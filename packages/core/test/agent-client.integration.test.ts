@@ -185,13 +185,13 @@ describe('AgentMux Agent client', () => {
     await second.releaseAgentAttachment('semantic-main')
     expect(second.agentSession('semantic-main').run).toEqual(originalRun)
     await second.submitAgentPrompt('semantic-main', 'after attachment release')
-    await waitFor('Run output after releasing the Attachment', async () => (
-      (await second.listRuns()).some((run) => (
-        run.runId === originalRun.runId &&
-        run.latestOutputBytes > reattached.attachment.run.latestOutputBytes
+    let reopenedAttachment = await second.reattachAgent('semantic-main', 0)
+    await waitFor('Agent output after releasing the Attachment', async () => {
+      reopenedAttachment = await second.reattachAgent('semantic-main', 0)
+      return reopenedAttachment.attachment.replay.some((event) => (
+        event.data.includes('hook-agent-input:after attachment release')
       ))
-    ))
-    const reopenedAttachment = await second.reattachAgent('semantic-main', 0)
+    })
     expect(reopenedAttachment.session.run).toEqual(originalRun)
     expect(reopenedAttachment.attachment.replay.map((event) => event.data).join(''))
       .toContain('hook-agent-input:after attachment release')

@@ -104,6 +104,9 @@ describe.runIf(supportedPlatform)('AgentMux isolated system SSH remote daemon', 
     daemonPid = 0
     const environment = (delayOutput: boolean): NodeJS.ProcessEnv => ({
       ...process.env,
+      HOME: remoteHome,
+      SHELL: '/bin/sh',
+      LANG: 'C.UTF-8',
       AGENTMUX_FAKE_SSH_HOME: remoteHome,
       ...(delayOutput ? { AGENTMUX_FAKE_SSH_OUTPUT_DELAY_MS: '150' } : {})
     })
