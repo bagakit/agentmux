@@ -28,6 +28,10 @@ const MAX_CLIENT_BUFFER_BYTES = 1024 * 1024
 const MAX_CLIENTS_PER_DAEMON = 64
 const MAX_IN_FLIGHT_REQUESTS_PER_CLIENT = 256
 const MAX_UNACKNOWLEDGED_OUTPUT_BYTES = 512 * 1024
+const MAX_CREATE_ARGUMENTS = 256
+const MAX_CREATE_ARGUMENT_BYTES = 256 * 1024
+const MAX_CREATE_ENVIRONMENT_ENTRIES = 256
+const MAX_CREATE_ENVIRONMENT_BYTES = 256 * 1024
 
 type ClientAttachment = {
   ref: AgentMuxDaemonSessionRef
@@ -67,6 +71,85 @@ function readString(params: Record<string, unknown>, name: string): string {
   const value = params[name]
   if (typeof value !== 'string') throw new AgentMuxError(`Missing string param: ${name}`, 'INVALID_DAEMON_REQUEST')
   return value
+}
+
+function boundedCreateString(value: unknown, name: string, maxBytes: number): string {
+  if (
+    typeof value !== 'string' ||
+    !value ||
+    Buffer.byteLength(value) > maxBytes ||
+    /\0/.test(value)
+  ) {
+    throw new AgentMuxError(`Invalid create param: ${name}`, 'INVALID_DAEMON_CREATE')
+  }
+  return value
+}
+
+function readCreateArguments(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length > MAX_CREATE_ARGUMENTS) {
+    throw new AgentMuxError('Invalid Agent argument list.', 'INVALID_DAEMON_CREATE')
+  }
+  let bytes = 0
+  return value.map((argument) => {
+    if (typeof argument !== 'string' || argument.includes('\0')) {
+      throw new AgentMuxError('Invalid Agent argument.', 'INVALID_DAEMON_CREATE')
+    }
+    bytes += Buffer.byteLength(argument)
+    if (bytes > MAX_CREATE_ARGUMENT_BYTES) {
+      throw new AgentMuxError('Agent arguments exceed the size limit.', 'DAEMON_CREATE_LIMIT')
+    }
+    return argument
+  })
+}
+
+function readCreateEnvironment(value: unknown): Record<string, string> {
+  const source = asObject(value)
+  const entries = Object.entries(source)
+  if (entries.length > MAX_CREATE_ENVIRONMENT_ENTRIES) {
+    throw new AgentMuxError('Agent environment exceeds the entry limit.', 'DAEMON_CREATE_LIMIT')
+  }
+  let bytes = 0
+  const environment: Record<string, string> = {}
+  for (const [name, entry] of entries) {
+    if (!name || Buffer.byteLength(name) > 1024 || /[=\0\r\n]/.test(name) || typeof entry !== 'string' || entry.includes('\0')) {
+      throw new AgentMuxError('Invalid Agent environment entry.', 'INVALID_DAEMON_CREATE')
+    }
+    bytes += Buffer.byteLength(name) + Buffer.byteLength(entry)
+    if (bytes > MAX_CREATE_ENVIRONMENT_BYTES) {
+      throw new AgentMuxError('Agent environment exceeds the size limit.', 'DAEMON_CREATE_LIMIT')
+    }
+    environment[name] = entry
+  }
+  return environment
+}
+
+function readCreateRequest(params: Record<string, unknown>): AgentMuxDaemonCreateRequest {
+  const kind = params.kind
+  const common = {
+    sessionId: boundedCreateString(params.sessionId, 'sessionId', 256),
+    createOperationId: boundedCreateString(params.createOperationId, 'createOperationId', 256),
+    cwd: boundedCreateString(params.cwd, 'cwd', 16 * 1024),
+    cols: readNumber(params, 'cols'),
+    rows: readNumber(params, 'rows'),
+    env: readCreateEnvironment(params.env)
+  }
+  if (kind === 'terminal') {
+    if (params.agentId !== null || params.semanticSessionId !== null || params.command !== undefined || params.args !== undefined) {
+      throw new AgentMuxError('Raw Terminal create request carries Agent fields.', 'INVALID_DAEMON_CREATE')
+    }
+    return { ...common, kind, agentId: null, semanticSessionId: null }
+  }
+  if (kind === 'agent') {
+    return {
+      ...common,
+      kind,
+      agentId: boundedCreateString(params.agentId, 'agentId', 256),
+      semanticSessionId: boundedCreateString(params.semanticSessionId, 'semanticSessionId', 256),
+      command: boundedCreateString(params.command, 'command', 4 * 1024),
+      args: readCreateArguments(params.args)
+    }
+  }
+  throw new AgentMuxError('Invalid Session kind.', 'INVALID_DAEMON_CREATE')
 }
 
 function safeExecutable(value: string): string {
@@ -303,7 +386,7 @@ export class AgentMuxDaemonServer {
         case 'create': {
           const endpoint = this.hookServer.getEndpoint()
           if (!endpoint) throw new AgentMuxError('Daemon hook ingress is unavailable.', 'HOOK_SERVER_NOT_RUNNING')
-          const requested = params as AgentMuxDaemonCreateRequest
+          const requested = readCreateRequest(params)
           const create: AgentMuxDaemonCreateRequest = requested.kind === 'agent'
             ? {
                 ...requested,

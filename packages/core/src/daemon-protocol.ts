@@ -168,14 +168,109 @@ export type AgentMuxDaemonFrame =
   | AgentMuxDaemonResponseFrame
   | AgentMuxDaemonEventFrame
 
+const daemonMethods = new Set<string>([
+  'hello',
+  'diagnose',
+  'list',
+  'find-create-operation',
+  'probe-executable',
+  'create',
+  'attach',
+  'detach',
+  'write',
+  'resize',
+  'ack',
+  'signal',
+  'stop'
+])
+
+function record(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function boundedString(value: unknown, maxBytes = 16 * 1024): value is string {
+  return typeof value === 'string' && Buffer.byteLength(value) <= maxBytes && !/[\0\r\n]/.test(value)
+}
+
+function safeSequence(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0
+}
+
+function validEvent(value: unknown): value is AgentMuxDaemonEvent {
+  const event = record(value)
+  if (
+    !event ||
+    !boundedString(event.sessionId, 256) || !event.sessionId ||
+    !boundedString(event.incarnationId, 256) || !event.incarnationId
+  ) {
+    return false
+  }
+  if (event.type === 'data') {
+    return (
+      safeSequence(event.startSequence) &&
+      safeSequence(event.endSequence) &&
+      typeof event.data === 'string' &&
+      event.endSequence >= event.startSequence &&
+      event.endSequence - event.startSequence === Buffer.byteLength(event.data)
+    )
+  }
+  if (event.type === 'exit') {
+    return (
+      Number.isInteger(event.pid) && (event.pid as number) > 0 &&
+      Number.isInteger(event.exitCode) &&
+      (event.exitSignal === undefined || Number.isInteger(event.exitSignal)) &&
+      safeSequence(event.observedAt)
+    )
+  }
+  if (event.type === 'hook') {
+    return (
+      boundedString(event.semanticSessionId, 256) && Boolean(event.semanticSessionId) &&
+      boundedString(event.agentId, 256) && Boolean(event.agentId) &&
+      (event.eventName === undefined || boundedString(event.eventName, 4 * 1024)) &&
+      (event.payload === undefined || record(event.payload) !== null)
+    )
+  }
+  return false
+}
+
 export function encodeAgentMuxDaemonFrame(frame: AgentMuxDaemonFrame): string {
   return `${JSON.stringify(frame)}\n`
 }
 
 export function parseAgentMuxDaemonFrame(line: string): AgentMuxDaemonFrame {
   const value: unknown = JSON.parse(line)
-  if (!value || typeof value !== 'object' || !('type' in value)) {
-    throw new Error('Invalid AgentMux daemon frame.')
+  const frame = record(value)
+  if (!frame) throw new Error('Invalid AgentMux daemon frame.')
+  if (frame.type === 'request') {
+    if (
+      !boundedString(frame.id, 256) || !frame.id ||
+      typeof frame.method !== 'string' || !daemonMethods.has(frame.method) ||
+      record(frame.params) === null
+    ) {
+      throw new Error('Invalid AgentMux daemon request frame.')
+    }
+    return frame as AgentMuxDaemonRequestFrame
   }
-  return value as AgentMuxDaemonFrame
+  if (frame.type === 'response') {
+    if (!boundedString(frame.id, 256) || !frame.id || typeof frame.ok !== 'boolean') {
+      throw new Error('Invalid AgentMux daemon response frame.')
+    }
+    if (frame.ok) {
+      if (!('result' in frame)) throw new Error('Invalid AgentMux daemon response frame.')
+    } else {
+      const error = record(frame.error)
+      if (
+        !error ||
+        !boundedString(error.code, 256) || !error.code ||
+        !boundedString(error.message, 16 * 1024)
+      ) {
+        throw new Error('Invalid AgentMux daemon error frame.')
+      }
+    }
+    return frame as AgentMuxDaemonResponseFrame
+  }
+  if (frame.type === 'event' && validEvent(frame.event)) return frame as AgentMuxDaemonEventFrame
+  throw new Error('Invalid AgentMux daemon frame.')
 }

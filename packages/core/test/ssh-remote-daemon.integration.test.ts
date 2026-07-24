@@ -27,6 +27,7 @@ import {
 } from '../src/ssh-daemon-connector.js'
 import type { AgentMuxClientEvent } from '../src/types.js'
 import { createAgentMuxRemoteArtifact } from '../src/remote-artifact-builder.js'
+import { posixProcessIsControllable } from '../src/posix-process-identity.js'
 
 const fakeSshPath = fileURLToPath(new URL('./fixtures/fake-system-ssh.mjs', import.meta.url))
 const stubbornTreePath = fileURLToPath(new URL('./fixtures/stubborn-process-tree.mjs', import.meta.url))
@@ -63,12 +64,7 @@ function latestSequence(events: readonly AgentMuxDaemonEvent[]): number {
 }
 
 function processIsAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code !== 'ESRCH'
-  }
+  return posixProcessIsControllable(pid)
 }
 
 describe.runIf(supportedPlatform)('AgentMux isolated system SSH remote daemon', () => {
@@ -350,6 +346,50 @@ describe.runIf(supportedPlatform)('AgentMux isolated system SSH remote daemon', 
     expect(attached.session.pid).toBe(recovered?.pid)
     await client.stop(attached.session)
   }, 25_000)
+
+  it.runIf(process.env.AGENTMUX_STRESS === '1')('survives repeated deterministic SSH transport partitions', async () => {
+    const current = await installAndActivate()
+    const identity = await manager.audit(current)
+    const client = manager.createDaemonClient(current)
+    clients.push(client)
+    await client.connect()
+    const session = await client.createTerminal({
+      sessionId: 'ssh-partition-soak',
+      createOperationId: 'ssh-partition-soak-operation',
+      cwd: process.cwd()
+    })
+    let cursor = 0
+    for (let cycle = 0; cycle < 5; cycle += 1) {
+      const marker = `partition-cycle-${cycle}`
+      const source = `setTimeout(() => process.stdout.write(${JSON.stringify(marker)}), 300)`
+      await client.write(session, `${JSON.stringify(process.execPath)} -e ${JSON.stringify(source)}\n`)
+      crashTransport()
+      await waitForCondition(`partition ${cycle} disconnect`, async () => {
+        try {
+          await client.listSessions()
+          return false
+        } catch {
+          return true
+        }
+      })
+      await client.connect()
+      let attached = await client.attach(session.sessionId, cursor)
+      await waitForCondition(`partition ${cycle} replay`, async () => {
+        attached = await client.attach(session.sessionId, cursor)
+        return attached.replay.some((event) => event.data.includes(marker))
+      })
+      expect(attached.session).toMatchObject({
+        incarnationId: session.incarnationId,
+        pid: session.pid,
+        state: 'running'
+      })
+      expect(client.daemonIdentity().daemonInstanceId).toBe(identity.daemonInstanceId)
+      cursor = attached.session.latestSequence
+      await client.acknowledgeOutput(attached.session, cursor)
+    }
+    await client.stop(session)
+    await expect(client.listSessions()).resolves.toEqual([])
+  }, 35_000)
 
   it('fails closed on Build, Host, and transport identity failures', async () => {
     const current = await installAndActivate()

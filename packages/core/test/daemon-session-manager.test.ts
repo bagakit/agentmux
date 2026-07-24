@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -109,6 +109,43 @@ describe('AgentMux daemon session transactions', () => {
 
       await owner.stop(running)
       await replacement.stop(lost)
+    } finally {
+      await Promise.allSettled(managers.splice(0).map(async (manager) => await manager.dispose()))
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it.runIf(process.platform !== 'win32')('removes a reboot-disposed lost session without signaling an unrelated process', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agentmux-reboot-test-'))
+    const journalPath = join(directory, 'sessions.json')
+    try {
+      await writeFile(journalPath, `${JSON.stringify({
+        version: 2,
+        sessions: [{
+          sessionId: 'session-before-reboot',
+          incarnationId: 'incarnation-before-reboot',
+          createOperationId: 'operation-before-reboot',
+          kind: 'terminal',
+          agentId: null,
+          semanticSessionId: null,
+          cwd: process.cwd(),
+          pid: process.pid,
+          processStartedAt: 1,
+          state: 'running',
+          cols: 80,
+          rows: 24,
+          createdAt: 1,
+          latestSequence: 0,
+          acceptedInputSequence: 0
+        }]
+      })}\n`, { mode: 0o600 })
+      const manager = new AgentMuxDaemonSessionManager({ journalPath })
+      managers.push(manager)
+      manager.activate()
+      const lost = manager.list()[0]!
+      expect(lost).toMatchObject({ state: 'lost', lostReason: 'daemon-crash' })
+      await manager.stop(lost)
+      expect(manager.list()).toEqual([])
     } finally {
       await Promise.allSettled(managers.splice(0).map(async (manager) => await manager.dispose()))
       await rm(directory, { recursive: true, force: true })
