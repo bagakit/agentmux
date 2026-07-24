@@ -5,6 +5,8 @@ import type {
   AppConfig,
   BrowserEvent,
   CreateWorkspacePathInput,
+  DesktopViewFocusResult,
+  DesktopViewFocusTarget,
   FileDocument,
   HostConfig,
   HostCheckResult,
@@ -14,6 +16,7 @@ import type {
 } from '../../shared/contracts'
 import { api } from './lib/api'
 import { rendererResourceOwnerCounts } from './lib/resource-owner-counts'
+import { resolveWorkbenchViewFocus } from './lib/view-focus'
 import {
   activateTab as activateLayoutTab,
   addTab,
@@ -103,6 +106,7 @@ type AppState = {
   activateWorkspaceSelection(result: WorkspaceSelectionResult): void
   focusPane(workspaceId: string, paneId: string): void
   activateTab(workspaceId: string, paneId: string, tabId: string): void
+  focusView(target: DesktopViewFocusTarget): DesktopViewFocusResult
   selectSession(id: string, paneId?: string): void
   openLauncher(paneId?: string, view?: LauncherView): void
   setLauncherView(tabId: string, view: LauncherView): void
@@ -224,12 +228,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       else get().applyBrowserEvent(event)
     })
-    runtimeSubscriptionCount += 2
+    const disposeViewFocus = api.views.onFocusRequest((target) => get().focusView(target))
+    runtimeSubscriptionCount += 3
     const disposeRuntimeSubscriptions = (): void => {
       if (runtimeSubscriptionCount === 0) return
-      runtimeSubscriptionCount -= 2
+      runtimeSubscriptionCount -= 3
       disposeSessions()
       disposeBrowsers()
+      disposeViewFocus()
     }
     try {
       const [config, snapshot] = await Promise.all([api.config.get(), api.sessions.snapshot()])
@@ -324,6 +330,25 @@ export const useAppStore = create<AppState>((set, get) => ({
         ? { lastActiveFileByWorkspace: { ...state.lastActiveFileByWorkspace, [workspaceId]: tab.path } }
         : {})
     }))
+  },
+  focusView(target) {
+    const state = get()
+    const resolved = resolveWorkbenchViewFocus({
+      sessions: state.sessions,
+      tabs: state.tabs,
+      layouts: state.layouts,
+      target
+    })
+    const layout = state.layouts[resolved.workspaceId]!
+    set({
+      activeWorkspaceId: resolved.workspaceId,
+      mainSurface: 'workbench',
+      layouts: {
+        ...state.layouts,
+        [resolved.workspaceId]: activateLayoutTab(layout, resolved.paneId, resolved.viewId)
+      }
+    })
+    return resolved
   },
   selectSession(id, paneId) {
     const session = get().sessions.find((candidate) => candidate.id === id)

@@ -35,6 +35,42 @@ export type AgentMuxViewRequest = {
     | { kind: 'agent-session'; agentSessionId: string }
 }
 
+export type AgentMuxOpenView =
+  | { viewId: string; kind: 'terminal' }
+  | { viewId: string; kind: 'agent'; agentSessionId: string }
+
+export type AgentMuxViewFocusTarget =
+  | { kind: 'terminal-view'; viewId: string }
+  | { kind: 'agent-session'; agentSessionId: string }
+
+export type AgentMuxResolvedViewFocus = {
+  viewId: string
+  kind: 'terminal' | 'agent'
+}
+
+export interface AgentMuxDesktopFocusControl<Result extends AgentMuxResolvedViewFocus = AgentMuxResolvedViewFocus> {
+  focus(target: AgentMuxViewFocusTarget): Promise<Result>
+}
+
+export function resolveAgentMuxViewFocus(
+  views: readonly AgentMuxOpenView[],
+  target: AgentMuxViewFocusTarget
+): AgentMuxResolvedViewFocus {
+  if (new Set(views.map((view) => view.viewId)).size !== views.length) {
+    throw new AgentMuxError('Open View identity is ambiguous.', 'AMBIGUOUS_VIEW_TARGET')
+  }
+  const matches = views.filter((view) => target.kind === 'terminal-view'
+    ? view.kind === 'terminal' && view.viewId === target.viewId
+    : view.kind === 'agent' && view.agentSessionId === target.agentSessionId)
+  if (matches.length === 0) {
+    throw new AgentMuxError('View target is not currently open.', 'VIEW_NOT_OPEN')
+  }
+  if (matches.length !== 1) {
+    throw new AgentMuxError('View target is ambiguous.', 'AMBIGUOUS_VIEW_TARGET')
+  }
+  return { viewId: matches[0]!.viewId, kind: matches[0]!.kind }
+}
+
 function sameRun(left: { runId: string }, right: { runId: string }): boolean {
   return left.runId === right.runId
 }
