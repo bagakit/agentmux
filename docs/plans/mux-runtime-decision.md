@@ -25,7 +25,7 @@ Desktop / CLI / external Node consumer
  Run / PTY / Process / ordered I/O / replay / stop
 ```
 
-T-020 的 Shell checkpoint 已删除历史自建 Run Kernel、旧 Local/SSH Run production paths 和 `node-pty` Owner。Local Terminal 只经过固定 CtxMux public contract；Codex vertical 尚未完成。Remote 在 T-021 前明确 unsupported。
+T-020 candidate 已删除历史自建 Run Kernel、旧 Local/SSH Run production paths 和 `node-pty` Owner。Local Terminal 与 Codex 只经过固定 CtxMux public contract；AgentMux 继续独立拥有 Provider、Hook、Agent Session、Resume、Prompt readiness 与身份解析。Remote 在 T-021 前明确 unsupported。
 
 最终产品不保留 tmux、自建 agentmuxd、Main-owned PTY 或 Hybrid Runtime 作为兼容层、Fallback、Migration 或可选 Backend。
 
@@ -108,8 +108,8 @@ T-020 结束时删除旧 Local/SSH production paths；T-021 前 Remote 返回 ty
 
 最后执行 Kernel 与消费链：
 
-6. 已在 ctxmux 补齐 Local consumer 所需 public gap，并固定 clean commit `3b94288` 与可复现消费合同；
-7. 已接入唯一 CtxmuxRunAdapter 并完成 Local Terminal Shell checkpoint；Codex 与 Desktop Agent vertical 待收口；
+6. 已在 ctxmux 补齐 Local consumer 所需 public gap，并固定 clean commit `2e32a9d` 与可复现消费合同；
+7. 已接入唯一 CtxmuxRunAdapter，并形成 Local Terminal、Codex、统一 CLI/Resolver 与 Desktop existing-View focus candidate；最终真实 Codex、独立 review 与 clean Gate 待收口；
 8. 已删除自建 Run Kernel、node-pty Owner、wire、Journal、Remote Artifact、旧 Local/SSH Run paths 和 package bin；Remote 明确 unsupported；
 9. 在最终 Local AgentMux+ctxmux candidate 上重做 Package、Security、Chaos、Resource、Benchmark 与 Review；
 10. T-021 通过 ctxmux public Remote 合同恢复 SSH，不建立 fallback。

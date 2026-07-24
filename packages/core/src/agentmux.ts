@@ -1,19 +1,33 @@
 #!/usr/bin/env node
+import { randomUUID } from 'node:crypto'
 import process from 'node:process'
 import { connectLocalAgentMux } from './runtime-client.js'
 import { diagnoseAgentMux, type AgentMuxDoctorReport } from './doctor.js'
+import { requestAgentMuxDesktopFocus } from './desktop-focus-control.js'
 import { AgentMuxError } from './errors.js'
 import type { AgentMuxClient, AgentMuxAgentRuntimeStatus } from './client.js'
+import type { AgentMuxAgentSessionLookup } from './agent-session-registry.js'
+import type { AgentMuxViewFocusTarget } from './runtime.js'
+import type { AgentMuxAgentSession } from './types.js'
 
 const USAGE = [
   'Usage:',
   '  agentmux doctor [--json]',
   '  agentmux list [--json]',
+  '  agentmux resolve agent-session <id> [--json]',
+  '  agentmux resolve provider-native <provider-id> <native-session-id> [--json]',
+  '  agentmux resolve acp-native <adapter-id> <native-session-id> [--json]',
+  '  agentmux resolve run <run-id> [--json]',
+  '  agentmux switch terminal-view <view-id> [--json]',
+  '  agentmux switch agent-session <id> [--json]',
+  '  agentmux switch provider-native <provider-id> <native-session-id> [--json]',
+  '  agentmux switch acp-native <adapter-id> <native-session-id> [--json]',
+  '  agentmux switch run <run-id> [--json]',
   '  agentmux status <agent-session-id> [--json]',
   '  agentmux send <agent-session-id> --text <prompt> [--json]',
   '  agentmux interrupt <agent-session-id> [--json]',
   '  agentmux attach <agent-session-id> [--after-byte <n>] [--json]',
-  '  agentmux resume <agent-session-id> [--json]',
+  '  agentmux resume <agent-session-id> --text <prompt> [--json]',
   '  agentmux stop <agent-session-id> [--json]'
 ].join('\n')
 
@@ -60,6 +74,53 @@ function subject(args: readonly string[]): { agentSessionId: string; rest: reado
   return { agentSessionId, rest: args.slice(1) }
 }
 
+function identifier(value: string | undefined, label: string): string {
+  if (!value || value.startsWith('--')) {
+    throw new AgentMuxError(`${label} is required.`, 'INVALID_CLI_ARGUMENT')
+  }
+  return value
+}
+
+function lookupSubject(args: readonly string[]): {
+  lookup: AgentMuxAgentSessionLookup
+  rest: readonly string[]
+} {
+  const kind = args[0]
+  if (kind === 'agent-session') {
+    return {
+      lookup: { kind, agentSessionId: identifier(args[1], 'Agent Session id') },
+      rest: args.slice(2)
+    }
+  }
+  if (kind === 'provider-native') {
+    return {
+      lookup: {
+        kind,
+        providerId: identifier(args[1], 'Provider id'),
+        sessionId: identifier(args[2], 'Provider native session id')
+      },
+      rest: args.slice(3)
+    }
+  }
+  if (kind === 'acp-native') {
+    return {
+      lookup: {
+        kind,
+        adapterId: identifier(args[1], 'ACP adapter id'),
+        sessionId: identifier(args[2], 'ACP session id')
+      },
+      rest: args.slice(3)
+    }
+  }
+  if (kind === 'run') {
+    return {
+      lookup: { kind, run: { runId: identifier(args[1], 'Run id') } },
+      rest: args.slice(2)
+    }
+  }
+  throw new AgentMuxError('Agent lookup kind is invalid.', 'INVALID_CLI_ARGUMENT')
+}
+
 function afterByte(value: string | undefined): number {
   if (value === undefined) return 0
   const parsed = Number(value)
@@ -98,6 +159,12 @@ function printDoctor(report: AgentMuxDoctorReport): void {
 function printStatus(status: AgentMuxAgentRuntimeStatus): void {
   process.stdout.write(
     `${status.session.agentSessionId}\t${status.session.agentId}\t${status.run.state}\t${status.run.runId}\t${status.session.workspacePath}\n`
+  )
+}
+
+function printResolved(session: AgentMuxAgentSession): void {
+  process.stdout.write(
+    `${session.agentSessionId}\t${session.agentId}\t${session.run.runId}\t${session.workspacePath}\n`
   )
 }
 
@@ -143,6 +210,38 @@ async function status(args: readonly string[]): Promise<number> {
   })
 }
 
+async function resolveSession(args: readonly string[]): Promise<number> {
+  const target = lookupSubject(args)
+  const flags = parseFlags(target.rest, new Set(['--json']), new Set())
+  return await withClient(async (client) => {
+    const session = client.resolveAgentSession(target.lookup)
+    if (flags.booleans.has('--json')) printJson(session)
+    else printResolved(session)
+    return 0
+  })
+}
+
+async function switchView(args: readonly string[]): Promise<number> {
+  let target: AgentMuxViewFocusTarget
+  let rest: readonly string[]
+  if (args[0] === 'terminal-view') {
+    target = { kind: 'terminal-view', viewId: identifier(args[1], 'Terminal View id') }
+    rest = args.slice(2)
+  } else {
+    const parsed = lookupSubject(args)
+    const agentSessionId = await withClient(async (client) => (
+      client.resolveAgentSession(parsed.lookup).agentSessionId
+    ))
+    target = { kind: 'agent-session', agentSessionId }
+    rest = parsed.rest
+  }
+  const flags = parseFlags(rest, new Set(['--json']), new Set())
+  const focused = await requestAgentMuxDesktopFocus(target)
+  if (flags.booleans.has('--json')) printJson(focused)
+  else process.stdout.write(`switch ok: ${focused.kind} ${focused.viewId}\n`)
+  return 0
+}
+
 async function action(
   name: 'send' | 'interrupt' | 'resume' | 'stop',
   args: readonly string[]
@@ -151,18 +250,28 @@ async function action(
   const flags = parseFlags(
     target.rest,
     new Set(['--json']),
-    name === 'send' ? new Set(['--text']) : new Set()
+    name === 'send' || name === 'resume' ? new Set(['--text']) : new Set()
   )
   return await withClient(async (client) => {
     let result: unknown
     if (name === 'send') {
       const text = flags.values.get('--text')
       if (text === undefined) throw new AgentMuxError('--text is required.', 'INVALID_CLI_ARGUMENT')
-      await client.submitAgentPrompt(target.agentSessionId, text)
+      await client.submitAgentPrompt({
+        agentSessionId: target.agentSessionId,
+        operationId: randomUUID(),
+        prompt: text
+      })
     } else if (name === 'interrupt') {
       await client.signalAgent(target.agentSessionId, 'SIGINT')
     } else if (name === 'resume') {
-      result = await client.resumeAgent({ agentSessionId: target.agentSessionId })
+      const prompt = flags.values.get('--text')
+      if (prompt === undefined) throw new AgentMuxError('--text is required.', 'INVALID_CLI_ARGUMENT')
+      result = await client.resumeAgent({
+        agentSessionId: target.agentSessionId,
+        operationId: randomUUID(),
+        prompt
+      })
     } else {
       await client.stopAgent(target.agentSessionId)
     }
@@ -226,6 +335,8 @@ async function main(): Promise<number> {
   }
   if (args[0] === 'doctor') return await doctor(args.slice(1))
   if (args[0] === 'list') return await list(args.slice(1))
+  if (args[0] === 'resolve') return await resolveSession(args.slice(1))
+  if (args[0] === 'switch') return await switchView(args.slice(1))
   if (args[0] === 'status') return await status(args.slice(1))
   if (args[0] === 'attach') return await attach(args.slice(1))
   if (args[0] === 'send' || args[0] === 'interrupt' || args[0] === 'resume' || args[0] === 'stop') {

@@ -1,5 +1,8 @@
 import { AgentMuxError } from './errors.js'
+import { isAbsolute, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import type { ExecutionHost } from './execution-host.js'
+import type { AgentManagedHookPlan } from './managed-hook-installer.js'
 import {
   normalizeNativeHook,
   type AgentNativeHookSpecification
@@ -9,8 +12,11 @@ import type {
   AgentCatalogEntry,
   AgentId,
   AgentLaunchPlan,
+  AgentPromptInputPlan,
   AgentProviderLaunchContext,
   AgentProviderResumeContext,
+  AgentTerminalHandshake,
+  AgentTerminalPromptRenderMatcher,
   NativeHookEnvelope,
   NormalizedHookEvent
 } from './types.js'
@@ -24,9 +30,12 @@ export type AgentProvider = {
   readonly label: string
   readonly executable: string
   readonly catalog: AgentCatalogEntry
+  readonly terminalHandshake?: AgentTerminalHandshake
+  readonly terminalPromptRender?: AgentTerminalPromptRenderMatcher
   probeCapabilities(probe: AgentExecutableProbe, commandOverride?: string): Promise<AgentCapabilitySnapshot>
   buildLaunch(context: AgentProviderLaunchContext): AgentLaunchPlan
   buildResumeLaunch(context: AgentProviderResumeContext): AgentLaunchPlan
+  planPromptInput(prompt: string): AgentPromptInputPlan
   normalizeHook(envelope: NativeHookEnvelope): NormalizedHookEvent
 }
 
@@ -34,10 +43,27 @@ export type AgentProviderDefinition = {
   catalog: AgentCatalogEntry
   buildArgs(prompt: string, args: readonly string[]): string[]
   hook: AgentNativeHookSpecification
-  buildResumeArgs?: (sessionId: string, transcriptPath: string | undefined, args: readonly string[]) => string[]
+  terminalHandshake?: AgentTerminalHandshake
+  terminalPromptRender?: AgentTerminalPromptRenderMatcher
+  buildResumeArgs?: (
+    sessionId: string,
+    transcriptPath: string | undefined,
+    prompt: string,
+    args: readonly string[]
+  ) => string[]
+  planPromptInput?: (prompt: string) => AgentPromptInputPlan
 }
 
 const NO_HOOKS: AgentNativeHookSpecification = { rules: [] }
+const CODEX_HOOK_EVENTS = [
+  'SessionStart',
+  'PermissionRequest',
+  'PreToolUse',
+  'PostToolUse',
+  'UserPromptSubmit',
+  'SubagentStart',
+  'Stop'
+] as const
 
 const CLAUDE_HOOKS: AgentNativeHookSpecification = {
   rules: [
@@ -72,6 +98,34 @@ const CODEX_HOOKS: AgentNativeHookSpecification = {
   nativeHandle: {
     sessionIdKeys: ['session_id'],
     transcriptPathKeys: ['transcript_path', 'transcriptPath']
+  }
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`
+}
+
+export function createCodexManagedHookPlan(workspacePath: string): AgentManagedHookPlan {
+  const workspace = resolve(workspacePath)
+  if (!isAbsolute(workspacePath) || workspace !== workspacePath) {
+    throw new AgentMuxError('Codex Hook workspace must be an absolute normalized path.', 'INVALID_HOOK_PLAN')
+  }
+  const commandPath = fileURLToPath(new URL('../bin/agentmux-hook.js', import.meta.url))
+  const command = `${shellQuote(process.execPath)} ${shellQuote(commandPath)}`
+  const hooks = Object.fromEntries(CODEX_HOOK_EVENTS.map((eventName) => [eventName, [{
+    ...(eventName === 'SessionStart' ? { matcher: 'startup|resume|clear|compact' } : {}),
+    hooks: [{ type: 'command', command, timeout: 10 }]
+  }]]))
+  return {
+    agentId: 'codex',
+    mutations: [{
+      path: join(workspace, '.codex', 'hooks.json'),
+      content: `${JSON.stringify({
+        description: 'AgentMux Codex lifecycle bridge.',
+        hooks
+      }, null, 2)}\n`,
+      mode: 0o600
+    }]
   }
 }
 
@@ -124,11 +178,33 @@ function executable(commandOverride: string | undefined, fallback: string): stri
 
 export function defineAgentProvider(definition: AgentProviderDefinition): AgentProvider {
   const { catalog } = definition
+  if (
+    definition.terminalHandshake &&
+    (!definition.terminalHandshake.query || !definition.terminalHandshake.response)
+  ) {
+    throw new AgentMuxError('Agent terminal handshake bytes cannot be empty.', 'INVALID_AGENT_PROVIDER')
+  }
+  if (
+    definition.terminalPromptRender &&
+    (
+      !definition.terminalPromptRender.frameStart ||
+      !definition.terminalPromptRender.activeComposer ||
+      !definition.terminalPromptRender.frameEnd
+    )
+  ) {
+    throw new AgentMuxError('Agent terminal prompt render matcher cannot be empty.', 'INVALID_AGENT_PROVIDER')
+  }
   return {
     id: catalog.id,
     label: catalog.label,
     executable: catalog.executable,
     catalog,
+    ...(definition.terminalHandshake
+      ? { terminalHandshake: { ...definition.terminalHandshake } }
+      : {}),
+    ...(definition.terminalPromptRender
+      ? { terminalPromptRender: { ...definition.terminalPromptRender } }
+      : {}),
     async probeCapabilities(probe, commandOverride) {
       const command = executable(commandOverride, catalog.executable)
       return {
@@ -155,8 +231,19 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
       }
       return {
         command: executable(context.commandOverride, catalog.executable),
-        args: definition.buildResumeArgs(handle.sessionId, handle.transcriptPath, context.args),
+        args: definition.buildResumeArgs(
+          handle.sessionId,
+          handle.transcriptPath,
+          context.prompt,
+          context.args
+        ),
         env: { ...context.env }
+      }
+    },
+    planPromptInput(prompt) {
+      return definition.planPromptInput?.(prompt) ?? {
+        kind: 'single-phase',
+        data: `${prompt}\r`
       }
     },
     normalizeHook(envelope) {
@@ -198,8 +285,24 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
       }
     }),
     buildArgs: (prompt, args) => [...args, ...(prompt ? [prompt] : [])],
+    terminalHandshake: {
+      query: '\u001b[?u',
+      response: '\u001b[?0u'
+    },
+    terminalPromptRender: {
+      frameStart: '\u001b[?2026h',
+      activeComposer: '›',
+      frameEnd: '\u001b[?2026l'
+    },
+    planPromptInput: (prompt) => ({
+      kind: 'render-then-submit',
+      payload: prompt,
+      submit: '\r'
+    }),
     hook: CODEX_HOOKS,
-    buildResumeArgs: (sessionId, _transcriptPath, args) => ['resume', sessionId, ...args]
+    buildResumeArgs: (sessionId, _transcriptPath, prompt, args) => [
+      'resume', sessionId, prompt, ...args
+    ]
   }),
   defineAgentProvider({
     catalog: catalog({
@@ -222,7 +325,9 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
     }),
     buildArgs: (prompt, args) => [...args, ...(prompt ? [prompt] : [])],
     hook: CLAUDE_HOOKS,
-    buildResumeArgs: (sessionId, _transcriptPath, args) => ['--resume', sessionId, ...args]
+    buildResumeArgs: (sessionId, _transcriptPath, prompt, args) => [
+      '--resume', sessionId, ...args, prompt
+    ]
   }),
   defineAgentProvider({
     catalog: catalog({
@@ -290,11 +395,11 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
     }),
     buildArgs: (prompt, args) => [...args, ...(prompt ? [prompt] : [])],
     hook: PI_HOOKS,
-    buildResumeArgs: (_sessionId, transcriptPath, args) => {
+    buildResumeArgs: (_sessionId, transcriptPath, prompt, args) => {
       if (!transcriptPath) {
         throw new AgentMuxError('Pi resume requires its hook-reported session file.', 'INVALID_NATIVE_SESSION_HANDLE')
       }
-      return ['--session', transcriptPath, ...args]
+      return ['--session', transcriptPath, ...args, prompt]
     }
   })
 ]

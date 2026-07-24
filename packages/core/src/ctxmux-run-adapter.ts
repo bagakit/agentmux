@@ -1,7 +1,8 @@
-import { execFile, spawn } from 'node:child_process'
+import { execFile, spawn, type ChildProcess } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import type { Readable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import {
@@ -23,12 +24,13 @@ import {
   defaultCtxmuxStateDirectory
 } from './runtime-paths.js'
 
-const CTXMUX_COMMIT = '3b94288c3a7896bb355e028135409c8e8bbaf764'
-const CTXMUX_TREE = '58f3630477881e75f0f022d3fbb98a93ff2f46c4'
+const CTXMUX_COMMIT = '2e32a9d647d627952ea5c455fb2efef6c636643a'
+const CTXMUX_TREE = 'd60870c2481c9b153da6bf22f829d24afb8a81a8'
 const CTXMUX_VERSION = '0.1.0'
-const CTXMUX_MANIFEST_SHA256 = 'c1bab5039f6270c4c6c546d81699df251fe583477546a56a26a3f9332020ef42'
+const CTXMUX_MANIFEST_SHA256 = '15c0f54980ac339251017293cf4a21c94e2fb923d22cc3998b293f1a61a997d9'
 const DAEMON_READY_TIMEOUT_MS = 5_000
 const DAEMON_POLL_INTERVAL_MS = 20
+const DAEMON_READINESS_MAX_BYTES = 8 * 1024
 const execFileAsync = promisify(execFile)
 
 type ArtifactDescriptor = {
@@ -69,6 +71,7 @@ type OwnerReceipt = {
 
 export type CtxmuxAdapterRun = {
   runId: string
+  lifecycleOperationId: string | null
   program: string | null
   args: readonly string[]
   workspacePath: string | null
@@ -90,6 +93,7 @@ export type CtxmuxAdapterDataEvent = {
   startByte: number
   endByte: number
   data: string
+  dataBytes: Uint8Array
 }
 
 export type CtxmuxAdapterExitEvent = {
@@ -116,6 +120,10 @@ export type CtxmuxAdapterAttachment = {
   gap: { requestedAfterByte: number; firstAvailableByte: number } | null
 }
 
+export type CtxmuxAdapterOutputObservation = CtxmuxAdapterAttachment & {
+  close(): Promise<void>
+}
+
 export type CtxmuxAdapterInputOperation = {
   ownerInstanceId: string
   operationId: string
@@ -130,6 +138,88 @@ type LiveAttachment = {
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds))
+}
+
+function daemonEnvironment(): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = {
+    ...process.env,
+    TERM: 'xterm-256color',
+    COLORTERM: 'truecolor',
+    TERM_PROGRAM: 'AgentMux',
+    TERM_PROGRAM_VERSION: '0.1.0',
+    FORCE_HYPERLINK: '1'
+  }
+  delete environment.NO_COLOR
+  if (environment.FORCE_COLOR === '0') delete environment.FORCE_COLOR
+  if (environment.CLICOLOR === '0') delete environment.CLICOLOR
+  return environment
+}
+
+function readDaemonReadiness(child: ChildProcess, stream: Readable): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let content = ''
+    let settled = false
+    const finish = (error: Error | null, daemonInstanceId?: string): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      stream.destroy()
+      if (error) reject(error)
+      else resolve(daemonInstanceId as string)
+    }
+    const timer = setTimeout(() => {
+      finish(new AgentMuxError(
+        'The spawned CtxMux daemon did not publish its readiness receipt in time.',
+        'CTXMUX_OWNER_IDENTITY_UNPROVEN'
+      ))
+    }, DAEMON_READY_TIMEOUT_MS)
+    stream.setEncoding('utf8')
+    stream.on('data', (chunk: string) => {
+      content += chunk
+      if (Buffer.byteLength(content) > DAEMON_READINESS_MAX_BYTES) {
+        finish(new AgentMuxError(
+          'The spawned CtxMux daemon readiness receipt exceeded its bound.',
+          'CTXMUX_OWNER_IDENTITY_UNPROVEN'
+        ))
+        return
+      }
+      const newline = content.indexOf('\n')
+      if (newline < 0) return
+      try {
+        if (content.slice(newline + 1).trim()) throw new Error('multiple readiness records')
+        const receipt = JSON.parse(content.slice(0, newline)) as unknown
+        if (
+          typeof receipt !== 'object' ||
+          receipt === null ||
+          Array.isArray(receipt) ||
+          JSON.stringify(Object.keys(receipt).sort()) !== JSON.stringify(['daemon_instance', 'schema']) ||
+          (receipt as { schema?: unknown }).schema !== 'ctxmux.daemon-ready.v1' ||
+          typeof (receipt as { daemon_instance?: unknown }).daemon_instance !== 'string' ||
+          !(receipt as { daemon_instance: string }).daemon_instance
+        ) throw new Error('invalid readiness record')
+        finish(null, (receipt as { daemon_instance: string }).daemon_instance)
+      } catch (error) {
+        finish(new AgentMuxError(
+          `The spawned CtxMux daemon published an invalid readiness receipt: ${error instanceof Error ? error.message : String(error)}`,
+          'CTXMUX_OWNER_IDENTITY_UNPROVEN'
+        ))
+      }
+    })
+    stream.once('error', (error) => finish(new AgentMuxError(
+      `The spawned CtxMux readiness channel failed: ${error.message}`,
+      'CTXMUX_OWNER_IDENTITY_UNPROVEN'
+    )))
+    stream.once('close', () => {
+      if (!content.includes('\n')) finish(new AgentMuxError(
+        `The spawned CtxMux daemon closed its readiness channel before proving startup${child.exitCode === null ? '' : ` (exit ${child.exitCode})`}.`,
+        'CTXMUX_OWNER_IDENTITY_UNPROVEN'
+      ))
+    })
+    child.once('error', (error) => finish(new AgentMuxError(
+      `The CtxMux daemon artifact could not be spawned: ${error.message}`,
+      'CTXMUX_UNAVAILABLE'
+    )))
+  })
 }
 
 function ownerReceiptPath(): string {
@@ -148,6 +238,7 @@ function artifactDirectory(): string {
 function projectRun(run: RunInfo): CtxmuxAdapterRun {
   return {
     runId: run.id,
+    lifecycleOperationId: run.spec?.env.AGENTMUX_LIFECYCLE_OPERATION_ID ?? null,
     program: run.spec?.program ?? null,
     args: run.spec?.args ?? [],
     workspacePath: run.spec?.cwd ?? null,
@@ -329,12 +420,14 @@ function decodeChunk(
   decoder: TextDecoder,
   chunk: OutputChunk
 ): CtxmuxAdapterDataEvent {
+  const dataBytes = Uint8Array.from(chunk.data)
   return {
     type: 'data',
     runId,
     startByte: chunk.start_byte,
     endByte: chunk.end_byte,
-    data: decoder.decode(Uint8Array.from(chunk.data), { stream: true })
+    data: decoder.decode(dataBytes, { stream: true }),
+    dataBytes
   }
 }
 
@@ -388,27 +481,57 @@ export class CtxmuxRunAdapter {
         '--socket',
         this.socketPath,
         '--state-dir',
-        this.stateDirectory
+        this.stateDirectory,
+        '--readiness-fd',
+        '3'
       ], {
         detached: true,
-        stdio: 'ignore'
+        stdio: ['ignore', 'ignore', 'ignore', 'pipe'],
+        env: daemonEnvironment()
       })
-      let spawnError: Error | null = null
-      child.once('error', (error) => { spawnError = error })
-      child.unref()
-      const deadline = Date.now() + DAEMON_READY_TIMEOUT_MS
-      let lastError: unknown = spawnError
-      while (Date.now() <= deadline) {
-        try {
-          daemonInstanceId = await client.daemonInstance()
-          lastError = null
-          break
-        } catch (error) {
-          lastError = spawnError ?? error
-          await delay(DAEMON_POLL_INTERVAL_MS)
-        }
+      const readinessStream = child.stdio[3] as Readable | null
+      if (!readinessStream) {
+        child.kill('SIGTERM')
+        throw new AgentMuxError(
+          'The CtxMux daemon readiness channel was not created.',
+          'CTXMUX_OWNER_IDENTITY_UNPROVEN'
+        )
       }
-      if (lastError !== null) throw lastError
+      child.unref()
+      try {
+        const spawnedDaemonInstanceId = await readDaemonReadiness(child, readinessStream)
+        const deadline = Date.now() + DAEMON_READY_TIMEOUT_MS
+        let lastError: unknown = null
+        while (Date.now() <= deadline) {
+          if (child.exitCode !== null) {
+            throw new AgentMuxError(
+              `The spawned CtxMux daemon exited before public handshake (exit ${child.exitCode}).`,
+              'CTXMUX_OWNER_IDENTITY_UNPROVEN'
+            )
+          }
+          try {
+            daemonInstanceId = await client.daemonInstance()
+            if (daemonInstanceId !== spawnedDaemonInstanceId) {
+              throw new AgentMuxError(
+                'The CtxMux socket responder does not match the exact daemon child that AgentMux spawned.',
+                'CTXMUX_OWNER_IDENTITY_UNPROVEN'
+              )
+            }
+            lastError = null
+            break
+          } catch (error) {
+            if (error instanceof AgentMuxError && error.code === 'CTXMUX_OWNER_IDENTITY_UNPROVEN') {
+              throw error
+            }
+            lastError = error
+            await delay(DAEMON_POLL_INTERVAL_MS)
+          }
+        }
+        if (lastError !== null || daemonInstanceId === null) throw lastError
+      } catch (error) {
+        if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM')
+        throw error
+      }
       await writeOwnerReceipt(
         artifacts,
         this.socketPath,
@@ -507,6 +630,96 @@ export class CtxmuxRunAdapter {
           : null
       }
     } catch (error) {
+      throw translateCtxmuxError(error)
+    }
+  }
+
+  hasAttachment(runId: string): boolean {
+    return this.attachments.has(runId)
+  }
+
+  async replay(runId: string, afterByte: number): Promise<CtxmuxAdapterAttachment> {
+    let attachment: Attachment | null = null
+    try {
+      attachment = await this.requireClient().attach(runId, afterByte)
+      const decoder = new TextDecoder()
+      return {
+        run: projectRun(attachment.snapshot.run),
+        replay: attachment.snapshot.replay.chunks.map((chunk) => (
+          decodeChunk(runId, decoder, chunk)
+        )),
+        gap: attachment.snapshot.replay.truncated
+          ? {
+              requestedAfterByte: afterByte,
+              firstAvailableByte: attachment.snapshot.replay.first_available_byte
+            }
+          : null
+      }
+    } catch (error) {
+      throw translateCtxmuxError(error)
+    } finally {
+      if (attachment) await attachment.detach()
+    }
+  }
+
+  async observeOutput(
+    runId: string,
+    afterByte: number,
+    listener: (event: CtxmuxAdapterEvent) => void
+  ): Promise<CtxmuxAdapterOutputObservation> {
+    let attachment: Attachment | null = null
+    try {
+      attachment = await this.requireClient().attach(runId, afterByte)
+      const decoder = new TextDecoder()
+      let closed = false
+      const active = attachment
+      void (async () => {
+        try {
+          for await (const event of active.events()) {
+            if (closed) return
+            if (event.type === 'output') {
+              listener(decodeChunk(runId, decoder, event.chunk))
+            } else if (event.type === 'gap') {
+              listener({ type: 'gap', runId, latestOutputBytes: event.latest_output_bytes })
+            } else if (event.type === 'tmux') {
+              this.errorListener?.(new AgentMuxError(
+                'A native AgentMux Run received an unexpected tmux event.',
+                'CTXMUX_EVENT_INVALID'
+              ), runId)
+            } else {
+              listener({
+                type: 'exit',
+                runId,
+                state: event.type === 'exited'
+                  ? event.state
+                  : { type: 'interrupted', reason: event.reason },
+                observedAt: Date.now()
+              })
+            }
+          }
+        } catch (error) {
+          if (!closed) this.errorListener?.(translateCtxmuxError(error), runId)
+        }
+      })()
+      const snapshot = active.snapshot
+      const replayDecoder = new TextDecoder()
+      return {
+        run: projectRun(snapshot.run),
+        replay: snapshot.replay.chunks.map((chunk) => decodeChunk(runId, replayDecoder, chunk)),
+        gap: snapshot.replay.truncated
+          ? {
+              requestedAfterByte: afterByte,
+              firstAvailableByte: snapshot.replay.first_available_byte
+            }
+          : null,
+        close: async () => {
+          if (closed) return
+          closed = true
+          await active.detach()
+        }
+      }
+    } catch (error) {
+      if (attachment) await attachment.detach().catch(() => {})
       throw translateCtxmuxError(error)
     }
   }

@@ -308,12 +308,29 @@ export class RuntimeController {
 
   async submitPrompt(
     control: Extract<SessionControl, { kind: 'agent' }>,
-    prompt: string
+    prompt: string,
+    config: AppConfig
   ): Promise<void> {
-    await (await this.connectedClient(control.hostId)).submitAgentPrompt(
-      control.agentSessionId,
-      prompt
-    )
+    const client = await this.connectedClient(control.hostId)
+    const status = await client.statusAgent(control.agentSessionId)
+    if (status.run.state === 'running') {
+      await client.submitAgentPrompt({
+        agentSessionId: control.agentSessionId,
+        operationId: randomUUID(),
+        prompt
+      })
+      return
+    }
+    const agent = config.agents[status.session.agentId]
+    if (!agent) throw new Error(`Missing agent configuration: ${status.session.agentId}`)
+    await client.resumeAgent({
+      agentSessionId: control.agentSessionId,
+      operationId: randomUUID(),
+      prompt,
+      args: agent.args,
+      env: agent.env,
+      commandOverride: agent.command
+    })
   }
 
   async acknowledge(control: SessionControl, throughByte: number): Promise<void> {

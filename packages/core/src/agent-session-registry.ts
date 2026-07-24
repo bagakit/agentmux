@@ -1,8 +1,10 @@
 import { AgentMuxError } from './errors.js'
+import { randomUUID } from 'node:crypto'
 import {
   loadAgentSessions,
   normalizeStoredAgentSession,
-  type AgentMuxAgentSessionStore
+  type AgentMuxAgentSessionStore,
+  type AgentMuxLifecycleReservation
 } from './agent-session-store.js'
 import type { AgentMuxRunRef, AgentMuxAgentSession } from './types.js'
 
@@ -28,22 +30,29 @@ export class AgentMuxAgentSessionRegistry {
   private readonly sessions = new Map<string, AgentMuxAgentSession>()
   private readonly agentIdByRun = new Map<string, string>()
   private readonly agentIdByRetiredRun = new Map<string, string>()
+  private readonly unboundRetiredRuns = new Set<string>()
   private readonly agentIdByNative = new Map<string, string>()
-  private readonly reservations = new Set<string>()
   private readonly writeTails = new Map<string, Promise<void>>()
+  private readonly lifecycleOwnerId = randomUUID()
+  private static readonly lifecycleLeaseMs = 30_000
 
   constructor(private readonly store: AgentMuxAgentSessionStore) {}
 
   async load(hostId: string): Promise<void> {
     await Promise.allSettled(this.writeTails.values())
-    const sessions = await loadAgentSessions(this.store)
+    const [sessions, retiredRuns] = await Promise.all([
+      loadAgentSessions(this.store),
+      this.store.loadRetiredRuns()
+    ])
     this.sessions.clear()
     this.agentIdByRun.clear()
     this.agentIdByRetiredRun.clear()
+    this.unboundRetiredRuns.clear()
     this.agentIdByNative.clear()
     for (const session of sessions) {
       if (session.hostId === hostId) this.remember(session)
     }
+    for (const run of retiredRuns) this.unboundRetiredRuns.add(run.runId)
   }
 
   list(): AgentMuxAgentSession[] {
@@ -70,7 +79,11 @@ export class AgentMuxAgentSessionRegistry {
           ? JSON.stringify(['provider', lookup.providerId, lookup.sessionId])
           : JSON.stringify(['acp', lookup.adapterId, lookup.sessionId]))
     const session = agentSessionId ? this.sessions.get(agentSessionId) : undefined
-    if (!session && lookup.kind === 'run' && this.agentIdByRetiredRun.has(lookup.run.runId)) {
+    if (
+      !session &&
+      lookup.kind === 'run' &&
+      (this.agentIdByRetiredRun.has(lookup.run.runId) || this.unboundRetiredRuns.has(lookup.run.runId))
+    ) {
       throw new AgentMuxError('Run binding is retired.', 'STALE_AGENT_SESSION_BINDING')
     }
     if (!session) {
@@ -82,19 +95,63 @@ export class AgentMuxAgentSessionRegistry {
     return session
   }
 
-  reserveNew(agentSessionId: string): () => void {
-    if (this.sessions.has(agentSessionId) || this.reservations.has(agentSessionId)) {
-      throw new AgentMuxError(`Agent Session already exists: ${agentSessionId}`, 'DUPLICATE_AGENT_SESSION')
-    }
-    return this.reserve(agentSessionId)
+  async reserveNew(
+    agentSessionId: string,
+    operationId: string
+  ): Promise<AgentMuxLifecycleReservation> {
+    return await this.reserveLifecycle({ kind: 'create', agentSessionId, operationId })
   }
 
-  reserveExisting(agentSessionId: string): () => void {
-    this.get(agentSessionId)
-    if (this.reservations.has(agentSessionId)) {
-      throw new AgentMuxError('Agent Session already has a lifecycle operation in progress.', 'AGENT_SESSION_BUSY')
+  async reserveExisting(
+    kind: 'resume' | 'stop',
+    agentSessionId: string,
+    operationId: string
+  ): Promise<AgentMuxLifecycleReservation> {
+    const session = this.get(agentSessionId)
+    return await this.reserveLifecycle({
+      kind,
+      agentSessionId,
+      operationId,
+      expectedRun: session.run
+    })
+  }
+
+  async claimStaleLifecycles(now = Date.now()): Promise<AgentMuxLifecycleReservation[]> {
+    return await this.store.claimStaleLifecycles({
+      ownerId: this.lifecycleOwnerId,
+      ownerPid: process.pid,
+      now,
+      expiresAt: now + AgentMuxAgentSessionRegistry.lifecycleLeaseMs
+    })
+  }
+
+  async releaseLifecycle(
+    reservation: AgentMuxLifecycleReservation,
+    retiredRuns: readonly AgentMuxRunRef[] = []
+  ): Promise<void> {
+    await this.store.releaseLifecycle(reservation, retiredRuns)
+    for (const run of retiredRuns) this.unboundRetiredRuns.add(run.runId)
+  }
+
+  async retireRuns(runs: readonly AgentMuxRunRef[]): Promise<void> {
+    await this.store.retireRuns(runs)
+    for (const run of runs) this.unboundRetiredRuns.add(run.runId)
+  }
+
+  async commitLifecycle(
+    reservation: AgentMuxLifecycleReservation,
+    session: AgentMuxAgentSession | null
+  ): Promise<AgentMuxAgentSession | null> {
+    const normalized = session ? normalizeStoredAgentSession(session) : null
+    await this.store.commitLifecycle(reservation, normalized)
+    const previous = this.sessions.get(reservation.agentSessionId)
+    if (previous) this.forget(previous)
+    if (!normalized) {
+      this.sessions.delete(reservation.agentSessionId)
+      return null
     }
-    return this.reserve(agentSessionId)
+    this.remember(normalized)
+    return this.get(normalized.agentSessionId)
   }
 
   async put(
@@ -108,10 +165,38 @@ export class AgentMuxAgentSessionRegistry {
         throw new AgentMuxError('Agent Session changed before persistence completed.', 'STALE_AGENT_SESSION')
       }
       this.assertAvailable(normalized)
-      await this.store.put(normalized)
+      await this.store.compareAndSwap(previous ?? null, normalized)
       if (previous) this.forget(previous)
       this.remember(normalized)
       return this.get(normalized.agentSessionId)
+    })
+  }
+
+  async update(
+    agentSessionId: string,
+    expectedCurrentRun: AgentMuxRunRef,
+    operation: (current: AgentMuxAgentSession) => AgentMuxAgentSession
+  ): Promise<AgentMuxAgentSession> {
+    return await this.enqueue(agentSessionId, async () => {
+      const previous = this.get(agentSessionId)
+      if (!sameRun(previous.run, expectedCurrentRun)) {
+        throw new AgentMuxError(
+          'Agent Session changed before persistence completed.',
+          'STALE_AGENT_SESSION'
+        )
+      }
+      const normalized = normalizeStoredAgentSession(operation(structuredClone(previous)))
+      if (normalized.agentSessionId !== agentSessionId) {
+        throw new AgentMuxError(
+          'Agent Session update changed its identity.',
+          'INVALID_AGENT_SESSION_STORE'
+        )
+      }
+      this.assertAvailable(normalized)
+      await this.store.compareAndSwap(previous, normalized)
+      this.forget(previous)
+      this.remember(normalized)
+      return this.get(agentSessionId)
     })
   }
 
@@ -121,7 +206,7 @@ export class AgentMuxAgentSessionRegistry {
       if (expectedCurrentRun && !sameRun(session.run, expectedCurrentRun)) {
         throw new AgentMuxError('Agent Session changed before deletion completed.', 'STALE_AGENT_SESSION')
       }
-      await this.store.delete(agentSessionId)
+      await this.store.compareAndSwap(session, null)
       this.forget(session)
       this.sessions.delete(agentSessionId)
     })
@@ -134,12 +219,28 @@ export class AgentMuxAgentSessionRegistry {
   }
 
   isRetiredRun(ref: AgentMuxRunRef): boolean {
-    return this.agentIdByRetiredRun.has(ref.runId)
+    return this.agentIdByRetiredRun.has(ref.runId) || this.unboundRetiredRuns.has(ref.runId)
   }
 
-  private reserve(agentSessionId: string): () => void {
-    this.reservations.add(agentSessionId)
-    return () => this.reservations.delete(agentSessionId)
+  private async reserveLifecycle(input: {
+    kind: AgentMuxLifecycleReservation['kind']
+    agentSessionId: string
+    operationId: string
+    expectedRun?: AgentMuxRunRef
+  }): Promise<AgentMuxLifecycleReservation> {
+    const now = Date.now()
+    const reservation: AgentMuxLifecycleReservation = {
+      reservationId: randomUUID(),
+      ownerId: this.lifecycleOwnerId,
+      ownerPid: process.pid,
+      kind: input.kind,
+      agentSessionId: input.agentSessionId,
+      operationId: input.operationId,
+      expiresAt: now + AgentMuxAgentSessionRegistry.lifecycleLeaseMs,
+      ...(input.expectedRun ? { expectedRun: { ...input.expectedRun } } : {})
+    }
+    await this.store.reserveLifecycle(reservation)
+    return reservation
   }
 
   private async enqueue<T>(agentSessionId: string, operation: () => Promise<T>): Promise<T> {
@@ -167,6 +268,12 @@ export class AgentMuxAgentSessionRegistry {
   }
 
   private assertAvailable(session: AgentMuxAgentSession): void {
+    if (
+      this.unboundRetiredRuns.has(session.run.runId) ||
+      session.retiredRuns.some((run) => this.unboundRetiredRuns.has(run.runId))
+    ) {
+      throw new AgentMuxError('Run is retired by an abandoned lifecycle.', 'AGENT_SESSION_IDENTITY_CONFLICT')
+    }
     const runOwner = this.agentIdByRun.get(session.run.runId)
     if (runOwner && runOwner !== session.agentSessionId) {
       throw new AgentMuxError('Run is already bound to another Agent Session.', 'AGENT_SESSION_IDENTITY_CONFLICT')

@@ -81,4 +81,4 @@ CLI、SDK 与 Desktop 共用同一 Agent Session Resolver、View Resolver 和操
 - View Resolver 与 Desktop 测试验证只聚焦当前已打开的 Terminal View 或唯一 Agent View；closed、stale、ambiguous 目标不改变布局，也不调用任何 Run lifecycle API。
 - Core 与 Desktop 类型检查验证 daemon wire 不再进入 Desktop 的共享合同。
 
-T-020 的 Local implementation candidate 已固定并消费 CtxMux `3b94288`，删除旧 Run Kernel，并完成 Codex、统一 CLI 与 typed View focus。Tracker 完成仍以 independent review 与 exact clean-checkpoint `pnpm check` 为准，不能从局部测试外推。
+T-020 的 Local implementation candidate 已固定并消费 CtxMux `2e32a9d`，删除旧 Run Kernel，并完成 Codex、统一 CLI 与 typed View focus。Tracker 完成仍以 independent review 与 exact clean-checkpoint `pnpm check` 为准，不能从局部测试外推。
