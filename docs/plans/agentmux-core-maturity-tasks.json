@@ -7,41 +7,43 @@
   "source_refs": [
     "AGENTS.md",
     "docs/plans/agentmux-core-maturity-review.md",
+    "docs/plans/mux-runtime-decision.md",
     "docs/a mature workbench-agent-runtime-notes.md"
   ],
   "tasks": [
     {
       "id": "T-001",
-      "title": "建立 transport-neutral Core contract",
-      "objective": "将 Agent 差异与执行传输拆开，建立 AgentMux 自有的 Backend、Integration、Session、Capability、Event 和 Error 契约，并把现有 Local/SSH tmux 生命周期迁移到 Terminal Backend。",
-      "outcome": "Core 不再假设所有 Agent 都是 tmux TUI，同时保留当前可运行的 tmux vertical slice 和 ExecutionHost 边界。",
+      "title": "建立 AgentMux 与 ctxmux 边界并跑通本地竖切",
+      "objective": "以 ctxmux 当前稳定的公共协议为 Run Kernel，建立 AgentMux 自有 Domain、Integration、ACP 与 CtxmuxRunAdapter 的所有权边界，并跑通 generic terminal 与 Codex 的本地端到端链路。",
+      "outcome": "AgentMux 不再把 tmux 当作 Agent Domain；无需等待 ctxmux 全部优化即可用一条真实竖切验证新的唯一 Runtime 方向。",
       "acceptance": [
-        "Agent Integration 负责 discover、launch plan、prompt delivery、resume、hook strategy 和 capability declaration；Agent Backend 负责 session transport 与生命周期。",
-        "公共事件明确分离 semantic stream 与 terminal byte stream，并保留 evidence provenance。",
-        "现有 Local/SSH tmux create、discover、send、interrupt、stop 和 recovery 全部通过新的 Terminal Backend 运行。",
-        "旧的 tmux-only Provider contract 被删除，不保留 alias、migration 或 compatibility facade。"
+        "Agent Integration 负责 catalog、launch plan、prompt delivery、hook、resume 和 capability declaration；ctxmux 只负责 Agent-neutral Run、PTY、process、bytes 和 lifecycle。",
+        "CtxmuxRunAdapter 只使用版本化公共 SDK/协议，映射 Run identity、start、input、resize、ordered output、attach/detach、replay、gap/truncated、stop 和 exit，不读取 daemon 内部状态。",
+        "generic terminal 与 Codex 各有一条通过 packages/core 公共 API 的本地竖切；Desktop 或测试 client 断开后可重新 attach 同一 Run。",
+        "ctxmux version/capability probe 缺失时返回可操作错误；T-001 不因 Remote、daemon-restart persistence 或其他后续 capability 尚未完成而阻塞。",
+        "AgentMux 不实现第二套 PTY Host、Run Protocol、sequence/replay、backpressure 或 Run persistence；现有 tmux 仅承载尚未迁移场景且不再增加能力。"
       ],
       "verification": [
         {
           "kind": "command",
           "ref": "packages/core/package.json#scripts.typecheck",
-          "proves": "新的公共类型和内部所有权边界完整编译。"
+          "proves": "新的公共类型和 AgentMux/ctxmux 所有权边界完整编译。"
         },
         {
           "kind": "command",
           "ref": "packages/core/package.json#scripts.test",
-          "proves": "现有 tmux 和 ExecutionHost 行为在架构迁移后没有回归。"
+          "proves": "本地 Terminal、Codex、断连重连、ordered output 和 capability failure 有确定性覆盖。"
         },
         {
           "kind": "artifact",
           "ref": "packages/core/src/runtime.ts",
-          "proves": "Runtime 通过 Backend contract 管理 session，而不是直接硬编码 tmux。"
+          "proves": "Runtime 通过 CtxmuxRunAdapter 管理 Run，而不是直接硬编码 tmux 或 daemon internals。"
         }
       ],
       "source_refs": [
         "AGENTS.md",
         "docs/plans/agentmux-core-maturity-review.md",
-        "docs/a mature workbench-agent-runtime-notes.md"
+        "docs/plans/mux-runtime-decision.md"
       ],
       "supersedes": []
     },
@@ -49,24 +51,24 @@
       "id": "T-002",
       "title": "接入 ACP semantic backend",
       "objective": "以精确锁定的 acpx runtime 实现 ACP Backend，将 structured turn、tool、permission、usage、model/config、cancel 和 native session identity 映射到 AgentMux 公共契约。",
-      "outcome": "支持 ACP 的 Agent 不再依赖 terminal scraping，client 可以消费可靠且 Agent-agnostic 的语义事件。",
+      "outcome": "支持 ACP 的 Agent 不依赖 terminal scraping 获取语义；ACP 与 ctxmux Run facts 在同一 AgentMux Session 中保持来源可区分。",
       "acceptance": [
         "acpx 被封装在内部 adapter 后面，`@agentmux/core` 的公开声明不泄露 acpx 类型。",
         "确定性 fake ACP Agent 覆盖 initialize、new/load session、prompt streaming、tool call、permission、cancel、close 和 process exit。",
         "permission request 必须由 policy 或 client 明确回答，缺少回答时 fail closed，绝不 auto-approve。",
         "Adapter 安装和下载是显式策略；默认运行不得静默联网或执行 npx 下载。",
-        "Codex、Claude 和 Pi 在可用 ACP adapter 上走 ACP；TraeX 只有在其已安装命令暴露经过验证的 ACP 入口时才走 ACP，否则与 Hermes、自定义 Agent 一样走明确声明的 Terminal Backend。"
+        "ACP 只提供 semantic backend，不拥有 PTY、Run replay 或进程生命周期，也不把 terminal facts 升格成伪造语义。"
       ],
       "verification": [
         {
           "kind": "command",
           "ref": "packages/core/package.json#scripts.test",
-          "proves": "ACP 生命周期、事件归一化、权限和失败路径有确定性覆盖。"
+          "proves": "ACP 生命周期、事件归一化、权限、ctxmux Run 关联和失败路径有确定性覆盖。"
         },
         {
           "kind": "artifact",
           "ref": "packages/core/src/types.ts",
-          "proves": "AgentMux 自有类型表达 structured turn、capability 和 permission，而不暴露依赖实现。"
+          "proves": "AgentMux 自有类型表达 structured turn、capability、permission 和 evidence provenance。"
         }
       ],
       "source_refs": [
@@ -77,56 +79,61 @@
     },
     {
       "id": "T-003",
-      "title": "成熟化 Terminal Provider",
-      "objective": "定义并实现可替换的 direct PTY 与 durable tmux Terminal Provider，使任意交互式 CLI 获得真实字节流、输入、resize、attach、replay 和可靠 teardown。",
-      "outcome": "任何项目既能零 tmux 依赖地嵌入本地 Agent，也能在需要进程持久化时选择 tmux，而 client 不需要理解两者差异。",
+      "title": "完成 ctxmux Runtime cutover 与 Remote Host",
+      "objective": "补齐 AgentMux 完整切换所需的 ctxmux capability，迁移 Local/SSH terminal 路径和增量渲染，并删除 tmux polling Runtime。",
+      "outcome": "Local 与 Remote 只使用 ctxmux Run Kernel；输入和输出不再为每个 chunk 启动命令或轮询并重画整屏。",
       "acceptance": [
-        "Terminal Provider contract 覆盖 spawn、attach、write、resize、signal、shutdown、exit、applied dimensions 和 foreground process evidence。",
-        "输出使用 monotonic sequence 与 bounded replay；慢消费者受到明确 backpressure 或丢弃策略保护。",
-        "direct PTY 采用维护中的 library，tmux 使用 pipe-backed incremental output；两者都不再以 capture snapshot polling 作为唯一输出来源。",
-        "shutdown 先 graceful 后 force，并验证 Agent 子进程和工具后代不会成为 Core 所有的孤儿进程。",
-        "terminal pattern、hook、transcript 和 ACP 证据的可信级别保持可区分。"
+        "切换 Gate 明确验证 daemon activation、AgentMux metadata/tag、idempotent create/incarnation fence、process-tree stop、applied-size readback、replay 截断恢复和 attachment command correlation；缺失能力不由 AgentMux 私有重造。",
+        "Local terminal 使用 ctxmux 增量字节流；Renderer 对 xterm 增量写入，Gap/Truncated 触发明确恢复或不完整状态。",
+        "Remote 通过远端 ctxmuxd 与长期系统 SSH transport/socket forwarding 工作，不复制 Private Key、不按输入 chunk 启动 ssh、不静默下载。",
+        "Stop、disconnect/reconnect、late exit、lost create response 和 daemon unavailable 均有确定性行为，不重复启动 Agent。",
+        "Local 与 Remote Gate 通过后删除 TmuxClient、tmux Environment Discovery、capture-pane polling、command-per-input 和 tmux-only public types；不保留 fallback 或可选双 Runtime。"
       ],
       "verification": [
         {
           "kind": "command",
           "ref": "packages/core/package.json#scripts.test",
-          "proves": "direct PTY 与 tmux 的输入、输出、resize、replay、exit 和 teardown 行为有集成测试。"
+          "proves": "Local/Remote、恢复、fence、resize、stop 和 ctxmux failure path 有集成测试。"
+        },
+        {
+          "kind": "command",
+          "ref": "apps/desktop/package.json#scripts.test",
+          "proves": "Desktop 消费增量 output 且没有恢复 snapshot-polling 所有权。"
         },
         {
           "kind": "artifact",
           "ref": "packages/core/src/tmux-client.ts",
-          "proves": "tmux 被收敛为 Terminal Provider 实现细节。"
+          "proves": "完成任务时该旧 Runtime 文件已删除，ctxmux 是唯一 Run owner。"
         }
       ],
       "source_refs": [
         "docs/plans/agentmux-core-maturity-review.md",
-        "docs/a mature workbench-agent-runtime-notes.md"
+        "docs/plans/mux-runtime-decision.md"
       ],
       "supersedes": []
     },
     {
       "id": "T-004",
-      "title": "补齐 Catalog、Hook、Resume 与 durable session",
-      "objective": "把 Agent catalog、显式 hook 安装、provider-native resume、持久 SessionStore 和幂等 create/claim 组合成可恢复的多 Agent session layer。",
-      "outcome": "Codex、Claude、TraeX、Hermes、Pi 和自定义 Agent 在重启、丢响应和恢复场景下维持稳定身份与诚实能力。",
+      "title": "补齐 Catalog、Hook、Resume 与语义恢复",
+      "objective": "把 Agent catalog、显式 hook 安装、provider-native resume、AgentMux semantic store 与 ctxmux Run 引用组合成可恢复的多 Agent Session layer。",
+      "outcome": "Codex、Claude、TraeX、Hermes、Pi 和自定义 Agent 在重启与恢复场景下保持诚实身份，同时不复制 ctxmux 的 Run persistence。",
       "acceptance": [
         "Catalog 对每个 Agent 声明 executable、backend options、prompt injection、ready signal、expected process、hook strategy、resume strategy 和 capability probe。",
-        "SessionStore 可由宿主注入，并持久化 AgentMux id、backend、host、workspace、native handle、incarnation 和 replay cursor。",
-        "create/claim 使用 operation id 与 request fingerprint，重复请求不会启动第二个 Agent process。",
-        "native resume 与 cold terminal reattach 分开表达；无法恢复原生上下文时不得伪装为原 session。",
-        "managed hook installer 只能由显式用户动作触发，在临时 home 测试，并提供变更预览、receipt 和可恢复卸载。"
+        "AgentMux store 只持久化 semantic session、workspace、native Agent handle、hook receipt、ctxmux Run reference 和必要 projection cursor；Run identity、bytes、replay 和 process state 以 ctxmux 为权威。",
+        "AgentMux 将 create operation id 传给 ctxmux 并依赖其幂等/fence capability；缺失时禁止不安全自动重试，不在上层复制一个弱实现。",
+        "provider-native resume、ctxmux reattach 和 ctxmux fork 分开表达；无法恢复模型上下文时不得伪装为原 semantic session。",
+        "Hook 事件与 Agent、semantic session、Run 和 incarnation 可关联；managed installer 仅由显式动作触发，并提供预览、receipt 和可恢复卸载。"
       ],
       "verification": [
         {
           "kind": "command",
           "ref": "packages/core/package.json#scripts.test",
-          "proves": "catalog、resume、idempotency、persistence 和 hook 安装边界有确定性测试。"
+          "proves": "catalog、resume、semantic persistence、hook 关联和不安全重试边界有确定性测试。"
         },
         {
           "kind": "artifact",
           "ref": "packages/core/src/agent-provider.ts",
-          "proves": "Agent 差异已经从简单 argv builder 提升为可探测、可恢复的 catalog contract。"
+          "proves": "Agent 差异被收敛为可探测、可恢复且不拥有 Run 的 Integration contract。"
         }
       ],
       "source_refs": [
@@ -140,12 +147,12 @@
       "id": "T-005",
       "title": "提供可选 AHP Host adapter",
       "objective": "在 AgentMux in-process domain 之上实现 capability-gated AHP Host adapter，为多个 client 提供同步 session、reconnect/replay、action sequencing 和 terminal ownership。",
-      "outcome": "浏览器、第二个桌面端或远程 client 可以通过标准协议接入同一个 AgentMux host，而执行后端不依赖 AHP state shape。",
+      "outcome": "浏览器、第二个桌面端或远程 client 可以接入同一个 AgentMux host，而 AHP 不拥有 Agent domain 或 ctxmux Run。",
       "acceptance": [
-        "AHP 是可选 adapter；Core domain、ACP Backend 和 Terminal Backend 不导入 AHP state 作为内部唯一真相。",
+        "AHP 是可选 adapter；Core domain、ACP Backend 和 CtxmuxRunAdapter 不导入 AHP state 作为内部唯一真相。",
         "in-memory transport 覆盖 snapshot、ordered action、reconnect replay、turn ownership、cancel 和 single-winner permission resolution。",
         "loopback WebSocket transport 默认需要认证；不监听 non-loopback 地址。",
-        "terminal claim、input/data、resize 和 exit 按 host-authoritative 语义映射，重连不得重放输入。",
+        "terminal claim、input/data、resize 和 exit 映射到 ctxmux-backed host-authoritative 语义，重连不得重放输入。",
         "AHP 版本被精确锁定并通过 capability negotiation 隔离协议演化。"
       ],
       "verification": [
@@ -167,22 +174,22 @@
     },
     {
       "id": "T-006",
-      "title": "完成 package consumer 与第一方 client 验收",
-      "objective": "从干净外部项目和 AgentMux Desktop 两端验证 Core 的安装、类型、运行、诊断、文档和边界，形成可发布但不实际发布的候选包。",
-      "outcome": "`@agentmux/core` 的成熟度由真实 consumer 证明，而不是仅由 monorepo 内部编译证明。",
+      "title": "完成 package、daemon 与第一方 client 验收",
+      "objective": "从干净外部项目和 AgentMux Desktop 两端验证 Core、ctxmux SDK/binary、daemon activation、Remote artifact、诊断、文档和边界，形成可发布但不实际发布的候选包。",
+      "outcome": "`@agentmux/core` 的成熟度由真实 consumer 证明，ctxmux 依赖的安装与生命周期也成为显式产品合同。",
       "acceptance": [
-        "`pnpm pack` 产物只包含声明的发布文件，可在干净 Node consumer 中安装、导入并运行最小 ACP 与 Terminal 示例。",
-        "package 声明并测试受支持的 Node/runtime 范围，且不依赖 Electron、React 或 Desktop 内部模块。",
-        "文档覆盖 quickstart、custom Agent、ACP adapter policy、terminal capability 差异、permission policy、resume 和 shutdown。",
-        "doctor 输出 Agent、adapter、tmux/PTY、host 和 capability 的可操作诊断，不用模糊 UNKNOWN 掩盖错误。",
-        "Desktop 的 Agent lifecycle 只经过 Core public API；没有 renderer/main 自行 spawn Agent 或绕过 session ownership。",
-        "完整 repository check、package consumer test 和 opt-in live smoke 通过；不执行 npm publish 或 release。"
+        "`pnpm pack` 产物只包含声明文件，可在干净 Node consumer 中安装、导入并运行最小 ACP 与 ctxmux-backed Terminal 示例。",
+        "ctxmux SDK 与 binary/sidecar 版本兼容性、查找、显式安装、daemon activation、升级和不可用错误都有文档与测试；不得依赖开发仓库路径。",
+        "Remote artifact 的平台范围、安装/启动、版本协商、审计和卸载明确；不得静默联网或复制用户 Private Key。",
+        "package 声明并测试受支持的 Node/runtime/OS 范围，且不依赖 Electron、React 或 Desktop 内部模块。",
+        "doctor 输出 Agent、ACP adapter、ctxmux daemon、Remote Host 和 capability 的可操作诊断，不用模糊 UNKNOWN 掩盖错误。",
+        "Desktop 的 Agent lifecycle 只经过 Core public API；没有 renderer/main 自行 spawn Agent、直接调用 tmux 或绕过 Run ownership。"
       ],
       "verification": [
         {
           "kind": "command",
           "ref": "package.json#scripts.check",
-          "proves": "Core 与第一方 Desktop 的完整回归检查通过。"
+          "proves": "Core、Desktop 和第一方集成的完整回归检查通过。"
         },
         {
           "kind": "command",
@@ -197,7 +204,102 @@
       ],
       "source_refs": [
         "AGENTS.md",
-        "docs/plans/agentmux-core-maturity-review.md"
+        "docs/plans/agentmux-core-maturity-review.md",
+        "docs/plans/mux-runtime-decision.md"
+      ],
+      "supersedes": []
+    },
+    {
+      "id": "T-007",
+      "title": "建立顶级可靠性与安全测试闭环",
+      "objective": "以能力和故障模型为轴补齐 correctness、concurrency、chaos、stress、security、fuzz、资源边界和跨平台测试，并与同类产品公开测试方法逐维对照。",
+      "outcome": "Core 与 ctxmux 接缝的高风险行为由可持续运行的自动化证据保护，而不是依赖 happy-path E2E。",
+      "acceptance": [
+        "测试矩阵覆盖 lifecycle、ordered input/output、multi-client、replay gap/truncation、resize race、late exit、lost response、daemon/client crash、network partition、disk/full quota、slow consumer、process tree 和 cleanup。",
+        "压力与并发场景覆盖大量 Run、长输出、输入 burst、反复 attach/detach、并发 stop/resize/fork 以及受控资源上限，结果无死锁、数据无声丢失、孤儿进程或无界增长。",
+        "安全测试覆盖 Unix socket 权限、认证、协议畸形输入与 fuzz、恶意 ANSI/output、argument/env injection、workspace boundary、symlink、remote transport 和 secret redaction。",
+        "覆盖率按关键不变量和失败路径审计，不以单一行覆盖率代替行为证明；所有已知 high-risk gap 都映射到 fixture/test 或有明确 disposition。",
+        "tmux、Zellij、WezTerm mux、a mature workbench、a mature workbench 和可运行同类的公开测试维度被记录为证据矩阵；无法证实的项标记 unknown，不猜测，并把可复用的成熟模式落实为 Gate。",
+        "fast deterministic suite 进入默认 check；高成本 chaos/stress/security suite 具有可重复 seed、超时、资源预算和 CI/nightly 分层。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "package.json#scripts.check",
+          "proves": "默认确定性质量 Gate 包含本任务定义的 fast suite。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "docs/testing/strategy.md",
+          "proves": "故障模型、竞品对照、suite 分层、覆盖证据和剩余风险有单一维护入口。"
+        }
+      ],
+      "source_refs": [
+        "docs/plans/agentmux-core-maturity-review.md",
+        "docs/plans/mux-runtime-decision.md"
+      ],
+      "supersedes": []
+    },
+    {
+      "id": "T-008",
+      "title": "完成可复现竞品 Benchmark 并全面胜出",
+      "objective": "冻结方法、环境和基线，对 AgentMux+ctxmux 与当前 tmux Runtime 及可运行同类进行端到端 Benchmark；在预先声明的发布维度全部胜出后才通过。",
+      "outcome": "性能收益由可重复数据证明，且没有以牺牲正确性、稳定性或资源上限换取漂亮数字。",
+      "acceptance": [
+        "运行前提交 benchmark protocol、hardware/software manifest、workload、warmup、sample size、统计方法、置信区间、outlier policy 和原始结果格式，禁止看结果后改主指标。",
+        "主维度至少包含 input-to-visible-output p50/p95/p99、sustained output throughput、attach/replay latency、并发 Run scale、idle CPU、steady/peak RSS、reconnect recovery 和 stop cleanup。",
+        "冻结当前真实 tmux Runtime 为强制 baseline；tmux、Zellij、WezTerm mux 及其他可运行同类在同机同 workload 下比较，不可比项明确解释且不得伪装为胜出。",
+        "AgentMux+ctxmux 在每个预先声明且可比的发布主维度都优于冻结 tmux baseline，并对可运行竞品给出完整结果；任何主维度回退都阻止任务完成。",
+        "benchmark 同时运行 correctness oracle、资源上限和泄漏检查；原始数据、汇总脚本、版本 SHA 与复现命令纳入仓库。",
+        "至少两轮独立复跑得到一致结论；flaky、环境噪声和失败样本完整保留，不只展示最佳结果。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "packages/core/package.json#scripts.benchmark",
+          "proves": "冻结 benchmark protocol 可从仓库入口复现并产生机器可读结果。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "docs/benchmarks/ctxmux-cutover.md",
+          "proves": "方法、竞品版本、原始证据索引、统计结果和 release verdict 完整可审计。"
+        }
+      ],
+      "source_refs": [
+        "docs/plans/agentmux-core-maturity-review.md",
+        "docs/plans/mux-runtime-decision.md"
+      ],
+      "supersedes": []
+    },
+    {
+      "id": "T-009",
+      "title": "完成多 Agent 独立 Review 与 Feature 收口",
+      "objective": "由多个独立 Agent 分别审查功能完整性、架构边界、安全、测试充分性和 Benchmark 有效性，修复 release-blocking findings，并完成最终 Gate。",
+      "outcome": "Feature 的完成结论来自相互独立且有证据的审查，而不是实现者自评。",
+      "acceptance": [
+        "至少三个独立 reviewer 使用不同关注面：功能/架构、可靠性/安全、测试/Benchmark；review prompt、范围、证据和结论被保存。",
+        "Review 明确检查 AgentMux/ctxmux 所有权泄漏、隐藏 tmux fallback、Agent 语义下沉、重复 Run 基建和不必要抽象。",
+        "Review 对每个 acceptance criterion 建立实现与测试证据映射，并执行 targeted adversarial tests；仅阅读文档不算完成。",
+        "所有 critical/high 或 release-blocking finding 均修复并回归；其余 finding 有 owner、理由和明确 disposition，不用模糊 backlog 掩盖。",
+        "完整 check、package consumer、live smoke、chaos/stress/security suite 和冻结 benchmark 在最终候选 SHA 上重跑通过，证据未引用旧提交。",
+        "最终收口确认没有发布包、没有修改用户全局 Agent 配置，并为 Feature Tracker closeout 准备可审计摘要。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "package.json#scripts.check",
+          "proves": "最终候选 SHA 通过统一 repository Gate。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "docs/reviews/agentmux-core-maturity-final.md",
+          "proves": "独立 review、findings、修复、验收映射和最终 verdict 可审计。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/plans/agentmux-core-maturity-review.md",
+        "docs/plans/mux-runtime-decision.md"
       ],
       "supersedes": []
     }
