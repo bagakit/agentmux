@@ -3,7 +3,6 @@ import {
   AlertTriangle,
   ArrowUpRight,
   BellRing,
-  Bot,
   CheckCircle2,
   GitBranch,
   Inbox,
@@ -32,6 +31,7 @@ import {
 import { projectWorkspaces } from '../lib/workspace-projects'
 import { useAppStore } from '../store'
 import { BoardDiscussionCanvas } from './BoardDiscussionCanvas'
+import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
 import { StatusDot } from './StatusDot'
 
 const COLUMN_META: Record<ProjectBoardColumn, {
@@ -66,7 +66,7 @@ function RunCard({ session, onOpen }: { session: SessionSnapshot; onOpen: () => 
       <span className="board-run-card__status"><StatusDot status={session.status} /></span>
       <span className="board-run-card__identity">
         <strong>{session.label}</strong>
-        <small>{session.agentId ? <><Bot size={11} /> {session.agentId}</> : <><SquareTerminal size={11} /> terminal</>}</small>
+        <small>{session.agentId ? <><AgentProviderIcon agentId={session.agentId} size={11} /> {agentProviderLabel(session.agentId)}</> : <><SquareTerminal size={11} /> terminal</>}</small>
       </span>
       <span className="board-run-card__meta">
         <em>{session.status.state}</em>

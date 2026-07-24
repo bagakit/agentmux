@@ -2,14 +2,7 @@ import { AlertTriangle, CheckCircle2, ChevronDown, LoaderCircle, RefreshCw, XCir
 import { useEffect, useMemo, useState } from 'react'
 import type { AgentConfig, AppConfig } from '../../../../shared/contracts'
 import { agentDetectionKey, useAppStore } from '../../store'
-
-const AGENT_LABELS: Record<string, string> = {
-  codex: 'Codex',
-  claude: 'Claude',
-  traex: 'TraeX',
-  hermes: 'Hermes',
-  pi: 'Pi'
-}
+import { AgentProviderIcon, agentProviderLabel } from '../AgentProviderIcon'
 
 type AgentDraft = { command: string; args: string; env: string }
 
@@ -62,7 +55,7 @@ export function AgentSettingsPane({ config, onSave }: {
   const [error, setError] = useState<string | null>(null)
   const agents = useMemo(() => Object.keys(config.agents).map((id) => ({
     id,
-    label: AGENT_LABELS[id] ?? id,
+    label: agentProviderLabel(id),
     detection: detections[agentDetectionKey(hostId, id)]
   })), [config.agents, detections, hostId])
   const checking = agents.some((agent) => agent.detection?.state === 'checking')
@@ -114,7 +107,7 @@ export function AgentSettingsPane({ config, onSave }: {
               return (
                 <details className="agent-settings-card" key={agent.id}>
                   <summary>
-                    <span className="agent-provider-mark">{agent.label.slice(0, 1)}</span>
+                    <span className="agent-provider-mark"><AgentProviderIcon agentId={agent.id} size={17} /></span>
                     <span><strong>{agent.label}</strong><small>{draft.command}</small></span>
                     <em className={`check-pill check-pill--${agent.detection?.state ?? 'idle'}`}>{status.icon}{status.label}</em>
                     <ChevronDown className="settings-disclosure-icon" size={14} />

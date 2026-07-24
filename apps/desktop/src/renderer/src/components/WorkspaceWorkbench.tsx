@@ -17,7 +17,6 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import {
-  Bot,
   FileCode2,
   Globe2,
   GripVertical,
@@ -30,6 +29,7 @@ import {
 import { lazy, Suspense, useMemo, useState } from 'react'
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
 import { BrowserPane } from './BrowserPane'
+import { AgentProviderIcon } from './AgentProviderIcon'
 import { ConfirmationDialog } from './ConfirmationDialog'
 import { NewTabSurface } from './NewTabSurface'
 import { SessionPane } from './SessionPane'
@@ -130,7 +130,9 @@ function SortableWorkbenchTab({
         {...listeners}
       >
         {tab.kind === 'agent' || tab.kind === 'terminal' ? (
-          session ? <StatusDot status={session.status} /> : tab.kind === 'terminal' ? <SquareTerminal size={12} /> : <Bot size={12} />
+          session?.kind === 'agent' ? (
+            <i className="workbench-tab__agent-mark"><AgentProviderIcon agentId={session.agentId} size={13} /><StatusDot status={session.status} /></i>
+          ) : session ? <StatusDot status={session.status} /> : <SquareTerminal size={12} />
         ) : tab.kind === 'file' ? (
           <FileCode2 size={12} />
         ) : tab.kind === 'browser' ? (
