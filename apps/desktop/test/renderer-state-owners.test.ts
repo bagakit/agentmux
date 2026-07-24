@@ -210,6 +210,7 @@ describe('Renderer resource state owners', () => {
       documents: {},
       dirtyDocuments: {},
       documentGenerations: {},
+      documentObservationGenerations: {},
       documentIssues: {},
       savingDocuments: {},
       layouts: { [workspaceId]: createWorkspaceLayout('pane') },

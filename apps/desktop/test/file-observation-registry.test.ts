@@ -31,4 +31,11 @@ describe('FileObservationRegistry', () => {
     await registry.dispose()
     expect(dispose).toHaveBeenCalledTimes(1)
   })
+
+  it('rejects observation starts after disposal', async () => {
+    const registry = new FileObservationRegistry()
+    await registry.dispose()
+    await expect(registry.observe('workspace\0file.ts', async () => () => {}))
+      .rejects.toThrow('File observation registry is disposed')
+  })
 })

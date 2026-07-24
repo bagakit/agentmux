@@ -2,8 +2,10 @@ type DisposeObservation = () => void
 
 export class FileObservationRegistry {
   private readonly observations = new Map<string, Promise<DisposeObservation>>()
+  private disposed = false
 
   async observe(key: string, start: () => Promise<DisposeObservation>): Promise<void> {
+    if (this.disposed) throw new Error('File observation registry is disposed')
     let observation = this.observations.get(key)
     if (!observation) {
       observation = start()
@@ -26,6 +28,7 @@ export class FileObservationRegistry {
   }
 
   async dispose(): Promise<void> {
+    this.disposed = true
     const observations = [...this.observations.values()]
     this.observations.clear()
     const settled = await Promise.allSettled(observations)

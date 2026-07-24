@@ -16,6 +16,7 @@ export type FileWorkbenchState = {
   documents: Record<string, FileDocument>
   dirtyDocuments: Record<string, boolean>
   documentGenerations: Record<string, number>
+  documentObservationGenerations: Record<string, number>
   documentIssues: Record<string, FileDocumentIssue | undefined>
   savingDocuments: Record<string, boolean>
   layouts: Record<string, WorkspaceLayout>
@@ -60,6 +61,10 @@ export function reduceFileOpened(
       ...state.documentGenerations,
       [key]: state.documentGenerations[key] ?? 0
     },
+    documentObservationGenerations: {
+      ...state.documentObservationGenerations,
+      [key]: state.documentObservationGenerations[key] ?? 0
+    },
     documentIssues: alreadyOpen ? state.documentIssues : withoutIssue(state.documentIssues, key),
     tabs: { ...state.tabs, [tab.id]: tab },
     lastActiveFileByWorkspace: { ...state.lastActiveFileByWorkspace, [workspaceId]: path },
@@ -102,17 +107,23 @@ export function reduceDocumentWritten(
   path: string,
   savedGeneration: number,
   revision: string,
-  expectedRevision: string | null = revision
+  expectedRevision: string | null = revision,
+  savedObservationGeneration = 0
 ): FileWorkbenchState {
   const key = documentKey(workspaceId, path)
   const document = state.documents[key]
   if (!document) return state
   const issue = state.documentIssues[key]
+  const observedConflictIsSavedRevision =
+    issue?.kind === 'changed' && issue.observed.revision === revision
+  const observedConflictWasCaptured =
+    (state.documentObservationGenerations[key] ?? 0) === savedObservationGeneration && (
+      (issue?.kind === 'changed' && issue.observed.revision === expectedRevision) ||
+      (issue?.kind === 'deleted' && expectedRevision === null)
+    )
   const clearsIssue = issue?.kind === 'write-error' ||
-    (issue?.kind === 'changed' && (
-      issue.observed.revision === revision || issue.observed.revision === expectedRevision
-    )) ||
-    (issue?.kind === 'deleted' && expectedRevision === null)
+    observedConflictIsSavedRevision ||
+    observedConflictWasCaptured
   const hasNewerDiskConflict =
     (issue?.kind === 'changed' && !clearsIssue) ||
     (issue?.kind === 'deleted' && !clearsIssue)
@@ -137,16 +148,21 @@ export function reduceDocumentRead(
   const key = documentKey(workspaceId, path)
   const current = state.documents[key]
   if (!current) return state
+  const documentObservationGenerations = {
+    ...state.documentObservationGenerations,
+    [key]: (state.documentObservationGenerations[key] ?? 0) + 1
+  }
   if (result.status === 'deleted') {
     return {
       ...state,
-      dirtyDocuments: { ...state.dirtyDocuments, [key]: true },
+      documentObservationGenerations,
       documentIssues: { ...state.documentIssues, [key]: { kind: 'deleted' } }
     }
   }
   if (result.status === 'error') {
     return {
       ...state,
+      documentObservationGenerations,
       documentIssues: {
         ...state.documentIssues,
         [key]: { kind: 'read-error', code: result.code, message: result.message }
@@ -156,12 +172,13 @@ export function reduceDocumentRead(
   if (result.document.revision === current.revision) {
     const issue = state.documentIssues[key]
     return issue?.kind === 'changed' || issue?.kind === 'deleted' || issue?.kind === 'read-error'
-      ? { ...state, documentIssues: withoutIssue(state.documentIssues, key) }
-      : state
+      ? { ...state, documentObservationGenerations, documentIssues: withoutIssue(state.documentIssues, key) }
+      : { ...state, documentObservationGenerations }
   }
   if (state.dirtyDocuments[key]) {
     return {
       ...state,
+      documentObservationGenerations,
       documentIssues: {
         ...state.documentIssues,
         [key]: { kind: 'changed', observed: result.document }
@@ -170,6 +187,7 @@ export function reduceDocumentRead(
   }
   return {
     ...state,
+    documentObservationGenerations,
     documents: { ...state.documents, [key]: result.document },
     dirtyDocuments: { ...state.dirtyDocuments, [key]: false },
     documentGenerations: {
@@ -252,6 +270,7 @@ export function reduceFileClosed(
   const documents = { ...state.documents }
   const dirtyDocuments = { ...state.dirtyDocuments }
   const documentGenerations = { ...state.documentGenerations }
+  const documentObservationGenerations = { ...state.documentObservationGenerations }
   const documentIssues = { ...state.documentIssues }
   const savingDocuments = { ...state.savingDocuments }
   const key = documentKey(tab.workspaceId, tab.path)
@@ -259,6 +278,7 @@ export function reduceFileClosed(
   delete documents[key]
   delete dirtyDocuments[key]
   delete documentGenerations[key]
+  delete documentObservationGenerations[key]
   delete documentIssues[key]
   delete savingDocuments[key]
   return {
@@ -266,6 +286,7 @@ export function reduceFileClosed(
     documents,
     dirtyDocuments,
     documentGenerations,
+    documentObservationGenerations,
     documentIssues,
     savingDocuments,
     layouts,
@@ -300,6 +321,7 @@ export function reduceFileRename(
   const documents = { ...state.documents }
   const dirtyDocuments = { ...state.dirtyDocuments }
   const documentGenerations = { ...state.documentGenerations }
+  const documentObservationGenerations = { ...state.documentObservationGenerations }
   const documentIssues = { ...state.documentIssues }
   const savingDocuments = { ...state.savingDocuments }
   for (const tab of affectedTabs) {
@@ -324,7 +346,7 @@ export function reduceFileRename(
     delete dirtyDocuments[key]
     dirtyDocuments[documentKey(workspaceId, remapPathWithinSubtree(documentPath, path, nextPath))] = dirty
   }
-  for (const collection of [documentGenerations, documentIssues]) {
+  for (const collection of [documentGenerations, documentObservationGenerations, documentIssues]) {
     for (const [key, value] of Object.entries(collection)) {
       if (!key.startsWith(documentPrefix)) continue
       const documentPath = key.slice(documentPrefix.length)
@@ -345,6 +367,7 @@ export function reduceFileRename(
     documents,
     dirtyDocuments,
     documentGenerations,
+    documentObservationGenerations,
     documentIssues,
     savingDocuments,
     layouts: Object.fromEntries(
@@ -384,6 +407,7 @@ export function reduceFileDelete(
   const documents = { ...state.documents }
   const dirtyDocuments = { ...state.dirtyDocuments }
   const documentGenerations = { ...state.documentGenerations }
+  const documentObservationGenerations = { ...state.documentObservationGenerations }
   const documentIssues = { ...state.documentIssues }
   const savingDocuments = { ...state.savingDocuments }
   for (const tab of removedTabs) {
@@ -398,7 +422,7 @@ export function reduceFileDelete(
     if (!key.startsWith(documentPrefix)) continue
     if (isPathWithinSubtree(key.slice(documentPrefix.length), path)) delete dirtyDocuments[key]
   }
-  for (const collection of [documentGenerations, documentIssues, savingDocuments]) {
+  for (const collection of [documentGenerations, documentObservationGenerations, documentIssues, savingDocuments]) {
     for (const key of Object.keys(collection)) {
       if (!key.startsWith(documentPrefix)) continue
       if (isPathWithinSubtree(key.slice(documentPrefix.length), path)) delete collection[key]
@@ -409,6 +433,7 @@ export function reduceFileDelete(
     documents,
     dirtyDocuments,
     documentGenerations,
+    documentObservationGenerations,
     documentIssues,
     savingDocuments,
     layouts: layout ? { ...state.layouts, [workspaceId]: layout } : state.layouts,
