@@ -8,7 +8,14 @@
     "dev:web": "pnpm --filter @agentmux/desktop dev:web",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
-    "test": "pnpm --filter @agentmux/core build && vitest run --exclude packages/core/test/remote-artifact-builder.test.ts --exclude packages/core/test/ssh-remote-daemon.integration.test.ts --exclude packages/core/test/package-consumer.integration.test.ts && vitest run packages/core/test/remote-artifact-builder.test.ts && vitest run packages/core/test/ssh-remote-daemon.integration.test.ts && vitest run packages/core/test/package-consumer.integration.test.ts",
+    "test:fast": "pnpm --filter @agentmux/core build && vitest run --exclude packages/core/test/remote-artifact-builder.test.ts --exclude packages/core/test/ssh-remote-daemon.integration.test.ts --exclude packages/core/test/package-consumer.integration.test.ts",
+    "test:native": "pnpm --filter @agentmux/core build && vitest run packages/core/test/remote-artifact-builder.test.ts && vitest run packages/core/test/ssh-remote-daemon.integration.test.ts && vitest run packages/core/test/package-consumer.integration.test.ts",
+    "test": "pnpm test:fast && pnpm test:native",
+    "test:security": "pnpm --filter @agentmux/core build && vitest run packages/core/test/daemon-security.test.ts packages/core/test/acp-adapter.test.ts packages/core/test/hook-server.test.ts packages/core/test/managed-hook-installer.test.ts packages/core/test/ssh-daemon-connector.test.ts packages/core/test/ssh-remote-daemon.test.ts apps/desktop/test/workspace-files.test.ts apps/desktop/test/browser-view-manager.test.ts",
+    "test:fuzz": "pnpm --filter @agentmux/core test:fuzz",
+    "test:chaos": "pnpm --filter @agentmux/core test:chaos",
+    "test:stress": "pnpm --filter @agentmux/core test:stress && pnpm --filter @agentmux/desktop measure:desktop",
+    "test:nightly": "pnpm test:security && pnpm test:fuzz && pnpm test:chaos && pnpm test:stress",
     "check": "pnpm typecheck && pnpm test && pnpm build"
   },
   "devDependencies": {
