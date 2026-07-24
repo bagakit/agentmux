@@ -24,7 +24,7 @@ Agent Adapter -> Startup Plan -> Terminal / Session Owner
                           Normalized Event Stream
 ```
 
-AgentMux 保留真实 tmux 作为当前 PTY/Process Owner，同时采用 a mature workbench 的 Adapter、Session 和归一化事件边界。
+旧的 Desktop Redesign Feature 保留真实 tmux 作为当时的 PTY/Process Owner，并采用 a mature workbench 的 Adapter、Session 和归一化事件边界。当前 Core Maturity Feature 已选择 AgentMux 自有的持久 `agentmuxd`；a mature workbench 的 `node-pty`、Attach-only、Incarnation、增量输出、Replay、背压和进程树清理模式成为实现证据，但不复制 a mature workbench 的账户、Relay 或兼容历史。
 
 ## 1. Agent 启动规划由数据驱动
 
@@ -48,14 +48,14 @@ a mature workbench Local Provider 通过 Shell Fallback 调用 `pty.spawn`（`sr
 
 停止 Agent 时，a mature workbench 不只杀 Shell，还会清理后代进程，避免 MCP 或工具进程继续占用 Worktree cwd。POSIX 先优雅停止再强制终止；Windows ConPTY 只走强制路径（`1110-1202`）。
 
-AgentMux 当前把下列责任交给真实 tmux：
+切换前的 AgentMux 基线把下列责任交给真实 tmux：
 
 - Detached Session 提供 PTY/Process 持久化；
 - `remain-on-exit` 和 Pane Format 提供可检查的退出状态；
 - Prefix 限定的 Session Name 提供窄化停止目标；
 - `capture-pane` 提供重启后可恢复的终端投影。
 
-Core 仍负责 Session 身份、Local/SSH Host、输入、Resize、Capture、状态轮询、事件和精确清理。
+Core 仍负责 Session 身份、Local/SSH Host、输入、Resize、Capture、状态轮询、事件和精确清理。当前 Feature 将 PTY/Process、增量字节流和 Attach/Detach 移入独立 Daemon；切换通过后一次删除这些 tmux 假设。
 
 ## 3. a mature workbench 的“tmux 支持”是兼容外观
 
@@ -132,7 +132,7 @@ a mature workbench Desktop Browser 主要使用 Renderer `<webview>`，而 Offsc
 
 Browser 不属于 Agent Runtime，也不通过 tmux。它属于 Desktop Host Capability，但继续遵守 Universal Tab、Pane、拖拽、分屏与关闭生命周期。
 
-## 7. 采用、简化与明确不采用
+## 7. 当前 Core Maturity 的采用、简化与明确不采用
 
 当前采用：
 
@@ -143,16 +143,23 @@ Browser 不属于 Agent Runtime，也不通过 tmux。它属于 Desktop Host Cap
 - Raw Output、Process Liveness、Semantic Status 分离；
 - 一个 Session 的 Terminal 与 Observable Activity 两种投影。
 
-当前简化：
+切换前基线：
 
 - Local/SSH 均通过 `ExecutionHost + tmux`，不复制 a mature workbench Daemon/Relay/WSL 图；
 - 五个内置 Agent：Codex、Claude、TraeX、Hermes、Pi；
 - 从真实 tmux 状态恢复，不序列化 xterm Snapshot；
 - Desktop-local Workspace/Worktree，不引入远程账户和 Host Federation。
 
+当前 Feature 新采用：
+
+- 维护中的 `node-pty` 作为 PTY 原语；具体版本与 Artifact 证据见 `docs/plans/agentmux-core-dependency-audit.md`；
+- Headless `agentmuxd` 作为 Local/SSH 唯一 PTY/Process Owner；
+- 明确区分 Create、Attach-only 与 Detach，并从第一天携带 Session/Incarnation/Create Operation 身份；
+- Incremental Output、Sequence、Bounded Replay、Gap、Backpressure、Applied Size 与进程树停止作为逐 Task 收紧的长期合同。
+
 明确不采用：
 
-- a mature workbench 的 node-pty Host 与 Checkpoint 系统；
+- 直接复制 a mature workbench 的完整 node-pty Host、Checkpoint、Daemon Adoption 与兼容系统；
 - Relay/Mobile/Account/Transcript Vault；
 - Claude Fake-tmux 兼容层；
 - 静默修改用户全局 Agent Hook；
