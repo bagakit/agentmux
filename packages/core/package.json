@@ -10,7 +10,11 @@
       "import": "./dist/index.js"
     }
   },
+  "bin": {
+    "agentmuxd": "./bin/agentmuxd.js"
+  },
   "files": [
+    "bin",
     "dist"
   ],
   "dependencies": {

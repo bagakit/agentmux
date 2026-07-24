@@ -1,0 +1,296 @@
+import { chmod, lstat, mkdir, stat, unlink } from 'node:fs/promises'
+import { dirname } from 'node:path'
+import { createServer, createConnection, type Server, type Socket } from 'node:net'
+import { AgentMuxError } from './errors.js'
+import {
+  AGENTMUX_DAEMON_PROTOCOL_VERSION,
+  AGENTMUX_DAEMON_MAX_FRAME_BYTES,
+  encodeAgentMuxDaemonFrame,
+  parseAgentMuxDaemonFrame,
+  type AgentMuxDaemonCreateRequest,
+  type AgentMuxDaemonEvent,
+  type AgentMuxDaemonRequestFrame,
+  type AgentMuxDaemonResponseFrame
+} from './daemon-protocol.js'
+import { AgentMuxDaemonSessionManager } from './daemon-session-manager.js'
+import { defaultAgentMuxDaemonSocketPath } from './daemon-endpoint.js'
+
+const MAX_CLIENT_BUFFER_BYTES = 1024 * 1024
+const MAX_CLIENTS_PER_DAEMON = 64
+const MAX_IN_FLIGHT_REQUESTS_PER_CLIENT = 256
+
+type ConnectedClient = {
+  socket: Socket
+  attachedSessionIds: Set<string>
+  input: string
+  inFlightRequests: number
+}
+
+type SocketIdentity = { dev: number; ino: number }
+
+export type AgentMuxDaemonServerOptions = {
+  socketPath?: string
+  sessions?: AgentMuxDaemonSessionManager
+}
+
+function isAgentMuxError(error: unknown): error is AgentMuxError {
+  return error instanceof AgentMuxError
+}
+
+function asObject(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new AgentMuxError('Daemon request params must be an object.', 'INVALID_DAEMON_REQUEST')
+  }
+  return value as Record<string, unknown>
+}
+
+function readString(params: Record<string, unknown>, name: string): string {
+  const value = params[name]
+  if (typeof value !== 'string') throw new AgentMuxError(`Missing string param: ${name}`, 'INVALID_DAEMON_REQUEST')
+  return value
+}
+
+function readNumber(params: Record<string, unknown>, name: string, fallback?: number): number {
+  const value = params[name]
+  if (value === undefined && fallback !== undefined) return fallback
+  if (typeof value !== 'number') throw new AgentMuxError(`Missing number param: ${name}`, 'INVALID_DAEMON_REQUEST')
+  return value
+}
+
+async function endpointAcceptsConnections(socketPath: string): Promise<boolean> {
+  return await new Promise((resolve) => {
+    const socket = createConnection(socketPath)
+    const finish = (reachable: boolean): void => {
+      socket.removeAllListeners()
+      socket.destroy()
+      resolve(reachable)
+    }
+    socket.once('connect', () => finish(true))
+    socket.once('error', () => finish(false))
+    socket.setTimeout(250, () => finish(false))
+  })
+}
+
+export class AgentMuxDaemonServer {
+  readonly socketPath: string
+  readonly sessions: AgentMuxDaemonSessionManager
+  private readonly clients = new Set<ConnectedClient>()
+  private readonly unsubscribeSessionEvents: () => void
+  private server: Server | null = null
+  private socketIdentity: SocketIdentity | null = null
+
+  constructor(options: AgentMuxDaemonServerOptions = {}) {
+    this.socketPath = options.socketPath ?? defaultAgentMuxDaemonSocketPath()
+    this.sessions = options.sessions ?? new AgentMuxDaemonSessionManager()
+    this.unsubscribeSessionEvents = this.sessions.onEvent((event) => this.publishEvent(event))
+  }
+
+  async start(): Promise<void> {
+    if (this.server) return
+    await this.prepareEndpoint()
+    const server = createServer((socket) => this.acceptClient(socket))
+    this.server = server
+    try {
+      await new Promise<void>((resolve, reject) => {
+        server.once('error', reject)
+        server.listen(this.socketPath, () => {
+          server.off('error', reject)
+          resolve()
+        })
+      })
+      if (process.platform !== 'win32') {
+        await chmod(this.socketPath, 0o600)
+        const info = await lstat(this.socketPath)
+        this.socketIdentity = { dev: info.dev, ino: info.ino }
+      }
+    } catch (error) {
+      this.server = null
+      server.close()
+      throw error
+    }
+  }
+
+  async stop(): Promise<void> {
+    const server = this.server
+    this.server = null
+    for (const client of this.clients) client.socket.destroy()
+    this.clients.clear()
+    await this.sessions.dispose()
+    this.unsubscribeSessionEvents()
+    if (server) {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+    await this.unlinkOwnedSocket()
+  }
+
+  private async prepareEndpoint(): Promise<void> {
+    if (process.platform === 'win32') return
+    const directory = dirname(this.socketPath)
+    await mkdir(directory, { recursive: true, mode: 0o700 })
+    const directoryInfo = await stat(directory)
+    if ((directoryInfo.mode & 0o077) !== 0) {
+      throw new AgentMuxError('Daemon socket directory must be accessible only by the current user.', 'INSECURE_DAEMON_DIRECTORY')
+    }
+    if (typeof process.getuid === 'function' && directoryInfo.uid !== process.getuid()) {
+      throw new AgentMuxError('Daemon socket directory is owned by another user.', 'INSECURE_DAEMON_DIRECTORY')
+    }
+    let existing
+    try {
+      existing = await lstat(this.socketPath)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+      throw error
+    }
+    if (!existing.isSocket()) {
+      throw new AgentMuxError('Daemon endpoint path exists and is not a Unix socket.', 'INVALID_DAEMON_ENDPOINT')
+    }
+    if (await endpointAcceptsConnections(this.socketPath)) {
+      throw new AgentMuxError('An AgentMux daemon is already running.', 'DAEMON_ALREADY_RUNNING')
+    }
+    await unlink(this.socketPath)
+  }
+
+  private acceptClient(socket: Socket): void {
+    if (this.clients.size >= MAX_CLIENTS_PER_DAEMON) {
+      socket.destroy(new Error('AgentMux daemon client limit reached.'))
+      return
+    }
+    const client: ConnectedClient = { socket, attachedSessionIds: new Set(), input: '', inFlightRequests: 0 }
+    this.clients.add(client)
+    socket.setEncoding('utf8')
+    socket.on('data', (data: string) => this.acceptData(client, data))
+    socket.on('error', () => socket.destroy())
+    socket.on('close', () => {
+      client.attachedSessionIds.clear()
+      this.clients.delete(client)
+    })
+  }
+
+  private acceptData(client: ConnectedClient, data: string): void {
+    client.input += data
+    while (true) {
+      const newline = client.input.indexOf('\n')
+      if (newline < 0) break
+      const line = client.input.slice(0, newline)
+      client.input = client.input.slice(newline + 1)
+      if (!line) continue
+      if (Buffer.byteLength(line) > AGENTMUX_DAEMON_MAX_FRAME_BYTES) {
+        client.socket.destroy(new Error('AgentMux daemon frame exceeds the maximum size.'))
+        return
+      }
+      try {
+        const frame = parseAgentMuxDaemonFrame(line)
+        if (frame.type !== 'request') throw new AgentMuxError('Expected a daemon request frame.', 'INVALID_DAEMON_REQUEST')
+        if (client.inFlightRequests >= MAX_IN_FLIGHT_REQUESTS_PER_CLIENT) {
+          throw new AgentMuxError('Daemon client has too many in-flight requests.', 'DAEMON_REQUEST_LIMIT')
+        }
+        client.inFlightRequests += 1
+        void this.handleRequest(client, frame).finally(() => {
+          client.inFlightRequests -= 1
+        })
+      } catch (error) {
+        client.socket.destroy(error instanceof Error ? error : new Error(String(error)))
+        return
+      }
+    }
+    if (Buffer.byteLength(client.input) > AGENTMUX_DAEMON_MAX_FRAME_BYTES) {
+      client.socket.destroy(new Error('AgentMux daemon frame exceeds the maximum size.'))
+    }
+  }
+
+  private async handleRequest(client: ConnectedClient, request: AgentMuxDaemonRequestFrame): Promise<void> {
+    try {
+      const params = asObject(request.params)
+      let result: unknown
+      switch (request.method) {
+        case 'hello':
+          result = { protocolVersion: AGENTMUX_DAEMON_PROTOCOL_VERSION, daemonPid: process.pid }
+          break
+        case 'list':
+          result = this.sessions.list()
+          break
+        case 'create': {
+          const create = params as AgentMuxDaemonCreateRequest
+          const session = this.sessions.create(create)
+          result = session
+          client.attachedSessionIds.add(session.sessionId)
+          break
+        }
+        case 'attach': {
+          const sessionId = readString(params, 'sessionId')
+          result = this.sessions.attach(sessionId, readNumber(params, 'afterSequence', 0))
+          client.attachedSessionIds.add(sessionId)
+          break
+        }
+        case 'detach':
+          client.attachedSessionIds.delete(readString(params, 'sessionId'))
+          result = null
+          break
+        case 'write':
+          this.sessions.write(readString(params, 'sessionId'), readString(params, 'data'))
+          result = null
+          break
+        case 'resize':
+          result = this.sessions.resize(
+            readString(params, 'sessionId'),
+            readNumber(params, 'cols'),
+            readNumber(params, 'rows')
+          )
+          break
+        case 'signal':
+          this.sessions.signal(readString(params, 'sessionId'), readString(params, 'signal'))
+          result = null
+          break
+        case 'stop': {
+          const sessionId = readString(params, 'sessionId')
+          await this.sessions.stop(sessionId)
+          for (const connected of this.clients) connected.attachedSessionIds.delete(sessionId)
+          result = null
+          break
+        }
+      }
+      this.write(client, { type: 'response', id: request.id, ok: true, result })
+    } catch (error) {
+      const response: AgentMuxDaemonResponseFrame = {
+        type: 'response',
+        id: request.id,
+        ok: false,
+        error: {
+          code: isAgentMuxError(error) ? error.code : 'DAEMON_REQUEST_FAILED',
+          message: error instanceof Error ? error.message : String(error)
+        }
+      }
+      this.write(client, response)
+    }
+  }
+
+  private publishEvent(event: AgentMuxDaemonEvent): void {
+    for (const client of this.clients) {
+      if (client.attachedSessionIds.has(event.sessionId)) {
+        this.write(client, { type: 'event', event })
+      }
+    }
+  }
+
+  private write(client: ConnectedClient, frame: AgentMuxDaemonResponseFrame | { type: 'event'; event: AgentMuxDaemonEvent }): void {
+    if (client.socket.destroyed) return
+    const encoded = encodeAgentMuxDaemonFrame(frame)
+    if (client.socket.writableLength + Buffer.byteLength(encoded) > MAX_CLIENT_BUFFER_BYTES) {
+      client.socket.destroy(new Error('AgentMux daemon client is not consuming output.'))
+      return
+    }
+    client.socket.write(encoded)
+  }
+
+  private async unlinkOwnedSocket(): Promise<void> {
+    if (process.platform === 'win32' || !this.socketIdentity) return
+    const owned = this.socketIdentity
+    this.socketIdentity = null
+    try {
+      const current = await lstat(this.socketPath)
+      if (current.dev === owned.dev && current.ino === owned.ino) await unlink(this.socketPath)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+  }
+}
