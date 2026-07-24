@@ -46,6 +46,11 @@ type LocalMutablePath = {
   name: string
 }
 
+type LocalObserverEntry = {
+  listeners: Set<() => void>
+  disposeWorker: () => Promise<void>
+}
+
 export type WorkspaceFilesOptions = {
   beforeWrite?: (input: WorkspaceFileWriteInput) => Promise<void>
   localWriteFault?: 'temporary-write' | 'replace' | (() => 'temporary-write' | 'replace' | undefined)
@@ -487,14 +492,9 @@ function resultError(error: unknown): { status: 'error'; code: string; message: 
 export class WorkspaceFiles {
   private readonly writeRequestTails = new Map<string, Promise<void>>()
   private readonly writeTails = new Map<string, Promise<void>>()
-  private readonly observers = new Map<string, {
-    listeners: Set<() => void>
-    disposeWorker: () => Promise<void>
-  }>()
-  private readonly observerStarts = new Map<string, Promise<{
-    listeners: Set<() => void>
-    disposeWorker: () => Promise<void>
-  }>>()
+  private readonly observers = new Map<string, LocalObserverEntry>()
+  private readonly observerStarts = new Map<string, Promise<LocalObserverEntry>>()
+  private readonly observerDisposals = new Map<LocalObserverEntry, Promise<void>>()
   private disposed = false
   private disposal: Promise<void> | undefined
 
@@ -502,6 +502,16 @@ export class WorkspaceFiles {
     private readonly hostFor: (id: string) => ExecutionHost,
     private readonly options: WorkspaceFilesOptions = {}
   ) {}
+
+  private disposeObserver(entry: LocalObserverEntry): Promise<void> {
+    let disposal = this.observerDisposals.get(entry)
+    if (!disposal) {
+      disposal = entry.disposeWorker()
+      this.observerDisposals.set(entry, disposal)
+      void disposal.finally(() => this.observerDisposals.delete(entry)).catch(() => {})
+    }
+    return disposal
+  }
 
   private async serializeWrite<T>(
     tails: Map<string, Promise<void>>,
@@ -550,16 +560,21 @@ export class WorkspaceFiles {
         start = runLocalObserver(parent, resolved.root, name, () => {
           for (const listener of listeners) listener()
         }).then(async (disposeWorker) => {
+          const startedEntry = { listeners, disposeWorker }
           if (this.disposed) {
-            await disposeWorker()
+            await this.disposeObserver(startedEntry)
             throw new Error('WorkspaceFiles is disposed')
           }
-          return { listeners, disposeWorker }
+          return startedEntry
         })
         this.observerStarts.set(key, start)
       }
       try {
         entry = await start
+        if (this.disposed) {
+          await this.disposeObserver(entry)
+          throw new Error('WorkspaceFiles is disposed')
+        }
         this.observers.set(key, entry)
       } finally {
         if (this.observerStarts.get(key) === start) this.observerStarts.delete(key)
@@ -573,7 +588,7 @@ export class WorkspaceFiles {
       entry!.listeners.delete(invalidated)
       if (entry!.listeners.size !== 0 || this.observers.get(key) !== entry) return
       this.observers.delete(key)
-      await entry!.disposeWorker()
+      await this.disposeObserver(entry!)
     }
   }
 
@@ -585,8 +600,15 @@ export class WorkspaceFiles {
       this.observers.clear()
       this.observerStarts.clear()
       this.disposal = Promise.allSettled([
-        ...observers.map(async (entry) => await entry.disposeWorker()),
-        ...starts
+        ...this.observerDisposals.values(),
+        ...observers.map((entry) => this.disposeObserver(entry)),
+        ...starts.map(async (start) => {
+          try {
+            await this.disposeObserver(await start)
+          } catch {
+            // Failed starts already close their worker before rejecting.
+          }
+        })
       ]).then(() => {})
     }
     return this.disposal
