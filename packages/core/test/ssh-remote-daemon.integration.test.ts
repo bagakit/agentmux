@@ -270,8 +270,8 @@ describe.runIf(supportedPlatform)('AgentMux isolated system SSH remote daemon', 
     semanticClient.onEvent((event) => semanticEvents.push(event))
     await semanticClient.connect()
     const semantic = await semanticClient.createAgent({
-      semanticSessionId: 'ssh-semantic',
-      daemonSessionId: 'ssh-semantic-run',
+      agentSessionId: 'ssh-semantic',
+      runId: 'ssh-semantic-run',
       createOperationId: 'ssh-semantic-create',
       agentId: 'codex',
       workspacePath: process.cwd(),
@@ -280,13 +280,13 @@ describe.runIf(supportedPlatform)('AgentMux isolated system SSH remote daemon', 
       commandOverride: process.execPath
     })
     await waitForCondition('the remote semantic Hook event', () => (
-      semanticClient.semanticSession(semantic.semanticSessionId).nativeHandle?.kind === 'provider'
+      semanticClient.agentSession(semantic.agentSessionId).nativeHandle?.kind === 'provider'
     ))
     await waitForCondition('the remote semantic terminal output', () => semanticEvents.some((event) => (
       event.type === 'terminal-output' && event.data.includes('hook-agent-ready:remote-hook')
     )))
     expect(semanticEvents).toContainEqual(expect.objectContaining({
-      type: 'semantic-status',
+      type: 'agent-status',
       evidence: expect.objectContaining({ source: 'native-hook' })
     }))
     expect(semanticEvents).toContainEqual(expect.objectContaining({
@@ -303,9 +303,9 @@ describe.runIf(supportedPlatform)('AgentMux isolated system SSH remote daemon', 
       }
     })
     await semanticClient.connect()
-    const semanticReattach = await semanticClient.reattachAgent(semantic.semanticSessionId)
-    expect(semanticReattach.session.daemonSession).toEqual(semantic.daemonSession)
-    await semanticClient.stopAgent(semantic.semanticSessionId)
+    const semanticReattach = await semanticClient.reattachAgent(semantic.agentSessionId)
+    expect(semanticReattach.session.run).toEqual(semantic.run)
+    await semanticClient.stopAgent(semantic.agentSessionId)
     semanticClient.disconnect()
 
     await manager.uninstall(current)
@@ -443,7 +443,7 @@ describe.runIf(supportedPlatform)('AgentMux isolated system SSH remote daemon', 
       sessionId: 'ssh-stubborn-tree',
       createOperationId: 'ssh-stubborn-tree-operation',
       agentId: 'codex',
-      semanticSessionId: 'semantic-ssh-stubborn-tree',
+      agentSessionId: 'semantic-ssh-stubborn-tree',
       command: process.execPath,
       args: [stubbornTreePath],
       cwd: process.cwd()

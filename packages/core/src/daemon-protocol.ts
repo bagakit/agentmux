@@ -18,7 +18,7 @@ export type AgentMuxDaemonSession = {
   createOperationId: string
   kind: 'terminal' | 'agent'
   agentId: AgentId | null
-  semanticSessionId: string | null
+  agentSessionId: string | null
   cwd: string
   pid: number
   processStartedAt?: number
@@ -58,7 +58,7 @@ export type AgentMuxDaemonHookEvent = {
   type: 'hook'
   sessionId: string
   incarnationId: string
-  semanticSessionId: string
+  agentSessionId: string
   agentId: AgentId
   eventName?: string
   payload?: Record<string, unknown>
@@ -123,7 +123,7 @@ export type AgentMuxDaemonCreateRequest = {
   createOperationId: string
   kind: 'terminal' | 'agent'
   agentId: AgentId | null
-  semanticSessionId: string | null
+  agentSessionId: string | null
   cwd: string
   cols: number
   rows: number
@@ -226,7 +226,7 @@ function validEvent(value: unknown): value is AgentMuxDaemonEvent {
   }
   if (event.type === 'hook') {
     return (
-      boundedString(event.semanticSessionId, 256) && Boolean(event.semanticSessionId) &&
+      boundedString(event.agentSessionId, 256) && Boolean(event.agentSessionId) &&
       boundedString(event.agentId, 256) && Boolean(event.agentId) &&
       (event.eventName === undefined || boundedString(event.eventName, 4 * 1024)) &&
       (event.payload === undefined || record(event.payload) !== null)

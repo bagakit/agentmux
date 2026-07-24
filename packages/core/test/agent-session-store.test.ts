@@ -1,19 +1,19 @@
 import { describe, expect, it } from 'vitest'
 import {
-  loadSemanticSessions,
-  normalizeStoredSemanticSession,
-  type AgentMuxSemanticStore
-} from '../src/semantic-store.js'
+  loadAgentSessions,
+  normalizeStoredAgentSession,
+  type AgentMuxAgentSessionStore
+} from '../src/agent-session-store.js'
 
 function storedSession() {
   return {
     kind: 'agent' as const,
-    semanticSessionId: 'semantic-1',
+    agentSessionId: 'semantic-1',
     agentId: 'codex',
     hostId: 'local',
     workspacePath: '/tmp/work',
-    daemonSession: { sessionId: 'daemon-1', incarnationId: 'incarnation-1' },
-    outputCursor: 12,
+    run: { runId: 'daemon-1', incarnationId: 'incarnation-1' },
+    outputCursorBytes: 12,
     createdAt: 100,
     updatedAt: 200,
     nativeHandle: {
@@ -24,8 +24,8 @@ function storedSession() {
     hookReceipt: {
       id: 'receipt-1',
       agentId: 'codex',
-      semanticSessionId: 'semantic-1',
-      daemonSession: { sessionId: 'daemon-1', incarnationId: 'incarnation-1' },
+      agentSessionId: 'semantic-1',
+      run: { runId: 'daemon-1', incarnationId: 'incarnation-1' },
       eventName: 'SessionStart',
       observedAt: 200
     }
@@ -34,7 +34,7 @@ function storedSession() {
 
 describe('semantic session persistence boundary', () => {
   it('selects only semantic identity, run reference, native handle, receipt, and cursor fields', () => {
-    const normalized = normalizeStoredSemanticSession({
+    const normalized = normalizeStoredAgentSession({
       ...storedSession(),
       pid: 123,
       terminalSnapshot: 'secret terminal bytes',
@@ -46,19 +46,19 @@ describe('semantic session persistence boundary', () => {
   })
 
   it('rejects mismatched receipts and duplicate semantic identities', async () => {
-    expect(() => normalizeStoredSemanticSession({
+    expect(() => normalizeStoredAgentSession({
       ...storedSession(),
       hookReceipt: {
         ...storedSession().hookReceipt,
-        daemonSession: { sessionId: 'another-run', incarnationId: 'incarnation-1' }
+        run: { runId: 'another-run', incarnationId: 'incarnation-1' }
       }
     })).toThrow('does not match')
 
-    const store: AgentMuxSemanticStore = {
+    const store: AgentMuxAgentSessionStore = {
       async load() { return [storedSession(), storedSession()] },
       async put() {},
       async delete() {}
     }
-    await expect(loadSemanticSessions(store)).rejects.toMatchObject({ code: 'INVALID_SEMANTIC_STORE' })
+    await expect(loadAgentSessions(store)).rejects.toMatchObject({ code: 'INVALID_AGENT_SESSION_STORE' })
   })
 })

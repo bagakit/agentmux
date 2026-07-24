@@ -3,6 +3,30 @@ export type AgentId = BuiltInAgentId | (string & {})
 
 export type ExecutionHostKind = 'local' | 'ssh'
 
+export type AgentMuxRuntimeIdentity = {
+  hostId: string
+  buildIdentity: string
+  protocolVersion: number
+  processId: number
+  instanceId: string
+}
+
+export type AgentMuxRuntimeDiagnostics = {
+  nodeVersion: string
+  platform: NodeJS.Platform
+  arch: string
+  supported: boolean
+  pty: {
+    packageName: 'node-pty'
+    version: string
+    artifact: string
+    artifactPresent: boolean
+    helperArtifact: string | null
+    helperExecutable: boolean | null
+    ready: boolean
+  }
+}
+
 export type AgentSemanticState =
   | 'unknown'
   | 'working'
@@ -28,23 +52,86 @@ export type AgentDisplayState =
  */
 export type AgentMuxEvidenceSource =
   | 'terminal-output'
-  | 'daemon-process'
+  | 'run-process'
   | 'native-hook'
   | 'acp'
   | 'user'
 
+export type AgentMuxRunState = 'running' | 'exited' | 'lost'
+
 export type AgentMuxRunRef = {
-  sessionId: string
+  runId: string
   incarnationId: string
+}
+
+export type AgentMuxRun = AgentMuxRunRef & {
+  createOperationId: string
+  kind: 'terminal' | 'agent'
+  agentId: AgentId | null
+  agentSessionId: string | null
+  workspacePath: string
+  pid: number
+  processStartedAt?: number
+  state: AgentMuxRunState
+  cols: number
+  rows: number
+  createdAt: number
+  latestOutputBytes: number
+  acceptedInputBytes: number
+  exitedAt?: number
+  exitCode?: number
+  exitSignal?: number
+  lostAt?: number
+  lostReason?: string
+}
+
+export type AgentMuxRunDataEvent = AgentMuxRunRef & {
+  type: 'data'
+  startByte: number
+  endByte: number
+  data: string
+}
+
+export type AgentMuxRunExitEvent = AgentMuxRunRef & {
+  type: 'exit'
+  pid: number
+  exitCode: number
+  exitSignal?: number
+  observedAt: number
+}
+
+export type AgentMuxRunReplayGap = {
+  requestedAfterByte: number
+  firstAvailableByte: number
+}
+
+export type AgentMuxRunAttachment = {
+  run: AgentMuxRun
+  replay: AgentMuxRunDataEvent[]
+  gap: AgentMuxRunReplayGap | null
+}
+
+export type AgentMuxRunInputAck = AgentMuxRunRef & {
+  acceptedThroughByte: number
+  duplicate: boolean
+}
+
+export type AgentMuxRunOutputAck = AgentMuxRunRef & {
+  acknowledgedThroughByte: number
+}
+
+export type AgentMuxRunAppliedSize = AgentMuxRunRef & {
+  cols: number
+  rows: number
 }
 
 export type AgentMuxEvidence = {
   source: AgentMuxEvidenceSource
   observedAt: number
-  daemonSession?: AgentMuxRunRef
-  outputSequence?: {
-    start: number
-    end: number
+  run?: AgentMuxRunRef
+  outputByteRange?: {
+    startByte: number
+    endByte: number
   }
   hookReceiptId?: string
   acpSessionId?: string
@@ -75,6 +162,7 @@ export type AgentCapabilities = {
   permission: 'none' | 'observe' | 'respond'
   providerResume: boolean
   acp: boolean
+  replyCorrelation: 'none' | 'native-turn-id' | 'acp-turn-id'
 }
 
 export type AgentCatalogEntry = {
@@ -113,20 +201,20 @@ export type AgentNativeSessionHandle =
 export type AgentHookReceipt = {
   id: string
   agentId: AgentId
-  semanticSessionId: string
-  daemonSession: AgentMuxRunRef
+  agentSessionId: string
+  run: AgentMuxRunRef
   eventName: string
   observedAt: number
 }
 
-export type AgentMuxSemanticSession = {
+export type AgentMuxAgentSession = {
   kind: 'agent'
-  semanticSessionId: string
+  agentSessionId: string
   agentId: AgentId
   hostId: string
   workspacePath: string
-  daemonSession: AgentMuxRunRef
-  outputCursor: number
+  run: AgentMuxRunRef
+  outputCursorBytes: number
   createdAt: number
   updatedAt: number
   nativeHandle?: AgentNativeSessionHandle
@@ -135,7 +223,7 @@ export type AgentMuxSemanticSession = {
 
 /** This is the complete persistent semantic record. It deliberately has no PTY,
  * process, replay, terminal snapshot, or output byte field. */
-export type AgentMuxStoredSemanticSession = AgentMuxSemanticSession
+export type AgentMuxStoredAgentSession = AgentMuxAgentSession
 
 export type AgentMuxPermissionOption = {
   id: string
@@ -145,7 +233,7 @@ export type AgentMuxPermissionOption = {
 
 export type AgentMuxPermissionRequest = {
   id: string
-  semanticSessionId: string
+  agentSessionId: string
   title: string
   options: AgentMuxPermissionOption[]
   toolName?: string
@@ -187,15 +275,15 @@ export type AgentMuxAcpEvent =
 export type AgentMuxClientEvent =
   | {
       type: 'terminal-output'
-      semanticSessionId?: string
-      daemonSession: AgentMuxRunRef
+      agentSessionId?: string
+      run: AgentMuxRunRef
       data: string
       evidence: AgentMuxEvidence
     }
   | {
       type: 'process-state'
-      semanticSessionId?: string
-      daemonSession: AgentMuxRunRef
+      agentSessionId?: string
+      run: AgentMuxRunRef
       state: 'running' | 'exited' | 'lost'
       pid: number
       exitCode?: number
@@ -203,15 +291,15 @@ export type AgentMuxClientEvent =
       evidence: AgentMuxEvidence
     }
   | {
-      type: 'semantic-status'
-      semanticSessionId: string
+      type: 'agent-status'
+      agentSessionId: string
       state: AgentSemanticState
       detail?: string
       evidence: AgentMuxEvidence
     }
   | {
-      type: 'semantic-activity'
-      semanticSessionId: string
+      type: 'agent-activity'
+      agentSessionId: string
       activity: Omit<AgentActivity, 'sessionId' | 'source'>
       evidence: AgentMuxEvidence
     }
@@ -220,18 +308,18 @@ export type AgentMuxClientEvent =
       request: AgentMuxPermissionRequest
     }
   | {
-      type: 'semantic-session'
-      session: AgentMuxSemanticSession
+      type: 'agent-session'
+      session: AgentMuxAgentSession
     }
   | {
-      type: 'session-removed'
-      semanticSessionId?: string
-      daemonSession: AgentMuxRunRef
+      type: 'run-removed'
+      agentSessionId?: string
+      run: AgentMuxRunRef
       evidence: AgentMuxEvidence
     }
   | {
-      type: 'semantic-error'
-      semanticSessionId?: string
+      type: 'agent-error'
+      agentSessionId?: string
       code: string
       message: string
       evidence: AgentMuxEvidence
@@ -288,8 +376,8 @@ export type AgentProviderResumeContext = {
 }
 
 export type NativeHookEnvelope = {
-  semanticSessionId: string
-  daemonSessionId: string
+  agentSessionId: string
+  runId: string
   incarnationId: string
   agentId: AgentId
   eventName?: string
@@ -297,8 +385,8 @@ export type NativeHookEnvelope = {
 }
 
 export type NormalizedHookEvent = {
-  semanticSessionId: string
-  daemonSession: AgentMuxRunRef
+  agentSessionId: string
+  run: AgentMuxRunRef
   agentId: AgentId
   eventName: string
   semanticState: AgentSemanticState

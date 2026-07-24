@@ -43,6 +43,14 @@ async function waitForResponse(binding: FakeBinding): Promise<void> {
   throw new Error('Timed out waiting for ACP permission response')
 }
 
+async function waitForResponses(binding: FakeBinding, count: number): Promise<void> {
+  for (let index = 0; index < 100; index += 1) {
+    if (binding.responses.length >= count) return
+    await new Promise((resolve) => setTimeout(resolve, 1))
+  }
+  throw new Error(`Timed out waiting for ${count} ACP permission responses`)
+}
+
 afterEach(() => {
   vi.useRealTimers()
 })
@@ -52,11 +60,11 @@ describe('AgentMux ACP adapter boundary', () => {
     const events: unknown[] = []
     const handles: unknown[] = []
     const bridge = new AgentMuxAcpBridge({
-      onEvent(semanticSessionId, event, evidence) {
-        events.push({ semanticSessionId, event, evidence })
+      onEvent(agentSessionId, event, evidence) {
+        events.push({ agentSessionId, event, evidence })
       },
-      onNativeHandle(semanticSessionId, handle) {
-        handles.push({ semanticSessionId, handle })
+      onNativeHandle(agentSessionId, handle) {
+        handles.push({ agentSessionId, handle })
       }
     })
     const binding = new FakeBinding()
@@ -73,11 +81,11 @@ describe('AgentMux ACP adapter boundary', () => {
     await waitForResponse(binding)
 
     expect(handles).toEqual([{
-      semanticSessionId: 'semantic-acp',
+      agentSessionId: 'semantic-acp',
       handle: { kind: 'acp', adapterId: 'fixture-acp', sessionId: 'acp-session-1' }
     }])
     expect(events).toContainEqual(expect.objectContaining({
-      semanticSessionId: 'semantic-acp',
+      agentSessionId: 'semantic-acp',
       evidence: expect.objectContaining({ source: 'acp', acpSessionId: 'acp-session-1' })
     }))
     expect(binding.responses).toEqual([{
@@ -103,6 +111,34 @@ describe('AgentMux ACP adapter boundary', () => {
     })
     await waitForResponse(binding)
     expect(binding.responses[0]?.decision).toEqual({ outcome: 'selected', optionId: 'allow' })
+    await bridge.dispose()
+  })
+
+  it('rejects unknown selections and permission handler failures', async () => {
+    let requestCount = 0
+    const bridge = new AgentMuxAcpBridge(
+      { onEvent() {}, onNativeHandle() {} },
+      async () => {
+        requestCount += 1
+        if (requestCount === 1) return { outcome: 'selected', optionId: 'not-offered' }
+        throw new Error('permission UI unavailable')
+      }
+    )
+    const binding = new FakeBinding()
+    await bridge.bind('semantic-acp', binding)
+    for (const requestId of ['permission-invalid', 'permission-error']) {
+      binding.emit({
+        type: 'permission',
+        requestId,
+        title: 'Run command',
+        options: [{ id: 'reject', label: 'Reject', kind: 'reject-once' }]
+      })
+    }
+    await waitForResponses(binding, 2)
+    expect(binding.responses).toEqual(expect.arrayContaining([
+      { requestId: 'permission-invalid', decision: { outcome: 'selected', optionId: 'reject' } },
+      { requestId: 'permission-error', decision: { outcome: 'selected', optionId: 'reject' } }
+    ]))
     await bridge.dispose()
   })
 
