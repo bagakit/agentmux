@@ -151,6 +151,13 @@ async function copyRuntimeApplication(appPath) {
   await cp(join(coreRoot, 'dist'), join(coreRuntime, 'dist'), { recursive: true })
   await cp(join(coreRoot, 'vendor'), join(coreRuntime, 'vendor'), { recursive: true })
   await cp(join(coreRoot, 'bin'), join(coreRuntime, 'bin'), { recursive: true })
+  await writeFile(join(coreRuntime, 'bin', 'agentmux'), [
+    '#!/bin/sh',
+    'set -eu',
+    'launcher_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)',
+    'export ELECTRON_RUN_AS_NODE=1',
+    'exec "$launcher_dir/../../../../../../MacOS/AgentMux" "$launcher_dir/../dist/agentmux.js" "$@"'
+  ].join('\n') + '\n', { mode: 0o755 })
   const coreManifest = JSON.parse(await readFile(join(coreRoot, 'package.json'), 'utf8'))
   await writeFile(join(coreRuntime, 'package.json'), `${JSON.stringify({
     name: coreManifest.name,
@@ -172,7 +179,7 @@ async function copyRuntimeApplication(appPath) {
   await Promise.all([
     chmod(join(coreRuntime, 'vendor', 'ctxmux', 'darwin-arm64', 'bin', 'ctxmux'), 0o755),
     chmod(join(coreRuntime, 'vendor', 'ctxmux', 'darwin-arm64', 'bin', 'ctxmuxd'), 0o755),
-    chmod(join(coreRuntime, 'bin', 'agentmux.js'), 0o755)
+    chmod(join(coreRuntime, 'bin', 'agentmux'), 0o755)
   ])
 }
 
@@ -279,12 +286,17 @@ async function verifyPackagedRuntime(appPath, verificationRoot) {
   const appResources = join(appPath, 'Contents', 'Resources', 'app')
   const coreRuntime = join(appResources, 'node_modules', '@agentmux', 'core')
   const binaryRoot = join(coreRuntime, 'vendor', 'ctxmux', 'darwin-arm64', 'bin')
-  const [cli, daemon] = await Promise.all([
+  const [cli, daemon, agentmux] = await Promise.all([
     run(join(binaryRoot, 'ctxmux'), ['--version'], { capture: true }),
-    run(join(binaryRoot, 'ctxmuxd'), ['--version'], { capture: true })
+    run(join(binaryRoot, 'ctxmuxd'), ['--version'], { capture: true }),
+    run(join(coreRuntime, 'bin', 'agentmux'), ['--version'], {
+      capture: true,
+      env: { PATH: '/usr/bin:/bin' }
+    })
   ])
   assert(cli.stdout.trim() === 'ctxmux 0.1.0 (protocol 9)', 'Packaged ctxmux identity is wrong.')
   assert(daemon.stdout.trim() === 'ctxmuxd 0.1.0 (protocol 9)', 'Packaged ctxmuxd identity is wrong.')
+  assert(agentmux.stdout.trim() === 'agentmux 0.1.0', 'Packaged AgentMux CLI cannot use the embedded runtime.')
   const manifest = JSON.parse(await readFile(
     join(coreRuntime, 'vendor', 'ctxmux', 'darwin-arm64', 'manifest.json'),
     'utf8'

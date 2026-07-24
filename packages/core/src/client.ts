@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { constants as fsConstants } from 'node:fs'
 import { access } from 'node:fs/promises'
-import { delimiter, isAbsolute, join } from 'node:path'
+import { delimiter, dirname, isAbsolute, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   AgentMuxAcpBridge,
   type AgentMuxAcpBinding,
@@ -12,6 +13,7 @@ import {
   type AgentProvider
 } from './agent-provider.js'
 import { AgentMuxClientEventPublisher } from './client-event-publisher.js'
+import { AgentTerminalScreen } from './agent-terminal-screen.js'
 import {
   CtxmuxRunAdapter,
   type CtxmuxAdapterDataEvent,
@@ -55,9 +57,7 @@ import type {
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/
 const TERMINAL_HANDSHAKE_TIMEOUT_MS = 10_000
 const TERMINAL_PROMPT_RENDER_TIMEOUT_MS = 10_000
-const MAX_TERMINAL_PROMPT_RENDER_FRAME_CHARS = 256 * 1024
-const TERMINAL_READY_LOOKBEHIND_BYTES = 256 * 1024
-const ANSI_CSI_SEQUENCE = /\u001b\[[0-?]*[ -/]*[@-~]/gu
+const AGENTMUX_CLI_PATH = fileURLToPath(new URL('../bin/agentmux', import.meta.url))
 
 export type AgentMuxAgentCreateInput = {
   agentSessionId?: string
@@ -191,99 +191,20 @@ function terminalPromptPhaseOperationIdentity(
     .digest('base64url')
 }
 
-function synchronizedFrameContainsPrompt(
-  frame: string,
-  matcher: AgentTerminalPromptRenderMatcher,
-  prompt: string
-): boolean {
-  const visible = frame.replace(ANSI_CSI_SEQUENCE, '')
-  const composer = visible.indexOf(matcher.activeComposer)
-  if (composer < 0) return false
-  return visible.slice(composer + matcher.activeComposer.length).includes(prompt)
-}
-
 function terminalEnvironment(
   environment: Readonly<Record<string, string>>
 ): Record<string, string> {
+  const inheritedPath = environment.PATH ?? process.env.PATH ?? ''
   return {
     TERM: 'xterm-256color',
     COLORTERM: 'truecolor',
     TERM_PROGRAM: 'AgentMux',
     TERM_PROGRAM_VERSION: '0.1.0',
     FORCE_HYPERLINK: '1',
-    ...environment
-  }
-}
-
-class ActiveComposerFrameScanner {
-  private readonly frameStart: Buffer
-  private readonly activeComposer: Buffer
-  private readonly frameEnd: Buffer
-  private buffer = Buffer.alloc(0)
-  private bufferStartByte = 0
-  private nextByte: number | null = null
-
-  constructor(
-    matcher: AgentTerminalPromptRenderMatcher,
-    private readonly boundaryByte: number
-  ) {
-    this.frameStart = Buffer.from(matcher.frameStart)
-    this.activeComposer = Buffer.from(matcher.activeComposer)
-    this.frameEnd = Buffer.from(matcher.frameEnd)
-  }
-
-  observe(event: CtxmuxAdapterDataEvent): number | null {
-    const bytes = Buffer.from(event.dataBytes)
-    if (bytes.byteLength !== event.endByte - event.startByte) {
-      throw new AgentMuxError(
-        'CtxMux output bytes do not match their authoritative cursor range.',
-        'CTXMUX_OUTPUT_CURSOR_MISMATCH'
-      )
-    }
-    if (this.nextByte !== event.startByte) {
-      this.buffer = Buffer.alloc(0)
-      this.bufferStartByte = event.startByte
-    }
-    if (this.buffer.byteLength === 0) this.bufferStartByte = event.startByte
-    this.buffer = Buffer.concat([this.buffer, bytes])
-    this.nextByte = event.endByte
-
-    while (true) {
-      const start = this.buffer.indexOf(this.frameStart)
-      if (start < 0) {
-        const retained = Math.min(this.buffer.byteLength, this.frameStart.byteLength - 1)
-        this.bufferStartByte += this.buffer.byteLength - retained
-        this.buffer = this.buffer.subarray(this.buffer.byteLength - retained)
-        return null
-      }
-      if (start > 0) {
-        this.bufferStartByte += start
-        this.buffer = this.buffer.subarray(start)
-      }
-      const nextStart = this.buffer.indexOf(this.frameStart, this.frameStart.byteLength)
-      const end = this.buffer.indexOf(this.frameEnd, this.frameStart.byteLength)
-      if (nextStart >= 0 && (end < 0 || nextStart < end)) {
-        this.bufferStartByte += nextStart
-        this.buffer = this.buffer.subarray(nextStart)
-        continue
-      }
-      if (end < 0) {
-        if (this.buffer.byteLength > TERMINAL_READY_LOOKBEHIND_BYTES) {
-          this.buffer = Buffer.alloc(0)
-          this.bufferStartByte = event.endByte
-        }
-        return null
-      }
-      const frameEndOffset = end + this.frameEnd.byteLength
-      const readyThroughByte = this.bufferStartByte + frameEndOffset
-      const frame = this.buffer.subarray(this.frameStart.byteLength, end)
-      this.bufferStartByte = readyThroughByte
-      this.buffer = this.buffer.subarray(frameEndOffset)
-      if (
-        readyThroughByte >= this.boundaryByte &&
-        frame.indexOf(this.activeComposer) >= 0
-      ) return readyThroughByte
-    }
+    ...environment,
+    PATH: [dirname(AGENTMUX_CLI_PATH), inheritedPath].filter(Boolean).join(delimiter),
+    AGENTMUX_ENV: '1',
+    AGENTMUX_CLI: AGENTMUX_CLI_PATH
   }
 }
 
@@ -1589,105 +1510,119 @@ export class AgentMuxClient {
         'INVALID_AGENT_PROVIDER'
       )
     }
-    let buffer = ''
+    await this.waitForTerminalScreenState(
+      session,
+      submission.outputCursorBytes,
+      true,
+      (screen) => screen.composerText(matcher.activeComposer) === content,
+      {
+        timeoutMs: TERMINAL_PROMPT_RENDER_TIMEOUT_MS,
+        timeoutMessage: 'Timed out waiting for the Agent prompt to render.',
+        terminalMessage: 'Agent Run exited before the prompt was rendered.'
+      }
+    )
+  }
+
+  private async waitForTerminalScreenState(
+    session: AgentMuxAgentSession,
+    outputBoundaryByte: number,
+    requireOutputAfterBoundary: boolean,
+    predicate: (screen: AgentTerminalScreen) => boolean,
+    options: {
+      timeoutMs?: number
+      timeoutMessage: string
+      terminalMessage: string
+      signal?: AbortSignal
+    }
+  ): Promise<number> {
+    let observation: Awaited<ReturnType<CtxmuxRunAdapter['observeOutput']>> | null = null
+    let screen: AgentTerminalScreen | null = null
+    let initialized = false
     let settled = false
-    let matched = false
-    let resolveObserved!: () => void
-    let rejectObserved!: (error: Error) => void
-    const rendered = new Promise<void>((resolve, reject) => {
-      resolveObserved = resolve
-      rejectObserved = reject
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let tail = Promise.resolve()
+    const pending: CtxmuxAdapterDataEvent[] = []
+    let resolveState!: (throughByte: number) => void
+    let rejectState!: (error: Error) => void
+    const state = new Promise<number>((resolve, reject) => {
+      resolveState = resolve
+      rejectState = reject
     })
-    const fail = (error: AgentMuxError): void => {
+    void state.catch(() => {})
+    const fail = (error: Error): void => {
       if (settled) return
       settled = true
-      rejectObserved(error)
+      rejectState(error)
     }
-    const observe = (data: string): void => {
-      if (settled) return
-      buffer += data
-      while (true) {
-        const start = buffer.indexOf(matcher.frameStart)
-        if (start < 0) {
-          buffer = buffer.slice(-Math.max(0, matcher.frameStart.length - 1))
-          return
-        }
-        if (start > 0) buffer = buffer.slice(start)
-        const nextStart = buffer.indexOf(matcher.frameStart, matcher.frameStart.length)
-        const end = buffer.indexOf(matcher.frameEnd, matcher.frameStart.length)
-        if (nextStart >= 0 && (end < 0 || nextStart < end)) {
-          buffer = buffer.slice(nextStart)
-          continue
-        }
-        if (end < 0) {
-          if (buffer.length > MAX_TERMINAL_PROMPT_RENDER_FRAME_CHARS) {
-            fail(new AgentMuxError(
-              'Provider terminal prompt render frame exceeded its bound.',
-              'AGENT_PROMPT_RENDER_FRAME_LIMIT'
-            ))
-          }
-          return
-        }
-        const frameEnd = end + matcher.frameEnd.length
-        if (frameEnd > MAX_TERMINAL_PROMPT_RENDER_FRAME_CHARS) {
-          fail(new AgentMuxError(
-            'Provider terminal prompt render frame exceeded its bound.',
-            'AGENT_PROMPT_RENDER_FRAME_LIMIT'
-          ))
-          return
-        }
-        const frame = buffer.slice(matcher.frameStart.length, end)
-        buffer = buffer.slice(frameEnd)
-        if (synchronizedFrameContainsPrompt(frame, matcher, content)) {
-          settled = true
-          matched = true
-          resolveObserved()
-          return
-        }
+    const inspect = (): void => {
+      if (settled || !screen) return
+      const crossedBoundary = requireOutputAfterBoundary
+        ? screen.throughByte > outputBoundaryByte
+        : screen.throughByte >= outputBoundaryByte
+      if (crossedBoundary && predicate(screen)) {
+        settled = true
+        resolveState(screen.throughByte)
       }
     }
-    const unsubscribe = this.publisher.onEvent((event) => {
-      if (event.type !== 'terminal-output' && event.type !== 'process-state') return
-      if (event.run.runId !== session.run.runId) return
-      if (event.type === 'terminal-output') {
-        const range = event.evidence.outputByteRange
-        if (range && range.endByte > submission.outputCursorBytes) {
-          observe(event.data)
-        }
-      } else if (event.state !== 'running') {
-        fail(new AgentMuxError(
-          'Agent Run exited before the prompt was rendered.',
-          'AGENT_PROMPT_RENDER_FAILED'
-        ))
-      }
-    })
-    const timer = setTimeout(() => {
-      fail(new AgentMuxError(
-        'Timed out waiting for the Agent prompt to render.',
+    const apply = async (event: CtxmuxAdapterDataEvent, inspectAfterWrite: boolean): Promise<void> => {
+      if (settled || !screen) return
+      await screen.write(event)
+      if (inspectAfterWrite) inspect()
+    }
+    const enqueue = (event: CtxmuxAdapterDataEvent): void => {
+      tail = tail.then(async () => await apply(event, true))
+      void tail.catch((error) => fail(error instanceof Error ? error : new Error(String(error))))
+    }
+    const abort = (): void => fail(new AgentMuxError(
+      'Terminal screen observation was cancelled.',
+      'AGENT_PROMPT_READINESS_CANCELLED'
+    ))
+    options.signal?.addEventListener('abort', abort, { once: true })
+    if (options.signal?.aborted) abort()
+    if (options.timeoutMs !== undefined) {
+      timer = setTimeout(() => fail(new AgentMuxError(
+        options.timeoutMessage,
         'AGENT_PROMPT_RENDER_TIMEOUT'
-      ))
-    }, TERMINAL_PROMPT_RENDER_TIMEOUT_MS)
-    let attached = false
+      )), options.timeoutMs)
+    }
     try {
-      const alreadyAttached = this.kernel.hasAttachment(session.run.runId)
-      const observation = alreadyAttached
-        ? await this.kernel.replay(session.run.runId, submission.outputCursorBytes)
-        : await this.kernel.attach(session.run.runId, submission.outputCursorBytes)
-      attached = !alreadyAttached
+      observation = await this.kernel.observeOutput(session.run.runId, 0, (event) => {
+        if (event.type === 'data') {
+          if (initialized) enqueue(event)
+          else pending.push(event)
+        } else if (event.type === 'gap') {
+          fail(new AgentMuxError(
+            'Terminal screen evidence was evicted from CtxMux replay.',
+            'OUTPUT_GAP'
+          ))
+        } else if (event.type === 'exit') {
+          fail(new AgentMuxError(options.terminalMessage, 'AGENT_PROMPT_RENDER_FAILED'))
+        }
+      })
       if (observation.gap) {
         throw new AgentMuxError(
-          'Agent prompt render evidence was evicted from replay.',
+          'Terminal screen evidence was evicted from CtxMux replay.',
           'OUTPUT_GAP'
         )
       }
-      for (const event of observation.replay) {
-        observe(event.data)
-      }
-      if (!matched) await rendered
+      screen = new AgentTerminalScreen(observation.run.cols, observation.run.rows)
+      for (const event of observation.replay) await apply(event, false)
+      pending.sort((left, right) => left.startByte - right.startByte)
+      initialized = true
+      for (const event of pending.splice(0)) enqueue(event)
+      await tail
+      inspect()
+      return await state
+    } catch (error) {
+      fail(error instanceof Error ? error : new Error(String(error)))
+      return await state
     } finally {
-      clearTimeout(timer)
-      unsubscribe()
-      if (attached) await this.kernel.detach(session.run.runId)
+      initialized = false
+      if (timer) clearTimeout(timer)
+      options.signal?.removeEventListener('abort', abort)
+      await tail.catch(() => {})
+      await observation?.close().catch(() => {})
+      screen?.dispose()
     }
   }
 
@@ -1840,25 +1775,15 @@ export class AgentMuxClient {
     const matcher = this.providers.get(session.agentId).terminalPromptRender
     if (!matcher) return
     this.terminalStopReadinessCancels.get(session.agentSessionId)?.()
-    const scanner = new ActiveComposerFrameScanner(matcher, stopReceipt.outputCursorBytes)
-    let observation: Awaited<ReturnType<CtxmuxRunAdapter['observeOutput']>> | null = null
-    let cancelled = false
-    let initialized = false
-    const pending: CtxmuxAdapterDataEvent[] = []
-
+    const controller = new AbortController()
     const cancel = (): void => {
-      if (cancelled) return
-      cancelled = true
       if (this.terminalStopReadinessCancels.get(session.agentSessionId) === cancel) {
         this.terminalStopReadinessCancels.delete(session.agentSessionId)
       }
-      if (observation) void observation.close().catch(() => {})
+      controller.abort()
     }
     this.terminalStopReadinessCancels.set(session.agentSessionId, cancel)
-
     const persistReady = async (readyThroughByte: number): Promise<void> => {
-      if (cancelled) return
-      cancelled = true
       try {
         const next = await this.registry.update(
           session.agentSessionId,
@@ -1902,58 +1827,35 @@ export class AgentMuxClient {
         if (this.terminalStopReadinessCancels.get(session.agentSessionId) === cancel) {
           this.terminalStopReadinessCancels.delete(session.agentSessionId)
         }
-        if (observation) await observation.close().catch(() => {})
       }
     }
-
-    const inspect = (event: CtxmuxAdapterDataEvent): void => {
-      if (cancelled) return
-      const readyThroughByte = scanner.observe(event)
-      if (readyThroughByte !== null) void persistReady(readyThroughByte)
-    }
-
-    void (async () => {
-      try {
-        const afterByte = Math.max(
-          0,
-          stopReceipt.outputCursorBytes - TERMINAL_READY_LOOKBEHIND_BYTES
-        )
-        observation = await this.kernel.observeOutput(
-          session.run.runId,
-          afterByte,
-          (event) => {
-            if (event.type === 'data') {
-              if (initialized) inspect(event)
-              else pending.push(event)
-            } else if (event.type === 'exit') {
-              cancel()
-            }
-          }
-        )
-        if (cancelled) {
-          await observation.close().catch(() => {})
-          return
+    void this.waitForTerminalScreenState(
+      session,
+      stopReceipt.outputCursorBytes,
+      false,
+      (screen) => screen.composerText(matcher.activeComposer) === '',
+      {
+        timeoutMessage: 'Timed out waiting for an empty Agent composer.',
+        terminalMessage: 'Agent Run exited before its Stop receipt became ready.',
+        signal: controller.signal
+      }
+    ).then(persistReady).catch((error) => {
+      if (error instanceof AgentMuxError && error.code === 'AGENT_PROMPT_READINESS_CANCELLED') return
+      if (this.terminalStopReadinessCancels.get(session.agentSessionId) === cancel) {
+        this.terminalStopReadinessCancels.delete(session.agentSessionId)
+      }
+      this.publisher.publish({
+        type: 'agent-error',
+        agentSessionId: session.agentSessionId,
+        code: error instanceof AgentMuxError ? error.code : 'AGENT_PROMPT_READINESS_FAILED',
+        message: error instanceof Error ? error.message : String(error),
+        evidence: {
+          source: 'terminal-output',
+          observedAt: Date.now(),
+          run: { ...session.run }
         }
-        for (const event of observation.replay) inspect(event)
-        initialized = true
-        pending.sort((left, right) => left.startByte - right.startByte)
-        for (const event of pending) inspect(event)
-        pending.length = 0
-      } catch (error) {
-        cancel()
-        this.publisher.publish({
-          type: 'agent-error',
-          agentSessionId: session.agentSessionId,
-          code: error instanceof AgentMuxError ? error.code : 'AGENT_PROMPT_READINESS_FAILED',
-          message: error instanceof Error ? error.message : String(error),
-          evidence: {
-            source: 'terminal-output',
-            observedAt: Date.now(),
-            run: { ...session.run }
-          }
-        })
-      }
-    })()
+      })
+    })
   }
 
   private async updateNativeHandle(

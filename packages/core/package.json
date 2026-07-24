@@ -24,7 +24,7 @@
     }
   },
   "bin": {
-    "agentmux": "./bin/agentmux.js",
+    "agentmux": "./bin/agentmux",
     "ctxmux": "./vendor/ctxmux/darwin-arm64/bin/ctxmux",
     "ctxmuxd": "./vendor/ctxmux/darwin-arm64/bin/ctxmuxd"
   },
@@ -34,7 +34,9 @@
     "examples",
     "vendor"
   ],
-  "dependencies": {},
+  "dependencies": {
+    "@xterm/headless": "5.5.0"
+  },
   "scripts": {
     "build": "node scripts/build.mjs",
     "prepack": "pnpm build",

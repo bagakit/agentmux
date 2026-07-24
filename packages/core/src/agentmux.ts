@@ -9,31 +9,25 @@ import type { AgentMuxClient, AgentMuxAgentRuntimeStatus } from './client.js'
 import type { AgentMuxAgentSessionLookup } from './agent-session-registry.js'
 import type { AgentMuxViewFocusTarget } from './runtime.js'
 import type { AgentMuxAgentSession } from './types.js'
+import {
+  AGENTMUX_CLI_HELP,
+  AGENTMUX_CLI_SKILL,
+  agentMuxCommandHelp
+} from './agentmux-cli-help.js'
 
-const USAGE = [
-  'Usage:',
-  '  agentmux doctor [--json]',
-  '  agentmux list [--json]',
-  '  agentmux resolve agent-session <id> [--json]',
-  '  agentmux resolve provider-native <provider-id> <native-session-id> [--json]',
-  '  agentmux resolve acp-native <adapter-id> <native-session-id> [--json]',
-  '  agentmux resolve run <run-id> [--json]',
-  '  agentmux switch terminal-view <view-id> [--json]',
-  '  agentmux switch agent-session <id> [--json]',
-  '  agentmux switch provider-native <provider-id> <native-session-id> [--json]',
-  '  agentmux switch acp-native <adapter-id> <native-session-id> [--json]',
-  '  agentmux switch run <run-id> [--json]',
-  '  agentmux status <agent-session-id> [--json]',
-  '  agentmux send <agent-session-id> --text <prompt> [--json]',
-  '  agentmux interrupt <agent-session-id> [--json]',
-  '  agentmux attach <agent-session-id> [--after-byte <n>] [--json]',
-  '  agentmux resume <agent-session-id> --text <prompt> [--json]',
-  '  agentmux stop <agent-session-id> [--json]'
-].join('\n')
+const VERSION = '0.1.0'
 
 type ParsedFlags = {
   values: Map<string, string>
   booleans: Set<string>
+}
+
+function requestsCommandHelp(args: readonly string[]): boolean {
+  return args.some((argument, index) => (
+    (argument === '--help' || argument === '-h') &&
+    args[index - 1] !== '--text' &&
+    args[index - 1] !== '--after-byte'
+  ))
 }
 
 function parseFlags(
@@ -45,7 +39,7 @@ function parseFlags(
   const booleans = new Set<string>()
   for (let index = 0; index < args.length; index += 1) {
     const flag = args[index]
-    if (!flag?.startsWith('--')) throw new AgentMuxError(USAGE, 'INVALID_CLI_ARGUMENT')
+    if (!flag?.startsWith('--')) throw new AgentMuxError(AGENTMUX_CLI_HELP, 'INVALID_CLI_ARGUMENT')
     if (values.has(flag) || booleans.has(flag)) {
       throw new AgentMuxError(`Duplicate option: ${flag}`, 'INVALID_CLI_ARGUMENT')
     }
@@ -57,7 +51,7 @@ function parseFlags(
       throw new AgentMuxError(`Unsupported option: ${flag}`, 'INVALID_CLI_ARGUMENT')
     }
     const value = args[index + 1]
-    if (value === undefined || value.startsWith('--')) {
+    if (value === undefined || (value.startsWith('--') && flag !== '--text')) {
       throw new AgentMuxError(`Missing value for ${flag}.`, 'INVALID_CLI_ARGUMENT')
     }
     values.set(flag, value)
@@ -330,7 +324,21 @@ async function attach(args: readonly string[]): Promise<number> {
 async function main(): Promise<number> {
   const args = process.argv.slice(2)
   if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
-    process.stdout.write(`${USAGE}\n`)
+    process.stdout.write(`${AGENTMUX_CLI_HELP}\n`)
+    return 0
+  }
+  if (args.length === 1 && args[0] === '--skill') {
+    process.stdout.write(`${AGENTMUX_CLI_SKILL}\n`)
+    return 0
+  }
+  if (args.length === 1 && (args[0] === '--version' || args[0] === '-V')) {
+    process.stdout.write(`agentmux ${VERSION}\n`)
+    return 0
+  }
+  if (requestsCommandHelp(args.slice(1))) {
+    const help = agentMuxCommandHelp(args[0] ?? '')
+    if (!help) throw new AgentMuxError(AGENTMUX_CLI_HELP, 'INVALID_CLI_ARGUMENT')
+    process.stdout.write(`${help}\n`)
     return 0
   }
   if (args[0] === 'doctor') return await doctor(args.slice(1))
@@ -342,7 +350,7 @@ async function main(): Promise<number> {
   if (args[0] === 'send' || args[0] === 'interrupt' || args[0] === 'resume' || args[0] === 'stop') {
     return await action(args[0], args.slice(1))
   }
-  throw new AgentMuxError(USAGE, 'INVALID_CLI_ARGUMENT')
+  throw new AgentMuxError(AGENTMUX_CLI_HELP, 'INVALID_CLI_ARGUMENT')
 }
 
 void main().then((exitCode) => {
