@@ -398,61 +398,182 @@
       "supersedes": []
     },
     {
-      "id": "T-023",
-      "title": "隔离 Project Snapshot 并收口 Branch Board",
-      "objective": "在保留已实现 Branch Lanes 与 Inbox 投影的基础上，让异步 Branch Snapshot 携带 Workspace/Project 身份，并完成 Board 的 Project Scope 交互与视觉收口。",
-      "outcome": "切换 Project 的第一帧和所有异步返回都不会显示上一 Project 数据，Branch Lanes/Inbox 成为可验收的真实项目看板。",
+      "id": "T-025",
+      "title": "收紧 Core Launch Reservation 与 tmux 回滚真相",
+      "objective": "把 Session ID 占用前移到所有异步准备之前，并让一次 Launch 只清理自己拥有的 reservation、Session 与 tmux 资源；tmux 后置配置和回滚同时失败时必须保留可诊断真相。",
+      "outcome": "并发同 ID 启动最多只有一个请求进入真实 tmux 创建；任何失败请求都不能删除另一请求的成功 Session，清理失败也不会被伪装成已移除。",
       "acceptance": [
-        "Hook 暴露的有效 Snapshot 与请求 Workspace Identity 绑定；Workspace ID 改变后的同步首帧不组合新 Project 与旧 Snapshot。",
-        "过期 Local/SSH 请求不能覆盖当前 Project；Loading、Error、Empty、Search、Filter 与 Selection 也按 Project 隔离。",
-        "Board 泳道身份由 Project 下真实 Branch/Worktree 决定，Agent/Terminal 只作为 Run 卡片；Inbox 只投影真实 Waiting、Blocked、Disconnected、Error Session。",
-        "Board 与 Workspace 继续共享标题前 Tools 容器并分别恢复子 Tab；音乐游戏只保留平行泳道与节奏构图，不加入装饰性游戏机制。",
-        "保留 T-015 已完成的可用实现与证据，删除被替代的 Agent 状态泳道和重复配置真相，不添加兼容路径。"
+        "Session ID 在 Provider detect、SSH 端口暴露和 tmux assert/start 之前完成同步 reservation；并发同 ID 请求只有一个能继续。",
+        "Launch transaction 使用 attempt identity 或等价所有权判断，失败清理不得删除另一 attempt 已发布的 Session、Activity、Watcher 或输入队列。",
+        "Runtime 首次并发启动共享同一 readiness；Hook Server 尚未完成时不能向后续 Launch 暴露半启动状态。",
+        "tmux 创建后配置失败会尝试 kill；kill 也失败时错误同时携带原始失败与清理失败，Runtime 不发送虚假的 removed 真相，并允许显式 Stop/Discovery 收敛。",
+        "测试确定性覆盖同 ID 并发、成功与失败交错、配置失败加 kill 失败，以及重试不会创建两个真实 tmux Session。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "packages/core/package.json#scripts.test",
+          "proves": "Launch reservation、首次启动 readiness 与双重回滚失败有确定性回归测试。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "packages/core/src/runtime.ts",
+          "proves": "Core 只有一条按 attempt 所有权发布和清理 Session 的路径。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/a mature workbench-agent-runtime-notes.md"
+      ],
+      "supersedes": []
+    },
+    {
+      "id": "T-026",
+      "title": "让 File Document Cache 服从关闭、丢弃与 Mutation 生命周期",
+      "objective": "由 File Workbench owner 统一维护 File Tab、Document Cache、Dirty State、Layout 与 Last Active File，让关闭、Discard、Rename 和 Delete 对打开或已关闭文档采用同一资源集合。",
+      "outcome": "Discard & Close 真正丢弃内存修改；重新打开会读取磁盘，重命名或删除后旧路径缓存不会复活。",
+      "acceptance": [
+        "关闭 File Tab 后，该文件不再保留可复活的 Document 或 Dirty State；确认 Discard 后重开必须重新读取 Main Process 返回的磁盘内容。",
+        "Rename/Delete 直接遍历 Document owner 的全部 key，而不是只从当前打开的 File Tab 反推缓存集合。",
+        "文件与目录 Mutation 继续使用 exact-or-path-separator 语义；关闭文档、删除后同路径重建和目录子树均有覆盖。",
+        "File Tab、Document、Dirty、Layout 与 Last Active File 在一个纯 reducer transaction 中收敛，不新增第二套 cache、migration 或 fallback。"
       ],
       "verification": [
         {
           "kind": "command",
           "ref": "apps/desktop/package.json#scripts.test",
-          "proves": "同步首帧、乱序响应、Project 切换、Branch Lanes 与 Inbox 投影有确定性测试。"
+          "proves": "关闭丢弃、重开磁盘、Rename/Delete 与删除后重建有确定性测试。"
         },
         {
-          "kind": "manual",
-          "ref": ".bagakit/feature-tracker/features/f-2238fbdxh/verification.md",
-          "proves": "Production Board 的双 Project 切换、Branch Lanes、Inbox 与 Tools 恢复有渲染证据。"
+          "kind": "artifact",
+          "ref": "apps/desktop/src/renderer/src/lib/file-workbench-state.ts",
+          "proves": "文件资源生命周期只有一个纯状态转换 owner。"
         }
       ],
       "source_refs": [
         "AGENTS.md",
-        "docs/design/interaction-review.md",
-        ".bagakit/design/a mature workbench-informed-interaction-redesign/design-packet.toml"
+        "docs/design/interaction-review.md"
       ],
-      "supersedes": [
-        "T-015"
-      ]
+      "supersedes": []
     },
     {
-      "id": "T-024",
-      "title": "完成安全、Runtime 与成熟交互的 Production 验收",
-      "objective": "在 Core、Browser、Workspace/File/Monaco 一致性、Renderer 熵与 Board 收口后，重新运行完整自动化和 Production Electron 验收。",
-      "outcome": "AgentMux 的架构边界、数据安全和成熟桌面交互同时被证明可交付，不再以局部测试或截图掩盖 P1/P2 缺口。",
+      "id": "T-027",
+      "title": "把配置持久化与 Runtime 切换收敛成一次事务",
+      "objective": "以候选 Runtime prepare、配置原子持久化、无失败 commit 的顺序替代当前先写盘和提前改 Host signature 的流程。",
+      "outcome": "Host Discovery 或配置保存失败时，磁盘、IPC 读取与活动 Runtime 仍一致指向旧配置；原配置可确定性重试。",
       "acceptance": [
-        "pnpm check、Tracker validation 与 git diff --check 全部通过，不存在已知未处置 P1/P2；失败 Session 回滚和动态 Host Discovery 有集成证据。",
-        "Browser 权限默认拒绝，页面导航与重定向协议受控；Production 仍验证 Browser Zoom Factor 为 0.9。",
-        "Workspace 身份唯一、文件 Mutation 使用 segment-aware 子树、Detector 输出属于 Monaco 注册集合、Project 切换首帧不泄漏。",
-        "目标窗口截图覆盖标题前纯图标 Tools、Workspace 三个子 Tab、Board Branch Lanes/Inbox、Explorer/Branches、Universal Tab、四向 Split、Editor/Terminal/Browser 默认尺度和错误恢复。",
-        "Production Electron 使用干净 user-data 目录启动，无 Renderer Error、严重 Overflow、幽灵 Session、权限提示漂移、旧 Agent Status 泳道或 Compatibility Fallback。",
-        "Verification 记录 Source Manifest、Interaction Matrix、DPR/字号/Zoom、代码所有权变化和诚实残余风险；视觉证据不能替代安全与状态测试。"
+        "RuntimeController 在候选 Host Discovery 完成前不替换活动 Runtime、Host 集合或 signature；失败候选会完整 dispose。",
+        "IPC 保存流程先 prepare 候选 Runtime，再原子写入配置，最后以不含异步失败点的 commit 交换活动 Runtime。",
+        "配置持久化失败不会留下新 Runtime；Discovery 失败不会写盘，同一配置重试不得因提前更新 signature 而跳过。",
+        "Runtime Event 订阅在交换后继续只投影活动 Runtime，不新增双 Runtime fallback 或兼容路由。",
+        "测试覆盖 Discovery 失败、持久化失败、相同配置重试和成功交换后的旧 Runtime dispose。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "apps/desktop/package.json#scripts.test",
+          "proves": "配置 prepare、save、commit 与 rollback 顺序有确定性故障注入测试。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "apps/desktop/src/main/runtime-controller.ts",
+          "proves": "活动 Runtime 与候选 Runtime 的所有权和交换边界集中在 Main Process。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/a mature workbench-agent-runtime-notes.md"
+      ],
+      "supersedes": []
+    },
+    {
+      "id": "T-028",
+      "title": "统一 Launcher 与 Launching Tab 生命周期真相",
+      "objective": "删除 New Tab 的组件本地 mode，并以 Tab 是否仍存在作为异步 Launch 能否落地的唯一所有权条件，让关闭中的 Launch 不会被迟到 Promise 复活。",
+      "outcome": "Launcher Back、重新挂载和关闭 Launching Session 都遵循 Store 单一真相；用户确认关闭后 Tab 不会回来。",
+      "acceptance": [
+        "NewTabSurface 只读取和更新 launcher.view，不保留本地 mode 或重新挂载后恢复旧视图的分叉。",
+        "关闭 launching Tab 会立即从 Layout/Tab owner 移除；Launch resolve/reject 只有在原 Tab 仍存在且仍拥有同一请求时才能替换或恢复 Launcher。",
+        "已被关闭的 Launch 若随后在 Core 成功，Store 会立即停止该 Session 且不重新创建 Tab；失败也不恢复已关闭 Tab。",
+        "普通 Session Close、Launcher Back、Agent Picker 与错误重试复用同一 reducer 语义，不增加 cancellation compatibility state。",
+        "测试覆盖重新挂载、Back、关闭前成功、关闭后成功、关闭后失败和重复关闭。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "apps/desktop/package.json#scripts.test",
+          "proves": "Launcher 与异步 Launch 的所有关键顺序有确定性状态测试。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "apps/desktop/src/renderer/src/lib/session-state.ts",
+          "proves": "Session Tab 的 attach、close、late result 与 failure 由一个 owner 决定。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/interaction-review.md"
+      ],
+      "supersedes": []
+    },
+    {
+      "id": "T-030",
+      "title": "建立 Production 内存基线并收敛资源回收",
+      "objective": "先为冷启动、Workspace/File Tree、Monaco、Terminal/tmux 和 Browser WebContentsView 建立可重复的 Production 多进程内存与活资源基线，再只修复有证据的常驻占用、未回收 owner 或重复打开/关闭增长。",
+      "outcome": "AgentMux 的主要 Surface 具有可审计的内存成本和确定性释放边界；关闭资源不会留下孤儿 WebContents、tmux Session、Monaco Model、Document Cache、Watcher 或订阅。",
+      "acceptance": [
+        "使用同一 Production Build、隔离 user-data、固定窗口与明确稳定等待点，至少记录冷启动、Workspace/File Tree、单 Monaco Editor、单 Terminal、单 Browser、全部关闭及重复循环后的原始样本。",
+        "样本按 Electron Main、主 Renderer、Browser Renderer、GPU 和 Utility 分进程记录 RSS，并在系统 API 可靠时记录 Private/Working Set；文档不直接相加包含共享页的 RSS，保留测量命令、时间和场景。",
+        "连续完成至少 5 轮 Editor、Terminal 和 Browser 的打开/关闭；每轮核对 WebContents/Process、Core Session、tmux Session、Monaco Model、Document/Dirty Cache、Watcher 与 Event Subscription 数量，关闭后不得持续累积孤儿资源。",
+        "先检查已有 Electron、Monaco、xterm 与项目依赖的生命周期能力；只在基线指向具体 owner 时修改代码，不新增性能框架、全局 Cache 层、强制 GC、预防性配置项、Migration 或 Fallback。",
+        "对确认的泄漏或过度常驻补 owner-level 生命周期测试，使用同一 Production 矩阵复测并记录优化前后对比；`pnpm check`、Tracker validation 与 `git diff --check` 全部通过。",
+        "verification.md 新增独立 T-030 章节，包含测量方法、原始基线、资源计数、归因、实际改动、复测结果和诚实残余风险；T-006 mux 讨论仍保持最后一项。"
       ],
       "verification": [
         {
           "kind": "command",
           "ref": "package.json#scripts.check",
-          "proves": "完整 Repository Proof Suite 覆盖 Core 与 Desktop。"
+          "proves": "内存与资源回收收口不破坏 Core 和 Desktop 公共行为。"
         },
         {
           "kind": "manual",
           "ref": ".bagakit/feature-tracker/features/f-2238fbdxh/verification.md",
-          "proves": "Production Desktop 的安全、Runtime、交互、清晰度与残余风险完成最终复审。"
+          "proves": "Production 多进程基线、重复循环、资源数量与优化前后证据可审计。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/interaction-review.md",
+        ".bagakit/feature-tracker/features/f-2238fbdxh/verification.md"
+      ],
+      "supersedes": [
+        "T-029"
+      ]
+    },
+    {
+      "id": "T-031",
+      "title": "重建二维 Branch × Status 看板与 Inbox Discussion Canvas",
+      "objective": "采用 a mature workbench 已验证的 Project Scope 看板空间结构，把 Board 重建为纵向按 Branch/Worktree 分泳道、横向按工作状态分列的二维矩阵，并让 Inbox 成为可拉起现有 Core/tmux Agent 讨论的入口。",
+      "outcome": "用户可以按 Branch 观察 Run 在 Inbox、Working、Needs You、Done 之间的横向进展，并从任一 Branch 的 Inbox 直接进入讨论 Canvas；Board、Workspace、Branch 与 Session 继续共享单一项目真相。",
+      "acceptance": [
+        "Board 主体采用二维矩阵：Project 下每个 Branch/Worktree 对应一条纵向泳道（视觉上为一行），横向固定展示 Inbox、Working、Needs You、Done 状态列；不再使用只按 Agent 状态分组的四条纵向列表。",
+        "Run 卡片位置由稳定的 `(branchId, status)` 共同决定；同一 Branch 中的 Agent 状态变化只在该行内横向移动，不能因为状态变化跳到另一 Branch 泳道。",
+        "Bound Worktree、Unbound Branch、当前 Branch、Host、Workspace Path 与 Session/Provider 状态复用现有 Project/Branch/Core Snapshot；无 Worktree 的 Branch 明确显示不可启动原因和 Create Worktree 动作，不隐式 checkout。",
+        "Inbox 是 Board 本体的第一状态列，不再是 Board Tools 的独立子 Tab；空 Inbox 单元格和已有 Inbox 卡片都可以打开 Discussion Canvas，并携带当前 Branch 上下文。",
+        "Discussion Canvas 提供最少的讨论主题、Branch/Workspace 和 Provider 选择，提交后复用现有 Core/tmux Agent Launch 路径创建真实 Session；成功 Run 回落到对应 Branch 泳道，失败保持可见且不产生幽灵卡片。",
+        "Board 支持 Project Scope 的横向滚动、纵向 Branch 浏览、紧凑卡片与状态/Host 筛选，在常见窗口宽度下保留 Branch 标签和状态列头；不引入第二套 Board Store、通用 Canvas 框架、任务数据库、插件系统或 mux Runtime 改造。",
+        "更新中文设计文档、Goal 不变量与 Production 验收证据，明确二维轴、Inbox 归属、Canvas 启动边界和 a mature workbench Copy/Adapt/Omit 依据；T-006 mux 讨论继续保持最后一项。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "apps/desktop/package.json#scripts.test",
+          "proves": "Branch × Status 投影、Run 横向迁移、Inbox Canvas 上下文和 Launch 成败有确定性状态测试。"
+        },
+        {
+          "kind": "manual",
+          "ref": ".bagakit/feature-tracker/features/f-2238fbdxh/verification.md",
+          "proves": "Production Board 展示二维矩阵、Branch/Worktree 语义、Inbox Canvas 与真实 Agent Launch 闭环。"
         }
       ],
       "source_refs": [
@@ -460,10 +581,7 @@
         "docs/design/interaction-review.md",
         ".bagakit/design/a mature workbench-informed-interaction-redesign/design-packet.toml"
       ],
-      "supersedes": [
-        "T-014",
-        "T-016"
-      ]
+      "supersedes": []
     },
     {
       "id": "T-006",
