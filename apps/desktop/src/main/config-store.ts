@@ -43,15 +43,7 @@ const configSchema = z
   .object({
     version: z.literal(4),
     hosts: z.array(hostSchema),
-    agents: z
-      .object({
-        codex: agentSchema,
-        claude: agentSchema,
-        traex: agentSchema,
-        hermes: agentSchema,
-        pi: agentSchema
-      })
-      .strict(),
+    agents: z.record(z.string().min(1), agentSchema),
     workspaces: z.array(workspaceSchema),
     appearance: z.object({ terminalTheme: z.enum(['graphite', 'catppuccin-mocha']) }).strict()
   })

@@ -761,6 +761,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       await api.sessions.submitPrompt(session.control, text)
     } catch (error) {
       get().reportError(error)
+      throw error
     }
   },
   async interrupt(sessionId) {

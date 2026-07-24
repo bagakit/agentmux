@@ -6,6 +6,7 @@ import type { RuntimeEvent, SessionSnapshot } from '../../../shared/contracts'
 import type { TerminalThemeId } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { terminalOptions, terminalTheme } from '../lib/terminal-theme'
+import { TerminalViewportSynchronizer } from '../lib/terminal-viewport-sync'
 
 function terminalWrite(terminal: Terminal, data: string): Promise<void> {
   return new Promise((resolve) => terminal.write(data, resolve))
@@ -47,6 +48,22 @@ export function TerminalView({ session, themeId }: { session: SessionSnapshot; t
     const pending: RuntimeEvent[] = []
     let pendingBytes = 0
     let droppedPendingThrough = 0
+    let renderReady: { dispose(): void } | null = null
+    const viewport = new TerminalViewportSynchronizer({
+      fit: () => {
+        if (!fit.proposeDimensions()) return false
+        fit.fit()
+        renderReady?.dispose()
+        renderReady = null
+        return true
+      },
+      readGrid: () => ({ cols: terminal.cols, rows: terminal.rows }),
+      resize: async ({ cols, rows }) => await api.sessions.resize(session.control, cols, rows),
+      requestFrame: (callback) => requestAnimationFrame(callback),
+      cancelFrame: (frameId) => cancelAnimationFrame(frameId),
+      onResizeError: (error) => console.warn('[terminal] failed to synchronize PTY viewport', error)
+    })
+    renderReady = terminal.onRender(() => viewport.observeViewport())
 
     const queueAcknowledge = (control: SessionSnapshot['control'], sequence: number): void => {
       acknowledgeTail = acknowledgeTail
@@ -85,10 +102,7 @@ export function TerminalView({ session, themeId }: { session: SessionSnapshot; t
       })
     }
     const disposeEvents = api.sessions.onEvent(accept)
-    const resize = new ResizeObserver(() => {
-      fit.fit()
-      if (readyForLiveOutput) void api.sessions.resize(session.control, terminal.cols, terminal.rows)
-    })
+    const resize = new ResizeObserver(() => viewport.observeViewport())
     resize.observe(rootRef.current)
     const input = terminal.onData((data) => {
       if (readyForLiveOutput) void api.sessions.write(session.control, data)
@@ -113,8 +127,6 @@ export function TerminalView({ session, themeId }: { session: SessionSnapshot; t
           await terminalWrite(terminal, event.data)
           cursor = event.endByte
         }
-        fit.fit()
-        await api.sessions.resize(result.session.control, terminal.cols, terminal.rows)
         if (droppedPendingThrough > cursor) {
           await terminalWrite(
             terminal,
@@ -122,6 +134,7 @@ export function TerminalView({ session, themeId }: { session: SessionSnapshot; t
           )
           cursor = droppedPendingThrough
         }
+        await viewport.startLiveSynchronization()
         readyForLiveOutput = true
         if (cursor > 0) queueAcknowledge(result.session.control, cursor)
         for (const event of pending.splice(0)) accept(event)
@@ -137,9 +150,11 @@ export function TerminalView({ session, themeId }: { session: SessionSnapshot; t
       }
     })()
 
-    requestAnimationFrame(() => fit.fit())
+    viewport.observeViewport()
     return () => {
       disposed = true
+      viewport.dispose()
+      renderReady?.dispose()
       disposeEvents()
       input.dispose()
       resize.disconnect()

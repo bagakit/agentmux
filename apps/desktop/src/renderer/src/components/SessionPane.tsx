@@ -1,14 +1,28 @@
-import { AlertTriangle, LoaderCircle, RadioTower, RefreshCw, ServerOff, Square, SquareTerminal } from 'lucide-react'
+import { AlertTriangle, LoaderCircle, RadioTower, RefreshCw, ServerOff, Square } from 'lucide-react'
 import { useState } from 'react'
 import { useAppStore } from '../store'
+import {
+  abbreviatedSessionId,
+  latestSessionActivityAt,
+  recentSessionMessage
+} from '../lib/session-metadata'
 import { ConversationView } from './ConversationView'
 import { ConfirmationDialog } from './ConfirmationDialog'
 import { RichComposer } from './RichComposer'
-import { StatusDot } from './StatusDot'
 import { TerminalView } from './TerminalView'
-import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
 
 const NO_ACTIVITIES: never[] = []
+
+function formatSessionTime(timestamp: number): string {
+  const value = new Date(timestamp)
+  const today = new Date()
+  const sameDay = value.getFullYear() === today.getFullYear()
+    && value.getMonth() === today.getMonth()
+    && value.getDate() === today.getDate()
+  return sameDay
+    ? value.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : value.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
 
 export function SessionPane({ sessionId }: { sessionId: string }) {
   const session = useAppStore((state) => state.sessions.find((item) => item.id === sessionId))
@@ -34,6 +48,10 @@ export function SessionPane({ sessionId }: { sessionId: string }) {
   const disconnected = session.status.state === 'disconnected'
   const missing = session.processState === 'interrupted' && session.status.state === 'error'
   const exited = session.processState === 'exited'
+  const lastActivityAt = latestSessionActivityAt(session, activities)
+  const recentMessage = session.kind === 'agent'
+    ? recentSessionMessage(activities) ?? 'No messages yet'
+    : `${session.latestOutputBytes.toLocaleString()} output bytes`
 
   async function refresh(): Promise<void> {
     if (refreshing) return
@@ -55,20 +73,27 @@ export function SessionPane({ sessionId }: { sessionId: string }) {
 
   return (
     <section className="agent-surface">
-      <header className="agent-context-bar">
-        <div className="agent-context-bar__identity">
-          <StatusDot status={session.status} withLabel />
-          <span className="agent-provider-mark">
-            {session.kind === 'agent' ? <AgentProviderIcon agentId={session.agentId} size={15} /> : <SquareTerminal size={13} />}
-          </span>
-          <strong>{session.kind === 'agent' ? agentProviderLabel(session.agentId) : 'Terminal'}</strong>
+      <header className="session-info-bar">
+        <div className="session-info-bar__identity">
+          <strong title={session.label}>{session.label}</strong>
+          <code title={`Session ID · ${session.id}`}>ID {abbreviatedSessionId(session.id)}</code>
         </div>
-        <div className="agent-context-bar__host">
-          {session.hostId !== 'local' ? <RadioTower size={11} /> : null}
-          <span>{session.hostId}</span>
-          {session.status.detail ? <span>· {session.status.detail}</span> : null}
+        <span className="session-info-bar__time session-info-bar__time--started">
+          <i>Started</i>
+          <time dateTime={new Date(session.createdAt).toISOString()} title={new Date(session.createdAt).toLocaleString()}>{formatSessionTime(session.createdAt)}</time>
+        </span>
+        <span className="session-info-bar__time">
+          <i>Active</i>
+          <time dateTime={new Date(lastActivityAt).toISOString()} title={new Date(lastActivityAt).toLocaleString()}>{formatSessionTime(lastActivityAt)}</time>
+        </span>
+        <span className="session-info-bar__recent" title={recentMessage}>
+          <i>{session.kind === 'agent' ? 'Recent' : 'Output'}</i>
+          <span>{recentMessage}</span>
+        </span>
+        <div className="session-info-bar__actions">
+          {session.hostId !== 'local' ? <span title={`Host · ${session.hostId}`}><RadioTower size={11} />{session.hostId}</span> : null}
           {session.processState !== 'exited' ? (
-            <button type="button" className="small-button agent-context-bar__stop" onClick={() => setConfirmingStop(true)}>
+            <button type="button" className="small-button session-info-bar__stop" onClick={() => setConfirmingStop(true)}>
               <Square size={11} /> Stop Run
             </button>
           ) : null}
@@ -99,7 +124,7 @@ export function SessionPane({ sessionId }: { sessionId: string }) {
           <ConversationView activities={activities} />
         )}
       </div>
-      {session.kind === 'agent' ? <RichComposer sessionId={session.id} /> : null}
+      {session.kind === 'agent' && viewMode === 'conversation' ? <RichComposer sessionId={session.id} /> : null}
       <ConfirmationDialog
         open={confirmingStop}
         title={`Stop this ${session.kind === 'agent' ? 'agent' : 'terminal'} Run?`}
