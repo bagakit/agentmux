@@ -1,25 +1,36 @@
 import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { realpath } from 'node:fs/promises'
 import { basename, dirname, resolve, sep } from 'node:path'
 import { posix } from 'node:path'
 import type { ExecutionHost } from '@agentmux/core'
 import type {
   CreateWorkspacePathInput,
-  FileDocument,
   RenameWorkspacePathInput,
   WorkspaceDirectoryEntry,
+  WorkspaceFileReadResult,
+  WorkspaceFileWriteInput,
+  WorkspaceFileWriteResult,
   WorkspaceRecord
 } from '../shared/contracts.js'
 
 const IGNORED_NAMES = new Set(['.git', 'node_modules', 'dist', 'out', '.worktrees'])
 const LOCAL_WORKER_READY = 'AGENTMUX_WORKSPACE_READY'
+const LOCAL_WORKER_OBSERVING = 'AGENTMUX_WORKSPACE_OBSERVING'
+const LOCAL_WORKER_INVALIDATED = 'AGENTMUX_WORKSPACE_INVALIDATED'
 const LOCAL_WORKER_ERROR = 'AGENTMUX_WORKSPACE_ERROR:'
 
 type LocalWorkerRequest =
   | { action: 'read'; name: string }
   | { action: 'list' }
   | { action: 'reveal'; name: string | null }
-  | { action: 'write'; name: string }
+  | { action: 'observe'; name: string }
+  | {
+      action: 'write'
+      name: string
+      expectedRevision: string | null
+      fault?: 'temporary-write' | 'replace'
+    }
   | { action: 'create'; name: string; kind: 'file' | 'directory' }
   | { action: 'rename'; name: string; nextName: string }
   | { action: 'delete'; name: string }
@@ -35,13 +46,26 @@ type LocalMutablePath = {
   name: string
 }
 
+export type WorkspaceFilesOptions = {
+  beforeWrite?: (input: WorkspaceFileWriteInput) => Promise<void>
+  localWriteFault?: 'temporary-write' | 'replace' | (() => 'temporary-write' | 'replace' | undefined)
+}
+
+let activeLocalFileObservers = 0
+
+export function workspaceFileObserverCount(): number {
+  return activeLocalFileObservers
+}
+
 // Node does not expose openat(2), and Darwin's /dev/fd directory handles cannot
 // be used as path prefixes. A short Node worker gives each operation a kernel-
 // pinned cwd. It validates that physical cwd after spawn, then touches only one
 // basename; replacing the original parent path with a symlink cannot redirect
 // the operation after that point.
 const LOCAL_WORKER_SOURCE = String.raw`
-import { constants, lstat, mkdir, open, readdir, realpath, rename, rm } from 'node:fs/promises'
+import { createHash, randomBytes } from 'node:crypto'
+import { watch } from 'node:fs'
+import { constants, lstat, mkdir, open, readdir, realpath, rename, rm, unlink } from 'node:fs/promises'
 import { join, sep } from 'node:path'
 
 const request = JSON.parse(process.argv[1] ?? '')
@@ -72,6 +96,25 @@ async function openRegularFile(name, flags) {
   }
 }
 
+function revisionFor(bytes) {
+  return 'sha256:' + createHash('sha256').update(bytes).digest('hex')
+}
+
+async function currentFile(name) {
+  try {
+    const handle = await openRegularFile(name, constants.O_RDONLY)
+    try {
+      const [bytes, info] = await Promise.all([handle.readFile(), handle.stat()])
+      return { revision: revisionFor(bytes), mode: info.mode & 0o7777 }
+    } finally {
+      await handle.close()
+    }
+  } catch (error) {
+    if (error?.code === 'ENOENT') return { revision: null, mode: null }
+    throw error
+  }
+}
+
 try {
   await currentDirectory()
   process.stderr.write('${LOCAL_WORKER_READY}\n')
@@ -94,13 +137,65 @@ try {
       await handle.close()
     }
     process.stdout.write(request.name === null ? cwd : join(cwd, request.name))
+  } else if (request.action === 'observe') {
+    const watcher = watch('.', { persistent: true }, (_eventType, filename) => {
+      if (filename === request.name) process.stdout.write('${LOCAL_WORKER_INVALIDATED}\n')
+    })
+    watcher.on('error', (error) => {
+      process.stderr.write('${LOCAL_WORKER_ERROR}' + JSON.stringify({
+        message: error instanceof Error ? error.message : String(error),
+        code: error && typeof error === 'object' && 'code' in error ? error.code : null
+      }) + '\n')
+      process.exitCode = 1
+      watcher.close()
+    })
+    process.once('SIGTERM', () => {
+      watcher.close()
+      process.exit(0)
+    })
+    process.stdout.write('${LOCAL_WORKER_OBSERVING}\n')
   } else if (request.action === 'write') {
-    const handle = await openRegularFile(request.name, constants.O_WRONLY)
-    try {
-      await handle.truncate(0)
-      await handle.writeFile(input)
-    } finally {
-      await handle.close()
+    const before = await currentFile(request.name)
+    if (before.revision !== request.expectedRevision) {
+      process.stdout.write(JSON.stringify({ status: 'conflict', observedRevision: before.revision }))
+    } else {
+      const temporaryName = '.' + request.name + '.agentmux-' + process.pid + '-' + randomBytes(8).toString('hex')
+      let handle = null
+      let temporaryExists = false
+      try {
+        handle = await open(
+          temporaryName,
+          constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+          before.mode ?? 0o666
+        )
+        temporaryExists = true
+        if (before.mode !== null) await handle.chmod(before.mode)
+        if (request.fault === 'temporary-write') {
+          throw Object.assign(new Error('Injected temporary write failure'), { code: 'INJECTED_TEMPORARY_WRITE' })
+        }
+        await handle.writeFile(input)
+        await handle.sync()
+        await handle.close()
+        handle = null
+
+        const immediatelyBeforeReplace = await currentFile(request.name)
+        if (immediatelyBeforeReplace.revision !== request.expectedRevision) {
+          process.stdout.write(JSON.stringify({
+            status: 'conflict',
+            observedRevision: immediatelyBeforeReplace.revision
+          }))
+        } else {
+          if (request.fault === 'replace') {
+            throw Object.assign(new Error('Injected atomic replace failure'), { code: 'INJECTED_REPLACE' })
+          }
+          await rename(temporaryName, request.name)
+          temporaryExists = false
+          process.stdout.write(JSON.stringify({ status: 'written', revision: revisionFor(input) }))
+        }
+      } finally {
+        if (handle) await handle.close().catch(() => {})
+        if (temporaryExists) await unlink(temporaryName).catch(() => {})
+      }
     }
   } else if (request.action === 'create') {
     if (request.kind === 'directory') await mkdir(request.name)
@@ -229,6 +324,98 @@ async function runLocalWorker(
   )
 }
 
+async function runLocalObserver(
+  cwd: string,
+  root: string,
+  name: string,
+  invalidated: () => void
+): Promise<() => void> {
+  const environment: NodeJS.ProcessEnv = { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
+  delete environment.NODE_OPTIONS
+  const child = spawn(process.execPath, [
+    '--input-type=module',
+    '--eval',
+    LOCAL_WORKER_SOURCE,
+    JSON.stringify({ action: 'observe', name } satisfies LocalWorkerRequest),
+    root
+  ], {
+    cwd,
+    env: environment,
+    stdio: ['pipe', 'pipe', 'pipe']
+  })
+  child.stdout.setEncoding('utf8')
+  child.stderr.setEncoding('utf8')
+  let stdout = ''
+  let stderr = ''
+  let inputSent = false
+  let observing = false
+  let settled = false
+  let disposed = false
+
+  const ready = new Promise<void>((resolveReady, rejectReady) => {
+    const fail = (error: unknown): void => {
+      if (settled) return
+      settled = true
+      rejectReady(error instanceof Error ? error : new Error(String(error)))
+    }
+    child.once('error', fail)
+    child.stderr.on('data', (chunk: string) => {
+      stderr += chunk
+      if (!inputSent && stderr.split('\n').includes(LOCAL_WORKER_READY)) {
+        inputSent = true
+        child.stdin.end()
+      }
+      const record = stderr.split('\n').find((line) => line.startsWith(LOCAL_WORKER_ERROR))
+      if (record) {
+        const detail = JSON.parse(record.slice(LOCAL_WORKER_ERROR.length)) as {
+          message: string
+          code: string | null
+        }
+        fail(Object.assign(new Error(detail.message), detail.code ? { code: detail.code } : {}))
+      }
+    })
+    child.stdout.on('data', (chunk: string) => {
+      stdout += chunk
+      const lines = stdout.split('\n')
+      stdout = lines.pop() ?? ''
+      for (const line of lines) {
+        if (line === LOCAL_WORKER_OBSERVING && !settled) {
+          observing = true
+          settled = true
+          activeLocalFileObservers += 1
+          resolveReady()
+        } else if (line === LOCAL_WORKER_INVALIDATED && observing && !disposed) {
+          invalidated()
+        }
+      }
+    })
+    child.once('close', (code, signal) => {
+      if (observing) {
+        observing = false
+        activeLocalFileObservers -= 1
+      }
+      if (!disposed) {
+        fail(new Error(
+          `Local Workspace observer failed${signal ? ` with ${signal}` : ` with exit ${code}`}`
+        ))
+      }
+    })
+  })
+
+  try {
+    await ready
+  } catch (error) {
+    disposed = true
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM')
+    throw error
+  }
+  return () => {
+    if (disposed) return
+    disposed = true
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM')
+  }
+}
+
 async function remoteRealPath(host: ExecutionHost, path: string): Promise<string> {
   const result = await host.run('realpath', ['--', path], { timeoutMs: 15_000 })
   if (result.exitCode !== 0) {
@@ -277,8 +464,115 @@ function sortDirectoryEntries(entries: WorkspaceDirectoryEntry[]): WorkspaceDire
   })
 }
 
+function revisionFor(bytes: Uint8Array): string {
+  return `sha256:${createHash('sha256').update(bytes).digest('hex')}`
+}
+
+function resultError(error: unknown): { status: 'error'; code: string; message: string } {
+  return {
+    status: 'error',
+    code: typeof error === 'object' && error !== null && 'code' in error
+      ? String(error.code)
+      : 'WORKSPACE_FILE_ERROR',
+    message: error instanceof Error ? error.message : String(error)
+  }
+}
+
 export class WorkspaceFiles {
-  constructor(private readonly hostFor: (id: string) => ExecutionHost) {}
+  private readonly writeTails = new Map<string, Promise<void>>()
+  private readonly observers = new Map<string, {
+    listeners: Set<() => void>
+    disposeWorker: () => void
+  }>()
+  private readonly observerStarts = new Map<string, Promise<{
+    listeners: Set<() => void>
+    disposeWorker: () => void
+  }>>()
+  private disposed = false
+
+  constructor(
+    private readonly hostFor: (id: string) => ExecutionHost,
+    private readonly options: WorkspaceFilesOptions = {}
+  ) {}
+
+  private async serializeWrite<T>(key: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.writeTails.get(key) ?? Promise.resolve()
+    let release!: () => void
+    const current = new Promise<void>((resolveCurrent) => {
+      release = resolveCurrent
+    })
+    const tail = previous.catch(() => {}).then(async () => await current)
+    this.writeTails.set(key, tail)
+    await previous.catch(() => {})
+    try {
+      return await operation()
+    } finally {
+      release()
+      if (this.writeTails.get(key) === tail) this.writeTails.delete(key)
+    }
+  }
+
+  async observe(
+    workspace: WorkspaceRecord,
+    requestedPath: string,
+    invalidated: () => void
+  ): Promise<() => void> {
+    if (this.disposed) throw new Error('WorkspaceFiles is disposed')
+    const host = this.hostFor(workspace.hostId)
+    if (host.kind !== 'local') {
+      throw Object.assign(
+        new Error('File observation is not available for remote workspaces.'),
+        { code: 'REMOTE_WORKSPACE_FILE_OBSERVATION_UNSUPPORTED' }
+      )
+    }
+    const resolved = await localExistingPathWithin(workspace.path, requestedPath)
+    const parent = dirname(resolved.target)
+    const name = basename(resolved.target)
+    const key = `${resolved.root}\0${parent}\0${name}`
+    let entry = this.observers.get(key)
+    if (!entry) {
+      let start = this.observerStarts.get(key)
+      if (!start) {
+        const listeners = new Set<() => void>()
+        start = runLocalObserver(parent, resolved.root, name, () => {
+          for (const listener of listeners) listener()
+        }).then((disposeWorker) => {
+          if (this.disposed) {
+            disposeWorker()
+            throw new Error('WorkspaceFiles is disposed')
+          }
+          return { listeners, disposeWorker }
+        })
+        this.observerStarts.set(key, start)
+      }
+      try {
+        entry = await start
+        this.observers.set(key, entry)
+      } finally {
+        if (this.observerStarts.get(key) === start) this.observerStarts.delete(key)
+      }
+    }
+    entry.listeners.add(invalidated)
+    let disposed = false
+    return () => {
+      if (disposed) return
+      disposed = true
+      entry!.listeners.delete(invalidated)
+      if (entry!.listeners.size !== 0 || this.observers.get(key) !== entry) return
+      this.observers.delete(key)
+      entry!.disposeWorker()
+    }
+  }
+
+  dispose(): void {
+    this.disposed = true
+    for (const entry of this.observers.values()) entry.disposeWorker()
+    this.observers.clear()
+    for (const start of this.observerStarts.values()) {
+      void start.then((entry) => entry.disposeWorker(), () => {})
+    }
+    this.observerStarts.clear()
+  }
 
   async localPathForReveal(workspace: WorkspaceRecord, requestedPath: string): Promise<string> {
     const host = this.hostFor(workspace.hostId)
@@ -356,45 +650,79 @@ export class WorkspaceFiles {
     return sortDirectoryEntries(entries)
   }
 
-  async read(workspace: WorkspaceRecord, requestedPath: string): Promise<FileDocument> {
-    const host = this.hostFor(workspace.hostId)
-    if (host.kind === 'local') {
-      const resolved = await localExistingPathWithin(workspace.path, requestedPath)
-      return {
-        path: requestedPath,
-        content: (await runLocalWorker(dirname(resolved.target), resolved.root, {
+  async read(workspace: WorkspaceRecord, requestedPath: string): Promise<WorkspaceFileReadResult> {
+    try {
+      const host = this.hostFor(workspace.hostId)
+      if (host.kind === 'local') {
+        const resolved = await localExistingPathWithin(workspace.path, requestedPath)
+        const bytes = await runLocalWorker(dirname(resolved.target), resolved.root, {
           action: 'read',
           name: basename(resolved.target)
-        })).toString('utf8')
+        })
+        return {
+          status: 'read',
+          document: {
+            path: requestedPath,
+            content: bytes.toString('utf8'),
+            revision: revisionFor(bytes)
+          }
+        }
       }
+      const path = await remoteExistingPathWithin(host, workspace.path, requestedPath)
+      const result = await host.run('cat', ['--', path], {
+        timeoutMs: 15_000,
+        maxOutputBytes: 4 * 1024 * 1024
+      })
+      if (result.exitCode !== 0) {
+        throw new Error(result.stderr.trim() || `Could not read ${basename(path)}`)
+      }
+      const bytes = Buffer.from(result.stdout)
+      return {
+        status: 'read',
+        document: { path: requestedPath, content: result.stdout, revision: revisionFor(bytes) }
+      }
+    } catch (error) {
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') {
+        return { status: 'deleted' }
+      }
+      return resultError(error)
     }
-    const path = await remoteExistingPathWithin(host, workspace.path, requestedPath)
-    const result = await host.run('cat', ['--', path], {
-      timeoutMs: 15_000,
-      maxOutputBytes: 4 * 1024 * 1024
-    })
-    if (result.exitCode !== 0) {
-      throw new Error(result.stderr.trim() || `Could not read ${basename(path)}`)
-    }
-    return { path: requestedPath, content: result.stdout }
   }
 
-  async write(workspace: WorkspaceRecord, document: FileDocument): Promise<void> {
-    const host = this.hostFor(workspace.hostId)
-    if (host.kind === 'local') {
-      const resolved = await localExistingPathWithin(workspace.path, document.path)
-      await runLocalWorker(dirname(resolved.target), resolved.root, {
-        action: 'write',
-        name: basename(resolved.target)
-      }, document.content)
-      return
+  async write(
+    workspace: WorkspaceRecord,
+    input: WorkspaceFileWriteInput
+  ): Promise<WorkspaceFileWriteResult> {
+    try {
+      const host = this.hostFor(workspace.hostId)
+      if (host.kind !== 'local') {
+        return {
+          status: 'error',
+          code: 'REMOTE_WORKSPACE_FILE_WRITE_UNSUPPORTED',
+          message: 'Revision-aware atomic save is not available for remote workspaces.'
+        }
+      }
+      const resolved = await localMutablePathWithin(workspace.path, input.path)
+      const key = `${resolved.root}\0${resolved.parent}\0${resolved.name}`
+      return await this.serializeWrite(key, async () => {
+        try {
+          await this.options.beforeWrite?.(input)
+          const fault = typeof this.options.localWriteFault === 'function'
+            ? this.options.localWriteFault()
+            : this.options.localWriteFault
+          return JSON.parse((await runLocalWorker(resolved.parent, resolved.root, {
+            action: 'write',
+            name: resolved.name,
+            expectedRevision: input.expectedRevision,
+            ...(fault ? { fault } : {})
+          }, input.content)).toString('utf8')) as WorkspaceFileWriteResult
+        } catch (error) {
+          return resultError(error)
+        }
+      })
+    } catch (error) {
+      return resultError(error)
     }
-    const path = await remoteExistingPathWithin(host, workspace.path, document.path)
-    const result = await host.run('tee', ['--', path], {
-      input: document.content,
-      timeoutMs: 15_000
-    })
-    if (result.exitCode !== 0) throw new Error(result.stderr.trim() || 'Remote file write failed')
   }
 
   async create(workspace: WorkspaceRecord, input: CreateWorkspacePathInput): Promise<void> {

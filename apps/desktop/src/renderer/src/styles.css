@@ -785,8 +785,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .composer-send:disabled { opacity: .35; cursor: default; }
 
 .editor-pane { height: 100%; min-width: 0; min-height: 0; display: grid; grid-template-rows: 34px minmax(0, 1fr); background: #101315; }
+.editor-pane--issue { grid-template-rows: 34px auto minmax(0, 1fr); }
 .editor-header { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 8px 0 11px; border-bottom: 1px solid var(--line-soft); color: var(--text-2); font-size: 10px; }
 .editor-header > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.editor-header__actions { display: flex; align-items: center; gap: 5px; }
+.editor-file-notice { min-width: 0; display: flex; align-items: center; gap: 7px; padding: 6px 10px; border-bottom: 1px solid #61432d; color: #efc28d; background: #2a2117; font-size: 10px; line-height: 1.4; }
+.editor-file-notice > svg { flex: 0 0 auto; }
+.editor-file-notice--read-error, .editor-file-notice--write-error { border-bottom-color: #633130; color: #ffc2bf; background: #301b1b; }
 .editor-canvas { min-width: 0; min-height: 0; overflow: hidden; }
 .pane-state { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; padding: 30px; color: var(--text-3); background: #0d1012; font-size: 10px; text-align: center; }
 .pane-state strong { color: var(--text-2); font-size: 12px; }
@@ -886,6 +891,7 @@ button.launch-surface__icon:hover { background: #1b3022; }
 
 .small-button, .primary-button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; border-radius: 6px; cursor: pointer; }
 .small-button { padding: 5px 8px; border: 1px solid var(--line); color: var(--text-2); background: var(--surface-2); font-size: 11px; }
+.small-button--warning { border-color: #725136; color: #f0c48f; background: #2b2117; }
 .small-button:disabled { opacity: .45; cursor: default; }
 .primary-button { padding: 8px 12px; border: 1px solid #477154; color: #c1efd1; background: #1d3827; font-size: 10px; }
 .primary-button:hover:not(:disabled) { background: #24462f; }

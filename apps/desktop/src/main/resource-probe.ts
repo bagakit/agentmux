@@ -3,6 +3,7 @@ import { app, webContents, type BrowserWindow } from 'electron'
 import type { SessionControl, SessionSnapshot } from '../shared/contracts.js'
 import { ConfigStore } from './config-store.js'
 import { RuntimeController } from './runtime-controller.js'
+import { workspaceFileObserverCount } from './workspace-files.js'
 
 const MAX_TERMINAL_INCREMENT_KIB = 256 * 1024
 const MAX_EDITOR_INCREMENT_KIB = 512 * 1024
@@ -51,7 +52,6 @@ async function ownerCounts(
   })()`) as {
     monacoModels: number
     documents: number
-    fileWatchers: number
     runtimeSubscriptions: number
     terminalViews: number
     terminalAddons: number
@@ -59,6 +59,7 @@ async function ownerCounts(
   }
   const owners = {
     browserWebContents: webContents.getAllWebContents().filter((item) => item !== window.webContents).length,
+    fileWatchers: workspaceFileObserverCount(),
     ...renderer,
     ...runtime.resourceOwnerCounts()
   }
@@ -180,7 +181,7 @@ export async function runDesktopResourceProbe(options: {
       monacoModels: 0,
       documents: 0,
       fileWatchers: 0,
-      runtimeSubscriptions: 3,
+      runtimeSubscriptions: 4,
       terminalViews: 0,
       terminalAddons: 0,
       terminalListeners: 0,
@@ -223,9 +224,15 @@ export async function runDesktopResourceProbe(options: {
     await click(options.window, "document.querySelector('[data-tree-path=\"resource-probe.ts\"]')")
     await waitFor('Monaco editor', async () => await rendererBoolean(options.window, "document.querySelector('.monaco-editor')"))
     const editorSample = await sample('monaco-editor', options.window, options.runtime)
+    if (editorSample.owners.fileWatchers !== 1) {
+      throw new Error(`Desktop editor did not retain exactly one Main-owned file observer: ${JSON.stringify(editorSample.owners)}`)
+    }
 
     await click(options.window, "document.querySelector('[aria-label=\"Close resource-probe.ts\"]')")
     await waitFor('Monaco disposal', async () => !await rendererBoolean(options.window, "document.querySelector('.monaco-editor')"))
+    await waitFor('Main file observer release', async () => (
+      (await ownerCounts(options.window, options.runtime)).fileWatchers === 0
+    ))
     await options.runtime.stopSession(terminalControl)
     terminalControl = null
     await waitFor('Terminal release', async () => newTerminal(before, (await options.runtime.snapshot(config)).sessions) === null)
@@ -264,6 +271,9 @@ export async function runDesktopResourceProbe(options: {
       await waitFor(`cycle ${cycle} Monaco disposal`, async () => !await rendererBoolean(
         options.window,
         "document.querySelector('.monaco-editor')"
+      ))
+      await waitFor(`cycle ${cycle} Main file observer release`, async () => (
+        (await ownerCounts(options.window, options.runtime)).fileWatchers === 0
       ))
       await options.runtime.stopSession(terminalControl)
       terminalControl = null

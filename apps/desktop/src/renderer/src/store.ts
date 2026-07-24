@@ -34,11 +34,16 @@ import {
 import { reduceBrowserEvent } from './lib/browser-state'
 import {
   reduceDocumentContent,
-  reduceDocumentSaved,
+  reduceDocumentRead,
+  reduceDocumentReloaded,
+  reduceDocumentSaving,
+  reduceDocumentWriteError,
+  reduceDocumentWritten,
   reduceFileClosed,
   reduceFileDelete,
   reduceFileOpened,
-  reduceFileRename
+  reduceFileRename,
+  type FileDocumentIssue
 } from './lib/file-workbench-state'
 import {
   ownsSessionLaunch,
@@ -66,6 +71,7 @@ import {
   type TerminalWorkbenchTab,
   type WorkbenchTab
 } from './lib/workbench-tabs'
+import { isPathWithinSubtree, remapPathWithinSubtree } from './lib/workspace-paths'
 
 type ViewMode = SessionViewMode
 export type MainSurface = 'workbench' | 'board'
@@ -90,6 +96,9 @@ type AppState = {
   activeWorkspaceId: string | null
   documents: Record<string, FileDocument>
   dirtyDocuments: Record<string, boolean>
+  documentGenerations: Record<string, number>
+  documentIssues: Record<string, FileDocumentIssue | undefined>
+  savingDocuments: Record<string, boolean>
   lastActiveFileByWorkspace: Record<string, string | undefined>
   tabs: Record<string, WorkbenchTab>
   layouts: Record<string, WorkspaceLayout>
@@ -140,6 +149,9 @@ type AppState = {
   deletePath(path: string): Promise<void>
   updateDocument(tabId: string, content: string): void
   saveDocument(tabId: string): Promise<void>
+  overwriteDocument(tabId: string): Promise<void>
+  reloadDocument(tabId: string): Promise<void>
+  refreshDocument(workspaceId: string, path: string): Promise<void>
   launchBoardAgent(workspaceId: string, agentId: string, prompt: string): Promise<void>
   launchAgent(agentId: string, prompt: string, paneId: string, launcherTabId?: string): Promise<void>
   launchTerminal(paneId: string, launcherTabId?: string, workspacePath?: string): Promise<void>
@@ -164,6 +176,9 @@ export function agentDetectionKey(hostId: string, agentId: string): string {
 
 const detectionRequestIds = new Map<string, number>()
 const hostCheckRequestIds = new Map<string, number>()
+const fileReadRequestIds = new Map<string, number>()
+const fileInvalidationSequences = new Map<string, number>()
+const fileSaveTails = new Map<string, Promise<void>>()
 let runtimeSubscriptionCount = 0
 
 if (typeof window !== 'undefined') {
@@ -190,6 +205,112 @@ function newLauncherTab(workspaceId: string, view: LauncherView = 'picker'): Lau
   return { id: `launcher:${crypto.randomUUID()}`, kind: 'launcher', workspaceId, view }
 }
 
+async function refreshFileDocument(workspaceId: string, path: string): Promise<void> {
+  const key = documentKey(workspaceId, path)
+  if (!useAppStore.getState().documents[key]) return
+  const requestId = (fileReadRequestIds.get(key) ?? 0) + 1
+  fileReadRequestIds.set(key, requestId)
+  let result
+  try {
+    result = await api.files.read(workspaceId, path)
+  } catch (error) {
+    result = {
+      status: 'error' as const,
+      code: typeof error === 'object' && error !== null && 'code' in error
+        ? String(error.code)
+        : 'WORKSPACE_FILE_READ_FAILED',
+      message: message(error)
+    }
+  }
+  if (fileReadRequestIds.get(key) !== requestId) return
+  useAppStore.setState((state) => reduceDocumentRead(state, workspaceId, path, result))
+}
+
+async function enqueueFileSave(tabId: string, overwrite: boolean): Promise<void> {
+  const initialTab = useAppStore.getState().tabs[tabId]
+  if (initialTab?.kind !== 'file') return
+  const key = documentKey(initialTab.workspaceId, initialTab.path)
+  const previous = fileSaveTails.get(key) ?? Promise.resolve()
+  const operation = previous.catch(() => {}).then(async () => {
+    const state = useAppStore.getState()
+    const tab = state.tabs[tabId]
+    if (tab?.kind !== 'file') return
+    const currentKey = documentKey(tab.workspaceId, tab.path)
+    const document = state.documents[currentKey]
+    const issue = state.documentIssues[currentKey]
+    if (!document || !state.dirtyDocuments[currentKey]) return
+    if (!overwrite && (issue?.kind === 'changed' || issue?.kind === 'deleted' || issue?.kind === 'read-error')) {
+      return
+    }
+    if (overwrite && issue?.kind !== 'changed' && issue?.kind !== 'deleted') return
+    const generation = state.documentGenerations[currentKey] ?? 0
+    let expectedRevision: string | null = document.revision
+    if (overwrite) {
+      if (issue?.kind === 'changed') expectedRevision = issue.observed.revision
+      else if (issue?.kind === 'deleted') expectedRevision = null
+      else return
+    }
+    useAppStore.setState((current) => reduceDocumentSaving(
+      current,
+      tab.workspaceId,
+      tab.path,
+      true
+    ))
+    let result
+    try {
+      result = await api.files.write(tab.workspaceId, {
+        path: tab.path,
+        content: document.content,
+        expectedRevision
+      })
+    } catch (error) {
+      result = {
+        status: 'error' as const,
+        code: typeof error === 'object' && error !== null && 'code' in error
+          ? String(error.code)
+          : 'WORKSPACE_FILE_WRITE_FAILED',
+        message: message(error)
+      }
+    }
+    if (!useAppStore.getState().documents[currentKey]) return
+    if (result.status === 'written') {
+      useAppStore.setState((current) => reduceDocumentWritten(
+        current,
+        tab.workspaceId,
+        tab.path,
+        generation,
+        result.revision,
+        expectedRevision
+      ))
+      return
+    }
+    if (result.status === 'error') {
+      useAppStore.setState((current) => reduceDocumentWriteError(
+        current,
+        tab.workspaceId,
+        tab.path,
+        result.code,
+        result.message
+      ))
+      return
+    }
+    useAppStore.setState((current) => reduceDocumentSaving(
+      current,
+      tab.workspaceId,
+      tab.path,
+      false
+    ))
+    await refreshFileDocument(tab.workspaceId, tab.path)
+  })
+  const tail = operation.then(() => {}, () => {})
+  fileSaveTails.set(key, tail)
+  try {
+    await operation
+  } finally {
+    if (fileSaveTails.get(key) === tail) fileSaveTails.delete(key)
+  }
+}
+
 export const useAppStore = create<AppState>((set, get) => ({
   config: null,
   sessions: [],
@@ -197,6 +318,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   activeWorkspaceId: null,
   documents: {},
   dirtyDocuments: {},
+  documentGenerations: {},
+  documentIssues: {},
+  savingDocuments: {},
   lastActiveFileByWorkspace: {},
   tabs: {},
   layouts: {},
@@ -231,13 +355,19 @@ export const useAppStore = create<AppState>((set, get) => ({
       else get().applyBrowserEvent(event)
     })
     const disposeViewFocus = api.views.onFocusRequest((target) => get().focusView(target))
-    runtimeSubscriptionCount += 3
+    const disposeFileInvalidations = api.files.onInvalidated((event) => {
+      const key = documentKey(event.workspaceId, event.path)
+      fileInvalidationSequences.set(key, (fileInvalidationSequences.get(key) ?? 0) + 1)
+      void get().refreshDocument(event.workspaceId, event.path)
+    })
+    runtimeSubscriptionCount += 4
     const disposeRuntimeSubscriptions = (): void => {
       if (runtimeSubscriptionCount === 0) return
-      runtimeSubscriptionCount -= 3
+      runtimeSubscriptionCount -= 4
       disposeSessions()
       disposeBrowsers()
       disposeViewFocus()
+      disposeFileInvalidations()
     }
     try {
       const [config, snapshot] = await Promise.all([api.config.get(), api.sessions.snapshot()])
@@ -406,6 +536,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     const tab = get().tabs[tabId]
     if (tab?.kind === 'file') {
       set((state) => reduceFileClosed(state, workspaceId, paneId, tabId))
+      if (!get().documents[documentKey(tab.workspaceId, tab.path)]) {
+        await api.files.unobserve(tab.workspaceId, tab.path)
+      }
       return
     }
     if (tab?.kind === 'browser') {
@@ -556,8 +689,25 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!workspaceId || !layout) return
     const key = documentKey(workspaceId, path)
     try {
-      const document = get().documents[key] ?? (await api.files.read(workspaceId, path))
+      const existing = get().documents[key]
+      if (existing) {
+        set((state) => reduceFileOpened(state, workspaceId, path, existing, paneId))
+        return
+      }
+      const invalidationSequence = fileInvalidationSequences.get(key) ?? 0
+      await api.files.observe(workspaceId, path)
+      const result = await api.files.read(workspaceId, path)
+      if (result.status !== 'read') {
+        await api.files.unobserve(workspaceId, path)
+        throw new Error(result.status === 'deleted'
+          ? `File was deleted: ${path}`
+          : result.message)
+      }
+      const document = result.document
       set((state) => reduceFileOpened(state, workspaceId, path, document, paneId))
+      if ((fileInvalidationSequences.get(key) ?? 0) !== invalidationSequence) {
+        await get().refreshDocument(workspaceId, path)
+      }
     } catch (error) {
       get().reportError(error)
     }
@@ -575,9 +725,21 @@ export const useAppStore = create<AppState>((set, get) => ({
   async renamePath(path, nextPath) {
     const workspaceId = get().activeWorkspaceId
     if (!workspaceId) throw new Error('Select a workspace first')
+    const observedPaths = Object.keys(get().documents).flatMap((key) => {
+      const prefix = `${workspaceId}\0`
+      if (!key.startsWith(prefix)) return []
+      const documentPath = key.slice(prefix.length)
+      return isPathWithinSubtree(documentPath, path) ? [documentPath] : []
+    })
     try {
       await api.files.rename(workspaceId, { path, nextPath })
       set((state) => reduceFileRename(state, workspaceId, path, nextPath))
+      for (const observedPath of observedPaths) {
+        const renamedPath = remapPathWithinSubtree(observedPath, path, nextPath)
+        await api.files.unobserve(workspaceId, observedPath)
+        await api.files.observe(workspaceId, renamedPath)
+        await get().refreshDocument(workspaceId, renamedPath)
+      }
     } catch (error) {
       get().reportError(error)
       throw error
@@ -586,9 +748,18 @@ export const useAppStore = create<AppState>((set, get) => ({
   async deletePath(path) {
     const workspaceId = get().activeWorkspaceId
     if (!workspaceId) throw new Error('Select a workspace first')
+    const observedPaths = Object.keys(get().documents).flatMap((key) => {
+      const prefix = `${workspaceId}\0`
+      if (!key.startsWith(prefix)) return []
+      const documentPath = key.slice(prefix.length)
+      return isPathWithinSubtree(documentPath, path) ? [documentPath] : []
+    })
     try {
       await api.files.delete(workspaceId, path)
       set((state) => reduceFileDelete(state, workspaceId, path))
+      await Promise.all(observedPaths.map(async (observedPath) => {
+        await api.files.unobserve(workspaceId, observedPath)
+      }))
     } catch (error) {
       get().reportError(error)
       throw error
@@ -598,17 +769,29 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => reduceDocumentContent(state, tabId, content))
   },
   async saveDocument(tabId) {
+    await enqueueFileSave(tabId, false)
+  },
+  async overwriteDocument(tabId) {
+    await enqueueFileSave(tabId, true)
+  },
+  async reloadDocument(tabId) {
     const tab = get().tabs[tabId]
     if (tab?.kind !== 'file') return
     const key = documentKey(tab.workspaceId, tab.path)
-    const document = get().documents[key]
-    if (!document) return
-    try {
-      await api.files.write(tab.workspaceId, document)
-      set((state) => reduceDocumentSaved(state, tab.workspaceId, tab.path))
-    } catch (error) {
-      get().reportError(error)
+    const issue = get().documentIssues[key]
+    if (issue?.kind === 'changed') {
+      set((state) => reduceDocumentReloaded(state, tab.workspaceId, tab.path, issue.observed))
+      return
     }
+    if (issue?.kind === 'deleted') {
+      set((state) => reduceFileDelete(state, tab.workspaceId, tab.path))
+      await api.files.unobserve(tab.workspaceId, tab.path)
+      return
+    }
+    await get().refreshDocument(tab.workspaceId, tab.path)
+  },
+  async refreshDocument(workspaceId, path) {
+    await refreshFileDocument(workspaceId, path)
   },
   async launchBoardAgent(workspaceId, agentId, prompt) {
     await get().selectWorkspace(workspaceId)
