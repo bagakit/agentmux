@@ -6,7 +6,8 @@ import type {
   AgentMuxRunDataEvent,
   AgentMuxRunRef,
   AgentMuxRunReplayGap,
-  AgentMuxRunState
+  AgentMuxRunState,
+  AgentMuxViewFocusTarget
 } from '@agentmux/core'
 
 export type LocalHostConfig = {
@@ -210,6 +211,24 @@ export type AgentDetection = {
   installed: boolean
 }
 
+export type DesktopViewFocusTarget = AgentMuxViewFocusTarget
+
+export type DesktopViewFocusResult = {
+  viewId: string
+  kind: 'terminal' | 'agent'
+  workspaceId: string
+  paneId: string
+}
+
+export type DesktopViewFocusRequest = {
+  requestId: string
+  target: DesktopViewFocusTarget
+}
+
+export type DesktopViewFocusResponse =
+  | { requestId: string; ok: true; result: DesktopViewFocusResult }
+  | { requestId: string; ok: false; code: string; message: string }
+
 export type BrowserSnapshot = {
   id: string
   url: string
@@ -256,6 +275,10 @@ export type AgentMuxDesktopApi = {
   }
   agents: {
     detect(agentId: AgentId, hostId: string): Promise<AgentDetection>
+  }
+  views: {
+    focus(target: DesktopViewFocusTarget): Promise<DesktopViewFocusResult>
+    onFocusRequest(listener: (target: DesktopViewFocusTarget) => DesktopViewFocusResult | Promise<DesktopViewFocusResult>): () => void
   }
   sessions: {
     snapshot(): Promise<RuntimeSnapshot>

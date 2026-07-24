@@ -10,6 +10,9 @@ import type {
   CreateWorkspacePathInput,
   CreateWorktreeForBranchInput,
   CreateWorkspaceInput,
+  DesktopViewFocusRequest,
+  DesktopViewFocusResponse,
+  DesktopViewFocusTarget,
   FileDocument,
   HostConfig,
   RenameWorkspacePathInput,
@@ -48,6 +51,29 @@ const api: AgentMuxDesktopApi = {
   },
   agents: {
     detect: (agentId: AgentId, hostId: string) => ipcRenderer.invoke('agents:detect', agentId, hostId)
+  },
+  views: {
+    focus: (target: DesktopViewFocusTarget) => ipcRenderer.invoke('views:focus', target),
+    onFocusRequest(listener) {
+      const wrapped = (_event: Electron.IpcRendererEvent, request: DesktopViewFocusRequest): void => {
+        void Promise.resolve(listener(request.target)).then((result) => {
+          const response: DesktopViewFocusResponse = { requestId: request.requestId, ok: true, result }
+          ipcRenderer.send('views:focus:response', response)
+        }, (error) => {
+          const response: DesktopViewFocusResponse = {
+            requestId: request.requestId,
+            ok: false,
+            code: typeof error === 'object' && error !== null && 'code' in error
+              ? String(error.code)
+              : 'VIEW_FOCUS_FAILED',
+            message: error instanceof Error ? error.message : String(error)
+          }
+          ipcRenderer.send('views:focus:response', response)
+        })
+      }
+      ipcRenderer.on('agentmux:view-focus-request', wrapped)
+      return () => ipcRenderer.off('agentmux:view-focus-request', wrapped)
+    }
   },
   sessions: {
     snapshot: () => ipcRenderer.invoke('sessions:snapshot'),

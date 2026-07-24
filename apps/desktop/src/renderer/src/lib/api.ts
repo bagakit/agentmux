@@ -9,6 +9,7 @@ import type {
   SessionSnapshot,
   WorkspaceBranchRecord
 } from '../../../shared/contracts'
+import type { DesktopViewFocusTarget, DesktopViewFocusResult } from '../../../shared/contracts'
 
 const now = Date.now()
 let mockConfig: AppConfig = {
@@ -108,6 +109,10 @@ const mockOutput = new Map<string, string>([
   ['session-codex', '\u001b[1;36mAgentMux core\u001b[0m\r\n\r\n✓ Run attached\r\n✓ local Provider ready\r\n\r\nEditing packages/core/src/runtime.ts\r\nRunning pnpm test…\r\n'],
   ['session-claude', 'Claude Code\r\n\r\nI need permission to run the material snapshot suite.\r\n']
 ])
+
+const mockViewFocusListeners = new Set<(
+  target: DesktopViewFocusTarget
+) => DesktopViewFocusResult | Promise<DesktopViewFocusResult>>()
 
 const mockActivities: Record<string, AgentActivity[]> = {
   'session-codex': [
@@ -303,6 +308,16 @@ const mockApi: AgentMuxDesktopApi = {
       hostId,
       installed: !(hostId === 'studio' && ['hermes', 'pi'].includes(agentId))
     })
+  },
+  views: {
+    async focus(target) {
+      if (mockViewFocusListeners.size !== 1) throw new Error('Desktop View focus owner is unavailable')
+      return await [...mockViewFocusListeners][0]!(target)
+    },
+    onFocusRequest(listener) {
+      mockViewFocusListeners.add(listener)
+      return () => mockViewFocusListeners.delete(listener)
+    }
   },
   sessions: {
     snapshot: async () => structuredClone(mockSnapshot),
