@@ -1,6 +1,6 @@
 # AgentMux Daemon Cutover Benchmark
 
-状态：Protocol Freeze Revision 1；本文件的首个 Git Commit 是冻结点。冻结后 Runner 可以修正实现 Bug，但不得根据结果改变 Workload、样本量、主指标、统计方法或胜出门槛；任何修订必须保留旧结果并让 T-008 重新开始。
+状态：历史 Protocol Freeze Revision 1，已因 mux 决策修正停止。它只适用于被放弃的自建 `agentmuxd` candidate；4 MiB Debug Run 的 sustained-output timeout 已记录为失败证据。Workload、样本量、主指标、统计方法和门槛继续保留，不覆盖旧结果；旧 Runner 已删除。T-013 只提炼候选无关 Fixture 与统计原语，最终 AgentMux+ctxmux candidate 要到 T-018 建立新的 Protocol Revision 和 Runner。
 
 ## 1. 判定问题
 
@@ -173,11 +173,6 @@ Raw Sample、失败、跳过原因与 Manifest 全部保留。汇总脚本只读
 
 ## 8. 复现与安全
 
-冻结入口：
+Revision 1 已没有可执行入口，避免继续在错误 candidate 上累积结果。`run-kernel-workload.mjs` 和 `run-kernel-statistics.mjs` 是 T-013 保留的中立资产，不构成 Benchmark Runner，也不会写结果目录。
 
-```bash
-pnpm --filter @agentmux/core benchmark -- --round 1
-pnpm --filter @agentmux/core benchmark -- --round 2
-```
-
-Runner 只创建自己的临时目录、Unix Socket、`agentmux-benchmark-*` tmux Socket／Session 和 Fixture Process；开始前拒绝目标前缀已存在，结束时按精确身份 Stop。它不读取或删除用户 tmux Session，不连接 SSH，不下载竞品，不改 Agent Hook／Credential，不发布 Package。
+T-018 只有在 ctxmux Adapter 已通过无豁免 Conformance 后，才按本文件冻结的新 Revision 重建两轮 Runner。新 Runner 只能创建自己的临时目录、精确命名的 tmux Baseline 和 Fixture Process；不得读取或删除用户 tmux Session，不连接未授权 SSH，不下载竞品，不改 Agent Hook/Credential，不发布 Package。
