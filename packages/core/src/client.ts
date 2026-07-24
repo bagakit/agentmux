@@ -510,7 +510,16 @@ export class AgentMuxClient {
       attached.session.agentSessionId !== session.agentSessionId ||
       !matchesRun(attached.session, session.run)
     ) {
-      throw new AgentMuxError('Run no longer matches the Agent Session.', 'AGENT_SESSION_RUN_MISMATCH')
+      const mismatch = new AgentMuxError('Run no longer matches the Agent Session.', 'AGENT_SESSION_RUN_MISMATCH')
+      try {
+        await this.kernel.detach({
+          sessionId: attached.session.sessionId,
+          incarnationId: attached.session.incarnationId
+        })
+      } catch (cleanupError) {
+        throw new AggregateError([mismatch, cleanupError], 'Agent reattach rollback failed.')
+      }
+      throw mismatch
     }
     this.emitProcessState(attached.session, session.agentSessionId)
     return { session: cloneSession(session), attachment: projectAttachment(attached) }
