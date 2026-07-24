@@ -70,7 +70,7 @@ describe('AgentMux SSH remote management boundaries', () => {
     const remote = new AgentMuxSshRemoteDaemon({
       target: { hostId: 'linux-host', hostname: 'linux.example' }
     })
-    expect(() => remote.createClient({
+    expect(() => remote.createDaemonClient({
       hostId: 'linux-host',
       buildIdentity: 'build-1',
       platform: 'linux-x64',

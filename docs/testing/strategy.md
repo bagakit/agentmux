@@ -70,6 +70,10 @@ Daemon Crash 后没有可重新 Attach 的 PTY 文件描述符，因此当前正
 | Session Journal | 1 MiB | 启动或持久化 Fail Closed |
 | SSH Transport stderr | 64 KiB／Proxy | Kill Proxy 并返回 `SSH_TRANSPORT_OUTPUT_LIMIT` |
 | Remote 控制面输出 | 1 MiB／Command | 终止安装或控制操作 |
+| Semantic Session／Store Load | 256 | Load／Put 返回 `SEMANTIC_STORE_LIMIT` |
+| Native Hook Body | 128 KiB／Request | Observation 返回 204，不发布事件 |
+| ACP Event | 128 KiB／Event | 拒绝事件；Permission 连接关闭而不是默认允许 |
+| Managed Hook Preview | 4 个 Preview × 8 个文件 × 256 KiB | 新 Preview 返回 `HOOK_PREVIEW_LIMIT` |
 
 最坏情况下 Replay 本体不超过 `128 × 256 KiB = 32 MiB` 的 Daemon 全局上限。未确认 Output 只保存 Cursor，不为每个 Client 再复制一份 Replay；真正排队的编码数据仍受每 Client 1 MiB Socket 上限约束。一个 Execution Host 只启动一个 Daemon，Tab 和 Pane 只是 Client 投影。
 
@@ -86,6 +90,16 @@ Remote Artifact、命令与凭据边界记录在 `docs/plans/agentmux-ssh-remote
 - Remote Applied Size、顽固 Agent／工具后代 Stop 和 Local 使用同一 Daemon 实现。
 
 系统 OpenSSH 默认负责 `~/.ssh/config`、Agent、Known Hosts、硬件 Key 与认证交互。AgentMux 只把用户显式配置的 `-i` Path 作为本地 argv 传给 ssh，不读取、复制或保存 Key；不添加 `StrictHostKeyChecking=no`，不打开 TCP Listener，也不运行 npx／远端 npm install。真实公网／公司 SSH Host、Credential 或远端安装不在自动化中执行，仍需用户另行授权。
+
+## Semantic Session、Hook、ACP 与 Resume
+
+- Catalog Test 必须逐个覆盖 Codex、Claude、TraeX、Hermes、Pi 的 executable、Prompt Delivery、Ready Signal、Hook、Permission、Resume 与 ACP 声明。
+- Semantic Integration 使用真实 `agentmuxd + node-pty + 127.0.0.1 Hook Ingress`，同时发送正确 Hook 和伪造 Incarnation Hook，证明只有四重身份一致的事件进入 Semantic Session。
+- 同一个用例分别证明 Reattach 保持 Daemon Incarnation、Provider Resume 保持 Semantic ID 但更换 Daemon Run、Respawn 强制更换 Semantic ID。
+- Store Failure 必须证明新 Daemon Run 被回滚；Store 读取测试证明 PID、Terminal Snapshot、Replay 与 Bytes 不会被接受为持久语义字段；串行化与 Run Fence 证明旧 Run 的延迟写不能覆盖 Resume 后的新 Run。
+- ACP Permission 覆盖 Handler 缺失、无返回、异常、非法 Option 和合法显式选择；所有非显式合法选择都必须拒绝或取消。
+- Managed Hook Installer 只在临时目录验证 Preview、Generation Check、Receipt、恢复卸载、备份真实路径边界和用户后续编辑 Fail Closed，不修改真实 `~/.claude`、`~/.codex`、Pi Extension 或 Hermes Plugin。
+- SSH 隔离 Fixture 运行同一个 Semantic Client 和远端 Hook Ingress，证明 Capability Probe 与 Hook 关联发生在远端 Host，而不是误用本机状态。
 
 ## 资源基线方法
 
@@ -128,6 +142,11 @@ pnpm check
 - `ssh-daemon-connector.test.ts`：系统 SSH argv、远端命令引用与 Destination 边界。
 - `ssh-remote-daemon.test.ts`：平台、Archive Traversal 与受管删除范围。
 - `ssh-remote-daemon.integration.test.ts`：隔离 SSH 安装、Activation、Partition、Lost Create、Mismatch、Upgrade、Replay 与 Process Tree。
+- `semantic-client.integration.test.ts`：Local Hook 关联、Evidence Source、Store 回滚与三种恢复身份。
+- `semantic-session-registry.test.ts`：Semantic Store 串行写入和旧 Daemon Run 乐观 Fence。
+- `agent-provider.test.ts`：五个内置 Catalog、Capability Probe、Launch 与 Provider Resume。
+- `acp-adapter.test.ts`：ACP Event 映射和 Permission 默认拒绝。
+- `managed-hook-installer.test.ts`：显式 Preview、Generation Fence、Receipt 与恢复卸载。
 
 ## 剩余边界
 

@@ -18,6 +18,13 @@ PTY 的模式；AgentMux 没有复制 a mature workbench 的 ssh2 Transport、Re
 兼容 GC 或 Provider 体系，而是继续使用用户确认的系统 OpenSSH 与同一份 Daemon
 Protocol。
 
+T-004 在 2026-08-11 通过 CodeGraph 复核 a mature workbench 当前
+`src/shared/tui-agent-config.ts`、`src/shared/agent-session-resume.ts` 与 Managed Hook
+实现：采用声明式 executable / expected process / prompt delivery、Provider Session
+Handle 与 Daemon Attach 分离、配置写入前 Generation Check 和只移除自有 Hook 的模式。
+AgentMux 没有复制 a mature workbench 的大型 Agent Catalog、AI Vault、自动全局安装与兼容路径；具体边界见
+`docs/plans/agentmux-semantic-session.md`。
+
 ## 总体结论
 
 a mature workbench 不是传统意义上的无界面 Agent Runner。它先是一套持久化终端系统，再在终端之上叠加 Agent 语义：

@@ -1,12 +1,10 @@
 import { EventEmitter } from 'node:events'
 import { randomUUID } from 'node:crypto'
 import type { Duplex } from 'node:stream'
-import { AgentProviderRegistry, type AgentProvider } from './agent-provider.js'
 import {
   LocalAgentMuxDaemonConnector,
   type AgentMuxDaemonConnector
 } from './daemon-connector.js'
-import { LocalExecutionHost } from './execution-host.js'
 import { AgentMuxError } from './errors.js'
 import {
   AGENTMUX_DAEMON_MAX_FRAME_BYTES,
@@ -50,25 +48,23 @@ type CreateBase = {
   env?: Readonly<Record<string, string>>
 }
 
-export type AgentMuxTerminalCreateInput = CreateBase
+export type AgentMuxDaemonTerminalCreateInput = CreateBase
 
-export type AgentMuxAgentCreateInput = CreateBase & {
+export type AgentMuxDaemonAgentCreateInput = CreateBase & {
+  semanticSessionId: string
   agentId: AgentId
-  prompt?: string
-  args?: readonly string[]
-  commandOverride?: string
+  command: string
+  args: readonly string[]
 }
 
-export type AgentMuxClientOptions = {
+export type AgentMuxDaemonClientOptions = {
   socketPath?: string
   connector?: AgentMuxDaemonConnector
   expectedHostId?: string
   expectedBuildIdentity?: string
-  providers?: readonly AgentProvider[]
 }
 
-export class AgentMuxClient {
-  readonly providers: AgentProviderRegistry
+export class AgentMuxDaemonClient {
   private readonly connector: AgentMuxDaemonConnector
   private readonly expectedHostId: string | undefined
   private readonly expectedBuildIdentity: string | undefined
@@ -77,7 +73,6 @@ export class AgentMuxClient {
   private readonly messageQueue: string[] = []
   private readonly sessionStates = new Map<string, ClientSessionState>()
   private readonly inputTails = new Map<string, Promise<void>>()
-  private readonly localHost = new LocalExecutionHost()
   private connection: Duplex | null = null
   private connecting: Promise<void> | null = null
   private input = ''
@@ -85,7 +80,7 @@ export class AgentMuxClient {
   private processingMessages = false
   private hello: AgentMuxDaemonHello | null = null
 
-  constructor(options: AgentMuxClientOptions = {}) {
+  constructor(options: AgentMuxDaemonClientOptions = {}) {
     if (options.socketPath && options.connector) {
       throw new AgentMuxError('Choose either a local socket path or a daemon connector.', 'INVALID_CLIENT_TRANSPORT')
     }
@@ -94,7 +89,6 @@ export class AgentMuxClient {
     )
     this.expectedHostId = options.expectedHostId ?? this.connector.expectedHostId
     this.expectedBuildIdentity = options.expectedBuildIdentity ?? this.connector.expectedBuildIdentity
-    this.providers = new AgentProviderRegistry(options.providers)
   }
 
   async connect(): Promise<void> {
@@ -186,6 +180,10 @@ export class AgentMuxClient {
     return () => this.events.off('event', listener)
   }
 
+  isConnected(): boolean {
+    return this.hello !== null && this.connection !== null && !this.connection.destroyed
+  }
+
   async listSessions(): Promise<AgentMuxDaemonSession[]> {
     return await this.request('list', {}) as AgentMuxDaemonSession[]
   }
@@ -199,12 +197,17 @@ export class AgentMuxClient {
     return await this.request('find-create-operation', { createOperationId }) as AgentMuxDaemonSession | null
   }
 
-  async createTerminal(input: AgentMuxTerminalCreateInput): Promise<AgentMuxDaemonSession> {
+  async probeExecutable(executable: string): Promise<boolean> {
+    return await this.request('probe-executable', { executable }) as boolean
+  }
+
+  async createTerminal(input: AgentMuxDaemonTerminalCreateInput): Promise<AgentMuxDaemonSession> {
     const request: AgentMuxDaemonCreateRequest = {
       sessionId: input.sessionId,
       createOperationId: input.createOperationId,
       kind: 'terminal',
       agentId: null,
+      semanticSessionId: null,
       cwd: input.cwd,
       cols: input.cols ?? 80,
       rows: input.rows ?? 24,
@@ -215,29 +218,19 @@ export class AgentMuxClient {
     return session
   }
 
-  async createAgent(input: AgentMuxAgentCreateInput): Promise<AgentMuxDaemonSession> {
-    const provider = this.providers.get(input.agentId)
-    if (!(await provider.detect(this.localHost, input.commandOverride))) {
-      throw new AgentMuxError(`${provider.label} is not installed on this host.`, 'AGENT_NOT_FOUND')
-    }
-    const plan = provider.buildLaunch({
-      workspacePath: input.cwd,
-      prompt: input.prompt ?? '',
-      args: input.args ?? [],
-      env: input.env ?? {},
-      ...(input.commandOverride !== undefined ? { commandOverride: input.commandOverride } : {})
-    })
+  async createAgent(input: AgentMuxDaemonAgentCreateInput): Promise<AgentMuxDaemonSession> {
     const request: AgentMuxDaemonCreateRequest = {
       sessionId: input.sessionId,
       createOperationId: input.createOperationId,
       kind: 'agent',
-      agentId: provider.id,
+      agentId: input.agentId,
+      semanticSessionId: input.semanticSessionId,
       cwd: input.cwd,
       cols: input.cols ?? 80,
       rows: input.rows ?? 24,
-      env: plan.env,
-      command: plan.command,
-      args: plan.args
+      env: { ...input.env },
+      command: input.command,
+      args: [...input.args]
     }
     const session = await this.request('create', request) as AgentMuxDaemonSession
     this.rememberSession(session)
@@ -440,6 +433,7 @@ export type {
   AgentMuxDaemonDataEvent,
   AgentMuxDaemonEvent,
   AgentMuxDaemonExitEvent,
+  AgentMuxDaemonHookEvent,
   AgentMuxDaemonHello,
   AgentMuxDaemonInputAck,
   AgentMuxDaemonOutputAck,

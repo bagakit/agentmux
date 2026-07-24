@@ -18,7 +18,7 @@ import {
 } from '../src/ssh-remote-daemon.js'
 import { runProcess, type ProcessRunner } from '../src/process-runner.js'
 import {
-  AgentMuxClient,
+  AgentMuxDaemonClient,
   type AgentMuxDaemonDataEvent,
   type AgentMuxDaemonEvent
 } from '../src/daemon-client.js'
@@ -27,11 +27,13 @@ import {
   type AgentMuxSshSpawn,
   type AgentMuxSshTarget
 } from '../src/ssh-daemon-connector.js'
+import type { AgentMuxClientEvent } from '../src/types.js'
 
 const execFileAsync = promisify(execFile)
 const repositoryRoot = resolve(import.meta.dirname, '../../..')
 const fakeSshPath = fileURLToPath(new URL('./fixtures/fake-system-ssh.mjs', import.meta.url))
 const stubbornTreePath = fileURLToPath(new URL('./fixtures/stubborn-process-tree.mjs', import.meta.url))
+const hookAgentPath = fileURLToPath(new URL('./fixtures/fake-hook-agent.mjs', import.meta.url))
 const supportedPlatform = (
   (process.platform === 'darwin' || process.platform === 'linux') &&
   (process.arch === 'arm64' || process.arch === 'x64')
@@ -219,8 +221,8 @@ describe.runIf(supportedPlatform)('AgentMux isolated system SSH remote daemon', 
   function clientExpecting(
     current: AgentMuxRemoteInstallation,
     expected: { hostId: string; buildIdentity: string }
-  ): AgentMuxClient {
-    return new AgentMuxClient({
+  ): AgentMuxDaemonClient {
+    return new AgentMuxDaemonClient({
       connector: new SshAgentMuxDaemonConnector({
         target: sshTarget(),
         remoteNodePath: 'node',
@@ -245,7 +247,7 @@ describe.runIf(supportedPlatform)('AgentMux isolated system SSH remote daemon', 
     expect((await stat(current.remoteAgentMuxdPath)).isFile()).toBe(true)
     const firstIdentity = await manager.audit(current)
 
-    const client = manager.createClient(current)
+    const client = manager.createDaemonClient(current)
     clients.push(client)
     const events: AgentMuxDaemonEvent[] = []
     client.onEvent((event) => events.push(event))
@@ -303,6 +305,50 @@ describe.runIf(supportedPlatform)('AgentMux isolated system SSH remote daemon', 
     await client.stop(replayed.session)
     client.disconnect()
 
+    const semanticClient = manager.createClient(current)
+    clients.push(semanticClient)
+    const semanticEvents: AgentMuxClientEvent[] = []
+    semanticClient.onEvent((event) => semanticEvents.push(event))
+    await semanticClient.connect()
+    const semantic = await semanticClient.createAgent({
+      semanticSessionId: 'ssh-semantic',
+      daemonSessionId: 'ssh-semantic-run',
+      createOperationId: 'ssh-semantic-create',
+      agentId: 'codex',
+      workspacePath: process.cwd(),
+      prompt: 'remote-hook',
+      args: [hookAgentPath],
+      commandOverride: process.execPath
+    })
+    await waitForCondition('the remote semantic Hook event', () => (
+      semanticClient.semanticSession(semantic.semanticSessionId).nativeHandle?.kind === 'provider'
+    ))
+    await waitForCondition('the remote semantic terminal output', () => semanticEvents.some((event) => (
+      event.type === 'terminal-output' && event.data.includes('hook-agent-ready:remote-hook')
+    )))
+    expect(semanticEvents).toContainEqual(expect.objectContaining({
+      type: 'semantic-status',
+      evidence: expect.objectContaining({ source: 'native-hook' })
+    }))
+    expect(semanticEvents).toContainEqual(expect.objectContaining({
+      type: 'terminal-output',
+      evidence: expect.objectContaining({ source: 'terminal-output' })
+    }))
+    crashTransport()
+    await waitForCondition('the semantic SSH client to observe its partition', async () => {
+      try {
+        await semanticClient.listRuns()
+        return false
+      } catch {
+        return true
+      }
+    })
+    await semanticClient.connect()
+    const semanticReattach = await semanticClient.reattachAgent(semantic.semanticSessionId)
+    expect(semanticReattach.session.daemonSession).toEqual(semantic.daemonSession)
+    await semanticClient.stopAgent(semantic.semanticSessionId)
+    semanticClient.disconnect()
+
     await manager.uninstall(current)
     installation = null
     daemonPid = 0
@@ -312,7 +358,7 @@ describe.runIf(supportedPlatform)('AgentMux isolated system SSH remote daemon', 
 
   it('recovers a Create whose response was lost with the crashed SSH client', async () => {
     const current = await installAndActivate()
-    const client = manager.createClient(current)
+    const client = manager.createDaemonClient(current)
     clients.push(client)
     await client.connect()
     const create = client.createTerminal({
@@ -359,7 +405,7 @@ describe.runIf(supportedPlatform)('AgentMux isolated system SSH remote daemon', 
     await expect(wrongHost.connect()).rejects.toMatchObject({ code: 'DAEMON_HOST_MISMATCH' })
 
     await writeFile(join(remoteHome, '.agentmux-ssh-unavailable'), 'offline\n')
-    const unavailable = manager.createClient(current)
+    const unavailable = manager.createDaemonClient(current)
     clients.push(unavailable)
     await expect(unavailable.connect()).rejects.toMatchObject({ code: 'SSH_TRANSPORT_FAILED' })
   }, 25_000)
@@ -385,7 +431,7 @@ describe.runIf(supportedPlatform)('AgentMux isolated system SSH remote daemon', 
 
   it('uses the remote daemon to force-stop a stubborn Agent process tree', async () => {
     const current = await installAndActivate()
-    const client = manager.createClient(current)
+    const client = manager.createDaemonClient(current)
     clients.push(client)
     const events: AgentMuxDaemonEvent[] = []
     client.onEvent((event) => events.push(event))
@@ -394,8 +440,9 @@ describe.runIf(supportedPlatform)('AgentMux isolated system SSH remote daemon', 
       sessionId: 'ssh-stubborn-tree',
       createOperationId: 'ssh-stubborn-tree-operation',
       agentId: 'codex',
+      semanticSessionId: 'semantic-ssh-stubborn-tree',
+      command: process.execPath,
       args: [stubbornTreePath],
-      commandOverride: process.execPath,
       cwd: process.cwd()
     })
     let childPid = 0

@@ -3,7 +3,8 @@ import { createReadStream } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { posix } from 'node:path'
 import { pipeline } from 'node:stream/promises'
-import { AgentMuxClient } from './daemon-client.js'
+import { AgentMuxClient, type AgentMuxClientOptions } from './client.js'
+import { AgentMuxDaemonClient } from './daemon-client.js'
 import { AgentMuxError, CommandExecutionError } from './errors.js'
 import { runProcess, type ProcessRunner } from './process-runner.js'
 import {
@@ -88,6 +89,11 @@ export type AgentMuxRemoteInstallation = {
   remoteSocketPath: string
   remoteStatePath: string
 }
+
+export type AgentMuxSshClientOptions = Omit<
+  AgentMuxClientOptions,
+  'socketPath' | 'connector' | 'expectedHostId' | 'expectedBuildIdentity'
+>
 
 export type AgentMuxSshRemoteDaemonOptions = {
   target: AgentMuxSshTarget
@@ -239,18 +245,23 @@ export class AgentMuxSshRemoteDaemon {
     return assertRemoteIdentity(parseJsonLine(result.stdout, 'Remote daemon status'), installation)
   }
 
-  createClient(installation: AgentMuxRemoteInstallation): AgentMuxClient {
+  createDaemonClient(installation: AgentMuxRemoteInstallation): AgentMuxDaemonClient {
+    this.assertInstallation(installation)
+    return new AgentMuxDaemonClient({
+      connector: this.connector(installation),
+      expectedHostId: installation.hostId,
+      expectedBuildIdentity: installation.buildIdentity
+    })
+  }
+
+  createClient(
+    installation: AgentMuxRemoteInstallation,
+    options: AgentMuxSshClientOptions = {}
+  ): AgentMuxClient {
     this.assertInstallation(installation)
     return new AgentMuxClient({
-      connector: new SshAgentMuxDaemonConnector({
-        target: this.options.target,
-        remoteNodePath: this.remoteNodePath,
-        remoteAgentMuxdPath: installation.remoteAgentMuxdPath,
-        remoteSocketPath: installation.remoteSocketPath,
-        expectedBuildIdentity: installation.buildIdentity,
-        sshCommand: this.sshCommand,
-        spawnProcess: this.spawnProcess
-      }),
+      ...options,
+      connector: this.connector(installation),
       expectedHostId: installation.hostId,
       expectedBuildIdentity: installation.buildIdentity
     })
@@ -269,6 +280,18 @@ export class AgentMuxSshRemoteDaemon {
       '--build-id',
       installation.buildIdentity
     ])
+  }
+
+  private connector(installation: AgentMuxRemoteInstallation): SshAgentMuxDaemonConnector {
+    return new SshAgentMuxDaemonConnector({
+      target: this.options.target,
+      remoteNodePath: this.remoteNodePath,
+      remoteAgentMuxdPath: installation.remoteAgentMuxdPath,
+      remoteSocketPath: installation.remoteSocketPath,
+      expectedBuildIdentity: installation.buildIdentity,
+      sshCommand: this.sshCommand,
+      spawnProcess: this.spawnProcess
+    })
   }
 
   async upgrade(

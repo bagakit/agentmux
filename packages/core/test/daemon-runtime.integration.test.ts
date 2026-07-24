@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
-  AgentMuxClient,
+  AgentMuxDaemonClient,
   type AgentMuxDaemonAttachResult,
   type AgentMuxDaemonDataEvent,
   type AgentMuxDaemonEvent
@@ -28,7 +28,7 @@ async function waitForData(
 }
 
 async function waitForReplay(
-  client: AgentMuxClient,
+  client: AgentMuxDaemonClient,
   sessionId: string,
   afterSequence: number,
   expectedText: string,
@@ -47,7 +47,7 @@ describe('agentmuxd local node-pty vertical slice', () => {
   let temporaryDirectory: string
   let socketPath: string
   let server: AgentMuxDaemonServer
-  const clients: AgentMuxClient[] = []
+  const clients: AgentMuxDaemonClient[] = []
 
   beforeEach(async () => {
     temporaryDirectory = await mkdtemp(join(tmpdir(), 'agentmuxd-test-'))
@@ -62,8 +62,8 @@ describe('agentmuxd local node-pty vertical slice', () => {
     await rm(temporaryDirectory, { recursive: true, force: true })
   })
 
-  async function connect(): Promise<AgentMuxClient> {
-    const client = new AgentMuxClient({ socketPath })
+  async function connect(): Promise<AgentMuxDaemonClient> {
+    const client = new AgentMuxDaemonClient({ socketPath })
     clients.push(client)
     await client.connect()
     return client
@@ -122,7 +122,7 @@ describe('agentmuxd local node-pty vertical slice', () => {
     expect(await client.listSessions()).toEqual([])
   })
 
-  it('launches Codex through the Provider plan and streams input and exit from the same node-pty owner', async () => {
+  it('launches one Agent command and streams input and exit from the same node-pty owner', async () => {
     const client = await connect()
     const events: AgentMuxDaemonEvent[] = []
     client.onEvent((event) => events.push(event))
@@ -130,9 +130,9 @@ describe('agentmuxd local node-pty vertical slice', () => {
       sessionId: 'codex-provider-slice',
       createOperationId: 'create-codex-provider-slice',
       agentId: 'codex',
-      prompt: 'review-the-daemon',
-      args: [fixturePath],
-      commandOverride: process.execPath,
+      semanticSessionId: 'semantic-codex-provider-slice',
+      command: process.execPath,
+      args: [fixturePath, 'review-the-daemon'],
       cwd: process.cwd()
     })
 

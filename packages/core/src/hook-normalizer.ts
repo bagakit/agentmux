@@ -2,11 +2,30 @@ import { randomUUID } from 'node:crypto'
 import type {
   AgentActivity,
   AgentId,
+  AgentNativeSessionHandle,
   AgentSemanticState,
   AgentStatus,
   NativeHookEnvelope,
   NormalizedHookEvent
 } from './types.js'
+
+const MAX_NATIVE_SESSION_ID_BYTES = 512
+const MAX_TRANSCRIPT_PATH_BYTES = 4 * 1024
+
+export type AgentNativeHookStateRule = {
+  events: readonly string[]
+  state: AgentSemanticState
+  toolNames?: readonly string[]
+}
+
+export type AgentNativeHookSpecification = {
+  rules: readonly AgentNativeHookStateRule[]
+  nativeHandle?: {
+    sessionIdKeys: readonly string[]
+    transcriptPathKeys?: readonly string[]
+    requireTranscriptPath?: boolean
+  }
+}
 
 function stringField(payload: Record<string, unknown>, ...names: string[]): string | undefined {
   for (const name of names) {
@@ -16,33 +35,61 @@ function stringField(payload: Record<string, unknown>, ...names: string[]): stri
   return undefined
 }
 
-function eventState(agentId: AgentId, eventName: string, payload: Record<string, unknown>): AgentSemanticState {
+function hasUnsafeControlCharacters(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index)
+    if (code <= 0x1f || code === 0x7f) return true
+  }
+  return false
+}
+
+function boundedField(
+  payload: Record<string, unknown>,
+  names: readonly string[],
+  maxBytes: number
+): string | undefined {
+  const value = stringField(payload, ...names)
+  if (!value || Buffer.byteLength(value) > maxBytes || hasUnsafeControlCharacters(value)) return undefined
+  return value
+}
+
+function eventState(
+  specification: AgentNativeHookSpecification,
+  eventName: string,
+  payload: Record<string, unknown>
+): AgentSemanticState {
   const toolName = stringField(payload, 'tool_name', 'toolName', 'name')?.toLowerCase()
-  if (agentId === 'claude') {
-    if (eventName === 'PermissionRequest' || (eventName === 'PreToolUse' && toolName === 'askuserquestion')) return 'waiting'
-    if (['Stop', 'StopFailure'].includes(eventName)) return 'done'
-    if (['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'PreCompact'].includes(eventName)) return 'working'
-  }
-  if (agentId === 'codex') {
-    if (eventName === 'PermissionRequest' || (eventName === 'PreToolUse' && ['request_user_input', 'askuserquestion'].includes(toolName ?? ''))) return 'waiting'
-    if (eventName === 'Stop') return 'done'
-    if (['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'SubagentStart'].includes(eventName)) return 'working'
-  }
-  if (agentId === 'pi') {
-    if (['tool_call', 'tool_execution_start'].includes(eventName) && ['ask_user_question', 'askuserquestion'].includes(toolName ?? '')) return 'blocked'
-    if (['agent_end', 'agent_settled'].includes(eventName)) return 'done'
-    if (['before_agent_start', 'agent_start', 'tool_call', 'tool_execution_start', 'tool_execution_end', 'message_end'].includes(eventName)) return 'working'
-  }
-  if (agentId === 'hermes') {
-    if (eventName === 'pre_approval_request') return 'waiting'
-    if (['post_llm_call', 'on_session_end', 'on_session_finalize', 'on_session_reset'].includes(eventName)) return 'done'
-    if (['on_session_start', 'pre_llm_call', 'pre_tool_call', 'post_tool_call', 'post_approval_response'].includes(eventName)) return 'working'
+  for (const rule of specification.rules) {
+    if (!rule.events.includes(eventName)) continue
+    if (rule.toolNames && !rule.toolNames.includes(toolName ?? '')) continue
+    return rule.state
   }
   return 'unknown'
 }
 
+function nativeHandle(
+  agentId: AgentId,
+  specification: AgentNativeHookSpecification,
+  payload: Record<string, unknown>
+): AgentNativeSessionHandle | undefined {
+  const definition = specification.nativeHandle
+  if (!definition) return undefined
+  const sessionId = boundedField(payload, definition.sessionIdKeys, MAX_NATIVE_SESSION_ID_BYTES)
+  if (!sessionId || sessionId.startsWith('-')) return undefined
+  const transcriptPath = definition.transcriptPathKeys
+    ? boundedField(payload, definition.transcriptPathKeys, MAX_TRANSCRIPT_PATH_BYTES)
+    : undefined
+  if (definition.requireTranscriptPath && !transcriptPath) return undefined
+  return {
+    kind: 'provider',
+    providerId: agentId,
+    sessionId,
+    ...(transcriptPath ? { transcriptPath } : {})
+  }
+}
+
 function activity(
-  sessionId: string,
+  semanticSessionId: string,
   kind: AgentActivity['kind'],
   title: string,
   eventName: string,
@@ -50,7 +97,7 @@ function activity(
 ): AgentActivity {
   return {
     id: randomUUID(),
-    sessionId,
+    sessionId: semanticSessionId,
     kind,
     source: 'native-hook',
     createdAt: Date.now(),
@@ -83,38 +130,56 @@ function buildActivities(
         ? undefined
         : JSON.stringify(rawToolInput)
   const activities: AgentActivity[] = []
-  if (prompt) activities.push(activity(envelope.sessionId, 'prompt', 'Prompt received', eventName, { content: prompt }))
+  if (prompt) {
+    activities.push(activity(envelope.semanticSessionId, 'prompt', 'Prompt received', eventName, { content: prompt }))
+  }
   if (toolName) {
     activities.push(
-      activity(envelope.sessionId, state === 'waiting' || state === 'blocked' ? 'permission' : 'tool', toolName, eventName, {
+      activity(
+        envelope.semanticSessionId,
+        state === 'waiting' || state === 'blocked' ? 'permission' : 'tool',
         toolName,
-        ...(toolInput ? { toolInput } : {})
-      })
+        eventName,
+        { toolName, ...(toolInput ? { toolInput } : {}) }
+      )
     )
   }
-  if (assistant) activities.push(activity(envelope.sessionId, 'assistant', 'Assistant response', eventName, { content: assistant }))
+  if (assistant) {
+    activities.push(
+      activity(envelope.semanticSessionId, 'assistant', 'Assistant response', eventName, { content: assistant })
+    )
+  }
   if (activities.length === 0) {
-    activities.push(activity(envelope.sessionId, 'lifecycle', eventName, eventName))
+    activities.push(activity(envelope.semanticSessionId, 'lifecycle', eventName, eventName))
   }
   return activities
 }
 
-export function normalizeNativeHook(envelope: NativeHookEnvelope): NormalizedHookEvent {
+export function normalizeNativeHook(
+  specification: AgentNativeHookSpecification,
+  envelope: NativeHookEnvelope
+): NormalizedHookEvent {
   const payload = envelope.payload ?? {}
   const eventName = envelope.eventName ?? stringField(payload, 'hook_event_name', 'hookEventName') ?? 'unknown'
-  const semanticState = eventState(envelope.agentId, eventName, payload)
+  const semanticState = eventState(specification, eventName, payload)
   const status: AgentStatus = {
     state: semanticState === 'unknown' ? 'running' : semanticState,
     source: 'native-hook',
     observedAt: Date.now(),
     detail: eventName
   }
+  const handle = nativeHandle(envelope.agentId, specification, payload)
   return {
-    sessionId: envelope.sessionId,
+    semanticSessionId: envelope.semanticSessionId,
+    daemonSession: {
+      sessionId: envelope.daemonSessionId,
+      incarnationId: envelope.incarnationId
+    },
     agentId: envelope.agentId,
     eventName,
     semanticState,
     status,
-    activities: buildActivities(envelope, eventName, payload, semanticState)
+    activities: buildActivities(envelope, eventName, payload, semanticState),
+    ...(handle ? { nativeHandle: handle } : {})
   }
 }
