@@ -19,7 +19,7 @@ function session(id: string): AgentMuxStoredAgentSession {
     agentId: 'codex',
     hostId: 'local',
     workspacePath: _hygiene_fixturePath("repo"),
-    run: { runId: `${id}-run`, incarnationId: `${id}-incarnation` },
+    run: { runId: `${id}-run` },
     outputCursorBytes: 0,
     createdAt: 1,
     updatedAt: 1

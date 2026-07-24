@@ -1,4 +1,3 @@
-const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentMuxAgentSessionStore } from '@agentmux/core'
 import type { AppConfig, SshHostConfig } from '../src/shared/contracts.js'
@@ -76,13 +75,7 @@ const remoteHost: SshHostConfig = {
   id: 'remote',
   kind: 'ssh',
   label: 'Build box',
-  hostname: 'build.example.test',
-  runtime: {
-    buildIdentity: '0.1.0',
-    remoteNodePath: 'node',
-    remoteEntrypointPath: _hygiene_fixturePath("home/build/.agentmux/versions/0.1.0/package/dist/agentmuxd.js"),
-    remoteEndpointPath: _hygiene_fixturePath("home/build/.agentmux/agentmuxd.sock")
-  }
+  hostname: 'build.example.test'
 }
 
 async function configuredController(): Promise<RuntimeController> {

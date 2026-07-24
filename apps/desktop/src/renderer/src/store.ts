@@ -161,18 +161,20 @@ const detectionRequestIds = new Map<string, number>()
 const hostCheckRequestIds = new Map<string, number>()
 let runtimeSubscriptionCount = 0
 
-window.addEventListener('agentmux:resource-owner-counts', (event) => {
-  const target = event as CustomEvent<Record<string, number | boolean>>
-  const resourceWindow = window as typeof window & { __agentmuxMonacoModelCount?: () => number }
-  Object.assign(target.detail, rendererResourceOwnerCounts({
-    documentCount: Object.keys(useAppStore.getState().documents).length,
-    runtimeSubscriptionCount,
-    ...(resourceWindow.__agentmuxMonacoModelCount
-      ? { monacoModelCount: resourceWindow.__agentmuxMonacoModelCount }
-      : {})
-  }))
-  target.detail.observed = true
-})
+if (typeof window !== 'undefined') {
+  window.addEventListener('agentmux:resource-owner-counts', (event) => {
+    const target = event as CustomEvent<Record<string, number | boolean>>
+    const resourceWindow = window as typeof window & { __agentmuxMonacoModelCount?: () => number }
+    Object.assign(target.detail, rendererResourceOwnerCounts({
+      documentCount: Object.keys(useAppStore.getState().documents).length,
+      runtimeSubscriptionCount,
+      ...(resourceWindow.__agentmuxMonacoModelCount
+        ? { monacoModelCount: resourceWindow.__agentmuxMonacoModelCount }
+        : {})
+    }))
+    target.detail.observed = true
+  })
+}
 
 function newPaneId(): string {
   return `pane-${crypto.randomUUID()}`
@@ -619,7 +621,6 @@ export const useAppStore = create<AppState>((set, get) => ({
         workspacePath: workspace.path,
         prompt,
         agentSessionId: sessionId,
-        runId: sessionId,
         createOperationId: crypto.randomUUID()
       })
       if (!ownsSessionLaunch(get().tabs[tabId], 'agent', sessionId)) {
@@ -664,7 +665,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       const session = await api.sessions.launchTerminal({
         hostId: workspace.hostId,
         workspacePath: workspace.path,
-        runId: sessionId,
         createOperationId: crypto.randomUUID()
       })
       if (!ownsSessionLaunch(get().tabs[tabId], 'terminal', sessionId)) {
@@ -673,7 +673,17 @@ export const useAppStore = create<AppState>((set, get) => ({
         })
         return
       }
-      set((current) => reduceSessionLaunchAttached(current, tabId, session))
+      set((current) => {
+        const tab = current.tabs[tabId]
+        if (!ownsSessionLaunch(tab, 'terminal', sessionId) || tab?.kind !== 'terminal') return current
+        return reduceSessionLaunchAttached({
+          ...current,
+          tabs: {
+            ...current.tabs,
+            [tabId]: { ...tab, sessionId: session.id }
+          }
+        }, tabId, session)
+      })
     } catch (error) {
       if (!ownsSessionLaunch(get().tabs[tabId], 'terminal', sessionId)) return
       set((current) => reduceSessionLaunchFailed(current, tabId, 'terminal', sessionId, 'picker'))

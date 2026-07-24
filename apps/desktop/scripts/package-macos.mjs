@@ -149,6 +149,8 @@ async function copyRuntimeApplication(appPath) {
   const coreRuntime = join(appResources, 'node_modules', '@agentmux', 'core')
   await mkdir(coreRuntime, { recursive: true })
   await cp(join(coreRoot, 'dist'), join(coreRuntime, 'dist'), { recursive: true })
+  await cp(join(coreRoot, 'vendor'), join(coreRuntime, 'vendor'), { recursive: true })
+  await cp(join(coreRoot, 'bin'), join(coreRuntime, 'bin'), { recursive: true })
   const coreManifest = JSON.parse(await readFile(join(coreRoot, 'package.json'), 'utf8'))
   await writeFile(join(coreRuntime, 'package.json'), `${JSON.stringify({
     name: coreManifest.name,
@@ -156,7 +158,10 @@ async function copyRuntimeApplication(appPath) {
     type: coreManifest.type,
     main: coreManifest.main,
     exports: coreManifest.exports,
-    engines: coreManifest.engines
+    engines: coreManifest.engines,
+    os: coreManifest.os,
+    cpu: coreManifest.cpu,
+    bin: coreManifest.bin
   }, null, 2)}\n`)
   await materializeDependencies(
     coreRoot,
@@ -164,7 +169,11 @@ async function copyRuntimeApplication(appPath) {
     join(coreRuntime, 'node_modules')
   )
   await materializeDependency(desktopRoot, 'zod', join(appResources, 'node_modules', 'zod'))
-  await pruneNodePty(coreRuntime)
+  await Promise.all([
+    chmod(join(coreRuntime, 'vendor', 'ctxmux', 'darwin-arm64', 'bin', 'ctxmux'), 0o755),
+    chmod(join(coreRuntime, 'vendor', 'ctxmux', 'darwin-arm64', 'bin', 'ctxmuxd'), 0o755),
+    chmod(join(coreRuntime, 'bin', 'agentmux.js'), 0o755)
+  ])
 }
 
 async function materializeDependencies(sourcePackage, dependencies, destination) {
@@ -205,28 +214,6 @@ async function resolvePackageRoot(sourcePackage, packageName) {
     current = parent
   }
   throw new Error(`Could not resolve package root for ${packageName} from ${sourcePackage}.`)
-}
-
-async function pruneNodePty(coreRuntime) {
-  const nodePty = await realpath(join(coreRuntime, 'node_modules', 'node-pty'))
-  const prebuilds = join(nodePty, 'prebuilds')
-  const target = `${process.platform}-${process.arch}`
-  for (const entry of await readdir(prebuilds, { withFileTypes: true })) {
-    if (entry.isDirectory() && entry.name !== target) {
-      await rm(join(prebuilds, entry.name), { recursive: true, force: true })
-    }
-  }
-  for (const retired of ['binding.gyp', 'scripts', 'src', 'third_party', 'typings', 'README.md']) {
-    await rm(join(nodePty, retired), { recursive: true, force: true })
-  }
-  const helper = join(prebuilds, target, 'spawn-helper')
-  const nativeModule = join(prebuilds, target, 'pty.node')
-  assert(await pathExists(nativeModule), `node-pty is missing ${target}/pty.node.`)
-  assert(await pathExists(helper), `node-pty is missing ${target}/spawn-helper.`)
-  await chmod(helper, 0o755)
-  const architectures = (await run('lipo', ['-archs', nativeModule], { capture: true })).stdout.trim().split(/\s+/)
-  const expectedArchitecture = process.arch === 'x64' ? 'x86_64' : process.arch
-  assert(architectures.includes(expectedArchitecture), `node-pty architecture is ${architectures.join(', ')}, expected ${expectedArchitecture}.`)
 }
 
 async function auditBundleSymlinks(root) {
@@ -289,39 +276,23 @@ async function verifyIdentity(appPath) {
 }
 
 async function verifyPackagedRuntime(appPath, verificationRoot) {
-  const executable = join(appPath, 'Contents', 'MacOS', PRODUCT_NAME)
   const appResources = join(appPath, 'Contents', 'Resources', 'app')
   const coreRuntime = join(appResources, 'node_modules', '@agentmux', 'core')
-  const isolatedHome = join(verificationRoot, 'home')
-  await mkdir(isolatedHome, { recursive: true })
-  const environment = {
-    HOME: isolatedHome,
-    PATH: process.env.PATH,
-    SHELL: '/bin/sh',
-    TMPDIR: tmpdir(),
-    LANG: 'C.UTF-8',
-    NODE_PATH: '',
-    ELECTRON_RUN_AS_NODE: '1'
-  }
-  const daemonHelp = await run(executable, [join(coreRuntime, 'dist', 'agentmuxd.js'), '--help'], {
-    capture: true,
-    env: environment
-  })
-  assert(daemonHelp.stdout.includes('agentmuxd serve'), 'Packaged daemon entry did not boot under the packaged runtime.')
-  const nodePtyProbe = [
-    "const {createRequire}=require('node:module')",
-    'const requireFromCore=createRequire(process.argv[1])',
-    "const pty=requireFromCore('node-pty')",
-    "const child=pty.spawn('/bin/sh',['-c',\"printf 'agentmux-packaged-pty'\"],{name:'xterm-256color',cols:80,rows:24,cwd:process.cwd(),env:{PATH:process.env.PATH,TERM:'xterm-256color'}})",
-    "let output=''",
-    "child.onData((data)=>{output+=data})",
-    "child.onExit(()=>{process.stdout.write(output);process.exit(output.includes('agentmux-packaged-pty')?0:2)})"
-  ].join(';')
-  const ptyResult = await run(executable, ['-e', nodePtyProbe, join(coreRuntime, 'package.json')], {
-    capture: true,
-    env: environment
-  })
-  assert(ptyResult.stdout.includes('agentmux-packaged-pty'), 'Packaged node-pty did not create a PTY.')
+  const binaryRoot = join(coreRuntime, 'vendor', 'ctxmux', 'darwin-arm64', 'bin')
+  const [cli, daemon] = await Promise.all([
+    run(join(binaryRoot, 'ctxmux'), ['--version'], { capture: true }),
+    run(join(binaryRoot, 'ctxmuxd'), ['--version'], { capture: true })
+  ])
+  assert(cli.stdout.trim() === 'ctxmux 0.1.0 (protocol 9)', 'Packaged ctxmux identity is wrong.')
+  assert(daemon.stdout.trim() === 'ctxmuxd 0.1.0 (protocol 9)', 'Packaged ctxmuxd identity is wrong.')
+  const manifest = JSON.parse(await readFile(
+    join(coreRuntime, 'vendor', 'ctxmux', 'darwin-arm64', 'manifest.json'),
+    'utf8'
+  ))
+  assert(
+    manifest.source.commit === '3b94288c3a7896bb355e028135409c8e8bbaf764',
+    'Packaged ctxmux manifest commit is wrong.'
+  )
 }
 
 async function processIdsForApplication(appPath) {
@@ -341,7 +312,12 @@ async function verifyLaunchServices(appPath, verificationRoot) {
   const processTemporaryDirectory = await mkdtemp(join(tmpdir(), 'amx-smoke-'))
   const stdoutPath = join(verificationRoot, 'desktop-stdout.log')
   const stderrPath = join(verificationRoot, 'desktop-stderr.log')
-  const endpointPath = join(processTemporaryDirectory, `agentmux-${process.getuid()}`, 'agentmuxd.sock')
+  const endpointPath = join(
+    processTemporaryDirectory,
+    `agentmux-${process.getuid()}`,
+    'ctxmux',
+    'ctxmux.sock'
+  )
   const executable = join(appPath, 'Contents', 'MacOS', PRODUCT_NAME)
   const daemonEntrypoint = join(
     appPath,
@@ -351,8 +327,11 @@ async function verifyLaunchServices(appPath, verificationRoot) {
     'node_modules',
     '@agentmux',
     'core',
-    'dist',
-    'agentmuxd.js'
+    'vendor',
+    'ctxmux',
+    'darwin-arm64',
+    'bin',
+    'ctxmuxd'
   )
   await mkdir(userData, { recursive: true })
   const before = new Set(await processIdsForApplication(appPath))
@@ -380,27 +359,17 @@ async function verifyLaunchServices(appPath, verificationRoot) {
     assert(remaining.length === 0, `Packaged Desktop left ${remaining.length} process(es) after the smoke run.`)
   } finally {
     try {
-      if (await pathExists(endpointPath)) {
-        await run(executable, [
-          daemonEntrypoint,
-          'shutdown',
-          '--socket', endpointPath,
-          '--host-id', 'local',
-          '--build-id', manifest.version
-        ], {
-          capture: true,
-          env: {
-            HOME: join(verificationRoot, 'home'),
-            PATH: process.env.PATH,
-            SHELL: '/bin/sh',
-            TMPDIR: processTemporaryDirectory,
-            LANG: 'C.UTF-8',
-            NODE_PATH: '',
-            ELECTRON_RUN_AS_NODE: '1'
-          }
-        })
+      const processes = await run('ps', ['-axo', 'pid=,command='], { capture: true })
+      for (const line of processes.stdout.split('\n')) {
+        const match = /^\s*(\d+)\s+(.+)$/u.exec(line)
+        if (!match || !match[2].includes(daemonEntrypoint) || !match[2].includes(endpointPath)) continue
+        process.kill(Number(match[1]), 'SIGTERM')
       }
-      assert(!await pathExists(endpointPath), 'Launch smoke daemon endpoint survived explicit shutdown.')
+      const deadline = Date.now() + 5_000
+      while (await pathExists(endpointPath) && Date.now() <= deadline) {
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, 20))
+      }
+      assert(!await pathExists(endpointPath), 'Launch smoke ctxmuxd endpoint survived scoped cleanup.')
     } finally {
       await rm(processTemporaryDirectory, { recursive: true, force: true })
     }

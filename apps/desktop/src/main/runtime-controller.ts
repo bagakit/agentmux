@@ -55,13 +55,13 @@ function workspaceLabel(config: AppConfig, hostId: string, path: string): string
 
 function projectSession(view: AgentMuxView, config: AppConfig): SessionSnapshot {
   const run = view.run
-  const observedAt = run.exitedAt ?? run.lostAt ?? run.createdAt
+  const observedAt = run.observedAt
   const status = {
-    state: run.state === 'lost' ? 'error' as const : run.state,
+    state: run.state === 'interrupted' ? 'error' as const : run.state,
     source: 'run-process' as const,
     observedAt,
-    ...(run.state === 'lost'
-      ? { detail: 'The Run Kernel restarted; this PTY can no longer be attached.' }
+    ...(run.state === 'interrupted'
+      ? { detail: run.interruptionReason ?? 'The Run owner interrupted this PTY.' }
       : run.exitSignal !== undefined
         ? { detail: `signal ${run.exitSignal}` }
         : {}),
@@ -95,7 +95,7 @@ function projectSession(view: AgentMuxView, config: AppConfig): SessionSnapshot 
     hostId: view.hostId,
     workspacePath: view.workspacePath,
     label: `Terminal · ${workspaceLabel(config, view.hostId, view.workspacePath)}`,
-    createdAt: run.createdAt,
+    createdAt: run.observedAt,
     updatedAt: observedAt,
     processState: run.state,
     status,
@@ -104,7 +104,7 @@ function projectSession(view: AgentMuxView, config: AppConfig): SessionSnapshot 
       kind: 'terminal',
       hostId: view.hostId,
       runId: run.runId,
-      run: { runId: run.runId, incarnationId: run.incarnationId }
+      run: { runId: run.runId }
     }
   }
 }
@@ -233,7 +233,6 @@ export class RuntimeController {
       env: agent.env,
       commandOverride: agent.command,
       ...(request.agentSessionId === undefined ? {} : { agentSessionId: request.agentSessionId }),
-      ...(request.runId === undefined ? {} : { runId: request.runId }),
       ...(request.createOperationId === undefined ? {} : { createOperationId: request.createOperationId }),
       ...(request.prompt === undefined ? {} : { prompt: request.prompt }),
       ...(request.cols === undefined ? {} : { cols: request.cols }),
@@ -244,15 +243,13 @@ export class RuntimeController {
 
   async launchTerminal(request: TerminalLaunchInput, config: AppConfig): Promise<SessionSnapshot> {
     const client = await this.connectedClient(request.hostId)
-    const runId = request.runId ?? randomUUID()
-    await client.createTerminal({
-      runId,
+    const run = await client.createTerminal({
       createOperationId: request.createOperationId ?? randomUUID(),
       workspacePath: request.workspacePath,
       ...(request.cols === undefined ? {} : { cols: request.cols }),
       ...(request.rows === undefined ? {} : { rows: request.rows })
     })
-    return await this.sessionById(client, runId, config)
+    return await this.sessionById(client, run.runId, config)
   }
 
   async attachSession(
@@ -354,7 +351,6 @@ export class RuntimeController {
             ...(config.port ? { port: config.port } : {}),
             ...(config.identityFile ? { identityFile: config.identityFile } : {})
           },
-          runtime: config.runtime
         })
       }
       return { id: config.id, executionHost, client }

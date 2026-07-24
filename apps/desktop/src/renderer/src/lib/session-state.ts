@@ -28,7 +28,7 @@ function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T
 }
 
 function sameRun(left: AgentMuxRunRef, right: AgentMuxRunRef): boolean {
-  return left.runId === right.runId && left.incarnationId === right.incarnationId
+  return left.runId === right.runId
 }
 
 function ownsRunEvent(
@@ -107,7 +107,7 @@ export function reduceRuntimeEvent(
     }
   }
   if (core.type === 'process-state') {
-    const displayState = core.state === 'lost' ? 'error' : core.state
+    const displayState = core.state === 'interrupted' ? 'error' : core.state
     return {
       ...state,
       sessions: state.sessions.map((item) =>
@@ -120,7 +120,7 @@ export function reduceRuntimeEvent(
                 state: displayState,
                 source: core.evidence.source,
                 observedAt: core.evidence.observedAt,
-                ...(core.state === 'lost' ? { detail: 'The Run Kernel no longer owns this PTY.' } : {}),
+                ...(core.state === 'interrupted' ? { detail: 'The Run owner interrupted this PTY.' } : {}),
                 ...(core.exitCode === undefined ? {} : { exitCode: core.exitCode })
               }
             }

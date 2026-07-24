@@ -23,13 +23,7 @@ const baseConfig: AppConfig = {
       id: 'remote',
       kind: 'ssh',
       label: 'Build box',
-      hostname: 'build.example.test',
-      runtime: {
-        buildIdentity: '0.1.0',
-        remoteNodePath: 'node',
-        remoteEntrypointPath: _hygiene_fixturePath("home/build/.agentmux/versions/0.1.0/package/dist/agentmuxd.js"),
-        remoteEndpointPath: _hygiene_fixturePath("home/build/.agentmux/agentmuxd.sock")
-      }
+      hostname: 'build.example.test'
     }
   ],
   agents: {

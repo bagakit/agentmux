@@ -111,7 +111,7 @@ AgentMux 不会在首个交付中静默修改 `~/.claude`、`~/.codex`、Hermes 
 T-011 把过时的 Session 混合模型直接替换为 Run、Agent Session、Attachment 与 View，不保留类型别名或 IPC 兼容层：
 
 ```ts
-type AgentMuxRunRef = { runId: string; incarnationId: string }
+type AgentMuxRunRef = { runId: string }
 type AgentMuxAgentSession = { agentSessionId: string; run: AgentMuxRunRef }
 type AgentMuxRunAttachment = { run: AgentMuxRun; replay: AgentMuxRunDataEvent[]; gap: AgentMuxRunReplayGap | null }
 type AgentMuxView = AgentMuxAgentView | AgentMuxTerminalView

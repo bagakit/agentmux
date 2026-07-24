@@ -230,7 +230,7 @@ describe('universal new tab transitions', () => {
           kind: 'agent',
           hostId: 'local',
           agentSessionId: sessionId,
-          run: { runId: sessionId, incarnationId: `${sessionId}-incarnation` }
+          run: { runId: sessionId }
         }
       }
       return launched
