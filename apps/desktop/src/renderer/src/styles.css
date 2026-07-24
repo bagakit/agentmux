@@ -684,6 +684,18 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   margin-top: 4px;
   margin-left: 4px;
 }
+.terminal-view__xterm--hydrating { visibility: hidden; }
+.terminal-hydration {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--text-3);
+  background: #000;
+  font-size: 10px;
+}
 .terminal-view .xterm-viewport { scrollbar-color: #2f3733 transparent; }
 .terminal-view .xterm-viewport::-webkit-scrollbar { width: 7px; }
 .terminal-view .xterm-viewport::-webkit-scrollbar-thumb { border-radius: 7px; background: #454d49; }

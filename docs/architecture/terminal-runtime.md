@@ -211,6 +211,15 @@ DOM 的 `ResizeObserver` 只说明容器几何发生了变化，不代表 xterm 
 （`terminal-viewport-sync.ts:77`–`:100`）：网格稳定或达到 8 帧上限后才执行 fit；若 xterm
 已经等于 proposal，则不做无效 fit。这样 divider 拖拽不会把每一帧都变成 Codex 的整屏重排。
 
+xterm 的 `onRender` 只用于证明首帧已经可测量：`TerminalView` 在收到首个 render 时先注销
+监听，再请求一次 viewport 同步。普通 TUI 输出不是 geometry 事件，绝不能持续进入 fit 链路；
+否则 Codex 重绘与一列宽度波动会形成 render → fit → PTY resize → render 的反馈环。
+
+Attach replay 是状态恢复，不是历史动画。`TerminalView` 将 CtxMux 返回的有序 replay chunk
+合并为一次 xterm parser write，并在 replay 与启动期 pending output 排空前保持终端画布不可见，
+只展示 `Restoring terminal…`。最终状态完成后再原子揭示画布；真实 attach 失败则揭示红色错误。
+这样既保留字节顺序与最终 TUI 状态，也不会把数千个历史重绘帧播放成“终端自己 resize”。
+
 PTY resize 仍可能慢于 UI 拖拽，所以 synchronizer 不再把所有中间尺寸串成 Promise 队列。
 它只保留一个 in-flight 请求和一个可替换的 pending size（`:115`–`:146`）；新尺寸覆盖尚未
 发送的旧尺寸，最终由 `api.sessions.resize` → Core → CtxMux 应用。历史 Run 因 `live=false`
@@ -275,6 +284,8 @@ private adapter"*）。其记录的限制是：自建栈与 CtxMux 会**争用 R
 | OSC 回复格式与 a mature workbench 不一致 | `terminal-osc-color-query.test.ts:10` | 16-bit `rgb:RRRR/GGGG/BBBB` 形式 |
 | 历史 Run 被误写输入 | `TerminalView.tsx:50`（`canControlRun` 门控，见 §5.3） | 非 running 时输入/OSC/resize 均不写回 |
 | 拖拽后 Codex 因陈旧 PTY 尺寸队列持续闪烁 | `apps/desktop/test/terminal-viewport-sync.test.ts` | proposal 稳定后才 fit；未发送的中间尺寸被最新网格替换 |
+| 首帧 render 监听未注销导致 TUI 自发 resize | `TerminalView.tsx` 的 one-shot `terminal.onRender` | 首个 render 先 dispose；后续输出不再触发 viewport 同步 |
+| Attach 逐条写入数千个 replay event，历史 TUI 帧看起来像持续 resize | `apps/desktop/test/terminal-replay.test.ts` | replay 合并为一次 parser write；恢复完成前隐藏画布 |
 
 `docs/testing/strategy.md` 记录了整体测试策略；本表只列与终端运行时直接相关的回归点。
 
