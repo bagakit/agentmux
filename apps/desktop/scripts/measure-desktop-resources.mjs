@@ -19,7 +19,7 @@ try {
   await mkdir(workspace, { recursive: true })
   await writeFile(join(workspace, 'resource-probe.ts'), 'export const value = 1\n'.repeat(20_000))
   await writeFile(join(userData, 'agentmux.config.json'), `${JSON.stringify({
-    version: 3,
+    version: 4,
     hosts: [{ id: 'local', kind: 'local', label: 'Resource Probe' }],
     agents: {
       codex: { command: 'codex', args: [], env: {} },
@@ -28,7 +28,8 @@ try {
       hermes: { command: 'hermes', args: [], env: {} },
       pi: { command: 'pi', args: [], env: {} }
     },
-    workspaces: [{ id: 'resource-workspace', name: 'Resource Probe', hostId: 'local', path: workspace, kind: 'folder' }]
+    workspaces: [{ id: 'resource-workspace', name: 'Resource Probe', hostId: 'local', path: workspace, kind: 'folder' }],
+    appearance: { terminalTheme: 'graphite' }
   }, null, 2)}\n`, { mode: 0o600 })
 
   child = spawn(electron, [`--user-data-dir=${userData}`, entry], {

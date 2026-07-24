@@ -131,10 +131,11 @@ const store: AgentMuxAgentSessionStore = {
 }
 
 const localConfig: AppConfig = {
-  version: 3,
+  version: 4,
   hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
   agents: {},
-  workspaces: []
+  workspaces: [],
+  appearance: { terminalTheme: 'graphite' }
 }
 
 const remoteHost: SshHostConfig = {

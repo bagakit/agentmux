@@ -1,18 +1,19 @@
 import { describe, expect, it } from 'vitest'
 import {
-  DEFAULT_TERMINAL_APPEARANCE,
-  DEFAULT_TERMINAL_THEME
+  TERMINAL_THEME_CATALOG,
+  terminalOptions,
+  terminalTheme
 } from '../src/renderer/src/lib/terminal-theme.js'
 
-describe('default terminal appearance', () => {
-  it('keeps a complete AgentMux verdant palette at one renderer-owned boundary', () => {
-    expect(DEFAULT_TERMINAL_THEME).toEqual({
-      background: '#1e2522',
-      foreground: '#edf3ef',
-      cursor: '#a8f0c6',
-      cursorAccent: '#1e2522',
-      selectionBackground: '#426b55',
-      selectionForeground: '#f4fff7',
+describe('terminal appearance', () => {
+  it('keeps Graphite aligned with the proven Ghostty dark semantic palette', () => {
+    expect(terminalTheme('graphite')).toEqual({
+      background: '#282c34',
+      foreground: '#ffffff',
+      cursor: '#ffffff',
+      cursorAccent: '#282c34',
+      selectionBackground: '#5a7898',
+      selectionForeground: '#ffffff',
       black: '#1d1f21',
       red: '#cc6666',
       green: '#b5bd68',
@@ -32,8 +33,25 @@ describe('default terminal appearance', () => {
     })
   })
 
-  it('matches the proven rendering defaults while retaining AgentMux font size', () => {
-    expect(DEFAULT_TERMINAL_APPEARANCE).toMatchObject({
+  it('does not collapse the default TUI composer color into the work area', () => {
+    const theme = terminalTheme('graphite')
+    expect(theme.black).toBe('#1d1f21')
+    expect(theme.black).not.toBe(theme.background)
+  })
+
+  it('offers only complete curated palettes', () => {
+    expect(TERMINAL_THEME_CATALOG.map((item) => item.id)).toEqual([
+      'graphite',
+      'catppuccin-mocha'
+    ])
+    for (const { theme } of TERMINAL_THEME_CATALOG) {
+      expect(Object.keys(theme)).toHaveLength(22)
+      expect(theme.black).not.toBe(theme.background)
+    }
+  })
+
+  it('keeps renderer behavior stable while selecting a palette', () => {
+    expect(terminalOptions('catppuccin-mocha')).toMatchObject({
       cursorStyle: 'block',
       cursorInactiveStyle: 'outline',
       fontSize: 12,
@@ -43,7 +61,7 @@ describe('default terminal appearance', () => {
       allowTransparency: false,
       minimumContrastRatio: 3,
       drawBoldTextInBrightColors: true,
-      theme: DEFAULT_TERMINAL_THEME
+      theme: terminalTheme('catppuccin-mocha')
     })
   })
 })

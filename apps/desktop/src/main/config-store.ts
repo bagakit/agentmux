@@ -41,7 +41,7 @@ const workspaceSchema = z
 
 const configSchema = z
   .object({
-    version: z.literal(3),
+    version: z.literal(4),
     hosts: z.array(hostSchema),
     agents: z
       .object({
@@ -52,7 +52,8 @@ const configSchema = z
         pi: agentSchema
       })
       .strict(),
-    workspaces: z.array(workspaceSchema)
+    workspaces: z.array(workspaceSchema),
+    appearance: z.object({ terminalTheme: z.enum(['graphite', 'catppuccin-mocha']) }).strict()
   })
   .strict()
   .superRefine((config, context) => {
@@ -100,7 +101,7 @@ const configSchema = z
   })
 
 const DEFAULT_CONFIG: AppConfig = {
-  version: 3,
+  version: 4,
   hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
   agents: {
     codex: { command: 'codex', args: [], env: {} },
@@ -109,7 +110,8 @@ const DEFAULT_CONFIG: AppConfig = {
     hermes: { command: 'hermes', args: [], env: {} },
     pi: { command: 'pi', args: [], env: {} }
   },
-  workspaces: []
+  workspaces: [],
+  appearance: { terminalTheme: 'graphite' }
 }
 
 export class ConfigStore {
