@@ -9,6 +9,8 @@
     "dev": "node scripts/dev-desktop.mjs",
     "dev:web": "vite --config vite.web.config.ts --host 127.0.0.1",
     "build": "electron-vite build",
+    "package:mac": "pnpm build && pnpm --filter @agentmux/core build && node scripts/package-macos.mjs",
+    "package:mac:install": "pnpm package:mac -- --install",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "measure:desktop": "pnpm build && node scripts/measure-desktop-resources.mjs"
   },

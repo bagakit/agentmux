@@ -1,6 +1,7 @@
 .worktrees
 node_modules
 dist
+apps/desktop/release
 out
 .vite
 coverage
