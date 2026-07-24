@@ -25,7 +25,6 @@ describe('AgentHookServer', () => {
       body: JSON.stringify({
         agentSessionId: 'semantic-1',
         runId: 'daemon-1',
-        incarnationId: 'incarnation-1',
         agentId: 'claude',
         eventName: 'PermissionRequest',
         payload: { tool_name: 'Bash', tool_input: { command: 'pnpm test' } }
@@ -51,7 +50,6 @@ describe('AgentHookServer', () => {
       body: JSON.stringify({
         agentSessionId: 'semantic-1',
         runId: 'daemon-1',
-        incarnationId: 'incarnation-1',
         agentId: 'claude'
       })
     })

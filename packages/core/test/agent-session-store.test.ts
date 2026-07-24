@@ -12,7 +12,7 @@ function storedSession() {
     agentId: 'codex',
     hostId: 'local',
     workspacePath: '/tmp/work',
-    run: { runId: 'daemon-1', incarnationId: 'incarnation-1' },
+    run: { runId: 'daemon-1' },
     outputCursorBytes: 12,
     createdAt: 100,
     updatedAt: 200,
@@ -25,7 +25,7 @@ function storedSession() {
       id: 'receipt-1',
       agentId: 'codex',
       agentSessionId: 'semantic-1',
-      run: { runId: 'daemon-1', incarnationId: 'incarnation-1' },
+      run: { runId: 'daemon-1' },
       eventName: 'SessionStart',
       observedAt: 200
     }
@@ -48,9 +48,14 @@ describe('semantic session persistence boundary', () => {
   it('rejects mismatched receipts and duplicate semantic identities', async () => {
     expect(() => normalizeStoredAgentSession({
       ...storedSession(),
+      run: { runId: 'daemon-1', generation: 'retired-identity' }
+    })).toThrow('only runId')
+
+    expect(() => normalizeStoredAgentSession({
+      ...storedSession(),
       hookReceipt: {
         ...storedSession().hookReceipt,
-        run: { runId: 'another-run', incarnationId: 'incarnation-1' }
+        run: { runId: 'another-run' }
       }
     })).toThrow('does not match')
 

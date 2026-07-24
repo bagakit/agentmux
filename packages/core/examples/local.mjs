@@ -11,7 +11,6 @@ const output = new Promise((resolve) => {
   })
 })
 const terminal = await client.createTerminal({
-  runId: crypto.randomUUID(),
   createOperationId: crypto.randomUUID(),
   workspacePath: process.cwd()
 })

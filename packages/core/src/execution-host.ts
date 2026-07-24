@@ -1,8 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { AgentMuxError, CommandExecutionError } from './errors.js'
-import { quote } from 'shell-quote'
+import { AgentMuxError } from './errors.js'
 import {
   runProcess,
   type CommandResult,
@@ -61,28 +57,6 @@ export type SshExecutionHostOptions = {
   runner?: ProcessRunner
 }
 
-function assertSafeSshDestination(value: string): void {
-  if (!/^[A-Za-z0-9_.:@%+-]+$/.test(value)) {
-    throw new AgentMuxError('SSH destination contains unsupported characters.', 'INVALID_SSH_DESTINATION')
-  }
-}
-
-function environmentArgv(
-  command: string,
-  args: readonly string[],
-  env: Readonly<Record<string, string | undefined>> | undefined
-): string[] {
-  if (!env) return [command, ...args]
-  const assignments = Object.entries(env).flatMap(([name, value]) => {
-    if (value === undefined) return []
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
-      throw new AgentMuxError(`Invalid remote environment name: ${name}`, 'INVALID_ENV_NAME')
-    }
-    return [`${name}=${value}`]
-  })
-  return assignments.length > 0 ? ['env', ...assignments, command, ...args] : [command, ...args]
-}
-
 export class SshExecutionHost implements ExecutionHost {
   readonly id: string
   readonly kind = 'ssh' as const
@@ -92,10 +66,6 @@ export class SshExecutionHost implements ExecutionHost {
   readonly port: number | undefined
   readonly identityFile: string | undefined
   readonly extraArgs: readonly string[]
-  private readonly connectTimeoutSeconds: number
-  private readonly runner: ProcessRunner
-  private forward: { controlDirectory: string; controlPath: string; localPort: number; remotePort: number } | null = null
-  private forwardPromise: Promise<number> | null = null
 
   constructor(options: SshExecutionHostOptions) {
     if (!options.id.trim() || !options.hostname.trim()) {
@@ -107,116 +77,24 @@ export class SshExecutionHost implements ExecutionHost {
     this.port = options.port
     this.identityFile = options.identityFile
     this.extraArgs = options.extraArgs ?? []
-    this.connectTimeoutSeconds = options.connectTimeoutSeconds ?? 10
     this.label = options.label ?? options.hostname
-    this.runner = options.runner ?? runProcess
   }
 
-  async run(command: string, args: readonly string[], options: RunCommandOptions = {}): Promise<CommandResult> {
-    const destination = this.destination()
-    const remoteArgv = environmentArgv(command, args, options.env)
-    const remoteCommand = quote(remoteArgv)
-    const sshArgs = [
-      ...this.connectionArgs(),
-      '--',
-      destination,
-      remoteCommand
-    ]
-    return await this.runner('ssh', sshArgs, {
-      ...(options.input !== undefined ? { input: options.input } : {}),
-      ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
-      ...(options.signal !== undefined ? { signal: options.signal } : {}),
-      ...(options.maxOutputBytes !== undefined ? { maxOutputBytes: options.maxOutputBytes } : {})
-    })
+  async run(_command: string, _args: readonly string[], _options: RunCommandOptions = {}): Promise<CommandResult> {
+    throw new AgentMuxError(
+      'Remote execution is unavailable until the ctxmux Remote contract is delivered.',
+      'REMOTE_UNSUPPORTED'
+    )
   }
 
-  async exposeLoopbackPort(localPort: number): Promise<number> {
-    if (!Number.isInteger(localPort) || localPort < 1 || localPort > 65535) {
-      throw new AgentMuxError(`Invalid local forward port: ${localPort}`, 'INVALID_FORWARD_PORT')
-    }
-    if (this.forward) {
-      if (this.forward.localPort !== localPort) {
-        throw new AgentMuxError('SSH host already forwards a different hook server.', 'HOOK_FORWARD_CONFLICT')
-      }
-      return this.forward.remotePort
-    }
-    if (this.forwardPromise) return await this.forwardPromise
-    this.forwardPromise = this.createLoopbackForward(localPort)
-    try {
-      return await this.forwardPromise
-    } finally {
-      this.forwardPromise = null
-    }
+  async exposeLoopbackPort(_localPort: number): Promise<number> {
+    throw new AgentMuxError(
+      'Remote hook forwarding is unavailable until the ctxmux Remote contract is delivered.',
+      'REMOTE_UNSUPPORTED'
+    )
   }
 
-  async dispose(): Promise<void> {
-    const forward = this.forward
-    this.forward = null
-    if (!forward) return
-    await this.runner(
-      'ssh',
-      ['-S', forward.controlPath, '-O', 'exit', '--', this.destination()],
-      { timeoutMs: 8_000 }
-    ).catch(() => ({ stdout: '', stderr: '', exitCode: 1 }))
-    await rm(forward.controlDirectory, { recursive: true, force: true })
-  }
-
-  private destination(): string {
-    const destination = this.user ? `${this.user}@${this.hostname}` : this.hostname
-    assertSafeSshDestination(destination)
-    return destination
-  }
-
-  private connectionArgs(): string[] {
-    return [
-      '-T',
-      '-o',
-      `ConnectTimeout=${this.connectTimeoutSeconds}`,
-      ...(this.port ? ['-p', String(this.port)] : []),
-      ...(this.identityFile ? ['-i', this.identityFile] : []),
-      ...this.extraArgs
-    ]
-  }
-
-  private async createLoopbackForward(localPort: number): Promise<number> {
-    const controlDirectory = await mkdtemp(join(tmpdir(), 'agentmux-ssh-'))
-    const controlPath = join(controlDirectory, 'control')
-    const destination = this.destination()
-    const masterArgs = [
-      '-M',
-      '-S',
-      controlPath,
-      '-f',
-      '-N',
-      ...this.connectionArgs(),
-      '--',
-      destination
-    ]
-    const master = await this.runner('ssh', masterArgs, { timeoutMs: 15_000 })
-    if (master.exitCode !== 0) {
-      await rm(controlDirectory, { recursive: true, force: true })
-      throw new CommandExecutionError('Failed to open SSH hook bridge.', 'ssh', masterArgs, master.exitCode, master.stderr)
-    }
-
-    const forwardSpec = `127.0.0.1:0:127.0.0.1:${localPort}`
-    const forwardArgs = ['-S', controlPath, '-O', 'forward', '-R', forwardSpec, '--', destination]
-    const result = await this.runner('ssh', forwardArgs, { timeoutMs: 15_000 })
-    const remotePort = Number(result.stdout.trim())
-    if (result.exitCode !== 0 || !Number.isInteger(remotePort) || remotePort < 1 || remotePort > 65535) {
-      await this.runner('ssh', ['-S', controlPath, '-O', 'exit', '--', destination], { timeoutMs: 8_000 })
-        .catch(() => ({ stdout: '', stderr: '', exitCode: 1 }))
-      await rm(controlDirectory, { recursive: true, force: true })
-      throw new CommandExecutionError(
-        'Failed to allocate remote SSH hook port.',
-        'ssh',
-        forwardArgs,
-        result.exitCode || 1,
-        result.stderr || result.stdout
-      )
-    }
-    this.forward = { controlDirectory, controlPath, localPort, remotePort }
-    return remotePort
-  }
+  async dispose(): Promise<void> {}
 }
 
 export class ExecutionHostRegistry {

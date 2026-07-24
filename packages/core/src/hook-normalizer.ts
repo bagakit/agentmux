@@ -172,8 +172,7 @@ export function normalizeNativeHook(
   return {
     agentSessionId: envelope.agentSessionId,
     run: {
-      runId: envelope.runId,
-      incarnationId: envelope.incarnationId
+      runId: envelope.runId
     },
     agentId: envelope.agentId,
     eventName,

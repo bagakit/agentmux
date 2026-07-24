@@ -8,7 +8,6 @@ describe('native hook normalization', () => {
     const event = providers.get('codex').normalizeHook({
       agentSessionId: 'semantic-1',
       runId: 'daemon-1',
-      incarnationId: 'incarnation-1',
       agentId: 'codex',
       eventName: 'PreToolUse',
       payload: {
@@ -30,7 +29,6 @@ describe('native hook normalization', () => {
     const event = providers.get('pi').normalizeHook({
       agentSessionId: 'semantic-2',
       runId: 'daemon-2',
-      incarnationId: 'incarnation-2',
       agentId: 'pi',
       eventName: 'tool_call',
       payload: {
@@ -47,7 +45,6 @@ describe('native hook normalization', () => {
     const event = providers.get('traex').normalizeHook({
       agentSessionId: 'semantic-3',
       runId: 'daemon-3',
-      incarnationId: 'incarnation-3',
       agentId: 'traex',
       eventName: 'tick'
     })

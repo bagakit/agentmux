@@ -13,8 +13,8 @@ import type {
   NormalizedHookEvent
 } from './types.js'
 
-function runRef(value: { runId: string; incarnationId: string }) {
-  return { runId: value.runId, incarnationId: value.incarnationId }
+function runRef(value: { runId: string }) {
+  return { runId: value.runId }
 }
 
 const MAX_EVENT_LISTENERS = 64
@@ -65,7 +65,7 @@ export class AgentMuxClientEventPublisher {
       ...(run.exitSignal === undefined ? {} : { exitSignal: run.exitSignal }),
       evidence: {
         source: 'run-process',
-        observedAt: run.state === 'running' ? Date.now() : run.exitedAt ?? run.lostAt ?? Date.now(),
+        observedAt: run.observedAt,
         run: runRef(run)
       }
     })

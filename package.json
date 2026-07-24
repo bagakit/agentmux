@@ -10,14 +10,12 @@
     "package:mac": "pnpm --filter @agentmux/desktop package:mac",
     "package:mac:install": "pnpm --filter @agentmux/desktop package:mac:install",
     "typecheck": "pnpm -r typecheck",
-    "test:fast": "pnpm --filter @agentmux/core build && vitest run --exclude packages/core/test/remote-artifact-builder.test.ts --exclude packages/core/test/ssh-remote-daemon.integration.test.ts --exclude packages/core/test/package-consumer.integration.test.ts",
-    "test:native": "pnpm --filter @agentmux/core build && vitest run --maxWorkers=1 packages/core/test/remote-artifact-builder.test.ts && vitest run --maxWorkers=1 packages/core/test/ssh-remote-daemon.integration.test.ts && vitest run --maxWorkers=1 packages/core/test/package-consumer.integration.test.ts",
+    "test:fast": "pnpm --filter @agentmux/core build && vitest run --exclude packages/core/test/package-consumer.integration.test.ts",
+    "test:native": "pnpm --filter @agentmux/core build && vitest run --maxWorkers=1 packages/core/test/package-consumer.integration.test.ts",
     "test": "pnpm test:fast && pnpm test:native",
-    "test:security": "pnpm --filter @agentmux/core build && vitest run packages/core/test/daemon-security.test.ts packages/core/test/acp-adapter.test.ts packages/core/test/hook-server.test.ts packages/core/test/managed-hook-installer.test.ts packages/core/test/ssh-daemon-connector.test.ts packages/core/test/ssh-remote-daemon.test.ts apps/desktop/test/workspace-files.test.ts apps/desktop/test/browser-view-manager.test.ts",
-    "test:fuzz": "pnpm --filter @agentmux/core test:fuzz",
+    "test:security": "pnpm --filter @agentmux/core build && vitest run packages/core/test/acp-adapter.test.ts packages/core/test/hook-server.test.ts packages/core/test/managed-hook-installer.test.ts packages/core/test/package-consumer.integration.test.ts apps/desktop/test/workspace-files.test.ts apps/desktop/test/browser-view-manager.test.ts",
     "test:chaos": "pnpm --filter @agentmux/core test:chaos",
-    "test:stress": "pnpm --filter @agentmux/core test:stress && pnpm --filter @agentmux/desktop measure:desktop",
-    "test:nightly": "pnpm test:security && pnpm test:fuzz && pnpm test:chaos && pnpm test:stress",
+    "test:nightly": "pnpm test:security && pnpm test:chaos",
     "check": "pnpm typecheck && pnpm test && pnpm build"
   },
   "devDependencies": {
