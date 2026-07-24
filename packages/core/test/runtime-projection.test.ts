@@ -4,8 +4,6 @@ import type { AgentMuxAgentSession, AgentMuxRun } from '../src/types.js'
 
 const run: AgentMuxRun = {
   runId: 'run-1',
-  incarnationId: 'incarnation-1',
-  createOperationId: 'create-1',
   kind: 'agent',
   agentId: 'codex',
   agentSessionId: 'semantic-1',
@@ -14,7 +12,7 @@ const run: AgentMuxRun = {
   state: 'running',
   cols: 80,
   rows: 24,
-  createdAt: 100,
+  observedAt: 100,
   latestOutputBytes: 12,
   acceptedInputBytes: 0
 }
@@ -25,7 +23,7 @@ const agentSession: AgentMuxAgentSession = {
   agentId: 'codex',
   hostId: 'local',
   workspacePath: '/repo',
-  run: { runId: 'run-1', incarnationId: 'incarnation-1' },
+  run: { runId: 'run-1' },
   outputCursorBytes: 0,
   createdAt: 100,
   updatedAt: 100
@@ -36,8 +34,6 @@ describe('AgentMux runtime projection', () => {
     const terminal: AgentMuxRun = {
       ...run,
       runId: 'terminal-1',
-      incarnationId: 'terminal-incarnation',
-      createOperationId: 'terminal-create',
       kind: 'terminal',
       agentId: null,
       agentSessionId: null
@@ -50,7 +46,7 @@ describe('AgentMux runtime projection', () => {
         agentSession: { agentSessionId: 'semantic-1' }
       },
       {
-        viewId: 'terminal-view:local:terminal-1:terminal-incarnation',
+        viewId: 'terminal-view:local:terminal-1',
         kind: 'terminal',
         run: { latestOutputBytes: 12 }
       }
@@ -71,10 +67,10 @@ describe('AgentMux runtime projection', () => {
     expect(views[0]).not.toBe(views[1])
   })
 
-  it('fails closed when an Agent Session record points to another Run incarnation', () => {
+  it('fails closed when an Agent Session record points to another Run', () => {
     expect(() => projectAgentMuxViews('local', [run], [{
       ...agentSession,
-      run: { ...agentSession.run, incarnationId: 'stale-incarnation' }
-    }])).toThrow('does not match')
+      run: { runId: 'stale-run' }
+    }])).toThrow('unavailable')
   })
 })

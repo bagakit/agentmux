@@ -102,7 +102,7 @@ export async function diagnoseAgentMux(options: DiagnoseAgentMuxOptions): Promis
       )))
     ])
     return {
-      ok: runtime.supported && runtime.pty.ready && agents.every((agent) => agent.probe !== 'blocked'),
+      ok: runtime.supported && runtime.ctxmux.ready && agents.every((agent) => agent.probe !== 'blocked'),
       host: {
         kind: options.hostKind,
         reachable: true,
@@ -116,8 +116,8 @@ export async function diagnoseAgentMux(options: DiagnoseAgentMuxOptions): Promis
       runtime,
       runtimeAction: !runtime.supported
         ? 'Use Node 22 or newer on macOS or Linux with x64 or arm64.'
-        : !runtime.pty.ready
-          ? 'Reinstall @agentmux/core for this platform and verify the node-pty prebuild and Helper permissions.'
+        : !runtime.ctxmux.ready
+          ? 'Reinstall @agentmux/core and verify the pinned ctxmux artifact manifest.'
           : null,
       agents,
       integration: {
@@ -140,8 +140,8 @@ export async function diagnoseAgentMux(options: DiagnoseAgentMuxOptions): Promis
         runtimeInstanceId: null,
         error: detail,
         action: options.hostKind === 'local'
-          ? 'Run agentmuxd activate, then rerun doctor.'
-          : 'Verify system SSH authentication and the explicit remote agentmuxd Build and Socket paths.'
+          ? 'Verify the bundled ctxmux artifacts, then rerun doctor.'
+          : 'Remote is unsupported until the ctxmux Remote contract is delivered.'
       },
       runtime: null,
       runtimeAction: null,

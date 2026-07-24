@@ -31,15 +31,12 @@ export type AgentMuxWorkspaceView = {
 export type AgentMuxViewRequest = {
   viewId: string
   target:
-    | { kind: 'terminal-run'; run: { runId: string; incarnationId: string } }
+    | { kind: 'terminal-run'; run: { runId: string } }
     | { kind: 'agent-session'; agentSessionId: string }
 }
 
-function sameRun(
-  left: { runId: string; incarnationId: string },
-  right: { runId: string; incarnationId: string }
-): boolean {
-  return left.runId === right.runId && left.incarnationId === right.incarnationId
+function sameRun(left: { runId: string }, right: { runId: string }): boolean {
+  return left.runId === right.runId
 }
 
 export function projectAgentMuxViews(
@@ -52,8 +49,8 @@ export function projectAgentMuxViews(
   const runsById = new Map(runs.map((run) => [run.runId, run]))
   const resolvedRequests = requests ?? runs.map((run): AgentMuxViewRequest => run.kind === 'terminal'
     ? {
-        viewId: `terminal-view:${hostId}:${run.runId}:${run.incarnationId}`,
-        target: { kind: 'terminal-run', run: { runId: run.runId, incarnationId: run.incarnationId } }
+        viewId: `terminal-view:${hostId}:${run.runId}`,
+        target: { kind: 'terminal-run', run: { runId: run.runId } }
       }
     : {
         viewId: `agent-view:${hostId}:${run.agentSessionId ?? run.runId}`,
@@ -71,7 +68,7 @@ export function projectAgentMuxViews(
         })()
     if (!run) throw new AgentMuxError('View target is unavailable.', 'UNKNOWN_VIEW_TARGET')
     if (request.target.kind === 'terminal-run' && !sameRun(request.target.run, run)) {
-      throw new AgentMuxError('Terminal View points to a stale Run incarnation.', 'STALE_VIEW_TARGET')
+      throw new AgentMuxError('Terminal View points to another Run.', 'STALE_VIEW_TARGET')
     }
     if (run.kind === 'terminal') {
       if (

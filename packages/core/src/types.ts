@@ -7,7 +7,7 @@ export type AgentMuxRuntimeIdentity = {
   hostId: string
   buildIdentity: string
   protocolVersion: number
-  processId: number
+  processId: number | null
   instanceId: string
 }
 
@@ -16,13 +16,11 @@ export type AgentMuxRuntimeDiagnostics = {
   platform: NodeJS.Platform
   arch: string
   supported: boolean
-  pty: {
-    packageName: 'node-pty'
+  ctxmux: {
     version: string
-    artifact: string
-    artifactPresent: boolean
-    helperArtifact: string | null
-    helperExecutable: boolean | null
+    protocolVersion: number
+    sourceCommit: string
+    artifactPlatform: string
     ready: boolean
   }
 }
@@ -57,32 +55,27 @@ export type AgentMuxEvidenceSource =
   | 'acp'
   | 'user'
 
-export type AgentMuxRunState = 'running' | 'exited' | 'lost'
+export type AgentMuxRunState = 'running' | 'exited' | 'interrupted'
 
 export type AgentMuxRunRef = {
   runId: string
-  incarnationId: string
 }
 
 export type AgentMuxRun = AgentMuxRunRef & {
-  createOperationId: string
   kind: 'terminal' | 'agent'
   agentId: AgentId | null
   agentSessionId: string | null
   workspacePath: string
-  pid: number
-  processStartedAt?: number
+  pid: number | null
   state: AgentMuxRunState
   cols: number
   rows: number
-  createdAt: number
+  observedAt: number
   latestOutputBytes: number
   acceptedInputBytes: number
-  exitedAt?: number
   exitCode?: number
-  exitSignal?: number
-  lostAt?: number
-  lostReason?: string
+  exitSignal?: string
+  interruptionReason?: string
 }
 
 export type AgentMuxRunDataEvent = AgentMuxRunRef & {
@@ -94,9 +87,9 @@ export type AgentMuxRunDataEvent = AgentMuxRunRef & {
 
 export type AgentMuxRunExitEvent = AgentMuxRunRef & {
   type: 'exit'
-  pid: number
+  pid: number | null
   exitCode: number
-  exitSignal?: number
+  exitSignal?: string
   observedAt: number
 }
 
@@ -284,10 +277,10 @@ export type AgentMuxClientEvent =
       type: 'process-state'
       agentSessionId?: string
       run: AgentMuxRunRef
-      state: 'running' | 'exited' | 'lost'
-      pid: number
+      state: AgentMuxRunState
+      pid: number | null
       exitCode?: number
-      exitSignal?: number
+      exitSignal?: string
       evidence: AgentMuxEvidence
     }
   | {
@@ -378,7 +371,6 @@ export type AgentProviderResumeContext = {
 export type NativeHookEnvelope = {
   agentSessionId: string
   runId: string
-  incarnationId: string
   agentId: AgentId
   eventName?: string
   payload?: Record<string, unknown>

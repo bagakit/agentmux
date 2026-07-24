@@ -3,10 +3,9 @@ const hookUrl = process.env.AGENTMUX_HOOK_URL
 const hookToken = process.env.AGENTMUX_HOOK_TOKEN
 const agentSessionId = process.env.AGENTMUX_AGENT_SESSION_ID
 const runId = process.env.AGENTMUX_RUN_ID
-const incarnationId = process.env.AGENTMUX_RUN_INCARNATION_ID
 const agentId = process.env.AGENTMUX_AGENT_ID
 
-if (!hookUrl || !hookToken || !agentSessionId || !runId || !incarnationId || !agentId) {
+if (!hookUrl || !hookToken || !agentSessionId || !runId || !agentId) {
   throw new Error('missing AgentMux hook environment')
 }
 
@@ -21,8 +20,7 @@ const request = async (body) => await fetch(hookUrl, {
 
 await request({
   agentSessionId,
-  runId,
-  incarnationId: 'forged-incarnation',
+  runId: 'forged-run',
   agentId,
   eventName: 'PermissionRequest',
   payload: { session_id: 'forged-native-session' }
@@ -31,7 +29,6 @@ await request({
 const response = await request({
   agentSessionId,
   runId,
-  incarnationId,
   agentId,
   eventName: 'SessionStart',
   payload: {

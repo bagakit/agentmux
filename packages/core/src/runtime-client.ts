@@ -1,9 +1,8 @@
 import type { AgentMuxPermissionHandler } from './acp-adapter.js'
 import type { AgentProvider } from './agent-provider.js'
 import { AgentMuxClient } from './client.js'
+import { AgentMuxError } from './errors.js'
 import type { AgentMuxAgentSessionStore } from './agent-session-store.js'
-import { activateAgentMuxLocalDaemon } from './local-daemon.js'
-import { SshAgentMuxDaemonConnector } from './ssh-daemon-connector.js'
 
 type AgentMuxRuntimeClientCommonOptions = {
   providers?: readonly AgentProvider[]
@@ -12,8 +11,8 @@ type AgentMuxRuntimeClientCommonOptions = {
 }
 
 export type AgentMuxLocalRuntimeClientOptions = AgentMuxRuntimeClientCommonOptions & {
-  endpointPath?: string
-  statePath?: string
+  socketPath?: string
+  stateDirectory?: string
 }
 
 export type AgentMuxSshRuntimeClientOptions = AgentMuxRuntimeClientCommonOptions & {
@@ -24,24 +23,14 @@ export type AgentMuxSshRuntimeClientOptions = AgentMuxRuntimeClientCommonOptions
     port?: number
     identityFile?: string
   }
-  runtime: {
-    buildIdentity: string
-    remoteNodePath: string
-    remoteEntrypointPath: string
-    remoteEndpointPath: string
-  }
-  sshCommand?: string
 }
 
 export async function connectLocalAgentMux(
   options: AgentMuxLocalRuntimeClientOptions = {}
 ): Promise<AgentMuxClient> {
-  await activateAgentMuxLocalDaemon({
-    ...(options.endpointPath === undefined ? {} : { socketPath: options.endpointPath }),
-    ...(options.statePath === undefined ? {} : { statePath: options.statePath })
-  })
   const client = new AgentMuxClient({
-    ...(options.endpointPath === undefined ? {} : { socketPath: options.endpointPath }),
+    ...(options.socketPath === undefined ? {} : { socketPath: options.socketPath }),
+    ...(options.stateDirectory === undefined ? {} : { stateDirectory: options.stateDirectory }),
     ...(options.providers === undefined ? {} : { providers: options.providers }),
     ...(options.store === undefined ? {} : { store: options.store }),
     ...(options.permissionHandler === undefined ? {} : { permissionHandler: options.permissionHandler })
@@ -51,21 +40,10 @@ export async function connectLocalAgentMux(
 }
 
 export async function connectSshAgentMux(
-  options: AgentMuxSshRuntimeClientOptions
+  _options: AgentMuxSshRuntimeClientOptions
 ): Promise<AgentMuxClient> {
-  const client = new AgentMuxClient({
-    connector: new SshAgentMuxDaemonConnector({
-      target: options.target,
-      remoteNodePath: options.runtime.remoteNodePath,
-      remoteAgentMuxdPath: options.runtime.remoteEntrypointPath,
-      remoteSocketPath: options.runtime.remoteEndpointPath,
-      expectedBuildIdentity: options.runtime.buildIdentity,
-      ...(options.sshCommand === undefined ? {} : { sshCommand: options.sshCommand })
-    }),
-    ...(options.providers === undefined ? {} : { providers: options.providers }),
-    ...(options.store === undefined ? {} : { store: options.store }),
-    ...(options.permissionHandler === undefined ? {} : { permissionHandler: options.permissionHandler })
-  })
-  await client.connect()
-  return client
+  throw new AgentMuxError(
+    'Remote AgentMux Runs are not available until the ctxmux Remote contract is delivered.',
+    'REMOTE_UNSUPPORTED'
+  )
 }

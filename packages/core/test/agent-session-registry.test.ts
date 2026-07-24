@@ -10,7 +10,7 @@ function session(run = 'run-1'): AgentMuxStoredAgentSession {
     agentId: 'codex',
     hostId: 'local',
     workspacePath: '/tmp/work',
-    run: { runId: run, incarnationId: `${run}-incarnation` },
+    run: { runId: run },
     outputCursorBytes: 0,
     createdAt: 100,
     updatedAt: 100

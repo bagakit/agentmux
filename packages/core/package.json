@@ -21,33 +21,28 @@
   },
   "bin": {
     "agentmux": "./bin/agentmux.js",
-    "agentmuxd": "./bin/agentmuxd.js"
+    "ctxmux": "./vendor/ctxmux/darwin-arm64/bin/ctxmux",
+    "ctxmuxd": "./vendor/ctxmux/darwin-arm64/bin/ctxmuxd"
   },
   "files": [
     "bin",
     "dist",
-    "examples"
+    "examples",
+    "vendor"
   ],
-  "dependencies": {
-    "execa": "^9.6.0",
-    "node-pty": "1.2.0-beta.15",
-    "shell-quote": "^1.8.3"
-  },
+  "dependencies": {},
   "scripts": {
-    "build": "node scripts/clean-build.mjs && tsc -p tsconfig.build.json",
+    "build": "node scripts/build.mjs",
     "prepack": "pnpm build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "pnpm build && vitest run --exclude test/remote-artifact-builder.test.ts --exclude test/ssh-remote-daemon.integration.test.ts --exclude test/package-consumer.integration.test.ts && vitest run test/remote-artifact-builder.test.ts && vitest run test/ssh-remote-daemon.integration.test.ts && vitest run test/package-consumer.integration.test.ts",
-    "test:security": "pnpm build && vitest run test/daemon-security.test.ts test/acp-adapter.test.ts test/hook-server.test.ts test/managed-hook-installer.test.ts test/ssh-daemon-connector.test.ts test/ssh-remote-daemon.test.ts",
-    "test:fuzz": "pnpm build && AGENTMUX_FUZZ_SEED=1592619015 vitest run test/daemon-security.test.ts -t 'malformed and oversized frames'",
-    "test:chaos": "pnpm build && vitest run test/daemon-reliability.integration.test.ts test/daemon-crash.integration.test.ts && vitest run test/ssh-remote-daemon.integration.test.ts",
-    "test:conformance": "pnpm build && vitest run test/run-kernel-conformance.test.ts test/run-kernel-statistics.test.ts test/daemon-reliability.integration.test.ts test/daemon-crash.integration.test.ts && vitest run --maxWorkers=1 test/ssh-remote-daemon.integration.test.ts",
-    "test:stress": "pnpm build && AGENTMUX_STRESS_SEED=7007 node scripts/soak-daemon-resources.mjs && AGENTMUX_STRESS=1 vitest run test/ssh-remote-daemon.integration.test.ts -t 'repeated deterministic SSH transport partitions'",
-    "measure:daemon": "pnpm build && node scripts/measure-daemon-resources.mjs"
+    "test": "pnpm build && vitest run --exclude test/package-consumer.integration.test.ts && vitest run --maxWorkers=1 test/package-consumer.integration.test.ts",
+    "test:security": "pnpm build && vitest run test/acp-adapter.test.ts test/hook-server.test.ts test/managed-hook-installer.test.ts test/package-consumer.integration.test.ts",
+    "test:chaos": "pnpm build && vitest run --maxWorkers=1 test/package-consumer.integration.test.ts",
+    "test:conformance": "pnpm build && vitest run test/runtime-projection.test.ts test/agent-session-store.test.ts && vitest run --maxWorkers=1 test/package-consumer.integration.test.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "@types/shell-quote": "^1.7.5",
+    "esbuild": "^0.25.0",
     "typescript": "^5.9.0",
     "vitest": "^3.2.0"
   }

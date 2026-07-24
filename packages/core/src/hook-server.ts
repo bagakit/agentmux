@@ -27,7 +27,6 @@ function isEnvelope(value: unknown): value is NativeHookEnvelope {
   return (
     typeof record.agentSessionId === 'string' && Boolean(record.agentSessionId.trim()) &&
     typeof record.runId === 'string' && Boolean(record.runId.trim()) &&
-    typeof record.incarnationId === 'string' && Boolean(record.incarnationId.trim()) &&
     typeof record.agentId === 'string' && Boolean(record.agentId.trim())
   )
 }
