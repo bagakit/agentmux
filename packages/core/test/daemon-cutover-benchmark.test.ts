@@ -12,7 +12,9 @@ import {
   evaluateFullRound,
   parseBenchmarkArguments,
   parseOwnedDaemonProcesses,
-  parseProcessCpuCounter,
+  parseProcessCpuCalibration,
+  parseProcessCpuSnapshot,
+  processCpuInterval,
   runBenchmark,
   verifyBurstOutput
 } from '../scripts/run-daemon-cutover-benchmark.mjs'
@@ -52,6 +54,8 @@ function passingSummary(): Record<string, unknown> {
     resources: {
       agentmux: {
         idleCpuPercent: 0.5,
+        idleCpuPercentLower: 0.45,
+        idleCpuPercentUpper: 0.55,
         idleRssKiB: 1024,
         perSessionRssKiB: 10,
         steadyRssKiB: 2048,
@@ -60,6 +64,8 @@ function passingSummary(): Record<string, unknown> {
       },
       tmux: {
         idleCpuPercent: 0.75,
+        idleCpuPercentLower: 0.7,
+        idleCpuPercentUpper: 0.8,
         idleRssKiB: 2048,
         perSessionRssKiB: 20,
         steadyRssKiB: 4096,
@@ -71,10 +77,10 @@ function passingSummary(): Record<string, unknown> {
 }
 
 describe('Daemon cutover benchmark protocol', () => {
-  it('freezes Revision 4 identity, resource-first execution, and smoke isolation', () => {
-    expect(BENCHMARK_SCHEMA).toBe('agentmux.benchmark.daemon-cutover.v4')
-    expect(PROTOCOL_REVISION).toBe(4)
-    expect(FORMAL_RESULT_PREFIX).toBe('revision-4')
+  it('freezes Revision 5 identity, resource-first execution, and smoke isolation', () => {
+    expect(BENCHMARK_SCHEMA).toBe('agentmux.benchmark.daemon-cutover.v5')
+    expect(PROTOCOL_REVISION).toBe(5)
+    expect(FORMAL_RESULT_PREFIX).toBe('revision-5')
     expect(WORKLOAD_EXECUTION_ORDER).toEqual([
       'resources',
       'inputToVisible',
@@ -115,14 +121,54 @@ describe('Daemon cutover benchmark protocol', () => {
     expect(() => parseBenchmarkArguments(['--round', '3'])).toThrow('exactly 1 or 2')
   })
 
-  it('parses exact nanosecond process CPU counters without Number truncation', () => {
-    expect(parseProcessCpuCounter('9007199254740993 17\n')).toEqual({
+  it('parses endpoint-bounded CPU snapshots and calibrated positive steps without Number truncation', () => {
+    expect(parseProcessCpuSnapshot('sample 100 120 9007199254740993 17\n')).toEqual({
+      monotonicBeforeNanoseconds: '100',
+      monotonicAfterNanoseconds: '120',
       userNanoseconds: '9007199254740993',
       systemNanoseconds: '17',
       totalNanoseconds: '9007199254741010'
     })
-    expect(() => parseProcessCpuCounter('0:00.01')).toThrow('Invalid process CPU counter')
-    expect(() => parseProcessCpuCounter('-1 2')).toThrow('Invalid process CPU counter')
+    expect(parseProcessCpuCalibration('calibration 4 100000\nstep 3000\nstep 1000\nstep 2000\n')).toEqual({
+      workload: 'forked-child-continuous-cpu-burn',
+      samples: 4,
+      samplingDelayNanoseconds: '100000',
+      positiveStepsNanoseconds: ['3000', '1000', '2000'],
+      observedQuantumNanoseconds: '1000'
+    })
+    expect(() => parseProcessCpuSnapshot('0:00.01')).toThrow('Invalid process CPU snapshot')
+    expect(() => parseProcessCpuSnapshot('sample 2 1 3 4')).toThrow('monotonic interval regressed')
+    expect(() => parseProcessCpuCalibration('calibration 2 100000')).toThrow('did not observe')
+  })
+
+  it('compares CPU over endpoint uncertainty and fails closed inside the observed quantum', () => {
+    const start = {
+      monotonicBeforeNanoseconds: '1000',
+      monotonicAfterNanoseconds: '1100',
+      totalNanoseconds: '5000'
+    }
+    const end = {
+      monotonicBeforeNanoseconds: '2100',
+      monotonicAfterNanoseconds: '2300',
+      totalNanoseconds: '5600'
+    }
+    expect(processCpuInterval(start, end, '100')).toEqual({
+      distinguishable: true,
+      deltaNanoseconds: '600',
+      observedQuantumNanoseconds: '100',
+      cpuIntervalNanoseconds: { lower: '500', upper: '700' },
+      wallIntervalNanoseconds: { lower: '1000', estimate: '1150', upper: '1300' },
+      cpuSeconds: 6e-7,
+      wallSeconds: 0.00000115,
+      cpuPercent: 600 / 1150 * 100,
+      cpuPercentInterval: { lower: 500 / 1300 * 100, upper: 700 / 1000 * 100 }
+    })
+    expect(processCpuInterval(start, { ...end, totalNanoseconds: '5100' }, '100')).toMatchObject({
+      distinguishable: false
+    })
+    expect(() => processCpuInterval(start, { ...end, monotonicBeforeNanoseconds: '1050' }, '100')).toThrow(
+      'positive ordered window'
+    )
   })
 
   it('keeps formal and smoke workloads separate without mutating frozen values', () => {
@@ -201,6 +247,27 @@ describe('Daemon cutover benchmark protocol', () => {
     expect(evaluateFullRound({}, {}, true)).toMatchObject({
       verdict: 'fail',
       failures: expect.arrayContaining(['correctness', 'throughput.p50.missing'])
+    })
+
+    const overlappingCpu = passingSummary() as {
+      resources: {
+        agentmux: { idleCpuPercentUpper: number }
+        tmux: { idleCpuPercentLower: number }
+      }
+    }
+    overlappingCpu.resources.agentmux.idleCpuPercentUpper = 0.71
+    expect(evaluateFullRound(passingWorkloads(), overlappingCpu, true)).toMatchObject({
+      verdict: 'fail',
+      failures: expect.arrayContaining(['resources.idleCpuPercent'])
+    })
+
+    const cpuBudget = passingSummary() as {
+      resources: { agentmux: { idleCpuPercentUpper: number } }
+    }
+    cpuBudget.resources.agentmux.idleCpuPercentUpper = 1.01
+    expect(evaluateFullRound(passingWorkloads(), cpuBudget, true)).toMatchObject({
+      verdict: 'fail',
+      failures: expect.arrayContaining(['budget.idleCpuPercent'])
     })
   })
 
