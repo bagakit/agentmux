@@ -88,7 +88,7 @@ AgentMux 应保留小而清晰的 Agent Provider Core 和自己的终端视觉�
 
 ### 0. 提升默认清晰度与 Tab 内容尺度
 
-真实体验确认当前画面不是单纯“信息密度高”，而是大量 7–10px 字体、过小命中区和 13px Terminal/Editor 默认字号共同造成的发虚与低分辨率感。后续不再把极小字号当作专家密度；优先通过 11–13px 操作层级、14–15px Terminal/Editor 内容、稳定行高和原生 DPR 渲染建立清晰度，再用布局而不是缩字承载容量。
+真实体验确认当前画面不是单纯“信息密度高”，而是大量 7–10px 字体、过小命中区和不一致的内容层级共同造成的发虚与低分辨率感。后续不再把极小字号当作专家密度；操作层级保持 10–11px，Editor 保持 14px 长文阅读基线，Terminal 则按高吞吐字符界面独立采用 12px / 1.2，并全部依靠原生 DPR 渲染，不用 CSS transform 伪造密度。
 
 xterm.js 与 Monaco 继续拥有 Canvas/Text 渲染，不另写像素缩放层；实现需要验证 Production Electron 的 `devicePixelRatio`、Canvas backing size、Terminal Cell Metrics、Monaco Font Info 和截图物理像素。若原生库已经正确处理 DPR，修复应落在默认字号、行高与 CSS 缩放，而不是叠加 transform 或模糊的二次缩放。
 
@@ -167,7 +167,7 @@ Inbox 是 Board 第一列，不再是 Tools 的独立子 Tab。每个 Branch 的
 
 ## 2026-08-10 UI 反馈追加
 
-- Editor 与嵌入网页的初始内容偏大。“更高分辨率”不解释为降低 DPR 或缩放 bitmap，而是在原生 HiDPI backing 上提高默认信息容量：Monaco 使用 `14px / 21px`，Main-owned Browser WebContents 初始 Zoom Factor 为 `0.9`。Terminal 仍保持当前 15px，避免把三个不同内容 owner 绑成一项全局比例配置。
+- Editor 与嵌入网页的初始内容偏大。“更高分辨率”不解释为降低 DPR 或缩放 bitmap，而是在原生 HiDPI backing 上提高默认信息容量：Monaco 使用 `14px / 21px`，Main-owned Browser WebContents 初始 Zoom Factor 为 `0.9`。2026-08-12 两轮真实 Production 窗口复审先确认 `15px / 1.4` 与常驻 Composer 造成容量过低，随后又确认 `14px / 1.25` 相对 10–11px 的周围操作层级仍明显过大；Terminal 因而独立定为 `12px / 1.2`，不把 Terminal、Editor、Browser 三个内容 owner 绑成一项全局比例配置。
 - Titlebar 的 Tools 入口改为纯图标，通过 Tooltip 与 ARIA 表达展开／收起；Tool 二级面板不再重复放一个 Collapse 按钮。展开状态仍只有 Zustand 中的一份 truth。
 - Settings 只保留 Project Rail 左下角入口，删除右上角重复入口；不保留 Alias 或兼容 UI。
 - 上述尺度必须在 Production Electron 的真实 DPR 下验收：Editor 检查字号与 Canvas backing/CSS，Browser 检查 `webContents.getZoomFactor()`，不能用 CSS transform 假装“更高分辨率”。
