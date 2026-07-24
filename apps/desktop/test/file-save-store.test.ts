@@ -11,9 +11,13 @@ const fileApi = vi.hoisted(() => {
     path: string
     resolve(value: unknown): void
   }> = []
+  const observes: Array<{ workspaceId: string; path: string }> = []
+  const unobserves: Array<{ workspaceId: string; path: string }> = []
   return {
     writes,
     reads,
+    observes,
+    unobserves,
     api: {
       files: {
         write(workspaceId: string, input: { path: string; content: string; expectedRevision: string | null }) {
@@ -22,8 +26,8 @@ const fileApi = vi.hoisted(() => {
         read(workspaceId: string, path: string) {
           return new Promise((resolve) => reads.push({ workspaceId, path, resolve }))
         },
-        observe: async () => {},
-        unobserve: async () => {},
+        observe: async (workspaceId: string, path: string) => { observes.push({ workspaceId, path }) },
+        unobserve: async (workspaceId: string, path: string) => { unobserves.push({ workspaceId, path }) },
         onInvalidated: () => () => {}
       }
     }
@@ -43,6 +47,8 @@ afterEach(() => {
   useAppStore.setState(initialState, true)
   fileApi.writes.splice(0)
   fileApi.reads.splice(0)
+  fileApi.observes.splice(0)
+  fileApi.unobserves.splice(0)
 })
 
 async function waitFor(predicate: () => boolean): Promise<void> {
@@ -87,6 +93,7 @@ function seed(document: FileDocument = {
     documents: { [key]: document },
     dirtyDocuments: { [key]: false },
     documentGenerations: { [key]: 0 },
+    documentObservationGenerations: { [key]: 0 },
     documentIssues: {},
     savingDocuments: {},
     layouts: { [workspace.id]: createWorkspaceLayout('pane', [tab.id]) }
@@ -131,6 +138,85 @@ describe('revision-aware file save Store', () => {
       revision: 'revision-charlie'
     })
     expect(useAppStore.getState().dirtyDocuments[key]).toBe(false)
+  })
+
+  it('ignores a pre-write disk read that completes after the written receipt', async () => {
+    const { workspace, tab, key } = seed()
+    useAppStore.getState().updateDocument(tab.id, 'bravo')
+    const save = useAppStore.getState().saveDocument(tab.id)
+    await waitFor(() => fileApi.writes.length === 1)
+    const staleRefresh = useAppStore.getState().refreshDocument(workspace.id, tab.path)
+    await waitFor(() => fileApi.reads.length === 1)
+
+    fileApi.writes[0]!.resolve({ status: 'written', revision: 'revision-bravo' })
+    await save
+    fileApi.reads[0]!.resolve({
+      status: 'read',
+      document: { path: tab.path, content: 'alpha', revision: 'revision-alpha' }
+    })
+    await staleRefresh
+
+    expect(useAppStore.getState().documents[key]).toEqual({
+      path: tab.path,
+      content: 'bravo',
+      revision: 'revision-bravo'
+    })
+    expect(useAppStore.getState().dirtyDocuments[key]).toBe(false)
+  })
+
+  it('does not clear a newer deletion observed after Overwrite starts', async () => {
+    const { workspace, tab, key } = seed()
+    const firstRefresh = useAppStore.getState().refreshDocument(workspace.id, tab.path)
+    await waitFor(() => fileApi.reads.length === 1)
+    fileApi.reads[0]!.resolve({ status: 'deleted' })
+    await firstRefresh
+
+    const overwrite = useAppStore.getState().overwriteDocument(tab.id)
+    await waitFor(() => fileApi.writes.length === 1)
+    const newerRefresh = useAppStore.getState().refreshDocument(workspace.id, tab.path)
+    await waitFor(() => fileApi.reads.length === 2)
+    fileApi.reads[1]!.resolve({ status: 'deleted' })
+    await newerRefresh
+    fileApi.writes[0]!.resolve({ status: 'written', revision: 'revision-recreated' })
+    await overwrite
+
+    expect(useAppStore.getState().documents[key]).toMatchObject({
+      content: 'alpha',
+      revision: 'revision-recreated'
+    })
+    expect(useAppStore.getState().dirtyDocuments[key]).toBe(true)
+    expect(useAppStore.getState().documentIssues[key]).toEqual({ kind: 'deleted' })
+  })
+
+  it('coalesces concurrent opens before one read can release the shared observation', async () => {
+    const { workspace, tab, key } = seed()
+    useAppStore.setState({
+      tabs: {},
+      documents: {},
+      dirtyDocuments: {},
+      documentGenerations: {},
+      documentObservationGenerations: {},
+      documentIssues: {},
+      savingDocuments: {}
+    })
+
+    const first = useAppStore.getState().openFile(tab.path, 'pane')
+    const second = useAppStore.getState().openFile(tab.path, 'pane')
+    await waitFor(() => fileApi.reads.length === 1)
+    expect(fileApi.observes).toEqual([{ workspaceId: workspace.id, path: tab.path }])
+    fileApi.reads[0]!.resolve({
+      status: 'read',
+      document: { path: tab.path, content: 'alpha', revision: 'revision-alpha' }
+    })
+    await Promise.all([first, second])
+
+    expect(fileApi.reads).toHaveLength(1)
+    expect(fileApi.unobserves).toHaveLength(0)
+    expect(useAppStore.getState().documents[key]).toEqual({
+      path: tab.path,
+      content: 'alpha',
+      revision: 'revision-alpha'
+    })
   })
 
   it('keeps a dirty draft on invalidation, reloads explicitly, and overwrites only the latest observed revision', async () => {
@@ -218,7 +304,7 @@ describe('revision-aware file save Store', () => {
     })
   })
 
-  it('marks a clean externally deleted buffer dirty so Overwrite can recreate it', async () => {
+  it('lets a clean externally deleted buffer Overwrite without inventing an edit', async () => {
     const { workspace, tab, key } = seed()
     const refresh = useAppStore.getState().refreshDocument(workspace.id, tab.path)
     await waitFor(() => fileApi.reads.length === 1)
@@ -226,7 +312,7 @@ describe('revision-aware file save Store', () => {
     await refresh
 
     expect(useAppStore.getState().documents[key]?.content).toBe('alpha')
-    expect(useAppStore.getState().dirtyDocuments[key]).toBe(true)
+    expect(useAppStore.getState().dirtyDocuments[key]).toBe(false)
     expect(useAppStore.getState().documentIssues[key]).toEqual({ kind: 'deleted' })
 
     const overwrite = useAppStore.getState().overwriteDocument(tab.id)

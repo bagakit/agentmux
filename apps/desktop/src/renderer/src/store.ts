@@ -97,6 +97,7 @@ type AppState = {
   documents: Record<string, FileDocument>
   dirtyDocuments: Record<string, boolean>
   documentGenerations: Record<string, number>
+  documentObservationGenerations: Record<string, number>
   documentIssues: Record<string, FileDocumentIssue | undefined>
   savingDocuments: Record<string, boolean>
   lastActiveFileByWorkspace: Record<string, string | undefined>
@@ -179,6 +180,7 @@ const hostCheckRequestIds = new Map<string, number>()
 const fileReadRequestIds = new Map<string, number>()
 const fileInvalidationSequences = new Map<string, number>()
 const fileSaveTails = new Map<string, Promise<void>>()
+const fileOpenRequests = new Map<string, Promise<void>>()
 let runtimeSubscriptionCount = 0
 
 if (typeof window !== 'undefined') {
@@ -238,12 +240,15 @@ async function enqueueFileSave(tabId: string, overwrite: boolean): Promise<void>
     const currentKey = documentKey(tab.workspaceId, tab.path)
     const document = state.documents[currentKey]
     const issue = state.documentIssues[currentKey]
-    if (!document || !state.dirtyDocuments[currentKey]) return
+    if (!document) return
+    const hasOverwriteConflict = overwrite && (issue?.kind === 'changed' || issue?.kind === 'deleted')
+    if (!state.dirtyDocuments[currentKey] && !hasOverwriteConflict) return
     if (!overwrite && (issue?.kind === 'changed' || issue?.kind === 'deleted' || issue?.kind === 'read-error')) {
       return
     }
     if (overwrite && issue?.kind !== 'changed' && issue?.kind !== 'deleted') return
     const generation = state.documentGenerations[currentKey] ?? 0
+    const observationGeneration = state.documentObservationGenerations[currentKey] ?? 0
     let expectedRevision: string | null = document.revision
     if (overwrite) {
       if (issue?.kind === 'changed') expectedRevision = issue.observed.revision
@@ -274,13 +279,15 @@ async function enqueueFileSave(tabId: string, overwrite: boolean): Promise<void>
     }
     if (!useAppStore.getState().documents[currentKey]) return
     if (result.status === 'written') {
+      fileReadRequestIds.set(currentKey, (fileReadRequestIds.get(currentKey) ?? 0) + 1)
       useAppStore.setState((current) => reduceDocumentWritten(
         current,
         tab.workspaceId,
         tab.path,
         generation,
         result.revision,
-        expectedRevision
+        expectedRevision,
+        observationGeneration
       ))
       return
     }
@@ -319,6 +326,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   documents: {},
   dirtyDocuments: {},
   documentGenerations: {},
+  documentObservationGenerations: {},
   documentIssues: {},
   savingDocuments: {},
   lastActiveFileByWorkspace: {},
@@ -694,21 +702,34 @@ export const useAppStore = create<AppState>((set, get) => ({
         set((state) => reduceFileOpened(state, workspaceId, path, existing, paneId))
         return
       }
-      const invalidationSequence = fileInvalidationSequences.get(key) ?? 0
-      await api.files.observe(workspaceId, path)
-      const result = await api.files.read(workspaceId, path)
-      if (result.status !== 'read') {
-        await api.files.unobserve(workspaceId, path)
-        throw new Error(result.status === 'deleted'
-          ? `File was deleted: ${path}`
-          : result.message)
+      let request = fileOpenRequests.get(key)
+      if (!request) {
+        request = (async () => {
+          try {
+            const invalidationSequence = fileInvalidationSequences.get(key) ?? 0
+            await api.files.observe(workspaceId, path)
+            const result = await api.files.read(workspaceId, path)
+            if (result.status !== 'read') {
+              await api.files.unobserve(workspaceId, path)
+              throw new Error(result.status === 'deleted'
+                ? `File was deleted: ${path}`
+                : result.message)
+            }
+            const document = result.document
+            set((state) => reduceFileOpened(state, workspaceId, path, document, paneId))
+            if ((fileInvalidationSequences.get(key) ?? 0) !== invalidationSequence) {
+              await get().refreshDocument(workspaceId, path)
+            }
+          } catch (error) {
+            get().reportError(error)
+          }
+        })()
+        fileOpenRequests.set(key, request)
       }
-      const document = result.document
-      set((state) => reduceFileOpened(state, workspaceId, path, document, paneId))
-      if ((fileInvalidationSequences.get(key) ?? 0) !== invalidationSequence) {
-        await get().refreshDocument(workspaceId, path)
-      }
+      await request
+      if (fileOpenRequests.get(key) === request) fileOpenRequests.delete(key)
     } catch (error) {
+      if (fileOpenRequests.get(key)) fileOpenRequests.delete(key)
       get().reportError(error)
     }
   },
