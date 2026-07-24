@@ -1,4 +1,5 @@
 export * from './agent-provider.js'
+export * from './daemon-client.js'
 export * from './errors.js'
 export * from './execution-host.js'
 export * from './hook-normalizer.js'
