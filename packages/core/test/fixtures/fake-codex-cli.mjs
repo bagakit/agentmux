@@ -6,7 +6,8 @@ const hookUrl = process.env.AGENTMUX_HOOK_URL
 const hookToken = process.env.AGENTMUX_HOOK_TOKEN
 const agentSessionId = process.env.AGENTMUX_AGENT_SESSION_ID
 const agentId = process.env.AGENTMUX_AGENT_ID
-const readyMode = process.env.AGENTMUX_FAKE_READY_MODE ?? 'before'
+const readyMode = process.env.AGENTMUX_FAKE_READY_MODE ?? 'before-delayed'
+const promptRenderMode = process.env.AGENTMUX_FAKE_PROMPT_RENDER_MODE ?? 'normal'
 
 if (!hookUrl || !hookToken || !agentSessionId || !agentId) {
   throw new Error('missing AgentMux hook environment')
@@ -17,6 +18,13 @@ if (
   process.env.NO_COLOR !== undefined
 ) {
   throw new Error('AgentMux did not provide a color-capable terminal environment')
+}
+if (
+  process.env.AGENTMUX_ENV !== '1' ||
+  !process.env.AGENTMUX_CLI?.endsWith('/bin/agentmux') ||
+  !process.env.PATH?.split(':').includes(process.env.AGENTMUX_CLI.slice(0, -'/agentmux'.length))
+) {
+  throw new Error('AgentMux did not provide its managed CLI environment')
 }
 
 const request = async (body) => {
@@ -49,23 +57,34 @@ let stopGeneration = 0
 let controlledReadyPending = false
 let resolveHandshake
 const handshake = new Promise((resolve) => { resolveHandshake = resolve })
+const writeDiagnostic = (value) => {
+  process.stdout.write(`\u001b[s\u001b[24;1H${value}\u001b[K\u001b[u`)
+}
 const writeComposerFrame = (value) => {
-  process.stdout.write('\u001b[?2026h\u001b[1m›\u001b[0m')
+  process.stdout.write('\u001b[?2026h\u001b[22;3H')
   for (const [index, character] of Array.from(value).entries()) {
     process.stdout.write(`\u001b[${index % 2 === 0 ? '32' : '36'}m${character}\u001b[0m`)
   }
-  process.stdout.write('\u001b[?2026l')
-  process.stdout.write(`codex-composer-rendered:${Buffer.byteLength(value)}\n`)
+  process.stdout.write('\u001b[K\u001b[?2026l')
+  writeDiagnostic(`codex-composer-rendered:${Buffer.byteLength(value)}`)
+}
+const writeHistoricalPromptMatch = (value) => {
+  process.stdout.write(`\u001b[?2026h\u001b[5;1H› ${value}\u001b[22;3H\u001b[?2026l`)
+  writeDiagnostic('codex-historical-prompt-match')
 }
 const writeComposerNearMiss = (value) => {
   process.stdout.write(`\u001b[?2026h›${Array.from(value).join('·')}\u001b[?2026l`)
-  process.stdout.write('codex-composer-near-miss\n')
+  writeDiagnostic('codex-composer-near-miss')
 }
 const writeReadyFrame = () => {
   tuiReady = true
   controlledReadyPending = false
   process.stdout.write('codex-composer-ready-frame\n')
-  process.stdout.write('\u001b[?2026h\u001b[1m›\u001b[?25h\u001b[?2026l')
+  process.stdout.write('\u001b[?2026h\u001b[22;1H\u001b[1m›\u001b[0m \u001b[K\u001b[22;3H\u001b[?25h\u001b[?2026l')
+}
+const writeAssistantMarkerWithoutComposer = () => {
+  process.stdout.write('\u001b[2J\u001b[5;1H› assistant text only\u001b[22;1Hstatus\u001b[22;7H')
+  writeDiagnostic('codex-assistant-marker-without-composer')
 }
 const publishStop = async () => {
   stopGeneration += 1
@@ -85,8 +104,20 @@ const settleTurn = async () => {
     await publishStop()
     return
   }
+  if (readyMode === 'before-delayed') {
+    writeReadyFrame()
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    await publishStop()
+    return
+  }
   if (readyMode === 'after') {
     await publishStop()
+    controlledReadyPending = true
+    return
+  }
+  if (readyMode === 'after-assistant') {
+    await publishStop()
+    writeAssistantMarkerWithoutComposer()
     controlledReadyPending = true
     return
   }
@@ -118,6 +149,11 @@ process.stdin.on('data', (data) => {
     return
   }
   if (!data.includes('\r') && Array.from(data).length > 1) writeComposerNearMiss(data)
+  if (
+    promptRenderMode === 'historical-match' &&
+    !data.includes('\r') &&
+    Array.from(data).length > 1
+  ) writeHistoricalPromptMatch(data)
   for (const character of data) {
     if (character === '\r') {
       if (!composerReady) {
@@ -147,7 +183,7 @@ process.stdin.on('data', (data) => {
   }
 })
 process.on('SIGINT', () => {
-  process.stdout.write('codex-interrupt\n')
+  writeDiagnostic('codex-interrupt')
 })
 process.stdout.write('\u001b[?u')
 await handshake

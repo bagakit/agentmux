@@ -160,8 +160,19 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         filename: string
         files: Array<{ path: string }>
       }
+      const packedHeadless = await execFileAsync('npm', [
+        'pack',
+        resolve(repositoryRoot, 'packages/core/node_modules/@xterm/headless'),
+        '--pack-destination',
+        packDirectory
+      ], {
+        cwd: repositoryRoot,
+        timeout: 60_000,
+        maxBuffer: 8 * 1024 * 1024
+      })
+      const headlessArchive = join(packDirectory, packedHeadless.stdout.trim().split(/\r?\n/u).at(-1)!)
       const packedPaths = metadata.files.map((file) => file.path)
-      expect(packedPaths).toContain('bin/agentmux.js')
+      expect(packedPaths).toContain('bin/agentmux')
       expect(packedPaths).not.toContain('bin/agentmuxd.js')
       expect(packedPaths).toContain('dist/index.d.ts')
       expect(packedPaths).toContain('vendor/ctxmux/darwin-arm64/manifest.json')
@@ -176,6 +187,7 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         '--ignore-scripts',
         '--no-package-lock',
         '--no-save',
+        headlessArchive,
         metadata.filename
       ], {
         cwd: consumerDirectory,
@@ -207,12 +219,13 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
           './runtime': { types: './dist/runtime.d.ts', import: './dist/runtime.js' }
         },
         bin: {
-          agentmux: './bin/agentmux.js',
+          agentmux: './bin/agentmux',
           ctxmux: './vendor/ctxmux/darwin-arm64/bin/ctxmux',
           ctxmuxd: './vendor/ctxmux/darwin-arm64/bin/ctxmuxd'
         }
       })
       expect(installedManifest.dependencies).not.toHaveProperty('node-pty')
+      expect(installedManifest.dependencies).toEqual({ '@xterm/headless': '5.5.0' })
       expect(JSON.stringify(installedManifest)).not.toMatch(/(?:file|link):/u)
 
       const artifactManifest = JSON.parse(await readFile(
