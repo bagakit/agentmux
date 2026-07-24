@@ -1,0 +1,36 @@
+name: Nightly reliability
+
+on:
+  schedule:
+    - cron: '37 17 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reliability:
+    name: Nightly · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.5.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.1
+          cache: pnpm
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+      - run: pnpm install --frozen-lockfile
+      - if: runner.os == 'Linux'
+        run: Xvfb :99 -screen 0 1920x1080x24 >/tmp/agentmux-xvfb.log 2>&1 &
+      - if: runner.os == 'Linux'
+        run: echo "DISPLAY=:99" >> "$GITHUB_ENV"
+      - run: pnpm test:nightly

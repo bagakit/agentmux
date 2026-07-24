@@ -53,6 +53,7 @@ Daemon Crash 后没有可重新 Attach 的 PTY 文件描述符，因此当前正
 - Daemon 正常关闭会停止它真实持有的 PTY；Client 关闭不会触发 Daemon Stop。
 - 原子 Journal 只让 Crash Disposition 可恢复，不恢复 PTY、OS Process 或模型上下文。
 - 新 Daemon 清理 lost Session 前重新核对 PID 与 `lstart`；PID 已消失或已被复用时不发信号，避免把旧 Session 的权限施加到无关进程。
+- POSIX 身份同时读取 `stat`；Zombie 虽仍占有 PID，但已经不能运行或接收控制信号，因此按“已停止、等待父进程回收”处理，不能让无 reaper 的容器误报 Stop Timeout。
 
 ## 硬资源预算
 
@@ -121,7 +122,59 @@ RSS 取五次 `ps` 样本的平均值；CPU 用采样区间内 `ps time` 的增�
 
 2026-08-10 在 `darwin-arm64`、Node `v24.14.1` 的当前开发机样本：空闲 RSS 约 53.0 MiB；16 个额外 Client 后约 53.4 MiB；8 个 Session 后约 54.6 MiB；4 个满 Replay Window 后约 62.3 MiB。各稳定采样窗口 CPU 增量低于 `ps time` 的 10 ms 分辨率。Stop 后 Session 数回到 0；RSS 高水位仍约 62.3 MiB，说明 V8／native allocator 没有立刻把页归还 OS，因此单次 RSS 回落不能作为释放证明。
 
-确定性释放由以下行为证明：Stop 后 `listSessions()` 为空，原 Incarnation 不能再控制资源；64 Client 上限触发后断开一个 Client，可以立即接入新 Client；重复测试退出后临时 Socket、Journal、PTY 根进程和顽固后代均不存在。长期 RSS 是否随循环持续增长仍需 T-007 的 Soak、Heap／Handle 对比和多平台采样证明。
+确定性释放由以下行为证明：Stop 后 `listSessions()` 为空，原 Incarnation 不能再控制资源；64 Client 上限触发后断开一个 Client，可以立即接入新 Client；重复测试退出后临时 Socket、Journal、PTY 根进程和顽固后代均不存在。长期循环的 RSS／文件描述符与 Desktop Working Set 由下述 T-007 Soak 补充，仍不把 allocator 高水位误写成物理页立即归还。
+
+### T-007 循环释放与 Desktop 基线
+
+`pnpm --filter @agentmux/core test:stress` 使用固定 Seed `7007`，在一个独立 Daemon 上执行 20 轮；每轮创建 4 个 Session、各保留至少 64 KiB Replay、让 8 个 Client 逐个 Attach／Detach，再并发 Stop。脚本不调用手工 GC，也不重启 Daemon，硬性检查：
+
+- 每轮结束 `listSessions()` 必须为 0；
+- 文件描述符峰值不得比基线增加 64，最终不得比基线多 4；
+- RSS 峰值增量不得超过 64 MiB；后五轮均值相对前五轮均值不得继续增长超过 32 MiB；
+- 单个等待 10 秒，整套脚本 120 秒后终止；支持 10～100 轮但 Nightly 固定 20 轮。
+
+2026-08-11 的 `darwin-arm64`／Node `v24.14.1` Gate 样本中，20 轮后文件描述符始终为 17；RSS 从 59.8 MiB 起步，峰值 90.7 MiB，前五轮均值 71.7 MiB，后五轮均值 86.2 MiB，全部落在冻结预算内。这个结果证明循环没有线性 FD 泄漏，不能外推为 V8 会立即归还 RSS 页。
+
+同日一次性 `linux-arm64`／Node `v24.19.0` 容器复跑中，Fast 46 个文件、172 项测试通过；20 轮 Soak 的文件描述符始终为 21，RSS 从 60.4 MiB 起步、峰值和最终值均约 81.5 MiB，前后五轮均值约 66.7／81.5 MiB；SSH 五轮分区恢复通过。首轮曾暴露 Linux 无 reaper 容器中的 Zombie 被当作活进程，修复后重新执行完整 Fast 与 Stress 才记录此结果。
+
+`pnpm --filter @agentmux/desktop measure:desktop` 从 Production Build 启动隔离 Electron 配置，用真实 xterm 写入 300 KiB Output，并打开 20,000 行 TypeScript 文件触发真实 Monaco；随后连续 5 轮打开／释放 Terminal 与 Editor。它汇总 Electron Main、Renderer、GPU 和 Utility Process 的五次 Working Set 样本，不把 `agentmuxd` 或 Agent CLI 混进 Desktop 数字。
+
+同机 Electron `43.3.0` Gate 样本：空闲 Desktop 约 477.9 MiB；xterm 长输出相对空闲增加 63.0 MiB；Monaco 相对空闲增加 314.2 MiB；五次全部 Pane 释放后依次约 822.1、842.4、870.9、878.6、696.4 MiB。采样期间没有手工 GC；Warm Cache 峰值相对第一轮漂移 56.5 MiB，随后由运行时自行回收，落在 128 MiB 预算内。当前硬预算是 Terminal 增量 256 MiB、Editor 增量 512 MiB、释放后整个 Electron 进程组 1 GiB、第一轮 Warm Cache 后额外漂移 128 MiB。它是 Release Guard，不等于“这些绝对值已经足够低”；T-008 仍须拿同一方法与冻结基线比较并决定是否需要降低 Monaco／Electron 常驻成本。
+
+## 高风险不变量矩阵
+
+| 不变量／故障 | 当前自动化证据 | 层级 | 处置 |
+| --- | --- | --- | --- |
+| Create／Write 丢响应、Input Burst 与字节顺序 | `daemon-reliability.integration.test.ts` | Fast／Chaos | Receipt 与 Cursor 收敛，不重放已确认字节 |
+| Multi-client、慢消费者、Replay Gap／Truncation | `daemon-reliability.integration.test.ts` | Fast／Chaos | 慢 Client 断开；其他 Client 与 PTY 继续 |
+| Resize／Stop 并发、重复 Stop、迟到 Exit | `daemon-reliability.integration.test.ts` | Fast／Chaos | 只允许成功或明确的 Not Running／Unknown；最终一个进程、零 Session |
+| 反复 Attach／Detach | `daemon-reliability.integration.test.ts`、Daemon Soak | Fast／Stress | 100 次快速循环和每轮 32 次 Stress Attach 均不复制 Session 真相 |
+| Daemon Crash 与 Host Reboot | `daemon-crash.integration.test.ts`、`daemon-session-manager.test.ts` | Chaos／Fast | Crash 恢复为 `lost`；重启后 PID 消失或启动身份不符时只删除 Journal，不发信号 |
+| SSH Partition、Remote 抖动与身份漂移 | `ssh-remote-daemon.integration.test.ts` | Native／Stress | 单次完整恢复进入默认 Native；Nightly 固定 5 次分区并核对 PID／Incarnation／Daemon Instance |
+| 顽固 Shell／Agent／工具后代 | `posix-pty-process-groups.test.ts`、Local／SSH Reliability | Fast／Native | TTY Process Group 范围内先 graceful 后 force；无孤儿进程 |
+| Unix Socket、Remote Build／Host／Protocol | `daemon-runtime.integration.test.ts`、`daemon-security.test.ts`、SSH Integration | Fast／Security | 私有目录 `0700`、Socket `0600`；非 Socket 不删除；身份不匹配 Fail Closed |
+| 畸形协议、Frame／Request DoS | `daemon-security.test.ts` | Fast／Security／Fuzz | 严格 Frame Envelope；1 MiB Frame、256 In-flight、256 Arg／Env Entry 与 256 KiB Create Payload 预算 |
+| argv／env 注入、恶意 ANSI | `daemon-security.test.ts` | Fast／Security | `node-pty.spawn(command, args)` 不经过 Shell；ANSI 原样传给 xterm，不在 Core 解释或执行 |
+| Secret、Workspace、Symlink | `daemon-security.test.ts`、`semantic-store.test.ts`、`workspace-files.test.ts`、`managed-hook-installer.test.ts` | Fast／Security | Journal／Semantic Store 不保存 env、argv、Terminal Bytes；文件与 Hook Backup Realpath 越界 Fail Closed |
+| Daemon／Session／Client／Replay 释放 | `measure-daemon-resources.mjs`、`soak-daemon-resources.mjs` | Measure／Stress | 单点归因与 20 轮无 GC Soak 同时保留 |
+| Terminal／Desktop／Monaco 释放 | `measure-desktop-resources.mjs` | Stress／Nightly | 真实 Production UI 五轮；绝对 Working Set 进入 T-008 基线比较，不用本任务伪装成优化完成 |
+
+这里的 Workspace Boundary 属于 Desktop File/Git Owner，不属于 Daemon。Daemon 按宿主明确传入的 `cwd` 启动 Agent，而 Agent 本身拥有当前用户权限；在 Daemon 再造一套假文件沙箱既不能约束 Agent 工具，也会形成第二个 Workspace 真相。文件读写、Symlink 与受管 Hook 恢复分别在其真实 Owner 上测试。
+
+Secret Redaction 的合同同样保持窄而真实：AgentMux 不把 env、argv、Prompt、Terminal Output 或 Hook Token写入 Journal／Semantic Store／诊断报告；Terminal Output 是用户请求的原始流，如果 Agent 主动打印 Secret，Core 不篡改字节，展示侧也不能把“删字节”冒充安全日志系统。
+
+## Suite 分层与 CI
+
+| Suite | 命令 | Seed／超时 | 运行位置 |
+| --- | --- | --- | --- |
+| Fast deterministic | `pnpm test:fast`，并由 `pnpm check` 调用 | 无随机输入；单测试等待 8～20 秒 | 每次 Push／PR，Linux 与 macOS |
+| Native／Package | `pnpm test:native` | SSH／Pack Case 20～95 秒，串行执行 Native-heavy 文件 | 默认 `pnpm test`，Linux 与 macOS |
+| Security | `pnpm test:security` | 固定输入；协议、权限、Workspace、Browser、Hook | Nightly，也可本地单独运行 |
+| Fuzz | `pnpm test:fuzz` | Seed `1592619015`；32 个畸形 Frame + 1 MiB Oversize | Nightly；失败时用同一 Seed 复现 |
+| Chaos | `pnpm test:chaos` | 每个故障用例固定时序与 8～35 秒 Deadline | Nightly |
+| Stress | `pnpm test:stress` | Seed `7007`；20 轮 Local、5 轮 SSH、120 秒 Daemon Soak、60 秒 Desktop Probe | Nightly |
+
+`.github/workflows/verify.yml` 在 Ubuntu 24.04 与 macOS 14 运行默认 Gate；`.github/workflows/nightly.yml` 每天 `01:37 +08:00` 运行高成本 Suite，Linux Desktop Probe 在 Xvfb 中执行。Package 声明的 Linux／macOS、x64／arm64 Native Artifact 由 Artifact Builder 全平台检查；当前真实 Native 执行证据是 `darwin-arm64` 与 `linux-arm64`，x64 仍以 CI 真正运行后的结果为准，不从 Artifact 清单外推。
 
 ## 自动化入口
 
@@ -129,6 +182,12 @@ RSS 取五次 `ps` 样本的平均值；CPU 用采样区间内 `ps time` 的增�
 pnpm --filter @agentmux/core typecheck
 pnpm exec vitest run packages/core/test
 pnpm --filter @agentmux/core measure:daemon
+pnpm --filter @agentmux/core test:stress
+pnpm --filter @agentmux/desktop measure:desktop
+pnpm test:security
+pnpm test:fuzz
+pnpm test:chaos
+pnpm test:nightly
 pnpm check
 ```
 
@@ -154,8 +213,8 @@ pnpm check
 ## 剩余边界
 
 - 当前 Journal 只恢复 Active／Lost Session 身份，不持久化已经淘汰的 Retired Receipt；4096 Receipt 是有界幂等窗口，不是无限历史数据库。
-- Daemon Crash 到用户显式 Stop lost Session 之间，原进程可能继续运行；Stop 会对仍匹配原 PID／启动时间的 PTY 进程组做强制清理。已经主动脱离该 PTY 的任意恶意后代仍不能仅凭 Journal 安全识别；主机重启的处理和更长时间 Soak 属于 T-007。
-- POSIX 进程组路径已在 macOS 真实验证；Package 直接排除 Windows／ConPTY。Linux 与另一 CPU 架构的真实 Native 执行、清理和 Soak 证据属于 T-007。
-- 隔离 Fixture 证明了 SSH 进程与 Remote Daemon 合同，但不外推真实网络的 MTU、ProxyJump、FIDO／Kerberos、Known Hosts 轮换或长时间抖动；真实 Host 安全矩阵与 Soak 属于 T-007。
+- Daemon Crash 到用户显式 Stop lost Session 之间，原进程可能继续运行；Stop 会对仍匹配原 PID／启动时间的 PTY 进程组做强制清理。已经主动脱离该 PTY 的任意恶意后代仍不能仅凭 Journal 安全识别；Host Reboot 已明确收敛为“PID 不存在或启动身份不符，只清除 lost 记录”，不承诺恢复 PTY。
+- POSIX 进程组与 Soak 已在 macOS arm64、Linux arm64 真实验证；Package 直接排除 Windows／ConPTY。x64 Native 执行由 CI Workflow 承载，只有 Workflow 真正运行后才形成该架构证据。
+- 隔离 Fixture 证明了 SSH 进程与 Remote Daemon 合同，并增加固定 5 轮 Transport 抖动；它仍不外推真实网络的 MTU、ProxyJump、FIDO／Kerberos 或 Known Hosts 轮换。自动化不连接真实 Host、不修改 Credential。
 - Remote Artifact 仍由调用方显式提供，并以 Manifest、目标平台与系统 SSH 完整性为边界；T-006 已交付精简 Native Artifact、Packed Consumer 与正式 Doctor。额外内容签名或发布渠道完整性不在当前未发布候选范围。
-- 当前基线只描述 Daemon 进程，不包含 Desktop、xterm、Monaco、Browser View 或 Agent CLI 自身的内存。
+- Desktop、xterm 与 Monaco 已有 Production Probe；Browser View 是 Main-owned WebContents，当前 Probe 不访问外网也不创建 Browser，Browser 单独基线留给 T-008。Agent CLI 内存属于各 Provider 子进程，不能混入 Daemon／Desktop 预算。
