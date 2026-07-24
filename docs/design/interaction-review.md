@@ -15,6 +15,10 @@ AgentMux 的应用外框与 Terminal 使用两套独立的外观边界。应用�
 
 Desktop Settings 提供独立 Appearance Pane，只持久化一个严格的 `terminalTheme` 标识并从 Renderer 内置的完整 palette catalog 选择。当前 catalog 只保留 Graphite 与 Catppuccin Mocha 两个经过语义层级检查的深色方案；不建设主题 Registry、导入器、任意颜色表单或兼容层。以后增加 DIY 时沿 `TerminalThemeDefinition` catalog 边界扩展，保持 Core、Run Kernel 与 PTY 协议不变。默认主题仍保持简约干净，主题能力不成为当前产品主线。
 
+### Agent 身份图标
+
+Agent 身份不能退化成“方框加首字母”。Desktop 直接复用 a mature workbench 已验证的 Codex、Claude、Trae、Hermes 与 Pi 图标：Codex、Claude、Pi 使用离线内联 SVG，TraeX 与 Hermes 使用随应用打包的 64×64 资源；不请求在线 favicon。`AgentProviderIcon` 是 Launcher、Tab、Session header、Settings 与 Board 的唯一图标投影，`packages/core` 的 Provider 合同仍只提供稳定 Agent identity 与 label，不接收 Renderer 资产或组件。未知自定义 Provider 使用中性 Bot 标记，不冒充某个内置 Agent。
+
 ## 各界面的取舍
 
 | 界面 | AgentMux 现状 | a mature workbench 更好的模式 | 决策 |

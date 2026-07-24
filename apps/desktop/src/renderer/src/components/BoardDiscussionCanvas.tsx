@@ -15,14 +15,7 @@ import type { WorkspaceRecord } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import type { ProjectBranchLane } from '../lib/project-board'
 import { agentDetectionKey, useAppStore } from '../store'
-
-const AGENT_LABELS: Record<string, string> = {
-  codex: 'Codex',
-  claude: 'Claude',
-  traex: 'TraeX',
-  hermes: 'Hermes',
-  pi: 'Pi'
-}
+import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
 
 export function BoardDiscussionCanvas({
   lane,
@@ -50,7 +43,7 @@ export function BoardDiscussionCanvas({
   const agents = useMemo(
     () => Object.keys(config?.agents ?? {}).map((id) => ({
       id,
-      label: AGENT_LABELS[id] ?? id,
+      label: agentProviderLabel(id),
       detection: detections[agentDetectionKey(hostId, id)]
     })),
     [config?.agents, detections, hostId]
@@ -171,7 +164,7 @@ export function BoardDiscussionCanvas({
                           aria-pressed={agent.id === agentId}
                           onClick={() => setAgentId(agent.id)}
                         >
-                          <span>{agent.label.slice(0, 1)}</span>
+                          <span><AgentProviderIcon agentId={agent.id} size={22} /></span>
                           <strong>{agent.label}</strong>
                           <small>Ready</small>
                         </button>

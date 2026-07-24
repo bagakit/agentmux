@@ -6,6 +6,7 @@ import { ConfirmationDialog } from './ConfirmationDialog'
 import { RichComposer } from './RichComposer'
 import { StatusDot } from './StatusDot'
 import { TerminalView } from './TerminalView'
+import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
 
 const NO_ACTIVITIES: never[] = []
 
@@ -58,9 +59,9 @@ export function SessionPane({ sessionId }: { sessionId: string }) {
         <div className="agent-context-bar__identity">
           <StatusDot status={session.status} withLabel />
           <span className="agent-provider-mark">
-            {session.kind === 'agent' ? session.agentId.slice(0, 1).toUpperCase() : <SquareTerminal size={11} />}
+            {session.kind === 'agent' ? <AgentProviderIcon agentId={session.agentId} size={15} /> : <SquareTerminal size={13} />}
           </span>
-          <strong>{session.kind === 'agent' ? session.agentId : 'Terminal'}</strong>
+          <strong>{session.kind === 'agent' ? agentProviderLabel(session.agentId) : 'Terminal'}</strong>
         </div>
         <div className="agent-context-bar__host">
           {session.hostId !== 'local' ? <RadioTower size={11} /> : null}
