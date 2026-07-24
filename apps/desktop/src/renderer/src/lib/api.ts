@@ -20,13 +20,7 @@ let mockConfig: AppConfig = {
       kind: 'ssh',
       label: 'Studio Box',
       hostname: 'studio.example.com',
-      user: 'river',
-      runtime: {
-        buildIdentity: '0.1.0',
-        remoteNodePath: 'node',
-        remoteEntrypointPath: '/home/river/.agentmux/versions/0.1.0/package/dist/agentmuxd.js',
-        remoteEndpointPath: '/home/river/.agentmux/agentmuxd.sock'
-      }
+      user: 'river'
     }
   ],
   agents: {
@@ -86,7 +80,7 @@ const mockSessions: SessionSnapshot[] = [
       kind: 'agent',
       hostId: 'local',
       agentSessionId: 'session-codex',
-      run: { runId: 'run-codex', incarnationId: 'incarnation-codex' }
+      run: { runId: 'run-codex' }
     }
   },
   {
@@ -98,14 +92,14 @@ const mockSessions: SessionSnapshot[] = [
     label: 'Claude · material audit',
     createdAt: now - 38 * 60_000,
     updatedAt: now - 20_000,
-    processState: 'lost',
+    processState: 'interrupted',
     status: { state: 'error', source: 'run-process', observedAt: now - 20_000, detail: 'SSH connection to Studio Box is unavailable.' },
     latestOutputBytes: 0,
     control: {
       kind: 'agent',
       hostId: 'studio',
       agentSessionId: 'session-claude',
-      run: { runId: 'run-claude', incarnationId: 'incarnation-claude' }
+      run: { runId: 'run-claude' }
     }
   }
 ]
@@ -185,7 +179,9 @@ const mockApi: AgentMuxDesktopApi = {
     get: async () => structuredClone(mockConfig),
     save: async (config) => (mockConfig = structuredClone(config))
   },
-  hosts: { check: async (host) => ({ ok: true, detail: host.kind === 'ssh' ? `Runtime ${host.runtime.buildIdentity} · ${host.hostname}` : 'Runtime 0.1.0' }) },
+  hosts: { check: async (host) => host.kind === 'ssh'
+    ? { ok: false, detail: 'Remote Runs are not yet supported.' }
+    : { ok: true, detail: 'CtxMux 0.1.0 · protocol 9' } },
   workspaces: {
     chooseLocalFolder: async () => null,
     add: async (input) => {
@@ -312,7 +308,7 @@ const mockApi: AgentMuxDesktopApi = {
     snapshot: async () => structuredClone(mockSnapshot),
     launchAgent: async (input) => {
       const agentSessionId = input.agentSessionId ?? crypto.randomUUID()
-      const runId = input.runId ?? agentSessionId
+      const runId = crypto.randomUUID()
       const session: SessionSnapshot = {
         id: agentSessionId,
         kind: 'agent',
@@ -329,7 +325,7 @@ const mockApi: AgentMuxDesktopApi = {
           kind: 'agent',
           hostId: input.hostId,
           agentSessionId,
-          run: { runId, incarnationId: crypto.randomUUID() }
+          run: { runId }
         }
       }
       mockSnapshot.sessions.push(session)
@@ -337,7 +333,7 @@ const mockApi: AgentMuxDesktopApi = {
       return session
     },
     launchTerminal: async (input) => {
-      const runId = input.runId ?? crypto.randomUUID()
+      const runId = crypto.randomUUID()
       const session: SessionSnapshot = {
         id: runId,
         kind: 'terminal',
@@ -354,7 +350,7 @@ const mockApi: AgentMuxDesktopApi = {
           kind: 'terminal',
           hostId: input.hostId,
           runId,
-          run: { runId, incarnationId: crypto.randomUUID() }
+          run: { runId }
         }
       }
       mockSnapshot.sessions.push(session)
@@ -372,7 +368,6 @@ const mockApi: AgentMuxDesktopApi = {
         replay: data ? [{
           type: 'data' as const,
           runId: control.run.runId,
-          incarnationId: control.run.incarnationId,
           startByte: 0,
           endByte,
           data
@@ -421,7 +416,7 @@ const mockApi: AgentMuxDesktopApi = {
       const sessionId = control.kind === 'agent' ? control.agentSessionId : control.runId
       const session = mockSnapshot.sessions.find((item) => item.id === sessionId)
       if (!session) throw new Error(`Session not found: ${sessionId}`)
-      if (session.processState === 'lost') {
+      if (session.processState === 'interrupted') {
         session.processState = 'running'
         session.status = {
           state: 'running',

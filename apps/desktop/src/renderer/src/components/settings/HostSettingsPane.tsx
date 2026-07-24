@@ -31,27 +31,13 @@ export function HostSettingsPane({ config, onSave }: {
     }))
   }
 
-  function updateRuntime(id: string, patch: Partial<SshHostConfig['runtime']>): void {
-    setHosts((current) => current.map((host) =>
-      host.id === id && host.kind === 'ssh'
-        ? { ...host, runtime: { ...host.runtime, ...patch } }
-        : host
-    ))
-  }
-
   function addHost(): void {
     const id = `ssh-${crypto.randomUUID().slice(0, 8)}`
     setHosts((current) => [...current, {
       id,
       kind: 'ssh',
       label: 'Remote host',
-      hostname: '',
-      runtime: {
-        buildIdentity: '',
-        remoteNodePath: 'node',
-        remoteEntrypointPath: '',
-        remoteEndpointPath: ''
-      }
+      hostname: ''
     }])
   }
 
@@ -61,13 +47,9 @@ export function HostSettingsPane({ config, onSave }: {
     try {
       if (nextHosts.some((host) => host.kind === 'ssh' && (
         !host.label.trim() ||
-        !host.hostname.trim() ||
-        !host.runtime.buildIdentity.trim() ||
-        !host.runtime.remoteNodePath.trim() ||
-        !host.runtime.remoteEntrypointPath.startsWith('/') ||
-        !host.runtime.remoteEndpointPath.startsWith('/')
+        !host.hostname.trim()
       ))) {
-        throw new Error('Every SSH host needs connection details and absolute Runtime paths')
+        throw new Error('Every SSH host needs connection details')
       }
       await onSave(nextHosts, nextWorkspaces)
       return true
@@ -118,10 +100,7 @@ export function HostSettingsPane({ config, onSave }: {
                     <label><span>User</span><input value={host.user ?? ''} onChange={(event) => event.target.value ? update(host.id, { user: event.target.value }) : clear(host.id, 'user')} placeholder="optional" /></label>
                     <label><span>Port</span><input type="number" min={1} max={65535} value={host.port ?? ''} onChange={(event) => event.target.value ? update(host.id, { port: Number(event.target.value) }) : clear(host.id, 'port')} placeholder="22" /></label>
                     <label className="host-edit-grid__wide"><span>Identity file path <small>optional; key contents are never stored</small></span><input value={host.identityFile ?? ''} onChange={(event) => event.target.value ? update(host.id, { identityFile: event.target.value }) : clear(host.id, 'identityFile')} placeholder="~/.ssh/id_ed25519" /></label>
-                    <label><span>Runtime build</span><input value={host.runtime.buildIdentity} onChange={(event) => updateRuntime(host.id, { buildIdentity: event.target.value })} placeholder="0.1.0" /></label>
-                    <label><span>Remote launcher</span><input value={host.runtime.remoteNodePath} onChange={(event) => updateRuntime(host.id, { remoteNodePath: event.target.value })} placeholder="node" /></label>
-                    <label className="host-edit-grid__wide"><span>Installed Runtime entrypoint</span><input value={host.runtime.remoteEntrypointPath} onChange={(event) => updateRuntime(host.id, { remoteEntrypointPath: event.target.value })} placeholder="/home/user/.agentmux/runtime/entrypoint.js" /></label>
-                    <label className="host-edit-grid__wide"><span>Runtime endpoint path</span><input value={host.runtime.remoteEndpointPath} onChange={(event) => updateRuntime(host.id, { remoteEndpointPath: event.target.value })} placeholder="/home/user/.agentmux/runtime.sock" /></label>
+                    <p className="field-hint host-edit-grid__wide">Remote Runs are unavailable until the ctxmux Remote contract is delivered.</p>
                   </div>
                 </details>
               ) : null}

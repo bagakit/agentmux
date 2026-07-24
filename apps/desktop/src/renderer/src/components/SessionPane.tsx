@@ -30,7 +30,7 @@ export function SessionPane({ sessionId }: { sessionId: string }) {
   }
 
   const disconnected = session.status.state === 'disconnected'
-  const missing = session.processState === 'lost' && session.status.state === 'error'
+  const missing = session.processState === 'interrupted' && session.status.state === 'error'
   const exited = session.processState === 'exited'
 
   async function refresh(): Promise<void> {
