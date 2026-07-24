@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process'
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
@@ -13,18 +14,58 @@ import {
 
 const execFileAsync = promisify(execFile)
 const roots: string[] = []
+const runtimeDirectories: string[] = []
 const createdCodexSessions: Array<{ command: string; sessionId: string; cwd: string }> = []
 const activeAgentSessions: Array<{ store: AgentMuxFileAgentSessionStore; agentSessionId: string }> = []
+const originalRuntimeDirectory = process.env.AGENTMUX_RUNTIME_DIRECTORY
+const ctxmuxDaemon = fileURLToPath(new URL('../vendor/ctxmux/darwin-arm64/bin/ctxmuxd', import.meta.url))
+
+async function stopOwnedTestDaemon(runtimeDirectory: string): Promise<void> {
+  const processes = await execFileAsync('ps', ['-axo', 'pid=,command='], {
+    timeout: 5_000,
+    maxBuffer: 4 * 1024 * 1024
+  })
+  const pids = processes.stdout.split('\n').flatMap((line) => {
+    const match = /^\s*(\d+)\s+(.+)$/u.exec(line)
+    if (!match) return []
+    const command = match[2]!
+    return command.includes(ctxmuxDaemon) &&
+      command.includes(`--socket ${join(runtimeDirectory, 'ctxmux.sock')}`) &&
+      command.includes(`--state-dir ${join(runtimeDirectory, 'state')}`)
+      ? [Number(match[1])]
+      : []
+  })
+  if (pids.length > 1) throw new Error('Multiple CtxMux daemons occupy the isolated real Codex runtime.')
+  const pid = pids[0]
+  if (pid === undefined) return
+  try {
+    process.kill(pid, 'SIGTERM')
+  } catch (error) {
+    if (!(error instanceof Error && 'code' in error && error.code === 'ESRCH')) throw error
+  }
+  const deadline = Date.now() + 5_000
+  while (Date.now() <= deadline) {
+    try {
+      process.kill(pid, 0)
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'ESRCH') return
+      throw error
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+  throw new Error(`Isolated real Codex CtxMux daemon ${pid} did not stop.`)
+}
 
 afterEach(async () => {
   const cleanupErrors: unknown[] = []
+  const cleanupClients: Array<Awaited<ReturnType<typeof connectLocalAgentMux>>> = []
   for (const active of activeAgentSessions.splice(0)) {
     try {
       const client = await connectLocalAgentMux({ store: active.store })
       if (client.agentSessions().some((session) => session.agentSessionId === active.agentSessionId)) {
         await client.stopAgent(active.agentSessionId)
       }
-      await client.dispose()
+      cleanupClients.push(client)
     } catch (error) {
       cleanupErrors.push(error)
     }
@@ -40,18 +81,40 @@ afterEach(async () => {
       cleanupErrors.push(error)
     }
   }
+  for (const client of cleanupClients) {
+    try {
+      await client.dispose()
+    } catch (error) {
+      cleanupErrors.push(error)
+    }
+  }
+  for (const runtimeDirectory of runtimeDirectories.splice(0)) {
+    try {
+      await stopOwnedTestDaemon(runtimeDirectory)
+    } catch (error) {
+      cleanupErrors.push(error)
+    }
+  }
+  if (originalRuntimeDirectory === undefined) delete process.env.AGENTMUX_RUNTIME_DIRECTORY
+  else process.env.AGENTMUX_RUNTIME_DIRECTORY = originalRuntimeDirectory
   await Promise.all(roots.splice(0).map(async (root) => await rm(root, { recursive: true, force: true })))
   if (cleanupErrors.length > 0) throw new AggregateError(cleanupErrors, 'Real Codex E2E session cleanup failed.')
 })
 
-async function waitFor<T>(description: string, predicate: () => T | Promise<T>, timeoutMs = 120_000): Promise<T> {
+async function waitFor<T>(
+  description: string,
+  predicate: () => T | Promise<T>,
+  timeoutMs = 120_000,
+  diagnose?: () => unknown
+): Promise<T> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() <= deadline) {
     const result = await predicate()
     if (result) return result
     await new Promise((resolve) => setTimeout(resolve, 50))
   }
-  throw new Error(`Timed out waiting for ${description}.`)
+  const detail = diagnose ? ` diagnostic=${JSON.stringify(diagnose())}` : ''
+  throw new Error(`Timed out waiting for ${description}.${detail}`)
 }
 
 describe.runIf(process.env.AGENTMUX_REAL_CODEX_E2E === '1')('installed real Codex lifecycle', () => {
@@ -74,6 +137,9 @@ describe.runIf(process.env.AGENTMUX_REAL_CODEX_E2E === '1')('installed real Code
 
     const root = await mkdtemp('/private/tmp/agentmux-real-codex-')
     roots.push(root)
+    const runtimeDirectory = join(root, 'runtime')
+    runtimeDirectories.push(runtimeDirectory)
+    process.env.AGENTMUX_RUNTIME_DIRECTORY = runtimeDirectory
     const invocationId = root.slice(root.lastIndexOf('-') + 1)
     const agentSessionId = `real-codex-${invocationId}`
     const workspace = join(root, 'workspace')
@@ -128,7 +194,7 @@ describe.runIf(process.env.AGENTMUX_REAL_CODEX_E2E === '1')('installed real Code
         ? session.nativeHandle.sessionId
         : ''
     })
-    createdCodexSessions.push({ command, sessionId: nativeSessionId, cwd: workspace })
+    createdCodexSessions.push({ command, sessionId: nativeSessionId, cwd: root })
     await waitFor('real Codex initial completed response', () => {
       const session = client.agentSession(created.agentSessionId)
       return output.includes('AGENTMUX_REAL_CODEX_READY') &&
@@ -137,6 +203,15 @@ describe.runIf(process.env.AGENTMUX_REAL_CODEX_E2E === '1')('installed real Code
         session.hookReceipt.run.runId === created.run.runId &&
         session.terminalStopReceipt?.id === session.hookReceipt.id &&
         session.terminalStopReceipt.readyThroughByte !== undefined
+    }, 120_000, () => {
+      const session = client.agentSession(created.agentSessionId)
+      return {
+        outputTail: output.slice(-8 * 1024),
+        assistantMarkers: [...assistantMarkers].slice(-8).map((value) => value.slice(-1024)),
+        nativeHandle: session.nativeHandle ?? null,
+        hookReceipt: session.hookReceipt ?? null,
+        terminalStopReceipt: session.terminalStopReceipt ?? null
+      }
     })
     const initialReadyStop = client.agentSession(created.agentSessionId).terminalStopReceipt
     expect(initialReadyStop?.readyThroughByte).toBeGreaterThanOrEqual(
@@ -219,6 +294,15 @@ describe.runIf(process.env.AGENTMUX_REAL_CODEX_E2E === '1')('installed real Code
         session.hookBindingId === resumed.hookBindingId &&
         session.terminalStopReceipt?.id === session.hookReceipt.id &&
         session.terminalStopReceipt.readyThroughByte !== undefined
+    }, 120_000, () => {
+      const session = client.agentSession(resumed.agentSessionId)
+      return {
+        outputTail: output.slice(-8 * 1024),
+        assistantMarkers: [...assistantMarkers].slice(-8).map((value) => value.slice(-1024)),
+        nativeHandle: session.nativeHandle ?? null,
+        hookReceipt: session.hookReceipt ?? null,
+        terminalStopReceipt: session.terminalStopReceipt ?? null
+      }
     })
     const resumedReadyStop = client.agentSession(resumed.agentSessionId).terminalStopReceipt
     const resumedConnectedStatus = await client.statusAgent(resumed.agentSessionId)

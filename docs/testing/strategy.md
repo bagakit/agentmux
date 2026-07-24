@@ -1,6 +1,6 @@
 # AgentMux 测试策略
 
-更新：2026-08-15
+更新：2026-08-17
 
 ## 权威边界
 
@@ -28,13 +28,14 @@ Terminal output 是 raw PTY bytes 的 UTF-8 投影，不是模型上下文、Too
 | cross-process lifecycle | 两个真实 Node 进程竞争 Create/Resume，只允许一个 File Store reservation/CAS commit；Owner crash 按 CtxMux Run spec operation id 回收 orphan |
 | natural terminal retire | public CtxMux status 证明 Run 已 terminal 后只退休语义绑定，不伪造 Stop 成功 |
 | Codex terminal handshake | fake + real Codex 发出 terminal query；Core 只回复 flags 0 并持久化可恢复 Input receipt |
-| Stop-epoch readiness | exact Run 的 Stop receipt 捕获 public output cursor；有界 lookbehind/live Attachment 只在后续 active-composer frame 后开放 prompt |
-| prompt crash recovery | payload 与 submit 各自使用确定性 operation id；丢失 receipt 或进程 crash 后只恢复一次，不重复 payload/CR |
+| Stop-epoch readiness | Core 用有界 headless terminal emulator 从 byte 0 连续重放 CtxMux public Replay/live；只有当前 cursor 所属 composer 为空且 screen 已穿过 Stop cursor 才 ready，Gap/overlap 失败关闭，assistant 或历史行里的 `›` 不能伪造 composer |
+| prompt crash recovery | payload 与 submit 各自使用确定性 operation id；只有当前 screen/cursor 的 composer 精确等于 payload 且 output 越过写入前 boundary 才发送 CR；局部更新不要求重画 marker，历史同文、丢失 receipt 或进程 crash 都不能造成重复 payload/CR |
 | terminal color capability | packed consumer 在父环境显式设置 `NO_COLOR=1`，真实 daemon/PTY child 仍观察到 `TERM=xterm-256color`、`COLORTERM=truecolor` 且 `NO_COLOR` 不存在 |
 | Terminal appearance query | Desktop Main 在 Renderer 未 attach 时识别完整及跨 chunk OSC 10/11 query，等待 Core 发布 ready Agent Session 后才经 Core → CtxMux Input 回复当前 shared palette，不能与 Core Terminal handshake 竞争 Input cursor；Renderer replay handler 消费旧 query 而不重复注入 |
 | Terminal/Explorer interaction | Fast suite 固定黑底 Graphite 的 Agent Surface 层次、workbench-derived options、OSC parser、历史 Run 只读 fit、平台路径、Workspace Root reveal 边界与 Store action；Production build 证明 Search/WebLinks/WebGL/Context Menu 可打包 |
 | Hook acceptance/drain | Hook command 的 receipt id 跨重试稳定；bound ingress 仅在 owner persistence 成功后 `204`，失败以非 2xx 触发同 receipt 重试；Server shutdown 排空已接受事件 |
 | external View switch | CLI 通过 Core Resolver 与 typed Desktop focus socket，只聚焦已打开 View，不 Open/Attach/Resume/Spawn |
+| Agent-owned CLI discovery | checkout-external packed consumer 的真实 PTY 从 injected `PATH` 执行 `agentmux --version`；fake Codex 同时复核 `AGENTMUX_ENV`、权威 `AGENTMUX_CLI` 与 Agent Session context；Fast suite 固定分组帮助、子命令成功语义、`next:` 和 `--skill` 的 fail-closed composition 边界；Desktop package smoke 在 `PATH=/usr/bin:/bin` 下证明 launcher 使用 `.app` 自带 Node runtime |
 | Darwin endpoint bound | product endpoint 固定在 `/private/tmp/amx-<uid>-<artifact-id>` 且小于 104 bytes；package LaunchServices smoke 启动真实内置 ctxmuxd |
 
 主 Oracle：`packages/core/test/package-consumer.integration.test.ts` 与 `packages/core/test/fixtures/packed-consumer.mjs`。
@@ -59,7 +60,9 @@ Fast 与 Native 分开是为了让失败归因清晰，不允许用 Mock 代替 
 
 ## 未完成，不能外推
 
-- 确定性 Codex/Agent Session、Hook、Permission、Resume 与 Stop-epoch prompt vertical 已完成；最终 candidate 的 opt-in 真实 Codex E2E 尚需再次全程通过；
+- 确定性 Codex/Agent Session、Hook、Permission、Resume 与 Stop-epoch prompt vertical 已完成；最终 candidate 已在用户现有 Codex `0.147.0` 与原位认证上通过 create/reconnect/resume/natural-retire E2E；
 - resource soak、slow consumer、daemon crash/restart、security/fuzz 和最终 benchmark 仍由后续已审核 Task 补齐，不从当前 T-020 proof 外推；
+- terminal screen proof 当前必须从 byte 0 连续重放；当 CtxMux 的 4 MiB retained Output 已淘汰 byte 0 时，后续 semantic prompt 会明确 `OUTPUT_GAP`，不会猜测 readiness。长期会话 checkpoint/snapshot 合同属于后续成熟度工作；
+- headless replay 使用 attach snapshot 的当前 cols/rows，历史 Resize 时序尚未进入 Output stream，观察期间的 Resize 也不会直接更新该 screen。当前真实 Codex Gate 依赖 TUI resize 后全屏 redraw；在将此模型泛化到其他 TUI 前，必须补 Resize 失效或时序合同；
 - Remote/SSH 属于 T-021；
 - 当前 artifact 只支持 `darwin-arm64`，其他平台必须有自己的 exact manifest 和 Native proof，不能从本机结果推断。

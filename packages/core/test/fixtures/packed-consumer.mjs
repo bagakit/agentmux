@@ -86,6 +86,10 @@ assert.equal(
   output(firstEvents, run.runId).includes('terminal-env:xterm-256color:truecolor:color-enabled'),
   true
 )
+assert.equal(
+  output(firstEvents, run.runId).includes('agentmux-env:1:true:agentmux 0.1.0'),
+  true
+)
 assert.equal(output(firstEvents, run.runId).includes('prefix:😀:tail'), true)
 assert.equal(output(firstEvents, run.runId).includes('�'), false)
 const beforeReconnect = (await first.listRuns()).find((candidate) => candidate.runId === run.runId)
@@ -186,7 +190,8 @@ const codex = await codexFirst.createAgent({
   agentId: 'codex',
   workspacePath: process.cwd(),
   prompt: 'first',
-  commandOverride: fakeCodex
+  commandOverride: fakeCodex,
+  env: { AGENTMUX_FAKE_PROMPT_RENDER_MODE: 'historical-match' }
 })
 assert.deepEqual(codex.terminalHandshake, {
   run: { runId: codex.run.runId },
@@ -296,6 +301,7 @@ assert.equal(
   true
 )
 assert.equal(codexReplayText.includes('codex-composer-near-miss'), true)
+assert.equal(codexReplayText.includes('codex-historical-prompt-match'), true)
 assert.equal(codexReplayText.includes('codex-ignored-early-enter'), false)
 assert.equal(codexReplayText.includes('codex-interrupt'), true)
 assert.equal(codexReplayText.includes('\u001b[?7u'), false)
@@ -308,10 +314,24 @@ assert.ok(handshakeQueryIndex >= 0)
 assert.ok(handshakeAckIndex > handshakeQueryIndex)
 assert.ok(initialPromptIndex > handshakeAckIndex)
 assert.ok(submittedPromptIndex > handshakeAckIndex)
-await waitFor('next ready Stop receipt', () => {
-  const receipt = codexSecond.agentSession(codex.agentSessionId).terminalStopReceipt
-  return receipt?.id !== initialStopReceipt.id && receipt?.readyThroughByte !== undefined
-})
+try {
+  await waitFor('next ready Stop receipt', () => {
+    const receipt = codexSecond.agentSession(codex.agentSessionId).terminalStopReceipt
+    return receipt?.id !== initialStopReceipt.id && receipt?.readyThroughByte !== undefined
+  })
+} catch (error) {
+  const session = codexSecond.agentSession(codex.agentSessionId)
+  const agentErrors = codexSecondEvents.filter((event) => event.type === 'agent-error')
+  const debugAttachment = JSON.parse((await cli([
+    'attach', codex.agentSessionId, '--after-byte', '0', '--json'
+  ])).stdout)
+  throw new Error(`${error.message}\n${JSON.stringify({
+    terminalStopReceipt: session.terminalStopReceipt,
+    terminalPromptSubmission: session.terminalPromptSubmission,
+    agentErrors,
+    outputTail: debugAttachment.replay.map((event) => event.data).join('').slice(-1_500)
+  }, null, 2)}`)
+}
 await codexSecond.submitAgentPrompt({
   agentSessionId: codex.agentSessionId,
   operationId: 'packed-codex-exit',
@@ -367,6 +387,30 @@ await cli(['stop', resumed.agentSessionId, '--json'])
 const codexStopped = await connectLocalAgentMux()
 assert.deepEqual(codexStopped.agentSessions(), [])
 await codexStopped.dispose()
+
+const literalPromptClient = await connectLocalAgentMux()
+const literalPromptEvents = []
+literalPromptClient.onEvent((event) => literalPromptEvents.push(event))
+const literalPromptAgent = await literalPromptClient.createAgent({
+  agentSessionId: 'codex-literal-option-prompt',
+  createOperationId: 'packed-codex-literal-option-create',
+  agentId: 'codex',
+  workspacePath: process.cwd(),
+  commandOverride: fakeCodex
+})
+await literalPromptClient.reattachAgent(literalPromptAgent.agentSessionId, 0)
+await waitFor('literal prompt Agent ready Stop receipt', () => (
+  literalPromptClient.agentSession(literalPromptAgent.agentSessionId)
+    .terminalStopReceipt?.readyThroughByte !== undefined
+))
+await cli(['send', literalPromptAgent.agentSessionId, '--text', '--help', '--json'])
+await waitFor('literal option-like prompt submitted', () => (
+  output(literalPromptEvents, literalPromptAgent.run.runId).includes('codex-submit:--help:accepted')
+))
+await literalPromptClient.dispose()
+const literalPromptCleanup = await connectLocalAgentMux()
+await literalPromptCleanup.stopAgent(literalPromptAgent.agentSessionId)
+await literalPromptCleanup.dispose()
 
 const noStopClient = await connectLocalAgentMux()
 const noStopEvents = []
@@ -433,6 +477,40 @@ await waitFor('after-cursor fake Codex exit', async () => (
 ))
 await afterCursorClient.stopAgent(afterCursor.agentSessionId)
 await afterCursorClient.dispose()
+
+const assistantMarkerClient = await connectLocalAgentMux()
+const assistantMarker = await assistantMarkerClient.createAgent({
+  agentSessionId: 'codex-assistant-marker',
+  createOperationId: 'packed-codex-assistant-marker-create',
+  agentId: 'codex',
+  workspacePath: process.cwd(),
+  commandOverride: fakeCodex,
+  env: { AGENTMUX_FAKE_READY_MODE: 'after-assistant' }
+})
+const assistantMarkerStop = await waitFor('Stop with assistant marker but no composer', () => (
+  assistantMarkerClient.agentSession(assistantMarker.agentSessionId).terminalStopReceipt ?? null
+))
+assert.equal(assistantMarkerStop.readyThroughByte, undefined)
+await new Promise((resolve) => setTimeout(resolve, 150))
+assert.equal(
+  assistantMarkerClient.agentSession(assistantMarker.agentSessionId).terminalStopReceipt?.readyThroughByte,
+  undefined
+)
+await assert.rejects(
+  assistantMarkerClient.submitAgentPrompt({
+    agentSessionId: assistantMarker.agentSessionId,
+    operationId: 'packed-assistant-marker-too-early',
+    prompt: 'must-not-reach-pty'
+  }),
+  (error) => error?.code === 'AGENT_PROMPT_NOT_READY'
+)
+await assistantMarkerClient.writeAgent(assistantMarker.agentSessionId, '\u001d')
+await waitFor('real composer after misleading assistant marker', () => (
+  assistantMarkerClient.agentSession(assistantMarker.agentSessionId)
+    .terminalStopReceipt?.readyThroughByte ?? null
+))
+await assistantMarkerClient.stopAgent(assistantMarker.agentSessionId)
+await assistantMarkerClient.dispose()
 
 const concurrentOwner = await connectLocalAgentMux()
 const concurrent = await concurrentOwner.createAgent({

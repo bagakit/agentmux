@@ -1,7 +1,7 @@
 # CtxMux Local cutover
 
-状态：T-020 Local + Codex implementation candidate；最终真实 Codex 与独立复核 pending
-更新：2026-08-15
+状态：T-020 Local + Codex implementation candidate；独立复核与 clean Tracker Gate pending
+更新：2026-08-17
 
 ## 固定消费身份
 
@@ -33,7 +33,7 @@ AgentMux vendor 已由 `2e32a9d` clean build 整套替换。
 
 Local endpoint 不是可选 Backend。Core 不接受外部 socket/state path；Darwin 固定使用长度有界的 `/private/tmp/amx-<uid>-<artifact-id>/`，不受调用进程 `TMPDIR` 长度影响，socket 当前为 57 bytes。Adapter 创建并复核 `0700` runtime/state 目录，启动前复核 manifest 整体 digest、binary bytes/mode 与 `ctxmuxd --version`，然后只从该随包绝对路径启动 daemon。首次启动通过 caller-owned fd 3 接收 `ctxmux.daemon-ready.v1`，只有 inherited receipt 的 daemon instance 与 public handshake 完全相等才写 owner receipt；socket race、PID、sleep 或 filesystem-only receipt 都不能证明所启动的 child。重连时响应 peer 还必须匹配 `0600` owner receipt 中的 full commit/tree/manifest/binary/path/endpoint 和 daemon instance；仅 protocol 9 相同不足以被声明为该 build。
 
-AgentMux 启动 ctxmuxd 时建立 terminal-capable 基线：`TERM=xterm-256color`、`COLORTERM=truecolor`，并删除父宿主遗留的 `NO_COLOR`、`FORCE_COLOR=0` 与 `CLICOLOR=0`。Provider/调用方仍可通过 Run env 显式覆盖终端设置。这样既保留 Codex ANSI/truecolor，也让 Stop 后的 synchronized active-composer frame 可被同一 raw PTY 链路证明。
+AgentMux 启动 ctxmuxd 时建立 terminal-capable 基线：`TERM=xterm-256color`、`COLORTERM=truecolor`，并删除父宿主遗留的 `NO_COLOR`、`FORCE_COLOR=0` 与 `CLICOLOR=0`。Provider/调用方仍可通过 Run env 显式覆盖终端设置。这样既保留 Codex ANSI/truecolor，也让 Core 能从同一条权威 raw PTY byte stream 重放当前 terminal screen。
 
 macOS LaunchServices 启动的 packaged Electron 不天然继承 Terminal 的登录环境。Desktop Main
 因此在创建任何 Local Runtime Host 之前，只执行一次用户的 profile-loading shell，并把其中的
@@ -87,7 +87,7 @@ Hook ingress 使用每次 lifecycle operation 派生的有界 binding identity�
 
 File Store version 2 是 Agent Session、current Run、retired Run 与 lifecycle reservation 的唯一跨进程真相。Create/Resume/Stop 通过文件锁、CAS、带 owner/PID/lease 的 reservation 和 CtxMux Run spec 中的 lifecycle operation id 提交；Owner crash 后，新 Client 只按 public `list/status/stop` 回收匹配 operation 的未提交 Run。自然退出的 Run 只记录 retire，不伪造 Stop。没有进程内 Map 充当第二提交权威，也没有旧 Store migration/fallback。
 
-Codex 终端输入不是“写入成功即 ready”。初次启动先回应 Codex terminal capability query；后续 prompt 必须原子消费 exact Run 的一个未消费 Stop receipt。Stop receipt 保存当时的 CtxMux output byte cursor，Core 只在该 cursor 之后观察到有界 synchronized active-composer frame 后才允许两阶段 `payload` + `CR` 提交。每阶段使用确定性 CtxMux Input operation id 和累计 input cursor，因而 payload/submit 任一点 crash 后都能由新 Client 恢复且不重复输入。Provider-native resume 的第一条 prompt 直接进入 native resume argv，不参与 startup composer race。
+Codex 终端输入不是“写入成功即 ready”。初次启动先回应 Codex terminal capability query；后续 prompt 必须原子消费 exact Run 的一个未消费 Stop receipt。Core 从 CtxMux public Output byte 0 开始，以有界 `@xterm/headless` terminal emulator 连续重放 retained Replay 与 live bytes；任何 Gap、重叠或非连续 range 都失败关闭。Stop readiness 只在当前 cursor 所属 active composer 确实为空且 screen 已重放到 Stop cursor 后成立。两阶段 `payload` + `CR` 中，Core 先写 payload，随后只在当前 screen/cursor 的 composer 精确等于 payload 且 output 已越过写入前 boundary 时发送 CR。Codex 的局部更新不要求重复绘制左侧 `›`，但 assistant 行、历史全屏 redraw 或相同文本 substring 都不能冒充当前 composer。每阶段使用确定性 CtxMux Input operation id 和累计 input cursor，因而 payload/submit 任一点 crash 后都能由新 Client 恢复且不重复输入。Provider-native resume 的第一条 prompt 直接进入 native resume argv，不参与 startup composer race。
 
 checkout-external packed consumer 真实证明：
 
@@ -96,12 +96,24 @@ checkout-external packed consumer 真实证明：
 3. 第一个 Client 完全退出后，第二个 Client 用同一 AgentMux ID 重连原 RunId/PID 并 Replay；
 4. `agentmux list/status/attach/send/interrupt` 只接收 AgentMux ID，调用方不理解 RunId 或 Codex native 参数；
 5. provider-native `agentmux resume --text <prompt>` 保留 AgentMux ID、创建新 RunId，并把首条 prompt 放入 native resume argv；旧 Run 查询变成 `STALE_AGENT_SESSION_BINDING`；
-6. no-Stop、已消费 Stop、不同 operation 并发全部失败关闭；lookbehind readiness、post-cursor live readiness、payload/submit crash recovery 都只提交一次；
+6. no-Stop、已消费 Stop、不同 operation 并发全部失败关闭；assistant 行里的 `›`、历史 screen 中与 payload 相同的文本都不能伪造当前 composer，post-cursor live readiness 与 payload/submit crash recovery 都只提交一次；
 7. 两个独立 Node 进程竞争 Create/Resume 只提交一个 current Run，失败者不留下 orphan；自然终态 retire 不调用 Stop；
 8. 外部 `switch` 只聚焦已打开 View；新 Run 的 Hook receipt 绑定新 RunId，`agentmux stop` 清理 current Run 与 Session binding；
 9. Shell vertical 的 UTF-8、Input recovery、Resize、Interrupt 与 stubborn-tree Stop 在同一 packed proof 中继续通过。
 
 Core View Resolver 只接收当前已打开 View 的投影。Raw Terminal 按 runtime-issued View ID，Agent 按 AgentMux ID 唯一解析；zero/multiple/stale/closed 都失败。Desktop typed focus broker 只激活既有 workspace/pane/tab，不 Open、Attach、Resume、Spawn 或修改 CtxMux Attachment。
+
+CLI 同时是受管 Agent 可自发现的公共控制面，而不只是给人手工调用的二进制：
+
+- 每个 Local Run 都收到权威 `AGENTMUX_ENV=1`、`AGENTMUX_CLI`，并把随 `@agentmux/core` 打包的 `agentmux` 目录放在 `PATH` 首位；Agent Run 额外收到稳定的 `AGENTMUX_AGENT_SESSION_ID`；
+- 顶级 `agentmux --help` 按 Inspect、Control、Desktop 分组解释对象与命令，具体 `agentmux <command> --help` 写明成功语义、失败关闭边界和下一条建议命令；
+- `agentmux --skill` 输出可直接被 Coding Agent 阅读的调用说明，要求先验证 caller context、优先解析 JSON receipt、使用返回 ID 而不是猜测焦点或列表顺序；
+- 不提供 `appmux`、旧文件名或其他 compatibility alias；品牌命令只有 `agentmux`；
+- 当前 `switch` 只聚焦已打开 View。创建、分屏、移动、打开或 Spawn Desktop Pane/Tab/View 属于独立 Desktop Composition 控制面，不偷渡进 T-020，也不因缺少 CLI 而退化为 computer-use。
+
+Herdr 的对照说明，Agent-friendly 不是多写一页帮助，而是让一个受管 Agent 能在一次发现后闭环执行：从 injected caller context 确定“我在哪”，从只读命令枚举 workspace/tab/pane/agent，用显式 target 发出一个原子 mutation，再从 JSON receipt 读取新 ID 和下一步。AgentMux 后续 Desktop Composition 竖切因此应把 layout primitive 与 Agent lifecycle 分开：先对当前 Pane 做有方向、可保留焦点与 cwd 的 split，返回新 Pane/View identity；再在该位置启动指定 Provider，并在可交互后返回稳定 Agent Session id。`switch` 继续只负责 focus，Core Session CLI 继续只负责 Agent lifecycle；不能用 UI 焦点猜 target，也不能把 computer-use 作为缺少公共命令时的 fallback。
+
+checkout-external packed consumer 会在真实 CtxMux PTY 内执行 `agentmux --version`，并由 fake Codex 复核相同 managed CLI environment，证明这不是仓库 PATH 或全局安装造成的偶然可用。npm Package 的 CLI 使用其声明的 Node 22 host；Desktop Package 则把同一入口物化为只调用 `.app` 自带 Electron Node mode 的 launcher，打包 smoke 在 `PATH=/usr/bin:/bin`、没有外部 Node 的条件下直接执行它，不改变用户普通 `node` 解析。
 
 Desktop 的 Terminal View 不再直接一对一占有 Core Attachment。Main Process 以 exact `(hostId, runId)` 串行化 attach/detach，为第一个 View 建立一个 retained Core Attachment，为后续 View 通过 `readRunReplay` 获取各自 byte cursor 的 Replay，并给每个 View 返回 opaque `attachmentId` lease；只有最后一份 lease 释放才调用 `releaseRunAttachment(exact RunRef)`。Agent Session 的多 View acknowledgement 取最大 cursor，迟到的慢 View 不能回退持久进度。因此双 Pane、Terminal/Activity 快速切换和 Renderer 消失不会把一个 View 的 cleanup 错当成另一个 View 的 Attachment 生命周期。
 
@@ -115,4 +127,4 @@ Interrupt 使用 retained PTY 上的 `TIOCSIG`。Stop 的 macOS public POSIX imp
 
 ## 下一闭环
 
-已提交的基础为 `8322cbf`（Core Codex/identity/CLI）与 `1f74518`（Core View Resolver/typed Desktop focus）；当前未提交候选补齐跨进程 lifecycle、真实 Codex Hook/resume、Stop-epoch readiness、prompt crash recovery、Darwin 短 endpoint、可安装 package smoke 与 Desktop View lease broker。2026-08-15 的 candidate 已通过 typecheck、159 个 fast tests、checkout-external packed Native proof、Production build 和独立 Attachment review；先前候选的 DMG/签名/LaunchServices/CtxMux smoke 也已通过，并从 `~/Applications/AgentMux.app` 启动精确 artifact owner。最终真实 Codex E2E、clean commit 上的 Tracker Gate 完成前，不把 T-020 标记为 done。Remote/SSH 继续留给 T-021；不得重新引入 Run owner、Backend Selector、复制 wire、fallback 或 compatibility。
+已提交的基础为 `8322cbf`（Core Codex/identity/CLI）与 `1f74518`（Core View Resolver/typed Desktop focus）；当前 candidate 继续补齐跨进程 lifecycle、真实 Codex Hook/resume、Stop-epoch readiness、prompt crash recovery、Darwin 短 endpoint、可安装 package smoke、Desktop View lease broker 与受管 Agent CLI 自发现。2026-08-17 的 candidate 已通过完整 `pnpm check`（typecheck、209 个 fast tests、checkout-external packed Native proof 与 Core/Desktop Production build），以及安装版 Codex `0.147.0` 的真实 Hook/Auth、同 Run 重连、两阶段 `/exit`、provider-native resume 到新 exact Run 和自然退役 E2E；Production `.app`、DMG/签名/LaunchServices/CtxMux smoke 与无外部 Node 的 embedded CLI smoke 也已通过。独立复核和 clean commit 上的 Tracker Gate 完成前，不把 T-020 标记为 done。Remote/SSH 继续留给 T-021；不得重新引入 Run owner、Backend Selector、复制 wire、fallback 或 compatibility。

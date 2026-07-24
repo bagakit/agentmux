@@ -257,7 +257,10 @@ function terminalStopReceipt(
   const consumedBySubmissionId = source.consumedBySubmissionId === undefined
     ? undefined
     : string(source.consumedBySubmissionId, 'terminalStopReceipt.consumedBySubmissionId')
-  if (run.runId !== currentRun.runId || (readyThroughByte !== undefined && readyThroughByte < outputCursorBytes)) {
+  if (
+    run.runId !== currentRun.runId ||
+    (readyThroughByte !== undefined && readyThroughByte < outputCursorBytes)
+  ) {
     throw new AgentMuxError(
       'Terminal Stop receipt does not match its Agent Run boundary.',
       'INVALID_AGENT_SESSION_STORE'
@@ -331,6 +334,10 @@ function terminalPromptSubmission(
   const run = runRef(source.run)
   const payload = terminalInputPhase(source.payload, 'terminalPromptSubmission.payload')
   const submit = terminalInputPhase(source.submit, 'terminalPromptSubmission.submit')
+  const outputCursorBytes = timestamp(
+    source.outputCursorBytes,
+    'terminalPromptSubmission.outputCursorBytes'
+  )
   if (
     run.runId !== currentRun.runId ||
     payload.operationId === submit.operationId ||
@@ -358,10 +365,7 @@ function terminalPromptSubmission(
       source.readyThroughByte,
       'terminalPromptSubmission.readyThroughByte'
     ),
-    outputCursorBytes: timestamp(
-      source.outputCursorBytes,
-      'terminalPromptSubmission.outputCursorBytes'
-    ),
+    outputCursorBytes,
     payload,
     submit
   }
