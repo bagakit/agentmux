@@ -1,7 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import { normalizeNativeHook } from './hook-normalizer.js'
-import type { NativeHookEnvelope, NormalizedHookEvent } from './types.js'
+import type { NativeHookEnvelope } from './types.js'
 
 const MAX_BODY_BYTES = 128 * 1024
 
@@ -25,7 +24,12 @@ function respond(response: ServerResponse, statusCode: number, body = ''): void 
 function isEnvelope(value: unknown): value is NativeHookEnvelope {
   if (!value || typeof value !== 'object') return false
   const record = value as Record<string, unknown>
-  return typeof record.sessionId === 'string' && Boolean(record.sessionId.trim()) && typeof record.agentId === 'string' && Boolean(record.agentId.trim())
+  return (
+    typeof record.semanticSessionId === 'string' && Boolean(record.semanticSessionId.trim()) &&
+    typeof record.daemonSessionId === 'string' && Boolean(record.daemonSessionId.trim()) &&
+    typeof record.incarnationId === 'string' && Boolean(record.incarnationId.trim()) &&
+    typeof record.agentId === 'string' && Boolean(record.agentId.trim())
+  )
 }
 
 export type HookServerEndpoint = {
@@ -39,7 +43,7 @@ export class AgentHookServer {
   private readonly token = randomBytes(32).toString('base64url')
   private endpoint: HookServerEndpoint | null = null
 
-  constructor(private readonly onEvent: (event: NormalizedHookEvent) => void) {}
+  constructor(private readonly onEvent: (event: NativeHookEnvelope) => void | Promise<void>) {}
 
   async start(): Promise<HookServerEndpoint> {
     if (this.endpoint) return this.endpoint
@@ -82,7 +86,7 @@ export class AgentHookServer {
         respond(response, 400, JSON.stringify({ error: 'invalid_hook_envelope' }))
         return
       }
-      this.onEvent(normalizeNativeHook(parsed))
+      await this.onEvent(parsed)
       respond(response, 204)
     } catch {
       // Observation is fail-open: malformed status must not hold up an agent hook.

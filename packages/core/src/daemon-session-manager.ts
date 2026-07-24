@@ -141,6 +141,11 @@ export class AgentMuxDaemonSessionManager {
     return [...this.sessions.values()].map((record) => cloneSession(record.snapshot))
   }
 
+  inspect(sessionId: string): AgentMuxDaemonSession | null {
+    const record = this.sessions.get(safeIdentity(sessionId, 'session_id'))
+    return record ? cloneSession(record.snapshot) : null
+  }
+
   findByCreateOperation(createOperationId: string): AgentMuxDaemonSession | null {
     const operationId = safeIdentity(createOperationId, 'create_operation_id')
     const receipt = this.createOperations.get(operationId)
@@ -152,6 +157,12 @@ export class AgentMuxDaemonSessionManager {
   create(input: AgentMuxDaemonCreateRequest): AgentMuxDaemonSession {
     const sessionId = safeIdentity(input.sessionId, 'session_id')
     const createOperationId = safeIdentity(input.createOperationId, 'create_operation_id')
+    const semanticSessionId = input.kind === 'agent'
+      ? safeIdentity(input.semanticSessionId ?? '', 'semantic_session_id')
+      : null
+    if (input.kind === 'terminal' && input.semanticSessionId !== null) {
+      throw new AgentMuxError('Raw Terminal cannot carry an Agent semantic session id.', 'INVALID_SEMANTIC_SESSION')
+    }
     const previousReceipt = this.createOperations.get(createOperationId)
     if (previousReceipt) {
       if (previousReceipt.sessionId !== sessionId) {
@@ -193,6 +204,7 @@ export class AgentMuxDaemonSessionManager {
       AGENTMUX_SESSION_INCARNATION_ID: incarnationId,
       AGENTMUX_CREATE_OPERATION_ID: createOperationId,
       AGENTMUX_SESSION_KIND: input.kind,
+      ...(semanticSessionId ? { AGENTMUX_SEMANTIC_SESSION_ID: semanticSessionId } : {}),
       ...(input.agentId ? { AGENTMUX_AGENT_ID: input.agentId } : {})
     })
     const child = nodePty.spawn(command, args, {
@@ -214,6 +226,7 @@ export class AgentMuxDaemonSessionManager {
       createOperationId,
       kind: input.kind,
       agentId: input.agentId,
+      semanticSessionId,
       cwd: input.cwd,
       pid: child.pid,
       ...(processIdentity ? { processStartedAt: processIdentity.startedAtMs } : {}),
@@ -431,6 +444,7 @@ export class AgentMuxDaemonSessionManager {
       type: 'exit',
       sessionId,
       incarnationId,
+      pid: record.snapshot.pid,
       exitCode,
       ...(signal !== undefined ? { exitSignal: signal } : {}),
       observedAt

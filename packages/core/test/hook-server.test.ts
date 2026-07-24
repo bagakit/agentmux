@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { AgentHookServer } from '../src/hook-server.js'
-import type { NormalizedHookEvent } from '../src/types.js'
+import type { NativeHookEnvelope } from '../src/types.js'
 
 const servers: AgentHookServer[] = []
 
@@ -9,9 +9,11 @@ afterEach(async () => {
 })
 
 describe('AgentHookServer', () => {
-  it('accepts authenticated loopback events and normalizes them', async () => {
-    const events: NormalizedHookEvent[] = []
-    const server = new AgentHookServer((event) => events.push(event))
+  it('accepts authenticated loopback events without interpreting provider semantics', async () => {
+    const events: NativeHookEnvelope[] = []
+    const server = new AgentHookServer((event) => {
+      events.push(event)
+    })
     servers.push(server)
     const endpoint = await server.start()
     const response = await fetch(endpoint.url, {
@@ -21,7 +23,9 @@ describe('AgentHookServer', () => {
         'content-type': 'application/json'
       },
       body: JSON.stringify({
-        sessionId: 'session-1',
+        semanticSessionId: 'semantic-1',
+        daemonSessionId: 'daemon-1',
+        incarnationId: 'incarnation-1',
         agentId: 'claude',
         eventName: 'PermissionRequest',
         payload: { tool_name: 'Bash', tool_input: { command: 'pnpm test' } }
@@ -29,7 +33,12 @@ describe('AgentHookServer', () => {
     })
     expect(response.status).toBe(204)
     expect(events).toHaveLength(1)
-    expect(events[0]?.status).toMatchObject({ state: 'waiting', source: 'native-hook' })
+    expect(events[0]).toMatchObject({
+      semanticSessionId: 'semantic-1',
+      daemonSessionId: 'daemon-1',
+      agentId: 'claude',
+      eventName: 'PermissionRequest'
+    })
   })
 
   it('rejects requests without the bearer token', async () => {
@@ -39,7 +48,12 @@ describe('AgentHookServer', () => {
     const response = await fetch(endpoint.url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ sessionId: 'session-1', agentId: 'claude' })
+      body: JSON.stringify({
+        semanticSessionId: 'semantic-1',
+        daemonSessionId: 'daemon-1',
+        incarnationId: 'incarnation-1',
+        agentId: 'claude'
+      })
     })
     expect(response.status).toBe(403)
   })

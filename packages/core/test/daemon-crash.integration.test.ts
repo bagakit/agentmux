@@ -4,7 +4,7 @@ import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { AgentMuxClient } from '../src/daemon-client.js'
+import { AgentMuxDaemonClient } from '../src/daemon-client.js'
 
 const repositoryRoot = resolve(import.meta.dirname, '../../..')
 const daemonEntry = resolve(import.meta.dirname, '../dist/agentmuxd.js')
@@ -63,8 +63,8 @@ describe.runIf(process.platform !== 'win32')('agentmuxd crash disposition', () =
     let firstDaemon: ChildProcess | null = null
     let replacementDaemon: ChildProcess | null = null
     let sessionPid = 0
-    const firstClient = new AgentMuxClient({ socketPath })
-    const replacementClient = new AgentMuxClient({ socketPath })
+    const firstClient = new AgentMuxDaemonClient({ socketPath })
+    const replacementClient = new AgentMuxDaemonClient({ socketPath })
     try {
       firstDaemon = await startDaemon(socketPath)
       await firstClient.connect()

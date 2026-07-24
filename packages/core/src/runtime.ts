@@ -1,6 +1,10 @@
 import { EventEmitter } from 'node:events'
 import { randomUUID } from 'node:crypto'
-import { AgentProviderRegistry, type AgentProvider } from './agent-provider.js'
+import {
+  AgentProviderRegistry,
+  executionHostProbe,
+  type AgentProvider
+} from './agent-provider.js'
 import { AgentMuxError } from './errors.js'
 import {
   ExecutionHostRegistry,
@@ -85,7 +89,9 @@ export class AgentMuxRuntime {
     this.hosts = new ExecutionHostRegistry(options.hosts ?? [new LocalExecutionHost()])
     this.providers = new AgentProviderRegistry(options.providers)
     this.pollIntervalMs = Math.max(250, options.pollIntervalMs ?? 750)
-    this.hookServer = new AgentHookServer((event) => this.acceptHookEvent(event))
+    this.hookServer = new AgentHookServer((event) => {
+      this.acceptHookEvent(this.providers.get(event.agentId).normalizeHook(event))
+    })
   }
 
   async start(): Promise<void> {
@@ -136,7 +142,11 @@ export class AgentMuxRuntime {
   }
 
   async detect(agentId: string, hostId = 'local', commandOverride?: string): Promise<boolean> {
-    return await this.providers.get(agentId).detect(this.hosts.get(hostId), commandOverride)
+    return (
+      await this.providers
+        .get(agentId)
+        .probeCapabilities(executionHostProbe(this.hosts.get(hostId)), commandOverride)
+    ).installed
   }
 
   async launch(request: SessionLaunchRequest): Promise<SessionSnapshot> {
@@ -156,7 +166,7 @@ export class AgentMuxRuntime {
       let launch: { command?: string; args?: readonly string[]; env: Record<string, string>; agentId: string | null; label: string }
       if (request.kind === 'agent') {
         const provider = this.providers.get(request.agentId)
-        if (!(await provider.detect(host, request.commandOverride))) {
+        if (!(await provider.probeCapabilities(executionHostProbe(host), request.commandOverride)).installed) {
           throw new AgentMuxError(`${provider.label} is not installed on ${host.label}.`, 'AGENT_NOT_FOUND')
         }
         const plan = provider.buildLaunch({
@@ -498,7 +508,7 @@ export class AgentMuxRuntime {
   }
 
   private acceptHookEvent(event: NormalizedHookEvent): void {
-    const session = this.sessions.get(event.sessionId)
+    const session = this.sessions.get(event.semanticSessionId)
     if (!session || session.kind !== 'agent' || session.agentId !== event.agentId) return
     this.setStatus(session, event.status)
     for (const activity of event.activities) this.addActivity(activity)

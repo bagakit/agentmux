@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { AgentProvider } from '../src/agent-provider.js'
 import { LocalExecutionHost } from '../src/execution-host.js'
 import { AgentMuxRuntime } from '../src/runtime.js'
 
@@ -25,32 +24,23 @@ afterEach(async () => {
 
 describe('real tmux runtime', () => {
   it('launches, captures output, sends input, observes exit, and cleans up', async () => {
-    const provider: AgentProvider = {
-      id: 'fixture',
-      label: 'Fixture',
-      executable: process.execPath,
-      async detect() {
-        return true
-      },
-      buildLaunch() {
-        return {
-          command: process.execPath,
-          args: [
-            '-e',
-            "const readline=require('node:readline'); console.log('READY'); const rl=readline.createInterface({input:process.stdin}); rl.on('line',line=>{console.log('ECHO:'+line); if(line==='quit') process.exit(7)})"
-          ],
-          env: {}
-        }
-      }
-    }
     const runtime = new AgentMuxRuntime({
       hosts: [new LocalExecutionHost()],
-      providers: [provider],
       pollIntervalMs: 100
     })
     runtimes.push(runtime)
     const id = `test-${randomUUID().slice(0, 8)}`
-    await runtime.launch({ kind: 'agent', sessionId: id, agentId: 'fixture', workspacePath: process.cwd() })
+    await runtime.launch({
+      kind: 'agent',
+      sessionId: id,
+      agentId: 'codex',
+      workspacePath: process.cwd(),
+      commandOverride: process.execPath,
+      args: [
+        '-e',
+        "const readline=require('node:readline'); console.log('READY'); const rl=readline.createInterface({input:process.stdin}); rl.on('line',line=>{console.log('ECHO:'+line); if(line==='quit') process.exit(7)})"
+      ]
+    })
 
     await waitFor(() => runtime.capture(id), (output) => output.includes('READY'))
     await runtime.send(id, 'hello')

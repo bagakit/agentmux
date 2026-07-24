@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { createConnection } from 'node:net'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
-  AgentMuxClient,
+  AgentMuxDaemonClient,
   type AgentMuxDaemonDataEvent,
   type AgentMuxDaemonEvent,
   type AgentMuxDaemonSession
@@ -75,7 +75,7 @@ describe('agentmuxd reliability contract', () => {
   let temporaryDirectory: string
   let socketPath: string
   let server: AgentMuxDaemonServer
-  const clients: AgentMuxClient[] = []
+  const clients: AgentMuxDaemonClient[] = []
 
   beforeEach(async () => {
     temporaryDirectory = await mkdtemp(join(tmpdir(), 'agentmuxd-reliability-'))
@@ -90,8 +90,8 @@ describe('agentmuxd reliability contract', () => {
     await rm(temporaryDirectory, { recursive: true, force: true })
   })
 
-  async function connect(): Promise<AgentMuxClient> {
-    const client = new AgentMuxClient({ socketPath })
+  async function connect(): Promise<AgentMuxDaemonClient> {
+    const client = new AgentMuxDaemonClient({ socketPath })
     clients.push(client)
     await client.connect()
     return client
@@ -103,6 +103,7 @@ describe('agentmuxd reliability contract', () => {
       createOperationId: 'operation-lost-create-response',
       kind: 'terminal',
       agentId: null,
+      semanticSessionId: null,
       cwd: process.cwd(),
       cols: 80,
       rows: 24,
@@ -170,9 +171,9 @@ describe('agentmuxd reliability contract', () => {
       sessionId: 'ordered-input',
       createOperationId: 'operation-ordered-input',
       agentId: 'codex',
-      prompt: 'ordered-input',
-      args: [fakeCodexPath],
-      commandOverride: process.execPath,
+      semanticSessionId: 'semantic-ordered-input',
+      command: process.execPath,
+      args: [fakeCodexPath, 'ordered-input'],
       cwd: process.cwd()
     })
     await waitForCondition('the fake agent ready signal', () => output(events).includes('codex-ready:ordered-input'))
@@ -202,9 +203,9 @@ describe('agentmuxd reliability contract', () => {
       sessionId: 'lost-write-response',
       createOperationId: 'operation-lost-write-response',
       agentId: 'codex',
-      prompt: 'lost-write-response',
-      args: [fakeCodexPath],
-      commandOverride: process.execPath,
+      semanticSessionId: 'semantic-lost-write-response',
+      command: process.execPath,
+      args: [fakeCodexPath, 'lost-write-response'],
       cwd: process.cwd()
     })
     await waitForCondition('the lost-write fixture ready signal', () => (
@@ -286,8 +287,9 @@ describe('agentmuxd reliability contract', () => {
       sessionId: 'stubborn-process-tree',
       createOperationId: 'operation-stubborn-process-tree',
       agentId: 'codex',
+      semanticSessionId: 'semantic-stubborn-process-tree',
+      command: process.execPath,
       args: [stubbornTreePath],
-      commandOverride: process.execPath,
       cwd: process.cwd()
     })
     let childPid = 0
@@ -308,20 +310,20 @@ describe('agentmuxd reliability contract', () => {
   })
 
   it('releases a client slot after enforcing the per-daemon client limit', async () => {
-    const shared = new AgentMuxClient({ socketPath })
+    const shared = new AgentMuxDaemonClient({ socketPath })
     clients.push(shared)
     await Promise.all(Array.from({ length: 32 }, async () => await shared.connect()))
     const accepted = [
       shared,
       ...await Promise.all(Array.from({ length: 63 }, async () => await connect()))
     ]
-    const rejected = new AgentMuxClient({ socketPath })
+    const rejected = new AgentMuxDaemonClient({ socketPath })
     clients.push(rejected)
     await expect(rejected.connect()).rejects.toMatchObject({ code: 'DAEMON_DISCONNECTED' })
 
     accepted[0]!.disconnect()
     await waitForCondition('the disconnected client slot to be released', async () => {
-      const replacement = new AgentMuxClient({ socketPath })
+      const replacement = new AgentMuxDaemonClient({ socketPath })
       try {
         await replacement.connect()
         clients.push(replacement)

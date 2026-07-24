@@ -15,7 +15,7 @@ import { randomUUID } from 'node:crypto'
 import { AgentMuxError } from './errors.js'
 import type { AgentMuxDaemonSession } from './daemon-protocol.js'
 
-const JOURNAL_VERSION = 1
+const JOURNAL_VERSION = 2
 const MAX_JOURNAL_BYTES = 1024 * 1024
 
 type SessionJournalDocument = {
@@ -38,6 +38,7 @@ function parseSession(value: unknown): AgentMuxDaemonSession {
     typeof session.createOperationId !== 'string' ||
     (session.kind !== 'terminal' && session.kind !== 'agent') ||
     (session.agentId !== null && typeof session.agentId !== 'string') ||
+    (session.semanticSessionId !== null && typeof session.semanticSessionId !== 'string') ||
     typeof session.cwd !== 'string' ||
     !isNumber(session.pid) ||
     (session.processStartedAt !== undefined && !isNumber(session.processStartedAt)) ||

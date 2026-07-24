@@ -1,8 +1,10 @@
 import { chmod, lstat, mkdir, stat, unlink } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
+import { spawn } from 'node:child_process'
 import { dirname } from 'node:path'
 import { createServer, createConnection, type Server, type Socket } from 'node:net'
 import { AgentMuxError } from './errors.js'
+import { AgentHookServer } from './hook-server.js'
 import {
   AGENTMUX_DAEMON_PROTOCOL_VERSION,
   AGENTMUX_DAEMON_MAX_FRAME_BYTES,
@@ -19,6 +21,7 @@ import {
 } from './daemon-protocol.js'
 import { AgentMuxDaemonSessionManager } from './daemon-session-manager.js'
 import { agentMuxDaemonStatePath, defaultAgentMuxDaemonSocketPath } from './daemon-endpoint.js'
+import type { NativeHookEnvelope } from './types.js'
 
 const MAX_CLIENT_BUFFER_BYTES = 1024 * 1024
 const MAX_CLIENTS_PER_DAEMON = 64
@@ -65,6 +68,38 @@ function readString(params: Record<string, unknown>, name: string): string {
   return value
 }
 
+function safeExecutable(value: string): string {
+  const executable = value.trim()
+  if (!executable || Buffer.byteLength(executable) > 4 * 1024 || /[\0\r\n]/.test(executable)) {
+    throw new AgentMuxError('Executable probe value is invalid.', 'INVALID_EXECUTABLE_PROBE')
+  }
+  return executable
+}
+
+async function probeExecutable(executable: string): Promise<boolean> {
+  const command = process.platform === 'win32' ? 'where.exe' : 'sh'
+  const args = process.platform === 'win32'
+    ? [executable]
+    : ['-lc', 'command -v -- "$1" >/dev/null 2>&1', 'agentmux-probe', executable]
+  return await new Promise<boolean>((resolve) => {
+    const child = spawn(command, args, { stdio: 'ignore', windowsHide: true })
+    let settled = false
+    const finish = (found: boolean): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve(found)
+    }
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL')
+      finish(false)
+    }, 8_000)
+    timer.unref()
+    child.once('error', () => finish(false))
+    child.once('exit', (code) => finish(code === 0))
+  })
+}
+
 function readNumber(params: Record<string, unknown>, name: string, fallback?: number): number {
   const value = params[name]
   if (value === undefined && fallback !== undefined) return fallback
@@ -101,6 +136,7 @@ export class AgentMuxDaemonServer {
   private readonly daemonInstanceId = randomUUID()
   private readonly hostId: string
   private readonly buildIdentity: string
+  private readonly hookServer: AgentHookServer
   private server: Server | null = null
   private socketIdentity: SocketIdentity | null = null
 
@@ -114,20 +150,24 @@ export class AgentMuxDaemonServer {
     this.sessions = options.sessions ?? new AgentMuxDaemonSessionManager({
       journalPath: options.statePath ?? agentMuxDaemonStatePath(this.socketPath)
     })
+    this.hookServer = new AgentHookServer((event) => this.acceptHookEvent(event))
     this.unsubscribeSessionEvents = this.sessions.onEvent((event) => this.publishEvent(event))
   }
 
   async start(): Promise<void> {
     if (this.server) return
-    await this.prepareEndpoint()
-    this.sessions.activate()
-    const server = createServer((socket) => this.acceptClient(socket))
-    this.server = server
+    await this.hookServer.start()
+    let server: Server | null = null
     try {
+      await this.prepareEndpoint()
+      this.sessions.activate()
+      const startedServer = createServer((socket) => this.acceptClient(socket))
+      server = startedServer
+      this.server = startedServer
       await new Promise<void>((resolve, reject) => {
-        server.once('error', reject)
-        server.listen(this.socketPath, () => {
-          server.off('error', reject)
+        startedServer.once('error', reject)
+        startedServer.listen(this.socketPath, () => {
+          startedServer.off('error', reject)
           resolve()
         })
       })
@@ -138,7 +178,8 @@ export class AgentMuxDaemonServer {
       }
     } catch (error) {
       this.server = null
-      server.close()
+      server?.close()
+      await this.hookServer.stop()
       throw error
     }
   }
@@ -150,6 +191,7 @@ export class AgentMuxDaemonServer {
     this.clients.clear()
     await this.sessions.dispose()
     this.unsubscribeSessionEvents()
+    await this.hookServer.stop()
     if (server) {
       await new Promise<void>((resolve) => server.close(() => resolve()))
     }
@@ -251,8 +293,23 @@ export class AgentMuxDaemonServer {
         case 'find-create-operation':
           result = this.sessions.findByCreateOperation(readString(params, 'createOperationId'))
           break
+        case 'probe-executable':
+          result = await probeExecutable(safeExecutable(readString(params, 'executable')))
+          break
         case 'create': {
-          const create = params as AgentMuxDaemonCreateRequest
+          const endpoint = this.hookServer.getEndpoint()
+          if (!endpoint) throw new AgentMuxError('Daemon hook ingress is unavailable.', 'HOOK_SERVER_NOT_RUNNING')
+          const requested = params as AgentMuxDaemonCreateRequest
+          const create: AgentMuxDaemonCreateRequest = requested.kind === 'agent'
+            ? {
+                ...requested,
+                env: {
+                  ...requested.env,
+                  AGENTMUX_HOOK_URL: endpoint.url,
+                  AGENTMUX_HOOK_TOKEN: endpoint.token
+                }
+              }
+            : requested
           const session = this.sessions.create(create)
           result = session
           client.attachments.set(session.sessionId, {
@@ -357,6 +414,28 @@ export class AgentMuxDaemonServer {
       }
       this.write(client, { type: 'event', event })
     }
+  }
+
+  private acceptHookEvent(envelope: NativeHookEnvelope): void {
+    const session = this.sessions.inspect(envelope.daemonSessionId)
+    if (
+      !session ||
+      session.kind !== 'agent' ||
+      session.incarnationId !== envelope.incarnationId ||
+      session.semanticSessionId !== envelope.semanticSessionId ||
+      session.agentId !== envelope.agentId
+    ) {
+      return
+    }
+    this.publishEvent({
+      type: 'hook',
+      sessionId: session.sessionId,
+      incarnationId: session.incarnationId,
+      semanticSessionId: envelope.semanticSessionId,
+      agentId: envelope.agentId,
+      ...(envelope.eventName !== undefined ? { eventName: envelope.eventName } : {}),
+      ...(envelope.payload !== undefined ? { payload: envelope.payload } : {})
+    })
   }
 
   private attachmentForAttach(attached: AgentMuxDaemonAttachResult, afterSequence: number): ClientAttachment {
