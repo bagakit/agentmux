@@ -7,6 +7,7 @@ import { defineAgentProvider, type AgentProvider } from '../src/agent-provider.j
 import { AgentMuxClient } from '../src/client.js'
 import type { AgentMuxAcpBinding } from '../src/acp-adapter.js'
 import { AgentMuxDaemonServer } from '../src/daemon-server.js'
+import { AgentMuxDaemonClient } from '../src/daemon-client.js'
 import {
   AgentMuxMemoryAgentSessionStore,
   type AgentMuxAgentSessionStore
@@ -462,5 +463,85 @@ describe('AgentMux Agent client', () => {
       agentSessionId: 'semantic-external',
       evidence: expect.objectContaining({ source: 'user' })
     }))
+  })
+
+  it('rolls back the exact physical attachment when a Run id was reused by another incarnation', async () => {
+    const client = await connect(new AgentMuxMemoryAgentSessionStore())
+    const created = await client.createAgent({
+      agentSessionId: 'semantic-stale-attach',
+      runId: 'daemon-stale-attach',
+      createOperationId: 'create-stale-attach',
+      agentId: 'fixture',
+      workspacePath: process.cwd(),
+      commandOverride: process.execPath
+    })
+    const external = new AgentMuxDaemonClient({ socketPath, expectedHostId: 'semantic-host' })
+    await external.connect()
+    try {
+      await external.attach(created.run.runId, 0)
+      await external.stop({ sessionId: created.run.runId, incarnationId: created.run.incarnationId })
+      const replacement = await external.createAgent({
+        sessionId: created.run.runId,
+        createOperationId: 'create-stale-attach-replacement',
+        agentSessionId: created.agentSessionId,
+        agentId: created.agentId,
+        cwd: process.cwd(),
+        command: process.execPath,
+        args: ['-e', 'setInterval(() => {}, 1000)']
+      })
+
+      await expect(client.reattachAgent(created.agentSessionId, 0)).rejects.toMatchObject({
+        code: 'AGENT_SESSION_RUN_MISMATCH'
+      })
+      await expect(client.acknowledgeAgentOutput(created.agentSessionId, 0)).rejects.toMatchObject({
+        code: 'SESSION_NOT_ATTACHED'
+      })
+      await external.stop({ sessionId: replacement.sessionId, incarnationId: replacement.incarnationId })
+    } finally {
+      external.disconnect()
+    }
+  })
+
+  it('preserves both Agent reattach mismatch and rollback failure', async () => {
+    const client = await connect(new AgentMuxMemoryAgentSessionStore())
+    const created = await client.createAgent({
+      agentSessionId: 'semantic-double-failure',
+      runId: 'daemon-double-failure',
+      createOperationId: 'create-double-failure',
+      agentId: 'fixture',
+      workspacePath: process.cwd(),
+      commandOverride: process.execPath
+    })
+    const internal = client as unknown as {
+      kernel: {
+        attach(sessionId: string, afterByte: number): Promise<{
+          session: {
+            sessionId: string
+            incarnationId: string
+            kind: 'agent'
+            agentId: string
+            agentSessionId: string
+          }
+        }>
+        detach(ref: { sessionId: string; incarnationId: string }): Promise<void>
+      }
+    }
+    internal.kernel.attach = async () => ({
+      session: {
+        sessionId: created.run.runId,
+        incarnationId: 'replacement-incarnation',
+        kind: 'agent',
+        agentId: created.agentId,
+        agentSessionId: created.agentSessionId
+      }
+    })
+    internal.kernel.detach = async () => { throw new Error('detach failed') }
+
+    const failure = await client.reattachAgent(created.agentSessionId, 0).catch((error: unknown) => error)
+    expect(failure).toBeInstanceOf(AggregateError)
+    expect((failure as AggregateError).errors).toEqual([
+      expect.objectContaining({ code: 'AGENT_SESSION_RUN_MISMATCH' }),
+      expect.objectContaining({ message: 'detach failed' })
+    ])
   })
 })
