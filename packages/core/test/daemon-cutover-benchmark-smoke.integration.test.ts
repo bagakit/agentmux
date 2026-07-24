@@ -37,6 +37,7 @@ describe.runIf(
           }
           sourceSha256: string
           binarySha256: string
+          compileEnvironment: Record<string, string>
           compileArgv: string[]
         }
       }
@@ -87,6 +88,13 @@ describe.runIf(
       unit: 'nanoseconds',
       sourceSha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
       binarySha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      compileEnvironment: {
+        PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
+        LANG: 'C',
+        LC_ALL: 'C',
+        TZ: 'UTC0',
+        SDKROOT: '/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk'
+      },
       compileArgv: expect.arrayContaining(['-std=c11', '-O2', '-Werror'])
     })
     expect(raw.manifest.processCpuObserver.calibration).toMatchObject({
