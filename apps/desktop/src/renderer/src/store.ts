@@ -16,6 +16,7 @@ import type {
 } from '../../shared/contracts'
 import { api } from './lib/api'
 import { rendererResourceOwnerCounts } from './lib/resource-owner-counts'
+import { terminalResourceOwnerCounts } from './lib/terminal-resource-owners'
 import { resolveWorkbenchViewFocus } from './lib/view-focus'
 import {
   activateTab as activateLayoutTab,
@@ -172,6 +173,7 @@ if (typeof window !== 'undefined') {
     Object.assign(target.detail, rendererResourceOwnerCounts({
       documentCount: Object.keys(useAppStore.getState().documents).length,
       runtimeSubscriptionCount,
+      terminalOwners: terminalResourceOwnerCounts(),
       ...(resourceWindow.__agentmuxMonacoModelCount
         ? { monacoModelCount: resourceWindow.__agentmuxMonacoModelCount }
         : {})

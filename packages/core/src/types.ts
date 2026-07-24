@@ -13,7 +13,7 @@ export type AgentMuxRuntimeIdentity = {
 
 export type AgentMuxRuntimeDiagnostics = {
   nodeVersion: string
-  platform: NodeJS.Platform
+  platform: string
   arch: string
   supported: boolean
   ctxmux: {
@@ -22,6 +22,15 @@ export type AgentMuxRuntimeDiagnostics = {
     sourceCommit: string
     artifactPlatform: string
     ready: boolean
+    capabilities: {
+      transport: 'local-unix'
+      orderedOutputBytes: true
+      boundedReplay: true
+      recoverableInput: true
+      resize: true
+      interrupt: true
+      completeStop: true
+    }
   }
 }
 
@@ -242,7 +251,6 @@ export type AgentMuxAgentSession = {
   workspacePath: string
   run: AgentMuxRunRef
   retiredRuns: AgentMuxRunRef[]
-  hookBindingId: string
   outputCursorBytes: number
   createdAt: number
   updatedAt: number
@@ -286,7 +294,10 @@ export type AgentTerminalPromptSubmissionState = {
 
 /** This is the complete persistent semantic/control record. It deliberately has no
  * PTY, process, replay, terminal snapshot, or terminal output bytes. */
-export type AgentMuxStoredAgentSession = AgentMuxAgentSession
+export type AgentMuxStoredAgentSession = AgentMuxAgentSession & {
+  hookBindingId: string
+  hookToken: string
+}
 
 export type AgentMuxPermissionOption = {
   id: string

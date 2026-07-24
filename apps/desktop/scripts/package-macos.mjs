@@ -168,6 +168,8 @@ async function copyRuntimeApplication(appPath) {
     engines: coreManifest.engines,
     os: coreManifest.os,
     cpu: coreManifest.cpu,
+    license: coreManifest.license,
+    repository: coreManifest.repository,
     bin: coreManifest.bin
   }, null, 2)}\n`)
   await materializeDependencies(
@@ -471,7 +473,7 @@ async function installApplication(appPath) {
 
 async function main() {
   assert(process.platform === 'darwin', 'macOS packaging must run on macOS.')
-  assert(process.arch === 'arm64' || process.arch === 'x64', `Unsupported macOS architecture: ${process.arch}`)
+  assert(process.arch === 'arm64', `AgentMux currently packages only darwin-arm64, not darwin-${process.arch}.`)
   const electronRoot = dirname(require.resolve('electron/package.json'))
   const electronApp = join(electronRoot, 'dist', 'Electron.app')
   assert(await pathExists(electronApp), 'The locked Electron application is missing.')

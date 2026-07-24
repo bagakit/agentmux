@@ -6,7 +6,11 @@ import {
   type AgentMuxAgentSessionStore,
   type AgentMuxLifecycleReservation
 } from './agent-session-store.js'
-import type { AgentMuxRunRef, AgentMuxAgentSession } from './types.js'
+import type {
+  AgentMuxRunRef,
+  AgentMuxAgentSession,
+  AgentMuxStoredAgentSession
+} from './types.js'
 
 function sameRun(left: AgentMuxRunRef, right: AgentMuxRunRef): boolean {
   return left.runId === right.runId
@@ -26,20 +30,34 @@ export type AgentMuxAgentSessionLookup =
   | { kind: 'provider-native'; providerId: string; sessionId: string }
   | { kind: 'acp-native'; adapterId: string; sessionId: string }
 
+type AgentSessionWrite = {
+  started: boolean
+  controller: AbortController
+  run(): Promise<void>
+  cancelQueued(): void
+}
+
+type AgentSessionWriteDrain = {
+  promise: Promise<void>
+  resolve(): void
+}
+
 export class AgentMuxAgentSessionRegistry {
-  private readonly sessions = new Map<string, AgentMuxAgentSession>()
+  private readonly sessions = new Map<string, AgentMuxStoredAgentSession>()
   private readonly agentIdByRun = new Map<string, string>()
   private readonly agentIdByRetiredRun = new Map<string, string>()
   private readonly unboundRetiredRuns = new Set<string>()
   private readonly agentIdByNative = new Map<string, string>()
-  private readonly writeTails = new Map<string, Promise<void>>()
+  private readonly writeQueues = new Map<string, AgentSessionWrite[]>()
+  private readonly activeWrites = new Set<string>()
+  private readonly writeDrains = new Map<string, AgentSessionWriteDrain>()
   private readonly lifecycleOwnerId = randomUUID()
   private static readonly lifecycleLeaseMs = 30_000
 
   constructor(private readonly store: AgentMuxAgentSessionStore) {}
 
   async load(hostId: string): Promise<void> {
-    await Promise.allSettled(this.writeTails.values())
+    await Promise.allSettled([...this.writeDrains.values()].map((drain) => drain.promise))
     const [sessions, retiredRuns] = await Promise.all([
       loadAgentSessions(this.store),
       this.store.loadRetiredRuns()
@@ -55,7 +73,7 @@ export class AgentMuxAgentSessionRegistry {
     for (const run of retiredRuns) this.unboundRetiredRuns.add(run.runId)
   }
 
-  list(): AgentMuxAgentSession[] {
+  list(): AgentMuxStoredAgentSession[] {
     return [...this.sessions.values()].map((session) => structuredClone(session))
   }
 
@@ -63,7 +81,7 @@ export class AgentMuxAgentSessionRegistry {
     return this.sessions.has(agentSessionId)
   }
 
-  get(agentSessionId: string): AgentMuxAgentSession {
+  get(agentSessionId: string): AgentMuxStoredAgentSession {
     const session = this.sessions.get(agentSessionId)
     if (!session) {
       throw new AgentMuxError(`Unknown Agent Session: ${agentSessionId}`, 'UNKNOWN_AGENT_SESSION')
@@ -71,7 +89,7 @@ export class AgentMuxAgentSessionRegistry {
     return session
   }
 
-  resolve(lookup: AgentMuxAgentSessionLookup): AgentMuxAgentSession {
+  resolve(lookup: AgentMuxAgentSessionLookup): AgentMuxStoredAgentSession {
     if (lookup.kind === 'agent-session') return this.get(lookup.agentSessionId)
     const agentSessionId = lookup.kind === 'run'
       ? this.agentIdByRun.get(lookup.run.runId)
@@ -140,8 +158,8 @@ export class AgentMuxAgentSessionRegistry {
 
   async commitLifecycle(
     reservation: AgentMuxLifecycleReservation,
-    session: AgentMuxAgentSession | null
-  ): Promise<AgentMuxAgentSession | null> {
+    session: AgentMuxStoredAgentSession | null
+  ): Promise<AgentMuxStoredAgentSession | null> {
     const normalized = session ? normalizeStoredAgentSession(session) : null
     await this.store.commitLifecycle(reservation, normalized)
     const previous = this.sessions.get(reservation.agentSessionId)
@@ -155,17 +173,17 @@ export class AgentMuxAgentSessionRegistry {
   }
 
   async put(
-    session: AgentMuxAgentSession,
+    session: AgentMuxStoredAgentSession,
     expectedCurrentRun?: AgentMuxRunRef
-  ): Promise<AgentMuxAgentSession> {
+  ): Promise<AgentMuxStoredAgentSession> {
     const normalized = normalizeStoredAgentSession(session)
-    return await this.enqueue(normalized.agentSessionId, async () => {
+    return await this.enqueue(normalized.agentSessionId, async (signal) => {
       const previous = this.sessions.get(normalized.agentSessionId)
       if (expectedCurrentRun && (!previous || !sameRun(previous.run, expectedCurrentRun))) {
         throw new AgentMuxError('Agent Session changed before persistence completed.', 'STALE_AGENT_SESSION')
       }
       this.assertAvailable(normalized)
-      await this.store.compareAndSwap(previous ?? null, normalized)
+      await this.store.compareAndSwap(previous ?? null, normalized, signal)
       if (previous) this.forget(previous)
       this.remember(normalized)
       return this.get(normalized.agentSessionId)
@@ -175,9 +193,11 @@ export class AgentMuxAgentSessionRegistry {
   async update(
     agentSessionId: string,
     expectedCurrentRun: AgentMuxRunRef,
-    operation: (current: AgentMuxAgentSession) => AgentMuxAgentSession
-  ): Promise<AgentMuxAgentSession> {
-    return await this.enqueue(agentSessionId, async () => {
+    operation: (current: AgentMuxStoredAgentSession) => AgentMuxStoredAgentSession,
+    signal?: AbortSignal
+  ): Promise<AgentMuxStoredAgentSession> {
+    return await this.enqueue(agentSessionId, async (writeSignal) => {
+      writeSignal.throwIfAborted()
       const previous = this.get(agentSessionId)
       if (!sameRun(previous.run, expectedCurrentRun)) {
         throw new AgentMuxError(
@@ -193,26 +213,26 @@ export class AgentMuxAgentSessionRegistry {
         )
       }
       this.assertAvailable(normalized)
-      await this.store.compareAndSwap(previous, normalized)
+      await this.store.compareAndSwap(previous, normalized, writeSignal)
       this.forget(previous)
       this.remember(normalized)
       return this.get(agentSessionId)
-    })
+    }, signal)
   }
 
   async delete(agentSessionId: string, expectedCurrentRun?: AgentMuxRunRef): Promise<void> {
-    await this.enqueue(agentSessionId, async () => {
+    await this.enqueue(agentSessionId, async (signal) => {
       const session = this.get(agentSessionId)
       if (expectedCurrentRun && !sameRun(session.run, expectedCurrentRun)) {
         throw new AgentMuxError('Agent Session changed before deletion completed.', 'STALE_AGENT_SESSION')
       }
-      await this.store.compareAndSwap(session, null)
+      await this.store.compareAndSwap(session, null, signal)
       this.forget(session)
       this.sessions.delete(agentSessionId)
     })
   }
 
-  findByRun(ref: AgentMuxRunRef): AgentMuxAgentSession | undefined {
+  findByRun(ref: AgentMuxRunRef): AgentMuxStoredAgentSession | undefined {
     const agentSessionId = this.agentIdByRun.get(ref.runId)
     const session = agentSessionId ? this.sessions.get(agentSessionId) : undefined
     return session && sameRun(session.run, ref) ? session : undefined
@@ -243,19 +263,83 @@ export class AgentMuxAgentSessionRegistry {
     return reservation
   }
 
-  private async enqueue<T>(agentSessionId: string, operation: () => Promise<T>): Promise<T> {
-    const previous = this.writeTails.get(agentSessionId) ?? Promise.resolve()
-    const current = previous.catch(() => {}).then(operation)
-    const tail = current.then(() => {}, () => {})
-    this.writeTails.set(agentSessionId, tail)
-    try {
-      return await current
-    } finally {
-      if (this.writeTails.get(agentSessionId) === tail) this.writeTails.delete(agentSessionId)
-    }
+  private async enqueue<T>(
+    agentSessionId: string,
+    operation: (signal: AbortSignal) => Promise<T>,
+    externalSignal?: AbortSignal
+  ): Promise<T> {
+    return await new Promise<T>((resolve, reject) => {
+      const controller = new AbortController()
+      const cleanup = (): void => externalSignal?.removeEventListener('abort', abort)
+      const entry: AgentSessionWrite = {
+        started: false,
+        controller,
+        run: async () => {
+          try {
+            controller.signal.throwIfAborted()
+            resolve(await operation(controller.signal))
+          } catch (error) {
+            reject(error)
+          } finally {
+            cleanup()
+          }
+        },
+        cancelQueued: () => {
+          const queue = this.writeQueues.get(agentSessionId)
+          const index = queue?.indexOf(entry) ?? -1
+          if (entry.started || index < 0 || !queue) return
+          queue.splice(index, 1)
+          cleanup()
+          reject(controller.signal.reason)
+          this.finishWriteQueueIfIdle(agentSessionId)
+        }
+      }
+      const abort = (): void => {
+        controller.abort(externalSignal?.reason)
+        entry.cancelQueued()
+      }
+      const queue = this.writeQueues.get(agentSessionId) ?? []
+      queue.push(entry)
+      this.writeQueues.set(agentSessionId, queue)
+      if (!this.writeDrains.has(agentSessionId)) {
+        let finish!: () => void
+        const promise = new Promise<void>((resolveDrain) => { finish = resolveDrain })
+        this.writeDrains.set(agentSessionId, { promise, resolve: finish })
+      }
+      externalSignal?.addEventListener('abort', abort, { once: true })
+      if (externalSignal?.aborted) abort()
+      this.startNextWrite(agentSessionId)
+    })
   }
 
-  private remember(session: AgentMuxAgentSession): void {
+  private startNextWrite(agentSessionId: string): void {
+    if (this.activeWrites.has(agentSessionId)) return
+    const queue = this.writeQueues.get(agentSessionId)
+    const entry = queue?.shift()
+    if (!entry) {
+      this.finishWriteQueueIfIdle(agentSessionId)
+      return
+    }
+    entry.started = true
+    this.activeWrites.add(agentSessionId)
+    void entry.run().finally(() => {
+      this.activeWrites.delete(agentSessionId)
+      this.startNextWrite(agentSessionId)
+    })
+  }
+
+  private finishWriteQueueIfIdle(agentSessionId: string): void {
+    if (this.activeWrites.has(agentSessionId)) return
+    const queue = this.writeQueues.get(agentSessionId)
+    if (queue && queue.length > 0) return
+    this.writeQueues.delete(agentSessionId)
+    const drain = this.writeDrains.get(agentSessionId)
+    if (!drain) return
+    this.writeDrains.delete(agentSessionId)
+    drain.resolve()
+  }
+
+  private remember(session: AgentMuxStoredAgentSession): void {
     this.assertAvailable(session)
     const copy = structuredClone(session)
     this.sessions.set(copy.agentSessionId, copy)
@@ -267,7 +351,7 @@ export class AgentMuxAgentSessionRegistry {
     if (key) this.agentIdByNative.set(key, copy.agentSessionId)
   }
 
-  private assertAvailable(session: AgentMuxAgentSession): void {
+  private assertAvailable(session: AgentMuxStoredAgentSession): void {
     if (
       this.unboundRetiredRuns.has(session.run.runId) ||
       session.retiredRuns.some((run) => this.unboundRetiredRuns.has(run.runId))
@@ -299,7 +383,7 @@ export class AgentMuxAgentSessionRegistry {
     }
   }
 
-  private forget(session: AgentMuxAgentSession): void {
+  private forget(session: AgentMuxStoredAgentSession): void {
     if (this.agentIdByRun.get(session.run.runId) === session.agentSessionId) {
       this.agentIdByRun.delete(session.run.runId)
     }

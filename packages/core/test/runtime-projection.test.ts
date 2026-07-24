@@ -26,7 +26,6 @@ const agentSession: AgentMuxAgentSession = {
   workspacePath: upstreamFixturePath("repo"),
   run: { runId: 'run-1' },
   retiredRuns: [],
-  hookBindingId: 'hook-binding-1',
   outputCursorBytes: 0,
   createdAt: 100,
   updatedAt: 100

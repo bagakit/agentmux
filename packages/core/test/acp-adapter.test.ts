@@ -51,6 +51,14 @@ async function waitForResponses(binding: FakeBinding, count: number): Promise<vo
   throw new Error(`Timed out waiting for ${count} ACP permission responses`)
 }
 
+async function waitForClosed(binding: FakeBinding): Promise<void> {
+  for (let index = 0; index < 100; index += 1) {
+    if (binding.closed) return
+    await new Promise((resolve) => setTimeout(resolve, 1))
+  }
+  throw new Error('Timed out waiting for ACP binding closure')
+}
+
 afterEach(() => {
   vi.useRealTimers()
 })
@@ -158,6 +166,22 @@ describe('AgentMux ACP adapter boundary', () => {
     })
     await vi.advanceTimersByTimeAsync(30_000)
     expect(binding.responses[0]?.decision).toEqual({ outcome: 'selected', optionId: 'reject' })
+    await bridge.dispose()
+  })
+
+  it('fails closed and releases a binding that emits an oversized event', async () => {
+    const bridge = new AgentMuxAcpBridge({ onEvent() {}, onNativeHandle() {} })
+    const binding = new FakeBinding()
+    await bridge.bind('semantic-acp', binding)
+    binding.emit({
+      type: 'activity',
+      kind: 'assistant',
+      title: 'oversized',
+      content: 'x'.repeat(128 * 1024)
+    })
+
+    await waitForClosed(binding)
+    expect(binding.closed).toBe(true)
     await bridge.dispose()
   })
 })

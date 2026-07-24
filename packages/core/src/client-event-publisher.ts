@@ -28,9 +28,9 @@ function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
 }
 
 export class AgentMuxClientEventPublisher {
-  private readonly listeners = new Set<(event: AgentMuxClientEvent) => unknown>()
+  private readonly listeners = new Set<(event: AgentMuxClientEvent) => void>()
 
-  onEvent(listener: (event: AgentMuxClientEvent) => unknown): () => void {
+  onEvent(listener: (event: AgentMuxClientEvent) => void): () => void {
     if (!this.listeners.has(listener) && this.listeners.size >= MAX_EVENT_LISTENERS) {
       throw new AgentMuxError('AgentMux Client event listener limit reached.', 'CLIENT_EVENT_LISTENER_LIMIT')
     }
@@ -45,8 +45,11 @@ export class AgentMuxClientEventPublisher {
   publish(event: AgentMuxClientEvent): void {
     for (const listener of [...this.listeners]) {
       try {
-        const result = listener(event)
-        if (isPromiseLike(result)) void Promise.resolve(result).catch(() => {})
+        const result = (listener as (value: AgentMuxClientEvent) => unknown)(event)
+        if (isPromiseLike(result)) {
+          this.listeners.delete(listener)
+          void Promise.resolve(result).catch(() => {})
+        }
       } catch {
         // A Consumer callback cannot become part of Run transport or Agent
         // lifecycle control. The Consumer owns reporting its callback failure.
