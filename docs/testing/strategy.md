@@ -31,6 +31,8 @@ Terminal output 是 raw PTY bytes 的 UTF-8 投影，不是模型上下文、Too
 | Stop-epoch readiness | exact Run 的 Stop receipt 捕获 public output cursor；有界 lookbehind/live Attachment 只在后续 active-composer frame 后开放 prompt |
 | prompt crash recovery | payload 与 submit 各自使用确定性 operation id；丢失 receipt 或进程 crash 后只恢复一次，不重复 payload/CR |
 | terminal color capability | packed consumer 在父环境显式设置 `NO_COLOR=1`，真实 daemon/PTY child 仍观察到 `TERM=xterm-256color`、`COLORTERM=truecolor` 且 `NO_COLOR` 不存在 |
+| Terminal appearance query | Desktop Main 在 Renderer 未 attach 时识别完整及跨 chunk OSC 10/11 query，等待 Core 发布 ready Agent Session 后才经 Core → CtxMux Input 回复当前 shared palette，不能与 Core Terminal handshake 竞争 Input cursor；Renderer replay handler 消费旧 query 而不重复注入 |
+| Terminal/Explorer interaction | Fast suite 固定黑底 Graphite 的 Agent Surface 层次、workbench-derived options、OSC parser、历史 Run 只读 fit、平台路径、Workspace Root reveal 边界与 Store action；Production build 证明 Search/WebLinks/WebGL/Context Menu 可打包 |
 | Hook acceptance/drain | Hook command 的 receipt id 跨重试稳定；bound ingress 仅在 owner persistence 成功后 `204`，失败以非 2xx 触发同 receipt 重试；Server shutdown 排空已接受事件 |
 | external View switch | CLI 通过 Core Resolver 与 typed Desktop focus socket，只聚焦已打开 View，不 Open/Attach/Resume/Spawn |
 | Darwin endpoint bound | product endpoint 固定在 `/private/tmp/amx-<uid>-<artifact-id>` 且小于 104 bytes；package LaunchServices smoke 启动真实内置 ctxmuxd |

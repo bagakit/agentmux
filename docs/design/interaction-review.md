@@ -7,13 +7,36 @@
 
 AgentMux 应保留小而清晰的 Agent Provider Core 和自己的终端视觉气质，但桌面端要从固定三栏演示布局切换为更成熟的三层产品模型：最左侧 Project/Workspace Rail 只负责切换工程上下文；右侧主区 Titlebar 的最左入口是共享 Tools，位于 Workspace/Board 标题之前；Tools 在 Workspace 与 Board 都存在，但内容服从各自 Surface。Workspace 的 Files + Branches 以 Selected Worktree 驱动文件树根目录；Board 使用 Project Scope 的二维 `Branch × Status` 矩阵，Inbox 是矩阵第一列而不是 Tools 独立页。Workspace 拥有递归 Pane 布局，Pane 拥有通用 Tab，文件、终端、Agent、Browser 和可观察 Activity 都是 Tab 内容；Host、Agent 和恢复状态显示在它们所影响的对象旁边。
 
-这是内容模型、交互模式与正确实现的定向移植，不要求视觉临摹。对编辑器、文件树、Terminal/Session 状态、Pane 拖拽和可访问对话框这类成熟能力，优先直接移植 a mature workbench 源码或采用 a mature workbench 已验证的维护中依赖，再按 AgentMux 的 Core 边界裁剪和重新组织；不另写功能缩水的替代实现。a mature workbench 的 daemon/relay、账户、移动端、WSL/runtime environment 图、第三方 Issue 集成和兼容历史不在范围内。
+这是内容模型、交互模式与正确实现的定向移植，不把整个产品做成 a mature workbench 换皮；但 2026-08-16 用户明确要求 Terminal 外观／交互和文件右键菜单先做到 a mature workbench 一致，再讨论产品差异。对编辑器、文件树、Terminal/Session 状态、Pane 拖拽和可访问对话框这类成熟能力，优先直接移植 a mature workbench 源码或采用 a mature workbench 已验证的维护中依赖，再按 AgentMux 的 Core 边界裁剪和重新组织；不另写功能缩水的替代实现。a mature workbench 的 daemon/relay、账户、移动端、WSL/runtime environment 图、第三方 Issue 集成和兼容历史不在范围内。
 
 ### Terminal 外观所有权
 
-AgentMux 的应用外框与 Terminal 使用两套独立的外观边界。应用外框保留 Graphite/Mint 的产品视觉；Terminal 由 Desktop Renderer 在创建 xterm 时注入一份简约、完整的 `ITheme`。默认 Graphite palette 保留 a mature workbench 已验证的 Ghostty Default Style Dark 语义角色，尤其不能把 Terminal 工作面、Agent 输入面和 App chrome 调成无法辨认的相邻背景；产品识别留在外框，而不是通过破坏终端程序依赖的颜色层级实现。Agent TUI 发出的 ANSI/OSC 可以改变当前终端画面，但 PTY 与 CtxMux 只持有原始字节、尺寸和生命周期，不拥有或保存任何主题语义；`packages/core`、RunSpec 和公共协议也不出现主题字段。
+AgentMux 的应用外框与 Terminal 使用两套独立的外观边界。应用外框保留 Graphite/Mint 的产品视觉；Terminal 由 Desktop Renderer 在创建 xterm 时注入一份简约、完整的 `ITheme`。默认 Graphite palette 保留 a mature workbench 已验证的 ANSI 语义角色，但 Terminal 工作面使用真实黑底，让 Codex 自己发出的灰色输入／消息 Surface 与工作面明确分层；产品识别留在外框，而不是通过破坏终端程序依赖的颜色层级实现。Agent TUI 发出的 ANSI/OSC 可以改变当前终端画面，但 PTY 与 CtxMux 只持有原始字节、尺寸和生命周期，不拥有或保存任何主题语义；`packages/core`、RunSpec 和公共协议也不出现主题字段。
 
 Desktop Settings 提供独立 Appearance Pane，只持久化一个严格的 `terminalTheme` 标识并从 Renderer 内置的完整 palette catalog 选择。当前 catalog 只保留 Graphite 与 Catppuccin Mocha 两个经过语义层级检查的深色方案；不建设主题 Registry、导入器、任意颜色表单或兼容层。以后增加 DIY 时沿 `TerminalThemeDefinition` catalog 边界扩展，保持 Core、Run Kernel 与 PTY 协议不变。默认主题仍保持简约干净，主题能力不成为当前产品主线。
+
+### Terminal 与文件交互先对齐 a mature workbench
+
+2026-08-16 固定 a mature workbench `c0a775454a29667c3f9fbfeef356e31e1e2acbe0` 的
+`pane-terminal-options.ts`、`terminal-appearance.ts`、`terminal-theme.ts`、
+`terminal-capability-replies.ts`、`terminal-osc-color-reply.ts`、`FileExplorerRow.tsx` 与
+`ui/context-menu.tsx` 为本轮来源。AgentMux 默认 Graphite 沿用 a mature workbench 已验证的 ANSI 色槽，
+Terminal 工作面按实际产品验收使用黑底；除 AgentMux 已确认保留的 `12px` 字号外，默认字重、粗体字重、
+`1.0` 行高、滚动灵敏度、macOS Option 语义、对比度、WebGL、搜索、Web Links、选择、复制粘贴、
+清屏、滚到底部和紧凑 Context Menu 按 a mature workbench 行为移植，不再用零散 CSS 调色冒充一致。
+
+Codex 会在 Renderer 尚未 attach 时发出 OSC 10/11 前景／背景查询。Desktop Main 必须从 Core 的
+live Terminal Output 识别完整或跨 chunk 查询，并在 Core 发布 ready Agent Session 后把回复经现有
+Agent Input API 写回，避免与 Core 自有的 Terminal handshake 竞争同一个 Input cursor；
+最终仍由 CtxMux 的累计 Input cursor 接受字节。xterm 消费 replay 中的旧查询但不再次回复，避免
+重开 Tab 后把历史响应注入当前进程。主题 SSOT 只在 Desktop shared palette；CtxMux、RunSpec 与
+`packages/core` 不出现主题字段。
+
+文件行右键菜单直接复用现有 Explorer Selection 和 Mutation owner，提供当前产品真实具备的
+New File、New Folder、Copy Path、Copy Relative Path、View File、Open in Terminal、Collapse、
+Reveal in Finder、Rename 与 Delete。`Open in Terminal` 只调用 Desktop Store 的公开 Terminal
+launch，并继续通过 Core → CtxMux 创建 Run；Finder、Clipboard 与 URL 只经 typed Main IPC。
+不复制 a mature workbench 的远端下载、Open-in App Registry、Issue/Browser 专属动作或兼容菜单分支。
 
 ### Agent 身份图标
 
@@ -46,7 +69,7 @@ Agent Tab 保留 Provider Icon、Session Name 和无文字 Status Dot，Close �
 状态文字不在下一行重复。
 
 Session 顶部 `28px` 信息带改为 Session Name、短 Session ID、Started、Active、Recent 和 Stop。
-完整 ID 通过 title 保留，短 ID 只用于高频扫读。Active 取 Runtime `updatedAt` 与结构化 Activity
+Name、ID、Started、Active 与 Recent 都是可点击复制的紧凑按钮：显示值继续服务高频扫读，ID 复制完整值，时间复制无损 ISO 值，并提供短暂的 Copied 状态。Active 取 Runtime `updatedAt` 与结构化 Activity
 的最大时间；Terminal Output、Agent Activity 和 Permission 都会推进同一 Last Activity Truth。
 Recent 只投影最新的 User/Assistant 结构化消息，不解析 PTY 文本、不把 Tool Event 冒充消息；没有
 可靠消息时显示 `No messages yet`，Raw Terminal 则显示累计 Output Bytes。常规单 Pane 必须完整
@@ -145,7 +168,7 @@ listener，正常阶段只由容器尺寸变化驱动。这个尺寸 owner 只�
 
 ### 0. 提升默认清晰度与 Tab 内容尺度
 
-真实体验确认当前画面不是单纯“信息密度高”，而是大量 7–10px 字体、过小命中区和不一致的内容层级共同造成的发虚与低分辨率感。后续不再把极小字号当作专家密度；操作层级保持 10–11px，Editor 保持 14px 长文阅读基线，Terminal 则按高吞吐字符界面独立采用 12px / 1.2，并全部依靠原生 DPR 渲染，不用 CSS transform 伪造密度。
+真实体验确认当前画面不是单纯“信息密度高”，而是大量 7–10px 字体、过小命中区和不一致的内容层级共同造成的发虚与低分辨率感。后续不再把极小字号当作专家密度；操作层级保持 10–11px，Editor 保持 14px 长文阅读基线，Terminal 保留 AgentMux 已确认的 12px 字号，但行高按 a mature workbench 默认收口为 1.0，并全部依靠原生 DPR 与 WebGL/DOM 自动降级渲染，不用 CSS transform 伪造密度。
 
 xterm.js 与 Monaco 继续拥有 Canvas/Text 渲染，不另写像素缩放层；实现需要验证 Production Electron 的 `devicePixelRatio`、Canvas backing size、Terminal Cell Metrics、Monaco Font Info 和截图物理像素。若原生库已经正确处理 DPR，修复应落在默认字号、行高与 CSS 缩放，而不是叠加 transform 或模糊的二次缩放。
 
@@ -224,7 +247,7 @@ Inbox 是 Board 第一列，不再是 Tools 的独立子 Tab。每个 Branch 的
 
 ## 2026-08-10 UI 反馈追加
 
-- Editor 与嵌入网页的初始内容偏大。“更高分辨率”不解释为降低 DPR 或缩放 bitmap，而是在原生 HiDPI backing 上提高默认信息容量：Monaco 使用 `14px / 21px`，Main-owned Browser WebContents 初始 Zoom Factor 为 `0.9`。2026-08-12 两轮真实 Production 窗口复审先确认 `15px / 1.4` 与常驻 Composer 造成容量过低，随后又确认 `14px / 1.25` 相对 10–11px 的周围操作层级仍明显过大；Terminal 因而独立定为 `12px / 1.2`，不把 Terminal、Editor、Browser 三个内容 owner 绑成一项全局比例配置。
+- Editor 与嵌入网页的初始内容偏大。“更高分辨率”不解释为降低 DPR 或缩放 bitmap，而是在原生 HiDPI backing 上提高默认信息容量：Monaco 使用 `14px / 21px`，Main-owned Browser WebContents 初始 Zoom Factor 为 `0.9`。2026-08-12 两轮真实 Production 窗口复审先确认 `15px / 1.4` 与常驻 Composer 造成容量过低，随后又确认 `14px / 1.25` 相对 10–11px 的周围操作层级仍明显过大；Terminal 保留独立 `12px` 字号，2026-08-16 再按用户“除字号外先与 a mature workbench 一致”的要求把行高从 `1.2` 收口为 `1.0`，不把 Terminal、Editor、Browser 三个内容 owner 绑成一项全局比例配置。
 - Titlebar 的 Tools 入口改为纯图标，通过 Tooltip 与 ARIA 表达展开／收起；Tool 二级面板不再重复放一个 Collapse 按钮。展开状态仍只有 Zustand 中的一份 truth。
 - Settings 只保留 Project Rail 左下角入口，删除右上角重复入口；不保留 Alias 或兼容 UI。
 - 上述尺度必须在 Production Electron 的真实 DPR 下验收：Editor 检查字号与 Canvas backing/CSS，Browser 检查 `webContents.getZoomFactor()`，不能用 CSS transform 假装“更高分辨率”。

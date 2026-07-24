@@ -47,7 +47,13 @@ const api: AgentMuxDesktopApi = {
       ipcRenderer.invoke('files:create', workspaceId, input),
     rename: (workspaceId: string, input: RenameWorkspacePathInput) =>
       ipcRenderer.invoke('files:rename', workspaceId, input),
-    delete: (workspaceId: string, path: string) => ipcRenderer.invoke('files:delete', workspaceId, path)
+    delete: (workspaceId: string, path: string) => ipcRenderer.invoke('files:delete', workspaceId, path),
+    reveal: (workspaceId: string, path: string) => ipcRenderer.invoke('files:reveal', workspaceId, path)
+  },
+  ui: {
+    readClipboardText: () => ipcRenderer.invoke('ui:readClipboardText'),
+    writeClipboardText: (text: string) => ipcRenderer.invoke('ui:writeClipboardText', text),
+    openExternal: (url: string) => ipcRenderer.invoke('ui:openExternal', url)
   },
   agents: {
     detect: (agentId: AgentId, hostId: string) => ipcRenderer.invoke('agents:detect', agentId, hostId)

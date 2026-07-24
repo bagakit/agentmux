@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { access, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { access, mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ExecutionHost } from '@agentmux/core'
@@ -40,6 +40,9 @@ describe('WorkspaceFiles root confinement', () => {
     }
     const files = new WorkspaceFiles(() => localHost)
 
+    await expect(files.localPathForReveal(workspace, 'inside.txt')).resolves.toBe(
+      await realpath(join(root, 'inside.txt'))
+    )
     await expect(files.read(workspace, 'inside.txt')).resolves.toEqual({ path: 'inside.txt', content: 'inside' })
     await files.write(workspace, { path: 'inside.txt', content: 'updated' })
     await expect(readFile(join(root, 'inside.txt'), 'utf8')).resolves.toBe('updated')
@@ -121,6 +124,9 @@ describe('WorkspaceFiles root confinement', () => {
     }
     const files = new WorkspaceFiles(() => remoteHost)
 
+    await expect(files.localPathForReveal(workspace, 'linked-secret')).rejects.toThrow(
+      'Reveal in file manager is available only for local paths'
+    )
     await expect(files.read(workspace, 'linked-secret')).rejects.toThrow('Path escapes the workspace root')
     await expect(files.write(workspace, { path: 'linked-secret', content: 'stolen' })).rejects.toThrow(
       'Path escapes the workspace root'

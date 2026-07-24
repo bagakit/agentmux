@@ -4,6 +4,7 @@ import { resolveFileExplorerNavigationTarget } from '../src/renderer/src/compone
 import {
   getRevealAncestorPaths,
   isPathWithinSubtree,
+  joinWorkspacePath,
   remapPathWithinSubtree
 } from '../src/renderer/src/lib/workspace-paths.js'
 import { createFileExplorerRowProjection } from '../src/renderer/src/components/file-tree/file-explorer-row-projection.js'
@@ -38,6 +39,13 @@ const rows = [
   node('src/nested/b.ts', 2),
   node('README.md', 0)
 ]
+
+describe('file explorer context paths', () => {
+  it('builds host-native absolute paths for context-menu actions', () => {
+    expect(joinWorkspacePath('/srv/project/', 'src/index.ts')).toBe('/srv/project/src/index.ts')
+    expect(joinWorkspacePath('C:\\work\\project\\', 'src/index.ts')).toBe('C:\\work\\project\\src\\index.ts')
+  })
+})
 
 describe('Orca-derived explorer row projection and navigation', () => {
   const projection = createFileExplorerRowProjection(rows)

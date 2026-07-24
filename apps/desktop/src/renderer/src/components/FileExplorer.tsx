@@ -12,7 +12,8 @@ import {
   Trash2,
   X
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { api } from '../lib/api'
 import { getFileTypeIcon } from '../lib/file-type-icons'
 import { documentKey } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
@@ -24,6 +25,7 @@ import {
 import {
   getRevealAncestorPaths,
   isPathWithinSubtree,
+  joinWorkspacePath,
   remapPathWithinSubtree
 } from '../lib/workspace-paths'
 import { createFileExplorerRowProjection } from './file-tree/file-explorer-row-projection'
@@ -39,6 +41,7 @@ import {
   useWorkspaceFileTree,
   type TreeNode
 } from './file-tree/useWorkspaceFileTree'
+import { FileTreeContextMenu } from './file-tree/FileTreeContextMenu'
 
 type InlineEdit =
   | { kind: 'create-file' | 'create-directory'; parentPath: string }
@@ -70,9 +73,19 @@ function FileTreeRow({
   onCommitEdit,
   onCancelEdit,
   onClick,
+  onCollapse,
+  onContextMenuOpen,
+  onCopyPaths,
+  onCreate,
   onToggle,
+  onOpenTerminal,
   onRename,
-  onDelete
+  onDelete,
+  onReveal,
+  onViewFile,
+  canOpenTerminal,
+  isLocal,
+  selectionSize
 }: {
   node: TreeNode
   rowIndex: number
@@ -85,72 +98,101 @@ function FileTreeRow({
   onCommitEdit: () => void
   onCancelEdit: () => void
   onClick: (event: React.MouseEvent) => void
+  onCollapse: () => void
+  onContextMenuOpen: () => void
+  onCopyPaths: (kind: 'absolute' | 'relative') => void
+  onCreate: (kind: 'file' | 'directory') => void
   onToggle: () => void
+  onOpenTerminal: () => void
   onRename: () => void
   onDelete: () => void
+  onReveal: () => void
+  onViewFile: () => void
+  canOpenTerminal: boolean
+  isLocal: boolean
+  selectionSize: number
 }) {
   const FileIcon = getFileTypeIcon(node.path)
   return (
-    <div
-      className={`tree-row ${selected ? 'tree-row--selected' : ''}`}
-      style={{ '--tree-depth': node.depth } as React.CSSProperties}
-      data-tree-path={node.path}
-      data-tree-index={rowIndex}
-      role="treeitem"
-      tabIndex={selected ? 0 : -1}
-      aria-level={node.depth + 1}
-      aria-expanded={node.isDirectory ? expanded : undefined}
-      aria-selected={selected}
-      onClick={onClick}
+    <FileTreeContextMenu
+      canOpenTerminal={canOpenTerminal}
+      isDirectory={node.isDirectory}
+      isExpanded={expanded}
+      isLocal={isLocal}
+      selectionSize={selectionSize}
+      onOpenChange={(open) => {
+        if (open) onContextMenuOpen()
+      }}
+      onCreate={onCreate}
+      onCopyPaths={onCopyPaths}
+      onOpenTerminal={onOpenTerminal}
+      onViewFile={onViewFile}
+      onCollapse={onCollapse}
+      onReveal={onReveal}
+      onRename={onRename}
+      onDelete={onDelete}
     >
-      <button
-        type="button"
-        className="tree-row__disclosure"
-        tabIndex={-1}
-        onClick={(event) => {
-          event.stopPropagation()
-          if (node.isDirectory) onToggle()
-        }}
-        aria-label={node.isDirectory ? `${expanded ? 'Collapse' : 'Expand'} ${node.name}` : undefined}
+      <div
+        className={`tree-row ${selected ? 'tree-row--selected' : ''}`}
+        style={{ '--tree-depth': node.depth } as React.CSSProperties}
+        data-tree-path={node.path}
+        data-tree-index={rowIndex}
+        role="treeitem"
+        tabIndex={selected ? 0 : -1}
+        aria-level={node.depth + 1}
+        aria-expanded={node.isDirectory ? expanded : undefined}
+        aria-selected={selected}
+        onClick={onClick}
       >
-        {node.isDirectory ? expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} /> : null}
-      </button>
-      <span className="tree-row__icon">
-        {node.isDirectory
-          ? expanded ? <FolderOpen size={14} /> : <Folder size={14} />
-          : <FileIcon size={13} />}
-      </span>
-      {editing ? (
-        <input
-          autoFocus
-          className="tree-inline-input"
-          value={editValue}
-          onChange={(event) => onEditValue(event.target.value)}
-          onBlur={onCommitEdit}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') onCommitEdit()
-            if (event.key === 'Escape') onCancelEdit()
-          }}
-          onClick={(event) => event.stopPropagation()}
-        />
-      ) : (
         <button
           type="button"
-          className="tree-row__label"
+          className="tree-row__disclosure"
           tabIndex={-1}
+          onClick={(event) => {
+            event.stopPropagation()
+            if (node.isDirectory) onToggle()
+          }}
+          aria-label={node.isDirectory ? `${expanded ? 'Collapse' : 'Expand'} ${node.name}` : undefined}
         >
-          {node.name}
+          {node.isDirectory ? expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} /> : null}
         </button>
-      )}
-      {dirty ? <i className="tree-row__dirty" aria-label="Unsaved changes" /> : null}
-      {node.isSymlink ? <span className="tree-row__badge">link</span> : null}
-      {!editing ? (
-        <span className="tree-row__actions">
-          <button type="button" title={`Rename ${node.name}`} onClick={(event) => { event.stopPropagation(); onRename() }}><Pencil size={11} /></button>
-          <button type="button" title={`Delete ${node.name}`} onClick={(event) => { event.stopPropagation(); onDelete() }}><Trash2 size={11} /></button>
+        <span className="tree-row__icon">
+          {node.isDirectory
+            ? expanded ? <FolderOpen size={14} /> : <Folder size={14} />
+            : <FileIcon size={13} />}
         </span>
-      ) : null}
-    </div>
+        {editing ? (
+          <input
+            autoFocus
+            className="tree-inline-input"
+            value={editValue}
+            onChange={(event) => onEditValue(event.target.value)}
+            onBlur={onCommitEdit}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') onCommitEdit()
+              if (event.key === 'Escape') onCancelEdit()
+            }}
+            onClick={(event) => event.stopPropagation()}
+          />
+        ) : (
+          <button
+            type="button"
+            className="tree-row__label"
+            tabIndex={-1}
+          >
+            {node.name}
+          </button>
+        )}
+        {dirty ? <i className="tree-row__dirty" aria-label="Unsaved changes" /> : null}
+        {node.isSymlink ? <span className="tree-row__badge">link</span> : null}
+        {!editing ? (
+          <span className="tree-row__actions">
+            <button type="button" title={`Rename ${node.name}`} onClick={(event) => { event.stopPropagation(); onRename() }}><Pencil size={11} /></button>
+            <button type="button" title={`Delete ${node.name}`} onClick={(event) => { event.stopPropagation(); onDelete() }}><Trash2 size={11} /></button>
+          </span>
+        ) : null}
+      </div>
+    </FileTreeContextMenu>
   )
 }
 
@@ -166,6 +208,11 @@ export function FileExplorer() {
   const createPath = useAppStore((state) => state.createPath)
   const renamePath = useAppStore((state) => state.renamePath)
   const deletePath = useAppStore((state) => state.deletePath)
+  const launchTerminal = useAppStore((state) => state.launchTerminal)
+  const reportError = useAppStore((state) => state.reportError)
+  const activePaneId = useAppStore((state) => (
+    state.activeWorkspaceId ? state.layouts[state.activeWorkspaceId]?.activeGroupId : undefined
+  ))
   const dirtyDocuments = useAppStore((state) => state.dirtyDocuments)
   const [query, setQuery] = useState('')
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
@@ -244,10 +291,44 @@ export function FileExplorer() {
     })
   }
 
-  function beginCreate(kind: 'create-file' | 'create-directory'): void {
-    setExpanded((current) => new Set(current).add(createParent))
-    setInlineEdit({ kind, parentPath: createParent })
+  function beginCreate(kind: 'create-file' | 'create-directory', targetParent = createParent): void {
+    setExpanded((current) => new Set(current).add(targetParent))
+    setInlineEdit({ kind, parentPath: targetParent })
     setEditValue('')
+  }
+
+  function pathsForContext(node: TreeNode): string[] {
+    return selection.selectedPaths.has(node.path)
+      ? [...selection.selectedPaths]
+      : [node.path]
+  }
+
+  async function copyContextPaths(node: TreeNode, kind: 'absolute' | 'relative'): Promise<void> {
+    if (!workspace) return
+    const paths = pathsForContext(node)
+    const text = (kind === 'absolute'
+      ? paths.map((path) => joinWorkspacePath(workspace.path, path))
+      : paths
+    ).join('\n')
+    try {
+      await api.ui.writeClipboardText(text)
+    } catch (error) {
+      reportError(error)
+    }
+  }
+
+  async function openDirectoryInTerminal(node: TreeNode): Promise<void> {
+    if (!workspace || !activePaneId || !node.isDirectory) return
+    await launchTerminal(activePaneId, undefined, joinWorkspacePath(workspace.path, node.path))
+  }
+
+  async function revealLocalPath(node: TreeNode): Promise<void> {
+    if (!workspaceId || workspace?.hostId !== 'local') return
+    try {
+      await api.files.reveal(workspaceId, node.path)
+    } catch (error) {
+      reportError(error)
+    }
   }
 
   function beginRename(node: TreeNode): void {
@@ -380,7 +461,26 @@ export function FileExplorer() {
   }
 
   if (!workspaceId) return null
-  const creating = inlineEdit?.kind === 'create-file' || inlineEdit?.kind === 'create-directory'
+  const createEdit = inlineEdit?.kind === 'create-file' || inlineEdit?.kind === 'create-directory'
+    ? inlineEdit
+    : null
+  const createRow = createEdit ? (
+    <div className="tree-create-row" style={{ '--tree-depth': createEdit.parentPath ? createEdit.parentPath.split('/').length : 0 } as React.CSSProperties}>
+      {createEdit.kind === 'create-directory' ? <Folder size={14} /> : <FilePlus2 size={13} />}
+      <input
+        autoFocus
+        className="tree-inline-input"
+        value={editValue}
+        placeholder={createEdit.kind === 'create-directory' ? 'folder name' : 'file name'}
+        onChange={(event) => setEditValue(event.target.value)}
+        onBlur={() => void commitEdit()}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') void commitEdit()
+          if (event.key === 'Escape') setInlineEdit(null)
+        }}
+      />
+    </div>
+  ) : null
   return (
     <section className="file-explorer">
       <div className="explorer-header">
@@ -406,25 +506,10 @@ export function FileExplorer() {
         tabIndex={0}
         onKeyDown={handleTreeKeyDown}
       >
-        {creating ? (
-          <div className="tree-create-row" style={{ '--tree-depth': inlineEdit.parentPath ? inlineEdit.parentPath.split('/').length : 0 } as React.CSSProperties}>
-            {inlineEdit.kind === 'create-directory' ? <Folder size={14} /> : <FilePlus2 size={13} />}
-            <input
-              autoFocus
-              className="tree-inline-input"
-              value={editValue}
-              placeholder={inlineEdit.kind === 'create-directory' ? 'folder name' : 'file name'}
-              onChange={(event) => setEditValue(event.target.value)}
-              onBlur={() => void commitEdit()}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') void commitEdit()
-                if (event.key === 'Escape') setInlineEdit(null)
-              }}
-            />
-          </div>
-        ) : null}
+        {createEdit && !createEdit.parentPath ? createRow : null}
         {visibleRows.map((node, rowIndex) => (
-          <FileTreeRow
+          <Fragment key={node.path}>
+            <FileTreeRow
             key={node.path}
             node={node}
             rowIndex={rowIndex}
@@ -436,6 +521,26 @@ export function FileExplorer() {
             onEditValue={setEditValue}
             onCommitEdit={() => void commitEdit()}
             onCancelEdit={() => setInlineEdit(null)}
+            onContextMenuOpen={() => {
+              if (!selection.selectedPaths.has(node.path)) {
+                setSelection(createSingleFileExplorerSelection(node.path))
+              }
+            }}
+            onCreate={(kind) => beginCreate(
+              kind === 'file' ? 'create-file' : 'create-directory',
+              node.isDirectory ? node.path : parentPath(node.path)
+            )}
+            onCopyPaths={(kind) => void copyContextPaths(node, kind)}
+            onOpenTerminal={() => void openDirectoryInTerminal(node).catch(() => {})}
+            onViewFile={() => {
+              if (!node.isDirectory && !node.isSymlink) void openFile(node.path)
+            }}
+            onCollapse={() => setExpanded((current) => {
+              const next = new Set(current)
+              next.delete(node.path)
+              return next
+            })}
+            onReveal={() => void revealLocalPath(node)}
             onClick={(event) => {
               const mode = getFileExplorerSelectionMode(event, isMac)
               setSelection((current) => updateFileExplorerSelection(
@@ -455,7 +560,12 @@ export function FileExplorer() {
             onToggle={() => toggle(node)}
             onRename={() => beginRename(node)}
             onDelete={() => setDeleteRequest(node)}
-          />
+            canOpenTerminal={workspace?.hostId === 'local'}
+            isLocal={workspace?.hostId === 'local'}
+            selectionSize={pathsForContext(node).length}
+            />
+            {createEdit?.parentPath === node.path ? createRow : null}
+          </Fragment>
         ))}
         {tree.rootError ? (
           <div className="tree-empty tree-empty--error"><strong>Could not read workspace</strong><span>{tree.rootError}</span><button className="small-button" onClick={() => void tree.refreshTree()}>Retry</button></div>

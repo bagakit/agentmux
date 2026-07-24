@@ -102,12 +102,14 @@
     {
       "id": "T-004",
       "title": "移植 a mature workbench 成熟 Terminal 交互",
-      "objective": "从固定 a mature workbench 源码移植适用于 AgentMux 的搜索、链接、复制粘贴、聚焦、清屏、滚动、Pane 放大和平台快捷键行为，同时保持 Core 是唯一 Session API。",
-      "outcome": "Terminal 不只是可显示字节，而是可高频使用、鼠标优先且跨平台一致的一等工作面。",
+      "objective": "从固定 a mature workbench 源码先一致移植 Terminal 外观、搜索、链接、复制粘贴、聚焦、清屏、滚动、Pane 放大、平台快捷键和文件右键菜单，同时保持 Core 是唯一 Session API、CtxMux 是唯一 Run/PTY owner。",
+      "outcome": "Terminal 不只是可显示字节，而是外观正确、可高频使用、鼠标优先且跨平台一致的一等工作面；Explorer 具备与已有文件能力一致的成熟右键操作面。",
       "acceptance": [
         "新建或切换到 Terminal 后输入焦点进入 xterm；搜索、清屏、滚动到底部、复制和粘贴有可见且可访问的入口与 CmdOrCtrl 快捷键。",
         "macOS 选中即复制/右键行为、Linux/Windows Ctrl 行为按平台明确实现，不硬编码 metaKey，不劫持 Agent CLI 自己的键位。",
         "OSC/URL 链接只通过安全的 Main-owned external-open 边界；不允许 file/javascript/data 协议或 Renderer 直接调用系统 Shell。",
+        "默认 Terminal palette、字重、行高、滚动、Option 语义与 Renderer 策略按固定 a mature workbench 来源对齐，仅保留用户确认的 AgentMux 字号；启动期 OSC 10/11 query 在无 Renderer 时仍只经 Core → CtxMux Input 回复，replay 不重复注入。",
+        "文件行右键菜单提供现有产品真实支持的创建、复制绝对／相对路径、查看、目录 Terminal、折叠、Finder、重命名与删除；复用 Explorer Selection/Mutation、typed Main IPC 和 CtxMux Terminal launch，不建立第二份文件状态。",
         "所有交互复用当前 xterm、Pane、Typed IPC 和 Core Session owner；不复制 a mature workbench daemon、历史兼容配置、插件或第二套 Terminal 状态机。",
         "Production Electron 在真实 DPR 下通过密度、输入、选择、搜索、链接和重启重连验收。"
       ],
