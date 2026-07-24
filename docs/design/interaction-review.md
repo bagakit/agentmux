@@ -61,7 +61,7 @@ AgentMux 应保留小而清晰的 Agent Provider Core 和自己的终端视觉�
 - Host-aware 状态文案和上下文内 Retry/Test
 - 看板的固定状态列、横向溢出、筛选和 Workspace Card 元数据层级；Branch 行轴与 Inbox Canvas 是 AgentMux 的适配语义
 
-成熟基础能力继续由维护中的库负责：Monaco 提供编辑器，xterm.js 提供终端渲染，`node-pty` 提供 PTY 原语，`agentmuxd` 提供持久进程所有权，`@dnd-kit` 提供跨 Pane 拖拽，Radix Dialog 提供焦点管理与可访问确认。AgentMux 只实现这些能力之间的产品所有权和 Core API 接线。
+成熟基础能力继续由维护中的库负责：Monaco 提供编辑器，xterm.js 提供终端渲染，CtxMux 提供持久 PTY/Process/Replay 所有权，`@dnd-kit` 提供跨 Pane 拖拽，Radix Dialog 提供焦点管理与可访问确认。AgentMux 只实现这些能力之间的产品所有权和 Core API 接线。
 
 明确不抄：
 
@@ -152,7 +152,7 @@ Monaco 继续负责文本布局、DPR、tokenization 和编辑行为；AgentMux 
 
 AgentMux 的纵向泳道身份由 Project 下的 Branch／Worktree 决定，每个 Branch 视觉上占一行；横向固定为 Inbox、Working、Needs You、Done 四列。Inbox 是创建入口，不伪造 Session；真实 Run 由 `(branchId, status)` 共同落位，状态变化是在同一 Branch 行内横向移动，不能跳到别的 Branch。映射保持穷尽且简单：`starting/running/working → Working`、`waiting/blocked/disconnected/error → Needs You`、`done/exited → Done`。
 
-Inbox 是 Board 第一列，不再是 Tools 的独立子 Tab。每个 Branch 的空 Inbox 单元都提供 Start discussion；点击它或已有 Inbox Run 会进入携带 Branch/Workspace 的 Discussion Canvas。Canvas 只选择讨论主题与现有 Provider，提交后通过已有 Store → Typed IPC → Core Client → `agentmuxd` 创建真实 Session；成功 Run 自动出现在该 Branch 对应状态格，失败沿现有 Launcher 事务恢复，不制造 Mock 卡片或第二套任务数据。
+Inbox 是 Board 第一列，不再是 Tools 的独立子 Tab。每个 Branch 的空 Inbox 单元都提供 Start discussion；点击它或已有 Inbox Run 会进入携带 Branch/Workspace 的 Discussion Canvas。Canvas 只选择讨论主题与现有 Provider，提交后通过已有 Store → Typed IPC → Core Client → private CtxmuxRunAdapter 创建真实 Session；成功 Run 自动出现在该 Branch 对应状态格，失败沿现有 Launcher 事务恢复，不制造 Mock 卡片或第二套任务数据。
 
 “像音乐游戏”只保留平行泳道、清晰落点和横向进展感，不加入积分、皮肤或无关动效。Board 继续使用标题前的共享 Tools Dock，但 Dock 只表达 Project Branch Scope 与矩阵图例；Inbox 的创建和处理留在矩阵本体。横向滚动发生在矩阵容器，纵向滚动浏览 Branch，Branch 标签和状态列头在滚动时保持可辨认。
 

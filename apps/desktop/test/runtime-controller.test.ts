@@ -75,13 +75,7 @@ const remoteHost: SshHostConfig = {
   id: 'remote',
   kind: 'ssh',
   label: 'Build box',
-  hostname: 'build.example.test',
-  runtime: {
-    buildIdentity: '0.1.0',
-    remoteNodePath: 'node',
-    remoteEntrypointPath: '/home/build/.agentmux/versions/0.1.0/package/dist/agentmuxd.js',
-    remoteEndpointPath: '/home/build/.agentmux/agentmuxd.sock'
-  }
+  hostname: 'build.example.test'
 }
 
 async function configuredController(): Promise<RuntimeController> {

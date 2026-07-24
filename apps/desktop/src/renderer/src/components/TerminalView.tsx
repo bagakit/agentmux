@@ -17,8 +17,7 @@ function outputForSession(event: RuntimeEvent, session: SessionSnapshot) {
   if (
     event.hostId !== session.hostId ||
     core.type !== 'terminal-output' ||
-    core.run.runId !== session.control.run.runId ||
-    core.run.incarnationId !== session.control.run.incarnationId
+    core.run.runId !== session.control.run.runId
   ) return null
   const byteRange = core.evidence.outputByteRange
   return byteRange ? { ...core, ...byteRange } : null
@@ -161,7 +160,7 @@ export function TerminalView({ session }: { session: SessionSnapshot }) {
       if (attached) void api.sessions.detach(session.control)
       terminal.dispose()
     }
-  }, [session.control.run.incarnationId, session.control.run.runId, session.id])
+  }, [session.control.run.runId, session.id])
 
   return <div className="terminal-view" ref={rootRef} />
 }

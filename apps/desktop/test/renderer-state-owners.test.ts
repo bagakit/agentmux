@@ -27,7 +27,7 @@ const session: SessionSnapshot = {
     kind: 'agent',
     hostId: 'local',
     agentSessionId: 'session-1',
-    run: { runId: 'run-1', incarnationId: 'incarnation-1' }
+    run: { runId: 'run-1' }
   }
 }
 
@@ -45,7 +45,7 @@ function core(event: RuntimeEvent['event']): RuntimeEvent {
 }
 
 describe('Renderer resource state owners', () => {
-  it('ignores late events from an old Run incarnation even when Agent Session identity matches', () => {
+  it('ignores late events from an old Run even when Agent Session identity matches', () => {
     const tabId = `session:${session.id}`
     const state = {
       sessions: [session],
@@ -62,7 +62,7 @@ describe('Renderer resource state owners', () => {
       layouts: { 'workspace-1': createWorkspaceLayout('pane', [tabId]) },
       viewModes: { [session.id]: 'conversation' as const }
     }
-    const staleRun = { ...session.control.run, incarnationId: 'stale-incarnation' }
+    const staleRun = { runId: 'stale-run' }
 
     const afterState = reduceRuntimeEvent(state, core({
       type: 'process-state',

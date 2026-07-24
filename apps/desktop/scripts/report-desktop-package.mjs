@@ -1,4 +1,4 @@
-import { readdir, realpath, stat } from 'node:fs/promises'
+import { readdir, stat } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
 
 const desktopRoot = resolve(import.meta.dirname, '..')
@@ -42,14 +42,20 @@ const chunks = await Promise.all((await readdir(rendererAssets, { withFileTypes:
   .map(async (entry) => ({ name: entry.name, bytes: (await stat(join(rendererAssets, entry.name))).size })))
 chunks.sort((left, right) => right.bytes - left.bytes || left.name.localeCompare(right.name))
 
-const nodePtyRoot = await realpath(join(appResources, 'node_modules', '@agentmux', 'core', 'node_modules', 'node-pty'))
-const prebuildRoot = join(nodePtyRoot, 'prebuilds')
-const nativeArtifacts = await Promise.all((await directories(prebuildRoot)).map(async (platform) => ({
-  platform,
-  files: await Promise.all((await readdir(join(prebuildRoot, platform), { withFileTypes: true }))
-    .filter((entry) => entry.isFile())
-    .map(async (entry) => ({ name: entry.name, bytes: (await stat(join(prebuildRoot, platform, entry.name))).size })))
-})))
+const ctxmuxRoot = join(
+  appResources,
+  'node_modules',
+  '@agentmux',
+  'core',
+  'vendor',
+  'ctxmux',
+  'darwin-arm64'
+)
+const nativeArtifacts = [{
+  platform: 'darwin-arm64',
+  files: await Promise.all(['bin/ctxmux', 'bin/ctxmuxd', 'ctxmux-sdk-0.0.0.tgz', 'manifest.json']
+    .map(async (name) => ({ name, bytes: (await stat(join(ctxmuxRoot, name))).size })))
+}]
 
 const report = {
   app: { path: relative(desktopRoot, appPath), bytes: await pathSize(appPath) },

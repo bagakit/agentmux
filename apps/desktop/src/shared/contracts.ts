@@ -23,12 +23,6 @@ export type SshHostConfig = {
   user?: string
   port?: number
   identityFile?: string
-  runtime: {
-    buildIdentity: string
-    remoteNodePath: string
-    remoteEntrypointPath: string
-    remoteEndpointPath: string
-  }
 }
 
 export type HostConfig = LocalHostConfig | SshHostConfig
@@ -120,7 +114,6 @@ export type AgentLaunchInput = {
   hostId: string
   workspacePath: string
   agentSessionId?: string
-  runId?: string
   createOperationId?: string
   prompt?: string
   cols?: number
@@ -130,7 +123,6 @@ export type AgentLaunchInput = {
 export type TerminalLaunchInput = {
   hostId: string
   workspacePath: string
-  runId?: string
   createOperationId?: string
   cols?: number
   rows?: number

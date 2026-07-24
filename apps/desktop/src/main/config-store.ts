@@ -14,13 +14,7 @@ const hostSchema = z.discriminatedUnion('kind', [
       hostname: z.string().min(1),
       user: z.string().min(1).optional(),
       port: z.number().int().min(1).max(65535).optional(),
-      identityFile: z.string().min(1).optional(),
-      runtime: z.object({
-        buildIdentity: z.string().min(1),
-        remoteNodePath: z.string().min(1),
-        remoteEntrypointPath: z.string().startsWith('/'),
-        remoteEndpointPath: z.string().startsWith('/')
-      }).strict()
+      identityFile: z.string().min(1).optional()
     })
     .strict()
 ])

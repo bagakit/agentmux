@@ -2,35 +2,35 @@
 
 状态：T-011 领域合同
 
-这份文档只说明长期成立的对象边界。当前仓库中的自建 `agentmuxd` 是待删除的过渡 Run Kernel；最终由 `ctxmux` 独占 PTY、进程和有序输入输出。无论底层 Kernel 如何实现，AgentMux 的公共调用方只看到本文定义的领域对象，不接触 daemon/ctxmux wire、Electron IPC 或第三方 SDK 类型。
+这份文档只说明长期成立的对象边界。`ctxmux` 已是唯一 Local Run Kernel，独占 PTY、进程和有序输入输出；AgentMux 的公共调用方只看到本文定义的领域对象，不接触 ctxmux wire、Electron IPC 或第三方 SDK 类型。
 
 ## 1. 四个对象不是四种叫法
 
 | 对象 | 身份 | 持有的事实 | 明确不持有 |
 | --- | --- | --- | --- |
-| Run | `runId + incarnationId` | 物理进程、工作目录、尺寸、UTF-8 byte cursor、退出事实 | 模型上下文、UI 布局 |
+| Run | CtxMux `runId` | 物理进程、工作目录、尺寸、UTF-8 byte cursor、退出事实 | 模型上下文、UI 布局 |
 | Agent Session | `agentSessionId` | Provider、Workspace 关联、当前 Run 引用、Native Handle、Hook Receipt | PTY、Replay、进程所有权 |
-| Attachment | 当前 Client 对一个 Run incarnation 的附着 | 有界 Replay、Gap、增量输出和控制入口 | Run 生命周期、Agent 上下文 |
+| Attachment | 当前 Client 对一个 Run 的附着 | 有界 Replay、Gap、增量输出和控制入口 | Run 生命周期、Agent 上下文 |
 | View | `viewId` | 一个 Consumer 对 Run 或 Agent Session 的展示投影 | 领域真相、进程或订阅所有权 |
 
-`viewId`、`agentSessionId` 和 `runId` 必须属于不同身份空间。一个 Agent Session 可以同时投影到多个 View；View 关闭后再打开，不会创建或恢复模型上下文。一个 Run incarnation 也可以先释放 Attachment，再由同一或另一个 Client 重新 Attach。
+`viewId`、`agentSessionId` 和 `runId` 必须属于不同身份空间。一个 Agent Session 可以同时投影到多个 View；View 关闭后再打开，不会创建或恢复模型上下文。一个 Run 也可以先释放 Attachment，再由同一或另一个 Client 重新 Attach。
 
-Raw Terminal 只有 Run，没有 Agent Session。Agent Run 必须引用恰好一个 Agent Session；两边的 Agent、Host、Workspace Path、Run ID 和 Incarnation 不一致时，投影必须失败关闭。
+Raw Terminal 只有 Run，没有 Agent Session。Agent Run 必须引用恰好一个 Agent Session；两边的 Agent、Host、Workspace Path 和 exact Run ID 不一致时，投影必须失败关闭。
 
-`agentSessionId` 是 AgentMux CLI、SDK 和 Desktop 的稳定公共主键。Provider native session ID、ACP handle 与 exact RunRef 是 AgentMux Core-owned Store 上的外部索引，不是替代主键：native session ID 必须与 Provider 身份组成查询键，RunRef 必须包含 incarnation。一个查询命中零个、多个、过期或互相冲突的绑定时必须失败关闭，不能猜测最近 Session，也不能从 Terminal 标题或输出反推身份。
+`agentSessionId` 是 AgentMux CLI、SDK 和 Desktop 的稳定公共主键。Provider native session ID、ACP handle 与 exact RunRef 是 AgentMux Core-owned Store 上的外部索引，不是替代主键：native session ID 必须与 Provider 身份组成查询键，RunRef 直接包含 CtxMux RunId。一个查询命中零个、多个、过期或互相冲突的绑定时必须失败关闭，不能猜测最近 Session，也不能从 Terminal 标题或输出反推身份。
 
 Raw Terminal 的 Client 路由身份是 runtime-issued Terminal/View ID，不伪装成 `agentSessionId`。Agent 的 `agentSessionId` 可以经同一 Core-owned View Resolver 唯一解析到当前已打开 View；零个、多个、过期或已关闭的 View 都不是可切换目标。CLI、SDK 和 Desktop 复用该 Resolver 与 typed Desktop control，Renderer 不维护第二份映射。
 
 ## 2. 六个动作必须分开
 
-- **Reattach 原 Run**：Run ID、Incarnation 和 Agent Session ID 全部不变；从指定 byte cursor 获取 Replay/Gap 并建立新的 Attachment，不 Spawn。
+- **Reattach 原 Run**：exact Run ID 和 Agent Session ID 不变；从指定 byte cursor 获取 Replay/Gap 并建立新的 Attachment，不 Spawn。
 - **Release Attachment**：只释放当前 Client 的输出附着；不停止 Run，不删除 Agent Session，也不关闭其他 View。
-- **Provider-native Resume**：可信 Native Handle 和 Provider Capability 同时成立时，保留 Agent Session ID，创建新的 Run ID 与 Incarnation。
+- **Provider-native Resume**：可信 Native Handle 和 Provider Capability 同时成立时，保留 Agent Session ID，创建新的 CtxMux Run ID。
 - **Respawn**：创建新的 Agent Session 和新的 Run；即使 Provider、Workspace 和 Prompt 相同，也不宣称继承模型上下文。
 - **Open View**：创建新的 View ID，引用已有 Run 或 Agent Session；不创建进程、不 Attach 输出，也不改变 Agent Session。
 - **Switch View**：使用已解析的 runtime-issued Terminal/View ID 聚焦一个当前已打开的 Desktop View；Agent 调用可先由 `agentSessionId` 唯一解析其当前 View。该动作不 Open、不 Attach、不 Resume、不 Spawn，不改变 Run、Attachment 或 Agent Session 生命周期。
 
-原 Run 仍为 `running` 时禁止 provider-native Resume，避免一个 Agent Session 同时驱动两个物理 Agent。迟到的旧 Incarnation 事件只能作为旧 Run 事实处理，不能更新已经指向新 Run 的 Agent Session。
+原 Run 仍为 `running` 时禁止 provider-native Resume，避免一个 Agent Session 同时驱动两个物理 Agent。迟到的旧 Run 事件只能作为旧 Run 事实处理，不能更新已经指向新 Run 的 Agent Session。
 
 ## 3. Cursor 和输入输出
 
@@ -77,7 +77,7 @@ CLI、SDK 与 Desktop 共用同一 Agent Session Resolver、View Resolver 和操
 
 - Runtime 投影测试验证 Run、Agent Session 与 View 身份独立，同一 Agent Session 可生成多个 View。
 - Registry 测试验证 Agent Session 换 Run 后，迟到旧 Run 写入会被拒绝。
-- Client 集成测试验证 Reattach、Release Attachment、Provider Resume 和 Respawn 是不同动作，并验证同步/异步 Consumer 订阅者异常不会破坏其他 Listener 或 Run 控制。
+- packed Client 集成测试已验证 CtxMux Run 的 Reattach、Release Attachment、byte replay、Resize、Interrupt 和 Stop；Provider Resume/Respawn 要在 Codex vertical 恢复真实证据后才能宣称完成。
 - Core 与 Desktop 类型检查验证 daemon wire 不再进入 Desktop 的共享合同。
 
-T-012 收口 Provider/ACP/Hook/Permission/Resume 后，T-013 将现有可靠性资产提炼成 Kernel-neutral Conformance Kit；T-020 必须先对新的、已提交且版本化的 ctxmux public candidate 做新鲜审计，全部硬 Gate 通过后才执行最终 Kernel 替换、统一 CLI/View switch 并删除自建 daemon。
+T-020 的 Shell checkpoint 已固定并消费 CtxMux `3b94288`，删除旧 Run Kernel。Codex、统一 CLI/View switch 与最终可靠性 Gate 仍未完成，不能从 Shell 证据外推。

@@ -116,7 +116,7 @@ Context7 没有 ctxmux 条目；本机常用项目目录、AgentMux lockfile、�
 
 Adapter 不持久化第二份 Run Map、Replay、Input receipt 或 Remote artifact。若为了弥合缺口需要 AgentMux 自己拥有这些状态，说明 ctxmux 仍未达到接入门槛。
 
-Agent identity 不属于 Adapter。`agentSessionId`、Provider + native session ID、ACP handle 及其唯一性索引全部由 AgentMux Core-owned Store/Resolver 持有；ctxmux `runId` 只作为 exact RunRef 的一部分被索引。CLI、SDK 与 Desktop 先经同一个 Resolver 得到当前 Agent Session 与 RunRef，再调用 Adapter。ctxmux 不解析 AgentMux ID，AgentMux 也不把 ctxmux SDK/wire 类型作为公共身份；零匹配、多匹配、过期 incarnation 或冲突绑定都必须失败关闭。
+Agent identity 不属于 Adapter。`agentSessionId`、Provider + native session ID、ACP handle 及其唯一性索引全部由 AgentMux Core-owned Store/Resolver 持有；ctxmux `runId` 就是 exact RunRef。CLI、SDK 与 Desktop 先经同一个 Resolver 得到当前 Agent Session 与 RunRef，再调用 Adapter。ctxmux 不解析 AgentMux ID，AgentMux 也不把 ctxmux SDK/wire 类型作为公共身份；零匹配、多匹配、过期 Run 或冲突绑定都必须失败关闭。
 
 ## 7. 历史 T-016 与 revision 9 执行门槛
 

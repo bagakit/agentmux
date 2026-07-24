@@ -62,7 +62,7 @@ function terminalSession(id: string): SessionSnapshot {
       kind: 'terminal',
       hostId: 'local',
       runId: id,
-      run: { runId: id, incarnationId: `${id}-incarnation` }
+      run: { runId: id }
     }
   }
 }

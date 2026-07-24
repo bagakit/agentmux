@@ -25,18 +25,19 @@ The command fails closed unless all of the following hold:
 1. every application symlink resolves inside `AgentMux.app`;
 2. no packaged text artifact refers to the source checkout or packaging temp
    directory;
-3. the target `node-pty` Mach-O slice and executable `spawn-helper` exist;
-4. the packaged Electron runtime can boot the packaged daemon entry and create
-   a real PTY with an empty `NODE_PATH`;
+3. the packaged CtxMux manifest binds exact clean commit `3b94288`, protocol 9,
+   and the darwin-arm64 SDK/binary hashes;
+4. packaged `ctxmux` and `ctxmuxd` report version `0.1.0 (protocol 9)` without
+   a global install or source checkout;
 5. `codesign --verify --deep --strict` accepts the local candidate;
 6. the DMG verifies, mounts read-only, copies into an isolated `Applications`
    directory, and detaches cleanly;
 7. LaunchServices starts the relocated app and the packaged Main process emits
    a ready receipt from an isolated current-schema data directory;
 8. the exact relocated Desktop and Helper processes exit cleanly; the Gate
-   shuts down only its short-path isolated daemon endpoint through the packaged
-   public command and leaves existing AgentMux applications and global runtime
-   state untouched.
+   identifies only the isolated packaged ctxmuxd whose argv contains its exact
+   socket, sends that PID SIGTERM, and leaves existing applications and global
+   runtime state untouched.
 
 Dependency materialization reads the pnpm lockfile-resolved workspace tree but
 writes only to a temporary application bundle. It does not run a nested install

@@ -62,7 +62,7 @@ function session(overrides: Partial<SessionSnapshot> & Pick<SessionSnapshot, 'id
       kind: 'agent',
       hostId: 'local',
       agentSessionId: overrides.id,
-      run: { runId: overrides.id, incarnationId: `${overrides.id}-incarnation` }
+      run: { runId: overrides.id }
     },
     ...overrides
   } as SessionSnapshot
