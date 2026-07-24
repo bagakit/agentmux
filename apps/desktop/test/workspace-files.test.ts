@@ -343,12 +343,25 @@ describe('WorkspaceFiles root confinement', () => {
       message: 'Workspace path is not a regular file'
     })
 
-    dispose()
-    await waitFor(() => workspaceFileObserverCount() === 0)
+    await dispose()
+    expect(workspaceFileObserverCount()).toBe(0)
     const afterDispose = invalidations
     await rm(path, { recursive: true })
     await new Promise((resolve) => setTimeout(resolve, 100))
     expect(invalidations).toBe(afterDispose)
+  })
+
+  it('does not finish WorkspaceFiles disposal before observer children close', async () => {
+    const { root, workspace, host } = await localFixture('observation-disposal')
+    await writeFile(join(root, 'document.txt'), 'alpha')
+    const files = new WorkspaceFiles(() => host)
+    const disposeObservation = await files.observe(workspace, 'document.txt', () => {})
+    expect(workspaceFileObserverCount()).toBe(1)
+
+    await files.dispose()
+
+    expect(workspaceFileObserverCount()).toBe(0)
+    await disposeObservation()
   })
 
   it('lists one directory level and confines create, rename, and delete mutations', async () => {
