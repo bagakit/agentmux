@@ -17,6 +17,8 @@
 
 Raw Terminal 只有 Run，没有 Agent Session。Agent Run 必须引用恰好一个 Agent Session；两边的 Agent、Host、Workspace Path、Run ID 和 Incarnation 不一致时，投影必须失败关闭。
 
+`agentSessionId` 是 AgentMux CLI、SDK 和 Desktop 的稳定公共主键。Provider native session ID、ACP handle 与 exact RunRef 是 AgentMux Core-owned Store 上的外部索引，不是替代主键：native session ID 必须与 Provider 身份组成查询键，RunRef 必须包含 incarnation。一个查询命中零个、多个、过期或互相冲突的绑定时必须失败关闭，不能猜测最近 Session，也不能从 Terminal 标题或输出反推身份。
+
 ## 2. 五个动作必须分开
 
 - **Reattach 原 Run**：Run ID、Incarnation 和 Agent Session ID 全部不变；从指定 byte cursor 获取 Replay/Gap 并建立新的 Attachment，不 Spawn。
@@ -59,6 +61,8 @@ AgentMux 持有 Provider Catalog、能力探测、Launch/Resume Intent、Agent S
 Run Kernel 持有 Local/SSH 的 PTY、Process、Ordered I/O、Replay、Gap、Backpressure、Attachment、Resize、Signal 和 Stop。最终只有 `ctxmux` 实现这一层；AgentMux 不保留自建 daemon fallback，也不提供兼容 API。
 
 Adapter 只做两件事：把 AgentMux 的 Run Intent 翻译给 Kernel，把 Kernel Run Fact 翻译成 AgentMux 自有类型。Kernel 的 Frame、Snapshot、Error、SDK Object 和连接状态不能穿过 Adapter。
+
+CLI、SDK 与 Desktop 共用同一 Agent Session Resolver 和操作合同。调用方可以用 `agentSessionId` 对不同 Provider 统一执行 list、status、send、interrupt、attach、resume 与 stop；Resolver 先核对 Agent Session、Provider capability 和 exact current RunRef，再把纯 Run 动作交给 Adapter。Provider native ID、ACP handle 或 RunRef 的反查也只能返回 AgentMux 身份，不得让 ctxmux 持有 Agent 索引，或让 CLI 另建一份映射。某个 Provider 不支持某项语义动作时返回明确 unsupported，而不是降级成字符串注入、隐式 respawn 或旧 CLI 路径。
 
 ## 6. 持久化与资源边界
 

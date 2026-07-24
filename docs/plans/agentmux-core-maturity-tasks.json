@@ -8,8 +8,10 @@
     "AGENTS.md",
     "docs/plans/agentmux-core-maturity-review.md",
     "docs/plans/mux-runtime-decision.md",
-    "docs/a mature workbench-agent-runtime-notes.md"
+    "docs/a mature workbench-agent-runtime-notes.md",
+    "docs/plans/agentmux-semantic-session.md"
   ],
+  "supersedes_revision": 6,
   "tasks": [
     {
       "id": "T-010",
@@ -219,35 +221,42 @@
       "supersedes": []
     },
     {
-      "id": "T-016",
-      "title": "接入 ctxmux 并一次替换 Local/SSH Run Kernel",
-      "objective": "仅在 T-015 证明能力齐备后实现一个 CtxmuxRunAdapter，切换 Local/SSH、Desktop 与外部 Consumer，并直接删除自建 agentmuxd Run Kernel。",
-      "outcome": "ctxmuxd 成为唯一 PTY/Process/Replay Owner，AgentMux 只保留 Agent 语义和 Client 投影；产品不存在双 Runtime 或迁移期公开配置。",
+      "id": "T-020",
+      "title": "完成 ctxmux 原子切换与 AgentMux 统一 CLI",
+      "objective": "在保留 T-016 blocked 证据的前提下，以满足全部解除条件的新 ctxmux candidate 完成同一次原子切换，交付以稳定 AgentMux Agent Session ID 为主键的统一 CLI/SDK 操作面，并直接删除自建 agentmuxd Run Kernel。",
+      "outcome": "ctxmuxd 成为唯一 PTY/Process/Replay Owner；AgentMux 以自己的 Agent Session ID 统一解析和操作不同 Provider，CLI、SDK 与 Desktop 共享一份 Core 身份真相；产品不存在双 Runtime 或迁移期公开配置。",
       "acceptance": [
-        "Local Terminal 与 Codex 先在最终 Adapter 上通过完整 Conformance，再接通其余 Provider；不建立通用 Backend Registry。",
-        "SSH 使用系统 Client 与用户现有认证连接版本匹配的远端 ctxmuxd；不复制 Private Key、不开放未授权端口、不静默安装或下载。",
-        "Desktop 完全退出、UI Crash、SSH Partition、lost create response、late event、gap、resize 和 stop 均通过 public API 恢复，不重复 Spawn 或重放已确认 Input。",
-        "同一切换中删除自建 daemon server/client/protocol/session journal/PTY/process cleanup/remote artifact 与其 package bin；仅保留已移植的 Conformance 与通用 Agent 语义测试。",
-        "删除 node-pty direct ownership、Backend Selector、Alias、Migration、Fallback 与旧文档承诺；ctxmux 不满足任何硬 Gate 时任务阻塞而不是降级。"
+        "T-015 和原 T-016 的九项外部解除条件全部由新的版本化 ctxmux public package 与 Conformance 证据关闭；缺少任何硬 Gate 时本任务阻塞，不回退旧 daemon 或部分切换。",
+        "Local Terminal 与 Codex 先在最终 Adapter 上通过完整 Conformance，再接通 Claude、TraeX、Hermes 与 Pi；不建立通用 Backend Registry。",
+        "SSH 使用系统 Client 与用户现有认证连接版本匹配的远端 ctxmuxd；Desktop 完全退出、UI Crash、SSH Partition、lost create response、late event、gap、resize、signal 和 stop 均通过 public API 恢复，不重复 Spawn 或重放已确认 Input。",
+        "AgentMux agentSessionId 是跨 Provider 的稳定公共主键；Core-owned Store/Resolver 可由 Provider + native session ID、ACP handle 或 exact RunRef 唯一反查该主键，歧义、过期绑定和身份冲突一律失败关闭。",
+        "交付 a mature workbench-like AgentMux CLI：可按 AgentMux ID 执行 list、status、send、interrupt、attach、resume 与 stop，并按 Provider capability 给出明确成功或 unsupported；调用方不需要理解各 Agent CLI 的 native session 参数或 ctxmux Run ID。",
+        "CLI、Desktop 与外部 SDK 只调用同一 Core Agent Session Store/Resolver 和 Agent 操作合同；不得在 CLI 建第二份索引，不把 Agent identity 下沉 ctxmux，也不把 ctxmux wire、SDK type 或 Run-only 状态上浮为 AgentMux 公共身份。",
+        "同一切换中删除自建 daemon server/client/protocol/session journal/PTY/process cleanup/remote artifact、node-pty direct ownership 与 package bin；仅保留已移植的 Conformance 与通用 Agent 语义测试。",
+        "删除 Backend Selector、Alias、Migration、Fallback、旧 CLI 兼容与旧文档承诺；不存在双 Runtime 或过渡公开配置。"
       ],
       "verification": [
         {
           "kind": "command",
           "ref": "package.json#scripts.check",
-          "proves": "Core、Desktop、CLI、Package Consumer 与 Local/SSH 在唯一 ctxmux Kernel 上通过回归。"
+          "proves": "Core、Desktop、AgentMux CLI、Package Consumer 与 Local/SSH 在唯一 ctxmux Kernel 和统一身份 Resolver 上通过回归。"
         },
         {
           "kind": "artifact",
           "ref": "docs/plans/ctxmux-cutover.md",
-          "proves": "切换范围、删除清单、运行证据与剩余外部边界可审计。"
+          "proves": "切换、CLI/Resolver 身份合同、删除清单、运行证据与剩余外部边界可审计。"
         }
       ],
       "source_refs": [
         "AGENTS.md",
         "docs/plans/mux-runtime-decision.md",
-        "docs/plans/ctxmux-capability-audit.md"
+        "docs/plans/ctxmux-capability-audit.md",
+        "docs/plans/agentmux-semantic-session.md",
+        "docs/a mature workbench-agent-runtime-notes.md"
       ],
-      "supersedes": []
+      "supersedes": [
+        "T-016"
+      ]
     },
     {
       "id": "T-017",

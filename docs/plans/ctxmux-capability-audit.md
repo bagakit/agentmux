@@ -116,6 +116,8 @@ Context7 没有 ctxmux 条目；本机常用项目目录、AgentMux lockfile、�
 
 Adapter 不持久化第二份 Run Map、Replay、Input receipt 或 Remote artifact。若为了弥合缺口需要 AgentMux 自己拥有这些状态，说明 ctxmux 仍未达到接入门槛。
 
+Agent identity 不属于 Adapter。`agentSessionId`、Provider + native session ID、ACP handle 及其唯一性索引全部由 AgentMux Core-owned Store/Resolver 持有；ctxmux `runId` 只作为 exact RunRef 的一部分被索引。CLI、SDK 与 Desktop 先经同一个 Resolver 得到当前 Agent Session 与 RunRef，再调用 Adapter。ctxmux 不解析 AgentMux ID，AgentMux 也不把 ctxmux SDK/wire 类型作为公共身份；零匹配、多匹配、过期 incarnation 或冲突绑定都必须失败关闭。
+
 ## 7. T-016 精确 parked context
 
 T-016 的外部解除条件全部可独立核对：
@@ -128,7 +130,7 @@ T-016 的外部解除条件全部可独立核对：
 6. Run/Exited/Attachment/Replay/FD/RSS 有硬预算、GC 与释放后收敛证据；
 7. Hello/Doctor 提供可核对的 Build、Host、Instance/epoch、平台与 Capability；
 8. 提供同一 Run 合同的系统 SSH Transport、显式部署/升级方式和 partition recovery；
-9. 最终 candidate 在支持平台通过 AgentMux Conformance，无 `knownGaps`。
+9. 最终 candidate 在支持平台通过 AgentMux Conformance，无 `knownGaps`；AgentMux Core Store/Resolver 能以 Provider + native session ID、ACP handle 或 exact RunRef 唯一反查稳定 `agentSessionId`，并让 CLI、SDK、Desktop 共用该身份与操作合同。
 
 在这些条件满足前，AgentMux 保持当前可运行过渡实现但不继续给它增加产品能力；T-017/T-018 也不能用旧 candidate 的 Package、资源或 Benchmark 证据冒充最终结果。
 
