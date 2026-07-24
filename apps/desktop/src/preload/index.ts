@@ -1,8 +1,9 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { AgentId, RuntimeEvent } from '@agentmux/core'
+import type { AgentId } from '@agentmux/core'
 import type {
   AgentLaunchInput,
   AgentMuxDesktopApi,
+  AgentSessionControl,
   AppConfig,
   BrowserBounds,
   BrowserEvent,
@@ -12,6 +13,8 @@ import type {
   FileDocument,
   HostConfig,
   RenameWorkspacePathInput,
+  RuntimeEvent,
+  SessionControl,
   TerminalLaunchInput
 } from '../shared/contracts.js'
 
@@ -50,11 +53,19 @@ const api: AgentMuxDesktopApi = {
     snapshot: () => ipcRenderer.invoke('sessions:snapshot'),
     launchAgent: (input: AgentLaunchInput) => ipcRenderer.invoke('sessions:launchAgent', input),
     launchTerminal: (input: TerminalLaunchInput) => ipcRenderer.invoke('sessions:launchTerminal', input),
-    send: (sessionId: string, text: string, submit = true) => ipcRenderer.invoke('sessions:send', sessionId, text, submit),
-    interrupt: (sessionId: string) => ipcRenderer.invoke('sessions:interrupt', sessionId),
-    resize: (sessionId: string, cols: number, rows: number) => ipcRenderer.invoke('sessions:resize', sessionId, cols, rows),
-    refresh: (sessionId: string) => ipcRenderer.invoke('sessions:refresh', sessionId),
-    stop: (sessionId: string) => ipcRenderer.invoke('sessions:stop', sessionId),
+    attach: (session: SessionControl, afterSequence = 0) =>
+      ipcRenderer.invoke('sessions:attach', session, afterSequence),
+    detach: (session: SessionControl) => ipcRenderer.invoke('sessions:detach', session),
+    write: (session: SessionControl, data: string) => ipcRenderer.invoke('sessions:write', session, data),
+    submitPrompt: (session: AgentSessionControl, prompt: string) =>
+      ipcRenderer.invoke('sessions:submitPrompt', session, prompt),
+    acknowledge: (session: SessionControl, sequence: number) =>
+      ipcRenderer.invoke('sessions:acknowledge', session, sequence),
+    interrupt: (session: SessionControl) => ipcRenderer.invoke('sessions:interrupt', session),
+    resize: (session: SessionControl, cols: number, rows: number) =>
+      ipcRenderer.invoke('sessions:resize', session, cols, rows),
+    refresh: (session: SessionControl) => ipcRenderer.invoke('sessions:refresh', session),
+    stop: (session: SessionControl) => ipcRenderer.invoke('sessions:stop', session),
     onEvent(listener: (event: RuntimeEvent) => void) {
       const wrapped = (_event: Electron.IpcRendererEvent, value: RuntimeEvent): void => listener(value)
       ipcRenderer.on('agentmux:session-event', wrapped)

@@ -26,7 +26,7 @@ describe('file mutation resource reconciliation', () => {
       kind: 'folder'
     }
     const config: AppConfig = {
-      version: 1,
+      version: 2,
       hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
       agents: {},
       workspaces: [workspace]
@@ -123,7 +123,7 @@ describe('file mutation resource reconciliation', () => {
     }
     useAppStore.setState({
       config: {
-        version: 1,
+        version: 2,
         hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
         agents: {},
         workspaces: [workspace]

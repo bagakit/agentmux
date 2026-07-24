@@ -71,7 +71,7 @@ export function LaunchAgent({
           <button type="button" className="launch-surface__icon" title="Back to content picker" onClick={onBack}><ArrowLeft size={17} /></button>
         ) : <span className="launch-surface__icon"><Sparkles size={17} /></span>}
         <div>
-          <div className="eyebrow">New tmux agent</div>
+          <div className="eyebrow">New Agent session</div>
           <h2>Start in {workspace?.name ?? 'a workspace'}</h2>
           <p>Provider details stay in core. This pane owns the interaction.</p>
         </div>

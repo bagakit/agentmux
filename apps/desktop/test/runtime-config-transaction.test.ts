@@ -4,14 +4,14 @@ import type { RuntimeController, RuntimePreparation } from '../src/main/runtime-
 import { saveRuntimeConfig } from '../src/main/runtime-config-transaction.js'
 
 const config: AppConfig = {
-  version: 1,
+  version: 2,
   hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
   agents: {},
   workspaces: []
 }
 
 function runtimeFixture(overrides: Partial<RuntimeController> = {}) {
-  const preparation = { kind: 'update', hosts: [], removedHostIds: [], hostSignatures: new Map() } as RuntimePreparation
+  const preparation = { hosts: [], removedHostIds: [], hostSignatures: new Map() } as RuntimePreparation
   const runtime = {
     prepare: vi.fn(async () => preparation),
     commit: vi.fn(),

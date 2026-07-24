@@ -16,10 +16,21 @@ afterEach(async () => {
 })
 
 const baseConfig: AppConfig = {
-  version: 1,
+  version: 2,
   hosts: [
     { id: 'local', kind: 'local', label: 'This Mac' },
-    { id: 'remote', kind: 'ssh', label: 'Build box', hostname: 'build.example.test' }
+    {
+      id: 'remote',
+      kind: 'ssh',
+      label: 'Build box',
+      hostname: 'build.example.test',
+      daemon: {
+        buildIdentity: '0.1.0',
+        remoteNodePath: 'node',
+        remoteAgentMuxdPath: _hygiene_fixturePath("home/build/.agentmux/versions/0.1.0/package/dist/agentmuxd.js"),
+        remoteSocketPath: _hygiene_fixturePath("home/build/.agentmux/agentmuxd.sock")
+      }
+    }
   ],
   agents: {
     codex: { command: 'codex', args: [], env: {} },
