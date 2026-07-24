@@ -576,7 +576,24 @@ export class AgentMuxClient {
     return { run, replay: attached.replay, gap: attached.gap }
   }
 
-  async releaseTerminalAttachment(ref: AgentMuxRunRef): Promise<void> {
+  async readRunReplay(ref: AgentMuxRunRef, afterByte = 0): Promise<AgentMuxRunAttachment> {
+    this.requireConnected()
+    if (this.registry.isRetiredRun(ref)) {
+      throw new AgentMuxError('Retired Agent Run replay is unavailable.', 'STALE_AGENT_SESSION_BINDING')
+    }
+    const replay = await this.kernel.replay(ref.runId, afterByte)
+    if (this.registry.isRetiredRun(ref)) {
+      throw new AgentMuxError('Agent Run retired while its replay was being read.', 'STALE_AGENT_SESSION_BINDING')
+    }
+    this.runPids.set(ref.runId, replay.run.pid)
+    return {
+      run: projectRun(replay.run, this.registry.findByRun(ref)),
+      replay: replay.replay,
+      gap: replay.gap
+    }
+  }
+
+  async releaseRunAttachment(ref: AgentMuxRunRef): Promise<void> {
     this.requireConnected()
     await this.kernel.detach(ref.runId)
   }
@@ -736,6 +753,10 @@ export class AgentMuxClient {
     const session = this.requireAgentSession(agentSessionId)
     const attached = await this.kernel.attach(session.run.runId, afterByte ?? session.outputCursorBytes)
     try {
+      const current = this.requireAgentSession(agentSessionId)
+      if (current.run.runId !== session.run.runId) {
+        throw new AgentMuxError('Agent Session changed while its Run was being attached.', 'STALE_AGENT_SESSION_BINDING')
+      }
       this.assertAgentRun(session, attached.run)
     } catch (error) {
       try {
@@ -758,11 +779,6 @@ export class AgentMuxClient {
         gap: attached.gap
       }
     }
-  }
-
-  async releaseAgentAttachment(agentSessionId: string): Promise<void> {
-    this.requireConnected()
-    await this.kernel.detach(this.requireAgentSession(agentSessionId).run.runId)
   }
 
   async resumeAgent(input: AgentMuxAgentResumeInput): Promise<AgentMuxAgentSession> {
@@ -941,7 +957,9 @@ export class AgentMuxClient {
     await this.registry.update(
       agentSessionId,
       session.run,
-      (current) => ({ ...current, outputCursorBytes: throughByte, updatedAt: Date.now() })
+      (current) => throughByte <= current.outputCursorBytes
+        ? current
+        : { ...current, outputCursorBytes: throughByte, updatedAt: Date.now() }
     )
   }
 

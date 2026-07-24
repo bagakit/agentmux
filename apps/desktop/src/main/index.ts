@@ -10,6 +10,7 @@ import { runDesktopResourceProbe } from './resource-probe.js'
 const appIconPath = join(import.meta.dirname, '../../resources/icon.png')
 const packagedUserDataPath = join(app.getPath('appData'), 'dev.agentmux.desktop')
 let disposeIpc: (() => Promise<void>) | null = null
+let quitting = false
 
 if (process.env.AGENTMUX_DESKTOP_USER_DATA) {
   app.setPath('userData', process.env.AGENTMUX_DESKTOP_USER_DATA)
@@ -86,8 +87,17 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-app.on('before-quit', () => {
-  void disposeIpc?.()
-  disposeIpc = null
-  void runtime.dispose()
+app.on('before-quit', (event) => {
+  if (quitting) return
+  event.preventDefault()
+  quitting = true
+  void (async () => {
+    await disposeIpc?.()
+    disposeIpc = null
+    await runtime.dispose()
+    app.quit()
+  })().catch((error) => {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
+    app.exit(1)
+  })
 })

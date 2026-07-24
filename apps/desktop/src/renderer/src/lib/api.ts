@@ -379,6 +379,7 @@ const mockApi: AgentMuxDesktopApi = {
       const data = mockOutput.get(sessionId) ?? ''
       const endByte = new TextEncoder().encode(data).byteLength
       return {
+        attachmentId: crypto.randomUUID(),
         session: structuredClone(session),
         replay: data ? [{
           type: 'data' as const,

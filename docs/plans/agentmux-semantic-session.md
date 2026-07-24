@@ -13,7 +13,7 @@
 | Attachment | 当前 Client 对一个 Run 的附着 | 有界 Replay、Gap、增量输出和控制入口 | Run 生命周期、Agent 上下文 |
 | View | `viewId` | 一个 Consumer 对 Run 或 Agent Session 的展示投影 | 领域真相、进程或订阅所有权 |
 
-`viewId`、`agentSessionId` 和 `runId` 必须属于不同身份空间。一个 Agent Session 可以同时投影到多个 View；View 关闭后再打开，不会创建或恢复模型上下文。一个 Run 也可以先释放 Attachment，再由同一或另一个 Client 重新 Attach。
+`viewId`、`agentSessionId` 和 `runId` 必须属于不同身份空间。一个 Agent Session 可以同时投影到多个 View；View 关闭后再打开，不会创建或恢复模型上下文。同一 Desktop Client 的多个 View 共享 exact Run 的一个 retained Core Attachment，每个 View 只持有 Desktop-issued lease 与自己的 Replay 起点；最后一份 lease 释放时才释放底层 Attachment。多个 View 的 Output acknowledgement 只能单调推进 Agent Session cursor，较慢 View 的迟到 acknowledgement 不能把 cursor 回退。一个 Run 也可以先释放 Attachment，再由同一或另一个 Client 重新 Attach。
 
 Raw Terminal 只有 Run，没有 Agent Session。Agent Run 必须引用恰好一个 Agent Session；两边的 Agent、Host、Workspace Path 和 exact Run ID 不一致时，投影必须失败关闭。
 
@@ -24,7 +24,7 @@ Raw Terminal 的 Client 路由身份是 runtime-issued Terminal/View ID，不伪
 ## 2. 六个动作必须分开
 
 - **Reattach 原 Run**：exact Run ID 和 Agent Session ID 不变；从指定 byte cursor 获取 Replay/Gap 并建立新的 Attachment，不 Spawn。
-- **Release Attachment**：只释放当前 Client 的输出附着；不停止 Run，不删除 Agent Session，也不关闭其他 View。
+- **Release Attachment**：按 exact RunRef 释放当前 Client 的输出附着；Desktop 的一个 View 只释放自己的 lease，最后一个 View 离开时才释放 retained Core Attachment。两者都不停止 Run、不删除 Agent Session，也不关闭其他 View。
 - **Provider-native Resume**：可信 Native Handle 和 Provider Capability 同时成立时，保留 Agent Session ID，创建新的 CtxMux Run ID。
 - **Respawn**：创建新的 Agent Session 和新的 Run；即使 Provider、Workspace 和 Prompt 相同，也不宣称继承模型上下文。
 - **Open View**：创建新的 View ID，引用已有 Run 或 Agent Session；不创建进程、不 Attach 输出，也不改变 Agent Session。
@@ -77,7 +77,9 @@ CLI、SDK 与 Desktop 共用同一 Agent Session Resolver、View Resolver 和操
 
 - Runtime 投影测试验证 Run、Agent Session 与 View 身份独立，同一 Agent Session 可生成多个 View。
 - Registry 测试验证 Agent Session 换 Run 后，迟到旧 Run 写入会被拒绝。
-- packed Client 集成测试已验证 CtxMux Run 的 Reattach、Release Attachment、byte replay、Resize、Interrupt 和 Stop，以及 Codex create、Hook/Permission、native-id 反查、跨 Client reconnect、CLI send/interrupt/attach、provider-native Resume 和 Stop。
+- packed Client 集成测试已验证 CtxMux Run 的 Reattach、exact RunRef Release、retained Attachment 存在时的第二 View byte replay、Resize、Interrupt 和 Stop，以及 Codex create、Hook/Permission、native-id 反查、跨 Client reconnect、CLI send/interrupt/attach、provider-native Resume 和 Stop。
+- Desktop attachment broker 测试验证并发 View 只建立一个 retained Core Attachment，每个 View 获得独立 lease，释放非末位 lease 不影响其他 View。
+- Runtime configuration transaction 测试验证 changed Host 从 prepare 到 commit 期间拒绝新 Launch，并在既有 lifecycle/Attachment tail 收敛后才允许替换 Client。
 - View Resolver 与 Desktop 测试验证只聚焦当前已打开的 Terminal View 或唯一 Agent View；closed、stale、ambiguous 目标不改变布局，也不调用任何 Run lifecycle API。
 - Core 与 Desktop 类型检查验证 daemon wire 不再进入 Desktop 的共享合同。
 

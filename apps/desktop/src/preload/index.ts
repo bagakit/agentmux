@@ -81,7 +81,7 @@ const api: AgentMuxDesktopApi = {
     launchTerminal: (input: TerminalLaunchInput) => ipcRenderer.invoke('sessions:launchTerminal', input),
     attach: (session: SessionControl, afterSequence = 0) =>
       ipcRenderer.invoke('sessions:attach', session, afterSequence),
-    detach: (session: SessionControl) => ipcRenderer.invoke('sessions:detach', session),
+    detach: (attachmentId: string) => ipcRenderer.invoke('sessions:detach', attachmentId),
     write: (session: SessionControl, data: string) => ipcRenderer.invoke('sessions:write', session, data),
     submitPrompt: (session: AgentSessionControl, prompt: string) =>
       ipcRenderer.invoke('sessions:submitPrompt', session, prompt),

@@ -53,7 +53,7 @@ checkout-external packed consumer 已真实证明：
 1. 创建 Run 后拿到 CtxMux UUID 和 PID；
 2. 第一个 Client 释放后，第二个 Client 看到相同 RunId/PID；
 3. fragmented UTF-8 不产生错误替换字符；
-4. 从累计 byte 7 的 interior cursor replay 连续 suffix；
+4. 从累计 byte 7 的 interior cursor replay 连续 suffix，并在 retained Attachment 存在时为第二 View 读取同一 exact Run 的非持有 Replay；
 5. 调用方丢弃首次 Input receipt 后，新 Client 用同一 owner instance、operation id、expected byte 和 data 恢复精确 range，PTY 只收到一次；
 6. Resize 由真实 PTY 回读为 `101x37`；
 7. Interrupt 被进程观察且进程继续 running；
@@ -96,6 +96,10 @@ checkout-external packed consumer 真实证明：
 
 Core View Resolver 只接收当前已打开 View 的投影。Raw Terminal 按 runtime-issued View ID，Agent 按 AgentMux ID 唯一解析；zero/multiple/stale/closed 都失败。Desktop typed focus broker 只激活既有 workspace/pane/tab，不 Open、Attach、Resume、Spawn 或修改 CtxMux Attachment。
 
+Desktop 的 Terminal View 不再直接一对一占有 Core Attachment。Main Process 以 exact `(hostId, runId)` 串行化 attach/detach，为第一个 View 建立一个 retained Core Attachment，为后续 View 通过 `readRunReplay` 获取各自 byte cursor 的 Replay，并给每个 View 返回 opaque `attachmentId` lease；只有最后一份 lease 释放才调用 `releaseRunAttachment(exact RunRef)`。Agent Session 的多 View acknowledgement 取最大 cursor，迟到的慢 View 不能回退持久进度。因此双 Pane、Terminal/Activity 快速切换和 Renderer 消失不会把一个 View 的 cleanup 错当成另一个 View 的 Attachment 生命周期。
+
+Host 配置替换从 `prepare` 到 `commit/discard` 持有显式 reservation。reservation 建立后先等待已经登记的 Launch/Resume 与 Attachment tail 收敛，再复核旧 Host 没有 Run；期间新生命周期操作失败关闭。这样不能在“第一次检查为空”之后插入新 Run 或 Attachment，再让 commit 把它连同旧 Client 一起异步丢弃。Desktop 退出同样先等待这些 owner-owned tail，再 dispose Core Client，Electron 的最终 quit 在 cleanup 完成后继续。
+
 ## 安全边界
 
 Interrupt 使用 retained PTY 上的 `TIOCSIG`。Stop 的 macOS public POSIX implementation 保留极窄 PID reuse race：身份重验后到发信号前若目标退出、同 PID 被同 UID 新进程立即复用，理论上可能误发信号。
@@ -104,4 +108,4 @@ Interrupt 使用 retained PTY 上的 `TIOCSIG`。Stop 的 macOS public POSIX imp
 
 ## 下一闭环
 
-已提交的基础为 `8322cbf`（Core Codex/identity/CLI）与 `1f74518`（Core View Resolver/typed Desktop focus）；当前未提交候选补齐跨进程 lifecycle、真实 Codex Hook/resume、Stop-epoch readiness、prompt crash recovery、Darwin 短 endpoint 与可安装 package smoke。2026-08-15 的 candidate 已通过 typecheck、151 个 fast tests、checkout-external packed Native proof、DMG/签名/LaunchServices/CtxMux smoke，并从 `~/Applications/AgentMux.app` 启动精确 artifact owner。最终真实 Codex E2E、独立 reviewer、clean commit 上的 `pnpm check` 与 Tracker Gate 完成前，不把 T-020 标记为 done。Remote/SSH 继续留给 T-021；不得重新引入 Run owner、Backend Selector、复制 wire、fallback 或 compatibility。
+已提交的基础为 `8322cbf`（Core Codex/identity/CLI）与 `1f74518`（Core View Resolver/typed Desktop focus）；当前未提交候选补齐跨进程 lifecycle、真实 Codex Hook/resume、Stop-epoch readiness、prompt crash recovery、Darwin 短 endpoint、可安装 package smoke 与 Desktop View lease broker。2026-08-15 的 candidate 已通过 typecheck、159 个 fast tests、checkout-external packed Native proof、Production build 和独立 Attachment review；先前候选的 DMG/签名/LaunchServices/CtxMux smoke 也已通过，并从 `~/Applications/AgentMux.app` 启动精确 artifact owner。最终真实 Codex E2E、clean commit 上的 Tracker Gate 完成前，不把 T-020 标记为 done。Remote/SSH 继续留给 T-021；不得重新引入 Run owner、Backend Selector、复制 wire、fallback 或 compatibility。
