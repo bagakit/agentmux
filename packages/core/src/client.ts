@@ -91,8 +91,6 @@ export type AgentMuxClientOptions = {
   providers?: readonly AgentProvider[]
   store?: AgentMuxAgentSessionStore
   permissionHandler?: AgentMuxPermissionHandler
-  socketPath?: string
-  stateDirectory?: string
 }
 
 function runRef(runId: string): AgentMuxRunRef {
@@ -170,10 +168,7 @@ export class AgentMuxClient {
     this.registry = new AgentMuxAgentSessionRegistry(
       options.store ?? new AgentMuxMemoryAgentSessionStore()
     )
-    this.kernel = new CtxmuxRunAdapter({
-      ...(options.socketPath === undefined ? {} : { socketPath: options.socketPath }),
-      ...(options.stateDirectory === undefined ? {} : { stateDirectory: options.stateDirectory })
-    })
+    this.kernel = new CtxmuxRunAdapter()
     this.acp = new AgentMuxAcpBridge(
       {
         onEvent: (agentSessionId, event, evidence) => {

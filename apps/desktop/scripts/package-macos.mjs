@@ -22,6 +22,7 @@ import process from 'node:process'
 
 const PRODUCT_NAME = 'AgentMux'
 const BUNDLE_ID = 'dev.agentmux.desktop'
+const CTXMUX_RUNTIME_ID = '88e8377ecc4341b655d47306'
 const require = createRequire(import.meta.url)
 const desktopRoot = resolve(import.meta.dirname, '..')
 const repositoryRoot = resolve(desktopRoot, '../..')
@@ -314,8 +315,7 @@ async function verifyLaunchServices(appPath, verificationRoot) {
   const stderrPath = join(verificationRoot, 'desktop-stderr.log')
   const endpointPath = join(
     processTemporaryDirectory,
-    `agentmux-${process.getuid()}`,
-    'ctxmux',
+    `amx-${process.getuid()}-${CTXMUX_RUNTIME_ID}`,
     'ctxmux.sock'
   )
   const executable = join(appPath, 'Contents', 'MacOS', PRODUCT_NAME)
