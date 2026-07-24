@@ -101,7 +101,11 @@ export function reduceRuntimeEvent(
       ...state,
       sessions: state.sessions.map((item) =>
         ownsRunEvent(item, core.agentSessionId, core.run)
-          ? { ...item, latestOutputBytes: core.evidence.outputByteRange?.endByte ?? item.latestOutputBytes }
+          ? {
+              ...item,
+              updatedAt: Math.max(item.updatedAt, core.evidence.observedAt),
+              latestOutputBytes: core.evidence.outputByteRange?.endByte ?? item.latestOutputBytes
+            }
           : item
       )
     }
@@ -178,6 +182,9 @@ export function reduceRuntimeEvent(
     ]
     return {
       ...state,
+      sessions: state.sessions.map((item) => item.id === core.agentSessionId
+        ? { ...item, updatedAt: Math.max(item.updatedAt, core.evidence.observedAt) }
+        : item),
       activities: {
         ...state.activities,
         [core.agentSessionId]: items.slice(-200)
@@ -203,6 +210,9 @@ export function reduceRuntimeEvent(
     ]
     return {
       ...state,
+      sessions: state.sessions.map((item) => item.id === request.agentSessionId
+        ? { ...item, updatedAt: Math.max(item.updatedAt, request.evidence.observedAt) }
+        : item),
       activities: { ...state.activities, [request.agentSessionId]: items.slice(-200) }
     }
   }

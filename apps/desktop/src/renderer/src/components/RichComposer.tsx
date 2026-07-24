@@ -20,8 +20,12 @@ export function RichComposer({ sessionId }: { sessionId: string }) {
   async function submit(): Promise<void> {
     if (!text.trim()) return
     const value = text
-    setText('')
-    await send(sessionId, value)
+    try {
+      await send(sessionId, value)
+      setText((current) => current === value ? '' : current)
+    } catch {
+      // The Store owns error presentation; keep the draft available for retry.
+    }
   }
 
   function addFileReference(): void {

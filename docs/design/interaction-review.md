@@ -19,6 +19,52 @@ Desktop Settings 提供独立 Appearance Pane，只持久化一个严格的 `ter
 
 Agent 身份不能退化成“方框加首字母”。Desktop 直接复用 a mature workbench 已验证的 Codex、Claude、Trae、Hermes 与 Pi 图标：Codex、Claude、Pi 使用离线内联 SVG，TraeX 与 Hermes 使用随应用打包的 64×64 资源；不请求在线 favicon。`AgentProviderIcon` 是 Launcher、Tab、Session header、Settings 与 Board 的唯一图标投影，`packages/core` 的 Provider 合同仍只提供稳定 Agent identity 与 label，不接收 Renderer 资产或组件。未知自定义 Provider 使用中性 Bot 标记，不冒充某个内置 Agent。
 
+### Tab 右键菜单与 Terminal 尺寸真相
+
+2026-08-16 继续审计 a mature workbench `c0a775454a29667c3f9fbfeef356e31e1e2acbe0` 的
+`SortableTabContextMenu.tsx`、`TerminalTabSplitMenuSection.tsx` 与
+`TabWorkspaceLayoutMenuSection.tsx`。AgentMux 采用同一组已验证的核心操作：Close、Close
+Others、Close Left、Close Right，以及把当前 Tab 移到 Right/Down Split。操作直接调用现有
+Workbench Store 的 `closeTab` / `splitTab`，不建立第二份 Tab 状态；批量关闭遇到未保存文件时
+由一个可访问确认框统一失败关闭。Pin、Tab Color、Rename 与“新建一个 Terminal Split”当前没有
+对应产品模型，不用占位动作或兼容层伪造。菜单交互交给维护中的 Radix Context Menu，Desktop
+只保留 AgentMux 的动作投影和 Graphite 外观。菜单采用紧凑的面性浮层而不是重边框列表：宽度
+`192px`、行高 `24px`、横向 Padding `6px`，用半透明 Surface、内高光、阴影和局部 Hover
+建立层级。Production Rendered Proof 必须量真实 DOM 尺寸，不能只以 CSS 声明自证。
+
+New Agent Session 使用同一套 Surface 语言，但不是 Context Menu 的放大版。Provider 以
+Available / Not installed 分组，卡片同时展示品牌图标、名称和明确状态；当前选择用边界、底面和
+Check 三重反馈，Unavailable 仍可识别但不可误点。Provider 目录使用 `repeat(auto-fill,
+minmax(142px, 1fr))`，三列目标卡片高 `44px`，目录有固定最大高度并独立滚动。Desktop 配置的
+Agent 集合使用开放 Record 校验，不硬编码五个内置 ID；20 项配置与 Rendered DOM 压力证明必须
+确认目录滚动，而不是把 Launcher 或整个 Pane 无限撑高。未知 Provider 使用中性 Bot 图标，只有
+Core 注册对应 Provider 后才允许启动。
+
+Pane Tabbar 固定为 `31px`，Tab 本体同步使用同一高度；拖拽 Split Overlay 的顶部边界也消费
+同一个 `--pane-tabbar-height`，不能出现视觉缩短但 Drop Zone 仍按旧 `36px` 计算的双重真相。
+Agent Tab 保留 Provider Icon、Session Name 和无文字 Status Dot，Close 命中区收为 `16px`；
+状态文字不在下一行重复。
+
+Session 顶部 `28px` 信息带改为 Session Name、短 Session ID、Started、Active、Recent 和 Stop。
+完整 ID 通过 title 保留，短 ID 只用于高频扫读。Active 取 Runtime `updatedAt` 与结构化 Activity
+的最大时间；Terminal Output、Agent Activity 和 Permission 都会推进同一 Last Activity Truth。
+Recent 只投影最新的 User/Assistant 结构化消息，不解析 PTY 文本、不把 Tool Event 冒充消息；没有
+可靠消息时显示 `No messages yet`，Raw Terminal 则显示累计 Output Bytes。常规单 Pane 必须完整
+显示五项；只有容器窄于 `620px` 才收起时间标签，窄于 `520px` 才隐藏 Started 与 Recent，且不能
+产生横向 Overflow。
+
+Codex TUI 的输入面属于 PTY 画面，不由 AgentMux 的外部 Rich Composer 仿制。Terminal View
+直接让 xterm/Codex 接收键盘输入，不再同时展示第二个 Composer；Rich Composer 只属于
+Activity/Conversation View，负责结构化语义提交，并在提交失败时保留原草稿。xterm 的实际
+`cols × rows` 是 Renderer View 真相，CtxMux 持有并应用对应 PTY 尺寸。Terminal attach 期间可以
+先 Fit 以正确回放，但只有 Replay 完成后才打开 live barrier；此时必须先把当前网格同步给
+CtxMux，并在下一 animation frame 和后续 ResizeObserver 变化上继续做去重同步。Font metrics、
+窗口尺寸或 Pane/Composer 布局稳定后，不能让 xterm 与 PTY 停在不同 Rows，否则 Codex 自己的
+输入框和 footer 会悬在窗格中间。xterm cell metrics 尚未可测时不能把构造默认值 `80×24`
+误认成 settled viewport；首个 Render signal 负责重新触发 Fit，成功后即注销该 bootstrap
+listener，正常阶段只由容器尺寸变化驱动。这个尺寸 owner 只属于 Desktop Renderer → Core public Resize
+→ CtxMux，不读取 CtxMux 私有数据库，也不把 Terminal 布局字段写进 Agent Session 语义。
+
 ## 各界面的取舍
 
 | 界面 | AgentMux 现状 | a mature workbench 更好的模式 | 决策 |
@@ -87,7 +133,8 @@ Agent 身份不能退化成“方框加首字母”。Desktop 直接复用 a mat
 - 二级面板以上下可调整分栏同时显示 Explorer 与 Branches；Branch 行展示真实 Worktree 绑定和路径，选择已有 Worktree 会切换 Explorer Root，选择未绑定 Branch 只提供 Create Worktree 而不隐式 checkout。
 - Project/Workspace Rail 保持紧凑；Workspace/Board 切换位于右侧主区，不把 Branches 和看板控制都塞进最左侧。
 - `+` 立即创建一个新 Tab；初始 Tab 可选择 Terminal、Agent 或 Browser，三类内容都遵守 Focused Pane、拖拽分屏和关闭生命周期。
-- 每个 Terminal Pane 都显示 Session/Provider/Host/状态，并有真实的空、连接中、错误、断连和关闭确认状态。
+- 每个 Terminal Pane 都显示 Session 身份与时间；Provider/状态由 Tab 图标和 Dot 表达，远端 Host 才占据信息带空间，并有真实的空、连接中、错误、断连和关闭确认状态。
+- Agent/Terminal Pane 的紧凑信息带显示 Session Name、ID、Started、Active 与可验证 Recent；Tab 不再与信息带重复输出 Provider + Running 文案。
 - Agent Settings 按 Host 展示 Codex、Claude、TraeX、Hermes、Pi 的检测结果和高级 Command/Args/Env；Launch 消费相同状态。
 - Workspace 与 Board 一致表达 Branch/Path/Host/Agent 状态，不出现互相矛盾的标签。
 - `pnpm check` 通过，Production Electron 在目标窗口尺寸启动，无 Renderer Overflow。

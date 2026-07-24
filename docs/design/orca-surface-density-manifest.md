@@ -14,6 +14,7 @@
   - `src/renderer/src/lib/desktop-window-chrome.ts`
   - `src/renderer/src/store/slices/editor.ts`
 - T-011 的 Explorer / Editor 移植仍以审计时固定的 a mature workbench `6da7b8e9cfe62e5b4d34bb52e8c570036c1935fc` 为源码基线；视觉参考更新不改变该来源。
+- T-020 的 Tab Context Menu 参考成熟工作台 `c0a775454a29667c3f9fbfeef356e31e1e2acbe0` 的 Radix 浮层、Focus Surface 与 Tab Action 分组；AgentMux 保留 Graphite / Mint，不复制主题系统。
 - AgentMux 基线：`c0478938afb3eb014f45adb9f1d4f4e10fa067b8`，实现发生在当前树且不创建兼容层。
 
 a mature workbench 在本任务中证明的是成熟模式，而不是配色答案：Sidebar owner 同时拥有展开状态、所选工具、像素宽度、Resize 和活动条；36px Titlebar / Activity Strip 明确划分 drag 与 no-drag；面板只在语义边界保留分隔，内容层级主要靠 Surface 和密度建立。
@@ -41,11 +42,14 @@ a mature workbench 在本任务中证明的是成熟模式，而不是配色答�
 | --- | --- | --- |
 | Titlebar Plane | 42px | Topbar 从窗口顶边开始；左侧只为 macOS Traffic Lights 留 76px 安全区；Tools 位于右侧主区标题之前 |
 | Workspace Tool Activity Strip | 36px | 与 a mature workbench 成熟活动条一致，容纳四个 28px 命中区 |
-| Pane Tabbar | 36px | 保持现有高密度 Universal Tab |
+| Pane Tabbar | 31px | Universal Tab 使用更精巧的工作区索引高度；Split Drop Zone 消费同一 CSS truth |
+| Session Info Bar | 28px | Name / ID / Started / Active / Recent 单行投影；不重复 Tab 的 Provider + Running 文案 |
 | Explorer / Branch Section Header | 32–34px | 清晰但不形成第二层大 Topbar |
 | Tree Row | 24px | 保持专家密度与键盘扫描速度 |
 | Tool Dock Width | 默认 300px；最小 236px；最大 440px | 同时容纳 Explorer / Branches，且给主工作面保留容量 |
 | Tool Content Padding | 8–12px | 只用于局部卡片；不再以统一大 Padding 包住整栏 |
+| Tab Context Menu | 192px 宽；24px Row；6px 横向 Padding | 以 Surface、阴影与 Hover 建立层级，避免重边框和松散系统菜单感 |
+| Agent Provider Catalog | 142px 最小列宽；44px Card；最多 268px 高 | 三列优先、容器独立滚动；20 个 Provider 不扩大 Launcher 的窗口占用 |
 | 操作与元数据文字 | 11–13px；必要微标不低于 10px | 不再用 7–9px 冒充专家密度 |
 | Terminal / Editor 内容 | Terminal `12px / 1.2`；Editor `14px / 21px` | 由 xterm/Monaco 原生 DPR 渲染，不加 CSS transform 缩放；Terminal 作为高吞吐字符界面采用与周围 10–11px 操作层级相称的 12px 基线，Editor 保持面向长文阅读的 14px 基线 |
 
@@ -62,6 +66,7 @@ a mature workbench 在本任务中证明的是成熟模式，而不是配色答�
 | Browser Favorites | Workspace Tool Panel | 只调用 Main-owned Browser Universal Tab；收藏真相必须来自一个 owner，不能用临时按钮伪装持久化 |
 | Terminal Shortcuts | Workspace Tool Panel | 只调用 `packages/core` 既有 Terminal launch action |
 | Agent Launch | Universal New Tab | 不属于 Tools；继续由 Pane `+` 打开 Agent 创建面 |
+| Agent Provider Catalog | Universal New Tab / Renderer projection | 只投影 Config + Core Detection；开放 Agent ID，按 Available / Not installed 分组，不复制 Provider Registry |
 | Branch Board | Board Tool Panel | 只显示 Project Scope、四列图例和真实 Run 数量；Inbox 位于主矩阵，不保留单选 `boardTool` 状态 |
 | Titlebar drag | Titlebar Plane | Breadcrumb 可拖拽；按钮、Tab 和输入区全部 `no-drag` |
 | Traffic Lights Safe Area | Project Rail Titlebar | 只在窗口左上保留 76px，不再让右侧主区空出整行 |

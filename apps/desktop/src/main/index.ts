@@ -4,6 +4,7 @@ import { app, BrowserWindow, shell } from 'electron'
 import { AgentMuxFileAgentSessionStore } from '@agentmux/core'
 import { ConfigStore } from './config-store.js'
 import { registerIpc } from './ipc.js'
+import { hydrateProcessPathFromLoginShell } from './login-shell-path.js'
 import { RuntimeController } from './runtime-controller.js'
 import { runDesktopResourceProbe } from './resource-probe.js'
 
@@ -73,6 +74,10 @@ async function createWindow(appReadyAtMs: number = Date.now()): Promise<void> {
 
 app.whenReady().then(async () => {
   const appReadyAtMs = Date.now()
+  const pathHydration = await hydrateProcessPathFromLoginShell()
+  if (!pathHydration.ok && pathHydration.reason !== 'unsupported-platform') {
+    process.stderr.write(`Unable to load login shell PATH: ${pathHydration.reason}\n`)
+  }
   if (process.platform === 'darwin') app.dock?.setIcon(appIconPath)
   await createWindow(appReadyAtMs)
   app.on('activate', () => {

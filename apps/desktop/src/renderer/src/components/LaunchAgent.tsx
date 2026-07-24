@@ -1,4 +1,4 @@
-import { ArrowLeft, LoaderCircle, Play, RadioTower, RefreshCw, Sparkles } from 'lucide-react'
+import { ArrowLeft, Check, LoaderCircle, Play, RadioTower, RefreshCw, Sparkles } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { agentDetectionKey, useAppStore } from '../store'
 import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
@@ -78,23 +78,45 @@ export function LaunchAgent({
           {detecting ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}
         </button>
       </div>
-      <div className="agent-picks">
-        {installedAgents.map((agent) => (
-          <button
-            key={agent.id}
-            className={`agent-pick ${agent.id === agentId ? 'agent-pick--selected' : ''}`}
-            onClick={() => setAgentId(agent.id)}
-          >
-            <AgentProviderIcon agentId={agent.id} size={16} />{agent.label}
-          </button>
-        ))}
-      </div>
-      {unavailableAgents.length > 0 ? (
-        <div className="agent-unavailable">
-          <span>Not installed on {workspace?.hostId ?? 'this host'}</span>
-          <div>{unavailableAgents.map((agent) => <span key={agent.id}><AgentProviderIcon agentId={agent.id} size={11} />{agent.label}</span>)}</div>
+      <div className="agent-catalog" aria-label="Agent providers">
+        <div className="agent-catalog__group">
+          <div className="agent-catalog__label">
+            <span><i className="agent-catalog__ready-dot" />Available</span>
+            <em>{installedAgents.length}</em>
+          </div>
+          <div className="agent-picks">
+            {installedAgents.map((agent) => (
+              <button
+                type="button"
+                key={agent.id}
+                aria-pressed={agent.id === agentId}
+                className={`agent-pick ${agent.id === agentId ? 'agent-pick--selected' : ''}`}
+                onClick={() => setAgentId(agent.id)}
+              >
+                <span className="agent-pick__icon"><AgentProviderIcon agentId={agent.id} size={16} /></span>
+                <span className="agent-pick__copy"><strong>{agent.label}</strong><small>Ready</small></span>
+                {agent.id === agentId ? <span className="agent-pick__check"><Check size={10} strokeWidth={3} /></span> : null}
+              </button>
+            ))}
+          </div>
         </div>
-      ) : null}
+        {unavailableAgents.length > 0 ? (
+          <div className="agent-catalog__group">
+            <div className="agent-catalog__label">
+              <span>Not installed on {workspace?.hostId ?? 'this host'}</span>
+              <em>{unavailableAgents.length}</em>
+            </div>
+            <div className="agent-picks">
+              {unavailableAgents.map((agent) => (
+                <button type="button" key={agent.id} className="agent-pick agent-pick--unavailable" disabled>
+                  <span className="agent-pick__icon"><AgentProviderIcon agentId={agent.id} size={16} /></span>
+                  <span className="agent-pick__copy"><strong>{agent.label}</strong><small>Unavailable</small></span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </div>
       <textarea
         value={prompt}
         onChange={(event) => setPrompt(event.target.value)}

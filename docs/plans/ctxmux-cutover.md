@@ -35,6 +35,13 @@ Local endpoint 不是可选 Backend。Core 不接受外部 socket/state path；D
 
 AgentMux 启动 ctxmuxd 时建立 terminal-capable 基线：`TERM=xterm-256color`、`COLORTERM=truecolor`，并删除父宿主遗留的 `NO_COLOR`、`FORCE_COLOR=0` 与 `CLICOLOR=0`。Provider/调用方仍可通过 Run env 显式覆盖终端设置。这样既保留 Codex ANSI/truecolor，也让 Stop 后的 synchronized active-composer frame 可被同一 raw PTY 链路证明。
 
+macOS LaunchServices 启动的 packaged Electron 不天然继承 Terminal 的登录环境。Desktop Main
+因此在创建任何 Local Runtime Host 之前，只执行一次用户的 profile-loading shell，并把其中的
+完整 `PATH` 设为当前进程的权威值；Core executable probe、CtxMux daemon 和每个 Run 都从这一
+进程环境自然继承同一值。实现不硬编码 Homebrew、npm、Cargo 或某个用户目录，也不在检测失败后
+猜常见路径；探测超时、启动失败或输出不可解析时保留原环境并明确记录失败。SSH Host 的环境仍由
+远端执行边界负责，不误用本机登录 Shell。
+
 这不是 `file:` dependency：
 
 - `package.json` 不声明 `@ctxmux/sdk` 路径依赖；

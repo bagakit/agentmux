@@ -34,7 +34,9 @@ import { ConfirmationDialog } from './ConfirmationDialog'
 import { NewTabSurface } from './NewTabSurface'
 import { SessionPane } from './SessionPane'
 import { StatusDot } from './StatusDot'
+import { WorkbenchTabContextMenu } from './WorkbenchTabContextMenu'
 import { resolvePaneColumnEdgeZone } from '../lib/tab-drop-zone'
+import { tabIdsForCloseScope } from '../lib/workbench-tab-actions'
 import type {
   SplitDirection,
   TabGroup,
@@ -83,8 +85,10 @@ function SortableWorkbenchTab({
 }) {
   const sessions = useAppStore((state) => state.sessions)
   const dirtyDocuments = useAppStore((state) => state.dirtyDocuments)
+  const tabsById = useAppStore((state) => state.tabs)
   const activateTab = useAppStore((state) => state.activateTab)
   const closeTab = useAppStore((state) => state.closeTab)
+  const splitTab = useAppStore((state) => state.splitTab)
   const session = tab.kind === 'agent' || tab.kind === 'terminal'
     ? sessions.find((item) => item.id === tab.sessionId)
     : null
@@ -96,74 +100,117 @@ function SortableWorkbenchTab({
     id: tab.id,
     data: { kind: 'tab', tabId: tab.id, groupId: group.id } satisfies DragTabData
   })
-  const [confirmingClose, setConfirmingClose] = useState(false)
+  const [pendingClose, setPendingClose] = useState<{ tabIds: string[]; dirtyCount: number } | null>(null)
   const [closing, setClosing] = useState(false)
+
+  async function closeTabs(tabIds: readonly string[]): Promise<void> {
+    for (const tabId of tabIds) await closeTab(workspaceId, group.id, tabId)
+  }
+
+  async function requestTabsClose(tabIds: readonly string[]): Promise<void> {
+    const currentTabIds = tabIds.filter((tabId) => group.tabOrder.includes(tabId))
+    if (currentTabIds.length === 0 || closing) return
+    const dirtyCount = currentTabIds.filter((tabId) => {
+      const candidate = tabsById[tabId]
+      return candidate?.kind === 'file' && dirtyDocuments[documentKey(candidate.workspaceId, candidate.path)]
+    }).length
+    if (dirtyCount > 0) {
+      setPendingClose({ tabIds: currentTabIds, dirtyCount })
+      return
+    }
+    setClosing(true)
+    try {
+      await closeTabs(currentTabIds)
+    } finally {
+      setClosing(false)
+    }
+  }
 
   async function requestClose(event: React.MouseEvent): Promise<void> {
     event.stopPropagation()
-    if (dirty) {
-      setConfirmingClose(true)
-      return
-    }
-    await closeTab(workspaceId, group.id, tab.id)
+    await requestTabsClose([tab.id])
   }
 
   async function confirmClose(): Promise<void> {
-    if (closing) return
+    if (closing || !pendingClose) return
     setClosing(true)
-    await closeTab(workspaceId, group.id, tab.id)
-    setClosing(false)
-    setConfirmingClose(false)
+    try {
+      await closeTabs(pendingClose.tabIds)
+      setPendingClose(null)
+    } finally {
+      setClosing(false)
+    }
   }
+
+  const tabsToLeft = tabIdsForCloseScope(group.tabOrder, tab.id, 'left')
+  const tabsToRight = tabIdsForCloseScope(group.tabOrder, tab.id, 'right')
+  const otherTabs = tabIdsForCloseScope(group.tabOrder, tab.id, 'others')
 
   return (
     <>
-      <button
-        ref={setNodeRef}
-        type="button"
-        className={`workbench-tab ${group.activeTabId === tab.id ? 'workbench-tab--active' : ''} ${
-          isDragging ? 'workbench-tab--dragging' : ''
-        }`}
-        style={{ transform: CSS.Translate.toString(transform), transition }}
-        onClick={() => activateTab(workspaceId, group.id, tab.id)}
-        {...attributes}
-        {...listeners}
+      <WorkbenchTabContextMenu
+        canCloseOthers={otherTabs.length > 0}
+        canCloseLeft={tabsToLeft.length > 0}
+        canCloseRight={tabsToRight.length > 0}
+        canMoveToSplit={group.tabOrder.length > 1}
+        onClose={() => void requestTabsClose([tab.id])}
+        onCloseOthers={() => void requestTabsClose(otherTabs)}
+        onCloseLeft={() => void requestTabsClose(tabsToLeft)}
+        onCloseRight={() => void requestTabsClose(tabsToRight)}
+        onMoveToSplitRight={() => splitTab(workspaceId, tab.id, group.id, group.id, 'right')}
+        onMoveToSplitDown={() => splitTab(workspaceId, tab.id, group.id, group.id, 'down')}
       >
-        {tab.kind === 'agent' || tab.kind === 'terminal' ? (
-          session?.kind === 'agent' ? (
-            <i className="workbench-tab__agent-mark"><AgentProviderIcon agentId={session.agentId} size={13} /><StatusDot status={session.status} /></i>
-          ) : session ? <StatusDot status={session.status} /> : <SquareTerminal size={12} />
-        ) : tab.kind === 'file' ? (
-          <FileCode2 size={12} />
-        ) : tab.kind === 'browser' ? (
-          <Globe2 size={12} />
-        ) : (
-          <Sparkles size={12} />
-        )}
-        <span>{session?.label ?? tabLabel(tab)}</span>
-        {dirty ? <i className="workbench-tab__dirty" aria-label="Unsaved" /> : null}
-        <span
-          role="button"
-          tabIndex={0}
-          className="workbench-tab__close"
-          aria-label={`Close ${session?.label ?? tabLabel(tab)}`}
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={(event) => void requestClose(event)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' || event.key === ' ') void requestClose(event as never)
-          }}
+        <button
+          ref={setNodeRef}
+          type="button"
+          className={`workbench-tab ${group.activeTabId === tab.id ? 'workbench-tab--active' : ''} ${
+            isDragging ? 'workbench-tab--dragging' : ''
+          }`}
+          style={{ transform: CSS.Translate.toString(transform), transition }}
+          onClick={() => activateTab(workspaceId, group.id, tab.id)}
+          {...attributes}
+          {...listeners}
         >
-          <X size={11} />
-        </span>
-      </button>
+          {tab.kind === 'agent' || tab.kind === 'terminal' ? (
+            session?.kind === 'agent' ? (
+              <i className="workbench-tab__agent-mark"><AgentProviderIcon agentId={session.agentId} size={13} /><StatusDot status={session.status} /></i>
+            ) : session ? <StatusDot status={session.status} /> : <SquareTerminal size={12} />
+          ) : tab.kind === 'file' ? (
+            <FileCode2 size={12} />
+          ) : tab.kind === 'browser' ? (
+            <Globe2 size={12} />
+          ) : (
+            <Sparkles size={12} />
+          )}
+          <span>{session?.label ?? tabLabel(tab)}</span>
+          {dirty ? <i className="workbench-tab__dirty" aria-label="Unsaved" /> : null}
+          <span
+            role="button"
+            tabIndex={0}
+            className="workbench-tab__close"
+            aria-label={`Close ${session?.label ?? tabLabel(tab)}`}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => void requestClose(event)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') void requestClose(event as never)
+            }}
+          >
+            <X size={11} />
+          </span>
+        </button>
+      </WorkbenchTabContextMenu>
       <ConfirmationDialog
-        open={confirmingClose}
+        open={pendingClose !== null}
         title="Discard unsaved changes?"
-        description="Closing this editor tab will discard changes that have not been saved."
-        subject={session?.label ?? tabLabel(tab)}
+        description={pendingClose && pendingClose.tabIds.length > 1
+          ? 'Closing these tabs will discard changes that have not been saved.'
+          : 'Closing this editor tab will discard changes that have not been saved.'}
+        subject={pendingClose && pendingClose.tabIds.length > 1
+          ? `${pendingClose.tabIds.length} tabs · ${pendingClose.dirtyCount} unsaved`
+          : session?.label ?? tabLabel(tab)}
         confirmLabel="Discard & Close"
         busy={closing}
-        onCancel={() => !closing && setConfirmingClose(false)}
+        onCancel={() => !closing && setPendingClose(null)}
         onConfirm={() => void confirmClose()}
       />
     </>

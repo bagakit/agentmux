@@ -113,6 +113,17 @@ describe('ConfigStore workspace identity', () => {
     } as never)).rejects.toThrow()
   })
 
+  it('accepts a provider-sized Agent catalog without hard-coded desktop ids', async () => {
+    const { store } = await storeFixture()
+    const agents = Object.fromEntries(Array.from({ length: 20 }, (_, index) => [
+      `provider-${index + 1}`,
+      { command: `agent-${index + 1}`, args: [], env: {} }
+    ]))
+
+    await expect(store.save({ ...baseConfig, agents })).resolves.toMatchObject({ agents })
+    await expect(store.get()).resolves.toMatchObject({ agents })
+  })
+
   it('uses host-specific normalized paths as physical workspace identity', async () => {
     const { store } = await storeFixture()
 
