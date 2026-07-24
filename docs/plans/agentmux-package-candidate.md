@@ -1,6 +1,6 @@
 # AgentMux Core Package 候选
 
-状态：T-006 发布候选已实现（未发布）
+状态：T-006 历史候选（未发布）；已被 ctxmux 唯一 Run Kernel 决策取代。本文不再是最终 Package 合同，最终 candidate 不包含自建 agentmuxd、node-pty Owner 或 Remote Artifact。
 
 本文定义 `@agentmux/core@0.1.0` 的发布候选边界。当前工作只构建、安装和验证本地 tarball；不执行 npm Publish、GitHub Release 或真实远端全局安装。
 
@@ -49,7 +49,7 @@ Daemon 不可达时不会用 `UNKNOWN` 填满字段：Host 明确为 unavailable
 
 ## 4. Remote Artifact
 
-`createAgentMuxRemoteArtifact()` 与 `agentmux artifact create` 生成 `agentmux.remote-artifact.v1`：
+历史 `createAgentMuxRemoteArtifact()` 与 `agentmux artifact create` 生成 `agentmux.remote-artifact.v1`。T-014 已从 Package root 删除 Builder 与 Daemon Manager 导出；CLI 仅为过渡 candidate 保留到 T-016：
 
 ```text
 agentmux-artifact.json
@@ -75,9 +75,11 @@ Builder 先在输出目录写临时 Archive，再用排他 Hard Link 发布；�
 1. ESM Import 与两个 bin；
 2. Local Activation、Raw Terminal 与 Fake Codex；
 3. Local Doctor；
-4. Remote Artifact Builder；
-5. 隔离系统 SSH 的 Install、Activate、Remote Terminal 与 Remote Doctor；
-6. Stop、Dispose、Shutdown 与 Uninstall。
+4. 公共 `connectLocalAgentMux()` / `connectSshAgentMux()`；
+5. 隔离系统 SSH 的预装 Runtime、Remote Terminal 与 Remote Doctor；
+6. Stop、Dispose 与 Shutdown。
+
+Consumer 还会断言 Package root 不再导出 `AgentMuxDaemonClient`、`AgentMuxSshRemoteDaemon`、`SshAgentMuxDaemonConnector`、`activateAgentMuxLocalDaemon` 或 `createAgentMuxRemoteArtifact`。
 
 另外保留一次真实干净 npm 安装证据，用于证明 Registry Consumer 会拿到官方 Native Artifact，而不是 workspace patch。自动化不把公网 Registry 作为日常 `pnpm check` 前提。
 

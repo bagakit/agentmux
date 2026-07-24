@@ -1,6 +1,6 @@
 # AgentMux Core Native PTY 依赖审计
 
-状态：T-001 基线已完成；T-006 发布候选已复审
+状态：T-001/T-006 历史依赖证据；自建 node-pty Owner 已被 ctxmux 决策取代。本文保留供应链与 Artifact 发现，不能继续作为最终依赖选择。
 Feature：`f-2248f4yx5`
 Task：`T-001`、`T-006`
 审计日期：2026-08-10（Asia/Shanghai）

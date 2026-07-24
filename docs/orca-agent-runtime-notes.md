@@ -46,7 +46,7 @@ Agent Adapter -> Startup Plan -> Terminal / Session Owner
                           Normalized Event Stream
 ```
 
-旧的 Desktop Redesign Feature 保留真实 tmux 作为当时的 PTY/Process Owner，并采用 a mature workbench 的 Adapter、Session 和归一化事件边界。当前 Core Maturity Feature 已选择 AgentMux 自有的持久 `agentmuxd`；a mature workbench 的 `node-pty`、Attach-only、Incarnation、增量输出、Replay、背压和进程树清理模式成为实现证据，但不复制 a mature workbench 的账户、Relay 或兼容历史。
+旧的 Desktop Redesign Feature 曾保留真实 tmux，随后 Core Maturity 又实现了自建 `agentmuxd`。2026-08-11 的方向修正恢复 ctxmux 为唯一 Run Kernel：a mature workbench 的 Attach-only、Incarnation、增量输出、Replay、背压和进程树清理继续作为 Conformance 证据，但 AgentMux 不再复制这些通用 mux 实现，也不复制 a mature workbench 的账户、Relay 或兼容历史。
 
 ## 1. Agent 启动规划由数据驱动
 
@@ -62,7 +62,7 @@ Agent Adapter -> Startup Plan -> Terminal / Session Owner
 
 `buildAgentStartupPlan` 是主要归一化点：它解析配置与覆盖值，按 Shell 规则引用参数，再选择位置参数、`--prompt`、Hermes Query、交互标志或后续输入（`src/shared/tui-agent-startup.ts:43-184`）。因此 Prompt 交付属于 Provider 启动计划，不属于 Terminal 或 UI 的条件分支。
 
-Hermes 还会限制 Prompt 传输大小、从环境恢复 argv-safe Query，并在启动后清理环境变量，避免工具子进程继承原始 Prompt（`src/shared/hermes-startup-query.ts:9-16`、`141-194`）。AgentMux Daemon 直接通过 argv 启动 Agent，可以删掉 Shell 字符串传输复杂度，但保留 Hermes 的原生命令形状。
+Hermes 还会限制 Prompt 传输大小、从环境恢复 argv-safe Query，并在启动后清理环境变量，避免工具子进程继承原始 Prompt（`src/shared/hermes-startup-query.ts:9-16`、`141-194`）。AgentMux Provider 继续输出 argv-safe Launch Plan，由 Run Kernel 执行；保留 Hermes 的原生命令形状，不让 UI 或 Adapter 拼 Shell 字符串。
 
 ## 2. a mature workbench 的普通 Session 是 node-pty，而不是 tmux
 
@@ -77,7 +77,7 @@ a mature workbench Local Provider 通过 Shell Fallback 调用 `pty.spawn`（`sr
 - Prefix 限定的 Session Name 提供窄化停止目标；
 - `capture-pane` 提供重启后可恢复的终端投影。
 
-T-005 已完成所有权切换：Core 负责 Session 身份、Local/SSH Client、输入、Resize、增量事件和精确清理；`agentmuxd` 负责 PTY/Process、Sequence、Replay、Ack、Backpressure 与 Attach/Detach。旧的 Capture Polling、command-per-input 和 tmux 类型／测试被一次删除。
+T-005 已完成从 tmux 到自建 `agentmuxd` 的历史切换并删除 Capture Polling、command-per-input 和 tmux 类型。该实现现在是待替换 baseline：最终由 ctxmux 负责 Run/PTY/Process、Sequence、Replay、Backpressure 与 Attachment，AgentMux 只保留 AgentSession、Provider 和 Client 投影。
 
 ## 3. a mature workbench 的“tmux 支持”是兼容外观
 
@@ -85,7 +85,7 @@ Claude Agent Teams 是一个容易误判的例子。a mature workbench 没有为
 
 Dispatcher 只实现 Claude Code 需要的 `split-window`、`respawn-pane`、`list-panes`、`send-keys`、`capture-pane`、Pane 选择和销毁，再把这些调用翻译成 a mature workbench Terminal API（`claude-agent-teams-tmux-dispatcher.ts:17-80`）。
 
-AgentMux 不复制这层兼容外观：普通 Terminal／Agent 直接使用 AgentMux Daemon Session API，不暴露 tmux Vocabulary，也不保留 Fake／Real tmux Backend。
+AgentMux 不复制这层兼容外观：普通 Terminal／Agent 通过 AgentMux Run/AgentSession API 映射到 ctxmux，不暴露 tmux Vocabulary，也不保留 Fake／Real tmux Backend。
 
 ## 4. Agent 语义状态来自 Hook，不来自终端猜测
 
@@ -106,20 +106,21 @@ Hook Receiver 是只绑定 `127.0.0.1` 的临时认证 HTTP Server。它生成�
 
 AgentMux 不会在首个交付中静默修改 `~/.claude`、`~/.codex`、Hermes Plugin 或 Pi Extension。Core 只提供带认证的 Hook Ingress 与归一化事件合同；全局 Hook 安装必须是后续显式授权动作。
 
-## 5. 当前 AgentMux 公共 Session 模型
+## 5. 当前 AgentMux 公共领域模型
 
-T-005 已把切换前的 `SessionSnapshot + terminalSnapshot` 直接替换为 Daemon Run 与 Semantic Session 的组合，不保留类型别名或 IPC 兼容层：
+T-011 把过时的 Session 混合模型直接替换为 Run、Agent Session、Attachment 与 View，不保留类型别名或 IPC 兼容层：
 
 ```ts
-type AgentMuxSessionSnapshot =
-  | { kind: 'agent'; semantic: AgentMuxSemanticSession; run: AgentMuxDaemonSession }
-  | { kind: 'terminal'; run: AgentMuxDaemonSession }
+type AgentMuxRunRef = { runId: string; incarnationId: string }
+type AgentMuxAgentSession = { agentSessionId: string; run: AgentMuxRunRef }
+type AgentMuxRunAttachment = { run: AgentMuxRun; replay: AgentMuxRunDataEvent[]; gap: AgentMuxRunReplayGap | null }
+type AgentMuxView = AgentMuxAgentView | AgentMuxTerminalView
 ```
 
-- Agent Session 通过 `AgentProvider.buildLaunch` 生成命令，接入 Hook 语义与 Activity。
-- Raw Terminal Session 不伪装成 Agent Provider；Daemon 不带 Agent Command 创建时运行目标 Host 的默认 Shell。
-- 两类 Session 共用发现、启动、停止、输入、Interrupt、Resize、Attach、Local/SSH、断连恢复与事件 API。
-- `AgentMuxDaemonClient.write` 对同一 Run 保证调用顺序，不同 Run 独立推进；失败不会毒化后续输入，Session 清理同时释放输入 tail。这个顺序属于 Core 公共合同，不由 Desktop/xterm 补偿。
+- Agent Session 通过 `AgentProvider.buildLaunch` 生成启动意图，接入 Hook 语义与 Activity。
+- Raw Terminal Run 不伪装成 Agent Provider；它运行目标 Host 的默认 Shell。
+- 两类 Run 共用启动、停止、输入、Interrupt、Resize、Attach、Local/SSH、断连恢复与事件 API。
+- `AgentMuxClient.writeTerminal/writeAgent` 对同一 Run 保证调用顺序，不同 Run 独立推进；失败不会毒化后续输入，Run 清理同时释放输入 tail。这个顺序属于 Core 公共合同，不由 Desktop/xterm 补偿。
 - 只有 Agent Session 把 Submit Input 记录为 Prompt Activity；Raw Terminal 输入保持纯终端语义。
 - Renderer 的 xterm 在挂载时 Attach 有界 Replay，随后直接消费增量 Output 并在渲染后 Ack；Zustand 不保存终端字节。
 
@@ -166,18 +167,44 @@ Browser 不属于 Agent Runtime，也不通过 Agent Daemon。它属于 Desktop 
 - 从真实 tmux 状态恢复，不序列化 xterm Snapshot；
 - Desktop-local Workspace/Worktree，不引入远程账户和 Host Federation。
 
-当前 Feature 新采用：
+当前 Feature 最终采用：
 
-- 维护中的 `node-pty` 作为 PTY 原语；具体版本与 Artifact 证据见 `docs/plans/agentmux-core-dependency-audit.md`；
-- Headless `agentmuxd` 作为 Local/SSH 唯一 PTY/Process Owner；
-- 明确区分 Create、Attach-only 与 Detach，并从第一天携带 Session/Incarnation/Create Operation 身份；
-- Incremental Output、Sequence、Bounded Replay、Gap、Backpressure、Applied Size 与进程树停止作为逐 Task 收紧的长期合同。
+- ctxmux 作为 Local/SSH 唯一 Run/PTY/Process Owner；
+- AgentMux 明确区分 Run、AgentSession、Attachment 与 View；
+- Create/Attach、Incarnation、Incremental Output、Replay/Gap、Backpressure、Applied Size 与 Stop 作为 Kernel-neutral Conformance，而不是 AgentMux 私有实现；
+- Provider、ACP、Hook、Permission、Evidence 与 provider-native Resume 继续由 AgentMux 拥有。
 
 明确不采用：
 
 - 直接复制 a mature workbench 的完整 node-pty Host、Checkpoint、Daemon Adoption 与兼容系统；
+- AgentMux 自建 agentmuxd、Run wire、Replay、Journal、Remote Artifact 或进程树 Owner；
 - Relay/Mobile/Account/Transcript Vault；
 - Claude Fake-tmux 兼容层；
 - 静默修改用户全局 Agent Hook；
 - 把可观察 Hook/Terminal Activity 描述成模型私有 Chain-of-thought；
 - 任何 Real／Fake tmux Runtime、Backend Selector、Migration 或 Fallback。
+
+## 8. a mature workbench CLI 的 Agent 间通信边界
+
+2026-08-12 通过当前安装版本的 `a mature workbench skills get a mature workbench-cli` 与 `a mature workbench skills get orchestration` 复核了 a mature workbench 的公开 CLI 合同。真正值得采用的不是“向另一个终端发送字符串”，而是把低层终端输入与可恢复的 Agent 通信分开：
+
+- `terminal send` 只适合一次性直接输入，不携带任务、收件箱、回复或完成状态；
+- 结构化通信使用持久 Message／Delivery：`send`、`check`、`reply`、`ask`、`inbox` 分别表达投递、消费、关联回复、阻塞提问和历史检查；
+- 一个协调 Run 只是命名空间与 Inbox，Task 是工作项，Dispatch 是一次 Agent 终端上的执行绑定；Terminal Handle 只是可重新解析的路由信息，不是持久身份；
+- Coordinator 的 `check` 按 FIFO 返回有界 Delivery，并在显式 Ack 前重放同一批次；问答以 Message ID 恢复，避免 timeout 后重复提问；
+- `worker_done` 同时绑定 Task ID、Dispatch ID 与 outcome，不能只靠终端 idle、输出文本或心跳推断完成；
+- 完整 Handoff 与受监督 Dispatch 是两种所有权语义。前者交出工作后原协调者停止监控；后者保留 question、escalation、worker_done 和 cleanup 责任；
+- 断线、更新和旧状态恢复必须携带可验证 authority；不能从数据库行、旧 Terminal 或相似 Prompt 猜测当前消息所有权。
+
+AgentMux 采用这些原则时保持自己的分层：
+
+```text
+AgentSession identity ── AgentMessage / Thread / Delivery ── bounded Inbox
+        │                           │
+        │                           ├─ check / ack / reply / ask
+        │                           └─ evidence-backed outcome
+        ▼
+exact RunRef ── Provider delivery ── ctxmux Run control
+```
+
+`@agentmux/core` 只拥有 Provider-neutral 的 Message、Thread、Delivery、Permission、Correlation 与有界 Inbox；ctxmux 仍只拥有 Run。Desktop Board Inbox/Discussion Canvas 是同一 Core 状态的第一方投影。Task DAG、自动调度、Agent 选型、结果评判和 coordinator loop 属于调用方策略，不下沉 Core；a mature workbench Account、跨服务器 Relay、legacy adoption、compatibility replay 和 Terminal 注入协议也不复制。

@@ -2,158 +2,130 @@
 
 状态：已批准
 对应 Feature：`f-2248f4yx5`
-当前计划修订：revision 4 候选
+当前计划候选：revision 6
 前置决策：`docs/plans/mux-runtime-decision.md`
 
-## 1. 结论
+## 1. 修正结论
 
-`@agentmux/core` 的长期形态是 AgentMux 自有的可嵌入 Agent Runtime；它随包提供 Headless `agentmuxd`，由 Daemon 持有 Local/SSH PTY 与进程。Desktop、CLI 和其他宿主只通过 Core 的类型安全 Client API 创建、附着、观察和控制 Session。
+AgentMux 的长期边界恢复为已经确认的 a mature workbench-like embeddable 方案：`ctxmux` 是唯一通用 Run Kernel，AgentMux 是它上面的 Agent Runtime。
 
 ```text
 Desktop / CLI / external Node consumer
                   │
                   ▼
-          @agentmux/core Client
- Agent Domain / Provider / ACP / Hook / Permission
-                  │
-        Local socket | system SSH proxy
+          @agentmux/core public domain
+ Provider / Agent Session / ACP / Hook / Permission / Resume
                   │
                   ▼
-              agentmuxd
- Session owner / node-pty / process tree
- ordered bytes / replay / backpressure / recovery
+             CtxmuxRunAdapter
+                  │
+                  ▼
+          @ctxmux/sdk -> ctxmuxd
+ Run / PTY / Process / ordered bytes / replay / stop
 ```
 
-最终只有这一条 Runtime。现有 tmux 是已验证的基线和切换前实现，不是可选 Backend；`ctxmux` 提案已被用户确认的 AgentMux Daemon 决策取代。完成切换时直接删除两者的代码、类型、配置、文档和测试假设，不保留 Alias、Migration、Fallback 或公开双路径。
+2026-08-10 的 `236fce6` 把 Board 讨论中的用户回复“1”错误归因为 mux 选择，并据此把已经在 `b02803b` 固化的 ctxmux 方向反写成自建 `agentmuxd`。这个变更没有可靠的用户确认来源，因此 revision 4 的 Goal 与 Task 不能继续作为方向真相。
 
-## 2. 当前基线
+本轮不通过简单回退 Commit 抹掉已经产生的证据。自建 daemon 阶段形成的故障模型、correctness oracle、fixtures、资源测量与 Benchmark 方法保留并改造成 Run Kernel Conformance；重复实现的 PTY、wire、Replay、Journal、Remote Artifact 与进程清理生产代码在 ctxmux 切换时直接删除。
 
-当前 Core 已经具备可继续利用的 Agent 语义基础：
+## 2. 为什么立即停止继续完善自建 Daemon
 
-- UI 无关的 `packages/core` 包形态；
-- Local/SSH `ExecutionHost`、真实 tmux Session 与重启发现；
-- Codex、Claude、TraeX、Hermes、Pi 的 Catalog 与 Launch Plan；
-- 带认证的 Hook Ingress、来源明确的语义状态与 Activity；
-- Session Launch Reservation、失败回滚、输入顺序、动态 Host Discovery 和确定性测试；
-- Desktop 通过 Typed IPC 消费 Core，不由 Renderer 直接 Spawn Agent。
+局部实现证明了团队理解 Create Fence、Incarnation、Replay、Gap、Backpressure、Crash、SSH 和资源边界，但这些能力属于通用 Run Kernel。继续修复 request timeout、operation fingerprint、PID identity、setsid 后代、同步 Journal 或 burst backpressure，只会让错误 Owner 更难删除。
 
-主要缺口不是“再包一层接口”，而是 PTY/Process Owner 仍在 tmux：
+T-008 的首轮临时 Debug 又显示 4 MiB sustained output 未能在 30 秒形成完整 Hash 证据。这个结果作为历史 failure 保留，但不再通过修改自建 daemon 来争取通过；最终 Benchmark candidate 必须是 AgentMux+ctxmux。
 
-- 输入以命令为单位，输出以 `capture-pane` Snapshot Polling 为单位；
-- 没有单调 Output Sequence、有界 Replay、Gap 与 Backpressure 公共合同；
-- App 与 SSH Client 的断开恢复依赖 tmux，而不是 AgentMux Session Identity；
-- 远端每个操作重新执行命令，缺少长期受控 Transport；
-- Core 包尚未由干净外部 Consumer、Daemon Artifact 和真实安装流程证明。
+## 3. 最终所有权
 
-## 3. 依赖与成熟模式
+### AgentMux 拥有
 
-### 现有依赖
+- Provider Catalog、Launch/Prompt Strategy 与 Capability；
+- Agent Session、ACP、Hook、Permission、Evidence 与 provider-native Resume；
+- Run 引用与 Agent Session 的关联；
+- Client API、Workspace 关联、Desktop/CLI 投影；
+- 不依赖 Kernel 私有类型的 Agent-to-Agent 与 Artifact 上层能力。
 
-当前 `@agentmux/core` 只有 `execa` 与 `shell-quote`；它们能继续负责安全进程执行和 Shell 参数，不提供 PTY、Replay 或 Daemon Transport。Desktop 已有 xterm，继续只负责终端渲染。
+### ctxmux 拥有
 
-项目当前没有 PTY 库、WebSocket/RPC 框架或远端 Daemon SDK。后续实现不能假设“已有库做不了”，但也不能用手写伪终端替代成熟实现。
+- Run、PTY、Process 与真实运行状态；
+- Ordered Input/Output、Sequence、Replay、Gap、Backpressure；
+- Attachment、Attach/Detach、Resize、Signal、Stop 与 Run-level Recovery；
+- Local/Remote Run Kernel 的版本、能力、资源和进程安全边界。
 
-### 新增依赖原则
+### 不允许存在
 
-- PTY 使用 a mature workbench、VS Code 等成熟产品采用的维护中 `node-pty`，不自行实现 PTY、ConPTY 或 Terminal Emulator。
-- 协议与流控先复用 Node Stream/Socket 的成熟原语，并对照固定 a mature workbench 源码移植 Session Fence、Replay、Ack 与 Backpressure 模式；只有明确缺口才增加维护中的协议库。
-- ACP 优先使用经验证、精确锁定版本的 Runtime/SDK 并包在 AgentMux Adapter 后面，不重写 JSON-RPC Framing，也不泄漏第三方类型。
-- SSH 继续使用系统 Client 与现有认证。远端 Transport 是一条长期 `ssh -T` 代理连接到用户权限 Unix Socket，不复制 Private Key，不开放未授权公网端口。
+- AgentMux 自建 PTY daemon 或私有 Run protocol；
+- tmux、ctxmux、自建 daemon 的 Backend Selector；
+- Compatibility Alias、Migration、Fallback 或隐藏双 Runtime；
+- 把 Terminal Output、idle 或 replay 冒充 Tool、Reply、Permission 或模型上下文连续。
 
-具体新增版本必须在实施 Task 中用 Package Metadata、License、维护状态、Native Artifact 和最小 Spike 证明后确定；评审文档不预填未经验证的版本号。
+## 4. 排序原则
 
-## 4. 最终所有权
+先做不依赖 ctxmux 新实现、能在当前仓库独立闭环的工作：
 
-### Core
+1. 修正 SSOT 与资产处置；
+2. 分开 Run、Agent Session、Attachment 与 View；
+3. 收口 Provider、ACP、Hook、Permission 与 Resume；
+4. 提炼 Kernel-neutral Conformance Kit；
+5. 收口 Desktop 与外部 Consumer 的 Kernel-neutral 投影。
 
-Core 拥有 AgentMux 领域：
+最后才做可能受外部能力阻塞的工作：
 
-- Agent Catalog、Provider、Launch Plan、Prompt Delivery；
-- Semantic Session、ACP、Hook、Permission、Provider-native Resume；
-- Host/Workspace 关联、Session 状态代数、错误与 Capability；
-- Client API 以及 Daemon Protocol 的 AgentMux 语义映射。
+6. 审计 ctxmux 当前 SDK、发布、License 与能力；
+7. 能力齐备后一次接入 Local/SSH 并删除自建 daemon；
+8. 在最终 candidate 上重做 Package、可靠性、安全、资源、Benchmark 与独立 Review。
+9. 在最终 Runtime 与 Package 证据稳定后，交付 a mature workbench-like 的 Agent 间结构化通信、Inbox 与 Discussion Canvas，并完成 Feature Closeout。
 
-Core 不依赖 Electron、React 或 Desktop Store，也不让 Client 理解 tmux/ctxmux、Daemon 内部 Map 或某个 Agent CLI 的状态形状。
+ctxmux 缺少硬能力时，审计要给出精确 Gap，接入任务进入 parked context。此前五项继续完成，不通过私有 fallback 填坑，也不要求用户为可自行完成的工作持续做选择。
 
-### Daemon
+## 5. 领域模型
 
-Daemon 是运行事实的唯一 Owner：
+`Session` 不再同时表示物理进程、模型上下文和 UI Tab：
 
-- PTY、Shell、Agent 与工具进程树；
-- `sessionId`、`incarnationId`、`createOperationId`；
-- Ordered Input、Incremental Output、Sequence、Bounded Replay、Gap 与 Backpressure；
-- Applied Size、Signal、Graceful/Force Stop、Attach/Detach；
-- 用户权限 Endpoint、版本协商、Client Lease 与资源配额。
+- `Run`：一个由 ctxmux 持有的物理进程及终端事实；
+- `AgentSession`：AgentMux 持有的模型/Provider 语义与 native resume identity；
+- `Attachment`：一个 Client 对 Run output/control 的有界订阅；
+- `View`：Desktop Pane/Tab 对 Run 或 AgentSession 的产品投影。
 
-每个 Execution Host 只有一个轻量 Daemon，不为每个 Tab 或 Pane 启动 Daemon。Session 和 Replay 按需分配并受全局与每 Session 硬上限约束。
+Reattach 原 Run、provider-native resume、spawn 新 Run、创建新 AgentSession 和打开新 View 是五个不同动作。公共 API 必须表达这些差异，不靠注释修补含混命名。
 
-### Client
+## 6. 资产处置原则
 
-Desktop 和外部 Consumer 只提交 Intent 和消费事件：
+- Keep：Provider、ACP、Hook、Permission、Semantic Store、Evidence、Desktop interaction、故障模型、fixtures、correctness oracle、统计方法。
+- Port：Create/Incarnation、ordered I/O、Replay/Gap、slow consumer、stop tree、SSH partition、resource 和 Benchmark 测试，改成 ctxmux public-boundary Conformance。
+- Delete：自建 daemon server/client/protocol、session journal、node-pty owner、process-table cleanup、remote daemon artifact、agentmuxd bin，以及只证明这些实现的白盒测试。
 
-- Client 退出不会结束 Session；
-- 重连使用 Attach + Cursor/Replay，不重复 Spawn 或重放已确认 Input；
-- xterm 增量写入 Daemon Output，Gap 时显式重建或显示不完整状态；
-- Renderer/Main 不直接管理 PTY、SSH Credential 或 Agent 子进程。
+详细逐文件清单由 T-010 写入 `docs/plans/ctxmux-correction-inventory.md`。
 
-## 5. 持久化与恢复语义
+## 7. 与其他 Feature 的关系
 
-用户确认的硬要求是：Desktop 完全退出、UI 崩溃或 SSH 网络中断后，Session 继续运行并可恢复。
+`f-2258fa79w` 图片与鼠标输入继续保持独立 Feature。2026-08-12 用户要求把 a mature workbench CLI 式 Agent 通信追加到当前 Feature 的最后；因此旧 `f-2268fqs8a` proposal 的成熟约束被吸收到 T-019，并以当前 Feature 为唯一执行真相。旧 proposal 只保留 Tracker 历史，不再并行执行。
 
-为避免“恢复”成为模糊词，Feature 必须分别证明：
+## 8. 完成门槛
 
-- **Client Recovery**：Client 重启 Attach 原 Session，不重复 Create。
-- **Transport Recovery**：SSH Partition 后远端 Daemon 与 Session 仍在，重连校验 Host、Build、Session、Incarnation 和 Cursor。
-- **Lost Response Recovery**：同一 `createOperationId` 只对应一个物理进程。
-- **Late Event Fence**：旧 Incarnation 的 Data/Exit 不得污染新进程。
-- **Replay Recovery**：窗口内有序补发；窗口外明确 Gap/Truncated。
-- **Daemon Crash**：如果当前实现不能让 Worker 在 Daemon Crash 后继续持有 PTY，必须诚实标记 `lost`，不能伪装恢复。
-- **Host Reboot / Model Context**：OS Process、Terminal History、Provider-native Session 是不同对象，只有对应证据存在时才能分别恢复。
+- Goal、Tracker、决策文档与代码只存在一个 ctxmux Run Kernel 方向；
+- AgentMux 公共模型清楚区分 Run、AgentSession、Attachment 与 View；
+- 五个 Provider、ACP、Hook、Permission、Resume 与 Evidence 不依赖 Kernel 私有类型；
+- Desktop、CLI、外部 Consumer 只通过 AgentMux 公共 API；
+- ctxmux 通过适用 Conformance，Local/SSH 切换后自建 daemon 与 tmux 生产路径全部删除；
+- 最终 Package、Security、Chaos、Stress、Resource 和两轮 Benchmark 在最终 SHA 通过；
+- 独立 Review 的所有 Release Blocker 已处理；
+- Agent 间消息、Inbox、Ask/Reply、Delivery Ack 与证据等级通过至少一个真实双 Agent 竖切；直接 Terminal Input、完整 Handoff 与受监督 Dispatch 不混为一种语义；
+- 不实际发布、不修改用户全局 Agent 配置、不静默安装远端组件。
 
-## 6. 最小纵向推进顺序
+## 9. 非目标
 
-1. 先用同一个 `@agentmux/core` 包中的 `agentmuxd` 跑通 Local Terminal 与 Codex：创建、字节流、输入、Resize、Stop、Detach、Client 重启 Attach。
-2. 再补 Session Transaction、Incarnation Fence、Replay/Gap、Backpressure、进程树与资源上限，证明 Local Owner 可靠。
-3. 建立远端 Daemon Artifact 与长期系统 SSH Transport，证明网络断开不结束 Session。
-4. 将 ACP、Hook、Permission 与 Provider Resume 组合到同一 Session，但不把 Terminal Fact 冒充语义。
-5. Desktop 和外部 Consumer 切换后删除 tmux/ctxmux 假设，随后完成 Packaging、Doctor、Chaos/Security、Benchmark 与独立 Review。
-
-这个顺序允许 Feature 工作树中存在尚未接入产品的测试竖切，但不允许发布 Backend 配置、兼容承诺或运行时 Fallback。切换 Gate 通过后旧路径一次删除。
-
-## 7. 资源与内存边界
-
-资源约束是发布合同，不是事后优化：
-
-- 一个 Host 一个 Daemon；空闲 Daemon、每个 PTY Session、每个 Attach Client 和每 MiB Replay 都要有可复现 RSS/CPU 成本。
-- Replay、未确认 Output、Client Queue、Hook/Activity 与日志全部有硬上限；慢或失联 Client 不能拖成无界内存。
-- Client Detach、Session Stop、SSH Transport Close 和 Daemon Shutdown 都有确定性释放测试。
-- Benchmark 必须同时运行 correctness oracle 与泄漏检查，不能以丢数据或缩小恢复语义换低内存。
-- Desktop 关闭后 Electron 进程应退出，只保留轻量 Daemon 与真实运行 Session。
-
-## 8. 非目标
-
-- 不发布 Package、Binary 或 Release；发布仍需用户单独授权。
-- 不复制 a mature workbench Account、Mobile、AI Vault、WSL、Emulator、Hosted Issue Integration 或兼容历史。
-- 不建立 AHP、插件市场、多租户或任意 Transport 框架；当前真实 Client 和 SSH 需求没有要求这些抽象。
-- 不静默安装远端软件、修改 SSH Credential 或用户全局 Agent Hook。
-- 不把 Terminal Output 描述为 Tool Call、Permission、模型私有 Chain-of-thought 或 Provider-native Resume。
-- 不保留 tmux/ctxmux 的迁移器、别名、Fallback 或长期双 Owner。
-
-## 9. Feature 完成门槛
-
-- Local/SSH 只由 AgentMux Daemon 持有 PTY/Process；App 退出、UI Crash 与网络断开恢复通过真实测试。
-- Input/Output/Resize/Stop/Attach 的顺序、幂等、Fence、Replay、Gap 与资源上限有 Contract、Integration、Chaos 和 Stress 证据。
-- Permission 默认拒绝；Local Endpoint、Remote Transport、协议输入、参数/环境、日志与 Secret 有安全测试。
-- Codex、Claude、TraeX、Hermes、Pi 与 Raw Terminal 通过同一 Core 生命周期合同，并诚实表达 Capability 差异。
-- Desktop 与干净外部 Consumer 只使用 Core 公共 API；`pnpm pack` 安装、Daemon Activation、Remote Artifact 与 Doctor 可复现。
-- 冻结 Benchmark 在预先声明的发布主维度上优于当前真实 tmux 基线，同时没有正确性、RSS、CPU 或泄漏回退。
-- 仓库中不存在 ctxmux/tmux Runtime、兼容层、Migration、Fallback Route 或隐藏双 Owner。
-- 多个独立 Reviewer 完成功能/架构、可靠性/安全、测试/Benchmark 审查，所有 Release Blocker 已处理。
+- 在 ctxmux 未就绪时继续完善自建 Run Kernel；
+- 为等待期建立临时 Backend、Compatibility 或 Fallback；
+- 把 ctxmux Agent 化，或把 AgentMux 的 Provider/ACP/Permission 下沉到 ctxmux；
+- 把 AgentMux Core 扩张成自动调度器、Agent 团队规划器、结果评判器、跨服务器 Relay 或 a mature workbench compatibility runtime；
+- 用删除历史、重写旧 Gate 或覆盖旧失败结果来制造干净叙事。
 
 ## 10. 证据
 
 - `AGENTS.md`
+- `b02803b`：采用 ctxmux 唯一 Run Kernel 的已确认决策
+- `236fce6`：错误反写为自建 daemon 的决策变更
 - `docs/plans/mux-runtime-decision.md`
 - `docs/a mature workbench-agent-runtime-notes.md`
-- 当前 `packages/core/package.json` 与源码/测试
-- a mature workbench 固定 Commit 的 Local PTY、Daemon、SSH Owner Lease、Replay、Backpressure 与 Recovery 实现
+- 当前安装版本的 `a mature workbench skills get a mature workbench-cli` 与 `a mature workbench skills get orchestration` 合同
+- 当前 `packages/core`、Desktop、测试与 T-008 debug failure

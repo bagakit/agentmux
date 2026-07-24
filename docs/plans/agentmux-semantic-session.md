@@ -1,84 +1,76 @@
-# AgentMux Semantic Session 设计
+# AgentMux Run 与 Agent Session 领域模型
 
-状态：T-004 实现基线
+状态：T-011 领域合同
 
-## 1. 边界
+这份文档只说明长期成立的对象边界。当前仓库中的自建 `agentmuxd` 是待删除的过渡 Run Kernel；最终由 `ctxmux` 独占 PTY、进程和有序输入输出。无论底层 Kernel 如何实现，AgentMux 的公共调用方只看到本文定义的领域对象，不接触 daemon/ctxmux wire、Electron IPC 或第三方 SDK 类型。
 
-AgentMux 把一次 Agent 工作拆成两个有意不同的对象：
+## 1. 四个对象不是四种叫法
 
-- **Daemon Run**：`sessionId + incarnationId`，只证明 PTY、进程、输入输出、尺寸和退出事实；
-- **Semantic Session**：`semanticSessionId`，保存 Agent、Workspace、Daemon Run 引用、必要 Output Cursor、Provider/ACP Native Handle 和最后一份 Hook Receipt。
+| 对象 | 身份 | 持有的事实 | 明确不持有 |
+| --- | --- | --- | --- |
+| Run | `runId + incarnationId` | 物理进程、工作目录、尺寸、UTF-8 byte cursor、退出事实 | 模型上下文、UI 布局 |
+| Agent Session | `agentSessionId` | Provider、Workspace 关联、当前 Run 引用、Native Handle、Hook Receipt | PTY、Replay、进程所有权 |
+| Attachment | 当前 Client 对一个 Run incarnation 的附着 | 有界 Replay、Gap、增量输出和控制入口 | Run 生命周期、Agent 上下文 |
+| View | `viewId` | 一个 Consumer 对 Run 或 Agent Session 的展示投影 | 领域真相、进程或订阅所有权 |
 
-两者不能互相冒充。Terminal Replay 只能恢复可见终端，不能证明模型上下文连续；Native Hook 或 ACP 提供的 Session Handle 才能成为 Provider-native Resume 的依据。
+`viewId`、`agentSessionId` 和 `runId` 必须属于不同身份空间。一个 Agent Session 可以同时投影到多个 View；View 关闭后再打开，不会创建或恢复模型上下文。一个 Run incarnation 也可以先释放 Attachment，再由同一或另一个 Client 重新 Attach。
 
-公共事件固定携带下列 Evidence Source：
+Raw Terminal 只有 Run，没有 Agent Session。Agent Run 必须引用恰好一个 Agent Session；两边的 Agent、Host、Workspace Path、Run ID 和 Incarnation 不一致时，投影必须失败关闭。
 
-| Source | 能证明什么 | 不能证明什么 |
+## 2. 五个动作必须分开
+
+- **Reattach 原 Run**：Run ID、Incarnation 和 Agent Session ID 全部不变；从指定 byte cursor 获取 Replay/Gap 并建立新的 Attachment，不 Spawn。
+- **Release Attachment**：只释放当前 Client 的输出附着；不停止 Run，不删除 Agent Session，也不关闭其他 View。
+- **Provider-native Resume**：可信 Native Handle 和 Provider Capability 同时成立时，保留 Agent Session ID，创建新的 Run ID 与 Incarnation。
+- **Respawn**：创建新的 Agent Session 和新的 Run；即使 Provider、Workspace 和 Prompt 相同，也不宣称继承模型上下文。
+- **Open View**：创建新的 View ID，引用已有 Run 或 Agent Session；不创建进程、不 Attach 输出，也不改变 Agent Session。
+
+原 Run 仍为 `running` 时禁止 provider-native Resume，避免一个 Agent Session 同时驱动两个物理 Agent。迟到的旧 Incarnation 事件只能作为旧 Run 事实处理，不能更新已经指向新 Run 的 Agent Session。
+
+## 3. Cursor 和输入输出
+
+所有 public Run cursor 都以 UTF-8 byte 为单位，并在名字中显式带 `Byte` 或 `Bytes`：
+
+- `latestOutputBytes`
+- `acceptedInputBytes`
+- `startByte` / `endByte`
+- `requestedAfterByte` / `firstAvailableByte`
+- `acceptedThroughByte` / `acknowledgedThroughByte`
+- `outputCursorBytes`
+
+调用方不能把 JavaScript 字符数、终端列数或 wire sequence 混入这些字段。Kernel 私有 sequence 只允许在 Adapter 内映射。
+
+## 4. Evidence 不互相冒充
+
+| Source | 能证明 | 不能证明 |
 | --- | --- | --- |
-| `terminal-output` | Daemon 收到了哪些有序字节 | Tool、Permission、模型思考 |
-| `daemon-process` | 进程退出及对应 Incarnation | Agent 已完成语义任务 |
-| `native-hook` | Provider 原生 Hook 报告的状态、活动和 Handle | 没有 Hook 的历史活动 |
-| `acp` | ACP Adapter 报告的结构化事件和 Session | 终端进程仍存活 |
-| `user` | 用户提交、Interrupt 等明确动作 | Agent 已处理动作 |
+| `terminal-output` | 某个 Run 输出了哪些有序字节 | Tool、Permission、Reply、模型私有思考 |
+| `run-process` | 物理进程正在运行、退出或丢失 | Agent 已完成语义任务 |
+| `native-hook` | Provider Hook 报告的状态、活动或 Native Handle | 没有 Hook 覆盖的历史语义 |
+| `acp` | ACP Adapter 报告的结构化事件和权限请求 | PTY 或进程仍存活 |
+| `user` | 用户提交 Prompt、Signal、Stop 等明确动作 | Agent 已处理该动作 |
 
-Raw Terminal 没有 `semanticSessionId`，也不会生成 Agent Activity。
+Terminal Output 和 Replay 永远不能被包装成 Tool、Reply、Permission、Chain-of-thought 或模型上下文连续。Hook 与 ACP 事件必须携带 Agent Session 身份以及当时的 Run Evidence；它们不拥有 Run。
 
-## 2. Catalog 与 Provider
+## 5. Provider 与 Kernel 的所有权
 
-每个 Provider 同时声明：
+AgentMux 持有 Provider Catalog、能力探测、Launch/Resume Intent、Agent Session、ACP、Hook、Permission、Evidence 和 Client 投影。新增 Agent 只新增 Provider/Integration，不修改 Run 生命周期。每个 Provider 必须显式声明 Reply correlation；当前五个内置 Provider 都是 `none`，因为现有 Hook 没有稳定 Turn ID，不能拿时间邻近或 Assistant 文本冒充关联证据。
 
-- executable 与 expected process；
-- Prompt Delivery 与 Ready Signal；
-- Native Hook、Provider Resume、ACP 和 Permission Capability；
-- Launch Plan、Resume Plan、Capability Probe 与 Hook Normalizer。
+Run Kernel 持有 Local/SSH 的 PTY、Process、Ordered I/O、Replay、Gap、Backpressure、Attachment、Resize、Signal 和 Stop。最终只有 `ctxmux` 实现这一层；AgentMux 不保留自建 daemon fallback，也不提供兼容 API。
 
-当前内置能力如下：
+Adapter 只做两件事：把 AgentMux 的 Run Intent 翻译给 Kernel，把 Kernel Run Fact 翻译成 AgentMux 自有类型。Kernel 的 Frame、Snapshot、Error、SDK Object 和连接状态不能穿过 Adapter。
 
-| Agent | Prompt | Hook | Permission | Provider Resume | ACP |
-| --- | --- | --- | --- | --- | --- |
-| Codex | positional argv | native / explicit managed | observe | session id | 无 |
-| Claude | positional argv | native / explicit managed | observe | session id | 无 |
-| TraeX | positional argv | 无 | 无 | 无 | 无 |
-| Hermes | native query + TUI | native / explicit managed | observe | 无 | 无 |
-| Pi | positional argv | native / explicit managed | observe | hook-reported session file | 无 |
+## 6. 持久化与资源边界
 
-新增 Agent 只增加 Provider/Integration；Hook 的事件规则和 Native Handle 提取也属于 Provider，不再修改全局 `switch(agentId)`。
+`AgentMuxAgentSessionStore` 只保存有界 Agent Session：Provider 身份、Workspace、当前 Run Ref、必要 Output Cursor、Native Handle 和最后一份 Hook Receipt。它不保存 PID、PTY、Terminal Snapshot、Replay、Activity 列表或第三方 wire state。
 
-Capability Probe 由实际 Execution Host 的 Daemon 执行。因此 SSH Client 不会拿本机的 `PATH` 误判远端 Agent 是否可用。
+默认 Memory Store 与加载器最多保留 256 个 Agent Session。Run、Attachment、Replay、Client Queue、Hook Body 和日志都必须有硬上限；释放 Attachment、关闭 View 和停止 Run 后要有确定性的资源释放证据。
 
-## 3. 三种恢复动作
+## 7. 当前验证面
 
-- **Reattach**：Semantic ID、Daemon Session ID 和 Incarnation 全部不变，只从已确认 Cursor Attach；不存在时不 Spawn。
-- **Provider-native Resume**：必须已有匹配 Provider 的 Native Handle；Semantic ID 保持不变，新建 Daemon Run 和 Incarnation。
-- **Respawn**：明确创建新 Semantic ID 和新 Daemon Run；即使 Agent、Workspace 和 Prompt 相同，也不宣称继承模型上下文。
+- Runtime 投影测试验证 Run、Agent Session 与 View 身份独立，同一 Agent Session 可生成多个 View。
+- Registry 测试验证 Agent Session 换 Run 后，迟到旧 Run 写入会被拒绝。
+- Client 集成测试验证 Reattach、Release Attachment、Provider Resume 和 Respawn 是不同动作，并验证同步/异步 Consumer 订阅者异常不会破坏其他 Listener 或 Run 控制。
+- Core 与 Desktop 类型检查验证 daemon wire 不再进入 Desktop 的共享合同。
 
-原 Daemon Run 仍在 `running` 时禁止 Resume，避免一个 Semantic Session 同时驱动两个物理 Agent。
-
-## 4. Hook 传输与安装
-
-每个 `agentmuxd` 在所在 Host 的 `127.0.0.1` 启动带随机 Bearer Token 的 Hook Ingress，并把 URL、Token、Semantic ID、Daemon Session ID 和 Incarnation 注入 Agent 环境。Daemon 只校验并转发完全匹配的原始 Hook；Provider 在 Client 侧归一化语义。伪造或迟到 Incarnation 的 Hook 会被静默丢弃，观察失败不阻断 Agent。
-
-全局 Agent 配置不自动修改。`AgentManagedHookInstaller` 只能经过 `preview -> install` 两步显式调用：
-
-- Preview 固定目标文件当前 Hash 与下一版 Hash；
-- Install 前再次检查 Generation，避免覆盖用户刚保存的配置；
-- 被替换内容备份到 AgentMux State Directory，Receipt 记录恢复所需 Hash、Mode 和 Backup；
-- Uninstall 只在目标仍等于已安装版本时恢复，用户安装后自行编辑则 Fail Closed。
-
-Provider-specific 配置合并由对应 Integration 生成 Mutation Plan，通用 Installer 不猜测 Claude/Codex/Pi/Hermes 的私有配置结构。
-
-## 5. ACP 与 Permission
-
-T-004 没有把某个 ACP SDK 变成公共类型，也没有手写 JSON-RPC Framing。Core 提供 AgentMux 自有的 `AgentMuxAcpBinding` 边界，具体 SDK/Process Adapter 留在 Integration 内部。
-
-实施时核验了 `@agentclientprotocol/sdk@1.3.0`：Apache-2.0、2026-07-21 发布、解包约 5.3 MB，并带 `zod` Peer Dependency。当前五个内置 Agent 都不使用 ACP，直接引入只会增加包体、依赖面和空闲代码，因此本 Task 不采用。未来第一个真实 ACP Integration 采用 SDK 时必须精确锁版本，并在 Adapter 内完成类型翻译。
-
-ACP Permission 只有显式且属于当前 Options 的选择才会转发。Handler 缺失、抛错、返回 `undefined`、30 秒内没有返回或返回未知 Option 时，Core 选择 Provider 提供的 Reject Option；若没有 Reject Option，则返回 Cancelled。拒绝响应本身无法送达时关闭 ACP Binding，不存在默认允许或无界等待路径。
-
-## 6. 持久化与资源
-
-`AgentMuxSemanticStore` 是可注入边界。Core 在读取时重新选择并验证字段，额外的 PID、Terminal Snapshot、Replay 或 Output Bytes 不会进入运行真相。
-
-默认 Memory Store 与加载器最多保留 256 个 Semantic Session；Hook Body、ACP Event、Provider Handle、Transcript Path 和 Managed Hook 文件都有固定字节上限。Client 不缓存 Terminal Output 或 Activity 列表，终端历史继续由 Daemon 有界 Replay 和上层 xterm 投影负责。
-
-创建 Agent 后若 Store 写入失败，Client 会停止刚创建的 Daemon Run；若停止也失败，则用 `AggregateError` 同时暴露主失败和清理失败，不留下伪造的成功 Session。
+T-012 收口 Provider/ACP/Hook/Permission/Resume 后，T-013 将现有可靠性资产提炼成 Kernel-neutral Conformance Kit；只有 ctxmux 能力审计通过后，T-016 才执行最终 Kernel 替换并删除自建 daemon。

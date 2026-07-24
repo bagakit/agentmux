@@ -1,6 +1,45 @@
 # AgentMux 测试策略
 
-本文是 `@agentmux/core` 与 `agentmuxd` 的故障模型、资源预算和验证入口。它记录当前已经能证明的边界，也明确哪些恢复能力尚未交付；测试通过不能把 Terminal Replay 描述成 Agent 模型上下文恢复。
+本文记录当前自建 `agentmuxd` 阶段已经形成的故障模型、资源预算和验证入口。自 2026-08-11 起，这些数据是待移植的历史 baseline，不再证明最终 Run Kernel；T-013 已把适用部分提炼成 Run Kernel public-boundary Conformance。测试通过始终不能把 Terminal Replay 描述成 Agent 模型上下文恢复。
+
+## Run Kernel-neutral Conformance Kit
+
+T-013 已建立测试侧 `RunKernelConformanceHarness`，只描述 Create、Run Ref、ordered byte I/O、Attachment、Replay/Gap、Resize、Stop 和恢复可观察结果。共享 Suite 不 import 自建 daemon、ctxmux、Journal、PID Map 或 Frame；每个候选只在自己的 Adapter 文件映射 public 行为。
+
+稳定入口：
+
+```bash
+pnpm --filter @agentmux/core test:conformance
+```
+
+合同分四层：
+
+| 层 | 强制 Oracle | 默认入口 |
+| --- | --- | --- |
+| Fast | Create content identity、Input content identity、Incarnation Fence、ordered bytes、Attach/Release、Replay/Gap、Resize readback | 共享 Conformance Suite |
+| Chaos | Stop process tree、slow consumer、Kernel crash disposition | 共享 Suite + 当前 candidate 黑盒可靠性 |
+| Resource | Run/Attachment/Replay/FD/RSS 硬预算与关闭后释放 | 固定 Seed Soak 与统一统计库 |
+| Remote | SSH partition 不改变远端 Run identity，重连重新验 Host/Build/Transport | Remote Adapter 黑盒 Integration |
+
+共享资产：
+
+- `packages/core/test/conformance/run-kernel-contract.ts`：候选无关的类型、合同目录和可复用 Suite；
+- `packages/core/test/fixtures/run-kernel-workload.mjs`：只产生 echo/burst 字节，不携带 Agent、daemon 或 ctxmux 语义；
+- `packages/core/scripts/run-kernel-statistics.mjs`：Mean、Percentile 与 Sample Summary，当前资源脚本和未来 Benchmark 共用；
+- `packages/core/test/run-kernel-conformance.test.ts`：过渡 agentmuxd Adapter；未来 `CtxmuxRunAdapter` 使用同一 Harness，不能改 Oracle；
+- `packages/core/test/run-kernel-statistics.test.ts`：统计插值与输入边界的确定性测试。
+
+### 当前 candidate 审计结果
+
+| 合同 | 过渡 agentmuxd | 处置 |
+| --- | --- | --- |
+| Create operation content identity | **FAIL**：只比较 Run ID，不比较 cwd/尺寸/命令/环境指纹 | Conformance 使用 expected-failure 保留；不继续扩展待删除 Kernel |
+| Input content identity | **FAIL**：旧 cursor 的不同字节也返回 duplicate | Conformance 使用 expected-failure 保留；ctxmux Adapter 不得带豁免通过 |
+| Incarnation/ordered bytes/Attach/Resize | PASS | 共享 Suite 直接执行 |
+| Slow consumer/Gap/Stop tree/Crash | PASS（当前 candidate baseline） | 由现有黑盒测试提供高成本证据，T-016 删除旧实现时保留 Oracle/Fixture |
+| SSH partition/recovery | PASS（隔离系统 SSH） | 只证明当前 Adapter；T-015 重新审计 ctxmux Remote 能力 |
+
+Expected-failure 不是兼容许可：当前 candidate 的两个 Gap 被明确判定为不合格，修复不会在本 Feature 中继续增加沉没成本；最终 ctxmux candidate 必须以无 `knownGaps` 配置运行同一 Suite。
 
 ## Session 故障模型
 
@@ -201,8 +240,8 @@ pnpm check
 - `ssh-daemon-connector.test.ts`：系统 SSH argv、远端命令引用与 Destination 边界。
 - `ssh-remote-daemon.test.ts`：平台、Archive Traversal 与受管删除范围。
 - `ssh-remote-daemon.integration.test.ts`：隔离 SSH 安装、Activation、Partition、Lost Create、Mismatch、Upgrade、Replay 与 Process Tree。
-- `semantic-client.integration.test.ts`：Local Hook 关联、Evidence Source、Store 回滚与三种恢复身份。
-- `semantic-session-registry.test.ts`：Semantic Store 串行写入和旧 Daemon Run 乐观 Fence。
+- `agent-client.integration.test.ts`：Local Hook 关联、Evidence Source、Agent Session Store 回滚与 Reattach/Resume/Respawn 身份。
+- `agent-session-registry.test.ts`：Agent Session Store 串行写入和旧 Run 乐观 Fence。
 - `agent-provider.test.ts`：五个内置 Catalog、Capability Probe、Launch 与 Provider Resume。
 - `acp-adapter.test.ts`：ACP Event 映射和 Permission 默认拒绝。
 - `managed-hook-installer.test.ts`：显式 Preview、Generation Fence、Receipt 与恢复卸载。
