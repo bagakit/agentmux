@@ -192,6 +192,10 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         engines: { node: '>=22.0.0' },
         os: ['darwin'],
         cpu: ['arm64'],
+        exports: {
+          '.': { types: './dist/index.d.ts', import: './dist/index.js' },
+          './runtime': { types: './dist/runtime.d.ts', import: './dist/runtime.js' }
+        },
         bin: {
           agentmux: './bin/agentmux.js',
           ctxmux: './vendor/ctxmux/darwin-arm64/bin/ctxmux',

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { connectLocalAgentMux, connectSshAgentMux } from '@agentmux/core'
+import { resolveAgentMuxViewFocus } from '@agentmux/core/runtime'
 
 const execFileAsync = promisify(execFile)
 
@@ -10,6 +11,13 @@ const stubbornFixture = process.env.AGENTMUX_STUBBORN_FIXTURE
 const fakeCodex = process.env.AGENTMUX_FAKE_CODEX
 const agentmuxCli = process.env.AGENTMUX_CLI_PATH
 assert.ok(controlFixture && stubbornFixture && fakeCodex && agentmuxCli)
+assert.deepEqual(
+  resolveAgentMuxViewFocus(
+    [{ viewId: 'packed-agent-view', kind: 'agent', agentSessionId: 'packed-agent' }],
+    { kind: 'agent-session', agentSessionId: 'packed-agent' }
+  ),
+  { viewId: 'packed-agent-view', kind: 'agent' }
+)
 
 async function waitFor(description, predicate, timeoutMs = 8_000) {
   const deadline = Date.now() + timeoutMs
