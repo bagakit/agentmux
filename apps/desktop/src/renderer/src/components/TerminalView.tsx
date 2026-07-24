@@ -38,7 +38,8 @@ export function TerminalView({ session }: { session: SessionSnapshot }) {
     terminal.loadAddon(fit)
     terminal.open(rootRef.current)
     let disposed = false
-    let attached = false
+    let attachmentId: string | null = null
+    let readyForLiveOutput = false
     let cursor = 0
     let outputTail = Promise.resolve()
     let acknowledgeTail = Promise.resolve()
@@ -56,7 +57,7 @@ export function TerminalView({ session }: { session: SessionSnapshot }) {
     const accept = (event: RuntimeEvent): void => {
       const output = outputForSession(event, session)
       if (!output) return
-      if (!attached) {
+      if (!readyForLiveOutput) {
         pending.push(event)
         pendingBytes += output.endByte - output.startByte
         while (
@@ -85,20 +86,21 @@ export function TerminalView({ session }: { session: SessionSnapshot }) {
     const disposeEvents = api.sessions.onEvent(accept)
     const resize = new ResizeObserver(() => {
       fit.fit()
-      if (attached) void api.sessions.resize(session.control, terminal.cols, terminal.rows)
+      if (readyForLiveOutput) void api.sessions.resize(session.control, terminal.cols, terminal.rows)
     })
     resize.observe(rootRef.current)
     const input = terminal.onData((data) => {
-      if (attached) void api.sessions.write(session.control, data)
+      if (readyForLiveOutput) void api.sessions.write(session.control, data)
     })
 
     void (async () => {
       try {
         const result = await api.sessions.attach(session.control, 0)
         if (disposed) {
-          await api.sessions.detach(result.session.control)
+          await api.sessions.detach(result.attachmentId)
           return
         }
+        attachmentId = result.attachmentId
         if (result.gap) {
           await terminalWrite(
             terminal,
@@ -110,6 +112,8 @@ export function TerminalView({ session }: { session: SessionSnapshot }) {
           await terminalWrite(terminal, event.data)
           cursor = event.endByte
         }
+        fit.fit()
+        await api.sessions.resize(result.session.control, terminal.cols, terminal.rows)
         if (droppedPendingThrough > cursor) {
           await terminalWrite(
             terminal,
@@ -117,10 +121,8 @@ export function TerminalView({ session }: { session: SessionSnapshot }) {
           )
           cursor = droppedPendingThrough
         }
-        attached = true
+        readyForLiveOutput = true
         if (cursor > 0) queueAcknowledge(result.session.control, cursor)
-        fit.fit()
-        await api.sessions.resize(result.session.control, terminal.cols, terminal.rows)
         for (const event of pending.splice(0)) accept(event)
       } catch (error) {
         if (!disposed) {
@@ -140,7 +142,7 @@ export function TerminalView({ session }: { session: SessionSnapshot }) {
       disposeEvents()
       input.dispose()
       resize.disconnect()
-      if (attached) void api.sessions.detach(session.control)
+      if (attachmentId !== null) void api.sessions.detach(attachmentId)
       terminal.dispose()
     }
   }, [session.control.run.runId, session.id])

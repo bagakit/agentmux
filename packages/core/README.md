@@ -11,16 +11,18 @@ import { connectLocalAgentMux } from '@agentmux/core'
 
 const client = await connectLocalAgentMux()
 const run = await client.createTerminal({ workspacePath: process.cwd() })
-await client.attachTerminal(run.runId, 0)
+const attachment = await client.attachTerminal(run.runId, 0)
+const secondViewReplay = await client.readRunReplay(run, 0)
 await client.writeTerminal(run, {
   ownerInstanceId: client.runtimeIdentity().instanceId,
   operationId: crypto.randomUUID(),
   expectedByte: run.acceptedInputBytes,
   data: 'pwd\n'
 })
+await client.releaseRunAttachment(attachment.run)
 ```
 
-Run identity 就是 `{ runId }`。关闭 Client 不会停止 Run；`attachTerminal(runId, afterByte)` 用累计 raw-output byte cursor 恢复。Input 调用方在 disposition 确定前保留 `ownerInstanceId + operationId + expectedByte + data`，新 Client 可以重试同一 operation，CtxMux 返回精确 applied byte range 且不会重复写 PTY。`signalTerminal(..., 'SIGINT')` 映射 CtxMux portable Interrupt，其他信号失败关闭。Remote 当前返回 `REMOTE_UNSUPPORTED`。
+Run identity 就是 `{ runId }`。关闭 Client 不会停止 Run；`attachTerminal(runId, afterByte)` 用累计 raw-output byte cursor 建立 retained Attachment，`readRunReplay(run, afterByte)` 在不新增 retained owner 的前提下为另一个 View 读取有界 Replay，`releaseRunAttachment(run)` 按 exact RunRef 释放。Input 调用方在 disposition 确定前保留 `ownerInstanceId + operationId + expectedByte + data`，新 Client 可以重试同一 operation，CtxMux 返回精确 applied byte range 且不会重复写 PTY。`signalTerminal(..., 'SIGINT')` 映射 CtxMux portable Interrupt，其他信号失败关闭。Remote 当前返回 `REMOTE_UNSUPPORTED`。
 
 Shell checkpoint 已证明：same Run/PID reconnect、fragmented UTF-8、interior byte replay、lost-receipt Input dedup、resize、interrupt-still-live、complete stubborn-tree Stop，以及 checkout-external packed consumer。
 
