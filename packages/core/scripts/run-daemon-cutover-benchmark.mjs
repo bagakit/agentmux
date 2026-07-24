@@ -10,10 +10,10 @@ import {
   summarizeSamples
 } from './run-kernel-statistics.mjs'
 
-export const BENCHMARK_SCHEMA = 'agentmux.benchmark.daemon-cutover.v4'
-export const PROTOCOL_REVISION = 4
-export const RUNNER_VERSION = 4
-export const FORMAL_RESULT_PREFIX = 'revision-4'
+export const BENCHMARK_SCHEMA = 'agentmux.benchmark.daemon-cutover.v5'
+export const PROTOCOL_REVISION = 5
+export const RUNNER_VERSION = 5
+export const FORMAL_RESULT_PREFIX = 'revision-5'
 export const WORKLOAD_EXECUTION_ORDER = Object.freeze([
   'resources',
   'inputToVisible',
@@ -48,7 +48,15 @@ const fullConfig = Object.freeze({
   reconnect: { warmup: 20, samples: 100, bytes: 64 * 1024 },
   scale: { rounds: 5, sessions: 32, pollMs: 750 },
   stop: { samples: 10 },
-  resources: { settleMs: 2_000, samples: 15, intervalMs: 200, sessions: 32, bytes: 4 * 1024 * 1024, pollMs: 750 }
+  resources: {
+    settleMs: 2_000,
+    samples: 15,
+    intervalMs: 200,
+    sessions: 32,
+    bytes: 4 * 1024 * 1024,
+    pollMs: 750,
+    requireDistinguishableCpu: true
+  }
 })
 const smokeConfig = Object.freeze({
   latency: { warmup: 1, samples: 2, pollMs: 20 },
@@ -57,7 +65,15 @@ const smokeConfig = Object.freeze({
   reconnect: { warmup: 1, samples: 2, bytes: 16 * 1024 },
   scale: { rounds: 1, sessions: 2, pollMs: 20 },
   stop: { samples: 1 },
-  resources: { settleMs: 20, samples: 2, intervalMs: 20, sessions: 2, bytes: 64 * 1024, pollMs: 20 }
+  resources: {
+    settleMs: 20,
+    samples: 2,
+    intervalMs: 20,
+    sessions: 2,
+    bytes: 64 * 1024,
+    pollMs: 20,
+    requireDistinguishableCpu: false
+  }
 })
 
 function nowNs() {
@@ -161,15 +177,53 @@ async function commandAvailable(command) {
   }
 }
 
-export function parseProcessCpuCounter(value) {
-  const match = /^(\d+) (\d+)$/u.exec(value.trim())
-  if (!match) throw new Error(`Invalid process CPU counter: ${value}`)
-  const userNanoseconds = BigInt(match[1])
-  const systemNanoseconds = BigInt(match[2])
+export function parseProcessCpuSnapshot(value) {
+  const match = /^sample (\d+) (\d+) (\d+) (\d+)$/u.exec(value.trim())
+  if (!match) throw new Error(`Invalid process CPU snapshot: ${value}`)
+  const monotonicBeforeNanoseconds = BigInt(match[1])
+  const monotonicAfterNanoseconds = BigInt(match[2])
+  const userNanoseconds = BigInt(match[3])
+  const systemNanoseconds = BigInt(match[4])
+  if (monotonicAfterNanoseconds < monotonicBeforeNanoseconds) {
+    throw new Error('Process CPU snapshot monotonic interval regressed')
+  }
   return {
+    monotonicBeforeNanoseconds: monotonicBeforeNanoseconds.toString(),
+    monotonicAfterNanoseconds: monotonicAfterNanoseconds.toString(),
     userNanoseconds: userNanoseconds.toString(),
     systemNanoseconds: systemNanoseconds.toString(),
     totalNanoseconds: (userNanoseconds + systemNanoseconds).toString()
+  }
+}
+
+export function parseProcessCpuCalibration(value) {
+  const lines = value.trim().split('\n')
+  const header = /^calibration (\d+) (\d+)$/u.exec(lines.shift() ?? '')
+  if (!header) throw new Error(`Invalid process CPU calibration: ${value}`)
+  const samples = Number.parseInt(header[1], 10)
+  const samplingDelayNanoseconds = BigInt(header[2])
+  const positiveStepsNanoseconds = lines.map((line) => {
+    const match = /^step (\d+)$/u.exec(line)
+    if (!match) throw new Error(`Invalid process CPU calibration step: ${line}`)
+    const step = BigInt(match[1])
+    if (step <= 0n) throw new Error('Process CPU calibration step must be positive')
+    return step
+  })
+  if (!Number.isSafeInteger(samples) || samples < 1 || positiveStepsNanoseconds.length > samples) {
+    throw new Error('Process CPU calibration sample count is invalid')
+  }
+  if (samplingDelayNanoseconds < 1n || positiveStepsNanoseconds.length === 0) {
+    throw new Error('Process CPU calibration did not observe a positive counter step')
+  }
+  const observedQuantumNanoseconds = positiveStepsNanoseconds.reduce(
+    (minimum, step) => step < minimum ? step : minimum
+  )
+  return {
+    workload: 'forked-child-continuous-cpu-burn',
+    samples,
+    samplingDelayNanoseconds: samplingDelayNanoseconds.toString(),
+    positiveStepsNanoseconds: positiveStepsNanoseconds.map(String),
+    observedQuantumNanoseconds: observedQuantumNanoseconds.toString()
   }
 }
 
@@ -187,21 +241,35 @@ async function buildProcessRusageProbe(root) {
     timeoutMs: 5_000,
     maxBuffer: 64 * 1024
   })
+  const sdkVersion = await commandOutput('xcrun', ['--show-sdk-version'], {
+    timeoutMs: 5_000,
+    maxBuffer: 64 * 1024
+  })
   const path = join(root, 'process-rusage')
-  await runCommand(compiler, [
+  const compileArgv = [
     '-isysroot', sdkPath,
     '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror', processRusageSourcePath, '-o', path
-  ], { timeoutMs: 30_000, maxBuffer: 1024 * 1024 })
+  ]
+  await runCommand(compiler, compileArgv, { timeoutMs: 30_000, maxBuffer: 1024 * 1024 })
+  const calibration = parseProcessCpuCalibration(await commandOutput(path, ['--calibrate'], {
+    timeoutMs: 10_000,
+    maxBuffer: 1024 * 1024
+  }))
+  const binary = await readFile(path)
   return {
     path,
     evidence: {
-      source: 'proc_pid_rusage:RUSAGE_INFO_V4',
+      counterSource: 'proc_pid_rusage:RUSAGE_INFO_V4',
+      endpointClock: 'clock_gettime:CLOCK_MONOTONIC_RAW',
       unit: 'nanoseconds',
-      reportedResolutionNanoseconds: 1,
+      calibration,
       sourceSha256: createHash('sha256').update(source).digest('hex'),
+      binarySha256: createHash('sha256').update(binary).digest('hex'),
       compiler,
       compilerVersion,
-      sdkPath
+      sdkPath,
+      sdkVersion,
+      compileArgv
     }
   }
 }
@@ -974,11 +1042,55 @@ async function runStopCleanup(runtime, kind, config, emergencyPids) {
   }
 }
 
-async function processCpuCounter(pid, probePath) {
-  return parseProcessCpuCounter(await commandOutput(probePath, [String(pid)], {
+async function processCpuSnapshot(pid, probePath) {
+  return parseProcessCpuSnapshot(await commandOutput(probePath, [String(pid)], {
     timeoutMs: 2_000,
     maxBuffer: 64 * 1024
   }))
+}
+
+export function processCpuInterval(start, end, observedQuantumNanoseconds) {
+  const startBefore = BigInt(start.monotonicBeforeNanoseconds)
+  const startAfter = BigInt(start.monotonicAfterNanoseconds)
+  const endBefore = BigInt(end.monotonicBeforeNanoseconds)
+  const endAfter = BigInt(end.monotonicAfterNanoseconds)
+  const startCpu = BigInt(start.totalNanoseconds)
+  const endCpu = BigInt(end.totalNanoseconds)
+  const quantum = BigInt(observedQuantumNanoseconds)
+  if (startAfter < startBefore || endAfter < endBefore || endBefore <= startAfter) {
+    throw new Error('Process CPU endpoint intervals do not form a positive ordered window')
+  }
+  if (endCpu < startCpu) throw new Error('Process CPU counter regressed')
+  if (quantum <= 0n) throw new Error('Process CPU observer quantum must be positive')
+
+  const delta = endCpu - startCpu
+  const cpuLower = delta > quantum ? delta - quantum : 0n
+  const cpuUpper = delta + quantum
+  const wallLower = endBefore - startAfter
+  const wallUpper = endAfter - startBefore
+  const wallEstimate = (wallLower + wallUpper) / 2n
+  const percent = (cpu, wall) => Number(cpu) / Number(wall) * 100
+  return {
+    distinguishable: delta > quantum,
+    deltaNanoseconds: delta.toString(),
+    observedQuantumNanoseconds: quantum.toString(),
+    cpuIntervalNanoseconds: {
+      lower: cpuLower.toString(),
+      upper: cpuUpper.toString()
+    },
+    wallIntervalNanoseconds: {
+      lower: wallLower.toString(),
+      estimate: wallEstimate.toString(),
+      upper: wallUpper.toString()
+    },
+    cpuSeconds: Number(delta) / 1_000_000_000,
+    wallSeconds: Number(wallEstimate) / 1_000_000_000,
+    cpuPercent: percent(delta, wallEstimate),
+    cpuPercentInterval: {
+      lower: percent(cpuLower, wallUpper),
+      upper: percent(cpuUpper, wallLower)
+    }
+  }
 }
 
 async function processFdCount(pid) {
@@ -991,32 +1103,37 @@ async function processFdCount(pid) {
 
 async function sampleProcess(pid, config, cpuProbe) {
   const rssSamplesKiB = []
-  const cpuStart = await processCpuCounter(pid, cpuProbe.path)
-  const wallStart = nowNs()
+  const cpuStart = await processCpuSnapshot(pid, cpuProbe.path)
   for (let index = 0; index < config.samples; index += 1) {
     rssSamplesKiB.push(await processRssKiB(pid))
     if (index + 1 < config.samples) await delay(config.intervalMs)
   }
-  const wallSeconds = Number(nowNs() - wallStart) / 1_000_000_000
-  const cpuEnd = await processCpuCounter(pid, cpuProbe.path)
-  const cpuNanoseconds = BigInt(cpuEnd.totalNanoseconds) - BigInt(cpuStart.totalNanoseconds)
-  if (cpuNanoseconds < 0n) throw new Error(`Process CPU counter regressed for PID ${pid}`)
-  const cpuSeconds = Number(cpuNanoseconds) / 1_000_000_000
+  const cpuEnd = await processCpuSnapshot(pid, cpuProbe.path)
+  const cpu = processCpuInterval(
+    cpuStart,
+    cpuEnd,
+    cpuProbe.evidence.calibration.observedQuantumNanoseconds
+  )
   return {
     rssSamplesKiB,
     meanRssKiB: mean(rssSamplesKiB),
     fdCount: await processFdCount(pid),
     cpuCounter: {
-      source: cpuProbe.evidence.source,
+      source: cpuProbe.evidence.counterSource,
+      endpointClock: cpuProbe.evidence.endpointClock,
       unit: cpuProbe.evidence.unit,
-      reportedResolutionNanoseconds: cpuProbe.evidence.reportedResolutionNanoseconds,
       start: cpuStart,
       end: cpuEnd,
-      deltaNanoseconds: cpuNanoseconds.toString()
+      distinguishable: cpu.distinguishable,
+      observedQuantumNanoseconds: cpu.observedQuantumNanoseconds,
+      deltaNanoseconds: cpu.deltaNanoseconds,
+      cpuIntervalNanoseconds: cpu.cpuIntervalNanoseconds,
+      wallIntervalNanoseconds: cpu.wallIntervalNanoseconds
     },
-    cpuSeconds,
-    wallSeconds,
-    cpuPercent: wallSeconds === 0 ? 0 : cpuSeconds / wallSeconds * 100
+    cpuSeconds: cpu.cpuSeconds,
+    wallSeconds: cpu.wallSeconds,
+    cpuPercent: cpu.cpuPercent,
+    cpuPercentInterval: cpu.cpuPercentInterval
   }
 }
 
@@ -1071,12 +1188,21 @@ async function runResources(runtime, kind, config, ownerPid, cpuProbe) {
   const released = await sampleProcess(ownerPid, config, cpuProbe)
   const releasedOwnerState = await runtime.ownerState()
   const resourceRunCount = config.sessions + 1
-  const retainedHistoricalFdsPerRun = (released.fdCount - idle.fdCount) / resourceRunCount
+  const expectedReleasedOwnerState = kind === 'agentmux'
+    ? { live: 0, historical: resourceRunCount, total: resourceRunCount }
+    : { live: 0, historical: 0, total: 0 }
+  const releasedOwnerCountMatches =
+    releasedOwnerState.live === expectedReleasedOwnerState.live &&
+    releasedOwnerState.historical === expectedReleasedOwnerState.historical &&
+    releasedOwnerState.total === expectedReleasedOwnerState.total
+  const retainedHistoricalFdsPerRun = kind === 'agentmux' && releasedOwnerState.historical > 0
+    ? (released.fdCount - idle.fdCount) / releasedOwnerState.historical
+    : null
   const comparableOwnerCensus =
-    idleOwnerState.live === 0 && idleOwnerState.historical === 0 &&
-    oneSessionOwnerState.live === 1 && oneSessionOwnerState.historical === 0 &&
+    idleOwnerState.live === 0 && idleOwnerState.historical === 0 && idleOwnerState.total === 0 &&
+    oneSessionOwnerState.live === 1 && oneSessionOwnerState.historical === 0 && oneSessionOwnerState.total === 1 &&
     manySessionsOwnerState.live === config.sessions && manySessionsOwnerState.historical === 0 &&
-    releasedOwnerState.live === 0
+    manySessionsOwnerState.total === config.sessions && releasedOwnerCountMatches
 
   return {
     idle,
@@ -1091,12 +1217,16 @@ async function runResources(runtime, kind, config, ownerPid, cpuProbe) {
     fixtureRssKiB,
     released,
     releasedOwnerState,
+    expectedReleasedOwnerState,
     retainedHistoricalFdsPerRun,
     perSessionRssKiB: (manySessions.meanRssKiB - idle.meanRssKiB) / config.sessions,
     oneSessionIncrementKiB: oneSession.meanRssKiB - idle.meanRssKiB,
     correctness:
       comparableOwnerCensus &&
-      (kind !== 'agentmux' || retainedHistoricalFdsPerRun <= 2.25)
+      (!config.requireDistinguishableCpu || idle.cpuCounter.distinguishable) &&
+      (kind !== 'agentmux' || (
+        Number.isFinite(retainedHistoricalFdsPerRun) && retainedHistoricalFdsPerRun <= 2.25
+      ))
   }
 }
 
@@ -1127,6 +1257,8 @@ function resourceSummary(resources) {
   if (!resources || resources.correctness !== true) {
     return {
       idleCpuPercent: null,
+      idleCpuPercentLower: null,
+      idleCpuPercentUpper: null,
       idleRssKiB: null,
       perSessionRssKiB: null,
       steadyRssKiB: null,
@@ -1136,6 +1268,8 @@ function resourceSummary(resources) {
   }
   return {
     idleCpuPercent: resources.idle.cpuPercent,
+    idleCpuPercentLower: resources.idle.cpuPercentInterval.lower,
+    idleCpuPercentUpper: resources.idle.cpuPercentInterval.upper,
     idleRssKiB: resources.idle.meanRssKiB,
     perSessionRssKiB: resources.perSessionRssKiB,
     steadyRssKiB: resources.steady.meanRssKiB,
@@ -1218,18 +1352,24 @@ export function evaluateFullRound(workloads, summary, environmentMatches) {
   less('scaleWall', 'p50')
   greater('scaleRate', 'p50')
   if (correctness.compareStopPerformance) less('stopCleanup', 'p95')
-  for (const metric of ['idleCpuPercent', 'idleRssKiB', 'perSessionRssKiB', 'steadyRssKiB', 'peakRssKiB', 'releasedRssKiB']) {
+  for (const metric of ['idleRssKiB', 'perSessionRssKiB', 'steadyRssKiB', 'peakRssKiB', 'releasedRssKiB']) {
     less('resources', metric)
   }
-  const budget = (metric, maximum) => {
-    const value = summary?.resources?.agentmux?.[metric]
+  const agentMuxCpuUpper = summary?.resources?.agentmux?.idleCpuPercentUpper
+  const tmuxCpuLower = summary?.resources?.tmux?.idleCpuPercentLower
+  if (!Number.isFinite(agentMuxCpuUpper) || !Number.isFinite(tmuxCpuLower)) {
+    failures.push('resources.idleCpuPercent.missing')
+  } else if (agentMuxCpuUpper >= tmuxCpuLower) {
+    failures.push('resources.idleCpuPercent')
+  }
+  const budget = (metric, maximum, value = summary?.resources?.agentmux?.[metric]) => {
     if (!Number.isFinite(value)) {
       failures.push(`budget.${metric}.missing`)
     } else if (value > maximum) {
       failures.push(`budget.${metric}`)
     }
   }
-  budget('idleCpuPercent', 1)
+  budget('idleCpuPercent', 1, agentMuxCpuUpper)
   budget('idleRssKiB', 96 * 1024)
   budget('peakRssKiB', 160 * 1024)
   return {
@@ -1240,7 +1380,7 @@ export function evaluateFullRound(workloads, summary, environmentMatches) {
   }
 }
 
-async function environmentManifest(mode) {
+async function environmentManifest(mode, cpuObserver) {
   const [gitSha, gitStatusResult, tmuxVersion, productVersion, darwinVersion, cpu, pnpmVersion] = await Promise.all([
     commandOutput('git', ['rev-parse', 'HEAD'], { cwd: repositoryRoot }),
     runCommand('git', ['status', '--porcelain=v1', '-z', '--untracked-files=normal'], { cwd: repositoryRoot }),
@@ -1273,7 +1413,15 @@ async function environmentManifest(mode) {
     pnpm: pnpmVersion,
     tmux: tmuxVersion,
     terminalGeometry: geometry,
-    locale: localeEnvironment
+    locale: localeEnvironment,
+    processCpuObserver: {
+      counterSource: cpuObserver.counterSource,
+      endpointClock: cpuObserver.endpointClock,
+      compiler: cpuObserver.compiler,
+      compilerVersion: cpuObserver.compilerVersion,
+      sdkPath: cpuObserver.sdkPath,
+      sdkVersion: cpuObserver.sdkVersion
+    }
   }
   const expected = {
     os: 'macOS 26.3.2',
@@ -1283,10 +1431,25 @@ async function environmentManifest(mode) {
     memoryBytes: 51_539_607_552,
     node: 'v24.14.1',
     pnpm: '11.5.1',
-    tmux: 'tmux 3.6b'
+    tmux: 'tmux 3.6b',
+    processCpuObserver: {
+      counterSource: 'proc_pid_rusage:RUSAGE_INFO_V4',
+      endpointClock: 'clock_gettime:CLOCK_MONOTONIC_RAW',
+      compiler: '/Library/Developer/CommandLineTools/usr/bin/clang',
+      compilerVersion: [
+        'Apple clang version 21.0.0 (clang-2100.0.123.102)',
+        'Target: arm64-apple-darwin25.3.0',
+        'Thread model: posix',
+        'InstalledDir: /Library/Developer/CommandLineTools/usr/bin'
+      ].join('\n'),
+      sdkPath: '/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk',
+      sdkVersion: '26.4'
+    }
   }
   const mismatches = Object.entries(expected).flatMap(([name, value]) => (
-    environment[name] === value ? [] : [{ name, expected: value, actual: environment[name] }]
+    JSON.stringify(environment[name]) === JSON.stringify(value)
+      ? []
+      : [{ name, expected: value, actual: environment[name] }]
   ))
   if (mode === 'full' && trackedDirtyPaths.length > 0) {
     mismatches.push({ name: 'trackedDirtyPaths', expected: [], actual: trackedDirtyPaths })
@@ -1535,7 +1698,7 @@ export async function runBenchmark(options) {
     config = benchmarkConfiguration(options.mode)
     cpuProbe = await buildProcessRusageProbe(root)
     const { AgentMuxClient } = await import(pathToFileURL(join(packageRoot, 'dist', 'index.js')).href)
-    environment = await environmentManifest(options.mode)
+    environment = await environmentManifest(options.mode, cpuProbe.evidence)
     const tmuxEnvironment = { ...process.env, ...localeEnvironment, TMUX_TMPDIR: tmuxDirectory }
     agentmux = new AgentMuxHarness(AgentMuxClient, runtimeDirectory)
     tmux = new TmuxHarness(socketName, tmuxEnvironment)

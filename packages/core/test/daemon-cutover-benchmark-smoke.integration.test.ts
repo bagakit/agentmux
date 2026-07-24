@@ -25,18 +25,38 @@ describe.runIf(
       verdict: string
       manifest: {
         processCpuObserver: {
-          source: string
+          counterSource: string
+          endpointClock: string
           unit: string
-          reportedResolutionNanoseconds: number
+          calibration: {
+            workload: string
+            samples: number
+            samplingDelayNanoseconds: string
+            positiveStepsNanoseconds: string[]
+            observedQuantumNanoseconds: string
+          }
           sourceSha256: string
+          binarySha256: string
+          compileArgv: string[]
         }
       }
       workloads: Record<string, unknown> & {
         resources: Record<'agentmux' | 'tmux', {
-          idle: { cpuCounter: { start: { totalNanoseconds: string }; end: { totalNanoseconds: string } } }
+          idle: {
+            cpuCounter: {
+              start: { monotonicBeforeNanoseconds: string; monotonicAfterNanoseconds: string; totalNanoseconds: string }
+              end: { monotonicBeforeNanoseconds: string; monotonicAfterNanoseconds: string; totalNanoseconds: string }
+              observedQuantumNanoseconds: string
+              cpuIntervalNanoseconds: { lower: string; upper: string }
+              wallIntervalNanoseconds: { lower: string; estimate: string; upper: string }
+            }
+          }
           idleOwnerState: { live: number; historical: number; total: number }
           oneSessionOwnerState: { live: number; historical: number; total: number }
           manySessionsOwnerState: { live: number; historical: number; total: number }
+          releasedOwnerState: { live: number; historical: number; total: number }
+          expectedReleasedOwnerState: { live: number; historical: number; total: number }
+          retainedHistoricalFdsPerRun: number | null
         }>
       }
       correctness: Record<string, { agentmux: boolean; tmux: boolean } | boolean>
@@ -48,7 +68,7 @@ describe.runIf(
     }
     expect(receipt.output).toBe(output)
     expect(raw).toMatchObject({
-      schema: 'agentmux.benchmark.daemon-cutover.v4',
+      schema: 'agentmux.benchmark.daemon-cutover.v5',
       mode: 'smoke',
       verdict: 'smoke'
     })
@@ -62,18 +82,45 @@ describe.runIf(
       'stopCleanup'
     ])
     expect(raw.manifest.processCpuObserver).toMatchObject({
-      source: 'proc_pid_rusage:RUSAGE_INFO_V4',
+      counterSource: 'proc_pid_rusage:RUSAGE_INFO_V4',
+      endpointClock: 'clock_gettime:CLOCK_MONOTONIC_RAW',
       unit: 'nanoseconds',
-      reportedResolutionNanoseconds: 1,
-      sourceSha256: expect.stringMatching(/^[a-f0-9]{64}$/u)
+      sourceSha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      binarySha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      compileArgv: expect.arrayContaining(['-std=c11', '-O2', '-Werror'])
     })
+    expect(raw.manifest.processCpuObserver.calibration).toMatchObject({
+      workload: 'forked-child-continuous-cpu-burn',
+      samples: 256
+    })
+    expect(raw.manifest.processCpuObserver.calibration.positiveStepsNanoseconds).not.toHaveLength(0)
+    expect(raw.manifest.processCpuObserver.calibration.observedQuantumNanoseconds).toMatch(/^\d+$/u)
     for (const runtime of ['agentmux', 'tmux'] as const) {
-      expect(raw.workloads.resources[runtime].idle.cpuCounter.start.totalNanoseconds).toMatch(/^\d+$/u)
-      expect(raw.workloads.resources[runtime].idle.cpuCounter.end.totalNanoseconds).toMatch(/^\d+$/u)
+      const cpu = raw.workloads.resources[runtime].idle.cpuCounter
+      expect(cpu.start.totalNanoseconds).toMatch(/^\d+$/u)
+      expect(cpu.start.monotonicBeforeNanoseconds).toMatch(/^\d+$/u)
+      expect(cpu.start.monotonicAfterNanoseconds).toMatch(/^\d+$/u)
+      expect(cpu.end.totalNanoseconds).toMatch(/^\d+$/u)
+      expect(BigInt(cpu.wallIntervalNanoseconds.lower)).toBeGreaterThan(0n)
+      expect(BigInt(cpu.wallIntervalNanoseconds.upper)).toBeGreaterThanOrEqual(
+        BigInt(cpu.wallIntervalNanoseconds.lower)
+      )
+      expect(BigInt(cpu.cpuIntervalNanoseconds.upper)).toBeGreaterThanOrEqual(
+        BigInt(cpu.cpuIntervalNanoseconds.lower)
+      )
+      expect(cpu.observedQuantumNanoseconds).toBe(
+        raw.manifest.processCpuObserver.calibration.observedQuantumNanoseconds
+      )
       expect(raw.workloads.resources[runtime].idleOwnerState).toEqual({ live: 0, historical: 0, total: 0 })
       expect(raw.workloads.resources[runtime].oneSessionOwnerState).toEqual({ live: 1, historical: 0, total: 1 })
       expect(raw.workloads.resources[runtime].manySessionsOwnerState).toEqual({ live: 2, historical: 0, total: 2 })
     }
+    expect(raw.workloads.resources.agentmux.releasedOwnerState).toEqual({ live: 0, historical: 3, total: 3 })
+    expect(raw.workloads.resources.agentmux.expectedReleasedOwnerState).toEqual({ live: 0, historical: 3, total: 3 })
+    expect(raw.workloads.resources.agentmux.retainedHistoricalFdsPerRun).toBeTypeOf('number')
+    expect(raw.workloads.resources.tmux.releasedOwnerState).toEqual({ live: 0, historical: 0, total: 0 })
+    expect(raw.workloads.resources.tmux.expectedReleasedOwnerState).toEqual({ live: 0, historical: 0, total: 0 })
+    expect(raw.workloads.resources.tmux.retainedHistoricalFdsPerRun).toBeNull()
     expect(Object.keys(raw.correctness)).toEqual(expect.arrayContaining([
       'inputToVisible',
       'throughput',
