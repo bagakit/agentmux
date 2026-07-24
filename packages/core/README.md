@@ -43,3 +43,5 @@ const byNative = client.resolveAgentSession({
 ```
 
 Packed consumer 已覆盖 Core API 与 `agentmux list/status/send/interrupt/attach/resume/stop` 的真实 Codex 生命周期。Provider-native Resume 保留 `agentSessionId`，创建新的 CtxMux RunId；旧 Run 只保留有界 stale tombstone，不能再被操作或投影成 Raw Terminal。
+
+浏览器侧只需要 View 投影和 focus resolver 时，从 `@agentmux/core/runtime` 导入。该子路径不加载 Agent Client、Hook Server、File Store 或 CtxMux Adapter 等 Node-only Runtime 模块。
