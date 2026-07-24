@@ -22,7 +22,6 @@ import process from 'node:process'
 
 const PRODUCT_NAME = 'AgentMux'
 const BUNDLE_ID = 'dev.agentmux.desktop'
-const CTXMUX_RUNTIME_ID = '88e8377ecc4341b655d47306'
 const require = createRequire(import.meta.url)
 const desktopRoot = resolve(import.meta.dirname, '..')
 const repositoryRoot = resolve(desktopRoot, '../..')
@@ -312,12 +311,8 @@ async function verifyLaunchServices(appPath, verificationRoot) {
   const userData = join(verificationRoot, 'user-data')
   const stdoutPath = join(verificationRoot, 'desktop-stdout.log')
   const stderrPath = join(verificationRoot, 'desktop-stderr.log')
-  const endpointPath = join(
-    '/private/tmp',
-    `amx-${process.getuid()}-${CTXMUX_RUNTIME_ID}`,
-    'ctxmux.sock'
-  )
-  const runtimeRoot = dirname(endpointPath)
+  const runtimeRoot = await mkdtemp(join('/private/tmp', `amx-smoke-${process.getuid()}-`))
+  const endpointPath = join(runtimeRoot, 'ctxmux.sock')
   const ownerReceiptPath = join(runtimeRoot, 'owner.json')
   const executable = join(appPath, 'Contents', 'MacOS', PRODUCT_NAME)
   const daemonEntrypoint = join(
@@ -336,19 +331,18 @@ async function verifyLaunchServices(appPath, verificationRoot) {
   )
   await mkdir(userData, { recursive: true })
   const before = new Set(await processIdsForApplication(appPath))
-  const endpointExistedBefore = await pathExists(endpointPath)
-  const runtimeRootExistedBefore = await pathExists(runtimeRoot)
   try {
     await run('open', [
       '-n',
       '-j',
       '-W',
-      '-a', appPath,
       '--stdout', stdoutPath,
       '--stderr', stderrPath,
       '--env', `AGENTMUX_DESKTOP_USER_DATA=${userData}`,
+      '--env', `AGENTMUX_RUNTIME_DIRECTORY=${runtimeRoot}`,
       '--env', `AGENTMUX_DESKTOP_READY_FILE=${readyFile}`,
-      '--env', 'AGENTMUX_DESKTOP_EXIT_AFTER_READY=1'
+      '--env', 'AGENTMUX_DESKTOP_EXIT_AFTER_READY=1',
+      appPath
     ], { capture: true })
     if (!await pathExists(readyFile)) {
       const stderr = await readFile(stderrPath, 'utf8').catch(() => '')
@@ -357,6 +351,12 @@ async function verifyLaunchServices(appPath, verificationRoot) {
     const ready = JSON.parse(await readFile(readyFile, 'utf8'))
     assert(ready.productName === PRODUCT_NAME, 'LaunchServices started an incorrectly branded application.')
     assert(ready.packaged === true, 'LaunchServices did not start the packaged application.')
+    const ownerReceipt = JSON.parse(await readFile(ownerReceiptPath, 'utf8'))
+    assert(
+      await realpath(ownerReceipt.daemonPath) === await realpath(daemonEntrypoint) &&
+        ownerReceipt.socketPath === endpointPath,
+      'LaunchServices did not start the exact packaged CtxMux runtime.'
+    )
     const remaining = (await processIdsForApplication(appPath)).filter((pid) => !before.has(pid))
     assert(remaining.length === 0, `Packaged Desktop left ${remaining.length} process(es) after the smoke run.`)
   } finally {
@@ -382,23 +382,8 @@ async function verifyLaunchServices(appPath, verificationRoot) {
       remainingDaemonPids = await ownedDaemonPids()
     }
     assert(remainingDaemonPids.length === 0, 'Launch smoke ctxmuxd survived scoped cleanup.')
-    if (!endpointExistedBefore) {
-      const ownerReceipt = JSON.parse(await readFile(ownerReceiptPath, 'utf8'))
-      assert(
-        await realpath(ownerReceipt.daemonPath) === await realpath(daemonEntrypoint) &&
-          ownerReceipt.socketPath === endpointPath,
-        'Launch smoke cannot prove ownership of the CtxMux endpoint cleanup.'
-      )
-      if (runtimeRootExistedBefore) {
-        await Promise.all([
-          rm(endpointPath, { force: true }),
-          rm(ownerReceiptPath, { force: true })
-        ])
-      } else {
-        await rm(runtimeRoot, { recursive: true, force: true })
-      }
-      assert(!await pathExists(endpointPath), 'Launch smoke ctxmuxd endpoint survived scoped cleanup.')
-    }
+    await rm(runtimeRoot, { recursive: true, force: true })
+    assert(!await pathExists(endpointPath), 'Launch smoke ctxmuxd endpoint survived scoped cleanup.')
   }
 }
 
