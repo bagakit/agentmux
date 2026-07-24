@@ -8,7 +8,12 @@ import {
   type ExecutionHost
 } from './execution-host.js'
 import { AgentHookServer } from './hook-server.js'
-import { AGENTMUX_TMUX_PREFIX, TmuxClient, type TmuxPaneInfo } from './tmux-client.js'
+import {
+  AGENTMUX_TMUX_PREFIX,
+  TmuxClient,
+  TmuxRollbackError,
+  type TmuxPaneInfo
+} from './tmux-client.js'
 import type {
   AgentActivity,
   AgentStatus,
@@ -25,6 +30,11 @@ export type AgentMuxRuntimeOptions = {
   hosts?: readonly ExecutionHost[]
   providers?: readonly AgentProvider[]
   pollIntervalMs?: number
+}
+
+export type PreparedExecutionHost = {
+  readonly host: ExecutionHost
+  readonly sessions: readonly SessionSnapshot[]
 }
 
 function safeSessionId(value: string): string {
@@ -65,8 +75,10 @@ export class AgentMuxRuntime {
   private readonly activities = new Map<string, AgentActivity[]>()
   private readonly watchers = new Map<string, NodeJS.Timeout>()
   private readonly inputTails = new Map<string, Promise<void>>()
+  private readonly launchReservations = new Map<string, symbol>()
   private readonly hookServer: AgentHookServer
   private readonly pollIntervalMs: number
+  private startPromise: Promise<void> | null = null
   private started = false
 
   constructor(options: AgentMuxRuntimeOptions = {}) {
@@ -78,12 +90,28 @@ export class AgentMuxRuntime {
 
   async start(): Promise<void> {
     if (this.started) return
-    this.started = true
-    await this.hookServer.start()
-    for (const host of this.hosts.list()) await this.discover(host.id)
+    const existing = this.startPromise
+    if (existing) return await existing
+    const startPromise = (async () => {
+      try {
+        await this.hookServer.start()
+        for (const host of this.hosts.list()) await this.discover(host.id)
+        this.started = true
+      } catch (error) {
+        await this.hookServer.stop().catch(() => {})
+        throw error
+      }
+    })()
+    this.startPromise = startPromise
+    try {
+      await startPromise
+    } finally {
+      if (this.startPromise === startPromise) this.startPromise = null
+    }
   }
 
   async dispose(): Promise<void> {
+    await this.startPromise?.catch(() => {})
     this.started = false
     for (const watcher of this.watchers.values()) clearInterval(watcher)
     this.watchers.clear()
@@ -112,102 +140,115 @@ export class AgentMuxRuntime {
   }
 
   async launch(request: SessionLaunchRequest): Promise<SessionSnapshot> {
-    await this.start()
-    const host = this.hosts.get(request.hostId ?? 'local')
-    const client = new TmuxClient(host)
-    await client.assertAvailable()
     const id = safeSessionId(request.sessionId ?? randomUUID())
-    if (this.sessions.has(id)) throw new AgentMuxError(`Session already exists: ${id}`, 'DUPLICATE_SESSION')
-    const tmuxSession = `${AGENTMUX_TMUX_PREFIX}${id}`
-    const workspaceName = request.workspacePath.split(/[\\/]/).pop() || request.workspacePath
-    let launch: { command?: string; args?: readonly string[]; env: Record<string, string>; agentId: string | null; label: string }
-    if (request.kind === 'agent') {
-      const provider = this.providers.get(request.agentId)
-      if (!(await provider.detect(host, request.commandOverride))) {
-        throw new AgentMuxError(`${provider.label} is not installed on ${host.label}.`, 'AGENT_NOT_FOUND')
-      }
-      const plan = provider.buildLaunch({
-        workspacePath: request.workspacePath,
-        prompt: request.prompt ?? '',
-        args: request.args ?? [],
-        env: request.env ?? {},
-        ...(request.commandOverride !== undefined ? { commandOverride: request.commandOverride } : {})
-      })
-      const endpoint = this.hookServer.getEndpoint()
-      if (!endpoint) throw new AgentMuxError('Hook server is not running.', 'HOOK_SERVER_NOT_RUNNING')
-      const hookPort = await host.exposeLoopbackPort(endpoint.port)
-      const label = request.label?.trim() || `${provider.label} · ${workspaceName}`
-      launch = {
-        command: plan.command,
-        args: plan.args,
-        agentId: provider.id,
-        label,
-        env: {
-          ...plan.env,
-          ...metadataEnvironment({ sessionId: id, kind: 'agent', agentId: provider.id, hostId: host.id, workspacePath: request.workspacePath, label }),
-          AGENTMUX_HOOK_URL: `http://127.0.0.1:${hookPort}/v1/events`,
-          AGENTMUX_HOOK_TOKEN: endpoint.token
+    if (this.sessions.has(id) || this.launchReservations.has(id)) {
+      throw new AgentMuxError(`Session already exists: ${id}`, 'DUPLICATE_SESSION')
+    }
+    const launchAttempt = Symbol(id)
+    this.launchReservations.set(id, launchAttempt)
+    try {
+      await this.start()
+      const host = this.hosts.get(request.hostId ?? 'local')
+      const client = new TmuxClient(host)
+      await client.assertAvailable()
+      const tmuxSession = `${AGENTMUX_TMUX_PREFIX}${id}`
+      const workspaceName = request.workspacePath.split(/[\\/]/).pop() || request.workspacePath
+      let launch: { command?: string; args?: readonly string[]; env: Record<string, string>; agentId: string | null; label: string }
+      if (request.kind === 'agent') {
+        const provider = this.providers.get(request.agentId)
+        if (!(await provider.detect(host, request.commandOverride))) {
+          throw new AgentMuxError(`${provider.label} is not installed on ${host.label}.`, 'AGENT_NOT_FOUND')
+        }
+        const plan = provider.buildLaunch({
+          workspacePath: request.workspacePath,
+          prompt: request.prompt ?? '',
+          args: request.args ?? [],
+          env: request.env ?? {},
+          ...(request.commandOverride !== undefined ? { commandOverride: request.commandOverride } : {})
+        })
+        const endpoint = this.hookServer.getEndpoint()
+        if (!endpoint) throw new AgentMuxError('Hook server is not running.', 'HOOK_SERVER_NOT_RUNNING')
+        const hookPort = await host.exposeLoopbackPort(endpoint.port)
+        const label = request.label?.trim() || `${provider.label} · ${workspaceName}`
+        launch = {
+          command: plan.command,
+          args: plan.args,
+          agentId: provider.id,
+          label,
+          env: {
+            ...plan.env,
+            ...metadataEnvironment({ sessionId: id, kind: 'agent', agentId: provider.id, hostId: host.id, workspacePath: request.workspacePath, label }),
+            AGENTMUX_HOOK_URL: `http://127.0.0.1:${hookPort}/v1/events`,
+            AGENTMUX_HOOK_TOKEN: endpoint.token
+          }
+        }
+      } else {
+        const label = request.label?.trim() || `Terminal · ${workspaceName}`
+        launch = {
+          agentId: null,
+          label,
+          env: metadataEnvironment({ sessionId: id, kind: 'terminal', hostId: host.id, workspacePath: request.workspacePath, label })
         }
       }
-    } else {
-      const label = request.label?.trim() || `Terminal · ${workspaceName}`
-      launch = {
-        agentId: null,
-        label,
-        env: metadataEnvironment({ sessionId: id, kind: 'terminal', hostId: host.id, workspacePath: request.workspacePath, label })
-      }
-    }
-    const now = Date.now()
-    const sessionBase = {
-      id,
-      tmuxSession,
-      hostId: host.id,
-      workspacePath: request.workspacePath,
-      label: launch.label,
-      createdAt: now,
-      updatedAt: now,
-      processState: 'starting' as const,
-      status: { state: 'starting' as const, source: 'tmux' as const, observedAt: now },
-      terminalSnapshot: ''
-    }
-    const session: SessionSnapshot = request.kind === 'agent'
-      ? { ...sessionBase, kind: 'agent', agentId: launch.agentId! }
-      : { ...sessionBase, kind: 'terminal', agentId: null }
-    this.sessions.set(id, session)
-    this.emit({ type: 'session', session: cloneSession(session) })
-    try {
-      await client.start({
-        sessionName: tmuxSession,
-        cwd: request.workspacePath,
-        ...(launch.command === undefined ? {} : { command: launch.command, args: launch.args ?? [] }),
-        env: launch.env,
-        ...(request.cols !== undefined ? { cols: request.cols } : {}),
-        ...(request.rows !== undefined ? { rows: request.rows } : {})
-      })
-    } catch (error) {
-      this.setStatus(session, {
-        state: 'error',
-        source: 'tmux',
-        observedAt: Date.now(),
-        detail: error instanceof Error ? error.message : String(error)
-      })
-      this.forgetSession(id)
-      throw error
-    }
-    if (request.kind === 'agent' && request.prompt?.trim()) {
-      this.addActivity({
-        id: randomUUID(),
-        sessionId: id,
-        kind: 'prompt',
-        source: 'user',
+      const now = Date.now()
+      const sessionBase = {
+        id,
+        tmuxSession,
+        hostId: host.id,
+        workspacePath: request.workspacePath,
+        label: launch.label,
         createdAt: now,
-        title: 'Initial prompt',
-        content: request.prompt.trim()
-      })
+        updatedAt: now,
+        processState: 'starting' as const,
+        status: { state: 'starting' as const, source: 'tmux' as const, observedAt: now },
+        terminalSnapshot: ''
+      }
+      const session: SessionSnapshot = request.kind === 'agent'
+        ? { ...sessionBase, kind: 'agent', agentId: launch.agentId! }
+        : { ...sessionBase, kind: 'terminal', agentId: null }
+      try {
+        await client.start({
+          sessionName: tmuxSession,
+          cwd: request.workspacePath,
+          ...(launch.command === undefined ? {} : { command: launch.command, args: launch.args ?? [] }),
+          env: launch.env,
+          ...(request.cols !== undefined ? { cols: request.cols } : {}),
+          ...(request.rows !== undefined ? { rows: request.rows } : {})
+        })
+      } catch (error) {
+        if (error instanceof TmuxRollbackError) {
+          session.processState = 'unknown'
+          session.status = {
+            state: 'error',
+            source: 'tmux',
+            observedAt: Date.now(),
+            detail: error.detail ?? error.message
+          }
+          session.updatedAt = session.status.observedAt
+          this.sessions.set(id, session)
+          this.emit({ type: 'session', session: cloneSession(session) })
+        }
+        throw error
+      }
+      this.sessions.set(id, session)
+      this.emit({ type: 'session', session: cloneSession(session) })
+      if (request.kind === 'agent' && request.prompt?.trim()) {
+        this.addActivity({
+          id: randomUUID(),
+          sessionId: id,
+          kind: 'prompt',
+          source: 'user',
+          createdAt: now,
+          title: 'Initial prompt',
+          content: request.prompt.trim()
+        })
+      }
+      this.watch(id)
+      await this.poll(id)
+      return cloneSession(session)
+    } finally {
+      if (this.launchReservations.get(id) === launchAttempt) this.launchReservations.delete(id)
     }
-    this.watch(id)
-    await this.poll(id)
-    return cloneSession(session)
   }
 
   async discover(hostId: string): Promise<SessionSnapshot[]> {
@@ -218,15 +259,30 @@ export class AgentMuxRuntime {
     } catch {
       return []
     }
-    const discovered: SessionSnapshot[] = []
+    return this.publishPreparedHost(await this.scanHost(host, client))
+  }
+
+  async prepareHost(host: ExecutionHost): Promise<PreparedExecutionHost> {
+    const client = new TmuxClient(host)
+    await client.assertAvailable()
+    return await this.scanHost(host, client)
+  }
+
+  commitHost(prepared: PreparedExecutionHost): ExecutionHost | undefined {
+    const previous = this.hosts.replace(prepared.host)
+    this.publishPreparedHost(prepared)
+    return previous
+  }
+
+  removeHost(hostId: string): ExecutionHost | undefined {
+    return this.hosts.remove(hostId)
+  }
+
+  private async scanHost(host: ExecutionHost, client: TmuxClient): Promise<PreparedExecutionHost> {
+    const sessions: SessionSnapshot[] = []
     for (const tmuxSession of await client.list()) {
       if (!tmuxSession.name.startsWith(AGENTMUX_TMUX_PREFIX)) continue
       const id = tmuxSession.name.slice(AGENTMUX_TMUX_PREFIX.length)
-      const existing = this.sessions.get(id)
-      if (existing) {
-        discovered.push(cloneSession(existing))
-        continue
-      }
       const env = await client.showEnvironment(tmuxSession.name)
       const kind = env.AGENTMUX_SESSION_KIND
       const agentId = env.AGENTMUX_AGENT_ID
@@ -236,7 +292,7 @@ export class AgentMuxRuntime {
       const recoveredBase = {
         id,
         tmuxSession: tmuxSession.name,
-        hostId,
+        hostId: host.id,
         workspacePath,
         label: env.AGENTMUX_SESSION_LABEL || `${kind === 'agent' ? agentId : 'Terminal'} · recovered`,
         createdAt,
@@ -248,9 +304,24 @@ export class AgentMuxRuntime {
       const session: SessionSnapshot = kind === 'agent'
         ? { ...recoveredBase, kind: 'agent', agentId: agentId! }
         : { ...recoveredBase, kind: 'terminal', agentId: null }
-      this.sessions.set(id, session)
-      await this.poll(id, false)
-      this.watch(id)
+      await this.inspectSession(session, client, false)
+      sessions.push(session)
+    }
+    return { host, sessions }
+  }
+
+  private publishPreparedHost(prepared: PreparedExecutionHost): SessionSnapshot[] {
+    const discovered: SessionSnapshot[] = []
+    for (const preparedSession of prepared.sessions) {
+      const existing = this.sessions.get(preparedSession.id)
+      if (existing) {
+        discovered.push(cloneSession(existing))
+        continue
+      }
+      if (this.launchReservations.has(preparedSession.id)) continue
+      const session = cloneSession(preparedSession)
+      this.sessions.set(session.id, session)
+      this.watch(session.id)
       this.emit({ type: 'session', session: cloneSession(session) })
       discovered.push(cloneSession(session))
     }
@@ -347,6 +418,14 @@ export class AgentMuxRuntime {
     const session = this.sessions.get(sessionId)
     if (!session) return
     const client = new TmuxClient(this.hosts.get(session.hostId))
+    await this.inspectSession(session, client, emitEvents)
+  }
+
+  private async inspectSession(
+    session: SessionSnapshot,
+    client: TmuxClient,
+    emitEvents: boolean
+  ): Promise<void> {
     let pane: TmuxPaneInfo | null
     try {
       pane = await client.inspect(session.tmuxSession)
@@ -401,7 +480,7 @@ export class AgentMuxRuntime {
         session.terminalSnapshot = captured
         session.updatedAt = Date.now()
         if (emitEvents) {
-          this.emit({ type: 'terminal', sessionId, snapshot: captured, observedAt: session.updatedAt })
+          this.emit({ type: 'terminal', sessionId: session.id, snapshot: captured, observedAt: session.updatedAt })
         }
       }
     } catch (error) {

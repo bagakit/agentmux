@@ -19,6 +19,7 @@ import { BrowserViewManager } from './browser-view-manager.js'
 import { ConfigStore } from './config-store.js'
 import { createExecutionHost } from './host-factory.js'
 import { RuntimeController } from './runtime-controller.js'
+import { saveRuntimeConfig } from './runtime-config-transaction.js'
 import { WorkspaceFiles } from './workspace-files.js'
 import { WorktreeService } from './worktree-service.js'
 
@@ -34,7 +35,7 @@ export async function registerIpc(args: {
   runtime: RuntimeController
 }): Promise<() => void> {
   let config = await args.configStore.get()
-  await args.runtime.configure(config)
+  args.runtime.commit(await args.runtime.prepare(config))
   const files = new WorkspaceFiles((id) => args.runtime.value.hosts.get(id))
   const worktrees = new WorktreeService((id) => args.runtime.value.hosts.get(id), args.configStore)
   const browsers = new BrowserViewManager(args.window)
@@ -49,9 +50,7 @@ export async function registerIpc(args: {
 
   handle('config:get', () => config)
   handle('config:save', async (next: AppConfig) => {
-    args.runtime.assertConfigurable(next)
-    const saved = await args.configStore.save(next)
-    await args.runtime.configure(saved)
+    const saved = await saveRuntimeConfig({ runtime: args.runtime, configWriter: args.configStore, next })
     config = saved
     return saved
   })
