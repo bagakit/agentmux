@@ -11,7 +11,7 @@
     "docs/a mature workbench-agent-runtime-notes.md",
     "docs/plans/agentmux-semantic-session.md"
   ],
-  "supersedes_revision": 7,
+  "supersedes_revision": 8,
   "tasks": [
     {
       "id": "T-010",
@@ -222,26 +222,27 @@
     },
     {
       "id": "T-020",
-      "title": "完成 ctxmux 原子切换与 AgentMux 统一 CLI",
-      "objective": "在保留 T-016 blocked 证据的前提下，以满足全部解除条件的新 ctxmux candidate 完成同一次原子切换，交付以稳定 AgentMux Agent Session ID 为主键的统一 CLI/SDK 操作面，并直接删除自建 agentmuxd Run Kernel。",
-      "outcome": "ctxmuxd 成为唯一 PTY/Process/Replay Owner；AgentMux 以自己的 Agent Session ID 统一解析和操作不同 Provider，并可把 Raw Terminal/View ID 或 Agent Session ID 解析成当前已打开 View；CLI、SDK 与 Desktop 共享一份 Core 身份真相；产品不存在双 Runtime、第二身份索引或迁移期公开配置。",
+      "title": "完成 ctxmux Local 原子切换与 AgentMux 统一 CLI",
+      "objective": "消费一个通过所需 public behavior Gate 的精确 ctxmux commit，在同一次变更中把 Local Terminal 与 Codex 切到唯一 CtxmuxRunAdapter，交付以稳定 AgentMux Agent Session ID 为主键的统一 CLI/SDK/View 操作面，并直接删除自建 agentmuxd、node-pty 和旧 Local/SSH Run production paths。",
+      "outcome": "ctxmuxd 成为唯一 Local PTY/Process/Replay Owner；AgentMux 以自己的 Agent Session ID 统一解析和操作 Provider，并可把 Raw Terminal/View ID 或 Agent Session ID 解析成当前已打开 View；Remote 在后续 T-021 前明确 unsupported；产品不存在双 Runtime、第二身份索引、相邻目录依赖或迁移期公开配置。",
       "acceptance": [
-        "T-015 和原 T-016 的九项外部解除条件全部由新的版本化 ctxmux public package 与 Conformance 证据关闭；缺少任何硬 Gate 时本任务阻塞，不回退旧 daemon 或部分切换。",
-        "Local Terminal 与 Codex 先在最终 Adapter 上通过完整 Conformance，再接通 Claude、TraeX、Hermes 与 Pi；不建立通用 Backend Registry。",
-        "SSH 使用系统 Client 与用户现有认证连接版本匹配的远端 ctxmuxd；Desktop 完全退出、UI Crash、SSH Partition、lost create response、late event、gap、resize、signal 和 stop 均通过 public API 恢复，不重复 Spawn 或重放已确认 Input。",
+        "固定并记录一个干净、已提交的 ctxmux commit；其 public SDK/CLI/daemon 以可复现的 exact-commit package/binary 合同被 AgentMux 消费，不使用相邻目录、file dependency、私有模块、复制 wire、全局安装或未记录本地产物。两仓库同属用户，因此 License、公开 npm 发布与 GitHub Release 不阻塞本次 Local 内部集成，也不得被写成已发布。",
+        "ctxmux public boundary 先交付并证明累计 output byte cursor、Replay/Gap、public interrupt/signal、完整 process-tree stop 和 exact-commit consumption；若需要 Adapter 自持 cursor、receipt、process owner 或第二 Runtime，停止 AgentMux 实现并回到 ctxmux owner 修复。",
+        "Local Terminal 与 Codex 在一个 CtxmuxRunAdapter 上完成真实端到端切换；Desktop 完全退出或 UI Crash 后重开可继续同一 Run，replay/input/resize/interrupt/stop 只经 ctxmux public API，late event、gap 与 stale identity 失败关闭，不重复 Spawn 或重放已确认 Input。",
+        "Claude、TraeX、Hermes 与 Pi 继续复用同一 AgentMux Provider/Agent Session 合同；本任务只要求 Local Terminal+Codex 代表性竖切，不建立通用 Backend Registry，也不把 Agent 语义下沉 ctxmux。",
         "AgentMux agentSessionId 是跨 Provider 的稳定公共主键；Core-owned Store/Resolver 可由 Provider + native session ID、ACP handle 或 exact RunRef 唯一反查该主键，歧义、过期绑定和身份冲突一律失败关闭。",
         "交付 a mature workbench-like AgentMux CLI：可按 AgentMux ID 执行 list、status、send、interrupt、attach、resume 与 stop，并按 Provider capability 给出明确成功或 unsupported；调用方不需要理解各 Agent CLI 的 native session 参数或 ctxmux Run ID。",
         "交付独立于 Run 生命周期的 switch：Raw Terminal 使用 runtime-issued Terminal/View ID 聚焦对应的当前已打开 View；Agent 使用 AgentMux agentSessionId 经 Core Resolver 唯一解析到当前 View 后聚焦。switch 只改变 Desktop Client 当前焦点，不 Open View、不 Attach、不 Resume、不 Spawn，也不修改 ctxmux Run 或 Attachment。",
         "unknown、ambiguous、stale、not-open 的 Terminal/View ID 或 Agent Session ID 一律失败关闭；不得猜测最近 View、隐式新建 View，或把旧 Run/已关闭 View 当作可切换目标。",
         "CLI、Desktop 与外部 SDK 只调用同一 Core Agent Session Store/Resolver、View Resolver、Agent 操作合同和 typed Desktop control；不得在 CLI 或 Renderer 建第二份索引，不把 Agent identity 下沉 ctxmux，也不把 ctxmux wire、SDK type 或 Run-only 状态上浮为 AgentMux 公共身份。",
-        "同一切换中删除自建 daemon server/client/protocol/session journal/PTY/process cleanup/remote artifact、node-pty direct ownership 与 package bin；仅保留已移植的 Conformance 与通用 Agent 语义测试。",
+        "同一切换中删除自建 daemon server/client/protocol/session journal/PTY/process cleanup/remote artifact、node-pty direct ownership、旧 Local/SSH ExecutionHost Run 路径与 package bin；仅保留已移植的 Conformance 与通用 Agent 语义测试。Remote 在 T-021 前返回 typed unsupported，不保留旧 SSH、fallback 或隐藏可用路径。",
         "删除 Backend Selector、Alias、Migration、Fallback、旧 CLI 兼容与旧文档承诺；不存在双 Runtime 或过渡公开配置。"
       ],
       "verification": [
         {
           "kind": "command",
           "ref": "package.json#scripts.check",
-          "proves": "Core、Desktop、AgentMux CLI、Package Consumer 与 Local/SSH 在唯一 ctxmux Kernel 和统一身份 Resolver 上通过回归。"
+          "proves": "Core、Desktop、AgentMux CLI、Package Consumer 与 Local Terminal+Codex 在唯一 ctxmux Kernel 和统一身份 Resolver 上通过回归，Remote 明确 unsupported。"
         },
         {
           "kind": "command",
@@ -256,7 +257,7 @@
         {
           "kind": "artifact",
           "ref": "docs/plans/ctxmux-cutover.md",
-          "proves": "切换、CLI/Resolver 身份合同、删除清单、运行证据与剩余外部边界可审计。"
+          "proves": "精确 ctxmux commit、可复现消费、Local 切换、CLI/Resolver/View switch、删除清单、Remote unsupported 与运行证据可审计。"
         }
       ],
       "source_refs": [
@@ -273,13 +274,13 @@
     {
       "id": "T-017",
       "title": "重做 Package、可靠性、安全与资源验收",
-      "objective": "在最终 ctxmux candidate 上重新验证干净 Consumer、Doctor、Local/SSH、权限、安全、Chaos、Stress 和内存边界，废止只证明自建 daemon 的旧发布结论。",
+      "objective": "在完成 Local 原子切换的精确 ctxmux candidate 上重新验证干净 Consumer、Doctor、权限、安全、Chaos、Stress 和内存边界，废止只证明自建 daemon 的旧发布结论，并保持 Remote typed unsupported。",
       "outcome": "Core 的可发布性和资源成本由最终 Kernel 与最终公共 API 共同证明，不引用旧 daemon SHA 或用测试迁移数量冒充行为完成。",
       "acceptance": [
-        "pnpm pack 在干净外部 Node 项目安装并运行 Local/SSH 最小示例；包不依赖 Electron、React、开发路径或自建 agentmuxd artifact。",
+        "pnpm pack 在干净外部 Node 项目安装并运行 Local 最小示例；包不依赖 Electron、React、相邻源码目录、开发路径或自建 agentmuxd artifact，Remote 返回 typed unsupported。",
         "Doctor 输出 AgentMux Provider/ACP/Hook、ctxmux 版本/capability、Local/Remote Host 与权限边界的可操作诊断。",
         "Security/Fuzz 覆盖输入、Workspace、Secret、Permission 和 Adapter 边界；不重复测试或维护 ctxmux 内部 wire。",
-        "Chaos/Stress 覆盖 Client Crash、SSH Partition、slow consumer、attach/detach、stop、reconnect 和多 Session；无孤儿、无界队列或隐藏 Owner。",
+        "Chaos/Stress 覆盖 Client Crash、slow consumer、attach/detach、stop、reconnect 和多 Session；无孤儿、无界队列或隐藏 Owner。SSH Partition 留给 T-021，不保留旧 SSH Gate 冒充完成。",
         "资源证据分别量化 ctxmuxd、AgentMux Client、每 Run、每 Attachment、Replay 与 Desktop，并证明关闭后的确定性资源释放。"
       ],
       "verification": [
@@ -344,17 +345,17 @@
         "结构化 send/check/ack/reply/ask 与一次性 Terminal Input 是不同 API；Delivery 在 Ack 前可幂等重放，Ask timeout 后按原 Message ID 恢复，不重新创建问题或重复注入 Prompt。",
         "状态至少区分 queued、delivered、accepted、replied、failed、timed-out、cancelled；PTY write 最多证明 delivered，只有 Hook、ACP 或绑定 Session/Run/Thread 的 scoped reply receipt 能推进 accepted/replied，terminal idle、标题、输出相似或模型服从提示词均不能冒充相关回复。",
         "完整 Handoff 与受监督 Dispatch 的所有权分开：Handoff 交出工作后原 Owner 不再等待；Dispatch 明确绑定 Task/attempt/target Agent，question、escalation、worker_done 与 cleanup 都有稳定相关 ID。Core 提供通信事实，不实现自动调度、Agent 选型、结果评判或 coordinator loop。",
-        "Provider-neutral 投递只消费当前 Agent Session continuity 与 exact RunRef；Run replacement、迟到事件、Local/SSH partition、重复调用和 Client 重开不会错投到旧 Run 或重复 Prompt。新增 Provider 只扩展 Capability/Evidence fixture，不新增 Agent pair switch。",
+        "Provider-neutral 投递只消费当前 Agent Session continuity 与 exact RunRef；Run replacement、迟到事件、重复调用和 Client 重开不会错投到旧 Run 或重复 Prompt。新增 Provider 只扩展 Capability/Evidence fixture，不新增 Agent pair switch；Remote 仍按 T-021 前的 typed unsupported 处理。",
         "权限默认拒绝跨 Workspace、自动唤醒、Agent 发起后续 Turn 和未来附件；消息大小、历史、并发、hop/cycle、waiter、retry、token 与 Inbox 都有硬上限，伪造/重放/错 Session/Run/Thread/过期 receipt fail closed。",
         "Desktop Board Inbox 与 Discussion Canvas 允许选择 source/target Agent、查看 Thread、回复/取消/超时和 Evidence 等级；刷新或重启从 Core 有界投影恢复，不持有第二消息状态机，也不把 delivery-only 文案写成已回复。",
         "先用一个 correlated-reply Provider pair、一个 delivery-only Provider 和一个 unsupported target 完成真实竖切，再扩大矩阵；回归覆盖 duplicate、target replacement、A→B→A cycle、permission withdrawal、timeout/cancel race、慢 Consumer 与资源释放。",
-        "完成 T-019 后执行 Feature Closeout；最终代码不存在 a mature workbench Account/Relay/legacy compatibility、隐藏 Terminal 注入协议、第二 Run Owner 或无界 orchestration framework。"
+        "T-019 完成后不提前 Closeout；最终代码不存在 a mature workbench Account/Relay/legacy compatibility、隐藏 Terminal 注入协议、第二 Run Owner 或无界 orchestration framework，Feature Closeout 在 T-021 Remote/SSH 闭环后执行。"
       ],
       "verification": [
         {
           "kind": "command",
           "ref": "package.json#scripts.check",
-          "proves": "Core、Desktop、Local/SSH、消息可靠性与最终构建统一通过。"
+          "proves": "Core、Desktop、Local 消息可靠性与最终构建统一通过，Remote 保持 typed unsupported。"
         },
         {
           "kind": "artifact",
@@ -372,6 +373,43 @@
         "docs/a mature workbench-agent-runtime-notes.md",
         "docs/plans/agentmux-core-maturity-review.md",
         "docs/plans/agentmux-semantic-session.md",
+        "docs/testing/strategy.md"
+      ],
+      "supersedes": []
+    },
+    {
+      "id": "T-021",
+      "title": "以 ctxmux public Remote 合同恢复 SSH",
+      "objective": "在 Local 唯一 Kernel 和最终 AgentMux 身份合同稳定后，为 ctxmux 增加并消费一个边界明确的 public Remote/SSH transport，使同一 Run/Agent Session API 在系统 SSH 与用户现有认证上成立，而不恢复旧 ExecutionHost Run path。",
+      "outcome": "Remote 从明确 unsupported 变为由 ctxmux public contract 支持；Local 与 SSH 共享同一 AgentMux Run/Agent Session/CLI 语义，只在 ctxmux 连接与显式部署方式上不同。",
+      "acceptance": [
+        "ctxmux public SDK 提供版本化 Remote connector、Host/Build/Capability 身份、显式部署/升级和 partition recovery；AgentMux 不复制 Private Key、不静默安装、不开放未授权监听端口，也不自建 proxy wire。",
+        "系统 SSH Client 与用户现有认证保持权威；Remote binary 来自可复现的 exact-commit artifact，目标版本不匹配时失败关闭，不回退旧 agentmuxd、tmux 或 Local 冒充 Remote。",
+        "同一 AgentMux API 在 SSH 上证明 start/list/status/input/attach/replay/gap/resize/interrupt/stop、Client 重开与 partition recovery；断网只结束 Transport/Attachment，不自动结束远端 Run，也不重复 Spawn 或 Input。",
+        "Agent Session Resolver、CLI list/status/send/interrupt/attach/resume/stop 与 Desktop View 投影不建立 Remote 分支身份或第二索引；Agent 语义仍不进入 ctxmux。",
+        "SSH security、resource、chaos 和 package consumer 证据独立记录；没有真实 Host/Credential 授权时使用隔离系统 SSH fixture，不把未运行的真实远端声明为已验证。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "package.json#scripts.check",
+          "proves": "Local 与 SSH 在唯一 ctxmux Kernel、同一 AgentMux API 和无 fallback 条件下通过仓库回归。"
+        },
+        {
+          "kind": "command",
+          "ref": "package.json#scripts.test:native",
+          "proves": "隔离系统 SSH 的部署、版本身份、partition recovery、输入与停止通过真实进程边界。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "docs/plans/ctxmux-remote-cutover.md",
+          "proves": "Remote public contract、部署、安全、恢复、资源、删除旧路径与未授权边界可审计。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/plans/mux-runtime-decision.md",
+        "docs/plans/ctxmux-cutover.md",
         "docs/testing/strategy.md"
       ],
       "supersedes": []

@@ -25,7 +25,7 @@ Desktop / CLI / external Node consumer
  Run / PTY / Process / ordered I/O / replay / stop
 ```
 
-当前仓库中的自建 `agentmuxd` 是错误决策下已经实现的过渡代码，不是长期架构，也不是可继续扩展的备选 Backend。它会在 ctxmux 通过能力 Gate、Local/SSH 与 Desktop 完成切换时直接删除；切换前只维持仓库现有可运行性，不再为其新增产品能力或修补将随 Kernel 删除的私有协议债务。
+当前仓库中的自建 `agentmuxd` 是错误决策下已经实现的过渡代码，不是长期架构，也不是可继续扩展的备选 Backend。它会在 T-020 的 ctxmux Local Terminal+Codex 原子切换中连同旧 Local/SSH production paths 直接删除；切换前只维持仓库现有可运行性，不再为其新增产品能力或修补将随 Kernel 删除的私有协议债务。Remote 在 T-021 前明确 unsupported。
 
 最终产品不保留 tmux、自建 agentmuxd、Main-owned PTY 或 Hybrid Runtime 作为兼容层、Fallback、Migration 或可选 Backend。
 
@@ -81,9 +81,9 @@ a mature workbench 的成熟模式同样证明：可恢复 Agent 产品需要稳
 
 Reattach 原 Run、provider-native resume、Spawn 新 Run、创建新 AgentSession 和打开新 View 是不同动作。Terminal Output、Process Liveness 与 Agent Evidence 保持来源差异；PTY 可证明“进程输出了什么”，不能证明 Tool、Permission、Reply、模型私有 Chain-of-thought 或模型上下文连续。
 
-## 7. Local、SSH 与恢复
+## 7. Local、Remote 与恢复
 
-Local 与 SSH 使用同一 AgentMux Run 合同，只替换 ctxmux 的连接与显式部署方式：
+Local 先在 T-020 完成唯一 Kernel 切换；Remote/SSH 在 T-021 通过同一 AgentMux Run 合同恢复，只替换 ctxmux 的连接与显式部署方式：
 
 - Desktop 完全退出、Renderer/Main 崩溃后，仍在运行的 Run 继续；重开只 Attach；
 - SSH 网络中断只结束 Transport/Attachment，不自动结束远端 Run；
@@ -92,9 +92,9 @@ Local 与 SSH 使用同一 AgentMux Run 合同，只替换 ctxmux 的连接与�
 - 只有 ACP handle 或 provider-native resume 能证明 AgentSession 上下文连续；
 - 系统 SSH 与用户现有认证保持权威，不复制 Private Key、不静默下载或安装、不开放未授权监听端口。
 
-具体 create fence、input identity、process tree、remote artifact、capability negotiation 与资源边界由 ctxmux capability audit 和 Conformance Kit 验证。缺失任何硬能力时，最终接入任务阻塞，不回退自建实现。
+T-020 结束时删除旧 Local/SSH production paths；T-021 前 Remote 返回 typed unsupported，不回退自建实现。具体 process tree、Remote artifact、capability negotiation 与资源边界由 ctxmux capability audit 和 Conformance Kit 验证。
 
-2026-08-11 的 T-015 已固定审计公开 commit `b2bbc7a`：Local Start/Attach/Replay/Resize/Stop 与 Client 重连已有真实证据，但 License/Release/Package、SSH、Create/Input 幂等 byte cursor、Output byte cursor、完整进程树、全局资源预算和 Runtime capability identity 尚未齐备。原 T-016 因这些精确外部缺口 parked；当前 T-020 必须对新的已提交、版本化 public candidate 重新审计，完整矩阵与解除条件见 `docs/plans/ctxmux-capability-audit.md`。
+2026-08-11 的 T-015 已固定审计公开 commit `b2bbc7a` 并留下历史 Gap。2026-08-14 用户明确两仓库共同所有：License、公开 npm/Release 和 SSH 不再阻塞首个 Local cutover。当前 T-020 只消费新的干净精确 commit，并要求累计 output byte cursor、public interrupt/signal、完整 process-tree stop 和无需发布的可复现 SDK/binary 消费合同；Remote 由 T-021 后续交付。完整历史矩阵与当前门槛见 `docs/plans/ctxmux-capability-audit.md`。
 
 ## 8. 实施顺序
 
@@ -106,19 +106,21 @@ Local 与 SSH 使用同一 AgentMux Run 合同，只替换 ctxmux 的连接与�
 4. 提炼 Kernel-neutral Conformance Kit；
 5. 收口 Desktop、CLI 与外部 Consumer 的 Kernel-neutral 投影。
 
-最后执行外部依赖链：
+最后执行 Kernel 与消费链：
 
-6. 审计 ctxmux 当前公开 SDK、版本、License、发布与 Local/SSH 能力；
-7. 能力齐备后接入一个 CtxmuxRunAdapter，原子切换 Local/SSH 与 Desktop；
-8. 直接删除自建 agentmuxd、node-pty Owner、wire、Journal、Remote Artifact 和旧 package bin；
-9. 在最终 AgentMux+ctxmux candidate 上重做 Package、Security、Chaos、Resource、Benchmark 与 Review。
+6. 在 ctxmux 补齐 Local consumer 所需 public gap，并固定干净精确 commit 与可复现消费合同；
+7. 接入唯一 CtxmuxRunAdapter，原子切换 Local Terminal+Codex 与 Desktop；
+8. 同次删除自建 agentmuxd、node-pty Owner、wire、Journal、Remote Artifact、旧 Local/SSH Run paths 和 package bin；Remote 明确 unsupported；
+9. 在最终 Local AgentMux+ctxmux candidate 上重做 Package、Security、Chaos、Resource、Benchmark 与 Review；
+10. T-021 通过 ctxmux public Remote 合同恢复 SSH，不建立 fallback。
 
 ## 9. 验收条件
 
 - 仓库中只剩 ctxmux 一个 Run Kernel，没有 tmux/agentmuxd 生产路径或双 Owner；
 - AgentMux 公共 API 不泄漏 ctxmux、自建 daemon 或 Electron wire；
 - 五个 Provider、ACP、Hook、Permission 与 Resume 在同一 AgentMux lifecycle 下诚实表达能力差异；
-- Local/SSH、退出重开、Crash、Partition、Lost Response、Late Event、Gap、Resize、Stop 与资源释放通过最终 Conformance；
+- T-020 的 Local Terminal+Codex、退出重开、Late Event、Gap、Input、Resize、Interrupt、Stop 与资源释放通过最终 Conformance，Remote 明确 unsupported；
+- T-021 完成后 SSH Partition 与 Remote recovery 通过同一 public contract；
 - Desktop 与干净外部 Consumer 只使用 Core 公共 API；
 - 最终 Package、Benchmark 和独立 Review 只引用最终 candidate SHA；
 - 不实际发布、不修改用户全局 Agent Hook 或 SSH Credential。
@@ -135,5 +137,5 @@ Local 与 SSH 使用同一 AgentMux Run 合同，只替换 ctxmux 的连接与�
 
 - 架构：a mature workbench-like embeddable，ctxmux 是唯一 Run Kernel；
 - 排序：先完成能独立闭环的 AgentMux 工作，ctxmux 接入和最终 mux 替换放在后序；
-- 等待策略：ctxmux 能力不齐时记录精确 blocker，不阻塞前序、不建立 fallback；
-- 修正确认：2026-08-11，本线程当前指令。
+- 等待策略：Local 所需 ctxmux public gap 直接在共同所有的 ctxmux 仓库修复；SSH 不阻塞 Local，也不建立 fallback；
+- 修正确认：2026-08-11 恢复 ctxmux 唯一 Kernel；2026-08-14 明确共同所有、Local-first、SSH-later 与无需先公开发布的消费边界。

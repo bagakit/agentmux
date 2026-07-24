@@ -2,7 +2,7 @@
 
 状态：已批准
 对应 Feature：`f-2248f4yx5`
-当前计划：revision 8（T-020）
+当前计划：revision 9（T-020 Local cutover；T-021 Remote）
 前置决策：`docs/plans/mux-runtime-decision.md`
 
 ## 1. 修正结论
@@ -68,14 +68,15 @@ T-008 的首轮临时 Debug 又显示 4 MiB sustained output 未能在 30 秒形
 4. 提炼 Kernel-neutral Conformance Kit；
 5. 收口 Desktop 与外部 Consumer 的 Kernel-neutral 投影。
 
-最后才做可能受外部能力阻塞的工作：
+最后按可独立证明的边界推进 Kernel 工作：
 
-6. 审计 ctxmux 当前 SDK、发布、License 与能力；
-7. 能力齐备后一次接入 Local/SSH 并删除自建 daemon；
-8. 在最终 candidate 上重做 Package、可靠性、安全、资源、Benchmark 与独立 Review。
-9. 在最终 Runtime 与 Package 证据稳定后，交付 a mature workbench-like 的 Agent 间结构化通信、Inbox 与 Discussion Canvas，并完成 Feature Closeout。
+6. 固定一个已提交的 ctxmux commit，补齐 AgentMux Local consumer 所需的 public byte cursor、interrupt/process-tree stop 与可复现消费合同；
+7. 一次接入 Local Terminal+Codex 并删除自建 daemon、node-pty 和旧 Local/SSH production paths；Remote 明确 unsupported；
+8. 在 Local 最终 candidate 上重做 Package、可靠性、安全、资源、Benchmark 与独立 Review；
+9. 在最终 Runtime 与 Package 证据稳定后，交付 a mature workbench-like 的 Agent 间结构化通信、Inbox 与 Discussion Canvas；
+10. 通过独立 T-021 以 ctxmux public Remote 合同恢复 SSH，并完成 Feature Closeout。
 
-ctxmux 缺少硬能力时，审计要给出精确 Gap，接入任务进入 parked context。此前五项继续完成，不通过私有 fallback 填坑，也不要求用户为可自行完成的工作持续做选择。
+两仓库同属用户，本次 Local 内部集成不以 License、公开 npm 或 GitHub Release 为前置；它仍必须固定干净 commit，并提供可复现、无需相邻目录或全局安装的 SDK/binary 消费合同。SSH 不阻塞 Local，也不允许保留旧 SSH fallback；T-020 后直到 T-021 完成前，Remote 必须诚实返回 unsupported。
 
 ## 5. 领域模型
 
@@ -107,7 +108,7 @@ Reattach 原 Run、provider-native resume、spawn 新 Run、创建新 AgentSessi
 - 五个 Provider、ACP、Hook、Permission、Resume 与 Evidence 不依赖 Kernel 私有类型；
 - Desktop、CLI、外部 Consumer 只通过 AgentMux 公共 API；
 - 统一 CLI/SDK/Desktop 可用 runtime-issued Raw Terminal/View ID，或把稳定 `agentSessionId` 唯一解析为当前已打开 View 后执行 `switch`；该动作只改变 Desktop 焦点，与 Open、Attach、Resume 和 Run 生命周期严格分离，未知、歧义、过期、未打开目标失败关闭；
-- ctxmux 通过适用 Conformance，Local/SSH 切换后自建 daemon 与 tmux 生产路径全部删除；
+- ctxmux 通过适用 Conformance，T-020 完成 Local 切换并删除自建 daemon、node-pty 与旧 Local/SSH 生产路径；Remote 在 T-021 前明确 unsupported；
 - 最终 Package、Security、Chaos、Stress、Resource 和两轮 Benchmark 在最终 SHA 通过；
 - 独立 Review 的所有 Release Blocker 已处理；
 - Agent 间消息、Inbox、Ask/Reply、Delivery Ack 与证据等级通过至少一个真实双 Agent 竖切；直接 Terminal Input、完整 Handoff 与受监督 Dispatch 不混为一种语义；
