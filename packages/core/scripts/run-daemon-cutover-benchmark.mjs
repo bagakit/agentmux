@@ -246,11 +246,22 @@ async function buildProcessRusageProbe(root) {
     maxBuffer: 64 * 1024
   })
   const path = join(root, 'process-rusage')
+  const compileEnvironment = {
+    PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
+    LANG: 'C',
+    LC_ALL: 'C',
+    TZ: 'UTC0',
+    SDKROOT: sdkPath
+  }
   const compileArgv = [
     '-isysroot', sdkPath,
     '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror', processRusageSourcePath, '-o', path
   ]
-  await runCommand(compiler, compileArgv, { timeoutMs: 30_000, maxBuffer: 1024 * 1024 })
+  await runCommand(compiler, compileArgv, {
+    env: compileEnvironment,
+    timeoutMs: 30_000,
+    maxBuffer: 1024 * 1024
+  })
   const calibration = parseProcessCpuCalibration(await commandOutput(path, ['--calibrate'], {
     timeoutMs: 10_000,
     maxBuffer: 1024 * 1024
@@ -269,6 +280,7 @@ async function buildProcessRusageProbe(root) {
       compilerVersion,
       sdkPath,
       sdkVersion,
+      compileEnvironment,
       compileArgv
     }
   }
@@ -1417,10 +1429,13 @@ async function environmentManifest(mode, cpuObserver) {
     processCpuObserver: {
       counterSource: cpuObserver.counterSource,
       endpointClock: cpuObserver.endpointClock,
+      sourceSha256: cpuObserver.sourceSha256,
+      binarySha256: cpuObserver.binarySha256,
       compiler: cpuObserver.compiler,
       compilerVersion: cpuObserver.compilerVersion,
       sdkPath: cpuObserver.sdkPath,
-      sdkVersion: cpuObserver.sdkVersion
+      sdkVersion: cpuObserver.sdkVersion,
+      compileEnvironment: cpuObserver.compileEnvironment
     }
   }
   const expected = {
@@ -1435,6 +1450,8 @@ async function environmentManifest(mode, cpuObserver) {
     processCpuObserver: {
       counterSource: 'proc_pid_rusage:RUSAGE_INFO_V4',
       endpointClock: 'clock_gettime:CLOCK_MONOTONIC_RAW',
+      sourceSha256: 'a6462fe49e4bb1316a4a2ab5dbdc9fa3430041885e350db212f94f6d857e2612',
+      binarySha256: '021b2bd3351a35985fcdf7a6aed34be70f480d9027327ca14c054b26d365b9c9',
       compiler: '/Library/Developer/CommandLineTools/usr/bin/clang',
       compilerVersion: [
         'Apple clang version 21.0.0 (clang-2100.0.123.102)',
@@ -1443,7 +1460,14 @@ async function environmentManifest(mode, cpuObserver) {
         'InstalledDir: /Library/Developer/CommandLineTools/usr/bin'
       ].join('\n'),
       sdkPath: '/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk',
-      sdkVersion: '26.4'
+      sdkVersion: '26.4',
+      compileEnvironment: {
+        PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
+        LANG: 'C',
+        LC_ALL: 'C',
+        TZ: 'UTC0',
+        SDKROOT: '/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk'
+      }
     }
   }
   const mismatches = Object.entries(expected).flatMap(([name, value]) => (
