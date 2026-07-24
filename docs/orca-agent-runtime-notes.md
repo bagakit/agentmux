@@ -3,6 +3,13 @@
 对照源码：`~/proj/github/a mature workbench`，版本
 `6da7b8e9cfe62e5b4d34bb52e8c570036c1935fc`（2026-08-08）。
 
+T-002 在 2026-08-10 又通过 CodeGraph 复核了 a mature workbench
+`34f2a62cdaf58dc5924a3b01f560f91b53a5c277` 的
+`src/main/pty/posix-pty-process-groups.ts` 与对应测试。AgentMux 直接采用其已验证的
+PTY 范围识别模式：先用 `ps -p` 获取根进程的 TTY，再用 `ps -t` 限定同一终端，
+子进程组先于根进程组强停，并在 Daemon 与目标共享 TTY 时回退到 node-pty 的窄化
+Kill。没有复制 a mature workbench 的 Provider、兼容层或 Desktop 状态。
+
 ## 总体结论
 
 a mature workbench 不是传统意义上的无界面 Agent Runner。它先是一套持久化终端系统，再在终端之上叠加 Agent 语义：
