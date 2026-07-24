@@ -9,7 +9,7 @@
     "build": "pnpm -r build",
     "package:mac": "pnpm --filter @agentmux/desktop package:mac",
     "package:mac:install": "pnpm --filter @agentmux/desktop package:mac:install",
-    "typecheck": "pnpm -r typecheck",
+    "typecheck": "pnpm --filter @agentmux/core build && pnpm -r typecheck",
     "test:fast": "pnpm --filter @agentmux/core build && vitest run --exclude packages/core/test/package-consumer.integration.test.ts",
     "test:native": "pnpm --filter @agentmux/core build && vitest run --maxWorkers=1 packages/core/test/package-consumer.integration.test.ts",
     "test": "pnpm test:fast && pnpm test:native",

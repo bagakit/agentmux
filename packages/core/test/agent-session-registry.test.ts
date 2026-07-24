@@ -11,6 +11,8 @@ function session(run = 'run-1'): AgentMuxStoredAgentSession {
     hostId: 'local',
     workspacePath: '/tmp/work',
     run: { runId: run },
+    retiredRuns: [],
+    hookBindingId: 'hook-binding-1',
     outputCursorBytes: 0,
     createdAt: 100,
     updatedAt: 100

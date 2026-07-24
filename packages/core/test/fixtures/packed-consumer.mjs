@@ -1,9 +1,15 @@
 import assert from 'node:assert/strict'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { connectLocalAgentMux, connectSshAgentMux } from '@agentmux/core'
+
+const execFileAsync = promisify(execFile)
 
 const controlFixture = process.env.AGENTMUX_CONTROL_FIXTURE
 const stubbornFixture = process.env.AGENTMUX_STUBBORN_FIXTURE
-assert.ok(controlFixture && stubbornFixture)
+const fakeCodex = process.env.AGENTMUX_FAKE_CODEX
+const agentmuxCli = process.env.AGENTMUX_CLI_PATH
+assert.ok(controlFixture && stubbornFixture && fakeCodex && agentmuxCli)
 
 async function waitFor(description, predicate, timeoutMs = 8_000) {
   const deadline = Date.now() + timeoutMs
@@ -131,6 +137,91 @@ await waitFor('complete stubborn process-tree stop', async () => (
 ))
 unsubscribe()
 
+const cli = async (args) => await execFileAsync(agentmuxCli, args, {
+  timeout: 15_000,
+  maxBuffer: 4 * 1024 * 1024
+})
+let codexFirst = await connectLocalAgentMux()
+const codexFirstEvents = []
+codexFirst.onEvent((event) => codexFirstEvents.push(event))
+const codex = await codexFirst.createAgent({
+  agentSessionId: 'codex-semantic-1',
+  createOperationId: `packed-codex-${crypto.randomUUID()}`,
+  agentId: 'codex',
+  workspacePath: process.cwd(),
+  prompt: 'first',
+  commandOverride: fakeCodex
+})
+const codexAttachment = await codexFirst.reattachAgent(codex.agentSessionId, 0)
+await waitFor('Codex native Hook identity', () => (
+  codexFirst.agentSession(codex.agentSessionId).nativeHandle?.kind === 'provider' &&
+  codexFirstEvents.some((event) => (
+    event.type === 'agent-status' && event.agentSessionId === codex.agentSessionId && event.state === 'waiting'
+  ))
+))
+assert.equal(codexFirst.resolveAgentSession({ kind: 'run', run: codex.run }).agentSessionId, codex.agentSessionId)
+assert.equal(codexFirst.resolveAgentSession({
+  kind: 'provider-native',
+  providerId: 'codex',
+  sessionId: 'native-codex-semantic-1'
+}).agentSessionId, codex.agentSessionId)
+assert.equal(codexFirstEvents.some((event) => (
+  event.type === 'agent-status' && event.agentSessionId === codex.agentSessionId && event.state === 'waiting'
+)), true)
+const codexPid = (await codexFirst.statusAgent(codex.agentSessionId)).run.pid
+assert.ok(codexPid)
+await codexFirst.dispose()
+codexFirst = null
+
+const cliStatus = JSON.parse((await cli(['status', codex.agentSessionId, '--json'])).stdout)
+assert.equal(cliStatus.session.agentSessionId, codex.agentSessionId)
+assert.equal(cliStatus.run.runId, codex.run.runId)
+const cliList = JSON.parse((await cli(['list', '--json'])).stdout)
+assert.equal(cliList.length, 1)
+assert.equal(cliList[0].session.agentSessionId, codex.agentSessionId)
+const cliAttachment = JSON.parse((await cli(['attach', codex.agentSessionId, '--after-byte', '0', '--json'])).stdout)
+assert.equal(cliAttachment.session.agentSessionId, codex.agentSessionId)
+await cli(['send', codex.agentSessionId, '--text', 'continue', '--json'])
+await cli(['interrupt', codex.agentSessionId, '--json'])
+
+const codexSecond = await connectLocalAgentMux()
+const codexSecondEvents = []
+codexSecond.onEvent((event) => codexSecondEvents.push(event))
+const codexReconnected = await codexSecond.statusAgent(codex.agentSessionId)
+assert.equal(codexReconnected.run.runId, codex.run.runId)
+assert.equal(codexReconnected.run.pid, codexPid)
+assert.equal(codexSecond.agentSessions().length, 1)
+const codexReplay = await codexSecond.reattachAgent(codex.agentSessionId, 0)
+const codexReplayText = codexAttachment.attachment.replay.map((event) => event.data).join('') +
+  codexReplay.attachment.replay.map((event) => event.data).join('')
+assert.equal(codexReplayText.includes('codex-ready:first'), true)
+assert.equal(codexReplayText.includes('codex-input:continue'), true)
+assert.equal(codexReplayText.includes('codex-interrupt'), true)
+await codexSecond.writeAgent(codex.agentSessionId, 'exit\n')
+await waitFor('Codex Run exit', async () => (
+  (await codexSecond.statusAgent(codex.agentSessionId)).run.state === 'exited'
+))
+await codexSecond.dispose()
+const resumeResult = JSON.parse((await cli(['resume', codex.agentSessionId, '--json'])).stdout)
+const resumed = resumeResult.result
+assert.equal(resumed.agentSessionId, codex.agentSessionId)
+assert.notEqual(resumed.run.runId, codex.run.runId)
+const codexThird = await connectLocalAgentMux()
+assert.equal(codexThird.agentSessions().length, 1)
+await codexThird.reattachAgent(resumed.agentSessionId, 0)
+await waitFor('resumed Codex Hook receipt', () => (
+  codexThird.agentSession(resumed.agentSessionId).hookReceipt?.run.runId === resumed.run.runId
+))
+assert.throws(
+  () => codexThird.resolveAgentSession({ kind: 'run', run: codex.run }),
+  (error) => error?.code === 'STALE_AGENT_SESSION_BINDING'
+)
+await codexThird.dispose()
+await cli(['stop', resumed.agentSessionId, '--json'])
+const codexStopped = await connectLocalAgentMux()
+assert.deepEqual(codexStopped.agentSessions(), [])
+await codexStopped.dispose()
+
 await assert.rejects(
   connectSshAgentMux({ target: { hostId: 'remote', hostname: 'example.invalid' } }),
   (error) => error?.code === 'REMOTE_UNSUPPORTED'
@@ -145,5 +236,7 @@ process.stdout.write(`${JSON.stringify({
   interruptStillLive: true,
   dedupOccurrences,
   stubbornPids,
+  codexSemanticSession: codex.agentSessionId,
+  codexNativeSession: 'native-codex-semantic-1',
   remote: 'unsupported'
 })}\n`)
