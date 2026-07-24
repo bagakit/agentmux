@@ -8,7 +8,7 @@
     "dev:web": "pnpm --filter @agentmux/desktop dev:web",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
-    "test": "vitest run",
+    "test": "pnpm --filter @agentmux/core build && vitest run",
     "check": "pnpm typecheck && pnpm test && pnpm build"
   },
   "devDependencies": {

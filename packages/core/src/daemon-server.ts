@@ -6,6 +6,8 @@ import { AgentMuxError } from './errors.js'
 import {
   AGENTMUX_DAEMON_PROTOCOL_VERSION,
   AGENTMUX_DAEMON_MAX_FRAME_BYTES,
+  AGENTMUX_DAEMON_BUILD_IDENTITY,
+  AGENTMUX_LOCAL_HOST_ID,
   encodeAgentMuxDaemonFrame,
   parseAgentMuxDaemonFrame,
   type AgentMuxDaemonCreateRequest,
@@ -41,6 +43,8 @@ type SocketIdentity = { dev: number; ino: number }
 export type AgentMuxDaemonServerOptions = {
   socketPath?: string
   statePath?: string
+  hostId?: string
+  buildIdentity?: string
   sessions?: AgentMuxDaemonSessionManager
 }
 
@@ -95,11 +99,18 @@ export class AgentMuxDaemonServer {
   private readonly clients = new Set<ConnectedClient>()
   private readonly unsubscribeSessionEvents: () => void
   private readonly daemonInstanceId = randomUUID()
+  private readonly hostId: string
+  private readonly buildIdentity: string
   private server: Server | null = null
   private socketIdentity: SocketIdentity | null = null
 
   constructor(options: AgentMuxDaemonServerOptions = {}) {
     this.socketPath = options.socketPath ?? defaultAgentMuxDaemonSocketPath()
+    this.hostId = options.hostId ?? AGENTMUX_LOCAL_HOST_ID
+    this.buildIdentity = options.buildIdentity ?? AGENTMUX_DAEMON_BUILD_IDENTITY
+    if (!this.hostId.trim() || !this.buildIdentity.trim()) {
+      throw new AgentMuxError('Daemon host and build identities are required.', 'INVALID_DAEMON_IDENTITY')
+    }
     this.sessions = options.sessions ?? new AgentMuxDaemonSessionManager({
       journalPath: options.statePath ?? agentMuxDaemonStatePath(this.socketPath)
     })
@@ -228,6 +239,8 @@ export class AgentMuxDaemonServer {
         case 'hello':
           result = {
             protocolVersion: AGENTMUX_DAEMON_PROTOCOL_VERSION,
+            buildIdentity: this.buildIdentity,
+            hostId: this.hostId,
             daemonPid: process.pid,
             daemonInstanceId: this.daemonInstanceId
           }
