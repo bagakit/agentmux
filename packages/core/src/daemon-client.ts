@@ -14,6 +14,7 @@ import {
   type AgentMuxDaemonAttachResult,
   type AgentMuxDaemonAppliedSize,
   type AgentMuxDaemonCreateRequest,
+  type AgentMuxDaemonDiagnostics,
   type AgentMuxDaemonEvent,
   type AgentMuxDaemonHello,
   type AgentMuxDaemonInputAck,
@@ -191,6 +192,10 @@ export class AgentMuxDaemonClient {
   daemonIdentity(): AgentMuxDaemonHello {
     if (!this.hello) throw new AgentMuxError('Daemon client is not connected.', 'DAEMON_DISCONNECTED')
     return { ...this.hello }
+  }
+
+  async diagnose(): Promise<AgentMuxDaemonDiagnostics> {
+    return await this.request('diagnose', {}) as AgentMuxDaemonDiagnostics
   }
 
   async findCreateOperation(createOperationId: string): Promise<AgentMuxDaemonSession | null> {
@@ -431,6 +436,7 @@ export type {
   AgentMuxDaemonAttachResult,
   AgentMuxDaemonAppliedSize,
   AgentMuxDaemonDataEvent,
+  AgentMuxDaemonDiagnostics,
   AgentMuxDaemonEvent,
   AgentMuxDaemonExitEvent,
   AgentMuxDaemonHookEvent,

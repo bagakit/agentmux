@@ -19,7 +19,7 @@ const runtimeFixture = vi.hoisted(() => {
     readonly listRuns = vi.fn(async () => [])
     readonly snapshot = vi.fn(async () => ({ hostId: 'fixture', sessions: [] }))
     readonly daemonIdentity = vi.fn(() => ({
-      protocolVersion: 4,
+      protocolVersion: 5,
       buildIdentity: '0.1.0',
       hostId: 'fixture',
       daemonPid: 1,
@@ -35,7 +35,7 @@ const runtimeFixture = vi.hoisted(() => {
     FakeClient,
     createdHosts,
     activate: vi.fn(async () => ({
-      protocolVersion: 4,
+      protocolVersion: 5,
       buildIdentity: '0.1.0',
       hostId: 'local',
       daemonPid: 1,
