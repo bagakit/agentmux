@@ -1,3 +1,4 @@
+import * as Dialog from '@radix-ui/react-dialog'
 import {
   Check,
   FolderGit2,
@@ -5,7 +6,8 @@ import {
   LoaderCircle,
   Plus,
   RefreshCw,
-  Unlink
+  Unlink,
+  X
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type {
@@ -15,8 +17,14 @@ import type {
 } from '../../../shared/contracts'
 import { useWorkspaceBranches } from '../hooks/useWorkspaceBranches'
 import { api } from '../lib/api'
+import {
+  runningAgentPresenceByWorktree,
+  worktreePresenceKey
+} from '../lib/branch-agent-presence'
 import { defaultWorktreePath } from '../lib/workspace-projects'
 import { useAppStore } from '../store'
+import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
+import { BranchContextMenu } from './BranchContextMenu'
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -24,7 +32,9 @@ function message(error: unknown): string {
 
 export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
   const activateWorkspaceSelection = useAppStore((state) => state.activateWorkspaceSelection)
+  const sessions = useAppStore((state) => state.sessions)
   const [selectedBranch, setSelectedBranch] = useState(workspace.branch ?? null)
+  const [createBranch, setCreateBranch] = useState<WorkspaceBranchRecord | null>(null)
   const [worktreePath, setWorktreePath] = useState('')
   const [busyBranch, setBusyBranch] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -49,23 +59,30 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
       : [],
     [snapshot]
   )
-  const selected = snapshot?.kind === 'git-repository'
-    ? snapshot.branches.find((branch) => branch.name === selectedBranch) ?? null
-    : null
+  const runningAgentsByWorktree = useMemo(
+    () => runningAgentPresenceByWorktree(sessions),
+    [sessions]
+  )
 
-  async function selectBranch(name: string): Promise<void> {
-    if (snapshot?.kind !== 'git-repository') return
-    const branch = snapshot.branches.find((candidate) => candidate.name === name)
+  function openCreateDialog(branch: WorkspaceBranchRecord): void {
+    if (snapshot?.kind !== 'git-repository' || branch.worktreePath) return
+    setSelectedBranch(branch.name)
+    setCreateBranch(branch)
+    setWorktreePath(defaultWorktreePath(snapshot.repoPath, branch.name))
+    setActionError(null)
+  }
+
+  async function openBranch(branch: WorkspaceBranchRecord): Promise<void> {
     if (!branch || busyBranch) return
-    setSelectedBranch(name)
+    setSelectedBranch(branch.name)
     setActionError(null)
     if (!branch.worktreePath) {
-      setWorktreePath(defaultWorktreePath(snapshot.repoPath, branch.name))
+      openCreateDialog(branch)
       return
     }
-    setBusyBranch(name)
+    setBusyBranch(branch.name)
     try {
-      activateWorkspaceSelection(await api.workspaces.openBranch(workspace.id, name))
+      activateWorkspaceSelection(await api.workspaces.openBranch(workspace.id, branch.name))
     } catch (cause) {
       setActionError(message(cause))
     } finally {
@@ -75,15 +92,16 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
 
   async function createWorktree(event: React.FormEvent): Promise<void> {
     event.preventDefault()
-    if (!selected || selected.worktreePath || !worktreePath.trim() || busyBranch) return
-    setBusyBranch(selected.name)
+    if (!createBranch || createBranch.worktreePath || !worktreePath.trim() || busyBranch) return
+    setBusyBranch(createBranch.name)
     setActionError(null)
     try {
       activateWorkspaceSelection(await api.workspaces.createWorktreeForBranch({
         workspaceId: workspace.id,
-        branch: selected.name,
+        branch: createBranch.name,
         path: worktreePath.trim()
       }))
+      setCreateBranch(null)
     } catch (cause) {
       setActionError(message(cause))
     } finally {
@@ -91,27 +109,70 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
     }
   }
 
+  async function copyText(text: string): Promise<void> {
+    setActionError(null)
+    try {
+      await api.ui.writeClipboardText(text)
+    } catch (cause) {
+      setActionError(message(cause))
+    }
+  }
+
   function branchRow(branch: WorkspaceBranchRecord) {
     const selectedRow = selectedBranch === branch.name
+    const runningAgents = branch.worktreePath && snapshot?.kind === 'git-repository'
+      ? runningAgentsByWorktree.get(worktreePresenceKey(snapshot.hostId, branch.worktreePath)) ?? []
+      : []
+    const visibleAgents = runningAgents.slice(0, 4)
+    const hiddenAgentTypes = runningAgents.length - visibleAgents.length
+    const runningAgentLabel = runningAgents
+      .map((agent) => `${agentProviderLabel(agent.agentId)}${agent.count > 1 ? ` ×${agent.count}` : ''}`)
+      .join(', ')
     return (
-      <button
+      <BranchContextMenu
         key={branch.name}
-        type="button"
-        className={`branch-row ${selectedRow ? 'branch-row--selected' : ''}`}
-        aria-pressed={selectedRow}
-        onClick={() => void selectBranch(branch.name)}
+        hasWorktree={branch.worktreePath !== null}
+        onOpen={() => void openBranch(branch)}
+        onCopyBranchName={() => void copyText(branch.name)}
+        onCopyWorktreePath={() => branch.worktreePath && void copyText(branch.worktreePath)}
+        onRefresh={() => void refresh()}
       >
-        <span className="branch-row__icon">
-          {busyBranch === branch.name ? <LoaderCircle className="spin" size={13} /> : <GitBranch size={13} />}
-        </span>
-        <span className="branch-row__identity">
-          <strong>{branch.name}</strong>
-          <small>{branch.worktreePath ?? 'No worktree'}</small>
-        </span>
-        <span className={`branch-row__state ${branch.worktreePath ? '' : 'branch-row__state--unbound'}`}>
-          {branch.isCurrent ? <><Check size={10} /> Current</> : branch.worktreePath ? 'Worktree' : <><Unlink size={10} /> Branch</>}
-        </span>
-      </button>
+        <button
+          type="button"
+          className={`branch-row ${selectedRow ? 'branch-row--selected' : ''}`}
+          aria-pressed={selectedRow}
+          onClick={() => void openBranch(branch)}
+          onContextMenu={() => setSelectedBranch(branch.name)}
+        >
+          <span className="branch-row__icon">
+            {busyBranch === branch.name ? <LoaderCircle className="spin" size={12} /> : <GitBranch size={12} />}
+          </span>
+          <span className="branch-row__identity">
+            <strong title={branch.name}>{branch.name}</strong>
+            <small title={branch.worktreePath ?? undefined}>{branch.worktreePath ?? 'No worktree'}</small>
+          </span>
+          <span className="branch-row__meta">
+            {visibleAgents.length > 0 ? (
+              <span
+                className="branch-row__agents"
+                aria-label={`Running agents: ${runningAgentLabel}`}
+                title={`Running agents: ${runningAgentLabel}`}
+              >
+                {visibleAgents.map((agent) => (
+                  <span className="branch-row__agent" key={agent.agentId}>
+                    <AgentProviderIcon agentId={agent.agentId} size={11} />
+                    {agent.count > 1 ? <small>{agent.count}</small> : null}
+                  </span>
+                ))}
+                {hiddenAgentTypes > 0 ? <em>+{hiddenAgentTypes}</em> : null}
+              </span>
+            ) : null}
+            <span className={`branch-row__state ${branch.worktreePath ? '' : 'branch-row__state--unbound'}`}>
+              {branch.isCurrent ? <><Check size={9} /> Current</> : branch.worktreePath ? 'Worktree' : <><Unlink size={9} /> Branch</>}
+            </span>
+          </span>
+        </button>
+      </BranchContextMenu>
     )
   }
 
@@ -137,16 +198,62 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
           <div className="branches-empty branches-empty--error"><strong>Branches unavailable</strong><span>{loadError}</span><button className="small-button" onClick={() => void refresh()}>Retry</button></div>
         ) : null}
       </div>
-      {selected && !selected.worktreePath ? (
-        <form className="branch-create" onSubmit={(event) => void createWorktree(event)}>
-          <div><strong>Create worktree</strong><span>{selected.name}</span></div>
-          <label><span>Path</span><input value={worktreePath} onChange={(event) => setWorktreePath(event.target.value)} /></label>
-          {actionError ? <p>{actionError}</p> : null}
-          <button className="primary-button" type="submit" disabled={!worktreePath.trim() || busyBranch !== null}>
-            {busyBranch ? <LoaderCircle className="spin" size={12} /> : <Plus size={12} />} Create
-          </button>
-        </form>
-      ) : actionError && snapshot ? <div className="branches-inline-error">{actionError}</div> : null}
+      {actionError && !createBranch && snapshot ? <div className="branches-inline-error" role="alert">{actionError}</div> : null}
+      <Dialog.Root
+        open={createBranch !== null}
+        onOpenChange={(open) => {
+          if (!open && busyBranch === null) {
+            setCreateBranch(null)
+            setActionError(null)
+          }
+        }}
+      >
+        <Dialog.Portal>
+          <Dialog.Overlay className="confirmation-dialog__overlay" />
+          <Dialog.Content
+            className="branch-create-dialog"
+            onEscapeKeyDown={(event) => busyBranch !== null && event.preventDefault()}
+          >
+            <form onSubmit={(event) => void createWorktree(event)}>
+              <header>
+                <span><GitBranch size={16} /></span>
+                <div>
+                  <Dialog.Title>Create worktree</Dialog.Title>
+                  <Dialog.Description>Bind this Branch to an isolated working directory.</Dialog.Description>
+                </div>
+                <Dialog.Close asChild>
+                  <button type="button" className="icon-button" aria-label="Close create worktree dialog" disabled={busyBranch !== null}>
+                    <X size={14} />
+                  </button>
+                </Dialog.Close>
+              </header>
+              <section className="branch-create-dialog__context">
+                <GitBranch size={13} />
+                <span><small>Branch</small><strong>{createBranch?.name}</strong></span>
+              </section>
+              <label>
+                <span>Worktree path</span>
+                <input
+                  autoFocus
+                  value={worktreePath}
+                  onChange={(event) => setWorktreePath(event.target.value)}
+                  spellCheck={false}
+                />
+              </label>
+              {actionError ? <p role="alert">{actionError}</p> : null}
+              <footer>
+                <Dialog.Close asChild>
+                  <button className="small-button" type="button" disabled={busyBranch !== null}>Cancel</button>
+                </Dialog.Close>
+                <button className="primary-button" type="submit" disabled={!worktreePath.trim() || busyBranch !== null}>
+                  {busyBranch ? <LoaderCircle className="spin" size={12} /> : <Plus size={12} />}
+                  {busyBranch ? 'Creating…' : 'Create Worktree'}
+                </button>
+              </footer>
+            </form>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
     </section>
   )
 }

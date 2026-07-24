@@ -1,0 +1,40 @@
+import type { AgentId } from '@agentmux/core'
+import type { SessionSnapshot } from '../../../shared/contracts'
+
+export type RunningAgentPresence = {
+  agentId: AgentId
+  count: number
+  updatedAt: number
+}
+
+export function worktreePresenceKey(hostId: string, workspacePath: string): string {
+  return `${hostId}\0${workspacePath}`
+}
+
+/** Projects live Core Session truth onto worktrees without creating Branch-owned state. */
+export function runningAgentPresenceByWorktree(
+  sessions: readonly SessionSnapshot[]
+): ReadonlyMap<string, readonly RunningAgentPresence[]> {
+  const grouped = new Map<string, Map<AgentId, RunningAgentPresence>>()
+  for (const session of sessions) {
+    if (session.kind !== 'agent' || session.processState !== 'running') continue
+    const key = worktreePresenceKey(session.hostId, session.workspacePath)
+    const agents = grouped.get(key) ?? new Map<AgentId, RunningAgentPresence>()
+    const current = agents.get(session.agentId)
+    agents.set(session.agentId, {
+      agentId: session.agentId,
+      count: (current?.count ?? 0) + 1,
+      updatedAt: Math.max(current?.updatedAt ?? 0, session.updatedAt)
+    })
+    grouped.set(key, agents)
+  }
+
+  return new Map(
+    Array.from(grouped, ([key, agents]) => [
+      key,
+      Array.from(agents.values()).sort(
+        (left, right) => right.updatedAt - left.updatedAt || left.agentId.localeCompare(right.agentId)
+      )
+    ])
+  )
+}
