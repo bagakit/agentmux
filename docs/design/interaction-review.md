@@ -15,6 +15,8 @@ AgentMux 的应用外框与 Terminal 使用两套独立的外观边界。应用�
 
 Desktop Settings 提供独立 Appearance Pane，只持久化一个严格的 `terminalTheme` 标识并从 Renderer 内置的完整 palette catalog 选择。当前 catalog 只保留 Graphite 与 Catppuccin Mocha 两个经过语义层级检查的深色方案；不建设主题 Registry、导入器、任意颜色表单或兼容层。以后增加 DIY 时沿 `TerminalThemeDefinition` catalog 边界扩展，保持 Core、Run Kernel 与 PTY 协议不变。默认主题仍保持简约干净，主题能力不成为当前产品主线。
 
+> 从字节到像素的端到端链路、各层 owner 矩阵、TERM/COLORTERM/NO_COLOR、真黑工作面让 Codex 灰色 composer 显现的因果链、OSC 10/11 就绪门控与迁移前后的实现还原，见 [`docs/architecture/terminal-runtime.md`](../architecture/terminal-runtime.md)（含 Git 证据）。
+
 ### Terminal 与文件交互先对齐 a mature workbench
 
 2026-08-16 固定 a mature workbench `c0a775454a29667c3f9fbfeef356e31e1e2acbe0` 的
