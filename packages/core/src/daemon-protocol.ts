@@ -1,6 +1,6 @@
 import type { AgentId } from './types.js'
 
-export const AGENTMUX_DAEMON_PROTOCOL_VERSION = 3
+export const AGENTMUX_DAEMON_PROTOCOL_VERSION = 4
 export const AGENTMUX_DAEMON_MAX_FRAME_BYTES = 1024 * 1024
 export const AGENTMUX_DAEMON_BUILD_IDENTITY = '0.1.0'
 export const AGENTMUX_LOCAL_HOST_ID = 'local'
@@ -18,6 +18,7 @@ export type AgentMuxDaemonSession = {
   createOperationId: string
   kind: 'terminal' | 'agent'
   agentId: AgentId | null
+  semanticSessionId: string | null
   cwd: string
   pid: number
   processStartedAt?: number
@@ -47,12 +48,26 @@ export type AgentMuxDaemonExitEvent = {
   type: 'exit'
   sessionId: string
   incarnationId: string
+  pid: number
   exitCode: number
   exitSignal?: number
   observedAt: number
 }
 
-export type AgentMuxDaemonEvent = AgentMuxDaemonDataEvent | AgentMuxDaemonExitEvent
+export type AgentMuxDaemonHookEvent = {
+  type: 'hook'
+  sessionId: string
+  incarnationId: string
+  semanticSessionId: string
+  agentId: AgentId
+  eventName?: string
+  payload?: Record<string, unknown>
+}
+
+export type AgentMuxDaemonEvent =
+  | AgentMuxDaemonDataEvent
+  | AgentMuxDaemonExitEvent
+  | AgentMuxDaemonHookEvent
 
 export type AgentMuxReplayGap = {
   requestedAfterSequence: number
@@ -92,6 +107,7 @@ export type AgentMuxDaemonCreateRequest = {
   createOperationId: string
   kind: 'terminal' | 'agent'
   agentId: AgentId | null
+  semanticSessionId: string | null
   cwd: string
   cols: number
   rows: number
@@ -104,6 +120,7 @@ export type AgentMuxDaemonMethod =
   | 'hello'
   | 'list'
   | 'find-create-operation'
+  | 'probe-executable'
   | 'create'
   | 'attach'
   | 'detach'

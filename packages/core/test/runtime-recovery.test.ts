@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import type { AgentProvider } from '../src/agent-provider.js'
 import type { ExecutionHost } from '../src/execution-host.js'
 import type { CommandResult, RunCommandOptions } from '../src/process-runner.js'
 import { AgentMuxRuntime } from '../src/runtime.js'
@@ -75,19 +74,13 @@ afterEach(async () => {
 describe('AgentMuxRuntime remote recovery', () => {
   it('publishes SSH disconnection and returns to the same tmux session after refresh', async () => {
     const host = new RecoverableSshHost()
-    const provider: AgentProvider = {
-      id: 'fixture',
-      label: 'Fixture',
-      executable: 'fixture',
-      async detect() { return true },
-      buildLaunch() { return { command: 'fixture', args: [], env: {} } }
-    }
-    const runtime = new AgentMuxRuntime({ hosts: [host], providers: [provider] })
+    const runtime = new AgentMuxRuntime({ hosts: [host] })
     runtimes.push(runtime)
     const launched = await runtime.launch({
       kind: 'agent',
       sessionId: 'recoverable',
-      agentId: 'fixture',
+      agentId: 'codex',
+      commandOverride: 'fixture',
       hostId: host.id,
       workspacePath: '/srv/project'
     })

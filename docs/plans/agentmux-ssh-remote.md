@@ -4,15 +4,17 @@
 
 ## 结论
 
-SSH 不新增第二套 Session Runtime。Local 与 Remote 都使用同一份 Daemon Protocol、`AgentMuxClient`、Session Manager 和 node-pty Owner；差异只在 Client 如何得到一条双向字节连接。
+SSH 不新增第二套 Session Runtime。Local 与 Remote 都使用同一份 `AgentMuxClient -> AgentMuxDaemonClient`、Daemon Protocol、Session Manager 和 node-pty Owner；差异只在底层 Client 如何得到一条双向字节连接。
 
 ```text
 AgentMuxClient
       │
-      ├─ LocalAgentMuxDaemonConnector ── Unix Socket
-      │
-      └─ SshAgentMuxDaemonConnector
-             └─ ssh -T <host> "node agentmuxd connect --socket <path>"
+      └─ AgentMuxDaemonClient
+              │
+              ├─ LocalAgentMuxDaemonConnector ── Unix Socket
+              │
+              └─ SshAgentMuxDaemonConnector
+                     └─ ssh -T <host> "node agentmuxd connect --socket <path>"
                                       │
                                       └─ 用户私有 Unix Socket
                                              │
@@ -23,7 +25,7 @@ AgentMuxClient
 
 ## 身份与握手
 
-Protocol v3 的 Hello 同时携带：
+Protocol v4 的 Hello 继续携带：
 
 - `protocolVersion`：协议结构身份；
 - `buildIdentity`：Remote Artifact／Daemon Build 身份；
@@ -34,6 +36,10 @@ Protocol v3 的 Hello 同时携带：
 SSH Client 仍由系统 OpenSSH 根据用户已有的 `~/.ssh/config`、Agent、硬件 Key、Known Hosts 与交互式认证完成真实主机认证。AgentMux 不复制、读取或保存 Private Key，也不加入 `StrictHostKeyChecking=no`。`hostId` 不是 SSH Host Key 的替代品；它用于阻止一条已认证连接被错误绑定到另一个 AgentMux Host 配置。
 
 重连必须重新通过 Protocol／Build／Host Hello，再由上层按原 `sessionId + incarnationId + output cursor` Attach。Mismatch 直接失败，不创建新 Session，不切 tmux，不进入兼容路径。
+
+v4 还增加远端 Host 上执行的 executable capability probe，以及经过
+`semanticSessionId + sessionId + incarnationId + agentId` 校验的原始 Hook Event；远端
+Agent 的 PATH 与 Hook Ingress 都由远端 Daemon 负责，不误用本机状态。
 
 ## Remote Artifact
 

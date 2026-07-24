@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
-import { AgentMuxClient } from '../dist/daemon-client.js'
+import { AgentMuxDaemonClient } from '../dist/daemon-client.js'
 
 const execFileAsync = promisify(execFile)
 const daemonEntry = resolve(import.meta.dirname, '../dist/agentmuxd.js')
@@ -56,7 +56,7 @@ async function sampleProcess(pid) {
 }
 
 async function connect(socketPath) {
-  const client = new AgentMuxClient({ socketPath })
+  const client = new AgentMuxDaemonClient({ socketPath })
   await client.connect()
   return client
 }
