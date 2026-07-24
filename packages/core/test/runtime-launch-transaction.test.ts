@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { ExecutionHost } from '../src/execution-host.js'
 import type { CommandResult, RunCommandOptions } from '../src/process-runner.js'
 import { AgentMuxRuntime } from '../src/runtime.js'
-import { TmuxClient } from '../src/tmux-client.js'
+import { TmuxClient, TmuxRollbackError } from '../src/tmux-client.js'
 
 class TransactionalTmuxHost implements ExecutionHost {
   readonly id = 'remote'
@@ -55,7 +55,7 @@ describe('Session launch transaction', () => {
     })).rejects.toThrow('Failed to create tmux session')
 
     expect(runtime.snapshot()).toEqual({ sessions: [], activities: {} })
-    expect(events.at(-1)).toBe('removed')
+    expect(events).toEqual([])
 
     const launched = await runtime.launch({
       kind: 'terminal',
@@ -86,5 +86,64 @@ describe('Session launch transaction', () => {
     })).rejects.toThrow('set-option failed')
 
     expect(host.commands).toContainEqual(['kill-session', '-t', 'agentmux-partial'])
+  })
+
+  it('reserves a session id before concurrent launch preparation begins', async () => {
+    const host = new TransactionalTmuxHost()
+    host.failNewSession = false
+    const runtime = new AgentMuxRuntime({ hosts: [host] })
+    runtimes.push(runtime)
+
+    const results = await Promise.allSettled([
+      runtime.launch({ kind: 'terminal', sessionId: 'concurrent', hostId: host.id, workspacePath: '/srv/project' }),
+      runtime.launch({ kind: 'terminal', sessionId: 'concurrent', hostId: host.id, workspacePath: '/srv/project' })
+    ])
+
+    expect(results.map((result) => result.status).sort()).toEqual(['fulfilled', 'rejected'])
+    expect(host.commands.filter(([command]) => command === 'new-session')).toHaveLength(1)
+    expect(runtime.snapshot().sessions).toHaveLength(1)
+    expect(runtime.snapshot().sessions[0]?.id).toBe('concurrent')
+  })
+
+  it('keeps an error session when tmux setup and rollback both fail', async () => {
+    const host = new TransactionalTmuxHost()
+    host.failNewSession = false
+    const originalRun = host.run.bind(host)
+    let failSetup = true
+    let failCleanup = true
+    host.run = async (command, args, options) => {
+      if (args[0] === 'set-option' && failSetup) {
+        failSetup = false
+        host.commands.push([...args])
+        return { stdout: '', stderr: 'set-option failed', exitCode: 1 }
+      }
+      if (args[0] === 'kill-session' && failCleanup) {
+        failCleanup = false
+        host.commands.push([...args])
+        return { stdout: '', stderr: 'kill failed', exitCode: 1 }
+      }
+      return await originalRun(command, args, options)
+    }
+    const runtime = new AgentMuxRuntime({ hosts: [host] })
+    runtimes.push(runtime)
+    const events: string[] = []
+    runtime.onEvent((event) => events.push(event.type))
+
+    await expect(runtime.launch({
+      kind: 'terminal',
+      sessionId: 'rollback-failed',
+      hostId: host.id,
+      workspacePath: '/srv/project'
+    })).rejects.toBeInstanceOf(TmuxRollbackError)
+
+    expect(runtime.snapshot().sessions).toMatchObject([{
+      id: 'rollback-failed',
+      processState: 'unknown',
+      status: { state: 'error', source: 'tmux' }
+    }])
+    expect(events).not.toContain('removed')
+
+    await runtime.stopSession('rollback-failed')
+    expect(runtime.snapshot().sessions).toEqual([])
   })
 })

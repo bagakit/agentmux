@@ -1,4 +1,9 @@
-import { AgentMuxRuntime, type AgentId } from '@agentmux/core'
+import {
+  AgentMuxRuntime,
+  type AgentId,
+  type ExecutionHost,
+  type PreparedExecutionHost
+} from '@agentmux/core'
 import type { WebContents } from 'electron'
 import type {
   AgentDetection,
@@ -8,48 +13,119 @@ import type {
 } from '../shared/contracts.js'
 import { createExecutionHost } from './host-factory.js'
 
+type InitialRuntimePreparation = {
+  kind: 'initial'
+  runtime: AgentMuxRuntime
+  hostSignatures: Map<string, string>
+}
+
+type RuntimeUpdatePreparation = {
+  kind: 'update'
+  hosts: PreparedExecutionHost[]
+  removedHostIds: string[]
+  hostSignatures: Map<string, string>
+}
+
+export type RuntimePreparation = InitialRuntimePreparation | RuntimeUpdatePreparation
+
+function signatures(config: AppConfig): Map<string, string> {
+  return new Map(config.hosts.map((host) => [host.id, JSON.stringify(host)]))
+}
+
+async function disposeHosts(hosts: readonly ExecutionHost[]): Promise<void> {
+  const results = await Promise.allSettled(hosts.map(async (host) => await host.dispose()))
+  const errors = results.flatMap((result) => result.status === 'rejected' ? [result.reason] : [])
+  if (errors.length > 0) throw new AggregateError(errors, 'Failed to dispose prepared execution hosts.')
+}
+
 export class RuntimeController {
   private runtime: AgentMuxRuntime | null = null
   private unsubscribe: (() => void) | null = null
   private readonly clients = new Set<WebContents>()
-  private readonly hostSignatures = new Map<string, string>()
+  private hostSignatures = new Map<string, string>()
 
-  assertConfigurable(config: AppConfig): void {
-    if (!this.runtime) return
-    const nextHosts = new Map(config.hosts.map((host) => [host.id, JSON.stringify(host)]))
-    for (const session of this.runtime.snapshot().sessions) {
-      if (nextHosts.get(session.hostId) !== this.hostSignatures.get(session.hostId)) {
-        throw new Error(`Stop sessions on ${session.hostId} before changing that host`)
+  async prepare(config: AppConfig): Promise<RuntimePreparation> {
+    const nextSignatures = signatures(config)
+    if (!this.runtime) {
+      const runtime = new AgentMuxRuntime({ hosts: config.hosts.map(createExecutionHost) })
+      try {
+        await runtime.start()
+      } catch (error) {
+        try {
+          await runtime.dispose()
+        } catch (cleanupError) {
+          throw new AggregateError([error, cleanupError], 'Runtime preparation and cleanup both failed.')
+        }
+        throw error
       }
+      return { kind: 'initial', runtime, hostSignatures: nextSignatures }
+    }
+
+    this.assertConfigurable(nextSignatures)
+    const changedHosts = config.hosts
+      .filter((host) => this.hostSignatures.get(host.id) !== nextSignatures.get(host.id))
+      .map(createExecutionHost)
+    const preparationResults = await Promise.allSettled(
+      changedHosts.map(async (host) => await this.runtime!.prepareHost(host))
+    )
+    const preparationErrors = preparationResults.flatMap(
+      (result) => result.status === 'rejected' ? [result.reason] : []
+    )
+    if (preparationErrors.length > 0) {
+      try {
+        await disposeHosts(changedHosts)
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [...preparationErrors, cleanupError],
+          'Host discovery and cleanup both failed.'
+        )
+      }
+      if (preparationErrors.length === 1) throw preparationErrors[0]
+      throw new AggregateError(preparationErrors, 'Multiple execution hosts failed discovery.')
+    }
+    const preparedHosts = preparationResults.flatMap(
+      (result) => result.status === 'fulfilled' ? [result.value] : []
+    )
+    return {
+      kind: 'update',
+      hosts: preparedHosts,
+      removedHostIds: [...this.hostSignatures.keys()].filter((id) => !nextSignatures.has(id)),
+      hostSignatures: nextSignatures
     }
   }
 
-  async configure(config: AppConfig): Promise<void> {
-    if (!this.runtime) {
-      this.runtime = new AgentMuxRuntime({ hosts: config.hosts.map(createExecutionHost) })
-      for (const host of config.hosts) this.hostSignatures.set(host.id, JSON.stringify(host))
-      this.unsubscribe = this.runtime.onEvent((event) => {
-        for (const client of this.clients) {
-          if (!client.isDestroyed()) client.send('agentmux:session-event', event)
-        }
-      })
-      await this.runtime.start()
+  commit(preparation: RuntimePreparation): void {
+    if (preparation.kind === 'initial') {
+      if (this.runtime) throw new Error('Runtime is already configured')
+      this.runtime = preparation.runtime
+      this.hostSignatures = preparation.hostSignatures
+      this.subscribe()
       return
     }
-    this.assertConfigurable(config)
-    const configuredHostIds = new Set(config.hosts.map((host) => host.id))
-    for (const hostId of [...this.hostSignatures.keys()]) {
-      if (configuredHostIds.has(hostId)) continue
-      await this.runtime.hosts.remove(hostId)
-      this.hostSignatures.delete(hostId)
+    if (!this.runtime) throw new Error('Runtime is not configured')
+    const retiredHosts: ExecutionHost[] = []
+    for (const hostId of preparation.removedHostIds) {
+      const retired = this.runtime.removeHost(hostId)
+      if (retired) retiredHosts.push(retired)
     }
-    for (const host of config.hosts) {
-      const signature = JSON.stringify(host)
-      if (this.hostSignatures.get(host.id) === signature) continue
-      await this.runtime.hosts.replace(createExecutionHost(host))
-      this.hostSignatures.set(host.id, signature)
-      await this.runtime.discover(host.id)
+    for (const preparedHost of preparation.hosts) {
+      const retired = this.runtime.commitHost(preparedHost)
+      if (retired) retiredHosts.push(retired)
     }
+    this.hostSignatures = preparation.hostSignatures
+    for (const host of retiredHosts) {
+      void host.dispose().catch((error) => {
+        console.error(`Failed to dispose retired execution host ${host.id}`, error)
+      })
+    }
+  }
+
+  async discard(preparation: RuntimePreparation): Promise<void> {
+    if (preparation.kind === 'initial') {
+      await preparation.runtime.dispose()
+      return
+    }
+    await disposeHosts(preparation.hosts.map((prepared) => prepared.host))
   }
 
   attach(client: WebContents): () => void {
@@ -94,5 +170,27 @@ export class RuntimeController {
     this.runtime = null
     this.clients.clear()
     this.hostSignatures.clear()
+  }
+
+  private assertConfigurable(nextSignatures: ReadonlyMap<string, string>): void {
+    if (!this.runtime) return
+    for (const session of this.runtime.snapshot().sessions) {
+      if (nextSignatures.get(session.hostId) !== this.hostSignatures.get(session.hostId)) {
+        throw new Error(`Stop sessions on ${session.hostId} before changing that host`)
+      }
+    }
+  }
+
+  private subscribe(): void {
+    this.unsubscribe = this.runtime!.onEvent((event) => {
+      for (const client of this.clients) {
+        if (client.isDestroyed()) continue
+        try {
+          client.send('agentmux:session-event', event)
+        } catch (error) {
+          console.error('Failed to publish AgentMux Runtime event', error)
+        }
+      }
+    })
   }
 }

@@ -233,17 +233,17 @@ export class ExecutionHostRegistry {
     this.hosts.set(host.id, host)
   }
 
-  async replace(host: ExecutionHost): Promise<void> {
+  replace(host: ExecutionHost): ExecutionHost | undefined {
     const previous = this.hosts.get(host.id)
-    if (previous && previous !== host) await previous.dispose()
     this.hosts.set(host.id, host)
+    return previous === host ? undefined : previous
   }
 
-  async remove(id: string): Promise<void> {
+  remove(id: string): ExecutionHost | undefined {
     const host = this.hosts.get(id)
-    if (!host) return
-    await host.dispose()
+    if (!host) return undefined
     this.hosts.delete(id)
+    return host
   }
 
   get(id: string): ExecutionHost {

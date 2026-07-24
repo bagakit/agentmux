@@ -111,23 +111,26 @@ describe('AgentMuxRuntime remote recovery', () => {
     })
   })
 
-  it('discovers an existing session when an SSH host is registered after startup', async () => {
+  it('prepares an added SSH host without publishing until synchronous commit', async () => {
     const initialHost = new RecoverableSshHost()
     const runtime = new AgentMuxRuntime({ hosts: [initialHost] })
     runtimes.push(runtime)
     await runtime.start()
 
     const discoveredHost = new DiscoverableSshHost()
-    runtime.hosts.register(discoveredHost)
     const published: string[] = []
     runtime.onEvent((event) => {
       if (event.type === 'session') published.push(event.session.id)
     })
 
-    const first = await runtime.discover(discoveredHost.id)
+    const prepared = await runtime.prepareHost(discoveredHost)
+    expect(runtime.snapshot().sessions).toEqual([])
+    expect(() => runtime.hosts.get(discoveredHost.id)).toThrow('Unknown execution host')
+
+    const retired = runtime.commitHost(prepared)
     const second = await runtime.discover(discoveredHost.id)
 
-    expect(first).toHaveLength(1)
+    expect(retired).toBeUndefined()
     expect(second).toHaveLength(1)
     expect(runtime.snapshot().sessions).toEqual([
       expect.objectContaining({

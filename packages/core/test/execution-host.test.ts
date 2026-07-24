@@ -88,7 +88,7 @@ describe('SshExecutionHost', () => {
 })
 
 describe('ExecutionHostRegistry', () => {
-  it('disposes and removes a host without retaining a compatibility alias', async () => {
+  it('returns a removed host so the transaction owner controls disposal', async () => {
     const dispose = vi.fn(async () => {})
     const host: ExecutionHost = {
       id: 'retired',
@@ -99,7 +99,9 @@ describe('ExecutionHostRegistry', () => {
       dispose
     }
     const registry = new ExecutionHostRegistry([host])
-    await registry.remove(host.id)
+    const removed = registry.remove(host.id)
+    expect(removed).toBe(host)
+    await removed?.dispose()
     expect(dispose).toHaveBeenCalledOnce()
     expect(() => registry.get(host.id)).toThrow('Unknown execution host')
   })

@@ -33,6 +33,25 @@ export type TmuxSessionInfo = {
   windows: number
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+export class TmuxRollbackError extends AgentMuxError {
+  constructor(
+    readonly sessionName: string,
+    readonly setupError: unknown,
+    readonly cleanupError: unknown
+  ) {
+    super(
+      `Failed to configure tmux session ${sessionName}, and rollback also failed.`,
+      'TMUX_ROLLBACK_FAILED',
+      `setup: ${errorMessage(setupError)}; rollback: ${errorMessage(cleanupError)}`
+    )
+    this.name = 'TmuxRollbackError'
+  }
+}
+
 function requireSuccess(
   result: { exitCode: number; stderr: string },
   command: string,
@@ -91,7 +110,11 @@ export class TmuxClient {
       await this.run(['set-option', '-t', request.sessionName, 'remain-on-exit', 'on'])
       await this.run(['set-option', '-t', request.sessionName, 'history-limit', '50000'])
     } catch (error) {
-      await this.stop(request.sessionName).catch(() => {})
+      try {
+        await this.stop(request.sessionName)
+      } catch (cleanupError) {
+        throw new TmuxRollbackError(request.sessionName, error, cleanupError)
+      }
       throw error
     }
   }
