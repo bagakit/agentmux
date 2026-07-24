@@ -30,11 +30,18 @@ import { reduceBrowserEvent } from './lib/browser-state'
 import {
   reduceDocumentContent,
   reduceDocumentSaved,
+  reduceFileClosed,
   reduceFileDelete,
   reduceFileOpened,
   reduceFileRename
 } from './lib/file-workbench-state'
-import { reduceRuntimeEvent, type SessionViewMode } from './lib/session-state'
+import {
+  ownsSessionLaunch,
+  reduceRuntimeEvent,
+  reduceSessionLaunchAttached,
+  reduceSessionLaunchFailed,
+  type SessionViewMode
+} from './lib/session-state'
 import {
   TOOL_DOCK_DEFAULT_WIDTH,
   clampToolDockWidth,
@@ -99,6 +106,7 @@ type AppState = {
   activateTab(workspaceId: string, paneId: string, tabId: string): void
   selectSession(id: string, paneId?: string): void
   openLauncher(paneId?: string, view?: LauncherView): void
+  setLauncherView(tabId: string, view: LauncherView): void
   closeTab(workspaceId: string, paneId: string, tabId: string): Promise<void>
   moveTab(
     workspaceId: string,
@@ -316,8 +324,20 @@ export const useAppStore = create<AppState>((set, get) => ({
       layouts: { ...state.layouts, [workspaceId]: addTab(layout, targetPaneId, tab.id) }
     }))
   },
+  setLauncherView(tabId, view) {
+    set((state) => {
+      const tab = state.tabs[tabId]
+      return tab?.kind === 'launcher'
+        ? { tabs: { ...state.tabs, [tabId]: { ...tab, view } } }
+        : state
+    })
+  },
   async closeTab(workspaceId, paneId, tabId) {
     const tab = get().tabs[tabId]
+    if (tab?.kind === 'file') {
+      set((state) => reduceFileClosed(state, workspaceId, paneId, tabId))
+      return
+    }
     if (tab?.kind === 'browser') {
       try {
         await api.browser.close(tab.browserId)
@@ -556,22 +576,16 @@ export const useAppStore = create<AppState>((set, get) => ({
         sessionId,
         label: `${agentId} · ${workspace.name}`
       })
-      set((current) => {
-        const projected = reduceRuntimeEvent(current, { type: 'session', session })
-        return {
-          ...projected,
-          tabs: projected.tabs[tabId]?.kind === 'agent' && projected.tabs[tabId].sessionId === session.id
-            ? { ...projected.tabs, [tabId]: { ...projected.tabs[tabId], phase: 'attached' } }
-            : projected.tabs,
-          viewModes: { ...current.viewModes, [session.id]: 'terminal' }
-        }
-      })
+      if (!ownsSessionLaunch(get().tabs[tabId], 'agent', sessionId)) {
+        await api.sessions.stop(session.id).catch((cleanupError) => {
+          if (get().sessions.some((item) => item.id === session.id)) get().reportError(cleanupError)
+        })
+        return
+      }
+      set((current) => reduceSessionLaunchAttached(current, tabId, session))
     } catch (error) {
-      set((current) => ({
-        tabs: current.tabs[tabId]?.kind === 'agent' && current.tabs[tabId].sessionId === sessionId
-          ? { ...current.tabs, [tabId]: { id: tabId, kind: 'launcher', workspaceId: workspace.id, view: 'agent' } }
-          : current.tabs
-      }))
+      if (!ownsSessionLaunch(get().tabs[tabId], 'agent', sessionId)) return
+      set((current) => reduceSessionLaunchFailed(current, tabId, 'agent', sessionId, 'agent'))
       get().reportError(error)
       throw error
     }
@@ -607,21 +621,16 @@ export const useAppStore = create<AppState>((set, get) => ({
         sessionId,
         label: `Terminal · ${workspace.name}`
       })
-      set((current) => {
-        const projected = reduceRuntimeEvent(current, { type: 'session', session })
-        return {
-          ...projected,
-          tabs: projected.tabs[tabId]?.kind === 'terminal' && projected.tabs[tabId].sessionId === session.id
-            ? { ...projected.tabs, [tabId]: { ...projected.tabs[tabId], phase: 'attached' } }
-            : projected.tabs
-        }
-      })
+      if (!ownsSessionLaunch(get().tabs[tabId], 'terminal', sessionId)) {
+        await api.sessions.stop(session.id).catch((cleanupError) => {
+          if (get().sessions.some((item) => item.id === session.id)) get().reportError(cleanupError)
+        })
+        return
+      }
+      set((current) => reduceSessionLaunchAttached(current, tabId, session))
     } catch (error) {
-      set((current) => ({
-        tabs: current.tabs[tabId]?.kind === 'terminal' && current.tabs[tabId].sessionId === sessionId
-          ? { ...current.tabs, [tabId]: { id: tabId, kind: 'launcher', workspaceId: workspace.id, view: 'picker' } }
-          : current.tabs
-      }))
+      if (!ownsSessionLaunch(get().tabs[tabId], 'terminal', sessionId)) return
+      set((current) => reduceSessionLaunchFailed(current, tabId, 'terminal', sessionId, 'picker'))
       get().reportError(error)
       throw error
     }
@@ -649,6 +658,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         kind: 'browser',
         workspaceId,
         browserId: browser.id
+      }
+      if (get().tabs[tabId]?.kind !== 'launcher') {
+        await api.browser.close(browser.id)
+        return
       }
       set((current) => ({ tabs: { ...current.tabs, [tabId]: tab } }))
     } catch (error) {
@@ -682,16 +695,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     await api.sessions.stop(sessionId).catch((error) => get().reportError(error))
   },
   applyEvent(event) {
-    if (event.type === 'session') {
-      const workspace = workspaceForSession(get().config, event.session)
-      const hasTab = Object.values(get().tabs).some(
-        (tab) => (tab.kind === 'agent' || tab.kind === 'terminal') && tab.sessionId === event.session.id
-      )
-      set((state) => reduceRuntimeEvent(state, event))
-      if (workspace && !hasTab) get().selectSession(event.session.id)
-    } else {
-      set((state) => reduceRuntimeEvent(state, event))
-    }
+    set((state) => reduceRuntimeEvent(state, event))
   },
   setConfig(config) {
     detectionRequestIds.clear()

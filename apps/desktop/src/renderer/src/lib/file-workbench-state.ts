@@ -5,6 +5,7 @@ import {
   fileTabId,
   paneForTab,
   remapLayoutTabIds,
+  tabStillOpen,
   type FileWorkbenchTab,
   type WorkbenchTab
 } from './workbench-tabs'
@@ -74,6 +75,40 @@ export function reduceDocumentSaved(
   }
 }
 
+export function reduceFileClosed(
+  state: FileWorkbenchState,
+  workspaceId: string,
+  paneId: string,
+  tabId: string
+): FileWorkbenchState {
+  const tab = state.tabs[tabId]
+  const layout = state.layouts[workspaceId]
+  if (tab?.kind !== 'file' || !layout) return state
+  const layouts = {
+    ...state.layouts,
+    [workspaceId]: removeTab(layout, paneId, tabId)
+  }
+  if (tabStillOpen(layouts, tabId)) return { ...state, layouts }
+  const tabs = { ...state.tabs }
+  const documents = { ...state.documents }
+  const dirtyDocuments = { ...state.dirtyDocuments }
+  delete tabs[tabId]
+  delete documents[documentKey(tab.workspaceId, tab.path)]
+  delete dirtyDocuments[documentKey(tab.workspaceId, tab.path)]
+  return {
+    tabs,
+    documents,
+    dirtyDocuments,
+    layouts,
+    lastActiveFileByWorkspace: {
+      ...state.lastActiveFileByWorkspace,
+      [workspaceId]: state.lastActiveFileByWorkspace[workspaceId] === tab.path
+        ? undefined
+        : state.lastActiveFileByWorkspace[workspaceId]
+    }
+  }
+}
+
 export function reduceFileRename(
   state: FileWorkbenchState,
   workspaceId: string,
@@ -100,17 +135,22 @@ export function reduceFileRename(
     const nextId = replacements.get(tab.id)!
     delete tabs[tab.id]
     tabs[nextId] = { ...tab, id: nextId, path: renamedPath }
-    const oldKey = documentKey(workspaceId, tab.path)
-    const nextKey = documentKey(workspaceId, renamedPath)
-    const document = documents[oldKey]
-    if (document) {
-      delete documents[oldKey]
-      documents[nextKey] = { ...document, path: renamedPath }
-    }
-    if (oldKey in dirtyDocuments) {
-      dirtyDocuments[nextKey] = dirtyDocuments[oldKey] ?? false
-      delete dirtyDocuments[oldKey]
-    }
+  }
+  const documentPrefix = `${workspaceId}\0`
+  for (const [key, document] of Object.entries(state.documents)) {
+    if (!key.startsWith(documentPrefix)) continue
+    const documentPath = key.slice(documentPrefix.length)
+    if (!isPathWithinSubtree(documentPath, path)) continue
+    const renamedPath = remapPathWithinSubtree(documentPath, path, nextPath)
+    delete documents[key]
+    documents[documentKey(workspaceId, renamedPath)] = { ...document, path: renamedPath }
+  }
+  for (const [key, dirty] of Object.entries(state.dirtyDocuments)) {
+    if (!key.startsWith(documentPrefix)) continue
+    const documentPath = key.slice(documentPrefix.length)
+    if (!isPathWithinSubtree(documentPath, path)) continue
+    delete dirtyDocuments[key]
+    dirtyDocuments[documentKey(workspaceId, remapPathWithinSubtree(documentPath, path, nextPath))] = dirty
   }
   return {
     tabs,
@@ -154,9 +194,15 @@ export function reduceFileDelete(
   const dirtyDocuments = { ...state.dirtyDocuments }
   for (const tab of removedTabs) {
     delete tabs[tab.id]
-    const key = documentKey(workspaceId, tab.path)
-    delete documents[key]
-    delete dirtyDocuments[key]
+  }
+  const documentPrefix = `${workspaceId}\0`
+  for (const key of Object.keys(state.documents)) {
+    if (!key.startsWith(documentPrefix)) continue
+    if (isPathWithinSubtree(key.slice(documentPrefix.length), path)) delete documents[key]
+  }
+  for (const key of Object.keys(state.dirtyDocuments)) {
+    if (!key.startsWith(documentPrefix)) continue
+    if (isPathWithinSubtree(key.slice(documentPrefix.length), path)) delete dirtyDocuments[key]
   }
   return {
     tabs,
