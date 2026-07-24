@@ -8,7 +8,9 @@ import type { WorkspaceRecord } from '../src/shared/contracts.js'
 import { WorkspaceFiles, workspaceFileObserverCount } from '../src/main/workspace-files.js'
 
 const localWorkerRace = vi.hoisted(() => ({
-  beforeInput: null as null | (() => Promise<void>)
+  beforeInput: null as null | (() => Promise<void>),
+  beforeObserverInput: null as null | (() => Promise<void>),
+  beforeObserverKill: null as null | (() => Promise<void>)
 }))
 
 vi.mock('node:child_process', async (importOriginal) => {
@@ -17,12 +19,15 @@ vi.mock('node:child_process', async (importOriginal) => {
     ...actual,
     spawn: (...args: any[]) => {
       const child = (actual.spawn as (...values: any[]) => ReturnType<typeof actual.spawn>)(...args)
+      const request = JSON.parse(args[1]?.[3] ?? 'null') as { action?: string } | null
       const input = child.stdin
       if (!input) return child
       const originalEnd = input.end.bind(input)
       input.end = ((...values: any[]) => {
-        const hook = localWorkerRace.beforeInput
-        localWorkerRace.beforeInput = null
+        const observerHook = request?.action === 'observe' ? localWorkerRace.beforeObserverInput : null
+        const hook = observerHook ?? localWorkerRace.beforeInput
+        if (observerHook) localWorkerRace.beforeObserverInput = null
+        else localWorkerRace.beforeInput = null
         if (!hook) return originalEnd(...values)
         void hook().then(
           () => originalEnd(...values),
@@ -30,6 +35,19 @@ vi.mock('node:child_process', async (importOriginal) => {
         )
         return input
       }) as typeof input.end
+      if (request?.action === 'observe') {
+        const originalKill = child.kill.bind(child)
+        child.kill = ((signal?: NodeJS.Signals | number) => {
+          const hook = localWorkerRace.beforeObserverKill
+          localWorkerRace.beforeObserverKill = null
+          if (!hook) return originalKill(signal)
+          void hook().then(
+            () => originalKill(signal),
+            () => originalKill(signal)
+          )
+          return true
+        }) as typeof child.kill
+      }
       return child
     }
   }
@@ -81,6 +99,8 @@ async function localFixture(label: string): Promise<{
 
 afterEach(async () => {
   localWorkerRace.beforeInput = null
+  localWorkerRace.beforeObserverInput = null
+  localWorkerRace.beforeObserverKill = null
   await Promise.all(temporaryRoots.splice(0).map(async (path) => await rm(path, { recursive: true, force: true })))
 })
 
@@ -362,6 +382,55 @@ describe('WorkspaceFiles root confinement', () => {
 
     expect(workspaceFileObserverCount()).toBe(0)
     await disposeObservation()
+  })
+
+  it('closes a pending observer start before disposal and rejects its registration', async () => {
+    const { root, workspace, host } = await localFixture('pending-observation-disposal')
+    await writeFile(join(root, 'document.txt'), 'alpha')
+    const files = new WorkspaceFiles(() => host)
+    let inputReached!: () => void
+    let releaseInput!: () => void
+    const reached = new Promise<void>((resolve) => { inputReached = resolve })
+    const release = new Promise<void>((resolve) => { releaseInput = resolve })
+    localWorkerRace.beforeObserverInput = async () => {
+      inputReached()
+      await release
+    }
+
+    const observation = files.observe(workspace, 'document.txt', () => {})
+    await reached
+    const disposal = files.dispose()
+    releaseInput()
+
+    await expect(observation).rejects.toThrow('WorkspaceFiles is disposed')
+    await disposal
+    expect(workspaceFileObserverCount()).toBe(0)
+  })
+
+  it('waits for a last-listener shutdown already in progress', async () => {
+    const { root, workspace, host } = await localFixture('concurrent-observation-disposal')
+    await writeFile(join(root, 'document.txt'), 'alpha')
+    const files = new WorkspaceFiles(() => host)
+    const disposeObservation = await files.observe(workspace, 'document.txt', () => {})
+    let killReached!: () => void
+    let releaseKill!: () => void
+    const reached = new Promise<void>((resolve) => { killReached = resolve })
+    const release = new Promise<void>((resolve) => { releaseKill = resolve })
+    localWorkerRace.beforeObserverKill = async () => {
+      killReached()
+      await release
+    }
+
+    const listenerDisposal = disposeObservation()
+    await reached
+    let filesDisposed = false
+    const filesDisposal = files.dispose().then(() => { filesDisposed = true })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(filesDisposed).toBe(false)
+
+    releaseKill()
+    await Promise.all([listenerDisposal, filesDisposal])
+    expect(workspaceFileObserverCount()).toBe(0)
   })
 
   it('lists one directory level and confines create, rename, and delete mutations', async () => {
