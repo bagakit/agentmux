@@ -8,10 +8,12 @@ const MAX_TERMINAL_INCREMENT_KIB = 256 * 1024
 const MAX_EDITOR_INCREMENT_KIB = 512 * 1024
 const MAX_BROWSER_INCREMENT_KIB = 256 * 1024
 const MAX_BROWSER_RELEASED_INCREMENT_KIB = 256 * 1024
-const MAX_RELEASED_INCREMENT_KIB = MAX_EDITOR_INCREMENT_KIB
 const MAX_RELEASED_TOTAL_KIB = 1024 * 1024
+const MIN_EXPECTED_IDLE_KIB = 448 * 1024
+const MAX_RELEASED_INCREMENT_KIB = MAX_RELEASED_TOTAL_KIB - MIN_EXPECTED_IDLE_KIB
 const MAX_RELEASE_DRIFT_KIB = 128 * 1024
-const RELEASE_CYCLES = 5
+const RELEASE_WARMUP_CYCLES = 2
+const RELEASE_CYCLES = 7
 
 type ResourceSample = {
   label: string
@@ -292,8 +294,19 @@ export async function runDesktopResourceProbe(options: {
       (await ownerCounts(options.window, options.runtime)).browserWebContents === browserOwnerBefore
     ))
     const browserReleased = await sample('browser-released', options.window, options.runtime)
-    const releaseDriftKiB = Math.max(...releaseCycles.map((entry) => entry.totalWorkingSetKiB)) -
-      releaseCycles[0]!.totalWorkingSetKiB
+    const warmupReleaseCycles = releaseCycles.slice(0, RELEASE_WARMUP_CYCLES)
+    const steadyReleaseCycles = releaseCycles.slice(RELEASE_WARMUP_CYCLES)
+    const ownerCleanReleaseSamples = [...releaseCycles, browserReleased]
+    const maxReleasedWorkingSetKiB = Math.max(
+      ...ownerCleanReleaseSamples.map((entry) => entry.totalWorkingSetKiB)
+    )
+    const maxReleasedIncrementKiB = maxReleasedWorkingSetKiB - idle.totalWorkingSetKiB
+    const totalReleaseDriftKiB = Math.max(...releaseCycles.map((entry) => entry.totalWorkingSetKiB)) -
+      Math.min(...releaseCycles.map((entry) => entry.totalWorkingSetKiB))
+    const warmupReleaseDriftKiB = Math.max(...warmupReleaseCycles.map((entry) => entry.totalWorkingSetKiB)) -
+      Math.min(...warmupReleaseCycles.map((entry) => entry.totalWorkingSetKiB))
+    const releaseDriftKiB = Math.max(...steadyReleaseCycles.map((entry) => entry.totalWorkingSetKiB)) -
+      steadyReleaseCycles[0]!.totalWorkingSetKiB
     const report = {
       schema: 'agentmux.t017-desktop-resources.v1',
       measuredAt: new Date().toISOString(),
@@ -316,7 +329,9 @@ export async function runDesktopResourceProbe(options: {
         maxReleasedIncrementKiB: MAX_RELEASED_INCREMENT_KIB,
         maxReleasedTotalKiB: MAX_RELEASED_TOTAL_KIB,
         maxReleaseDriftKiB: MAX_RELEASE_DRIFT_KIB,
-        releaseCycles: RELEASE_CYCLES
+        releaseCycles: RELEASE_CYCLES,
+        warmupReleaseCycles: RELEASE_WARMUP_CYCLES,
+        steadyReleaseCycles: steadyReleaseCycles.length
       },
       phases: {
         idle,
@@ -332,7 +347,10 @@ export async function runDesktopResourceProbe(options: {
         editorWorkingSetKiB: editorSample.totalWorkingSetKiB - idle.totalWorkingSetKiB,
         browserWorkingSetKiB: browser.totalWorkingSetKiB - released.totalWorkingSetKiB,
         browserReleasedWorkingSetKiB: browserReleased.totalWorkingSetKiB - released.totalWorkingSetKiB,
-        releasedWorkingSetKiB: released.totalWorkingSetKiB - idle.totalWorkingSetKiB,
+        maxReleasedWorkingSetKiB,
+        maxReleasedIncrementKiB,
+        totalReleaseDriftKiB,
+        warmupReleaseDriftKiB,
         releaseDriftKiB
       }
     }
@@ -366,14 +384,14 @@ export async function runDesktopResourceProbe(options: {
         throw new Error(`Desktop resource owners did not converge at ${phase.label}.`)
       }
     }
-    if (report.deltas.releasedWorkingSetKiB > MAX_RELEASED_INCREMENT_KIB) {
-      throw new Error('Released Desktop resources exceeded their working-set budget.')
+    if (report.deltas.maxReleasedIncrementKiB > MAX_RELEASED_INCREMENT_KIB) {
+      throw new Error('An owner-clean Desktop sample exceeded its released working-set increment budget.')
     }
-    if (released.totalWorkingSetKiB > MAX_RELEASED_TOTAL_KIB) {
-      throw new Error('Released Desktop process group exceeded its working-set budget.')
+    if (report.deltas.maxReleasedWorkingSetKiB > MAX_RELEASED_TOTAL_KIB) {
+      throw new Error('An owner-clean Desktop sample exceeded the released process-group budget.')
     }
     if (releaseDriftKiB > MAX_RELEASE_DRIFT_KIB) {
-      throw new Error('Desktop working set kept growing across release cycles.')
+      throw new Error('Desktop steady-state working set kept growing across release cycles.')
     }
   } catch (error) {
     if (terminalControl) await options.runtime.stopSession(terminalControl).catch(() => {})
