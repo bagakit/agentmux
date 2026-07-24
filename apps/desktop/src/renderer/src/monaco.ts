@@ -57,3 +57,6 @@ monacoTypeScript.javascriptDefaults.setCompilerOptions({
 })
 
 loader.config({ monaco })
+
+const resourceWindow = window as typeof window & { __agentmuxMonacoModelCount?: () => number }
+resourceWindow.__agentmuxMonacoModelCount = () => monaco.editor.getModels().length

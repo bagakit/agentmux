@@ -22,7 +22,8 @@ const runtime = new RuntimeController(new DesktopAgentSessionStore(
 ))
 const configStore = new ConfigStore()
 
-async function createWindow(): Promise<void> {
+async function createWindow(appReadyAtMs: number = Date.now()): Promise<void> {
+  const windowCreationStartedAtMs = Date.now()
   const window = new BrowserWindow({
     width: 1480,
     height: 940,
@@ -46,6 +47,7 @@ async function createWindow(): Promise<void> {
   disposeIpc = await registerIpc({ window, configStore, runtime })
   if (process.env.ELECTRON_RENDERER_URL) await window.loadURL(process.env.ELECTRON_RENDERER_URL)
   else await window.loadFile(join(import.meta.dirname, '../renderer/index.html'))
+  const rendererLoadedAtMs = Date.now()
   if (process.env.AGENTMUX_DESKTOP_READY_FILE) {
     await writeFile(process.env.AGENTMUX_DESKTOP_READY_FILE, `${JSON.stringify({
       productName: app.name,
@@ -57,12 +59,23 @@ async function createWindow(): Promise<void> {
       return
     }
   }
-  if (await runDesktopResourceProbe({ window, runtime, configStore })) app.quit()
+  if (await runDesktopResourceProbe({
+    window,
+    runtime,
+    configStore,
+    startup: {
+      spawnedAtMs: Number(process.env.AGENTMUX_DESKTOP_SPAWNED_AT_MS),
+      appReadyAtMs,
+      windowCreationStartedAtMs,
+      rendererLoadedAtMs
+    }
+  })) app.quit()
 }
 
 app.whenReady().then(async () => {
+  const appReadyAtMs = Date.now()
   if (process.platform === 'darwin') app.dock?.setIcon(appIconPath)
-  await createWindow()
+  await createWindow(appReadyAtMs)
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) void createWindow()
   })
