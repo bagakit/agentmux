@@ -1,5 +1,5 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { dirname, join, normalize as normalizeLocalPath, posix } from 'node:path'
 import { app } from 'electron'
 import { z } from 'zod'
 import type { AppConfig } from '../shared/contracts.js'
@@ -43,10 +43,61 @@ const configSchema = z
   .object({
     version: z.literal(1),
     hosts: z.array(hostSchema),
-    agents: z.record(z.string(), agentSchema),
+    agents: z
+      .object({
+        codex: agentSchema,
+        claude: agentSchema,
+        traex: agentSchema,
+        hermes: agentSchema,
+        pi: agentSchema
+      })
+      .strict(),
     workspaces: z.array(workspaceSchema)
   })
   .strict()
+  .superRefine((config, context) => {
+    const hostIds = new Set(config.hosts.map((host) => host.id))
+    const hostsById = new Map(config.hosts.map((host) => [host.id, host]))
+    if (hostIds.size !== config.hosts.length) {
+      context.addIssue({ code: 'custom', path: ['hosts'], message: 'Host ids must be unique' })
+    }
+    if (!hostIds.has('local')) {
+      context.addIssue({ code: 'custom', path: ['hosts'], message: 'Local host is required' })
+    }
+    const workspaceIds = new Set<string>()
+    const workspaceLocations = new Set<string>()
+    for (const [index, workspace] of config.workspaces.entries()) {
+      if (workspaceIds.has(workspace.id)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['workspaces', index, 'id'],
+          message: `Workspace id must be unique: ${workspace.id}`
+        })
+      }
+      workspaceIds.add(workspace.id)
+      if (!hostIds.has(workspace.hostId)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['workspaces', index, 'hostId'],
+          message: `Unknown workspace host: ${workspace.hostId}`
+        })
+        continue
+      }
+      const host = hostsById.get(workspace.hostId)!
+      const normalizedPath = host.kind === 'local'
+        ? normalizeLocalPath(join(workspace.path, '.'))
+        : posix.normalize(posix.join(workspace.path, '.'))
+      const location = `${workspace.hostId}\0${normalizedPath}`
+      if (workspaceLocations.has(location)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['workspaces', index, 'path'],
+          message: `Workspace path must be unique on ${workspace.hostId}: ${normalizedPath}`
+        })
+      }
+      workspaceLocations.add(location)
+    }
+  })
 
 const DEFAULT_CONFIG: AppConfig = {
   version: 1,
@@ -54,6 +105,7 @@ const DEFAULT_CONFIG: AppConfig = {
   agents: {
     codex: { command: 'codex', args: [], env: {} },
     claude: { command: 'claude', args: [], env: {} },
+    traex: { command: 'traex', args: [], env: {} },
     hermes: { command: 'hermes', args: [], env: {} },
     pi: { command: 'pi', args: [], env: {} }
   },

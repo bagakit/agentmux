@@ -1,6 +1,6 @@
 import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it, vi } from 'vitest'
-import { SshExecutionHost } from '../src/execution-host.js'
+import { ExecutionHostRegistry, SshExecutionHost, type ExecutionHost } from '../src/execution-host.js'
 import type { ProcessRunner } from '../src/process-runner.js'
 
 describe('SshExecutionHost', () => {
@@ -85,5 +85,23 @@ describe('SshExecutionHost', () => {
       '--',
       'river@dev.example.com'
     ])
+  })
+})
+
+describe('ExecutionHostRegistry', () => {
+  it('disposes and removes a host without retaining a compatibility alias', async () => {
+    const dispose = vi.fn(async () => {})
+    const host: ExecutionHost = {
+      id: 'retired',
+      kind: 'ssh',
+      label: 'Retired host',
+      run: vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
+      exposeLoopbackPort: vi.fn(async (port: number) => port),
+      dispose
+    }
+    const registry = new ExecutionHostRegistry([host])
+    await registry.remove(host.id)
+    expect(dispose).toHaveBeenCalledOnce()
+    expect(() => registry.get(host.id)).toThrow('Unknown execution host')
   })
 })

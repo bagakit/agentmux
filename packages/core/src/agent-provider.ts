@@ -65,6 +65,12 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
     buildArgs: (prompt, args) => [...args, ...(prompt ? [prompt] : [])]
   }),
   defineProvider({
+    id: 'traex',
+    label: 'TraeX',
+    executable: 'traex',
+    buildArgs: (prompt, args) => [...args, ...(prompt ? [prompt] : [])]
+  }),
+  defineProvider({
     id: 'hermes',
     label: 'Hermes',
     executable: 'hermes',

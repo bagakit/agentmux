@@ -1,18 +1,37 @@
 import { randomUUID } from 'node:crypto'
 import type { ExecutionHost } from '@agentmux/core'
-import type { AppConfig, CreateWorktreeInput, WorkspaceRecord } from '../shared/contracts.js'
+import type {
+  AppConfig,
+  CreateWorktreeForBranchInput,
+  WorkspaceBranchesSnapshot,
+  WorkspaceRecord,
+  WorkspaceSelectionResult
+} from '../shared/contracts.js'
 
 type ConfigWriter = {
   save(value: AppConfig): Promise<AppConfig>
 }
 
-export type WorktreeCreation = {
-  config: AppConfig
-  workspace: WorkspaceRecord
+type GitWorktree = { path: string; branch: string | null }
+
+export function parseGitWorktreePorcelain(output: string): GitWorktree[] {
+  const worktrees: GitWorktree[] = []
+  let current: GitWorktree | null = null
+  for (const rawToken of output.split('\0')) {
+    const token = rawToken.replace(/^\n+/, '')
+    if (token.startsWith('worktree ')) {
+      if (current) worktrees.push(current)
+      current = { path: token.slice('worktree '.length), branch: null }
+    } else if (current && token.startsWith('branch refs/heads/')) {
+      current.branch = token.slice('branch refs/heads/'.length)
+    }
+  }
+  if (current) worktrees.push(current)
+  return worktrees
 }
 
-function labelFor(input: CreateWorktreeInput): string {
-  return input.name?.trim() || input.path.split(/[\\/]/).filter(Boolean).pop() || input.branch
+export function parseGitBranches(output: string): string[] {
+  return [...new Set(output.split(/\r?\n/).map((branch) => branch.trim()).filter(Boolean))]
 }
 
 export class WorktreeService {
@@ -21,37 +40,129 @@ export class WorktreeService {
     private readonly configWriter: ConfigWriter
   ) {}
 
-  async create(input: CreateWorktreeInput, config: AppConfig): Promise<WorktreeCreation> {
-    const repoPath = input.repoPath.trim()
+  async list(workspaceId: string, config: AppConfig): Promise<WorkspaceBranchesSnapshot> {
+    const workspace = this.workspace(config, workspaceId)
+    const host = this.hostFor(workspace.hostId)
+    const repoPath = workspace.repoPath ?? await this.resolveRepoPath(host, workspace.path)
+    const [branchesResult, worktreesResult] = await Promise.all([
+      host.run('git', ['-C', repoPath, 'for-each-ref', '--format=%(refname:short)', 'refs/heads'], {
+        timeoutMs: 20_000,
+        maxOutputBytes: 2 * 1024 * 1024
+      }),
+      host.run('git', ['-C', repoPath, 'worktree', 'list', '--porcelain', '-z'], {
+        timeoutMs: 20_000,
+        maxOutputBytes: 2 * 1024 * 1024
+      })
+    ])
+    this.assertGit(branchesResult, 'Could not list Git branches')
+    this.assertGit(worktreesResult, 'Could not list Git worktrees')
+    const worktrees = parseGitWorktreePorcelain(worktreesResult.stdout)
+    const worktreeByBranch = new Map(
+      worktrees.flatMap((item) => item.branch ? [[item.branch, item] as const] : [])
+    )
+    const branchNames = new Set(parseGitBranches(branchesResult.stdout))
+    for (const item of worktrees) if (item.branch) branchNames.add(item.branch)
+    const branches = [...branchNames].map((name) => {
+      const worktreePath = worktreeByBranch.get(name)?.path ?? null
+      const registered = worktreePath
+        ? config.workspaces.find((item) => item.hostId === workspace.hostId && item.path === worktreePath)
+        : undefined
+      return {
+        name,
+        worktreePath,
+        workspaceId: registered?.id ?? null,
+        isCurrent: worktreePath === workspace.path
+      }
+    }).sort((left, right) =>
+      Number(right.isCurrent) - Number(left.isCurrent) ||
+      Number(right.worktreePath !== null) - Number(left.worktreePath !== null) ||
+      left.name.localeCompare(right.name)
+    )
+    return { hostId: workspace.hostId, repoPath, branches }
+  }
+
+  async openBranch(
+    workspaceId: string,
+    branchName: string,
+    config: AppConfig
+  ): Promise<WorkspaceSelectionResult> {
+    const snapshot = await this.list(workspaceId, config)
+    const branch = snapshot.branches.find((item) => item.name === branchName)
+    if (!branch?.worktreePath) throw new Error(`Branch has no worktree: ${branchName}`)
+    const existing = config.workspaces.find(
+      (item) => item.hostId === snapshot.hostId && item.path === branch.worktreePath
+    )
+    if (existing) return { config, workspace: existing }
+    return await this.register(config, {
+      id: randomUUID(),
+      name: branch.name,
+      hostId: snapshot.hostId,
+      path: branch.worktreePath,
+      kind: 'worktree',
+      repoPath: snapshot.repoPath,
+      branch: branch.name
+    })
+  }
+
+  async createForBranch(
+    input: CreateWorktreeForBranchInput,
+    config: AppConfig
+  ): Promise<WorkspaceSelectionResult> {
+    const branchName = input.branch.trim()
     const path = input.path.trim()
-    const branch = input.branch.trim()
-    const baseRef = input.baseRef.trim()
-    if (!repoPath || !path || !branch || !baseRef) {
-      throw new Error('Repository, worktree path, branch, and base ref are required')
-    }
-    if (config.workspaces.some((item) => item.hostId === input.hostId && item.path === path)) {
+    if (!branchName || !path) throw new Error('Branch and worktree path are required')
+    const snapshot = await this.list(input.workspaceId, config)
+    const branch = snapshot.branches.find((item) => item.name === branchName)
+    if (!branch) throw new Error(`Unknown branch: ${branchName}`)
+    if (branch.worktreePath) throw new Error(`Branch already has a worktree: ${branchName}`)
+    if (config.workspaces.some((item) => item.hostId === snapshot.hostId && item.path === path)) {
       throw new Error(`Workspace already registered: ${path}`)
     }
-
-    const host = this.hostFor(input.hostId)
+    const host = this.hostFor(snapshot.hostId)
     const result = await host.run(
       'git',
-      ['-C', repoPath, 'worktree', 'add', '-b', branch, '--', path, baseRef],
+      ['-C', snapshot.repoPath, 'worktree', 'add', '--', path, branchName],
       { timeoutMs: 60_000, maxOutputBytes: 2 * 1024 * 1024 }
     )
-    if (result.exitCode !== 0) {
-      throw new Error(result.stderr.trim() || result.stdout.trim() || 'Git worktree creation failed')
-    }
-
-    const workspace: WorkspaceRecord = {
+    this.assertGit(result, 'Git worktree creation failed')
+    return await this.register(config, {
       id: randomUUID(),
-      name: labelFor({ ...input, path, branch }),
-      hostId: input.hostId,
+      name: branchName,
+      hostId: snapshot.hostId,
       path,
       kind: 'worktree',
-      repoPath,
-      branch
+      repoPath: snapshot.repoPath,
+      branch: branchName
+    })
+  }
+
+  private workspace(config: AppConfig, id: string): WorkspaceRecord {
+    const workspace = config.workspaces.find((item) => item.id === id)
+    if (!workspace) throw new Error(`Unknown workspace: ${id}`)
+    return workspace
+  }
+
+  private async resolveRepoPath(host: ExecutionHost, path: string): Promise<string> {
+    const result = await host.run('git', ['-C', path, 'rev-parse', '--show-toplevel'], {
+      timeoutMs: 20_000,
+      maxOutputBytes: 256 * 1024
+    })
+    this.assertGit(result, 'Workspace is not a Git repository')
+    const repoPath = result.stdout.trim()
+    if (!repoPath) throw new Error('Git returned an empty repository path')
+    return repoPath
+  }
+
+  private assertGit(
+    result: { exitCode: number; stdout: string; stderr: string },
+    fallback: string
+  ): void {
+    if (result.exitCode !== 0) {
+      throw new Error(result.stderr.trim() || result.stdout.trim() || fallback)
     }
+  }
+
+  private async register(config: AppConfig, workspace: WorkspaceRecord): Promise<WorkspaceSelectionResult> {
     const nextConfig = await this.configWriter.save({
       ...config,
       workspaces: [...config.workspaces, workspace]
