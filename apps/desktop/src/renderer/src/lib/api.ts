@@ -12,7 +12,7 @@ import type {
 
 const now = Date.now()
 let mockConfig: AppConfig = {
-  version: 2,
+  version: 3,
   hosts: [
     { id: 'local', kind: 'local', label: 'This Mac' },
     {
@@ -21,11 +21,11 @@ let mockConfig: AppConfig = {
       label: 'Studio Box',
       hostname: 'studio.example.com',
       user: 'river',
-      daemon: {
+      runtime: {
         buildIdentity: '0.1.0',
         remoteNodePath: 'node',
-        remoteAgentMuxdPath: '/home/river/.agentmux/versions/0.1.0/package/dist/agentmuxd.js',
-        remoteSocketPath: '/home/river/.agentmux/agentmuxd.sock'
+        remoteEntrypointPath: '/home/river/.agentmux/versions/0.1.0/package/dist/agentmuxd.js',
+        remoteEndpointPath: '/home/river/.agentmux/agentmuxd.sock'
       }
     }
   ],
@@ -81,12 +81,12 @@ const mockSessions: SessionSnapshot[] = [
     updatedAt: now,
     processState: 'running',
     status: { state: 'working', source: 'native-hook', observedAt: now, detail: 'PreToolUse' },
-    latestSequence: 0,
+    latestOutputBytes: 0,
     control: {
       kind: 'agent',
       hostId: 'local',
-      semanticSessionId: 'session-codex',
-      daemonSession: { sessionId: 'run-codex', incarnationId: 'incarnation-codex' }
+      agentSessionId: 'session-codex',
+      run: { runId: 'run-codex', incarnationId: 'incarnation-codex' }
     }
   },
   {
@@ -99,19 +99,19 @@ const mockSessions: SessionSnapshot[] = [
     createdAt: now - 38 * 60_000,
     updatedAt: now - 20_000,
     processState: 'lost',
-    status: { state: 'error', source: 'daemon-process', observedAt: now - 20_000, detail: 'SSH connection to Studio Box is unavailable.' },
-    latestSequence: 0,
+    status: { state: 'error', source: 'run-process', observedAt: now - 20_000, detail: 'SSH connection to Studio Box is unavailable.' },
+    latestOutputBytes: 0,
     control: {
       kind: 'agent',
       hostId: 'studio',
-      semanticSessionId: 'session-claude',
-      daemonSession: { sessionId: 'run-claude', incarnationId: 'incarnation-claude' }
+      agentSessionId: 'session-claude',
+      run: { runId: 'run-claude', incarnationId: 'incarnation-claude' }
     }
   }
 ]
 
 const mockOutput = new Map<string, string>([
-  ['session-codex', '\u001b[1;36mAgentMux core\u001b[0m\r\n\r\n✓ daemon session attached\r\n✓ local Provider ready\r\n\r\nEditing packages/core/src/runtime.ts\r\nRunning pnpm test…\r\n'],
+  ['session-codex', '\u001b[1;36mAgentMux core\u001b[0m\r\n\r\n✓ Run attached\r\n✓ local Provider ready\r\n\r\nEditing packages/core/src/runtime.ts\r\nRunning pnpm test…\r\n'],
   ['session-claude', 'Claude Code\r\n\r\nI need permission to run the material snapshot suite.\r\n']
 ])
 
@@ -124,7 +124,7 @@ const mockActivities: Record<string, AgentActivity[]> = {
       source: 'user',
       createdAt: now - 11 * 60_000,
       title: 'Prompt',
-      content: 'Make the daemon runtime observable without coupling it to Electron.'
+      content: 'Make the Run adapter observable without coupling it to Electron.'
     },
     {
       id: 'a2',
@@ -185,7 +185,7 @@ const mockApi: AgentMuxDesktopApi = {
     get: async () => structuredClone(mockConfig),
     save: async (config) => (mockConfig = structuredClone(config))
   },
-  hosts: { check: async (host) => ({ ok: true, detail: host.kind === 'ssh' ? `agentmuxd ${host.daemon.buildIdentity} · ${host.hostname}` : 'agentmuxd 0.1.0' }) },
+  hosts: { check: async (host) => ({ ok: true, detail: host.kind === 'ssh' ? `Runtime ${host.runtime.buildIdentity} · ${host.hostname}` : 'Runtime 0.1.0' }) },
   workspaces: {
     chooseLocalFolder: async () => null,
     add: async (input) => {
@@ -310,10 +310,10 @@ const mockApi: AgentMuxDesktopApi = {
   sessions: {
     snapshot: async () => structuredClone(mockSnapshot),
     launchAgent: async (input) => {
-      const semanticSessionId = input.semanticSessionId ?? crypto.randomUUID()
-      const daemonSessionId = input.daemonSessionId ?? semanticSessionId
+      const agentSessionId = input.agentSessionId ?? crypto.randomUUID()
+      const runId = input.runId ?? agentSessionId
       const session: SessionSnapshot = {
-        id: semanticSessionId,
+        id: agentSessionId,
         kind: 'agent',
         agentId: input.agentId,
         hostId: input.hostId || 'local',
@@ -322,13 +322,13 @@ const mockApi: AgentMuxDesktopApi = {
         createdAt: Date.now(),
         updatedAt: Date.now(),
         processState: 'running',
-        status: { state: 'running', source: 'daemon-process', observedAt: Date.now() },
-        latestSequence: 0,
+        status: { state: 'running', source: 'run-process', observedAt: Date.now() },
+        latestOutputBytes: 0,
         control: {
           kind: 'agent',
           hostId: input.hostId,
-          semanticSessionId,
-          daemonSession: { sessionId: daemonSessionId, incarnationId: crypto.randomUUID() }
+          agentSessionId,
+          run: { runId, incarnationId: crypto.randomUUID() }
         }
       }
       mockSnapshot.sessions.push(session)
@@ -336,9 +336,9 @@ const mockApi: AgentMuxDesktopApi = {
       return session
     },
     launchTerminal: async (input) => {
-      const sessionId = input.sessionId ?? crypto.randomUUID()
+      const runId = input.runId ?? crypto.randomUUID()
       const session: SessionSnapshot = {
-        id: sessionId,
+        id: runId,
         kind: 'terminal',
         agentId: null,
         hostId: input.hostId || 'local',
@@ -347,13 +347,13 @@ const mockApi: AgentMuxDesktopApi = {
         createdAt: Date.now(),
         updatedAt: Date.now(),
         processState: 'running',
-        status: { state: 'running', source: 'daemon-process', observedAt: Date.now() },
-        latestSequence: 0,
+        status: { state: 'running', source: 'run-process', observedAt: Date.now() },
+        latestOutputBytes: 0,
         control: {
           kind: 'terminal',
           hostId: input.hostId,
-          sessionId,
-          daemonSession: { sessionId, incarnationId: crypto.randomUUID() }
+          runId,
+          run: { runId, incarnationId: crypto.randomUUID() }
         }
       }
       mockSnapshot.sessions.push(session)
@@ -361,19 +361,19 @@ const mockApi: AgentMuxDesktopApi = {
       return session
     },
     attach: async (control) => {
-      const sessionId = control.kind === 'agent' ? control.semanticSessionId : control.sessionId
+      const sessionId = control.kind === 'agent' ? control.agentSessionId : control.runId
       const session = mockSnapshot.sessions.find((item) => item.id === sessionId)
       if (!session) throw new Error(`Session not found: ${sessionId}`)
       const data = mockOutput.get(sessionId) ?? ''
-      const endSequence = new TextEncoder().encode(data).byteLength
+      const endByte = new TextEncoder().encode(data).byteLength
       return {
         session: structuredClone(session),
         replay: data ? [{
           type: 'data' as const,
-          sessionId: control.daemonSession.sessionId,
-          incarnationId: control.daemonSession.incarnationId,
-          startSequence: 0,
-          endSequence,
+          runId: control.run.runId,
+          incarnationId: control.run.incarnationId,
+          startByte: 0,
+          endByte,
           data
         }] : [],
         gap: null
@@ -381,7 +381,7 @@ const mockApi: AgentMuxDesktopApi = {
     },
     detach: async () => {},
     write: async (control, data) => {
-      const sessionId = control.kind === 'agent' ? control.semanticSessionId : control.sessionId
+      const sessionId = control.kind === 'agent' ? control.agentSessionId : control.runId
       const session = mockSnapshot.sessions.find((item) => item.id === sessionId)
       if (!session) return
       const previous = mockOutput.get(sessionId) ?? ''
@@ -392,8 +392,8 @@ const mockApi: AgentMuxDesktopApi = {
           type: 'core',
           hostId: session.hostId,
           event: {
-            type: 'semantic-activity',
-            semanticSessionId: session.id,
+            type: 'agent-activity',
+            agentSessionId: session.id,
             activity: {
               id: crypto.randomUUID(),
               kind: 'prompt',
@@ -404,7 +404,7 @@ const mockApi: AgentMuxDesktopApi = {
             evidence: {
               source: 'user',
               observedAt,
-              daemonSession: { ...session.control.daemonSession }
+              run: { ...session.control.run }
             }
           }
         }))
@@ -417,34 +417,34 @@ const mockApi: AgentMuxDesktopApi = {
     interrupt: async () => {},
     resize: async () => {},
     refresh: async (control) => {
-      const sessionId = control.kind === 'agent' ? control.semanticSessionId : control.sessionId
+      const sessionId = control.kind === 'agent' ? control.agentSessionId : control.runId
       const session = mockSnapshot.sessions.find((item) => item.id === sessionId)
       if (!session) throw new Error(`Session not found: ${sessionId}`)
       if (session.processState === 'lost') {
         session.processState = 'running'
         session.status = {
           state: 'running',
-          source: 'daemon-process',
+          source: 'run-process',
           observedAt: Date.now()
         }
       }
       return structuredClone(session)
     },
     stop: async (control) => {
-      const sessionId = control.kind === 'agent' ? control.semanticSessionId : control.sessionId
+      const sessionId = control.kind === 'agent' ? control.agentSessionId : control.runId
       mockSnapshot.sessions = mockSnapshot.sessions.filter((item) => item.id !== sessionId)
       mockOutput.delete(sessionId)
       sessionListeners.forEach((listener) => listener({
         type: 'core',
         hostId: control.hostId,
         event: {
-          type: 'session-removed',
-          ...(control.kind === 'agent' ? { semanticSessionId: control.semanticSessionId } : {}),
-          daemonSession: { ...control.daemonSession },
+          type: 'run-removed',
+          ...(control.kind === 'agent' ? { agentSessionId: control.agentSessionId } : {}),
+          run: { ...control.run },
           evidence: {
             source: 'user',
             observedAt: Date.now(),
-            daemonSession: { ...control.daemonSession }
+            run: { ...control.run }
           }
         }
       }))

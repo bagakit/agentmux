@@ -17,11 +17,11 @@ function outputForSession(event: RuntimeEvent, session: SessionSnapshot) {
   if (
     event.hostId !== session.hostId ||
     core.type !== 'terminal-output' ||
-    core.daemonSession.sessionId !== session.control.daemonSession.sessionId ||
-    core.daemonSession.incarnationId !== session.control.daemonSession.incarnationId
+    core.run.runId !== session.control.run.runId ||
+    core.run.incarnationId !== session.control.run.incarnationId
   ) return null
-  const sequence = core.evidence.outputSequence
-  return sequence ? { ...core, startSequence: sequence.start, endSequence: sequence.end } : null
+  const byteRange = core.evidence.outputByteRange
+  return byteRange ? { ...core, ...byteRange } : null
 }
 
 export function TerminalView({ session }: { session: SessionSnapshot }) {
@@ -76,7 +76,7 @@ export function TerminalView({ session }: { session: SessionSnapshot }) {
       if (!output) return
       if (!attached) {
         pending.push(event)
-        pendingBytes += output.endSequence - output.startSequence
+        pendingBytes += output.endByte - output.startByte
         while (
           pending.length > MAX_PENDING_OUTPUT_EVENTS ||
           pendingBytes > MAX_PENDING_OUTPUT_BYTES
@@ -85,18 +85,18 @@ export function TerminalView({ session }: { session: SessionSnapshot }) {
           if (!dropped) break
           const droppedOutput = outputForSession(dropped, session)
           if (!droppedOutput) continue
-          pendingBytes -= droppedOutput.endSequence - droppedOutput.startSequence
-          droppedPendingThrough = Math.max(droppedPendingThrough, droppedOutput.endSequence)
+          pendingBytes -= droppedOutput.endByte - droppedOutput.startByte
+          droppedPendingThrough = Math.max(droppedPendingThrough, droppedOutput.endByte)
         }
         return
       }
       outputTail = outputTail.then(async () => {
-        if (disposed || output.endSequence <= cursor) return
-        if (output.startSequence !== cursor) {
+        if (disposed || output.endByte <= cursor) return
+        if (output.startByte !== cursor) {
           await terminalWrite(terminal, '\r\n\u001b[33m[Output sequence gap; earlier bytes are unavailable]\u001b[0m\r\n')
         }
         await terminalWrite(terminal, output.data)
-        cursor = output.endSequence
+        cursor = output.endByte
         queueAcknowledge(session.control, cursor)
       })
     }
@@ -122,11 +122,11 @@ export function TerminalView({ session }: { session: SessionSnapshot }) {
             terminal,
             '\u001b[33m[Earlier terminal output fell outside the bounded replay window]\u001b[0m\r\n'
           )
-          cursor = result.gap.firstAvailableSequence
+          cursor = result.gap.firstAvailableByte
         }
         for (const event of result.replay) {
           await terminalWrite(terminal, event.data)
-          cursor = event.endSequence
+          cursor = event.endByte
         }
         if (droppedPendingThrough > cursor) {
           await terminalWrite(
@@ -161,7 +161,7 @@ export function TerminalView({ session }: { session: SessionSnapshot }) {
       if (attached) void api.sessions.detach(session.control)
       terminal.dispose()
     }
-  }, [session.control.daemonSession.incarnationId, session.control.daemonSession.sessionId, session.id])
+  }, [session.control.run.incarnationId, session.control.run.runId, session.id])
 
   return <div className="terminal-view" ref={rootRef} />
 }

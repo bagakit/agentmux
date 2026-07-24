@@ -23,7 +23,7 @@ function deferred<T>() {
 }
 
 const config: AppConfig = {
-  version: 2,
+  version: 3,
   hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
   agents: {},
   workspaces: [{ id: 'workspace', name: 'Project', hostId: 'local', path: '/repo', kind: 'folder' }]
@@ -56,13 +56,13 @@ function terminalSession(id: string): SessionSnapshot {
     createdAt: 1,
     updatedAt: 1,
     processState: 'running',
-    status: { state: 'running', source: 'daemon-process', observedAt: 1 },
-    latestSequence: 0,
+    status: { state: 'running', source: 'run-process', observedAt: 1 },
+    latestOutputBytes: 0,
     control: {
       kind: 'terminal',
       hostId: 'local',
-      sessionId: id,
-      daemonSession: { sessionId: id, incarnationId: `${id}-incarnation` }
+      runId: id,
+      run: { runId: id, incarnationId: `${id}-incarnation` }
     }
   }
 }
@@ -115,6 +115,35 @@ describe('Session and Launcher lifecycle ownership', () => {
     await expect(launch).resolves.toBeUndefined()
     expect(useAppStore.getState().tabs[launcher.id]).toBeUndefined()
     expect(useAppStore.getState().error).toBeNull()
+  })
+
+  it('closes one View without stopping a Run shared by another View', async () => {
+    const session = terminalSession('shared-run')
+    const firstView = {
+      id: 'terminal-view-left',
+      kind: 'terminal' as const,
+      phase: 'attached' as const,
+      workspaceId: 'workspace',
+      sessionId: session.id
+    }
+    const secondView = { ...firstView, id: 'terminal-view-right' }
+    useAppStore.setState({
+      config,
+      activeWorkspaceId: 'workspace',
+      sessions: [session],
+      tabs: { [firstView.id]: firstView, [secondView.id]: secondView },
+      layouts: { workspace: createWorkspaceLayout('pane', [firstView.id, secondView.id]) }
+    })
+    const stop = vi.spyOn(api.sessions, 'stop').mockResolvedValue()
+
+    await useAppStore.getState().closeTab('workspace', 'pane', firstView.id)
+
+    const state = useAppStore.getState()
+    expect(stop).not.toHaveBeenCalled()
+    expect(state.sessions).toEqual([session])
+    expect(state.tabs[firstView.id]).toBeUndefined()
+    expect(state.tabs[secondView.id]).toEqual(secondView)
+    expect(state.layouts.workspace?.groups[0]?.tabOrder).toEqual([secondView.id])
   })
 
   it('closes a Browser created after its owning Launcher Tab disappeared', async () => {

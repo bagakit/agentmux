@@ -1,13 +1,13 @@
 import { randomUUID } from 'node:crypto'
 import {
-  AgentMuxClient,
-  AgentMuxMemorySemanticStore,
-  SshAgentMuxDaemonConnector,
-  activateAgentMuxLocalDaemon,
+  AgentMuxMemoryAgentSessionStore,
+  connectLocalAgentMux,
+  connectSshAgentMux,
   type AgentId,
+  type AgentMuxClient,
   type AgentMuxClientEvent,
-  type AgentMuxSemanticStore,
-  type AgentMuxSessionSnapshot,
+  type AgentMuxAgentSessionStore,
+  type AgentMuxView,
   type ExecutionHost
 } from '@agentmux/core'
 import type { WebContents } from 'electron'
@@ -53,58 +53,58 @@ function workspaceLabel(config: AppConfig, hostId: string, path: string): string
     ?? path
 }
 
-function projectSession(session: AgentMuxSessionSnapshot, config: AppConfig): SessionSnapshot {
-  const run = session.run
+function projectSession(view: AgentMuxView, config: AppConfig): SessionSnapshot {
+  const run = view.run
   const observedAt = run.exitedAt ?? run.lostAt ?? run.createdAt
   const status = {
     state: run.state === 'lost' ? 'error' as const : run.state,
-    source: 'daemon-process' as const,
+    source: 'run-process' as const,
     observedAt,
     ...(run.state === 'lost'
-      ? { detail: 'The daemon restarted; this PTY can no longer be attached.' }
+      ? { detail: 'The Run Kernel restarted; this PTY can no longer be attached.' }
       : run.exitSignal !== undefined
         ? { detail: `signal ${run.exitSignal}` }
         : {}),
     ...(run.exitCode === undefined ? {} : { exitCode: run.exitCode })
   }
-  if (session.kind === 'agent') {
+  if (view.kind === 'agent') {
     return {
-      id: session.id,
+      id: view.agentSession.agentSessionId,
       kind: 'agent',
-      agentId: session.agentId,
-      hostId: session.hostId,
-      workspacePath: session.workspacePath,
-      label: `${session.agentId} · ${workspaceLabel(config, session.hostId, session.workspacePath)}`,
-      createdAt: session.semantic.createdAt,
-      updatedAt: Math.max(session.semantic.updatedAt, observedAt),
+      agentId: view.agentId,
+      hostId: view.hostId,
+      workspacePath: view.workspacePath,
+      label: `${view.agentId} · ${workspaceLabel(config, view.hostId, view.workspacePath)}`,
+      createdAt: view.agentSession.createdAt,
+      updatedAt: Math.max(view.agentSession.updatedAt, observedAt),
       processState: run.state,
       status,
-      latestSequence: run.latestSequence,
+      latestOutputBytes: run.latestOutputBytes,
       control: {
         kind: 'agent',
-        hostId: session.hostId,
-        semanticSessionId: session.semantic.semanticSessionId,
-        daemonSession: { ...session.semantic.daemonSession }
+        hostId: view.hostId,
+        agentSessionId: view.agentSession.agentSessionId,
+        run: { ...view.agentSession.run }
       }
     }
   }
   return {
-    id: session.id,
+    id: run.runId,
     kind: 'terminal',
     agentId: null,
-    hostId: session.hostId,
-    workspacePath: session.workspacePath,
-    label: `Terminal · ${workspaceLabel(config, session.hostId, session.workspacePath)}`,
+    hostId: view.hostId,
+    workspacePath: view.workspacePath,
+    label: `Terminal · ${workspaceLabel(config, view.hostId, view.workspacePath)}`,
     createdAt: run.createdAt,
     updatedAt: observedAt,
     processState: run.state,
     status,
-    latestSequence: run.latestSequence,
+    latestOutputBytes: run.latestOutputBytes,
     control: {
       kind: 'terminal',
-      hostId: session.hostId,
-      sessionId: run.sessionId,
-      daemonSession: { sessionId: run.sessionId, incarnationId: run.incarnationId }
+      hostId: view.hostId,
+      runId: run.runId,
+      run: { runId: run.runId, incarnationId: run.incarnationId }
     }
   }
 }
@@ -123,7 +123,7 @@ export class RuntimeController {
   private readonly clients = new Set<WebContents>()
   private hostSignatures = new Map<string, string>()
 
-  constructor(private readonly semanticStore: AgentMuxSemanticStore) {}
+  constructor(private readonly agentSessionStore: AgentMuxAgentSessionStore) {}
 
   async prepare(config: AppConfig): Promise<RuntimePreparation> {
     const nextSignatures = signatures(config)
@@ -190,11 +190,11 @@ export class RuntimeController {
   async checkHost(config: HostConfig): Promise<HostCheckResult> {
     let prepared: PreparedRuntimeHost | null = null
     try {
-      prepared = await this.prepareHost(config, new AgentMuxMemorySemanticStore())
-      const identity = prepared.client.daemonIdentity()
+      prepared = await this.prepareHost(config, new AgentMuxMemoryAgentSessionStore())
+      const identity = prepared.client.runtimeIdentity()
       return {
         ok: true,
-        detail: `agentmuxd ${identity.buildIdentity} · protocol ${identity.protocolVersion}`
+        detail: `Runtime ${identity.buildIdentity} · protocol ${identity.protocolVersion}`
       }
     } finally {
       if (prepared) await disposePrepared([prepared])
@@ -212,12 +212,12 @@ export class RuntimeController {
   }
 
   async snapshot(config: AppConfig) {
-    const snapshots = await Promise.all([...this.hosts.values()].map(async ({ client }) => {
+    const workspaceViews = await Promise.all([...this.hosts.values()].map(async ({ client }) => {
       await client.connect()
-      return await client.snapshot()
+      return await client.workspaceView()
     }))
     return {
-      sessions: snapshots.flatMap((snapshot) => snapshot.sessions.map((session) => projectSession(session, config))),
+      sessions: workspaceViews.flatMap((workspaceView) => workspaceView.views.map((view) => projectSession(view, config))),
       activities: {}
     }
   }
@@ -226,47 +226,47 @@ export class RuntimeController {
     const agent = config.agents[request.agentId]
     if (!agent) throw new Error(`Missing agent configuration: ${request.agentId}`)
     const client = await this.connectedClient(request.hostId)
-    const semantic = await client.createAgent({
+    const agentSession = await client.createAgent({
       agentId: request.agentId,
       workspacePath: request.workspacePath,
       args: agent.args,
       env: agent.env,
       commandOverride: agent.command,
-      ...(request.semanticSessionId === undefined ? {} : { semanticSessionId: request.semanticSessionId }),
-      ...(request.daemonSessionId === undefined ? {} : { daemonSessionId: request.daemonSessionId }),
+      ...(request.agentSessionId === undefined ? {} : { agentSessionId: request.agentSessionId }),
+      ...(request.runId === undefined ? {} : { runId: request.runId }),
       ...(request.createOperationId === undefined ? {} : { createOperationId: request.createOperationId }),
       ...(request.prompt === undefined ? {} : { prompt: request.prompt }),
       ...(request.cols === undefined ? {} : { cols: request.cols }),
       ...(request.rows === undefined ? {} : { rows: request.rows })
     })
-    return await this.sessionById(client, semantic.semanticSessionId, config)
+    return await this.sessionById(client, agentSession.agentSessionId, config)
   }
 
   async launchTerminal(request: TerminalLaunchInput, config: AppConfig): Promise<SessionSnapshot> {
     const client = await this.connectedClient(request.hostId)
-    const sessionId = request.sessionId ?? randomUUID()
+    const runId = request.runId ?? randomUUID()
     await client.createTerminal({
-      sessionId,
+      runId,
       createOperationId: request.createOperationId ?? randomUUID(),
-      cwd: request.workspacePath,
+      workspacePath: request.workspacePath,
       ...(request.cols === undefined ? {} : { cols: request.cols }),
       ...(request.rows === undefined ? {} : { rows: request.rows })
     })
-    return await this.sessionById(client, sessionId, config)
+    return await this.sessionById(client, runId, config)
   }
 
   async attachSession(
     control: SessionControl,
-    afterSequence: number,
+    afterByte: number,
     config: AppConfig
   ): Promise<SessionAttachResult> {
     const client = await this.connectedClient(control.hostId)
     const attached = control.kind === 'agent'
-      ? (await client.reattachAgent(control.semanticSessionId, afterSequence)).run
-      : await client.attachTerminal(control.sessionId, afterSequence)
+      ? (await client.reattachAgent(control.agentSessionId, afterByte)).attachment
+      : await client.attachTerminal(control.runId, afterByte)
     const session = await this.sessionById(
       client,
-      control.kind === 'agent' ? control.semanticSessionId : control.sessionId,
+      control.kind === 'agent' ? control.agentSessionId : control.runId,
       config
     )
     return { session, replay: attached.replay, gap: attached.gap }
@@ -274,14 +274,14 @@ export class RuntimeController {
 
   async detachSession(control: SessionControl): Promise<void> {
     const client = await this.connectedClient(control.hostId)
-    if (control.kind === 'agent') await client.detachAgent(control.semanticSessionId)
-    else await client.detachTerminal(control.daemonSession)
+    if (control.kind === 'agent') await client.releaseAgentAttachment(control.agentSessionId)
+    else await client.releaseTerminalAttachment(control.run)
   }
 
   async write(control: SessionControl, data: string): Promise<void> {
     const client = await this.connectedClient(control.hostId)
-    if (control.kind === 'agent') await client.writeAgent(control.semanticSessionId, data)
-    else await client.writeTerminal(control.daemonSession, data)
+    if (control.kind === 'agent') await client.writeAgent(control.agentSessionId, data)
+    else await client.writeTerminal(control.run, data)
   }
 
   async submitPrompt(
@@ -289,41 +289,41 @@ export class RuntimeController {
     prompt: string
   ): Promise<void> {
     await (await this.connectedClient(control.hostId)).submitAgentPrompt(
-      control.semanticSessionId,
+      control.agentSessionId,
       prompt
     )
   }
 
-  async acknowledge(control: SessionControl, sequence: number): Promise<void> {
+  async acknowledge(control: SessionControl, throughByte: number): Promise<void> {
     const client = await this.connectedClient(control.hostId)
-    if (control.kind === 'agent') await client.acknowledgeAgentOutput(control.semanticSessionId, sequence)
-    else await client.acknowledgeTerminalOutput(control.daemonSession, sequence)
+    if (control.kind === 'agent') await client.acknowledgeAgentOutput(control.agentSessionId, throughByte)
+    else await client.acknowledgeTerminalOutput(control.run, throughByte)
   }
 
   async interrupt(control: SessionControl): Promise<void> {
     const client = await this.connectedClient(control.hostId)
-    if (control.kind === 'agent') await client.signalAgent(control.semanticSessionId, 'SIGINT')
-    else await client.signalTerminal(control.daemonSession, 'SIGINT')
+    if (control.kind === 'agent') await client.signalAgent(control.agentSessionId, 'SIGINT')
+    else await client.signalTerminal(control.run, 'SIGINT')
   }
 
   async resize(control: SessionControl, cols: number, rows: number): Promise<void> {
     const client = await this.connectedClient(control.hostId)
-    if (control.kind === 'agent') await client.resizeAgent(control.semanticSessionId, cols, rows)
-    else await client.resizeTerminal(control.daemonSession, cols, rows)
+    if (control.kind === 'agent') await client.resizeAgent(control.agentSessionId, cols, rows)
+    else await client.resizeTerminal(control.run, cols, rows)
   }
 
   async refresh(control: SessionControl, config: AppConfig): Promise<SessionSnapshot> {
     return await this.sessionById(
       await this.connectedClient(control.hostId),
-      control.kind === 'agent' ? control.semanticSessionId : control.sessionId,
+      control.kind === 'agent' ? control.agentSessionId : control.runId,
       config
     )
   }
 
   async stopSession(control: SessionControl): Promise<void> {
     const client = await this.connectedClient(control.hostId)
-    if (control.kind === 'agent') await client.stopAgent(control.semanticSessionId)
-    else await client.stopTerminal(control.daemonSession)
+    if (control.kind === 'agent') await client.stopAgent(control.agentSessionId)
+    else await client.stopTerminal(control.run)
   }
 
   async dispose(): Promise<void> {
@@ -337,33 +337,26 @@ export class RuntimeController {
 
   private async prepareHost(
     config: HostConfig,
-    store: AgentMuxSemanticStore = this.semanticStore
+    store: AgentMuxAgentSessionStore = this.agentSessionStore
   ): Promise<PreparedRuntimeHost> {
     const executionHost = createExecutionHost(config)
     let client: AgentMuxClient | null = null
     try {
       if (config.kind === 'local') {
-        await activateAgentMuxLocalDaemon()
-        client = new AgentMuxClient({ store })
+        client = await connectLocalAgentMux({ store })
       } else {
-        client = new AgentMuxClient({
+        client = await connectSshAgentMux({
           store,
-          connector: new SshAgentMuxDaemonConnector({
-            target: {
-              hostId: config.id,
-              hostname: config.hostname,
-              ...(config.user ? { user: config.user } : {}),
-              ...(config.port ? { port: config.port } : {}),
-              ...(config.identityFile ? { identityFile: config.identityFile } : {})
-            },
-            remoteNodePath: config.daemon.remoteNodePath,
-            remoteAgentMuxdPath: config.daemon.remoteAgentMuxdPath,
-            remoteSocketPath: config.daemon.remoteSocketPath,
-            expectedBuildIdentity: config.daemon.buildIdentity
-          })
+          target: {
+            hostId: config.id,
+            hostname: config.hostname,
+            ...(config.user ? { user: config.user } : {}),
+            ...(config.port ? { port: config.port } : {}),
+            ...(config.identityFile ? { identityFile: config.identityFile } : {})
+          },
+          runtime: config.runtime
         })
       }
-      await client.connect()
       return { id: config.id, executionHost, client }
     } catch (error) {
       const cleanup = await Promise.allSettled([
@@ -397,12 +390,16 @@ export class RuntimeController {
 
   private async sessionById(
     client: AgentMuxClient,
-    sessionId: string,
+    subjectId: string,
     config: AppConfig
   ): Promise<SessionSnapshot> {
-    const session = (await client.snapshot()).sessions.find((candidate) => candidate.id === sessionId)
-    if (!session) throw new Error(`Session is not available: ${sessionId}`)
-    return projectSession(session, config)
+    const view = (await client.workspaceView()).views.find((candidate) => (
+      candidate.kind === 'agent'
+        ? candidate.agentSession.agentSessionId === subjectId
+        : candidate.run.runId === subjectId
+    ))
+    if (!view) throw new Error(`Runtime subject is not available: ${subjectId}`)
+    return projectSession(view, config)
   }
 
   private publish(hostId: string, event: AgentMuxClientEvent): void {

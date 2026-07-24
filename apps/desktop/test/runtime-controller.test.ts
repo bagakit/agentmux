@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AgentMuxSemanticStore } from '@agentmux/core'
+import type { AgentMuxAgentSessionStore } from '@agentmux/core'
 import type { AppConfig, SshHostConfig } from '../src/shared/contracts.js'
 
 const runtimeFixture = vi.hoisted(() => {
@@ -11,19 +11,19 @@ const runtimeFixture = vi.hoisted(() => {
     readonly connect = vi.fn(async () => {
       if (FakeClient.failNextConnect) {
         FakeClient.failNextConnect = false
-        throw new Error('daemon discovery failed')
+        throw new Error('Runtime discovery failed')
       }
     })
     readonly dispose = vi.fn(async () => {})
     readonly onEvent = vi.fn(() => () => {})
     readonly listRuns = vi.fn(async () => [])
-    readonly snapshot = vi.fn(async () => ({ hostId: 'fixture', sessions: [] }))
-    readonly daemonIdentity = vi.fn(() => ({
+    readonly workspaceView = vi.fn(async () => ({ hostId: 'fixture', views: [] }))
+    readonly runtimeIdentity = vi.fn(() => ({
       protocolVersion: 5,
       buildIdentity: '0.1.0',
       hostId: 'fixture',
-      daemonPid: 1,
-      daemonInstanceId: 'daemon-1'
+      processId: 1,
+      instanceId: 'runtime-1'
     }))
 
     constructor() {
@@ -34,20 +34,19 @@ const runtimeFixture = vi.hoisted(() => {
   return {
     FakeClient,
     createdHosts,
-    activate: vi.fn(async () => ({
-      protocolVersion: 5,
-      buildIdentity: '0.1.0',
-      hostId: 'local',
-      daemonPid: 1,
-      daemonInstanceId: 'local-daemon'
-    }))
+    connectClient: vi.fn(async () => {
+      const client = new FakeClient()
+      await client.connect()
+      return client
+    })
   }
 })
 
 vi.mock('@agentmux/core', () => ({
   AgentMuxClient: runtimeFixture.FakeClient,
-  SshAgentMuxDaemonConnector: class {},
-  activateAgentMuxLocalDaemon: runtimeFixture.activate
+  AgentMuxMemoryAgentSessionStore: class {},
+  connectLocalAgentMux: runtimeFixture.connectClient,
+  connectSshAgentMux: runtimeFixture.connectClient
 }))
 vi.mock('../src/main/host-factory.js', () => ({
   createExecutionHost: vi.fn((host: { id: string }) => {
@@ -59,14 +58,14 @@ vi.mock('../src/main/host-factory.js', () => ({
 
 import { RuntimeController } from '../src/main/runtime-controller.js'
 
-const store: AgentMuxSemanticStore = {
+const store: AgentMuxAgentSessionStore = {
   async load() { return [] },
   async put() {},
   async delete() {}
 }
 
 const localConfig: AppConfig = {
-  version: 2,
+  version: 3,
   hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
   agents: {},
   workspaces: []
@@ -77,11 +76,11 @@ const remoteHost: SshHostConfig = {
   kind: 'ssh',
   label: 'Build box',
   hostname: 'build.example.test',
-  daemon: {
+  runtime: {
     buildIdentity: '0.1.0',
     remoteNodePath: 'node',
-    remoteAgentMuxdPath: '/home/build/.agentmux/versions/0.1.0/package/dist/agentmuxd.js',
-    remoteSocketPath: '/home/build/.agentmux/agentmuxd.sock'
+    remoteEntrypointPath: '/home/build/.agentmux/versions/0.1.0/package/dist/agentmuxd.js',
+    remoteEndpointPath: '/home/build/.agentmux/agentmuxd.sock'
   }
 }
 
@@ -111,12 +110,12 @@ describe('RuntimeController configuration transaction', () => {
     expect(controller.executionHost('remote')).toMatchObject({ id: 'remote' })
   })
 
-  it('does not advance host truth when daemon discovery fails and retries the same config', async () => {
+  it('does not advance host truth when Runtime discovery fails and retries the same config', async () => {
     const controller = await configuredController()
     const next = { ...localConfig, hosts: [...localConfig.hosts, remoteHost] }
     runtimeFixture.FakeClient.failNextConnect = true
 
-    await expect(controller.prepare(next)).rejects.toThrow('daemon discovery failed')
+    await expect(controller.prepare(next)).rejects.toThrow('Runtime discovery failed')
     expect(() => controller.executionHost('remote')).toThrow('not configured')
     expect(runtimeFixture.createdHosts.at(-1)?.dispose).toHaveBeenCalledOnce()
 
