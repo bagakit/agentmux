@@ -168,6 +168,9 @@ describe('BrowserViewManager', () => {
     manager.close('browser-1')
     expect(fixture.children).toHaveLength(0)
     expect(view.webContents.isDestroyed()).toBe(true)
+    expect(() => manager.setBounds('browser-1', null)).not.toThrow()
+    expect(() => manager.setBounds('browser-1', { x: 0, y: 0, width: 100, height: 100 }))
+      .toThrow('Unknown browser: browser-1')
   })
 
   it('blocks unsupported page navigation and redirects before commit', async () => {

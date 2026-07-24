@@ -4,6 +4,7 @@ import { reduceBrowserEvent } from '../src/renderer/src/lib/browser-state.js'
 import {
   reduceDocumentContent,
   reduceDocumentSaved,
+  reduceFileClosed,
   reduceFileOpened
 } from '../src/renderer/src/lib/file-workbench-state.js'
 import { reduceRuntimeEvent } from '../src/renderer/src/lib/session-state.js'
@@ -84,7 +85,7 @@ describe('Renderer resource state owners', () => {
     expect(state.viewModes[session.id]).toBeUndefined()
   })
 
-  it('leaves a launching Tab for the launch owner to recover after Core rollback', () => {
+  it('removes a launching Tab when Core removes the matching Session', () => {
     const tabId = `session:${session.id}`
     const state = reduceRuntimeEvent({
       sessions: [session],
@@ -103,8 +104,8 @@ describe('Renderer resource state owners', () => {
     }, { type: 'removed', sessionId: session.id })
 
     expect(state.sessions).toEqual([])
-    expect(state.tabs[tabId]).toMatchObject({ phase: 'launching' })
-    expect(state.layouts['workspace-1']?.groups[0]?.tabOrder).toEqual([tabId])
+    expect(state.tabs[tabId]).toBeUndefined()
+    expect(state.layouts['workspace-1']?.groups[0]?.tabOrder).toEqual([])
   })
 
   it('owns Browser update and close convergence across Tab and Layout', () => {
@@ -162,5 +163,11 @@ describe('Renderer resource state owners', () => {
     state = reduceDocumentSaved(state, workspaceId, 'src/app.ts')
     expect(state.dirtyDocuments[documentKey(workspaceId, 'src/app.ts')]).toBe(false)
     expect(state.layouts[workspaceId]?.groups[0]?.activeTabId).toBe(tabId)
+
+    state = reduceFileClosed(state, workspaceId, 'pane', tabId)
+    expect(state.tabs[tabId]).toBeUndefined()
+    expect(state.documents[documentKey(workspaceId, 'src/app.ts')]).toBeUndefined()
+    expect(state.dirtyDocuments[documentKey(workspaceId, 'src/app.ts')]).toBeUndefined()
+    expect(state.lastActiveFileByWorkspace[workspaceId]).toBeUndefined()
   })
 })

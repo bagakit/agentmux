@@ -102,7 +102,11 @@ export class BrowserViewManager {
   }
 
   setBounds(id: string, bounds: BrowserBounds | null): void {
-    const entry = this.require(id)
+    const entry = this.entries.get(id)
+    if (!entry) {
+      if (bounds === null) return
+      throw new Error(`Unknown browser: ${id}`)
+    }
     if (bounds === null) {
       entry.view.setVisible(false)
       return

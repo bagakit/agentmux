@@ -27,11 +27,10 @@ import {
   SquareTerminal,
   X
 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { lazy, Suspense, useMemo, useState } from 'react'
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
 import { BrowserPane } from './BrowserPane'
 import { ConfirmationDialog } from './ConfirmationDialog'
-import { EditorPane } from './EditorPane'
 import { NewTabSurface } from './NewTabSurface'
 import { SessionPane } from './SessionPane'
 import { StatusDot } from './StatusDot'
@@ -43,6 +42,11 @@ import type {
 } from '../lib/workbench-layout'
 import { documentKey, type WorkbenchTab } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
+
+const EditorPane = lazy(async () => {
+  const module = await import('./EditorPane')
+  return { default: module.EditorPane }
+})
 
 type DragTabData = { kind: 'tab'; tabId: string; groupId: string }
 type DropData = DragTabData | { kind: 'pane'; groupId: string }
@@ -108,8 +112,14 @@ function SortableWorkbenchTab({
   async function confirmClose(): Promise<void> {
     if (closing) return
     setClosing(true)
-    if ((tab.kind === 'agent' || tab.kind === 'terminal') && session) await stopSession(session.id)
-    else await closeTab(workspaceId, group.id, tab.id)
+    if ((tab.kind === 'agent' || tab.kind === 'terminal') && tab.phase === 'launching') {
+      await closeTab(workspaceId, group.id, tab.id)
+      if (session) await stopSession(session.id)
+    } else if ((tab.kind === 'agent' || tab.kind === 'terminal') && session) {
+      await stopSession(session.id)
+    } else {
+      await closeTab(workspaceId, group.id, tab.id)
+    }
     setClosing(false)
     setConfirmingClose(false)
   }
@@ -181,7 +191,13 @@ function PaneContent({
 }) {
   if (!tab) return <NewTabSurface paneId={groupId} />
   if (tab.kind === 'agent' || tab.kind === 'terminal') return <SessionPane sessionId={tab.sessionId} />
-  if (tab.kind === 'file') return <EditorPane tabId={tab.id} />
+  if (tab.kind === 'file') {
+    return (
+      <Suspense fallback={<section className="pane-state"><strong>Loading editor…</strong></section>}>
+        <EditorPane tabId={tab.id} />
+      </Suspense>
+    )
+  }
   if (tab.kind === 'browser') return <BrowserPane tab={tab} visible={nativeSurfacesVisible} />
   return <NewTabSurface paneId={groupId} tabId={tab.id} />
 }
