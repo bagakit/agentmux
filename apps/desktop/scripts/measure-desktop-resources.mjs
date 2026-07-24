@@ -35,6 +35,7 @@ try {
     env: {
       ...process.env,
       AGENTMUX_DESKTOP_RESOURCE_REPORT: reportPath,
+      AGENTMUX_DESKTOP_SPAWNED_AT_MS: String(Date.now()),
       ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
     },
     stdio: ['ignore', 'pipe', 'pipe']

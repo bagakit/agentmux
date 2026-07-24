@@ -176,7 +176,11 @@ RSS 取五次 `ps` 样本的平均值；CPU 用采样区间内 `ps time` 的增�
 
 同日一次性 `linux-arm64`／Node `v24.19.0` 容器复跑中，Fast 46 个文件、172 项测试通过；20 轮 Soak 的文件描述符始终为 21，RSS 从 60.4 MiB 起步、峰值和最终值均约 81.5 MiB，前后五轮均值约 66.7／81.5 MiB；SSH 五轮分区恢复通过。首轮曾暴露 Linux 无 reaper 容器中的 Zombie 被当作活进程，修复后重新执行完整 Fast 与 Stress 才记录此结果。
 
-`pnpm --filter @agentmux/desktop measure:desktop` 从 Production Build 启动隔离 Electron 配置，用真实 xterm 写入 300 KiB Output，并打开 20,000 行 TypeScript 文件触发真实 Monaco；随后连续 5 轮打开／释放 Terminal 与 Editor。它汇总 Electron Main、Renderer、GPU 和 Utility Process 的五次 Working Set 样本，不把 `agentmuxd` 或 Agent CLI 混进 Desktop 数字。
+`pnpm --filter @agentmux/desktop measure:desktop` 从 Production Build 启动隔离 Electron 配置，用真实 xterm 写入 300 KiB Output，并打开 20,000 行 TypeScript 文件触发真实 Monaco；随后连续 5 轮打开／释放 Terminal 与 Editor，再真实创建和关闭一个 Main-owned `about:blank` Browser WebContents。它汇总 Electron Main、Renderer、GPU 和 Utility Process 的五次 Working Set 样本，不把 `agentmuxd` 或 Agent CLI 混进 Desktop 数字。
+
+同一报告的 Cold Start 从测量脚本 `spawn()` 前的 wall clock 起算，依次记录 Electron `app.whenReady()`、Window 创建开始、Renderer `loadFile()` 完成和 New Tab 控件可交互；时间必须有限且单调，否则报告失败关闭。每个阶段同时记录 Monaco Model、Document Store、显式文件 Watcher、Browser WebContents 和根 Runtime Event 订阅 owner 数；Editor/Browser 关闭和五轮释放必须分别回到 `0 / 0 / 0 / 0 / 2`，不能用 RSS 抖动替代所有权收敛。
+
+`pnpm --filter @agentmux/desktop package:mac` 在生成并验证 App/DMG 后自动运行 Package Report；`report:package` 可在不重打 DMG 时复核已有候选。报告逐项列出 App、Framework、app resources、Renderer chunks 和 native artifacts，并在 Production App 又携带已经被 Renderer bundle 的完整 React、Monaco、xterm、Radix、DND 或 Zustand dependency tree 时失败关闭。
 
 同机 Electron `43.3.0` Gate 样本：空闲 Desktop 约 477.9 MiB；xterm 长输出相对空闲增加 63.0 MiB；Monaco 相对空闲增加 314.2 MiB；五次全部 Pane 释放后依次约 822.1、842.4、870.9、878.6、696.4 MiB。采样期间没有手工 GC；Warm Cache 峰值相对第一轮漂移 56.5 MiB，随后由运行时自行回收，落在 128 MiB 预算内。当前硬预算是 Terminal 增量 256 MiB、Editor 增量 512 MiB、释放后整个 Electron 进程组 1 GiB、第一轮 Warm Cache 后额外漂移 128 MiB。它是 Release Guard，不等于“这些绝对值已经足够低”；T-008 仍须拿同一方法与冻结基线比较并决定是否需要降低 Monaco／Electron 常驻成本。
 

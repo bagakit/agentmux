@@ -13,6 +13,7 @@ import type {
   WorkspaceSelectionResult
 } from '../../shared/contracts'
 import { api } from './lib/api'
+import { rendererResourceOwnerCounts } from './lib/resource-owner-counts'
 import {
   activateTab as activateLayoutTab,
   addTab,
@@ -158,6 +159,20 @@ export function agentDetectionKey(hostId: string, agentId: string): string {
 
 const detectionRequestIds = new Map<string, number>()
 const hostCheckRequestIds = new Map<string, number>()
+let runtimeSubscriptionCount = 0
+
+window.addEventListener('agentmux:resource-owner-counts', (event) => {
+  const target = event as CustomEvent<Record<string, number | boolean>>
+  const resourceWindow = window as typeof window & { __agentmuxMonacoModelCount?: () => number }
+  Object.assign(target.detail, rendererResourceOwnerCounts({
+    documentCount: Object.keys(useAppStore.getState().documents).length,
+    runtimeSubscriptionCount,
+    ...(resourceWindow.__agentmuxMonacoModelCount
+      ? { monacoModelCount: resourceWindow.__agentmuxMonacoModelCount }
+      : {})
+  }))
+  target.detail.observed = true
+})
 
 function newPaneId(): string {
   return `pane-${crypto.randomUUID()}`
@@ -207,6 +222,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       else get().applyBrowserEvent(event)
     })
+    runtimeSubscriptionCount += 2
+    const disposeRuntimeSubscriptions = (): void => {
+      if (runtimeSubscriptionCount === 0) return
+      runtimeSubscriptionCount -= 2
+      disposeSessions()
+      disposeBrowsers()
+    }
     try {
       const [config, snapshot] = await Promise.all([api.config.get(), api.sessions.snapshot()])
       const firstWorkspace = config.workspaces[0]?.id ?? null
@@ -225,13 +247,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       for (const event of pendingSessionEvents) get().applyEvent(event)
       for (const event of pendingBrowserEvents) get().applyBrowserEvent(event)
       return () => {
-        disposeSessions()
-        disposeBrowsers()
+        disposeRuntimeSubscriptions()
       }
     } catch (error) {
       booting = false
-      disposeSessions()
-      disposeBrowsers()
+      disposeRuntimeSubscriptions()
       set({ loading: false, error: message(error) })
       return () => {}
     }
