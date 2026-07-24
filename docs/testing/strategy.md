@@ -36,7 +36,7 @@ pnpm --filter @agentmux/core test:conformance
 | Create operation content identity | **FAIL**：只比较 Run ID，不比较 cwd/尺寸/命令/环境指纹 | Conformance 使用 expected-failure 保留；不继续扩展待删除 Kernel |
 | Input content identity | **FAIL**：旧 cursor 的不同字节也返回 duplicate | Conformance 使用 expected-failure 保留；ctxmux Adapter 不得带豁免通过 |
 | Incarnation/ordered bytes/Attach/Resize | PASS | 共享 Suite 直接执行 |
-| Slow consumer/Gap/Stop tree/Crash | PASS（当前 candidate baseline） | 由现有黑盒测试提供高成本证据，T-016 删除旧实现时保留 Oracle/Fixture |
+| Slow consumer/Gap/Stop tree/Crash | PASS（当前 candidate baseline） | 由现有黑盒测试提供高成本证据，T-020 删除旧实现时保留 Oracle/Fixture |
 | SSH partition/recovery | PASS（隔离系统 SSH） | 只证明当前 Adapter；T-015 重新审计 ctxmux Remote 能力 |
 
 Expected-failure 不是兼容许可：当前 candidate 的两个 Gap 被明确判定为不合格，修复不会在本 Feature 中继续增加沉没成本；最终 ctxmux candidate 必须以无 `knownGaps` 配置运行同一 Suite。
