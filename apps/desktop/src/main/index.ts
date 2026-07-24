@@ -1,3 +1,4 @@
+import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { app, BrowserWindow, shell } from 'electron'
 import { ConfigStore } from './config-store.js'
@@ -7,8 +8,14 @@ import { DesktopAgentSessionStore } from './agent-session-store.js'
 import { runDesktopResourceProbe } from './resource-probe.js'
 
 const appIconPath = join(import.meta.dirname, '../../resources/icon.png')
+const packagedUserDataPath = join(app.getPath('appData'), 'dev.agentmux.desktop')
 let disposeIpc: (() => void) | null = null
 
+if (process.env.AGENTMUX_DESKTOP_USER_DATA) {
+  app.setPath('userData', process.env.AGENTMUX_DESKTOP_USER_DATA)
+} else if (app.isPackaged) {
+  app.setPath('userData', packagedUserDataPath)
+}
 app.setName('AgentMux')
 const runtime = new RuntimeController(new DesktopAgentSessionStore(
   join(app.getPath('userData'), 'agentmux.agent-sessions.json')
@@ -39,6 +46,17 @@ async function createWindow(): Promise<void> {
   disposeIpc = await registerIpc({ window, configStore, runtime })
   if (process.env.ELECTRON_RENDERER_URL) await window.loadURL(process.env.ELECTRON_RENDERER_URL)
   else await window.loadFile(join(import.meta.dirname, '../renderer/index.html'))
+  if (process.env.AGENTMUX_DESKTOP_READY_FILE) {
+    await writeFile(process.env.AGENTMUX_DESKTOP_READY_FILE, `${JSON.stringify({
+      productName: app.name,
+      version: app.getVersion(),
+      packaged: app.isPackaged
+    })}\n`, { mode: 0o600 })
+    if (process.env.AGENTMUX_DESKTOP_EXIT_AFTER_READY === '1') {
+      app.quit()
+      return
+    }
+  }
   if (await runDesktopResourceProbe({ window, runtime, configStore })) app.quit()
 }
 
