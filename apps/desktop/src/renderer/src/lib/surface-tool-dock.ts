@@ -7,8 +7,6 @@ export type WorkspaceTool =
   | 'browser-favorites'
   | 'terminal-shortcuts'
 
-export type BoardTool = 'branch-lanes' | 'inbox'
-
 export type LauncherView = 'picker' | 'agent'
 
 export function clampToolDockWidth(width: number): number {

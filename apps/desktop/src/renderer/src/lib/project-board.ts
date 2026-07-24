@@ -4,42 +4,17 @@ import type {
   WorkspaceRecord
 } from '../../../shared/contracts'
 
-export type BranchActivityState = 'attention' | 'active' | 'complete' | 'idle'
+export const PROJECT_BOARD_COLUMNS = ['inbox', 'working', 'needs-you', 'done'] as const
+
+export type ProjectBoardColumn = (typeof PROJECT_BOARD_COLUMNS)[number]
 export type BranchBindingFilter = 'all' | 'bound' | 'unbound'
 
 export type ProjectBranchLane = {
   branch: WorkspaceBranchesSnapshot['branches'][number]
   workspace: WorkspaceRecord | null
+  runsByColumn: Record<ProjectBoardColumn, SessionSnapshot[]>
   sessions: SessionSnapshot[]
-  activity: BranchActivityState
   searchText: string
-}
-
-export type ProjectInboxItem = {
-  id: string
-  lane: ProjectBranchLane
-  session: SessionSnapshot
-  reason: string
-}
-
-export const ATTENTION_SESSION_STATES = new Set([
-  'waiting',
-  'blocked',
-  'disconnected',
-  'error'
-])
-
-const ACTIVE_SESSION_STATES = new Set(['starting', 'running', 'working'])
-
-export function branchActivity(sessions: readonly SessionSnapshot[]): BranchActivityState {
-  if (sessions.some((session) => ATTENTION_SESSION_STATES.has(session.status.state))) {
-    return 'attention'
-  }
-  if (sessions.some((session) => ACTIVE_SESSION_STATES.has(session.status.state))) {
-    return 'active'
-  }
-  if (sessions.length > 0) return 'complete'
-  return 'idle'
 }
 
 function workspaceForBranch(
@@ -60,6 +35,41 @@ function workspaceForBranch(
   )
 }
 
+export function sessionBoardColumn(
+  session: Pick<SessionSnapshot, 'status'>
+): Exclude<ProjectBoardColumn, 'inbox'> {
+  switch (session.status.state) {
+    case 'starting':
+    case 'running':
+    case 'working':
+      return 'working'
+    case 'waiting':
+    case 'blocked':
+    case 'disconnected':
+    case 'error':
+      return 'needs-you'
+    case 'done':
+    case 'exited':
+      return 'done'
+  }
+}
+
+function groupRuns(
+  sessions: readonly SessionSnapshot[]
+): Record<ProjectBoardColumn, SessionSnapshot[]> {
+  const grouped: Record<ProjectBoardColumn, SessionSnapshot[]> = {
+    inbox: [],
+    working: [],
+    'needs-you': [],
+    done: []
+  }
+  for (const session of sessions) grouped[sessionBoardColumn(session)].push(session)
+  for (const column of PROJECT_BOARD_COLUMNS) {
+    grouped[column].sort((left, right) => right.updatedAt - left.updatedAt)
+  }
+  return grouped
+}
+
 export function buildProjectBranchLanes(
   snapshot: WorkspaceBranchesSnapshot,
   workspaces: readonly WorkspaceRecord[],
@@ -69,18 +79,16 @@ export function buildProjectBranchLanes(
     .map((branch) => {
       const workspace = workspaceForBranch(branch, workspaces, snapshot.hostId)
       const branchSessions = workspace
-        ? sessions
-            .filter(
-              (session) =>
-                session.hostId === workspace.hostId && session.workspacePath === workspace.path
-            )
-            .sort((left, right) => left.createdAt - right.createdAt)
+        ? sessions.filter(
+            (session) =>
+              session.hostId === workspace.hostId && session.workspacePath === workspace.path
+          )
         : []
       return {
         branch,
         workspace,
         sessions: branchSessions,
-        activity: branchActivity(branchSessions),
+        runsByColumn: groupRuns(branchSessions),
         searchText: [
           branch.name,
           branch.worktreePath,
@@ -111,37 +119,17 @@ export function buildProjectBranchLanes(
 export function filterProjectBranchLanes(
   lanes: readonly ProjectBranchLane[],
   query: string,
-  activity: BranchActivityState | 'all',
+  column: ProjectBoardColumn | 'all',
   binding: BranchBindingFilter
 ): ProjectBranchLane[] {
   const normalized = query.trim().toLocaleLowerCase()
   return lanes.filter(
     (lane) =>
       (!normalized || lane.searchText.includes(normalized)) &&
-      (activity === 'all' || lane.activity === activity) &&
+      (column === 'all' ||
+        (column === 'inbox'
+          ? Boolean(lane.branch.worktreePath)
+          : lane.runsByColumn[column].length > 0)) &&
       (binding === 'all' || (binding === 'bound') === Boolean(lane.branch.worktreePath))
   )
-}
-
-function inboxReason(session: SessionSnapshot): string {
-  if (session.status.detail) return session.status.detail
-  switch (session.status.state) {
-    case 'waiting': return 'Waiting for input'
-    case 'blocked': return 'Blocked'
-    case 'disconnected': return 'Connection lost'
-    case 'error': return 'Session failed'
-    default: return session.status.state
-  }
-}
-
-export function buildProjectInbox(lanes: readonly ProjectBranchLane[]): ProjectInboxItem[] {
-  return lanes
-    .flatMap((lane) =>
-      lane.sessions.flatMap((session) =>
-        ATTENTION_SESSION_STATES.has(session.status.state)
-          ? [{ id: session.id, lane, session, reason: inboxReason(session) }]
-          : []
-      )
-    )
-    .sort((left, right) => right.session.updatedAt - left.session.updatedAt)
 }
