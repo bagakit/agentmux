@@ -10,6 +10,7 @@ import {
 import { useEffect, useMemo, useState } from 'react'
 import type {
   WorkspaceBranchesSnapshot,
+  WorkspaceBranchRecord,
   WorkspaceRecord
 } from '../../../shared/contracts'
 import { useWorkspaceBranches } from '../hooks/useWorkspaceBranches'
@@ -30,27 +31,36 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
   const { snapshot, loading, error: loadError, refresh } = useWorkspaceBranches(workspace.id)
 
   useEffect(() => {
-    const current = snapshot?.branches.find((branch) => branch.isCurrent)
+    const current = snapshot?.kind === 'git-repository'
+      ? snapshot.branches.find((branch) => branch.isCurrent)
+      : undefined
     setSelectedBranch(current?.name ?? workspace.branch ?? null)
   }, [snapshot, workspace.branch])
 
   const bound = useMemo(
-    () => snapshot?.branches.filter((branch) => branch.worktreePath) ?? [],
+    () => snapshot?.kind === 'git-repository'
+      ? snapshot.branches.filter((branch) => branch.worktreePath)
+      : [],
     [snapshot]
   )
   const unbound = useMemo(
-    () => snapshot?.branches.filter((branch) => !branch.worktreePath) ?? [],
+    () => snapshot?.kind === 'git-repository'
+      ? snapshot.branches.filter((branch) => !branch.worktreePath)
+      : [],
     [snapshot]
   )
-  const selected = snapshot?.branches.find((branch) => branch.name === selectedBranch) ?? null
+  const selected = snapshot?.kind === 'git-repository'
+    ? snapshot.branches.find((branch) => branch.name === selectedBranch) ?? null
+    : null
 
   async function selectBranch(name: string): Promise<void> {
-    const branch = snapshot?.branches.find((candidate) => candidate.name === name)
+    if (snapshot?.kind !== 'git-repository') return
+    const branch = snapshot.branches.find((candidate) => candidate.name === name)
     if (!branch || busyBranch) return
     setSelectedBranch(name)
     setActionError(null)
     if (!branch.worktreePath) {
-      setWorktreePath(defaultWorktreePath(snapshot!.repoPath, branch.name))
+      setWorktreePath(defaultWorktreePath(snapshot.repoPath, branch.name))
       return
     }
     setBusyBranch(name)
@@ -81,7 +91,7 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
     }
   }
 
-  function branchRow(branch: NonNullable<WorkspaceBranchesSnapshot['branches'][number]>) {
+  function branchRow(branch: WorkspaceBranchRecord) {
     const selectedRow = selectedBranch === branch.name
     return (
       <button
@@ -108,16 +118,19 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
   return (
     <section className="branches-panel">
       <header className="branches-header">
-        <div><span>Branches</span><small>{snapshot ? snapshot.branches.length : 0}</small></div>
+        <div><span>Branches</span><small>{snapshot?.kind === 'git-repository' ? snapshot.branches.length : 0}</small></div>
         <button type="button" title="Refresh branches" onClick={() => void refresh()} disabled={loading}>
           {loading ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}
         </button>
       </header>
-      {snapshot ? <div className="branches-repo"><FolderGit2 size={11} /><span>{snapshot.repoPath}</span></div> : null}
+      {snapshot?.kind === 'git-repository' ? <div className="branches-repo"><FolderGit2 size={11} /><span>{snapshot.repoPath}</span></div> : null}
       <div className="branches-scroll">
         {bound.length > 0 ? <div className="branch-group"><span>Worktrees</span>{bound.map(branchRow)}</div> : null}
         {unbound.length > 0 ? <div className="branch-group"><span>Without worktree</span>{unbound.map(branchRow)}</div> : null}
-        {!loading && snapshot && snapshot.branches.length === 0 ? (
+        {!loading && snapshot?.kind === 'not-a-git-repository' ? (
+          <div className="branches-empty"><strong>Not a Git repository</strong><span>This workspace is not linked to a Git repository.</span></div>
+        ) : null}
+        {!loading && snapshot?.kind === 'git-repository' && snapshot.branches.length === 0 ? (
           <div className="branches-empty"><strong>No local branches</strong><span>Create a branch with Git, then refresh.</span></div>
         ) : null}
         {!loading && loadError && !snapshot ? (

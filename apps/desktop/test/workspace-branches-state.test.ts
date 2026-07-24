@@ -7,6 +7,7 @@ import {
 } from '../src/renderer/src/lib/workspace-branches-state.js'
 
 const snapshot: WorkspaceBranchesSnapshot = {
+  kind: 'git-repository',
   hostId: 'local',
   repoPath: _hygiene_fixturePath("repo-a"),
   branches: [
@@ -42,5 +43,20 @@ describe('Workspace Branch snapshot identity', () => {
       loading: false,
       error: null
     })).toEqual({ snapshot: null, loading: false, error: null })
+  })
+
+  it('keeps a non-Git folder snapshot on the normal success path', () => {
+    const nonGitSnapshot: WorkspaceBranchesSnapshot = {
+      kind: 'not-a-git-repository',
+      hostId: 'remote',
+      workspacePath: _hygiene_fixturePath("srv/plain-folder")
+    }
+
+    expect(visibleWorkspaceBranchesState('plain-folder', {
+      workspaceId: 'plain-folder',
+      snapshot: nonGitSnapshot,
+      loading: false,
+      error: null
+    })).toEqual({ snapshot: nonGitSnapshot, loading: false, error: null })
   })
 })

@@ -172,6 +172,14 @@ export function WorkspaceBoard() {
     )
   }
 
+  if (snapshot?.kind === 'not-a-git-repository') {
+    return (
+      <section className="board board--empty">
+        <div className="board-state"><GitBranch size={22} /><strong>Not a Git repository</strong><span>This workspace is not linked to a Git repository.</span></div>
+      </section>
+    )
+  }
+
   const columnCounts = Object.fromEntries(PROJECT_BOARD_COLUMNS.map((id) => [
     id,
     id === 'inbox'

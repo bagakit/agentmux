@@ -1,5 +1,6 @@
 import type {
   SessionSnapshot,
+  WorkspaceBranchRecord,
   WorkspaceBranchesSnapshot,
   WorkspaceRecord
 } from '../../../shared/contracts'
@@ -10,7 +11,7 @@ export type ProjectBoardColumn = (typeof PROJECT_BOARD_COLUMNS)[number]
 export type BranchBindingFilter = 'all' | 'bound' | 'unbound'
 
 export type ProjectBranchLane = {
-  branch: WorkspaceBranchesSnapshot['branches'][number]
+  branch: WorkspaceBranchRecord
   workspace: WorkspaceRecord | null
   runsByColumn: Record<ProjectBoardColumn, SessionSnapshot[]>
   sessions: SessionSnapshot[]
@@ -18,7 +19,7 @@ export type ProjectBranchLane = {
 }
 
 function workspaceForBranch(
-  branch: WorkspaceBranchesSnapshot['branches'][number],
+  branch: WorkspaceBranchRecord,
   workspaces: readonly WorkspaceRecord[],
   hostId: string
 ): WorkspaceRecord | null {
@@ -75,6 +76,7 @@ export function buildProjectBranchLanes(
   workspaces: readonly WorkspaceRecord[],
   sessions: readonly SessionSnapshot[]
 ): ProjectBranchLane[] {
+  if (snapshot.kind !== 'git-repository') return []
   return snapshot.branches
     .map((branch) => {
       const workspace = workspaceForBranch(branch, workspaces, snapshot.hostId)

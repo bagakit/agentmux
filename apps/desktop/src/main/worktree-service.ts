@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { posix } from 'node:path'
 import type { ExecutionHost } from '@agentmux/core'
 import type {
   AppConfig,
@@ -13,6 +14,15 @@ type ConfigWriter = {
 }
 
 type GitWorktree = { path: string; branch: string | null }
+type GitBranchesSnapshot = Extract<WorkspaceBranchesSnapshot, { kind: 'git-repository' }>
+
+const NOT_A_GIT_REPOSITORY = /^fatal: not a git repository \(or any of the parent directories\): .+\n?$/
+const GIT_DISCOVERY_OPTIONS = {
+  env: { LC_ALL: 'C', LANG: 'C' },
+  timeoutMs: 20_000,
+  maxOutputBytes: 256 * 1024
+} as const
+const METADATA_PROBE_OPTIONS = { timeoutMs: 20_000, maxOutputBytes: 256 * 1024 } as const
 
 export function parseGitWorktreePorcelain(output: string): GitWorktree[] {
   const worktrees: GitWorktree[] = []
@@ -44,6 +54,9 @@ export class WorktreeService {
     const workspace = this.workspace(config, workspaceId)
     const host = this.hostFor(workspace.hostId)
     const repoPath = workspace.repoPath ?? await this.resolveRepoPath(host, workspace.path)
+    if (repoPath === null) {
+      return { kind: 'not-a-git-repository', hostId: workspace.hostId, workspacePath: workspace.path }
+    }
     const [branchesResult, worktreesResult] = await Promise.all([
       host.run('git', ['-C', repoPath, 'for-each-ref', '--format=%(refname:short)', 'refs/heads'], {
         timeoutMs: 20_000,
@@ -78,7 +91,7 @@ export class WorktreeService {
       Number(right.worktreePath !== null) - Number(left.worktreePath !== null) ||
       left.name.localeCompare(right.name)
     )
-    return { hostId: workspace.hostId, repoPath, branches }
+    return { kind: 'git-repository', hostId: workspace.hostId, repoPath, branches }
   }
 
   async openBranch(
@@ -87,6 +100,7 @@ export class WorktreeService {
     config: AppConfig
   ): Promise<WorkspaceSelectionResult> {
     const snapshot = await this.list(workspaceId, config)
+    this.assertRepository(snapshot)
     const branch = snapshot.branches.find((item) => item.name === branchName)
     if (!branch?.worktreePath) throw new Error(`Branch has no worktree: ${branchName}`)
     const existing = config.workspaces.find(
@@ -112,6 +126,7 @@ export class WorktreeService {
     const path = input.path.trim()
     if (!branchName || !path) throw new Error('Branch and worktree path are required')
     const snapshot = await this.list(input.workspaceId, config)
+    this.assertRepository(snapshot)
     const branch = snapshot.branches.find((item) => item.name === branchName)
     if (!branch) throw new Error(`Unknown branch: ${branchName}`)
     if (branch.worktreePath) throw new Error(`Branch already has a worktree: ${branchName}`)
@@ -142,15 +157,42 @@ export class WorktreeService {
     return workspace
   }
 
-  private async resolveRepoPath(host: ExecutionHost, path: string): Promise<string> {
-    const result = await host.run('git', ['-C', path, 'rev-parse', '--show-toplevel'], {
-      timeoutMs: 20_000,
-      maxOutputBytes: 256 * 1024
-    })
+  private async resolveRepoPath(host: ExecutionHost, path: string): Promise<string | null> {
+    const result = await host.run(
+      'git',
+      ['-C', path, 'rev-parse', '--show-toplevel'],
+      GIT_DISCOVERY_OPTIONS
+    )
+    if (
+      result.exitCode !== 0 &&
+      NOT_A_GIT_REPOSITORY.test(result.stderr) &&
+      !await this.hasGitMetadataInAncestry(host, path)
+    ) return null
     this.assertGit(result, 'Workspace is not a Git repository')
     const repoPath = result.stdout.trim()
     if (!repoPath) throw new Error('Git returned an empty repository path')
     return repoPath
+  }
+
+  private async hasGitMetadataInAncestry(host: ExecutionHost, path: string): Promise<boolean> {
+    let directory = posix.normalize(path)
+    while (true) {
+      const metadataPath = posix.join(directory, '.git')
+      const result = await host.run(
+        'test',
+        ['-e', metadataPath, '-o', '-L', metadataPath],
+        METADATA_PROBE_OPTIONS
+      )
+      if (result.exitCode === 0) return true
+      if (result.exitCode !== 1) this.assertGit(result, 'Could not inspect Git repository metadata')
+      const parent = posix.dirname(directory)
+      if (parent === directory) return false
+      directory = parent
+    }
+  }
+
+  private assertRepository(snapshot: WorkspaceBranchesSnapshot): asserts snapshot is GitBranchesSnapshot {
+    if (snapshot.kind !== 'git-repository') throw new Error('Workspace is not a Git repository')
   }
 
   private assertGit(
