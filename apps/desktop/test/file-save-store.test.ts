@@ -367,6 +367,63 @@ describe('revision-aware file save Store', () => {
     })
   })
 
+  it('does not apply an old save receipt to a closed and reopened document', async () => {
+    const { workspace, tab, key } = seed()
+    useAppStore.getState().updateDocument(tab.id, 'old-draft')
+    const oldSave = useAppStore.getState().saveDocument(tab.id)
+    await waitFor(() => fileApi.writes.length === 1)
+
+    await useAppStore.getState().closeTab(workspace.id, 'pane', tab.id)
+    const reopen = useAppStore.getState().openFile(tab.path, 'pane')
+    await waitFor(() => fileApi.reads.length === 1)
+    fileApi.reads[0]!.resolve({
+      status: 'read',
+      document: { path: tab.path, content: 'reopened', revision: 'revision-reopened' }
+    })
+    await reopen
+
+    fileApi.writes[0]!.resolve({ status: 'written', revision: 'revision-old-draft' })
+    await oldSave
+
+    expect(useAppStore.getState().documents[key]).toEqual({
+      path: tab.path,
+      content: 'reopened',
+      revision: 'revision-reopened'
+    })
+    expect(useAppStore.getState().dirtyDocuments[key]).not.toBe(true)
+    expect(useAppStore.getState().documentIssues[key]).toBeUndefined()
+    expect(useAppStore.getState().savingDocuments[key]).toBeUndefined()
+  })
+
+  it('does not apply an old refresh to a closed and reopened document', async () => {
+    const { workspace, tab, key } = seed()
+    const oldRefresh = useAppStore.getState().refreshDocument(workspace.id, tab.path)
+    await waitFor(() => fileApi.reads.length === 1)
+
+    await useAppStore.getState().closeTab(workspace.id, 'pane', tab.id)
+    const reopen = useAppStore.getState().openFile(tab.path, 'pane')
+    await waitFor(() => fileApi.reads.length === 2)
+    fileApi.reads[1]!.resolve({
+      status: 'read',
+      document: { path: tab.path, content: 'reopened', revision: 'revision-reopened' }
+    })
+    await reopen
+
+    fileApi.reads[0]!.resolve({
+      status: 'read',
+      document: { path: tab.path, content: 'old-owner', revision: 'revision-old-owner' }
+    })
+    await oldRefresh
+
+    expect(useAppStore.getState().documents[key]).toEqual({
+      path: tab.path,
+      content: 'reopened',
+      revision: 'revision-reopened'
+    })
+    expect(useAppStore.getState().dirtyDocuments[key]).not.toBe(true)
+    expect(useAppStore.getState().documentIssues[key]).toBeUndefined()
+  })
+
   it('keeps a dirty draft on invalidation, reloads explicitly, and overwrites only the latest observed revision', async () => {
     const { workspace, tab, key } = seed()
     useAppStore.getState().updateDocument(tab.id, 'draft')

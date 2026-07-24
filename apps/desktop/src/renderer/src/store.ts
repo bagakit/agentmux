@@ -177,12 +177,24 @@ export function agentDetectionKey(hostId: string, agentId: string): string {
 
 const detectionRequestIds = new Map<string, number>()
 const hostCheckRequestIds = new Map<string, number>()
+const fileDocumentLifetimes = new Map<string, number>()
 const fileReadRequestIds = new Map<string, number>()
 const fileReadInFlightCounts = new Map<string, number>()
 const fileInvalidationSequences = new Map<string, number>()
 const fileSaveTails = new Map<string, Promise<void>>()
 const fileOpenRequests = new Map<string, Promise<boolean>>()
 let runtimeSubscriptionCount = 0
+
+function documentLifetime(key: string): number {
+  return fileDocumentLifetimes.get(key) ?? 0
+}
+
+function advanceDocumentLifetime(key: string): number {
+  const lifetime = documentLifetime(key) + 1
+  fileDocumentLifetimes.set(key, lifetime)
+  fileReadRequestIds.set(key, (fileReadRequestIds.get(key) ?? 0) + 1)
+  return lifetime
+}
 
 if (typeof window !== 'undefined') {
   window.addEventListener('agentmux:resource-owner-counts', (event) => {
@@ -208,9 +220,13 @@ function newLauncherTab(workspaceId: string, view: LauncherView = 'picker'): Lau
   return { id: `launcher:${crypto.randomUUID()}`, kind: 'launcher', workspaceId, view }
 }
 
-async function refreshFileDocument(workspaceId: string, path: string): Promise<void> {
+async function refreshFileDocument(
+  workspaceId: string,
+  path: string,
+  expectedLifetime = documentLifetime(documentKey(workspaceId, path))
+): Promise<void> {
   const key = documentKey(workspaceId, path)
-  if (!useAppStore.getState().documents[key]) return
+  if (documentLifetime(key) !== expectedLifetime || !useAppStore.getState().documents[key]) return
   const requestId = (fileReadRequestIds.get(key) ?? 0) + 1
   fileReadRequestIds.set(key, requestId)
   fileReadInFlightCounts.set(key, (fileReadInFlightCounts.get(key) ?? 0) + 1)
@@ -227,7 +243,7 @@ async function refreshFileDocument(workspaceId: string, path: string): Promise<v
         message: message(error)
       }
     }
-    if (fileReadRequestIds.get(key) !== requestId) return
+    if (documentLifetime(key) !== expectedLifetime || fileReadRequestIds.get(key) !== requestId) return
     useAppStore.setState((state) => reduceDocumentRead(state, workspaceId, path, result))
   } finally {
     const remaining = (fileReadInFlightCounts.get(key) ?? 1) - 1
@@ -257,6 +273,7 @@ async function enqueueFileSave(tabId: string, overwrite: boolean): Promise<void>
     if (overwrite && issue?.kind !== 'changed' && issue?.kind !== 'deleted') return
     const generation = state.documentGenerations[currentKey] ?? 0
     const observationGeneration = state.documentObservationGenerations[currentKey] ?? 0
+    const savedLifetime = documentLifetime(currentKey)
     let expectedRevision: string | null = document.revision
     if (overwrite) {
       if (issue?.kind === 'changed') expectedRevision = issue.observed.revision
@@ -285,7 +302,7 @@ async function enqueueFileSave(tabId: string, overwrite: boolean): Promise<void>
         message: message(error)
       }
     }
-    if (!useAppStore.getState().documents[currentKey]) return
+    if (documentLifetime(currentKey) !== savedLifetime || !useAppStore.getState().documents[currentKey]) return
     if (result.status === 'written') {
       const receiptState = useAppStore.getState()
       const receiptIssue = receiptState.documentIssues[currentKey]
@@ -307,7 +324,7 @@ async function enqueueFileSave(tabId: string, overwrite: boolean): Promise<void>
         expectedRevision,
         observationGeneration
       ))
-      if (needsReconciliation) await refreshFileDocument(tab.workspaceId, tab.path)
+      if (needsReconciliation) await refreshFileDocument(tab.workspaceId, tab.path, savedLifetime)
       return
     }
     if (result.status === 'error') {
@@ -326,7 +343,7 @@ async function enqueueFileSave(tabId: string, overwrite: boolean): Promise<void>
       tab.path,
       false
     ))
-    await refreshFileDocument(tab.workspaceId, tab.path)
+    await refreshFileDocument(tab.workspaceId, tab.path, savedLifetime)
   })
   const tail = operation.then(() => {}, () => {})
   fileSaveTails.set(key, tail)
@@ -562,8 +579,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   async closeTab(workspaceId, paneId, tabId) {
     const tab = get().tabs[tabId]
     if (tab?.kind === 'file') {
-      set((state) => reduceFileClosed(state, workspaceId, paneId, tabId))
-      if (!get().documents[documentKey(tab.workspaceId, tab.path)]) {
+      const key = documentKey(tab.workspaceId, tab.path)
+      set((state) => {
+        const next = reduceFileClosed(state, workspaceId, paneId, tabId)
+        if (state.documents[key] && !next.documents[key]) advanceDocumentLifetime(key)
+        return next
+      })
+      if (!get().documents[key]) {
         await api.files.unobserve(tab.workspaceId, tab.path)
       }
       return
@@ -725,6 +747,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         let request = fileOpenRequests.get(key)
         const joinedRequest = Boolean(request)
         if (!request) {
+          const openedLifetime = advanceDocumentLifetime(key)
           request = Promise.resolve().then(async () => {
             try {
               const invalidationSequence = fileInvalidationSequences.get(key) ?? 0
@@ -736,10 +759,14 @@ export const useAppStore = create<AppState>((set, get) => ({
                   ? `File was deleted: ${path}`
                   : result.message)
               }
+              if (documentLifetime(key) !== openedLifetime) {
+                await api.files.unobserve(workspaceId, path)
+                return false
+              }
               set((state) => reduceFileOpened(state, workspaceId, path, result.document, paneId))
               if (fileOpenRequests.get(key) === request) fileOpenRequests.delete(key)
               if ((fileInvalidationSequences.get(key) ?? 0) !== invalidationSequence) {
-                await get().refreshDocument(workspaceId, path)
+                await refreshFileDocument(workspaceId, path, openedLifetime)
               }
               return true
             } catch (error) {
