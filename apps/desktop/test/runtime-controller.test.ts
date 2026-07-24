@@ -17,7 +17,13 @@ const runtimeFixture = vi.hoisted(() => {
       }
     })
     readonly dispose = vi.fn(async () => {})
-    readonly onEvent = vi.fn(() => () => {})
+    eventListener: ((event: unknown) => void) | null = null
+    readonly onEvent = vi.fn((listener: (event: unknown) => void) => {
+      this.eventListener = listener
+      return () => {
+        if (this.eventListener === listener) this.eventListener = null
+      }
+    })
     readonly listRuns = vi.fn(async (): Promise<Array<{
       runId: string
       acceptedInputBytes: number
@@ -77,6 +83,11 @@ const runtimeFixture = vi.hoisted(() => {
         endByte: operation.expectedByte + Buffer.byteLength(operation.data)
       },
       acceptedThroughByte: operation.expectedByte + Buffer.byteLength(operation.data)
+    }))
+    readonly writeAgent = vi.fn(async (_agentSessionId: string, data: string) => ({
+      runId: 'agent-run',
+      appliedByteRange: { startByte: 0, endByte: Buffer.byteLength(data) },
+      acceptedThroughByte: Buffer.byteLength(data)
     }))
     readonly workspaceView = vi.fn(async (): Promise<AgentMuxWorkspaceView> => ({ hostId: 'fixture', views: [] }))
     readonly runtimeIdentity = vi.fn(() => ({
@@ -245,6 +256,55 @@ describe('RuntimeController configuration transaction', () => {
     expect(client.writeTerminal.mock.calls[0]?.[1].operationId).not.toBe(
       client.writeTerminal.mock.calls[1]?.[1].operationId
     )
+  })
+
+  it('answers split Codex color queries only after Core publishes the ready Agent Session', async () => {
+    const controller = await configuredController()
+    controller.setTerminalViewColors({ foreground: '#ffffff', background: '#000000' })
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const publish = (data: string, startByte: number) => client.eventListener?.({
+      type: 'terminal-output',
+      agentSessionId: 'agent-1',
+      run: { runId: 'run-1' },
+      data,
+      evidence: {
+        source: 'terminal-output',
+        observedAt: 1,
+        run: { runId: 'run-1' },
+        outputByteRange: {
+          startByte,
+          endByte: startByte + Buffer.byteLength(data)
+        }
+      }
+    })
+
+    publish('frame\x1b]10;?;', 0)
+    publish('?\x1b\\', 12)
+    await Promise.resolve()
+    expect(client.writeAgent).not.toHaveBeenCalled()
+    client.eventListener?.({
+      type: 'agent-session',
+      session: {
+        kind: 'agent',
+        agentSessionId: 'agent-1',
+        agentId: 'codex',
+        hostId: 'local',
+        workspacePath: '/repo',
+        run: { runId: 'run-1' },
+        retiredRuns: [],
+        hookBindingId: 'hook-1',
+        outputCursorBytes: 0,
+        createdAt: 1,
+        updatedAt: 1
+      }
+    })
+
+    await vi.waitFor(() => {
+      expect(client.writeAgent).toHaveBeenCalledWith(
+        'agent-1',
+        '\x1b]10;rgb:ffff/ffff/ffff\x1b\\\x1b]11;rgb:0000/0000/0000\x1b\\'
+      )
+    })
   })
 
   it('shares one retained Run Attachment across concurrent Desktop View leases', async () => {

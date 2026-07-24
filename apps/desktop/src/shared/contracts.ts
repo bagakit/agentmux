@@ -280,6 +280,12 @@ export type AgentMuxDesktopApi = {
     create(workspaceId: string, input: CreateWorkspacePathInput): Promise<void>
     rename(workspaceId: string, input: RenameWorkspacePathInput): Promise<void>
     delete(workspaceId: string, path: string): Promise<void>
+    reveal(workspaceId: string, path: string): Promise<void>
+  }
+  ui: {
+    readClipboardText(): Promise<string>
+    writeClipboardText(text: string): Promise<void>
+    openExternal(url: string): Promise<void>
   }
   agents: {
     detect(agentId: AgentId, hostId: string): Promise<AgentDetection>

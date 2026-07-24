@@ -71,6 +71,26 @@ describe('TerminalViewportSynchronizer', () => {
     await vi.waitFor(() => expect(resize).toHaveBeenCalledTimes(1))
   })
 
+  it('fits a replay-only historical Run without sending a PTY resize', async () => {
+    const frames = frameHarness()
+    const fit = vi.fn(() => true)
+    const resize = vi.fn(async (_size: { cols: number; rows: number }) => {})
+    const sync = new TerminalViewportSynchronizer({
+      fit,
+      readGrid: () => ({ cols: 120, rows: 40 }),
+      resize,
+      requestFrame: frames.request,
+      cancelFrame: frames.cancel
+    })
+
+    sync.observeViewport()
+    expect(frames.runNext()).toBe(true)
+    await Promise.resolve()
+
+    expect(fit).toHaveBeenCalledTimes(1)
+    expect(resize).not.toHaveBeenCalled()
+  })
+
   it('coalesces viewport observations and forwards the latest settled grid', async () => {
     const frames = frameHarness()
     let proposed = { cols: 100, rows: 30 }

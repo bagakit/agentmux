@@ -23,6 +23,10 @@ import type {
   SessionSnapshot,
   TerminalLaunchInput
 } from '../shared/contracts.js'
+import {
+  scanTerminalOscColorQueries,
+  type TerminalOscColorQueryReplyColors
+} from '../shared/terminal-osc-color-query.js'
 import { createExecutionHost } from './host-factory.js'
 
 type RuntimeHost = {
@@ -166,9 +170,20 @@ export class RuntimeController {
   private readonly hostReconfigurationReservations = new Set<string>()
   private readonly terminalInputCursors = new Map<string, number>()
   private readonly terminalInputTails = new Map<string, Promise<void>>()
+  private readonly terminalColorQueryRemainders = new Map<string, string>()
+  private readonly pendingAgentColorQueryReplies = new Map<string, string>()
+  private readonly readyAgentColorQueryRuns = new Map<string, string>()
+  private terminalViewColors: TerminalOscColorQueryReplyColors = {
+    foreground: '#ffffff',
+    background: '#000000'
+  }
   private hostSignatures = new Map<string, string>()
 
   constructor(private readonly agentSessionStore: AgentMuxAgentSessionStore) {}
+
+  setTerminalViewColors(colors: TerminalOscColorQueryReplyColors): void {
+    this.terminalViewColors = { ...colors }
+  }
 
   async prepare(config: AppConfig): Promise<RuntimePreparation> {
     const nextSignatures = signatures(config)
@@ -537,6 +552,9 @@ export class RuntimeController {
     this.hostSignatures.clear()
     this.terminalInputCursors.clear()
     this.terminalInputTails.clear()
+    this.terminalColorQueryRemainders.clear()
+    this.pendingAgentColorQueryReplies.clear()
+    this.readyAgentColorQueryRuns.clear()
     for (const [, host] of hosts) host.unsubscribe()
     await disposePrepared(hosts.map(([id, host]) => ({ id, ...host })))
   }
@@ -701,6 +719,49 @@ export class RuntimeController {
   }
 
   private publish(hostId: string, event: AgentMuxClientEvent): void {
+    if (event.type === 'terminal-output') {
+      const queryKey = terminalInputKey(hostId, event.run.runId)
+      const scan = scanTerminalOscColorQueries(
+        event.data,
+        this.terminalColorQueryRemainders.get(queryKey) ?? '',
+        this.terminalViewColors
+      )
+      if (scan.remainder) this.terminalColorQueryRemainders.set(queryKey, scan.remainder)
+      else this.terminalColorQueryRemainders.delete(queryKey)
+      if (scan.replies.length > 0) {
+        const replies = scan.replies.join('')
+        const readyAgentSessionId = this.readyAgentColorQueryRuns.get(queryKey)
+        if (readyAgentSessionId) {
+          void this.replyToAgentColorQuery(hostId, readyAgentSessionId, event.run.runId, replies)
+        } else {
+          const pending = `${this.pendingAgentColorQueryReplies.get(queryKey) ?? ''}${replies}`
+          if (Buffer.byteLength(pending) <= 4 * 1024) {
+            this.pendingAgentColorQueryReplies.set(queryKey, pending)
+          }
+        }
+      }
+    } else if (event.type === 'agent-session') {
+      const queryKey = terminalInputKey(hostId, event.session.run.runId)
+      this.readyAgentColorQueryRuns.set(queryKey, event.session.agentSessionId)
+      const pending = this.pendingAgentColorQueryReplies.get(queryKey)
+      this.pendingAgentColorQueryReplies.delete(queryKey)
+      if (pending) {
+        void this.replyToAgentColorQuery(
+          hostId,
+          event.session.agentSessionId,
+          event.session.run.runId,
+          pending
+        )
+      }
+    } else if (
+      event.type === 'run-removed' ||
+      (event.type === 'process-state' && event.state !== 'running')
+    ) {
+      const queryKey = terminalInputKey(hostId, event.run.runId)
+      this.terminalColorQueryRemainders.delete(queryKey)
+      this.pendingAgentColorQueryReplies.delete(queryKey)
+      this.readyAgentColorQueryRuns.delete(queryKey)
+    }
     const runtimeEvent: RuntimeEvent = { type: 'core', hostId, event }
     for (const client of this.clients) {
       if (client.isDestroyed()) continue
@@ -709,6 +770,19 @@ export class RuntimeController {
       } catch (error) {
         console.error('Failed to publish AgentMux Runtime event', error)
       }
+    }
+  }
+
+  private async replyToAgentColorQuery(
+    hostId: string,
+    agentSessionId: string,
+    runId: string,
+    data: string
+  ): Promise<void> {
+    try {
+      await (await this.connectedClient(hostId)).writeAgent(agentSessionId, data)
+    } catch (error) {
+      console.error(`Failed to answer Terminal color query for Run ${runId}`, error)
     }
   }
 }

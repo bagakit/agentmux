@@ -6,12 +6,12 @@ import {
 } from '../src/renderer/src/lib/terminal-theme.js'
 
 describe('terminal appearance', () => {
-  it('keeps Graphite aligned with the proven Ghostty dark semantic palette', () => {
+  it('keeps Codex gray surfaces distinct on the Graphite terminal work area', () => {
     expect(terminalTheme('graphite')).toEqual({
-      background: '#282c34',
+      background: '#000000',
       foreground: '#ffffff',
       cursor: '#ffffff',
-      cursorAccent: '#282c34',
+      cursorAccent: '#000000',
       selectionBackground: '#5a7898',
       selectionForeground: '#ffffff',
       black: '#1d1f21',
@@ -57,7 +57,11 @@ describe('terminal appearance', () => {
       fontSize: 12,
       fontWeight: '300',
       fontWeightBold: '500',
-      lineHeight: 1.2,
+      lineHeight: 1,
+      scrollSensitivity: 1.15,
+      fastScrollSensitivity: 5,
+      macOptionIsMeta: false,
+      macOptionClickForcesSelection: true,
       allowTransparency: false,
       minimumContrastRatio: 3,
       drawBoldTextInBrightColors: true,
