@@ -13,6 +13,7 @@ const packedConsumerFixture = fileURLToPath(new URL('./fixtures/packed-consumer.
 const ownerFenceFixture = fileURLToPath(new URL('./fixtures/ctxmux-owner-fence.mjs', import.meta.url))
 const controlFixture = fileURLToPath(new URL('./fixtures/ctxmux-terminal-control.mjs', import.meta.url))
 const stubbornFixture = fileURLToPath(new URL('./fixtures/stubborn-process-tree.mjs', import.meta.url))
+const fakeCodexFixture = fileURLToPath(new URL('./fixtures/fake-codex-cli.mjs', import.meta.url))
 const roots: string[] = []
 
 afterEach(async () => {
@@ -125,7 +126,8 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
       const runtimeDirectory = join(root, 'runtime')
       await Promise.all([
         mkdir(packDirectory),
-        mkdir(consumerDirectory),
+        mkdir(consumerDirectory, { recursive: true }),
+        mkdir(join(consumerDirectory, 'bin'), { recursive: true }),
         mkdir(runtimeDirectory, { mode: 0o700 })
       ])
       await writeFile(join(consumerDirectory, 'package.json'), JSON.stringify({
@@ -177,7 +179,8 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         cp(packedConsumerFixture, join(consumerDirectory, 'packed-consumer.mjs')),
         cp(ownerFenceFixture, join(consumerDirectory, 'ctxmux-owner-fence.mjs')),
         cp(controlFixture, join(consumerDirectory, 'ctxmux-terminal-control.mjs')),
-        cp(stubbornFixture, join(consumerDirectory, 'stubborn-process-tree.mjs'))
+        cp(stubbornFixture, join(consumerDirectory, 'stubborn-process-tree.mjs')),
+        cp(fakeCodexFixture, join(consumerDirectory, 'bin', 'codex'))
       ])
 
       const packageRoot = join(consumerDirectory, 'node_modules', '@agentmux', 'core')
@@ -220,8 +223,11 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
           env: {
             ...process.env,
             TMPDIR: runtimeDirectory,
+            PATH: `${join(consumerDirectory, 'bin')}:${process.env.PATH ?? ''}`,
             AGENTMUX_CONTROL_FIXTURE: join(consumerDirectory, 'ctxmux-terminal-control.mjs'),
-            AGENTMUX_STUBBORN_FIXTURE: join(consumerDirectory, 'stubborn-process-tree.mjs')
+            AGENTMUX_STUBBORN_FIXTURE: join(consumerDirectory, 'stubborn-process-tree.mjs'),
+            AGENTMUX_FAKE_CODEX: join(consumerDirectory, 'bin', 'codex'),
+            AGENTMUX_CLI_PATH: join(consumerDirectory, 'node_modules', '.bin', 'agentmux')
           }
         })
         expect(JSON.parse(result.stdout.trim())).toMatchObject({
@@ -229,6 +235,8 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
           resize: '101x37',
           interruptStillLive: true,
           dedupOccurrences: 1,
+          codexSemanticSession: 'codex-semantic-1',
+          codexNativeSession: 'native-codex-semantic-1',
           remote: 'unsupported'
         })
 

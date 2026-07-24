@@ -1,10 +1,10 @@
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { app, BrowserWindow, shell } from 'electron'
+import { AgentMuxFileAgentSessionStore } from '@agentmux/core'
 import { ConfigStore } from './config-store.js'
 import { registerIpc } from './ipc.js'
 import { RuntimeController } from './runtime-controller.js'
-import { DesktopAgentSessionStore } from './agent-session-store.js'
 import { runDesktopResourceProbe } from './resource-probe.js'
 
 const appIconPath = join(import.meta.dirname, '../../resources/icon.png')
@@ -17,9 +17,7 @@ if (process.env.AGENTMUX_DESKTOP_USER_DATA) {
   app.setPath('userData', packagedUserDataPath)
 }
 app.setName('AgentMux')
-const runtime = new RuntimeController(new DesktopAgentSessionStore(
-  join(app.getPath('userData'), 'agentmux.agent-sessions.json')
-))
+const runtime = new RuntimeController(new AgentMuxFileAgentSessionStore())
 const configStore = new ConfigStore()
 
 async function createWindow(appReadyAtMs: number = Date.now()): Promise<void> {

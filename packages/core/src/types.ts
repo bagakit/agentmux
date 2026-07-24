@@ -217,6 +217,8 @@ export type AgentMuxAgentSession = {
   hostId: string
   workspacePath: string
   run: AgentMuxRunRef
+  retiredRuns: AgentMuxRunRef[]
+  hookBindingId: string
   outputCursorBytes: number
   createdAt: number
   updatedAt: number

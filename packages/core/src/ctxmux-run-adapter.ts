@@ -1,7 +1,6 @@
 import { execFile, spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
@@ -18,12 +17,16 @@ import {
   type RunInfo
 } from '@ctxmux/sdk'
 import { AgentMuxError } from './errors.js'
+import {
+  defaultAgentMuxRuntimeDirectory,
+  defaultCtxmuxSocketPath,
+  defaultCtxmuxStateDirectory
+} from './runtime-paths.js'
 
 const CTXMUX_COMMIT = '3b94288c3a7896bb355e028135409c8e8bbaf764'
 const CTXMUX_TREE = '58f3630477881e75f0f022d3fbb98a93ff2f46c4'
 const CTXMUX_VERSION = '0.1.0'
 const CTXMUX_MANIFEST_SHA256 = 'c1bab5039f6270c4c6c546d81699df251fe583477546a56a26a3f9332020ef42'
-const CTXMUX_RUNTIME_ID = '88e8377ecc4341b655d47306'
 const DAEMON_READY_TIMEOUT_MS = 5_000
 const DAEMON_POLL_INTERVAL_MS = 20
 const execFileAsync = promisify(execFile)
@@ -129,22 +132,11 @@ function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds))
 }
 
-function runtimeRoot(): string {
-  const uid = typeof process.getuid === 'function' ? process.getuid() : 'user'
-  return join(tmpdir(), `amx-${uid}-${CTXMUX_RUNTIME_ID}`)
-}
-
-export function defaultCtxmuxSocketPath(): string {
-  return join(runtimeRoot(), 'ctxmux.sock')
-}
-
-export function defaultCtxmuxStateDirectory(): string {
-  return join(runtimeRoot(), 'state')
-}
-
 function ownerReceiptPath(): string {
-  return join(runtimeRoot(), 'owner.json')
+  return join(defaultAgentMuxRuntimeDirectory(), 'owner.json')
 }
+
+export { defaultCtxmuxSocketPath, defaultCtxmuxStateDirectory }
 
 function artifactDirectory(): string {
   return fileURLToPath(new URL(
