@@ -35,6 +35,7 @@ import type {
   AgentMuxRunAttachment,
   AgentMuxRunDataEvent,
   AgentMuxRunInputAck,
+  AgentMuxRunInputOperation,
   AgentMuxRunOutputAck,
   AgentMuxRunRef,
   AgentMuxRuntimeDiagnostics,
@@ -352,14 +353,21 @@ export class AgentMuxClient {
     await this.kernel.detach(ref.runId)
   }
 
-  async writeTerminal(ref: AgentMuxRunRef, data: string): Promise<AgentMuxRunInputAck> {
+  async writeTerminal(
+    ref: AgentMuxRunRef,
+    operation: AgentMuxRunInputOperation
+  ): Promise<AgentMuxRunInputAck> {
     this.requireConnected()
-    const accepted = await this.kernel.input(ref.runId, data)
+    const accepted = await this.kernel.input(ref.runId, operation)
     const acceptedThroughByte = accepted.run.acceptedInputBytes
     if (acceptedThroughByte === null) {
       throw new AgentMuxError('CtxMux omitted its accepted Input byte cursor.', 'CTXMUX_INPUT_CURSOR_MISSING')
     }
-    return { runId: ref.runId, acceptedThroughByte, duplicate: false }
+    return {
+      runId: ref.runId,
+      appliedByteRange: accepted.appliedByteRange,
+      acceptedThroughByte
+    }
   }
 
   async resizeTerminal(ref: AgentMuxRunRef, cols: number, rows: number): Promise<AgentMuxRunAppliedSize> {

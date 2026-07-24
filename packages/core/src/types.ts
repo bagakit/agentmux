@@ -104,9 +104,19 @@ export type AgentMuxRunAttachment = {
   gap: AgentMuxRunReplayGap | null
 }
 
+export type AgentMuxRunInputOperation = {
+  ownerInstanceId: string
+  operationId: string
+  expectedByte: number
+  data: string
+}
+
 export type AgentMuxRunInputAck = AgentMuxRunRef & {
+  appliedByteRange: {
+    startByte: number
+    endByte: number
+  }
   acceptedThroughByte: number
-  duplicate: boolean
 }
 
 export type AgentMuxRunOutputAck = AgentMuxRunRef & {

@@ -34,6 +34,7 @@ async function processIsGone(pid) {
 
 let first = await connectLocalAgentMux()
 assert.deepEqual(await first.listRuns(), [])
+const ownerInstanceId = first.runtimeIdentity().instanceId
 const firstEvents = []
 first.onEvent((event) => firstEvents.push(event))
 const run = await first.createTerminal({
@@ -67,23 +68,55 @@ assert.equal(suffix.gap, null)
 assert.equal(suffix.replay[0]?.startByte, Buffer.byteLength('prefix:'))
 assert.equal(suffix.replay.map((event) => event.data).join('').includes('😀:tail'), true)
 
-await second.resizeTerminal(run, 101, 37)
-await waitFor('applied resize', () => output(secondEvents, run.runId).includes('size:101x37'))
-await second.signalTerminal(run, 'SIGINT')
+const recoverableInput = {
+  ownerInstanceId,
+  operationId: 'packed-abandoned-input-response',
+  expectedByte: reconnected.acceptedInputBytes,
+  data: 'dedup-once\n'
+}
+// Deliberately discard the first receipt, then recover it through a fresh public Client.
+await second.writeTerminal(run, recoverableInput)
+await waitFor('first recoverable input', () => output(secondEvents, run.runId).includes('input:dedup-once'))
+await second.dispose()
+
+const third = await connectLocalAgentMux()
+const thirdEvents = []
+third.onEvent((event) => thirdEvents.push(event))
+const fullReplay = await third.attachTerminal(run.runId, 0)
+const recoveredInput = await third.writeTerminal(run, recoverableInput)
+assert.deepEqual(recoveredInput.appliedByteRange, {
+  startByte: recoverableInput.expectedByte,
+  endByte: recoverableInput.expectedByte + Buffer.byteLength(recoverableInput.data)
+})
+const followingInput = {
+  ownerInstanceId,
+  operationId: 'packed-following-input',
+  expectedByte: recoveredInput.acceptedThroughByte,
+  data: 'after-dedup\n'
+}
+await third.writeTerminal(run, followingInput)
+await waitFor('following recoverable input', () => output(thirdEvents, run.runId).includes('input:after-dedup'))
+const completeOutput = fullReplay.replay.map((event) => event.data).join('') + output(thirdEvents, run.runId)
+const dedupOccurrences = completeOutput.match(/input:dedup-once/gu)?.length ?? 0
+assert.equal(dedupOccurrences, 1)
+
+await third.resizeTerminal(run, 101, 37)
+await waitFor('applied resize', () => output(thirdEvents, run.runId).includes('size:101x37'))
+await third.signalTerminal(run, 'SIGINT')
 await waitFor('interrupt receipt from the still-live process', () => (
-  output(secondEvents, run.runId).includes('interrupt-observed')
+  output(thirdEvents, run.runId).includes('interrupt-observed')
 ))
-assert.equal((await second.listRuns()).find((candidate) => candidate.runId === run.runId)?.state, 'running')
-await second.stopTerminal(run)
+assert.equal((await third.listRuns()).find((candidate) => candidate.runId === run.runId)?.state, 'running')
+await third.stopTerminal(run)
 
 const stubbornEvents = []
-const unsubscribe = second.onEvent((event) => stubbornEvents.push(event))
-const stubborn = await second.createTerminal({
+const unsubscribe = third.onEvent((event) => stubbornEvents.push(event))
+const stubborn = await third.createTerminal({
   workspacePath: process.cwd(),
   command: process.execPath,
   args: [stubbornFixture]
 })
-await second.attachTerminal(stubborn.runId, 0)
+await third.attachTerminal(stubborn.runId, 0)
 const stubbornOutput = await waitFor('stubborn process tree identities', () => {
   const text = output(stubbornEvents, stubborn.runId)
   return text.includes('stubborn-root:') && text.includes('stubborn-child:') ? text : null
@@ -92,7 +125,7 @@ const rootMatch = /stubborn-root:(\d+):(\d+)/u.exec(stubbornOutput)
 const childMatch = /stubborn-child:(\d+)/u.exec(stubbornOutput)
 assert.ok(rootMatch && childMatch)
 const stubbornPids = [Number(rootMatch[1]), Number(rootMatch[2]), Number(childMatch[1])]
-await second.stopTerminal(stubborn)
+await third.stopTerminal(stubborn)
 await waitFor('complete stubborn process-tree stop', async () => (
   (await Promise.all(stubbornPids.map(processIsGone))).every(Boolean)
 ))
@@ -102,7 +135,7 @@ await assert.rejects(
   connectSshAgentMux({ target: { hostId: 'remote', hostname: 'example.invalid' } }),
   (error) => error?.code === 'REMOTE_UNSUPPORTED'
 )
-await second.dispose()
+await third.dispose()
 
 process.stdout.write(`${JSON.stringify({
   runId: run.runId,
@@ -110,6 +143,7 @@ process.stdout.write(`${JSON.stringify({
   replayStartByte: suffix.replay[0]?.startByte,
   resize: '101x37',
   interruptStillLive: true,
+  dedupOccurrences,
   stubbornPids,
   remote: 'unsupported'
 })}\n`)

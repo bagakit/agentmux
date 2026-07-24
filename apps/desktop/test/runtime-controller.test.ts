@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentMuxAgentSessionStore } from '@agentmux/core'
-import type { AppConfig, SshHostConfig } from '../src/shared/contracts.js'
+import type { AppConfig, SessionControl, SshHostConfig } from '../src/shared/contracts.js'
 
 const runtimeFixture = vi.hoisted(() => {
   const createdHosts: Array<{ id: string; dispose: ReturnType<typeof vi.fn> }> = []
@@ -16,7 +16,26 @@ const runtimeFixture = vi.hoisted(() => {
     })
     readonly dispose = vi.fn(async () => {})
     readonly onEvent = vi.fn(() => () => {})
-    readonly listRuns = vi.fn(async () => [])
+    readonly listRuns = vi.fn(async (): Promise<Array<{
+      runId: string
+      acceptedInputBytes: number
+    }>> => [])
+    readonly writeTerminal = vi.fn(async (
+      ref: { runId: string },
+      operation: {
+        ownerInstanceId: string
+        operationId: string
+        expectedByte: number
+        data: string
+      }
+    ) => ({
+      runId: ref.runId,
+      appliedByteRange: {
+        startByte: operation.expectedByte,
+        endByte: operation.expectedByte + Buffer.byteLength(operation.data)
+      },
+      acceptedThroughByte: operation.expectedByte + Buffer.byteLength(operation.data)
+    }))
     readonly workspaceView = vi.fn(async () => ({ hostId: 'fixture', views: [] }))
     readonly runtimeIdentity = vi.fn(() => ({
       protocolVersion: 5,
@@ -116,5 +135,37 @@ describe('RuntimeController configuration transaction', () => {
     const retry = await controller.prepare(next)
     controller.commit(retry)
     expect(controller.executionHost('remote')).toMatchObject({ id: 'remote' })
+  })
+
+  it('serializes terminal Input with one retained owner and advancing byte boundaries', async () => {
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    client.listRuns.mockResolvedValue([{
+      runId: 'run-1',
+      acceptedInputBytes: 4
+    }])
+    const control: SessionControl = {
+      kind: 'terminal',
+      hostId: 'local',
+      runId: 'run-1',
+      run: { runId: 'run-1' }
+    }
+
+    await Promise.all([
+      controller.write(control, 'A'),
+      controller.write(control, '😀')
+    ])
+
+    expect(client.writeTerminal.mock.calls.map(([, operation]) => ({
+      ownerInstanceId: operation.ownerInstanceId,
+      expectedByte: operation.expectedByte,
+      data: operation.data
+    }))).toEqual([
+      { ownerInstanceId: 'runtime-1', expectedByte: 4, data: 'A' },
+      { ownerInstanceId: 'runtime-1', expectedByte: 5, data: '😀' }
+    ])
+    expect(client.writeTerminal.mock.calls[0]?.[1].operationId).not.toBe(
+      client.writeTerminal.mock.calls[1]?.[1].operationId
+    )
   })
 })
