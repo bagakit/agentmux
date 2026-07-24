@@ -55,6 +55,19 @@ let mockFiles = new Map<string, string | null>([
   ['docs', null],
   ['docs/orca-agent-runtime-notes.md', '# Orca runtime notes\n']
 ])
+let mockRevisionSequence = 0
+let mockFileRevisions = new Map<string, string>(
+  [...mockFiles.entries()].flatMap(([path, content]) =>
+    typeof content === 'string' ? [[path, `mock:${++mockRevisionSequence}`] as const] : []
+  )
+)
+const mockObservedFiles = new Set<string>()
+const mockFileInvalidationListeners = new Set<Parameters<AgentMuxDesktopApi['files']['onInvalidated']>[0]>()
+
+function invalidateMockFile(workspaceId: string, path: string): void {
+  if (!mockObservedFiles.has(`${workspaceId}\0${path}`)) return
+  for (const listener of mockFileInvalidationListeners) listener({ workspaceId, path })
+}
 
 function mockParent(path: string): string {
   const index = path.lastIndexOf('/')
@@ -276,15 +289,37 @@ const mockApi: AgentMuxDesktopApi = {
         ),
     read: async (_workspaceId, path) => {
       const content = mockFiles.get(path)
-      if (typeof content !== 'string') throw new Error(`File not found: ${path}`)
-      return { path, content }
+      if (typeof content !== 'string') return { status: 'deleted' }
+      return {
+        status: 'read',
+        document: { path, content, revision: mockFileRevisions.get(path) ?? `mock:${++mockRevisionSequence}` }
+      }
     },
-    write: async (_workspaceId, document) => {
-      mockFiles.set(document.path, document.content)
+    write: async (workspaceId, input) => {
+      const observedRevision = mockFileRevisions.get(input.path) ?? null
+      if (observedRevision !== input.expectedRevision) {
+        return { status: 'conflict', observedRevision }
+      }
+      const revision = `mock:${++mockRevisionSequence}`
+      mockFiles.set(input.path, input.content)
+      mockFileRevisions.set(input.path, revision)
+      queueMicrotask(() => invalidateMockFile(workspaceId, input.path))
+      return { status: 'written', revision }
+    },
+    observe: async (workspaceId, path) => {
+      mockObservedFiles.add(`${workspaceId}\0${path}`)
+    },
+    unobserve: async (workspaceId, path) => {
+      mockObservedFiles.delete(`${workspaceId}\0${path}`)
+    },
+    onInvalidated(listener) {
+      mockFileInvalidationListeners.add(listener)
+      return () => mockFileInvalidationListeners.delete(listener)
     },
     create: async (_workspaceId, input) => {
       if (mockFiles.has(input.path)) throw new Error(`Path already exists: ${input.path}`)
       mockFiles.set(input.path, input.kind === 'directory' ? null : '')
+      if (input.kind === 'file') mockFileRevisions.set(input.path, `mock:${++mockRevisionSequence}`)
     },
     rename: async (_workspaceId, input) => {
       if (!mockFiles.has(input.path)) throw new Error(`Path not found: ${input.path}`)
@@ -293,13 +328,20 @@ const mockApi: AgentMuxDesktopApi = {
       for (const [path, content] of entries) {
         if (path === input.path || path.startsWith(`${input.path}/`)) {
           mockFiles.delete(path)
-          mockFiles.set(`${input.nextPath}${path.slice(input.path.length)}`, content)
+          const nextPath = `${input.nextPath}${path.slice(input.path.length)}`
+          mockFiles.set(nextPath, content)
+          const revision = mockFileRevisions.get(path)
+          mockFileRevisions.delete(path)
+          if (revision) mockFileRevisions.set(nextPath, revision)
         }
       }
     },
     delete: async (_workspaceId, path) => {
       for (const candidate of [...mockFiles.keys()]) {
-        if (candidate === path || candidate.startsWith(`${path}/`)) mockFiles.delete(candidate)
+        if (candidate === path || candidate.startsWith(`${path}/`)) {
+          mockFiles.delete(candidate)
+          mockFileRevisions.delete(candidate)
+        }
       }
     },
     reveal: async () => {}

@@ -13,12 +13,13 @@ import type {
   DesktopViewFocusRequest,
   DesktopViewFocusResponse,
   DesktopViewFocusTarget,
-  FileDocument,
   HostConfig,
   RenameWorkspacePathInput,
   RuntimeEvent,
   SessionControl,
-  TerminalLaunchInput
+  TerminalLaunchInput,
+  WorkspaceFileInvalidated,
+  WorkspaceFileWriteInput
 } from '../shared/contracts.js'
 
 const api: AgentMuxDesktopApi = {
@@ -42,7 +43,14 @@ const api: AgentMuxDesktopApi = {
     readDirectory: (workspaceId: string, path: string) =>
       ipcRenderer.invoke('files:readDirectory', workspaceId, path),
     read: (workspaceId: string, path: string) => ipcRenderer.invoke('files:read', workspaceId, path),
-    write: (workspaceId: string, document: FileDocument) => ipcRenderer.invoke('files:write', workspaceId, document),
+    write: (workspaceId: string, input: WorkspaceFileWriteInput) => ipcRenderer.invoke('files:write', workspaceId, input),
+    observe: (workspaceId: string, path: string) => ipcRenderer.invoke('files:observe', workspaceId, path),
+    unobserve: (workspaceId: string, path: string) => ipcRenderer.invoke('files:unobserve', workspaceId, path),
+    onInvalidated(listener: (event: WorkspaceFileInvalidated) => void) {
+      const wrapped = (_event: Electron.IpcRendererEvent, value: WorkspaceFileInvalidated): void => listener(value)
+      ipcRenderer.on('agentmux:workspace-file-invalidated', wrapped)
+      return () => ipcRenderer.off('agentmux:workspace-file-invalidated', wrapped)
+    },
     create: (workspaceId: string, input: CreateWorkspacePathInput) =>
       ipcRenderer.invoke('files:create', workspaceId, input),
     rename: (workspaceId: string, input: RenameWorkspacePathInput) =>

@@ -12,7 +12,6 @@ describe('Renderer resource owner counts', () => {
     })).toEqual({
       monacoModels: 2,
       documents: 3,
-      fileWatchers: 0,
       runtimeSubscriptions: 2,
       terminalViews: 1,
       terminalAddons: 4,

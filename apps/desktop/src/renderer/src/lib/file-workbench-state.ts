@@ -1,4 +1,4 @@
-import type { FileDocument } from '../../../shared/contracts'
+import type { FileDocument, WorkspaceFileReadResult } from '../../../shared/contracts'
 import { activateTab, addTab, removeTab, type WorkspaceLayout } from './workbench-layout'
 import {
   documentKey,
@@ -15,8 +15,27 @@ export type FileWorkbenchState = {
   tabs: Record<string, WorkbenchTab>
   documents: Record<string, FileDocument>
   dirtyDocuments: Record<string, boolean>
+  documentGenerations: Record<string, number>
+  documentIssues: Record<string, FileDocumentIssue | undefined>
+  savingDocuments: Record<string, boolean>
   layouts: Record<string, WorkspaceLayout>
   lastActiveFileByWorkspace: Record<string, string | undefined>
+}
+
+export type FileDocumentIssue =
+  | { kind: 'changed'; observed: FileDocument }
+  | { kind: 'deleted' }
+  | { kind: 'read-error'; code: string; message: string }
+  | { kind: 'write-error'; code: string; message: string }
+
+function withoutIssue(
+  issues: FileWorkbenchState['documentIssues'],
+  key: string
+): FileWorkbenchState['documentIssues'] {
+  if (!issues[key]) return issues
+  const next = { ...issues }
+  delete next[key]
+  return next
 }
 
 export function reduceFileOpened(
@@ -29,12 +48,19 @@ export function reduceFileOpened(
   const layout = state.layouts[workspaceId]
   if (!layout) return state
   const tabId = fileTabId(workspaceId, path)
+  const key = documentKey(workspaceId, path)
+  const alreadyOpen = Boolean(state.documents[key])
   const existingPaneId = paneForTab(layout, tabId)
   const targetPaneId = existingPaneId ?? preferredPaneId ?? layout.activeGroupId
   const tab: FileWorkbenchTab = { id: tabId, kind: 'file', workspaceId, path }
   return {
     ...state,
-    documents: { ...state.documents, [documentKey(workspaceId, path)]: document },
+    documents: { ...state.documents, [key]: alreadyOpen ? state.documents[key]! : document },
+    documentGenerations: {
+      ...state.documentGenerations,
+      [key]: state.documentGenerations[key] ?? 0
+    },
+    documentIssues: alreadyOpen ? state.documentIssues : withoutIssue(state.documentIssues, key),
     tabs: { ...state.tabs, [tab.id]: tab },
     lastActiveFileByWorkspace: { ...state.lastActiveFileByWorkspace, [workspaceId]: path },
     layouts: {
@@ -59,19 +85,152 @@ export function reduceDocumentContent(
   return {
     ...state,
     documents: { ...state.documents, [key]: { ...current, content } },
-    dirtyDocuments: { ...state.dirtyDocuments, [key]: true }
+    dirtyDocuments: { ...state.dirtyDocuments, [key]: true },
+    documentGenerations: {
+      ...state.documentGenerations,
+      [key]: (state.documentGenerations[key] ?? 0) + 1
+    },
+    documentIssues: state.documentIssues[key]?.kind === 'write-error'
+      ? withoutIssue(state.documentIssues, key)
+      : state.documentIssues
   }
 }
 
-export function reduceDocumentSaved(
+export function reduceDocumentWritten(
   state: FileWorkbenchState,
   workspaceId: string,
-  path: string
+  path: string,
+  savedGeneration: number,
+  revision: string,
+  expectedRevision: string | null = revision
+): FileWorkbenchState {
+  const key = documentKey(workspaceId, path)
+  const document = state.documents[key]
+  if (!document) return state
+  const issue = state.documentIssues[key]
+  const clearsIssue = issue?.kind === 'write-error' ||
+    (issue?.kind === 'changed' && (
+      issue.observed.revision === revision || issue.observed.revision === expectedRevision
+    )) ||
+    (issue?.kind === 'deleted' && expectedRevision === null)
+  const hasNewerDiskConflict =
+    (issue?.kind === 'changed' && !clearsIssue) ||
+    (issue?.kind === 'deleted' && !clearsIssue)
+  return {
+    ...state,
+    documents: { ...state.documents, [key]: { ...document, revision } },
+    dirtyDocuments: {
+      ...state.dirtyDocuments,
+      [key]: (state.documentGenerations[key] ?? 0) !== savedGeneration || hasNewerDiskConflict
+    },
+    documentIssues: clearsIssue ? withoutIssue(state.documentIssues, key) : state.documentIssues,
+    savingDocuments: { ...state.savingDocuments, [key]: false }
+  }
+}
+
+export function reduceDocumentRead(
+  state: FileWorkbenchState,
+  workspaceId: string,
+  path: string,
+  result: WorkspaceFileReadResult
+): FileWorkbenchState {
+  const key = documentKey(workspaceId, path)
+  const current = state.documents[key]
+  if (!current) return state
+  if (result.status === 'deleted') {
+    return {
+      ...state,
+      dirtyDocuments: { ...state.dirtyDocuments, [key]: true },
+      documentIssues: { ...state.documentIssues, [key]: { kind: 'deleted' } }
+    }
+  }
+  if (result.status === 'error') {
+    return {
+      ...state,
+      documentIssues: {
+        ...state.documentIssues,
+        [key]: { kind: 'read-error', code: result.code, message: result.message }
+      }
+    }
+  }
+  if (result.document.revision === current.revision) {
+    const issue = state.documentIssues[key]
+    return issue?.kind === 'changed' || issue?.kind === 'deleted' || issue?.kind === 'read-error'
+      ? { ...state, documentIssues: withoutIssue(state.documentIssues, key) }
+      : state
+  }
+  if (state.dirtyDocuments[key]) {
+    return {
+      ...state,
+      documentIssues: {
+        ...state.documentIssues,
+        [key]: { kind: 'changed', observed: result.document }
+      }
+    }
+  }
+  return {
+    ...state,
+    documents: { ...state.documents, [key]: result.document },
+    dirtyDocuments: { ...state.dirtyDocuments, [key]: false },
+    documentGenerations: {
+      ...state.documentGenerations,
+      [key]: (state.documentGenerations[key] ?? 0) + 1
+    },
+    documentIssues: withoutIssue(state.documentIssues, key)
+  }
+}
+
+export function reduceDocumentReloaded(
+  state: FileWorkbenchState,
+  workspaceId: string,
+  path: string,
+  document: FileDocument
+): FileWorkbenchState {
+  const key = documentKey(workspaceId, path)
+  if (!state.documents[key]) return state
+  return {
+    ...state,
+    documents: { ...state.documents, [key]: document },
+    dirtyDocuments: { ...state.dirtyDocuments, [key]: false },
+    documentGenerations: {
+      ...state.documentGenerations,
+      [key]: (state.documentGenerations[key] ?? 0) + 1
+    },
+    documentIssues: withoutIssue(state.documentIssues, key)
+  }
+}
+
+export function reduceDocumentSaving(
+  state: FileWorkbenchState,
+  workspaceId: string,
+  path: string,
+  saving: boolean
 ): FileWorkbenchState {
   const key = documentKey(workspaceId, path)
   return {
     ...state,
-    dirtyDocuments: { ...state.dirtyDocuments, [key]: false }
+    savingDocuments: { ...state.savingDocuments, [key]: saving },
+    ...(saving && state.documentIssues[key]?.kind === 'write-error'
+      ? { documentIssues: withoutIssue(state.documentIssues, key) }
+      : {})
+  }
+}
+
+export function reduceDocumentWriteError(
+  state: FileWorkbenchState,
+  workspaceId: string,
+  path: string,
+  code: string,
+  message: string
+): FileWorkbenchState {
+  const key = documentKey(workspaceId, path)
+  return {
+    ...state,
+    savingDocuments: { ...state.savingDocuments, [key]: false },
+    documentIssues: {
+      ...state.documentIssues,
+      [key]: { kind: 'write-error', code, message }
+    }
   }
 }
 
@@ -92,13 +251,23 @@ export function reduceFileClosed(
   const tabs = { ...state.tabs }
   const documents = { ...state.documents }
   const dirtyDocuments = { ...state.dirtyDocuments }
+  const documentGenerations = { ...state.documentGenerations }
+  const documentIssues = { ...state.documentIssues }
+  const savingDocuments = { ...state.savingDocuments }
+  const key = documentKey(tab.workspaceId, tab.path)
   delete tabs[tabId]
-  delete documents[documentKey(tab.workspaceId, tab.path)]
-  delete dirtyDocuments[documentKey(tab.workspaceId, tab.path)]
+  delete documents[key]
+  delete dirtyDocuments[key]
+  delete documentGenerations[key]
+  delete documentIssues[key]
+  delete savingDocuments[key]
   return {
     tabs,
     documents,
     dirtyDocuments,
+    documentGenerations,
+    documentIssues,
+    savingDocuments,
     layouts,
     lastActiveFileByWorkspace: {
       ...state.lastActiveFileByWorkspace,
@@ -130,6 +299,9 @@ export function reduceFileRename(
   const tabs = { ...state.tabs }
   const documents = { ...state.documents }
   const dirtyDocuments = { ...state.dirtyDocuments }
+  const documentGenerations = { ...state.documentGenerations }
+  const documentIssues = { ...state.documentIssues }
+  const savingDocuments = { ...state.savingDocuments }
   for (const tab of affectedTabs) {
     const renamedPath = remapPathWithinSubtree(tab.path, path, nextPath)
     const nextId = replacements.get(tab.id)!
@@ -152,10 +324,29 @@ export function reduceFileRename(
     delete dirtyDocuments[key]
     dirtyDocuments[documentKey(workspaceId, remapPathWithinSubtree(documentPath, path, nextPath))] = dirty
   }
+  for (const collection of [documentGenerations, documentIssues]) {
+    for (const [key, value] of Object.entries(collection)) {
+      if (!key.startsWith(documentPrefix)) continue
+      const documentPath = key.slice(documentPrefix.length)
+      if (!isPathWithinSubtree(documentPath, path)) continue
+      delete collection[key]
+      collection[documentKey(workspaceId, remapPathWithinSubtree(documentPath, path, nextPath))] = value
+    }
+  }
+  for (const key of Object.keys(savingDocuments)) {
+    if (!key.startsWith(documentPrefix)) continue
+    const documentPath = key.slice(documentPrefix.length)
+    if (!isPathWithinSubtree(documentPath, path)) continue
+    delete savingDocuments[key]
+    savingDocuments[documentKey(workspaceId, remapPathWithinSubtree(documentPath, path, nextPath))] = false
+  }
   return {
     tabs,
     documents,
     dirtyDocuments,
+    documentGenerations,
+    documentIssues,
+    savingDocuments,
     layouts: Object.fromEntries(
       Object.entries(state.layouts).map(([id, layout]) => [
         id,
@@ -192,6 +383,9 @@ export function reduceFileDelete(
   const tabs = { ...state.tabs }
   const documents = { ...state.documents }
   const dirtyDocuments = { ...state.dirtyDocuments }
+  const documentGenerations = { ...state.documentGenerations }
+  const documentIssues = { ...state.documentIssues }
+  const savingDocuments = { ...state.savingDocuments }
   for (const tab of removedTabs) {
     delete tabs[tab.id]
   }
@@ -204,10 +398,19 @@ export function reduceFileDelete(
     if (!key.startsWith(documentPrefix)) continue
     if (isPathWithinSubtree(key.slice(documentPrefix.length), path)) delete dirtyDocuments[key]
   }
+  for (const collection of [documentGenerations, documentIssues, savingDocuments]) {
+    for (const key of Object.keys(collection)) {
+      if (!key.startsWith(documentPrefix)) continue
+      if (isPathWithinSubtree(key.slice(documentPrefix.length), path)) delete collection[key]
+    }
+  }
   return {
     tabs,
     documents,
     dirtyDocuments,
+    documentGenerations,
+    documentIssues,
+    savingDocuments,
     layouts: layout ? { ...state.layouts, [workspaceId]: layout } : state.layouts,
     lastActiveFileByWorkspace: {
       ...state.lastActiveFileByWorkspace,

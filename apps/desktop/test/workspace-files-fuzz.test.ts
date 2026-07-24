@@ -41,16 +41,18 @@ describe('deterministic Workspace path fuzz', () => {
       const prefix = Array.from({ length: depth }, (_, index) => `segment-${index}`).join('/')
       const ascent = Array.from({ length: depth + 1 }, () => '..').join('/')
       const base = [prefix, ascent, 'outside'].filter(Boolean).join('/')
-      await expect(files.read(workspace, `${base}/secret.txt`)).rejects.toThrow(
-        'Path escapes the workspace root'
-      )
+      await expect(files.read(workspace, `${base}/secret.txt`)).resolves.toMatchObject({
+        status: 'error',
+        message: 'Path escapes the workspace root'
+      })
       await expect(files.create(workspace, { path: `${base}/created-${depth}`, kind: 'file' }))
         .rejects.toThrow('Path escapes the workspace root')
     }
 
-    await expect(files.read(workspace, join(outside, 'secret.txt'))).rejects.toThrow(
-      'Path escapes the workspace root'
-    )
+    await expect(files.read(workspace, join(outside, 'secret.txt'))).resolves.toMatchObject({
+      status: 'error',
+      message: 'Path escapes the workspace root'
+    })
     await expect(access(join(outside, 'created-0'))).rejects.toThrow()
   })
 })
