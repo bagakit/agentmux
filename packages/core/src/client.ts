@@ -46,6 +46,7 @@ import type {
   AgentMuxRunInputOperation,
   AgentMuxRunOutputAck,
   AgentMuxRunRef,
+  AgentMuxStoredAgentSession,
   AgentMuxRuntimeDiagnostics,
   AgentMuxRuntimeIdentity,
   AgentNativeSessionHandle,
@@ -139,8 +140,9 @@ function safeId(value: string, name: string): string {
   return value
 }
 
-function cloneSession(session: AgentMuxAgentSession): AgentMuxAgentSession {
-  return structuredClone(session)
+function cloneSession(session: AgentMuxStoredAgentSession): AgentMuxAgentSession {
+  const { hookBindingId: _bindingId, hookToken: _token, ...publicSession } = structuredClone(session)
+  return publicSession
 }
 
 function hookBindingIdentity(operationId: string): string {
@@ -274,7 +276,9 @@ export class AgentMuxClient {
       options.store ?? new AgentMuxFileAgentSessionStore()
     )
     this.kernel = new CtxmuxRunAdapter()
-    this.hookServer = new AgentHookServer(async (event) => await this.acceptHookEvent(event))
+    this.hookServer = new AgentHookServer(
+      async (event, signal) => await this.acceptHookEvent(event, signal)
+    )
     this.acp = new AgentMuxAcpBridge(
       {
         onEvent: (agentSessionId, event, evidence) => {
@@ -375,13 +379,18 @@ export class AgentMuxClient {
   async dispose(): Promise<void> {
     await this.hookServer.stop()
     this.disconnect()
-    for (const binding of this.hookBindings.values()) binding.close()
+    await Promise.allSettled([...this.hookBindings.values()].map(async (binding) => await binding.close()))
     this.hookBindings.clear()
     await this.acp.dispose()
     this.publisher.dispose()
   }
 
-  onEvent(listener: (event: AgentMuxClientEvent) => unknown): () => void {
+  /**
+   * Registers a synchronous observation callback. Copy work into a
+   * Consumer-owned bounded queue before returning if asynchronous handling is
+   * required. Promise-returning callbacks are detached on their first event.
+   */
+  onEvent(listener: (event: AgentMuxClientEvent) => void): () => void {
     return this.publisher.onEvent(listener)
   }
 
@@ -390,7 +399,7 @@ export class AgentMuxClient {
   }
 
   agentSessions(): AgentMuxAgentSession[] {
-    return this.registry.list()
+    return this.registry.list().map(cloneSession)
   }
 
   agentSession(agentSessionId: string): AgentMuxAgentSession {
@@ -424,8 +433,17 @@ export class AgentMuxClient {
         version: '0.1.0',
         protocolVersion: identity.protocolVersion,
         sourceCommit: '2e32a9d647d627952ea5c455fb2efef6c636643a',
-        artifactPlatform: `${process.platform}-${process.arch}`,
-        ready: true
+        artifactPlatform: 'darwin-arm64',
+        ready: true,
+        capabilities: {
+          transport: 'local-unix',
+          orderedOutputBytes: true,
+          boundedReplay: true,
+          recoverableInput: true,
+          resize: true,
+          interrupt: true,
+          completeStop: true
+        }
       }
     }
   }
@@ -452,7 +470,7 @@ export class AgentMuxClient {
     const runs = await this.listRuns()
     return {
       hostId: 'local',
-      views: projectAgentMuxViews('local', runs, this.registry.list())
+      views: projectAgentMuxViews('local', runs, this.registry.list().map(cloneSession))
     }
   }
 
@@ -580,7 +598,7 @@ export class AgentMuxClient {
     )
     const reservation = await this.registry.reserveNew(agentSessionId, lifecycleOperationId)
     let hookBinding: AgentHookBinding | null = null
-    let persisted: AgentMuxAgentSession | null = null
+    let persisted: AgentMuxStoredAgentSession | null = null
     let abandonedRun: AgentMuxRunRef | null = null
     try {
       const provider = this.providers.get(input.agentId)
@@ -617,7 +635,7 @@ export class AgentMuxClient {
         ...(input.rows === undefined ? {} : { rows: input.rows })
       })
       const now = Date.now()
-      const session: AgentMuxAgentSession = {
+      const session: AgentMuxStoredAgentSession = {
         kind: 'agent',
         agentSessionId,
         agentId: input.agentId,
@@ -626,6 +644,7 @@ export class AgentMuxClient {
         run: runRef(run.runId),
         retiredRuns: [],
         hookBindingId: hookBinding.bindingId,
+        hookToken: hookBinding.endpoint.token,
         outputCursorBytes: 0,
         createdAt: now,
         updatedAt: now
@@ -638,7 +657,7 @@ export class AgentMuxClient {
       } catch (error) {
         const rollbackErrors: unknown[] = [error]
         try {
-          hookBinding.close()
+          await hookBinding.close()
           await this.retireUncommittedRun(run.runId)
           abandonedRun = runRef(run.runId)
         }
@@ -664,7 +683,7 @@ export class AgentMuxClient {
       if (input.prompt?.trim()) this.publishPrompt(readySession, 'Initial prompt', input.prompt.trim(), now)
       return cloneSession(readySession)
     } finally {
-      if (hookBinding && ![...this.hookBindings.values()].includes(hookBinding)) hookBinding.close()
+      if (hookBinding && ![...this.hookBindings.values()].includes(hookBinding)) await hookBinding.close()
       await this.registry.releaseLifecycle(reservation, abandonedRun ? [abandonedRun] : [])
     }
   }
@@ -718,7 +737,7 @@ export class AgentMuxClient {
       lifecycleOperationId
     )
     let hookBinding: AgentHookBinding | null = null
-    let persisted: AgentMuxAgentSession | null = null
+    let persisted: AgentMuxStoredAgentSession | null = null
     let abandonedRun: AgentMuxRunRef | null = null
     try {
       if (!current.nativeHandle || current.nativeHandle.kind !== 'provider') {
@@ -748,7 +767,7 @@ export class AgentMuxClient {
         ...(input.commandOverride === undefined ? {} : { commandOverride: input.commandOverride })
       })
       await this.requireHookIngressOwner()
-      this.hookBindings.get(current.run.runId)?.close()
+      await this.hookBindings.get(current.run.runId)?.close()
       this.hookBindings.delete(current.run.runId)
       hookBinding = this.hookServer.createBinding(
         current.agentSessionId,
@@ -770,11 +789,12 @@ export class AgentMuxClient {
         ...(input.cols === undefined ? {} : { cols: input.cols }),
         ...(input.rows === undefined ? {} : { rows: input.rows })
       })
-      const next: AgentMuxAgentSession = {
+      const next: AgentMuxStoredAgentSession = {
         ...current,
         run: runRef(run.runId),
         retiredRuns: [...current.retiredRuns, current.run].slice(-16),
         hookBindingId: hookBinding.bindingId,
+        hookToken: hookBinding.endpoint.token,
         outputCursorBytes: 0,
         updatedAt: Date.now(),
         nativeHandle: structuredClone(current.nativeHandle)
@@ -791,7 +811,7 @@ export class AgentMuxClient {
       } catch (error) {
         const rollbackErrors: unknown[] = [error]
         try {
-          hookBinding.close()
+          await hookBinding.close()
           await this.retireUncommittedRun(run.runId)
           abandonedRun = runRef(run.runId)
         }
@@ -821,7 +841,7 @@ export class AgentMuxClient {
       this.publishPrompt(readySession, 'Resume prompt', prompt, Date.now())
       return cloneSession(readySession)
     } finally {
-      if (hookBinding && ![...this.hookBindings.values()].includes(hookBinding)) hookBinding.close()
+      if (hookBinding && ![...this.hookBindings.values()].includes(hookBinding)) await hookBinding.close()
       await this.registry.releaseLifecycle(reservation, abandonedRun ? [abandonedRun] : [])
     }
   }
@@ -891,7 +911,7 @@ export class AgentMuxClient {
     try {
       const run = await this.requireCurrentAgentRun(session)
       if (run.state.type === 'running') await this.stopRunningRun(session.run.runId)
-      this.hookBindings.get(session.run.runId)?.close()
+      await this.hookBindings.get(session.run.runId)?.close()
       this.hookBindings.delete(session.run.runId)
       const cleanup = await Promise.allSettled([
         this.acp.unbind(agentSessionId),
@@ -977,13 +997,14 @@ export class AgentMuxClient {
       const binding = this.hookServer.createBinding(
         session.agentSessionId,
         session.agentId,
-        session.hookBindingId
+        session.hookBindingId,
+        session.hookToken
       )
       try {
         await binding.bindRun(session.run.runId)
         this.hookBindings.set(session.run.runId, binding)
       } catch (error) {
-        binding.close()
+        await binding.close()
         throw error
       }
     }
@@ -1058,9 +1079,9 @@ export class AgentMuxClient {
   }
 
   private async ensureTerminalHandshake(
-    requestedSession: AgentMuxAgentSession,
+    requestedSession: AgentMuxStoredAgentSession,
     knownRun?: CtxmuxAdapterRun
-  ): Promise<AgentMuxAgentSession> {
+  ): Promise<AgentMuxStoredAgentSession> {
     const provider = this.providers.get(requestedSession.agentId)
     const handshake = provider.terminalHandshake
     if (!handshake) {
@@ -1330,7 +1351,7 @@ export class AgentMuxClient {
     if (expectedByte === null) {
       throw new AgentMuxError('CtxMux omitted its accepted Input byte cursor.', 'CTXMUX_INPUT_CURSOR_MISSING')
     }
-    let current: AgentMuxAgentSession
+    let current: AgentMuxStoredAgentSession
     try {
       current = await this.registry.update(
         session.agentSessionId,
@@ -1701,11 +1722,12 @@ export class AgentMuxClient {
     }
   }
 
-  private requireAgentSession(agentSessionId: string): AgentMuxAgentSession {
+  private requireAgentSession(agentSessionId: string): AgentMuxStoredAgentSession {
     return this.registry.get(agentSessionId)
   }
 
-  private async acceptHookEvent(envelope: NativeHookEnvelope): Promise<void> {
+  private async acceptHookEvent(envelope: NativeHookEnvelope, signal: AbortSignal): Promise<void> {
+    signal.throwIfAborted()
     const session = this.registry.findByRun(runRef(envelope.runId))
     if (
       !session ||
@@ -1729,6 +1751,7 @@ export class AgentMuxClient {
       session.agentSessionId,
       session.run,
       (current) => {
+        signal.throwIfAborted()
         const existingStop = current.terminalStopReceipt?.id === receipt.id
           ? current.terminalStopReceipt
           : undefined
@@ -1750,8 +1773,10 @@ export class AgentMuxClient {
             : {}),
           ...(normalized.nativeHandle ? { nativeHandle: normalized.nativeHandle } : {})
         }
-      }
+      },
+      signal
     )
+    signal.throwIfAborted()
     const persistedReceipt = next.hookReceipt
     if (!persistedReceipt) {
       throw new AgentMuxError('Native Hook receipt was not persisted.', 'HOOK_RECEIPT_INVALID')

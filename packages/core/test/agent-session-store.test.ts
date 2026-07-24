@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import {
+  AgentMuxFileAgentSessionStore,
   loadAgentSessions,
   normalizeStoredAgentSession,
   type AgentMuxAgentSessionStore
@@ -15,6 +18,7 @@ function storedSession() {
     run: { runId: 'daemon-1' },
     retiredRuns: [],
     hookBindingId: 'hook-binding-1',
+    hookToken: 'hook-token-1',
     outputCursorBytes: 12,
     createdAt: 100,
     updatedAt: 200,
@@ -122,5 +126,24 @@ describe('semantic session persistence boundary', () => {
       async commitLifecycle() {}
     }
     await expect(loadAgentSessions(store)).rejects.toMatchObject({ code: 'INVALID_AGENT_SESSION_STORE' })
+  })
+
+  it('cancels a File Store write while it waits for another owner lock', async () => {
+    const root = await mkdtemp('/private/tmp/agentmux-store-abort-')
+    const path = join(root, 'sessions.json')
+    try {
+      await writeFile(`${path}.lock`, `${process.pid}\n`, { mode: 0o600 })
+      const controller = new AbortController()
+      const pending = new AgentMuxFileAgentSessionStore(path).compareAndSwap(
+        null,
+        storedSession(),
+        controller.signal
+      )
+      setTimeout(() => controller.abort(), 20)
+
+      await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 })

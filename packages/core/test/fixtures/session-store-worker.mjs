@@ -47,6 +47,7 @@ try {
     run,
     retiredRuns: current ? [...current.retiredRuns, current.run].slice(-16) : [],
     hookBindingId: `${workerId}-binding`,
+    hookToken: `${workerId}-token`,
     outputCursorBytes: 0,
     createdAt: current?.createdAt ?? 1,
     updatedAt: 2

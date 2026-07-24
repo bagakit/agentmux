@@ -12,6 +12,7 @@ import { installTerminalColorQueryReplyHandlers } from '../lib/terminal-capabili
 import { terminalOptions, terminalTheme } from '../lib/terminal-theme'
 import { isTerminalAppShortcut } from '../lib/terminal-shortcuts'
 import { hydrateTerminalReplay } from '../lib/terminal-replay'
+import { acquireTerminalResourceOwners } from '../lib/terminal-resource-owners'
 import { TerminalViewportSynchronizer } from '../lib/terminal-viewport-sync'
 import { TerminalContextMenu } from './TerminalContextMenu'
 
@@ -85,6 +86,10 @@ export function TerminalView({ session, themeId }: { session: SessionSnapshot; t
       webgl = null
       console.warn('[terminal] WebGL unavailable; xterm DOM renderer remains active', error)
     }
+    const releaseResourceOwners = acquireTerminalResourceOwners({
+      addons: webgl ? 4 : 3,
+      listeners: 6
+    })
 
     let disposed = false
     let attachmentId: string | null = null
@@ -247,8 +252,13 @@ export function TerminalView({ session, themeId }: { session: SessionSnapshot; t
       disposeEvents()
       input.dispose()
       resize.disconnect()
-      if (attachmentId !== null) void api.sessions.detach(attachmentId)
+      if (attachmentId !== null) {
+        void api.sessions.detach(attachmentId).catch((error) => {
+          console.warn('[terminal] Attachment release was not acknowledged', error)
+        })
+      }
       terminal.dispose()
+      releaseResourceOwners()
     }
   }, [session.control.run.runId, session.id, session.processState, themeId])
 

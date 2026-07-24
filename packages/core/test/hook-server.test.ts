@@ -106,6 +106,138 @@ describe('AgentHookServer', () => {
     expect(stopped).toBe(true)
   })
 
+  it('keeps a closing binding visible to server drain ownership', async () => {
+    let releaseObservation!: () => void
+    let observationStarted!: () => void
+    const release = new Promise<void>((resolve) => { releaseObservation = resolve })
+    const started = new Promise<void>((resolve) => { observationStarted = resolve })
+    const server = new AgentHookServer(async () => {
+      observationStarted()
+      await release
+    }, 0)
+    servers.push(server)
+    await server.start()
+    const binding = server.createBinding('semantic-close-drain', 'codex')
+    await binding.bindRun('run-close-drain')
+    const response = fetch(binding.endpoint.url, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${binding.endpoint.token}`,
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({ receiptId: 'close-drain-receipt' })
+    })
+    await started
+    let stopped = false
+    const closing = binding.close()
+    const stopping = server.stop().then(() => { stopped = true })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(stopped).toBe(false)
+
+    releaseObservation()
+    expect((await response).status).toBe(204)
+    await Promise.all([closing, stopping])
+    expect(stopped).toBe(true)
+  })
+
+  it('bounds shutdown when an accepted owner delivery never settles', async () => {
+    let observationStarted!: () => void
+    const started = new Promise<void>((resolve) => { observationStarted = resolve })
+    let aborted = false
+    const server = new AgentHookServer(async (_event, signal) => {
+      observationStarted()
+      await new Promise<void>((_resolve, reject) => {
+        signal.addEventListener('abort', () => {
+          aborted = true
+          reject(signal.reason)
+        }, { once: true })
+      })
+    }, 0)
+    servers.push(server)
+    await server.start()
+    const binding = server.createBinding('semantic-timeout', 'codex')
+    await binding.bindRun('run-timeout')
+    const response = fetch(binding.endpoint.url, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${binding.endpoint.token}`,
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({ receiptId: 'timeout-receipt', eventName: 'Stop' })
+    })
+    await started
+
+    const before = Date.now()
+    await server.stop()
+    expect(Date.now() - before).toBeLessThan(3_000)
+    expect((await response).status).toBe(503)
+    expect(aborted).toBe(true)
+  })
+
+  it('queues every pre-bind event before accepting bound delivery', async () => {
+    let releaseFirst!: () => void
+    let firstStarted!: () => void
+    const release = new Promise<void>((resolve) => { releaseFirst = resolve })
+    const started = new Promise<void>((resolve) => { firstStarted = resolve })
+    const receipts: string[] = []
+    const server = new AgentHookServer(async (event) => {
+      receipts.push(event.receiptId)
+      if (event.receiptId === 'before-0') {
+        firstStarted()
+        await release
+      }
+    }, 0)
+    servers.push(server)
+    await server.start()
+    const binding = server.createBinding('semantic-order', 'codex')
+    const request = async (receiptId: string) => await fetch(binding.endpoint.url, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${binding.endpoint.token}`,
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({ receiptId })
+    })
+    expect((await request('before-0')).status).toBe(204)
+    expect((await request('before-1')).status).toBe(204)
+
+    const bind = binding.bindRun('run-order')
+    await started
+    const live = request('live')
+    releaseFirst()
+
+    await bind
+    expect((await live).status).toBe(204)
+    expect(receipts).toEqual(['before-0', 'before-1', 'live'])
+  })
+
+  it('keeps the same token retryable after an abort-aware delivery timeout', async () => {
+    let attempts = 0
+    const server = new AgentHookServer(async (_event, signal) => {
+      attempts += 1
+      if (attempts !== 1) return
+      await new Promise<void>((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+      })
+    }, 0)
+    servers.push(server)
+    await server.start()
+    const binding = server.createBinding('semantic-retry', 'codex')
+    await binding.bindRun('run-retry')
+    const request = async () => await fetch(binding.endpoint.url, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${binding.endpoint.token}`,
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({ receiptId: 'retry-receipt', eventName: 'Stop' })
+    })
+
+    expect((await request()).status).toBe(503)
+    expect((await request()).status).toBe(204)
+    expect(attempts).toBe(2)
+  })
+
   it('returns a retryable failure when bound owner persistence fails', async () => {
     let attempts = 0
     const server = new AgentHookServer(() => {
@@ -143,5 +275,129 @@ describe('AgentHookServer', () => {
       })
     })
     expect(response.status).toBe(403)
+  })
+
+  it('rejects oversized bodies before parsing an envelope', async () => {
+    const server = new AgentHookServer(() => {}, 0)
+    servers.push(server)
+    await server.start()
+    const binding = server.createBinding('semantic-oversized', 'codex')
+    const response = await fetch(binding.endpoint.url, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${binding.endpoint.token}`,
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({ receiptId: 'oversized', payload: { value: 'x'.repeat(128 * 1024) } })
+    })
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: 'invalid_hook_envelope' })
+  })
+
+  it('caps unbound events and bound delivery work independently', async () => {
+    let releaseObservation!: () => void
+    let observationStarted!: () => void
+    const release = new Promise<void>((resolve) => { releaseObservation = resolve })
+    const started = new Promise<void>((resolve) => { observationStarted = resolve })
+    const events: NativeHookEnvelope[] = []
+    const server = new AgentHookServer(async (event) => {
+      events.push(event)
+      observationStarted()
+      await release
+    }, 0)
+    servers.push(server)
+    await server.start()
+    const binding = server.createBinding('semantic-bounded', 'codex')
+    const request = (receiptId: string) => fetch(binding.endpoint.url, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${binding.endpoint.token}`,
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({ receiptId, eventName: 'Stop' })
+    })
+
+    for (let index = 0; index < 8; index += 1) {
+      expect((await request(`unbound-${index}`)).status).toBe(204)
+    }
+    expect((await request('unbound-overflow')).status).toBe(429)
+    const bind = binding.bindRun('run-bounded')
+    await started
+    releaseObservation()
+    await bind
+    expect(events).toHaveLength(8)
+
+    let releaseFlood!: () => void
+    let floodStarted!: () => void
+    const floodRelease = new Promise<void>((resolve) => { releaseFlood = resolve })
+    const floodStart = new Promise<void>((resolve) => { floodStarted = resolve })
+    const floodServer = new AgentHookServer(async () => {
+      floodStarted()
+      await floodRelease
+    }, 0)
+    servers.push(floodServer)
+    await floodServer.start()
+    const floodBinding = floodServer.createBinding('semantic-flood', 'claude')
+    await floodBinding.bindRun('run-flood')
+    const flood = Array.from({ length: 9 }, (_, index) => fetch(floodBinding.endpoint.url, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${floodBinding.endpoint.token}`,
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({ receiptId: `flood-${index}` })
+    }))
+    await floodStart
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    releaseFlood()
+    expect((await Promise.all(flood)).map((response) => response.status).sort()).toEqual([
+      204, 204, 204, 204, 204, 204, 204, 204, 429
+    ])
+  })
+
+  it('caps bindings and keeps bearer tokens scoped to one binding', async () => {
+    const events: NativeHookEnvelope[] = []
+    const server = new AgentHookServer((event) => { events.push(event) }, 0)
+    servers.push(server)
+    await server.start()
+    const bindings = Array.from({ length: 256 }, (_, index) => (
+      server.createBinding(`semantic-${index}`, index % 2 === 0 ? 'codex' : 'claude')
+    ))
+    expect(() => server.createBinding('semantic-overflow', 'pi')).toThrowError(
+      expect.objectContaining({ code: 'HOOK_BINDING_LIMIT' })
+    )
+
+    await Promise.all(bindings.slice(0, 2).map(async (binding, index) => {
+      await binding.bindRun(`run-${index}`)
+      const response = await fetch(binding.endpoint.url, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${binding.endpoint.token}`,
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({ receiptId: `scoped-${index}` })
+      })
+      expect(response.status).toBe(204)
+    }))
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ agentSessionId: 'semantic-0', runId: 'run-0', receiptId: 'scoped-0' }),
+      expect.objectContaining({ agentSessionId: 'semantic-1', runId: 'run-1', receiptId: 'scoped-1' })
+    ]))
+    expect(JSON.stringify(events)).not.toContain(bindings[0]!.endpoint.token)
+  })
+
+  it('does not derive a bearer token from the stable binding identity', async () => {
+    const server = new AgentHookServer(() => {}, 0)
+    servers.push(server)
+    await server.start()
+    const bindingId = 'a'.repeat(43)
+    const first = server.createBinding('semantic-secret', 'codex', bindingId)
+    const firstToken = first.endpoint.token
+    await first.close()
+    const second = server.createBinding('semantic-secret', 'codex', bindingId)
+
+    expect(firstToken).not.toBe(second.endpoint.token)
+    expect(firstToken).not.toBe(bindingId)
   })
 })

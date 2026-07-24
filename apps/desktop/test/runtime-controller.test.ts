@@ -292,7 +292,6 @@ describe('RuntimeController configuration transaction', () => {
         workspacePath: '/repo',
         run: { runId: 'run-1' },
         retiredRuns: [],
-        hookBindingId: 'hook-1',
         outputCursorBytes: 0,
         createdAt: 1,
         updatedAt: 1
@@ -350,14 +349,34 @@ describe('RuntimeController configuration transaction', () => {
     expect(first.attachmentId).not.toBe(second.attachmentId)
     expect(client.attachTerminal).toHaveBeenCalledOnce()
     expect(client.readRunReplay).toHaveBeenCalledWith(control.run, 8)
+    expect(controller.resourceOwnerCounts()).toEqual({
+      sessionAttachmentOwners: 1,
+      sessionAttachmentLeases: 2
+    })
 
     await controller.detachSession(renderer.id, first.attachmentId)
     expect(client.releaseRunAttachment).not.toHaveBeenCalled()
+    expect(controller.resourceOwnerCounts()).toEqual({
+      sessionAttachmentOwners: 1,
+      sessionAttachmentLeases: 1
+    })
     client.releaseRunAttachment.mockRejectedValueOnce(new Error('release interrupted'))
     await expect(controller.detachSession(renderer.id, second.attachmentId)).rejects.toThrow('release interrupted')
-    await controller.detachSession(renderer.id, second.attachmentId)
+    expect(controller.resourceOwnerCounts()).toEqual({
+      sessionAttachmentOwners: 0,
+      sessionAttachmentLeases: 0
+    })
+
+    const third = await controller.attachSession(renderer.id, control, 12, localConfig)
+    expect(client.attachTerminal).toHaveBeenCalledTimes(2)
+    expect(client.readRunReplay).toHaveBeenCalledOnce()
+    await controller.detachSession(renderer.id, third.attachmentId)
     expect(client.releaseRunAttachment).toHaveBeenCalledTimes(2)
     expect(client.releaseRunAttachment).toHaveBeenCalledWith(expect.objectContaining(control.run))
+    expect(controller.resourceOwnerCounts()).toEqual({
+      sessionAttachmentOwners: 0,
+      sessionAttachmentLeases: 0
+    })
     detachRenderer()
   })
 

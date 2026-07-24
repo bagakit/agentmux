@@ -1,7 +1,6 @@
 import type { AgentMuxClient } from './client.js'
 import type { AgentId, AgentCapabilities, AgentCatalogEntry } from './types.js'
 
-export type AgentMuxDoctorHostKind = 'local' | 'ssh'
 export type AgentMuxDoctorProbeState = 'found' | 'missing' | 'blocked'
 
 export type AgentMuxDoctorAgent = {
@@ -19,7 +18,7 @@ export type AgentMuxDoctorAgent = {
 export type AgentMuxDoctorReport = {
   ok: boolean
   host: {
-    kind: AgentMuxDoctorHostKind
+    kind: 'local'
     reachable: boolean
     hostId: string | null
     buildIdentity: string | null
@@ -30,6 +29,16 @@ export type AgentMuxDoctorReport = {
   }
   runtime: Awaited<ReturnType<AgentMuxClient['runtimeDiagnostics']>> | null
   runtimeAction: string | null
+  hosts: {
+    local: {
+      status: 'available' | 'unavailable'
+      action: string | null
+    }
+    remote: {
+      status: 'unsupported'
+      action: string
+    }
+  }
   agents: AgentMuxDoctorAgent[]
   integration: {
     hookIngress: 'authenticated-loopback'
@@ -41,7 +50,6 @@ export type AgentMuxDoctorReport = {
 
 export type DiagnoseAgentMuxOptions = {
   client: AgentMuxClient
-  hostKind: AgentMuxDoctorHostKind
   commandOverrides?: Readonly<Record<string, string>>
 }
 
@@ -104,7 +112,7 @@ export async function diagnoseAgentMux(options: DiagnoseAgentMuxOptions): Promis
     return {
       ok: runtime.supported && runtime.ctxmux.ready && agents.every((agent) => agent.probe !== 'blocked'),
       host: {
-        kind: options.hostKind,
+        kind: 'local',
         reachable: true,
         hostId: identity.hostId,
         buildIdentity: identity.buildIdentity,
@@ -115,10 +123,22 @@ export async function diagnoseAgentMux(options: DiagnoseAgentMuxOptions): Promis
       },
       runtime,
       runtimeAction: !runtime.supported
-        ? 'Use Node 22 or newer on macOS or Linux with x64 or arm64.'
+        ? 'Use Node 22 or newer on macOS arm64 with the bundled darwin-arm64 ctxmux artifacts.'
         : !runtime.ctxmux.ready
           ? 'Reinstall @agentmux/core and verify the pinned ctxmux artifact manifest.'
           : null,
+      hosts: {
+        local: {
+          status: runtime.supported && runtime.ctxmux.ready ? 'available' : 'unavailable',
+          action: runtime.supported && runtime.ctxmux.ready
+            ? null
+            : 'Restore the pinned local ctxmux runtime, then rerun doctor.'
+        },
+        remote: {
+          status: 'unsupported',
+          action: 'Remote is unsupported until the ctxmux Remote contract is delivered in T-021.'
+        }
+      },
       agents,
       integration: {
         hookIngress: 'authenticated-loopback',
@@ -132,19 +152,27 @@ export async function diagnoseAgentMux(options: DiagnoseAgentMuxOptions): Promis
     return {
       ok: false,
       host: {
-        kind: options.hostKind,
+        kind: 'local',
         reachable: false,
         hostId: null,
         buildIdentity: null,
         protocolVersion: null,
         runtimeInstanceId: null,
         error: detail,
-        action: options.hostKind === 'local'
-          ? 'Verify the bundled ctxmux artifacts, then rerun doctor.'
-          : 'Remote is unsupported until the ctxmux Remote contract is delivered.'
+        action: 'Verify the bundled ctxmux artifacts, then rerun doctor.'
       },
       runtime: null,
       runtimeAction: null,
+      hosts: {
+        local: {
+          status: 'unavailable',
+          action: 'Verify the bundled ctxmux artifacts, then rerun doctor.'
+        },
+        remote: {
+          status: 'unsupported',
+          action: 'Remote is unsupported until the ctxmux Remote contract is delivered in T-021.'
+        }
+      },
       agents: catalog.map(blockedAgent),
       integration: {
         hookIngress: 'authenticated-loopback',

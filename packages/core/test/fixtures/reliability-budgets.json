@@ -1,0 +1,16 @@
+{
+  "schema": "agentmux.t017-reliability-budgets.v1",
+  "ctxmuxSourceCommit": "2e32a9d647d627952ea5c455fb2efef6c636643a",
+  "runCount": 16,
+  "maxDaemonRssKiB": 32768,
+  "maxReplayDaemonRssKiB": 49152,
+  "maxClientRssKiB": 262144,
+  "maxDisposedClientRssKiB": 262144,
+  "maxClientRssPerAttachmentKiB": 4096,
+  "maxReplayClientIncrementKiB": 163840,
+  "maxDaemonThreadsPerRun": 3,
+  "maxDaemonFdsPerRun": 4,
+  "maxCleanupRssDriftKiB": 16384,
+  "maxCleanupThreadDrift": 1,
+  "maxRetainedHistoricalFdsPerRun": 2.25
+}

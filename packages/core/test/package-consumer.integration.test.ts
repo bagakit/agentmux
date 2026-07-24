@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
-import { cp, mkdtemp, mkdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import { cp, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
@@ -18,6 +18,7 @@ const fakeCodexFixture = fileURLToPath(new URL('./fixtures/fake-codex-cli.mjs', 
 const lifecycleCrashFixture = fileURLToPath(new URL('./fixtures/lifecycle-crash-worker.mjs', import.meta.url))
 const promptCrashFixture = fileURLToPath(new URL('./fixtures/prompt-submit-crash-worker.mjs', import.meta.url))
 const runtimeScopePreloadFixture = fileURLToPath(new URL('./fixtures/runtime-scope-preload.mjs', import.meta.url))
+const ownerReceiptFailureFixture = fileURLToPath(new URL('./fixtures/ctxmux-owner-receipt-failure.mjs', import.meta.url))
 const ctxmuxRuntimeId = '88e8377ecc4341b655d47306'
 const roots: string[] = []
 
@@ -56,6 +57,16 @@ type DaemonProcess = {
   pid: number
   socketPath: string
   stateDirectory: string
+}
+
+function processIsGone(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return false
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ESRCH') return true
+    throw error
+  }
 }
 
 async function daemonProcesses(daemonPath: string, runtimeDirectory: string): Promise<DaemonProcess[]> {
@@ -118,6 +129,53 @@ async function stopDaemon(daemon: DaemonProcess): Promise<void> {
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 20))
   }
   throw new Error(`CtxMux daemon ${daemon.pid} did not stop.`)
+}
+
+async function stopDaemonRuns(cliPath: string, daemon: DaemonProcess): Promise<void> {
+  const listed = await execFileAsync(cliPath, ['--socket', daemon.socketPath, 'list'], {
+    timeout: 5_000,
+    maxBuffer: 4 * 1024 * 1024
+  })
+  const runningRunIds = listed.stdout.split('\n').flatMap((line) => {
+    const [runId, state] = line.split('\t')
+    return runId && state === 'running' ? [runId] : []
+  })
+  const stopped = await Promise.allSettled(runningRunIds.map(async (runId) => {
+    await execFileAsync(cliPath, ['--socket', daemon.socketPath, 'stop', runId], {
+      timeout: 10_000,
+      maxBuffer: 256 * 1024
+    })
+  }))
+  const errors = stopped.flatMap((result) => result.status === 'rejected' ? [result.reason] : [])
+  if (errors.length > 0) {
+    throw new AggregateError(errors, 'Packed consumer cleanup could not stop every live CtxMux Run.')
+  }
+}
+
+async function stopDaemonAndRuns(cliPath: string, daemon: DaemonProcess): Promise<void> {
+  let failure: unknown = null
+  try {
+    await stopDaemonRuns(cliPath, daemon)
+  } catch (error) {
+    failure = error
+  }
+  try {
+    await stopDaemon(daemon)
+  } catch (error) {
+    failure = failure
+      ? new AggregateError([failure, error], 'Packed consumer Run and daemon cleanup both failed.')
+      : error
+  }
+  if (failure) throw failure
+}
+
+async function waitForNoDaemon(daemonPath: string, runtimeDirectory: string): Promise<void> {
+  const deadline = Date.now() + 5_000
+  while (Date.now() <= deadline) {
+    if ((await daemonProcesses(daemonPath, runtimeDirectory)).length === 0) return
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 20))
+  }
+  throw new Error('AgentMux left a ctxmuxd process after failed owner receipt commit.')
 }
 
 describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
@@ -202,7 +260,8 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         cp(fakeCodexFixture, join(consumerDirectory, 'bin', 'codex')),
         cp(lifecycleCrashFixture, join(consumerDirectory, 'lifecycle-crash-worker.mjs')),
         cp(promptCrashFixture, join(consumerDirectory, 'prompt-submit-crash-worker.mjs')),
-        cp(runtimeScopePreloadFixture, join(consumerDirectory, 'runtime-scope-preload.mjs'))
+        cp(runtimeScopePreloadFixture, join(consumerDirectory, 'runtime-scope-preload.mjs')),
+        cp(ownerReceiptFailureFixture, join(consumerDirectory, 'ctxmux-owner-receipt-failure.mjs'))
       ])
 
       const packageRoot = join(consumerDirectory, 'node_modules', '@agentmux', 'core')
@@ -211,6 +270,12 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
       expect(resolvedPackageRoot.startsWith(repositoryRoot)).toBe(false)
       const installedManifest = JSON.parse(await readFile(join(packageRoot, 'package.json'), 'utf8'))
       expect(installedManifest).toMatchObject({
+        license: 'UNLICENSED',
+        repository: {
+          type: 'git',
+          url: 'git+ssh://git@github.com/bagakit/agentmux.git',
+          directory: 'packages/core'
+        },
         engines: { node: '>=22.0.0' },
         os: ['darwin'],
         cpu: ['arm64'],
@@ -227,6 +292,36 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
       expect(installedManifest.dependencies).not.toHaveProperty('node-pty')
       expect(installedManifest.dependencies).toEqual({ '@xterm/headless': '5.5.0' })
       expect(JSON.stringify(installedManifest)).not.toMatch(/(?:file|link):/u)
+      await Promise.all([
+        writeFile(join(consumerDirectory, 'consumer.ts'), [
+          "import type { AgentMuxAgentSession, AgentMuxRuntimeDiagnostics } from '@agentmux/core'",
+          "const platform: AgentMuxRuntimeDiagnostics['platform'] = 'darwin'",
+          'const session = null as AgentMuxAgentSession | null',
+          'void platform',
+          'void session',
+          ''
+        ].join('\n')),
+        writeFile(join(consumerDirectory, 'tsconfig.json'), `${JSON.stringify({
+          compilerOptions: {
+            strict: true,
+            noEmit: true,
+            target: 'ES2022',
+            module: 'NodeNext',
+            moduleResolution: 'NodeNext',
+            lib: ['ES2022', 'DOM'],
+            types: [],
+            skipLibCheck: false
+          },
+          files: ['consumer.ts']
+        }, null, 2)}\n`)
+      ])
+      await execFileAsync(join(repositoryRoot, 'node_modules', '.bin', 'tsc'), [
+        '--project', join(consumerDirectory, 'tsconfig.json')
+      ], {
+        cwd: consumerDirectory,
+        timeout: 15_000,
+        maxBuffer: 2 * 1024 * 1024
+      })
 
       const artifactManifest = JSON.parse(await readFile(
         join(packageRoot, 'vendor', 'ctxmux', 'darwin-arm64', 'manifest.json'),
@@ -251,6 +346,7 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
       }
       let activeDaemon: DaemonProcess | null = null
       let replacement: ReturnType<typeof spawn> | null = null
+      let cleanupSentinelPid: number | null = null
       try {
         const result = await execFileAsync(process.execPath, ['packed-consumer.mjs'], {
           cwd: consumerDirectory,
@@ -267,7 +363,8 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
             AGENTMUX_CLI_PATH: join(consumerDirectory, 'node_modules', '.bin', 'agentmux')
           }
         })
-        expect(JSON.parse(result.stdout.trim())).toMatchObject({
+        const consumerReceipt = JSON.parse(result.stdout.trim()) as { cleanupSentinelPid: number }
+        expect(consumerReceipt).toMatchObject({
           replayStartByte: 7,
           sharedReplayWhileAttached: true,
           agentSharedReplayWhileAttached: true,
@@ -286,15 +383,78 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
             'crash-recovered-once'
           ],
           promptCrashRecovery: true,
+          doctor: true,
           cliResolveKinds: ['agent-session', 'provider-native', 'acp-native', 'run'],
           externalSwitch: true,
           naturalTerminalStop: true,
           crashRecovery: true,
           remote: 'unsupported'
         })
+        cleanupSentinelPid = consumerReceipt.cleanupSentinelPid
+        expect(Number.isInteger(cleanupSentinelPid) && cleanupSentinelPid > 0).toBe(true)
 
         activeDaemon = await waitForDaemonProcess(daemonPath, runtimeDirectory)
         await stopDaemon(activeDaemon)
+        const missingDaemonPath = `${daemonPath}.doctor-missing`
+        await rename(daemonPath, missingDaemonPath)
+        try {
+          const doctorEnvironment = {
+            ...runtimeEnvironment,
+            PATH: `${join(consumerDirectory, 'bin')}:${process.env.PATH ?? ''}`
+          }
+          const jsonFailure = await execFileAsync(
+            join(consumerDirectory, 'node_modules', '.bin', 'agentmux'),
+            ['doctor', '--json'],
+            { cwd: consumerDirectory, env: doctorEnvironment }
+          ).then(
+            () => null,
+            (error: NodeJS.ErrnoException & { stdout?: string }) => error
+          )
+          expect(jsonFailure?.code).toBe(1)
+          expect(JSON.parse(jsonFailure?.stdout ?? '')).toMatchObject({
+            ok: false,
+            host: {
+              reachable: false,
+              action: 'Verify the bundled ctxmux artifacts, then rerun doctor.'
+            },
+            hosts: {
+              local: { status: 'unavailable' },
+              remote: { status: 'unsupported' }
+            }
+          })
+          const plainFailure = await execFileAsync(
+            join(consumerDirectory, 'node_modules', '.bin', 'agentmux'),
+            ['doctor'],
+            { cwd: consumerDirectory, env: doctorEnvironment }
+          ).then(
+            () => null,
+            (error: NodeJS.ErrnoException & { stdout?: string }) => error
+          )
+          expect(plainFailure?.code).toBe(1)
+          expect(plainFailure?.stdout).toContain('Host action: Verify the bundled ctxmux artifacts')
+          expect(plainFailure?.stdout).toContain('Remote action: Remote is unsupported')
+          expect(plainFailure?.stdout).toContain('Action: Restore the Runtime connection')
+        } finally {
+          await rename(missingDaemonPath, daemonPath)
+        }
+        const ownerReceiptPath = join(runtimeDirectory, 'owner.json')
+        await rm(ownerReceiptPath, { force: true })
+        await mkdir(ownerReceiptPath)
+        const receiptFailure = await execFileAsync(
+          process.execPath,
+          ['ctxmux-owner-receipt-failure.mjs'],
+          {
+            cwd: consumerDirectory,
+            timeout: 15_000,
+            maxBuffer: 2 * 1024 * 1024,
+            env: runtimeEnvironment
+          }
+        )
+        expect(JSON.parse(receiptFailure.stdout.trim())).toMatchObject({ rejected: true })
+        await waitForNoDaemon(daemonPath, runtimeDirectory)
+        expect((await readdir(runtimeDirectory)).some((entry) => entry.startsWith('.owner-'))).toBe(false)
+        await rm(ownerReceiptPath, { recursive: true, force: true })
+
         const replacementStateDirectory = join(runtimeDirectory, 'replacement-state')
         await mkdir(replacementStateDirectory, { mode: 0o700 })
         replacement = spawn(daemonPath, [
@@ -327,8 +487,11 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
           await exited.catch(() => {})
         }
         for (const daemon of await daemonProcesses(daemonPath, runtimeDirectory)) {
-          await stopDaemon(daemon)
+          await stopDaemonAndRuns(cliPath, daemon)
         }
+      }
+      if (cleanupSentinelPid !== null) {
+        expect(processIsGone(cleanupSentinelPid)).toBe(true)
       }
     }, 95_000)
   }

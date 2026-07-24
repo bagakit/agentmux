@@ -185,6 +185,13 @@ export class RuntimeController {
     this.terminalViewColors = { ...colors }
   }
 
+  resourceOwnerCounts(): { sessionAttachmentOwners: number; sessionAttachmentLeases: number } {
+    return {
+      sessionAttachmentOwners: this.sessionAttachmentOwners.size,
+      sessionAttachmentLeases: this.sessionAttachmentLeases.size
+    }
+  }
+
   async prepare(config: AppConfig): Promise<RuntimePreparation> {
     const nextSignatures = signatures(config)
     const changed = config.hosts.filter(
@@ -458,10 +465,13 @@ export class RuntimeController {
         this.sessionAttachmentLeases.delete(attachmentId)
         return
       }
-      await (await this.connectedClient(owner.control.hostId)).releaseRunAttachment(owner.control.run)
-      owner.attachmentIds.delete(attachmentId)
-      this.sessionAttachmentLeases.delete(attachmentId)
-      this.sessionAttachmentOwners.delete(currentLease.key)
+      try {
+        await (await this.connectedClient(owner.control.hostId)).releaseRunAttachment(owner.control.run)
+      } finally {
+        owner.attachmentIds.delete(attachmentId)
+        this.sessionAttachmentLeases.delete(attachmentId)
+        this.sessionAttachmentOwners.delete(currentLease.key)
+      }
     })
   }
 

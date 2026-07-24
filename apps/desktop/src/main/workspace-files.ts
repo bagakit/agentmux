@@ -1,14 +1,6 @@
-import {
-  lstat,
-  mkdir,
-  readdir,
-  readFile,
-  realpath,
-  rename as renamePath,
-  rm,
-  writeFile
-} from 'node:fs/promises'
-import { basename, dirname, relative, resolve, sep } from 'node:path'
+import { spawn } from 'node:child_process'
+import { realpath } from 'node:fs/promises'
+import { basename, dirname, resolve, sep } from 'node:path'
 import { posix } from 'node:path'
 import type { ExecutionHost } from '@agentmux/core'
 import type {
@@ -20,6 +12,127 @@ import type {
 } from '../shared/contracts.js'
 
 const IGNORED_NAMES = new Set(['.git', 'node_modules', 'dist', 'out', '.worktrees'])
+const LOCAL_WORKER_READY = 'AGENTMUX_WORKSPACE_READY'
+const LOCAL_WORKER_ERROR = 'AGENTMUX_WORKSPACE_ERROR:'
+
+type LocalWorkerRequest =
+  | { action: 'read'; name: string }
+  | { action: 'list' }
+  | { action: 'reveal'; name: string | null }
+  | { action: 'write'; name: string }
+  | { action: 'create'; name: string; kind: 'file' | 'directory' }
+  | { action: 'rename'; name: string; nextName: string }
+  | { action: 'delete'; name: string }
+
+type LocalExistingPath = {
+  root: string
+  target: string
+}
+
+type LocalMutablePath = {
+  root: string
+  parent: string
+  name: string
+}
+
+// Node does not expose openat(2), and Darwin's /dev/fd directory handles cannot
+// be used as path prefixes. A short Node worker gives each operation a kernel-
+// pinned cwd. It validates that physical cwd after spawn, then touches only one
+// basename; replacing the original parent path with a symlink cannot redirect
+// the operation after that point.
+const LOCAL_WORKER_SOURCE = String.raw`
+import { constants, lstat, mkdir, open, readdir, realpath, rename, rm } from 'node:fs/promises'
+import { join, sep } from 'node:path'
+
+const request = JSON.parse(process.argv[1] ?? '')
+const expectedRoot = process.argv[2]
+
+async function currentDirectory() {
+  const cwd = await realpath('.')
+  if (cwd !== expectedRoot && !cwd.startsWith(expectedRoot + sep)) {
+    throw Object.assign(new Error('Path escapes the workspace root'), { code: 'WORKSPACE_PATH_ESCAPE' })
+  }
+  return cwd
+}
+
+async function inputBytes() {
+  const chunks = []
+  for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk))
+  return Buffer.concat(chunks)
+}
+
+async function openRegularFile(name, flags) {
+  const handle = await open(name, flags | constants.O_NOFOLLOW)
+  try {
+    if (!(await handle.stat()).isFile()) throw new Error('Workspace path is not a regular file')
+    return handle
+  } catch (error) {
+    await handle.close()
+    throw error
+  }
+}
+
+try {
+  await currentDirectory()
+  process.stderr.write('${LOCAL_WORKER_READY}\n')
+  const input = await inputBytes()
+  const cwd = await currentDirectory()
+
+  if (request.action === 'read') {
+    const handle = await openRegularFile(request.name, constants.O_RDONLY)
+    try { process.stdout.write(await handle.readFile()) } finally { await handle.close() }
+  } else if (request.action === 'list') {
+    const entries = await readdir('.', { withFileTypes: true })
+    process.stdout.write(JSON.stringify(entries.map((entry) => ({
+      name: entry.name,
+      isDirectory: entry.isDirectory(),
+      isSymlink: entry.isSymbolicLink()
+    }))))
+  } else if (request.action === 'reveal') {
+    if (request.name !== null) {
+      const handle = await open(request.name, constants.O_RDONLY | constants.O_NOFOLLOW)
+      await handle.close()
+    }
+    process.stdout.write(request.name === null ? cwd : join(cwd, request.name))
+  } else if (request.action === 'write') {
+    const handle = await openRegularFile(request.name, constants.O_WRONLY)
+    try {
+      await handle.truncate(0)
+      await handle.writeFile(input)
+    } finally {
+      await handle.close()
+    }
+  } else if (request.action === 'create') {
+    if (request.kind === 'directory') await mkdir(request.name)
+    else {
+      const handle = await open(
+        request.name,
+        constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+        0o666
+      )
+      await handle.close()
+    }
+  } else if (request.action === 'rename') {
+    try {
+      await lstat(request.nextName)
+      throw new Error('Destination already exists: ' + request.nextName)
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error
+    }
+    await rename(request.name, request.nextName)
+  } else if (request.action === 'delete') {
+    await rm(request.name, { recursive: true, force: false })
+  } else {
+    throw new Error('Unknown local Workspace operation')
+  }
+} catch (error) {
+  process.stderr.write('${LOCAL_WORKER_ERROR}' + JSON.stringify({
+    message: error instanceof Error ? error.message : String(error),
+    code: error && typeof error === 'object' && 'code' in error ? error.code : null
+  }) + '\n')
+  process.exitCode = 1
+}
+`
 
 function localPathWithin(root: string, requested: string): string {
   const normalizedRoot = resolve(root)
@@ -51,19 +164,69 @@ function assertMutableRelativePath(requested: string): void {
   }
 }
 
-async function localExistingPathWithin(root: string, requested: string): Promise<string> {
+async function localExistingPathWithin(root: string, requested: string): Promise<LocalExistingPath> {
   const lexicalTarget = localPathWithin(root, requested)
   const [realRoot, realTarget] = await Promise.all([realpath(root), realpath(lexicalTarget)])
   assertRealPathWithin(realRoot, realTarget, sep)
-  return realTarget
+  return { root: realRoot, target: realTarget }
 }
 
-async function localMutablePathWithin(root: string, requested: string): Promise<string> {
+async function localMutablePathWithin(root: string, requested: string): Promise<LocalMutablePath> {
   assertMutableRelativePath(requested)
   const lexicalTarget = localPathWithin(root, requested)
   const [realRoot, realParent] = await Promise.all([realpath(root), realpath(dirname(lexicalTarget))])
   assertRealPathWithin(realRoot, realParent, sep)
-  return resolve(realParent, basename(lexicalTarget))
+  return { root: realRoot, parent: realParent, name: basename(lexicalTarget) }
+}
+
+async function runLocalWorker(
+  cwd: string,
+  root: string,
+  request: LocalWorkerRequest,
+  input?: string
+): Promise<Buffer> {
+  const environment: NodeJS.ProcessEnv = { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
+  delete environment.NODE_OPTIONS
+  const child = spawn(process.execPath, [
+    '--input-type=module',
+    '--eval',
+    LOCAL_WORKER_SOURCE,
+    JSON.stringify(request),
+    root
+  ], {
+    cwd,
+    env: environment,
+    stdio: ['pipe', 'pipe', 'pipe']
+  })
+  const stdout: Buffer[] = []
+  let stderr = ''
+  let inputSent = false
+  child.stdout.on('data', (chunk: Buffer) => stdout.push(Buffer.from(chunk)))
+  child.stderr.setEncoding('utf8')
+  child.stderr.on('data', (chunk: string) => {
+    stderr += chunk
+    if (!inputSent && stderr.split('\n').includes(LOCAL_WORKER_READY)) {
+      inputSent = true
+      child.stdin.end(input ?? '')
+    }
+  })
+
+  const result = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
+    child.once('error', reject)
+    child.once('close', (code, signal) => resolve({ code, signal }))
+  })
+  if (result.code === 0) return Buffer.concat(stdout)
+  const record = stderr.split('\n').find((line) => line.startsWith(LOCAL_WORKER_ERROR))
+  if (record) {
+    const detail = JSON.parse(record.slice(LOCAL_WORKER_ERROR.length)) as {
+      message: string
+      code: string | null
+    }
+    throw Object.assign(new Error(detail.message), detail.code ? { code: detail.code } : {})
+  }
+  throw new Error(
+    `Local Workspace operation failed${result.signal ? ` with ${result.signal}` : ` with exit ${result.code}`}`
+  )
 }
 
 async function remoteRealPath(host: ExecutionHost, path: string): Promise<string> {
@@ -114,22 +277,20 @@ function sortDirectoryEntries(entries: WorkspaceDirectoryEntry[]): WorkspaceDire
   })
 }
 
-async function assertDestinationMissing(path: string): Promise<void> {
-  try {
-    await lstat(path)
-    throw new Error(`Destination already exists: ${basename(path)}`)
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-  }
-}
-
 export class WorkspaceFiles {
   constructor(private readonly hostFor: (id: string) => ExecutionHost) {}
 
   async localPathForReveal(workspace: WorkspaceRecord, requestedPath: string): Promise<string> {
     const host = this.hostFor(workspace.hostId)
     if (host.kind !== 'local') throw new Error('Reveal in file manager is available only for local paths')
-    return await localExistingPathWithin(workspace.path, requestedPath)
+    const resolved = await localExistingPathWithin(workspace.path, requestedPath || '.')
+    if (resolved.target === resolved.root) {
+      return (await runLocalWorker(resolved.root, resolved.root, { action: 'reveal', name: null })).toString('utf8')
+    }
+    return (await runLocalWorker(dirname(resolved.target), resolved.root, {
+      action: 'reveal',
+      name: basename(resolved.target)
+    })).toString('utf8')
   }
 
   async readDirectory(
@@ -139,15 +300,19 @@ export class WorkspaceFiles {
     const host = this.hostFor(workspace.hostId)
     if (host.kind === 'local') {
       const directory = await localExistingPathWithin(workspace.path, requestedPath || '.')
-      const entries = await readdir(directory, { withFileTypes: true })
+      const entries = JSON.parse((await runLocalWorker(
+        directory.target,
+        directory.root,
+        { action: 'list' }
+      )).toString('utf8')) as Array<{ name: string; isDirectory: boolean; isSymlink: boolean }>
       return sortDirectoryEntries(
         entries.flatMap((entry) => {
           if (IGNORED_NAMES.has(entry.name)) return []
           return [{
             name: entry.name,
             path: relativeEntryPath(requestedPath, entry.name),
-            isDirectory: entry.isDirectory(),
-            isSymlink: entry.isSymbolicLink()
+            isDirectory: entry.isDirectory,
+            isSymlink: entry.isSymlink
           }]
         })
       )
@@ -194,8 +359,14 @@ export class WorkspaceFiles {
   async read(workspace: WorkspaceRecord, requestedPath: string): Promise<FileDocument> {
     const host = this.hostFor(workspace.hostId)
     if (host.kind === 'local') {
-      const path = await localExistingPathWithin(workspace.path, requestedPath)
-      return { path: requestedPath, content: await readFile(path, 'utf8') }
+      const resolved = await localExistingPathWithin(workspace.path, requestedPath)
+      return {
+        path: requestedPath,
+        content: (await runLocalWorker(dirname(resolved.target), resolved.root, {
+          action: 'read',
+          name: basename(resolved.target)
+        })).toString('utf8')
+      }
     }
     const path = await remoteExistingPathWithin(host, workspace.path, requestedPath)
     const result = await host.run('cat', ['--', path], {
@@ -211,8 +382,11 @@ export class WorkspaceFiles {
   async write(workspace: WorkspaceRecord, document: FileDocument): Promise<void> {
     const host = this.hostFor(workspace.hostId)
     if (host.kind === 'local') {
-      const path = await localExistingPathWithin(workspace.path, document.path)
-      await writeFile(path, document.content, 'utf8')
+      const resolved = await localExistingPathWithin(workspace.path, document.path)
+      await runLocalWorker(dirname(resolved.target), resolved.root, {
+        action: 'write',
+        name: basename(resolved.target)
+      }, document.content)
       return
     }
     const path = await remoteExistingPathWithin(host, workspace.path, document.path)
@@ -226,9 +400,12 @@ export class WorkspaceFiles {
   async create(workspace: WorkspaceRecord, input: CreateWorkspacePathInput): Promise<void> {
     const host = this.hostFor(workspace.hostId)
     if (host.kind === 'local') {
-      const path = await localMutablePathWithin(workspace.path, input.path)
-      if (input.kind === 'directory') await mkdir(path)
-      else await writeFile(path, '', { flag: 'wx', encoding: 'utf8' })
+      const resolved = await localMutablePathWithin(workspace.path, input.path)
+      await runLocalWorker(resolved.parent, resolved.root, {
+        action: 'create',
+        name: resolved.name,
+        kind: input.kind
+      })
       return
     }
     const path = await remoteMutablePathWithin(host, workspace.path, input.path)
@@ -252,8 +429,14 @@ export class WorkspaceFiles {
         localMutablePathWithin(workspace.path, input.path),
         localMutablePathWithin(workspace.path, input.nextPath)
       ])
-      await assertDestinationMissing(nextPath)
-      await renamePath(path, nextPath)
+      if (path.root !== nextPath.root || path.parent !== nextPath.parent) {
+        throw new Error('Local Workspace rename cannot move a path between directories')
+      }
+      await runLocalWorker(path.parent, path.root, {
+        action: 'rename',
+        name: path.name,
+        nextName: nextPath.name
+      })
       return
     }
     const [path, nextPath] = await Promise.all([
@@ -283,8 +466,11 @@ export class WorkspaceFiles {
   async delete(workspace: WorkspaceRecord, requestedPath: string): Promise<void> {
     const host = this.hostFor(workspace.hostId)
     if (host.kind === 'local') {
-      const path = await localMutablePathWithin(workspace.path, requestedPath)
-      await rm(path, { recursive: true, force: false })
+      const resolved = await localMutablePathWithin(workspace.path, requestedPath)
+      await runLocalWorker(resolved.parent, resolved.root, {
+        action: 'delete',
+        name: resolved.name
+      })
       return
     }
     const path = await remoteMutablePathWithin(host, workspace.path, requestedPath)

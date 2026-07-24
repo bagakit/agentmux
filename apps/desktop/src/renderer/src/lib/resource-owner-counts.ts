@@ -3,11 +3,19 @@ export type RendererResourceOwnerCounts = {
   documents: number
   fileWatchers: number
   runtimeSubscriptions: number
+  terminalViews: number
+  terminalAddons: number
+  terminalListeners: number
 }
 
 export function rendererResourceOwnerCounts(input: {
   documentCount: number
   runtimeSubscriptionCount: number
+  terminalOwners: {
+    terminalViews: number
+    terminalAddons: number
+    terminalListeners: number
+  }
   monacoModelCount?: () => number
 }): RendererResourceOwnerCounts {
   return {
@@ -16,6 +24,7 @@ export function rendererResourceOwnerCounts(input: {
     // File refresh is explicit and cross-host; AgentMux intentionally has no
     // hidden local-only filesystem watcher owner.
     fileWatchers: 0,
-    runtimeSubscriptions: input.runtimeSubscriptionCount
+    runtimeSubscriptions: input.runtimeSubscriptionCount,
+    ...input.terminalOwners
   }
 }
