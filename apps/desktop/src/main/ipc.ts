@@ -41,6 +41,7 @@ export async function registerIpc(args: {
   window: BrowserWindow
   configStore: ConfigStore
   runtime: RuntimeController
+  workspaceFiles?: WorkspaceFiles
 }): Promise<() => Promise<void>> {
   let config = await args.configStore.get()
   const initialPalette = terminalPalette(config.appearance.terminalTheme)
@@ -49,7 +50,7 @@ export async function registerIpc(args: {
     background: initialPalette.background
   })
   args.runtime.commit(await args.runtime.prepare(config))
-  const files = new WorkspaceFiles((id) => args.runtime.executionHost(id))
+  const files = args.workspaceFiles ?? new WorkspaceFiles((id) => args.runtime.executionHost(id))
   const worktrees = new WorktreeService((id) => args.runtime.executionHost(id), args.configStore)
   const browsers = new BrowserViewManager(args.window)
   const fileObservations = new FileObservationRegistry()
