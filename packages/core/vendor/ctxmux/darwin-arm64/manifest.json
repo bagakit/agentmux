@@ -1,0 +1,63 @@
+{
+  "schema": "ctxmux.local-artifacts.v1",
+  "source": {
+    "commit": "3b94288c3a7896bb355e028135409c8e8bbaf764",
+    "tree": "58f3630477881e75f0f022d3fbb98a93ff2f46c4",
+    "worktree_clean": true
+  },
+  "product": {
+    "version": "0.1.0",
+    "protocol": 9
+  },
+  "support": {
+    "platform": "darwin",
+    "architecture": "arm64",
+    "rust_target": "aarch64-apple-darwin",
+    "transport": "unix"
+  },
+  "build": {
+    "profile": "release",
+    "locked": true,
+    "rustc": "1.96.0",
+    "cargo": "cargo 1.96.0 (30a34c682 2026-05-25)",
+    "node": "v24.14.1",
+    "npm": "11.12.1"
+  },
+  "sdk": {
+    "name": "@ctxmux/sdk",
+    "version": "0.0.0",
+    "protocol": 9,
+    "entry_count": 210,
+    "unpacked_bytes": 246115,
+    "archive": {
+      "path": "ctxmux-sdk-0.0.0.tgz",
+      "sha256": "320dbdfd9cdf577c3541f16d85d1e4bd1bea40ad102262efcedd8091cc2d8eed",
+      "bytes": 54701,
+      "mode": "0644"
+    }
+  },
+  "binaries": [
+    {
+      "name": "ctxmux",
+      "version": "0.1.0",
+      "protocol": 9,
+      "path": "bin/ctxmux",
+      "sha256": "4a9eccb809dfd8ed5ec97665a5476fcee3993442d3a4d80480a11c13c35696a6",
+      "bytes": 2395088,
+      "mode": "0755"
+    },
+    {
+      "name": "ctxmuxd",
+      "version": "0.1.0",
+      "protocol": 9,
+      "path": "bin/ctxmuxd",
+      "sha256": "5984becd26ea1074c1cbf4049d29118212e100e9f6a2b272a896a59e7a567490",
+      "bytes": 4872368,
+      "mode": "0755"
+    }
+  ],
+  "determinism": {
+    "sdk_archive": "Archive member timestamps normalized; documentation examples use caller-owned configuration; executable member payloads are unchanged and the archive identity is the recorded digest.",
+    "binaries": "Diagnostic compiler source roots normalized without instruction changes; ad-hoc signatures regenerated where required; content identity is the recorded binary digest."
+  }
+}
