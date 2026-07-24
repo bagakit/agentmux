@@ -4,6 +4,7 @@ import { ConfigStore } from './config-store.js'
 import { registerIpc } from './ipc.js'
 import { RuntimeController } from './runtime-controller.js'
 import { DesktopSemanticSessionStore } from './semantic-session-store.js'
+import { runDesktopResourceProbe } from './resource-probe.js'
 
 const appIconPath = join(import.meta.dirname, '../../resources/icon.png')
 let disposeIpc: (() => void) | null = null
@@ -12,6 +13,7 @@ app.setName('AgentMux')
 const runtime = new RuntimeController(new DesktopSemanticSessionStore(
   join(app.getPath('userData'), 'agentmux.semantic-sessions.json')
 ))
+const configStore = new ConfigStore()
 
 async function createWindow(): Promise<void> {
   const window = new BrowserWindow({
@@ -34,9 +36,10 @@ async function createWindow(): Promise<void> {
     return { action: 'deny' }
   })
   disposeIpc?.()
-  disposeIpc = await registerIpc({ window, configStore: new ConfigStore(), runtime })
+  disposeIpc = await registerIpc({ window, configStore, runtime })
   if (process.env.ELECTRON_RENDERER_URL) await window.loadURL(process.env.ELECTRON_RENDERER_URL)
   else await window.loadFile(join(import.meta.dirname, '../renderer/index.html'))
+  if (await runDesktopResourceProbe({ window, runtime, configStore })) app.quit()
 }
 
 app.whenReady().then(async () => {
@@ -45,6 +48,9 @@ app.whenReady().then(async () => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) void createWindow()
   })
+}).catch((error) => {
+  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
+  app.exit(1)
 })
 
 app.on('window-all-closed', () => {
