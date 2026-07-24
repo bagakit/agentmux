@@ -1,12 +1,21 @@
 # AgentMux Daemon Cutover Benchmark
 
-状态：Revision 3 Round 1 已于 clean candidate `9a92bd14c3f68314354dc406da16f6766fa4c1d5` 运行并得到 `fail`；Raw Result 永久保留。Revision 3 只评估最终 `@agentmux/core` + 固定 CtxMux artifact candidate；Revision 1 只适用于已经删除的自建 `agentmuxd`，Revision 2 的首轮 Raw Result 保留为 characterization。历史 Revision 都不覆盖、不改写。
+状态：Protocol Revision 4 的 observer 方法已冻结，最终 CtxMux candidate 待 owner-layer 资源修复后精确写入；尚未运行任何 Revision 4 正式 Result。Revision 3 Round 1 已于 clean candidate `9a92bd14c3f68314354dc406da16f6766fa4c1d5` 运行并得到 `fail`，Raw Result 永久保留。Revision 1 只适用于已经删除的自建 `agentmuxd`，Revision 2 的首轮 Raw Result 保留为 characterization。历史 Revision 都不覆盖、不改写。
 
 Revision 3 Round 1 的所有 workload correctness 与 cleanup oracle 均通过，tmux 仅按冻结规则暴露完整进程树 Stop 限制；主性能维度中 AgentMux 已胜出 input、throughput、attach、reconnect、32 Run scale、steady/peak/released RSS 与完整 Stop。最终 Verdict 仍然失败：Idle RSS `5120 KiB >= 3536 KiB` 是真实 candidate gap；Per-session RSS 的 `142.5 KiB >= 32 KiB` 方向有独立证据支持，但正式样本把 AgentMux 的一个 historical Run 混入 32 live Run，而 tmux 只有 32 live Session，状态不等价；Idle CPU 两端都由百分之一秒精度的 `ps time` 观测成零，证据不可判定。不能把 `0 == 0` 改成通过、放宽严格 `<`、增加容差或从 RSS 事后扣数。完整原始证据见 `docs/benchmarks/results/revision-3-round-1-9a92bd14-darwin-arm64-2026-08-16T225516355Z.json`。
 
-下一 Revision 只能修复 observer：使用精确 owner 的高分辨率累计 CPU counter，并记录原始起止计数、单位和精度；在双方 fresh empty owner 上分别测量 1／32 Session，并记录每个 checkpoint 的 live/historical owner 数。数值阈值、样本量、统计、outlier policy、strict comparison 和 workload correctness 不变。新正式 Round 之前还必须在 CtxMux owner 层修复真实 Idle/Per-Run RSS 缺口。
+Revision 4 只修复 observer：使用精确 owner 的高分辨率累计 CPU counter，并记录原始起止计数、单位和精度；在双方 fresh empty owner 上测量 1 live Session 后保留它，再创建 31 个得到 `32 live + 0 historical`，并记录每个 checkpoint 的 live/historical owner 数。数值阈值、样本量、统计、outlier policy、strict comparison 和 workload correctness 不变。新正式 Round 之前还必须在 CtxMux owner 层修复真实 Idle/Per-Run RSS 缺口。
 
-## 0. Revision 3 方法修正
+## 0. Protocol 修正历史
+
+### Revision 4：资源 observer
+
+- Exact owner CPU 不再读取百分之一秒精度的 `ps time`。Runner 从已提交的 C source 编译一个只读 probe，调用 macOS public `proc_pid_rusage(RUSAGE_INFO_V4)`，以纳秒单位读取 owner process 的 user/system 累计计数；Raw Result 保存 source SHA-256、compiler identity、reported resolution、起止计数和 delta。
+- Fresh owner 先采 Idle，再创建并保留第一个 Session，随后只增加 31 个 Session。Per-session RSS 因而比较双方相同的 `32 live + 0 historical`，不从 AgentMux 样本中事后扣除 history。
+- AgentMux owner census 只调用公共 `listRuns()`，tmux census 只调用独立 socket 的 `list-panes`；Idle、1 Session、32 Session 与 Released checkpoint 都保存 `live/historical/total`。Idle、1 与 32 census 不相等时 Resource correctness 失败关闭。
+- Revision 3 的严格 `<`、1% Idle CPU 预算、15 个 RSS sample、2 秒 settle、200 ms interval 和其余所有统计/数值门槛保持不变。
+
+### Revision 3：Baseline 与执行顺序
 
 Revision 2 原始结果永久保留在 `docs/benchmarks/results/round-1-308dd27c-darwin-arm64-2026-08-16T223750749Z.json`。它暴露了四个 Runner／Protocol 方法错误，因此只能作为 characterization，不能据此判定产品回退：
 
@@ -43,7 +52,7 @@ Revision 2 原始结果永久保留在 `docs/benchmarks/results/round-1-308dd27c
   - Reconnect：`list-sessions`、`list-panes`、`show-environment` 与 `capture-pane`；
   - Stop：`kill-session`。
 - Runner 可以直接固化这些命令，不把已删除的 tmux 产品代码重新引入 Core，不提供 Backend Selector、Compatibility Layer 或 Fallback。
-- Revision 3 Runner 还为 fresh-owner 资源测量冻结 `start-server`、`set-option -g exit-empty off`、首个 pane 前的 `set-option -gw history-limit 50000` 与 `display-message -p '#{pid}'`，为 exact Session／fixture PID 记录冻结 `list-panes -a -F '#{session_name}|#{pane_pid}'`。所有命令都必须带同一个随机 `-L agentmux-benchmark-*`；cleanup 只调用该 socket 的 `kill-session`／`kill-server`，绝不调用默认 tmux socket 或枚举、终止用户 Session。
+- Revision 4 Runner 延续 fresh-owner 资源测量的 `start-server`、`set-option -g exit-empty off`、首个 pane 前的 `set-option -gw history-limit 50000` 与 `display-message -p '#{pid}'`，为 exact Session／fixture PID 记录冻结 `list-panes -a -F '#{session_name}|#{pane_pid}'`，并用 `#{pane_dead}` 形成 owner census。所有命令都必须带同一个随机 `-L agentmux-benchmark-*`；cleanup 只调用该 socket 的 `kill-session`／`kill-server`，绝不调用默认 tmux socket 或枚举、终止用户 Session。
 
 ### 其他产品
 
@@ -119,8 +128,8 @@ Revision 2 原始结果永久保留在 `docs/benchmarks/results/round-1-308dd27c
 
 - 资源族必须是每轮 fresh owner 初始化后的第一个 workload family；在它之前不得创建任何 AgentMux Run 或 tmux Session。
 - 分别启动空 AgentMux Daemon 与空 tmux Server；稳定 2 秒后，每 200 ms 采样 15 次。
-- Idle CPU 使用 `ps time` 在采样窗口内的增量；Idle RSS 取 15 次均值。
-- Per-session RSS 使用 1 Session 与 32 Session 稳态相对 Idle 的增量。
+- Idle CPU 使用 exact owner 的 `proc_pid_rusage(RUSAGE_INFO_V4)` user/system 累计纳秒计数在采样窗口内的增量；Raw Result 保留 counter source、reported resolution、原始起止值与 delta。Idle RSS 取 15 次均值。
+- Per-session RSS 使用同一个 fresh owner：先测 1 live Session，再保留它并增加 31 个，最终以 `32 live + 0 historical` 相对 Idle 的增量除以 32。Owner census 与任一冻结状态不符时失败关闭。
 - Steady／Peak RSS 使用 4 MiB Throughput Workload 的采样序列；停止并释放后再采样 15 次作为 Released RSS。
 - Runner RSS 不计入任一 Runtime；Fixture 子进程 RSS 单独记录且不混入 Owner RSS。
 
@@ -168,9 +177,9 @@ Runner 写入一个不覆盖已有文件的 JSON：
 
 ```json
 {
-  "schema": "agentmux.benchmark.daemon-cutover.v3",
-  "protocolRevision": 3,
-  "runnerVersion": 3,
+  "schema": "agentmux.benchmark.daemon-cutover.v4",
+  "protocolRevision": 4,
+  "runnerVersion": 4,
   "mode": "full",
   "runId": "<uuid>",
   "round": 1,
@@ -193,12 +202,12 @@ Runner 写入一个不覆盖已有文件的 JSON：
 }
 ```
 
-Raw Sample、失败、跳过原因与 Manifest 全部保留。Runner 在内存中只从 Raw Sample 生成 Summary；统计原语是纯函数，不能修改样本。默认输出目录是 `docs/benchmarks/results/`；Revision 3 正式文件名以 `revision-3-round-` 开头，并包含 Round、Git Short SHA、Platform 和 UTC Timestamp，采用排他创建，禁止覆盖。正式模式必须显式传 `--round 1` 或 `--round 2`；`--smoke` 使用缩小样本验证相同控制路径，必须显式传一个 results 目录外的 `--output`，Verdict 固定为 `smoke`。
+Raw Sample、失败、跳过原因与 Manifest 全部保留。Runner 在内存中只从 Raw Sample 生成 Summary；统计原语是纯函数，不能修改样本。默认输出目录是 `docs/benchmarks/results/`；Revision 4 正式文件名以 `revision-4-round-` 开头，并包含 Round、Git Short SHA、Platform 和 UTC Timestamp，采用排他创建，禁止覆盖。正式模式必须显式传 `--round 1` 或 `--round 2`；`--smoke` 使用缩小样本验证相同控制路径，必须显式传一个 results 目录外的 `--output`，Verdict 固定为 `smoke`。
 
 ## 8. 复现与安全
 
-Revision 1 已没有可执行入口，避免继续在错误 candidate 上累积结果。它使用的自建 daemon 已删除；已知 4 MiB Debug sustained-output 在 30 秒内没有形成完整 Hash，旧结果不能证明 AgentMux + CtxMux，也不能通过调低 payload、延长后删样本或改变主维度来修饰。`run-kernel-workload.mjs` 和 `run-kernel-statistics.mjs` 是 T-013 保留并由 Revision 3 复用的 candidate-neutral Fixture／统计原语。
+Revision 1 已没有可执行入口，避免继续在错误 candidate 上累积结果。它使用的自建 daemon 已删除；已知 4 MiB Debug sustained-output 在 30 秒内没有形成完整 Hash，旧结果不能证明 AgentMux + CtxMux，也不能通过调低 payload、延长后删样本或改变主维度来修饰。`run-kernel-workload.mjs` 和 `run-kernel-statistics.mjs` 是 T-013 保留并由 Revision 4 复用的 candidate-neutral Fixture／统计原语。
 
-Revision 3 入口是 `pnpm benchmark:daemon-cutover -- --round <1|2>`；实现期路径验证是 `pnpm benchmark:daemon-cutover:smoke -- --round 1 --output <outside-results.json>`。Runner 只创建自己的临时目录、以 `agentmux-benchmark-` 开头的随机 tmux socket、精确记录的 AgentMux RunId 和 Fixture PID。正常 cleanup 只通过 AgentMux 公共 `stopTerminal(exact RunRef)` 停止其创建且仍 running 的 Run，只通过带 exact `-L` 的 tmux `kill-session`／`kill-server` 停止自己的 baseline。若 correctness 证明 tmux 留下 Runner 记录的 fixture PID，最终 emergency cleanup 只对这些 exact PID 发信号。最后可用 OS process metadata 仅匹配 exact benchmark runtime directory 的 daemon argv 并关闭该空 daemon；不得读 CtxMux wire/state，不得按名称广泛 `pkill`，不得触碰默认 tmux socket、用户 Session 或非 benchmark PID。
+Revision 4 入口是 `pnpm benchmark:daemon-cutover -- --round <1|2>`；实现期路径验证是 `pnpm benchmark:daemon-cutover:smoke -- --round 1 --output <outside-results.json>`。Runner 只创建自己的临时目录、在其中编译只读 CPU probe、使用以 `agentmux-benchmark-` 开头的随机 tmux socket，并精确记录 AgentMux RunId 和 Fixture PID。正常 cleanup 只通过 AgentMux 公共 `stopTerminal(exact RunRef)` 停止其创建且仍 running 的 Run，只通过带 exact `-L` 的 tmux `kill-session`／`kill-server` 停止自己的 baseline。若 correctness 证明 tmux 留下 Runner 记录的 fixture PID，最终 emergency cleanup 只对这些 exact PID 发信号。最后可用 OS process metadata 仅匹配 exact benchmark runtime directory 的 daemon argv 并关闭该空 daemon；不得读 CtxMux wire/state，不得按名称广泛 `pkill`，不得触碰默认 tmux socket、用户 Session 或非 benchmark PID。
 
 不连接真实 SSH，不下载或临时安装竞品，不改 Agent Hook／Credential，不发布 Package。两轮正式结果之间必须完整 cleanup 两个 Runtime 并由调用者等待 10 秒；Round 2 不能复用 Round 1 的临时目录、daemon、tmux socket、Run、Replay 或 Fixture。

@@ -1,7 +1,7 @@
-export declare const BENCHMARK_SCHEMA: 'agentmux.benchmark.daemon-cutover.v3'
-export declare const PROTOCOL_REVISION: 3
-export declare const RUNNER_VERSION: 3
-export declare const FORMAL_RESULT_PREFIX: 'revision-3'
+export declare const BENCHMARK_SCHEMA: 'agentmux.benchmark.daemon-cutover.v4'
+export declare const PROTOCOL_REVISION: 4
+export declare const RUNNER_VERSION: 4
+export declare const FORMAL_RESULT_PREFIX: 'revision-4'
 export declare const WORKLOAD_EXECUTION_ORDER: readonly [
   'resources',
   'inputToVisible',
@@ -23,6 +23,11 @@ export declare function parseBenchmarkArguments(argv: readonly string[]):
   | { help: true }
   | { help: false; mode: 'full' | 'smoke'; round: 1 | 2; output: string | null }
 export declare function benchmarkConfiguration(mode: 'full' | 'smoke'): Record<string, unknown>
+export declare function parseProcessCpuCounter(value: string): {
+  userNanoseconds: string
+  systemNanoseconds: string
+  totalNanoseconds: string
+}
 export declare function verifyBurstOutput(
   text: string,
   label: string,
