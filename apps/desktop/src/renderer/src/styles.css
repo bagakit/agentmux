@@ -565,7 +565,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 }
 .agent-body { min-height: 0; overflow: hidden; }
 .agent-terminal-stage { position: relative; width: 100%; height: 100%; overflow: hidden; }
-.terminal-view { width: 100%; height: 100%; padding: 4px 4px 4px 7px; background: #0b0e10; }
+.terminal-view { width: 100%; height: 100%; padding: 4px 4px 4px 7px; }
 .terminal-view .xterm-viewport { scrollbar-color: #2f3733 transparent; }
 .terminal-recovery {
   position: absolute;
