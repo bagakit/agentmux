@@ -21,13 +21,13 @@ const session: SessionSnapshot = {
   createdAt: 1,
   updatedAt: 2,
   processState: 'running',
-  status: { state: 'running', source: 'daemon-process', observedAt: 2 },
-  latestSequence: 0,
+  status: { state: 'running', source: 'run-process', observedAt: 2 },
+  latestOutputBytes: 0,
   control: {
     kind: 'agent',
     hostId: 'local',
-    semanticSessionId: 'session-1',
-    daemonSession: { sessionId: 'run-1', incarnationId: 'incarnation-1' }
+    agentSessionId: 'session-1',
+    run: { runId: 'run-1', incarnationId: 'incarnation-1' }
   }
 }
 
@@ -45,6 +45,44 @@ function core(event: RuntimeEvent['event']): RuntimeEvent {
 }
 
 describe('Renderer resource state owners', () => {
+  it('ignores late events from an old Run incarnation even when Agent Session identity matches', () => {
+    const tabId = `session:${session.id}`
+    const state = {
+      sessions: [session],
+      activities: { [session.id]: [activity] },
+      tabs: {
+        [tabId]: {
+          id: tabId,
+          kind: 'agent' as const,
+          phase: 'attached' as const,
+          workspaceId: 'workspace-1',
+          sessionId: session.id
+        }
+      },
+      layouts: { 'workspace-1': createWorkspaceLayout('pane', [tabId]) },
+      viewModes: { [session.id]: 'conversation' as const }
+    }
+    const staleRun = { ...session.control.run, incarnationId: 'stale-incarnation' }
+
+    const afterState = reduceRuntimeEvent(state, core({
+      type: 'process-state',
+      agentSessionId: session.id,
+      run: staleRun,
+      state: 'exited',
+      pid: 99,
+      exitCode: 1,
+      evidence: { source: 'run-process', observedAt: 10, run: staleRun }
+    }))
+    const afterRemoval = reduceRuntimeEvent(afterState, core({
+      type: 'run-removed',
+      agentSessionId: session.id,
+      run: staleRun,
+      evidence: { source: 'user', observedAt: 11, run: staleRun }
+    }))
+
+    expect(afterRemoval).toEqual(state)
+  })
+
   it('owns every Runtime Event transition and fully removes Session resources', () => {
     const tabId = `session:${session.id}`
     let state = {
@@ -64,41 +102,41 @@ describe('Renderer resource state owners', () => {
     }
 
     state = reduceRuntimeEvent(state, core({
-      type: 'semantic-status',
-      semanticSessionId: session.id,
+      type: 'agent-status',
+      agentSessionId: session.id,
       state: 'waiting',
-      evidence: { source: 'native-hook', observedAt: 3, daemonSession: session.control.daemonSession }
+      evidence: { source: 'native-hook', observedAt: 3, run: session.control.run }
     }))
     state = reduceRuntimeEvent(state, core({
       type: 'terminal-output',
-      semanticSessionId: session.id,
-      daemonSession: session.control.daemonSession,
+      agentSessionId: session.id,
+      run: session.control.run,
       data: 'Waiting for approval',
       evidence: {
         source: 'terminal-output',
         observedAt: 4,
-        daemonSession: session.control.daemonSession,
-        outputSequence: { start: 0, end: 20 }
+        run: session.control.run,
+        outputByteRange: { startByte: 0, endByte: 20 }
       }
     }))
     state = reduceRuntimeEvent(state, core({
-      type: 'semantic-activity',
-      semanticSessionId: session.id,
+      type: 'agent-activity',
+      agentSessionId: session.id,
       activity: { id: 'activity-2', kind: 'lifecycle', createdAt: 4, title: 'Started' },
-      evidence: { source: 'native-hook', observedAt: 4, daemonSession: session.control.daemonSession }
+      evidence: { source: 'native-hook', observedAt: 4, run: session.control.run }
     }))
     expect(state.sessions[0]).toMatchObject({
       status: { state: 'waiting' },
-      latestSequence: 20,
+      latestOutputBytes: 20,
       updatedAt: 3
     })
     expect(state.activities[session.id]).toHaveLength(2)
 
     state = reduceRuntimeEvent(state, core({
-      type: 'session-removed',
-      semanticSessionId: session.id,
-      daemonSession: session.control.daemonSession,
-      evidence: { source: 'user', observedAt: 5, daemonSession: session.control.daemonSession }
+      type: 'run-removed',
+      agentSessionId: session.id,
+      run: session.control.run,
+      evidence: { source: 'user', observedAt: 5, run: session.control.run }
     }))
     expect(state.sessions).toEqual([])
     expect(state.activities[session.id]).toBeUndefined()
@@ -124,10 +162,10 @@ describe('Renderer resource state owners', () => {
       layouts: { 'workspace-1': createWorkspaceLayout('pane', [tabId]) },
       viewModes: {}
     }, core({
-      type: 'session-removed',
-      semanticSessionId: session.id,
-      daemonSession: session.control.daemonSession,
-      evidence: { source: 'user', observedAt: 5, daemonSession: session.control.daemonSession }
+      type: 'run-removed',
+      agentSessionId: session.id,
+      run: session.control.run,
+      evidence: { source: 'user', observedAt: 5, run: session.control.run }
     }))
 
     expect(state.sessions).toEqual([])

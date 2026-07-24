@@ -43,7 +43,7 @@ describe('selected worktree workspace context', () => {
     }
     const oldLayout = createWorkspaceLayout('main-pane', [oldTab.id])
     const initialConfig: AppConfig = {
-      version: 2,
+      version: 3,
       hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
       agents: {},
       workspaces: [main]
@@ -131,7 +131,7 @@ function prepareUniversalTab(): { workspace: WorkspaceRecord; tabId: string } {
     kind: 'folder'
   }
   const config: AppConfig = {
-    version: 2,
+    version: 3,
     hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
     agents: { codex: { command: 'codex', args: [], env: {} } },
     workspaces: [workspace]
@@ -212,7 +212,7 @@ describe('universal new tab transitions', () => {
     }))
     let launched: SessionSnapshot | null = null
     const launch = vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async (input) => {
-      const sessionId = input.semanticSessionId!
+      const sessionId = input.agentSessionId!
       launched = {
         id: sessionId,
         kind: 'agent',
@@ -224,12 +224,12 @@ describe('universal new tab transitions', () => {
         updatedAt: 10,
         processState: 'running',
         status: { state: 'working', source: 'native-hook', observedAt: 10 },
-        latestSequence: 0,
+        latestOutputBytes: 0,
         control: {
           kind: 'agent',
           hostId: 'local',
-          semanticSessionId: sessionId,
-          daemonSession: { sessionId, incarnationId: `${sessionId}-incarnation` }
+          agentSessionId: sessionId,
+          run: { runId: sessionId, incarnationId: `${sessionId}-incarnation` }
         }
       }
       return launched

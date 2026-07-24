@@ -15,11 +15,11 @@ const hostSchema = z.discriminatedUnion('kind', [
       user: z.string().min(1).optional(),
       port: z.number().int().min(1).max(65535).optional(),
       identityFile: z.string().min(1).optional(),
-      daemon: z.object({
+      runtime: z.object({
         buildIdentity: z.string().min(1),
         remoteNodePath: z.string().min(1),
-        remoteAgentMuxdPath: z.string().startsWith('/'),
-        remoteSocketPath: z.string().startsWith('/')
+        remoteEntrypointPath: z.string().startsWith('/'),
+        remoteEndpointPath: z.string().startsWith('/')
       }).strict()
     })
     .strict()
@@ -47,7 +47,7 @@ const workspaceSchema = z
 
 const configSchema = z
   .object({
-    version: z.literal(2),
+    version: z.literal(3),
     hosts: z.array(hostSchema),
     agents: z
       .object({
@@ -106,7 +106,7 @@ const configSchema = z
   })
 
 const DEFAULT_CONFIG: AppConfig = {
-  version: 2,
+  version: 3,
   hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
   agents: {
     codex: { command: 'codex', args: [], env: {} },

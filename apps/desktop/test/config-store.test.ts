@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { AppConfig, WorkspaceRecord } from '../src/shared/contracts.js'
@@ -15,7 +15,7 @@ afterEach(async () => {
 })
 
 const baseConfig: AppConfig = {
-  version: 2,
+  version: 3,
   hosts: [
     { id: 'local', kind: 'local', label: 'This Mac' },
     {
@@ -23,11 +23,11 @@ const baseConfig: AppConfig = {
       kind: 'ssh',
       label: 'Build box',
       hostname: 'build.example.test',
-      daemon: {
+      runtime: {
         buildIdentity: '0.1.0',
         remoteNodePath: 'node',
-        remoteAgentMuxdPath: '/home/build/.agentmux/versions/0.1.0/package/dist/agentmuxd.js',
-        remoteSocketPath: '/home/build/.agentmux/agentmuxd.sock'
+        remoteEntrypointPath: '/home/build/.agentmux/versions/0.1.0/package/dist/agentmuxd.js',
+        remoteEndpointPath: '/home/build/.agentmux/agentmuxd.sock'
       }
     }
   ],
@@ -60,6 +60,29 @@ async function storeFixture(): Promise<{ store: ConfigStore; path: string }> {
 }
 
 describe('ConfigStore workspace identity', () => {
+  it('rejects retired v2 daemon config without migration or fallback', async () => {
+    const { store, path } = await storeFixture()
+    await writeFile(path, JSON.stringify({
+      ...baseConfig,
+      version: 2,
+      hosts: [{
+        id: 'remote',
+        kind: 'ssh',
+        label: 'Old host',
+        hostname: 'old.example.test',
+        daemon: {
+          buildIdentity: 'old',
+          remoteNodePath: 'node',
+          remoteAgentMuxdPath: '/old/agentmuxd.js',
+          remoteSocketPath: '/old/agentmuxd.sock'
+        }
+      }]
+    }))
+
+    await expect(store.get()).rejects.toBeInstanceOf(Error)
+    expect(await readFile(path, 'utf8')).toContain('"version":2')
+  })
+
   it('rejects duplicate workspace ids without replacing the persisted config', async () => {
     const { store, path } = await storeFixture()
     const saved = { ...baseConfig, workspaces: [workspace()] }

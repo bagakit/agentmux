@@ -3,6 +3,7 @@ import type {
   RuntimeEvent,
   SessionSnapshot
 } from '../../../shared/contracts'
+import type { AgentMuxEvidence, AgentMuxRunRef } from '@agentmux/core'
 import type { WorkspaceLayout } from './workbench-layout'
 import {
   removeTabsFromLayouts,
@@ -24,6 +25,22 @@ function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T
   const next = { ...record }
   delete next[key]
   return next
+}
+
+function sameRun(left: AgentMuxRunRef, right: AgentMuxRunRef): boolean {
+  return left.runId === right.runId && left.incarnationId === right.incarnationId
+}
+
+function ownsRunEvent(
+  session: SessionSnapshot,
+  agentSessionId: string | undefined,
+  run: AgentMuxRunRef
+): boolean {
+  return session.id === (agentSessionId ?? run.runId) && sameRun(session.control.run, run)
+}
+
+function acceptsAgentEvidence(session: SessionSnapshot, evidence: AgentMuxEvidence): boolean {
+  return evidence.run === undefined || sameRun(session.control.run, evidence.run)
 }
 
 export function ownsSessionLaunch(
@@ -80,23 +97,21 @@ export function reduceRuntimeEvent(
 ): SessionProjectionState {
   const core = event.event
   if (core.type === 'terminal-output') {
-    const sessionId = core.semanticSessionId ?? core.daemonSession.sessionId
     return {
       ...state,
       sessions: state.sessions.map((item) =>
-        item.id === sessionId
-          ? { ...item, latestSequence: core.evidence.outputSequence?.end ?? item.latestSequence }
+        ownsRunEvent(item, core.agentSessionId, core.run)
+          ? { ...item, latestOutputBytes: core.evidence.outputByteRange?.endByte ?? item.latestOutputBytes }
           : item
       )
     }
   }
   if (core.type === 'process-state') {
-    const sessionId = core.semanticSessionId ?? core.daemonSession.sessionId
     const displayState = core.state === 'lost' ? 'error' : core.state
     return {
       ...state,
       sessions: state.sessions.map((item) =>
-        item.id === sessionId
+        ownsRunEvent(item, core.agentSessionId, core.run)
           ? {
               ...item,
               processState: core.state,
@@ -105,7 +120,7 @@ export function reduceRuntimeEvent(
                 state: displayState,
                 source: core.evidence.source,
                 observedAt: core.evidence.observedAt,
-                ...(core.state === 'lost' ? { detail: 'The daemon no longer owns this PTY.' } : {}),
+                ...(core.state === 'lost' ? { detail: 'The Run Kernel no longer owns this PTY.' } : {}),
                 ...(core.exitCode === undefined ? {} : { exitCode: core.exitCode })
               }
             }
@@ -113,10 +128,10 @@ export function reduceRuntimeEvent(
       )
     }
   }
-  if (core.type === 'semantic-status') {
+  if (core.type === 'agent-status') {
     return {
       ...state,
-      sessions: state.sessions.map((item) => item.id === core.semanticSessionId
+      sessions: state.sessions.map((item) => item.id === core.agentSessionId && acceptsAgentEvidence(item, core.evidence)
         ? {
             ...item,
             updatedAt: core.evidence.observedAt,
@@ -130,10 +145,10 @@ export function reduceRuntimeEvent(
         : item)
     }
   }
-  if (core.type === 'semantic-session') {
+  if (core.type === 'agent-session') {
     return {
       ...state,
-      sessions: state.sessions.map((item) => item.kind === 'agent' && item.id === core.session.semanticSessionId
+      sessions: state.sessions.map((item) => item.kind === 'agent' && item.id === core.session.agentSessionId
         ? {
             ...item,
             agentId: core.session.agentId,
@@ -143,19 +158,21 @@ export function reduceRuntimeEvent(
             control: {
               kind: 'agent' as const,
               hostId: core.session.hostId,
-              semanticSessionId: core.session.semanticSessionId,
-              daemonSession: { ...core.session.daemonSession }
+              agentSessionId: core.session.agentSessionId,
+              run: { ...core.session.run }
             }
           }
         : item)
     }
   }
-  if (core.type === 'semantic-activity') {
+  if (core.type === 'agent-activity') {
+    const session = state.sessions.find((item) => item.id === core.agentSessionId)
+    if (!session || !acceptsAgentEvidence(session, core.evidence)) return state
     const items = [
-      ...(state.activities[core.semanticSessionId] ?? []),
+      ...(state.activities[core.agentSessionId] ?? []),
       {
         ...core.activity,
-        sessionId: core.semanticSessionId,
+        sessionId: core.agentSessionId,
         source: core.evidence.source
       }
     ]
@@ -163,17 +180,19 @@ export function reduceRuntimeEvent(
       ...state,
       activities: {
         ...state.activities,
-        [core.semanticSessionId]: items.slice(-200)
+        [core.agentSessionId]: items.slice(-200)
       }
     }
   }
   if (core.type === 'permission') {
     const request = core.request
+    const session = state.sessions.find((item) => item.id === request.agentSessionId)
+    if (!session || !acceptsAgentEvidence(session, request.evidence)) return state
     const items = [
-      ...(state.activities[request.semanticSessionId] ?? []),
+      ...(state.activities[request.agentSessionId] ?? []),
       {
         id: request.id,
-        sessionId: request.semanticSessionId,
+        sessionId: request.agentSessionId,
         kind: 'permission' as const,
         source: request.evidence.source,
         createdAt: request.evidence.observedAt,
@@ -184,14 +203,14 @@ export function reduceRuntimeEvent(
     ]
     return {
       ...state,
-      activities: { ...state.activities, [request.semanticSessionId]: items.slice(-200) }
+      activities: { ...state.activities, [request.agentSessionId]: items.slice(-200) }
     }
   }
-  if (core.type === 'semantic-error') {
-    if (!core.semanticSessionId) return state
+  if (core.type === 'agent-error') {
+    if (!core.agentSessionId) return state
     return {
       ...state,
-      sessions: state.sessions.map((item) => item.id === core.semanticSessionId
+      sessions: state.sessions.map((item) => item.id === core.agentSessionId && acceptsAgentEvidence(item, core.evidence)
         ? {
             ...item,
             updatedAt: core.evidence.observedAt,
@@ -205,8 +224,10 @@ export function reduceRuntimeEvent(
         : item)
     }
   }
-  if (core.type !== 'session-removed') return state
-  const sessionId = core.semanticSessionId ?? core.daemonSession.sessionId
+  if (core.type !== 'run-removed') return state
+  const session = state.sessions.find((item) => ownsRunEvent(item, core.agentSessionId, core.run))
+  if (!session) return state
+  const sessionId = session.id
   const removedTabIds = Object.values(state.tabs).flatMap((tab) =>
     (tab.kind === 'agent' || tab.kind === 'terminal') &&
       tab.sessionId === sessionId

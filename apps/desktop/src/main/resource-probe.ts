@@ -115,7 +115,7 @@ export async function runDesktopResourceProbe(options: {
     await options.runtime.write(terminalControl, `${JSON.stringify(process.execPath)} -e ${JSON.stringify(source)}\n`)
     await waitFor('bounded Terminal output', async () => {
       const current = newTerminal(before, (await options.runtime.snapshot(config)).sessions)
-      return (current?.latestSequence ?? 0) >= 300_000
+      return (current?.latestOutputBytes ?? 0) >= 300_000
     })
     const terminalSample = await sample('xterm-300kb-output')
 
@@ -152,7 +152,7 @@ export async function runDesktopResourceProbe(options: {
       terminalControl = current.control
       await options.runtime.write(terminalControl, `${JSON.stringify(process.execPath)} -e ${JSON.stringify(source)}\n`)
       await waitFor(`cycle ${cycle} bounded Terminal output`, async () => (
-        (newTerminal(before, (await options.runtime.snapshot(config)).sessions)?.latestSequence ?? 0) >= 300_000
+        (newTerminal(before, (await options.runtime.snapshot(config)).sessions)?.latestOutputBytes ?? 0) >= 300_000
       ))
       await click(options.window, "document.querySelector('[data-tree-path=\"resource-probe.ts\"]')")
       await waitFor(`cycle ${cycle} Monaco editor`, async () => await rendererBoolean(

@@ -31,10 +31,10 @@ export function HostSettingsPane({ config, onSave }: {
     }))
   }
 
-  function updateDaemon(id: string, patch: Partial<SshHostConfig['daemon']>): void {
+  function updateRuntime(id: string, patch: Partial<SshHostConfig['runtime']>): void {
     setHosts((current) => current.map((host) =>
       host.id === id && host.kind === 'ssh'
-        ? { ...host, daemon: { ...host.daemon, ...patch } }
+        ? { ...host, runtime: { ...host.runtime, ...patch } }
         : host
     ))
   }
@@ -46,11 +46,11 @@ export function HostSettingsPane({ config, onSave }: {
       kind: 'ssh',
       label: 'Remote host',
       hostname: '',
-      daemon: {
+      runtime: {
         buildIdentity: '',
         remoteNodePath: 'node',
-        remoteAgentMuxdPath: '',
-        remoteSocketPath: ''
+        remoteEntrypointPath: '',
+        remoteEndpointPath: ''
       }
     }])
   }
@@ -62,12 +62,12 @@ export function HostSettingsPane({ config, onSave }: {
       if (nextHosts.some((host) => host.kind === 'ssh' && (
         !host.label.trim() ||
         !host.hostname.trim() ||
-        !host.daemon.buildIdentity.trim() ||
-        !host.daemon.remoteNodePath.trim() ||
-        !host.daemon.remoteAgentMuxdPath.startsWith('/') ||
-        !host.daemon.remoteSocketPath.startsWith('/')
+        !host.runtime.buildIdentity.trim() ||
+        !host.runtime.remoteNodePath.trim() ||
+        !host.runtime.remoteEntrypointPath.startsWith('/') ||
+        !host.runtime.remoteEndpointPath.startsWith('/')
       ))) {
-        throw new Error('Every SSH host needs connection details and an absolute installed daemon path')
+        throw new Error('Every SSH host needs connection details and absolute Runtime paths')
       }
       await onSave(nextHosts, nextWorkspaces)
       return true
@@ -104,7 +104,7 @@ export function HostSettingsPane({ config, onSave }: {
             <section className="host-settings-card" key={host.id}>
               <header>
                 <span className="host-card__icon">{host.kind === 'ssh' ? <RadioTower size={16} /> : <Monitor size={16} />}</span>
-                <div><strong>{host.label}</strong><small>{host.kind === 'ssh' ? `${host.user ? `${host.user}@` : ''}${host.hostname || 'hostname required'}${host.port ? `:${host.port}` : ''}` : 'Local AgentMux daemon'}</small></div>
+                <div><strong>{host.label}</strong><small>{host.kind === 'ssh' ? `${host.user ? `${host.user}@` : ''}${host.hostname || 'hostname required'}${host.port ? `:${host.port}` : ''}` : 'Local AgentMux Runtime'}</small></div>
                 {check ? <span className={`check-pill check-pill--${check.state}`}>{check.state === 'checking' ? <LoaderCircle className="spin" size={13} /> : check.state === 'ready' ? <CheckCircle2 size={13} /> : <XCircle size={13} />}{check.state === 'checking' ? 'Testing' : check.detail}</span> : null}
                 <button className="small-button" disabled={check?.state === 'checking' || (host.kind === 'ssh' && !host.hostname.trim())} onClick={() => void checkHost(host)}>Test</button>
                 {host.kind === 'ssh' ? <button className="icon-button icon-button--danger" title={`Remove ${host.label}`} disabled={sessionCount > 0} onClick={() => setRemoveRequest(host)}><Trash2 size={14} /></button> : null}
@@ -118,10 +118,10 @@ export function HostSettingsPane({ config, onSave }: {
                     <label><span>User</span><input value={host.user ?? ''} onChange={(event) => event.target.value ? update(host.id, { user: event.target.value }) : clear(host.id, 'user')} placeholder="optional" /></label>
                     <label><span>Port</span><input type="number" min={1} max={65535} value={host.port ?? ''} onChange={(event) => event.target.value ? update(host.id, { port: Number(event.target.value) }) : clear(host.id, 'port')} placeholder="22" /></label>
                     <label className="host-edit-grid__wide"><span>Identity file path <small>optional; key contents are never stored</small></span><input value={host.identityFile ?? ''} onChange={(event) => event.target.value ? update(host.id, { identityFile: event.target.value }) : clear(host.id, 'identityFile')} placeholder="~/.ssh/id_ed25519" /></label>
-                    <label><span>Daemon build</span><input value={host.daemon.buildIdentity} onChange={(event) => updateDaemon(host.id, { buildIdentity: event.target.value })} placeholder="0.1.0" /></label>
-                    <label><span>Remote Node</span><input value={host.daemon.remoteNodePath} onChange={(event) => updateDaemon(host.id, { remoteNodePath: event.target.value })} placeholder="node" /></label>
-                    <label className="host-edit-grid__wide"><span>Installed agentmuxd path</span><input value={host.daemon.remoteAgentMuxdPath} onChange={(event) => updateDaemon(host.id, { remoteAgentMuxdPath: event.target.value })} placeholder="/home/user/.agentmux/versions/0.1.0/package/dist/agentmuxd.js" /></label>
-                    <label className="host-edit-grid__wide"><span>Daemon socket path</span><input value={host.daemon.remoteSocketPath} onChange={(event) => updateDaemon(host.id, { remoteSocketPath: event.target.value })} placeholder="/home/user/.agentmux/agentmuxd.sock" /></label>
+                    <label><span>Runtime build</span><input value={host.runtime.buildIdentity} onChange={(event) => updateRuntime(host.id, { buildIdentity: event.target.value })} placeholder="0.1.0" /></label>
+                    <label><span>Remote launcher</span><input value={host.runtime.remoteNodePath} onChange={(event) => updateRuntime(host.id, { remoteNodePath: event.target.value })} placeholder="node" /></label>
+                    <label className="host-edit-grid__wide"><span>Installed Runtime entrypoint</span><input value={host.runtime.remoteEntrypointPath} onChange={(event) => updateRuntime(host.id, { remoteEntrypointPath: event.target.value })} placeholder="/home/user/.agentmux/runtime/entrypoint.js" /></label>
+                    <label className="host-edit-grid__wide"><span>Runtime endpoint path</span><input value={host.runtime.remoteEndpointPath} onChange={(event) => updateRuntime(host.id, { remoteEndpointPath: event.target.value })} placeholder="/home/user/.agentmux/runtime.sock" /></label>
                   </div>
                 </details>
               ) : null}
