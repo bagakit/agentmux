@@ -3,8 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { AppConfig } from '../../../../shared/contracts'
 import { api } from '../../lib/api'
 import { agentDetectionKey, useAppStore } from '../../store'
-
-const AGENT_LABELS: Record<string, string> = { codex: 'Codex', claude: 'Claude', traex: 'TraeX', hermes: 'Hermes', pi: 'Pi' }
+import { agentProviderLabel } from '../AgentProviderIcon'
 
 export function WorkspaceSettingsPane({ config, onClose }: {
   config: AppConfig
@@ -27,7 +26,7 @@ export function WorkspaceSettingsPane({ config, onClose }: {
   const checkingHosts = config.hosts.some((host) => !hostChecks[host.id] || hostChecks[host.id]?.state === 'checking')
   const agents = useMemo(() => Object.keys(config.agents).map((id) => ({
     id,
-    label: AGENT_LABELS[id] ?? id,
+    label: agentProviderLabel(id),
     detection: detections[agentDetectionKey(hostId, id)]
   })), [config.agents, detections, hostId])
   const readyAgents = agents.filter((agent) => agent.detection?.state === 'ready')

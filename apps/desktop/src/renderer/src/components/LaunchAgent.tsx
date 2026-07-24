@@ -1,14 +1,7 @@
 import { ArrowLeft, LoaderCircle, Play, RadioTower, RefreshCw, Sparkles } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { agentDetectionKey, useAppStore } from '../store'
-
-const LABELS: Record<string, string> = {
-  codex: 'Codex',
-  claude: 'Claude',
-  traex: 'TraeX',
-  hermes: 'Hermes',
-  pi: 'Pi'
-}
+import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
 
 export function LaunchAgent({
   paneId,
@@ -35,7 +28,7 @@ export function LaunchAgent({
   const agents = useMemo(
     () => Object.keys(config?.agents ?? {}).map((id) => ({
       id,
-      label: LABELS[id] ?? id,
+      label: agentProviderLabel(id),
       detection: workspace ? detections[agentDetectionKey(workspace.hostId, id)] : undefined
     })),
     [config?.agents, detections, workspace]
@@ -92,14 +85,14 @@ export function LaunchAgent({
             className={`agent-pick ${agent.id === agentId ? 'agent-pick--selected' : ''}`}
             onClick={() => setAgentId(agent.id)}
           >
-            <span>{agent.label.slice(0, 1)}</span>{agent.label}
+            <AgentProviderIcon agentId={agent.id} size={16} />{agent.label}
           </button>
         ))}
       </div>
       {unavailableAgents.length > 0 ? (
         <div className="agent-unavailable">
           <span>Not installed on {workspace?.hostId ?? 'this host'}</span>
-          <div>{unavailableAgents.map((agent) => <span key={agent.id}>{agent.label}</span>)}</div>
+          <div>{unavailableAgents.map((agent) => <span key={agent.id}><AgentProviderIcon agentId={agent.id} size={11} />{agent.label}</span>)}</div>
         </div>
       ) : null}
       <textarea
