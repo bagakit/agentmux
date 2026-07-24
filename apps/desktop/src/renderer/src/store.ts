@@ -178,9 +178,10 @@ export function agentDetectionKey(hostId: string, agentId: string): string {
 const detectionRequestIds = new Map<string, number>()
 const hostCheckRequestIds = new Map<string, number>()
 const fileReadRequestIds = new Map<string, number>()
+const fileReadInFlightCounts = new Map<string, number>()
 const fileInvalidationSequences = new Map<string, number>()
 const fileSaveTails = new Map<string, Promise<void>>()
-const fileOpenRequests = new Map<string, Promise<void>>()
+const fileOpenRequests = new Map<string, Promise<boolean>>()
 let runtimeSubscriptionCount = 0
 
 if (typeof window !== 'undefined') {
@@ -212,20 +213,27 @@ async function refreshFileDocument(workspaceId: string, path: string): Promise<v
   if (!useAppStore.getState().documents[key]) return
   const requestId = (fileReadRequestIds.get(key) ?? 0) + 1
   fileReadRequestIds.set(key, requestId)
-  let result
+  fileReadInFlightCounts.set(key, (fileReadInFlightCounts.get(key) ?? 0) + 1)
   try {
-    result = await api.files.read(workspaceId, path)
-  } catch (error) {
-    result = {
-      status: 'error' as const,
-      code: typeof error === 'object' && error !== null && 'code' in error
-        ? String(error.code)
-        : 'WORKSPACE_FILE_READ_FAILED',
-      message: message(error)
+    let result
+    try {
+      result = await api.files.read(workspaceId, path)
+    } catch (error) {
+      result = {
+        status: 'error' as const,
+        code: typeof error === 'object' && error !== null && 'code' in error
+          ? String(error.code)
+          : 'WORKSPACE_FILE_READ_FAILED',
+        message: message(error)
+      }
     }
+    if (fileReadRequestIds.get(key) !== requestId) return
+    useAppStore.setState((state) => reduceDocumentRead(state, workspaceId, path, result))
+  } finally {
+    const remaining = (fileReadInFlightCounts.get(key) ?? 1) - 1
+    if (remaining === 0) fileReadInFlightCounts.delete(key)
+    else fileReadInFlightCounts.set(key, remaining)
   }
-  if (fileReadRequestIds.get(key) !== requestId) return
-  useAppStore.setState((state) => reduceDocumentRead(state, workspaceId, path, result))
 }
 
 async function enqueueFileSave(tabId: string, overwrite: boolean): Promise<void> {
@@ -279,6 +287,16 @@ async function enqueueFileSave(tabId: string, overwrite: boolean): Promise<void>
     }
     if (!useAppStore.getState().documents[currentKey]) return
     if (result.status === 'written') {
+      const receiptState = useAppStore.getState()
+      const receiptIssue = receiptState.documentIssues[currentKey]
+      const hasObservedDiskFact =
+        receiptIssue?.kind === 'changed' ||
+        receiptIssue?.kind === 'deleted' ||
+        receiptIssue?.kind === 'read-error'
+      const needsReconciliation =
+        (fileReadInFlightCounts.get(currentKey) ?? 0) > 0 ||
+        ((receiptState.documentObservationGenerations[currentKey] ?? 0) !== observationGeneration &&
+          !hasObservedDiskFact)
       fileReadRequestIds.set(currentKey, (fileReadRequestIds.get(currentKey) ?? 0) + 1)
       useAppStore.setState((current) => reduceDocumentWritten(
         current,
@@ -289,6 +307,7 @@ async function enqueueFileSave(tabId: string, overwrite: boolean): Promise<void>
         expectedRevision,
         observationGeneration
       ))
+      if (needsReconciliation) await refreshFileDocument(tab.workspaceId, tab.path)
       return
     }
     if (result.status === 'error') {
@@ -702,34 +721,41 @@ export const useAppStore = create<AppState>((set, get) => ({
         set((state) => reduceFileOpened(state, workspaceId, path, existing, paneId))
         return
       }
-      let request = fileOpenRequests.get(key)
-      if (!request) {
-        request = (async () => {
-          try {
-            const invalidationSequence = fileInvalidationSequences.get(key) ?? 0
-            await api.files.observe(workspaceId, path)
-            const result = await api.files.read(workspaceId, path)
-            if (result.status !== 'read') {
-              await api.files.unobserve(workspaceId, path)
-              throw new Error(result.status === 'deleted'
-                ? `File was deleted: ${path}`
-                : result.message)
+      while (!get().documents[key]) {
+        let request = fileOpenRequests.get(key)
+        const joinedRequest = Boolean(request)
+        if (!request) {
+          request = Promise.resolve().then(async () => {
+            try {
+              const invalidationSequence = fileInvalidationSequences.get(key) ?? 0
+              await api.files.observe(workspaceId, path)
+              const result = await api.files.read(workspaceId, path)
+              if (result.status !== 'read') {
+                await api.files.unobserve(workspaceId, path)
+                throw new Error(result.status === 'deleted'
+                  ? `File was deleted: ${path}`
+                  : result.message)
+              }
+              set((state) => reduceFileOpened(state, workspaceId, path, result.document, paneId))
+              if (fileOpenRequests.get(key) === request) fileOpenRequests.delete(key)
+              if ((fileInvalidationSequences.get(key) ?? 0) !== invalidationSequence) {
+                await get().refreshDocument(workspaceId, path)
+              }
+              return true
+            } catch (error) {
+              get().reportError(error)
+              return false
+            } finally {
+              if (fileOpenRequests.get(key) === request) fileOpenRequests.delete(key)
             }
-            const document = result.document
-            set((state) => reduceFileOpened(state, workspaceId, path, document, paneId))
-            if ((fileInvalidationSequences.get(key) ?? 0) !== invalidationSequence) {
-              await get().refreshDocument(workspaceId, path)
-            }
-          } catch (error) {
-            get().reportError(error)
-          }
-        })()
-        fileOpenRequests.set(key, request)
+          })
+          fileOpenRequests.set(key, request)
+        }
+        const opened = await request
+        if (!opened || get().documents[key]) return
+        if (!joinedRequest) return
       }
-      await request
-      if (fileOpenRequests.get(key) === request) fileOpenRequests.delete(key)
     } catch (error) {
-      if (fileOpenRequests.get(key)) fileOpenRequests.delete(key)
       get().reportError(error)
     }
   },

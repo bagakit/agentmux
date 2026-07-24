@@ -140,7 +140,7 @@ describe('revision-aware file save Store', () => {
     expect(useAppStore.getState().dirtyDocuments[key]).toBe(false)
   })
 
-  it('ignores a pre-write disk read that completes after the written receipt', async () => {
+  it('reconciles after cancelling a pre-write disk read at the written receipt', async () => {
     const { workspace, tab, key } = seed()
     useAppStore.getState().updateDocument(tab.id, 'bravo')
     const save = useAppStore.getState().saveDocument(tab.id)
@@ -149,11 +149,16 @@ describe('revision-aware file save Store', () => {
     await waitFor(() => fileApi.reads.length === 1)
 
     fileApi.writes[0]!.resolve({ status: 'written', revision: 'revision-bravo' })
-    await save
+    await waitFor(() => fileApi.reads.length === 2)
     fileApi.reads[0]!.resolve({
       status: 'read',
       document: { path: tab.path, content: 'alpha', revision: 'revision-alpha' }
     })
+    fileApi.reads[1]!.resolve({
+      status: 'read',
+      document: { path: tab.path, content: 'bravo', revision: 'revision-bravo' }
+    })
+    await save
     await staleRefresh
 
     expect(useAppStore.getState().documents[key]).toEqual({
@@ -162,6 +167,102 @@ describe('revision-aware file save Store', () => {
       revision: 'revision-bravo'
     })
     expect(useAppStore.getState().dirtyDocuments[key]).toBe(false)
+  })
+
+  it('adopts a newer disk fact instead of losing it behind the written receipt', async () => {
+    const { workspace, tab, key } = seed()
+    useAppStore.getState().updateDocument(tab.id, 'bravo')
+    const save = useAppStore.getState().saveDocument(tab.id)
+    await waitFor(() => fileApi.writes.length === 1)
+    const overlappingRefresh = useAppStore.getState().refreshDocument(workspace.id, tab.path)
+    await waitFor(() => fileApi.reads.length === 1)
+
+    fileApi.writes[0]!.resolve({ status: 'written', revision: 'revision-bravo' })
+    await waitFor(() => fileApi.reads.length === 2)
+    fileApi.reads[0]!.resolve({
+      status: 'read',
+      document: { path: tab.path, content: 'disk-delta', revision: 'revision-delta' }
+    })
+    fileApi.reads[1]!.resolve({
+      status: 'read',
+      document: { path: tab.path, content: 'disk-delta', revision: 'revision-delta' }
+    })
+    await Promise.all([save, overlappingRefresh])
+
+    expect(useAppStore.getState().documents[key]).toEqual({
+      path: tab.path,
+      content: 'disk-delta',
+      revision: 'revision-delta'
+    })
+    expect(useAppStore.getState().dirtyDocuments[key]).toBe(false)
+    expect(useAppStore.getState().documentIssues[key]).toBeUndefined()
+  })
+
+  it.each([
+    {
+      label: 'deletion',
+      result: { status: 'deleted' as const },
+      issue: { kind: 'deleted' }
+    },
+    {
+      label: 'read failure',
+      result: { status: 'error' as const, code: 'EIO', message: 'read failed' },
+      issue: { kind: 'read-error', code: 'EIO', message: 'read failed' }
+    }
+  ])('keeps a fresh $label visible after cancelling an overlapping read', async ({ result, issue }) => {
+    const { workspace, tab, key } = seed()
+    useAppStore.getState().updateDocument(tab.id, 'bravo')
+    const save = useAppStore.getState().saveDocument(tab.id)
+    await waitFor(() => fileApi.writes.length === 1)
+    const overlappingRefresh = useAppStore.getState().refreshDocument(workspace.id, tab.path)
+    await waitFor(() => fileApi.reads.length === 1)
+
+    fileApi.writes[0]!.resolve({ status: 'written', revision: 'revision-bravo' })
+    await waitFor(() => fileApi.reads.length === 2)
+    fileApi.reads[0]!.resolve({
+      status: 'read',
+      document: { path: tab.path, content: 'alpha', revision: 'revision-alpha' }
+    })
+    fileApi.reads[1]!.resolve(result)
+    await Promise.all([save, overlappingRefresh])
+
+    expect(useAppStore.getState().documents[key]).toEqual({
+      path: tab.path,
+      content: 'bravo',
+      revision: 'revision-bravo'
+    })
+    expect(useAppStore.getState().dirtyDocuments[key]).toBe(false)
+    expect(useAppStore.getState().documentIssues[key]).toEqual(issue)
+  })
+
+  it('reconciles a same-revision ABA read that completes before the written receipt', async () => {
+    const { workspace, tab, key } = seed()
+    useAppStore.getState().updateDocument(tab.id, 'bravo')
+    const save = useAppStore.getState().saveDocument(tab.id)
+    await waitFor(() => fileApi.writes.length === 1)
+    const overlappingRefresh = useAppStore.getState().refreshDocument(workspace.id, tab.path)
+    await waitFor(() => fileApi.reads.length === 1)
+    fileApi.reads[0]!.resolve({
+      status: 'read',
+      document: { path: tab.path, content: 'alpha', revision: 'revision-alpha' }
+    })
+    await overlappingRefresh
+
+    fileApi.writes[0]!.resolve({ status: 'written', revision: 'revision-bravo' })
+    await waitFor(() => fileApi.reads.length === 2)
+    fileApi.reads[1]!.resolve({
+      status: 'read',
+      document: { path: tab.path, content: 'alpha', revision: 'revision-alpha' }
+    })
+    await save
+
+    expect(useAppStore.getState().documents[key]).toEqual({
+      path: tab.path,
+      content: 'alpha',
+      revision: 'revision-alpha'
+    })
+    expect(useAppStore.getState().dirtyDocuments[key]).toBe(false)
+    expect(useAppStore.getState().documentIssues[key]).toBeUndefined()
   })
 
   it('does not clear a newer deletion observed after Overwrite starts', async () => {
@@ -216,6 +317,53 @@ describe('revision-aware file save Store', () => {
       path: tab.path,
       content: 'alpha',
       revision: 'revision-alpha'
+    })
+  })
+
+  it('restarts a joined open when the first tab closes during open completion', async () => {
+    const { workspace, tab, key } = seed()
+    useAppStore.setState({
+      tabs: {},
+      documents: {},
+      dirtyDocuments: {},
+      documentGenerations: {},
+      documentObservationGenerations: {},
+      documentIssues: {},
+      savingDocuments: {}
+    })
+
+    let close: Promise<void> | undefined
+    let reopen: Promise<void> | undefined
+    let triggered = false
+    const unsubscribe = useAppStore.subscribe((state) => {
+      if (triggered || !state.documents[key]) return
+      triggered = true
+      close = useAppStore.getState().closeTab(workspace.id, 'pane', tab.id)
+      reopen = useAppStore.getState().openFile(tab.path, 'pane')
+    })
+    const firstOpen = useAppStore.getState().openFile(tab.path, 'pane')
+    await waitFor(() => fileApi.reads.length === 1)
+    fileApi.reads[0]!.resolve({
+      status: 'read',
+      document: { path: tab.path, content: 'alpha', revision: 'revision-alpha' }
+    })
+    await waitFor(() => fileApi.reads.length === 2)
+    fileApi.reads[1]!.resolve({
+      status: 'read',
+      document: { path: tab.path, content: 'bravo', revision: 'revision-bravo' }
+    })
+    await Promise.all([firstOpen, close!, reopen!])
+    unsubscribe()
+
+    expect(fileApi.observes).toEqual([
+      { workspaceId: workspace.id, path: tab.path },
+      { workspaceId: workspace.id, path: tab.path }
+    ])
+    expect(fileApi.unobserves).toEqual([{ workspaceId: workspace.id, path: tab.path }])
+    expect(useAppStore.getState().documents[key]).toEqual({
+      path: tab.path,
+      content: 'bravo',
+      revision: 'revision-bravo'
     })
   })
 
