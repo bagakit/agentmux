@@ -1,10 +1,10 @@
 # AgentMux Daemon Cutover Benchmark
 
-状态：历史 Protocol Freeze Revision 1，已因 mux 决策修正停止。它只适用于被放弃的自建 `agentmuxd` candidate；4 MiB Debug Run 的 sustained-output timeout 已记录为失败证据。Workload、样本量、主指标、统计方法和门槛继续保留，不覆盖旧结果；旧 Runner 已删除。T-013 只提炼候选无关 Fixture 与统计原语，最终 AgentMux+ctxmux candidate 要到 T-018 建立新的 Protocol Revision 和 Runner。
+状态：Protocol Freeze Revision 2，冻结于任何 Revision 2 Result 运行之前。Revision 2 只评估最终 `@agentmux/core` + 固定 CtxMux artifact candidate；Revision 1 只适用于已经删除的自建 `agentmuxd`，其 4 MiB sustained-output timeout 和停止决定作为历史失败证据保留，不覆盖、不改写，也不参与 Revision 2 Verdict。
 
 ## 1. 判定问题
 
-本 Benchmark 只回答一个问题：在相同机器、相同 PTY Workload 和相同 correctness oracle 下，新的持久 `agentmuxd` 是否在所有可比发布主维度优于切换前真实 tmux Runtime，同时保留已经交付的持久化、安全和资源上限。
+本 Benchmark 只回答一个问题：在相同机器、相同 PTY Workload 和相同 correctness oracle 下，最终 AgentMux + CtxMux candidate 是否在所有可比发布主维度优于切换前真实 tmux Runtime，同时保留已经交付的持久化、安全和资源上限。
 
 发布 Verdict 只有 `pass` 或 `fail`。任何可比主维度回退、correctness oracle 失败、两轮方向不一致、资源超预算或缺少原始样本都会得到 `fail`；不允许用加权总分掩盖单项回退。
 
@@ -12,9 +12,10 @@
 
 ### AgentMux Candidate
 
-- 当前提交构建的 `@agentmux/core` 与包内 `agentmuxd`。
-- Local Unix Socket、`AgentMuxDaemonClient`、Incremental Output、Sequence、Ack、Bounded Replay 与 Process Tree Stop。
-- 一个独立 Daemon；Benchmark Runner 是 Client，不把 Runner RSS 计入 Daemon RSS。
+- 当前提交从源码构建的 `@agentmux/core` 公共 `AgentMuxClient`；Runner 只能调用 package 根导出的 `connect`、`runtimeIdentity`、`runtimeDiagnostics`、`createTerminal`、`attachTerminal`、`releaseRunAttachment`、`writeTerminal`、`listRuns`、`stopTerminal`、`disconnect` 与 `dispose`。不得导入 `CtxmuxRunAdapter`、`@ctxmux/sdk`、wire、state 或其他 private module。
+- 固定 CtxMux artifact 是 clean commit `2e32a9d647d627952ea5c455fb2efef6c636643a`、tree `d60870c2481c9b153da6bf22f829d24afb8a81a8`、product `0.1.0`、protocol `9`、manifest SHA-256 `15c0f54980ac339251017293cf4a21c94e2fb923d22cc3998b293f1a61a997d9`；Runner 从 `runtimeDiagnostics()` 核对公开 identity，并把 package 中 manifest 的 SHA-256 作为只读 build-input evidence 记录，不读取 CtxMux state。
+- 每轮使用一个独立、随机、权限 `0700` 的 `AGENTMUX_RUNTIME_DIRECTORY`。CtxMux daemon 是唯一 Run Owner；Benchmark Runner 是 Client，不把 Runner RSS 计入 daemon RSS。
+- 正式 `full` Result 必须来自 tracked-clean Git SHA；Runner 把 SHA 与 dirty paths 写入 Manifest，dirty 时拒绝写发布 Verdict。`smoke` 只验证 Runner 路径，不产生 release `pass`，也不得写入正式 results 目录。
 
 ### 强制 tmux Baseline
 
@@ -27,6 +28,7 @@
   - Reconnect：`list-sessions`、`list-panes`、`show-environment` 与 `capture-pane`；
   - Stop：`kill-session`。
 - Runner 可以直接固化这些命令，不把已删除的 tmux 产品代码重新引入 Core，不提供 Backend Selector、Compatibility Layer 或 Fallback。
+- Revision 2 Runner 还为资源测量冻结 `start-server`、`set-option -g exit-empty off` 与 `display-message -p '#{pid}'`，为 fixture PID 记录冻结 `list-panes -a -F '#{pane_pid}'`。所有命令都必须带同一个随机 `-L agentmux-benchmark-*`；cleanup 只调用该 socket 的 `kill-session`／`kill-server`，绝不调用默认 tmux socket 或枚举、终止用户 Session。
 
 ### 其他产品
 
@@ -36,7 +38,7 @@
 
 ## 3. 冻结环境
 
-首轮目标机：
+首轮目标机；Runner 必须逐项实测并与下表一致，否则本轮 `fail`：
 
 | 项目 | 冻结值 |
 | --- | --- |
@@ -50,7 +52,7 @@
 | Terminal Geometry | 120 × 36 |
 | Locale | `LANG=C`, `LC_ALL=C`, `TZ=UTC0`（子进程） |
 
-每个原始结果还必须记录 Git SHA、Dirty Paths、Node／OS／Arch、CPU、总内存、tmux／可选竞品版本、开始／结束时间、Protocol Revision 和 Runner Version。Dirty Worktree 允许只包含当前 T-008 Runner／Result 工作，但必须逐项写入 Manifest；正式 Verdict 只接受结果与 Runner 同一最终候选 SHA 的重跑。
+每个原始结果还必须记录 Git SHA、Dirty Paths、Node／OS／Arch、CPU、总内存、tmux／可选竞品版本、开始／结束时间、Protocol Revision、Runner Version、CtxMux public identity 与固定 artifact identity。正式 Verdict 只接受结果与 Runner 同一最终 candidate SHA 的 tracked-clean 重跑；实现期 dirty smoke 只能得到 `smoke`，不能冒充正式证据。
 
 ## 4. Workload 与样本量
 
@@ -66,7 +68,7 @@
 
 ### B. Sustained Output Throughput
 
-- Input 触发 Fixture 输出恰好 4 MiB 可验证 Payload，使用 16 KiB Chunk，最后输出 SHA-256 End Marker。
+- Input 触发 Fixture 先输出 Payload-start Marker，再输出恰好 4 MiB 可验证 Payload，使用 16 KiB Chunk，最后输出 SHA-256 End Marker；PTY 对触发 Input 的本地 echo 位于 Payload-start 之前，不计入 Payload Hash。
 - Warmup 1 次，采集 7 次；每次使用新 Session，避免历史窗口互相污染。
 - AgentMux 从 Input Ack 到 Client 收齐 End Marker；tmux 从 Paste 完成到 750 ms Watcher 的 Capture 收齐 End Marker。
 - Correctness 要求 Payload Byte Count 与 SHA-256 完全一致；不完整样本计失败，不删掉重跑。
@@ -75,14 +77,14 @@
 
 - Session 先产生 192 KiB Payload 并 Detach。
 - Warmup 20 次，采集 100 次。
-- AgentMux 计一次 `attach(sessionId, 0)` 返回完整 Replay；tmux 计一次冻结 `capture-pane` 返回完整历史。
+- AgentMux 每个样本都计一次 `attachTerminal(runId, 0)` 返回完整 Replay，计时在 Attachment receipt 返回时停止，再在计时区间外 `releaseRunAttachment`；tmux 计一次冻结 `capture-pane` 返回完整历史。
 - 每个样本验证 End Marker 和内容 Hash；记录 p50／p95／p99。
 
 ### D. Reconnect Recovery
 
 - 一个保持运行且已经产生 64 KiB 历史的 Session。
 - Warmup 20 次，采集 100 次。
-- AgentMux 从新 Local Socket Client Connect 开始，到 Hello 身份核对与 Attach Replay 完成；tmux 从新控制调用开始，依次完成冻结的 List Session／Pane／Environment／Capture。
+- AgentMux 从新 Local Socket Client Connect 开始，到 Hello 身份核对与 `attachTerminal(runId, 0)` Replay 完成，随后在计时区间外 release；tmux 从新控制调用开始，依次完成冻结的 List Session／Pane／Environment／Capture。
 - 必须保持原 PID 与 Session 身份，不允许 Respawn；记录 p50／p95／p99。
 
 ### E. Concurrent Session Scale
@@ -108,9 +110,10 @@
 
 ## 5. 统计方法
 
-- 分位数使用排序后的 nearest-rank；p99 至少需要 100 个样本。
+- 分位数使用排序后的 nearest-rank。Input-to-visible、Attach／Replay 与 Reconnect 的 p99 各自至少有 100 个正式样本；Throughput、Scale 与 Stop 的 p99 仍按 Raw Sample 描述性记录，但因样本不足 100 不作为 p99 release comparison。
 - 汇总同时输出 count、min、mean、p50、p95、p99、max、standard deviation。
-- 使用固定 Bootstrap Seed `8008`、10,000 次有放回重采样，为 mean 与 p50／p95／p99 输出 95% Percentile Confidence Interval。
+- Standard deviation 使用 population 公式 `sqrt(sum((x - mean)^2) / n)`。
+- 使用固定 Bootstrap Seed `8008`、10,000 次有放回重采样，为 mean 与 p50／p95／p99 输出 95% Percentile Confidence Interval；bootstrap PRNG 冻结为 32-bit Mulberry32，CI 两端取 bootstrap statistic 排序后的 nearest-rank 2.5／97.5 percentile。每个 summary 独立从 Seed `8008` 开始，保证相同 Raw Sample 逐字节复现相同 Summary。
 - 不删除 Outlier，不 Winsorize，不按 IQR 过滤。OS 调度、GC、tmux Server 启动和失败样本全部进入 Raw Result；失败另有 Error Code／Phase。
 - 至少两轮独立完整运行；每轮之间完整 Shutdown 两个 Runtime、等待 10 秒，不共享 Session、Replay 或 Server。两轮所有 Gate 必须同方向通过。
 
@@ -119,12 +122,12 @@
 ### Correctness Gate
 
 - AgentMux 与 tmux 的每个有效样本必须通过 Marker、Byte Count／Hash、Session Identity 和 Cleanup Oracle。
-- AgentMux 还必须通过 Sequence 单调、无隐藏 Gap、Reconnect 不 Respawn、Stop 后零 Session；tmux 必须无仍可运行的孤儿进程。
+- AgentMux 还必须通过 Sequence 单调、无隐藏 Gap、Reconnect 不 Respawn、Stop 后零个 benchmark-owned live Run；CtxMux 可继续保留明确为 historical 的 Run identity，不把历史记录伪装成 live Session。tmux 必须无仍可运行的孤儿进程。
 - 任何 AgentMux correctness failure 直接 `fail`；Baseline correctness failure 诚实记录，并使对应性能项不可用，不能算成 AgentMux 的速度胜出。
 
 ### Resource Budget
 
-- AgentMux Daemon：沿用 T-007，Idle RSS 不超过 96 MiB；32 Session Peak RSS 不超过 160 MiB；20 轮释放无 FD 线性增长；Idle CPU 不超过 1%。
+- AgentMux CtxMux daemon：Idle RSS 不超过 96 MiB；32 Run Peak RSS 不超过 160 MiB；Idle CPU 不超过 1%。Live child、Attachment 与 transient thread 在 Stop 后必须归零。固定 CtxMux candidate 尚无 global Run GC，historical Run 可保留的 FD 成本不得超过 `packages/core/test/fixtures/reliability-budgets.json` 冻结的每 Run `2.25`；这项 T-017 Gate 前置证据必须与最终 SHA 一起复核，不能误写成“历史 Run 已删除”或“FD 零保留”。
 - 单 Runtime Client Queue、Replay、Frame、Session 与 Client 数继续使用 `docs/testing/strategy.md` 的硬上限；Benchmark 不提供放宽开关。
 - Desktop：沿用 T-007，Terminal 增量 256 MiB、Editor 增量 512 MiB、释放后进程组 1 GiB、Warm Cache 漂移 128 MiB。Desktop 数字不与 Headless tmux Server 混合。
 
@@ -148,8 +151,10 @@ Runner 写入一个不覆盖已有文件的 JSON：
 
 ```json
 {
-  "schema": "agentmux.benchmark.daemon-cutover.v1",
-  "protocolRevision": 1,
+  "schema": "agentmux.benchmark.daemon-cutover.v2",
+  "protocolRevision": 2,
+  "runnerVersion": 2,
+  "mode": "full",
   "runId": "<uuid>",
   "round": 1,
   "manifest": {},
@@ -165,14 +170,16 @@ Runner 写入一个不覆盖已有文件的 JSON：
   },
   "correctness": {},
   "summary": {},
-  "verdict": "pass | fail"
+  "verdict": "pass | fail | smoke"
 }
 ```
 
-Raw Sample、失败、跳过原因与 Manifest 全部保留。汇总脚本只读 Raw JSON，不能重新跑 Workload 或修改样本。默认输出目录是 `docs/benchmarks/results/`；文件名包含 Round、Git Short SHA、Platform 和 UTC Timestamp，采用排他创建，禁止覆盖。
+Raw Sample、失败、跳过原因与 Manifest 全部保留。Runner 在内存中只从 Raw Sample 生成 Summary；统计原语是纯函数，不能修改样本。默认输出目录是 `docs/benchmarks/results/`；文件名包含 Round、Git Short SHA、Platform 和 UTC Timestamp，采用排他创建，禁止覆盖。正式模式必须显式传 `--round 1` 或 `--round 2`；`--smoke` 使用缩小样本验证相同控制路径，必须显式传一个 results 目录外的 `--output`，Verdict 固定为 `smoke`。
 
 ## 8. 复现与安全
 
-Revision 1 已没有可执行入口，避免继续在错误 candidate 上累积结果。`run-kernel-workload.mjs` 和 `run-kernel-statistics.mjs` 是 T-013 保留的中立资产，不构成 Benchmark Runner，也不会写结果目录。
+Revision 1 已没有可执行入口，避免继续在错误 candidate 上累积结果。它使用的自建 daemon 已删除；已知 4 MiB Debug sustained-output 在 30 秒内没有形成完整 Hash，旧结果不能证明 AgentMux + CtxMux，也不能通过调低 payload、延长后删样本或改变主维度来修饰。`run-kernel-workload.mjs` 和 `run-kernel-statistics.mjs` 是 T-013 保留并由 Revision 2 复用的 candidate-neutral Fixture／统计原语。
 
-T-018 只有在 ctxmux Adapter 已通过无豁免 Conformance 后，才按本文件冻结的新 Revision 重建两轮 Runner。新 Runner 只能创建自己的临时目录、精确命名的 tmux Baseline 和 Fixture Process；不得读取或删除用户 tmux Session，不连接未授权 SSH，不下载竞品，不改 Agent Hook/Credential，不发布 Package。
+Revision 2 入口是 `pnpm benchmark:daemon-cutover -- --round <1|2>`；实现期路径验证是 `pnpm benchmark:daemon-cutover:smoke -- --round 1 --output <outside-results.json>`。Runner 只创建自己的临时目录、以 `agentmux-benchmark-` 开头的随机 tmux socket、精确记录的 AgentMux RunId 和 Fixture PID。正常 cleanup 只通过 AgentMux 公共 `stopTerminal(exact RunRef)` 停止其创建且仍 running 的 Run，只通过带 exact `-L` 的 tmux `kill-session`／`kill-server` 停止自己的 baseline。若 correctness 证明 tmux 留下 Runner 记录的 fixture PID，最终 emergency cleanup 只对这些 exact PID 发信号。最后可用 OS process metadata 仅匹配 exact benchmark runtime directory 的 daemon argv 并关闭该空 daemon；不得读 CtxMux wire/state，不得按名称广泛 `pkill`，不得触碰默认 tmux socket、用户 Session 或非 benchmark PID。
+
+不连接真实 SSH，不下载或临时安装竞品，不改 Agent Hook／Credential，不发布 Package。两轮正式结果之间必须完整 cleanup 两个 Runtime 并由调用者等待 10 秒；Round 2 不能复用 Round 1 的临时目录、daemon、tmux socket、Run、Replay 或 Fixture。
