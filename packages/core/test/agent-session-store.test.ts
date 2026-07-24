@@ -14,6 +14,8 @@ function storedSession() {
     hostId: 'local',
     workspacePath: upstreamFixturePath("tmp/work"),
     run: { runId: 'daemon-1' },
+    retiredRuns: [],
+    hookBindingId: 'hook-binding-1',
     outputCursorBytes: 12,
     createdAt: 100,
     updatedAt: 200,
