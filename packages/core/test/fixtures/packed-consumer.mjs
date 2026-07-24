@@ -1,11 +1,9 @@
 import assert from 'node:assert/strict'
 import { connectLocalAgentMux, connectSshAgentMux } from '@agentmux/core'
 
-const socketPath = process.env.AGENTMUX_CTXMUX_SOCKET
-const stateDirectory = process.env.AGENTMUX_CTXMUX_STATE
 const controlFixture = process.env.AGENTMUX_CONTROL_FIXTURE
 const stubbornFixture = process.env.AGENTMUX_STUBBORN_FIXTURE
-assert.ok(socketPath && stateDirectory && controlFixture && stubbornFixture)
+assert.ok(controlFixture && stubbornFixture)
 
 async function waitFor(description, predicate, timeoutMs = 8_000) {
   const deadline = Date.now() + timeoutMs
@@ -34,8 +32,8 @@ async function processIsGone(pid) {
   return false
 }
 
-const options = { socketPath, stateDirectory }
-let first = await connectLocalAgentMux(options)
+let first = await connectLocalAgentMux()
+assert.deepEqual(await first.listRuns(), [])
 const firstEvents = []
 first.onEvent((event) => firstEvents.push(event))
 const run = await first.createTerminal({
@@ -57,7 +55,7 @@ const originalPid = beforeReconnect.pid
 await first.dispose()
 first = null
 
-const second = await connectLocalAgentMux(options)
+const second = await connectLocalAgentMux()
 const reconnected = (await second.listRuns()).find((candidate) => candidate.runId === run.runId)
 assert.ok(reconnected)
 assert.equal(reconnected.runId, run.runId)

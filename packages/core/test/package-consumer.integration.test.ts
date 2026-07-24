@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 const execFileAsync = promisify(execFile)
 const repositoryRoot = resolve(import.meta.dirname, '../../..')
 const packedConsumerFixture = fileURLToPath(new URL('./fixtures/packed-consumer.mjs', import.meta.url))
+const ownerFenceFixture = fileURLToPath(new URL('./fixtures/ctxmux-owner-fence.mjs', import.meta.url))
 const controlFixture = fileURLToPath(new URL('./fixtures/ctxmux-terminal-control.mjs', import.meta.url))
 const stubbornFixture = fileURLToPath(new URL('./fixtures/stubborn-process-tree.mjs', import.meta.url))
 const roots: string[] = []
@@ -36,6 +37,74 @@ async function waitForSocket(
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 20))
   }
   throw new Error(`Packed ctxmuxd did not create its socket: ${stderr()}`)
+}
+
+type DaemonProcess = {
+  pid: number
+  socketPath: string
+  stateDirectory: string
+}
+
+async function daemonProcesses(daemonPath: string, runtimeDirectory: string): Promise<DaemonProcess[]> {
+  const result = await execFileAsync('ps', ['-axo', 'pid=,command='], {
+    timeout: 5_000,
+    maxBuffer: 4 * 1024 * 1024
+  })
+  return result.stdout.split('\n').flatMap((line) => {
+    const match = /^\s*(\d+)\s+(.+)$/u.exec(line)
+    if (!match) return []
+    const args = match[2]!.trim().split(/\s+/u)
+    const executableIndex = args.indexOf(daemonPath)
+    const socketIndex = args.indexOf('--socket')
+    const stateIndex = args.indexOf('--state-dir')
+    const socketPath = args[socketIndex + 1]
+    const stateDirectory = args[stateIndex + 1]
+    if (
+      executableIndex < 0 ||
+      socketIndex < 0 ||
+      stateIndex < 0 ||
+      !socketPath?.startsWith(runtimeDirectory) ||
+      !stateDirectory?.startsWith(runtimeDirectory)
+    ) return []
+    return [{
+      pid: Number(match[1]),
+      socketPath,
+      stateDirectory
+    }]
+  })
+}
+
+async function waitForDaemonProcess(
+  daemonPath: string,
+  runtimeDirectory: string
+): Promise<DaemonProcess> {
+  const deadline = Date.now() + 5_000
+  while (Date.now() <= deadline) {
+    const processes = await daemonProcesses(daemonPath, runtimeDirectory)
+    if (processes.length === 1) return processes[0]!
+    if (processes.length > 1) throw new Error('Multiple packed ctxmuxd owners share one runtime root.')
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 20))
+  }
+  throw new Error('AgentMux did not activate its packed ctxmuxd owner.')
+}
+
+async function stopDaemon(daemon: DaemonProcess): Promise<void> {
+  try {
+    process.kill(daemon.pid, 'SIGTERM')
+  } catch (error) {
+    if (!(error instanceof Error && 'code' in error && error.code === 'ESRCH')) throw error
+  }
+  const deadline = Date.now() + 5_000
+  while (Date.now() <= deadline) {
+    try {
+      process.kill(daemon.pid, 0)
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'ESRCH') return
+      throw error
+    }
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 20))
+  }
+  throw new Error(`CtxMux daemon ${daemon.pid} did not stop.`)
 }
 
 describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
@@ -99,6 +168,7 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
       })
       await Promise.all([
         cp(packedConsumerFixture, join(consumerDirectory, 'packed-consumer.mjs')),
+        cp(ownerFenceFixture, join(consumerDirectory, 'ctxmux-owner-fence.mjs')),
         cp(controlFixture, join(consumerDirectory, 'ctxmux-terminal-control.mjs')),
         cp(stubbornFixture, join(consumerDirectory, 'stubborn-process-tree.mjs'))
       ])
@@ -131,27 +201,17 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         worktree_clean: true
       })
 
-      const socketPath = join(runtimeDirectory, 'ctxmux.sock')
-      const stateDirectory = join(runtimeDirectory, 'state')
       const daemonPath = join(packageRoot, 'vendor', 'ctxmux', 'darwin-arm64', 'bin', 'ctxmuxd')
-      const daemon = spawn(daemonPath, ['--socket', socketPath, '--state-dir', stateDirectory], {
-        stdio: ['ignore', 'ignore', 'pipe']
-      })
-      let daemonStderr = ''
-      let daemonSpawnError: Error | null = null
-      daemon.once('error', (error) => { daemonSpawnError = error })
-      daemon.stderr.setEncoding('utf8')
-      daemon.stderr.on('data', (chunk) => { daemonStderr += chunk })
+      let activeDaemon: DaemonProcess | null = null
+      let replacement: ReturnType<typeof spawn> | null = null
       try {
-        await waitForSocket(socketPath, daemon, () => daemonStderr, () => daemonSpawnError)
         const result = await execFileAsync(process.execPath, ['packed-consumer.mjs'], {
           cwd: consumerDirectory,
           timeout: 60_000,
           maxBuffer: 8 * 1024 * 1024,
           env: {
             ...process.env,
-            AGENTMUX_CTXMUX_SOCKET: socketPath,
-            AGENTMUX_CTXMUX_STATE: stateDirectory,
+            TMPDIR: runtimeDirectory,
             AGENTMUX_CONTROL_FIXTURE: join(consumerDirectory, 'ctxmux-terminal-control.mjs'),
             AGENTMUX_STUBBORN_FIXTURE: join(consumerDirectory, 'stubborn-process-tree.mjs')
           }
@@ -162,11 +222,39 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
           interruptStillLive: true,
           remote: 'unsupported'
         })
+
+        activeDaemon = await waitForDaemonProcess(daemonPath, runtimeDirectory)
+        await stopDaemon(activeDaemon)
+        replacement = spawn(daemonPath, [
+          '--socket', activeDaemon.socketPath,
+          '--state-dir', activeDaemon.stateDirectory
+        ], { stdio: ['ignore', 'ignore', 'pipe'] })
+        let replacementStderr = ''
+        let replacementError: Error | null = null
+        replacement.once('error', (error) => { replacementError = error })
+        replacement.stderr?.setEncoding('utf8')
+        replacement.stderr?.on('data', (chunk) => { replacementStderr += chunk })
+        await waitForSocket(
+          activeDaemon.socketPath,
+          replacement,
+          () => replacementStderr,
+          () => replacementError
+        )
+        const fenced = await execFileAsync(process.execPath, ['ctxmux-owner-fence.mjs'], {
+          cwd: consumerDirectory,
+          timeout: 15_000,
+          maxBuffer: 4 * 1024 * 1024,
+          env: { ...process.env, TMPDIR: runtimeDirectory }
+        })
+        expect(fenced.stdout.trim()).toBe('ctxmux-owner-fence-ok')
       } finally {
-        if (daemon.pid && daemon.exitCode === null && daemon.signalCode === null) {
-          const exited = once(daemon, 'exit')
-          daemon.kill('SIGTERM')
+        if (replacement?.pid && replacement.exitCode === null && replacement.signalCode === null) {
+          const exited = once(replacement, 'exit')
+          replacement.kill('SIGTERM')
           await exited.catch(() => {})
+        }
+        for (const daemon of await daemonProcesses(daemonPath, runtimeDirectory)) {
+          await stopDaemon(daemon)
         }
       }
     }, 95_000)

@@ -1,9 +1,10 @@
-import { spawn } from 'node:child_process'
-import { createHash } from 'node:crypto'
-import { chmod, mkdir, readFile, stat } from 'node:fs/promises'
+import { execFile, spawn } from 'node:child_process'
+import { createHash, randomUUID } from 'node:crypto'
+import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { promisify } from 'node:util'
 import {
   Attachment,
   CtxmuxClient,
@@ -19,9 +20,13 @@ import {
 import { AgentMuxError } from './errors.js'
 
 const CTXMUX_COMMIT = '3b94288c3a7896bb355e028135409c8e8bbaf764'
+const CTXMUX_TREE = '58f3630477881e75f0f022d3fbb98a93ff2f46c4'
 const CTXMUX_VERSION = '0.1.0'
+const CTXMUX_MANIFEST_SHA256 = 'c1bab5039f6270c4c6c546d81699df251fe583477546a56a26a3f9332020ef42'
+const CTXMUX_RUNTIME_ID = '88e8377ecc4341b655d47306'
 const DAEMON_READY_TIMEOUT_MS = 5_000
 const DAEMON_POLL_INTERVAL_MS = 20
+const execFileAsync = promisify(execFile)
 
 type ArtifactDescriptor = {
   name: string
@@ -35,11 +40,28 @@ type ArtifactDescriptor = {
 
 type ArtifactManifest = {
   schema: string
-  source: { commit: string; worktree_clean: boolean }
+  source: { commit: string; tree: string; worktree_clean: boolean }
   product: { version: string; protocol: number }
   support: { platform: string; architecture: string; transport: string }
   sdk: { archive: { path: string; sha256: string; bytes: number; mode: string } }
   binaries: ArtifactDescriptor[]
+}
+
+type VerifiedArtifacts = {
+  daemonPath: string
+  daemonSha256: string
+}
+
+type OwnerReceipt = {
+  schema: 'agentmux.ctxmux-owner.v1'
+  sourceCommit: string
+  sourceTree: string
+  manifestSha256: string
+  daemonSha256: string
+  daemonPath: string
+  socketPath: string
+  stateDirectory: string
+  daemonInstanceId: string
 }
 
 export type CtxmuxAdapterRun = {
@@ -91,11 +113,6 @@ export type CtxmuxAdapterAttachment = {
   gap: { requestedAfterByte: number; firstAvailableByte: number } | null
 }
 
-export type CtxmuxRunAdapterOptions = {
-  socketPath?: string
-  stateDirectory?: string
-}
-
 type LiveAttachment = {
   attachment: Attachment
   token: symbol
@@ -107,7 +124,7 @@ function delay(milliseconds: number): Promise<void> {
 
 function runtimeRoot(): string {
   const uid = typeof process.getuid === 'function' ? process.getuid() : 'user'
-  return join(tmpdir(), `agentmux-${uid}`, 'ctxmux')
+  return join(tmpdir(), `amx-${uid}-${CTXMUX_RUNTIME_ID}`)
 }
 
 export function defaultCtxmuxSocketPath(): string {
@@ -116,6 +133,10 @@ export function defaultCtxmuxSocketPath(): string {
 
 export function defaultCtxmuxStateDirectory(): string {
   return join(runtimeRoot(), 'state')
+}
+
+function ownerReceiptPath(): string {
+  return join(runtimeRoot(), 'owner.json')
 }
 
 function artifactDirectory(): string {
@@ -163,7 +184,8 @@ async function sha256(path: string): Promise<string> {
 async function verifyArtifact(
   root: string,
   descriptor: { path: string; sha256: string; bytes: number; mode: string },
-  expectedMode: number
+  expectedMode: number,
+  expectedModeText: string
 ): Promise<void> {
   if (descriptor.path.startsWith('/') || descriptor.path.includes('..')) {
     throw new AgentMuxError('CtxMux artifact manifest contains an unsafe path.', 'CTXMUX_ARTIFACT_INVALID')
@@ -172,6 +194,7 @@ async function verifyArtifact(
   const metadata = await stat(path)
   if (
     !metadata.isFile() ||
+    descriptor.mode !== expectedModeText ||
     metadata.size !== descriptor.bytes ||
     (metadata.mode & 0o777) !== expectedMode ||
     await sha256(path) !== descriptor.sha256
@@ -180,11 +203,15 @@ async function verifyArtifact(
   }
 }
 
-async function verifyArtifacts(): Promise<{ daemonPath: string }> {
+async function verifyArtifacts(): Promise<VerifiedArtifacts> {
   const root = artifactDirectory()
   let manifest: ArtifactManifest
   try {
-    manifest = JSON.parse(await readFile(join(root, 'manifest.json'), 'utf8')) as ArtifactManifest
+    const manifestBytes = await readFile(join(root, 'manifest.json'))
+    if (createHash('sha256').update(manifestBytes).digest('hex') !== CTXMUX_MANIFEST_SHA256) {
+      throw new Error('manifest digest mismatch')
+    }
+    manifest = JSON.parse(manifestBytes.toString('utf8')) as ArtifactManifest
   } catch (error) {
     throw new AgentMuxError(
       `CtxMux artifact manifest is unavailable: ${error instanceof Error ? error.message : String(error)}`,
@@ -194,6 +221,7 @@ async function verifyArtifacts(): Promise<{ daemonPath: string }> {
   if (
     manifest.schema !== 'ctxmux.local-artifacts.v1' ||
     manifest.source.commit !== CTXMUX_COMMIT ||
+    manifest.source.tree !== CTXMUX_TREE ||
     manifest.source.worktree_clean !== true ||
     manifest.product.version !== CTXMUX_VERSION ||
     manifest.product.protocol !== PROTOCOL_VERSION ||
@@ -203,17 +231,98 @@ async function verifyArtifacts(): Promise<{ daemonPath: string }> {
   ) {
     throw new AgentMuxError('CtxMux artifact manifest does not match this AgentMux build.', 'CTXMUX_ARTIFACT_INVALID')
   }
-  await verifyArtifact(root, manifest.sdk.archive, 0o644)
+  await verifyArtifact(root, manifest.sdk.archive, 0o644, '0644')
   const daemon = manifest.binaries.find((binary) => binary.name === 'ctxmuxd')
   const cli = manifest.binaries.find((binary) => binary.name === 'ctxmux')
   if (!daemon || !cli || manifest.binaries.length !== 2) {
     throw new AgentMuxError('CtxMux artifact manifest is missing required binaries.', 'CTXMUX_ARTIFACT_INVALID')
   }
   await Promise.all([
-    verifyArtifact(root, daemon, 0o755),
-    verifyArtifact(root, cli, 0o755)
+    verifyArtifact(root, daemon, 0o755, '0755'),
+    verifyArtifact(root, cli, 0o755, '0755')
   ])
-  return { daemonPath: join(root, daemon.path) }
+  const daemonPath = join(root, daemon.path)
+  try {
+    const version = await execFileAsync(daemonPath, ['--version'], {
+      timeout: 5_000,
+      maxBuffer: 64 * 1024
+    })
+    if (version.stdout.trim() !== `ctxmuxd ${CTXMUX_VERSION} (protocol ${PROTOCOL_VERSION})`) {
+      throw new Error(`unexpected version: ${version.stdout.trim()}`)
+    }
+  } catch (error) {
+    throw new AgentMuxError(
+      `CtxMux daemon artifact did not satisfy its public version contract: ${error instanceof Error ? error.message : String(error)}`,
+      'CTXMUX_ARTIFACT_INVALID'
+    )
+  }
+  return { daemonPath, daemonSha256: daemon.sha256 }
+}
+
+function expectedOwnerReceipt(
+  artifacts: VerifiedArtifacts,
+  socketPath: string,
+  stateDirectory: string,
+  daemonInstanceId: string
+): OwnerReceipt {
+  return {
+    schema: 'agentmux.ctxmux-owner.v1',
+    sourceCommit: CTXMUX_COMMIT,
+    sourceTree: CTXMUX_TREE,
+    manifestSha256: CTXMUX_MANIFEST_SHA256,
+    daemonSha256: artifacts.daemonSha256,
+    daemonPath: artifacts.daemonPath,
+    socketPath,
+    stateDirectory,
+    daemonInstanceId
+  }
+}
+
+async function verifyOwnerReceipt(
+  artifacts: VerifiedArtifacts,
+  socketPath: string,
+  stateDirectory: string,
+  daemonInstanceId: string
+): Promise<void> {
+  try {
+    const path = ownerReceiptPath()
+    const metadata = await stat(path)
+    const receipt = JSON.parse(await readFile(path, 'utf8')) as OwnerReceipt
+    const expected = expectedOwnerReceipt(artifacts, socketPath, stateDirectory, daemonInstanceId)
+    if (
+      !metadata.isFile() ||
+      (metadata.mode & 0o777) !== 0o600 ||
+      JSON.stringify(receipt) !== JSON.stringify(expected)
+    ) {
+      throw new Error('owner receipt mismatch')
+    }
+  } catch (error) {
+    throw new AgentMuxError(
+      `The responding CtxMux peer is not the artifact-owned AgentMux daemon: ${error instanceof Error ? error.message : String(error)}`,
+      'CTXMUX_OWNER_IDENTITY_UNPROVEN'
+    )
+  }
+}
+
+async function writeOwnerReceipt(
+  artifacts: VerifiedArtifacts,
+  socketPath: string,
+  stateDirectory: string,
+  daemonInstanceId: string
+): Promise<void> {
+  const path = ownerReceiptPath()
+  const temporaryPath = join(dirname(path), `.owner-${process.pid}-${randomUUID()}.json`)
+  try {
+    await writeFile(
+      temporaryPath,
+      `${JSON.stringify(expectedOwnerReceipt(artifacts, socketPath, stateDirectory, daemonInstanceId))}\n`,
+      { encoding: 'utf8', mode: 0o600, flag: 'wx' }
+    )
+    await rename(temporaryPath, path)
+    await chmod(path, 0o600)
+  } finally {
+    await rm(temporaryPath, { force: true })
+  }
 }
 
 function decodeChunk(
@@ -231,18 +340,13 @@ function decodeChunk(
 }
 
 export class CtxmuxRunAdapter {
-  readonly socketPath: string
-  readonly stateDirectory: string
+  readonly socketPath = defaultCtxmuxSocketPath()
+  readonly stateDirectory = defaultCtxmuxStateDirectory()
   private client: CtxmuxClient | null = null
   private daemonInstanceId: string | null = null
   private readonly attachments = new Map<string, LiveAttachment>()
   private eventListener: ((event: CtxmuxAdapterEvent) => void) | null = null
   private errorListener: ((error: AgentMuxError, runId?: string) => void) | null = null
-
-  constructor(options: CtxmuxRunAdapterOptions = {}) {
-    this.socketPath = options.socketPath ?? defaultCtxmuxSocketPath()
-    this.stateDirectory = options.stateDirectory ?? defaultCtxmuxStateDirectory()
-  }
 
   onEvent(listener: (event: CtxmuxAdapterEvent) => void): () => void {
     this.eventListener = listener
@@ -260,7 +364,7 @@ export class CtxmuxRunAdapter {
 
   async connect(): Promise<void> {
     if (this.client !== null) return
-    const { daemonPath } = await verifyArtifacts()
+    const artifacts = await verifyArtifacts()
     await Promise.all([
       mkdir(dirname(this.socketPath), { recursive: true, mode: 0o700 }),
       mkdir(this.stateDirectory, { recursive: true, mode: 0o700 })
@@ -270,10 +374,18 @@ export class CtxmuxRunAdapter {
       chmod(this.stateDirectory, 0o700)
     ])
     const client = new CtxmuxClient({ socketPath: this.socketPath })
+    let daemonInstanceId: string | null = null
     try {
-      await client.ping()
+      daemonInstanceId = await client.daemonInstance()
+      await verifyOwnerReceipt(artifacts, this.socketPath, this.stateDirectory, daemonInstanceId)
     } catch {
-      const child = spawn(daemonPath, [
+      if (daemonInstanceId !== null) {
+        throw new AgentMuxError(
+          'An unowned CtxMux peer already occupies the exact AgentMux runtime endpoint.',
+          'CTXMUX_OWNER_IDENTITY_UNPROVEN'
+        )
+      }
+      const child = spawn(artifacts.daemonPath, [
         '--socket',
         this.socketPath,
         '--state-dir',
@@ -289,7 +401,7 @@ export class CtxmuxRunAdapter {
       let lastError: unknown = spawnError
       while (Date.now() <= deadline) {
         try {
-          await client.ping()
+          daemonInstanceId = await client.daemonInstance()
           lastError = null
           break
         } catch (error) {
@@ -298,13 +410,18 @@ export class CtxmuxRunAdapter {
         }
       }
       if (lastError !== null) throw lastError
+      await writeOwnerReceipt(
+        artifacts,
+        this.socketPath,
+        this.stateDirectory,
+        daemonInstanceId as string
+      )
     }
-    try {
-      this.daemonInstanceId = await client.daemonInstance()
-      this.client = client
-    } catch (error) {
-      throw translateCtxmuxError(error)
+    if (daemonInstanceId === null) {
+      throw new AgentMuxError('CtxMux did not report its daemon instance.', 'CTXMUX_OWNER_IDENTITY_UNPROVEN')
     }
+    this.daemonInstanceId = daemonInstanceId
+    this.client = client
   }
 
   disconnect(): void {

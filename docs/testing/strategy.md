@@ -13,6 +13,7 @@ Terminal output 是 raw PTY bytes 的 UTF-8 投影，不是模型上下文、Too
 | 不变量 | AgentMux public oracle |
 | --- | --- |
 | exact artifact identity | pack 内 manifest 固定 commit `3b94288c3a7896bb355e028135409c8e8bbaf764`、tree `58f3630477881e75f0f022d3fbb98a93ff2f46c4`、protocol 9，并在 build/runtime 复核 size/mode/SHA-256 |
+| exact endpoint owner | socket/state 根由 commit + manifest identity 派生；packed consumer 让同 protocol replacement 占用该路径，新 Client 因 owner receipt/daemon instance 不匹配失败关闭 |
 | checkout independence | `package-consumer.integration.test.ts` 在 `/private/tmp` 执行 `pnpm pack` 和 offline/no-save npm install；真实 package root 不在 checkout |
 | one Run identity | 公共 `AgentMuxRunRef` 只有 CtxMux `runId`；重连后 RunId 与 PID 均不变 |
 | ordered byte replay | fixture 拆分一个四字节 emoji 的两次 write；Client 不产生 replacement character；从 byte 7 interior cursor 重连后得到连续 suffix |

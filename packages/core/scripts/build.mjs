@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
 const execFileAsync = promisify(execFile)
+const expectedManifestSha256 = 'c1bab5039f6270c4c6c546d81699df251fe583477546a56a26a3f9332020ef42'
 const packageRoot = fileURLToPath(new URL('../', import.meta.url))
 const workspaceRoot = fileURLToPath(new URL('../../../', import.meta.url))
 const buildRoot = join(packageRoot, '.ctxmux-build')
@@ -35,7 +36,11 @@ async function verify(path, descriptor, mode) {
 await rm(buildRoot, { recursive: true, force: true })
 await mkdir(buildRoot, { recursive: true })
 try {
-  const manifest = JSON.parse(await readFile(join(artifactRoot, 'manifest.json'), 'utf8'))
+  const manifestPath = join(artifactRoot, 'manifest.json')
+  if (await sha256(manifestPath) !== expectedManifestSha256) {
+    throw new Error('CtxMux build input manifest digest does not match the pinned consumer contract.')
+  }
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
   if (
     manifest.schema !== 'ctxmux.local-artifacts.v1' ||
     manifest.source.commit !== '3b94288c3a7896bb355e028135409c8e8bbaf764' ||
