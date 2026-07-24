@@ -18,7 +18,10 @@
     "test:fuzz": "pnpm --filter @agentmux/core build && vitest run packages/core/test/security-fuzz.test.ts apps/desktop/test/workspace-files-fuzz.test.ts",
     "test:reliability": "pnpm --filter @agentmux/core build && vitest run --maxWorkers=1 packages/core/test/reliability-stress.integration.test.ts",
     "test:resources": "pnpm --filter @agentmux/desktop measure:desktop",
+    "test:benchmark-smoke": "pnpm --filter @agentmux/core test:benchmark-smoke",
     "test:nightly": "pnpm test:native && pnpm test:security && pnpm test:fuzz && pnpm test:reliability && pnpm test:resources",
+    "benchmark:daemon-cutover": "pnpm --filter @agentmux/core benchmark:daemon-cutover",
+    "benchmark:daemon-cutover:smoke": "pnpm --filter @agentmux/core benchmark:daemon-cutover:smoke",
     "check": "pnpm typecheck && pnpm test && pnpm build"
   },
   "devDependencies": {

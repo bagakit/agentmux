@@ -52,7 +52,10 @@
     "test:security": "pnpm build && vitest run test/acp-adapter.test.ts test/agent-session-store-limits.test.ts test/client-event-publisher.test.ts test/desktop-focus-control.test.ts test/hook-server.test.ts test/managed-hook-installer.test.ts",
     "test:fuzz": "pnpm build && vitest run test/security-fuzz.test.ts",
     "test:reliability": "pnpm build && vitest run --maxWorkers=1 test/reliability-stress.integration.test.ts",
-    "test:conformance": "pnpm build && vitest run test/runtime-projection.test.ts test/agent-session-store.test.ts && vitest run --maxWorkers=1 test/package-consumer.integration.test.ts"
+    "test:conformance": "pnpm build && vitest run test/runtime-projection.test.ts test/agent-session-store.test.ts && vitest run --maxWorkers=1 test/package-consumer.integration.test.ts",
+    "test:benchmark-smoke": "pnpm build && AGENTMUX_BENCHMARK_SMOKE=1 vitest run --maxWorkers=1 test/daemon-cutover-benchmark-smoke.integration.test.ts",
+    "benchmark:daemon-cutover": "pnpm build && node scripts/run-daemon-cutover-benchmark.mjs",
+    "benchmark:daemon-cutover:smoke": "pnpm build && node scripts/run-daemon-cutover-benchmark.mjs --smoke"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
