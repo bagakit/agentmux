@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { basename } from 'node:path'
 import { dialog, ipcMain, type BrowserWindow, type IpcMainEvent } from 'electron'
-import type { AgentId } from '@agentmux/core'
+import { AgentMuxDesktopFocusServer, type AgentId } from '@agentmux/core'
 import type {
   AgentLaunchInput,
   AgentSessionControl,
@@ -38,7 +38,7 @@ export async function registerIpc(args: {
   window: BrowserWindow
   configStore: ConfigStore
   runtime: RuntimeController
-}): Promise<() => void> {
+}): Promise<() => Promise<void>> {
   let config = await args.configStore.get()
   args.runtime.commit(await args.runtime.prepare(config))
   const files = new WorkspaceFiles((id) => args.runtime.executionHost(id))
@@ -62,6 +62,21 @@ export async function registerIpc(args: {
       pending.reject(error)
     }
   }
+  const focusView = async (target: DesktopViewFocusTarget): Promise<DesktopViewFocusResult> => (
+    await new Promise((resolve, reject) => {
+      if (args.window.webContents.isDestroyed()) {
+        reject(Object.assign(new Error('Desktop View focus owner is unavailable.'), { code: 'VIEW_FOCUS_UNAVAILABLE' }))
+        return
+      }
+      const request: DesktopViewFocusRequest = { requestId: randomUUID(), target }
+      const timeout = setTimeout(() => {
+        pendingViewFocus.delete(request.requestId)
+        reject(Object.assign(new Error('Desktop View focus request timed out.'), { code: 'VIEW_FOCUS_TIMEOUT' }))
+      }, 2_000)
+      pendingViewFocus.set(request.requestId, { resolve, reject, timeout })
+      args.window.webContents.send('agentmux:view-focus-request', request)
+    })
+  )
   ipcMain.on('views:focus:response', acceptViewFocus)
   const handle = <TArgs extends unknown[], TResult>(
     channel: string,
@@ -138,19 +153,7 @@ export async function registerIpc(args: {
     await files.delete(workspace(config, workspaceId), path)
   })
   handle('agents:detect', async (agentId: AgentId, hostId: string) => await args.runtime.detect(agentId, hostId, config))
-  handle('views:focus', async (target: DesktopViewFocusTarget) => await new Promise((resolve, reject) => {
-    if (args.window.webContents.isDestroyed()) {
-      reject(Object.assign(new Error('Desktop View focus owner is unavailable.'), { code: 'VIEW_FOCUS_UNAVAILABLE' }))
-      return
-    }
-    const request: DesktopViewFocusRequest = { requestId: randomUUID(), target }
-    const timeout = setTimeout(() => {
-      pendingViewFocus.delete(request.requestId)
-      reject(Object.assign(new Error('Desktop View focus request timed out.'), { code: 'VIEW_FOCUS_TIMEOUT' }))
-    }, 2_000)
-    pendingViewFocus.set(request.requestId, { resolve, reject, timeout })
-    args.window.webContents.send('agentmux:view-focus-request', request)
-  }))
+  handle('views:focus', focusView)
   handle('sessions:snapshot', async () => await args.runtime.snapshot(config))
   handle('sessions:launchAgent', async (input: AgentLaunchInput) => await args.runtime.launchAgent(input, config))
   handle('sessions:launchTerminal', async (input: TerminalLaunchInput) => await args.runtime.launchTerminal(input, config))
@@ -162,7 +165,7 @@ export async function registerIpc(args: {
     await args.runtime.write(session, data)
   })
   handle('sessions:submitPrompt', async (session: AgentSessionControl, prompt: string) => {
-    await args.runtime.submitPrompt(session, prompt)
+    await args.runtime.submitPrompt(session, prompt, config)
   })
   handle('sessions:acknowledge', async (session: SessionControl, sequence: number) => {
     await args.runtime.acknowledge(session, sequence)
@@ -181,7 +184,10 @@ export async function registerIpc(args: {
   handle('browser:setBounds', (id: string, bounds: BrowserBounds | null) => browsers.setBounds(id, bounds))
   handle('browser:close', (id: string) => browsers.close(id))
   const detach = args.runtime.attach(args.window.webContents)
-  return () => {
+  const externalFocus = new AgentMuxDesktopFocusServer({ focus: focusView })
+  await externalFocus.start()
+  return async () => {
+    await externalFocus.stop()
     detach()
     browsers.dispose()
     ipcMain.removeListener('views:focus:response', acceptViewFocus)

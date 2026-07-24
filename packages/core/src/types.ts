@@ -147,6 +147,21 @@ export type AgentReadySignal = {
   expectedProcess: string
 }
 
+export type AgentTerminalHandshake = {
+  query: string
+  response: string
+}
+
+export type AgentTerminalPromptRenderMatcher = {
+  frameStart: string
+  activeComposer: string
+  frameEnd: string
+}
+
+export type AgentPromptInputPlan =
+  | { kind: 'single-phase'; data: string }
+  | { kind: 'render-then-submit'; payload: string; submit: string }
+
 export type AgentHookStrategy =
   | { kind: 'none' }
   | { kind: 'native'; installation: 'explicit-managed' }
@@ -208,6 +223,15 @@ export type AgentHookReceipt = {
   run: AgentMuxRunRef
   eventName: string
   observedAt: number
+  outputCursorBytes?: number
+}
+
+export type AgentTerminalStopReceiptState = {
+  id: string
+  run: AgentMuxRunRef
+  outputCursorBytes: number
+  readyThroughByte?: number
+  consumedBySubmissionId?: string
 }
 
 export type AgentMuxAgentSession = {
@@ -222,12 +246,46 @@ export type AgentMuxAgentSession = {
   outputCursorBytes: number
   createdAt: number
   updatedAt: number
+  terminalHandshake?: AgentTerminalHandshakeState
+  terminalStopReceipt?: AgentTerminalStopReceiptState
+  terminalPromptSubmission?: AgentTerminalPromptSubmissionState
   nativeHandle?: AgentNativeSessionHandle
   hookReceipt?: AgentHookReceipt
 }
 
-/** This is the complete persistent semantic record. It deliberately has no PTY,
- * process, replay, terminal snapshot, or output byte field. */
+export type AgentTerminalHandshakeState = {
+  run: AgentMuxRunRef
+  operationId: string
+  inputByteRange: {
+    startByte: number
+    endByte: number
+  }
+  acknowledged: boolean
+}
+
+export type AgentTerminalInputPhaseState = {
+  operationId: string
+  inputByteRange: {
+    startByte: number
+    endByte: number
+  }
+  acknowledged: boolean
+}
+
+export type AgentTerminalPromptSubmissionState = {
+  run: AgentMuxRunRef
+  submissionId: string
+  promptDigest: string
+  stopReceiptId: string
+  stopOutputCursorBytes: number
+  readyThroughByte: number
+  outputCursorBytes: number
+  payload: AgentTerminalInputPhaseState
+  submit: AgentTerminalInputPhaseState
+}
+
+/** This is the complete persistent semantic/control record. It deliberately has no
+ * PTY, process, replay, terminal snapshot, or terminal output bytes. */
 export type AgentMuxStoredAgentSession = AgentMuxAgentSession
 
 export type AgentMuxPermissionOption = {
@@ -375,12 +433,14 @@ export type AgentProviderLaunchContext = {
 export type AgentProviderResumeContext = {
   workspacePath: string
   nativeHandle: AgentNativeSessionHandle
+  prompt: string
   args: readonly string[]
   env: Readonly<Record<string, string>>
   commandOverride?: string
 }
 
 export type NativeHookEnvelope = {
+  receiptId: string
   agentSessionId: string
   runId: string
   agentId: AgentId

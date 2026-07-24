@@ -19,6 +19,7 @@ const request = async (body) => await fetch(hookUrl, {
 })
 
 await request({
+  receiptId: 'forged-receipt',
   agentSessionId,
   runId: 'forged-run',
   agentId,
@@ -27,6 +28,7 @@ await request({
 })
 
 const response = await request({
+  receiptId: `session-start-${agentSessionId}`,
   agentSessionId,
   runId,
   agentId,

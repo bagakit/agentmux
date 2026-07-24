@@ -2,7 +2,7 @@
 
 无 Electron、React 依赖的 AgentMux Runtime Core。
 
-当前 Local Run 只由固定的 CtxMux `3b94288c3a7896bb355e028135409c8e8bbaf764` 持有。包内携带 exact-commit manifest、SDK tarball 和 darwin-arm64 binaries；构建把官方 SDK 私有 bundle 进唯一 `CtxmuxRunAdapter`。公共 API 不导出 CtxMux SDK/wire 类型，也不需要相邻仓库、`file:` dependency、全局 `ctxmux` 或运行时下载。
+当前 Local Run 只由固定的 CtxMux `2e32a9d647d627952ea5c455fb2efef6c636643a` 持有。包内携带 exact-commit manifest、SDK tarball 和 darwin-arm64 binaries；构建把官方 SDK 私有 bundle 进唯一 `CtxmuxRunAdapter`。公共 API 不导出 CtxMux SDK/wire 类型，也不需要相邻仓库、`file:` dependency、全局 `ctxmux` 或运行时下载。
 
 Local Client 不接受外部 socket/state 注入。Endpoint 路径由 exact commit 与 manifest digest 派生，只启动经过 hash、mode 和公开 `--version` 合同验证的随包 `ctxmuxd`。已存在的 peer 还必须匹配当时启动时写入的 owner receipt 与 daemon instance；同协议的其他 daemon 失败关闭，不会被标记成该 exact build。
 

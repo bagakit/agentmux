@@ -7,6 +7,7 @@ describe('native hook normalization', () => {
 
   it('maps Codex request_user_input to waiting with native provenance', () => {
     const event = providers.get('codex').normalizeHook({
+      receiptId: 'receipt-1',
       agentSessionId: 'semantic-1',
       runId: 'daemon-1',
       agentId: 'codex',
@@ -28,6 +29,7 @@ describe('native hook normalization', () => {
 
   it('maps Pi ask_user_question to blocked', () => {
     const event = providers.get('pi').normalizeHook({
+      receiptId: 'receipt-2',
       agentSessionId: 'semantic-2',
       runId: 'daemon-2',
       agentId: 'pi',
@@ -44,6 +46,7 @@ describe('native hook normalization', () => {
 
   it('does not invent semantic work from an unknown event', () => {
     const event = providers.get('traex').normalizeHook({
+      receiptId: 'receipt-3',
       agentSessionId: 'semantic-3',
       runId: 'daemon-3',
       agentId: 'traex',

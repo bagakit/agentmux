@@ -1,6 +1,7 @@
 import {
   AlertTriangle,
   LayoutDashboard,
+  LoaderCircle,
   PanelLeftClose,
   PanelLeftOpen,
   RadioTower,
@@ -64,10 +65,22 @@ export function App() {
 
   if (loading) {
     return (
-      <div className="boot">
+      <div className="boot" role="status" aria-live="polite">
         <span className="brand-mark"><BrandIcon size={18} /></span>
         <strong>Starting AgentMux</strong>
-        <span>Connecting to AgentMux Runtime…</span>
+        <span className="boot__progress"><LoaderCircle className="spin" size={13} /> Starting the local Runtime…</span>
+        <small>This is a normal startup state.</small>
+      </div>
+    )
+  }
+
+  if (!config && error) {
+    return (
+      <div className="boot boot--error" role="alert">
+        <AlertTriangle size={22} />
+        <strong>Runtime connection failed</strong>
+        <span>{error}</span>
+        <button className="small-button" onClick={() => window.location.reload()}>Retry startup</button>
       </div>
     )
   }
