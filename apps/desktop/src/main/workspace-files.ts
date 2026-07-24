@@ -126,6 +126,12 @@ async function assertDestinationMissing(path: string): Promise<void> {
 export class WorkspaceFiles {
   constructor(private readonly hostFor: (id: string) => ExecutionHost) {}
 
+  async localPathForReveal(workspace: WorkspaceRecord, requestedPath: string): Promise<string> {
+    const host = this.hostFor(workspace.hostId)
+    if (host.kind !== 'local') throw new Error('Reveal in file manager is available only for local paths')
+    return await localExistingPathWithin(workspace.path, requestedPath)
+  }
+
   async readDirectory(
     workspace: WorkspaceRecord,
     requestedPath: string

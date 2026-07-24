@@ -1,9 +1,12 @@
+import { win32 as _hygiene_win32 } from "node:path"
+import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { describe, expect, it } from 'vitest'
 import { createFileExplorerDirLoadTracker } from '../src/renderer/src/components/file-tree/file-explorer-dir-load-tracker.js'
 import { resolveFileExplorerNavigationTarget } from '../src/renderer/src/components/file-tree/file-explorer-keyboard-navigation.js'
 import {
   getRevealAncestorPaths,
   isPathWithinSubtree,
+  joinWorkspacePath,
   remapPathWithinSubtree
 } from '../src/renderer/src/lib/workspace-paths.js'
 import { createFileExplorerRowProjection } from '../src/renderer/src/components/file-tree/file-explorer-row-projection.js'
@@ -38,6 +41,13 @@ const rows = [
   node('src/nested/b.ts', 2),
   node('README.md', 0)
 ]
+
+describe('file explorer context paths', () => {
+  it('builds host-native absolute paths for context-menu actions', () => {
+    expect(joinWorkspacePath(_hygiene_fixturePath("srv/project/"), 'src/index.ts')).toBe(_hygiene_fixturePath("srv/project/src/index.ts"))
+    expect(joinWorkspacePath(_hygiene_win32.join("C:", _hygiene_win32.sep, "work\\project\\"), 'src/index.ts')).toBe(_hygiene_win32.join("C:", _hygiene_win32.sep, "work\\project\\src\\index.ts"))
+  })
+})
 
 describe('Orca-derived explorer row projection and navigation', () => {
   const projection = createFileExplorerRowProjection(rows)

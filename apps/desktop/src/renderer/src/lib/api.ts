@@ -301,7 +301,13 @@ const mockApi: AgentMuxDesktopApi = {
       for (const candidate of [...mockFiles.keys()]) {
         if (candidate === path || candidate.startsWith(`${path}/`)) mockFiles.delete(candidate)
       }
-    }
+    },
+    reveal: async () => {}
+  },
+  ui: {
+    readClipboardText: async () => '',
+    writeClipboardText: async () => {},
+    openExternal: async () => {}
   },
   agents: {
     detect: async (agentId, hostId) => ({

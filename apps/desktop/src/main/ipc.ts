@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { basename } from 'node:path'
-import { dialog, ipcMain, type BrowserWindow, type IpcMainEvent } from 'electron'
+import { clipboard, dialog, ipcMain, shell, type BrowserWindow, type IpcMainEvent } from 'electron'
 import { AgentMuxDesktopFocusServer, type AgentId } from '@agentmux/core'
 import type {
   AgentLaunchInput,
@@ -21,8 +21,10 @@ import type {
   TerminalLaunchInput,
   WorkspaceRecord
 } from '../shared/contracts.js'
+import { terminalPalette } from '../shared/terminal-palettes.js'
 import { BrowserViewManager } from './browser-view-manager.js'
 import { ConfigStore } from './config-store.js'
+import { normalizeExternalUrl } from './external-url.js'
 import { RuntimeController } from './runtime-controller.js'
 import { saveRuntimeConfig } from './runtime-config-transaction.js'
 import { WorkspaceFiles } from './workspace-files.js'
@@ -40,6 +42,11 @@ export async function registerIpc(args: {
   runtime: RuntimeController
 }): Promise<() => Promise<void>> {
   let config = await args.configStore.get()
+  const initialPalette = terminalPalette(config.appearance.terminalTheme)
+  args.runtime.setTerminalViewColors({
+    foreground: initialPalette.foreground,
+    background: initialPalette.background
+  })
   args.runtime.commit(await args.runtime.prepare(config))
   const files = new WorkspaceFiles((id) => args.runtime.executionHost(id))
   const worktrees = new WorktreeService((id) => args.runtime.executionHost(id), args.configStore)
@@ -90,6 +97,11 @@ export async function registerIpc(args: {
   handle('config:save', async (next: AppConfig) => {
     const saved = await saveRuntimeConfig({ runtime: args.runtime, configWriter: args.configStore, next })
     config = saved
+    const palette = terminalPalette(saved.appearance.terminalTheme)
+    args.runtime.setTerminalViewColors({
+      foreground: palette.foreground,
+      background: palette.background
+    })
     return saved
   })
   handle('hosts:check', async (input: HostConfig) => {
@@ -151,6 +163,16 @@ export async function registerIpc(args: {
   })
   handle('files:delete', async (workspaceId: string, path: string) => {
     await files.delete(workspace(config, workspaceId), path)
+  })
+  handle('files:reveal', async (workspaceId: string, path: string) => {
+    shell.showItemInFolder(await files.localPathForReveal(workspace(config, workspaceId), path))
+  })
+  handle('ui:readClipboardText', () => clipboard.readText())
+  handle('ui:writeClipboardText', (text: string) => {
+    clipboard.writeText(text)
+  })
+  handle('ui:openExternal', async (rawUrl: string) => {
+    await shell.openExternal(normalizeExternalUrl(rawUrl))
   })
   handle('agents:detect', async (agentId: AgentId, hostId: string) => await args.runtime.detect(agentId, hostId, config))
   handle('views:focus', focusView)

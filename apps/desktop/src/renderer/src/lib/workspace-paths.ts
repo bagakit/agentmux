@@ -16,3 +16,11 @@ export function remapPathWithinSubtree(path: string, oldRoot: string, nextRoot: 
     ? `${nextRoot}${path.slice(oldRoot.length)}`
     : path
 }
+
+export function joinWorkspacePath(root: string, relativePath: string): string {
+  if (!relativePath) return root
+  const separator = root.includes('\\') && !root.includes('/') ? '\\' : '/'
+  const normalizedRoot = root.replace(/[\\/]+$/, '')
+  const normalizedRelative = relativePath.replace(/[\\/]+/g, separator).replace(/^[\\/]+/, '')
+  return `${normalizedRoot}${separator}${normalizedRelative}`
+}

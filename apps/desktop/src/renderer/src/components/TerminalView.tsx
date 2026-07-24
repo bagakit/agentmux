@@ -1,12 +1,18 @@
 import { FitAddon } from '@xterm/addon-fit'
+import { SearchAddon } from '@xterm/addon-search'
+import { WebLinksAddon } from '@xterm/addon-web-links'
+import { WebglAddon } from '@xterm/addon-webgl'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
-import { useEffect, useRef } from 'react'
-import type { RuntimeEvent, SessionSnapshot } from '../../../shared/contracts'
-import type { TerminalThemeId } from '../../../shared/contracts'
+import { ChevronDown, ChevronUp, Search, X } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import type { RuntimeEvent, SessionSnapshot, TerminalThemeId } from '../../../shared/contracts'
 import { api } from '../lib/api'
+import { installTerminalColorQueryReplyHandlers } from '../lib/terminal-capability-replies'
 import { terminalOptions, terminalTheme } from '../lib/terminal-theme'
+import { isTerminalAppShortcut } from '../lib/terminal-shortcuts'
 import { TerminalViewportSynchronizer } from '../lib/terminal-viewport-sync'
+import { TerminalContextMenu } from './TerminalContextMenu'
 
 function terminalWrite(terminal: Terminal, data: string): Promise<void> {
   return new Promise((resolve) => terminal.write(data, resolve))
@@ -28,17 +34,55 @@ function outputForSession(event: RuntimeEvent, session: SessionSnapshot) {
 
 export function TerminalView({ session, themeId }: { session: SessionSnapshot; themeId: TerminalThemeId }) {
   const rootRef = useRef<HTMLDivElement>(null)
+  const terminalRef = useRef<Terminal | null>(null)
+  const searchAddonRef = useRef<SearchAddon | null>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const [hasSelection, setHasSelection] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+
+  useEffect(() => {
+    if (searchOpen) searchInputRef.current?.focus()
+  }, [searchOpen])
 
   useEffect(() => {
     if (!rootRef.current) return
+    const canControlRun = session.processState === 'running'
+    const isMac = navigator.userAgent.includes('Mac')
     const terminal = new Terminal({
       ...terminalOptions(themeId),
-      allowProposedApi: false,
       scrollback: 5_000
     })
     const fit = new FitAddon()
+    const search = new SearchAddon()
+    const webLinks = new WebLinksAddon((_event, uri) => {
+      if (!/^https?:\/\//i.test(uri)) return
+      void api.ui.openExternal(uri).catch((error) => {
+        console.warn('[terminal] failed to open external link', error)
+      })
+    })
     terminal.loadAddon(fit)
+    terminal.loadAddon(search)
+    terminal.loadAddon(webLinks)
     terminal.open(rootRef.current)
+    terminalRef.current = terminal
+    searchAddonRef.current = search
+
+    let webgl: WebglAddon | null = null
+    let webglContextLoss: { dispose(): void } | null = null
+    try {
+      webgl = new WebglAddon()
+      terminal.loadAddon(webgl)
+      webglContextLoss = webgl.onContextLoss(() => {
+        webgl?.dispose()
+        webgl = null
+      })
+    } catch (error) {
+      webgl?.dispose()
+      webgl = null
+      console.warn('[terminal] WebGL unavailable; xterm DOM renderer remains active', error)
+    }
+
     let disposed = false
     let attachmentId: string | null = null
     let readyForLiveOutput = false
@@ -105,7 +149,38 @@ export function TerminalView({ session, themeId }: { session: SessionSnapshot; t
     const resize = new ResizeObserver(() => viewport.observeViewport())
     resize.observe(rootRef.current)
     const input = terminal.onData((data) => {
-      if (readyForLiveOutput) void api.sessions.write(session.control, data)
+      if (canControlRun && readyForLiveOutput) void api.sessions.write(session.control, data)
+    })
+    const selection = terminal.onSelectionChange(() => setHasSelection(terminal.hasSelection()))
+    const colorQuerySuppression = installTerminalColorQueryReplyHandlers(terminal, {
+      isReplaying: () => !readyForLiveOutput,
+      respondFromRenderer: session.kind === 'terminal',
+      sendInput: (data) => {
+        if (canControlRun && readyForLiveOutput) void api.sessions.write(session.control, data)
+      }
+    })
+    terminal.attachCustomKeyEventHandler((event) => {
+      if (isTerminalAppShortcut(event, 'f', isMac)) {
+        if (event.type === 'keydown') setSearchOpen(true)
+        return false
+      }
+      if (isTerminalAppShortcut(event, 'c', isMac) && terminal.hasSelection()) {
+        if (event.type === 'keydown') void api.ui.writeClipboardText(terminal.getSelection())
+        return false
+      }
+      if (isTerminalAppShortcut(event, 'v', isMac)) {
+        if (event.type === 'keydown') {
+          void api.ui.readClipboardText().then((text) => {
+            if (!disposed && text) terminal.paste(text)
+          })
+        }
+        return false
+      }
+      if (isTerminalAppShortcut(event, 'k', isMac)) {
+        if (event.type === 'keydown') terminal.clear()
+        return false
+      }
+      return true
     })
 
     void (async () => {
@@ -134,10 +209,11 @@ export function TerminalView({ session, themeId }: { session: SessionSnapshot; t
           )
           cursor = droppedPendingThrough
         }
-        await viewport.startLiveSynchronization()
+        if (canControlRun) await viewport.startLiveSynchronization()
         readyForLiveOutput = true
         if (cursor > 0) queueAcknowledge(result.session.control, cursor)
         for (const event of pending.splice(0)) accept(event)
+        terminal.focus()
       } catch (error) {
         if (!disposed) {
           const detail = (error instanceof Error ? error.message : String(error))
@@ -151,23 +227,95 @@ export function TerminalView({ session, themeId }: { session: SessionSnapshot; t
     })()
 
     viewport.observeViewport()
+    requestAnimationFrame(() => terminal.focus())
     return () => {
       disposed = true
+      if (terminalRef.current === terminal) terminalRef.current = null
+      if (searchAddonRef.current === search) searchAddonRef.current = null
       viewport.dispose()
       renderReady?.dispose()
+      webglContextLoss?.dispose()
+      webgl?.dispose()
+      colorQuerySuppression.dispose()
+      selection.dispose()
       disposeEvents()
       input.dispose()
       resize.disconnect()
       if (attachmentId !== null) void api.sessions.detach(attachmentId)
       terminal.dispose()
     }
-  }, [session.control.run.runId, session.id, themeId])
+  }, [session.control.run.runId, session.id, session.processState, themeId])
+
+  function copySelection(): void {
+    const terminal = terminalRef.current
+    if (terminal?.hasSelection()) void api.ui.writeClipboardText(terminal.getSelection())
+  }
+
+  function pasteClipboard(): void {
+    const terminal = terminalRef.current
+    if (!terminal) return
+    void api.ui.readClipboardText().then((text) => {
+      if (terminalRef.current === terminal && text) terminal.paste(text)
+    })
+  }
+
+  function closeSearch(): void {
+    searchAddonRef.current?.clearDecorations()
+    setSearchOpen(false)
+    terminalRef.current?.focus()
+  }
+
+  function searchTerminal(query: string, previous = false): void {
+    if (!query) {
+      searchAddonRef.current?.clearDecorations()
+      return
+    }
+    if (previous) searchAddonRef.current?.findPrevious(query)
+    else searchAddonRef.current?.findNext(query, { incremental: true })
+  }
 
   return (
-    <div
-      className="terminal-view"
-      ref={rootRef}
-      style={{ backgroundColor: terminalTheme(themeId).background }}
-    />
+    <TerminalContextMenu
+      hasSelection={hasSelection}
+      onCopy={copySelection}
+      onPaste={pasteClipboard}
+      onSelectAll={() => terminalRef.current?.selectAll()}
+      onSearch={() => setSearchOpen(true)}
+      onScrollToBottom={() => terminalRef.current?.scrollToBottom()}
+      onClear={() => terminalRef.current?.clear()}
+    >
+      <div
+        className="terminal-view"
+        style={{ backgroundColor: terminalTheme(themeId).background }}
+      >
+        <div
+          className="terminal-view__xterm"
+          ref={rootRef}
+          onPointerDown={() => terminalRef.current?.focus()}
+        />
+        {searchOpen ? (
+          <div className="terminal-search" role="search">
+            <Search size={13} />
+            <input
+              ref={searchInputRef}
+              value={searchQuery}
+              placeholder="Find"
+              aria-label="Find in terminal"
+              onChange={(event) => {
+                setSearchQuery(event.target.value)
+                searchTerminal(event.target.value)
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') searchTerminal(searchQuery, event.shiftKey)
+                if (event.key === 'Escape') closeSearch()
+              }}
+            />
+            <button type="button" title="Previous match" onClick={() => searchTerminal(searchQuery, true)}><ChevronUp size={13} /></button>
+            <button type="button" title="Next match" onClick={() => searchTerminal(searchQuery)}><ChevronDown size={13} /></button>
+            <button type="button" title="Close find" onClick={closeSearch}><X size={13} /></button>
+          </div>
+        ) : null}
+      </div>
+    </TerminalContextMenu>
   )
 }

@@ -1,5 +1,6 @@
 import { AlertTriangle, LoaderCircle, RadioTower, RefreshCw, ServerOff, Square } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { api } from '../lib/api'
 import { useAppStore } from '../store'
 import {
   abbreviatedSessionId,
@@ -34,6 +35,13 @@ export function SessionPane({ sessionId }: { sessionId: string }) {
   const [refreshing, setRefreshing] = useState(false)
   const [confirmingStop, setConfirmingStop] = useState(false)
   const [stopping, setStopping] = useState(false)
+  const [copiedMetadata, setCopiedMetadata] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!copiedMetadata) return
+    const timeout = window.setTimeout(() => setCopiedMetadata(null), 1_200)
+    return () => window.clearTimeout(timeout)
+  }, [copiedMetadata])
 
   if (!session || !terminalThemeId) {
     return (
@@ -52,6 +60,17 @@ export function SessionPane({ sessionId }: { sessionId: string }) {
   const recentMessage = session.kind === 'agent'
     ? recentSessionMessage(activities) ?? 'No messages yet'
     : `${session.latestOutputBytes.toLocaleString()} output bytes`
+  const startedAt = new Date(session.createdAt)
+  const activeAt = new Date(lastActivityAt)
+
+  async function copyMetadata(field: string, value: string): Promise<void> {
+    try {
+      await api.ui.writeClipboardText(value)
+      setCopiedMetadata(field)
+    } catch (error) {
+      console.warn(`[session] failed to copy ${field}`, error)
+    }
+  }
 
   async function refresh(): Promise<void> {
     if (refreshing) return
@@ -75,21 +94,60 @@ export function SessionPane({ sessionId }: { sessionId: string }) {
     <section className="agent-surface">
       <header className="session-info-bar">
         <div className="session-info-bar__identity">
-          <strong title={session.label}>{session.label}</strong>
-          <code title={`Session ID · ${session.id}`}>ID {abbreviatedSessionId(session.id)}</code>
+          <button
+            type="button"
+            className="session-meta-copy session-info-bar__name"
+            data-copied={copiedMetadata === 'name' || undefined}
+            title={copiedMetadata === 'name' ? 'Session name copied' : `Copy session name · ${session.label}`}
+            aria-label={`Copy session name ${session.label}`}
+            onClick={() => void copyMetadata('name', session.label)}
+          >
+            <strong>{session.label}</strong>
+          </button>
+          <button
+            type="button"
+            className="session-meta-copy session-info-bar__id"
+            data-copied={copiedMetadata === 'id' || undefined}
+            title={copiedMetadata === 'id' ? 'Session ID copied' : `Copy full Session ID · ${session.id}`}
+            aria-label={`Copy full Session ID ${session.id}`}
+            onClick={() => void copyMetadata('id', session.id)}
+          >
+            <code>ID {abbreviatedSessionId(session.id)}</code>
+          </button>
         </div>
-        <span className="session-info-bar__time session-info-bar__time--started">
-          <i>Started</i>
-          <time dateTime={new Date(session.createdAt).toISOString()} title={new Date(session.createdAt).toLocaleString()}>{formatSessionTime(session.createdAt)}</time>
-        </span>
-        <span className="session-info-bar__time">
-          <i>Active</i>
-          <time dateTime={new Date(lastActivityAt).toISOString()} title={new Date(lastActivityAt).toLocaleString()}>{formatSessionTime(lastActivityAt)}</time>
-        </span>
-        <span className="session-info-bar__recent" title={recentMessage}>
-          <i>{session.kind === 'agent' ? 'Recent' : 'Output'}</i>
+        <button
+          type="button"
+          className="session-meta-copy session-info-bar__time session-info-bar__time--started"
+          data-copied={copiedMetadata === 'started' || undefined}
+          title={copiedMetadata === 'started' ? 'Start time copied' : `Copy full start time · ${startedAt.toLocaleString()}`}
+          aria-label={`Copy full start time ${startedAt.toLocaleString()}`}
+          onClick={() => void copyMetadata('started', startedAt.toISOString())}
+        >
+          <i>{copiedMetadata === 'started' ? 'Copied' : 'Started'}</i>
+          <time dateTime={startedAt.toISOString()}>{formatSessionTime(session.createdAt)}</time>
+        </button>
+        <button
+          type="button"
+          className="session-meta-copy session-info-bar__time"
+          data-copied={copiedMetadata === 'active' || undefined}
+          title={copiedMetadata === 'active' ? 'Activity time copied' : `Copy full activity time · ${activeAt.toLocaleString()}`}
+          aria-label={`Copy full activity time ${activeAt.toLocaleString()}`}
+          onClick={() => void copyMetadata('active', activeAt.toISOString())}
+        >
+          <i>{copiedMetadata === 'active' ? 'Copied' : 'Active'}</i>
+          <time dateTime={activeAt.toISOString()}>{formatSessionTime(lastActivityAt)}</time>
+        </button>
+        <button
+          type="button"
+          className="session-meta-copy session-info-bar__recent"
+          data-copied={copiedMetadata === 'recent' || undefined}
+          title={copiedMetadata === 'recent' ? 'Recent metadata copied' : `Copy ${session.kind === 'agent' ? 'recent message' : 'output metadata'} · ${recentMessage}`}
+          aria-label={`Copy ${session.kind === 'agent' ? 'recent message' : 'output metadata'} ${recentMessage}`}
+          onClick={() => void copyMetadata('recent', recentMessage)}
+        >
+          <i>{copiedMetadata === 'recent' ? 'Copied' : session.kind === 'agent' ? 'Recent' : 'Output'}</i>
           <span>{recentMessage}</span>
-        </span>
+        </button>
         <div className="session-info-bar__actions">
           {session.hostId !== 'local' ? <span title={`Host · ${session.hostId}`}><RadioTower size={11} />{session.hostId}</span> : null}
           {session.processState !== 'exited' ? (

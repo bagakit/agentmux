@@ -141,7 +141,7 @@ type AppState = {
   saveDocument(tabId: string): Promise<void>
   launchBoardAgent(workspaceId: string, agentId: string, prompt: string): Promise<void>
   launchAgent(agentId: string, prompt: string, paneId: string, launcherTabId?: string): Promise<void>
-  launchTerminal(paneId: string, launcherTabId?: string): Promise<void>
+  launchTerminal(paneId: string, launcherTabId?: string, workspacePath?: string): Promise<void>
   createBrowser(paneId: string, launcherTabId?: string): Promise<void>
   applyBrowserEvent(event: BrowserEvent): void
   send(sessionId: string, text: string): Promise<void>
@@ -662,7 +662,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       throw error
     }
   },
-  async launchTerminal(paneId, launcherTabId) {
+  async launchTerminal(paneId, launcherTabId, workspacePath) {
     const state = get()
     const launcher = launcherTabId ? state.tabs[launcherTabId] : undefined
     const workspaceId = launcher?.workspaceId ?? state.activeWorkspaceId
@@ -689,7 +689,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const session = await api.sessions.launchTerminal({
         hostId: workspace.hostId,
-        workspacePath: workspace.path,
+        workspacePath: workspacePath ?? workspace.path,
         createOperationId: crypto.randomUUID()
       })
       if (!ownsSessionLaunch(get().tabs[tabId], 'terminal', sessionId)) {
