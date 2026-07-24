@@ -32,12 +32,19 @@ The command fails closed unless all of the following hold:
 5. `codesign --verify --deep --strict` accepts the local candidate;
 6. the DMG verifies, mounts read-only, copies into an isolated `Applications`
    directory, and detaches cleanly;
-7. LaunchServices starts the relocated app and the packaged Main process emits
-   a ready receipt from an isolated current-schema data directory;
+7. LaunchServices opens the exact relocated `.app` path—not another registered
+   app with the same bundle id—and the packaged Main process emits a ready
+   receipt from an isolated current-schema data directory;
 8. the exact relocated Desktop and Helper processes exit cleanly; the Gate
-   identifies only the isolated packaged ctxmuxd whose argv contains its exact
-   socket, sends that PID SIGTERM, and leaves existing applications and global
-   runtime state untouched.
+   gives the smoke process a short `mkdtemp` runtime root under `/private/tmp`,
+   verifies its owner receipt, identifies only the packaged ctxmuxd whose argv
+   contains that exact socket, sends that PID SIGTERM, and leaves existing
+   applications and the user's long-lived CtxMux runtime untouched.
+
+`AGENTMUX_RUNTIME_DIRECTORY` is the explicit isolation seam used by package
+smoke and parallel clients. It must be absolute. Normal Desktop launches leave
+it unset and continue using the stable per-user runtime endpoint; user-data
+isolation alone does not imply a second Run kernel.
 
 Dependency materialization reads the pnpm lockfile-resolved workspace tree but
 writes only to a temporary application bundle. It does not run a nested install
