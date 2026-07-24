@@ -67,7 +67,7 @@ if (process.platform === 'win32') {
 
 const directory = await mkdtemp(join(tmpdir(), 'agentmuxd-resource-probe-'))
 const socketPath = join(directory, 'agentmuxd.sock')
-const daemon = spawn(process.execPath, [daemonEntry, '--socket', socketPath], {
+const daemon = spawn(process.execPath, [daemonEntry, 'serve', '--socket', socketPath], {
   stdio: ['ignore', 'pipe', 'inherit']
 })
 const clients = []

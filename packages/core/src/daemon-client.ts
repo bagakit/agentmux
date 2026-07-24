@@ -1,7 +1,11 @@
 import { EventEmitter } from 'node:events'
 import { randomUUID } from 'node:crypto'
-import { createConnection, type Socket } from 'node:net'
+import type { Duplex } from 'node:stream'
 import { AgentProviderRegistry, type AgentProvider } from './agent-provider.js'
+import {
+  LocalAgentMuxDaemonConnector,
+  type AgentMuxDaemonConnector
+} from './daemon-connector.js'
 import { LocalExecutionHost } from './execution-host.js'
 import { AgentMuxError } from './errors.js'
 import {
@@ -57,19 +61,24 @@ export type AgentMuxAgentCreateInput = CreateBase & {
 
 export type AgentMuxClientOptions = {
   socketPath?: string
+  connector?: AgentMuxDaemonConnector
+  expectedHostId?: string
+  expectedBuildIdentity?: string
   providers?: readonly AgentProvider[]
 }
 
 export class AgentMuxClient {
-  readonly socketPath: string
   readonly providers: AgentProviderRegistry
+  private readonly connector: AgentMuxDaemonConnector
+  private readonly expectedHostId: string | undefined
+  private readonly expectedBuildIdentity: string | undefined
   private readonly events = new EventEmitter()
   private readonly pending = new Map<string, PendingRequest>()
   private readonly messageQueue: string[] = []
   private readonly sessionStates = new Map<string, ClientSessionState>()
   private readonly inputTails = new Map<string, Promise<void>>()
   private readonly localHost = new LocalExecutionHost()
-  private socket: Socket | null = null
+  private connection: Duplex | null = null
   private connecting: Promise<void> | null = null
   private input = ''
   private queuedMessageBytes = 0
@@ -77,12 +86,19 @@ export class AgentMuxClient {
   private hello: AgentMuxDaemonHello | null = null
 
   constructor(options: AgentMuxClientOptions = {}) {
-    this.socketPath = options.socketPath ?? defaultAgentMuxDaemonSocketPath()
+    if (options.socketPath && options.connector) {
+      throw new AgentMuxError('Choose either a local socket path or a daemon connector.', 'INVALID_CLIENT_TRANSPORT')
+    }
+    this.connector = options.connector ?? new LocalAgentMuxDaemonConnector(
+      options.socketPath ?? defaultAgentMuxDaemonSocketPath()
+    )
+    this.expectedHostId = options.expectedHostId ?? this.connector.expectedHostId
+    this.expectedBuildIdentity = options.expectedBuildIdentity ?? this.connector.expectedBuildIdentity
     this.providers = new AgentProviderRegistry(options.providers)
   }
 
   async connect(): Promise<void> {
-    if (this.hello && this.socket && !this.socket.destroyed) return
+    if (this.hello && this.connection && !this.connection.destroyed) return
     if (this.connecting) return await this.connecting
     const attempt = this.openConnection()
     this.connecting = attempt
@@ -94,36 +110,27 @@ export class AgentMuxClient {
   }
 
   private async openConnection(): Promise<void> {
-    const socket = createConnection(this.socketPath)
-    socket.setEncoding('utf8')
-    this.socket = socket
+    const connection = await this.connector.connect()
+    connection.setEncoding('utf8')
+    this.connection = connection
     try {
-      await new Promise<void>((resolve, reject) => {
-        const onConnect = (): void => {
-          socket.off('error', onError)
-          resolve()
-        }
-        const onError = (error: Error): void => {
-          socket.off('connect', onConnect)
-          reject(error)
-        }
-        socket.once('connect', onConnect)
-        socket.once('error', onError)
-      })
+      if (connection.destroyed) throw new AgentMuxError('Daemon connection closed.', 'DAEMON_DISCONNECTED')
     } catch (error) {
-      socket.destroy()
-      if (this.socket === socket) this.socket = null
+      connection.destroy()
+      if (this.connection === connection) this.connection = null
       throw error
     }
-    socket.on('data', (data: string) => {
-      if (this.socket === socket) this.acceptData(data)
+    connection.on('data', (data: string) => {
+      if (this.connection === connection) this.acceptData(data)
     })
-    socket.on('error', (error) => this.failConnection(
-      socket,
-      new AgentMuxError(`Daemon connection failed: ${error.message}`, 'DAEMON_DISCONNECTED')
+    connection.on('error', (error) => this.failConnection(
+      connection,
+      error instanceof AgentMuxError
+        ? error
+        : new AgentMuxError(`Daemon connection failed: ${error.message}`, 'DAEMON_DISCONNECTED')
     ))
-    socket.on('close', () => this.failConnection(
-      socket,
+    connection.on('close', () => this.failConnection(
+      connection,
       new AgentMuxError('Daemon connection closed.', 'DAEMON_DISCONNECTED')
     ))
     const hello = await this.request('hello', {}) as AgentMuxDaemonHello
@@ -134,14 +141,37 @@ export class AgentMuxClient {
         'DAEMON_PROTOCOL_MISMATCH'
       )
     }
+    if (
+      typeof hello.buildIdentity !== 'string' || !hello.buildIdentity ||
+      typeof hello.hostId !== 'string' || !hello.hostId ||
+      typeof hello.daemonInstanceId !== 'string' || !hello.daemonInstanceId ||
+      !Number.isInteger(hello.daemonPid) || hello.daemonPid < 1
+    ) {
+      this.disconnect()
+      throw new AgentMuxError('Daemon returned an invalid identity.', 'INVALID_DAEMON_RESPONSE')
+    }
+    if (this.expectedBuildIdentity !== undefined && hello.buildIdentity !== this.expectedBuildIdentity) {
+      this.disconnect()
+      throw new AgentMuxError(
+        `Daemon build mismatch: expected ${this.expectedBuildIdentity}, received ${hello.buildIdentity}.`,
+        'DAEMON_BUILD_MISMATCH'
+      )
+    }
+    if (this.expectedHostId !== undefined && hello.hostId !== this.expectedHostId) {
+      this.disconnect()
+      throw new AgentMuxError(
+        `Daemon host mismatch: expected ${this.expectedHostId}, received ${hello.hostId}.`,
+        'DAEMON_HOST_MISMATCH'
+      )
+    }
     this.hello = hello
   }
 
   disconnect(): void {
-    const socket = this.socket
-    this.socket = null
+    const connection = this.connection
+    this.connection = null
     this.connecting = null
-    socket?.destroy()
+    connection?.destroy()
     this.input = ''
     this.messageQueue.length = 0
     this.queuedMessageBytes = 0
@@ -273,8 +303,8 @@ export class AgentMuxClient {
   }
 
   private async request(method: AgentMuxDaemonMethod, params: unknown): Promise<unknown> {
-    const socket = this.socket
-    if (!socket || socket.destroyed) {
+    const connection = this.connection
+    if (!connection || connection.destroyed) {
       throw new AgentMuxError('Daemon client is not connected.', 'DAEMON_DISCONNECTED')
     }
     if (this.pending.size >= MAX_PENDING_REQUESTS) {
@@ -287,11 +317,11 @@ export class AgentMuxClient {
       this.pending.delete(id)
       throw new AgentMuxError('Daemon request exceeds the maximum frame size.', 'DAEMON_FRAME_TOO_LARGE')
     }
-    if (socket.writableLength + Buffer.byteLength(encoded) > MAX_CLIENT_WRITE_BUFFER_BYTES) {
+    if (connection.writableLength + Buffer.byteLength(encoded) > MAX_CLIENT_WRITE_BUFFER_BYTES) {
       this.pending.delete(id)
       throw new AgentMuxError('Daemon client write buffer is full.', 'DAEMON_CLIENT_BACKPRESSURE')
     }
-    socket.write(encoded)
+    connection.write(encoded)
     return await response
   }
 
@@ -304,7 +334,7 @@ export class AgentMuxClient {
       this.input = this.input.slice(newline + 1)
       if (!line) continue
       if (Buffer.byteLength(line) > AGENTMUX_DAEMON_MAX_FRAME_BYTES) {
-        this.failConnection(this.socket, new AgentMuxError(
+        this.failConnection(this.connection, new AgentMuxError(
           'Daemon response exceeds the maximum frame size.',
           'DAEMON_FRAME_TOO_LARGE'
         ))
@@ -313,7 +343,7 @@ export class AgentMuxClient {
       this.messageQueue.push(line)
       this.queuedMessageBytes += Buffer.byteLength(line)
       if (this.queuedMessageBytes > AGENTMUX_DAEMON_MAX_FRAME_BYTES) {
-        this.failConnection(this.socket, new AgentMuxError(
+        this.failConnection(this.connection, new AgentMuxError(
           'Daemon event queue exceeds the maximum size.',
           'DAEMON_EVENT_QUEUE_FULL'
         ))
@@ -321,7 +351,7 @@ export class AgentMuxClient {
       }
     }
     if (Buffer.byteLength(this.input) > AGENTMUX_DAEMON_MAX_FRAME_BYTES) {
-      this.failConnection(this.socket, new AgentMuxError(
+      this.failConnection(this.connection, new AgentMuxError(
         'Daemon response exceeds the maximum frame size.',
         'DAEMON_FRAME_TOO_LARGE'
       ))
@@ -345,7 +375,7 @@ export class AgentMuxClient {
         this.acceptResponse(frame)
       }
     } catch (error) {
-      this.failConnection(this.socket, error instanceof Error ? error : new Error(String(error)))
+      this.failConnection(this.connection, error instanceof Error ? error : new Error(String(error)))
     } finally {
       this.processingMessages = false
       queueMicrotask(() => this.processNextMessage())
@@ -360,10 +390,10 @@ export class AgentMuxClient {
     else pending.reject(new AgentMuxError(frame.error.message, frame.error.code))
   }
 
-  private failConnection(socket: Socket | null, error: Error): void {
-    if (!socket || this.socket !== socket) return
-    socket.destroy()
-    this.socket = null
+  private failConnection(connection: Duplex | null, error: Error): void {
+    if (!connection || this.connection !== connection) return
+    connection.destroy()
+    this.connection = null
     this.input = ''
     this.messageQueue.length = 0
     this.queuedMessageBytes = 0
