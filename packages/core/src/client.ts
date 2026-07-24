@@ -206,6 +206,11 @@ export class AgentMuxClient {
     return this.daemon.daemonIdentity()
   }
 
+  async daemonDiagnostics() {
+    this.requireConnected()
+    return await this.daemon.diagnose()
+  }
+
   async probeAgent(agentId: AgentId, commandOverride?: string): Promise<AgentCapabilitySnapshot> {
     this.requireConnected()
     return await this.providers.get(agentId).probeCapabilities(

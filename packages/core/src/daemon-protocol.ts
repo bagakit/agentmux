@@ -1,6 +1,6 @@
 import type { AgentId } from './types.js'
 
-export const AGENTMUX_DAEMON_PROTOCOL_VERSION = 4
+export const AGENTMUX_DAEMON_PROTOCOL_VERSION = 5
 export const AGENTMUX_DAEMON_MAX_FRAME_BYTES = 1024 * 1024
 export const AGENTMUX_DAEMON_BUILD_IDENTITY = '0.1.0'
 export const AGENTMUX_LOCAL_HOST_ID = 'local'
@@ -88,6 +88,22 @@ export type AgentMuxDaemonHello = {
   daemonInstanceId: string
 }
 
+export type AgentMuxDaemonDiagnostics = {
+  nodeVersion: string
+  platform: NodeJS.Platform
+  arch: string
+  supported: boolean
+  pty: {
+    packageName: 'node-pty'
+    version: string
+    artifact: string
+    artifactPresent: boolean
+    helperArtifact: string | null
+    helperExecutable: boolean | null
+    ready: boolean
+  }
+}
+
 export type AgentMuxDaemonInputAck = AgentMuxDaemonSessionRef & {
   acceptedThrough: number
   duplicate: boolean
@@ -118,6 +134,7 @@ export type AgentMuxDaemonCreateRequest = {
 
 export type AgentMuxDaemonMethod =
   | 'hello'
+  | 'diagnose'
   | 'list'
   | 'find-create-operation'
   | 'probe-executable'

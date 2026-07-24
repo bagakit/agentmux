@@ -10,7 +10,7 @@ describe('local daemon activation boundary', () => {
       return {
         stdout: `${JSON.stringify({
           type: 'active',
-          protocolVersion: 4,
+          protocolVersion: 5,
           buildIdentity: 'build-1',
           hostId: 'local-test',
           daemonPid: 42,
@@ -44,7 +44,7 @@ describe('local daemon activation boundary', () => {
       buildIdentity: 'expected-build',
       runner: async () => ({
         stdout: JSON.stringify({
-          protocolVersion: 4,
+          protocolVersion: 5,
           buildIdentity: 'other-build',
           hostId: 'expected-host',
           daemonPid: 42,

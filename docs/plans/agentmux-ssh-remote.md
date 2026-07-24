@@ -25,7 +25,7 @@ AgentMuxClient
 
 ## 身份与握手
 
-Protocol v4 的 Hello 继续携带：
+Protocol v5 的 Hello 继续携带：
 
 - `protocolVersion`：协议结构身份；
 - `buildIdentity`：Remote Artifact／Daemon Build 身份；
@@ -37,9 +37,13 @@ SSH Client 仍由系统 OpenSSH 根据用户已有的 `~/.ssh/config`、Agent、
 
 重连必须重新通过 Protocol／Build／Host Hello，再由上层按原 `sessionId + incarnationId + output cursor` Attach。Mismatch 直接失败，不创建新 Session，不切 tmux，不进入兼容路径。
 
-v4 还增加远端 Host 上执行的 executable capability probe，以及经过
+v4 增加远端 Host 上执行的 executable capability probe，以及经过
 `semanticSessionId + sessionId + incarnationId + agentId` 校验的原始 Hook Event；远端
 Agent 的 PATH 与 Hook Ingress 都由远端 Daemon 负责，不误用本机状态。
+
+v5 增加只读 `diagnose` 方法，由实际 Daemon 返回 Node／Platform／Arch、`node-pty`
+版本、当前平台 Native Artifact 与 darwin Helper 权限。旧 v4 Client／Daemon 不会被
+伪装成具备 Doctor 能力；Protocol Mismatch 直接失败。
 
 ## Remote Artifact
 
@@ -55,6 +59,14 @@ T-003 定义的显式 Artifact 合同：
 ```
 
 tar.gz 根目录包含上述 `agentmux-artifact.json` 与 `package/`。安装器在本地先拒绝绝对路径和 `..` Archive Entry，再通过系统 SSH 把 Archive 流式送入远端 `tar`；不会把整个包读入内存，也不会在远端执行 npx、npm install 或联网下载。
+
+T-006 已提供公开的 `createAgentMuxRemoteArtifact()` 和等价 CLI：
+
+```bash
+agentmux artifact create --output ./agentmux-linux-arm64.tgz --build-id 0.1.0 --platform linux-arm64
+```
+
+Builder 从当前安装包复制 `dist`、`bin`、Package 清单，以及目标平台唯一一份 `node-pty` Loader／Prebuild；不会把当前仓库、其他平台 Native 文件或开发依赖装进 Remote Artifact。darwin Artifact 会再次固定检查 `spawn-helper` 的可执行位。
 
 远端布局固定为当前用户 Home 下的受管目录：
 
@@ -107,4 +119,4 @@ tar.gz 根目录包含上述 `agentmux-artifact.json` 与 `package/`。安装器
 
 T-003 的受支持 Remote 是带 Unix Socket、`sh`、`tar` 和 Node 的 `linux-x64`、`linux-arm64`、`darwin-x64`、`darwin-arm64`。Windows Remote 明确返回 `UNSUPPORTED_REMOTE_PLATFORM`，不进入未验证的 Pipe／PowerShell Fallback。
 
-隔离 SSH Fixture 真实执行 Node、tar、stdio、node-pty、独立 Daemon 和进程组，只把 SSH Server 替换为受控本地跳板，用于确定性制造 SSH Client SIGKILL、输出延迟和 Host unavailable。T-006 仍需把 Artifact 生成、内容哈希、目标平台 Native PTY、干净 Consumer 与正式 Doctor 固化为候选 Package；T-007 继续负责真实远端／多平台安全与 Soak 证据。
+隔离 SSH Fixture 真实执行 Node、tar、stdio、node-pty、独立 Daemon 和进程组，只把 SSH Server 替换为受控本地跳板，用于确定性制造 SSH Client SIGKILL、输出延迟和 Host unavailable。T-006 已把同一个公开 Artifact Builder 接入 Remote Integration 与 Packed Consumer，并由 Doctor 读取远端 Daemon 实际 Node／平台／PTY Artifact。T-007 继续负责真实远端／多平台安全与 Soak 证据。

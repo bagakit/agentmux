@@ -1,14 +1,12 @@
 import {
-  execFile,
   spawn,
   type ChildProcessWithoutNullStreams,
   type SpawnOptionsWithoutStdio
 } from 'node:child_process'
-import { cp, mkdtemp, mkdir, readFile, rm, stat, unlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { promisify } from 'node:util'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import {
   AgentMuxSshRemoteDaemon,
@@ -28,9 +26,8 @@ import {
   type AgentMuxSshTarget
 } from '../src/ssh-daemon-connector.js'
 import type { AgentMuxClientEvent } from '../src/types.js'
+import { createAgentMuxRemoteArtifact } from '../src/remote-artifact-builder.js'
 
-const execFileAsync = promisify(execFile)
-const repositoryRoot = resolve(import.meta.dirname, '../../..')
 const fakeSshPath = fileURLToPath(new URL('./fixtures/fake-system-ssh.mjs', import.meta.url))
 const stubbornTreePath = fileURLToPath(new URL('./fixtures/stubborn-process-tree.mjs', import.meta.url))
 const hookAgentPath = fileURLToPath(new URL('./fixtures/fake-hook-agent.mjs', import.meta.url))
@@ -88,54 +85,17 @@ describe.runIf(supportedPlatform)('AgentMux isolated system SSH remote daemon', 
 
   beforeAll(async () => {
     artifactRoot = await mkdtemp(join(tmpdir(), 'agentmux-remote-artifact-'))
-    const staging = join(artifactRoot, 'staging')
-    const deployedPackage = join(staging, 'package')
-    await mkdir(staging, { recursive: true })
-    await mkdir(deployedPackage, { recursive: true })
-    const nodePtySource = resolve(repositoryRoot, 'packages/core/node_modules/node-pty')
-    const nodePtyDestination = join(deployedPackage, 'node_modules/node-pty')
-    await mkdir(nodePtyDestination, { recursive: true })
-    await Promise.all([
-      cp(resolve(repositoryRoot, 'packages/core/dist'), join(deployedPackage, 'dist'), { recursive: true }),
-      cp(resolve(repositoryRoot, 'packages/core/bin'), join(deployedPackage, 'bin'), { recursive: true }),
-      cp(resolve(repositoryRoot, 'packages/core/package.json'), join(deployedPackage, 'package.json')),
-      cp(join(nodePtySource, 'package.json'), join(nodePtyDestination, 'package.json')),
-      cp(join(nodePtySource, 'lib'), join(nodePtyDestination, 'lib'), { recursive: true }),
-      cp(
-        join(nodePtySource, 'prebuilds', `${process.platform}-${process.arch}`),
-        join(nodePtyDestination, 'prebuilds', `${process.platform}-${process.arch}`),
-        { recursive: true }
-      )
-    ])
     const platform = `${process.platform}-${process.arch}` as AgentMuxRemotePlatform
-    await writeFile(join(staging, 'agentmux-artifact.json'), `${JSON.stringify({
-      schema: 'agentmux.remote-artifact.v1',
+    artifact = await createAgentMuxRemoteArtifact({
+      outputPath: join(artifactRoot, 'agentmux-remote.tgz'),
       buildIdentity: 'fixture-build-1',
-      platform,
-      entrypoint: 'package/dist/agentmuxd.js'
-    })}\n`, { mode: 0o600 })
-    const archivePath = join(artifactRoot, 'agentmux-remote.tgz')
-    await execFileAsync('tar', ['-czf', archivePath, '-C', staging, '.'], {
-      timeout: 30_000,
-      maxBuffer: 4 * 1024 * 1024
+      platform
     })
-    artifact = { archivePath, buildIdentity: 'fixture-build-1', platform }
-    await writeFile(join(staging, 'agentmux-artifact.json'), `${JSON.stringify({
-      schema: 'agentmux.remote-artifact.v1',
-      buildIdentity: 'fixture-build-2',
-      platform,
-      entrypoint: 'package/dist/agentmuxd.js'
-    })}\n`, { mode: 0o600 })
-    const upgradeArchivePath = join(artifactRoot, 'agentmux-remote-upgrade.tgz')
-    await execFileAsync('tar', ['-czf', upgradeArchivePath, '-C', staging, '.'], {
-      timeout: 30_000,
-      maxBuffer: 4 * 1024 * 1024
-    })
-    upgradeArtifact = {
-      archivePath: upgradeArchivePath,
+    upgradeArtifact = await createAgentMuxRemoteArtifact({
+      outputPath: join(artifactRoot, 'agentmux-remote-upgrade.tgz'),
       buildIdentity: 'fixture-build-2',
       platform
-    }
+    })
   }, 95_000)
 
   afterAll(async () => {
@@ -187,12 +147,15 @@ describe.runIf(supportedPlatform)('AgentMux isolated system SSH remote daemon', 
       try {
         process.kill(daemonPid, 'SIGTERM')
       } catch {}
+      await waitForCondition('the remote daemon cleanup process to exit', () => !processIsAlive(daemonPid))
     }
     for (const { child } of spawned.splice(0)) {
       if (child.exitCode !== null || child.signalCode !== null || !child.pid) continue
+      const pid = child.pid
       try {
-        process.kill(-child.pid, 'SIGKILL')
+        process.kill(-pid, 'SIGKILL')
       } catch {}
+      await waitForCondition('the SSH fixture process to exit', () => !processIsAlive(pid))
     }
     await rm(remoteHome, { recursive: true, force: true })
   })

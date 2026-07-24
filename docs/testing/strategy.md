@@ -147,12 +147,15 @@ pnpm check
 - `agent-provider.test.ts`：五个内置 Catalog、Capability Probe、Launch 与 Provider Resume。
 - `acp-adapter.test.ts`：ACP Event 映射和 Permission 默认拒绝。
 - `managed-hook-installer.test.ts`：显式 Preview、Generation Fence、Receipt 与恢复卸载。
+- `doctor.test.ts`：Host／Build／Protocol、实际 Node／PTY Artifact、五个 Agent、Hook／Permission／ACP 与失败 Action。
+- `remote-artifact-builder.test.ts`：单平台精简 Artifact、Manifest、Native Prebuild、Helper 权限与无陈旧 tmux 产物。
+- `package-consumer.integration.test.ts`：真实 Pack 解包后的 Local Terminal、Fake Codex、Doctor、Remote Artifact 与隔离 SSH 生命周期。
 
 ## 剩余边界
 
 - 当前 Journal 只恢复 Active／Lost Session 身份，不持久化已经淘汰的 Retired Receipt；4096 Receipt 是有界幂等窗口，不是无限历史数据库。
 - Daemon Crash 到用户显式 Stop lost Session 之间，原进程可能继续运行；Stop 会对仍匹配原 PID／启动时间的 PTY 进程组做强制清理。已经主动脱离该 PTY 的任意恶意后代仍不能仅凭 Journal 安全识别；主机重启的处理和更长时间 Soak 属于 T-007。
-- POSIX 进程组路径已在 macOS 真实验证；Windows ConPTY 当前仍使用 node-pty 的平台 Kill 行为，多平台 Artifact／清理证据属于 T-006、T-007。
+- POSIX 进程组路径已在 macOS 真实验证；Package 直接排除 Windows／ConPTY。Linux 与另一 CPU 架构的真实 Native 执行、清理和 Soak 证据属于 T-007。
 - 隔离 Fixture 证明了 SSH 进程与 Remote Daemon 合同，但不外推真实网络的 MTU、ProxyJump、FIDO／Kerberos、Known Hosts 轮换或长时间抖动；真实 Host 安全矩阵与 Soak 属于 T-007。
-- Remote Artifact 当前由调用方显式提供且以 Manifest／SSH 完整性为边界；内容哈希、精简 Native Artifact、干净 Consumer 与正式 Doctor 属于 T-006。
+- Remote Artifact 仍由调用方显式提供，并以 Manifest、目标平台与系统 SSH 完整性为边界；T-006 已交付精简 Native Artifact、Packed Consumer 与正式 Doctor。额外内容签名或发布渠道完整性不在当前未发布候选范围。
 - 当前基线只描述 Daemon 进程，不包含 Desktop、xterm、Monaco、Browser View 或 Agent CLI 自身的内存。

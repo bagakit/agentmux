@@ -42,6 +42,7 @@ flowchart LR
 
 a mature workbench 源码证据与采用边界见 [docs/a mature workbench-agent-runtime-notes.md](docs/a mature workbench-agent-runtime-notes.md)。
 Desktop 原子切换后的数据流、恢复语义和内存边界见 [docs/plans/agentmux-desktop-daemon-cutover.md](docs/plans/agentmux-desktop-daemon-cutover.md)。
+Package、Doctor 与 Remote Artifact 候选边界见 [docs/plans/agentmux-package-candidate.md](docs/plans/agentmux-package-candidate.md)。
 
 ## 环境与验证
 
@@ -55,6 +56,14 @@ Desktop 原子切换后的数据流、恢复语义和内存边界见 [docs/plans
 corepack enable
 pnpm install
 pnpm check
+```
+
+构建并检查发布候选（不会 Publish）：
+
+```bash
+pnpm --filter @agentmux/core pack --pack-destination /tmp/agentmux-pack
+node packages/core/bin/agentmux.js doctor --activate
+node packages/core/bin/agentmux.js artifact create --output /tmp/agentmux-linux-arm64.tgz --build-id 0.1.0 --platform linux-arm64
 ```
 
 ## 使用 Core
@@ -136,7 +145,7 @@ pnpm dev:web
 ### SSH 配置
 
 1. 先确认系统 `ssh <host>` 使用现有配置和认证可以连接。
-2. 显式安装并启动版本匹配的远端 `agentmuxd`；T-006 将交付完整 Artifact／Doctor 验收。
+2. 使用 `agentmux artifact create` 构建目标平台 Artifact，再通过 `AgentMuxSshRemoteDaemon.install()` 与 `activate()` 显式安装并启动版本匹配的远端 `agentmuxd`。
 3. 在 Host 设置中填写 hostname、可选 user／port／identity path，以及 Daemon Build、Node、入口绝对路径和 Socket 绝对路径。
 4. 使用 Test 核对 Host、Build 和 Protocol 身份。
 5. 添加远端 Workspace 后，Terminal、Agent、文件和 Git 操作都会在同一 Host 上执行。
@@ -155,6 +164,7 @@ docs/                中文设计、a mature workbench 源码证据、测试与 
 
 - 仓库不会自动修改用户全局 Codex、Claude、Hermes 或 Pi Hook 配置。
 - SSH 自动化使用隔离的系统 SSH Fixture；不连接真实外部 Host，也不包含真实凭据。
-- 完整 Package、Remote Artifact、Doctor、干净外部安装和多平台验收属于 T-006。
+- 当前 Package 候选声明 Node 22+、macOS／Linux、x64／arm64；Windows／ConPTY 不在支持范围。
+- `node-pty` 精确锁定官方 `1.2.0-beta.15`，因为稳定版 1.1.0 的外部 Consumer 在 macOS 会遇到不可执行的 `spawn-helper`。
 - 更长时间 Soak、协议安全矩阵和资源回归属于 T-007。
 - 应用尚未签名、自动更新或发布。

@@ -8,7 +8,7 @@
     "dev:web": "pnpm --filter @agentmux/desktop dev:web",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
-    "test": "pnpm --filter @agentmux/core build && vitest run",
+    "test": "pnpm --filter @agentmux/core build && vitest run --exclude packages/core/test/remote-artifact-builder.test.ts --exclude packages/core/test/ssh-remote-daemon.integration.test.ts --exclude packages/core/test/package-consumer.integration.test.ts && vitest run packages/core/test/remote-artifact-builder.test.ts && vitest run packages/core/test/ssh-remote-daemon.integration.test.ts && vitest run packages/core/test/package-consumer.integration.test.ts",
     "check": "pnpm typecheck && pnpm test && pnpm build"
   },
   "devDependencies": {
