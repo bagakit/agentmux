@@ -69,15 +69,16 @@ CLI、SDK 与 Desktop 共用同一 Agent Session Resolver、View Resolver 和操
 
 ## 6. 持久化与资源边界
 
-`AgentMuxAgentSessionStore` 只保存有界 Agent Session：Provider 身份、Workspace、当前 Run Ref、必要 Output Cursor、Native Handle 和最后一份 Hook Receipt。它不保存 PID、PTY、Terminal Snapshot、Replay、Activity 列表或第三方 wire state。
+`AgentMuxAgentSessionStore` 只保存有界 Agent Session：Provider 身份、Workspace、当前 Run Ref、必要 Output Cursor、Native Handle、Hook binding、最后一份 Hook Receipt，以及最多 16 个 retired exact Run tombstone。Tombstone 只防止自然退出的旧 Agent Run 在 Resume 后被当作 Raw Terminal 或 current binding；它不保存 PID、PTY、Terminal Snapshot、Replay、Activity 列表或第三方 wire state。
 
-默认 Memory Store 与加载器最多保留 256 个 Agent Session。Run、Attachment、Replay、Client Queue、Hook Body 和日志都必须有硬上限；释放 Attachment、关闭 View 和停止 Run 后要有确定性的资源释放证据。
+默认 File Store 是 CLI 与 Desktop 共用的唯一身份文件，使用 `0600` 原子替换与进程间锁；Memory Store 只用于显式嵌入和测试。加载器最多保留 256 个 Agent Session。Run、Attachment、Replay、Client Queue、Hook Body 和日志都必须有硬上限；释放 Attachment、关闭 View 和停止 Run 后要有确定性的资源释放证据。
 
 ## 7. 当前验证面
 
 - Runtime 投影测试验证 Run、Agent Session 与 View 身份独立，同一 Agent Session 可生成多个 View。
 - Registry 测试验证 Agent Session 换 Run 后，迟到旧 Run 写入会被拒绝。
-- packed Client 集成测试已验证 CtxMux Run 的 Reattach、Release Attachment、byte replay、Resize、Interrupt 和 Stop；Provider Resume/Respawn 要在 Codex vertical 恢复真实证据后才能宣称完成。
+- packed Client 集成测试已验证 CtxMux Run 的 Reattach、Release Attachment、byte replay、Resize、Interrupt 和 Stop，以及 Codex create、Hook/Permission、native-id 反查、跨 Client reconnect、CLI send/interrupt/attach、provider-native Resume 和 Stop。
+- View Resolver 与 Desktop 测试验证只聚焦当前已打开的 Terminal View 或唯一 Agent View；closed、stale、ambiguous 目标不改变布局，也不调用任何 Run lifecycle API。
 - Core 与 Desktop 类型检查验证 daemon wire 不再进入 Desktop 的共享合同。
 
-T-020 的 Shell checkpoint 已固定并消费 CtxMux `3b94288`，删除旧 Run Kernel。Codex、统一 CLI/View switch 与最终可靠性 Gate 仍未完成，不能从 Shell 证据外推。
+T-020 的 Local implementation candidate 已固定并消费 CtxMux `3b94288`，删除旧 Run Kernel，并完成 Codex、统一 CLI 与 typed View focus。Tracker 完成仍以 independent review 与 exact clean-checkpoint `pnpm check` 为准，不能从局部测试外推。
