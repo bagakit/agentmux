@@ -42,7 +42,7 @@ export function RichComposer({ sessionId }: { sessionId: string }) {
           }
         }}
         placeholder={canInteract ? 'Ask, steer, or paste a command…' : 'Terminal is not connected'}
-        rows={2}
+        rows={1}
       />
       <div className="composer__toolbar">
         <div>

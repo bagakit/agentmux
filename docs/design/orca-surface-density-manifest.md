@@ -47,7 +47,7 @@ a mature workbench 在本任务中证明的是成熟模式，而不是配色答�
 | Tool Dock Width | 默认 300px；最小 236px；最大 440px | 同时容纳 Explorer / Branches，且给主工作面保留容量 |
 | Tool Content Padding | 8–12px | 只用于局部卡片；不再以统一大 Padding 包住整栏 |
 | 操作与元数据文字 | 11–13px；必要微标不低于 10px | 不再用 7–9px 冒充专家密度 |
-| Terminal / Editor 内容 | 默认 14–15px，稳定行高 | 由 xterm/Monaco 原生 DPR 渲染，不加 CSS transform 缩放 |
+| Terminal / Editor 内容 | Terminal `12px / 1.2`；Editor `14px / 21px` | 由 xterm/Monaco 原生 DPR 渲染，不加 CSS transform 缩放；Terminal 作为高吞吐字符界面采用与周围 10–11px 操作层级相称的 12px 基线，Editor 保持面向长文阅读的 14px 基线 |
 
 小于等于 900px 时 Tool Dock 作为覆盖层出现，宽度仍取同一 Store truth；不得复制一套移动端状态。
 

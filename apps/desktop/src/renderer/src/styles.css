@@ -534,7 +534,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .pane-drop-overlay--up { inset: 36px 0 50% 0; }
 .pane-drop-overlay--down { inset: 50% 0 0 0; }
 
-.agent-surface { height: 100%; min-height: 0; display: grid; grid-template-rows: 31px minmax(0, 1fr) auto; background: var(--surface-0); }
+.agent-surface { height: 100%; min-height: 0; display: grid; grid-template-rows: 28px minmax(0, 1fr) auto; background: var(--surface-0); }
 .agent-context-bar {
   min-width: 0;
   display: flex;
@@ -565,7 +565,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 }
 .agent-body { min-height: 0; overflow: hidden; }
 .agent-terminal-stage { position: relative; width: 100%; height: 100%; overflow: hidden; }
-.terminal-view { width: 100%; height: 100%; padding: 9px 6px 6px 11px; background: #0b0e10; }
+.terminal-view { width: 100%; height: 100%; padding: 4px 4px 4px 7px; background: #0b0e10; }
 .terminal-view .xterm-viewport { scrollbar-color: #2f3733 transparent; }
 .terminal-recovery {
   position: absolute;
@@ -618,17 +618,17 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .activity__body pre { padding: 8px; overflow: auto; border: 1px solid var(--line-soft); border-radius: 5px; color: #b9c1bb; background: #0a0d0e; font-size: 10px; white-space: pre-wrap; }
 .provenance { padding: 2px 5px; border-radius: 8px; color: var(--text-3); background: var(--surface-3); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
 .provenance--native-hook { color: var(--green); background: #14241a; }
-.composer { margin: 8px 10px 10px; overflow: hidden; border: 1px solid #30383a; border-radius: 9px; background: #15191b; box-shadow: 0 12px 35px #0006; }
+.composer { margin: 6px 8px 8px; overflow: hidden; border: 1px solid #30383a; border-radius: 8px; background: #15191b; box-shadow: 0 9px 28px #0005; }
 .composer:focus-within { border-color: #4c6a58; box-shadow: 0 0 0 2px #83dca60c, 0 12px 35px #0006; }
-.composer textarea { width: 100%; min-height: 51px; max-height: 180px; display: block; resize: vertical; padding: 11px 13px 3px; border: 0; outline: 0; color: var(--text); background: transparent; font-size: 11px; line-height: 1.5; }
+.composer textarea { width: 100%; min-height: 34px; max-height: 132px; field-sizing: content; display: block; resize: none; padding: 8px 11px 2px; border: 0; outline: 0; color: var(--text); background: transparent; font-size: 11px; line-height: 1.45; }
 .composer textarea::placeholder { color: #5e6762; }
 .composer textarea:disabled { color: var(--text-3); cursor: not-allowed; }
-.composer__toolbar { display: flex; justify-content: space-between; padding: 6px; }
+.composer__toolbar { display: flex; justify-content: space-between; padding: 3px 5px 5px; }
 .composer__toolbar > div { min-width: 0; display: flex; gap: 3px; }
-.composer-tool { max-width: 180px; display: flex; align-items: center; gap: 4px; padding: 5px 7px; overflow: hidden; border: 0; border-radius: 5px; color: var(--text-3); background: transparent; font-size: 11px; cursor: pointer; white-space: nowrap; }
+.composer-tool { max-width: 180px; display: flex; align-items: center; gap: 4px; padding: 4px 6px; overflow: hidden; border: 0; border-radius: 5px; color: var(--text-3); background: transparent; font-size: 10px; cursor: pointer; white-space: nowrap; }
 .composer-tool:hover:not(:disabled) { color: var(--text); background: var(--surface-3); }
 .composer-tool--danger:hover:not(:disabled) { color: var(--red); }
-.composer-send { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border: 1px solid #3e684d; border-radius: 5px; color: #bcf1cf; background: #1d3927; font-size: 11px; cursor: pointer; }
+.composer-send { display: flex; align-items: center; gap: 5px; padding: 4px 7px; border: 1px solid #3e684d; border-radius: 5px; color: #bcf1cf; background: #1d3927; font-size: 10px; cursor: pointer; }
 .composer-send:disabled { opacity: .35; cursor: default; }
 
 .editor-pane { height: 100%; min-width: 0; min-height: 0; display: grid; grid-template-rows: 34px minmax(0, 1fr); background: #101315; }

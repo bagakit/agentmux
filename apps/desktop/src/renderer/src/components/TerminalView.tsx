@@ -34,8 +34,8 @@ export function TerminalView({ session }: { session: SessionSnapshot }) {
       cursorBlink: true,
       cursorStyle: 'bar',
       fontFamily: '"SFMono-Regular", "Cascadia Code", "JetBrains Mono", monospace',
-      fontSize: 15,
-      lineHeight: 1.4,
+      fontSize: 12,
+      lineHeight: 1.2,
       scrollback: 5_000,
       theme: {
         background: '#0c0f11',
