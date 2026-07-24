@@ -7,11 +7,14 @@ import { registerIpc } from './ipc.js'
 import { hydrateProcessPathFromLoginShell } from './login-shell-path.js'
 import { RuntimeController } from './runtime-controller.js'
 import { runDesktopResourceProbe } from './resource-probe.js'
+import { runDesktopFileEditingProbe, WorkspaceFileEditingProbeControl } from './file-editing-probe.js'
+import { WorkspaceFiles } from './workspace-files.js'
 
 const appIconPath = join(import.meta.dirname, '../../resources/icon.png')
 const packagedUserDataPath = join(app.getPath('appData'), 'dev.agentmux.desktop')
 let disposeIpc: (() => Promise<void>) | null = null
-let quitting = false
+let ownerDisposal: Promise<void> | null = null
+let allowingQuit = false
 
 if (process.env.AGENTMUX_DESKTOP_USER_DATA) {
   app.setPath('userData', process.env.AGENTMUX_DESKTOP_USER_DATA)
@@ -21,6 +24,38 @@ if (process.env.AGENTMUX_DESKTOP_USER_DATA) {
 app.setName('AgentMux')
 const runtime = new RuntimeController(new AgentMuxFileAgentSessionStore())
 const configStore = new ConfigStore()
+
+function disposeOwners(): Promise<void> {
+  if (!ownerDisposal) {
+    ownerDisposal = (async () => {
+      const disposeRegisteredIpc = disposeIpc
+      disposeIpc = null
+      const failures: unknown[] = []
+      try {
+        await disposeRegisteredIpc?.()
+      } catch (error) {
+        failures.push(error)
+      }
+      try {
+        await runtime.dispose()
+      } catch (error) {
+        failures.push(error)
+      }
+      if (failures.length > 0) throw new AggregateError(failures, 'Desktop owner disposal failed')
+    })()
+  }
+  return ownerDisposal
+}
+
+async function exitAfterFailure(error: unknown): Promise<void> {
+  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
+  try {
+    await disposeOwners()
+  } catch (cleanupError) {
+    process.stderr.write(`${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}\n`)
+  }
+  app.exit(1)
+}
 
 async function createWindow(appReadyAtMs: number = Date.now()): Promise<void> {
   const windowCreationStartedAtMs = Date.now()
@@ -43,8 +78,18 @@ async function createWindow(appReadyAtMs: number = Date.now()): Promise<void> {
     if (url.startsWith('https://')) void shell.openExternal(url)
     return { action: 'deny' }
   })
+  const fileEditingProbeControl = new WorkspaceFileEditingProbeControl()
+  const workspaceFiles = new WorkspaceFiles(
+    (id) => runtime.executionHost(id),
+    process.env.AGENTMUX_DESKTOP_FILE_EDITING_REPORT
+      ? {
+          beforeWrite: async (input) => await fileEditingProbeControl.beforeWrite(input),
+          localWriteFault: () => fileEditingProbeControl.consumeFault()
+        }
+      : {}
+  )
   await disposeIpc?.()
-  disposeIpc = await registerIpc({ window, configStore, runtime })
+  disposeIpc = await registerIpc({ window, configStore, runtime, workspaceFiles })
   if (process.env.ELECTRON_RENDERER_URL) await window.loadURL(process.env.ELECTRON_RENDERER_URL)
   else await window.loadFile(join(import.meta.dirname, '../renderer/index.html'))
   const rendererLoadedAtMs = Date.now()
@@ -52,9 +97,24 @@ async function createWindow(appReadyAtMs: number = Date.now()): Promise<void> {
     await writeFile(process.env.AGENTMUX_DESKTOP_READY_FILE, `${JSON.stringify({
       productName: app.name,
       version: app.getVersion(),
-      packaged: app.isPackaged
+      packaged: app.isPackaged,
+      executable: process.execPath
     })}\n`, { mode: 0o600 })
     if (process.env.AGENTMUX_DESKTOP_EXIT_AFTER_READY === '1') {
+      app.quit()
+      return
+    }
+  }
+  const fileEditingConfig = await configStore.get()
+  if (process.env.AGENTMUX_DESKTOP_FILE_EDITING_REPORT) {
+    if (fileEditingConfig.workspaces.length !== 1) {
+      throw new Error('Desktop file editing probe requires exactly one workspace.')
+    }
+    if (await runDesktopFileEditingProbe({
+      window,
+      workspacePath: fileEditingConfig.workspaces[0]!.path,
+      control: fileEditingProbeControl
+    })) {
       app.quit()
       return
     }
@@ -84,8 +144,7 @@ app.whenReady().then(async () => {
     if (BrowserWindow.getAllWindows().length === 0) void createWindow()
   })
 }).catch((error) => {
-  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
-  app.exit(1)
+  void exitAfterFailure(error)
 })
 
 app.on('window-all-closed', () => {
@@ -93,16 +152,10 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', (event) => {
-  if (quitting) return
+  if (allowingQuit) return
   event.preventDefault()
-  quitting = true
-  void (async () => {
-    await disposeIpc?.()
-    disposeIpc = null
-    await runtime.dispose()
+  void disposeOwners().then(() => {
+    allowingQuit = true
     app.quit()
-  })().catch((error) => {
-    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
-    app.exit(1)
-  })
+  }, async (error) => await exitAfterFailure(error))
 })

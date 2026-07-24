@@ -58,5 +58,22 @@ monacoTypeScript.javascriptDefaults.setCompilerOptions({
 
 loader.config({ monaco })
 
-const resourceWindow = window as typeof window & { __agentmuxMonacoModelCount?: () => number }
+const resourceWindow = window as typeof window & {
+  __agentmuxMonacoModelCount?: () => number
+  __agentmuxFileEditingProbe?: {
+    value(): string | null
+    setValue(value: string): void
+  }
+}
 resourceWindow.__agentmuxMonacoModelCount = () => monaco.editor.getModels().length
+const mountedEditorModel = () => monaco.editor.getEditors()
+  .find((editor) => editor.getDomNode()?.isConnected)
+  ?.getModel() ?? null
+resourceWindow.__agentmuxFileEditingProbe = {
+  value: () => mountedEditorModel()?.getValue() ?? null,
+  setValue(value) {
+    const model = mountedEditorModel()
+    if (!model) throw new Error('File editing probe has no Monaco model')
+    model.setValue(value)
+  }
+}

@@ -49,6 +49,17 @@ async function run(command, args, options = {}) {
     })
     let stdout = ''
     let stderr = ''
+    let timedOut = false
+    let forceKill
+    const timeout = options.timeoutMs
+      ? setTimeout(() => {
+          timedOut = true
+          child.kill('SIGTERM')
+          forceKill = setTimeout(() => child.kill('SIGKILL'), 2_000)
+          forceKill.unref()
+        }, options.timeoutMs)
+      : undefined
+    timeout?.unref()
     if (capture) {
       if (options.input !== undefined) child.stdin.end(options.input)
       child.stdout.setEncoding('utf8')
@@ -58,7 +69,10 @@ async function run(command, args, options = {}) {
     }
     child.once('error', reject)
     child.once('exit', (code, signal) => {
-      if (code === 0) resolvePromise({ stdout, stderr })
+      if (timeout) clearTimeout(timeout)
+      if (forceKill) clearTimeout(forceKill)
+      if (timedOut) reject(new Error(`${command} timed out after ${options.timeoutMs}ms`))
+      else if (code === 0) resolvePromise({ stdout, stderr })
       else reject(new Error(`${command} exited with ${signal ?? code}${stderr ? `: ${stderr.trim()}` : ''}`))
     })
   })
@@ -310,27 +324,59 @@ async function verifyPackagedRuntime(appPath, verificationRoot) {
 }
 
 async function processIdsForApplication(appPath) {
-  const executable = join(appPath, 'Contents', 'MacOS', PRODUCT_NAME)
-  const helperRoot = join(appPath, 'Contents', 'Frameworks') + sep
+  const canonicalAppPath = await realpath(appPath)
+  const executable = join(canonicalAppPath, 'Contents', 'MacOS', PRODUCT_NAME)
+  const helperRoot = join(canonicalAppPath, 'Contents', 'Frameworks') + sep
   const result = await run('ps', ['-axo', 'pid=,command='], { capture: true })
   return result.stdout.split('\n').flatMap((line) => {
     const match = /^\s*(\d+)\s+(.+)$/.exec(line)
-    if (!match || (match[2] !== executable && !match[2].startsWith(helperRoot))) return []
+    if (!match || (
+      match[2] !== executable &&
+      !match[2].startsWith(`${executable} `) &&
+      !match[2].startsWith(helperRoot)
+    )) return []
     return [Number(match[1])]
   })
 }
 
+async function waitForProcessExit(findProcessIds, timeoutMs) {
+  const deadline = Date.now() + timeoutMs
+  let remaining = await findProcessIds()
+  while (remaining.length > 0 && Date.now() <= deadline) {
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 20))
+    remaining = await findProcessIds()
+  }
+  return remaining
+}
+
+function signalProcessIds(processIds, signal) {
+  const errors = []
+  for (const pid of processIds) {
+    try {
+      process.kill(pid, signal)
+    } catch (error) {
+      if (!(error instanceof Error && 'code' in error && error.code === 'ESRCH')) {
+        errors.push(new Error(`Could not send ${signal} to scoped process ${pid}`, { cause: error }))
+      }
+    }
+  }
+  return errors
+}
+
 async function verifyLaunchServices(appPath, verificationRoot) {
+  const canonicalAppPath = await realpath(appPath)
   const readyFile = join(verificationRoot, 'desktop-ready.json')
+  const fileEditingReport = join(verificationRoot, 'workspace-file-editing.json')
   const userData = join(verificationRoot, 'user-data')
+  const workspace = join(verificationRoot, 'workspace')
   const stdoutPath = join(verificationRoot, 'desktop-stdout.log')
   const stderrPath = join(verificationRoot, 'desktop-stderr.log')
   const runtimeRoot = await mkdtemp(join('/private/tmp', `amx-smoke-${process.getuid()}-`))
   const endpointPath = join(runtimeRoot, 'ctxmux.sock')
   const ownerReceiptPath = join(runtimeRoot, 'owner.json')
-  const executable = join(appPath, 'Contents', 'MacOS', PRODUCT_NAME)
+  const executable = join(canonicalAppPath, 'Contents', 'MacOS', PRODUCT_NAME)
   const daemonEntrypoint = join(
-    appPath,
+    canonicalAppPath,
     'Contents',
     'Resources',
     'app',
@@ -343,21 +389,62 @@ async function verifyLaunchServices(appPath, verificationRoot) {
     'bin',
     'ctxmuxd'
   )
-  await mkdir(userData, { recursive: true })
-  const before = new Set(await processIdsForApplication(appPath))
+  await Promise.all([
+    mkdir(userData, { recursive: true }),
+    mkdir(workspace, { recursive: true })
+  ])
+  await Promise.all([
+    writeFile(join(workspace, 'revision-probe.txt'), 'alpha', { mode: 0o640 }),
+    writeFile(join(userData, 'agentmux.config.json'), `${JSON.stringify({
+      version: 4,
+      hosts: [{ id: 'local', kind: 'local', label: 'Mounted Desktop E2E' }],
+      agents: {},
+      workspaces: [{
+        id: 'workspace-file-editing-e2e',
+        name: 'Workspace File Editing E2E',
+        hostId: 'local',
+        path: workspace,
+        kind: 'folder'
+      }],
+      appearance: { terminalTheme: 'graphite' }
+    }, null, 2)}\n`, { mode: 0o600 })
+  ])
+  const before = new Set(await processIdsForApplication(canonicalAppPath))
+  const ownedApplicationPids = async () => (
+    (await processIdsForApplication(canonicalAppPath)).filter((pid) => !before.has(pid))
+  )
+  const ownedDaemonPids = async () => {
+    const processes = await run('ps', ['-axo', 'pid=,command='], { capture: true })
+    return processes.stdout.split('\n').flatMap((line) => {
+      const match = /^\s*(\d+)\s+(.+)$/u.exec(line)
+      if (!match || !match[2].includes(daemonEntrypoint) || !match[2].includes(endpointPath)) return []
+      return [Number(match[1])]
+    })
+  }
+  let verificationError
   try {
-    await run('open', [
-      '-n',
-      '-j',
-      '-W',
-      '--stdout', stdoutPath,
-      '--stderr', stderrPath,
-      '--env', `AGENTMUX_DESKTOP_USER_DATA=${userData}`,
-      '--env', `AGENTMUX_RUNTIME_DIRECTORY=${runtimeRoot}`,
-      '--env', `AGENTMUX_DESKTOP_READY_FILE=${readyFile}`,
-      '--env', 'AGENTMUX_DESKTOP_EXIT_AFTER_READY=1',
-      appPath
-    ], { capture: true })
+    try {
+      await run('open', [
+        '-n',
+        '-j',
+        '-W',
+        '--stdout', stdoutPath,
+        '--stderr', stderrPath,
+        '--env', `AGENTMUX_DESKTOP_USER_DATA=${userData}`,
+        '--env', `AGENTMUX_RUNTIME_DIRECTORY=${runtimeRoot}`,
+        '--env', `AGENTMUX_DESKTOP_READY_FILE=${readyFile}`,
+        '--env', `AGENTMUX_DESKTOP_FILE_EDITING_REPORT=${fileEditingReport}`,
+        canonicalAppPath
+      ], { capture: true, timeoutMs: 90_000 })
+    } catch (error) {
+      const report = await readFile(fileEditingReport, 'utf8')
+        .then((value) => JSON.parse(value), () => null)
+      const stderr = await readFile(stderrPath, 'utf8').catch(() => '')
+      throw new Error([
+        `Mounted Desktop lifecycle failed: ${report?.error ?? (error instanceof Error ? error.message : String(error))}`,
+        stderr.trim()
+      ].filter(Boolean).join(': '), { cause: error })
+    }
     if (!await pathExists(readyFile)) {
       const stderr = await readFile(stderrPath, 'utf8').catch(() => '')
       throw new Error(`Packaged Desktop did not emit a ready receipt${stderr ? `: ${stderr.trim()}` : '.'}`)
@@ -365,40 +452,72 @@ async function verifyLaunchServices(appPath, verificationRoot) {
     const ready = JSON.parse(await readFile(readyFile, 'utf8'))
     assert(ready.productName === PRODUCT_NAME, 'LaunchServices started an incorrectly branded application.')
     assert(ready.packaged === true, 'LaunchServices did not start the packaged application.')
+    assert(
+      await realpath(ready.executable) === executable,
+      'LaunchServices ready receipt did not come from the exact relocated application.'
+    )
+    const fileEditing = JSON.parse(await readFile(fileEditingReport, 'utf8'))
+    assert(fileEditing.schema === 'agentmux.workspace-file-editing-e2e.v1', 'Mounted Desktop emitted the wrong file editing report schema.')
+    assert(fileEditing.ok === true, `Mounted Desktop file editing E2E failed: ${fileEditing.error ?? 'unknown error'}`)
+    assert(
+      fileEditing.phases?.saveGeneration?.disk === 'bravo' &&
+        fileEditing.phases.saveGeneration.editor === 'charlie' &&
+        fileEditing.phases.saveGeneration.state === 'dirty',
+      'Mounted Desktop did not preserve input made during save.'
+    )
+    assert(
+      fileEditing.phases?.writeError?.disk === 'lima' &&
+        fileEditing.phases.writeError.editor === 'mike' &&
+        fileEditing.phases.writeError.state === 'write-error',
+      'Mounted Desktop did not preserve original bytes and draft after replace failure.'
+    )
     const ownerReceipt = JSON.parse(await readFile(ownerReceiptPath, 'utf8'))
     assert(
       await realpath(ownerReceipt.daemonPath) === await realpath(daemonEntrypoint) &&
         ownerReceipt.socketPath === endpointPath,
       'LaunchServices did not start the exact packaged CtxMux runtime.'
     )
-    const remaining = (await processIdsForApplication(appPath)).filter((pid) => !before.has(pid))
-    assert(remaining.length === 0, `Packaged Desktop left ${remaining.length} process(es) after the smoke run.`)
-  } finally {
-    const ownedDaemonPids = async () => {
-      const processes = await run('ps', ['-axo', 'pid=,command='], { capture: true })
-      return processes.stdout.split('\n').flatMap((line) => {
-        const match = /^\s*(\d+)\s+(.+)$/u.exec(line)
-        if (!match || !match[2].includes(daemonEntrypoint) || !match[2].includes(endpointPath)) return []
-        return [Number(match[1])]
-      })
-    }
-    for (const pid of await ownedDaemonPids()) {
-      try {
-        process.kill(pid, 'SIGTERM')
-      } catch (error) {
-        if (!(error instanceof Error && 'code' in error && error.code === 'ESRCH')) throw error
-      }
-    }
-    const deadline = Date.now() + 5_000
-    let remainingDaemonPids = await ownedDaemonPids()
-    while (remainingDaemonPids.length > 0 && Date.now() <= deadline) {
-      await new Promise((resolveDelay) => setTimeout(resolveDelay, 20))
-      remainingDaemonPids = await ownedDaemonPids()
-    }
-    assert(remainingDaemonPids.length === 0, 'Launch smoke ctxmuxd survived scoped cleanup.')
+    const remainingApplicationPids = await waitForProcessExit(ownedApplicationPids, 5_000)
+    assert(remainingApplicationPids.length === 0, 'Packaged Desktop application or observer processes did not exit gracefully.')
+  } catch (error) {
+    verificationError = error
+  }
+
+  const cleanupErrors = []
+  cleanupErrors.push(...signalProcessIds(await ownedApplicationPids(), 'SIGTERM'))
+  let remainingApplicationPids = await waitForProcessExit(ownedApplicationPids, 5_000)
+  if (remainingApplicationPids.length > 0) {
+    cleanupErrors.push(new Error(`Launch smoke application cleanup required SIGKILL for PIDs ${remainingApplicationPids.join(', ')}`))
+    cleanupErrors.push(...signalProcessIds(remainingApplicationPids, 'SIGKILL'))
+    remainingApplicationPids = await waitForProcessExit(ownedApplicationPids, 2_000)
+  }
+  if (remainingApplicationPids.length > 0) {
+    cleanupErrors.push(new Error(`Launch smoke application processes survived scoped cleanup: ${remainingApplicationPids.join(', ')}`))
+  }
+
+  cleanupErrors.push(...signalProcessIds(await ownedDaemonPids(), 'SIGTERM'))
+  let remainingDaemonPids = await waitForProcessExit(ownedDaemonPids, 5_000)
+  if (remainingDaemonPids.length > 0) {
+    cleanupErrors.push(new Error(`Launch smoke daemon cleanup required SIGKILL for PIDs ${remainingDaemonPids.join(', ')}`))
+    cleanupErrors.push(...signalProcessIds(remainingDaemonPids, 'SIGKILL'))
+    remainingDaemonPids = await waitForProcessExit(ownedDaemonPids, 2_000)
+  }
+  if (remainingDaemonPids.length > 0) {
+    cleanupErrors.push(new Error(`Launch smoke daemon processes survived scoped cleanup: ${remainingDaemonPids.join(', ')}`))
+  }
+
+  try {
     await rm(runtimeRoot, { recursive: true, force: true })
     assert(!await pathExists(endpointPath), 'Launch smoke ctxmuxd endpoint survived scoped cleanup.')
+  } catch (error) {
+    cleanupErrors.push(error)
   }
+
+  const failures = [verificationError, ...cleanupErrors].filter(Boolean)
+  if (failures.length > 0) {
+    throw new AggregateError(failures, 'Mounted Desktop verification did not reach a clean terminal state')
+  }
+  process.stdout.write('mounted_workspace_file_editing=passed\n')
 }
 
 async function createDmg(appPath, temporaryRoot) {
