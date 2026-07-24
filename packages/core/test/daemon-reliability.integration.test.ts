@@ -12,6 +12,7 @@ import {
 } from '../src/daemon-client.js'
 import { encodeAgentMuxDaemonFrame, type AgentMuxDaemonCreateRequest } from '../src/daemon-protocol.js'
 import { AgentMuxDaemonServer } from '../src/daemon-server.js'
+import { posixProcessIsControllable } from '../src/posix-process-identity.js'
 
 const fakeCodexPath = fileURLToPath(new URL('./fixtures/fake-codex.mjs', import.meta.url))
 const stubbornTreePath = fileURLToPath(new URL('./fixtures/stubborn-process-tree.mjs', import.meta.url))
@@ -63,12 +64,7 @@ async function sendRequestAndDrop(socketPath: string, method: 'create' | 'write'
 }
 
 function processIsAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code !== 'ESRCH'
-  }
+  return posixProcessIsControllable(pid)
 }
 
 describe('agentmuxd reliability contract', () => {
@@ -333,5 +329,53 @@ describe('agentmuxd reliability contract', () => {
         return false
       }
     })
+  })
+
+  it('repeatedly attaches and detaches without losing control or leaking an attachment', async () => {
+    const controller = await connect()
+    const observer = await connect()
+    const session = await controller.createTerminal({
+      sessionId: 'attach-detach-loop',
+      createOperationId: 'operation-attach-detach-loop',
+      cwd: process.cwd()
+    })
+    for (let index = 0; index < 100; index += 1) {
+      const attached = await observer.attach(session.sessionId)
+      expect(attached.session.incarnationId).toBe(session.incarnationId)
+      await observer.detach(attached.session)
+    }
+    await controller.write(session, "printf 'still-controlled\\n'\n")
+    const attached = await observer.attach(session.sessionId)
+    expect(attached.session.state).toBe('running')
+    await observer.stop(attached.session)
+    await expect(controller.listSessions()).resolves.toEqual([])
+  })
+
+  it('converges concurrent Stop and Resize requests on one removed process', async () => {
+    const first = await connect()
+    const second = await connect()
+    const session = await first.createTerminal({
+      sessionId: 'stop-resize-race',
+      createOperationId: 'operation-stop-resize-race',
+      cwd: process.cwd()
+    })
+    const attached = await second.attach(session.sessionId)
+    const results = await Promise.allSettled([
+      first.stop(session),
+      second.stop(attached.session),
+      ...Array.from({ length: 32 }, (_, index) => second.resize(
+        attached.session,
+        80 + index,
+        24 + index % 8
+      ))
+    ])
+    expect(results.slice(0, 2).some((result) => result.status === 'fulfilled')).toBe(true)
+    for (const result of results) {
+      if (result.status === 'rejected') {
+        expect((result.reason as { code?: string }).code).toMatch(/^(SESSION_NOT_RUNNING|UNKNOWN_DAEMON_SESSION)$/)
+      }
+    }
+    await expect(first.listSessions()).resolves.toEqual([])
+    expect(processIsAlive(session.pid)).toBe(false)
   })
 })

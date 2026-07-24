@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { AgentMuxDaemonClient } from '../src/daemon-client.js'
+import { posixProcessIsControllable } from '../src/posix-process-identity.js'
 
 const repositoryRoot = resolve(import.meta.dirname, '../../..')
 const daemonEntry = resolve(import.meta.dirname, '../dist/agentmuxd.js')
@@ -48,12 +49,7 @@ async function stopChild(child: ChildProcess | null, signal: NodeJS.Signals): Pr
 }
 
 function processIsAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code !== 'ESRCH'
-  }
+  return posixProcessIsControllable(pid)
 }
 
 describe.runIf(process.platform !== 'win32')('agentmuxd crash disposition', () => {
