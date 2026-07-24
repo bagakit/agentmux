@@ -4,10 +4,11 @@ import type { RuntimeController, RuntimePreparation } from '../src/main/runtime-
 import { saveRuntimeConfig } from '../src/main/runtime-config-transaction.js'
 
 const config: AppConfig = {
-  version: 3,
+  version: 4,
   hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
   agents: {},
-  workspaces: []
+  workspaces: [],
+  appearance: { terminalTheme: 'graphite' }
 }
 
 function runtimeFixture(overrides: Partial<RuntimeController> = {}) {

@@ -44,10 +44,11 @@ describe('selected worktree workspace context', () => {
     }
     const oldLayout = createWorkspaceLayout('main-pane', [oldTab.id])
     const initialConfig: AppConfig = {
-      version: 3,
+      version: 4,
       hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
       agents: {},
-      workspaces: [main]
+      workspaces: [main],
+      appearance: { terminalTheme: 'graphite' }
     }
     const selectedConfig: AppConfig = {
       ...initialConfig,
@@ -132,10 +133,11 @@ function prepareUniversalTab(): { workspace: WorkspaceRecord; tabId: string } {
     kind: 'folder'
   }
   const config: AppConfig = {
-    version: 3,
+    version: 4,
     hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
     agents: { codex: { command: 'codex', args: [], env: {} } },
-    workspaces: [workspace]
+    workspaces: [workspace],
+    appearance: { terminalTheme: 'graphite' }
   }
   useAppStore.setState({
     config,

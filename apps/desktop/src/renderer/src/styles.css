@@ -838,6 +838,19 @@ button.launch-surface__icon:hover { background: #1b3022; }
 .settings-inline-error { margin: 0; color: #f2a19b; font-size: 10px; }
 .settings-pane-actions { display: flex; align-items: center; justify-content: flex-end; gap: 14px; }
 .settings-pane-actions > span { margin-right: auto; color: var(--text-3); font-size: 10px; }
+.appearance-theme-group > header { text-transform: none; letter-spacing: normal; }
+.terminal-theme-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; padding: 10px; }
+.terminal-theme-choice { min-width: 0; display: grid; grid-template-columns: 108px minmax(0, 1fr) 16px; align-items: center; gap: 10px; padding: 9px; border: 1px solid var(--line-soft); border-radius: 8px; color: var(--text-3); background: #0e1214; text-align: left; cursor: pointer; }
+.terminal-theme-choice:hover { border-color: #37443e; color: var(--text-2); background: #111719; }
+.terminal-theme-choice--selected { border-color: #4b7059; color: var(--green); background: #142019; box-shadow: inset 0 0 0 1px #4b705930; }
+.terminal-theme-preview { height: 68px; display: flex; flex-direction: column; gap: 5px; overflow: hidden; padding: 7px; border-radius: 5px; box-shadow: inset 0 0 0 1px #ffffff14; font: 8px/1.2 "SFMono-Regular", monospace; }
+.terminal-theme-preview__chrome { display: flex; gap: 3px; }
+.terminal-theme-preview__chrome i { width: 5px; height: 5px; border-radius: 50%; }
+.terminal-theme-preview__line { display: flex; gap: 4px; opacity: .86; }
+.terminal-theme-preview__composer { margin-top: auto; display: flex; gap: 4px; padding: 5px 6px; border-radius: 3px; }
+.terminal-theme-choice__copy { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.terminal-theme-choice__copy strong { color: var(--text); font-size: 11px; }
+.terminal-theme-choice__copy small { color: var(--text-3); font-size: 10px; line-height: 1.4; }
 .host-settings-card { overflow: hidden; border: 1px solid var(--line); border-radius: 9px; background: #121719; }
 .host-settings-card > header { min-height: 55px; display: grid; grid-template-columns: 32px minmax(0, 1fr) auto auto auto; align-items: center; gap: 9px; padding: 9px 11px; }
 .host-settings-card > header > div { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
@@ -1009,6 +1022,7 @@ button.launch-surface__icon:hover { background: #1b3022; }
   .host-edit-grid { grid-template-columns: 1fr 1fr; }
   .workspace-settings-list > div { grid-template-columns: 20px minmax(0, 1fr); }
   .workspace-settings-list em { grid-column: 2; }
+  .terminal-theme-grid { grid-template-columns: 1fr; }
 }
 @media (max-height: 720px) {
   .launch-surface { padding: 15px; }

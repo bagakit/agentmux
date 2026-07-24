@@ -13,7 +13,7 @@ import type { DesktopViewFocusTarget, DesktopViewFocusResult } from '../../../sh
 
 const now = Date.now()
 let mockConfig: AppConfig = {
-  version: 3,
+  version: 4,
   hosts: [
     { id: 'local', kind: 'local', label: 'This Mac' },
     {
@@ -34,7 +34,8 @@ let mockConfig: AppConfig = {
   workspaces: [
     { id: 'workspace-demo', name: 'agentmux', hostId: 'local', path: new URL("Users/river/agentmux", new URL('/', new URL(import.meta.url))).pathname, kind: 'folder' },
     { id: 'workspace-remote', name: 'render-lab', hostId: 'studio', path: new URL("srv/render-lab", new URL('/', new URL(import.meta.url))).pathname, kind: 'worktree', branch: 'feat/materials' }
-  ]
+  ],
+  appearance: { terminalTheme: 'graphite' }
 }
 
 let mockFiles = new Map<string, string | null>([

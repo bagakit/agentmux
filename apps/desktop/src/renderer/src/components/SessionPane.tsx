@@ -12,6 +12,7 @@ const NO_ACTIVITIES: never[] = []
 export function SessionPane({ sessionId }: { sessionId: string }) {
   const session = useAppStore((state) => state.sessions.find((item) => item.id === sessionId))
   const activities = useAppStore((state) => state.activities[sessionId] ?? NO_ACTIVITIES)
+  const terminalThemeId = useAppStore((state) => state.config?.appearance.terminalTheme)
   const viewMode = useAppStore((state) => state.viewModes[sessionId] ?? 'terminal')
   const refreshSession = useAppStore((state) => state.refreshSession)
   const stopSession = useAppStore((state) => state.stopSession)
@@ -19,7 +20,7 @@ export function SessionPane({ sessionId }: { sessionId: string }) {
   const [confirmingStop, setConfirmingStop] = useState(false)
   const [stopping, setStopping] = useState(false)
 
-  if (!session) {
+  if (!session || !terminalThemeId) {
     return (
       <div className="pane-state pane-state--error">
         <AlertTriangle size={20} />
@@ -75,7 +76,7 @@ export function SessionPane({ sessionId }: { sessionId: string }) {
       <div className="agent-body">
         {session.kind === 'terminal' || viewMode === 'terminal' ? (
           <div className="agent-terminal-stage">
-            <TerminalView session={session} />
+            <TerminalView session={session} themeId={terminalThemeId} />
             {disconnected || missing || exited ? (
               <div className={`terminal-recovery terminal-recovery--${disconnected ? 'disconnected' : exited ? 'exited' : 'error'}`} role="status" aria-live="polite">
                 <span className="terminal-recovery__icon">

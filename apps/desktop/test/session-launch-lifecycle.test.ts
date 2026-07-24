@@ -24,10 +24,11 @@ function deferred<T>() {
 }
 
 const config: AppConfig = {
-  version: 3,
+  version: 4,
   hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
   agents: {},
-  workspaces: [{ id: 'workspace', name: 'Project', hostId: 'local', path: _hygiene_fixturePath("repo"), kind: 'folder' }]
+  workspaces: [{ id: 'workspace', name: 'Project', hostId: 'local', path: _hygiene_fixturePath("repo"), kind: 'folder' }],
+  appearance: { terminalTheme: 'graphite' }
 }
 
 function launcherFixture(view: LauncherWorkbenchTab['view'] = 'picker'): LauncherWorkbenchTab {

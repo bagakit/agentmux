@@ -3,8 +3,9 @@ import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import { useEffect, useRef } from 'react'
 import type { RuntimeEvent, SessionSnapshot } from '../../../shared/contracts'
+import type { TerminalThemeId } from '../../../shared/contracts'
 import { api } from '../lib/api'
-import { DEFAULT_TERMINAL_APPEARANCE, DEFAULT_TERMINAL_THEME } from '../lib/terminal-theme'
+import { terminalOptions, terminalTheme } from '../lib/terminal-theme'
 
 function terminalWrite(terminal: Terminal, data: string): Promise<void> {
   return new Promise((resolve) => terminal.write(data, resolve))
@@ -24,13 +25,13 @@ function outputForSession(event: RuntimeEvent, session: SessionSnapshot) {
   return byteRange ? { ...core, ...byteRange } : null
 }
 
-export function TerminalView({ session }: { session: SessionSnapshot }) {
+export function TerminalView({ session, themeId }: { session: SessionSnapshot; themeId: TerminalThemeId }) {
   const rootRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!rootRef.current) return
     const terminal = new Terminal({
-      ...DEFAULT_TERMINAL_APPEARANCE,
+      ...terminalOptions(themeId),
       allowProposedApi: false,
       scrollback: 5_000
     })
@@ -145,13 +146,13 @@ export function TerminalView({ session }: { session: SessionSnapshot }) {
       if (attachmentId !== null) void api.sessions.detach(attachmentId)
       terminal.dispose()
     }
-  }, [session.control.run.runId, session.id])
+  }, [session.control.run.runId, session.id, themeId])
 
   return (
     <div
       className="terminal-view"
       ref={rootRef}
-      style={{ backgroundColor: DEFAULT_TERMINAL_THEME.background }}
+      style={{ backgroundColor: terminalTheme(themeId).background }}
     />
   )
 }
