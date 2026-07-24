@@ -114,7 +114,13 @@ try {
     '--build-id',
     '0.1.0'
   ], {
-    env: { ...process.env, HOME: remoteHome },
+    env: {
+      HOME: remoteHome,
+      PATH: process.env.PATH,
+      SHELL: '/bin/sh',
+      TMPDIR: process.env.TMPDIR,
+      LANG: 'C.UTF-8'
+    },
     stdio: ['ignore', 'pipe', 'inherit']
   })
   remoteRuntime.stdout.setEncoding('utf8')
