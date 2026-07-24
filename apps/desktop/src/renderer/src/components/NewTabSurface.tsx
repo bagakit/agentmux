@@ -8,7 +8,6 @@ export function NewTabSurface({ paneId, tabId }: { paneId: string; tabId?: strin
     const tab = tabId ? state.tabs[tabId] : undefined
     return tab?.kind === 'launcher' ? tab.view : 'picker'
   })
-  const [mode, setMode] = useState<'picker' | 'agent'>(launcherView)
   const [starting, setStarting] = useState<'terminal' | 'browser' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const firstAction = useRef<HTMLButtonElement>(null)
@@ -17,6 +16,8 @@ export function NewTabSurface({ paneId, tabId }: { paneId: string; tabId?: strin
   const tabWorkspaceId = useAppStore((state) => tabId ? state.tabs[tabId]?.workspaceId : undefined)
   const launchTerminal = useAppStore((state) => state.launchTerminal)
   const createBrowser = useAppStore((state) => state.createBrowser)
+  const openLauncher = useAppStore((state) => state.openLauncher)
+  const setLauncherView = useAppStore((state) => state.setLauncherView)
   const workspace = config?.workspaces.find((item) => item.id === (tabWorkspaceId ?? activeWorkspaceId))
 
   useEffect(() => {
@@ -37,8 +38,16 @@ export function NewTabSurface({ paneId, tabId }: { paneId: string; tabId?: strin
     }
   }
 
-  if (mode === 'agent') {
-    return <LaunchAgent paneId={paneId} {...(tabId ? { launcherTabId: tabId } : {})} onBack={() => setMode('picker')} />
+  if (launcherView === 'agent') {
+    return (
+      <LaunchAgent
+        paneId={paneId}
+        {...(tabId ? { launcherTabId: tabId } : {})}
+        onBack={() => {
+          if (tabId) setLauncherView(tabId, 'picker')
+        }}
+      />
+    )
   }
 
   return (
@@ -54,7 +63,11 @@ export function NewTabSurface({ paneId, tabId }: { paneId: string; tabId?: strin
           <span><strong>Terminal</strong><small>Open the host shell in a recoverable core session.</small></span>
           {starting === 'terminal' ? <LoaderCircle className="spin" size={14} /> : null}
         </button>
-        <button type="button" onClick={() => setMode('agent')} disabled={starting !== null}>
+        <button
+          type="button"
+          onClick={() => tabId ? setLauncherView(tabId, 'agent') : openLauncher(paneId, 'agent')}
+          disabled={starting !== null}
+        >
           <span className="new-tab-card__icon"><Bot size={19} /></span>
           <span><strong>Agent</strong><small>Launch Codex, Claude, TraeX, Hermes, or Pi.</small></span>
         </button>

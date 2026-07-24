@@ -1,3 +1,4 @@
+import '../monaco'
 import Editor from '@monaco-editor/react'
 import { Save } from 'lucide-react'
 import { detectLanguage } from '../lib/language-detect'
