@@ -99,7 +99,7 @@ describe('agentmuxd reliability contract', () => {
       createOperationId: 'operation-lost-create-response',
       kind: 'terminal',
       agentId: null,
-      semanticSessionId: null,
+      agentSessionId: null,
       cwd: process.cwd(),
       cols: 80,
       rows: 24,
@@ -167,7 +167,7 @@ describe('agentmuxd reliability contract', () => {
       sessionId: 'ordered-input',
       createOperationId: 'operation-ordered-input',
       agentId: 'codex',
-      semanticSessionId: 'semantic-ordered-input',
+      agentSessionId: 'semantic-ordered-input',
       command: process.execPath,
       args: [fakeCodexPath, 'ordered-input'],
       cwd: process.cwd()
@@ -199,7 +199,7 @@ describe('agentmuxd reliability contract', () => {
       sessionId: 'lost-write-response',
       createOperationId: 'operation-lost-write-response',
       agentId: 'codex',
-      semanticSessionId: 'semantic-lost-write-response',
+      agentSessionId: 'semantic-lost-write-response',
       command: process.execPath,
       args: [fakeCodexPath, 'lost-write-response'],
       cwd: process.cwd()
@@ -283,7 +283,7 @@ describe('agentmuxd reliability contract', () => {
       sessionId: 'stubborn-process-tree',
       createOperationId: 'operation-stubborn-process-tree',
       agentId: 'codex',
-      semanticSessionId: 'semantic-stubborn-process-tree',
+      agentSessionId: 'semantic-stubborn-process-tree',
       command: process.execPath,
       args: [stubbornTreePath],
       cwd: process.cwd()

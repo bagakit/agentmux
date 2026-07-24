@@ -1,60 +1,80 @@
 import { describe, expect, it } from 'vitest'
-import type { AgentMuxDaemonSession } from '../src/daemon-protocol.js'
-import { projectAgentMuxSessions } from '../src/runtime.js'
-import type { AgentMuxSemanticSession } from '../src/types.js'
+import { projectAgentMuxViews } from '../src/runtime.js'
+import type { AgentMuxAgentSession, AgentMuxRun } from '../src/types.js'
 
-const run: AgentMuxDaemonSession = {
-  sessionId: 'run-1',
+const run: AgentMuxRun = {
+  runId: 'run-1',
   incarnationId: 'incarnation-1',
   createOperationId: 'create-1',
   kind: 'agent',
   agentId: 'codex',
-  semanticSessionId: 'semantic-1',
-  cwd: '/repo',
+  agentSessionId: 'semantic-1',
+  workspacePath: '/repo',
   pid: 42,
   state: 'running',
   cols: 80,
   rows: 24,
   createdAt: 100,
-  latestSequence: 12,
-  acceptedInputSequence: 0
+  latestOutputBytes: 12,
+  acceptedInputBytes: 0
 }
 
-const semantic: AgentMuxSemanticSession = {
+const agentSession: AgentMuxAgentSession = {
   kind: 'agent',
-  semanticSessionId: 'semantic-1',
+  agentSessionId: 'semantic-1',
   agentId: 'codex',
   hostId: 'local',
   workspacePath: '/repo',
-  daemonSession: { sessionId: 'run-1', incarnationId: 'incarnation-1' },
-  outputCursor: 0,
+  run: { runId: 'run-1', incarnationId: 'incarnation-1' },
+  outputCursorBytes: 0,
   createdAt: 100,
   updatedAt: 100
 }
 
 describe('AgentMux runtime projection', () => {
   it('projects Agent and Raw Terminal runs without storing terminal output', () => {
-    const terminal: AgentMuxDaemonSession = {
+    const terminal: AgentMuxRun = {
       ...run,
-      sessionId: 'terminal-1',
+      runId: 'terminal-1',
       incarnationId: 'terminal-incarnation',
       createOperationId: 'terminal-create',
       kind: 'terminal',
       agentId: null,
-      semanticSessionId: null
+      agentSessionId: null
     }
-    const sessions = projectAgentMuxSessions('local', [run, terminal], [semantic])
-    expect(sessions).toMatchObject([
-      { id: 'semantic-1', kind: 'agent', semantic: { semanticSessionId: 'semantic-1' } },
-      { id: 'terminal-1', kind: 'terminal', run: { latestSequence: 12 } }
+    const views = projectAgentMuxViews('local', [run, terminal], [agentSession])
+    expect(views).toMatchObject([
+      {
+        viewId: 'agent-view:local:semantic-1',
+        kind: 'agent',
+        agentSession: { agentSessionId: 'semantic-1' }
+      },
+      {
+        viewId: 'terminal-view:local:terminal-1:terminal-incarnation',
+        kind: 'terminal',
+        run: { latestOutputBytes: 12 }
+      }
     ])
-    expect(JSON.stringify(sessions)).not.toContain('terminalSnapshot')
+    expect(JSON.stringify(views)).not.toContain('terminalSnapshot')
   })
 
-  it('fails closed when a semantic record points to another daemon incarnation', () => {
-    expect(() => projectAgentMuxSessions('local', [run], [{
-      ...semantic,
-      daemonSession: { ...semantic.daemonSession, incarnationId: 'stale-incarnation' }
+  it('projects two independent Views over one Agent Session without changing Agent identity', () => {
+    const views = projectAgentMuxViews('local', [run], [agentSession], [
+      { viewId: 'view-left', target: { kind: 'agent-session', agentSessionId: 'semantic-1' } },
+      { viewId: 'view-right', target: { kind: 'agent-session', agentSessionId: 'semantic-1' } }
+    ])
+    expect(views.map((view) => view.viewId)).toEqual(['view-left', 'view-right'])
+    expect(views).toMatchObject([
+      { agentSession: { agentSessionId: 'semantic-1' }, run: { runId: 'run-1' } },
+      { agentSession: { agentSessionId: 'semantic-1' }, run: { runId: 'run-1' } }
+    ])
+    expect(views[0]).not.toBe(views[1])
+  })
+
+  it('fails closed when an Agent Session record points to another Run incarnation', () => {
+    expect(() => projectAgentMuxViews('local', [run], [{
+      ...agentSession,
+      run: { ...agentSession.run, incarnationId: 'stale-incarnation' }
     }])).toThrow('does not match')
   })
 })

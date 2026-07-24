@@ -1,11 +1,8 @@
 import {
-  AgentMuxClient,
-  activateAgentMuxLocalDaemon
+  connectLocalAgentMux
 } from '@agentmux/core'
 
-await activateAgentMuxLocalDaemon()
-const client = new AgentMuxClient()
-await client.connect()
+const client = await connectLocalAgentMux()
 const output = new Promise((resolve) => {
   const unsubscribe = client.onEvent((event) => {
     if (event.type !== 'terminal-output' || !event.data.includes('agentmux-local-ready')) return
@@ -14,9 +11,9 @@ const output = new Promise((resolve) => {
   })
 })
 const terminal = await client.createTerminal({
-  sessionId: crypto.randomUUID(),
+  runId: crypto.randomUUID(),
   createOperationId: crypto.randomUUID(),
-  cwd: process.cwd()
+  workspacePath: process.cwd()
 })
 await client.writeTerminal(terminal, "printf 'agentmux-local-ready\\n'\n")
 await output

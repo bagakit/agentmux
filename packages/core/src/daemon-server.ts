@@ -134,17 +134,17 @@ function readCreateRequest(params: Record<string, unknown>): AgentMuxDaemonCreat
     env: readCreateEnvironment(params.env)
   }
   if (kind === 'terminal') {
-    if (params.agentId !== null || params.semanticSessionId !== null || params.command !== undefined || params.args !== undefined) {
+    if (params.agentId !== null || params.agentSessionId !== null || params.command !== undefined || params.args !== undefined) {
       throw new AgentMuxError('Raw Terminal create request carries Agent fields.', 'INVALID_DAEMON_CREATE')
     }
-    return { ...common, kind, agentId: null, semanticSessionId: null }
+    return { ...common, kind, agentId: null, agentSessionId: null }
   }
   if (kind === 'agent') {
     return {
       ...common,
       kind,
       agentId: boundedCreateString(params.agentId, 'agentId', 256),
-      semanticSessionId: boundedCreateString(params.semanticSessionId, 'semanticSessionId', 256),
+      agentSessionId: boundedCreateString(params.agentSessionId, 'agentSessionId', 256),
       command: boundedCreateString(params.command, 'command', 4 * 1024),
       args: readCreateArguments(params.args)
     }
@@ -504,12 +504,12 @@ export class AgentMuxDaemonServer {
   }
 
   private acceptHookEvent(envelope: NativeHookEnvelope): void {
-    const session = this.sessions.inspect(envelope.daemonSessionId)
+    const session = this.sessions.inspect(envelope.runId)
     if (
       !session ||
       session.kind !== 'agent' ||
       session.incarnationId !== envelope.incarnationId ||
-      session.semanticSessionId !== envelope.semanticSessionId ||
+      session.agentSessionId !== envelope.agentSessionId ||
       session.agentId !== envelope.agentId
     ) {
       return
@@ -518,7 +518,7 @@ export class AgentMuxDaemonServer {
       type: 'hook',
       sessionId: session.sessionId,
       incarnationId: session.incarnationId,
-      semanticSessionId: envelope.semanticSessionId,
+      agentSessionId: envelope.agentSessionId,
       agentId: envelope.agentId,
       ...(envelope.eventName !== undefined ? { eventName: envelope.eventName } : {}),
       ...(envelope.payload !== undefined ? { payload: envelope.payload } : {})

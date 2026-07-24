@@ -157,11 +157,11 @@ export class AgentMuxDaemonSessionManager {
   create(input: AgentMuxDaemonCreateRequest): AgentMuxDaemonSession {
     const sessionId = safeIdentity(input.sessionId, 'session_id')
     const createOperationId = safeIdentity(input.createOperationId, 'create_operation_id')
-    const semanticSessionId = input.kind === 'agent'
-      ? safeIdentity(input.semanticSessionId ?? '', 'semantic_session_id')
+    const agentSessionId = input.kind === 'agent'
+      ? safeIdentity(input.agentSessionId ?? '', 'agent_session_id')
       : null
-    if (input.kind === 'terminal' && input.semanticSessionId !== null) {
-      throw new AgentMuxError('Raw Terminal cannot carry an Agent semantic session id.', 'INVALID_SEMANTIC_SESSION')
+    if (input.kind === 'terminal' && input.agentSessionId !== null) {
+      throw new AgentMuxError('Raw Terminal cannot carry an Agent Session id.', 'INVALID_AGENT_SESSION')
     }
     const previousReceipt = this.createOperations.get(createOperationId)
     if (previousReceipt) {
@@ -200,11 +200,11 @@ export class AgentMuxDaemonSessionManager {
       TERM: terminalName,
       COLORTERM: input.env.COLORTERM || 'truecolor',
       TERM_PROGRAM: 'AgentMux',
-      AGENTMUX_SESSION_ID: sessionId,
-      AGENTMUX_SESSION_INCARNATION_ID: incarnationId,
+      AGENTMUX_RUN_ID: sessionId,
+      AGENTMUX_RUN_INCARNATION_ID: incarnationId,
       AGENTMUX_CREATE_OPERATION_ID: createOperationId,
       AGENTMUX_SESSION_KIND: input.kind,
-      ...(semanticSessionId ? { AGENTMUX_SEMANTIC_SESSION_ID: semanticSessionId } : {}),
+      ...(agentSessionId ? { AGENTMUX_AGENT_SESSION_ID: agentSessionId } : {}),
       ...(input.agentId ? { AGENTMUX_AGENT_ID: input.agentId } : {})
     })
     const child = nodePty.spawn(command, args, {
@@ -226,7 +226,7 @@ export class AgentMuxDaemonSessionManager {
       createOperationId,
       kind: input.kind,
       agentId: input.agentId,
-      semanticSessionId,
+      agentSessionId,
       cwd: input.cwd,
       pid: child.pid,
       ...(processIdentity ? { processStartedAt: processIdentity.startedAtMs } : {}),

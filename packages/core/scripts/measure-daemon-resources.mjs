@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { AgentMuxDaemonClient } from '../dist/daemon-client.js'
+import { mean } from './run-kernel-statistics.mjs'
 
 const execFileAsync = promisify(execFile)
 const daemonEntry = resolve(import.meta.dirname, '../dist/agentmuxd.js')
@@ -50,7 +51,7 @@ async function sampleProcess(pid) {
   const elapsedMs = performance.now() - startedAt
   const cpuDeltaMs = samples.at(-1).cpuTimeMs - samples[0].cpuTimeMs
   return {
-    rssKiB: Math.round(samples.reduce((sum, sample) => sum + sample.rssKiB, 0) / samples.length),
+    rssKiB: Math.round(mean(samples.map((sample) => sample.rssKiB))),
     cpuPercent: Number((cpuDeltaMs / elapsedMs * 100).toFixed(2))
   }
 }

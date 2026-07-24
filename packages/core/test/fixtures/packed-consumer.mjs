@@ -1,15 +1,15 @@
-import { execFile } from 'node:child_process'
-import { chmod, mkdir, stat, writeFile } from 'node:fs/promises'
+import { execFile, spawn } from 'node:child_process'
+import { once } from 'node:events'
+import { chmod, mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import {
-  AgentMuxClient,
-  AgentMuxSshRemoteDaemon,
-  activateAgentMuxLocalDaemon,
-  createAgentMuxRemoteArtifact,
+  connectLocalAgentMux,
+  connectSshAgentMux,
   diagnoseAgentMux
 } from '@agentmux/core'
+import * as AgentMuxPackage from '@agentmux/core'
 
 const execFileAsync = promisify(execFile)
 const root = process.cwd()
@@ -19,13 +19,11 @@ const statePath = join(runtimeDirectory, 'agentmuxd.state.json')
 const remoteHome = process.env.AGENTMUX_FAKE_SSH_HOME
 const fakeSshPath = join(root, 'fake-system-ssh.mjs')
 const fakeAgentPath = join(root, 'fake-agent.mjs')
-const artifactPath = join(root, 'agentmux-remote.tgz')
 const coreIndex = fileURLToPath(import.meta.resolve('@agentmux/core'))
 const agentmuxdPath = resolve(dirname(coreIndex), '../bin/agentmuxd.js')
-const local = new AgentMuxClient({ socketPath })
-let remoteManager = null
-let remoteInstallation = null
+let local = null
 let remote = null
+let remoteRuntime = null
 
 async function waitFor(description, predicate, timeoutMs = 8_000) {
   const deadline = Date.now() + timeoutMs
@@ -51,6 +49,15 @@ async function shutdownLocal() {
 
 try {
   if (!remoteHome) throw new Error('Packed Consumer remote home is missing.')
+  for (const retiredExport of [
+    'AgentMuxDaemonClient',
+    'AgentMuxSshRemoteDaemon',
+    'SshAgentMuxDaemonConnector',
+    'activateAgentMuxLocalDaemon',
+    'createAgentMuxRemoteArtifact'
+  ]) {
+    if (retiredExport in AgentMuxPackage) throw new Error(`Retired public export is still available: ${retiredExport}`)
+  }
   await mkdir(runtimeDirectory, { recursive: true, mode: 0o700 })
   await chmod(runtimeDirectory, 0o700)
   await writeFile(fakeAgentPath, [
@@ -58,22 +65,21 @@ try {
     'process.stdin.resume()'
   ].join('\n'))
 
-  await activateAgentMuxLocalDaemon({ socketPath, statePath })
-  await local.connect()
+  local = await connectLocalAgentMux({ endpointPath: socketPath, statePath })
   const localEvents = []
   local.onEvent((event) => localEvents.push(event))
   const terminal = await local.createTerminal({
-    sessionId: 'packed-terminal',
+    runId: 'packed-terminal',
     createOperationId: 'packed-terminal-create',
-    cwd: root
+    workspacePath: root
   })
   await local.writeTerminal(terminal, "printf 'packed-terminal-ready\\n'\n")
   await waitFor('packed Terminal output', () => localEvents.some((event) => (
     event.type === 'terminal-output' && event.data.includes('packed-terminal-ready')
   )))
   const agent = await local.createAgent({
-    semanticSessionId: 'packed-agent',
-    daemonSessionId: 'packed-agent-run',
+    agentSessionId: 'packed-agent',
+    runId: 'packed-agent-run',
     createOperationId: 'packed-agent-create',
     agentId: 'codex',
     workspacePath: root,
@@ -93,22 +99,41 @@ try {
   if (!localDoctor.ok) throw new Error('Packed Local doctor did not pass.')
   if (localDoctor.runtime?.pty.version !== '1.2.0-beta.15') throw new Error('Packed PTY version is wrong.')
 
-  const artifact = await createAgentMuxRemoteArtifact({
-    outputPath: artifactPath,
-    buildIdentity: 'packed-consumer'
+  const remoteSocketPath = join(remoteHome, 'agentmuxd.sock')
+  const remoteStatePath = join(remoteHome, 'agentmuxd.state.json')
+  let remoteOutput = ''
+  remoteRuntime = spawn(process.execPath, [
+    agentmuxdPath,
+    'serve',
+    '--socket',
+    remoteSocketPath,
+    '--state',
+    remoteStatePath,
+    '--host-id',
+    'packed-remote',
+    '--build-id',
+    '0.1.0'
+  ], {
+    env: { ...process.env, HOME: remoteHome },
+    stdio: ['ignore', 'pipe', 'inherit']
   })
-  remoteManager = new AgentMuxSshRemoteDaemon({
+  remoteRuntime.stdout.setEncoding('utf8')
+  remoteRuntime.stdout.on('data', (chunk) => { remoteOutput += chunk })
+  await waitFor('packed Remote Runtime readiness', () => remoteOutput.includes('"type":"ready"'))
+  remote = await connectSshAgentMux({
     target: { hostId: 'packed-remote', hostname: 'fixture.example' },
+    runtime: {
+      buildIdentity: '0.1.0',
+      remoteNodePath: process.execPath,
+      remoteEntrypointPath: agentmuxdPath,
+      remoteEndpointPath: remoteSocketPath
+    },
     sshCommand: fakeSshPath
   })
-  remoteInstallation = await remoteManager.install(artifact)
-  await remoteManager.activate(remoteInstallation)
-  remote = remoteManager.createClient(remoteInstallation)
-  await remote.connect()
   const remoteTerminal = await remote.createTerminal({
-    sessionId: 'packed-remote-terminal',
+    runId: 'packed-remote-terminal',
     createOperationId: 'packed-remote-create',
-    cwd: root
+    workspacePath: root
   })
   const remoteDoctor = await diagnoseAgentMux({
     client: remote,
@@ -120,19 +145,21 @@ try {
   }
 
   await remote.stopTerminal(remoteTerminal)
-  await local.stopAgent(agent.semanticSessionId)
+  await local.stopAgent(agent.agentSessionId)
   await local.stopTerminal(terminal)
   const packageRoot = resolve(dirname(coreIndex), '..')
   process.stdout.write(`${JSON.stringify({
     local: localDoctor.host,
     remote: remoteDoctor.host,
     pty: localDoctor.runtime.pty,
-    packageRoot,
-    artifactBytes: (await stat(artifactPath)).size
+    packageRoot
   })}\n`)
 } finally {
   await remote?.dispose().catch(() => {})
-  if (remoteManager && remoteInstallation) await remoteManager.uninstall(remoteInstallation).catch(() => {})
-  await local.dispose().catch(() => {})
+  if (remoteRuntime && remoteRuntime.exitCode === null && remoteRuntime.signalCode === null) {
+    remoteRuntime.kill('SIGTERM')
+    await once(remoteRuntime, 'exit').catch(() => {})
+  }
+  await local?.dispose().catch(() => {})
   await shutdownLocal()
 }

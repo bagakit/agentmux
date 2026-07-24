@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { AgentMuxDaemonClient } from '../dist/daemon-client.js'
+import { mean } from './run-kernel-statistics.mjs'
 
 const execFileAsync = promisify(execFile)
 const daemonEntry = resolve(import.meta.dirname, '../dist/agentmuxd.js')
@@ -57,10 +58,6 @@ async function connect(socketPath) {
   const client = new AgentMuxDaemonClient({ socketPath })
   await client.connect()
   return client
-}
-
-function mean(values) {
-  return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length)
 }
 
 if (process.platform === 'win32') {
@@ -128,8 +125,8 @@ try {
   const peakRssKiB = Math.max(...samples.map((entry) => entry.rssKiB))
   const peakOpenFiles = Math.max(...samples.map((entry) => entry.openFiles))
   const window = Math.min(5, Math.floor(samples.length / 2))
-  const earlyMeanRssKiB = mean(samples.slice(0, window).map((entry) => entry.rssKiB))
-  const lateMeanRssKiB = mean(samples.slice(-window).map((entry) => entry.rssKiB))
+  const earlyMeanRssKiB = Math.round(mean(samples.slice(0, window).map((entry) => entry.rssKiB)))
+  const lateMeanRssKiB = Math.round(mean(samples.slice(-window).map((entry) => entry.rssKiB)))
   const report = {
     measuredAt: new Date().toISOString(),
     platform: `${process.platform}-${process.arch}`,

@@ -193,7 +193,8 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
         hookEvents: true,
         permission: 'observe',
         providerResume: true,
-        acp: false
+        acp: false,
+        replyCorrelation: 'none'
       }
     }),
     buildArgs: (prompt, args) => [...args, ...(prompt ? [prompt] : [])],
@@ -215,7 +216,8 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
         hookEvents: true,
         permission: 'observe',
         providerResume: true,
-        acp: false
+        acp: false,
+        replyCorrelation: 'none'
       }
     }),
     buildArgs: (prompt, args) => [...args, ...(prompt ? [prompt] : [])],
@@ -237,7 +239,8 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
         hookEvents: false,
         permission: 'none',
         providerResume: false,
-        acp: false
+        acp: false,
+        replyCorrelation: 'none'
       }
     }),
     buildArgs: (prompt, args) => [...args, ...(prompt ? [prompt] : [])],
@@ -258,7 +261,8 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
         hookEvents: true,
         permission: 'observe',
         providerResume: false,
-        acp: false
+        acp: false,
+        replyCorrelation: 'none'
       }
     }),
     buildArgs: (prompt, args) =>
@@ -280,7 +284,8 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
         hookEvents: true,
         permission: 'observe',
         providerResume: true,
-        acp: false
+        acp: false,
+        replyCorrelation: 'none'
       }
     }),
     buildArgs: (prompt, args) => [...args, ...(prompt ? [prompt] : [])],

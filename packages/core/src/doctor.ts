@@ -24,11 +24,11 @@ export type AgentMuxDoctorReport = {
     hostId: string | null
     buildIdentity: string | null
     protocolVersion: number | null
-    daemonInstanceId: string | null
+    runtimeInstanceId: string | null
     error: string | null
     action: string | null
   }
-  runtime: Awaited<ReturnType<AgentMuxClient['daemonDiagnostics']>> | null
+  runtime: Awaited<ReturnType<AgentMuxClient['runtimeDiagnostics']>> | null
   runtimeAction: string | null
   agents: AgentMuxDoctorAgent[]
   integration: {
@@ -51,7 +51,7 @@ function blockedAgent(catalog: AgentCatalogEntry): AgentMuxDoctorAgent {
     label: catalog.label,
     executable: catalog.executable,
     probe: 'blocked',
-    action: 'Restore the daemon connection, then rerun doctor.',
+    action: 'Restore the Runtime connection, then rerun doctor.',
     capabilities: { ...catalog.capabilities },
     hook: { ...catalog.hookStrategy },
     permission: catalog.capabilities.permission,
@@ -92,9 +92,9 @@ export async function diagnoseAgentMux(options: DiagnoseAgentMuxOptions): Promis
   const catalog = options.client.catalog()
   try {
     await options.client.connect()
-    const identity = options.client.daemonIdentity()
+    const identity = options.client.runtimeIdentity()
     const [runtime, agents] = await Promise.all([
-      options.client.daemonDiagnostics(),
+      options.client.runtimeDiagnostics(),
       Promise.all(catalog.map(async (entry) => await probeAgent(
         options.client,
         entry,
@@ -109,7 +109,7 @@ export async function diagnoseAgentMux(options: DiagnoseAgentMuxOptions): Promis
         hostId: identity.hostId,
         buildIdentity: identity.buildIdentity,
         protocolVersion: identity.protocolVersion,
-        daemonInstanceId: identity.daemonInstanceId,
+        runtimeInstanceId: identity.instanceId,
         error: null,
         action: null
       },
@@ -137,7 +137,7 @@ export async function diagnoseAgentMux(options: DiagnoseAgentMuxOptions): Promis
         hostId: null,
         buildIdentity: null,
         protocolVersion: null,
-        daemonInstanceId: null,
+        runtimeInstanceId: null,
         error: detail,
         action: options.hostKind === 'local'
           ? 'Run agentmuxd activate, then rerun doctor.'

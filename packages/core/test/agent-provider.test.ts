@@ -12,33 +12,40 @@ describe('built-in agent providers', () => {
       promptDelivery: entry.promptDelivery,
       readySignal: entry.readySignal.kind,
       hook: entry.hookStrategy.kind,
+      permission: entry.capabilities.permission,
       resume: entry.resumeStrategy.kind,
-      acp: entry.acpStrategy.kind
+      acp: entry.acpStrategy.kind,
+      replyCorrelation: entry.capabilities.replyCorrelation
     }))).toEqual([
       {
         id: 'codex', executable: 'codex', expectedProcess: 'codex',
         promptDelivery: 'positional-argv', readySignal: 'foreground-process',
-        hook: 'native', resume: 'provider-native', acp: 'none'
+        hook: 'native', permission: 'observe', resume: 'provider-native', acp: 'none',
+        replyCorrelation: 'none'
       },
       {
         id: 'claude', executable: 'claude', expectedProcess: 'claude',
         promptDelivery: 'positional-argv', readySignal: 'foreground-process',
-        hook: 'native', resume: 'provider-native', acp: 'none'
+        hook: 'native', permission: 'observe', resume: 'provider-native', acp: 'none',
+        replyCorrelation: 'none'
       },
       {
         id: 'traex', executable: 'traex', expectedProcess: 'traex',
         promptDelivery: 'positional-argv', readySignal: 'foreground-process',
-        hook: 'none', resume: 'none', acp: 'none'
+        hook: 'none', permission: 'none', resume: 'none', acp: 'none',
+        replyCorrelation: 'none'
       },
       {
         id: 'hermes', executable: 'hermes', expectedProcess: 'hermes',
         promptDelivery: 'hermes-query', readySignal: 'foreground-process',
-        hook: 'native', resume: 'none', acp: 'none'
+        hook: 'native', permission: 'observe', resume: 'none', acp: 'none',
+        replyCorrelation: 'none'
       },
       {
         id: 'pi', executable: 'pi', expectedProcess: 'pi',
         promptDelivery: 'positional-argv', readySignal: 'foreground-process',
-        hook: 'native', resume: 'provider-native', acp: 'none'
+        hook: 'native', permission: 'observe', resume: 'provider-native', acp: 'none',
+        replyCorrelation: 'none'
       }
     ])
   })

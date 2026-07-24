@@ -52,7 +52,7 @@ type CreateBase = {
 export type AgentMuxDaemonTerminalCreateInput = CreateBase
 
 export type AgentMuxDaemonAgentCreateInput = CreateBase & {
-  semanticSessionId: string
+  agentSessionId: string
   agentId: AgentId
   command: string
   args: readonly string[]
@@ -212,7 +212,7 @@ export class AgentMuxDaemonClient {
       createOperationId: input.createOperationId,
       kind: 'terminal',
       agentId: null,
-      semanticSessionId: null,
+      agentSessionId: null,
       cwd: input.cwd,
       cols: input.cols ?? 80,
       rows: input.rows ?? 24,
@@ -229,7 +229,7 @@ export class AgentMuxDaemonClient {
       createOperationId: input.createOperationId,
       kind: 'agent',
       agentId: input.agentId,
-      semanticSessionId: input.semanticSessionId,
+      agentSessionId: input.agentSessionId,
       cwd: input.cwd,
       cols: input.cols ?? 80,
       rows: input.rows ?? 24,

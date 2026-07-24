@@ -6,8 +6,8 @@ describe('native hook normalization', () => {
 
   it('maps Codex request_user_input to waiting with native provenance', () => {
     const event = providers.get('codex').normalizeHook({
-      semanticSessionId: 'semantic-1',
-      daemonSessionId: 'daemon-1',
+      agentSessionId: 'semantic-1',
+      runId: 'daemon-1',
       incarnationId: 'incarnation-1',
       agentId: 'codex',
       eventName: 'PreToolUse',
@@ -28,8 +28,8 @@ describe('native hook normalization', () => {
 
   it('maps Pi ask_user_question to blocked', () => {
     const event = providers.get('pi').normalizeHook({
-      semanticSessionId: 'semantic-2',
-      daemonSessionId: 'daemon-2',
+      agentSessionId: 'semantic-2',
+      runId: 'daemon-2',
       incarnationId: 'incarnation-2',
       agentId: 'pi',
       eventName: 'tool_call',
@@ -45,8 +45,8 @@ describe('native hook normalization', () => {
 
   it('does not invent semantic work from an unknown event', () => {
     const event = providers.get('traex').normalizeHook({
-      semanticSessionId: 'semantic-3',
-      daemonSessionId: 'daemon-3',
+      agentSessionId: 'semantic-3',
+      runId: 'daemon-3',
       incarnationId: 'incarnation-3',
       agentId: 'traex',
       eventName: 'tick'

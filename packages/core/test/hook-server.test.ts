@@ -23,8 +23,8 @@ describe('AgentHookServer', () => {
         'content-type': 'application/json'
       },
       body: JSON.stringify({
-        semanticSessionId: 'semantic-1',
-        daemonSessionId: 'daemon-1',
+        agentSessionId: 'semantic-1',
+        runId: 'daemon-1',
         incarnationId: 'incarnation-1',
         agentId: 'claude',
         eventName: 'PermissionRequest',
@@ -34,8 +34,8 @@ describe('AgentHookServer', () => {
     expect(response.status).toBe(204)
     expect(events).toHaveLength(1)
     expect(events[0]).toMatchObject({
-      semanticSessionId: 'semantic-1',
-      daemonSessionId: 'daemon-1',
+      agentSessionId: 'semantic-1',
+      runId: 'daemon-1',
       agentId: 'claude',
       eventName: 'PermissionRequest'
     })
@@ -49,8 +49,8 @@ describe('AgentHookServer', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        semanticSessionId: 'semantic-1',
-        daemonSessionId: 'daemon-1',
+        agentSessionId: 'semantic-1',
+        runId: 'daemon-1',
         incarnationId: 'incarnation-1',
         agentId: 'claude'
       })

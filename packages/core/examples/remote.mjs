@@ -1,5 +1,5 @@
 import {
-  AgentMuxSshRemoteDaemon
+  connectSshAgentMux
 } from '@agentmux/core'
 
 const required = (name) => {
@@ -10,26 +10,24 @@ const required = (name) => {
 
 const hostId = required('AGENTMUX_REMOTE_HOST_ID')
 const buildIdentity = required('AGENTMUX_REMOTE_BUILD_ID')
-const manager = new AgentMuxSshRemoteDaemon({
+const client = await connectSshAgentMux({
   target: {
     hostId,
     hostname: required('AGENTMUX_REMOTE_HOST'),
     ...(process.env.AGENTMUX_REMOTE_USER ? { user: process.env.AGENTMUX_REMOTE_USER } : {})
+  },
+  runtime: {
+    buildIdentity,
+    remoteNodePath: process.env.AGENTMUX_REMOTE_NODE_PATH ?? 'node',
+    remoteEntrypointPath: required('AGENTMUX_REMOTE_ENTRYPOINT_PATH'),
+    remoteEndpointPath: required('AGENTMUX_REMOTE_ENDPOINT_PATH')
   }
 })
-const installation = await manager.install({
-  archivePath: required('AGENTMUX_REMOTE_ARTIFACT'),
-  buildIdentity,
-  platform: required('AGENTMUX_REMOTE_PLATFORM')
-})
-await manager.activate(installation)
-const client = manager.createClient(installation)
-await client.connect()
 const terminal = await client.createTerminal({
-  sessionId: crypto.randomUUID(),
+  runId: crypto.randomUUID(),
   createOperationId: crypto.randomUUID(),
-  cwd: required('AGENTMUX_REMOTE_CWD')
+  workspacePath: required('AGENTMUX_REMOTE_CWD')
 })
 await client.stopTerminal(terminal)
 await client.dispose()
-process.stdout.write(`${JSON.stringify(installation, null, 2)}\n`)
+process.stdout.write(`${JSON.stringify({ hostId, buildIdentity }, null, 2)}\n`)

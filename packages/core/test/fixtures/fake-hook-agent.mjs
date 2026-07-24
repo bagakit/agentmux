@@ -1,12 +1,12 @@
 const prompt = process.argv.at(-1) ?? ''
 const hookUrl = process.env.AGENTMUX_HOOK_URL
 const hookToken = process.env.AGENTMUX_HOOK_TOKEN
-const semanticSessionId = process.env.AGENTMUX_SEMANTIC_SESSION_ID
-const daemonSessionId = process.env.AGENTMUX_SESSION_ID
-const incarnationId = process.env.AGENTMUX_SESSION_INCARNATION_ID
+const agentSessionId = process.env.AGENTMUX_AGENT_SESSION_ID
+const runId = process.env.AGENTMUX_RUN_ID
+const incarnationId = process.env.AGENTMUX_RUN_INCARNATION_ID
 const agentId = process.env.AGENTMUX_AGENT_ID
 
-if (!hookUrl || !hookToken || !semanticSessionId || !daemonSessionId || !incarnationId || !agentId) {
+if (!hookUrl || !hookToken || !agentSessionId || !runId || !incarnationId || !agentId) {
   throw new Error('missing AgentMux hook environment')
 }
 
@@ -20,8 +20,8 @@ const request = async (body) => await fetch(hookUrl, {
 })
 
 await request({
-  semanticSessionId,
-  daemonSessionId,
+  agentSessionId,
+  runId,
   incarnationId: 'forged-incarnation',
   agentId,
   eventName: 'PermissionRequest',
@@ -29,13 +29,13 @@ await request({
 })
 
 const response = await request({
-  semanticSessionId,
-  daemonSessionId,
+  agentSessionId,
+  runId,
   incarnationId,
   agentId,
   eventName: 'SessionStart',
   payload: {
-    session_id: `native-${semanticSessionId}`,
+    session_id: `native-${agentSessionId}`,
     prompt
   }
 })
