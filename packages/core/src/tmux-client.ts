@@ -4,15 +4,18 @@ import type { ExecutionHost } from './execution-host.js'
 
 export const AGENTMUX_TMUX_PREFIX = 'agentmux-'
 
-export type TmuxStartRequest = {
+type TmuxStartRequestBase = {
   sessionName: string
   cwd: string
-  command: string
-  args: readonly string[]
   env?: Readonly<Record<string, string>>
   cols?: number
   rows?: number
 }
+
+export type TmuxStartRequest = TmuxStartRequestBase & (
+  | { command: string; args: readonly string[] }
+  | { command?: undefined; args?: undefined }
+)
 
 export type TmuxPaneInfo = {
   paneId: string
@@ -67,6 +70,7 @@ export class TmuxClient {
       }
       return ['-e', `${name}=${value}`]
     })
+    const command = request.command === undefined ? [] : ['--', request.command, ...request.args]
     const args = [
       'new-session',
       '-d',
@@ -79,14 +83,17 @@ export class TmuxClient {
       '-y',
       String(request.rows ?? 36),
       ...environment,
-      '--',
-      request.command,
-      ...request.args
+      ...command
     ]
     const result = await this.host.run('tmux', args, { timeoutMs: 15_000 })
     requireSuccess(result, 'tmux', args, `Failed to create tmux session ${request.sessionName}`)
-    await this.run(['set-option', '-t', request.sessionName, 'remain-on-exit', 'on'])
-    await this.run(['set-option', '-t', request.sessionName, 'history-limit', '50000'])
+    try {
+      await this.run(['set-option', '-t', request.sessionName, 'remain-on-exit', 'on'])
+      await this.run(['set-option', '-t', request.sessionName, 'history-limit', '50000'])
+    } catch (error) {
+      await this.stop(request.sessionName).catch(() => {})
+      throw error
+    }
   }
 
   async list(): Promise<TmuxSessionInfo[]> {
@@ -127,6 +134,18 @@ export class TmuxClient {
       ],
       { timeoutMs: 8_000 }
     )
+    // ssh reserves 255 for transport/authentication failures. Preserve that
+    // distinction so clients can offer an honest reconnect action instead of
+    // reporting that a still-running remote tmux pane disappeared.
+    if (result.exitCode === 255 && this.host.kind === 'ssh') {
+      throw new CommandExecutionError(
+        `SSH connection to ${this.host.label} is unavailable.`,
+        'tmux',
+        ['list-panes', '-t', `${sessionName}:0.0`],
+        result.exitCode,
+        result.stderr
+      )
+    }
     if (result.exitCode !== 0) return null
     const line = result.stdout.split('\n').find(Boolean)
     if (!line) return null

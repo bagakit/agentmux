@@ -1,23 +1,21 @@
-import { ChevronRight, FolderGit2, GitBranchPlus, Plus, RadioTower } from 'lucide-react'
-import { useAppStore } from '../store'
+import { FolderGit2, Plus, RadioTower } from 'lucide-react'
+import { useMemo } from 'react'
 import { api } from '../lib/api'
-import { StatusDot } from './StatusDot'
+import { projectWorkspaces, workspaceProjectId } from '../lib/workspace-projects'
+import { useAppStore } from '../store'
 import { BrandIcon } from './BrandIcon'
 
-export function WorkspaceSidebar({
-  onOpenSettings,
-  onCreateWorktree
-}: {
-  onOpenSettings: () => void
-  onCreateWorktree: () => void
-}) {
+export function WorkspaceSidebar({ onOpenSettings }: { onOpenSettings: () => void }) {
   const config = useAppStore((state) => state.config)
   const sessions = useAppStore((state) => state.sessions)
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
-  const activeSessionId = useAppStore((state) => state.activeSessionId)
+  const mainSurface = useAppStore((state) => state.mainSurface)
   const selectWorkspace = useAppStore((state) => state.selectWorkspace)
-  const selectSession = useAppStore((state) => state.selectSession)
+  const setMainSurface = useAppStore((state) => state.setMainSurface)
   const setConfig = useAppStore((state) => state.setConfig)
+  const projects = useMemo(() => projectWorkspaces(config?.workspaces ?? []), [config?.workspaces])
+  const activeWorkspace = config?.workspaces.find((workspace) => workspace.id === activeWorkspaceId)
+  const activeProjectId = activeWorkspace ? workspaceProjectId(activeWorkspace) : null
 
   async function chooseFolder(): Promise<void> {
     const workspace = await api.workspaces.chooseLocalFolder()
@@ -27,51 +25,54 @@ export function WorkspaceSidebar({
   }
 
   return (
-    <aside className="sidebar">
+    <aside className="sidebar project-rail">
       <div className="sidebar__brand">
         <span className="brand-mark"><BrandIcon size={18} /></span>
         <span>AgentMux</span>
         <span className="brand-version">alpha</span>
       </div>
       <div className="sidebar__section-heading">
-        <span>Workspaces</span>
-        <div className="sidebar__heading-actions">
-          <button className="icon-button" onClick={onCreateWorktree} title="Create worktree"><GitBranchPlus size={14} /></button>
-          <button className="icon-button" onClick={() => void chooseFolder()} title="Add local folder"><Plus size={15} /></button>
-        </div>
+        <span>Projects</span>
+        <button className="icon-button" onClick={() => void chooseFolder()} title="Add project folder"><Plus size={15} /></button>
       </div>
-      <nav className="workspace-list">
-        {config?.workspaces.map((workspace) => {
-          const workspaceSessions = sessions.filter(
-            (session) => session.hostId === workspace.hostId && session.workspacePath === workspace.path
-          )
-          const active = workspace.id === activeWorkspaceId
+      <nav className="project-list" aria-label="Projects">
+        {projects.map((project) => {
+          const sessionCount = sessions.filter((session) =>
+            project.workspaces.some(
+              (workspace) => workspace.hostId === session.hostId && workspace.path === session.workspacePath
+            )
+          ).length
+          const active = project.id === activeProjectId
+          const preferred = active
+            ? activeWorkspaceId
+            : project.preferredWorkspaceId
           return (
-            <div className={`workspace-row ${active ? 'workspace-row--active' : ''}`} key={workspace.id}>
-              <button className="workspace-row__button" onClick={() => void selectWorkspace(workspace.id)}>
-                <ChevronRight size={13} className={active ? 'chevron chevron--open' : 'chevron'} />
-                <FolderGit2 size={15} />
-                <span className="workspace-row__label">{workspace.name}</span>
-                {workspace.hostId !== 'local' ? <RadioTower size={12} className="remote-glyph" /> : null}
-              </button>
-              {active ? (
-                <div className="session-list">
-                  {workspaceSessions.map((session) => (
-                    <button
-                      key={session.id}
-                      className={`session-row ${activeSessionId === session.id ? 'session-row--active' : ''}`}
-                      onClick={() => selectSession(session.id)}
-                    >
-                      <StatusDot status={session.status} />
-                      <span>{session.label}</span>
-                    </button>
-                  ))}
-                  {workspaceSessions.length === 0 ? <div className="session-list__empty">No agents yet</div> : null}
-                </div>
-              ) : null}
-            </div>
+            <button
+              key={project.id}
+              className={`project-rail-row ${active ? 'project-rail-row--active' : ''}`}
+              title={project.repoPath}
+              onClick={() => {
+                if (!preferred) return
+                const keepBoardOpen = mainSurface === 'board'
+                void selectWorkspace(preferred).then(() => {
+                  if (keepBoardOpen) setMainSurface('board')
+                })
+              }}
+            >
+              <span className="project-rail-row__icon"><FolderGit2 size={15} /></span>
+              <span className="project-rail-row__identity">
+                <strong>{project.name}</strong>
+                <small>{project.hostId === 'local' ? 'This Mac' : <><RadioTower size={9} /> {project.hostId}</>}</small>
+              </span>
+              <span className="project-rail-row__count" title={`${project.workspaces.length} workspaces · ${sessionCount} sessions`}>
+                {project.workspaces.length}
+              </span>
+            </button>
           )
         })}
+        {projects.length === 0 ? (
+          <div className="workspace-list__empty"><strong>No projects yet</strong><span>Add a local folder, then manage its branches and worktrees from the navigator.</span><button className="small-button" onClick={() => void chooseFolder()}><Plus size={12} /> Add project</button></div>
+        ) : null}
       </nav>
       <div className="sidebar__bottom">
         <button className="sidebar-action" onClick={onOpenSettings}>Settings & hosts</button>

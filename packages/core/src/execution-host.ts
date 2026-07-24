@@ -239,6 +239,13 @@ export class ExecutionHostRegistry {
     this.hosts.set(host.id, host)
   }
 
+  async remove(id: string): Promise<void> {
+    const host = this.hosts.get(id)
+    if (!host) return
+    await host.dispose()
+    this.hosts.delete(id)
+  }
+
   get(id: string): ExecutionHost {
     const host = this.hosts.get(id)
     if (!host) throw new AgentMuxError(`Unknown execution host: ${id}`, 'UNKNOWN_HOST')
