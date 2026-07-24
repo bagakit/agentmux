@@ -19,8 +19,9 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(async (root) => await rm(root, { recursive: true, force: true })))
 })
 
-async function waitForSocket(
+async function waitForDaemonReady(
   path: string,
+  cliPath: string,
   daemon: ReturnType<typeof spawn>,
   stderr: () => string,
   spawnError: () => Error | null
@@ -32,11 +33,17 @@ async function waitForSocket(
       throw new Error(`Packed ctxmuxd exited before readiness: ${stderr()}`)
     }
     try {
-      if ((await stat(path)).isSocket()) return
+      if ((await stat(path)).isSocket()) {
+        await execFileAsync(cliPath, ['--socket', path, 'ping'], {
+          timeout: 2_000,
+          maxBuffer: 64 * 1024
+        })
+        return
+      }
     } catch {}
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 20))
   }
-  throw new Error(`Packed ctxmuxd did not create its socket: ${stderr()}`)
+  throw new Error(`Packed ctxmuxd did not become ready: ${stderr()}`)
 }
 
 type DaemonProcess = {
@@ -202,6 +209,7 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
       })
 
       const daemonPath = join(packageRoot, 'vendor', 'ctxmux', 'darwin-arm64', 'bin', 'ctxmuxd')
+      const cliPath = join(packageRoot, 'vendor', 'ctxmux', 'darwin-arm64', 'bin', 'ctxmux')
       let activeDaemon: DaemonProcess | null = null
       let replacement: ReturnType<typeof spawn> | null = null
       try {
@@ -226,17 +234,20 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
 
         activeDaemon = await waitForDaemonProcess(daemonPath, runtimeDirectory)
         await stopDaemon(activeDaemon)
+        const replacementStateDirectory = join(runtimeDirectory, 'replacement-state')
+        await mkdir(replacementStateDirectory, { mode: 0o700 })
         replacement = spawn(daemonPath, [
           '--socket', activeDaemon.socketPath,
-          '--state-dir', activeDaemon.stateDirectory
+          '--state-dir', replacementStateDirectory
         ], { stdio: ['ignore', 'ignore', 'pipe'] })
         let replacementStderr = ''
         let replacementError: Error | null = null
         replacement.once('error', (error) => { replacementError = error })
         replacement.stderr?.setEncoding('utf8')
         replacement.stderr?.on('data', (chunk) => { replacementStderr += chunk })
-        await waitForSocket(
+        await waitForDaemonReady(
           activeDaemon.socketPath,
+          cliPath,
           replacement,
           () => replacementStderr,
           () => replacementError
