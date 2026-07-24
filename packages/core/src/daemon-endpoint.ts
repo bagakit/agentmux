@@ -6,3 +6,9 @@ export function defaultAgentMuxDaemonSocketPath(): string {
   const uid = typeof process.getuid === 'function' ? process.getuid() : userInfo().username
   return join(tmpdir(), `agentmux-${uid}`, 'agentmuxd.sock')
 }
+
+export function agentMuxDaemonStatePath(socketPath: string): string {
+  if (process.platform !== 'win32') return `${socketPath}.sessions.json`
+  const uid = typeof process.getuid === 'function' ? process.getuid() : userInfo().username
+  return join(tmpdir(), `agentmux-${uid}`, 'agentmuxd.sessions.json')
+}

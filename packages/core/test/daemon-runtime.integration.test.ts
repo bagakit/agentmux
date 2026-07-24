@@ -83,14 +83,14 @@ describe('agentmuxd local node-pty vertical slice', () => {
       cols: 90,
       rows: 30
     })
-    await first.write(session.sessionId, "printf 'terminal-before-detach\\n'\n")
+    await first.write(session, "printf 'terminal-before-detach\\n'\n")
     await waitForData(firstEvents, (text) => text.includes('terminal-before-detach'))
     const cursor = firstEvents
       .filter((event): event is AgentMuxDaemonDataEvent => event.type === 'data')
-      .at(-1)?.sequence ?? 0
+      .at(-1)?.endSequence ?? 0
 
-    await first.detach(session.sessionId)
-    await first.write(session.sessionId, "printf 'terminal-while-detached\\n'\n")
+    await first.detach(session)
+    await first.write(session, "printf 'terminal-while-detached\\n'\n")
     first.disconnect()
 
     const second = await connect()
@@ -104,7 +104,7 @@ describe('agentmuxd local node-pty vertical slice', () => {
     })
     expect(attached.replay.map((event) => event.data).join('')).toContain('terminal-while-detached')
     expect(attached.gap).toBeNull()
-    expect(await second.resize(session.sessionId, 120, 40)).toEqual({ cols: 120, rows: 40 })
+    expect(await second.resize(attached.session, 120, 40)).toMatchObject({ cols: 120, rows: 40 })
 
     const repeated = await second.createTerminal({
       sessionId: session.sessionId,
@@ -113,7 +113,7 @@ describe('agentmuxd local node-pty vertical slice', () => {
     })
     expect(repeated.incarnationId).toBe(session.incarnationId)
     expect(repeated.pid).toBe(session.pid)
-    await second.stop(session.sessionId)
+    await second.stop(repeated)
   })
 
   it('fails attach-only for an unknown id without spawning a Shell', async () => {
@@ -142,7 +142,7 @@ describe('agentmuxd local node-pty vertical slice', () => {
       state: 'running'
     })
     await waitForData(events, (text) => text.includes('codex-ready:review-the-daemon'))
-    await client.write(session.sessionId, 'hello-from-client\n')
+    await client.write(session, 'hello-from-client\n')
     await waitForData(events, (text) => text.includes('codex-input:hello-from-client'))
 
     const exit = new Promise<AgentMuxDaemonEvent>((resolve) => {
@@ -153,12 +153,12 @@ describe('agentmuxd local node-pty vertical slice', () => {
         }
       })
     })
-    await client.signal(session.sessionId, 'SIGTERM')
+    await client.signal(session, 'SIGTERM')
     await expect(exit).resolves.toMatchObject({
       type: 'exit',
       sessionId: session.sessionId,
       incarnationId: session.incarnationId
     })
-    await client.stop(session.sessionId)
+    await client.stop(session)
   })
 })

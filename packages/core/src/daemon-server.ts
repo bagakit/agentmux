@@ -1,4 +1,5 @@
 import { chmod, lstat, mkdir, stat, unlink } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import { dirname } from 'node:path'
 import { createServer, createConnection, type Server, type Socket } from 'node:net'
 import { AgentMuxError } from './errors.js'
@@ -8,20 +9,29 @@ import {
   encodeAgentMuxDaemonFrame,
   parseAgentMuxDaemonFrame,
   type AgentMuxDaemonCreateRequest,
+  type AgentMuxDaemonAttachResult,
   type AgentMuxDaemonEvent,
   type AgentMuxDaemonRequestFrame,
-  type AgentMuxDaemonResponseFrame
+  type AgentMuxDaemonResponseFrame,
+  type AgentMuxDaemonSessionRef
 } from './daemon-protocol.js'
 import { AgentMuxDaemonSessionManager } from './daemon-session-manager.js'
-import { defaultAgentMuxDaemonSocketPath } from './daemon-endpoint.js'
+import { agentMuxDaemonStatePath, defaultAgentMuxDaemonSocketPath } from './daemon-endpoint.js'
 
 const MAX_CLIENT_BUFFER_BYTES = 1024 * 1024
 const MAX_CLIENTS_PER_DAEMON = 64
 const MAX_IN_FLIGHT_REQUESTS_PER_CLIENT = 256
+const MAX_UNACKNOWLEDGED_OUTPUT_BYTES = 512 * 1024
+
+type ClientAttachment = {
+  ref: AgentMuxDaemonSessionRef
+  acknowledgedThrough: number
+  deliveredThrough: number
+}
 
 type ConnectedClient = {
   socket: Socket
-  attachedSessionIds: Set<string>
+  attachments: Map<string, ClientAttachment>
   input: string
   inFlightRequests: number
 }
@@ -30,6 +40,7 @@ type SocketIdentity = { dev: number; ino: number }
 
 export type AgentMuxDaemonServerOptions = {
   socketPath?: string
+  statePath?: string
   sessions?: AgentMuxDaemonSessionManager
 }
 
@@ -57,6 +68,13 @@ function readNumber(params: Record<string, unknown>, name: string, fallback?: nu
   return value
 }
 
+function readSessionRef(params: Record<string, unknown>): AgentMuxDaemonSessionRef {
+  return {
+    sessionId: readString(params, 'sessionId'),
+    incarnationId: readString(params, 'incarnationId')
+  }
+}
+
 async function endpointAcceptsConnections(socketPath: string): Promise<boolean> {
   return await new Promise((resolve) => {
     const socket = createConnection(socketPath)
@@ -76,18 +94,22 @@ export class AgentMuxDaemonServer {
   readonly sessions: AgentMuxDaemonSessionManager
   private readonly clients = new Set<ConnectedClient>()
   private readonly unsubscribeSessionEvents: () => void
+  private readonly daemonInstanceId = randomUUID()
   private server: Server | null = null
   private socketIdentity: SocketIdentity | null = null
 
   constructor(options: AgentMuxDaemonServerOptions = {}) {
     this.socketPath = options.socketPath ?? defaultAgentMuxDaemonSocketPath()
-    this.sessions = options.sessions ?? new AgentMuxDaemonSessionManager()
+    this.sessions = options.sessions ?? new AgentMuxDaemonSessionManager({
+      journalPath: options.statePath ?? agentMuxDaemonStatePath(this.socketPath)
+    })
     this.unsubscribeSessionEvents = this.sessions.onEvent((event) => this.publishEvent(event))
   }
 
   async start(): Promise<void> {
     if (this.server) return
     await this.prepareEndpoint()
+    this.sessions.activate()
     const server = createServer((socket) => this.acceptClient(socket))
     this.server = server
     try {
@@ -152,16 +174,16 @@ export class AgentMuxDaemonServer {
 
   private acceptClient(socket: Socket): void {
     if (this.clients.size >= MAX_CLIENTS_PER_DAEMON) {
-      socket.destroy(new Error('AgentMux daemon client limit reached.'))
+      socket.destroy()
       return
     }
-    const client: ConnectedClient = { socket, attachedSessionIds: new Set(), input: '', inFlightRequests: 0 }
+    const client: ConnectedClient = { socket, attachments: new Map(), input: '', inFlightRequests: 0 }
     this.clients.add(client)
     socket.setEncoding('utf8')
     socket.on('data', (data: string) => this.acceptData(client, data))
     socket.on('error', () => socket.destroy())
     socket.on('close', () => {
-      client.attachedSessionIds.clear()
+      client.attachments.clear()
       this.clients.delete(client)
     })
   }
@@ -204,50 +226,91 @@ export class AgentMuxDaemonServer {
       let result: unknown
       switch (request.method) {
         case 'hello':
-          result = { protocolVersion: AGENTMUX_DAEMON_PROTOCOL_VERSION, daemonPid: process.pid }
+          result = {
+            protocolVersion: AGENTMUX_DAEMON_PROTOCOL_VERSION,
+            daemonPid: process.pid,
+            daemonInstanceId: this.daemonInstanceId
+          }
           break
         case 'list':
           result = this.sessions.list()
+          break
+        case 'find-create-operation':
+          result = this.sessions.findByCreateOperation(readString(params, 'createOperationId'))
           break
         case 'create': {
           const create = params as AgentMuxDaemonCreateRequest
           const session = this.sessions.create(create)
           result = session
-          client.attachedSessionIds.add(session.sessionId)
+          client.attachments.set(session.sessionId, {
+            ref: { sessionId: session.sessionId, incarnationId: session.incarnationId },
+            acknowledgedThrough: session.latestSequence,
+            deliveredThrough: session.latestSequence
+          })
           break
         }
         case 'attach': {
           const sessionId = readString(params, 'sessionId')
-          result = this.sessions.attach(sessionId, readNumber(params, 'afterSequence', 0))
-          client.attachedSessionIds.add(sessionId)
+          const afterSequence = readNumber(params, 'afterSequence', 0)
+          const attached = this.sessions.attach(sessionId, afterSequence)
+          result = attached
+          client.attachments.set(sessionId, this.attachmentForAttach(attached, afterSequence))
           break
         }
-        case 'detach':
-          client.attachedSessionIds.delete(readString(params, 'sessionId'))
+        case 'detach': {
+          const ref = readSessionRef(params)
+          const attachment = client.attachments.get(ref.sessionId)
+          if (attachment?.ref.incarnationId === ref.incarnationId) client.attachments.delete(ref.sessionId)
           result = null
           break
+        }
         case 'write':
-          this.sessions.write(readString(params, 'sessionId'), readString(params, 'data'))
-          result = null
+          result = this.sessions.write(
+            readSessionRef(params),
+            readNumber(params, 'startSequence'),
+            readString(params, 'data')
+          )
           break
         case 'resize':
           result = this.sessions.resize(
-            readString(params, 'sessionId'),
+            readSessionRef(params),
             readNumber(params, 'cols'),
             readNumber(params, 'rows')
           )
           break
+        case 'ack': {
+          const ref = readSessionRef(params)
+          const sequence = readNumber(params, 'sequence')
+          const attachment = client.attachments.get(ref.sessionId)
+          if (!attachment || attachment.ref.incarnationId !== ref.incarnationId) {
+            throw new AgentMuxError(`Client is not attached to session: ${ref.sessionId}`, 'SESSION_NOT_ATTACHED')
+          }
+          if (sequence < attachment.acknowledgedThrough) {
+            throw new AgentMuxError('Output acknowledgement cannot move backwards.', 'OUTPUT_ACK_REGRESSION')
+          }
+          if (sequence > attachment.deliveredThrough) {
+            throw new AgentMuxError('Output acknowledgement exceeds delivered output.', 'INVALID_OUTPUT_ACK')
+          }
+          result = this.sessions.acknowledgeOutput(ref, sequence)
+          attachment.acknowledgedThrough = sequence
+          break
+        }
         case 'signal':
-          this.sessions.signal(readString(params, 'sessionId'), readString(params, 'signal'))
+          this.sessions.signal(readSessionRef(params), readString(params, 'signal'))
           result = null
           break
         case 'stop': {
-          const sessionId = readString(params, 'sessionId')
-          await this.sessions.stop(sessionId)
-          for (const connected of this.clients) connected.attachedSessionIds.delete(sessionId)
+          const ref = readSessionRef(params)
+          await this.sessions.stop(ref)
+          for (const connected of this.clients) {
+            const attachment = connected.attachments.get(ref.sessionId)
+            if (attachment?.ref.incarnationId === ref.incarnationId) connected.attachments.delete(ref.sessionId)
+          }
           result = null
           break
         }
+        default:
+          throw new AgentMuxError(`Unsupported daemon method: ${String(request.method)}`, 'INVALID_DAEMON_REQUEST')
       }
       this.write(client, { type: 'response', id: request.id, ok: true, result })
     } catch (error) {
@@ -266,9 +329,31 @@ export class AgentMuxDaemonServer {
 
   private publishEvent(event: AgentMuxDaemonEvent): void {
     for (const client of this.clients) {
-      if (client.attachedSessionIds.has(event.sessionId)) {
-        this.write(client, { type: 'event', event })
+      const attachment = client.attachments.get(event.sessionId)
+      if (!attachment || attachment.ref.incarnationId !== event.incarnationId) continue
+      if (event.type === 'data') {
+        if (event.startSequence !== attachment.deliveredThrough) {
+          client.socket.destroy(new Error('AgentMux daemon output sequence diverged.'))
+          continue
+        }
+        attachment.deliveredThrough = event.endSequence
+        if (attachment.deliveredThrough - attachment.acknowledgedThrough > MAX_UNACKNOWLEDGED_OUTPUT_BYTES) {
+          client.socket.destroy(new Error('AgentMux daemon client did not acknowledge output.'))
+          continue
+        }
       }
+      this.write(client, { type: 'event', event })
+    }
+  }
+
+  private attachmentForAttach(attached: AgentMuxDaemonAttachResult, afterSequence: number): ClientAttachment {
+    return {
+      ref: {
+        sessionId: attached.session.sessionId,
+        incarnationId: attached.session.incarnationId
+      },
+      acknowledgedThrough: Math.max(afterSequence, attached.gap?.firstAvailableSequence ?? afterSequence),
+      deliveredThrough: attached.session.latestSequence
     }
   }
 
