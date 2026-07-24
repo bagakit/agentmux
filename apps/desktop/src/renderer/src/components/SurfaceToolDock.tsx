@@ -1,18 +1,21 @@
 import {
+  Activity,
+  BellRing,
   Bookmark,
+  CheckCircle2,
   Columns3,
   FolderGit2,
   Globe2,
-  Inbox,
   LoaderCircle,
+  MessageSquarePlus,
   RadioTower,
   SquareTerminal
 } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import type { WorkspaceRecord } from '../../../shared/contracts'
 import type { MainSurface } from '../store'
-import type { BoardTool, WorkspaceTool } from '../lib/surface-tool-dock'
-import { ATTENTION_SESSION_STATES } from '../lib/project-board'
+import type { WorkspaceTool } from '../lib/surface-tool-dock'
+import { sessionBoardColumn } from '../lib/project-board'
 import { projectWorkspaces } from '../lib/workspace-projects'
 import { useAppStore } from '../store'
 import { BranchesPanel } from './BranchesPanel'
@@ -32,10 +35,12 @@ const WORKSPACE_TOOLS: ToolDefinition<WorkspaceTool>[] = [
   { id: 'terminal-shortcuts', label: 'Terminal Shortcuts', description: 'Start a terminal in the focused pane', icon: SquareTerminal }
 ]
 
-const BOARD_TOOLS: ToolDefinition<BoardTool>[] = [
-  { id: 'branch-lanes', label: 'Branch Lanes', description: 'View project work by status', icon: Columns3 },
-  { id: 'inbox', label: 'Inbox', description: 'Review project attention items', icon: Inbox }
-]
+const BOARD_TOOL: ToolDefinition<'branch-board'> = {
+  id: 'branch-board',
+  label: 'Branch Board',
+  description: 'Inspect project Branches by run status',
+  icon: Columns3
+}
 
 function ToolActionSurface({
   icon,
@@ -98,33 +103,35 @@ function WorkspaceFilesTool({ workspace }: { workspace: WorkspaceRecord }) {
 }
 
 function BoardToolSummary({
-  tool,
+  projectName,
+  hostId,
   workspaceCount,
-  attentionCount
+  workingCount,
+  needsYouCount,
+  doneCount
 }: {
-  tool: BoardTool
+  projectName: string
+  hostId: string
   workspaceCount: number
-  attentionCount: number
+  workingCount: number
+  needsYouCount: number
+  doneCount: number
 }) {
-  const isInbox = tool === 'inbox'
-  const Icon = isInbox ? Inbox : Columns3
   return (
     <section className="surface-tool-summary">
-      <div className="surface-tool-summary__icon"><Icon size={18} /></div>
-      <div className="eyebrow">Board tool</div>
-      <h2>{isInbox ? 'Inbox' : 'Branch lanes'}</h2>
-      <p>
-        {isInbox
-          ? `${attentionCount} live attention item${attentionCount === 1 ? '' : 's'} from this Project. Select one in the main board to focus its Session.`
-          : `${workspaceCount} registered worktree${workspaceCount === 1 ? '' : 's'} contribute Runs to the Project's Git Branch lanes.`}
-      </p>
-      <div className="surface-tool-unavailable">
-        <Icon size={15} />
-        <span>
-          <strong>{isInbox ? (attentionCount > 0 ? 'Action needed' : 'All caught up') : 'Git-owned lanes'}</strong>
-          <small>{isInbox ? 'Derived from live Session state; no duplicate persistence.' : 'Agent status is Run metadata, never the lane identity.'}</small>
-        </span>
-        <em>{isInbox ? attentionCount : 'Live'}</em>
+      <div className="surface-tool-summary__icon"><Columns3 size={18} /></div>
+      <div className="eyebrow">Project board</div>
+      <h2>Branch × status</h2>
+      <p>{projectName} uses Branches as rows and run state as columns. Inbox lives in the board itself.</p>
+      <div className="board-tool-context">
+        <span><RadioTower size={12} /> {hostId === 'local' ? 'This Mac' : hostId}</span>
+        <em>{workspaceCount} worktree{workspaceCount === 1 ? '' : 's'}</em>
+      </div>
+      <div className="board-tool-legend">
+        <div><MessageSquarePlus size={13} /><span><strong>Inbox</strong><small>Start a Branch discussion</small></span><em>Open</em></div>
+        <div><Activity size={13} /><span><strong>Working</strong><small>Running now</small></span><em>{workingCount}</em></div>
+        <div><BellRing size={13} /><span><strong>Needs You</strong><small>Waiting or blocked</small></span><em>{needsYouCount}</em></div>
+        <div><CheckCircle2 size={13} /><span><strong>Done</strong><small>Completed runs</small></span><em>{doneCount}</em></div>
       </div>
     </section>
   )
@@ -138,9 +145,7 @@ export function SurfaceToolDock({
   workspace: WorkspaceRecord | undefined
 }) {
   const workspaceTool = useAppStore((state) => state.workspaceTool)
-  const boardTool = useAppStore((state) => state.boardTool)
   const setWorkspaceTool = useAppStore((state) => state.setWorkspaceTool)
-  const setBoardTool = useAppStore((state) => state.setBoardTool)
   const layout = useAppStore((state) => workspace ? state.layouts[workspace.id] : undefined)
   const launchTerminal = useAppStore((state) => state.launchTerminal)
   const createBrowser = useAppStore((state) => state.createBrowser)
@@ -149,8 +154,8 @@ export function SurfaceToolDock({
   const [starting, setStarting] = useState<'browser' | 'terminal' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const isBoard = surface === 'board'
-  const tools = isBoard ? BOARD_TOOLS : WORKSPACE_TOOLS
-  const selectedTool = isBoard ? boardTool : workspaceTool
+  const tools: ToolDefinition<string>[] = isBoard ? [BOARD_TOOL] : WORKSPACE_TOOLS
+  const selectedTool = isBoard ? BOARD_TOOL.id : workspaceTool
   const activePaneId = layout?.activeGroupId
   const project = workspace
     ? projectWorkspaces(config?.workspaces ?? []).find((candidate) =>
@@ -158,12 +163,13 @@ export function SurfaceToolDock({
       )
     : null
   const workspaceCount = project?.workspaces.length ?? 0
-  const attentionCount = sessions.filter((session) =>
-    ATTENTION_SESSION_STATES.has(session.status.state) &&
+  const projectSessions = sessions.filter((session) =>
     Boolean(project?.workspaces.some((item) =>
       item.hostId === session.hostId && item.path === session.workspacePath
     ))
-  ).length
+  )
+  const runCounts = { working: 0, 'needs-you': 0, done: 0 }
+  for (const session of projectSessions) runCounts[sessionBoardColumn(session)] += 1
 
   async function open(kind: 'browser' | 'terminal'): Promise<void> {
     if (!activePaneId || starting) return
@@ -194,8 +200,7 @@ export function SurfaceToolDock({
                 aria-pressed={selectedTool === tool.id}
                 title={`${tool.label} — ${tool.description}`}
                 onClick={() => {
-                  if (isBoard) setBoardTool(tool.id as BoardTool)
-                  else setWorkspaceTool(tool.id as WorkspaceTool)
+                  if (!isBoard) setWorkspaceTool(tool.id as WorkspaceTool)
                 }}
               >
                 <Icon size={15} />
@@ -243,7 +248,16 @@ export function SurfaceToolDock({
             </div>
           </ToolActionSurface>
         ) : null}
-        {isBoard ? <BoardToolSummary tool={boardTool} workspaceCount={workspaceCount} attentionCount={attentionCount} /> : null}
+        {isBoard && project ? (
+          <BoardToolSummary
+            projectName={project.name}
+            hostId={project.hostId}
+            workspaceCount={workspaceCount}
+            workingCount={runCounts.working}
+            needsYouCount={runCounts['needs-you']}
+            doneCount={runCounts.done}
+          />
+        ) : null}
         {error ? <div className="surface-tool-error" role="alert">{error}</div> : null}
       </div>
     </aside>

@@ -57,13 +57,12 @@ a mature workbench 在本任务中证明的是成熟模式，而不是配色答�
 | --- | --- | --- |
 | `toolsOpen` | Renderer Store | 收起／恢复同一个二级 Tool Dock；Workspace 与 Board 共用 |
 | `workspaceTool` | Renderer Store | `files-branches / browser-favorites / terminal-shortcuts` 三选一 |
-| `boardTool` | Renderer Store | `branch-lanes / inbox` 二选一；Project Scope |
 | `toolDockWidth` | Renderer Store | Workspace/Board 共享像素宽度；拖拽中直接更新 owner DOM，结束时写回，避免 React 回弹 |
 | Explorer | Workspace Tool Panel | 展示 File / Branches；打开 File 继续进入 Focused Pane |
 | Browser Favorites | Workspace Tool Panel | 只调用 Main-owned Browser Universal Tab；收藏真相必须来自一个 owner，不能用临时按钮伪装持久化 |
 | Terminal Shortcuts | Workspace Tool Panel | 只调用 `packages/core` 既有 Terminal launch action |
 | Agent Launch | Universal New Tab | 不属于 Tools；继续由 Pane `+` 打开 Agent 创建面 |
-| Branch Lanes / Inbox | Board Tool Panel | 选择 Board 的 Project-scoped 主内容，不复用 Workspace 文件工具 |
+| Branch Board | Board Tool Panel | 只显示 Project Scope、四列图例和真实 Run 数量；Inbox 位于主矩阵，不保留单选 `boardTool` 状态 |
 | Titlebar drag | Titlebar Plane | Breadcrumb 可拖拽；按钮、Tab 和输入区全部 `no-drag` |
 | Traffic Lights Safe Area | Project Rail Titlebar | 只在窗口左上保留 76px，不再让右侧主区空出整行 |
 
@@ -78,7 +77,7 @@ T-010 只清理根结构和新工具 Surface 的重复线，不机会主义重�
 | 决策 | a mature workbench 模式 | AgentMux 处理 |
 | --- | --- | --- |
 | Copy | `useSidebarResize` 的 live DOM width、全屏透明 Drag Overlay、mouseup / blur 收尾 | 保留行为和纯函数，并把方向改为左侧 Dock 的 `deltaSign=1` |
-| Adapt | 36px Activity Strip、收起、所选工具、宽度 owner | 入口移到右侧主区标题之前；Workspace 三个子 Tab、Board 两个子 Tab，配色使用 Graphite / Mint |
+| Adapt | 36px Activity Strip、收起、所选工具、宽度 owner | 入口移到右侧主区标题之前；Workspace 三个子 Tab，Board 一个 Branch × Status 内容，配色使用 Graphite / Mint |
 | Adapt | Titlebar drag/no-drag 与 Traffic Lights 安全区 | Topbar 与 Rail Brand 同处 42px Plane；右侧无全局空行 |
 | Keep | Universal Tab、Focused Pane、Main-owned Browser、Core-owned Session | 工具只调用现有 action，不新增 lifecycle |
 | Omit | a mature workbench Plugin Panel、隐藏 Tab fallback、Activity Bar 位置菜单 | 当前需求不需要通用扩展框架或复杂兼容路径 |
