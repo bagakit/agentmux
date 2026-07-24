@@ -126,7 +126,7 @@ export class TmuxClient {
       { timeoutMs: 8_000 }
     )
     if (result.exitCode !== 0) {
-      return /no server running|failed to connect/i.test(result.stderr) ? [] : Promise.reject(
+      return /no server running|failed to connect|error connecting/i.test(result.stderr) ? [] : Promise.reject(
         new CommandExecutionError('Failed to list tmux sessions.', 'tmux', ['list-sessions'], result.exitCode, result.stderr)
       )
     }
