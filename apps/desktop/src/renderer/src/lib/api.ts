@@ -12,10 +12,22 @@ import type {
 
 const now = Date.now()
 let mockConfig: AppConfig = {
-  version: 1,
+  version: 2,
   hosts: [
     { id: 'local', kind: 'local', label: 'This Mac' },
-    { id: 'studio', kind: 'ssh', label: 'Studio Box', hostname: 'studio.example.com', user: 'river' }
+    {
+      id: 'studio',
+      kind: 'ssh',
+      label: 'Studio Box',
+      hostname: 'studio.example.com',
+      user: 'river',
+      daemon: {
+        buildIdentity: '0.1.0',
+        remoteNodePath: 'node',
+        remoteAgentMuxdPath: '/home/river/.agentmux/versions/0.1.0/package/dist/agentmuxd.js',
+        remoteSocketPath: '/home/river/.agentmux/agentmuxd.sock'
+      }
+    }
   ],
   agents: {
     codex: { command: 'codex', args: ['--full-auto'], env: {} },
@@ -60,7 +72,6 @@ function mockName(path: string): string {
 const mockSessions: SessionSnapshot[] = [
   {
     id: 'session-codex',
-    tmuxSession: 'agentmux-session-codex',
     kind: 'agent',
     agentId: 'codex',
     hostId: 'local',
@@ -70,14 +81,16 @@ const mockSessions: SessionSnapshot[] = [
     updatedAt: now,
     processState: 'running',
     status: { state: 'working', source: 'native-hook', observedAt: now, detail: 'PreToolUse' },
-    terminalSnapshot:
-      '\u001b[1;36mAgentMux core\u001b[0m\n\n✓ tmux session attached\n✓ local provider ready\n\nEditing packages/core/src/runtime.ts\nRunning pnpm test…',
-    paneCommand: 'codex',
-    panePid: 48126
+    latestSequence: 0,
+    control: {
+      kind: 'agent',
+      hostId: 'local',
+      semanticSessionId: 'session-codex',
+      daemonSession: { sessionId: 'run-codex', incarnationId: 'incarnation-codex' }
+    }
   },
   {
     id: 'session-claude',
-    tmuxSession: 'agentmux-session-claude',
     kind: 'agent',
     agentId: 'claude',
     hostId: 'studio',
@@ -85,13 +98,22 @@ const mockSessions: SessionSnapshot[] = [
     label: 'Claude · material audit',
     createdAt: now - 38 * 60_000,
     updatedAt: now - 20_000,
-    processState: 'unknown',
-    status: { state: 'disconnected', source: 'tmux', observedAt: now - 20_000, detail: 'SSH connection to Studio Box is unavailable.' },
-    terminalSnapshot: 'Claude Code\n\nI need permission to run the material snapshot suite.',
-    paneCommand: 'claude',
-    panePid: 7742
+    processState: 'lost',
+    status: { state: 'error', source: 'daemon-process', observedAt: now - 20_000, detail: 'SSH connection to Studio Box is unavailable.' },
+    latestSequence: 0,
+    control: {
+      kind: 'agent',
+      hostId: 'studio',
+      semanticSessionId: 'session-claude',
+      daemonSession: { sessionId: 'run-claude', incarnationId: 'incarnation-claude' }
+    }
   }
 ]
+
+const mockOutput = new Map<string, string>([
+  ['session-codex', '\u001b[1;36mAgentMux core\u001b[0m\r\n\r\n✓ daemon session attached\r\n✓ local Provider ready\r\n\r\nEditing packages/core/src/runtime.ts\r\nRunning pnpm test…\r\n'],
+  ['session-claude', 'Claude Code\r\n\r\nI need permission to run the material snapshot suite.\r\n']
+])
 
 const mockActivities: Record<string, AgentActivity[]> = {
   'session-codex': [
@@ -102,7 +124,7 @@ const mockActivities: Record<string, AgentActivity[]> = {
       source: 'user',
       createdAt: now - 11 * 60_000,
       title: 'Prompt',
-      content: 'Make the tmux runtime observable without coupling it to Electron.'
+      content: 'Make the daemon runtime observable without coupling it to Electron.'
     },
     {
       id: 'a2',
@@ -163,7 +185,7 @@ const mockApi: AgentMuxDesktopApi = {
     get: async () => structuredClone(mockConfig),
     save: async (config) => (mockConfig = structuredClone(config))
   },
-  hosts: { check: async (host) => ({ ok: true, detail: host.kind === 'ssh' ? `tmux 3.5a · ${host.hostname}` : 'tmux 3.5a' }) },
+  hosts: { check: async (host) => ({ ok: true, detail: host.kind === 'ssh' ? `agentmuxd ${host.daemon.buildIdentity} · ${host.hostname}` : 'agentmuxd 0.1.0' }) },
   workspaces: {
     chooseLocalFolder: async () => null,
     add: async (input) => {
@@ -288,77 +310,144 @@ const mockApi: AgentMuxDesktopApi = {
   sessions: {
     snapshot: async () => structuredClone(mockSnapshot),
     launchAgent: async (input) => {
+      const semanticSessionId = input.semanticSessionId ?? crypto.randomUUID()
+      const daemonSessionId = input.daemonSessionId ?? semanticSessionId
       const session: SessionSnapshot = {
-        id: input.sessionId ?? crypto.randomUUID(),
-        tmuxSession: `agentmux-${crypto.randomUUID()}`,
+        id: semanticSessionId,
         kind: 'agent',
         agentId: input.agentId,
         hostId: input.hostId || 'local',
         workspacePath: input.workspacePath,
-        label: input.label || `${input.agentId} · new session`,
+        label: `${input.agentId} · new session`,
         createdAt: Date.now(),
         updatedAt: Date.now(),
         processState: 'running',
-        status: { state: 'running', source: 'tmux', observedAt: Date.now() },
-        terminalSnapshot: 'Starting agent…'
+        status: { state: 'running', source: 'daemon-process', observedAt: Date.now() },
+        latestSequence: 0,
+        control: {
+          kind: 'agent',
+          hostId: input.hostId,
+          semanticSessionId,
+          daemonSession: { sessionId: daemonSessionId, incarnationId: crypto.randomUUID() }
+        }
       }
       mockSnapshot.sessions.push(session)
-      sessionListeners.forEach((listener) => listener({ type: 'session', session }))
+      mockOutput.set(session.id, 'Starting agent…\r\n')
       return session
     },
     launchTerminal: async (input) => {
+      const sessionId = input.sessionId ?? crypto.randomUUID()
       const session: SessionSnapshot = {
-        id: input.sessionId ?? crypto.randomUUID(),
-        tmuxSession: `agentmux-${crypto.randomUUID()}`,
+        id: sessionId,
         kind: 'terminal',
         agentId: null,
         hostId: input.hostId || 'local',
         workspacePath: input.workspacePath,
-        label: input.label || 'Terminal',
+        label: 'Terminal',
         createdAt: Date.now(),
         updatedAt: Date.now(),
         processState: 'running',
-        status: { state: 'running', source: 'tmux', observedAt: Date.now(), detail: 'zsh' },
-        terminalSnapshot: '$ '
+        status: { state: 'running', source: 'daemon-process', observedAt: Date.now() },
+        latestSequence: 0,
+        control: {
+          kind: 'terminal',
+          hostId: input.hostId,
+          sessionId,
+          daemonSession: { sessionId, incarnationId: crypto.randomUUID() }
+        }
       }
       mockSnapshot.sessions.push(session)
-      sessionListeners.forEach((listener) => listener({ type: 'session', session }))
+      mockOutput.set(session.id, '$ ')
       return session
     },
-    send: async (sessionId, text) => {
-      const session = mockSnapshot.sessions.find((item) => item.id === sessionId)
-      if (session?.kind !== 'agent') return
-      const activity: AgentActivity = {
-        id: crypto.randomUUID(),
-        sessionId,
-        kind: 'prompt',
-        source: 'user',
-        createdAt: Date.now(),
-        title: 'Prompt',
-        content: text
-      }
-      ;(mockSnapshot.activities[sessionId] ??= []).push(activity)
-      sessionListeners.forEach((listener) => listener({ type: 'activity', sessionId, activity }))
-    },
-    interrupt: async () => {},
-    resize: async () => {},
-    refresh: async (sessionId) => {
+    attach: async (control) => {
+      const sessionId = control.kind === 'agent' ? control.semanticSessionId : control.sessionId
       const session = mockSnapshot.sessions.find((item) => item.id === sessionId)
       if (!session) throw new Error(`Session not found: ${sessionId}`)
-      if (session.status.state === 'disconnected') {
+      const data = mockOutput.get(sessionId) ?? ''
+      const endSequence = new TextEncoder().encode(data).byteLength
+      return {
+        session: structuredClone(session),
+        replay: data ? [{
+          type: 'data' as const,
+          sessionId: control.daemonSession.sessionId,
+          incarnationId: control.daemonSession.incarnationId,
+          startSequence: 0,
+          endSequence,
+          data
+        }] : [],
+        gap: null
+      }
+    },
+    detach: async () => {},
+    write: async (control, data) => {
+      const sessionId = control.kind === 'agent' ? control.semanticSessionId : control.sessionId
+      const session = mockSnapshot.sessions.find((item) => item.id === sessionId)
+      if (!session) return
+      const previous = mockOutput.get(sessionId) ?? ''
+      mockOutput.set(sessionId, `${previous}${data}`)
+      if (session.kind === 'agent' && data.trim()) {
+        const observedAt = Date.now()
+        sessionListeners.forEach((listener) => listener({
+          type: 'core',
+          hostId: session.hostId,
+          event: {
+            type: 'semantic-activity',
+            semanticSessionId: session.id,
+            activity: {
+              id: crypto.randomUUID(),
+              kind: 'prompt',
+              createdAt: observedAt,
+              title: 'Prompt',
+              content: data.trim()
+            },
+            evidence: {
+              source: 'user',
+              observedAt,
+              daemonSession: { ...session.control.daemonSession }
+            }
+          }
+        }))
+      }
+    },
+    submitPrompt: async (control, prompt) => {
+      await mockApi.sessions.write(control, `${prompt.trim()}\r`)
+    },
+    acknowledge: async () => {},
+    interrupt: async () => {},
+    resize: async () => {},
+    refresh: async (control) => {
+      const sessionId = control.kind === 'agent' ? control.semanticSessionId : control.sessionId
+      const session = mockSnapshot.sessions.find((item) => item.id === sessionId)
+      if (!session) throw new Error(`Session not found: ${sessionId}`)
+      if (session.processState === 'lost') {
         session.processState = 'running'
         session.status = {
           state: 'running',
-          source: 'tmux',
-          observedAt: Date.now(),
-          ...(session.paneCommand ? { detail: session.paneCommand } : {})
+          source: 'daemon-process',
+          observedAt: Date.now()
         }
       }
       return structuredClone(session)
     },
-    stop: async (sessionId) => {
+    stop: async (control) => {
+      const sessionId = control.kind === 'agent' ? control.semanticSessionId : control.sessionId
       mockSnapshot.sessions = mockSnapshot.sessions.filter((item) => item.id !== sessionId)
-      sessionListeners.forEach((listener) => listener({ type: 'removed', sessionId }))
+      mockOutput.delete(sessionId)
+      sessionListeners.forEach((listener) => listener({
+        type: 'core',
+        hostId: control.hostId,
+        event: {
+          type: 'session-removed',
+          ...(control.kind === 'agent' ? { semanticSessionId: control.semanticSessionId } : {}),
+          daemonSession: { ...control.daemonSession },
+          evidence: {
+            source: 'user',
+            observedAt: Date.now(),
+            daemonSession: { ...control.daemonSession }
+          }
+        }
+      }))
     },
     onEvent(listener) {
       sessionListeners.add(listener)

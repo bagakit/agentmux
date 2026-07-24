@@ -62,7 +62,7 @@ Agent Adapter -> Startup Plan -> Terminal / Session Owner
 
 `buildAgentStartupPlan` 是主要归一化点：它解析配置与覆盖值，按 Shell 规则引用参数，再选择位置参数、`--prompt`、Hermes Query、交互标志或后续输入（`src/shared/tui-agent-startup.ts:43-184`）。因此 Prompt 交付属于 Provider 启动计划，不属于 Terminal 或 UI 的条件分支。
 
-Hermes 还会限制 Prompt 传输大小、从环境恢复 argv-safe Query，并在启动后清理环境变量，避免工具子进程继承原始 Prompt（`src/shared/hermes-startup-query.ts:9-16`、`141-194`）。AgentMux 通过 tmux 的 argv 启动可以删掉这部分传输复杂度，但保留 Hermes 的原生命令形状。
+Hermes 还会限制 Prompt 传输大小、从环境恢复 argv-safe Query，并在启动后清理环境变量，避免工具子进程继承原始 Prompt（`src/shared/hermes-startup-query.ts:9-16`、`141-194`）。AgentMux Daemon 直接通过 argv 启动 Agent，可以删掉 Shell 字符串传输复杂度，但保留 Hermes 的原生命令形状。
 
 ## 2. a mature workbench 的普通 Session 是 node-pty，而不是 tmux
 
@@ -77,7 +77,7 @@ a mature workbench Local Provider 通过 Shell Fallback 调用 `pty.spawn`（`sr
 - Prefix 限定的 Session Name 提供窄化停止目标；
 - `capture-pane` 提供重启后可恢复的终端投影。
 
-Core 仍负责 Session 身份、Local/SSH Host、输入、Resize、Capture、状态轮询、事件和精确清理。当前 Feature 将 PTY/Process、增量字节流和 Attach/Detach 移入独立 Daemon；切换通过后一次删除这些 tmux 假设。
+T-005 已完成所有权切换：Core 负责 Session 身份、Local/SSH Client、输入、Resize、增量事件和精确清理；`agentmuxd` 负责 PTY/Process、Sequence、Replay、Ack、Backpressure 与 Attach/Detach。旧的 Capture Polling、command-per-input 和 tmux 类型／测试被一次删除。
 
 ## 3. a mature workbench 的“tmux 支持”是兼容外观
 
@@ -85,7 +85,7 @@ Claude Agent Teams 是一个容易误判的例子。a mature workbench 没有为
 
 Dispatcher 只实现 Claude Code 需要的 `split-window`、`respawn-pane`、`list-panes`、`send-keys`、`capture-pane`、Pane 选择和销毁，再把这些调用翻译成 a mature workbench Terminal API（`claude-agent-teams-tmux-dispatcher.ts:17-80`）。
 
-这和 AgentMux 的方向相反：a mature workbench 把 tmux Vocabulary 翻译成自己的 PTY Pane；AgentMux 当前让真实 tmux 持有 Pane，再在上面提供 Provider-neutral Session API。
+AgentMux 不复制这层兼容外观：普通 Terminal／Agent 直接使用 AgentMux Daemon Session API，不暴露 tmux Vocabulary，也不保留 Fake／Real tmux Backend。
 
 ## 4. Agent 语义状态来自 Hook，不来自终端猜测
 
@@ -108,26 +108,20 @@ AgentMux 不会在首个交付中静默修改 `~/.claude`、`~/.codex`、Hermes 
 
 ## 5. 当前 AgentMux 公共 Session 模型
 
-T-008 已把旧的 Agent-only 生命周期直接替换为最终 Session 模型，不保留类型别名或 IPC 兼容层：
+T-005 已把切换前的 `SessionSnapshot + terminalSnapshot` 直接替换为 Daemon Run 与 Semantic Session 的组合，不保留类型别名或 IPC 兼容层：
 
 ```ts
-type SessionSnapshot = SessionBase & (
-  | { kind: 'agent'; agentId: AgentId }
-  | { kind: 'terminal'; agentId: null }
-)
-
-type SessionLaunchRequest = SessionLaunchBase & (
-  | { kind: 'agent'; agentId: AgentId; prompt?: string; args?: string[]; env?: Record<string, string> }
-  | { kind: 'terminal' }
-)
+type AgentMuxSessionSnapshot =
+  | { kind: 'agent'; semantic: AgentMuxSemanticSession; run: AgentMuxDaemonSession }
+  | { kind: 'terminal'; run: AgentMuxDaemonSession }
 ```
 
 - Agent Session 通过 `AgentProvider.buildLaunch` 生成命令，接入 Hook 语义与 Activity。
-- Raw Terminal Session 不伪装成 Agent Provider；tmux 不带 Command 创建 Pane，因此运行目标 Host 的默认 Shell。
-- 两类 Session 共用发现、启动、停止、输入、Interrupt、Resize、Capture、Local/SSH、断连恢复与事件 API。
-- `AgentMuxRuntime.send` 对同一 Session 保证调用顺序，不同 Session 独立推进；失败不会毒化后续输入，Session 清理同时释放输入 tail。这个顺序属于 Core 公共合同，不由 Desktop/xterm 补偿。
+- Raw Terminal Session 不伪装成 Agent Provider；Daemon 不带 Agent Command 创建时运行目标 Host 的默认 Shell。
+- 两类 Session 共用发现、启动、停止、输入、Interrupt、Resize、Attach、Local/SSH、断连恢复与事件 API。
+- `AgentMuxDaemonClient.write` 对同一 Run 保证调用顺序，不同 Run 独立推进；失败不会毒化后续输入，Session 清理同时释放输入 tail。这个顺序属于 Core 公共合同，不由 Desktop/xterm 补偿。
 - 只有 Agent Session 把 Submit Input 记录为 Prompt Activity；Raw Terminal 输入保持纯终端语义。
-- tmux Environment 写入 `AGENTMUX_SESSION_KIND`。旧 Session 没有该字段时不会被兼容性猜测或迁移。
+- Renderer 的 xterm 在挂载时 Attach 有界 Replay，随后直接消费增量 Output 并在渲染后 Ack；Zustand 不保存终端字节。
 
 Desktop Typed Preload API 也按职责分离：
 
@@ -152,7 +146,7 @@ a mature workbench Desktop Browser 主要使用 Renderer `<webview>`，而 Offsc
 - Tab Close 先销毁 WebContents 资源，再从 Pane Layout 移除 Tab；
 - URL 只接受 `http:`、`https:` 与内部空白页；本地地址默认使用 HTTP，普通域名默认 HTTPS，含空格输入作为搜索词处理。
 
-Browser 不属于 Agent Runtime，也不通过 tmux。它属于 Desktop Host Capability，但继续遵守 Universal Tab、Pane、拖拽、分屏与关闭生命周期。
+Browser 不属于 Agent Runtime，也不通过 Agent Daemon。它属于 Desktop Host Capability，但继续遵守 Universal Tab、Pane、拖拽、分屏与关闭生命周期。
 
 ## 7. 当前 Core Maturity 的采用、简化与明确不采用
 
@@ -165,7 +159,7 @@ Browser 不属于 Agent Runtime，也不通过 tmux。它属于 Desktop Host Cap
 - Raw Output、Process Liveness、Semantic Status 分离；
 - 一个 Session 的 Terminal 与 Observable Activity 两种投影。
 
-切换前基线：
+已经删除的切换前基线：
 
 - Local/SSH 均通过 `ExecutionHost + tmux`，不复制 a mature workbench Daemon/Relay/WSL 图；
 - 五个内置 Agent：Codex、Claude、TraeX、Hermes、Pi；
@@ -186,4 +180,4 @@ Browser 不属于 Agent Runtime，也不通过 tmux。它属于 Desktop Host Cap
 - Claude Fake-tmux 兼容层；
 - 静默修改用户全局 Agent Hook；
 - 把可观察 Hook/Terminal Activity 描述成模型私有 Chain-of-thought；
-- 在本 Feature 中替换当前 mux Owner。
+- 任何 Real／Fake tmux Runtime、Backend Selector、Migration 或 Fallback。

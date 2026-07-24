@@ -157,6 +157,13 @@ describe('AgentMux semantic client', () => {
       state: 'working',
       evidence: expect.objectContaining({ source: 'native-hook' })
     }))
+    await first.submitAgentPrompt('semantic-main', 'follow-up prompt')
+    expect(firstEvents).toContainEqual(expect.objectContaining({
+      type: 'semantic-activity',
+      semanticSessionId: 'semantic-main',
+      activity: expect.objectContaining({ kind: 'prompt', content: 'follow-up prompt' }),
+      evidence: expect.objectContaining({ source: 'user' })
+    }))
     const persistedText = JSON.stringify(await store.load())
     expect(persistedText).not.toContain('hook-agent-ready')
     expect(persistedText).not.toContain('terminalSnapshot')
@@ -310,5 +317,52 @@ describe('AgentMux semantic client', () => {
       sessionId: 'fixture-acp-session'
     })
     await client.stopAgent('semantic-acp')
+  })
+
+  it('reconstructs an explicit daemon Agent identity for a fresh external client', async () => {
+    const first = await connect(new AgentMuxMemorySemanticStore())
+    await first.createAgent({
+      semanticSessionId: 'semantic-external',
+      daemonSessionId: 'daemon-external',
+      createOperationId: 'create-external',
+      agentId: 'fixture',
+      workspacePath: process.cwd(),
+      prompt: 'external-client',
+      commandOverride: process.execPath
+    })
+    await waitFor('the first client Hook receipt', () => (
+      first.semanticSession('semantic-external').nativeHandle?.kind === 'provider'
+    ))
+    first.disconnect()
+
+    const second = await connect(new AgentMuxMemorySemanticStore())
+    const snapshot = await second.snapshot()
+    expect(snapshot).toMatchObject({
+      hostId: 'semantic-host',
+      sessions: [{
+        id: 'semantic-external',
+        kind: 'agent',
+        semantic: {
+          semanticSessionId: 'semantic-external'
+        },
+        run: { sessionId: 'daemon-external', state: 'running' }
+      }]
+    })
+    const reconstructed = snapshot.sessions[0]
+    expect(reconstructed?.kind).toBe('agent')
+    if (!reconstructed || reconstructed.kind !== 'agent') throw new Error('Expected an Agent session')
+    expect(reconstructed.semantic).not.toHaveProperty('nativeHandle')
+    await expect(second.reattachAgent('semantic-external', 0)).resolves.toMatchObject({
+      session: { semanticSessionId: 'semantic-external' },
+      run: { session: { sessionId: 'daemon-external' } }
+    })
+    const events: AgentMuxClientEvent[] = []
+    second.onEvent((event) => events.push(event))
+    await second.stopAgent('semantic-external')
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'session-removed',
+      semanticSessionId: 'semantic-external',
+      evidence: expect.objectContaining({ source: 'user' })
+    }))
   })
 })

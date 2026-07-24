@@ -47,7 +47,6 @@ const snapshot: WorkspaceBranchesSnapshot = {
 function session(overrides: Partial<SessionSnapshot> & Pick<SessionSnapshot, 'id'>): SessionSnapshot {
   return {
     id: overrides.id,
-    tmuxSession: `agentmux-${overrides.id}`,
     kind: 'agent',
     agentId: 'codex',
     hostId: 'local',
@@ -57,7 +56,13 @@ function session(overrides: Partial<SessionSnapshot> & Pick<SessionSnapshot, 'id
     updatedAt: 200,
     processState: 'running',
     status: { state: 'working', source: 'native-hook', observedAt: 200 },
-    terminalSnapshot: '',
+    latestSequence: 0,
+    control: {
+      kind: 'agent',
+      hostId: 'local',
+      semanticSessionId: overrides.id,
+      daemonSession: { sessionId: overrides.id, incarnationId: `${overrides.id}-incarnation` }
+    },
     ...overrides
   } as SessionSnapshot
 }
@@ -65,11 +70,11 @@ function session(overrides: Partial<SessionSnapshot> & Pick<SessionSnapshot, 'id
 describe('Project Branch × Status board projection', () => {
   it('defines the horizontal columns explicitly and maps every Session state', () => {
     expect(PROJECT_BOARD_COLUMNS).toEqual(['inbox', 'working', 'needs-you', 'done'])
-    expect(sessionBoardColumn(session({ id: 'starting', status: { state: 'starting', source: 'tmux', observedAt: 1 } }))).toBe('working')
+    expect(sessionBoardColumn(session({ id: 'starting', status: { state: 'starting', source: 'daemon-process', observedAt: 1 } }))).toBe('working')
     expect(sessionBoardColumn(session({ id: 'working' }))).toBe('working')
     expect(sessionBoardColumn(session({ id: 'waiting', status: { state: 'waiting', source: 'native-hook', observedAt: 1 } }))).toBe('needs-you')
     expect(sessionBoardColumn(session({ id: 'done', status: { state: 'done', source: 'native-hook', observedAt: 1 } }))).toBe('done')
-    expect(sessionBoardColumn(session({ id: 'exited', status: { state: 'exited', source: 'tmux', observedAt: 1 } }))).toBe('done')
+    expect(sessionBoardColumn(session({ id: 'exited', status: { state: 'exited', source: 'daemon-process', observedAt: 1 } }))).toBe('done')
   })
 
   it('uses Branches as stable rows and groups Runs into status cells', () => {
@@ -136,7 +141,7 @@ describe('Project Branch × Status board projection', () => {
       session({
         id: 'feature-run',
         workspacePath: feature.path,
-        status: { state: 'disconnected', source: 'tmux', observedAt: 220 }
+        status: { state: 'disconnected', source: 'daemon-process', observedAt: 220 }
       })
     ])
     expect(filterProjectBranchLanes(lanes, 'feature', 'all', 'all')).toHaveLength(2)

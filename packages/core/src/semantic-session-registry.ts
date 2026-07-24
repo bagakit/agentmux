@@ -32,6 +32,10 @@ export class AgentMuxSemanticSessionRegistry {
     return [...this.sessions.values()].map((session) => structuredClone(session))
   }
 
+  has(semanticSessionId: string): boolean {
+    return this.sessions.has(semanticSessionId)
+  }
+
   get(semanticSessionId: string): AgentMuxSemanticSession {
     const session = this.sessions.get(semanticSessionId)
     if (!session) {

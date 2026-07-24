@@ -1,63 +1,55 @@
 # AgentMux
 
-AgentMux is a typed tmux runtime for CLI coding agents, plus an Electron workbench that proves the runtime through real terminal, activity, editor, workspace, and Git worktree flows.
+AgentMux 是面向 Codex、Claude、TraeX、Hermes、Pi 等本地 Agent CLI 的可嵌入 Runtime，同时提供一个 Electron 桌面端作为第一方 Client。
 
-It currently supports Codex, Claude, TraeX, Hermes, and Pi on the local machine or a configured SSH host. tmux owns the persistent PTY and process. `@agentmux/core` owns provider command plans, session identity, lifecycle observation, and hook normalization. The desktop is a consumer of that package rather than a second agent runtime.
+`@agentmux/core` 负责 Provider、Semantic Session、Hook、Permission、恢复和类型安全的控制 API；每台执行主机上的轻量 `agentmuxd` 是唯一 PTY／进程 Owner。Desktop、Renderer 或 SSH Transport 退出后，仍在运行的 Session 不会被隐式停止。
 
-## What works
+## 当前能力
 
-- Launch, discover, capture, resize, send input to, interrupt, and stop package-owned tmux sessions.
-- Use one `ExecutionHost` contract for local commands and system-SSH commands.
-- Build deterministic launch plans for Codex, Claude, TraeX, Hermes, and Pi.
-- Receive authenticated native-hook events and keep their provenance separate from tmux liveness and terminal output.
-- View one session as either a raw xterm terminal or an observable activity conversation.
-- Compose multiline prompts and insert the active file as an `@path` reference.
-- Browse, edit, and save files inside a root-confined local or remote workspace.
-- Use session tabs and workspace-specific persistent resizable splits.
-- Navigate workspaces through a sidebar or a two-dimensional Branch × Status board; start a real Agent discussion from each Branch Inbox.
-- Explicitly create and register a local or SSH Git worktree; registration happens only after Git succeeds.
+- Local／SSH 共用同一份 Daemon Session 合同，只替换连接 Transport。
+- Raw Terminal 与五个内置 Agent 共用 Create、Attach、Detach、Write、Resize、Signal、Stop 和恢复边界。
+- Output 使用单调 Sequence、有界 Replay、显式 Gap 和 Client Ack，不轮询或保存整屏 Snapshot。
+- Daemon Run、Semantic Session、Provider-native Resume 与重新 Spawn 是不同对象和动作。
+- Native Hook、ACP、Terminal Output、Daemon Process 与 User Action 保留各自 Evidence Source，不从终端文本猜测 Tool、Permission 或模型私有 Chain-of-thought。
+- Desktop 支持 xterm、对话 Activity、Monaco 编辑器、文件树、拖拽分屏、Browser、Workspace、Branch／Worktree 和 Branch × Status 看板。
+- Browser、文件系统和 Git Worktree 仍由 Electron Main 持有，不下沉到 Agent Daemon。
 
-The activity view shows observable prompts, assistant messages, tool use, permissions, and lifecycle events. It does not expose or claim to expose private chain-of-thought.
-
-## Architecture
+## 架构
 
 ```mermaid
 flowchart LR
-  UI[React workbench] --> PRELOAD[Sandboxed preload API]
-  PRELOAD --> IPC[Electron main IPC]
-  IPC --> FILES[Root-confined files]
-  IPC --> GIT[WorktreeService]
-  IPC --> RUNTIME[AgentMuxRuntime]
-  RUNTIME --> PROVIDERS[AgentProvider registry]
-  RUNTIME --> HOSTS[ExecutionHost registry]
-  HOSTS --> LOCAL[Local process]
-  HOSTS --> SSH[System SSH]
-  RUNTIME --> TMUX[TmuxClient]
-  RUNTIME --> HOOK[Authenticated loopback hook server]
-  SSH -->|OpenSSH reverse forward| HOOK
+  UI[React workbench] --> PRELOAD[Typed sandboxed preload]
+  PRELOAD --> MAIN[Electron Main]
+  MAIN --> CLIENT[AgentMuxClient]
+  CLIENT --> LOCAL[Local Unix socket]
+  CLIENT --> SSH[Long-lived system SSH stdio]
+  LOCAL --> DAEMON[agentmuxd]
+  SSH --> DAEMON
+  DAEMON --> PTY[node-pty / process tree]
+  DAEMON --> HOOK[Authenticated loopback Hook ingress]
+  MAIN --> FILES[Workspace files]
+  MAIN --> GIT[Git worktrees]
+  MAIN --> BROWSER[WebContentsView]
 ```
 
-The main boundaries are deliberately small:
+主要边界：
 
-- `AgentProvider` owns agent-specific executable and argument planning.
-- `ExecutionHost` owns local-versus-SSH command transport and hook reachability.
-- `TmuxClient` owns only `agentmux-*` tmux sessions and sends prompts through tmux buffers rather than shell interpolation.
-- `AgentMuxRuntime` owns session state, polling, normalized events, and public controls.
-- Electron main owns configuration, filesystem, Git, and IPC trust boundaries.
-- React owns presentation and interaction only; it never imports Node, SSH, Git, or tmux primitives.
+- `AgentProvider` 声明 executable、Prompt Delivery、Ready Signal、Hook、Capability 和 Resume Plan。
+- `AgentMuxClient` 组合 Agent 语义与 Daemon 运行事实，但不缓存终端字节或持有 PTY。
+- `agentmuxd` 持有 `sessionId + incarnationId`、node-pty、进程树、增量 Output、Replay、Backpressure 和控制确认。
+- Electron Main 只调用 Core Client，并持有配置、文件、Git、Browser 和 IPC 信任边界。
+- Renderer 只消费 Typed Preload API；xterm 直接写入增量 Output，渲染后按 Sequence Ack。
 
-The a mature workbench mechanisms and extraction decisions that informed these boundaries are documented in [docs/a mature workbench-agent-runtime-notes.md](docs/a mature workbench-agent-runtime-notes.md).
+a mature workbench 源码证据与采用边界见 [docs/a mature workbench-agent-runtime-notes.md](docs/a mature workbench-agent-runtime-notes.md)。
+Desktop 原子切换后的数据流、恢复语义和内存边界见 [docs/plans/agentmux-desktop-daemon-cutover.md](docs/plans/agentmux-desktop-daemon-cutover.md)。
 
-## Prerequisites
+## 环境与验证
 
-- Node.js 22 or newer and pnpm 11.5.1 through Corepack.
-- `tmux` on every execution host.
-- `git` on hosts where worktrees will be created.
-- The selected agent executable on the host where it will run.
-- OpenSSH client for SSH hosts. The remote server must permit remote TCP forwarding for native hook delivery.
-- macOS or Linux for the local desktop demonstrator. Remote workspaces are expected to be POSIX hosts.
-
-Install and verify:
+- Node.js 22 或更高版本。
+- 通过 Corepack 使用仓库声明的 pnpm 版本。
+- 创建 Worktree 的主机需要 Git。
+- SSH Host 使用系统 OpenSSH 和用户已有认证。
+- 目标主机需要相应 Agent CLI；AgentMux 不静默下载 Agent 或远端 Daemon。
 
 ```bash
 corepack enable
@@ -65,63 +57,58 @@ pnpm install
 pnpm check
 ```
 
-## Use the core package
+## 使用 Core
+
+下面的最小 Client 只使用包的公开 API。`dispose()` 只断开 Client，不停止 Daemon Session；需要结束进程时必须显式调用 `stopAgent()` 或 `stopTerminal()`。
 
 ```ts
 import {
-  AgentMuxRuntime,
-  LocalExecutionHost,
-  SshExecutionHost
+  AgentMuxClient,
+  activateAgentMuxLocalDaemon
 } from '@agentmux/core'
 
-const runtime = new AgentMuxRuntime({
-  hosts: [
-    new LocalExecutionHost(),
-    new SshExecutionHost({
-      id: 'buildbox',
-      hostname: 'buildbox.example.com',
-      user: 'river'
-    })
-  ]
+await activateAgentMuxLocalDaemon()
+
+const client = new AgentMuxClient()
+await client.connect()
+
+const unsubscribe = client.onEvent((event) => {
+  if (event.type === 'terminal-output') process.stdout.write(event.data)
 })
 
-await runtime.start()
-const unsubscribe = runtime.onEvent((event) => {
-  console.log(event.type, event)
-})
-
-const session = await runtime.launch({
+const session = await client.createAgent({
   agentId: 'codex',
-  hostId: 'buildbox',
   workspacePath: '/srv/project',
-  prompt: 'Inspect the failing tests and explain the smallest correct fix.'
+  prompt: '检查失败测试，并说明最小正确修复。'
 })
 
-await runtime.send(session.id, 'Run the focused test next.')
+await client.writeAgent(session.semanticSessionId, '先运行聚焦测试。\r')
 
 unsubscribe()
-await runtime.dispose()
+await client.dispose()
 ```
 
-Custom providers implement `AgentProvider` and register through the runtime's provider registry. They do not need to know whether tmux is local or remote.
+新增 Agent 只需实现 `AgentProvider` 并注入 `AgentMuxClient`，不需要了解 Electron、Local Socket 或 SSH Connector。
 
-## Native hook contract
+## Hook 合同
 
-Every launched process receives:
+每个 Agent Run 会收到：
 
 - `AGENTMUX_SESSION_ID`
+- `AGENTMUX_SESSION_INCARNATION_ID`
+- `AGENTMUX_SEMANTIC_SESSION_ID`
 - `AGENTMUX_AGENT_ID`
-- `AGENTMUX_HOST_ID`
-- `AGENTMUX_WORKSPACE_PATH`
 - `AGENTMUX_HOOK_URL`
 - `AGENTMUX_HOOK_TOKEN`
 
-A configured native agent hook posts a JSON envelope to `AGENTMUX_HOOK_URL` with `Authorization: Bearer <AGENTMUX_HOOK_TOKEN>`:
+Agent 原生 Hook 向 `AGENTMUX_HOOK_URL` 发送带 Bearer Token 的 JSON：
 
 ```json
 {
-  "sessionId": "value from AGENTMUX_SESSION_ID",
-  "agentId": "value from AGENTMUX_AGENT_ID",
+  "semanticSessionId": "value from AGENTMUX_SEMANTIC_SESSION_ID",
+  "daemonSessionId": "value from AGENTMUX_SESSION_ID",
+  "incarnationId": "value from AGENTMUX_SESSION_INCARNATION_ID",
+  "agentId": "codex",
   "eventName": "PreToolUse",
   "payload": {
     "tool_name": "Bash",
@@ -130,64 +117,44 @@ A configured native agent hook posts a JSON envelope to `AGENTMUX_HOOK_URL` with
 }
 ```
 
-The receiver listens only on local loopback. For an SSH host, `SshExecutionHost` creates one OpenSSH ControlMaster and dynamically allocates a remote-loopback reverse forward to that receiver. The same bearer-token check applies after SSH transport. Launch fails explicitly if the tunnel cannot be established.
+Ingress 只监听 Daemon 所在主机的 `127.0.0.1`，并同时核对 Agent、Semantic Session、Daemon Session 和 Incarnation。观察失败不会阻塞 Agent。全局 Hook 安装只能由用户显式执行 `preview -> install`，并带 Generation Check、Receipt 和可恢复卸载。
 
-AgentMux does not silently edit user-global Codex, Claude, Hermes, or Pi hook configuration. Hook installation is an explicit operator concern; without it, terminal output and tmux lifecycle remain available with their own provenance, but semantic activity is not fabricated from terminal text.
-
-## Run the desktop
-
-Start the Electron development app:
+## Desktop
 
 ```bash
 pnpm dev
 ```
 
-For renderer-only visual work with deterministic demo data:
+只查看确定性演示数据：
 
 ```bash
 pnpm dev:web
 ```
 
-The app starts on the terminal workbench. Add a local folder from the sidebar, or open **Settings & hosts** to add an SSH host. Provider command fields allow a different executable name or absolute executable path.
+应用直接进入 Terminal-first Workbench。可以从侧栏加入本地目录，或在 Settings 中配置 SSH Host 和已显式安装的远端 Daemon。
 
-### SSH setup
+### SSH 配置
 
-1. Make sure `ssh <host>` succeeds through the system SSH client and existing agent/configuration.
-2. Add the hostname, optional user and port in **Settings & hosts**.
-3. Use **Test** to verify SSH and remote tmux together.
-4. Add a remote workspace path or create a remote worktree.
-5. Launch an agent; the provider, tmux commands, file operations, Git operations, and hook bridge all execute against that host.
+1. 先确认系统 `ssh <host>` 使用现有配置和认证可以连接。
+2. 显式安装并启动版本匹配的远端 `agentmuxd`；T-006 将交付完整 Artifact／Doctor 验收。
+3. 在 Host 设置中填写 hostname、可选 user／port／identity path，以及 Daemon Build、Node、入口绝对路径和 Socket 绝对路径。
+4. 使用 Test 核对 Host、Build 和 Protocol 身份。
+5. 添加远端 Workspace 后，Terminal、Agent、文件和 Git 操作都会在同一 Host 上执行。
 
-AgentMux stores host selectors and an optional identity-file path. It never copies or persists private key contents.
+AgentMux 只保存连接元数据和可选 Identity File 路径，不读取、复制或保存 Private Key 内容。
 
-### Create a worktree
-
-1. Open **Workspace → Files + Branches**, or choose an unbound Branch Inbox on the Board and select **Open Branches**.
-2. Select an unbound Branch and choose **Create worktree**.
-3. Review or edit the suggested host-scoped worktree path.
-4. Confirm the explicit Git operation.
-5. Choose **Create worktree**; registration and Workspace selection occur only after Git succeeds.
-
-The main process runs this shape through an argument array:
+## 仓库结构
 
 ```text
-git -C <repository> worktree add -b <branch> -- <worktree-path> <base-ref>
+packages/core/       UI 无关的 Provider、Client、Daemon、Local／SSH Transport 与 Session 合同
+apps/desktop/        Electron Main／Preload 与 React 第一方 Client
+docs/                中文设计、a mature workbench 源码证据、测试与 Feature 决策
 ```
 
-On success, the resulting host-scoped workspace is registered and selected, its own split layout is restored, and the terminal-first launch surface is shown. A Git failure leaves no workspace record.
+## 当前限制
 
-## Repository layout
-
-```text
-packages/core/       reusable Provider, ExecutionHost, tmux, hook, and runtime package
-apps/desktop/        Electron main/preload plus React workbench
-docs/                a mature workbench evidence and reviewed implementation decisions
-```
-
-## Current limits
-
-- Native provider hooks are normalized and transported, but AgentMux does not install them into user-global agent settings.
-- SSH transport and reverse forwarding are deterministically tested at the OpenSSH argv boundary; this repository does not contain live remote credentials for an end-to-end public-host test.
-- The hook bridge belongs to the live runtime. tmux sessions survive desktop shutdown and are rediscovered with terminal/liveness evidence, but a prior process's hook URL is not claimed as active semantic evidence after shutdown.
-- The demonstrator is not code-signed, packaged, auto-updated, or published.
-- WSL transport, mobile clients, account management, and a mature workbench's daemon/relay protocol are intentionally outside this implementation.
+- 仓库不会自动修改用户全局 Codex、Claude、Hermes 或 Pi Hook 配置。
+- SSH 自动化使用隔离的系统 SSH Fixture；不连接真实外部 Host，也不包含真实凭据。
+- 完整 Package、Remote Artifact、Doctor、干净外部安装和多平台验收属于 T-006。
+- 更长时间 Soak、协议安全矩阵和资源回归属于 T-007。
+- 应用尚未签名、自动更新或发布。

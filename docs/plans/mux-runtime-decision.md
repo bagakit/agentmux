@@ -73,7 +73,7 @@ a mature workbench 的成熟模式不是简单把 `node-pty` 塞进 Electron。�
 - Stop 区分 graceful 与 force，并清理 Agent 的后代进程；
 - SSH 持久化依赖远端 Session Owner、认证租约、版本身份、Multiplexing、Flow Control 与恢复记录，不是简单 `ssh -tt`。
 
-这些事实由 `docs/a mature workbench-agent-runtime-notes.md` 固定 a mature workbench Commit 和源码位置；当前 AgentMux 的所有权由 `packages/core/src/runtime.ts`、`tmux-client.ts`、`execution-host.ts` 及对应测试证明。
+这些事实由 `docs/a mature workbench-agent-runtime-notes.md` 固定 a mature workbench Commit 和源码位置；当前 AgentMux 的所有权由 `packages/core/src/runtime.ts`、`daemon-session-manager.ts`、`client.ts`、`execution-host.ts` 及对应测试证明。
 
 | 候选 | 进程持有与持久化 | Local / SSH | 输入输出与监听 | 主要代价 | 结论 |
 | --- | --- | --- | --- | --- | --- |

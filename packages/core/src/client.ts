@@ -26,6 +26,7 @@ import {
   type AgentMuxSemanticStore
 } from './semantic-store.js'
 import { AgentMuxSemanticSessionRegistry } from './semantic-session-registry.js'
+import { projectAgentMuxSessions, type AgentMuxRuntimeSnapshot } from './runtime.js'
 import type {
   AgentCapabilitySnapshot,
   AgentCatalogEntry,
@@ -159,6 +160,7 @@ export class AgentMuxClient {
       this.assertConnectionEpoch(epoch)
       const hostId = this.daemon.daemonIdentity().hostId
       await this.registry.load(hostId)
+      await this.synchronizeAgentRuns(hostId)
       this.assertConnectionEpoch(epoch)
       this.unsubscribeDaemon?.()
       this.unsubscribeDaemon = this.daemon.onEvent((event) => this.acceptDaemonEvent(event))
@@ -217,6 +219,15 @@ export class AgentMuxClient {
     return await this.daemon.listSessions()
   }
 
+  async snapshot(): Promise<AgentMuxRuntimeSnapshot> {
+    this.requireConnected()
+    const hostId = this.daemon.daemonIdentity().hostId
+    return {
+      hostId,
+      sessions: projectAgentMuxSessions(hostId, await this.daemon.listSessions(), this.registry.list())
+    }
+  }
+
   async createTerminal(input: AgentMuxTerminalCreateInput): Promise<AgentMuxDaemonSession> {
     this.requireConnected()
     const run = await this.daemon.createTerminal(input)
@@ -262,6 +273,11 @@ export class AgentMuxClient {
   async stopTerminal(ref: AgentMuxDaemonSessionRef): Promise<void> {
     this.requireConnected()
     await this.daemon.stop(ref)
+    this.publisher.publish({
+      type: 'session-removed',
+      daemonSession: { ...ref },
+      evidence: { source: 'user', observedAt: Date.now(), daemonSession: { ...ref } }
+    })
   }
 
   async createAgent(input: AgentMuxAgentCreateInput): Promise<AgentMuxSemanticSession> {
@@ -339,10 +355,16 @@ export class AgentMuxClient {
     }
   }
 
-  async reattachAgent(semanticSessionId: string): Promise<AgentMuxSemanticAttachResult> {
+  async reattachAgent(
+    semanticSessionId: string,
+    afterSequence?: number
+  ): Promise<AgentMuxSemanticAttachResult> {
     this.requireConnected()
     const session = this.requireSemanticSession(semanticSessionId)
-    const attached = await this.daemon.attach(session.daemonSession.sessionId, session.outputCursor)
+    const attached = await this.daemon.attach(
+      session.daemonSession.sessionId,
+      afterSequence ?? session.outputCursor
+    )
     if (
       attached.session.kind !== 'agent' ||
       attached.session.agentId !== session.agentId ||
@@ -353,6 +375,11 @@ export class AgentMuxClient {
     }
     this.emitProcessState(attached.session, session.semanticSessionId)
     return { session: cloneSession(session), run: attached }
+  }
+
+  async detachAgent(semanticSessionId: string): Promise<void> {
+    this.requireConnected()
+    await this.daemon.detach(this.requireSemanticSession(semanticSessionId).daemonSession)
   }
 
   async resumeAgent(input: AgentMuxAgentResumeInput): Promise<AgentMuxSemanticSession> {
@@ -445,6 +472,31 @@ export class AgentMuxClient {
     return await this.daemon.write(this.requireSemanticSession(semanticSessionId).daemonSession, data)
   }
 
+  async submitAgentPrompt(semanticSessionId: string, prompt: string): Promise<void> {
+    this.requireConnected()
+    const content = prompt.trim()
+    if (!content) throw new AgentMuxError('Agent prompt cannot be empty.', 'INVALID_AGENT_PROMPT')
+    const session = this.requireSemanticSession(semanticSessionId)
+    await this.daemon.write(session.daemonSession, `${content}\r`)
+    const observedAt = Date.now()
+    this.publisher.publish({
+      type: 'semantic-activity',
+      semanticSessionId,
+      activity: {
+        id: randomUUID(),
+        kind: 'prompt',
+        createdAt: observedAt,
+        title: 'Prompt',
+        content
+      },
+      evidence: {
+        source: 'user',
+        observedAt,
+        daemonSession: { ...session.daemonSession }
+      }
+    })
+  }
+
   async resizeAgent(semanticSessionId: string, cols: number, rows: number) {
     this.requireConnected()
     return await this.daemon.resize(this.requireSemanticSession(semanticSessionId).daemonSession, cols, rows)
@@ -478,6 +530,18 @@ export class AgentMuxClient {
         this.acp.unbind(semanticSessionId),
         this.registry.delete(semanticSessionId, session.daemonSession)
       ])
+      if (cleanup[1]?.status === 'fulfilled') {
+        this.publisher.publish({
+          type: 'session-removed',
+          semanticSessionId,
+          daemonSession: { ...session.daemonSession },
+          evidence: {
+            source: 'user',
+            observedAt: Date.now(),
+            daemonSession: { ...session.daemonSession }
+          }
+        })
+      }
       const errors = cleanup.flatMap((result) => result.status === 'rejected' ? [result.reason] : [])
       if (errors.length > 0) throw new AggregateError(errors, 'Agent stopped but semantic cleanup failed.')
     } finally {
@@ -502,6 +566,37 @@ export class AgentMuxClient {
   private requireConnected(): void {
     if (!this.connected || !this.daemon.isConnected()) {
       throw new AgentMuxError('AgentMux client is not connected.', 'DAEMON_DISCONNECTED')
+    }
+  }
+
+  private async synchronizeAgentRuns(hostId: string): Promise<void> {
+    for (const run of await this.daemon.listSessions()) {
+      if (run.kind !== 'agent') continue
+      if (!run.agentId || !run.semanticSessionId) {
+        throw new AgentMuxError('Agent run is missing semantic identity.', 'SESSION_KIND_MISMATCH')
+      }
+      if (this.registry.has(run.semanticSessionId)) {
+        const semantic = this.registry.get(run.semanticSessionId)
+        if (!sameRun(semantic.daemonSession, run)) {
+          throw new AgentMuxError(
+            'Persisted semantic session points to another daemon run.',
+            'SEMANTIC_RUN_MISMATCH'
+          )
+        }
+        continue
+      }
+      const observedAt = run.exitedAt ?? run.lostAt ?? run.createdAt
+      await this.registry.put({
+        kind: 'agent',
+        semanticSessionId: run.semanticSessionId,
+        agentId: run.agentId,
+        hostId,
+        workspacePath: run.cwd,
+        daemonSession: runRef(run),
+        outputCursor: 0,
+        createdAt: run.createdAt,
+        updatedAt: observedAt
+      })
     }
   }
 

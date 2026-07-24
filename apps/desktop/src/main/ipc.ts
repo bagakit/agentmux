@@ -4,6 +4,7 @@ import { dialog, ipcMain, type BrowserWindow } from 'electron'
 import type { AgentId } from '@agentmux/core'
 import type {
   AgentLaunchInput,
+  AgentSessionControl,
   AppConfig,
   BrowserBounds,
   CreateWorkspacePathInput,
@@ -12,12 +13,12 @@ import type {
   FileDocument,
   HostConfig,
   RenameWorkspacePathInput,
+  SessionControl,
   TerminalLaunchInput,
   WorkspaceRecord
 } from '../shared/contracts.js'
 import { BrowserViewManager } from './browser-view-manager.js'
 import { ConfigStore } from './config-store.js'
-import { createExecutionHost } from './host-factory.js'
 import { RuntimeController } from './runtime-controller.js'
 import { saveRuntimeConfig } from './runtime-config-transaction.js'
 import { WorkspaceFiles } from './workspace-files.js'
@@ -36,8 +37,8 @@ export async function registerIpc(args: {
 }): Promise<() => void> {
   let config = await args.configStore.get()
   args.runtime.commit(await args.runtime.prepare(config))
-  const files = new WorkspaceFiles((id) => args.runtime.value.hosts.get(id))
-  const worktrees = new WorktreeService((id) => args.runtime.value.hosts.get(id), args.configStore)
+  const files = new WorkspaceFiles((id) => args.runtime.executionHost(id))
+  const worktrees = new WorktreeService((id) => args.runtime.executionHost(id), args.configStore)
   const browsers = new BrowserViewManager(args.window)
   const channels: string[] = []
   const handle = <TArgs extends unknown[], TResult>(
@@ -55,15 +56,10 @@ export async function registerIpc(args: {
     return saved
   })
   handle('hosts:check', async (input: HostConfig) => {
-    const host = createExecutionHost(input)
     try {
-      const result = await host.run('tmux', ['-V'], { timeoutMs: 10_000 })
-      return {
-        ok: result.exitCode === 0,
-        detail: result.exitCode === 0 ? result.stdout.trim() : result.stderr.trim() || 'Connection failed'
-      }
-    } finally {
-      await host.dispose()
+      return await args.runtime.checkHost(input)
+    } catch (error) {
+      return { ok: false, detail: error instanceof Error ? error.message : String(error) }
     }
   })
   handle('workspaces:chooseLocalFolder', async () => {
@@ -81,7 +77,7 @@ export async function registerIpc(args: {
     return item
   })
   handle('workspaces:add', async (input: CreateWorkspaceInput) => {
-    args.runtime.value.hosts.get(input.hostId)
+    args.runtime.executionHost(input.hostId)
     const item: WorkspaceRecord = {
       id: randomUUID(),
       name: input.name?.trim() || input.path.split(/[\\/]/).filter(Boolean).pop() || input.path,
@@ -120,18 +116,28 @@ export async function registerIpc(args: {
     await files.delete(workspace(config, workspaceId), path)
   })
   handle('agents:detect', async (agentId: AgentId, hostId: string) => await args.runtime.detect(agentId, hostId, config))
-  handle('sessions:snapshot', () => args.runtime.value.snapshot())
+  handle('sessions:snapshot', async () => await args.runtime.snapshot(config))
   handle('sessions:launchAgent', async (input: AgentLaunchInput) => await args.runtime.launchAgent(input, config))
-  handle('sessions:launchTerminal', async (input: TerminalLaunchInput) => await args.runtime.launchTerminal(input))
-  handle('sessions:send', async (sessionId: string, text: string, submit?: boolean) => {
-    await args.runtime.value.send(sessionId, text, submit ?? true)
+  handle('sessions:launchTerminal', async (input: TerminalLaunchInput) => await args.runtime.launchTerminal(input, config))
+  handle('sessions:attach', async (session: SessionControl, afterSequence: number = 0) => {
+    return await args.runtime.attachSession(session, afterSequence, config)
   })
-  handle('sessions:interrupt', async (sessionId: string) => await args.runtime.value.interrupt(sessionId))
-  handle('sessions:resize', async (sessionId: string, cols: number, rows: number) => {
-    await args.runtime.value.resize(sessionId, cols, rows)
+  handle('sessions:detach', async (session: SessionControl) => await args.runtime.detachSession(session))
+  handle('sessions:write', async (session: SessionControl, data: string) => {
+    await args.runtime.write(session, data)
   })
-  handle('sessions:refresh', async (sessionId: string) => await args.runtime.value.refresh(sessionId))
-  handle('sessions:stop', async (sessionId: string) => await args.runtime.value.stopSession(sessionId))
+  handle('sessions:submitPrompt', async (session: AgentSessionControl, prompt: string) => {
+    await args.runtime.submitPrompt(session, prompt)
+  })
+  handle('sessions:acknowledge', async (session: SessionControl, sequence: number) => {
+    await args.runtime.acknowledge(session, sequence)
+  })
+  handle('sessions:interrupt', async (session: SessionControl) => await args.runtime.interrupt(session))
+  handle('sessions:resize', async (session: SessionControl, cols: number, rows: number) => {
+    await args.runtime.resize(session, cols, rows)
+  })
+  handle('sessions:refresh', async (session: SessionControl) => await args.runtime.refresh(session, config))
+  handle('sessions:stop', async (session: SessionControl) => await args.runtime.stopSession(session))
   handle('browser:create', async (id: string, url: string) => await browsers.create(id, url))
   handle('browser:navigate', async (id: string, url: string) => await browsers.navigate(id, url))
   handle('browser:back', async (id: string) => await browsers.back(id))
