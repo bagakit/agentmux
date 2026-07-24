@@ -1,7 +1,9 @@
 import type { AgentId } from './types.js'
 
-export const AGENTMUX_DAEMON_PROTOCOL_VERSION = 2
+export const AGENTMUX_DAEMON_PROTOCOL_VERSION = 3
 export const AGENTMUX_DAEMON_MAX_FRAME_BYTES = 1024 * 1024
+export const AGENTMUX_DAEMON_BUILD_IDENTITY = '0.1.0'
+export const AGENTMUX_LOCAL_HOST_ID = 'local'
 
 export type AgentMuxDaemonSessionState = 'running' | 'exited' | 'lost'
 
@@ -65,6 +67,8 @@ export type AgentMuxDaemonAttachResult = {
 
 export type AgentMuxDaemonHello = {
   protocolVersion: number
+  buildIdentity: string
+  hostId: string
   daemonPid: number
   daemonInstanceId: string
 }

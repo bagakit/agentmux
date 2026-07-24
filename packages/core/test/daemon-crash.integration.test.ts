@@ -1,13 +1,11 @@
-import { execFile, spawn, type ChildProcess } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import { once } from 'node:events'
 import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { promisify } from 'node:util'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { AgentMuxClient } from '../src/daemon-client.js'
 
-const execFileAsync = promisify(execFile)
 const repositoryRoot = resolve(import.meta.dirname, '../../..')
 const daemonEntry = resolve(import.meta.dirname, '../dist/agentmuxd.js')
 
@@ -25,7 +23,7 @@ async function waitForCondition(
 }
 
 async function startDaemon(socketPath: string): Promise<ChildProcess> {
-  const child = spawn(process.execPath, [daemonEntry, '--socket', socketPath], {
+  const child = spawn(process.execPath, [daemonEntry, 'serve', '--socket', socketPath], {
     cwd: repositoryRoot,
     stdio: ['ignore', 'pipe', 'pipe']
   })
@@ -59,14 +57,6 @@ function processIsAlive(pid: number): boolean {
 }
 
 describe.runIf(process.platform !== 'win32')('agentmuxd crash disposition', () => {
-  beforeAll(async () => {
-    await execFileAsync('pnpm', ['--filter', '@agentmux/core', 'build'], {
-      cwd: repositoryRoot,
-      timeout: 30_000,
-      maxBuffer: 4 * 1024 * 1024
-    })
-  }, 35_000)
-
   it('restarts with the previous running identity marked lost', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'agentmuxd-crash-'))
     const socketPath = join(directory, 'agentmuxd.sock')
