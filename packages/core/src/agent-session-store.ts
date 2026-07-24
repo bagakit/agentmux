@@ -39,9 +39,11 @@ function timestamp(value: unknown, name: string): number {
 
 function runRef(value: unknown): AgentMuxRunRef {
   const source = record(value, 'run')
+  if (Object.keys(source).length !== 1 || !Object.hasOwn(source, 'runId')) {
+    throw new AgentMuxError('run must contain only runId.', 'INVALID_AGENT_SESSION_STORE')
+  }
   return {
-    runId: string(source.runId, 'run.runId'),
-    incarnationId: string(source.incarnationId, 'run.incarnationId')
+    runId: string(source.runId, 'run.runId')
   }
 }
 
@@ -106,8 +108,7 @@ export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgent
     (
       session.hookReceipt.agentId !== session.agentId ||
       session.hookReceipt.agentSessionId !== session.agentSessionId ||
-      session.hookReceipt.run.runId !== session.run.runId ||
-      session.hookReceipt.run.incarnationId !== session.run.incarnationId
+      session.hookReceipt.run.runId !== session.run.runId
     )
   ) {
     throw new AgentMuxError('Hook receipt does not match the Agent Session.', 'INVALID_AGENT_SESSION_STORE')

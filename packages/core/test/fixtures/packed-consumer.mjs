@@ -1,171 +1,117 @@
-import { execFile, spawn } from 'node:child_process'
-import { once } from 'node:events'
-import { chmod, mkdir, writeFile } from 'node:fs/promises'
-import { dirname, join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { promisify } from 'node:util'
-import {
-  connectLocalAgentMux,
-  connectSshAgentMux,
-  diagnoseAgentMux
-} from '@agentmux/core'
-import * as AgentMuxPackage from '@agentmux/core'
+import assert from 'node:assert/strict'
+import { connectLocalAgentMux, connectSshAgentMux } from '@agentmux/core'
 
-const execFileAsync = promisify(execFile)
-const root = process.cwd()
-const runtimeDirectory = join(root, 'runtime')
-const socketPath = join(runtimeDirectory, 'agentmuxd.sock')
-const statePath = join(runtimeDirectory, 'agentmuxd.state.json')
-const remoteHome = process.env.AGENTMUX_FAKE_SSH_HOME
-const fakeSshPath = join(root, 'fake-system-ssh.mjs')
-const fakeAgentPath = join(root, 'fake-agent.mjs')
-const coreIndex = fileURLToPath(import.meta.resolve('@agentmux/core'))
-const agentmuxdPath = resolve(dirname(coreIndex), '../bin/agentmuxd.js')
-let local = null
-let remote = null
-let remoteRuntime = null
+const socketPath = process.env.AGENTMUX_CTXMUX_SOCKET
+const stateDirectory = process.env.AGENTMUX_CTXMUX_STATE
+const controlFixture = process.env.AGENTMUX_CONTROL_FIXTURE
+const stubbornFixture = process.env.AGENTMUX_STUBBORN_FIXTURE
+assert.ok(socketPath && stateDirectory && controlFixture && stubbornFixture)
 
 async function waitFor(description, predicate, timeoutMs = 8_000) {
   const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    if (await predicate()) return
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 20))
+  while (Date.now() <= deadline) {
+    const result = await predicate()
+    if (result) return result
+    await new Promise((resolve) => setTimeout(resolve, 20))
   }
   throw new Error(`Timed out waiting for ${description}.`)
 }
 
-async function shutdownLocal() {
-  await execFileAsync(process.execPath, [
-    agentmuxdPath,
-    'shutdown',
-    '--socket',
-    socketPath,
-    '--host-id',
-    'local',
-    '--build-id',
-    '0.1.0'
-  ]).catch(() => {})
+function output(events, runId) {
+  return events
+    .filter((event) => event.type === 'terminal-output' && event.run.runId === runId)
+    .map((event) => event.data)
+    .join('')
 }
 
-try {
-  if (!remoteHome) throw new Error('Packed Consumer remote home is missing.')
-  for (const retiredExport of [
-    'AgentMuxDaemonClient',
-    'AgentMuxSshRemoteDaemon',
-    'SshAgentMuxDaemonConnector',
-    'activateAgentMuxLocalDaemon',
-    'createAgentMuxRemoteArtifact'
-  ]) {
-    if (retiredExport in AgentMuxPackage) throw new Error(`Retired public export is still available: ${retiredExport}`)
+async function processIsGone(pid) {
+  try {
+    process.kill(pid, 0)
+  } catch (error) {
+    if (error && typeof error === 'object' && error.code === 'ESRCH') return true
+    throw error
   }
-  await mkdir(runtimeDirectory, { recursive: true, mode: 0o700 })
-  await chmod(runtimeDirectory, 0o700)
-  await writeFile(fakeAgentPath, [
-    "process.stdout.write(`packed-agent:${process.argv.slice(2).join('|')}\\n`)",
-    'process.stdin.resume()'
-  ].join('\n'))
-
-  local = await connectLocalAgentMux({ endpointPath: socketPath, statePath })
-  const localEvents = []
-  local.onEvent((event) => localEvents.push(event))
-  const terminal = await local.createTerminal({
-    runId: 'packed-terminal',
-    createOperationId: 'packed-terminal-create',
-    workspacePath: root
-  })
-  await local.writeTerminal(terminal, "printf 'packed-terminal-ready\\n'\n")
-  await waitFor('packed Terminal output', () => localEvents.some((event) => (
-    event.type === 'terminal-output' && event.data.includes('packed-terminal-ready')
-  )))
-  const agent = await local.createAgent({
-    agentSessionId: 'packed-agent',
-    runId: 'packed-agent-run',
-    createOperationId: 'packed-agent-create',
-    agentId: 'codex',
-    workspacePath: root,
-    commandOverride: process.execPath,
-    args: [fakeAgentPath],
-    prompt: 'clean-consumer'
-  })
-  await waitFor('packed Agent output', () => localEvents.some((event) => (
-    event.type === 'terminal-output' && event.data.includes('packed-agent:clean-consumer')
-  )))
-  const commandOverrides = Object.fromEntries(local.catalog().map((entry) => [entry.id, process.execPath]))
-  const localDoctor = await diagnoseAgentMux({
-    client: local,
-    hostKind: 'local',
-    commandOverrides
-  })
-  if (!localDoctor.ok) throw new Error('Packed Local doctor did not pass.')
-  if (localDoctor.runtime?.pty.version !== '1.2.0-beta.15') throw new Error('Packed PTY version is wrong.')
-
-  const remoteSocketPath = join(remoteHome, 'agentmuxd.sock')
-  const remoteStatePath = join(remoteHome, 'agentmuxd.state.json')
-  let remoteOutput = ''
-  remoteRuntime = spawn(process.execPath, [
-    agentmuxdPath,
-    'serve',
-    '--socket',
-    remoteSocketPath,
-    '--state',
-    remoteStatePath,
-    '--host-id',
-    'packed-remote',
-    '--build-id',
-    '0.1.0'
-  ], {
-    env: {
-      HOME: remoteHome,
-      PATH: process.env.PATH,
-      SHELL: '/bin/sh',
-      TMPDIR: process.env.TMPDIR,
-      LANG: 'C.UTF-8'
-    },
-    stdio: ['ignore', 'pipe', 'inherit']
-  })
-  remoteRuntime.stdout.setEncoding('utf8')
-  remoteRuntime.stdout.on('data', (chunk) => { remoteOutput += chunk })
-  await waitFor('packed Remote Runtime readiness', () => remoteOutput.includes('"type":"ready"'))
-  remote = await connectSshAgentMux({
-    target: { hostId: 'packed-remote', hostname: 'fixture.example' },
-    runtime: {
-      buildIdentity: '0.1.0',
-      remoteNodePath: process.execPath,
-      remoteEntrypointPath: agentmuxdPath,
-      remoteEndpointPath: remoteSocketPath
-    },
-    sshCommand: fakeSshPath
-  })
-  const remoteTerminal = await remote.createTerminal({
-    runId: 'packed-remote-terminal',
-    createOperationId: 'packed-remote-create',
-    workspacePath: root
-  })
-  const remoteDoctor = await diagnoseAgentMux({
-    client: remote,
-    hostKind: 'ssh',
-    commandOverrides
-  })
-  if (!remoteDoctor.ok || remoteDoctor.host.hostId !== 'packed-remote') {
-    throw new Error('Packed SSH doctor did not pass.')
-  }
-
-  await remote.stopTerminal(remoteTerminal)
-  await local.stopAgent(agent.agentSessionId)
-  await local.stopTerminal(terminal)
-  const packageRoot = resolve(dirname(coreIndex), '..')
-  process.stdout.write(`${JSON.stringify({
-    local: localDoctor.host,
-    remote: remoteDoctor.host,
-    pty: localDoctor.runtime.pty,
-    packageRoot
-  })}\n`)
-} finally {
-  await remote?.dispose().catch(() => {})
-  if (remoteRuntime && remoteRuntime.exitCode === null && remoteRuntime.signalCode === null) {
-    remoteRuntime.kill('SIGTERM')
-    await once(remoteRuntime, 'exit').catch(() => {})
-  }
-  await local?.dispose().catch(() => {})
-  await shutdownLocal()
+  return false
 }
+
+const options = { socketPath, stateDirectory }
+let first = await connectLocalAgentMux(options)
+const firstEvents = []
+first.onEvent((event) => firstEvents.push(event))
+const run = await first.createTerminal({
+  workspacePath: process.cwd(),
+  command: process.execPath,
+  args: [controlFixture],
+  cols: 80,
+  rows: 24
+})
+const firstAttachment = await first.attachTerminal(run.runId, 0)
+assert.equal(firstAttachment.gap, null)
+await waitFor('fragmented UTF-8 output', () => output(firstEvents, run.runId).includes('control-ready'))
+assert.equal(output(firstEvents, run.runId).includes('prefix:😀:tail'), true)
+assert.equal(output(firstEvents, run.runId).includes('�'), false)
+const beforeReconnect = (await first.listRuns()).find((candidate) => candidate.runId === run.runId)
+assert.ok(beforeReconnect)
+assert.ok(beforeReconnect.pid)
+const originalPid = beforeReconnect.pid
+await first.dispose()
+first = null
+
+const second = await connectLocalAgentMux(options)
+const reconnected = (await second.listRuns()).find((candidate) => candidate.runId === run.runId)
+assert.ok(reconnected)
+assert.equal(reconnected.runId, run.runId)
+assert.equal(reconnected.pid, originalPid)
+const secondEvents = []
+second.onEvent((event) => secondEvents.push(event))
+const suffix = await second.attachTerminal(run.runId, Buffer.byteLength('prefix:'))
+assert.equal(suffix.gap, null)
+assert.equal(suffix.replay[0]?.startByte, Buffer.byteLength('prefix:'))
+assert.equal(suffix.replay.map((event) => event.data).join('').includes('😀:tail'), true)
+
+await second.resizeTerminal(run, 101, 37)
+await waitFor('applied resize', () => output(secondEvents, run.runId).includes('size:101x37'))
+await second.signalTerminal(run, 'SIGINT')
+await waitFor('interrupt receipt from the still-live process', () => (
+  output(secondEvents, run.runId).includes('interrupt-observed')
+))
+assert.equal((await second.listRuns()).find((candidate) => candidate.runId === run.runId)?.state, 'running')
+await second.stopTerminal(run)
+
+const stubbornEvents = []
+const unsubscribe = second.onEvent((event) => stubbornEvents.push(event))
+const stubborn = await second.createTerminal({
+  workspacePath: process.cwd(),
+  command: process.execPath,
+  args: [stubbornFixture]
+})
+await second.attachTerminal(stubborn.runId, 0)
+const stubbornOutput = await waitFor('stubborn process tree identities', () => {
+  const text = output(stubbornEvents, stubborn.runId)
+  return text.includes('stubborn-root:') && text.includes('stubborn-child:') ? text : null
+})
+const rootMatch = /stubborn-root:(\d+):(\d+)/u.exec(stubbornOutput)
+const childMatch = /stubborn-child:(\d+)/u.exec(stubbornOutput)
+assert.ok(rootMatch && childMatch)
+const stubbornPids = [Number(rootMatch[1]), Number(rootMatch[2]), Number(childMatch[1])]
+await second.stopTerminal(stubborn)
+await waitFor('complete stubborn process-tree stop', async () => (
+  (await Promise.all(stubbornPids.map(processIsGone))).every(Boolean)
+))
+unsubscribe()
+
+await assert.rejects(
+  connectSshAgentMux({ target: { hostId: 'remote', hostname: 'example.invalid' } }),
+  (error) => error?.code === 'REMOTE_UNSUPPORTED'
+)
+await second.dispose()
+
+process.stdout.write(`${JSON.stringify({
+  runId: run.runId,
+  pid: originalPid,
+  replayStartByte: suffix.replay[0]?.startByte,
+  resize: '101x37',
+  interruptStillLive: true,
+  stubbornPids,
+  remote: 'unsupported'
+})}\n`)

@@ -1,0 +1,22 @@
+const emoji = Buffer.from('😀')
+
+process.stdout.write('prefix:')
+process.stdout.write(emoji.subarray(0, 2))
+setTimeout(() => {
+  process.stdout.write(emoji.subarray(2))
+  process.stdout.write(':tail\ncontrol-ready\n')
+}, 25)
+
+process.stdout.on('resize', () => {
+  process.stdout.write(`size:${process.stdout.columns}x${process.stdout.rows}\n`)
+})
+
+process.on('SIGINT', () => {
+  process.stdout.write('interrupt-observed\n')
+})
+
+process.stdin.setEncoding('utf8')
+process.stdin.on('data', (data) => {
+  process.stdout.write(`input:${data}`)
+})
+process.stdin.resume()

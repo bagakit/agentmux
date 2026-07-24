@@ -7,7 +7,7 @@ import {
 import type { AgentMuxRunRef, AgentMuxAgentSession } from './types.js'
 
 function sameRun(left: AgentMuxRunRef, right: AgentMuxRunRef): boolean {
-  return left.runId === right.runId && left.incarnationId === right.incarnationId
+  return left.runId === right.runId
 }
 
 export class AgentMuxAgentSessionRegistry {
