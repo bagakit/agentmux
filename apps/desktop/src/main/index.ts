@@ -9,7 +9,7 @@ import { runDesktopResourceProbe } from './resource-probe.js'
 
 const appIconPath = join(import.meta.dirname, '../../resources/icon.png')
 const packagedUserDataPath = join(app.getPath('appData'), 'dev.agentmux.desktop')
-let disposeIpc: (() => void) | null = null
+let disposeIpc: (() => Promise<void>) | null = null
 
 if (process.env.AGENTMUX_DESKTOP_USER_DATA) {
   app.setPath('userData', process.env.AGENTMUX_DESKTOP_USER_DATA)
@@ -41,7 +41,7 @@ async function createWindow(appReadyAtMs: number = Date.now()): Promise<void> {
     if (url.startsWith('https://')) void shell.openExternal(url)
     return { action: 'deny' }
   })
-  disposeIpc?.()
+  await disposeIpc?.()
   disposeIpc = await registerIpc({ window, configStore, runtime })
   if (process.env.ELECTRON_RENDERER_URL) await window.loadURL(process.env.ELECTRON_RENDERER_URL)
   else await window.loadFile(join(import.meta.dirname, '../renderer/index.html'))
@@ -87,7 +87,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
-  disposeIpc?.()
+  void disposeIpc?.()
   disposeIpc = null
   void runtime.dispose()
 })

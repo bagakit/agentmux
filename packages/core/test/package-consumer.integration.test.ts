@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { cp, mkdtemp, mkdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
@@ -14,6 +15,10 @@ const ownerFenceFixture = fileURLToPath(new URL('./fixtures/ctxmux-owner-fence.m
 const controlFixture = fileURLToPath(new URL('./fixtures/ctxmux-terminal-control.mjs', import.meta.url))
 const stubbornFixture = fileURLToPath(new URL('./fixtures/stubborn-process-tree.mjs', import.meta.url))
 const fakeCodexFixture = fileURLToPath(new URL('./fixtures/fake-codex-cli.mjs', import.meta.url))
+const lifecycleCrashFixture = fileURLToPath(new URL('./fixtures/lifecycle-crash-worker.mjs', import.meta.url))
+const promptCrashFixture = fileURLToPath(new URL('./fixtures/prompt-submit-crash-worker.mjs', import.meta.url))
+const runtimeScopePreloadFixture = fileURLToPath(new URL('./fixtures/runtime-scope-preload.mjs', import.meta.url))
+const ctxmuxRuntimeId = '88e8377ecc4341b655d47306'
 const roots: string[] = []
 
 afterEach(async () => {
@@ -123,7 +128,9 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
       roots.push(root)
       const packDirectory = join(root, 'pack')
       const consumerDirectory = join(root, 'consumer')
-      const runtimeDirectory = join(root, 'runtime')
+      const testUid = `t${process.pid}-${randomUUID().slice(0, 8)}`
+      const runtimeDirectory = join('/private/tmp', `amx-${testUid}-${ctxmuxRuntimeId}`)
+      roots.push(runtimeDirectory)
       await Promise.all([
         mkdir(packDirectory),
         mkdir(consumerDirectory, { recursive: true }),
@@ -180,7 +187,10 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         cp(ownerFenceFixture, join(consumerDirectory, 'ctxmux-owner-fence.mjs')),
         cp(controlFixture, join(consumerDirectory, 'ctxmux-terminal-control.mjs')),
         cp(stubbornFixture, join(consumerDirectory, 'stubborn-process-tree.mjs')),
-        cp(fakeCodexFixture, join(consumerDirectory, 'bin', 'codex'))
+        cp(fakeCodexFixture, join(consumerDirectory, 'bin', 'codex')),
+        cp(lifecycleCrashFixture, join(consumerDirectory, 'lifecycle-crash-worker.mjs')),
+        cp(promptCrashFixture, join(consumerDirectory, 'prompt-submit-crash-worker.mjs')),
+        cp(runtimeScopePreloadFixture, join(consumerDirectory, 'runtime-scope-preload.mjs'))
       ])
 
       const packageRoot = join(consumerDirectory, 'node_modules', '@agentmux', 'core')
@@ -210,13 +220,22 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         'utf8'
       ))
       expect(artifactManifest.source).toMatchObject({
-        commit: '3b94288c3a7896bb355e028135409c8e8bbaf764',
-        tree: '58f3630477881e75f0f022d3fbb98a93ff2f46c4',
+        commit: '2e32a9d647d627952ea5c455fb2efef6c636643a',
+        tree: 'd60870c2481c9b153da6bf22f829d24afb8a81a8',
         worktree_clean: true
       })
 
       const daemonPath = join(packageRoot, 'vendor', 'ctxmux', 'darwin-arm64', 'bin', 'ctxmuxd')
       const cliPath = join(packageRoot, 'vendor', 'ctxmux', 'darwin-arm64', 'bin', 'ctxmux')
+      const runtimeEnvironment = {
+        ...process.env,
+        NO_COLOR: '1',
+        AGENTMUX_TEST_UID: testUid,
+        NODE_OPTIONS: [
+          process.env.NODE_OPTIONS,
+          `--import=${join(consumerDirectory, 'runtime-scope-preload.mjs')}`
+        ].filter(Boolean).join(' ')
+      }
       let activeDaemon: DaemonProcess | null = null
       let replacement: ReturnType<typeof spawn> | null = null
       try {
@@ -225,12 +244,13 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
           timeout: 60_000,
           maxBuffer: 8 * 1024 * 1024,
           env: {
-            ...process.env,
-            TMPDIR: runtimeDirectory,
+            ...runtimeEnvironment,
             PATH: `${join(consumerDirectory, 'bin')}:${process.env.PATH ?? ''}`,
             AGENTMUX_CONTROL_FIXTURE: join(consumerDirectory, 'ctxmux-terminal-control.mjs'),
             AGENTMUX_STUBBORN_FIXTURE: join(consumerDirectory, 'stubborn-process-tree.mjs'),
             AGENTMUX_FAKE_CODEX: join(consumerDirectory, 'bin', 'codex'),
+            AGENTMUX_LIFECYCLE_CRASH_FIXTURE: join(consumerDirectory, 'lifecycle-crash-worker.mjs'),
+            AGENTMUX_PROMPT_CRASH_FIXTURE: join(consumerDirectory, 'prompt-submit-crash-worker.mjs'),
             AGENTMUX_CLI_PATH: join(consumerDirectory, 'node_modules', '.bin', 'agentmux')
           }
         })
@@ -241,6 +261,19 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
           dedupOccurrences: 1,
           codexSemanticSession: 'codex-semantic-1',
           codexNativeSession: 'native-codex-semantic-1',
+          terminalHandshake: 'query-ack-prompt',
+          stopEpochReadiness: [
+            'missing-stop-rejected-before-payload',
+            'tail-lookbehind-ready',
+            'post-cursor-live-ready',
+            'concurrent-single-consumer',
+            'crash-recovered-once'
+          ],
+          promptCrashRecovery: true,
+          cliResolveKinds: ['agent-session', 'provider-native', 'acp-native', 'run'],
+          externalSwitch: true,
+          naturalTerminalStop: true,
+          crashRecovery: true,
           remote: 'unsupported'
         })
 
@@ -268,7 +301,7 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
           cwd: consumerDirectory,
           timeout: 15_000,
           maxBuffer: 4 * 1024 * 1024,
-          env: { ...process.env, TMPDIR: runtimeDirectory }
+          env: runtimeEnvironment
         })
         expect(fenced.stdout.trim()).toBe('ctxmux-owner-fence-ok')
       } finally {

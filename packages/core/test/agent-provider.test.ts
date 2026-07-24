@@ -90,6 +90,28 @@ describe('built-in agent providers', () => {
     expect(plan.args).toEqual(['$(touch /tmp/not-executed)'])
   })
 
+  it('plans interactive prompt submission with the Provider terminal protocol', () => {
+    expect(providers.get('codex').terminalHandshake).toEqual({
+      query: '\u001b[?u',
+      response: '\u001b[?0u'
+    })
+    expect(providers.get('codex').terminalPromptRender).toEqual({
+      frameStart: '\u001b[?2026h',
+      activeComposer: '›',
+      frameEnd: '\u001b[?2026l'
+    })
+    expect(providers.get('codex').planPromptInput('continue')).toEqual({
+      kind: 'render-then-submit', payload: 'continue', submit: '\r'
+    })
+    for (const id of ['claude', 'traex', 'hermes', 'pi'] as const) {
+      expect(providers.get(id).terminalHandshake).toBeUndefined()
+      expect(providers.get(id).terminalPromptRender).toBeUndefined()
+      expect(providers.get(id).planPromptInput('continue')).toEqual({
+        kind: 'single-phase', data: 'continue\r'
+      })
+    }
+  })
+
   it('probes the selected executable on the execution host', async () => {
     const probes: string[] = []
     await expect(providers.get('claude').probeCapabilities({
@@ -110,22 +132,25 @@ describe('built-in agent providers', () => {
     expect(providers.get('codex').buildResumeLaunch({
       workspacePath: '/tmp/work',
       nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'native-1' },
+      prompt: 'continue now',
       args: ['--model', 'demo'],
       env: {}
     })).toEqual({
       command: 'codex',
-      args: ['resume', 'native-1', '--model', 'demo'],
+      args: ['resume', 'native-1', 'continue now', '--model', 'demo'],
       env: {}
     })
     expect(() => providers.get('pi').buildResumeLaunch({
       workspacePath: '/tmp/work',
       nativeHandle: { kind: 'provider', providerId: 'pi', sessionId: 'native-2' },
+      prompt: 'continue now',
       args: [],
       env: {}
     })).toThrow('session file')
     expect(() => providers.get('hermes').buildResumeLaunch({
       workspacePath: '/tmp/work',
       nativeHandle: { kind: 'provider', providerId: 'hermes', sessionId: 'native-3' },
+      prompt: 'continue now',
       args: [],
       env: {}
     })).toThrow('does not support')

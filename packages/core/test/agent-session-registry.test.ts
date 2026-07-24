@@ -20,6 +20,39 @@ function session(run = 'run-1'): AgentMuxStoredAgentSession {
 }
 
 describe('semantic session registry concurrency', () => {
+  it('merges serialized control-state updates from the latest CAS value', async () => {
+    const registry = new AgentMuxAgentSessionRegistry(new AgentMuxMemoryAgentSessionStore())
+    await registry.put(session())
+    await registry.update('semantic-1', { runId: 'run-1' }, (current) => ({
+      ...current,
+      terminalHandshake: {
+        run: { ...current.run },
+        operationId: 'handshake-operation',
+        inputByteRange: { startByte: 0, endByte: 5 },
+        acknowledged: false
+      }
+    }))
+    await registry.update('semantic-1', { runId: 'run-1' }, (current) => ({
+      ...current,
+      hookReceipt: {
+        id: 'hook-receipt',
+        agentId: current.agentId,
+        agentSessionId: current.agentSessionId,
+        run: { ...current.run },
+        eventName: 'SessionStart',
+        observedAt: 200
+      }
+    }))
+
+    expect(registry.get('semantic-1')).toMatchObject({
+      terminalHandshake: {
+        inputByteRange: { startByte: 0, endByte: 5 },
+        acknowledged: false
+      },
+      hookReceipt: { id: 'hook-receipt' }
+    })
+  })
+
   it('serializes persistence and rejects an old run update after a resume transition', async () => {
     const memory = new AgentMuxMemoryAgentSessionStore()
     let enteredTransition!: () => void
@@ -28,14 +61,19 @@ describe('semantic session registry concurrency', () => {
     const transitionRelease = new Promise<void>((resolve) => { releaseTransition = resolve })
     const store: AgentMuxAgentSessionStore = {
       async load() { return await memory.load() },
-      async put(value) {
-        if (value.run.runId === 'run-2') {
+      async loadRetiredRuns() { return await memory.loadRetiredRuns() },
+      async compareAndSwap(expected, next) {
+        if (next?.run.runId === 'run-2') {
           enteredTransition()
           await transitionRelease
         }
-        await memory.put(value)
+        await memory.compareAndSwap(expected, next)
       },
-      async delete(id) { await memory.delete(id) }
+      async reserveLifecycle(value) { await memory.reserveLifecycle(value) },
+      async claimStaleLifecycles(value) { return await memory.claimStaleLifecycles(value) },
+      async releaseLifecycle(value) { await memory.releaseLifecycle(value) },
+      async retireRuns(value) { await memory.retireRuns(value) },
+      async commitLifecycle(value, next) { await memory.commitLifecycle(value, next) }
     }
     const registry = new AgentMuxAgentSessionRegistry(store)
     const original = session()

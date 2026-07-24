@@ -291,7 +291,7 @@ async function verifyPackagedRuntime(appPath, verificationRoot) {
     'utf8'
   ))
   assert(
-    manifest.source.commit === '3b94288c3a7896bb355e028135409c8e8bbaf764',
+    manifest.source.commit === '2e32a9d647d627952ea5c455fb2efef6c636643a',
     'Packaged ctxmux manifest commit is wrong.'
   )
 }
@@ -310,14 +310,15 @@ async function processIdsForApplication(appPath) {
 async function verifyLaunchServices(appPath, verificationRoot) {
   const readyFile = join(verificationRoot, 'desktop-ready.json')
   const userData = join(verificationRoot, 'user-data')
-  const processTemporaryDirectory = await mkdtemp(join(tmpdir(), 'amx-smoke-'))
   const stdoutPath = join(verificationRoot, 'desktop-stdout.log')
   const stderrPath = join(verificationRoot, 'desktop-stderr.log')
   const endpointPath = join(
-    processTemporaryDirectory,
+    '/private/tmp',
     `amx-${process.getuid()}-${CTXMUX_RUNTIME_ID}`,
     'ctxmux.sock'
   )
+  const runtimeRoot = dirname(endpointPath)
+  const ownerReceiptPath = join(runtimeRoot, 'owner.json')
   const executable = join(appPath, 'Contents', 'MacOS', PRODUCT_NAME)
   const daemonEntrypoint = join(
     appPath,
@@ -335,6 +336,8 @@ async function verifyLaunchServices(appPath, verificationRoot) {
   )
   await mkdir(userData, { recursive: true })
   const before = new Set(await processIdsForApplication(appPath))
+  const endpointExistedBefore = await pathExists(endpointPath)
+  const runtimeRootExistedBefore = await pathExists(runtimeRoot)
   try {
     await run('open', [
       '-n',
@@ -345,8 +348,7 @@ async function verifyLaunchServices(appPath, verificationRoot) {
       '--stderr', stderrPath,
       '--env', `AGENTMUX_DESKTOP_USER_DATA=${userData}`,
       '--env', `AGENTMUX_DESKTOP_READY_FILE=${readyFile}`,
-      '--env', 'AGENTMUX_DESKTOP_EXIT_AFTER_READY=1',
-      '--env', `TMPDIR=${processTemporaryDirectory}`
+      '--env', 'AGENTMUX_DESKTOP_EXIT_AFTER_READY=1'
     ], { capture: true })
     if (!await pathExists(readyFile)) {
       const stderr = await readFile(stderrPath, 'utf8').catch(() => '')
@@ -358,20 +360,44 @@ async function verifyLaunchServices(appPath, verificationRoot) {
     const remaining = (await processIdsForApplication(appPath)).filter((pid) => !before.has(pid))
     assert(remaining.length === 0, `Packaged Desktop left ${remaining.length} process(es) after the smoke run.`)
   } finally {
-    try {
+    const ownedDaemonPids = async () => {
       const processes = await run('ps', ['-axo', 'pid=,command='], { capture: true })
-      for (const line of processes.stdout.split('\n')) {
+      return processes.stdout.split('\n').flatMap((line) => {
         const match = /^\s*(\d+)\s+(.+)$/u.exec(line)
-        if (!match || !match[2].includes(daemonEntrypoint) || !match[2].includes(endpointPath)) continue
-        process.kill(Number(match[1]), 'SIGTERM')
+        if (!match || !match[2].includes(daemonEntrypoint) || !match[2].includes(endpointPath)) return []
+        return [Number(match[1])]
+      })
+    }
+    for (const pid of await ownedDaemonPids()) {
+      try {
+        process.kill(pid, 'SIGTERM')
+      } catch (error) {
+        if (!(error instanceof Error && 'code' in error && error.code === 'ESRCH')) throw error
       }
-      const deadline = Date.now() + 5_000
-      while (await pathExists(endpointPath) && Date.now() <= deadline) {
-        await new Promise((resolveDelay) => setTimeout(resolveDelay, 20))
+    }
+    const deadline = Date.now() + 5_000
+    let remainingDaemonPids = await ownedDaemonPids()
+    while (remainingDaemonPids.length > 0 && Date.now() <= deadline) {
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 20))
+      remainingDaemonPids = await ownedDaemonPids()
+    }
+    assert(remainingDaemonPids.length === 0, 'Launch smoke ctxmuxd survived scoped cleanup.')
+    if (!endpointExistedBefore) {
+      const ownerReceipt = JSON.parse(await readFile(ownerReceiptPath, 'utf8'))
+      assert(
+        await realpath(ownerReceipt.daemonPath) === await realpath(daemonEntrypoint) &&
+          ownerReceipt.socketPath === endpointPath,
+        'Launch smoke cannot prove ownership of the CtxMux endpoint cleanup.'
+      )
+      if (runtimeRootExistedBefore) {
+        await Promise.all([
+          rm(endpointPath, { force: true }),
+          rm(ownerReceiptPath, { force: true })
+        ])
+      } else {
+        await rm(runtimeRoot, { recursive: true, force: true })
       }
       assert(!await pathExists(endpointPath), 'Launch smoke ctxmuxd endpoint survived scoped cleanup.')
-    } finally {
-      await rm(processTemporaryDirectory, { recursive: true, force: true })
     }
   }
 }

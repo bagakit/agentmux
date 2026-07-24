@@ -26,6 +26,7 @@ function respond(response: ServerResponse, statusCode: number, body = ''): void 
 }
 
 type HookIngressEvent = {
+  receiptId: string
   eventName?: string
   payload?: Record<string, unknown>
 }
@@ -33,6 +34,10 @@ type HookIngressEvent = {
 function isIngressEvent(value: unknown): value is HookIngressEvent {
   if (!value || typeof value !== 'object') return false
   const record = value as Record<string, unknown>
+  if (
+    typeof record.receiptId !== 'string' ||
+    !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u.test(record.receiptId)
+  ) return false
   if (record.eventName !== undefined && typeof record.eventName !== 'string') return false
   if (
     record.payload !== undefined &&
@@ -58,6 +63,7 @@ type PendingBinding = {
   agentId: AgentId
   runId: string | null
   events: HookIngressEvent[]
+  tail: Promise<void>
 }
 
 export class AgentHookServer {
@@ -102,9 +108,10 @@ export class AgentHookServer {
     const server = this.server
     this.server = null
     this.endpoint = null
+    if (server) await new Promise<void>((resolve) => server.close(() => resolve()))
+    const tails = [...this.bindings.values()].map((binding) => binding.tail)
+    await Promise.allSettled(tails)
     this.bindings.clear()
-    if (!server) return
-    await new Promise<void>((resolve) => server.close(() => resolve()))
   }
 
   createBinding(agentSessionId: string, agentId: AgentId, requestedBindingId?: string): AgentHookBinding {
@@ -118,7 +125,13 @@ export class AgentHookServer {
     if (this.bindings.has(token)) {
       throw new AgentMuxError('Hook binding already exists.', 'HOOK_BINDING_CONFLICT')
     }
-    const binding: PendingBinding = { agentSessionId, agentId, runId: null, events: [] }
+    const binding: PendingBinding = {
+      agentSessionId,
+      agentId,
+      runId: null,
+      events: [],
+      tail: Promise.resolve()
+    }
     this.bindings.set(token, binding)
     let closed = false
     return {
@@ -133,7 +146,7 @@ export class AgentHookServer {
         }
         binding.runId = runId
         const events = binding.events.splice(0)
-        for (const event of events) await this.publish(binding, event)
+        for (const event of events) await this.enqueue(binding, event)
       },
       close: () => {
         if (closed) return
@@ -156,31 +169,44 @@ export class AgentHookServer {
       return
     }
     request.setTimeout(2_000, () => request.destroy())
+    let parsed: unknown
     try {
-      const parsed: unknown = JSON.parse(await readBody(request))
-      if (!isIngressEvent(parsed)) {
-        respond(response, 400, JSON.stringify({ error: 'invalid_hook_envelope' }))
+      parsed = JSON.parse(await readBody(request))
+    } catch {
+      respond(response, 400, JSON.stringify({ error: 'invalid_hook_envelope' }))
+      return
+    }
+    if (!isIngressEvent(parsed)) {
+      respond(response, 400, JSON.stringify({ error: 'invalid_hook_envelope' }))
+      return
+    }
+    if (binding.runId === null) {
+      if (binding.events.length >= MAX_PENDING_EVENTS) {
+        respond(response, 429, JSON.stringify({ error: 'hook_binding_pending_limit' }))
         return
       }
-      if (binding.runId === null) {
-        if (binding.events.length >= MAX_PENDING_EVENTS) {
-          respond(response, 429, JSON.stringify({ error: 'hook_binding_pending_limit' }))
-          return
-        }
-        binding.events.push(parsed)
-      } else {
-        await this.publish(binding, parsed)
-      }
+      binding.events.push(parsed)
+      respond(response, 204)
+      return
+    }
+    try {
+      await this.enqueue(binding, parsed)
       respond(response, 204)
     } catch {
-      // Observation is fail-open: malformed status must not hold up an agent hook.
-      respond(response, 204)
+      respond(response, 503, JSON.stringify({ error: 'hook_delivery_failed' }))
     }
+  }
+
+  private enqueue(binding: PendingBinding, event: HookIngressEvent): Promise<void> {
+    const delivery = binding.tail.catch(() => {}).then(async () => await this.publish(binding, event))
+    binding.tail = delivery.then(() => {}, () => {})
+    return delivery
   }
 
   private async publish(binding: PendingBinding, event: HookIngressEvent): Promise<void> {
     if (binding.runId === null) return
     await this.onEvent({
+      receiptId: event.receiptId,
       agentSessionId: binding.agentSessionId,
       runId: binding.runId,
       agentId: binding.agentId,

@@ -79,8 +79,13 @@ import { RuntimeController } from '../src/main/runtime-controller.js'
 
 const store: AgentMuxAgentSessionStore = {
   async load() { return [] },
-  async put() {},
-  async delete() {}
+  async loadRetiredRuns() { return [] },
+  async compareAndSwap() {},
+  async reserveLifecycle() {},
+  async claimStaleLifecycles() { return [] },
+  async releaseLifecycle() {},
+  async retireRuns() {},
+  async commitLifecycle() {}
 }
 
 const localConfig: AppConfig = {
