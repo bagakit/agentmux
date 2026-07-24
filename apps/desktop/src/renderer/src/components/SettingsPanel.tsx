@@ -1,17 +1,19 @@
-import { Bot, Boxes, FolderGit2, Search, Server, Settings2, X } from 'lucide-react'
+import { Bot, Boxes, FolderGit2, Palette, Search, Server, Settings2, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
-import type { AgentConfig, HostConfig, WorkspaceRecord } from '../../../shared/contracts'
+import type { AgentConfig, AppearanceConfig, HostConfig, WorkspaceRecord } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { useAppStore } from '../store'
 import { AgentSettingsPane } from './settings/AgentSettingsPane'
+import { AppearanceSettingsPane } from './settings/AppearanceSettingsPane'
 import { GeneralSettingsPane } from './settings/GeneralSettingsPane'
 import { HostSettingsPane } from './settings/HostSettingsPane'
 import { WorkspaceSettingsPane } from './settings/WorkspaceSettingsPane'
 
-export type SettingsSectionId = 'general' | 'agents' | 'hosts' | 'workspaces'
+export type SettingsSectionId = 'general' | 'appearance' | 'agents' | 'hosts' | 'workspaces'
 
 const SECTIONS = [
   { id: 'general' as const, title: 'General', description: 'Runtime and terminal behavior', icon: Settings2, keywords: 'core runtime terminal tmux ssh' },
+  { id: 'appearance' as const, title: 'Appearance', description: 'Interface layers and terminal palette', icon: Palette, keywords: 'theme color palette terminal tui composer input background' },
   { id: 'agents' as const, title: 'Agents', description: 'Detection and commands', icon: Bot, keywords: 'codex claude traex hermes pi command args env installed provider' },
   { id: 'hosts' as const, title: 'Hosts', description: 'Local and SSH machines', icon: Server, keywords: 'ssh remote hostname user port key test connection' },
   { id: 'workspaces' as const, title: 'Workspaces', description: 'Project folders and registered worktrees', icon: FolderGit2, keywords: 'project folder repo branch worktree create run on agent' }
@@ -53,6 +55,12 @@ export function SettingsPanel({ onClose, initialSection = 'general' }: {
     setConfig(await api.config.save({ ...current, agents }))
   }
 
+  async function saveAppearance(appearance: AppearanceConfig): Promise<void> {
+    const current = useAppStore.getState().config
+    if (!current) return
+    setConfig(await api.config.save({ ...current, appearance }))
+  }
+
   async function saveHosts(hosts: HostConfig[], workspaces: WorkspaceRecord[]): Promise<void> {
     const current = useAppStore.getState().config
     if (!current) return
@@ -79,6 +87,7 @@ export function SettingsPanel({ onClose, initialSection = 'general' }: {
         <header><div className="eyebrow">Configuration</div><h2>{section.title}</h2><p>{section.description}</p></header>
         <div className="settings-content__scroll">
           {active === 'general' ? <GeneralSettingsPane /> : null}
+          {active === 'appearance' ? <AppearanceSettingsPane appearance={config.appearance} onSave={saveAppearance} /> : null}
           {active === 'agents' ? <AgentSettingsPane config={config} onSave={saveAgents} /> : null}
           {active === 'hosts' ? <HostSettingsPane config={config} onSave={saveHosts} /> : null}
           {active === 'workspaces' ? <WorkspaceSettingsPane config={config} onClose={onClose} /> : null}

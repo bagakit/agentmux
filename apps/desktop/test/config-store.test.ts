@@ -15,7 +15,7 @@ afterEach(async () => {
 })
 
 const baseConfig: AppConfig = {
-  version: 3,
+  version: 4,
   hosts: [
     { id: 'local', kind: 'local', label: 'This Mac' },
     {
@@ -32,7 +32,8 @@ const baseConfig: AppConfig = {
     hermes: { command: 'hermes', args: [], env: {} },
     pi: { command: 'pi', args: [], env: {} }
   },
-  workspaces: []
+  workspaces: [],
+  appearance: { terminalTheme: 'graphite' }
 }
 
 function workspace(overrides: Partial<WorkspaceRecord> = {}): WorkspaceRecord {
@@ -54,11 +55,11 @@ async function storeFixture(): Promise<{ store: ConfigStore; path: string }> {
 }
 
 describe('ConfigStore workspace identity', () => {
-  it('rejects retired v2 daemon config without migration or fallback', async () => {
+  it('rejects retired config without migration or fallback', async () => {
     const { store, path } = await storeFixture()
     await writeFile(path, JSON.stringify({
       ...baseConfig,
-      version: 2,
+      version: 3,
       hosts: [{
         id: 'remote',
         kind: 'ssh',
@@ -74,7 +75,7 @@ describe('ConfigStore workspace identity', () => {
     }))
 
     await expect(store.get()).rejects.toBeInstanceOf(Error)
-    expect(await readFile(path, 'utf8')).toContain('"version":2')
+    expect(await readFile(path, 'utf8')).toContain('"version":3')
   })
 
   it('rejects duplicate workspace ids without replacing the persisted config', async () => {
@@ -93,6 +94,23 @@ describe('ConfigStore workspace identity', () => {
 
     expect(await readFile(path, 'utf8')).toBe(persisted)
     expect(await store.get()).toEqual(saved)
+  })
+
+  it('persists only a known terminal palette as desktop appearance truth', async () => {
+    const { store, path } = await storeFixture()
+    const saved = await store.save({
+      ...baseConfig,
+      appearance: { terminalTheme: 'catppuccin-mocha' }
+    })
+
+    expect(saved.appearance).toEqual({ terminalTheme: 'catppuccin-mocha' })
+    expect((await store.get()).appearance).toEqual({ terminalTheme: 'catppuccin-mocha' })
+    expect(await readFile(path, 'utf8')).toContain('"terminalTheme": "catppuccin-mocha"')
+
+    await expect(store.save({
+      ...baseConfig,
+      appearance: { terminalTheme: 'retired-theme' }
+    } as never)).rejects.toThrow()
   })
 
   it('uses host-specific normalized paths as physical workspace identity', async () => {

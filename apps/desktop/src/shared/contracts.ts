@@ -44,11 +44,18 @@ export type WorkspaceRecord = {
   branch?: string
 }
 
+export type TerminalThemeId = 'graphite' | 'catppuccin-mocha'
+
+export type AppearanceConfig = {
+  terminalTheme: TerminalThemeId
+}
+
 export type AppConfig = {
-  version: 3
+  version: 4
   hosts: HostConfig[]
   agents: Record<string, AgentConfig>
   workspaces: WorkspaceRecord[]
+  appearance: AppearanceConfig
 }
 
 export type FileDocument = {
