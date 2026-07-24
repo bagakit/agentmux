@@ -2,7 +2,7 @@
 
 状态：已批准
 对应 Feature：`f-2248f4yx5`
-当前计划候选：revision 6
+当前计划：revision 8（T-020）
 前置决策：`docs/plans/mux-runtime-decision.md`
 
 ## 1. 修正结论
@@ -106,6 +106,7 @@ Reattach 原 Run、provider-native resume、spawn 新 Run、创建新 AgentSessi
 - AgentMux 公共模型清楚区分 Run、AgentSession、Attachment 与 View；
 - 五个 Provider、ACP、Hook、Permission、Resume 与 Evidence 不依赖 Kernel 私有类型；
 - Desktop、CLI、外部 Consumer 只通过 AgentMux 公共 API；
+- 统一 CLI/SDK/Desktop 可用 runtime-issued Raw Terminal/View ID，或把稳定 `agentSessionId` 唯一解析为当前已打开 View 后执行 `switch`；该动作只改变 Desktop 焦点，与 Open、Attach、Resume 和 Run 生命周期严格分离，未知、歧义、过期、未打开目标失败关闭；
 - ctxmux 通过适用 Conformance，Local/SSH 切换后自建 daemon 与 tmux 生产路径全部删除；
 - 最终 Package、Security、Chaos、Stress、Resource 和两轮 Benchmark 在最终 SHA 通过；
 - 独立 Review 的所有 Release Blocker 已处理；

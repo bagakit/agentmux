@@ -49,7 +49,7 @@ Daemon 不可达时不会用 `UNKNOWN` 填满字段：Host 明确为 unavailable
 
 ## 4. Remote Artifact
 
-历史 `createAgentMuxRemoteArtifact()` 与 `agentmux artifact create` 生成 `agentmux.remote-artifact.v1`。T-014 已从 Package root 删除 Builder 与 Daemon Manager 导出；CLI 仅为过渡 candidate 保留到 T-016：
+历史 `createAgentMuxRemoteArtifact()` 与 `agentmux artifact create` 生成 `agentmux.remote-artifact.v1`。T-014 已从 Package root 删除 Builder 与 Daemon Manager 导出；CLI 仅为过渡 candidate 保留到 T-020：
 
 ```text
 agentmux-artifact.json

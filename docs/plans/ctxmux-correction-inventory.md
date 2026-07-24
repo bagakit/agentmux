@@ -76,7 +76,7 @@ Conformance 只观察 public Run 行为，不 import ctxmux 或旧 daemon 内部
 - 已经被公共 Conformance 覆盖的重复 daemon-specific 测试；
 - 旧 Benchmark runner 中直接 new `AgentMuxDaemonClient` 的 candidate 路径。
 
-删除发生在 T-016 的同一原子切换，不提前破坏当前产品，也不保留 deprecated export、兼容 facade 或隐藏入口。
+删除发生在 T-020 的同一原子切换，不提前破坏当前产品，也不保留 deprecated export、兼容 facade 或隐藏入口。
 
 ## 5. 历史文档
 

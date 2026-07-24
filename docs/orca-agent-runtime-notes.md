@@ -186,7 +186,11 @@ Browser 不属于 Agent Runtime，也不通过 Agent Daemon。它属于 Desktop 
 
 ## 8. a mature workbench CLI 的 Agent 间通信边界
 
-2026-08-12 通过当前安装版本的 `a mature workbench skills get a mature workbench-cli` 与 `a mature workbench skills get orchestration` 复核了 a mature workbench 的公开 CLI 合同。真正值得采用的不是“向另一个终端发送字符串”，而是把低层终端输入与可恢复的 Agent 通信分开：
+2026-08-12 通过当时安装版本的 `a mature workbench skills get a mature workbench-cli` 与 `a mature workbench skills get orchestration` 复核了 a mature workbench 的公开通信合同。2026-08-13 又复核当前 a mature workbench `1.4.176`：`terminal switch --terminal <runtime-issued handle>` 的公开语义是让 a mature workbench UI 切换到对应 Terminal Tab；它是 Client 焦点操作，不是 Terminal Attach、Agent Resume 或进程生命周期操作。
+
+AgentMux 采用这一交互合同，但保留自己的身份边界：Raw Terminal 使用 runtime-issued Terminal/View ID；Agent 调用使用稳定 `agentSessionId`，由 Core-owned Resolver 唯一映射到当前已打开 View，再通过 typed Desktop control 聚焦。unknown、ambiguous、stale、not-open 目标失败关闭；不猜测最近 Tab，不隐式 Open/Attach/Resume，也不让 CLI 或 Renderer 建立第二索引。
+
+真正值得采用的也不是“向另一个终端发送字符串”，而是把低层终端输入与可恢复的 Agent 通信分开：
 
 - `terminal send` 只适合一次性直接输入，不携带任务、收件箱、回复或完成状态；
 - 结构化通信使用持久 Message／Delivery：`send`、`check`、`reply`、`ask`、`inbox` 分别表达投递、消费、关联回复、阻塞提问和历史检查；

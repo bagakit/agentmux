@@ -1,6 +1,6 @@
 # Desktop 切换到 AgentMux Daemon
 
-> 历史实现文档：本文记录已完成的 tmux → 自建 agentmuxd 切换证据。2026-08-11 的 ctxmux 决策修正已取代其“长期实现”结论；当前代码在 T-016 前继续运行，但不会获得新能力，最终切换后直接删除，不提供兼容入口。
+> 历史实现文档：本文记录已完成的 tmux → 自建 agentmuxd 切换证据。2026-08-11 的 ctxmux 决策修正已取代其“长期实现”结论；当前代码在 T-020 前继续运行，但不会获得新能力，最终切换后直接删除，不提供兼容入口。
 
 ## 1. 唯一运行链路
 
@@ -64,4 +64,4 @@ Run 启动继续由 Launcher Tab 持有事务：只有仍属于该启动请求�
 
 ## 7. 验证入口
 
-完整回归使用 `pnpm check`。当前关键回归覆盖 Local Activation、Run/Agent Session/View 投影、外部 Client 重建、Desktop Agent Session Store、Host 配置事务、Launcher 生命周期和 Renderer 状态 Owner。T-016 接入 ctxmux 时会删除这条历史 daemon 路径，不保留兼容入口。
+完整回归使用 `pnpm check`。当前关键回归覆盖 Local Activation、Run/Agent Session/View 投影、外部 Client 重建、Desktop Agent Session Store、Host 配置事务、Launcher 生命周期和 Renderer 状态 Owner。T-020 接入 ctxmux 时会删除这条历史 daemon 路径，不保留兼容入口。

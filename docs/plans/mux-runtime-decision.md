@@ -94,7 +94,7 @@ Local 与 SSH 使用同一 AgentMux Run 合同，只替换 ctxmux 的连接与�
 
 具体 create fence、input identity、process tree、remote artifact、capability negotiation 与资源边界由 ctxmux capability audit 和 Conformance Kit 验证。缺失任何硬能力时，最终接入任务阻塞，不回退自建实现。
 
-2026-08-11 的 T-015 已固定审计公开 commit `b2bbc7a`：Local Start/Attach/Replay/Resize/Stop 与 Client 重连已有真实证据，但 License/Release/Package、SSH、Create/Input 幂等 byte cursor、Output byte cursor、完整进程树、全局资源预算和 Runtime capability identity 尚未齐备。当前 T-016 因这些精确外部缺口 parked；完整矩阵与解除条件见 `docs/plans/ctxmux-capability-audit.md`。
+2026-08-11 的 T-015 已固定审计公开 commit `b2bbc7a`：Local Start/Attach/Replay/Resize/Stop 与 Client 重连已有真实证据，但 License/Release/Package、SSH、Create/Input 幂等 byte cursor、Output byte cursor、完整进程树、全局资源预算和 Runtime capability identity 尚未齐备。原 T-016 因这些精确外部缺口 parked；当前 T-020 必须对新的已提交、版本化 public candidate 重新审计，完整矩阵与解除条件见 `docs/plans/ctxmux-capability-audit.md`。
 
 ## 8. 实施顺序
 

@@ -1,6 +1,6 @@
 # ctxmux 能力审计与 AgentMux Adapter Gate
 
-状态：T-015 完成审计；当前 candidate **不满足 T-016 原子替换门槛**。本文件记录外部能力事实，不授权在 AgentMux 内补齐 ctxmux 缺口。
+状态：T-015 已完成对历史 candidate 的审计；`b2bbc7a` **不满足原 T-016 原子替换门槛**。当前 T-020 必须重新审计一个已提交、版本化、可公共消费的 ctxmux candidate；本文件记录的历史事实不授权在 AgentMux 内补齐缺口。
 
 审计日期：2026-08-11（Asia/Shanghai）
 
@@ -13,7 +13,7 @@
 - **可用的 Local 基础**：Rust daemon、Rust CLI 和 TypeScript SDK 已通过同一 generation 2 Unix-socket 协议运行真实 PTY。Start、List、Status、Input、Attach、Detach、Replay、Live Output、Resize、Stop 与 Client 退出后重连都有真实行为证据。
 - **不能开始替换**：当前没有可合法消费的 License／Release／Package，没有 SSH Transport；Create/Input 没有幂等 cursor 或 lost-response recovery；Output 使用 chunk sequence 而 AgentMux 合同使用 byte cursor；Stop 没有完整后代树保证；Run/Attachment/内存没有 daemon 级总预算与 GC；Runtime identity/capability negotiation、任意 Signal 和 applied-size readback 也未交付。
 
-因此 T-015 可以完成“审计与冻结映射”，但 T-016 必须进入精确 parked context。不得用 AgentMux 私有 daemon、Adapter 内持久 Map、隐藏 Backend、wire fork 或 fallback 填这些缺口。
+因此 T-015 可以完成“审计与冻结映射”，原 T-016 的 blocked 证据保持为历史事实。T-020 不能沿用这份 2026-08-11 审计作为当前通过结论：它必须对新的、已提交且版本化的 public candidate 做新鲜审计，并逐项关闭硬 Gate。ctxmux 工作区的 dirty WIP、未提交源码或本地产物都不能关闭任何 Gap。不得用 AgentMux 私有 daemon、Adapter 内持久 Map、隐藏 Backend、wire fork 或 fallback 填这些缺口。
 
 ## 2. 发布、License 与供应链
 
@@ -24,7 +24,7 @@
 | TypeScript SDK 发布 | `missing` | `packages/sdk/package.json` 为 `@ctxmux/sdk@0.0.0` 且 `private: true`；npm 查询 `@ctxmux/sdk` 返回 404。 |
 | Rust crate 发布 | `missing` | 四个 crate 都声明 `publish = false`；`cargo search ctxmux` 无结果。 |
 | License | `missing` | 仓库无 License 文件，GitHub License API 返回 404，Manifest 也没有 license/SPDX 字段。公开可读不等于允许复制、分发或打包。 |
-| Binary / package artifact | `missing` | 没有 Release asset、稳定 npm tarball、crate 或安装/校验合同。T-016 不能临时下载未知 binary，也不能把 Git checkout 当发布依赖。 |
+| Binary / package artifact | `missing` | 没有 Release asset、稳定 npm tarball、crate 或安装/校验合同。T-020 不能临时下载未知 binary，也不能把 Git checkout 当发布依赖。 |
 | 版本 | `available`（开发态） | Rust workspace `0.1.0`、CLI/daemon 输出 `ctxmux 0.1.0 (protocol 2)`；SDK workspace 仍为 `0.0.0`。 |
 | CI 平台 | `available`（Linux 单点） | GitHub Actions 只有一个 `ubuntu-latest` Gate；本轮另在 Darwin arm64 原样通过。没有 durable macOS matrix 或发布资格矩阵。 |
 
@@ -99,7 +99,7 @@ Context7 没有 ctxmux 条目；本机常用项目目录、AgentMux lockfile、�
 
 ## 6. 冻结的 `CtxmuxRunAdapter` 映射
 
-只有上一节硬缺口关闭后，T-016 才实现一个 Adapter。它不是 Backend Registry，也不接入 ctxmux 的 shell/Codex Integration：Agent 发现、Launch Plan、Hook、ACP、Permission、Resume 与 Evidence 继续由 AgentMux Provider 持有。
+只有对新的、已提交且版本化的 public candidate 重新审计并关闭上一节硬缺口后，T-020 才实现一个 Adapter。它不是 Backend Registry，也不接入 ctxmux 的 shell/Codex Integration：Agent 发现、Launch Plan、Hook、ACP、Permission、Resume 与 Evidence 继续由 AgentMux Provider 持有。
 
 | AgentMux Run Port | ctxmux public SDK | 映射约束 |
 | --- | --- | --- |
@@ -118,9 +118,9 @@ Adapter 不持久化第二份 Run Map、Replay、Input receipt 或 Remote artifa
 
 Agent identity 不属于 Adapter。`agentSessionId`、Provider + native session ID、ACP handle 及其唯一性索引全部由 AgentMux Core-owned Store/Resolver 持有；ctxmux `runId` 只作为 exact RunRef 的一部分被索引。CLI、SDK 与 Desktop 先经同一个 Resolver 得到当前 Agent Session 与 RunRef，再调用 Adapter。ctxmux 不解析 AgentMux ID，AgentMux 也不把 ctxmux SDK/wire 类型作为公共身份；零匹配、多匹配、过期 incarnation 或冲突绑定都必须失败关闭。
 
-## 7. T-016 精确 parked context
+## 7. 历史 T-016 parked context 与当前 T-020 新鲜审计门槛
 
-T-016 的外部解除条件全部可独立核对：
+以下九项是原 T-016 blocked 时记录的外部解除条件，历史证据继续可审计；T-020 必须在新的、已提交、版本化且可公共消费的 ctxmux candidate 上重新核对，不能用 `b2bbc7a` 的旧结论或当前 dirty WIP 代替：
 
 1. 仓库加入明确 License，并提供版本化、可校验的 `@ctxmux/sdk` 与 `ctxmuxd/ctxmux` Package/Artifact；
 2. Public SDK/Protocol 提供 Create Operation content identity 与 lost-response recovery；
@@ -140,4 +140,4 @@ T-016 的外部解除条件全部可独立核对：
 - 没有安装全局 ctxmux、下载 Release binary、接入真实 SSH Host 或修改 Credential；
 - 只在系统临时目录 checkout 精确公开 commit 并从 lockfile 构建测试；
 - 没有读取、修改或纳入 AgentMux 的用户 `.tmp/`；
-- 没有为 T-016 编写 Adapter、Backend Selector、fallback、migration 或兼容层。
+- 没有为原 T-016 编写 Adapter、Backend Selector、fallback、migration 或兼容层。

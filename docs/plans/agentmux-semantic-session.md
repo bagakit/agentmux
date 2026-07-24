@@ -19,13 +19,16 @@ Raw Terminal 只有 Run，没有 Agent Session。Agent Run 必须引用恰好一
 
 `agentSessionId` 是 AgentMux CLI、SDK 和 Desktop 的稳定公共主键。Provider native session ID、ACP handle 与 exact RunRef 是 AgentMux Core-owned Store 上的外部索引，不是替代主键：native session ID 必须与 Provider 身份组成查询键，RunRef 必须包含 incarnation。一个查询命中零个、多个、过期或互相冲突的绑定时必须失败关闭，不能猜测最近 Session，也不能从 Terminal 标题或输出反推身份。
 
-## 2. 五个动作必须分开
+Raw Terminal 的 Client 路由身份是 runtime-issued Terminal/View ID，不伪装成 `agentSessionId`。Agent 的 `agentSessionId` 可以经同一 Core-owned View Resolver 唯一解析到当前已打开 View；零个、多个、过期或已关闭的 View 都不是可切换目标。CLI、SDK 和 Desktop 复用该 Resolver 与 typed Desktop control，Renderer 不维护第二份映射。
+
+## 2. 六个动作必须分开
 
 - **Reattach 原 Run**：Run ID、Incarnation 和 Agent Session ID 全部不变；从指定 byte cursor 获取 Replay/Gap 并建立新的 Attachment，不 Spawn。
 - **Release Attachment**：只释放当前 Client 的输出附着；不停止 Run，不删除 Agent Session，也不关闭其他 View。
 - **Provider-native Resume**：可信 Native Handle 和 Provider Capability 同时成立时，保留 Agent Session ID，创建新的 Run ID 与 Incarnation。
 - **Respawn**：创建新的 Agent Session 和新的 Run；即使 Provider、Workspace 和 Prompt 相同，也不宣称继承模型上下文。
 - **Open View**：创建新的 View ID，引用已有 Run 或 Agent Session；不创建进程、不 Attach 输出，也不改变 Agent Session。
+- **Switch View**：使用已解析的 runtime-issued Terminal/View ID 聚焦一个当前已打开的 Desktop View；Agent 调用可先由 `agentSessionId` 唯一解析其当前 View。该动作不 Open、不 Attach、不 Resume、不 Spawn，不改变 Run、Attachment 或 Agent Session 生命周期。
 
 原 Run 仍为 `running` 时禁止 provider-native Resume，避免一个 Agent Session 同时驱动两个物理 Agent。迟到的旧 Incarnation 事件只能作为旧 Run 事实处理，不能更新已经指向新 Run 的 Agent Session。
 
@@ -62,7 +65,7 @@ Run Kernel 持有 Local/SSH 的 PTY、Process、Ordered I/O、Replay、Gap、Bac
 
 Adapter 只做两件事：把 AgentMux 的 Run Intent 翻译给 Kernel，把 Kernel Run Fact 翻译成 AgentMux 自有类型。Kernel 的 Frame、Snapshot、Error、SDK Object 和连接状态不能穿过 Adapter。
 
-CLI、SDK 与 Desktop 共用同一 Agent Session Resolver 和操作合同。调用方可以用 `agentSessionId` 对不同 Provider 统一执行 list、status、send、interrupt、attach、resume 与 stop；Resolver 先核对 Agent Session、Provider capability 和 exact current RunRef，再把纯 Run 动作交给 Adapter。Provider native ID、ACP handle 或 RunRef 的反查也只能返回 AgentMux 身份，不得让 ctxmux 持有 Agent 索引，或让 CLI 另建一份映射。某个 Provider 不支持某项语义动作时返回明确 unsupported，而不是降级成字符串注入、隐式 respawn 或旧 CLI 路径。
+CLI、SDK 与 Desktop 共用同一 Agent Session Resolver、View Resolver 和操作合同。调用方可以用 `agentSessionId` 对不同 Provider 统一执行 list、status、send、interrupt、attach、resume 与 stop，也可以将它唯一解析成当前 View 后执行 Desktop `switch`；Raw Terminal 则直接使用 runtime-issued Terminal/View ID。Resolver 先核对 Agent Session、Provider capability 和 exact current RunRef，再把纯 Run 动作交给 Adapter；`switch` 只交给 typed Desktop control，不进入 Adapter。Provider native ID、ACP handle 或 RunRef 的反查也只能返回 AgentMux 身份，不得让 ctxmux 持有 Agent 索引，或让 CLI/Renderer 另建一份映射。某个 Provider 不支持某项语义动作时返回明确 unsupported，而 unknown、ambiguous、stale、not-open 的 switch 目标失败关闭，不能降级成字符串注入、隐式 Open/Attach/Resume、猜测最近 View 或旧 CLI 路径。
 
 ## 6. 持久化与资源边界
 
@@ -77,4 +80,4 @@ CLI、SDK 与 Desktop 共用同一 Agent Session Resolver 和操作合同。调�
 - Client 集成测试验证 Reattach、Release Attachment、Provider Resume 和 Respawn 是不同动作，并验证同步/异步 Consumer 订阅者异常不会破坏其他 Listener 或 Run 控制。
 - Core 与 Desktop 类型检查验证 daemon wire 不再进入 Desktop 的共享合同。
 
-T-012 收口 Provider/ACP/Hook/Permission/Resume 后，T-013 将现有可靠性资产提炼成 Kernel-neutral Conformance Kit；只有 ctxmux 能力审计通过后，T-016 才执行最终 Kernel 替换并删除自建 daemon。
+T-012 收口 Provider/ACP/Hook/Permission/Resume 后，T-013 将现有可靠性资产提炼成 Kernel-neutral Conformance Kit；T-020 必须先对新的、已提交且版本化的 ctxmux public candidate 做新鲜审计，全部硬 Gate 通过后才执行最终 Kernel 替换、统一 CLI/View switch 并删除自建 daemon。
