@@ -4,6 +4,7 @@ import '@xterm/xterm/css/xterm.css'
 import { useEffect, useRef } from 'react'
 import type { RuntimeEvent, SessionSnapshot } from '../../../shared/contracts'
 import { api } from '../lib/api'
+import { DEFAULT_TERMINAL_APPEARANCE, DEFAULT_TERMINAL_THEME } from '../lib/terminal-theme'
 
 function terminalWrite(terminal: Terminal, data: string): Promise<void> {
   return new Promise((resolve) => terminal.write(data, resolve))
@@ -29,27 +30,9 @@ export function TerminalView({ session }: { session: SessionSnapshot }) {
   useEffect(() => {
     if (!rootRef.current) return
     const terminal = new Terminal({
+      ...DEFAULT_TERMINAL_APPEARANCE,
       allowProposedApi: false,
-      cursorBlink: true,
-      cursorStyle: 'bar',
-      fontFamily: '"SFMono-Regular", "Cascadia Code", "JetBrains Mono", monospace',
-      fontSize: 12,
-      lineHeight: 1.2,
-      scrollback: 5_000,
-      theme: {
-        background: '#0c0f11',
-        foreground: '#d8ddd8',
-        cursor: '#a8f0c6',
-        selectionBackground: '#31574688',
-        black: '#171b1e',
-        red: '#ff7676',
-        green: '#88d7a6',
-        yellow: '#e4c875',
-        blue: '#80aeea',
-        magenta: '#c69be8',
-        cyan: '#73cbd0',
-        white: '#d8ddd8'
-      }
+      scrollback: 5_000
     })
     const fit = new FitAddon()
     terminal.loadAddon(fit)
@@ -162,5 +145,11 @@ export function TerminalView({ session }: { session: SessionSnapshot }) {
     }
   }, [session.control.run.runId, session.id])
 
-  return <div className="terminal-view" ref={rootRef} />
+  return (
+    <div
+      className="terminal-view"
+      ref={rootRef}
+      style={{ backgroundColor: DEFAULT_TERMINAL_THEME.background }}
+    />
+  )
 }
