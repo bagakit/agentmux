@@ -540,7 +540,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 10px;
+  padding: 0 8px;
   border-bottom: 1px solid var(--line-soft);
   color: var(--text-3);
   background: #101416;
@@ -549,6 +549,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .agent-context-bar__identity, .agent-context-bar__host { min-width: 0; display: flex; align-items: center; gap: 6px; }
 .agent-context-bar__identity strong { color: var(--text-2); text-transform: capitalize; }
 .agent-context-bar__host span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-context-bar__stop { padding: 3px 6px; font-size: 10px; }
 .agent-provider-mark {
   width: 17px;
   height: 17px;

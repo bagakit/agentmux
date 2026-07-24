@@ -85,7 +85,6 @@ function SortableWorkbenchTab({
   const dirtyDocuments = useAppStore((state) => state.dirtyDocuments)
   const activateTab = useAppStore((state) => state.activateTab)
   const closeTab = useAppStore((state) => state.closeTab)
-  const stopSession = useAppStore((state) => state.stopSession)
   const session = tab.kind === 'agent' || tab.kind === 'terminal'
     ? sessions.find((item) => item.id === tab.sessionId)
     : null
@@ -102,7 +101,7 @@ function SortableWorkbenchTab({
 
   async function requestClose(event: React.MouseEvent): Promise<void> {
     event.stopPropagation()
-    if (((tab.kind === 'agent' || tab.kind === 'terminal') && session?.processState !== 'exited') || dirty) {
+    if (dirty) {
       setConfirmingClose(true)
       return
     }
@@ -112,14 +111,7 @@ function SortableWorkbenchTab({
   async function confirmClose(): Promise<void> {
     if (closing) return
     setClosing(true)
-    if ((tab.kind === 'agent' || tab.kind === 'terminal') && tab.phase === 'launching') {
-      await closeTab(workspaceId, group.id, tab.id)
-      if (session) await stopSession(session.id)
-    } else if ((tab.kind === 'agent' || tab.kind === 'terminal') && session) {
-      await stopSession(session.id)
-    } else {
-      await closeTab(workspaceId, group.id, tab.id)
-    }
+    await closeTab(workspaceId, group.id, tab.id)
     setClosing(false)
     setConfirmingClose(false)
   }
@@ -164,14 +156,10 @@ function SortableWorkbenchTab({
       </button>
       <ConfirmationDialog
         open={confirmingClose}
-        title={tab.kind === 'agent' ? 'Stop this agent?' : tab.kind === 'terminal' ? 'Stop this terminal?' : 'Discard unsaved changes?'}
-        description={
-          tab.kind === 'agent' || tab.kind === 'terminal'
-            ? `Closing this tab will stop the ${tab.kind === 'agent' ? "agent's current work" : 'terminal session'}.`
-            : 'Closing this editor tab will discard changes that have not been saved.'
-        }
+        title="Discard unsaved changes?"
+        description="Closing this editor tab will discard changes that have not been saved."
         subject={session?.label ?? tabLabel(tab)}
-        confirmLabel={tab.kind === 'agent' ? 'Stop Agent' : tab.kind === 'terminal' ? 'Stop Terminal' : 'Discard & Close'}
+        confirmLabel="Discard & Close"
         busy={closing}
         onCancel={() => !closing && setConfirmingClose(false)}
         onConfirm={() => void confirmClose()}
