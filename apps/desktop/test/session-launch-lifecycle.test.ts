@@ -68,6 +68,21 @@ function terminalSession(id: string): SessionSnapshot {
   }
 }
 
+function agentSession(id: string): SessionSnapshot {
+  return {
+    ...terminalSession(id),
+    kind: 'agent',
+    agentId: 'codex',
+    label: 'Codex',
+    control: {
+      kind: 'agent',
+      hostId: 'local',
+      agentSessionId: id,
+      run: { runId: id }
+    }
+  }
+}
+
 afterEach(() => {
   vi.restoreAllMocks()
   useAppStore.setState(initialState, true)
@@ -168,5 +183,16 @@ describe('Session and Launcher lifecycle ownership', () => {
 
     expect(close).toHaveBeenCalledWith(launcher.id)
     expect(useAppStore.getState().tabs[launcher.id]).toBeUndefined()
+  })
+
+  it('reports prompt submission failure without claiming the Composer draft was accepted', async () => {
+    const session = agentSession('agent-run')
+    useAppStore.setState({ sessions: [session], error: null })
+    vi.spyOn(api.sessions, 'submitPrompt').mockRejectedValue(new Error('agent input is not ready'))
+
+    await expect(useAppStore.getState().send(session.id, 'keep this draft')).rejects.toThrow(
+      'agent input is not ready'
+    )
+    expect(useAppStore.getState().error).toBe('agent input is not ready')
   })
 })

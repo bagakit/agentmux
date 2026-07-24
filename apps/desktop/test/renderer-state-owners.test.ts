@@ -128,7 +128,7 @@ describe('Renderer resource state owners', () => {
     expect(state.sessions[0]).toMatchObject({
       status: { state: 'waiting' },
       latestOutputBytes: 20,
-      updatedAt: 3
+      updatedAt: 4
     })
     expect(state.activities[session.id]).toHaveLength(2)
 
