@@ -4,13 +4,14 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
-import { ChevronDown, ChevronUp, Search, X } from 'lucide-react'
+import { ChevronDown, ChevronUp, LoaderCircle, Search, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { RuntimeEvent, SessionSnapshot, TerminalThemeId } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { installTerminalColorQueryReplyHandlers } from '../lib/terminal-capability-replies'
 import { terminalOptions, terminalTheme } from '../lib/terminal-theme'
 import { isTerminalAppShortcut } from '../lib/terminal-shortcuts'
+import { hydrateTerminalReplay } from '../lib/terminal-replay'
 import { TerminalViewportSynchronizer } from '../lib/terminal-viewport-sync'
 import { TerminalContextMenu } from './TerminalContextMenu'
 
@@ -38,6 +39,7 @@ export function TerminalView({ session, themeId }: { session: SessionSnapshot; t
   const searchAddonRef = useRef<SearchAddon | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const [hasSelection, setHasSelection] = useState(false)
+  const [hydrating, setHydrating] = useState(true)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
 
@@ -47,6 +49,7 @@ export function TerminalView({ session, themeId }: { session: SessionSnapshot; t
 
   useEffect(() => {
     if (!rootRef.current) return
+    setHydrating(true)
     const canControlRun = session.processState === 'running'
     const isMac = navigator.userAgent.includes('Mac')
     const terminal = new Terminal({
@@ -95,18 +98,18 @@ export function TerminalView({ session, themeId }: { session: SessionSnapshot; t
     let renderReady: { dispose(): void } | null = null
     const viewport = new TerminalViewportSynchronizer({
       proposeGrid: () => fit.proposeDimensions() ?? null,
-      fit: () => {
-        fit.fit()
-        renderReady?.dispose()
-        renderReady = null
-      },
+      fit: () => fit.fit(),
       readGrid: () => ({ cols: terminal.cols, rows: terminal.rows }),
       resize: async ({ cols, rows }) => await api.sessions.resize(session.control, cols, rows),
       requestFrame: (callback) => requestAnimationFrame(callback),
       cancelFrame: (frameId) => cancelAnimationFrame(frameId),
       onResizeError: (error) => console.warn('[terminal] failed to synchronize PTY viewport', error)
     })
-    renderReady = terminal.onRender(() => viewport.observeViewport())
+    renderReady = terminal.onRender(() => {
+      renderReady?.dispose()
+      renderReady = null
+      viewport.observeViewport()
+    })
 
     const queueAcknowledge = (control: SessionSnapshot['control'], sequence: number): void => {
       acknowledgeTail = acknowledgeTail
@@ -197,10 +200,10 @@ export function TerminalView({ session, themeId }: { session: SessionSnapshot; t
           )
           cursor = result.gap.firstAvailableByte
         }
-        for (const event of result.replay) {
-          await terminalWrite(terminal, event.data)
-          cursor = event.endByte
-        }
+        cursor = await hydrateTerminalReplay(
+          result.replay,
+          async (data) => await terminalWrite(terminal, data)
+        ) ?? cursor
         if (droppedPendingThrough > cursor) {
           await terminalWrite(
             terminal,
@@ -212,6 +215,9 @@ export function TerminalView({ session, themeId }: { session: SessionSnapshot; t
         readyForLiveOutput = true
         if (cursor > 0) queueAcknowledge(result.session.control, cursor)
         for (const event of pending.splice(0)) accept(event)
+        await outputTail
+        if (disposed) return
+        setHydrating(false)
         terminal.focus()
       } catch (error) {
         if (!disposed) {
@@ -221,6 +227,7 @@ export function TerminalView({ session, themeId }: { session: SessionSnapshot; t
             terminal,
             `\r\n\u001b[31m[Attach failed: ${detail}]\u001b[0m\r\n`
           )
+          setHydrating(false)
         }
       }
     })()
@@ -288,10 +295,15 @@ export function TerminalView({ session, themeId }: { session: SessionSnapshot; t
         style={{ backgroundColor: terminalTheme(themeId).background }}
       >
         <div
-          className="terminal-view__xterm"
+          className={`terminal-view__xterm ${hydrating ? 'terminal-view__xterm--hydrating' : ''}`}
           ref={rootRef}
           onPointerDown={() => terminalRef.current?.focus()}
         />
+        {hydrating ? (
+          <div className="terminal-hydration" role="status" aria-live="polite">
+            <LoaderCircle className="spin" size={13} /> Restoring terminal…
+          </div>
+        ) : null}
         {searchOpen ? (
           <div className="terminal-search" role="search">
             <Search size={13} />
