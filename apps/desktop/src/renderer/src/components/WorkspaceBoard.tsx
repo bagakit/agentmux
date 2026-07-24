@@ -1,47 +1,48 @@
 import {
+  Activity,
   AlertTriangle,
   ArrowUpRight,
+  BellRing,
   Bot,
   CheckCircle2,
-  CircleDot,
   GitBranch,
   Inbox,
   LoaderCircle,
+  MessageSquarePlus,
   RadioTower,
   RefreshCw,
   Search,
   SquareTerminal,
   Unlink,
-  X
+  X,
+  type LucideIcon
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { useWorkspaceBranches } from '../hooks/useWorkspaceBranches'
 import { api } from '../lib/api'
 import {
+  PROJECT_BOARD_COLUMNS,
   buildProjectBranchLanes,
-  buildProjectInbox,
   filterProjectBranchLanes,
-  type BranchActivityState,
   type BranchBindingFilter,
+  type ProjectBoardColumn,
   type ProjectBranchLane
 } from '../lib/project-board'
 import { projectWorkspaces } from '../lib/workspace-projects'
 import { useAppStore } from '../store'
+import { BoardDiscussionCanvas } from './BoardDiscussionCanvas'
 import { StatusDot } from './StatusDot'
 
-const ACTIVITY_FILTERS: { id: BranchActivityState; label: string }[] = [
-  { id: 'attention', label: 'Needs attention' },
-  { id: 'active', label: 'Active' },
-  { id: 'complete', label: 'Complete' },
-  { id: 'idle', label: 'Idle' }
-]
-
-const ACTIVITY_LABELS: Record<BranchActivityState, string> = {
-  attention: 'Needs attention',
-  active: 'Active',
-  complete: 'Complete',
-  idle: 'Idle'
+const COLUMN_META: Record<ProjectBoardColumn, {
+  label: string
+  description: string
+  icon: LucideIcon
+}> = {
+  inbox: { label: 'Inbox', description: 'Start a Branch discussion', icon: Inbox },
+  working: { label: 'Working', description: 'Running now', icon: Activity },
+  'needs-you': { label: 'Needs You', description: 'Waiting or blocked', icon: BellRing },
+  done: { label: 'Done', description: 'Completed runs', icon: CheckCircle2 }
 }
 
 function formatAge(timestamp: number): string {
@@ -58,21 +59,21 @@ function RunCard({ session, onOpen }: { session: SessionSnapshot; onOpen: () => 
   return (
     <button
       type="button"
-      className={`branch-run-card branch-run-card--${session.status.state}`}
+      className={`board-run-card board-run-card--${session.status.state}`}
       onClick={onOpen}
       aria-label={`Open ${session.label}`}
     >
-      <span className="branch-run-card__marker"><StatusDot status={session.status} /></span>
-      <span className="branch-run-card__identity">
+      <span className="board-run-card__status"><StatusDot status={session.status} /></span>
+      <span className="board-run-card__identity">
         <strong>{session.label}</strong>
         <small>{session.agentId ? <><Bot size={11} /> {session.agentId}</> : <><SquareTerminal size={11} /> terminal</>}</small>
       </span>
-      <span className="branch-run-card__state">
-        <strong>{session.status.state}</strong>
-        <small>{session.status.detail ?? session.status.source}</small>
+      <span className="board-run-card__meta">
+        <em>{session.status.state}</em>
+        <time>{formatAge(session.updatedAt)}</time>
       </span>
-      <time>{formatAge(session.updatedAt)}</time>
-      <ArrowUpRight size={13} />
+      {session.status.detail ? <span className="board-run-card__detail">{session.status.detail}</span> : null}
+      <ArrowUpRight size={12} />
     </button>
   )
 }
@@ -81,15 +82,15 @@ export function WorkspaceBoard() {
   const config = useAppStore((state) => state.config)
   const sessions = useAppStore((state) => state.sessions)
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
-  const boardTool = useAppStore((state) => state.boardTool)
   const selectWorkspace = useAppStore((state) => state.selectWorkspace)
   const selectSession = useAppStore((state) => state.selectSession)
   const activateWorkspaceSelection = useAppStore((state) => state.activateWorkspaceSelection)
   const setWorkspaceTool = useAppStore((state) => state.setWorkspaceTool)
   const [query, setQuery] = useState('')
-  const [activity, setActivity] = useState<BranchActivityState | 'all'>('all')
+  const [column, setColumn] = useState<ProjectBoardColumn | 'all'>('all')
   const [binding, setBinding] = useState<BranchBindingFilter>('all')
   const [actionError, setActionError] = useState<string | null>(null)
+  const [discussionLane, setDiscussionLane] = useState<ProjectBranchLane | null>(null)
 
   const projects = useMemo(() => projectWorkspaces(config?.workspaces ?? []), [config?.workspaces])
   const project = projects.find((candidate) =>
@@ -102,9 +103,10 @@ export function WorkspaceBoard() {
 
   useEffect(() => {
     setQuery('')
-    setActivity('all')
+    setColumn('all')
     setBinding('all')
     setActionError(null)
+    setDiscussionLane(null)
   }, [project?.id])
 
   const lanes = useMemo(
@@ -114,22 +116,14 @@ export function WorkspaceBoard() {
     [project, sessions, snapshot]
   )
   const filteredLanes = useMemo(
-    () => filterProjectBranchLanes(lanes, query, activity, binding),
-    [activity, binding, lanes, query]
+    () => filterProjectBranchLanes(lanes, query, column, binding),
+    [binding, column, lanes, query]
   )
-  const inboxItems = useMemo(() => {
-    const normalized = query.trim().toLocaleLowerCase()
-    return buildProjectInbox(lanes).filter(
-      (item) =>
-        (!normalized || item.lane.searchText.includes(normalized)) &&
-        (binding === 'all' || (binding === 'bound') === Boolean(item.lane.branch.worktreePath))
-    )
-  }, [binding, lanes, query])
-  const hasLaneFilters = Boolean(query.trim() || activity !== 'all' || binding !== 'all')
+  const hasFilters = Boolean(query.trim() || column !== 'all' || binding !== 'all')
 
   function clearFilters(): void {
     setQuery('')
-    setActivity('all')
+    setColumn('all')
     setBinding('all')
   }
 
@@ -156,7 +150,7 @@ export function WorkspaceBoard() {
         <div className="board-state">
           <GitBranch size={22} />
           <strong>No project selected</strong>
-          <span>Add or select a Project before opening its Branch lanes.</span>
+          <span>Add or select a Project before opening its Branch board.</span>
         </div>
       </section>
     )
@@ -178,87 +172,95 @@ export function WorkspaceBoard() {
     )
   }
 
-  if (boardTool === 'inbox') {
-    return (
-      <section className="board board--inbox">
-        <header className="board__header">
-          <div><div className="eyebrow">Project inbox</div><h1>Attention inbox</h1><p>Waiting, blocked, disconnected, and failed sessions from this Project only.</p></div>
-          <span className="board__context-hint">{project.name} · {inboxItems.length} open</span>
-        </header>
-        <div className="board-toolbar board-toolbar--inbox">
-          <label className="board-search"><Search size={13} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search branch, worktree, agent, or detail" />{query ? <button title="Clear search" onClick={() => setQuery('')}><X size={11} /></button> : null}</label>
-          <label><span>Binding</span><select aria-label="Filter inbox by binding" value={binding} onChange={(event) => setBinding(event.target.value as BranchBindingFilter)}><option value="all">All branches</option><option value="bound">Worktrees</option><option value="unbound">Unbound</option></select></label>
-          <span className="board-filter-count">{inboxItems.length} items</span>
-          <button className="small-button" type="button" title="Refresh branches" onClick={() => void refresh()} disabled={loading}>{loading ? <LoaderCircle className="spin" size={12} /> : <RefreshCw size={12} />} Refresh</button>
-        </div>
-        {loadError ? <div className="board-inline-warning"><AlertTriangle size={13} /> {loadError}</div> : null}
-        {inboxItems.length > 0 ? (
-          <div className="board-inbox-list">
-            {inboxItems.map((item) => (
-              <button className={`board-inbox-item board-inbox-item--${item.session.status.state}`} type="button" key={item.id} onClick={() => selectSession(item.session.id)}>
-                <span className="board-inbox-item__status"><StatusDot status={item.session.status} /></span>
-                <span className="board-inbox-item__identity"><strong>{item.reason}</strong><small>{item.session.label}</small></span>
-                <span className="board-inbox-item__branch"><GitBranch size={12} /><strong>{item.lane.branch.name}</strong><small>{item.lane.branch.worktreePath ?? 'No worktree'}</small></span>
-                <span className="board-inbox-item__meta"><RadioTower size={11} /> {item.session.hostId === 'local' ? 'This Mac' : item.session.hostId}<time>{formatAge(item.session.updatedAt)}</time></span>
-                <ArrowUpRight size={14} />
-              </button>
-            ))}
-          </div>
-        ) : (
-          <div className="board-inbox-empty">
-            <span className="board-inbox-empty__icon"><CheckCircle2 size={22} /></span>
-            <strong>{query ? 'No matching attention items' : 'All caught up'}</strong>
-            <span>{query ? 'Change the search to inspect other Project items.' : 'No waiting, blocked, disconnected, or failed sessions need you right now.'}</span>
-            <em>Project clear</em>
-          </div>
-        )}
-      </section>
-    )
-  }
+  const columnCounts = Object.fromEntries(PROJECT_BOARD_COLUMNS.map((id) => [
+    id,
+    id === 'inbox'
+      ? filteredLanes.filter((lane) => lane.branch.worktreePath).length
+      : filteredLanes.reduce((total, lane) => total + lane.runsByColumn[id].length, 0)
+  ])) as Record<ProjectBoardColumn, number>
 
   return (
-    <section className="board board--branches">
+    <section className="board board--matrix">
       <header className="board__header">
-        <div><div className="eyebrow">Project board</div><h1>Branch lanes</h1><p>Each Git Branch owns one lane; Agents and Terminals appear as Runs on that lane.</p></div>
+        <div>
+          <div className="eyebrow">Project board</div>
+          <h1>Branch × status</h1>
+          <p>Branches run vertically. Agent progress moves horizontally within the same row.</p>
+        </div>
         <span className="board__context-hint">{project.name} · {lanes.length} branches</span>
       </header>
-      <div className="board-toolbar">
-        <label className="board-search"><Search size={13} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search branches, paths, agents, or terminals" />{query ? <button title="Clear search" onClick={() => setQuery('')}><X size={11} /></button> : null}</label>
-        <label><span>Activity</span><select aria-label="Filter by activity" value={activity} onChange={(event) => setActivity(event.target.value as BranchActivityState | 'all')}><option value="all">All activity</option>{ACTIVITY_FILTERS.map((item) => <option value={item.id} key={item.id}>{item.label}</option>)}</select></label>
+
+      <div className="board-toolbar board-toolbar--matrix">
+        <label className="board-search"><Search size={13} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search branches, paths, providers, or run details" />{query ? <button title="Clear search" onClick={() => setQuery('')}><X size={11} /></button> : null}</label>
+        <label><span>Status</span><select aria-label="Filter by board status" value={column} onChange={(event) => setColumn(event.target.value as ProjectBoardColumn | 'all')}><option value="all">All statuses</option>{PROJECT_BOARD_COLUMNS.map((id) => <option value={id} key={id}>{COLUMN_META[id].label}</option>)}</select></label>
         <label><span>Binding</span><select aria-label="Filter by binding" value={binding} onChange={(event) => setBinding(event.target.value as BranchBindingFilter)}><option value="all">All branches</option><option value="bound">Worktrees</option><option value="unbound">Unbound</option></select></label>
+        <span className="board-host-scope"><RadioTower size={11} /> {project.hostId === 'local' ? 'This Mac' : project.hostId}</span>
         <span className="board-filter-count">{filteredLanes.length} / {lanes.length}</span>
-        {hasLaneFilters ? <button className="small-button" onClick={clearFilters}><X size={11} /> Reset</button> : <button className="small-button" type="button" onClick={() => void refresh()} disabled={loading}>{loading ? <LoaderCircle className="spin" size={12} /> : <RefreshCw size={12} />} Refresh</button>}
+        {hasFilters ? <button className="small-button" onClick={clearFilters}><X size={11} /> Reset</button> : <button className="small-button" type="button" onClick={() => void refresh()} disabled={loading}>{loading ? <LoaderCircle className="spin" size={12} /> : <RefreshCw size={12} />} Refresh</button>}
       </div>
+
       {loadError ? <div className="board-inline-warning"><AlertTriangle size={13} /> {loadError}</div> : null}
       {actionError ? <div className="board-inline-warning"><AlertTriangle size={13} /> {actionError}</div> : null}
+
       {filteredLanes.length === 0 ? (
-        <div className="board-no-results"><Search size={18} /><strong>{hasLaneFilters ? 'No matching branches' : 'No local branches'}</strong><span>{hasLaneFilters ? 'Change or reset the Project filters.' : 'Create a branch with Git, then refresh the board.'}</span>{hasLaneFilters ? <button className="small-button" onClick={clearFilters}>Clear filters</button> : null}</div>
+        <div className="board-no-results"><Search size={18} /><strong>{hasFilters ? 'No matching branches' : 'No local branches'}</strong><span>{hasFilters ? 'Change or reset the Project filters.' : 'Create a branch with Git, then refresh the board.'}</span>{hasFilters ? <button className="small-button" onClick={clearFilters}>Clear filters</button> : null}</div>
       ) : (
-        <div className="branch-lanes">
-          {filteredLanes.map((lane) => (
-            <section className={`branch-lane branch-lane--${lane.activity}`} data-branch-lane={lane.branch.name} key={lane.branch.name}>
-              <header className="branch-lane__header">
-                <span className="branch-lane__glyph">{lane.branch.worktreePath ? <GitBranch size={15} /> : <Unlink size={15} />}</span>
-                <span className="branch-lane__identity"><strong>{lane.branch.name}</strong><small title={lane.branch.worktreePath ?? undefined}>{lane.branch.worktreePath ?? 'No worktree'}</small></span>
-                <span className={`branch-lane__activity branch-lane__activity--${lane.activity}`}><CircleDot size={11} /> {ACTIVITY_LABELS[lane.activity]}</span>
-                {lane.branch.isCurrent ? <em>Current</em> : null}
-                <button className="small-button" type="button" onClick={() => void openLane(lane)}>{lane.workspace ? 'Open workspace' : lane.branch.worktreePath ? 'Open worktree' : 'Open Branches'} <ArrowUpRight size={11} /></button>
-              </header>
-              <div className="branch-lane__track">
-                <span className="branch-lane__rail" aria-hidden />
-                {lane.sessions.map((session) => <RunCard key={session.id} session={session} onOpen={() => selectSession(session.id)} />)}
-                {lane.sessions.length === 0 ? (
-                  <div className="branch-lane__empty-run">
-                    <span>{lane.branch.worktreePath ? <SquareTerminal size={14} /> : <Unlink size={14} />}</span>
-                    <strong>{lane.branch.worktreePath ? 'No runs yet' : 'Branch has no worktree'}</strong>
-                    <small>{lane.branch.worktreePath ? 'Open this workspace to start a Terminal or Agent.' : 'Create a worktree from Workspace → Files + Branches.'}</small>
-                  </div>
-                ) : null}
+        <div className="board-matrix-scroll">
+          <div className="board-matrix" role="grid" aria-label="Branch by status board">
+            <div className="board-matrix__head" role="row">
+              <div className="board-matrix__corner" role="columnheader">
+                <GitBranch size={13} /> Branch / Worktree
               </div>
-            </section>
-          ))}
+              {PROJECT_BOARD_COLUMNS.map((id) => {
+                const meta = COLUMN_META[id]
+                const Icon = meta.icon
+                return (
+                  <div className={`board-column-head board-column-head--${id}`} role="columnheader" key={id}>
+                    <span><Icon size={13} /><strong>{meta.label}</strong></span>
+                    <small>{meta.description}</small>
+                    <em>{columnCounts[id]}</em>
+                  </div>
+                )
+              })}
+            </div>
+            {filteredLanes.map((lane) => (
+              <div className="board-matrix__row" role="row" data-branch-lane={lane.branch.name} key={lane.branch.name}>
+                <header className="board-branch-head" role="rowheader">
+                  <span className="board-branch-head__glyph">{lane.branch.worktreePath ? <GitBranch size={15} /> : <Unlink size={15} />}</span>
+                  <span className="board-branch-head__identity"><strong>{lane.branch.name}</strong><small title={lane.branch.worktreePath ?? undefined}>{lane.branch.worktreePath ?? 'No worktree'}</small></span>
+                  <span className="board-branch-head__meta">
+                    {lane.branch.isCurrent ? <em>Current</em> : null}
+                    <small>{lane.sessions.length} run{lane.sessions.length === 1 ? '' : 's'}</small>
+                  </span>
+                  <button className="icon-button" type="button" title={lane.workspace ? 'Open workspace' : lane.branch.worktreePath ? 'Open worktree' : 'Open Branches'} onClick={() => void openLane(lane)}><ArrowUpRight size={12} /></button>
+                </header>
+                {PROJECT_BOARD_COLUMNS.map((id) => (
+                  <div className={`board-cell board-cell--${id}`} role="gridcell" data-board-column={id} key={id}>
+                    {id === 'inbox' ? (
+                      <button className={`board-discussion-card ${lane.branch.worktreePath ? '' : 'board-discussion-card--unbound'}`} type="button" onClick={() => setDiscussionLane(lane)}>
+                        <span>{lane.branch.worktreePath ? <MessageSquarePlus size={15} /> : <Unlink size={15} />}</span>
+                        <strong>{lane.branch.worktreePath ? 'Start discussion' : 'Worktree required'}</strong>
+                        <small>{lane.branch.worktreePath ? `Launch an Agent on ${lane.branch.name}` : 'Create a worktree before launching an Agent'}</small>
+                      </button>
+                    ) : lane.runsByColumn[id].length > 0 ? (
+                      lane.runsByColumn[id].map((session) => <RunCard key={session.id} session={session} onOpen={() => selectSession(session.id)} />)
+                    ) : (
+                      <div className="board-cell__empty"><span>—</span><small>No {COLUMN_META[id].label.toLocaleLowerCase()} runs</small></div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
         </div>
       )}
+
+      <BoardDiscussionCanvas
+        lane={discussionLane}
+        anchor={anchor}
+        onClose={() => setDiscussionLane(null)}
+        onOpenBranches={(lane) => void openLane(lane)}
+      />
     </section>
   )
 }

@@ -5,9 +5,10 @@ import type {
   WorkspaceRecord
 } from '../src/shared/contracts.js'
 import {
+  PROJECT_BOARD_COLUMNS,
   buildProjectBranchLanes,
-  buildProjectInbox,
-  filterProjectBranchLanes
+  filterProjectBranchLanes,
+  sessionBoardColumn
 } from '../src/renderer/src/lib/project-board.js'
 
 const main: WorkspaceRecord = {
@@ -61,8 +62,17 @@ function session(overrides: Partial<SessionSnapshot> & Pick<SessionSnapshot, 'id
   } as SessionSnapshot
 }
 
-describe('Project Branch board projection', () => {
-  it('uses Git branches as lane identity and keeps Agent state as lane metadata', () => {
+describe('Project Branch × Status board projection', () => {
+  it('defines the horizontal columns explicitly and maps every Session state', () => {
+    expect(PROJECT_BOARD_COLUMNS).toEqual(['inbox', 'working', 'needs-you', 'done'])
+    expect(sessionBoardColumn(session({ id: 'starting', status: { state: 'starting', source: 'tmux', observedAt: 1 } }))).toBe('working')
+    expect(sessionBoardColumn(session({ id: 'working' }))).toBe('working')
+    expect(sessionBoardColumn(session({ id: 'waiting', status: { state: 'waiting', source: 'native-hook', observedAt: 1 } }))).toBe('needs-you')
+    expect(sessionBoardColumn(session({ id: 'done', status: { state: 'done', source: 'native-hook', observedAt: 1 } }))).toBe('done')
+    expect(sessionBoardColumn(session({ id: 'exited', status: { state: 'exited', source: 'tmux', observedAt: 1 } }))).toBe('done')
+  })
+
+  it('uses Branches as stable rows and groups Runs into status cells', () => {
     const lanes = buildProjectBranchLanes(snapshot, [main, feature], [
       session({ id: 'main-run' }),
       session({
@@ -82,25 +92,46 @@ describe('Project Branch board projection', () => {
       'feature/ui',
       'feature/unbound'
     ])
-    expect(lanes.find((lane) => lane.branch.name === 'feature/ui')).toMatchObject({
-      workspace: feature,
-      activity: 'attention'
-    })
-    expect(lanes.find((lane) => lane.branch.name === 'feature/unbound')).toMatchObject({
-      workspace: null,
-      activity: 'idle',
-      sessions: []
-    })
+    expect(lanes.find((lane) => lane.branch.name === 'main')?.runsByColumn.working.map((run) => run.id)).toEqual(['main-run'])
+    expect(lanes.find((lane) => lane.branch.name === 'feature/ui')).toMatchObject({ workspace: feature })
+    expect(lanes.find((lane) => lane.branch.name === 'feature/ui')?.runsByColumn['needs-you'].map((run) => run.id)).toEqual(['feature-run'])
+    expect(lanes.find((lane) => lane.branch.name === 'feature/unbound')).toMatchObject({ workspace: null, sessions: [] })
   })
 
-  it('does not leak sessions from another Project with a different Workspace path', () => {
+  it('moves a status update horizontally without changing its Branch row', () => {
+    const working = buildProjectBranchLanes(snapshot, [main, feature], [
+      session({ id: 'feature-run', workspacePath: feature.path })
+    ])
+    const waiting = buildProjectBranchLanes(snapshot, [main, feature], [
+      session({
+        id: 'feature-run',
+        workspacePath: feature.path,
+        status: { state: 'blocked', source: 'native-hook', observedAt: 300 }
+      })
+    ])
+
+    expect(working[1]?.branch.name).toBe('feature/ui')
+    expect(working[1]?.runsByColumn.working.map((run) => run.id)).toEqual(['feature-run'])
+    expect(waiting[1]?.branch.name).toBe('feature/ui')
+    expect(waiting[1]?.runsByColumn['needs-you'].map((run) => run.id)).toEqual(['feature-run'])
+  })
+
+  it('sorts each status cell by the most recently updated Run', () => {
+    const lanes = buildProjectBranchLanes(snapshot, [main, feature], [
+      session({ id: 'older', updatedAt: 200 }),
+      session({ id: 'newer', updatedAt: 400 })
+    ])
+    expect(lanes[0]?.runsByColumn.working.map((run) => run.id)).toEqual(['newer', 'older'])
+  })
+
+  it('does not leak Sessions from another Project path', () => {
     const lanes = buildProjectBranchLanes(snapshot, [main, feature], [
       session({ id: 'other-project', workspacePath: '/other-repo' })
     ])
     expect(lanes.every((lane) => lane.sessions.length === 0)).toBe(true)
   })
 
-  it('filters only the projected Project lanes by query, activity, and binding', () => {
+  it('filters Project rows by query, status column, and Worktree binding', () => {
     const lanes = buildProjectBranchLanes(snapshot, [main, feature], [
       session({
         id: 'feature-run',
@@ -109,26 +140,8 @@ describe('Project Branch board projection', () => {
       })
     ])
     expect(filterProjectBranchLanes(lanes, 'feature', 'all', 'all')).toHaveLength(2)
-    expect(filterProjectBranchLanes(lanes, '', 'attention', 'bound').map((lane) => lane.branch.name)).toEqual(['feature/ui'])
+    expect(filterProjectBranchLanes(lanes, '', 'needs-you', 'bound').map((lane) => lane.branch.name)).toEqual(['feature/ui'])
+    expect(filterProjectBranchLanes(lanes, '', 'inbox', 'all').map((lane) => lane.branch.name)).toEqual(['main', 'feature/ui'])
     expect(filterProjectBranchLanes(lanes, '', 'all', 'unbound').map((lane) => lane.branch.name)).toEqual(['feature/unbound'])
-  })
-
-  it('builds Inbox only from real attention Session states in update order', () => {
-    const lanes = buildProjectBranchLanes(snapshot, [main, feature], [
-      session({ id: 'working', updatedAt: 400 }),
-      session({
-        id: 'blocked',
-        updatedAt: 300,
-        status: { state: 'blocked', source: 'native-hook', observedAt: 300 }
-      }),
-      session({
-        id: 'disconnected',
-        workspacePath: feature.path,
-        updatedAt: 500,
-        status: { state: 'disconnected', source: 'tmux', observedAt: 500 }
-      })
-    ])
-
-    expect(buildProjectInbox(lanes).map((item) => item.id)).toEqual(['disconnected', 'blocked'])
   })
 })

@@ -45,7 +45,6 @@ import {
 import {
   TOOL_DOCK_DEFAULT_WIDTH,
   clampToolDockWidth,
-  type BoardTool,
   type LauncherView,
   type WorkspaceTool
 } from './lib/surface-tool-dock'
@@ -95,7 +94,6 @@ type AppState = {
   mainSurface: MainSurface
   toolsOpen: boolean
   workspaceTool: WorkspaceTool
-  boardTool: BoardTool
   toolDockWidth: number
   loading: boolean
   error: string | null
@@ -126,7 +124,6 @@ type AppState = {
   setViewMode(sessionId: string, mode: ViewMode): void
   setMainSurface(surface: MainSurface): void
   setWorkspaceTool(tool: WorkspaceTool): void
-  setBoardTool(tool: BoardTool): void
   toggleTools(): void
   setToolDockWidth(width: number): void
   detectAgents(hostId: string): Promise<void>
@@ -137,6 +134,7 @@ type AppState = {
   deletePath(path: string): Promise<void>
   updateDocument(tabId: string, content: string): void
   saveDocument(tabId: string): Promise<void>
+  launchBoardAgent(workspaceId: string, agentId: string, prompt: string): Promise<void>
   launchAgent(agentId: string, prompt: string, paneId: string, launcherTabId?: string): Promise<void>
   launchTerminal(paneId: string, launcherTabId?: string): Promise<void>
   createBrowser(paneId: string, launcherTabId?: string): Promise<void>
@@ -185,7 +183,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   mainSurface: 'workbench',
   toolsOpen: true,
   workspaceTool: 'files-branches',
-  boardTool: 'branch-lanes',
   toolDockWidth: TOOL_DOCK_DEFAULT_WIDTH,
   loading: true,
   error: null,
@@ -399,9 +396,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   setWorkspaceTool(workspaceTool) {
     set({ workspaceTool, toolsOpen: true, mainSurface: 'workbench' })
   },
-  setBoardTool(boardTool) {
-    set({ boardTool, toolsOpen: true, mainSurface: 'board' })
-  },
   toggleTools() {
     set((state) => ({ toolsOpen: !state.toolsOpen }))
   },
@@ -542,6 +536,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     } catch (error) {
       get().reportError(error)
     }
+  },
+  async launchBoardAgent(workspaceId, agentId, prompt) {
+    await get().selectWorkspace(workspaceId)
+    set({ mainSurface: 'board' })
+    const layout = get().layouts[workspaceId]
+    if (!layout) throw new Error('Workspace layout is unavailable')
+    await get().launchAgent(agentId, prompt, layout.activeGroupId)
   },
   async launchAgent(agentId, prompt, paneId, launcherTabId) {
     const state = get()

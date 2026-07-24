@@ -4,7 +4,8 @@ vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
 })
 
-import type { AppConfig, WorkspaceRecord } from '../src/shared/contracts.js'
+import type { AppConfig, SessionSnapshot, WorkspaceRecord } from '../src/shared/contracts.js'
+import { api } from '../src/renderer/src/lib/api.js'
 import { createWorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.js'
 import type { FileWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
 import { useAppStore } from '../src/renderer/src/store.js'
@@ -12,6 +13,7 @@ import { useAppStore } from '../src/renderer/src/store.js'
 const initialState = useAppStore.getState()
 
 afterEach(() => {
+  vi.restoreAllMocks()
   useAppStore.setState(initialState, true)
 })
 
@@ -87,11 +89,10 @@ describe('selected worktree workspace context', () => {
     expect(withLauncher.layouts[main.id]).toBe(oldLayout)
   })
 
-  it('shares tool dock open and width state while preserving each Surface selection', () => {
+  it('shares tool dock open and width while Workspace keeps its own tool selection', () => {
     useAppStore.setState({
       toolsOpen: true,
       workspaceTool: 'files-branches',
-      boardTool: 'branch-lanes',
       toolDockWidth: 300,
       mainSurface: 'workbench'
     })
@@ -100,12 +101,10 @@ describe('selected worktree workspace context', () => {
     store.setWorkspaceTool('terminal-shortcuts')
     store.setToolDockWidth(378)
     store.setMainSurface('board')
-    store.setBoardTool('inbox')
 
     expect(useAppStore.getState()).toMatchObject({
       toolsOpen: true,
       workspaceTool: 'terminal-shortcuts',
-      boardTool: 'inbox',
       toolDockWidth: 378,
       mainSurface: 'board'
     })
@@ -114,7 +113,6 @@ describe('selected worktree workspace context', () => {
     expect(useAppStore.getState()).toMatchObject({
       toolsOpen: true,
       workspaceTool: 'terminal-shortcuts',
-      boardTool: 'inbox',
       toolDockWidth: 378,
       mainSurface: 'workbench'
     })
@@ -195,6 +193,78 @@ describe('universal new tab transitions', () => {
       ? state.sessions.find((item) => item.id === agentTab.sessionId)
       : null
     expect(session).toMatchObject({ kind: 'agent', agentId: 'codex', workspacePath: workspace.path })
+  })
+
+  it('starts a Board discussion in the selected Branch workspace and keeps Board visible', async () => {
+    const { workspace: mainWorkspace } = prepareUniversalTab()
+    const featureWorkspace: WorkspaceRecord = {
+      id: 'feature-board',
+      name: 'feature/board',
+      hostId: 'local',
+      path: '/repo.worktrees/feature-board',
+      kind: 'worktree',
+      repoPath: mainWorkspace.path,
+      branch: 'feature/board'
+    }
+    useAppStore.setState((state) => ({
+      config: { ...state.config!, workspaces: [mainWorkspace, featureWorkspace] },
+      mainSurface: 'board'
+    }))
+    let launched: SessionSnapshot | null = null
+    const launch = vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async (input) => {
+      launched = {
+        id: input.sessionId!,
+        tmuxSession: `agentmux-${input.sessionId}`,
+        kind: 'agent',
+        agentId: 'codex',
+        hostId: 'local',
+        workspacePath: featureWorkspace.path,
+        label: 'Codex · feature/board',
+        createdAt: 10,
+        updatedAt: 10,
+        processState: 'running',
+        status: { state: 'working', source: 'native-hook', observedAt: 10 },
+        terminalSnapshot: ''
+      }
+      return launched
+    })
+
+    await useAppStore.getState().launchBoardAgent(featureWorkspace.id, 'codex', 'Review the board')
+
+    const state = useAppStore.getState()
+    expect(launch).toHaveBeenCalledWith(expect.objectContaining({
+      agentId: 'codex',
+      prompt: 'Review the board',
+      workspacePath: featureWorkspace.path
+    }))
+    expect(state.activeWorkspaceId).toBe(featureWorkspace.id)
+    expect(state.mainSurface).toBe('board')
+    expect(state.sessions).toContainEqual(launched)
+    expect(Object.values(state.tabs)).toContainEqual(expect.objectContaining({
+      kind: 'agent',
+      phase: 'attached',
+      workspaceId: featureWorkspace.id,
+      sessionId: launched!.id
+    }))
+  })
+
+  it('keeps Board visible and leaves only the existing Launcher recovery path when discussion launch fails', async () => {
+    const { workspace } = prepareUniversalTab()
+    useAppStore.setState({ mainSurface: 'board', sessions: [], error: null })
+    vi.spyOn(api.sessions, 'launchAgent').mockRejectedValue(new Error('provider failed'))
+
+    await expect(
+      useAppStore.getState().launchBoardAgent(workspace.id, 'codex', 'Discuss failure')
+    ).rejects.toThrow('provider failed')
+
+    const state = useAppStore.getState()
+    expect(state.mainSurface).toBe('board')
+    expect(state.sessions).toEqual([])
+    expect(Object.values(state.tabs)).toContainEqual(expect.objectContaining({
+      kind: 'launcher',
+      view: 'agent',
+      workspaceId: workspace.id
+    }))
   })
 
   it('replaces and closes the same tab with a Main-owned browser resource', async () => {

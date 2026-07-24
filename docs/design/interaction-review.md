@@ -5,7 +5,7 @@
 
 ## 总结
 
-AgentMux 应保留小而清晰的 tmux Provider core 和自己的终端视觉气质，但桌面端要从固定三栏演示布局切换为更成熟的三层产品模型：最左侧 Project/Workspace Rail 只负责切换工程上下文；右侧主区 Titlebar 的最左入口是共享 Tools，位于 Workspace/Board 标题之前；Tools 在 Workspace 与 Board 都存在，只切换各自的子 Tab。Workspace 的 Files + Branches 以 Selected Worktree 驱动文件树根目录，Board 的 Branch Lanes / Inbox 使用 Project Scope。Workspace 拥有递归 Pane 布局，Pane 拥有通用 Tab，文件、终端、Agent、Browser 和可观察 Activity 都是 Tab 内容；Host、Agent 和恢复状态显示在它们所影响的对象旁边。
+AgentMux 应保留小而清晰的 tmux Provider core 和自己的终端视觉气质，但桌面端要从固定三栏演示布局切换为更成熟的三层产品模型：最左侧 Project/Workspace Rail 只负责切换工程上下文；右侧主区 Titlebar 的最左入口是共享 Tools，位于 Workspace/Board 标题之前；Tools 在 Workspace 与 Board 都存在，但内容服从各自 Surface。Workspace 的 Files + Branches 以 Selected Worktree 驱动文件树根目录；Board 使用 Project Scope 的二维 `Branch × Status` 矩阵，Inbox 是矩阵第一列而不是 Tools 独立页。Workspace 拥有递归 Pane 布局，Pane 拥有通用 Tab，文件、终端、Agent、Browser 和可观察 Activity 都是 Tab 内容；Host、Agent 和恢复状态显示在它们所影响的对象旁边。
 
 这是内容模型、交互模式与正确实现的定向移植，不要求视觉临摹。对编辑器、文件树、Terminal/tmux 状态、Pane 拖拽和可访问对话框这类成熟能力，优先直接移植 a mature workbench 源码或采用 a mature workbench 已验证的维护中依赖，再按 AgentMux 的 Core 边界裁剪和重新组织；不另写功能缩水的替代实现。a mature workbench 的 daemon/relay、账户、移动端、WSL/runtime environment 图、第三方 Issue 集成和兼容历史不在范围内。
 
@@ -16,7 +16,7 @@ AgentMux 应保留小而清晰的 tmux Provider core 和自己的终端视觉气
 | 应用骨架 | Workspace 侧栏 + 固定 Files / Agent / Editor 三栏 | 工程 Rail、上下联动的文件/分支面板、用户可安排的 Tab Group 工作区 | 删除固定三栏；采用窄 Project/Workspace Rail、Warp 式大二级面板和 Workspace/Board 主区 |
 | Workspace | 名称和可展开的 Session 列表 | 卡片同时表达分支/路径、Host、Activity、内联 Agent 和注意状态 | 直接吸收信息层级；不引入 Issue/PR 元数据 |
 | Explorer / Branches | 文件树与 Worktree 入口彼此孤立，选择 Branch 不改变文件上下文 | a mature workbench 的工作分区以 Worktree 作为可操作上下文 | 二级面板上半展示 Explorer、下半展示 Branches；Branch 显示 Worktree 绑定与路径，选择已绑定 Branch 会联动文件树 |
-| 看板 | 四个按 Agent 状态派生的泳道，无筛选 | 可搜索/筛选的状态泳道，并复用侧栏 Workspace 卡片内容 | 加搜索、Host/状态筛选、数量和统一卡片语义 |
+| 看板 | Branch 各自一条横向 Run Track，Inbox 是另一个 Tools 页面 | a mature workbench 的稳定状态列、卡片层级、筛选与横向溢出 | Adapt 为二维矩阵：Branch/Worktree 是纵向行轴，Inbox/Working/Needs You/Done 是横向列轴；卡片由 `(branchId, status)` 落位 |
 | 创建 Workspace | 文件夹选择与 Worktree 表单分离 | Project → Run on → Name/Create from → Agent → Advanced | 合并为一条流程；保留明确 Git 确认和当前必要字段 |
 | Tab | Session Tab 加一个偶发的文档 Tab，`+` 只显示 Agent 启动页 | 通用 Tab、每 Pane 独立 Tab Strip、创建入口、拖拽排序/移动/分屏 | `+` 立即创建 Tab；Tab 内先选择 Terminal、Agent 或 Browser，再进入对应内容 |
 | Pane 布局 | `react-resizable-panels` 只调整三个固定区域 | 递归 Split Tree、持久 Ratio、Focused Pane、四向 Drop Zone | 采用同一模型和手势；使用成熟的 `@dnd-kit` 与现有 Resize 能力 |
@@ -40,7 +40,7 @@ AgentMux 应保留小而清晰的 tmux Provider core 和自己的终端视觉气
 3. Branches 同时列出已绑定 Worktree 与未绑定 Worktree 的分支。Branch 行显示绑定状态、Worktree Path 和当前/脏状态等真实 Git 证据，不从 UI 配置重复推导 Git 真相。
 4. 选择已有 Worktree 的 Branch，会原子更新 Selected Worktree、Explorer Root、Breadcrumb 和后续新 Tab 的 Workspace 上下文。已经打开的 File/Agent/Terminal Tab 保留原 Workspace 绑定，不被静默换根。
 5. 选择未绑定 Worktree 的 Branch 不执行隐式 checkout，也不把当前文件树伪装成该分支；界面提供 Create Worktree，只有 Git 成功并注册 Workspace 后才切换。
-6. 右侧主区在 Workspace 与 Board 间切换；Board 使用同一份 Project/Workspace、Branch、Host 和 Agent 状态投影。
+6. 右侧主区在 Workspace 与 Board 间切换；Board 使用同一份 Project/Workspace、Branch、Host 和 Agent 状态投影。每个 Branch/Worktree 是稳定行，Run 状态只在该行内横向移动。
 7. 点击 Focused Pane 的 `+` 会立即创建一个新 Tab。初始 Tab 提供 Terminal、Agent、Browser 选择；选定后在同一个 Tab 内替换创建面板，不再额外创建 Tab。
 8. Focused Pane 决定文件、新 Tab 和 Agent 启动页打开到哪里。Tab 在同一 Strip 内拖拽会排序，拖到另一个 Pane会移动；悬停 Pane 边缘时显示“新建分屏”方向目标，Drop 后用递归 Split 替换原 Leaf。
 9. 关闭最后一个 Tab 会保留明确的创建入口；Secondary Pane 没有 Tab 后折叠对应 Split；关闭运行中的 Terminal/Agent 前先确认是否停止 Session。
@@ -59,7 +59,7 @@ AgentMux 应保留小而清晰的 tmux Provider core 和自己的终端视觉气
 - Pane-local Terminal Recovery Banner、运行会话关闭确认与 Host-aware 状态文案
 - Settings Sidebar + Pane 组合、Installed / Not installed Agent 分组
 - Host-aware 状态文案和上下文内 Retry/Test
-- 看板筛选和 Workspace Card 元数据层级
+- 看板的固定状态列、横向溢出、筛选和 Workspace Card 元数据层级；Branch 行轴与 Inbox Canvas 是 AgentMux 的适配语义
 
 成熟基础能力继续由维护中的库负责：Monaco 提供编辑器，xterm.js 提供终端渲染，tmux 提供持久进程，`@dnd-kit` 提供跨 Pane 拖拽，Radix Dialog 提供焦点管理与可访问确认。AgentMux 只实现这些能力之间的产品所有权和 Core API 接线。
 
@@ -113,12 +113,12 @@ xterm.js 与 Monaco 继续拥有 Canvas/Text 渲染，不另写像素缩放层�
 
 ### 3. Tools 属于右侧主区，Workspace 与 Board 共享容器
 
-Tools 不是 Project Rail 的内容，也不是 Topbar 右侧的一项普通 Action。入口固定在右侧主区最左边、Workspace/Board 标题之前；它拥有可收起的高容量二级 Dock。无论当前是 Workspace 还是 Board，Tools 都存在，只切换 Surface-specific 子 Tab：
+Tools 不是 Project Rail 的内容，也不是 Topbar 右侧的一项普通 Action。入口固定在右侧主区最左边、Workspace/Board 标题之前；它拥有可收起的高容量二级 Dock。无论当前是 Workspace 还是 Board，Tools 都存在，但内容服从 Surface：
 
 - Workspace：Files + Branches、Browser Favorites、Terminal Shortcuts
-- Board：Branch Lanes、Inbox
+- Board：Branch Board 的 Project Scope、状态图例和统计；Inbox 属于主矩阵第一列
 
-Dock 支持整体收起／展开，并记住宽度以及 Workspace/Board 各自的上次子 Tab。Files + Branches 保持上下联动；Browser Favorites 和 Terminal Shortcuts 只路由现有 Browser/Terminal Universal Tab，不另建进程所有权、Session 生命周期或状态真相。Agent Launch 不再属于 Tools，继续由 Pane 的 `+` / New Tab 创建器负责。这个列表是显式的一方 UI 能力，不引入插件发现、市场、脚本运行时或通用扩展框架。
+Dock 支持整体收起／展开并共享宽度；Workspace 记住上次工具，Board 不保留只有一个选项的伪选择状态。Files + Branches 保持上下联动；Browser Favorites 和 Terminal Shortcuts 只路由现有 Browser/Terminal Universal Tab，不另建进程所有权、Session 生命周期或状态真相。普通 Agent Launch 继续由 Pane 的 `+` / New Tab 创建器负责；Board Inbox 只作为带 Branch 上下文的第二个真实 Launch 入口。这个列表是显式的一方 UI 能力，不引入插件发现、市场、脚本运行时或通用扩展框架。
 
 ### 3.1 Explorer / Editor Copy、Adapt、Omit Manifest
 
@@ -146,18 +146,22 @@ Monaco 继续负责文本布局、DPR、tokenization 和编辑行为；AgentMux 
 
 2026-08-10 注册真相复审补充：Monaco 0.56 未注册 `notebook`、`mermaid`、`makefile`、`cmake`、`erlang`、`haskell`、`csv`、`tsv`。这些映射已删除并回落 `plaintext`；`.ipynb` 作为实际 JSON 源文件使用内置 `json`，`.mdx` 使用内置 `mdx`。启动时会把 detector 输出全集与 `monaco.languages.getLanguages()` 比对，测试则从当前安装包的 `editor.main.js` contribution 入口推导内置注册集合，并加入四个 AgentMux 明确注册 ID，避免再用手写字符串清单自证。
 
-### 4. Board 是项目全局的 Branch / Worktree 泳道
+### 4. Board 是二维 Branch × Status 矩阵
 
-用户口述的 “broad” 按现有产品名解释为 `Board`。Board 不应继续沿用 Agent 状态四泳道，也不应被 Workspace 的 Files + Branches 包围；它是 Project 全局视图，泳道身份由 Branch／Worktree 决定，Agent 状态退回卡片和 Run 的元数据。Board 仍保留共享 Tools Dock，但子 Tab 改为 Branch Lanes / Inbox；这两项都使用 Project Scope，不泄漏 Workspace 局部文件工具。
+用户口述的 “broad” 按现有产品名解释为 `Board`。a mature workbench 的 `AgentKanbanBoard` 已验证固定状态列、列内卡片排序、搜索／筛选、独立滚动和点击卡片打开 Terminal；AgentMux 直接迁移这些空间与卡片层级，但不照搬 a mature workbench 以 Agent 状态作为唯一分组的对象模型。
 
-“像音乐游戏”是一条构图隐喻：用有节奏的平行泳道、清晰落点和横向进展感表达不同 Branch 上正在运行的工作，而不是加入积分、皮肤或无关动效。进入 Board 时保留同一个 Tool 容器并恢复 Board 子 Tab；回到 Workspace 时恢复 Workspace 子 Tab与共享宽度。
+AgentMux 的纵向泳道身份由 Project 下的 Branch／Worktree 决定，每个 Branch 视觉上占一行；横向固定为 Inbox、Working、Needs You、Done 四列。Inbox 是创建入口，不伪造 Session；真实 Run 由 `(branchId, status)` 共同落位，状态变化是在同一 Branch 行内横向移动，不能跳到别的 Branch。映射保持穷尽且简单：`starting/running/working → Working`、`waiting/blocked/disconnected/error → Needs You`、`done/exited → Done`。
+
+Inbox 是 Board 第一列，不再是 Tools 的独立子 Tab。每个 Branch 的空 Inbox 单元都提供 Start discussion；点击它或已有 Inbox Run 会进入携带 Branch/Workspace 的 Discussion Canvas。Canvas 只选择讨论主题与现有 Provider，提交后通过已有 Store → Typed IPC → Core/tmux Launch 创建真实 Session；成功 Run 自动出现在该 Branch 对应状态格，失败沿现有 Launcher 事务恢复，不制造 Mock 卡片或第二套任务数据。
+
+“像音乐游戏”只保留平行泳道、清晰落点和横向进展感，不加入积分、皮肤或无关动效。Board 继续使用标题前的共享 Tools Dock，但 Dock 只表达 Project Branch Scope 与矩阵图例；Inbox 的创建和处理留在矩阵本体。横向滚动发生在矩阵容器，纵向滚动浏览 Branch，Branch 标签和状态列头在滚动时保持可辨认。
 
 ### 追加验收边界
 
 - a mature workbench 视觉语言必须有 Reference Provenance、Surface／Density 规则和并排截图证据，不能再以“风格类似”代替验证。
 - Explorer／Editor 必须有 a mature workbench Source Manifest、集中式语言识别与文件图标测试，以及目录点击、键盘导航、选择、刷新和文件变更的行为矩阵。
-- Tools 入口必须位于右侧主区最左侧、标题之前；Workspace/Board 共用容器但拥有不同子 Tab。Browser/Terminal 工具只能路由 Universal Tab，不得形成第二套进程或插件架构。
-- Board 截图与交互证据必须证明 Branch／Worktree 泳道、Inbox、Surface-specific Tool Tab 恢复和项目全局语义；Agent Status 泳道应被删除。
+- Tools 入口必须位于右侧主区最左侧、标题之前；Workspace/Board 共用容器但拥有不同内容。Browser/Terminal 工具只能路由 Universal Tab，不得形成第二套进程或插件架构；Inbox 不得重复出现在 Board Tools。
+- Board 截图与交互证据必须证明 Branch／Worktree 行轴、四个状态列、Run 在同一 Branch 内横向迁移、Inbox Canvas 和项目全局语义；仅按 Agent 状态分列或仅按 Branch 横向串卡片都不通过。
 - Production Rendered Proof 必须同时记录 `devicePixelRatio`、Terminal/Monaco 默认字号与关键文本物理像素，不能用极小字号换取“密度”。
 - 新一轮最终验收继续要求 `pnpm check`、Production Electron 干净配置启动、目标窗口截图、无 Renderer Error／严重 Overflow，并诚实记录残余差距。
 
@@ -217,3 +221,11 @@ T-022 不按文件行数机械拆分，也不引入第二个 Store。拆分后�
 | 工具、检测与宿主交互 | `store.ts` | Zustand 组合、跨资源编排和公共 `useAppStore` |
 
 `store.ts` 从本轮开始前的 965 行降到约 700 行；这不是验收本身，真正的验收是 Session removed 会同时清理 Session、Activity、View Mode、Tab 与 Layout，Browser close 和 File Mutation 也只经过各自一个纯转换 owner。启动中的 Agent/Terminal Tab 使用必填 `phase: launching | attached`：Core 启动回滚时保留 launching Tab 交给 launch owner 恢复 Launcher，已附着 Session 的 removed 才由 Session owner 清理；用户主动关闭的 launching Tab 不会被 catch 复活。
+
+## 2026-08-10 内存与资源回收追加要求
+
+当前 Production Electron 在完成 Editor、Terminal、Browser 与 Board 交互后，一次起始观测为 Main 约 223 MiB、主 Renderer 约 243 MiB、Browser Renderer 约 98 MiB、GPU 约 96 MiB、Network Utility 约 52 MiB RSS。Chromium 多进程包含共享页，不能把这些 RSS 直接相加成“应用总内存”；单个时点也不足以证明泄漏。
+
+后续工作必须先用同一 Production Build、隔离 user-data、固定窗口和稳定等待点建立可重复基线，分别测量冷启动、Workspace/File Tree、Monaco Editor、Terminal/tmux、Browser WebContentsView 及关闭后回收。重复开启/关闭循环不只看 RSS，还要核对 Browser WebContents/Process、Core Session、tmux Session、Monaco Model、Document Cache、Watcher 和 Event Subscription 的真实数量。
+
+只优化有证据的长驻 owner 或未回收资源；先检查 Electron、Monaco、xterm 和当前项目依赖的生命周期 API。不为了数字强制 GC、卸载用户仍在使用的 Surface，也不新建全局 Cache 层、性能框架、兼容路径或一组无证据的配置开关。优化后必须用同一场景复测，并保持完整功能回归通过。
