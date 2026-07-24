@@ -2,19 +2,19 @@
 
 AgentMux is a typed tmux runtime for CLI coding agents, plus an Electron workbench that proves the runtime through real terminal, activity, editor, workspace, and Git worktree flows.
 
-It currently supports Codex, Claude, Hermes, and Pi on the local machine or a configured SSH host. tmux owns the persistent PTY and process. `@agentmux/core` owns provider command plans, session identity, lifecycle observation, and hook normalization. The desktop is a consumer of that package rather than a second agent runtime.
+It currently supports Codex, Claude, TraeX, Hermes, and Pi on the local machine or a configured SSH host. tmux owns the persistent PTY and process. `@agentmux/core` owns provider command plans, session identity, lifecycle observation, and hook normalization. The desktop is a consumer of that package rather than a second agent runtime.
 
 ## What works
 
 - Launch, discover, capture, resize, send input to, interrupt, and stop package-owned tmux sessions.
 - Use one `ExecutionHost` contract for local commands and system-SSH commands.
-- Build deterministic launch plans for Codex, Claude, Hermes, and Pi.
+- Build deterministic launch plans for Codex, Claude, TraeX, Hermes, and Pi.
 - Receive authenticated native-hook events and keep their provenance separate from tmux liveness and terminal output.
 - View one session as either a raw xterm terminal or an observable activity conversation.
 - Compose multiline prompts and insert the active file as an `@path` reference.
 - Browse, edit, and save files inside a root-confined local or remote workspace.
 - Use session tabs and workspace-specific persistent resizable splits.
-- Navigate workspaces through a sidebar or an agent-state board.
+- Navigate workspaces through a sidebar or a two-dimensional Branch × Status board; start a real Agent discussion from each Branch Inbox.
 - Explicitly create and register a local or SSH Git worktree; registration happens only after Git succeeds.
 
 The activity view shows observable prompts, assistant messages, tool use, permissions, and lifecycle events. It does not expose or claim to expose private chain-of-thought.
@@ -162,11 +162,11 @@ AgentMux stores host selectors and an optional identity-file path. It never copi
 
 ### Create a worktree
 
-1. Choose **Worktree** in the top bar, the worktree icon in the sidebar, or **New worktree** on the board.
-2. Select the local or SSH execution host.
-3. Enter repository path, new worktree path, new branch, and base reference.
-4. Check the explicit Git confirmation.
-5. Choose **Create & register**.
+1. Open **Workspace → Files + Branches**, or choose an unbound Branch Inbox on the Board and select **Open Branches**.
+2. Select an unbound Branch and choose **Create worktree**.
+3. Review or edit the suggested host-scoped worktree path.
+4. Confirm the explicit Git operation.
+5. Choose **Create worktree**; registration and Workspace selection occur only after Git succeeds.
 
 The main process runs this shape through an argument array:
 
