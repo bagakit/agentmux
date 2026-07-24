@@ -69,7 +69,7 @@ Agent Tab 保留 Provider Icon、Session Name 和无文字 Status Dot，Close �
 状态文字不在下一行重复。
 
 Session 顶部 `28px` 信息带改为 Session Name、短 Session ID、Started、Active、Recent 和 Stop。
-Name、ID、Started、Active 与 Recent 都是可点击复制的紧凑按钮：显示值继续服务高频扫读，ID 复制完整值，时间复制无损 ISO 值，并提供短暂的 Copied 状态。Active 取 Runtime `updatedAt` 与结构化 Activity
+Name、ID、Started、Active 与 Recent 都是可点击复制的紧凑按钮：显示值继续服务高频扫读，ID 复制完整值，时间复制无损 ISO 值；hover 只用虚线下划线提示可操作，点击后在字段下方短暂显示 `Copied` tooltip，不使用系统 Copy 光标／复制图标，也不替换字段标签。Active 取 Runtime `updatedAt` 与结构化 Activity
 的最大时间；Terminal Output、Agent Activity 和 Permission 都会推进同一 Last Activity Truth。
 Recent 只投影最新的 User/Assistant 结构化消息，不解析 PTY 文本、不把 Tool Event 冒充消息；没有
 可靠消息时显示 `No messages yet`，Raw Terminal 则显示累计 Output Bytes。常规单 Pane 必须完整
@@ -116,7 +116,7 @@ listener，正常阶段只由容器尺寸变化驱动。这个尺寸 owner 只�
 
 1. 选择 Project/Workspace 会恢复其工作分区、Pane Tree 和上一次 Focused Pane；Project/Workspace Rail 不承载完整文件树或 Branch 列表。
 2. Warp 式二级面板上下分栏：上半 Explorer，下半 Branches；分隔线可调整高度，任一分区都不能把另一分区挤到不可操作。
-3. Branches 同时列出已绑定 Worktree 与未绑定 Worktree 的分支。Branch 行显示绑定状态、Worktree Path 和当前/脏状态等真实 Git 证据，不从 UI 配置重复推导 Git 真相。
+3. Branches 同时列出已绑定 Worktree 与未绑定 Worktree 的分支。Branch 行显示绑定状态、Worktree Path 和当前/脏状态等真实 Git 证据，不从 UI 配置重复推导 Git 真相；同时按 `hostId + worktreePath` 从全局 Session Snapshot 投影仍在运行的 Agent，以现有 Provider 图标和同类数量紧凑显示。Terminal、历史或已退出 Session 不算作运行中 Agent，Branches 不建立第二份 Session registry。
 4. 选择已有 Worktree 的 Branch，会原子更新 Selected Worktree、Explorer Root、Breadcrumb 和后续新 Tab 的 Workspace 上下文。已经打开的 File/Agent/Terminal Tab 保留原 Workspace 绑定，不被静默换根。
 5. 选择未绑定 Worktree 的 Branch 不执行隐式 checkout，也不把当前文件树伪装成该分支；界面提供 Create Worktree，只有 Git 成功并注册 Workspace 后才切换。
 6. 右侧主区在 Workspace 与 Board 间切换；Board 使用同一份 Project/Workspace、Branch、Host 和 Agent 状态投影。每个 Branch/Worktree 是稳定行，Run 状态只在该行内横向移动。
