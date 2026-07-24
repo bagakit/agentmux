@@ -20,13 +20,13 @@ export function SessionPane({ sessionId }: { sessionId: string }) {
       <div className="pane-state pane-state--error">
         <AlertTriangle size={20} />
         <strong>Session is no longer available</strong>
-        <span>Waiting for the core runtime to publish this tmux session.</span>
+        <span>Waiting for the Core client to publish this daemon session.</span>
       </div>
     )
   }
 
   const disconnected = session.status.state === 'disconnected'
-  const missing = session.processState === 'unknown' && session.status.state === 'error'
+  const missing = session.processState === 'lost' && session.status.state === 'error'
   const exited = session.processState === 'exited'
 
   async function refresh(): Promise<void> {
@@ -45,7 +45,7 @@ export function SessionPane({ sessionId }: { sessionId: string }) {
             {session.kind === 'agent' ? session.agentId.slice(0, 1).toUpperCase() : <SquareTerminal size={11} />}
           </span>
           <strong>{session.kind === 'agent' ? session.agentId : 'Terminal'}</strong>
-          <span>{session.paneCommand ?? 'tmux'}</span>
+          <span>{session.processState}</span>
         </div>
         <div className="agent-context-bar__host">
           {session.hostId !== 'local' ? <RadioTower size={11} /> : null}
@@ -56,13 +56,7 @@ export function SessionPane({ sessionId }: { sessionId: string }) {
       <div className="agent-body">
         {session.kind === 'terminal' || viewMode === 'terminal' ? (
           <div className="agent-terminal-stage">
-            {session.terminalSnapshot ? (
-              <TerminalView sessionId={session.id} snapshot={session.terminalSnapshot} />
-            ) : session.status.state === 'starting' ? (
-              <div className="pane-state"><LoaderCircle className="spin" size={19} /><strong>Starting {session.kind === 'agent' ? 'agent' : 'terminal'}</strong><span>Waiting for the tmux pane to become ready…</span></div>
-            ) : (
-              <TerminalView sessionId={session.id} snapshot="" />
-            )}
+            <TerminalView session={session} />
             {disconnected || missing || exited ? (
               <div className={`terminal-recovery terminal-recovery--${disconnected ? 'disconnected' : exited ? 'exited' : 'error'}`} role="status" aria-live="polite">
                 <span className="terminal-recovery__icon">
@@ -70,7 +64,7 @@ export function SessionPane({ sessionId }: { sessionId: string }) {
                 </span>
                 <div>
                   <strong>{disconnected ? 'Remote terminal disconnected' : exited ? `${session.kind === 'agent' ? 'Agent' : 'Terminal'} process exited` : 'Terminal session unavailable'}</strong>
-                  <span>{session.status.detail ?? (exited ? 'The tmux pane is no longer running.' : 'Check the host and try again.')}</span>
+                  <span>{session.status.detail ?? (exited ? 'The daemon process is no longer running.' : 'Check the host and try again.')}</span>
                 </div>
                 {!exited ? (
                   <button type="button" className="small-button" disabled={refreshing} onClick={() => void refresh()}>

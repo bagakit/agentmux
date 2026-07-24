@@ -31,17 +31,43 @@ export function HostSettingsPane({ config, onSave }: {
     }))
   }
 
+  function updateDaemon(id: string, patch: Partial<SshHostConfig['daemon']>): void {
+    setHosts((current) => current.map((host) =>
+      host.id === id && host.kind === 'ssh'
+        ? { ...host, daemon: { ...host.daemon, ...patch } }
+        : host
+    ))
+  }
+
   function addHost(): void {
     const id = `ssh-${crypto.randomUUID().slice(0, 8)}`
-    setHosts((current) => [...current, { id, kind: 'ssh', label: 'Remote host', hostname: '' }])
+    setHosts((current) => [...current, {
+      id,
+      kind: 'ssh',
+      label: 'Remote host',
+      hostname: '',
+      daemon: {
+        buildIdentity: '',
+        remoteNodePath: 'node',
+        remoteAgentMuxdPath: '',
+        remoteSocketPath: ''
+      }
+    }])
   }
 
   async function save(nextHosts = hosts, nextWorkspaces = config.workspaces): Promise<boolean> {
     setSaving(true)
     setError(null)
     try {
-      if (nextHosts.some((host) => host.kind === 'ssh' && (!host.label.trim() || !host.hostname.trim()))) {
-        throw new Error('Every SSH host needs a label and hostname')
+      if (nextHosts.some((host) => host.kind === 'ssh' && (
+        !host.label.trim() ||
+        !host.hostname.trim() ||
+        !host.daemon.buildIdentity.trim() ||
+        !host.daemon.remoteNodePath.trim() ||
+        !host.daemon.remoteAgentMuxdPath.startsWith('/') ||
+        !host.daemon.remoteSocketPath.startsWith('/')
+      ))) {
+        throw new Error('Every SSH host needs connection details and an absolute installed daemon path')
       }
       await onSave(nextHosts, nextWorkspaces)
       return true
@@ -78,7 +104,7 @@ export function HostSettingsPane({ config, onSave }: {
             <section className="host-settings-card" key={host.id}>
               <header>
                 <span className="host-card__icon">{host.kind === 'ssh' ? <RadioTower size={16} /> : <Monitor size={16} />}</span>
-                <div><strong>{host.label}</strong><small>{host.kind === 'ssh' ? `${host.user ? `${host.user}@` : ''}${host.hostname || 'hostname required'}${host.port ? `:${host.port}` : ''}` : 'Local tmux runtime'}</small></div>
+                <div><strong>{host.label}</strong><small>{host.kind === 'ssh' ? `${host.user ? `${host.user}@` : ''}${host.hostname || 'hostname required'}${host.port ? `:${host.port}` : ''}` : 'Local AgentMux daemon'}</small></div>
                 {check ? <span className={`check-pill check-pill--${check.state}`}>{check.state === 'checking' ? <LoaderCircle className="spin" size={13} /> : check.state === 'ready' ? <CheckCircle2 size={13} /> : <XCircle size={13} />}{check.state === 'checking' ? 'Testing' : check.detail}</span> : null}
                 <button className="small-button" disabled={check?.state === 'checking' || (host.kind === 'ssh' && !host.hostname.trim())} onClick={() => void checkHost(host)}>Test</button>
                 {host.kind === 'ssh' ? <button className="icon-button icon-button--danger" title={`Remove ${host.label}`} disabled={sessionCount > 0} onClick={() => setRemoveRequest(host)}><Trash2 size={14} /></button> : null}
@@ -92,6 +118,10 @@ export function HostSettingsPane({ config, onSave }: {
                     <label><span>User</span><input value={host.user ?? ''} onChange={(event) => event.target.value ? update(host.id, { user: event.target.value }) : clear(host.id, 'user')} placeholder="optional" /></label>
                     <label><span>Port</span><input type="number" min={1} max={65535} value={host.port ?? ''} onChange={(event) => event.target.value ? update(host.id, { port: Number(event.target.value) }) : clear(host.id, 'port')} placeholder="22" /></label>
                     <label className="host-edit-grid__wide"><span>Identity file path <small>optional; key contents are never stored</small></span><input value={host.identityFile ?? ''} onChange={(event) => event.target.value ? update(host.id, { identityFile: event.target.value }) : clear(host.id, 'identityFile')} placeholder="~/.ssh/id_ed25519" /></label>
+                    <label><span>Daemon build</span><input value={host.daemon.buildIdentity} onChange={(event) => updateDaemon(host.id, { buildIdentity: event.target.value })} placeholder="0.1.0" /></label>
+                    <label><span>Remote Node</span><input value={host.daemon.remoteNodePath} onChange={(event) => updateDaemon(host.id, { remoteNodePath: event.target.value })} placeholder="node" /></label>
+                    <label className="host-edit-grid__wide"><span>Installed agentmuxd path</span><input value={host.daemon.remoteAgentMuxdPath} onChange={(event) => updateDaemon(host.id, { remoteAgentMuxdPath: event.target.value })} placeholder="/home/user/.agentmux/versions/0.1.0/package/dist/agentmuxd.js" /></label>
+                    <label className="host-edit-grid__wide"><span>Daemon socket path</span><input value={host.daemon.remoteSocketPath} onChange={(event) => updateDaemon(host.id, { remoteSocketPath: event.target.value })} placeholder="/home/user/.agentmux/agentmuxd.sock" /></label>
                   </div>
                 </details>
               ) : null}

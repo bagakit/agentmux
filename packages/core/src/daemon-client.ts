@@ -439,5 +439,6 @@ export type {
   AgentMuxDaemonOutputAck,
   AgentMuxReplayGap,
   AgentMuxDaemonSession,
+  AgentMuxDaemonSessionState,
   AgentMuxDaemonSessionRef
 } from './daemon-protocol.js'

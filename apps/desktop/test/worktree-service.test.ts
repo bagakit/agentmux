@@ -11,7 +11,7 @@ import {
 } from '../src/main/worktree-service.js'
 
 const config: AppConfig = {
-  version: 1,
+  version: 2,
   hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
   agents: {},
   workspaces: []

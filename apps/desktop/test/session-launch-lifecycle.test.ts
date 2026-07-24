@@ -23,7 +23,7 @@ function deferred<T>() {
 }
 
 const config: AppConfig = {
-  version: 1,
+  version: 2,
   hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
   agents: {},
   workspaces: [{ id: 'workspace', name: 'Project', hostId: 'local', path: '/repo', kind: 'folder' }]
@@ -48,7 +48,6 @@ function launcherFixture(view: LauncherWorkbenchTab['view'] = 'picker'): Launche
 function terminalSession(id: string): SessionSnapshot {
   return {
     id,
-    tmuxSession: `agentmux-${id}`,
     kind: 'terminal',
     agentId: null,
     hostId: 'local',
@@ -57,8 +56,14 @@ function terminalSession(id: string): SessionSnapshot {
     createdAt: 1,
     updatedAt: 1,
     processState: 'running',
-    status: { state: 'running', source: 'tmux', observedAt: 1 },
-    terminalSnapshot: ''
+    status: { state: 'running', source: 'daemon-process', observedAt: 1 },
+    latestSequence: 0,
+    control: {
+      kind: 'terminal',
+      hostId: 'local',
+      sessionId: id,
+      daemonSession: { sessionId: id, incarnationId: `${id}-incarnation` }
+    }
   }
 }
 
@@ -90,10 +95,11 @@ describe('Session and Launcher lifecycle ownership', () => {
       : ''
 
     await useAppStore.getState().closeTab('workspace', 'pane', launcher.id)
-    pending.resolve(terminalSession(sessionId))
+    const resolved = terminalSession(sessionId)
+    pending.resolve(resolved)
     await launch
 
-    expect(stop).toHaveBeenCalledWith(sessionId)
+    expect(stop).toHaveBeenCalledWith(resolved.control)
     expect(useAppStore.getState().tabs[launcher.id]).toBeUndefined()
   })
 

@@ -40,7 +40,10 @@ export function reduceSessionLaunchAttached(
   session: SessionSnapshot
 ): SessionProjectionState {
   if (!ownsSessionLaunch(state.tabs[tabId], session.kind, session.id)) return state
-  const projected = reduceRuntimeEvent(state, { type: 'session', session })
+  const projected = {
+    ...state,
+    sessions: [...state.sessions.filter((item) => item.id !== session.id), session]
+  }
   const tab = projected.tabs[tabId]
   return {
     ...projected,
@@ -75,54 +78,148 @@ export function reduceRuntimeEvent(
   state: SessionProjectionState,
   event: RuntimeEvent
 ): SessionProjectionState {
-  if (event.type === 'session') {
-    return {
-      ...state,
-      sessions: [...state.sessions.filter((item) => item.id !== event.session.id), event.session]
-    }
-  }
-  if (event.type === 'status') {
+  const core = event.event
+  if (core.type === 'terminal-output') {
+    const sessionId = core.semanticSessionId ?? core.daemonSession.sessionId
     return {
       ...state,
       sessions: state.sessions.map((item) =>
-        item.id === event.sessionId
-          ? { ...item, status: event.status, updatedAt: event.status.observedAt }
+        item.id === sessionId
+          ? { ...item, latestSequence: core.evidence.outputSequence?.end ?? item.latestSequence }
           : item
       )
     }
   }
-  if (event.type === 'terminal') {
+  if (core.type === 'process-state') {
+    const sessionId = core.semanticSessionId ?? core.daemonSession.sessionId
+    const displayState = core.state === 'lost' ? 'error' : core.state
     return {
       ...state,
       sessions: state.sessions.map((item) =>
-        item.id === event.sessionId
-          ? { ...item, terminalSnapshot: event.snapshot, updatedAt: event.observedAt }
+        item.id === sessionId
+          ? {
+              ...item,
+              processState: core.state,
+              updatedAt: core.evidence.observedAt,
+              status: {
+                state: displayState,
+                source: core.evidence.source,
+                observedAt: core.evidence.observedAt,
+                ...(core.state === 'lost' ? { detail: 'The daemon no longer owns this PTY.' } : {}),
+                ...(core.exitCode === undefined ? {} : { exitCode: core.exitCode })
+              }
+            }
           : item
       )
     }
   }
-  if (event.type === 'activity') {
+  if (core.type === 'semantic-status') {
+    return {
+      ...state,
+      sessions: state.sessions.map((item) => item.id === core.semanticSessionId
+        ? {
+            ...item,
+            updatedAt: core.evidence.observedAt,
+            status: {
+              state: core.state === 'unknown' ? 'running' : core.state,
+              source: core.evidence.source,
+              observedAt: core.evidence.observedAt,
+              ...(core.detail === undefined ? {} : { detail: core.detail })
+            }
+          }
+        : item)
+    }
+  }
+  if (core.type === 'semantic-session') {
+    return {
+      ...state,
+      sessions: state.sessions.map((item) => item.kind === 'agent' && item.id === core.session.semanticSessionId
+        ? {
+            ...item,
+            agentId: core.session.agentId,
+            hostId: core.session.hostId,
+            workspacePath: core.session.workspacePath,
+            updatedAt: core.session.updatedAt,
+            control: {
+              kind: 'agent' as const,
+              hostId: core.session.hostId,
+              semanticSessionId: core.session.semanticSessionId,
+              daemonSession: { ...core.session.daemonSession }
+            }
+          }
+        : item)
+    }
+  }
+  if (core.type === 'semantic-activity') {
+    const items = [
+      ...(state.activities[core.semanticSessionId] ?? []),
+      {
+        ...core.activity,
+        sessionId: core.semanticSessionId,
+        source: core.evidence.source
+      }
+    ]
     return {
       ...state,
       activities: {
         ...state.activities,
-        [event.sessionId]: [...(state.activities[event.sessionId] ?? []), event.activity]
+        [core.semanticSessionId]: items.slice(-200)
       }
     }
   }
+  if (core.type === 'permission') {
+    const request = core.request
+    const items = [
+      ...(state.activities[request.semanticSessionId] ?? []),
+      {
+        id: request.id,
+        sessionId: request.semanticSessionId,
+        kind: 'permission' as const,
+        source: request.evidence.source,
+        createdAt: request.evidence.observedAt,
+        title: request.title,
+        ...(request.toolName === undefined ? {} : { toolName: request.toolName }),
+        ...(request.toolInput === undefined ? {} : { toolInput: request.toolInput })
+      }
+    ]
+    return {
+      ...state,
+      activities: { ...state.activities, [request.semanticSessionId]: items.slice(-200) }
+    }
+  }
+  if (core.type === 'semantic-error') {
+    if (!core.semanticSessionId) return state
+    return {
+      ...state,
+      sessions: state.sessions.map((item) => item.id === core.semanticSessionId
+        ? {
+            ...item,
+            updatedAt: core.evidence.observedAt,
+            status: {
+              state: 'error',
+              source: core.evidence.source,
+              observedAt: core.evidence.observedAt,
+              detail: core.message
+            }
+          }
+        : item)
+    }
+  }
+  if (core.type !== 'session-removed') return state
+  const sessionId = core.semanticSessionId ?? core.daemonSession.sessionId
   const removedTabIds = Object.values(state.tabs).flatMap((tab) =>
     (tab.kind === 'agent' || tab.kind === 'terminal') &&
-      tab.sessionId === event.sessionId
+      tab.sessionId === sessionId
       ? [tab.id]
       : []
   )
   const tabs = { ...state.tabs }
   for (const tabId of removedTabIds) delete tabs[tabId]
   return {
-    sessions: state.sessions.filter((item) => item.id !== event.sessionId),
-    activities: withoutKey(state.activities, event.sessionId),
+    sessions: state.sessions.filter((item) => item.id !== sessionId),
+    activities: withoutKey(state.activities, sessionId),
     tabs,
     layouts: removeTabsFromLayouts(state.layouts, removedTabIds),
-    viewModes: withoutKey(state.viewModes, event.sessionId)
+    viewModes: withoutKey(state.viewModes, sessionId)
   }
 }

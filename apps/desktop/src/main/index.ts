@@ -3,12 +3,15 @@ import { app, BrowserWindow, shell } from 'electron'
 import { ConfigStore } from './config-store.js'
 import { registerIpc } from './ipc.js'
 import { RuntimeController } from './runtime-controller.js'
+import { DesktopSemanticSessionStore } from './semantic-session-store.js'
 
-const runtime = new RuntimeController()
 const appIconPath = join(import.meta.dirname, '../../resources/icon.png')
 let disposeIpc: (() => void) | null = null
 
 app.setName('AgentMux')
+const runtime = new RuntimeController(new DesktopSemanticSessionStore(
+  join(app.getPath('userData'), 'agentmux.semantic-sessions.json')
+))
 
 async function createWindow(): Promise<void> {
   const window = new BrowserWindow({

@@ -1,10 +1,12 @@
 import type {
-  AgentActivity,
+  AgentDisplayState,
   AgentId,
-  RuntimeEvent,
-  RuntimeSnapshot,
-  SessionLaunchRequest,
-  SessionSnapshot
+  AgentMuxClientEvent,
+  AgentMuxDaemonDataEvent,
+  AgentMuxDaemonSessionState,
+  AgentMuxEvidenceSource,
+  AgentMuxReplayGap,
+  AgentMuxRunRef
 } from '@agentmux/core'
 
 export type LocalHostConfig = {
@@ -21,6 +23,12 @@ export type SshHostConfig = {
   user?: string
   port?: number
   identityFile?: string
+  daemon: {
+    buildIdentity: string
+    remoteNodePath: string
+    remoteAgentMuxdPath: string
+    remoteSocketPath: string
+  }
 }
 
 export type HostConfig = LocalHostConfig | SshHostConfig
@@ -42,7 +50,7 @@ export type WorkspaceRecord = {
 }
 
 export type AppConfig = {
-  version: 1
+  version: 2
   hosts: HostConfig[]
   agents: Record<string, AgentConfig>
   workspaces: WorkspaceRecord[]
@@ -100,15 +108,97 @@ export type WorkspaceSelectionResult = {
   workspace: WorkspaceRecord
 }
 
-export type AgentLaunchInput = Omit<
-  Extract<SessionLaunchRequest, { kind: 'agent' }>,
-  'kind' | 'args' | 'env' | 'commandOverride'
->
+export type AgentLaunchInput = {
+  agentId: AgentId
+  hostId: string
+  workspacePath: string
+  semanticSessionId?: string
+  daemonSessionId?: string
+  createOperationId?: string
+  prompt?: string
+  cols?: number
+  rows?: number
+}
 
-export type TerminalLaunchInput = Omit<
-  Extract<SessionLaunchRequest, { kind: 'terminal' }>,
-  'kind'
->
+export type TerminalLaunchInput = {
+  hostId: string
+  workspacePath: string
+  sessionId?: string
+  createOperationId?: string
+  cols?: number
+  rows?: number
+}
+
+export type AgentSessionControl = {
+  kind: 'agent'
+  hostId: string
+  semanticSessionId: string
+  daemonSession: AgentMuxRunRef
+}
+
+export type TerminalSessionControl = {
+  kind: 'terminal'
+  hostId: string
+  sessionId: string
+  daemonSession: AgentMuxRunRef
+}
+
+export type SessionControl = AgentSessionControl | TerminalSessionControl
+
+export type SessionStatus = {
+  state: AgentDisplayState
+  source: AgentMuxEvidenceSource
+  observedAt: number
+  detail?: string
+  exitCode?: number
+}
+
+type SessionSnapshotBase = {
+  id: string
+  hostId: string
+  workspacePath: string
+  label: string
+  createdAt: number
+  updatedAt: number
+  processState: AgentMuxDaemonSessionState
+  status: SessionStatus
+  latestSequence: number
+}
+
+export type SessionSnapshot = SessionSnapshotBase & (
+  | { kind: 'agent'; agentId: AgentId; control: AgentSessionControl }
+  | { kind: 'terminal'; agentId: null; control: TerminalSessionControl }
+)
+
+export type AgentActivity = {
+  id: string
+  sessionId: string
+  kind: 'prompt' | 'assistant' | 'tool' | 'permission' | 'lifecycle'
+  source: AgentMuxEvidenceSource
+  createdAt: number
+  title: string
+  content?: string
+  toolName?: string
+  toolInput?: string
+  eventName?: string
+}
+
+export type RuntimeEvent = {
+  type: 'core'
+  hostId: string
+  event: AgentMuxClientEvent
+}
+
+export type RuntimeSnapshot = {
+  sessions: SessionSnapshot[]
+  activities: Record<string, AgentActivity[]>
+}
+
+export type SessionAttachResult = {
+  session: SessionSnapshot
+  replay: AgentMuxDaemonDataEvent[]
+  gap: AgentMuxReplayGap | null
+}
 
 export type HostCheckResult = {
   ok: boolean
@@ -172,11 +262,15 @@ export type AgentMuxDesktopApi = {
     snapshot(): Promise<RuntimeSnapshot>
     launchAgent(input: AgentLaunchInput): Promise<SessionSnapshot>
     launchTerminal(input: TerminalLaunchInput): Promise<SessionSnapshot>
-    send(sessionId: string, text: string, submit?: boolean): Promise<void>
-    interrupt(sessionId: string): Promise<void>
-    resize(sessionId: string, cols: number, rows: number): Promise<void>
-    refresh(sessionId: string): Promise<SessionSnapshot>
-    stop(sessionId: string): Promise<void>
+    attach(session: SessionControl, afterSequence?: number): Promise<SessionAttachResult>
+    detach(session: SessionControl): Promise<void>
+    write(session: SessionControl, data: string): Promise<void>
+    submitPrompt(session: AgentSessionControl, prompt: string): Promise<void>
+    acknowledge(session: SessionControl, sequence: number): Promise<void>
+    interrupt(session: SessionControl): Promise<void>
+    resize(session: SessionControl, cols: number, rows: number): Promise<void>
+    refresh(session: SessionControl): Promise<SessionSnapshot>
+    stop(session: SessionControl): Promise<void>
     onEvent(listener: (event: RuntimeEvent) => void): () => void
   }
   browser: {
@@ -190,5 +284,3 @@ export type AgentMuxDesktopApi = {
     onEvent(listener: (event: BrowserEvent) => void): () => void
   }
 }
-
-export type { AgentActivity, RuntimeEvent, RuntimeSnapshot, SessionSnapshot }

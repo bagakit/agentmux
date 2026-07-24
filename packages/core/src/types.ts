@@ -3,8 +3,6 @@ export type AgentId = BuiltInAgentId | (string & {})
 
 export type ExecutionHostKind = 'local' | 'ssh'
 
-export type AgentProcessState = 'starting' | 'running' | 'exited' | 'unknown'
-
 export type AgentSemanticState =
   | 'unknown'
   | 'working'
@@ -23,8 +21,6 @@ export type AgentDisplayState =
   | 'done'
   | 'exited'
   | 'error'
-
-export type AgentEvidenceSource = 'native-hook' | 'tmux' | 'output' | 'user'
 
 /**
  * The final AgentMux runtime never infers semantic activity from terminal bytes.
@@ -228,6 +224,12 @@ export type AgentMuxClientEvent =
       session: AgentMuxSemanticSession
     }
   | {
+      type: 'session-removed'
+      semanticSessionId?: string
+      daemonSession: AgentMuxRunRef
+      evidence: AgentMuxEvidence
+    }
+  | {
       type: 'semantic-error'
       semanticSessionId?: string
       code: string
@@ -237,7 +239,7 @@ export type AgentMuxClientEvent =
 
 export type AgentStatus = {
   state: AgentDisplayState
-  source: AgentEvidenceSource
+  source: AgentMuxEvidenceSource
   observedAt: number
   detail?: string
   exitCode?: number
@@ -254,7 +256,7 @@ export type AgentActivity = {
   id: string
   sessionId: string
   kind: AgentActivityKind
-  source: AgentEvidenceSource
+  source: AgentMuxEvidenceSource
   createdAt: number
   title: string
   content?: string
@@ -262,56 +264,6 @@ export type AgentActivity = {
   toolInput?: string
   eventName?: string
 }
-
-type SessionSnapshotBase = {
-  id: string
-  tmuxSession: string
-  hostId: string
-  workspacePath: string
-  label: string
-  createdAt: number
-  updatedAt: number
-  processState: AgentProcessState
-  status: AgentStatus
-  terminalSnapshot: string
-  panePid?: number
-  paneCommand?: string
-}
-
-export type SessionSnapshot = SessionSnapshotBase & (
-  | { kind: 'agent'; agentId: AgentId }
-  | { kind: 'terminal'; agentId: null }
-)
-
-export type RuntimeEvent =
-  | { type: 'session'; session: SessionSnapshot }
-  | { type: 'status'; sessionId: string; status: AgentStatus }
-  | { type: 'terminal'; sessionId: string; snapshot: string; observedAt: number }
-  | { type: 'activity'; sessionId: string; activity: AgentActivity }
-  | { type: 'removed'; sessionId: string }
-
-type SessionLaunchRequestBase = {
-  hostId?: string
-  workspacePath: string
-  sessionId?: string
-  label?: string
-  cols?: number
-  rows?: number
-}
-
-export type SessionLaunchRequest = SessionLaunchRequestBase & (
-  | {
-      kind: 'agent'
-      agentId: AgentId
-      prompt?: string
-      args?: readonly string[]
-      env?: Readonly<Record<string, string>>
-      commandOverride?: string
-    }
-  | {
-      kind: 'terminal'
-    }
-)
 
 export type AgentLaunchPlan = {
   command: string
@@ -353,9 +305,4 @@ export type NormalizedHookEvent = {
   status: AgentStatus
   activities: AgentActivity[]
   nativeHandle?: AgentNativeSessionHandle
-}
-
-export type RuntimeSnapshot = {
-  sessions: SessionSnapshot[]
-  activities: Record<string, AgentActivity[]>
 }

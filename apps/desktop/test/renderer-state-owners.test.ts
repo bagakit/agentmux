@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { AgentActivity, SessionSnapshot } from '../src/shared/contracts.js'
+import type { AgentActivity, RuntimeEvent, SessionSnapshot } from '../src/shared/contracts.js'
 import { reduceBrowserEvent } from '../src/renderer/src/lib/browser-state.js'
 import {
   reduceDocumentContent,
@@ -13,7 +13,6 @@ import { documentKey, type WorkbenchTab } from '../src/renderer/src/lib/workbenc
 
 const session: SessionSnapshot = {
   id: 'session-1',
-  tmuxSession: 'agentmux-session-1',
   kind: 'agent',
   agentId: 'codex',
   hostId: 'local',
@@ -22,8 +21,14 @@ const session: SessionSnapshot = {
   createdAt: 1,
   updatedAt: 2,
   processState: 'running',
-  status: { state: 'running', source: 'tmux', observedAt: 2 },
-  terminalSnapshot: ''
+  status: { state: 'running', source: 'daemon-process', observedAt: 2 },
+  latestSequence: 0,
+  control: {
+    kind: 'agent',
+    hostId: 'local',
+    semanticSessionId: 'session-1',
+    daemonSession: { sessionId: 'run-1', incarnationId: 'incarnation-1' }
+  }
 }
 
 const activity: AgentActivity = {
@@ -33,6 +38,10 @@ const activity: AgentActivity = {
   source: 'user',
   createdAt: 2,
   title: 'Started'
+}
+
+function core(event: RuntimeEvent['event']): RuntimeEvent {
+  return { type: 'core', hostId: 'local', event }
 }
 
 describe('Renderer resource state owners', () => {
@@ -54,30 +63,43 @@ describe('Renderer resource state owners', () => {
       viewModes: { [session.id]: 'conversation' as const }
     }
 
-    state = reduceRuntimeEvent(state, {
-      type: 'status',
-      sessionId: session.id,
-      status: { state: 'waiting', source: 'native-hook', observedAt: 3 }
-    })
-    state = reduceRuntimeEvent(state, {
-      type: 'terminal',
-      sessionId: session.id,
-      snapshot: 'Waiting for approval',
-      observedAt: 4
-    })
-    state = reduceRuntimeEvent(state, {
-      type: 'activity',
-      sessionId: session.id,
-      activity: { ...activity, id: 'activity-2', createdAt: 4 }
-    })
+    state = reduceRuntimeEvent(state, core({
+      type: 'semantic-status',
+      semanticSessionId: session.id,
+      state: 'waiting',
+      evidence: { source: 'native-hook', observedAt: 3, daemonSession: session.control.daemonSession }
+    }))
+    state = reduceRuntimeEvent(state, core({
+      type: 'terminal-output',
+      semanticSessionId: session.id,
+      daemonSession: session.control.daemonSession,
+      data: 'Waiting for approval',
+      evidence: {
+        source: 'terminal-output',
+        observedAt: 4,
+        daemonSession: session.control.daemonSession,
+        outputSequence: { start: 0, end: 20 }
+      }
+    }))
+    state = reduceRuntimeEvent(state, core({
+      type: 'semantic-activity',
+      semanticSessionId: session.id,
+      activity: { id: 'activity-2', kind: 'lifecycle', createdAt: 4, title: 'Started' },
+      evidence: { source: 'native-hook', observedAt: 4, daemonSession: session.control.daemonSession }
+    }))
     expect(state.sessions[0]).toMatchObject({
       status: { state: 'waiting' },
-      terminalSnapshot: 'Waiting for approval',
-      updatedAt: 4
+      latestSequence: 20,
+      updatedAt: 3
     })
     expect(state.activities[session.id]).toHaveLength(2)
 
-    state = reduceRuntimeEvent(state, { type: 'removed', sessionId: session.id })
+    state = reduceRuntimeEvent(state, core({
+      type: 'session-removed',
+      semanticSessionId: session.id,
+      daemonSession: session.control.daemonSession,
+      evidence: { source: 'user', observedAt: 5, daemonSession: session.control.daemonSession }
+    }))
     expect(state.sessions).toEqual([])
     expect(state.activities[session.id]).toBeUndefined()
     expect(state.tabs[tabId]).toBeUndefined()
@@ -101,7 +123,12 @@ describe('Renderer resource state owners', () => {
       },
       layouts: { 'workspace-1': createWorkspaceLayout('pane', [tabId]) },
       viewModes: {}
-    }, { type: 'removed', sessionId: session.id })
+    }, core({
+      type: 'session-removed',
+      semanticSessionId: session.id,
+      daemonSession: session.control.daemonSession,
+      evidence: { source: 'user', observedAt: 5, daemonSession: session.control.daemonSession }
+    }))
 
     expect(state.sessions).toEqual([])
     expect(state.tabs[tabId]).toBeUndefined()

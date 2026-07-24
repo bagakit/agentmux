@@ -187,6 +187,26 @@ export const useAppStore = create<AppState>((set, get) => ({
   loading: true,
   error: null,
   async initialize() {
+    const pendingSessionEvents: RuntimeEvent[] = []
+    const pendingBrowserEvents: BrowserEvent[] = []
+    let booting = true
+    const disposeSessions = api.sessions.onEvent((event) => {
+      if (booting) {
+        if (event.event.type !== 'terminal-output') {
+          pendingSessionEvents.push(event)
+          if (pendingSessionEvents.length > 256) pendingSessionEvents.shift()
+        }
+        return
+      }
+      get().applyEvent(event)
+    })
+    const disposeBrowsers = api.browser.onEvent((event) => {
+      if (booting) {
+        pendingBrowserEvents.push(event)
+        if (pendingBrowserEvents.length > 256) pendingBrowserEvents.shift()
+      }
+      else get().applyBrowserEvent(event)
+    })
     try {
       const [config, snapshot] = await Promise.all([api.config.get(), api.sessions.snapshot()])
       const firstWorkspace = config.workspaces[0]?.id ?? null
@@ -201,13 +221,17 @@ export const useAppStore = create<AppState>((set, get) => ({
         loading: false
       })
       if (firstWorkspace) await get().selectWorkspace(firstWorkspace)
-      const disposeSessions = api.sessions.onEvent((event) => get().applyEvent(event))
-      const disposeBrowsers = api.browser.onEvent((event) => get().applyBrowserEvent(event))
+      booting = false
+      for (const event of pendingSessionEvents) get().applyEvent(event)
+      for (const event of pendingBrowserEvents) get().applyBrowserEvent(event)
       return () => {
         disposeSessions()
         disposeBrowsers()
       }
     } catch (error) {
+      booting = false
+      disposeSessions()
+      disposeBrowsers()
       set({ loading: false, error: message(error) })
       return () => {}
     }
@@ -574,11 +598,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         hostId: workspace.hostId,
         workspacePath: workspace.path,
         prompt,
-        sessionId,
-        label: `${agentId} · ${workspace.name}`
+        semanticSessionId: sessionId,
+        daemonSessionId: sessionId,
+        createOperationId: crypto.randomUUID()
       })
       if (!ownsSessionLaunch(get().tabs[tabId], 'agent', sessionId)) {
-        await api.sessions.stop(session.id).catch((cleanupError) => {
+        await api.sessions.stop(session.control).catch((cleanupError) => {
           if (get().sessions.some((item) => item.id === session.id)) get().reportError(cleanupError)
         })
         return
@@ -620,10 +645,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         hostId: workspace.hostId,
         workspacePath: workspace.path,
         sessionId,
-        label: `Terminal · ${workspace.name}`
+        createOperationId: crypto.randomUUID()
       })
       if (!ownsSessionLaunch(get().tabs[tabId], 'terminal', sessionId)) {
-        await api.sessions.stop(session.id).catch((cleanupError) => {
+        await api.sessions.stop(session.control).catch((cleanupError) => {
           if (get().sessions.some((item) => item.id === session.id)) get().reportError(cleanupError)
         })
         return
@@ -675,25 +700,33 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   async send(sessionId, text) {
     if (!text.trim()) return
+    const session = get().sessions.find((item) => item.id === sessionId)
+    if (!session || session.kind !== 'agent') return
     try {
-      await api.sessions.send(sessionId, text.trim(), true)
+      await api.sessions.submitPrompt(session.control, text)
     } catch (error) {
       get().reportError(error)
     }
   },
   async interrupt(sessionId) {
-    await api.sessions.interrupt(sessionId).catch((error) => get().reportError(error))
+    const session = get().sessions.find((item) => item.id === sessionId)
+    if (session) await api.sessions.interrupt(session.control).catch((error) => get().reportError(error))
   },
   async refreshSession(sessionId) {
+    const current = get().sessions.find((item) => item.id === sessionId)
+    if (!current) return
     try {
-      const session = await api.sessions.refresh(sessionId)
-      set((state) => reduceRuntimeEvent(state, { type: 'session', session }))
+      const session = await api.sessions.refresh(current.control)
+      set((state) => ({
+        sessions: [...state.sessions.filter((item) => item.id !== session.id), session]
+      }))
     } catch (error) {
       get().reportError(error)
     }
   },
   async stopSession(sessionId) {
-    await api.sessions.stop(sessionId).catch((error) => get().reportError(error))
+    const session = get().sessions.find((item) => item.id === sessionId)
+    if (session) await api.sessions.stop(session.control).catch((error) => get().reportError(error))
   },
   applyEvent(event) {
     set((state) => reduceRuntimeEvent(state, event))

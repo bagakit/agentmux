@@ -5,9 +5,9 @@
 
 ## 总结
 
-AgentMux 应保留小而清晰的 tmux Provider core 和自己的终端视觉气质，但桌面端要从固定三栏演示布局切换为更成熟的三层产品模型：最左侧 Project/Workspace Rail 只负责切换工程上下文；右侧主区 Titlebar 的最左入口是共享 Tools，位于 Workspace/Board 标题之前；Tools 在 Workspace 与 Board 都存在，但内容服从各自 Surface。Workspace 的 Files + Branches 以 Selected Worktree 驱动文件树根目录；Board 使用 Project Scope 的二维 `Branch × Status` 矩阵，Inbox 是矩阵第一列而不是 Tools 独立页。Workspace 拥有递归 Pane 布局，Pane 拥有通用 Tab，文件、终端、Agent、Browser 和可观察 Activity 都是 Tab 内容；Host、Agent 和恢复状态显示在它们所影响的对象旁边。
+AgentMux 应保留小而清晰的 Agent Provider Core 和自己的终端视觉气质，但桌面端要从固定三栏演示布局切换为更成熟的三层产品模型：最左侧 Project/Workspace Rail 只负责切换工程上下文；右侧主区 Titlebar 的最左入口是共享 Tools，位于 Workspace/Board 标题之前；Tools 在 Workspace 与 Board 都存在，但内容服从各自 Surface。Workspace 的 Files + Branches 以 Selected Worktree 驱动文件树根目录；Board 使用 Project Scope 的二维 `Branch × Status` 矩阵，Inbox 是矩阵第一列而不是 Tools 独立页。Workspace 拥有递归 Pane 布局，Pane 拥有通用 Tab，文件、终端、Agent、Browser 和可观察 Activity 都是 Tab 内容；Host、Agent 和恢复状态显示在它们所影响的对象旁边。
 
-这是内容模型、交互模式与正确实现的定向移植，不要求视觉临摹。对编辑器、文件树、Terminal/tmux 状态、Pane 拖拽和可访问对话框这类成熟能力，优先直接移植 a mature workbench 源码或采用 a mature workbench 已验证的维护中依赖，再按 AgentMux 的 Core 边界裁剪和重新组织；不另写功能缩水的替代实现。a mature workbench 的 daemon/relay、账户、移动端、WSL/runtime environment 图、第三方 Issue 集成和兼容历史不在范围内。
+这是内容模型、交互模式与正确实现的定向移植，不要求视觉临摹。对编辑器、文件树、Terminal/Session 状态、Pane 拖拽和可访问对话框这类成熟能力，优先直接移植 a mature workbench 源码或采用 a mature workbench 已验证的维护中依赖，再按 AgentMux 的 Core 边界裁剪和重新组织；不另写功能缩水的替代实现。a mature workbench 的 daemon/relay、账户、移动端、WSL/runtime environment 图、第三方 Issue 集成和兼容历史不在范围内。
 
 ## 各界面的取舍
 
@@ -61,7 +61,7 @@ AgentMux 应保留小而清晰的 tmux Provider core 和自己的终端视觉气
 - Host-aware 状态文案和上下文内 Retry/Test
 - 看板的固定状态列、横向溢出、筛选和 Workspace Card 元数据层级；Branch 行轴与 Inbox Canvas 是 AgentMux 的适配语义
 
-成熟基础能力继续由维护中的库负责：Monaco 提供编辑器，xterm.js 提供终端渲染，tmux 提供持久进程，`@dnd-kit` 提供跨 Pane 拖拽，Radix Dialog 提供焦点管理与可访问确认。AgentMux 只实现这些能力之间的产品所有权和 Core API 接线。
+成熟基础能力继续由维护中的库负责：Monaco 提供编辑器，xterm.js 提供终端渲染，`node-pty` 提供 PTY 原语，`agentmuxd` 提供持久进程所有权，`@dnd-kit` 提供跨 Pane 拖拽，Radix Dialog 提供焦点管理与可访问确认。AgentMux 只实现这些能力之间的产品所有权和 Core API 接线。
 
 明确不抄：
 
@@ -152,7 +152,7 @@ Monaco 继续负责文本布局、DPR、tokenization 和编辑行为；AgentMux 
 
 AgentMux 的纵向泳道身份由 Project 下的 Branch／Worktree 决定，每个 Branch 视觉上占一行；横向固定为 Inbox、Working、Needs You、Done 四列。Inbox 是创建入口，不伪造 Session；真实 Run 由 `(branchId, status)` 共同落位，状态变化是在同一 Branch 行内横向移动，不能跳到别的 Branch。映射保持穷尽且简单：`starting/running/working → Working`、`waiting/blocked/disconnected/error → Needs You`、`done/exited → Done`。
 
-Inbox 是 Board 第一列，不再是 Tools 的独立子 Tab。每个 Branch 的空 Inbox 单元都提供 Start discussion；点击它或已有 Inbox Run 会进入携带 Branch/Workspace 的 Discussion Canvas。Canvas 只选择讨论主题与现有 Provider，提交后通过已有 Store → Typed IPC → Core/tmux Launch 创建真实 Session；成功 Run 自动出现在该 Branch 对应状态格，失败沿现有 Launcher 事务恢复，不制造 Mock 卡片或第二套任务数据。
+Inbox 是 Board 第一列，不再是 Tools 的独立子 Tab。每个 Branch 的空 Inbox 单元都提供 Start discussion；点击它或已有 Inbox Run 会进入携带 Branch/Workspace 的 Discussion Canvas。Canvas 只选择讨论主题与现有 Provider，提交后通过已有 Store → Typed IPC → Core Client → `agentmuxd` 创建真实 Session；成功 Run 自动出现在该 Branch 对应状态格，失败沿现有 Launcher 事务恢复，不制造 Mock 卡片或第二套任务数据。
 
 “像音乐游戏”只保留平行泳道、清晰落点和横向进展感，不加入积分、皮肤或无关动效。Board 继续使用标题前的共享 Tools Dock，但 Dock 只表达 Project Branch Scope 与矩阵图例；Inbox 的创建和处理留在矩阵本体。横向滚动发生在矩阵容器，纵向滚动浏览 Branch，Branch 标签和状态列头在滚动时保持可辨认。
 
@@ -226,6 +226,6 @@ T-022 不按文件行数机械拆分，也不引入第二个 Store。拆分后�
 
 当前 Production Electron 在完成 Editor、Terminal、Browser 与 Board 交互后，一次起始观测为 Main 约 223 MiB、主 Renderer 约 243 MiB、Browser Renderer 约 98 MiB、GPU 约 96 MiB、Network Utility 约 52 MiB RSS。Chromium 多进程包含共享页，不能把这些 RSS 直接相加成“应用总内存”；单个时点也不足以证明泄漏。
 
-后续工作必须先用同一 Production Build、隔离 user-data、固定窗口和稳定等待点建立可重复基线，分别测量冷启动、Workspace/File Tree、Monaco Editor、Terminal/tmux、Browser WebContentsView 及关闭后回收。重复开启/关闭循环不只看 RSS，还要核对 Browser WebContents/Process、Core Session、tmux Session、Monaco Model、Document Cache、Watcher 和 Event Subscription 的真实数量。
+后续工作必须先用同一 Production Build、隔离 user-data、固定窗口和稳定等待点建立可重复基线，分别测量冷启动、Workspace/File Tree、Monaco Editor、Terminal/Daemon、Browser WebContentsView 及关闭后回收。重复开启/关闭循环不只看 RSS，还要核对 Browser WebContents/Process、Core Session、Daemon Session、Monaco Model、Document Cache、Watcher 和 Event Subscription 的真实数量。
 
 只优化有证据的长驻 owner 或未回收资源；先检查 Electron、Monaco、xterm 和当前项目依赖的生命周期 API。不为了数字强制 GC、卸载用户仍在使用的 Surface，也不新建全局 Cache 层、性能框架、兼容路径或一组无证据的配置开关。优化后必须用同一场景复测，并保持完整功能回归通过。
