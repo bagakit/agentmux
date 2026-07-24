@@ -21,7 +21,7 @@ Desktop / CLI / external Node client
 
 ## 当前实现状态
 
-2026-08-14 的 Shell checkpoint 已完成 Local Run 层切换：
+2026-08-14 的 T-020 Local implementation candidate 已完成 Run 层与 Codex 代表纵切；Tracker 完成仍等待独立复核：
 
 - 固定 CtxMux clean commit `3b94288c3a7896bb355e028135409c8e8bbaf764`、protocol 9；
 - `packages/core/vendor/ctxmux/darwin-arm64` 携带其 manifest、SDK tarball、`ctxmux` 与 `ctxmuxd`；
@@ -31,8 +31,41 @@ Desktop / CLI / external Node client
 - Local Terminal 已通过同 Run/PID 重连、累计 byte replay、fragmented UTF-8、丢失 Input receipt 后的跨 Client 去重恢复、Resize、Interrupt-still-live 与 stubborn process-tree Stop；
 - Remote/SSH 明确返回 `REMOTE_UNSUPPORTED`；
 - 旧自建 daemon、wire、journal、`node-pty` Owner、Remote artifact 和 package bin 已删除。
+- Codex 继续使用 AgentMux Provider 的 Launch/Resume/Hook/Permission 语义，只把物理 Run 交给同一个 `CtxmuxRunAdapter`；没有采用 CtxMux 的 Codex Integration；
+- Core File Store/Resolver 是 `agentSessionId ↔ exact runId ↔ Provider native session id/ACP handle` 的唯一身份 Owner，Desktop 与 CLI 不再各存一份；
+- checkout-external packed consumer 已证明 Codex create、Hook/permission、native-id 反查、跨 Client 同 Run/PID reconnect、send、Interrupt、provider-native Resume 保持 AgentMux ID 但切换 RunId、旧 Run 失败关闭和 Stop；
+- `agentmux list/status/send/interrupt/attach/resume/stop` 全部以 AgentMux `agentSessionId` 为主键；
+- Core View Resolver 与 typed Desktop focus 只聚焦当前已打开的 Terminal View 或唯一 Agent View，不 Open、Attach、Resume 或 Spawn。
 
-Coding Agent vertical 尚未在这个 checkpoint 中宣称完成。下一个闭环会把 Codex 接到同一个 Adapter，再恢复 Provider、Hook 与 Agent Session 的真实端到端证据。
+Remote/SSH 仍明确 unsupported；Claude、TraeX、Hermes、Pi 保留同一 Provider/Agent Session 合同，但 T-020 只用 Codex 作为真实代表纵切。
+
+## 使用 Codex 与统一 CLI
+
+```ts
+import { connectLocalAgentMux } from '@agentmux/core'
+
+const client = await connectLocalAgentMux()
+const session = await client.createAgent({
+  agentId: 'codex',
+  workspacePath: process.cwd(),
+  prompt: 'Inspect this repository'
+})
+
+await client.reattachAgent(session.agentSessionId, 0)
+await client.submitAgentPrompt(session.agentSessionId, 'Run the focused tests')
+await client.signalAgent(session.agentSessionId, 'SIGINT')
+await client.dispose()
+```
+
+```bash
+agentmux list --json
+agentmux status <agent-session-id> --json
+agentmux send <agent-session-id> --text "Run the focused tests"
+agentmux interrupt <agent-session-id>
+agentmux attach <agent-session-id>
+agentmux resume <agent-session-id>
+agentmux stop <agent-session-id>
+```
 
 ## 使用 Local Terminal
 
