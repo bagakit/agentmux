@@ -29,10 +29,13 @@ local artifact consumer passed commit=3b94288c3a7896bb355e028135409c8e8bbaf764 t
 
 `packages/core/vendor/ctxmux/darwin-arm64` 是唯一 Artifact 输入，内容只有 CtxMux manifest、SDK tarball 与两个 binaries。Core build 先验证 manifest、platform、mode、size 与 SHA-256，再从 tarball 私有 bundle SDK 到 `CtxmuxRunAdapter`。
 
+Local endpoint 不是可选 Backend。Core 不接受外部 socket/state path；默认路径由 exact commit 和 manifest SHA-256 派生的 identity 隔离。Adapter 启动前复核 manifest 整体 digest、binary bytes/mode 与 `ctxmuxd --version`，然后只从该随包绝对路径启动 daemon。重连时响应 peer 还必须匹配 `0600` owner receipt 中的 full commit/tree/manifest/binary/path/endpoint 和 daemon instance；仅 protocol 9 相同不足以被声明为该 build。
+
 这不是 `file:` dependency：
 
 - `package.json` 不声明 `@ctxmux/sdk` 路径依赖；
 - runtime 不读取相邻 CtxMux checkout；
+- runtime 不接受调用方插入的 CtxMux endpoint/state；
 - 不依赖全局 `ctxmux`、npm publish、GitHub Release 或下载；
 - CtxMux SDK/wire type 不进入 AgentMux public `.d.ts`；
 - packed package 自带 manifest、SDK source artifact、`ctxmux` 与 `ctxmuxd`。

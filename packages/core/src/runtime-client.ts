@@ -10,10 +10,7 @@ type AgentMuxRuntimeClientCommonOptions = {
   permissionHandler?: AgentMuxPermissionHandler
 }
 
-export type AgentMuxLocalRuntimeClientOptions = AgentMuxRuntimeClientCommonOptions & {
-  socketPath?: string
-  stateDirectory?: string
-}
+export type AgentMuxLocalRuntimeClientOptions = AgentMuxRuntimeClientCommonOptions
 
 export type AgentMuxSshRuntimeClientOptions = AgentMuxRuntimeClientCommonOptions & {
   target: {
@@ -29,8 +26,6 @@ export async function connectLocalAgentMux(
   options: AgentMuxLocalRuntimeClientOptions = {}
 ): Promise<AgentMuxClient> {
   const client = new AgentMuxClient({
-    ...(options.socketPath === undefined ? {} : { socketPath: options.socketPath }),
-    ...(options.stateDirectory === undefined ? {} : { stateDirectory: options.stateDirectory }),
     ...(options.providers === undefined ? {} : { providers: options.providers }),
     ...(options.store === undefined ? {} : { store: options.store }),
     ...(options.permissionHandler === undefined ? {} : { permissionHandler: options.permissionHandler })

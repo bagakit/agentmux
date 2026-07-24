@@ -6,7 +6,7 @@ import { AgentMuxError } from './errors.js'
 
 const USAGE = [
   'Usage:',
-  '  agentmux doctor [--socket <path>] [--state-directory <path>] [--json]'
+  '  agentmux doctor [--json]'
 ].join('\n')
 
 type ParsedFlags = {
@@ -27,15 +27,7 @@ function parseFlags(args: readonly string[]): ParsedFlags {
       booleans.add(flag)
       continue
     }
-    if (flag !== '--socket' && flag !== '--state-directory') {
-      throw new AgentMuxError(`Unsupported option: ${flag}`, 'INVALID_CLI_ARGUMENT')
-    }
-    const value = args[index + 1]
-    if (!value || value.startsWith('--')) {
-      throw new AgentMuxError(`Missing value for ${flag}.`, 'INVALID_CLI_ARGUMENT')
-    }
-    values.set(flag, value)
-    index += 1
+    throw new AgentMuxError(`Unsupported option: ${flag}`, 'INVALID_CLI_ARGUMENT')
   }
   return { values, booleans }
 }
@@ -64,12 +56,7 @@ function printDoctor(report: AgentMuxDoctorReport): void {
 
 async function doctor(args: readonly string[]): Promise<number> {
   const flags = parseFlags(args)
-  const socketPath = flags.values.get('--socket')
-  const stateDirectory = flags.values.get('--state-directory')
-  const client = await connectLocalAgentMux({
-    ...(socketPath === undefined ? {} : { socketPath }),
-    ...(stateDirectory === undefined ? {} : { stateDirectory })
-  })
+  const client = await connectLocalAgentMux()
   try {
     const report = await diagnoseAgentMux({ client, hostKind: 'local' })
     if (flags.booleans.has('--json')) process.stdout.write(`${JSON.stringify(report, null, 2)}\n`)
