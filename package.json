@@ -1,0 +1,19 @@
+{
+  "name": "agentmux-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@11.5.1",
+  "scripts": {
+    "dev": "pnpm --filter @agentmux/desktop dev",
+    "dev:web": "pnpm --filter @agentmux/desktop dev:web",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "vitest run",
+    "check": "pnpm typecheck && pnpm test && pnpm build"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}

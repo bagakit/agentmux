@@ -1,0 +1,159 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/plans/agentmux-runtime-desktop-review.md"
+  },
+  "source_refs": [
+    ".bagakit/feature-tracker/features/f-2228fpnqm/proposal.md",
+    "docs/plans/agentmux-runtime-desktop-review.md"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Document a mature workbench extraction boundary",
+      "objective": "Trace a mature workbench's agent launch planning, PTY lifecycle, native hook status normalization, and Claude Agent Teams tmux special case into an evidence-backed extraction note.",
+      "outcome": "The implementation has a source-linked map of what to borrow, simplify, and deliberately omit.",
+      "acceptance": [
+        "The note covers Codex, Claude, Hermes, and Pi launch and status paths.",
+        "The note distinguishes normal node-pty hosting from the Claude Agent Teams tmux shim.",
+        "Every material claim links to a repository-relative a mature workbench source path and line reference."
+      ],
+      "verification": [
+        {
+          "kind": "artifact",
+          "ref": "docs/a mature workbench-agent-runtime-notes.md",
+          "proves": "The extraction decisions are grounded in the inspected a mature workbench implementation."
+        }
+      ],
+      "source_refs": [
+        ".bagakit/feature-tracker/features/f-2228fpnqm/proposal.md",
+        "docs/plans/agentmux-runtime-desktop-review.md"
+      ],
+      "supersedes": []
+    },
+    {
+      "id": "T-002",
+      "title": "Build reusable tmux agent runtime",
+      "objective": "Implement the public Provider core, local/SSH ExecutionHost boundary, tmux process boundary, output follower, normalized status/activity model, hook ingress, and four built-in agent adapters.",
+      "outcome": "Node consumers can configure, launch, observe, control, and stop supported agents on local or SSH tmux hosts through one typed API.",
+      "acceptance": [
+        "All tmux commands use argument arrays and package-owned session names.",
+        "LocalHost and SshHost satisfy the same ExecutionHost contract and have deterministic transport tests.",
+        "Codex, Claude, Hermes, and Pi produce correct deterministic launch plans.",
+        "Status events identify native-hook versus fallback provenance.",
+        "Observable prompt, assistant, tool, permission, lifecycle, and raw-output activity can be projected without claiming private chain-of-thought.",
+        "A real tmux integration test proves lifecycle, output, input, exit, and cleanup."
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "package.json#scripts.test",
+          "proves": "Core unit and real-tmux integration behavior passes."
+        },
+        {
+          "kind": "artifact",
+          "ref": "packages/core/src/index.ts",
+          "proves": "The reusable runtime is exposed through one public package boundary."
+        }
+      ],
+      "source_refs": [
+        "docs/a mature workbench-agent-runtime-notes.md",
+        "docs/plans/agentmux-runtime-desktop-review.md"
+      ],
+      "supersedes": []
+    },
+    {
+      "id": "T-003",
+      "title": "Build terminal-first conversational workbench",
+      "objective": "Implement a thin Electron/React consumer with terminal-first startup, raw-terminal and conversation projections, Warp-style rich input, host/agent configuration and controls, rooted local/remote file editing, tabs, and resizable split panes.",
+      "outcome": "A developer can operate one tmux session as either a terminal or a readable conversation/activity stream while editing the same workspace.",
+      "acceptance": [
+        "The renderer never imports Node or tmux primitives directly.",
+        "Workspace file reads and writes are root-confined in main-process IPC.",
+        "Agent configuration and session controls consume the core package public API.",
+        "Users can select a configured local or SSH host for workspace and session operations.",
+        "The main workbench supports resizable navigator, editor, and agent-console regions with tabs.",
+        "Rich input supports multi-line prompts and contextual file references.",
+        "Terminal and conversation modes are two projections of the same session and expose event provenance."
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "package.json#scripts.build",
+          "proves": "The core package and desktop main, preload, and renderer production bundles compile."
+        },
+        {
+          "kind": "artifact",
+          "ref": "apps/desktop/src/renderer/App.tsx",
+          "proves": "The demonstrator exposes the required workbench capabilities."
+        }
+      ],
+      "source_refs": [
+        ".bagakit/feature-tracker/features/f-2228fpnqm/proposal.md",
+        "docs/plans/agentmux-runtime-desktop-review.md"
+      ],
+      "supersedes": []
+    },
+    {
+      "id": "T-004",
+      "title": "Build workspace board and worktree automation",
+      "objective": "Add an workbench-style workspace board plus explicit local/SSH Git worktree creation that automatically registers the resulting host-scoped workspace and can launch an agent there.",
+      "outcome": "Repositories, worktrees, and their active agent sessions are navigable as both a sidebar hierarchy and a status board.",
+      "acceptance": [
+        "The board groups workspace cards by normalized agent state and shows branch/path/session evidence.",
+        "Worktree creation uses Git argument arrays and happens only after explicit confirmation.",
+        "Remote worktree creation and workspace file operations execute through the selected SshHost without persisting private key material.",
+        "A successful worktree is registered as a workspace; a failed Git command leaves no phantom workspace.",
+        "Workspace selection restores its tabs/splits and defaults to the terminal surface."
+      ],
+      "verification": [
+        {
+          "kind": "artifact",
+          "ref": "apps/desktop/src/main/worktree-service.ts",
+          "proves": "Git worktree mutation and workspace registration have one audited main-process owner."
+        },
+        {
+          "kind": "artifact",
+          "ref": "apps/desktop/src/renderer/components/WorkspaceBoard.tsx",
+          "proves": "The desktop exposes the required workspace-as-board projection."
+        }
+      ],
+      "source_refs": [
+        ".bagakit/feature-tracker/features/f-2228fpnqm/proposal.md",
+        "docs/a mature workbench-agent-runtime-notes.md",
+        "docs/plans/agentmux-runtime-desktop-review.md"
+      ],
+      "supersedes": []
+    },
+    {
+      "id": "T-005",
+      "title": "Verify and hand off the demonstrator",
+      "objective": "Run the repository proof suite, inspect the rendered desktop surface, document setup and usage, and record residual limits.",
+      "outcome": "The repository is reproducibly buildable and the user has a concise architectural and operational handoff.",
+      "acceptance": [
+        "Install, typecheck, test, and build complete successfully.",
+        "README documents prerequisites, architecture, Provider/ExecutionHost API usage, desktop startup, SSH setup, and worktree flow.",
+        "Visual inspection confirms clear state hierarchy, usable terminal/chat modes, splits, board, empty/error states, and no overflow at the target window size.",
+        "Residual limits are explicit rather than presented as completed behavior."
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "package.json#scripts.check",
+          "proves": "All automated repository checks pass through one public command."
+        },
+        {
+          "kind": "manual",
+          "ref": ".bagakit/feature-tracker/features/f-2228fpnqm/verification.md",
+          "proves": "Desktop behavior and visual quality were manually inspected."
+        }
+      ],
+      "source_refs": [
+        "README.md",
+        "docs/a mature workbench-agent-runtime-notes.md"
+      ],
+      "supersedes": []
+    }
+  ]
+}
