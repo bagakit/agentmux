@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { basename } from 'node:path'
-import { dialog, ipcMain, type BrowserWindow } from 'electron'
+import { dialog, ipcMain, type BrowserWindow, type IpcMainEvent } from 'electron'
 import type { AgentId } from '@agentmux/core'
 import type {
   AgentLaunchInput,
@@ -10,6 +10,10 @@ import type {
   CreateWorkspacePathInput,
   CreateWorktreeForBranchInput,
   CreateWorkspaceInput,
+  DesktopViewFocusRequest,
+  DesktopViewFocusResult,
+  DesktopViewFocusResponse,
+  DesktopViewFocusTarget,
   FileDocument,
   HostConfig,
   RenameWorkspacePathInput,
@@ -41,6 +45,24 @@ export async function registerIpc(args: {
   const worktrees = new WorktreeService((id) => args.runtime.executionHost(id), args.configStore)
   const browsers = new BrowserViewManager(args.window)
   const channels: string[] = []
+  const pendingViewFocus = new Map<string, {
+    resolve(value: DesktopViewFocusResult): void
+    reject(error: Error): void
+    timeout: NodeJS.Timeout
+  }>()
+  const acceptViewFocus = (event: IpcMainEvent, response: DesktopViewFocusResponse): void => {
+    if (event.sender !== args.window.webContents || !response || typeof response.requestId !== 'string') return
+    const pending = pendingViewFocus.get(response.requestId)
+    if (!pending) return
+    pendingViewFocus.delete(response.requestId)
+    clearTimeout(pending.timeout)
+    if (response.ok) pending.resolve(response.result)
+    else {
+      const error = Object.assign(new Error(response.message), { code: response.code })
+      pending.reject(error)
+    }
+  }
+  ipcMain.on('views:focus:response', acceptViewFocus)
   const handle = <TArgs extends unknown[], TResult>(
     channel: string,
     listener: (...values: TArgs) => Promise<TResult> | TResult
@@ -116,6 +138,19 @@ export async function registerIpc(args: {
     await files.delete(workspace(config, workspaceId), path)
   })
   handle('agents:detect', async (agentId: AgentId, hostId: string) => await args.runtime.detect(agentId, hostId, config))
+  handle('views:focus', async (target: DesktopViewFocusTarget) => await new Promise((resolve, reject) => {
+    if (args.window.webContents.isDestroyed()) {
+      reject(Object.assign(new Error('Desktop View focus owner is unavailable.'), { code: 'VIEW_FOCUS_UNAVAILABLE' }))
+      return
+    }
+    const request: DesktopViewFocusRequest = { requestId: randomUUID(), target }
+    const timeout = setTimeout(() => {
+      pendingViewFocus.delete(request.requestId)
+      reject(Object.assign(new Error('Desktop View focus request timed out.'), { code: 'VIEW_FOCUS_TIMEOUT' }))
+    }, 2_000)
+    pendingViewFocus.set(request.requestId, { resolve, reject, timeout })
+    args.window.webContents.send('agentmux:view-focus-request', request)
+  }))
   handle('sessions:snapshot', async () => await args.runtime.snapshot(config))
   handle('sessions:launchAgent', async (input: AgentLaunchInput) => await args.runtime.launchAgent(input, config))
   handle('sessions:launchTerminal', async (input: TerminalLaunchInput) => await args.runtime.launchTerminal(input, config))
@@ -149,6 +184,12 @@ export async function registerIpc(args: {
   return () => {
     detach()
     browsers.dispose()
+    ipcMain.removeListener('views:focus:response', acceptViewFocus)
+    for (const pending of pendingViewFocus.values()) {
+      clearTimeout(pending.timeout)
+      pending.reject(Object.assign(new Error('Desktop View focus owner was disposed.'), { code: 'VIEW_FOCUS_UNAVAILABLE' }))
+    }
+    pendingViewFocus.clear()
     for (const channel of channels) ipcMain.removeHandler(channel)
   }
 }

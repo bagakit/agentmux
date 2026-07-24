@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { projectAgentMuxViews } from '../src/runtime.js'
+import { projectAgentMuxViews, resolveAgentMuxViewFocus } from '../src/runtime.js'
 import type { AgentMuxAgentSession, AgentMuxRun } from '../src/types.js'
 
 const run: AgentMuxRun = {
@@ -24,6 +24,8 @@ const agentSession: AgentMuxAgentSession = {
   hostId: 'local',
   workspacePath: '/repo',
   run: { runId: 'run-1' },
+  retiredRuns: [],
+  hookBindingId: 'hook-binding-1',
   outputCursorBytes: 0,
   createdAt: 100,
   updatedAt: 100
@@ -72,5 +74,26 @@ describe('AgentMux runtime projection', () => {
       ...agentSession,
       run: { runId: 'stale-run' }
     }])).toThrow('unavailable')
+  })
+
+  it('resolves only one currently open Terminal View or Agent View', () => {
+    const views = [
+      { viewId: 'terminal-left', kind: 'terminal' as const },
+      { viewId: 'agent-left', kind: 'agent' as const, agentSessionId: 'semantic-1' }
+    ]
+    expect(resolveAgentMuxViewFocus(views, { kind: 'terminal-view', viewId: 'terminal-left' })).toEqual({
+      viewId: 'terminal-left', kind: 'terminal'
+    })
+    expect(resolveAgentMuxViewFocus(views, { kind: 'agent-session', agentSessionId: 'semantic-1' })).toEqual({
+      viewId: 'agent-left', kind: 'agent'
+    })
+    expect(() => resolveAgentMuxViewFocus(views, {
+      kind: 'terminal-view', viewId: 'closed-terminal'
+    })).toThrow('not currently open')
+    expect(() => resolveAgentMuxViewFocus([...views, {
+      viewId: 'agent-right', kind: 'agent', agentSessionId: 'semantic-1'
+    }], {
+      kind: 'agent-session', agentSessionId: 'semantic-1'
+    })).toThrow('ambiguous')
   })
 })
