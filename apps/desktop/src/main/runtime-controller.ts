@@ -53,6 +53,10 @@ function workspaceLabel(config: AppConfig, hostId: string, path: string): string
     ?? path
 }
 
+function terminalInputKey(hostId: string, runId: string): string {
+  return JSON.stringify([hostId, runId])
+}
+
 function projectSession(view: AgentMuxView, config: AppConfig): SessionSnapshot {
   const run = view.run
   const observedAt = run.observedAt
@@ -121,6 +125,8 @@ async function disposePrepared(hosts: readonly PreparedRuntimeHost[]): Promise<v
 export class RuntimeController {
   private readonly hosts = new Map<string, RuntimeHost>()
   private readonly clients = new Set<WebContents>()
+  private readonly terminalInputCursors = new Map<string, number>()
+  private readonly terminalInputTails = new Map<string, Promise<void>>()
   private hostSignatures = new Map<string, string>()
 
   constructor(private readonly agentSessionStore: AgentMuxAgentSessionStore) {}
@@ -216,6 +222,15 @@ export class RuntimeController {
       await client.connect()
       return await client.workspaceView()
     }))
+    for (const workspaceView of workspaceViews) {
+      for (const view of workspaceView.views) {
+        if (view.kind !== 'terminal') continue
+        this.terminalInputCursors.set(
+          terminalInputKey(view.hostId, view.run.runId),
+          view.run.acceptedInputBytes
+        )
+      }
+    }
     return {
       sessions: workspaceViews.flatMap((workspaceView) => workspaceView.views.map((view) => projectSession(view, config))),
       activities: {}
@@ -249,6 +264,10 @@ export class RuntimeController {
       ...(request.cols === undefined ? {} : { cols: request.cols }),
       ...(request.rows === undefined ? {} : { rows: request.rows })
     })
+    this.terminalInputCursors.set(
+      terminalInputKey(request.hostId, run.runId),
+      run.acceptedInputBytes
+    )
     return await this.sessionById(client, run.runId, config)
   }
 
@@ -261,6 +280,12 @@ export class RuntimeController {
     const attached = control.kind === 'agent'
       ? (await client.reattachAgent(control.agentSessionId, afterByte)).attachment
       : await client.attachTerminal(control.runId, afterByte)
+    if (control.kind === 'terminal') {
+      this.terminalInputCursors.set(
+        terminalInputKey(control.hostId, control.runId),
+        attached.run.acceptedInputBytes
+      )
+    }
     const session = await this.sessionById(
       client,
       control.kind === 'agent' ? control.agentSessionId : control.runId,
@@ -278,7 +303,7 @@ export class RuntimeController {
   async write(control: SessionControl, data: string): Promise<void> {
     const client = await this.connectedClient(control.hostId)
     if (control.kind === 'agent') await client.writeAgent(control.agentSessionId, data)
-    else await client.writeTerminal(control.run, data)
+    else await this.writeTerminalInput(client, control, data)
   }
 
   async submitPrompt(
@@ -320,7 +345,12 @@ export class RuntimeController {
   async stopSession(control: SessionControl): Promise<void> {
     const client = await this.connectedClient(control.hostId)
     if (control.kind === 'agent') await client.stopAgent(control.agentSessionId)
-    else await client.stopTerminal(control.run)
+    else {
+      await client.stopTerminal(control.run)
+      const key = terminalInputKey(control.hostId, control.runId)
+      this.terminalInputCursors.delete(key)
+      this.terminalInputTails.delete(key)
+    }
   }
 
   async dispose(): Promise<void> {
@@ -328,6 +358,8 @@ export class RuntimeController {
     this.hosts.clear()
     this.clients.clear()
     this.hostSignatures.clear()
+    this.terminalInputCursors.clear()
+    this.terminalInputTails.clear()
     for (const [, host] of hosts) host.unsubscribe()
     await disposePrepared(hosts.map(([id, host]) => ({ id, ...host })))
   }
@@ -382,6 +414,43 @@ export class RuntimeController {
     if (!host) throw new Error(`Runtime host is not configured: ${hostId}`)
     await host.client.connect()
     return host.client
+  }
+
+  private async writeTerminalInput(
+    client: AgentMuxClient,
+    control: Extract<SessionControl, { kind: 'terminal' }>,
+    data: string
+  ): Promise<void> {
+    const key = terminalInputKey(control.hostId, control.runId)
+    const previous = this.terminalInputTails.get(key) ?? Promise.resolve()
+    const operation = previous.catch(() => {}).then(async () => {
+      let expectedByte = this.terminalInputCursors.get(key)
+      if (expectedByte === undefined) {
+        const run = (await client.listRuns()).find((candidate) => candidate.runId === control.runId)
+        if (!run || run.acceptedInputBytes === null) {
+          throw new Error(`Terminal Input cursor is unavailable: ${control.runId}`)
+        }
+        expectedByte = run.acceptedInputBytes
+      }
+      try {
+        const accepted = await client.writeTerminal(control.run, {
+          ownerInstanceId: client.runtimeIdentity().instanceId,
+          operationId: randomUUID(),
+          expectedByte,
+          data
+        })
+        this.terminalInputCursors.set(key, accepted.acceptedThroughByte)
+      } catch (error) {
+        this.terminalInputCursors.delete(key)
+        throw error
+      }
+    })
+    const tail = operation.then(() => {}, () => {})
+    this.terminalInputTails.set(key, tail)
+    void tail.finally(() => {
+      if (this.terminalInputTails.get(key) === tail) this.terminalInputTails.delete(key)
+    })
+    await operation
   }
 
   private async sessionById(

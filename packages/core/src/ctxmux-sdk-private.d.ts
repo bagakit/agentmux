@@ -33,6 +33,14 @@ declare module '@ctxmux/sdk' {
     data: number[]
   }
 
+  export type RecoverableInputOperation = {
+    daemonInstance: string
+    operationKey: string
+    runId: RunId
+    expectedByte: number
+    data: string | Uint8Array
+  }
+
   export type RunEvent =
     | { type: 'output'; chunk: OutputChunk }
     | { type: 'exited'; state: RunState }
@@ -70,9 +78,9 @@ declare module '@ctxmux/sdk' {
     start(spec: ReturnType<typeof defineRun>, operationKey?: string): Promise<RunInfo>
     list(): Promise<readonly RunInfo[]>
     status(id: RunId): Promise<RunInfo>
-    input(id: RunId, data: string | Uint8Array): Promise<{
+    recoverableInput(operation: RecoverableInputOperation): Promise<{
       run: RunInfo
-      receipt: { type: 'input'; written_bytes: number }
+      receipt: { start_byte: number; end_byte: number }
     }>
     resize(id: RunId, size: { cols: number; rows: number }): Promise<{
       run: RunInfo
