@@ -1,11 +1,13 @@
 import { writeFile } from 'node:fs/promises'
-import { app, type BrowserWindow } from 'electron'
+import { app, webContents, type BrowserWindow } from 'electron'
 import type { SessionControl, SessionSnapshot } from '../shared/contracts.js'
 import { ConfigStore } from './config-store.js'
 import { RuntimeController } from './runtime-controller.js'
 
 const MAX_TERMINAL_INCREMENT_KIB = 256 * 1024
 const MAX_EDITOR_INCREMENT_KIB = 512 * 1024
+const MAX_BROWSER_INCREMENT_KIB = 256 * 1024
+const MAX_BROWSER_RELEASED_INCREMENT_KIB = 256 * 1024
 const MAX_RELEASED_TOTAL_KIB = 1024 * 1024
 const MAX_RELEASE_DRIFT_KIB = 128 * 1024
 const RELEASE_CYCLES = 5
@@ -13,12 +15,39 @@ const RELEASE_CYCLES = 5
 type ResourceSample = {
   label: string
   totalWorkingSetKiB: number
+  owners: {
+    browserWebContents: number
+    monacoModels: number
+    documents: number
+    fileWatchers: number
+    runtimeSubscriptions: number
+  }
   processes: Array<{
     pid: number
     type: string
     workingSetKiB: number
     privateKiB: number
   }>
+}
+
+async function ownerCounts(window: BrowserWindow): Promise<ResourceSample['owners']> {
+  const renderer = await window.webContents.executeJavaScript(`(() => {
+    const event = new CustomEvent('agentmux:resource-owner-counts', { detail: { observed: false } })
+    window.dispatchEvent(event)
+    if (!event.detail.observed) throw new Error('Renderer resource owner observer is not installed')
+    const { observed: _observed, ...owners } = event.detail
+    return owners
+  })()`) as { monacoModels: number; documents: number; fileWatchers: number; runtimeSubscriptions: number }
+  const owners = {
+    browserWebContents: webContents.getAllWebContents().filter((item) => item !== window.webContents).length,
+    ...renderer
+  }
+  for (const [name, value] of Object.entries(owners)) {
+    if (!Number.isInteger(value) || value < 0) {
+      throw new Error(`Invalid resource owner count for ${name}.`)
+    }
+  }
+  return owners
 }
 
 function delay(ms: number): Promise<void> {
@@ -38,7 +67,7 @@ async function waitFor(
   throw new Error(`Timed out waiting for ${description}.`)
 }
 
-async function sample(label: string): Promise<ResourceSample> {
+async function sample(label: string, window: BrowserWindow): Promise<ResourceSample> {
   await delay(500)
   const snapshots = []
   for (let index = 0; index < 5; index += 1) {
@@ -64,6 +93,7 @@ async function sample(label: string): Promise<ResourceSample> {
   return {
     label,
     totalWorkingSetKiB: processes.reduce((sum, process) => sum + process.workingSetKiB, 0),
+    owners: await ownerCounts(window),
     processes
   }
 }
@@ -85,6 +115,12 @@ export async function runDesktopResourceProbe(options: {
   window: BrowserWindow
   runtime: RuntimeController
   configStore: ConfigStore
+  startup: {
+    spawnedAtMs: number
+    appReadyAtMs: number
+    windowCreationStartedAtMs: number
+    rendererLoadedAtMs: number
+  }
 }): Promise<boolean> {
   const reportPath = process.env.AGENTMUX_DESKTOP_RESOURCE_REPORT
   if (!reportPath) return false
@@ -97,8 +133,22 @@ export async function runDesktopResourceProbe(options: {
       options.window,
       "[...document.querySelectorAll('.new-tab-grid button')].some((button) => button.textContent?.includes('Terminal'))"
     ))
+    const interactiveAtMs = Date.now()
+    const startupTimes = [
+      options.startup.spawnedAtMs,
+      options.startup.appReadyAtMs,
+      options.startup.windowCreationStartedAtMs,
+      options.startup.rendererLoadedAtMs,
+      interactiveAtMs
+    ]
+    if (startupTimes.some((value) => !Number.isFinite(value))) {
+      throw new Error('Desktop startup timeline contains a non-finite timestamp.')
+    }
+    if (startupTimes.some((value, index) => index > 0 && value < startupTimes[index - 1]!)) {
+      throw new Error('Desktop startup timeline is not monotonic.')
+    }
     const before = new Set((await options.runtime.snapshot(config)).sessions.map((session) => session.id))
-    const idle = await sample('idle-desktop')
+    const idle = await sample('idle-desktop', options.window)
 
     await click(
       options.window,
@@ -117,7 +167,7 @@ export async function runDesktopResourceProbe(options: {
       const current = newTerminal(before, (await options.runtime.snapshot(config)).sessions)
       return (current?.latestOutputBytes ?? 0) >= 300_000
     })
-    const terminalSample = await sample('xterm-300kb-output')
+    const terminalSample = await sample('xterm-300kb-output', options.window)
 
     await waitFor('resource probe file row', async () => await rendererBoolean(
       options.window,
@@ -125,14 +175,14 @@ export async function runDesktopResourceProbe(options: {
     ))
     await click(options.window, "document.querySelector('[data-tree-path=\"resource-probe.ts\"]')")
     await waitFor('Monaco editor', async () => await rendererBoolean(options.window, "document.querySelector('.monaco-editor')"))
-    const editorSample = await sample('monaco-editor')
+    const editorSample = await sample('monaco-editor', options.window)
 
     await click(options.window, "document.querySelector('[aria-label=\"Close resource-probe.ts\"]')")
     await waitFor('Monaco disposal', async () => !await rendererBoolean(options.window, "document.querySelector('.monaco-editor')"))
     await options.runtime.stopSession(terminalControl)
     terminalControl = null
     await waitFor('Terminal release', async () => newTerminal(before, (await options.runtime.snapshot(config)).sessions) === null)
-    const released = await sample('released-panes')
+    const released = await sample('released-panes', options.window)
     const releaseCycles = [released]
     for (let cycle = 1; cycle < RELEASE_CYCLES; cycle += 1) {
       await waitFor(`cycle ${cycle} New Tab launcher`, async () => await rendererBoolean(
@@ -169,8 +219,26 @@ export async function runDesktopResourceProbe(options: {
       await waitFor(`cycle ${cycle} Terminal release`, async () => (
         newTerminal(before, (await options.runtime.snapshot(config)).sessions) === null
       ))
-      releaseCycles.push(await sample(`released-panes-${cycle + 1}`))
+      releaseCycles.push(await sample(`released-panes-${cycle + 1}`, options.window))
     }
+    await waitFor('New Tab launcher before Browser', async () => await rendererBoolean(
+      options.window,
+      "[...document.querySelectorAll('.new-tab-grid button')].some((button) => button.textContent?.includes('Browser'))"
+    ))
+    const browserOwnerBefore = idle.owners.browserWebContents
+    await click(
+      options.window,
+      "[...document.querySelectorAll('.new-tab-grid button')].find((button) => button.textContent?.includes('Browser'))"
+    )
+    await waitFor('Main-owned Browser WebContents', async () => (
+      (await ownerCounts(options.window)).browserWebContents === browserOwnerBefore + 1
+    ))
+    const browser = await sample('browser-about-blank', options.window)
+    await click(options.window, "document.querySelector('[aria-label=\"Close New Tab\"]')")
+    await waitFor('Browser WebContents release', async () => (
+      (await ownerCounts(options.window)).browserWebContents === browserOwnerBefore
+    ))
+    const browserReleased = await sample('browser-released', options.window)
     const releaseDriftKiB = Math.max(...releaseCycles.map((entry) => entry.totalWorkingSetKiB)) -
       releaseCycles[0]!.totalWorkingSetKiB
     const report = {
@@ -178,18 +246,37 @@ export async function runDesktopResourceProbe(options: {
       platform: `${process.platform}-${process.arch}`,
       node: process.version,
       electron: process.versions.electron,
+      startup: {
+        ...options.startup,
+        interactiveAtMs,
+        processToAppReadyMs: options.startup.appReadyAtMs - options.startup.spawnedAtMs,
+        processToWindowCreationMs: options.startup.windowCreationStartedAtMs - options.startup.spawnedAtMs,
+        processToRendererLoadedMs: options.startup.rendererLoadedAtMs - options.startup.spawnedAtMs,
+        processToInteractiveMs: interactiveAtMs - options.startup.spawnedAtMs
+      },
       budgets: {
         maxTerminalIncrementKiB: MAX_TERMINAL_INCREMENT_KIB,
         maxEditorIncrementKiB: MAX_EDITOR_INCREMENT_KIB,
+        maxBrowserIncrementKiB: MAX_BROWSER_INCREMENT_KIB,
+        maxBrowserReleasedIncrementKiB: MAX_BROWSER_RELEASED_INCREMENT_KIB,
         maxReleasedTotalKiB: MAX_RELEASED_TOTAL_KIB,
         maxReleaseDriftKiB: MAX_RELEASE_DRIFT_KIB,
         releaseCycles: RELEASE_CYCLES
       },
-      phases: { idle, terminal: terminalSample, editor: editorSample, released },
+      phases: {
+        idle,
+        terminal: terminalSample,
+        editor: editorSample,
+        released,
+        browser,
+        browserReleased
+      },
       releaseCycles,
       deltas: {
         terminalWorkingSetKiB: terminalSample.totalWorkingSetKiB - idle.totalWorkingSetKiB,
         editorWorkingSetKiB: editorSample.totalWorkingSetKiB - idle.totalWorkingSetKiB,
+        browserWorkingSetKiB: browser.totalWorkingSetKiB - released.totalWorkingSetKiB,
+        browserReleasedWorkingSetKiB: browserReleased.totalWorkingSetKiB - released.totalWorkingSetKiB,
         releasedWorkingSetKiB: released.totalWorkingSetKiB - idle.totalWorkingSetKiB,
         releaseDriftKiB
       }
@@ -201,6 +288,23 @@ export async function runDesktopResourceProbe(options: {
     }
     if (report.deltas.editorWorkingSetKiB > MAX_EDITOR_INCREMENT_KIB) {
       throw new Error('Desktop editor exceeded its working-set budget.')
+    }
+    if (report.deltas.browserWorkingSetKiB > MAX_BROWSER_INCREMENT_KIB) {
+      throw new Error('Desktop Browser exceeded its working-set budget.')
+    }
+    if (report.deltas.browserReleasedWorkingSetKiB > MAX_BROWSER_RELEASED_INCREMENT_KIB) {
+      throw new Error('Released Desktop Browser exceeded its working-set budget.')
+    }
+    for (const phase of [released, ...releaseCycles, browserReleased]) {
+      if (
+        phase.owners.monacoModels !== 0 ||
+        phase.owners.documents !== 0 ||
+        phase.owners.fileWatchers !== 0 ||
+        phase.owners.browserWebContents !== 0 ||
+        phase.owners.runtimeSubscriptions !== 2
+      ) {
+        throw new Error(`Desktop resource owners did not converge at ${phase.label}.`)
+      }
     }
     if (released.totalWorkingSetKiB > MAX_RELEASED_TOTAL_KIB) {
       throw new Error('Released Desktop process group exceeded its working-set budget.')
