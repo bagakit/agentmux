@@ -123,7 +123,7 @@ export function SessionPane({ sessionId }: { sessionId: string }) {
           aria-label={`Copy full start time ${startedAt.toLocaleString()}`}
           onClick={() => void copyMetadata('started', startedAt.toISOString())}
         >
-          <i>{copiedMetadata === 'started' ? 'Copied' : 'Started'}</i>
+          <i>Started</i>
           <time dateTime={startedAt.toISOString()}>{formatSessionTime(session.createdAt)}</time>
         </button>
         <button
@@ -134,7 +134,7 @@ export function SessionPane({ sessionId }: { sessionId: string }) {
           aria-label={`Copy full activity time ${activeAt.toLocaleString()}`}
           onClick={() => void copyMetadata('active', activeAt.toISOString())}
         >
-          <i>{copiedMetadata === 'active' ? 'Copied' : 'Active'}</i>
+          <i>Active</i>
           <time dateTime={activeAt.toISOString()}>{formatSessionTime(lastActivityAt)}</time>
         </button>
         <button
@@ -145,9 +145,12 @@ export function SessionPane({ sessionId }: { sessionId: string }) {
           aria-label={`Copy ${session.kind === 'agent' ? 'recent message' : 'output metadata'} ${recentMessage}`}
           onClick={() => void copyMetadata('recent', recentMessage)}
         >
-          <i>{copiedMetadata === 'recent' ? 'Copied' : session.kind === 'agent' ? 'Recent' : 'Output'}</i>
+          <i>{session.kind === 'agent' ? 'Recent' : 'Output'}</i>
           <span>{recentMessage}</span>
         </button>
+        <span className="session-copy-announcement" role="status" aria-live="polite">
+          {copiedMetadata ? 'Copied to clipboard' : ''}
+        </span>
         <div className="session-info-bar__actions">
           {session.hostId !== 'local' ? <span title={`Host · ${session.hostId}`}><RadioTower size={11} />{session.hostId}</span> : null}
           {session.processState !== 'exited' ? (

@@ -94,12 +94,11 @@ export function TerminalView({ session, themeId }: { session: SessionSnapshot; t
     let droppedPendingThrough = 0
     let renderReady: { dispose(): void } | null = null
     const viewport = new TerminalViewportSynchronizer({
+      proposeGrid: () => fit.proposeDimensions() ?? null,
       fit: () => {
-        if (!fit.proposeDimensions()) return false
         fit.fit()
         renderReady?.dispose()
         renderReady = null
-        return true
       },
       readGrid: () => ({ cols: terminal.cols, rows: terminal.rows }),
       resize: async ({ cols, rows }) => await api.sessions.resize(session.control, cols, rows),

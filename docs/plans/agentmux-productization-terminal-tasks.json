@@ -132,10 +132,42 @@
       "supersedes": []
     },
     {
+      "id": "T-006",
+      "title": "对齐 a mature workbench Branches 密度、创建与右键操作",
+      "objective": "从固定 a mature workbench Worktree Composer、Creation Panel 与 Context Menu 提取已验证的交互模式，收紧 Branches 列表密度，把未绑定 Branch 的创建从挤压列表的底部表单改成独立对话框，为 Branch 行提供只映射现有真实能力的右键菜单，并投影该 Worktree 上仍在运行的 Agent。",
+      "outcome": "Branches 与 Files、Terminal 使用同一套紧凑 Surface 语言；选择、打开、创建、复制、刷新和运行中 Agent 一眼可见，同时 Git/Worktree 与 Session 真相仍分别只有 Main WorktreeService 和 Core Runtime Snapshot 一份。",
+      "acceptance": [
+        "Header、Repository、Group 与 Branch Row 使用 expert-dense 尺度；Branch 名称与 Worktree path 保持可扫读和截断，20 个 Branch 不因重复 Padding 浪费主要高度。",
+        "点击已有 Worktree 的 Branch 继续直接打开 Workspace；点击未绑定 Branch 打开独立 Create Worktree Dialog，列表尺寸保持稳定，不再被底部表单压缩或遮挡。",
+        "Create Dialog 明确显示 Branch 与目标 Path，支持自动聚焦、Enter 提交、Escape/Cancel、Busy 和原位错误，成功后复用 typed workspaces:createWorktreeForBranch 与现有 Workspace activation。",
+        "Branch 右键菜单只提供当前真实支持的 Open Workspace 或 Create Worktree、Copy Branch Name、Copy Worktree Path 与 Refresh；Clipboard 继续走 typed Main IPC。",
+        "已绑定 Branch 行按 hostId + worktreePath 从全局 Session Snapshot 投影 processState=running 的 Agent，以现有 Provider 图标紧凑显示类型和同类数量；Terminal、历史或已退出 Session 不伪装成运行中 Agent，也不建立 Branch-owned Session registry。",
+        "不伪造 Rename/Delete/Fetch/Reveal/PR/Pin 等尚无公共 owner 的动作，不添加第二份 Git 状态、兼容分支或新依赖。",
+        "Fast tests、Desktop typecheck 与 Production build 通过，Owner 在安装包中验收密度、Dialog 和 Context Menu。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "package.json#scripts.test",
+          "proves": "Branches 状态、Worktree 操作和 Desktop 交互没有破坏现有公共边界。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "docs/design/interaction-review.md",
+          "proves": "a mature workbench 来源、Copy/Adapt 动作与排除项可审计。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/interaction-review.md"
+      ],
+      "supersedes": []
+    },
+    {
       "id": "T-005",
       "title": "完成产品化、资源与 Terminal 总验收",
-      "objective": "在最终提交上重跑 Repository、Package、Production Desktop、资源和交互 Gate，安装并启动可体验的 AgentMux.app。",
-      "outcome": "本轮优化以可运行安装包、可复现指标、稳定 Terminal 和闭环 Git 版本结束。",
+      "objective": "在 Terminal、Explorer 与 Branches 的 workbench-derived 交互闭合后，于最终提交上重跑 Repository、Package、Production Desktop、资源和交互 Gate，安装并启动可体验的 AgentMux.app。",
+      "outcome": "本轮优化以可运行安装包、可复现指标、稳定 Terminal、成熟 Branches 操作面和闭环 Git 版本结束。",
       "acceptance": [
         "pnpm check、Package Gate、Desktop Resource Gate、git diff --check 与 Tracker validation 均通过或有精确外部 blocker。",
         "安装应用显示 AgentMux 名称和图标，从独立 current-schema 数据目录启动，不依赖开发仓库。",
