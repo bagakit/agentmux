@@ -14,6 +14,10 @@
 | Replay 超窗 | 每 Session 的保留窗口 | Attach 返回显式 `gap`，从 `firstAvailableSequence` 提供剩余 Replay，不伪装成完整历史 | `daemon-reliability.integration.test.ts` |
 | Daemon 被 SIGKILL | 私有原子 Session Journal | 新 Daemon 保留原 Session／Incarnation／Operation／Process Start 身份，但把原 `running` 明确改为 `lost`；显式 Stop 只清理仍匹配原启动身份的进程组 | `daemon-crash.integration.test.ts` |
 | 正常 Stop | Daemon 持有的 PTY 与进程组 | 先 SIGHUP，超时后按同一 PTY 的进程组从子组到根组 SIGKILL | `posix-pty-process-groups.test.ts`、`daemon-reliability.integration.test.ts` |
+| SSH Client Crash／网络分区 | Remote Daemon 仍持有 PTY | 长期 ssh stdio Transport 失败；重连重新核对 Host／Build／Protocol，再按 Incarnation 和 Cursor Attach | `ssh-remote-daemon.integration.test.ts` |
+| Remote Create Response 丢失 | Remote Create Receipt | 调用方使用请求前已持有的 Operation ID 查询同一 PID；不因 SSH 重连 Spawn | `ssh-remote-daemon.integration.test.ts` |
+| SSH Host／Build Mismatch | Hello 与系统 SSH 认证结果 | Fail Closed，销毁 Proxy；不启动新 Agent、不回退 tmux | `ssh-remote-daemon.integration.test.ts` |
+| Remote 不可用／平台不支持 | 系统 SSH Exit 与 Node Platform Probe | 返回可区分错误；Windows Remote 不进入未验证 Fallback | `ssh-remote-daemon.test.ts`、`ssh-remote-daemon.integration.test.ts` |
 
 Daemon Crash 后没有可重新 Attach 的 PTY 文件描述符，因此当前正确结果是 `lost`，不是 `running`。默认 Journal 位于用户私有 Socket 目录；它不保存命令环境、Prompt、终端输出或 Secret，只保存 Session 身份、进程启动时间与运行快照。
 
@@ -64,8 +68,24 @@ Daemon Crash 后没有可重新 Attach 的 PTY 文件描述符，因此当前正
 | Client 消息队列 | 1 MiB | Client 主动断线并清空队列 |
 | 单协议 Frame | 1 MiB | 拒绝或断开连接 |
 | Session Journal | 1 MiB | 启动或持久化 Fail Closed |
+| SSH Transport stderr | 64 KiB／Proxy | Kill Proxy 并返回 `SSH_TRANSPORT_OUTPUT_LIMIT` |
+| Remote 控制面输出 | 1 MiB／Command | 终止安装或控制操作 |
 
 最坏情况下 Replay 本体不超过 `128 × 256 KiB = 32 MiB` 的 Daemon 全局上限。未确认 Output 只保存 Cursor，不为每个 Client 再复制一份 Replay；真正排队的编码数据仍受每 Client 1 MiB Socket 上限约束。一个 Execution Host 只启动一个 Daemon，Tab 和 Pane 只是 Client 投影。
+
+## SSH Remote 验证边界
+
+Remote Artifact、命令与凭据边界记录在 `docs/plans/agentmux-ssh-remote.md`。自动化 Fixture 使用当前构建产物、当前平台 node-pty、真实 tar、真实独立 Daemon 与真实 stdio Process Tree，只把 SSH Server 替换为本机受控跳板。它验证：
+
+- Artifact Manifest／Platform、Stage、原子版本目录、Activation、Status、Upgrade 和 Uninstall；
+- 一条长期 `ssh -T` 承载全部 Session 请求与 Event，控制面短连接不进入数据路径；
+- SSH Proxy Process Group 被 SIGKILL 后 Remote Daemon Instance／PID／Session 不变；
+- 分区期间产生的 Output 从原 Cursor Replay，超窗仍返回 Gap；
+- Create Response 丢失后按 Operation 找回同一物理进程；
+- Build、Host、SSH unavailable 与不支持平台均 Fail Closed；
+- Remote Applied Size、顽固 Agent／工具后代 Stop 和 Local 使用同一 Daemon 实现。
+
+系统 OpenSSH 默认负责 `~/.ssh/config`、Agent、Known Hosts、硬件 Key 与认证交互。AgentMux 只把用户显式配置的 `-i` Path 作为本地 argv 传给 ssh，不读取、复制或保存 Key；不添加 `StrictHostKeyChecking=no`，不打开 TCP Listener，也不运行 npx／远端 npm install。真实公网／公司 SSH Host、Credential 或远端安装不在自动化中执行，仍需用户另行授权。
 
 ## 资源基线方法
 
@@ -105,11 +125,15 @@ pnpm check
 - `daemon-reliability.integration.test.ts`：丢响应、并发 Input、Stale Control、Ack／Gap、Client Cap 和进程树。
 - `daemon-crash.integration.test.ts`：真实独立 Daemon SIGKILL 与 `lost` 恢复。
 - `posix-pty-process-groups.test.ts`：TTY 范围与组信号安全边界。
+- `ssh-daemon-connector.test.ts`：系统 SSH argv、远端命令引用与 Destination 边界。
+- `ssh-remote-daemon.test.ts`：平台、Archive Traversal 与受管删除范围。
+- `ssh-remote-daemon.integration.test.ts`：隔离 SSH 安装、Activation、Partition、Lost Create、Mismatch、Upgrade、Replay 与 Process Tree。
 
 ## 剩余边界
 
 - 当前 Journal 只恢复 Active／Lost Session 身份，不持久化已经淘汰的 Retired Receipt；4096 Receipt 是有界幂等窗口，不是无限历史数据库。
 - Daemon Crash 到用户显式 Stop lost Session 之间，原进程可能继续运行；Stop 会对仍匹配原 PID／启动时间的 PTY 进程组做强制清理。已经主动脱离该 PTY 的任意恶意后代仍不能仅凭 Journal 安全识别；主机重启的处理和更长时间 Soak 属于 T-007。
 - POSIX 进程组路径已在 macOS 真实验证；Windows ConPTY 当前仍使用 node-pty 的平台 Kill 行为，多平台 Artifact／清理证据属于 T-006、T-007。
-- SSH 网络分区、远端 Daemon 部署与 Transport Flow Control 属于 T-003，不能由 Local Socket 测试外推。
+- 隔离 Fixture 证明了 SSH 进程与 Remote Daemon 合同，但不外推真实网络的 MTU、ProxyJump、FIDO／Kerberos、Known Hosts 轮换或长时间抖动；真实 Host 安全矩阵与 Soak 属于 T-007。
+- Remote Artifact 当前由调用方显式提供且以 Manifest／SSH 完整性为边界；内容哈希、精简 Native Artifact、干净 Consumer 与正式 Doctor 属于 T-006。
 - 当前基线只描述 Daemon 进程，不包含 Desktop、xterm、Monaco、Browser View 或 Agent CLI 自身的内存。

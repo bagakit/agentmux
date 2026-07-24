@@ -10,6 +10,14 @@ PTY 范围识别模式：先用 `ps -p` 获取根进程的 TTY，再用 `ps -t` 
 子进程组先于根进程组强停，并在 Daemon 与目标共享 TTY 时回退到 node-pty 的窄化
 Kill。没有复制 a mature workbench 的 Provider、兼容层或 Desktop 状态。
 
+T-003 同日通过 CodeGraph 复核 a mature workbench 当前的
+`src/main/ssh/ssh-connection.ts`、`ssh-relay-session.ts`、
+`ssh-relay-versioned-install.ts` 与 `src/relay/relay-handshake.ts`：采用长期 Transport
+退出后重连、版本化并排安装、完成 Sentinel、握手版本 Fail Closed、重新 Attach 已知
+PTY 的模式；AgentMux 没有复制 a mature workbench 的 ssh2 Transport、Relay Account、端口扫描、
+兼容 GC 或 Provider 体系，而是继续使用用户确认的系统 OpenSSH 与同一份 Daemon
+Protocol。
+
 ## 总体结论
 
 a mature workbench 不是传统意义上的无界面 Agent Runner。它先是一套持久化终端系统，再在终端之上叠加 Agent 语义：
