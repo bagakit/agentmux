@@ -13,7 +13,7 @@ Revision 5 只修正证据合同，不调整门槛：每个 CPU counter endpoint
 - C probe 在每次 `proc_pid_rusage(RUSAGE_INFO_V4)` 调用前后读取 `clock_gettime(CLOCK_MONOTONIC_RAW)`。两个 endpoint 的真实 counter snapshot 分别位于各自的原始时间边界内，因此 wall interval 保守地落在 `end.before - start.after` 与 `end.after - start.before` 之间；不再用 Node 侧、排除两个 probe 调度间隙的独立 wall timer。
 - Probe 通过自己 fork 的独立、持续 CPU-burn 子进程执行 256 次校准读取，Raw Result 保存全部正 counter step 和最小观测 quantum。校准无正 step 时 Runner 失败；正式 Idle delta 不大于该 quantum 时 Resource correctness 失败关闭，不把零、相等或不可辨别写成胜出。校准子进程只属于 probe，正常由父进程精确 kill/reap，父进程消失时也通过 parent identity 自行退出。
 - 若 measured CPU delta 为 `D`、最小观测 quantum 为 `q`，Raw Result 保存保守 CPU interval `[max(0, D-q), D+q]` 与上述 wall interval。Release comparison 只接受 AgentMux CPU-percent 上界严格小于 tmux 下界；AgentMux 1% Idle CPU budget 使用同一个上界。
-- Raw Result 记录 C source SHA-256、完整 compile argv、compiler path/version、SDK path/version 和 probe binary SHA-256。正式环境 Gate 同时冻结 compiler 与 SDK identity；tracked-clean Git SHA 继续绑定 source。
+- Raw Result 记录 C source SHA-256、完整 compile argv、compiler path/version、SDK path/version、受控 compile environment 和 probe binary SHA-256。Compiler 只继承冻结的 `PATH/LANG/LC_ALL/TZ/SDKROOT`，不会读取调用者的 `CPATH`、`C_INCLUDE_PATH`、`MACOSX_DEPLOYMENT_TARGET` 等 ambient build input；两次独立临时输出目录的实现期编译已得到相同 binary SHA-256，正式环境 Gate 同时冻结 source、binary、compiler、SDK 与 compile environment identity，tracked-clean Git SHA 继续绑定 source。
 - Released checkpoint 必须精确匹配当前候选的 owner 真相：AgentMux 为 `0 live + (sessions+1) historical`，tmux 为 `0/0/0`。AgentMux retained FD 成本以已验证的实际 historical count 为分母；history 丢失、额外 Run 或 census 漂移全部失败关闭。
 
 ### Revision 4：资源 observer

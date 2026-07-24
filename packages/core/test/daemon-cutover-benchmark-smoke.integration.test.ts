@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -16,7 +16,7 @@ describe.runIf(
   process.arch === 'arm64'
 )('Daemon cutover real smoke', () => {
   it('runs both public runtimes and leaves an auditable cleanup receipt', async () => {
-    const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/agentmux-benchmark-test-"))
+    const root = await mkdtemp(fixturePath("tmp/agentmux-benchmark-test-"))
     roots.push(root)
     const output = join(root, 'smoke.json')
     const receipt = await runBenchmark({ mode: 'smoke', round: 1, output })
@@ -38,6 +38,7 @@ describe.runIf(
           }
           sourceSha256: string
           binarySha256: string
+          compileEnvironment: Record<string, string>
           compileArgv: string[]
         }
       }
@@ -88,6 +89,13 @@ describe.runIf(
       unit: 'nanoseconds',
       sourceSha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
       binarySha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      compileEnvironment: {
+        PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
+        LANG: 'C',
+        LC_ALL: 'C',
+        TZ: 'UTC0',
+        SDKROOT: fixturePath("Library/Developer/CommandLineTools/SDKs/MacOSX.sdk")
+      },
       compileArgv: expect.arrayContaining(['-std=c11', '-O2', '-Werror'])
     })
     expect(raw.manifest.processCpuObserver.calibration).toMatchObject({
