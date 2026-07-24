@@ -1,0 +1,162 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/design/interaction-review.md"
+  },
+  "source_refs": [
+    "AGENTS.md",
+    "docs/design/interaction-review.md",
+    "docs/testing/strategy.md"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "收口当前 Core 与 Desktop 实现并形成可审查提交",
+      "objective": "验证当前 Run、Agent Session、Attachment、View、Provider 与 Kernel-neutral Client 收口，把代码、合同测试、Desktop 投影和架构真相按回滚边界提交，消除完成状态与 Git 真相的漂移。",
+      "outcome": "后续产品化工作建立在全绿、可恢复、可逐项审查的基线上，而不是继续堆叠于百文件未提交工作树。",
+      "acceptance": [
+        "完整 Fast、Native、Typecheck 与 Production Build 通过；高成本 Native 文件串行执行，不为通过而删除测试或放宽正确性门槛。",
+        "提交按架构真相、Core/Desktop 公共模型、Conformance 与 UI/品牌等独立意图拆分，工作树不夹带临时截图和产物。",
+        "Git-facing 信息说明 Run 与 Agent Session 的新边界、旧 daemon 的待删除身份和每个提交的回滚范围。",
+        "不发布、不推送、不修改用户全局 Agent 或 SSH 配置。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "package.json#scripts.check",
+          "proves": "提交基线通过统一仓库 Gate。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "docs/plans/agentmux-core-maturity-review.md",
+          "proves": "实现与长期 Core/ctxmux 所有权保持一致。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/plans/agentmux-core-maturity-review.md",
+        "docs/testing/strategy.md"
+      ],
+      "supersedes": []
+    },
+    {
+      "id": "T-002",
+      "title": "交付一等 macOS 打包与可重复安装链路",
+      "objective": "用项目原生脚本从 Production Build 生成自包含 AgentMux.app 和 DMG 候选，统一产品名、Bundle、图标、数据目录、Native Artifact、签名准备与安装校验。",
+      "outcome": "开发者不再手工改 Electron.app；一条命令可以构建、验证并安装真正独立的 AgentMux 应用。",
+      "acceptance": [
+        "打包只消费锁定依赖和 Workspace @agentmux/core，不引用源码仓库、临时 deploy 路径或系统全局 Node 模块。",
+        "Info.plist、Helper、图标、版本和 Bundle ID 全部显示 AgentMux；正式数据目录直接使用当前 schema，不读取、迁移或 fallback 到旧目录。",
+        "产物包含当前平台 node-pty Artifact、Main/Preload/Renderer/resources；默认 Electron App 和部署期绝对 shim 不进入产物。",
+        "无签名凭据时生成可验证的 ad-hoc 本地候选；Notarization/正式发布只保留显式输入边界，不伪造已签名发布能力。",
+        "安装验证从 Applications 路径启动，完全退出后可直接双击重开。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "apps/desktop/package.json#scripts.package:mac",
+          "proves": "Production macOS 应用可重复生成并完成结构校验。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "docs/plans/agentmux-desktop-package.md",
+          "proves": "产物边界、签名状态、安装和发布非目标可审计。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/interaction-review.md"
+      ],
+      "supersedes": []
+    },
+    {
+      "id": "T-003",
+      "title": "降低 Desktop 体积、冷启动与长驻资源",
+      "objective": "以固定 Production 场景量化 App Size、Cold Start、Workspace、Monaco、Terminal、Browser 和关闭后回收，只优化有证据的重复依赖与未释放 owner。",
+      "outcome": "AgentMux 的安装体积和运行成本有可重复预算，Monaco/Browser/Terminal 的生命周期不会靠一次 RSS 截图或手工 GC 伪装完成。",
+      "acceptance": [
+        "Package Report 列出 App、Framework、app resources、Renderer Chunk 和 Native Artifact 体积，并拒绝 production bundle 携带已被 Renderer bundle 的完整 UI dependency tree。",
+        "Monaco 与大型语言 Worker 按真实打开动作加载；关闭后 Model、Document、Watcher、WebContents 和订阅 owner 数量收敛。",
+        "Cold Start、Idle、Terminal burst、Editor、Browser 与五轮释放使用固定窗口、等待点和隔离数据目录。",
+        "只用同场景 before/after 数据宣称收益；不强制 GC、不卸载仍使用的 Surface、不增加全局 Cache 框架或性能配置层。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "apps/desktop/package.json#scripts.measure:desktop",
+          "proves": "Production Desktop 的资源与释放预算通过。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "docs/testing/strategy.md",
+          "proves": "场景、预算、对象计数与测量限制有统一记录。"
+        }
+      ],
+      "source_refs": [
+        "docs/testing/strategy.md",
+        "docs/design/interaction-review.md"
+      ],
+      "supersedes": []
+    },
+    {
+      "id": "T-004",
+      "title": "移植 a mature workbench 成熟 Terminal 交互",
+      "objective": "从固定 a mature workbench 源码移植适用于 AgentMux 的搜索、链接、复制粘贴、聚焦、清屏、滚动、Pane 放大和平台快捷键行为，同时保持 Core 是唯一 Session API。",
+      "outcome": "Terminal 不只是可显示字节，而是可高频使用、鼠标优先且跨平台一致的一等工作面。",
+      "acceptance": [
+        "新建或切换到 Terminal 后输入焦点进入 xterm；搜索、清屏、滚动到底部、复制和粘贴有可见且可访问的入口与 CmdOrCtrl 快捷键。",
+        "macOS 选中即复制/右键行为、Linux/Windows Ctrl 行为按平台明确实现，不硬编码 metaKey，不劫持 Agent CLI 自己的键位。",
+        "OSC/URL 链接只通过安全的 Main-owned external-open 边界；不允许 file/javascript/data 协议或 Renderer 直接调用系统 Shell。",
+        "所有交互复用当前 xterm、Pane、Typed IPC 和 Core Session owner；不复制 a mature workbench daemon、历史兼容配置、插件或第二套 Terminal 状态机。",
+        "Production Electron 在真实 DPR 下通过密度、输入、选择、搜索、链接和重启重连验收。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "package.json#scripts.test",
+          "proves": "Terminal command、平台快捷键、外链安全和 Session 生命周期有回归测试。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "docs/design/interaction-review.md",
+          "proves": "固定 a mature workbench 来源、Copy/Adapt 清单和排除项可审计。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/interaction-review.md"
+      ],
+      "supersedes": []
+    },
+    {
+      "id": "T-005",
+      "title": "完成产品化、资源与 Terminal 总验收",
+      "objective": "在最终提交上重跑 Repository、Package、Production Desktop、资源和交互 Gate，安装并启动可体验的 AgentMux.app。",
+      "outcome": "本轮优化以可运行安装包、可复现指标、稳定 Terminal 和闭环 Git 版本结束。",
+      "acceptance": [
+        "pnpm check、Package Gate、Desktop Resource Gate、git diff --check 与 Tracker validation 均通过或有精确外部 blocker。",
+        "安装应用显示 AgentMux 名称和图标，从独立 current-schema 数据目录启动，不依赖开发仓库。",
+        "最终 Commit 按意图分层，文档只描述已交付事实和明确非目标。",
+        "不发布、不推送、不迁移旧数据、不引入 fallback。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "package.json#scripts.check",
+          "proves": "最终代码和构建统一通过。"
+        },
+        {
+          "kind": "artifact",
+          "ref": "docs/plans/agentmux-desktop-package.md",
+          "proves": "最终产物和安装证据可审计。"
+        }
+      ],
+      "source_refs": [
+        "docs/testing/strategy.md",
+        "docs/plans/agentmux-desktop-package.md"
+      ],
+      "supersedes": []
+    }
+  ]
+}
