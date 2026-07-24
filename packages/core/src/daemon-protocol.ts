@@ -1,9 +1,14 @@
 import type { AgentId } from './types.js'
 
-export const AGENTMUX_DAEMON_PROTOCOL_VERSION = 1
+export const AGENTMUX_DAEMON_PROTOCOL_VERSION = 2
 export const AGENTMUX_DAEMON_MAX_FRAME_BYTES = 1024 * 1024
 
-export type AgentMuxDaemonSessionState = 'running' | 'exited'
+export type AgentMuxDaemonSessionState = 'running' | 'exited' | 'lost'
+
+export type AgentMuxDaemonSessionRef = {
+  sessionId: string
+  incarnationId: string
+}
 
 export type AgentMuxDaemonSession = {
   sessionId: string
@@ -13,21 +18,26 @@ export type AgentMuxDaemonSession = {
   agentId: AgentId | null
   cwd: string
   pid: number
+  processStartedAt?: number
   state: AgentMuxDaemonSessionState
   cols: number
   rows: number
   createdAt: number
   latestSequence: number
+  acceptedInputSequence: number
   exitedAt?: number
   exitCode?: number
   exitSignal?: number
+  lostAt?: number
+  lostReason?: 'daemon-crash'
 }
 
 export type AgentMuxDaemonDataEvent = {
   type: 'data'
   sessionId: string
   incarnationId: string
-  sequence: number
+  startSequence: number
+  endSequence: number
   data: string
 }
 
@@ -56,6 +66,21 @@ export type AgentMuxDaemonAttachResult = {
 export type AgentMuxDaemonHello = {
   protocolVersion: number
   daemonPid: number
+  daemonInstanceId: string
+}
+
+export type AgentMuxDaemonInputAck = AgentMuxDaemonSessionRef & {
+  acceptedThrough: number
+  duplicate: boolean
+}
+
+export type AgentMuxDaemonOutputAck = AgentMuxDaemonSessionRef & {
+  acknowledgedThrough: number
+}
+
+export type AgentMuxDaemonAppliedSize = AgentMuxDaemonSessionRef & {
+  cols: number
+  rows: number
 }
 
 export type AgentMuxDaemonCreateRequest = {
@@ -74,11 +99,13 @@ export type AgentMuxDaemonCreateRequest = {
 export type AgentMuxDaemonMethod =
   | 'hello'
   | 'list'
+  | 'find-create-operation'
   | 'create'
   | 'attach'
   | 'detach'
   | 'write'
   | 'resize'
+  | 'ack'
   | 'signal'
   | 'stop'
 
