@@ -329,7 +329,7 @@ async function runLocalObserver(
   root: string,
   name: string,
   invalidated: () => void
-): Promise<() => void> {
+): Promise<() => Promise<void>> {
   const environment: NodeJS.ProcessEnv = { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
   delete environment.NODE_OPTIONS
   const child = spawn(process.execPath, [
@@ -351,6 +351,9 @@ async function runLocalObserver(
   let observing = false
   let settled = false
   let disposed = false
+  const closed = new Promise<void>((resolveClosed) => {
+    child.once('close', () => resolveClosed())
+  })
 
   const ready = new Promise<void>((resolveReady, rejectReady) => {
     const fail = (error: unknown): void => {
@@ -407,12 +410,15 @@ async function runLocalObserver(
   } catch (error) {
     disposed = true
     if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM')
+    await closed
     throw error
   }
-  return () => {
-    if (disposed) return
-    disposed = true
-    if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM')
+  return async () => {
+    if (!disposed) {
+      disposed = true
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM')
+    }
+    await closed
   }
 }
 
@@ -483,13 +489,14 @@ export class WorkspaceFiles {
   private readonly writeTails = new Map<string, Promise<void>>()
   private readonly observers = new Map<string, {
     listeners: Set<() => void>
-    disposeWorker: () => void
+    disposeWorker: () => Promise<void>
   }>()
   private readonly observerStarts = new Map<string, Promise<{
     listeners: Set<() => void>
-    disposeWorker: () => void
+    disposeWorker: () => Promise<void>
   }>>()
   private disposed = false
+  private disposal: Promise<void> | undefined
 
   constructor(
     private readonly hostFor: (id: string) => ExecutionHost,
@@ -521,7 +528,7 @@ export class WorkspaceFiles {
     workspace: WorkspaceRecord,
     requestedPath: string,
     invalidated: () => void
-  ): Promise<() => void> {
+  ): Promise<() => Promise<void>> {
     if (this.disposed) throw new Error('WorkspaceFiles is disposed')
     const host = this.hostFor(workspace.hostId)
     if (host.kind !== 'local') {
@@ -531,6 +538,7 @@ export class WorkspaceFiles {
       )
     }
     const resolved = await localExistingPathWithin(workspace.path, requestedPath)
+    if (this.disposed) throw new Error('WorkspaceFiles is disposed')
     const parent = dirname(resolved.target)
     const name = basename(resolved.target)
     const key = `${resolved.root}\0${parent}\0${name}`
@@ -541,9 +549,9 @@ export class WorkspaceFiles {
         const listeners = new Set<() => void>()
         start = runLocalObserver(parent, resolved.root, name, () => {
           for (const listener of listeners) listener()
-        }).then((disposeWorker) => {
+        }).then(async (disposeWorker) => {
           if (this.disposed) {
-            disposeWorker()
+            await disposeWorker()
             throw new Error('WorkspaceFiles is disposed')
           }
           return { listeners, disposeWorker }
@@ -559,24 +567,29 @@ export class WorkspaceFiles {
     }
     entry.listeners.add(invalidated)
     let disposed = false
-    return () => {
+    return async () => {
       if (disposed) return
       disposed = true
       entry!.listeners.delete(invalidated)
       if (entry!.listeners.size !== 0 || this.observers.get(key) !== entry) return
       this.observers.delete(key)
-      entry!.disposeWorker()
+      await entry!.disposeWorker()
     }
   }
 
-  dispose(): void {
-    this.disposed = true
-    for (const entry of this.observers.values()) entry.disposeWorker()
-    this.observers.clear()
-    for (const start of this.observerStarts.values()) {
-      void start.then((entry) => entry.disposeWorker(), () => {})
+  dispose(): Promise<void> {
+    if (!this.disposal) {
+      this.disposed = true
+      const observers = [...this.observers.values()]
+      const starts = [...this.observerStarts.values()]
+      this.observers.clear()
+      this.observerStarts.clear()
+      this.disposal = Promise.allSettled([
+        ...observers.map(async (entry) => await entry.disposeWorker()),
+        ...starts
+      ]).then(() => {})
     }
-    this.observerStarts.clear()
+    return this.disposal
   }
 
   async localPathForReveal(workspace: WorkspaceRecord, requestedPath: string): Promise<string> {
