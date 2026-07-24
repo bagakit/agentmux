@@ -598,8 +598,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         hostId: workspace.hostId,
         workspacePath: workspace.path,
         prompt,
-        semanticSessionId: sessionId,
-        daemonSessionId: sessionId,
+        agentSessionId: sessionId,
+        runId: sessionId,
         createOperationId: crypto.randomUUID()
       })
       if (!ownsSessionLaunch(get().tabs[tabId], 'agent', sessionId)) {
@@ -644,7 +644,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       const session = await api.sessions.launchTerminal({
         hostId: workspace.hostId,
         workspacePath: workspace.path,
-        sessionId,
+        runId: sessionId,
         createOperationId: crypto.randomUUID()
       })
       if (!ownsSessionLaunch(get().tabs[tabId], 'terminal', sessionId)) {

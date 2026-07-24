@@ -67,7 +67,7 @@ export function App() {
       <div className="boot">
         <span className="brand-mark"><BrandIcon size={18} /></span>
         <strong>Starting AgentMux</strong>
-        <span>Connecting to AgentMux daemon…</span>
+        <span>Connecting to AgentMux Runtime…</span>
       </div>
     )
   }

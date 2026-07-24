@@ -19,7 +19,7 @@ try {
   await mkdir(workspace, { recursive: true })
   await writeFile(join(workspace, 'resource-probe.ts'), 'export const value = 1\n'.repeat(20_000))
   await writeFile(join(userData, 'agentmux.config.json'), `${JSON.stringify({
-    version: 2,
+    version: 3,
     hosts: [{ id: 'local', kind: 'local', label: 'Resource Probe' }],
     agents: {
       codex: { command: 'codex', args: [], env: {} },
