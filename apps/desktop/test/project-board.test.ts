@@ -30,6 +30,7 @@ const feature: WorkspaceRecord = {
 }
 
 const snapshot: WorkspaceBranchesSnapshot = {
+  kind: 'git-repository',
   hostId: 'local',
   repoPath: '/repo',
   branches: [
@@ -134,6 +135,14 @@ describe('Project Branch × Status board projection', () => {
       session({ id: 'other-project', workspacePath: '/other-repo' })
     ])
     expect(lanes.every((lane) => lane.sessions.length === 0)).toBe(true)
+  })
+
+  it('projects no Branch lanes for a non-Git folder', () => {
+    expect(buildProjectBranchLanes({
+      kind: 'not-a-git-repository',
+      hostId: 'local',
+      workspacePath: '/plain-folder'
+    }, [main], [session({ id: 'plain-run', workspacePath: '/plain-folder' })])).toEqual([])
   })
 
   it('filters Project rows by query, status column, and Worktree binding', () => {

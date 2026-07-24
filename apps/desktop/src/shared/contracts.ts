@@ -97,11 +97,18 @@ export type WorkspaceBranchRecord = {
   isCurrent: boolean
 }
 
-export type WorkspaceBranchesSnapshot = {
-  hostId: string
-  repoPath: string
-  branches: WorkspaceBranchRecord[]
-}
+export type WorkspaceBranchesSnapshot =
+  | {
+      kind: 'git-repository'
+      hostId: string
+      repoPath: string
+      branches: WorkspaceBranchRecord[]
+    }
+  | {
+      kind: 'not-a-git-repository'
+      hostId: string
+      workspacePath: string
+    }
 
 export type WorkspaceSelectionResult = {
   config: AppConfig

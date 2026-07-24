@@ -215,10 +215,11 @@ const mockApi: AgentMuxDesktopApi = {
       if (workspace.hostId === 'local' && !records.some((item) => item.name === 'feature/new-tab')) {
         records.push({ name: 'feature/new-tab', worktreePath: null, workspaceId: null, isCurrent: false })
       }
-      return { hostId: workspace.hostId, repoPath, branches: records }
+      return { kind: 'git-repository', hostId: workspace.hostId, repoPath, branches: records }
     },
     openBranch: async (workspaceId, branch) => {
       const snapshot = await mockApi.workspaces.listBranches(workspaceId)
+      if (snapshot.kind !== 'git-repository') throw new Error('Workspace is not a Git repository')
       const record = snapshot.branches.find((item) => item.name === branch)
       if (!record?.worktreePath) throw new Error(`Branch has no worktree: ${branch}`)
       let workspace = mockConfig.workspaces.find(

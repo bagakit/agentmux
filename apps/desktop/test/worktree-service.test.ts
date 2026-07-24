@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { LocalExecutionHost, type ExecutionHost } from '@agentmux/core'
@@ -78,6 +78,7 @@ describe('WorktreeService', () => {
     const snapshot = await service.list('repo', branchConfig)
 
     expect(snapshot).toEqual({
+      kind: 'git-repository',
       hostId: 'remote',
       repoPath: '/srv/repo',
       branches: [
@@ -86,6 +87,129 @@ describe('WorktreeService', () => {
         { name: 'feature/free', worktreePath: null, workspaceId: null, isCurrent: false }
       ]
     })
+  })
+
+  it('models a plain folder as a normal non-Git capability state', async () => {
+    const executionHost = branchHost()
+    vi.mocked(executionHost.run).mockImplementation(async (command, args) => command === 'test'
+      ? gitResult(args, '', '', 1)
+      : gitResult(
+          args,
+          '',
+          'fatal: not a git repository (or any of the parent directories): .git\n',
+          128
+        ))
+    const service = new WorktreeService(() => executionHost, { save: vi.fn() })
+    const branchConfig: AppConfig = {
+      ...config,
+      workspaces: [{ id: 'plain', name: 'plain', hostId: 'remote', path: '/srv/plain-folder', kind: 'folder' }]
+    }
+
+    await expect(service.list('plain', branchConfig)).resolves.toEqual({
+      kind: 'not-a-git-repository',
+      hostId: 'remote',
+      workspacePath: '/srv/plain-folder'
+    })
+    expect(executionHost.run).toHaveBeenCalledWith(
+      'git',
+      ['-C', '/srv/plain-folder', 'rev-parse', '--show-toplevel'],
+      {
+        env: { LC_ALL: 'C', LANG: 'C' },
+        timeoutMs: 20_000,
+        maxOutputBytes: 256 * 1024
+      }
+    )
+    expect(executionHost.run).toHaveBeenNthCalledWith(
+      2,
+      'test',
+      ['-e', '/srv/plain-folder/.git', '-o', '-L', '/srv/plain-folder/.git'],
+      { timeoutMs: 20_000, maxOutputBytes: 256 * 1024 }
+    )
+    expect(executionHost.run).toHaveBeenNthCalledWith(
+      3,
+      'test',
+      ['-e', '/srv/.git', '-o', '-L', '/srv/.git'],
+      { timeoutMs: 20_000, maxOutputBytes: 256 * 1024 }
+    )
+    expect(executionHost.run).toHaveBeenNthCalledWith(
+      4,
+      'test',
+      ['-e', '/.git', '-o', '-L', '/.git'],
+      { timeoutMs: 20_000, maxOutputBytes: 256 * 1024 }
+    )
+  })
+
+  it.each([
+    'fatal: detected dubious ownership in repository at /srv/repo\n',
+    'fatal: cannot change to /srv/missing: Permission denied\n'
+  ])('keeps unrelated Git discovery failures fail-closed: %s', async (stderr) => {
+    const executionHost = branchHost()
+    vi.mocked(executionHost.run).mockImplementation(async (_command, args) => gitResult(args, '', stderr, 128))
+    const service = new WorktreeService(() => executionHost, { save: vi.fn() })
+    const branchConfig: AppConfig = {
+      ...config,
+      workspaces: [{ id: 'repo', name: 'repo', hostId: 'remote', path: '/srv/repo', kind: 'folder' }]
+    }
+
+    await expect(service.list('repo', branchConfig)).rejects.toThrow(stderr.trim())
+  })
+
+  it('rejects Git-only branch actions for a plain folder', async () => {
+    const executionHost = branchHost()
+    vi.mocked(executionHost.run).mockImplementation(async (command, args) => command === 'test'
+      ? gitResult(args, '', '', 1)
+      : gitResult(
+          args,
+          '',
+          'fatal: not a git repository (or any of the parent directories): .git\n',
+          128
+        ))
+    const save = vi.fn(async (value: AppConfig) => value)
+    const service = new WorktreeService(() => executionHost, { save })
+    const branchConfig: AppConfig = {
+      ...config,
+      workspaces: [{ id: 'plain', name: 'plain', hostId: 'remote', path: '/srv/plain-folder', kind: 'folder' }]
+    }
+
+    await expect(service.openBranch('plain', 'main', branchConfig)).rejects.toThrow(
+      'Workspace is not a Git repository'
+    )
+    await expect(service.createForBranch({
+      workspaceId: 'plain',
+      branch: 'main',
+      path: '/srv/plain-folder.worktrees/main'
+    }, branchConfig)).rejects.toThrow('Workspace is not a Git repository')
+    expect(save).not.toHaveBeenCalled()
+  })
+
+  it('fails closed when present Git metadata is corrupt', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-corrupt-repository-test-'))
+    temporaryRoots.push(root)
+    const repoPath = join(root, 'repo')
+    await mkdir(join(repoPath, '.git'), { recursive: true })
+    await writeFile(join(repoPath, '.git', 'HEAD'), 'ref: refs/heads/\n')
+    const service = new WorktreeService(() => new LocalExecutionHost(), { save: vi.fn() })
+    const branchConfig: AppConfig = {
+      ...config,
+      workspaces: [{ id: 'repo', name: 'repo', hostId: 'local', path: repoPath, kind: 'folder' }]
+    }
+
+    await expect(service.list('repo', branchConfig)).rejects.toThrow('not a git repository')
+  })
+
+  it('fails closed when Git metadata is a dangling symlink', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-dangling-git-metadata-test-'))
+    temporaryRoots.push(root)
+    const repoPath = join(root, 'repo')
+    await mkdir(repoPath)
+    await symlink(join(root, 'missing-git-directory'), join(repoPath, '.git'))
+    const service = new WorktreeService(() => new LocalExecutionHost(), { save: vi.fn() })
+    const branchConfig: AppConfig = {
+      ...config,
+      workspaces: [{ id: 'repo', name: 'repo', hostId: 'local', path: repoPath, kind: 'folder' }]
+    }
+
+    await expect(service.list('repo', branchConfig)).rejects.toThrow('not a git repository')
   })
 
   it('registers an existing worktree only when its bound branch is opened', async () => {
