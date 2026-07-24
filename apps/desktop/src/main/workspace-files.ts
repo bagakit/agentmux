@@ -479,6 +479,7 @@ function resultError(error: unknown): { status: 'error'; code: string; message: 
 }
 
 export class WorkspaceFiles {
+  private readonly writeRequestTails = new Map<string, Promise<void>>()
   private readonly writeTails = new Map<string, Promise<void>>()
   private readonly observers = new Map<string, {
     listeners: Set<() => void>
@@ -495,20 +496,24 @@ export class WorkspaceFiles {
     private readonly options: WorkspaceFilesOptions = {}
   ) {}
 
-  private async serializeWrite<T>(key: string, operation: () => Promise<T>): Promise<T> {
-    const previous = this.writeTails.get(key) ?? Promise.resolve()
+  private async serializeWrite<T>(
+    tails: Map<string, Promise<void>>,
+    key: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    const previous = tails.get(key) ?? Promise.resolve()
     let release!: () => void
     const current = new Promise<void>((resolveCurrent) => {
       release = resolveCurrent
     })
     const tail = previous.catch(() => {}).then(async () => await current)
-    this.writeTails.set(key, tail)
+    tails.set(key, tail)
     await previous.catch(() => {})
     try {
       return await operation()
     } finally {
       release()
-      if (this.writeTails.get(key) === tail) this.writeTails.delete(key)
+      if (tails.get(key) === tail) tails.delete(key)
     }
   }
 
@@ -693,36 +698,39 @@ export class WorkspaceFiles {
     workspace: WorkspaceRecord,
     input: WorkspaceFileWriteInput
   ): Promise<WorkspaceFileWriteResult> {
-    try {
-      const host = this.hostFor(workspace.hostId)
-      if (host.kind !== 'local') {
-        return {
-          status: 'error',
-          code: 'REMOTE_WORKSPACE_FILE_WRITE_UNSUPPORTED',
-          message: 'Revision-aware atomic save is not available for remote workspaces.'
+    const requestKey = `${workspace.hostId}\0${workspace.path}\0${input.path}`
+    return await this.serializeWrite(this.writeRequestTails, requestKey, async () => {
+      try {
+        const host = this.hostFor(workspace.hostId)
+        if (host.kind !== 'local') {
+          return {
+            status: 'error',
+            code: 'REMOTE_WORKSPACE_FILE_WRITE_UNSUPPORTED',
+            message: 'Revision-aware atomic save is not available for remote workspaces.'
+          }
         }
+        const resolved = await localMutablePathWithin(workspace.path, input.path)
+        const key = `${resolved.root}\0${resolved.parent}\0${resolved.name}`
+        return await this.serializeWrite(this.writeTails, key, async () => {
+          try {
+            await this.options.beforeWrite?.(input)
+            const fault = typeof this.options.localWriteFault === 'function'
+              ? this.options.localWriteFault()
+              : this.options.localWriteFault
+            return JSON.parse((await runLocalWorker(resolved.parent, resolved.root, {
+              action: 'write',
+              name: resolved.name,
+              expectedRevision: input.expectedRevision,
+              ...(fault ? { fault } : {})
+            }, input.content)).toString('utf8')) as WorkspaceFileWriteResult
+          } catch (error) {
+            return resultError(error)
+          }
+        })
+      } catch (error) {
+        return resultError(error)
       }
-      const resolved = await localMutablePathWithin(workspace.path, input.path)
-      const key = `${resolved.root}\0${resolved.parent}\0${resolved.name}`
-      return await this.serializeWrite(key, async () => {
-        try {
-          await this.options.beforeWrite?.(input)
-          const fault = typeof this.options.localWriteFault === 'function'
-            ? this.options.localWriteFault()
-            : this.options.localWriteFault
-          return JSON.parse((await runLocalWorker(resolved.parent, resolved.root, {
-            action: 'write',
-            name: resolved.name,
-            expectedRevision: input.expectedRevision,
-            ...(fault ? { fault } : {})
-          }, input.content)).toString('utf8')) as WorkspaceFileWriteResult
-        } catch (error) {
-          return resultError(error)
-        }
-      })
-    } catch (error) {
-      return resultError(error)
-    }
+    })
   }
 
   async create(workspace: WorkspaceRecord, input: CreateWorkspacePathInput): Promise<void> {
