@@ -1,6 +1,16 @@
-export declare const BENCHMARK_SCHEMA: 'agentmux.benchmark.daemon-cutover.v2'
-export declare const PROTOCOL_REVISION: 2
-export declare const RUNNER_VERSION: 2
+export declare const BENCHMARK_SCHEMA: 'agentmux.benchmark.daemon-cutover.v3'
+export declare const PROTOCOL_REVISION: 3
+export declare const RUNNER_VERSION: 3
+export declare const FORMAL_RESULT_PREFIX: 'revision-3'
+export declare const WORKLOAD_EXECUTION_ORDER: readonly [
+  'resources',
+  'inputToVisible',
+  'throughput',
+  'attachReplay',
+  'reconnect',
+  'sessionScale',
+  'stopCleanup'
+]
 export declare const CTXMUX_ARTIFACT: Readonly<{
   commit: string
   tree: string
@@ -26,7 +36,12 @@ export declare function evaluateFullRound(
   workloads: Record<string, unknown>,
   summary: Record<string, unknown>,
   environmentMatches: boolean
-): { verdict: 'pass' | 'fail'; failures: string[] }
+): {
+  verdict: 'pass' | 'fail'
+  failures: string[]
+  qualitativeWins: string[]
+  skippedComparisons: string[]
+}
 export declare function runBenchmark(options: {
   mode: 'full' | 'smoke'
   round: 1 | 2

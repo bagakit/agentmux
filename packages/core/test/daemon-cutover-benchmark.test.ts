@@ -5,7 +5,9 @@ import { describe, expect, it } from 'vitest'
 import {
   BENCHMARK_SCHEMA,
   CTXMUX_ARTIFACT,
+  FORMAL_RESULT_PREFIX,
   PROTOCOL_REVISION,
+  WORKLOAD_EXECUTION_ORDER,
   benchmarkConfiguration,
   evaluateFullRound,
   parseBenchmarkArguments,
@@ -68,9 +70,19 @@ function passingSummary(): Record<string, unknown> {
 }
 
 describe('Daemon cutover benchmark protocol', () => {
-  it('freezes Revision 2 and keeps smoke evidence out of formal results', () => {
-    expect(BENCHMARK_SCHEMA).toBe('agentmux.benchmark.daemon-cutover.v2')
-    expect(PROTOCOL_REVISION).toBe(2)
+  it('freezes Revision 3 identity, resource-first execution, and smoke isolation', () => {
+    expect(BENCHMARK_SCHEMA).toBe('agentmux.benchmark.daemon-cutover.v3')
+    expect(PROTOCOL_REVISION).toBe(3)
+    expect(FORMAL_RESULT_PREFIX).toBe('revision-3')
+    expect(WORKLOAD_EXECUTION_ORDER).toEqual([
+      'resources',
+      'inputToVisible',
+      'throughput',
+      'attachReplay',
+      'reconnect',
+      'sessionScale',
+      'stopCleanup'
+    ])
     expect(CTXMUX_ARTIFACT).toMatchObject({
       commit: '2e32a9d647d627952ea5c455fb2efef6c636643a',
       protocol: 9
@@ -149,7 +161,9 @@ describe('Daemon cutover benchmark protocol', () => {
   it('fails closed when comparison or budget evidence is missing or non-finite', () => {
     expect(evaluateFullRound(passingWorkloads(), passingSummary(), true)).toEqual({
       verdict: 'pass',
-      failures: []
+      failures: [],
+      qualitativeWins: [],
+      skippedComparisons: []
     })
 
     const missing = passingSummary() as {
@@ -176,6 +190,48 @@ describe('Daemon cutover benchmark protocol', () => {
     expect(evaluateFullRound({}, {}, true)).toMatchObject({
       verdict: 'fail',
       failures: expect.arrayContaining(['correctness', 'throughput.p50.missing'])
+    })
+  })
+
+  it('treats only the proven tmux stop-tree limitation as a qualitative correctness win', () => {
+    const stopLimited = passingWorkloads() as {
+      stopCleanup: {
+        agentmux: { correctness: boolean }
+        tmux: { correctness?: boolean }
+      }
+      throughput: { tmux: { correctness: boolean } }
+    }
+    stopLimited.stopCleanup.tmux.correctness = false
+    const withoutStopTiming = passingSummary() as {
+      stopCleanup: { tmux: unknown }
+    }
+    withoutStopTiming.stopCleanup.tmux = null
+    expect(evaluateFullRound(stopLimited, withoutStopTiming, true)).toEqual({
+      verdict: 'pass',
+      failures: [],
+      qualitativeWins: ['stopCleanup.complete-process-tree'],
+      skippedComparisons: ['stopCleanup.p95']
+    })
+
+    const agentMuxStopFailure = structuredClone(stopLimited)
+    agentMuxStopFailure.stopCleanup.agentmux.correctness = false
+    expect(evaluateFullRound(agentMuxStopFailure, withoutStopTiming, true)).toMatchObject({
+      verdict: 'fail',
+      failures: expect.arrayContaining(['correctness.agentmux.stopCleanup'])
+    })
+
+    const unrelatedTmuxFailure = structuredClone(stopLimited)
+    unrelatedTmuxFailure.throughput.tmux.correctness = false
+    expect(evaluateFullRound(unrelatedTmuxFailure, withoutStopTiming, true)).toMatchObject({
+      verdict: 'fail',
+      failures: expect.arrayContaining(['correctness.tmux.throughput'])
+    })
+
+    const missingTmuxStop = passingWorkloads() as typeof stopLimited
+    delete missingTmuxStop.stopCleanup.tmux.correctness
+    expect(evaluateFullRound(missingTmuxStop, passingSummary(), true)).toMatchObject({
+      verdict: 'fail',
+      failures: expect.arrayContaining(['correctness.tmux.stopCleanup.missing'])
     })
   })
 
