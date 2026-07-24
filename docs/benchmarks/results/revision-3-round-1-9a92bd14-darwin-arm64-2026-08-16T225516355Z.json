@@ -1,0 +1,7895 @@
+{
+  "schema": "agentmux.benchmark.daemon-cutover.v3",
+  "protocolRevision": 3,
+  "runnerVersion": 3,
+  "mode": "full",
+  "runId": "eedf0e11-548d-4916-8974-8623f39300ca",
+  "round": 1,
+  "manifest": {
+    "startedAt": "2026-08-16T22:50:19.756Z",
+    "endedAt": "2026-08-16T22:55:16.355Z",
+    "gitSha": "9a92bd14c3f68314354dc406da16f6766fa4c1d5",
+    "dirtyPaths": [
+      ".tmp/"
+    ],
+    "trackedDirtyPaths": [],
+    "untrackedPaths": [
+      ".tmp/"
+    ],
+    "environment": {
+      "os": "macOS 26.3.2",
+      "darwin": "25.3.0",
+      "platform": "darwin",
+      "release": "25.3.0",
+      "arch": "arm64",
+      "cpu": "Apple M4 Pro",
+      "cpuCount": 14,
+      "memoryBytes": 51539607552,
+      "node": "v24.14.1",
+      "pnpm": "11.5.1",
+      "tmux": "tmux 3.6b",
+      "terminalGeometry": {
+        "cols": 120,
+        "rows": 36
+      },
+      "locale": {
+        "LANG": "C",
+        "LC_ALL": "C",
+        "TZ": "UTC0"
+      }
+    },
+    "expectedEnvironment": {
+      "os": "macOS 26.3.2",
+      "darwin": "25.3.0",
+      "arch": "arm64",
+      "cpu": "Apple M4 Pro",
+      "memoryBytes": 51539607552,
+      "node": "v24.14.1",
+      "pnpm": "11.5.1",
+      "tmux": "tmux 3.6b"
+    },
+    "environmentMismatches": [],
+    "ctxmux": {
+      "frozen": {
+        "commit": "2e32a9d647d627952ea5c455fb2efef6c636643a",
+        "tree": "d60870c2481c9b153da6bf22f829d24afb8a81a8",
+        "version": "0.1.0",
+        "protocol": 9,
+        "manifestSha256": "15c0f54980ac339251017293cf4a21c94e2fb923d22cc3998b293f1a61a997d9"
+      },
+      "publicDiagnostics": {
+        "version": "0.1.0",
+        "protocolVersion": 9,
+        "sourceCommit": "2e32a9d647d627952ea5c455fb2efef6c636643a",
+        "artifactPlatform": "darwin-arm64",
+        "ready": true,
+        "capabilities": {
+          "transport": "local-unix",
+          "orderedOutputBytes": true,
+          "boundedReplay": true,
+          "recoverableInput": true,
+          "resize": true,
+          "interrupt": true,
+          "completeStop": true
+        }
+      }
+    },
+    "tmuxSocketName": "agentmux-benchmark-eedf0e11",
+    "runtimeScope": "/private/tmp/agentmux-benchmark-W1TH2p",
+    "workloadConfig": {
+      "latency": {
+        "warmup": 20,
+        "samples": 120,
+        "pollMs": 750
+      },
+      "throughput": {
+        "warmup": 1,
+        "samples": 7,
+        "bytes": 4194304,
+        "pollMs": 750
+      },
+      "attach": {
+        "warmup": 20,
+        "samples": 100,
+        "bytes": 196608
+      },
+      "reconnect": {
+        "warmup": 20,
+        "samples": 100,
+        "bytes": 65536
+      },
+      "scale": {
+        "rounds": 5,
+        "sessions": 32,
+        "pollMs": 750
+      },
+      "stop": {
+        "samples": 10
+      },
+      "resources": {
+        "settleMs": 2000,
+        "samples": 15,
+        "intervalMs": 200,
+        "sessions": 32,
+        "bytes": 4194304,
+        "pollMs": 750
+      }
+    },
+    "statistics": {
+      "percentiles": "nearest-rank",
+      "standardDeviation": "population",
+      "bootstrap": {
+        "seed": 8008,
+        "iterations": 10000,
+        "prng": "mulberry32",
+        "confidence": 0.95
+      },
+      "outliers": "retained"
+    }
+  },
+  "comparators": {
+    "tmux": {
+      "available": true,
+      "version": "tmux 3.6b"
+    },
+    "zellij": {
+      "available": false
+    },
+    "weztermMux": {
+      "available": false
+    },
+    "a mature workbench": {
+      "status": "not_comparable"
+    },
+    "a mature workbench": {
+      "status": "not_comparable"
+    }
+  },
+  "workloads": {
+    "resources": {
+      "agentmux": {
+        "idle": {
+          "rssSamplesKiB": [
+            5120,
+            5120,
+            5120,
+            5120,
+            5120,
+            5120,
+            5120,
+            5120,
+            5120,
+            5120,
+            5120,
+            5120,
+            5120,
+            5120,
+            5120
+          ],
+          "meanRssKiB": 5120,
+          "fdCount": 19,
+          "cpuSeconds": 0,
+          "wallSeconds": 2.8770865,
+          "cpuPercent": 0
+        },
+        "oneSession": {
+          "rssSamplesKiB": [
+            5808,
+            5808,
+            5808,
+            5808,
+            5808,
+            5808,
+            5808,
+            5808,
+            5808,
+            5808,
+            5808,
+            5808,
+            5808,
+            5808,
+            5808
+          ],
+          "meanRssKiB": 5808,
+          "fdCount": 23,
+          "cpuSeconds": 0,
+          "wallSeconds": 2.890929417,
+          "cpuPercent": 0
+        },
+        "manySessions": {
+          "rssSamplesKiB": [
+            9680,
+            9680,
+            9680,
+            9680,
+            9680,
+            9680,
+            9680,
+            9680,
+            9680,
+            9680,
+            9680,
+            9680,
+            9680,
+            9680,
+            9680
+          ],
+          "meanRssKiB": 9680,
+          "fdCount": 149,
+          "cpuSeconds": 0.03,
+          "wallSeconds": 2.882503709,
+          "cpuPercent": 1.0407618871861788
+        },
+        "steady": {
+          "rssSamplesKiB": [
+            9456,
+            9680,
+            9936,
+            10224,
+            10448,
+            10688,
+            10912,
+            11136,
+            11376,
+            11568,
+            11824,
+            12032,
+            12272,
+            12480,
+            12688,
+            12912,
+            13040,
+            13120,
+            13328,
+            13488,
+            13568,
+            13648,
+            13728,
+            13808,
+            13904,
+            14000,
+            14064,
+            14160,
+            14240,
+            14320,
+            14400,
+            14496,
+            14576,
+            14672,
+            14752,
+            14848,
+            14928,
+            15008,
+            15104,
+            15184,
+            15280,
+            15360,
+            15440,
+            15520,
+            15616,
+            15712,
+            15792,
+            15888,
+            15968,
+            16048,
+            16144
+          ],
+          "meanRssKiB": 13584
+        },
+        "peakRssKiB": 16144,
+        "peakRssSamplesKiB": [
+          9456,
+          9680,
+          9936,
+          10224,
+          10448,
+          10688,
+          10912,
+          11136,
+          11376,
+          11568,
+          11824,
+          12032,
+          12272,
+          12480,
+          12688,
+          12912,
+          13040,
+          13120,
+          13328,
+          13488,
+          13568,
+          13648,
+          13728,
+          13808,
+          13904,
+          14000,
+          14064,
+          14160,
+          14240,
+          14320,
+          14400,
+          14496,
+          14576,
+          14672,
+          14752,
+          14848,
+          14928,
+          15008,
+          15104,
+          15184,
+          15280,
+          15360,
+          15440,
+          15520,
+          15616,
+          15712,
+          15792,
+          15888,
+          15968,
+          16048,
+          16144
+        ],
+        "fixtureRssKiB": 52592,
+        "released": {
+          "rssSamplesKiB": [
+            20352,
+            20352,
+            20352,
+            20352,
+            20352,
+            20352,
+            20352,
+            20352,
+            20352,
+            20352,
+            20352,
+            20352,
+            20352,
+            20352,
+            20352
+          ],
+          "meanRssKiB": 20352,
+          "fdCount": 87,
+          "cpuSeconds": 0,
+          "wallSeconds": 2.889978584,
+          "cpuPercent": 0
+        },
+        "retainedHistoricalFdsPerRun": 2,
+        "perSessionRssKiB": 142.5,
+        "oneSessionIncrementKiB": 688,
+        "correctness": true
+      },
+      "tmux": {
+        "idle": {
+          "rssSamplesKiB": [
+            3536,
+            3536,
+            3536,
+            3536,
+            3536,
+            3536,
+            3536,
+            3536,
+            3536,
+            3536,
+            3536,
+            3536,
+            3536,
+            3536,
+            3536
+          ],
+          "meanRssKiB": 3536,
+          "fdCount": 12,
+          "cpuSeconds": 0,
+          "wallSeconds": 2.891154333,
+          "cpuPercent": 0
+        },
+        "oneSession": {
+          "rssSamplesKiB": [
+            3904,
+            3904,
+            3904,
+            3904,
+            3904,
+            3904,
+            3904,
+            3904,
+            3904,
+            3904,
+            3904,
+            3904,
+            3904,
+            3904,
+            3904
+          ],
+          "meanRssKiB": 3904,
+          "fdCount": 13,
+          "cpuSeconds": 0,
+          "wallSeconds": 2.899473833,
+          "cpuPercent": 0
+        },
+        "manySessions": {
+          "rssSamplesKiB": [
+            4560,
+            4560,
+            4560,
+            4560,
+            4560,
+            4560,
+            4560,
+            4560,
+            4560,
+            4560,
+            4560,
+            4560,
+            4560,
+            4560,
+            4560
+          ],
+          "meanRssKiB": 4560,
+          "fdCount": 44,
+          "cpuSeconds": 0,
+          "wallSeconds": 2.897383292,
+          "cpuPercent": 0
+        },
+        "steady": {
+          "rssSamplesKiB": [
+            4560,
+            4624,
+            5376,
+            5904,
+            6272,
+            6832,
+            7280,
+            7760,
+            8224,
+            8720,
+            9232,
+            9696,
+            10256,
+            10624,
+            11152,
+            11568,
+            12112,
+            12592,
+            13168,
+            13712,
+            14192,
+            14736,
+            15200,
+            15744,
+            16224,
+            16656,
+            17136,
+            17616,
+            18080,
+            18720,
+            19200,
+            19648,
+            20224,
+            20688,
+            21152,
+            21616,
+            22176,
+            22656,
+            23200,
+            23760,
+            24224,
+            24688,
+            25152,
+            25616,
+            26176,
+            26624,
+            27184,
+            27680,
+            28224,
+            28512,
+            28512,
+            28512,
+            29072,
+            29536,
+            30032,
+            30528,
+            33024,
+            33568,
+            34032,
+            34496,
+            43088
+          ],
+          "meanRssKiB": 19291.27868852459
+        },
+        "peakRssKiB": 43088,
+        "peakRssSamplesKiB": [
+          4560,
+          4624,
+          5376,
+          5904,
+          6272,
+          6832,
+          7280,
+          7760,
+          8224,
+          8720,
+          9232,
+          9696,
+          10256,
+          10624,
+          11152,
+          11568,
+          12112,
+          12592,
+          13168,
+          13712,
+          14192,
+          14736,
+          15200,
+          15744,
+          16224,
+          16656,
+          17136,
+          17616,
+          18080,
+          18720,
+          19200,
+          19648,
+          20224,
+          20688,
+          21152,
+          21616,
+          22176,
+          22656,
+          23200,
+          23760,
+          24224,
+          24688,
+          25152,
+          25616,
+          26176,
+          26624,
+          27184,
+          27680,
+          28224,
+          28512,
+          28512,
+          28512,
+          29072,
+          29536,
+          30032,
+          30528,
+          33024,
+          33568,
+          34032,
+          34496,
+          43088
+        ],
+        "fixtureRssKiB": 52672,
+        "released": {
+          "rssSamplesKiB": [
+            34864,
+            34864,
+            34864,
+            34864,
+            34864,
+            34864,
+            34864,
+            34864,
+            34864,
+            34864,
+            34864,
+            34864,
+            34864,
+            34864,
+            34864
+          ],
+          "meanRssKiB": 34864,
+          "fdCount": 12,
+          "cpuSeconds": 0,
+          "wallSeconds": 2.883446042,
+          "cpuPercent": 0
+        },
+        "retainedHistoricalFdsPerRun": 0,
+        "perSessionRssKiB": 32,
+        "oneSessionIncrementKiB": 368,
+        "correctness": true
+      }
+    },
+    "inputToVisible": {
+      "agentmux": {
+        "attempts": [
+          {
+            "index": 0,
+            "warmup": true,
+            "offsetMs": 549,
+            "durationUs": 6132.5,
+            "ok": true
+          },
+          {
+            "index": 1,
+            "warmup": true,
+            "offsetMs": 249,
+            "durationUs": 7461.292,
+            "ok": true
+          },
+          {
+            "index": 2,
+            "warmup": true,
+            "offsetMs": 504,
+            "durationUs": 6968.25,
+            "ok": true
+          },
+          {
+            "index": 3,
+            "warmup": true,
+            "offsetMs": 38,
+            "durationUs": 6382.875,
+            "ok": true
+          },
+          {
+            "index": 4,
+            "warmup": true,
+            "offsetMs": 327,
+            "durationUs": 7421.834,
+            "ok": true
+          },
+          {
+            "index": 5,
+            "warmup": true,
+            "offsetMs": 656,
+            "durationUs": 6875.125,
+            "ok": true
+          },
+          {
+            "index": 6,
+            "warmup": true,
+            "offsetMs": 598,
+            "durationUs": 6891.416,
+            "ok": true
+          },
+          {
+            "index": 7,
+            "warmup": true,
+            "offsetMs": 710,
+            "durationUs": 7481.541,
+            "ok": true
+          },
+          {
+            "index": 8,
+            "warmup": true,
+            "offsetMs": 183,
+            "durationUs": 7589.209,
+            "ok": true
+          },
+          {
+            "index": 9,
+            "warmup": true,
+            "offsetMs": 307,
+            "durationUs": 7021.792,
+            "ok": true
+          },
+          {
+            "index": 10,
+            "warmup": true,
+            "offsetMs": 36,
+            "durationUs": 6931.416,
+            "ok": true
+          },
+          {
+            "index": 11,
+            "warmup": true,
+            "offsetMs": 521,
+            "durationUs": 6849.25,
+            "ok": true
+          },
+          {
+            "index": 12,
+            "warmup": true,
+            "offsetMs": 481,
+            "durationUs": 6808.416,
+            "ok": true
+          },
+          {
+            "index": 13,
+            "warmup": true,
+            "offsetMs": 332,
+            "durationUs": 6181.959,
+            "ok": true
+          },
+          {
+            "index": 14,
+            "warmup": true,
+            "offsetMs": 537,
+            "durationUs": 5681.917,
+            "ok": true
+          },
+          {
+            "index": 15,
+            "warmup": true,
+            "offsetMs": 523,
+            "durationUs": 7366.875,
+            "ok": true
+          },
+          {
+            "index": 16,
+            "warmup": true,
+            "offsetMs": 741,
+            "durationUs": 7592.792,
+            "ok": true
+          },
+          {
+            "index": 17,
+            "warmup": true,
+            "offsetMs": 2,
+            "durationUs": 6237,
+            "ok": true
+          },
+          {
+            "index": 18,
+            "warmup": true,
+            "offsetMs": 662,
+            "durationUs": 7558.917,
+            "ok": true
+          },
+          {
+            "index": 19,
+            "warmup": true,
+            "offsetMs": 707,
+            "durationUs": 7378.666,
+            "ok": true
+          },
+          {
+            "index": 20,
+            "warmup": false,
+            "offsetMs": 718,
+            "durationUs": 6944.875,
+            "ok": true
+          },
+          {
+            "index": 21,
+            "warmup": false,
+            "offsetMs": 108,
+            "durationUs": 5956.417,
+            "ok": true
+          },
+          {
+            "index": 22,
+            "warmup": false,
+            "offsetMs": 200,
+            "durationUs": 7051.333,
+            "ok": true
+          },
+          {
+            "index": 23,
+            "warmup": false,
+            "offsetMs": 73,
+            "durationUs": 583.125,
+            "ok": true
+          },
+          {
+            "index": 24,
+            "warmup": false,
+            "offsetMs": 675,
+            "durationUs": 6728.334,
+            "ok": true
+          },
+          {
+            "index": 25,
+            "warmup": false,
+            "offsetMs": 386,
+            "durationUs": 6906.542,
+            "ok": true
+          },
+          {
+            "index": 26,
+            "warmup": false,
+            "offsetMs": 712,
+            "durationUs": 6951.541,
+            "ok": true
+          },
+          {
+            "index": 27,
+            "warmup": false,
+            "offsetMs": 205,
+            "durationUs": 7082.459,
+            "ok": true
+          },
+          {
+            "index": 28,
+            "warmup": false,
+            "offsetMs": 273,
+            "durationUs": 6980.416,
+            "ok": true
+          },
+          {
+            "index": 29,
+            "warmup": false,
+            "offsetMs": 142,
+            "durationUs": 6951.291,
+            "ok": true
+          },
+          {
+            "index": 30,
+            "warmup": false,
+            "offsetMs": 361,
+            "durationUs": 8029.166,
+            "ok": true
+          },
+          {
+            "index": 31,
+            "warmup": false,
+            "offsetMs": 637,
+            "durationUs": 5830.5,
+            "ok": true
+          },
+          {
+            "index": 32,
+            "warmup": false,
+            "offsetMs": 422,
+            "durationUs": 11455.084,
+            "ok": true
+          },
+          {
+            "index": 33,
+            "warmup": false,
+            "offsetMs": 518,
+            "durationUs": 7043.292,
+            "ok": true
+          },
+          {
+            "index": 34,
+            "warmup": false,
+            "offsetMs": 153,
+            "durationUs": 7599.708,
+            "ok": true
+          },
+          {
+            "index": 35,
+            "warmup": false,
+            "offsetMs": 607,
+            "durationUs": 7189.916,
+            "ok": true
+          },
+          {
+            "index": 36,
+            "warmup": false,
+            "offsetMs": 732,
+            "durationUs": 7029.167,
+            "ok": true
+          },
+          {
+            "index": 37,
+            "warmup": false,
+            "offsetMs": 318,
+            "durationUs": 5768.583,
+            "ok": true
+          },
+          {
+            "index": 38,
+            "warmup": false,
+            "offsetMs": 528,
+            "durationUs": 7948.25,
+            "ok": true
+          },
+          {
+            "index": 39,
+            "warmup": false,
+            "offsetMs": 160,
+            "durationUs": 6578.792,
+            "ok": true
+          },
+          {
+            "index": 40,
+            "warmup": false,
+            "offsetMs": 691,
+            "durationUs": 6248.083,
+            "ok": true
+          },
+          {
+            "index": 41,
+            "warmup": false,
+            "offsetMs": 190,
+            "durationUs": 602.334,
+            "ok": true
+          },
+          {
+            "index": 42,
+            "warmup": false,
+            "offsetMs": 667,
+            "durationUs": 6931.791,
+            "ok": true
+          },
+          {
+            "index": 43,
+            "warmup": false,
+            "offsetMs": 46,
+            "durationUs": 5847.292,
+            "ok": true
+          },
+          {
+            "index": 44,
+            "warmup": false,
+            "offsetMs": 173,
+            "durationUs": 6207.542,
+            "ok": true
+          },
+          {
+            "index": 45,
+            "warmup": false,
+            "offsetMs": 677,
+            "durationUs": 6986.917,
+            "ok": true
+          },
+          {
+            "index": 46,
+            "warmup": false,
+            "offsetMs": 672,
+            "durationUs": 6247.375,
+            "ok": true
+          },
+          {
+            "index": 47,
+            "warmup": false,
+            "offsetMs": 101,
+            "durationUs": 6931.5,
+            "ok": true
+          },
+          {
+            "index": 48,
+            "warmup": false,
+            "offsetMs": 187,
+            "durationUs": 6934.541,
+            "ok": true
+          },
+          {
+            "index": 49,
+            "warmup": false,
+            "offsetMs": 520,
+            "durationUs": 6679.792,
+            "ok": true
+          },
+          {
+            "index": 50,
+            "warmup": false,
+            "offsetMs": 664,
+            "durationUs": 5906.75,
+            "ok": true
+          },
+          {
+            "index": 51,
+            "warmup": false,
+            "offsetMs": 342,
+            "durationUs": 7751.5,
+            "ok": true
+          },
+          {
+            "index": 52,
+            "warmup": false,
+            "offsetMs": 734,
+            "durationUs": 5661.459,
+            "ok": true
+          },
+          {
+            "index": 53,
+            "warmup": false,
+            "offsetMs": 288,
+            "durationUs": 7643.209,
+            "ok": true
+          },
+          {
+            "index": 54,
+            "warmup": false,
+            "offsetMs": 487,
+            "durationUs": 6850.209,
+            "ok": true
+          },
+          {
+            "index": 55,
+            "warmup": false,
+            "offsetMs": 330,
+            "durationUs": 642.959,
+            "ok": true
+          },
+          {
+            "index": 56,
+            "warmup": false,
+            "offsetMs": 560,
+            "durationUs": 6138.458,
+            "ok": true
+          },
+          {
+            "index": 57,
+            "warmup": false,
+            "offsetMs": 301,
+            "durationUs": 7180.042,
+            "ok": true
+          },
+          {
+            "index": 58,
+            "warmup": false,
+            "offsetMs": 566,
+            "durationUs": 6252.041,
+            "ok": true
+          },
+          {
+            "index": 59,
+            "warmup": false,
+            "offsetMs": 677,
+            "durationUs": 7487.5,
+            "ok": true
+          },
+          {
+            "index": 60,
+            "warmup": false,
+            "offsetMs": 739,
+            "durationUs": 7204.792,
+            "ok": true
+          },
+          {
+            "index": 61,
+            "warmup": false,
+            "offsetMs": 423,
+            "durationUs": 6481.334,
+            "ok": true
+          },
+          {
+            "index": 62,
+            "warmup": false,
+            "offsetMs": 233,
+            "durationUs": 7189.209,
+            "ok": true
+          },
+          {
+            "index": 63,
+            "warmup": false,
+            "offsetMs": 164,
+            "durationUs": 6346.833,
+            "ok": true
+          },
+          {
+            "index": 64,
+            "warmup": false,
+            "offsetMs": 199,
+            "durationUs": 7709.375,
+            "ok": true
+          },
+          {
+            "index": 65,
+            "warmup": false,
+            "offsetMs": 108,
+            "durationUs": 602.25,
+            "ok": true
+          },
+          {
+            "index": 66,
+            "warmup": false,
+            "offsetMs": 688,
+            "durationUs": 7555.667,
+            "ok": true
+          },
+          {
+            "index": 67,
+            "warmup": false,
+            "offsetMs": 551,
+            "durationUs": 6857.417,
+            "ok": true
+          },
+          {
+            "index": 68,
+            "warmup": false,
+            "offsetMs": 106,
+            "durationUs": 6974.834,
+            "ok": true
+          },
+          {
+            "index": 69,
+            "warmup": false,
+            "offsetMs": 12,
+            "durationUs": 7019.125,
+            "ok": true
+          },
+          {
+            "index": 70,
+            "warmup": false,
+            "offsetMs": 646,
+            "durationUs": 6736.292,
+            "ok": true
+          },
+          {
+            "index": 71,
+            "warmup": false,
+            "offsetMs": 504,
+            "durationUs": 5863.542,
+            "ok": true
+          },
+          {
+            "index": 72,
+            "warmup": false,
+            "offsetMs": 114,
+            "durationUs": 6950.5,
+            "ok": true
+          },
+          {
+            "index": 73,
+            "warmup": false,
+            "offsetMs": 357,
+            "durationUs": 6790.042,
+            "ok": true
+          },
+          {
+            "index": 74,
+            "warmup": false,
+            "offsetMs": 563,
+            "durationUs": 6859.25,
+            "ok": true
+          },
+          {
+            "index": 75,
+            "warmup": false,
+            "offsetMs": 661,
+            "durationUs": 605.916,
+            "ok": true
+          },
+          {
+            "index": 76,
+            "warmup": false,
+            "offsetMs": 632,
+            "durationUs": 6888.5,
+            "ok": true
+          },
+          {
+            "index": 77,
+            "warmup": false,
+            "offsetMs": 559,
+            "durationUs": 6945.292,
+            "ok": true
+          },
+          {
+            "index": 78,
+            "warmup": false,
+            "offsetMs": 308,
+            "durationUs": 8563.291,
+            "ok": true
+          },
+          {
+            "index": 79,
+            "warmup": false,
+            "offsetMs": 76,
+            "durationUs": 8057.292,
+            "ok": true
+          },
+          {
+            "index": 80,
+            "warmup": false,
+            "offsetMs": 693,
+            "durationUs": 5870.458,
+            "ok": true
+          },
+          {
+            "index": 81,
+            "warmup": false,
+            "offsetMs": 473,
+            "durationUs": 7256,
+            "ok": true
+          },
+          {
+            "index": 82,
+            "warmup": false,
+            "offsetMs": 453,
+            "durationUs": 6939.417,
+            "ok": true
+          },
+          {
+            "index": 83,
+            "warmup": false,
+            "offsetMs": 739,
+            "durationUs": 6866.75,
+            "ok": true
+          },
+          {
+            "index": 84,
+            "warmup": false,
+            "offsetMs": 685,
+            "durationUs": 7710.125,
+            "ok": true
+          },
+          {
+            "index": 85,
+            "warmup": false,
+            "offsetMs": 705,
+            "durationUs": 5672.833,
+            "ok": true
+          },
+          {
+            "index": 86,
+            "warmup": false,
+            "offsetMs": 551,
+            "durationUs": 7071.709,
+            "ok": true
+          },
+          {
+            "index": 87,
+            "warmup": false,
+            "offsetMs": 622,
+            "durationUs": 6983.041,
+            "ok": true
+          },
+          {
+            "index": 88,
+            "warmup": false,
+            "offsetMs": 34,
+            "durationUs": 6546.541,
+            "ok": true
+          },
+          {
+            "index": 89,
+            "warmup": false,
+            "offsetMs": 562,
+            "durationUs": 6928,
+            "ok": true
+          },
+          {
+            "index": 90,
+            "warmup": false,
+            "offsetMs": 188,
+            "durationUs": 6698.083,
+            "ok": true
+          },
+          {
+            "index": 91,
+            "warmup": false,
+            "offsetMs": 336,
+            "durationUs": 7295.333,
+            "ok": true
+          },
+          {
+            "index": 92,
+            "warmup": false,
+            "offsetMs": 600,
+            "durationUs": 6946.333,
+            "ok": true
+          },
+          {
+            "index": 93,
+            "warmup": false,
+            "offsetMs": 351,
+            "durationUs": 6149.917,
+            "ok": true
+          },
+          {
+            "index": 94,
+            "warmup": false,
+            "offsetMs": 546,
+            "durationUs": 6693.917,
+            "ok": true
+          },
+          {
+            "index": 95,
+            "warmup": false,
+            "offsetMs": 355,
+            "durationUs": 5717.75,
+            "ok": true
+          },
+          {
+            "index": 96,
+            "warmup": false,
+            "offsetMs": 514,
+            "durationUs": 6985.291,
+            "ok": true
+          },
+          {
+            "index": 97,
+            "warmup": false,
+            "offsetMs": 163,
+            "durationUs": 5808.042,
+            "ok": true
+          },
+          {
+            "index": 98,
+            "warmup": false,
+            "offsetMs": 173,
+            "durationUs": 6955.833,
+            "ok": true
+          },
+          {
+            "index": 99,
+            "warmup": false,
+            "offsetMs": 425,
+            "durationUs": 6417.25,
+            "ok": true
+          },
+          {
+            "index": 100,
+            "warmup": false,
+            "offsetMs": 628,
+            "durationUs": 7151.209,
+            "ok": true
+          },
+          {
+            "index": 101,
+            "warmup": false,
+            "offsetMs": 327,
+            "durationUs": 6219.833,
+            "ok": true
+          },
+          {
+            "index": 102,
+            "warmup": false,
+            "offsetMs": 741,
+            "durationUs": 6712.583,
+            "ok": true
+          },
+          {
+            "index": 103,
+            "warmup": false,
+            "offsetMs": 717,
+            "durationUs": 6971.417,
+            "ok": true
+          },
+          {
+            "index": 104,
+            "warmup": false,
+            "offsetMs": 383,
+            "durationUs": 7666.209,
+            "ok": true
+          },
+          {
+            "index": 105,
+            "warmup": false,
+            "offsetMs": 636,
+            "durationUs": 6930.375,
+            "ok": true
+          },
+          {
+            "index": 106,
+            "warmup": false,
+            "offsetMs": 231,
+            "durationUs": 6975.875,
+            "ok": true
+          },
+          {
+            "index": 107,
+            "warmup": false,
+            "offsetMs": 78,
+            "durationUs": 7704.834,
+            "ok": true
+          },
+          {
+            "index": 108,
+            "warmup": false,
+            "offsetMs": 219,
+            "durationUs": 604,
+            "ok": true
+          },
+          {
+            "index": 109,
+            "warmup": false,
+            "offsetMs": 655,
+            "durationUs": 6760.625,
+            "ok": true
+          },
+          {
+            "index": 110,
+            "warmup": false,
+            "offsetMs": 680,
+            "durationUs": 7109.208,
+            "ok": true
+          },
+          {
+            "index": 111,
+            "warmup": false,
+            "offsetMs": 669,
+            "durationUs": 7696.291,
+            "ok": true
+          },
+          {
+            "index": 112,
+            "warmup": false,
+            "offsetMs": 143,
+            "durationUs": 6974.916,
+            "ok": true
+          },
+          {
+            "index": 113,
+            "warmup": false,
+            "offsetMs": 55,
+            "durationUs": 6994.709,
+            "ok": true
+          },
+          {
+            "index": 114,
+            "warmup": false,
+            "offsetMs": 52,
+            "durationUs": 6939.583,
+            "ok": true
+          },
+          {
+            "index": 115,
+            "warmup": false,
+            "offsetMs": 541,
+            "durationUs": 7745.959,
+            "ok": true
+          },
+          {
+            "index": 116,
+            "warmup": false,
+            "offsetMs": 556,
+            "durationUs": 7010.917,
+            "ok": true
+          },
+          {
+            "index": 117,
+            "warmup": false,
+            "offsetMs": 519,
+            "durationUs": 6200.833,
+            "ok": true
+          },
+          {
+            "index": 118,
+            "warmup": false,
+            "offsetMs": 381,
+            "durationUs": 6942.042,
+            "ok": true
+          },
+          {
+            "index": 119,
+            "warmup": false,
+            "offsetMs": 641,
+            "durationUs": 7168.291,
+            "ok": true
+          },
+          {
+            "index": 120,
+            "warmup": false,
+            "offsetMs": 181,
+            "durationUs": 3053.292,
+            "ok": true
+          },
+          {
+            "index": 121,
+            "warmup": false,
+            "offsetMs": 493,
+            "durationUs": 6758.125,
+            "ok": true
+          },
+          {
+            "index": 122,
+            "warmup": false,
+            "offsetMs": 236,
+            "durationUs": 6878.542,
+            "ok": true
+          },
+          {
+            "index": 123,
+            "warmup": false,
+            "offsetMs": 153,
+            "durationUs": 6923.208,
+            "ok": true
+          },
+          {
+            "index": 124,
+            "warmup": false,
+            "offsetMs": 92,
+            "durationUs": 6910.166,
+            "ok": true
+          },
+          {
+            "index": 125,
+            "warmup": false,
+            "offsetMs": 414,
+            "durationUs": 6106.708,
+            "ok": true
+          },
+          {
+            "index": 126,
+            "warmup": false,
+            "offsetMs": 457,
+            "durationUs": 6979.333,
+            "ok": true
+          },
+          {
+            "index": 127,
+            "warmup": false,
+            "offsetMs": 381,
+            "durationUs": 757.167,
+            "ok": true
+          },
+          {
+            "index": 128,
+            "warmup": false,
+            "offsetMs": 260,
+            "durationUs": 7016.75,
+            "ok": true
+          },
+          {
+            "index": 129,
+            "warmup": false,
+            "offsetMs": 713,
+            "durationUs": 6975,
+            "ok": true
+          },
+          {
+            "index": 130,
+            "warmup": false,
+            "offsetMs": 497,
+            "durationUs": 6922.5,
+            "ok": true
+          },
+          {
+            "index": 131,
+            "warmup": false,
+            "offsetMs": 350,
+            "durationUs": 5423.875,
+            "ok": true
+          },
+          {
+            "index": 132,
+            "warmup": false,
+            "offsetMs": 504,
+            "durationUs": 5400.708,
+            "ok": true
+          },
+          {
+            "index": 133,
+            "warmup": false,
+            "offsetMs": 451,
+            "durationUs": 560.541,
+            "ok": true
+          },
+          {
+            "index": 134,
+            "warmup": false,
+            "offsetMs": 630,
+            "durationUs": 7691.833,
+            "ok": true
+          },
+          {
+            "index": 135,
+            "warmup": false,
+            "offsetMs": 640,
+            "durationUs": 6949.875,
+            "ok": true
+          },
+          {
+            "index": 136,
+            "warmup": false,
+            "offsetMs": 263,
+            "durationUs": 6403.583,
+            "ok": true
+          },
+          {
+            "index": 137,
+            "warmup": false,
+            "offsetMs": 111,
+            "durationUs": 7041.416,
+            "ok": true
+          },
+          {
+            "index": 138,
+            "warmup": false,
+            "offsetMs": 537,
+            "durationUs": 7037.917,
+            "ok": true
+          },
+          {
+            "index": 139,
+            "warmup": false,
+            "offsetMs": 682,
+            "durationUs": 6888.583,
+            "ok": true
+          }
+        ],
+        "samplesUs": [
+          6944.875,
+          5956.417,
+          7051.333,
+          583.125,
+          6728.334,
+          6906.542,
+          6951.541,
+          7082.459,
+          6980.416,
+          6951.291,
+          8029.166,
+          5830.5,
+          11455.084,
+          7043.292,
+          7599.708,
+          7189.916,
+          7029.167,
+          5768.583,
+          7948.25,
+          6578.792,
+          6248.083,
+          602.334,
+          6931.791,
+          5847.292,
+          6207.542,
+          6986.917,
+          6247.375,
+          6931.5,
+          6934.541,
+          6679.792,
+          5906.75,
+          7751.5,
+          5661.459,
+          7643.209,
+          6850.209,
+          642.959,
+          6138.458,
+          7180.042,
+          6252.041,
+          7487.5,
+          7204.792,
+          6481.334,
+          7189.209,
+          6346.833,
+          7709.375,
+          602.25,
+          7555.667,
+          6857.417,
+          6974.834,
+          7019.125,
+          6736.292,
+          5863.542,
+          6950.5,
+          6790.042,
+          6859.25,
+          605.916,
+          6888.5,
+          6945.292,
+          8563.291,
+          8057.292,
+          5870.458,
+          7256,
+          6939.417,
+          6866.75,
+          7710.125,
+          5672.833,
+          7071.709,
+          6983.041,
+          6546.541,
+          6928,
+          6698.083,
+          7295.333,
+          6946.333,
+          6149.917,
+          6693.917,
+          5717.75,
+          6985.291,
+          5808.042,
+          6955.833,
+          6417.25,
+          7151.209,
+          6219.833,
+          6712.583,
+          6971.417,
+          7666.209,
+          6930.375,
+          6975.875,
+          7704.834,
+          604,
+          6760.625,
+          7109.208,
+          7696.291,
+          6974.916,
+          6994.709,
+          6939.583,
+          7745.959,
+          7010.917,
+          6200.833,
+          6942.042,
+          7168.291,
+          3053.292,
+          6758.125,
+          6878.542,
+          6923.208,
+          6910.166,
+          6106.708,
+          6979.333,
+          757.167,
+          7016.75,
+          6975,
+          6922.5,
+          5423.875,
+          5400.708,
+          560.541,
+          7691.833,
+          6949.875,
+          6403.583,
+          7041.416,
+          7037.917,
+          6888.583
+        ],
+        "correctness": true
+      },
+      "tmux": {
+        "attempts": [
+          {
+            "index": 0,
+            "warmup": true,
+            "offsetMs": 549,
+            "durationUs": 208595,
+            "ok": true
+          },
+          {
+            "index": 1,
+            "warmup": true,
+            "offsetMs": 249,
+            "durationUs": 509361.292,
+            "ok": true
+          },
+          {
+            "index": 2,
+            "warmup": true,
+            "offsetMs": 504,
+            "durationUs": 251758.459,
+            "ok": true
+          },
+          {
+            "index": 3,
+            "warmup": true,
+            "offsetMs": 38,
+            "durationUs": 718869.416,
+            "ok": true
+          },
+          {
+            "index": 4,
+            "warmup": true,
+            "offsetMs": 327,
+            "durationUs": 429270.041,
+            "ok": true
+          },
+          {
+            "index": 5,
+            "warmup": true,
+            "offsetMs": 656,
+            "durationUs": 101778.5,
+            "ok": true
+          },
+          {
+            "index": 6,
+            "warmup": true,
+            "offsetMs": 598,
+            "durationUs": 159715.542,
+            "ok": true
+          },
+          {
+            "index": 7,
+            "warmup": true,
+            "offsetMs": 710,
+            "durationUs": 46579.875,
+            "ok": true
+          },
+          {
+            "index": 8,
+            "warmup": true,
+            "offsetMs": 183,
+            "durationUs": 574603.458,
+            "ok": true
+          },
+          {
+            "index": 9,
+            "warmup": true,
+            "offsetMs": 307,
+            "durationUs": 450768.458,
+            "ok": true
+          },
+          {
+            "index": 10,
+            "warmup": true,
+            "offsetMs": 36,
+            "durationUs": 719805.5,
+            "ok": true
+          },
+          {
+            "index": 11,
+            "warmup": true,
+            "offsetMs": 521,
+            "durationUs": 236681.25,
+            "ok": true
+          },
+          {
+            "index": 12,
+            "warmup": true,
+            "offsetMs": 481,
+            "durationUs": 280657.5,
+            "ok": true
+          },
+          {
+            "index": 13,
+            "warmup": true,
+            "offsetMs": 332,
+            "durationUs": 425074.334,
+            "ok": true
+          },
+          {
+            "index": 14,
+            "warmup": true,
+            "offsetMs": 537,
+            "durationUs": 246429,
+            "ok": true
+          },
+          {
+            "index": 15,
+            "warmup": true,
+            "offsetMs": 523,
+            "durationUs": 236880.959,
+            "ok": true
+          },
+          {
+            "index": 16,
+            "warmup": true,
+            "offsetMs": 741,
+            "durationUs": 27364.875,
+            "ok": true
+          },
+          {
+            "index": 17,
+            "warmup": true,
+            "offsetMs": 2,
+            "durationUs": 775974.417,
+            "ok": true
+          },
+          {
+            "index": 18,
+            "warmup": true,
+            "offsetMs": 662,
+            "durationUs": 93550.334,
+            "ok": true
+          },
+          {
+            "index": 19,
+            "warmup": true,
+            "offsetMs": 707,
+            "durationUs": 48865.25,
+            "ok": true
+          },
+          {
+            "index": 20,
+            "warmup": false,
+            "offsetMs": 718,
+            "durationUs": 38685.5,
+            "ok": true
+          },
+          {
+            "index": 21,
+            "warmup": false,
+            "offsetMs": 108,
+            "durationUs": 647068.542,
+            "ok": true
+          },
+          {
+            "index": 22,
+            "warmup": false,
+            "offsetMs": 200,
+            "durationUs": 565118.791,
+            "ok": true
+          },
+          {
+            "index": 23,
+            "warmup": false,
+            "offsetMs": 73,
+            "durationUs": 683294.083,
+            "ok": true
+          },
+          {
+            "index": 24,
+            "warmup": false,
+            "offsetMs": 675,
+            "durationUs": 82055.584,
+            "ok": true
+          },
+          {
+            "index": 25,
+            "warmup": false,
+            "offsetMs": 386,
+            "durationUs": 371635.583,
+            "ok": true
+          },
+          {
+            "index": 26,
+            "warmup": false,
+            "offsetMs": 712,
+            "durationUs": 43305.625,
+            "ok": true
+          },
+          {
+            "index": 27,
+            "warmup": false,
+            "offsetMs": 205,
+            "durationUs": 549698.708,
+            "ok": true
+          },
+          {
+            "index": 28,
+            "warmup": false,
+            "offsetMs": 273,
+            "durationUs": 481651.333,
+            "ok": true
+          },
+          {
+            "index": 29,
+            "warmup": false,
+            "offsetMs": 142,
+            "durationUs": 617767.125,
+            "ok": true
+          },
+          {
+            "index": 30,
+            "warmup": false,
+            "offsetMs": 361,
+            "durationUs": 395415,
+            "ok": true
+          },
+          {
+            "index": 31,
+            "warmup": false,
+            "offsetMs": 637,
+            "durationUs": 119158.5,
+            "ok": true
+          },
+          {
+            "index": 32,
+            "warmup": false,
+            "offsetMs": 422,
+            "durationUs": 334490.875,
+            "ok": true
+          },
+          {
+            "index": 33,
+            "warmup": false,
+            "offsetMs": 518,
+            "durationUs": 240229.917,
+            "ok": true
+          },
+          {
+            "index": 34,
+            "warmup": false,
+            "offsetMs": 153,
+            "durationUs": 602289.125,
+            "ok": true
+          },
+          {
+            "index": 35,
+            "warmup": false,
+            "offsetMs": 607,
+            "durationUs": 151283.458,
+            "ok": true
+          },
+          {
+            "index": 36,
+            "warmup": false,
+            "offsetMs": 732,
+            "durationUs": 23599.791,
+            "ok": true
+          },
+          {
+            "index": 37,
+            "warmup": false,
+            "offsetMs": 318,
+            "durationUs": 437571.042,
+            "ok": true
+          },
+          {
+            "index": 38,
+            "warmup": false,
+            "offsetMs": 528,
+            "durationUs": 229251.291,
+            "ok": true
+          },
+          {
+            "index": 39,
+            "warmup": false,
+            "offsetMs": 160,
+            "durationUs": 595321.583,
+            "ok": true
+          },
+          {
+            "index": 40,
+            "warmup": false,
+            "offsetMs": 691,
+            "durationUs": 64745.292,
+            "ok": true
+          },
+          {
+            "index": 41,
+            "warmup": false,
+            "offsetMs": 190,
+            "durationUs": 571942.125,
+            "ok": true
+          },
+          {
+            "index": 42,
+            "warmup": false,
+            "offsetMs": 667,
+            "durationUs": 87529.334,
+            "ok": true
+          },
+          {
+            "index": 43,
+            "warmup": false,
+            "offsetMs": 46,
+            "durationUs": 710644.25,
+            "ok": true
+          },
+          {
+            "index": 44,
+            "warmup": false,
+            "offsetMs": 173,
+            "durationUs": 583652,
+            "ok": true
+          },
+          {
+            "index": 45,
+            "warmup": false,
+            "offsetMs": 677,
+            "durationUs": 78663.166,
+            "ok": true
+          },
+          {
+            "index": 46,
+            "warmup": false,
+            "offsetMs": 672,
+            "durationUs": 85958.333,
+            "ok": true
+          },
+          {
+            "index": 47,
+            "warmup": false,
+            "offsetMs": 101,
+            "durationUs": 652792.042,
+            "ok": true
+          },
+          {
+            "index": 48,
+            "warmup": false,
+            "offsetMs": 187,
+            "durationUs": 569978.792,
+            "ok": true
+          },
+          {
+            "index": 49,
+            "warmup": false,
+            "offsetMs": 520,
+            "durationUs": 236466.125,
+            "ok": true
+          },
+          {
+            "index": 50,
+            "warmup": false,
+            "offsetMs": 664,
+            "durationUs": 91356.375,
+            "ok": true
+          },
+          {
+            "index": 51,
+            "warmup": false,
+            "offsetMs": 342,
+            "durationUs": 414936.083,
+            "ok": true
+          },
+          {
+            "index": 52,
+            "warmup": false,
+            "offsetMs": 734,
+            "durationUs": 23093.042,
+            "ok": true
+          },
+          {
+            "index": 53,
+            "warmup": false,
+            "offsetMs": 288,
+            "durationUs": 468381.083,
+            "ok": true
+          },
+          {
+            "index": 54,
+            "warmup": false,
+            "offsetMs": 487,
+            "durationUs": 270205.958,
+            "ok": true
+          },
+          {
+            "index": 55,
+            "warmup": false,
+            "offsetMs": 330,
+            "durationUs": 428890.792,
+            "ok": true
+          },
+          {
+            "index": 56,
+            "warmup": false,
+            "offsetMs": 560,
+            "durationUs": 197413.833,
+            "ok": true
+          },
+          {
+            "index": 57,
+            "warmup": false,
+            "offsetMs": 301,
+            "durationUs": 455253.292,
+            "ok": true
+          },
+          {
+            "index": 58,
+            "warmup": false,
+            "offsetMs": 566,
+            "durationUs": 189586.375,
+            "ok": true
+          },
+          {
+            "index": 59,
+            "warmup": false,
+            "offsetMs": 677,
+            "durationUs": 78336.958,
+            "ok": true
+          },
+          {
+            "index": 60,
+            "warmup": false,
+            "offsetMs": 739,
+            "durationUs": 22025,
+            "ok": true
+          },
+          {
+            "index": 61,
+            "warmup": false,
+            "offsetMs": 423,
+            "durationUs": 331267.375,
+            "ok": true
+          },
+          {
+            "index": 62,
+            "warmup": false,
+            "offsetMs": 233,
+            "durationUs": 523561.792,
+            "ok": true
+          },
+          {
+            "index": 63,
+            "warmup": false,
+            "offsetMs": 164,
+            "durationUs": 591688.208,
+            "ok": true
+          },
+          {
+            "index": 64,
+            "warmup": false,
+            "offsetMs": 199,
+            "durationUs": 560931.042,
+            "ok": true
+          },
+          {
+            "index": 65,
+            "warmup": false,
+            "offsetMs": 108,
+            "durationUs": 649873.791,
+            "ok": true
+          },
+          {
+            "index": 66,
+            "warmup": false,
+            "offsetMs": 688,
+            "durationUs": 67057.291,
+            "ok": true
+          },
+          {
+            "index": 67,
+            "warmup": false,
+            "offsetMs": 551,
+            "durationUs": 207449.917,
+            "ok": true
+          },
+          {
+            "index": 68,
+            "warmup": false,
+            "offsetMs": 106,
+            "durationUs": 647647.584,
+            "ok": true
+          },
+          {
+            "index": 69,
+            "warmup": false,
+            "offsetMs": 12,
+            "durationUs": 743580.625,
+            "ok": true
+          },
+          {
+            "index": 70,
+            "warmup": false,
+            "offsetMs": 646,
+            "durationUs": 109639.042,
+            "ok": true
+          },
+          {
+            "index": 71,
+            "warmup": false,
+            "offsetMs": 504,
+            "durationUs": 254533.75,
+            "ok": true
+          },
+          {
+            "index": 72,
+            "warmup": false,
+            "offsetMs": 114,
+            "durationUs": 641175.041,
+            "ok": true
+          },
+          {
+            "index": 73,
+            "warmup": false,
+            "offsetMs": 357,
+            "durationUs": 400377.584,
+            "ok": true
+          },
+          {
+            "index": 74,
+            "warmup": false,
+            "offsetMs": 563,
+            "durationUs": 194671.625,
+            "ok": true
+          },
+          {
+            "index": 75,
+            "warmup": false,
+            "offsetMs": 661,
+            "durationUs": 96606.375,
+            "ok": true
+          },
+          {
+            "index": 76,
+            "warmup": false,
+            "offsetMs": 632,
+            "durationUs": 124318.083,
+            "ok": true
+          },
+          {
+            "index": 77,
+            "warmup": false,
+            "offsetMs": 559,
+            "durationUs": 198766.25,
+            "ok": true
+          },
+          {
+            "index": 78,
+            "warmup": false,
+            "offsetMs": 308,
+            "durationUs": 449076.208,
+            "ok": true
+          },
+          {
+            "index": 79,
+            "warmup": false,
+            "offsetMs": 76,
+            "durationUs": 682701.959,
+            "ok": true
+          },
+          {
+            "index": 80,
+            "warmup": false,
+            "offsetMs": 693,
+            "durationUs": 62318.167,
+            "ok": true
+          },
+          {
+            "index": 81,
+            "warmup": false,
+            "offsetMs": 473,
+            "durationUs": 284155.541,
+            "ok": true
+          },
+          {
+            "index": 82,
+            "warmup": false,
+            "offsetMs": 453,
+            "durationUs": 305090.333,
+            "ok": true
+          },
+          {
+            "index": 83,
+            "warmup": false,
+            "offsetMs": 739,
+            "durationUs": 20593.125,
+            "ok": true
+          },
+          {
+            "index": 84,
+            "warmup": false,
+            "offsetMs": 685,
+            "durationUs": 69828.458,
+            "ok": true
+          },
+          {
+            "index": 85,
+            "warmup": false,
+            "offsetMs": 705,
+            "durationUs": 51155.292,
+            "ok": true
+          },
+          {
+            "index": 86,
+            "warmup": false,
+            "offsetMs": 551,
+            "durationUs": 204408.875,
+            "ok": true
+          },
+          {
+            "index": 87,
+            "warmup": false,
+            "offsetMs": 622,
+            "durationUs": 133449.833,
+            "ok": true
+          },
+          {
+            "index": 88,
+            "warmup": false,
+            "offsetMs": 34,
+            "durationUs": 721537.25,
+            "ok": true
+          },
+          {
+            "index": 89,
+            "warmup": false,
+            "offsetMs": 562,
+            "durationUs": 193900.125,
+            "ok": true
+          },
+          {
+            "index": 90,
+            "warmup": false,
+            "offsetMs": 188,
+            "durationUs": 570834.125,
+            "ok": true
+          },
+          {
+            "index": 91,
+            "warmup": false,
+            "offsetMs": 336,
+            "durationUs": 419274.125,
+            "ok": true
+          },
+          {
+            "index": 92,
+            "warmup": false,
+            "offsetMs": 600,
+            "durationUs": 156740.666,
+            "ok": true
+          },
+          {
+            "index": 93,
+            "warmup": false,
+            "offsetMs": 351,
+            "durationUs": 406406.25,
+            "ok": true
+          },
+          {
+            "index": 94,
+            "warmup": false,
+            "offsetMs": 546,
+            "durationUs": 213627.875,
+            "ok": true
+          },
+          {
+            "index": 95,
+            "warmup": false,
+            "offsetMs": 355,
+            "durationUs": 399375.542,
+            "ok": true
+          },
+          {
+            "index": 96,
+            "warmup": false,
+            "offsetMs": 514,
+            "durationUs": 241731.792,
+            "ok": true
+          },
+          {
+            "index": 97,
+            "warmup": false,
+            "offsetMs": 163,
+            "durationUs": 593563.458,
+            "ok": true
+          },
+          {
+            "index": 98,
+            "warmup": false,
+            "offsetMs": 173,
+            "durationUs": 585246,
+            "ok": true
+          },
+          {
+            "index": 99,
+            "warmup": false,
+            "offsetMs": 425,
+            "durationUs": 329125.166,
+            "ok": true
+          },
+          {
+            "index": 100,
+            "warmup": false,
+            "offsetMs": 628,
+            "durationUs": 126508.791,
+            "ok": true
+          },
+          {
+            "index": 101,
+            "warmup": false,
+            "offsetMs": 327,
+            "durationUs": 432199.167,
+            "ok": true
+          },
+          {
+            "index": 102,
+            "warmup": false,
+            "offsetMs": 741,
+            "durationUs": 20508.333,
+            "ok": true
+          },
+          {
+            "index": 103,
+            "warmup": false,
+            "offsetMs": 717,
+            "durationUs": 36934.416,
+            "ok": true
+          },
+          {
+            "index": 104,
+            "warmup": false,
+            "offsetMs": 383,
+            "durationUs": 371621.959,
+            "ok": true
+          },
+          {
+            "index": 105,
+            "warmup": false,
+            "offsetMs": 636,
+            "durationUs": 120712,
+            "ok": true
+          },
+          {
+            "index": 106,
+            "warmup": false,
+            "offsetMs": 231,
+            "durationUs": 525450.917,
+            "ok": true
+          },
+          {
+            "index": 107,
+            "warmup": false,
+            "offsetMs": 78,
+            "durationUs": 678513.541,
+            "ok": true
+          },
+          {
+            "index": 108,
+            "warmup": false,
+            "offsetMs": 219,
+            "durationUs": 536519.708,
+            "ok": true
+          },
+          {
+            "index": 109,
+            "warmup": false,
+            "offsetMs": 655,
+            "durationUs": 104303.292,
+            "ok": true
+          },
+          {
+            "index": 110,
+            "warmup": false,
+            "offsetMs": 680,
+            "durationUs": 76082.292,
+            "ok": true
+          },
+          {
+            "index": 111,
+            "warmup": false,
+            "offsetMs": 669,
+            "durationUs": 85702.125,
+            "ok": true
+          },
+          {
+            "index": 112,
+            "warmup": false,
+            "offsetMs": 143,
+            "durationUs": 613628.125,
+            "ok": true
+          },
+          {
+            "index": 113,
+            "warmup": false,
+            "offsetMs": 55,
+            "durationUs": 698690.958,
+            "ok": true
+          },
+          {
+            "index": 114,
+            "warmup": false,
+            "offsetMs": 52,
+            "durationUs": 705538.166,
+            "ok": true
+          },
+          {
+            "index": 115,
+            "warmup": false,
+            "offsetMs": 541,
+            "durationUs": 216302,
+            "ok": true
+          },
+          {
+            "index": 116,
+            "warmup": false,
+            "offsetMs": 556,
+            "durationUs": 201199.459,
+            "ok": true
+          },
+          {
+            "index": 117,
+            "warmup": false,
+            "offsetMs": 519,
+            "durationUs": 236689,
+            "ok": true
+          },
+          {
+            "index": 118,
+            "warmup": false,
+            "offsetMs": 381,
+            "durationUs": 378347.5,
+            "ok": true
+          },
+          {
+            "index": 119,
+            "warmup": false,
+            "offsetMs": 641,
+            "durationUs": 115044.417,
+            "ok": true
+          },
+          {
+            "index": 120,
+            "warmup": false,
+            "offsetMs": 181,
+            "durationUs": 575622.834,
+            "ok": true
+          },
+          {
+            "index": 121,
+            "warmup": false,
+            "offsetMs": 493,
+            "durationUs": 268759.333,
+            "ok": true
+          },
+          {
+            "index": 122,
+            "warmup": false,
+            "offsetMs": 236,
+            "durationUs": 523462.083,
+            "ok": true
+          },
+          {
+            "index": 123,
+            "warmup": false,
+            "offsetMs": 153,
+            "durationUs": 603310.959,
+            "ok": true
+          },
+          {
+            "index": 124,
+            "warmup": false,
+            "offsetMs": 92,
+            "durationUs": 663330.709,
+            "ok": true
+          },
+          {
+            "index": 125,
+            "warmup": false,
+            "offsetMs": 414,
+            "durationUs": 343993.25,
+            "ok": true
+          },
+          {
+            "index": 126,
+            "warmup": false,
+            "offsetMs": 457,
+            "durationUs": 299418,
+            "ok": true
+          },
+          {
+            "index": 127,
+            "warmup": false,
+            "offsetMs": 381,
+            "durationUs": 375397.042,
+            "ok": true
+          },
+          {
+            "index": 128,
+            "warmup": false,
+            "offsetMs": 260,
+            "durationUs": 496396.333,
+            "ok": true
+          },
+          {
+            "index": 129,
+            "warmup": false,
+            "offsetMs": 713,
+            "durationUs": 41695.209,
+            "ok": true
+          },
+          {
+            "index": 130,
+            "warmup": false,
+            "offsetMs": 497,
+            "durationUs": 260574.791,
+            "ok": true
+          },
+          {
+            "index": 131,
+            "warmup": false,
+            "offsetMs": 350,
+            "durationUs": 406096.333,
+            "ok": true
+          },
+          {
+            "index": 132,
+            "warmup": false,
+            "offsetMs": 504,
+            "durationUs": 256098.458,
+            "ok": true
+          },
+          {
+            "index": 133,
+            "warmup": false,
+            "offsetMs": 451,
+            "durationUs": 304463.375,
+            "ok": true
+          },
+          {
+            "index": 134,
+            "warmup": false,
+            "offsetMs": 630,
+            "durationUs": 125809.583,
+            "ok": true
+          },
+          {
+            "index": 135,
+            "warmup": false,
+            "offsetMs": 640,
+            "durationUs": 118515.375,
+            "ok": true
+          },
+          {
+            "index": 136,
+            "warmup": false,
+            "offsetMs": 263,
+            "durationUs": 492225.458,
+            "ok": true
+          },
+          {
+            "index": 137,
+            "warmup": false,
+            "offsetMs": 111,
+            "durationUs": 645164.583,
+            "ok": true
+          },
+          {
+            "index": 138,
+            "warmup": false,
+            "offsetMs": 537,
+            "durationUs": 219707.25,
+            "ok": true
+          },
+          {
+            "index": 139,
+            "warmup": false,
+            "offsetMs": 682,
+            "durationUs": 75138.958,
+            "ok": true
+          }
+        ],
+        "samplesUs": [
+          38685.5,
+          647068.542,
+          565118.791,
+          683294.083,
+          82055.584,
+          371635.583,
+          43305.625,
+          549698.708,
+          481651.333,
+          617767.125,
+          395415,
+          119158.5,
+          334490.875,
+          240229.917,
+          602289.125,
+          151283.458,
+          23599.791,
+          437571.042,
+          229251.291,
+          595321.583,
+          64745.292,
+          571942.125,
+          87529.334,
+          710644.25,
+          583652,
+          78663.166,
+          85958.333,
+          652792.042,
+          569978.792,
+          236466.125,
+          91356.375,
+          414936.083,
+          23093.042,
+          468381.083,
+          270205.958,
+          428890.792,
+          197413.833,
+          455253.292,
+          189586.375,
+          78336.958,
+          22025,
+          331267.375,
+          523561.792,
+          591688.208,
+          560931.042,
+          649873.791,
+          67057.291,
+          207449.917,
+          647647.584,
+          743580.625,
+          109639.042,
+          254533.75,
+          641175.041,
+          400377.584,
+          194671.625,
+          96606.375,
+          124318.083,
+          198766.25,
+          449076.208,
+          682701.959,
+          62318.167,
+          284155.541,
+          305090.333,
+          20593.125,
+          69828.458,
+          51155.292,
+          204408.875,
+          133449.833,
+          721537.25,
+          193900.125,
+          570834.125,
+          419274.125,
+          156740.666,
+          406406.25,
+          213627.875,
+          399375.542,
+          241731.792,
+          593563.458,
+          585246,
+          329125.166,
+          126508.791,
+          432199.167,
+          20508.333,
+          36934.416,
+          371621.959,
+          120712,
+          525450.917,
+          678513.541,
+          536519.708,
+          104303.292,
+          76082.292,
+          85702.125,
+          613628.125,
+          698690.958,
+          705538.166,
+          216302,
+          201199.459,
+          236689,
+          378347.5,
+          115044.417,
+          575622.834,
+          268759.333,
+          523462.083,
+          603310.959,
+          663330.709,
+          343993.25,
+          299418,
+          375397.042,
+          496396.333,
+          41695.209,
+          260574.791,
+          406096.333,
+          256098.458,
+          304463.375,
+          125809.583,
+          118515.375,
+          492225.458,
+          645164.583,
+          219707.25,
+          75138.958
+        ],
+        "correctness": true
+      }
+    },
+    "throughput": {
+      "agentmux": {
+        "attempts": [
+          {
+            "index": 0,
+            "warmup": true,
+            "durationUs": 683604.791,
+            "bytesPerSecond": 6135568.467658677,
+            "ok": true,
+            "oracle": {
+              "byteCount": 4194304,
+              "sha256": "baa7a6d36ffa957552df230235c2d51d735f28d49c58a5f3438a3a973a25a37d"
+            }
+          },
+          {
+            "index": 1,
+            "warmup": false,
+            "durationUs": 692835.708,
+            "bytesPerSecond": 6053821.925702479,
+            "ok": true,
+            "oracle": {
+              "byteCount": 4194304,
+              "sha256": "baa7a6d36ffa957552df230235c2d51d735f28d49c58a5f3438a3a973a25a37d"
+            }
+          },
+          {
+            "index": 2,
+            "warmup": false,
+            "durationUs": 694373.5,
+            "bytesPerSecond": 6040414.848780951,
+            "ok": true,
+            "oracle": {
+              "byteCount": 4194304,
+              "sha256": "baa7a6d36ffa957552df230235c2d51d735f28d49c58a5f3438a3a973a25a37d"
+            }
+          },
+          {
+            "index": 3,
+            "warmup": false,
+            "durationUs": 683413.709,
+            "bytesPerSecond": 6137283.968355397,
+            "ok": true,
+            "oracle": {
+              "byteCount": 4194304,
+              "sha256": "baa7a6d36ffa957552df230235c2d51d735f28d49c58a5f3438a3a973a25a37d"
+            }
+          },
+          {
+            "index": 4,
+            "warmup": false,
+            "durationUs": 683286.833,
+            "bytesPerSecond": 6138423.56889087,
+            "ok": true,
+            "oracle": {
+              "byteCount": 4194304,
+              "sha256": "baa7a6d36ffa957552df230235c2d51d735f28d49c58a5f3438a3a973a25a37d"
+            }
+          },
+          {
+            "index": 5,
+            "warmup": false,
+            "durationUs": 691452.791,
+            "bytesPerSecond": 6065929.669520996,
+            "ok": true,
+            "oracle": {
+              "byteCount": 4194304,
+              "sha256": "baa7a6d36ffa957552df230235c2d51d735f28d49c58a5f3438a3a973a25a37d"
+            }
+          },
+          {
+            "index": 6,
+            "warmup": false,
+            "durationUs": 679976.792,
+            "bytesPerSecond": 6168304.638255947,
+            "ok": true,
+            "oracle": {
+              "byteCount": 4194304,
+              "sha256": "baa7a6d36ffa957552df230235c2d51d735f28d49c58a5f3438a3a973a25a37d"
+            }
+          },
+          {
+            "index": 7,
+            "warmup": false,
+            "durationUs": 708372.375,
+            "bytesPerSecond": 5921043.998927823,
+            "ok": true,
+            "oracle": {
+              "byteCount": 4194304,
+              "sha256": "baa7a6d36ffa957552df230235c2d51d735f28d49c58a5f3438a3a973a25a37d"
+            }
+          }
+        ],
+        "samplesBytesPerSecond": [
+          6053821.925702479,
+          6040414.848780951,
+          6137283.968355397,
+          6138423.56889087,
+          6065929.669520996,
+          6168304.638255947,
+          5921043.998927823
+        ],
+        "correctness": true
+      },
+      "tmux": {
+        "attempts": [
+          {
+            "index": 0,
+            "warmup": true,
+            "durationUs": 902945.667,
+            "bytesPerSecond": 4645134.423132461,
+            "ok": true,
+            "oracle": {
+              "byteCount": 4194304,
+              "sha256": "baa7a6d36ffa957552df230235c2d51d735f28d49c58a5f3438a3a973a25a37d"
+            }
+          },
+          {
+            "index": 1,
+            "warmup": false,
+            "durationUs": 896274.25,
+            "bytesPerSecond": 4679710.479242263,
+            "ok": true,
+            "oracle": {
+              "byteCount": 4194304,
+              "sha256": "baa7a6d36ffa957552df230235c2d51d735f28d49c58a5f3438a3a973a25a37d"
+            }
+          },
+          {
+            "index": 2,
+            "warmup": false,
+            "durationUs": 897067.959,
+            "bytesPerSecond": 4675569.958685816,
+            "ok": true,
+            "oracle": {
+              "byteCount": 4194304,
+              "sha256": "baa7a6d36ffa957552df230235c2d51d735f28d49c58a5f3438a3a973a25a37d"
+            }
+          },
+          {
+            "index": 3,
+            "warmup": false,
+            "durationUs": 900953.167,
+            "bytesPerSecond": 4655407.354819809,
+            "ok": true,
+            "oracle": {
+              "byteCount": 4194304,
+              "sha256": "baa7a6d36ffa957552df230235c2d51d735f28d49c58a5f3438a3a973a25a37d"
+            }
+          },
+          {
+            "index": 4,
+            "warmup": false,
+            "durationUs": 892622.917,
+            "bytesPerSecond": 4698853.144053885,
+            "ok": true,
+            "oracle": {
+              "byteCount": 4194304,
+              "sha256": "baa7a6d36ffa957552df230235c2d51d735f28d49c58a5f3438a3a973a25a37d"
+            }
+          },
+          {
+            "index": 5,
+            "warmup": false,
+            "durationUs": 896120.459,
+            "bytesPerSecond": 4680513.604923733,
+            "ok": true,
+            "oracle": {
+              "byteCount": 4194304,
+              "sha256": "baa7a6d36ffa957552df230235c2d51d735f28d49c58a5f3438a3a973a25a37d"
+            }
+          },
+          {
+            "index": 6,
+            "warmup": false,
+            "durationUs": 901458.791,
+            "bytesPerSecond": 4652796.158709822,
+            "ok": true,
+            "oracle": {
+              "byteCount": 4194304,
+              "sha256": "baa7a6d36ffa957552df230235c2d51d735f28d49c58a5f3438a3a973a25a37d"
+            }
+          },
+          {
+            "index": 7,
+            "warmup": false,
+            "durationUs": 900146.375,
+            "bytesPerSecond": 4659579.948872204,
+            "ok": true,
+            "oracle": {
+              "byteCount": 4194304,
+              "sha256": "baa7a6d36ffa957552df230235c2d51d735f28d49c58a5f3438a3a973a25a37d"
+            }
+          }
+        ],
+        "samplesBytesPerSecond": [
+          4679710.479242263,
+          4675569.958685816,
+          4655407.354819809,
+          4698853.144053885,
+          4680513.604923733,
+          4652796.158709822,
+          4659579.948872204
+        ],
+        "correctness": true
+      }
+    },
+    "attachReplay": {
+      "agentmux": {
+        "attempts": [
+          {
+            "index": 0,
+            "warmup": true,
+            "durationUs": 4672.083,
+            "ok": true
+          },
+          {
+            "index": 1,
+            "warmup": true,
+            "durationUs": 4416.375,
+            "ok": true
+          },
+          {
+            "index": 2,
+            "warmup": true,
+            "durationUs": 4499,
+            "ok": true
+          },
+          {
+            "index": 3,
+            "warmup": true,
+            "durationUs": 4566.542,
+            "ok": true
+          },
+          {
+            "index": 4,
+            "warmup": true,
+            "durationUs": 4503.292,
+            "ok": true
+          },
+          {
+            "index": 5,
+            "warmup": true,
+            "durationUs": 4714.208,
+            "ok": true
+          },
+          {
+            "index": 6,
+            "warmup": true,
+            "durationUs": 4790.375,
+            "ok": true
+          },
+          {
+            "index": 7,
+            "warmup": true,
+            "durationUs": 4476,
+            "ok": true
+          },
+          {
+            "index": 8,
+            "warmup": true,
+            "durationUs": 4289.5,
+            "ok": true
+          },
+          {
+            "index": 9,
+            "warmup": true,
+            "durationUs": 4542.417,
+            "ok": true
+          },
+          {
+            "index": 10,
+            "warmup": true,
+            "durationUs": 4492.5,
+            "ok": true
+          },
+          {
+            "index": 11,
+            "warmup": true,
+            "durationUs": 4598.542,
+            "ok": true
+          },
+          {
+            "index": 12,
+            "warmup": true,
+            "durationUs": 4527.458,
+            "ok": true
+          },
+          {
+            "index": 13,
+            "warmup": true,
+            "durationUs": 8284.917,
+            "ok": true
+          },
+          {
+            "index": 14,
+            "warmup": true,
+            "durationUs": 4423.209,
+            "ok": true
+          },
+          {
+            "index": 15,
+            "warmup": true,
+            "durationUs": 4312.041,
+            "ok": true
+          },
+          {
+            "index": 16,
+            "warmup": true,
+            "durationUs": 4223.625,
+            "ok": true
+          },
+          {
+            "index": 17,
+            "warmup": true,
+            "durationUs": 4314.916,
+            "ok": true
+          },
+          {
+            "index": 18,
+            "warmup": true,
+            "durationUs": 4162.209,
+            "ok": true
+          },
+          {
+            "index": 19,
+            "warmup": true,
+            "durationUs": 4271.292,
+            "ok": true
+          },
+          {
+            "index": 20,
+            "warmup": false,
+            "durationUs": 4321.375,
+            "ok": true
+          },
+          {
+            "index": 21,
+            "warmup": false,
+            "durationUs": 4257.625,
+            "ok": true
+          },
+          {
+            "index": 22,
+            "warmup": false,
+            "durationUs": 4379.834,
+            "ok": true
+          },
+          {
+            "index": 23,
+            "warmup": false,
+            "durationUs": 4274.958,
+            "ok": true
+          },
+          {
+            "index": 24,
+            "warmup": false,
+            "durationUs": 4304.042,
+            "ok": true
+          },
+          {
+            "index": 25,
+            "warmup": false,
+            "durationUs": 4318.917,
+            "ok": true
+          },
+          {
+            "index": 26,
+            "warmup": false,
+            "durationUs": 4138.917,
+            "ok": true
+          },
+          {
+            "index": 27,
+            "warmup": false,
+            "durationUs": 4166.125,
+            "ok": true
+          },
+          {
+            "index": 28,
+            "warmup": false,
+            "durationUs": 4470.416,
+            "ok": true
+          },
+          {
+            "index": 29,
+            "warmup": false,
+            "durationUs": 7147.166,
+            "ok": true
+          },
+          {
+            "index": 30,
+            "warmup": false,
+            "durationUs": 4380.833,
+            "ok": true
+          },
+          {
+            "index": 31,
+            "warmup": false,
+            "durationUs": 4230.417,
+            "ok": true
+          },
+          {
+            "index": 32,
+            "warmup": false,
+            "durationUs": 4318.583,
+            "ok": true
+          },
+          {
+            "index": 33,
+            "warmup": false,
+            "durationUs": 4284.167,
+            "ok": true
+          },
+          {
+            "index": 34,
+            "warmup": false,
+            "durationUs": 4294.5,
+            "ok": true
+          },
+          {
+            "index": 35,
+            "warmup": false,
+            "durationUs": 4152.709,
+            "ok": true
+          },
+          {
+            "index": 36,
+            "warmup": false,
+            "durationUs": 4348.208,
+            "ok": true
+          },
+          {
+            "index": 37,
+            "warmup": false,
+            "durationUs": 4337.5,
+            "ok": true
+          },
+          {
+            "index": 38,
+            "warmup": false,
+            "durationUs": 4412.5,
+            "ok": true
+          },
+          {
+            "index": 39,
+            "warmup": false,
+            "durationUs": 4378.167,
+            "ok": true
+          },
+          {
+            "index": 40,
+            "warmup": false,
+            "durationUs": 4185.833,
+            "ok": true
+          },
+          {
+            "index": 41,
+            "warmup": false,
+            "durationUs": 6600.291,
+            "ok": true
+          },
+          {
+            "index": 42,
+            "warmup": false,
+            "durationUs": 4403.875,
+            "ok": true
+          },
+          {
+            "index": 43,
+            "warmup": false,
+            "durationUs": 4337.292,
+            "ok": true
+          },
+          {
+            "index": 44,
+            "warmup": false,
+            "durationUs": 4281.042,
+            "ok": true
+          },
+          {
+            "index": 45,
+            "warmup": false,
+            "durationUs": 4228.625,
+            "ok": true
+          },
+          {
+            "index": 46,
+            "warmup": false,
+            "durationUs": 4183.166,
+            "ok": true
+          },
+          {
+            "index": 47,
+            "warmup": false,
+            "durationUs": 4394,
+            "ok": true
+          },
+          {
+            "index": 48,
+            "warmup": false,
+            "durationUs": 4455.417,
+            "ok": true
+          },
+          {
+            "index": 49,
+            "warmup": false,
+            "durationUs": 4276.458,
+            "ok": true
+          },
+          {
+            "index": 50,
+            "warmup": false,
+            "durationUs": 4409.917,
+            "ok": true
+          },
+          {
+            "index": 51,
+            "warmup": false,
+            "durationUs": 4085.041,
+            "ok": true
+          },
+          {
+            "index": 52,
+            "warmup": false,
+            "durationUs": 4051.791,
+            "ok": true
+          },
+          {
+            "index": 53,
+            "warmup": false,
+            "durationUs": 4247.5,
+            "ok": true
+          },
+          {
+            "index": 54,
+            "warmup": false,
+            "durationUs": 4104,
+            "ok": true
+          },
+          {
+            "index": 55,
+            "warmup": false,
+            "durationUs": 6304.75,
+            "ok": true
+          },
+          {
+            "index": 56,
+            "warmup": false,
+            "durationUs": 4514.208,
+            "ok": true
+          },
+          {
+            "index": 57,
+            "warmup": false,
+            "durationUs": 4301.083,
+            "ok": true
+          },
+          {
+            "index": 58,
+            "warmup": false,
+            "durationUs": 4310.208,
+            "ok": true
+          },
+          {
+            "index": 59,
+            "warmup": false,
+            "durationUs": 4290.708,
+            "ok": true
+          },
+          {
+            "index": 60,
+            "warmup": false,
+            "durationUs": 4266.625,
+            "ok": true
+          },
+          {
+            "index": 61,
+            "warmup": false,
+            "durationUs": 4224.167,
+            "ok": true
+          },
+          {
+            "index": 62,
+            "warmup": false,
+            "durationUs": 4249.583,
+            "ok": true
+          },
+          {
+            "index": 63,
+            "warmup": false,
+            "durationUs": 4317.416,
+            "ok": true
+          },
+          {
+            "index": 64,
+            "warmup": false,
+            "durationUs": 4191.292,
+            "ok": true
+          },
+          {
+            "index": 65,
+            "warmup": false,
+            "durationUs": 4209.417,
+            "ok": true
+          },
+          {
+            "index": 66,
+            "warmup": false,
+            "durationUs": 4175.791,
+            "ok": true
+          },
+          {
+            "index": 67,
+            "warmup": false,
+            "durationUs": 4205.916,
+            "ok": true
+          },
+          {
+            "index": 68,
+            "warmup": false,
+            "durationUs": 4614.292,
+            "ok": true
+          },
+          {
+            "index": 69,
+            "warmup": false,
+            "durationUs": 4672.75,
+            "ok": true
+          },
+          {
+            "index": 70,
+            "warmup": false,
+            "durationUs": 4507.041,
+            "ok": true
+          },
+          {
+            "index": 71,
+            "warmup": false,
+            "durationUs": 6753.875,
+            "ok": true
+          },
+          {
+            "index": 72,
+            "warmup": false,
+            "durationUs": 4256.167,
+            "ok": true
+          },
+          {
+            "index": 73,
+            "warmup": false,
+            "durationUs": 4233.458,
+            "ok": true
+          },
+          {
+            "index": 74,
+            "warmup": false,
+            "durationUs": 4206.667,
+            "ok": true
+          },
+          {
+            "index": 75,
+            "warmup": false,
+            "durationUs": 4417.584,
+            "ok": true
+          },
+          {
+            "index": 76,
+            "warmup": false,
+            "durationUs": 4424.125,
+            "ok": true
+          },
+          {
+            "index": 77,
+            "warmup": false,
+            "durationUs": 4146.083,
+            "ok": true
+          },
+          {
+            "index": 78,
+            "warmup": false,
+            "durationUs": 4364.917,
+            "ok": true
+          },
+          {
+            "index": 79,
+            "warmup": false,
+            "durationUs": 4356.667,
+            "ok": true
+          },
+          {
+            "index": 80,
+            "warmup": false,
+            "durationUs": 4637.708,
+            "ok": true
+          },
+          {
+            "index": 81,
+            "warmup": false,
+            "durationUs": 4363.791,
+            "ok": true
+          },
+          {
+            "index": 82,
+            "warmup": false,
+            "durationUs": 4501.792,
+            "ok": true
+          },
+          {
+            "index": 83,
+            "warmup": false,
+            "durationUs": 4290.25,
+            "ok": true
+          },
+          {
+            "index": 84,
+            "warmup": false,
+            "durationUs": 4547.708,
+            "ok": true
+          },
+          {
+            "index": 85,
+            "warmup": false,
+            "durationUs": 4411.75,
+            "ok": true
+          },
+          {
+            "index": 86,
+            "warmup": false,
+            "durationUs": 4578.375,
+            "ok": true
+          },
+          {
+            "index": 87,
+            "warmup": false,
+            "durationUs": 5493,
+            "ok": true
+          },
+          {
+            "index": 88,
+            "warmup": false,
+            "durationUs": 4444.916,
+            "ok": true
+          },
+          {
+            "index": 89,
+            "warmup": false,
+            "durationUs": 4563.375,
+            "ok": true
+          },
+          {
+            "index": 90,
+            "warmup": false,
+            "durationUs": 4807.666,
+            "ok": true
+          },
+          {
+            "index": 91,
+            "warmup": false,
+            "durationUs": 4273.417,
+            "ok": true
+          },
+          {
+            "index": 92,
+            "warmup": false,
+            "durationUs": 4336.459,
+            "ok": true
+          },
+          {
+            "index": 93,
+            "warmup": false,
+            "durationUs": 4256.125,
+            "ok": true
+          },
+          {
+            "index": 94,
+            "warmup": false,
+            "durationUs": 4439.583,
+            "ok": true
+          },
+          {
+            "index": 95,
+            "warmup": false,
+            "durationUs": 4611.291,
+            "ok": true
+          },
+          {
+            "index": 96,
+            "warmup": false,
+            "durationUs": 4669.25,
+            "ok": true
+          },
+          {
+            "index": 97,
+            "warmup": false,
+            "durationUs": 4473.083,
+            "ok": true
+          },
+          {
+            "index": 98,
+            "warmup": false,
+            "durationUs": 4198.584,
+            "ok": true
+          },
+          {
+            "index": 99,
+            "warmup": false,
+            "durationUs": 4277,
+            "ok": true
+          },
+          {
+            "index": 100,
+            "warmup": false,
+            "durationUs": 4098.167,
+            "ok": true
+          },
+          {
+            "index": 101,
+            "warmup": false,
+            "durationUs": 4235.5,
+            "ok": true
+          },
+          {
+            "index": 102,
+            "warmup": false,
+            "durationUs": 5501.875,
+            "ok": true
+          },
+          {
+            "index": 103,
+            "warmup": false,
+            "durationUs": 4470.292,
+            "ok": true
+          },
+          {
+            "index": 104,
+            "warmup": false,
+            "durationUs": 4468.417,
+            "ok": true
+          },
+          {
+            "index": 105,
+            "warmup": false,
+            "durationUs": 4458.625,
+            "ok": true
+          },
+          {
+            "index": 106,
+            "warmup": false,
+            "durationUs": 4448.125,
+            "ok": true
+          },
+          {
+            "index": 107,
+            "warmup": false,
+            "durationUs": 4211.958,
+            "ok": true
+          },
+          {
+            "index": 108,
+            "warmup": false,
+            "durationUs": 4180.5,
+            "ok": true
+          },
+          {
+            "index": 109,
+            "warmup": false,
+            "durationUs": 4354.084,
+            "ok": true
+          },
+          {
+            "index": 110,
+            "warmup": false,
+            "durationUs": 4435.792,
+            "ok": true
+          },
+          {
+            "index": 111,
+            "warmup": false,
+            "durationUs": 4496.459,
+            "ok": true
+          },
+          {
+            "index": 112,
+            "warmup": false,
+            "durationUs": 4291.833,
+            "ok": true
+          },
+          {
+            "index": 113,
+            "warmup": false,
+            "durationUs": 4163.625,
+            "ok": true
+          },
+          {
+            "index": 114,
+            "warmup": false,
+            "durationUs": 4227.667,
+            "ok": true
+          },
+          {
+            "index": 115,
+            "warmup": false,
+            "durationUs": 4256.25,
+            "ok": true
+          },
+          {
+            "index": 116,
+            "warmup": false,
+            "durationUs": 4108.167,
+            "ok": true
+          },
+          {
+            "index": 117,
+            "warmup": false,
+            "durationUs": 5610.25,
+            "ok": true
+          },
+          {
+            "index": 118,
+            "warmup": false,
+            "durationUs": 4302.125,
+            "ok": true
+          },
+          {
+            "index": 119,
+            "warmup": false,
+            "durationUs": 4684.584,
+            "ok": true
+          }
+        ],
+        "samplesUs": [
+          4321.375,
+          4257.625,
+          4379.834,
+          4274.958,
+          4304.042,
+          4318.917,
+          4138.917,
+          4166.125,
+          4470.416,
+          7147.166,
+          4380.833,
+          4230.417,
+          4318.583,
+          4284.167,
+          4294.5,
+          4152.709,
+          4348.208,
+          4337.5,
+          4412.5,
+          4378.167,
+          4185.833,
+          6600.291,
+          4403.875,
+          4337.292,
+          4281.042,
+          4228.625,
+          4183.166,
+          4394,
+          4455.417,
+          4276.458,
+          4409.917,
+          4085.041,
+          4051.791,
+          4247.5,
+          4104,
+          6304.75,
+          4514.208,
+          4301.083,
+          4310.208,
+          4290.708,
+          4266.625,
+          4224.167,
+          4249.583,
+          4317.416,
+          4191.292,
+          4209.417,
+          4175.791,
+          4205.916,
+          4614.292,
+          4672.75,
+          4507.041,
+          6753.875,
+          4256.167,
+          4233.458,
+          4206.667,
+          4417.584,
+          4424.125,
+          4146.083,
+          4364.917,
+          4356.667,
+          4637.708,
+          4363.791,
+          4501.792,
+          4290.25,
+          4547.708,
+          4411.75,
+          4578.375,
+          5493,
+          4444.916,
+          4563.375,
+          4807.666,
+          4273.417,
+          4336.459,
+          4256.125,
+          4439.583,
+          4611.291,
+          4669.25,
+          4473.083,
+          4198.584,
+          4277,
+          4098.167,
+          4235.5,
+          5501.875,
+          4470.292,
+          4468.417,
+          4458.625,
+          4448.125,
+          4211.958,
+          4180.5,
+          4354.084,
+          4435.792,
+          4496.459,
+          4291.833,
+          4163.625,
+          4227.667,
+          4256.25,
+          4108.167,
+          5610.25,
+          4302.125,
+          4684.584
+        ],
+        "correctness": true
+      },
+      "tmux": {
+        "attempts": [
+          {
+            "index": 0,
+            "warmup": true,
+            "durationUs": 11807,
+            "ok": true
+          },
+          {
+            "index": 1,
+            "warmup": true,
+            "durationUs": 11173.667,
+            "ok": true
+          },
+          {
+            "index": 2,
+            "warmup": true,
+            "durationUs": 12919.959,
+            "ok": true
+          },
+          {
+            "index": 3,
+            "warmup": true,
+            "durationUs": 11151.666,
+            "ok": true
+          },
+          {
+            "index": 4,
+            "warmup": true,
+            "durationUs": 11350,
+            "ok": true
+          },
+          {
+            "index": 5,
+            "warmup": true,
+            "durationUs": 11334.166,
+            "ok": true
+          },
+          {
+            "index": 6,
+            "warmup": true,
+            "durationUs": 11959.417,
+            "ok": true
+          },
+          {
+            "index": 7,
+            "warmup": true,
+            "durationUs": 11693.042,
+            "ok": true
+          },
+          {
+            "index": 8,
+            "warmup": true,
+            "durationUs": 12522.959,
+            "ok": true
+          },
+          {
+            "index": 9,
+            "warmup": true,
+            "durationUs": 11893.792,
+            "ok": true
+          },
+          {
+            "index": 10,
+            "warmup": true,
+            "durationUs": 11629.709,
+            "ok": true
+          },
+          {
+            "index": 11,
+            "warmup": true,
+            "durationUs": 12111.291,
+            "ok": true
+          },
+          {
+            "index": 12,
+            "warmup": true,
+            "durationUs": 11556.083,
+            "ok": true
+          },
+          {
+            "index": 13,
+            "warmup": true,
+            "durationUs": 11610.834,
+            "ok": true
+          },
+          {
+            "index": 14,
+            "warmup": true,
+            "durationUs": 11946.875,
+            "ok": true
+          },
+          {
+            "index": 15,
+            "warmup": true,
+            "durationUs": 11811.542,
+            "ok": true
+          },
+          {
+            "index": 16,
+            "warmup": true,
+            "durationUs": 11415.125,
+            "ok": true
+          },
+          {
+            "index": 17,
+            "warmup": true,
+            "durationUs": 11927.75,
+            "ok": true
+          },
+          {
+            "index": 18,
+            "warmup": true,
+            "durationUs": 11582.583,
+            "ok": true
+          },
+          {
+            "index": 19,
+            "warmup": true,
+            "durationUs": 11955.833,
+            "ok": true
+          },
+          {
+            "index": 20,
+            "warmup": false,
+            "durationUs": 11417.875,
+            "ok": true
+          },
+          {
+            "index": 21,
+            "warmup": false,
+            "durationUs": 11419.709,
+            "ok": true
+          },
+          {
+            "index": 22,
+            "warmup": false,
+            "durationUs": 11841.875,
+            "ok": true
+          },
+          {
+            "index": 23,
+            "warmup": false,
+            "durationUs": 11584.125,
+            "ok": true
+          },
+          {
+            "index": 24,
+            "warmup": false,
+            "durationUs": 12444.5,
+            "ok": true
+          },
+          {
+            "index": 25,
+            "warmup": false,
+            "durationUs": 12812.542,
+            "ok": true
+          },
+          {
+            "index": 26,
+            "warmup": false,
+            "durationUs": 12804.375,
+            "ok": true
+          },
+          {
+            "index": 27,
+            "warmup": false,
+            "durationUs": 11739.041,
+            "ok": true
+          },
+          {
+            "index": 28,
+            "warmup": false,
+            "durationUs": 11478.958,
+            "ok": true
+          },
+          {
+            "index": 29,
+            "warmup": false,
+            "durationUs": 11789,
+            "ok": true
+          },
+          {
+            "index": 30,
+            "warmup": false,
+            "durationUs": 12503.75,
+            "ok": true
+          },
+          {
+            "index": 31,
+            "warmup": false,
+            "durationUs": 11692.166,
+            "ok": true
+          },
+          {
+            "index": 32,
+            "warmup": false,
+            "durationUs": 12058.042,
+            "ok": true
+          },
+          {
+            "index": 33,
+            "warmup": false,
+            "durationUs": 11527.667,
+            "ok": true
+          },
+          {
+            "index": 34,
+            "warmup": false,
+            "durationUs": 12628.417,
+            "ok": true
+          },
+          {
+            "index": 35,
+            "warmup": false,
+            "durationUs": 11782.292,
+            "ok": true
+          },
+          {
+            "index": 36,
+            "warmup": false,
+            "durationUs": 12219.709,
+            "ok": true
+          },
+          {
+            "index": 37,
+            "warmup": false,
+            "durationUs": 12162.833,
+            "ok": true
+          },
+          {
+            "index": 38,
+            "warmup": false,
+            "durationUs": 12119.458,
+            "ok": true
+          },
+          {
+            "index": 39,
+            "warmup": false,
+            "durationUs": 12113.291,
+            "ok": true
+          },
+          {
+            "index": 40,
+            "warmup": false,
+            "durationUs": 11857.166,
+            "ok": true
+          },
+          {
+            "index": 41,
+            "warmup": false,
+            "durationUs": 12799.834,
+            "ok": true
+          },
+          {
+            "index": 42,
+            "warmup": false,
+            "durationUs": 11791.334,
+            "ok": true
+          },
+          {
+            "index": 43,
+            "warmup": false,
+            "durationUs": 11950.209,
+            "ok": true
+          },
+          {
+            "index": 44,
+            "warmup": false,
+            "durationUs": 11963.542,
+            "ok": true
+          },
+          {
+            "index": 45,
+            "warmup": false,
+            "durationUs": 11374.458,
+            "ok": true
+          },
+          {
+            "index": 46,
+            "warmup": false,
+            "durationUs": 11944.625,
+            "ok": true
+          },
+          {
+            "index": 47,
+            "warmup": false,
+            "durationUs": 11081.584,
+            "ok": true
+          },
+          {
+            "index": 48,
+            "warmup": false,
+            "durationUs": 11449.584,
+            "ok": true
+          },
+          {
+            "index": 49,
+            "warmup": false,
+            "durationUs": 11943.208,
+            "ok": true
+          },
+          {
+            "index": 50,
+            "warmup": false,
+            "durationUs": 12003.917,
+            "ok": true
+          },
+          {
+            "index": 51,
+            "warmup": false,
+            "durationUs": 11685.542,
+            "ok": true
+          },
+          {
+            "index": 52,
+            "warmup": false,
+            "durationUs": 11670.292,
+            "ok": true
+          },
+          {
+            "index": 53,
+            "warmup": false,
+            "durationUs": 11252.875,
+            "ok": true
+          },
+          {
+            "index": 54,
+            "warmup": false,
+            "durationUs": 12671.542,
+            "ok": true
+          },
+          {
+            "index": 55,
+            "warmup": false,
+            "durationUs": 12712.25,
+            "ok": true
+          },
+          {
+            "index": 56,
+            "warmup": false,
+            "durationUs": 11931.208,
+            "ok": true
+          },
+          {
+            "index": 57,
+            "warmup": false,
+            "durationUs": 11677.417,
+            "ok": true
+          },
+          {
+            "index": 58,
+            "warmup": false,
+            "durationUs": 11126.291,
+            "ok": true
+          },
+          {
+            "index": 59,
+            "warmup": false,
+            "durationUs": 11680.417,
+            "ok": true
+          },
+          {
+            "index": 60,
+            "warmup": false,
+            "durationUs": 11856.708,
+            "ok": true
+          },
+          {
+            "index": 61,
+            "warmup": false,
+            "durationUs": 11619.667,
+            "ok": true
+          },
+          {
+            "index": 62,
+            "warmup": false,
+            "durationUs": 11908.125,
+            "ok": true
+          },
+          {
+            "index": 63,
+            "warmup": false,
+            "durationUs": 11656.209,
+            "ok": true
+          },
+          {
+            "index": 64,
+            "warmup": false,
+            "durationUs": 11776,
+            "ok": true
+          },
+          {
+            "index": 65,
+            "warmup": false,
+            "durationUs": 11483.667,
+            "ok": true
+          },
+          {
+            "index": 66,
+            "warmup": false,
+            "durationUs": 12125.75,
+            "ok": true
+          },
+          {
+            "index": 67,
+            "warmup": false,
+            "durationUs": 11328.542,
+            "ok": true
+          },
+          {
+            "index": 68,
+            "warmup": false,
+            "durationUs": 11623.875,
+            "ok": true
+          },
+          {
+            "index": 69,
+            "warmup": false,
+            "durationUs": 11922.75,
+            "ok": true
+          },
+          {
+            "index": 70,
+            "warmup": false,
+            "durationUs": 13102.958,
+            "ok": true
+          },
+          {
+            "index": 71,
+            "warmup": false,
+            "durationUs": 12743.125,
+            "ok": true
+          },
+          {
+            "index": 72,
+            "warmup": false,
+            "durationUs": 11540.375,
+            "ok": true
+          },
+          {
+            "index": 73,
+            "warmup": false,
+            "durationUs": 12065.916,
+            "ok": true
+          },
+          {
+            "index": 74,
+            "warmup": false,
+            "durationUs": 11973.042,
+            "ok": true
+          },
+          {
+            "index": 75,
+            "warmup": false,
+            "durationUs": 12582.125,
+            "ok": true
+          },
+          {
+            "index": 76,
+            "warmup": false,
+            "durationUs": 12246.333,
+            "ok": true
+          },
+          {
+            "index": 77,
+            "warmup": false,
+            "durationUs": 12096.042,
+            "ok": true
+          },
+          {
+            "index": 78,
+            "warmup": false,
+            "durationUs": 11484.833,
+            "ok": true
+          },
+          {
+            "index": 79,
+            "warmup": false,
+            "durationUs": 11962.834,
+            "ok": true
+          },
+          {
+            "index": 80,
+            "warmup": false,
+            "durationUs": 13972.959,
+            "ok": true
+          },
+          {
+            "index": 81,
+            "warmup": false,
+            "durationUs": 13917.167,
+            "ok": true
+          },
+          {
+            "index": 82,
+            "warmup": false,
+            "durationUs": 12956.042,
+            "ok": true
+          },
+          {
+            "index": 83,
+            "warmup": false,
+            "durationUs": 12221.75,
+            "ok": true
+          },
+          {
+            "index": 84,
+            "warmup": false,
+            "durationUs": 12236.25,
+            "ok": true
+          },
+          {
+            "index": 85,
+            "warmup": false,
+            "durationUs": 12892.167,
+            "ok": true
+          },
+          {
+            "index": 86,
+            "warmup": false,
+            "durationUs": 12794.792,
+            "ok": true
+          },
+          {
+            "index": 87,
+            "warmup": false,
+            "durationUs": 12529.208,
+            "ok": true
+          },
+          {
+            "index": 88,
+            "warmup": false,
+            "durationUs": 13987.958,
+            "ok": true
+          },
+          {
+            "index": 89,
+            "warmup": false,
+            "durationUs": 13511.334,
+            "ok": true
+          },
+          {
+            "index": 90,
+            "warmup": false,
+            "durationUs": 12028.417,
+            "ok": true
+          },
+          {
+            "index": 91,
+            "warmup": false,
+            "durationUs": 12276,
+            "ok": true
+          },
+          {
+            "index": 92,
+            "warmup": false,
+            "durationUs": 12986.417,
+            "ok": true
+          },
+          {
+            "index": 93,
+            "warmup": false,
+            "durationUs": 11909.083,
+            "ok": true
+          },
+          {
+            "index": 94,
+            "warmup": false,
+            "durationUs": 11752.417,
+            "ok": true
+          },
+          {
+            "index": 95,
+            "warmup": false,
+            "durationUs": 14276.75,
+            "ok": true
+          },
+          {
+            "index": 96,
+            "warmup": false,
+            "durationUs": 13060.542,
+            "ok": true
+          },
+          {
+            "index": 97,
+            "warmup": false,
+            "durationUs": 13141.083,
+            "ok": true
+          },
+          {
+            "index": 98,
+            "warmup": false,
+            "durationUs": 13767.375,
+            "ok": true
+          },
+          {
+            "index": 99,
+            "warmup": false,
+            "durationUs": 12173.833,
+            "ok": true
+          },
+          {
+            "index": 100,
+            "warmup": false,
+            "durationUs": 12903.875,
+            "ok": true
+          },
+          {
+            "index": 101,
+            "warmup": false,
+            "durationUs": 12143.708,
+            "ok": true
+          },
+          {
+            "index": 102,
+            "warmup": false,
+            "durationUs": 12445.917,
+            "ok": true
+          },
+          {
+            "index": 103,
+            "warmup": false,
+            "durationUs": 12400.792,
+            "ok": true
+          },
+          {
+            "index": 104,
+            "warmup": false,
+            "durationUs": 12581.792,
+            "ok": true
+          },
+          {
+            "index": 105,
+            "warmup": false,
+            "durationUs": 11901.291,
+            "ok": true
+          },
+          {
+            "index": 106,
+            "warmup": false,
+            "durationUs": 12951.875,
+            "ok": true
+          },
+          {
+            "index": 107,
+            "warmup": false,
+            "durationUs": 12339.875,
+            "ok": true
+          },
+          {
+            "index": 108,
+            "warmup": false,
+            "durationUs": 12707.791,
+            "ok": true
+          },
+          {
+            "index": 109,
+            "warmup": false,
+            "durationUs": 12524,
+            "ok": true
+          },
+          {
+            "index": 110,
+            "warmup": false,
+            "durationUs": 12462.458,
+            "ok": true
+          },
+          {
+            "index": 111,
+            "warmup": false,
+            "durationUs": 13138.542,
+            "ok": true
+          },
+          {
+            "index": 112,
+            "warmup": false,
+            "durationUs": 12232.208,
+            "ok": true
+          },
+          {
+            "index": 113,
+            "warmup": false,
+            "durationUs": 12548.792,
+            "ok": true
+          },
+          {
+            "index": 114,
+            "warmup": false,
+            "durationUs": 12311.75,
+            "ok": true
+          },
+          {
+            "index": 115,
+            "warmup": false,
+            "durationUs": 13082.417,
+            "ok": true
+          },
+          {
+            "index": 116,
+            "warmup": false,
+            "durationUs": 18026.167,
+            "ok": true
+          },
+          {
+            "index": 117,
+            "warmup": false,
+            "durationUs": 17725.583,
+            "ok": true
+          },
+          {
+            "index": 118,
+            "warmup": false,
+            "durationUs": 14159.541,
+            "ok": true
+          },
+          {
+            "index": 119,
+            "warmup": false,
+            "durationUs": 14585.292,
+            "ok": true
+          }
+        ],
+        "samplesUs": [
+          11417.875,
+          11419.709,
+          11841.875,
+          11584.125,
+          12444.5,
+          12812.542,
+          12804.375,
+          11739.041,
+          11478.958,
+          11789,
+          12503.75,
+          11692.166,
+          12058.042,
+          11527.667,
+          12628.417,
+          11782.292,
+          12219.709,
+          12162.833,
+          12119.458,
+          12113.291,
+          11857.166,
+          12799.834,
+          11791.334,
+          11950.209,
+          11963.542,
+          11374.458,
+          11944.625,
+          11081.584,
+          11449.584,
+          11943.208,
+          12003.917,
+          11685.542,
+          11670.292,
+          11252.875,
+          12671.542,
+          12712.25,
+          11931.208,
+          11677.417,
+          11126.291,
+          11680.417,
+          11856.708,
+          11619.667,
+          11908.125,
+          11656.209,
+          11776,
+          11483.667,
+          12125.75,
+          11328.542,
+          11623.875,
+          11922.75,
+          13102.958,
+          12743.125,
+          11540.375,
+          12065.916,
+          11973.042,
+          12582.125,
+          12246.333,
+          12096.042,
+          11484.833,
+          11962.834,
+          13972.959,
+          13917.167,
+          12956.042,
+          12221.75,
+          12236.25,
+          12892.167,
+          12794.792,
+          12529.208,
+          13987.958,
+          13511.334,
+          12028.417,
+          12276,
+          12986.417,
+          11909.083,
+          11752.417,
+          14276.75,
+          13060.542,
+          13141.083,
+          13767.375,
+          12173.833,
+          12903.875,
+          12143.708,
+          12445.917,
+          12400.792,
+          12581.792,
+          11901.291,
+          12951.875,
+          12339.875,
+          12707.791,
+          12524,
+          12462.458,
+          13138.542,
+          12232.208,
+          12548.792,
+          12311.75,
+          13082.417,
+          18026.167,
+          17725.583,
+          14159.541,
+          14585.292
+        ],
+        "correctness": true
+      }
+    },
+    "reconnect": {
+      "agentmux": {
+        "attempts": [
+          {
+            "index": 0,
+            "warmup": true,
+            "durationUs": 14492.709,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 1,
+            "warmup": true,
+            "durationUs": 14635.792,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 2,
+            "warmup": true,
+            "durationUs": 12718.583,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 3,
+            "warmup": true,
+            "durationUs": 9960.917,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 4,
+            "warmup": true,
+            "durationUs": 11786.042,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 5,
+            "warmup": true,
+            "durationUs": 10536.333,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 6,
+            "warmup": true,
+            "durationUs": 15997.333,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 7,
+            "warmup": true,
+            "durationUs": 11137.958,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 8,
+            "warmup": true,
+            "durationUs": 11928.792,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 9,
+            "warmup": true,
+            "durationUs": 10284.958,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 10,
+            "warmup": true,
+            "durationUs": 10109.375,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 11,
+            "warmup": true,
+            "durationUs": 13631.833,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 12,
+            "warmup": true,
+            "durationUs": 10937.167,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 13,
+            "warmup": true,
+            "durationUs": 11739,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 14,
+            "warmup": true,
+            "durationUs": 11788.584,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 15,
+            "warmup": true,
+            "durationUs": 11580.708,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 16,
+            "warmup": true,
+            "durationUs": 9723.291,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 17,
+            "warmup": true,
+            "durationUs": 9873.834,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 18,
+            "warmup": true,
+            "durationUs": 11445.416,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 19,
+            "warmup": true,
+            "durationUs": 10752.666,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 20,
+            "warmup": false,
+            "durationUs": 11583.375,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 21,
+            "warmup": false,
+            "durationUs": 10051.708,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 22,
+            "warmup": false,
+            "durationUs": 10366.75,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 23,
+            "warmup": false,
+            "durationUs": 11830.125,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 24,
+            "warmup": false,
+            "durationUs": 10787.458,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 25,
+            "warmup": false,
+            "durationUs": 10574.167,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 26,
+            "warmup": false,
+            "durationUs": 10374.667,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 27,
+            "warmup": false,
+            "durationUs": 11953.625,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 28,
+            "warmup": false,
+            "durationUs": 10965.417,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 29,
+            "warmup": false,
+            "durationUs": 10006.917,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 30,
+            "warmup": false,
+            "durationUs": 9686.25,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 31,
+            "warmup": false,
+            "durationUs": 9799.375,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 32,
+            "warmup": false,
+            "durationUs": 9728.958,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 33,
+            "warmup": false,
+            "durationUs": 11727.709,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 34,
+            "warmup": false,
+            "durationUs": 10036.875,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 35,
+            "warmup": false,
+            "durationUs": 9970.458,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 36,
+            "warmup": false,
+            "durationUs": 9745.584,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 37,
+            "warmup": false,
+            "durationUs": 9690.542,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 38,
+            "warmup": false,
+            "durationUs": 9872.041,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 39,
+            "warmup": false,
+            "durationUs": 9468.917,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 40,
+            "warmup": false,
+            "durationUs": 11877.75,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 41,
+            "warmup": false,
+            "durationUs": 9721.708,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 42,
+            "warmup": false,
+            "durationUs": 9642.542,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 43,
+            "warmup": false,
+            "durationUs": 9926.458,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 44,
+            "warmup": false,
+            "durationUs": 10069.333,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 45,
+            "warmup": false,
+            "durationUs": 9985.542,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 46,
+            "warmup": false,
+            "durationUs": 10154.417,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 47,
+            "warmup": false,
+            "durationUs": 9681.584,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 48,
+            "warmup": false,
+            "durationUs": 13004.709,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 49,
+            "warmup": false,
+            "durationUs": 10060,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 50,
+            "warmup": false,
+            "durationUs": 10987.792,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 51,
+            "warmup": false,
+            "durationUs": 9926.291,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 52,
+            "warmup": false,
+            "durationUs": 9813.417,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 53,
+            "warmup": false,
+            "durationUs": 12150.208,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 54,
+            "warmup": false,
+            "durationUs": 10099.334,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 55,
+            "warmup": false,
+            "durationUs": 9337.625,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 56,
+            "warmup": false,
+            "durationUs": 9547.5,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 57,
+            "warmup": false,
+            "durationUs": 11841.042,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 58,
+            "warmup": false,
+            "durationUs": 10075.042,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 59,
+            "warmup": false,
+            "durationUs": 9810.75,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 60,
+            "warmup": false,
+            "durationUs": 14747.209,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 61,
+            "warmup": false,
+            "durationUs": 10312.5,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 62,
+            "warmup": false,
+            "durationUs": 10210,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 63,
+            "warmup": false,
+            "durationUs": 9670.209,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 64,
+            "warmup": false,
+            "durationUs": 9583.041,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 65,
+            "warmup": false,
+            "durationUs": 9707.333,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 66,
+            "warmup": false,
+            "durationUs": 9539.125,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 67,
+            "warmup": false,
+            "durationUs": 10393.125,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 68,
+            "warmup": false,
+            "durationUs": 12152.208,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 69,
+            "warmup": false,
+            "durationUs": 9857.542,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 70,
+            "warmup": false,
+            "durationUs": 9625.459,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 71,
+            "warmup": false,
+            "durationUs": 12758.875,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 72,
+            "warmup": false,
+            "durationUs": 10035.625,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 73,
+            "warmup": false,
+            "durationUs": 9708,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 74,
+            "warmup": false,
+            "durationUs": 11077.667,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 75,
+            "warmup": false,
+            "durationUs": 10847.75,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 76,
+            "warmup": false,
+            "durationUs": 9579.584,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 77,
+            "warmup": false,
+            "durationUs": 9671.792,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 78,
+            "warmup": false,
+            "durationUs": 9266.25,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 79,
+            "warmup": false,
+            "durationUs": 12063.875,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 80,
+            "warmup": false,
+            "durationUs": 9417.875,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 81,
+            "warmup": false,
+            "durationUs": 9957.334,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 82,
+            "warmup": false,
+            "durationUs": 11082.666,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 83,
+            "warmup": false,
+            "durationUs": 10992.833,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 84,
+            "warmup": false,
+            "durationUs": 10143.709,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 85,
+            "warmup": false,
+            "durationUs": 10758.917,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 86,
+            "warmup": false,
+            "durationUs": 9715.875,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 87,
+            "warmup": false,
+            "durationUs": 9957.625,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 88,
+            "warmup": false,
+            "durationUs": 10669.458,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 89,
+            "warmup": false,
+            "durationUs": 10231.958,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 90,
+            "warmup": false,
+            "durationUs": 9773.916,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 91,
+            "warmup": false,
+            "durationUs": 10855.541,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 92,
+            "warmup": false,
+            "durationUs": 9648.041,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 93,
+            "warmup": false,
+            "durationUs": 9349.75,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 94,
+            "warmup": false,
+            "durationUs": 10020.417,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 95,
+            "warmup": false,
+            "durationUs": 9512.709,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 96,
+            "warmup": false,
+            "durationUs": 18142.125,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 97,
+            "warmup": false,
+            "durationUs": 10066.042,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 98,
+            "warmup": false,
+            "durationUs": 11496.875,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 99,
+            "warmup": false,
+            "durationUs": 16654.792,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 100,
+            "warmup": false,
+            "durationUs": 12686.041,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 101,
+            "warmup": false,
+            "durationUs": 10834.5,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 102,
+            "warmup": false,
+            "durationUs": 10439.083,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 103,
+            "warmup": false,
+            "durationUs": 12675.458,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 104,
+            "warmup": false,
+            "durationUs": 15125.167,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 105,
+            "warmup": false,
+            "durationUs": 10445.791,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 106,
+            "warmup": false,
+            "durationUs": 11226.625,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 107,
+            "warmup": false,
+            "durationUs": 12233.084,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 108,
+            "warmup": false,
+            "durationUs": 11837.792,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 109,
+            "warmup": false,
+            "durationUs": 10181.542,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 110,
+            "warmup": false,
+            "durationUs": 10336.625,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 111,
+            "warmup": false,
+            "durationUs": 12854.875,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 112,
+            "warmup": false,
+            "durationUs": 10619.791,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 113,
+            "warmup": false,
+            "durationUs": 11400.333,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 114,
+            "warmup": false,
+            "durationUs": 11006.292,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 115,
+            "warmup": false,
+            "durationUs": 10954.666,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 116,
+            "warmup": false,
+            "durationUs": 10894.459,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 117,
+            "warmup": false,
+            "durationUs": 12705.166,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 118,
+            "warmup": false,
+            "durationUs": 10468.125,
+            "pid": 25135,
+            "ok": true
+          },
+          {
+            "index": 119,
+            "warmup": false,
+            "durationUs": 12704.083,
+            "pid": 25135,
+            "ok": true
+          }
+        ],
+        "samplesUs": [
+          11583.375,
+          10051.708,
+          10366.75,
+          11830.125,
+          10787.458,
+          10574.167,
+          10374.667,
+          11953.625,
+          10965.417,
+          10006.917,
+          9686.25,
+          9799.375,
+          9728.958,
+          11727.709,
+          10036.875,
+          9970.458,
+          9745.584,
+          9690.542,
+          9872.041,
+          9468.917,
+          11877.75,
+          9721.708,
+          9642.542,
+          9926.458,
+          10069.333,
+          9985.542,
+          10154.417,
+          9681.584,
+          13004.709,
+          10060,
+          10987.792,
+          9926.291,
+          9813.417,
+          12150.208,
+          10099.334,
+          9337.625,
+          9547.5,
+          11841.042,
+          10075.042,
+          9810.75,
+          14747.209,
+          10312.5,
+          10210,
+          9670.209,
+          9583.041,
+          9707.333,
+          9539.125,
+          10393.125,
+          12152.208,
+          9857.542,
+          9625.459,
+          12758.875,
+          10035.625,
+          9708,
+          11077.667,
+          10847.75,
+          9579.584,
+          9671.792,
+          9266.25,
+          12063.875,
+          9417.875,
+          9957.334,
+          11082.666,
+          10992.833,
+          10143.709,
+          10758.917,
+          9715.875,
+          9957.625,
+          10669.458,
+          10231.958,
+          9773.916,
+          10855.541,
+          9648.041,
+          9349.75,
+          10020.417,
+          9512.709,
+          18142.125,
+          10066.042,
+          11496.875,
+          16654.792,
+          12686.041,
+          10834.5,
+          10439.083,
+          12675.458,
+          15125.167,
+          10445.791,
+          11226.625,
+          12233.084,
+          11837.792,
+          10181.542,
+          10336.625,
+          12854.875,
+          10619.791,
+          11400.333,
+          11006.292,
+          10954.666,
+          10894.459,
+          12705.166,
+          10468.125,
+          12704.083
+        ],
+        "correctness": true
+      },
+      "tmux": {
+        "attempts": [
+          {
+            "index": 0,
+            "warmup": true,
+            "durationUs": 26596.5,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 1,
+            "warmup": true,
+            "durationUs": 25322.583,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 2,
+            "warmup": true,
+            "durationUs": 24833.709,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 3,
+            "warmup": true,
+            "durationUs": 27150.208,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 4,
+            "warmup": true,
+            "durationUs": 26007.334,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 5,
+            "warmup": true,
+            "durationUs": 23556.791,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 6,
+            "warmup": true,
+            "durationUs": 23276.875,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 7,
+            "warmup": true,
+            "durationUs": 23399.417,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 8,
+            "warmup": true,
+            "durationUs": 24220.541,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 9,
+            "warmup": true,
+            "durationUs": 24440.333,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 10,
+            "warmup": true,
+            "durationUs": 23823.541,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 11,
+            "warmup": true,
+            "durationUs": 23409.667,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 12,
+            "warmup": true,
+            "durationUs": 24006.5,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 13,
+            "warmup": true,
+            "durationUs": 22323.167,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 14,
+            "warmup": true,
+            "durationUs": 23060.042,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 15,
+            "warmup": true,
+            "durationUs": 23889.916,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 16,
+            "warmup": true,
+            "durationUs": 24758.875,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 17,
+            "warmup": true,
+            "durationUs": 25179.875,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 18,
+            "warmup": true,
+            "durationUs": 22811.334,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 19,
+            "warmup": true,
+            "durationUs": 24624.708,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 20,
+            "warmup": false,
+            "durationUs": 24063.833,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 21,
+            "warmup": false,
+            "durationUs": 24045.834,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 22,
+            "warmup": false,
+            "durationUs": 21973.833,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 23,
+            "warmup": false,
+            "durationUs": 21173.25,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 24,
+            "warmup": false,
+            "durationUs": 20822.542,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 25,
+            "warmup": false,
+            "durationUs": 22019.791,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 26,
+            "warmup": false,
+            "durationUs": 26789.084,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 27,
+            "warmup": false,
+            "durationUs": 22821.625,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 28,
+            "warmup": false,
+            "durationUs": 22802.25,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 29,
+            "warmup": false,
+            "durationUs": 22540.292,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 30,
+            "warmup": false,
+            "durationUs": 22135.709,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 31,
+            "warmup": false,
+            "durationUs": 20189,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 32,
+            "warmup": false,
+            "durationUs": 21282.291,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 33,
+            "warmup": false,
+            "durationUs": 21238.958,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 34,
+            "warmup": false,
+            "durationUs": 21300.125,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 35,
+            "warmup": false,
+            "durationUs": 22476.875,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 36,
+            "warmup": false,
+            "durationUs": 21725.333,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 37,
+            "warmup": false,
+            "durationUs": 23495.209,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 38,
+            "warmup": false,
+            "durationUs": 22593.792,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 39,
+            "warmup": false,
+            "durationUs": 32830.583,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 40,
+            "warmup": false,
+            "durationUs": 26394.875,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 41,
+            "warmup": false,
+            "durationUs": 23202.708,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 42,
+            "warmup": false,
+            "durationUs": 21219.833,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 43,
+            "warmup": false,
+            "durationUs": 22251.792,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 44,
+            "warmup": false,
+            "durationUs": 20660.917,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 45,
+            "warmup": false,
+            "durationUs": 20968.333,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 46,
+            "warmup": false,
+            "durationUs": 21183.666,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 47,
+            "warmup": false,
+            "durationUs": 20446.333,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 48,
+            "warmup": false,
+            "durationUs": 23549.083,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 49,
+            "warmup": false,
+            "durationUs": 23608,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 50,
+            "warmup": false,
+            "durationUs": 23045.042,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 51,
+            "warmup": false,
+            "durationUs": 23743.75,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 52,
+            "warmup": false,
+            "durationUs": 23806.292,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 53,
+            "warmup": false,
+            "durationUs": 23650.833,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 54,
+            "warmup": false,
+            "durationUs": 23805.208,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 55,
+            "warmup": false,
+            "durationUs": 25809.5,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 56,
+            "warmup": false,
+            "durationUs": 23934.833,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 57,
+            "warmup": false,
+            "durationUs": 23955.791,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 58,
+            "warmup": false,
+            "durationUs": 23618.166,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 59,
+            "warmup": false,
+            "durationUs": 24254.208,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 60,
+            "warmup": false,
+            "durationUs": 25235.209,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 61,
+            "warmup": false,
+            "durationUs": 23802.584,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 62,
+            "warmup": false,
+            "durationUs": 22131.209,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 63,
+            "warmup": false,
+            "durationUs": 24752.333,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 64,
+            "warmup": false,
+            "durationUs": 24374.875,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 65,
+            "warmup": false,
+            "durationUs": 23175.292,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 66,
+            "warmup": false,
+            "durationUs": 24423.416,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 67,
+            "warmup": false,
+            "durationUs": 22684.75,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 68,
+            "warmup": false,
+            "durationUs": 23359.958,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 69,
+            "warmup": false,
+            "durationUs": 25559.041,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 70,
+            "warmup": false,
+            "durationUs": 21952.916,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 71,
+            "warmup": false,
+            "durationUs": 23233.958,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 72,
+            "warmup": false,
+            "durationUs": 21464.834,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 73,
+            "warmup": false,
+            "durationUs": 21103.125,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 74,
+            "warmup": false,
+            "durationUs": 22555.125,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 75,
+            "warmup": false,
+            "durationUs": 21534.667,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 76,
+            "warmup": false,
+            "durationUs": 22451.834,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 77,
+            "warmup": false,
+            "durationUs": 23204.083,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 78,
+            "warmup": false,
+            "durationUs": 22249.959,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 79,
+            "warmup": false,
+            "durationUs": 24283.375,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 80,
+            "warmup": false,
+            "durationUs": 25062.166,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 81,
+            "warmup": false,
+            "durationUs": 22621.334,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 82,
+            "warmup": false,
+            "durationUs": 28837.583,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 83,
+            "warmup": false,
+            "durationUs": 23835.958,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 84,
+            "warmup": false,
+            "durationUs": 24773.333,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 85,
+            "warmup": false,
+            "durationUs": 24429.584,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 86,
+            "warmup": false,
+            "durationUs": 25438.708,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 87,
+            "warmup": false,
+            "durationUs": 23326.333,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 88,
+            "warmup": false,
+            "durationUs": 25654.834,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 89,
+            "warmup": false,
+            "durationUs": 24717.75,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 90,
+            "warmup": false,
+            "durationUs": 26552.792,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 91,
+            "warmup": false,
+            "durationUs": 27640.417,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 92,
+            "warmup": false,
+            "durationUs": 27721.541,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 93,
+            "warmup": false,
+            "durationUs": 25632.042,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 94,
+            "warmup": false,
+            "durationUs": 25770.459,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 95,
+            "warmup": false,
+            "durationUs": 25880.292,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 96,
+            "warmup": false,
+            "durationUs": 22889.75,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 97,
+            "warmup": false,
+            "durationUs": 22471.541,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 98,
+            "warmup": false,
+            "durationUs": 22734.208,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 99,
+            "warmup": false,
+            "durationUs": 22595.25,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 100,
+            "warmup": false,
+            "durationUs": 22143.5,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 101,
+            "warmup": false,
+            "durationUs": 22686.666,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 102,
+            "warmup": false,
+            "durationUs": 21561.541,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 103,
+            "warmup": false,
+            "durationUs": 22606.417,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 104,
+            "warmup": false,
+            "durationUs": 24250.709,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 105,
+            "warmup": false,
+            "durationUs": 23190.542,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 106,
+            "warmup": false,
+            "durationUs": 23469.084,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 107,
+            "warmup": false,
+            "durationUs": 23210.917,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 108,
+            "warmup": false,
+            "durationUs": 23200.375,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 109,
+            "warmup": false,
+            "durationUs": 23314.709,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 110,
+            "warmup": false,
+            "durationUs": 25146.417,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 111,
+            "warmup": false,
+            "durationUs": 24787.833,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 112,
+            "warmup": false,
+            "durationUs": 24878.791,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 113,
+            "warmup": false,
+            "durationUs": 23934.917,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 114,
+            "warmup": false,
+            "durationUs": 23358.291,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 115,
+            "warmup": false,
+            "durationUs": 25210.416,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 116,
+            "warmup": false,
+            "durationUs": 21536.875,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 117,
+            "warmup": false,
+            "durationUs": 21007,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 118,
+            "warmup": false,
+            "durationUs": 22162.583,
+            "pid": 25444,
+            "ok": true
+          },
+          {
+            "index": 119,
+            "warmup": false,
+            "durationUs": 22718.291,
+            "pid": 25444,
+            "ok": true
+          }
+        ],
+        "samplesUs": [
+          24063.833,
+          24045.834,
+          21973.833,
+          21173.25,
+          20822.542,
+          22019.791,
+          26789.084,
+          22821.625,
+          22802.25,
+          22540.292,
+          22135.709,
+          20189,
+          21282.291,
+          21238.958,
+          21300.125,
+          22476.875,
+          21725.333,
+          23495.209,
+          22593.792,
+          32830.583,
+          26394.875,
+          23202.708,
+          21219.833,
+          22251.792,
+          20660.917,
+          20968.333,
+          21183.666,
+          20446.333,
+          23549.083,
+          23608,
+          23045.042,
+          23743.75,
+          23806.292,
+          23650.833,
+          23805.208,
+          25809.5,
+          23934.833,
+          23955.791,
+          23618.166,
+          24254.208,
+          25235.209,
+          23802.584,
+          22131.209,
+          24752.333,
+          24374.875,
+          23175.292,
+          24423.416,
+          22684.75,
+          23359.958,
+          25559.041,
+          21952.916,
+          23233.958,
+          21464.834,
+          21103.125,
+          22555.125,
+          21534.667,
+          22451.834,
+          23204.083,
+          22249.959,
+          24283.375,
+          25062.166,
+          22621.334,
+          28837.583,
+          23835.958,
+          24773.333,
+          24429.584,
+          25438.708,
+          23326.333,
+          25654.834,
+          24717.75,
+          26552.792,
+          27640.417,
+          27721.541,
+          25632.042,
+          25770.459,
+          25880.292,
+          22889.75,
+          22471.541,
+          22734.208,
+          22595.25,
+          22143.5,
+          22686.666,
+          21561.541,
+          22606.417,
+          24250.709,
+          23190.542,
+          23469.084,
+          23210.917,
+          23200.375,
+          23314.709,
+          25146.417,
+          24787.833,
+          24878.791,
+          23934.917,
+          23358.291,
+          25210.416,
+          21536.875,
+          21007,
+          22162.583,
+          22718.291
+        ],
+        "correctness": true
+      }
+    },
+    "sessionScale": {
+      "agentmux": {
+        "rounds": [
+          {
+            "round": 1,
+            "wallUs": 349136.542,
+            "sessionsPerSecond": 91.65468563299227,
+            "peakRssKiB": 56128,
+            "rssSamplesKiB": [
+              54144,
+              54384,
+              54576,
+              54640,
+              54752,
+              54880,
+              54992,
+              55040,
+              55152,
+              55232,
+              55312,
+              55392,
+              55520,
+              55680,
+              55712,
+              55760,
+              55840,
+              55904,
+              56016,
+              56096,
+              56128,
+              56128,
+              56128
+            ],
+            "failures": [],
+            "cleanupOracle": {
+              "noLiveOwnerObjects": true,
+              "fixturePidsStopped": true
+            },
+            "ok": true
+          },
+          {
+            "round": 2,
+            "wallUs": 350141.833,
+            "sessionsPerSecond": 91.39153618356708,
+            "peakRssKiB": 57824,
+            "rssSamplesKiB": [
+              56192,
+              56368,
+              56480,
+              56528,
+              56608,
+              56656,
+              56768,
+              56816,
+              56928,
+              57040,
+              57152,
+              57280,
+              57392,
+              57488,
+              57600,
+              57616,
+              57664,
+              57728,
+              57760,
+              57808,
+              57824,
+              57824,
+              57824
+            ],
+            "failures": [],
+            "cleanupOracle": {
+              "noLiveOwnerObjects": true,
+              "fixturePidsStopped": true
+            },
+            "ok": true
+          },
+          {
+            "round": 3,
+            "wallUs": 384733.834,
+            "sessionsPerSecond": 83.1743849177559,
+            "peakRssKiB": 59632,
+            "rssSamplesKiB": [
+              58160,
+              58208,
+              58256,
+              58320,
+              58368,
+              58432,
+              58544,
+              58592,
+              58720,
+              58784,
+              58880,
+              58928,
+              59056,
+              59168,
+              59216,
+              59328,
+              59360,
+              59408,
+              59456,
+              59536,
+              59584,
+              59584,
+              59600,
+              59632,
+              59632
+            ],
+            "failures": [],
+            "cleanupOracle": {
+              "noLiveOwnerObjects": true,
+              "fixturePidsStopped": true
+            },
+            "ok": true
+          },
+          {
+            "round": 4,
+            "wallUs": 971462.416,
+            "sessionsPerSecond": 32.940028839983455,
+            "peakRssKiB": 63664,
+            "rssSamplesKiB": [
+              58944,
+              59184,
+              59264,
+              59296,
+              59360,
+              59440,
+              59536,
+              59616,
+              59664,
+              59776,
+              59872,
+              59920,
+              59984,
+              60016,
+              60048,
+              61312,
+              61872,
+              63456,
+              63456,
+              63488,
+              63488,
+              63488,
+              63520,
+              63536,
+              63536,
+              63536,
+              63536,
+              63584,
+              63568,
+              63568,
+              63568,
+              63568,
+              63600,
+              63568,
+              63568,
+              63568,
+              63568,
+              63616,
+              63584,
+              63584,
+              63584,
+              63584,
+              63600,
+              63632,
+              63632,
+              63632,
+              63632,
+              63664,
+              63632,
+              63632,
+              63632,
+              63632,
+              63632,
+              63664,
+              63632,
+              63632,
+              63632,
+              63632,
+              63632,
+              63664,
+              63632,
+              63632,
+              63632,
+              63632
+            ],
+            "failures": [],
+            "cleanupOracle": {
+              "noLiveOwnerObjects": true,
+              "fixturePidsStopped": true
+            },
+            "ok": true
+          },
+          {
+            "round": 5,
+            "wallUs": 352243.375,
+            "sessionsPerSecond": 90.8462792238463,
+            "peakRssKiB": 63984,
+            "rssSamplesKiB": [
+              62960,
+              63248,
+              63280,
+              63312,
+              63344,
+              63408,
+              63440,
+              63504,
+              63536,
+              63600,
+              63664,
+              63696,
+              63760,
+              63824,
+              63856,
+              63920,
+              63984,
+              63984,
+              63984,
+              63984,
+              63984,
+              63984,
+              63984
+            ],
+            "failures": [],
+            "cleanupOracle": {
+              "noLiveOwnerObjects": true,
+              "fixturePidsStopped": true
+            },
+            "ok": true
+          }
+        ],
+        "wallSamplesUs": [
+          349136.542,
+          350141.833,
+          384733.834,
+          971462.416,
+          352243.375
+        ],
+        "sessionsPerSecond": [
+          91.65468563299227,
+          91.39153618356708,
+          83.1743849177559,
+          32.940028839983455,
+          90.8462792238463
+        ],
+        "correctness": true
+      },
+      "tmux": {
+        "rounds": [
+          {
+            "round": 1,
+            "wallUs": 1198631.041,
+            "sessionsPerSecond": 26.697122722020342,
+            "peakRssKiB": 46800,
+            "rssSamplesKiB": [
+              46800,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768,
+              42768
+            ],
+            "failures": [],
+            "cleanupOracle": {
+              "noLiveOwnerObjects": true,
+              "fixturePidsStopped": true
+            },
+            "ok": true
+          },
+          {
+            "round": 2,
+            "wallUs": 1208781.792,
+            "sessionsPerSecond": 26.47293350361783,
+            "peakRssKiB": 42800,
+            "rssSamplesKiB": [
+              42768,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800,
+              42800
+            ],
+            "failures": [],
+            "cleanupOracle": {
+              "noLiveOwnerObjects": true,
+              "fixturePidsStopped": true
+            },
+            "ok": true
+          },
+          {
+            "round": 3,
+            "wallUs": 1282768.834,
+            "sessionsPerSecond": 24.946037939053948,
+            "peakRssKiB": 42848,
+            "rssSamplesKiB": [
+              42800,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848
+            ],
+            "failures": [],
+            "cleanupOracle": {
+              "noLiveOwnerObjects": true,
+              "fixturePidsStopped": true
+            },
+            "ok": true
+          },
+          {
+            "round": 4,
+            "wallUs": 1390807.167,
+            "sessionsPerSecond": 23.008221958637634,
+            "peakRssKiB": 42848,
+            "rssSamplesKiB": [
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848,
+              42848
+            ],
+            "failures": [],
+            "cleanupOracle": {
+              "noLiveOwnerObjects": true,
+              "fixturePidsStopped": true
+            },
+            "ok": true
+          },
+          {
+            "round": 5,
+            "wallUs": 1186052.792,
+            "sessionsPerSecond": 26.980249290623483,
+            "peakRssKiB": 42864,
+            "rssSamplesKiB": [
+              42848,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864,
+              42864
+            ],
+            "failures": [],
+            "cleanupOracle": {
+              "noLiveOwnerObjects": true,
+              "fixturePidsStopped": true
+            },
+            "ok": true
+          }
+        ],
+        "wallSamplesUs": [
+          1198631.041,
+          1208781.792,
+          1282768.834,
+          1390807.167,
+          1186052.792
+        ],
+        "sessionsPerSecond": [
+          26.697122722020342,
+          26.47293350361783,
+          24.946037939053948,
+          23.008221958637634,
+          26.980249290623483
+        ],
+        "correctness": true
+      }
+    },
+    "stopCleanup": {
+      "agentmux": {
+        "attempts": [
+          {
+            "index": 0,
+            "durationUs": 529404.417,
+            "pids": [
+              83534,
+              83535
+            ],
+            "cleanupSuccess": true,
+            "ok": true
+          },
+          {
+            "index": 1,
+            "durationUs": 526694.958,
+            "pids": [
+              83645,
+              83646
+            ],
+            "cleanupSuccess": true,
+            "ok": true
+          },
+          {
+            "index": 2,
+            "durationUs": 538359.625,
+            "pids": [
+              83789,
+              83791
+            ],
+            "cleanupSuccess": true,
+            "ok": true
+          },
+          {
+            "index": 3,
+            "durationUs": 530768.458,
+            "pids": [
+              83862,
+              83864
+            ],
+            "cleanupSuccess": true,
+            "ok": true
+          },
+          {
+            "index": 4,
+            "durationUs": 528953.709,
+            "pids": [
+              83995,
+              83996
+            ],
+            "cleanupSuccess": true,
+            "ok": true
+          },
+          {
+            "index": 5,
+            "durationUs": 530319,
+            "pids": [
+              84084,
+              84090
+            ],
+            "cleanupSuccess": true,
+            "ok": true
+          },
+          {
+            "index": 6,
+            "durationUs": 529036.375,
+            "pids": [
+              84203,
+              84204
+            ],
+            "cleanupSuccess": true,
+            "ok": true
+          },
+          {
+            "index": 7,
+            "durationUs": 536560.917,
+            "pids": [
+              84288,
+              84289
+            ],
+            "cleanupSuccess": true,
+            "ok": true
+          },
+          {
+            "index": 8,
+            "durationUs": 531199.417,
+            "pids": [
+              84401,
+              84402
+            ],
+            "cleanupSuccess": true,
+            "ok": true
+          },
+          {
+            "index": 9,
+            "durationUs": 534408.541,
+            "pids": [
+              84541,
+              84542
+            ],
+            "cleanupSuccess": true,
+            "ok": true
+          }
+        ],
+        "samplesUs": [
+          529404.417,
+          526694.958,
+          538359.625,
+          530768.458,
+          528953.709,
+          530319,
+          529036.375,
+          536560.917,
+          531199.417,
+          534408.541
+        ],
+        "correctness": true
+      },
+      "tmux": {
+        "attempts": [
+          {
+            "index": 0,
+            "durationUs": 5522166.959,
+            "pids": [
+              84632,
+              84733
+            ],
+            "cleanupSuccess": false,
+            "ok": false,
+            "emergencyKilledPids": [
+              84632,
+              84733
+            ]
+          },
+          {
+            "index": 1,
+            "durationUs": 5524614,
+            "pids": [
+              97287,
+              97388
+            ],
+            "cleanupSuccess": false,
+            "ok": false,
+            "emergencyKilledPids": [
+              97287,
+              97388
+            ]
+          },
+          {
+            "index": 2,
+            "durationUs": 5529618.792,
+            "pids": [
+              10239,
+              10340
+            ],
+            "cleanupSuccess": false,
+            "ok": false,
+            "emergencyKilledPids": [
+              10239,
+              10340
+            ]
+          },
+          {
+            "index": 3,
+            "durationUs": 5530191.208,
+            "pids": [
+              22741,
+              22842
+            ],
+            "cleanupSuccess": false,
+            "ok": false,
+            "emergencyKilledPids": [
+              22741,
+              22842
+            ]
+          },
+          {
+            "index": 4,
+            "durationUs": 5521574.083,
+            "pids": [
+              35309,
+              35411
+            ],
+            "cleanupSuccess": false,
+            "ok": false,
+            "emergencyKilledPids": [
+              35309,
+              35411
+            ]
+          },
+          {
+            "index": 5,
+            "durationUs": 5519202.25,
+            "pids": [
+              47834,
+              47935
+            ],
+            "cleanupSuccess": false,
+            "ok": false,
+            "emergencyKilledPids": [
+              47834,
+              47935
+            ]
+          },
+          {
+            "index": 6,
+            "durationUs": 5517585.542,
+            "pids": [
+              60192,
+              60297
+            ],
+            "cleanupSuccess": false,
+            "ok": false,
+            "emergencyKilledPids": [
+              60192,
+              60297
+            ]
+          },
+          {
+            "index": 7,
+            "durationUs": 5511886.583,
+            "pids": [
+              72747,
+              72849
+            ],
+            "cleanupSuccess": false,
+            "ok": false,
+            "emergencyKilledPids": [
+              72747,
+              72849
+            ]
+          },
+          {
+            "index": 8,
+            "durationUs": 5521466.208,
+            "pids": [
+              85315,
+              85420
+            ],
+            "cleanupSuccess": false,
+            "ok": false,
+            "emergencyKilledPids": [
+              85315,
+              85420
+            ]
+          },
+          {
+            "index": 9,
+            "durationUs": 5529621.167,
+            "pids": [
+              98023,
+              98125
+            ],
+            "cleanupSuccess": false,
+            "ok": false,
+            "emergencyKilledPids": [
+              98023,
+              98125
+            ]
+          }
+        ],
+        "samplesUs": [],
+        "correctness": false
+      }
+    }
+  },
+  "correctness": {
+    "resources": {
+      "agentmux": true,
+      "tmux": true
+    },
+    "inputToVisible": {
+      "agentmux": true,
+      "tmux": true
+    },
+    "throughput": {
+      "agentmux": true,
+      "tmux": true
+    },
+    "attachReplay": {
+      "agentmux": true,
+      "tmux": true
+    },
+    "reconnect": {
+      "agentmux": true,
+      "tmux": true
+    },
+    "sessionScale": {
+      "agentmux": true,
+      "tmux": true
+    },
+    "stopCleanup": {
+      "agentmux": true,
+      "tmux": false
+    },
+    "cleanup": true
+  },
+  "summary": {
+    "inputToVisible": {
+      "agentmux": {
+        "count": 120,
+        "min": 560.541,
+        "mean": 6438.435766666666,
+        "p50": 6931.5,
+        "p95": 7745.959,
+        "p99": 8563.291,
+        "max": 11455.084,
+        "standardDeviation": 1740.9993485385469,
+        "confidenceIntervals": {
+          "mean": {
+            "lower": 6111.847266666667,
+            "upper": 6732.072958333335
+          },
+          "p50": {
+            "lower": 6859.25,
+            "upper": 6951.291
+          },
+          "p95": {
+            "lower": 7666.209,
+            "upper": 8057.292
+          },
+          "p99": {
+            "lower": 7751.5,
+            "upper": 11455.084
+          }
+        }
+      },
+      "tmux": {
+        "count": 120,
+        "min": 20508.333,
+        "mean": 335864.19439999975,
+        "p50": 304463.375,
+        "p95": 682701.959,
+        "p99": 721537.25,
+        "max": 743580.625,
+        "standardDeviation": 219066.44633279834,
+        "confidenceIntervals": {
+          "mean": {
+            "lower": 297103.21734166663,
+            "upper": 374267.5072999999
+          },
+          "p50": {
+            "lower": 236466.125,
+            "upper": 399375.542
+          },
+          "p95": {
+            "lower": 647068.542,
+            "upper": 710644.25
+          },
+          "p99": {
+            "lower": 683294.083,
+            "upper": 743580.625
+          }
+        }
+      }
+    },
+    "throughput": {
+      "agentmux": {
+        "count": 7,
+        "min": 5921043.998927823,
+        "mean": 6075031.802633495,
+        "p50": 6065929.669520996,
+        "p95": 6168304.638255947,
+        "p99": 6168304.638255947,
+        "max": 6168304.638255947,
+        "standardDeviation": 77493.73700232801,
+        "confidenceIntervals": {
+          "mean": {
+            "lower": 6011869.162774568,
+            "upper": 6128202.647126405
+          },
+          "p50": {
+            "lower": 6040414.848780951,
+            "upper": 6138423.56889087
+          },
+          "p95": {
+            "lower": 6137283.968355397,
+            "upper": 6168304.638255947
+          },
+          "p99": {
+            "lower": 6137283.968355397,
+            "upper": 6168304.638255947
+          }
+        }
+      },
+      "tmux": {
+        "count": 7,
+        "min": 4652796.158709822,
+        "mean": 4671775.807043933,
+        "p50": 4675569.958685816,
+        "p95": 4698853.144053885,
+        "p99": 4698853.144053885,
+        "max": 4698853.144053885,
+        "standardDeviation": 15416.95790151763,
+        "confidenceIntervals": {
+          "mean": {
+            "lower": 4660858.992591947,
+            "upper": 4683634.767716098
+          },
+          "p50": {
+            "lower": 4655407.354819809,
+            "upper": 4680513.604923733
+          },
+          "p95": {
+            "lower": 4679710.479242263,
+            "upper": 4698853.144053885
+          },
+          "p99": {
+            "lower": 4679710.479242263,
+            "upper": 4698853.144053885
+          }
+        }
+      }
+    },
+    "attachReplay": {
+      "agentmux": {
+        "count": 100,
+        "min": 4051.791,
+        "mean": 4468.55415,
+        "p50": 4318.917,
+        "p95": 5501.875,
+        "p99": 6753.875,
+        "max": 7147.166,
+        "standardDeviation": 523.5754862721778,
+        "confidenceIntervals": {
+          "mean": {
+            "lower": 4375.4070900000015,
+            "upper": 4580.2191299999995
+          },
+          "p50": {
+            "lower": 4290.25,
+            "upper": 4378.167
+          },
+          "p95": {
+            "lower": 4637.708,
+            "upper": 6600.291
+          },
+          "p99": {
+            "lower": 5501.875,
+            "upper": 7147.166
+          }
+        }
+      },
+      "tmux": {
+        "count": 100,
+        "min": 11081.584,
+        "mean": 12393.710059999998,
+        "p50": 12125.75,
+        "p95": 13987.958,
+        "p99": 17725.583,
+        "max": 18026.167,
+        "standardDeviation": 1060.8946101890972,
+        "confidenceIntervals": {
+          "mean": {
+            "lower": 12202.270129999997,
+            "upper": 12620.307530000002
+          },
+          "p50": {
+            "lower": 11962.834,
+            "upper": 12311.75
+          },
+          "p95": {
+            "lower": 13138.542,
+            "upper": 14585.292
+          },
+          "p99": {
+            "lower": 13987.958,
+            "upper": 18026.167
+          }
+        }
+      }
+    },
+    "reconnect": {
+      "agentmux": {
+        "count": 100,
+        "min": 9266.25,
+        "mean": 10768.19087,
+        "p50": 10210,
+        "p95": 12854.875,
+        "p99": 16654.792,
+        "max": 18142.125,
+        "standardDeviation": 1482.7401314012154,
+        "confidenceIntervals": {
+          "mean": {
+            "lower": 10495.894589999998,
+            "upper": 11078.058340000005
+          },
+          "p50": {
+            "lower": 10036.875,
+            "upper": 10574.167
+          },
+          "p95": {
+            "lower": 12233.084,
+            "upper": 15125.167
+          },
+          "p99": {
+            "lower": 12854.875,
+            "upper": 18142.125
+          }
+        }
+      },
+      "tmux": {
+        "count": 100,
+        "min": 20189,
+        "mean": 23479.236640000006,
+        "p50": 23210.917,
+        "p95": 26552.792,
+        "p99": 28837.583,
+        "max": 32830.583,
+        "standardDeviation": 1927.3911349260975,
+        "confidenceIntervals": {
+          "mean": {
+            "lower": 23123.37574000001,
+            "upper": 23878.47080000001
+          },
+          "p50": {
+            "lower": 22734.208,
+            "upper": 23618.166
+          },
+          "p95": {
+            "lower": 25632.042,
+            "upper": 27721.541
+          },
+          "p99": {
+            "lower": 26552.792,
+            "upper": 32830.583
+          }
+        }
+      }
+    },
+    "scaleWall": {
+      "agentmux": {
+        "count": 5,
+        "min": 349136.542,
+        "mean": 481543.6,
+        "p50": 352243.375,
+        "p95": 971462.416,
+        "p99": 971462.416,
+        "max": 971462.416,
+        "standardDeviation": 245319.86410717125,
+        "confidenceIntervals": {
+          "mean": {
+            "lower": 350160.025,
+            "upper": 729651.5248
+          },
+          "p50": {
+            "lower": 349136.542,
+            "upper": 971462.416
+          },
+          "p95": {
+            "lower": 352243.375,
+            "upper": 971462.416
+          },
+          "p99": {
+            "lower": 352243.375,
+            "upper": 971462.416
+          }
+        }
+      },
+      "tmux": {
+        "count": 5,
+        "min": 1186052.792,
+        "mean": 1253408.3251999996,
+        "p50": 1208781.792,
+        "p95": 1390807.167,
+        "p99": 1390807.167,
+        "max": 1390807.167,
+        "standardDeviation": 76510.5579477903,
+        "confidenceIntervals": {
+          "mean": {
+            "lower": 1195629.8915999997,
+            "upper": 1328248.6254
+          },
+          "p50": {
+            "lower": 1186052.792,
+            "upper": 1390807.167
+          },
+          "p95": {
+            "lower": 1208781.792,
+            "upper": 1390807.167
+          },
+          "p99": {
+            "lower": 1208781.792,
+            "upper": 1390807.167
+          }
+        }
+      }
+    },
+    "scaleRate": {
+      "agentmux": {
+        "count": 5,
+        "min": 32.940028839983455,
+        "mean": 78.001382959629,
+        "p50": 90.8462792238463,
+        "p95": 91.65468563299227,
+        "p99": 91.65468563299227,
+        "max": 91.65468563299227,
+        "standardDeviation": 22.750761840625877,
+        "confidenceIntervals": {
+          "mean": {
+            "lower": 54.729831414139696,
+            "upper": 91.387744571393
+          },
+          "p50": {
+            "lower": 32.940028839983455,
+            "upper": 91.65468563299227
+          },
+          "p95": {
+            "lower": 90.8462792238463,
+            "upper": 91.65468563299227
+          },
+          "p99": {
+            "lower": 90.8462792238463,
+            "upper": 91.65468563299227
+          }
+        }
+      },
+      "tmux": {
+        "count": 5,
+        "min": 23.008221958637634,
+        "mean": 25.62091308279065,
+        "p50": 26.47293350361783,
+        "p95": 26.980249290623483,
+        "p99": 26.980249290623483,
+        "max": 26.980249290623483,
+        "standardDeviation": 1.4841544583273243,
+        "confidenceIntervals": {
+          "mean": {
+            "lower": 24.170911546887424,
+            "upper": 26.7655355057811
+          },
+          "p50": {
+            "lower": 23.008221958637634,
+            "upper": 26.980249290623483
+          },
+          "p95": {
+            "lower": 26.47293350361783,
+            "upper": 26.980249290623483
+          },
+          "p99": {
+            "lower": 26.47293350361783,
+            "upper": 26.980249290623483
+          }
+        }
+      }
+    },
+    "stopCleanup": {
+      "agentmux": {
+        "count": 10,
+        "min": 526694.958,
+        "mean": 531570.5417000002,
+        "p50": 530319,
+        "p95": 538359.625,
+        "p99": 538359.625,
+        "max": 538359.625,
+        "standardDeviation": 3508.9940584506267,
+        "confidenceIntervals": {
+          "mean": {
+            "lower": 529544.1375,
+            "upper": 533855.4458000001
+          },
+          "p50": {
+            "lower": 528953.709,
+            "upper": 534408.541
+          },
+          "p95": {
+            "lower": 531199.417,
+            "upper": 538359.625
+          },
+          "p99": {
+            "lower": 531199.417,
+            "upper": 538359.625
+          }
+        }
+      },
+      "tmux": null
+    },
+    "resources": {
+      "agentmux": {
+        "idleCpuPercent": 0,
+        "idleRssKiB": 5120,
+        "perSessionRssKiB": 142.5,
+        "steadyRssKiB": 13584,
+        "peakRssKiB": 16144,
+        "releasedRssKiB": 20352
+      },
+      "tmux": {
+        "idleCpuPercent": 0,
+        "idleRssKiB": 3536,
+        "perSessionRssKiB": 32,
+        "steadyRssKiB": 19291.27868852459,
+        "peakRssKiB": 43088,
+        "releasedRssKiB": 34864
+      }
+    }
+  },
+  "verdict": "fail",
+  "verdictFailures": [
+    "resources.idleCpuPercent",
+    "resources.idleRssKiB",
+    "resources.perSessionRssKiB"
+  ],
+  "qualitativeWins": [
+    "stopCleanup.complete-process-tree"
+  ],
+  "skippedComparisons": [
+    "stopCleanup.p95"
+  ],
+  "cleanup": {
+    "agentmux": {
+      "stoppedTrackedRuns": true
+    },
+    "tmux": {
+      "killedExactSocket": "agentmux-benchmark-eedf0e11"
+    },
+    "fixtures": {
+      "emergencyKilledPids": []
+    },
+    "daemon": {
+      "matchedPids": [
+        73744
+      ],
+      "stopped": true
+    },
+    "rootRemoved": true,
+    "errors": []
+  }
+}

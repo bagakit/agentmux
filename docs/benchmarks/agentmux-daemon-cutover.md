@@ -1,6 +1,10 @@
 # AgentMux Daemon Cutover Benchmark
 
-状态：Protocol Freeze Revision 3，冻结于任何 Revision 3 Result 运行之前。Revision 3 只评估最终 `@agentmux/core` + 固定 CtxMux artifact candidate；Revision 1 只适用于已经删除的自建 `agentmuxd`，Revision 2 的首轮 Raw Result 保留为 characterization。两个历史 Revision 都不覆盖、不改写，也不参与 Revision 3 Verdict。
+状态：Revision 3 Round 1 已于 clean candidate `9a92bd14c3f68314354dc406da16f6766fa4c1d5` 运行并得到 `fail`；Raw Result 永久保留。Revision 3 只评估最终 `@agentmux/core` + 固定 CtxMux artifact candidate；Revision 1 只适用于已经删除的自建 `agentmuxd`，Revision 2 的首轮 Raw Result 保留为 characterization。历史 Revision 都不覆盖、不改写。
+
+Revision 3 Round 1 的所有 workload correctness 与 cleanup oracle 均通过，tmux 仅按冻结规则暴露完整进程树 Stop 限制；主性能维度中 AgentMux 已胜出 input、throughput、attach、reconnect、32 Run scale、steady/peak/released RSS 与完整 Stop。最终 Verdict 仍然失败：Idle RSS `5120 KiB >= 3536 KiB` 是真实 candidate gap；Per-session RSS 的 `142.5 KiB >= 32 KiB` 方向有独立证据支持，但正式样本把 AgentMux 的一个 historical Run 混入 32 live Run，而 tmux 只有 32 live Session，状态不等价；Idle CPU 两端都由百分之一秒精度的 `ps time` 观测成零，证据不可判定。不能把 `0 == 0` 改成通过、放宽严格 `<`、增加容差或从 RSS 事后扣数。完整原始证据见 `docs/benchmarks/results/revision-3-round-1-9a92bd14-darwin-arm64-2026-08-16T225516355Z.json`。
+
+下一 Revision 只能修复 observer：使用精确 owner 的高分辨率累计 CPU counter，并记录原始起止计数、单位和精度；在双方 fresh empty owner 上分别测量 1／32 Session，并记录每个 checkpoint 的 live/historical owner 数。数值阈值、样本量、统计、outlier policy、strict comparison 和 workload correctness 不变。新正式 Round 之前还必须在 CtxMux owner 层修复真实 Idle/Per-Run RSS 缺口。
 
 ## 0. Revision 3 方法修正
 
