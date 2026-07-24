@@ -322,7 +322,7 @@ async function attach(args: readonly string[]): Promise<number> {
       }
     }
     unsubscribe()
-    await client.releaseAgentAttachment(target.agentSessionId)
+    await client.releaseRunAttachment(attached.attachment.run)
     return 0
   })
 }

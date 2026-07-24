@@ -11,7 +11,9 @@ const config: AppConfig = {
 }
 
 function runtimeFixture(overrides: Partial<RuntimeController> = {}) {
-  const preparation = { hosts: [], removedHostIds: [], hostSignatures: new Map() } as RuntimePreparation
+  const preparation = {
+    hosts: [], removedHostIds: [], hostSignatures: new Map(), reservedHostIds: []
+  } as RuntimePreparation
   const runtime = {
     prepare: vi.fn(async () => preparation),
     commit: vi.fn(),

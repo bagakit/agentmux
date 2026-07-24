@@ -177,7 +177,7 @@ describe.runIf(process.env.AGENTMUX_REAL_CODEX_E2E === '1')('installed real Code
       payload: { acknowledged: true },
       submit: { acknowledged: true }
     })
-    await client.releaseAgentAttachment(created.agentSessionId)
+    await client.releaseRunAttachment(created.run)
     const firstExitReplay = await client.reattachAgent(
       created.agentSessionId,
       firstPreExit.run.latestOutputBytes
@@ -262,7 +262,7 @@ describe.runIf(process.env.AGENTMUX_REAL_CODEX_E2E === '1')('installed real Code
       payload: { acknowledged: true },
       submit: { acknowledged: true }
     })
-    await client.releaseAgentAttachment(resumed.agentSessionId)
+    await client.releaseRunAttachment(resumed.run)
     const resumedExitReplay = await client.reattachAgent(
       resumed.agentSessionId,
       resumedPreExit.run.latestOutputBytes

@@ -157,10 +157,17 @@ export async function registerIpc(args: {
   handle('sessions:snapshot', async () => await args.runtime.snapshot(config))
   handle('sessions:launchAgent', async (input: AgentLaunchInput) => await args.runtime.launchAgent(input, config))
   handle('sessions:launchTerminal', async (input: TerminalLaunchInput) => await args.runtime.launchTerminal(input, config))
-  handle('sessions:attach', async (session: SessionControl, afterSequence: number = 0) => {
-    return await args.runtime.attachSession(session, afterSequence, config)
+  channels.push('sessions:attach')
+  ipcMain.handle('sessions:attach', async (event, session: SessionControl, afterSequence: number = 0) => {
+    const result = await args.runtime.attachSession(event.sender.id, session, afterSequence, config)
+    if (!event.sender.isDestroyed()) return result
+    await args.runtime.detachSession(event.sender.id, result.attachmentId)
+    throw new Error('The Desktop View disappeared before its Session Attachment was delivered.')
   })
-  handle('sessions:detach', async (session: SessionControl) => await args.runtime.detachSession(session))
+  channels.push('sessions:detach')
+  ipcMain.handle('sessions:detach', async (event, attachmentId: string) => {
+    await args.runtime.detachSession(event.sender.id, attachmentId)
+  })
   handle('sessions:write', async (session: SessionControl, data: string) => {
     await args.runtime.write(session, data)
   })

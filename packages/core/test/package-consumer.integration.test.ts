@@ -256,6 +256,9 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         })
         expect(JSON.parse(result.stdout.trim())).toMatchObject({
           replayStartByte: 7,
+          sharedReplayWhileAttached: true,
+          agentSharedReplayWhileAttached: true,
+          multiViewAcknowledgementMonotonic: true,
           resize: '101x37',
           interruptStillLive: true,
           dedupOccurrences: 1,

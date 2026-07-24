@@ -122,6 +122,9 @@ const third = await connectLocalAgentMux()
 const thirdEvents = []
 third.onEvent((event) => thirdEvents.push(event))
 const fullReplay = await third.attachTerminal(run.runId, 0)
+const sharedReplay = await third.readRunReplay(run, Buffer.byteLength('prefix:'))
+assert.equal(sharedReplay.replay[0]?.startByte, Buffer.byteLength('prefix:'))
+assert.equal(sharedReplay.replay.map((event) => event.data).join('').includes('😀:tail'), true)
 const recoveredInput = await third.writeTerminal(run, recoverableInput)
 assert.deepEqual(recoveredInput.appliedByteRange, {
   startByte: recoverableInput.expectedByte,
@@ -193,6 +196,9 @@ assert.deepEqual(codex.terminalHandshake, {
 })
 assert.ok(codex.terminalHandshake.operationId)
 const codexAttachment = await codexFirst.reattachAgent(codex.agentSessionId, 0)
+const codexSharedReplay = await codexFirst.readRunReplay(codex.run, 0)
+assert.equal(codexSharedReplay.run.kind, 'agent')
+assert.equal(codexSharedReplay.run.agentSessionId, codex.agentSessionId)
 await waitFor('Codex native Hook identity', () => (
   codexFirst.agentSession(codex.agentSessionId).nativeHandle?.kind === 'provider' &&
   codexFirstEvents.some((event) => (
@@ -204,6 +210,11 @@ const initialStopReceipt = await waitFor('Codex ready Stop receipt', () => {
   return receipt?.readyThroughByte === undefined ? null : receipt
 })
 assert.equal(initialStopReceipt.readyThroughByte, initialStopReceipt.outputCursorBytes)
+const acknowledgedThroughByte = (await codexFirst.statusAgent(codex.agentSessionId)).run.latestOutputBytes
+assert.ok(acknowledgedThroughByte > 0)
+await codexFirst.acknowledgeAgentOutput(codex.agentSessionId, acknowledgedThroughByte)
+await codexFirst.acknowledgeAgentOutput(codex.agentSessionId, acknowledgedThroughByte - 1)
+assert.equal(codexFirst.agentSession(codex.agentSessionId).outputCursorBytes, acknowledgedThroughByte)
 assert.equal(codexFirst.resolveAgentSession({ kind: 'run', run: codex.run }).agentSessionId, codex.agentSessionId)
 assert.equal(codexFirst.resolveAgentSession({
   kind: 'provider-native',
@@ -573,6 +584,9 @@ process.stdout.write(`${JSON.stringify({
   runId: run.runId,
   pid: originalPid,
   replayStartByte: suffix.replay[0]?.startByte,
+  sharedReplayWhileAttached: true,
+  agentSharedReplayWhileAttached: true,
+  multiViewAcknowledgementMonotonic: true,
   resize: '101x37',
   interruptStillLive: true,
   dedupOccurrences,

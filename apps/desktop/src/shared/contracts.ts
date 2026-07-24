@@ -195,6 +195,7 @@ export type RuntimeSnapshot = {
 }
 
 export type SessionAttachResult = {
+  attachmentId: string
   session: SessionSnapshot
   replay: AgentMuxRunDataEvent[]
   gap: AgentMuxRunReplayGap | null
@@ -285,7 +286,7 @@ export type AgentMuxDesktopApi = {
     launchAgent(input: AgentLaunchInput): Promise<SessionSnapshot>
     launchTerminal(input: TerminalLaunchInput): Promise<SessionSnapshot>
     attach(session: SessionControl, afterByte?: number): Promise<SessionAttachResult>
-    detach(session: SessionControl): Promise<void>
+    detach(attachmentId: string): Promise<void>
     write(session: SessionControl, data: string): Promise<void>
     submitPrompt(session: AgentSessionControl, prompt: string): Promise<void>
     acknowledge(session: SessionControl, throughByte: number): Promise<void>
