@@ -3,7 +3,7 @@ import type { AgentActivity, RuntimeEvent, SessionSnapshot } from '../src/shared
 import { reduceBrowserEvent } from '../src/renderer/src/lib/browser-state.js'
 import {
   reduceDocumentContent,
-  reduceDocumentSaved,
+  reduceDocumentWritten,
   reduceFileClosed,
   reduceFileOpened
 } from '../src/renderer/src/lib/file-workbench-state.js'
@@ -208,6 +208,9 @@ describe('Renderer resource state owners', () => {
       tabs: {},
       documents: {},
       dirtyDocuments: {},
+      documentGenerations: {},
+      documentIssues: {},
+      savingDocuments: {},
       layouts: { [workspaceId]: createWorkspaceLayout('pane') },
       lastActiveFileByWorkspace: {}
     }
@@ -215,18 +218,20 @@ describe('Renderer resource state owners', () => {
       state,
       workspaceId,
       'src/app.ts',
-      { path: 'src/app.ts', content: 'before' }
+      { path: 'src/app.ts', content: 'before', revision: 'revision-before' }
     )
     const tabId = `file:${workspaceId}:src/app.ts`
     state = reduceDocumentContent(state, tabId, 'after')
     expect(state.documents[documentKey(workspaceId, 'src/app.ts')]).toEqual({
       path: 'src/app.ts',
-      content: 'after'
+      content: 'after',
+      revision: 'revision-before'
     })
     expect(state.dirtyDocuments[documentKey(workspaceId, 'src/app.ts')]).toBe(true)
 
-    state = reduceDocumentSaved(state, workspaceId, 'src/app.ts')
+    state = reduceDocumentWritten(state, workspaceId, 'src/app.ts', 1, 'revision-after')
     expect(state.dirtyDocuments[documentKey(workspaceId, 'src/app.ts')]).toBe(false)
+    expect(state.documents[documentKey(workspaceId, 'src/app.ts')]?.revision).toBe('revision-after')
     expect(state.layouts[workspaceId]?.groups[0]?.activeTabId).toBe(tabId)
 
     state = reduceFileClosed(state, workspaceId, 'pane', tabId)

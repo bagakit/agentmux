@@ -14,17 +14,18 @@ import type {
   DesktopViewFocusResult,
   DesktopViewFocusResponse,
   DesktopViewFocusTarget,
-  FileDocument,
   HostConfig,
   RenameWorkspacePathInput,
   SessionControl,
   TerminalLaunchInput,
+  WorkspaceFileWriteInput,
   WorkspaceRecord
 } from '../shared/contracts.js'
 import { terminalPalette } from '../shared/terminal-palettes.js'
 import { BrowserViewManager } from './browser-view-manager.js'
 import { ConfigStore } from './config-store.js'
 import { normalizeExternalUrl } from './external-url.js'
+import { FileObservationRegistry } from './file-observation-registry.js'
 import { RuntimeController } from './runtime-controller.js'
 import { saveRuntimeConfig } from './runtime-config-transaction.js'
 import { WorkspaceFiles } from './workspace-files.js'
@@ -51,6 +52,7 @@ export async function registerIpc(args: {
   const files = new WorkspaceFiles((id) => args.runtime.executionHost(id))
   const worktrees = new WorktreeService((id) => args.runtime.executionHost(id), args.configStore)
   const browsers = new BrowserViewManager(args.window)
+  const fileObservations = new FileObservationRegistry()
   const channels: string[] = []
   const pendingViewFocus = new Map<string, {
     resolve(value: DesktopViewFocusResult): void
@@ -152,8 +154,21 @@ export async function registerIpc(args: {
     await files.readDirectory(workspace(config, workspaceId), path)
   )
   handle('files:read', async (workspaceId: string, path: string) => await files.read(workspace(config, workspaceId), path))
-  handle('files:write', async (workspaceId: string, document: FileDocument) => {
-    await files.write(workspace(config, workspaceId), document)
+  handle('files:write', async (workspaceId: string, input: WorkspaceFileWriteInput) =>
+    await files.write(workspace(config, workspaceId), input)
+  )
+  handle('files:observe', async (workspaceId: string, path: string) => {
+    const key = `${workspaceId}\0${path}`
+    await fileObservations.observe(key, async () => (
+      await files.observe(workspace(config, workspaceId), path, () => {
+        if (args.window.webContents.isDestroyed()) return
+        args.window.webContents.send('agentmux:workspace-file-invalidated', { workspaceId, path })
+      })
+    ))
+  })
+  handle('files:unobserve', async (workspaceId: string, path: string) => {
+    const key = `${workspaceId}\0${path}`
+    await fileObservations.unobserve(key)
   })
   handle('files:create', async (workspaceId: string, input: CreateWorkspacePathInput) => {
     await files.create(workspace(config, workspaceId), input)
@@ -225,6 +240,8 @@ export async function registerIpc(args: {
       pending.reject(Object.assign(new Error('Desktop View focus owner was disposed.'), { code: 'VIEW_FOCUS_UNAVAILABLE' }))
     }
     pendingViewFocus.clear()
+    await fileObservations.dispose()
+    files.dispose()
     for (const channel of channels) ipcMain.removeHandler(channel)
   }
 }

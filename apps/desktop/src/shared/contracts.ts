@@ -61,6 +61,28 @@ export type AppConfig = {
 export type FileDocument = {
   path: string
   content: string
+  revision: string
+}
+
+export type WorkspaceFileReadResult =
+  | { status: 'read'; document: FileDocument }
+  | { status: 'deleted' }
+  | { status: 'error'; code: string; message: string }
+
+export type WorkspaceFileWriteInput = {
+  path: string
+  content: string
+  expectedRevision: string | null
+}
+
+export type WorkspaceFileWriteResult =
+  | { status: 'written'; revision: string }
+  | { status: 'conflict'; observedRevision: string | null }
+  | { status: 'error'; code: string; message: string }
+
+export type WorkspaceFileInvalidated = {
+  workspaceId: string
+  path: string
 }
 
 export type WorkspaceDirectoryEntry = {
@@ -275,8 +297,11 @@ export type AgentMuxDesktopApi = {
   }
   files: {
     readDirectory(workspaceId: string, path: string): Promise<WorkspaceDirectoryEntry[]>
-    read(workspaceId: string, path: string): Promise<FileDocument>
-    write(workspaceId: string, document: FileDocument): Promise<void>
+    read(workspaceId: string, path: string): Promise<WorkspaceFileReadResult>
+    write(workspaceId: string, input: WorkspaceFileWriteInput): Promise<WorkspaceFileWriteResult>
+    observe(workspaceId: string, path: string): Promise<void>
+    unobserve(workspaceId: string, path: string): Promise<void>
+    onInvalidated(listener: (event: WorkspaceFileInvalidated) => void): () => void
     create(workspaceId: string, input: CreateWorkspacePathInput): Promise<void>
     rename(workspaceId: string, input: RenameWorkspacePathInput): Promise<void>
     delete(workspaceId: string, path: string): Promise<void>

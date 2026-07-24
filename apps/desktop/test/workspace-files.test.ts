@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { access, mkdtemp, mkdir, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { access, chmod, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ExecutionHost } from '@agentmux/core'
 import type { WorkspaceRecord } from '../src/shared/contracts.js'
-import { WorkspaceFiles } from '../src/main/workspace-files.js'
+import { WorkspaceFiles, workspaceFileObserverCount } from '../src/main/workspace-files.js'
 
 const localWorkerRace = vi.hoisted(() => ({
   beforeInput: null as null | (() => Promise<void>)
@@ -35,6 +36,48 @@ vi.mock('node:child_process', async (importOriginal) => {
 })
 
 const temporaryRoots: string[] = []
+
+function revision(content: string): string {
+  return `sha256:${createHash('sha256').update(content).digest('hex')}`
+}
+
+async function waitFor(predicate: () => boolean | Promise<boolean>): Promise<void> {
+  const deadline = Date.now() + 5_000
+  while (Date.now() < deadline) {
+    if (await predicate()) return
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+  throw new Error('Timed out waiting for Workspace file observation')
+}
+
+async function localFixture(label: string): Promise<{
+  root: string
+  workspace: WorkspaceRecord
+  host: ExecutionHost
+}> {
+  const fixture = await mkdtemp(join(tmpdir(), `agentmux-${label}-`))
+  temporaryRoots.push(fixture)
+  const root = join(fixture, 'workspace')
+  await mkdir(root)
+  return {
+    root,
+    workspace: {
+      id: `${label}-workspace`,
+      name: label,
+      hostId: 'local',
+      path: root,
+      kind: 'folder'
+    },
+    host: {
+      id: 'local',
+      kind: 'local',
+      label: 'Local',
+      run: vi.fn(),
+      exposeLoopbackPort: async (port) => port,
+      dispose: async () => {}
+    }
+  }
+}
 
 afterEach(async () => {
   localWorkerRace.beforeInput = null
@@ -84,8 +127,12 @@ describe('WorkspaceFiles root confinement', () => {
         writeFile(join(readRace.outside, 'value.txt'), 'outside-secret')
       ])
       await expect(files.read(workspace, 'read/value.txt')).resolves.toEqual({
-        path: 'read/value.txt',
-        content: 'inside'
+        status: 'read',
+        document: {
+          path: 'read/value.txt',
+          content: 'inside',
+          revision: revision('inside')
+        }
       })
       await expect(readFile(join(readRace.outside, 'value.txt'), 'utf8')).resolves.toBe('outside-secret')
 
@@ -116,7 +163,11 @@ describe('WorkspaceFiles root confinement', () => {
         writeFile(join(writeRace.requested, 'value.txt'), 'inside'),
         writeFile(join(writeRace.outside, 'value.txt'), 'outside-secret')
       ])
-      await files.write(workspace, { path: 'write/value.txt', content: 'updated' })
+      await expect(files.write(workspace, {
+        path: 'write/value.txt',
+        content: 'updated',
+        expectedRevision: revision('inside')
+      })).resolves.toEqual({ status: 'written', revision: revision('updated') })
       await expect(readFile(join(writeRace.held, 'value.txt'), 'utf8')).resolves.toBe('updated')
       await expect(readFile(join(writeRace.outside, 'value.txt'), 'utf8')).resolves.toBe('outside-secret')
 
@@ -172,14 +223,132 @@ describe('WorkspaceFiles root confinement', () => {
     await expect(files.localPathForReveal(workspace, 'inside.txt')).resolves.toBe(
       await realpath(join(root, 'inside.txt'))
     )
-    await expect(files.read(workspace, 'inside.txt')).resolves.toEqual({ path: 'inside.txt', content: 'inside' })
-    await files.write(workspace, { path: 'inside.txt', content: 'updated' })
+    await expect(files.read(workspace, 'inside.txt')).resolves.toEqual({
+      status: 'read',
+      document: { path: 'inside.txt', content: 'inside', revision: revision('inside') }
+    })
+    await expect(files.write(workspace, {
+      path: 'inside.txt',
+      content: 'updated',
+      expectedRevision: revision('inside')
+    })).resolves.toEqual({ status: 'written', revision: revision('updated') })
     await expect(readFile(join(root, 'inside.txt'), 'utf8')).resolves.toBe('updated')
-    await expect(files.read(workspace, 'escape/secret.txt')).rejects.toThrow('Path escapes the workspace root')
-    await expect(files.write(workspace, { path: 'escape/secret.txt', content: 'stolen' })).rejects.toThrow(
-      'Path escapes the workspace root'
-    )
+    await expect(files.read(workspace, 'escape/secret.txt')).resolves.toMatchObject({
+      status: 'error',
+      message: 'Path escapes the workspace root'
+    })
+    await expect(files.write(workspace, {
+      path: 'escape/secret.txt',
+      content: 'stolen',
+      expectedRevision: revision('secret')
+    })).resolves.toMatchObject({ status: 'error', message: 'Path escapes the workspace root' })
     await expect(readFile(join(outside, 'secret.txt'), 'utf8')).resolves.toBe('secret')
+  })
+
+  it('returns revisions, serializes competing saves, and rejects stale expected revisions', async () => {
+    const { root, workspace, host } = await localFixture('revision')
+    const path = join(root, 'document.txt')
+    await writeFile(path, 'alpha')
+    const files = new WorkspaceFiles(() => host)
+
+    const opened = await files.read(workspace, 'document.txt')
+    expect(opened).toEqual({
+      status: 'read',
+      document: { path: 'document.txt', content: 'alpha', revision: revision('alpha') }
+    })
+    if (opened.status !== 'read') throw new Error('Fixture file was not read')
+
+    const [first, second] = await Promise.all([
+      files.write(workspace, {
+        path: 'document.txt',
+        content: 'bravo',
+        expectedRevision: opened.document.revision
+      }),
+      files.write(workspace, {
+        path: 'document.txt',
+        content: 'charlie',
+        expectedRevision: opened.document.revision
+      })
+    ])
+    expect(first).toEqual({ status: 'written', revision: revision('bravo') })
+    expect(second).toEqual({ status: 'conflict', observedRevision: revision('bravo') })
+    await expect(readFile(path, 'utf8')).resolves.toBe('bravo')
+
+    await writeFile(path, 'delta')
+    await expect(files.write(workspace, {
+      path: 'document.txt',
+      content: 'echo',
+      expectedRevision: revision('bravo')
+    })).resolves.toEqual({ status: 'conflict', observedRevision: revision('delta') })
+    await expect(readFile(path, 'utf8')).resolves.toBe('delta')
+  })
+
+  it.each(['temporary-write', 'replace'] as const)(
+    'keeps original bytes and mode when %s fails',
+    async (fault) => {
+      const { root, workspace, host } = await localFixture(`atomic-${fault}`)
+      const path = join(root, 'document.txt')
+      await writeFile(path, 'original bytes')
+      await chmod(path, 0o640)
+      const files = new WorkspaceFiles(() => host, { localWriteFault: fault })
+
+      await expect(files.write(workspace, {
+        path: 'document.txt',
+        content: 'replacement bytes',
+        expectedRevision: revision('original bytes')
+      })).resolves.toMatchObject({ status: 'error' })
+      await expect(readFile(path, 'utf8')).resolves.toBe('original bytes')
+      expect((await stat(path)).mode & 0o777).toBe(0o640)
+      expect((await readdir(root)).filter((name) => name.includes('.agentmux-'))).toEqual([])
+    }
+  )
+
+  it('atomically replaces a complete file while preserving its mode', async () => {
+    const { root, workspace, host } = await localFixture('atomic-success')
+    const path = join(root, 'document.txt')
+    await writeFile(path, 'original bytes')
+    await chmod(path, 0o640)
+    const files = new WorkspaceFiles(() => host)
+
+    await expect(files.write(workspace, {
+      path: 'document.txt',
+      content: 'replacement bytes',
+      expectedRevision: revision('original bytes')
+    })).resolves.toEqual({ status: 'written', revision: revision('replacement bytes') })
+    await expect(readFile(path, 'utf8')).resolves.toBe('replacement bytes')
+    expect((await stat(path)).mode & 0o777).toBe(0o640)
+  })
+
+  it('publishes only invalidation facts and distinguishes deletion from read failure', async () => {
+    const { root, workspace, host } = await localFixture('observation')
+    const path = join(root, 'document.txt')
+    await writeFile(path, 'alpha')
+    const files = new WorkspaceFiles(() => host)
+    let invalidations = 0
+    const dispose = await files.observe(workspace, 'document.txt', () => {
+      invalidations += 1
+    })
+    expect(workspaceFileObserverCount()).toBe(1)
+
+    await writeFile(path, 'bravo')
+    await waitFor(() => invalidations > 0)
+    await rm(path)
+    await waitFor(() => invalidations > 1)
+    await expect(files.read(workspace, 'document.txt')).resolves.toEqual({ status: 'deleted' })
+
+    await mkdir(path)
+    await waitFor(() => invalidations > 2)
+    await expect(files.read(workspace, 'document.txt')).resolves.toMatchObject({
+      status: 'error',
+      message: 'Workspace path is not a regular file'
+    })
+
+    dispose()
+    await waitFor(() => workspaceFileObserverCount() === 0)
+    const afterDispose = invalidations
+    await rm(path, { recursive: true })
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(invalidations).toBe(afterDispose)
   })
 
   it('lists one directory level and confines create, rename, and delete mutations', async () => {
@@ -258,10 +427,15 @@ describe('WorkspaceFiles root confinement', () => {
     await expect(files.localPathForReveal(workspace, 'linked-secret')).rejects.toThrow(
       'Reveal in file manager is available only for local paths'
     )
-    await expect(files.read(workspace, 'linked-secret')).rejects.toThrow('Path escapes the workspace root')
-    await expect(files.write(workspace, { path: 'linked-secret', content: 'stolen' })).rejects.toThrow(
-      'Path escapes the workspace root'
-    )
+    await expect(files.read(workspace, 'linked-secret')).resolves.toMatchObject({
+      status: 'error',
+      message: 'Path escapes the workspace root'
+    })
+    await expect(files.write(workspace, {
+      path: 'linked-secret',
+      content: 'stolen',
+      expectedRevision: revision('secret')
+    })).resolves.toMatchObject({ status: 'error' })
     expect(run.mock.calls.every(([command]) => command === 'realpath')).toBe(true)
   })
 

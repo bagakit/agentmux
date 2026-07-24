@@ -57,9 +57,9 @@ describe('file mutation resource reconciliation', () => {
     useAppStore.setState({
       tabs: { [child.id]: child, [neighbor.id]: neighbor },
       documents: {
-        [documentKey(workspace.id, child.path)]: { path: child.path, content: 'child' },
-        [documentKey(workspace.id, 'src/app/closed.ts')]: { path: 'src/app/closed.ts', content: 'closed' },
-        [documentKey(workspace.id, neighbor.path)]: { path: neighbor.path, content: 'neighbor' }
+        [documentKey(workspace.id, child.path)]: { path: child.path, content: 'child', revision: 'child-revision' },
+        [documentKey(workspace.id, 'src/app/closed.ts')]: { path: 'src/app/closed.ts', content: 'closed', revision: 'closed-revision' },
+        [documentKey(workspace.id, neighbor.path)]: { path: neighbor.path, content: 'neighbor', revision: 'neighbor-revision' }
       },
       dirtyDocuments: {
         [documentKey(workspace.id, child.path)]: true,
@@ -80,16 +80,19 @@ describe('file mutation resource reconciliation', () => {
     expect(renamed.tabs[neighbor.id]).toEqual(neighbor)
     expect(renamed.documents[documentKey(workspace.id, renamedPath)]).toEqual({
       path: renamedPath,
-      content: 'child'
+      content: 'child',
+      revision: 'child-revision'
     })
     expect(renamed.documents[documentKey(workspace.id, 'src/renamed/closed.ts')]).toEqual({
       path: 'src/renamed/closed.ts',
-      content: 'closed'
+      content: 'closed',
+      revision: 'closed-revision'
     })
     expect(renamed.dirtyDocuments[documentKey(workspace.id, 'src/renamed/closed.ts')]).toBe(true)
     expect(renamed.documents[documentKey(workspace.id, neighbor.path)]).toEqual({
       path: neighbor.path,
-      content: 'neighbor'
+      content: 'neighbor',
+      revision: 'neighbor-revision'
     })
     expect(renamed.dirtyDocuments[documentKey(workspace.id, renamedPath)]).toBe(true)
     expect(renamed.layouts[workspace.id]?.groups[0]?.tabOrder).toEqual([renamedId, neighbor.id])
@@ -145,7 +148,7 @@ describe('file mutation resource reconciliation', () => {
     expect(closed.dirtyDocuments[documentKey(workspace.id, path)]).toBeUndefined()
 
     await useAppStore.getState().openFile(path, 'pane')
-    expect(useAppStore.getState().documents[documentKey(workspace.id, path)]).toEqual({
+    expect(useAppStore.getState().documents[documentKey(workspace.id, path)]).toMatchObject({
       path,
       content: ''
     })
