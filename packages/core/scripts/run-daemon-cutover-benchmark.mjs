@@ -10,10 +10,10 @@ import {
   summarizeSamples
 } from './run-kernel-statistics.mjs'
 
-export const BENCHMARK_SCHEMA = 'agentmux.benchmark.daemon-cutover.v3'
-export const PROTOCOL_REVISION = 3
-export const RUNNER_VERSION = 3
-export const FORMAL_RESULT_PREFIX = 'revision-3'
+export const BENCHMARK_SCHEMA = 'agentmux.benchmark.daemon-cutover.v4'
+export const PROTOCOL_REVISION = 4
+export const RUNNER_VERSION = 4
+export const FORMAL_RESULT_PREFIX = 'revision-4'
 export const WORKLOAD_EXECUTION_ORDER = Object.freeze([
   'resources',
   'inputToVisible',
@@ -34,6 +34,7 @@ export const CTXMUX_ARTIFACT = Object.freeze({
 const packageRoot = fileURLToPath(new URL('../', import.meta.url))
 const repositoryRoot = fileURLToPath(new URL('../../../', import.meta.url))
 const fixturePath = fileURLToPath(new URL('../test/fixtures/run-kernel-workload.mjs', import.meta.url))
+const processRusageSourcePath = fileURLToPath(new URL('../test/fixtures/process-rusage.c', import.meta.url))
 const manifestPath = join(packageRoot, 'vendor', 'ctxmux', 'darwin-arm64', 'manifest.json')
 const daemonPath = join(packageRoot, 'vendor', 'ctxmux', 'darwin-arm64', 'bin', 'ctxmuxd')
 const formalResultsDirectory = join(repositoryRoot, 'docs', 'benchmarks', 'results')
@@ -157,6 +158,51 @@ async function commandAvailable(command) {
     return true
   } catch {
     return false
+  }
+}
+
+export function parseProcessCpuCounter(value) {
+  const match = /^(\d+) (\d+)$/u.exec(value.trim())
+  if (!match) throw new Error(`Invalid process CPU counter: ${value}`)
+  const userNanoseconds = BigInt(match[1])
+  const systemNanoseconds = BigInt(match[2])
+  return {
+    userNanoseconds: userNanoseconds.toString(),
+    systemNanoseconds: systemNanoseconds.toString(),
+    totalNanoseconds: (userNanoseconds + systemNanoseconds).toString()
+  }
+}
+
+async function buildProcessRusageProbe(root) {
+  const source = await readFile(processRusageSourcePath)
+  const compiler = await commandOutput('xcrun', ['--find', 'clang'], {
+    timeoutMs: 5_000,
+    maxBuffer: 64 * 1024
+  })
+  const compilerVersion = await commandOutput(compiler, ['--version'], {
+    timeoutMs: 5_000,
+    maxBuffer: 64 * 1024
+  })
+  const sdkPath = await commandOutput('xcrun', ['--show-sdk-path'], {
+    timeoutMs: 5_000,
+    maxBuffer: 64 * 1024
+  })
+  const path = join(root, 'process-rusage')
+  await runCommand(compiler, [
+    '-isysroot', sdkPath,
+    '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror', processRusageSourcePath, '-o', path
+  ], { timeoutMs: 30_000, maxBuffer: 1024 * 1024 })
+  return {
+    path,
+    evidence: {
+      source: 'proc_pid_rusage:RUSAGE_INFO_V4',
+      unit: 'nanoseconds',
+      reportedResolutionNanoseconds: 1,
+      sourceSha256: createHash('sha256').update(source).digest('hex'),
+      compiler,
+      compilerVersion,
+      sdkPath
+    }
   }
 }
 
@@ -430,6 +476,12 @@ class AgentMuxHarness {
     }
   }
 
+  async ownerState() {
+    const runs = await this.client.listRuns()
+    const live = runs.filter((run) => run.state === 'running').length
+    return { live, historical: runs.length - live, total: runs.length }
+  }
+
   async cleanup() {
     const errors = []
     let listed = []
@@ -560,13 +612,35 @@ class TmuxHarness {
     try {
       listed = (await this.command(['list-sessions', '-F', '#{session_name}'])).stdout
     } catch (error) {
-      if (!(error instanceof Error && /no server sessions/u.test(error.message))) throw error
+      if (!(error instanceof Error && /no (?:server sessions|current target)/u.test(error.message))) {
+        throw error
+      }
     }
     const liveNames = new Set(listed.split('\n').filter(Boolean))
     return {
       noLiveOwnerObjects: runs.every((run) => !liveNames.has(run.runId)),
       fixturePidsStopped: await waitForStopped(runs.map((run) => run.pid), 1_000)
     }
+  }
+
+  async ownerState() {
+    let output = ''
+    try {
+      output = (await this.command([
+        'list-panes', '-a', '-F', '#{session_name}|#{pane_dead}'
+      ])).stdout
+    } catch (error) {
+      if (!(error instanceof Error && /no (?:server sessions|current target)/u.test(error.message))) {
+        throw error
+      }
+    }
+    const rows = output.split('\n').filter(Boolean)
+    const live = rows.filter((row) => row.endsWith('|0')).length
+    const historical = rows.filter((row) => row.endsWith('|1')).length
+    if (live + historical !== rows.length) {
+      throw new Error(`tmux returned an invalid owner census: ${JSON.stringify(rows)}`)
+    }
+    return { live, historical, total: rows.length }
   }
 
   async cleanup() {
@@ -900,19 +974,11 @@ async function runStopCleanup(runtime, kind, config, emergencyPids) {
   }
 }
 
-function parsePsTime(value) {
-  const dayParts = value.trim().split('-')
-  const days = dayParts.length === 2 ? Number.parseInt(dayParts[0], 10) : 0
-  const clock = dayParts.at(-1).split(':').map(Number)
-  if (clock.some((part) => !Number.isFinite(part))) throw new Error(`Invalid ps time: ${value}`)
-  if (clock.length === 1) return days * 86_400 + clock[0]
-  if (clock.length === 2) return days * 86_400 + clock[0] * 60 + clock[1]
-  if (clock.length === 3) return days * 86_400 + clock[0] * 3_600 + clock[1] * 60 + clock[2]
-  throw new Error(`Invalid ps time: ${value}`)
-}
-
-async function processCpuSeconds(pid) {
-  return parsePsTime(await commandOutput('ps', ['-o', 'time=', '-p', String(pid)], { timeoutMs: 2_000, maxBuffer: 64 * 1024 }))
+async function processCpuCounter(pid, probePath) {
+  return parseProcessCpuCounter(await commandOutput(probePath, [String(pid)], {
+    timeoutMs: 2_000,
+    maxBuffer: 64 * 1024
+  }))
 }
 
 async function processFdCount(pid) {
@@ -923,43 +989,57 @@ async function processFdCount(pid) {
   return output.split('\n').filter((line) => /^f/u.test(line)).length
 }
 
-async function sampleProcess(pid, config) {
+async function sampleProcess(pid, config, cpuProbe) {
   const rssSamplesKiB = []
-  const cpuStart = await processCpuSeconds(pid)
+  const cpuStart = await processCpuCounter(pid, cpuProbe.path)
   const wallStart = nowNs()
   for (let index = 0; index < config.samples; index += 1) {
     rssSamplesKiB.push(await processRssKiB(pid))
     if (index + 1 < config.samples) await delay(config.intervalMs)
   }
   const wallSeconds = Number(nowNs() - wallStart) / 1_000_000_000
-  const cpuSeconds = await processCpuSeconds(pid) - cpuStart
+  const cpuEnd = await processCpuCounter(pid, cpuProbe.path)
+  const cpuNanoseconds = BigInt(cpuEnd.totalNanoseconds) - BigInt(cpuStart.totalNanoseconds)
+  if (cpuNanoseconds < 0n) throw new Error(`Process CPU counter regressed for PID ${pid}`)
+  const cpuSeconds = Number(cpuNanoseconds) / 1_000_000_000
   return {
     rssSamplesKiB,
     meanRssKiB: mean(rssSamplesKiB),
     fdCount: await processFdCount(pid),
+    cpuCounter: {
+      source: cpuProbe.evidence.source,
+      unit: cpuProbe.evidence.unit,
+      reportedResolutionNanoseconds: cpuProbe.evidence.reportedResolutionNanoseconds,
+      start: cpuStart,
+      end: cpuEnd,
+      deltaNanoseconds: cpuNanoseconds.toString()
+    },
     cpuSeconds,
     wallSeconds,
     cpuPercent: wallSeconds === 0 ? 0 : cpuSeconds / wallSeconds * 100
   }
 }
 
-async function runResources(runtime, kind, config, ownerPid) {
+async function runResources(runtime, kind, config, ownerPid, cpuProbe) {
   await delay(config.settleMs)
-  const idle = await sampleProcess(ownerPid, config)
+  const idle = await sampleProcess(ownerPid, config, cpuProbe)
+  const idleOwnerState = await runtime.ownerState()
 
   const oneLabel = `${kind}-resource-one-${randomUUID()}`
   const one = await runtime.create('echo', oneLabel)
   await runtime.wait(one.runId, `run-kernel-ready:${oneLabel}`)
-  const oneSession = await sampleProcess(ownerPid, config)
-  await runtime.stop(one.runId)
+  const oneSession = await sampleProcess(ownerPid, config, cpuProbe)
+  const oneSessionOwnerState = await runtime.ownerState()
 
-  const runs = await Promise.all(Array.from({ length: config.sessions }, async (_, index) => {
+  const additionalRuns = await Promise.all(Array.from({ length: config.sessions - 1 }, async (_, index) => {
     const label = `${kind}-resource-scale-${index}-${randomUUID()}`
     const run = await runtime.create('echo', label)
     await runtime.wait(run.runId, `run-kernel-ready:${label}`)
     return run
   }))
-  const manySessions = await sampleProcess(ownerPid, config)
+  const runs = [one, ...additionalRuns]
+  const manySessions = await sampleProcess(ownerPid, config, cpuProbe)
+  const manySessionsOwnerState = await runtime.ownerState()
   for (const run of runs) await runtime.stop(run.runId)
 
   const label = `${kind}-resource-throughput-${randomUUID()}`
@@ -988,23 +1068,35 @@ async function runResources(runtime, kind, config, ownerPid) {
     meanRssKiB: mean(measured.samplesKiB)
   }
   await runtime.stop(throughputRun.runId)
-  const released = await sampleProcess(ownerPid, config)
-  const resourceRunCount = config.sessions + 2
+  const released = await sampleProcess(ownerPid, config, cpuProbe)
+  const releasedOwnerState = await runtime.ownerState()
+  const resourceRunCount = config.sessions + 1
   const retainedHistoricalFdsPerRun = (released.fdCount - idle.fdCount) / resourceRunCount
+  const comparableOwnerCensus =
+    idleOwnerState.live === 0 && idleOwnerState.historical === 0 &&
+    oneSessionOwnerState.live === 1 && oneSessionOwnerState.historical === 0 &&
+    manySessionsOwnerState.live === config.sessions && manySessionsOwnerState.historical === 0 &&
+    releasedOwnerState.live === 0
 
   return {
     idle,
+    idleOwnerState,
     oneSession,
+    oneSessionOwnerState,
     manySessions,
+    manySessionsOwnerState,
     steady,
     peakRssKiB: measured.peakKiB,
     peakRssSamplesKiB: measured.samplesKiB,
     fixtureRssKiB,
     released,
+    releasedOwnerState,
     retainedHistoricalFdsPerRun,
     perSessionRssKiB: (manySessions.meanRssKiB - idle.meanRssKiB) / config.sessions,
     oneSessionIncrementKiB: oneSession.meanRssKiB - idle.meanRssKiB,
-    correctness: kind !== 'agentmux' || retainedHistoricalFdsPerRun <= 2.25
+    correctness:
+      comparableOwnerCensus &&
+      (kind !== 'agentmux' || retainedHistoricalFdsPerRun <= 2.25)
   }
 }
 
@@ -1292,7 +1384,15 @@ async function emergencyStopFixturePids(pids) {
   return stopped
 }
 
-async function runRuntimeWorkloads(agentmux, tmux, config, daemonPid, tmuxPid, emergencyPids) {
+async function runRuntimeWorkloads(
+  agentmux,
+  tmux,
+  config,
+  daemonPid,
+  tmuxPid,
+  cpuProbe,
+  emergencyPids
+) {
   const failed = (shape, error, phase) => ({
     ...structuredClone(shape),
     correctness: false,
@@ -1316,12 +1416,12 @@ async function runRuntimeWorkloads(agentmux, tmux, config, daemonPid, tmuxPid, e
   const workloads = {}
   workloads.resources = {
     agentmux: await safe(
-      async () => await runResources(agentmux, 'agentmux', config.resources, daemonPid),
+      async () => await runResources(agentmux, 'agentmux', config.resources, daemonPid, cpuProbe),
       resourcesShape,
       'resources.agentmux'
     ),
     tmux: await safe(
-      async () => await runResources(tmux, 'tmux', config.resources, tmuxPid),
+      async () => await runResources(tmux, 'tmux', config.resources, tmuxPid, cpuProbe),
       resourcesShape,
       'resources.tmux'
     )
@@ -1371,7 +1471,7 @@ async function runRuntimeWorkloads(agentmux, tmux, config, daemonPid, tmuxPid, e
     )
   }
   if (Object.keys(workloads).some((name, index) => name !== WORKLOAD_EXECUTION_ORDER[index])) {
-    throw new Error('Benchmark workload execution order drifted from Protocol Revision 3')
+    throw new Error(`Benchmark workload execution order drifted from Protocol Revision ${PROTOCOL_REVISION}`)
   }
   return workloads
 }
@@ -1396,7 +1496,7 @@ function defaultOutputPath(round, gitSha) {
 
 export async function runBenchmark(options) {
   if (platform() !== 'darwin' || arch() !== 'arm64') {
-    throw new Error('Revision 3 is frozen for darwin-arm64 only')
+    throw new Error(`Revision ${PROTOCOL_REVISION} is frozen for darwin-arm64 only`)
   }
   if (!(await commandAvailable('tmux'))) throw new Error('tmux is required for the frozen baseline')
   const startedAt = new Date().toISOString()
@@ -1422,6 +1522,7 @@ export async function runBenchmark(options) {
   }
   let agentmux = null
   let tmux = null
+  let cpuProbe = null
   let result
   try {
     const rootMetadata = await stat(root)
@@ -1432,6 +1533,7 @@ export async function runBenchmark(options) {
     ])
     process.env.AGENTMUX_RUNTIME_DIRECTORY = runtimeDirectory
     config = benchmarkConfiguration(options.mode)
+    cpuProbe = await buildProcessRusageProbe(root)
     const { AgentMuxClient } = await import(pathToFileURL(join(packageRoot, 'dist', 'index.js')).href)
     environment = await environmentManifest(options.mode)
     const tmuxEnvironment = { ...process.env, ...localeEnvironment, TMUX_TMPDIR: tmuxDirectory }
@@ -1448,6 +1550,7 @@ export async function runBenchmark(options) {
       config,
       daemonPids[0],
       tmux.serverPid,
+      cpuProbe,
       emergencyPids
     )
     const summary = summarizeWorkloads(workloads)
@@ -1481,6 +1584,7 @@ export async function runBenchmark(options) {
         tmuxSocketName: socketName,
         runtimeScope: root,
         workloadConfig: config,
+        processCpuObserver: cpuProbe.evidence,
         statistics: {
           percentiles: 'nearest-rank',
           standardDeviation: 'population',
@@ -1528,7 +1632,8 @@ export async function runBenchmark(options) {
         expectedEnvironment: environment.expected,
         environmentMismatches: environment.mismatches,
         runtimeScope: root,
-        workloadConfig: config
+        workloadConfig: config,
+        ...(cpuProbe ? { processCpuObserver: cpuProbe.evidence } : {})
       },
       comparators: {},
       workloads: {},

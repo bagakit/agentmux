@@ -12,6 +12,7 @@ import {
   evaluateFullRound,
   parseBenchmarkArguments,
   parseOwnedDaemonProcesses,
+  parseProcessCpuCounter,
   runBenchmark,
   verifyBurstOutput
 } from '../scripts/run-daemon-cutover-benchmark.mjs'
@@ -70,10 +71,10 @@ function passingSummary(): Record<string, unknown> {
 }
 
 describe('Daemon cutover benchmark protocol', () => {
-  it('freezes Revision 3 identity, resource-first execution, and smoke isolation', () => {
-    expect(BENCHMARK_SCHEMA).toBe('agentmux.benchmark.daemon-cutover.v3')
-    expect(PROTOCOL_REVISION).toBe(3)
-    expect(FORMAL_RESULT_PREFIX).toBe('revision-3')
+  it('freezes Revision 4 identity, resource-first execution, and smoke isolation', () => {
+    expect(BENCHMARK_SCHEMA).toBe('agentmux.benchmark.daemon-cutover.v4')
+    expect(PROTOCOL_REVISION).toBe(4)
+    expect(FORMAL_RESULT_PREFIX).toBe('revision-4')
     expect(WORKLOAD_EXECUTION_ORDER).toEqual([
       'resources',
       'inputToVisible',
@@ -112,6 +113,16 @@ describe('Daemon cutover benchmark protocol', () => {
       'docs/benchmarks/results/not-formal.json'
     ])).toThrow('cannot be written')
     expect(() => parseBenchmarkArguments(['--round', '3'])).toThrow('exactly 1 or 2')
+  })
+
+  it('parses exact nanosecond process CPU counters without Number truncation', () => {
+    expect(parseProcessCpuCounter('9007199254740993 17\n')).toEqual({
+      userNanoseconds: '9007199254740993',
+      systemNanoseconds: '17',
+      totalNanoseconds: '9007199254741010'
+    })
+    expect(() => parseProcessCpuCounter('0:00.01')).toThrow('Invalid process CPU counter')
+    expect(() => parseProcessCpuCounter('-1 2')).toThrow('Invalid process CPU counter')
   })
 
   it('keeps formal and smoke workloads separate without mutating frozen values', () => {

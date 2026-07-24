@@ -23,7 +23,22 @@ describe.runIf(
       schema: string
       mode: string
       verdict: string
-      workloads: Record<string, unknown>
+      manifest: {
+        processCpuObserver: {
+          source: string
+          unit: string
+          reportedResolutionNanoseconds: number
+          sourceSha256: string
+        }
+      }
+      workloads: Record<string, unknown> & {
+        resources: Record<'agentmux' | 'tmux', {
+          idle: { cpuCounter: { start: { totalNanoseconds: string }; end: { totalNanoseconds: string } } }
+          idleOwnerState: { live: number; historical: number; total: number }
+          oneSessionOwnerState: { live: number; historical: number; total: number }
+          manySessionsOwnerState: { live: number; historical: number; total: number }
+        }>
+      }
       correctness: Record<string, { agentmux: boolean; tmux: boolean } | boolean>
       verdictFailures: string[]
       qualitativeWins: string[]
@@ -33,7 +48,7 @@ describe.runIf(
     }
     expect(receipt.output).toBe(output)
     expect(raw).toMatchObject({
-      schema: 'agentmux.benchmark.daemon-cutover.v3',
+      schema: 'agentmux.benchmark.daemon-cutover.v4',
       mode: 'smoke',
       verdict: 'smoke'
     })
@@ -46,6 +61,19 @@ describe.runIf(
       'sessionScale',
       'stopCleanup'
     ])
+    expect(raw.manifest.processCpuObserver).toMatchObject({
+      source: 'proc_pid_rusage:RUSAGE_INFO_V4',
+      unit: 'nanoseconds',
+      reportedResolutionNanoseconds: 1,
+      sourceSha256: expect.stringMatching(/^[a-f0-9]{64}$/u)
+    })
+    for (const runtime of ['agentmux', 'tmux'] as const) {
+      expect(raw.workloads.resources[runtime].idle.cpuCounter.start.totalNanoseconds).toMatch(/^\d+$/u)
+      expect(raw.workloads.resources[runtime].idle.cpuCounter.end.totalNanoseconds).toMatch(/^\d+$/u)
+      expect(raw.workloads.resources[runtime].idleOwnerState).toEqual({ live: 0, historical: 0, total: 0 })
+      expect(raw.workloads.resources[runtime].oneSessionOwnerState).toEqual({ live: 1, historical: 0, total: 1 })
+      expect(raw.workloads.resources[runtime].manySessionsOwnerState).toEqual({ live: 2, historical: 0, total: 2 })
+    }
     expect(Object.keys(raw.correctness)).toEqual(expect.arrayContaining([
       'inputToVisible',
       'throughput',
