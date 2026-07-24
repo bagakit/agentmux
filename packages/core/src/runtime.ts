@@ -1,81 +1,117 @@
 import { AgentMuxError } from './errors.js'
-import type { AgentMuxDaemonSession } from './daemon-protocol.js'
-import type { AgentId, AgentMuxSemanticSession } from './types.js'
+import type { AgentId, AgentMuxAgentSession, AgentMuxRun } from './types.js'
 
-export type AgentMuxTerminalSessionSnapshot = {
-  id: string
+export type AgentMuxTerminalView = {
+  viewId: string
   kind: 'terminal'
   hostId: string
   workspacePath: string
-  run: AgentMuxDaemonSession & { kind: 'terminal'; agentId: null; semanticSessionId: null }
+  run: AgentMuxRun & { kind: 'terminal'; agentId: null; agentSessionId: null }
 }
 
-export type AgentMuxAgentSessionSnapshot = {
-  id: string
+export type AgentMuxAgentView = {
+  viewId: string
   kind: 'agent'
   hostId: string
   workspacePath: string
   agentId: AgentId
-  semantic: AgentMuxSemanticSession
-  run: AgentMuxDaemonSession & { kind: 'agent'; agentId: AgentId; semanticSessionId: string }
+  agentSession: AgentMuxAgentSession
+  run: AgentMuxRun & { kind: 'agent'; agentId: AgentId; agentSessionId: string }
 }
 
-export type AgentMuxSessionSnapshot =
-  | AgentMuxTerminalSessionSnapshot
-  | AgentMuxAgentSessionSnapshot
+export type AgentMuxView =
+  | AgentMuxTerminalView
+  | AgentMuxAgentView
 
-export type AgentMuxRuntimeSnapshot = {
+export type AgentMuxWorkspaceView = {
   hostId: string
-  sessions: AgentMuxSessionSnapshot[]
+  views: AgentMuxView[]
+}
+
+export type AgentMuxViewRequest = {
+  viewId: string
+  target:
+    | { kind: 'terminal-run'; run: { runId: string; incarnationId: string } }
+    | { kind: 'agent-session'; agentSessionId: string }
 }
 
 function sameRun(
-  left: { sessionId: string; incarnationId: string },
-  right: { sessionId: string; incarnationId: string }
+  left: { runId: string; incarnationId: string },
+  right: { runId: string; incarnationId: string }
 ): boolean {
-  return left.sessionId === right.sessionId && left.incarnationId === right.incarnationId
+  return left.runId === right.runId && left.incarnationId === right.incarnationId
 }
 
-export function projectAgentMuxSessions(
+export function projectAgentMuxViews(
   hostId: string,
-  runs: readonly AgentMuxDaemonSession[],
-  semanticSessions: readonly AgentMuxSemanticSession[]
-): AgentMuxSessionSnapshot[] {
-  const semantics = new Map(semanticSessions.map((session) => [session.semanticSessionId, session]))
-  return runs.map((run): AgentMuxSessionSnapshot => {
+  runs: readonly AgentMuxRun[],
+  agentSessions: readonly AgentMuxAgentSession[],
+  requests?: readonly AgentMuxViewRequest[]
+): AgentMuxView[] {
+  const sessions = new Map(agentSessions.map((session) => [session.agentSessionId, session]))
+  const runsById = new Map(runs.map((run) => [run.runId, run]))
+  const resolvedRequests = requests ?? runs.map((run): AgentMuxViewRequest => run.kind === 'terminal'
+    ? {
+        viewId: `terminal-view:${hostId}:${run.runId}:${run.incarnationId}`,
+        target: { kind: 'terminal-run', run: { runId: run.runId, incarnationId: run.incarnationId } }
+      }
+    : {
+        viewId: `agent-view:${hostId}:${run.agentSessionId ?? run.runId}`,
+        target: { kind: 'agent-session', agentSessionId: run.agentSessionId ?? '' }
+      })
+  if (new Set(resolvedRequests.map((request) => request.viewId)).size !== resolvedRequests.length) {
+    throw new AgentMuxError('View identity must be unique within a projection.', 'DUPLICATE_VIEW_ID')
+  }
+  return resolvedRequests.map((request): AgentMuxView => {
+    const run = request.target.kind === 'terminal-run'
+      ? runsById.get(request.target.run.runId)
+      : (() => {
+          const session = sessions.get(request.target.agentSessionId)
+          return session ? runsById.get(session.run.runId) : undefined
+        })()
+    if (!run) throw new AgentMuxError('View target is unavailable.', 'UNKNOWN_VIEW_TARGET')
+    if (request.target.kind === 'terminal-run' && !sameRun(request.target.run, run)) {
+      throw new AgentMuxError('Terminal View points to a stale Run incarnation.', 'STALE_VIEW_TARGET')
+    }
     if (run.kind === 'terminal') {
-      if (run.agentId !== null || run.semanticSessionId !== null) {
+      if (
+        request.target.kind !== 'terminal-run' ||
+        run.agentId !== null ||
+        run.agentSessionId !== null
+      ) {
         throw new AgentMuxError('Raw Terminal run carries Agent identity.', 'SESSION_KIND_MISMATCH')
       }
       return {
-        id: run.sessionId,
+        viewId: request.viewId,
         kind: 'terminal',
         hostId,
-        workspacePath: run.cwd,
-        run: structuredClone(run) as AgentMuxTerminalSessionSnapshot['run']
+        workspacePath: run.workspacePath,
+        run: structuredClone(run) as AgentMuxTerminalView['run']
       }
     }
-    if (!run.agentId || !run.semanticSessionId) {
-      throw new AgentMuxError('Agent run is missing semantic identity.', 'SESSION_KIND_MISMATCH')
+    if (!run.agentId || !run.agentSessionId) {
+      throw new AgentMuxError('Agent Run is missing Agent Session identity.', 'SESSION_KIND_MISMATCH')
     }
-    const semantic = semantics.get(run.semanticSessionId)
+    const agentSession = request.target.kind === 'agent-session'
+      ? sessions.get(request.target.agentSessionId)
+      : undefined
     if (
-      !semantic ||
-      semantic.hostId !== hostId ||
-      semantic.agentId !== run.agentId ||
-      semantic.workspacePath !== run.cwd ||
-      !sameRun(semantic.daemonSession, run)
+      !agentSession ||
+      agentSession.hostId !== hostId ||
+      agentSession.agentId !== run.agentId ||
+      agentSession.workspacePath !== run.workspacePath ||
+      !sameRun(agentSession.run, run)
     ) {
-      throw new AgentMuxError('Agent run does not match its semantic session.', 'SEMANTIC_RUN_MISMATCH')
+      throw new AgentMuxError('Agent Run does not match its Agent Session.', 'AGENT_SESSION_RUN_MISMATCH')
     }
     return {
-      id: semantic.semanticSessionId,
+      viewId: request.viewId,
       kind: 'agent',
       hostId,
-      workspacePath: semantic.workspacePath,
-      agentId: semantic.agentId,
-      semantic: structuredClone(semantic),
-      run: structuredClone(run) as AgentMuxAgentSessionSnapshot['run']
+      workspacePath: agentSession.workspacePath,
+      agentId: agentSession.agentId,
+      agentSession: structuredClone(agentSession),
+      run: structuredClone(run) as AgentMuxAgentView['run']
     }
   })
 }

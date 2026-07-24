@@ -38,7 +38,7 @@ function parseSession(value: unknown): AgentMuxDaemonSession {
     typeof session.createOperationId !== 'string' ||
     (session.kind !== 'terminal' && session.kind !== 'agent') ||
     (session.agentId !== null && typeof session.agentId !== 'string') ||
-    (session.semanticSessionId !== null && typeof session.semanticSessionId !== 'string') ||
+    (session.agentSessionId !== null && typeof session.agentSessionId !== 'string') ||
     typeof session.cwd !== 'string' ||
     !isNumber(session.pid) ||
     (session.processStartedAt !== undefined && !isNumber(session.processStartedAt)) ||

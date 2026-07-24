@@ -1,72 +1,91 @@
 import { randomUUID } from 'node:crypto'
-import { EventEmitter } from 'node:events'
-import type {
-  AgentMuxDaemonDataEvent,
-  AgentMuxDaemonExitEvent,
-  AgentMuxDaemonSession
-} from './daemon-protocol.js'
+import { AgentMuxError } from './errors.js'
 import type {
   AgentHookReceipt,
   AgentMuxAcpEvent,
+  AgentMuxAgentSession,
   AgentMuxClientEvent,
   AgentMuxEvidence,
   AgentMuxPermissionRequest,
-  AgentMuxSemanticSession,
+  AgentMuxRun,
+  AgentMuxRunDataEvent,
+  AgentMuxRunExitEvent,
   NormalizedHookEvent
 } from './types.js'
 
-function runRef(value: { sessionId: string; incarnationId: string }) {
-  return { sessionId: value.sessionId, incarnationId: value.incarnationId }
+function runRef(value: { runId: string; incarnationId: string }) {
+  return { runId: value.runId, incarnationId: value.incarnationId }
+}
+
+const MAX_EVENT_LISTENERS = 64
+
+function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
+  return (
+    (typeof value === 'object' || typeof value === 'function') &&
+    value !== null &&
+    typeof (value as { then?: unknown }).then === 'function'
+  )
 }
 
 export class AgentMuxClientEventPublisher {
-  private readonly events = new EventEmitter()
+  private readonly listeners = new Set<(event: AgentMuxClientEvent) => unknown>()
 
-  onEvent(listener: (event: AgentMuxClientEvent) => void): () => void {
-    this.events.on('event', listener)
-    return () => this.events.off('event', listener)
+  onEvent(listener: (event: AgentMuxClientEvent) => unknown): () => void {
+    if (!this.listeners.has(listener) && this.listeners.size >= MAX_EVENT_LISTENERS) {
+      throw new AgentMuxError('AgentMux Client event listener limit reached.', 'CLIENT_EVENT_LISTENER_LIMIT')
+    }
+    this.listeners.add(listener)
+    return () => this.listeners.delete(listener)
   }
 
   dispose(): void {
-    this.events.removeAllListeners()
+    this.listeners.clear()
   }
 
   publish(event: AgentMuxClientEvent): void {
-    this.events.emit('event', event)
+    for (const listener of [...this.listeners]) {
+      try {
+        const result = listener(event)
+        if (isPromiseLike(result)) void Promise.resolve(result).catch(() => {})
+      } catch {
+        // A Consumer callback cannot become part of Run transport or Agent
+        // lifecycle control. The Consumer owns reporting its callback failure.
+      }
+    }
   }
 
-  publishProcessState(run: AgentMuxDaemonSession, semanticSessionId?: string): void {
+  publishRunState(run: AgentMuxRun, agentSessionId?: string): void {
     this.publish({
       type: 'process-state',
-      ...(semanticSessionId === undefined ? {} : { semanticSessionId }),
-      daemonSession: runRef(run),
+      ...(agentSessionId === undefined ? {} : { agentSessionId }),
+      run: runRef(run),
       state: run.state,
       pid: run.pid,
       ...(run.exitCode === undefined ? {} : { exitCode: run.exitCode }),
       ...(run.exitSignal === undefined ? {} : { exitSignal: run.exitSignal }),
       evidence: {
-        source: 'daemon-process',
+        source: 'run-process',
         observedAt: run.state === 'running' ? Date.now() : run.exitedAt ?? run.lostAt ?? Date.now(),
-        daemonSession: runRef(run)
+        run: runRef(run)
       }
     })
   }
 
-  publishDaemonEvent(
-    event: AgentMuxDaemonDataEvent | AgentMuxDaemonExitEvent,
-    semantic?: AgentMuxSemanticSession
+  publishRunEvent(
+    event: AgentMuxRunDataEvent | AgentMuxRunExitEvent,
+    agentSession?: AgentMuxAgentSession
   ): void {
     if (event.type === 'data') {
       const evidence: AgentMuxEvidence = {
         source: 'terminal-output',
         observedAt: Date.now(),
-        daemonSession: runRef(event),
-        outputSequence: { start: event.startSequence, end: event.endSequence }
+        run: runRef(event),
+        outputByteRange: { startByte: event.startByte, endByte: event.endByte }
       }
       this.publish({
         type: 'terminal-output',
-        ...(semantic ? { semanticSessionId: semantic.semanticSessionId } : {}),
-        daemonSession: runRef(event),
+        ...(agentSession ? { agentSessionId: agentSession.agentSessionId } : {}),
+        run: runRef(event),
         data: event.data,
         evidence
       })
@@ -74,34 +93,34 @@ export class AgentMuxClientEventPublisher {
     }
     this.publish({
       type: 'process-state',
-      ...(semantic ? { semanticSessionId: semantic.semanticSessionId } : {}),
-      daemonSession: runRef(event),
+      ...(agentSession ? { agentSessionId: agentSession.agentSessionId } : {}),
+      run: runRef(event),
       state: 'exited',
       pid: event.pid,
       exitCode: event.exitCode,
       ...(event.exitSignal === undefined ? {} : { exitSignal: event.exitSignal }),
       evidence: {
-        source: 'daemon-process',
+        source: 'run-process',
         observedAt: event.observedAt,
-        daemonSession: runRef(event)
+        run: runRef(event)
       }
     })
   }
 
   publishHook(
-    session: AgentMuxSemanticSession,
+    session: AgentMuxAgentSession,
     normalized: NormalizedHookEvent,
     receipt: AgentHookReceipt
   ): void {
     const evidence: AgentMuxEvidence = {
       source: 'native-hook',
       observedAt: normalized.status.observedAt,
-      daemonSession: { ...session.daemonSession },
+      run: { ...session.run },
       hookReceiptId: receipt.id
     }
     this.publish({
-      type: 'semantic-status',
-      semanticSessionId: session.semanticSessionId,
+      type: 'agent-status',
+      agentSessionId: session.agentSessionId,
       state: normalized.semanticState,
       detail: normalized.eventName,
       evidence
@@ -109,8 +128,8 @@ export class AgentMuxClientEventPublisher {
     for (const activity of normalized.activities) {
       const { sessionId: _sessionId, source: _source, ...publicActivity } = activity
       this.publish({
-        type: 'semantic-activity',
-        semanticSessionId: session.semanticSessionId,
+        type: 'agent-activity',
+        agentSessionId: session.agentSessionId,
         activity: publicActivity,
         evidence
       })
@@ -118,14 +137,14 @@ export class AgentMuxClientEventPublisher {
   }
 
   publishAcp(
-    semanticSessionId: string,
+    agentSessionId: string,
     event: AgentMuxAcpEvent,
     evidence: AgentMuxEvidence
   ): void {
     if (event.type === 'status') {
       this.publish({
-        type: 'semantic-status',
-        semanticSessionId,
+        type: 'agent-status',
+        agentSessionId,
         state: event.state,
         ...(event.detail === undefined ? {} : { detail: event.detail }),
         evidence
@@ -134,8 +153,8 @@ export class AgentMuxClientEventPublisher {
     }
     if (event.type === 'activity') {
       this.publish({
-        type: 'semantic-activity',
-        semanticSessionId,
+        type: 'agent-activity',
+        agentSessionId,
         activity: {
           id: randomUUID(),
           kind: event.kind,
@@ -152,7 +171,7 @@ export class AgentMuxClientEventPublisher {
     if (event.type === 'permission') {
       const request: AgentMuxPermissionRequest = {
         id: event.requestId,
-        semanticSessionId,
+        agentSessionId,
         title: event.title,
         options: event.options.map((option) => ({ ...option })),
         evidence,

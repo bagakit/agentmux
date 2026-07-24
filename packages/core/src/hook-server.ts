@@ -25,8 +25,8 @@ function isEnvelope(value: unknown): value is NativeHookEnvelope {
   if (!value || typeof value !== 'object') return false
   const record = value as Record<string, unknown>
   return (
-    typeof record.semanticSessionId === 'string' && Boolean(record.semanticSessionId.trim()) &&
-    typeof record.daemonSessionId === 'string' && Boolean(record.daemonSessionId.trim()) &&
+    typeof record.agentSessionId === 'string' && Boolean(record.agentSessionId.trim()) &&
+    typeof record.runId === 'string' && Boolean(record.runId.trim()) &&
     typeof record.incarnationId === 'string' && Boolean(record.incarnationId.trim()) &&
     typeof record.agentId === 'string' && Boolean(record.agentId.trim())
   )

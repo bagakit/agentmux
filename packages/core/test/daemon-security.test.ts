@@ -174,7 +174,7 @@ describe('agentmuxd security boundary', () => {
     const session = await client.createAgent({
       sessionId: 'security-argv-env',
       createOperationId: 'operation-security-argv-env',
-      semanticSessionId: 'semantic-security-argv-env',
+      agentSessionId: 'semantic-security-argv-env',
       agentId: 'security-fixture',
       command: process.execPath,
       args: ['-e', source, argument],
@@ -200,7 +200,7 @@ describe('agentmuxd security boundary', () => {
     await expect(client.createAgent({
       sessionId: 'too-many-args',
       createOperationId: 'operation-too-many-args',
-      semanticSessionId: 'semantic-too-many-args',
+      agentSessionId: 'semantic-too-many-args',
       agentId: 'security-fixture',
       command: process.execPath,
       args: Array.from({ length: 257 }, () => 'x'),
@@ -209,7 +209,7 @@ describe('agentmuxd security boundary', () => {
     await expect(client.createAgent({
       sessionId: 'too-much-env',
       createOperationId: 'operation-too-much-env',
-      semanticSessionId: 'semantic-too-much-env',
+      agentSessionId: 'semantic-too-much-env',
       agentId: 'security-fixture',
       command: process.execPath,
       args: ['-e', 'setInterval(() => {}, 1000)'],
@@ -219,7 +219,7 @@ describe('agentmuxd security boundary', () => {
     await expect(client.createAgent({
       sessionId: 'invalid-env-name',
       createOperationId: 'operation-invalid-env-name',
-      semanticSessionId: 'semantic-invalid-env-name',
+      agentSessionId: 'semantic-invalid-env-name',
       agentId: 'security-fixture',
       command: process.execPath,
       args: ['-e', 'setInterval(() => {}, 1000)'],

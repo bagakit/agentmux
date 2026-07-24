@@ -23,8 +23,8 @@ export type AgentMuxPermissionHandler = (
 ) => Promise<AgentMuxPermissionDecision | undefined>
 
 export type AgentMuxAcpBridgeCallbacks = {
-  onEvent(semanticSessionId: string, event: AgentMuxAcpEvent, evidence: AgentMuxEvidence): void
-  onNativeHandle(semanticSessionId: string, handle: AgentNativeSessionHandle): void | Promise<void>
+  onEvent(agentSessionId: string, event: AgentMuxAcpEvent, evidence: AgentMuxEvidence): void
+  onNativeHandle(agentSessionId: string, handle: AgentNativeSessionHandle): void | Promise<void>
 }
 
 type BoundAcpSession = {
@@ -62,9 +62,9 @@ export class AgentMuxAcpBridge {
     private readonly permissionHandler?: AgentMuxPermissionHandler
   ) {}
 
-  async bind(semanticSessionId: string, binding: AgentMuxAcpBinding): Promise<void> {
-    if (this.bindings.has(semanticSessionId)) {
-      throw new AgentMuxError('Semantic session already has an ACP binding.', 'ACP_ALREADY_BOUND')
+  async bind(agentSessionId: string, binding: AgentMuxAcpBinding): Promise<void> {
+    if (this.bindings.has(agentSessionId)) {
+      throw new AgentMuxError('Agent Session already has an ACP binding.', 'ACP_ALREADY_BOUND')
     }
     const nativeHandle: AgentNativeSessionHandle = {
       kind: 'acp',
@@ -72,27 +72,27 @@ export class AgentMuxAcpBridge {
       sessionId: binding.sessionId
     }
     const unsubscribe = binding.onEvent((event) => {
-      void this.accept(semanticSessionId, binding, event).catch(() => {
+      void this.accept(agentSessionId, binding, event).catch(() => {
         // If a rejecting Permission response cannot be delivered, close the ACP
         // binding instead of leaving the Agent waiting on an ambiguous approval.
-        void this.unbind(semanticSessionId).catch(() => {})
+        void this.unbind(agentSessionId).catch(() => {})
       })
     })
-    this.bindings.set(semanticSessionId, { binding, unsubscribe })
+    this.bindings.set(agentSessionId, { binding, unsubscribe })
     try {
-      await this.callbacks.onNativeHandle(semanticSessionId, nativeHandle)
+      await this.callbacks.onNativeHandle(agentSessionId, nativeHandle)
     } catch (error) {
-      this.bindings.delete(semanticSessionId)
+      this.bindings.delete(agentSessionId)
       unsubscribe()
       await binding.close().catch(() => {})
       throw error
     }
   }
 
-  async unbind(semanticSessionId: string): Promise<void> {
-    const bound = this.bindings.get(semanticSessionId)
+  async unbind(agentSessionId: string): Promise<void> {
+    const bound = this.bindings.get(agentSessionId)
     if (!bound) return
-    this.bindings.delete(semanticSessionId)
+    this.bindings.delete(agentSessionId)
     bound.unsubscribe()
     await bound.binding.close()
   }
@@ -105,7 +105,7 @@ export class AgentMuxAcpBridge {
   }
 
   private async accept(
-    semanticSessionId: string,
+    agentSessionId: string,
     binding: AgentMuxAcpBinding,
     event: AgentMuxAcpEvent
   ): Promise<void> {
@@ -116,9 +116,9 @@ export class AgentMuxAcpBridge {
       acpSessionId: binding.sessionId
     }
     if (event.type !== 'permission') {
-      this.callbacks.onEvent(semanticSessionId, event, evidence)
+      this.callbacks.onEvent(agentSessionId, event, evidence)
       if (event.type === 'native-session' && event.sessionId !== binding.sessionId) {
-        await this.callbacks.onNativeHandle(semanticSessionId, {
+        await this.callbacks.onNativeHandle(agentSessionId, {
           kind: 'acp',
           adapterId: binding.adapterId,
           sessionId: event.sessionId
@@ -129,14 +129,14 @@ export class AgentMuxAcpBridge {
 
     const request: AgentMuxPermissionRequest = {
       id: event.requestId,
-      semanticSessionId,
+      agentSessionId,
       title: event.title,
       options: event.options.map((option) => ({ ...option })),
       evidence,
       ...(event.toolName !== undefined ? { toolName: event.toolName } : {}),
       ...(event.toolInput !== undefined ? { toolInput: event.toolInput } : {})
     }
-    this.callbacks.onEvent(semanticSessionId, event, evidence)
+    this.callbacks.onEvent(agentSessionId, event, evidence)
     let decision: AgentMuxPermissionDecision | null = null
     try {
       decision = explicitDecision(request, await this.permissionDecision(request))

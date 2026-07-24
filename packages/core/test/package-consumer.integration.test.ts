@@ -21,7 +21,7 @@ afterEach(async () => {
 })
 
 describe.runIf(supported)('packed @agentmux/core consumer', () => {
-  it('runs the packed package without repository paths across Local, Agent, Doctor, Artifact, and SSH lifecycles', async () => {
+  it('uses only public AgentMux Runtime APIs across Local, Agent, Doctor, and SSH lifecycles', async () => {
     const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/agentmux-packed-consumer-test-"))
     roots.push(root)
     const packDirectory = join(root, 'pack')
@@ -94,6 +94,5 @@ describe.runIf(supported)('packed @agentmux/core consumer', () => {
     })
     expect(summary.packageRoot).toContain(consumerDirectory)
     expect(summary.packageRoot).not.toContain(repositoryRoot)
-    expect(summary.artifactBytes).toBeGreaterThan(0)
   }, 95_000)
 })

@@ -89,7 +89,7 @@ function nativeHandle(
 }
 
 function activity(
-  semanticSessionId: string,
+  agentSessionId: string,
   kind: AgentActivity['kind'],
   title: string,
   eventName: string,
@@ -97,7 +97,7 @@ function activity(
 ): AgentActivity {
   return {
     id: randomUUID(),
-    sessionId: semanticSessionId,
+    sessionId: agentSessionId,
     kind,
     source: 'native-hook',
     createdAt: Date.now(),
@@ -131,12 +131,12 @@ function buildActivities(
         : JSON.stringify(rawToolInput)
   const activities: AgentActivity[] = []
   if (prompt) {
-    activities.push(activity(envelope.semanticSessionId, 'prompt', 'Prompt received', eventName, { content: prompt }))
+    activities.push(activity(envelope.agentSessionId, 'prompt', 'Prompt received', eventName, { content: prompt }))
   }
   if (toolName) {
     activities.push(
       activity(
-        envelope.semanticSessionId,
+        envelope.agentSessionId,
         state === 'waiting' || state === 'blocked' ? 'permission' : 'tool',
         toolName,
         eventName,
@@ -146,11 +146,11 @@ function buildActivities(
   }
   if (assistant) {
     activities.push(
-      activity(envelope.semanticSessionId, 'assistant', 'Assistant response', eventName, { content: assistant })
+      activity(envelope.agentSessionId, 'assistant', 'Assistant response', eventName, { content: assistant })
     )
   }
   if (activities.length === 0) {
-    activities.push(activity(envelope.semanticSessionId, 'lifecycle', eventName, eventName))
+    activities.push(activity(envelope.agentSessionId, 'lifecycle', eventName, eventName))
   }
   return activities
 }
@@ -170,9 +170,9 @@ export function normalizeNativeHook(
   }
   const handle = nativeHandle(envelope.agentId, specification, payload)
   return {
-    semanticSessionId: envelope.semanticSessionId,
-    daemonSession: {
-      sessionId: envelope.daemonSessionId,
+    agentSessionId: envelope.agentSessionId,
+    run: {
+      runId: envelope.runId,
       incarnationId: envelope.incarnationId
     },
     agentId: envelope.agentId,

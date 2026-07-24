@@ -130,7 +130,7 @@ describe('agentmuxd local node-pty vertical slice', () => {
       sessionId: 'codex-provider-slice',
       createOperationId: 'create-codex-provider-slice',
       agentId: 'codex',
-      semanticSessionId: 'semantic-codex-provider-slice',
+      agentSessionId: 'semantic-codex-provider-slice',
       command: process.execPath,
       args: [fixturePath, 'review-the-daemon'],
       cwd: process.cwd()

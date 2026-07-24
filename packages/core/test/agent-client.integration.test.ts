@@ -8,10 +8,10 @@ import { AgentMuxClient } from '../src/client.js'
 import type { AgentMuxAcpBinding } from '../src/acp-adapter.js'
 import { AgentMuxDaemonServer } from '../src/daemon-server.js'
 import {
-  AgentMuxMemorySemanticStore,
-  type AgentMuxSemanticStore
-} from '../src/semantic-store.js'
-import type { AgentMuxClientEvent } from '../src/types.js'
+  AgentMuxMemoryAgentSessionStore,
+  type AgentMuxAgentSessionStore
+} from '../src/agent-session-store.js'
+import type { AgentMuxAcpEvent, AgentMuxClientEvent } from '../src/types.js'
 
 const fixturePath = fileURLToPath(new URL('./fixtures/fake-hook-agent.mjs', import.meta.url))
 
@@ -32,7 +32,8 @@ function fixtureProvider(): AgentProvider {
         hookEvents: true,
         permission: 'observe',
         providerResume: true,
-        acp: false
+        acp: false,
+        replyCorrelation: 'none'
       }
     },
     buildArgs: (prompt) => [fixturePath, prompt],
@@ -61,7 +62,8 @@ function acpProvider(): AgentProvider {
         hookEvents: false,
         permission: 'respond',
         providerResume: false,
-        acp: true
+        acp: true,
+        replyCorrelation: 'none'
       }
     },
     buildArgs: () => ['-e', 'setInterval(() => {}, 1000)'],
@@ -69,11 +71,14 @@ function acpProvider(): AgentProvider {
   })
 }
 
-function acpBinding(): AgentMuxAcpBinding {
+function acpBinding(capture?: (listener: (event: AgentMuxAcpEvent) => void) => void): AgentMuxAcpBinding {
   return {
     adapterId: 'fixture-adapter',
     sessionId: 'fixture-acp-session',
-    onEvent: () => () => {},
+    onEvent(listener) {
+      capture?.(listener)
+      return () => {}
+    },
     async respondPermission() {},
     async close() {}
   }
@@ -92,7 +97,7 @@ async function waitFor(
   throw new Error(`Timed out waiting for ${description}`)
 }
 
-describe('AgentMux semantic client', () => {
+describe('AgentMux Agent client', () => {
   let directory: string
   let socketPath: string
   let server: AgentMuxDaemonServer
@@ -111,7 +116,7 @@ describe('AgentMux semantic client', () => {
     await rm(directory, { recursive: true, force: true })
   })
 
-  async function connect(store: AgentMuxSemanticStore): Promise<AgentMuxClient> {
+  async function connect(store: AgentMuxAgentSessionStore): Promise<AgentMuxClient> {
     const client = new AgentMuxClient({
       socketPath,
       expectedHostId: 'semantic-host',
@@ -124,13 +129,13 @@ describe('AgentMux semantic client', () => {
   }
 
   it('keeps reattach, provider resume, and respawn as three different identity operations', async () => {
-    const store = new AgentMuxMemorySemanticStore()
+    const store = new AgentMuxMemoryAgentSessionStore()
     const first = await connect(store)
     const firstEvents: AgentMuxClientEvent[] = []
     first.onEvent((event) => firstEvents.push(event))
     const created = await first.createAgent({
-      semanticSessionId: 'semantic-main',
-      daemonSessionId: 'daemon-main',
+      agentSessionId: 'semantic-main',
+      runId: 'daemon-main',
       createOperationId: 'create-main',
       agentId: 'fixture',
       workspacePath: process.cwd(),
@@ -138,29 +143,29 @@ describe('AgentMux semantic client', () => {
       commandOverride: process.execPath
     })
     await waitFor('the hook-bound native session', () => (
-      first.semanticSession(created.semanticSessionId).nativeHandle?.kind === 'provider'
+      first.agentSession(created.agentSessionId).nativeHandle?.kind === 'provider'
     ))
     await waitFor('terminal output evidence', () => firstEvents.some((event) => (
       event.type === 'terminal-output' && event.data.includes('hook-agent-ready:initial')
     )))
-    expect(first.semanticSession('semantic-main')).toMatchObject({
+    expect(first.agentSession('semantic-main')).toMatchObject({
       nativeHandle: { sessionId: 'native-semantic-main' },
       hookReceipt: { eventName: 'SessionStart' }
     })
     expect(firstEvents).not.toContainEqual(expect.objectContaining({
-      type: 'semantic-status',
+      type: 'agent-status',
       detail: 'PermissionRequest'
     }))
     expect(firstEvents).toContainEqual(expect.objectContaining({
-      type: 'semantic-status',
-      semanticSessionId: 'semantic-main',
+      type: 'agent-status',
+      agentSessionId: 'semantic-main',
       state: 'working',
       evidence: expect.objectContaining({ source: 'native-hook' })
     }))
     await first.submitAgentPrompt('semantic-main', 'follow-up prompt')
     expect(firstEvents).toContainEqual(expect.objectContaining({
-      type: 'semantic-activity',
-      semanticSessionId: 'semantic-main',
+      type: 'agent-activity',
+      agentSessionId: 'semantic-main',
       activity: expect.objectContaining({ kind: 'prompt', content: 'follow-up prompt' }),
       evidence: expect.objectContaining({ source: 'user' })
     }))
@@ -168,36 +173,49 @@ describe('AgentMux semantic client', () => {
     expect(persistedText).not.toContain('hook-agent-ready')
     expect(persistedText).not.toContain('terminalSnapshot')
 
-    const originalRun = first.semanticSession('semantic-main').daemonSession
+    const originalRun = first.agentSession('semantic-main').run
     first.disconnect()
     const second = await connect(store)
     const secondEvents: AgentMuxClientEvent[] = []
     second.onEvent((event) => secondEvents.push(event))
     const reattached = await second.reattachAgent('semantic-main')
-    expect(reattached.session.daemonSession).toEqual(originalRun)
-    expect(reattached.run.session.incarnationId).toBe(originalRun.incarnationId)
-    expect(reattached.run.replay.map((event) => event.data).join('')).toContain('hook-agent-ready:initial')
+    expect(reattached.session.run).toEqual(originalRun)
+    expect(reattached.attachment.run.incarnationId).toBe(originalRun.incarnationId)
+    expect(reattached.attachment.replay.map((event) => event.data).join('')).toContain('hook-agent-ready:initial')
+    await second.releaseAgentAttachment('semantic-main')
+    expect(second.agentSession('semantic-main').run).toEqual(originalRun)
+    await second.submitAgentPrompt('semantic-main', 'after attachment release')
+    await waitFor('Run output after releasing the Attachment', async () => (
+      (await second.listRuns()).some((run) => (
+        run.runId === originalRun.runId &&
+        run.latestOutputBytes > reattached.attachment.run.latestOutputBytes
+      ))
+    ))
+    const reopenedAttachment = await second.reattachAgent('semantic-main', 0)
+    expect(reopenedAttachment.session.run).toEqual(originalRun)
+    expect(reopenedAttachment.attachment.replay.map((event) => event.data).join(''))
+      .toContain('hook-agent-input:after attachment release')
     await expect(second.resumeAgent({
-      semanticSessionId: 'semantic-main',
-      daemonSessionId: 'daemon-duplicate',
+      agentSessionId: 'semantic-main',
+      runId: 'daemon-duplicate',
       createOperationId: 'create-duplicate',
       commandOverride: process.execPath
-    })).rejects.toMatchObject({ code: 'SEMANTIC_SESSION_STILL_RUNNING' })
+    })).rejects.toMatchObject({ code: 'AGENT_SESSION_STILL_RUNNING' })
 
     await second.signalAgent('semantic-main', 'SIGTERM')
     await waitFor('the original daemon run to exit', () => secondEvents.some((event) => (
       event.type === 'process-state' &&
       event.state === 'exited' &&
-      event.daemonSession.incarnationId === originalRun.incarnationId
+      event.run.incarnationId === originalRun.incarnationId
     )))
     const resumed = await second.resumeAgent({
-      semanticSessionId: 'semantic-main',
-      daemonSessionId: 'daemon-resumed',
+      agentSessionId: 'semantic-main',
+      runId: 'daemon-resumed',
       createOperationId: 'create-resumed',
       commandOverride: process.execPath
     })
-    expect(resumed.semanticSessionId).toBe('semantic-main')
-    expect(resumed.daemonSession).not.toEqual(originalRun)
+    expect(resumed.agentSessionId).toBe('semantic-main')
+    expect(resumed.run).not.toEqual(originalRun)
     expect(resumed.nativeHandle).toMatchObject({
       kind: 'provider',
       providerId: 'fixture',
@@ -205,36 +223,36 @@ describe('AgentMux semantic client', () => {
     })
 
     const respawned = await second.respawnAgent({
-      previousSemanticSessionId: 'semantic-main',
-      semanticSessionId: 'semantic-fresh',
-      daemonSessionId: 'daemon-fresh',
+      previousAgentSessionId: 'semantic-main',
+      agentSessionId: 'semantic-fresh',
+      runId: 'daemon-fresh',
       createOperationId: 'create-fresh',
       prompt: 'fresh-context',
       commandOverride: process.execPath
     })
-    expect(respawned.semanticSessionId).toBe('semantic-fresh')
-    expect(respawned.daemonSession).not.toEqual(resumed.daemonSession)
+    expect(respawned.agentSessionId).toBe('semantic-fresh')
+    expect(respawned.run).not.toEqual(resumed.run)
     await expect(second.respawnAgent({
-      previousSemanticSessionId: 'semantic-main',
-      semanticSessionId: 'semantic-main',
-      daemonSessionId: 'daemon-invalid',
+      previousAgentSessionId: 'semantic-main',
+      agentSessionId: 'semantic-main',
+      runId: 'daemon-invalid',
       createOperationId: 'create-invalid'
-    })).rejects.toMatchObject({ code: 'SEMANTIC_ID_REUSE' })
+    })).rejects.toMatchObject({ code: 'AGENT_SESSION_ID_REUSE' })
 
     await second.stopAgent('semantic-main')
     await second.stopAgent('semantic-fresh')
   })
 
   it('rolls the daemon run back when semantic persistence fails', async () => {
-    const store: AgentMuxSemanticStore = {
+    const store: AgentMuxAgentSessionStore = {
       async load() { return [] },
       async put() { throw new Error('store unavailable') },
       async delete() {}
     }
     const client = await connect(store)
     await expect(client.createAgent({
-      semanticSessionId: 'semantic-rollback',
-      daemonSessionId: 'daemon-rollback',
+      agentSessionId: 'semantic-rollback',
+      runId: 'daemon-rollback',
       createOperationId: 'create-rollback',
       agentId: 'fixture',
       workspacePath: process.cwd(),
@@ -242,23 +260,23 @@ describe('AgentMux semantic client', () => {
       commandOverride: process.execPath
     })).rejects.toThrow('store unavailable')
     expect(await client.listRuns()).toEqual([])
-    expect(client.semanticSessions()).toEqual([])
+    expect(client.agentSessions()).toEqual([])
   })
 
   it('reserves a semantic identity before asynchronous capability probing', async () => {
-    const client = await connect(new AgentMuxMemorySemanticStore())
+    const client = await connect(new AgentMuxMemoryAgentSessionStore())
     const results = await Promise.allSettled([
       client.createAgent({
-        semanticSessionId: 'semantic-concurrent',
-        daemonSessionId: 'daemon-concurrent-a',
+        agentSessionId: 'semantic-concurrent',
+        runId: 'daemon-concurrent-a',
         createOperationId: 'create-concurrent-a',
         agentId: 'fixture',
         workspacePath: process.cwd(),
         commandOverride: process.execPath
       }),
       client.createAgent({
-        semanticSessionId: 'semantic-concurrent',
-        daemonSessionId: 'daemon-concurrent-b',
+        agentSessionId: 'semantic-concurrent',
+        runId: 'daemon-concurrent-b',
         createOperationId: 'create-concurrent-b',
         agentId: 'fixture',
         workspacePath: process.cwd(),
@@ -270,13 +288,48 @@ describe('AgentMux semantic client', () => {
     await client.stopAgent('semantic-concurrent')
   })
 
+  it('isolates a throwing Consumer listener from other listeners and Run control', async () => {
+    const client = await connect(new AgentMuxMemoryAgentSessionStore())
+    const observed: AgentMuxClientEvent[] = []
+    client.onEvent(() => {
+      throw new Error('consumer listener failed')
+    })
+    client.onEvent(async () => {
+      throw new Error('async consumer listener failed')
+    })
+    client.onEvent((event) => observed.push(event))
+
+    const session = await client.createAgent({
+      agentSessionId: 'listener-isolation',
+      runId: 'listener-isolation-run',
+      createOperationId: 'listener-isolation-create',
+      agentId: 'fixture',
+      workspacePath: process.cwd(),
+      commandOverride: process.execPath
+    })
+
+    expect(observed).toContainEqual(expect.objectContaining({
+      type: 'agent-session',
+      session: expect.objectContaining({ agentSessionId: session.agentSessionId })
+    }))
+    await expect(client.listRuns()).resolves.toHaveLength(1)
+    await expect(client.stopAgent(session.agentSessionId)).resolves.toBeUndefined()
+  })
+
+  it('bounds Consumer event subscriptions instead of retaining an unlimited listener set', async () => {
+    const client = await connect(new AgentMuxMemoryAgentSessionStore())
+    for (let index = 0; index < 64; index += 1) client.onEvent(() => {})
+    expect(() => client.onEvent(() => {})).toThrow('listener limit')
+    await expect(client.listRuns()).resolves.toEqual([])
+  })
+
   it('holds the semantic lifecycle reservation until an ACP binding is persisted', async () => {
-    const memory = new AgentMuxMemorySemanticStore()
+    const memory = new AgentMuxMemoryAgentSessionStore()
     let enteredAcpWrite!: () => void
     let releaseAcpWrite!: () => void
     const acpWriteEntered = new Promise<void>((resolve) => { enteredAcpWrite = resolve })
     const acpWriteRelease = new Promise<void>((resolve) => { releaseAcpWrite = resolve })
-    const store: AgentMuxSemanticStore = {
+    const store: AgentMuxAgentSessionStore = {
       async load() { return await memory.load() },
       async put(session) {
         if (session.nativeHandle?.kind === 'acp') {
@@ -296,8 +349,8 @@ describe('AgentMux semantic client', () => {
     clients.push(client)
     await client.connect()
     await client.createAgent({
-      semanticSessionId: 'semantic-acp',
-      daemonSessionId: 'daemon-acp',
+      agentSessionId: 'semantic-acp',
+      runId: 'daemon-acp',
       createOperationId: 'create-acp',
       agentId: 'fixture-acp',
       workspacePath: process.cwd(),
@@ -307,11 +360,11 @@ describe('AgentMux semantic client', () => {
     const binding = client.bindAcp('semantic-acp', acpBinding())
     await acpWriteEntered
     await expect(client.stopAgent('semantic-acp')).rejects.toMatchObject({
-      code: 'SEMANTIC_SESSION_BUSY'
+      code: 'AGENT_SESSION_BUSY'
     })
     releaseAcpWrite()
     await binding
-    expect(client.semanticSession('semantic-acp').nativeHandle).toEqual({
+    expect(client.agentSession('semantic-acp').nativeHandle).toEqual({
       kind: 'acp',
       adapterId: 'fixture-adapter',
       sessionId: 'fixture-acp-session'
@@ -319,11 +372,56 @@ describe('AgentMux semantic client', () => {
     await client.stopAgent('semantic-acp')
   })
 
+  it('projects ACP evidence onto the current Agent Session Run without giving ACP Run ownership', async () => {
+    const client = new AgentMuxClient({
+      socketPath,
+      expectedHostId: 'semantic-host',
+      providers: [acpProvider()],
+      store: new AgentMuxMemoryAgentSessionStore()
+    })
+    clients.push(client)
+    await client.connect()
+    const session = await client.createAgent({
+      agentSessionId: 'acp-evidence',
+      runId: 'acp-evidence-run',
+      createOperationId: 'acp-evidence-create',
+      agentId: 'fixture-acp',
+      workspacePath: process.cwd(),
+      commandOverride: process.execPath
+    })
+    let emit!: (event: AgentMuxAcpEvent) => void
+    const events: AgentMuxClientEvent[] = []
+    client.onEvent((event) => events.push(event))
+    await client.bindAcp(session.agentSessionId, acpBinding((listener) => { emit = listener }))
+
+    await expect(client.resumeAgent({
+      agentSessionId: session.agentSessionId,
+      runId: 'acp-resume-run',
+      createOperationId: 'acp-resume-create',
+      commandOverride: process.execPath
+    })).rejects.toMatchObject({ code: 'AGENT_RESUME_UNAVAILABLE' })
+
+    emit({ type: 'status', state: 'working', detail: 'adapter-working' })
+    await waitFor('ACP status with Run evidence', () => events.some((event) => (
+      event.type === 'agent-status' && event.detail === 'adapter-working'
+    )))
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'agent-status',
+      agentSessionId: session.agentSessionId,
+      evidence: expect.objectContaining({
+        source: 'acp',
+        acpSessionId: 'fixture-acp-session',
+        run: session.run
+      })
+    }))
+    await client.stopAgent(session.agentSessionId)
+  })
+
   it('reconstructs an explicit daemon Agent identity for a fresh external client', async () => {
-    const first = await connect(new AgentMuxMemorySemanticStore())
+    const first = await connect(new AgentMuxMemoryAgentSessionStore())
     await first.createAgent({
-      semanticSessionId: 'semantic-external',
-      daemonSessionId: 'daemon-external',
+      agentSessionId: 'semantic-external',
+      runId: 'daemon-external',
       createOperationId: 'create-external',
       agentId: 'fixture',
       workspacePath: process.cwd(),
@@ -331,37 +429,37 @@ describe('AgentMux semantic client', () => {
       commandOverride: process.execPath
     })
     await waitFor('the first client Hook receipt', () => (
-      first.semanticSession('semantic-external').nativeHandle?.kind === 'provider'
+      first.agentSession('semantic-external').nativeHandle?.kind === 'provider'
     ))
     first.disconnect()
 
-    const second = await connect(new AgentMuxMemorySemanticStore())
-    const snapshot = await second.snapshot()
-    expect(snapshot).toMatchObject({
+    const second = await connect(new AgentMuxMemoryAgentSessionStore())
+    const workspaceView = await second.workspaceView()
+    expect(workspaceView).toMatchObject({
       hostId: 'semantic-host',
-      sessions: [{
-        id: 'semantic-external',
+      views: [{
+        viewId: 'agent-view:semantic-host:semantic-external',
         kind: 'agent',
-        semantic: {
-          semanticSessionId: 'semantic-external'
+        agentSession: {
+          agentSessionId: 'semantic-external'
         },
-        run: { sessionId: 'daemon-external', state: 'running' }
+        run: { runId: 'daemon-external', state: 'running' }
       }]
     })
-    const reconstructed = snapshot.sessions[0]
+    const reconstructed = workspaceView.views[0]
     expect(reconstructed?.kind).toBe('agent')
     if (!reconstructed || reconstructed.kind !== 'agent') throw new Error('Expected an Agent session')
-    expect(reconstructed.semantic).not.toHaveProperty('nativeHandle')
+    expect(reconstructed.agentSession).not.toHaveProperty('nativeHandle')
     await expect(second.reattachAgent('semantic-external', 0)).resolves.toMatchObject({
-      session: { semanticSessionId: 'semantic-external' },
-      run: { session: { sessionId: 'daemon-external' } }
+      session: { agentSessionId: 'semantic-external' },
+      attachment: { run: { runId: 'daemon-external' } }
     })
     const events: AgentMuxClientEvent[] = []
     second.onEvent((event) => events.push(event))
     await second.stopAgent('semantic-external')
     expect(events).toContainEqual(expect.objectContaining({
-      type: 'session-removed',
-      semanticSessionId: 'semantic-external',
+      type: 'run-removed',
+      agentSessionId: 'semantic-external',
       evidence: expect.objectContaining({ source: 'user' })
     }))
   })
