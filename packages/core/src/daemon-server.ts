@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process'
 import { dirname } from 'node:path'
 import { createServer, createConnection, type Server, type Socket } from 'node:net'
 import { AgentMuxError } from './errors.js'
+import { inspectAgentMuxDaemonRuntime } from './daemon-diagnostics.js'
 import { AgentHookServer } from './hook-server.js'
 import {
   AGENTMUX_DAEMON_PROTOCOL_VERSION,
@@ -286,6 +287,9 @@ export class AgentMuxDaemonServer {
             daemonPid: process.pid,
             daemonInstanceId: this.daemonInstanceId
           }
+          break
+        case 'diagnose':
+          result = await inspectAgentMuxDaemonRuntime()
           break
         case 'list':
           result = this.sessions.list()

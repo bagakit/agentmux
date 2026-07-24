@@ -2,6 +2,17 @@
   "name": "@agentmux/core",
   "version": "0.1.0",
   "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -11,21 +22,24 @@
     }
   },
   "bin": {
+    "agentmux": "./bin/agentmux.js",
     "agentmuxd": "./bin/agentmuxd.js"
   },
   "files": [
     "bin",
-    "dist"
+    "dist",
+    "examples"
   ],
   "dependencies": {
     "execa": "^9.6.0",
-    "node-pty": "1.1.0",
+    "node-pty": "1.2.0-beta.15",
     "shell-quote": "^1.8.3"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "node scripts/clean-build.mjs && tsc -p tsconfig.build.json",
+    "prepack": "pnpm build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run",
+    "test": "pnpm build && vitest run --exclude test/remote-artifact-builder.test.ts --exclude test/ssh-remote-daemon.integration.test.ts --exclude test/package-consumer.integration.test.ts && vitest run test/remote-artifact-builder.test.ts && vitest run test/ssh-remote-daemon.integration.test.ts && vitest run test/package-consumer.integration.test.ts",
     "measure:daemon": "pnpm build && node scripts/measure-daemon-resources.mjs"
   },
   "devDependencies": {
