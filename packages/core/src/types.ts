@@ -1,4 +1,4 @@
-export type BuiltInAgentId = 'codex' | 'claude' | 'hermes' | 'pi'
+export type BuiltInAgentId = 'codex' | 'claude' | 'traex' | 'hermes' | 'pi'
 export type AgentId = BuiltInAgentId | (string & {})
 
 export type ExecutionHostKind = 'local' | 'ssh'
@@ -16,6 +16,7 @@ export type AgentSemanticState =
 export type AgentDisplayState =
   | 'starting'
   | 'running'
+  | 'disconnected'
   | 'working'
   | 'waiting'
   | 'blocked'
@@ -53,10 +54,9 @@ export type AgentActivity = {
   eventName?: string
 }
 
-export type AgentSessionSnapshot = {
+type SessionSnapshotBase = {
   id: string
   tmuxSession: string
-  agentId: AgentId
   hostId: string
   workspacePath: string
   label: string
@@ -69,26 +69,40 @@ export type AgentSessionSnapshot = {
   paneCommand?: string
 }
 
-export type AgentRuntimeEvent =
-  | { type: 'session'; session: AgentSessionSnapshot }
+export type SessionSnapshot = SessionSnapshotBase & (
+  | { kind: 'agent'; agentId: AgentId }
+  | { kind: 'terminal'; agentId: null }
+)
+
+export type RuntimeEvent =
+  | { type: 'session'; session: SessionSnapshot }
   | { type: 'status'; sessionId: string; status: AgentStatus }
   | { type: 'terminal'; sessionId: string; snapshot: string; observedAt: number }
   | { type: 'activity'; sessionId: string; activity: AgentActivity }
   | { type: 'removed'; sessionId: string }
 
-export type AgentLaunchRequest = {
-  agentId: AgentId
+type SessionLaunchRequestBase = {
   hostId?: string
   workspacePath: string
-  prompt?: string
-  args?: readonly string[]
-  env?: Readonly<Record<string, string>>
-  commandOverride?: string
   sessionId?: string
   label?: string
   cols?: number
   rows?: number
 }
+
+export type SessionLaunchRequest = SessionLaunchRequestBase & (
+  | {
+      kind: 'agent'
+      agentId: AgentId
+      prompt?: string
+      args?: readonly string[]
+      env?: Readonly<Record<string, string>>
+      commandOverride?: string
+    }
+  | {
+      kind: 'terminal'
+    }
+)
 
 export type AgentLaunchPlan = {
   command: string
@@ -121,6 +135,6 @@ export type NormalizedHookEvent = {
 }
 
 export type RuntimeSnapshot = {
-  sessions: AgentSessionSnapshot[]
+  sessions: SessionSnapshot[]
   activities: Record<string, AgentActivity[]>
 }

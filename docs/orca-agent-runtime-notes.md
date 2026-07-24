@@ -1,129 +1,160 @@
-# a mature workbench Agent Runtime: extraction notes
+# a mature workbench Agent Runtime 源码解读与 AgentMux 提取边界
 
-Source inspected: `~/proj/github/a mature workbench` at `6da7b8e9cfe62e5b4d34bb52e8c570036c1935fc` (2026-08-08).
+对照源码：`~/proj/github/a mature workbench`，版本
+`6da7b8e9cfe62e5b4d34bb52e8c570036c1935fc`（2026-08-08）。
 
-## Executive reading
+## 总体结论
 
-a mature workbench is not an agent executor in the headless-runner sense. It is a durable terminal system with an agent-semantic layer laid over it:
+a mature workbench 不是传统意义上的无界面 Agent Runner。它先是一套持久化终端系统，再在终端之上叠加 Agent 语义：
 
-1. A declarative catalog identifies the binary, expected foreground process, prompt-injection mode, and readiness quirks for each CLI.
-2. A startup planner converts `{ agent, prompt, args, env, platform }` into a terminal launch command plus optional follow-up input.
-3. A provider-owned PTY hosts the shell and child process, streams bytes, handles reattach, and performs descendant-aware teardown.
-4. Native agent hooks post lifecycle events to an authenticated loopback receiver. The receiver normalizes provider-specific events into a small status algebra and attributes them to a stable pane identity.
-5. Renderer stores project that state into worktree, tab, dashboard, notification, and mobile views.
+1. 声明式目录描述每个 Agent 的可执行文件、前台进程、Prompt 注入方式和就绪条件。
+2. 启动规划器把 `{ agent, prompt, args, env, platform }` 转换成终端启动命令和必要的后续输入。
+3. Provider 持有 PTY、Shell 与子进程，负责字节流、重连和进程树清理。
+4. Agent 原生 Hook 把生命周期事件发送到带认证的本地接收器；接收器把 Provider 特有事件归一化成小型状态代数，并绑定到稳定 Pane 身份。
+5. Renderer 再把同一份状态投影到 Worktree、Tab、Board、通知和移动端。
 
-The important extraction boundary is therefore not “copy a mature workbench's terminal.” It is:
+真正值得提取的边界不是“复制 a mature workbench 的终端”，而是：
 
 ```text
-Agent adapter -> startup plan -> terminal/session provider
-                         |              |
-                         v              v
-                  native hook events  output/liveness facts
-                         \              /
-                          normalized event stream
+Agent Adapter -> Startup Plan -> Terminal / Session Owner
+                         |                 |
+                         v                 v
+                  Native Hook Event    Output / Liveness
+                         \                 /
+                          Normalized Event Stream
 ```
 
-AgentMux replaces a mature workbench's `node-pty`/daemon/SSH provider graph with real tmux, while preserving the adapter and normalized-event seams.
+AgentMux 保留真实 tmux 作为当前 PTY/Process Owner，同时采用 a mature workbench 的 Adapter、Session 和归一化事件边界。
 
-## 1. Launch planning is data-driven
+## 1. Agent 启动规划由数据驱动
 
-`src/shared/tui-agent-config.ts:4-45` declares six prompt delivery modes and the common adapter fields. The four requested agents are not actually launched the same way:
+`src/shared/tui-agent-config.ts:4-45` 定义六种 Prompt 交付模式和统一的 Adapter 字段。内置 Agent 的启动方式并不相同：
 
-- Claude is `claude` with a positional submitted prompt; `--prefill` is a separate draft-only capability (`src/shared/tui-agent-config.ts:48-56`).
-- Codex is also positional, but a mature workbench marks it for trust preflight and uses a Codex-specific composer-readiness signal for draft paste (`src/shared/tui-agent-config.ts:80-87`).
-- Pi accepts a positional submitted prompt, while draft prefill is injected through `ORCA_PI_PREFILL` because post-start paste races its startup (`src/shared/tui-agent-config.ts:129-137`).
-- Hermes' plain hosted TUI is `hermes --tui`, but a non-empty startup prompt uses the native `hermes chat --query=... --tui` contract (`src/shared/tui-agent-config.ts:274-280`, `src/shared/hermes-startup-query.ts:89-139`).
+- Claude 使用 `claude` 加位置参数；`--prefill` 是独立的“只填充、不提交”能力（`48-56`）。
+- Codex 也使用位置参数，但 a mature workbench 会先做 Trust Preflight，并通过 Codex 特有的 Composer Ready 信号决定何时粘贴草稿（`80-87`）。
+- TraeX 使用已安装的 `traex` 交互式 CLI，初始 Prompt 是一个位置参数。
+- Pi 接收位置参数；草稿预填则通过 `ORCA_PI_PREFILL`，避免启动后的粘贴竞争（`129-137`）。
+- Hermes 的普通 TUI 是 `hermes --tui`；有初始 Prompt 时使用原生
+  `hermes chat --query=... --tui`（`274-280`，以及
+  `src/shared/hermes-startup-query.ts:89-139`）。
 
-`buildAgentStartupPlan` is the main normalization point. It resolves config/overrides, quotes per shell, then chooses argv, `--prompt`, Hermes query, interactive flag, or follow-up input (`src/shared/tui-agent-startup.ts:43-184`). This is the most reusable a mature workbench idea: prompt delivery belongs to an adapter plan, not to terminal/UI conditionals.
+`buildAgentStartupPlan` 是主要归一化点：它解析配置与覆盖值，按 Shell 规则引用参数，再选择位置参数、`--prompt`、Hermes Query、交互标志或后续输入（`src/shared/tui-agent-startup.ts:43-184`）。因此 Prompt 交付属于 Provider 启动计划，不属于 Terminal 或 UI 的条件分支。
 
-Hermes deserves special treatment because a mature workbench transports the prompt through an environment variable, reconstructs an argv-safe native query invocation, unsets the prompt before tools inherit the environment, and enforces a 24 KB transport bound (`src/shared/hermes-startup-query.ts:9-16`, `141-194`). AgentMux can simplify this because tmux accepts an argv launch, but should keep the native `chat --query ... --tui` shape and avoid post-start typing for the initial prompt.
+Hermes 还会限制 Prompt 传输大小、从环境恢复 argv-safe Query，并在启动后清理环境变量，避免工具子进程继承原始 Prompt（`src/shared/hermes-startup-query.ts:9-16`、`141-194`）。AgentMux 通过 tmux 的 argv 启动可以删掉这部分传输复杂度，但保留 Hermes 的原生命令形状。
 
-The renderer launch path then queues the plan before terminal mount, preserving initial cwd, env, agent identity, session options, and the chosen follow-up delivery (`src/renderer/src/lib/launch-agent-in-new-tab.ts:62-70`, `179-229`). This separation lets the same planner serve visible tabs and background sessions (`src/renderer/src/lib/launch-agent-background-session.ts:44-99`).
+## 2. a mature workbench 的普通 Session 是 node-pty，而不是 tmux
 
-## 2. Normal a mature workbench sessions are node-pty sessions, not tmux
+a mature workbench Local Provider 通过 Shell Fallback 调用 `pty.spawn`（`src/main/providers/local-pty-provider.ts:838-862`）。它按稳定 Session ID 持有进程，可以重新 Attach，而不是重复 Spawn（`532-553`）。输出统一进入 Provider Event Fanout（`910-929`、`1002-1013`）；退出事件使用 Incarnation Fence，避免旧进程的迟到事件污染新 Session（`1018-1038`）。
 
-The local provider calls `pty.spawn` through a shell fallback layer (`src/main/providers/local-pty-provider.ts:838-862`). It retains the process by stable session id and can reattach instead of spawning a duplicate (`src/main/providers/local-pty-provider.ts:532-553`). Output enters one provider event fanout (`src/main/providers/local-pty-provider.ts:910-929`, `1002-1013`); physical exit clears ownership and emits an incarnation-fenced exit event (`src/main/providers/local-pty-provider.ts:1018-1038`).
+停止 Agent 时，a mature workbench 不只杀 Shell，还会清理后代进程，避免 MCP 或工具进程继续占用 Worktree cwd。POSIX 先优雅停止再强制终止；Windows ConPTY 只走强制路径（`1110-1202`）。
 
-Shutdown is intentionally stronger than killing the shell. Agent sessions get a descendant sweep so MCP/tool children cannot outlive the pane and hold its worktree cwd; POSIX graceful stop escalates to force, while Windows ConPTY is treated as force-only (`src/main/providers/local-pty-provider.ts:1110-1178`, `1181-1202`).
+AgentMux 当前把下列责任交给真实 tmux：
 
-AgentMux gets most of that ownership from tmux itself:
+- Detached Session 提供 PTY/Process 持久化；
+- `remain-on-exit` 和 Pane Format 提供可检查的退出状态；
+- Prefix 限定的 Session Name 提供窄化停止目标；
+- `capture-pane` 提供重启后可恢复的终端投影。
 
-- detached sessions provide process/PTY persistence;
-- `remain-on-exit` plus pane format fields provide an inspectable terminal boundary;
-- `pipe-pane` provides a byte stream without embedding a terminal emulator in core;
-- exact, prefixed session names provide a narrow teardown target.
+Core 仍负责 Session 身份、Local/SSH Host、输入、Resize、Capture、状态轮询、事件和精确清理。
 
-It still needs explicit output tailing, state reconciliation after restart, exact session ownership, and cleanup of package-created log/control files.
+## 3. a mature workbench 的“tmux 支持”是兼容外观
 
-## 3. a mature workbench's “tmux support” is a compatibility facade
+Claude Agent Teams 是一个容易误判的例子。a mature workbench 没有为它启动真实 tmux Server，而是在 `PATH` 前放置 Fake tmux，注入合成的 `TMUX`/`TMUX_PANE`，并为每个 Team 分配随机 Bearer Token（`src/main/runtime/claude-agent-teams-service.ts:25-76`、`claude-agent-teams-shim-env.ts:19-51`、`116-134`）。
 
-Claude Agent Teams is the surprising case. a mature workbench does not launch a real tmux server. It places a fake `tmux` binary first on `PATH`, sets synthetic `TMUX`/`TMUX_PANE` values, and gives each team a random bearer token (`src/main/runtime/claude-agent-teams-service.ts:25-76`, `src/main/runtime/claude-agent-teams-shim-env.ts:19-51`, `116-134`).
+Dispatcher 只实现 Claude Code 需要的 `split-window`、`respawn-pane`、`list-panes`、`send-keys`、`capture-pane`、Pane 选择和销毁，再把这些调用翻译成 a mature workbench Terminal API（`claude-agent-teams-tmux-dispatcher.ts:17-80`）。
 
-The shim forwards tmux argv to a mature workbench, where a dispatcher implements just the subset Claude Code needs: `split-window`, `respawn-pane`, `list-panes`, `send-keys`, `capture-pane`, selection, and teardown (`src/main/runtime/claude-agent-teams-tmux-dispatcher.ts:17-80`). The calls are translated into a mature workbench terminal APIs (`src/main/runtime/claude-agent-teams-types.ts:32-51`). Even tmux's two-step holding-pane/`respawn-pane` behavior is emulated by closing and recreating an a mature workbench PTY while preserving the fake pane id (`src/main/runtime/claude-agent-teams-tmux-dispatcher.ts:139-181`).
+这和 AgentMux 的方向相反：a mature workbench 把 tmux Vocabulary 翻译成自己的 PTY Pane；AgentMux 当前让真实 tmux 持有 Pane，再在上面提供 Provider-neutral Session API。
 
-This validates tmux as a useful agent-control vocabulary, but it is the inverse of AgentMux. a mature workbench translates tmux calls into its pane model; AgentMux delegates the pane model to real tmux and exposes a provider-neutral API above it.
+## 4. Agent 语义状态来自 Hook，不来自终端猜测
 
-## 4. Semantic state comes from hooks, not terminal scraping
+a mature workbench 明确声明：Agent Status 来自原生 Hook，不从终端标题推断（`src/shared/agent-status-types.ts:1-3`）。核心语义状态为 `working`、`blocked`、`waiting`、`done`（`16-17`），同时保留 Prompt、时间、Model、Pane/Worktree 归属、Tool Preview、交互问题、Assistant Preview、Subagent 和 Provider Session 身份（`89-145`）。
 
-a mature workbench explicitly states that agent status comes from native hooks and is not inferred from terminal titles (`src/shared/agent-status-types.ts:1-3`). The canonical states are `working`, `blocked`, `waiting`, and `done` (`src/shared/agent-status-types.ts:16-17`). Entries retain prompt, timestamps, model, pane/worktree attribution, tool preview, interactive question, assistant preview, subagents, and provider session identity (`src/shared/agent-status-types.ts:89-145`).
+Hook Receiver 是只绑定 `127.0.0.1` 的临时认证 HTTP Server。它生成随机 Token、验证 Header、限制请求生命周期，并采用 Fail-open：观察器失败不能阻断 Agent（`src/main/agent-hooks/server.ts:2081-2199`）。状态持久化使用临时文件加原子 Rename（`2804-2863`）。
 
-The receiver is an ephemeral authenticated HTTP server on `127.0.0.1`. It creates a random token, restores prior status before binding, checks the token header, bounds request lifetime, resolves the agent endpoint, and deliberately fails open so a broken observer never blocks the agent (`src/main/agent-hooks/server.ts:2081-2199`). Current status is atomically persisted through temp-write/rename with a trailing debounce (`src/main/agent-hooks/server.ts:2804-2863`).
+主要事件映射如下：
 
-Provider hook payloads are attributed through stable pane keys and normalized by source before entering the shared state map (`src/shared/agent-hook-listener.ts:4099-4170`, `4203-4317`). Important mappings for the requested agents are:
-
-| Agent | Working | Human attention | Done |
+| Agent | 工作中 | 需要用户 | 完成 |
 | --- | --- | --- | --- |
-| Claude | `UserPromptSubmit`, tool progress, compact progress | `PermissionRequest`, `AskUserQuestion` | `Stop`, `StopFailure`, completed compact |
-| Codex | `SessionStart`, `UserPromptSubmit`, tool progress | `PermissionRequest`, `request_user_input` | `Stop` |
-| Pi | agent/tool/message activity | `ask_user_question` becomes `blocked` | `agent_end` / settled |
-| Hermes | session/LLM/tool activity, approval response | `pre_approval_request` | LLM/session end/finalize/reset |
+| Claude | `UserPromptSubmit`、Tool/Compact Progress | `PermissionRequest`、`AskUserQuestion` | `Stop`、`StopFailure` |
+| Codex | `SessionStart`、`UserPromptSubmit`、Tool Progress | `PermissionRequest`、`request_user_input` | `Stop` |
+| Pi | Agent/Tool/Message Activity | `ask_user_question` | `agent_end` / Settled |
+| Hermes | Session/LLM/Tool Activity | `pre_approval_request` | LLM/Session End、Finalize、Reset |
 
-The exact Claude mapping is in `src/shared/agent-hook-listener.ts:2729-2813`; Codex is in `3561-3588`; Pi is in `3800-3854`; Hermes is in `4043-4087`. The normalizers also cache prompts and tool state because most later events omit the original user text.
+对应归一化证据位于 `src/shared/agent-hook-listener.ts`：Claude `2729-2813`，Codex `3561-3588`，Pi `3800-3854`，Hermes `4043-4087`。
 
-The hook transports differ by provider:
+AgentMux 不会在首个交付中静默修改 `~/.claude`、`~/.codex`、Hermes Plugin 或 Pi Extension。Core 只提供带认证的 Hook Ingress 与归一化事件合同；全局 Hook 安装必须是后续显式授权动作。
 
-- Claude and Codex install managed hook commands that capture stdin and POST form fields plus raw payload. Claude posts to `/hook/claude` (`src/main/claude/hook-service.ts:81-115`); Codex subscribes to eight lifecycle/tool/subagent events (`src/main/codex/hook-service.ts:85-120`) and posts to `/hook/codex` (`src/main/codex/hook-service.ts:781-846`).
-- Hermes installs a Python plugin, bounds payload traversal, registers native plugin hooks, and POSTs selected JSON fields (`src/main/hermes/hook-service.ts:270-313`, `374-435`).
-- Pi has no settings hook surface; a mature workbench writes an in-process TypeScript extension into Pi's extension directory (`src/main/pi/agent-status-extension-source.ts:1-19`). It coalesces to the latest pending post so observer latency cannot stall or unboundedly queue the Pi event loop (`src/main/pi/agent-status-extension-source.ts:88-103`, `162-183`).
+## 5. 当前 AgentMux 公共 Session 模型
 
-For AgentMux, automatic global installation is deliberately out of the first delivery: launch must not rewrite `~/.claude`, `~/.codex`, Hermes plugins, or Pi extensions without a separate opt-in action. Core will expose an authenticated hook ingress and normalized event contract now; opt-in installers can be added behind explicit user control.
+T-008 已把旧的 Agent-only 生命周期直接替换为最终 Session 模型，不保留类型别名或 IPC 兼容层：
 
-## 5. What the desktop app should borrow
+```ts
+type SessionSnapshot = SessionBase & (
+  | { kind: 'agent'; agentId: AgentId }
+  | { kind: 'terminal'; agentId: null }
+)
 
-The desktop consumer should borrow a mature workbench's ownership separations, not its full implementation scale:
+type SessionLaunchRequest = SessionLaunchBase & (
+  | { kind: 'agent'; agentId: AgentId; prompt?: string; args?: string[]; env?: Record<string, string> }
+  | { kind: 'terminal' }
+)
+```
 
-- Renderer decides workspace/tab/split intent and queues a provider-neutral launch.
-- Main owns process, filesystem, git, tmux, and hook trust boundaries.
-- Core emits both raw terminal output and structured semantic events.
-- Stable session/pane/workspace ids are the join keys; labels and current paths are presentation data.
-- A session can be projected into several views: raw terminal, conversation/activity timeline, workspace card, and board lane.
+- Agent Session 通过 `AgentProvider.buildLaunch` 生成命令，接入 Hook 语义与 Activity。
+- Raw Terminal Session 不伪装成 Agent Provider；tmux 不带 Command 创建 Pane，因此运行目标 Host 的默认 Shell。
+- 两类 Session 共用发现、启动、停止、输入、Interrupt、Resize、Capture、Local/SSH、断连恢复与事件 API。
+- `AgentMuxRuntime.send` 对同一 Session 保证调用顺序，不同 Session 独立推进；失败不会毒化后续输入，Session 清理同时释放输入 tail。这个顺序属于 Core 公共合同，不由 Desktop/xterm 补偿。
+- 只有 Agent Session 把 Submit Input 记录为 Prompt Activity；Raw Terminal 输入保持纯终端语义。
+- tmux Environment 写入 `AGENTMUX_SESSION_KIND`。旧 Session 没有该字段时不会被兼容性猜测或迁移。
 
-The richer target adds a Warp/a mature workbench-inspired presentation. Raw bytes remain available for terminal fidelity, while conversation mode may render only observable user prompts, assistant output, tool events, permission waits, and lifecycle changes. It must not claim that those events expose a model's private chain of thought.
+Desktop Typed Preload API 也按职责分离：
 
-## 6. Extraction decisions
+```text
+agents.detect                 Agent 可用性
+sessions.*                    Terminal / Agent 生命周期
+browser.*                     Electron WebContentsView 生命周期
+workspaces.* / files.*        Git 与文件边界
+```
 
-Borrow now:
+Renderer 不直接启动进程，也不持有 SSH Client。
 
-- declarative agent adapters and prompt modes;
-- startup plan as a pure value;
-- stable session identity and explicit ownership;
-- native hook normalization into a compact state model;
-- separate raw output, process liveness, and semantic status provenance;
-- fail-open observation and bounded payloads.
+## 6. Browser 为什么不进入 core
 
-Simplify now:
+a mature workbench Desktop Browser 主要使用 Renderer `<webview>`，而 Offscreen/Headless 路径由 Main Process `BrowserWindow` 持有。AgentMux 已确认采用 Electron 维护中的 `WebContentsView`：
 
-- one local tmux provider rather than local/daemon/SSH/WSL providers;
-- file-backed `pipe-pane` output rather than renderer/relay sequence ledgers;
-- four built-in agents rather than a mature workbench's full catalog;
-- restart reconciliation from live tmux state rather than serialized xterm snapshots;
-- desktop-local workspace/worktree management rather than remote host federation.
+- `BrowserViewManager` 在 Main Process 创建、导航、定位、隐藏和销毁 View；
+- Renderer 只通过 Typed Preload IPC 发送 Browser Intent 与像素 Bounds；
+- Browser Tab 非活动、拖拽中、切到 Board 或被窄窗口 Navigator 覆盖时，Main-owned View 会隐藏；
+- Back、Forward、Reload、Title、Loading、Error 和 Render-process Gone 都回投为 Browser Event；
+- Permission Check/Request 默认全部拒绝；每次页面完成导航后重新应用 0.9 Zoom，避免跨 Origin 导航恢复为默认比例；
+- Tab Close 先销毁 WebContents 资源，再从 Pane Layout 移除 Tab；
+- URL 只接受 `http:`、`https:` 与内部空白页；本地地址默认使用 HTTP，普通域名默认 HTTPS，含空格输入作为搜索词处理。
 
-Do not copy now:
+Browser 不属于 Agent Runtime，也不通过 tmux。它属于 Desktop Host Capability，但继续遵守 Universal Tab、Pane、拖拽、分屏与关闭生命周期。
 
-- node-pty terminal host and checkpoint system;
-- Electron renderer delivery queues and SSH flow control;
-- account homes, auth switching, rate-limit scanners, session transcript vault;
-- mobile RPC and notification fanout;
-- Claude fake-tmux compatibility layer (real tmux already supplies that protocol);
-- silent/automatic mutation of user-global agent hook configuration.
+## 7. 采用、简化与明确不采用
+
+当前采用：
+
+- 声明式 Agent Adapter；
+- Startup Plan 纯值边界；
+- 稳定 Session Identity 与明确 Owner；
+- Hook 归一化与状态来源；
+- Raw Output、Process Liveness、Semantic Status 分离；
+- 一个 Session 的 Terminal 与 Observable Activity 两种投影。
+
+当前简化：
+
+- Local/SSH 均通过 `ExecutionHost + tmux`，不复制 a mature workbench Daemon/Relay/WSL 图；
+- 五个内置 Agent：Codex、Claude、TraeX、Hermes、Pi；
+- 从真实 tmux 状态恢复，不序列化 xterm Snapshot；
+- Desktop-local Workspace/Worktree，不引入远程账户和 Host Federation。
+
+明确不采用：
+
+- a mature workbench 的 node-pty Host 与 Checkpoint 系统；
+- Relay/Mobile/Account/Transcript Vault；
+- Claude Fake-tmux 兼容层；
+- 静默修改用户全局 Agent Hook；
+- 把可观察 Hook/Terminal Activity 描述成模型私有 Chain-of-thought；
+- 在本 Feature 中替换当前 mux Owner。

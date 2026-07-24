@@ -16,8 +16,8 @@ export function TerminalView({ sessionId, snapshot }: { sessionId: string; snaps
       cursorBlink: true,
       cursorStyle: 'bar',
       fontFamily: '"SFMono-Regular", "Cascadia Code", "JetBrains Mono", monospace',
-      fontSize: 13,
-      lineHeight: 1.45,
+      fontSize: 15,
+      lineHeight: 1.4,
       scrollback: 10_000,
       theme: {
         background: '#0c0f11',
@@ -41,10 +41,10 @@ export function TerminalView({ sessionId, snapshot }: { sessionId: string; snaps
     fitRef.current = fit
     const resize = new ResizeObserver(() => {
       fit.fit()
-      void api.agents.resize(sessionId, terminal.cols, terminal.rows)
+      void api.sessions.resize(sessionId, terminal.cols, terminal.rows)
     })
     resize.observe(rootRef.current)
-    const input = terminal.onData((data) => void api.agents.send(sessionId, data, false))
+    const input = terminal.onData((data) => void api.sessions.send(sessionId, data, false))
     requestAnimationFrame(() => fit.fit())
     return () => {
       input.dispose()

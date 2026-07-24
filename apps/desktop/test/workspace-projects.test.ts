@@ -1,0 +1,55 @@
+import { describe, expect, it } from 'vitest'
+import type { WorkspaceRecord } from '../src/shared/contracts'
+import {
+  defaultWorktreePath,
+  projectWorkspaces,
+  workspaceProjectId
+} from '../src/renderer/src/lib/workspace-projects'
+
+describe('workspace projects', () => {
+  it('groups a project folder and its worktrees by host and repository path', () => {
+    const workspaces: WorkspaceRecord[] = [
+      { id: 'root', name: 'AgentMux', hostId: 'local', path: '/repo/agentmux', kind: 'folder' },
+      {
+        id: 'feature',
+        name: 'feature-a',
+        hostId: 'local',
+        path: '/repo/agentmux.worktrees/feature-a',
+        kind: 'worktree',
+        repoPath: '/repo/agentmux',
+        branch: 'feature/a'
+      },
+      {
+        id: 'remote',
+        name: 'feature-a',
+        hostId: 'studio',
+        path: '/repo/agentmux.worktrees/feature-a',
+        kind: 'worktree',
+        repoPath: '/repo/agentmux',
+        branch: 'feature/a'
+      }
+    ]
+
+    const projects = projectWorkspaces(workspaces)
+
+    expect(projects).toHaveLength(2)
+    expect(projects[0]).toMatchObject({
+      name: 'AgentMux',
+      hostId: 'local',
+      repoPath: '/repo/agentmux',
+      preferredWorkspaceId: 'root'
+    })
+    expect(projects[0]?.workspaces.map((workspace) => workspace.id)).toEqual(['root', 'feature'])
+    expect(workspaceProjectId(workspaces[0]!)).toBe(workspaceProjectId(workspaces[1]!))
+    expect(workspaceProjectId(workspaces[2]!)).not.toBe(workspaceProjectId(workspaces[0]!))
+  })
+
+  it('derives host-neutral sibling worktree paths without leaking branch separators', () => {
+    expect(defaultWorktreePath('/repo/agentmux', 'feature/new-tab')).toBe(
+      '/repo/agentmux.worktrees/feature-new-tab'
+    )
+    expect(defaultWorktreePath('C:\\repo\\agentmux', 'fix/ui')).toBe(
+      'C:\\repo\\agentmux.worktrees\\fix-ui'
+    )
+  })
+})

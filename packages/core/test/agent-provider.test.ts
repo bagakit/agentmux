@@ -4,7 +4,7 @@ import { AgentProviderRegistry } from '../src/agent-provider.js'
 describe('built-in agent providers', () => {
   const providers = new AgentProviderRegistry()
 
-  it.each(['codex', 'claude', 'pi'] as const)('delivers %s prompts as positional argv data', (id) => {
+  it.each(['codex', 'claude', 'traex', 'pi'] as const)('delivers %s prompts as positional argv data', (id) => {
     const plan = providers.get(id).buildLaunch({
       workspacePath: '/tmp/work',
       prompt: 'fix "quoted"\ntext',

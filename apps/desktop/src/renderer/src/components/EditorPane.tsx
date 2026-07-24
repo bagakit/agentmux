@@ -1,56 +1,57 @@
 import Editor from '@monaco-editor/react'
 import { Save } from 'lucide-react'
+import { detectLanguage } from '../lib/language-detect'
+import { documentKey } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
 
-function language(path: string): string {
-  if (/\.(ts|tsx)$/.test(path)) return 'typescript'
-  if (/\.(js|jsx|mjs|cjs)$/.test(path)) return 'javascript'
-  if (/\.jsonc?$/.test(path)) return 'json'
-  if (/\.md$/.test(path)) return 'markdown'
-  if (/\.css$/.test(path)) return 'css'
-  if (/\.ya?ml$/.test(path)) return 'yaml'
-  return 'plaintext'
-}
-
-export function EditorPane() {
-  const document = useAppStore((state) => state.activeDocument)
-  const dirty = useAppStore((state) => state.documentDirty)
+export function EditorPane({ tabId }: { tabId: string }) {
+  const tab = useAppStore((state) => state.tabs[tabId])
+  const document = useAppStore((state) => {
+    if (tab?.kind !== 'file') return null
+    return state.documents[documentKey(tab.workspaceId, tab.path)] ?? null
+  })
+  const dirty = useAppStore((state) => {
+    if (tab?.kind !== 'file') return false
+    return Boolean(state.dirtyDocuments[documentKey(tab.workspaceId, tab.path)])
+  })
   const update = useAppStore((state) => state.updateDocument)
   const save = useAppStore((state) => state.saveDocument)
-  if (!document) {
+
+  if (tab?.kind !== 'file' || !document) {
     return (
-      <section className="editor-empty">
-        <div className="editor-empty__glyph">⌘</div>
-        <strong>Open a file beside the agent</strong>
-        <span>Changes stay rooted to this workspace.</span>
+      <section className="pane-state pane-state--error">
+        <strong>File is no longer available</strong>
+        <span>Refresh the explorer and open it again.</span>
       </section>
     )
   }
+
   return (
     <section className="editor-pane">
       <header className="editor-header">
-        <span>{document.path}</span>
-        <button className="small-button" disabled={!dirty} onClick={() => void save()}>
+        <span title={document.path}>{document.path}</span>
+        <button className="small-button" disabled={!dirty} onClick={() => void save(tabId)}>
           <Save size={13} /> {dirty ? 'Save' : 'Saved'}
         </button>
       </header>
       <div className="editor-canvas">
         <Editor
-          path={document.path}
-          language={language(document.path)}
+          path={`${tab.workspaceId}:${document.path}`}
+          language={detectLanguage(document.path)}
           value={document.content}
-          onChange={(value) => update(value ?? '')}
+          onChange={(value) => update(tabId, value ?? '')}
           theme="vs-dark"
           options={{
             minimap: { enabled: false },
             fontFamily: '"SFMono-Regular", "Cascadia Code", monospace',
-            fontSize: 13,
+            fontSize: 14,
             lineHeight: 21,
-            padding: { top: 16 },
+            padding: { top: 14 },
             scrollBeyondLastLine: false,
             automaticLayout: true,
             renderLineHighlight: 'gutter',
-            smoothScrolling: true
+            smoothScrolling: true,
+            wordWrap: 'off'
           }}
         />
       </div>

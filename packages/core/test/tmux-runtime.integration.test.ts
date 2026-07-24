@@ -50,7 +50,7 @@ describe('real tmux runtime', () => {
     })
     runtimes.push(runtime)
     const id = `test-${randomUUID().slice(0, 8)}`
-    await runtime.launch({ sessionId: id, agentId: 'fixture', workspacePath: process.cwd() })
+    await runtime.launch({ kind: 'agent', sessionId: id, agentId: 'fixture', workspacePath: process.cwd() })
 
     await waitFor(() => runtime.capture(id), (output) => output.includes('READY'))
     await runtime.send(id, 'hello')
@@ -64,5 +64,25 @@ describe('real tmux runtime', () => {
 
     await runtime.stopSession(id)
     expect(runtime.snapshot().sessions).toHaveLength(0)
+  })
+
+  it('launches a raw terminal in the host default shell', async () => {
+    const runtime = new AgentMuxRuntime({ hosts: [new LocalExecutionHost()], pollIntervalMs: 100 })
+    runtimes.push(runtime)
+    const id = `terminal-${randomUUID().slice(0, 8)}`
+
+    const launched = await runtime.launch({
+      kind: 'terminal',
+      sessionId: id,
+      workspacePath: process.cwd()
+    })
+
+    expect(launched).toMatchObject({ kind: 'terminal', agentId: null, processState: 'running' })
+    await runtime.send(id, "printf 'RAW_TERMINAL_OK\\n'")
+    await waitFor(() => runtime.capture(id), (output) => output.includes('RAW_TERMINAL_OK'))
+
+    const typedCommand = "printf 'ORDERED_INPUT_OK\\n'\r"
+    await Promise.all([...typedCommand].map(async (character) => await runtime.send(id, character, false)))
+    await waitFor(() => runtime.capture(id), (output) => output.includes('ORDERED_INPUT_OK'))
   })
 })
