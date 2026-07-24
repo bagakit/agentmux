@@ -6,11 +6,9 @@
     "node": ">=22.0.0"
   },
   "os": [
-    "darwin",
-    "linux"
+    "darwin"
   ],
   "cpu": [
-    "x64",
     "arm64"
   ],
   "main": "./dist/index.js",
