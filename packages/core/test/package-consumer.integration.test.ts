@@ -220,6 +220,7 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
           replayStartByte: 7,
           resize: '101x37',
           interruptStillLive: true,
+          dedupOccurrences: 1,
           remote: 'unsupported'
         })
 

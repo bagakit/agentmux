@@ -113,6 +113,13 @@ export type CtxmuxAdapterAttachment = {
   gap: { requestedAfterByte: number; firstAvailableByte: number } | null
 }
 
+export type CtxmuxAdapterInputOperation = {
+  ownerInstanceId: string
+  operationId: string
+  expectedByte: number
+  data: string
+}
+
 type LiveAttachment = {
   attachment: Attachment
   token: symbol
@@ -523,13 +530,40 @@ export class CtxmuxRunAdapter {
     }
   }
 
-  async input(runId: string, data: string): Promise<{ run: CtxmuxAdapterRun; writtenBytes: number }> {
-    try {
-      const accepted = await this.requireClient().input(runId, data)
-      return { run: projectRun(accepted.run), writtenBytes: accepted.receipt.written_bytes }
-    } catch (error) {
-      throw translateCtxmuxError(error)
+  async input(
+    runId: string,
+    operation: CtxmuxAdapterInputOperation
+  ): Promise<{
+    run: CtxmuxAdapterRun
+    appliedByteRange: { startByte: number; endByte: number }
+  }> {
+    const recoverable = {
+      daemonInstance: operation.ownerInstanceId,
+      operationKey: operation.operationId,
+      runId,
+      expectedByte: operation.expectedByte,
+      data: operation.data
     }
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const accepted = await this.requireClient().recoverableInput(recoverable)
+        return {
+          run: projectRun(accepted.run),
+          appliedByteRange: {
+            startByte: accepted.receipt.start_byte,
+            endByte: accepted.receipt.end_byte
+          }
+        }
+      } catch (error) {
+        if (
+          attempt === 0 &&
+          error instanceof CtxmuxCommandError &&
+          error.disposition === 'unknown'
+        ) continue
+        throw translateCtxmuxError(error)
+      }
+    }
+    throw new AgentMuxError('Recoverable CtxMux Input did not resolve.', 'CTXMUX_INPUT_UNRESOLVED')
   }
 
   async resize(runId: string, cols: number, rows: number): Promise<{ run: CtxmuxAdapterRun; cols: number; rows: number }> {

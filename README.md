@@ -26,8 +26,9 @@ Desktop / CLI / external Node client
 - 固定 CtxMux clean commit `3b94288c3a7896bb355e028135409c8e8bbaf764`、protocol 9；
 - `packages/core/vendor/ctxmux/darwin-arm64` 携带其 manifest、SDK tarball、`ctxmux` 与 `ctxmuxd`；
 - Core 构建时从固定 tarball 私有打包 SDK，不暴露 CtxMux 类型，不使用 `file:` 依赖、相邻 checkout、全局安装或下载；
+- Local endpoint 由 exact artifact identity 隔离，调用方不能插入另一个同协议 daemon；
 - `AgentMuxRunRef` 只包含 CtxMux `runId`，没有第二个 incarnation identity；
-- Local Terminal 已通过同 Run/PID 重连、累计 byte replay、fragmented UTF-8、Resize、Interrupt-still-live 与 stubborn process-tree Stop；
+- Local Terminal 已通过同 Run/PID 重连、累计 byte replay、fragmented UTF-8、丢失 Input receipt 后的跨 Client 去重恢复、Resize、Interrupt-still-live 与 stubborn process-tree Stop；
 - Remote/SSH 明确返回 `REMOTE_UNSUPPORTED`；
 - 旧自建 daemon、wire、journal、`node-pty` Owner、Remote artifact 和 package bin 已删除。
 
@@ -46,7 +47,12 @@ const run = await client.createTerminal({
 const attachment = await client.attachTerminal(run.runId, 0)
 for (const event of attachment.replay) process.stdout.write(event.data)
 
-await client.writeTerminal(run, "printf 'hello from AgentMux\\n'\n")
+await client.writeTerminal(run, {
+  ownerInstanceId: client.runtimeIdentity().instanceId,
+  operationId: crypto.randomUUID(),
+  expectedByte: run.acceptedInputBytes,
+  data: "printf 'hello from AgentMux\\n'\n"
+})
 await client.resizeTerminal(run, 120, 40)
 await client.signalTerminal(run, 'SIGINT')
 await client.stopTerminal(run)

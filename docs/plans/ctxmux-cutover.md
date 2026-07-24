@@ -50,10 +50,11 @@ checkout-external packed consumer 已真实证明：
 2. 第一个 Client 释放后，第二个 Client 看到相同 RunId/PID；
 3. fragmented UTF-8 不产生错误替换字符；
 4. 从累计 byte 7 的 interior cursor replay 连续 suffix；
-5. Resize 由真实 PTY 回读为 `101x37`；
-6. Interrupt 被进程观察且进程继续 running；
-7. 忽略 HUP/TERM 的 root/child process tree 被 Stop 完整清除；
-8. Remote 返回 `REMOTE_UNSUPPORTED`。
+5. 调用方丢弃首次 Input receipt 后，新 Client 用同一 owner instance、operation id、expected byte 和 data 恢复精确 range，PTY 只收到一次；
+6. Resize 由真实 PTY 回读为 `101x37`；
+7. Interrupt 被进程观察且进程继续 running；
+8. 忽略 HUP/TERM 的 root/child process tree 被 Stop 完整清除；
+9. Remote 返回 `REMOTE_UNSUPPORTED`。
 
 旧自建 daemon client/server/protocol/session manager/journal、Local activator、POSIX process cleanup、Remote artifact/connector、`agentmuxd` bin 与 `node-pty` dependency 已删除。Desktop package 改为携带并检查相同 CtxMux artifacts。
 
