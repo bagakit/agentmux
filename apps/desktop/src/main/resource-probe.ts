@@ -8,6 +8,7 @@ const MAX_TERMINAL_INCREMENT_KIB = 256 * 1024
 const MAX_EDITOR_INCREMENT_KIB = 512 * 1024
 const MAX_BROWSER_INCREMENT_KIB = 256 * 1024
 const MAX_BROWSER_RELEASED_INCREMENT_KIB = 256 * 1024
+const MAX_RELEASED_INCREMENT_KIB = MAX_EDITOR_INCREMENT_KIB
 const MAX_RELEASED_TOTAL_KIB = 1024 * 1024
 const MAX_RELEASE_DRIFT_KIB = 128 * 1024
 const RELEASE_CYCLES = 5
@@ -21,6 +22,11 @@ type ResourceSample = {
     documents: number
     fileWatchers: number
     runtimeSubscriptions: number
+    terminalViews: number
+    terminalAddons: number
+    terminalListeners: number
+    sessionAttachmentOwners: number
+    sessionAttachmentLeases: number
   }
   processes: Array<{
     pid: number
@@ -30,17 +36,29 @@ type ResourceSample = {
   }>
 }
 
-async function ownerCounts(window: BrowserWindow): Promise<ResourceSample['owners']> {
+async function ownerCounts(
+  window: BrowserWindow,
+  runtime: RuntimeController
+): Promise<ResourceSample['owners']> {
   const renderer = await window.webContents.executeJavaScript(`(() => {
     const event = new CustomEvent('agentmux:resource-owner-counts', { detail: { observed: false } })
     window.dispatchEvent(event)
     if (!event.detail.observed) throw new Error('Renderer resource owner observer is not installed')
     const { observed: _observed, ...owners } = event.detail
     return owners
-  })()`) as { monacoModels: number; documents: number; fileWatchers: number; runtimeSubscriptions: number }
+  })()`) as {
+    monacoModels: number
+    documents: number
+    fileWatchers: number
+    runtimeSubscriptions: number
+    terminalViews: number
+    terminalAddons: number
+    terminalListeners: number
+  }
   const owners = {
     browserWebContents: webContents.getAllWebContents().filter((item) => item !== window.webContents).length,
-    ...renderer
+    ...renderer,
+    ...runtime.resourceOwnerCounts()
   }
   for (const [name, value] of Object.entries(owners)) {
     if (!Number.isInteger(value) || value < 0) {
@@ -67,7 +85,11 @@ async function waitFor(
   throw new Error(`Timed out waiting for ${description}.`)
 }
 
-async function sample(label: string, window: BrowserWindow): Promise<ResourceSample> {
+async function sample(
+  label: string,
+  window: BrowserWindow,
+  runtime: RuntimeController
+): Promise<ResourceSample> {
   await delay(500)
   const snapshots = []
   for (let index = 0; index < 5; index += 1) {
@@ -93,7 +115,7 @@ async function sample(label: string, window: BrowserWindow): Promise<ResourceSam
   return {
     label,
     totalWorkingSetKiB: processes.reduce((sum, process) => sum + process.workingSetKiB, 0),
-    owners: await ownerCounts(window),
+    owners: await ownerCounts(window, runtime),
     processes
   }
 }
@@ -104,11 +126,13 @@ async function rendererBoolean(window: BrowserWindow, source: string): Promise<b
 
 async function click(window: BrowserWindow, source: string): Promise<void> {
   const clicked = await window.webContents.executeJavaScript(`(() => { const target = ${source}; target?.click(); return Boolean(target) })()`)
-  if (!clicked) throw new Error('Desktop resource probe could not find the requested UI control.')
+  if (!clicked) throw new Error(`Desktop resource probe could not find UI control: ${source}`)
 }
 
 function newTerminal(before: ReadonlySet<string>, sessions: readonly SessionSnapshot[]): SessionSnapshot | null {
-  return sessions.find((session) => session.kind === 'terminal' && !before.has(session.id)) ?? null
+  return sessions.find((session) => (
+    session.kind === 'terminal' && session.processState === 'running' && !before.has(session.id)
+  )) ?? null
 }
 
 export async function runDesktopResourceProbe(options: {
@@ -148,7 +172,21 @@ export async function runDesktopResourceProbe(options: {
       throw new Error('Desktop startup timeline is not monotonic.')
     }
     const before = new Set((await options.runtime.snapshot(config)).sessions.map((session) => session.id))
-    const idle = await sample('idle-desktop', options.window)
+    const idle = await sample('idle-desktop', options.window, options.runtime)
+    if (JSON.stringify(idle.owners) !== JSON.stringify({
+      browserWebContents: 0,
+      monacoModels: 0,
+      documents: 0,
+      fileWatchers: 0,
+      runtimeSubscriptions: 3,
+      terminalViews: 0,
+      terminalAddons: 0,
+      terminalListeners: 0,
+      sessionAttachmentOwners: 0,
+      sessionAttachmentLeases: 0
+    })) {
+      throw new Error(`Desktop idle owners are not clean: ${JSON.stringify(idle.owners)}`)
+    }
 
     await click(
       options.window,
@@ -162,12 +200,19 @@ export async function runDesktopResourceProbe(options: {
     if (!terminal) throw new Error('Desktop resource probe lost the created Terminal session.')
     terminalControl = terminal.control
     const source = "process.stdout.write('t'.repeat(300000))"
-    await options.runtime.write(terminalControl, `${JSON.stringify(process.execPath)} -e ${JSON.stringify(source)}\n`)
+    const terminalCommand = `ELECTRON_RUN_AS_NODE=1 ${JSON.stringify(process.execPath)} -e ${JSON.stringify(source)}\r`
+    await options.runtime.write(terminalControl, terminalCommand)
     await waitFor('bounded Terminal output', async () => {
       const current = newTerminal(before, (await options.runtime.snapshot(config)).sessions)
       return (current?.latestOutputBytes ?? 0) >= 300_000
     })
-    const terminalSample = await sample('xterm-300kb-output', options.window)
+    const terminalSample = await sample('xterm-300kb-output', options.window, options.runtime)
+    if (
+      terminalSample.owners.sessionAttachmentOwners !== 1 ||
+      terminalSample.owners.sessionAttachmentLeases !== 1
+    ) {
+      throw new Error(`Desktop Terminal did not retain exactly one Main-owned Attachment lease: ${JSON.stringify(terminalSample.owners)}`)
+    }
 
     await waitFor('resource probe file row', async () => await rendererBoolean(
       options.window,
@@ -175,14 +220,18 @@ export async function runDesktopResourceProbe(options: {
     ))
     await click(options.window, "document.querySelector('[data-tree-path=\"resource-probe.ts\"]')")
     await waitFor('Monaco editor', async () => await rendererBoolean(options.window, "document.querySelector('.monaco-editor')"))
-    const editorSample = await sample('monaco-editor', options.window)
+    const editorSample = await sample('monaco-editor', options.window, options.runtime)
 
     await click(options.window, "document.querySelector('[aria-label=\"Close resource-probe.ts\"]')")
     await waitFor('Monaco disposal', async () => !await rendererBoolean(options.window, "document.querySelector('.monaco-editor')"))
     await options.runtime.stopSession(terminalControl)
     terminalControl = null
     await waitFor('Terminal release', async () => newTerminal(before, (await options.runtime.snapshot(config)).sessions) === null)
-    const released = await sample('released-panes', options.window)
+    await waitFor('New Tab launcher after Terminal release', async () => await rendererBoolean(
+      options.window,
+      "[...document.querySelectorAll('.new-tab-grid button')].some((button) => button.textContent?.includes('Terminal'))"
+    ))
+    const released = await sample('released-panes', options.window, options.runtime)
     const releaseCycles = [released]
     for (let cycle = 1; cycle < RELEASE_CYCLES; cycle += 1) {
       await waitFor(`cycle ${cycle} New Tab launcher`, async () => await rendererBoolean(
@@ -200,7 +249,7 @@ export async function runDesktopResourceProbe(options: {
       const current = newTerminal(before, (await options.runtime.snapshot(config)).sessions)
       if (!current) throw new Error(`Desktop resource probe lost Terminal cycle ${cycle}.`)
       terminalControl = current.control
-      await options.runtime.write(terminalControl, `${JSON.stringify(process.execPath)} -e ${JSON.stringify(source)}\n`)
+      await options.runtime.write(terminalControl, terminalCommand)
       await waitFor(`cycle ${cycle} bounded Terminal output`, async () => (
         (newTerminal(before, (await options.runtime.snapshot(config)).sessions)?.latestOutputBytes ?? 0) >= 300_000
       ))
@@ -219,7 +268,11 @@ export async function runDesktopResourceProbe(options: {
       await waitFor(`cycle ${cycle} Terminal release`, async () => (
         newTerminal(before, (await options.runtime.snapshot(config)).sessions) === null
       ))
-      releaseCycles.push(await sample(`released-panes-${cycle + 1}`, options.window))
+      await waitFor(`cycle ${cycle} New Tab launcher after Terminal release`, async () => await rendererBoolean(
+        options.window,
+        "[...document.querySelectorAll('.new-tab-grid button')].some((button) => button.textContent?.includes('Terminal'))"
+      ))
+      releaseCycles.push(await sample(`released-panes-${cycle + 1}`, options.window, options.runtime))
     }
     await waitFor('New Tab launcher before Browser', async () => await rendererBoolean(
       options.window,
@@ -231,17 +284,18 @@ export async function runDesktopResourceProbe(options: {
       "[...document.querySelectorAll('.new-tab-grid button')].find((button) => button.textContent?.includes('Browser'))"
     )
     await waitFor('Main-owned Browser WebContents', async () => (
-      (await ownerCounts(options.window)).browserWebContents === browserOwnerBefore + 1
+      (await ownerCounts(options.window, options.runtime)).browserWebContents === browserOwnerBefore + 1
     ))
-    const browser = await sample('browser-about-blank', options.window)
+    const browser = await sample('browser-about-blank', options.window, options.runtime)
     await click(options.window, "document.querySelector('[aria-label=\"Close New Tab\"]')")
     await waitFor('Browser WebContents release', async () => (
-      (await ownerCounts(options.window)).browserWebContents === browserOwnerBefore
+      (await ownerCounts(options.window, options.runtime)).browserWebContents === browserOwnerBefore
     ))
-    const browserReleased = await sample('browser-released', options.window)
+    const browserReleased = await sample('browser-released', options.window, options.runtime)
     const releaseDriftKiB = Math.max(...releaseCycles.map((entry) => entry.totalWorkingSetKiB)) -
       releaseCycles[0]!.totalWorkingSetKiB
     const report = {
+      schema: 'agentmux.t017-desktop-resources.v1',
       measuredAt: new Date().toISOString(),
       platform: `${process.platform}-${process.arch}`,
       node: process.version,
@@ -259,6 +313,7 @@ export async function runDesktopResourceProbe(options: {
         maxEditorIncrementKiB: MAX_EDITOR_INCREMENT_KIB,
         maxBrowserIncrementKiB: MAX_BROWSER_INCREMENT_KIB,
         maxBrowserReleasedIncrementKiB: MAX_BROWSER_RELEASED_INCREMENT_KIB,
+        maxReleasedIncrementKiB: MAX_RELEASED_INCREMENT_KIB,
         maxReleasedTotalKiB: MAX_RELEASED_TOTAL_KIB,
         maxReleaseDriftKiB: MAX_RELEASE_DRIFT_KIB,
         releaseCycles: RELEASE_CYCLES
@@ -297,14 +352,22 @@ export async function runDesktopResourceProbe(options: {
     }
     for (const phase of [released, ...releaseCycles, browserReleased]) {
       if (
-        phase.owners.monacoModels !== 0 ||
-        phase.owners.documents !== 0 ||
-        phase.owners.fileWatchers !== 0 ||
-        phase.owners.browserWebContents !== 0 ||
-        phase.owners.runtimeSubscriptions !== 2
+        phase.owners.monacoModels !== idle.owners.monacoModels ||
+        phase.owners.documents !== idle.owners.documents ||
+        phase.owners.fileWatchers !== idle.owners.fileWatchers ||
+        phase.owners.browserWebContents !== idle.owners.browserWebContents ||
+        phase.owners.runtimeSubscriptions !== idle.owners.runtimeSubscriptions ||
+        phase.owners.terminalViews !== idle.owners.terminalViews ||
+        phase.owners.terminalAddons !== idle.owners.terminalAddons ||
+        phase.owners.terminalListeners !== idle.owners.terminalListeners ||
+        phase.owners.sessionAttachmentOwners !== idle.owners.sessionAttachmentOwners ||
+        phase.owners.sessionAttachmentLeases !== idle.owners.sessionAttachmentLeases
       ) {
         throw new Error(`Desktop resource owners did not converge at ${phase.label}.`)
       }
+    }
+    if (report.deltas.releasedWorkingSetKiB > MAX_RELEASED_INCREMENT_KIB) {
+      throw new Error('Released Desktop resources exceeded their working-set budget.')
     }
     if (released.totalWorkingSetKiB > MAX_RELEASED_TOTAL_KIB) {
       throw new Error('Released Desktop process group exceeded its working-set budget.')
@@ -316,6 +379,7 @@ export async function runDesktopResourceProbe(options: {
     if (terminalControl) await options.runtime.stopSession(terminalControl).catch(() => {})
     await writeFile(reportPath, `${JSON.stringify({
       ...reportEvidence,
+      schema: 'agentmux.t017-desktop-resources.v1',
       measuredAt: new Date().toISOString(),
       error: error instanceof Error ? error.message : String(error)
     }, null, 2)}\n`, { mode: 0o600 })

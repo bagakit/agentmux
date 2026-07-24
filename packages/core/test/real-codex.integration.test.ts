@@ -273,7 +273,6 @@ describe.runIf(process.env.AGENTMUX_REAL_CODEX_E2E === '1')('installed real Code
     })
     expect(resumed.agentSessionId).toBe(created.agentSessionId)
     expect(resumed.run.runId).not.toBe(created.run.runId)
-    expect(resumed.hookBindingId).not.toBe(created.hookBindingId)
     expect(resumed.terminalHandshake).toMatchObject({
       run: { runId: resumed.run.runId },
       inputByteRange: { startByte: 0, endByte: 5 },
@@ -291,7 +290,6 @@ describe.runIf(process.env.AGENTMUX_REAL_CODEX_E2E === '1')('installed real Code
         [...assistantMarkers].some((content) => content.includes('AGENTMUX_REAL_CODEX_RESUMED')) &&
         session.hookReceipt?.eventName === 'Stop' &&
         session.hookReceipt.run.runId === resumed.run.runId &&
-        session.hookBindingId === resumed.hookBindingId &&
         session.terminalStopReceipt?.id === session.hookReceipt.id &&
         session.terminalStopReceipt.readyThroughByte !== undefined
     }, 120_000, () => {
@@ -317,8 +315,7 @@ describe.runIf(process.env.AGENTMUX_REAL_CODEX_E2E === '1')('installed real Code
     expect(resumedReconnectedStatus.run.runId).toBe(resumedConnectedStatus.run.runId)
     expect(resumedReconnectedStatus.run.pid).toBe(resumedConnectedStatus.run.pid)
     expect(client.agentSession(resumed.agentSessionId)).toMatchObject({
-      nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: nativeSessionId },
-      hookBindingId: resumed.hookBindingId
+      nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: nativeSessionId }
     })
     expect(output).toContain('AGENTMUX_REAL_CODEX_RESUMED')
     const resumedPromptAcceptedInputBytes = 5

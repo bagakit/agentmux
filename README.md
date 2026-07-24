@@ -21,9 +21,9 @@ Desktop / CLI / external Node client
 
 ## 当前实现状态
 
-2026-08-14 的 T-020 Local implementation candidate 已完成 Run 层与 Codex 代表纵切；Tracker 完成仍等待独立复核：
+2026-08-17 的 T-020 Local implementation candidate 已完成 Run 层与 Codex 代表纵切；T-017 正在对同一候选做 Package、安全、可靠性与资源收口：
 
-- 固定 CtxMux clean commit `3b94288c3a7896bb355e028135409c8e8bbaf764`、protocol 9；
+- 固定 CtxMux clean commit `2e32a9d647d627952ea5c455fb2efef6c636643a`、protocol 9；
 - `packages/core/vendor/ctxmux/darwin-arm64` 携带其 manifest、SDK tarball、`ctxmux` 与 `ctxmuxd`；
 - Core 构建时从固定 tarball 私有打包 SDK，不暴露 CtxMux 类型，不使用 `file:` 依赖、相邻 checkout、全局安装或下载；
 - Local endpoint 由 exact artifact identity 隔离，调用方不能插入另一个同协议 daemon；
@@ -93,6 +93,8 @@ await client.dispose()
 ```
 
 `dispose()` 只释放当前 Client/Attachment；Run 由 `ctxmuxd` 持有，另一个 Client 可用相同 `runId` 和 byte cursor 重连。
+
+`client.onEvent` 是同步观察接口。需要异步处理时，callback 必须先把事件复制到 Consumer 自己的有界队列再返回；返回 Promise 的 callback 会在首个事件后自动退订。需要完整终端字节流时使用独立 Attachment/Replay，不把通用事件观察器当作无界消息队列。
 
 ## 验证
 

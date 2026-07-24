@@ -22,6 +22,19 @@ assert.ok(
   controlFixture && stubbornFixture && fakeCodex && agentmuxCli &&
   lifecycleCrashFixture && promptCrashFixture
 )
+
+const ownedChildren = new Set()
+function spawnOwned(...args) {
+  const child = spawn(...args)
+  ownedChildren.add(child)
+  child.once('exit', () => ownedChildren.delete(child))
+  return child
+}
+process.once('exit', () => {
+  for (const child of ownedChildren) {
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+  }
+})
 assert.deepEqual(
   resolveAgentMuxViewFocus(
     [{ viewId: 'packed-agent-view', kind: 'agent', agentSessionId: 'packed-agent' }],
@@ -58,13 +71,28 @@ async function processIsGone(pid) {
 }
 
 async function firstJsonLine(child) {
-  let buffer = ''
-  for await (const chunk of child.stdout) {
-    buffer += chunk.toString('utf8')
-    const newline = buffer.indexOf('\n')
-    if (newline >= 0) return JSON.parse(buffer.slice(0, newline))
+  let timer
+  try {
+    return await Promise.race([
+      (async () => {
+        let buffer = ''
+        for await (const chunk of child.stdout) {
+          buffer += chunk.toString('utf8')
+          const newline = buffer.indexOf('\n')
+          if (newline >= 0) return JSON.parse(buffer.slice(0, newline))
+        }
+        throw new Error('Child exited before reporting its lifecycle checkpoint.')
+      })(),
+      new Promise((_resolve, reject) => {
+        timer = setTimeout(() => {
+          if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+          reject(new Error('Timed out waiting for child lifecycle checkpoint.'))
+        }, 5_000)
+      })
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
   }
-  throw new Error('Child exited before reporting its lifecycle checkpoint.')
 }
 
 let first = await connectLocalAgentMux()
@@ -181,6 +209,19 @@ const cli = async (args) => await execFileAsync(agentmuxCli, args, {
   timeout: 15_000,
   maxBuffer: 4 * 1024 * 1024
 })
+const doctor = JSON.parse((await cli(['doctor', '--json'])).stdout)
+assert.equal(doctor.ok, true)
+assert.equal(doctor.hosts.local.status, 'available')
+assert.equal(doctor.hosts.remote.status, 'unsupported')
+assert.deepEqual(doctor.runtime.ctxmux.capabilities, {
+  transport: 'local-unix',
+  orderedOutputBytes: true,
+  boundedReplay: true,
+  recoverableInput: true,
+  resize: true,
+  interrupt: true,
+  completeStop: true
+})
 let codexFirst = await connectLocalAgentMux()
 const codexFirstEvents = []
 codexFirst.onEvent((event) => codexFirstEvents.push(event))
@@ -193,6 +234,14 @@ const codex = await codexFirst.createAgent({
   commandOverride: fakeCodex,
   env: { AGENTMUX_FAKE_PROMPT_RENDER_MODE: 'historical-match' }
 })
+assert.equal('hookBindingId' in codex, false)
+assert.equal('hookToken' in codex, false)
+assert.equal('hookBindingId' in codexFirst.agentSessions()[0], false)
+assert.equal('hookToken' in codexFirst.agentSessions()[0], false)
+const codexView = (await codexFirst.workspaceView()).views.find((view) => view.kind === 'agent')
+assert.ok(codexView)
+assert.equal('hookBindingId' in codexView.agentSession, false)
+assert.equal('hookToken' in codexView.agentSession, false)
 assert.deepEqual(codex.terminalHandshake, {
   run: { runId: codex.run.runId },
   operationId: codex.terminalHandshake?.operationId,
@@ -550,7 +599,7 @@ await concurrentContender.dispose()
 await concurrentOwner.stopAgent(concurrent.agentSessionId)
 await concurrentOwner.dispose()
 
-const promptCrashWorker = spawn(process.execPath, [promptCrashFixture], {
+const promptCrashWorker = spawnOwned(process.execPath, [promptCrashFixture], {
   cwd: process.cwd(),
   stdio: ['ignore', 'pipe', 'pipe'],
   env: { ...process.env, AGENTMUX_FAKE_CODEX: fakeCodex }
@@ -612,6 +661,7 @@ const acpSession = {
   run: { runId: 'acp-synthetic-run' },
   retiredRuns: [],
   hookBindingId: 'acp-synthetic-binding',
+  hookToken: 'acp-synthetic-token',
   outputCursorBytes: 0,
   createdAt: Date.now(),
   updatedAt: Date.now(),
@@ -624,7 +674,7 @@ const resolvedAcp = JSON.parse((await cli([
 assert.equal(resolvedAcp.agentSessionId, acpSession.agentSessionId)
 await acpStore.compareAndSwap(acpSession, null)
 
-const crashWorker = spawn(process.execPath, [lifecycleCrashFixture], {
+const crashWorker = spawnOwned(process.execPath, [lifecycleCrashFixture], {
   cwd: process.cwd(),
   stdio: ['ignore', 'pipe', 'pipe'],
   env: { ...process.env, AGENTMUX_FAKE_CODEX: fakeCodex }
@@ -656,6 +706,12 @@ await assert.rejects(
   connectSshAgentMux({ target: { hostId: 'remote', hostname: 'example.invalid' } }),
   (error) => error?.code === 'REMOTE_UNSUPPORTED'
 )
+const cleanupSentinel = await third.createTerminal({
+  workspacePath: process.cwd(),
+  command: process.execPath,
+  args: ['-e', 'setInterval(() => {}, 1_000)']
+})
+assert.ok(cleanupSentinel.pid)
 await third.dispose()
 
 process.stdout.write(`${JSON.stringify({
@@ -680,9 +736,11 @@ process.stdout.write(`${JSON.stringify({
     'crash-recovered-once'
   ],
   promptCrashRecovery: true,
+  doctor: true,
   cliResolveKinds: ['agent-session', 'provider-native', 'acp-native', 'run'],
   externalSwitch: true,
   naturalTerminalStop: true,
   crashRecovery: true,
+  cleanupSentinelPid: cleanupSentinel.pid,
   remote: 'unsupported'
 })}\n`)

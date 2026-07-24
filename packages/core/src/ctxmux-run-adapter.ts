@@ -31,6 +31,7 @@ const CTXMUX_MANIFEST_SHA256 = '15c0f54980ac339251017293cf4a21c94e2fb923d22cc399
 const DAEMON_READY_TIMEOUT_MS = 5_000
 const DAEMON_POLL_INTERVAL_MS = 20
 const DAEMON_READINESS_MAX_BYTES = 8 * 1024
+const DAEMON_SHUTDOWN_TIMEOUT_MS = 2_000
 const execFileAsync = promisify(execFile)
 
 type ArtifactDescriptor = {
@@ -220,6 +221,37 @@ function readDaemonReadiness(child: ChildProcess, stream: Readable): Promise<str
       'CTXMUX_UNAVAILABLE'
     )))
   })
+}
+
+function waitForChildExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
+  if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) {
+    return Promise.resolve(true)
+  }
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (exited: boolean): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      child.off('exit', onExit)
+      resolve(exited)
+    }
+    const onExit = (): void => finish(true)
+    const timer = setTimeout(() => finish(false), timeoutMs)
+    child.once('exit', onExit)
+  })
+}
+
+async function terminateSpawnedDaemon(child: ChildProcess): Promise<void> {
+  if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return
+  child.kill('SIGTERM')
+  if (await waitForChildExit(child, DAEMON_SHUTDOWN_TIMEOUT_MS)) return
+  if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+  if (await waitForChildExit(child, DAEMON_SHUTDOWN_TIMEOUT_MS)) return
+  throw new AgentMuxError(
+    `The spawned CtxMux daemon ${child.pid} did not terminate during failed activation cleanup.`,
+    'CTXMUX_OWNER_IDENTITY_UNPROVEN'
+  )
 }
 
 function ownerReceiptPath(): string {
@@ -489,16 +521,15 @@ export class CtxmuxRunAdapter {
         stdio: ['ignore', 'ignore', 'ignore', 'pipe'],
         env: daemonEnvironment()
       })
-      const readinessStream = child.stdio[3] as Readable | null
-      if (!readinessStream) {
-        child.kill('SIGTERM')
-        throw new AgentMuxError(
-          'The CtxMux daemon readiness channel was not created.',
-          'CTXMUX_OWNER_IDENTITY_UNPROVEN'
-        )
-      }
       child.unref()
       try {
+        const readinessStream = child.stdio[3] as Readable | null
+        if (!readinessStream) {
+          throw new AgentMuxError(
+            'The CtxMux daemon readiness channel was not created.',
+            'CTXMUX_OWNER_IDENTITY_UNPROVEN'
+          )
+        }
         const spawnedDaemonInstanceId = await readDaemonReadiness(child, readinessStream)
         const deadline = Date.now() + DAEMON_READY_TIMEOUT_MS
         let lastError: unknown = null
@@ -528,16 +559,23 @@ export class CtxmuxRunAdapter {
           }
         }
         if (lastError !== null || daemonInstanceId === null) throw lastError
+        await writeOwnerReceipt(
+          artifacts,
+          this.socketPath,
+          this.stateDirectory,
+          daemonInstanceId
+        )
       } catch (error) {
-        if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM')
+        try {
+          await terminateSpawnedDaemon(child)
+        } catch (cleanupError) {
+          throw new AgentMuxError(
+            `CtxMux activation failed and its exact spawned daemon could not be cleaned up: ${error instanceof Error ? error.message : String(error)}; cleanup: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
+            'CTXMUX_OWNER_IDENTITY_UNPROVEN'
+          )
+        }
         throw error
       }
-      await writeOwnerReceipt(
-        artifacts,
-        this.socketPath,
-        this.stateDirectory,
-        daemonInstanceId as string
-      )
     }
     if (daemonInstanceId === null) {
       throw new AgentMuxError('CtxMux did not report its daemon instance.', 'CTXMUX_OWNER_IDENTITY_UNPROVEN')
@@ -658,7 +696,26 @@ export class CtxmuxRunAdapter {
     } catch (error) {
       throw translateCtxmuxError(error)
     } finally {
-      if (attachment) await attachment.detach()
+      if (attachment) {
+        if (attachment.snapshot.run.state.type !== 'running') {
+          // Historical Runs may close the wire immediately after their
+          // terminal event, so there is no live View left to acknowledge.
+          attachment.close()
+        } else {
+          try {
+            await attachment.detach()
+          } catch (error) {
+            attachment.close()
+            let current: RunInfo
+            try {
+              current = await this.requireClient().status(runId)
+            } catch {
+              throw translateCtxmuxError(error)
+            }
+            if (current.state.type === 'running') throw translateCtxmuxError(error)
+          }
+        }
+      }
     }
   }
 
@@ -731,6 +788,7 @@ export class CtxmuxRunAdapter {
     try {
       await live.attachment.detach()
     } catch (error) {
+      live.attachment.close()
       throw translateCtxmuxError(error)
     }
   }

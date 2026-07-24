@@ -41,9 +41,11 @@ export type AgentMuxLifecycleClaim = {
 export type AgentMuxAgentSessionStore = {
   load(): Promise<readonly unknown[]>
   loadRetiredRuns(): Promise<readonly AgentMuxRunRef[]>
+  /** Abort must cancel queued or active persistence without a late commit. */
   compareAndSwap(
     expected: AgentMuxStoredAgentSession | null,
-    next: AgentMuxStoredAgentSession | null
+    next: AgentMuxStoredAgentSession | null,
+    signal?: AbortSignal
   ): Promise<void>
   reserveLifecycle(reservation: AgentMuxLifecycleReservation): Promise<void>
   claimStaleLifecycles(claim: AgentMuxLifecycleClaim): Promise<AgentMuxLifecycleReservation[]>
@@ -386,6 +388,7 @@ export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgent
     run: currentRun,
     retiredRuns: retiredRuns(source.retiredRuns, currentRun),
     hookBindingId: string(source.hookBindingId, 'hookBindingId'),
+    hookToken: string(source.hookToken, 'hookToken'),
     outputCursorBytes: timestamp(source.outputCursorBytes, 'outputCursorBytes'),
     createdAt: timestamp(source.createdAt, 'createdAt'),
     updatedAt: timestamp(source.updatedAt, 'updatedAt'),
@@ -595,8 +598,10 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
 
   async compareAndSwap(
     expected: AgentMuxStoredAgentSession | null,
-    next: AgentMuxStoredAgentSession | null
+    next: AgentMuxStoredAgentSession | null,
+    signal?: AbortSignal
   ): Promise<void> {
+    signal?.throwIfAborted()
     const agentSessionId = expected?.agentSessionId ?? next?.agentSessionId
     if (!agentSessionId || (expected && next && expected.agentSessionId !== next.agentSessionId)) {
       throw new AgentMuxError('Agent Session CAS identity is invalid.', 'INVALID_AGENT_SESSION_STORE')
@@ -704,8 +709,19 @@ type AgentSessionStoreDocument = {
   retiredRuns: AgentMuxRunRef[]
 }
 
-function delay(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds))
+function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted()
+  return new Promise((resolve, reject) => {
+    const abort = (): void => {
+      clearTimeout(timer)
+      reject(signal?.reason)
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', abort)
+      resolve()
+    }, milliseconds)
+    signal?.addEventListener('abort', abort, { once: true })
+  })
 }
 
 export function defaultAgentMuxAgentSessionStorePath(): string {
@@ -729,14 +745,16 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
 
   async compareAndSwap(
     expected: AgentMuxStoredAgentSession | null,
-    next: AgentMuxStoredAgentSession | null
+    next: AgentMuxStoredAgentSession | null,
+    signal?: AbortSignal
   ): Promise<void> {
     await this.enqueue(async () => {
+      signal?.throwIfAborted()
       const agentSessionId = expected?.agentSessionId ?? next?.agentSessionId
       if (!agentSessionId || (expected && next && expected.agentSessionId !== next.agentSessionId)) {
         throw new AgentMuxError('Agent Session CAS identity is invalid.', 'INVALID_AGENT_SESSION_STORE')
       }
-      const document = await this.read()
+      const document = await this.read(signal)
       const sessions = new Map(document.sessions.map((item) => [item.agentSessionId, item]))
       const current = sessions.get(agentSessionId) ?? null
       if (!sameSession(current, expected)) {
@@ -753,8 +771,8 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       else sessions.delete(agentSessionId)
       const normalized = normalizeAgentSessions([...sessions.values()])
       assertUnboundRetiredRuns(normalized, document.retiredRuns)
-      await this.write({ ...document, sessions: normalized })
-    })
+      await this.write({ ...document, sessions: normalized }, signal)
+    }, signal)
   }
 
   async reserveLifecycle(value: AgentMuxLifecycleReservation): Promise<void> {
@@ -871,13 +889,14 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     })
   }
 
-  private async read(): Promise<AgentSessionStoreDocument> {
+  private async read(signal?: AbortSignal): Promise<AgentSessionStoreDocument> {
     try {
+      signal?.throwIfAborted()
       const metadata = await stat(this.path)
       if (!metadata.isFile() || metadata.size > MAX_STORE_BYTES) {
         throw new AgentMuxError('Agent Session store is invalid.', 'INVALID_AGENT_SESSION_STORE')
       }
-      const value: unknown = JSON.parse(await readFile(this.path, 'utf8'))
+      const value: unknown = JSON.parse(await readFile(this.path, { encoding: 'utf8', signal }))
       if (!value || typeof value !== 'object' || Array.isArray(value)) {
         throw new AgentMuxError('Agent Session store is invalid.', 'INVALID_AGENT_SESSION_STORE')
       }
@@ -912,7 +931,8 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     }
   }
 
-  private async write(document: AgentSessionStoreDocument): Promise<void> {
+  private async write(document: AgentSessionStoreDocument, signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted()
     const content = `${JSON.stringify(document, null, 2)}\n`
     if (Buffer.byteLength(content) > MAX_STORE_BYTES) {
       throw new AgentMuxError('Agent Session store exceeds its size limit.', 'AGENT_SESSION_STORE_LIMIT')
@@ -920,7 +940,8 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     await mkdir(dirname(this.path), { recursive: true, mode: 0o700 })
     const temporaryPath = `${this.path}.${process.pid}.${randomUUID()}.tmp`
     try {
-      await writeFile(temporaryPath, content, { mode: 0o600, flag: 'wx' })
+      await writeFile(temporaryPath, content, { mode: 0o600, flag: 'wx', signal })
+      signal?.throwIfAborted()
       await rename(temporaryPath, this.path)
       await chmod(this.path, 0o600)
     } finally {
@@ -930,9 +951,10 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     }
   }
 
-  private async enqueue(operation: () => Promise<void>): Promise<void> {
+  private async enqueue(operation: () => Promise<void>, signal?: AbortSignal): Promise<void> {
     const current = this.tail.catch(() => {}).then(async () => {
-      const release = await this.acquireLock()
+      signal?.throwIfAborted()
+      const release = await this.acquireLock(signal)
       try {
         await operation()
       } finally {
@@ -943,10 +965,11 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     await current
   }
 
-  private async acquireLock(): Promise<() => Promise<void>> {
+  private async acquireLock(signal?: AbortSignal): Promise<() => Promise<void>> {
     const path = `${this.path}.lock`
     await mkdir(dirname(path), { recursive: true, mode: 0o700 })
     for (let attempt = 0; attempt < LOCK_ATTEMPTS; attempt += 1) {
+      signal?.throwIfAborted()
       try {
         const handle = await open(path, 'wx', 0o600)
         await handle.writeFile(`${process.pid}\n`, 'utf8')
@@ -959,7 +982,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
         await this.removeDeadOwnerLock(path)
-        await delay(LOCK_RETRY_MS)
+        await delay(LOCK_RETRY_MS, signal)
       }
     }
     throw new AgentMuxError('Agent Session store is busy.', 'AGENT_SESSION_STORE_BUSY')

@@ -5,7 +5,7 @@ import { connectLocalAgentMux } from './runtime-client.js'
 import { diagnoseAgentMux, type AgentMuxDoctorReport } from './doctor.js'
 import { requestAgentMuxDesktopFocus } from './desktop-focus-control.js'
 import { AgentMuxError } from './errors.js'
-import type { AgentMuxClient, AgentMuxAgentRuntimeStatus } from './client.js'
+import { AgentMuxClient, type AgentMuxAgentRuntimeStatus } from './client.js'
 import type { AgentMuxAgentSessionLookup } from './agent-session-registry.js'
 import type { AgentMuxViewFocusTarget } from './runtime.js'
 import type { AgentMuxAgentSession } from './types.js'
@@ -137,15 +137,26 @@ function printDoctor(report: AgentMuxDoctorReport): void {
   } else {
     process.stdout.write(`Host: unavailable · ${report.host.error}\n`)
   }
+  if (report.host.action) process.stdout.write(`Host action: ${report.host.action}\n`)
   if (report.runtime) {
     process.stdout.write(
       `CtxMux: ${report.runtime.ctxmux.version} · ${report.runtime.ctxmux.artifactPlatform} · ${report.runtime.ctxmux.ready ? 'ready' : 'invalid'}\n`
     )
+    const capabilities = report.runtime.ctxmux.capabilities
+    process.stdout.write(
+      `CtxMux capabilities: ${capabilities.transport} · ordered bytes · bounded replay · recoverable input · resize · interrupt · complete stop\n`
+    )
   }
+  process.stdout.write(
+    `Hosts: Local ${report.hosts.local.status} · Remote ${report.hosts.remote.status}\n`
+  )
+  if (report.hosts.local.action) process.stdout.write(`Local action: ${report.hosts.local.action}\n`)
+  process.stdout.write(`Remote action: ${report.hosts.remote.action}\n`)
   for (const agent of report.agents) {
     process.stdout.write(
-      `${agent.probe === 'found' ? 'OK' : agent.probe === 'missing' ? 'WARN' : 'BLOCKED'} ${agent.label} (${agent.executable})\n`
+      `${agent.probe === 'found' ? 'OK' : agent.probe === 'missing' ? 'WARN' : 'BLOCKED'} ${agent.label} (${agent.executable}) · Hook ${agent.hook.kind} · ACP ${agent.acp.kind} · Permission ${agent.permission}\n`
     )
+    if (agent.action) process.stdout.write(`  Action: ${agent.action}\n`)
   }
   if (report.runtimeAction) process.stdout.write(`Action: ${report.runtimeAction}\n`)
 }
@@ -173,12 +184,15 @@ async function withClient<T>(operation: (client: AgentMuxClient) => Promise<T>):
 
 async function doctor(args: readonly string[]): Promise<number> {
   const flags = parseFlags(args, new Set(['--json']), new Set())
-  return await withClient(async (client) => {
-    const report = await diagnoseAgentMux({ client, hostKind: 'local' })
+  const client = new AgentMuxClient()
+  try {
+    const report = await diagnoseAgentMux({ client })
     if (flags.booleans.has('--json')) printJson(report)
     else printDoctor(report)
     return report.ok ? 0 : 1
-  })
+  } finally {
+    await client.dispose()
+  }
 }
 
 async function list(args: readonly string[]): Promise<number> {

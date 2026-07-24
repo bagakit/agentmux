@@ -13,6 +13,7 @@ function session(run = 'run-1'): AgentMuxStoredAgentSession {
     run: { runId: run },
     retiredRuns: [],
     hookBindingId: 'hook-binding-1',
+    hookToken: 'hook-token-1',
     outputCursorBytes: 0,
     createdAt: 100,
     updatedAt: 100
@@ -89,5 +90,72 @@ describe('semantic session registry concurrency', () => {
     await expect(staleUpdate).rejects.toMatchObject({ code: 'STALE_AGENT_SESSION' })
     expect(registry.get('semantic-1')).toEqual(resumed)
     expect(await memory.load()).toEqual([resumed])
+  })
+
+  it('cancels only the queued Hook write without aborting its active predecessor', async () => {
+    const memory = new AgentMuxMemoryAgentSessionStore()
+    let block = false
+    let blocked!: () => void
+    const entered = new Promise<void>((resolve) => { blocked = resolve })
+    let releaseActive!: () => void
+    const released = new Promise<void>((resolve) => { releaseActive = resolve })
+    let compareCalls = 0
+    const store: AgentMuxAgentSessionStore = {
+      async load() { return await memory.load() },
+      async loadRetiredRuns() { return await memory.loadRetiredRuns() },
+      async compareAndSwap(expected, next, signal) {
+        compareCalls += 1
+        if (block) {
+          blocked()
+          await new Promise<void>((resolve, reject) => {
+            const abort = (): void => reject(signal?.reason)
+            signal?.addEventListener('abort', abort, { once: true })
+            void released.then(() => {
+              signal?.removeEventListener('abort', abort)
+              resolve()
+            })
+          })
+        }
+        await memory.compareAndSwap(expected, next, signal)
+      },
+      async reserveLifecycle(value) { await memory.reserveLifecycle(value) },
+      async claimStaleLifecycles(value) { return await memory.claimStaleLifecycles(value) },
+      async releaseLifecycle(value) { await memory.releaseLifecycle(value) },
+      async retireRuns(value) { await memory.retireRuns(value) },
+      async commitLifecycle(value, next) { await memory.commitLifecycle(value, next) }
+    }
+    const registry = new AgentMuxAgentSessionRegistry(store)
+    await registry.put(session())
+    block = true
+    const active = registry.update('semantic-1', { runId: 'run-1' }, (current) => ({
+      ...current,
+      outputCursorBytes: 1
+    }))
+    let activeSettled = false
+    void active.then(
+      () => { activeSettled = true },
+      () => { activeSettled = true }
+    )
+    await entered
+    const controller = new AbortController()
+    const queued = registry.update('semantic-1', { runId: 'run-1' }, (current) => ({
+      ...current,
+      outputCursorBytes: 2
+    }), controller.signal)
+    const following = registry.update('semantic-1', { runId: 'run-1' }, (current) => ({
+      ...current,
+      outputCursorBytes: 3
+    }))
+    controller.abort()
+
+    await expect(queued).rejects.toMatchObject({ name: 'AbortError' })
+    expect(activeSettled).toBe(false)
+    block = false
+    releaseActive()
+    await expect(active).resolves.toMatchObject({ outputCursorBytes: 1 })
+    await expect(following).resolves.toMatchObject({ outputCursorBytes: 3 })
+    expect(compareCalls).toBe(3)
+    expect(registry.get('semantic-1').outputCursorBytes).toBe(3)
+    expect((await memory.load())[0]).toMatchObject({ outputCursorBytes: 3 })
   })
 })
