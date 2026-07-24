@@ -9,6 +9,12 @@ AgentMux 应保留小而清晰的 Agent Provider Core 和自己的终端视觉�
 
 这是内容模型、交互模式与正确实现的定向移植，不要求视觉临摹。对编辑器、文件树、Terminal/Session 状态、Pane 拖拽和可访问对话框这类成熟能力，优先直接移植 a mature workbench 源码或采用 a mature workbench 已验证的维护中依赖，再按 AgentMux 的 Core 边界裁剪和重新组织；不另写功能缩水的替代实现。a mature workbench 的 daemon/relay、账户、移动端、WSL/runtime environment 图、第三方 Issue 集成和兼容历史不在范围内。
 
+### Terminal 外观所有权
+
+AgentMux 的应用外框与 Terminal 使用两套独立的外观边界。应用外框保留 Graphite/Mint 的产品视觉；Terminal 由 Desktop Renderer 在创建 xterm 时注入一份简约、完整的默认 `ITheme`，采用更适合长时间字符阅读的 AgentMux Verdant 配色。Agent TUI 发出的 ANSI/OSC 可以改变当前终端画面，但 PTY 与 CtxMux 只持有原始字节、尺寸和生命周期，不拥有或保存任何主题语义；`packages/core`、RunSpec 和公共协议也不出现主题字段。
+
+当前不建设主题 Registry、导入器、配置持久化或兼容层。xterm 的 `ITheme`/terminal options 就是未来的扩展边界：用户 DIY 成为真实需求后，由 Desktop 的 Appearance 或扩展层选择并注入，保持 Core 和 Run Kernel 不变。现有 Settings 的 Sidebar + Pane 结构足以承载该能力；届时新增独立 Appearance Pane，而不是把主题配置堆进 General。默认主题仍应保持简约干净，主题能力不成为当前产品主线。
+
 ## 各界面的取舍
 
 | 界面 | AgentMux 现状 | a mature workbench 更好的模式 | 决策 |
@@ -30,7 +36,7 @@ AgentMux 应保留小而清晰的 Agent Provider Core 和自己的终端视觉�
 | 创建 Tab | 空白中心的一张大 Agent Launch Card | Warp 式新 Tab 先建立容器，再选择内容 | 保留“点击 `+` 立即出现新 Tab”，将初始内容改为 Terminal / Agent / Browser 创建面板；Agent 只是其中一种内容 |
 | Activity | 诚实的 Hook 时间线 | Agent UI 是终端事件的可读投影，并保留来源 | 保留“不等于私有思维链”的边界，改善分组与空状态 |
 | Composer | 有用的 Rich Textarea，但固定挂在中栏下方 | Composer 属于 Active Agent Pane，并携带当前文件/Workspace 上下文 | 保留交互，改变所有权，展示已引用文件 Chip |
-| Settings | 一个右侧抽屉平铺所有字段 | 全尺寸设置工作区，左侧分组导航、搜索和 Pane 级内容 | 改为 General、Agents、Hosts、Workspaces 四组 |
+| Settings | 一个右侧抽屉平铺所有字段 | 全尺寸设置工作区，左侧分组导航、搜索和 Pane 级内容 | 当前保持 General、Agents、Hosts、Workspaces 四组；主题 DIY 成熟后新增独立 Appearance Pane |
 | 状态真相 | Detection/Connection 只存在组件临时状态 | Hook 让 Tab、Launch、Settings、Workspace 共享一份状态 | Detection 以 Host 为键进入 Renderer Store，所有界面只消费同一投影 |
 
 ## 要实现的交互模型
