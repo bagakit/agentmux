@@ -1,4 +1,4 @@
-import { resolveAgentMuxViewFocus, type AgentMuxOpenView } from '@agentmux/core'
+import { resolveAgentMuxViewFocus, type AgentMuxOpenView } from '@agentmux/core/runtime'
 import type {
   DesktopViewFocusResult,
   DesktopViewFocusTarget,
