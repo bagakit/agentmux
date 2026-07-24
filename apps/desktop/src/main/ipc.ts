@@ -241,7 +241,7 @@ export async function registerIpc(args: {
     }
     pendingViewFocus.clear()
     await fileObservations.dispose()
-    files.dispose()
+    await files.dispose()
     for (const channel of channels) ipcMain.removeHandler(channel)
   }
 }
