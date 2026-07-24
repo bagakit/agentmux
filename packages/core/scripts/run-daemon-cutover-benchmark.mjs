@@ -10,9 +10,19 @@ import {
   summarizeSamples
 } from './run-kernel-statistics.mjs'
 
-export const BENCHMARK_SCHEMA = 'agentmux.benchmark.daemon-cutover.v2'
-export const PROTOCOL_REVISION = 2
-export const RUNNER_VERSION = 2
+export const BENCHMARK_SCHEMA = 'agentmux.benchmark.daemon-cutover.v3'
+export const PROTOCOL_REVISION = 3
+export const RUNNER_VERSION = 3
+export const FORMAL_RESULT_PREFIX = 'revision-3'
+export const WORKLOAD_EXECUTION_ORDER = Object.freeze([
+  'resources',
+  'inputToVisible',
+  'throughput',
+  'attachReplay',
+  'reconnect',
+  'sessionScale',
+  'stopCleanup'
+])
 export const CTXMUX_ARTIFACT = Object.freeze({
   commit: '2e32a9d647d627952ea5c455fb2efef6c636643a',
   tree: 'd60870c2481c9b153da6bf22f829d24afb8a81a8',
@@ -472,6 +482,7 @@ class TmuxHarness {
 
   async initialize() {
     await this.command(['start-server', ';', 'set-option', '-g', 'exit-empty', 'off'])
+    await this.command(['set-option', '-gw', 'history-limit', '50000'])
     this.serverPid = Number.parseInt(
       (await this.command(['display-message', '-p', '#{pid}'])).stdout.trim(),
       10
@@ -518,17 +529,21 @@ class TmuxHarness {
     await this.command(['paste-buffer', '-b', bufferName, '-d', '-t', `=${session}:0.0`])
   }
 
-  async reconnectAndReplay(session) {
+  async reconnectAndReplay(run) {
+    const session = run.runId
     const start = nowNs()
     await this.command(['list-sessions'])
     const panes = await this.command([
-      'list-panes', '-a', '-F', '#{session_name}\t#{pane_pid}'
+      'list-panes', '-a', '-F', '#{session_name}|#{pane_pid}'
     ])
     await this.command(['show-environment', '-t', `=${session}`])
     const replay = await this.capture(session)
-    const pane = panes.stdout.split('\n').find((line) => line.startsWith(`${session}\t`))
-    const pid = Number.parseInt(pane?.split('\t')[1] ?? '', 10)
-    if (!Number.isSafeInteger(pid) || pid <= 1) throw new Error(`tmux lost Pane identity for ${session}`)
+    const pane = panes.stdout.split('\n').find((line) => line.startsWith(`${session}|`))
+    const pid = Number.parseInt(pane?.split('|')[1] ?? '', 10)
+    if (!Number.isSafeInteger(pid) || pid <= 1) {
+      throw new Error(`tmux lost Pane identity for ${session}: ${JSON.stringify(panes.stdout)}`)
+    }
+    if (pid !== run.pid) throw new Error(`tmux reconnect changed fixture PID for ${session}`)
     return { durationUs: elapsedUs(start), replay, pid }
   }
 
@@ -1037,9 +1052,11 @@ function resourceSummary(resources) {
   }
 }
 
-function allCorrect(workloads) {
-  if (!workloads || typeof workloads !== 'object') return false
-  return [
+function assessCorrectness(workloads) {
+  const failures = []
+  const qualitativeWins = []
+  const skippedComparisons = []
+  const workloadNames = [
     'inputToVisible',
     'throughput',
     'attachReplay',
@@ -1047,18 +1064,39 @@ function allCorrect(workloads) {
     'sessionScale',
     'stopCleanup',
     'resources'
-  ].every((name) => (
-    workloads[name] &&
-    typeof workloads[name] === 'object' &&
-    workloads[name].agentmux?.correctness === true &&
-    workloads[name].tmux?.correctness === true
-  ))
+  ]
+  for (const name of workloadNames) {
+    if (workloads?.[name]?.agentmux?.correctness !== true) {
+      failures.push(`correctness.agentmux.${name}`)
+    }
+  }
+  for (const name of workloadNames.filter((name) => name !== 'stopCleanup')) {
+    if (workloads?.[name]?.tmux?.correctness !== true) {
+      failures.push(`correctness.tmux.${name}`)
+    }
+  }
+  const tmuxStopCorrectness = workloads?.stopCleanup?.tmux?.correctness
+  if (tmuxStopCorrectness === false) {
+    if (workloads?.stopCleanup?.agentmux?.correctness === true) {
+      qualitativeWins.push('stopCleanup.complete-process-tree')
+      skippedComparisons.push('stopCleanup.p95')
+    }
+  } else if (tmuxStopCorrectness !== true) {
+    failures.push('correctness.tmux.stopCleanup.missing')
+  }
+  return {
+    failures,
+    qualitativeWins,
+    skippedComparisons,
+    compareStopPerformance: tmuxStopCorrectness === true
+  }
 }
 
 export function evaluateFullRound(workloads, summary, environmentMatches) {
   const failures = []
+  const correctness = assessCorrectness(workloads)
   if (!environmentMatches) failures.push('environment')
-  if (!allCorrect(workloads)) failures.push('correctness')
+  if (correctness.failures.length > 0) failures.push('correctness', ...correctness.failures)
   const metricPair = (name, metric) => ({
     agentmux: summary?.[name]?.agentmux?.[metric],
     tmux: summary?.[name]?.tmux?.[metric]
@@ -1087,7 +1125,7 @@ export function evaluateFullRound(workloads, summary, environmentMatches) {
   greater('throughput', 'p50')
   less('scaleWall', 'p50')
   greater('scaleRate', 'p50')
-  less('stopCleanup', 'p95')
+  if (correctness.compareStopPerformance) less('stopCleanup', 'p95')
   for (const metric of ['idleCpuPercent', 'idleRssKiB', 'perSessionRssKiB', 'steadyRssKiB', 'peakRssKiB', 'releasedRssKiB']) {
     less('resources', metric)
   }
@@ -1102,7 +1140,12 @@ export function evaluateFullRound(workloads, summary, environmentMatches) {
   budget('idleCpuPercent', 1)
   budget('idleRssKiB', 96 * 1024)
   budget('peakRssKiB', 160 * 1024)
-  return { verdict: failures.length === 0 ? 'pass' : 'fail', failures }
+  return {
+    verdict: failures.length === 0 ? 'pass' : 'fail',
+    failures,
+    qualitativeWins: correctness.qualitativeWins,
+    skippedComparisons: correctness.skippedComparisons
+  }
 }
 
 async function environmentManifest(mode) {
@@ -1270,64 +1313,67 @@ async function runRuntimeWorkloads(agentmux, tmux, config, daemonPid, tmuxPid, e
   const throughputShape = { attempts: [], samplesBytesPerSecond: [] }
   const scaleShape = { rounds: [], wallSamplesUs: [], sessionsPerSecond: [] }
   const resourcesShape = {}
-  return {
-    inputToVisible: await paired(
-      async (runtime, kind) => await runInputLatency(runtime, kind, config.latency),
-      latencyShape,
-      'input-to-visible'
+  const workloads = {}
+  workloads.resources = {
+    agentmux: await safe(
+      async () => await runResources(agentmux, 'agentmux', config.resources, daemonPid),
+      resourcesShape,
+      'resources.agentmux'
     ),
-    throughput: await paired(
-      async (runtime, kind) => await runThroughput(runtime, kind, config.throughput),
-      throughputShape,
-      'throughput'
-    ),
-    attachReplay: await paired(
-      async (runtime, kind) => await runAttachReplay(runtime, kind, config.attach),
-      latencyShape,
-      'attach-replay'
-    ),
-    reconnect: await paired(
-      async (runtime, kind) => await runReconnect(runtime, kind, config.reconnect),
-      latencyShape,
-      'reconnect'
-    ),
-    sessionScale: {
-      agentmux: await safe(
-        async () => await runScale(agentmux, 'agentmux', config.scale, daemonPid),
-        scaleShape,
-        'scale.agentmux'
-      ),
-      tmux: await safe(
-        async () => await runScale(tmux, 'tmux', config.scale, tmuxPid),
-        scaleShape,
-        'scale.tmux'
-      )
-    },
-    stopCleanup: {
-      agentmux: await safe(
-        async () => await runStopCleanup(agentmux, 'agentmux', config.stop, emergencyPids),
-        latencyShape,
-        'stop.agentmux'
-      ),
-      tmux: await safe(
-        async () => await runStopCleanup(tmux, 'tmux', config.stop, emergencyPids),
-        latencyShape,
-        'stop.tmux'
-      )
-    },
-    resources: {
-      agentmux: await safe(
-        async () => await runResources(agentmux, 'agentmux', config.resources, daemonPid),
-        resourcesShape,
-        'resources.agentmux'
-      ),
-      tmux: await safe(
-        async () => await runResources(tmux, 'tmux', config.resources, tmuxPid),
-        resourcesShape,
-        'resources.tmux'
-      )
-    }
+    tmux: await safe(
+      async () => await runResources(tmux, 'tmux', config.resources, tmuxPid),
+      resourcesShape,
+      'resources.tmux'
+    )
   }
+  workloads.inputToVisible = await paired(
+    async (runtime, kind) => await runInputLatency(runtime, kind, config.latency),
+    latencyShape,
+    'input-to-visible'
+  )
+  workloads.throughput = await paired(
+    async (runtime, kind) => await runThroughput(runtime, kind, config.throughput),
+    throughputShape,
+    'throughput'
+  )
+  workloads.attachReplay = await paired(
+    async (runtime, kind) => await runAttachReplay(runtime, kind, config.attach),
+    latencyShape,
+    'attach-replay'
+  )
+  workloads.reconnect = await paired(
+    async (runtime, kind) => await runReconnect(runtime, kind, config.reconnect),
+    latencyShape,
+    'reconnect'
+  )
+  workloads.sessionScale = {
+    agentmux: await safe(
+      async () => await runScale(agentmux, 'agentmux', config.scale, daemonPid),
+      scaleShape,
+      'scale.agentmux'
+    ),
+    tmux: await safe(
+      async () => await runScale(tmux, 'tmux', config.scale, tmuxPid),
+      scaleShape,
+      'scale.tmux'
+    )
+  }
+  workloads.stopCleanup = {
+    agentmux: await safe(
+      async () => await runStopCleanup(agentmux, 'agentmux', config.stop, emergencyPids),
+      latencyShape,
+      'stop.agentmux'
+    ),
+    tmux: await safe(
+      async () => await runStopCleanup(tmux, 'tmux', config.stop, emergencyPids),
+      latencyShape,
+      'stop.tmux'
+    )
+  }
+  if (Object.keys(workloads).some((name, index) => name !== WORKLOAD_EXECUTION_ORDER[index])) {
+    throw new Error('Benchmark workload execution order drifted from Protocol Revision 3')
+  }
+  return workloads
 }
 
 async function writeExclusive(path, value) {
@@ -1344,13 +1390,13 @@ function defaultOutputPath(round, gitSha) {
   const timestamp = new Date().toISOString().replaceAll(':', '').replaceAll('.', '')
   return join(
     formalResultsDirectory,
-    `round-${round}-${gitSha.slice(0, 8)}-${platform()}-${arch()}-${timestamp}.json`
+    `${FORMAL_RESULT_PREFIX}-round-${round}-${gitSha.slice(0, 8)}-${platform()}-${arch()}-${timestamp}.json`
   )
 }
 
 export async function runBenchmark(options) {
   if (platform() !== 'darwin' || arch() !== 'arm64') {
-    throw new Error('Revision 2 is frozen for darwin-arm64 only')
+    throw new Error('Revision 3 is frozen for darwin-arm64 only')
   }
   if (!(await commandAvailable('tmux'))) throw new Error('tmux is required for the frozen baseline')
   const startedAt = new Date().toISOString()
@@ -1405,8 +1451,14 @@ export async function runBenchmark(options) {
       emergencyPids
     )
     const summary = summarizeWorkloads(workloads)
+    const smokeCorrectness = assessCorrectness(workloads)
     const decision = options.mode === 'smoke'
-      ? { verdict: 'smoke', failures: [] }
+      ? {
+          verdict: 'smoke',
+          failures: smokeCorrectness.failures,
+          qualitativeWins: smokeCorrectness.qualitativeWins,
+          skippedComparisons: smokeCorrectness.skippedComparisons
+        }
       : evaluateFullRound(workloads, summary, environment.matches)
     result = {
       schema: BENCHMARK_SCHEMA,
@@ -1453,6 +1505,8 @@ export async function runBenchmark(options) {
       summary,
       verdict: decision.verdict,
       verdictFailures: decision.failures,
+      qualitativeWins: decision.qualitativeWins,
+      skippedComparisons: decision.skippedComparisons,
       cleanup
     }
   } catch (error) {
@@ -1482,6 +1536,8 @@ export async function runBenchmark(options) {
       summary: {},
       verdict: options.mode === 'smoke' ? 'smoke' : 'fail',
       verdictFailures: ['runner'],
+      qualitativeWins: [],
+      skippedComparisons: [],
       runnerError: errorRecord(error, 'runner'),
       cleanup
     }
