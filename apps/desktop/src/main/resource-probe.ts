@@ -419,7 +419,6 @@ export async function runDesktopResourceProbe(options: {
     const browserOwners: ResourceOwners = {
       ...readyLauncherOwners,
       browserWebContents: browserOwnerBefore + 1,
-      runtimeSubscriptions: 0,
       terminalViews: 0,
       terminalAddons: 0,
       terminalListeners: 0,
