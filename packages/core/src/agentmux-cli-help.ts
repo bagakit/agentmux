@@ -9,6 +9,7 @@ Intents:
   open        Open typed content at one exact spatial destination.
   send        Send one prompt to an exact Session or uniquely resolved presentation target.
   focus       Focus one exact Tab or Region.
+  arrange     Apply one explicit layout operation to a Tab.
   output      Read or follow one Agent Session's ordered output.
   interrupt   Interrupt one Agent Session through the Desktop Control Host.
   resume      Resume one Agent Session through the Desktop Control Host.
@@ -55,10 +56,13 @@ Agents are Desktop-configured executors with availability. Sessions are Core-own
 or historical Agent Session status entries. Never infer a target from order.`],
   ['open', `Open typed content at one exact destination
 
-Usage: agentmux open agent [options]
+Usage:
+  agentmux open agent [options]
+  agentmux open terminal [--command <shell-command>] <destination>
+  agentmux open browser --url <url> <destination>
 
-The current delivery supports Agent content. Terminal and Browser use the same
-destination model when their owner slices are installed.`],
+Agent prompt, Terminal shell command, and Browser URL are delivered once to their
+respective owner. Every form requires exactly one destination.`],
   ['open.agent', `Open a new or existing Agent Session
 
 Usage:
@@ -73,6 +77,18 @@ Exactly one destination is required:
 The token after --prompt is data, including literal --help. Agent creation remains
 owned by the long-lived Desktop RuntimeController. Lifecycle or layout failure rolls
 back this open transaction.`],
+  ['open.terminal', `Open a Terminal
+
+Usage: agentmux open terminal [--command <shell-command>] <destination>
+
+Exactly one destination from open --help is required. --command runs once through the
+host shell at Terminal creation; it is never typed into an attached terminal.`],
+  ['open.browser', `Open a Browser
+
+Usage: agentmux open browser --url <url> <destination>
+
+Exactly one destination from open --help is required. The Main Browser owner validates
+and opens the URL; Renderer layout state does not own Browser navigation truth.`],
   ['send', `Send one prompt without resuming or broadcasting
 
 Usage:
@@ -90,6 +106,17 @@ Usage:
   agentmux focus --region <region-id>
 
 Focus never opens content or mutates a Run.`],
+  ['arrange', `Apply one explicit Tab layout operation
+
+Usage:
+  agentmux arrange --tab <tab-id|self> --preset <columns-3|grid-4|grid-6|grid-9>
+  agentmux arrange --tab <tab-id|self> --balance
+  agentmux arrange --tab <tab-id|self> --active-first
+
+Presets preserve existing Region reading order and fill empty slots with Launchers.
+They fail without changing layout when the Tab has too many Regions. Balance equalizes
+leaf area. Active-first moves only the active Region to reading-order first. Nothing
+rearranges in the background.`],
   ['output', `Read bounded replay or follow one Agent Session
 
 Usage: agentmux output --session <session-id|self> [--after-byte <n>] [--follow]
@@ -152,12 +179,41 @@ titles, UI focus, terminal output, or list order.
 \`\`\`bash
 agentmux open agent --agent codex --prompt "Implement the change" --right-of self
 agentmux open agent --agent claude --prompt "Review the writer" --below <region-id>
+agentmux open agent --agent codex --prompt "Work on the left" --left-of <region-id>
+agentmux open agent --agent claude --prompt "Review above" --above <region-id>
 agentmux open agent --session <session-id> --new-tab-after self
+agentmux open agent --session <session-id> --in-region <launcher-region-id>
 \`\`\`
 
 Use a directional destination for the same task. Use \`--new-tab-after\` only when the
 user explicitly requests a new Tab. For a non-trivial Tab, inspect its bounds and choose
 the exact Region whose split produces the requested whole-Tab layout.
+
+## Open a Terminal or Browser
+
+\`\`\`bash
+agentmux open terminal --command "pnpm test:fast" --below <region-id>
+agentmux open browser --url "http://localhost:5173" --new-tab-after self
+\`\`\`
+
+Terminal commands execute once at creation through the host shell. Browser URLs go to
+the Main Browser owner. Do not simulate either payload with keyboard or UI automation.
+
+## Apply a deliberate layout
+
+\`\`\`bash
+agentmux arrange --tab self --preset columns-3
+agentmux arrange --tab self --preset grid-4
+agentmux arrange --tab self --preset grid-6
+agentmux arrange --tab self --preset grid-9
+agentmux arrange --tab self --balance
+agentmux arrange --tab self --active-first
+\`\`\`
+
+Three columns are useful for a user/Writer/Reviewer working set. Four cells suit two
+paired workstreams; six or nine cells suit larger parallel batches. Presets retain
+existing Regions and create Launcher slots for later \`open --in-region\` calls. Layout
+changes are explicit: never continuously reorder based on output, titles, or recency.
 
 ## Send without guessing
 
@@ -169,6 +225,13 @@ agentmux send --to-tab <tab-id> --text "Continue"
 
 Tab send succeeds only for one distinct Agent Session. If candidates are returned, inspect
 the Tab and select an exact Session. Send never broadcasts and never resumes.
+
+Tab \`self\` resolves by deduplicating every caller Region's \`tabId\`; Region \`self\` must
+resolve to exactly one caller Region. Zero or multiple matches fail closed.
+
+Every receipt has stable \`schemaVersion\`, \`requestId\`, \`operation\`, and exactly one of
+\`result\` or \`error\`. A \`MESSAGE_TARGET_NOT_UNIQUE\` error includes typed
+\`candidates[].agentSessionId\` and \`candidates[].regionIds\`; never parse its message.
 
 ## Runtime intents
 

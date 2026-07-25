@@ -34,6 +34,12 @@ const regions: AgentMuxRegion[] = [agentRegion, {
   kind: 'browser',
   browserId: 'browser-1'
 }]
+const terminalRegion = {
+  tabId: 'tab-main', regionId: 'terminal-bottom', workspaceId: 'workspace', kind: 'terminal', runId: 'run-terminal'
+} as const
+const browserRegion = {
+  tabId: 'tab-main', regionId: 'browser-right', workspaceId: 'workspace', kind: 'browser', browserId: 'browser-1'
+} as const
 
 describe('Control protocol', () => {
   it('uses only closed Tab, Region, AgentSession, Run, and owner surface identities', () => {
@@ -72,6 +78,12 @@ describe('Control protocol', () => {
     })).toThrow('managed caller')
     expect(() => parseAgentMuxControlRequest({
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId: 'reserved-explicit-id',
+      operation: 'focus',
+      target: { kind: 'tab', tabId: 'self' }
+    })).toThrow('Focus target')
+    expect(() => parseAgentMuxControlRequest({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
       requestId: 'legacy',
       operation: 'context',
       caller: { agentSessionId: 'semantic-1' }
@@ -94,6 +106,27 @@ describe('Control protocol', () => {
       content: { kind: 'new-agent', executorId: 'codex' },
       destination: { kind: 'recent' }
     })).toThrow('destination')
+    expect(parseAgentMuxControlRequest({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId: 'terminal-below',
+      operation: 'open.terminal',
+      shellCommand: 'pnpm test:fast',
+      destination: { kind: 'split', direction: 'down', region: { kind: 'region', regionId: 'agent-left' } }
+    })).toMatchObject({ operation: 'open.terminal', shellCommand: 'pnpm test:fast' })
+    expect(parseAgentMuxControlRequest({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId: 'browser-tab',
+      operation: 'open.browser',
+      url: 'http://localhost:5173',
+      destination: { kind: 'new-tab', after: { kind: 'tab', tabId: 'tab-main' } }
+    })).toMatchObject({ operation: 'open.browser', url: 'http://localhost:5173' })
+    expect(parseAgentMuxControlRequest({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId: 'arrange',
+      operation: 'arrange',
+      target: { kind: 'tab', tabId: 'tab-main' },
+      mode: { kind: 'preset', preset: 'grid-6' }
+    })).toMatchObject({ operation: 'arrange', mode: { kind: 'preset', preset: 'grid-6' } })
   })
 
   it('preserves typed ambiguous message candidates through receipts', () => {
@@ -114,6 +147,24 @@ describe('Control protocol', () => {
       ok: false,
       error: { candidates: [{ agentSessionId: 'writer' }, { agentSessionId: 'reviewer' }] }
     })
+    expect(() => parseAgentMuxControlReceipt({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId: 'missing-candidates',
+      ok: false,
+      operation: 'send',
+      error: { code: 'MESSAGE_TARGET_NOT_UNIQUE', message: 'Candidates are required.' }
+    })).toThrow('candidates are required')
+    expect(() => parseAgentMuxControlReceipt({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId: 'unexpected-candidates',
+      ok: false,
+      operation: 'send',
+      error: {
+        code: 'REGION_NOT_OPEN',
+        message: 'Region is closed.',
+        candidates: [{ agentSessionId: 'writer', regionIds: ['region-writer'] }]
+      }
+    })).toThrow('candidates are invalid')
   })
 })
 
@@ -138,11 +189,30 @@ describe('external Control control', () => {
         }
         if (request.operation === 'list.agents') return { operation: request.operation, agents: [{ executorId: 'codex', providerId: 'codex', label: 'Codex', available: true }] }
         if (request.operation === 'open.agent') return { operation: request.operation, region: agentRegion }
-        if (request.operation === 'send') return { operation: request.operation, agentSessionId: 'semantic-1' }
+        if (request.operation === 'open.terminal') return { operation: request.operation, region: terminalRegion }
+        if (request.operation === 'open.browser') return { operation: request.operation, region: browserRegion }
+        if (request.operation === 'send') {
+          if (request.text === 'invalid candidates') {
+            throw Object.assign(new Error('Invalid candidates'), {
+              code: 'MESSAGE_TARGET_NOT_UNIQUE',
+              candidates: [{ agentSessionId: '', regionIds: [] }]
+            })
+          }
+          return { operation: request.operation, agentSessionId: 'semantic-1' }
+        }
         if (request.operation === 'focus') return { operation: request.operation, tabId: 'tab-main', regionId: 'agent-left' }
+        if (request.operation === 'arrange') return {
+          operation: request.operation,
+          tab: {
+            tabId: 'tab-main',
+            workspaceId: 'workspace',
+            regions: [{ ...agentRegion, bounds: { x: 0, y: 0, width: 1, height: 1 } }]
+          }
+        }
         if (request.operation === 'inspect.region') return { operation: request.operation, region: { ...agentRegion, bounds: { x: 0, y: 0, width: 1, height: 1 } } }
         if (request.operation === 'resume') return { operation: request.operation, agentSessionId: 'semantic-1', runId: 'run-resumed' }
-        return { operation: request.operation, agentSessionId: 'semantic-1' }
+        if (request.operation === 'interrupt' || request.operation === 'stop') return { operation: request.operation, agentSessionId: 'semantic-1' }
+        throw new Error('Unexpected operation')
       }
     }, path)
     await server.start()
@@ -168,7 +238,14 @@ describe('external Control control', () => {
       target: { kind: 'tab', tabId: 'tab-main' },
       text: 'Continue'
     }, path)).resolves.toMatchObject({ operation: 'send', result: { agentSessionId: 'semantic-1' } })
-    expect(seen).toEqual(['inspect.tab', 'open.agent', 'send'])
+    await expect(requestAgentMuxControl({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId: 'invalid-candidates',
+      operation: 'send',
+      target: { kind: 'tab', tabId: 'tab-main' },
+      text: 'invalid candidates'
+    }, path)).rejects.toMatchObject({ code: 'CONTROL_FAILED' })
+    expect(seen).toEqual(['inspect.tab', 'open.agent', 'send', 'send'])
     await server.stop()
   })
 

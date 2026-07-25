@@ -5,6 +5,7 @@ import type { AgentMuxAgentSessionLookup } from './agent-session-registry.js'
 import { AGENTMUX_CLI_HELP, AGENTMUX_CLI_SKILL, agentMuxCommandHelp } from './agentmux-cli-help.js'
 import { AgentMuxClient } from './client.js'
 import {
+  AGENTMUX_CONTROL_ERROR_CODES,
   AGENTMUX_CONTROL_SCHEMA_VERSION,
   type AgentMuxControlCaller,
   type AgentMuxOpenDestination
@@ -15,22 +16,40 @@ import { connectLocalAgentMux } from './runtime-client.js'
 import { OrderedSessionOutputFollow } from './session-output-follow.js'
 
 const VERSION = '0.1.0'
-const CLI_SCHEMA_VERSION = 1 as const
+const CLI_REQUEST_ID = randomUUID()
+const CLI_ERROR_CODES = [
+  ...AGENTMUX_CONTROL_ERROR_CODES,
+  'INVALID_CLI_ARGUMENT',
+  'MANAGED_AGENT_CONTEXT_REQUIRED',
+  'AGENTMUX_FAILED'
+] as const
+type CliErrorCode = typeof CLI_ERROR_CODES[number]
 type FlagKind = 'boolean' | 'value' | 'data'
 type ParsedFlags = { values: Map<string, string>; booleans: Set<string> }
 
 function cliError(message: string): AgentMuxError { return new AgentMuxError(message, 'INVALID_CLI_ARGUMENT') }
 
+function cliErrorCode(value: unknown): CliErrorCode {
+  return (CLI_ERROR_CODES as readonly unknown[]).includes(value) ? value as CliErrorCode : 'AGENTMUX_FAILED'
+}
+
 function parseFlags(args: readonly string[], specs: Readonly<Record<string, FlagKind>>): ParsedFlags {
   const values = new Map<string, string>()
   const booleans = new Set<string>()
   for (let index = 0; index < args.length; index += 1) {
-    const flag = args[index]
-    if (!flag?.startsWith('--')) throw cliError(`Unexpected argument: ${flag ?? ''}`)
+    const argument = args[index]
+    if (!argument?.startsWith('--')) throw cliError(`Unexpected argument: ${argument ?? ''}`)
+    const separator = argument.indexOf('=')
+    const flag = separator < 0 ? argument : argument.slice(0, separator)
+    const inlineValue = separator < 0 ? undefined : argument.slice(separator + 1)
     if (values.has(flag) || booleans.has(flag)) throw cliError(`Duplicate option: ${flag}`)
     const kind = specs[flag]
     if (!kind) throw cliError(`Unsupported option: ${flag}`)
-    if (kind === 'boolean') { booleans.add(flag); continue }
+    if (kind === 'boolean') {
+      if (inlineValue !== undefined) throw cliError(`Option does not accept a value: ${flag}`)
+      booleans.add(flag); continue
+    }
+    if (inlineValue !== undefined) { values.set(flag, inlineValue); continue }
     const value = args[index + 1]
     if (value === undefined || (kind === 'value' && value.startsWith('--'))) throw cliError(`Missing value for ${flag}.`)
     values.set(flag, value); index += 1
@@ -39,8 +58,14 @@ function parseFlags(args: readonly string[], specs: Readonly<Record<string, Flag
 }
 
 function identifier(value: string | undefined, label: string): string {
-  if (!value || value.startsWith('--')) throw cliError(`${label} is required.`)
+  if (!value) throw cliError(`${label} is required.`)
   return value
+}
+
+function explicitSelectorId(value: string | undefined, label: string): string {
+  const result = identifier(value, label)
+  if (result === 'self') throw cliError(`${label} cannot use the reserved self selector.`)
+  return result
 }
 
 function requiredData(flags: ParsedFlags, name: string, label: string): string {
@@ -66,10 +91,14 @@ function callerForSelf(value: string): AgentMuxControlCaller | undefined {
 }
 
 function sessionId(value: string): string { return value === 'self' ? managedCaller().agentSessionId : identifier(value, 'Agent Session id') }
-function requestBase() { return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: randomUUID() } as const }
+function requestBase() { return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: CLI_REQUEST_ID } as const }
 function writeJson(value: unknown, stream: NodeJS.WritableStream = process.stdout): void { stream.write(`${JSON.stringify(value)}\n`) }
-function printSuccess(operation: string, result: unknown): void { writeJson({ schemaVersion: CLI_SCHEMA_VERSION, operation, result }) }
-function printStream(operation: string, event: string, result: unknown): void { writeJson({ schemaVersion: CLI_SCHEMA_VERSION, operation, event, result }) }
+function printSuccess(operation: string, result: unknown): void {
+  writeJson({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: CLI_REQUEST_ID, ok: true, operation, result })
+}
+function printStream(operation: string, event: string, result: unknown): void {
+  writeJson({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: CLI_REQUEST_ID, ok: true, operation, event, result })
+}
 
 async function withClient<T>(operation: (client: AgentMuxClient) => Promise<T>): Promise<T> {
   const client = await connectLocalAgentMux()
@@ -82,12 +111,18 @@ async function inspectCommand(args: readonly string[]): Promise<number> {
     '--provider-native': 'value', '--provider': 'value', '--acp-native': 'value', '--adapter': 'value'
   })
   const selector = exactlyOne(flags, ['--session', '--run', '--tab', '--region', '--provider-native', '--acp-native'], 'inspect')
+  if ((selector === '--provider-native') !== flags.values.has('--provider')) {
+    throw cliError('--provider-native and --provider must be used together.')
+  }
+  if ((selector === '--acp-native') !== flags.values.has('--adapter')) {
+    throw cliError('--acp-native and --adapter must be used together.')
+  }
   if (selector === '--tab') {
     const value = flags.values.get(selector)!
     const owner = callerForSelf(value)
     const receipt = await requestAgentMuxControl({
       ...requestBase(), operation: 'inspect.tab',
-      target: value === 'self' ? { kind: 'self' } : { kind: 'tab', tabId: identifier(value, 'Tab id') },
+      target: value === 'self' ? { kind: 'self' } : { kind: 'tab', tabId: explicitSelectorId(value, 'Tab id') },
       ...(owner ? { caller: owner } : {})
     })
     printSuccess(receipt.operation, receipt.result); return 0
@@ -97,7 +132,7 @@ async function inspectCommand(args: readonly string[]): Promise<number> {
     const owner = callerForSelf(value)
     const receipt = await requestAgentMuxControl({
       ...requestBase(), operation: 'inspect.region',
-      target: value === 'self' ? { kind: 'self' } : { kind: 'region', regionId: identifier(value, 'Region id') },
+      target: value === 'self' ? { kind: 'self' } : { kind: 'region', regionId: explicitSelectorId(value, 'Region id') },
       ...(owner ? { caller: owner } : {})
     })
     printSuccess(receipt.operation, receipt.result); return 0
@@ -135,28 +170,82 @@ function openDestination(flags: ParsedFlags): { destination: AgentMuxOpenDestina
   const selected = exactlyOne(flags, ['--left-of', '--right-of', '--above', '--below', '--new-tab-after', '--in-region'], 'open')
   const value = flags.values.get(selected)!
   const owner = callerForSelf(value)
-  if (selected === '--new-tab-after') return { destination: { kind: 'new-tab', after: value === 'self' ? { kind: 'self' } : { kind: 'tab', tabId: identifier(value, 'Tab id') } }, ...(owner ? { caller: owner } : {}) }
-  if (selected === '--in-region') return { destination: { kind: 'launcher', regionId: identifier(value, 'Launcher Region id') } }
+  if (selected === '--new-tab-after') return { destination: { kind: 'new-tab', after: value === 'self' ? { kind: 'self' } : { kind: 'tab', tabId: explicitSelectorId(value, 'Tab id') } }, ...(owner ? { caller: owner } : {}) }
+  if (selected === '--in-region') return { destination: { kind: 'launcher', regionId: explicitSelectorId(value, 'Launcher Region id') } }
   const direction = selected === '--left-of' ? 'left' : selected === '--right-of' ? 'right' : selected === '--above' ? 'up' : 'down'
-  return { destination: { kind: 'split', direction, region: value === 'self' ? { kind: 'self' } : { kind: 'region', regionId: identifier(value, 'Region id') } }, ...(owner ? { caller: owner } : {}) }
+  return { destination: { kind: 'split', direction, region: value === 'self' ? { kind: 'self' } : { kind: 'region', regionId: explicitSelectorId(value, 'Region id') } }, ...(owner ? { caller: owner } : {}) }
 }
 
 async function openCommand(args: readonly string[]): Promise<number> {
-  if (args[0] !== 'agent') throw cliError('open currently supports agent.')
+  if (args[0] !== 'agent' && args[0] !== 'terminal' && args[0] !== 'browser') {
+    throw cliError('open requires agent, terminal, or browser.')
+  }
   const flags = parseFlags(args.slice(1), {
     '--agent': 'value', '--session': 'value', '--prompt': 'data',
+    '--command': 'data', '--url': 'value',
     '--left-of': 'value', '--right-of': 'value', '--above': 'value', '--below': 'value',
     '--new-tab-after': 'value', '--in-region': 'value'
   })
+  const placement = openDestination(flags)
+  if (args[0] === 'terminal') {
+    if (flags.values.has('--agent') || flags.values.has('--session') || flags.values.has('--prompt') || flags.values.has('--url')) {
+      throw cliError('open terminal accepts only --command and one destination.')
+    }
+    const receipt = await requestAgentMuxControl({
+      ...requestBase(),
+      operation: 'open.terminal',
+      ...(flags.values.has('--command') ? { shellCommand: flags.values.get('--command')! } : {}),
+      ...placement
+    })
+    printSuccess(receipt.operation, receipt.result); return 0
+  }
+  if (args[0] === 'browser') {
+    if (flags.values.has('--agent') || flags.values.has('--session') || flags.values.has('--prompt') || flags.values.has('--command')) {
+      throw cliError('open browser accepts only --url and one destination.')
+    }
+    const receipt = await requestAgentMuxControl({
+      ...requestBase(),
+      operation: 'open.browser',
+      url: identifier(flags.values.get('--url'), 'Browser URL'),
+      ...placement
+    })
+    printSuccess(receipt.operation, receipt.result); return 0
+  }
+  if (flags.values.has('--command') || flags.values.has('--url')) {
+    throw cliError('open agent accepts only --agent/--session, --prompt, and one destination.')
+  }
   const contentFlag = exactlyOne(flags, ['--agent', '--session'], 'open agent')
   if (contentFlag === '--session' && flags.values.has('--prompt')) throw cliError('--prompt is valid only with --agent.')
-  const placement = openDestination(flags)
   const receipt = await requestAgentMuxControl({
     ...requestBase(), operation: 'open.agent',
     content: contentFlag === '--agent'
       ? { kind: 'new-agent', executorId: identifier(flags.values.get(contentFlag), 'Agent Executor id'), ...(flags.values.has('--prompt') ? { prompt: flags.values.get('--prompt')! } : {}) }
-      : { kind: 'agent-session', agentSessionId: identifier(flags.values.get(contentFlag), 'Agent Session id') },
+      : { kind: 'agent-session', agentSessionId: explicitSelectorId(flags.values.get(contentFlag), 'Agent Session id') },
     ...placement
+  })
+  printSuccess(receipt.operation, receipt.result); return 0
+}
+
+async function arrangeCommand(args: readonly string[]): Promise<number> {
+  const flags = parseFlags(args, { '--tab': 'value', '--preset': 'value', '--balance': 'boolean', '--active-first': 'boolean' })
+  const tab = identifier(flags.values.get('--tab'), 'Tab id')
+  const selections = [
+    ...(flags.values.has('--preset') ? ['--preset'] : []),
+    ...(flags.booleans.has('--balance') ? ['--balance'] : []),
+    ...(flags.booleans.has('--active-first') ? ['--active-first'] : [])
+  ]
+  if (selections.length !== 1) throw cliError('arrange requires exactly one of --preset, --balance, --active-first.')
+  const preset = flags.values.get('--preset')
+  if (preset && !['columns-3', 'grid-4', 'grid-6', 'grid-9'].includes(preset)) throw cliError('Arrange preset is invalid.')
+  const owner = callerForSelf(tab)
+  const receipt = await requestAgentMuxControl({
+    ...requestBase(),
+    operation: 'arrange',
+    target: tab === 'self' ? { kind: 'self' } : { kind: 'tab', tabId: explicitSelectorId(tab, 'Tab id') },
+    mode: preset
+      ? { kind: 'preset', preset: preset as 'columns-3' | 'grid-4' | 'grid-6' | 'grid-9' }
+      : flags.booleans.has('--balance') ? { kind: 'balance' } : { kind: 'active-first' },
+    ...(owner ? { caller: owner } : {})
   })
   printSuccess(receipt.operation, receipt.result); return 0
 }
@@ -169,8 +258,8 @@ async function sendCommand(args: readonly string[]): Promise<number> {
   const target = selected === '--to-session'
     ? value === 'self' ? { kind: 'self' } as const : { kind: 'agent-session', agentSessionId: identifier(value, 'Agent Session id') } as const
     : selected === '--to-region'
-      ? { kind: 'region', regionId: identifier(value, 'Region id') } as const
-      : { kind: 'tab', tabId: identifier(value, 'Tab id') } as const
+      ? { kind: 'region', regionId: explicitSelectorId(value, 'Region id') } as const
+      : { kind: 'tab', tabId: explicitSelectorId(value, 'Tab id') } as const
   const receipt = await requestAgentMuxControl({ ...requestBase(), operation: 'send', target, text: requiredData(flags, '--text', 'Message text'), ...(owner ? { caller: owner } : {}) })
   printSuccess(receipt.operation, receipt.result); return 0
 }
@@ -181,7 +270,7 @@ async function focusCommand(args: readonly string[]): Promise<number> {
   const value = flags.values.get(selected)!
   const receipt = await requestAgentMuxControl({
     ...requestBase(), operation: 'focus',
-    target: selected === '--region' ? { kind: 'region', regionId: identifier(value, 'Region id') } : { kind: 'tab', tabId: identifier(value, 'Tab id') }
+    target: selected === '--region' ? { kind: 'region', regionId: explicitSelectorId(value, 'Region id') } : { kind: 'tab', tabId: explicitSelectorId(value, 'Tab id') }
   })
   printSuccess(receipt.operation, receipt.result); return 0
 }
@@ -237,11 +326,16 @@ async function sessionMutation(operation: 'interrupt' | 'resume' | 'stop', args:
 }
 
 function operationPath(args: readonly string[]): string | null {
-  if (args[0] === 'open' && args[1]) return `${args[0]}.${args[1]}`
+  if (args[0] === 'open' && ['agent', 'terminal', 'browser'].includes(args[1] ?? '')) {
+    return `${args[0]}.${args[1]}`
+  }
   return args[0] ?? null
 }
 function requestsHelp(args: readonly string[]): boolean {
-  return args.some((argument, index) => (argument === '--help' || argument === '-h') && args[index - 1] !== '--text' && args[index - 1] !== '--prompt')
+  return args.some((argument, index) => (
+    (argument === '--help' || argument === '-h') &&
+    args[index - 1] !== '--text' && args[index - 1] !== '--prompt' && args[index - 1] !== '--command'
+  ))
 }
 
 async function main(): Promise<number> {
@@ -259,6 +353,7 @@ async function main(): Promise<number> {
   if (args[0] === 'open') return await openCommand(args.slice(1))
   if (args[0] === 'send') return await sendCommand(args.slice(1))
   if (args[0] === 'focus') return await focusCommand(args.slice(1))
+  if (args[0] === 'arrange') return await arrangeCommand(args.slice(1))
   if (args[0] === 'output') return await outputCommand(args.slice(1))
   if (args[0] === 'interrupt') return await sessionMutation('interrupt', args.slice(1))
   if (args[0] === 'resume') return await sessionMutation('resume', args.slice(1))
@@ -268,8 +363,15 @@ async function main(): Promise<number> {
 
 const attemptedOperation = operationPath(process.argv.slice(2))
 void main().then((exitCode) => { process.exitCode = exitCode }, (error) => {
-  const code = typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : 'AGENTMUX_FAILED'
+  const source = typeof error === 'object' && error !== null ? error as Record<string, unknown> : null
+  const code = cliErrorCode(source?.code)
   const candidates = typeof error === 'object' && error !== null && 'candidates' in error ? error.candidates : undefined
-  writeJson({ schemaVersion: CLI_SCHEMA_VERSION, operation: attemptedOperation, error: { code, message: error instanceof Error ? error.message : String(error), ...(candidates ? { candidates } : {}) } }, process.stderr)
+  writeJson({
+    schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+    requestId: typeof source?.requestId === 'string' ? source.requestId : CLI_REQUEST_ID,
+    ok: false,
+    operation: typeof source?.operation === 'string' ? source.operation : attemptedOperation,
+    error: { code, message: error instanceof Error ? error.message : String(error), ...(candidates ? { candidates } : {}) }
+  }, process.stderr)
   process.exitCode = 1
 })
