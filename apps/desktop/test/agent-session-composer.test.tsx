@@ -18,7 +18,8 @@ const fixture = vi.hoisted(() => ({
     clearAgentComposerDraftIfUnchanged: vi.fn(),
     send: vi.fn(async () => {}),
     interrupt: vi.fn(async () => {}),
-    setPosture: vi.fn(async () => {})
+    setPosture: vi.fn(async () => {}),
+    reportError: vi.fn()
   }
 }))
 
@@ -31,19 +32,25 @@ vi.mock('../src/renderer/src/store.js', () => ({
 
 // The composer reaches for native capabilities (file picker, pasted-image persistence) that only the
 // desktop shell provides; the module itself resolves a build-time constant, so it is stubbed here.
+// Hoisted so a test can make one of them reject and assert where that failure surfaces.
+const nativeApi = vi.hoisted(() => ({
+  chooseFiles: vi.fn(async () => null as string[] | null),
+  savePastedImage: vi.fn(async () => '/tmp/pasted.png')
+}))
+
 vi.mock('../src/renderer/src/lib/api.js', () => ({
-  api: {
-    ui: {
-      chooseFiles: vi.fn(async () => null),
-      savePastedImage: vi.fn(async () => '/tmp/pasted.png')
-    }
-  }
+  api: { ui: nativeApi }
 }))
 
 import {
   AgentSessionComposer,
   agentComposerAvailability
 } from '../src/renderer/src/components/AgentSessionComposer.js'
+
+// Errors cross the reportError seam as `unknown`; read them the way the store's banner does.
+function message(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
 
 function agentSession(overrides: Partial<Extract<SessionSnapshot, { kind: 'agent' }>> = {}): Extract<SessionSnapshot, { kind: 'agent' }> {
   return {
@@ -87,6 +94,11 @@ afterEach(() => {
   fixture.state.setPosture.mockClear()
   fixture.state.setAgentComposerDraft.mockClear()
   fixture.state.clearAgentComposerDraftIfUnchanged.mockClear()
+  fixture.state.reportError.mockClear()
+  nativeApi.chooseFiles.mockClear()
+  nativeApi.savePastedImage.mockClear()
+  nativeApi.chooseFiles.mockImplementation(async () => null)
+  nativeApi.savePastedImage.mockImplementation(async () => '/tmp/pasted.png')
 })
 
 // A minimal grok-shaped catalog entry carrying only the fields the composer reads plus the DESCRIBE-half
@@ -261,5 +273,54 @@ describe('AgentSessionComposer adapter', () => {
       disabled: true,
       placeholder: 'Answer the Agent request above…'
     })
+  })
+
+  // Every native action on this Composer is fired as `void action()` from a JSX handler, so a rejection
+  // it does not catch itself is unobserved: the paste appears to do nothing and no error is shown. The
+  // main handler throws on reachable conditions — an empty image, one over the byte cap, or any
+  // mkdir/writeFile failure — so these are real user-facing paths, not defensive padding. Each must
+  // reach the same reportError surface its sibling actions already use.
+  it('surfaces a failed pasted-image save instead of swallowing it', async () => {
+    fixture.state.sessions = [agentSession()]
+    fixture.state.agentComposerDrafts = { 'agent-1': 'Look at this' }
+    nativeApi.savePastedImage.mockRejectedValueOnce(new Error('Pasted image exceeds the size limit.'))
+    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
+      props: { onPasteImage(image: { bytes: Uint8Array; extension: string }): void }
+    }
+
+    composer.props.onPasteImage({ bytes: new Uint8Array([1, 2, 3]), extension: 'png' })
+
+    await vi.waitFor(() => expect(fixture.state.reportError).toHaveBeenCalledOnce())
+    expect(message(fixture.state.reportError.mock.calls[0]?.[0]))
+      .toContain('Pasted image exceeds the size limit.')
+    // The draft is untouched: a failed paste must not silently rewrite what the user typed.
+    expect(fixture.state.setAgentComposerDraft).not.toHaveBeenCalled()
+  })
+
+  it('surfaces a failed file attachment instead of swallowing it', async () => {
+    fixture.state.sessions = [agentSession()]
+    nativeApi.chooseFiles.mockRejectedValueOnce(new Error('Workspace file picker failed.'))
+    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
+      props: { onAttach(): void }
+    }
+
+    composer.props.onAttach()
+
+    await vi.waitFor(() => expect(fixture.state.reportError).toHaveBeenCalledOnce())
+    expect(message(fixture.state.reportError.mock.calls[0]?.[0])).toContain('Workspace file picker failed.')
+    expect(fixture.state.setAgentComposerDraft).not.toHaveBeenCalled()
+  })
+
+  it('keeps a successful paste on its existing path-reference behaviour', async () => {
+    fixture.state.sessions = [agentSession()]
+    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
+      props: { onPasteImage(image: { bytes: Uint8Array; extension: string }): void }
+    }
+
+    composer.props.onPasteImage({ bytes: new Uint8Array([1]), extension: 'png' })
+
+    // Proves the catch did not swallow the success path too: the reference still lands, silently.
+    await vi.waitFor(() => expect(fixture.state.setAgentComposerDraft).toHaveBeenCalledOnce())
+    expect(fixture.state.reportError).not.toHaveBeenCalled()
   })
 })
