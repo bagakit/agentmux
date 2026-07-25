@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, normalize as normalizeLocalPath, posix } from 'node:path'
 import { app } from 'electron'
 import { z } from 'zod'
@@ -202,7 +202,15 @@ export class ConfigStore {
     let loaded: AppConfig
     let persist = false
     try {
-      loaded = configSchema.parse(JSON.parse(await readFile(this.path, 'utf8'))) as AppConfig
+      const rawText = await readFile(this.path, 'utf8')
+      const rawJson = JSON.parse(rawText)
+      if (typeof rawJson === 'object' && rawJson !== null && 'version' in rawJson && rawJson.version !== 7) {
+        await rm(this.path, { force: true })
+        loaded = structuredClone(DEFAULT_CONFIG)
+        persist = true
+      } else {
+        loaded = configSchema.parse(rawJson) as AppConfig
+      }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       loaded = structuredClone(DEFAULT_CONFIG)
