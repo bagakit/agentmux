@@ -427,11 +427,25 @@ async function processIdsForApplication(appPath) {
 async function waitForProcessExit(findProcessIds, timeoutMs) {
   const deadline = Date.now() + timeoutMs
   let remaining = await findProcessIds()
-  while (remaining.length > 0 && Date.now() <= deadline) {
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 20))
+  while (remaining.length > 0) {
+    const delay = Math.min(20, deadline - Date.now())
+    if (delay <= 0) break
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, delay))
     remaining = await findProcessIds()
   }
   return remaining
+}
+
+async function waitForPath(path, deadline) {
+  while (true) {
+    if (Date.now() > deadline) return false
+    const exists = await pathExists(path)
+    if (Date.now() > deadline) return false
+    if (exists) return true
+    const remaining = deadline - Date.now()
+    if (remaining <= 0) return false
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, Math.min(20, remaining)))
+  }
 }
 
 function signalProcessIds(processIds, signal) {
@@ -444,6 +458,40 @@ function signalProcessIds(processIds, signal) {
         errors.push(new Error(`Could not send ${signal} to scoped process ${pid}`, { cause: error }))
       }
     }
+  }
+  return errors
+}
+
+async function cleanupProcessScope(scope, findProcessIds) {
+  const errors = []
+  let processIds
+  try {
+    processIds = await findProcessIds()
+  } catch (error) {
+    errors.push(new Error(`Launch smoke ${scope} cleanup PID query failed`, { cause: error }))
+    return errors
+  }
+  errors.push(...signalProcessIds(processIds, 'SIGTERM'))
+
+  let remaining
+  try {
+    remaining = await waitForProcessExit(findProcessIds, 5_000)
+  } catch (error) {
+    errors.push(new Error(`Launch smoke ${scope} cleanup exit wait failed`, { cause: error }))
+    return errors
+  }
+  if (remaining.length === 0) return errors
+
+  errors.push(new Error(`Launch smoke ${scope} cleanup required SIGKILL for PIDs ${remaining.join(', ')}`))
+  errors.push(...signalProcessIds(remaining, 'SIGKILL'))
+  try {
+    remaining = await waitForProcessExit(findProcessIds, 2_000)
+  } catch (error) {
+    errors.push(new Error(`Launch smoke ${scope} cleanup forced-exit wait failed`, { cause: error }))
+    return errors
+  }
+  if (remaining.length > 0) {
+    errors.push(new Error(`Launch smoke ${scope} processes survived scoped cleanup: ${remaining.join(', ')}`))
   }
   return errors
 }
@@ -529,33 +577,25 @@ async function verifyLaunchServices(appPath, verificationRoot) {
     })
   }
   let verificationError
+  let verificationStage = 'launch-request'
+  const verificationDeadline = Date.now() + 90_000
   try {
-    try {
-      await run('open', [
-        '-n',
-        '-j',
-        '-W',
-        '--stdout', stdoutPath,
-        '--stderr', stderrPath,
-        '--env', `AGENTMUX_DESKTOP_USER_DATA=${userData}`,
-        '--env', `AGENTMUX_RUNTIME_DIRECTORY=${runtimeRoot}`,
-        '--env', `AGENTMUX_DESKTOP_READY_FILE=${readyFile}`,
-        '--env', `AGENTMUX_DESKTOP_FILE_EDITING_REPORT=${fileEditingReport}`,
-        canonicalAppPath
-      ], { capture: true, timeoutMs: 90_000 })
-    } catch (error) {
-      const report = await readFile(fileEditingReport, 'utf8')
-        .then((value) => JSON.parse(value), () => null)
-      const stderr = await readFile(stderrPath, 'utf8').catch(() => '')
-      throw new Error([
-        `Mounted Desktop lifecycle failed: ${report?.error ?? (error instanceof Error ? error.message : String(error))}`,
-        stderr.trim()
-      ].filter(Boolean).join(': '), { cause: error })
-    }
-    if (!await pathExists(readyFile)) {
-      const stderr = await readFile(stderrPath, 'utf8').catch(() => '')
-      throw new Error(`Packaged Desktop did not emit a ready receipt${stderr ? `: ${stderr.trim()}` : '.'}`)
-    }
+    await run('open', [
+      '-n',
+      '-j',
+      '--stdout', stdoutPath,
+      '--stderr', stderrPath,
+      '--env', `AGENTMUX_DESKTOP_USER_DATA=${userData}`,
+      '--env', `AGENTMUX_RUNTIME_DIRECTORY=${runtimeRoot}`,
+      '--env', `AGENTMUX_DESKTOP_READY_FILE=${readyFile}`,
+      '--env', `AGENTMUX_DESKTOP_FILE_EDITING_REPORT=${fileEditingReport}`,
+      canonicalAppPath
+    ], { capture: true, timeoutMs: Math.max(1, verificationDeadline - Date.now()) })
+    verificationStage = 'ready-receipt'
+    assert(
+      await waitForPath(readyFile, verificationDeadline),
+      'Packaged Desktop timed out waiting for a ready receipt.'
+    )
     const ready = JSON.parse(await readFile(readyFile, 'utf8'))
     assert(ready.productName === PRODUCT_NAME, 'LaunchServices started an incorrectly branded application.')
     assert(ready.packaged === true, 'LaunchServices did not start the packaged application.')
@@ -563,9 +603,14 @@ async function verifyLaunchServices(appPath, verificationRoot) {
       await realpath(ready.executable) === executable,
       'LaunchServices ready receipt did not come from the exact relocated application.'
     )
+    verificationStage = 'file-editing-report'
+    assert(
+      await waitForPath(fileEditingReport, verificationDeadline),
+      'Mounted Desktop timed out waiting for the file editing report.'
+    )
     const fileEditing = JSON.parse(await readFile(fileEditingReport, 'utf8'))
-    assert(fileEditing.schema === 'agentmux.workspace-file-editing-e2e.v2', 'Mounted Desktop emitted the wrong file editing report schema.')
     assert(fileEditing.ok === true, `Mounted Desktop file editing E2E failed: ${fileEditing.error ?? 'unknown error'}`)
+    assert(fileEditing.schema === 'agentmux.workspace-file-editing-e2e.v2', 'Mounted Desktop emitted the wrong file editing report schema.')
     assert(
       fileEditing.phases?.saveGeneration?.disk === 'bravo' &&
         fileEditing.phases.saveGeneration.editor === 'charlie' &&
@@ -608,40 +653,103 @@ async function verifyLaunchServices(appPath, verificationRoot) {
         fileEditing.phases.explorer.menu.workspaceRace.explorerProjectionNotifications?.total === 1,
       'Mounted Desktop did not reject the stale primary refresh or recover it from its Workspace owner.'
     )
+    verificationStage = 'runtime-owner-receipt'
     const ownerReceipt = JSON.parse(await readFile(ownerReceiptPath, 'utf8'))
     assert(
       await realpath(ownerReceipt.daemonPath) === await realpath(daemonEntrypoint) &&
         ownerReceipt.socketPath === endpointPath,
       'LaunchServices did not start the exact packaged CtxMux runtime.'
     )
-    const remainingApplicationPids = await waitForProcessExit(ownedApplicationPids, 5_000)
-    assert(remainingApplicationPids.length === 0, 'Packaged Desktop application or observer processes did not exit gracefully.')
+    verificationStage = 'application-exit'
+    const exitBudget = verificationDeadline - Date.now()
+    assert(exitBudget > 0, 'Packaged Desktop exhausted the lifecycle budget before exit observation.')
+    const remainingApplicationPids = await waitForProcessExit(
+      ownedApplicationPids,
+      exitBudget
+    )
+    assert(Date.now() <= verificationDeadline, 'Packaged Desktop exit observation exceeded the lifecycle budget.')
+    assert(
+      remainingApplicationPids.length === 0,
+      `Packaged Desktop application or observer processes did not exit within the lifecycle budget: ${remainingApplicationPids.join(', ')}`
+    )
   } catch (error) {
-    verificationError = error
+    const [readyExists, reportExists, ownerReceiptExists] = await Promise.all([
+      pathExists(readyFile),
+      pathExists(fileEditingReport),
+      pathExists(ownerReceiptPath)
+    ])
+    let reportReadError
+    const reportText = await readFile(fileEditingReport, 'utf8').catch((readError) => {
+      reportReadError = readError instanceof Error ? readError.message : String(readError)
+      return null
+    })
+    let ownerReceiptReadError
+    const ownerReceiptText = await readFile(ownerReceiptPath, 'utf8').catch((readError) => {
+      ownerReceiptReadError = readError instanceof Error ? readError.message : String(readError)
+      return null
+    })
+    const stderr = await readFile(stderrPath, 'utf8').catch(() => '')
+    let report
+    let reportParseError
+    if (reportText !== null) {
+      try {
+        report = JSON.parse(reportText)
+      } catch (parseError) {
+        reportParseError = parseError instanceof Error ? parseError.message : String(parseError)
+      }
+    }
+    let ownerReceipt
+    let ownerReceiptParseError
+    let ownerIdentity = ownerReceiptExists ? 'unavailable' : 'missing'
+    if (ownerReceiptText !== null) {
+      try {
+        ownerReceipt = JSON.parse(ownerReceiptText)
+      } catch (parseError) {
+        ownerReceiptParseError = parseError instanceof Error ? parseError.message : String(parseError)
+      }
+    }
+    if (ownerReceipt) {
+      try {
+        ownerIdentity =
+          await realpath(ownerReceipt.daemonPath) === await realpath(daemonEntrypoint) &&
+            ownerReceipt.socketPath === endpointPath
+            ? 'match'
+            : 'mismatch'
+      } catch (identityError) {
+        ownerIdentity = `unavailable:${identityError instanceof Error ? identityError.message : String(identityError)}`
+      }
+    }
+    let applicationPids = 'unavailable'
+    try {
+      const scopedPids = await ownedApplicationPids()
+      applicationPids = scopedPids.length > 0 ? scopedPids.join(',') : 'none'
+    } catch (processError) {
+      applicationPids = `unavailable:${processError instanceof Error ? processError.message : String(processError)}`
+    }
+    verificationError = new Error([
+      `Mounted Desktop ${verificationStage} stage failed: ${error instanceof Error ? error.message : String(error)}`,
+      [
+        `ready=${readyExists ? 'present' : 'missing'}`,
+        `report=${reportExists ? 'present' : 'missing'}`,
+        `report_read_error=${reportReadError ?? 'none'}`,
+        `report_ok=${typeof report?.ok === 'boolean' ? String(report.ok) : 'unknown'}`,
+        `report_error=${report?.error === undefined ? 'none' : JSON.stringify(report.error)}`,
+        `report_parse_error=${reportParseError ?? 'none'}`,
+        `owner_receipt=${ownerReceiptExists ? 'present' : 'missing'}`,
+        `owner_read_error=${ownerReceiptReadError ?? 'none'}`,
+        `owner_parse=${!ownerReceiptExists ? 'missing' : ownerReceipt ? 'ok' : 'error'}`,
+        `owner_parse_error=${ownerReceiptParseError ?? 'none'}`,
+        `owner_identity=${ownerIdentity}`,
+        `scoped_application_pids=${applicationPids}`,
+        `stderr=${stderr.trim() ? JSON.stringify(stderr.trim()) : 'empty'}`
+      ].join(' ')
+    ].join('\n'), { cause: error })
   }
 
-  const cleanupErrors = []
-  cleanupErrors.push(...signalProcessIds(await ownedApplicationPids(), 'SIGTERM'))
-  let remainingApplicationPids = await waitForProcessExit(ownedApplicationPids, 5_000)
-  if (remainingApplicationPids.length > 0) {
-    cleanupErrors.push(new Error(`Launch smoke application cleanup required SIGKILL for PIDs ${remainingApplicationPids.join(', ')}`))
-    cleanupErrors.push(...signalProcessIds(remainingApplicationPids, 'SIGKILL'))
-    remainingApplicationPids = await waitForProcessExit(ownedApplicationPids, 2_000)
-  }
-  if (remainingApplicationPids.length > 0) {
-    cleanupErrors.push(new Error(`Launch smoke application processes survived scoped cleanup: ${remainingApplicationPids.join(', ')}`))
-  }
-
-  cleanupErrors.push(...signalProcessIds(await ownedDaemonPids(), 'SIGTERM'))
-  let remainingDaemonPids = await waitForProcessExit(ownedDaemonPids, 5_000)
-  if (remainingDaemonPids.length > 0) {
-    cleanupErrors.push(new Error(`Launch smoke daemon cleanup required SIGKILL for PIDs ${remainingDaemonPids.join(', ')}`))
-    cleanupErrors.push(...signalProcessIds(remainingDaemonPids, 'SIGKILL'))
-    remainingDaemonPids = await waitForProcessExit(ownedDaemonPids, 2_000)
-  }
-  if (remainingDaemonPids.length > 0) {
-    cleanupErrors.push(new Error(`Launch smoke daemon processes survived scoped cleanup: ${remainingDaemonPids.join(', ')}`))
-  }
+  const cleanupErrors = [
+    ...await cleanupProcessScope('application', ownedApplicationPids),
+    ...await cleanupProcessScope('daemon', ownedDaemonPids)
+  ]
 
   try {
     await rm(runtimeRoot, { recursive: true, force: true })
