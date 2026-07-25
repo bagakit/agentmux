@@ -215,10 +215,15 @@ async function copyRuntimeApplication(appPath) {
   )
   await materializeDependency(desktopRoot, 'tldts', join(appResources, 'node_modules', 'tldts'))
   await materializeDependency(desktopRoot, 'zod', join(appResources, 'node_modules', 'zod'))
+  const outBin = join(appResources, 'out', 'bin')
+  await mkdir(outBin, { recursive: true })
+  await cp(join(coreRoot, 'bin'), outBin, { recursive: true })
+  await cp(join(coreRuntime, 'bin', 'agentmux'), join(outBin, 'agentmux'))
   await Promise.all([
     chmod(join(coreRuntime, 'vendor', 'ctxmux', 'darwin-arm64', 'bin', 'ctxmux'), 0o755),
     chmod(join(coreRuntime, 'vendor', 'ctxmux', 'darwin-arm64', 'bin', 'ctxmuxd'), 0o755),
-    chmod(join(coreRuntime, 'bin', 'agentmux'), 0o755)
+    chmod(join(coreRuntime, 'bin', 'agentmux'), 0o755),
+    chmod(join(outBin, 'agentmux'), 0o755)
   ])
 }
 
