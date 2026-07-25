@@ -364,6 +364,39 @@ export type BrowserScreenshotCapture = {
   image: BrowserPng
 }
 
+export type BrowserElementRect = {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export type BrowserElementSelection = {
+  browserId: string
+  navigationId: string
+  pageTitle: string
+  pageUrl: string
+  tagName: string
+  role: string
+  accessibleName: string
+  selector: string
+  text: string
+  nearbyText: string[]
+  attributes: Record<string, string>
+  html: string
+  rectViewport: BrowserElementRect
+  rectPage: BrowserElementRect
+  isFixed: boolean
+}
+
+export type BrowserAnnotationMarker = {
+  id: string
+  index: number
+  rectViewport: BrowserElementRect
+  rectPage: BrowserElementRect
+  isFixed: boolean
+}
+
 export type BrowserEvent =
   | { type: 'updated'; browser: BrowserSnapshot }
   | { type: 'closed'; id: string }
@@ -466,6 +499,9 @@ export type AgentMuxDesktopApi = {
     openDevTools(id: string): Promise<void>
     setViewport(id: string, viewport: BrowserViewport): Promise<BrowserSnapshot>
     captureScreenshot(id: string): Promise<BrowserScreenshotCapture>
+    selectElement(id: string): Promise<BrowserElementSelection | null>
+    cancelElementSelection(id: string): Promise<void>
+    setAnnotationMarkers(id: string, navigationId: string, markers: BrowserAnnotationMarker[]): Promise<void>
     setBounds(id: string, bounds: BrowserBounds | null): Promise<void>
     close(id: string): Promise<void>
     onEvent(listener: (event: BrowserEvent) => void): () => void

@@ -15,7 +15,9 @@ import {
   Pencil,
   Plus,
   RadioTower,
-  SlidersHorizontal
+  Send,
+  SlidersHorizontal,
+  Trash2
 } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type {
@@ -45,7 +47,14 @@ import {
 import { sessionBoardColumn } from '../lib/project-board'
 import { projectWorkspaces } from '../lib/workspace-projects'
 import { api } from '../lib/api'
+import {
+  browserAnnotationDisplayNumber,
+  formatBrowserAnnotationsContext,
+  type BrowserAnnotation
+} from '../lib/browser-annotations'
+import { workbenchSurfaces } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
+import { agentComposerAvailability } from './AgentSessionComposer'
 import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
 import { BranchesPanel } from './BranchesPanel'
 import { FileExplorer, type FileExplorerRevealRequest } from './FileExplorer'
@@ -151,6 +160,80 @@ export function BrowserToolbarPreferences({
         {saving ? <LoaderCircle className="spin" size={12} /> : null}
         {saving ? 'Saving…' : 'Save Browser bar'}
       </button>
+    </section>
+  )
+}
+
+export function BrowserAnnotationsPanel({
+  annotations,
+  currentNavigationByBrowserId,
+  agentSessions,
+  onDelete,
+  onClear,
+  onAddToComposer
+}: {
+  annotations: BrowserAnnotation[]
+  currentNavigationByBrowserId: Readonly<Record<string, string>>
+  agentSessions: Array<Extract<SessionSnapshot, { kind: 'agent' }>>
+  onDelete(browserId: string, annotationId: string): void
+  onClear(): void
+  onAddToComposer(sessionId: string, annotations: BrowserAnnotation[]): void
+}) {
+  const eligibleAgents = agentSessions.filter((session) => !agentComposerAvailability(session).disabled)
+  const [targetSessionId, setTargetSessionId] = useState('')
+  const currentAnnotations = annotations.filter((annotation) => (
+    currentNavigationByBrowserId[annotation.browserId] === annotation.navigationId
+  ))
+
+  useEffect(() => {
+    if (eligibleAgents.some(({ id }) => id === targetSessionId)) return
+    setTargetSessionId(eligibleAgents.length === 1 ? eligibleAgents[0]!.id : '')
+  }, [eligibleAgents, targetSessionId])
+
+  return (
+    <section className="browser-annotations" aria-label="Browser annotations">
+      <header><MessageSquarePlus size={14} /><span><strong>Element annotations</strong><small>Desktop drafts stay out of Activity until you send them.</small></span></header>
+      {annotations.length === 0 ? (
+        <p>Select an element in a Browser tab, then add an annotation.</p>
+      ) : (
+        <div className="browser-annotations__list">
+          {annotations.map((annotation, index) => {
+            const current = currentNavigationByBrowserId[annotation.browserId] === annotation.navigationId
+            return (
+              <article key={annotation.id} className={current ? '' : 'stale'}>
+                <b>{browserAnnotationDisplayNumber(annotations, index)}</b>
+                <span>
+                  <strong>{annotation.selection.accessibleName || `<${annotation.selection.tagName}>`}</strong>
+                  <small>{current ? annotation.note || annotation.selection.selector : 'Page changed · annotation is stale'}</small>
+                </span>
+                <button type="button" aria-label="Delete annotation" onClick={() => onDelete(annotation.browserId, annotation.id)}><Trash2 size={12} /></button>
+              </article>
+            )
+          })}
+        </div>
+      )}
+      {annotations.length > 0 ? (
+        <div className="browser-annotations__handoff">
+          <label>
+            <span>Agent Composer</span>
+            <select value={targetSessionId} onChange={(event) => setTargetSessionId(event.target.value)}>
+              <option value="">Choose an Agent…</option>
+              {eligibleAgents.map((session) => <option key={session.id} value={session.id}>{session.label}</option>)}
+            </select>
+          </label>
+          <div>
+            <button className="small-button" type="button" onClick={onClear}>Clear all</button>
+            <button
+              className="primary-button"
+              type="button"
+              disabled={!targetSessionId || currentAnnotations.length === 0}
+              onClick={() => onAddToComposer(targetSessionId, currentAnnotations)}
+            >
+              <Send size={12} /> Add to Composer
+            </button>
+          </div>
+        </div>
+      ) : null}
     </section>
   )
 }
@@ -567,6 +650,11 @@ export function SurfaceToolDock({
   const selectSession = useAppStore((state) => state.selectSession)
   const config = useAppStore((state) => state.config)
   const sessions = useAppStore((state) => state.sessions)
+  const tabs = useAppStore((state) => state.tabs)
+  const browserAnnotationsByBrowserId = useAppStore((state) => state.browserAnnotationsByBrowserId)
+  const deleteBrowserAnnotation = useAppStore((state) => state.deleteBrowserAnnotation)
+  const clearBrowserAnnotations = useAppStore((state) => state.clearBrowserAnnotations)
+  const appendAgentComposerDraft = useAppStore((state) => state.appendAgentComposerDraft)
   const [startingBrowser, setStartingBrowser] = useState(false)
   const [savingBrowserToolbar, setSavingBrowserToolbar] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -603,6 +691,19 @@ export function SurfaceToolDock({
   )
   const runCounts = { working: 0, 'needs-you': 0, done: 0 }
   for (const session of projectSessions) runCounts[sessionBoardColumn(session)] += 1
+  const browserSurfaces = Object.values(tabs).flatMap((tab) => workbenchSurfaces(tab))
+    .flatMap((candidate) => (
+      candidate.kind === 'browser' && candidate.workspaceId === workspace?.id ? [candidate] : []
+    ))
+  const currentNavigationByBrowserId = Object.fromEntries(browserSurfaces.map((browser) => [
+    browser.browserId,
+    browser.navigationId
+  ]))
+  const browserAnnotations = Object.values(browserAnnotationsByBrowserId).flat()
+    .filter((annotation) => annotation.workspaceId === workspace?.id)
+  const workspaceAgentSessions = sessions.flatMap((session) => (
+    workspace && session.kind === 'agent' && workspaceOwnsSessionPath(workspace, session) ? [session] : []
+  ))
 
   async function openBrowser(): Promise<void> {
     if (!activePaneId || startingBrowser) return
@@ -624,7 +725,7 @@ export function SurfaceToolDock({
     setSavingBrowserToolbar(true)
     setError(null)
     try {
-      setConfig(await api.config.save({ ...current, browser: { toolbar } }))
+      setConfig(await api.config.save({ ...current, browser: { ...current.browser, toolbar } }))
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     } finally {
@@ -683,6 +784,21 @@ export function SurfaceToolDock({
               toolbar={config.browser.toolbar}
               saving={savingBrowserToolbar}
               onSave={saveBrowserToolbar}
+            />
+            <BrowserAnnotationsPanel
+              annotations={browserAnnotations}
+              currentNavigationByBrowserId={currentNavigationByBrowserId}
+              agentSessions={workspaceAgentSessions}
+              onDelete={deleteBrowserAnnotation}
+              onClear={() => {
+                for (const browserId of new Set(browserAnnotations.map(({ browserId }) => browserId))) {
+                  clearBrowserAnnotations(browserId)
+                }
+              }}
+              onAddToComposer={(sessionId, currentAnnotations) => {
+                appendAgentComposerDraft(sessionId, formatBrowserAnnotationsContext(currentAnnotations))
+                selectSession(sessionId, activePaneId)
+              }}
             />
           </ToolActionSurface>
         ) : null}

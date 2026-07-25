@@ -792,6 +792,9 @@ const mockApi: AgentMuxDesktopApi = {
         byteLength: 70
       }
     }),
+    selectElement: async () => null,
+    cancelElementSelection: async () => {},
+    setAnnotationMarkers: async () => {},
     setBounds: async () => {},
     close: async (id) => {
       if (!mockBrowsers.delete(id)) return

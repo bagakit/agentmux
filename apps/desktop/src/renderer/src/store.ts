@@ -27,6 +27,7 @@ import {
 } from '../../shared/scratch-topics'
 import { isScratchWorkspaceId } from '../../shared/contracts'
 import { api } from './lib/api'
+import type { BrowserAnnotation } from './lib/browser-annotations'
 import { rendererResourceOwnerCounts } from './lib/resource-owner-counts'
 import { terminalResourceOwnerCounts } from './lib/terminal-resource-owners'
 import {
@@ -175,6 +176,8 @@ type AppState = {
   viewModes: Record<string, ViewMode>
   executorDetections: Record<string, ExecutorDetectionState>
   hostChecks: Record<string, HostCheckState>
+  browserAnnotationsByBrowserId: Record<string, BrowserAnnotation[]>
+  agentComposerDrafts: Record<string, string>
   mainSurface: MainSurface
   projectRailOpen: boolean
   toolsOpen: boolean
@@ -270,6 +273,12 @@ type AppState = {
   ): Promise<void>
   createBrowser(tabGroupId: string, launcher?: { tabId: string; regionId: string }): Promise<void>
   applyBrowserEvent(event: BrowserEvent): void
+  addBrowserAnnotation(annotation: BrowserAnnotation): void
+  deleteBrowserAnnotation(browserId: string, annotationId: string): void
+  clearBrowserAnnotations(browserId: string): void
+  setAgentComposerDraft(sessionId: string, text: string): void
+  appendAgentComposerDraft(sessionId: string, text: string): void
+  clearAgentComposerDraftIfUnchanged(sessionId: string, expectedText: string): void
   send(sessionId: string, text: string): Promise<void>
   interrupt(sessionId: string): Promise<void>
   refreshSession(sessionId: string): Promise<void>
@@ -811,6 +820,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   viewModes: {},
   executorDetections: {},
   hostChecks: {},
+  browserAnnotationsByBrowserId: {},
+  agentComposerDrafts: {},
   mainSurface: 'workbench',
   projectRailOpen: true,
   toolsOpen: true,
@@ -2457,7 +2468,79 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
   },
   applyBrowserEvent(event) {
-    set((state) => reduceBrowserEvent(state, event))
+    set((state) => ({
+      ...reduceBrowserEvent(state, event),
+      ...(event.type === 'closed'
+        ? {
+            browserAnnotationsByBrowserId: Object.fromEntries(
+              Object.entries(state.browserAnnotationsByBrowserId)
+                .filter(([browserId]) => browserId !== event.id)
+            )
+          }
+        : {})
+    }))
+  },
+  addBrowserAnnotation(annotation) {
+    if (
+      annotation.browserId !== annotation.selection.browserId ||
+      annotation.navigationId !== annotation.selection.navigationId
+    ) {
+      throw new Error('Browser annotation identity does not match its selected element')
+    }
+    set((state) => {
+      const current = state.browserAnnotationsByBrowserId[annotation.browserId] ?? []
+      if (current.some(({ id }) => id === annotation.id)) return state
+      return {
+        browserAnnotationsByBrowserId: {
+          ...state.browserAnnotationsByBrowserId,
+          [annotation.browserId]: [...current, annotation]
+        }
+      }
+    })
+  },
+  deleteBrowserAnnotation(browserId, annotationId) {
+    set((state) => {
+      const current = state.browserAnnotationsByBrowserId[browserId] ?? []
+      const next = current.filter(({ id }) => id !== annotationId)
+      if (next.length === current.length) return state
+      const browserAnnotationsByBrowserId = { ...state.browserAnnotationsByBrowserId }
+      if (next.length > 0) browserAnnotationsByBrowserId[browserId] = next
+      else delete browserAnnotationsByBrowserId[browserId]
+      return { browserAnnotationsByBrowserId }
+    })
+  },
+  clearBrowserAnnotations(browserId) {
+    set((state) => {
+      if (!state.browserAnnotationsByBrowserId[browserId]) return state
+      const browserAnnotationsByBrowserId = { ...state.browserAnnotationsByBrowserId }
+      delete browserAnnotationsByBrowserId[browserId]
+      return { browserAnnotationsByBrowserId }
+    })
+  },
+  setAgentComposerDraft(sessionId, text) {
+    set((state) => ({
+      agentComposerDrafts: { ...state.agentComposerDrafts, [sessionId]: text }
+    }))
+  },
+  appendAgentComposerDraft(sessionId, text) {
+    if (!text.trim()) return
+    set((state) => {
+      const current = state.agentComposerDrafts[sessionId] ?? ''
+      return {
+        agentComposerDrafts: {
+          ...state.agentComposerDrafts,
+          [sessionId]: `${current}${current.trim() ? '\n\n' : ''}${text}`
+        }
+      }
+    })
+  },
+  clearAgentComposerDraftIfUnchanged(sessionId, expectedText) {
+    set((state) => {
+      if ((state.agentComposerDrafts[sessionId] ?? '') !== expectedText) return state
+      const agentComposerDrafts = { ...state.agentComposerDrafts }
+      delete agentComposerDrafts[sessionId]
+      return { agentComposerDrafts }
+    })
   },
   async send(sessionId, text) {
     if (!text.trim()) return

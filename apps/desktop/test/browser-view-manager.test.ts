@@ -27,6 +27,12 @@ const fakeElectron = vi.hoisted(() => {
       this.deviceEmulation = parameters
     })
     readonly openDevTools = vi.fn()
+    executeJavaScriptInIsolatedWorldImpl = async (_worldId: number, scripts: Array<{ code: string }>) =>
+      scripts[0]?.code.includes('Select an element') ? null : true
+    readonly executeJavaScriptInIsolatedWorld = vi.fn(async (
+      worldId: number,
+      scripts: Array<{ code: string }>
+    ) => await this.executeJavaScriptInIsolatedWorldImpl(worldId, scripts))
     capturePageImpl = async () => ({
       isEmpty: () => false,
       getSize: () => ({ width: 2, height: 3 }),
@@ -415,5 +421,122 @@ describe('BrowserViewManager', () => {
     })
 
     await expect(pending).rejects.toThrow('Browser page changed while the screenshot was being captured')
+  })
+
+  it('returns only the sanitized Main-owned element selection contract', async () => {
+    const fixture = fakeWindow()
+    const manager = new BrowserViewManager(fixture.window as never)
+    const created = await manager.create('browser-selection', 'https://example.com/page')
+    const view = fixture.children[0]!
+    view.webContents.executeJavaScriptInIsolatedWorldImpl = async (_worldId, scripts) => (
+      scripts[0]?.code.includes('Select an element')
+        ? {
+            pageTitle: 'Secret docs',
+            pageUrl: 'https://user:password@example.com/page?token=secret#private',
+            tagName: 'button',
+            role: 'button',
+            accessibleName: 'Open docs',
+            selector: 'main > button',
+            text: 'Open docs',
+            nearbyText: ['Documentation'],
+            attributes: { onclick: 'steal()', 'aria-label': 'Open docs' },
+            html: '<button onclick="steal()" aria-label="Open docs">Open docs</button>',
+            rectViewport: { x: 1, y: 2, width: 3, height: 4 },
+            rectPage: { x: 5, y: 6, width: 3, height: 4 },
+            isFixed: false
+          }
+        : true
+    )
+
+    await expect(manager.selectElement('browser-selection')).resolves.toEqual({
+      browserId: 'browser-selection',
+      navigationId: created.navigationId,
+      pageTitle: 'Secret docs',
+      pageUrl: 'https://example.com/page',
+      tagName: 'button',
+      role: 'button',
+      accessibleName: 'Open docs',
+      selector: 'main > button',
+      text: 'Open docs',
+      nearbyText: ['Documentation'],
+      attributes: { 'aria-label': 'Open docs' },
+      html: '<button aria-label="Open docs">Open docs</button>',
+      rectViewport: { x: 1, y: 2, width: 3, height: 4 },
+      rectPage: { x: 5, y: 6, width: 3, height: 4 },
+      isFixed: false
+    })
+  })
+
+  it('does not start selection after a newer cancel wins the preflight race', async () => {
+    const fixture = fakeWindow()
+    const manager = new BrowserViewManager(fixture.window as never)
+    await manager.create('browser-selection-race', 'https://example.com/page')
+    const view = fixture.children[0]!
+    let resolvePreflight!: (value: boolean) => void
+    let delayFirstCancel = true
+    view.webContents.executeJavaScriptInIsolatedWorldImpl = async (_worldId, scripts) => {
+      const script = scripts[0]?.code ?? ''
+      if (delayFirstCancel && script.includes('const barrier =')) {
+        delayFirstCancel = false
+        return await new Promise<boolean>((resolve) => { resolvePreflight = resolve })
+      }
+      return script.includes('Select an element') ? null : true
+    }
+    view.webContents.executeJavaScriptInIsolatedWorld.mockClear()
+
+    const pending = manager.selectElement('browser-selection-race')
+    await manager.cancelElementSelection('browser-selection-race')
+    resolvePreflight(true)
+
+    await expect(pending).resolves.toBeNull()
+    expect(view.webContents.executeJavaScriptInIsolatedWorld.mock.calls.filter((call) => (
+      call[1][0]?.code.includes('Select an element')
+    ))).toHaveLength(0)
+  })
+
+  it('validates annotation identity and geometry before isolated-world injection', async () => {
+    const fixture = fakeWindow()
+    const manager = new BrowserViewManager(fixture.window as never)
+    const created = await manager.create('browser-markers', 'https://example.com/page')
+    const view = fixture.children[0]!
+    view.webContents.executeJavaScriptInIsolatedWorld.mockClear()
+
+    await manager.setAnnotationMarkers('browser-markers', created.navigationId, [{
+      id: 'annotation-1',
+      index: 0,
+      rectViewport: { x: -20_000_000, y: 2, width: 3, height: 4 },
+      rectPage: { x: 5, y: 6, width: 3, height: 4 },
+      isFixed: false
+    }])
+
+    expect(view.webContents.executeJavaScriptInIsolatedWorld).toHaveBeenCalledOnce()
+    const script = view.webContents.executeJavaScriptInIsolatedWorld.mock.calls[0]?.[1][0]?.code
+    expect(script).toContain('annotation-1')
+    expect(script).toContain('"x":-10000000')
+    await expect(manager.setAnnotationMarkers('browser-markers', 'stale-navigation', []))
+      .resolves.toBeUndefined()
+    await expect(manager.setAnnotationMarkers('browser-markers', created.navigationId, [{
+      id: 'annotation-2',
+      index: 0,
+      rectViewport: { x: Number.NaN, y: 0, width: 1, height: 1 },
+      rectPage: { x: 0, y: 0, width: 1, height: 1 },
+      isFixed: false
+    }])).rejects.toThrow('geometry is invalid')
+    await expect(manager.setAnnotationMarkers('browser-markers', created.navigationId, [{
+      id: 'duplicate',
+      index: 0,
+      rectViewport: { x: 0, y: 0, width: 1, height: 1 },
+      rectPage: { x: 0, y: 0, width: 1, height: 1 },
+      isFixed: false
+    }, {
+      id: 'duplicate',
+      index: 1,
+      rectViewport: { x: 1, y: 1, width: 1, height: 1 },
+      rectPage: { x: 1, y: 1, width: 1, height: 1 },
+      isFixed: false
+    }])).rejects.toThrow('duplicates an id or index')
+    const sparse = Array.from({ length: 1 }) as never
+    await expect(manager.setAnnotationMarkers('browser-markers', created.navigationId, sparse))
+      .rejects.toThrow('marker 0 is invalid')
   })
 })
