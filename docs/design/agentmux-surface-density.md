@@ -103,6 +103,7 @@
 - 每个图标按钮必须有 tooltip、`aria-label` 和可见键盘 focus。
 - Tab 名称始终单行；过长省略，空间不足时由 Pane 内横向 overflow 解决。
 - Surface 明度和状态色必须保持足够对比；不可只靠颜色区分选中、危险或不可用。
+- 共享状态点（`.status--{state} .status__dot`，StatusDot 与 Attention Bar 的 StatusCount 同源复用）中，"需要你"（`waiting`/`blocked`）必须带**形状**而非仅靠颜色：琥珀圆点内嵌 `?` 字形，使其在色盲与快速一瞥下仍与其他琥珀含义可辨。`disconnected` 是掉线而非请求关注，从琥珀让出、改用中性空心环，令琥珀唯一地表示"需要你"。5px 角标（Tab 角、Rail 行）容不下字形也无需字形——颜色加角落位置已足够区分，字形只在全尺寸状态点上浮现。
 
 ## 验收
 
