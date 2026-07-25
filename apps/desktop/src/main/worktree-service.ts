@@ -128,17 +128,31 @@ export class WorktreeService {
     const snapshot = await this.list(input.workspaceId, config)
     this.assertRepository(snapshot)
     const branch = snapshot.branches.find((item) => item.name === branchName)
-    if (!branch) throw new Error(`Unknown branch: ${branchName}`)
-    if (branch.worktreePath) throw new Error(`Branch already has a worktree: ${branchName}`)
+    // Creating the branch and adopting an existing one are different intents, and confusing them is how
+    // someone's work gets moved. `createBranch` therefore requires the name to be free, and the default
+    // path still requires it to exist — neither silently does the other's job.
+    if (input.createBranch) {
+      if (branch) throw new Error(`Branch already exists: ${branchName}`)
+    } else {
+      if (!branch) throw new Error(`Unknown branch: ${branchName}`)
+      if (branch.worktreePath) throw new Error(`Branch already has a worktree: ${branchName}`)
+    }
     if (config.workspaces.some((item) => item.hostId === snapshot.hostId && item.path === path)) {
       throw new Error(`Workspace already registered: ${path}`)
     }
     const host = this.hostFor(snapshot.hostId)
     const result = await host.run(
       'git',
-      ['-C', snapshot.repoPath, 'worktree', 'add', '--', path, branchName],
+      input.createBranch
+        // `-b <branch> <path> HEAD`: the new branch starts at the repository's current HEAD, which is
+        // what "run these N agents from where I am now" means. Git itself refuses if the name is taken,
+        // so the check above is the readable error rather than the only guard.
+        ? ['-C', snapshot.repoPath, 'worktree', 'add', '-b', branchName, '--', path, 'HEAD']
+        : ['-C', snapshot.repoPath, 'worktree', 'add', '--', path, branchName],
       { timeoutMs: 60_000, maxOutputBytes: 2 * 1024 * 1024 }
     )
+    // Registration only happens after git succeeded, so a failed create never leaves a workspace record
+    // pointing at a directory that does not exist.
     this.assertGit(result, 'Git worktree creation failed')
     return await this.register(config, {
       id: randomUUID(),
@@ -149,6 +163,70 @@ export class WorktreeService {
       repoPath: snapshot.repoPath,
       branch: branchName
     })
+  }
+
+  /**
+   * Remove one worktree and withdraw its workspace record.
+   *
+   * A fan-out that cannot clean up is a fan-out that leaks: N directories and N workspace rows every
+   * time someone compares approaches. This is the symmetric half of createForBranch, and it is a general
+   * capability rather than fan-out scaffolding.
+   *
+   * Uncommitted work is refused by default. Losing an agent's output because it happened to be the lane
+   * you did not pick is the one outcome this must never produce silently, so discarding is opt-in and
+   * says what it is.
+   */
+  async removeWorktree(
+    input: { workspaceId: string; discardChanges?: boolean },
+    config: AppConfig
+  ): Promise<{ config: AppConfig; removedPath: string }> {
+    const workspace = this.workspace(config, input.workspaceId)
+    if (workspace.kind !== 'worktree' || !workspace.repoPath) {
+      throw new Error(`Workspace is not a worktree: ${workspace.name}`)
+    }
+    const host = this.hostFor(workspace.hostId)
+
+    if (!input.discardChanges) {
+      // `status --porcelain` is empty exactly when there is nothing to lose: no modifications, no staged
+      // changes, no untracked files. Anything at all means stop and say so.
+      const status = await host.run(
+        'git',
+        ['-C', workspace.path, 'status', '--porcelain'],
+        GIT_DISCOVERY_OPTIONS
+      )
+      this.assertGit(status, 'Could not inspect the worktree for uncommitted changes')
+      if (status.stdout.trim() !== '') {
+        throw new Error(
+          `Worktree has uncommitted changes: ${workspace.name}. Review them, or remove it explicitly discarding the changes.`
+        )
+      }
+    }
+
+    const removal = await host.run(
+      'git',
+      input.discardChanges
+        ? ['-C', workspace.repoPath, 'worktree', 'remove', '--force', '--', workspace.path]
+        : ['-C', workspace.repoPath, 'worktree', 'remove', '--', workspace.path],
+      { timeoutMs: 60_000, maxOutputBytes: 2 * 1024 * 1024 }
+    )
+    this.assertGit(removal, 'Git worktree removal failed')
+
+    // Prune after removing so git's metadata carries no dangling entry. Without this a later
+    // `worktree add` at the same path is refused by a record of something that is already gone.
+    const prune = await host.run(
+      'git',
+      ['-C', workspace.repoPath, 'worktree', 'prune'],
+      { timeoutMs: 30_000, maxOutputBytes: 1024 * 1024 }
+    )
+    this.assertGit(prune, 'Git worktree prune failed')
+
+    // Withdrawn only after git confirmed: a record removed ahead of a failed removal would strand a
+    // real directory with nothing pointing at it.
+    const nextConfig = await this.configWriter.save({
+      ...config,
+      workspaces: config.workspaces.filter((item) => item.id !== workspace.id)
+    })
+    return { config: nextConfig, removedPath: workspace.path }
   }
 
   private workspace(config: AppConfig, id: string): WorkspaceRecord {

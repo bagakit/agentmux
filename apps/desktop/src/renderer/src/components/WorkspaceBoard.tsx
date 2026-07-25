@@ -32,6 +32,7 @@ import { projectWorkspaces } from '../lib/workspace-projects'
 import { useAppStore } from '../store'
 import { BoardDiscussionCanvas } from './BoardDiscussionCanvas'
 import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
+import { FanOutStrip } from './FanOutStrip'
 import { StatusDot } from './StatusDot'
 
 const COLUMN_META: Record<ProjectBoardColumn, {
@@ -206,6 +207,13 @@ export function WorkspaceBoard() {
         <span className="board-filter-count">{filteredLanes.length} / {lanes.length}</span>
         {hasFilters ? <button className="small-button" onClick={clearFilters}><X size={11} /> Reset</button> : <button className="small-button" type="button" onClick={() => void refresh()} disabled={loading}>{loading ? <LoaderCircle className="spin" size={12} /> : <RefreshCw size={12} />} Refresh</button>}
       </div>
+
+      {/* Which branches are racing on the same prompt. Absent when there is no fan-out to compare. */}
+      <FanOutStrip
+        workspaces={project.workspaces}
+        sessions={sessions}
+        onSelectSession={(sessionId) => void selectSession(sessionId)}
+      />
 
       {loadError ? <div className="board-inline-warning"><AlertTriangle size={13} /> {loadError}</div> : null}
       {actionError ? <div className="board-inline-warning"><AlertTriangle size={13} /> {actionError}</div> : null}
