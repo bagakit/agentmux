@@ -35,7 +35,7 @@ import { ConfirmationDialog } from './ConfirmationDialog'
 import { NewTabSurface } from './NewTabSurface'
 import { PaneSplitMenu } from './PaneSplitMenu'
 import { RegionContextMenu } from './RegionContextMenu'
-import { layoutForActiveTopic } from '../lib/scratch-topic-layout'
+import { activeTopicIdFromLayout, layoutForActiveTopic } from '../lib/scratch-topic-layout'
 import { SessionPane } from './SessionPane'
 import { StatusDot } from './StatusDot'
 import { WorkbenchTabContextMenu } from './WorkbenchTabContextMenu'
@@ -822,11 +822,14 @@ export function WorkspaceWorkbench({
 }) {
   const storedLayout = useAppStore((state) => state.layouts[workspaceId])
   const tabs = useAppStore((state) => state.tabs)
-  const activeScratchTopicId = useAppStore((state) => state.activeScratchTopicId)
   // 切 Topic 就像切 Branch：换掉那一组 Tab。layout 仍只有一份，这里只是一次投影。
+  // 当前 Topic 从活动 Tab 的绑定派生，而不是读一个只有面板点击会写的字段——否则从别的路径
+  // 进入 Topic（点 Tab、会话恢复、Board 跳转）时它是空的，投影整个不发生。
   const layout = useMemo(
-    () => storedLayout ? layoutForActiveTopic(storedLayout, tabs, activeScratchTopicId) : storedLayout,
-    [storedLayout, tabs, activeScratchTopicId]
+    () => storedLayout
+      ? layoutForActiveTopic(storedLayout, tabs, activeTopicIdFromLayout(storedLayout, tabs))
+      : storedLayout,
+    [storedLayout, tabs]
   )
   const moveTab = useAppStore((state) => state.moveTab)
   const moveTabToNewGroup = useAppStore((state) => state.moveTabToNewGroup)
