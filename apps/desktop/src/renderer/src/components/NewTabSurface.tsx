@@ -1,9 +1,11 @@
 import { ArrowUpRight, Check, ChevronRight, Globe2, LoaderCircle, Play, RadioTower, RefreshCw, Sparkles, SquareTerminal } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import type { LaunchOptionSelection } from '@agentmux/core'
 import { DESKTOP_ACTIONS } from '../../../shared/desktop-actions'
 import { executorDetectionKey, useAppStore, warmTerminalKey } from '../store'
 import { configuredExecutors } from '../lib/executors'
 import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
+import { LaunchOptionControls } from './LaunchOptionControls'
 import { TerminalView } from './TerminalView'
 
 export function NewTabSurface({
@@ -17,11 +19,13 @@ export function NewTabSurface({
 }) {
   const [executorId, setExecutorId] = useState('codex')
   const [prompt, setPrompt] = useState('')
+  const [launchOptionSelection, setLaunchOptionSelection] = useState<LaunchOptionSelection>({})
   const [busy, setBusy] = useState<'agent' | 'terminal' | 'browser' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [showUnavailable, setShowUnavailable] = useState(false)
   const promptRef = useRef<HTMLTextAreaElement>(null)
   const config = useAppStore((state) => state.config)
+  const providerCatalog = useAppStore((state) => state.providerCatalog)
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
   const tabWorkspaceId = useAppStore((state) => tabId ? state.tabs[tabId]?.workspaceId : undefined)
   const detections = useAppStore((state) => state.executorDetections)
@@ -50,6 +54,24 @@ export function NewTabSurface({
   const installedExecutors = executors.filter((executor) => executor.detection?.state === 'ready')
   const unavailableExecutors = executors.filter((executor) => executor.detection?.state !== 'ready')
   const detecting = executors.some((executor) => executor.detection?.state === 'checking')
+
+  // Launch options are read purely from the selected Provider's catalog declaration — no branch on
+  // providerId. A Provider that declares none yields [], so LaunchOptionControls renders nothing.
+  const selectedProviderId = executors.find((executor) => executor.id === executorId)?.providerId
+  const launchOptions = useMemo(
+    () => providerCatalog.find((entry) => entry.id === selectedProviderId)?.launchOptions ?? [],
+    [providerCatalog, selectedProviderId]
+  )
+  // Reset the picked choices to each option's declared default whenever the target Provider changes, so a
+  // choice picked for one Provider can never launch another. Options without a default start unset, leaving
+  // the Provider's own default untouched until the user picks.
+  useEffect(() => {
+    const defaults: Record<string, string> = {}
+    for (const option of launchOptions) {
+      if (option.defaultChoiceId !== undefined) defaults[option.id] = option.defaultChoiceId
+    }
+    setLaunchOptionSelection(defaults)
+  }, [launchOptions])
 
   useEffect(() => {
     promptRef.current?.focus()
@@ -185,6 +207,21 @@ export function NewTabSurface({
         rows={4}
       />
 
+      <LaunchOptionControls
+        options={launchOptions}
+        selection={launchOptionSelection}
+        disabled={busy !== null}
+        onSelect={(optionId, choiceId) =>
+          setLaunchOptionSelection((current) => {
+            if (choiceId === null) {
+              const { [optionId]: _cleared, ...rest } = current
+              return rest
+            }
+            return { ...current, [optionId]: choiceId }
+          })
+        }
+      />
+
       <div className="launch-surface__footer">
         <span>
           {workspace?.hostId !== 'local' ? <RadioTower size={13} /> : null}
@@ -198,7 +235,8 @@ export function NewTabSurface({
             executorId,
             prompt,
             tabGroupId,
-            tabId && regionId ? { tabId, regionId } : undefined
+            tabId && regionId ? { tabId, regionId } : undefined,
+            launchOptionSelection
           ))}
         >
           {busy === 'agent' ? <LoaderCircle className="spin" size={14} /> : <Play size={14} />} {busy === 'agent' ? 'Launching…' : 'Launch agent'}

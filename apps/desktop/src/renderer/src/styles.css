@@ -1004,6 +1004,43 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   margin-left: 4px;
 }
 .terminal-view__xterm--hydrating { visibility: hidden; }
+/* Hover preview for terminal links: filled surface + top highlight, anchored by JS so it never
+   covers the link. `above` grows upward from its top edge; `below` grows downward. */
+.terminal-link-preview {
+  position: fixed;
+  z-index: 40;
+  max-width: 360px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 9px;
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  background:
+    radial-gradient(120% 90% at 100% 0, #1d47303d 0, transparent 52%),
+    #1a2027f7;
+  box-shadow: var(--elev-2), var(--hl-strong), 0 0 0 1px #00000073;
+  pointer-events: none;
+  animation: menu-in 90ms ease;
+}
+.terminal-link-preview[data-placement='above'] { transform: translateY(-100%); }
+.terminal-link-preview > svg { flex: 0 0 auto; color: var(--green); }
+.terminal-link-preview__url {
+  min-width: 0;
+  overflow: hidden;
+  font: 10px/1.4 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.terminal-link-preview__hint {
+  flex: 0 0 auto;
+  padding-left: 8px;
+  margin-left: 2px;
+  border-left: 1px solid #ffffff14;
+  color: var(--text-3);
+  font: 10px/1.2 var(--font-mono);
+  white-space: nowrap;
+}
 .terminal-hydration {
   position: absolute;
   inset: 0;
@@ -1520,6 +1557,20 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .launch-terminal__body .terminal-view { border-radius: 0 0 var(--radius-sm) var(--radius-sm); }
 .launch-surface textarea { width: min(640px, 100%); margin-inline: auto; padding: 11px 12px; resize: vertical; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); outline: none; color: var(--text); background: var(--surface-1); font-size: 11.5px; line-height: 1.5; transition: border-color 140ms ease, box-shadow 140ms ease; }
 .launch-surface textarea:focus { border-color: var(--focus-line); box-shadow: var(--focus-ring); background: var(--surface-0); }
+.launch-options { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.launch-options__label { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 0 2px; color: var(--text-3); font-size: 10px; font-weight: 650; letter-spacing: .07em; text-transform: uppercase; }
+.launch-options__label em { font-size: 10px; font-weight: 500; font-style: normal; letter-spacing: 0; text-transform: none; color: var(--text-3); opacity: .8; }
+.launch-option { display: flex; flex-direction: column; gap: 6px; padding: 9px 10px; border-radius: var(--radius-sm); background: var(--surface-1); }
+.launch-option__head { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.launch-option__head strong { color: var(--text-2); font-size: 11.5px; font-weight: 600; }
+.launch-option__head small { color: var(--text-3); font-size: 10px; line-height: 1.4; }
+.launch-option__segments { display: flex; flex-wrap: wrap; gap: 4px; }
+.launch-option__segment { min-height: 24px; padding: 3px 10px; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: var(--surface-2); font-size: 11px; font-weight: 500; cursor: pointer; transition: background 120ms ease, color 120ms ease, box-shadow 120ms ease; }
+.launch-option__segment:hover:not(:disabled) { color: var(--text); background: var(--surface-3); }
+.launch-option__segment:disabled { opacity: .5; cursor: default; }
+.launch-option__segment--selected, .launch-option__segment--selected:hover { color: var(--text); background: var(--surface-3); box-shadow: var(--hl); }
+.launch-option__segment--selected[data-tier="caution"] { color: var(--amber); }
+.launch-option__segment--selected[data-tier="danger"] { color: var(--red); }
 .launch-surface__footer { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; }
 .launch-surface__footer > span { display: flex; align-items: center; gap: 5px; color: var(--text-3); font-size: 11px; }
 .launch-host-health { padding: 2px 5px; border-radius: var(--radius); color: var(--text-3); background: var(--surface-3); font-size: 10px; font-style: normal; }

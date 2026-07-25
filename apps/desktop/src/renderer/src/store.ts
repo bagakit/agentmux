@@ -7,7 +7,7 @@ import {
   type AgentMuxControlResult,
   type AgentMuxRegion
 } from '@agentmux/core/control'
-import type { AgentCatalogEntry, AgentMuxInteractionResponse } from '@agentmux/core'
+import type { AgentCatalogEntry, AgentMuxInteractionResponse, LaunchOptionSelection } from '@agentmux/core'
 import type {
   AgentLaunchResult,
   AgentSessionRecoveryCandidate,
@@ -275,7 +275,8 @@ type AppState = {
     executorId: string,
     prompt: string,
     tabGroupId: string,
-    launcher?: { tabId: string; regionId: string }
+    launcher?: { tabId: string; regionId: string },
+    launchOptions?: LaunchOptionSelection
   ): Promise<void>
   launchTerminal(
     tabGroupId: string,
@@ -2111,7 +2112,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!layout) throw new Error('Workspace layout is unavailable')
     await get().launchAgent(executorId, prompt, layout.activeGroupId)
   },
-  async launchAgent(executorId, prompt, tabGroupId, launcher) {
+  async launchAgent(executorId, prompt, tabGroupId, launcher, launchOptions) {
     const state = get()
     const launcherTab = launcher ? state.tabs[launcher.tabId] : undefined
     const launcherSurface = launcherTab && launcher
@@ -2162,6 +2163,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         hostId: workspace.hostId,
         workspacePath: workspace.path,
         ...(scratchTopicId ? { scratchTopicId } : {}),
+        ...(launchOptions && Object.keys(launchOptions).length > 0 ? { launchOptions } : {}),
         prompt,
         agentSessionId: sessionId,
         createOperationId: crypto.randomUUID()

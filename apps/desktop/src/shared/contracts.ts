@@ -6,6 +6,7 @@ import type {
   AgentExecutorConfig,
   AgentExecutorId,
   AgentProviderId,
+  LaunchOptionSelection,
   AgentMuxClientEvent,
   AgentMuxEvidenceSource,
   AgentMuxInteractionRequest,
@@ -200,6 +201,12 @@ export type AgentLaunchInput = {
   agentSessionId?: string
   createOperationId?: string
   prompt?: string
+  /**
+   * The choice ids the launcher picked for this Provider's declared launch options (DESCRIBE half in
+   * {@link AgentCatalogEntry.launchOptions}). Core resolves each choice's argv at spawn; a choice the
+   * Provider does not declare fails closed. Absent/empty leaves the Provider's own defaults untouched.
+   */
+  launchOptions?: LaunchOptionSelection
   cols?: number
   rows?: number
 }

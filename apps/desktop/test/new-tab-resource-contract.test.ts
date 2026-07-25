@@ -42,6 +42,7 @@ const fixture = vi.hoisted(() => {
         browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
       },
       activeWorkspaceId: 'workspace',
+      providerCatalog: [],
       tabs: {},
       hostChecks: {},
       executorDetections: {},

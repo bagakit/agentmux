@@ -4,14 +4,18 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
-import { ChevronDown, ChevronUp, LoaderCircle, Search, X } from 'lucide-react'
+import { ChevronDown, ChevronUp, ExternalLink, LoaderCircle, Search, X } from 'lucide-react'
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { RuntimeEvent, SessionSnapshot, TerminalThemeId } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import type { OpenHttpLinkOrigin } from '../lib/open-destination'
 import { useAppStore } from '../store'
 import { installTerminalColorQueryReplyHandlers } from '../lib/terminal-capability-replies'
-import { isTerminalLinkClick } from '../lib/terminal-link-gesture'
+import {
+  isTerminalLinkClick,
+  terminalLinkModifierOpensSystemBrowser,
+  terminalLinkPreviewAnchor
+} from '../lib/terminal-link-gesture'
 import { terminalOptions, terminalTheme } from '../lib/terminal-theme'
 import { isTerminalAppShortcut } from '../lib/terminal-shortcuts'
 import { finishTerminalReplayRecovery, hydrateTerminalReplay } from '../lib/terminal-replay'
@@ -86,6 +90,10 @@ export function TerminalView({
   const terminalGenerationRef = useRef(0)
   const nextLinkRequestIdRef = useRef(0)
   const linkRequestRef = useRef<TerminalLinkRequest | null>(null)
+  /** linkOrigin is a prop; the attach effect only re-runs on runId/session/theme, so read it fresh
+   * through a ref when the modifier fast-path opens a link from inside the effect closure. */
+  const linkOriginRef = useRef(linkOrigin)
+  linkOriginRef.current = linkOrigin
   /** Where the current press began, so a drag that ends over a link is not mistaken for a click. */
   const linkPressRef = useRef<{ x: number; y: number } | null>(null)
   const interactiveResizeRef = useRef(interactiveResize)
@@ -110,8 +118,16 @@ export function TerminalView({
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [linkRequest, setLinkRequest] = useState<TerminalLinkRequest | null>(null)
+  const [linkPreview, setLinkPreview] = useState<{
+    url: string
+    left: number
+    top: number
+    placement: 'above' | 'below'
+    fastPath: boolean
+  } | null>(null)
   const openHttpLink = useAppStore((state) => state.openHttpLink)
   const reportError = useAppStore((state) => state.reportError)
+  const isMac = navigator.userAgent.includes('Mac')
 
   useEffect(() => {
     if (searchOpen) searchInputRef.current?.focus()
@@ -137,7 +153,6 @@ export function TerminalView({
     setHasOutput(false)
     setReplayGap(false)
     setRedrawing(false)
-    const isMac = navigator.userAgent.includes('Mac')
     const terminal = new Terminal({
       ...terminalOptions(themeId),
       scrollback: 5_000
@@ -157,6 +172,13 @@ export function TerminalView({
         release: { x: event.clientX, y: event.clientY },
         hasSelection: terminal.hasSelection()
       })) return
+      // Cmd (macOS) / Ctrl (elsewhere) + click opens the system browser immediately, skipping the
+      // destination menu. A plain click keeps the menu.
+      if (terminalLinkModifierOpensSystemBrowser(event, isMac)) {
+        setLinkPreview(null)
+        void openHttpLink(linkOriginRef.current, url, 'system').catch(reportError)
+        return
+      }
       const request = {
         id: ++nextLinkRequestIdRef.current,
         url,
@@ -166,6 +188,29 @@ export function TerminalView({
       }
       linkRequestRef.current = request
       setLinkRequest(request)
+      setLinkPreview(null)
+    }, {
+      hover: (event, text) => {
+        const url = parseTerminalHttpLink(text)
+        if (!url) return
+        const rect = root.getBoundingClientRect()
+        // Cell height in CSS px, so the preview clears the whole link row whatever the pointer's
+        // vertical offset within the hovered cell. Derived from the grid to avoid a private xterm API.
+        const cellHeight = terminal.rows > 0 ? rect.height / terminal.rows : 0
+        const anchor = terminalLinkPreviewAnchor({
+          pointer: { x: event.clientX, y: event.clientY },
+          cellHeight,
+          viewport: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom }
+        })
+        setLinkPreview({
+          url,
+          left: anchor.left,
+          top: anchor.top,
+          placement: anchor.placement,
+          fastPath: terminalLinkModifierOpensSystemBrowser(event, isMac)
+        })
+      },
+      leave: () => setLinkPreview(null)
     })
     terminal.loadAddon(fit)
     terminal.loadAddon(search)
@@ -372,6 +417,7 @@ export function TerminalView({
     if (autoFocusRef.current) requestAnimationFrame(() => terminal.focus())
     return () => {
       disposed = true
+      setLinkPreview(null)
       setLinkRequest((current) => {
         const next = current?.terminalGeneration === terminalGeneration ? null : current
         linkRequestRef.current = next
@@ -474,6 +520,24 @@ export function TerminalView({
               terminalRef.current?.focus()
             }}
           />
+          {linkPreview ? (
+            <div
+              className="terminal-link-preview"
+              data-placement={linkPreview.placement}
+              role="tooltip"
+              style={{ left: linkPreview.left, top: linkPreview.top }}
+            >
+              <ExternalLink size={13} />
+              <span className="terminal-link-preview__url" title={linkPreview.url}>
+                {linkPreview.url}
+              </span>
+              <kbd className="terminal-link-preview__hint">
+                {linkPreview.fastPath
+                  ? 'Open in browser'
+                  : `${isMac ? '⌘' : 'Ctrl'}+click to open · click to choose`}
+              </kbd>
+            </div>
+          ) : null}
           {startupPhase === 'restoring' ? (
             <div className="terminal-hydration" role="status" aria-live="polite">
               <LoaderCircle className="spin" size={13} /> Restoring terminal…

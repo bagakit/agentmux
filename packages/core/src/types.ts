@@ -1,3 +1,5 @@
+import type { LaunchOption } from './agent-launch-option.js'
+
 export type BuiltInAgentProviderId =
   | 'codex'
   | 'claude'
@@ -238,6 +240,13 @@ export type AgentCatalogEntry = {
   resumeStrategy: AgentResumeStrategy
   acpStrategy: AgentAcpStrategy
   capabilities: AgentCapabilities
+  /**
+   * The DESCRIBE half of the sealed launch-option contract: pure serializable controls the renderer can
+   * draw with no knowledge of the provider. Empty for a provider that declares no option, so the UI
+   * renders nothing — absence hides the control rather than disabling it. The argv each choice
+   * contributes never crosses IPC; it stays core-side (see agent-launch-option.ts).
+   */
+  launchOptions: LaunchOption[]
 }
 
 export type AgentCapabilitySnapshot = {

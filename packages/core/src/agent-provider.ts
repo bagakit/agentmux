@@ -5,6 +5,15 @@ import { fileURLToPath } from 'node:url'
 import type { ExecutionHost } from './execution-host.js'
 import type { AgentManagedHookPlan } from './managed-hook-installer.js'
 import {
+  cloneLaunchOptions,
+  describeLaunchOptions,
+  resolveLaunchOptionArgv,
+  validateLaunchOptionDeclarations,
+  type LaunchOption,
+  type LaunchOptionDeclaration,
+  type LaunchOptionSelection
+} from './agent-launch-option.js'
+import {
   normalizeTerminalInteraction,
   planNumberedTerminalInteractionResponse,
   type AgentTerminalInteractionProtocol
@@ -45,6 +54,11 @@ export type AgentProvider = {
   probeCapabilities(probe: AgentExecutableProbe, commandOverride?: string): Promise<AgentCapabilitySnapshot>
   buildLaunch(context: AgentProviderLaunchContext): AgentLaunchPlan
   buildResumeLaunch(context: AgentProviderResumeContext): AgentLaunchPlan
+  /**
+   * CONTRIBUTE half of the sealed launch-option contract: turn the choice ids the UI sent back into the
+   * argv fragment to prepend at launch. Fails closed on an option or choice this Provider never declared.
+   */
+  resolveLaunchArgv(selections: LaunchOptionSelection): string[]
   planPromptInput(prompt: string): AgentPromptInputPlan
   planInteractionResponse(
     request: AgentMuxInteractionRequest,
@@ -53,10 +67,20 @@ export type AgentProvider = {
   normalizeHook(envelope: NativeHookEnvelope): NormalizedHookEvent
 }
 
+/** The catalog fields a Provider declares directly; `readySignal` and the DESCRIBE-half `launchOptions`
+ * are derived by {@link defineAgentProvider} from the definition. */
+export type AgentCatalogSeed = Omit<AgentCatalogEntry, 'readySignal' | 'launchOptions'>
+
 export type AgentProviderDefinition = {
-  catalog: AgentCatalogEntry
+  catalog: Omit<AgentCatalogEntry, 'launchOptions'>
   buildArgs(prompt: string, args: readonly string[]): string[]
   hook: AgentNativeHookSpecification
+  /**
+   * SSOT launch-option declarations: each choice fuses the label the UI shows with the argv it
+   * contributes at launch. Omit (or leave empty) and the Provider offers no option — the catalog's
+   * `launchOptions` is `[]` and the renderer draws no control.
+   */
+  launchOptions?: readonly LaunchOptionDeclaration[]
   terminalHandshake?: AgentTerminalHandshake
   terminalPromptRender?: AgentTerminalPromptRenderMatcher
   buildResumeArgs?: (
@@ -441,7 +465,7 @@ export function buildPromptInputPayload(prompt: string): string {
 }
 
 export function defineAgentProvider(definition: AgentProviderDefinition): AgentProvider {
-  const { catalog } = definition
+  const { catalog: catalogSeed } = definition
   if (
     definition.terminalHandshake &&
     (!definition.terminalHandshake.query || !definition.terminalHandshake.response)
@@ -457,6 +481,14 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     )
   ) {
     throw new AgentMuxError('Agent terminal prompt render matcher cannot be empty.', 'INVALID_AGENT_PROVIDER')
+  }
+  const launchOptionDeclarations = definition.launchOptions ?? []
+  validateLaunchOptionDeclarations(catalogSeed.id, launchOptionDeclarations)
+  // Freeze the DESCRIBE half once; the catalog getter hands out clones so no consumer can mutate it.
+  const describedLaunchOptions: readonly LaunchOption[] = describeLaunchOptions(launchOptionDeclarations)
+  const catalog: AgentCatalogEntry = {
+    ...catalogSeed,
+    launchOptions: cloneLaunchOptions(describedLaunchOptions)
   }
   return {
     id: catalog.id,
@@ -504,6 +536,9 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
         env: { ...context.env }
       }
     },
+    resolveLaunchArgv(selections) {
+      return resolveLaunchOptionArgv(catalog.id, launchOptionDeclarations, selections)
+    },
     planPromptInput(prompt) {
       return definition.planPromptInput?.(prompt) ?? {
         kind: 'single-phase',
@@ -532,14 +567,83 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
   }
 }
 
-function catalog(
-  input: Omit<AgentCatalogEntry, 'readySignal'>
-): AgentCatalogEntry {
+function catalog(input: AgentCatalogSeed): Omit<AgentCatalogEntry, 'launchOptions'> {
   return {
     ...input,
     readySignal: { kind: 'foreground-process', expectedProcess: input.expectedProcess }
   }
 }
+
+// SSOT launch-option declarations. Every flag below was verified against the installed CLI's own --help
+// before it was declared; nothing is invented. Each choice's argv is the exact flag pair the CLI accepts,
+// and the label is what the renderer shows — one declaration, so the two can never drift. AgentMux drives
+// these as real PTY processes, so these are honestly launch-time choices, not live switches.
+
+// codex top-level (interactive) flags. `-s/--sandbox <read-only|workspace-write|danger-full-access>` and
+// `-a/--ask-for-approval <on-request|never>` verified via `codex --help`. Two options that compose.
+const CODEX_LAUNCH_OPTIONS: readonly LaunchOptionDeclaration[] = [
+  {
+    id: 'sandbox',
+    label: 'Sandbox',
+    description: 'How much of the machine Codex may touch when it runs commands.',
+    choices: [
+      { id: 'read-only', label: 'Read only', tier: 'safe', argv: ['--sandbox', 'read-only'] },
+      {
+        id: 'workspace-write',
+        label: 'Workspace write',
+        description: 'Writes limited to the workspace.',
+        tier: 'caution',
+        argv: ['--sandbox', 'workspace-write']
+      },
+      {
+        id: 'danger-full-access',
+        label: 'Full access',
+        description: 'No sandbox — full machine access.',
+        tier: 'danger',
+        argv: ['--sandbox', 'danger-full-access']
+      }
+    ]
+  },
+  {
+    id: 'approval',
+    label: 'Approval policy',
+    description: 'When Codex pauses for human approval before running a command.',
+    choices: [
+      {
+        id: 'on-request',
+        label: 'On request',
+        description: 'The model decides when to ask.',
+        tier: 'caution',
+        argv: ['--ask-for-approval', 'on-request']
+      },
+      {
+        id: 'never',
+        label: 'Never',
+        description: 'Never pauses for approval.',
+        tier: 'danger',
+        argv: ['--ask-for-approval', 'never']
+      }
+    ]
+  }
+]
+
+// claude top-level flag `--permission-mode <acceptEdits|auto|bypassPermissions|manual|dontAsk|plan>`,
+// verified via `claude --help`. One option; its argv composes cleanly with the positional prompt.
+const CLAUDE_LAUNCH_OPTIONS: readonly LaunchOptionDeclaration[] = [
+  {
+    id: 'permission-mode',
+    label: 'Permission mode',
+    description: 'How Claude handles tool-permission prompts for this session.',
+    choices: [
+      { id: 'manual', label: 'Manual', description: 'Ask for each action.', tier: 'safe', argv: ['--permission-mode', 'manual'] },
+      { id: 'plan', label: 'Plan', description: 'Plan first, no edits.', tier: 'safe', argv: ['--permission-mode', 'plan'] },
+      { id: 'acceptEdits', label: 'Accept edits', description: 'Auto-accept file edits.', tier: 'caution', argv: ['--permission-mode', 'acceptEdits'] },
+      { id: 'auto', label: 'Auto', tier: 'caution', argv: ['--permission-mode', 'auto'] },
+      { id: 'dontAsk', label: "Don't ask", tier: 'caution', argv: ['--permission-mode', 'dontAsk'] },
+      { id: 'bypassPermissions', label: 'Bypass permissions', description: 'Skip all permission checks.', tier: 'danger', argv: ['--permission-mode', 'bypassPermissions'] }
+    ]
+  }
+]
 
 export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
   defineAgentProvider({
@@ -588,6 +692,7 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
       planResponse: planNumberedTerminalInteractionResponse
     },
     hook: CODEX_HOOKS,
+    launchOptions: CODEX_LAUNCH_OPTIONS,
     buildResumeArgs: (sessionId, _transcriptPath, prompt, args) => [
       'resume',
       sessionId,
@@ -623,6 +728,7 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
       planResponse: planNumberedTerminalInteractionResponse
     },
     hook: CLAUDE_HOOKS,
+    launchOptions: CLAUDE_LAUNCH_OPTIONS,
     buildResumeArgs: (sessionId, _transcriptPath, prompt, args) => [
       '--resume', sessionId, ...args, ...(prompt ? [prompt] : [])
     ]
@@ -863,7 +969,8 @@ export class AgentProviderRegistry {
       hookStrategy: { ...provider.catalog.hookStrategy },
       resumeStrategy: { ...provider.catalog.resumeStrategy },
       acpStrategy: { ...provider.catalog.acpStrategy },
-      capabilities: { ...provider.catalog.capabilities }
+      capabilities: { ...provider.catalog.capabilities },
+      launchOptions: cloneLaunchOptions(provider.catalog.launchOptions)
     }))
   }
 }
