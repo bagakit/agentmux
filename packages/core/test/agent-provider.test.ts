@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { AgentProviderRegistry } from '../src/agent-provider.js'
+import { AgentProviderRegistry, createAntigravityManagedHookPlan } from '../src/agent-provider.js'
 
 describe('built-in agent providers', () => {
   const providers = new AgentProviderRegistry()
@@ -305,7 +305,11 @@ describe('built-in agent providers', () => {
     })
     expect(toolUse.status.state).toBe('waiting')
     expect(toolUse.timeline).toHaveLength(1)
-    expect(toolUse.timeline[0].item.kind).toBe('permission')
+    const toolMutation = toolUse.timeline[0]
+    expect(toolMutation?.type).toBe('append')
+    if (toolMutation?.type === 'append') {
+      expect(toolMutation.item.kind).toBe('permission')
+    }
 
     const stop = provider.normalizeHook({
       providerId: 'antigravity',
@@ -317,7 +321,28 @@ describe('built-in agent providers', () => {
     })
     expect(stop.status.state).toBe('done')
     expect(stop.timeline).toHaveLength(1)
-    expect(stop.timeline[0].item.kind).toBe('assistant_message')
-    expect(stop.timeline[0].item.content).toBe('Done all work.')
+    const stopMutation = stop.timeline[0]
+    expect(stopMutation?.type).toBe('append')
+    if (stopMutation?.type === 'append') {
+      expect(stopMutation.item.kind).toBe('assistant_message')
+      expect(stopMutation.item.content).toBe('Done all work.')
+    }
+  })
+
+  it('generates Antigravity managed hook plan with global path, agentmux-status bundle, and tool schemas', () => {
+    const plan = createAntigravityManagedHookPlan('/tmp/fake-home')
+    expect(plan.providerId).toBe('antigravity')
+    expect(plan.mutations).toHaveLength(1)
+    const mutation = plan.mutations[0]
+    expect(mutation?.path).toBe('/tmp/fake-home/.gemini/config/hooks.json')
+    const parsed = JSON.parse(mutation?.content ?? '{}') as {
+      'agentmux-status': Record<string, Array<{ type?: string; matcher?: string; hooks?: unknown[]; command?: string }>>
+    }
+    const bundle = parsed['agentmux-status']
+    expect(bundle).toBeDefined()
+    expect(bundle['PreInvocation']?.[0]?.type).toBe('command')
+    expect(bundle['PreInvocation']?.[0]?.command).toContain('--event PreInvocation')
+    expect(bundle['PreToolUse']?.[0]?.matcher).toBe('*')
+    expect(bundle['PreToolUse']?.[0]?.hooks?.[0]).toMatchObject({ type: 'command' })
   })
 })

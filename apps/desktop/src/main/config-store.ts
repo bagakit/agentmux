@@ -204,7 +204,15 @@ export class ConfigStore {
     try {
       const rawText = await readFile(this.path, 'utf8')
       const rawJson = JSON.parse(rawText)
-      if (typeof rawJson === 'object' && rawJson !== null && 'version' in rawJson && rawJson.version !== 7) {
+      const isOlderVersion =
+        typeof rawJson === 'object' &&
+        rawJson !== null &&
+        'version' in rawJson &&
+        typeof (rawJson as { version: unknown }).version === 'number' &&
+        Number.isInteger((rawJson as { version: number }).version) &&
+        (rawJson as { version: number }).version > 0 &&
+        (rawJson as { version: number }).version < 7
+      if (isOlderVersion) {
         await rm(this.path, { force: true })
         loaded = structuredClone(DEFAULT_CONFIG)
         persist = true
