@@ -23,7 +23,8 @@ Browser 不只负责打开网页，还要把网页上下文安全地带给 Agent
 
 ## 所有权与依赖方向
 
-- Electron Main 的 `BrowserViewManager` 是 Browser WebContents、Session partition、Profile、导航、权限、DevTools、截图、视口和页面选择执行的唯一 owner。
+- Electron Main 的 `BrowserProfileManager` 是 Profile 身份、导入和 Session partition 解析的唯一 owner；`BrowserViewManager` 只通过它的窄 resolver 消费目标 partition，不保存第二份 Profile 事实。
+- Electron Main 的 `BrowserViewManager` 是 Browser WebContents、导航、权限、DevTools、截图、视口和页面选择执行的唯一 owner。
 - Preload 只暴露窄的 typed Browser IPC；Renderer 不持有 WebContents、Cookie、Profile 目录或 DevTools 生命周期事实。
 - Renderer 的 Browser bar 和 Browser Tools 只投影 Main 的结果，并保存纯展示偏好。工具显隐不改变底层能力与安全策略。
 - Browser 元素上下文、批注和截屏只有在用户显式复制或发送后才进入 Agent 输入；Renderer 不把它们伪装成 Core Timeline 事实。提交给 Agent 时继续走现有 Composer/Core prompt owner。
