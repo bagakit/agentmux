@@ -39,7 +39,7 @@
 - 同一语义在不同容器中使用同一控件层级。
 - hover 提升 Surface 明度；active 用内阴影表达按下，不靠边框位移。
 - 输入聚焦统一使用 `--focus-line` 与 `--focus-ring`。
-- 圆角只使用 `--radius-sm`、`--radius`、`--radius-lg` 三档；状态点和微标可保留更小值。
+- 圆角只使用 `--radius-sm`、`--radius`、`--radius-lg` 三档，**两类例外据实开放**：其一是紧凑交互控件——24px 图标按钮、Tree/File Row、Tab 与 Region 的关闭键、pane 动作等在 6px 下会显得过圆，故取 4–5px；其二是微标与装饰件——状态点、hairline 轨道、ruler tick、图标裁角、选中标记等取 1–3px。例外只对**这两类**成立：面性容器（卡片、菜单、弹窗、输入框、工具坞）一律走 token，不得因为"看起来更合适"而硬编码。这条由 `apps/desktop/test/surface-radius-contract.test.ts` 守住：它从 CSS 推出所有低于最小 token 的圆角并核对是否落在已声明的例外清单内，新增一个未声明的硬编码圆角会红。
 - Tab 选中态使用轻微背景和底部 2px 横条，不使用顶部高光或整圈描边。
 
 ## 身份归属
