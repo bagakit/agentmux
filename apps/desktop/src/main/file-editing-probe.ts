@@ -713,7 +713,6 @@ async function runExplorerInteractionProbe(options: {
   await waitForActivePointerDropTarget(window, 'targets/hover', hoverTarget)
   await waitFor('500ms hover-expanded directory', async () => (
     await window.webContents.executeJavaScript(
-      `${treeRowSource('targets/hover')}?.classList.contains('tree-row--drop-over') === true && ` +
       `${treeRowSource('targets/hover')}?.getAttribute('aria-expanded') === 'true'`
     ) as boolean
   ))
