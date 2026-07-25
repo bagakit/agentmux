@@ -65,8 +65,10 @@ Revision 2 原始结果保留在 `docs/benchmarks/results/` 中带有 `round-1-3
 ### 其他产品
 
 - Zellij 与 WezTerm mux 只有在运行前能从 `PATH` 找到固定版本、且能表达同一 Persist／Input／Capture／Stop Contract 时才运行；当前环境未安装时记录 `unavailable`，不得下载或安装后临时扩围。
-- a mature workbench／a mature workbench 是产品与源码参考，不是稳定的公开 Headless Benchmark Contract。不能验证相同输入、Replay Cursor 和进程树清理时标记 `not_comparable`，不得伪装为 AgentMux 胜出。
-- 不连接真实 SSH Host。Remote 网络、认证与 MTU 噪声不进入本地 Cutover 主 Verdict；隔离 SSH 的 Partition／Recovery 已由 T-007 Stress Gate 保护。
+- 没有稳定公开 Headless Benchmark Contract 的外部产品，无法验证相同 Input、Replay Cursor
+  和进程树清理时标记 `not_comparable`，不得伪装为 AgentMux 胜出。
+- 不连接真实 SSH Host。Remote 网络、认证与 MTU 噪声不进入本地 Cutover 主 Verdict；
+  SSH Partition／Recovery 由独立 Remote 验收合同证明。
 
 ## 3. 冻结环境
 
@@ -163,9 +165,10 @@ Revision 2 原始结果保留在 `docs/benchmarks/results/` 中带有 `round-1-3
 
 ### Resource Budget
 
-- AgentMux CtxMux daemon：Idle RSS 不超过 96 MiB；32 Run Peak RSS 不超过 160 MiB；Idle CPU 区间上界不超过 1%。Live child、Attachment 与 transient thread 在 Stop 后必须归零。固定 CtxMux candidate 尚无 global Run GC，historical Run 可保留的 FD 成本不得超过 `packages/core/test/fixtures/reliability-budgets.json` 冻结的每 Run `2.25`；这项 T-017 Gate 前置证据必须与最终 SHA 一起复核，不能误写成“历史 Run 已删除”或“FD 零保留”。
+- AgentMux CtxMux daemon：Idle RSS 不超过 96 MiB；32 Run Peak RSS 不超过 160 MiB；Idle CPU 区间上界不超过 1%。Live child、Attachment 与 transient thread 在 Stop 后必须归零。固定 CtxMux candidate 尚无 global Run GC，historical Run 可保留的 FD 成本不得超过 `packages/core/test/fixtures/reliability-budgets.json` 冻结的每 Run `2.25`；这项资源证据必须与最终 SHA 一起复核，不能误写成“历史 Run 已删除”或“FD 零保留”。
 - 单 Runtime Client Queue、Replay、Frame、Session 与 Client 数继续使用 `docs/testing/strategy.md` 的硬上限；Benchmark 不提供放宽开关。
-- Desktop：沿用 T-007，Terminal 增量 256 MiB、Editor 增量 512 MiB、释放后进程组 1 GiB、Warm Cache 漂移 128 MiB。Desktop 数字不与 Headless tmux Server 混合。
+- Desktop：Terminal 增量 256 MiB、Editor 增量 512 MiB、释放后进程组 1 GiB、Warm Cache
+  漂移 128 MiB。Desktop 数字不与 Headless tmux Server 混合。
 
 ### Release Primary Dimensions
 
@@ -179,7 +182,9 @@ Revision 2 原始结果保留在 `docs/benchmarks/results/` 中带有 `round-1-3
 - Stop 在双方 correctness 都通过时比较 p95，AgentMux 必须更小；若 tmux 明确留下可运行孤儿而 AgentMux correctness 通过，则只记录 AgentMux 的完整进程树定性胜出并跳过 p95，不把 tmux 已知限制扩散成整体自动失败；
 - AgentMux Idle CPU 的区间上界必须严格小于 tmux 区间下界；Idle RSS、Per-session RSS、Steady RSS、Peak RSS 与 Released RSS 均小于 tmux 对应值。AgentMux Idle CPU 的 1% 自身预算同样使用区间上界。
 
-这里故意不设容差、不做加权，也不允许“延迟收益抵消内存回退”。如果独立 Node Daemon 的 RSS 高于 tmux，T-008 就应失败，后续只能基于这份冻结证据重新讨论产品目标，不能回头把 RSS 降为次要指标。
+这里故意不设容差、不做加权，也不允许“延迟收益抵消内存回退”。如果独立 Node Daemon
+的 RSS 高于 tmux，Benchmark Verdict 就应失败；只能基于冻结证据重新讨论产品目标，不能
+回头把 RSS 降为次要指标。
 
 ## 7. Raw Result Contract
 
@@ -216,7 +221,7 @@ Raw Sample、失败、跳过原因与 Manifest 全部保留。Runner 在内存�
 
 ## 8. 复现与安全
 
-Revision 1 已没有可执行入口，避免继续在错误 candidate 上累积结果。它使用的自建 daemon 已删除；已知 4 MiB Debug sustained-output 在 30 秒内没有形成完整 Hash，旧结果不能证明 AgentMux + CtxMux，也不能通过调低 payload、延长后删样本或改变主维度来修饰。`run-kernel-workload.mjs` 和 `run-kernel-statistics.mjs` 是 T-013 保留并由 Revision 5 复用的 candidate-neutral Fixture／统计原语。
+Revision 1 已没有可执行入口，避免继续在错误 candidate 上累积结果。它使用的自建 daemon 已删除；已知 4 MiB Debug sustained-output 在 30 秒内没有形成完整 Hash，旧结果不能证明 AgentMux + CtxMux，也不能通过调低 payload、延长后删样本或改变主维度来修饰。`run-kernel-workload.mjs` 和 `run-kernel-statistics.mjs` 是当前 Revision 复用的 candidate-neutral Fixture／统计原语。
 
 Revision 5 入口是 `pnpm benchmark:daemon-cutover -- --round <1|2>`；实现期路径验证是 `pnpm benchmark:daemon-cutover:smoke -- --round 1 --output <outside-results.json>`。Runner 只创建自己的临时目录、在其中编译只读 CPU probe、使用以 `agentmux-benchmark-` 开头的随机 tmux socket，并精确记录 AgentMux RunId 和 Fixture PID。CPU 校准子进程是 probe fork 的唯一子进程，正常路径精确 kill/reap，父进程异常退出后也因 parent identity 改变而自行退出。正常 cleanup 只通过 AgentMux 公共 `stopTerminal(exact RunRef)` 停止其创建且仍 running 的 Run，只通过带 exact `-L` 的 tmux `kill-session`／`kill-server` 停止自己的 baseline。若 correctness 证明 tmux 留下 Runner 记录的 fixture PID，最终 emergency cleanup 只对这些 exact PID 发信号。最后可用 OS process metadata 仅匹配 exact benchmark runtime directory 的 daemon argv 并关闭该空 daemon；不得读 CtxMux wire/state，不得按名称广泛 `pkill`，不得触碰默认 tmux socket、用户 Session 或非 benchmark PID。
 
