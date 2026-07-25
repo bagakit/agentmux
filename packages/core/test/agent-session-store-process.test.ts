@@ -52,7 +52,6 @@ type WorkerOwner = {
   spawn(input: WorkerInput): WorkerHandle
   createRoot(prefix: string): Promise<string>
   runBody<T>(body: () => Promise<T>): Promise<T>
-  stopChildren(): Promise<void>
   close(): Promise<void>
   childCount(): number
   rootCount(): number
@@ -343,16 +342,13 @@ function createWorkerOwner(
       }
       return admittedBody
     },
-    stopChildren() {
-      return stopChildren([...children])
-    },
     close() {
       if (closePromise) return closePromise
       accepting = false
       const activeBodies = [...bodies]
       const activeRoots = [...pendingRoots]
       closePromise = (async () => {
-        await owner.stopChildren()
+        await stopChildren([...children])
         await Promise.allSettled(activeBodies)
         await Promise.allSettled(activeRoots)
         if (children.size > 0) throw new Error('Store worker owner closed before its children.')
@@ -702,21 +698,21 @@ describe('File Store multi-process authority', () => {
       announceWrite()
       await bodyRelease
     })
-    await bodyPaused
-
-    const nextRoot = await nextOwner.createRoot('/private/tmp/agentmux-store-body-owner-next-')
-    const nextMarker = join(nextRoot, 'next-generation')
-    await writeFile(nextMarker, 'next generation\n')
+    let closing: Promise<void> | null = null
     let closeCompleted = false
-    const closing = staleOwner.close().then(() => { closeCompleted = true })
     try {
+      await Promise.race([bodyPaused, staleBody])
+      const nextRoot = await nextOwner.createRoot('/private/tmp/agentmux-store-body-owner-next-')
+      const nextMarker = join(nextRoot, 'next-generation')
+      await writeFile(nextMarker, 'next generation\n')
+      closing = staleOwner.close().then(() => { closeCompleted = true })
       await Promise.resolve()
       expect(closeCompleted).toBe(false)
       expect(() => staleOwner.runBody(async () => {}))
         .toThrow('Store worker owner is closed.')
 
       resumeBody()
-      await bodyWrote
+      await Promise.race([bodyWrote, staleBody])
       expect(closeCompleted).toBe(false)
       await expect(readFile(join(staleRoot, 'late-write'), 'utf8'))
         .resolves.toBe('stale generation\n')
@@ -732,7 +728,7 @@ describe('File Store multi-process authority', () => {
     } finally {
       resumeBody()
       releaseBody()
-      await Promise.allSettled([staleBody, closing])
+      await Promise.allSettled([staleBody, closing ?? staleOwner.close()])
     }
   }))
 
