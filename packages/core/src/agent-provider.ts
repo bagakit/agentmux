@@ -140,7 +140,12 @@ export function createCodexManagedHookPlan(workspacePath: string): AgentManagedH
         description: 'AgentMux Codex lifecycle bridge.',
         hooks
       }, null, 2)}\n`,
-      mode: 0o600
+      mode: 0o600,
+      // `.codex/hooks.json` may hold project-committed foreign hooks; inject only AgentMux entries.
+      // The marker is the hook script filename, not the full command, so a moved execPath still
+      // sweeps our stale entries instead of duplicating them (Codex rejects unknown top-level fields,
+      // so we cannot namespace under our own key the way antigravity does).
+      merge: { kind: 'json-managed-events', marker: 'agentmux-hook.js' }
     }]
   }
 }
@@ -201,7 +206,10 @@ export function createAntigravityManagedHookPlan(homeOrWorkspacePath?: string): 
     mutations: [{
       path: targetPath,
       content: `${JSON.stringify({ 'agentmux-status': bundle }, null, 2)}\n`,
-      mode: 0o600
+      mode: 0o600,
+      // `~/.gemini/config/hooks.json` is shared with the real Gemini CLI; AgentMux owns only the
+      // `agentmux-status` top-level bundle and must leave every sibling key untouched.
+      merge: { kind: 'json-owned-key', key: 'agentmux-status' }
     }]
   }
 }

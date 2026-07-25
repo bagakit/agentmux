@@ -11,6 +11,7 @@ import {
 } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { AgentMuxError } from './errors.js'
+import { renderMergedHookContent, type AgentHookMergeStrategy } from './hook-config-merge.js'
 import type { AgentProviderId } from './types.js'
 
 const MAX_HOOK_FILE_BYTES = 256 * 1024
@@ -19,8 +20,14 @@ const MAX_PENDING_PREVIEWS = 4
 
 export type AgentManagedHookMutation = {
   path: string
+  /**
+   * The AgentMux-owned content. With no `merge` it is the entire file (safe only for files AgentMux
+   * exclusively owns). With `merge` it is the owned fragment combined into the file on disk so foreign
+   * entries survive — required for shared configs like antigravity's `~/.gemini/config/hooks.json`.
+   */
   content: string
   mode?: number
+  merge?: AgentHookMergeStrategy
 }
 
 export type AgentManagedHookPlan = {
@@ -55,6 +62,8 @@ export type AgentManagedHookInstallReceipt = {
 type PreparedMutation = AgentManagedHookMutation & {
   currentHash: string | null
   currentMode: number | null
+  /** Content actually written: merged with the file on disk when a strategy is set, else `content`. */
+  effectiveContent: string
   nextHash: string
 }
 
@@ -136,13 +145,22 @@ export class AgentManagedHookInstaller {
         throw new AgentMuxError('Managed Hook content exceeds the file size limit.', 'HOOK_FILE_TOO_LARGE')
       }
       const current = await readCurrent(path)
+      const currentContent = current ? current.content.toString('utf8') : null
+      const effectiveContent = mutation.merge
+        ? renderMergedHookContent(currentContent, mutation.content, mutation.merge)
+        : mutation.content
+      if (Buffer.byteLength(effectiveContent) > MAX_HOOK_FILE_BYTES) {
+        throw new AgentMuxError('Managed Hook merged content exceeds the file size limit.', 'HOOK_FILE_TOO_LARGE')
+      }
       mutations.push({
         path,
         content: mutation.content,
         ...(mutation.mode === undefined ? {} : { mode: mutation.mode }),
+        ...(mutation.merge === undefined ? {} : { merge: mutation.merge }),
         currentHash: current ? hash(current.content) : null,
         currentMode: current?.mode ?? null,
-        nextHash: hash(mutation.content)
+        effectiveContent,
+        nextHash: hash(effectiveContent)
       })
     }
     const preview: AgentManagedHookPreview = {
@@ -193,7 +211,7 @@ export class AgentManagedHookInstaller {
         if (mutation.currentHash !== mutation.nextHash) {
           await writeAtomically(
             mutation.path,
-            mutation.content,
+            mutation.effectiveContent,
             mutation.mode ?? mutation.currentMode ?? 0o600
           )
           applied.push(mutation)
