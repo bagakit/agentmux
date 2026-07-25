@@ -3,6 +3,7 @@ import { useMemo } from 'react'
 import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
 import { api } from '../lib/api'
 import { projectRailNavigation, workspaceProjectId } from '../lib/workspace-projects'
+import { rowAttention, rowAttentionLabel } from '../lib/row-attention'
 import { useAppStore } from '../store'
 import type { SettingsSectionId } from './SettingsPanel'
 import { ProjectRailToolbar } from './ProjectRailToolbar'
@@ -74,9 +75,14 @@ export function WorkspaceSidebar({
       </div>
       <nav className="project-list" aria-label="Projects">
         {projects.map((project) => {
-          const sessionCount = sessions.filter((session) =>
+          const projectSessions = sessions.filter((session) =>
             project.workspaces.some((workspace) => workspaceOwnsSessionPath(workspace, session))
-          ).length
+          )
+          const sessionCount = projectSessions.length
+          // Rolled up from the same Session projection the window bar and the tab dots read, so a
+          // collapsed project can no longer hide an Agent that is waiting on you.
+          const attention = rowAttention(projectSessions)
+          const attentionLabel = rowAttentionLabel(attention)
           const active = project.id === activeProjectId
           const preferred = active
             ? activeWorkspaceId
@@ -85,7 +91,9 @@ export function WorkspaceSidebar({
             <button
               key={project.id}
               className={`project-rail-row ${active ? 'project-rail-row--active' : ''}`}
-              title={project.repoPath}
+              title={attentionLabel ? `${project.repoPath} · ${attentionLabel}` : project.repoPath}
+              {...(attentionLabel ? { 'aria-label': `${project.name} · ${attentionLabel}` } : {})}
+              {...(attention.category ? { 'data-attention': attention.category } : {})}
               onClick={() => {
                 if (!preferred) return
                 const keepBoardOpen = mainSurface === 'board'
