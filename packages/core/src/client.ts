@@ -789,7 +789,8 @@ export class AgentMuxClient {
     workspacePath: string,
     agentSessionId: string
   ): Promise<void> {
-    if (provider.catalog.hookStrategy.kind !== 'native') return
+    const hookStrategy = provider.catalog.hookStrategy
+    if (hookStrategy.kind !== 'native' || hookStrategy.installation !== 'explicit-managed') return
     const plan = resolveManagedHookPlan(providerId, workspacePath)
     if (!plan) return
     try {
