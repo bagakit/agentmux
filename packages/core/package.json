@@ -28,9 +28,9 @@
       "types": "./dist/runtime.d.ts",
       "import": "./dist/runtime.js"
     },
-    "./composition": {
-      "types": "./dist/composition.d.ts",
-      "import": "./dist/composition.js"
+    "./control": {
+      "types": "./dist/control.d.ts",
+      "import": "./dist/control.js"
     },
     "./timeline": {
       "types": "./dist/session-timeline.d.ts",
@@ -57,7 +57,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "pnpm build && vitest run --exclude test/package-consumer.integration.test.ts --exclude test/reliability-stress.integration.test.ts --exclude test/security-fuzz.test.ts && vitest run --maxWorkers=1 test/package-consumer.integration.test.ts",
     "test:real-codex": "pnpm build && AGENTMUX_REAL_CODEX_E2E=1 vitest run --maxWorkers=1 test/real-codex.integration.test.ts",
-    "test:security": "pnpm build && vitest run test/acp-adapter.test.ts test/agent-session-store-limits.test.ts test/client-event-publisher.test.ts test/composition-control.test.ts test/hook-server.test.ts test/managed-hook-installer.test.ts",
+    "test:security": "pnpm build && vitest run test/acp-adapter.test.ts test/agent-session-store-limits.test.ts test/client-event-publisher.test.ts test/control-host.test.ts test/hook-server.test.ts test/managed-hook-installer.test.ts",
     "test:fuzz": "pnpm build && vitest run test/security-fuzz.test.ts",
     "test:reliability": "pnpm build && vitest run --maxWorkers=1 test/reliability-stress.integration.test.ts",
     "test:conformance": "pnpm build && vitest run test/runtime-projection.test.ts test/agent-session-store.test.ts && vitest run --maxWorkers=1 test/package-consumer.integration.test.ts",
