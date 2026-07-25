@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import type { ChildProcess } from 'node:child_process'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -10,8 +11,13 @@ import {
 
 const workerFixture = fileURLToPath(new URL('./fixtures/session-store-worker.mjs', import.meta.url))
 const roots: string[] = []
+const children = new Map<ChildProcess, Promise<void>>()
 
 afterEach(async () => {
+  await Promise.all([...children].map(async ([child, closed]) => {
+    if (child.exitCode === null && child.signalCode === null) child.kill()
+    await closed
+  }))
   await Promise.all(roots.splice(0).map(async (root) => await rm(root, { recursive: true, force: true })))
 })
 
@@ -44,13 +50,23 @@ function worker(input: {
   })
   let buffer = ''
   let readyResolve!: () => void
+  let readyReject!: (error: Error) => void
   let resultResolve!: (value: WorkerResult) => void
   let resultReject!: (error: Error) => void
-  const ready = new Promise<void>((resolve) => { readyResolve = resolve })
+  let readySeen = false
+  let parsedResult: WorkerResult | null = null
+  let protocolError: Error | null = null
+  const ready = new Promise<void>((resolve, reject) => {
+    readyResolve = resolve
+    readyReject = reject
+  })
   const result = new Promise<WorkerResult>((resolve, reject) => {
     resultResolve = resolve
     resultReject = reject
   })
+  let closeResolve!: () => void
+  const closed = new Promise<void>((resolve) => { closeResolve = resolve })
+  children.set(child, closed)
   child.stdout.setEncoding('utf8')
   child.stdout.on('data', (chunk: string) => {
     buffer += chunk
@@ -59,17 +75,58 @@ function worker(input: {
       if (newline < 0) break
       const line = buffer.slice(0, newline)
       buffer = buffer.slice(newline + 1)
-      const message = JSON.parse(line) as { type: string }
-      if (message.type === 'ready') readyResolve()
-      if (message.type === 'result') resultResolve(message as WorkerResult)
+      try {
+        const message = JSON.parse(line) as { type: string }
+        if (message.type === 'ready') {
+          readySeen = true
+          readyResolve()
+        }
+        if (message.type === 'result') {
+          if (parsedResult) {
+            protocolError = new Error('Store worker published more than one result.')
+            child.kill()
+          } else {
+            parsedResult = message as WorkerResult
+          }
+        }
+      } catch (error) {
+        protocolError = error instanceof Error ? error : new Error(String(error))
+        child.kill()
+      }
     }
   })
   let stderr = ''
   child.stderr.setEncoding('utf8')
   child.stderr.on('data', (chunk: string) => { stderr += chunk })
-  child.once('error', resultReject)
-  child.once('exit', (code) => {
-    if (code !== 0) resultReject(new Error(`Store worker exited ${code}: ${stderr}`))
+  child.once('error', (error) => {
+    protocolError = error
+  })
+  child.once('close', (code, signal) => {
+    children.delete(child)
+    closeResolve()
+    const fail = (error: Error) => {
+      readyReject(error)
+      resultReject(error)
+    }
+    if (protocolError) {
+      fail(protocolError)
+      return
+    }
+    if (code !== 0) {
+      fail(new Error(
+        `Store worker exited ${signal ? `with ${signal}` : `with code ${code}`}: ${stderr}`
+      ))
+      return
+    }
+    if (!readySeen) {
+      fail(new Error(`Store worker closed before becoming ready: ${stderr}`))
+      return
+    }
+    if (!parsedResult) {
+      fail(new Error(`Store worker closed without a result: ${stderr}`))
+      return
+    }
+    resultResolve(parsedResult)
   })
   return { ready, result }
 }
