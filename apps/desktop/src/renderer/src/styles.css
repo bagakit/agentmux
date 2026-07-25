@@ -2090,6 +2090,51 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 
 .board { width: 100%; height: 100%; min-width: 0; min-height: 0; display: flex; flex-direction: column; padding: 18px 18px 20px; overflow: hidden; background: radial-gradient(circle at 74% 0%, #101a162e, transparent 36%), #12151b; }
 .board--empty { align-items: center; justify-content: center; }
+/* The bake-off strip: which branches are racing on one prompt. Surface fill and a hairline carry it,
+   no stroke; it reuses the shared status dots so a lane here reads exactly like a Tab dot. */
+.fanout-strip { flex: none; display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.fanout-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: var(--radius);
+  background: var(--surface-1);
+  box-shadow: var(--hl);
+}
+.fanout-group__identity { min-width: 0; display: flex; align-items: center; gap: 6px; color: var(--text-2); }
+.fanout-group__identity > svg { flex: 0 0 auto; color: var(--text-3); }
+.fanout-group__identity strong { font-size: 11px; font-weight: 620; letter-spacing: -.01em; }
+.fanout-group__identity small { color: var(--text-3); font-size: 10px; font-variant-numeric: tabular-nums; }
+.fanout-group__lanes { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.fanout-lane {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 7px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  background: var(--surface-2);
+  font-size: 10px;
+  cursor: pointer;
+}
+.fanout-lane:hover { color: var(--text); background: var(--surface-3); }
+/* A lane whose Agent never launched: still part of the set, but nothing to open. */
+.fanout-lane--idle { color: var(--text-3); background: transparent; box-shadow: inset 0 0 0 1px #ffffff0f; cursor: default; }
+.fanout-lane__branch { overflow: hidden; max-width: 160px; text-overflow: ellipsis; white-space: nowrap; }
+.fanout-group__jump {
+  margin-left: auto;
+  flex: 0 0 auto;
+  padding: 4px 9px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: #10161c;
+  background: var(--amber);
+  font-size: 10px;
+  font-weight: 620;
+  cursor: pointer;
+}
 .board__header { display: flex; flex: none; align-items: flex-end; justify-content: space-between; gap: 20px; margin-bottom: 14px; }
 .board__header h1 { margin: 4px 0 3px; font-size: 23px; letter-spacing: -.04em; }
 .board__header p { margin: 0; color: var(--text-3); font-size: 11px; }
