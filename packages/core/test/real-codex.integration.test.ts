@@ -208,8 +208,9 @@ describe.runIf(process.env.AGENTMUX_REAL_CODEX_E2E === '1')('installed real Code
         [...assistantMarkers].some((content) => content.includes('AGENTMUX_REAL_CODEX_READY')) &&
         session.hookReceipt?.eventName === 'Stop' &&
         session.hookReceipt.run.runId === created.run.runId &&
-        session.terminalStopReceipt?.id === session.hookReceipt.id &&
-        session.terminalStopReceipt.readyThroughByte !== undefined
+        session.terminalPromptReadiness?.source === 'native-stop' &&
+        session.terminalPromptReadiness.id === session.hookReceipt.id &&
+        session.terminalPromptReadiness.readyThroughByte !== undefined
     }, 120_000, () => {
       const session = client.agentSession(created.agentSessionId)
       return {
@@ -217,12 +218,12 @@ describe.runIf(process.env.AGENTMUX_REAL_CODEX_E2E === '1')('installed real Code
         assistantMarkers: [...assistantMarkers].slice(-8).map((value) => value.slice(-1024)),
         nativeHandle: session.nativeHandle ?? null,
         hookReceipt: session.hookReceipt ?? null,
-        terminalStopReceipt: session.terminalStopReceipt ?? null
+        terminalPromptReadiness: session.terminalPromptReadiness ?? null
       }
     })
-    const initialReadyStop = client.agentSession(created.agentSessionId).terminalStopReceipt
-    expect(initialReadyStop?.readyThroughByte).toBeGreaterThanOrEqual(
-      initialReadyStop?.outputCursorBytes ?? Number.MAX_SAFE_INTEGER
+    const initialReadiness = client.agentSession(created.agentSessionId).terminalPromptReadiness
+    expect(initialReadiness?.readyThroughByte).toBeGreaterThanOrEqual(
+      initialReadiness?.outputCursorBytes ?? Number.MAX_SAFE_INTEGER
     )
     const firstStatus = await client.statusAgent(created.agentSessionId)
     await client.dispose()
@@ -253,9 +254,10 @@ describe.runIf(process.env.AGENTMUX_REAL_CODEX_E2E === '1')('installed real Code
     expect(firstExit!.run.exitCode).toBe(0)
     expect(firstExit!.run.exitSignal).toBeUndefined()
     expect(client.agentSession(created.agentSessionId).terminalPromptSubmission).toMatchObject({
-      stopReceiptId: initialReadyStop?.id,
-      stopOutputCursorBytes: initialReadyStop?.outputCursorBytes,
-      readyThroughByte: initialReadyStop?.readyThroughByte,
+      readinessSource: 'native-stop',
+      readinessId: initialReadiness?.id,
+      readinessOutputCursorBytes: initialReadiness?.outputCursorBytes,
+      readyThroughByte: initialReadiness?.readyThroughByte,
       payload: { acknowledged: true },
       submit: { acknowledged: true }
     })
@@ -297,8 +299,9 @@ describe.runIf(process.env.AGENTMUX_REAL_CODEX_E2E === '1')('installed real Code
         [...assistantMarkers].some((content) => content.includes('AGENTMUX_REAL_CODEX_RESUMED')) &&
         session.hookReceipt?.eventName === 'Stop' &&
         session.hookReceipt.run.runId === resumed.run.runId &&
-        session.terminalStopReceipt?.id === session.hookReceipt.id &&
-        session.terminalStopReceipt.readyThroughByte !== undefined
+        session.terminalPromptReadiness?.source === 'native-stop' &&
+        session.terminalPromptReadiness.id === session.hookReceipt.id &&
+        session.terminalPromptReadiness.readyThroughByte !== undefined
     }, 120_000, () => {
       const session = client.agentSession(resumed.agentSessionId)
       return {
@@ -306,10 +309,10 @@ describe.runIf(process.env.AGENTMUX_REAL_CODEX_E2E === '1')('installed real Code
         assistantMarkers: [...assistantMarkers].slice(-8).map((value) => value.slice(-1024)),
         nativeHandle: session.nativeHandle ?? null,
         hookReceipt: session.hookReceipt ?? null,
-        terminalStopReceipt: session.terminalStopReceipt ?? null
+        terminalPromptReadiness: session.terminalPromptReadiness ?? null
       }
     })
-    const resumedReadyStop = client.agentSession(resumed.agentSessionId).terminalStopReceipt
+    const resumedReadiness = client.agentSession(resumed.agentSessionId).terminalPromptReadiness
     const resumedConnectedStatus = await client.statusAgent(resumed.agentSessionId)
     await client.dispose()
 
@@ -344,9 +347,10 @@ describe.runIf(process.env.AGENTMUX_REAL_CODEX_E2E === '1')('installed real Code
     expect(resumedExit!.run.exitCode).toBe(0)
     expect(resumedExit!.run.exitSignal).toBeUndefined()
     expect(client.agentSession(resumed.agentSessionId).terminalPromptSubmission).toMatchObject({
-      stopReceiptId: resumedReadyStop?.id,
-      stopOutputCursorBytes: resumedReadyStop?.outputCursorBytes,
-      readyThroughByte: resumedReadyStop?.readyThroughByte,
+      readinessSource: 'native-stop',
+      readinessId: resumedReadiness?.id,
+      readinessOutputCursorBytes: resumedReadiness?.outputCursorBytes,
+      readyThroughByte: resumedReadiness?.readyThroughByte,
       payload: { acknowledged: true },
       submit: { acknowledged: true }
     })

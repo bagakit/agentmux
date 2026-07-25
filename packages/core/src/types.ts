@@ -263,7 +263,8 @@ export type AgentHookReceipt = {
   outputCursorBytes?: number
 }
 
-export type AgentTerminalStopReceiptState = {
+export type AgentTerminalPromptReadinessState = {
+  source: 'initial-composer' | 'native-stop'
   id: string
   run: AgentMuxRunRef
   outputCursorBytes: number
@@ -284,7 +285,7 @@ export type AgentMuxAgentSession = {
   createdAt: number
   updatedAt: number
   terminalHandshake?: AgentTerminalHandshakeState
-  terminalStopReceipt?: AgentTerminalStopReceiptState
+  terminalPromptReadiness?: AgentTerminalPromptReadinessState
   terminalPromptSubmission?: AgentTerminalPromptSubmissionState
   nativeHandle?: AgentNativeSessionHandle
   hookReceipt?: AgentHookReceipt
@@ -313,8 +314,9 @@ export type AgentTerminalPromptSubmissionState = {
   run: AgentMuxRunRef
   submissionId: string
   promptDigest: string
-  stopReceiptId: string
-  stopOutputCursorBytes: number
+  readinessSource: AgentTerminalPromptReadinessState['source']
+  readinessId: string
+  readinessOutputCursorBytes: number
   readyThroughByte: number
   outputCursorBytes: number
   payload: AgentTerminalInputPhaseState

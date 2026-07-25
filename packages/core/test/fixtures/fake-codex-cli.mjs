@@ -10,6 +10,7 @@ const agentSessionId = process.env.AGENTMUX_AGENT_SESSION_ID
 const providerId = process.env.AGENTMUX_PROVIDER_ID
 const readyMode = process.env.AGENTMUX_FAKE_READY_MODE ?? 'before-delayed'
 const promptRenderMode = process.env.AGENTMUX_FAKE_PROMPT_RENDER_MODE ?? 'normal'
+const handshakeQueryDelay = Number(process.env.AGENTMUX_FAKE_HANDSHAKE_QUERY_DELAY_MS ?? '0')
 
 if (!hookUrl || !hookToken || !agentSessionId || !providerId) {
   throw new Error('missing AgentMux hook environment')
@@ -56,6 +57,7 @@ let composer = ''
 let composerReady = false
 let renderGeneration = 0
 let stopGeneration = 0
+let payloadStopPublished = false
 let controlledReadyPending = false
 let resolveHandshake
 const handshake = new Promise((resolve) => { resolveHandshake = resolve })
@@ -97,8 +99,20 @@ const publishStop = async () => {
   })
 }
 const settleTurn = async () => {
-  if (readyMode === 'no-stop') {
-    writeReadyFrame()
+  if (readyMode === 'no-stop' || readyMode === 'stop-after-payload') {
+    controlledReadyPending = true
+    writeDiagnostic('codex-controlled-ready-pending')
+    return
+  }
+  if (readyMode === 'no-stop-assistant') {
+    writeAssistantMarkerWithoutComposer()
+    controlledReadyPending = true
+    writeDiagnostic('codex-controlled-ready-pending')
+    return
+  }
+  if (readyMode === 'pre-handshake-composer') {
+    controlledReadyPending = true
+    writeDiagnostic('codex-post-handshake-status-only')
     return
   }
   if (readyMode === 'before') {
@@ -183,13 +197,21 @@ process.stdin.on('data', (data) => {
       if (generation !== renderGeneration || !composer) return
       composerReady = true
       writeComposerFrame(composer)
+      if (readyMode === 'stop-after-payload' && !payloadStopPublished) {
+        payloadStopPublished = true
+        void publishStop()
+      }
     })
   }
 })
 process.on('SIGINT', () => {
   writeDiagnostic('codex-interrupt')
 })
+if (handshakeQueryDelay > 0) {
+  await new Promise((resolve) => setTimeout(resolve, handshakeQueryDelay))
+}
 process.stdout.write('\u001b[?u')
+if (readyMode === 'pre-handshake-composer') writeReadyFrame()
 await handshake
 if (process.env.AGENTMUX_FAKE_OMIT_HANDLE !== '1') {
   await request({
