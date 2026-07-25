@@ -2,12 +2,21 @@ import { Bot, ChevronRight, CircleDot, Hammer, Info, ShieldAlert, UserRound } fr
 import { Fragment, useMemo, useState } from 'react'
 import type { AgentTimelineItem } from '../../../shared/contracts'
 
-function Glyph({ kind }: { kind: AgentTimelineItem['kind'] }) {
-  if (kind === 'user_message') return <UserRound size={12} />
-  if (kind === 'assistant_message') return <Bot size={12} />
-  if (kind === 'tool_call') return <Hammer size={12} />
-  if (kind === 'permission') return <ShieldAlert size={12} />
-  return <CircleDot size={12} />
+function Glyph({ kind, size = 12 }: { kind: AgentTimelineItem['kind']; size?: number }) {
+  if (kind === 'user_message') return <UserRound size={size} />
+  if (kind === 'assistant_message') return <Bot size={size} />
+  if (kind === 'tool_call') return <Hammer size={size} />
+  if (kind === 'permission') return <ShieldAlert size={size} />
+  return <CircleDot size={size} />
+}
+
+/**
+ * The two turns a person actually reads — what they typed and what the agent said back. They are carved
+ * out of the machine Row/fold path (see {@link segment}) so a sentence never wears the same 24px log
+ * rhythm as a lifecycle hook firing.
+ */
+function isTurn(kind: AgentTimelineItem['kind']): boolean {
+  return kind === 'user_message' || kind === 'assistant_message'
 }
 
 /** Offset from the first event. Tabular numerals keep the gutter from shifting as it ticks. */
@@ -39,7 +48,10 @@ function segment(items: AgentTimelineItem[]): Segment[] {
     run = []
   }
   for (const item of items) {
-    if (item.source === 'native-hook') run.push(item)
+    // A run holds machine reporting only. user_message already breaks it (source 'user'); the assistant
+    // reply is native-hook too, so without the kind guard segment() would sweep it into a collapsed
+    // "N steps" fold and hide the agent's half of the conversation.
+    if (item.source === 'native-hook' && !isTurn(item.kind)) run.push(item)
     else {
       flush()
       segments.push({ kind: 'item', item })
@@ -168,6 +180,28 @@ function Row({
   )
 }
 
+/**
+ * A readable conversation turn — the second register threaded on the same spine as the machine Row. It
+ * shares the log's 20px node hole-punch so chronology is unbroken, but the substance is the words: the
+ * caption is a quiet speaker tag, and the body is the largest, brightest text in the view. Never folded,
+ * always on screen. This is the register the machine Row deliberately is not.
+ */
+function Turn({ item, origin }: { item: AgentTimelineItem; origin: number }) {
+  const who = item.kind === 'user_message' ? 'You' : 'Assistant'
+  return (
+    <div className={`log-turn log-turn--${item.kind}`} data-status={item.status}>
+      <span className="log-turn__node"><Glyph kind={item.kind} size={14} /></span>
+      <div className="log-turn__head">
+        <span className="log-turn__who">{who}</span>
+        {item.status === 'streaming' ? <span className="log-row__chip">Streaming</span> : null}
+        {item.status === 'failed' ? <span className="log-row__chip log-row__chip--failed">Failed</span> : null}
+        <span className="log-turn__time">{formatOffset(item.createdAt, origin)}</span>
+      </div>
+      {item.content ? <p className="log-turn__body">{item.content}</p> : null}
+    </div>
+  )
+}
+
 function Run({ items, origin }: { items: AgentTimelineItem[]; origin: number }) {
   const [open, setOpen] = useState(false)
   const rows = useMemo(() => tally(items), [items])
@@ -236,6 +270,8 @@ export function ActivityView({
         {segments.map((entry) =>
           entry.kind === 'run' ? (
             <Run key={entry.id} items={entry.items} origin={origin} />
+          ) : isTurn(entry.item.kind) ? (
+            <Turn key={entry.item.id} item={entry.item} origin={origin} />
           ) : (
             <Row key={entry.item.id} item={entry.item} origin={origin} count={1} showSource />
           )

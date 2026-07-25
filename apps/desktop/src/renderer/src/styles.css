@@ -1340,6 +1340,66 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .log-fold__chevron { transition: transform 120ms ease; }
 .log-fold[data-open] .log-fold__chevron { transform: rotate(90deg); }
 .log-fold__label { display: inline-flex; align-items: center; gap: 8px; color: var(--text-3); font-size: 11px; }
+/* The conversation register. A turn threads the SAME spine as a machine row — identical 20px node
+   hole-punch at left:21px — but it is taller, its caption is a quiet tag, and its body is the primary,
+   brightest text in the view. No hover: a turn is content, not a control, and a block hover would break
+   the node hole over the user's own surface-1 body. */
+.log-turn {
+  position: relative;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  column-gap: 8px;
+  padding: 8px 12px 10px;
+  margin: 6px 0;
+}
+.log-turn__node {
+  grid-column: 1;
+  grid-row: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: var(--text-3);
+  background: var(--surface-0);
+  border-radius: 50%;
+}
+.log-turn--user_message .log-turn__node { color: var(--blue); }
+.log-turn--assistant_message .log-turn__node { color: var(--green); }
+.log-turn[data-status='failed'] .log-turn__node { color: var(--red); }
+.log-turn__head {
+  grid-column: 2;
+  grid-row: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 20px;
+}
+.log-turn__who { color: var(--text-3); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; }
+.log-turn__time {
+  margin-left: auto;
+  color: var(--text-3);
+  font: 11px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.log-turn__body {
+  grid-column: 2;
+  grid-row: 2;
+  margin: 3px 0 0;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* User speech gets a quiet ground so the turn has a visible start and end — Surface fill carries the
+   boundary, never a stroke. The assistant reply flows open on the feed as the main narrative. */
+.log-turn--user_message .log-turn__body {
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  background: var(--surface-1);
+}
 .provenance { padding: 2px 5px; border-radius: var(--radius); color: var(--text-3); background: var(--surface-3); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
 .provenance--native-hook { color: var(--green); background: #14241a; }
 .composer { margin: 6px 8px 8px; overflow: hidden; border: 1px solid #333c3f; border-radius: var(--radius); background: transparent; box-shadow: none; }
@@ -1718,6 +1778,64 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .danger-button:hover:not(:disabled) { background: linear-gradient(180deg, #f4a5a2, #f0847f); }
 .danger-button:active:not(:disabled) { background: var(--red); box-shadow: inset 0 1px 3px #0005; }
 .danger-button:disabled { opacity: .5; cursor: default; }
+
+/* Quick switcher — the window's one global navigation overlay. Graphite surface at the top elevation
+   and largest radius; layered by surface fill + top highlight + shadow, not a stroke (density SSOT:
+   "描边不作为控件的主要视觉手段"). Accent appears only to express a row's STATE (needs-you / error),
+   never as decoration; row title ≥12px, subtitle at the 10–11px metadata floor. */
+.quick-switch__overlay { position: fixed; z-index: 120; inset: 0; background: #000a; backdrop-filter: blur(2px); }
+.quick-switch {
+  position: fixed;
+  z-index: 121;
+  top: 14vh;
+  left: 50%;
+  width: min(560px, calc(100vw - 32px));
+  max-height: 62vh;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(-50%);
+  border-radius: var(--radius-lg);
+  outline: none;
+  color: var(--text);
+  background: var(--surface-2);
+  box-shadow: var(--elev-3), var(--hl-strong);
+  overflow: hidden;
+}
+/* The title/description name the dialog for assistive tech without spending vertical chrome. */
+.quick-switch__title, .quick-switch__description { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.quick-switch__input { display: flex; align-items: center; gap: 9px; padding: 13px 15px; color: var(--text-3); box-shadow: inset 0 -1px var(--line-soft); }
+.quick-switch__input > svg { flex: none; }
+.quick-switch__input input { flex: 1; min-width: 0; border: 0; padding: 0; background: transparent; color: var(--text); font-size: 14px; }
+.quick-switch__input input::placeholder { color: var(--text-3); }
+.quick-switch__input input:focus-visible { outline: none; }
+.quick-switch__list { flex: 1; min-height: 0; overflow-y: auto; padding: 6px; }
+.quick-switch__empty { padding: 22px 12px; color: var(--text-3); font-size: 12px; text-align: center; }
+.quick-switch__row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+/* hover/active row lifts by surface brightness, not a border (SSOT control language). */
+.quick-switch__row[data-active="true"] { background: var(--surface-3); }
+.quick-switch__glyph { flex: none; width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-2); }
+.quick-switch__labels { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.quick-switch__row-title { font-size: 12px; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.quick-switch__row-subtitle { color: var(--text-3); font-size: 10px; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* State expresses through the shared StatusDot on the right; the row tint is a quiet echo of that
+   same state, kept to needs-you/error so a scan finds who needs you without reading every label. */
+.quick-switch__row[data-attention="needs-you"] .quick-switch__row-title { color: var(--amber); }
+.quick-switch__row[data-attention="error"] .quick-switch__row-title { color: var(--red); }
+.quick-switch__row .status { flex: none; }
+.quick-switch__footer { display: flex; justify-content: space-between; gap: 12px; padding: 8px 13px; color: var(--text-3); font-size: 10px; box-shadow: inset 0 1px var(--line-soft); }
+.quick-switch__footer kbd { display: inline-flex; align-items: center; padding: 1px 5px; border-radius: var(--radius-sm); background: var(--surface-3); color: var(--text-2); font-family: var(--font-mono); font-size: 10px; }
 
 .host-card__icon { width: 27px; height: 27px; display: flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); color: var(--green); background: #16221b; }
 .field-hint { padding: 2px; color: var(--text-3); font-size: 11px; }
