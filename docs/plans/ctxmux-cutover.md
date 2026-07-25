@@ -109,26 +109,31 @@ checkout-external packed consumer 真实证明：
 1. Codex Provider create 后取得 CtxMux RunId/PID，并观察 `SessionStart`、Permission、Stop 与 native session id；
 2. AgentMux ID、exact RunId、Provider + native id、ACP handle 四种查询只解析到同一 Session；
 3. 第一个 Client 完全退出后，第二个 Client 用同一 AgentMux ID 重连原 RunId/PID 并 Replay；
-4. `agentmux list/status/attach/send/interrupt` 只接收 AgentMux ID，调用方不理解 RunId 或 Codex native 参数；
-5. provider-native `agentmux resume --text <prompt>` 保留 AgentMux ID、创建新 RunId，并把首条 prompt 放入 native resume argv；旧 Run 查询变成 `STALE_AGENT_SESSION_BINDING`；
+4. AgentMux Core 的 Session control 只接收 AgentMux ID，调用方不理解 RunId 或 Codex native 参数；
+5. provider-native Resume 保留 AgentMux ID、创建新 RunId，并把首条 prompt 放入 native resume argv；旧 Run 查询变成 `STALE_AGENT_SESSION_BINDING`；
 6. no-Stop、已消费 Stop、不同 operation 并发全部失败关闭；assistant 行里的 `›`、历史 screen 中与 payload 相同的文本都不能伪造当前 composer，post-cursor live readiness 与 payload/submit crash recovery 都只提交一次；
 7. 两个独立 Node 进程竞争 Create/Resume 只提交一个 current Run，失败者不留下 orphan；自然终态 retire 不调用 Stop；
-8. 外部 `switch` 只聚焦已打开 View；新 Run 的 Hook receipt 绑定新 RunId，`agentmux stop` 清理 current Run 与 Session binding；
+8. Desktop Control 的 focus 只聚焦已打开 Tab/Region；新 Run 的 Hook receipt 绑定新 RunId，公开 Stop 清理 current Run 与 Session binding；
 9. Shell vertical 的 UTF-8、Input recovery、Resize、Interrupt 与 stubborn-tree Stop 在同一 packed proof 中继续通过。
 
-Core View Resolver 只接收当前已打开 View 的投影。Raw Terminal 按 runtime-issued View ID，Agent 按 AgentMux ID 唯一解析；zero/multiple/stale/closed 都失败。Desktop typed focus broker 只激活既有 workspace/pane/tab，不 Open、Attach、Resume、Spawn 或修改 CtxMux Attachment。
+Desktop Control Host 只接收当前 Renderer Layout Store 的 Tab/Region 投影。Raw Terminal 按 Run
+identity，Agent 按 AgentMux ID 解析；zero/multiple/stale/closed 都失败。typed focus 只激活既有
+Tab/Region，不 Open、Attach、Resume、Spawn 或修改 CtxMux Attachment。
 
 CLI 同时是受管 Agent 可自发现的公共控制面，而不只是给人手工调用的二进制：
 
 - 每个 Local Run 都收到权威 `AGENTMUX_ENV=1`、`AGENTMUX_CLI`，并把随 `@agentmux/core` 打包的 `agentmux` 目录放在 `PATH` 首位；Agent Run 额外收到稳定的 `AGENTMUX_AGENT_SESSION_ID`；
-- 顶级 `agentmux --help` 按 Inspect、Control、Desktop 分组解释对象与命令，具体 `agentmux <command> --help` 写明成功语义、失败关闭边界和下一条建议命令；
-- `agentmux --skill` 输出可直接被 Coding Agent 阅读的调用说明，要求先验证 caller context、优先解析 JSON receipt、使用返回 ID 而不是猜测焦点或列表顺序；
+- 顶级 `agentmux --help` 和逐级帮助解释公共意图、typed selector、成功语义与失败关闭边界；
+- `agentmux --skill` 输出可直接被 Coding Agent 阅读的调用说明，要求先验证 caller identity、优先解析 JSON receipt、使用返回 ID 而不是猜测焦点或列表顺序；
 - 不提供 `appmux`、旧文件名或其他 compatibility alias；品牌命令只有 `agentmux`；
-- `switch` 只聚焦已打开 View。创建、分屏、移动、打开或 Spawn Desktop Pane/Tab/View 属于
-  独立 Desktop Composition 控制面，不偷渡进 `switch`，也不因缺少 CLI 而退化为
-  computer-use。
+- 完整命令树、`self`、Tab/Region 与 receipt 合同只由
+  `docs/plans/agentmux-ai-native-desktop-composition-cli.md` 定义，不在 ctxmux cutover 文档复制。
 
-Agent-friendly 不是多写一页帮助，而是让受管 Agent 能在一次发现后闭环执行：从 injected caller context 确定“我在哪”，从只读命令枚举 workspace、View、Region 与 Agent，用显式 target 发出原子 mutation，再从 JSON receipt 读取新 ID 和下一步。Desktop Composition 因此把 layout primitive 与 Agent lifecycle 分开：先在当前 View 中建立有方向的 Region，再在该位置启动指定 Provider，并在可交互后返回稳定 Agent Session id。`switch` 继续只负责 focus，Core Session CLI 继续只负责 Agent lifecycle；不能用 UI 焦点猜 target，也不能把 computer-use 当成缺少公共命令时的 fallback。
+Agent-friendly 不是多写一页帮助，而是让受管 Agent 能在一次发现后闭环执行：从 injected
+caller identity 确定“我在哪”，从只读命令枚举 Tab、Region 与 Agent，用显式 target 发出原子
+mutation，再从 JSON receipt 读取新 ID。Desktop Control 把 layout primitive 与 Agent lifecycle
+分开：Renderer 只拥有布局，RuntimeController/Core 只拥有 Agent/Terminal，Main Browser owner
+只拥有 Browser；不能用 UI 焦点猜 target，也不能把 computer-use 当成公共能力缺口的 fallback。
 
 checkout-external packed consumer 会在真实 CtxMux PTY 内执行 `agentmux --version`，并由 fake Codex 复核相同 managed CLI environment，证明这不是仓库 PATH 或全局安装造成的偶然可用。npm Package 的 CLI 使用其声明的 Node 24 host；Desktop Package 则把同一入口物化为只调用 `.app` 自带 Electron Node mode 的 launcher，打包 smoke 在 `PATH=/usr/bin:/bin`、没有外部 Node 的条件下直接执行它，不改变用户普通 `node` 解析。
 

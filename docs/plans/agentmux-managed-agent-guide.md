@@ -28,7 +28,7 @@ User request:
 
 这不是让 App 猜用户想开 Split 还是 Tab。Agent 读完 Skill 后仍按已经确认的规则判断：
 同一件事或明确方向默认在当前 Tab 内分屏；只有用户明确要求 Tab 才新建 Tab；明确是
-另一件事时先询问用户。当前 Tab 已有多个 Region 时，Agent 还必须先读 `agentmux context`
+另一件事时先询问用户。当前 Tab 已有多个 Region 时，Agent 还必须先读 `agentmux inspect --tab self`
 返回的空间地图，再选择精确 Region；“左边”指整张 Tab 的左侧，不总是“在自己左边再切一刀”。
 
 ## 分层
@@ -52,6 +52,6 @@ User request:
 - 用户任务只出现一次；空任务会明确要求 Agent 等待用户。
 - `在右边打开 Claude` 所需的最终规则仍来自 `agentmux --skill`，Claude 仍由 Desktop
   中配置的 Profile 启动。
-- 三块不对称布局中，Agent 能从 `context.regions` 判断哪块占据左侧，并用精确 Region 把它
-  上下分成 2×2，而不是永远 `--relative-to self`。
+- 三块不对称布局中，Agent 能从 `inspect --tab self` 的 Region bounds 判断哪块占据左侧，
+  并用 `--above/--below <region-id>` 把它上下分成 2×2，而不是永远切自己的 Region。
 - 设置、Core 启动合同和自动化测试使用同一个开关，不存在第二套默认值。

@@ -74,9 +74,11 @@ AgentMux 的核心价值是统一 Agent 语义，而不是再造通用 mux 基�
 - `Run`：ctxmux 持有的物理进程和终端事实；
 - `AgentSession`：AgentMux 持有的 Provider/模型语义和 native resume identity；
 - `Attachment`：一个 Client 对 Run output/control 的有界订阅；
-- `View`：Desktop Pane/Tab 对 Run 或 AgentSession 的产品投影。
+- `Tab/Region`：Desktop 对 Run 或 AgentSession 的产品投影；只属于 Client 布局域。
 
-Reattach 原 Run、provider-native resume、Spawn 新 Run、创建新 AgentSession 和打开新 View 是不同动作。Terminal Output、Process Liveness 与 Agent Evidence 保持来源差异；PTY 可证明“进程输出了什么”，不能证明 Tool、Permission、Reply、模型私有 Chain-of-thought 或模型上下文连续。
+Reattach 原 Run、provider-native resume、Spawn 新 Run、创建新 AgentSession 和打开新的 Tab/Region
+投影是不同动作。Terminal Output、Process Liveness 与 Agent Evidence 保持来源差异；PTY 可证明
+“进程输出了什么”，不能证明 Tool、Permission、Reply、模型私有 Chain-of-thought 或模型上下文连续。
 
 ## 6. Local、Remote 与恢复
 
@@ -95,7 +97,7 @@ artifact、capability negotiation 与资源边界由 ctxmux 公共合同和 Conf
 
 ## 7. 交付规则
 
-- AgentMux 可以独立完成 Provider、AgentSession、Hook、Permission、Composition 与 Client
+- AgentMux 可以独立完成 Provider、AgentSession、Hook、Permission、Control 与 Client
   投影；缺少的通用 Run 能力直接在 ctxmux 公共边界补齐。
 - Local 始终只经过一个 `CtxmuxRunAdapter`，不引入第二个 Owner 或临时 fallback。
 - 每个可发布候选都通过 Package、Security、Chaos、Resource、Benchmark 与独立 Review。

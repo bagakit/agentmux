@@ -2,7 +2,7 @@
 
 ## 权威边界
 
-AgentMux 只测试自己的公共 Core/Client 行为和 CtxMux public boundary，不读取 CtxMux wire、数据库、PID table 或私有模块。PTY、Replay、Signal 与 Stop 的底层正确性由固定 CtxMux source Gate 拥有；AgentMux 必须另做 checkout-external packed-boundary proof，证明打包和映射没有破坏这些能力。本文的 Desktop Composition 专指 Pane/Tab/View 空间合同，不与 package composition 混用。
+AgentMux 只测试自己的公共 Core/Client 行为和 CtxMux public boundary，不读取 CtxMux wire、数据库、PID table 或私有模块。PTY、Replay、Signal 与 Stop 的底层正确性由固定 CtxMux source Gate 拥有；AgentMux 必须另做 checkout-external packed-boundary proof，证明打包和映射没有破坏这些能力。Desktop Control 的完整命令与 selector 合同只由 `docs/plans/agentmux-ai-native-desktop-composition-cli.md` 定义；本文只拥有验证分层和公开 oracle。
 
 Terminal output 是 raw PTY bytes 的 UTF-8 投影，不是模型上下文、Tool、Permission、Reply 或 Worker Done 证据。
 
@@ -11,8 +11,8 @@ Terminal output 是 raw PTY bytes 的 UTF-8 投影，不是模型上下文、Too
 | Lane | 命令 | 证明范围 |
 | --- | --- | --- |
 | Fast | `pnpm test:fast` | Pure domain、Store、Provider、Desktop owner 与 UI reducer；不启动 packaged native fixture。 |
-| Native package | `pnpm test:native` | checkout 外 `pnpm pack`、offline install、真实 CtxMux PTY、分组 CLI/Composition handshake、Codex fixture、crash recovery 与 Remote typed unsupported。 |
-| Security | `pnpm test:security` | ACP 默认拒绝、Hook 认证/Secret scope/队列上限、Store 上限、Composition endpoint、Hook installer、Workspace 与 Browser 权限边界。 |
+| Native package | `pnpm test:native` | checkout 外 `pnpm pack`、offline install、真实 CtxMux PTY、Control handshake、Codex fixture、crash recovery 与 Remote typed unsupported。 |
+| Security | `pnpm test:security` | ACP 默认拒绝、Hook 认证/Secret scope/队列上限、Store 上限、Control endpoint、Hook installer、Workspace 与 Browser 权限边界。 |
 | Seeded fuzz | `pnpm test:fuzz` | 固定 seed/case 数的 Hook/Store/terminal byte 与 Workspace path 边界；失败可由测试名中的 seed 重放。 |
 | Reliability | `pnpm test:reliability` | 16 个真实 Run、并发 Attachment、attach/detach churn、stop/input race、slow/fast Consumer、5 MiB 输出、live daemon `SIGKILL`、恢复与 Core 资源斜率。 |
 | Desktop resources | `pnpm test:resources` | 隔离 runtime 中七轮 reusable Terminal claim、Terminal+Monaco 使用与 ready launcher 回归，另验证 Browser WebContents 释放和进程组 working-set 预算。 |
@@ -56,9 +56,9 @@ Security/Fuzz 的 Input 证据由 public recoverable Input、option-like prompt�
 | Workspace revision save | Owner tests 注入临时写入和替换故障并锁定原字节；Store tests 覆盖每文件串行、generation、close/reopen epoch、clean/dirty invalidation、Reload/Overwrite、删除与 read error；mounted oracle 走真实 Renderer → preload → IPC → `WorkspaceFiles`。 |
 | Workspace atomic move | Main owner tests 在 destination-absent 后、最终 syscall 前制造竞争目标，并覆盖 no-follow、no-replace、typed unsupported；post-commit receipt matrix 覆盖 source/destination replacement、moved-back、双缺失、destination parent/Workspace Root 换代与 mutation/read interleave，所有场景都保持 `unknown`，不从 pathname occupancy 猜对象身份。Store tests 覆盖 save mutation admission、目标 owner 冲突、unknown 不改投影，以及 Document/Dirty/Last Active/Tab/Region/Selection/Expanded/changed observed payload 的一次性 segment-aware rekey；订阅断言证明每次 Rename 恰好一次 Explorer projection 引用变化，A→B→A 为零次。Fast interaction tests 固定同 parent、自身/后代与 loaded collision 的共享 plan、成功或 unknown 后恰好两 parent 并发去重刷新。Mounted Desktop 证明 Pointer/菜单只表达单项 Move、非法目标不提交、真实 input 驱动的 A→B→A 保持多选且产生零 Explorer projection 通知；commit barrier 另制造 A Move 已提交、B 已激活、旧 A closure 才继续的时序，证明一次路径事务通知之外两个 parent load 都被 Workspace identity/epoch admission 拒绝，B DOM/cache 不受污染，回 A 后由当前 owner 自行恢复。packaged helper 继续证明安装副本使用同一 no-replace owner。 |
 | Hook acceptance/drain | Hook command 的 receipt id 跨重试稳定；bound ingress 仅在 owner persistence 成功后 `204`，失败以非 2xx 触发同 receipt 重试；Server shutdown 排空已接受事件 |
-| Desktop Composition owner | Fast suite 对真实 Renderer Store 验证唯一 caller context、当前 View 全部 Region 的归一化 bounds、同 Pane Tab、四向 split、精确 focus、配置 Agent launch、ambiguous/stale target、launch failure 与 Renderer/View owner-loss rollback；三块不对称布局会暴露左侧整块与右上/右下，Agent 因而能选精确左 Region 形成 2×2；bridge 测试证明跨 Electron world 只传取消消息并由 Renderer 创建真实 AbortSignal；所有布局 mutation 继续通过同一个 workbench reducer，ctxmux 只接收最终 viewport size |
-| Packed Composition CLI | checkout-external packed consumer 从 injected `PATH` 执行同版本 `agentmux`，通过一个版本化 endpoint 验证受管 caller、context/launch/open/focus、JSON receipt、literal `--help` prompt、分组 Session 命令、deleted flat surface 与 `session output --follow` JSON Lines；Core endpoint 测试另锁定 protocol mismatch、closed target 与 owner unavailable error |
-| Agent-owned CLI discovery | fake Codex 复核 `AGENTMUX_ENV`、权威 `AGENTMUX_CLI` 与 Agent Session context；Fast suite 固定逐级帮助、typed flags、子命令成功语义、`next:` 和 `--skill` 的 fail-closed Composition 边界；Desktop package smoke 在 `PATH=/usr/bin:/bin` 下证明 launcher 使用 `.app` 自带 Node runtime |
+| Desktop Control owner | Fast suite 对真实 Renderer Store 验证 caller identity、Tab/Region 投影、四向 split、精确 focus、三类 typed open、send 唯一性、arrange 和 owner-loss rollback；bridge 测试证明跨 Electron world 只传普通 request/response/cancellation，所有布局 mutation 继续通过同一个 workbench reducer，ctxmux 只接收最终 viewport size |
+| Packed Control CLI | checkout-external packed consumer 从 injected `PATH` 执行同版本 `agentmux`，通过一个版本化 endpoint 验证 `inspect/list/open/send/focus/arrange/output/interrupt/resume/stop`、稳定 JSON receipt、literal `--help` payload、UTF-8 分片和 peer early-close；Core endpoint 测试另锁定 protocol mismatch、closed target、typed candidates 与 owner unavailable error |
+| Agent-owned CLI discovery | fake Codex 复核 `AGENTMUX_ENV`、权威 `AGENTMUX_CLI` 与 Agent Session identity；Fast suite 固定逐级帮助、typed flags、子命令成功语义和 `--skill` 的 fail-closed Control 边界；Desktop package smoke 在 `PATH=/usr/bin:/bin` 下证明 launcher 使用 `.app` 自带 Node runtime |
 | Managed Agent 启动指南 | Core 纯测试固定开启、关闭、原任务和空任务的组装结果；Desktop 测试固定 Config v5 的逐 Profile 开关、内置 Profile 默认开启，内置 Grok Profile 默认使用 `--permission-mode bypassPermissions`，并证明 RuntimeController 把同一份 Profile 原样交给 Core |
 | Darwin endpoint bound | product endpoint 固定在 `/private/tmp/amx-<uid>-<artifact-id>` 且小于 104 bytes；package LaunchServices smoke 启动真实内置 ctxmuxd |
 | bounded Consumer publication | Client 最多 64 个同步 listeners；callback 一旦返回 Promise 就立即自动退订，不建立隐式队列，也不在“忙碌期”静默漏掉仍注册 listener 的 lifecycle/permission 事件；永久 pending Promise 不保留 Client/Publisher。需要异步处理的 Consumer 必须在同步 callback 内复制到自己的有界队列；需要无损字节流则使用独立 Attachment/Replay |
@@ -67,25 +67,25 @@ Security/Fuzz 的 Input 证据由 public recoverable Input、option-like prompt�
 
 主 Oracle：`packages/core/test/package-consumer.integration.test.ts` 与 `packages/core/test/fixtures/packed-consumer.mjs`。
 
-## Production Desktop Composition smoke
+## Production Desktop Control smoke
 
 在 `pnpm package:mac` 产出的 `AgentMux.app` 上完成一次隔离 runtime 的真实 mixed smoke：
 
 - ready receipt 确认 `packaged: true`；caller Agent Session 由 `.app` 内随包 Core/ctxmux artifact
-  创建，packaged Desktop 从同一 Store 建立其唯一 View；
-- 受管 caller 先执行 `agentmux context`，再执行
-  `agentmux launch --agent codex --placement split-right --relative-to self`；launch receipt 返回新的
-  Agent Session/View，且新 `paneId` 与 caller `paneId` 不同；新 Run 的 public status 为 `running`；
+  创建，packaged Desktop 从同一 Store 建立其唯一 Tab/Region 投影；
+- 受管 caller 执行 `agentmux inspect --tab self`，再用 `agentmux open agent --agent codex
+  --right-of self`；receipt 返回新的 Agent Session、Tab 与 Region identity，新 Run 的 public status
+  为 `running`；
 - launch 前后 `owner.json.daemonInstanceId` 与 exact `ctxmuxd` PID 均不变；同一份受信 Core artifact
   从 checkout 搬到 packaged App 后可以继续使用原 daemon，receipt 中的启动路径只作诊断，不参与身份判断；
 - owner 身份继续精确绑定 source commit/tree、manifest/daemon hash、runtime endpoint 和 daemon instance；
   任一身份字段不一致都会被拒绝，不能仅凭协议相同接管；
-- smoke 后通过公开 `session stop` 停止两个测试 Run，退出 test Desktop，确认没有隔离 runtime
+- smoke 后通过公开 `stop --session` 停止两个测试 Run，退出 test Desktop，确认没有隔离 runtime
   进程残留，再删除 test-only `/private/tmp` 目录。
 
-空间方向的非视觉合同由 `apps/desktop/test/composition.test.ts` 对真实 Layout Store/reducer
+空间方向的非视觉合同由 Desktop Control/Layout 测试对真实 Layout Store/reducer
 自动化锁定；此 mixed smoke 证明 packaged 跨进程 CLI → Desktop → Core → ctxmux 纵切。它不外推
-多 Desktop、Remote/SSH、布局持久化或 headless Composition Owner。
+多 Desktop、Remote/SSH 或 headless Control Host。
 
 ## POSIX signal 安全语义
 
