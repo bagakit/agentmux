@@ -62,7 +62,8 @@ lineage 作为 Evidence，但语义解释仍由 AgentMux 持有。
 - `agentmux context/launch/view open/view focus` 通过一个版本化 Composition Control 进入 Desktop。Renderer 是 Layout SSOT，Desktop Main 持有长期 RuntimeController，`ctxmuxd` 仍只持有最终产生的 Run、PTY 与 Replay；
 - `tab` 与四向 `split-left/right/up/down` 使用精确 View 或唯一 caller View，不读取 UI 焦点，也不猜最近 Pane。
 
-Remote/SSH 仍明确 unsupported；Claude、TraeX、Hermes、Pi 保留同一 Provider/Agent Session 合同，但 T-020 只用 Codex 作为真实代表纵切。
+Remote/SSH 仍明确 unsupported；Claude、TraeX、Hermes、Pi 与 Codex 共享同一
+Provider/Agent Session 合同，当前真实端到端覆盖以 Codex 为代表。
 
 ## 使用 Codex 与统一 CLI
 

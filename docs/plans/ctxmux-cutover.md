@@ -124,7 +124,9 @@ CLI 同时是受管 Agent 可自发现的公共控制面，而不只是给人手
 - 顶级 `agentmux --help` 按 Inspect、Control、Desktop 分组解释对象与命令，具体 `agentmux <command> --help` 写明成功语义、失败关闭边界和下一条建议命令；
 - `agentmux --skill` 输出可直接被 Coding Agent 阅读的调用说明，要求先验证 caller context、优先解析 JSON receipt、使用返回 ID 而不是猜测焦点或列表顺序；
 - 不提供 `appmux`、旧文件名或其他 compatibility alias；品牌命令只有 `agentmux`；
-- 当前 `switch` 只聚焦已打开 View。创建、分屏、移动、打开或 Spawn Desktop Pane/Tab/View 属于独立 Desktop Composition 控制面，不偷渡进 T-020，也不因缺少 CLI 而退化为 computer-use。
+- `switch` 只聚焦已打开 View。创建、分屏、移动、打开或 Spawn Desktop Pane/Tab/View 属于
+  独立 Desktop Composition 控制面，不偷渡进 `switch`，也不因缺少 CLI 而退化为
+  computer-use。
 
 Agent-friendly 不是多写一页帮助，而是让受管 Agent 能在一次发现后闭环执行：从 injected caller context 确定“我在哪”，从只读命令枚举 workspace、View、Region 与 Agent，用显式 target 发出原子 mutation，再从 JSON receipt 读取新 ID 和下一步。Desktop Composition 因此把 layout primitive 与 Agent lifecycle 分开：先在当前 View 中建立有方向的 Region，再在该位置启动指定 Provider，并在可交互后返回稳定 Agent Session id。`switch` 继续只负责 focus，Core Session CLI 继续只负责 Agent lifecycle；不能用 UI 焦点猜 target，也不能把 computer-use 当成缺少公共命令时的 fallback。
 

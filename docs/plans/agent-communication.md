@@ -106,7 +106,8 @@ Provider 没有 reply correlation 时，产品必须明确显示 `Delivered` 或
 - 自动唤醒默认拒绝。只有创建专属 target Agent Session 的 P0 操作携带一次明确 launch 授权。
 - Agent 发起 target 的后续 Turn 默认拒绝；持续 send、ask 或 reply 必须具有对应 Thread 与 target capability。
 - 附件默认拒绝并保持 unsupported，直到独立需求明确其存储、权限和生命周期。
-- T-021 完成前 Remote target 返回 typed unsupported，不降级为 Local 猜测、Terminal 注入或隐藏 fallback。
+- CtxMux 公开 Remote 合同交付并通过验证前，Remote target 返回 typed unsupported，不降级为
+  Local 猜测、Terminal 注入或隐藏 fallback。
 
 ## Discussion 交互
 
