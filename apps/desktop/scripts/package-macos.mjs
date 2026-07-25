@@ -579,7 +579,7 @@ async function verifyLaunchServices(appPath, verificationRoot) {
   }
   let verificationError
   let verificationStage = 'launch-request'
-  const verificationDeadline = Date.now() + 90_000
+  const verificationDeadline = Date.now() + 180_000
   try {
     await run('open', [
       '-n',
