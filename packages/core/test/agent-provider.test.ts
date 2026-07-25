@@ -189,6 +189,38 @@ describe('built-in agent providers', () => {
     })).toThrow('does not support')
   })
 
+  it('publishes grok as the only built-in with an addressable posture control, drawn from its declaration', () => {
+    const catalog = new Map(providers.catalog().map((provider) => [provider.id, provider]))
+
+    // grok exposes `/always-approve [on|off]` — two modes, each SET by a distinct in-band slash command.
+    // The catalog carries the DESCRIBE half (labels + tiers) and NO keystroke, so a byte never crosses IPC.
+    expect(catalog.get('grok')?.postureControl).toEqual({
+      id: 'approval',
+      label: 'Approvals',
+      modes: [
+        { id: 'ask', label: 'Ask each time', description: 'Grok asks before running commands or editing files.', tier: 'safe' },
+        { id: 'always-approve', label: 'Auto-approve', description: 'Skip all permission prompts for this session.', tier: 'danger' }
+      ]
+    })
+    expect(JSON.stringify(catalog.get('grok')?.postureControl)).not.toContain('/always-approve')
+
+    // Every other built-in exposes only a blind Shift+Tab cycle (or an unnavigable popup), which is not
+    // addressable — so it declares no posture control and the composer draws nothing for it.
+    for (const id of ['codex', 'claude', 'gemini', 'traex', 'hermes', 'pi', 'antigravity', 'cursor'] as const) {
+      expect(catalog.get(id)?.postureControl).toBeUndefined()
+    }
+  })
+
+  it('resolves grok posture keystrokes core-side and fails closed for providers without a control', () => {
+    // grok's mode ids resolve to the exact bytes the CLI needs — a SET, not a blind cycle.
+    expect(providers.get('grok').planPostureSet('ask')).toEqual({ data: '/always-approve off\r' })
+    expect(providers.get('grok').planPostureSet('always-approve')).toEqual({ data: '/always-approve on\r' })
+    // A mode grok does not declare fails closed.
+    expect(() => providers.get('grok').planPostureSet('yolo')).toThrow('does not declare')
+    // A Provider that declares no posture control refuses the operation rather than emitting a blind key.
+    expect(() => providers.get('claude').planPostureSet('always-approve')).toThrow('does not expose a live posture control')
+  })
+
   it('builds Antigravity resume launch with --conversation and --prompt-interactive', () => {
     const plan = providers.get('antigravity').buildResumeLaunch({
       workspacePath: '/tmp/work',
@@ -370,6 +402,48 @@ describe('built-in agent providers', () => {
     })).toEqual({
       command: 'pi',
       args: ['--session', '/tmp/session.jsonl'],
+      env: {}
+    })
+  })
+
+  it('carries the resolved launch posture into resume argv without breaking the positional prompt', () => {
+    // The create path appends `resolveLaunchArgv(selection)` after the caller args; resume must do the
+    // same so a narrowed sandbox / permission-mode survives the stop/resume boundary rather than
+    // reverting to the Provider's default. buildResumeArgs orders these differently per provider — codex
+    // places args AFTER the positional prompt, claude BEFORE — and both must stay CLI-valid.
+    const codex = providers.get('codex')
+    const codexPosture = codex.resolveLaunchArgv({ sandbox: 'read-only', approval: 'never' })
+    expect(codexPosture).toEqual(['--sandbox', 'read-only', '--ask-for-approval', 'never'])
+    expect(codex.buildResumeLaunch({
+      workspacePath: '/tmp/work',
+      nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'native-1' },
+      prompt: 'resume now',
+      args: codexPosture,
+      env: {}
+    })).toEqual({
+      command: 'codex',
+      // Option flags intermix after the positional prompt; clap accepts option/positional intermixing,
+      // and `resume now` remains a single positional token.
+      args: [
+        'resume', 'native-1', '--dangerously-bypass-hook-trust',
+        'resume now', '--sandbox', 'read-only', '--ask-for-approval', 'never'
+      ],
+      env: {}
+    })
+
+    const claude = providers.get('claude')
+    const claudePosture = claude.resolveLaunchArgv({ 'permission-mode': 'plan' })
+    expect(claudePosture).toEqual(['--permission-mode', 'plan'])
+    expect(claude.buildResumeLaunch({
+      workspacePath: '/tmp/work',
+      nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: 'native-2' },
+      prompt: 'resume now',
+      args: claudePosture,
+      env: {}
+    })).toEqual({
+      command: 'claude',
+      // Claude places args before the positional prompt, so the flag pair precedes it — still valid.
+      args: ['--resume', 'native-2', '--permission-mode', 'plan', 'resume now'],
       env: {}
     })
   })

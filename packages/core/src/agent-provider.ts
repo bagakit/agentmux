@@ -5,18 +5,22 @@ import { fileURLToPath } from 'node:url'
 import type { ExecutionHost } from './execution-host.js'
 import type { AgentManagedHookPlan } from './managed-hook-installer.js'
 import {
+  CLAUDE_LAUNCH_OPTIONS,
+  CODEX_LAUNCH_OPTIONS,
   cloneLaunchOptions,
   describeLaunchOptions,
   resolveLaunchOptionArgv,
   validateLaunchOptionDeclarations,
-  type LaunchOption,
   type LaunchOptionDeclaration,
   type LaunchOptionSelection
 } from './agent-launch-option.js'
 import {
   createNumberedTerminalInteractionProtocol,
+  createPostureControl,
   normalizeTerminalInteraction,
+  type AgentPostureProtocol,
   type AgentTerminalInteractionProtocol,
+  type PostureControlDeclaration,
   type TerminalPermissionOption
 } from './agent-interaction.js'
 import { resolveCoreBinPath } from './runtime-paths.js'
@@ -32,6 +36,7 @@ import type {
   AgentMuxInteractionInputPlan,
   AgentMuxInteractionRequest,
   AgentMuxInteractionResponse,
+  AgentPostureInputPlan,
   AgentPromptInputPlan,
   AgentProviderLaunchContext,
   AgentProviderResumeContext,
@@ -65,6 +70,12 @@ export type AgentProvider = {
     request: AgentMuxInteractionRequest,
     response: AgentMuxInteractionResponse
   ): AgentMuxInteractionInputPlan
+  /**
+   * CONTRIBUTE half of the sealed posture contract: turn a mode id the composer sent back into the exact
+   * PTY keystroke that SETS that posture in-band. Fails closed on a mode this Provider never declared, and
+   * throws when the Provider declares no posture control at all.
+   */
+  planPostureSet(modeId: string): AgentPostureInputPlan
   normalizeHook(envelope: NativeHookEnvelope): NormalizedHookEvent
 }
 
@@ -92,6 +103,14 @@ export type AgentProviderDefinition = {
   ) => string[]
   planPromptInput?: (prompt: string) => AgentPromptInputPlan
   interaction?: AgentTerminalInteractionProtocol
+  /**
+   * SSOT posture declaration: the live, mid-session security-posture control this Provider exposes in-band.
+   * Declare it ONLY when the posture is addressable — two or more modes, each SET by a distinct keystroke
+   * over the PTY-input transport (a slash command that names the target state). Omit it for a Provider with
+   * no in-band affordance, or only a blind cycle it cannot address; the catalog's `postureControl` is then
+   * absent and the composer draws nothing.
+   */
+  posture?: PostureControlDeclaration
 }
 
 const NO_HOOKS: AgentNativeHookSpecification = { rules: [] }
@@ -485,11 +504,18 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
   }
   const launchOptionDeclarations = definition.launchOptions ?? []
   validateLaunchOptionDeclarations(catalogSeed.id, launchOptionDeclarations)
-  // Freeze the DESCRIBE half once; the catalog getter hands out clones so no consumer can mutate it.
-  const describedLaunchOptions: readonly LaunchOption[] = describeLaunchOptions(launchOptionDeclarations)
+  // Build the posture protocol once so the declaration is validated at registration (fail-closed) and the
+  // catalog carries only its DESCRIBE half — the keystrokes stay closed over in `posture` for planPostureSet.
+  const posture: AgentPostureProtocol | undefined = definition.posture
+    ? createPostureControl(definition.posture)
+    : undefined
+  // describeLaunchOptions already builds a fresh DESCRIBE-half structure that shares no reference with the
+  // declarations; AgentProviderRegistry.catalog() clones again per consumer, so a second copy here guards
+  // nothing.
   const catalog: AgentCatalogEntry = {
     ...catalogSeed,
-    launchOptions: cloneLaunchOptions(describedLaunchOptions)
+    launchOptions: describeLaunchOptions(launchOptionDeclarations),
+    ...(posture ? { postureControl: posture.control } : {})
   }
   return {
     id: catalog.id,
@@ -555,6 +581,15 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
       }
       return definition.interaction.planResponse(request, response)
     },
+    planPostureSet(modeId) {
+      if (!posture) {
+        throw new AgentMuxError(
+          `${catalog.label} does not expose a live posture control.`,
+          'AGENT_POSTURE_UNSUPPORTED'
+        )
+      }
+      return posture.planSet(modeId)
+    },
     normalizeHook(envelope) {
       if (envelope.providerId !== catalog.id) {
         throw new AgentMuxError('Hook event does not belong to this provider.', 'HOOK_PROVIDER_MISMATCH')
@@ -575,81 +610,11 @@ function catalog(input: AgentCatalogSeed): Omit<AgentCatalogEntry, 'launchOption
   }
 }
 
-// SSOT launch-option declarations. Every flag below was verified against the installed CLI's own --help
-// before it was declared; nothing is invented. Each choice's argv is the exact flag pair the CLI accepts,
-// and the label is what the renderer shows — one declaration, so the two can never drift. AgentMux drives
-// these as real PTY processes, so these are honestly launch-time choices, not live switches.
-
-// codex top-level (interactive) flags. `-s/--sandbox <read-only|workspace-write|danger-full-access>` and
-// `-a/--ask-for-approval <on-request|never>` verified via `codex --help`. Two options that compose.
-const CODEX_LAUNCH_OPTIONS: readonly LaunchOptionDeclaration[] = [
-  {
-    id: 'sandbox',
-    label: 'Sandbox',
-    description: 'How much of the machine Codex may touch when it runs commands.',
-    choices: [
-      { id: 'read-only', label: 'Read only', tier: 'safe', argv: ['--sandbox', 'read-only'] },
-      {
-        id: 'workspace-write',
-        label: 'Workspace write',
-        description: 'Writes limited to the workspace.',
-        tier: 'caution',
-        argv: ['--sandbox', 'workspace-write']
-      },
-      {
-        id: 'danger-full-access',
-        label: 'Full access',
-        description: 'No sandbox — full machine access.',
-        tier: 'danger',
-        argv: ['--sandbox', 'danger-full-access']
-      }
-    ]
-  },
-  {
-    id: 'approval',
-    label: 'Approval policy',
-    description: 'When Codex pauses for human approval before running a command.',
-    choices: [
-      {
-        id: 'on-request',
-        label: 'On request',
-        description: 'The model decides when to ask.',
-        tier: 'caution',
-        argv: ['--ask-for-approval', 'on-request']
-      },
-      {
-        id: 'never',
-        label: 'Never',
-        description: 'Never pauses for approval.',
-        tier: 'danger',
-        argv: ['--ask-for-approval', 'never']
-      }
-    ]
-  }
-]
-
-// claude top-level flag `--permission-mode <acceptEdits|auto|bypassPermissions|manual|dontAsk|plan>`,
-// verified via `claude --help`. One option; its argv composes cleanly with the positional prompt.
-const CLAUDE_LAUNCH_OPTIONS: readonly LaunchOptionDeclaration[] = [
-  {
-    id: 'permission-mode',
-    label: 'Permission mode',
-    description: 'How Claude handles tool-permission prompts for this session.',
-    choices: [
-      { id: 'manual', label: 'Manual', description: 'Ask for each action.', tier: 'safe', argv: ['--permission-mode', 'manual'] },
-      { id: 'plan', label: 'Plan', description: 'Plan first, no edits.', tier: 'safe', argv: ['--permission-mode', 'plan'] },
-      { id: 'acceptEdits', label: 'Accept edits', description: 'Auto-accept file edits.', tier: 'caution', argv: ['--permission-mode', 'acceptEdits'] },
-      { id: 'auto', label: 'Auto', tier: 'caution', argv: ['--permission-mode', 'auto'] },
-      { id: 'dontAsk', label: "Don't ask", tier: 'caution', argv: ['--permission-mode', 'dontAsk'] },
-      { id: 'bypassPermissions', label: 'Bypass permissions', description: 'Skip all permission checks.', tier: 'danger', argv: ['--permission-mode', 'bypassPermissions'] }
-    ]
-  }
-]
-
 // Keystroke that answers a permission prompt by cancelling it — dismiss the whole prompt.
 const PERMISSION_ESC = ''
 
-// SSOT permission-option declarations — the live-prompt analogue of the launch options above. Each option
+// SSOT permission-option declarations — the live-prompt analogue of the launch options declared in
+// agent-launch-option.ts. Each option
 // fuses the DESCRIBE half (id/label/kind/description/tier, which crosses IPC and the card draws) with the
 // CONTRIBUTE half (`input`, the exact keystroke that selects that row in the Provider's own numbered TUI
 // prompt). The keystroke never crosses IPC; the reply resolves it core-side (see agent-interaction.ts).
@@ -680,6 +645,40 @@ const CLAUDE_PERMISSION_OPTIONS: readonly TerminalPermissionOption[] = [
   },
   { id: 'reject-once', label: 'Deny', kind: 'reject-once', tier: 'safe', input: PERMISSION_ESC }
 ]
+
+// SSOT posture declaration — the live analogue of the permission options above, but SET ahead of a prompt
+// rather than answering one. A posture control is declared ONLY where the Provider's in-band affordance is
+// ADDRESSABLE: a keystroke that names the target state, so setting it is deterministic without reading the
+// TUI (which AgentMux cannot). Every mode carries a NON-EMPTY, DISTINCT keystroke; the validator rejects a
+// single blind cycle, so a control can never masquerade over an unaddressable Shift+Tab.
+//
+// grok exposes `/always-approve [on|off]` — a clap ValueEnum (verified in the installed binary: the enum's
+// possible-values, the `always-approve set to:` set-path, and the documented `/always-approve [on|off]`
+// grammar). Each argument SETS a specific state regardless of the current one, so the two modes get two
+// distinct slash commands submitted with a carriage return. Grok is the ONLY built-in that qualifies:
+// claude, gemini, and codex expose only a Shift+Tab CYCLE (or, for codex, an unnavigable `/approvals`
+// popup) — not addressable to a named mode — so they declare no posture control and the composer draws
+// nothing for them.
+const GROK_POSTURE: PostureControlDeclaration = {
+  id: 'approval',
+  label: 'Approvals',
+  modes: [
+    {
+      id: 'ask',
+      label: 'Ask each time',
+      description: 'Grok asks before running commands or editing files.',
+      tier: 'safe',
+      input: '/always-approve off\r'
+    },
+    {
+      id: 'always-approve',
+      label: 'Auto-approve',
+      description: 'Skip all permission prompts for this session.',
+      tier: 'danger',
+      input: '/always-approve on\r'
+    }
+  ]
+}
 
 export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
   defineAgentProvider({
@@ -876,6 +875,7 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
     // Orca: promptInjectionMode 'argv' with argvPromptSeparator '--' → `grok -- <prompt>`
     // (separator so prompts like `--version` aren't parsed as Grok CLI flags).
     buildArgs: (prompt, args) => (prompt ? [...args, '--', prompt] : [...args]),
+    posture: GROK_POSTURE,
     hook: NO_HOOKS
   }),
   defineAgentProvider({
@@ -1006,7 +1006,16 @@ export class AgentProviderRegistry {
       resumeStrategy: { ...provider.catalog.resumeStrategy },
       acpStrategy: { ...provider.catalog.acpStrategy },
       capabilities: { ...provider.catalog.capabilities },
-      launchOptions: cloneLaunchOptions(provider.catalog.launchOptions)
+      launchOptions: cloneLaunchOptions(provider.catalog.launchOptions),
+      ...(provider.catalog.postureControl
+        ? {
+            postureControl: {
+              id: provider.catalog.postureControl.id,
+              label: provider.catalog.postureControl.label,
+              modes: provider.catalog.postureControl.modes.map((mode) => ({ ...mode }))
+            }
+          }
+        : {})
     }))
   }
 }

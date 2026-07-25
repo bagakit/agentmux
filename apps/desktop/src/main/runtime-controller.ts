@@ -756,6 +756,19 @@ export class RuntimeController {
     })
   }
 
+  async setPosture(
+    control: Extract<SessionControl, { kind: 'agent' }>,
+    modeId: string
+  ): Promise<void> {
+    await this.trackHostLifecycleOperation(control.hostId, async () => {
+      await (await this.connectedClient(control.hostId)).setAgentPosture({
+        agentSessionId: control.agentSessionId,
+        expectedRun: control.run,
+        modeId
+      })
+    })
+  }
+
   async resumeSession(
     control: Extract<SessionControl, { kind: 'agent' }>,
     prompt: string,

@@ -63,15 +63,11 @@ export function NewTabSurface({
     () => providerCatalog.find((entry) => entry.id === selectedProviderId)?.launchOptions ?? [],
     [providerCatalog, selectedProviderId]
   )
-  // Reset the picked choices to each option's declared default whenever the target Provider changes, so a
-  // choice picked for one Provider can never launch another. Options without a default start unset, leaving
-  // the Provider's own default untouched until the user picks.
+  // Clear the picked choices whenever the target Provider changes, so a choice picked for one Provider can
+  // never launch another. Every option starts unset, leaving the Provider's own default untouched until the
+  // user picks.
   useEffect(() => {
-    const defaults: Record<string, string> = {}
-    for (const option of launchOptions) {
-      if (option.defaultChoiceId !== undefined) defaults[option.id] = option.defaultChoiceId
-    }
-    setLaunchOptionSelection(defaults)
+    setLaunchOptionSelection({})
     // Switching Provider re-collapses the disclosure so an untouched agent shows no options noise, and the
     // freshly-reset choices are never revealed mid-flight against the previous Provider's expanded panel.
     setOptionsExpanded(false)

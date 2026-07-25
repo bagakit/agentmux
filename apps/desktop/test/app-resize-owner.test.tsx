@@ -22,7 +22,8 @@ const observed = vi.hoisted(() => {
       projectRailOpen: true,
       toolsOpen: true,
       toolDockWidth: 300,
-      setToolDockWidth: () => {}
+      setToolDockWidth: () => {},
+      sessions: []
     }
   }
 })

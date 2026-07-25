@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   cloneLaunchOptions,
   describeLaunchOptions,
+  normalizeLaunchOptionSelection,
   resolveLaunchOptionArgv,
   validateLaunchOptionDeclarations,
   type LaunchOptionDeclaration
@@ -84,7 +85,7 @@ describe('sealed launch-option contract', () => {
     expect(described[0]!.choices[0]!.label).toBe('Read only')
   })
 
-  it('validates declarations fail closed on duplicate ids, empty labels, and unknown defaults', () => {
+  it('validates declarations fail closed on duplicate ids and empty labels', () => {
     expect(() => validateLaunchOptionDeclarations('codex', [
       { id: 'a', label: 'A', choices: [{ id: 'x', label: 'X', argv: [] }] },
       { id: 'a', label: 'B', choices: [{ id: 'y', label: 'Y', argv: [] }] }
@@ -95,13 +96,23 @@ describe('sealed launch-option contract', () => {
     expect(() => validateLaunchOptionDeclarations('codex', [
       { id: 'a', label: 'A', choices: [] }
     ])).toThrowError(/at least one choice/)
-    expect(() => validateLaunchOptionDeclarations('codex', [
-      {
-        id: 'a', label: 'A', defaultChoiceId: 'nope',
-        choices: [{ id: 'x', label: 'X', argv: [] }]
-      }
-    ])).toThrowError(/unknown defaultChoiceId 'nope'/)
-    // A well-formed declaration (including a named default) validates without throwing.
+    // A well-formed declaration validates without throwing.
     expect(() => validateLaunchOptionDeclarations('codex', twoOptions)).not.toThrow()
+  })
+
+  it('normalizes a selection for persistence and fails closed on malformed input', () => {
+    // Absent or empty resolves to undefined — an un-narrowed create stores no posture and resumes on
+    // the Provider's default rather than a fabricated empty one.
+    expect(normalizeLaunchOptionSelection(undefined)).toBeUndefined()
+    expect(normalizeLaunchOptionSelection({})).toBeUndefined()
+    expect(normalizeLaunchOptionSelection({ sandbox: 'read-only', approval: 'never' }))
+      .toEqual({ sandbox: 'read-only', approval: 'never' })
+    // Fail closed so a malformed posture never reaches a spawn.
+    expect(() => normalizeLaunchOptionSelection({ sandbox: '' }))
+      .toThrowError(/non-empty option and choice ids/)
+    expect(() => normalizeLaunchOptionSelection({ sandbox: 5 }))
+      .toThrowError(/non-empty option and choice ids/)
+    expect(() => normalizeLaunchOptionSelection([]))
+      .toThrowError(/must be an object/)
   })
 })

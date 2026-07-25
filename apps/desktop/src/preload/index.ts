@@ -128,6 +128,8 @@ const api: AgentMuxPreloadApi = {
       ipcRenderer.invoke('sessions:submitPrompt', session, prompt),
     respondInteraction: (session, response) =>
       ipcRenderer.invoke('sessions:respondInteraction', session, response),
+    setPosture: (session: AgentSessionControl, modeId: string) =>
+      ipcRenderer.invoke('sessions:setPosture', session, modeId),
     resume: (session: AgentSessionControl, prompt: string, operationId: string) =>
       ipcRenderer.invoke('sessions:resume', session, prompt, operationId),
     acknowledge: (session: SessionControl, sequence: number) =>

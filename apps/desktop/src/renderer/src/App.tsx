@@ -11,6 +11,7 @@ import {
   getToolDockMinimumWidth
 } from './lib/surface-tool-dock'
 import { SettingsPanel, type SettingsSectionId } from './components/SettingsPanel'
+import { AgentStatusBar } from './components/AgentStatusBar'
 import { ProjectRailToolbar } from './components/ProjectRailToolbar'
 import { SurfaceSwitch, TopRowLeadingChrome } from './components/TopRowChrome'
 import { WorkspaceBoard } from './components/WorkspaceBoard'
@@ -166,6 +167,7 @@ export function App() {
         )}
         {error ? <div className="error-toast"><AlertTriangle size={14} /><span>{error}</span></div> : null}
       </main>
+      <AgentStatusBar />
     </div>
   )
 }
