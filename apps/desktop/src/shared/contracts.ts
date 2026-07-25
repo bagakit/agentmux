@@ -166,6 +166,14 @@ export type CreateWorktreeForBranchInput = {
   workspaceId: string
   branch: string
   path: string
+  /**
+   * Create `branch` from the repository's current HEAD instead of requiring it to already exist.
+   *
+   * This is what makes a fan-out possible: opening N fresh branches for one bake-off. Without it a
+   * caller must create every branch by hand first. When the branch already exists this is refused
+   * rather than silently re-pointing it — moving someone's existing branch is never the intent.
+   */
+  createBranch?: boolean
 }
 
 export type WorkspaceBranchRecord = {
