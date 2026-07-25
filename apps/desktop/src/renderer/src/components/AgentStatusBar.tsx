@@ -1,5 +1,6 @@
 import { useAppStore } from '../store'
 import { summarizeAgentAttention } from '../lib/agent-attention'
+import { AgentRoster } from './AgentRoster'
 
 // The window's only cross-session attention rollup. Every other status indicator is scoped — the
 // tab dot to one Session, Board columns to one Project, the Agents tool total to one open Workspace
@@ -42,9 +43,9 @@ export function AgentStatusBar() {
     // role="group" makes the aria-label a real accessible name; a bare div is a generic node many
     // screen readers skip, so the window's only attention rollup would announce as nothing.
     <div className="agent-status-bar" role="group" aria-label="Agent attention across this window">
-      <span className="agent-status-bar__segment" data-attention="total">
-        <StatusCount state={null} count={rollup.total} label={rollup.total === 1 ? 'agent' : 'agents'} />
-      </span>
+      {/* The total segment now discloses the roster. It already owned "how many Agents exist", so the
+          enumerable list belongs to it rather than to a second control competing for the same fact. */}
+      <AgentRoster total={rollup.total} />
       <span className="agent-status-bar__segment" data-attention="working">
         <StatusCount state={rollup.working > 0 ? 'working' : null} count={rollup.working} label="working" />
       </span>
