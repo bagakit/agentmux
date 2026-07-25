@@ -2,7 +2,6 @@ import {
   Activity,
   ArrowUpRight,
   BellRing,
-  Bookmark,
   Bot,
   CheckCircle2,
   Columns3,
@@ -15,11 +14,22 @@ import {
   NotebookText,
   Pencil,
   Plus,
-  RadioTower
+  RadioTower,
+  SlidersHorizontal
 } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import type { ScratchTopicSnapshot, SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
+import type {
+  BrowserToolbarConfig,
+  ScratchTopicSnapshot,
+  SessionSnapshot,
+  WorkspaceRecord
+} from '../../../shared/contracts'
 import { isScratchWorkspaceId } from '../../../shared/contracts'
+import {
+  BROWSER_TOOLBAR_ITEM_LABELS,
+  BROWSER_TOOLBAR_ITEM_ORDER,
+  type BrowserToolbarItem
+} from '../lib/browser-toolbar'
 import {
   SCRATCH_TOPIC_TITLE_MAX_LENGTH,
   workspaceOwnsSessionPath
@@ -53,7 +63,7 @@ type ToolDefinition<T extends string> = {
 const WORKSPACE_TOOL_META: Record<WorkspaceTool, Omit<ToolDefinition<WorkspaceTool>, 'id'>> = {
   'files-branches': { label: 'Files + Branches', description: 'Browse the selected worktree', icon: FolderGit2 },
   agents: { label: 'Agents', description: 'Find Agents that remain available after their Tab closes', icon: Bot },
-  'browser-favorites': { label: 'Browser Favorites', description: 'Open a browser in the focused pane', icon: Bookmark }
+  'browser-tools': { label: 'Browser Tools', description: 'Open browsers and configure their tools', icon: Globe2 }
 }
 
 const BOARD_TOOL: ToolDefinition<'branch-board'> = {
@@ -93,6 +103,54 @@ function ToolActionSurface({
         {busy ? 'Opening…' : actionLabel}
       </button>
       {children}
+    </section>
+  )
+}
+
+export function BrowserToolbarPreferences({
+  toolbar,
+  saving,
+  onSave
+}: {
+  toolbar: BrowserToolbarConfig
+  saving: boolean
+  onSave(toolbar: BrowserToolbarConfig): Promise<void>
+}) {
+  const [draft, setDraft] = useState(toolbar)
+
+  useEffect(() => setDraft(toolbar), [toolbar])
+
+  const dirty = BROWSER_TOOLBAR_ITEM_ORDER.some((item) => draft[item] !== toolbar[item])
+
+  function setItem(item: BrowserToolbarItem, shown: boolean): void {
+    setDraft((current) => ({ ...current, [item]: shown }))
+  }
+
+  return (
+    <section className="browser-tools-preferences" aria-label="Browser bar visibility">
+      <header><SlidersHorizontal size={14} /><span><strong>Browser bar</strong><small>External open is always visible.</small></span></header>
+      <div>
+        {BROWSER_TOOLBAR_ITEM_ORDER.map((item) => (
+          <label key={item}>
+            <input
+              type="checkbox"
+              checked={draft[item]}
+              disabled={saving}
+              onChange={(event) => setItem(item, event.target.checked)}
+            />
+            <span>{BROWSER_TOOLBAR_ITEM_LABELS[item]}</span>
+          </label>
+        ))}
+      </div>
+      <button
+        className="small-button"
+        type="button"
+        disabled={!dirty || saving}
+        onClick={() => void onSave(draft)}
+      >
+        {saving ? <LoaderCircle className="spin" size={12} /> : null}
+        {saving ? 'Saving…' : 'Save Browser bar'}
+      </button>
     </section>
   )
 }
@@ -503,12 +561,14 @@ export function SurfaceToolDock({
   const workspaceTool = useAppStore((state) => state.workspaceTool)
   const projectRailOpen = useAppStore((state) => state.projectRailOpen)
   const setWorkspaceTool = useAppStore((state) => state.setWorkspaceTool)
+  const setConfig = useAppStore((state) => state.setConfig)
   const layout = useAppStore((state) => workspace ? state.layouts[workspace.id] : undefined)
   const createBrowser = useAppStore((state) => state.createBrowser)
   const selectSession = useAppStore((state) => state.selectSession)
   const config = useAppStore((state) => state.config)
   const sessions = useAppStore((state) => state.sessions)
   const [startingBrowser, setStartingBrowser] = useState(false)
+  const [savingBrowserToolbar, setSavingBrowserToolbar] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const isBoard = surface === 'board'
   // Scratch is a wiki-first workspace: the content slot keeps its `files-branches` role but is
@@ -557,6 +617,21 @@ export function SurfaceToolDock({
     }
   }
 
+  async function saveBrowserToolbar(toolbar: BrowserToolbarConfig): Promise<void> {
+    if (savingBrowserToolbar) return
+    const current = useAppStore.getState().config
+    if (!current) return
+    setSavingBrowserToolbar(true)
+    setError(null)
+    try {
+      setConfig(await api.config.save({ ...current, browser: { toolbar } }))
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setSavingBrowserToolbar(false)
+    }
+  }
+
   return (
     <aside className="surface-tool-panel" aria-label={`${isBoard ? 'Board' : 'Workspace'} tools`}>
       <header className={`surface-tool-activitybar ${projectRailOpen ? '' : 'surface-tool-activitybar--compact-chrome'}`}>
@@ -594,21 +669,21 @@ export function SurfaceToolDock({
             onOpen={(sessionId) => selectSession(sessionId, activePaneId)}
           />
         ) : null}
-        {!isBoard && effectiveWorkspaceTool === 'browser-favorites' && workspace ? (
+        {!isBoard && effectiveWorkspaceTool === 'browser-tools' && workspace && config ? (
           <ToolActionSurface
             icon={<Globe2 size={17} />}
-            eyebrow="Browser Favorites"
+            eyebrow="Browser Tools"
             title="Open a browser tab"
-            description="The browser remains owned by Electron Main and opens in the focused Universal Pane."
+            description="Open a Main-owned browser in the focused Universal Pane, then choose which controls stay on its Browser bar."
             actionLabel="New Browser"
             busy={startingBrowser}
             onAction={() => void openBrowser()}
           >
-            <div className="surface-tool-unavailable">
-              <Bookmark size={15} />
-              <span><strong>No saved favorites</strong><small>Favorite persistence is not available in this build.</small></span>
-              <em>Unavailable</em>
-            </div>
+            <BrowserToolbarPreferences
+              toolbar={config.browser.toolbar}
+              saving={savingBrowserToolbar}
+              onSave={saveBrowserToolbar}
+            />
           </ToolActionSurface>
         ) : null}
         {isBoard && project ? (

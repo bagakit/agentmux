@@ -12,6 +12,7 @@ import type {
   AgentSessionControl,
   AppConfig,
   BrowserBounds,
+  BrowserViewport,
   CreateWorkspacePathInput,
   CreateWorktreeForBranchInput,
   CreateWorkspaceInput,
@@ -252,6 +253,8 @@ export async function registerIpc(args: {
   handle('browser:back', async (id: string) => await browsers.back(id))
   handle('browser:forward', async (id: string) => await browsers.forward(id))
   handle('browser:reload', async (id: string) => await browsers.reload(id))
+  handle('browser:openDevTools', (id: string) => browsers.openDevTools(id))
+  handle('browser:setViewport', (id: string, viewport: BrowserViewport) => browsers.setViewport(id, viewport))
   handle('browser:setBounds', (id: string, bounds: BrowserBounds | null) => browsers.setBounds(id, bounds))
   handle('browser:close', (id: string) => browsers.close(id))
   const detach = args.runtime.attach(args.window.webContents)

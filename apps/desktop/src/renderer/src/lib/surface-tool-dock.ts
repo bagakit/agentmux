@@ -12,7 +12,7 @@ export const TOOL_DOCK_MAX_WIDTH = 440
 export const WORKSPACE_TOOL_IDS = [
   'files-branches',
   'agents',
-  'browser-favorites'
+  'browser-tools'
 ] as const
 
 export type WorkspaceTool = (typeof WORKSPACE_TOOL_IDS)[number]

@@ -13,6 +13,7 @@ import type {
   AppConfig,
   BrowserBounds,
   BrowserEvent,
+  BrowserViewport,
   CreateWorkspacePathInput,
   CreateWorktreeForBranchInput,
   CreateWorkspaceInput,
@@ -141,6 +142,8 @@ const api: AgentMuxPreloadApi = {
     back: (id: string) => ipcRenderer.invoke('browser:back', id),
     forward: (id: string) => ipcRenderer.invoke('browser:forward', id),
     reload: (id: string) => ipcRenderer.invoke('browser:reload', id),
+    openDevTools: (id: string) => ipcRenderer.invoke('browser:openDevTools', id),
+    setViewport: (id: string, viewport: BrowserViewport) => ipcRenderer.invoke('browser:setViewport', id, viewport),
     setBounds: (id: string, bounds: BrowserBounds | null) => ipcRenderer.invoke('browser:setBounds', id, bounds),
     close: (id: string) => ipcRenderer.invoke('browser:close', id),
     onEvent(listener: (event: BrowserEvent) => void) {
