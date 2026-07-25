@@ -5,9 +5,11 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import { ChevronDown, ChevronUp, LoaderCircle, Search, X } from 'lucide-react'
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { RuntimeEvent, SessionSnapshot, TerminalThemeId } from '../../../shared/contracts'
 import { api } from '../lib/api'
+import type { OpenHttpLinkOrigin } from '../lib/open-destination'
+import { useAppStore } from '../store'
 import { installTerminalColorQueryReplyHandlers } from '../lib/terminal-capability-replies'
 import { terminalOptions, terminalTheme } from '../lib/terminal-theme'
 import { isTerminalAppShortcut } from '../lib/terminal-shortcuts'
@@ -17,6 +19,10 @@ import { LatestTerminalOutputAcknowledger } from '../lib/terminal-output-ack'
 import { TerminalViewportSynchronizer } from '../lib/terminal-viewport-sync'
 import { terminalStartupPhase } from '../lib/terminal-startup'
 import { agentProviderLabel } from './AgentProviderIcon'
+import {
+  OpenDestinationMenu,
+  type OpenDestinationMenuRequest
+} from './OpenDestinationMenu'
 import { TerminalContextMenu } from './TerminalContextMenu'
 import { TerminalReplayGapNotice } from './TerminalReplayGapNotice'
 
@@ -26,6 +32,25 @@ function terminalWrite(terminal: Terminal, data: string): Promise<void> {
 
 const MAX_PENDING_OUTPUT_EVENTS = 256
 const MAX_PENDING_OUTPUT_BYTES = 512 * 1024
+
+type TerminalLinkRequest = OpenDestinationMenuRequest & { terminalGeneration: number }
+
+export function parseTerminalHttpLink(rawUrl: string): string | null {
+  try {
+    const url = new URL(rawUrl)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
+    return url.toString()
+  } catch {
+    return null
+  }
+}
+
+export function dismissTerminalLinkRequest<T extends OpenDestinationMenuRequest>(
+  current: T | null,
+  requestId: number
+): T | null {
+  return current?.id === requestId ? null : current
+}
 
 function outputForSession(event: RuntimeEvent, session: SessionSnapshot) {
   const core = event.event
@@ -42,19 +67,24 @@ export function TerminalView({
   session,
   themeId,
   interactiveResize,
-  autoFocus = true
+  autoFocus = true,
+  linkOrigin
 }: {
   session: SessionSnapshot
   themeId: TerminalThemeId
   interactiveResize: boolean
   // The reusable terminal on the create page must not steal focus from the prompt.
   autoFocus?: boolean
+  linkOrigin: OpenHttpLinkOrigin
 }) {
   const autoFocusRef = useRef(autoFocus)
   autoFocusRef.current = autoFocus
   const rootRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<Terminal | null>(null)
   const viewportRef = useRef<TerminalViewportSynchronizer | null>(null)
+  const terminalGenerationRef = useRef(0)
+  const nextLinkRequestIdRef = useRef(0)
+  const linkRequestRef = useRef<TerminalLinkRequest | null>(null)
   const interactiveResizeRef = useRef(interactiveResize)
   interactiveResizeRef.current = interactiveResize
   // canControlRun 随 processState 翻转，但 attach effect 不能依赖它——否则同 runId 的
@@ -73,6 +103,9 @@ export function TerminalView({
   const [redrawing, setRedrawing] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [linkRequest, setLinkRequest] = useState<TerminalLinkRequest | null>(null)
+  const openHttpLink = useAppStore((state) => state.openHttpLink)
+  const reportError = useAppStore((state) => state.reportError)
 
   useEffect(() => {
     if (searchOpen) searchInputRef.current?.focus()
@@ -92,6 +125,7 @@ export function TerminalView({
   useEffect(() => {
     const root = rootRef.current
     if (!root) return
+    const terminalGeneration = ++terminalGenerationRef.current
     setHydrating(true)
     setAttachFailed(false)
     setHasOutput(false)
@@ -104,11 +138,18 @@ export function TerminalView({
     })
     const fit = new FitAddon()
     const search = new SearchAddon()
-    const webLinks = new WebLinksAddon((_event, uri) => {
-      if (!/^https?:\/\//i.test(uri)) return
-      void api.ui.openExternal(uri).catch((error) => {
-        console.warn('[terminal] failed to open external link', error)
-      })
+    const webLinks = new WebLinksAddon((event, uri) => {
+      const url = parseTerminalHttpLink(uri)
+      if (!url) return
+      const request = {
+        id: ++nextLinkRequestIdRef.current,
+        url,
+        x: event.clientX,
+        y: event.clientY,
+        terminalGeneration
+      }
+      linkRequestRef.current = request
+      setLinkRequest(request)
     })
     terminal.loadAddon(fit)
     terminal.loadAddon(search)
@@ -311,6 +352,11 @@ export function TerminalView({
     if (autoFocusRef.current) requestAnimationFrame(() => terminal.focus())
     return () => {
       disposed = true
+      setLinkRequest((current) => {
+        const next = current?.terminalGeneration === terminalGeneration ? null : current
+        linkRequestRef.current = next
+        return next
+      })
       acknowledger.dispose()
       if (terminalRef.current === terminal) terminalRef.current = null
       if (viewportRef.current === viewport) viewportRef.current = null
@@ -386,68 +432,88 @@ export function TerminalView({
   })
 
   return (
-    <TerminalContextMenu
-      hasSelection={hasSelection}
-      onCopy={copySelection}
-      onPaste={pasteClipboard}
-      onSelectAll={() => terminalRef.current?.selectAll()}
-      onSearch={() => setSearchOpen(true)}
-      onScrollToBottom={() => terminalRef.current?.scrollToBottom()}
-      onClear={() => terminalRef.current?.clear()}
-    >
-      <div
-        className="terminal-view"
-        style={{ backgroundColor: terminalTheme(themeId).background }}
+    <Fragment>
+      <TerminalContextMenu
+        hasSelection={hasSelection}
+        onCopy={copySelection}
+        onPaste={pasteClipboard}
+        onSelectAll={() => terminalRef.current?.selectAll()}
+        onSearch={() => setSearchOpen(true)}
+        onScrollToBottom={() => terminalRef.current?.scrollToBottom()}
+        onClear={() => terminalRef.current?.clear()}
       >
         <div
-          className={`terminal-view__xterm ${hydrating ? 'terminal-view__xterm--hydrating' : ''}`}
-          ref={rootRef}
-          onPointerDown={() => terminalRef.current?.focus()}
-        />
-        {startupPhase === 'restoring' ? (
-          <div className="terminal-hydration" role="status" aria-live="polite">
-            <LoaderCircle className="spin" size={13} /> Restoring terminal…
-          </div>
-        ) : null}
-        {startupPhase === 'starting-agent' && session.kind === 'agent' ? (
-          <div className="terminal-agent-startup" role="status" aria-live="polite">
-            <div className="terminal-agent-startup__content">
-              <LoaderCircle className="spin" size={14} />
-              <strong>Starting {agentProviderLabel(session.providerId)}…</strong>
-              <span>Waiting for its first terminal output.</span>
-            </div>
-          </div>
-        ) : null}
-        {!hydrating && replayGap ? (
-          <TerminalReplayGapNotice
-            canRedraw={canControlRun}
-            redrawing={redrawing}
-            onRedraw={() => void redrawCurrentScreen()}
+          className="terminal-view"
+          style={{ backgroundColor: terminalTheme(themeId).background }}
+        >
+          <div
+            className={`terminal-view__xterm ${hydrating ? 'terminal-view__xterm--hydrating' : ''}`}
+            ref={rootRef}
+            onPointerDown={() => terminalRef.current?.focus()}
           />
-        ) : null}
-        {searchOpen ? (
-          <div className="terminal-search" role="search">
-            <Search size={13} />
-            <input
-              ref={searchInputRef}
-              value={searchQuery}
-              placeholder="Find"
-              aria-label="Find in terminal"
-              onChange={(event) => {
-                setSearchQuery(event.target.value)
-                searchTerminal(event.target.value)
-              }}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') searchTerminal(searchQuery, event.shiftKey)
-                if (event.key === 'Escape') closeSearch()
-              }}
+          {startupPhase === 'restoring' ? (
+            <div className="terminal-hydration" role="status" aria-live="polite">
+              <LoaderCircle className="spin" size={13} /> Restoring terminal…
+            </div>
+          ) : null}
+          {startupPhase === 'starting-agent' && session.kind === 'agent' ? (
+            <div className="terminal-agent-startup" role="status" aria-live="polite">
+              <div className="terminal-agent-startup__content">
+                <LoaderCircle className="spin" size={14} />
+                <strong>Starting {agentProviderLabel(session.providerId)}…</strong>
+                <span>Waiting for its first terminal output.</span>
+              </div>
+            </div>
+          ) : null}
+          {!hydrating && replayGap ? (
+            <TerminalReplayGapNotice
+              canRedraw={canControlRun}
+              redrawing={redrawing}
+              onRedraw={() => void redrawCurrentScreen()}
             />
-            <button type="button" title="Previous match" onClick={() => searchTerminal(searchQuery, true)}><ChevronUp size={13} /></button>
-            <button type="button" title="Next match" onClick={() => searchTerminal(searchQuery)}><ChevronDown size={13} /></button>
-            <button type="button" title="Close find" onClick={closeSearch}><X size={13} /></button>
-          </div>
-        ) : null}
-      </div>
-    </TerminalContextMenu>
+          ) : null}
+          {searchOpen ? (
+            <div className="terminal-search" role="search">
+              <Search size={13} />
+              <input
+                ref={searchInputRef}
+                value={searchQuery}
+                placeholder="Find"
+                aria-label="Find in terminal"
+                onChange={(event) => {
+                  setSearchQuery(event.target.value)
+                  searchTerminal(event.target.value)
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') searchTerminal(searchQuery, event.shiftKey)
+                  if (event.key === 'Escape') closeSearch()
+                }}
+              />
+              <button type="button" title="Previous match" onClick={() => searchTerminal(searchQuery, true)}><ChevronUp size={13} /></button>
+              <button type="button" title="Next match" onClick={() => searchTerminal(searchQuery)}><ChevronDown size={13} /></button>
+              <button type="button" title="Close find" onClick={closeSearch}><X size={13} /></button>
+            </div>
+          ) : null}
+        </div>
+      </TerminalContextMenu>
+      <OpenDestinationMenu
+        request={linkRequest}
+        canSplit={Boolean(linkOrigin.tabId && linkOrigin.regionId)}
+        onDismiss={(requestId) => {
+          setLinkRequest((current) => {
+            const next = dismissTerminalLinkRequest(current, requestId)
+            if (linkRequestRef.current?.id === requestId) linkRequestRef.current = next
+            return next
+          })
+        }}
+        onSelect={(destination) => {
+          const request = linkRequest
+          if (!request || linkRequestRef.current?.id !== request.id) return
+          linkRequestRef.current = null
+          setLinkRequest((current) => dismissTerminalLinkRequest(current, request.id))
+          void openHttpLink(linkOrigin, request.url, destination).catch(reportError)
+        }}
+      />
+    </Fragment>
   )
 }

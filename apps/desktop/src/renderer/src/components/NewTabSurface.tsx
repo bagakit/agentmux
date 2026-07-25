@@ -192,7 +192,7 @@ export function NewTabSurface({
           <span><SquareTerminal size={12} /> Terminal</span>
           <em>reusable</em>
         </div>
-        {warmSession && terminalThemeId ? (
+        {workspace && warmSession && terminalThemeId ? (
           <div className="launch-terminal">
             <div className="launch-terminal__head">
               <span className="launch-terminal__hint">Ready — run a quick command here, or claim it as its own tab.</span>
@@ -218,6 +218,7 @@ export function NewTabSurface({
                 themeId={terminalThemeId}
                 interactiveResize={false}
                 autoFocus={false}
+                linkOrigin={{ workspaceId: workspace.id, tabGroupId }}
               />
             </div>
           </div>
