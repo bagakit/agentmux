@@ -14,9 +14,10 @@ import {
   type LaunchOptionSelection
 } from './agent-launch-option.js'
 import {
+  createNumberedTerminalInteractionProtocol,
   normalizeTerminalInteraction,
-  planNumberedTerminalInteractionResponse,
-  type AgentTerminalInteractionProtocol
+  type AgentTerminalInteractionProtocol,
+  type TerminalPermissionOption
 } from './agent-interaction.js'
 import { resolveCoreBinPath } from './runtime-paths.js'
 import {
@@ -645,6 +646,41 @@ const CLAUDE_LAUNCH_OPTIONS: readonly LaunchOptionDeclaration[] = [
   }
 ]
 
+// Keystroke that answers a permission prompt by cancelling it — dismiss the whole prompt.
+const PERMISSION_ESC = ''
+
+// SSOT permission-option declarations — the live-prompt analogue of the launch options above. Each option
+// fuses the DESCRIBE half (id/label/kind/description/tier, which crosses IPC and the card draws) with the
+// CONTRIBUTE half (`input`, the exact keystroke that selects that row in the Provider's own numbered TUI
+// prompt). The keystroke never crosses IPC; the reply resolves it core-side (see agent-interaction.ts).
+// Only positionally STABLE rows are declared — a prompt row whose position shifts per command/host/file
+// cannot be answered by a static keystroke, so it is deliberately withheld and left to the launch posture.
+
+// Codex renders a DYNAMIC approval list: its middle rows (this-command / this-session / this-host /
+// these-files) appear conditionally and reorder, so only row 1 (allow-once → '1') and deny (ESC) are
+// positionally honest. Codex's richer auto/never-ask posture is the already-declared CODEX_LAUNCH_OPTIONS,
+// set once at spawn — we do not fake a live keystroke into a list we cannot read.
+const CODEX_PERMISSION_OPTIONS: readonly TerminalPermissionOption[] = [
+  { id: 'allow-once', label: 'Allow', kind: 'allow-once', tier: 'safe', input: '1' },
+  { id: 'reject-once', label: 'Deny', kind: 'reject-once', tier: 'safe', input: PERMISSION_ESC }
+]
+
+// Claude renders a STABLE three-row tool prompt: {Yes} / {Yes, and don't ask again for this tool} /
+// {No (esc)}. Row 2 is positionally invariant, so Claude honestly gains a live allow-always via '2' — the
+// exact "allow & don't ask again" tier the two-button card was truncating.
+const CLAUDE_PERMISSION_OPTIONS: readonly TerminalPermissionOption[] = [
+  { id: 'allow-once', label: 'Allow once', kind: 'allow-once', tier: 'safe', input: '1' },
+  {
+    id: 'allow-always',
+    label: "Allow & don't ask again",
+    description: 'This tool, this directory.',
+    kind: 'allow-always',
+    tier: 'caution',
+    input: '2'
+  },
+  { id: 'reject-once', label: 'Deny', kind: 'reject-once', tier: 'safe', input: PERMISSION_ESC }
+]
+
 export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
   defineAgentProvider({
     catalog: catalog({
@@ -686,11 +722,11 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
       renderedText: sanitizeBracketedPasteText(prompt).replace(/\r\n?/gu, '\n'),
       submit: '\r'
     }),
-    interaction: {
+    interaction: createNumberedTerminalInteractionProtocol({
       questionEvents: ['PreToolUse'],
       questionTools: ['request_user_input', 'askuserquestion'],
-      planResponse: planNumberedTerminalInteractionResponse
-    },
+      permissionOptions: CODEX_PERMISSION_OPTIONS
+    }),
     hook: CODEX_HOOKS,
     launchOptions: CODEX_LAUNCH_OPTIONS,
     buildResumeArgs: (sessionId, _transcriptPath, prompt, args) => [
@@ -722,11 +758,11 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
       }
     }),
     buildArgs: (prompt, args) => [...args, ...(prompt ? [prompt] : [])],
-    interaction: {
+    interaction: createNumberedTerminalInteractionProtocol({
       questionEvents: ['PermissionRequest', 'PreToolUse'],
       questionTools: ['askuserquestion'],
-      planResponse: planNumberedTerminalInteractionResponse
-    },
+      permissionOptions: CLAUDE_PERMISSION_OPTIONS
+    }),
     hook: CLAUDE_HOOKS,
     launchOptions: CLAUDE_LAUNCH_OPTIONS,
     buildResumeArgs: (sessionId, _transcriptPath, prompt, args) => [

@@ -352,6 +352,11 @@ export type AgentMuxPermissionOption = {
   id: string
   label: string
   kind: 'allow-once' | 'allow-always' | 'reject-once' | 'reject-always'
+  /** DESCRIBE-half only: prose the renderer draws beneath the label. The keystroke that answers this
+   * option never rides here — it stays core-side on the Provider's declaration. */
+  description?: string
+  /** Risk state a renderer surfaces as a restrained dot; not decoration, not a stroke. */
+  tier?: 'safe' | 'caution' | 'danger'
 }
 
 export type AgentMuxPermissionRequest = {

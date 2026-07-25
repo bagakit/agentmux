@@ -5,7 +5,7 @@ import { DESKTOP_ACTIONS } from '../../../shared/desktop-actions'
 import { executorDetectionKey, useAppStore, warmTerminalKey } from '../store'
 import { configuredExecutors } from '../lib/executors'
 import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
-import { LaunchOptionControls } from './LaunchOptionControls'
+import { LaunchRefine } from './LaunchOptionControls'
 import { TerminalView } from './TerminalView'
 
 export function NewTabSurface({
@@ -20,6 +20,7 @@ export function NewTabSurface({
   const [executorId, setExecutorId] = useState('codex')
   const [prompt, setPrompt] = useState('')
   const [launchOptionSelection, setLaunchOptionSelection] = useState<LaunchOptionSelection>({})
+  const [optionsExpanded, setOptionsExpanded] = useState(false)
   const [busy, setBusy] = useState<'agent' | 'terminal' | 'browser' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [showUnavailable, setShowUnavailable] = useState(false)
@@ -56,7 +57,7 @@ export function NewTabSurface({
   const detecting = executors.some((executor) => executor.detection?.state === 'checking')
 
   // Launch options are read purely from the selected Provider's catalog declaration — no branch on
-  // providerId. A Provider that declares none yields [], so LaunchOptionControls renders nothing.
+  // providerId. A Provider that declares none yields [], so LaunchRefine renders nothing.
   const selectedProviderId = executors.find((executor) => executor.id === executorId)?.providerId
   const launchOptions = useMemo(
     () => providerCatalog.find((entry) => entry.id === selectedProviderId)?.launchOptions ?? [],
@@ -71,6 +72,9 @@ export function NewTabSurface({
       if (option.defaultChoiceId !== undefined) defaults[option.id] = option.defaultChoiceId
     }
     setLaunchOptionSelection(defaults)
+    // Switching Provider re-collapses the disclosure so an untouched agent shows no options noise, and the
+    // freshly-reset choices are never revealed mid-flight against the previous Provider's expanded panel.
+    setOptionsExpanded(false)
   }, [launchOptions])
 
   useEffect(() => {
@@ -207,9 +211,11 @@ export function NewTabSurface({
         rows={4}
       />
 
-      <LaunchOptionControls
+      <LaunchRefine
         options={launchOptions}
         selection={launchOptionSelection}
+        expanded={optionsExpanded}
+        onToggle={() => setOptionsExpanded((value) => !value)}
         disabled={busy !== null}
         onSelect={(optionId, choiceId) =>
           setLaunchOptionSelection((current) => {

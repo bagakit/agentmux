@@ -3,6 +3,7 @@ import type {
   AgentMuxInteractionInputPlan,
   AgentMuxInteractionRequest,
   AgentMuxInteractionResponse,
+  AgentMuxPermissionOption,
   AgentMuxQuestion,
   NativeHookEnvelope
 } from './types.js'
@@ -15,6 +16,18 @@ const ESC = '\u001b'
 export type AgentTerminalInteractionDetection = {
   questionEvents: readonly string[]
   questionTools: readonly string[]
+  permissionOptions: readonly TerminalPermissionOption[]
+}
+
+/**
+ * The permission analogue of a {@link LaunchOptionChoiceDeclaration}: the DESCRIBE half
+ * ({@link AgentMuxPermissionOption} — id/label/kind/description/tier, which crosses IPC and the renderer
+ * draws) fused with the CONTRIBUTE half (`input`, the exact PTY keystroke that selects this row in the
+ * Provider's own live numbered prompt). The keystroke never crosses IPC; it is resolved core-side at
+ * reply time, so the reply always sends the byte the picked option declares — never a fixed '1'.
+ */
+export type TerminalPermissionOption = AgentMuxPermissionOption & {
+  readonly input: string
 }
 
 export type AgentTerminalInteractionProtocol = AgentTerminalInteractionDetection & {
@@ -22,6 +35,41 @@ export type AgentTerminalInteractionProtocol = AgentTerminalInteractionDetection
     request: AgentMuxInteractionRequest,
     response: AgentMuxInteractionResponse
   ): AgentMuxInteractionInputPlan
+}
+
+/**
+ * Fail closed on a malformed permission declaration so a Provider can never ship a permission surface the
+ * renderer cannot draw or the reply cannot honor. Mirrors {@link validateLaunchOptionDeclarations}: unique
+ * ids, a non-empty keystroke on every option, and at least one allow and one reject so the card always
+ * offers a real verdict either way. Called once, when a Provider's protocol is created.
+ */
+export function validatePermissionOptions(options: readonly TerminalPermissionOption[]): void {
+  if (options.length === 0) {
+    throw new AgentMuxError('A permission protocol must declare at least one option.', 'INVALID_PERMISSION_OPTION')
+  }
+  const seen = new Set<string>()
+  let allow = 0
+  let reject = 0
+  for (const option of options) {
+    if (!option.id.trim() || !option.label.trim() || !option.input) {
+      throw new AgentMuxError(
+        'A permission option must carry a non-empty id, label, and input.',
+        'INVALID_PERMISSION_OPTION'
+      )
+    }
+    if (seen.has(option.id)) {
+      throw new AgentMuxError(`Duplicate permission option id '${option.id}'.`, 'INVALID_PERMISSION_OPTION')
+    }
+    seen.add(option.id)
+    if (option.kind.startsWith('allow-')) allow += 1
+    else reject += 1
+  }
+  if (allow === 0 || reject === 0) {
+    throw new AgentMuxError(
+      'A permission protocol must declare at least one allow and one reject option.',
+      'INVALID_PERMISSION_OPTION'
+    )
+  }
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -127,10 +175,16 @@ export function normalizeTerminalInteraction(
       id: envelope.receiptId,
       agentSessionId: envelope.agentSessionId,
       title: toolName ? `Allow ${toolName}?` : 'Allow this action?',
-      options: [
-        { id: 'allow-once', label: 'Allow', kind: 'allow-once' },
-        { id: 'reject-once', label: 'Deny', kind: 'reject-once' }
-      ],
+      // Project the DESCRIBE half out of the Provider's declaration — never a hardcoded pair. The
+      // keystroke (`input`) is intentionally dropped here: it stays core-side and is resolved at reply
+      // time, so it never crosses IPC into the renderer.
+      options: protocol.permissionOptions.map((option) => ({
+        id: option.id,
+        label: option.label,
+        kind: option.kind,
+        ...(option.description === undefined ? {} : { description: option.description }),
+        ...(option.tier === undefined ? {} : { tier: option.tier })
+      })),
       ...(toolName ? { toolName } : {}),
       ...(toolInput ? { toolInput } : {}),
       evidence: {
@@ -144,28 +198,47 @@ export function normalizeTerminalInteraction(
   return undefined
 }
 
-export function planNumberedTerminalInteractionResponse(
-  request: AgentMuxInteractionRequest,
-  response: AgentMuxInteractionResponse
-): AgentMuxInteractionInputPlan {
-  const normalized = normalizeAgentInteractionResponse(request, response)
-  if (request.kind === 'permission') {
-    const decision = normalized.kind === 'permission' ? normalized.decision : null
-    if (!decision) {
-      throw new AgentMuxError('Permission response kind is invalid.', 'INVALID_AGENT_INTERACTION_RESPONSE')
+/**
+ * Build a Provider's numbered terminal-interaction protocol from its declared detection config. The
+ * returned `planResponse` CLOSES OVER `permissionOptions`, so the reply resolves the picked option's
+ * declared keystroke (its CONTRIBUTE half) — never a fixed '1'. Fails closed on a malformed permission
+ * declaration at construction, the way {@link validateLaunchOptionDeclarations} does for launch options.
+ */
+export function createNumberedTerminalInteractionProtocol(
+  config: AgentTerminalInteractionDetection
+): AgentTerminalInteractionProtocol {
+  validatePermissionOptions(config.permissionOptions)
+  return {
+    questionEvents: config.questionEvents,
+    questionTools: config.questionTools,
+    permissionOptions: config.permissionOptions,
+    planResponse(request, response) {
+      const normalized = normalizeAgentInteractionResponse(request, response)
+      if (request.kind === 'permission') {
+        const decision = normalized.kind === 'permission' ? normalized.decision : null
+        if (!decision) {
+          throw new AgentMuxError('Permission response kind is invalid.', 'INVALID_AGENT_INTERACTION_RESPONSE')
+        }
+        if (decision.outcome === 'cancelled') return { data: ESC }
+        const option = config.permissionOptions.find((candidate) => candidate.id === decision.optionId)
+        if (!option) {
+          throw new AgentMuxError(
+            'Permission response selected an option this Provider does not declare.',
+            'INVALID_AGENT_INTERACTION_RESPONSE'
+          )
+        }
+        return { data: option.input }
+      }
+      if (normalized.kind !== 'question') {
+        throw new AgentMuxError('Question response kind is invalid.', 'INVALID_AGENT_INTERACTION_RESPONSE')
+      }
+      if (normalized.outcome === 'cancelled') return { data: ESC }
+      const question = request.questions[0]!
+      const answer = normalized.answers[0]!
+      const optionIndex = question.options.findIndex((candidate) => candidate.id === answer.optionId)
+      return { data: String(optionIndex + 1) }
     }
-    if (decision.outcome === 'cancelled') return { data: ESC }
-    const option = request.options.find((candidate) => candidate.id === decision.optionId)
-    return { data: option!.kind.startsWith('allow-') ? '1' : ESC }
   }
-  if (normalized.kind !== 'question') {
-    throw new AgentMuxError('Question response kind is invalid.', 'INVALID_AGENT_INTERACTION_RESPONSE')
-  }
-  if (normalized.outcome === 'cancelled') return { data: ESC }
-  const question = request.questions[0]!
-  const answer = normalized.answers[0]!
-  const optionIndex = question.options.findIndex((candidate) => candidate.id === answer.optionId)
-  return { data: String(optionIndex + 1) }
 }
 
 export function normalizeAgentInteractionResponse(
