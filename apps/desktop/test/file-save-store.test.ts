@@ -327,7 +327,71 @@ describe('revision-aware file save Store', () => {
     expect(useAppStore.getState().documentIssues[key]).toBeUndefined()
   })
 
-  it('does not clear a newer deletion observed after Overwrite starts', async () => {
+  it('reconciles a deletion read that completes before the Overwrite receipt', async () => {
+    const { workspace, tab, key } = seed()
+    useAppStore.getState().updateDocument(tab.id, 'draft')
+    const firstRefresh = useAppStore.getState().refreshDocument(workspace.id, tab.path)
+    await waitFor(() => fileApi.reads.length === 1)
+    fileApi.reads[0]!.resolve({ status: 'deleted' })
+    await firstRefresh
+
+    const overwrite = useAppStore.getState().overwriteDocument(tab.id)
+    await waitFor(() => fileApi.writes.length === 1)
+    const overlappingRefresh = useAppStore.getState().refreshDocument(workspace.id, tab.path)
+    await waitFor(() => fileApi.reads.length === 2)
+    fileApi.reads[1]!.resolve({ status: 'deleted' })
+    await overlappingRefresh
+    fileApi.writes[0]!.resolve({ status: 'written', revision: 'revision-recreated' })
+    await waitFor(() => fileApi.reads.length === 3)
+    fileApi.reads[2]!.resolve({
+      status: 'read',
+      document: { path: tab.path, content: 'draft', revision: 'revision-recreated' }
+    })
+    await overwrite
+
+    expect(useAppStore.getState().documents[key]).toEqual({
+      path: tab.path,
+      content: 'draft',
+      revision: 'revision-recreated'
+    })
+    expect(useAppStore.getState().dirtyDocuments[key]).toBe(false)
+    expect(useAppStore.getState().documentIssues[key]).toBeUndefined()
+  })
+
+  it('keeps edits made while an Overwrite reconciliation read is in flight', async () => {
+    const { workspace, tab, key } = seed()
+    useAppStore.getState().updateDocument(tab.id, 'draft')
+    const firstRefresh = useAppStore.getState().refreshDocument(workspace.id, tab.path)
+    await waitFor(() => fileApi.reads.length === 1)
+    fileApi.reads[0]!.resolve({ status: 'deleted' })
+    await firstRefresh
+
+    const overwrite = useAppStore.getState().overwriteDocument(tab.id)
+    await waitFor(() => fileApi.writes.length === 1)
+    const overlappingRefresh = useAppStore.getState().refreshDocument(workspace.id, tab.path)
+    await waitFor(() => fileApi.reads.length === 2)
+    fileApi.reads[1]!.resolve({ status: 'deleted' })
+    await overlappingRefresh
+    fileApi.writes[0]!.resolve({ status: 'written', revision: 'revision-recreated' })
+    await waitFor(() => fileApi.reads.length === 3)
+
+    useAppStore.getState().updateDocument(tab.id, 'newer draft')
+    fileApi.reads[2]!.resolve({
+      status: 'read',
+      document: { path: tab.path, content: 'draft', revision: 'revision-recreated' }
+    })
+    await overwrite
+
+    expect(useAppStore.getState().documents[key]).toEqual({
+      path: tab.path,
+      content: 'newer draft',
+      revision: 'revision-recreated'
+    })
+    expect(useAppStore.getState().dirtyDocuments[key]).toBe(true)
+    expect(useAppStore.getState().documentIssues[key]).toBeUndefined()
+  })
+
+  it('keeps a deletion confirmed after Overwrite reconciliation', async () => {
     const { workspace, tab, key } = seed()
     const firstRefresh = useAppStore.getState().refreshDocument(workspace.id, tab.path)
     await waitFor(() => fileApi.reads.length === 1)
@@ -341,6 +405,8 @@ describe('revision-aware file save Store', () => {
     fileApi.reads[1]!.resolve({ status: 'deleted' })
     await newerRefresh
     fileApi.writes[0]!.resolve({ status: 'written', revision: 'revision-recreated' })
+    await waitFor(() => fileApi.reads.length === 3)
+    fileApi.reads[2]!.resolve({ status: 'deleted' })
     await overwrite
 
     expect(useAppStore.getState().documents[key]).toMatchObject({
@@ -610,6 +676,11 @@ describe('revision-aware file save Store', () => {
     })
     await refresh
     fileApi.writes[0]!.resolve({ status: 'written', revision: 'revision-bravo' })
+    await waitFor(() => fileApi.reads.length === 2)
+    fileApi.reads[1]!.resolve({
+      status: 'read',
+      document: { path: tab.path, content: 'disk-delta', revision: 'revision-delta' }
+    })
     await save
 
     expect(useAppStore.getState().documents[key]).toEqual({
