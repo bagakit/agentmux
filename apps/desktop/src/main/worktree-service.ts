@@ -211,14 +211,12 @@ export class WorktreeService {
     )
     this.assertGit(removal, 'Git worktree removal failed')
 
-    // Prune after removing so git's metadata carries no dangling entry. Without this a later
-    // `worktree add` at the same path is refused by a record of something that is already gone.
-    const prune = await host.run(
-      'git',
-      ['-C', workspace.repoPath, 'worktree', 'prune'],
-      { timeoutMs: 30_000, maxOutputBytes: 1024 * 1024 }
-    )
-    this.assertGit(prune, 'Git worktree prune failed')
+    // Deliberately NO `git worktree prune` here. It looked like hygiene, but it is both redundant and
+    // dangerous: `worktree remove` already deletes the admin entry, so the path is immediately
+    // re-addable (verified against real git), while `prune` deregisters EVERY worktree whose directory
+    // happens to be missing right now — an unmounted volume or a directory someone moved by hand. This
+    // method is a general capability, so that would silently drop an unrelated worktree's registration
+    // for callers that never asked to touch it.
 
     // Withdrawn only after git confirmed: a record removed ahead of a failed removal would strand a
     // real directory with nothing pointing at it.
