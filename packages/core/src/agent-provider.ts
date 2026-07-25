@@ -48,7 +48,7 @@ export type AgentProviderDefinition = {
   buildResumeArgs?: (
     sessionId: string,
     transcriptPath: string | undefined,
-    prompt: string,
+    prompt: string | undefined,
     args: readonly string[]
   ) => string[]
   planPromptInput?: (prompt: string) => AgentPromptInputPlan
@@ -234,7 +234,7 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
         args: definition.buildResumeArgs(
           handle.sessionId,
           handle.transcriptPath,
-          context.prompt,
+          context.prompt?.trim() || undefined,
           context.args
         ),
         env: { ...context.env }
@@ -302,7 +302,7 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
     }),
     hook: CODEX_HOOKS,
     buildResumeArgs: (sessionId, _transcriptPath, prompt, args) => [
-      'resume', sessionId, prompt, ...args
+      'resume', sessionId, ...(prompt ? [prompt] : []), ...args
     ]
   }),
   defineAgentProvider({
@@ -328,7 +328,7 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
     buildArgs: (prompt, args) => [...args, ...(prompt ? [prompt] : [])],
     hook: CLAUDE_HOOKS,
     buildResumeArgs: (sessionId, _transcriptPath, prompt, args) => [
-      '--resume', sessionId, ...args, prompt
+      '--resume', sessionId, ...args, ...(prompt ? [prompt] : [])
     ]
   }),
   defineAgentProvider({
@@ -404,7 +404,7 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
       if (!transcriptPath) {
         throw new AgentMuxError('Pi resume requires its hook-reported session file.', 'INVALID_NATIVE_SESSION_HANDLE')
       }
-      return ['--session', transcriptPath, ...args, prompt]
+      return ['--session', transcriptPath, ...args, ...(prompt ? [prompt] : [])]
     }
   }),
   // Terminal-only ports of Orca's TUI agents. Launch argv grammar is copied verbatim from

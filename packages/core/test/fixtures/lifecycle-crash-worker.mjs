@@ -10,6 +10,7 @@ const delegate = new AgentMuxFileAgentSessionStore()
 const store = {
   load: async () => await delegate.load(),
   loadRetiredRuns: async () => await delegate.loadRetiredRuns(),
+  loadRetiredAgentSessions: async () => await delegate.loadRetiredAgentSessions(),
   compareAndSwap: async (expected, next) => await delegate.compareAndSwap(expected, next),
   reserveLifecycle: async (reservation) => await delegate.reserveLifecycle(reservation),
   claimStaleLifecycles: async (claim) => await delegate.claimStaleLifecycles(claim),

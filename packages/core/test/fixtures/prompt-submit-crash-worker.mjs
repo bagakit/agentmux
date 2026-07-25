@@ -11,6 +11,7 @@ let crashArmed = false
 const store = {
   async load() { return await base.load() },
   async loadRetiredRuns() { return await base.loadRetiredRuns() },
+  async loadRetiredAgentSessions() { return await base.loadRetiredAgentSessions() },
   async compareAndSwap(expected, next) {
     await base.compareAndSwap(expected, next)
     const submission = next?.terminalPromptSubmission

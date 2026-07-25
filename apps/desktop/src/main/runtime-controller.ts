@@ -18,6 +18,7 @@ import type {
   ExecutorDetection,
   AgentLaunchResult,
   AgentLaunchInput,
+  AgentSessionRecoveryCandidate,
   AppConfig,
   HostCheckResult,
   HostConfig,
@@ -25,6 +26,7 @@ import type {
   RuntimeSnapshot,
   SessionAttachResult,
   SessionControl,
+  SessionRecoveryResult,
   SessionSnapshot,
   TerminalLaunchInput
 } from '../shared/contracts.js'
@@ -100,14 +102,6 @@ function requireSessionExecutor(
     )
   }
   return executor
-}
-
-// The ctxmux adapter maps a dead-socket dial (daemon gone) to CTXMUX_UNAVAILABLE and a
-// not-connected client to CTXMUX_DISCONNECTED. Detect by code structurally rather than by
-// instanceof, which is brittle across the core module boundary.
-function isBackendUnavailable(error: unknown): boolean {
-  const code = (error as { code?: unknown } | null)?.code
-  return code === 'CTXMUX_UNAVAILABLE' || code === 'CTXMUX_DISCONNECTED'
 }
 
 function sessionAttachmentKey(control: SessionControl): string {
@@ -442,8 +436,32 @@ export class RuntimeController {
           : undefined
       )
     )))
+    const recoveryCandidates = projections.flatMap(({ client, projection }) => {
+      const projected = new Set(projection.subjects.flatMap((subject) => (
+        subject.kind === 'agent' ? [subject.agentSession.agentSessionId] : []
+      )))
+      return client.agentSessions().flatMap((session): AgentSessionRecoveryCandidate[] => {
+        if (projected.has(session.agentSessionId)) return []
+        const configuredExecutor = config.executors[session.executorId]
+        const executorLabel = configuredExecutor?.providerId === session.providerId
+          ? configuredExecutor.label
+          : session.executorId
+        return [{
+          agentSessionId: session.agentSessionId,
+          hostId: session.hostId,
+          workspacePath: session.workspacePath,
+          providerId: session.providerId,
+          executorId: session.executorId,
+          capabilities: client.providers.get(session.providerId).catalog.capabilities,
+          label: `${executorLabel} · ${workspaceLabel(config, session.hostId, session.workspacePath)}`,
+          createdAt: session.createdAt,
+          updatedAt: session.updatedAt,
+          run: { ...session.run }
+        }]
+      })
+    })
     const timelineEntries = projections.flatMap(({ timelineEntries: entries }) => entries)
-    return { sessions, timelines: Object.fromEntries(timelineEntries) }
+    return { sessions, timelines: Object.fromEntries(timelineEntries), recoveryCandidates }
   }
 
   async launchAgent(request: AgentLaunchInput, config: AppConfig): Promise<AgentLaunchResult> {
@@ -729,44 +747,28 @@ export class RuntimeController {
   }
 
   /**
-   * Recovers a session whose PTY is gone (daemon_restart / tmux_* interruption, or exit).
+   * Recovers a session whose authoritative Run is ended or missing.
    *
-   * The PTY cannot be revived — recovery mints a fresh Run in the same cwd. Terminals
-   * relaunch the host shell (brand-new runId); agents resume via provider-native resume
-   * (stable agentSessionId, new runId). We try optimistically on the existing client
-   * first: if the daemon is still alive with live sibling sessions, tearing the client
-   * down would be needlessly destructive. Only when the operation reports the backend is
-   * unreachable (CTXMUX_UNAVAILABLE/CTXMUX_DISCONNECTED — the daemon_restart case, where
-   * the cached client short-circuits connect() forever and holds a stale daemonInstanceId)
-   * do we force a full reconnect (which respawns ctxmuxd if none is listening) and retry once.
+   * Raw Terminals relaunch with a new identity. Agents delegate the complete attach/resume/
+   * unavailable/retired/conflict decision to Core. Transport loss is surfaced unchanged;
+   * it never authorizes a retry or Provider resume.
    */
   async recoverSession(
     control: SessionControl,
     config: AppConfig,
     workspacePath?: string
-  ): Promise<SessionSnapshot> {
-    return await this.trackHostLifecycleOperation(control.hostId, async () => {
-      try {
-        return await this.performRecovery(control, config, workspacePath)
-      } catch (error) {
-        if (!isBackendUnavailable(error)) throw error
-        // Backend is gone (daemon_restart). Force the client to drop its stale connection
-        // state and re-establish — the only path that respawns ctxmuxd and refreshes the
-        // daemon instance id — then retry the recovery once against the fresh daemon.
-        const host = this.hosts.get(control.hostId)
-        if (!host) throw error
-        host.client.disconnect()
-        await host.client.connect()
-        return await this.performRecovery(control, config, workspacePath)
-      }
-    })
+  ): Promise<SessionRecoveryResult> {
+    return await this.trackHostLifecycleOperation(
+      control.hostId,
+      async () => await this.performRecovery(control, config, workspacePath)
+    )
   }
 
   private async performRecovery(
     control: SessionControl,
     config: AppConfig,
     workspacePath?: string
-  ): Promise<SessionSnapshot> {
+  ): Promise<SessionRecoveryResult> {
     const client = await this.connectedClient(control.hostId)
     if (control.kind === 'terminal') {
       const cwd = workspacePath ?? (await this.sessionById(client, control.runId, config)).workspacePath
@@ -778,31 +780,48 @@ export class RuntimeController {
         terminalInputKey(control.hostId, run.runId),
         run.acceptedInputBytes
       )
-      return await this.sessionById(client, run.runId, config)
+      return {
+        kind: 'terminal-restarted',
+        session: await this.sessionById(client, run.runId, config)
+      }
     }
-    // Agent: provider-native resume produces a fresh Run under the same agentSessionId.
-    // resumeAgent requires a non-empty prompt but we have no stored last prompt, so a
-    // minimal sentinel wakes the resumed process; the user steers it afterwards.
-    const status = await client.statusAgent(control.agentSessionId)
-    const executor = requireSessionExecutor(config, status.session)
+    let stored
+    try {
+      stored = client.agentSession(control.agentSessionId)
+    } catch {
+      const result = await client.ensureAgentContinuity({
+        agentSessionId: control.agentSessionId,
+        expectedRun: control.run,
+        operationId: randomUUID()
+      })
+      if (result.kind === 'reattachable' || result.kind === 'resumed') {
+        throw new Error('Core returned live continuity without a current Agent Session.')
+      }
+      return result
+    }
+    const executor = requireSessionExecutor(config, stored)
     const scratch = config.workspaces.find((workspace) => (
       workspace.id === SCRATCH_WORKSPACE_ID && workspace.hostId === control.hostId
     ))
     const scratchTopicId = scratch
-      ? scratchTopicIdFromWorkspacePath(scratch.path, status.session.workspacePath)
+      ? scratchTopicIdFromWorkspacePath(scratch.path, stored.workspacePath)
       : null
-    await client.resumeAgent({
+    const result = await client.ensureAgentContinuity({
       agentSessionId: control.agentSessionId,
+      expectedRun: control.run,
       operationId: randomUUID(),
-      prompt: 'resume',
       args: executor.args,
       env: {
         ...executor.env,
-        ...(scratchTopicId ? { AGENTMUX_WIKI_DIR: status.session.workspacePath } : {})
+        ...(scratchTopicId ? { AGENTMUX_WIKI_DIR: stored.workspacePath } : {})
       },
       commandOverride: executor.command
     })
-    return await this.sessionById(client, control.agentSessionId, config)
+    if (result.kind !== 'reattachable' && result.kind !== 'resumed') return result
+    return {
+      kind: result.kind,
+      session: await this.sessionById(client, control.agentSessionId, config)
+    }
   }
 
   async stopSession(control: SessionControl): Promise<void> {

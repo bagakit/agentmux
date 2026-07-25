@@ -48,6 +48,7 @@ export function SessionPane({
   const missing = session?.processState === 'interrupted' && session?.status.state === 'error'
   const exited = session?.processState === 'exited'
   const reason = session?.status.detail
+  const continuity = session?.status.continuity
 
   async function recover(): Promise<void> {
     if (recovering) return
@@ -85,7 +86,15 @@ export function SessionPane({
   }
 
   const noun = session.kind === 'agent' ? 'Agent' : 'Terminal'
-  const agentResumable = session.kind === 'agent' && session.capabilities.providerResume
+  const recoveryTitle = continuity === 'conflict'
+      ? 'Agent continuity conflict'
+      : continuity === 'unavailable'
+        ? 'Agent resume unavailable'
+        : disconnected
+          ? 'Remote terminal disconnected'
+          : exited
+            ? `${noun} process exited`
+            : `${noun} session unavailable`
 
   async function refresh(): Promise<void> {
     if (refreshing) return
@@ -110,7 +119,7 @@ export function SessionPane({
                   {refreshing || recovering ? <LoaderCircle className="spin" size={16} /> : disconnected ? <ServerOff size={16} /> : <AlertTriangle size={16} />}
                 </span>
                 <div>
-                  <strong>{disconnected ? 'Remote terminal disconnected' : exited ? `${noun} process exited` : `${noun} session unavailable`}</strong>
+                  <strong>{recoveryTitle}</strong>
                   <span>{humanizeDetail(session.status.detail, exited)}</span>
                 </div>
                 {session.kind === 'terminal' ? (
@@ -124,18 +133,22 @@ export function SessionPane({
                       <RotateCcw size={12} /> {recovering ? 'Restarting…' : 'Restart terminal'}
                     </button>
                   )
-                ) : agentResumable ? (
-                  <button type="button" className="small-button" disabled={recovering} onClick={() => void recover()}>
-                    <RotateCcw size={12} /> {recovering ? 'Resuming…' : 'Resume'}
-                  </button>
-                ) : (
+                ) : continuity ? (
                   <button
                     type="button"
                     className="small-button"
                     disabled
-                    title="This provider does not support resuming a session. Start a new agent to continue."
+                    title={session.status.detail}
                   >
-                    <RotateCcw size={12} /> Resume unavailable
+                    <RotateCcw size={12} /> {
+                      continuity === 'conflict'
+                          ? 'Resolve conflict first'
+                          : 'Resume unavailable'
+                    }
+                  </button>
+                ) : (
+                  <button type="button" className="small-button" disabled={recovering} onClick={() => void recover()}>
+                    <RotateCcw size={12} /> {recovering ? 'Resuming…' : 'Resume'}
                   </button>
                 )}
               </div>

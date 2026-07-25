@@ -1,6 +1,6 @@
 {
   "schema": "agentmux.t017-reliability-budgets.v1",
-  "ctxmuxSourceCommit": "f89dabe70eba38d46992c320e40c9ebe2f09b5e5",
+  "ctxmuxSourceCommit": "1603908a253162632e8812ceb9db19c3e416fea4",
   "runCount": 16,
   "maxDaemonRssKiB": 32768,
   "maxReplayDaemonRssKiB": 49152,

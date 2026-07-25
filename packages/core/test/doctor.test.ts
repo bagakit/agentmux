@@ -5,14 +5,14 @@ import { diagnoseAgentMux } from '../src/doctor.js'
 import type { AgentProviderId, AgentMuxRuntimeDiagnostics } from '../src/types.js'
 
 const runtime: AgentMuxRuntimeDiagnostics = {
-  nodeVersion: '22.0.0',
+  nodeVersion: '24.0.0',
   platform: 'darwin',
   arch: 'arm64',
   supported: true,
   ctxmux: {
     version: '0.1.0',
-    protocolVersion: 9,
-    sourceCommit: 'f89dabe70eba38d46992c320e40c9ebe2f09b5e5',
+    protocolVersion: 12,
+    sourceCommit: '1603908a253162632e8812ceb9db19c3e416fea4',
     artifactPlatform: 'darwin-arm64',
     ready: true,
     capabilities: {
@@ -35,7 +35,7 @@ function client(overrides: Partial<AgentMuxClient> = {}): AgentMuxClient {
     runtimeIdentity: () => ({
       hostId: 'local',
       buildIdentity: 'ctxmux-fixture',
-      protocolVersion: 9,
+      protocolVersion: 12,
       processId: null,
       instanceId: 'daemon-fixture'
     }),
@@ -56,7 +56,7 @@ describe('AgentMux doctor', () => {
 
     expect(report.ok).toBe(true)
     expect(report.runtime?.ctxmux).toMatchObject({
-      protocolVersion: 9,
+      protocolVersion: 12,
       artifactPlatform: 'darwin-arm64',
       capabilities: {
         transport: 'local-unix',

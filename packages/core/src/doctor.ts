@@ -123,7 +123,7 @@ export async function diagnoseAgentMux(options: DiagnoseAgentMuxOptions): Promis
       },
       runtime,
       runtimeAction: !runtime.supported
-        ? 'Use Node 22 or newer on macOS arm64 with the bundled darwin-arm64 ctxmux artifacts.'
+        ? 'Use Node 24 or newer on macOS arm64 with the bundled darwin-arm64 ctxmux artifacts.'
         : !runtime.ctxmux.ready
           ? 'Reinstall @agentmux/core and verify the pinned ctxmux artifact manifest.'
           : null,

@@ -4,7 +4,9 @@ import {
   loadAgentSessions,
   normalizeStoredAgentSession,
   type AgentMuxAgentSessionStore,
-  type AgentMuxLifecycleReservation
+  type AgentMuxLifecycleReservation,
+  type AgentMuxRecoverableStopOperation,
+  type AgentMuxRetiredAgentSession
 } from './agent-session-store.js'
 import type {
   AgentMuxRunRef,
@@ -47,6 +49,7 @@ export class AgentMuxAgentSessionRegistry {
   private readonly providerIdByRun = new Map<string, string>()
   private readonly providerIdByRetiredRun = new Map<string, string>()
   private readonly unboundRetiredRuns = new Set<string>()
+  private readonly retiredAgentSessions = new Map<string, AgentMuxRetiredAgentSession>()
   private readonly providerIdByNative = new Map<string, string>()
   private readonly writeQueues = new Map<string, AgentSessionWrite[]>()
   private readonly activeWrites = new Set<string>()
@@ -58,19 +61,26 @@ export class AgentMuxAgentSessionRegistry {
 
   async load(hostId: string): Promise<void> {
     await Promise.allSettled([...this.writeDrains.values()].map((drain) => drain.promise))
-    const [sessions, retiredRuns] = await Promise.all([
+    const [sessions, retiredRuns, retiredAgentSessions] = await Promise.all([
       loadAgentSessions(this.store),
-      this.store.loadRetiredRuns()
+      this.store.loadRetiredRuns(),
+      this.store.loadRetiredAgentSessions()
     ])
     this.sessions.clear()
     this.providerIdByRun.clear()
     this.providerIdByRetiredRun.clear()
     this.unboundRetiredRuns.clear()
+    this.retiredAgentSessions.clear()
     this.providerIdByNative.clear()
     for (const session of sessions) {
       if (session.hostId === hostId) this.remember(session)
     }
     for (const run of retiredRuns) this.unboundRetiredRuns.add(run.runId)
+    for (const session of retiredAgentSessions) {
+      if (session.hostId === hostId) {
+        this.retiredAgentSessions.set(session.agentSessionId, structuredClone(session))
+      }
+    }
   }
 
   list(): AgentMuxStoredAgentSession[] {
@@ -121,11 +131,25 @@ export class AgentMuxAgentSessionRegistry {
   }
 
   async reserveExisting(
-    kind: 'resume' | 'stop',
+    kind: 'resume',
     agentSessionId: string,
     expectedRun: AgentMuxRunRef,
     operationId: string
-  ): Promise<AgentMuxLifecycleReservation> {
+  ): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>>
+  async reserveExisting(
+    kind: 'stop',
+    agentSessionId: string,
+    expectedRun: AgentMuxRunRef,
+    operationId: string,
+    stopOperation: AgentMuxRecoverableStopOperation
+  ): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'stop' }>>
+  async reserveExisting(
+    kind: 'resume' | 'stop',
+    agentSessionId: string,
+    expectedRun: AgentMuxRunRef,
+    operationId: string,
+    stopOperation?: AgentMuxRecoverableStopOperation
+  ): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'resume' | 'stop' }>> {
     const session = this.get(agentSessionId)
     if (!sameRun(session.run, expectedRun)) {
       throw new AgentMuxError(
@@ -133,12 +157,19 @@ export class AgentMuxAgentSessionRegistry {
         'STALE_AGENT_SESSION'
       )
     }
-    return await this.reserveLifecycle({
-      kind,
-      agentSessionId,
-      operationId,
-      expectedRun
-    })
+    const reservation = kind === 'resume'
+      ? await this.reserveLifecycle({ kind, agentSessionId, operationId, expectedRun })
+      : await this.reserveLifecycle({
+          kind,
+          agentSessionId,
+          operationId,
+          expectedRun,
+          stopOperation: stopOperation!
+        })
+    if (reservation.kind === 'create') {
+      throw new AgentMuxError('Existing lifecycle reservation changed kind.', 'INVALID_AGENT_SESSION_STORE')
+    }
+    return reservation
   }
 
   async claimStaleLifecycles(now = Date.now()): Promise<AgentMuxLifecycleReservation[]> {
@@ -172,6 +203,21 @@ export class AgentMuxAgentSessionRegistry {
     const previous = this.sessions.get(reservation.agentSessionId)
     if (previous) this.forget(previous)
     if (!normalized) {
+      if (reservation.kind === 'stop' && previous) {
+        for (const run of [...previous.retiredRuns, previous.run]) {
+          this.unboundRetiredRuns.add(run.runId)
+        }
+        const retired = (await this.store.loadRetiredAgentSessions()).find(
+          (session) => session.agentSessionId === reservation.agentSessionId
+        )
+        if (!retired) {
+          throw new AgentMuxError(
+            'Stop lifecycle did not persist Agent Session retirement.',
+            'INVALID_AGENT_SESSION_STORE'
+          )
+        }
+        this.retiredAgentSessions.set(retired.agentSessionId, structuredClone(retired))
+      }
       this.sessions.delete(reservation.agentSessionId)
       return null
     }
@@ -249,23 +295,53 @@ export class AgentMuxAgentSessionRegistry {
     return this.providerIdByRetiredRun.has(ref.runId) || this.unboundRetiredRuns.has(ref.runId)
   }
 
-  private async reserveLifecycle(input: {
-    kind: AgentMuxLifecycleReservation['kind']
-    agentSessionId: string
-    operationId: string
-    expectedRun?: AgentMuxRunRef
-  }): Promise<AgentMuxLifecycleReservation> {
+  retiredAgentSession(
+    agentSessionId: string,
+    ref: AgentMuxRunRef
+  ): AgentMuxRetiredAgentSession | undefined {
+    const retired = this.retiredAgentSessions.get(agentSessionId)
+    return retired?.run.runId === ref.runId ? structuredClone(retired) : undefined
+  }
+
+  private async reserveLifecycle(input: (
+    | {
+        kind: 'create'
+        agentSessionId: string
+        operationId: string
+      }
+    | {
+        kind: 'resume'
+        agentSessionId: string
+        operationId: string
+        expectedRun: AgentMuxRunRef
+      }
+    | {
+        kind: 'stop'
+        agentSessionId: string
+        operationId: string
+        expectedRun: AgentMuxRunRef
+        stopOperation: AgentMuxRecoverableStopOperation
+      }
+  )): Promise<AgentMuxLifecycleReservation> {
     const now = Date.now()
-    const reservation: AgentMuxLifecycleReservation = {
+    const base = {
       reservationId: randomUUID(),
       ownerId: this.lifecycleOwnerId,
       ownerPid: process.pid,
-      kind: input.kind,
       agentSessionId: input.agentSessionId,
       operationId: input.operationId,
-      expiresAt: now + AgentMuxAgentSessionRegistry.lifecycleLeaseMs,
-      ...(input.expectedRun ? { expectedRun: { ...input.expectedRun } } : {})
+      expiresAt: now + AgentMuxAgentSessionRegistry.lifecycleLeaseMs
     }
+    const reservation: AgentMuxLifecycleReservation = input.kind === 'create'
+      ? { ...base, kind: 'create' }
+      : input.kind === 'resume'
+        ? { ...base, kind: 'resume', expectedRun: { ...input.expectedRun } }
+        : {
+            ...base,
+            kind: 'stop',
+            expectedRun: { ...input.expectedRun },
+            stopOperation: { ...input.stopOperation }
+          }
     await this.store.reserveLifecycle(reservation)
     return reservation
   }

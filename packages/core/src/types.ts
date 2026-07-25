@@ -520,7 +520,8 @@ export type AgentProviderLaunchContext = {
 export type AgentProviderResumeContext = {
   workspacePath: string
   nativeHandle: AgentNativeSessionHandle
-  prompt: string
+  /** Omitted for continuity recovery that must not invent a user message. */
+  prompt?: string
   args: readonly string[]
   env: Readonly<Record<string, string>>
   commandOverride?: string

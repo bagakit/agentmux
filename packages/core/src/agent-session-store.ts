@@ -22,6 +22,7 @@ import type {
 const MAX_STORED_SESSIONS = 256
 const MAX_LIFECYCLE_RESERVATIONS = 256
 const MAX_UNBOUND_RETIRED_RUNS = 256
+const MAX_RETIRED_AGENT_SESSIONS = 256
 const MAX_ID_BYTES = 512
 const MAX_PATH_BYTES = 16 * 1024
 const MAX_RETIRED_RUNS = 16
@@ -30,16 +31,30 @@ const MAX_TIMELINE_STORE_BYTES = 4 * 1024 * 1024
 const LOCK_ATTEMPTS = 100
 const LOCK_RETRY_MS = 10
 
-export type AgentMuxLifecycleReservation = {
+export type AgentMuxRecoverableStopOperation = {
+  daemonInstance: string
+  operationKey: string
+  runId: string
+}
+
+type AgentMuxLifecycleReservationBase = {
   reservationId: string
   ownerId: string
   ownerPid: number
-  kind: 'create' | 'resume' | 'stop'
   agentSessionId: string
   operationId: string
   expiresAt: number
-  expectedRun?: AgentMuxRunRef
 }
+
+export type AgentMuxLifecycleReservation = AgentMuxLifecycleReservationBase & (
+  | { kind: 'create'; expectedRun?: never; stopOperation?: never }
+  | { kind: 'resume'; expectedRun: AgentMuxRunRef; stopOperation?: never }
+  | {
+      kind: 'stop'
+      expectedRun: AgentMuxRunRef
+      stopOperation: AgentMuxRecoverableStopOperation
+    }
+)
 
 export type AgentMuxLifecycleClaim = {
   ownerId: string
@@ -48,9 +63,18 @@ export type AgentMuxLifecycleClaim = {
   expiresAt: number
 }
 
+export type AgentMuxRetiredAgentSession = {
+  agentSessionId: string
+  hostId: string
+  run: AgentMuxRunRef
+  source: 'user'
+  observedAt: number
+}
+
 export type AgentMuxAgentSessionStore = {
   load(): Promise<readonly unknown[]>
   loadRetiredRuns(): Promise<readonly AgentMuxRunRef[]>
+  loadRetiredAgentSessions(): Promise<readonly AgentMuxRetiredAgentSession[]>
   /** Abort must cancel queued or active persistence without a late commit. */
   compareAndSwap(
     expected: AgentMuxStoredAgentSession | null,
@@ -123,25 +147,59 @@ function runRef(value: unknown): AgentMuxRunRef {
   }
 }
 
+function recoverableStopOperation(value: unknown): AgentMuxRecoverableStopOperation {
+  const source = record(value, 'recoverable Stop operation')
+  if (JSON.stringify(Object.keys(source).sort()) !== JSON.stringify([
+    'daemonInstance',
+    'operationKey',
+    'runId'
+  ])) {
+    throw new AgentMuxError(
+      'Recoverable Stop operation must contain its exact identity.',
+      'INVALID_AGENT_SESSION_STORE'
+    )
+  }
+  return {
+    daemonInstance: string(source.daemonInstance, 'stopOperation.daemonInstance'),
+    operationKey: string(source.operationKey, 'stopOperation.operationKey'),
+    runId: string(source.runId, 'stopOperation.runId')
+  }
+}
+
 function lifecycleReservation(value: unknown): AgentMuxLifecycleReservation {
   const source = record(value, 'lifecycle reservation')
   if (source.kind !== 'create' && source.kind !== 'resume' && source.kind !== 'stop') {
     throw new AgentMuxError('Lifecycle reservation kind is invalid.', 'INVALID_AGENT_SESSION_STORE')
   }
   const expectedRun = source.expectedRun === undefined ? undefined : runRef(source.expectedRun)
-  if ((source.kind === 'create') === (expectedRun !== undefined)) {
+  const stopOperation = source.stopOperation === undefined
+    ? undefined
+    : recoverableStopOperation(source.stopOperation)
+  if (
+    (source.kind === 'create' && (expectedRun !== undefined || stopOperation !== undefined)) ||
+    (source.kind === 'resume' && (expectedRun === undefined || stopOperation !== undefined)) ||
+    (
+      source.kind === 'stop' &&
+      (
+        expectedRun === undefined ||
+        stopOperation === undefined ||
+        stopOperation.runId !== expectedRun.runId
+      )
+    )
+  ) {
     throw new AgentMuxError('Lifecycle reservation expected Run is invalid.', 'INVALID_AGENT_SESSION_STORE')
   }
-  return {
+  const base: AgentMuxLifecycleReservationBase = {
     reservationId: string(source.reservationId, 'reservationId'),
     ownerId: string(source.ownerId, 'ownerId'),
     ownerPid: positiveInteger(source.ownerPid, 'ownerPid'),
-    kind: source.kind,
     agentSessionId: string(source.agentSessionId, 'agentSessionId'),
     operationId: string(source.operationId, 'operationId'),
-    expiresAt: timestamp(source.expiresAt, 'expiresAt'),
-    ...(expectedRun ? { expectedRun } : {})
+    expiresAt: timestamp(source.expiresAt, 'expiresAt')
   }
+  if (source.kind === 'create') return { ...base, kind: 'create' }
+  if (source.kind === 'resume') return { ...base, kind: 'resume', expectedRun: expectedRun! }
+  return { ...base, kind: 'stop', expectedRun: expectedRun!, stopOperation: stopOperation! }
 }
 
 function sameSession(
@@ -196,6 +254,37 @@ function unboundRetiredRuns(value: unknown): AgentMuxRunRef[] {
   return runs
 }
 
+function retiredAgentSession(value: unknown): AgentMuxRetiredAgentSession {
+  const source = record(value, 'retired Agent Session')
+  if (source.source !== 'user') {
+    throw new AgentMuxError('Retired Agent Session source is invalid.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  return {
+    agentSessionId: string(source.agentSessionId, 'retiredAgentSession.agentSessionId'),
+    hostId: string(source.hostId, 'retiredAgentSession.hostId'),
+    run: runRef(source.run),
+    source: 'user',
+    observedAt: timestamp(source.observedAt, 'retiredAgentSession.observedAt')
+  }
+}
+
+function retiredAgentSessions(value: unknown): AgentMuxRetiredAgentSession[] {
+  if (!Array.isArray(value) || value.length > MAX_RETIRED_AGENT_SESSIONS) {
+    throw new AgentMuxError('Retired Agent Sessions are invalid.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  const sessions = value.map(retiredAgentSession)
+  if (
+    new Set(sessions.map((session) => session.agentSessionId)).size !== sessions.length ||
+    new Set(sessions.map((session) => session.run.runId)).size !== sessions.length
+  ) {
+    throw new AgentMuxError(
+      'Retired Agent Sessions contain duplicate identities or Runs.',
+      'INVALID_AGENT_SESSION_STORE'
+    )
+  }
+  return sessions
+}
+
 function mergeRetiredRuns(
   current: readonly AgentMuxRunRef[],
   added: readonly AgentMuxRunRef[]
@@ -209,6 +298,19 @@ function mergeRetiredRuns(
   return [...merged.values()].slice(-MAX_UNBOUND_RETIRED_RUNS)
 }
 
+function mergeRetiredAgentSessions(
+  current: readonly AgentMuxRetiredAgentSession[],
+  added: readonly AgentMuxRetiredAgentSession[]
+): AgentMuxRetiredAgentSession[] {
+  const merged = new Map(current.map((session) => [session.agentSessionId, session]))
+  for (const value of added) {
+    const session = retiredAgentSession(value)
+    merged.delete(session.agentSessionId)
+    merged.set(session.agentSessionId, session)
+  }
+  return [...merged.values()].slice(-MAX_RETIRED_AGENT_SESSIONS)
+}
+
 function assertUnboundRetiredRuns(
   sessions: readonly AgentMuxStoredAgentSession[],
   retiredRuns: readonly AgentMuxRunRef[]
@@ -219,6 +321,23 @@ function assertUnboundRetiredRuns(
   ]))
   if (retiredRuns.some((run) => bound.has(run.runId))) {
     throw new AgentMuxError('Unbound retired Run conflicts with an Agent Session.', 'INVALID_AGENT_SESSION_STORE')
+  }
+}
+
+function assertRetiredAgentSessions(
+  sessions: readonly AgentMuxStoredAgentSession[],
+  retiredRuns: readonly AgentMuxRunRef[],
+  retiredSessions: readonly AgentMuxRetiredAgentSession[]
+): void {
+  const currentIds = new Set(sessions.map((session) => session.agentSessionId))
+  const retiredRunIds = new Set(retiredRuns.map((run) => run.runId))
+  if (retiredSessions.some((session) => (
+    currentIds.has(session.agentSessionId) || !retiredRunIds.has(session.run.runId)
+  ))) {
+    throw new AgentMuxError(
+      'Retired Agent Session conflicts with current Session or Run truth.',
+      'INVALID_AGENT_SESSION_STORE'
+    )
   }
 }
 
@@ -567,11 +686,12 @@ function normalizeLifecycleReservations(
 
 function assertReservationPrecondition(
   reservation: AgentMuxLifecycleReservation,
-  sessions: readonly AgentMuxStoredAgentSession[]
+  sessions: readonly AgentMuxStoredAgentSession[],
+  retiredSessions: readonly AgentMuxRetiredAgentSession[]
 ): void {
   const current = sessions.find((session) => session.agentSessionId === reservation.agentSessionId)
   if (reservation.kind === 'create') {
-    if (current) {
+    if (current || retiredSessions.some((session) => session.agentSessionId === reservation.agentSessionId)) {
       throw new AgentMuxError(
         `Agent Session already exists: ${reservation.agentSessionId}`,
         'DUPLICATE_AGENT_SESSION'
@@ -613,6 +733,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
   private readonly sessions = new Map<string, AgentMuxStoredAgentSession>()
   private readonly reservations = new Map<string, AgentMuxLifecycleReservation>()
   private retiredRuns: AgentMuxRunRef[] = []
+  private retiredAgentSessions: AgentMuxRetiredAgentSession[] = []
   private readonly timelines = new Map<string, AgentTimelineSnapshot>()
 
   async load(): Promise<readonly unknown[]> {
@@ -621,6 +742,10 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
 
   async loadRetiredRuns(): Promise<readonly AgentMuxRunRef[]> {
     return this.retiredRuns.map((run) => ({ ...run }))
+  }
+
+  async loadRetiredAgentSessions(): Promise<readonly AgentMuxRetiredAgentSession[]> {
+    return structuredClone(this.retiredAgentSessions)
   }
 
   async compareAndSwap(
@@ -649,6 +774,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
       const values = [...this.sessions.values()].filter((session) => session.agentSessionId !== agentSessionId)
       const sessions = normalizeAgentSessions([...values, normalized])
       assertUnboundRetiredRuns(sessions, this.retiredRuns)
+      assertRetiredAgentSessions(sessions, this.retiredRuns, this.retiredAgentSessions)
       this.sessions.set(agentSessionId, structuredClone(normalized))
     } else {
       this.sessions.delete(agentSessionId)
@@ -664,14 +790,22 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     if (this.reservations.size >= MAX_LIFECYCLE_RESERVATIONS) {
       throw new AgentMuxError('Agent Session store exceeds its reservation limit.', 'AGENT_SESSION_STORE_LIMIT')
     }
-    assertReservationPrecondition(reservation, [...this.sessions.values()])
+    assertReservationPrecondition(
+      reservation,
+      [...this.sessions.values()],
+      this.retiredAgentSessions
+    )
     this.reservations.set(reservation.agentSessionId, structuredClone(reservation))
   }
 
   async claimStaleLifecycles(claim: AgentMuxLifecycleClaim): Promise<AgentMuxLifecycleReservation[]> {
     const claimed: AgentMuxLifecycleReservation[] = []
     for (const [agentSessionId, reservation] of this.reservations) {
-      if (reservation.expiresAt > claim.now && processIsAlive(reservation.ownerPid)) continue
+      if (
+        reservation.ownerId !== claim.ownerId &&
+        reservation.expiresAt > claim.now &&
+        processIsAlive(reservation.ownerPid)
+      ) continue
       const next = lifecycleReservation({
         ...reservation,
         ownerId: claim.ownerId,
@@ -696,6 +830,11 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     }
     const merged = mergeRetiredRuns(this.retiredRuns, retiredRuns)
     assertUnboundRetiredRuns([...this.sessions.values()], merged)
+    assertRetiredAgentSessions(
+      [...this.sessions.values()],
+      merged,
+      this.retiredAgentSessions
+    )
     this.retiredRuns = merged
     this.reservations.delete(reservation.agentSessionId)
   }
@@ -703,6 +842,11 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
   async retireRuns(runs: readonly AgentMuxRunRef[]): Promise<void> {
     const merged = mergeRetiredRuns(this.retiredRuns, runs)
     assertUnboundRetiredRuns([...this.sessions.values()], merged)
+    assertRetiredAgentSessions(
+      [...this.sessions.values()],
+      merged,
+      this.retiredAgentSessions
+    )
     this.retiredRuns = merged
   }
 
@@ -715,7 +859,12 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     if (!currentReservation || !sameReservationOwner(currentReservation, reservation)) {
       throw new AgentMuxError('Lifecycle reservation is no longer current.', 'STALE_AGENT_SESSION')
     }
-    assertReservationPrecondition(reservation, [...this.sessions.values()])
+    assertReservationPrecondition(
+      reservation,
+      [...this.sessions.values()],
+      this.retiredAgentSessions
+    )
+    const previous = this.sessions.get(reservation.agentSessionId)
     const normalized = next ? normalizeStoredAgentSession(next) : null
     assertLifecycleCommit(reservation, normalized)
     const values = [...this.sessions.values()].filter(
@@ -723,7 +872,20 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     )
     if (normalized) values.push(normalized)
     const sessions = normalizeAgentSessions(values)
-    assertUnboundRetiredRuns(sessions, this.retiredRuns)
+    const retiredRuns = reservation.kind === 'stop' && previous
+      ? mergeRetiredRuns(this.retiredRuns, [...previous.retiredRuns, previous.run])
+      : this.retiredRuns
+    const retiredAgentSessions = reservation.kind === 'stop' && previous
+      ? mergeRetiredAgentSessions(this.retiredAgentSessions, [{
+          agentSessionId: previous.agentSessionId,
+          hostId: previous.hostId,
+          run: { ...previous.run },
+          source: 'user',
+          observedAt: Date.now()
+        }])
+      : this.retiredAgentSessions
+    assertUnboundRetiredRuns(sessions, retiredRuns)
+    assertRetiredAgentSessions(sessions, retiredRuns, retiredAgentSessions)
     if (normalized) {
       if (reservation.kind === 'create') this.timelines.delete(normalized.agentSessionId)
       this.sessions.set(normalized.agentSessionId, structuredClone(normalized))
@@ -731,6 +893,8 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
       this.sessions.delete(reservation.agentSessionId)
       this.timelines.delete(reservation.agentSessionId)
     }
+    this.retiredRuns = retiredRuns
+    this.retiredAgentSessions = retiredAgentSessions
     this.reservations.delete(reservation.agentSessionId)
   }
 
@@ -783,10 +947,11 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
 }
 
 type AgentSessionStoreDocument = {
-  version: 2
+  version: 3
   sessions: AgentMuxStoredAgentSession[]
   reservations: AgentMuxLifecycleReservation[]
   retiredRuns: AgentMuxRunRef[]
+  retiredAgentSessions: AgentMuxRetiredAgentSession[]
 }
 
 type AgentTimelineStoreDocument = {
@@ -836,6 +1001,11 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     return (await this.read()).retiredRuns.map((run) => ({ ...run }))
   }
 
+  async loadRetiredAgentSessions(): Promise<readonly AgentMuxRetiredAgentSession[]> {
+    await this.tail
+    return structuredClone((await this.read()).retiredAgentSessions)
+  }
+
   async compareAndSwap(
     expected: AgentMuxStoredAgentSession | null,
     next: AgentMuxStoredAgentSession | null,
@@ -864,6 +1034,11 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       else sessions.delete(agentSessionId)
       const normalized = normalizeAgentSessions([...sessions.values()])
       assertUnboundRetiredRuns(normalized, document.retiredRuns)
+      assertRetiredAgentSessions(
+        normalized,
+        document.retiredRuns,
+        document.retiredAgentSessions
+      )
       if (next && !expected) await this.removeTimelineFile(agentSessionId)
       await this.write({ ...document, sessions: normalized }, signal)
       if (!next) await this.removeTimelineFile(agentSessionId).catch(() => {})
@@ -880,7 +1055,11 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       if (document.reservations.length >= MAX_LIFECYCLE_RESERVATIONS) {
         throw new AgentMuxError('Agent Session store exceeds its reservation limit.', 'AGENT_SESSION_STORE_LIMIT')
       }
-      assertReservationPrecondition(reservation, document.sessions)
+      assertReservationPrecondition(
+        reservation,
+        document.sessions,
+        document.retiredAgentSessions
+      )
       await this.write({
         ...document,
         reservations: [...document.reservations, reservation]
@@ -893,7 +1072,11 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     await this.enqueue(async () => {
       const document = await this.read()
       claimed = document.reservations.flatMap((reservation) => {
-        if (reservation.expiresAt > claim.now && processIsAlive(reservation.ownerPid)) return []
+        if (
+          reservation.ownerId !== claim.ownerId &&
+          reservation.expiresAt > claim.now &&
+          processIsAlive(reservation.ownerPid)
+        ) return []
         return [lifecycleReservation({
           ...reservation,
           ownerId: claim.ownerId,
@@ -929,6 +1112,11 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       }
       const mergedRetiredRuns = mergeRetiredRuns(document.retiredRuns, retiredRuns)
       assertUnboundRetiredRuns(document.sessions, mergedRetiredRuns)
+      assertRetiredAgentSessions(
+        document.sessions,
+        mergedRetiredRuns,
+        document.retiredAgentSessions
+      )
       await this.write({
         ...document,
         retiredRuns: mergedRetiredRuns,
@@ -944,6 +1132,11 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       const document = await this.read()
       const retiredRuns = mergeRetiredRuns(document.retiredRuns, runs)
       assertUnboundRetiredRuns(document.sessions, retiredRuns)
+      assertRetiredAgentSessions(
+        document.sessions,
+        retiredRuns,
+        document.retiredAgentSessions
+      )
       await this.write({
         ...document,
         retiredRuns
@@ -964,7 +1157,14 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       if (!currentReservation || !sameReservationOwner(currentReservation, reservation)) {
         throw new AgentMuxError('Lifecycle reservation is no longer current.', 'STALE_AGENT_SESSION')
       }
-      assertReservationPrecondition(reservation, document.sessions)
+      assertReservationPrecondition(
+        reservation,
+        document.sessions,
+        document.retiredAgentSessions
+      )
+      const previous = document.sessions.find(
+        (session) => session.agentSessionId === reservation.agentSessionId
+      )
       const normalized = next ? normalizeStoredAgentSession(next) : null
       assertLifecycleCommit(reservation, normalized)
       const sessions = document.sessions.filter(
@@ -972,17 +1172,31 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       )
       if (normalized) sessions.push(normalized)
       const committedSessions = normalizeAgentSessions(sessions)
-      assertUnboundRetiredRuns(committedSessions, document.retiredRuns)
+      const retiredRuns = reservation.kind === 'stop' && previous
+        ? mergeRetiredRuns(document.retiredRuns, [...previous.retiredRuns, previous.run])
+        : document.retiredRuns
+      const retiredAgentSessions = reservation.kind === 'stop' && previous
+        ? mergeRetiredAgentSessions(document.retiredAgentSessions, [{
+            agentSessionId: previous.agentSessionId,
+            hostId: previous.hostId,
+            run: { ...previous.run },
+            source: 'user',
+            observedAt: Date.now()
+          }])
+        : document.retiredAgentSessions
+      assertUnboundRetiredRuns(committedSessions, retiredRuns)
+      assertRetiredAgentSessions(committedSessions, retiredRuns, retiredAgentSessions)
       if (reservation.kind === 'create') {
         await this.removeTimelineFile(reservation.agentSessionId)
       }
       await this.write({
-        version: 2,
+        version: 3,
         sessions: committedSessions,
         reservations: document.reservations.filter(
           (item) => item.reservationId !== reservation.reservationId
         ),
-        retiredRuns: document.retiredRuns
+        retiredRuns,
+        retiredAgentSessions
       })
       if (!normalized) await this.removeTimelineFile(reservation.agentSessionId).catch(() => {})
     })
@@ -1049,27 +1263,38 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         sessions?: unknown
         reservations?: unknown
         retiredRuns?: unknown
+        retiredAgentSessions?: unknown
       }
       if (
-        document.version !== 2 ||
+        document.version !== 3 ||
         !Array.isArray(document.sessions) ||
         !Array.isArray(document.reservations) ||
-        !Array.isArray(document.retiredRuns)
+        !Array.isArray(document.retiredRuns) ||
+        !Array.isArray(document.retiredAgentSessions)
       ) {
         throw new AgentMuxError('Agent Session store is invalid.', 'INVALID_AGENT_SESSION_STORE')
       }
       const sessions = normalizeAgentSessions(document.sessions)
       const retiredRuns = unboundRetiredRuns(document.retiredRuns)
+      const retiredSessions = retiredAgentSessions(document.retiredAgentSessions)
       assertUnboundRetiredRuns(sessions, retiredRuns)
+      assertRetiredAgentSessions(sessions, retiredRuns, retiredSessions)
       return {
-        version: 2,
+        version: 3,
         sessions,
         reservations: normalizeLifecycleReservations(document.reservations),
-        retiredRuns
+        retiredRuns,
+        retiredAgentSessions: retiredSessions
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return { version: 2, sessions: [], reservations: [], retiredRuns: [] }
+        return {
+          version: 3,
+          sessions: [],
+          reservations: [],
+          retiredRuns: [],
+          retiredAgentSessions: []
+        }
       }
       throw error
     }

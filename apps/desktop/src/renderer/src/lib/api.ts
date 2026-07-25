@@ -210,7 +210,11 @@ const mockTimelines: Record<string, AgentTimelineSnapshot> = {
   }
 }
 
-let mockSnapshot: RuntimeSnapshot = { sessions: mockSessions, timelines: mockTimelines }
+let mockSnapshot: RuntimeSnapshot = {
+  sessions: mockSessions,
+  timelines: mockTimelines,
+  recoveryCandidates: []
+}
 const sessionListeners = new Set<(event: RuntimeEvent) => void>()
 const browserListeners = new Set<(event: BrowserEvent) => void>()
 const windowResizeListeners = new Set<(event: { active: boolean }) => void>()
@@ -238,7 +242,7 @@ const mockApi: AgentMuxDesktopApi = {
   },
   hosts: { check: async (host) => host.kind === 'ssh'
     ? { ok: false, detail: 'Remote Runs are not yet supported.' }
-    : { ok: true, detail: 'CtxMux 0.1.0 · protocol 9' } },
+    : { ok: true, detail: 'CtxMux 0.1.0 · protocol 13' } },
   workspaces: {
     chooseLocalFolder: async () => null,
     add: async (input) => {
@@ -676,7 +680,7 @@ const mockApi: AgentMuxDesktopApi = {
         previous.updatedAt = Date.now()
         previous.control = { ...previous.control, run: { runId } } as typeof previous.control
         mockOutput.set(previous.id, 'Resuming agent…\r\n')
-        return structuredClone(previous)
+        return { kind: 'resumed' as const, session: structuredClone(previous) }
       }
       // Terminals relaunch as a brand-new Run in the same cwd.
       const runId = crypto.randomUUID()
@@ -697,7 +701,7 @@ const mockApi: AgentMuxDesktopApi = {
       if (previous) mockSnapshot.sessions = mockSnapshot.sessions.filter((item) => item.id !== sessionId)
       mockSnapshot.sessions.push(session)
       mockOutput.set(session.id, '$ ')
-      return session
+      return { kind: 'terminal-restarted' as const, session }
     },
     stop: async (control) => {
       const sessionId = control.kind === 'agent' ? control.agentSessionId : control.runId
