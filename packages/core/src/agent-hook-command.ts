@@ -13,7 +13,41 @@ function parseEventFromArgv(): string | null {
   return null
 }
 
-async function main(): Promise<void> {
+/**
+ * Resolve which Agent Provider invoked this hook. The provider is baked into the managed hook
+ * command string (AGENTMUX_HOOK_PROVIDER) so it survives PTY restarts and SSH, and disambiguates
+ * `antigravity` (agy) from `gemini`, which share ~/.gemini. AGENTMUX_PROVIDER_ID (injected into the
+ * agent launch env) is the fallback, and the presence of the Antigravity-only event var infers it.
+ */
+export function resolveHookProvider(env: NodeJS.ProcessEnv = process.env): string | null {
+  return (
+    env.AGENTMUX_HOOK_PROVIDER ??
+    env.AGENTMUX_PROVIDER_ID ??
+    (env.AGENTMUX_ANTIGRAVITY_EVENT ? 'antigravity' : null)
+  )
+}
+
+/**
+ * The stdout a provider's hook protocol expects from a passive status observer.
+ *
+ * Only Antigravity gates tool calls on this hook and reads empty/absent stdout as a HARD DENY
+ * (#2426), so it must receive an explicit decision — `ask` defers to the user's own permission
+ * flow (never `allow`, which would auto-approve every observed tool call). Every other provider is
+ * observed, not gated, so it must receive `{}`: a valid no-decision payload that satisfies Claude's
+ * fail-closed-on-empty-stdout guard and Codex's strict "Stop requires JSON on stdout" rule, without
+ * tripping Codex's "unsupported decision value" hook failure that an Antigravity-shaped
+ * `{"decision":"ask"}` would cause. Emitting the Antigravity schema to any other provider is the
+ * P0 bug this replaces.
+ */
+export function hookResponseFor(provider: string | null, eventName: string | null): string {
+  if (provider === 'antigravity') {
+    if (eventName === 'PreToolUse') return '{"decision":"ask"}\n'
+    if (eventName === 'Stop') return '{"decision":""}\n'
+  }
+  return '{}\n'
+}
+
+export async function runAgentHookCommand(): Promise<void> {
   const flagEvent = parseEventFromArgv()
   const envEvent =
     process.env.AGENTMUX_ANTIGRAVITY_EVENT ??
@@ -53,6 +87,11 @@ async function main(): Promise<void> {
         : null
 
   const eventName = flagEvent ?? envEvent ?? stdinEvent
+
+  // Answer the invoking CLI with the provider-correct decision BEFORE the status relay, so a gate
+  // (Antigravity PreToolUse) never waits behind the network post's timeout.
+  process.stdout.write(hookResponseFor(resolveHookProvider(), eventName))
+
   const url = process.env.AGENTMUX_HOOK_URL
   const token = process.env.AGENTMUX_HOOK_TOKEN
 
@@ -82,17 +121,4 @@ async function main(): Promise<void> {
       process.stderr.write(`[AgentMux Hook] ${lastError instanceof Error ? lastError.message : String(lastError)}\n`)
     }
   }
-
-  if (eventName === 'PreToolUse') {
-    process.stdout.write('{"decision":"ask"}\n')
-  } else if (eventName === 'Stop') {
-    process.stdout.write('{"decision":""}\n')
-  } else {
-    process.stdout.write('{}\n')
-  }
 }
-
-void main().catch((error) => {
-  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
-  process.exitCode = 1
-})
