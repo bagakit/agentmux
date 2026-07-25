@@ -15,6 +15,7 @@ import {
 import type { ReactNode } from 'react'
 import { WORKBENCH_TAB_SPLIT_ACTIONS } from '../lib/workbench-tab-actions'
 import type { SplitDirection } from '../lib/workbench-layout'
+import { formatAgentMuxTabHandoff } from '../lib/tab-control-handoff'
 
 const SPLIT_ICONS = {
   left: ArrowLeft,
@@ -23,6 +24,53 @@ const SPLIT_ICONS = {
   down: ArrowDown
 } satisfies Record<SplitDirection, typeof ArrowRight>
 
+type WorkbenchTabCopyAction = {
+  label: 'Copy Tab ID' | 'Copy Agent Handoff' | 'Copy Session ID'
+  onSelect(): Promise<void>
+}
+
+export type WorkbenchTabCopyModel = {
+  tabId: WorkbenchTabCopyAction
+  agentHandoff: WorkbenchTabCopyAction
+  sessionId?: WorkbenchTabCopyAction
+}
+
+export function createWorkbenchTabCopyModel({
+  tabId,
+  agentSessionId,
+  writeClipboardText
+}: {
+  tabId: string
+  agentSessionId: string | null
+  writeClipboardText(text: string): Promise<void>
+}): WorkbenchTabCopyModel {
+  const copy = async (text: string, label: WorkbenchTabCopyAction['label']): Promise<void> => {
+    try {
+      await writeClipboardText(text)
+    } catch (error) {
+      console.warn(`[tab] failed to ${label.toLowerCase()}`, error)
+    }
+  }
+  return {
+    tabId: {
+      label: 'Copy Tab ID',
+      onSelect: async () => copy(tabId, 'Copy Tab ID')
+    },
+    agentHandoff: {
+      label: 'Copy Agent Handoff',
+      onSelect: async () => copy(formatAgentMuxTabHandoff(tabId), 'Copy Agent Handoff')
+    },
+    ...(agentSessionId
+      ? {
+          sessionId: {
+            label: 'Copy Session ID' as const,
+            onSelect: async () => copy(agentSessionId, 'Copy Session ID')
+          }
+        }
+      : {})
+  }
+}
+
 export function WorkbenchTabContextMenu({
   children,
   canCloseOthers,
@@ -30,9 +78,9 @@ export function WorkbenchTabContextMenu({
   canCloseRight,
   canMoveToNewGroup,
   onOpenChange,
-  onCopyTabId,
-  onCopyAgentHandoff,
-  onCopySessionId,
+  tabId,
+  copyableAgentSessionId,
+  writeClipboardText,
   onClose,
   onCloseOthers,
   onCloseLeft,
@@ -45,32 +93,37 @@ export function WorkbenchTabContextMenu({
   canCloseRight: boolean
   canMoveToNewGroup: boolean
   onOpenChange?: (open: boolean) => void
-  onCopyTabId(): void
-  onCopyAgentHandoff(): void
-  onCopySessionId?: () => void
+  tabId: string
+  copyableAgentSessionId: string | null
+  writeClipboardText(text: string): Promise<void>
   onClose(): void
   onCloseOthers(): void
   onCloseLeft(): void
   onCloseRight(): void
   onMoveToNewGroup(direction: SplitDirection): void
 }) {
+  const copyModel = createWorkbenchTabCopyModel({
+    tabId,
+    agentSessionId: copyableAgentSessionId,
+    writeClipboardText
+  })
   return (
     <ContextMenu.Root {...(onOpenChange ? { onOpenChange } : {})}>
       <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
       <ContextMenu.Portal>
         <ContextMenu.Content className="tab-context-menu" collisionPadding={8}>
-          <ContextMenu.Item className="tab-context-menu__item" onSelect={onCopyTabId}>
+          <ContextMenu.Item className="tab-context-menu__item" onSelect={copyModel.tabId.onSelect}>
             <Copy size={14} />
-            <span>Copy Tab ID</span>
+            <span>{copyModel.tabId.label}</span>
           </ContextMenu.Item>
-          <ContextMenu.Item className="tab-context-menu__item" onSelect={onCopyAgentHandoff}>
+          <ContextMenu.Item className="tab-context-menu__item" onSelect={copyModel.agentHandoff.onSelect}>
             <Send size={14} />
-            <span>Copy Agent Handoff</span>
+            <span>{copyModel.agentHandoff.label}</span>
           </ContextMenu.Item>
-          {onCopySessionId ? (
-            <ContextMenu.Item className="tab-context-menu__item" onSelect={onCopySessionId}>
+          {copyModel.sessionId ? (
+            <ContextMenu.Item className="tab-context-menu__item" onSelect={copyModel.sessionId.onSelect}>
               <Copy size={14} />
-              <span>Copy Session ID</span>
+              <span>{copyModel.sessionId.label}</span>
             </ContextMenu.Item>
           ) : null}
           <ContextMenu.Separator className="tab-context-menu__separator" />
