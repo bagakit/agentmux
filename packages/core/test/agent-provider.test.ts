@@ -427,6 +427,14 @@ describe('built-in agent providers', () => {
     ])
     expect(hermesPlan?.mutations[0]?.merge).toEqual({ kind: 'yaml-managed-events', marker: 'agentmux-hook.js' })
     expect(hermesPlan?.mutations[1]?.merge).toEqual({ kind: 'json-managed-approvals', marker: 'agentmux-hook.js' })
+    // A launch env carrying HERMES_HOME repoints the install to that dir directly (no `.hermes` append) —
+    // hermes reads its config dir from $HERMES_HOME, so the installer must target the same dir the process
+    // will read. This is the isolation lever the real-hermes e2e leans on.
+    const scopedPlan = resolveManagedHookPlan('hermes', '/tmp/work', { HERMES_HOME: '/tmp/scratch-hermes' })
+    expect(scopedPlan?.mutations.map((mutation) => mutation.path)).toEqual([
+      '/tmp/scratch-hermes/config.yaml',
+      '/tmp/scratch-hermes/shell-hooks-allowlist.json'
+    ])
     // pi (TypeScript extension) declares native hooks but has no plan builder, so it resolves to null and
     // is not auto-installed. Non-hook providers likewise.
     expect(resolveManagedHookPlan('pi', '/tmp/work')).toBeNull()
@@ -460,7 +468,7 @@ describe('built-in agent providers', () => {
     // `VAR=val exec …` prefix the other providers use would make `ELECTRON_RUN_AS_NODE=1` argv[0].
     // `/usr/bin/env` parses the NAME=value operands itself, then execs the interpreter with them applied.
     const command = (
-      JSON.parse(createHermesManagedHookPlan('/tmp/fake-home').mutations[0]?.content ?? '{}') as {
+      JSON.parse(createHermesManagedHookPlan({ HERMES_HOME: '/tmp/fake-home' }).mutations[0]?.content ?? '{}') as {
         hooks: Record<string, Array<{ command?: string }>>
       }
     ).hooks['pre_tool_call']?.[0]?.command ?? ''
@@ -471,7 +479,7 @@ describe('built-in agent providers', () => {
     // The allowlist approval must gate the SAME command string, byte-for-byte — hermes matches (event,
     // command) exactly, so any divergence would leave the hook un-approved and silently skipped.
     const approvals = (
-      JSON.parse(createHermesManagedHookPlan('/tmp/fake-home').mutations[1]?.content ?? '{}') as {
+      JSON.parse(createHermesManagedHookPlan({ HERMES_HOME: '/tmp/fake-home' }).mutations[1]?.content ?? '{}') as {
         approvals: Array<{ event?: string; command?: string }>
       }
     ).approvals
