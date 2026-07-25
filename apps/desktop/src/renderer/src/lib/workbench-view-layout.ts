@@ -22,6 +22,8 @@ export type WorkbenchRegionBounds = {
   height: number
 }
 
+export type WorkbenchRegionLayoutPreset = 'columns-3' | 'grid-4' | 'grid-6' | 'grid-9'
+
 export function createWorkbenchViewLayout(regionId: string): WorkbenchViewLayout {
   return { root: { type: 'leaf', regionId }, activeRegionId: regionId }
 }
@@ -30,6 +32,110 @@ export function regionIds(root: WorkbenchRegionLayoutNode): string[] {
   return root.type === 'leaf'
     ? [root.regionId]
     : [...regionIds(root.first), ...regionIds(root.second)]
+}
+
+function lineLayout(
+  ids: readonly string[],
+  direction: 'horizontal' | 'vertical'
+): WorkbenchRegionLayoutNode {
+  const [first, ...rest] = ids
+  if (!first) throw new Error('A Workbench Region layout cannot be empty.')
+  if (rest.length === 0) return { type: 'leaf', regionId: first }
+  return {
+    type: 'split',
+    direction,
+    first: { type: 'leaf', regionId: first },
+    second: lineLayout(rest, direction),
+    ratio: 1 / ids.length
+  }
+}
+
+function gridLayout(ids: readonly string[], columns: number): WorkbenchRegionLayoutNode {
+  const rows: WorkbenchRegionLayoutNode[] = []
+  for (let offset = 0; offset < ids.length; offset += columns) {
+    rows.push(lineLayout(ids.slice(offset, offset + columns), 'horizontal'))
+  }
+  if (rows.length === 1) return rows[0]!
+  const combineRows = (remaining: readonly WorkbenchRegionLayoutNode[]): WorkbenchRegionLayoutNode => {
+    const [first, ...rest] = remaining
+    if (!first) throw new Error('A Workbench Region grid cannot be empty.')
+    if (rest.length === 0) return first
+    return {
+      type: 'split',
+      direction: 'vertical',
+      first,
+      second: combineRows(rest),
+      ratio: 1 / remaining.length
+    }
+  }
+  return combineRows(rows)
+}
+
+export function workbenchRegionPresetSize(preset: WorkbenchRegionLayoutPreset): number {
+  switch (preset) {
+    case 'columns-3': return 3
+    case 'grid-4': return 4
+    case 'grid-6': return 6
+    case 'grid-9': return 9
+  }
+}
+
+export function applyWorkbenchRegionLayoutPreset(
+  layout: WorkbenchViewLayout,
+  preset: WorkbenchRegionLayoutPreset,
+  addedRegionIds: readonly string[]
+): WorkbenchViewLayout {
+  const current = regionIds(layout.root)
+  const size = workbenchRegionPresetSize(preset)
+  if (current.length > size || addedRegionIds.length !== size - current.length) return layout
+  const ids = [...current, ...addedRegionIds]
+  if (new Set(ids).size !== ids.length) return layout
+  return {
+    root: preset === 'columns-3'
+      ? lineLayout(ids, 'horizontal')
+      : gridLayout(ids, preset === 'grid-4' ? 2 : 3),
+    activeRegionId: layout.activeRegionId
+  }
+}
+
+function leafCount(root: WorkbenchRegionLayoutNode): number {
+  return root.type === 'leaf' ? 1 : leafCount(root.first) + leafCount(root.second)
+}
+
+function balanceNode(root: WorkbenchRegionLayoutNode): WorkbenchRegionLayoutNode {
+  if (root.type === 'leaf') return root
+  const first = balanceNode(root.first)
+  const second = balanceNode(root.second)
+  return {
+    ...root,
+    first,
+    second,
+    ratio: leafCount(first) / (leafCount(first) + leafCount(second))
+  }
+}
+
+export function balanceWorkbenchRegionLayout(layout: WorkbenchViewLayout): WorkbenchViewLayout {
+  return { ...layout, root: balanceNode(layout.root) }
+}
+
+function replaceLeafOrder(
+  root: WorkbenchRegionLayoutNode,
+  ids: Iterator<string>
+): WorkbenchRegionLayoutNode {
+  if (root.type === 'leaf') return { type: 'leaf', regionId: ids.next().value as string }
+  return {
+    ...root,
+    first: replaceLeafOrder(root.first, ids),
+    second: replaceLeafOrder(root.second, ids)
+  }
+}
+
+export function placeActiveWorkbenchRegionFirst(layout: WorkbenchViewLayout): WorkbenchViewLayout {
+  const current = regionIds(layout.root)
+  if (current[0] === layout.activeRegionId) return layout
+  const ordered = [layout.activeRegionId, ...current.filter((id) => id !== layout.activeRegionId)]
+  if (ordered.length !== current.length) return layout
+  return { ...layout, root: replaceLeafOrder(layout.root, ordered.values()) }
 }
 
 export function workbenchRegionBounds(
