@@ -237,6 +237,25 @@ describe('Desktop Control owner', () => {
     expect(useAppStore.getState().tabs[tab.id]).toEqual(tab)
   })
 
+  it('does not clean up a Browser id that Main create never returned', async () => {
+    const tab = fixture()
+    vi.spyOn(api.browser, 'create').mockRejectedValue(new Error('Browser owner create failed'))
+    const close = vi.spyOn(api.browser, 'close').mockResolvedValue()
+
+    await expect(useAppStore.getState().executeControl(request({
+      operation: 'open.browser',
+      url: 'https://example.com',
+      destination: {
+        kind: 'split',
+        direction: 'right',
+        region: { kind: 'region', regionId: 'region-caller' }
+      }
+    }))).rejects.toThrow('Browser owner create failed')
+
+    expect(close).not.toHaveBeenCalled()
+    expect(useAppStore.getState().tabs[tab.id]).toEqual(tab)
+  })
+
   it('creates requested presets atomically and inserts a new Tab immediately after its anchor', async () => {
     const tab = fixture([agent('target')])
     const arranged = await useAppStore.getState().executeControl(request({
