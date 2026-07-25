@@ -144,6 +144,13 @@ const api: AgentMuxPreloadApi = {
     back: (id: string) => ipcRenderer.invoke('browser:back', id),
     forward: (id: string) => ipcRenderer.invoke('browser:forward', id),
     reload: (id: string) => ipcRenderer.invoke('browser:reload', id),
+    switchProfile: (id: string, profileId: string) => ipcRenderer.invoke('browser:switchProfile', id, profileId),
+    listProfiles: () => ipcRenderer.invoke('browser:listProfiles'),
+    createProfile: (label: string) => ipcRenderer.invoke('browser:createProfile', label),
+    deleteProfile: (profileId: string) => ipcRenderer.invoke('browser:deleteProfile', profileId),
+    detectProfileImportSources: () => ipcRenderer.invoke('browser:detectProfileImportSources'),
+    importProfile: (sourceToken: string, label: string) =>
+      ipcRenderer.invoke('browser:importProfile', sourceToken, label),
     openDevTools: (id: string) => ipcRenderer.invoke('browser:openDevTools', id),
     setViewport: (id: string, viewport: BrowserViewport) => ipcRenderer.invoke('browser:setViewport', id, viewport),
     captureScreenshot: (id: string) => ipcRenderer.invoke('browser:captureScreenshot', id),

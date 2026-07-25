@@ -327,6 +327,7 @@ export const COMPOSITION_RESPONSE_CHANNEL = 'composition:response'
 export type BrowserSnapshot = {
   id: string
   navigationId: string
+  profileId: string
   url: string
   title: string
   loading: boolean
@@ -334,6 +335,28 @@ export type BrowserSnapshot = {
   canGoForward: boolean
   viewport: BrowserViewport
   error: string | null
+}
+
+export type BrowserProfileImportedSource = {
+  browserLabel: string
+  profileLabel: string
+  importedAt: number
+  importedCookies: number
+  skippedCookies: number
+}
+
+export type BrowserProfileSummary = {
+  id: string
+  label: string
+  createdAt: number
+  isDefault: boolean
+  source: BrowserProfileImportedSource | null
+}
+
+export type BrowserProfileImportSourceSummary = {
+  token: string
+  browserLabel: string
+  profileLabel: string
 }
 
 export const BROWSER_VIEWPORT_PRESETS = {
@@ -496,6 +519,12 @@ export type AgentMuxDesktopApi = {
     back(id: string): Promise<BrowserSnapshot>
     forward(id: string): Promise<BrowserSnapshot>
     reload(id: string): Promise<BrowserSnapshot>
+    switchProfile(id: string, profileId: string): Promise<BrowserSnapshot>
+    listProfiles(): Promise<BrowserProfileSummary[]>
+    createProfile(label: string): Promise<BrowserProfileSummary>
+    deleteProfile(profileId: string): Promise<void>
+    detectProfileImportSources(): Promise<BrowserProfileImportSourceSummary[]>
+    importProfile(sourceToken: string, label: string): Promise<BrowserProfileSummary>
     openDevTools(id: string): Promise<void>
     setViewport(id: string, viewport: BrowserViewport): Promise<BrowserSnapshot>
     captureScreenshot(id: string): Promise<BrowserScreenshotCapture>
