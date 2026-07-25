@@ -346,8 +346,12 @@ function controlErrorCode(value: unknown): AgentMuxControlErrorCode {
 export function parseAgentMuxControlReceipt(value: unknown): AgentMuxControlReceipt {
   const source = object(value, 'Control receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
   if (source.schemaVersion !== AGENTMUX_CONTROL_SCHEMA_VERSION) throw new AgentMuxError('Control receipt version is invalid.', 'CONTROL_PROTOCOL_ERROR')
-  if (source.ok === true) return parseSuccessReceipt(source)
+  if (source.ok === true) {
+    if (source.error !== undefined) throw new AgentMuxError('Control receipt must contain exactly one result or error.', 'CONTROL_PROTOCOL_ERROR')
+    return parseSuccessReceipt(source)
+  }
   if (source.ok !== false) throw new AgentMuxError('Control receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  if (source.result !== undefined) throw new AgentMuxError('Control receipt must contain exactly one result or error.', 'CONTROL_PROTOCOL_ERROR')
   const error = object(source.error, 'Control error receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
   const code = controlErrorCode(error.code)
   if (code === 'CONTROL_FAILED' && error.code !== 'CONTROL_FAILED') throw new AgentMuxError('Control error receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
@@ -479,6 +483,9 @@ export async function requestAgentMuxControl(value: AgentMuxControlRequest, path
     )
   })
   const receipt = parseAgentMuxControlReceipt(response)
+  if (receipt.requestId !== request.requestId || receipt.operation !== request.operation) {
+    throw new AgentMuxError('Control receipt does not match its request.', 'CONTROL_PROTOCOL_ERROR')
+  }
   if (!receipt.ok) throw Object.assign(
     new AgentMuxError(receipt.error.message, receipt.error.code),
     {
@@ -487,6 +494,5 @@ export async function requestAgentMuxControl(value: AgentMuxControlRequest, path
       ...(receipt.error.code === 'MESSAGE_TARGET_NOT_UNIQUE' ? { candidates: receipt.error.candidates } : {})
     }
   )
-  if (receipt.requestId !== request.requestId || receipt.operation !== request.operation) throw new AgentMuxError('Control receipt does not match its request.', 'CONTROL_PROTOCOL_ERROR')
   return receipt
 }

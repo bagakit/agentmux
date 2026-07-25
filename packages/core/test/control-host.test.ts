@@ -1,4 +1,5 @@
 import { mkdtemp, rm, stat } from 'node:fs/promises'
+import { createServer } from 'node:net'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
@@ -166,6 +167,39 @@ describe('Control protocol', () => {
       }
     })).toThrow('candidates are invalid')
   })
+
+  it('requires exactly one result or error and rejects reserved result identities', () => {
+    const success = {
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId: 'hybrid',
+      ok: true,
+      operation: 'send',
+      result: { agentSessionId: 'agent-1' }
+    }
+    expect(() => parseAgentMuxControlReceipt({
+      ...success,
+      error: { code: 'CONTROL_FAILED', message: 'must not coexist' }
+    })).toThrow('exactly one')
+    expect(() => parseAgentMuxControlReceipt({
+      ...success,
+      ok: false,
+      error: { code: 'CONTROL_FAILED', message: 'must not coexist' }
+    })).toThrow('exactly one')
+    for (const receipt of [
+      { ...success, result: { agentSessionId: 'self' } },
+      { ...success, operation: 'focus', result: { tabId: 'self' } },
+      {
+        ...success,
+        operation: 'inspect.region',
+        result: {
+          region: {
+            tabId: 'tab-main', regionId: 'self', workspaceId: 'workspace', kind: 'launcher',
+            bounds: { x: 0, y: 0, width: 1, height: 1 }
+          }
+        }
+      }
+    ]) expect(() => parseAgentMuxControlReceipt(receipt)).toThrow('invalid')
+  })
 })
 
 describe('external Control control', () => {
@@ -271,5 +305,33 @@ describe('external Control control', () => {
     }, path)
     expect(seen).toBe('继续检查')
     await server.stop()
+  })
+
+  it('rejects a valid error receipt belonging to another request', async () => {
+    const root = await mkdtemp('/private/tmp/agentmux-control-wrong-receipt-')
+    roots.push(root)
+    const path = join(root, 'control.sock')
+    const server = createServer((socket) => {
+      socket.once('data', () => socket.end(`${JSON.stringify({
+        schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+        requestId: 'another-request',
+        ok: false,
+        operation: 'send',
+        error: { code: 'REGION_NOT_OPEN', message: 'Another request failed.' }
+      })}\n`))
+    })
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(path, resolve)
+    })
+
+    await expect(requestAgentMuxControl({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId: 'expected-request',
+      operation: 'send',
+      target: { kind: 'agent-session', agentSessionId: 'agent-1' },
+      text: 'Continue'
+    }, path)).rejects.toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR' })
+    await new Promise<void>((resolve) => server.close(() => resolve()))
   })
 })
