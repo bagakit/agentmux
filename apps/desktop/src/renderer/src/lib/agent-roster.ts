@@ -90,9 +90,11 @@ export function buildAgentRoster(input: {
   sessions: readonly SessionSnapshot[]
   providerCatalog: readonly AgentCatalogEntry[]
 }): RosterRow[] {
-  const catalog = new Map(input.providerCatalog.map((entry) => [entry.id, entry]))
+  // A store that has not hydrated its catalog yet has none: that is an empty scope list, not a crash.
+  // The roster must survive being opened during startup.
+  const catalog = new Map((input.providerCatalog ?? []).map((entry) => [entry.id, entry]))
   const rows: RosterRow[] = []
-  for (const session of input.sessions) {
+  for (const session of input.sessions ?? []) {
     if (session.kind !== 'agent') continue
     rows.push({
       sessionId: session.id,

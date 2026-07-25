@@ -145,10 +145,15 @@ describe('AgentStatusBar', () => {
   })
 
   it('makes the needs-you and error segments clickable only when populated', () => {
+    // Scoped to the attention segments on purpose: the total segment is now the roster's disclosure and
+    // is always actionable, so counting every --action would conflate two different questions.
+    const attentionButtons = (markup: string): number =>
+      (markup.match(/<button[^>]*data-attention="(?:needs-you|error)"/gu) ?? []).length
+
     fixture.state.sessions = [agent('a', 'working', 10)]
     const idle = renderToStaticMarkup(createElement(AgentStatusBar))
-    // With nothing needing attention, neither segment is a button.
-    expect(idle).not.toContain('agent-status-bar__segment--action')
+    // With nothing needing attention, neither attention segment is a button.
+    expect(attentionButtons(idle)).toBe(0)
 
     fixture.state.sessions = [agent('w', 'waiting', 10), agent('e', 'error', 20)]
     const active = renderToStaticMarkup(createElement(AgentStatusBar))
@@ -156,7 +161,7 @@ describe('AgentStatusBar', () => {
     expect(active).toContain('status status--waiting')
     expect(active).toContain('status status--error')
     // Both populated attention segments become actionable.
-    expect(active.match(/agent-status-bar__segment--action/gu) ?? []).toHaveLength(2)
+    expect(attentionButtons(active)).toBe(2)
   })
 
   it('jumps a needs-you click to the earliest waiting|blocked session', () => {
