@@ -38,7 +38,6 @@ type LocalWorkerRequest =
       fault?: 'temporary-write' | 'replace'
     }
   | { action: 'create'; name: string; kind: 'file' | 'directory' }
-  | { action: 'exists'; name: string }
   | { action: 'delete'; name: string }
 
 type LocalExistingPath = {
@@ -63,6 +62,7 @@ export type WorkspaceFilesOptions = {
   localMoveHelperPath?: string
   beforeLocalMoveCommit?: () => Promise<void>
   afterLocalMoveCommit?: () => Promise<void>
+  onReadDirectoryStart?: (workspace: WorkspaceRecord, requestedPath: string) => void
 }
 
 let activeLocalFileObservers = 0
@@ -79,7 +79,7 @@ export function workspaceFileObserverCount(): number {
 const LOCAL_WORKER_SOURCE = String.raw`
 import { createHash, randomBytes } from 'node:crypto'
 import { watch } from 'node:fs'
-import { constants, lstat, mkdir, open, readdir, realpath, rename, rm, unlink } from 'node:fs/promises'
+import { constants, mkdir, open, readdir, realpath, rename, rm, unlink } from 'node:fs/promises'
 import { join, sep } from 'node:path'
 
 const request = JSON.parse(process.argv[1] ?? '')
@@ -220,14 +220,6 @@ try {
         0o666
       )
       await handle.close()
-    }
-  } else if (request.action === 'exists') {
-    try {
-      await lstat(request.name)
-      process.stdout.write('true')
-    } catch (error) {
-      if (error?.code !== 'ENOENT') throw error
-      process.stdout.write('false')
     }
   } else if (request.action === 'delete') {
     await rm(request.name, { recursive: true, force: false })
@@ -778,6 +770,7 @@ export class WorkspaceFiles {
     workspace: WorkspaceRecord,
     requestedPath: string
   ): Promise<WorkspaceDirectoryEntry[]> {
+    this.options.onReadDirectoryStart?.(workspace, requestedPath)
     const host = this.hostFor(workspace.hostId)
     if (host.kind === 'local') {
       const directory = await localExistingPathWithin(workspace.path, requestedPath || '.')
@@ -800,7 +793,7 @@ export class WorkspaceFiles {
     }
 
     const directory = await remoteExistingPathWithin(host, workspace.path, requestedPath || '.')
-    // 采用 Orca 的目录级读取边界，但保留 AgentMux 的 system-SSH transport。
+    // Directory-scoped reads keep system-SSH under the same Workspace boundary.
     // Script 是固定源码，目录由 argv 传入；NUL framing 可正确承载空格和换行文件名。
     const script = [
       'for path do',
@@ -940,13 +933,6 @@ export class WorkspaceFiles {
     }
   }
 
-  private async localPathExists(path: LocalMutablePath): Promise<boolean> {
-    return (await runLocalWorker(path.parent, path.root, {
-      action: 'exists',
-      name: path.name
-    })).toString('utf8') === 'true'
-  }
-
   async move(
     sourceWorkspace: WorkspaceRecord,
     destinationWorkspace: WorkspaceRecord,
@@ -1011,18 +997,9 @@ export class WorkspaceFiles {
               'definitelyUnchanged' in error && error.definitelyUnchanged === true) {
             return moveError(error, 'source')
           }
-          try {
-            const [source, destination] = await Promise.all([
-              localMutablePathWithin(sourceWorkspace.path, input.source.path),
-              localMutablePathWithin(destinationWorkspace.path, input.destination.path)
-            ])
-            await Promise.all([
-              this.localPathExists(source),
-              this.localPathExists(destination)
-            ])
-          } catch {
-            // The typed unknown result remains authoritative when owner-fact refresh also fails.
-          }
+          // Path occupancy cannot identify the moved object or bind a probe to
+          // the helper's pinned root. The Renderer will refresh both parents
+          // through this owner, but the move result remains unknown.
           return moveError(error, 'unknown')
         }
       }

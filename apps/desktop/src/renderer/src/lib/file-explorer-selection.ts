@@ -1,7 +1,14 @@
+import { getRevealAncestorPaths, isPathWithinSubtree, remapPathWithinSubtree } from './workspace-paths'
+
 export type FileExplorerSelectionState = {
   activePath: string | null
   anchorPath: string | null
   selectedPaths: Set<string>
+}
+
+export type FileExplorerViewState = {
+  selection: FileExplorerSelectionState
+  expandedPaths: Set<string>
 }
 
 export type FileExplorerSelectionMode = 'replace' | 'toggle' | 'range' | 'additive-range'
@@ -16,8 +23,33 @@ export function createEmptyFileExplorerSelection(): FileExplorerSelectionState {
   return { activePath: null, anchorPath: null, selectedPaths: new Set() }
 }
 
+export function createEmptyFileExplorerViewState(): FileExplorerViewState {
+  return { selection: createEmptyFileExplorerSelection(), expandedPaths: new Set() }
+}
+
 export function createSingleFileExplorerSelection(path: string | null): FileExplorerSelectionState {
   return { activePath: path, anchorPath: path, selectedPaths: path ? new Set([path]) : new Set() }
+}
+
+export function revealFileExplorerPath(
+  current: FileExplorerViewState,
+  path: string
+): FileExplorerViewState {
+  const ancestors = getRevealAncestorPaths(path)
+  const hasExpandedAncestors = ancestors.every((ancestor) => current.expandedPaths.has(ancestor))
+  const hasSelectedPath = current.selection.selectedPaths.has(path)
+  if (hasExpandedAncestors && hasSelectedPath) return current
+
+  const expandedPaths = hasExpandedAncestors
+    ? current.expandedPaths
+    : new Set(current.expandedPaths)
+  if (!hasExpandedAncestors) {
+    for (const ancestor of ancestors) expandedPaths.add(ancestor)
+  }
+  return {
+    selection: hasSelectedPath ? current.selection : createSingleFileExplorerSelection(path),
+    expandedPaths
+  }
 }
 
 export function getFileExplorerSelectionMode(
@@ -80,4 +112,33 @@ export function updateFileExplorerSelectionPaths(
   const updatedAnchor = current.anchorPath ? updatePath(current.anchorPath) : null
   const anchorPath = updatedAnchor && selectedPaths.has(updatedAnchor) ? updatedAnchor : activePath
   return { activePath, anchorPath, selectedPaths }
+}
+
+export function renameFileExplorerViewPaths(
+  current: FileExplorerViewState,
+  path: string,
+  nextPath: string
+): FileExplorerViewState {
+  return {
+    selection: updateFileExplorerSelectionPaths(current.selection, (candidate) =>
+      remapPathWithinSubtree(candidate, path, nextPath)
+    ),
+    expandedPaths: new Set(
+      [...current.expandedPaths].map((candidate) => remapPathWithinSubtree(candidate, path, nextPath))
+    )
+  }
+}
+
+export function deleteFileExplorerViewPaths(
+  current: FileExplorerViewState,
+  path: string
+): FileExplorerViewState {
+  return {
+    selection: updateFileExplorerSelectionPaths(current.selection, (candidate) =>
+      isPathWithinSubtree(candidate, path) ? null : candidate
+    ),
+    expandedPaths: new Set(
+      [...current.expandedPaths].filter((candidate) => !isPathWithinSubtree(candidate, path))
+    )
+  }
 }

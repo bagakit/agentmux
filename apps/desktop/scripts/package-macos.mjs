@@ -82,6 +82,27 @@ async function pathExists(path) {
   return await lstat(path).then(() => true, () => false)
 }
 
+async function sourceIdentity() {
+  const [commit, tree, status] = await Promise.all([
+    run('git', ['rev-parse', 'HEAD'], { cwd: repositoryRoot, capture: true }),
+    run('git', ['rev-parse', 'HEAD^{tree}'], { cwd: repositoryRoot, capture: true }),
+    run('git', ['status', '--porcelain=v1', '--untracked-files=all'], {
+      cwd: repositoryRoot,
+      capture: true
+    })
+  ])
+  return {
+    commit: commit.stdout.trim(),
+    tree: tree.stdout.trim(),
+    status: status.stdout.trim()
+  }
+}
+
+async function sha256(path) {
+  return (await run('shasum', ['-a', '256', path], { capture: true }))
+    .stdout.trim().split(/\s+/)[0]
+}
+
 async function plistReplace(path, key, type, value) {
   await run('plutil', ['-replace', key, `-${type}`, String(value), path], { capture: true })
 }
@@ -420,6 +441,7 @@ async function verifyLaunchServices(appPath, verificationRoot) {
   const fileEditingReport = join(verificationRoot, 'workspace-file-editing.json')
   const userData = join(verificationRoot, 'user-data')
   const workspace = join(verificationRoot, 'workspace')
+  const alternateWorkspace = join(verificationRoot, 'alternate-workspace')
   const stdoutPath = join(verificationRoot, 'desktop-stdout.log')
   const stderrPath = join(verificationRoot, 'desktop-stderr.log')
   const runtimeRoot = await mkdtemp(join('/private/tmp', `amx-smoke-${process.getuid()}-`))
@@ -442,10 +464,24 @@ async function verifyLaunchServices(appPath, verificationRoot) {
   )
   await Promise.all([
     mkdir(userData, { recursive: true }),
-    mkdir(workspace, { recursive: true })
+    mkdir(join(workspace, 'explorer-source'), { recursive: true }),
+    mkdir(join(workspace, 'targets', 'valid'), { recursive: true }),
+    mkdir(join(workspace, 'targets', 'collision'), { recursive: true }),
+    mkdir(join(workspace, 'targets', 'menu'), { recursive: true }),
+    mkdir(join(workspace, 'targets', 'hover'), { recursive: true }),
+    mkdir(join(workspace, 'targets', 'cancel'), { recursive: true }),
+    mkdir(alternateWorkspace, { recursive: true })
   ])
   await Promise.all([
     writeFile(join(workspace, 'revision-probe.txt'), 'alpha', { mode: 0o640 }),
+    writeFile(join(workspace, 'explorer-source', 'drag-valid.txt'), 'pointer move'),
+    writeFile(join(workspace, 'explorer-source', 'drag-invalid.txt'), 'must stay put'),
+    writeFile(join(workspace, 'explorer-source', 'menu.txt'), 'menu move'),
+    writeFile(join(workspace, 'explorer-source', 'menu-neighbor.txt'), 'selection neighbor'),
+    writeFile(join(workspace, 'targets', 'collision', 'drag-invalid.txt'), 'collision owner'),
+    writeFile(join(workspace, 'targets', 'hover', 'child.txt'), 'hover child'),
+    writeFile(join(workspace, 'targets', 'cancel', 'child.txt'), 'cancel child'),
+    writeFile(join(alternateWorkspace, 'alternate.txt'), 'alternate workspace'),
     writeFile(join(userData, 'agentmux.config.json'), `${JSON.stringify({
       version: 6,
       hosts: [{ id: 'local', kind: 'local', label: 'Mounted Desktop E2E' }],
@@ -455,6 +491,12 @@ async function verifyLaunchServices(appPath, verificationRoot) {
         name: 'Workspace File Editing E2E',
         hostId: 'local',
         path: workspace,
+        kind: 'folder'
+      }, {
+        id: 'workspace-file-editing-alternate-e2e',
+        name: 'Workspace File Editing Alternate E2E',
+        hostId: 'local',
+        path: alternateWorkspace,
         kind: 'folder'
       }],
       appearance: { terminalTheme: 'graphite' }
@@ -508,7 +550,7 @@ async function verifyLaunchServices(appPath, verificationRoot) {
       'LaunchServices ready receipt did not come from the exact relocated application.'
     )
     const fileEditing = JSON.parse(await readFile(fileEditingReport, 'utf8'))
-    assert(fileEditing.schema === 'agentmux.workspace-file-editing-e2e.v1', 'Mounted Desktop emitted the wrong file editing report schema.')
+    assert(fileEditing.schema === 'agentmux.workspace-file-editing-e2e.v2', 'Mounted Desktop emitted the wrong file editing report schema.')
     assert(fileEditing.ok === true, `Mounted Desktop file editing E2E failed: ${fileEditing.error ?? 'unknown error'}`)
     assert(
       fileEditing.phases?.saveGeneration?.disk === 'bravo' &&
@@ -521,6 +563,36 @@ async function verifyLaunchServices(appPath, verificationRoot) {
         fileEditing.phases.writeError.editor === 'mike' &&
         fileEditing.phases.writeError.state === 'write-error',
       'Mounted Desktop did not preserve original bytes and draft after replace failure.'
+    )
+    assert(
+      fileEditing.phases?.explorer?.pointerMove?.moved === true &&
+        fileEditing.phases.explorer.pointerMove.fileOverlayOnly === true &&
+        fileEditing.phases.explorer.invalidDrop?.blocked === true,
+      'Mounted Desktop did not prove PointerSensor move, invalid drop, and Workbench overlay isolation.'
+    )
+    assert(
+      fileEditing.phases?.explorer?.hover?.expanded === true &&
+        fileEditing.phases.explorer.hover.cancelledStayedCollapsed === true,
+      'Mounted Desktop did not prove hover expansion and drag-cancel cleanup.'
+    )
+    assert(
+      fileEditing.phases?.explorer?.menu?.shiftF10Opened === true &&
+        fileEditing.phases.explorer.menu.moved === true &&
+        fileEditing.phases.explorer.menu.singleSelection === true,
+      'Mounted Desktop did not prove Radix and Shift+F10 single-item Move behavior.'
+    )
+    assert(
+      fileEditing.phases?.explorer?.workspaceRevisit?.preserved === true &&
+        fileEditing.phases.explorer.workspaceRevisit.settledWithoutLoop === true &&
+        fileEditing.phases.explorer.workspaceRevisit.explorerProjectionNotifications?.total === 0,
+      'Mounted Desktop did not preserve the zero-notification Explorer projection across Workspace A to B to A.'
+    )
+    assert(
+      fileEditing.phases?.explorer?.menu?.workspaceRace?.alternateTreeUnchanged === true &&
+        fileEditing.phases.explorer.menu.workspaceRace.stalePrimaryReadsStarted === 0 &&
+        fileEditing.phases.explorer.menu.workspaceRace.primaryRecovered === true &&
+        fileEditing.phases.explorer.menu.workspaceRace.explorerProjectionNotifications?.total === 1,
+      'Mounted Desktop did not reject the stale primary refresh or recover it from its Workspace owner.'
     )
     const ownerReceipt = JSON.parse(await readFile(ownerReceiptPath, 'utf8'))
     assert(
@@ -568,7 +640,7 @@ async function verifyLaunchServices(appPath, verificationRoot) {
   if (failures.length > 0) {
     throw new AggregateError(failures, 'Mounted Desktop verification did not reach a clean terminal state')
   }
-  process.stdout.write('mounted_workspace_file_editing=passed\n')
+  process.stdout.write('mounted_desktop_interactions=passed\n')
 }
 
 async function createDmg(appPath, temporaryRoot) {
@@ -644,6 +716,13 @@ async function installApplication(appPath) {
 async function main() {
   assert(process.platform === 'darwin', 'macOS packaging must run on macOS.')
   assert(process.arch === 'arm64', `AgentMux currently packages only darwin-arm64, not darwin-${process.arch}.`)
+  const initialSource = await sourceIdentity()
+  assert(
+    initialSource.status === '',
+    `macOS packaging requires a clean source tree, found:\n${initialSource.status}`
+  )
+  await run('pnpm', ['build'], { cwd: desktopRoot })
+  await run('pnpm', ['--filter', '@agentmux/core', 'build'], { cwd: repositoryRoot })
   const electronRoot = dirname(require.resolve('electron/package.json'))
   const electronApp = join(electronRoot, 'dist', 'Electron.app')
   assert(await pathExists(electronApp), 'The locked Electron application is missing.')
@@ -665,14 +744,32 @@ async function main() {
     await createDmg(outputApp, temporaryRoot)
     await verifyDmg(temporaryRoot)
     if (installRequested) await installApplication(outputApp)
-    const appSize = (await run('du', ['-sk', outputApp], { capture: true })).stdout.trim().split(/\s+/)[0]
-    const dmgSize = (await stat(outputDmg)).size
+    await run(process.execPath, [join(desktopRoot, 'scripts', 'report-desktop-package.mjs')])
+    const [appHash, dmgHash, appSizeResult, dmgInfo] = await Promise.all([
+      sha256(join(outputApp, 'Contents', 'MacOS', PRODUCT_NAME)),
+      sha256(outputDmg),
+      run('du', ['-sk', outputApp], { capture: true }),
+      stat(outputDmg)
+    ])
+    const finalSource = await sourceIdentity()
+    assert(
+      finalSource.commit === initialSource.commit &&
+        finalSource.tree === initialSource.tree &&
+        finalSource.status === initialSource.status,
+      `Source tree changed during macOS packaging: ${JSON.stringify({ initialSource, finalSource })}`
+    )
+    const appSize = appSizeResult.stdout.trim().split(/\s+/)[0]
     process.stdout.write([
       `app=${outputApp}`,
       `dmg=${outputDmg}`,
       'signature=adhoc-local-candidate',
+      `source_commit=${initialSource.commit}`,
+      `source_tree=${initialSource.tree}`,
+      'source_status=clean',
+      `app_executable_sha256=${appHash}`,
+      `dmg_sha256=${dmgHash}`,
       `app_size_kib=${appSize}`,
-      `dmg_size_bytes=${dmgSize}`,
+      `dmg_size_bytes=${dmgInfo.size}`,
       'notarized=false'
     ].join('\n') + '\n')
   } finally {

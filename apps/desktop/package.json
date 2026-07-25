@@ -12,8 +12,8 @@
     "dev:web": "vite --config vite.web.config.ts --host 127.0.0.1",
     "prebuild": "pnpm build:workspace-move-helper",
     "build": "electron-vite build",
-    "package:mac": "pnpm build && pnpm --filter @agentmux/core build && node scripts/package-macos.mjs && node scripts/report-desktop-package.mjs",
-    "package:mac:install": "pnpm build && pnpm --filter @agentmux/core build && node scripts/package-macos.mjs --install && node scripts/report-desktop-package.mjs",
+    "package:mac": "node scripts/package-macos.mjs",
+    "package:mac:install": "node scripts/package-macos.mjs --install",
     "report:package": "node scripts/report-desktop-package.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "measure:desktop": "pnpm build && node scripts/measure-desktop-resources.mjs"
