@@ -1097,6 +1097,31 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .terminal-recovery > div { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .terminal-recovery strong { font-size: 10px; }
 .terminal-recovery > div > span { overflow: hidden; color: var(--text-3); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.terminal-recovery__actions {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 6px;
+}
+.terminal-recovery__dismiss {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--text-3);
+  background: var(--surface-3);
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+.terminal-recovery__dismiss:hover {
+  color: var(--text);
+  background: #ffffff15;
+  border-color: #ffffff25;
+}
 .status { display: inline-flex; align-items: center; gap: 5px; color: var(--text-3); font-size: 11px; text-transform: capitalize; }
 .status__dot { width: 7px; height: 7px; border-radius: 50%; background: #65706a; box-shadow: 0 0 0 2px #65706a20; }
 .status--working .status__dot, .status--running .status__dot { background: var(--green); box-shadow: 0 0 0 3px #8de3ae18; }
