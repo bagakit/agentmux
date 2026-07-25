@@ -620,13 +620,19 @@ describe('built-in agent providers', () => {
 
   it('projects launch options only for providers that declare them (absence hides the control)', () => {
     const catalog = new Map(providers.catalog().map((provider) => [provider.id, provider.launchOptions]))
-    // Codex and Claude declare launch options; every other built-in declares none, so the renderer
-    // draws no control for them.
+    // Each option id, per provider, matches the verified flag it declares. cursor and pi declare none —
+    // cursor because its executable exposes no such flag we chose to declare, pi likewise — so the
+    // renderer draws no launch control for them (absence hides, never a disabled affordance).
     expect(catalog.get('codex')?.map((option) => option.id)).toEqual(['sandbox', 'approval'])
     expect(catalog.get('claude')?.map((option) => option.id)).toEqual(['permission-mode'])
-    for (const id of ['traex', 'hermes', 'pi', 'grok', 'gemini', 'antigravity', 'cursor'] as const) {
-      expect(catalog.get(id)).toEqual([])
-    }
+    expect(catalog.get('gemini')?.map((option) => option.id)).toEqual(['approval-mode'])
+    expect(catalog.get('grok')?.map((option) => option.id)).toEqual(['permission-mode'])
+    expect(catalog.get('traex')?.map((option) => option.id)).toEqual(['sandbox', 'permission-mode'])
+    expect(catalog.get('hermes')?.map((option) => option.id)).toEqual(['yolo'])
+    expect(catalog.get('antigravity')?.map((option) => option.id)).toEqual(['sandbox'])
+    expect(catalog.get('cursor')?.map((option) => option.id)).toEqual(['mode', 'sandbox', 'approvals'])
+    // pi is the one built-in that declares nothing, so the control has nothing to render for it.
+    expect(catalog.get('pi')).toEqual([])
   })
 
   it('projects the DESCRIBE half without leaking any argv across the catalog', () => {
@@ -656,12 +662,103 @@ describe('built-in agent providers', () => {
 
   it('fails closed when a launch-option selection names an option or choice the provider never declared', () => {
     // A provider with no options rejects any selection rather than silently dropping it.
-    expect(() => providers.get('traex').resolveLaunchArgv({ sandbox: 'read-only' }))
+    expect(() => providers.get('pi').resolveLaunchArgv({ sandbox: 'read-only' }))
       .toThrowError(/does not declare launch option 'sandbox'/)
+    // A provider that declares other options still rejects one it never offered.
+    expect(() => providers.get('cursor').resolveLaunchArgv({ 'permission-mode': 'plan' }))
+      .toThrowError(/does not declare launch option 'permission-mode'/)
     // A declared option rejects an un-offered choice.
     expect(() => providers.get('codex').resolveLaunchArgv({ sandbox: 'yolo' }))
       .toThrowError(/has no choice 'yolo'/)
     // An empty selection contributes nothing.
     expect(providers.get('codex').resolveLaunchArgv({})).toEqual([])
+  })
+
+  it('resolves cursor to its verified argv, with the prompt still positional', () => {
+    // cursor-agent `--mode <plan|ask>`, `--sandbox <enabled|disabled>`, `--force` — each verified
+    // against the installed binary's own --help.
+    const cursor = providers.get('cursor')
+    const argv = cursor.resolveLaunchArgv({ mode: 'plan', sandbox: 'enabled', approvals: 'force' })
+    expect(argv).toEqual(['--mode', 'plan', '--sandbox', 'enabled', '--force'])
+    // cursor-agent takes the prompt positionally, so the resolved flags fold in ahead of it.
+    expect(cursor.buildLaunch({
+      workspacePath: '/repo', prompt: 'ship it', args: argv, env: {}
+    }).args).toEqual(['--mode', 'plan', '--sandbox', 'enabled', '--force', 'ship it'])
+    // The permissive defaults contribute nothing, leaving the CLI's own default posture intact.
+    expect(cursor.resolveLaunchArgv({ mode: 'default', approvals: 'default' })).toEqual([])
+  })
+
+  it('resolves the batch-two launch options to their exact verified argv, folded into buildArgs', () => {    // gemini `--approval-mode <default|auto_edit|yolo|plan>` — verified against the installed binary.
+    // -y/--yolo is an alias for approval-mode yolo, so it is NOT a second option.
+    const gemini = providers.get('gemini')
+    expect(gemini.resolveLaunchArgv({ 'approval-mode': 'plan' })).toEqual(['--approval-mode', 'plan'])
+    expect(gemini.resolveLaunchArgv({ 'approval-mode': 'yolo' })).toEqual(['--approval-mode', 'yolo'])
+    // gemini front-loads --prompt-interactive; the resolved argv folds in AFTER the prompt via buildArgs.
+    expect(gemini.buildLaunch({
+      workspacePath: '/tmp/work', prompt: 'go', args: gemini.resolveLaunchArgv({ 'approval-mode': 'yolo' }), env: {}
+    })).toEqual({ command: 'gemini', args: ['--prompt-interactive', 'go', '--approval-mode', 'yolo'], env: {} })
+
+    // grok `--permission-mode <default|acceptEdits|auto|dontAsk|bypassPermissions|plan>` — verified.
+    // The launch option is the spawn-time analogue of grok's live /always-approve posture control.
+    const grok = providers.get('grok')
+    expect(grok.resolveLaunchArgv({ 'permission-mode': 'bypassPermissions' }))
+      .toEqual(['--permission-mode', 'bypassPermissions'])
+    // grok's `--` separator still guards a flag-looking prompt with the posture argv folded in.
+    expect(grok.buildLaunch({
+      workspacePath: '/tmp/work', prompt: '--version', args: grok.resolveLaunchArgv({ 'permission-mode': 'plan' }), env: {}
+    })).toEqual({ command: 'grok', args: ['--permission-mode', 'plan', '--', '--version'], env: {} })
+
+    // traex `--sandbox` and `--permission-mode` — full permission-mode enum confirmed by reading the
+    // complete --help past the truncating long descriptions: default | bypass_permissions | auto.
+    const traex = providers.get('traex')
+    expect(traex.resolveLaunchArgv({ sandbox: 'workspace-write' })).toEqual(['--sandbox', 'workspace-write'])
+    expect(traex.resolveLaunchArgv({ 'permission-mode': 'bypass_permissions' }))
+      .toEqual(['--permission-mode', 'bypass_permissions'])
+    // Two options compose in declaration order.
+    expect(traex.resolveLaunchArgv({ sandbox: 'read-only', 'permission-mode': 'auto' }))
+      .toEqual(['--sandbox', 'read-only', '--permission-mode', 'auto'])
+
+    // hermes `--yolo` is boolean: the conservative default contributes NO argv, the yolo choice the flag.
+    const hermes = providers.get('hermes')
+    expect(hermes.resolveLaunchArgv({ yolo: 'default' })).toEqual([])
+    expect(hermes.resolveLaunchArgv({ yolo: 'yolo' })).toEqual(['--yolo'])
+    // Folded into hermes' chat/query/tui argv shape.
+    expect(hermes.buildLaunch({
+      workspacePath: '/tmp/work', prompt: 'inspect', args: hermes.resolveLaunchArgv({ yolo: 'yolo' }), env: {}
+    })).toEqual({ command: 'hermes', args: ['chat', '--query', 'inspect', '--yolo', '--tui'], env: {} })
+
+    // antigravity `--sandbox` is boolean: default off contributes NO argv, sandboxed adds the flag.
+    const agy = providers.get('antigravity')
+    expect(agy.resolveLaunchArgv({ sandbox: 'default' })).toEqual([])
+    expect(agy.resolveLaunchArgv({ sandbox: 'sandboxed' })).toEqual(['--sandbox'])
+  })
+
+  it('tiers the batch-two danger choices honestly and never leaks argv through the DESCRIBE half', () => {
+    const catalog = new Map(providers.catalog().map((provider) => [provider.id, provider]))
+    const tier = (providerId: string, optionId: string, choiceId: string) =>
+      catalog.get(providerId)?.launchOptions
+        .find((option) => option.id === optionId)?.choices
+        .find((choice) => choice.id === choiceId)?.tier
+    // A mode that bypasses approval or sandboxing is 'danger'.
+    expect(tier('gemini', 'approval-mode', 'yolo')).toBe('danger')
+    expect(tier('grok', 'permission-mode', 'bypassPermissions')).toBe('danger')
+    expect(tier('traex', 'sandbox', 'danger-full-access')).toBe('danger')
+    expect(tier('traex', 'permission-mode', 'bypass_permissions')).toBe('danger')
+    expect(tier('hermes', 'yolo', 'yolo')).toBe('danger')
+    // agy: enabling the sandbox ADDS containment, so it is the safe tier; the unsandboxed default is caution.
+    expect(tier('antigravity', 'sandbox', 'sandboxed')).toBe('safe')
+    expect(tier('antigravity', 'sandbox', 'default')).toBe('caution')
+    // The conservative default is 'safe'.
+    expect(tier('gemini', 'approval-mode', 'default')).toBe('safe')
+    expect(tier('grok', 'permission-mode', 'default')).toBe('safe')
+    expect(tier('traex', 'sandbox', 'read-only')).toBe('safe')
+    // The DESCRIBE half the catalog projects never carries the launch argv.
+    for (const providerId of ['gemini', 'grok', 'traex', 'hermes', 'antigravity'] as const) {
+      for (const option of catalog.get(providerId)?.launchOptions ?? []) {
+        for (const choice of option.choices) {
+          expect('argv' in choice).toBe(false)
+        }
+      }
+    }
   })
 })

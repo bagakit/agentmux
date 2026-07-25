@@ -5,8 +5,14 @@ import { fileURLToPath } from 'node:url'
 import type { ExecutionHost } from './execution-host.js'
 import type { AgentManagedHookPlan } from './managed-hook-installer.js'
 import {
+  ANTIGRAVITY_LAUNCH_OPTIONS,
   CLAUDE_LAUNCH_OPTIONS,
   CODEX_LAUNCH_OPTIONS,
+  GEMINI_LAUNCH_OPTIONS,
+  GROK_LAUNCH_OPTIONS,
+  CURSOR_LAUNCH_OPTIONS,
+  HERMES_LAUNCH_OPTIONS,
+  TRAEX_LAUNCH_OPTIONS,
   cloneLaunchOptions,
   describeLaunchOptions,
   resolveLaunchOptionArgv,
@@ -789,7 +795,8 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
       }
     }),
     buildArgs: (prompt, args) => [...args, ...(prompt ? [prompt] : [])],
-    hook: NO_HOOKS
+    hook: NO_HOOKS,
+    launchOptions: TRAEX_LAUNCH_OPTIONS
   }),
   defineAgentProvider({
     catalog: catalog({
@@ -815,7 +822,8 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
     }),
     buildArgs: (prompt, args) =>
       prompt ? ['chat', '--query', prompt, ...args, '--tui'] : [...args, '--tui'],
-    hook: HERMES_HOOKS
+    hook: HERMES_HOOKS,
+    launchOptions: HERMES_LAUNCH_OPTIONS
   }),
   defineAgentProvider({
     catalog: catalog({
@@ -876,7 +884,8 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
     // (separator so prompts like `--version` aren't parsed as Grok CLI flags).
     buildArgs: (prompt, args) => (prompt ? [...args, '--', prompt] : [...args]),
     posture: GROK_POSTURE,
-    hook: NO_HOOKS
+    hook: NO_HOOKS,
+    launchOptions: GROK_LAUNCH_OPTIONS
   }),
   defineAgentProvider({
     catalog: catalog({
@@ -900,7 +909,8 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
     }),
     // Orca: promptInjectionMode 'flag-prompt-interactive' → `gemini --prompt-interactive <prompt>`.
     buildArgs: (prompt, args) => (prompt ? ['--prompt-interactive', prompt, ...args] : [...args]),
-    hook: NO_HOOKS
+    hook: NO_HOOKS,
+    launchOptions: GEMINI_LAUNCH_OPTIONS
   }),
   defineAgentProvider({
     catalog: catalog({
@@ -925,6 +935,7 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
     // Orca: executable `agy`, promptInjectionMode 'flag-prompt-interactive' → `agy --prompt-interactive <prompt>`.
     buildArgs: (prompt, args) => (prompt ? ['--prompt-interactive', prompt, ...args] : [...args]),
     hook: ANTIGRAVITY_HOOKS,
+    launchOptions: ANTIGRAVITY_LAUNCH_OPTIONS,
     buildResumeArgs: (sessionId, _transcriptPath, prompt, args) => [
       '--conversation', sessionId, ...args, ...(prompt ? ['--prompt-interactive', prompt] : [])
     ]
@@ -949,6 +960,7 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
         replyCorrelation: 'none'
       }
     }),
+    launchOptions: CURSOR_LAUNCH_OPTIONS,
     // Orca: executable `cursor-agent`, promptInjectionMode 'argv' (no separator) → `cursor-agent <prompt>`.
     // Orca's `preflightTrust: 'cursor'` pre-seeds a trust marker; AgentMux has no such mechanism,
     // so the first launch may show Cursor's trust prompt.
