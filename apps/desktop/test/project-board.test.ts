@@ -49,7 +49,8 @@ function session(overrides: Partial<SessionSnapshot> & Pick<SessionSnapshot, 'id
   return {
     id: overrides.id,
     kind: 'agent',
-    agentId: 'codex',
+    providerId: 'codex',
+    executorId: 'codex',
     hostId: 'local',
     workspacePath: '/repo',
     label: overrides.id,

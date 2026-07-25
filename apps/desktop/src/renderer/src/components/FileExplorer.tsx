@@ -13,6 +13,8 @@ import {
   X
 } from 'lucide-react'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { isScratchWorkspaceId } from '../../../shared/contracts'
+import { scratchTopicIdFromDirectoryName } from '../../../shared/scratch-topics'
 import { api } from '../lib/api'
 import { getFileTypeIcon } from '../lib/file-type-icons'
 import { documentKey } from '../lib/workbench-tabs'
@@ -47,6 +49,12 @@ type InlineEdit =
   | { kind: 'create-file' | 'create-directory'; parentPath: string }
   | { kind: 'rename'; node: TreeNode }
 
+export type FileExplorerRevealRequest = {
+  workspaceId: string
+  path: string
+  requestId: number
+}
+
 function parentPath(path: string): string {
   const index = path.lastIndexOf('/')
   return index < 0 ? '' : path.slice(0, index)
@@ -59,6 +67,13 @@ function joinPath(parent: string, name: string): string {
 function validName(value: string): boolean {
   const name = value.trim()
   return Boolean(name && name !== '.' && name !== '..' && !name.includes('/') && !name.includes('\\'))
+}
+
+export function canRenameFileExplorerNode(workspaceId: string, node: TreeNode): boolean {
+  return !(isScratchWorkspaceId(workspaceId) &&
+    node.isDirectory &&
+    !node.path.includes('/') &&
+    scratchTopicIdFromDirectoryName(node.path) !== null)
 }
 
 function FileTreeRow({
@@ -84,6 +99,7 @@ function FileTreeRow({
   onReveal,
   onViewFile,
   canOpenTerminal,
+  canRename,
   isLocal,
   selectionSize
 }: {
@@ -109,12 +125,14 @@ function FileTreeRow({
   onReveal: () => void
   onViewFile: () => void
   canOpenTerminal: boolean
+  canRename: boolean
   isLocal: boolean
   selectionSize: number
 }) {
   const FileIcon = getFileTypeIcon(node.path)
   return (
     <FileTreeContextMenu
+      canRename={canRename}
       canOpenTerminal={canOpenTerminal}
       isDirectory={node.isDirectory}
       isExpanded={expanded}
@@ -187,7 +205,7 @@ function FileTreeRow({
         {node.isSymlink ? <span className="tree-row__badge">link</span> : null}
         {!editing ? (
           <span className="tree-row__actions">
-            <button type="button" title={`Rename ${node.name}`} onClick={(event) => { event.stopPropagation(); onRename() }}><Pencil size={11} /></button>
+            {canRename ? <button type="button" title={`Rename ${node.name}`} onClick={(event) => { event.stopPropagation(); onRename() }}><Pencil size={11} /></button> : null}
             <button type="button" title={`Delete ${node.name}`} onClick={(event) => { event.stopPropagation(); onDelete() }}><Trash2 size={11} /></button>
           </span>
         ) : null}
@@ -196,7 +214,11 @@ function FileTreeRow({
   )
 }
 
-export function FileExplorer() {
+export function FileExplorer({
+  revealRequest
+}: {
+  revealRequest?: FileExplorerRevealRequest | undefined
+}) {
   const workspaceId = useAppStore((state) => state.activeWorkspaceId)
   const workspace = useAppStore((state) =>
     state.config?.workspaces.find((item) => item.id === state.activeWorkspaceId)
@@ -214,6 +236,9 @@ export function FileExplorer() {
     state.activeWorkspaceId ? state.layouts[state.activeWorkspaceId]?.activeGroupId : undefined
   ))
   const dirtyDocuments = useAppStore((state) => state.dirtyDocuments)
+  const workspaceFileRevision = useAppStore((state) => (
+    workspaceId ? (state.workspaceFileRevisions[workspaceId] ?? 0) : 0
+  ))
   const [query, setQuery] = useState('')
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [selection, setSelection] = useState(createEmptyFileExplorerSelection)
@@ -221,8 +246,16 @@ export function FileExplorer() {
   const [editValue, setEditValue] = useState('')
   const [deleteRequest, setDeleteRequest] = useState<TreeNode | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [scrollTarget, setScrollTarget] = useState<{
+    path: string
+    requestId: number
+    focus: boolean
+  } | null>(null)
   const treeRootRef = useRef<HTMLDivElement>(null)
   const lastRevealedPathRef = useRef<string | null>(null)
+  const lastRevealRequestIdRef = useRef<number | null>(null)
+  const autoRevealRequestIdRef = useRef(0)
+  const observedFileRevisionRef = useRef(workspaceFileRevision)
   const tree = useWorkspaceFileTree(workspaceId ?? 'missing-workspace', expanded)
   const isMac = useMemo(() => navigator.userAgent.includes('Mac'), [])
   const selectedPath = selection.activePath
@@ -231,8 +264,16 @@ export function FileExplorer() {
     setExpanded(new Set())
     setSelection(createEmptyFileExplorerSelection())
     lastRevealedPathRef.current = null
+    lastRevealRequestIdRef.current = null
+    setScrollTarget(null)
     setInlineEdit(null)
   }, [workspaceId])
+
+  useEffect(() => {
+    if (observedFileRevisionRef.current === workspaceFileRevision) return
+    observedFileRevisionRef.current = workspaceFileRevision
+    void tree.refreshTree()
+  }, [tree.refreshTree, workspaceFileRevision])
 
   // Orca auto-reveal adapted to AgentMux's relative Workspace paths and DOM
   // rows: expand every ancestor, retain one selection owner, then scroll once
@@ -246,14 +287,43 @@ export function FileExplorer() {
       return next
     })
     setSelection(createSingleFileExplorerSelection(activePath))
+    autoRevealRequestIdRef.current += 1
+    setScrollTarget({
+      path: activePath,
+      requestId: autoRevealRequestIdRef.current,
+      focus: false
+    })
   }, [activePath, workspaceId])
 
   useEffect(() => {
-    if (!activePath) return
+    if (
+      !revealRequest ||
+      revealRequest.workspaceId !== workspaceId ||
+      revealRequest.requestId === lastRevealRequestIdRef.current
+    ) return
+    lastRevealRequestIdRef.current = revealRequest.requestId
+    setQuery('')
+    setExpanded((current) => {
+      const next = new Set(current)
+      for (const path of getRevealAncestorPaths(revealRequest.path)) next.add(path)
+      next.add(revealRequest.path)
+      return next
+    })
+    setSelection(createSingleFileExplorerSelection(revealRequest.path))
+    setScrollTarget({
+      path: revealRequest.path,
+      requestId: revealRequest.requestId,
+      focus: true
+    })
+  }, [revealRequest, workspaceId])
+
+  useEffect(() => {
+    if (!scrollTarget) return
     const row = [...(treeRootRef.current?.querySelectorAll<HTMLElement>('[data-tree-path]') ?? [])]
-      .find((candidate) => candidate.dataset.treePath === activePath)
+      .find((candidate) => candidate.dataset.treePath === scrollTarget.path)
+    if (scrollTarget.focus) row?.focus()
     row?.scrollIntoView({ block: 'nearest' })
-  }, [activePath, tree.dirCache])
+  }, [scrollTarget, tree.dirCache])
 
   // Continuous filesystem watch would need a cross-host owner. Until the mux
   // decision, refresh on application focus through the same Local/SSH IPC
@@ -332,6 +402,7 @@ export function FileExplorer() {
   }
 
   function beginRename(node: TreeNode): void {
+    if (!workspaceId || !canRenameFileExplorerNode(workspaceId, node)) return
     setSelection(createSingleFileExplorerSelection(node.path))
     setInlineEdit({ kind: 'rename', node })
     setEditValue(node.name)
@@ -453,7 +524,7 @@ export function FileExplorer() {
       actionNode.isDirectory ? toggle(actionNode) : void openFile(actionNode.path)
     } else if (event.key === 'F2' && actionNode) {
       event.preventDefault()
-      beginRename(actionNode)
+      if (workspaceId && canRenameFileExplorerNode(workspaceId, actionNode)) beginRename(actionNode)
     } else if ((event.key === 'Delete' || event.key === 'Backspace') && actionNode) {
       event.preventDefault()
       setDeleteRequest(actionNode)
@@ -561,6 +632,7 @@ export function FileExplorer() {
             onRename={() => beginRename(node)}
             onDelete={() => setDeleteRequest(node)}
             canOpenTerminal={workspace?.hostId === 'local'}
+            canRename={canRenameFileExplorerNode(workspaceId, node)}
             isLocal={workspace?.hostId === 'local'}
             selectionSize={pathsForContext(node).length}
             />

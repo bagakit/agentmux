@@ -27,3 +27,7 @@
 7. 架构决策往长了做。不接受"先这样以后再换"的临时方案。
 8. 先看成熟产品怎么解决同一个问题，用已验证的模式，别从零发明。
 9. 和用户讨论过的内容，要及时更新到需求文档，并尽量用贴近用户原始说法的表述方式。
+10. `ctxmux` 是可独立发布和使用的通用 Run Runtime，AgentMux 是它的高级 Client。PTY、进程、
+    Run lifecycle、ordered bytes、Replay、Gap、Attachment 与权威 Runtime 事实由 ctxmux 持有；
+    Provider、AgentSession、Hook、Permission、Prompt readiness、Agent status 与 semantic resume
+    由 AgentMux 持有。不得在任一侧保留第二份实现或把 Level B 暗中降为 Level A。

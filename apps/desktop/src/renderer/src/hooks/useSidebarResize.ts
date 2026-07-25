@@ -24,9 +24,12 @@ export function clampSidebarResizeWidth(width: number, minWidth: number, maxWidt
 export function getRenderedSidebarWidthCssValue(
   isOpen: boolean,
   width: number,
-  renderedExtraWidth: number
+  renderedExtraWidth: number,
+  minWidth = 0,
+  maxWidth = Number.POSITIVE_INFINITY
 ): string {
-  return isOpen ? `${width + renderedExtraWidth}px` : '0px'
+  const renderedWidth = clampSidebarResizeWidth(width, minWidth, maxWidth)
+  return isOpen ? `${renderedWidth + renderedExtraWidth}px` : '0px'
 }
 
 export function getNextSidebarResizeWidth({
@@ -48,6 +51,34 @@ export function getNextSidebarResizeWidth({
   return clampSidebarResizeWidth(startWidth + delta, minWidth, maxWidth)
 }
 
+export function getNextSidebarResizeDraftWidth({
+  clientX,
+  startX,
+  storedStartWidth,
+  renderedStartWidth,
+  deltaSign,
+  minWidth,
+  maxWidth
+}: {
+  clientX: number
+  startX: number
+  storedStartWidth: number
+  renderedStartWidth: number
+  deltaSign: 1 | -1
+  minWidth: number
+  maxWidth: number
+}): number {
+  if (clientX === startX) return storedStartWidth
+  return getNextSidebarResizeWidth({
+    clientX,
+    startX,
+    startWidth: renderedStartWidth,
+    deltaSign,
+    minWidth,
+    maxWidth
+  })
+}
+
 // Adapted from Orca's useSidebarResize at 34f2a62. Live drag width stays out of
 // React state so unrelated renders cannot pull the handle back under the pointer.
 export function useSidebarResize<T extends HTMLElement>({
@@ -64,6 +95,7 @@ export function useSidebarResize<T extends HTMLElement>({
   const isResizingRef = useRef(false)
   const startXRef = useRef(0)
   const startWidthRef = useRef(width)
+  const storedStartWidthRef = useRef(width)
   const draftWidthRef = useRef(width)
   const frameRef = useRef<number | null>(null)
   const overlayRef = useRef<HTMLDivElement | null>(null)
@@ -87,10 +119,12 @@ export function useSidebarResize<T extends HTMLElement>({
       containerRef.current.style.width = getRenderedSidebarWidthCssValue(
         isOpen,
         nextWidth,
-        renderedExtraWidth
+        renderedExtraWidth,
+        minWidth,
+        maxWidth
       )
     },
-    [isOpen, renderedExtraWidth]
+    [isOpen, maxWidth, minWidth, renderedExtraWidth]
   )
 
   useLayoutEffect(() => {
@@ -116,10 +150,11 @@ export function useSidebarResize<T extends HTMLElement>({
   const handleMouseMove = useCallback(
     (event: MouseEvent) => {
       if (!isResizingRef.current) return
-      const nextWidth = getNextSidebarResizeWidth({
+      const nextWidth = getNextSidebarResizeDraftWidth({
         clientX: event.clientX,
         startX: startXRef.current,
-        startWidth: startWidthRef.current,
+        storedStartWidth: storedStartWidthRef.current,
+        renderedStartWidth: startWidthRef.current,
         deltaSign,
         minWidth,
         maxWidth
@@ -157,7 +192,8 @@ export function useSidebarResize<T extends HTMLElement>({
       isResizingRef.current = true
       setIsResizing(true)
       startXRef.current = event.clientX
-      startWidthRef.current = width
+      startWidthRef.current = clampSidebarResizeWidth(width, minWidth, maxWidth)
+      storedStartWidthRef.current = width
       draftWidthRef.current = width
       onDraftWidthChange?.(width)
       document.body.style.cursor = 'col-resize'
@@ -173,7 +209,7 @@ export function useSidebarResize<T extends HTMLElement>({
         overlayRef.current = overlay
       }
     },
-    [onDraftWidthChange, width]
+    [maxWidth, minWidth, onDraftWidthChange, width]
   )
 
   return { containerRef, isResizing, onResizeStart }

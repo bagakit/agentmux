@@ -4,11 +4,16 @@ vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
 })
 
-import type { AppConfig, SessionSnapshot, WorkspaceRecord } from '../src/shared/contracts.js'
+import type { AgentLaunchResult, AppConfig, SessionSnapshot, WorkspaceRecord } from '../src/shared/contracts.js'
 import { api } from '../src/renderer/src/lib/api.js'
 import { createWorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.js'
-import type { FileWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
+import {
+  createWorkbenchTab,
+  initialWorkbenchRegionId,
+  titleWorkbenchSurface
+} from '../src/renderer/src/lib/workbench-tabs.js'
 import { useAppStore } from '../src/renderer/src/store.js'
+import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics.js'
 
 const initialState = useAppStore.getState()
 
@@ -18,6 +23,27 @@ afterEach(() => {
 })
 
 describe('selected worktree workspace context', () => {
+  it('collapses the project rail without changing Workspace or surface-tool owners', () => {
+    const tabs = useAppStore.getState().tabs
+    const layouts = useAppStore.getState().layouts
+    const sessions = useAppStore.getState().sessions
+    useAppStore.setState({ projectRailOpen: true, toolsOpen: true, toolDockWidth: 236 })
+
+    useAppStore.getState().toggleProjectRail()
+
+    expect(useAppStore.getState()).toMatchObject({
+      projectRailOpen: false,
+      toolsOpen: true,
+      toolDockWidth: 236
+    })
+    expect(useAppStore.getState().tabs).toBe(tabs)
+    expect(useAppStore.getState().layouts).toBe(layouts)
+    expect(useAppStore.getState().sessions).toBe(sessions)
+
+    useAppStore.getState().toggleProjectRail()
+    expect(useAppStore.getState()).toMatchObject({ projectRailOpen: true, toolDockWidth: 236 })
+  })
+
   it('keeps existing tabs bound while new tabs use the selected worktree', () => {
     const main: WorkspaceRecord = {
       id: 'main-workspace',
@@ -35,17 +61,18 @@ describe('selected worktree workspace context', () => {
       repoPath: '/repo',
       branch: 'feature/worktree-context'
     }
-    const oldTab: FileWorkbenchTab = {
-      id: 'file:main-workspace:README.md',
+    const oldTabId = 'file:main-workspace:README.md'
+    const oldTab = createWorkbenchTab(oldTabId, {
+      regionId: initialWorkbenchRegionId(oldTabId),
       kind: 'file',
       workspaceId: main.id,
       path: 'README.md'
-    }
+    })
     const oldLayout = createWorkspaceLayout('main-pane', [oldTab.id])
     const initialConfig: AppConfig = {
-      version: 4,
+      version: 6,
       hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
-      agents: {},
+      executors: {},
       workspaces: [main],
       appearance: { terminalTheme: 'graphite' }
     }
@@ -82,7 +109,7 @@ describe('selected worktree workspace context', () => {
 
     const withLauncher = useAppStore.getState()
     const launcher = Object.values(withLauncher.tabs).find(
-      (tab) => tab.kind === 'launcher' && tab.workspaceId === feature.id
+      (tab) => titleWorkbenchSurface(tab).kind === 'launcher' && tab.workspaceId === feature.id
     )
     expect(launcher).toBeDefined()
     expect(withLauncher.layouts[feature.id]?.groups[0]?.activeTabId).toBe(launcher?.id)
@@ -99,13 +126,13 @@ describe('selected worktree workspace context', () => {
     })
 
     const store = useAppStore.getState()
-    store.setWorkspaceTool('terminal-shortcuts')
+    store.setWorkspaceTool('agents')
     store.setToolDockWidth(378)
     store.setMainSurface('board')
 
     expect(useAppStore.getState()).toMatchObject({
       toolsOpen: true,
-      workspaceTool: 'terminal-shortcuts',
+      workspaceTool: 'agents',
       toolDockWidth: 378,
       mainSurface: 'board'
     })
@@ -113,13 +140,70 @@ describe('selected worktree workspace context', () => {
     useAppStore.getState().setMainSurface('workbench')
     expect(useAppStore.getState()).toMatchObject({
       toolsOpen: true,
-      workspaceTool: 'terminal-shortcuts',
+      workspaceTool: 'agents',
       toolDockWidth: 378,
       mainSurface: 'workbench'
     })
 
     useAppStore.getState().toggleTools()
     expect(useAppStore.getState().toolsOpen).toBe(false)
+  })
+
+  it('reopens an existing background Agent after its Tab View closes', async () => {
+    const workspace: WorkspaceRecord = {
+      id: 'workspace', name: 'repo', hostId: 'local', path: '/repo', kind: 'folder'
+    }
+    const session: SessionSnapshot = {
+      id: 'agent-session',
+      kind: 'agent',
+      providerId: 'codex',
+      executorId: 'codex',
+      hostId: 'local',
+      workspacePath: workspace.path,
+      label: 'Background review',
+      createdAt: 1,
+      updatedAt: 2,
+      processState: 'running',
+      status: { state: 'working', source: 'native-hook', observedAt: 2 },
+      latestOutputBytes: 0,
+      control: {
+        kind: 'agent',
+        hostId: 'local',
+        agentSessionId: 'agent-session',
+        run: { runId: 'agent-run' }
+      }
+    }
+    useAppStore.setState({
+      config: {
+        version: 6,
+        hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
+        executors: { codex: { label: 'Codex', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: true } },
+        workspaces: [workspace],
+        appearance: { terminalTheme: 'graphite' }
+      },
+      sessions: [session],
+      activeWorkspaceId: workspace.id,
+      tabs: {},
+      layouts: { [workspace.id]: createWorkspaceLayout('pane') }
+    })
+
+    useAppStore.getState().selectSession(session.id, 'pane')
+    const firstTab = Object.values(useAppStore.getState().tabs).find(
+      (tab) => titleWorkbenchSurface(tab).kind === 'agent'
+    )!
+    expect(titleWorkbenchSurface(firstTab)).toMatchObject({ sessionId: session.id })
+
+    await useAppStore.getState().closeTab(workspace.id, 'pane', firstTab.id, {
+      keepAgentSessions: true
+    })
+    expect(useAppStore.getState().sessions).toEqual([session])
+    expect(useAppStore.getState().tabs[firstTab.id]).toBeUndefined()
+
+    useAppStore.getState().selectSession(session.id, 'pane')
+    expect(titleWorkbenchSurface(useAppStore.getState().tabs[firstTab.id]!)).toMatchObject({
+      kind: 'agent',
+      sessionId: session.id
+    })
   })
 })
 
@@ -132,16 +216,16 @@ function prepareUniversalTab(): { workspace: WorkspaceRecord; tabId: string } {
     kind: 'folder'
   }
   const config: AppConfig = {
-    version: 4,
+    version: 6,
     hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
-    agents: { codex: { command: 'codex', args: [], env: {} } },
+    executors: { codex: { label: 'Codex', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: true } },
     workspaces: [workspace],
     appearance: { terminalTheme: 'graphite' }
   }
   useAppStore.setState({
     config,
     sessions: [],
-    activities: {},
+    timelines: {},
     activeWorkspaceId: workspace.id,
     tabs: {},
     layouts: { [workspace.id]: createWorkspaceLayout('pane') },
@@ -149,52 +233,57 @@ function prepareUniversalTab(): { workspace: WorkspaceRecord; tabId: string } {
   })
   useAppStore.getState().openLauncher('pane')
   const tabId = useAppStore.getState().layouts[workspace.id]!.groups[0]!.activeTabId!
-  expect(useAppStore.getState().tabs[tabId]?.kind).toBe('launcher')
+  expect(titleWorkbenchSurface(useAppStore.getState().tabs[tabId]!).kind).toBe('launcher')
   return { workspace, tabId }
 }
 
 describe('universal new tab transitions', () => {
-  it('opens Agent Launch as a launcher view in the focused pane', () => {
+  it('opens a launcher surface in the focused pane', () => {
     const { workspace } = prepareUniversalTab()
-    useAppStore.getState().openLauncher('pane', 'agent')
 
     const state = useAppStore.getState()
     const tabId = state.layouts[workspace.id]!.groups[0]!.activeTabId!
-    expect(state.tabs[tabId]).toMatchObject({
-      kind: 'launcher',
-      workspaceId: workspace.id,
-      view: 'agent'
+    expect(titleWorkbenchSurface(state.tabs[tabId]!)).toMatchObject({
+      kind: 'launcher', workspaceId: workspace.id
     })
   })
 
   it('replaces the same tab with a raw terminal session', async () => {
     const { workspace, tabId } = prepareUniversalTab()
 
-    await useAppStore.getState().launchTerminal('pane', tabId)
+    const launcher = useAppStore.getState().tabs[tabId]!
+    await useAppStore.getState().launchTerminal('pane', {
+      tabId,
+      regionId: launcher.layout.activeRegionId
+    })
 
     const state = useAppStore.getState()
     expect(state.layouts[workspace.id]?.groups[0]?.activeTabId).toBe(tabId)
-    expect(state.tabs[tabId]).toMatchObject({ id: tabId, kind: 'terminal', workspaceId: workspace.id })
-    const terminalTab = state.tabs[tabId]
-    const session = terminalTab?.kind === 'terminal'
-      ? state.sessions.find((item) => item.id === terminalTab.sessionId)
+    const terminalSurface = titleWorkbenchSurface(state.tabs[tabId]!)
+    expect(terminalSurface).toMatchObject({ kind: 'terminal', workspaceId: workspace.id })
+    const session = terminalSurface.kind === 'terminal'
+      ? state.sessions.find((item) => item.id === terminalSurface.sessionId)
       : null
-    expect(session).toMatchObject({ kind: 'terminal', agentId: null, workspacePath: workspace.path })
+    expect(session).toMatchObject({ kind: 'terminal', providerId: null, workspacePath: workspace.path })
   })
 
   it('replaces the same tab with an agent session', async () => {
     const { workspace, tabId } = prepareUniversalTab()
 
-    await useAppStore.getState().launchAgent('codex', 'ship it', 'pane', tabId)
+    const launcher = useAppStore.getState().tabs[tabId]!
+    await useAppStore.getState().launchAgent('codex', 'ship it', 'pane', {
+      tabId,
+      regionId: launcher.layout.activeRegionId
+    })
 
     const state = useAppStore.getState()
     expect(state.layouts[workspace.id]?.groups[0]?.activeTabId).toBe(tabId)
-    expect(state.tabs[tabId]).toMatchObject({ id: tabId, kind: 'agent', workspaceId: workspace.id })
-    const agentTab = state.tabs[tabId]
-    const session = agentTab?.kind === 'agent'
-      ? state.sessions.find((item) => item.id === agentTab.sessionId)
+    const agentSurface = titleWorkbenchSurface(state.tabs[tabId]!)
+    expect(agentSurface).toMatchObject({ kind: 'agent', workspaceId: workspace.id })
+    const session = agentSurface.kind === 'agent'
+      ? state.sessions.find((item) => item.id === agentSurface.sessionId)
       : null
-    expect(session).toMatchObject({ kind: 'agent', agentId: 'codex', workspacePath: workspace.path })
+    expect(session).toMatchObject({ kind: 'agent', providerId: 'codex', workspacePath: workspace.path })
   })
 
   it('starts a Board discussion in the selected Branch workspace and keeps Board visible', async () => {
@@ -212,13 +301,23 @@ describe('universal new tab transitions', () => {
       config: { ...state.config!, workspaces: [mainWorkspace, featureWorkspace] },
       mainSurface: 'board'
     }))
-    let launched: SessionSnapshot | null = null
+    let launched: Extract<SessionSnapshot, { kind: 'agent' }> | null = null
     const launch = vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async (input) => {
       const sessionId = input.agentSessionId!
       launched = {
         id: sessionId,
         kind: 'agent',
-        agentId: 'codex',
+        providerId: 'codex',
+        executorId: 'codex',
+        capabilities: {
+          terminal: true,
+          hookEvents: true,
+          timeline: 'streaming',
+          permission: 'observe',
+          providerResume: true,
+          acp: false,
+          replyCorrelation: 'none'
+        },
         hostId: 'local',
         workspacePath: featureWorkspace.path,
         label: 'Codex · feature/board',
@@ -234,21 +333,24 @@ describe('universal new tab transitions', () => {
           run: { runId: sessionId }
         }
       }
-      return launched
+      return {
+        session: launched,
+        timeline: { agentSessionId: sessionId, revision: 0, items: [] }
+      } satisfies AgentLaunchResult
     })
 
     await useAppStore.getState().launchBoardAgent(featureWorkspace.id, 'codex', 'Review the board')
 
     const state = useAppStore.getState()
     expect(launch).toHaveBeenCalledWith(expect.objectContaining({
-      agentId: 'codex',
+      executorId: 'codex',
       prompt: 'Review the board',
       workspacePath: featureWorkspace.path
     }))
     expect(state.activeWorkspaceId).toBe(featureWorkspace.id)
     expect(state.mainSurface).toBe('board')
     expect(state.sessions).toContainEqual(launched)
-    expect(Object.values(state.tabs)).toContainEqual(expect.objectContaining({
+    expect(Object.values(state.tabs).map(titleWorkbenchSurface)).toContainEqual(expect.objectContaining({
       kind: 'agent',
       phase: 'attached',
       workspaceId: featureWorkspace.id,
@@ -268,9 +370,8 @@ describe('universal new tab transitions', () => {
     const state = useAppStore.getState()
     expect(state.mainSurface).toBe('board')
     expect(state.sessions).toEqual([])
-    expect(Object.values(state.tabs)).toContainEqual(expect.objectContaining({
+    expect(Object.values(state.tabs).map(titleWorkbenchSurface)).toContainEqual(expect.objectContaining({
       kind: 'launcher',
-      view: 'agent',
       workspaceId: workspace.id
     }))
   })
@@ -278,15 +379,163 @@ describe('universal new tab transitions', () => {
   it('replaces and closes the same tab with a Main-owned browser resource', async () => {
     const { workspace, tabId } = prepareUniversalTab()
 
-    await useAppStore.getState().createBrowser('pane', tabId)
+    const launcher = useAppStore.getState().tabs[tabId]!
+    const regionId = launcher.layout.activeRegionId
+    await useAppStore.getState().createBrowser('pane', { tabId, regionId })
 
     const opened = useAppStore.getState()
     expect(opened.layouts[workspace.id]?.groups[0]?.activeTabId).toBe(tabId)
-    expect(opened.tabs[tabId]).toMatchObject({ id: tabId, browserId: tabId, kind: 'browser', url: 'about:blank' })
+    expect(titleWorkbenchSurface(opened.tabs[tabId]!)).toMatchObject({
+      browserId: regionId,
+      kind: 'browser',
+      url: 'about:blank'
+    })
 
     await opened.closeTab(workspace.id, 'pane', tabId)
 
     expect(useAppStore.getState().tabs[tabId]).toBeUndefined()
     expect(useAppStore.getState().layouts[workspace.id]?.groups[0]?.tabOrder).toEqual([])
+  })
+})
+
+describe('Scratch Topic workbench binding', () => {
+  function prepareScratch() {
+    const workspace: WorkspaceRecord = {
+      id: SCRATCH_WORKSPACE_ID,
+      name: 'Scratch',
+      hostId: 'local',
+      path: '/scratch',
+      kind: 'folder'
+    }
+    useAppStore.setState({
+      config: {
+        version: 6,
+        hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
+        executors: {
+          codex: { label: 'Codex', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: true }
+        },
+        workspaces: [workspace],
+        appearance: { terminalTheme: 'graphite' }
+      },
+      sessions: [],
+      timelines: {},
+      activeWorkspaceId: workspace.id,
+      tabs: {},
+      layouts: { [workspace.id]: createWorkspaceLayout('scratch-pane') },
+      workspaceFileRevisions: {},
+      error: null
+    })
+    return workspace
+  }
+
+  it('creates a real Topic and a durable owner View from the empty panel action', async () => {
+    const workspace = prepareScratch()
+    const ensure = vi.spyOn(api.scratch, 'ensureTopic')
+
+    const topic = await useAppStore.getState().createScratchTopic()
+
+    const state = useAppStore.getState()
+    const activeTabId = state.layouts[workspace.id]!.groups[0]!.activeTabId!
+    expect(topic.id).toBe(activeTabId)
+    expect(state.tabs[activeTabId]?.topicId).toBe(activeTabId)
+    expect(ensure).toHaveBeenCalledWith(workspace.id, activeTabId)
+    expect(state.workspaceFileRevisions[workspace.id]).toBe(1)
+
+    const nextTopic = await useAppStore.getState().createScratchTopic()
+    const nextState = useAppStore.getState()
+    expect(nextTopic.id).not.toBe(topic.id)
+    expect(nextState.layouts[workspace.id]!.groups[0]!.tabOrder).toHaveLength(2)
+    expect(nextState.tabs[nextTopic.id]?.topicId).toBe(nextTopic.id)
+  })
+
+  it('opens a filesystem Topic by focusing its bound View or recreating a Launcher View', async () => {
+    const workspace = prepareScratch()
+    const firstTopic = await useAppStore.getState().createScratchTopic()
+    const secondTopic = await useAppStore.getState().createScratchTopic()
+
+    await useAppStore.getState().openScratchTopic(firstTopic.id)
+
+    let state = useAppStore.getState()
+    let activeTabId = state.layouts[workspace.id]!.groups[0]!.activeTabId!
+    expect(activeTabId).toBe(firstTopic.id)
+    expect(state.tabs[activeTabId]?.topicId).toBe(firstTopic.id)
+
+    const terminalTab = createWorkbenchTab('session:plain-terminal', {
+      regionId: initialWorkbenchRegionId('session:plain-terminal'),
+      kind: 'terminal',
+      phase: 'attached',
+      workspaceId: workspace.id,
+      sessionId: 'plain-terminal'
+    })
+    useAppStore.setState({
+      tabs: { [terminalTab.id]: terminalTab },
+      layouts: { [workspace.id]: createWorkspaceLayout('scratch-pane', [terminalTab.id]) }
+    })
+    await useAppStore.getState().openScratchTopic(secondTopic.id)
+
+    state = useAppStore.getState()
+    activeTabId = state.layouts[workspace.id]!.groups[0]!.activeTabId!
+    expect(activeTabId).not.toBe(secondTopic.id)
+    expect(state.tabs[activeTabId]?.topicId).toBe(secondTopic.id)
+    expect(titleWorkbenchSurface(state.tabs[activeTabId]!).kind).toBe('launcher')
+    expect(state.tabs[terminalTab.id]?.topicId).toBeUndefined()
+    expect(state.layouts[workspace.id]!.groups[0]!.tabOrder).toContain(terminalTab.id)
+  })
+
+  it('renames a Topic title without changing its View binding and invalidates the filesystem snapshot', async () => {
+    const workspace = prepareScratch()
+    const topic = await useAppStore.getState().createScratchTopic()
+    const activeTabId = useAppStore.getState().layouts[workspace.id]!.groups[0]!.activeTabId!
+    const renameTitle = vi.spyOn(api.scratch, 'renameTitle')
+
+    const renamed = await useAppStore.getState().renameScratchTopic(topic.id, 'Shared outcome')
+
+    const state = useAppStore.getState()
+    expect(renameTitle).toHaveBeenCalledWith(workspace.id, topic.id, 'Shared outcome')
+    expect(renamed).toMatchObject({ id: topic.id, directoryPath: topic.directoryPath, title: 'Shared outcome' })
+    expect(state.tabs[activeTabId]?.topicId).toBe(topic.id)
+    expect(state.workspaceFileRevisions[workspace.id]).toBe(2)
+  })
+
+  it('invalidates Topic snapshots when the built-in editor saves a direct topic.md', async () => {
+    const workspace = prepareScratch()
+    const topic = await useAppStore.getState().createScratchTopic()
+    await useAppStore.getState().openFile(topic.topicPath, 'scratch-pane')
+    const tabId = `file:${workspace.id}:${topic.topicPath}`
+    const write = vi.spyOn(api.files, 'write')
+    useAppStore.getState().updateDocument(tabId, '# Edited in the file editor\n\nKeep the body.\n')
+
+    await useAppStore.getState().saveDocument(tabId)
+
+    expect(write).toHaveBeenCalledWith(workspace.id, expect.objectContaining({
+      path: topic.topicPath,
+      content: '# Edited in the file editor\n\nKeep the body.\n'
+    }))
+    expect(useAppStore.getState().workspaceFileRevisions[workspace.id]).toBe(2)
+    await expect(api.scratch.readTopic(workspace.id, topic.id)).resolves.toMatchObject({
+      id: topic.id,
+      title: 'Edited in the file editor'
+    })
+  })
+
+  it('binds a launched Agent to its View Topic without changing ordinary launch inputs', async () => {
+    const workspace = prepareScratch()
+    useAppStore.getState().openLauncher('scratch-pane')
+    const state = useAppStore.getState()
+    const tabId = state.layouts[workspace.id]!.groups[0]!.activeTabId!
+    const launcher = state.tabs[tabId]!
+    const launch = vi.spyOn(api.sessions, 'launchAgent')
+
+    await useAppStore.getState().launchAgent('codex', 'work together', 'scratch-pane', {
+      tabId,
+      regionId: launcher.layout.activeRegionId
+    })
+
+    expect(launch).toHaveBeenCalledWith(expect.objectContaining({
+      workspacePath: workspace.path,
+      scratchTopicId: tabId
+    }))
+    expect(useAppStore.getState().tabs[tabId]?.topicId).toBe(tabId)
+    expect(useAppStore.getState().workspaceFileRevisions[workspace.id]).toBe(1)
   })
 })

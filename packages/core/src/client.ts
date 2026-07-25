@@ -12,6 +12,7 @@ import {
   AgentProviderRegistry,
   type AgentProvider
 } from './agent-provider.js'
+import { composeAgentLaunchPrompt } from './agent-launch-prompt.js'
 import { AgentMuxClientEventPublisher } from './client-event-publisher.js'
 import { AgentTerminalScreen } from './agent-terminal-screen.js'
 import {
@@ -30,11 +31,13 @@ import {
   type AgentMuxAgentSessionLookup
 } from './agent-session-registry.js'
 import { AgentHookServer, type AgentHookBinding } from './hook-server.js'
-import { projectAgentMuxViews, type AgentMuxWorkspaceView } from './runtime.js'
+import { projectAgentMuxRuntimeSubjects, type AgentMuxRuntimeProjection } from './runtime.js'
+import { agentTimelineMutationFromAcpEvent } from './session-timeline.js'
 import type {
   AgentCapabilitySnapshot,
   AgentCatalogEntry,
-  AgentId,
+  AgentExecutorId,
+  AgentProviderId,
   AgentPromptInputPlan,
   AgentMuxAgentSession,
   AgentMuxClientEvent,
@@ -50,6 +53,9 @@ import type {
   AgentMuxRuntimeDiagnostics,
   AgentMuxRuntimeIdentity,
   AgentNativeSessionHandle,
+  AgentTimelineItem,
+  AgentTimelineMutation,
+  AgentTimelineSnapshot,
   AgentTerminalHandshake,
   AgentTerminalPromptRenderMatcher,
   NativeHookEnvelope
@@ -63,8 +69,10 @@ const AGENTMUX_CLI_PATH = fileURLToPath(new URL('../bin/agentmux', import.meta.u
 export type AgentMuxAgentCreateInput = {
   agentSessionId?: string
   createOperationId?: string
-  agentId: AgentId
+  providerId: AgentProviderId
+  executorId: AgentExecutorId
   workspacePath: string
+  injectAgentMuxGuide: boolean
   prompt?: string
   args?: readonly string[]
   env?: Readonly<Record<string, string>>
@@ -102,7 +110,7 @@ export type AgentMuxAgentPromptInput = {
 
 export type AgentMuxAgentRespawnInput = Omit<
   AgentMuxAgentCreateInput,
-  'agentId' | 'workspacePath' | 'agentSessionId'
+  'providerId' | 'executorId' | 'workspacePath' | 'agentSessionId'
 > & {
   previousAgentSessionId: string
   agentSessionId?: string
@@ -160,14 +168,14 @@ function agentLifecycleOperationIdentity(
 }
 
 function terminalHandshakeOperationIdentity(
-  agentId: AgentId,
+  providerId: AgentProviderId,
   runId: string,
   handshake: AgentTerminalHandshake
 ): string {
   return createHash('sha256')
     .update(JSON.stringify([
       'agentmux-terminal-handshake-v1',
-      agentId,
+      providerId,
       runId,
       handshake.query,
       handshake.response
@@ -218,7 +226,8 @@ function projectRun(
   return {
     runId: run.runId,
     kind: agentSession ? 'agent' : 'terminal',
-    agentId: agentSession?.agentId ?? null,
+    providerId: agentSession?.providerId ?? null,
+    executorId: agentSession?.executorId ?? null,
     agentSessionId: agentSession?.agentSessionId ?? null,
     workspacePath: run.workspacePath ?? agentSession?.workspacePath ?? '',
     pid: run.pid,
@@ -256,6 +265,7 @@ export class AgentMuxClient {
   readonly providers: AgentProviderRegistry
   private readonly kernel: CtxmuxRunAdapter
   private readonly registry: AgentMuxAgentSessionRegistry
+  private readonly store: AgentMuxAgentSessionStore
   private readonly publisher = new AgentMuxClientEventPublisher()
   private readonly acp: AgentMuxAcpBridge
   private readonly hookServer: AgentHookServer
@@ -272,21 +282,23 @@ export class AgentMuxClient {
 
   constructor(options: AgentMuxClientOptions = {}) {
     this.providers = new AgentProviderRegistry(options.providers)
-    this.registry = new AgentMuxAgentSessionRegistry(
-      options.store ?? new AgentMuxFileAgentSessionStore()
-    )
+    this.store = options.store ?? new AgentMuxFileAgentSessionStore()
+    this.registry = new AgentMuxAgentSessionRegistry(this.store)
     this.kernel = new CtxmuxRunAdapter()
     this.hookServer = new AgentHookServer(
       async (event, signal) => await this.acceptHookEvent(event, signal)
     )
     this.acp = new AgentMuxAcpBridge(
       {
-        onEvent: (agentSessionId, event, evidence) => {
+        onEvent: async (agentSessionId, event, evidence) => {
           const session = this.registry.get(agentSessionId)
-          this.publisher.publishAcp(agentSessionId, event, {
+          const observed = {
             ...evidence,
             run: { ...session.run }
-          })
+          }
+          const mutation = agentTimelineMutationFromAcpEvent(agentSessionId, event, observed)
+          if (mutation) await this.persistAndPublishTimeline(mutation, observed)
+          this.publisher.publishAcp(agentSessionId, event, observed)
         },
         onNativeHandle: async (agentSessionId, handle) => {
           await this.updateNativeHandle(agentSessionId, handle)
@@ -406,6 +418,11 @@ export class AgentMuxClient {
     return cloneSession(this.registry.get(agentSessionId))
   }
 
+  async sessionTimeline(agentSessionId: string): Promise<AgentTimelineSnapshot> {
+    this.requireAgentSession(agentSessionId)
+    return await this.store.loadTimeline(agentSessionId)
+  }
+
   resolveAgentSession(lookup: AgentMuxAgentSessionLookup): AgentMuxAgentSession {
     return cloneSession(this.registry.resolve(lookup))
   }
@@ -432,7 +449,7 @@ export class AgentMuxClient {
       ctxmux: {
         version: '0.1.0',
         protocolVersion: identity.protocolVersion,
-        sourceCommit: '2e32a9d647d627952ea5c455fb2efef6c636643a',
+        sourceCommit: 'f89dabe70eba38d46992c320e40c9ebe2f09b5e5',
         artifactPlatform: 'darwin-arm64',
         ready: true,
         capabilities: {
@@ -448,9 +465,9 @@ export class AgentMuxClient {
     }
   }
 
-  async probeAgent(agentId: AgentId, commandOverride?: string): Promise<AgentCapabilitySnapshot> {
+  async probeAgent(providerId: AgentProviderId, commandOverride?: string): Promise<AgentCapabilitySnapshot> {
     this.requireConnected()
-    return await this.providers.get(agentId).probeCapabilities(
+    return await this.providers.get(providerId).probeCapabilities(
       { hasExecutable },
       commandOverride
     )
@@ -466,11 +483,11 @@ export class AgentMuxClient {
     })
   }
 
-  async workspaceView(): Promise<AgentMuxWorkspaceView> {
+  async runtimeProjection(): Promise<AgentMuxRuntimeProjection> {
     const runs = await this.listRuns()
     return {
       hostId: 'local',
-      views: projectAgentMuxViews('local', runs, this.registry.list().map(cloneSession))
+      subjects: projectAgentMuxRuntimeSubjects('local', runs, this.registry.list().map(cloneSession))
     }
   }
 
@@ -481,7 +498,7 @@ export class AgentMuxClient {
     return {
       session: cloneSession(session),
       run: projectRun(run, session),
-      capabilities: { ...this.providers.get(session.agentId).catalog.capabilities }
+      capabilities: { ...this.providers.get(session.providerId).catalog.capabilities }
     }
   }
 
@@ -591,6 +608,7 @@ export class AgentMuxClient {
   async createAgent(input: AgentMuxAgentCreateInput): Promise<AgentMuxAgentSession> {
     this.requireConnected()
     const agentSessionId = safeId(input.agentSessionId ?? randomUUID(), 'Agent Session id')
+    const executorId = safeId(input.executorId, 'Agent Executor id')
     const lifecycleOperationId = agentLifecycleOperationIdentity(
       'create',
       agentSessionId,
@@ -601,14 +619,14 @@ export class AgentMuxClient {
     let persisted: AgentMuxStoredAgentSession | null = null
     let abandonedRun: AgentMuxRunRef | null = null
     try {
-      const provider = this.providers.get(input.agentId)
-      const capability = await this.probeAgent(input.agentId, input.commandOverride)
+      const provider = this.providers.get(input.providerId)
+      const capability = await this.probeAgent(input.providerId, input.commandOverride)
       if (!capability.installed) {
         throw new AgentMuxError(`${provider.label} is not installed on this host.`, 'AGENT_NOT_FOUND')
       }
       const plan = provider.buildLaunch({
         workspacePath: input.workspacePath,
-        prompt: input.prompt ?? '',
+        prompt: composeAgentLaunchPrompt(input.prompt, input.injectAgentMuxGuide),
         args: input.args ?? [],
         env: input.env ?? {},
         ...(input.commandOverride === undefined ? {} : { commandOverride: input.commandOverride })
@@ -616,7 +634,7 @@ export class AgentMuxClient {
       await this.requireHookIngressOwner()
       hookBinding = this.hookServer.createBinding(
         agentSessionId,
-        input.agentId,
+        input.providerId,
         hookBindingIdentity(lifecycleOperationId)
       )
       const run = await this.kernel.start({
@@ -627,7 +645,8 @@ export class AgentMuxClient {
         env: this.agentEnvironment(
           plan.env,
           agentSessionId,
-          input.agentId,
+          input.providerId,
+          executorId,
           hookBinding,
           lifecycleOperationId
         ),
@@ -638,7 +657,8 @@ export class AgentMuxClient {
       const session: AgentMuxStoredAgentSession = {
         kind: 'agent',
         agentSessionId,
-        agentId: input.agentId,
+        providerId: input.providerId,
+        executorId,
         hostId: 'local',
         workspacePath: input.workspacePath,
         run: runRef(run.runId),
@@ -680,7 +700,15 @@ export class AgentMuxClient {
       this.runPids.set(run.runId, run.pid)
       this.publisher.publish({ type: 'agent-session', session: cloneSession(readySession) })
       this.publisher.publishRunState(projectRun(run, readySession), agentSessionId)
-      if (input.prompt?.trim()) this.publishPrompt(readySession, 'Initial prompt', input.prompt.trim(), now)
+      if (input.prompt?.trim()) {
+        await this.recordPromptAfterSideEffect(
+          readySession,
+          `prompt:${lifecycleOperationId}`,
+          'Initial prompt',
+          input.prompt.trim(),
+          now
+        )
+      }
       return cloneSession(readySession)
     } finally {
       if (hookBinding && ![...this.hookBindings.values()].includes(hookBinding)) await hookBinding.close()
@@ -734,6 +762,7 @@ export class AgentMuxClient {
     const reservation = await this.registry.reserveExisting(
       'resume',
       current.agentSessionId,
+      current.run,
       lifecycleOperationId
     )
     let hookBinding: AgentHookBinding | null = null
@@ -753,8 +782,8 @@ export class AgentMuxClient {
       if (oldRun?.state.type === 'running') {
         throw new AgentMuxError('Cannot resume while the original Run is still running.', 'AGENT_SESSION_STILL_RUNNING')
       }
-      const provider = this.providers.get(current.agentId)
-      const capability = await this.probeAgent(current.agentId, input.commandOverride)
+      const provider = this.providers.get(current.providerId)
+      const capability = await this.probeAgent(current.providerId, input.commandOverride)
       if (!capability.installed) {
         throw new AgentMuxError(`${provider.label} is not installed on this host.`, 'AGENT_NOT_FOUND')
       }
@@ -771,7 +800,7 @@ export class AgentMuxClient {
       this.hookBindings.delete(current.run.runId)
       hookBinding = this.hookServer.createBinding(
         current.agentSessionId,
-        current.agentId,
+        current.providerId,
         hookBindingIdentity(lifecycleOperationId)
       )
       const run = await this.kernel.start({
@@ -782,7 +811,8 @@ export class AgentMuxClient {
         env: this.agentEnvironment(
           plan.env,
           current.agentSessionId,
-          current.agentId,
+          current.providerId,
+          current.executorId,
           hookBinding,
           lifecycleOperationId
         ),
@@ -838,7 +868,13 @@ export class AgentMuxClient {
       this.runPids.set(run.runId, run.pid)
       this.publisher.publish({ type: 'agent-session', session: cloneSession(readySession) })
       this.publisher.publishRunState(projectRun(run, readySession), readySession.agentSessionId)
-      this.publishPrompt(readySession, 'Resume prompt', prompt, Date.now())
+      await this.recordPromptAfterSideEffect(
+        readySession,
+        `prompt:${lifecycleOperationId}`,
+        'Resume prompt',
+        prompt,
+        Date.now()
+      )
       return cloneSession(readySession)
     } finally {
       if (hookBinding && ![...this.hookBindings.values()].includes(hookBinding)) await hookBinding.close()
@@ -856,7 +892,8 @@ export class AgentMuxClient {
     return await this.createAgent({
       ...launch,
       agentSessionId,
-      agentId: previous.agentId,
+      providerId: previous.providerId,
+      executorId: previous.executorId,
       workspacePath: previous.workspacePath
     })
   }
@@ -874,16 +911,34 @@ export class AgentMuxClient {
     const session = await this.ensureTerminalHandshake(
       this.requireAgentSession(input.agentSessionId)
     )
-    const plan = this.providers.get(session.agentId).planPromptInput(content)
+    const plan = this.providers.get(session.providerId).planPromptInput(content)
     await this.serializeAgentInput(session, async (current, run) => {
       await this.submitAgentInputPlan(current, run, operationId, content, plan)
     })
-    this.publishPrompt(this.requireAgentSession(input.agentSessionId), 'Prompt', content, Date.now())
+    await this.recordPromptAfterSideEffect(
+      this.requireAgentSession(input.agentSessionId),
+      `prompt:${operationId}`,
+      'Prompt',
+      content,
+      Date.now()
+    )
   }
 
-  async resizeAgent(agentSessionId: string, cols: number, rows: number): Promise<AgentMuxRunAppliedSize> {
+  async resizeAgent(
+    agentSessionId: string,
+    expectedRun: AgentMuxRunRef,
+    cols: number,
+    rows: number
+  ): Promise<AgentMuxRunAppliedSize> {
     this.requireConnected()
-    return await this.resizeTerminal(this.requireAgentSession(agentSessionId).run, cols, rows)
+    const session = this.requireAgentSession(agentSessionId)
+    if (!sameRun(session.run, expectedRun)) {
+      throw new AgentMuxError(
+        'Agent Session changed before its Run was resized.',
+        'STALE_AGENT_SESSION'
+      )
+    }
+    return await this.resizeTerminal(expectedRun, cols, rows)
   }
 
   async signalAgent(agentSessionId: string, signal: string): Promise<void> {
@@ -904,13 +959,25 @@ export class AgentMuxClient {
     )
   }
 
-  async stopAgent(agentSessionId: string): Promise<void> {
+  async stopAgent(agentSessionId: string, expectedRun: AgentMuxRunRef): Promise<void> {
     this.requireConnected()
     const session = this.requireAgentSession(agentSessionId)
-    const reservation = await this.registry.reserveExisting('stop', agentSessionId, randomUUID())
+    if (!sameRun(session.run, expectedRun)) {
+      throw new AgentMuxError(
+        'Agent Session changed before its Run was stopped.',
+        'STALE_AGENT_SESSION'
+      )
+    }
+    const reservation = await this.registry.reserveExisting(
+      'stop',
+      agentSessionId,
+      expectedRun,
+      randomUUID()
+    )
     try {
       const run = await this.requireCurrentAgentRun(session)
       if (run.state.type === 'running') await this.stopRunningRun(session.run.runId)
+      else await this.releaseRunAttachment(session.run)
       await this.hookBindings.get(session.run.runId)?.close()
       this.hookBindings.delete(session.run.runId)
       const cleanup = await Promise.allSettled([
@@ -938,7 +1005,7 @@ export class AgentMuxClient {
   async bindAcp(agentSessionId: string, binding: AgentMuxAcpBinding): Promise<void> {
     this.requireConnected()
     const session = this.requireAgentSession(agentSessionId)
-    if (this.providers.get(session.agentId).catalog.acpStrategy.kind !== 'adapter') {
+    if (this.providers.get(session.providerId).catalog.acpStrategy.kind !== 'adapter') {
       throw new AgentMuxError('Provider does not declare an ACP adapter.', 'ACP_UNSUPPORTED')
     }
     await this.acp.bind(agentSessionId, binding)
@@ -996,7 +1063,7 @@ export class AgentMuxClient {
       if (!runsById.has(session.run.runId) || this.hookBindings.has(session.run.runId)) continue
       const binding = this.hookServer.createBinding(
         session.agentSessionId,
-        session.agentId,
+        session.providerId,
         session.hookBindingId,
         session.hookToken
       )
@@ -1064,7 +1131,8 @@ export class AgentMuxClient {
   private agentEnvironment(
     environment: Readonly<Record<string, string>>,
     agentSessionId: string,
-    agentId: AgentId,
+    providerId: AgentProviderId,
+    executorId: AgentExecutorId,
     binding: AgentHookBinding,
     lifecycleOperationId: string
   ): Record<string, string> {
@@ -1073,7 +1141,8 @@ export class AgentMuxClient {
       AGENTMUX_HOOK_URL: binding.endpoint.url,
       AGENTMUX_HOOK_TOKEN: binding.endpoint.token,
       AGENTMUX_AGENT_SESSION_ID: agentSessionId,
-      AGENTMUX_AGENT_ID: agentId,
+      AGENTMUX_PROVIDER_ID: providerId,
+      AGENTMUX_EXECUTOR_ID: executorId,
       AGENTMUX_LIFECYCLE_OPERATION_ID: lifecycleOperationId
     }
   }
@@ -1082,7 +1151,7 @@ export class AgentMuxClient {
     requestedSession: AgentMuxStoredAgentSession,
     knownRun?: CtxmuxAdapterRun
   ): Promise<AgentMuxStoredAgentSession> {
-    const provider = this.providers.get(requestedSession.agentId)
+    const provider = this.providers.get(requestedSession.providerId)
     const handshake = provider.terminalHandshake
     if (!handshake) {
       if (knownRun?.acceptedInputBytes !== null && knownRun?.acceptedInputBytes !== undefined) {
@@ -1099,7 +1168,7 @@ export class AgentMuxClient {
       )
     }
     const operationId = terminalHandshakeOperationIdentity(
-      session.agentId,
+      session.providerId,
       session.run.runId,
       handshake
     )
@@ -1524,7 +1593,7 @@ export class AgentMuxClient {
     submission: NonNullable<AgentMuxAgentSession['terminalPromptSubmission']>,
     content: string
   ): Promise<void> {
-    const matcher = this.providers.get(session.agentId).terminalPromptRender
+    const matcher = this.providers.get(session.providerId).terminalPromptRender
     if (!matcher) {
       throw new AgentMuxError(
         'Provider omitted its terminal prompt render matcher.',
@@ -1647,24 +1716,40 @@ export class AgentMuxClient {
     }
   }
 
-  private publishPrompt(
+  private async recordPromptAfterSideEffect(
     session: AgentMuxAgentSession,
+    itemId: string,
     title: string,
     content: string,
     observedAt: number
-  ): void {
-    this.publisher.publish({
-      type: 'agent-activity',
+  ): Promise<void> {
+    const mutation: AgentTimelineMutation = {
+      type: 'append',
       agentSessionId: session.agentSessionId,
-      activity: {
-        id: randomUUID(),
-        kind: 'prompt',
+      item: {
+        id: itemId,
+        agentSessionId: session.agentSessionId,
+        kind: 'user_message',
+        status: 'complete',
+        source: 'user',
         createdAt: observedAt,
+        updatedAt: observedAt,
         title,
         content
-      },
-      evidence: { source: 'user', observedAt, run: { ...session.run } }
-    })
+      }
+    }
+    const evidence = { source: 'user' as const, observedAt, run: { ...session.run } }
+    try {
+      await this.persistAndPublishTimeline(mutation, evidence)
+    } catch (error) {
+      this.publisher.publish({
+        type: 'agent-error',
+        agentSessionId: session.agentSessionId,
+        code: error instanceof AgentMuxError ? error.code : 'AGENT_TIMELINE_PERSIST_FAILED',
+        message: error instanceof Error ? error.message : String(error),
+        evidence
+      })
+    }
   }
 
   private async writeAgentInput(
@@ -1732,15 +1817,15 @@ export class AgentMuxClient {
     if (
       !session ||
       session.agentSessionId !== envelope.agentSessionId ||
-      session.agentId !== envelope.agentId
+      session.providerId !== envelope.providerId
     ) return
-    const normalized = this.providers.get(envelope.agentId).normalizeHook(envelope)
+    const normalized = this.providers.get(envelope.providerId).normalizeHook(envelope)
     const stopRun = normalized.eventName === 'Stop'
       ? await this.kernel.status(session.run.runId)
       : null
     const receipt = {
       id: envelope.receiptId,
-      agentId: session.agentId,
+      providerId: session.providerId,
       agentSessionId: session.agentSessionId,
       run: { ...session.run },
       eventName: normalized.eventName,
@@ -1781,6 +1866,15 @@ export class AgentMuxClient {
     if (!persistedReceipt) {
       throw new AgentMuxError('Native Hook receipt was not persisted.', 'HOOK_RECEIPT_INVALID')
     }
+    const evidence = {
+      source: 'native-hook' as const,
+      observedAt: normalized.status.observedAt,
+      run: { ...next.run },
+      hookReceiptId: persistedReceipt.id
+    }
+    for (const mutation of normalized.timeline) {
+      await this.persistAndPublishTimeline(mutation, evidence, signal)
+    }
     this.publisher.publishHook(next, normalized, persistedReceipt)
     this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
     if (
@@ -1797,7 +1891,7 @@ export class AgentMuxClient {
     session: AgentMuxAgentSession,
     stopReceipt: NonNullable<AgentMuxAgentSession['terminalStopReceipt']>
   ): void {
-    const matcher = this.providers.get(session.agentId).terminalPromptRender
+    const matcher = this.providers.get(session.providerId).terminalPromptRender
     if (!matcher) return
     this.terminalStopReadinessCancels.get(session.agentSessionId)?.()
     const controller = new AbortController()
@@ -1896,6 +1990,15 @@ export class AgentMuxClient {
     this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
   }
 
+  private async persistAndPublishTimeline(
+    mutation: AgentTimelineMutation,
+    evidence: Parameters<AgentMuxClientEventPublisher['publishTimeline']>[1],
+    signal?: AbortSignal
+  ): Promise<void> {
+    const commit = await this.store.applyTimelineMutation(mutation, signal)
+    if (commit.changed) this.publisher.publishTimeline(commit, evidence)
+  }
+
   private requireConnected(): void {
     if (!this.connected || !this.kernel.isConnected()) {
       throw new AgentMuxError('AgentMux client is not connected.', 'CTXMUX_DISCONNECTED')
@@ -1946,7 +2049,9 @@ export class AgentMuxClient {
             exitCode: event.state.code,
             ...(event.state.signal === null ? {} : { exitSignal: event.state.signal })
           }
-        : {}),
+        : event.state.type === 'interrupted'
+          ? { interruptionReason: event.state.reason }
+          : {}),
       evidence: {
         source: 'run-process',
         observedAt: event.observedAt,

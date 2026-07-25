@@ -1,4 +1,16 @@
+import type { SplitDirection } from './workbench-layout'
+
 export type TabCloseScope = 'others' | 'left' | 'right'
+
+export const WORKBENCH_TAB_SPLIT_ACTIONS: ReadonlyArray<{
+  direction: SplitDirection
+  label: string
+}> = [
+  { direction: 'left', label: 'Split Left' },
+  { direction: 'right', label: 'Split Right' },
+  { direction: 'up', label: 'Split Up' },
+  { direction: 'down', label: 'Split Down' }
+]
 
 export function tabIdsForCloseScope(
   tabOrder: readonly string[],

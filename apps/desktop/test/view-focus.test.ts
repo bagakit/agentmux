@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionSnapshot } from '../src/shared/contracts.js'
-import { resolveWorkbenchViewFocus } from '../src/renderer/src/lib/view-focus.js'
+import { resolveWorkbenchRegion } from '../src/renderer/src/lib/composition.js'
 import { createWorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.js'
-import type { WorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
+import {
+  createWorkbenchTab,
+  initialWorkbenchRegionId,
+  type WorkbenchTab
+} from '../src/renderer/src/lib/workbench-tabs.js'
 
 function session(id: string, kind: 'agent' | 'terminal'): SessionSnapshot {
   const base = {
@@ -20,7 +24,8 @@ function session(id: string, kind: 'agent' | 'terminal'): SessionSnapshot {
     ? {
         ...base,
         kind,
-        agentId: 'codex',
+        providerId: 'codex',
+        executorId: 'codex',
         control: {
           kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId: `${id}-run` }
         }
@@ -28,7 +33,7 @@ function session(id: string, kind: 'agent' | 'terminal'): SessionSnapshot {
     : {
         ...base,
         kind,
-        agentId: null,
+        providerId: null,
         control: {
           kind: 'terminal', hostId: 'local', runId: `${id}-run`, run: { runId: `${id}-run` }
         }
@@ -36,11 +41,17 @@ function session(id: string, kind: 'agent' | 'terminal'): SessionSnapshot {
 }
 
 function tab(id: string, kind: 'agent' | 'terminal', sessionId: string): WorkbenchTab {
-  return { id, kind, phase: 'attached', workspaceId: 'workspace', sessionId }
+  return createWorkbenchTab(id, {
+    regionId: initialWorkbenchRegionId(id),
+    kind,
+    phase: 'attached',
+    workspaceId: 'workspace',
+    sessionId
+  })
 }
 
-describe('Desktop typed View focus', () => {
-  it('focuses an already-open Raw Terminal View or uniquely open Agent View', () => {
+describe('Desktop Composition Region resolver', () => {
+  it('resolves an already-open Terminal Region or uniquely open Agent Region', () => {
     const sessions = [session('semantic-1', 'agent'), session('terminal-1', 'terminal')]
     const tabs = {
       'agent-left': tab('agent-left', 'agent', 'semantic-1'),
@@ -49,12 +60,28 @@ describe('Desktop typed View focus', () => {
     const layouts = {
       workspace: createWorkspaceLayout('pane', ['agent-left', 'terminal-left'])
     }
-    expect(resolveWorkbenchViewFocus({
-      sessions, tabs, layouts, target: { kind: 'terminal-view', viewId: 'terminal-left' }
-    })).toEqual({ viewId: 'terminal-left', kind: 'terminal', workspaceId: 'workspace', paneId: 'pane' })
-    expect(resolveWorkbenchViewFocus({
+    expect(resolveWorkbenchRegion({
+      sessions, tabs, layouts, target: {
+        kind: 'region', regionId: initialWorkbenchRegionId('terminal-left')
+      }
+    })).toEqual({
+      viewId: 'terminal-left',
+      regionId: initialWorkbenchRegionId('terminal-left'),
+      kind: 'terminal',
+      runId: 'terminal-1-run',
+      workspaceId: 'workspace',
+      tabGroupId: 'pane'
+    })
+    expect(resolveWorkbenchRegion({
       sessions, tabs, layouts, target: { kind: 'agent-session', agentSessionId: 'semantic-1' }
-    })).toEqual({ viewId: 'agent-left', kind: 'agent', workspaceId: 'workspace', paneId: 'pane' })
+    })).toEqual({
+      viewId: 'agent-left',
+      regionId: initialWorkbenchRegionId('agent-left'),
+      kind: 'agent',
+      agentSessionId: 'semantic-1',
+      workspaceId: 'workspace',
+      tabGroupId: 'pane'
+    })
   })
 
   it('rejects closed, stale, and ambiguous targets without opening anything', () => {
@@ -68,14 +95,16 @@ describe('Desktop typed View focus', () => {
       workspace: createWorkspaceLayout('pane', ['agent-left', 'agent-right', 'stale'])
     }
     const before = structuredClone({ sessions, tabs, layouts })
-    expect(() => resolveWorkbenchViewFocus({
+    expect(() => resolveWorkbenchRegion({
       sessions, tabs, layouts, target: { kind: 'agent-session', agentSessionId: 'semantic-1' }
     })).toThrow('ambiguous')
-    expect(() => resolveWorkbenchViewFocus({
-      sessions, tabs, layouts, target: { kind: 'terminal-view', viewId: 'stale' }
+    expect(() => resolveWorkbenchRegion({
+      sessions, tabs, layouts, target: {
+        kind: 'region', regionId: initialWorkbenchRegionId('stale')
+      }
     })).toThrow('not currently open')
-    expect(() => resolveWorkbenchViewFocus({
-      sessions, tabs, layouts, target: { kind: 'terminal-view', viewId: 'closed' }
+    expect(() => resolveWorkbenchRegion({
+      sessions, tabs, layouts, target: { kind: 'region', regionId: 'closed' }
     })).toThrow('not currently open')
     expect({ sessions, tabs, layouts }).toEqual(before)
   })

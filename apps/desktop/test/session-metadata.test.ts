@@ -1,49 +1,58 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import type { AgentActivity } from '../src/shared/contracts.js'
-import {
-  abbreviatedSessionId,
-  latestSessionActivityAt,
-  recentSessionMessage
-} from '../src/renderer/src/lib/session-metadata.js'
+import { canStopSessionRun, sessionTabTooltip } from '../src/renderer/src/lib/session-metadata.js'
 
-function activity(overrides: Partial<AgentActivity>): AgentActivity {
-  return {
-    id: 'activity',
-    sessionId: 'session',
-    kind: 'assistant',
-    source: 'native-hook',
-    createdAt: 1,
-    title: 'Assistant response',
-    ...overrides
-  }
-}
+const sessionPaneSource = readFileSync(
+  new URL('../src/renderer/src/components/SessionPane.tsx', import.meta.url),
+  'utf8'
+)
+const workspaceWorkbenchSource = readFileSync(
+  new URL('../src/renderer/src/components/WorkspaceWorkbench.tsx', import.meta.url),
+  'utf8'
+)
+const workbenchTabMenuSource = readFileSync(
+  new URL('../src/renderer/src/components/WorkbenchTabContextMenu.tsx', import.meta.url),
+  'utf8'
+)
 
-describe('Session metadata projection', () => {
-  it('shows an abbreviated stable id while retaining short ids', () => {
-    expect(abbreviatedSessionId('9a27c67a-4b16-4f8c-b248-40c72ca83467')).toBe('9a27c67a')
-    expect(abbreviatedSessionId('run-12')).toBe('run-12')
-    expect(abbreviatedSessionId('session-codex')).toBe('session-codex')
+describe('single-line session tab projection', () => {
+  it('keeps low-frequency session metadata in the tab tooltip', () => {
+    const tooltip = sessionTabTooltip({
+      label: 'codex · agentmux',
+      id: 'd1df756e-18f5-4d3e-b309-0635b8d2999b',
+      hostId: 'local',
+      createdAt: 0,
+      updatedAt: 60_000
+    })
+
+    expect(tooltip).toContain('codex · agentmux')
+    expect(tooltip).toContain('Session ID: d1df756e-18f5-4d3e-b309-0635b8d2999b')
+    expect(tooltip).toContain('Host: local')
+    expect(tooltip).toContain('Started:')
+    expect(tooltip).toContain('Active:')
   })
 
-  it('uses the latest semantic message instead of a later tool event', () => {
-    expect(recentSessionMessage([
-      activity({ kind: 'prompt', createdAt: 2, content: '  Fix\n the lifecycle. ' }),
-      activity({ kind: 'assistant', createdAt: 3, content: 'The owner now closes exactly once.' }),
-      activity({ kind: 'tool', createdAt: 4, content: undefined, title: 'Edit' })
-    ])).toBe('Agent: The owner now closes exactly once.')
+  it('keeps Stop Run available until the process has exited', () => {
+    expect(canStopSessionRun({ processState: 'running' })).toBe(true)
+    expect(canStopSessionRun({ processState: 'interrupted' })).toBe(true)
+    expect(canStopSessionRun({ processState: 'exited' })).toBe(false)
   })
 
-  it('reports no message when only non-message evidence exists', () => {
-    expect(recentSessionMessage([
-      activity({ kind: 'permission', content: undefined, title: 'Bash permission' })
-    ])).toBeNull()
+  it('keeps SessionPane chrome-free and owns Run actions in the pane tabbar', () => {
+    expect(sessionPaneSource).not.toContain('session-info-bar')
+    expect(sessionPaneSource).not.toContain('Stop Run')
+    expect(workspaceWorkbenchSource).toContain('pane-action pane-action--stop')
+    expect(workbenchTabMenuSource).toContain('Copy Session ID')
   })
 
-  it('uses semantic activity as last activity without regressing runtime time', () => {
-    expect(latestSessionActivityAt({ updatedAt: 10 }, [
-      activity({ createdAt: 8 }),
-      activity({ createdAt: 14 })
-    ])).toBe(14)
-    expect(latestSessionActivityAt({ updatedAt: 20 }, [activity({ createdAt: 14 })])).toBe(20)
+  it('makes stopping the default Agent Tab close action while preserving an explicit background option', () => {
+    expect(workspaceWorkbenchSource).toContain("'Stop & Close'")
+    expect(workspaceWorkbenchSource).toContain("'Keep Session & Close'")
+    expect(workspaceWorkbenchSource).toContain('sessionIdsWithoutViewsAfterClosingTabs')
+  })
+
+  it('uses a Terminal icon instead of an Agent status dot for Terminal tabs', () => {
+    expect(workspaceWorkbenchSource).toContain(') : <SquareTerminal size={12} />')
+    expect(workspaceWorkbenchSource).not.toContain('session ? <StatusDot status={session.status} />')
   })
 })

@@ -5,16 +5,20 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import { ChevronDown, ChevronUp, LoaderCircle, Search, X } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { RuntimeEvent, SessionSnapshot, TerminalThemeId } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { installTerminalColorQueryReplyHandlers } from '../lib/terminal-capability-replies'
 import { terminalOptions, terminalTheme } from '../lib/terminal-theme'
 import { isTerminalAppShortcut } from '../lib/terminal-shortcuts'
-import { hydrateTerminalReplay } from '../lib/terminal-replay'
+import { finishTerminalReplayRecovery, hydrateTerminalReplay } from '../lib/terminal-replay'
 import { acquireTerminalResourceOwners } from '../lib/terminal-resource-owners'
+import { LatestTerminalOutputAcknowledger } from '../lib/terminal-output-ack'
 import { TerminalViewportSynchronizer } from '../lib/terminal-viewport-sync'
+import { terminalStartupPhase } from '../lib/terminal-startup'
+import { agentProviderLabel } from './AgentProviderIcon'
 import { TerminalContextMenu } from './TerminalContextMenu'
+import { TerminalReplayGapNotice } from './TerminalReplayGapNotice'
 
 function terminalWrite(terminal: Terminal, data: string): Promise<void> {
   return new Promise((resolve) => terminal.write(data, resolve))
@@ -34,13 +38,39 @@ function outputForSession(event: RuntimeEvent, session: SessionSnapshot) {
   return byteRange ? { ...core, ...byteRange } : null
 }
 
-export function TerminalView({ session, themeId }: { session: SessionSnapshot; themeId: TerminalThemeId }) {
+export function TerminalView({
+  session,
+  themeId,
+  interactiveResize,
+  autoFocus = true
+}: {
+  session: SessionSnapshot
+  themeId: TerminalThemeId
+  interactiveResize: boolean
+  // The reusable terminal on the create page must not steal focus from the prompt.
+  autoFocus?: boolean
+}) {
+  const autoFocusRef = useRef(autoFocus)
+  autoFocusRef.current = autoFocus
   const rootRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<Terminal | null>(null)
+  const viewportRef = useRef<TerminalViewportSynchronizer | null>(null)
+  const interactiveResizeRef = useRef(interactiveResize)
+  interactiveResizeRef.current = interactiveResize
+  // canControlRun 随 processState 翻转，但 attach effect 不能依赖它——否则同 runId 的
+  // 状态跳变（exit/interrupt/recovery）会整块拆/重建 xterm 并回放 scrollback，造成卡顿闪屏。
+  // 用 ref 让输入 guard / resize gate 跨状态保持响应，同时不触发 effect 重挂。
+  const canControlRun = session.processState === 'running'
+  const canControlRunRef = useRef(canControlRun)
+  canControlRunRef.current = canControlRun
   const searchAddonRef = useRef<SearchAddon | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const [hasSelection, setHasSelection] = useState(false)
   const [hydrating, setHydrating] = useState(true)
+  const [attachFailed, setAttachFailed] = useState(false)
+  const [hasOutput, setHasOutput] = useState(false)
+  const [replayGap, setReplayGap] = useState(false)
+  const [redrawing, setRedrawing] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
 
@@ -48,10 +78,25 @@ export function TerminalView({ session, themeId }: { session: SessionSnapshot; t
     if (searchOpen) searchInputRef.current?.focus()
   }, [searchOpen])
 
+  useLayoutEffect(() => {
+    viewportRef.current?.setInteractiveResize(interactiveResize)
+  }, [interactiveResize])
+
+  // 变为 running 时启动 live 视口同步。attach effect 不再随 processState 重挂，
+  // 所以这条独立小 effect 覆盖"attach 时非 running、随后恢复运行"的场景。
+  // startLiveSynchronization 幂等（this.live 卫），重复调用无副作用。
   useEffect(() => {
-    if (!rootRef.current) return
+    if (canControlRun) void viewportRef.current?.startLiveSynchronization().catch(() => {})
+  }, [canControlRun])
+
+  useEffect(() => {
+    const root = rootRef.current
+    if (!root) return
     setHydrating(true)
-    const canControlRun = session.processState === 'running'
+    setAttachFailed(false)
+    setHasOutput(false)
+    setReplayGap(false)
+    setRedrawing(false)
     const isMac = navigator.userAgent.includes('Mac')
     const terminal = new Terminal({
       ...terminalOptions(themeId),
@@ -68,7 +113,7 @@ export function TerminalView({ session, themeId }: { session: SessionSnapshot; t
     terminal.loadAddon(fit)
     terminal.loadAddon(search)
     terminal.loadAddon(webLinks)
-    terminal.open(rootRef.current)
+    terminal.open(root)
     terminalRef.current = terminal
     searchAddonRef.current = search
 
@@ -92,11 +137,11 @@ export function TerminalView({ session, themeId }: { session: SessionSnapshot; t
     })
 
     let disposed = false
+    let observedOutput = false
     let attachmentId: string | null = null
     let readyForLiveOutput = false
     let cursor = 0
     let outputTail = Promise.resolve()
-    let acknowledgeTail = Promise.resolve()
     const pending: RuntimeEvent[] = []
     let pendingBytes = 0
     let droppedPendingThrough = 0
@@ -105,27 +150,44 @@ export function TerminalView({ session, themeId }: { session: SessionSnapshot; t
       proposeGrid: () => fit.proposeDimensions() ?? null,
       fit: () => fit.fit(),
       readGrid: () => ({ cols: terminal.cols, rows: terminal.rows }),
-      resize: async ({ cols, rows }) => await api.sessions.resize(session.control, cols, rows),
+      resize: async ({ cols, rows }) => {
+        // 进程已死时不向 PTY 发 resize（effect 不再随 processState 重挂，
+        // ResizeObserver 仍可能在 exit 后触发）。
+        if (!canControlRunRef.current || attachmentId === null) return
+        await api.sessions.resize(attachmentId, cols, rows)
+      },
       requestFrame: (callback) => requestAnimationFrame(callback),
       cancelFrame: (frameId) => cancelAnimationFrame(frameId),
+      // 容器 CSS 像素：仅当像素真的变化时才 fit，滤掉 WebGL/DOM cell-metric 抖动
+      // 造成的一列 grid 摆动（否则 reflow→弹回会把 Codex 等 TUI 画花，见 viewport-sync）。
+      measureViewport: () => {
+        const rect = root.getBoundingClientRect()
+        return { width: rect.width, height: rect.height }
+      },
       onResizeError: (error) => console.warn('[terminal] failed to synchronize PTY viewport', error)
     })
+    viewport.setInteractiveResize(interactiveResizeRef.current)
+    viewportRef.current = viewport
     renderReady = terminal.onRender(() => {
       renderReady?.dispose()
       renderReady = null
       viewport.observeViewport()
     })
 
-    const queueAcknowledge = (control: SessionSnapshot['control'], sequence: number): void => {
-      acknowledgeTail = acknowledgeTail
-        .catch(() => {})
-        .then(async () => await api.sessions.acknowledge(control, sequence))
-        .catch(() => {})
+    const acknowledger = new LatestTerminalOutputAcknowledger(
+      async (throughByte) => await api.sessions.acknowledge(session.control, throughByte)
+    )
+
+    const observeOutput = (): void => {
+      if (disposed || observedOutput) return
+      observedOutput = true
+      setHasOutput(true)
     }
 
     const accept = (event: RuntimeEvent): void => {
       const output = outputForSession(event, session)
       if (!output) return
+      if (output.data.length > 0) observeOutput()
       if (!readyForLiveOutput) {
         pending.push(event)
         pendingBytes += output.endByte - output.startByte
@@ -149,21 +211,21 @@ export function TerminalView({ session, themeId }: { session: SessionSnapshot; t
         }
         await terminalWrite(terminal, output.data)
         cursor = output.endByte
-        queueAcknowledge(session.control, cursor)
+        acknowledger.queue(cursor)
       })
     }
     const disposeEvents = api.sessions.onEvent(accept)
     const resize = new ResizeObserver(() => viewport.observeViewport())
-    resize.observe(rootRef.current)
+    resize.observe(root)
     const input = terminal.onData((data) => {
-      if (canControlRun && readyForLiveOutput) void api.sessions.write(session.control, data)
+      if (canControlRunRef.current && readyForLiveOutput) void api.sessions.write(session.control, data)
     })
     const selection = terminal.onSelectionChange(() => setHasSelection(terminal.hasSelection()))
     const colorQuerySuppression = installTerminalColorQueryReplyHandlers(terminal, {
       isReplaying: () => !readyForLiveOutput,
       respondFromRenderer: session.kind === 'terminal',
       sendInput: (data) => {
-        if (canControlRun && readyForLiveOutput) void api.sessions.write(session.control, data)
+        if (canControlRunRef.current && readyForLiveOutput) void api.sessions.write(session.control, data)
       }
     })
     terminal.attachCustomKeyEventHandler((event) => {
@@ -175,14 +237,11 @@ export function TerminalView({ session, themeId }: { session: SessionSnapshot; t
         if (event.type === 'keydown') void api.ui.writeClipboardText(terminal.getSelection())
         return false
       }
-      if (isTerminalAppShortcut(event, 'v', isMac)) {
-        if (event.type === 'keydown') {
-          void api.ui.readClipboardText().then((text) => {
-            if (!disposed && text) terminal.paste(text)
-          })
-        }
-        return false
-      }
+      // Paste is intentionally NOT claimed here. Returning false from this handler does not
+      // preventDefault (xterm's _keyDown returns before cancel()), so the native paste path
+      // (Electron's Edit→Paste role → xterm's textarea paste listener) still fires. Handling
+      // Cmd/Ctrl+V here as well applied the same clipboard text twice. The native path is the
+      // single owner of paste; right-click paste is served by pasteClipboard().
       if (isTerminalAppShortcut(event, 'k', isMac)) {
         if (event.type === 'keydown') terminal.clear()
         return false
@@ -199,12 +258,10 @@ export function TerminalView({ session, themeId }: { session: SessionSnapshot; t
         }
         attachmentId = result.attachmentId
         if (result.gap) {
-          await terminalWrite(
-            terminal,
-            '\u001b[33m[Earlier terminal output fell outside the bounded replay window]\u001b[0m\r\n'
-          )
+          setReplayGap(true)
           cursor = result.gap.firstAvailableByte
         }
+        if (result.replay.some((chunk) => chunk.data.length > 0)) observeOutput()
         cursor = await hydrateTerminalReplay(
           result.replay,
           async (data) => await terminalWrite(terminal, data)
@@ -216,16 +273,29 @@ export function TerminalView({ session, themeId }: { session: SessionSnapshot; t
           )
           cursor = droppedPendingThrough
         }
-        if (canControlRun) await viewport.startLiveSynchronization()
-        readyForLiveOutput = true
-        if (cursor > 0) queueAcknowledge(result.session.control, cursor)
-        for (const event of pending.splice(0)) accept(event)
-        await outputTail
+        await finishTerminalReplayRecovery({
+          gap: Boolean(result.gap),
+          canControlRun: canControlRunRef.current,
+          startLiveSynchronization: async () => await viewport.startLiveSynchronization(),
+          releaseLiveOutput: async () => {
+            readyForLiveOutput = true
+            if (cursor > 0) acknowledger.queue(cursor)
+            for (const event of pending.splice(0)) accept(event)
+            await outputTail
+          },
+          redrawCurrentScreen: async () => {
+            const redrawn = await viewport.requestContentRedraw()
+            await outputTail
+            return redrawn
+          },
+          onRedrawError: (error) => console.warn('[terminal] failed to redraw after replay gap', error)
+        })
         if (disposed) return
         setHydrating(false)
-        terminal.focus()
+        if (autoFocusRef.current) terminal.focus()
       } catch (error) {
         if (!disposed) {
+          setAttachFailed(true)
           const detail = (error instanceof Error ? error.message : String(error))
             .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
           await terminalWrite(
@@ -238,10 +308,12 @@ export function TerminalView({ session, themeId }: { session: SessionSnapshot; t
     })()
 
     viewport.observeViewport()
-    requestAnimationFrame(() => terminal.focus())
+    if (autoFocusRef.current) requestAnimationFrame(() => terminal.focus())
     return () => {
       disposed = true
+      acknowledger.dispose()
       if (terminalRef.current === terminal) terminalRef.current = null
+      if (viewportRef.current === viewport) viewportRef.current = null
       if (searchAddonRef.current === search) searchAddonRef.current = null
       viewport.dispose()
       renderReady?.dispose()
@@ -260,7 +332,22 @@ export function TerminalView({ session, themeId }: { session: SessionSnapshot; t
       terminal.dispose()
       releaseResourceOwners()
     }
-  }, [session.control.run.runId, session.id, session.processState, themeId])
+  }, [session.control.run.runId, session.id, themeId])
+
+  async function redrawCurrentScreen(): Promise<void> {
+    if (!canControlRunRef.current || redrawing) return
+    const viewport = viewportRef.current
+    if (!viewport) return
+    setRedrawing(true)
+    try {
+      await viewport.requestContentRedraw()
+    } catch (error) {
+      console.warn('[terminal] failed to redraw current screen', error)
+    } finally {
+      setRedrawing(false)
+      terminalRef.current?.focus()
+    }
+  }
 
   function copySelection(): void {
     const terminal = terminalRef.current
@@ -290,6 +377,14 @@ export function TerminalView({ session, themeId }: { session: SessionSnapshot; t
     else searchAddonRef.current?.findNext(query, { incremental: true })
   }
 
+  const startupPhase = terminalStartupPhase({
+    hydrating,
+    attachFailed,
+    agent: session.kind === 'agent',
+    running: canControlRun,
+    hasOutput
+  })
+
   return (
     <TerminalContextMenu
       hasSelection={hasSelection}
@@ -309,10 +404,26 @@ export function TerminalView({ session, themeId }: { session: SessionSnapshot; t
           ref={rootRef}
           onPointerDown={() => terminalRef.current?.focus()}
         />
-        {hydrating ? (
+        {startupPhase === 'restoring' ? (
           <div className="terminal-hydration" role="status" aria-live="polite">
             <LoaderCircle className="spin" size={13} /> Restoring terminal…
           </div>
+        ) : null}
+        {startupPhase === 'starting-agent' && session.kind === 'agent' ? (
+          <div className="terminal-agent-startup" role="status" aria-live="polite">
+            <div className="terminal-agent-startup__content">
+              <LoaderCircle className="spin" size={14} />
+              <strong>Starting {agentProviderLabel(session.providerId)}…</strong>
+              <span>Waiting for its first terminal output.</span>
+            </div>
+          </div>
+        ) : null}
+        {!hydrating && replayGap ? (
+          <TerminalReplayGapNotice
+            canRedraw={canControlRun}
+            redrawing={redrawing}
+            onRedraw={() => void redrawCurrentScreen()}
+          />
         ) : null}
         {searchOpen ? (
           <div className="terminal-search" role="search">

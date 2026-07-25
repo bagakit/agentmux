@@ -63,7 +63,8 @@ afterEach(async () => {
     try {
       const client = await connectLocalAgentMux({ store: active.store })
       if (client.agentSessions().some((session) => session.agentSessionId === active.agentSessionId)) {
-        await client.stopAgent(active.agentSessionId)
+        const session = client.agentSession(active.agentSessionId)
+        await client.stopAgent(active.agentSessionId, session.run)
       }
       cleanupClients.push(client)
     } catch (error) {
@@ -164,16 +165,22 @@ describe.runIf(process.env.AGENTMUX_REAL_CODEX_E2E === '1')('installed real Code
     const assistantMarkers = new Set<string>()
     const observe = (event: AgentMuxClientEvent): void => {
       if (event.type === 'terminal-output') output += event.data ?? ''
-      if (event.type === 'agent-activity' && event.activity.kind === 'assistant') {
-        assistantMarkers.add(event.activity.content ?? '')
+      if (
+        event.type === 'agent-timeline' &&
+        event.mutation.type === 'append' &&
+        event.mutation.item.kind === 'assistant_message'
+      ) {
+        assistantMarkers.add(event.mutation.item.content ?? '')
       }
     }
     client.onEvent(observe)
     const created = await client.createAgent({
       agentSessionId,
       createOperationId: `real-codex-create-${invocationId}`,
-      agentId: 'codex',
+      providerId: 'codex',
+      executorId: 'codex',
       workspacePath: workspace,
+      injectAgentMuxGuide: false,
       commandOverride: command,
       args: codexArgs,
       prompt: 'Reply with exactly AGENTMUX_REAL_CODEX_READY and do not use tools.'
@@ -349,7 +356,7 @@ describe.runIf(process.env.AGENTMUX_REAL_CODEX_E2E === '1')('installed real Code
       resumedPreExit.run.latestOutputBytes
     )
     expect(resumedExitReplay.attachment.replay.map((event) => event.data).join('')).toContain('/exit')
-    await client.stopAgent(resumed.agentSessionId)
+    await client.stopAgent(resumed.agentSessionId, resumed.run)
     activeAgentSessions.splice(0)
     expect(client.agentSessions()).toEqual([])
     await client.dispose()

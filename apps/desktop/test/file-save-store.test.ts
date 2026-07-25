@@ -13,11 +13,19 @@ const fileApi = vi.hoisted(() => {
   }> = []
   const observes: Array<{ workspaceId: string; path: string }> = []
   const unobserves: Array<{ workspaceId: string; path: string }> = []
+  const moves: Array<{
+    input: {
+      source: { workspaceId: string; path: string }
+      destination: { workspaceId: string; path: string }
+    }
+    resolve(value: unknown): void
+  }> = []
   return {
     writes,
     reads,
     observes,
     unobserves,
+    moves,
     api: {
       files: {
         write(workspaceId: string, input: { path: string; content: string; expectedRevision: string | null }) {
@@ -28,7 +36,13 @@ const fileApi = vi.hoisted(() => {
         },
         observe: async (workspaceId: string, path: string) => { observes.push({ workspaceId, path }) },
         unobserve: async (workspaceId: string, path: string) => { unobserves.push({ workspaceId, path }) },
-        onInvalidated: () => () => {}
+        onInvalidated: () => () => {},
+        move(input: {
+          source: { workspaceId: string; path: string }
+          destination: { workspaceId: string; path: string }
+        }) {
+          return new Promise((resolve) => moves.push({ input, resolve }))
+        }
       }
     }
   }
@@ -38,7 +52,13 @@ vi.mock('../src/renderer/src/lib/api.js', () => ({ api: fileApi.api }))
 
 import type { AppConfig, FileDocument, WorkspaceRecord } from '../src/shared/contracts.js'
 import { createWorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.js'
-import { documentKey, fileTabId, type FileWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
+import {
+  createWorkbenchTab,
+  documentKey,
+  fileTabId,
+  initialWorkbenchRegionId,
+  type WorkbenchTab
+} from '../src/renderer/src/lib/workbench-tabs.js'
 import { useAppStore } from '../src/renderer/src/store.js'
 
 const initialState = useAppStore.getState()
@@ -49,6 +69,7 @@ afterEach(() => {
   fileApi.reads.splice(0)
   fileApi.observes.splice(0)
   fileApi.unobserves.splice(0)
+  fileApi.moves.splice(0)
 })
 
 async function waitFor(predicate: () => boolean): Promise<void> {
@@ -64,7 +85,7 @@ function seed(document: FileDocument = {
   path: 'src/app.ts',
   content: 'alpha',
   revision: 'revision-alpha'
-}): { workspace: WorkspaceRecord; tab: FileWorkbenchTab; key: string } {
+}): { workspace: WorkspaceRecord; tab: WorkbenchTab & { path: string }; key: string } {
   const workspace: WorkspaceRecord = {
     id: 'save-workspace',
     name: 'Save fixture',
@@ -73,16 +94,20 @@ function seed(document: FileDocument = {
     kind: 'folder'
   }
   const config: AppConfig = {
-    version: 4,
+    version: 6,
     hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
-    agents: {},
+    executors: {},
     workspaces: [workspace],
     appearance: { terminalTheme: 'graphite' }
   }
-  const tab: FileWorkbenchTab = {
-    id: fileTabId(workspace.id, document.path),
-    kind: 'file',
-    workspaceId: workspace.id,
+  const tabId = fileTabId(workspace.id, document.path)
+  const tab = {
+    ...createWorkbenchTab(tabId, {
+      regionId: initialWorkbenchRegionId(tabId),
+      kind: 'file',
+      workspaceId: workspace.id,
+      path: document.path
+    }),
     path: document.path
   }
   const key = documentKey(workspace.id, document.path)
@@ -102,6 +127,42 @@ function seed(document: FileDocument = {
 }
 
 describe('revision-aware file save Store', () => {
+  it('admits a move before waiting for saves and prevents a racing save from recreating the source', async () => {
+    const { workspace, tab } = seed()
+    useAppStore.getState().updateDocument(tab.id, 'bravo')
+    const firstSave = useAppStore.getState().saveDocument(tab.id)
+    await waitFor(() => fileApi.writes.length === 1)
+
+    const rename = useAppStore.getState().renamePath(tab.path, 'src/renamed.ts')
+    useAppStore.getState().updateDocument(tab.id, 'charlie')
+    const saveDuringMove = useAppStore.getState().saveDocument(tab.id)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(fileApi.moves).toHaveLength(0)
+    expect(fileApi.writes).toHaveLength(1)
+
+    fileApi.writes[0]!.resolve({ status: 'written', revision: 'revision-bravo' })
+    await waitFor(() => fileApi.moves.length === 1)
+    expect(fileApi.moves[0]!.input).toEqual({
+      source: { workspaceId: workspace.id, path: tab.path },
+      destination: { workspaceId: workspace.id, path: 'src/renamed.ts' }
+    })
+    expect(fileApi.writes).toHaveLength(1)
+
+    fileApi.moves[0]!.resolve({ status: 'moved' })
+    await waitFor(() => fileApi.reads.length === 1)
+    fileApi.reads[0]!.resolve({
+      status: 'read',
+      document: { path: 'src/renamed.ts', content: 'bravo', revision: 'revision-bravo' }
+    })
+    await Promise.all([firstSave, rename, saveDuringMove])
+
+    const nextKey = documentKey(workspace.id, 'src/renamed.ts')
+    expect(fileApi.writes).toHaveLength(1)
+    expect(useAppStore.getState().tabs[tab.id]).toBeUndefined()
+    expect(useAppStore.getState().documents[nextKey]).toMatchObject({ content: 'charlie' })
+    expect(useAppStore.getState().dirtyDocuments[nextKey]).toBe(true)
+  })
+
   it('serializes each file and binds save completion to the captured edit generation', async () => {
     const { tab, key } = seed()
     useAppStore.getState().updateDocument(tab.id, 'bravo')
@@ -332,7 +393,7 @@ describe('revision-aware file save Store', () => {
       savingDocuments: {}
     })
 
-    let close: Promise<void> | undefined
+    let close: Promise<boolean> | undefined
     let reopen: Promise<void> | undefined
     let triggered = false
     const unsubscribe = useAppStore.subscribe((state) => {

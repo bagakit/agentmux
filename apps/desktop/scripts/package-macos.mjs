@@ -369,7 +369,7 @@ async function verifyPackagedRuntime(appPath, verificationRoot) {
     'utf8'
   ))
   assert(
-    manifest.source.commit === '2e32a9d647d627952ea5c455fb2efef6c636643a',
+    manifest.source.commit === 'f89dabe70eba38d46992c320e40c9ebe2f09b5e5',
     'Packaged ctxmux manifest commit is wrong.'
   )
 }
@@ -447,9 +447,9 @@ async function verifyLaunchServices(appPath, verificationRoot) {
   await Promise.all([
     writeFile(join(workspace, 'revision-probe.txt'), 'alpha', { mode: 0o640 }),
     writeFile(join(userData, 'agentmux.config.json'), `${JSON.stringify({
-      version: 4,
+      version: 6,
       hosts: [{ id: 'local', kind: 'local', label: 'Mounted Desktop E2E' }],
-      agents: {},
+      executors: {},
       workspaces: [{
         id: 'workspace-file-editing-e2e',
         name: 'Workspace File Editing E2E',

@@ -3,17 +3,21 @@ import {
   AgentMuxAcpBridge,
   type AgentMuxAcpBinding
 } from '../src/acp-adapter.js'
+import { agentTimelineMutationFromAcpEvent } from '../src/session-timeline.js'
 import type {
   AgentMuxAcpEvent,
   AgentMuxPermissionDecision
 } from '../src/types.js'
 
 class FakeBinding implements AgentMuxAcpBinding {
-  readonly adapterId = 'fixture-acp'
-  readonly sessionId = 'acp-session-1'
   readonly responses: Array<{ requestId: string; decision: AgentMuxPermissionDecision }> = []
   closed = false
   private listener: ((event: AgentMuxAcpEvent) => void) | null = null
+
+  constructor(
+    readonly adapterId = 'fixture-acp',
+    readonly sessionId = 'acp-session-1'
+  ) {}
 
   onEvent(listener: (event: AgentMuxAcpEvent) => void): () => void {
     this.listener = listener
@@ -94,7 +98,11 @@ describe('AgentMux ACP adapter boundary', () => {
     }])
     expect(events).toContainEqual(expect.objectContaining({
       agentSessionId: 'semantic-acp',
-      evidence: expect.objectContaining({ source: 'acp', acpSessionId: 'acp-session-1' })
+      evidence: expect.objectContaining({
+        source: 'acp',
+        acpAdapterId: 'fixture-acp',
+        acpSessionId: 'acp-session-1'
+      })
     }))
     expect(binding.responses).toEqual([{
       requestId: 'permission-1',
@@ -175,13 +183,138 @@ describe('AgentMux ACP adapter boundary', () => {
     await bridge.bind('semantic-acp', binding)
     binding.emit({
       type: 'activity',
-      kind: 'assistant',
+      operation: 'append',
+      activityId: 'oversized-activity',
+      kind: 'assistant_message',
+      status: 'complete',
       title: 'oversized',
       content: 'x'.repeat(128 * 1024)
     })
 
     await waitForClosed(binding)
     expect(binding.closed).toBe(true)
+    await bridge.dispose()
+  })
+
+  it('does not expose initialization events when binding persistence fails', async () => {
+    const events: AgentMuxAcpEvent[] = []
+    let unsubscribed = false
+    let closed = false
+    let handleAttempts = 0
+    const binding: AgentMuxAcpBinding = {
+      adapterId: 'fixture-acp',
+      sessionId: 'initial-native-session',
+      onEvent(listener) {
+        listener({ type: 'native-session', sessionId: 'uncommitted-native-session' })
+        listener({
+          type: 'activity',
+          operation: 'append',
+          activityId: 'uncommitted-activity',
+          kind: 'assistant_message',
+          status: 'complete',
+          title: 'Must stay private'
+        })
+        return () => { unsubscribed = true }
+      },
+      async respondPermission() {},
+      async close() { closed = true }
+    }
+    const bridge = new AgentMuxAcpBridge({
+      onEvent(_agentSessionId, event) { events.push(event) },
+      onNativeHandle() {
+        handleAttempts += 1
+        if (handleAttempts === 1) throw new Error('native handle persistence failed')
+      }
+    })
+
+    await expect(bridge.bind('semantic-acp', binding)).rejects.toThrow(
+      'native handle persistence failed'
+    )
+    expect(events).toEqual([])
+    expect(unsubscribed).toBe(true)
+    expect(closed).toBe(true)
+
+    const replacement = new FakeBinding()
+    await expect(bridge.bind('semantic-acp', replacement)).resolves.toBeUndefined()
+    await bridge.dispose()
+  })
+
+  it('rejects invalid synchronous initialization events before bind succeeds', async () => {
+    let closed = false
+    let persistedHandles = 0
+    const binding: AgentMuxAcpBinding = {
+      adapterId: 'fixture-acp',
+      sessionId: 'native-1',
+      onEvent(listener) {
+        listener({
+          type: 'activity',
+          operation: 'update',
+          activityId: 'assistant-1',
+          contentDelta: 'legacy delta'
+        } as unknown as AgentMuxAcpEvent)
+        return () => {}
+      },
+      async respondPermission() {},
+      async close() { closed = true }
+    }
+    const bridge = new AgentMuxAcpBridge({
+      onEvent(agentSessionId, event, evidence) {
+        agentTimelineMutationFromAcpEvent(agentSessionId, event, evidence)
+      },
+      onNativeHandle() { persistedHandles += 1 }
+    })
+
+    await expect(bridge.bind('semantic-acp', binding))
+      .rejects.toMatchObject({ code: 'INVALID_AGENT_TIMELINE' })
+    expect(closed).toBe(true)
+    expect(persistedHandles).toBe(0)
+  })
+
+  it('persists a new native Session handle before delivering Activity in that scope', async () => {
+    const order: string[] = []
+    let releaseHandle!: () => void
+    let newHandleStarted!: () => void
+    const handleGate = new Promise<void>((resolve) => { releaseHandle = resolve })
+    const handleStarted = new Promise<void>((resolve) => { newHandleStarted = resolve })
+    const bridge = new AgentMuxAcpBridge({
+      onEvent(_agentSessionId, event, evidence) {
+        if (event.type === 'activity') order.push(`activity:${evidence.acpSessionId}`)
+      },
+      async onNativeHandle(_agentSessionId, handle) {
+        if (handle.sessionId === 'native-1') {
+          order.push('handle:native-1')
+          return
+        }
+        order.push('handle:native-2:start')
+        newHandleStarted()
+        await handleGate
+        order.push('handle:native-2:done')
+      }
+    })
+    const binding = new FakeBinding('fixture-acp', 'native-1')
+    await bridge.bind('semantic-acp', binding)
+
+    binding.emit({ type: 'native-session', sessionId: 'native-2' })
+    binding.emit({
+      type: 'activity',
+      operation: 'append',
+      activityId: 'assistant-1',
+      kind: 'assistant_message',
+      status: 'complete',
+      title: 'Scoped response'
+    })
+    await handleStarted
+    expect(order).toEqual(['handle:native-1', 'handle:native-2:start'])
+    releaseHandle()
+    for (let index = 0; index < 100 && order.length < 4; index += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1))
+    }
+    expect(order).toEqual([
+      'handle:native-1',
+      'handle:native-2:start',
+      'handle:native-2:done',
+      'activity:native-2'
+    ])
     await bridge.dispose()
   })
 })

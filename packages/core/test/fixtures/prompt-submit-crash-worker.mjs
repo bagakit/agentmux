@@ -35,14 +35,19 @@ const store = {
   async claimStaleLifecycles(value) { return await base.claimStaleLifecycles(value) },
   async releaseLifecycle(value, retiredRuns) { await base.releaseLifecycle(value, retiredRuns) },
   async retireRuns(runs) { await base.retireRuns(runs) },
-  async commitLifecycle(value, next) { await base.commitLifecycle(value, next) }
+  async commitLifecycle(value, next) { await base.commitLifecycle(value, next) },
+  async loadTimeline(agentSessionId) { return await base.loadTimeline(agentSessionId) },
+  async applyTimelineMutation(mutation, signal) {
+    return await base.applyTimelineMutation(mutation, signal)
+  }
 }
 
 const client = await connectLocalAgentMux({ store })
 const session = await client.createAgent({
   agentSessionId: 'codex-prompt-crash',
   createOperationId: 'packed-prompt-crash-create',
-  agentId: 'codex',
+  providerId: 'codex',
+  executorId: 'codex',
   workspacePath: process.cwd(),
   commandOverride: fakeCodex
 })

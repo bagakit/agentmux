@@ -46,8 +46,39 @@ describe('built-in agent providers', () => {
         promptDelivery: 'positional-argv', readySignal: 'foreground-process',
         hook: 'native', permission: 'observe', resume: 'provider-native', acp: 'none',
         replyCorrelation: 'none'
+      },
+      {
+        id: 'grok', executable: 'grok', expectedProcess: 'grok',
+        promptDelivery: 'positional-argv', readySignal: 'foreground-process',
+        hook: 'none', permission: 'none', resume: 'none', acp: 'none',
+        replyCorrelation: 'none'
+      },
+      {
+        id: 'gemini', executable: 'gemini', expectedProcess: 'gemini',
+        promptDelivery: 'flag-prompt-interactive', readySignal: 'foreground-process',
+        hook: 'none', permission: 'none', resume: 'none', acp: 'none',
+        replyCorrelation: 'none'
+      },
+      {
+        id: 'antigravity', executable: 'agy', expectedProcess: 'agy',
+        promptDelivery: 'flag-prompt-interactive', readySignal: 'foreground-process',
+        hook: 'none', permission: 'none', resume: 'none', acp: 'none',
+        replyCorrelation: 'none'
+      },
+      {
+        id: 'cursor', executable: 'cursor-agent', expectedProcess: 'cursor-agent',
+        promptDelivery: 'positional-argv', readySignal: 'foreground-process',
+        hook: 'none', permission: 'none', resume: 'none', acp: 'none',
+        replyCorrelation: 'none'
       }
     ])
+  })
+
+  it('publishes each Provider timeline capability through the catalog', () => {
+    const catalog = new Map(providers.catalog().map((provider) => [provider.id, provider]))
+
+    expect(catalog.get('codex')?.capabilities.timeline).toBe('complete-events')
+    expect(catalog.get('traex')?.capabilities.timeline).toBe('unavailable')
   })
 
   it.each(['codex', 'claude', 'traex', 'pi'] as const)('delivers %s prompts as positional argv data', (id) => {
@@ -90,6 +121,43 @@ describe('built-in agent providers', () => {
     expect(plan.args).toEqual(['$(touch /tmp/not-executed)'])
   })
 
+  it('launches Grok with the argv separator that guards flag-looking prompts', () => {
+    expect(providers.get('grok').buildLaunch({
+      workspacePath: '/tmp/work', prompt: '--version', args: ['--model', 'demo'], env: {}
+    })).toEqual({ command: 'grok', args: ['--model', 'demo', '--', '--version'], env: {} })
+    // No prompt → no trailing separator.
+    expect(providers.get('grok').buildLaunch({
+      workspacePath: '/tmp/work', prompt: '', args: ['--model', 'demo'], env: {}
+    })).toEqual({ command: 'grok', args: ['--model', 'demo'], env: {} })
+  })
+
+  it.each(['gemini', 'antigravity'] as const)('launches %s via --prompt-interactive', (id) => {
+    const command = id === 'antigravity' ? 'agy' : 'gemini'
+    expect(providers.get(id).buildLaunch({
+      workspacePath: '/tmp/work', prompt: 'fix "quoted"\ntext', args: ['--yolo'], env: {}
+    })).toEqual({ command, args: ['--prompt-interactive', 'fix "quoted"\ntext', '--yolo'], env: {} })
+    // No prompt → interactive with no flag.
+    expect(providers.get(id).buildLaunch({
+      workspacePath: '/tmp/work', prompt: '', args: [], env: {}
+    })).toEqual({ command, args: [], env: {} })
+  })
+
+  it('launches Cursor with a positional prompt on cursor-agent', () => {
+    expect(providers.get('cursor').buildLaunch({
+      workspacePath: '/tmp/work', prompt: 'review this', args: ['--force'], env: {}
+    })).toEqual({ command: 'cursor-agent', args: ['--force', 'review this'], env: {} })
+  })
+
+  it.each(['grok', 'gemini', 'antigravity', 'cursor'] as const)('exposes %s as terminal-only (no resume/hook)', (id) => {
+    expect(() => providers.get(id).buildResumeLaunch({
+      workspacePath: '/tmp/work',
+      nativeHandle: { kind: 'provider', providerId: id, sessionId: 'native-x' },
+      prompt: 'continue now',
+      args: [],
+      env: {}
+    })).toThrow('does not support')
+  })
+
   it('plans interactive prompt submission with the Provider terminal protocol', () => {
     expect(providers.get('codex').terminalHandshake).toEqual({
       query: '\u001b[?u',
@@ -120,7 +188,7 @@ describe('built-in agent providers', () => {
         return executable === '/opt/claude'
       }
     }, '/opt/claude')).resolves.toMatchObject({
-      agentId: 'claude',
+      providerId: 'claude',
       executable: '/opt/claude',
       installed: true,
       capabilities: { hookEvents: true, providerResume: true, acp: false }

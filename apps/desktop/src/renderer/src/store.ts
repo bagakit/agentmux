@@ -1,23 +1,38 @@
 import { create } from 'zustand'
+import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware'
+import type { AgentCatalogEntry, AgentMuxCompositionRequest, AgentMuxCompositionResult } from '@agentmux/core'
 import type {
-  AgentActivity,
-  AgentDetection,
+  AgentLaunchResult,
+  AgentTimelineSnapshot,
   AppConfig,
   BrowserEvent,
   CreateWorkspacePathInput,
-  DesktopViewFocusResult,
-  DesktopViewFocusTarget,
   FileDocument,
   HostConfig,
   HostCheckResult,
+  ExecutorDetection,
   RuntimeEvent,
+  ScratchTopicSnapshot,
+  SessionControl,
   SessionSnapshot,
   WorkspaceSelectionResult
 } from '../../shared/contracts'
+import {
+  isScratchTopicId,
+  scratchTopicIdFromDirectoryName,
+  scratchTopicIdFromWorkspacePath,
+  workspaceOwnsSessionPath
+} from '../../shared/scratch-topics'
+import { isScratchWorkspaceId } from '../../shared/contracts'
 import { api } from './lib/api'
 import { rendererResourceOwnerCounts } from './lib/resource-owner-counts'
 import { terminalResourceOwnerCounts } from './lib/terminal-resource-owners'
-import { resolveWorkbenchViewFocus } from './lib/view-focus'
+import {
+  listWorkbenchViewRegions,
+  placeWorkbenchRegion,
+  resolveRelativeWorkbenchRegion,
+  resolveWorkbenchRegion
+} from './lib/composition'
 import {
   activateTab as activateLayoutTab,
   addTab,
@@ -27,10 +42,16 @@ import {
   moveTab as moveLayoutTab,
   removeTab as removeLayoutTab,
   setSplitRatio,
-  splitTab as splitLayoutTab,
+  moveTabToNewGroup as moveLayoutTabToNewGroup,
   type SplitDirection,
   type WorkspaceLayout
 } from './lib/workbench-layout'
+import { setWorkbenchRegionSplitRatio } from './lib/workbench-view-layout'
+import {
+  projectPersistedWorkbench,
+  restorePersistedWorkbench,
+  type PersistedWorkbench
+} from './lib/workbench-persistence'
 import { reduceBrowserEvent } from './lib/browser-state'
 import {
   reduceDocumentContent,
@@ -39,46 +60,76 @@ import {
   reduceDocumentSaving,
   reduceDocumentWriteError,
   reduceDocumentWritten,
-  reduceFileClosed,
   reduceFileDelete,
   reduceFileOpened,
   reduceFileRename,
+  findFileRenameProjectionCollision,
+  reconcileWorkbenchFileProjection,
   type FileDocumentIssue
 } from './lib/file-workbench-state'
 import {
   ownsSessionLaunch,
-  reduceRuntimeEvent,
+  pendingAgentLaunchEventId,
+  discardPendingAgentLaunch,
+  projectRuntimeEvent,
+  reduceAgentMembershipSnapshot,
+  reduceAgentSessionLaunchAttached,
+  reduceDetachedAgentLaunch,
   reduceSessionLaunchAttached,
   reduceSessionLaunchFailed,
+  reduceTimelineSnapshot,
+  type PendingAgentLaunch,
   type SessionViewMode
 } from './lib/session-state'
 import {
   TOOL_DOCK_DEFAULT_WIDTH,
   clampToolDockWidth,
-  type LauncherView,
   type WorkspaceTool
 } from './lib/surface-tool-dock'
 import {
-  createInitialWorkbench,
+  activeWorkbenchSurface,
+  addWorkbenchRegion,
+  createWorkbenchTab,
   documentKey,
-  paneForTab,
+  findWorkbenchRegion,
+  focusWorkbenchTabRegion,
+  initialWorkbenchRegionId,
+  tabGroupForTab,
+  removeWorkbenchRegion,
+  replaceWorkbenchRegion,
   sessionTabId,
   tabStillOpen,
+  titleWorkbenchSurface,
+  topicIdForSession,
+  workbenchSurfaces,
   workspaceForSession,
-  type AgentWorkbenchTab,
-  type BrowserWorkbenchTab,
-  type LauncherWorkbenchTab,
-  type TerminalWorkbenchTab,
+  type AgentWorkbenchSurface,
+  type BrowserWorkbenchSurface,
+  type FileWorkbenchSurface,
+  type LauncherWorkbenchSurface,
+  type TerminalWorkbenchSurface,
   type WorkbenchTab
 } from './lib/workbench-tabs'
+import {
+  applyWorkbenchViewCloseTopology,
+  hasAttachedSessionOutsideClosingViews,
+  planWorkbenchViewClose,
+  reconcileWorkbenchViewClose,
+  sameWorkbenchSurfaceOwner,
+  workbenchViewCloseAllowsSession,
+  workbenchViewCloseAllowsView,
+  type WorkbenchViewClosePlan,
+  type WorkbenchViewCloseReceipt,
+  type WorkbenchViewCloseResource
+} from './lib/workbench-view-close'
 import { isPathWithinSubtree, remapPathWithinSubtree } from './lib/workspace-paths'
 
 type ViewMode = SessionViewMode
 export type MainSurface = 'workbench' | 'board'
 export type AsyncCheckState = 'idle' | 'checking' | 'ready' | 'missing' | 'error'
-export type AgentDetectionState = {
+export type ExecutorDetectionState = {
   state: AsyncCheckState
-  result?: AgentDetection
+  result?: ExecutorDetection
   detail?: string
   observedAt?: number
 }
@@ -90,9 +141,16 @@ export type HostCheckState = {
 }
 
 type AppState = {
+  restoredWorkbench: PersistedWorkbench | null
   config: AppConfig | null
+  providerCatalog: AgentCatalogEntry[]
   sessions: SessionSnapshot[]
-  activities: Record<string, AgentActivity[]>
+  // The create page can render this shell directly, but it stays outside the ordinary
+  // Session projection until the user claims it.
+  warmTerminal: WarmTerminal | null
+  unclaimedTerminalSessionIds: string[]
+  timelines: Record<string, AgentTimelineSnapshot>
+  pendingAgentLaunches: Record<string, PendingAgentLaunch>
   activeWorkspaceId: string | null
   documents: Record<string, FileDocument>
   dirtyDocuments: Record<string, boolean>
@@ -103,11 +161,15 @@ type AppState = {
   lastActiveFileByWorkspace: Record<string, string | undefined>
   tabs: Record<string, WorkbenchTab>
   layouts: Record<string, WorkspaceLayout>
+  closingWorkbenchViews: Record<string, WorkbenchViewClosePlan>
+  workspaceFileRevisions: Record<string, number>
   viewModes: Record<string, ViewMode>
-  agentDetections: Record<string, AgentDetectionState>
+  executorDetections: Record<string, ExecutorDetectionState>
   hostChecks: Record<string, HostCheckState>
   mainSurface: MainSurface
+  projectRailOpen: boolean
   toolsOpen: boolean
+  tabMenuOpen: boolean
   workspaceTool: WorkspaceTool
   toolDockWidth: number
   loading: boolean
@@ -115,13 +177,20 @@ type AppState = {
   initialize(): Promise<() => void>
   selectWorkspace(id: string): Promise<void>
   activateWorkspaceSelection(result: WorkspaceSelectionResult): void
-  focusPane(workspaceId: string, paneId: string): void
-  activateTab(workspaceId: string, paneId: string, tabId: string): void
-  focusView(target: DesktopViewFocusTarget): DesktopViewFocusResult
-  selectSession(id: string, paneId?: string): void
-  openLauncher(paneId?: string, view?: LauncherView): void
-  setLauncherView(tabId: string, view: LauncherView): void
-  closeTab(workspaceId: string, paneId: string, tabId: string): Promise<void>
+  focusTabGroup(workspaceId: string, tabGroupId: string): void
+  activateTab(workspaceId: string, tabGroupId: string, tabId: string): void
+  executeComposition(
+    request: AgentMuxCompositionRequest,
+    signal?: AbortSignal
+  ): Promise<AgentMuxCompositionResult>
+  selectSession(id: string, tabGroupId?: string): void
+  openLauncher(tabGroupId?: string): void
+  closeTab(
+    workspaceId: string,
+    tabGroupId: string,
+    tabId: string,
+    options?: { keepAgentSessions?: boolean }
+  ): Promise<boolean>
   moveTab(
     workspaceId: string,
     tabId: string,
@@ -129,39 +198,72 @@ type AppState = {
     targetPaneId: string,
     targetIndex: number
   ): void
-  splitTab(
+  moveTabToNewGroup(
     workspaceId: string,
     tabId: string,
     sourcePaneId: string,
     targetPaneId: string,
     direction: SplitDirection
   ): void
+  focusRegion(workspaceId: string, tabId: string, regionId: string): void
+  splitRegion(
+    workspaceId: string,
+    tabId: string,
+    regionId: string,
+    direction: SplitDirection
+  ): void
+  closeRegion(workspaceId: string, tabId: string, regionId: string): Promise<void>
+  updateRegionSplitRatio(workspaceId: string, tabId: string, nodePath: string, ratio: number): void
   updateSplitRatio(workspaceId: string, nodePath: string, ratio: number): void
   setViewMode(sessionId: string, mode: ViewMode): void
   setMainSurface(surface: MainSurface): void
+  toggleProjectRail(): void
+  setTabMenuOpen(open: boolean): void
   setWorkspaceTool(tool: WorkspaceTool): void
   toggleTools(): void
   setToolDockWidth(width: number): void
-  detectAgents(hostId: string): Promise<void>
+  detectExecutors(hostId: string): Promise<void>
   checkHost(host: HostConfig): Promise<void>
-  openFile(path: string, paneId?: string): Promise<void>
+  openFile(path: string, tabGroupId?: string): Promise<void>
+  createScratchTopic(): Promise<ScratchTopicSnapshot>
+  openScratchTopic(topicId: string): Promise<void>
+  renameScratchTopic(topicId: string, title: string): Promise<ScratchTopicSnapshot>
   createPath(input: CreateWorkspacePathInput): Promise<void>
   renamePath(path: string, nextPath: string): Promise<void>
   deletePath(path: string): Promise<void>
-  updateDocument(tabId: string, content: string): void
-  saveDocument(tabId: string): Promise<void>
-  overwriteDocument(tabId: string): Promise<void>
-  reloadDocument(tabId: string): Promise<void>
+  updateDocument(tabId: string, content: string, regionId?: string): void
+  saveDocument(tabId: string, regionId?: string): Promise<void>
+  overwriteDocument(tabId: string, regionId?: string): Promise<void>
+  reloadDocument(tabId: string, regionId?: string): Promise<void>
   refreshDocument(workspaceId: string, path: string): Promise<void>
-  launchBoardAgent(workspaceId: string, agentId: string, prompt: string): Promise<void>
-  launchAgent(agentId: string, prompt: string, paneId: string, launcherTabId?: string): Promise<void>
-  launchTerminal(paneId: string, launcherTabId?: string, workspacePath?: string): Promise<void>
-  createBrowser(paneId: string, launcherTabId?: string): Promise<void>
+  launchBoardAgent(workspaceId: string, executorId: string, prompt: string): Promise<void>
+  launchAgent(
+    executorId: string,
+    prompt: string,
+    tabGroupId: string,
+    launcher?: { tabId: string; regionId: string }
+  ): Promise<void>
+  launchTerminal(
+    tabGroupId: string,
+    launcher?: { tabId: string; regionId: string },
+    workspacePath?: string
+  ): Promise<void>
+  // Idempotent for one host + cwd. Failures stay local to the create page.
+  prewarmTerminal(workspaceId: string): void
+  // Claims the exact warm shell or uses the ordinary Terminal launch path if none exists.
+  promoteWarmTerminal(
+    tabGroupId: string,
+    launcher?: { tabId: string; regionId: string }
+  ): Promise<void>
+  createBrowser(tabGroupId: string, launcher?: { tabId: string; regionId: string }): Promise<void>
   applyBrowserEvent(event: BrowserEvent): void
   send(sessionId: string, text: string): Promise<void>
   interrupt(sessionId: string): Promise<void>
   refreshSession(sessionId: string): Promise<void>
+  recoverSession(sessionId: string): Promise<void>
   stopSession(sessionId: string): Promise<void>
+  canonicalizeAgentLaunch(result: AgentLaunchResult): Promise<AgentLaunchResult | null>
+  resyncTimeline(sessionId: string): Promise<void>
   applyEvent(event: RuntimeEvent): void
   setConfig(config: AppConfig): void
   reportError(error: unknown): void
@@ -171,19 +273,160 @@ function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-export function agentDetectionKey(hostId: string, agentId: string): string {
-  return `${hostId}\0${agentId}`
+async function settleWorkbenchViewCloseResources<Resource extends WorkbenchViewCloseResource>(
+  resources: readonly Resource[],
+  close: (resource: Resource) => Promise<void>
+): Promise<WorkbenchViewCloseReceipt[]> {
+  const results = await Promise.allSettled(resources.map(close))
+  return results.map((result, index) => result.status === 'fulfilled'
+    ? { key: resources[index]!.key, status: 'fulfilled' }
+    : { key: resources[index]!.key, status: 'rejected', reason: result.reason })
+}
+
+function workbenchViewCloseFailure(receipts: readonly WorkbenchViewCloseReceipt[]): Error {
+  const reasons = receipts.flatMap((receipt) => receipt.status === 'rejected'
+    ? [receipt.reason instanceof Error ? receipt.reason : new Error(String(receipt.reason))]
+    : [])
+  return reasons.length === 1
+    ? reasons[0]!
+    : new AggregateError(reasons, 'Multiple View resources could not be closed.')
+}
+
+function sessionOwnsControl(session: SessionSnapshot, control: SessionControl): boolean {
+  return session.control.kind === control.kind &&
+    session.control.hostId === control.hostId &&
+    session.control.run.runId === control.run.runId
+}
+
+function hasAttachedSessionView(tabs: Readonly<Record<string, WorkbenchTab>>, sessionId: string): boolean {
+  return Object.values(tabs).some((tab) => workbenchSurfaces(tab).some((surface) => (
+    (surface.kind === 'agent' || surface.kind === 'terminal') &&
+    surface.phase === 'attached' &&
+    surface.sessionId === sessionId
+  )))
+}
+
+function projectRecoveredSession(
+  state: AppState,
+  previousSessionId: string,
+  session: SessionSnapshot
+): Pick<AppState, 'sessions' | 'tabs'> {
+  const tabs = { ...state.tabs }
+  if (session.id !== previousSessionId) {
+    for (const tab of Object.values(state.tabs)) {
+      let nextTab = tab
+      for (const surface of workbenchSurfaces(tab)) {
+        if (
+          (surface.kind === 'terminal' || surface.kind === 'agent') &&
+          surface.sessionId === previousSessionId
+        ) {
+          nextTab = replaceWorkbenchRegion(nextTab, surface.regionId, {
+            ...surface,
+            sessionId: session.id
+          })
+        }
+      }
+      if (nextTab !== tab) tabs[tab.id] = nextTab
+    }
+  }
+  return {
+    tabs,
+    sessions: [
+      ...state.sessions.filter((item) => item.id !== previousSessionId && item.id !== session.id),
+      session
+    ]
+  }
+}
+
+export function executorDetectionKey(hostId: string, executorId: string): string {
+  return `${hostId}\0${executorId}`
 }
 
 const detectionRequestIds = new Map<string, number>()
 const hostCheckRequestIds = new Map<string, number>()
+const timelineResyncs = new Map<string, { requested: boolean; promise: Promise<void> }>()
 const fileDocumentLifetimes = new Map<string, number>()
 const fileReadRequestIds = new Map<string, number>()
 const fileReadInFlightCounts = new Map<string, number>()
 const fileInvalidationSequences = new Map<string, number>()
 const fileSaveTails = new Map<string, Promise<void>>()
+const workspaceFileMutationTails = new Map<string, Promise<void>>()
 const fileOpenRequests = new Map<string, Promise<boolean>>()
-let runtimeSubscriptionCount = 0
+
+function fileSurface(tab: WorkbenchTab | undefined, regionId?: string): FileWorkbenchSurface | null {
+  if (!tab) return null
+  const surface = regionId ? tab.regions[regionId] : titleWorkbenchSurface(tab)
+  return surface?.kind === 'file' ? surface : null
+}
+
+function isScratchTopicDocument(surface: FileWorkbenchSurface): boolean {
+  const segments = surface.path.split('/').filter(Boolean)
+  const directoryName = segments.at(-2)
+  const fileName = segments.at(-1)
+  return isScratchWorkspaceId(surface.workspaceId) &&
+    fileName === 'topic.md' &&
+    scratchTopicIdFromDirectoryName(directoryName ?? '') !== null
+}
+
+function openFileRefs(tabs: Readonly<Record<string, WorkbenchTab>>): Map<string, FileWorkbenchSurface> {
+  return new Map(Object.values(tabs).flatMap((tab) => workbenchSurfaces(tab).flatMap((surface) => (
+    surface.kind === 'file' ? [[documentKey(surface.workspaceId, surface.path), surface] as const] : []
+  ))))
+}
+
+async function disposeClosedFileOwners(
+  previousTabs: Readonly<Record<string, WorkbenchTab>>,
+  nextTabs: Readonly<Record<string, WorkbenchTab>>
+): Promise<void> {
+  const previous = openFileRefs(previousTabs)
+  const next = openFileRefs(nextTabs)
+  await Promise.all([...previous].flatMap(([key, surface]) => {
+    if (next.has(key)) return []
+    advanceDocumentLifetime(key)
+    return [api.files.unobserve(surface.workspaceId, surface.path)]
+  }))
+}
+
+async function withWorkspaceFileMutation<T>(
+  workspaceId: string,
+  path: string,
+  operation: () => Promise<T>
+): Promise<T> {
+  const previousMutation = workspaceFileMutationTails.get(workspaceId) ?? Promise.resolve()
+  let releaseMutation!: () => void
+  const mutation = new Promise<void>((resolve) => { releaseMutation = resolve })
+  const tail = previousMutation.catch(() => {}).then(async () => await mutation)
+  workspaceFileMutationTails.set(workspaceId, tail)
+  const prefix = `${workspaceId}\0`
+  const saves = [...fileSaveTails.entries()].flatMap(([key, save]) => (
+    key.startsWith(prefix) && isPathWithinSubtree(key.slice(prefix.length), path) ? [save] : []
+  ))
+  try {
+    await previousMutation.catch(() => {})
+    await Promise.all(saves.map(async (save) => await save.catch(() => {})))
+    return await operation()
+  } finally {
+    releaseMutation()
+    await tail
+    if (workspaceFileMutationTails.get(workspaceId) === tail) {
+      workspaceFileMutationTails.delete(workspaceId)
+    }
+  }
+}
+
+function transferFileSaveTail(workspaceId: string, path: string, nextPath: string): void {
+  const key = documentKey(workspaceId, path)
+  const tail = fileSaveTails.get(key)
+  if (!tail) return
+  const nextKey = documentKey(workspaceId, nextPath)
+  const previous = fileSaveTails.get(nextKey) ?? Promise.resolve()
+  const transferred = Promise.all([previous.catch(() => {}), tail.catch(() => {})]).then(() => {})
+  if (fileSaveTails.get(key) === tail) fileSaveTails.delete(key)
+  fileSaveTails.set(nextKey, transferred)
+  void transferred.finally(() => {
+    if (fileSaveTails.get(nextKey) === transferred) fileSaveTails.delete(nextKey)
+  })
+}
 
 function documentLifetime(key: string): number {
   return fileDocumentLifetimes.get(key) ?? 0
@@ -194,30 +437,6 @@ function advanceDocumentLifetime(key: string): number {
   fileDocumentLifetimes.set(key, lifetime)
   fileReadRequestIds.set(key, (fileReadRequestIds.get(key) ?? 0) + 1)
   return lifetime
-}
-
-if (typeof window !== 'undefined') {
-  window.addEventListener('agentmux:resource-owner-counts', (event) => {
-    const target = event as CustomEvent<Record<string, number | boolean>>
-    const resourceWindow = window as typeof window & { __agentmuxMonacoModelCount?: () => number }
-    Object.assign(target.detail, rendererResourceOwnerCounts({
-      documentCount: Object.keys(useAppStore.getState().documents).length,
-      runtimeSubscriptionCount,
-      terminalOwners: terminalResourceOwnerCounts(),
-      ...(resourceWindow.__agentmuxMonacoModelCount
-        ? { monacoModelCount: resourceWindow.__agentmuxMonacoModelCount }
-        : {})
-    }))
-    target.detail.observed = true
-  })
-}
-
-function newPaneId(): string {
-  return `pane-${crypto.randomUUID()}`
-}
-
-function newLauncherTab(workspaceId: string, view: LauncherView = 'picker'): LauncherWorkbenchTab {
-  return { id: `launcher:${crypto.randomUUID()}`, kind: 'launcher', workspaceId, view }
 }
 
 async function refreshFileDocument(
@@ -252,44 +471,40 @@ async function refreshFileDocument(
   }
 }
 
-async function enqueueFileSave(tabId: string, overwrite: boolean): Promise<void> {
+async function enqueueFileSave(
+  tabId: string,
+  overwrite: boolean,
+  regionId?: string
+): Promise<void> {
   const initialTab = useAppStore.getState().tabs[tabId]
-  if (initialTab?.kind !== 'file') return
-  const key = documentKey(initialTab.workspaceId, initialTab.path)
+  const initialSurface = fileSurface(initialTab, regionId)
+  if (!initialSurface) return
+  const key = documentKey(initialSurface.workspaceId, initialSurface.path)
   const previous = fileSaveTails.get(key) ?? Promise.resolve()
-  const operation = previous.catch(() => {}).then(async () => {
+  const mutation = workspaceFileMutationTails.get(initialSurface.workspaceId) ?? Promise.resolve()
+  const operation = Promise.all([previous.catch(() => {}), mutation.catch(() => {})]).then(async () => {
     const state = useAppStore.getState()
     const tab = state.tabs[tabId]
-    if (tab?.kind !== 'file') return
-    const currentKey = documentKey(tab.workspaceId, tab.path)
+    const surface = fileSurface(tab, regionId)
+    if (!surface) return
+    const currentKey = documentKey(surface.workspaceId, surface.path)
     const document = state.documents[currentKey]
     const issue = state.documentIssues[currentKey]
     if (!document) return
     const hasOverwriteConflict = overwrite && (issue?.kind === 'changed' || issue?.kind === 'deleted')
     if (!state.dirtyDocuments[currentKey] && !hasOverwriteConflict) return
-    if (!overwrite && (issue?.kind === 'changed' || issue?.kind === 'deleted' || issue?.kind === 'read-error')) {
-      return
-    }
+    if (!overwrite && (issue?.kind === 'changed' || issue?.kind === 'deleted' || issue?.kind === 'read-error')) return
     if (overwrite && issue?.kind !== 'changed' && issue?.kind !== 'deleted') return
     const generation = state.documentGenerations[currentKey] ?? 0
     const observationGeneration = state.documentObservationGenerations[currentKey] ?? 0
     const savedLifetime = documentLifetime(currentKey)
     let expectedRevision: string | null = document.revision
-    if (overwrite) {
-      if (issue?.kind === 'changed') expectedRevision = issue.observed.revision
-      else if (issue?.kind === 'deleted') expectedRevision = null
-      else return
-    }
-    useAppStore.setState((current) => reduceDocumentSaving(
-      current,
-      tab.workspaceId,
-      tab.path,
-      true
-    ))
+    if (overwrite) expectedRevision = issue?.kind === 'changed' ? issue.observed.revision : null
+    useAppStore.setState((current) => reduceDocumentSaving(current, surface.workspaceId, surface.path, true))
     let result
     try {
-      result = await api.files.write(tab.workspaceId, {
-        path: tab.path,
+      result = await api.files.write(surface.workspaceId, {
+        path: surface.path,
         content: document.content,
         expectedRevision
       })
@@ -306,44 +521,40 @@ async function enqueueFileSave(tabId: string, overwrite: boolean): Promise<void>
     if (result.status === 'written') {
       const receiptState = useAppStore.getState()
       const receiptIssue = receiptState.documentIssues[currentKey]
-      const hasObservedDiskFact =
-        receiptIssue?.kind === 'changed' ||
-        receiptIssue?.kind === 'deleted' ||
-        receiptIssue?.kind === 'read-error'
+      const hasObservedDiskFact = receiptIssue?.kind === 'changed' || receiptIssue?.kind === 'deleted' || receiptIssue?.kind === 'read-error'
       const needsReconciliation =
         (fileReadInFlightCounts.get(currentKey) ?? 0) > 0 ||
-        ((receiptState.documentObservationGenerations[currentKey] ?? 0) !== observationGeneration &&
-          !hasObservedDiskFact)
+        ((receiptState.documentObservationGenerations[currentKey] ?? 0) !== observationGeneration && !hasObservedDiskFact)
       fileReadRequestIds.set(currentKey, (fileReadRequestIds.get(currentKey) ?? 0) + 1)
-      useAppStore.setState((current) => reduceDocumentWritten(
-        current,
-        tab.workspaceId,
-        tab.path,
-        generation,
-        result.revision,
-        expectedRevision,
-        observationGeneration
-      ))
-      if (needsReconciliation) await refreshFileDocument(tab.workspaceId, tab.path, savedLifetime)
+      useAppStore.setState((current) => {
+        const next = reduceDocumentWritten(
+          current,
+          surface.workspaceId,
+          surface.path,
+          generation,
+          result.revision,
+          expectedRevision,
+          observationGeneration
+        )
+        return isScratchTopicDocument(surface)
+          ? {
+              ...next,
+              workspaceFileRevisions: {
+                ...current.workspaceFileRevisions,
+                [surface.workspaceId]: (current.workspaceFileRevisions[surface.workspaceId] ?? 0) + 1
+              }
+            }
+          : next
+      })
+      if (needsReconciliation) await refreshFileDocument(surface.workspaceId, surface.path, savedLifetime)
       return
     }
     if (result.status === 'error') {
-      useAppStore.setState((current) => reduceDocumentWriteError(
-        current,
-        tab.workspaceId,
-        tab.path,
-        result.code,
-        result.message
-      ))
+      useAppStore.setState((current) => reduceDocumentWriteError(current, surface.workspaceId, surface.path, result.code, result.message))
       return
     }
-    useAppStore.setState((current) => reduceDocumentSaving(
-      current,
-      tab.workspaceId,
-      tab.path,
-      false
-    ))
-    await refreshFileDocument(tab.workspaceId, tab.path, savedLifetime)
+    useAppStore.setState((current) => reduceDocumentSaving(current, surface.workspaceId, surface.path, false))
+    await refreshFileDocument(surface.workspaceId, surface.path, savedLifetime)
   })
   const tail = operation.then(() => {}, () => {})
   fileSaveTails.set(key, tail)
@@ -354,10 +565,170 @@ async function enqueueFileSave(tabId: string, overwrite: boolean): Promise<void>
   }
 }
 
-export const useAppStore = create<AppState>((set, get) => ({
+type SessionMembershipResync = {
+  events: Array<{
+    event: RuntimeEvent
+    pendingLaunchAgentSessionId: string | null
+  }>
+  overflowed: boolean
+}
+const MAX_SESSION_MEMBERSHIP_EVENTS = 256
+let sessionMembershipResync: SessionMembershipResync | null = null
+let runtimeSubscriptionCount = 0
+
+function enqueueSessionMembershipEvent(
+  entry: SessionMembershipResync,
+  event: RuntimeEvent,
+  pendingLaunchAgentSessionId: string | null = null
+): void {
+  entry.events.push({ event, pendingLaunchAgentSessionId })
+  if (entry.events.length <= MAX_SESSION_MEMBERSHIP_EVENTS) return
+  entry.events.shift()
+  entry.overflowed = true
+}
+
+function startSessionMembershipResync(event: RuntimeEvent): void {
+  if (sessionMembershipResync) {
+    enqueueSessionMembershipEvent(sessionMembershipResync, event)
+    return
+  }
+  const entry: SessionMembershipResync = {
+    events: [{ event, pendingLaunchAgentSessionId: null }],
+    overflowed: false
+  }
+  sessionMembershipResync = entry
+  void (async () => {
+    try {
+      while (sessionMembershipResync === entry) {
+        // Everything already queued happened before this snapshot and is covered by its
+        // canonical baseline. Only events that arrive while the snapshot is in flight
+        // need ordered replay afterward.
+        entry.events.length = 0
+        entry.overflowed = false
+        const snapshot = await api.sessions.snapshot()
+        if (entry.overflowed) continue
+        const events = entry.events.splice(0)
+        let membershipGap = false
+        const timelineGaps = new Set<string>()
+        useAppStore.setState((state) => {
+          const protectedAgentSessionIds = new Set(events.flatMap((pending) => (
+            pending.pendingLaunchAgentSessionId ? [pending.pendingLaunchAgentSessionId] : []
+          )))
+          let projected = reduceAgentMembershipSnapshot(state, snapshot, protectedAgentSessionIds)
+          for (const pending of events) {
+            if (
+              pending.pendingLaunchAgentSessionId &&
+              pendingAgentLaunchEventId(projected, pending.event) === pending.pendingLaunchAgentSessionId
+            ) {
+              continue
+            }
+            const reduced = projectRuntimeEvent(projected, pending.event)
+            projected = reduced.state
+            membershipGap ||= reduced.sessionMembershipGap === true
+            if (reduced.timelineGapSessionId) timelineGaps.add(reduced.timelineGapSessionId)
+          }
+          return projected
+        })
+        for (const sessionId of timelineGaps) void useAppStore.getState().resyncTimeline(sessionId)
+        if (!membershipGap) return
+      }
+    } catch (error) {
+      useAppStore.getState().reportError(error)
+    } finally {
+      if (sessionMembershipResync === entry) sessionMembershipResync = null
+    }
+  })()
+}
+
+type WarmTerminal = {
+  // Prevents a shell from being reused for the wrong host or working directory.
+  key: string
+  ready: Promise<SessionSnapshot | null>
+  session: SessionSnapshot | null
+}
+
+export function warmTerminalKey(hostId: string, workspacePath: string): string {
+  return `${hostId}\0${workspacePath}`
+}
+
+async function stopTerminalSession(session: SessionSnapshot): Promise<boolean> {
+  try {
+    await api.sessions.stop(session.control)
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function stopWarmTerminal(held: WarmTerminal | null): Promise<string | null> {
+  if (!held) return null
+  const session = await held.ready.catch(() => null)
+  if (!session) return null
+  return await stopTerminalSession(session) ? session.id : null
+}
+
+function trackUnclaimedTerminalSession(ids: readonly string[], sessionId: string): string[] {
+  return ids.includes(sessionId) ? [...ids] : [...ids, sessionId]
+}
+
+function forgetUnclaimedTerminalSession(ids: readonly string[], sessionId: string): string[] {
+  return ids.filter((id) => id !== sessionId)
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('agentmux:resource-owner-counts', (event) => {
+    const target = event as CustomEvent<Record<string, number | boolean>>
+    const resourceWindow = window as typeof window & { __agentmuxMonacoModelCount?: () => number }
+    Object.assign(target.detail, rendererResourceOwnerCounts({
+      documentCount: Object.keys(useAppStore.getState().documents).length,
+      runtimeSubscriptionCount,
+      terminalOwners: terminalResourceOwnerCounts(),
+      ...(resourceWindow.__agentmuxMonacoModelCount
+        ? { monacoModelCount: resourceWindow.__agentmuxMonacoModelCount }
+        : {})
+    }))
+    target.detail.observed = true
+  })
+}
+
+function newTabGroupId(): string {
+  return `tab-group:${crypto.randomUUID()}`
+}
+
+function newRegionId(): string {
+  return `region:${crypto.randomUUID()}`
+}
+
+function newLauncherTab(workspaceId: string): WorkbenchTab {
+  const tabId = `launcher:${crypto.randomUUID()}`
+  const surface: LauncherWorkbenchSurface = {
+    regionId: initialWorkbenchRegionId(tabId),
+    kind: 'launcher',
+    workspaceId
+  }
+  return createWorkbenchTab(tabId, surface)
+}
+
+type PersistedAppState = {
+  restoredWorkbench: PersistedWorkbench
+  unclaimedTerminalSessionIds: string[]
+}
+
+const nonBrowserWorkbenchStorage: StateStorage = {
+  getItem: () => null,
+  setItem: () => undefined,
+  removeItem: () => undefined
+}
+
+export const useAppStore = create<AppState>()(persist<AppState, [], [], PersistedAppState>((set, get) => ({
+  restoredWorkbench: null,
   config: null,
+  providerCatalog: [],
   sessions: [],
-  activities: {},
+  warmTerminal: null,
+  unclaimedTerminalSessionIds: [],
+  timelines: {},
+  pendingAgentLaunches: {},
   activeWorkspaceId: null,
   documents: {},
   dirtyDocuments: {},
@@ -368,28 +739,36 @@ export const useAppStore = create<AppState>((set, get) => ({
   lastActiveFileByWorkspace: {},
   tabs: {},
   layouts: {},
+  closingWorkbenchViews: {},
+  workspaceFileRevisions: {},
   viewModes: {},
-  agentDetections: {},
+  executorDetections: {},
   hostChecks: {},
   mainSurface: 'workbench',
+  projectRailOpen: true,
   toolsOpen: true,
+  tabMenuOpen: false,
   workspaceTool: 'files-branches',
   toolDockWidth: TOOL_DOCK_DEFAULT_WIDTH,
   loading: true,
   error: null,
   async initialize() {
     const pendingSessionEvents: RuntimeEvent[] = []
+    let sessionEventBufferOverflowed = false
     const pendingBrowserEvents: BrowserEvent[] = []
     let booting = true
     const disposeSessions = api.sessions.onEvent((event) => {
       if (booting) {
         if (event.event.type !== 'terminal-output') {
           pendingSessionEvents.push(event)
-          if (pendingSessionEvents.length > 256) pendingSessionEvents.shift()
+          if (pendingSessionEvents.length > 256) {
+            pendingSessionEvents.shift()
+            sessionEventBufferOverflowed = true
+          }
         }
         return
       }
-      get().applyEvent(event)
+      if (event.event.type !== 'terminal-output') get().applyEvent(event)
     })
     const disposeBrowsers = api.browser.onEvent((event) => {
       if (booting) {
@@ -398,7 +777,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       else get().applyBrowserEvent(event)
     })
-    const disposeViewFocus = api.views.onFocusRequest((target) => get().focusView(target))
+    const disposeComposition = api.composition.onRequest((request, signal) => (
+      get().executeComposition(request, signal)
+    ))
     const disposeFileInvalidations = api.files.onInvalidated((event) => {
       const key = documentKey(event.workspaceId, event.path)
       fileInvalidationSequences.set(key, (fileInvalidationSequences.get(key) ?? 0) + 1)
@@ -410,23 +791,64 @@ export const useAppStore = create<AppState>((set, get) => ({
       runtimeSubscriptionCount -= 4
       disposeSessions()
       disposeBrowsers()
-      disposeViewFocus()
+      disposeComposition()
       disposeFileInvalidations()
+      void stopWarmTerminal(get().warmTerminal).then((sessionId) => {
+        if (!sessionId) return
+        set((state) => ({
+          unclaimedTerminalSessionIds: forgetUnclaimedTerminalSession(
+            state.unclaimedTerminalSessionIds,
+            sessionId
+          )
+        }))
+      })
+      set({ warmTerminal: null })
     }
     try {
-      const [config, snapshot] = await Promise.all([api.config.get(), api.sessions.snapshot()])
+      const [config, initialSnapshot, providerCatalog] = await Promise.all([
+        api.config.get(),
+        api.sessions.snapshot(),
+        api.providers.list()
+      ])
+      let snapshot = initialSnapshot
+      let failedCleanupIds = new Set<string>()
+      while (true) {
+        const unclaimedSessionIds = new Set(get().unclaimedTerminalSessionIds)
+        failedCleanupIds = new Set<string>()
+        await Promise.all(snapshot.sessions.flatMap((session) => {
+          if (!unclaimedSessionIds.has(session.id)) return []
+          return [api.sessions.stop(session.control).catch(() => {
+            failedCleanupIds.add(session.id)
+          })]
+        }))
+        if (!sessionEventBufferOverflowed) break
+        pendingSessionEvents.length = 0
+        sessionEventBufferOverflowed = false
+        snapshot = await api.sessions.snapshot()
+      }
+      const unclaimedSessionIds = new Set(get().unclaimedTerminalSessionIds)
+      const visibleSessions = snapshot.sessions.filter((session) => !unclaimedSessionIds.has(session.id))
       const firstWorkspace = config.workspaces[0]?.id ?? null
-      const workbench = createInitialWorkbench(config, snapshot.sessions, newPaneId)
-      set({
+      const workbench = restorePersistedWorkbench({
         config,
-        sessions: snapshot.sessions,
-        activities: snapshot.activities,
+        sessions: visibleSessions,
+        persisted: get().restoredWorkbench,
+        createTabGroupId: newTabGroupId
+      })
+      set({
+        restoredWorkbench: null,
+        config,
+        providerCatalog,
+        sessions: visibleSessions,
+        unclaimedTerminalSessionIds: [...failedCleanupIds],
+        timelines: snapshot.timelines,
+        pendingAgentLaunches: {},
         activeWorkspaceId: firstWorkspace,
         tabs: workbench.tabs,
         layouts: workbench.layouts,
         loading: false
       })
-      if (firstWorkspace) await get().selectWorkspace(firstWorkspace)
+      if (firstWorkspace) void get().selectWorkspace(firstWorkspace)
       booting = false
       for (const event of pendingSessionEvents) get().applyEvent(event)
       for (const event of pendingBrowserEvents) get().applyBrowserEvent(event)
@@ -444,16 +866,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ activeWorkspaceId: id, mainSurface: 'workbench', error: null })
     const state = get()
     if (!state.layouts[id]) {
-      const sessionTabIds = state.sessions.flatMap((session) => {
-        const workspace = state.config?.workspaces.find((candidate) => candidate.id === id)
-        return workspace &&
-          session.hostId === workspace.hostId &&
-          session.workspacePath === workspace.path
-          ? [sessionTabId(session.id)]
-          : []
-      })
       set((current) => ({
-        layouts: { ...current.layouts, [id]: createWorkspaceLayout(newPaneId(), sessionTabIds) }
+        layouts: { ...current.layouts, [id]: createWorkspaceLayout(newTabGroupId()) }
       }))
     }
   },
@@ -461,152 +875,563 @@ export const useAppStore = create<AppState>((set, get) => ({
     const workspace = result.workspace
     set((state) => {
       const existingLayout = state.layouts[workspace.id]
-      const tabs = { ...state.tabs }
-      const sessionTabIds = state.sessions.flatMap((session) => {
-        if (session.hostId !== workspace.hostId || session.workspacePath !== workspace.path) return []
-        const tab: AgentWorkbenchTab | TerminalWorkbenchTab = {
-          id: sessionTabId(session.id),
-          kind: session.kind,
-          phase: 'attached',
-          workspaceId: workspace.id,
-          sessionId: session.id
-        }
-        tabs[tab.id] = tab
-        return [tab.id]
-      })
       return {
         config: result.config,
         activeWorkspaceId: workspace.id,
         mainSurface: 'workbench',
         error: null,
-        tabs,
         layouts: existingLayout
           ? state.layouts
-          : { ...state.layouts, [workspace.id]: createWorkspaceLayout(newPaneId(), sessionTabIds) }
+          : { ...state.layouts, [workspace.id]: createWorkspaceLayout(newTabGroupId()) }
       }
     })
   },
-  focusPane(workspaceId, paneId) {
+  focusTabGroup(workspaceId, tabGroupId) {
     const layout = get().layouts[workspaceId]
-    if (!layout || !findGroup(layout, paneId)) return
+    if (!layout || !findGroup(layout, tabGroupId)) return
     set((state) => ({
-      layouts: { ...state.layouts, [workspaceId]: focusGroup(layout, paneId) }
+      layouts: { ...state.layouts, [workspaceId]: focusGroup(layout, tabGroupId) }
     }))
   },
-  activateTab(workspaceId, paneId, tabId) {
+  activateTab(workspaceId, tabGroupId, tabId) {
     const layout = get().layouts[workspaceId]
     if (!layout) return
     const tab = get().tabs[tabId]
+    const surface = tab ? titleWorkbenchSurface(tab) : null
     set((state) => ({
       layouts: {
         ...state.layouts,
-        [workspaceId]: activateLayoutTab(layout, paneId, tabId)
+        [workspaceId]: activateLayoutTab(layout, tabGroupId, tabId)
       },
-      ...(tab?.kind === 'file'
-        ? { lastActiveFileByWorkspace: { ...state.lastActiveFileByWorkspace, [workspaceId]: tab.path } }
+      ...(surface?.kind === 'file'
+        ? { lastActiveFileByWorkspace: { ...state.lastActiveFileByWorkspace, [workspaceId]: surface.path } }
         : {})
     }))
   },
-  focusView(target) {
+  async executeComposition(request, signal) {
+    const cancellationError = (): Error & { code?: string } => {
+      if (signal?.reason instanceof Error) return signal.reason
+      return Object.assign(new Error('Desktop Composition request was cancelled.'), {
+        code: 'COMPOSITION_CANCELLED'
+      })
+    }
+    if (signal?.aborted) throw cancellationError()
     const state = get()
-    const resolved = resolveWorkbenchViewFocus({
+    if (request.operation === 'context') {
+      const resolved = resolveWorkbenchRegion({
+        sessions: state.sessions,
+        tabs: state.tabs,
+        layouts: state.layouts,
+        target: { kind: 'agent-session', agentSessionId: request.caller.agentSessionId }
+      })
+      if (resolved.kind !== 'agent') {
+        throw Object.assign(
+          new Error('Composition caller is not an Agent Region.'),
+          { code: 'CALLER_REGION_INVALID' }
+        )
+      }
+      return {
+        operation: request.operation,
+        context: {
+          agentSessionId: resolved.agentSessionId,
+          workspaceId: resolved.workspaceId,
+          viewId: resolved.viewId,
+          regionId: resolved.regionId,
+          tabGroupId: resolved.tabGroupId,
+          regions: listWorkbenchViewRegions({
+            sessions: state.sessions,
+            tabs: state.tabs,
+            layouts: state.layouts
+          }, resolved.viewId),
+          executors: Object.entries(state.config?.executors ?? {}).map(([executorId, executor]) => ({
+            executorId,
+            label: executor.label,
+            providerId: executor.providerId,
+            available: state.executorDetections[
+              executorDetectionKey(
+                state.config?.workspaces.find((workspace) => workspace.id === resolved.workspaceId)?.hostId ?? 'local',
+                executorId
+              )
+            ]?.state === 'ready'
+          }))
+        }
+      }
+    }
+    if (request.operation === 'region.focus') {
+      const resolved = resolveWorkbenchRegion({
+        sessions: state.sessions,
+        tabs: state.tabs,
+        layouts: state.layouts,
+        target: { kind: 'region', regionId: request.regionId }
+      })
+      const layout = state.layouts[resolved.workspaceId]!
+      const tab = state.tabs[resolved.viewId]!
+      set({
+        activeWorkspaceId: resolved.workspaceId,
+        mainSurface: 'workbench',
+        tabs: {
+          ...state.tabs,
+          [tab.id]: focusWorkbenchTabRegion(tab, resolved.regionId)
+        },
+        layouts: {
+          ...state.layouts,
+          [resolved.workspaceId]: activateLayoutTab(
+            layout,
+            resolved.tabGroupId,
+            resolved.viewId
+          )
+        }
+      })
+      return { operation: request.operation, region: resolved }
+    }
+
+    const relativeRegion = resolveRelativeWorkbenchRegion({
       sessions: state.sessions,
       tabs: state.tabs,
       layouts: state.layouts,
-      target
+      callerAgentSessionId: request.caller.agentSessionId,
+      relativeTo: request.relativeTo
     })
-    const layout = state.layouts[resolved.workspaceId]!
-    set({
-      activeWorkspaceId: resolved.workspaceId,
-      mainSurface: 'workbench',
-      layouts: {
-        ...state.layouts,
-        [resolved.workspaceId]: activateLayoutTab(layout, resolved.paneId, resolved.viewId)
+    if (!workbenchViewCloseAllowsView(state.closingWorkbenchViews, relativeRegion.viewId)) {
+      throw Object.assign(new Error('Composition target View is closing.'), {
+        code: 'COMPOSITION_VIEW_OWNER_LOST'
+      })
+    }
+    const layout = state.layouts[relativeRegion.workspaceId]
+    if (!layout) {
+      throw Object.assign(new Error('Composition target Workspace is not open.'), {
+        code: 'WORKSPACE_NOT_OPEN'
+      })
+    }
+
+    if (request.operation === 'region.open') {
+      const session = state.sessions.find((candidate) => candidate.id === request.agentSessionId)
+      if (!session || session.kind !== 'agent') {
+        throw Object.assign(new Error('Agent Session is not available to the Desktop.'), {
+          code: 'UNKNOWN_AGENT_SESSION'
+        })
       }
+      if (!workbenchViewCloseAllowsSession(state.closingWorkbenchViews, session.id)) {
+        throw Object.assign(new Error('Agent Session is closing.'), { code: 'SESSION_CLOSING' })
+      }
+      const sessionWorkspace = workspaceForSession(state.config, session)
+      if (sessionWorkspace?.id !== relativeRegion.workspaceId) {
+        throw Object.assign(new Error('Agent Session and relative Region belong to different Workspaces.'), {
+          code: 'REGION_WORKSPACE_MISMATCH'
+        })
+      }
+      const sessionTopicId = topicIdForSession(state.config, session)
+      const relativeTopicId = state.tabs[relativeRegion.viewId]?.topicId
+      if (
+        isScratchWorkspaceId(relativeRegion.workspaceId) &&
+        request.placement !== 'tab' &&
+        sessionTopicId !== relativeTopicId
+      ) {
+        throw Object.assign(new Error('Agent Session and relative Region belong to different Scratch Topics.'), {
+          code: 'REGION_TOPIC_MISMATCH'
+        })
+      }
+      const regionId = newRegionId()
+      const surface: AgentWorkbenchSurface = {
+        regionId,
+        kind: 'agent',
+        phase: 'attached',
+        workspaceId: relativeRegion.workspaceId,
+        sessionId: session.id
+      }
+      const placed = placeWorkbenchRegion({
+        layout,
+        tabs: state.tabs,
+        relativeRegion,
+        newViewId: `view:${crypto.randomUUID()}`,
+        surface,
+        placement: request.placement
+      })
+      const placedTabs = sessionTopicId && request.placement === 'tab'
+        ? {
+            ...placed.tabs,
+            [placed.viewId]: { ...placed.tabs[placed.viewId]!, topicId: sessionTopicId }
+          }
+        : placed.tabs
+      set((current) => ({
+        activeWorkspaceId: relativeRegion.workspaceId,
+        mainSurface: 'workbench',
+        tabs: placedTabs,
+        layouts: { ...current.layouts, [relativeRegion.workspaceId]: placed.layout }
+      }))
+      return {
+        operation: request.operation,
+        region: {
+          viewId: placed.viewId,
+          regionId,
+          kind: 'agent',
+          agentSessionId: session.id,
+          workspaceId: relativeRegion.workspaceId,
+          tabGroupId: placed.tabGroupId
+        }
+      }
+    }
+
+    if (!state.config?.executors[request.executorId]) {
+      throw Object.assign(new Error(`Agent Executor is not configured: ${request.executorId}`), {
+        code: 'AGENT_EXECUTOR_NOT_CONFIGURED'
+      })
+    }
+    const workspace = state.config.workspaces.find((candidate) => candidate.id === relativeRegion.workspaceId)
+    if (!workspace) {
+      throw Object.assign(new Error('Composition target Workspace is not configured.'), {
+        code: 'UNKNOWN_WORKSPACE'
+      })
+    }
+    const regionId = newRegionId()
+    const agentSessionId = crypto.randomUUID()
+    const pendingSurface: AgentWorkbenchSurface = {
+      regionId,
+      kind: 'agent',
+      phase: 'launching',
+      workspaceId: workspace.id,
+      sessionId: agentSessionId
+    }
+    const placed = placeWorkbenchRegion({
+      layout,
+      tabs: state.tabs,
+      relativeRegion,
+      newViewId: `view:${crypto.randomUUID()}`,
+      surface: pendingSurface,
+      placement: request.placement
     })
-    return resolved
+    const scratchTopicId = isScratchWorkspaceId(workspace.id)
+      ? (request.placement === 'tab'
+          ? placed.viewId
+          : (state.tabs[relativeRegion.viewId]?.topicId ?? relativeRegion.viewId))
+      : undefined
+    if (scratchTopicId && !isScratchTopicId(scratchTopicId)) {
+      throw Object.assign(new Error('Scratch Agent View has an invalid Topic identity.'), {
+        code: 'SCRATCH_TOPIC_ID_INVALID'
+      })
+    }
+    const placedTabs = scratchTopicId
+      ? {
+          ...placed.tabs,
+          [placed.viewId]: { ...placed.tabs[placed.viewId]!, topicId: scratchTopicId }
+        }
+      : placed.tabs
+    set((current) => ({
+      activeWorkspaceId: workspace.id,
+      mainSurface: 'workbench',
+      tabs: placedTabs,
+      layouts: { ...current.layouts, [workspace.id]: placed.layout },
+      pendingAgentLaunches: {
+        ...current.pendingAgentLaunches,
+        [agentSessionId]: { events: [], overflowed: false }
+      }
+    }))
+    const rollbackPendingRegion = (): void => {
+      set((current) => {
+        const owner = findWorkbenchRegion(current.tabs, regionId)
+        if (!owner || !ownsSessionLaunch(owner.surface, 'agent', agentSessionId)) return current
+        const currentLayout = current.layouts[workspace.id]
+        if (request.placement !== 'tab') {
+          const tab = removeWorkbenchRegion(owner.tab, regionId)
+          if (!tab) return current
+          return { ...current, tabs: { ...current.tabs, [tab.id]: tab } }
+        }
+        const tabGroupId = tabGroupForTab(currentLayout, owner.tab.id)
+        if (!currentLayout || !tabGroupId) return current
+        const tabs = { ...current.tabs }
+        delete tabs[owner.tab.id]
+        return {
+          ...current,
+          tabs,
+          layouts: {
+            ...current.layouts,
+            [workspace.id]: removeLayoutTab(currentLayout, tabGroupId, owner.tab.id)
+          }
+        }
+      })
+    }
+    const failAfterLaunch = async (
+      result: AgentLaunchResult,
+      primary: Error & { code?: string }
+    ): Promise<never> => {
+      try {
+        await api.sessions.stop(result.session.control)
+        set((current) => discardPendingAgentLaunch(current, result.session.id))
+      } catch (cleanupError) {
+        let timelineGapSessionId: string | undefined
+        set((current) => {
+          const reduced = reduceDetachedAgentLaunch(current, result)
+          timelineGapSessionId = reduced.timelineGapSessionId
+          return reduced.state
+        })
+        if (timelineGapSessionId) void get().resyncTimeline(timelineGapSessionId)
+        throw Object.assign(
+          new Error(`${primary.message} Cleanup failed: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`),
+          { code: primary.code ?? 'COMPOSITION_LAUNCH_FAILED', cause: new AggregateError([primary, cleanupError]) }
+        )
+      }
+      throw primary
+    }
+    const cancelPendingRegion = (): void => rollbackPendingRegion()
+    signal?.addEventListener('abort', cancelPendingRegion, { once: true })
+    try {
+      const launched = await api.sessions.launchAgent({
+        executorId: request.executorId,
+        hostId: workspace.hostId,
+        workspacePath: workspace.path,
+        ...(scratchTopicId ? { scratchTopicId } : {}),
+        agentSessionId,
+        createOperationId: request.requestId,
+        ...(request.prompt === undefined ? {} : { prompt: request.prompt })
+      })
+      if (
+        launched.session.id !== agentSessionId ||
+        launched.timeline.agentSessionId !== agentSessionId
+      ) {
+        await failAfterLaunch(launched, Object.assign(
+          new Error('Agent launch result does not match its requested Session identity.'),
+          { code: 'COMPOSITION_LAUNCH_MISMATCH' }
+        ))
+      }
+      let result: AgentLaunchResult | null = null
+      try {
+        result = await get().canonicalizeAgentLaunch(launched)
+      } catch (error) {
+        await failAfterLaunch(launched, Object.assign(
+          new Error(`Agent launch state could not be reconciled: ${message(error)}`),
+          { code: 'COMPOSITION_LAUNCH_RECONCILE_FAILED', cause: error }
+        ))
+      }
+      if (!result) {
+        throw Object.assign(new Error('Agent Session ended before launch ownership settled.'), {
+          code: 'COMPOSITION_LAUNCH_ENDED'
+        })
+      }
+      const session = result.session
+      if (signal?.aborted) await failAfterLaunch(result, cancellationError())
+      const launchOwner = findWorkbenchRegion(get().tabs, regionId)
+      if (
+        !ownsSessionLaunch(launchOwner?.surface, 'agent', agentSessionId) ||
+        (launchOwner && !workbenchViewCloseAllowsView(get().closingWorkbenchViews, launchOwner.tab.id))
+      ) {
+        await failAfterLaunch(result, Object.assign(
+          new Error('Composition Region owner disappeared during Agent launch.'),
+          { code: 'COMPOSITION_REGION_OWNER_LOST' }
+        ))
+      }
+      if (
+        session.kind !== 'agent' ||
+        session.id !== agentSessionId ||
+        result.timeline.agentSessionId !== agentSessionId ||
+        !workspaceOwnsSessionPath(workspace, session)
+      ) {
+        rollbackPendingRegion()
+        await failAfterLaunch(result, Object.assign(
+          new Error('Agent launch result does not match its Composition request.'),
+          { code: 'COMPOSITION_LAUNCH_MISMATCH' }
+        ))
+      }
+      let timelineGapSessionId: string | undefined
+      set((current) => {
+        const reduced = reduceAgentSessionLaunchAttached(current, regionId, result)
+        timelineGapSessionId = reduced.timelineGapSessionId
+        return scratchTopicId
+          ? {
+              ...reduced.state,
+              workspaceFileRevisions: {
+                ...current.workspaceFileRevisions,
+                [workspace.id]: (current.workspaceFileRevisions[workspace.id] ?? 0) + 1
+              }
+            }
+          : reduced.state
+      })
+      if (timelineGapSessionId) void get().resyncTimeline(timelineGapSessionId)
+      const region = resolveWorkbenchRegion({
+        sessions: get().sessions,
+        tabs: get().tabs,
+        layouts: get().layouts,
+        target: { kind: 'region', regionId }
+      })
+      if (region.kind !== 'agent') {
+        throw Object.assign(new Error('Launched Agent Region is invalid.'), {
+          code: 'COMPOSITION_LAUNCH_MISMATCH'
+        })
+      }
+      return { operation: request.operation, agentSessionId, region }
+    } catch (error) {
+      rollbackPendingRegion()
+      set((current) => discardPendingAgentLaunch(current, agentSessionId))
+      throw error
+    } finally {
+      signal?.removeEventListener('abort', cancelPendingRegion)
+    }
   },
-  selectSession(id, paneId) {
+  selectSession(id, preferredTabGroupId) {
+    if (!workbenchViewCloseAllowsSession(get().closingWorkbenchViews, id)) return
     const session = get().sessions.find((candidate) => candidate.id === id)
     const workspace = session ? workspaceForSession(get().config, session) : null
     if (!session || !workspace) return
-    const existingTab = Object.values(get().tabs).find(
-      (tab) => (tab.kind === 'agent' || tab.kind === 'terminal') && tab.sessionId === id
-    )
-    const tabId = existingTab?.id ?? sessionTabId(id)
-    const layout = get().layouts[workspace.id] ?? createWorkspaceLayout(newPaneId())
-    const existingPaneId = paneForTab(layout, tabId)
-    const targetPaneId = existingPaneId ?? paneId ?? layout.activeGroupId
-    const tab: AgentWorkbenchTab | TerminalWorkbenchTab = {
-      id: tabId,
+    const existing = Object.values(get().tabs).flatMap((tab) => (
+      workbenchSurfaces(tab).flatMap((surface) => (
+        (surface.kind === 'agent' || surface.kind === 'terminal') && surface.sessionId === id
+          ? [{ tab, surface }]
+          : []
+      ))
+    ))[0]
+    const tabId = existing?.tab.id ?? sessionTabId(id)
+    const layout = get().layouts[workspace.id] ?? createWorkspaceLayout(newTabGroupId())
+    const existingTabGroupId = tabGroupForTab(layout, tabId)
+    const targetTabGroupId = existingTabGroupId ?? preferredTabGroupId ?? layout.activeGroupId
+    const regionId = existing?.surface.regionId ?? initialWorkbenchRegionId(tabId)
+    const surface: AgentWorkbenchSurface | TerminalWorkbenchSurface = {
+      regionId,
       kind: session.kind,
       phase: 'attached',
       workspaceId: workspace.id,
       sessionId: id
     }
+    const createdTab = existing
+      ? replaceWorkbenchRegion(existing.tab, regionId, surface)
+      : createWorkbenchTab(tabId, surface)
+    const sessionTopicId = scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath)
+    const tab = sessionTopicId ? { ...createdTab, topicId: sessionTopicId } : createdTab
     set((state) => ({
       activeWorkspaceId: workspace.id,
       mainSurface: 'workbench',
       tabs: { ...state.tabs, [tab.id]: tab },
       layouts: {
         ...state.layouts,
-        [workspace.id]: existingPaneId
-          ? activateLayoutTab(layout, targetPaneId, tabId)
-          : addTab(layout, targetPaneId, tabId)
+        [workspace.id]: existingTabGroupId
+          ? activateLayoutTab(layout, targetTabGroupId, tabId)
+          : addTab(layout, targetTabGroupId, tabId)
       }
     }))
+    if (existing) get().focusRegion(workspace.id, tabId, regionId)
   },
-  openLauncher(paneId, view = 'picker') {
+  openLauncher(tabGroupId) {
     const workspaceId = get().activeWorkspaceId
     const layout = workspaceId ? get().layouts[workspaceId] : undefined
     if (!workspaceId || !layout) return
-    const targetPaneId = paneId ?? layout.activeGroupId
-    const tab = newLauncherTab(workspaceId, view)
+    const targetTabGroupId = tabGroupId ?? layout.activeGroupId
+    const tab = newLauncherTab(workspaceId)
     set((state) => ({
       mainSurface: 'workbench',
       tabs: { ...state.tabs, [tab.id]: tab },
-      layouts: { ...state.layouts, [workspaceId]: addTab(layout, targetPaneId, tab.id) }
+      layouts: { ...state.layouts, [workspaceId]: addTab(layout, targetTabGroupId, tab.id) }
     }))
   },
-  setLauncherView(tabId, view) {
-    set((state) => {
-      const tab = state.tabs[tabId]
-      return tab?.kind === 'launcher'
-        ? { tabs: { ...state.tabs, [tabId]: { ...tab, view } } }
-        : state
-    })
-  },
-  async closeTab(workspaceId, paneId, tabId) {
-    const tab = get().tabs[tabId]
-    if (tab?.kind === 'file') {
-      const key = documentKey(tab.workspaceId, tab.path)
-      set((state) => {
-        const next = reduceFileClosed(state, workspaceId, paneId, tabId)
-        if (state.documents[key] && !next.documents[key]) advanceDocumentLifetime(key)
-        return next
-      })
-      if (!get().documents[key]) {
-        await api.files.unobserve(tab.workspaceId, tab.path)
-      }
-      return
+  closeTab(workspaceId, tabGroupId, tabId, options) {
+    const state = get()
+    const errorBeforeClose = state.error
+    if (!workbenchViewCloseAllowsView(state.closingWorkbenchViews, tabId)) {
+      return Promise.resolve(false)
     }
-    if (tab?.kind === 'browser') {
+    const plan = planWorkbenchViewClose({
+      tabs: state.tabs,
+      layouts: state.layouts,
+      sessions: state.sessions,
+      workspaceId,
+      tabGroupId,
+      tabId,
+      keepAgentSessions: options?.keepAgentSessions === true,
+      closingViewIds: new Set(Object.keys(state.closingWorkbenchViews))
+    })
+    if (!plan) return Promise.resolve(true)
+    if (!plan.closesView) {
+      set((current) => reconcileWorkbenchFileProjection(
+        current,
+        applyWorkbenchViewCloseTopology(current, plan, null)
+      ))
+      return Promise.resolve(true)
+    }
+    if (plan.resources.length === 0) {
+      const reconciliation = reconcileWorkbenchViewClose({
+        plan,
+        currentTab: state.tabs[tabId],
+        currentSessions: state.sessions,
+        receipts: []
+      })
+      const previousTabs = state.tabs
+      set((current) => reconcileWorkbenchFileProjection(
+        current,
+        applyWorkbenchViewCloseTopology(current, plan, reconciliation.tab)
+      ))
+      return disposeClosedFileOwners(previousTabs, get().tabs).then(
+        () => true,
+        (error) => {
+          get().reportError(error)
+          return false
+        }
+      )
+    }
+    set((current) => ({
+      closingWorkbenchViews: {
+        ...current.closingWorkbenchViews,
+        [tabId]: plan
+      }
+    }))
+    return (async () => {
       try {
-        await api.browser.close(tab.browserId)
+        const [browserReceipts, sessionReceipts] = await Promise.all([
+          settleWorkbenchViewCloseResources(
+            plan.resources.filter((resource) => resource.kind === 'browser'),
+            async (resource) => await api.browser.close(resource.browserId)
+          ),
+          settleWorkbenchViewCloseResources(
+            plan.resources.filter((resource) => resource.kind === 'session'),
+            async (resource) => {
+              const current = get()
+              if (!current.sessions.some((session) => (
+                session.id === resource.sessionId && sessionOwnsControl(session, resource.control)
+              ))) return
+              if (hasAttachedSessionOutsideClosingViews({
+                tabs: current.tabs,
+                plans: current.closingWorkbenchViews,
+                sessionId: resource.sessionId
+              })) {
+                throw new Error(`Session gained another View while closing: ${resource.sessionId}`)
+              }
+              await api.sessions.stop(resource.control)
+            }
+          )
+        ])
+        const reconciliation = reconcileWorkbenchViewClose({
+          plan,
+          currentTab: get().tabs[tabId],
+          currentSessions: get().sessions,
+          receipts: [...browserReceipts, ...sessionReceipts]
+        })
+        const previousTabs = get().tabs
+        set((current) => reconcileWorkbenchFileProjection(
+          current,
+          applyWorkbenchViewCloseTopology(current, plan, reconciliation.tab)
+        ))
+        await disposeClosedFileOwners(previousTabs, get().tabs)
+        if (reconciliation.failures.length > 0) {
+          get().reportError(workbenchViewCloseFailure(reconciliation.failures))
+        } else if (reconciliation.changedWhileClosing) {
+          if (get().error === errorBeforeClose) {
+            get().reportError(new Error('The View changed while it was closing. Review it and close it again.'))
+          }
+        }
+        return reconciliation.failures.length === 0 && !reconciliation.changedWhileClosing
       } catch (error) {
         get().reportError(error)
-        return
+        return false
+      } finally {
+        set((current) => {
+          if (current.closingWorkbenchViews[tabId] !== plan) return current
+          const closingWorkbenchViews = { ...current.closingWorkbenchViews }
+          delete closingWorkbenchViews[tabId]
+          return { closingWorkbenchViews }
+        })
       }
-    }
-    const layout = get().layouts[workspaceId]
-    if (!layout) return
-    const layouts = { ...get().layouts, [workspaceId]: removeLayoutTab(layout, paneId, tabId) }
-    const tabs = { ...get().tabs }
-    if (!tabStillOpen(layouts, tabId)) delete tabs[tabId]
-    set({ layouts, tabs })
+    })()
   },
   moveTab(workspaceId, tabId, sourcePaneId, targetPaneId, targetIndex) {
-    const layout = get().layouts[workspaceId]
+    const current = get()
+    if (!workbenchViewCloseAllowsView(current.closingWorkbenchViews, tabId)) return
+    const layout = current.layouts[workspaceId]
     if (!layout) return
     set((state) => ({
       layouts: {
@@ -615,20 +1440,91 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
     }))
   },
-  splitTab(workspaceId, tabId, sourcePaneId, targetPaneId, direction) {
-    const layout = get().layouts[workspaceId]
+  moveTabToNewGroup(workspaceId, tabId, sourcePaneId, targetPaneId, direction) {
+    const current = get()
+    if (!workbenchViewCloseAllowsView(current.closingWorkbenchViews, tabId)) return
+    const layout = current.layouts[workspaceId]
     if (!layout) return
     set((state) => ({
       layouts: {
         ...state.layouts,
-        [workspaceId]: splitLayoutTab(
+        [workspaceId]: moveLayoutTabToNewGroup(
           layout,
           tabId,
           sourcePaneId,
           targetPaneId,
           direction,
-          newPaneId()
+          newTabGroupId()
         )
+      }
+    }))
+  },
+  focusRegion(workspaceId, tabId, regionId) {
+    const tab = get().tabs[tabId]
+    const layout = get().layouts[workspaceId]
+    const tabGroupId = layout ? tabGroupForTab(layout, tabId) : null
+    if (!tab || tab.workspaceId !== workspaceId || !tabGroupId || !tab.regions[regionId]) return
+    set((state) => ({
+      tabs: { ...state.tabs, [tabId]: focusWorkbenchTabRegion(tab, regionId) },
+      layouts: {
+        ...state.layouts,
+        [workspaceId]: activateLayoutTab(layout!, tabGroupId, tabId)
+      }
+    }))
+  },
+  splitRegion(workspaceId, tabId, regionId, direction) {
+    const current = get()
+    if (!workbenchViewCloseAllowsView(current.closingWorkbenchViews, tabId)) return
+    const tab = current.tabs[tabId]
+    if (!tab || tab.workspaceId !== workspaceId || !tab.regions[regionId]) return
+    const addedRegionId = newRegionId()
+    const launcher: LauncherWorkbenchSurface = {
+      regionId: addedRegionId,
+      kind: 'launcher',
+      workspaceId
+    }
+    const nextTab = addWorkbenchRegion(tab, regionId, direction, launcher)
+    if (nextTab === tab) return
+    set((state) => ({ tabs: { ...state.tabs, [tabId]: nextTab } }))
+  },
+  async closeRegion(workspaceId, tabId, regionId) {
+    const current = get()
+    if (!workbenchViewCloseAllowsView(current.closingWorkbenchViews, tabId)) return
+    const tab = current.tabs[tabId]
+    const surface = tab?.regions[regionId]
+    if (!tab || tab.workspaceId !== workspaceId || !surface) return
+    if (!removeWorkbenchRegion(tab, regionId)) return
+    if (surface.kind === 'browser') {
+      try {
+        await api.browser.close(surface.browserId)
+      } catch (error) {
+        get().reportError(error)
+        return
+      }
+    }
+    const previousTabs = get().tabs
+    set((state) => {
+      const liveTab = state.tabs[tabId]
+      if (!liveTab || !sameWorkbenchSurfaceOwner(liveTab.regions[regionId], surface)) return state
+      const nextTab = removeWorkbenchRegion(liveTab, regionId)
+      if (!nextTab) return state
+      const tabs = { ...state.tabs, [tabId]: nextTab }
+      return surface.kind === 'file'
+        ? reconcileWorkbenchFileProjection(state, { tabs, layouts: state.layouts })
+        : { tabs }
+    })
+    if (surface.kind === 'file') await disposeClosedFileOwners(previousTabs, get().tabs)
+  },
+  updateRegionSplitRatio(workspaceId, tabId, nodePath, ratio) {
+    const tab = get().tabs[tabId]
+    if (!tab || tab.workspaceId !== workspaceId) return
+    set((state) => ({
+      tabs: {
+        ...state.tabs,
+        [tabId]: {
+          ...tab,
+          layout: setWorkbenchRegionSplitRatio(tab.layout, nodePath, ratio)
+        }
       }
     }))
   },
@@ -648,6 +1544,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   setMainSurface(mainSurface) {
     set({ mainSurface })
   },
+  toggleProjectRail() {
+    set((state) => ({ projectRailOpen: !state.projectRailOpen }))
+  },
+  setTabMenuOpen(tabMenuOpen) {
+    set({ tabMenuOpen })
+  },
   setWorkspaceTool(workspaceTool) {
     set({ workspaceTool, toolsOpen: true, mainSurface: 'workbench' })
   },
@@ -657,29 +1559,29 @@ export const useAppStore = create<AppState>((set, get) => ({
   setToolDockWidth(toolDockWidth) {
     set({ toolDockWidth: clampToolDockWidth(toolDockWidth) })
   },
-  async detectAgents(hostId) {
-    const agentIds = Object.keys(get().config?.agents ?? {})
-    if (agentIds.length === 0) return
-    if (agentIds.some((agentId) => get().agentDetections[agentDetectionKey(hostId, agentId)]?.state === 'checking')) return
+  async detectExecutors(hostId) {
+    const executorIds = Object.keys(get().config?.executors ?? {})
+    if (executorIds.length === 0) return
+    if (executorIds.some((executorId) => get().executorDetections[executorDetectionKey(hostId, executorId)]?.state === 'checking')) return
     const requestId = (detectionRequestIds.get(hostId) ?? 0) + 1
     detectionRequestIds.set(hostId, requestId)
     set((state) => ({
-      agentDetections: {
-        ...state.agentDetections,
+      executorDetections: {
+        ...state.executorDetections,
         ...Object.fromEntries(
-          agentIds.map((agentId) => [agentDetectionKey(hostId, agentId), { state: 'checking' } satisfies AgentDetectionState])
+          executorIds.map((executorId) => [executorDetectionKey(hostId, executorId), { state: 'checking' } satisfies ExecutorDetectionState])
         )
       }
     }))
     await Promise.all(
-      agentIds.map(async (agentId) => {
+      executorIds.map(async (executorId) => {
         try {
-          const result = await api.agents.detect(agentId, hostId)
+          const result = await api.executors.detect(executorId, hostId)
           if (detectionRequestIds.get(hostId) !== requestId) return
           set((state) => ({
-            agentDetections: {
-              ...state.agentDetections,
-              [agentDetectionKey(hostId, agentId)]: {
+            executorDetections: {
+              ...state.executorDetections,
+              [executorDetectionKey(hostId, executorId)]: {
                 state: result.installed ? 'ready' : 'missing',
                 result,
                 observedAt: Date.now()
@@ -689,9 +1591,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         } catch (error) {
           if (detectionRequestIds.get(hostId) !== requestId) return
           set((state) => ({
-            agentDetections: {
-              ...state.agentDetections,
-              [agentDetectionKey(hostId, agentId)]: {
+            executorDetections: {
+              ...state.executorDetections,
+              [executorDetectionKey(hostId, executorId)]: {
                 state: 'error',
                 detail: message(error),
                 observedAt: Date.now()
@@ -732,7 +1634,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }))
     }
   },
-  async openFile(path, paneId) {
+  async openFile(path, tabGroupId) {
     const workspaceId = get().activeWorkspaceId
     const layout = workspaceId ? get().layouts[workspaceId] : undefined
     if (!workspaceId || !layout) return
@@ -740,7 +1642,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const existing = get().documents[key]
       if (existing) {
-        set((state) => reduceFileOpened(state, workspaceId, path, existing, paneId))
+        const targetGroupId = tabGroupId ?? layout.activeGroupId
+        const activeTabId = findGroup(layout, targetGroupId)?.activeTabId
+        const topicId = activeTabId ? get().tabs[activeTabId]?.topicId : undefined
+        set((state) => reduceFileOpened(state, workspaceId, path, existing, tabGroupId, topicId))
         return
       }
       while (!get().documents[key]) {
@@ -763,7 +1668,15 @@ export const useAppStore = create<AppState>((set, get) => ({
                 await api.files.unobserve(workspaceId, path)
                 return false
               }
-              set((state) => reduceFileOpened(state, workspaceId, path, result.document, paneId))
+              const currentLayout = get().layouts[workspaceId]
+              if (!currentLayout) {
+                await api.files.unobserve(workspaceId, path)
+                return false
+              }
+              const targetGroupId = tabGroupId ?? currentLayout.activeGroupId
+              const activeTabId = findGroup(currentLayout, targetGroupId)?.activeTabId
+              const topicId = activeTabId ? get().tabs[activeTabId]?.topicId : undefined
+              set((state) => reduceFileOpened(state, workspaceId, path, result.document, tabGroupId, topicId))
               if (fileOpenRequests.get(key) === request) fileOpenRequests.delete(key)
               if ((fileInvalidationSequences.get(key) ?? 0) !== invalidationSequence) {
                 await refreshFileDocument(workspaceId, path, openedLifetime)
@@ -786,6 +1699,100 @@ export const useAppStore = create<AppState>((set, get) => ({
       get().reportError(error)
     }
   },
+  async createScratchTopic() {
+    const state = get()
+    const workspace = state.config?.workspaces.find((item) => item.id === state.activeWorkspaceId)
+    if (!workspace || !isScratchWorkspaceId(workspace.id)) {
+      throw new Error('Select the Scratch workspace first')
+    }
+    const layout = state.layouts[workspace.id]
+    if (!layout) throw new Error('Scratch workspace layout is unavailable')
+    const group = findGroup(layout, layout.activeGroupId)
+    const activeTab = group?.activeTabId ? state.tabs[group.activeTabId] : undefined
+    const activeSurface = activeTab ? titleWorkbenchSurface(activeTab) : undefined
+    const canOwnTopic = activeTab &&
+      !activeTab.topicId &&
+      (activeSurface?.kind === 'launcher' || activeSurface?.kind === 'agent') &&
+      isScratchTopicId(activeTab.id)
+    const targetTab = canOwnTopic ? activeTab : newLauncherTab(workspace.id)
+    const topicId = targetTab.topicId ?? targetTab.id
+    const snapshot = await api.scratch.ensureTopic(workspace.id, topicId)
+    set((current) => {
+      const currentLayout = current.layouts[workspace.id]
+      if (!currentLayout) return current
+      const nextTab = { ...targetTab, topicId }
+      const alreadyOpen = Boolean(current.tabs[targetTab.id])
+      return {
+        tabs: { ...current.tabs, [nextTab.id]: nextTab },
+        layouts: {
+          ...current.layouts,
+          [workspace.id]: alreadyOpen
+            ? activateLayoutTab(currentLayout, layout.activeGroupId, nextTab.id)
+            : addTab(currentLayout, layout.activeGroupId, nextTab.id)
+        },
+        workspaceFileRevisions: {
+          ...current.workspaceFileRevisions,
+          [workspace.id]: (current.workspaceFileRevisions[workspace.id] ?? 0) + 1
+        }
+      }
+    })
+    return snapshot
+  },
+  async openScratchTopic(topicId) {
+    const state = get()
+    const workspace = state.config?.workspaces.find((item) => item.id === state.activeWorkspaceId)
+    if (!workspace || !isScratchWorkspaceId(workspace.id)) {
+      throw new Error('Select the Scratch workspace first')
+    }
+    const snapshot = await api.scratch.readTopic(workspace.id, topicId)
+    if (!snapshot) throw new Error('Scratch Topic no longer exists')
+    set((current) => {
+      const layout = current.layouts[workspace.id]
+      if (!layout) return current
+      const boundTab = Object.values(current.tabs).find((tab) =>
+        tab.workspaceId === workspace.id &&
+        tab.topicId === topicId &&
+        tabGroupForTab(layout, tab.id) !== null
+      )
+      if (boundTab) {
+        const groupId = tabGroupForTab(layout, boundTab.id)!
+        return {
+          layouts: {
+            ...current.layouts,
+            [workspace.id]: activateLayoutTab(layout, groupId, boundTab.id)
+          }
+        }
+      }
+      const tab = { ...newLauncherTab(workspace.id), topicId }
+      return {
+        tabs: { ...current.tabs, [tab.id]: tab },
+        layouts: {
+          ...current.layouts,
+          [workspace.id]: addTab(layout, layout.activeGroupId, tab.id)
+        }
+      }
+    })
+  },
+  async renameScratchTopic(topicId, title) {
+    const state = get()
+    const workspace = state.config?.workspaces.find((item) => item.id === state.activeWorkspaceId)
+    if (!workspace || !isScratchWorkspaceId(workspace.id)) {
+      throw new Error('Select the Scratch workspace first')
+    }
+    try {
+      const snapshot = await api.scratch.renameTitle(workspace.id, topicId, title)
+      set((current) => ({
+        workspaceFileRevisions: {
+          ...current.workspaceFileRevisions,
+          [workspace.id]: (current.workspaceFileRevisions[workspace.id] ?? 0) + 1
+        }
+      }))
+      return snapshot
+    } catch (error) {
+      get().reportError(error)
+      throw error
+    }
+  },
   async createPath(input) {
     const workspaceId = get().activeWorkspaceId
     if (!workspaceId) throw new Error('Select a workspace first')
@@ -799,159 +1806,318 @@ export const useAppStore = create<AppState>((set, get) => ({
   async renamePath(path, nextPath) {
     const workspaceId = get().activeWorkspaceId
     if (!workspaceId) throw new Error('Select a workspace first')
-    const observedPaths = Object.keys(get().documents).flatMap((key) => {
-      const prefix = `${workspaceId}\0`
-      if (!key.startsWith(prefix)) return []
-      const documentPath = key.slice(prefix.length)
-      return isPathWithinSubtree(documentPath, path) ? [documentPath] : []
-    })
-    try {
-      const result = await api.files.move({
-        source: { workspaceId, path },
-        destination: { workspaceId, path: nextPath }
+    return await withWorkspaceFileMutation(workspaceId, path, async () => {
+      const stateBeforeMove = get()
+      const collision = findFileRenameProjectionCollision(stateBeforeMove, workspaceId, path, nextPath)
+      if (collision) {
+        const error = Object.assign(
+          new Error(`The destination is already open in the workbench: ${collision.path}`),
+          { code: 'WORKSPACE_MOVE_RENDERER_DESTINATION_OWNED' }
+        )
+        get().reportError(error)
+        throw error
+      }
+      const observedPaths = Object.keys(stateBeforeMove.documents).flatMap((key) => {
+        const prefix = `${workspaceId}\0`
+        if (!key.startsWith(prefix)) return []
+        const documentPath = key.slice(prefix.length)
+        return isPathWithinSubtree(documentPath, path) ? [documentPath] : []
       })
+      let result
+      try {
+        result = await api.files.move({
+          source: { workspaceId, path },
+          destination: { workspaceId, path: nextPath }
+        })
+      } catch (error) {
+        get().reportError(error)
+        throw error
+      }
       if (result.status === 'error') {
-        throw Object.assign(new Error(result.message), {
+        const error = Object.assign(new Error(result.message), {
           code: result.code,
           finalLocation: result.finalLocation
         })
+        get().reportError(error)
+        throw error
+      }
+      for (const observedPath of observedPaths) {
+        advanceDocumentLifetime(documentKey(workspaceId, observedPath))
       }
       set((state) => reduceFileRename(state, workspaceId, path, nextPath))
       for (const observedPath of observedPaths) {
         const renamedPath = remapPathWithinSubtree(observedPath, path, nextPath)
-        await api.files.unobserve(workspaceId, observedPath)
-        await api.files.observe(workspaceId, renamedPath)
-        await get().refreshDocument(workspaceId, renamedPath)
+        transferFileSaveTail(workspaceId, observedPath, renamedPath)
+        try {
+          await api.files.unobserve(workspaceId, observedPath)
+        } catch (error) {
+          get().reportError(error)
+        }
+        try {
+          await api.files.observe(workspaceId, renamedPath)
+        } catch (error) {
+          get().reportError(error)
+        }
+        try {
+          await get().refreshDocument(workspaceId, renamedPath)
+        } catch (error) {
+          get().reportError(error)
+        }
       }
-    } catch (error) {
-      get().reportError(error)
-      throw error
-    }
+    })
   },
   async deletePath(path) {
     const workspaceId = get().activeWorkspaceId
     if (!workspaceId) throw new Error('Select a workspace first')
-    const observedPaths = Object.keys(get().documents).flatMap((key) => {
-      const prefix = `${workspaceId}\0`
-      if (!key.startsWith(prefix)) return []
-      const documentPath = key.slice(prefix.length)
-      return isPathWithinSubtree(documentPath, path) ? [documentPath] : []
+    return await withWorkspaceFileMutation(workspaceId, path, async () => {
+      const observedPaths = Object.keys(get().documents).flatMap((key) => {
+        const prefix = `${workspaceId}\0`
+        if (!key.startsWith(prefix)) return []
+        const documentPath = key.slice(prefix.length)
+        return isPathWithinSubtree(documentPath, path) ? [documentPath] : []
+      })
+      try {
+        await api.files.delete(workspaceId, path)
+        for (const observedPath of observedPaths) {
+          advanceDocumentLifetime(documentKey(workspaceId, observedPath))
+        }
+        set((state) => reduceFileDelete(state, workspaceId, path))
+        await Promise.all(observedPaths.map(async (observedPath) => {
+          await api.files.unobserve(workspaceId, observedPath)
+        }))
+      } catch (error) {
+        get().reportError(error)
+        throw error
+      }
     })
-    try {
-      await api.files.delete(workspaceId, path)
-      set((state) => reduceFileDelete(state, workspaceId, path))
-      await Promise.all(observedPaths.map(async (observedPath) => {
-        await api.files.unobserve(workspaceId, observedPath)
-      }))
-    } catch (error) {
-      get().reportError(error)
-      throw error
-    }
   },
-  updateDocument(tabId, content) {
-    set((state) => reduceDocumentContent(state, tabId, content))
+  updateDocument(tabId, content, regionId) {
+    set((state) => reduceDocumentContent(state, tabId, content, regionId))
   },
-  async saveDocument(tabId) {
-    await enqueueFileSave(tabId, false)
+  async saveDocument(tabId, regionId) {
+    await enqueueFileSave(tabId, false, regionId)
   },
-  async overwriteDocument(tabId) {
-    await enqueueFileSave(tabId, true)
+  async overwriteDocument(tabId, regionId) {
+    await enqueueFileSave(tabId, true, regionId)
   },
-  async reloadDocument(tabId) {
-    const tab = get().tabs[tabId]
-    if (tab?.kind !== 'file') return
-    const key = documentKey(tab.workspaceId, tab.path)
+  async reloadDocument(tabId, regionId) {
+    const surface = fileSurface(get().tabs[tabId], regionId)
+    if (!surface) return
+    const key = documentKey(surface.workspaceId, surface.path)
     const issue = get().documentIssues[key]
     if (issue?.kind === 'changed') {
-      set((state) => reduceDocumentReloaded(state, tab.workspaceId, tab.path, issue.observed))
+      set((state) => reduceDocumentReloaded(state, surface.workspaceId, surface.path, issue.observed))
       return
     }
     if (issue?.kind === 'deleted') {
-      set((state) => reduceFileDelete(state, tab.workspaceId, tab.path))
-      await api.files.unobserve(tab.workspaceId, tab.path)
+      advanceDocumentLifetime(key)
+      set((state) => reduceFileDelete(state, surface.workspaceId, surface.path))
+      await api.files.unobserve(surface.workspaceId, surface.path)
       return
     }
-    await get().refreshDocument(tab.workspaceId, tab.path)
+    await get().refreshDocument(surface.workspaceId, surface.path)
   },
   async refreshDocument(workspaceId, path) {
     await refreshFileDocument(workspaceId, path)
   },
-  async launchBoardAgent(workspaceId, agentId, prompt) {
+  async launchBoardAgent(workspaceId, executorId, prompt) {
     await get().selectWorkspace(workspaceId)
     set({ mainSurface: 'board' })
     const layout = get().layouts[workspaceId]
     if (!layout) throw new Error('Workspace layout is unavailable')
-    await get().launchAgent(agentId, prompt, layout.activeGroupId)
+    await get().launchAgent(executorId, prompt, layout.activeGroupId)
   },
-  async launchAgent(agentId, prompt, paneId, launcherTabId) {
+  async launchAgent(executorId, prompt, tabGroupId, launcher) {
     const state = get()
-    const launcher = launcherTabId ? state.tabs[launcherTabId] : undefined
-    const workspaceId = launcher?.workspaceId ?? state.activeWorkspaceId
+    const launcherTab = launcher ? state.tabs[launcher.tabId] : undefined
+    const launcherSurface = launcherTab && launcher
+      ? launcherTab.regions[launcher.regionId]
+      : undefined
+    if (launcher && launcherSurface?.kind !== 'launcher') {
+      throw new Error('Launcher Region is no longer available')
+    }
+    const workspaceId = launcherTab?.workspaceId ?? state.activeWorkspaceId
     const workspace = state.config?.workspaces.find((item) => item.id === workspaceId)
     if (!workspace) throw new Error('Select a workspace first')
     const layout = state.layouts[workspace.id]
     if (!layout) throw new Error('Workspace layout is unavailable')
-    const tabId = launcherTabId ?? newLauncherTab(workspace.id).id
+    const targetTab = launcherTab ?? newLauncherTab(workspace.id)
+    const tabId = targetTab.id
+    if (!workbenchViewCloseAllowsView(state.closingWorkbenchViews, tabId)) throw new Error('The View is closing')
+    const scratchTopicId = isScratchWorkspaceId(workspace.id)
+      ? (targetTab.topicId ?? tabId)
+      : undefined
+    if (scratchTopicId && !isScratchTopicId(scratchTopicId)) {
+      throw new Error('Scratch Agent View has an invalid Topic identity')
+    }
+    const regionId = launcher?.regionId ?? targetTab.layout.activeRegionId
     const sessionId = crypto.randomUUID()
-    const pendingTab: AgentWorkbenchTab = {
-      id: tabId,
+    const pendingSurface: AgentWorkbenchSurface = {
+      regionId,
       kind: 'agent',
       phase: 'launching',
       workspaceId: workspace.id,
       sessionId
     }
+    const replacedTab = replaceWorkbenchRegion(targetTab, regionId, pendingSurface)
+    const pendingTab = scratchTopicId ? { ...replacedTab, topicId: scratchTopicId } : replacedTab
     set((current) => ({
       tabs: { ...current.tabs, [tabId]: pendingTab },
       layouts: {
         ...current.layouts,
-        [workspace.id]: launcherTabId ? layout : addTab(layout, paneId, tabId)
+        [workspace.id]: launcher ? layout : addTab(layout, tabGroupId, tabId)
+      },
+      pendingAgentLaunches: {
+        ...current.pendingAgentLaunches,
+        [sessionId]: { events: [], overflowed: false }
       }
     }))
     try {
-      const session = await api.sessions.launchAgent({
-        agentId,
+      const launched = await api.sessions.launchAgent({
+        executorId,
         hostId: workspace.hostId,
         workspacePath: workspace.path,
+        ...(scratchTopicId ? { scratchTopicId } : {}),
         prompt,
         agentSessionId: sessionId,
         createOperationId: crypto.randomUUID()
       })
-      if (!ownsSessionLaunch(get().tabs[tabId], 'agent', sessionId)) {
-        await api.sessions.stop(session.control).catch((cleanupError) => {
-          if (get().sessions.some((item) => item.id === session.id)) get().reportError(cleanupError)
-        })
+      if (
+        launched.session.id !== sessionId ||
+        launched.timeline.agentSessionId !== sessionId
+      ) {
+        try {
+          await api.sessions.stop(launched.session.control)
+          set((current) => discardPendingAgentLaunch(current, sessionId))
+        } catch (cleanupError) {
+          let timelineGapSessionId: string | undefined
+          set((current) => {
+            const reduced = reduceDetachedAgentLaunch(current, launched)
+            timelineGapSessionId = reduced.timelineGapSessionId
+            return reduced.state
+          })
+          if (timelineGapSessionId) void get().resyncTimeline(timelineGapSessionId)
+          throw Object.assign(
+            new Error(`Agent launch result mismatched its requested Session and cleanup failed: ${message(cleanupError)}`),
+            { code: 'AGENT_LAUNCH_CLEANUP_FAILED', cause: cleanupError }
+          )
+        }
+        throw new Error('Agent launch result does not match its requested Session identity')
+      }
+      let result: AgentLaunchResult | null
+      try {
+        result = await get().canonicalizeAgentLaunch(launched)
+      } catch (reconcileError) {
+        try {
+          await api.sessions.stop(launched.session.control)
+          set((current) => discardPendingAgentLaunch(current, sessionId))
+        } catch (cleanupError) {
+          let timelineGapSessionId: string | undefined
+          set((current) => {
+            const reduced = reduceDetachedAgentLaunch(current, launched)
+            timelineGapSessionId = reduced.timelineGapSessionId
+            return reduced.state
+          })
+          if (timelineGapSessionId) void get().resyncTimeline(timelineGapSessionId)
+          throw Object.assign(
+            new Error(`Agent launch state could not be reconciled and cleanup failed: ${message(cleanupError)}`),
+            {
+              code: 'AGENT_LAUNCH_CLEANUP_FAILED',
+              cause: new AggregateError([reconcileError, cleanupError])
+            }
+          )
+        }
+        throw reconcileError
+      }
+      if (!result) {
+        set((current) => reduceSessionLaunchFailed(current, regionId, 'agent', sessionId))
         return
       }
-      set((current) => reduceSessionLaunchAttached(current, tabId, session))
+      const session = result.session
+      const launchOwner = findWorkbenchRegion(get().tabs, regionId)
+      if (
+        !ownsSessionLaunch(launchOwner?.surface, 'agent', sessionId) ||
+        (launchOwner && !workbenchViewCloseAllowsView(get().closingWorkbenchViews, launchOwner.tab.id))
+      ) {
+        try {
+          await api.sessions.stop(session.control)
+          set((current) => discardPendingAgentLaunch(current, sessionId))
+        } catch (cleanupError) {
+          let timelineGapSessionId: string | undefined
+          set((current) => {
+            const reduced = reduceDetachedAgentLaunch(current, result)
+            timelineGapSessionId = reduced.timelineGapSessionId
+            return reduced.state
+          })
+          if (timelineGapSessionId) void get().resyncTimeline(timelineGapSessionId)
+          throw Object.assign(
+            new Error(`Agent launch owner disappeared and cleanup failed: ${message(cleanupError)}`),
+            { code: 'AGENT_LAUNCH_CLEANUP_FAILED', cause: cleanupError }
+          )
+        }
+        return
+      }
+      let timelineGapSessionId: string | undefined
+      set((current) => {
+        const reduced = reduceAgentSessionLaunchAttached(current, regionId, result)
+        timelineGapSessionId = reduced.timelineGapSessionId
+        return scratchTopicId
+          ? {
+              ...reduced.state,
+              workspaceFileRevisions: {
+                ...current.workspaceFileRevisions,
+                [workspace.id]: (current.workspaceFileRevisions[workspace.id] ?? 0) + 1
+              }
+            }
+          : reduced.state
+      })
+      if (timelineGapSessionId) void get().resyncTimeline(timelineGapSessionId)
     } catch (error) {
-      if (!ownsSessionLaunch(get().tabs[tabId], 'agent', sessionId)) return
-      set((current) => reduceSessionLaunchFailed(current, tabId, 'agent', sessionId, 'agent'))
+      if (!ownsSessionLaunch(findWorkbenchRegion(get().tabs, regionId)?.surface, 'agent', sessionId)) {
+        set((current) => discardPendingAgentLaunch(current, sessionId))
+        if ((error as { code?: unknown } | null)?.code === 'AGENT_LAUNCH_CLEANUP_FAILED') {
+          get().reportError(error)
+          throw error
+        }
+        return
+      }
+      set((current) => reduceSessionLaunchFailed(current, regionId, 'agent', sessionId))
       get().reportError(error)
       throw error
     }
   },
-  async launchTerminal(paneId, launcherTabId, workspacePath) {
+  async launchTerminal(tabGroupId, launcher, workspacePath) {
     const state = get()
-    const launcher = launcherTabId ? state.tabs[launcherTabId] : undefined
-    const workspaceId = launcher?.workspaceId ?? state.activeWorkspaceId
+    const launcherTab = launcher ? state.tabs[launcher.tabId] : undefined
+    const launcherSurface = launcherTab && launcher
+      ? launcherTab.regions[launcher.regionId]
+      : undefined
+    if (launcher && launcherSurface?.kind !== 'launcher') {
+      throw new Error('Launcher Region is no longer available')
+    }
+    const workspaceId = launcherTab?.workspaceId ?? state.activeWorkspaceId
     const workspace = state.config?.workspaces.find((item) => item.id === workspaceId)
     if (!workspace) throw new Error('Select a workspace first')
     const layout = state.layouts[workspace.id]
     if (!layout) throw new Error('Workspace layout is unavailable')
-    const tabId = launcherTabId ?? newLauncherTab(workspace.id).id
+    const targetTab = launcherTab ?? newLauncherTab(workspace.id)
+    const tabId = targetTab.id
+    if (!workbenchViewCloseAllowsView(state.closingWorkbenchViews, tabId)) throw new Error('The View is closing')
+    const regionId = launcher?.regionId ?? targetTab.layout.activeRegionId
     const sessionId = crypto.randomUUID()
-    const pendingTab: TerminalWorkbenchTab = {
-      id: tabId,
+    const pendingSurface: TerminalWorkbenchSurface = {
+      regionId,
       kind: 'terminal',
       phase: 'launching',
       workspaceId: workspace.id,
       sessionId
     }
+    const pendingTab = replaceWorkbenchRegion(targetTab, regionId, pendingSurface)
     set((current) => ({
       tabs: { ...current.tabs, [tabId]: pendingTab },
       layouts: {
         ...current.layouts,
-        [workspace.id]: launcherTabId ? layout : addTab(layout, paneId, tabId)
+        [workspace.id]: launcher ? layout : addTab(layout, tabGroupId, tabId)
       }
     }))
     try {
@@ -960,59 +2126,233 @@ export const useAppStore = create<AppState>((set, get) => ({
         workspacePath: workspacePath ?? workspace.path,
         createOperationId: crypto.randomUUID()
       })
-      if (!ownsSessionLaunch(get().tabs[tabId], 'terminal', sessionId)) {
+      const launchOwner = findWorkbenchRegion(get().tabs, regionId)
+      if (
+        !ownsSessionLaunch(launchOwner?.surface, 'terminal', sessionId) ||
+        (launchOwner && !workbenchViewCloseAllowsView(get().closingWorkbenchViews, launchOwner.tab.id))
+      ) {
         await api.sessions.stop(session.control).catch((cleanupError) => {
           if (get().sessions.some((item) => item.id === session.id)) get().reportError(cleanupError)
         })
         return
       }
       set((current) => {
-        const tab = current.tabs[tabId]
-        if (!ownsSessionLaunch(tab, 'terminal', sessionId) || tab?.kind !== 'terminal') return current
+        const owner = findWorkbenchRegion(current.tabs, regionId)
+        if (
+          !owner ||
+          owner.surface.kind !== 'terminal' ||
+          !ownsSessionLaunch(owner.surface, 'terminal', sessionId)
+        ) return current
         return reduceSessionLaunchAttached({
           ...current,
           tabs: {
             ...current.tabs,
-            [tabId]: { ...tab, sessionId: session.id }
+            [owner.tab.id]: replaceWorkbenchRegion(owner.tab, regionId, {
+              ...owner.surface,
+              sessionId: session.id
+            })
           }
-        }, tabId, session)
+        }, regionId, session)
       })
     } catch (error) {
-      if (!ownsSessionLaunch(get().tabs[tabId], 'terminal', sessionId)) return
-      set((current) => reduceSessionLaunchFailed(current, tabId, 'terminal', sessionId, 'picker'))
+      if (!ownsSessionLaunch(findWorkbenchRegion(get().tabs, regionId)?.surface, 'terminal', sessionId)) return
+      set((current) => reduceSessionLaunchFailed(current, regionId, 'terminal', sessionId))
       get().reportError(error)
       throw error
     }
   },
-  async createBrowser(paneId, launcherTabId) {
+  prewarmTerminal(workspaceId) {
+    const workspace = get().config?.workspaces.find((item) => item.id === workspaceId)
+    if (!workspace) return
+    const key = warmTerminalKey(workspace.hostId, workspace.path)
+    const existing = get().warmTerminal
+    if (existing?.key === key) return
+    if (existing) {
+      // A different host/cwd cannot reuse this shell. Keep its durable id recorded
+      // until Core confirms the stop.
+      void stopWarmTerminal(existing).then((sessionId) => {
+        if (!sessionId) return
+        set((state) => ({
+          unclaimedTerminalSessionIds: forgetUnclaimedTerminalSession(
+            state.unclaimedTerminalSessionIds,
+            sessionId
+          )
+        }))
+      })
+    }
+    const ready = api.sessions
+      .launchTerminal({
+        hostId: workspace.hostId,
+        workspacePath: workspace.path,
+        createOperationId: crypto.randomUUID()
+      })
+      .catch(() => null)
+    void ready.then((session) => {
+      if (!session) {
+        if (get().warmTerminal?.ready === ready) set({ warmTerminal: null })
+        return
+      }
+      set((state) => ({
+        // Track every successful prewarm even if another workspace replaced the slot
+        // while Core was launching it. The matching stop path removes the id later.
+        warmTerminal: state.warmTerminal?.ready === ready
+          ? { ...state.warmTerminal, session }
+          : state.warmTerminal,
+        unclaimedTerminalSessionIds: trackUnclaimedTerminalSession(
+          state.unclaimedTerminalSessionIds,
+          session.id
+        )
+      }))
+    })
+    set({ warmTerminal: { key, ready, session: null } })
+  },
+  async promoteWarmTerminal(tabGroupId, launcher) {
     const state = get()
-    const launcher = launcherTabId ? state.tabs[launcherTabId] : undefined
-    const workspaceId = launcher?.workspaceId ?? state.activeWorkspaceId
+    const launcherTab = launcher ? state.tabs[launcher.tabId] : undefined
+    const launcherSurface = launcherTab && launcher
+      ? launcherTab.regions[launcher.regionId]
+      : undefined
+    if (launcher && launcherSurface?.kind !== 'launcher') {
+      throw new Error('Launcher Region is no longer available')
+    }
+    if (launcherTab && !workbenchViewCloseAllowsView(state.closingWorkbenchViews, launcherTab.id)) {
+      throw new Error('The View is closing')
+    }
+    const workspaceId = launcherTab?.workspaceId ?? state.activeWorkspaceId
+    const workspace = state.config?.workspaces.find((item) => item.id === workspaceId)
+    if (!workspace) throw new Error('Select a workspace first')
+    const key = warmTerminalKey(workspace.hostId, workspace.path)
+    if (state.warmTerminal?.key !== key) {
+      await get().launchTerminal(tabGroupId, launcher)
+      return
+    }
+    const held = state.warmTerminal
+    // Consume the slot before awaiting so concurrent clicks cannot claim it twice.
+    set({ warmTerminal: null })
+    const session = await held.ready
+    if (!session) {
+      await get().launchTerminal(tabGroupId, launcher)
+      return
+    }
+    if (!get().layouts[workspace.id]) {
+      if (await stopTerminalSession(session)) {
+        set((current) => ({
+          unclaimedTerminalSessionIds: forgetUnclaimedTerminalSession(
+            current.unclaimedTerminalSessionIds,
+            session.id
+          )
+        }))
+      }
+      throw new Error('Workspace layout is unavailable')
+    }
+    const targetTab = launcherTab ?? newLauncherTab(workspace.id)
+    const tabId = targetTab.id
+    const regionId = launcher?.regionId ?? targetTab.layout.activeRegionId
+    const surface: TerminalWorkbenchSurface = {
+      regionId,
+      kind: 'terminal',
+      phase: 'attached',
+      workspaceId: workspace.id,
+      sessionId: session.id
+    }
+    let bound = false
+    let sessionOwnedByClose = false
+    set((current) => {
+      if (!workbenchViewCloseAllowsSession(current.closingWorkbenchViews, session.id)) {
+        sessionOwnedByClose = true
+        return current
+      }
+      if (!workbenchViewCloseAllowsView(current.closingWorkbenchViews, tabId)) return current
+      let baseTab = targetTab
+      if (launcher) {
+        const live = current.tabs[tabId]
+        if (!live || live.regions[regionId]?.kind !== 'launcher') return current
+        baseTab = live
+      }
+      const nextTabs = { ...current.tabs, [tabId]: replaceWorkbenchRegion(baseTab, regionId, surface) }
+      const nextSessions = [...current.sessions.filter((item) => item.id !== session.id), session]
+      const nextUnclaimedIds = forgetUnclaimedTerminalSession(
+        current.unclaimedTerminalSessionIds,
+        session.id
+      )
+      if (launcher) {
+        bound = true
+        return {
+          tabs: nextTabs,
+          sessions: nextSessions,
+          unclaimedTerminalSessionIds: nextUnclaimedIds
+        }
+      }
+      const layout = current.layouts[workspace.id]
+      if (!layout) return current
+      bound = true
+      return {
+        tabs: nextTabs,
+        layouts: { ...current.layouts, [workspace.id]: addTab(layout, tabGroupId, tabId) },
+        sessions: nextSessions,
+        unclaimedTerminalSessionIds: nextUnclaimedIds
+      }
+    })
+    if (!bound) {
+      if (sessionOwnedByClose) return
+      if (await stopTerminalSession(session)) {
+        set((current) => ({
+          unclaimedTerminalSessionIds: forgetUnclaimedTerminalSession(
+            current.unclaimedTerminalSessionIds,
+            session.id
+          )
+        }))
+      }
+      return
+    }
+    void get().refreshSession(session.id)
+  },
+  async createBrowser(tabGroupId, launcher) {
+    const state = get()
+    const launcherTab = launcher ? state.tabs[launcher.tabId] : undefined
+    const launcherSurface = launcherTab && launcher
+      ? launcherTab.regions[launcher.regionId]
+      : undefined
+    if (launcher && launcherSurface?.kind !== 'launcher') {
+      throw new Error('Launcher Region is no longer available')
+    }
+    const workspaceId = launcherTab?.workspaceId ?? state.activeWorkspaceId
     if (!workspaceId) throw new Error('Select a workspace first')
     const layout = state.layouts[workspaceId]
     if (!layout) throw new Error('Workspace layout is unavailable')
-    const tabId = launcherTabId ?? newLauncherTab(workspaceId).id
-    if (!launcherTabId) {
-      const launcherTab: LauncherWorkbenchTab = { id: tabId, kind: 'launcher', workspaceId, view: 'picker' }
+    const targetTab = launcherTab ?? newLauncherTab(workspaceId)
+    const tabId = targetTab.id
+    if (!workbenchViewCloseAllowsView(state.closingWorkbenchViews, tabId)) throw new Error('The View is closing')
+    const regionId = launcher?.regionId ?? targetTab.layout.activeRegionId
+    if (!launcher) {
       set((current) => ({
-        tabs: { ...current.tabs, [tabId]: launcherTab },
-        layouts: { ...current.layouts, [workspaceId]: addTab(layout, paneId, tabId) }
+        tabs: { ...current.tabs, [tabId]: targetTab },
+        layouts: { ...current.layouts, [workspaceId]: addTab(layout, tabGroupId, tabId) }
       }))
     }
     try {
-      const browser = await api.browser.create(tabId, 'about:blank')
-      const tab: BrowserWorkbenchTab = {
+      const browser = await api.browser.create(regionId, 'about:blank')
+      const surface: BrowserWorkbenchSurface = {
         ...browser,
-        id: tabId,
+        regionId,
         kind: 'browser',
         workspaceId,
         browserId: browser.id
       }
-      if (get().tabs[tabId]?.kind !== 'launcher') {
+      const currentOwner = findWorkbenchRegion(get().tabs, regionId)
+      if (
+        currentOwner?.surface.kind !== 'launcher' ||
+        !workbenchViewCloseAllowsView(get().closingWorkbenchViews, currentOwner.tab.id)
+      ) {
         await api.browser.close(browser.id)
         return
       }
-      set((current) => ({ tabs: { ...current.tabs, [tabId]: tab } }))
+      set((current) => ({
+        tabs: {
+          ...current.tabs,
+          [currentOwner.tab.id]: replaceWorkbenchRegion(currentOwner.tab, regionId, surface)
+        }
+      }))
     } catch (error) {
       get().reportError(error)
       throw error
@@ -1037,30 +2377,156 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (session) await api.sessions.interrupt(session.control).catch((error) => get().reportError(error))
   },
   async refreshSession(sessionId) {
-    const current = get().sessions.find((item) => item.id === sessionId)
+    const before = get()
+    if (!workbenchViewCloseAllowsSession(before.closingWorkbenchViews, sessionId)) return
+    const current = before.sessions.find((item) => item.id === sessionId)
     if (!current) return
     try {
       const session = await api.sessions.refresh(current.control)
-      set((state) => ({
-        sessions: [...state.sessions.filter((item) => item.id !== session.id), session]
-      }))
+      set((state) => {
+        if (!workbenchViewCloseAllowsSession(state.closingWorkbenchViews, sessionId)) return state
+        const live = state.sessions.find((item) => item.id === sessionId)
+        if (!live || !sessionOwnsControl(live, current.control)) return state
+        if (!hasAttachedSessionView(state.tabs, sessionId)) return state
+        return { sessions: [...state.sessions.filter((item) => item.id !== session.id), session] }
+      })
+    } catch (error) {
+      get().reportError(error)
+    }
+  },
+  async recoverSession(sessionId) {
+    const before = get()
+    if (!workbenchViewCloseAllowsSession(before.closingWorkbenchViews, sessionId)) return
+    const current = before.sessions.find((item) => item.id === sessionId)
+    if (!current) return
+    try {
+      const session = await api.sessions.recover(current.control, current.workspacePath)
+      const after = get()
+      const live = after.sessions.find((item) => item.id === sessionId)
+      const ownerStillCurrent = live !== undefined &&
+        (sessionOwnsControl(live, current.control) || sessionOwnsControl(live, session.control)) &&
+        hasAttachedSessionView(after.tabs, sessionId)
+      if (
+        workbenchViewCloseAllowsSession(after.closingWorkbenchViews, sessionId) &&
+        ownerStillCurrent
+      ) {
+        set((state) => projectRecoveredSession(state, sessionId, session))
+        return
+      }
+      if (session.control.run.runId === current.control.run.runId) return
+      try {
+        await api.sessions.stop(session.control)
+      } catch (cleanupError) {
+        set((state) => projectRecoveredSession(state, sessionId, session))
+        get().selectSession(session.id)
+        throw new AggregateError(
+          [new Error('Recovered Session owner disappeared before commit.'), cleanupError],
+          'Recovered Session owner disappeared and cleanup failed.'
+        )
+      }
     } catch (error) {
       get().reportError(error)
     }
   },
   async stopSession(sessionId) {
-    const session = get().sessions.find((item) => item.id === sessionId)
+    const state = get()
+    if (!workbenchViewCloseAllowsSession(state.closingWorkbenchViews, sessionId)) return
+    const session = state.sessions.find((item) => item.id === sessionId)
     if (session) await api.sessions.stop(session.control).catch((error) => get().reportError(error))
   },
+  async canonicalizeAgentLaunch(result) {
+    while (get().pendingAgentLaunches[result.session.id]?.overflowed) {
+      set((state) => {
+        const pending = state.pendingAgentLaunches[result.session.id]
+        if (!pending) return state
+        return {
+          pendingAgentLaunches: {
+            ...state.pendingAgentLaunches,
+            [result.session.id]: { ...pending, events: [], overflowed: false }
+          }
+        }
+      })
+      const snapshot = await api.sessions.snapshot()
+      const pending = get().pendingAgentLaunches[result.session.id]
+      if (!pending) return null
+      if (pending.overflowed) continue
+      const session = snapshot.sessions.find((candidate) => candidate.id === result.session.id)
+      if (!session) return null
+      if (session.kind !== 'agent') throw new Error('Agent launch resync projected a non-Agent Session')
+      const timeline = snapshot.timelines[result.session.id]
+      if (!timeline || timeline.agentSessionId !== result.session.id) {
+        throw new Error('Agent launch resync did not return its matching Timeline baseline')
+      }
+      result = { session, timeline }
+    }
+    return result
+  },
+  async resyncTimeline(sessionId) {
+    const existing = timelineResyncs.get(sessionId)
+    if (existing) {
+      existing.requested = true
+      await existing.promise
+      return
+    }
+    const entry = { requested: false, promise: Promise.resolve() }
+    entry.promise = (async () => {
+      try {
+        do {
+          entry.requested = false
+          const session = get().sessions.find((candidate) => (
+            candidate.kind === 'agent' && candidate.id === sessionId
+          ))
+          if (!session || session.kind !== 'agent') return
+          const snapshot = await api.sessions.timeline(session.control)
+          set((state) => reduceTimelineSnapshot(state, snapshot))
+        } while (entry.requested)
+      } catch (error) {
+        get().reportError(error)
+      } finally {
+        timelineResyncs.delete(sessionId)
+      }
+    })()
+    timelineResyncs.set(sessionId, entry)
+    await entry.promise
+  },
   applyEvent(event) {
-    set((state) => reduceRuntimeEvent(state, event))
+    if (sessionMembershipResync) {
+      const pendingLaunchAgentSessionId = pendingAgentLaunchEventId(get(), event)
+      if (pendingLaunchAgentSessionId) {
+        set((state) => projectRuntimeEvent(state, event).state)
+        enqueueSessionMembershipEvent(sessionMembershipResync, event, pendingLaunchAgentSessionId)
+        return
+      }
+      enqueueSessionMembershipEvent(sessionMembershipResync, event)
+      return
+    }
+    let timelineGapSessionId: string | undefined
+    let sessionMembershipGap = false
+    set((state) => {
+      const reduced = projectRuntimeEvent(state, event)
+      timelineGapSessionId = reduced.timelineGapSessionId
+      sessionMembershipGap = reduced.sessionMembershipGap === true
+      return reduced.state
+    })
+    if (sessionMembershipGap) startSessionMembershipResync(event)
+    if (timelineGapSessionId) void get().resyncTimeline(timelineGapSessionId)
   },
   setConfig(config) {
     detectionRequestIds.clear()
     hostCheckRequestIds.clear()
-    set({ config, agentDetections: {}, hostChecks: {} })
+    set({ config, executorDetections: {}, hostChecks: {} })
   },
   reportError(error) {
     set({ error: message(error) })
   }
+}), {
+  name: 'agentmux-workbench-v1',
+  version: 1,
+  storage: createJSONStorage(() => (
+    typeof window === 'undefined' ? nonBrowserWorkbenchStorage : window.localStorage
+  )),
+  partialize: (state) => ({
+    restoredWorkbench: projectPersistedWorkbench({ tabs: state.tabs, layouts: state.layouts }),
+    unclaimedTerminalSessionIds: state.unclaimedTerminalSessionIds
+  })
 }))

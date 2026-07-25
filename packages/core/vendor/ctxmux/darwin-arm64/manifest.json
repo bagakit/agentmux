@@ -1,9 +1,9 @@
 {
   "schema": "ctxmux.local-artifacts.v1",
   "source": {
-    "commit": "2e32a9d647d627952ea5c455fb2efef6c636643a",
-    "tree": "d60870c2481c9b153da6bf22f829d24afb8a81a8",
-    "commit_time_unix": "1786734472",
+    "commit": "f89dabe70eba38d46992c320e40c9ebe2f09b5e5",
+    "tree": "37632c41c4aae42ba40f33ebe9c54fab13d17c44",
+    "commit_time_unix": "1787411265",
     "worktree_clean": true
   },
   "product": {
@@ -19,7 +19,7 @@
   "build": {
     "profile": "release",
     "locked": true,
-    "source_date_epoch": "1786734472",
+    "source_date_epoch": "1787411265",
     "rustc": "1.96.0",
     "cargo": "cargo 1.96.0 (30a34c682 2026-05-25)",
     "node": "v24.14.1",
@@ -53,8 +53,8 @@
       "version": "0.1.0",
       "protocol": 9,
       "path": "bin/ctxmuxd",
-      "sha256": "5bb6592989bfc0e77287baba63b6ae4aa0ba536825e74381a787be3d196cf9b6",
-      "bytes": 4903232,
+      "sha256": "41e76b10da84a9ee018a820bab31c7c6c87ff424a7cc1eff05060cc533963132",
+      "bytes": 4903696,
       "mode": "0755"
     }
   ],

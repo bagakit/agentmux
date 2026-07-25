@@ -1,4 +1,4 @@
-import type { WorkspaceRecord } from '../../../shared/contracts'
+import { isScratchWorkspaceId, type WorkspaceRecord } from '../../../shared/contracts'
 
 export type WorkspaceProject = {
   id: string
@@ -41,6 +41,18 @@ export function projectWorkspaces(workspaces: readonly WorkspaceRecord[]): Works
     })
   }
   return [...projects.values()]
+}
+
+export function projectRailNavigation(workspaces: readonly WorkspaceRecord[]): {
+  scratch: WorkspaceRecord | null
+  projects: WorkspaceProject[]
+} {
+  return {
+    scratch: workspaces.find((workspace) => isScratchWorkspaceId(workspace.id)) ?? null,
+    projects: projectWorkspaces(
+      workspaces.filter((workspace) => !isScratchWorkspaceId(workspace.id))
+    )
+  }
 }
 
 export function defaultWorktreePath(repoPath: string, branch: string): string {

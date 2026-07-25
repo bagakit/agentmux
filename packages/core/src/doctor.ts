@@ -1,10 +1,10 @@
 import type { AgentMuxClient } from './client.js'
-import type { AgentId, AgentCapabilities, AgentCatalogEntry } from './types.js'
+import type { AgentProviderId, AgentCapabilities, AgentCatalogEntry } from './types.js'
 
 export type AgentMuxDoctorProbeState = 'found' | 'missing' | 'blocked'
 
 export type AgentMuxDoctorAgent = {
-  id: AgentId
+  id: AgentProviderId
   label: string
   executable: string
   probe: AgentMuxDoctorProbeState

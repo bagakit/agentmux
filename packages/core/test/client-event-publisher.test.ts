@@ -76,4 +76,37 @@ describe('AgentMux Client event publisher bounds', () => {
     expect(listener).toHaveBeenCalledTimes(2)
     publisher.dispose()
   })
+
+  it('publishes the Store-assigned Timeline revision and canonical mutation', () => {
+    const publisher = new AgentMuxClientEventPublisher()
+    const delivered = vi.fn()
+    publisher.onEvent(delivered)
+    const mutation = {
+      type: 'update' as const,
+      agentSessionId: 'session-1',
+      itemId: 'assistant-1',
+      updatedAt: 2,
+      content: 'complete content'
+    }
+
+    publisher.publishTimeline({
+      agentSessionId: 'session-1',
+      revision: 7,
+      changed: true,
+      mutation
+    }, { source: 'acp', observedAt: 2, acpAdapterId: 'adapter-1', acpSessionId: 'native-1' })
+
+    expect(delivered).toHaveBeenCalledWith({
+      type: 'agent-timeline',
+      agentSessionId: 'session-1',
+      revision: 7,
+      mutation,
+      evidence: {
+        source: 'acp',
+        observedAt: 2,
+        acpAdapterId: 'adapter-1',
+        acpSessionId: 'native-1'
+      }
+    })
+  })
 })

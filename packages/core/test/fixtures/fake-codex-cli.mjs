@@ -5,11 +5,11 @@ const prompt = isResume ? args[2] ?? '' : args.at(-1) ?? ''
 const hookUrl = process.env.AGENTMUX_HOOK_URL
 const hookToken = process.env.AGENTMUX_HOOK_TOKEN
 const agentSessionId = process.env.AGENTMUX_AGENT_SESSION_ID
-const agentId = process.env.AGENTMUX_AGENT_ID
+const providerId = process.env.AGENTMUX_PROVIDER_ID
 const readyMode = process.env.AGENTMUX_FAKE_READY_MODE ?? 'before-delayed'
 const promptRenderMode = process.env.AGENTMUX_FAKE_PROMPT_RENDER_MODE ?? 'normal'
 
-if (!hookUrl || !hookToken || !agentSessionId || !agentId) {
+if (!hookUrl || !hookToken || !agentSessionId || !providerId) {
   throw new Error('missing AgentMux hook environment')
 }
 if (
@@ -113,12 +113,14 @@ const settleTurn = async () => {
   if (readyMode === 'after') {
     await publishStop()
     controlledReadyPending = true
+    writeDiagnostic('codex-controlled-ready-pending')
     return
   }
   if (readyMode === 'after-assistant') {
     await publishStop()
     writeAssistantMarkerWithoutComposer()
     controlledReadyPending = true
+    writeDiagnostic('codex-controlled-ready-pending')
     return
   }
   throw new Error(`unknown fake readiness mode: ${readyMode}`)

@@ -340,7 +340,7 @@ export function moveTab(
   return { root, groups, activeGroupId: targetGroupId }
 }
 
-export function splitTab(
+export function moveTabToNewGroup(
   layout: WorkspaceLayout,
   tabId: string,
   sourceGroupId: string,

@@ -1,87 +1,262 @@
-import { Bot, Globe2, LoaderCircle, RadioTower, SquareTerminal } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
-import { useAppStore } from '../store'
-import { LaunchAgent } from './LaunchAgent'
+import { ArrowUpRight, Check, ChevronRight, Globe2, LoaderCircle, Play, RadioTower, RefreshCw, Sparkles, SquareTerminal } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { DESKTOP_ACTIONS } from '../../../shared/desktop-actions'
+import { executorDetectionKey, useAppStore, warmTerminalKey } from '../store'
+import { configuredExecutors } from '../lib/executors'
+import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
+import { TerminalView } from './TerminalView'
 
-export function NewTabSurface({ paneId, tabId }: { paneId: string; tabId?: string }) {
-  const launcherView = useAppStore((state) => {
-    const tab = tabId ? state.tabs[tabId] : undefined
-    return tab?.kind === 'launcher' ? tab.view : 'picker'
-  })
-  const [starting, setStarting] = useState<'terminal' | 'browser' | null>(null)
+export function NewTabSurface({
+  tabGroupId,
+  tabId,
+  regionId
+}: {
+  tabGroupId: string
+  tabId?: string
+  regionId?: string
+}) {
+  const [executorId, setExecutorId] = useState('codex')
+  const [prompt, setPrompt] = useState('')
+  const [busy, setBusy] = useState<'agent' | 'terminal' | 'browser' | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const firstAction = useRef<HTMLButtonElement>(null)
+  const promptRef = useRef<HTMLTextAreaElement>(null)
   const config = useAppStore((state) => state.config)
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
   const tabWorkspaceId = useAppStore((state) => tabId ? state.tabs[tabId]?.workspaceId : undefined)
-  const launchTerminal = useAppStore((state) => state.launchTerminal)
+  const detections = useAppStore((state) => state.executorDetections)
+  const detectExecutors = useAppStore((state) => state.detectExecutors)
+  const launchAgent = useAppStore((state) => state.launchAgent)
+  const promoteWarmTerminal = useAppStore((state) => state.promoteWarmTerminal)
+  const prewarmTerminal = useAppStore((state) => state.prewarmTerminal)
+  const warmTerminal = useAppStore((state) => state.warmTerminal)
+  const terminalThemeId = useAppStore((state) => state.config?.appearance.terminalTheme)
   const createBrowser = useAppStore((state) => state.createBrowser)
-  const openLauncher = useAppStore((state) => state.openLauncher)
-  const setLauncherView = useAppStore((state) => state.setLauncherView)
   const workspace = config?.workspaces.find((item) => item.id === (tabWorkspaceId ?? activeWorkspaceId))
+  const hostLabel = workspace ? (config?.hosts.find((host) => host.id === workspace.hostId)?.label ?? workspace.hostId) : 'No host'
+  const hostCheck = useAppStore((state) => workspace ? state.hostChecks[workspace.hostId] : undefined)
+  // Only show a warm shell created for this exact host and working directory.
+  // It remains outside the ordinary Session list until the user claims it.
+  const warmKey = workspace ? warmTerminalKey(workspace.hostId, workspace.path) : null
+  const warmSession = warmTerminal && warmTerminal.key === warmKey ? warmTerminal.session : null
+  const warmPending = Boolean(warmTerminal && warmTerminal.key === warmKey && !warmTerminal.session)
+  const executors = useMemo(
+    () => configuredExecutors(config).map((executor) => ({
+      ...executor,
+      detection: workspace ? detections[executorDetectionKey(workspace.hostId, executor.id)] : undefined
+    })),
+    [config?.executors, detections, workspace]
+  )
+  const installedExecutors = executors.filter((executor) => executor.detection?.state === 'ready')
+  const unavailableExecutors = executors.filter((executor) => executor.detection?.state !== 'ready')
+  const detecting = executors.some((executor) => executor.detection?.state === 'checking')
 
   useEffect(() => {
-    firstAction.current?.focus()
+    promptRef.current?.focus()
   }, [])
 
-  async function choose(kind: 'terminal' | 'browser'): Promise<void> {
-    if (starting) return
-    setStarting(kind)
+  useEffect(() => {
+    // The create page owns the prewarm trigger. Promoting the shell does not create
+    // another hidden terminal; a future create page will warm its own shell on mount.
+    if (workspace) prewarmTerminal(workspace.id)
+  }, [prewarmTerminal, workspace?.id])
+
+  useEffect(() => {
+    if (!workspace || executors.every((executor) => executor.detection)) return
+    void detectExecutors(workspace.hostId)
+  }, [executors, detectExecutors, workspace])
+
+  useEffect(() => {
+    if (installedExecutors.some((executor) => executor.id === executorId)) return
+    const first = installedExecutors[0]
+    if (first) setExecutorId(first.id)
+  }, [executorId, installedExecutors])
+
+  async function run<T>(kind: 'agent' | 'terminal' | 'browser', action: () => Promise<T>): Promise<void> {
+    if (busy) return
+    setBusy(kind)
     setError(null)
     try {
-      if (kind === 'terminal') await launchTerminal(paneId, tabId)
-      else await createBrowser(paneId, tabId)
+      await action()
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     } finally {
-      setStarting(null)
+      setBusy(null)
     }
   }
 
-  if (launcherView === 'agent') {
-    return (
-      <LaunchAgent
-        paneId={paneId}
-        {...(tabId ? { launcherTabId: tabId } : {})}
-        onBack={() => {
-          if (tabId) setLauncherView(tabId, 'picker')
-        }}
-      />
-    )
-  }
-
   return (
-    <section className="new-tab-surface">
-      <header>
-        <div className="eyebrow">New tab</div>
-        <h2>What do you want to open?</h2>
-        <p>Choose content for this pane. The selected content replaces this surface in the same tab.</p>
-      </header>
-      <div className="new-tab-grid">
-        <button ref={firstAction} type="button" onClick={() => void choose('terminal')} disabled={starting !== null}>
-          <span className="new-tab-card__icon"><SquareTerminal size={19} /></span>
-          <span><strong>Terminal</strong><small>Open the host shell in a recoverable core session.</small></span>
-          {starting === 'terminal' ? <LoaderCircle className="spin" size={14} /> : null}
-        </button>
+    <section className="launch-surface">
+      <div className="launch-surface__heading">
+        <span className="launch-surface__icon"><Sparkles size={17} /></span>
+        <div>
+          <div className="eyebrow">New session</div>
+          <h2>Start in {workspace?.name ?? 'this workspace'}</h2>
+          <p>Pick an Agent and describe the outcome — or open a terminal or browser instead.</p>
+        </div>
         <button
           type="button"
-          onClick={() => tabId ? setLauncherView(tabId, 'agent') : openLauncher(paneId, 'agent')}
-          disabled={starting !== null}
+          className="icon-button"
+          title="Refresh agents on this host"
+          disabled={!workspace || detecting}
+          onClick={() => workspace && void detectExecutors(workspace.hostId)}
         >
-          <span className="new-tab-card__icon"><Bot size={19} /></span>
-          <span><strong>Agent</strong><small>Launch Codex, Claude, TraeX, Hermes, or Pi.</small></span>
-        </button>
-        <button type="button" onClick={() => void choose('browser')} disabled={starting !== null}>
-          <span className="new-tab-card__icon"><Globe2 size={19} /></span>
-          <span><strong>Browser</strong><small>Navigate in a Main-owned embedded WebContents.</small></span>
-          {starting === 'browser' ? <LoaderCircle className="spin" size={14} /> : null}
+          {detecting ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}
         </button>
       </div>
-      <footer>
-        <span>{workspace?.hostId !== 'local' ? <RadioTower size={11} /> : null}{workspace?.name ?? 'No workspace'} · {workspace?.hostId ?? 'No host'}</span>
-        <kbd>tab</kbd><span>choose</span><kbd>↵</kbd><span>open</span>
-      </footer>
+      <div className="agent-catalog" aria-label="Agent executors">
+        <div className="agent-catalog__group">
+          <div className="agent-catalog__label">
+            <span><i className="agent-catalog__ready-dot" />Available</span>
+            <em>{installedExecutors.length}</em>
+          </div>
+          <div className="agent-picks">
+            {installedExecutors.map((executor) => (
+              <button
+                type="button"
+                key={executor.id}
+                aria-pressed={executor.id === executorId}
+                className={`agent-pick ${executor.id === executorId ? 'agent-pick--selected' : ''}`}
+                onClick={() => setExecutorId(executor.id)}
+              >
+                <span className="agent-pick__icon"><AgentProviderIcon providerId={executor.providerId} size={16} /></span>
+                <span className="agent-pick__copy"><strong>{executor.label}</strong><small>{agentProviderLabel(executor.providerId)} · Ready</small></span>
+                {executor.id === executorId ? <span className="agent-pick__check"><Check size={10} strokeWidth={3} /></span> : null}
+              </button>
+            ))}
+            {installedExecutors.length === 0 ? (
+              detecting ? (
+                <div className="agent-catalog__empty">Checking providers…</div>
+              ) : (
+                <div className="agent-catalog__empty agent-catalog__empty--action">
+                  <strong>No agent providers found on {hostLabel}</strong>
+                  <small>Install a supported CLI (codex, claude, …) on this host, then re-check.</small>
+                  <button
+                    type="button"
+                    className="small-button"
+                    disabled={!workspace || detecting}
+                    onClick={() => workspace && void detectExecutors(workspace.hostId)}
+                  >
+                    <RefreshCw size={12} /> Re-check host
+                  </button>
+                </div>
+              )
+            ) : null}
+          </div>
+        </div>
+        {unavailableExecutors.length > 0 ? (
+          <div className="agent-catalog__group">
+            <div className="agent-catalog__label">
+              <span>Not installed on {workspace?.hostId ?? 'this host'}</span>
+              <em>{unavailableExecutors.length}</em>
+            </div>
+            <div className="agent-picks">
+              {unavailableExecutors.map((executor) => (
+                <button type="button" key={executor.id} className="agent-pick agent-pick--unavailable" disabled>
+                  <span className="agent-pick__icon"><AgentProviderIcon providerId={executor.providerId} size={16} /></span>
+                  <span className="agent-pick__copy"><strong>{executor.label}</strong><small>{agentProviderLabel(executor.providerId)} · Unavailable</small></span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </div>
+      <textarea
+        ref={promptRef}
+        value={prompt}
+        onChange={(event) => setPrompt(event.target.value)}
+        placeholder="Describe the outcome. You can steer the agent after launch."
+        rows={4}
+      />
+      <div className="launch-surface__footer">
+        <span>
+          {workspace?.hostId !== 'local' ? <RadioTower size={13} /> : null}
+          {hostLabel}
+          {hostCheck ? <em className={`launch-host-health launch-host-health--${hostCheck.state}`}>{hostCheck.state === 'ready' ? 'Ready' : hostCheck.state === 'checking' ? 'Checking' : 'Needs attention'}</em> : null}
+        </span>
+        <button
+          className="primary-button"
+          disabled={!workspace || busy !== null || installedExecutors.length === 0}
+          onClick={() => void run('agent', () => launchAgent(
+            executorId,
+            prompt,
+            tabGroupId,
+            tabId && regionId ? { tabId, regionId } : undefined
+          ))}
+        >
+          {busy === 'agent' ? <LoaderCircle className="spin" size={14} /> : <Play size={14} />} {busy === 'agent' ? 'Launching…' : 'Launch agent'}
+        </button>
+      </div>
       {error ? <div className="new-tab-error" role="alert">{error}</div> : null}
+      <div className="launch-surface__alt">
+        <div className="agent-catalog__label">
+          <span><SquareTerminal size={12} /> Terminal</span>
+          <em>reusable</em>
+        </div>
+        {warmSession && terminalThemeId ? (
+          <div className="launch-terminal">
+            <div className="launch-terminal__head">
+              <span className="launch-terminal__hint">Ready — run a quick command here, or claim it as its own tab.</span>
+              <button
+                type="button"
+                className="small-button launch-terminal__claim"
+                aria-label="Open reusable Terminal in tab"
+                data-agentmux-action={DESKTOP_ACTIONS.claimReusableTerminal}
+                data-agentmux-session-id={warmSession.id}
+                disabled={busy !== null}
+                onClick={() => void run('terminal', () => promoteWarmTerminal(
+                  tabGroupId,
+                  tabId && regionId ? { tabId, regionId } : undefined
+                ))}
+              >
+                {busy === 'terminal' ? <LoaderCircle className="spin" size={12} /> : <ArrowUpRight size={12} />}
+                {busy === 'terminal' ? 'Opening…' : 'Open in tab'}
+              </button>
+            </div>
+            <div className="launch-terminal__body">
+              <TerminalView
+                session={warmSession}
+                themeId={terminalThemeId}
+                interactiveResize={false}
+                autoFocus={false}
+              />
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="agent-pick agent-pick--action launch-terminal__fallback"
+            aria-label="Open Terminal"
+            data-agentmux-action={DESKTOP_ACTIONS.claimReusableTerminal}
+            disabled={!workspace || busy !== null}
+            onClick={() => void run('terminal', () => promoteWarmTerminal(
+              tabGroupId,
+              tabId && regionId ? { tabId, regionId } : undefined
+            ))}
+          >
+            <span className="agent-pick__icon">{warmPending ? <LoaderCircle className="spin" size={16} /> : <SquareTerminal size={16} />}</span>
+            <span className="agent-pick__copy"><strong>Terminal</strong><small>{warmPending ? 'Warming a reusable host shell…' : 'Host shell in a recoverable core session'}</small></span>
+            <span className="agent-pick__go">{busy === 'terminal' ? <LoaderCircle className="spin" size={14} /> : <ChevronRight size={14} />}</span>
+          </button>
+        )}
+        <div className="agent-catalog__label"><span>Or open</span></div>
+        <div className="agent-picks">
+          <button
+            type="button"
+            className="agent-pick agent-pick--action"
+            aria-label="Open Browser"
+            data-agentmux-action={DESKTOP_ACTIONS.openBrowser}
+            disabled={!workspace || busy !== null}
+            onClick={() => void run('browser', () => createBrowser(
+              tabGroupId,
+              tabId && regionId ? { tabId, regionId } : undefined
+            ))}
+          >
+            <span className="agent-pick__icon"><Globe2 size={16} /></span>
+            <span className="agent-pick__copy"><strong>Browser</strong><small>Main-owned embedded WebContents</small></span>
+            <span className="agent-pick__go">{busy === 'browser' ? <LoaderCircle className="spin" size={14} /> : <ChevronRight size={14} />}</span>
+          </button>
+        </div>
+      </div>
     </section>
   )
 }

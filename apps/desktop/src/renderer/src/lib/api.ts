@@ -1,6 +1,7 @@
 import type {
-  AgentActivity,
+  AgentTimelineSnapshot,
   AgentMuxDesktopApi,
+  AgentMuxPreloadApi,
   AppConfig,
   BrowserEvent,
   BrowserSnapshot,
@@ -9,11 +10,26 @@ import type {
   SessionSnapshot,
   WorkspaceBranchRecord
 } from '../../../shared/contracts'
-import type { DesktopViewFocusTarget, DesktopViewFocusResult } from '../../../shared/contracts'
+import type { AgentMuxCompositionRequest, AgentMuxCompositionResult } from '@agentmux/core'
+import { createRendererCompositionApi } from './composition-api'
+import {
+  SCRATCH_TOPIC_TITLE_MAX_LENGTH,
+  scratchTopicDirectoryName,
+  scratchTopicIdFromDirectoryName
+} from '../../../shared/scratch-topics'
 
 const now = Date.now()
+const mockStructuredCapabilities = {
+  terminal: true as const,
+  hookEvents: true,
+  timeline: 'complete-events' as const,
+  permission: 'observe' as const,
+  providerResume: true,
+  acp: false,
+  replyCorrelation: 'none' as const
+}
 let mockConfig: AppConfig = {
-  version: 4,
+  version: 6,
   hosts: [
     { id: 'local', kind: 'local', label: 'This Mac' },
     {
@@ -24,12 +40,12 @@ let mockConfig: AppConfig = {
       user: 'river'
     }
   ],
-  agents: {
-    codex: { command: 'codex', args: ['--full-auto'], env: {} },
-    claude: { command: 'claude', args: [], env: {} },
-    traex: { command: 'traex', args: [], env: {} },
-    hermes: { command: 'hermes', args: [], env: {} },
-    pi: { command: 'pi', args: [], env: {} }
+  executors: {
+    codex: { label: 'Codex', providerId: 'codex', command: 'codex', args: ['--full-auto'], env: {}, injectAgentMuxGuide: true },
+    claude: { label: 'Claude', providerId: 'claude', command: 'claude', args: [], env: {}, injectAgentMuxGuide: true },
+    traex: { label: 'TraeX', providerId: 'traex', command: 'traex', args: [], env: {}, injectAgentMuxGuide: true },
+    hermes: { label: 'Hermes', providerId: 'hermes', command: 'hermes', args: [], env: {}, injectAgentMuxGuide: true },
+    pi: { label: 'Pi', providerId: 'pi', command: 'pi', args: [], env: {}, injectAgentMuxGuide: true }
   },
   workspaces: [
     { id: 'workspace-demo', name: 'agentmux', hostId: 'local', path: '/Users/river/agentmux', kind: 'folder' },
@@ -82,7 +98,9 @@ const mockSessions: SessionSnapshot[] = [
   {
     id: 'session-codex',
     kind: 'agent',
-    agentId: 'codex',
+    providerId: 'codex',
+    executorId: 'codex',
+    capabilities: mockStructuredCapabilities,
     hostId: 'local',
     workspacePath: '/Users/river/agentmux',
     label: 'Codex · runtime core',
@@ -101,7 +119,9 @@ const mockSessions: SessionSnapshot[] = [
   {
     id: 'session-claude',
     kind: 'agent',
-    agentId: 'claude',
+    providerId: 'claude',
+    executorId: 'claude',
+    capabilities: mockStructuredCapabilities,
     hostId: 'studio',
     workspacePath: '/srv/render-lab',
     label: 'Claude · material audit',
@@ -124,58 +144,76 @@ const mockOutput = new Map<string, string>([
   ['session-claude', 'Claude Code\r\n\r\nI need permission to run the material snapshot suite.\r\n']
 ])
 
-const mockViewFocusListeners = new Set<(
-  target: DesktopViewFocusTarget
-) => DesktopViewFocusResult | Promise<DesktopViewFocusResult>>()
+const mockCompositionListeners = new Set<(
+  request: AgentMuxCompositionRequest,
+  signal: AbortSignal
+) => AgentMuxCompositionResult | Promise<AgentMuxCompositionResult>>()
 
-const mockActivities: Record<string, AgentActivity[]> = {
-  'session-codex': [
-    {
-      id: 'a1',
-      sessionId: 'session-codex',
-      kind: 'prompt',
-      source: 'user',
-      createdAt: now - 11 * 60_000,
-      title: 'Prompt',
-      content: 'Make the Run adapter observable without coupling it to Electron.'
-    },
-    {
-      id: 'a2',
-      sessionId: 'session-codex',
-      kind: 'tool',
-      source: 'native-hook',
-      createdAt: now - 4 * 60_000,
-      title: 'Edit',
-      toolName: 'Edit',
-      toolInput: 'packages/core/src/runtime.ts'
-    },
-    {
-      id: 'a3',
-      sessionId: 'session-codex',
-      kind: 'assistant',
-      source: 'native-hook',
-      createdAt: now - 50_000,
-      title: 'Assistant response',
-      content: 'The runtime now emits typed session, status, terminal, and activity events from one owner.'
-    }
-  ],
-  'session-claude': [
-    {
-      id: 'b1',
-      sessionId: 'session-claude',
-      kind: 'permission',
-      source: 'native-hook',
-      createdAt: now - 20_000,
-      title: 'Bash permission',
-      toolName: 'Bash',
-      toolInput: 'pnpm test:visual'
-    }
-  ]
+const mockTimelines: Record<string, AgentTimelineSnapshot> = {
+  'session-codex': {
+    agentSessionId: 'session-codex',
+    revision: 3,
+    items: [
+      {
+        id: 'a1',
+        agentSessionId: 'session-codex',
+        kind: 'user_message',
+        status: 'complete',
+        source: 'user',
+        createdAt: now - 11 * 60_000,
+        updatedAt: now - 11 * 60_000,
+        title: 'Prompt',
+        content: 'Make the Run adapter observable without coupling it to Electron.'
+      },
+      {
+        id: 'a2',
+        agentSessionId: 'session-codex',
+        kind: 'tool_call',
+        status: 'complete',
+        source: 'native-hook',
+        createdAt: now - 4 * 60_000,
+        updatedAt: now - 4 * 60_000,
+        title: 'Edit',
+        toolName: 'Edit',
+        toolInput: 'packages/core/src/runtime.ts'
+      },
+      {
+        id: 'a3',
+        agentSessionId: 'session-codex',
+        kind: 'assistant_message',
+        status: 'complete',
+        source: 'native-hook',
+        createdAt: now - 50_000,
+        updatedAt: now - 50_000,
+        title: 'Assistant response',
+        content: 'The runtime now emits typed session, status, terminal, and activity events from one owner.'
+      }
+    ]
+  },
+  'session-claude': {
+    agentSessionId: 'session-claude',
+    revision: 1,
+    items: [
+      {
+        id: 'b1',
+        agentSessionId: 'session-claude',
+        kind: 'permission',
+        status: 'complete',
+        source: 'native-hook',
+        createdAt: now - 20_000,
+        updatedAt: now - 20_000,
+        title: 'Bash permission',
+        toolName: 'Bash',
+        toolInput: 'pnpm test:visual'
+      }
+    ]
+  }
 }
 
-let mockSnapshot: RuntimeSnapshot = { sessions: mockSessions, activities: mockActivities }
+let mockSnapshot: RuntimeSnapshot = { sessions: mockSessions, timelines: mockTimelines }
 const sessionListeners = new Set<(event: RuntimeEvent) => void>()
 const browserListeners = new Set<(event: BrowserEvent) => void>()
+const windowResizeListeners = new Set<(event: { active: boolean }) => void>()
 const mockBrowsers = new Map<string, BrowserSnapshot>()
 
 function requireMockBrowser(id: string): BrowserSnapshot {
@@ -369,40 +407,127 @@ const mockApi: AgentMuxDesktopApi = {
     },
     reveal: async () => {}
   },
+  scratch: {
+    listTopics: async (workspaceId) => {
+      const topicIds = [...mockFiles.entries()].flatMap(([path, content]) => {
+        if (content !== null || path.includes('/')) return []
+        const topicId = scratchTopicIdFromDirectoryName(path)
+        return topicId ? [topicId] : []
+      })
+      topicIds.sort((left, right) => left < right ? -1 : left > right ? 1 : 0)
+      return await Promise.all(topicIds.map(async (topicId) =>
+        (await mockApi.scratch.readTopic(workspaceId, topicId))!
+      ))
+    },
+    readTopic: async (_workspaceId, topicId) => {
+      const directoryPath = scratchTopicDirectoryName(topicId)
+      const topicPath = `${directoryPath}/topic.md`
+      const content = mockFiles.get(topicPath)
+      if (typeof content !== 'string') return null
+      const lines = content.split(/\r?\n/)
+      const title = lines.find((line) => /^#\s+\S/.test(line))?.replace(/^#\s+/, '').trim() || 'Untitled Topic'
+      const summary = lines.find((line) => {
+        const value = line.trim()
+        return Boolean(value && !value.startsWith('#'))
+      })?.trim() ?? ''
+      return {
+        id: topicId,
+        directoryPath,
+        topicPath,
+        title,
+        summary,
+        collaborators: [...mockFiles.keys()].flatMap((path) => {
+          const prefix = `${directoryPath}/.agents/`
+          if (!path.startsWith(prefix)) return []
+          const fileName = path.slice(prefix.length)
+          const match = /^([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)\.identity\.md$/.exec(fileName)
+          return match ? [{ fileName, providerId: match[1]!, sessionId: match[2]! }] : []
+        })
+      }
+    },
+    ensureTopic: async (workspaceId, topicId) => {
+      const directoryPath = scratchTopicDirectoryName(topicId)
+      mockFiles.set(directoryPath, null)
+      mockFiles.set(`${directoryPath}/outcome`, null)
+      mockFiles.set(`${directoryPath}/refs`, null)
+      mockFiles.set(`${directoryPath}/.agents`, null)
+      const topicPath = `${directoryPath}/topic.md`
+      if (!mockFiles.has(topicPath)) {
+        mockFiles.set(topicPath, '# Untitled Topic\n\nDescribe the shared goal.\n')
+        mockFileRevisions.set(topicPath, `mock:${++mockRevisionSequence}`)
+      }
+      return (await mockApi.scratch.readTopic(workspaceId, topicId))!
+    },
+    renameTitle: async (workspaceId, topicId, title) => {
+      const normalized = title.trim()
+      if (!normalized) throw new Error('Scratch Topic title cannot be empty')
+      if (/[\r\n]/.test(normalized)) throw new Error('Scratch Topic title must be one line')
+      if (normalized.length > SCRATCH_TOPIC_TITLE_MAX_LENGTH) {
+        throw new Error(`Scratch Topic title cannot exceed ${SCRATCH_TOPIC_TITLE_MAX_LENGTH} characters`)
+      }
+      const topic = await mockApi.scratch.readTopic(workspaceId, topicId)
+      if (!topic) throw new Error('Scratch Topic no longer exists')
+      const content = mockFiles.get(topic.topicPath)
+      if (typeof content !== 'string') throw new Error('Scratch Topic no longer exists')
+      const heading = /^#[^\S\r\n]+[^\r\n]*(?=\r?$)/m
+      const newline = content.includes('\r\n') ? '\r\n' : '\n'
+      mockFiles.set(
+        topic.topicPath,
+        heading.test(content)
+          ? content.replace(heading, `# ${normalized}`)
+          : `# ${normalized}${newline}${newline}${content}`
+      )
+      mockFileRevisions.set(topic.topicPath, `mock:${++mockRevisionSequence}`)
+      queueMicrotask(() => invalidateMockFile(workspaceId, topic.topicPath))
+      return (await mockApi.scratch.readTopic(workspaceId, topicId))!
+    }
+  },
   ui: {
     readClipboardText: async () => '',
     writeClipboardText: async () => {},
-    openExternal: async () => {}
+    openExternal: async () => {},
+    getZoomFactor: () => 1,
+    onWindowResize(listener) {
+      windowResizeListeners.add(listener)
+      return () => windowResizeListeners.delete(listener)
+    }
   },
-  agents: {
-    detect: async (agentId, hostId) => ({
-      agentId,
+  providers: {
+    list: async () => [
+      { id: 'codex', label: 'Codex', executable: 'codex', expectedProcess: 'codex', promptDelivery: 'positional-argv', readySignal: { kind: 'foreground-process', expectedProcess: 'codex' }, hookStrategy: { kind: 'native', installation: 'explicit-managed' }, resumeStrategy: { kind: 'provider-native', locator: 'session-id' }, acpStrategy: { kind: 'none' }, capabilities: mockStructuredCapabilities },
+      { id: 'claude', label: 'Claude', executable: 'claude', expectedProcess: 'claude', promptDelivery: 'positional-argv', readySignal: { kind: 'foreground-process', expectedProcess: 'claude' }, hookStrategy: { kind: 'native', installation: 'explicit-managed' }, resumeStrategy: { kind: 'provider-native', locator: 'session-id' }, acpStrategy: { kind: 'none' }, capabilities: mockStructuredCapabilities }
+    ]
+  },
+  executors: {
+    detect: async (executorId, hostId) => ({
+      executorId,
+      providerId: mockConfig.executors[executorId]?.providerId ?? 'codex',
       hostId,
-      installed: !(hostId === 'studio' && ['hermes', 'pi'].includes(agentId))
+      installed: !(hostId === 'studio' && ['hermes', 'pi'].includes(executorId))
     })
   },
-  views: {
-    async focus(target) {
-      if (mockViewFocusListeners.size !== 1) throw new Error('Desktop View focus owner is unavailable')
-      return await [...mockViewFocusListeners][0]!(target)
-    },
-    onFocusRequest(listener) {
-      mockViewFocusListeners.add(listener)
-      return () => mockViewFocusListeners.delete(listener)
+  composition: {
+    onRequest(listener) {
+      mockCompositionListeners.add(listener)
+      return () => mockCompositionListeners.delete(listener)
     }
   },
   sessions: {
     snapshot: async () => structuredClone(mockSnapshot),
     launchAgent: async (input) => {
+      const executor = mockConfig.executors[input.executorId]
+      if (!executor) throw new Error(`Unknown Agent Executor: ${input.executorId}`)
       const agentSessionId = input.agentSessionId ?? crypto.randomUUID()
       const runId = crypto.randomUUID()
       const session: SessionSnapshot = {
         id: agentSessionId,
         kind: 'agent',
-        agentId: input.agentId,
+        providerId: executor.providerId,
+        executorId: input.executorId,
+        capabilities: mockStructuredCapabilities,
         hostId: input.hostId || 'local',
         workspacePath: input.workspacePath,
-        label: `${input.agentId} · new session`,
+        label: `${executor.label} · new session`,
         createdAt: Date.now(),
         updatedAt: Date.now(),
         processState: 'running',
@@ -416,15 +541,21 @@ const mockApi: AgentMuxDesktopApi = {
         }
       }
       mockSnapshot.sessions.push(session)
+      const timeline: AgentTimelineSnapshot = {
+        agentSessionId: session.id,
+        revision: 0,
+        items: []
+      }
+      mockSnapshot.timelines[session.id] = timeline
       mockOutput.set(session.id, 'Starting agent…\r\n')
-      return session
+      return { session, timeline }
     },
     launchTerminal: async (input) => {
       const runId = crypto.randomUUID()
       const session: SessionSnapshot = {
         id: runId,
         kind: 'terminal',
-        agentId: null,
+        providerId: null,
         hostId: input.hostId || 'local',
         workspacePath: input.workspacePath,
         label: 'Terminal',
@@ -443,6 +574,11 @@ const mockApi: AgentMuxDesktopApi = {
       mockSnapshot.sessions.push(session)
       mockOutput.set(session.id, '$ ')
       return session
+    },
+    timeline: async (control) => {
+      const timeline = mockSnapshot.timelines[control.agentSessionId]
+      if (!timeline) throw new Error(`Timeline not found: ${control.agentSessionId}`)
+      return structuredClone(timeline)
     },
     attach: async (control) => {
       const sessionId = control.kind === 'agent' ? control.agentSessionId : control.runId
@@ -472,18 +608,32 @@ const mockApi: AgentMuxDesktopApi = {
       mockOutput.set(sessionId, `${previous}${data}`)
       if (session.kind === 'agent' && data.trim()) {
         const observedAt = Date.now()
+        const timeline = mockSnapshot.timelines[session.id]
+        if (!timeline) throw new Error(`Timeline not found: ${session.id}`)
+        const item = {
+          id: crypto.randomUUID(),
+          agentSessionId: session.id,
+          kind: 'user_message' as const,
+          status: 'complete' as const,
+          source: 'user' as const,
+          createdAt: observedAt,
+          updatedAt: observedAt,
+          title: 'Prompt',
+          content: data.trim()
+        }
+        timeline.revision += 1
+        timeline.items.push(item)
         sessionListeners.forEach((listener) => listener({
           type: 'core',
           hostId: session.hostId,
           event: {
-            type: 'agent-activity',
+            type: 'agent-timeline',
             agentSessionId: session.id,
-            activity: {
-              id: crypto.randomUUID(),
-              kind: 'prompt',
-              createdAt: observedAt,
-              title: 'Prompt',
-              content: data.trim()
+            revision: timeline.revision,
+            mutation: {
+              type: 'append',
+              agentSessionId: session.id,
+              item
             },
             evidence: {
               source: 'user',
@@ -514,9 +664,45 @@ const mockApi: AgentMuxDesktopApi = {
       }
       return structuredClone(session)
     },
+    recover: async (control, workspacePath) => {
+      const sessionId = control.kind === 'agent' ? control.agentSessionId : control.runId
+      const previous = mockSnapshot.sessions.find((item) => item.id === sessionId)
+      if (control.kind === 'agent') {
+        // Agents resume under the same agentSessionId with a fresh runId.
+        if (!previous) throw new Error(`Session not found: ${sessionId}`)
+        const runId = crypto.randomUUID()
+        previous.processState = 'running'
+        previous.status = { state: 'running', source: 'run-process', observedAt: Date.now() }
+        previous.updatedAt = Date.now()
+        previous.control = { ...previous.control, run: { runId } } as typeof previous.control
+        mockOutput.set(previous.id, 'Resuming agent…\r\n')
+        return structuredClone(previous)
+      }
+      // Terminals relaunch as a brand-new Run in the same cwd.
+      const runId = crypto.randomUUID()
+      const session: SessionSnapshot = {
+        id: runId,
+        kind: 'terminal',
+        providerId: null,
+        hostId: control.hostId || 'local',
+        workspacePath: workspacePath ?? previous?.workspacePath ?? '~',
+        label: 'Terminal',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        processState: 'running',
+        status: { state: 'running', source: 'run-process', observedAt: Date.now() },
+        latestOutputBytes: 0,
+        control: { kind: 'terminal', hostId: control.hostId, runId, run: { runId } }
+      }
+      if (previous) mockSnapshot.sessions = mockSnapshot.sessions.filter((item) => item.id !== sessionId)
+      mockSnapshot.sessions.push(session)
+      mockOutput.set(session.id, '$ ')
+      return session
+    },
     stop: async (control) => {
       const sessionId = control.kind === 'agent' ? control.agentSessionId : control.runId
       mockSnapshot.sessions = mockSnapshot.sessions.filter((item) => item.id !== sessionId)
+      delete mockSnapshot.timelines[sessionId]
       mockOutput.delete(sessionId)
       sessionListeners.forEach((listener) => listener({
         type: 'core',
@@ -579,7 +765,11 @@ const mockApi: AgentMuxDesktopApi = {
 
 function requireDesktopApi(): AgentMuxDesktopApi {
   if (!window.agentmux) throw new Error('AgentMux preload API is unavailable')
-  return window.agentmux
+  const preload: AgentMuxPreloadApi = window.agentmux
+  return {
+    ...preload,
+    composition: createRendererCompositionApi(preload.composition)
+  }
 }
 
 export const api = __AGENTMUX_WEB_PREVIEW__ ? mockApi : requireDesktopApi()

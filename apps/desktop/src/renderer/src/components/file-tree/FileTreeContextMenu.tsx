@@ -20,6 +20,7 @@ function stopRightButtonSelection(event: React.PointerEvent): void {
 
 export function FileTreeContextMenu({
   children,
+  canRename,
   canOpenTerminal,
   isDirectory,
   isExpanded,
@@ -36,6 +37,7 @@ export function FileTreeContextMenu({
   onViewFile
 }: {
   children: ReactNode
+  canRename: boolean
   canOpenTerminal: boolean
   isDirectory: boolean
   isExpanded: boolean
@@ -100,9 +102,11 @@ export function FileTreeContextMenu({
             </ContextMenu.Item>
           ) : null}
           <ContextMenu.Separator className="tab-context-menu__separator" />
-          <ContextMenu.Item className="tab-context-menu__item" onSelect={onRename}>
-            <Pencil size={14} /><span>Rename</span><kbd>{isMac ? '↩' : 'Enter'}</kbd>
-          </ContextMenu.Item>
+          {canRename ? (
+            <ContextMenu.Item className="tab-context-menu__item" onSelect={onRename}>
+              <Pencil size={14} /><span>Rename</span><kbd>{isMac ? '↩' : 'Enter'}</kbd>
+            </ContextMenu.Item>
+          ) : null}
           <ContextMenu.Item className="tab-context-menu__item file-context-menu__danger" onSelect={onDelete}>
             <Trash2 size={14} /><span>Delete</span><kbd>{isMac ? '⌘⌫' : 'Del'}</kbd>
           </ContextMenu.Item>

@@ -35,7 +35,8 @@ describe('TerminalViewportSynchronizer', () => {
       readGrid: () => ({ cols: measurable ? 132 : 80, rows: measurable ? 50 : 24 }),
       resize,
       requestFrame: frames.request,
-      cancelFrame: frames.cancel
+      cancelFrame: frames.cancel,
+      measureViewport: () => ({ width: measurable ? 1320 : 800, height: measurable ? 1000 : 480 })
     })
 
     await sync.startLiveSynchronization()
@@ -57,7 +58,8 @@ describe('TerminalViewportSynchronizer', () => {
       readGrid: () => actual,
       resize,
       requestFrame: frames.request,
-      cancelFrame: frames.cancel
+      cancelFrame: frames.cancel,
+      measureViewport: () => ({ width: proposed.cols * 10, height: proposed.rows * 20 })
     })
 
     proposed = { cols: 132, rows: 45 }
@@ -84,7 +86,8 @@ describe('TerminalViewportSynchronizer', () => {
       readGrid: () => actual,
       resize,
       requestFrame: frames.request,
-      cancelFrame: frames.cancel
+      cancelFrame: frames.cancel,
+      measureViewport: () => ({ width: 1200, height: 800 })
     })
 
     sync.observeViewport()
@@ -92,6 +95,68 @@ describe('TerminalViewportSynchronizer', () => {
     await Promise.resolve()
 
     expect(fit).toHaveBeenCalledTimes(1)
+    expect(resize).not.toHaveBeenCalled()
+  })
+
+  it('redraws a live TUI after replay loss by restoring the exact settled grid', async () => {
+    const frames = frameHarness()
+    const resize = vi.fn(async (_size: { cols: number; rows: number }) => {})
+    const sync = new TerminalViewportSynchronizer({
+      proposeGrid: () => ({ cols: 120, rows: 40 }),
+      fit: () => {},
+      readGrid: () => ({ cols: 120, rows: 40 }),
+      resize,
+      requestFrame: frames.request,
+      cancelFrame: frames.cancel,
+      measureViewport: () => ({ width: 1200, height: 800 })
+    })
+
+    await sync.startLiveSynchronization()
+    resize.mockClear()
+
+    await expect(sync.requestContentRedraw()).resolves.toBe(true)
+    expect(resize.mock.calls.map(([size]) => size)).toEqual([
+      { cols: 120, rows: 39 },
+      { cols: 120, rows: 40 }
+    ])
+  })
+
+  it('does not redraw a historical Run or race an interactive resize', async () => {
+    const frames = frameHarness()
+    const resize = vi.fn(async (_size: { cols: number; rows: number }) => {})
+    const sync = new TerminalViewportSynchronizer({
+      proposeGrid: () => ({ cols: 120, rows: 40 }),
+      fit: () => {},
+      readGrid: () => ({ cols: 120, rows: 40 }),
+      resize,
+      requestFrame: frames.request,
+      cancelFrame: frames.cancel,
+      measureViewport: () => ({ width: 1200, height: 800 })
+    })
+
+    await expect(sync.requestContentRedraw()).resolves.toBe(false)
+    await sync.startLiveSynchronization()
+    resize.mockClear()
+    sync.setInteractiveResize(true)
+    await expect(sync.requestContentRedraw()).resolves.toBe(false)
+    expect(resize).not.toHaveBeenCalled()
+  })
+
+  it('does not resize a live PTY while its viewport is not measurable', async () => {
+    const frames = frameHarness()
+    const resize = vi.fn(async (_size: { cols: number; rows: number }) => {})
+    const sync = new TerminalViewportSynchronizer({
+      proposeGrid: () => null,
+      fit: () => {},
+      readGrid: () => ({ cols: 80, rows: 24 }),
+      resize,
+      requestFrame: frames.request,
+      cancelFrame: frames.cancel,
+      measureViewport: () => ({ width: 800, height: 480 })
+    })
+
+    await sync.startLiveSynchronization()
+    await expect(sync.requestContentRedraw()).resolves.toBe(false)
     expect(resize).not.toHaveBeenCalled()
   })
 
@@ -106,7 +171,8 @@ describe('TerminalViewportSynchronizer', () => {
       readGrid: () => actual,
       resize,
       requestFrame: frames.request,
-      cancelFrame: frames.cancel
+      cancelFrame: frames.cancel,
+      measureViewport: () => ({ width: proposed.cols * 10, height: proposed.rows * 20 })
     })
 
     await sync.startLiveSynchronization()
@@ -131,7 +197,8 @@ describe('TerminalViewportSynchronizer', () => {
       readGrid: () => ({ cols: 80, rows: 24 }),
       resize: async () => {},
       requestFrame: frames.request,
-      cancelFrame: frames.cancel
+      cancelFrame: frames.cancel,
+      measureViewport: () => ({ width: 800, height: 480 })
     })
 
     sync.observeViewport()
@@ -161,7 +228,8 @@ describe('TerminalViewportSynchronizer', () => {
       readGrid: () => actual,
       resize,
       requestFrame: frames.request,
-      cancelFrame: frames.cancel
+      cancelFrame: frames.cancel,
+      measureViewport: () => ({ width: proposed.cols * 10, height: proposed.rows * 20 })
     })
 
     sync.observeViewport()
@@ -187,7 +255,8 @@ describe('TerminalViewportSynchronizer', () => {
       readGrid: () => actual,
       resize,
       requestFrame: frames.request,
-      cancelFrame: frames.cancel
+      cancelFrame: frames.cancel,
+      measureViewport: () => ({ width: proposed.cols * 10, height: proposed.rows * 20 })
     })
 
     const started = sync.startLiveSynchronization()
@@ -204,5 +273,145 @@ describe('TerminalViewportSynchronizer', () => {
     await started
     await vi.waitFor(() => expect(resize).toHaveBeenCalledTimes(2))
     expect(resize).toHaveBeenLastCalledWith({ cols: 120, rows: 30 })
+  })
+
+  it('drops queued viewport work when the owning Terminal View is disposed', async () => {
+    const frames = frameHarness()
+    let proposed = { cols: 100, rows: 30 }
+    let actual = { ...proposed }
+    let releaseResize!: () => void
+    const resizePending = new Promise<void>((resolve) => { releaseResize = resolve })
+    const resize = vi.fn(async () => await resizePending)
+    const sync = new TerminalViewportSynchronizer({
+      proposeGrid: () => proposed,
+      fit: () => { actual = { ...proposed } },
+      readGrid: () => actual,
+      resize,
+      requestFrame: frames.request,
+      cancelFrame: frames.cancel,
+      measureViewport: () => ({ width: proposed.cols * 10, height: proposed.rows * 20 })
+    })
+
+    const started = sync.startLiveSynchronization()
+    await vi.waitFor(() => expect(resize).toHaveBeenCalledWith({ cols: 100, rows: 30 }))
+    proposed = { cols: 120, rows: 40 }
+    sync.observeViewport()
+    expect(frames.runNext()).toBe(true)
+    sync.dispose()
+
+    releaseResize()
+    await started
+    expect(resize).toHaveBeenCalledTimes(1)
+  })
+
+  it('freezes xterm reflow during an interactive split drag and synchronizes only the final grid', async () => {
+    const frames = frameHarness()
+    let proposed = { cols: 100, rows: 30 }
+    let actual = { ...proposed }
+    const fit = vi.fn(() => { actual = { ...proposed } })
+    const resize = vi.fn(async (_size: { cols: number; rows: number }) => {})
+    const sync = new TerminalViewportSynchronizer({
+      proposeGrid: () => proposed,
+      fit,
+      readGrid: () => actual,
+      resize,
+      requestFrame: frames.request,
+      cancelFrame: frames.cancel,
+      measureViewport: () => ({ width: proposed.cols * 10, height: proposed.rows * 20 })
+    })
+
+    await sync.startLiveSynchronization()
+    frames.runNext()
+    await vi.waitFor(() => expect(resize).toHaveBeenCalled())
+    fit.mockClear()
+    resize.mockClear()
+
+    sync.setInteractiveResize(true)
+    proposed = { cols: 110, rows: 30 }
+    sync.observeViewport()
+    proposed = { cols: 120, rows: 30 }
+    sync.observeViewport()
+
+    expect(frames.count()).toBe(0)
+    expect(fit).not.toHaveBeenCalled()
+    expect(resize).not.toHaveBeenCalled()
+
+    sync.setInteractiveResize(false)
+    expect(frames.count()).toBe(1)
+    expect(frames.runNext()).toBe(true)
+
+    await vi.waitFor(() => expect(resize).toHaveBeenCalledTimes(1))
+    expect(fit).toHaveBeenCalledTimes(1)
+    expect(resize).toHaveBeenCalledWith({ cols: 120, rows: 30 })
+  })
+
+  it('skips a one-column grid wobble when container pixels have not changed', async () => {
+    const frames = frameHarness()
+    // 拖拽已停：像素固定，但 WebGL/DOM cell-metric 抖动让 proposeDimensions 从 120
+    // 跳到 121。只有真实像素变化才应触发 fit，否则 reflow 会把 TUI 画花。
+    const pixels = { width: 1200, height: 800 }
+    let proposed = { cols: 120, rows: 40 }
+    let actual = { cols: 120, rows: 40 }
+    const fit = vi.fn(() => { actual = { ...proposed } })
+    const resize = vi.fn(async (_size: { cols: number; rows: number }) => {})
+    const sync = new TerminalViewportSynchronizer({
+      proposeGrid: () => proposed,
+      fit,
+      readGrid: () => actual,
+      resize,
+      requestFrame: frames.request,
+      cancelFrame: frames.cancel,
+      measureViewport: () => ({ ...pixels })
+    })
+
+    // 首次 live 同步：像素基线被记录，grid 与 xterm 一致，无需 fit。
+    await sync.startLiveSynchronization()
+    frames.runNext()
+    await vi.waitFor(() => expect(resize).toHaveBeenCalledWith({ cols: 120, rows: 40 }))
+    const callsAfterBaseline = resize.mock.calls.length
+    expect(fit).not.toHaveBeenCalled()
+
+    // cell-metric 抖动：proposal 差一列，但像素完全没变 → 跳过 fit 与 resize。
+    proposed = { cols: 121, rows: 40 }
+    sync.observeViewport()
+    expect(frames.runNext()).toBe(true)
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(fit).not.toHaveBeenCalled()
+    expect(resize).toHaveBeenCalledTimes(callsAfterBaseline)
+  })
+
+  it('fits and resizes when container pixels actually change', async () => {
+    const frames = frameHarness()
+    const pixels = { width: 1200, height: 800 }
+    let proposed = { cols: 120, rows: 40 }
+    let actual = { ...proposed }
+    const fit = vi.fn(() => { actual = { ...proposed } })
+    const resize = vi.fn(async (_size: { cols: number; rows: number }) => {})
+    const sync = new TerminalViewportSynchronizer({
+      proposeGrid: () => proposed,
+      fit,
+      readGrid: () => actual,
+      resize,
+      requestFrame: frames.request,
+      cancelFrame: frames.cancel,
+      measureViewport: () => ({ ...pixels })
+    })
+
+    await sync.startLiveSynchronization()
+    frames.runNext()
+    await vi.waitFor(() => expect(resize).toHaveBeenCalledTimes(1))
+    expect(resize).toHaveBeenLastCalledWith({ cols: 120, rows: 40 })
+
+    // 真实 resize：像素与 grid 同时变化 → fit + PTY resize。
+    pixels.width = 1400
+    proposed = { cols: 140, rows: 40 }
+    sync.observeViewport()
+    frames.runNext()
+
+    await vi.waitFor(() => expect(resize).toHaveBeenCalledTimes(2))
+    expect(resize).toHaveBeenLastCalledWith({ cols: 140, rows: 40 })
+    expect(fit).toHaveBeenCalled()
   })
 })

@@ -1,20 +1,45 @@
 import { describe, expect, it } from 'vitest'
-import type { AgentActivity, RuntimeEvent, SessionSnapshot } from '../src/shared/contracts.js'
+import type { AgentTimelineItem, RuntimeEvent, SessionSnapshot } from '../src/shared/contracts.js'
 import { reduceBrowserEvent } from '../src/renderer/src/lib/browser-state.js'
 import {
   reduceDocumentContent,
   reduceDocumentWritten,
-  reduceFileClosed,
-  reduceFileOpened
+  reduceFileDelete,
+  reduceFileOpened,
+  reduceFileRename,
+  type FileWorkbenchState,
+  reconcileWorkbenchFileProjection
 } from '../src/renderer/src/lib/file-workbench-state.js'
 import { reduceRuntimeEvent } from '../src/renderer/src/lib/session-state.js'
 import { createWorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.js'
-import { documentKey, type WorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
+import {
+  addWorkbenchRegion,
+  createWorkbenchTab,
+  documentKey,
+  initialWorkbenchRegionId,
+  titleWorkbenchSurface,
+  workbenchSurfaces
+} from '../src/renderer/src/lib/workbench-tabs.js'
+import {
+  applyWorkbenchViewCloseTopology,
+  planWorkbenchViewClose,
+  reconcileWorkbenchViewClose
+} from '../src/renderer/src/lib/workbench-view-close.js'
 
 const session: SessionSnapshot = {
   id: 'session-1',
   kind: 'agent',
-  agentId: 'codex',
+  providerId: 'codex',
+  executorId: 'codex',
+  capabilities: {
+    terminal: true,
+    hookEvents: true,
+    timeline: 'complete-events',
+    permission: 'observe',
+    providerResume: true,
+    acp: false,
+    replyCorrelation: 'none'
+  },
   hostId: 'local',
   workspacePath: '/repo',
   label: 'Codex',
@@ -31,12 +56,14 @@ const session: SessionSnapshot = {
   }
 }
 
-const activity: AgentActivity = {
+const timelineItem: AgentTimelineItem = {
   id: 'activity-1',
-  sessionId: session.id,
+  agentSessionId: session.id,
   kind: 'lifecycle',
+  status: 'complete',
   source: 'user',
   createdAt: 2,
+  updatedAt: 2,
   title: 'Started'
 }
 
@@ -44,23 +71,56 @@ function core(event: RuntimeEvent['event']): RuntimeEvent {
   return { type: 'core', hostId: 'local', event }
 }
 
+function sessionTab(tabId: string, phase: 'launching' | 'attached') {
+  return createWorkbenchTab(tabId, {
+    regionId: initialWorkbenchRegionId(tabId),
+    kind: 'agent',
+    phase,
+    workspaceId: 'workspace-1',
+    sessionId: session.id
+  })
+}
+
 describe('Renderer resource state owners', () => {
-  it('ignores late events from an old Run even when Agent Session identity matches', () => {
+  it('keeps terminal output out of the global Session projection', () => {
+    const state = {
+      sessions: [session],
+      timelines: {},
+      pendingAgentLaunches: {},
+      tabs: {},
+      layouts: {},
+      viewModes: {}
+    }
+
+    const next = reduceRuntimeEvent(state, core({
+      type: 'terminal-output',
+      agentSessionId: session.id,
+      run: session.control.run,
+      data: 'Waiting for approval',
+      evidence: {
+        source: 'terminal-output',
+        observedAt: 4,
+        run: session.control.run,
+        outputByteRange: { startByte: 0, endByte: 20 }
+      }
+    }))
+
+    expect(next).toBe(state)
+  })
+
+  it('ignores old-Run lifecycle events but accepts committed Session Timeline revisions', () => {
     const tabId = `session:${session.id}`
     const state = {
       sessions: [session],
-      activities: { [session.id]: [activity] },
+      timelines: {
+        [session.id]: { agentSessionId: session.id, revision: 1, items: [timelineItem] }
+      },
+      pendingAgentLaunches: {},
       tabs: {
-        [tabId]: {
-          id: tabId,
-          kind: 'agent' as const,
-          phase: 'attached' as const,
-          workspaceId: 'workspace-1',
-          sessionId: session.id
-        }
+        [tabId]: sessionTab(tabId, 'attached')
       },
       layouts: { 'workspace-1': createWorkspaceLayout('pane', [tabId]) },
-      viewModes: { [session.id]: 'conversation' as const }
+      viewModes: { [session.id]: 'activity' as const }
     }
     const staleRun = { runId: 'stale-run' }
 
@@ -73,32 +133,57 @@ describe('Renderer resource state owners', () => {
       exitCode: 1,
       evidence: { source: 'run-process', observedAt: 10, run: staleRun }
     }))
-    const afterRemoval = reduceRuntimeEvent(afterState, core({
+    const afterTimeline = reduceRuntimeEvent(afterState, core({
+      type: 'agent-timeline',
+      agentSessionId: session.id,
+      revision: 2,
+      mutation: {
+        type: 'append',
+        agentSessionId: session.id,
+        item: {
+          ...timelineItem,
+          id: 'stale-run-item',
+          updatedAt: 10,
+          createdAt: 10,
+          title: 'Stale run'
+        }
+      },
+      evidence: { source: 'native-hook', observedAt: 10, run: staleRun }
+    }))
+    const afterRemoval = reduceRuntimeEvent(afterTimeline, core({
       type: 'run-removed',
       agentSessionId: session.id,
       run: staleRun,
       evidence: { source: 'user', observedAt: 11, run: staleRun }
     }))
 
-    expect(afterRemoval).toEqual(state)
+    expect(afterRemoval.sessions[0]).toMatchObject({
+      id: session.id,
+      processState: 'running',
+      control: { run: session.control.run }
+    })
+    expect(afterRemoval.timelines[session.id]).toMatchObject({
+      revision: 2,
+      items: [
+        timelineItem,
+        expect.objectContaining({ id: 'stale-run-item', title: 'Stale run' })
+      ]
+    })
   })
 
   it('owns every Runtime Event transition and fully removes Session resources', () => {
     const tabId = `session:${session.id}`
     let state = {
       sessions: [session],
-      activities: { [session.id]: [activity] },
+      timelines: {
+        [session.id]: { agentSessionId: session.id, revision: 1, items: [timelineItem] }
+      },
+      pendingAgentLaunches: {},
       tabs: {
-        [tabId]: {
-          id: tabId,
-          kind: 'agent',
-          phase: 'attached',
-          workspaceId: 'workspace-1',
-          sessionId: session.id
-        } satisfies WorkbenchTab
+        [tabId]: sessionTab(tabId, 'attached')
       },
       layouts: { 'workspace-1': createWorkspaceLayout('pane', [tabId]) },
-      viewModes: { [session.id]: 'conversation' as const }
+      viewModes: { [session.id]: 'activity' as const }
     }
 
     state = reduceRuntimeEvent(state, core({
@@ -108,38 +193,57 @@ describe('Renderer resource state owners', () => {
       evidence: { source: 'native-hook', observedAt: 3, run: session.control.run }
     }))
     state = reduceRuntimeEvent(state, core({
-      type: 'terminal-output',
+      type: 'agent-timeline',
       agentSessionId: session.id,
-      run: session.control.run,
-      data: 'Waiting for approval',
-      evidence: {
-        source: 'terminal-output',
-        observedAt: 4,
-        run: session.control.run,
-        outputByteRange: { startByte: 0, endByte: 20 }
-      }
-    }))
-    state = reduceRuntimeEvent(state, core({
-      type: 'agent-activity',
-      agentSessionId: session.id,
-      activity: { id: 'activity-2', kind: 'lifecycle', createdAt: 4, title: 'Started' },
+      revision: 2,
+      mutation: {
+        type: 'append',
+        agentSessionId: session.id,
+        item: {
+          id: 'activity-2',
+          agentSessionId: session.id,
+          kind: 'assistant_message',
+          status: 'streaming',
+          source: 'native-hook',
+          createdAt: 4,
+          updatedAt: 4,
+          title: 'Assistant response',
+          content: 'Hello'
+        }
+      },
       evidence: { source: 'native-hook', observedAt: 4, run: session.control.run }
     }))
     expect(state.sessions[0]).toMatchObject({
       status: { state: 'waiting' },
-      latestOutputBytes: 20,
+      latestOutputBytes: 0,
       updatedAt: 4
     })
-    expect(state.activities[session.id]).toHaveLength(2)
+    state = reduceRuntimeEvent(state, core({
+      type: 'agent-timeline',
+      agentSessionId: session.id,
+      revision: 3,
+      mutation: {
+        type: 'update',
+        agentSessionId: session.id,
+        itemId: 'activity-2',
+        updatedAt: 5,
+        status: 'complete',
+        content: 'Hello, world'
+      },
+      evidence: { source: 'native-hook', observedAt: 5, run: session.control.run }
+    }))
+    expect(state.timelines[session.id]).toMatchObject({ revision: 3 })
+    expect(state.timelines[session.id]?.items).toHaveLength(2)
+    expect(state.timelines[session.id]?.items[1]).toMatchObject({ content: 'Hello, world', status: 'complete' })
 
     state = reduceRuntimeEvent(state, core({
       type: 'run-removed',
       agentSessionId: session.id,
       run: session.control.run,
-      evidence: { source: 'user', observedAt: 5, run: session.control.run }
+      evidence: { source: 'user', observedAt: 6, run: session.control.run }
     }))
     expect(state.sessions).toEqual([])
-    expect(state.activities[session.id]).toBeUndefined()
+    expect(state.timelines[session.id]).toBeUndefined()
     expect(state.tabs[tabId]).toBeUndefined()
     expect(state.layouts['workspace-1']?.groups[0]?.tabOrder).toEqual([])
     expect(state.viewModes[session.id]).toBeUndefined()
@@ -149,15 +253,10 @@ describe('Renderer resource state owners', () => {
     const tabId = `session:${session.id}`
     const state = reduceRuntimeEvent({
       sessions: [session],
-      activities: {},
+      timelines: {},
+      pendingAgentLaunches: {},
       tabs: {
-        [tabId]: {
-          id: tabId,
-          kind: 'agent',
-          phase: 'launching',
-          workspaceId: 'workspace-1',
-          sessionId: session.id
-        }
+        [tabId]: sessionTab(tabId, 'launching')
       },
       layouts: { 'workspace-1': createWorkspaceLayout('pane', [tabId]) },
       viewModes: {}
@@ -175,8 +274,10 @@ describe('Renderer resource state owners', () => {
 
   it('owns Browser update and close convergence across Tab and Layout', () => {
     const tabId = 'browser-tab'
-    const browserTab = {
-      id: tabId,
+    const browserRegionId = initialWorkbenchRegionId(tabId)
+    const browserSurface = {
+      id: 'browser-1',
+      regionId: browserRegionId,
       kind: 'browser' as const,
       workspaceId: 'workspace-1',
       browserId: 'browser-1',
@@ -187,15 +288,19 @@ describe('Renderer resource state owners', () => {
       canGoForward: false,
       error: null
     }
+    const browserTab = createWorkbenchTab(tabId, browserSurface)
     let state = {
       tabs: { [tabId]: browserTab },
       layouts: { 'workspace-1': createWorkspaceLayout('pane', [tabId]) }
     }
     state = reduceBrowserEvent(state, {
       type: 'updated',
-      browser: { ...browserTab, id: 'browser-1', title: 'Docs', url: 'https://example.com/' }
+      browser: { ...browserSurface, title: 'Docs', url: 'https://example.com/' }
     })
-    expect(state.tabs[tabId]).toMatchObject({ title: 'Docs', url: 'https://example.com/' })
+    expect(titleWorkbenchSurface(state.tabs[tabId]!)).toMatchObject({
+      title: 'Docs',
+      url: 'https://example.com/'
+    })
 
     state = reduceBrowserEvent(state, { type: 'closed', id: 'browser-1' })
     expect(state.tabs[tabId]).toBeUndefined()
@@ -235,10 +340,92 @@ describe('Renderer resource state owners', () => {
     expect(state.documents[documentKey(workspaceId, 'src/app.ts')]?.revision).toBe('revision-after')
     expect(state.layouts[workspaceId]?.groups[0]?.activeTabId).toBe(tabId)
 
-    state = reduceFileClosed(state, workspaceId, 'pane', tabId)
+    const plan = planWorkbenchViewClose({
+      tabs: state.tabs,
+      layouts: state.layouts,
+      sessions: [],
+      workspaceId,
+      tabGroupId: 'pane',
+      tabId,
+      keepAgentSessions: false
+    })!
+    const reconciliation = reconcileWorkbenchViewClose({
+      plan,
+      currentTab: state.tabs[tabId],
+      currentSessions: [],
+      receipts: []
+    })
+    state = reconcileWorkbenchFileProjection(
+      state,
+      applyWorkbenchViewCloseTopology(state, plan, reconciliation.tab)
+    )
     expect(state.tabs[tabId]).toBeUndefined()
     expect(state.documents[documentKey(workspaceId, 'src/app.ts')]).toBeUndefined()
     expect(state.dirtyDocuments[documentKey(workspaceId, 'src/app.ts')]).toBeUndefined()
+    expect(state.documentGenerations[documentKey(workspaceId, 'src/app.ts')]).toBeUndefined()
+    expect(state.documentObservationGenerations[documentKey(workspaceId, 'src/app.ts')]).toBeUndefined()
+    expect(state.documentIssues[documentKey(workspaceId, 'src/app.ts')]).toBeUndefined()
+    expect(state.savingDocuments[documentKey(workspaceId, 'src/app.ts')]).toBeUndefined()
     expect(state.lastActiveFileByWorkspace[workspaceId]).toBeUndefined()
+  })
+
+  it('rekeys and removes File owners in non-title Regions without replacing the View', () => {
+    const workspaceId = 'workspace-1'
+    const tabId = `file:${workspaceId}:src/title.ts`
+    const titleRegionId = initialWorkbenchRegionId(tabId)
+    const detailRegionId = 'region:detail'
+    const titleTab = createWorkbenchTab(tabId, {
+      regionId: titleRegionId,
+      kind: 'file',
+      workspaceId,
+      path: 'src/title.ts'
+    })
+    const tab = addWorkbenchRegion(titleTab, titleRegionId, 'right', {
+      regionId: detailRegionId,
+      kind: 'file',
+      workspaceId,
+      path: 'src/detail/value.ts'
+    })
+    const detailKey = documentKey(workspaceId, 'src/detail/value.ts')
+    const state: FileWorkbenchState = {
+      tabs: { [tabId]: tab },
+      documents: {
+        [documentKey(workspaceId, 'src/title.ts')]: {
+          path: 'src/title.ts', content: 'title', revision: 'revision-title'
+        },
+        [detailKey]: { path: 'src/detail/value.ts', content: 'detail', revision: 'revision-detail' }
+      },
+      dirtyDocuments: { [detailKey]: true },
+      documentGenerations: { [detailKey]: 2 },
+      documentObservationGenerations: { [detailKey]: 3 },
+      documentIssues: { [detailKey]: { kind: 'deleted' } },
+      savingDocuments: { [detailKey]: true },
+      layouts: { [workspaceId]: createWorkspaceLayout('pane', [tabId]) },
+      lastActiveFileByWorkspace: { [workspaceId]: 'src/detail/value.ts' }
+    }
+
+    const renamed = reduceFileRename(state, workspaceId, 'src/detail', 'src/renamed')
+    const renamedKey = documentKey(workspaceId, 'src/renamed/value.ts')
+    expect(renamed.tabs[tabId]?.layout).toEqual(tab.layout)
+    expect(workbenchSurfaces(renamed.tabs[tabId]!)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ regionId: titleRegionId, path: 'src/title.ts' }),
+      expect.objectContaining({ regionId: detailRegionId, path: 'src/renamed/value.ts' })
+    ]))
+    expect(renamed.documents[renamedKey]).toMatchObject({ path: 'src/renamed/value.ts' })
+    expect(renamed.documentGenerations[renamedKey]).toBe(2)
+    expect(renamed.documentObservationGenerations[renamedKey]).toBe(3)
+    expect(renamed.documentIssues[renamedKey]).toEqual({ kind: 'deleted' })
+    expect(renamed.savingDocuments[renamedKey]).toBe(false)
+
+    const deleted = reduceFileDelete(renamed, workspaceId, 'src/renamed')
+    expect(deleted.tabs[tabId]).toBeDefined()
+    expect(workbenchSurfaces(deleted.tabs[tabId]!)).toEqual([
+      expect.objectContaining({ regionId: titleRegionId, path: 'src/title.ts' })
+    ])
+    expect(deleted.documents[renamedKey]).toBeUndefined()
+    expect(deleted.documentGenerations[renamedKey]).toBeUndefined()
+    expect(deleted.documentObservationGenerations[renamedKey]).toBeUndefined()
+    expect(deleted.documentIssues[renamedKey]).toBeUndefined()
+    expect(deleted.savingDocuments[renamedKey]).toBeUndefined()
   })
 })

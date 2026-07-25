@@ -103,10 +103,7 @@ export class BrowserViewManager {
 
   setBounds(id: string, bounds: BrowserBounds | null): void {
     const entry = this.entries.get(id)
-    if (!entry) {
-      if (bounds === null) return
-      throw new Error(`Unknown browser: ${id}`)
-    }
+    if (!entry) return
     if (bounds === null) {
       entry.view.setVisible(false)
       return
@@ -187,6 +184,7 @@ export class BrowserViewManager {
     })
     contents.once('destroyed', () => {
       if (!this.entries.delete(entry.id)) return
+      if (!this.window.isDestroyed()) this.window.contentView.removeChildView(entry.view)
       this.send({ type: 'closed', id: entry.id })
     })
   }

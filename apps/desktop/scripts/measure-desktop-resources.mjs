@@ -172,14 +172,25 @@ async function main() {
     receiptlessDaemonCleanup = true
     await writeFile(join(workspace, 'resource-probe.ts'), 'export const value = 1\n'.repeat(20_000))
     await writeFile(join(userData, 'agentmux.config.json'), `${JSON.stringify({
-      version: 4,
+      version: 6,
       hosts: [{ id: 'local', kind: 'local', label: 'Resource Probe' }],
-      agents: {
-        codex: { command: 'codex', args: [], env: {} },
-        claude: { command: 'claude', args: [], env: {} },
-        traex: { command: 'traex', args: [], env: {} },
-        hermes: { command: 'hermes', args: [], env: {} },
-        pi: { command: 'pi', args: [], env: {} }
+      executors: {
+        codex: { label: 'Codex', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: true },
+        claude: { label: 'Claude', providerId: 'claude', command: 'claude', args: [], env: {}, injectAgentMuxGuide: true },
+        traex: { label: 'TraeX', providerId: 'traex', command: 'traex', args: [], env: {}, injectAgentMuxGuide: true },
+        hermes: { label: 'Hermes', providerId: 'hermes', command: 'hermes', args: [], env: {}, injectAgentMuxGuide: true },
+        pi: { label: 'Pi', providerId: 'pi', command: 'pi', args: [], env: {}, injectAgentMuxGuide: true },
+        grok: {
+          label: 'Grok',
+          providerId: 'grok',
+          command: 'grok',
+          args: ['--permission-mode', 'bypassPermissions'],
+          env: {},
+          injectAgentMuxGuide: true
+        },
+        gemini: { label: 'Gemini', providerId: 'gemini', command: 'gemini', args: [], env: {}, injectAgentMuxGuide: true },
+        antigravity: { label: 'Antigravity', providerId: 'antigravity', command: 'agy', args: [], env: {}, injectAgentMuxGuide: true },
+        cursor: { label: 'Cursor', providerId: 'cursor', command: 'cursor-agent', args: [], env: {}, injectAgentMuxGuide: true }
       },
       workspaces: [{ id: 'resource-workspace', name: 'Resource Probe', hostId: 'local', path: workspace, kind: 'folder' }],
       appearance: { terminalTheme: 'graphite' }

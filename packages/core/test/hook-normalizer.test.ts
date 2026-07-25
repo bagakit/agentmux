@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
+import { applyAgentTimelineMutation } from '../src/session-timeline.js'
+
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 describe('native hook normalization', () => {
   const providers = new AgentProviderRegistry()
@@ -9,7 +14,7 @@ describe('native hook normalization', () => {
       receiptId: 'receipt-1',
       agentSessionId: 'semantic-1',
       runId: 'daemon-1',
-      agentId: 'codex',
+      providerId: 'codex',
       eventName: 'PreToolUse',
       payload: {
         tool_name: 'request_user_input',
@@ -18,7 +23,10 @@ describe('native hook normalization', () => {
       }
     })
     expect(event.status).toMatchObject({ state: 'waiting', source: 'native-hook' })
-    expect(event.activities[0]).toMatchObject({ kind: 'permission', toolName: 'request_user_input' })
+    expect(event.timeline[0]).toMatchObject({
+      type: 'append',
+      item: { id: 'daemon-1:receipt-1:0', kind: 'permission', toolName: 'request_user_input' }
+    })
     expect(event.nativeHandle).toEqual({
       kind: 'provider',
       providerId: 'codex',
@@ -31,7 +39,7 @@ describe('native hook normalization', () => {
       receiptId: 'receipt-2',
       agentSessionId: 'semantic-2',
       runId: 'daemon-2',
-      agentId: 'pi',
+      providerId: 'pi',
       eventName: 'tool_call',
       payload: {
         tool_name: 'ask_user_question',
@@ -43,12 +51,73 @@ describe('native hook normalization', () => {
     expect(event.nativeHandle).toMatchObject({ transcriptPath: '/tmp/pi-session.jsonl' })
   })
 
+  it('treats a Hook retry with only a later observation time as idempotent', () => {
+    vi.useFakeTimers()
+    const envelope = {
+      receiptId: 'reused-receipt',
+      agentSessionId: 'semantic-1',
+      runId: 'run-1',
+      providerId: 'codex' as const,
+      eventName: 'Stop',
+      payload: { last_assistant_message: 'Finished the task.' }
+    }
+    vi.setSystemTime(10)
+    const first = providers.get('codex').normalizeHook(envelope)
+    vi.setSystemTime(20)
+    const retry = providers.get('codex').normalizeHook(envelope)
+    const resumed = providers.get('codex').normalizeHook({ ...envelope, runId: 'run-2' })
+
+    expect(first.timeline[0]).toMatchObject({ type: 'append', item: { id: 'run-1:reused-receipt:0' } })
+    expect(retry.timeline[0]).toMatchObject({ type: 'append', item: { id: 'run-1:reused-receipt:0' } })
+    expect(resumed.timeline[0]).toMatchObject({ type: 'append', item: { id: 'run-2:reused-receipt:0' } })
+    expect(first.timeline[0]).not.toEqual(retry.timeline[0])
+
+    const once = applyAgentTimelineMutation([], first.timeline[0]!)
+    expect(applyAgentTimelineMutation(once, retry.timeline[0]!)).toEqual(once)
+  })
+
+  it('rejects a reused Hook identity with different semantic content', () => {
+    vi.useFakeTimers()
+    const envelope = {
+      receiptId: 'conflicting-receipt',
+      agentSessionId: 'semantic-1',
+      runId: 'run-1',
+      providerId: 'codex' as const,
+      eventName: 'Stop',
+      payload: { last_assistant_message: 'First result' }
+    }
+    const first = providers.get('codex').normalizeHook(envelope)
+    const conflicting = providers.get('codex').normalizeHook({
+      ...envelope,
+      payload: { last_assistant_message: 'Different result' }
+    })
+
+    const once = applyAgentTimelineMutation([], first.timeline[0]!)
+    expect(() => applyAgentTimelineMutation(once, conflicting.timeline[0]!))
+      .toThrowError(expect.objectContaining({ code: 'AGENT_TIMELINE_ID_CONFLICT' }))
+  })
+
+  it('leaves user Prompt ownership to the Core launch and send paths', () => {
+    const event = providers.get('codex').normalizeHook({
+      receiptId: 'prompt-receipt',
+      agentSessionId: 'semantic-1',
+      runId: 'run-1',
+      providerId: 'codex',
+      eventName: 'UserPromptSubmit',
+      payload: { prompt: 'Do not duplicate this Prompt.' }
+    })
+
+    expect(event.timeline.some(
+      (mutation) => mutation.type === 'append' && mutation.item.kind === 'user_message'
+    )).toBe(false)
+  })
+
   it('does not invent semantic work from an unknown event', () => {
     const event = providers.get('traex').normalizeHook({
       receiptId: 'receipt-3',
       agentSessionId: 'semantic-3',
       runId: 'daemon-3',
-      agentId: 'traex',
+      providerId: 'traex',
       eventName: 'tick'
     })
     expect(event.semanticState).toBe('unknown')

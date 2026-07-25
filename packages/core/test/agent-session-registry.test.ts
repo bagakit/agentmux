@@ -7,7 +7,8 @@ function session(run = 'run-1'): AgentMuxStoredAgentSession {
   return {
     kind: 'agent',
     agentSessionId: 'semantic-1',
-    agentId: 'codex',
+    providerId: 'codex',
+    executorId: 'codex',
     hostId: 'local',
     workspacePath: '/tmp/work',
     run: { runId: run },
@@ -37,7 +38,7 @@ describe('semantic session registry concurrency', () => {
       ...current,
       hookReceipt: {
         id: 'hook-receipt',
-        agentId: current.agentId,
+        providerId: current.providerId,
         agentSessionId: current.agentSessionId,
         run: { ...current.run },
         eventName: 'SessionStart',
@@ -74,7 +75,9 @@ describe('semantic session registry concurrency', () => {
       async claimStaleLifecycles(value) { return await memory.claimStaleLifecycles(value) },
       async releaseLifecycle(value) { await memory.releaseLifecycle(value) },
       async retireRuns(value) { await memory.retireRuns(value) },
-      async commitLifecycle(value, next) { await memory.commitLifecycle(value, next) }
+      async commitLifecycle(value, next) { await memory.commitLifecycle(value, next) },
+      async loadTimeline(agentSessionId) { return await memory.loadTimeline(agentSessionId) },
+      async applyTimelineMutation(value, signal) { return await memory.applyTimelineMutation(value, signal) }
     }
     const registry = new AgentMuxAgentSessionRegistry(store)
     const original = session()
@@ -122,7 +125,9 @@ describe('semantic session registry concurrency', () => {
       async claimStaleLifecycles(value) { return await memory.claimStaleLifecycles(value) },
       async releaseLifecycle(value) { await memory.releaseLifecycle(value) },
       async retireRuns(value) { await memory.retireRuns(value) },
-      async commitLifecycle(value, next) { await memory.commitLifecycle(value, next) }
+      async commitLifecycle(value, next) { await memory.commitLifecycle(value, next) },
+      async loadTimeline(agentSessionId) { return await memory.loadTimeline(agentSessionId) },
+      async applyTimelineMutation(value, signal) { return await memory.applyTimelineMutation(value, signal) }
     }
     const registry = new AgentMuxAgentSessionRegistry(store)
     await registry.put(session())

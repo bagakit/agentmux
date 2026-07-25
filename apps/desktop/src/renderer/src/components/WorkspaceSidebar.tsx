@@ -1,11 +1,18 @@
-import { FolderGit2, Plus, RadioTower } from 'lucide-react'
+import { FolderGit2, Pin, Plus, RadioTower, Sparkles } from 'lucide-react'
 import { useMemo } from 'react'
+import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
 import { api } from '../lib/api'
-import { projectWorkspaces, workspaceProjectId } from '../lib/workspace-projects'
+import { projectRailNavigation, workspaceProjectId } from '../lib/workspace-projects'
 import { useAppStore } from '../store'
-import { BrandIcon } from './BrandIcon'
+import type { SettingsSectionId } from './SettingsPanel'
+import { ProjectRailToolbar } from './ProjectRailToolbar'
+import { SidebarToggleChrome } from './TopRowChrome'
 
-export function WorkspaceSidebar({ onOpenSettings }: { onOpenSettings: () => void }) {
+export function WorkspaceSidebar({
+  onOpenSettings
+}: {
+  onOpenSettings: (section: SettingsSectionId) => void
+}) {
   const config = useAppStore((state) => state.config)
   const sessions = useAppStore((state) => state.sessions)
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
@@ -13,9 +20,18 @@ export function WorkspaceSidebar({ onOpenSettings }: { onOpenSettings: () => voi
   const selectWorkspace = useAppStore((state) => state.selectWorkspace)
   const setMainSurface = useAppStore((state) => state.setMainSurface)
   const setConfig = useAppStore((state) => state.setConfig)
-  const projects = useMemo(() => projectWorkspaces(config?.workspaces ?? []), [config?.workspaces])
+  const navigation = useMemo(
+    () => projectRailNavigation(config?.workspaces ?? []),
+    [config?.workspaces]
+  )
+  const { scratch, projects } = navigation
   const activeWorkspace = config?.workspaces.find((workspace) => workspace.id === activeWorkspaceId)
-  const activeProjectId = activeWorkspace ? workspaceProjectId(activeWorkspace) : null
+  const activeProjectId = activeWorkspace && activeWorkspace.id !== scratch?.id
+    ? workspaceProjectId(activeWorkspace)
+    : null
+  const scratchSessionCount = scratch
+    ? sessions.filter((session) => workspaceOwnsSessionPath(scratch, session)).length
+    : 0
 
   async function chooseFolder(): Promise<void> {
     const workspace = await api.workspaces.chooseLocalFolder()
@@ -26,11 +42,32 @@ export function WorkspaceSidebar({ onOpenSettings }: { onOpenSettings: () => voi
 
   return (
     <aside className="sidebar project-rail">
-      <div className="sidebar__brand">
-        <span className="brand-mark"><BrandIcon size={18} /></span>
-        <span>AgentMux</span>
-        <span className="brand-version">alpha</span>
-      </div>
+      <header className="project-rail-titlebar">
+        <SidebarToggleChrome />
+      </header>
+      {scratch ? (
+        <div className="scratch-workspace-slot">
+          <button
+            className={`project-rail-row scratch-workspace-row ${activeWorkspaceId === scratch.id ? 'project-rail-row--active' : ''}`}
+            aria-current={activeWorkspaceId === scratch.id ? 'page' : undefined}
+            title={scratch.path}
+            onClick={() => void selectWorkspace(scratch.id)}
+          >
+            <span className="project-rail-row__icon scratch-workspace-row__icon"><Sparkles size={15} /></span>
+            <span className="project-rail-row__identity scratch-workspace-row__identity">
+              <strong>Scratch</strong>
+              <small>Unscoped workspace</small>
+            </span>
+            <span
+              className="scratch-workspace-row__meta"
+              title={`Pinned workspace · ${scratchSessionCount} sessions`}
+            >
+              <Pin size={10} />
+              <span>{scratchSessionCount}</span>
+            </span>
+          </button>
+        </div>
+      ) : null}
       <div className="sidebar__section-heading">
         <span>Projects</span>
         <button className="icon-button" onClick={() => void chooseFolder()} title="Add project folder"><Plus size={15} /></button>
@@ -38,9 +75,7 @@ export function WorkspaceSidebar({ onOpenSettings }: { onOpenSettings: () => voi
       <nav className="project-list" aria-label="Projects">
         {projects.map((project) => {
           const sessionCount = sessions.filter((session) =>
-            project.workspaces.some(
-              (workspace) => workspace.hostId === session.hostId && workspace.path === session.workspacePath
-            )
+            project.workspaces.some((workspace) => workspaceOwnsSessionPath(workspace, session))
           ).length
           const active = project.id === activeProjectId
           const preferred = active
@@ -74,9 +109,7 @@ export function WorkspaceSidebar({ onOpenSettings }: { onOpenSettings: () => voi
           <div className="workspace-list__empty"><strong>No projects yet</strong><span>Add a local folder, then manage its branches and worktrees from the navigator.</span><button className="small-button" onClick={() => void chooseFolder()}><Plus size={12} /> Add project</button></div>
         ) : null}
       </nav>
-      <div className="sidebar__bottom">
-        <button className="sidebar-action" onClick={onOpenSettings}>Settings & hosts</button>
-      </div>
+      <ProjectRailToolbar onOpenSettings={onOpenSettings} />
     </aside>
   )
 }

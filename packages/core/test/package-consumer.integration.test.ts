@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
-import { cp, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { cp, mkdtemp, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
@@ -19,7 +19,8 @@ const lifecycleCrashFixture = fileURLToPath(new URL('./fixtures/lifecycle-crash-
 const promptCrashFixture = fileURLToPath(new URL('./fixtures/prompt-submit-crash-worker.mjs', import.meta.url))
 const runtimeScopePreloadFixture = fileURLToPath(new URL('./fixtures/runtime-scope-preload.mjs', import.meta.url))
 const ownerReceiptFailureFixture = fileURLToPath(new URL('./fixtures/ctxmux-owner-receipt-failure.mjs', import.meta.url))
-const ctxmuxRuntimeId = '88e8377ecc4341b655d47306'
+const ownerRelocationFixture = fileURLToPath(new URL('./fixtures/ctxmux-owner-relocation.mjs', import.meta.url))
+const ctxmuxRuntimeId = 'ac53b1e43e67a73841d4f6cf'
 const roots: string[] = []
 
 afterEach(async () => {
@@ -261,7 +262,8 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         cp(lifecycleCrashFixture, join(consumerDirectory, 'lifecycle-crash-worker.mjs')),
         cp(promptCrashFixture, join(consumerDirectory, 'prompt-submit-crash-worker.mjs')),
         cp(runtimeScopePreloadFixture, join(consumerDirectory, 'runtime-scope-preload.mjs')),
-        cp(ownerReceiptFailureFixture, join(consumerDirectory, 'ctxmux-owner-receipt-failure.mjs'))
+        cp(ownerReceiptFailureFixture, join(consumerDirectory, 'ctxmux-owner-receipt-failure.mjs')),
+        cp(ownerRelocationFixture, join(consumerDirectory, 'ctxmux-owner-relocation.mjs'))
       ])
 
       const packageRoot = join(consumerDirectory, 'node_modules', '@agentmux', 'core')
@@ -328,8 +330,8 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         'utf8'
       ))
       expect(artifactManifest.source).toMatchObject({
-        commit: '2e32a9d647d627952ea5c455fb2efef6c636643a',
-        tree: 'd60870c2481c9b153da6bf22f829d24afb8a81a8',
+        commit: 'f89dabe70eba38d46992c320e40c9ebe2f09b5e5',
+        tree: '37632c41c4aae42ba40f33ebe9c54fab13d17c44',
         worktree_clean: true
       })
 
@@ -383,9 +385,8 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
             'crash-recovered-once'
           ],
           promptCrashRecovery: true,
-          doctor: true,
           cliResolveKinds: ['agent-session', 'provider-native', 'acp-native', 'run'],
-          externalSwitch: true,
+          cliComposition: true,
           naturalTerminalStop: true,
           crashRecovery: true,
           remote: 'unsupported'
@@ -394,50 +395,56 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         expect(Number.isInteger(cleanupSentinelPid) && cleanupSentinelPid > 0).toBe(true)
 
         activeDaemon = await waitForDaemonProcess(daemonPath, runtimeDirectory)
-        await stopDaemon(activeDaemon)
-        const missingDaemonPath = `${daemonPath}.doctor-missing`
-        await rename(daemonPath, missingDaemonPath)
-        try {
-          const doctorEnvironment = {
-            ...runtimeEnvironment,
-            PATH: `${join(consumerDirectory, 'bin')}:${process.env.PATH ?? ''}`
-          }
-          const jsonFailure = await execFileAsync(
-            join(consumerDirectory, 'node_modules', '.bin', 'agentmux'),
-            ['doctor', '--json'],
-            { cwd: consumerDirectory, env: doctorEnvironment }
-          ).then(
-            () => null,
-            (error: NodeJS.ErrnoException & { stdout?: string }) => error
-          )
-          expect(jsonFailure?.code).toBe(1)
-          expect(JSON.parse(jsonFailure?.stdout ?? '')).toMatchObject({
-            ok: false,
-            host: {
-              reachable: false,
-              action: 'Verify the bundled ctxmux artifacts, then rerun doctor.'
-            },
-            hosts: {
-              local: { status: 'unavailable' },
-              remote: { status: 'unsupported' }
-            }
-          })
-          const plainFailure = await execFileAsync(
-            join(consumerDirectory, 'node_modules', '.bin', 'agentmux'),
-            ['doctor'],
-            { cwd: consumerDirectory, env: doctorEnvironment }
-          ).then(
-            () => null,
-            (error: NodeJS.ErrnoException & { stdout?: string }) => error
-          )
-          expect(plainFailure?.code).toBe(1)
-          expect(plainFailure?.stdout).toContain('Host action: Verify the bundled ctxmux artifacts')
-          expect(plainFailure?.stdout).toContain('Remote action: Remote is unsupported')
-          expect(plainFailure?.stdout).toContain('Action: Restore the Runtime connection')
-        } finally {
-          await rename(missingDaemonPath, daemonPath)
-        }
         const ownerReceiptPath = join(runtimeDirectory, 'owner.json')
+        const ownerReceipt = JSON.parse(await readFile(ownerReceiptPath, 'utf8')) as {
+          daemonPath: string
+          daemonSha256: string
+          daemonInstanceId: string
+        }
+        const relocatedReceipt = {
+          ...ownerReceipt,
+          daemonPath: join(
+            runtimeDirectory,
+            'relocated',
+            'AgentMux.app',
+            'Contents',
+            'Resources',
+            'app',
+            'node_modules',
+            '@agentmux',
+            'core',
+            'vendor',
+            'ctxmux',
+            'darwin-arm64',
+            'bin',
+            'ctxmuxd'
+          )
+        }
+        await writeFile(ownerReceiptPath, `${JSON.stringify(relocatedReceipt)}\n`)
+        const relocated = await execFileAsync(process.execPath, ['ctxmux-owner-relocation.mjs'], {
+          cwd: consumerDirectory,
+          timeout: 15_000,
+          maxBuffer: 2 * 1024 * 1024,
+          env: runtimeEnvironment
+        })
+        expect(JSON.parse(relocated.stdout.trim())).toMatchObject({
+          instanceId: ownerReceipt.daemonInstanceId
+        })
+        expect((await waitForDaemonProcess(daemonPath, runtimeDirectory)).pid).toBe(activeDaemon.pid)
+
+        await writeFile(ownerReceiptPath, `${JSON.stringify({
+          ...relocatedReceipt,
+          daemonSha256: '0'.repeat(64)
+        })}\n`)
+        const artifactMismatch = await execFileAsync(process.execPath, ['ctxmux-owner-fence.mjs'], {
+          cwd: consumerDirectory,
+          timeout: 15_000,
+          maxBuffer: 2 * 1024 * 1024,
+          env: runtimeEnvironment
+        })
+        expect(artifactMismatch.stdout.trim()).toBe('ctxmux-owner-fence-ok')
+
+        await stopDaemon(activeDaemon)
         await rm(ownerReceiptPath, { force: true })
         await mkdir(ownerReceiptPath)
         const receiptFailure = await execFileAsync(
