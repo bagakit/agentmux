@@ -426,7 +426,7 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         }
       })
       expect(installedManifest.dependencies).not.toHaveProperty('node-pty')
-      expect(installedManifest.dependencies).toEqual({ '@xterm/headless': '5.5.0' })
+      expect(installedManifest.dependencies).toEqual({ '@xterm/headless': '5.5.0', yaml: '2.9.0' })
       expect(JSON.stringify(installedManifest)).not.toMatch(/(?:file|link):/u)
       await Promise.all([
         writeFile(join(consumerDirectory, 'consumer.ts'), [

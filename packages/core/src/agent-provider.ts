@@ -4,6 +4,7 @@ import { isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { ExecutionHost } from './execution-host.js'
 import type { AgentManagedHookPlan } from './managed-hook-installer.js'
+import { resolveCoreBinPath } from './runtime-paths.js'
 import {
   normalizeNativeHook,
   type AgentNativeHookSpecification
@@ -118,7 +119,7 @@ function shellQuote(value: string): string {
  * existing POSIX-quoting assumption.
  */
 function managedHookCommand(providerId: AgentProviderId): string {
-  const commandPath = fileURLToPath(new URL('../bin/agentmux-hook.js', import.meta.url))
+  const commandPath = resolveCoreBinPath('agentmux-hook.js')
   return `ELECTRON_RUN_AS_NODE=1 AGENTMUX_HOOK_PROVIDER=${shellQuote(providerId)} ${shellQuote(process.execPath)} ${shellQuote(commandPath)}`
 }
 
@@ -132,7 +133,7 @@ function managedHookCommand(providerId: AgentProviderId): string {
  * argv[0]), hermes only requires it to be readable, never executable.
  */
 function hermesHookCommand(): string {
-  const commandPath = fileURLToPath(new URL('../bin/agentmux-hook.js', import.meta.url))
+  const commandPath = resolveCoreBinPath('agentmux-hook.js')
   return `/usr/bin/env ELECTRON_RUN_AS_NODE=1 AGENTMUX_HOOK_PROVIDER=${shellQuote('hermes')} ${shellQuote(process.execPath)} ${shellQuote(commandPath)}`
 }
 
