@@ -42,26 +42,29 @@ export class BrowserProfileManager implements BrowserProfileResolver {
   private readonly profiles = new Map<string, BrowserProfileSummary>()
   private readonly sourceTokens = new Map<string, ImportSourceToken>()
   private readonly importWindows = new Set<BrowserWindow>()
-  private readonly activeImports = new Set<Promise<unknown>>()
+  private readonly activeMutations = new Set<Promise<unknown>>()
   private defaultId: string | null = null
   private disposed = false
+  private disposePromise: Promise<void> | null = null
 
   constructor(private readonly store = new BrowserProfileStore()) {}
 
   async initialize(): Promise<void> {
     this.assertActive()
-    const profiles = await this.store.listProfiles()
-    const defaultProfile = profiles.find((profile) => profile.isDefault)
-    if (!defaultProfile) throw new Error('Browser Profile metadata has no default Profile')
+    await this.trackMutation((async () => {
+      const profiles = await this.store.listProfiles()
+      const defaultProfile = profiles.find((profile) => profile.isDefault)
+      if (!defaultProfile) throw new Error('Browser Profile metadata has no default Profile')
 
-    for (const pending of await this.store.listPendingImports()) {
-      await this.clearPartition(pending.profileId)
-      await this.store.abortPendingImport(pending.profileId)
-    }
+      for (const pending of await this.store.listPendingImports()) {
+        await this.clearPartition(pending.profileId)
+        await this.store.abortPendingImport(pending.profileId)
+      }
 
-    this.profiles.clear()
-    for (const profile of profiles) this.profiles.set(profile.id, cloneProfile(profile))
-    this.defaultId = defaultProfile.id
+      this.profiles.clear()
+      for (const profile of profiles) this.profiles.set(profile.id, cloneProfile(profile))
+      this.defaultId = defaultProfile.id
+    })())
   }
 
   defaultProfileId(): string {
@@ -82,23 +85,28 @@ export class BrowserProfileManager implements BrowserProfileResolver {
 
   async createProfile(label: string): Promise<BrowserProfileSummary> {
     this.assertInitialized()
-    const profile = await this.store.createProfile(validateBrowserProfileLabel(label))
-    this.profiles.set(profile.id, cloneProfile(profile))
-    return cloneProfile(profile)
+    const validatedLabel = validateBrowserProfileLabel(label)
+    return await this.trackMutation((async () => {
+      const profile = await this.store.createProfile(validatedLabel)
+      this.profiles.set(profile.id, cloneProfile(profile))
+      return cloneProfile(profile)
+    })())
   }
 
   async deleteProfile(profileId: string): Promise<void> {
     this.resolvePartition(profileId)
     if (profileId === this.defaultId) throw new Error('The default Browser Profile cannot be deleted')
     const profile = this.profiles.get(profileId)!
-    this.profiles.delete(profileId)
-    try {
-      await this.clearPartition(profileId)
-      await this.store.deleteProfile(profileId)
-    } catch (error) {
-      this.profiles.set(profileId, profile)
-      throw error
-    }
+    await this.trackMutation((async () => {
+      this.profiles.delete(profileId)
+      try {
+        await this.clearPartition(profileId)
+        await this.store.deleteProfile(profileId)
+      } catch (error) {
+        this.profiles.set(profileId, profile)
+        throw error
+      }
+    })())
   }
 
   detectImportSources(): BrowserProfileImportSourceSummary[] {
@@ -121,22 +129,23 @@ export class BrowserProfileManager implements BrowserProfileResolver {
     const source = this.consumeSourceToken(sourceToken)
     const validatedLabel = validateBrowserProfileLabel(label)
     const operation = this.importProfileFromSource(source, validatedLabel)
-    this.activeImports.add(operation)
-    void operation.finally(() => this.activeImports.delete(operation)).catch(() => {})
-    return await operation
+    return await this.trackMutation(operation)
   }
 
-  async dispose(): Promise<void> {
-    if (this.disposed) return
+  dispose(): Promise<void> {
+    if (this.disposePromise) return this.disposePromise
     this.disposed = true
     this.sourceTokens.clear()
-    for (const window of this.importWindows) {
-      if (!window.isDestroyed()) window.destroy()
-    }
-    await Promise.allSettled(this.activeImports)
-    this.importWindows.clear()
-    this.profiles.clear()
-    this.defaultId = null
+    this.disposePromise = (async () => {
+      for (const window of this.importWindows) {
+        if (!window.isDestroyed()) window.destroy()
+      }
+      await Promise.allSettled(this.activeMutations)
+      this.importWindows.clear()
+      this.profiles.clear()
+      this.defaultId = null
+    })()
+    return this.disposePromise
   }
 
   private async importProfileFromSource(
@@ -186,6 +195,8 @@ export class BrowserProfileManager implements BrowserProfileResolver {
     })
     this.importWindows.add(window)
     let debuggerAttached = false
+    let primaryFailed = false
+    let primaryError: unknown
     try {
       await window.loadURL(IMPORT_DOCUMENT_URL)
       this.assertActive()
@@ -200,12 +211,36 @@ export class BrowserProfileManager implements BrowserProfileResolver {
         )
       }
       await targetSession.flushStorageData()
+    } catch (error) {
+      primaryFailed = true
+      primaryError = error
+      throw error
     } finally {
-      if (debuggerAttached && window.webContents.debugger.isAttached()) {
-        window.webContents.debugger.detach()
+      try {
+        if (debuggerAttached && window.webContents.debugger.isAttached()) {
+          window.webContents.debugger.detach()
+        }
+      } catch (cleanupError) {
+        if (primaryFailed) {
+          throw new AggregateError(
+            [primaryError, cleanupError],
+            'Browser Profile import failed and its debugger could not be detached'
+          )
+        }
+        throw cleanupError
+      } finally {
+        this.importWindows.delete(window)
+        if (!window.isDestroyed()) window.destroy()
       }
-      this.importWindows.delete(window)
-      if (!window.isDestroyed()) window.destroy()
+    }
+  }
+
+  private async trackMutation<T>(operation: Promise<T>): Promise<T> {
+    this.activeMutations.add(operation)
+    try {
+      return await operation
+    } finally {
+      this.activeMutations.delete(operation)
     }
   }
 
