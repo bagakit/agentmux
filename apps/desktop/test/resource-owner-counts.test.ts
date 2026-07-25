@@ -3,13 +3,16 @@ import { rendererResourceOwnerCounts } from '../src/renderer/src/lib/resource-ow
 
 describe('Renderer resource owner counts', () => {
   it('reports explicit document, watcher, subscription, and Monaco owners', () => {
+    const monacoEditorCount = vi.fn(() => 1)
     const monacoModelCount = vi.fn(() => 2)
     expect(rendererResourceOwnerCounts({
       documentCount: 3,
       runtimeSubscriptionCount: 2,
       terminalOwners: { terminalViews: 1, terminalAddons: 4, terminalListeners: 6 },
+      monacoEditorCount,
       monacoModelCount
     })).toEqual({
+      monacoEditors: 1,
       monacoModels: 2,
       documents: 3,
       runtimeSubscriptions: 2,
@@ -17,6 +20,7 @@ describe('Renderer resource owner counts', () => {
       terminalAddons: 4,
       terminalListeners: 6
     })
+    expect(monacoEditorCount).toHaveBeenCalledOnce()
     expect(monacoModelCount).toHaveBeenCalledOnce()
   })
 
@@ -25,6 +29,6 @@ describe('Renderer resource owner counts', () => {
       documentCount: 0,
       runtimeSubscriptionCount: 2,
       terminalOwners: { terminalViews: 0, terminalAddons: 0, terminalListeners: 0 }
-    }).monacoModels).toBe(0)
+    })).toMatchObject({ monacoEditors: 0, monacoModels: 0 })
   })
 })
