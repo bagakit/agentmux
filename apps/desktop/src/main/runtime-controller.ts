@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import {
+  AgentMuxError,
   AgentMuxMemoryAgentSessionStore,
   connectLocalAgentMux,
   connectSshAgentMux,
@@ -707,12 +708,27 @@ export class RuntimeController {
       const client = await this.connectedClient(control.hostId)
       const status = await client.statusAgent(control.agentSessionId)
       if (status.run.state === 'running') {
-        await client.submitAgentPrompt({
-          agentSessionId: control.agentSessionId,
-          operationId: randomUUID(),
-          prompt
-        })
-        return
+        const deadline = Date.now() + 4000
+        while (true) {
+          try {
+            await client.submitAgentPrompt({
+              agentSessionId: control.agentSessionId,
+              operationId: randomUUID(),
+              prompt
+            })
+            return
+          } catch (error) {
+            if (
+              error instanceof AgentMuxError &&
+              error.code === 'AGENT_PROMPT_NOT_READY' &&
+              Date.now() < deadline
+            ) {
+              await new Promise((resolve) => setTimeout(resolve, 80))
+              continue
+            }
+            throw error
+          }
+        }
       }
       const executor = requireSessionExecutor(config, status.session)
       await client.resumeAgent({

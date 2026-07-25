@@ -3,10 +3,11 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type {
-  AgentMuxAgentContinuityResult,
-  AgentMuxAgentSessionStore,
-  AgentMuxRuntimeProjection
+import {
+  AgentMuxError,
+  type AgentMuxAgentContinuityResult,
+  type AgentMuxAgentSessionStore,
+  type AgentMuxRuntimeProjection
 } from '@agentmux/core'
 import type { WebContents } from 'electron'
 import type { AppConfig, SessionControl, SshHostConfig } from '../src/shared/contracts.js'
@@ -176,12 +177,23 @@ const runtimeFixture = vi.hoisted(() => {
   }
 })
 
-vi.mock('@agentmux/core', () => ({
-  AgentMuxClient: runtimeFixture.FakeClient,
-  AgentMuxMemoryAgentSessionStore: class {},
-  connectLocalAgentMux: runtimeFixture.connectClient,
-  connectSshAgentMux: runtimeFixture.connectClient
-}))
+vi.mock('@agentmux/core', () => {
+  class AgentMuxError extends Error {
+    readonly code: string
+    constructor(message: string, code: string) {
+      super(message)
+      this.name = 'AgentMuxError'
+      this.code = code
+    }
+  }
+  return {
+    AgentMuxError,
+    AgentMuxClient: runtimeFixture.FakeClient,
+    AgentMuxMemoryAgentSessionStore: class {},
+    connectLocalAgentMux: runtimeFixture.connectClient,
+    connectSshAgentMux: runtimeFixture.connectClient
+  }
+})
 vi.mock('../src/main/host-factory.js', () => ({
   createExecutionHost: vi.fn((host: { id: string }) => {
     const created = { id: host.id, dispose: vi.fn(async () => {}) }
@@ -589,6 +601,33 @@ describe('RuntimeController configuration transaction', () => {
       expect(client.submitAgentPrompt).not.toHaveBeenCalled()
     }
   )
+
+  it('retries submitPrompt when Core reports AGENT_PROMPT_NOT_READY until ready', async () => {
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const running = agentStatusFixture()
+    client.statusAgent.mockResolvedValue({
+      ...running,
+      run: { ...running.run, state: 'running' as const }
+    })
+    let attempts = 0
+    client.submitAgentPrompt.mockImplementation(async () => {
+      attempts++
+      if (attempts < 3) {
+        throw new AgentMuxError('Agent prompt requires a ready native Stop receipt.', 'AGENT_PROMPT_NOT_READY')
+      }
+    })
+    const control = {
+      kind: 'agent' as const,
+      hostId: 'local',
+      agentSessionId: 'agent-1',
+      run: { runId: 'run-1' }
+    }
+
+    await controller.submitPrompt(control, 'hello', localConfig)
+    expect(attempts).toBe(3)
+    expect(client.submitAgentPrompt).toHaveBeenCalledTimes(3)
+  })
 
   it('delegates Agent recovery to Core continuity without inventing a prompt', async () => {
     const controller = await configuredController()
