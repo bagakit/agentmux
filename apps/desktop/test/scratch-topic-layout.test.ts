@@ -2,7 +2,10 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { createWorkspaceLayout, addTab } from '../src/renderer/src/lib/workbench-layout.js'
 import { createWorkbenchTab, type WorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
-import { layoutForActiveTopic } from '../src/renderer/src/lib/scratch-topic-layout.js'
+import {
+  activeTopicIdFromLayout,
+  layoutForActiveTopic
+} from '../src/renderer/src/lib/scratch-topic-layout.js'
 
 const workspaceWorkbenchSource = readFileSync(
   new URL('../src/renderer/src/components/WorkspaceWorkbench.tsx', import.meta.url),
@@ -104,5 +107,66 @@ describe('切 Topic 就换那一组 Tab', () => {
     expect(paneGroup).toContain('layout: WorkspaceLayout')
     expect(paneGroup).not.toContain('state.layouts[workspaceId]')
     expect(workspaceWorkbenchSource).toContain('layout={layout}')
+  })
+})
+
+// 上面那组测投影：知道当前 Topic 是谁之后，只显示它的 Tab。
+// 下面这组测**当前 Topic 是谁**——投影再对，喂给它一个 null 也什么都不会发生。
+//
+// 用户看到的症状：「现在选择 topic , 没有像 branch 那样只展示自己的 tabs, 而是展示所有」。
+// 根因不在投影，在于当前 Topic 曾经存在 store 的一个字段里，而只有 Topic 面板的点击会写它。
+// 从别的路径进入一个 Topic，那个字段还是 null，于是 `if (!activeTopicId) return layout`
+// 原样返回——所有 Topic 的 Tab 混在一起。
+
+describe('当前 Topic 由活动 Tab 的绑定派生', () => {
+  function withActive(tabId: string) {
+    const layout = fullLayout()
+    return {
+      ...layout,
+      groups: layout.groups.map((group) => ({ ...group, activeTabId: tabId }))
+    }
+  }
+
+  it('点该 Topic 自己的 Tab 进入，也只看到它的 Tab', () => {
+    // 这条路径不经过 openScratchTopic：用户直接点了 Tab 条上属于 topic-b 的那张。
+    const layout = withActive('b-1')
+    const topicId = activeTopicIdFromLayout(layout, tabs)
+    expect(topicId).toBe('topic-b')
+    expect(layoutForActiveTopic(layout, tabs, topicId).groups[0]!.tabOrder).toEqual(['b-1', 'loose'])
+  })
+
+  it('会话恢复后落在某张 Tab 上，同样只看到它所属 Topic 的 Tab', () => {
+    // 恢复时没有任何人调用 openScratchTopic，活动 Tab 是持久化下来的。
+    const layout = withActive('a-2')
+    const topicId = activeTopicIdFromLayout(layout, tabs)
+    expect(topicId).toBe('topic-a')
+    expect(layoutForActiveTopic(layout, tabs, topicId).groups[0]!.tabOrder).toEqual(['a-1', 'a-2', 'loose'])
+  })
+
+  it('从 Board 的 Topic 行跳过去，看到的也只有那个 Topic', () => {
+    // Board 走 openScratchTopic 绑定，落点是该 Topic 的 launcher Tab——派生同样成立，
+    // 不需要它额外写一个字段。
+    const layout = withActive('a-1')
+    expect(activeTopicIdFromLayout(layout, tabs)).toBe('topic-a')
+  })
+
+  it('活动 Tab 不属于任何 Topic 时不隐藏任何东西', () => {
+    // 普通 workspace tab 意味着"现在不在任何 Topic 里"，此时藏起别的 Tab 是错的。
+    const layout = withActive('loose')
+    expect(activeTopicIdFromLayout(layout, tabs)).toBeNull()
+    expect(layoutForActiveTopic(layout, tabs, null).groups[0]!.tabOrder)
+      .toEqual(['a-1', 'a-2', 'b-1', 'loose'])
+  })
+
+  it('没有活动 Tab 时诚实地回答"不知道"', () => {
+    const layout = fullLayout()
+    const empty = { ...layout, groups: layout.groups.map((group) => ({ ...group, activeTabId: null })) }
+    expect(activeTopicIdFromLayout(empty, tabs)).toBeNull()
+  })
+
+  it('Workbench 从 layout 派生当前 Topic，而不是读那个只有面板会写的字段', () => {
+    // 这条钉住接线：派生函数本身全绿，也证明不了渲染面真的用了它。改回读 store 字段会红。
+    expect(workspaceWorkbenchSource).toContain('activeTopicIdFromLayout(storedLayout, tabs)')
+    expect(workspaceWorkbenchSource).not.toContain('state.activeScratchTopicId')
   })
 })
