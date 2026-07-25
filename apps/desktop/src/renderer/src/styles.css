@@ -1177,13 +1177,32 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   gap: 6px;
 }
 .status { display: inline-flex; align-items: center; gap: 5px; color: var(--text-3); font-size: 11px; text-transform: capitalize; }
-.status__dot { width: 7px; height: 7px; border-radius: 50%; background: #65706a; box-shadow: 0 0 0 2px #65706a20; }
+.status__dot { position: relative; width: 7px; height: 7px; border-radius: 50%; background: #65706a; box-shadow: 0 0 0 2px #65706a20; }
 .status--working .status__dot, .status--running .status__dot { background: var(--green); box-shadow: 0 0 0 3px #8de3ae18; }
 .status--working .status__dot { animation: pulse 1.8s infinite; }
-.status--waiting .status__dot, .status--blocked .status__dot { background: var(--amber); box-shadow: 0 0 0 3px #e7bd631d; }
-.status--disconnected .status__dot { background: var(--amber); box-shadow: 0 0 0 3px #e7bd631d; }
+/* Needs-you (waiting/blocked) carries a SHAPE, not only a colour: an amber pip bearing a "?" so the
+   one "an agent needs you" state survives colour-blindness and a fast glance, and never reads the
+   same as any other amber. This is the shared status seam — StatusDot and the status bar's
+   StatusCount both render .status--waiting/.status--blocked, so the pip lifts every full-size
+   surface at once (tab, board card, quick switcher, attention bar) from one rule. Accent expresses
+   state, not decoration (design SSOT: "颜色表达状态，不兼任布局线"). */
+.status--waiting .status__dot, .status--blocked .status__dot { width: 9px; height: 9px; background: var(--amber); box-shadow: 0 0 0 3px #e7bd631d; }
+.status--waiting .status__dot::after, .status--blocked .status__dot::after { content: "?"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #2a1d04; font-size: 7px; font-weight: 800; line-height: 1; }
+/* Disconnected is a dropped link, not an attention request — split off amber (which now means "needs
+   you") onto a neutral hollow dot so a lost connection can never be mistaken for one. Ring, not fill:
+   a distinct shape as well as a neutral colour. */
+.status--disconnected .status__dot { background: transparent; box-shadow: inset 0 0 0 1.5px var(--text-3); }
 .status--error .status__dot, .status--exited .status__dot { background: var(--red); }
 .status--done .status__dot { background: var(--blue); }
+/* Peripheral 5px marks (tab corner, rail row) can't seat a glyph and don't need one — colour plus
+   corner position already differentiates them. Higher specificity than the needs-you rule above, so
+   it restores the tight badge dot regardless of source order. */
+.workspace-agent-row__mark .status--waiting .status__dot,
+.workspace-agent-row__mark .status--blocked .status__dot,
+.workbench-tab__agent-mark .status--waiting .status__dot,
+.workbench-tab__agent-mark .status--blocked .status__dot { width: 5px; height: 5px; box-shadow: none; }
+.workspace-agent-row__mark .status__dot::after,
+.workbench-tab__agent-mark .status__dot::after { display: none; }
 /* Window-wide agent attention rollup. Permanent chrome, so the working dot never pulses here — a
    count states the fact and a pulsing dot would compete with the terminal. Colour appears only when
    a count crosses zero; until then every dot is the neutral grey of a bare .status. */
