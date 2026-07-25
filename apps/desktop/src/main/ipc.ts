@@ -45,11 +45,13 @@ import type {
 } from '../shared/contracts.js'
 import type { AgentMuxInteractionResponse } from '@agentmux/core'
 import {
+  AGENT_ATTENTION_ACTIVATE_CHANNEL,
   CONTROL_CANCEL_CHANNEL,
   CONTROL_REQUEST_CHANNEL,
   CONTROL_RESPONSE_CHANNEL
 } from '../shared/contracts.js'
 import { terminalPalette } from '../shared/terminal-palettes.js'
+import { createAgentNotifier } from './agent-notifier.js'
 import { BrowserViewManager } from './browser-view-manager.js'
 import { BrowserProfileManager } from './browser-profile-manager.js'
 import { nativeImageFromBrowserPng } from './browser-image.js'
@@ -98,6 +100,16 @@ export async function registerIpc(args: {
   const browserProfiles = new BrowserProfileManager()
   await browserProfiles.initialize()
   const browsers = new BrowserViewManager(args.window, browserProfiles)
+  const notifier = createAgentNotifier({
+    window: args.window,
+    onActivate: (sessionId) => {
+      // Main focuses the window; WHERE to go inside it is the renderer's call, so the id is forwarded
+      // rather than resolved here — View and Region truth belongs to the renderer.
+      if (args.window.isDestroyed()) return
+      args.window.webContents.send(AGENT_ATTENTION_ACTIVATE_CHANNEL, sessionId)
+    }
+  })
+
   const fileObservations = new FileObservationRegistry()
   const channels: string[] = []
   let acceptingControl = true
@@ -261,6 +273,16 @@ export async function registerIpc(args: {
     await writeFile(path, bytes, { mode: 0o600 })
     return path
   })
+  channels.push('ui:notifyAgentAttention')
+  ipcMain.handle('ui:notifyAgentAttention', async (event, input: {
+    sessionId: string
+    title: string
+    body: string
+  }) => {
+    if (event.sender !== args.window.webContents) throw new Error('Untrusted notification sender')
+    // The renderer decided this deserves attention; main only delivers, and says so when it cannot.
+    return notifier.notify(input)
+  })
   handle('providers:list', () => args.runtime.providerCatalog())
   handle('executors:detect', async (executorId: AgentExecutorId, hostId: string) => await args.runtime.detect(executorId, hostId, config))
   handle('sessions:snapshot', async () => await args.runtime.snapshot(config))
@@ -399,6 +421,7 @@ export async function registerIpc(args: {
       },
       async () => await control.stop(),
       () => detach(),
+      () => notifier.dispose(),
       () => browsers.dispose(),
       async () => await browserProfiles.dispose(),
       async () => await fileObservations.dispose(),
