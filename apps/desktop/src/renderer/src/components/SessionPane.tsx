@@ -1,4 +1,4 @@
-import { AlertTriangle, LoaderCircle, RefreshCw, RotateCcw, ServerOff } from 'lucide-react'
+import { AlertTriangle, LoaderCircle, RefreshCw, RotateCcw, ServerOff, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useAppStore } from '../store'
 import type { OpenHttpLinkOrigin } from '../lib/open-destination'
@@ -43,6 +43,7 @@ export function SessionPane({
   const recoverSession = useAppStore((state) => state.recoverSession)
   const [refreshing, setRefreshing] = useState(false)
   const [recovering, setRecovering] = useState(false)
+  const [dismissed, setDismissed] = useState(false)
   // daemon_restart auto-recovery fires at most once per dead session id, so a flapping
   // daemon can't spin us into a relaunch loop. Keyed by the session id we last recovered from.
   const autoRecoveredRef = useRef<string | null>(null)
@@ -52,6 +53,11 @@ export function SessionPane({
   const exited = session?.processState === 'exited'
   const reason = session?.status.detail
   const continuity = session?.status.continuity
+
+  // 当会话状态恢复为正常运行或切换 session 时重置 dismissed 状态
+  useEffect(() => {
+    setDismissed(false)
+  }, [sessionId, session?.processState, session?.status.state])
 
   async function recover(): Promise<void> {
     if (recovering) return
@@ -117,7 +123,7 @@ export function SessionPane({
               interactiveResize={interactiveResize}
               linkOrigin={linkOrigin}
             />
-            {disconnected || missing || exited ? (
+            {(disconnected || missing || exited) && !dismissed ? (
               <div className={`terminal-recovery terminal-recovery--${disconnected ? 'disconnected' : exited ? 'exited' : 'error'}`} role="status" aria-live="polite">
                 <span className="terminal-recovery__icon">
                   {refreshing || recovering ? <LoaderCircle className="spin" size={16} /> : disconnected ? <ServerOff size={16} /> : <AlertTriangle size={16} />}
@@ -126,35 +132,46 @@ export function SessionPane({
                   <strong>{recoveryTitle}</strong>
                   <span>{humanizeDetail(session.status.detail, exited)}</span>
                 </div>
-                {session.kind === 'terminal' ? (
-                  disconnected ? (
-                    <button type="button" className="small-button" disabled={refreshing} onClick={() => void refresh()}>
-                      <RefreshCw size={12} /> {refreshing ? 'Checking…' : 'Check again'}
+                <div className="terminal-recovery__actions">
+                  {session.kind === 'terminal' ? (
+                    disconnected ? (
+                      <button type="button" className="small-button" disabled={refreshing} onClick={() => void refresh()}>
+                        <RefreshCw size={12} /> {refreshing ? 'Checking…' : 'Check again'}
+                      </button>
+                    ) : (
+                      // The PTY is gone for good — relaunch a fresh terminal in the same cwd.
+                      <button type="button" className="small-button" disabled={recovering} onClick={() => void recover()}>
+                        <RotateCcw size={12} /> {recovering ? 'Restarting…' : 'Restart terminal'}
+                      </button>
+                    )
+                  ) : continuity ? (
+                    <button
+                      type="button"
+                      className="small-button"
+                      disabled
+                      title={session.status.detail}
+                    >
+                      <RotateCcw size={12} /> {
+                        continuity === 'conflict'
+                            ? 'Resolve conflict first'
+                            : 'Resume unavailable'
+                      }
                     </button>
                   ) : (
-                    // The PTY is gone for good — relaunch a fresh terminal in the same cwd.
                     <button type="button" className="small-button" disabled={recovering} onClick={() => void recover()}>
-                      <RotateCcw size={12} /> {recovering ? 'Restarting…' : 'Restart terminal'}
+                      <RotateCcw size={12} /> {recovering ? 'Resuming…' : 'Resume'}
                     </button>
-                  )
-                ) : continuity ? (
+                  )}
                   <button
                     type="button"
-                    className="small-button"
-                    disabled
-                    title={session.status.detail}
+                    className="terminal-recovery__dismiss"
+                    onClick={() => setDismissed(true)}
+                    title="Dismiss overlay to inspect terminal output"
+                    aria-label="Dismiss recovery banner"
                   >
-                    <RotateCcw size={12} /> {
-                      continuity === 'conflict'
-                          ? 'Resolve conflict first'
-                          : 'Resume unavailable'
-                    }
+                    <X size={14} />
                   </button>
-                ) : (
-                  <button type="button" className="small-button" disabled={recovering} onClick={() => void recover()}>
-                    <RotateCcw size={12} /> {recovering ? 'Resuming…' : 'Resume'}
-                  </button>
-                )}
+                </div>
               </div>
             ) : null}
           </div>
