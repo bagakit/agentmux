@@ -181,4 +181,33 @@ describe('AgentStatusBar', () => {
     fireClick(AgentStatusBar() as ReactElement, 'error')
     expect(fixture.state.selectSession).toHaveBeenCalledWith('early-error')
   })
+
+  it('names the rollup as a group so its aria-label is a real accessible name', () => {
+    // A bare div is a generic node; role="group" turns the aria-label into an announced name.
+    fixture.state.sessions = [agent('a', 'working', 10)]
+    const markup = renderToStaticMarkup(createElement(AgentStatusBar))
+    expect(markup).toContain('role="group"')
+    expect(markup).toContain('aria-label="Agent attention across this window"')
+  })
+
+  it('folds the count into each action segment’s accessible name so AT hears the fact, not just the jump', () => {
+    // The button’s aria-label overrides its inner "N needs you" text, so the number must live in
+    // the label itself or a screen-reader user loses it. Singular and plural both carry the count.
+    fixture.state.sessions = [agent('w', 'waiting', 10), agent('e', 'error', 20)]
+    const single = findByAttention(AgentStatusBar() as ReactElement, 'needs-you')
+    expect(single?.['aria-label']).toBe('1 agent needs you. Jump to the one waiting longest.')
+    const singleError = findByAttention(AgentStatusBar() as ReactElement, 'error')
+    expect(singleError?.['aria-label']).toBe('1 agent in error. Jump to the earliest.')
+
+    fixture.state.sessions = [
+      agent('w1', 'waiting', 10),
+      agent('b1', 'blocked', 15),
+      agent('e1', 'error', 20),
+      agent('e2', 'error', 25)
+    ]
+    const many = findByAttention(AgentStatusBar() as ReactElement, 'needs-you')
+    expect(many?.['aria-label']).toBe('2 agents need you. Jump to the one waiting longest.')
+    const manyError = findByAttention(AgentStatusBar() as ReactElement, 'error')
+    expect(manyError?.['aria-label']).toBe('2 agents in error. Jump to the earliest.')
+  })
 })

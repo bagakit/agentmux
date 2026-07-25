@@ -540,12 +540,22 @@ async function runExplorerInteractionProbe(options: {
   const multiSelectionPreserved = await window.webContents.executeJavaScript(
     `Boolean(${visibleMenuItemSource('Copy Paths')})`
   ) as boolean
-  sendKey(window, 'Escape')
-  await waitFor('closed Shift+F10 menu', async () => !(
-    await window.webContents.executeJavaScript(
+  // Radix arms its document-level Escape/dismiss listener inside a passive effect that runs a render
+  // or two AFTER the menu content has committed and painted (the layer must register itself, dispatch
+  // a context update, then re-render to become the highest layer before the keydown-capture effect
+  // attaches). The menu item is already laid out — getClientRects() > 0 — during that gap, so a single
+  // Escape sent the instant the menu is visible can land before the listener exists and be silently
+  // dropped; nothing re-sends it, so the menu stays open and this step times out. Heavy load widens
+  // the gap, which is why a higher load average still succeeded while lower ones failed. Re-send Escape
+  // on each poll until the menu actually closes. The assertion — the Move submenu item is gone — stays
+  // exact, so a menu that genuinely never closes still fails the gate at the timeout.
+  await waitFor('closed Shift+F10 menu', async () => {
+    const stillOpen = await window.webContents.executeJavaScript(
       `Boolean(${visibleMenuItemSource('Move This Item to')})`
     ) as boolean
-  ))
+    if (stillOpen) sendKey(window, 'Escape')
+    return !stillOpen
+  })
 
   await expandDirectory(window, 'targets/menu')
   await nativeContextMenu(window, 'Radix menu source', treeRowSource('explorer-source/menu.txt'))

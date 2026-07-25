@@ -39,7 +39,9 @@ export function AgentStatusBar() {
   if (rollup.total === 0) return null
 
   return (
-    <div className="agent-status-bar" aria-label="Agent attention across this window">
+    // role="group" makes the aria-label a real accessible name; a bare div is a generic node many
+    // screen readers skip, so the window's only attention rollup would announce as nothing.
+    <div className="agent-status-bar" role="group" aria-label="Agent attention across this window">
       <span className="agent-status-bar__segment" data-attention="total">
         <StatusCount state={null} count={rollup.total} label={rollup.total === 1 ? 'agent' : 'agents'} />
       </span>
@@ -51,7 +53,7 @@ export function AgentStatusBar() {
           className="agent-status-bar__segment agent-status-bar__segment--action"
           type="button"
           data-attention="needs-you"
-          aria-label="Jump to the agent that has been waiting longest"
+          aria-label={`${rollup.needsYou} ${rollup.needsYou === 1 ? 'agent needs' : 'agents need'} you. Jump to the one waiting longest.`}
           title="Jump to the agent that has been waiting longest"
           onClick={() => selectSession(rollup.needsYouSessionId!)}
         >
@@ -67,7 +69,7 @@ export function AgentStatusBar() {
           className="agent-status-bar__segment agent-status-bar__segment--action"
           type="button"
           data-attention="error"
-          aria-label="Jump to the earliest agent in error"
+          aria-label={`${rollup.error} ${rollup.error === 1 ? 'agent' : 'agents'} in error. Jump to the earliest.`}
           title="Jump to the earliest agent in error"
           onClick={() => selectSession(rollup.errorSessionId!)}
         >
