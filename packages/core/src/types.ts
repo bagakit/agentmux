@@ -198,8 +198,8 @@ export type AgentHookStrategy =
   | { kind: 'none' }
   // `explicit-managed`: AgentMux writes and owns the provider's hook config (codex/claude/antigravity).
   // `unmanaged`: the provider emits native hooks AgentMux understands, but its config lives on a surface
-  // AgentMux does not install into yet (hermes' YAML plugin, pi's TypeScript extension) — so hooks only
-  // fire if the user wires them by hand. Distinct from `none`, which means the provider has no hooks.
+  // AgentMux does not install into yet (pi's TypeScript extension) — so hooks only fire if the user
+  // wires them by hand. Distinct from `none`, which means the provider has no hooks.
   | { kind: 'native'; installation: 'explicit-managed' | 'unmanaged' }
 
 export type AgentResumeStrategy =
