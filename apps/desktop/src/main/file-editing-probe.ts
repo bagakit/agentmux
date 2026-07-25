@@ -465,6 +465,11 @@ async function runExplorerInteractionProbe(options: {
   const { window } = options
   window.webContents.focus()
   await expandDirectory(window, 'explorer-source')
+  await waitFor('loaded Explorer source children', async () => (
+    await window.webContents.executeJavaScript(
+      `Boolean(${treeRowSource('explorer-source/menu.txt')})`
+    ) as boolean
+  ))
   await expandDirectory(window, 'targets')
   await expandDirectory(window, 'targets/collision')
   await waitFor('loaded Explorer collision owner', async () => (
