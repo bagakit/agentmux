@@ -509,7 +509,8 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
       executable: 'hermes',
       expectedProcess: 'hermes',
       promptDelivery: 'hermes-query',
-      hookStrategy: { kind: 'native', installation: 'explicit-managed' },
+      // Native hooks live in a YAML plugin config AgentMux does not install into yet — unmanaged.
+      hookStrategy: { kind: 'native', installation: 'unmanaged' },
       resumeStrategy: { kind: 'none' },
       acpStrategy: { kind: 'none' },
       capabilities: {
@@ -533,7 +534,8 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
       executable: 'pi',
       expectedProcess: 'pi',
       promptDelivery: 'positional-argv',
-      hookStrategy: { kind: 'native', installation: 'explicit-managed' },
+      // Native hooks ship as a TypeScript extension AgentMux does not deploy yet — unmanaged.
+      hookStrategy: { kind: 'native', installation: 'unmanaged' },
       resumeStrategy: { kind: 'provider-native', locator: 'transcript-path' },
       acpStrategy: { kind: 'none' },
       capabilities: {

@@ -81,6 +81,23 @@ describe('built-in agent providers', () => {
     expect(catalog.get('traex')?.capabilities.timeline).toBe('unavailable')
   })
 
+  it('distinguishes explicit-managed hook install from unmanaged native providers', () => {
+    const catalog = new Map(providers.catalog().map((provider) => [provider.id, provider.hookStrategy]))
+    // AgentMux writes and owns these providers' hook config.
+    for (const id of ['codex', 'claude', 'antigravity'] as const) {
+      expect(catalog.get(id)).toEqual({ kind: 'native', installation: 'explicit-managed' })
+    }
+    // Native hooks AgentMux understands but cannot install yet (hermes YAML plugin, pi TS extension):
+    // they must NOT claim explicit-managed, so the launch-time trigger honestly skips them.
+    for (const id of ['hermes', 'pi'] as const) {
+      expect(catalog.get(id)).toEqual({ kind: 'native', installation: 'unmanaged' })
+    }
+    // Providers with no hooks at all stay `none`, never a fake native.
+    for (const id of ['traex', 'grok', 'gemini', 'cursor'] as const) {
+      expect(catalog.get(id)).toEqual({ kind: 'none' })
+    }
+  })
+
   it.each(['codex', 'claude', 'traex', 'pi'] as const)('delivers %s prompts as positional argv data', (id) => {
     const plan = providers.get(id).buildLaunch({
       workspacePath: '/tmp/work',
