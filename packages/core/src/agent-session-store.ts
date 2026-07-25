@@ -463,10 +463,18 @@ function interactionRequest(value: unknown): AgentMuxInteractionRequest {
       if (!['allow-once', 'allow-always', 'reject-once', 'reject-always'].includes(String(option.kind))) {
         throw new AgentMuxError('Permission option kind is invalid.', 'INVALID_AGENT_SESSION_STORE')
       }
+      const description = option.description === undefined
+        ? undefined
+        : text(option.description, `pendingInteraction.request.options[${index}].description`)
+      if (option.tier !== undefined && !['safe', 'caution', 'danger'].includes(String(option.tier))) {
+        throw new AgentMuxError('Permission option tier is invalid.', 'INVALID_AGENT_SESSION_STORE')
+      }
       return {
         id: string(option.id, `pendingInteraction.request.options[${index}].id`),
         label: text(option.label, `pendingInteraction.request.options[${index}].label`),
-        kind: option.kind as 'allow-once' | 'allow-always' | 'reject-once' | 'reject-always'
+        kind: option.kind as 'allow-once' | 'allow-always' | 'reject-once' | 'reject-always',
+        ...(description ? { description } : {}),
+        ...(option.tier === undefined ? {} : { tier: option.tier as 'safe' | 'caution' | 'danger' })
       }
     })
     if (new Set(options.map((option) => option.id)).size !== options.length) {

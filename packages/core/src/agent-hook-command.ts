@@ -38,6 +38,14 @@ export function resolveHookProvider(env: NodeJS.ProcessEnv = process.env): strin
  * tripping Codex's "unsupported decision value" hook failure that an Antigravity-shaped
  * `{"decision":"ask"}` would cause. Emitting the Antigravity schema to any other provider is the
  * P0 bug this replaces.
+ *
+ * Claude's PermissionRequest hook CAN return a structured decision on stdout
+ * (`{behavior:"allow",updatedPermissions}` / `{behavior:"deny"}`) — a real broader-scope grant with no
+ * PTY keystroke. It is DEFERRED, not built: honoring it would require turning this fire-and-forget hook
+ * into a blocking RPC that holds stdout open until the user clicks seconds later, a channel that does not
+ * exist today. Claude therefore abstains with `{}`, its own numbered TUI prompt renders, and AgentMux
+ * answers it by injecting the declared keystroke (see CLAUDE_PERMISSION_OPTIONS in agent-provider.ts) —
+ * reusing the existing PTY transport with zero new protocol.
  */
 export function hookResponseFor(provider: string | null, eventName: string | null): string {
   if (provider === 'antigravity') {

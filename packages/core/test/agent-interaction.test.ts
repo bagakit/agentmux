@@ -1,14 +1,43 @@
 import { describe, expect, it } from 'vitest'
 import {
+  createNumberedTerminalInteractionProtocol,
   normalizeAgentInteractionResponse,
   normalizeTerminalInteraction,
-  planNumberedTerminalInteractionResponse
+  validatePermissionOptions,
+  type TerminalPermissionOption
 } from '../src/agent-interaction.js'
 
-const protocol = {
+const ESC = ''
+
+// A two-option (Codex-shaped) declaration and a three-option (Claude-shaped) declaration, so the tests
+// exercise both the single-allow compact case and the scoped allow-once + allow-always case.
+const CODEX_OPTIONS: readonly TerminalPermissionOption[] = [
+  { id: 'allow-once', label: 'Allow', kind: 'allow-once', tier: 'safe', input: '1' },
+  { id: 'reject-once', label: 'Deny', kind: 'reject-once', tier: 'safe', input: ESC }
+]
+const CLAUDE_OPTIONS: readonly TerminalPermissionOption[] = [
+  { id: 'allow-once', label: 'Allow once', kind: 'allow-once', tier: 'safe', input: '1' },
+  {
+    id: 'allow-always',
+    label: "Allow & don't ask again",
+    description: 'This tool, this directory.',
+    kind: 'allow-always',
+    tier: 'caution',
+    input: '2'
+  },
+  { id: 'reject-once', label: 'Deny', kind: 'reject-once', tier: 'safe', input: ESC }
+]
+
+const codexProtocol = createNumberedTerminalInteractionProtocol({
   questionEvents: ['PreToolUse'],
-  questionTools: ['request_user_input', 'askuserquestion']
-}
+  questionTools: ['request_user_input', 'askuserquestion'],
+  permissionOptions: CODEX_OPTIONS
+})
+const claudeProtocol = createNumberedTerminalInteractionProtocol({
+  questionEvents: ['PermissionRequest', 'PreToolUse'],
+  questionTools: ['askuserquestion'],
+  permissionOptions: CLAUDE_OPTIONS
+})
 
 describe('Agent terminal interaction protocol', () => {
   it('normalizes one bounded single-select question from a native Hook', () => {
@@ -31,7 +60,7 @@ describe('Agent terminal interaction protocol', () => {
           }]
         }
       }
-    }, 100, protocol)
+    }, 100, codexProtocol)
 
     expect(request).toMatchObject({
       kind: 'question',
@@ -45,7 +74,7 @@ describe('Agent terminal interaction protocol', () => {
       }],
       evidence: { source: 'native-hook', run: { runId: 'run-1' }, hookReceiptId: 'receipt-1' }
     })
-    expect(planNumberedTerminalInteractionResponse(request!, {
+    expect(codexProtocol.planResponse(request!, {
       kind: 'question',
       requestId: 'receipt-1',
       outcome: 'answered',
@@ -70,7 +99,7 @@ describe('Agent terminal interaction protocol', () => {
         providerId: 'codex',
         eventName: 'PreToolUse',
         payload: { tool_name: 'request_user_input', tool_input: toolInput }
-      }, 100, protocol)).toBeUndefined()
+      }, 100, codexProtocol)).toBeUndefined()
     }
   })
 
@@ -85,7 +114,7 @@ describe('Agent terminal interaction protocol', () => {
         tool_name: 'request_user_input',
         tool_input: { question: 'Already answered?', options: ['Yes', 'No'] }
       }
-    }, 100, protocol)).toBeUndefined()
+    }, 100, codexProtocol)).toBeUndefined()
   })
 
   it('lets a Provider identify a question tool inside its permission event', () => {
@@ -99,10 +128,7 @@ describe('Agent terminal interaction protocol', () => {
         tool_name: 'AskUserQuestion',
         tool_input: { question: 'Choose scope?', options: ['Focused', 'Full'] }
       }
-    }, 100, {
-      questionEvents: ['PermissionRequest', 'PreToolUse'],
-      questionTools: ['askuserquestion']
-    })
+    }, 100, claudeProtocol)
 
     expect(request).toMatchObject({
       kind: 'question',
@@ -110,15 +136,59 @@ describe('Agent terminal interaction protocol', () => {
     })
   })
 
-  it('validates semantic permission choices before a Provider maps them to terminal bytes', () => {
+  it('projects every declared scoped option and maps each to its own declared keystroke', () => {
     const request = normalizeTerminalInteraction({
-      receiptId: 'permission-1',
+      receiptId: 'permission-claude',
       agentSessionId: 'agent-1',
       runId: 'run-1',
       providerId: 'claude',
       eventName: 'PermissionRequest',
+      payload: { tool_name: 'Edit', tool_input: { path: 'src/index.ts' } }
+    }, 100, claudeProtocol)!
+
+    // Every declared option — including allow-always — is projected with its DESCRIBE half; the
+    // keystroke (`input`) is deliberately withheld from the request that crosses IPC.
+    expect(request).toMatchObject({
+      kind: 'permission',
+      title: 'Allow Edit?',
+      options: [
+        { id: 'allow-once', label: 'Allow once', kind: 'allow-once', tier: 'safe' },
+        {
+          id: 'allow-always',
+          label: "Allow & don't ask again",
+          description: 'This tool, this directory.',
+          kind: 'allow-always',
+          tier: 'caution'
+        },
+        { id: 'reject-once', label: 'Deny', kind: 'reject-once', tier: 'safe' }
+      ]
+    })
+    expect(request.kind === 'permission' && 'input' in request.options[0]!).toBe(false)
+
+    const reply = (optionId: string) => claudeProtocol.planResponse(request, {
+      kind: 'permission' as const,
+      requestId: 'permission-claude',
+      decision: { outcome: 'selected' as const, optionId }
+    })
+    expect(reply('allow-once')).toEqual({ data: '1' })
+    expect(reply('allow-always')).toEqual({ data: '2' })
+    expect(reply('reject-once')).toEqual({ data: ESC })
+    expect(claudeProtocol.planResponse(request, {
+      kind: 'permission',
+      requestId: 'permission-claude',
+      decision: { outcome: 'cancelled' }
+    })).toEqual({ data: ESC })
+  })
+
+  it('validates the semantic choice and fails closed on an option no Provider declares', () => {
+    const request = normalizeTerminalInteraction({
+      receiptId: 'permission-1',
+      agentSessionId: 'agent-1',
+      runId: 'run-1',
+      providerId: 'codex',
+      eventName: 'PermissionRequest',
       payload: { tool_name: 'Bash', tool_input: { command: 'pnpm test' } }
-    }, 100, protocol)!
+    }, 100, codexProtocol)!
 
     const response = {
       kind: 'permission' as const,
@@ -126,8 +196,8 @@ describe('Agent terminal interaction protocol', () => {
       decision: { outcome: 'selected' as const, optionId: 'allow-once' }
     }
     expect(normalizeAgentInteractionResponse(request, response)).toEqual(response)
-    expect(planNumberedTerminalInteractionResponse(request, response)).toEqual({ data: '1' })
-    expect(() => planNumberedTerminalInteractionResponse(request, {
+    expect(codexProtocol.planResponse(request, response)).toEqual({ data: '1' })
+    expect(() => codexProtocol.planResponse(request, {
       ...response,
       decision: { outcome: 'selected', optionId: 'invented' }
     })).toThrow('unknown option')
@@ -137,15 +207,35 @@ describe('Agent terminal interaction protocol', () => {
     } as never)).toThrow('outcome is invalid')
   })
 
+  it('fails closed when a permission declaration is malformed', () => {
+    expect(() => validatePermissionOptions([])).toThrow('at least one option')
+    expect(() => validatePermissionOptions([
+      { id: 'allow-once', label: 'Allow', kind: 'allow-once', input: '1' },
+      { id: 'allow-once', label: 'Deny', kind: 'reject-once', input: ESC }
+    ])).toThrow('Duplicate permission option id')
+    expect(() => validatePermissionOptions([
+      { id: 'allow-once', label: 'Allow', kind: 'allow-once', input: '' },
+      { id: 'reject-once', label: 'Deny', kind: 'reject-once', input: ESC }
+    ])).toThrow('non-empty id, label, and input')
+    expect(() => validatePermissionOptions([
+      { id: 'allow-once', label: 'Allow', kind: 'allow-once', input: '1' }
+    ])).toThrow('at least one allow and one reject')
+    expect(() => createNumberedTerminalInteractionProtocol({
+      questionEvents: [],
+      questionTools: [],
+      permissionOptions: [{ id: 'reject-once', label: 'Deny', kind: 'reject-once', input: ESC }]
+    })).toThrow('at least one allow and one reject')
+  })
+
   it('rejects ambiguous request identifiers before mapping a response', () => {
     const permission = normalizeTerminalInteraction({
       receiptId: 'permission-ambiguous',
       agentSessionId: 'agent-1',
       runId: 'run-1',
-      providerId: 'claude',
+      providerId: 'codex',
       eventName: 'PermissionRequest',
       payload: { tool_name: 'Bash' }
-    }, 100, protocol)!
+    }, 100, codexProtocol)!
     permission.kind === 'permission' && permission.options.push({ ...permission.options[0]! })
     expect(() => normalizeAgentInteractionResponse(permission, {
       kind: 'permission',
@@ -163,7 +253,7 @@ describe('Agent terminal interaction protocol', () => {
         tool_name: 'request_user_input',
         tool_input: { question: 'Choose?', options: ['A', 'B'] }
       }
-    }, 100, protocol)!
+    }, 100, codexProtocol)!
     if (question.kind === 'question') {
       question.questions[0]!.options.push({ ...question.questions[0]!.options[0]! })
     }
