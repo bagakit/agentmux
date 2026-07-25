@@ -67,6 +67,7 @@ import type {
   AgentTimelineSnapshot,
   AgentTerminalHandshake,
   AgentTerminalPromptRenderMatcher,
+  AgentTerminalStopReceiptState,
   NativeHookEnvelope
 } from './types.js'
 
