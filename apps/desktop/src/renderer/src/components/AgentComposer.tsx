@@ -11,6 +11,7 @@ export type AgentComposerProps = {
   onInterrupt?: () => void
   onReferenceActiveFile?: () => void
   onAttach?: () => void
+  onPasteImage?: (image: { bytes: Uint8Array; extension: string }) => void
 }
 
 export function AgentComposer({
@@ -23,7 +24,8 @@ export function AgentComposer({
   onSubmit,
   onInterrupt,
   onReferenceActiveFile,
-  onAttach
+  onAttach,
+  onPasteImage
 }: AgentComposerProps) {
   const canSubmit = !disabled && Boolean(onSubmit) && Boolean(value.trim())
 
@@ -40,6 +42,19 @@ export function AgentComposer({
             onSubmit?.()
           }
         }}
+        onPaste={(event) => {
+          if (disabled || !onPasteImage) return
+          const file = [...event.clipboardData.items]
+            .find((item) => item.kind === 'file' && item.type.startsWith('image/'))
+            ?.getAsFile()
+          if (!file) return
+          // Claim the paste before the textarea inserts the image's filename as text.
+          event.preventDefault()
+          const extension = file.type.slice('image/'.length).split('+')[0] ?? 'png'
+          void file.arrayBuffer().then((buffer) => {
+            onPasteImage({ bytes: new Uint8Array(buffer), extension })
+          })
+        }}
         placeholder={placeholder}
         rows={1}
       />
@@ -48,21 +63,25 @@ export function AgentComposer({
           <button
             type="button"
             className="composer-tool"
-            disabled={disabled || !activeFile || !onReferenceActiveFile}
-            onClick={onReferenceActiveFile}
-            title="Reference the last active file"
-          >
-            <AtSign size={14} /> {activeFile ? activeFile.split('/').at(-1) : 'File'}
-          </button>
-          <button
-            type="button"
-            className="composer-tool"
             disabled={disabled || !onAttach}
             onClick={onAttach}
-            title={onAttach ? 'Attach a file' : 'Attachments are not available yet'}
+            title="Reference files for the Agent to read"
           >
             <Paperclip size={14} /> Attach
           </button>
+          {/* A shortcut to the file already open, not a second way to attach — so it appears only
+              when there is one, rather than sitting permanently greyed out. */}
+          {activeFile && onReferenceActiveFile ? (
+            <button
+              type="button"
+              className="composer-tool"
+              disabled={disabled}
+              onClick={onReferenceActiveFile}
+              title={`Reference ${activeFile}`}
+            >
+              <AtSign size={14} /> {activeFile.split('/').at(-1)}
+            </button>
+          ) : null}
         </div>
         <div>
           {isWorking ? (
