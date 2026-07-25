@@ -338,23 +338,15 @@ export class RuntimeController {
         console.error('Failed to release Renderer-owned Session Attachments', error)
       })
     }
-    const onNavigation = (...args: unknown[]): void => {
-      const first = args[0]
-      if (first && typeof first === 'object' && 'isMainFrame' in first) {
-        const details = first as { isMainFrame?: boolean; isSameDocument?: boolean }
-        if (details.isMainFrame === false || details.isSameDocument) return
-      } else if (args.length >= 4) {
-        const isInPlace = args[2]
-        const isMainFrame = args[3]
-        if (isMainFrame === false || isInPlace) return
-      }
+    const onNavigation = (details: { isMainFrame?: boolean; isSameDocument?: boolean }): void => {
+      if (details.isMainFrame === false || details.isSameDocument) return
       releaseAttachments()
     }
-    client.on('did-start-navigation' as any, onNavigation)
+    client.on('did-start-navigation', onNavigation)
     client.on('render-process-gone', releaseAttachments)
     client.on('destroyed', releaseAttachments)
     return () => {
-      client.off('did-start-navigation' as any, onNavigation)
+      client.off('did-start-navigation', onNavigation)
       client.off('render-process-gone', releaseAttachments)
       client.off('destroyed', releaseAttachments)
       this.clients.delete(client)
@@ -670,13 +662,10 @@ export class RuntimeController {
         this.sessionAttachmentLeases.delete(attachmentId)
         return
       }
-      try {
-        await (await this.connectedClient(owner.control.hostId)).releaseRunAttachment(owner.control.run)
-      } finally {
-        owner.attachmentIds.delete(attachmentId)
-        this.sessionAttachmentLeases.delete(attachmentId)
-        this.sessionAttachmentOwners.delete(currentLease.key)
-      }
+      await (await this.connectedClient(owner.control.hostId)).releaseRunAttachment(owner.control.run)
+      owner.attachmentIds.delete(attachmentId)
+      this.sessionAttachmentLeases.delete(attachmentId)
+      this.sessionAttachmentOwners.delete(currentLease.key)
     })
   }
 
