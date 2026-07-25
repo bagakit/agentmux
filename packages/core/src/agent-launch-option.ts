@@ -1,5 +1,5 @@
 import { AgentMuxError } from './errors.js'
-import type { AgentProviderId } from './types.js'
+import type { AgentProviderId, RiskTier } from './types.js'
 
 /**
  * Sealed Launch-Option Capabilities.
@@ -22,9 +22,6 @@ import type { AgentProviderId } from './types.js'
  * hides, it never disables-with-tooltip. Adding an option to a Provider later requires no renderer change.
  */
 
-/** Permission-style danger ranking a renderer can surface (e.g. escalating colour on a choice). */
-export type LaunchOptionTier = 'safe' | 'caution' | 'danger'
-
 /**
  * DESCRIBE half: one selectable value of an option. Pure data — this is exactly what crosses IPC and what
  * the renderer renders. It deliberately carries no argv; the launch contribution lives core-side.
@@ -33,7 +30,9 @@ export type LaunchOptionChoice = {
   id: string
   label: string
   description?: string
-  tier?: LaunchOptionTier
+  /** Danger ranking a renderer surfaces as a restrained dot. The shared {@link RiskTier} — a launch
+   * choice, a permission row, and a posture mode that read as equally dangerous carry the same token. */
+  tier?: RiskTier
 }
 
 /**
