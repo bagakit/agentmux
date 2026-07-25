@@ -430,29 +430,22 @@ async function explorerRowPaths(window: BrowserWindow): Promise<string[]> {
 }
 
 async function explorerProjectionSettles(window: BrowserWindow): Promise<boolean> {
-  return await window.webContents.executeJavaScript(`new Promise((resolve) => {
-    const snapshot = () => JSON.stringify({
+  let previous: string | null = null
+  let stableSamples = 0
+  await waitFor('settled Explorer projection', async () => {
+    const current = await window.webContents.executeJavaScript(`JSON.stringify({
       rows: [...document.querySelectorAll('[data-tree-path]')]
         .map((row) => row.getAttribute('data-tree-path')).filter(Boolean).sort(),
       selected: [...document.querySelectorAll('[data-tree-path][aria-selected="true"]')]
         .map((row) => row.getAttribute('data-tree-path')).filter(Boolean).sort(),
       expanded: [...document.querySelectorAll('[data-tree-path][aria-expanded="true"]')]
         .map((row) => row.getAttribute('data-tree-path')).filter(Boolean).sort()
-    })
-    let previous = snapshot()
-    let stableFrames = 0
-    let totalFrames = 0
-    const sample = () => {
-      const current = snapshot()
-      stableFrames = current === previous ? stableFrames + 1 : 0
-      previous = current
-      totalFrames += 1
-      if (stableFrames >= 4) resolve(true)
-      else if (totalFrames >= 120) resolve(false)
-      else requestAnimationFrame(sample)
-    }
-    requestAnimationFrame(sample)
-  })`) as boolean
+    })`) as string
+    stableSamples = current === previous ? stableSamples + 1 : 0
+    previous = current
+    return stableSamples >= 4
+  })
+  return true
 }
 
 async function pathExists(path: string): Promise<boolean> {
