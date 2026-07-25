@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { AgentProviderRegistry, createAntigravityManagedHookPlan } from '../src/agent-provider.js'
+import { AgentProviderRegistry, createAntigravityManagedHookPlan, createCodexManagedHookPlan } from '../src/agent-provider.js'
 
 describe('built-in agent providers', () => {
   const providers = new AgentProviderRegistry()
@@ -344,5 +344,27 @@ describe('built-in agent providers', () => {
     expect(bundle['PreInvocation']?.[0]?.command).toContain('--event PreInvocation')
     expect(bundle['PreToolUse']?.[0]?.matcher).toBe('*')
     expect(bundle['PreToolUse']?.[0]?.hooks?.[0]).toMatchObject({ type: 'command' })
+  })
+
+  it('bakes the packaged-Electron node runner and provider id into the managed hook command', () => {
+    // process.execPath is the Electron app binary when packaged; ELECTRON_RUN_AS_NODE=1 makes it run
+    // the .js as Node (and a real node binary ignores the var). AGENTMUX_HOOK_PROVIDER lets the shared
+    // hook binary emit the provider-correct decision schema without confusing antigravity with gemini.
+    const codexCommand = (
+      JSON.parse(createCodexManagedHookPlan('/tmp/work').mutations[0]?.content ?? '{}') as {
+        hooks: Record<string, Array<{ hooks?: Array<{ command?: string }> }>>
+      }
+    ).hooks['SessionStart']?.[0]?.hooks?.[0]?.command ?? ''
+    expect(codexCommand).toContain('ELECTRON_RUN_AS_NODE=1')
+    expect(codexCommand).toContain("AGENTMUX_HOOK_PROVIDER='codex'")
+    expect(codexCommand).toContain('agentmux-hook.js')
+
+    const antigravityCommand = (
+      JSON.parse(createAntigravityManagedHookPlan('/tmp/fake-home').mutations[0]?.content ?? '{}') as {
+        'agentmux-status': Record<string, Array<{ command?: string }>>
+      }
+    )['agentmux-status']['PreInvocation']?.[0]?.command ?? ''
+    expect(antigravityCommand).toContain('ELECTRON_RUN_AS_NODE=1')
+    expect(antigravityCommand).toContain("AGENTMUX_HOOK_PROVIDER='antigravity'")
   })
 })

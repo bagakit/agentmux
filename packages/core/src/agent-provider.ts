@@ -106,13 +106,28 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`
 }
 
+/**
+ * Build the managed hook `command` string written into a provider's hooks config.
+ *
+ * `process.execPath` is a real `node` binary in dev/tests but the Electron app binary when packaged;
+ * `ELECTRON_RUN_AS_NODE=1` makes the Electron binary run the .js as a plain Node script, while a real
+ * node binary ignores the unknown var — so one string is correct in both contexts. `AGENTMUX_HOOK_PROVIDER`
+ * is baked in (not merely inherited from the launch env) so the hook emits the provider-correct decision
+ * schema even across PTY restart/SSH, and so `antigravity` (agy) is never confused with `gemini` under
+ * the shared ~/.gemini root. Relies on the agent CLI running the command through a shell, matching the
+ * existing POSIX-quoting assumption.
+ */
+function managedHookCommand(providerId: AgentProviderId): string {
+  const commandPath = fileURLToPath(new URL('../bin/agentmux-hook.js', import.meta.url))
+  return `ELECTRON_RUN_AS_NODE=1 AGENTMUX_HOOK_PROVIDER=${shellQuote(providerId)} ${shellQuote(process.execPath)} ${shellQuote(commandPath)}`
+}
+
 export function createCodexManagedHookPlan(workspacePath: string): AgentManagedHookPlan {
   const workspace = resolve(workspacePath)
   if (!isAbsolute(workspacePath) || workspace !== workspacePath) {
     throw new AgentMuxError('Codex Hook workspace must be an absolute normalized path.', 'INVALID_HOOK_PLAN')
   }
-  const commandPath = fileURLToPath(new URL('../bin/agentmux-hook.js', import.meta.url))
-  const command = `${shellQuote(process.execPath)} ${shellQuote(commandPath)}`
+  const command = managedHookCommand('codex')
   const hooks = Object.fromEntries(CODEX_HOOK_EVENTS.map((eventName) => [eventName, [{
     ...(eventName === 'SessionStart' ? { matcher: 'startup|resume|clear|compact' } : {}),
     hooks: [{ type: 'command', command, timeout: 10 }]
@@ -162,8 +177,7 @@ export function createAntigravityManagedHookPlan(homeOrWorkspacePath?: string): 
   const targetPath = targetRoot.endsWith('.json')
     ? targetRoot
     : join(targetRoot, '.gemini', 'config', 'hooks.json')
-  const commandPath = fileURLToPath(new URL('../bin/agentmux-hook.js', import.meta.url))
-  const command = `${shellQuote(process.execPath)} ${shellQuote(commandPath)}`
+  const command = managedHookCommand('antigravity')
 
   const bundle: Record<string, unknown> = {}
   for (const eventName of ANTIGRAVITY_HOOK_EVENTS) {
