@@ -46,6 +46,16 @@ Codex 代表纵切现在也走同一个 Adapter。`AgentProvider` 仍在 Core �
 
 Hook 的 stable binding identity 与随机 bearer 只存在于权限为 `0600` 的 Stored Session；`createAgent`、`agentSessions`、Resolver、Status、事件和 View 投影都会删除这两个控制字段。`client.onEvent` 只接受同步观察 callback；异步 Consumer 必须先复制到自己的有界队列，返回 Promise 的 callback 会自动退订。完整终端字节使用 Attachment/Replay。
 
+Provider/ACP semantic status 与 pending Permission/Question 也是 Core-owned Session 事实。Client
+通过 `interaction` 事件和 `session.pendingInteraction` 公开 typed request；Consumer 用
+`respondAgentInteraction({ agentSessionId, expectedRun, response })` 回答。Core 会验证 exact Session、
+Run、request 与选项，ACP response 回到 Adapter，Native response 交给 Provider 规划终端协议。
+Consumer 不发送裸终端按键，也不从 `status.detail` 猜交互。需要两阶段 Prompt 的 Provider 必须同时
+声明真实 transport `payload` 与 TUI `renderedText`；bracketed paste 不是 Core 默认行为。Prompt 采用
+64 KiB 上限，screen oracle 的有界 scrollback 覆盖同一范围。pending interaction 期间，普通 Prompt
+和 raw Agent Input 都被 Core 拒绝；ACP response 只有在 Adapter delivery 与 semantic settlement 完成
+后才成功，Native response 即使遇到已终止 Run 也按原 ctxmux recoverable Input claim 收敛。
+
 ```ts
 const session = await client.createAgent({
   providerId: 'codex',

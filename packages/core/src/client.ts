@@ -5,9 +5,9 @@ import { delimiter, dirname, isAbsolute, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   AgentMuxAcpBridge,
-  type AgentMuxAcpBinding,
-  type AgentMuxPermissionHandler
+  type AgentMuxAcpBinding
 } from './acp-adapter.js'
+import { normalizeAgentInteractionResponse } from './agent-interaction.js'
 import {
   AgentProviderRegistry,
   resolveManagedHookPlan,
@@ -15,7 +15,10 @@ import {
 } from './agent-provider.js'
 import { composeAgentLaunchPrompt } from './agent-launch-prompt.js'
 import { AgentMuxClientEventPublisher } from './client-event-publisher.js'
-import { AgentTerminalScreen } from './agent-terminal-screen.js'
+import {
+  AgentTerminalScreen,
+  MAX_AGENT_PROMPT_BYTES
+} from './agent-terminal-screen.js'
 import {
   CtxmuxRunAdapter,
   type CtxmuxAdapterDataEvent,
@@ -50,6 +53,8 @@ import type {
   AgentPromptInputPlan,
   AgentMuxAgentSession,
   AgentMuxClientEvent,
+  AgentMuxInteractionRequest,
+  AgentMuxInteractionResponse,
   AgentMuxRun,
   AgentMuxRunAppliedSize,
   AgentMuxRunAttachment,
@@ -68,6 +73,7 @@ import type {
   AgentTerminalHandshake,
   AgentTerminalPromptRenderMatcher,
   AgentTerminalPromptReadinessState,
+  AgentStatus,
   NativeHookEnvelope
 } from './types.js'
 
@@ -122,6 +128,12 @@ export type AgentMuxAgentPromptInput = {
   prompt: string
 }
 
+export type AgentMuxAgentInteractionInput = {
+  agentSessionId: string
+  expectedRun: AgentMuxRunRef
+  response: AgentMuxInteractionResponse
+}
+
 export type AgentMuxAgentRespawnInput = Omit<
   AgentMuxAgentCreateInput,
   'providerId' | 'executorId' | 'workspacePath' | 'agentSessionId'
@@ -138,7 +150,6 @@ export type AgentMuxAgentAttachment = {
 export type AgentMuxClientOptions = {
   providers?: readonly AgentProvider[]
   store?: AgentMuxAgentSessionStore
-  permissionHandler?: AgentMuxPermissionHandler
   /**
    * Installs the provider's managed Hook config before its first launch. Defaults to a `hooks`
    * subdirectory of the ctxmux state directory so backups live beside the rest of the runtime state.
@@ -234,6 +245,37 @@ function terminalInitialPromptReadinessIdentity(
       handshakeOperationId
     ]))
     .digest('base64url')
+}
+
+function agentInteractionOperationIdentity(
+  session: AgentMuxAgentSession,
+  requestId: string,
+  responseDigest: string,
+  data: string
+): string {
+  return createHash('sha256')
+    .update(JSON.stringify([
+      'agentmux-agent-interaction-v1',
+      session.agentSessionId,
+      session.run.runId,
+      requestId,
+      responseDigest,
+      data
+    ]))
+    .digest('base64url')
+}
+
+function digestInteractionResponse(response: AgentMuxInteractionResponse): string {
+  return createHash('sha256').update(JSON.stringify(response)).digest('base64url')
+}
+
+function assertAgentPromptSize(prompt: string): void {
+  if (Buffer.byteLength(prompt) > MAX_AGENT_PROMPT_BYTES) {
+    throw new AgentMuxError(
+      `Agent prompt exceeds the ${MAX_AGENT_PROMPT_BYTES}-byte limit.`,
+      'INVALID_AGENT_PROMPT'
+    )
+  }
 }
 
 function terminalEnvironment(
@@ -337,13 +379,35 @@ export class AgentMuxClient {
           }
           const mutation = agentTimelineMutationFromAcpEvent(agentSessionId, event, observed)
           if (mutation) await this.persistAndPublishTimeline(mutation, observed)
+          if (event.type === 'status' && event.state !== 'unknown') {
+            await this.persistSemanticStatus(agentSessionId, session.run, {
+              state: event.state,
+              source: 'acp',
+              observedAt: observed.observedAt,
+              ...(event.detail === undefined ? {} : { detail: event.detail })
+            })
+          }
           this.publisher.publishAcp(agentSessionId, event, observed)
         },
         onNativeHandle: async (agentSessionId, handle) => {
           await this.updateNativeHandle(agentSessionId, handle)
+        },
+        onInteraction: async (request) => {
+          const session = this.requireAgentSession(request.agentSessionId)
+          const observedRequest = {
+            ...request,
+            evidence: { ...request.evidence, run: { ...session.run } }
+          }
+          const next = await this.persistPendingInteraction(observedRequest)
+          this.publisher.publishInteraction(observedRequest)
+          this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
+        },
+        onInteractionSettled: async (request) => {
+          const session = this.requireAgentSession(request.agentSessionId)
+          const next = await this.clearPendingInteraction(session, request.id)
+          this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
         }
-      },
-      options.permissionHandler
+      }
     )
   }
 
@@ -394,6 +458,7 @@ export class AgentMuxClient {
           await this.ensureTerminalHandshake(session, run)
         }
       }
+      await this.recoverPendingInteractionResponses(runs)
       this.assertConnectionEpoch(epoch)
       this.connected = true
     } catch (error) {
@@ -638,6 +703,7 @@ export class AgentMuxClient {
 
   async createAgent(input: AgentMuxAgentCreateInput): Promise<AgentMuxAgentSession> {
     this.requireConnected()
+    if (input.prompt !== undefined) assertAgentPromptSize(input.prompt.trim())
     const agentSessionId = safeId(input.agentSessionId ?? randomUUID(), 'Agent Session id')
     const executorId = safeId(input.executorId, 'Agent Executor id')
     const lifecycleOperationId = agentLifecycleOperationIdentity(
@@ -866,6 +932,7 @@ export class AgentMuxClient {
   async resumeAgent(input: AgentMuxAgentResumeInput): Promise<AgentMuxAgentSession> {
     const prompt = input.prompt.trim()
     if (!prompt) throw new AgentMuxError('Agent resume prompt cannot be empty.', 'INVALID_AGENT_PROMPT')
+    assertAgentPromptSize(prompt)
     return await this.resumeAgentRun({ ...input, prompt })
   }
 
@@ -963,6 +1030,8 @@ export class AgentMuxClient {
       delete next.terminalHandshake
       delete next.terminalPromptReadiness
       delete next.terminalPromptSubmission
+      delete next.semanticStatus
+      delete next.pendingInteraction
       if (
         !prompt &&
         (input.args?.length ?? 0) === 0 &&
@@ -1213,12 +1282,19 @@ export class AgentMuxClient {
     this.requireConnected()
     const content = input.prompt.trim()
     if (!content) throw new AgentMuxError('Agent prompt cannot be empty.', 'INVALID_AGENT_PROMPT')
+    assertAgentPromptSize(content)
     const operationId = safeId(input.operationId, 'Agent prompt operation id')
     const session = await this.ensureTerminalHandshake(
       this.requireAgentSession(input.agentSessionId)
     )
     const plan = this.providers.get(session.providerId).planPromptInput(content)
     await this.serializeAgentInput(session, async (current, run) => {
+      if (current.pendingInteraction) {
+        throw new AgentMuxError(
+          'Answer the pending Agent interaction before submitting another prompt.',
+          'AGENT_INTERACTION_PENDING'
+        )
+      }
       await this.submitAgentInputPlan(current, run, operationId, content, plan)
     })
     await this.recordPromptAfterSideEffect(
@@ -1228,6 +1304,52 @@ export class AgentMuxClient {
       content,
       Date.now()
     )
+  }
+
+  async respondAgentInteraction(input: AgentMuxAgentInteractionInput): Promise<void> {
+    this.requireConnected()
+    const requestedSession = this.requireAgentSession(input.agentSessionId)
+    if (!sameRun(requestedSession.run, input.expectedRun)) {
+      throw new AgentMuxError(
+        'Agent Session changed before its interaction was answered.',
+        'STALE_AGENT_SESSION'
+      )
+    }
+    const pending = requestedSession.pendingInteraction
+    if (!pending || pending.request.id !== input.response.requestId) {
+      throw new AgentMuxError('Agent interaction is not pending.', 'UNKNOWN_AGENT_INTERACTION')
+    }
+    const response = normalizeAgentInteractionResponse(pending.request, input.response)
+    if (pending.request.evidence.source === 'acp') {
+      if (response.kind !== 'permission') {
+        throw new AgentMuxError('ACP question responses are unsupported.', 'AGENT_INTERACTION_UNSUPPORTED')
+      }
+      await this.acp.respondPermission(input.agentSessionId, pending.request.id, response.decision)
+      return
+    }
+    const provider = this.providers.get(requestedSession.providerId)
+    const plan = provider.planInteractionResponse(pending.request, response)
+    if (!plan.data) {
+      throw new AgentMuxError('Provider interaction response bytes cannot be empty.', 'INVALID_AGENT_PROVIDER')
+    }
+    const responseDigest = digestInteractionResponse(response)
+    const operationId = agentInteractionOperationIdentity(
+      requestedSession,
+      pending.request.id,
+      responseDigest,
+      plan.data
+    )
+    await this.serializeAgentInput(requestedSession, async (session, run) => {
+      await this.submitNativeInteractionResponse(
+        session,
+        run,
+        pending.request,
+        response,
+        responseDigest,
+        operationId,
+        plan.data
+      )
+    })
   }
 
   async resizeAgent(
@@ -1367,6 +1489,84 @@ export class AgentMuxClient {
       for (const run of candidates) await this.retireUncommittedRun(run.runId)
       retiredRuns = candidates.map((run) => runRef(run.runId))
       await this.registry.releaseLifecycle(reservation, retiredRuns)
+    }
+  }
+
+  private async recoverPendingInteractionResponses(
+    runs: readonly CtxmuxAdapterRun[]
+  ): Promise<void> {
+    for (const session of this.registry.list()) {
+      const pending = session.pendingInteraction
+      if (!pending) continue
+      if (pending.request.evidence.source === 'acp') {
+        if (!this.acp.hasPendingPermission(session.agentSessionId, pending.request.id)) {
+          const settled = await this.clearPendingInteraction(session, pending.request.id)
+          this.publisher.publish({ type: 'agent-session', session: cloneSession(settled) })
+        }
+        continue
+      }
+      const response = pending?.response
+      const run = runs.find((candidate) => candidate.runId === session.run.runId)
+      if (!response || pending.request.evidence.source !== 'native-hook') continue
+      if (!run) {
+        throw new AgentMuxError(
+          'A persisted Agent interaction response points to a missing CtxMux Run.',
+          'AGENT_INTERACTION_STATE_INVALID'
+        )
+      }
+      const acceptedInputBytes = run.acceptedInputBytes
+      if (
+        acceptedInputBytes === null ||
+        acceptedInputBytes < response.inputByteRange.startByte ||
+        (
+          acceptedInputBytes > response.inputByteRange.startByte &&
+          acceptedInputBytes < response.inputByteRange.endByte
+        )
+      ) {
+        throw new AgentMuxError(
+          'CtxMux Input cursor cannot reconcile the persisted Agent interaction response.',
+          'AGENT_INTERACTION_STATE_INVALID'
+        )
+      }
+      const normalized = normalizeAgentInteractionResponse(pending.request, response.value)
+      const plan = this.providers.get(session.providerId).planInteractionResponse(
+        pending.request,
+        normalized
+      )
+      const recover = async (current: AgentMuxAgentSession, currentRun: CtxmuxAdapterRun) => {
+        await this.submitNativeInteractionResponse(
+          current,
+          currentRun,
+          pending.request,
+          normalized,
+          digestInteractionResponse(normalized),
+          agentInteractionOperationIdentity(
+            current,
+            pending.request.id,
+            digestInteractionResponse(normalized),
+            plan.data
+          ),
+          plan.data
+        )
+      }
+      if (run.state.type === 'running') {
+        await this.serializeAgentInput(session, recover)
+        continue
+      }
+      try {
+        await recover(session, run)
+      } catch (error) {
+        if (
+          error instanceof AgentMuxError &&
+          error.detail === 'not_applied' &&
+          acceptedInputBytes === response.inputByteRange.startByte
+        ) {
+          const settled = await this.clearPendingInteraction(session, pending.request.id)
+          this.publisher.publish({ type: 'agent-session', session: cloneSession(settled) })
+          continue
+        }
+        throw error
+      }
     }
   }
 
@@ -1812,7 +2012,7 @@ export class AgentMuxClient {
       this.agentInputCursors.set(session.agentSessionId, accepted.run.acceptedInputBytes)
       return
     }
-    if (!plan.payload || !plan.submit) {
+    if (!plan.payload || !plan.renderedText || !plan.submit) {
       throw new AgentMuxError(
         'Provider terminal prompt phases cannot be empty.',
         'INVALID_AGENT_PROVIDER'
@@ -2094,7 +2294,7 @@ export class AgentMuxClient {
       await applyPhase('submit', plan.submit)
       return
     }
-    await this.waitForTerminalPromptRender(session, submission, plan.payload)
+    await this.waitForTerminalPromptRender(session, submission, plan.renderedText)
     await applyPhase('submit', plan.submit)
   }
 
@@ -2114,7 +2314,7 @@ export class AgentMuxClient {
       session,
       submission.outputCursorBytes,
       true,
-      (screen) => screen.composerText(matcher.activeComposer) === content,
+      (screen) => screen.composerText(matcher.activeComposer, content.includes('\n')) === content,
       {
         timeoutMs: TERMINAL_PROMPT_RENDER_TIMEOUT_MS,
         timeoutMessage: 'Timed out waiting for the Agent prompt to render.',
@@ -2293,11 +2493,235 @@ export class AgentMuxClient {
     }
   }
 
+  private async updateExactAgentSession(
+    agentSessionId: string,
+    expectedRun: AgentMuxRunRef,
+    update: (current: AgentMuxStoredAgentSession) => AgentMuxStoredAgentSession
+  ): Promise<AgentMuxStoredAgentSession> {
+    try {
+      return await this.registry.update(agentSessionId, expectedRun, update)
+    } catch (error) {
+      if (!(error instanceof AgentMuxError) || error.code !== 'STALE_AGENT_SESSION') throw error
+      const hostId = this.requireAgentSession(agentSessionId).hostId
+      await this.registry.load(hostId)
+      const canonical = this.requireAgentSession(agentSessionId)
+      if (!sameRun(canonical.run, expectedRun)) {
+        throw new AgentMuxError('Agent Session changed while semantic state was persisted.', 'STALE_AGENT_SESSION')
+      }
+      return await this.registry.update(agentSessionId, expectedRun, update)
+    }
+  }
+
+  private async persistSemanticStatus(
+    agentSessionId: string,
+    expectedRun: AgentMuxRunRef,
+    status: AgentStatus
+  ): Promise<AgentMuxStoredAgentSession> {
+    const next = await this.updateExactAgentSession(agentSessionId, expectedRun, (current) => {
+      if (
+        current.semanticStatus &&
+        current.semanticStatus.observedAt > status.observedAt
+      ) return current
+      return {
+        ...current,
+        semanticStatus: structuredClone(status),
+        updatedAt: Math.max(current.updatedAt, status.observedAt)
+      }
+    })
+    this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
+    return next
+  }
+
+  private async persistPendingInteraction(
+    request: AgentMuxInteractionRequest
+  ): Promise<AgentMuxStoredAgentSession> {
+    const expectedRun = request.evidence.run
+    if (!expectedRun) {
+      throw new AgentMuxError('Agent interaction omitted its exact Run.', 'INVALID_AGENT_INTERACTION')
+    }
+    return await this.updateExactAgentSession(request.agentSessionId, expectedRun, (current) => {
+      const existing = current.pendingInteraction
+      if (existing) {
+        if (existing.request.id !== request.id) {
+          throw new AgentMuxError(
+            'Another Agent interaction is already pending.',
+            'AGENT_INTERACTION_BUSY'
+          )
+        }
+        return current
+      }
+      return {
+        ...current,
+        pendingInteraction: { request: structuredClone(request) },
+        updatedAt: Math.max(current.updatedAt, request.evidence.observedAt)
+      }
+    })
+  }
+
+  private async clearPendingInteraction(
+    session: AgentMuxAgentSession,
+    requestId: string
+  ): Promise<AgentMuxStoredAgentSession> {
+    return await this.updateExactAgentSession(session.agentSessionId, session.run, (current) => {
+      if (!current.pendingInteraction) return current
+      if (current.pendingInteraction.request.id !== requestId) {
+        throw new AgentMuxError('Agent interaction changed before settlement.', 'UNKNOWN_AGENT_INTERACTION')
+      }
+      const next = { ...current, updatedAt: Date.now() }
+      delete next.pendingInteraction
+      return next
+    })
+  }
+
+  private async submitNativeInteractionResponse(
+    session: AgentMuxAgentSession,
+    run: CtxmuxAdapterRun,
+    request: AgentMuxInteractionRequest,
+    response: AgentMuxInteractionResponse,
+    responseDigest: string,
+    operationId: string,
+    data: string
+  ): Promise<void> {
+    if (
+      request.agentSessionId !== session.agentSessionId ||
+      request.evidence.source !== 'native-hook' ||
+      request.evidence.run?.runId !== session.run.runId
+    ) {
+      throw new AgentMuxError(
+        'Native Agent interaction does not match the exact Session and Run.',
+        'INVALID_AGENT_INTERACTION'
+      )
+    }
+    const bytes = Buffer.byteLength(data)
+    const expectedByte = this.agentInputCursors.get(session.agentSessionId) ?? run.acceptedInputBytes
+    if (expectedByte === null) {
+      throw new AgentMuxError('CtxMux omitted its accepted Input byte cursor.', 'CTXMUX_INPUT_CURSOR_MISSING')
+    }
+    const assertResponse = (
+      state: NonNullable<NonNullable<AgentMuxAgentSession['pendingInteraction']>['response']>
+    ): void => {
+      if (
+        state.responseDigest !== responseDigest ||
+        state.operationId !== operationId ||
+        state.inputByteRange.endByte - state.inputByteRange.startByte !== bytes ||
+        JSON.stringify(state.value) !== JSON.stringify(response)
+      ) {
+        throw new AgentMuxError(
+          'Agent interaction was answered with conflicting content.',
+          'AGENT_INTERACTION_RESPONSE_CONFLICT'
+        )
+      }
+    }
+    let current = await this.updateExactAgentSession(
+      session.agentSessionId,
+      session.run,
+      (stored) => {
+        const pending = stored.pendingInteraction
+        if (!pending || pending.request.id !== request.id) {
+          throw new AgentMuxError('Agent interaction is not pending.', 'UNKNOWN_AGENT_INTERACTION')
+        }
+        if (pending.response) {
+          assertResponse(pending.response)
+          return stored
+        }
+        return {
+          ...stored,
+          pendingInteraction: {
+            request: pending.request,
+            response: {
+              value: structuredClone(response),
+              responseDigest,
+              operationId,
+              inputByteRange: {
+                startByte: expectedByte,
+                endByte: expectedByte + bytes
+              },
+              acknowledged: false
+            }
+          },
+          updatedAt: Date.now()
+        }
+      }
+    )
+    let state = current.pendingInteraction?.response
+    if (!state) {
+      throw new AgentMuxError(
+        'Agent interaction response claim was not persisted.',
+        'AGENT_INTERACTION_STATE_INVALID'
+      )
+    }
+    assertResponse(state)
+    let acceptedInputBytes = run.acceptedInputBytes
+    if (!state.acknowledged) {
+      const accepted = await this.kernel.input(session.run.runId, {
+        ownerInstanceId: this.kernel.identity().daemonInstanceId,
+        operationId: state.operationId,
+        expectedByte: state.inputByteRange.startByte,
+        data
+      })
+      if (
+        accepted.appliedByteRange.startByte !== state.inputByteRange.startByte ||
+        accepted.appliedByteRange.endByte !== state.inputByteRange.endByte ||
+        accepted.run.acceptedInputBytes === null ||
+        accepted.run.acceptedInputBytes < state.inputByteRange.endByte
+      ) {
+        throw new AgentMuxError(
+          'CtxMux interaction receipt does not match the persisted Input claim.',
+          'AGENT_INTERACTION_RECEIPT_MISMATCH'
+        )
+      }
+      acceptedInputBytes = accepted.run.acceptedInputBytes
+      current = await this.updateExactAgentSession(
+        session.agentSessionId,
+        session.run,
+        (stored) => {
+          const responseState = stored.pendingInteraction?.response
+          if (!responseState) {
+            throw new AgentMuxError(
+              'Agent interaction response claim disappeared.',
+              'AGENT_INTERACTION_STATE_INVALID'
+            )
+          }
+          assertResponse(responseState)
+          if (responseState.acknowledged) return stored
+          return {
+            ...stored,
+            pendingInteraction: {
+              request: stored.pendingInteraction!.request,
+              response: { ...responseState, acknowledged: true }
+            },
+            updatedAt: Date.now()
+          }
+        }
+      )
+      state = current.pendingInteraction?.response
+    }
+    if (
+      !state?.acknowledged ||
+      acceptedInputBytes === null ||
+      acceptedInputBytes < state.inputByteRange.endByte
+    ) {
+      throw new AgentMuxError(
+        'CtxMux Input cursor precedes the persisted interaction receipt.',
+        'AGENT_INTERACTION_STATE_INVALID'
+      )
+    }
+    this.agentInputCursors.set(session.agentSessionId, acceptedInputBytes)
+    const settled = await this.clearPendingInteraction(current, request.id)
+    this.publisher.publish({ type: 'agent-session', session: cloneSession(settled) })
+  }
+
   private async writeAgentInput(
     requestedSession: AgentMuxAgentSession,
     data: string
   ): Promise<AgentMuxRunInputAck> {
     return await this.serializeAgentInput(requestedSession, async (session, run) => {
+      if (session.pendingInteraction) {
+        throw new AgentMuxError(
+          'Answer the pending Agent interaction through the typed response API.',
+          'AGENT_INTERACTION_PENDING'
+        )
+      }
       const expectedByte = this.agentInputCursors.get(session.agentSessionId) ?? run.acceptedInputBytes
       if (expectedByte === null) {
         throw new AgentMuxError('CtxMux omitted its accepted Input byte cursor.', 'CTXMUX_INPUT_CURSOR_MISSING')
@@ -2392,10 +2816,13 @@ export class AgentMuxClient {
       const persistedReceipt = existingReadiness
         ? { ...receipt, outputCursorBytes: existingReadiness.outputCursorBytes }
         : receipt
-      return {
+      const next: AgentMuxStoredAgentSession = {
         ...current,
-        updatedAt: normalized.status.observedAt,
+        updatedAt: Math.max(current.updatedAt, normalized.status.observedAt),
         hookReceipt: persistedReceipt,
+        ...(normalized.semanticState === 'unknown'
+          ? {}
+          : { semanticStatus: structuredClone(normalized.status) }),
         ...(stopRun
           ? {
               terminalPromptReadiness: existingReadiness ?? {
@@ -2408,6 +2835,33 @@ export class AgentMuxClient {
           : {}),
         ...(normalized.nativeHandle ? { nativeHandle: normalized.nativeHandle } : {})
       }
+      if (normalized.interaction) {
+        const interaction = normalized.interaction
+        if (
+          interaction.agentSessionId !== current.agentSessionId ||
+          interaction.evidence.source !== 'native-hook' ||
+          interaction.evidence.run?.runId !== current.run.runId ||
+          interaction.evidence.hookReceiptId !== receipt.id
+        ) {
+          throw new AgentMuxError(
+            'Provider interaction does not match its native Hook receipt.',
+            'INVALID_AGENT_INTERACTION'
+          )
+        }
+        if (
+          current.pendingInteraction &&
+          current.pendingInteraction.request.id !== interaction.id
+        ) {
+          throw new AgentMuxError(
+            'Another Agent interaction is already pending.',
+            'AGENT_INTERACTION_BUSY'
+          )
+        }
+        next.pendingInteraction = current.pendingInteraction ?? {
+          request: structuredClone(interaction)
+        }
+      }
+      return next
     }
     let next: AgentMuxStoredAgentSession
     try {
@@ -2452,6 +2906,16 @@ export class AgentMuxClient {
       await this.persistAndPublishTimeline(mutation, evidence, signal)
     }
     this.publisher.publishHook(next, normalized, persistedReceipt)
+    if (normalized.interaction) {
+      const request = next.pendingInteraction?.request
+      if (!request || request.id !== normalized.interaction.id) {
+        throw new AgentMuxError(
+          'Native Agent interaction was not persisted.',
+          'AGENT_INTERACTION_STATE_INVALID'
+        )
+      }
+      this.publisher.publishInteraction(request)
+    }
     this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
     if (
       normalized.eventName === 'Stop' &&

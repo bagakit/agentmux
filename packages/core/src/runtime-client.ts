@@ -1,4 +1,3 @@
-import type { AgentMuxPermissionHandler } from './acp-adapter.js'
 import type { AgentProvider } from './agent-provider.js'
 import { AgentMuxClient } from './client.js'
 import { AgentMuxError } from './errors.js'
@@ -7,7 +6,6 @@ import type { AgentMuxAgentSessionStore } from './agent-session-store.js'
 type AgentMuxRuntimeClientCommonOptions = {
   providers?: readonly AgentProvider[]
   store?: AgentMuxAgentSessionStore
-  permissionHandler?: AgentMuxPermissionHandler
 }
 
 export type AgentMuxLocalRuntimeClientOptions = AgentMuxRuntimeClientCommonOptions
@@ -27,8 +25,7 @@ export async function connectLocalAgentMux(
 ): Promise<AgentMuxClient> {
   const client = new AgentMuxClient({
     ...(options.providers === undefined ? {} : { providers: options.providers }),
-    ...(options.store === undefined ? {} : { store: options.store }),
-    ...(options.permissionHandler === undefined ? {} : { permissionHandler: options.permissionHandler })
+    ...(options.store === undefined ? {} : { store: options.store })
   })
   await client.connect()
   return client

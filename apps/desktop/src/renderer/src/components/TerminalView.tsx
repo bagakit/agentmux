@@ -93,6 +93,9 @@ export function TerminalView({
   const canControlRun = session.processState === 'running'
   const canControlRunRef = useRef(canControlRun)
   canControlRunRef.current = canControlRun
+  const acceptsInput = session.kind !== 'agent' || session.pendingInteraction === undefined
+  const acceptsInputRef = useRef(acceptsInput)
+  acceptsInputRef.current = acceptsInput
   const searchAddonRef = useRef<SearchAddon | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const [hasSelection, setHasSelection] = useState(false)
@@ -259,14 +262,18 @@ export function TerminalView({
     const resize = new ResizeObserver(() => viewport.observeViewport())
     resize.observe(root)
     const input = terminal.onData((data) => {
-      if (canControlRunRef.current && readyForLiveOutput) void api.sessions.write(session.control, data)
+      if (canControlRunRef.current && acceptsInputRef.current && readyForLiveOutput) {
+        void api.sessions.write(session.control, data)
+      }
     })
     const selection = terminal.onSelectionChange(() => setHasSelection(terminal.hasSelection()))
     const colorQuerySuppression = installTerminalColorQueryReplyHandlers(terminal, {
       isReplaying: () => !readyForLiveOutput,
       respondFromRenderer: session.kind === 'terminal',
       sendInput: (data) => {
-        if (canControlRunRef.current && readyForLiveOutput) void api.sessions.write(session.control, data)
+        if (canControlRunRef.current && acceptsInputRef.current && readyForLiveOutput) {
+          void api.sessions.write(session.control, data)
+        }
       }
     })
     terminal.attachCustomKeyEventHandler((event) => {

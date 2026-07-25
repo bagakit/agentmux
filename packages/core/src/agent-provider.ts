@@ -4,6 +4,11 @@ import { isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { ExecutionHost } from './execution-host.js'
 import type { AgentManagedHookPlan } from './managed-hook-installer.js'
+import {
+  normalizeTerminalInteraction,
+  planNumberedTerminalInteractionResponse,
+  type AgentTerminalInteractionProtocol
+} from './agent-interaction.js'
 import { resolveCoreBinPath } from './runtime-paths.js'
 import {
   normalizeNativeHook,
@@ -14,6 +19,9 @@ import type {
   AgentCatalogEntry,
   AgentProviderId,
   AgentLaunchPlan,
+  AgentMuxInteractionInputPlan,
+  AgentMuxInteractionRequest,
+  AgentMuxInteractionResponse,
   AgentPromptInputPlan,
   AgentProviderLaunchContext,
   AgentProviderResumeContext,
@@ -38,6 +46,10 @@ export type AgentProvider = {
   buildLaunch(context: AgentProviderLaunchContext): AgentLaunchPlan
   buildResumeLaunch(context: AgentProviderResumeContext): AgentLaunchPlan
   planPromptInput(prompt: string): AgentPromptInputPlan
+  planInteractionResponse(
+    request: AgentMuxInteractionRequest,
+    response: AgentMuxInteractionResponse
+  ): AgentMuxInteractionInputPlan
   normalizeHook(envelope: NativeHookEnvelope): NormalizedHookEvent
 }
 
@@ -54,6 +66,7 @@ export type AgentProviderDefinition = {
     args: readonly string[]
   ) => string[]
   planPromptInput?: (prompt: string) => AgentPromptInputPlan
+  interaction?: AgentTerminalInteractionProtocol
 }
 
 const NO_HOOKS: AgentNativeHookSpecification = { rules: [] }
@@ -168,6 +181,7 @@ export function createCodexManagedHookPlan(workspacePath: string): AgentManagedH
 // Claude fires `matcher`-scoped tool events; every other lifecycle event is a flat command entry.
 const CLAUDE_HOOK_EVENTS = [
   'SessionStart',
+  'PermissionRequest',
   'UserPromptSubmit',
   'PreToolUse',
   'PostToolUse',
@@ -496,11 +510,24 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
         data: `${prompt}\r`
       }
     },
+    planInteractionResponse(request, response) {
+      if (!definition.interaction) {
+        throw new AgentMuxError(
+          `${catalog.label} does not support semantic terminal interactions.`,
+          'AGENT_INTERACTION_UNSUPPORTED'
+        )
+      }
+      return definition.interaction.planResponse(request, response)
+    },
     normalizeHook(envelope) {
       if (envelope.providerId !== catalog.id) {
         throw new AgentMuxError('Hook event does not belong to this provider.', 'HOOK_PROVIDER_MISMATCH')
       }
-      return normalizeNativeHook(definition.hook, envelope)
+      const normalized = normalizeNativeHook(definition.hook, envelope)
+      const interaction = definition.interaction
+        ? normalizeTerminalInteraction(envelope, normalized.status.observedAt, definition.interaction)
+        : undefined
+      return interaction ? { ...normalized, interaction } : normalized
     }
   }
 }
@@ -529,7 +556,7 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
         terminal: true,
         hookEvents: true,
         timeline: 'complete-events',
-        permission: 'observe',
+        permission: 'respond',
         providerResume: true,
         acp: false,
         replyCorrelation: 'none'
@@ -552,8 +579,14 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
     planPromptInput: (prompt) => ({
       kind: 'render-then-submit',
       payload: buildPromptInputPayload(prompt),
+      renderedText: sanitizeBracketedPasteText(prompt).replace(/\r\n?/gu, '\n'),
       submit: '\r'
     }),
+    interaction: {
+      questionEvents: ['PreToolUse'],
+      questionTools: ['request_user_input', 'askuserquestion'],
+      planResponse: planNumberedTerminalInteractionResponse
+    },
     hook: CODEX_HOOKS,
     buildResumeArgs: (sessionId, _transcriptPath, prompt, args) => [
       'resume',
@@ -577,13 +610,18 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
         terminal: true,
         hookEvents: true,
         timeline: 'complete-events',
-        permission: 'observe',
+        permission: 'respond',
         providerResume: true,
         acp: false,
         replyCorrelation: 'none'
       }
     }),
     buildArgs: (prompt, args) => [...args, ...(prompt ? [prompt] : [])],
+    interaction: {
+      questionEvents: ['PermissionRequest', 'PreToolUse'],
+      questionTools: ['askuserquestion'],
+      planResponse: planNumberedTerminalInteractionResponse
+    },
     hook: CLAUDE_HOOKS,
     buildResumeArgs: (sessionId, _transcriptPath, prompt, args) => [
       '--resume', sessionId, ...args, ...(prompt ? [prompt] : [])

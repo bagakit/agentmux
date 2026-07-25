@@ -3,15 +3,12 @@ import { useEffect, useRef, useState } from 'react'
 import { useAppStore } from '../store'
 import type { OpenHttpLinkOrigin } from '../lib/open-destination'
 import { AgentSessionComposer } from './AgentSessionComposer'
+import { AgentInteractionCard } from './AgentInteractionCard'
 import { ActivityView } from './ActivityView'
 import { TerminalView } from './TerminalView'
 
 const NO_TIMELINE_ITEMS: never[] = []
 
-// 内核的中断原因是机读 token（ctxmux-run-adapter 的已知集合）。刷新路径会把它原样
-// 塞进 status.detail，导致 banner 直接显示字面 "daemon_restart"。这里在渲染层兜底翻译成
-// 人类可读句子；未知值原样透传（不误改用户主动中断等其它文案）。真正的原因分支未来应下沉到
-// session-state.ts（当前为他人未提交热区，暂不改）。
 const INTERRUPTION_REASON_COPY: Record<string, string> = {
   daemon_restart: 'The terminal backend restarted, so this session’s process was lost. Open a new session to continue here.',
   tmux_server_unavailable: 'The terminal backend became unavailable and this session’s process was lost. Open a new session to continue here.',
@@ -19,9 +16,16 @@ const INTERRUPTION_REASON_COPY: Record<string, string> = {
   tmux_protocol_error: 'The terminal backend hit a protocol error and this session’s process was lost. Open a new session to continue here.'
 }
 
-function humanizeDetail(detail: string | undefined, exited: boolean): string {
+function humanizeDetail(
+  interruptionReason: string | undefined,
+  detail: string | undefined,
+  exited: boolean
+): string {
+  if (interruptionReason && INTERRUPTION_REASON_COPY[interruptionReason]) {
+    return INTERRUPTION_REASON_COPY[interruptionReason]
+  }
   if (!detail) return exited ? 'The process is no longer running.' : 'Check the host and try again.'
-  return INTERRUPTION_REASON_COPY[detail] ?? detail
+  return detail
 }
 
 export function SessionPane({
@@ -41,6 +45,7 @@ export function SessionPane({
   const viewMode = useAppStore((state) => state.viewModes[sessionId] ?? 'terminal')
   const refreshSession = useAppStore((state) => state.refreshSession)
   const recoverSession = useAppStore((state) => state.recoverSession)
+  const respondInteraction = useAppStore((state) => state.respondInteraction)
   const [refreshing, setRefreshing] = useState(false)
   const [recovering, setRecovering] = useState(false)
   // daemon_restart auto-recovery fires at most once per dead session id, so a flapping
@@ -50,7 +55,7 @@ export function SessionPane({
   const disconnected = session?.status.state === 'disconnected'
   const missing = session?.processState === 'interrupted' && session?.status.state === 'error'
   const exited = session?.processState === 'exited'
-  const reason = session?.status.detail
+  const interruptionReason = session?.interruptionReason
   const continuity = session?.status.continuity
 
   async function recover(): Promise<void> {
@@ -65,13 +70,13 @@ export function SessionPane({
   // replacing the useless "Check again" with a seamless recovery. One-shot per session id.
   useEffect(() => {
     if (!session || session.kind !== 'terminal') return
-    if (!missing || reason !== 'daemon_restart') return
+    if (!missing || interruptionReason !== 'daemon_restart') return
     if (autoRecoveredRef.current === session.id) return
     autoRecoveredRef.current = session.id
     void recover()
     // recover()/recovering are stable enough; we intentionally key only on the dead-session signal.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.id, session?.kind, missing, reason])
+  }, [session?.id, session?.kind, missing, interruptionReason])
 
   // A launching Region exists before Core returns its Session snapshot. Keep that handoff
   // neutral; interrupted and exited Sessions use the explicit recovery banners below.
@@ -124,7 +129,7 @@ export function SessionPane({
                 </span>
                 <div>
                   <strong>{recoveryTitle}</strong>
-                  <span>{humanizeDetail(session.status.detail, exited)}</span>
+                  <span>{humanizeDetail(session.interruptionReason, session.status.detail, exited)}</span>
                 </div>
                 <div className="terminal-recovery__actions">
                   {session.kind === 'terminal' ? (
@@ -168,7 +173,15 @@ export function SessionPane({
         )}
       </div>
       {surfaceKind === 'agent' && session.kind === 'agent' ? (
-        <AgentSessionComposer sessionId={session.id} />
+        <div className="agent-input-stack">
+          {session.pendingInteraction ? (
+            <AgentInteractionCard
+              request={session.pendingInteraction}
+              onRespond={async (response) => await respondInteraction(session.id, response)}
+            />
+          ) : null}
+          <AgentSessionComposer sessionId={session.id} />
+        </div>
       ) : null}
     </section>
   )
