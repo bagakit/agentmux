@@ -117,6 +117,11 @@ function assertProbe(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
 }
 
+function reportProbeProgress(status: 'waiting' | 'completed' | 'timed-out', description: string): void {
+  if (!process.env.AGENTMUX_DESKTOP_FILE_EDITING_REPORT) return
+  process.stderr.write(`file_editing_probe_${status}=${JSON.stringify(description)}\n`)
+}
+
 async function publishReport(path: string, report: Record<string, unknown>): Promise<void> {
   const temporaryPath = `${path}.tmp-${process.pid}`
   await writeFile(temporaryPath, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 })
@@ -129,20 +134,33 @@ async function waitFor(
   timeoutMs = 20_000
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs
+  reportProbeProgress('waiting', description)
   while (Date.now() < deadline) {
-    if (await predicate()) return
+    if (await predicate()) {
+      reportProbeProgress('completed', description)
+      return
+    }
     await delay(25)
   }
+  reportProbeProgress('timed-out', description)
   throw new Error(`Timed out waiting for ${description}`)
 }
 
 async function withTimeout<T>(description: string, promise: Promise<T>): Promise<T> {
-  return await Promise.race([
-    promise,
-    new Promise<T>((_resolve, reject) => {
-      setTimeout(() => reject(new Error(`Timed out waiting for ${description}`)), 20_000).unref()
-    })
-  ])
+  reportProbeProgress('waiting', description)
+  try {
+    const result = await Promise.race([
+      promise,
+      new Promise<T>((_resolve, reject) => {
+        setTimeout(() => reject(new Error(`Timed out waiting for ${description}`)), 20_000).unref()
+      })
+    ])
+    reportProbeProgress('completed', description)
+    return result
+  } catch (error) {
+    reportProbeProgress('timed-out', description)
+    throw error
+  }
 }
 
 type ExplorerProjectionEvidence = {
