@@ -36,11 +36,12 @@ function deferred<T>() {
 }
 
 const config: AppConfig = {
-  version: 6,
+  version: 7,
   hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
   executors: {},
   workspaces: [{ id: 'workspace', name: 'Project', hostId: 'local', path: '/repo', kind: 'folder' }],
-  appearance: { terminalTheme: 'graphite' }
+  appearance: { terminalTheme: 'graphite' },
+  browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
 }
 
 function launcherFixture(): WorkbenchTab {
@@ -109,6 +110,7 @@ function browserSurface(regionId: string, browserId = `browser:${regionId}`) {
     loading: false,
     canGoBack: false,
     canGoForward: false,
+    viewport: 'responsive',
     error: null
   }
 }
@@ -1312,6 +1314,7 @@ describe('Session and Launcher lifecycle ownership', () => {
       loading: false,
       canGoBack: false,
       canGoForward: false,
+      viewport: 'responsive',
       error: null
     })
     await create

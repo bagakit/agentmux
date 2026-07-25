@@ -22,7 +22,7 @@ afterEach(async () => {
 })
 
 const baseConfig: AppConfig = {
-  version: 6,
+  version: 7,
   hosts: [
     { id: 'local', kind: 'local', label: 'This Mac' },
     {
@@ -37,7 +37,8 @@ const baseConfig: AppConfig = {
     claude: { label: 'Claude', providerId: 'claude', command: 'claude', args: [], env: {}, injectAgentMuxGuide: true }
   },
   workspaces: [],
-  appearance: { terminalTheme: 'graphite' }
+  appearance: { terminalTheme: 'graphite' },
+  browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
 }
 
 function workspace(overrides: Partial<WorkspaceRecord> = {}): WorkspaceRecord {
@@ -116,7 +117,8 @@ describe('ConfigStore workspace identity', () => {
     const { store, path } = await storeFixture()
     const saved = await store.save({
       ...baseConfig,
-      appearance: { terminalTheme: 'catppuccin-mocha' }
+      appearance: { terminalTheme: 'catppuccin-mocha' },
+      browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
     })
 
     expect(saved.appearance).toEqual({ terminalTheme: 'catppuccin-mocha' })
@@ -125,8 +127,40 @@ describe('ConfigStore workspace identity', () => {
 
     await expect(store.save({
       ...baseConfig,
-      appearance: { terminalTheme: 'retired-theme' }
+      appearance: { terminalTheme: 'retired-theme' },
+      browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
     } as never)).rejects.toThrow()
+  })
+
+  it('persists Browser bar visibility as the only toolbar preference truth', async () => {
+    const { store, path } = await storeFixture()
+    const saved = await store.save({
+      ...baseConfig,
+      browser: {
+        toolbar: {
+          selectElement: false,
+          screenshot: true,
+          devTools: false,
+          viewport: true,
+          more: false
+        }
+      }
+    })
+
+    expect(saved.browser.toolbar).toEqual({
+      selectElement: false,
+      screenshot: true,
+      devTools: false,
+      viewport: true,
+      more: false
+    })
+    expect((await store.get()).browser).toEqual(saved.browser)
+    expect(await readFile(path, 'utf8')).not.toContain('openExternal')
+  })
+
+  it('rejects obsolete v6 config instead of adding a compatibility path', async () => {
+    const { store } = await storeFixture()
+    await expect(store.save({ ...baseConfig, version: 6 } as never)).rejects.toThrow()
   })
 
   it('persists the AgentMux guide setting per Executor', async () => {

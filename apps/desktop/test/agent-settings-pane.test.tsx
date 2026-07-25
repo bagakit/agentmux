@@ -25,7 +25,7 @@ vi.mock('../src/renderer/src/store.js', () => ({
 }))
 
 const config: AppConfig = {
-  version: 6,
+  version: 7,
   hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
   executors: {
     review: {
@@ -38,7 +38,8 @@ const config: AppConfig = {
     }
   },
   workspaces: [],
-  appearance: { terminalTheme: 'graphite' }
+  appearance: { terminalTheme: 'graphite' },
+  browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
 }
 
 describe('AgentSettingsPane Executor identity', () => {

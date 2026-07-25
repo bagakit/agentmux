@@ -172,7 +172,7 @@ async function main() {
     receiptlessDaemonCleanup = true
     await writeFile(join(workspace, 'resource-probe.ts'), 'export const value = 1\n'.repeat(20_000))
     await writeFile(join(userData, 'agentmux.config.json'), `${JSON.stringify({
-      version: 6,
+      version: 7,
       hosts: [{ id: 'local', kind: 'local', label: 'Resource Probe' }],
       executors: {
         codex: { label: 'Codex', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: true },
@@ -193,7 +193,8 @@ async function main() {
         cursor: { label: 'Cursor', providerId: 'cursor', command: 'cursor-agent', args: [], env: {}, injectAgentMuxGuide: true }
       },
       workspaces: [{ id: 'resource-workspace', name: 'Resource Probe', hostId: 'local', path: workspace, kind: 'folder' }],
-      appearance: { terminalTheme: 'graphite' }
+      appearance: { terminalTheme: 'graphite' },
+      browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
     }, null, 2)}\n`, { mode: 0o600 })
 
     child = spawn(electron, [`--user-data-dir=${userData}`, entry], {

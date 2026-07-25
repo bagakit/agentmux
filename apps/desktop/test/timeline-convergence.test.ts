@@ -24,7 +24,7 @@ import { useAppStore } from '../src/renderer/src/store.js'
 const initialState = useAppStore.getState()
 
 const config: AppConfig = {
-  version: 6,
+  version: 7,
   hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
   executors: {
     codex: {
@@ -37,7 +37,8 @@ const config: AppConfig = {
     }
   },
   workspaces: [{ id: 'workspace', name: 'Project', hostId: 'local', path: '/repo', kind: 'folder' }],
-  appearance: { terminalTheme: 'graphite' }
+  appearance: { terminalTheme: 'graphite' },
+  browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
 }
 
 function deferred<T>() {

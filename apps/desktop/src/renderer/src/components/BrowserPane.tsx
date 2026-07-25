@@ -1,6 +1,26 @@
-import { AlertTriangle, ArrowLeft, ArrowRight, Globe2, LoaderCircle, RefreshCw } from 'lucide-react'
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import {
+  AlertTriangle,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUpRight,
+  Camera,
+  Check,
+  Ellipsis,
+  Globe2,
+  LoaderCircle,
+  Monitor,
+  RefreshCw,
+  ScanSearch,
+  SlidersHorizontal,
+  Wrench
+} from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { BrowserSnapshot } from '../../../shared/contracts'
+import {
+  BROWSER_VIEWPORT_PRESETS,
+  type BrowserSnapshot,
+  type BrowserViewport
+} from '../../../shared/contracts'
 import { api } from '../lib/api'
 import {
   LatestBrowserBoundsSynchronizer,
@@ -8,6 +28,13 @@ import {
 } from '../lib/browser-bounds-sync'
 import type { BrowserWorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
+
+const VIEWPORT_LABELS: Record<BrowserViewport, string> = {
+  responsive: 'Responsive',
+  mobile: 'Mobile',
+  tablet: 'Tablet',
+  desktop: 'Desktop'
+}
 
 export function BrowserPane({
   tab,
@@ -18,10 +45,13 @@ export function BrowserPane({
 }) {
   const applyBrowserEvent = useAppStore((state) => state.applyBrowserEvent)
   const reportError = useAppStore((state) => state.reportError)
+  const setWorkspaceTool = useAppStore((state) => state.setWorkspaceTool)
+  const toolbar = useAppStore((state) => state.config?.browser.toolbar)
   const toolsOpen = useAppStore((state) => state.toolsOpen)
   const stageRef = useRef<HTMLDivElement>(null)
   const [address, setAddress] = useState(tab.url === 'about:blank' ? '' : tab.url)
   const [busy, setBusy] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
 
   useEffect(() => {
     setAddress(tab.url === 'about:blank' ? '' : tab.url)
@@ -39,7 +69,14 @@ export function BrowserPane({
       cancelAnimationFrame(frame)
       frame = requestAnimationFrame(() => {
         const navigatorCoversBrowser = toolsOpen && window.innerWidth <= 900
-        if (!visible || navigatorCoversBrowser || __AGENTMUX_WEB_PREVIEW__ || tab.error || tab.url === 'about:blank') {
+        if (
+          !visible ||
+          menuOpen ||
+          navigatorCoversBrowser ||
+          __AGENTMUX_WEB_PREVIEW__ ||
+          tab.error ||
+          tab.url === 'about:blank'
+        ) {
           synchronizer.observe(null)
           return
         }
@@ -61,7 +98,7 @@ export function BrowserPane({
       window.removeEventListener('resize', update)
       void api.browser.setBounds(tab.browserId, null).catch(() => {})
     }
-  }, [toolsOpen, reportError, tab.browserId, tab.error, tab.url, visible])
+  }, [menuOpen, toolsOpen, reportError, tab.browserId, tab.error, tab.url, visible])
 
   async function run(action: () => Promise<BrowserSnapshot>): Promise<void> {
     if (busy) return
@@ -69,6 +106,18 @@ export function BrowserPane({
     try {
       const browser = await action()
       applyBrowserEvent({ type: 'updated', browser })
+    } catch (error) {
+      reportError(error)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function runCommand(action: () => Promise<void>): Promise<void> {
+    if (busy) return
+    setBusy(true)
+    try {
+      await action()
     } catch (error) {
       reportError(error)
     } finally {
@@ -85,9 +134,18 @@ export function BrowserPane({
           if (address.trim()) void run(() => api.browser.navigate(tab.browserId, address.trim()))
         }}
       >
-        <button type="button" title="Back" disabled={!tab.canGoBack || busy} onClick={() => void run(() => api.browser.back(tab.browserId))}><ArrowLeft size={13} /></button>
-        <button type="button" title="Forward" disabled={!tab.canGoForward || busy} onClick={() => void run(() => api.browser.forward(tab.browserId))}><ArrowRight size={13} /></button>
-        <button type="button" title="Reload" disabled={busy} onClick={() => void run(() => api.browser.reload(tab.browserId))}>
+        <button
+          type="button"
+          aria-label="Open in external browser"
+          title="Open in external browser"
+          disabled={tab.url === 'about:blank' || busy}
+          onClick={() => void runCommand(async () => await api.ui.openExternal(tab.url))}
+        >
+          <ArrowUpRight size={14} />
+        </button>
+        <button type="button" aria-label="Back" title="Back" disabled={!tab.canGoBack || busy} onClick={() => void run(() => api.browser.back(tab.browserId))}><ArrowLeft size={13} /></button>
+        <button type="button" aria-label="Forward" title="Forward" disabled={!tab.canGoForward || busy} onClick={() => void run(() => api.browser.forward(tab.browserId))}><ArrowRight size={13} /></button>
+        <button type="button" aria-label="Reload" title="Reload" disabled={busy} onClick={() => void run(() => api.browser.reload(tab.browserId))}>
           {tab.loading || busy ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}
         </button>
         <label>
@@ -99,6 +157,74 @@ export function BrowserPane({
             onChange={(event) => setAddress(event.target.value)}
           />
         </label>
+        {toolbar?.selectElement ? (
+          <button type="button" aria-label="Select element — unavailable" title="Select element — available after Browser selection is installed" disabled>
+            <ScanSearch size={14} />
+          </button>
+        ) : null}
+        {toolbar?.screenshot ? (
+          <button type="button" aria-label="Screenshot — unavailable" title="Screenshot — available after capture editing is installed" disabled>
+            <Camera size={14} />
+          </button>
+        ) : null}
+        {toolbar?.devTools ? (
+          <button
+            type="button"
+            aria-label="Open DevTools"
+            title="Open DevTools"
+            disabled={tab.url === 'about:blank' || busy}
+            onClick={() => void runCommand(async () => await api.browser.openDevTools(tab.browserId))}
+          >
+            <Wrench size={14} />
+          </button>
+        ) : null}
+        {toolbar?.viewport ? (
+          <DropdownMenu.Root onOpenChange={setMenuOpen}>
+            <DropdownMenu.Trigger asChild>
+              <button type="button" aria-label="Viewport" title="Viewport" disabled={busy}>
+                <Monitor size={14} />
+              </button>
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Portal>
+              <DropdownMenu.Content className="browser-menu" align="end" sideOffset={5}>
+                <DropdownMenu.Label>Viewport</DropdownMenu.Label>
+                <DropdownMenu.RadioGroup
+                  value={tab.viewport}
+                  onValueChange={(viewport) => void run(() => api.browser.setViewport(tab.browserId, viewport as BrowserViewport))}
+                >
+                  {(Object.keys(BROWSER_VIEWPORT_PRESETS) as BrowserViewport[]).map((viewport) => {
+                    const size = BROWSER_VIEWPORT_PRESETS[viewport]
+                    return (
+                      <DropdownMenu.RadioItem key={viewport} value={viewport} className="browser-menu__item">
+                        <DropdownMenu.ItemIndicator><Check size={12} /></DropdownMenu.ItemIndicator>
+                        <span>{VIEWPORT_LABELS[viewport]}</span>
+                        <small>{size ? `${size.width} × ${size.height}` : 'Fit pane'}</small>
+                      </DropdownMenu.RadioItem>
+                    )
+                  })}
+                </DropdownMenu.RadioGroup>
+              </DropdownMenu.Content>
+            </DropdownMenu.Portal>
+          </DropdownMenu.Root>
+        ) : null}
+        {toolbar?.more ? (
+          <DropdownMenu.Root onOpenChange={setMenuOpen}>
+            <DropdownMenu.Trigger asChild>
+              <button type="button" aria-label="More browser tools" title="More browser tools"><Ellipsis size={14} /></button>
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Portal>
+              <DropdownMenu.Content className="browser-menu" align="end" sideOffset={5}>
+                <DropdownMenu.Label>Page</DropdownMenu.Label>
+                <DropdownMenu.Item className="browser-menu__item" onSelect={() => void run(() => api.browser.reload(tab.browserId))}>
+                  <RefreshCw size={12} /><span>Reload page</span>
+                </DropdownMenu.Item>
+                <DropdownMenu.Item className="browser-menu__item" onSelect={() => setWorkspaceTool('browser-tools')}>
+                  <SlidersHorizontal size={12} /><span>Customize toolbar…</span>
+                </DropdownMenu.Item>
+              </DropdownMenu.Content>
+            </DropdownMenu.Portal>
+          </DropdownMenu.Root>
+        ) : null}
       </form>
       <div className="browser-stage" ref={stageRef}>
         {tab.error ? (
