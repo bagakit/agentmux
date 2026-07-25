@@ -1,5 +1,3 @@
-import type { AppStore } from '../store'
-
 // The renderer's last-resort net for failures nobody observed.
 //
 // Almost every action in this UI is fired from a JSX handler as `void action()` — there are dozens of
@@ -18,6 +16,10 @@ import type { AppStore } from '../store'
 
 export type UnobservedFailureHost = Pick<Window, 'addEventListener' | 'removeEventListener'>
 
+// Only the one function this needs, not the whole store type. The store deliberately does not export
+// its state type, and widening its public surface for a last-resort net would be the wrong trade.
+export type ReportError = (error: unknown) => void
+
 /**
  * Route unobserved promise rejections to the store's single error surface.
  *
@@ -26,7 +28,7 @@ export type UnobservedFailureHost = Pick<Window, 'addEventListener' | 'removeEve
  */
 export function installUnobservedFailureReporter(input: {
   host: UnobservedFailureHost
-  reportError: AppStore['reportError']
+  reportError: ReportError
 }): () => void {
   const { host, reportError } = input
 
