@@ -42,8 +42,7 @@ export function buildBrowserElementSelectionScript(revision: number): string {
     let settled = false;
     const bounded = (value, limit) => typeof value === 'string' ? value.slice(0, limit) : '';
     const elementFromEvent = (event) => {
-      const path = typeof event.composedPath === 'function' ? event.composedPath() : [];
-      for (const item of path) {
+      for (const item of event.composedPath()) {
         if (item instanceof Element && item !== host && !host.contains(item)) return item;
       }
       return event.target instanceof Element && event.target !== host ? event.target : null;
@@ -54,10 +53,7 @@ export function buildBrowserElementSelectionScript(revision: number): string {
       while (current && current instanceof Element && current !== document.documentElement && parts.length < 8) {
         let part = current.tagName.toLowerCase();
         if (current.id) {
-          const escaped = globalThis.CSS && typeof globalThis.CSS.escape === 'function'
-            ? globalThis.CSS.escape(current.id)
-            : current.id.replace(/[^a-zA-Z0-9_-]/g, (value) => '\\\\' + value);
-          part += '#' + escaped;
+          part += '#' + CSS.escape(current.id);
           parts.unshift(part);
           break;
         }
@@ -153,7 +149,7 @@ export function buildBrowserElementSelectionScript(revision: number): string {
       if (!selected) return;
       event.preventDefault();
       event.stopPropagation();
-      if (typeof event.stopImmediatePropagation === 'function') event.stopImmediatePropagation();
+      event.stopImmediatePropagation();
       try {
         settle(extract(selected));
       } catch (error) {
