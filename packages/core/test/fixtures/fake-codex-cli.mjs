@@ -189,15 +189,17 @@ process.on('SIGINT', () => {
 })
 process.stdout.write('\u001b[?u')
 await handshake
-await request({
-  receiptId: `session-start-${agentSessionId}`,
-  eventName: 'SessionStart',
-  payload: { session_id: `native-${agentSessionId}`, prompt }
-})
-await request({
-  receiptId: `permission-${agentSessionId}`,
-  eventName: 'PermissionRequest',
-  payload: { session_id: `native-${agentSessionId}`, tool_name: 'request_user_input' }
-})
+if (process.env.AGENTMUX_FAKE_OMIT_HANDLE !== '1') {
+  await request({
+    receiptId: `session-start-${agentSessionId}`,
+    eventName: 'SessionStart',
+    payload: { session_id: `native-${agentSessionId}`, prompt }
+  })
+  await request({
+    receiptId: `permission-${agentSessionId}`,
+    eventName: 'PermissionRequest',
+    payload: { session_id: `native-${agentSessionId}`, tool_name: 'request_user_input' }
+  })
+}
 process.stdout.write(`codex-ready:${prompt}\n`)
 await settleTurn()
