@@ -22,6 +22,7 @@
   --radius: 9px;
   --radius-sm: 6px;
   --radius-lg: 12px;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
   /* focus：输入聚焦的统一描边色与光晕，收敛散落的硬编码绿边 */
   --focus-line: #4c6a58;
   --focus-ring: 0 0 0 2px #83dca61a;
@@ -44,9 +45,19 @@ html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; }
 button, input, textarea, select { font: inherit; }
 button { color: inherit; }
 button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
-  outline: 2px solid #66c98b88;
+  outline: 2px solid color-mix(in srgb, var(--green) 55%, transparent);
   outline-offset: 1px;
 }
+/* Selecting text anywhere should stay inside the palette; the OS default paints a saturated system
+   blue that reads as a foreign artifact on graphite. */
+::selection { color: var(--text); background: color-mix(in srgb, var(--green) 24%, transparent); }
+/* Every dark scroll panel gets the terminal's scrollbar treatment, not the light OS default. */
+* { scrollbar-width: thin; scrollbar-color: var(--surface-3) transparent; }
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: var(--radius); background: var(--surface-3); background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: #454d49; background-clip: content-box; }
+::-webkit-scrollbar-corner { background: transparent; }
 .spin { animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { 50% { opacity: .45; transform: scale(.8); } }
@@ -258,7 +269,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   color: var(--text-2);
   background: transparent;
   cursor: pointer;
+  transition: color .12s ease, background .12s ease;
 }
+/* The density contract asks press to read as an inner shadow rather than a border shift, so the most
+   reused control in the app answers the click instead of only the hover. */
+.icon-button:active:not(:disabled) { box-shadow: inset 0 1px 2px #00000059; }
 .icon-button:hover { color: var(--text); background: var(--surface-3); }
 .icon-button--danger:hover { color: var(--red); background: #301918; }
 
@@ -1263,6 +1278,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .composer-tool--danger:hover:not(:disabled) { color: var(--red); }
 .composer-send { display: flex; align-items: center; gap: 5px; padding: 5px 9px; border: 0; border-radius: var(--radius-sm); color: #0c130e; background: linear-gradient(180deg, var(--green), var(--green-2)); font-size: 10px; font-weight: 620; box-shadow: var(--hl-strong); cursor: pointer; transition: background .12s ease; }
 .composer-send:hover:not(:disabled) { background: linear-gradient(180deg, #a1ecbe, var(--green)); }
+.composer-send:active:not(:disabled) { box-shadow: inset 0 1px 3px #00000047; }
 .composer-send:disabled { opacity: .35; cursor: default; }
 .composer-send--working { color: #fca5a5; background: #2f1d1d; border: 1px solid #6b2e2e; box-shadow: none; }
 .composer-send--working:hover:not(:disabled) { color: #fee2e2; background: #452424; }
