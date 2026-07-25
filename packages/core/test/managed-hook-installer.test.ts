@@ -90,4 +90,47 @@ describe('explicit managed Hook installation', () => {
     await expect(installer.uninstall(receipt)).rejects.toMatchObject({ code: 'INVALID_HOOK_RECEIPT' })
     expect(await readFile(existingPath, 'utf8')).toBe('{"agentmux":true}\n')
   })
+
+  it('merges into a shared config, preserving foreign keys through install and uninstall', async () => {
+    const { installer, existingPath } = await fixture()
+    // A shared ~/.gemini-style file the real CLI also writes into.
+    await writeFile(existingPath, `${JSON.stringify({ 'user-hooks': { Stop: ['keep-me'] } }, null, 2)}\n`)
+    const preview = await installer.preview({
+      providerId: 'antigravity',
+      mutations: [{
+        path: existingPath,
+        content: `${JSON.stringify({ 'agentmux-status': { PreToolUse: [{ command: 'agentmux-hook.js' }] } })}\n`,
+        merge: { kind: 'json-owned-key', key: 'agentmux-status' }
+      }]
+    })
+    expect(preview.changes[0]?.action).toBe('replace')
+
+    const receipt = await installer.install(preview.id)
+    const installed = JSON.parse(await readFile(existingPath, 'utf8'))
+    expect(installed['user-hooks']).toEqual({ Stop: ['keep-me'] })
+    expect(installed['agentmux-status']).toBeDefined()
+
+    await installer.uninstall(receipt)
+    // Uninstall restores the exact pre-install file — the foreign key is intact, our key is gone.
+    const restored = JSON.parse(await readFile(existingPath, 'utf8'))
+    expect(restored['user-hooks']).toEqual({ Stop: ['keep-me'] })
+    expect(restored['agentmux-status']).toBeUndefined()
+  })
+
+  it('is idempotent on reinstall over an already-merged shared config', async () => {
+    const { installer, existingPath } = await fixture()
+    await writeFile(existingPath, `${JSON.stringify({ other: 1 }, null, 2)}\n`)
+    const mutation = {
+      path: existingPath,
+      content: `${JSON.stringify({ 'agentmux-status': { PreToolUse: [{ command: 'agentmux-hook.js' }] } })}\n`,
+      merge: { kind: 'json-owned-key', key: 'agentmux-status' } as const
+    }
+    await installer.install((await installer.preview({ providerId: 'antigravity', mutations: [mutation] })).id)
+    const afterFirst = await readFile(existingPath, 'utf8')
+    // Second preview over the already-merged file must report unchanged (no accumulation, no rewrite).
+    const secondPreview = await installer.preview({ providerId: 'antigravity', mutations: [mutation] })
+    expect(secondPreview.changes[0]?.action).toBe('unchanged')
+    await installer.install(secondPreview.id)
+    expect(await readFile(existingPath, 'utf8')).toBe(afterFirst)
+  })
 })

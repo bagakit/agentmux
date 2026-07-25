@@ -344,6 +344,13 @@ describe('built-in agent providers', () => {
     expect(bundle['PreInvocation']?.[0]?.command).toContain('--event PreInvocation')
     expect(bundle['PreToolUse']?.[0]?.matcher).toBe('*')
     expect(bundle['PreToolUse']?.[0]?.hooks?.[0]).toMatchObject({ type: 'command' })
+    // The shared ~/.gemini file must be merged, not overwritten — AgentMux owns only its bundle key.
+    expect(mutation?.merge).toEqual({ kind: 'json-owned-key', key: 'agentmux-status' })
+  })
+
+  it('declares Codex managed hooks as a marker-scoped merge so committed project hooks survive', () => {
+    const mutation = createCodexManagedHookPlan('/tmp/work').mutations[0]
+    expect(mutation?.merge).toEqual({ kind: 'json-managed-events', marker: 'agentmux-hook.js' })
   })
 
   it('bakes the packaged-Electron node runner and provider id into the managed hook command', () => {
