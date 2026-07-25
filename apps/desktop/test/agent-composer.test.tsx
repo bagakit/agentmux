@@ -45,6 +45,22 @@ describe('AgentComposer reusable surface', () => {
     expect(markup).toContain('Send')
   })
 
+  it('switches primary action button to Stop turn when isWorking is true', () => {
+    const markup = renderToStaticMarkup(createElement(AgentComposer, {
+      value: 'Some text',
+      disabled: false,
+      placeholder: 'Ask the Agent…',
+      isWorking: true,
+      onChange: vi.fn(),
+      onSubmit: vi.fn(),
+      onInterrupt: vi.fn()
+    }))
+
+    expect(markup).toContain('composer-send--working')
+    expect(markup).toContain('aria-label="Stop turn"')
+    expect(markup).toContain('Stop')
+  })
+
   it('uses a transparent surface without a black drop shadow', () => {
     const baseRule = styles.match(/\.composer \{([^}]*)\}/)?.[1]
     const focusRule = styles.match(/\.composer:focus-within \{([^}]*)\}/)?.[1]

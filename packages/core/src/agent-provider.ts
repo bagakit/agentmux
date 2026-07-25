@@ -399,6 +399,22 @@ function executable(commandOverride: string | undefined, fallback: string): stri
   return command
 }
 
+export const BRACKETED_PASTE_START = '\u001b[200~'
+export const BRACKETED_PASTE_END = '\u001b[201~'
+
+export function sanitizeBracketedPasteText(text: string): string {
+  return text.replaceAll('\u001b', '\u241b')
+}
+
+export function wrapBracketedPasteText(text: string): string {
+  return `${BRACKETED_PASTE_START}${sanitizeBracketedPasteText(text)}${BRACKETED_PASTE_END}`
+}
+
+export function buildPromptInputPayload(prompt: string): string {
+  const isMultiline = /[\r\n]/.test(prompt)
+  return isMultiline ? wrapBracketedPasteText(prompt) : sanitizeBracketedPasteText(prompt)
+}
+
 export function defineAgentProvider(definition: AgentProviderDefinition): AgentProvider {
   const { catalog } = definition
   if (
@@ -466,7 +482,7 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     planPromptInput(prompt) {
       return definition.planPromptInput?.(prompt) ?? {
         kind: 'single-phase',
-        data: `${prompt}\r`
+        data: `${buildPromptInputPayload(prompt)}\r`
       }
     },
     normalizeHook(envelope) {
@@ -524,7 +540,7 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
     },
     planPromptInput: (prompt) => ({
       kind: 'render-then-submit',
-      payload: prompt,
+      payload: buildPromptInputPayload(prompt),
       submit: '\r'
     }),
     hook: CODEX_HOOKS,
