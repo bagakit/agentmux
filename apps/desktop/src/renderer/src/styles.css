@@ -1116,21 +1116,124 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .status--disconnected .status__dot { background: var(--amber); box-shadow: 0 0 0 3px #e7bd631d; }
 .status--error .status__dot, .status--exited .status__dot { background: var(--red); }
 .status--done .status__dot { background: var(--blue); }
-.activity-feed { height: 100%; overflow: auto; padding: 18px clamp(14px, 4vw, 46px) 40px; background: #14171d; }
-.activity-feed__notice { max-width: 760px; margin: 0 auto 18px; padding: 7px 10px; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); color: var(--text-3); background: #171b21; font-size: 11px; text-align: center; }
+.activity-feed { height: 100%; overflow: auto; padding: 0 0 20px; background: var(--surface-0); }
 .activity-feed__empty { padding-top: 70px; color: var(--text-3); font-size: 11px; text-align: center; }
-.activity { max-width: 760px; margin: 0 auto; display: grid; grid-template-columns: 30px minmax(0, 1fr); position: relative; }
-.activity:not(:last-child)::before { content: ''; position: absolute; left: 14px; top: 28px; bottom: -3px; width: 1px; background: var(--line); }
-.activity__rail { width: 29px; height: 29px; display: flex; align-items: center; justify-content: center; z-index: 1; border: 1px solid var(--line); border-radius: 50%; color: var(--text-3); background: #1b2028; }
-.activity--user_message .activity__rail { color: var(--blue); }
-.activity--assistant_message .activity__rail { color: var(--green); }
-.activity--permission .activity__rail { color: var(--amber); }
-.activity__body { margin: 2px 0 17px 10px; padding: 10px 12px; border: 1px solid var(--line-soft); border-radius: var(--radius); background: #191e25; box-shadow: var(--elev-1), var(--hl); }
-.activity__body header { display: flex; align-items: center; gap: 7px; }
-.activity__body strong { font-size: 10px; }
-.activity__body time { margin-left: auto; color: var(--text-3); font-size: 10px; }
-.activity__body p { margin: 9px 0 2px; color: #cbd2cc; font-size: 11px; line-height: 1.6; white-space: pre-wrap; }
-.activity__body pre { padding: 8px; overflow: auto; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); color: #b9c1bb; background: #0e1116; font-size: 10px; white-space: pre-wrap; }
+/* The ruler is an honest temporal axis: ticks sit at their real elapsed fraction, so a burst of
+   machine steps clusters and a long think opens a gap. It reads the shape of the run at a glance. */
+.activity-ruler {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px 7px;
+  background: var(--surface-0);
+  box-shadow: inset 0 -1px var(--line-soft);
+}
+.activity-ruler__track { position: relative; flex: 1; height: 18px; }
+.activity-ruler__rail { position: absolute; top: 50%; left: 0; right: 0; height: 2px; border-radius: 1px; background: var(--line-soft); }
+.activity-ruler__tick {
+  position: absolute;
+  top: 50%;
+  width: 2px;
+  height: 10px;
+  margin-top: -5px;
+  border-radius: 1px;
+  background: var(--text-3);
+  transform: translateX(-1px);
+}
+.activity-ruler__tick--user_message { background: var(--blue); height: 14px; margin-top: -7px; }
+.activity-ruler__tick--assistant_message { background: var(--green); height: 14px; margin-top: -7px; }
+.activity-ruler__tick--permission { background: var(--amber); }
+.activity-ruler__tick[data-status='failed'] { background: var(--red); }
+.activity-ruler__span { color: var(--text-3); font: 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
+.activity-ruler__note { display: inline-flex; color: var(--text-3); cursor: help; }
+.activity-log { padding: 4px 0; }
+/* One hairline spine runs the whole log; each node knocks a hole in it with a fill halo rather than
+   a drawn ring, so the column stays continuous without a second edge. */
+.activity-log { position: relative; }
+.activity-log::before { content: ''; position: absolute; top: 0; bottom: 0; left: 21px; width: 1px; background: var(--line-soft); }
+.log-row, .log-fold {
+  position: relative;
+  display: grid;
+  grid-template-columns: 20px 56px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 8px;
+  min-height: 24px;
+  padding: 1px 12px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+}
+.log-row[data-expandable], .log-fold { cursor: pointer; }
+.log-row:hover, .log-fold:hover { background: var(--surface-1); }
+.log-row__node, .log-fold__node {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: var(--text-3);
+  background: var(--surface-0);
+  border-radius: 50%;
+}
+.log-row:hover .log-row__node, .log-fold:hover .log-fold__node { background: var(--surface-1); }
+.log-row--user_message .log-row__node { color: var(--blue); }
+.log-row--assistant_message .log-row__node { color: var(--green); }
+.log-row--permission .log-row__node { color: var(--amber); }
+.log-row[data-status='failed'] .log-row__node { color: var(--red); }
+.log-row__time {
+  color: var(--text-3);
+  font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.log-row__title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.log-row__count { margin-left: 6px; color: var(--text-3); font-size: 10px; font-variant-numeric: tabular-nums; }
+.log-row__meta { display: inline-flex; align-items: center; gap: 6px; }
+.log-row__chip { padding: 1px 4px; border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-2); font-size: 10px; letter-spacing: .06em; }
+.log-row__chip--failed { color: #ffb4ae; background: #ef8f8a1f; }
+/* Provenance repeats down a run; showing it only on the first row and on hover keeps the column quiet
+   without hiding where a fact came from. */
+.log-row__source { color: var(--text-3); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; opacity: 0; }
+.log-row__source[data-persistent] { opacity: 1; }
+.log-row:hover .log-row__source { opacity: 1; }
+.log-row__chevron { color: var(--text-3); opacity: 0; transition: transform 120ms ease, opacity 120ms ease; }
+.log-row:hover .log-row__chevron { opacity: 1; }
+.log-row__chevron[data-open] { opacity: 1; transform: rotate(90deg); }
+.log-row__prose {
+  margin: 0 12px 4px 96px;
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+.log-row__payload {
+  margin: 2px 12px 4px 96px;
+  padding: 8px;
+  max-height: 220px;
+  overflow: auto;
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  background: var(--surface-1);
+  font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
+}
+.log-fold__chevron { transition: transform 120ms ease; }
+.log-fold[data-open] .log-fold__chevron { transform: rotate(90deg); }
+.log-fold__label { display: inline-flex; align-items: center; gap: 8px; color: var(--text-3); font-size: 11px; }
 .provenance { padding: 2px 5px; border-radius: var(--radius); color: var(--text-3); background: var(--surface-3); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
 .provenance--native-hook { color: var(--green); background: #14241a; }
 .composer { margin: 6px 8px 8px; overflow: hidden; border: 1px solid #333c3f; border-radius: var(--radius); background: transparent; box-shadow: none; }
