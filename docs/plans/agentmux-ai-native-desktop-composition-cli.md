@@ -124,6 +124,13 @@ type MessageTarget =
   | { kind: 'tab'; tabId: string }
   | { kind: 'region'; regionId: string }
 
+type RegionSurface =
+  | { kind: 'agent'; agentSessionId: string; providerId: string; executorId: string }
+  | { kind: 'terminal'; runId: string }
+  | { kind: 'browser'; browserId: string; url: string }
+  | { kind: 'file'; path: string }
+  | { kind: 'launcher' }
+
 type OpenDestination =
   | { kind: 'split'; region: RegionAnchor; direction: 'left' | 'right' | 'up' | 'down' }
   | { kind: 'new-tab'; after: TabAnchor }
@@ -158,6 +165,8 @@ type MessageTargetNotUnique = {
 | `send --to-tab|--to-region` | Renderer 解析展示，Core 接收 prompt | Composition Host 解析精确 Session 后调用同一 Core API |
 
 Composition Host 是跨 Owner 事务编排边界，不保存 Provider、Run、Browser 或 Layout 第二份真相。
+`inspect --tab|--region` 中的 Region 直接携带上述封闭 `RegionSurface` 投影。不保留含混的
+`kind: other`；新 Surface 种类需要显式升级 schema，不能由 Renderer 私下藏住。
 
 ### Agent 如何选择 Split 还是 Tab
 
