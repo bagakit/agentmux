@@ -3,6 +3,49 @@ import type { AgentExecutorId, AgentProviderId } from './types.js'
 
 export const AGENTMUX_CONTROL_SCHEMA_VERSION = 5 as const
 
+export const AGENTMUX_CONTROL_ERROR_CODES = [
+  'INVALID_CONTROL_REQUEST',
+  'CONTROL_PROTOCOL_ERROR',
+  'CONTROL_TIMEOUT',
+  'CONTROL_UNAVAILABLE',
+  'CONTROL_OWNER_BUSY',
+  'CONTROL_FAILED',
+  'CONTROL_CANCELLED',
+  'CONTROL_REQUEST_CONFLICT',
+  'CONTROL_OWNER_LOST',
+  'CALLER_NOT_OPEN',
+  'TAB_NOT_OPEN',
+  'REGION_NOT_OPEN',
+  'AMBIGUOUS_TAB_TARGET',
+  'AMBIGUOUS_REGION_TARGET',
+  'MESSAGE_TARGET_NOT_UNIQUE',
+  'MESSAGE_TARGET_NOT_AGENT',
+  'AGENT_EXECUTOR_NOT_CONFIGURED',
+  'UNKNOWN_AGENT_SESSION',
+  'SESSION_CLOSING',
+  'SESSION_NOT_RUNNING',
+  'WORKSPACE_NOT_OPEN',
+  'UNKNOWN_WORKSPACE',
+  'REGION_WORKSPACE_MISMATCH',
+  'REGION_TOPIC_MISMATCH',
+  'LAUNCH_RESULT_MISMATCH',
+  'LAUNCH_CLEANUP_FAILED',
+  'LAYOUT_CAPACITY_EXCEEDED',
+  'LAUNCHER_REGION_REQUIRED',
+  'INVALID_BROWSER_URL',
+  'AGENT_NOT_FOUND',
+  'INVALID_AGENT_PROMPT',
+  'AGENT_SESSION_STILL_RUNNING',
+  'AGENT_RESUME_UNAVAILABLE',
+  'AGENT_RESUME_UNSUPPORTED',
+  'STALE_AGENT_SESSION',
+  'STALE_AGENT_SESSION_BINDING',
+  'CTXMUX_DISCONNECTED',
+  'CTXMUX_INPUT_CURSOR_MISSING',
+  'SIGNAL_UNSUPPORTED'
+] as const
+export type AgentMuxControlErrorCode = typeof AGENTMUX_CONTROL_ERROR_CODES[number]
+
 export type AgentMuxControlCaller = { agentSessionId: string }
 export type AgentMuxRegionBounds = { x: number; y: number; width: number; height: number }
 type AgentMuxRegionBase = { tabId: string; regionId: string; workspaceId: string }
@@ -43,6 +86,10 @@ export type AgentMuxOpenDestination =
 export type AgentMuxOpenAgentContent =
   | { kind: 'new-agent'; executorId: AgentExecutorId; prompt?: string }
   | { kind: 'agent-session'; agentSessionId: string }
+export type AgentMuxArrangeMode =
+  | { kind: 'preset'; preset: 'columns-3' | 'grid-4' | 'grid-6' | 'grid-9' }
+  | { kind: 'balance' }
+  | { kind: 'active-first' }
 
 type RequestBase = { schemaVersion: typeof AGENTMUX_CONTROL_SCHEMA_VERSION; requestId: string }
 export type AgentMuxControlInspectTabRequest = RequestBase & {
@@ -54,6 +101,12 @@ export type AgentMuxControlInspectRegionRequest = RequestBase & {
 export type AgentMuxControlOpenAgentRequest = RequestBase & {
   operation: 'open.agent'; content: AgentMuxOpenAgentContent; destination: AgentMuxOpenDestination; caller?: AgentMuxControlCaller
 }
+export type AgentMuxControlOpenTerminalRequest = RequestBase & {
+  operation: 'open.terminal'; shellCommand?: string; destination: AgentMuxOpenDestination; caller?: AgentMuxControlCaller
+}
+export type AgentMuxControlOpenBrowserRequest = RequestBase & {
+  operation: 'open.browser'; url: string; destination: AgentMuxOpenDestination; caller?: AgentMuxControlCaller
+}
 export type AgentMuxMessageTarget =
   | AgentMuxSelfAnchor
   | { kind: 'agent-session'; agentSessionId: string }
@@ -64,6 +117,9 @@ export type AgentMuxControlSendRequest = RequestBase & {
 }
 export type AgentMuxControlFocusRequest = RequestBase & {
   operation: 'focus'; target: { kind: 'tab'; tabId: string } | { kind: 'region'; regionId: string }
+}
+export type AgentMuxControlArrangeRequest = RequestBase & {
+  operation: 'arrange'; target: AgentMuxTabAnchor; mode: AgentMuxArrangeMode; caller?: AgentMuxControlCaller
 }
 export type AgentMuxControlListAgentsRequest = RequestBase & { operation: 'list.agents' }
 export type AgentMuxSessionSelector = AgentMuxSelfAnchor | { kind: 'agent-session'; agentSessionId: string }
@@ -80,8 +136,11 @@ export type AgentMuxControlRequest =
   | AgentMuxControlInspectTabRequest
   | AgentMuxControlInspectRegionRequest
   | AgentMuxControlOpenAgentRequest
+  | AgentMuxControlOpenTerminalRequest
+  | AgentMuxControlOpenBrowserRequest
   | AgentMuxControlSendRequest
   | AgentMuxControlFocusRequest
+  | AgentMuxControlArrangeRequest
   | AgentMuxControlListAgentsRequest
   | AgentMuxControlInterruptRequest
   | AgentMuxControlResumeRequest
@@ -91,8 +150,11 @@ export type AgentMuxControlResult =
   | { operation: 'inspect.tab'; tab: AgentMuxInspectedTab }
   | { operation: 'inspect.region'; region: AgentMuxInspectedRegion }
   | { operation: 'open.agent'; region: AgentMuxAgentRegion }
+  | { operation: 'open.terminal'; region: AgentMuxTerminalRegion }
+  | { operation: 'open.browser'; region: AgentMuxBrowserRegion }
   | { operation: 'send'; agentSessionId: string }
   | { operation: 'focus'; tabId: string; regionId?: string }
+  | { operation: 'arrange'; tab: AgentMuxInspectedTab }
   | { operation: 'list.agents'; agents: AgentMuxControlExecutor[] }
   | { operation: 'interrupt'; agentSessionId: string }
   | { operation: 'resume'; agentSessionId: string; runId: string }
@@ -108,12 +170,20 @@ type SuccessByOperation<Operation extends AgentMuxControlResult['operation']> = 
 export type AgentMuxControlSuccessReceipt = {
   [Operation in AgentMuxControlResult['operation']]: SuccessByOperation<Operation>
 }[AgentMuxControlResult['operation']]
+export type AgentMuxMessageTargetCandidate = { agentSessionId: string; regionIds: string[] }
+export type AgentMuxControlError =
+  | { code: 'MESSAGE_TARGET_NOT_UNIQUE'; message: string; candidates: AgentMuxMessageTargetCandidate[] }
+  | {
+      code: Exclude<AgentMuxControlErrorCode, 'MESSAGE_TARGET_NOT_UNIQUE'>
+      message: string
+      candidates?: never
+    }
 export type AgentMuxControlErrorReceipt = {
   schemaVersion: typeof AGENTMUX_CONTROL_SCHEMA_VERSION
   requestId: string | null
   ok: false
   operation: AgentMuxControlRequest['operation'] | null
-  error: { code: string; message: string; candidates?: Array<{ agentSessionId: string; regionIds: string[] }> }
+  error: AgentMuxControlError
 }
 export type AgentMuxControlReceipt = AgentMuxControlSuccessReceipt | AgentMuxControlErrorReceipt
 export interface AgentMuxControlHost { execute(request: AgentMuxControlRequest): Promise<AgentMuxControlResult> }
