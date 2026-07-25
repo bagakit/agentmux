@@ -18,6 +18,24 @@ import {
   type AgentProvider
 } from './agent-provider.js'
 import { composeAgentLaunchPrompt } from './agent-launch-prompt.js'
+import { hashAgentCapability, issueAgentCapability, resolveCapabilityAuthor } from './agent-capability.js'
+import { planDiscussion } from './agent-discussion.js'
+import {
+  ackDeliveryBatch,
+  checkDeliveries,
+  type DeliveryBatch,
+  type DeliveryQueue
+} from './agent-delivery-queue.js'
+import { answerAsk, cancelAsk, type AgentAsk } from './agent-ask.js'
+import {
+  handOff,
+  openDispatch,
+  recordDispatchEvent,
+  type Dispatch,
+  type DispatchEventKind,
+  type HandoffResult
+} from './agent-handoff.js'
+import { advanceDelivery, type AgentThread } from './agent-message.js'
 import { AgentMuxClientEventPublisher } from './client-event-publisher.js'
 import {
   AgentTerminalScreen,
@@ -717,6 +735,168 @@ export class AgentMuxClient {
     })
   }
 
+  /**
+   * 一次 Discussion：受管 Agent A 创建专属 Agent B 并投递首条消息。
+   *
+   * author 由 Core 从 A 交回的凭证解析——调用方声称的身份不作数。首条消息作为 B 的启动
+   * Prompt 投递，但那只是**账本首条消息的 transport**：Provider 收下启动参数最多证明
+   * `delivered`，证明不了 B 接受或回复了它。
+   *
+   * 创建走的是 `createAgent` 那条已验证的 reservation → commit 原子路径，不复制一份；
+   * 相同 operationId 因此天然落到同一个 Thread，重试不会再建一个 Session、
+   * 也不会重复注入 Prompt。
+   */
+  /**
+   * 解析调用方的 author，失败即关闭。
+   *
+   * 每个通信动作都先过这里：author 由 Core 从凭证解析，调用方声称的身份不作数。
+   * 抽成一处，是为了让"新增一个动作"不必重新想一遍怎么验身份——漏验一次就是一个冒充口子。
+   */
+  private resolveMessageAuthor(capability: string, callerAgentSessionId: string): string {
+    const caller = this.registry.get(callerAgentSessionId)
+    return resolveCapabilityAuthor(capability, {
+      agentSessionId: caller.agentSessionId,
+      workspacePath: caller.workspacePath,
+      runId: caller.run.runId,
+      capabilityHash: caller.capabilityHash ?? ''
+    }, caller.run.runId)
+  }
+
+  /** 取最旧的一批未确认投递。Ack 之前重复调用重放同一批——崩溃重连才不会丢消息。 */
+  checkDeliveries(input: {
+    capability: string
+    callerAgentSessionId: string
+    queue: DeliveryQueue
+    limit: number
+  }): DeliveryBatch {
+    const consumerId = this.resolveMessageAuthor(input.capability, input.callerAgentSessionId)
+    return checkDeliveries(input.queue, consumerId, input.limit)
+  }
+
+  /** 确认一批。只推进这个 consumer 的游标，不改变消息本身的状态。 */
+  ackDeliveryBatch(input: {
+    capability: string
+    callerAgentSessionId: string
+    queue: DeliveryQueue
+    generation: number
+  }): DeliveryQueue {
+    const consumerId = this.resolveMessageAuthor(input.capability, input.callerAgentSessionId)
+    return ackDeliveryBatch(input.queue, consumerId, input.generation)
+  }
+
+  /** 回答一个问题。相同回答幂等，不同回答冲突。 */
+  answerAsk(input: {
+    capability: string
+    callerAgentSessionId: string
+    ask: AgentAsk
+    answer: string
+  }): AgentAsk {
+    this.resolveMessageAuthor(input.capability, input.callerAgentSessionId)
+    return answerAsk(input.ask, input.answer, Date.now())
+  }
+
+  /** 不等了。与超时同为 closed，但原因不同。 */
+  cancelAsk(input: { capability: string; callerAgentSessionId: string; ask: AgentAsk }): AgentAsk {
+    this.resolveMessageAuthor(input.capability, input.callerAgentSessionId)
+    return cancelAsk(input.ask, Date.now())
+  }
+
+  /** 交出去：责任跟着工作走，原 Owner 不再等待。 */
+  handOff(input: {
+    capability: string
+    callerAgentSessionId: string
+    toAgentSessionId: string
+    taskId: string
+  }): HandoffResult {
+    const from = this.resolveMessageAuthor(input.capability, input.callerAgentSessionId)
+    return handOff({
+      fromAgentSessionId: from,
+      toAgentSessionId: input.toAgentSessionId,
+      taskId: input.taskId,
+      at: Date.now()
+    })
+  }
+
+  /** 派出去：所有权留在派发方，它仍要接问题、接升级、接收工。 */
+  openDispatch(input: {
+    capability: string
+    callerAgentSessionId: string
+    dispatchId: string
+    workerAgentSessionId: string
+    taskId: string
+    attempt: number
+  }): Dispatch {
+    const owner = this.resolveMessageAuthor(input.capability, input.callerAgentSessionId)
+    return openDispatch({
+      dispatchId: input.dispatchId,
+      ownerAgentSessionId: owner,
+      workerAgentSessionId: input.workerAgentSessionId,
+      taskId: input.taskId,
+      attempt: input.attempt,
+      at: Date.now()
+    })
+  }
+
+  /** 记一次派发事件。同一事件重放幂等，不会记两次。 */
+  recordDispatchEvent(input: {
+    capability: string
+    callerAgentSessionId: string
+    dispatch: Dispatch
+    kind: DispatchEventKind
+  }): Dispatch {
+    this.resolveMessageAuthor(input.capability, input.callerAgentSessionId)
+    return recordDispatchEvent(input.dispatch, input.kind, Date.now())
+  }
+
+  async startDiscussion(input: {
+    capability: string
+    /**
+     * 调用方自称的 Agent Session。它只是**上下文提示**：Core 会用凭证核对它，
+     * 对不上就拒绝——所以改这个字段冒充别人是行不通的。
+     */
+    callerAgentSessionId: string
+    executorId: AgentExecutorId
+    providerId: AgentProviderId
+    workspacePath: string
+    body: string
+    operationId: string
+  }): Promise<{ thread: AgentThread; session: AgentMuxAgentSession }> {
+    this.requireConnected()
+    const author = this.registry.get(input.callerAgentSessionId)
+    const plan = planDiscussion({
+      capability: input.capability,
+      binding: {
+        agentSessionId: author.agentSessionId,
+        workspacePath: author.workspacePath,
+        runId: author.run.runId,
+        capabilityHash: author.capabilityHash ?? ''
+      },
+      currentRunId: author.run.runId,
+      targetWorkspacePath: input.workspacePath,
+      body: input.body,
+      operationId: input.operationId,
+      now: Date.now()
+    })
+    const session = await this.createAgent({
+      executorId: input.executorId,
+      providerId: input.providerId,
+      workspacePath: input.workspacePath,
+      prompt: plan.launchPrompt,
+      injectAgentMuxGuide: true,
+      // 同一个 operation id：重试落到同一次创建，不会重复 Spawn 或重复注入 Prompt。
+      createOperationId: input.operationId
+    })
+    return {
+      thread: {
+        ...plan.thread,
+        targetAgentSessionId: session.agentSessionId,
+        // ctxmux 收下了启动输入——这最多证明送达。
+        delivery: advanceDelivery(plan.thread.delivery, 'delivered', Date.now())
+      },
+      session
+    }
+  }
+
   async createAgent(input: AgentMuxAgentCreateInput): Promise<AgentMuxAgentSession> {
     this.requireConnected()
     if (input.prompt !== undefined) assertAgentPromptSize(input.prompt.trim())
@@ -733,6 +913,8 @@ export class AgentMuxClient {
     let abandonedRun: AgentMuxRunRef | null = null
     try {
       const provider = this.providers.get(input.providerId)
+      // 这个 Run 的说话凭证。raw 只进受管进程的环境，Core 侧只留 hash。
+      const invocationCapability = issueAgentCapability()
       const capability = await this.probeAgent(input.providerId, input.commandOverride)
       if (!capability.installed) {
         throw new AgentMuxError(`${provider.label} is not installed on this host.`, 'AGENT_NOT_FOUND')
@@ -766,7 +948,8 @@ export class AgentMuxClient {
           input.providerId,
           executorId,
           hookBinding,
-          lifecycleOperationId
+          lifecycleOperationId,
+          invocationCapability
         ),
         ...(input.cols === undefined ? {} : { cols: input.cols }),
         ...(input.rows === undefined ? {} : { rows: input.rows })
@@ -784,6 +967,8 @@ export class AgentMuxClient {
         retiredRuns: [],
         hookBindingId: hookBinding.bindingId,
         hookToken: hookBinding.endpoint.token,
+        // 只存 hash：raw 凭证已随 env 进了受管进程，Core 这边不再留明文。
+        capabilityHash: hashAgentCapability(invocationCapability),
         outputCursorBytes: 0,
         createdAt: now,
         updatedAt: now,
@@ -1001,6 +1186,8 @@ export class AgentMuxClient {
         throw new AgentMuxError('Cannot resume while the original Run is still running.', 'AGENT_SESSION_STILL_RUNNING')
       }
       const provider = this.providers.get(current.providerId)
+      // resume 换了 Run，就换一枚凭证——旧 Run 的那枚随之作废，不能再以此 Agent 名义说话。
+      const invocationCapability = issueAgentCapability()
       const capability = knownCapability ?? await this.probeAgent(current.providerId, input.commandOverride)
       if (!capability.installed) {
         throw new AgentMuxError(`${provider.label} is not installed on this host.`, 'AGENT_NOT_FOUND')
@@ -1038,7 +1225,8 @@ export class AgentMuxClient {
           current.providerId,
           current.executorId,
           hookBinding,
-          lifecycleOperationId
+          lifecycleOperationId,
+          invocationCapability
         ),
         ...(input.cols === undefined ? {} : { cols: input.cols }),
         ...(input.rows === undefined ? {} : { rows: input.rows })
@@ -1049,6 +1237,8 @@ export class AgentMuxClient {
         retiredRuns: [...current.retiredRuns, current.run].slice(-16),
         hookBindingId: hookBinding.bindingId,
         hookToken: hookBinding.endpoint.token,
+        // 新 Run 换新凭证：旧 Run 的那枚从此认不出来，无法再以此 Agent 名义说话。
+        capabilityHash: hashAgentCapability(invocationCapability),
         outputCursorBytes: 0,
         updatedAt: Date.now(),
         nativeHandle: structuredClone(current.nativeHandle)
@@ -1720,7 +1910,8 @@ export class AgentMuxClient {
     providerId: AgentProviderId,
     executorId: AgentExecutorId,
     binding: AgentHookBinding,
-    lifecycleOperationId: string
+    lifecycleOperationId: string,
+    capability: string
   ): Record<string, string> {
     return {
       ...terminalEnvironment(environment),
@@ -1729,7 +1920,10 @@ export class AgentMuxClient {
       AGENTMUX_AGENT_SESSION_ID: agentSessionId,
       AGENTMUX_PROVIDER_ID: providerId,
       AGENTMUX_EXECUTOR_ID: executorId,
-      AGENTMUX_LIFECYCLE_OPERATION_ID: lifecycleOperationId
+      AGENTMUX_LIFECYCLE_OPERATION_ID: lifecycleOperationId,
+      // 这枚凭证是这个 Agent 说话时的身份证明。Core 只留它的 hash；公开的
+      // AGENTMUX_AGENT_SESSION_ID 只是上下文提示，改一下就能冒充，故不能用于认证。
+      AGENTMUX_AGENT_CAPABILITY: capability
     }
   }
 

@@ -50,6 +50,7 @@ const MICRO_MARKS = [
   '.agent-provider-icon > img',
   '.activity-ruler__rail',
   '.activity-ruler__tick',
+  '.activity-ruler__band',
   '.agent-pick--selected::before',
   '.terminal-theme-preview__composer'
 ]

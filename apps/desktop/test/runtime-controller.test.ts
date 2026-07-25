@@ -674,6 +674,46 @@ describe('RuntimeController configuration transaction', () => {
     }))
   })
 
+  it('rewrites a fail-closed readiness rejection into an honest, actionable message', async () => {
+    // Steering a render-then-submit Agent (codex) mid-turn is fail-closed by design: Core throws
+    // AGENT_PROMPT_NOT_READY because no ready composer epoch exists while it is working. That code is a
+    // sealed contract — but its raw message ("ready composer epoch…") is internal jargon, and Electron
+    // strips the code as the error crosses ipcRenderer.invoke. submitPrompt must translate it here, where
+    // the code is still intact, into a sentence the user can act on, while preserving the code for logs.
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const running = agentStatusFixture()
+    client.statusAgent.mockResolvedValue({
+      ...running,
+      run: { ...running.run, state: 'running' as const }
+    })
+    client.submitAgentPrompt.mockRejectedValue(
+      new AgentMuxError(
+        'Agent prompt requires a ready composer epoch for this exact Run.',
+        'AGENT_PROMPT_NOT_READY'
+      )
+    )
+    const control = {
+      kind: 'agent' as const,
+      hostId: 'local',
+      agentSessionId: 'agent-1',
+      run: { runId: 'run-1' }
+    }
+
+    const rejection = await controller.submitPrompt(control, 'steer mid-turn').then(
+      () => { throw new Error('submitPrompt resolved but should have rejected') },
+      (error: unknown) => error
+    )
+    expect(rejection).toBeInstanceOf(AgentMuxError)
+    const error = rejection as AgentMuxError
+    // The code survives for main-process logs and any programmatic branch.
+    expect(error.code).toBe('AGENT_PROMPT_NOT_READY')
+    // The message no longer leaks the internal "composer epoch" wording; it tells the user what to do.
+    expect(error.message).not.toMatch(/composer epoch/i)
+    expect(error.message).toMatch(/still working/i)
+    expect(error.message).toMatch(/send again/i)
+  })
+
   it('forwards a typed interaction response with the exact Session Run fence', async () => {
     const controller = await configuredController()
     const client = runtimeFixture.FakeClient.instances[0]!

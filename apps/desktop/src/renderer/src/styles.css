@@ -387,7 +387,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .workspace-topic-title-line strong,
 .workspace-topic-entry small > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-topic-title-line strong { color: var(--text-1); font-size: 11px; }
-.workspace-topic-title-line em { flex: 0 0 auto; padding: 1px 4px; border-radius: var(--radius-sm); color: var(--green); background: #193024; font-size: 10px; font-style: normal; }
+/* 每个 Agent 一枚状态点。它们靠右成一簇，不与标题争夺左缘；点本身沿用共享的
+   status 语汇，因此这里只管排布，不定义颜色——颜色改了三处会一起改。 */
+.workspace-topic-agents { flex: 0 0 auto; display: flex; align-items: center; gap: 3px; margin-left: auto; }
+.workspace-topic-agents .status { flex: 0 0 auto; }
+/* 拖动中的那一行抬起来一点，让落点看得见；不改变行高，避免列表在拖动时跳动。 */
+.workspace-topic-item.dragging { position: relative; z-index: 1; background: var(--surface-3); box-shadow: var(--hl-strong); }
 .workspace-topic-entry small { color: var(--text-3); font-size: 10px; }
 .workspace-topic-entry small > span { flex: 1; }
 .workspace-topic-entry small > em { flex: 0 0 auto; color: var(--text-3); font-style: normal; }
@@ -553,6 +558,30 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .branch-create-dialog footer { display: flex; justify-content: flex-end; gap: 7px; margin-top: 15px; padding: 11px 15px 13px; border-top: 1px solid var(--line); }
 .branch-create-dialog .primary-button { padding: 6px 9px; }
 .branches-inline-error { padding: 7px 9px; border-top: 1px solid #4b2b2a; background: #271818; }
+/* Source Control: the content slot's bottom half switches between Branches and Changes. */
+.content-slot-source-control { height: 100%; min-height: 0; display: flex; flex-direction: column; background: #12151b; }
+.source-control-switch { flex: 0 0 auto; display: flex; gap: 2px; padding: 5px 6px 0; }
+.source-control-switch button { flex: 1; height: 24px; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font-size: 11px; font-weight: 650; letter-spacing: .02em; cursor: pointer; transition: background 120ms ease, color 120ms ease; }
+.source-control-switch button:hover { color: var(--text-2); background: var(--surface-2); }
+.source-control-switch button.selected { color: var(--text); background: var(--surface-2); box-shadow: var(--hl); }
+.content-slot-source-control .branches-panel, .content-slot-source-control .changes-panel { flex: 1; min-height: 0; }
+.change-row { width: 100%; min-width: 0; display: grid; grid-template-columns: 16px minmax(0, 1fr) auto 24px; align-items: center; gap: 4px; min-height: 30px; padding: 3px 5px; border-radius: var(--radius-sm); color: var(--text-3); }
+.change-row:hover { background: var(--surface-2); }
+.change-row__icon { display: inline-flex; align-items: center; justify-content: center; color: var(--green-2); }
+.change-row--untracked .change-row__icon { color: var(--amber); }
+.change-row__identity { min-width: 0; display: flex; flex-direction: column; gap: 0; }
+.change-row__identity strong, .change-row__identity small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.change-row__identity strong { font-size: 11px; color: var(--text-2); }
+.change-row__identity small { color: var(--text-3); font-family: "SFMono-Regular", monospace; font-size: 10px; line-height: 12px; }
+.change-row__state { display: inline-flex; align-items: center; padding: 1px 4px; border-radius: var(--radius-sm); color: var(--green); background: #16271d; font-size: 10px; line-height: 13px; white-space: nowrap; }
+.change-row--untracked .change-row__state { color: var(--amber); background: #2b2417; }
+.change-row__stage, .change-row__staged-mark { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; }
+.change-row__staged-mark { color: var(--green); }
+.commit-box { flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; padding: 8px; border-top: 1px solid var(--line-soft); }
+.commit-box__message { width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); outline: 0; color: var(--text); background: #0e1116; font-family: inherit; font-size: 11px; line-height: 1.45; resize: none; }
+.commit-box__message:focus { border-color: var(--focus-line); box-shadow: var(--focus-ring); }
+.commit-box__message:disabled { opacity: .55; }
+.commit-box__submit { justify-content: center; padding: 6px 9px; }
 .file-explorer { min-height: 0; display: grid; grid-template-rows: 34px 38px minmax(0, 1fr); }
 .explorer-header {
   display: flex;
@@ -1382,6 +1411,53 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .activity-ruler__tick[data-status='failed'] { background: var(--red); }
 .activity-ruler__span { color: var(--text-3); font: 10px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
 .activity-ruler__note { display: inline-flex; color: var(--text-3); cursor: help; }
+/* The whole track is one focusable slider (click + keyboard both resolve to an event). Its focus ring
+   must be visible like every other interactive control in the surface. */
+.activity-ruler__track { outline: none; cursor: pointer; }
+.activity-ruler__track:focus-visible { border-radius: var(--radius-sm); box-shadow: var(--focus-ring); }
+/* The selected tick — where a click or keyboard landed — stands off the rail so the jump target reads
+   at a glance without disturbing the honest tick positions around it. */
+.activity-ruler__tick[data-selected] { width: 3px; height: 18px; margin-top: -9px; transform: translateX(-1.5px); box-shadow: 0 0 0 2px var(--surface-0); }
+/* The visible-range band frames which stretch of the trace the log is currently showing. It is only
+   ever rendered when the range is a real subset (see rulerBand), so it never spans the full width and
+   claims "everything is on screen". A dashed variant keeps it honest on the ordinal axis. */
+.activity-ruler__band {
+  position: absolute;
+  top: 50%;
+  height: 16px;
+  margin-top: -8px;
+  min-width: 2px;
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--green) 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--green) 42%, transparent);
+  pointer-events: none;
+}
+.activity-ruler__band[data-axis='ordinal'] {
+  background: color-mix(in oklab, var(--text-3) 14%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--text-3) 40%, transparent);
+}
+/* The hover/focus readout reuses the terminal link preview's anchoring rule so it never covers the
+   segment it describes; it flips above/below via data-placement exactly as that preview does. */
+.activity-ruler__readout {
+  position: fixed;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  background:
+    radial-gradient(120% 90% at 100% 0, #1d47303d 0, transparent 52%),
+    #1a2027f7;
+  box-shadow: var(--elev-2), var(--hl-strong), 0 0 0 1px #00000073;
+  pointer-events: none;
+  animation: menu-in 90ms ease;
+}
+.activity-ruler__readout[data-placement='above'] { transform: translateY(-100%); }
+.activity-ruler__readout-time { color: var(--text); font: 11px/1.3 var(--font-mono); font-variant-numeric: tabular-nums; }
+.activity-ruler__readout-offset { color: var(--text-3); font: 10px/1.2 var(--font-mono); font-variant-numeric: tabular-nums; }
+.activity-ruler__readout-ordinal { color: var(--text-2); font-size: 11px; }
 .activity-log { padding: 4px 0; }
 /* One hairline spine runs the whole log; each node knocks a hole in it with a fill halo rather than
    a drawn ring, so the column stays continuous without a second edge. */
@@ -1544,6 +1620,34 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   color: var(--text-2);
   font-weight: 600;
 }
+/* GFM table. It scrolls inside its own container because agents emit wide comparison tables, and a long
+   row must never widen the turn or push the whole feed sideways (density contract: wide content scrolls
+   in its own overflow container). */
+.md-table-scroll { max-width: 100%; overflow-x: auto; }
+.md-table { border-collapse: collapse; font-size: inherit; }
+.md-table th, .md-table td {
+  padding: 4px 9px;
+  /* A hairline grid is the one place a rule genuinely carries meaning — it says which cell belongs to
+     which column. Kept at the lowest contrast that still separates. */
+  border-bottom: 1px solid #ffffff12;
+  text-align: left;
+  white-space: nowrap;
+}
+.md-table th { color: var(--text-2); font-weight: 620; }
+.md-table td { color: var(--text); }
+.md-table th[data-align='center'], .md-table td[data-align='center'] { text-align: center; }
+.md-table th[data-align='right'], .md-table td[data-align='right'] { text-align: right; }
+.md-table tr:last-child td { border-bottom: 0; }
+/* A quote is set in from the spine and quieter — no oversized glyph, no size change. */
+.md-quote {
+  margin: 0;
+  padding-left: 9px;
+  border-left: 2px solid #ffffff1a;
+  color: var(--text-2);
+}
+.md-rule { height: 0; margin: 3px 0; border: 0; border-top: 1px solid #ffffff14; }
+.md-list .md-list { margin-top: 3px; }
+.md-list .md-paragraph { margin: 0; }
 .md-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 3px; }
 .md-list li { overflow-wrap: anywhere; }
 .md-code {
@@ -1592,8 +1696,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 }
 .provenance { padding: 2px 5px; border-radius: var(--radius); color: var(--text-3); background: var(--surface-3); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
 .provenance--native-hook { color: var(--green); background: #14241a; }
-.composer { margin: 6px 8px 8px; overflow: hidden; border: 1px solid #333c3f; border-radius: var(--radius); background: transparent; box-shadow: none; }
-.composer:focus-within { border-color: var(--focus-line); box-shadow: var(--focus-ring); }
+/* Flat by contract: no resting stroke — Surface luminance, the tool actions and the focus ring carry
+   hierarchy (surface-density.md), so the Composer reads as part of its Region, not a box floating on it.
+   Margin is uniform 6px top/bottom and 8px sides, the same inset the approval card above it uses, so the
+   whole input stack sits at one consistent gap from the Region edge instead of a ring of whitespace. */
+.composer { margin: 6px 8px; overflow: hidden; border-radius: var(--radius); background: transparent; box-shadow: none; }
+/* Focus stays clearly visible without a resting border: the --focus-ring glow plus a 1px inset line in
+   --focus-line take over the boundary the removed stroke used to draw only while focused. */
+.composer:focus-within { box-shadow: var(--focus-ring), inset 0 0 0 1px var(--focus-line); }
 .composer textarea { width: 100%; min-height: 34px; max-height: 132px; field-sizing: content; display: block; resize: none; padding: 8px 11px 2px; border: 0; outline: 0; color: var(--text); background: transparent; font-size: 11px; line-height: 1.45; }
 .composer textarea::placeholder { color: #5e6762; }
 .composer textarea:disabled { color: var(--text-3); cursor: not-allowed; }
@@ -2183,6 +2293,20 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 /* A lane whose Agent never launched: still part of the set, but nothing to open. */
 .fanout-lane--idle { color: var(--text-3); background: transparent; box-shadow: inset 0 0 0 1px #ffffff0f; cursor: default; }
 .fanout-lane__branch { overflow: hidden; max-width: 160px; text-overflow: ellipsis; white-space: nowrap; }
+/* The lane and its keep control travel together, so the control cannot drift onto another lane. */
+.fanout-lane-slot { display: inline-flex; align-items: center; gap: 2px; }
+/* Resolving the bake-off tears down the other lanes, so it stays quiet until the pointer is on it —
+   loud enough to find, never loud enough to hit by accident while reading the comparison. */
+.fanout-lane__keep {
+  padding: 3px 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-3);
+  background: transparent;
+  font-size: 10px;
+  cursor: pointer;
+}
+.fanout-lane__keep:hover { color: var(--text); background: var(--surface-3); }
 .fanout-group__jump {
   margin-left: auto;
   flex: 0 0 auto;

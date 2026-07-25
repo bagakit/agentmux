@@ -1,12 +1,53 @@
 import '../monaco'
 import Editor, { type OnMount } from '@monaco-editor/react'
-import { AlertTriangle, RefreshCw, Save } from 'lucide-react'
+import { AlertTriangle, FolderOpen, RefreshCw, Save } from 'lucide-react'
 import { useEffect, useRef } from 'react'
+import { api } from '../lib/api'
 import { detectLanguage } from '../lib/language-detect'
 import { documentKey, type FileWorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
 
 type MonacoStandaloneEditor = Parameters<OnMount>[0]
+
+// The failure state of a file surface. It stays hookless so it can be exercised without a Monaco
+// render context: the reveal action is the one output an unopenable file must still offer, and the
+// only escape hatch that answers "is it actually still there?". Absent — not disabled — when reveal
+// cannot work, because a button that is guaranteed to error is not an offer.
+export function EditorUnavailableState({
+  canReveal,
+  onReveal
+}: {
+  canReveal: boolean
+  onReveal: () => void
+}) {
+  return (
+    <section className="pane-state pane-state--error">
+      <strong>File is no longer available</strong>
+      <span>Refresh the explorer and open it again.</span>
+      {canReveal ? (
+        <button className="small-button" onClick={onReveal}>
+          <FolderOpen size={13} /> Reveal in Finder
+        </button>
+      ) : null}
+    </section>
+  )
+}
+
+// Routes the failure-state reveal through the SAME channel the file tree uses (api.files.reveal →
+// files:reveal → localPathForReveal). A deleted target is handled downstream by falling back to its
+// nearest existing ancestor, so this stays a plain call; when reveal still cannot land, the error
+// surfaces on the shared reportError banner rather than replacing the pane with a second dead end.
+export async function revealFileInFileManager(
+  workspaceId: string,
+  path: string,
+  reportError: (error: unknown) => void
+): Promise<void> {
+  try {
+    await api.files.reveal(workspaceId, path)
+  } catch (error) {
+    reportError(error)
+  }
+}
 
 export function EditorPane({ tabId, surface }: { tabId: string; surface: FileWorkbenchSurface }) {
   const key = documentKey(surface.workspaceId, surface.path)
@@ -28,6 +69,10 @@ export function EditorPane({ tabId, surface }: { tabId: string; surface: FileWor
   const reload = useAppStore((state) => state.reloadDocument)
   const overwrite = useAppStore((state) => state.overwriteDocument)
   const clearRevealTarget = useAppStore((state) => state.clearDocumentRevealTarget)
+  const isLocalWorkspace = useAppStore((state) =>
+    state.config?.workspaces.find((item) => item.id === surface.workspaceId)?.hostId === 'local'
+  )
+  const reportError = useAppStore((state) => state.reportError)
   const conflict = issue?.kind === 'changed' || issue?.kind === 'deleted'
   const editorRef = useRef<MonacoStandaloneEditor | null>(null)
 
@@ -52,10 +97,10 @@ export function EditorPane({ tabId, surface }: { tabId: string; surface: FileWor
 
   if (!document) {
     return (
-      <section className="pane-state pane-state--error">
-        <strong>File is no longer available</strong>
-        <span>Refresh the explorer and open it again.</span>
-      </section>
+      <EditorUnavailableState
+        canReveal={isLocalWorkspace}
+        onReveal={() => void revealFileInFileManager(surface.workspaceId, surface.path, reportError)}
+      />
     )
   }
 

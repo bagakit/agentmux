@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentCatalogEntry } from '@agentmux/core'
 import type { AgentDisplayState } from '@agentmux/core'
+import { CLAUDE_LAUNCH_OPTIONS, describeLaunchOptions } from '@agentmux/core'
 import type { SessionSnapshot } from '../src/shared/contracts.js'
 import {
   buildAgentRoster,
@@ -63,6 +64,17 @@ function catalogEntry(): AgentCatalogEntry {
         ]
       }
     ]
+  } as unknown as AgentCatalogEntry
+}
+
+// A claude-shaped catalog entry carrying the REAL SSOT launch-option DESCRIBE half, projected exactly as
+// the core catalog projects it (agent-provider.ts → describeLaunchOptions). Feeding the same constant the
+// launcher reads proves the roster resolves the T-001 model/effort declaration with no renderer change.
+function claudeCatalogEntry(): AgentCatalogEntry {
+  return {
+    id: 'claude',
+    label: 'Claude',
+    launchOptions: describeLaunchOptions(CLAUDE_LAUNCH_OPTIONS)
   } as unknown as AgentCatalogEntry
 }
 
@@ -189,6 +201,32 @@ describe('agent roster', () => {
     expect(rowRiskTier({ ...rows[0]!, scopes: [] })).toBeNull()
   })
 
+  it('shows a claude agent its picked model and effort as scope text, with NO risk mark', () => {
+    // model and effort carry no tier in the SSOT declaration on purpose (picking a model or reasoning
+    // depth neither widens nor narrows a permission), so their scopes must render their labels while the
+    // row shows no risk mark at all — a tier here would be a false danger claim.
+    const scopes = resolveRosterScopes({ model: 'opus', effort: 'high' }, claudeCatalogEntry())
+    expect(scopes).toEqual([
+      { label: 'Model', value: 'Opus' },
+      { label: 'Effort', value: 'High' }
+    ])
+    // No scope carries a tier, so no argv/flag word leaked into the resolved display either.
+    expect(scopes.every((scope) => scope.tier === undefined)).toBe(true)
+    expect(JSON.stringify(scopes)).not.toContain('--model')
+    expect(JSON.stringify(scopes)).not.toContain('--effort')
+
+    const rows = buildAgentRoster({
+      sessions: [agent('c', { providerId: 'claude', launchOptions: { model: 'opus', effort: 'high' } } as never)],
+      providerCatalog: [claudeCatalogEntry()]
+    })
+    expect(rows[0]?.scopes).toEqual([
+      { label: 'Model', value: 'Opus' },
+      { label: 'Effort', value: 'High' }
+    ])
+    // Both choices are tier-less, so the row's single risk mark resolves to null — nothing to flag.
+    expect(rowRiskTier(rows[0]!)).toBeNull()
+  })
+
   it('counts the badge exactly as the attention bar counts, so the two never disagree', () => {
     const rows = buildAgentRoster({
       sessions: [
@@ -203,5 +241,39 @@ describe('agent roster', () => {
     // needs-you + error. Working and done are not things waiting on the user.
     expect(rosterBadgeCount(rows)).toBe(2)
     expect(rosterBadgeCount([])).toBe(0)
+  })
+})
+
+// Inbox 不是第二个列表——按这份名册自己的声明（本文件头注释），待办就是它的行。
+// 未确认的 Thread 因此是一列，与 awaitingReply 并列，而不是另开一张卡片墙。
+describe('未确认 Thread 是名册的一列', () => {
+  function sessionWith(id: string): SessionSnapshot {
+    return {
+      id, kind: 'agent', providerId: 'codex', executorId: 'codex',
+      capabilities: {
+        terminal: true, hookEvents: true, timeline: 'streaming', permission: 'observe',
+        providerResume: true, acp: false, replyCorrelation: 'none'
+      },
+      hostId: 'local', workspacePath: '/repo', label: id, createdAt: 1, updatedAt: 1,
+      processState: 'running', status: { state: 'working', source: 'run-process', observedAt: 1 },
+      latestOutputBytes: 0,
+      control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId: `run-${id}` } }
+    }
+  }
+
+  it('把未确认 Thread 数带到对应的行上', () => {
+    const rows = buildAgentRoster({
+      sessions: [sessionWith('a-1'), sessionWith('a-2')],
+      providerCatalog: [],
+      unacknowledgedThreads: { 'a-1': 2 }
+    })
+    expect(rows.find((row) => row.sessionId === 'a-1')?.unacknowledgedThreads).toBe(2)
+    // 没有 Thread 的行报 0，而不是 undefined——它是一列，不是可选装饰。
+    expect(rows.find((row) => row.sessionId === 'a-2')?.unacknowledgedThreads).toBe(0)
+  })
+
+  it('不传时全为 0，名册照常可用', () => {
+    const rows = buildAgentRoster({ sessions: [sessionWith('a-1')], providerCatalog: [] })
+    expect(rows[0]!.unacknowledgedThreads).toBe(0)
   })
 })

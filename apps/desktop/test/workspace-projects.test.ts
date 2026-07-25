@@ -38,7 +38,7 @@ describe('workspace projects', () => {
         id: 'feature',
         name: 'feature-a',
         hostId: 'local',
-        path: '/repo/agentmux.worktrees/feature-a',
+        path: '/repo/agentmux/.worktrees/feature-a',
         kind: 'worktree',
         repoPath: '/repo/agentmux',
         branch: 'feature/a'
@@ -47,7 +47,7 @@ describe('workspace projects', () => {
         id: 'remote',
         name: 'feature-a',
         hostId: 'studio',
-        path: '/repo/agentmux.worktrees/feature-a',
+        path: '/repo/agentmux/.worktrees/feature-a',
         kind: 'worktree',
         repoPath: '/repo/agentmux',
         branch: 'feature/a'
@@ -68,12 +68,21 @@ describe('workspace projects', () => {
     expect(workspaceProjectId(workspaces[2]!)).not.toBe(workspaceProjectId(workspaces[0]!))
   })
 
-  it('derives host-neutral sibling worktree paths without leaking branch separators', () => {
+  it('derives host-neutral worktree paths inside the project without leaking branch separators', () => {
     expect(defaultWorktreePath('/repo/agentmux', 'feature/new-tab')).toBe(
-      '/repo/agentmux.worktrees/feature-new-tab'
+      '/repo/agentmux/.worktrees/feature-new-tab'
     )
     expect(defaultWorktreePath('C:\\repo\\agentmux', 'fix/ui')).toBe(
-      'C:\\repo\\agentmux.worktrees\\fix-ui'
+      'C:\\repo\\agentmux\\.worktrees\\fix-ui'
     )
+  })
+
+  it('nests the worktree inside the project rather than beside it as a sibling directory', () => {
+    const path = defaultWorktreePath('/repo/agentmux', 'feature/a')
+    // The separator before `.worktrees` is the whole fix: it keeps the worktree under the project
+    // (covered by its .gitignore, its file tree, its moves) instead of at `/repo/agentmux.worktrees/...`.
+    expect(path).toBe('/repo/agentmux/.worktrees/feature-a')
+    expect(path.startsWith('/repo/agentmux/')).toBe(true)
+    expect(path).not.toBe('/repo/agentmux.worktrees/feature-a')
   })
 })

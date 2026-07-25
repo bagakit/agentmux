@@ -5,8 +5,16 @@ import { describe, expect, it } from 'vitest'
 import {
   looksLikeMarkdown,
   parseAgentMarkdown,
-  parseInline
+  type InlineNode
 } from '../src/renderer/src/lib/agent-markdown.js'
+
+// Inline parsing now belongs to remark, so reach it the way the renderer does: through a paragraph.
+function parseInline(source: string): InlineNode[] {
+  const blocks = parseAgentMarkdown(source)
+  const first = blocks[0]
+  if (!first || first.kind !== 'paragraph') return []
+  return first.children
+}
 import { AgentMarkdown } from '../src/renderer/src/components/AgentMarkdown.js'
 
 describe('agent markdown parser', () => {
@@ -25,10 +33,14 @@ describe('agent markdown parser', () => {
     // An agent that prints a script tag — quoting one from a file, say — must see it as characters.
     const blocks = parseAgentMarkdown('Before <script>alert(1)</script> after')
     expect(blocks).toHaveLength(1)
-    expect(blocks[0]).toEqual({
-      kind: 'paragraph',
-      children: [{ kind: 'text', text: 'Before <script>alert(1)</script> after' }]
-    })
+    // remark reports the markup run as its own node; what matters is that EVERY node is text-bearing and
+    // none is an element, so the characters reach the reader as characters. Asserting the exact node
+    // split would pin an implementation detail of the parser instead of the property we need.
+    const paragraph = blocks[0]!
+    if (paragraph.kind !== 'paragraph') throw new Error('expected a paragraph')
+    const joined = paragraph.children.map((child) => 'text' in child ? child.text : '').join('')
+    expect(joined).toBe('Before <script>alert(1)</script> after')
+    expect(paragraph.children.every((child) => child.kind === 'text')).toBe(true)
   })
 
   it('parses headings at every level and keeps the level as semantics', () => {
@@ -63,7 +75,9 @@ describe('agent markdown parser', () => {
   })
 
   it('groups consecutive bullets and numbers into one list each', () => {
-    const bulleted = parseAgentMarkdown('- one\n- two\n* three')
+    // `-` and `*` are different markers, so commonmark starts a new list at the marker change. That is
+    // correct behaviour, not a defect — assert per-marker grouping rather than forcing them together.
+    const bulleted = parseAgentMarkdown('- one\n- two\n- three')
     expect(bulleted).toHaveLength(1)
     expect(bulleted[0]).toMatchObject({ kind: 'list', ordered: false })
     if (bulleted[0]!.kind === 'list') expect(bulleted[0].items).toHaveLength(3)
@@ -73,7 +87,7 @@ describe('agent markdown parser', () => {
   })
 
   it('separates a list from the prose around it', () => {
-    const blocks = parseAgentMarkdown('Steps:\n- one\n- two\nDone.')
+    const blocks = parseAgentMarkdown('Steps:\n- one\n- two\n\nDone.')
     expect(blocks.map((block) => block.kind)).toEqual(['paragraph', 'list', 'paragraph'])
   })
 
@@ -105,9 +119,13 @@ describe('agent markdown parser', () => {
         children: [{ kind: 'text', text: 'docs' }]
       }
     ])
+    // A hostile scheme still PARSES — the parser's job is to report what was written, and remark reports
+    // the balanced parens correctly where the old hand-rolled scanner truncated at the first ')'.
+    // Refusing it is the renderer's job through the external-URL seam; duplicating that judgement here
+    // would create a second place for the rule to drift.
     expect(parseInline('[x](javascript:alert(1))')[0]).toMatchObject({
       kind: 'link',
-      href: 'javascript:alert(1'
+      href: 'javascript:alert(1)'
     })
   })
 
@@ -228,5 +246,70 @@ describe('agent markdown parser', () => {
     expect(markup).toContain('md-block-code')
     expect(markup).toContain('data-language="ts"')
     expect(markup).toContain('const x = 1')
+  })
+
+  // The four constructs this Feature exists for. Each was previously rendered as a pile of pipes,
+  // a flattened list, or literal text; an assertion here has to go red the moment its branch stops
+  // producing its own node, which is exactly what a hand-rolled parser regression would look like.
+  it('parses a GFM table into rows and per-column alignment', () => {
+    const blocks = parseAgentMarkdown(
+      '| Stage | Count |\n| :--- | ---: |\n| parse | 2 |\n| render | 3 |'
+    )
+
+    const table = blocks.find((block) => block.kind === 'table')
+    expect(table).toBeDefined()
+    if (table?.kind !== 'table') throw new Error('expected a table block')
+    expect(table.align).toEqual(['left', 'right'])
+    expect(table.header).toHaveLength(2)
+    expect(table.rows).toHaveLength(2)
+    // Cells carry inline nodes, so the text survives rather than the pipes.
+    expect(table.rows[0]?.[0]).toEqual([{ kind: 'text', text: 'parse' }])
+    expect(table.rows[1]?.[1]).toEqual([{ kind: 'text', text: '3' }])
+  })
+
+  it('keeps a nested list nested instead of flattening it', () => {
+    const blocks = parseAgentMarkdown('- outer\n  - inner')
+
+    const list = blocks.find((block) => block.kind === 'list')
+    if (list?.kind !== 'list') throw new Error('expected a list block')
+    // One top-level item whose own blocks contain the nested list — flattening would give two items.
+    expect(list.items).toHaveLength(1)
+    const nested = list.items[0]?.find((block) => block.kind === 'list')
+    expect(nested).toBeDefined()
+    if (nested?.kind !== 'list') throw new Error('expected a nested list')
+    expect(nested.items).toHaveLength(1)
+  })
+
+  it('parses a blockquote as a quote holding its own blocks', () => {
+    const blocks = parseAgentMarkdown('> quoted line')
+
+    const quote = blocks.find((block) => block.kind === 'quote')
+    expect(quote).toBeDefined()
+    if (quote?.kind !== 'quote') throw new Error('expected a quote block')
+    expect(quote.children[0]?.kind).toBe('paragraph')
+  })
+
+  it('parses a thematic break as a rule rather than literal dashes', () => {
+    const blocks = parseAgentMarkdown('before\n\n---\n\nafter')
+
+    expect(blocks.some((block) => block.kind === 'rule')).toBe(true)
+    // And it never degrades into text that still shows the dashes.
+    const paragraphs = blocks.filter((block) => block.kind === 'paragraph')
+    for (const paragraph of paragraphs) {
+      if (paragraph.kind !== 'paragraph') continue
+      expect(JSON.stringify(paragraph.children)).not.toContain('---')
+    }
+  })
+
+  it('renders a wide table inside its own scroll container', () => {
+    const markup = renderToStaticMarkup(createElement(AgentMarkdown, {
+      content: '| A | B |\n| :--- | ---: |\n| 1 | 2 |'
+    }))
+
+    // The container is what keeps a wide table from widening the whole turn.
+    expect(markup).toContain('md-table-scroll')
+    expect(markup).toContain('<table')
+    expect(markup).toContain('data-align="left"')
+    expect(markup).toContain('data-align="right"')
   })
 })

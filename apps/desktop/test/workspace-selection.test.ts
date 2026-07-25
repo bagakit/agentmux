@@ -571,9 +571,11 @@ describe('Scratch Topic workbench binding', () => {
     })
   })
 
-  it('binds a launched Agent to its View Topic without changing ordinary launch inputs', async () => {
+  it('carries the View’s bound Topic into the launch without changing ordinary launch inputs', async () => {
     const workspace = prepareScratch()
-    useAppStore.getState().openLauncher('scratch-pane')
+    // The owner View created here is bound to a real Topic; the launch must carry that
+    // binding. A Topic is never minted from the Tab identity — see scratch-topic-agents.
+    const topic = await useAppStore.getState().createScratchTopic()
     const state = useAppStore.getState()
     const tabId = state.layouts[workspace.id]!.groups[0]!.activeTabId!
     const launcher = state.tabs[tabId]!
@@ -586,9 +588,27 @@ describe('Scratch Topic workbench binding', () => {
 
     expect(launch).toHaveBeenCalledWith(expect.objectContaining({
       workspacePath: workspace.path,
-      scratchTopicId: tabId
+      scratchTopicId: topic.id
     }))
-    expect(useAppStore.getState().tabs[tabId]?.topicId).toBe(tabId)
-    expect(useAppStore.getState().workspaceFileRevisions[workspace.id]).toBe(1)
+    expect(useAppStore.getState().tabs[tabId]?.topicId).toBe(topic.id)
+    expect(useAppStore.getState().workspaceFileRevisions[workspace.id]).toBe(2)
+  })
+
+  it('launches with no Topic from an unbound View instead of minting one from the Tab id', async () => {
+    const workspace = prepareScratch()
+    useAppStore.getState().openLauncher('scratch-pane')
+    const state = useAppStore.getState()
+    const tabId = state.layouts[workspace.id]!.groups[0]!.activeTabId!
+    const launcher = state.tabs[tabId]!
+    const launch = vi.spyOn(api.sessions, 'launchAgent')
+
+    await useAppStore.getState().launchAgent('codex', 'work alone', 'scratch-pane', {
+      tabId,
+      regionId: launcher.layout.activeRegionId
+    })
+
+    expect(launch).toHaveBeenCalledTimes(1)
+    expect(launch.mock.calls[0]![0]).not.toHaveProperty('scratchTopicId')
+    expect(useAppStore.getState().tabs[tabId]?.topicId).toBeUndefined()
   })
 })

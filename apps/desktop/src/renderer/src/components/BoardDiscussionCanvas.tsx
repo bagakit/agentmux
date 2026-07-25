@@ -4,6 +4,7 @@ import {
   GitBranch,
   LoaderCircle,
   MessageSquarePlus,
+  NotebookText,
   Play,
   RadioTower,
   RefreshCw,
@@ -12,22 +13,23 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { WorkspaceRecord } from '../../../shared/contracts'
+import { describeDeliveryEvidence } from '../lib/delivery-evidence'
 import { api } from '../lib/api'
 import { configuredExecutors } from '../lib/executors'
-import type { ProjectBranchLane } from '../lib/project-board'
+import type { BoardRow } from '../lib/project-board'
 import { executorDetectionKey, useAppStore } from '../store'
 import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
 
 export function BoardDiscussionCanvas({
-  lane,
+  row,
   anchor,
   onClose,
   onOpenBranches
 }: {
-  lane: ProjectBranchLane | null
+  row: BoardRow | null
   anchor: WorkspaceRecord
   onClose: () => void
-  onOpenBranches: (lane: ProjectBranchLane) => void
+  onOpenBranches: (row: BoardRow) => void
 }) {
   const config = useAppStore((state) => state.config)
   const detections = useAppStore((state) => state.executorDetections)
@@ -40,7 +42,7 @@ export function BoardDiscussionCanvas({
   const [launching, setLaunching] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const hostId = lane?.workspace?.hostId ?? anchor.hostId
+  const hostId = row?.workspace?.hostId ?? anchor.hostId
   const executors = useMemo(
     () => configuredExecutors(config).map((executor) => ({
       ...executor,
@@ -51,22 +53,24 @@ export function BoardDiscussionCanvas({
   const installedExecutors = executors.filter((executor) => executor.detection?.state === 'ready')
   const unavailableExecutors = executors.filter((executor) => executor.detection?.state !== 'ready')
   const detecting = executors.some((executor) => executor.detection?.state === 'checking')
+  // 能不能起，判据是"这一行有没有落地目录"，对 Branch 与 Topic 同义：Branch 要有 worktree，
+  // Topic 恒有目录因此恒可起——不为两种行来源各写一份可用性判定。
   const canLaunch = Boolean(
-    lane?.branch.worktreePath &&
+    row?.path &&
     prompt.trim() &&
     installedExecutors.some((executor) => executor.id === executorId)
   )
 
   useEffect(() => {
-    if (!lane) return
+    if (!row) return
     setPrompt('')
     setError(null)
-  }, [lane])
+  }, [row])
 
   useEffect(() => {
-    if (!lane || executors.every((executor) => executor.detection)) return
+    if (!row || executors.every((executor) => executor.detection)) return
     void detectExecutors(hostId)
-  }, [executors, detectExecutors, hostId, lane])
+  }, [executors, detectExecutors, hostId, row])
 
   useEffect(() => {
     if (installedExecutors.some((executor) => executor.id === executorId)) return
@@ -75,13 +79,19 @@ export function BoardDiscussionCanvas({
   }, [executorId, installedExecutors])
 
   async function startDiscussion(): Promise<void> {
-    if (!lane || !canLaunch || launching) return
+    if (!row || !canLaunch || launching) return
     setLaunching(true)
     setError(null)
     try {
-      let workspace = lane.workspace
+      if (row.kind === 'topic') {
+        // Topic 上下文随启动传下去：落点是该 Topic 目录，scratchTopicId 由既有绑定路径携带。
+        await launchBoardAgent(anchor.id, executorId, prompt.trim(), row.id)
+        onClose()
+        return
+      }
+      let workspace = row.workspace
       if (!workspace) {
-        const result = await api.workspaces.openBranch(anchor.id, lane.branch.name)
+        const result = await api.workspaces.openBranch(anchor.id, row.branch.name)
         activateWorkspaceSelection(result)
         setMainSurface('board')
         workspace = result.workspace
@@ -95,8 +105,11 @@ export function BoardDiscussionCanvas({
     }
   }
 
+  const isTopic = row?.kind === 'topic'
+  const ContextIcon = isTopic ? NotebookText : GitBranch
+
   return (
-    <Dialog.Root open={lane !== null} onOpenChange={(open) => !open && !launching && onClose()}>
+    <Dialog.Root open={row !== null} onOpenChange={(open) => !open && !launching && onClose()}>
       <Dialog.Portal>
         <Dialog.Overlay className="discussion-canvas__overlay" />
         <Dialog.Content
@@ -106,10 +119,12 @@ export function BoardDiscussionCanvas({
           <header className="discussion-canvas__header">
             <span className="discussion-canvas__mark"><MessageSquarePlus size={18} /></span>
             <div>
-              <div className="eyebrow">Branch inbox</div>
-              <Dialog.Title>Discuss {lane?.branch.name ?? 'this Branch'}</Dialog.Title>
+              <div className="eyebrow">{isTopic ? 'Topic inbox' : 'Branch inbox'}</div>
+              <Dialog.Title>Discuss {row?.name ?? (isTopic ? 'this Topic' : 'this Branch')}</Dialog.Title>
               <Dialog.Description>
-                Start a real Agent run in this Branch workspace. The run returns to this row.
+                {isTopic
+                  ? 'Start a real Agent run in this Topic directory. The run returns to this row.'
+                  : 'Start a real Agent run in this Branch workspace. The run returns to this row.'}
               </Dialog.Description>
             </div>
             <button type="button" className="icon-button" aria-label="Close discussion canvas" disabled={launching} onClick={onClose}>
@@ -117,18 +132,18 @@ export function BoardDiscussionCanvas({
             </button>
           </header>
 
-          {lane ? (
+          {row ? (
             <div className="discussion-canvas__body">
               <section className="discussion-context">
-                <span><GitBranch size={14} /></span>
+                <span><ContextIcon size={14} /></span>
                 <div>
-                  <strong>{lane.branch.name}</strong>
-                  <small title={lane.branch.worktreePath ?? undefined}>{lane.branch.worktreePath ?? 'No worktree'}</small>
+                  <strong>{row.name}</strong>
+                  <small title={row.path ?? undefined}>{row.path ?? 'No worktree'}</small>
                 </div>
                 <em>{hostId === 'local' ? 'This Mac' : <><RadioTower size={11} /> {hostId}</>}</em>
               </section>
 
-              {!lane.branch.worktreePath ? (
+              {!row.path ? (
                 <section className="discussion-unavailable">
                   <Unlink size={19} />
                   <div>
@@ -140,7 +155,7 @@ export function BoardDiscussionCanvas({
                     className="small-button"
                     onClick={() => {
                       onClose()
-                      onOpenBranches(lane)
+                      onOpenBranches(row)
                     }}
                   >
                     Open Branches
@@ -184,7 +199,9 @@ export function BoardDiscussionCanvas({
                       rows={7}
                       value={prompt}
                       onChange={(event) => setPrompt(event.target.value)}
-                      placeholder="What should the Agent investigate, decide, or change on this Branch?"
+                      placeholder={isTopic
+                        ? 'What should the Agent investigate, decide, or write down in this Topic?'
+                        : 'What should the Agent investigate, decide, or change on this Branch?'}
                     />
                     <small>The initial prompt is sent through the existing core-owned Agent session.</small>
                   </label>
@@ -195,7 +212,12 @@ export function BoardDiscussionCanvas({
           ) : null}
 
           <footer className="discussion-canvas__footer">
-            <span><Bot size={12} /> Core-owned launch · no Board-only session</span>
+            {/* 只声明证据支持的那一句。启动投递最多证明送到了——写成"已回复"会让人以为
+                对方看过并回应了，而此刻连读都未必读到。 */}
+            <span>
+              <Bot size={12} /> Core-owned launch · first message will read{' '}
+              <strong>{describeDeliveryEvidence('delivered').label}</strong> until the Agent replies
+            </span>
             <button type="button" className="small-button" disabled={launching} onClick={onClose}>Cancel</button>
             <button type="button" className="primary-button" disabled={!canLaunch || launching} onClick={() => void startDiscussion()}>
               {launching ? <LoaderCircle className="spin" size={14} /> : <Play size={14} />}

@@ -4,7 +4,8 @@ import { describe, expect, it, vi } from 'vitest'
 import type { AppConfig } from '../src/shared/contracts.js'
 import {
   AgentSettingsPane,
-  assertExecutorProviderIdentity
+  assertExecutorProviderIdentity,
+  parseExecutorArgs
 } from '../src/renderer/src/components/settings/AgentSettingsPane.js'
 
 const settingsFixture = vi.hoisted(() => ({
@@ -67,5 +68,30 @@ describe('AgentSettingsPane Executor identity', () => {
       'codex'
     )).not.toThrow()
     expect(() => assertExecutorProviderIdentity('new-review', undefined, 'claude')).not.toThrow()
+  })
+})
+
+describe('parseExecutorArgs', () => {
+  it('splits a shell-style launch line into argv, stripping quotes as syntax', () => {
+    // The user's exact reported string. Before the fix it split on '\n' only, so the whole line became a
+    // single argv token and the downstream CLI died with "unknown option '--dangerously-skip-permissions
+    // --model 'default' --effort 'ultracode''". Each flag and value must be its own argv entry.
+    expect(parseExecutorArgs("--dangerously-skip-permissions --model 'default' --effort 'ultracode'"))
+      .toEqual(['--dangerously-skip-permissions', '--model', 'default', '--effort', 'ultracode'])
+  })
+
+  it('keeps a quoted value with a space as one argv entry', () => {
+    expect(parseExecutorArgs('--model "gpt 5"')).toEqual(['--model', 'gpt 5'])
+  })
+
+  it('collapses runs of whitespace and treats newlines as separators', () => {
+    expect(parseExecutorArgs('--model   fable')).toEqual(['--model', 'fable'])
+    expect(parseExecutorArgs('--model\nfable\n--effort high'))
+      .toEqual(['--model', 'fable', '--effort', 'high'])
+  })
+
+  it('returns an empty argv for empty or whitespace-only input', () => {
+    expect(parseExecutorArgs('')).toEqual([])
+    expect(parseExecutorArgs('   \n\t ')).toEqual([])
   })
 })

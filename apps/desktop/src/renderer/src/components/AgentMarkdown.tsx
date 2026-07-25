@@ -37,6 +37,7 @@ function Inline({ nodes, openExternal }: { nodes: InlineNode[]; openExternal: Op
         if (node.kind === 'code') return <code key={key} className="md-code">{node.text}</code>
         if (node.kind === 'strong') return <strong key={key}><Inline nodes={node.children} openExternal={openExternal} /></strong>
         if (node.kind === 'emphasis') return <em key={key}><Inline nodes={node.children} openExternal={openExternal} /></em>
+        if (node.kind === 'strike') return <del key={key}><Inline nodes={node.children} openExternal={openExternal} /></del>
         return (
           // A button, not an anchor: an <a href> inside untrusted output is a navigation escape hatch out
           // of the renderer. Main owns the decision and normalises the URL, so a hostile scheme is
@@ -78,9 +79,55 @@ function Block({ node, openExternal }: { node: BlockNode; openExternal: OpenExte
     return (
       <Tag className="md-list">
         {node.items.map((item, index) => (
-          <li key={index}><Inline nodes={item} openExternal={openExternal} /></li>
+          // Items hold BLOCKS, not just inline runs — that is what keeps a nested list nested instead of
+          // flattening it into the parent, which is how the previous parser lost the author's grouping.
+          <li key={index}>
+            {item.map((child, childIndex) => (
+              <Block key={childIndex} node={child} openExternal={openExternal} />
+            ))}
+          </li>
         ))}
       </Tag>
+    )
+  }
+  if (node.kind === 'quote') {
+    return (
+      <blockquote className="md-quote">
+        {node.children.map((child, index) => (
+          <Block key={index} node={child} openExternal={openExternal} />
+        ))}
+      </blockquote>
+    )
+  }
+  if (node.kind === 'rule') return <hr className="md-rule" />
+  if (node.kind === 'table') {
+    return (
+      // The table owns its own horizontal scroll. Agents emit wide comparison tables, and without this a
+      // single long row would widen the turn and push the whole feed sideways.
+      <div className="md-table-scroll">
+        <table className="md-table">
+          <thead>
+            <tr>
+              {node.header.map((cell, index) => (
+                <th key={index} {...(node.align[index] ? { 'data-align': node.align[index] } : {})}>
+                  <Inline nodes={cell} openExternal={openExternal} />
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {node.rows.map((row, rowIndex) => (
+              <tr key={rowIndex}>
+                {row.map((cell, cellIndex) => (
+                  <td key={cellIndex} {...(node.align[cellIndex] ? { 'data-align': node.align[cellIndex] } : {})}>
+                    <Inline nodes={cell} openExternal={openExternal} />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     )
   }
   return <p className="md-paragraph"><Inline nodes={node.children} openExternal={openExternal} /></p>

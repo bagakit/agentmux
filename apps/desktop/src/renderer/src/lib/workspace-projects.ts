@@ -59,5 +59,8 @@ export function defaultWorktreePath(repoPath: string, branch: string): string {
   const separator = repoPath.includes('\\') && !repoPath.includes('/') ? '\\' : '/'
   const root = repoPath.replace(/[\\/]+$/, '')
   const segment = branch.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'branch'
-  return `${root}.worktrees${separator}${segment}`
+  // The worktree belongs to this project, so it lives INSIDE it as `<repo>/.worktrees/<segment>`.
+  // A separator before `.worktrees` is what keeps it there — without it the path collapses into a
+  // sibling `<repo>.worktrees/<segment>`, which the project's .gitignore, moves, and file tree miss.
+  return `${root}${separator}.worktrees${separator}${segment}`
 }

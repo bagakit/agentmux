@@ -34,10 +34,18 @@ import type {
   BrowserViewport,
   CreateWorkspacePathInput,
   CreateWorktreeForBranchInput,
+  CreatePullRequestInput,
   CreateWorkspaceInput,
   DesktopControlResponse,
+  GitPullStrategy,
+  GitPushOptions,
+  GitRemoteOptions,
   HostConfig,
+  KeepOneOfFanOutInput,
+  KeepOneOfFanOutOutcome,
   MoveWorkspacePathInput,
+  RunFanOutInput,
+  RunFanOutResult,
   SessionControl,
   TerminalLaunchInput,
   WorkspaceFileWriteInput,
@@ -65,6 +73,10 @@ import { ScratchTopics } from './scratch-topics.js'
 import { saveRuntimeConfig } from './runtime-config-transaction.js'
 import { WorkspaceFiles } from './workspace-files.js'
 import { WorktreeService } from './worktree-service.js'
+import { planFanOut } from './fanout-plan.js'
+import { runFanOut } from './fanout-run.js'
+import { GitService } from './git-service.js'
+import { GhService } from './gh-service.js'
 
 function workspace(config: AppConfig, id: string): WorkspaceRecord {
   const item = config.workspaces.find((entry) => entry.id === id)
@@ -97,6 +109,8 @@ export async function registerIpc(args: {
   args.runtime.commit(await args.runtime.prepare(config))
   const files = args.workspaceFiles ?? new WorkspaceFiles((id) => args.runtime.executionHost(id))
   const worktrees = new WorktreeService((id) => args.runtime.executionHost(id), args.configStore)
+  const git = new GitService((id) => args.runtime.executionHost(id))
+  const gh = new GhService((id) => args.runtime.executionHost(id))
   const browserProfiles = new BrowserProfileManager()
   await browserProfiles.initialize()
   const browsers = new BrowserViewManager(args.window, browserProfiles)
@@ -199,6 +213,87 @@ export async function registerIpc(args: {
     config = selection.config
     return selection
   })
+  // One fan-out. The plan comes from planFanOut and nowhere else: branch names and worktree paths have
+  // exactly one source, so a re-run of the same request is reproducible and no second naming scheme can
+  // drift into existence. A rejected plan is returned verbatim rather than swallowed, and a single-lane
+  // request is handed back as such — one lane is not a bake-off, so it belongs on the ordinary launch
+  // path instead of paying for orchestration to compare a result with nothing.
+  handle('workspaces:runFanOut', async (input: RunFanOutInput): Promise<RunFanOutResult> => {
+    const workspace = config.workspaces.find((item) => item.id === input.workspaceId)
+    if (!workspace) throw new Error('Fan-out needs an existing workspace')
+    const branches = await worktrees.list(input.workspaceId, config)
+    if (branches.kind !== 'git-repository') {
+      return { kind: 'rejected', reason: 'A fan-out needs a git repository.' }
+    }
+    const plan = planFanOut({
+      count: input.count,
+      baseName: input.baseName,
+      worktreeRoot: join(workspace.path, '.worktrees'),
+      executorIds: input.executorIds,
+      existingBranches: branches.branches.map((branch) => branch.name),
+      existingWorktreePaths: branches.branches.flatMap((branch) =>
+        branch.worktreePath ? [branch.worktreePath] : []
+      )
+    })
+    if (plan.kind !== 'fanout') return plan
+    const result = await runFanOut({
+      workspaceId: input.workspaceId,
+      prompt: input.prompt,
+      lanes: plan.lanes,
+      config,
+      ports: {
+        createWorktree: async (createInput, current) => {
+          const selection = await worktrees.createForBranch(createInput, current)
+          return { config: selection.config, workspace: selection.workspace }
+        },
+        launchAgent: async (launchInput, current) => {
+          const launched = await args.runtime.launchAgent({
+            executorId: launchInput.executorId,
+            hostId: workspace.hostId,
+            workspacePath: launchInput.workspacePath,
+            prompt: launchInput.prompt,
+            agentSessionId: randomUUID(),
+            createOperationId: randomUUID()
+          }, current)
+          return { sessionId: launched.session.id }
+        },
+        removeWorktree: async (removeInput, current) => await worktrees.removeWorktree(removeInput, current)
+      }
+    })
+    config = result.config
+    return { kind: 'fanout', lanes: result.lanes }
+  })
+  // Closing a bake-off: keep the chosen lane, tear the rest down through the same teardown primitive.
+  // The dirty-tree protection is not bypassed here — a lane holding uncommitted work comes back as
+  // `retained` and stays on disk, because "it lost" is not a reason to discard someone's work.
+  handle('workspaces:keepOneOfFanOut', async (input: KeepOneOfFanOutInput): Promise<KeepOneOfFanOutOutcome> => {
+    const result = await worktrees.keepOneOfFanOut(input, config)
+    config = result.config
+    return { keptWorkspaceId: result.keptWorkspaceId, outcomes: result.outcomes }
+  })
+  handle('git:status', async (workspaceId: string) => await git.status(workspaceId, config))
+  handle('git:stage', async (workspaceId: string, path: string) => {
+    await git.stage(workspaceId, path, config)
+  })
+  handle('git:commit', async (workspaceId: string, message: string) => {
+    await git.commit(workspaceId, message, config)
+  })
+  handle('git:diff', async (workspaceId: string, path: string) => await git.diff(workspaceId, path, config))
+  handle('git:unstage', async (workspaceId: string, path: string) => {
+    await git.unstage(workspaceId, path, config)
+  })
+  handle('git:discard', async (workspaceId: string, path: string, untracked: boolean) => {
+    await git.discard(workspaceId, path, untracked, config)
+  })
+  handle('git:push', async (workspaceId: string, options?: GitPushOptions) => await git.push(workspaceId, config, options))
+  handle('git:pull', async (workspaceId: string, options?: { strategy?: GitPullStrategy }) =>
+    await git.pull(workspaceId, config, options)
+  )
+  handle('git:fetch', async (workspaceId: string, options?: GitRemoteOptions) => await git.fetch(workspaceId, config, options))
+  handle('git:aheadBehind', async (workspaceId: string) => await git.aheadBehind(workspaceId, config))
+  handle('gh:authStatus', async (workspaceId: string) => await gh.authStatus(workspaceId, config))
+  handle('gh:createPullRequest', async (workspaceId: string, input: CreatePullRequestInput) =>
+    await gh.createPullRequest(workspaceId, input, config))
   handle('files:readDirectory', async (workspaceId: string, path: string) =>
     await files.readDirectory(workspace(config, workspaceId), path)
   )
