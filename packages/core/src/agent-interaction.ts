@@ -5,6 +5,9 @@ import type {
   AgentMuxInteractionResponse,
   AgentMuxPermissionOption,
   AgentMuxQuestion,
+  AgentPostureControl,
+  AgentPostureInputPlan,
+  AgentPostureMode,
   NativeHookEnvelope
 } from './types.js'
 
@@ -28,6 +31,112 @@ export type AgentTerminalInteractionDetection = {
  */
 export type TerminalPermissionOption = AgentMuxPermissionOption & {
   readonly input: string
+}
+
+/**
+ * The posture analogue of a {@link TerminalPermissionOption}: the DESCRIBE half ({@link AgentPostureMode} —
+ * id/label/description/tier, which crosses IPC and the composer draws) fused with the CONTRIBUTE half
+ * (`input`, the exact PTY keystroke that SETS this posture in the Provider's own in-band control). The
+ * keystroke never crosses IPC; it is resolved core-side when the composer sends a mode id, so the switch
+ * always writes the byte the picked mode declares.
+ */
+export type PostureModeDeclaration = AgentPostureMode & {
+  readonly input: string
+}
+
+/**
+ * SSOT posture declaration: the DESCRIBE-half control label fused with its CONTRIBUTE-half modes. Declared
+ * next to a Provider's interaction protocol; {@link createPostureControl} splits it into the catalog's
+ * pure {@link AgentPostureControl} and a core-side resolver.
+ */
+export type PostureControlDeclaration = {
+  readonly id: string
+  readonly label: string
+  readonly modes: readonly PostureModeDeclaration[]
+}
+
+/**
+ * A Provider's resolved posture control: the DESCRIBE half the catalog carries ({@link AgentPostureControl})
+ * beside a `planSet` that closes over the declared keystrokes, so setting a mode writes the byte that mode
+ * declares — never a blind cycle.
+ */
+export type AgentPostureProtocol = {
+  readonly control: AgentPostureControl
+  planSet(modeId: string): AgentPostureInputPlan
+}
+
+/**
+ * Fail closed on a malformed posture declaration, mirroring {@link validatePermissionOptions}. The core
+ * discipline lives here: a posture control must offer at least TWO modes, each with a NON-EMPTY, DISTINCT
+ * keystroke. This is what makes a control honest — a Provider whose only affordance is a blind cycle
+ * (one keystroke advancing through states it cannot read) cannot express two distinct set-keystrokes, so it
+ * structurally cannot declare a control that claims to set a specific target mode. Unique ids and non-empty
+ * labels round out what the composer needs to draw and the switch needs to honor.
+ */
+export function validatePostureControl(declaration: PostureControlDeclaration): void {
+  if (!declaration.id.trim() || !declaration.label.trim()) {
+    throw new AgentMuxError('A posture control must carry a non-empty id and label.', 'INVALID_POSTURE_CONTROL')
+  }
+  if (declaration.modes.length < 2) {
+    throw new AgentMuxError(
+      'A posture control must declare at least two addressable modes; a single blind cycle is not a control.',
+      'INVALID_POSTURE_CONTROL'
+    )
+  }
+  const ids = new Set<string>()
+  const inputs = new Set<string>()
+  for (const mode of declaration.modes) {
+    if (!mode.id.trim() || !mode.label.trim() || !mode.input) {
+      throw new AgentMuxError(
+        'A posture mode must carry a non-empty id, label, and input.',
+        'INVALID_POSTURE_CONTROL'
+      )
+    }
+    if (ids.has(mode.id)) {
+      throw new AgentMuxError(`Duplicate posture mode id '${mode.id}'.`, 'INVALID_POSTURE_CONTROL')
+    }
+    if (inputs.has(mode.input)) {
+      throw new AgentMuxError(
+        `Posture modes '${declaration.id}' share a keystroke; a mode that cannot be set apart from another is not addressable.`,
+        'INVALID_POSTURE_CONTROL'
+      )
+    }
+    ids.add(mode.id)
+    inputs.add(mode.input)
+  }
+}
+
+/**
+ * Build a Provider's posture protocol from its SSOT declaration. Validates at construction (fails closed the
+ * way {@link createNumberedTerminalInteractionProtocol} does), projects the DESCRIBE half into the catalog's
+ * pure {@link AgentPostureControl} (dropping every keystroke), and returns a `planSet` that CLOSES OVER the
+ * declared keystrokes so setting a mode resolves that mode's byte core-side.
+ */
+export function createPostureControl(declaration: PostureControlDeclaration): AgentPostureProtocol {
+  validatePostureControl(declaration)
+  const control: AgentPostureControl = {
+    id: declaration.id,
+    label: declaration.label,
+    modes: declaration.modes.map((mode) => ({
+      id: mode.id,
+      label: mode.label,
+      ...(mode.description === undefined ? {} : { description: mode.description }),
+      ...(mode.tier === undefined ? {} : { tier: mode.tier })
+    }))
+  }
+  return {
+    control,
+    planSet(modeId) {
+      const mode = declaration.modes.find((candidate) => candidate.id === modeId)
+      if (!mode) {
+        throw new AgentMuxError(
+          'Posture request selected a mode this Provider does not declare.',
+          'INVALID_POSTURE_MODE'
+        )
+      }
+      return { data: mode.input }
+    }
+  }
 }
 
 export type AgentTerminalInteractionProtocol = AgentTerminalInteractionDetection & {

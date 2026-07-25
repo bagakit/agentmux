@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
   createNumberedTerminalInteractionProtocol,
+  createPostureControl,
   normalizeAgentInteractionResponse,
   normalizeTerminalInteraction,
   validatePermissionOptions,
+  validatePostureControl,
+  type PostureControlDeclaration,
   type TerminalPermissionOption
 } from '../src/agent-interaction.js'
 
@@ -263,5 +266,75 @@ describe('Agent terminal interaction protocol', () => {
       outcome: 'answered',
       answers: [{ questionId: 'question-1', optionId: 'option-1' }]
     })).toThrow('duplicate option identifiers')
+  })
+})
+
+// A grok-shaped declaration: two addressable modes, each SET by a distinct in-band slash command.
+const GROK_SHAPED: PostureControlDeclaration = {
+  id: 'approval',
+  label: 'Approvals',
+  modes: [
+    { id: 'ask', label: 'Ask each time', tier: 'safe', input: '/always-approve off\r' },
+    { id: 'always-approve', label: 'Auto-approve', description: 'Skip prompts.', tier: 'danger', input: '/always-approve on\r' }
+  ]
+}
+
+describe('Agent posture control', () => {
+  it('projects the DESCRIBE half without any keystroke and maps a picked mode to its input', () => {
+    const posture = createPostureControl(GROK_SHAPED)
+
+    // The catalog-facing control carries labels/tiers the composer draws — and no `input`, so a keystroke
+    // never crosses IPC.
+    expect(posture.control).toEqual({
+      id: 'approval',
+      label: 'Approvals',
+      modes: [
+        { id: 'ask', label: 'Ask each time', tier: 'safe' },
+        { id: 'always-approve', label: 'Auto-approve', description: 'Skip prompts.', tier: 'danger' }
+      ]
+    })
+    expect(JSON.stringify(posture.control)).not.toContain('always-approve on')
+
+    // Each mode id resolves to its own declared bytes — a SET, not a cycle.
+    expect(posture.planSet('ask')).toEqual({ data: '/always-approve off\r' })
+    expect(posture.planSet('always-approve')).toEqual({ data: '/always-approve on\r' })
+  })
+
+  it('fails closed on a mode the Provider does not declare', () => {
+    const posture = createPostureControl(GROK_SHAPED)
+    expect(() => posture.planSet('yolo')).toThrow('does not declare')
+  })
+
+  it('rejects a single-mode declaration: a blind cycle is not an addressable control', () => {
+    // The heart of the honesty invariant: a Provider whose only affordance is a Shift+Tab cycle (one
+    // keystroke advancing through states it cannot read) cannot be expressed as a set-mode control, because
+    // a control requires at least TWO modes. So it can never be dressed up as "set mode X".
+    expect(() => validatePostureControl({
+      id: 'approval',
+      label: 'Approvals',
+      modes: [{ id: 'cycle', label: 'Cycle', input: '[Z' }]
+    })).toThrow('at least two addressable modes')
+  })
+
+  it('rejects two modes that share a keystroke: an unaddressable mode is not a target', () => {
+    expect(() => validatePostureControl({
+      id: 'approval',
+      label: 'Approvals',
+      modes: [
+        { id: 'ask', label: 'Ask', input: '[Z' },
+        { id: 'auto', label: 'Auto', input: '[Z' }
+      ]
+    })).toThrow('not addressable')
+  })
+
+  it('rejects an empty keystroke, id, or label', () => {
+    expect(() => validatePostureControl({
+      id: 'approval',
+      label: 'Approvals',
+      modes: [
+        { id: 'ask', label: 'Ask', input: '1' },
+        { id: 'auto', label: 'Auto', input: '' }
+      ]
+    })).toThrow('non-empty id, label, and input')
   })
 })

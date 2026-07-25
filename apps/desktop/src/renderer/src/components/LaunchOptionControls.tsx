@@ -36,7 +36,7 @@ export function LaunchRefine({
 
   // The summary is derived, never stored: it reads the same selection map that drives the panel below, so
   // the collapsed line and the expanded controls can never drift. An empty map is the honest untouched
-  // state for a Provider that declared no defaultChoiceId — no value is fabricated and no argv is added.
+  // state — nothing is pre-selected, so no value is fabricated and no argv is added until the user picks.
   const touched = Object.keys(selection).length > 0
   const chosen = options.flatMap((option) => {
     const choice = option.choices.find((candidate) => candidate.id === selection[option.id])

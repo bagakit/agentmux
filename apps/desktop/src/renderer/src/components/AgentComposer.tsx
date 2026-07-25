@@ -1,4 +1,6 @@
 import { AtSign, CornerDownLeft, Paperclip, Square } from 'lucide-react'
+import type { AgentPostureControl } from '@agentmux/core'
+import { PosturePicker } from './PosturePicker'
 
 export type AgentComposerProps = {
   value: string
@@ -6,12 +8,14 @@ export type AgentComposerProps = {
   placeholder: string
   activeFile?: string
   isWorking?: boolean
+  postureControl?: AgentPostureControl
   onChange(value: string): void
   onSubmit?: () => void
   onInterrupt?: () => void
   onReferenceActiveFile?: () => void
   onAttach?: () => void
   onPasteImage?: (image: { bytes: Uint8Array; extension: string }) => void
+  onSetPosture?: (modeId: string) => void
 }
 
 export function AgentComposer({
@@ -20,12 +24,14 @@ export function AgentComposer({
   placeholder,
   activeFile,
   isWorking = false,
+  postureControl,
   onChange,
   onSubmit,
   onInterrupt,
   onReferenceActiveFile,
   onAttach,
-  onPasteImage
+  onPasteImage,
+  onSetPosture
 }: AgentComposerProps) {
   const canSubmit = !disabled && Boolean(onSubmit) && Boolean(value.trim())
 
@@ -81,6 +87,11 @@ export function AgentComposer({
             >
               <AtSign size={14} /> {activeFile.split('/').at(-1)}
             </button>
+          ) : null}
+          {/* Absence hides: only a Provider that declared an addressable posture control renders this,
+              and only while the composer can write to the live process. */}
+          {onSetPosture ? (
+            <PosturePicker control={postureControl} disabled={disabled} onSet={onSetPosture} />
           ) : null}
         </div>
         <div>
