@@ -269,6 +269,10 @@ agentmux stop --session <session-id|self>
   多个都返回 `MESSAGE_TARGET_NOT_UNIQUE` 和按 Session 去重的精确 `candidates`，并提示先
   `inspect --tab`；不用 active Region、标题、顺序或最近焦点猜。这是封闭错误 union，不是
   任意 `details` JSON 袋。
+- 对明确支持 `<id|self>` 的 Session/Tab/Region selector，`self` 是保留字，该域的显式 ID
+  不得等于 `self`。CLI 同时接受 `--flag value` 和标准的 `--flag=value`；当不透明 ID
+  以 `--` 开头时，后一形式仍可无歧义传递。不接受 `self` 关键字的 native/executor 等 ID
+  域不做这一额外限制。
 - `focus` 只接受精确 `--region` 或 `--tab`。不提供 `--session`，因为同一 Session 可以有
   多个展示。
 - `output/interrupt/resume/stop` 始终以 Agent Session 为语义目标；不接受 Tab/Region，
@@ -314,7 +318,10 @@ Launcher Region，Region 多于 slot 时失败关闭。`balance` 按每个 split
 菜单中的 “Copy Tab ID” 复制同一个 `tabId`。“Copy Agent Handoff” 生成一段短 prompt，
 内含 `agentmux inspect --tab <tabId>`、唯一 Agent 时可用的
 `agentmux send --to-tab <tabId> --text <message>`，以及多 Agent 时改用
-`agentmux send --to-session <agentSessionId> --text <message>` 的说明。Tab 关闭后 `tabId` 立即失效。
+`agentmux send --to-session <agentSessionId> --text <message>` 的说明。命令中的不透明 `tabId`
+必须作为一个 POSIX shell argument 进行 quoting，并使用 `--tab=<quoted-id>` /
+`--to-tab=<quoted-id>` 避免 ID 与 flag 语法重叠；单独的 Copy Tab ID 仍复制原始值。Tab 关闭后
+`tabId` 立即失效。
 
 `send --to-tab` 是便利 selector，不是 Tab 通信通道：Desktop 只在当前 Layout Snapshot 中解析唯一
 Agent Session，然后调用同一 Core Provider prompt 合同。Tab 不保存消息、不广播、不成为
