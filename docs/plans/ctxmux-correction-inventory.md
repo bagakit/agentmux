@@ -1,14 +1,12 @@
 # ctxmux 方向修正与资产处置清单
 
-状态：T-010 当前处置基线
+状态：T-010 已完成的处置记录
 Feature：`f-2248f4yx5`
-更新日期：2026-08-11
-
 ## 1. 用途
 
-这份清单回答一个问题：自建 `agentmuxd` 阶段已经产生的代码、测试和文档，哪些属于 AgentMux 的长期能力，哪些应该移植成 Run Kernel 黑盒验证，哪些必须在 ctxmux 切换时删除。
+这份清单记录自建 `agentmuxd` 阶段产生的代码、测试和文档最终如何归属：AgentMux 长期能力被保留，通用 Runtime 证据被收敛为 Run Kernel 黑盒验证，自建 Run Owner 在 ctxmux 切换时删除。
 
-它不是 Migration 计划，也不允许两个 Kernel 长期共存。切换前保持当前产品可运行；切换 Gate 通过后一次删除旧 Owner。
+它不是 Migration 计划，也不允许两个 Kernel 长期共存。T-020 Gate 已一次删除旧 Owner，不保留过渡路径。
 
 ## 2. Keep：AgentMux 长期拥有
 
@@ -43,7 +41,7 @@ Keep 不表示原文件原样不动。包含 `DaemonSession` 等错误命名或 
 
 Conformance 只观察 public Run 行为，不 import ctxmux 或旧 daemon 内部对象，不为了复用白盒断言而建立测试专用后门。
 
-## 4. Delete：ctxmux 切换时直接删除
+## 4. Delete：ctxmux 切换时已经删除
 
 ### 自建 Run Kernel
 
@@ -76,31 +74,20 @@ Conformance 只观察 public Run 行为，不 import ctxmux 或旧 daemon 内部
 - 已经被公共 Conformance 覆盖的重复 daemon-specific 测试；
 - 旧 Benchmark runner 中直接 new `AgentMuxDaemonClient` 的 candidate 路径。
 
-删除发生在 T-020 的同一原子切换，不提前破坏当前产品，也不保留 deprecated export、兼容 facade 或隐藏入口。
+删除发生在 T-020 的同一原子切换，没有保留 deprecated export、兼容 facade 或隐藏入口。
 
 ## 5. 历史文档
 
 下列文档保留为已经执行过的自建 daemon 证据，但必须标记“被 ctxmux 修正取代”，不能作为最终架构或最终 Gate：
 
-- `docs/plans/agentmux-desktop-daemon-cutover.md`
-- `docs/plans/agentmux-ssh-remote.md`
-- `docs/plans/agentmux-package-candidate.md`
-- `docs/plans/agentmux-core-dependency-audit.md`
 - `docs/benchmarks/agentmux-daemon-cutover.md`
 - `.bagakit/feature-tracker/features/f-2248f4yx5/verification.md` 中 T-001～T-008 的历史章节
 
 `docs/testing/strategy.md` 在 T-013 前保留现有测试入口，但其自建 daemon 数据只作为历史 baseline。T-013 把它改写为 Kernel-neutral 测试策略。
 
-## 6. 当前未提交 T-008 资产
+## 6. 永久约束
 
-- `packages/core/package.json` 的 `benchmark` script 与 `scripts/benchmark-daemon-cutover.mjs` 仍指向错误 candidate，不应提交为最终入口；
-- `benchmark-lib.mjs` 与 `benchmark-agent.mjs` 的统计/Fixture 思想可保留，T-013 负责按 Kernel-neutral 边界采用；
-- `/tmp` Debug Result 不进入 Release 证据；其 4 MiB sustained-output timeout 已记录在 T-008 blocker 和方案评审中；
-- 冻结文档与旧失败不覆盖、不改门槛，最终 candidate 需要新 revision 和两轮新 Raw Result。
-
-## 7. 执行约束
-
-- 不继续修复待删 daemon 的 request timeout、operation fingerprint、PID identity、setsid 后代、sync Journal 或 burst backpressure；
-- 不为了等待 ctxmux 新建 Backend Registry、Mock Kernel、fallback 或兼容 API；
-- 只有 public AgentMux domain 与 Kernel-neutral Conformance 可以在接入前继续演进；
-- ctxmux 源码/SDK/发布物的能力结论只由 T-015 的审计和运行证据更新。
+- 不恢复已删除 daemon 的 request timeout、operation fingerprint、PID identity、setsid 后代、sync Journal 或 burst backpressure 实现；
+- 不新建 Backend Registry、Mock Kernel、fallback 或兼容 API；
+- 只有 public AgentMux domain 与 Kernel-neutral Conformance 可以继续演进；
+- ctxmux SDK/artifact 的能力结论只由当前 public contract 和运行证据更新。

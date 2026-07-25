@@ -20,12 +20,14 @@ type WorkerResult = {
   workerId: string
   ok: boolean
   runId?: string
+  revision?: number
+  changed?: boolean
   code?: string
   message?: string
 }
 
 function worker(input: {
-  mode: 'create' | 'resume'
+  mode: 'create' | 'resume' | 'timeline'
   storePath: string
   startPath: string
   workerId: string
@@ -72,14 +74,14 @@ function worker(input: {
   return { ready, result }
 }
 
-async function runRace(mode: 'create' | 'resume', storePath: string, startPath: string) {
+async function runRace(mode: 'create' | 'resume' | 'timeline', storePath: string, startPath: string) {
   const workers = ['left', 'right'].map((workerId) => worker({ mode, storePath, startPath, workerId }))
   await Promise.all(workers.map((item) => item.ready))
   await writeFile(startPath, 'go\n', { mode: 0o600, flag: 'wx' })
   return await Promise.all(workers.map((item) => item.result))
 }
 
-describe('File Store multi-process lifecycle authority', () => {
+describe('File Store multi-process authority', () => {
   it('allows exactly one create and one resume binding commit across processes', async () => {
     const root = await mkdtemp('/private/tmp/agentmux-store-process-')
     roots.push(root)
@@ -116,5 +118,42 @@ describe('File Store multi-process lifecycle authority', () => {
     })
     const documentAfterResume = JSON.parse(await readFile(storePath, 'utf8')) as { reservations: unknown[] }
     expect(documentAfterResume.reservations).toEqual([])
+  })
+
+  it('serializes concurrent Timeline revisions without losing either process update', async () => {
+    const root = await mkdtemp('/private/tmp/agentmux-timeline-process-')
+    roots.push(root)
+    const storePath = join(root, 'agent-sessions.json')
+    const store = new AgentMuxFileAgentSessionStore(storePath)
+    await store.compareAndSwap(null, normalizeStoredAgentSession({
+      kind: 'agent',
+      agentSessionId: 'shared-semantic',
+      providerId: 'codex',
+      executorId: 'codex',
+      hostId: 'local',
+      workspacePath: '/private/tmp/store-race',
+      run: { runId: 'timeline-run' },
+      retiredRuns: [],
+      hookBindingId: 'timeline-binding',
+      hookToken: 'timeline-token',
+      outputCursorBytes: 0,
+      createdAt: 1,
+      updatedAt: 1
+    }))
+
+    const results = await runRace('timeline', storePath, join(root, 'start-timeline'))
+    expect(results.every((result) => result.ok), JSON.stringify(results)).toBe(true)
+    expect(results.map((result) => result.revision).sort((left, right) => (left ?? 0) - (right ?? 0)))
+      .toEqual([1, 2])
+    expect(results.map((result) => result.changed)).toEqual([true, true])
+    await expect(new AgentMuxFileAgentSessionStore(storePath).loadTimeline('shared-semantic'))
+      .resolves.toMatchObject({
+        agentSessionId: 'shared-semantic',
+        revision: 2,
+        items: expect.arrayContaining([
+          expect.objectContaining({ id: 'activity-left' }),
+          expect.objectContaining({ id: 'activity-right' })
+        ])
+      })
   })
 })

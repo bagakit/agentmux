@@ -11,9 +11,9 @@ import {
 } from '../src/main/worktree-service.js'
 
 const config: AppConfig = {
-  version: 4,
+  version: 6,
   hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
-  agents: {},
+  executors: {},
   workspaces: [],
   appearance: { terminalTheme: 'graphite' }
 }

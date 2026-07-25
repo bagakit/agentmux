@@ -7,7 +7,7 @@ import {
 
 function session(input: {
   id: string
-  agentId: string | null
+  providerId: string | null
   hostId?: string
   workspacePath?: string
   processState?: SessionSnapshot['processState']
@@ -24,17 +24,18 @@ function session(input: {
     status: { state: 'running', source: 'kernel', observedAt: 1 },
     latestOutputBytes: 0
   } as const
-  return input.agentId
+  return input.providerId
     ? {
         ...common,
         kind: 'agent',
-        agentId: input.agentId,
+        providerId: input.providerId,
+        executorId: input.providerId,
         control: {} as Extract<SessionSnapshot, { kind: 'agent' }>['control']
       }
     : {
         ...common,
         kind: 'terminal',
-        agentId: null,
+        providerId: null,
         control: {} as Extract<SessionSnapshot, { kind: 'terminal' }>['control']
       }
 }
@@ -42,26 +43,26 @@ function session(input: {
 describe('runningAgentPresenceByWorktree', () => {
   it('groups live Agent sessions by host, worktree and provider', () => {
     const presence = runningAgentPresenceByWorktree([
-      session({ id: 'codex-old', agentId: 'codex', updatedAt: 10 }),
-      session({ id: 'codex-new', agentId: 'codex', updatedAt: 30 }),
-      session({ id: 'claude', agentId: 'claude', updatedAt: 20 }),
-      session({ id: 'other-host', agentId: 'pi', hostId: 'studio', updatedAt: 40 })
+      session({ id: 'codex-old', providerId: 'codex', updatedAt: 10 }),
+      session({ id: 'codex-new', providerId: 'codex', updatedAt: 30 }),
+      session({ id: 'claude', providerId: 'claude', updatedAt: 20 }),
+      session({ id: 'other-host', providerId: 'pi', hostId: 'studio', updatedAt: 40 })
     ])
 
     expect(presence.get(worktreePresenceKey('local', '/repo'))).toEqual([
-      { agentId: 'codex', count: 2, updatedAt: 30 },
-      { agentId: 'claude', count: 1, updatedAt: 20 }
+      { providerId: 'codex', count: 2, updatedAt: 30 },
+      { providerId: 'claude', count: 1, updatedAt: 20 }
     ])
     expect(presence.get(worktreePresenceKey('studio', '/repo'))).toEqual([
-      { agentId: 'pi', count: 1, updatedAt: 40 }
+      { providerId: 'pi', count: 1, updatedAt: 40 }
     ])
   })
 
   it('excludes terminals and non-running Agent Runs', () => {
     const presence = runningAgentPresenceByWorktree([
-      session({ id: 'terminal', agentId: null }),
-      session({ id: 'exited', agentId: 'codex', processState: 'exited' }),
-      session({ id: 'interrupted', agentId: 'claude', processState: 'interrupted' })
+      session({ id: 'terminal', providerId: null }),
+      session({ id: 'exited', providerId: 'codex', processState: 'exited' }),
+      session({ id: 'interrupted', providerId: 'claude', processState: 'interrupted' })
     ])
 
     expect(presence.size).toBe(0)

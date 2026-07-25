@@ -11,7 +11,7 @@ import {
 } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { AgentMuxError } from './errors.js'
-import type { AgentId } from './types.js'
+import type { AgentProviderId } from './types.js'
 
 const MAX_HOOK_FILE_BYTES = 256 * 1024
 const MAX_HOOK_MUTATIONS = 8
@@ -24,13 +24,13 @@ export type AgentManagedHookMutation = {
 }
 
 export type AgentManagedHookPlan = {
-  agentId: AgentId
+  providerId: AgentProviderId
   mutations: readonly AgentManagedHookMutation[]
 }
 
 export type AgentManagedHookPreview = {
   id: string
-  agentId: AgentId
+  providerId: AgentProviderId
   changes: Array<{
     path: string
     action: 'create' | 'replace' | 'unchanged'
@@ -41,7 +41,7 @@ export type AgentManagedHookPreview = {
 
 export type AgentManagedHookInstallReceipt = {
   id: string
-  agentId: AgentId
+  providerId: AgentProviderId
   installedAt: number
   entries: Array<{
     path: string
@@ -147,7 +147,7 @@ export class AgentManagedHookInstaller {
     }
     const preview: AgentManagedHookPreview = {
       id: randomUUID(),
-      agentId: plan.agentId,
+      providerId: plan.providerId,
       changes: mutations.map((mutation) => ({
         path: mutation.path,
         action: mutation.currentHash === mutation.nextHash
@@ -229,7 +229,7 @@ export class AgentManagedHookInstaller {
     }
     return {
       id: previewId,
-      agentId: prepared.preview.agentId,
+      providerId: prepared.preview.providerId,
       installedAt: Date.now(),
       entries
     }

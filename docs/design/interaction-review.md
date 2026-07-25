@@ -1,118 +1,123 @@
-# AgentMux Desktop 交互设计
+# AgentMux Desktop 交互设计合同
 
-本文记录 AgentMux Desktop 当前的产品模型、状态所有权和交互边界。它只描述 AgentMux 自身的事实；实现历史、外部产品对照和任务流水不进入这份长期文档。
+> 当前确认的导航、Tab、分屏和会话栏需求见
+> [`agentmux-project-rail-navigation.md`](../plans/agentmux-project-rail-navigation.md)。
+> Scratch 的 Topic 与 Wiki 合同见
+> [`agentmux-wiki-first-scratch.md`](../plans/agentmux-wiki-first-scratch.md)。
 
-## 产品模型
+## 设计哲学
 
-AgentMux Desktop 是 `packages/core` 的第一方 Client。Core 负责 Agent Provider、Session、进程、终端字节流、权限和交互请求；Desktop 负责 Workspace、文件、浏览器、窗口布局和用户交互。Core 不依赖 Electron 或 React，Desktop 也不绕过 Core 直接管理 Agent 进程。
+- AgentMux 是 Agent-first、terminal-first 的桌面 Client。Agent 状态、用户输入、终端输出和恢复动作必须靠近它们影响的 View。
+- 同一信息只在最合适的位置显示一次。Tab 拥有会话名称和状态；低频 ID、Host 和时间进入 tooltip 或 context menu；Activity 拥有最近消息。
+- 界面层级由 Surface、明度、局部高光和紧凑密度建立，不靠连续边框、重复标题或极小字号制造“专业感”。
+- 选择、键盘、拖拽、菜单和可访问性交互使用维护中的成熟依赖与平台模式。
+- Desktop 只组合 Core 的公共能力。所有 Agent 生命周期都经过 `packages/core`；所有 PTY、进程、Run、Replay 和 Attachment 事实都由 ctxmux 持有。
 
-界面由三层对象组成：
+## 产品对象
 
-1. Project/Workspace Rail 切换工程上下文。
-2. Tools Dock 承载当前 Surface 的高容量工具。Workspace 显示 Files、Branches、Browser Favorites 和 Terminal Shortcuts；Board 显示 Branch Scope、状态图例和统计。
-3. 主区在 Workspace 与 Board 间切换。Workspace 使用递归 Pane 布局，Board 使用二维 `Branch × Status` 矩阵。
+### Project 与 Workspace
 
-Workspace、Board、Branches 和 Session 列表消费同一份 Project、Workspace、Host、Branch 和 Agent 状态投影。界面不建立第二份 Session registry，也不根据标签反推运行时真相。
+- Project Rail 只负责选择 Project/Scratch、显示紧凑状态和进入 Settings/Hosts。
+- Workspace Tools 位于主工作区左侧，负责 Files + Branches、Agents 和 Browser Favorites。
+- Scratch 使用同一工具槽，但内容是 Files + Topics。Topic 来自文件系统，不从打开的 View 反推。
+- Topic 条目的目录动作只在内置 Explorer 中展开、选中并滚动到对应目录，不调用 Finder 或其他系统文件管理器。
+- Topic 条目的改名是对 `topic.md` 一级标题的语义编辑；`topic--*` 目录、`topicId`、Agent cwd 和 View 绑定保持稳定，Explorer 不向这些顶层目录暴露通用 Rename。
+- Project Rail 与 Workspace Tools 分别开关，不能共享状态或互相改变布局身份。
 
-### Workspace 与 Worktree
+### Tab、Tab Group 与 Region
 
-Files 和 Branches 位于同一个可调整的上下分栏。Branch 行展示真实 Worktree 绑定、路径和当前分支状态，并按 `hostId + worktreePath` 投影仍在运行的 Agent。Terminal、历史记录和已退出 Session 不计入运行中 Agent。
+- `View` 是用户认知里的一张完整工作视图，在 Desktop 中表现为一个 Tab。
+- `Tab Group` 用来整理整张 View；移动 Tab 不改变 View 内部内容布局。
+- `Region` 是 View 内的内容 leaf，可展示 Agent、Terminal、File、Browser 或 Launcher。
+- `split-left|right|up|down` 只修改当前 View 的 Region 树；`placement=tab` 只在用户明确要求时创建新 View。
+- Workspace 保存 Tab Group 树，每个 View 保存自己的 Region 树。两个树使用不同 ID、焦点、resize 状态和操作入口。
 
-选择已绑定 Worktree 会一起更新 Selected Worktree、Explorer Root、Breadcrumb 和后续新 Tab 的 Workspace 上下文。已经打开的 File、Agent 和 Terminal Tab 保留原绑定，不被静默换根。选择未绑定 Branch 不执行隐式 checkout；只有 Worktree 创建成功并注册为 Workspace 后才切换。
+### Session、Run 与 View
 
-### Board
+- Agent Session 是 Provider 语义身份；Run 是 ctxmux 进程身份；View/Region 是 Desktop 展示身份。
+- 一个 Session 可以没有 View，也可以投影到多个 View。关闭 Tab 内的 Region 只改变该 View 的内容布局；关闭承载某个 Session 最后一个 Region 的完整 View 时，Terminal 直接停止 Run，Agent 默认停止并二次确认，同时明确提供保留 Session 的选项。
+- Desktop 只持久化 Session/Run 在哪张 View 的哪个 Region，不复制 PTY、Replay、Agent 状态或进程生命周期。
+- 后台 Agent 由 Agents 工具重新发现和打开，不建立第二份 Session Registry。
 
-Board 的纵向行由 Branch/Worktree 决定，横向固定为 Inbox、Working、Needs You 和 Done。Branch 的 Worktree 绑定先解析为 Workspace，Run 再按 `hostId + workspacePath` 进入对应行。`starting/running/working` 映射到 Working，`waiting/blocked/disconnected/error` 映射到 Needs You，`done/exited` 映射到 Done；状态变化只在所属 Branch 行内移动。
+## 界面结构
 
-Inbox 是矩阵第一列。Start discussion 打开携带 Branch 和 Workspace 上下文的创建界面，提交后仍经 Renderer Store、typed IPC 和 Core Client 创建真实 Session。启动失败恢复原创建界面，不生成占位 Run 或第二套任务数据。
+### 顶部与项目栏
 
-## Pane、Tab 与对象级反馈
+- macOS 红绿灯之后固定放 Projects 与 Workspace tools 两个开关，顺序和位置不随面板状态变化。
+- 单 Pane 时，根 Tabbar 与窗口顶行合并；分屏时保留全局 chrome 行，每个 Pane 使用自己的紧凑 Tabbar。
+- Project Rail 展开时只在底部放 Settings 与 Hosts；收起后只保留不遮挡内容的 Settings 角标。
+- Breadcrumb 只展示工作上下文；绝对路径只在文件树根区域可见，并可通过 tooltip 查看完整值。
 
-Workspace 的布局是递归 `leaf | split` 树。每个 Leaf 拥有自己的 Tab Strip、Focused 状态和 Ratio；Tab 可以在同一 Strip 内排序、移入其他 Pane，或拖到 Pane 边缘创建 Right/Down Split。Secondary Pane 清空后折叠对应 Split，最后一个 Tab 关闭后仍保留明确的创建入口。
+### Tab 与 Pane
 
-点击 Focused Pane 的 `+` 会立即创建一个 Tab。初始内容提供 Terminal、Agent 和 Browser 选择，选定后在同一个 Tab 内完成转换。Focused Pane 同时决定文件、创建页和 Session 打开的落点。
+- Agent/Terminal 内容上方只保留一行 Tabbar，不再显示第二条 Session Info Bar。
+- Agent Tab 使用 Provider 图标并叠加语义状态点；Terminal Tab 使用 Terminal 图标，不能用同形状态点同时表达内容身份。
+- Tab 保持稳定可读宽度和单行名称；窄 Pane 使用自身横向 overflow、左右导航和自动滚入可见区。
+- Active Run 的 Stop 是 Tabbar 内的图标动作，继续使用统一确认和 Core stop owner。
+- `Split` 表示拆分当前 View 内容；移动整张 Tab 使用独立命令和拖拽落点，两种预览和结果不能混用。
 
-关闭 Terminal 或 Agent Tab 只关闭该 View，不停止底层 Run，也不要求确认。显式 Stop Run 会影响所有 View，因此需要明确确认。恢复、权限、断连和写入失败都显示在受影响对象旁边。跨对象故障由全局 Toast 汇总。
+### Agent Composer 与 Terminal
 
-Tab 右键菜单只提供已有状态模型可以完成的操作：Close、Close Others、Close Left、Close Right，以及移动到 Right/Down Split。批量关闭遇到 dirty 文件时使用一个可访问确认框统一决定。Tab Pin、颜色和重命名没有对应模型，因此不显示占位动作。
+- Composer 属于 Agent Session Region，不属于 Activity。Agent 的 Terminal 与 Activity 只是同一 Session 的两种投影；切换投影时 Composer 必须保持挂载，不能清空未发送草稿。
+- 每个 Agent Region 都显示同一个 Composer。Agent 尚在启动、已经断连、退出或中断时仍显示，但在 Agent Run 不可交互时禁用；Raw Terminal 永远不显示 Agent Composer。
+- Composer 使用独立、受控、无 Store 依赖的可复用输入组件；Session adapter 负责草稿、当前文件、Submit 与 Interrupt 绑定，为附件和其他富输入能力保留唯一扩展面。
+- Renderer 不根据 `working`、`waiting`、`blocked` 或 `done` 猜测 Prompt readiness。Core 拒绝提交时保留草稿供重试；semantic resume 和恢复动作继续由现有 Owner 负责。
+- Composer 表面透明，只用边界、工具动作和 focus ring 表达层级，不使用黑色填充或黑色投影。
+- Terminal 使用 xterm 的真实字符网格、DPR 和 TUI 输入。Agent Terminal 的 xterm TUI 输入与 Agent Composer 是同一 Agent 的两条明确输入路径；Raw Terminal 只保留 TUI 输入。
+- Terminal 主题只属于 Desktop Renderer。ctxmux、RunSpec 和 Core 公共合同不出现主题字段。
+- Renderer 负责把最新 `cols × rows` 通过 Core 公共 Resize 提交给 ctxmux；resize 热路径只保留一个在途请求和一个最新 pending size。
+- Replay、Live、Gap、ACK 与 Attachment lease 均服从 ctxmux/Core 的 ordered-byte 合同，View 不建立补偿状态机。
 
-### Session 信息与 Provider 身份
+### Explorer 与 Editor
 
-Agent 与 Terminal Pane 使用紧凑信息带展示 Session Name、短 ID、Started、Active、Recent 和 Stop。ID 可以复制完整值，时间复制无损值；Active 取 Runtime `updatedAt` 与结构化 Activity 的最大时间。Recent 只投影最近的 User/Assistant 结构化消息，不从 PTY 文本推断消息或私有思维。
+- Explorer 以 Selected Worktree 为根，使用层级目录、文件夹优先排序、多选、键盘导航、Reveal、刷新和受 Workspace Root 约束的文件操作。
+- Stale response 不能覆盖新 Workspace 或新目录 revision；刷新期间保留现有内容，直到新结果原子替换。
+- 文件 Rename 和删除先由 Desktop Main 完成磁盘操作；成功后，Renderer 用一次纯 reducer 原子更新 Document、Dirty、Last Active、Tab Group 和 View/Region 路径投影。路径映射若会占用已有 Tab、Document 或 Region owner，Renderer 会在请求磁盘操作前拒绝。
+- 路径映射使用 segment-aware 子树判断。受影响保存先被 mutation admission 阻止并等待静止；磁盘失败或最终位置未知时不提交 Renderer 映射。
+- Darwin Local move 使用同一 Desktop owner 构建和分发的原子 no-replace helper，同时执行 Workspace Root-relative、no-follow 和 no-clobber 约束。当前 Renderer 的文件树 Rename 入口使用该能力；helper 缺失或平台无法满足合同会明确返回 typed unsupported，不回退到普通 `rename`、`mv`、重试或事后回滚。
+- 内置 Editor 保存 Topic 的 `topic.md` 后使 Topics 文件系统快照失效并重读，不建立 Renderer Topic Registry。
+- Monaco 只声明当前真正注册的语言能力；未知或未注册语言回落 plaintext，不伪造 tokenizer。
 
-Provider 图标由 `AgentProviderIcon` 统一投影到 Launcher、Tab、Session header、Settings 和 Board。内置 Provider 使用离线资产，未知 Provider 使用中性 Bot 图标。Provider 是否可用由 Core detection 决定，Renderer 不以图标或配置项替代检测结果。
+#### Revision-aware 保存与外部冲突
 
-## Terminal 所有权
+- Desktop Main 的 `WorkspaceFiles` 独占 Workspace Root confinement、磁盘 revision、同目录临时写入、同步、mode 保留、原子替换、单文件观察和磁盘错误事实。Shared contract 与 preload 只暴露 typed read、write、observe 和 move 能力。
+- Read 返回内容和不透明 revision。Write 必须携带 expected revision，只返回 `written | conflict | error`。Remote workspace 无法满足同一原子保存合同时返回 typed unsupported。
+- 临时写入或替换失败会清理临时文件并保持原文件字节不变。普通文件系统 revision 是 optimistic concurrency signal；最终 revision 复核与原子替换之间仍存在外部进程竞争窗口，不宣称强跨进程 compare-and-swap。
+- Renderer 持有 Monaco buffer、dirty、保存 generation、observation generation、document lifetime 和冲突交互。每文件保存串行化；保存期间继续输入时旧 written 回执只更新落盘 revision，不清除更新后的 buffer 或 dirty。
+- Main observation 只发布 `{ workspaceId, path }` 失效事实，Renderer 重新 read。Clean buffer 自动采用新内容与 revision；dirty buffer 保留草稿并进入 changed/deleted conflict；read error 保留最后 buffer且不能伪装成删除。
+- Reload 明确采用 observed disk state。Overwrite 使用最近一次 observed revision；若磁盘再次变化则继续 conflict。旧 save/read completion 不能越过 close、reopen 或 move 的 lifetime 边界修改新文档 owner。
 
-应用外框与 Terminal 使用独立的外观边界。外框使用 Graphite/Mint；Renderer 在创建 xterm 时注入完整 Terminal palette。Settings 只持久化严格的 `terminalTheme` 标识，当前 catalog 提供 Graphite 与 Catppuccin Mocha。主题不进入 `packages/core`、RunSpec、PTY 或 CtxMux 协议。
+### Board 与 Settings
 
-CtxMux 持有 PTY、进程、原始字节、Replay、尺寸和生命周期。Core 将这些能力投影为 Agent 无关的公共 API。Desktop Main 识别 Renderer attach 前出现的 OSC 10/11 查询，等待 Core 发布 ready Session 后再经 Core Input 写回答复；Renderer 消费 Replay 中的历史查询但不重复注入当前进程。
+- Board 是 `Branch/Worktree × Inbox/Working/Needs You/Done` 的二维矩阵。状态变化只在同一 Branch 行内移动。
+- Inbox 是矩阵第一列和带 Branch 上下文的创建入口，不是 Tools 中的重复页面。
+- Settings 按可操作资源优先组织为 Workspaces、Hosts、Agents、Appearance、General；默认打开第一个可操作分区。
+- Agent Detection 以 Host 为键，由 Core discovery 统一投影到 Settings、Launcher 和状态面。
 
-Codex TUI 的输入区属于 PTY 画面。Terminal View 直接把键盘输入交给 xterm/Core，不并列渲染第二个 Composer。Rich Composer 只属于结构化 Activity/Conversation View，提交失败时保留草稿。
+## Owner 边界
 
-xterm 的实际 `cols × rows` 是 Renderer View 真相。Replay 完成后，Renderer 先同步当前网格，再响应 ResizeObserver 的后续变化。首个可测 Render signal 负责替换构造阶段的 `80×24` 默认值。尺寸路径固定为 Desktop Renderer → Core public Resize → CtxMux。
-
-默认 Terminal 使用 `12px` 字号和 `1.0` 行高；Monaco 使用 `14px / 21px`。Browser WebContents 初始 Zoom Factor 为 `0.9`。密度调整必须保留原生 DPR、Canvas backing 和库自身的布局语义，不使用 CSS transform 模拟分辨率。
-
-## Explorer 与 Editor
-
-Explorer 使用文件夹优先的层级树、展开目录缓存、stale response token、刷新时旧 children 保留、行选择、键盘导航和文件操作。Active Editor File 会展开祖先目录并滚动到真实 Row。Rename 和 Delete 会同步重映射或清理 Selection、Tab、Document 与 Last Active File 的对应子树。
-
-文件操作只经 typed preload IPC 到 Desktop Main。Main 负责 Workspace Root confinement 与 Local/Remote transport；Renderer 只持有树投影、选择和交互状态。Local 与 Remote 均支持读取、创建、重命名和删除，Reveal 与单文件观察只支持 Local。Remote revision-aware write 返回 typed unsupported。跨目录 move 不属于当前文件操作合同。
-
-Monaco 负责文本布局、DPR、tokenization 和编辑行为。语言检测使用集中式 filename/extension 注册，启动时把 detector 输出与 `monaco.languages.getLanguages()` 核对。`.vue`、`.svelte`、`.astro` 和 `.jsonl` 由 AgentMux 显式注册；`.ipynb` 使用 `json`，`.mdx` 使用 `mdx`；未注册的 `notebook`、`mermaid`、`makefile`、`cmake`、`erlang`、`haskell`、`csv`、`tsv` 和 `.nim` 回落为 `plaintext`。
-
-### Revision-aware 保存
-
-Desktop Main 的 `WorkspaceFiles` 是 Workspace Root confinement、磁盘 revision、文件写入和单文件观察的唯一 owner。Shared contract 与 preload 只暴露 typed read、write、observe 能力，不持有磁盘状态。
-
-Local read 从实际字节计算不透明 revision。Write 同时按请求路径和最终 physical path 串行，并执行以下顺序：
-
-1. 在目标同目录独占创建临时文件。
-2. 完整写入内容并同步临时文件。
-3. 保留原文件的必要 mode。
-4. 复核 expected revision。
-5. 用原子替换提交完整文件。
-
-临时写入或替换失败会清理临时文件，原文件字节保持不变。Remote workspace 在无法满足同一 revision-aware 原子保存合同的情况下返回 typed unsupported，不提供旧的 revisionless 写入口。
-
-Renderer 持有 Monaco buffer、dirty、保存 generation、observation generation、document lifetime 和冲突交互。保存开始时捕获 buffer、revision、generation 与 lifetime；保存期间继续输入不会被旧 written 回执清除。旧 save/read completion 也不能越过 close→reopen 边界修改新文档 owner。
-
-Main observation 只发布 `{ workspaceId, path }` 失效事实。Renderer 收到失效后重新 read：
-
-- clean buffer 自动采用新内容与 revision；
-- dirty buffer 保留草稿并进入 changed 或 deleted conflict；
-- read error 保留最后 buffer，并显示为独立错误，不能伪装成删除；
-- Reload 明确采用 observed disk state；
-- Overwrite 使用最近一次 observed revision，若磁盘再次变化则继续 conflict。
-
-这里的 revision 是普通文件系统上的 optimistic concurrency signal。最终 revision 复核与 `rename` 是两个独立系统调用，外部进程仍可能在两者之间改写目标；实现缩小并显式暴露冲突窗口，但不宣称内核提供强跨进程 compare-and-swap。
-
-## 状态与资源边界
-
-Renderer 只保留跨资源编排和公共 `useAppStore`，各类纯状态转换按真实资源拆分：
-
-| 资源 | 状态转换 owner | Store 职责 |
+| 事实或动作 | 唯一 Owner | Desktop 的职责 |
 | --- | --- | --- |
-| Pane/Split/Layout | `lib/workbench-layout.ts` | 调用布局操作并处理用户动作参数 |
-| Universal Tab 与 Workspace 投影 | `lib/workbench-tabs.ts` | 组合配置、Session 与当前 Workspace |
-| Session/Activity/View Mode | `lib/session-state.ts` | IPC 副作用、自动聚焦和 Launch 成败编排 |
-| Browser Tab | `lib/browser-state.ts` | WebContents create/navigate/close 副作用 |
-| File/Document/Dirty | `lib/file-workbench-state.ts` | 文件 read/write/create/rename/delete 的 Renderer 状态 |
-| 工具、检测与宿主交互 | `store.ts` | Zustand 组合、跨资源编排和公共 API |
+| PTY、进程、Run、ordered bytes、Replay、Gap、Attachment | ctxmux | 通过 Core 公共 API 消费 |
+| Provider、Agent Session、Hook、Permission、Prompt readiness、Agent status、semantic resume | `packages/core` | 投影状态并发起公共命令 |
+| Tab Group、View、Region、焦点、尺寸与空间组合 | Desktop Renderer | 保存和变更界面布局 |
+| Workspace Root、revision、写入、观察、move、Git、Browser WebContents 与原生系统能力 | Desktop Main | 提供 typed IPC 和最终磁盘事实 |
+| File tree、buffer、dirty、generation、冲突、路径映射与交互 | Desktop Renderer | 消费 Main 事实并原子投影视图状态 |
+| Topic 内容与协作者身份 | Scratch 文件系统 | 枚举、导航和绑定 View |
 
-Session removed 会一起清理 Session、Activity、View Mode、Tab 与 Layout。Browser close 和 File Mutation 只经过各自一个转换 owner。启动中的 Agent/Terminal Tab 使用 `phase: launching | attached`：launch 失败恢复创建界面；attached Session 的 removed 才触发 Session 清理；用户主动关闭的 launching Tab 不会被异步失败回执复活。
+任何一层都不得为方便 UI 再持有第二份 Runtime、Session、Topic、Layout 或磁盘真相。
 
-Desktop 退出时按顺序等待 IPC owner、文件观察、`WorkspaceFiles` observer child 和 Runtime 释放。Mounted package Gate 只在 relocated Main、Helpers 和 observer worker 全部 graceful 退出后通过；隔离 runtime 的长生命周期 CtxMux daemon 由测试 owner 根据 exact artifact path、socket 和 argv 识别并清理，不触碰用户的常规安装。
+## 验收原则
 
-资源判断同时观察进程、WebContents、Core Session、Attachment、Monaco Model、Document、Watcher 和 Event Subscription 数量。Chromium 进程间存在共享页，多个 RSS 数值不能直接相加成应用总内存。只有可重复场景中的 owner 数量或 steady-state 趋势才能支持泄漏判断。
+- 行为验证优先于 CSS 声明：Production Electron 要检查真实尺寸、DPR、overflow、焦点、拖拽落点和恢复结果。
+- 安全与状态一致性不能由截图替代；`pnpm check`、Owner-level tests 和相应 Production Gate 必须通过。
+- 文件保存覆盖继续输入、外部修改、删除、读取失败、写入失败和替换失败；草稿不被静默覆盖，原文件不被失败写入截断。
+- 文件移动覆盖目标碰撞、外部竞争、父目录换根、helper 缺失和 syscall 后回执失败；磁盘未确认成功时 Renderer 状态保持不变。
+- 资源收益只用同一场景的 before/after 数据声明，不强制 GC，不卸载仍使用的 Surface，不增加全局 Cache 框架。
+- Unsupported 能力明确失败关闭；不加兼容层、migration、fallback、第二 Runtime Owner 或隐藏 Registry。
 
-## 验证标准
+## 非目标
 
-- `packages/core` 不依赖 Electron/React，所有 Agent 生命周期都经过 Core public API。
-- Workspace、Board、Branches 和 Session 视图对同一对象给出一致的身份和状态。
-- Pane/Tab 拖拽、分屏、关闭确认和对象级恢复在 Production Electron 中工作，无严重 Overflow。
-- Explorer 的路径、symlink 和 mutation 受 Workspace Root 约束；跨目录 move 不被重命名入口隐式实现。
-- Local save 在继续输入、外部改盘、删除、read error、临时写入失败和替换失败下得到确定结果，草稿和原文件均不被静默覆盖。
-- Mounted Desktop 从 DMG 挂载副本经 LaunchServices 走 Renderer → preload → IPC → `WorkspaceFiles`，并在 Gate 结束时留下零个测试拥有的 Desktop/observer/daemon 进程。
-- `pnpm check`、Desktop typecheck/build、owner tests、故障注入和 mounted package Gate 共同通过；截图不替代状态一致性、安全或 lifecycle 证据。
+- 不把 AgentMux 做成另一个 Run Runtime。
+- 不把 Desktop 布局、Topic、Provider 或 Agent 语义下沉到 ctxmux。
+- 不为命令对称、未来平台或未出现的规模证据预建功能。

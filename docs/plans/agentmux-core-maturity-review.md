@@ -24,7 +24,7 @@ Desktop / CLI / external Node consumer
  Run / PTY / Process / ordered bytes / replay / stop
 ```
 
-2026-08-10 的 `236fce6` 把 Board 讨论中的用户回复“1”错误归因为 mux 选择，并据此把已经在 `b02803b` 固化的 ctxmux 方向反写成自建 `agentmuxd`。这个变更没有可靠的用户确认来源，因此 revision 4 的 Goal 与 Task 不能继续作为方向真相。
+`236fce6` 把 Board 讨论中的用户回复“1”错误归因为 mux 选择，并据此把已经在 `b02803b` 固化的 ctxmux 方向反写成自建 `agentmuxd`。这个变更没有可靠的用户确认来源，因此 revision 4 的 Goal 与 Task 不能继续作为方向真相。
 
 本轮不通过简单回退 Commit 抹掉已经产生的证据。自建 daemon 阶段形成的故障模型、correctness oracle、fixtures、资源测量与 Benchmark 方法保留并改造成 Run Kernel Conformance；重复实现的 PTY、wire、Replay、Journal、Remote Artifact 与进程清理生产代码在 ctxmux 切换时直接删除。
 
@@ -99,7 +99,7 @@ Reattach 原 Run、provider-native resume、spawn 新 Run、创建新 AgentSessi
 
 ## 7. 与其他 Feature 的关系
 
-`f-2258fa79w` 图片与鼠标输入继续保持独立 Feature。2026-08-12 用户要求把 a mature workbench CLI 式 Agent 通信追加到当前 Feature 的最后；因此旧 `f-2268fqs8a` proposal 的成熟约束被吸收到 T-019，并以当前 Feature 为唯一执行真相。旧 proposal 只保留 Tracker 历史，不再并行执行。
+`f-2258fa79w` 图片与鼠标输入继续保持独立 Feature。用户要求把 a mature workbench CLI 式 Agent 通信追加到当前 Feature 的最后；因此旧 `f-2268fqs8a` proposal 的成熟约束被吸收到 T-019，并以当前 Feature 为唯一执行真相。旧 proposal 只保留 Tracker 历史，不再并行执行。
 
 ## 8. 完成门槛
 

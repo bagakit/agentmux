@@ -23,26 +23,42 @@ import {
   MessagesSquare,
   Plus,
   Sparkles,
+  Square,
   SquareTerminal,
   X
 } from 'lucide-react'
-import { lazy, Suspense, useMemo, useState } from 'react'
+import { lazy, Suspense, useMemo, useRef, useState } from 'react'
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
 import { BrowserPane } from './BrowserPane'
 import { AgentProviderIcon } from './AgentProviderIcon'
 import { ConfirmationDialog } from './ConfirmationDialog'
 import { NewTabSurface } from './NewTabSurface'
+import { PaneSplitMenu } from './PaneSplitMenu'
 import { SessionPane } from './SessionPane'
 import { StatusDot } from './StatusDot'
 import { WorkbenchTabContextMenu } from './WorkbenchTabContextMenu'
+import { WorkbenchTabStrip } from './WorkbenchTabStrip'
 import { resolvePaneColumnEdgeZone } from '../lib/tab-drop-zone'
+import { SplitRatioCommitter } from '../lib/split-ratio-commit'
 import { tabIdsForCloseScope } from '../lib/workbench-tab-actions'
+import { SurfaceSwitch, TopRowLeadingChrome } from './TopRowChrome'
 import type {
   SplitDirection,
   TabGroup,
   TabGroupLayoutNode
 } from '../lib/workbench-layout'
-import { documentKey, type WorkbenchTab } from '../lib/workbench-tabs'
+import type { WorkbenchRegionLayoutNode } from '../lib/workbench-view-layout'
+import {
+  activeWorkbenchSurface,
+  documentKey,
+  sessionIdsWithoutViewsAfterClosingTabs,
+  titleWorkbenchSurface,
+  workbenchSurfaces,
+  type WorkbenchSurface,
+  type WorkbenchTab
+} from '../lib/workbench-tabs'
+import { canStopSessionRun, sessionTabTooltip } from '../lib/session-metadata'
+import { api } from '../lib/api'
 import { useAppStore } from '../store'
 
 const EditorPane = lazy(async () => {
@@ -55,14 +71,15 @@ type DropData = DragTabData | { kind: 'pane'; groupId: string }
 type SplitTarget = { groupId: string; direction: SplitDirection }
 
 function tabLabel(tab: WorkbenchTab): string {
-  if (tab.kind === 'file') return tab.path.split('/').at(-1) ?? tab.path
-  if (tab.kind === 'launcher') return 'New Tab'
-  if (tab.kind === 'browser') {
-    return tab.title && tab.title !== 'about:blank'
-      ? tab.title
-      : tab.url === 'about:blank' ? 'New Tab' : tab.url
+  const surface = titleWorkbenchSurface(tab)
+  if (surface.kind === 'file') return surface.path.split('/').at(-1) ?? surface.path
+  if (surface.kind === 'launcher') return 'New Tab'
+  if (surface.kind === 'browser') {
+    return surface.title && surface.title !== 'about:blank'
+      ? surface.title
+      : surface.url === 'about:blank' ? 'New Tab' : surface.url
   }
-  return tab.sessionId
+  return surface.sessionId
 }
 
 function DragPreview({ tab }: { tab: WorkbenchTab }) {
@@ -88,34 +105,58 @@ function SortableWorkbenchTab({
   const tabsById = useAppStore((state) => state.tabs)
   const activateTab = useAppStore((state) => state.activateTab)
   const closeTab = useAppStore((state) => state.closeTab)
-  const splitTab = useAppStore((state) => state.splitTab)
-  const session = tab.kind === 'agent' || tab.kind === 'terminal'
-    ? sessions.find((item) => item.id === tab.sessionId)
+  const moveTabToNewGroup = useAppStore((state) => state.moveTabToNewGroup)
+  const setTabMenuOpen = useAppStore((state) => state.setTabMenuOpen)
+  const surface = titleWorkbenchSurface(tab)
+  const session = surface.kind === 'agent' || surface.kind === 'terminal'
+    ? sessions.find((item) => item.id === surface.sessionId)
     : null
   const dirty =
-    tab.kind === 'file'
-      ? Boolean(dirtyDocuments[documentKey(tab.workspaceId, tab.path)])
+    surface.kind === 'file'
+      ? Boolean(dirtyDocuments[documentKey(surface.workspaceId, surface.path)])
       : false
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: tab.id,
     data: { kind: 'tab', tabId: tab.id, groupId: group.id } satisfies DragTabData
   })
-  const [pendingClose, setPendingClose] = useState<{ tabIds: string[]; dirtyCount: number } | null>(null)
+  const [pendingClose, setPendingClose] = useState<{
+    tabIds: string[]
+    dirtyCount: number
+    agentSessionCount: number
+  } | null>(null)
   const [closing, setClosing] = useState(false)
 
-  async function closeTabs(tabIds: readonly string[]): Promise<void> {
-    for (const tabId of tabIds) await closeTab(workspaceId, group.id, tabId)
+  async function closeTabs(
+    tabIds: readonly string[],
+    keepAgentSessions = false
+  ): Promise<boolean> {
+    for (const tabId of tabIds) {
+      if (!await closeTab(workspaceId, group.id, tabId, { keepAgentSessions })) return false
+    }
+    return true
   }
 
   async function requestTabsClose(tabIds: readonly string[]): Promise<void> {
     const currentTabIds = tabIds.filter((tabId) => group.tabOrder.includes(tabId))
     if (currentTabIds.length === 0 || closing) return
-    const dirtyCount = currentTabIds.filter((tabId) => {
+    const dirtyCount = new Set(currentTabIds.flatMap((tabId) => {
       const candidate = tabsById[tabId]
-      return candidate?.kind === 'file' && dirtyDocuments[documentKey(candidate.workspaceId, candidate.path)]
-    }).length
-    if (dirtyCount > 0) {
-      setPendingClose({ tabIds: currentTabIds, dirtyCount })
+      if (!candidate) return []
+      return workbenchSurfaces(candidate).flatMap((candidateSurface) => (
+        candidateSurface.kind === 'file' && dirtyDocuments[
+          documentKey(candidateSurface.workspaceId, candidateSurface.path)
+        ]
+          ? [documentKey(candidateSurface.workspaceId, candidateSurface.path)]
+          : []
+      ))
+    })).size
+    const agentSessionCount = sessionIdsWithoutViewsAfterClosingTabs(
+      tabsById,
+      currentTabIds,
+      'agent'
+    ).length
+    if (dirtyCount > 0 || agentSessionCount > 0) {
+      setPendingClose({ tabIds: currentTabIds, dirtyCount, agentSessionCount })
       return
     }
     setClosing(true)
@@ -131,12 +172,20 @@ function SortableWorkbenchTab({
     await requestTabsClose([tab.id])
   }
 
-  async function confirmClose(): Promise<void> {
+  async function copySessionId(): Promise<void> {
+    if (!session) return
+    try {
+      await api.ui.writeClipboardText(session.id)
+    } catch (error) {
+      console.warn('[session] failed to copy Session ID', error)
+    }
+  }
+
+  async function confirmClose(keepAgentSessions = false): Promise<void> {
     if (closing || !pendingClose) return
     setClosing(true)
     try {
-      await closeTabs(pendingClose.tabIds)
-      setPendingClose(null)
+      if (await closeTabs(pendingClose.tabIds, keepAgentSessions)) setPendingClose(null)
     } finally {
       setClosing(false)
     }
@@ -152,37 +201,46 @@ function SortableWorkbenchTab({
         canCloseOthers={otherTabs.length > 0}
         canCloseLeft={tabsToLeft.length > 0}
         canCloseRight={tabsToRight.length > 0}
-        canMoveToSplit={group.tabOrder.length > 1}
+        canMoveToNewGroup={group.tabOrder.length > 1}
+        onOpenChange={setTabMenuOpen}
+        {...(session ? { onCopySessionId: () => void copySessionId() } : {})}
         onClose={() => void requestTabsClose([tab.id])}
         onCloseOthers={() => void requestTabsClose(otherTabs)}
         onCloseLeft={() => void requestTabsClose(tabsToLeft)}
         onCloseRight={() => void requestTabsClose(tabsToRight)}
-        onMoveToSplitRight={() => splitTab(workspaceId, tab.id, group.id, group.id, 'right')}
-        onMoveToSplitDown={() => splitTab(workspaceId, tab.id, group.id, group.id, 'down')}
+        onMoveToNewGroup={(direction) => moveTabToNewGroup(
+          workspaceId,
+          tab.id,
+          group.id,
+          group.id,
+          direction
+        )}
       >
         <button
           ref={setNodeRef}
           type="button"
+          data-workbench-tab-id={tab.id}
           className={`workbench-tab ${group.activeTabId === tab.id ? 'workbench-tab--active' : ''} ${
             isDragging ? 'workbench-tab--dragging' : ''
           }`}
           style={{ transform: CSS.Translate.toString(transform), transition }}
+          title={session ? sessionTabTooltip(session) : tabLabel(tab)}
           onClick={() => activateTab(workspaceId, group.id, tab.id)}
           {...attributes}
           {...listeners}
         >
-          {tab.kind === 'agent' || tab.kind === 'terminal' ? (
+          {surface.kind === 'agent' || surface.kind === 'terminal' ? (
             session?.kind === 'agent' ? (
-              <i className="workbench-tab__agent-mark"><AgentProviderIcon agentId={session.agentId} size={13} /><StatusDot status={session.status} /></i>
-            ) : session ? <StatusDot status={session.status} /> : <SquareTerminal size={12} />
-          ) : tab.kind === 'file' ? (
+              <i className="workbench-tab__agent-mark"><AgentProviderIcon providerId={session.providerId} size={13} /><StatusDot status={session.status} /></i>
+            ) : <SquareTerminal size={12} />
+          ) : surface.kind === 'file' ? (
             <FileCode2 size={12} />
-          ) : tab.kind === 'browser' ? (
+          ) : surface.kind === 'browser' ? (
             <Globe2 size={12} />
           ) : (
             <Sparkles size={12} />
           )}
-          <span>{session?.label ?? tabLabel(tab)}</span>
+          <span className="workbench-tab__label">{session?.label ?? tabLabel(tab)}</span>
           {dirty ? <i className="workbench-tab__dirty" aria-label="Unsaved" /> : null}
           <span
             role="button"
@@ -201,14 +259,32 @@ function SortableWorkbenchTab({
       </WorkbenchTabContextMenu>
       <ConfirmationDialog
         open={pendingClose !== null}
-        title="Discard unsaved changes?"
-        description={pendingClose && pendingClose.tabIds.length > 1
-          ? 'Closing these tabs will discard changes that have not been saved.'
-          : 'Closing this editor tab will discard changes that have not been saved.'}
+        title={pendingClose?.agentSessionCount
+          ? pendingClose.agentSessionCount > 1
+            ? `Stop ${pendingClose.agentSessionCount} Agent Sessions?`
+            : 'Stop Agent Session?'
+          : 'Discard unsaved changes?'}
+        description={pendingClose?.agentSessionCount
+          ? `Closing the last View stops ${pendingClose.agentSessionCount > 1 ? 'these Agent Runs' : 'this Agent Run'} by default. Keeping ${pendingClose.agentSessionCount > 1 ? 'the Sessions' : 'the Session'} leaves ${pendingClose.agentSessionCount > 1 ? 'them' : 'it'} running in the background.${pendingClose.dirtyCount ? ' Unsaved editor changes will be discarded.' : ''}`
+          : pendingClose && pendingClose.tabIds.length > 1
+            ? 'Closing these tabs will discard changes that have not been saved.'
+            : 'Closing this editor tab will discard changes that have not been saved.'}
         subject={pendingClose && pendingClose.tabIds.length > 1
-          ? `${pendingClose.tabIds.length} tabs · ${pendingClose.dirtyCount} unsaved`
+          ? [
+              `${pendingClose.tabIds.length} tabs`,
+              pendingClose.agentSessionCount ? `${pendingClose.agentSessionCount} Agent Sessions` : null,
+              pendingClose.dirtyCount ? `${pendingClose.dirtyCount} unsaved` : null
+            ].filter(Boolean).join(' · ')
           : session?.label ?? tabLabel(tab)}
-        confirmLabel="Discard & Close"
+        confirmLabel={pendingClose?.agentSessionCount ? 'Stop & Close' : 'Discard & Close'}
+        {...(pendingClose?.agentSessionCount
+          ? {
+              secondaryLabel: pendingClose.agentSessionCount > 1
+                ? 'Keep Sessions & Close'
+                : 'Keep Session & Close',
+              onSecondary: () => void confirmClose(true)
+            }
+          : {})}
         busy={closing}
         onCancel={() => !closing && setPendingClose(null)}
         onConfirm={() => void confirmClose()}
@@ -217,71 +293,265 @@ function SortableWorkbenchTab({
   )
 }
 
-function PaneContent({
-  tab,
+function SurfaceContent({
+  surface,
+  tabId,
   groupId,
-  nativeSurfacesVisible
+  nativeSurfacesVisible,
+  interactiveResize
 }: {
-  tab: WorkbenchTab | null
+  surface: WorkbenchSurface
+  tabId: string
   groupId: string
   nativeSurfacesVisible: boolean
+  interactiveResize: boolean
 }) {
-  if (!tab) return <NewTabSurface paneId={groupId} />
-  if (tab.kind === 'agent' || tab.kind === 'terminal') return <SessionPane sessionId={tab.sessionId} />
-  if (tab.kind === 'file') {
+  if (surface.kind === 'agent' || surface.kind === 'terminal') {
+    return (
+      <SessionPane
+        sessionId={surface.sessionId}
+        surfaceKind={surface.kind}
+        interactiveResize={interactiveResize}
+      />
+    )
+  }
+  if (surface.kind === 'file') {
     return (
       <Suspense fallback={<section className="pane-state"><strong>Loading editor…</strong></section>}>
-        <EditorPane tabId={tab.id} />
+        <EditorPane tabId={tabId} surface={surface} />
       </Suspense>
     )
   }
-  if (tab.kind === 'browser') return <BrowserPane tab={tab} visible={nativeSurfacesVisible} />
-  return <NewTabSurface paneId={groupId} tabId={tab.id} />
+  if (surface.kind === 'browser') {
+    return (
+      <BrowserPane
+        tab={surface}
+        visible={nativeSurfacesVisible}
+      />
+    )
+  }
+  return <NewTabSurface tabGroupId={groupId} tabId={tabId} regionId={surface.regionId} />
+}
+
+function WorkbenchRegionNode({
+  node,
+  nodePath,
+  tab,
+  groupId,
+  nativeSurfacesVisible,
+  interactiveResize
+}: {
+  node: WorkbenchRegionLayoutNode
+  nodePath: string
+  tab: WorkbenchTab
+  groupId: string
+  nativeSurfacesVisible: boolean
+  interactiveResize: boolean
+}) {
+  const focusRegion = useAppStore((state) => state.focusRegion)
+  const closeRegion = useAppStore((state) => state.closeRegion)
+  const dirtyDocuments = useAppStore((state) => state.dirtyDocuments)
+  const [confirmingClose, setConfirmingClose] = useState(false)
+  if (node.type === 'leaf') {
+    const surface = tab.regions[node.regionId]
+    if (!surface) return null
+    const canClose = Object.keys(tab.regions).length > 1
+    const dirty = surface.kind === 'file' && Boolean(
+      dirtyDocuments[documentKey(surface.workspaceId, surface.path)]
+    )
+    return (
+      <section
+        className={`workbench-region ${tab.layout.activeRegionId === node.regionId ? 'workbench-region--active' : ''}`}
+        data-workbench-region-id={node.regionId}
+        onPointerDown={() => focusRegion(tab.workspaceId, tab.id, node.regionId)}
+      >
+        <SurfaceContent
+          surface={surface}
+          tabId={tab.id}
+          groupId={groupId}
+          nativeSurfacesVisible={nativeSurfacesVisible}
+          interactiveResize={interactiveResize}
+        />
+        {canClose ? (
+          <button
+            type="button"
+            className="workbench-region__close"
+            title="Close split"
+            aria-label="Close split"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation()
+              if (dirty) setConfirmingClose(true)
+              else void closeRegion(tab.workspaceId, tab.id, node.regionId)
+            }}
+          >
+            <X size={12} />
+          </button>
+        ) : null}
+        <ConfirmationDialog
+          open={confirmingClose}
+          title="Discard unsaved changes?"
+          description="Closing this split will discard changes that have not been saved."
+          subject={surface.kind === 'file' ? surface.path : 'Split'}
+          confirmLabel="Discard & Close"
+          onCancel={() => setConfirmingClose(false)}
+          onConfirm={() => {
+            setConfirmingClose(false)
+            void closeRegion(tab.workspaceId, tab.id, node.regionId)
+          }}
+        />
+      </section>
+    )
+  }
+  return (
+    <WorkbenchRegionBranch
+      node={node}
+      nodePath={nodePath}
+      tab={tab}
+      groupId={groupId}
+      nativeSurfacesVisible={nativeSurfacesVisible}
+      interactiveResize={interactiveResize}
+    />
+  )
+}
+
+function WorkbenchRegionBranch({
+  node,
+  nodePath,
+  tab,
+  groupId,
+  nativeSurfacesVisible,
+  interactiveResize
+}: {
+  node: Extract<WorkbenchRegionLayoutNode, { type: 'split' }>
+  nodePath: string
+  tab: WorkbenchTab
+  groupId: string
+  nativeSurfacesVisible: boolean
+  interactiveResize: boolean
+}) {
+  const updateRegionSplitRatio = useAppStore((state) => state.updateRegionSplitRatio)
+  const [dragging, setDragging] = useState(false)
+  const terminalResizeSuspended = interactiveResize || dragging
+  const commitRef = useRef((ratio: number) => (
+    updateRegionSplitRatio(tab.workspaceId, tab.id, nodePath, ratio)
+  ))
+  commitRef.current = (ratio) => updateRegionSplitRatio(tab.workspaceId, tab.id, nodePath, ratio)
+  const committerRef = useRef<SplitRatioCommitter | null>(null)
+  if (committerRef.current === null) {
+    committerRef.current = new SplitRatioCommitter(node.ratio, (ratio) => commitRef.current(ratio))
+  }
+  const committer = committerRef.current
+  committer.synchronizePersistedRatio(node.ratio)
+  return (
+    <PanelGroup
+      direction={node.direction}
+      className="workbench-region-split"
+      onLayout={(sizes) => committer.observeLayout(sizes)}
+    >
+      <Panel defaultSize={node.ratio * 100} minSize={15}>
+        <WorkbenchRegionNode
+          node={node.first}
+          nodePath={nodePath ? `${nodePath}.first` : 'first'}
+          tab={tab}
+          groupId={groupId}
+          nativeSurfacesVisible={nativeSurfacesVisible && !dragging}
+          interactiveResize={terminalResizeSuspended}
+        />
+      </Panel>
+      <PanelResizeHandle
+        className="workbench-region-resize-handle"
+        onDragging={(active) => {
+          committer.setDragging(active)
+          setDragging(active)
+        }}
+      />
+      <Panel defaultSize={(1 - node.ratio) * 100} minSize={15}>
+        <WorkbenchRegionNode
+          node={node.second}
+          nodePath={nodePath ? `${nodePath}.second` : 'second'}
+          tab={tab}
+          groupId={groupId}
+          nativeSurfacesVisible={nativeSurfacesVisible && !dragging}
+          interactiveResize={terminalResizeSuspended}
+        />
+      </Panel>
+    </PanelGroup>
+  )
 }
 
 function PaneGroup({
   group,
   workspaceId,
   splitTarget,
-  nativeSurfacesVisible
+  nativeSurfacesVisible,
+  interactiveResize,
+  isRootLeaf
 }: {
   group: TabGroup
   workspaceId: string
   splitTarget: SplitTarget | null
   nativeSurfacesVisible: boolean
+  interactiveResize: boolean
+  isRootLeaf?: boolean
 }) {
   const tabsById = useAppStore((state) => state.tabs)
   const sessions = useAppStore((state) => state.sessions)
   const layout = useAppStore((state) => state.layouts[workspaceId])
-  const focusPane = useAppStore((state) => state.focusPane)
+  const focusTabGroup = useAppStore((state) => state.focusTabGroup)
   const activateTab = useAppStore((state) => state.activateTab)
   const openLauncher = useAppStore((state) => state.openLauncher)
+  const splitRegion = useAppStore((state) => state.splitRegion)
+  const setTabMenuOpen = useAppStore((state) => state.setTabMenuOpen)
   const setViewMode = useAppStore((state) => state.setViewMode)
   const viewModes = useAppStore((state) => state.viewModes)
+  const stopSession = useAppStore((state) => state.stopSession)
+  const [pendingStopSessionId, setPendingStopSessionId] = useState<string | null>(null)
+  const [stopping, setStopping] = useState(false)
   const { setNodeRef, isOver } = useDroppable({
     id: `pane:${group.id}`,
     data: { kind: 'pane', groupId: group.id } satisfies DropData
   })
   const tabs = group.tabOrder.flatMap((id) => (tabsById[id] ? [tabsById[id]] : []))
   const activeTab = tabs.find((tab) => tab.id === group.activeTabId) ?? null
-  const activeSession =
-    activeTab?.kind === 'agent'
-      ? sessions.find((session) => session.id === activeTab.sessionId)
+  const activeSurface = activeTab ? activeWorkbenchSurface(activeTab) : null
+  const activeRuntimeSession =
+    activeSurface?.kind === 'agent' || activeSurface?.kind === 'terminal'
+      ? sessions.find((session) => session.id === activeSurface.sessionId)
       : null
-  const activeMode = activeSession ? (viewModes[activeSession.id] ?? 'terminal') : null
+  const activeAgentSession = activeRuntimeSession?.kind === 'agent' ? activeRuntimeSession : null
+  const activeMode = activeAgentSession ? (viewModes[activeAgentSession.id] ?? 'terminal') : null
+  const pendingStopSession = pendingStopSessionId
+    ? sessions.find((session) => session.id === pendingStopSessionId) ?? null
+    : null
+
+  async function confirmStop(): Promise<void> {
+    if (!pendingStopSessionId || stopping) return
+    const sessionId = pendingStopSessionId
+    setStopping(true)
+    try {
+      await stopSession(sessionId)
+    } finally {
+      setStopping(false)
+      setPendingStopSessionId(null)
+    }
+  }
 
   return (
     <section
       ref={setNodeRef}
-      className={`pane-group ${layout?.activeGroupId === group.id ? 'pane-group--focused' : ''} ${
+      className={`pane-group ${isRootLeaf ? 'pane-group--root' : ''} ${layout?.activeGroupId === group.id ? 'pane-group--focused' : ''} ${
         isOver ? 'pane-group--drop-over' : ''
       }`}
       data-pane-group-id={group.id}
-      onPointerDown={() => focusPane(workspaceId, group.id)}
+      onPointerDown={() => focusTabGroup(workspaceId, group.id)}
     >
-      <header className="pane-tabbar">
+      <header className={`pane-tabbar ${isRootLeaf ? 'pane-tabbar--root' : ''}`}>
+        {isRootLeaf ? (
+          <TopRowLeadingChrome />
+        ) : null}
         <SortableContext items={group.tabOrder} strategy={horizontalListSortingStrategy}>
-          <div className="pane-tabbar__tabs">
+          <WorkbenchTabStrip activeTabId={group.activeTabId} tabIds={group.tabOrder}>
             {tabs.map((tab) => (
               <SortableWorkbenchTab
                 key={tab.id}
@@ -290,29 +560,49 @@ function PaneGroup({
                 workspaceId={workspaceId}
               />
             ))}
-          </div>
+          </WorkbenchTabStrip>
         </SortableContext>
         <div className="pane-tabbar__actions">
-          {activeSession ? (
+          {activeAgentSession ? (
             <div className="pane-view-toggle" aria-label="Agent view">
               <button
                 type="button"
                 className={activeMode === 'terminal' ? 'selected' : ''}
                 title="Terminal"
-                onClick={() => setViewMode(activeSession.id, 'terminal')}
+                onClick={() => setViewMode(activeAgentSession.id, 'terminal')}
               >
                 <SquareTerminal size={12} />
               </button>
               <button
                 type="button"
-                className={activeMode === 'conversation' ? 'selected' : ''}
+                className={activeMode === 'activity' ? 'selected' : ''}
                 title="Activity"
-                onClick={() => setViewMode(activeSession.id, 'conversation')}
+                onClick={() => setViewMode(activeAgentSession.id, 'activity')}
               >
                 <MessagesSquare size={12} />
               </button>
             </div>
           ) : null}
+          {activeRuntimeSession && canStopSessionRun(activeRuntimeSession) ? (
+            <button
+              type="button"
+              className="pane-action pane-action--stop"
+              title="Stop Run"
+              aria-label={`Stop Run ${activeRuntimeSession.label}`}
+              onClick={() => setPendingStopSessionId(activeRuntimeSession.id)}
+            >
+              <Square size={12} />
+            </button>
+          ) : null}
+          <PaneSplitMenu
+            onOpenChange={setTabMenuOpen}
+            disabled={!activeTab || !activeSurface}
+            onSplit={(direction) => {
+              if (activeTab && activeSurface) {
+                splitRegion(workspaceId, activeTab.id, activeSurface.regionId, direction)
+              }
+            }}
+          />
           <button
             type="button"
             className="pane-action"
@@ -322,10 +612,36 @@ function PaneGroup({
             <Plus size={13} />
           </button>
         </div>
+        {isRootLeaf ? (
+          <div className="pane-tabbar__chrome pane-tabbar__chrome--trailing">
+            <SurfaceSwitch />
+          </div>
+        ) : null}
       </header>
       <div className="pane-body">
-        <PaneContent tab={activeTab} groupId={group.id} nativeSurfacesVisible={nativeSurfacesVisible} />
+        {activeTab ? (
+          <WorkbenchRegionNode
+            node={activeTab.layout.root}
+            nodePath=""
+            tab={activeTab}
+            groupId={group.id}
+            nativeSurfacesVisible={nativeSurfacesVisible}
+            interactiveResize={interactiveResize}
+          />
+        ) : (
+          <NewTabSurface tabGroupId={group.id} />
+        )}
       </div>
+      <ConfirmationDialog
+        open={pendingStopSessionId !== null}
+        title={`Stop this ${pendingStopSession?.kind === 'terminal' ? 'terminal' : 'agent'} Run?`}
+        description="This immediately stops the underlying Run for every open View."
+        subject={pendingStopSession?.label ?? 'Run'}
+        confirmLabel="Stop Run"
+        busy={stopping}
+        onCancel={() => !stopping && setPendingStopSessionId(null)}
+        onConfirm={() => void confirmStop()}
+      />
       {splitTarget?.groupId === group.id ? (
         <div className={`pane-drop-overlay pane-drop-overlay--${splitTarget.direction}`}>
           <span>New split</span>
@@ -340,34 +656,78 @@ function SplitNode({
   nodePath,
   workspaceId,
   splitTarget,
-  nativeSurfacesVisible
+  nativeSurfacesVisible,
+  interactiveResize = false,
+  isRootLeaf = false
 }: {
   node: TabGroupLayoutNode
   nodePath: string
   workspaceId: string
   splitTarget: SplitTarget | null
   nativeSurfacesVisible: boolean
+  interactiveResize?: boolean
+  isRootLeaf?: boolean
 }) {
   const layout = useAppStore((state) => state.layouts[workspaceId])
-  const updateSplitRatio = useAppStore((state) => state.updateSplitRatio)
   if (node.type === 'leaf') {
     const group = layout?.groups.find((candidate) => candidate.id === node.groupId)
     return group ? (
-      <PaneGroup group={group} workspaceId={workspaceId} splitTarget={splitTarget} nativeSurfacesVisible={nativeSurfacesVisible} />
+      <PaneGroup
+        group={group}
+        workspaceId={workspaceId}
+        splitTarget={splitTarget}
+        nativeSurfacesVisible={nativeSurfacesVisible}
+        interactiveResize={interactiveResize}
+        isRootLeaf={isRootLeaf}
+      />
     ) : null
   }
+  return (
+    <SplitBranch
+      node={node}
+      nodePath={nodePath}
+      workspaceId={workspaceId}
+      splitTarget={splitTarget}
+      nativeSurfacesVisible={nativeSurfacesVisible}
+      interactiveResize={interactiveResize}
+    />
+  )
+}
+
+function SplitBranch({
+  node,
+  nodePath,
+  workspaceId,
+  splitTarget,
+  nativeSurfacesVisible,
+  interactiveResize
+}: {
+  node: Extract<TabGroupLayoutNode, { type: 'split' }>
+  nodePath: string
+  workspaceId: string
+  splitTarget: SplitTarget | null
+  nativeSurfacesVisible: boolean
+  interactiveResize: boolean
+}) {
+  const updateSplitRatio = useAppStore((state) => state.updateSplitRatio)
+  const [dragging, setDragging] = useState(false)
+  const terminalResizeSuspended = interactiveResize || dragging
+  const commitRef = useRef((ratio: number) => updateSplitRatio(workspaceId, nodePath, ratio))
+  commitRef.current = (ratio) => updateSplitRatio(workspaceId, nodePath, ratio)
+  const committerRef = useRef<SplitRatioCommitter | null>(null)
+  if (committerRef.current === null) {
+    committerRef.current = new SplitRatioCommitter(
+      node.ratio ?? 0.5,
+      (ratio) => commitRef.current(ratio)
+    )
+  }
+  const committer = committerRef.current
+  committer.synchronizePersistedRatio(node.ratio ?? 0.5)
   return (
     <PanelGroup
       direction={node.direction}
       className="pane-split"
-      onLayout={(sizes) => {
-        const firstSize = sizes[0]
-        if (firstSize === undefined) return
-        const ratio = firstSize / 100
-        if (Math.abs(ratio - (node.ratio ?? 0.5)) > 0.005) {
-          updateSplitRatio(workspaceId, nodePath, ratio)
-        }
-      }}
+      onLayout={(sizes) => committer.observeLayout(sizes)}
     >
       <Panel defaultSize={(node.ratio ?? 0.5) * 100} minSize={15}>
         <SplitNode
@@ -375,17 +735,25 @@ function SplitNode({
           nodePath={nodePath ? `${nodePath}.first` : 'first'}
           workspaceId={workspaceId}
           splitTarget={splitTarget}
-          nativeSurfacesVisible={nativeSurfacesVisible}
+          nativeSurfacesVisible={nativeSurfacesVisible && !dragging}
+          interactiveResize={terminalResizeSuspended}
         />
       </Panel>
-      <PanelResizeHandle className="pane-resize-handle" />
+      <PanelResizeHandle
+        className="pane-resize-handle"
+        onDragging={(active) => {
+          committer.setDragging(active)
+          setDragging(active)
+        }}
+      />
       <Panel defaultSize={(1 - (node.ratio ?? 0.5)) * 100} minSize={15}>
         <SplitNode
           node={node.second}
           nodePath={nodePath ? `${nodePath}.second` : 'second'}
           workspaceId={workspaceId}
           splitTarget={splitTarget}
-          nativeSurfacesVisible={nativeSurfacesVisible}
+          nativeSurfacesVisible={nativeSurfacesVisible && !dragging}
+          interactiveResize={terminalResizeSuspended}
         />
       </Panel>
     </PanelGroup>
@@ -413,11 +781,18 @@ function splitTargetAtPoint(point: { x: number; y: number }): SplitTarget | null
   return direction ? { groupId: pane.dataset.paneGroupId!, direction } : null
 }
 
-export function WorkspaceWorkbench({ workspaceId }: { workspaceId: string }) {
+export function WorkspaceWorkbench({
+  workspaceId,
+  interactiveResize = false
+}: {
+  workspaceId: string
+  interactiveResize?: boolean
+}) {
   const layout = useAppStore((state) => state.layouts[workspaceId])
   const tabs = useAppStore((state) => state.tabs)
   const moveTab = useAppStore((state) => state.moveTab)
-  const splitTab = useAppStore((state) => state.splitTab)
+  const moveTabToNewGroup = useAppStore((state) => state.moveTabToNewGroup)
+  const tabMenuOpen = useAppStore((state) => state.tabMenuOpen)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
   const [activeDrag, setActiveDrag] = useState<DragTabData | null>(null)
   const [splitTarget, setSplitTarget] = useState<SplitTarget | null>(null)
@@ -445,7 +820,7 @@ export function WorkspaceWorkbench({ workspaceId }: { workspaceId: string }) {
     setSplitTarget(null)
     if (!drag) return
     if (target) {
-      splitTab(workspaceId, drag.tabId, drag.groupId, target.groupId, target.direction)
+      moveTabToNewGroup(workspaceId, drag.tabId, drag.groupId, target.groupId, target.direction)
       return
     }
     const over = event.over?.data.current as DropData | undefined
@@ -461,6 +836,10 @@ export function WorkspaceWorkbench({ workspaceId }: { workspaceId: string }) {
   }
 
   if (!layout) return null
+  // MERGE：不分屏时把全局 chrome 注入唯一 pane 的 tabbar（root tabbar）；
+  // 分屏时 tabbar 无法承载全局 chrome，改在 SplitNode 上方渲染一条惰性 chromeline
+  // （无 tab、无 data-pane-group-id，对 pointerWithin 完全透明，不影响 DnD 命中）。
+  const rootIsLeaf = layout.root.type === 'leaf'
   return (
     <DndContext
       sensors={sensors}
@@ -474,13 +853,21 @@ export function WorkspaceWorkbench({ workspaceId }: { workspaceId: string }) {
       }}
       autoScroll={false}
     >
-      <div className="workspace-workbench">
+      <div className={`workspace-workbench ${rootIsLeaf ? 'workspace-workbench--merged' : ''}`}>
+        {rootIsLeaf ? null : (
+          <div className="workbench-chromeline">
+            <TopRowLeadingChrome />
+            <SurfaceSwitch />
+          </div>
+        )}
         <SplitNode
           node={layout.root}
           nodePath=""
           workspaceId={workspaceId}
           splitTarget={splitTarget}
-          nativeSurfacesVisible={activeDrag === null}
+          nativeSurfacesVisible={activeDrag === null && !tabMenuOpen}
+          interactiveResize={interactiveResize}
+          isRootLeaf={rootIsLeaf}
         />
       </div>
       <DragOverlay dropAnimation={null}>

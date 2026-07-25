@@ -1,8 +1,12 @@
 import { EventEmitter } from 'node:events'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AgentMuxAgentSessionStore, AgentMuxWorkspaceView } from '@agentmux/core'
+import type { AgentMuxAgentSessionStore, AgentMuxRuntimeProjection } from '@agentmux/core'
 import type { WebContents } from 'electron'
 import type { AppConfig, SessionControl, SshHostConfig } from '../src/shared/contracts.js'
+import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics.js'
 
 const runtimeFixture = vi.hoisted(() => {
   const createdHosts: Array<{ id: string; dispose: ReturnType<typeof vi.fn> }> = []
@@ -32,7 +36,8 @@ const runtimeFixture = vi.hoisted(() => {
       run: {
         runId,
         kind: 'terminal' as const,
-        agentId: null,
+        providerId: null,
+        executorId: null,
         agentSessionId: null,
         workspacePath: '/repo',
         pid: 42,
@@ -50,7 +55,8 @@ const runtimeFixture = vi.hoisted(() => {
       run: {
         runId: run.runId,
         kind: 'terminal' as const,
-        agentId: null,
+        providerId: null,
+        executorId: null,
         agentSessionId: null,
         workspacePath: '/repo',
         pid: 42,
@@ -89,7 +95,42 @@ const runtimeFixture = vi.hoisted(() => {
       appliedByteRange: { startByte: 0, endByte: Buffer.byteLength(data) },
       acceptedThroughByte: Buffer.byteLength(data)
     }))
-    readonly workspaceView = vi.fn(async (): Promise<AgentMuxWorkspaceView> => ({ hostId: 'fixture', views: [] }))
+    readonly createAgent = vi.fn(async () => {
+      throw new Error('Agent launch fixture stopped after input capture')
+    })
+    readonly stopAgent = vi.fn(async () => {})
+    readonly stopTerminal = vi.fn(async () => {})
+    readonly resizeAgent = vi.fn(async () => ({ runId: 'agent-run', cols: 80, rows: 24 }))
+    readonly resizeTerminal = vi.fn(async (run: { runId: string }, cols: number, rows: number) => ({
+      runId: run.runId,
+      cols,
+      rows
+    }))
+    readonly statusAgent = vi.fn()
+    readonly submitAgentPrompt = vi.fn(async () => {})
+    readonly resumeAgent = vi.fn(async () => {})
+    readonly sessionTimeline = vi.fn(async (agentSessionId: string) => ({
+      agentSessionId,
+      revision: 0,
+      items: []
+    }))
+    readonly providers = {
+      catalog: vi.fn(() => []),
+      get: vi.fn(() => ({
+        catalog: {
+          capabilities: {
+            terminal: true as const,
+            hookEvents: true,
+            timeline: 'complete-events' as const,
+            permission: 'observe' as const,
+            providerResume: true,
+            acp: false,
+            replyCorrelation: 'none' as const
+          }
+        }
+      }))
+    }
+    readonly runtimeProjection = vi.fn(async (): Promise<AgentMuxRuntimeProjection> => ({ hostId: 'fixture', subjects: [] }))
     readonly runtimeIdentity = vi.fn(() => ({
       protocolVersion: 5,
       buildIdentity: '0.1.0',
@@ -138,13 +179,17 @@ const store: AgentMuxAgentSessionStore = {
   async claimStaleLifecycles() { return [] },
   async releaseLifecycle() {},
   async retireRuns() {},
-  async commitLifecycle() {}
+  async commitLifecycle() {},
+  async loadTimeline(agentSessionId: string) { return { agentSessionId, revision: 0, items: [] } },
+  async applyTimelineMutation(mutation: { agentSessionId: string }) {
+    return { agentSessionId: mutation.agentSessionId, revision: 1, changed: true, mutation }
+  },
 }
 
 const localConfig: AppConfig = {
-  version: 4,
+  version: 6,
   hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
-  agents: {},
+  executors: {},
   workspaces: [],
   appearance: { terminalTheme: 'graphite' }
 }
@@ -174,6 +219,50 @@ function webContentsFixture(id = 17): WebContents & EventEmitter {
     isDestroyed: () => false,
     send: vi.fn()
   }) as unknown as WebContents & EventEmitter
+}
+
+function agentStatusFixture() {
+  const run = {
+    runId: 'run-1',
+    kind: 'agent' as const,
+    providerId: 'codex',
+    executorId: 'review',
+    agentSessionId: 'agent-1',
+    workspacePath: '/repo',
+    pid: 42,
+    state: 'exited' as const,
+    cols: 80,
+    rows: 24,
+    observedAt: 2,
+    latestOutputBytes: 12,
+    acceptedInputBytes: 4,
+    exitCode: 0
+  }
+  return {
+    session: {
+      kind: 'agent' as const,
+      agentSessionId: 'agent-1',
+      providerId: 'codex',
+      executorId: 'review',
+      hostId: 'local',
+      workspacePath: '/repo',
+      run: { runId: run.runId },
+      retiredRuns: [],
+      outputCursorBytes: 0,
+      createdAt: 1,
+      updatedAt: 2
+    },
+    run,
+    capabilities: {
+      terminal: true as const,
+      hookEvents: true,
+      timeline: 'complete-events' as const,
+      permission: 'observe' as const,
+      providerResume: true,
+      acp: false,
+      replyCorrelation: 'none' as const
+    }
+  }
 }
 
 describe('RuntimeController configuration transaction', () => {
@@ -224,6 +313,349 @@ describe('RuntimeController configuration transaction', () => {
     }, next)).rejects.toThrow('being reconfigured')
 
     controller.commit(preparation)
+  })
+
+  it.each([true, false])('passes the Executor guide setting and Provider identity to Core (%s)', async (injectAgentMuxGuide) => {
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const config: AppConfig = {
+      ...localConfig,
+      executors: {
+        'codex-review': { label: 'Codex review', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide }
+      }
+    }
+
+    await expect(controller.launchAgent({
+      executorId: 'codex-review',
+      hostId: 'local',
+      workspacePath: '/repo',
+      prompt: 'Open Claude on the right.'
+    }, config)).rejects.toThrow('stopped after input capture')
+
+    expect(client.createAgent).toHaveBeenCalledWith(expect.objectContaining({
+      providerId: 'codex',
+      executorId: 'codex-review',
+      injectAgentMuxGuide,
+      prompt: 'Open Claude on the right.'
+    }))
+  })
+
+  it('launches a Scratch Agent inside its filesystem Topic with wiki context', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-runtime-topic-'))
+    try {
+      const controller = await configuredController()
+      const client = runtimeFixture.FakeClient.instances[0]!
+      const config: AppConfig = {
+        ...localConfig,
+        executors: {
+          codex: {
+            label: 'Codex',
+            providerId: 'codex',
+            command: 'codex',
+            args: [],
+            env: { EXECUTOR_SETTING: 'kept' },
+            injectAgentMuxGuide: true
+          }
+        },
+        workspaces: [{
+          id: SCRATCH_WORKSPACE_ID,
+          name: 'Scratch',
+          hostId: 'local',
+          path: root,
+          kind: 'folder'
+        }]
+      }
+
+      await expect(controller.launchAgent({
+        executorId: 'codex',
+        hostId: 'local',
+        workspacePath: root,
+        scratchTopicId: 'view:shared-work',
+        agentSessionId: 'agent-one',
+        prompt: 'Ship the result'
+      }, config)).rejects.toThrow('stopped after input capture')
+
+      expect(client.createAgent).toHaveBeenCalledWith(expect.objectContaining({
+        workspacePath: expect.stringMatching(/topic--view--shared-work$/),
+        env: expect.objectContaining({
+          EXECUTOR_SETTING: 'kept',
+          AGENTMUX_WIKI_DIR: expect.stringMatching(/topic--view--shared-work$/)
+        }),
+        prompt: expect.stringContaining('Inspect .agents/')
+      }))
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('launches two Executors through one Provider with their own commands and arguments', async () => {
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const config: AppConfig = {
+      ...localConfig,
+      executors: {
+        review: {
+          label: 'Review Codex',
+          providerId: 'codex',
+          command: '/opt/codex-review',
+          args: ['--model', 'review'],
+          env: { CODEX_PROFILE: 'review' },
+          injectAgentMuxGuide: true
+        },
+        ship: {
+          label: 'Ship Codex',
+          providerId: 'codex',
+          command: '/opt/codex-ship',
+          args: ['--full-auto'],
+          env: { CODEX_PROFILE: 'ship' },
+          injectAgentMuxGuide: false
+        }
+      }
+    }
+
+    for (const executorId of ['review', 'ship']) {
+      await expect(controller.launchAgent({
+        executorId,
+        hostId: 'local',
+        workspacePath: '/repo'
+      }, config)).rejects.toThrow('stopped after input capture')
+    }
+
+    expect(client.createAgent).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      executorId: 'review',
+      providerId: 'codex',
+      commandOverride: '/opt/codex-review',
+      args: ['--model', 'review'],
+      env: { CODEX_PROFILE: 'review' }
+    }))
+    expect(client.createAgent).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      executorId: 'ship',
+      providerId: 'codex',
+      commandOverride: '/opt/codex-ship',
+      args: ['--full-auto'],
+      env: { CODEX_PROFILE: 'ship' }
+    }))
+  })
+
+  it('returns a Session and its revision baseline from one Agent launch result', async () => {
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const status = agentStatusFixture()
+    client.createAgent.mockResolvedValue(status.session)
+    client.runtimeProjection.mockResolvedValue({
+      hostId: 'local',
+      subjects: [{
+        subjectId: 'agent:local:agent-1',
+        kind: 'agent',
+        hostId: 'local',
+        workspacePath: '/repo',
+        providerId: status.session.providerId,
+        executorId: status.session.executorId,
+        agentSession: status.session,
+        run: status.run
+      }]
+    })
+    const timeline = {
+      agentSessionId: status.session.agentSessionId,
+      revision: 1,
+      items: []
+    }
+    client.sessionTimeline.mockResolvedValue(timeline)
+    const config: AppConfig = {
+      ...localConfig,
+      executors: {
+        review: {
+          label: 'Review Codex',
+          providerId: 'codex',
+          command: 'codex',
+          args: [],
+          env: {},
+          injectAgentMuxGuide: true
+        }
+      }
+    }
+
+    await expect(controller.launchAgent({
+      executorId: 'review',
+      hostId: 'local',
+      workspacePath: '/repo',
+      agentSessionId: 'agent-1'
+    }, config)).resolves.toMatchObject({
+      session: { id: 'agent-1', kind: 'agent' },
+      timeline
+    })
+    expect(client.stopAgent).not.toHaveBeenCalled()
+  })
+
+  it('stops a created Agent when its launch projection cannot produce the matching Timeline baseline', async () => {
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const status = agentStatusFixture()
+    client.createAgent.mockResolvedValue(status.session)
+    client.runtimeProjection.mockResolvedValue({
+      hostId: 'local',
+      subjects: [{
+        subjectId: 'agent:local:agent-1',
+        kind: 'agent',
+        hostId: 'local',
+        workspacePath: '/repo',
+        providerId: status.session.providerId,
+        executorId: status.session.executorId,
+        agentSession: status.session,
+        run: status.run
+      }]
+    })
+    client.sessionTimeline.mockResolvedValue({ agentSessionId: 'another-session', revision: 0, items: [] })
+    const config: AppConfig = {
+      ...localConfig,
+      executors: {
+        review: {
+          label: 'Review Codex',
+          providerId: 'codex',
+          command: 'codex',
+          args: [],
+          env: {},
+          injectAgentMuxGuide: true
+        }
+      }
+    }
+
+    await expect(controller.launchAgent({
+      executorId: 'review',
+      hostId: 'local',
+      workspacePath: '/repo',
+      agentSessionId: 'agent-1'
+    }, config)).rejects.toThrow('Agent launch returned a Timeline for another Session')
+    expect(client.stopAgent).toHaveBeenCalledWith('agent-1', { runId: 'run-1' })
+  })
+
+  it.each(['submitPrompt', 'recoverSession'] as const)(
+    'fails %s closed when an existing Executor was rebound to another Provider',
+    async (operation) => {
+      const controller = await configuredController()
+      const client = runtimeFixture.FakeClient.instances[0]!
+      client.statusAgent.mockResolvedValue(agentStatusFixture())
+      const config: AppConfig = {
+        ...localConfig,
+        executors: {
+          review: {
+            label: 'Claude review',
+            providerId: 'claude',
+            command: 'claude',
+            args: ['--resume'],
+            env: {},
+            injectAgentMuxGuide: true
+          }
+        }
+      }
+      const control = {
+        kind: 'agent' as const,
+        hostId: 'local',
+        agentSessionId: 'agent-1',
+        run: { runId: 'run-1' }
+      }
+
+      const result = operation === 'submitPrompt'
+        ? controller.submitPrompt(control, 'continue', config)
+        : controller.recoverSession(control, config)
+
+      await expect(result).rejects.toThrow(
+        'Agent Executor review is bound to Provider claude, but this Session uses Provider codex'
+      )
+      expect(client.resumeAgent).not.toHaveBeenCalled()
+      expect(client.submitAgentPrompt).not.toHaveBeenCalled()
+    }
+  )
+
+  it('does not project a rebound Executor label onto a Session owned by another Provider', async () => {
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const status = agentStatusFixture()
+    client.runtimeProjection.mockResolvedValue({
+      hostId: 'local',
+      subjects: [{
+        subjectId: 'agent:local:agent-1',
+        kind: 'agent',
+        hostId: 'local',
+        workspacePath: '/repo',
+        providerId: status.session.providerId,
+        executorId: status.session.executorId,
+        agentSession: status.session,
+        run: status.run
+      }]
+    })
+    const snapshot = await controller.snapshot({
+      ...localConfig,
+      executors: {
+        review: {
+          label: 'Claude review',
+          providerId: 'claude',
+          command: 'claude',
+          args: [],
+          env: {},
+          injectAgentMuxGuide: true
+        }
+      },
+      workspaces: [{ id: 'workspace', name: 'Repository', hostId: 'local', path: '/repo', kind: 'folder' }]
+    })
+
+    expect(snapshot.sessions[0]).toMatchObject({
+      id: 'agent-1',
+      providerId: 'codex',
+      executorId: 'review',
+      label: 'review · Repository'
+    })
+    expect(client.sessionTimeline).toHaveBeenCalledWith('agent-1')
+  })
+
+  it('rejects a Runtime snapshot whose Timeline belongs to another Session', async () => {
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const status = agentStatusFixture()
+    client.runtimeProjection.mockResolvedValue({
+      hostId: 'local',
+      subjects: [{
+        subjectId: 'agent:local:agent-1',
+        kind: 'agent',
+        hostId: 'local',
+        workspacePath: '/repo',
+        providerId: status.session.providerId,
+        executorId: status.session.executorId,
+        agentSession: status.session,
+        run: status.run
+      }]
+    })
+    client.sessionTimeline.mockResolvedValue({ agentSessionId: 'another-session', revision: 0, items: [] })
+
+    await expect(controller.snapshot(localConfig)).rejects.toThrow(
+      'Runtime snapshot returned a Timeline for another Session: another-session'
+    )
+  })
+
+  it('reprojects membership when an Agent disappears before its Timeline can be read', async () => {
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const status = agentStatusFixture()
+    client.runtimeProjection
+      .mockResolvedValueOnce({
+        hostId: 'local',
+        subjects: [{
+          subjectId: 'agent:local:agent-1',
+          kind: 'agent',
+          hostId: 'local',
+          workspacePath: '/repo',
+          providerId: status.session.providerId,
+          executorId: status.session.executorId,
+          agentSession: status.session,
+          run: status.run
+        }]
+      })
+      .mockResolvedValueOnce({ hostId: 'local', subjects: [] })
+    client.sessionTimeline.mockRejectedValueOnce(new Error('Agent Session no longer exists'))
+
+    await expect(controller.snapshot(localConfig)).resolves.toEqual({ sessions: [], timelines: {} })
+    expect(client.runtimeProjection).toHaveBeenCalledTimes(2)
+    expect(client.sessionTimeline).toHaveBeenCalledOnce()
   })
 
   it('serializes terminal Input with one retained owner and advancing byte boundaries', async () => {
@@ -287,7 +719,8 @@ describe('RuntimeController configuration transaction', () => {
       session: {
         kind: 'agent',
         agentSessionId: 'agent-1',
-        agentId: 'codex',
+        providerId: 'codex',
+        executorId: 'codex',
         hostId: 'local',
         workspacePath: '/repo',
         run: { runId: 'run-1' },
@@ -311,17 +744,18 @@ describe('RuntimeController configuration transaction', () => {
     const client = runtimeFixture.FakeClient.instances[0]!
     const renderer = webContentsFixture()
     const detachRenderer = controller.attach(renderer)
-    client.workspaceView.mockResolvedValue({
+    client.runtimeProjection.mockResolvedValue({
       hostId: 'local',
-      views: [{
-        viewId: 'terminal-view:local:run-1',
+      subjects: [{
+        subjectId: 'terminal:local:run-1',
         kind: 'terminal',
         hostId: 'local',
         workspacePath: '/repo',
         run: {
           runId: 'run-1',
           kind: 'terminal',
-          agentId: null,
+          providerId: null,
+          executorId: null,
           agentSessionId: null,
           workspacePath: '/repo',
           pid: 42,
@@ -380,6 +814,131 @@ describe('RuntimeController configuration transaction', () => {
     detachRenderer()
   })
 
+  it('serializes Attachment-owned resize with exact-Run Stop and revokes late viewport work', async () => {
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const renderer = webContentsFixture()
+    const detachRenderer = controller.attach(renderer)
+    const control: SessionControl = {
+      kind: 'terminal',
+      hostId: 'local',
+      runId: 'run-1',
+      run: { runId: 'run-1' }
+    }
+    client.runtimeProjection.mockResolvedValue({
+      hostId: 'local',
+      subjects: [{
+        subjectId: 'terminal:local:run-1',
+        kind: 'terminal',
+        hostId: 'local',
+        workspacePath: '/repo',
+        run: {
+          runId: 'run-1', kind: 'terminal', providerId: null, executorId: null, agentSessionId: null,
+          workspacePath: '/repo', pid: 42, state: 'running', cols: 80, rows: 24,
+          observedAt: 1, latestOutputBytes: 12, acceptedInputBytes: 4
+        }
+      }]
+    })
+    const attachment = await controller.attachSession(renderer.id, control, 0, localConfig)
+    await expect(controller.resizeSessionAttachment(
+      renderer.id + 1,
+      attachment.attachmentId,
+      100,
+      30
+    )).rejects.toThrow('different Desktop client')
+
+    const resizeEntered = deferred<void>()
+    const releaseResize = deferred<void>()
+    client.resizeTerminal.mockImplementationOnce(async (run, cols, rows) => {
+      resizeEntered.resolve()
+      await releaseResize.promise
+      return { runId: run.runId, cols, rows }
+    })
+    const resize = controller.resizeSessionAttachment(
+      renderer.id,
+      attachment.attachmentId,
+      120,
+      40
+    )
+    await resizeEntered.promise
+    const stop = controller.stopSession(control)
+    await Promise.resolve()
+    expect(client.stopTerminal).not.toHaveBeenCalled()
+
+    releaseResize.resolve()
+    await Promise.all([resize, stop])
+    expect(client.resizeTerminal).toHaveBeenCalledOnce()
+    expect(client.resizeTerminal).toHaveBeenCalledWith(control.run, 120, 40)
+    expect(client.stopTerminal).toHaveBeenCalledWith(control.run)
+    expect(controller.resourceOwnerCounts()).toEqual({
+      sessionAttachmentOwners: 0,
+      sessionAttachmentLeases: 0
+    })
+
+    await expect(controller.resizeSessionAttachment(
+      renderer.id,
+      attachment.attachmentId,
+      140,
+      50
+    )).resolves.toBeUndefined()
+    expect(client.resizeTerminal).toHaveBeenCalledOnce()
+    detachRenderer()
+  })
+
+  it('revokes a late Attachment resize that queues behind an in-flight Stop', async () => {
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const renderer = webContentsFixture()
+    const detachRenderer = controller.attach(renderer)
+    const control: SessionControl = {
+      kind: 'terminal',
+      hostId: 'local',
+      runId: 'run-1',
+      run: { runId: 'run-1' }
+    }
+    client.runtimeProjection.mockResolvedValue({
+      hostId: 'local',
+      subjects: [{
+        subjectId: 'terminal:local:run-1',
+        kind: 'terminal',
+        hostId: 'local',
+        workspacePath: '/repo',
+        run: {
+          runId: 'run-1', kind: 'terminal', providerId: null, executorId: null, agentSessionId: null,
+          workspacePath: '/repo', pid: 42, state: 'running', cols: 80, rows: 24,
+          observedAt: 1, latestOutputBytes: 12, acceptedInputBytes: 4
+        }
+      }]
+    })
+    const attachment = await controller.attachSession(renderer.id, control, 0, localConfig)
+    const stopEntered = deferred<void>()
+    const releaseStop = deferred<void>()
+    client.stopTerminal.mockImplementationOnce(async () => {
+      stopEntered.resolve()
+      await releaseStop.promise
+    })
+
+    const stop = controller.stopSession(control)
+    await stopEntered.promise
+    const resize = controller.resizeSessionAttachment(
+      renderer.id,
+      attachment.attachmentId,
+      120,
+      40
+    )
+    await Promise.resolve()
+    expect(client.resizeTerminal).not.toHaveBeenCalled()
+
+    releaseStop.resolve()
+    await Promise.all([stop, resize])
+    expect(client.resizeTerminal).not.toHaveBeenCalled()
+    expect(controller.resourceOwnerCounts()).toEqual({
+      sessionAttachmentOwners: 0,
+      sessionAttachmentLeases: 0
+    })
+    detachRenderer()
+  })
+
   it('rolls back an in-flight attach when its Renderer generation disappears', async () => {
     const controller = await configuredController()
     const client = runtimeFixture.FakeClient.instances[0]!
@@ -391,15 +950,15 @@ describe('RuntimeController configuration transaction', () => {
       runId: 'run-1',
       run: { runId: 'run-1' }
     }
-    client.workspaceView.mockResolvedValue({
+    client.runtimeProjection.mockResolvedValue({
       hostId: 'local',
-      views: [{
-        viewId: 'terminal-view:local:run-1',
+      subjects: [{
+        subjectId: 'terminal:local:run-1',
         kind: 'terminal',
         hostId: 'local',
         workspacePath: '/repo',
         run: {
-          runId: 'run-1', kind: 'terminal', agentId: null, agentSessionId: null,
+          runId: 'run-1', kind: 'terminal', providerId: null, executorId: null, agentSessionId: null,
           workspacePath: '/repo', pid: 42, state: 'running', cols: 80, rows: 24,
           observedAt: 1, latestOutputBytes: 12, acceptedInputBytes: 4
         }
@@ -412,7 +971,7 @@ describe('RuntimeController configuration transaction', () => {
     renderer.emit('render-process-gone')
     pending.resolve({
       run: {
-        runId: 'run-1', kind: 'terminal', agentId: null, agentSessionId: null,
+        runId: 'run-1', kind: 'terminal', providerId: null, executorId: null, agentSessionId: null,
         workspacePath: '/repo', pid: 42, state: 'running', cols: 80, rows: 24,
         observedAt: 1, latestOutputBytes: 12, acceptedInputBytes: 4
       },
@@ -438,7 +997,7 @@ describe('RuntimeController configuration transaction', () => {
       session: { agentSessionId: 'agent-1' },
       attachment: {
         run: {
-          runId: 'new-run', kind: 'agent', agentId: 'codex', agentSessionId: 'agent-1',
+          runId: 'new-run', kind: 'agent', providerId: 'codex', executorId: 'codex', agentSessionId: 'agent-1',
           workspacePath: '/repo', pid: 42, state: 'running', cols: 80, rows: 24,
           observedAt: 1, latestOutputBytes: 12, acceptedInputBytes: 4
         },

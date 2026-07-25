@@ -1,50 +1,50 @@
 import {
   AlertTriangle,
-  LayoutDashboard,
-  LoaderCircle,
-  PanelLeftClose,
-  PanelLeftOpen,
-  RadioTower,
-  SquareTerminal
+  LoaderCircle
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { BrandIcon } from './components/BrandIcon'
 import { useSidebarResize } from './hooks/useSidebarResize'
 import {
   TOOL_DOCK_MAX_WIDTH,
-  TOOL_DOCK_MIN_WIDTH
+  getRenderedToolDockWidth,
+  getToolDockMinimumWidth
 } from './lib/surface-tool-dock'
-import { projectWorkspaces } from './lib/workspace-projects'
 import { SettingsPanel, type SettingsSectionId } from './components/SettingsPanel'
+import { ProjectRailToolbar } from './components/ProjectRailToolbar'
+import { SurfaceSwitch, TopRowLeadingChrome } from './components/TopRowChrome'
 import { WorkspaceBoard } from './components/WorkspaceBoard'
 import { WorkspaceSidebar } from './components/WorkspaceSidebar'
 import { SurfaceToolDock } from './components/SurfaceToolDock'
 import { WorkspaceWorkbench } from './components/WorkspaceWorkbench'
+import { api } from './lib/api'
 import { useAppStore } from './store'
 
 export function App() {
   const [settingsRoute, setSettingsRoute] = useState<{ section: SettingsSectionId } | null>(null)
+  const [windowResizeActive, setWindowResizeActive] = useState(false)
   const initialize = useAppStore((state) => state.initialize)
   const loading = useAppStore((state) => state.loading)
   const error = useAppStore((state) => state.error)
   const config = useAppStore((state) => state.config)
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
   const mainSurface = useAppStore((state) => state.mainSurface)
+  const projectRailOpen = useAppStore((state) => state.projectRailOpen)
   const toolsOpen = useAppStore((state) => state.toolsOpen)
   const toolDockWidth = useAppStore((state) => state.toolDockWidth)
-  const setMainSurface = useAppStore((state) => state.setMainSurface)
-  const toggleTools = useAppStore((state) => state.toggleTools)
   const setToolDockWidth = useAppStore((state) => state.setToolDockWidth)
   const workspace = config?.workspaces.find((item) => item.id === activeWorkspaceId)
-  const project = projectWorkspaces(config?.workspaces ?? []).find((candidate) =>
-    candidate.workspaces.some((item) => item.id === activeWorkspaceId)
-  )
   const toolsAvailable = mainSurface === 'board' || Boolean(workspace)
   const toolsVisible = toolsAvailable && toolsOpen
+  const toolDockMinimumWidth = getToolDockMinimumWidth(projectRailOpen)
+  const renderedToolDockWidth = getRenderedToolDockWidth(toolDockWidth, projectRailOpen)
+  // MERGE：workbench + workspace 时顶行下沉进 pane（root tabbar / chromeline），
+  // 主区不再占用独立 topbar 行；Board 与欢迎页仍走顶栏。
+  const mergedTopRow = mainSurface === 'workbench' && Boolean(workspace)
   const { containerRef, isResizing, onResizeStart } = useSidebarResize<HTMLDivElement>({
     isOpen: toolsVisible,
     width: toolDockWidth,
-    minWidth: TOOL_DOCK_MIN_WIDTH,
+    minWidth: toolDockMinimumWidth,
     maxWidth: TOOL_DOCK_MAX_WIDTH,
     deltaSign: 1,
     setWidth: setToolDockWidth
@@ -62,6 +62,8 @@ export function App() {
       dispose()
     }
   }, [initialize])
+
+  useEffect(() => api.ui.onWindowResize(({ active }) => setWindowResizeActive(active)), [])
 
   if (loading) {
     return (
@@ -93,41 +95,26 @@ export function App() {
   )
 
   return (
-    <div className="app-shell">
-      <WorkspaceSidebar
-        onOpenSettings={() => setSettingsRoute({ section: 'general' })}
-      />
-      <main className="main-shell">
-        <header className="topbar">
-          <div className="topbar__leading">
-            <button
-              className={`icon-button topbar-tools-button ${toolsOpen ? 'topbar-tools-button--active' : ''}`}
-              aria-label={`${toolsOpen ? 'Hide' : 'Show'} ${mainSurface === 'board' ? 'board' : 'workspace'} tools`}
-              title={`${toolsOpen ? 'Hide' : 'Show'} ${mainSurface === 'board' ? 'board' : 'workspace'} tools`}
-              aria-pressed={toolsOpen}
-              data-surface-tools-toggle
-              disabled={!toolsAvailable}
-              onClick={toggleTools}
-            >
-              {toolsOpen ? <PanelLeftClose size={15} /> : <PanelLeftOpen size={15} />}
-            </button>
-            <div className="breadcrumbs">
-              <strong>{mainSurface === 'board' ? 'Board' : (workspace?.name ?? 'Workspace')}</strong>
-              {mainSurface === 'board' && project
-                ? <><span>/</span><span>{project.name}</span></>
-                : workspace ? <><span>/</span><span>{workspace.branch ?? workspace.path}</span></> : null}
-              {(mainSurface === 'board' ? project?.hostId : workspace?.hostId) !== 'local' ? (
-                <span className="host-pill"><RadioTower size={11} /> {mainSurface === 'board' ? project?.hostId : workspace?.hostId}</span>
-              ) : null}
+    <div className={`app-shell ${projectRailOpen ? '' : 'app-shell--project-rail-collapsed'}`}>
+      {projectRailOpen ? (
+        <WorkspaceSidebar
+          onOpenSettings={(section) => setSettingsRoute({ section })}
+        />
+      ) : (
+        <ProjectRailToolbar
+          collapsed
+          onOpenSettings={(section) => setSettingsRoute({ section })}
+        />
+      )}
+      <main className={`main-shell ${mergedTopRow ? 'main-shell--merged' : ''}`}>
+        {!mergedTopRow ? (
+          <header className="topbar">
+            <TopRowLeadingChrome />
+            <div className="topbar__actions">
+              <SurfaceSwitch />
             </div>
-          </div>
-          <div className="topbar__actions">
-            <div className="surface-switch" role="group" aria-label="Main view">
-              <button className={mainSurface === 'workbench' ? 'selected' : ''} onClick={() => setMainSurface('workbench')}><SquareTerminal size={13} /> Workspace</button>
-              <button className={mainSurface === 'board' ? 'selected' : ''} onClick={() => setMainSurface('board')}><LayoutDashboard size={13} /> Board</button>
-            </div>
-          </div>
-        </header>
+          </header>
+        ) : null}
         {!workspace && mainSurface === 'workbench' ? (
           <section className="welcome">
             <span className="brand-mark brand-mark--large"><BrandIcon size={34} /></span>
@@ -150,16 +137,16 @@ export function App() {
                   role="separator"
                   aria-label="Resize surface tools"
                   aria-orientation="vertical"
-                  aria-valuemin={TOOL_DOCK_MIN_WIDTH}
+                  aria-valuemin={toolDockMinimumWidth}
                   aria-valuemax={TOOL_DOCK_MAX_WIDTH}
-                  aria-valuenow={toolDockWidth}
+                  aria-valuenow={renderedToolDockWidth}
                   tabIndex={0}
                   onMouseDown={onResizeStart}
                   onKeyDown={(event) => {
                     if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
                     event.preventDefault()
                     setToolDockWidth(
-                      toolDockWidth + (event.key === 'ArrowRight' ? 16 : -16)
+                      renderedToolDockWidth + (event.key === 'ArrowRight' ? 16 : -16)
                     )
                   }}
                 />
@@ -168,7 +155,12 @@ export function App() {
             <section className="workspace-main-surface">
               {mainSurface === 'board'
                 ? <WorkspaceBoard />
-                : workspace ? <WorkspaceWorkbench workspaceId={workspace.id} /> : null}
+                : workspace ? (
+                  <WorkspaceWorkbench
+                    workspaceId={workspace.id}
+                    interactiveResize={windowResizeActive || isResizing}
+                  />
+                ) : null}
             </section>
           </div>
         )}

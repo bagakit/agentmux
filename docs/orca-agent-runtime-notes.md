@@ -1,9 +1,9 @@
 # a mature workbench Agent Runtime 源码解读与 AgentMux 提取边界
 
 对照源码：`~/proj/github/a mature workbench`，版本
-`6da7b8e9cfe62e5b4d34bb52e8c570036c1935fc`（2026-08-08）。
+`6da7b8e9cfe62e5b4d34bb52e8c570036c1935fc`。
 
-T-002 在 2026-08-10 又通过 CodeGraph 复核了 a mature workbench
+T-002 又通过 CodeGraph 复核了 a mature workbench
 `34f2a62cdaf58dc5924a3b01f560f91b53a5c277` 的
 `src/main/pty/posix-pty-process-groups.ts` 与对应测试。AgentMux 直接采用其已验证的
 PTY 范围识别模式：先用 `ps -p` 获取根进程的 TTY，再用 `ps -t` 限定同一终端，
@@ -18,7 +18,7 @@ PTY 的模式；AgentMux 没有复制 a mature workbench 的 ssh2 Transport、Re
 兼容 GC 或 Provider 体系，而是继续使用用户确认的系统 OpenSSH 与同一份 Daemon
 Protocol。
 
-T-004 在 2026-08-11 通过 CodeGraph 复核 a mature workbench 当前
+T-004 通过 CodeGraph 复核 a mature workbench 当前
 `src/shared/tui-agent-config.ts`、`src/shared/agent-session-resume.ts` 与 Managed Hook
 实现：采用声明式 executable / expected process / prompt delivery、Provider Session
 Handle 与 Daemon Attach 分离、配置写入前 Generation Check 和只移除自有 Hook 的模式。
@@ -46,7 +46,7 @@ Agent Adapter -> Startup Plan -> Terminal / Session Owner
                           Normalized Event Stream
 ```
 
-旧的 Desktop Redesign Feature 曾保留真实 tmux，随后 Core Maturity 又实现了自建 `agentmuxd`。2026-08-11 的方向修正恢复 ctxmux 为唯一 Run Kernel：a mature workbench 的 Attach-only、Incarnation、增量输出、Replay、背压和进程树清理继续作为 Conformance 证据，但 AgentMux 不再复制这些通用 mux 实现，也不复制 a mature workbench 的账户、Relay 或兼容历史。
+旧的 Desktop Redesign Feature 曾保留真实 tmux，随后 Core Maturity 又实现了自建 `agentmuxd`。方向修正恢复 ctxmux 为唯一 Run Kernel：a mature workbench 的 Attach-only、Incarnation、增量输出、Replay、背压和进程树清理继续作为 Conformance 证据，但 AgentMux 不再复制这些通用 mux 实现，也不复制 a mature workbench 的账户、Relay 或兼容历史。
 
 ## 1. Agent 启动规划由数据驱动
 
@@ -108,12 +108,16 @@ AgentMux 不会在首个交付中静默修改 `~/.claude`、`~/.codex`、Hermes 
 
 ## 5. 当前 AgentMux 公共领域模型
 
-T-011 把过时的 Session 混合模型直接替换为 Run、Agent Session、Attachment 与 View，不保留类型别名或 IPC 兼容层：
+T-011 把过时的 Session 混合模型直接替换为 Run、Agent Session 与 Attachment；后续
+Composition 纵切又把 Core Runtime Projection 与真实 Client View 明确分开，不保留旧类型别名：
 
 ```ts
 type AgentMuxRunRef = { runId: string }
 type AgentMuxAgentSession = { agentSessionId: string; run: AgentMuxRunRef }
 type AgentMuxRunAttachment = { run: AgentMuxRun; replay: AgentMuxRunDataEvent[]; gap: AgentMuxRunReplayGap | null }
+type AgentMuxRuntimeProjection = { hostId: string; subjects: AgentMuxRuntimeSubject[] }
+
+// Composition presentation，由具体 Client 的 Layout SSOT 构造
 type AgentMuxView = AgentMuxAgentView | AgentMuxTerminalView
 ```
 
@@ -140,7 +144,10 @@ Renderer 不直接启动进程，也不持有 SSH Client。
 a mature workbench Desktop Browser 主要使用 Renderer `<webview>`，而 Offscreen/Headless 路径由 Main Process `BrowserWindow` 持有。AgentMux 已确认采用 Electron 维护中的 `WebContentsView`：
 
 - `BrowserViewManager` 在 Main Process 创建、导航、定位、隐藏和销毁 View；
-- Renderer 只通过 Typed Preload IPC 发送 Browser Intent 与像素 Bounds；
+- Renderer 只通过 Typed Preload IPC 发送 Browser Intent 与 Bounds；像 a mature workbench 的 DOM Browser 容器一样，
+  几何以 Renderer 容器为准。DOM 给出的 CSS 像素先按 preload 读取的 `webFrame` Zoom Factor 换算为
+  BrowserWindow DIP；窗口或侧栏交互缩放期间原生 View 继续跟随容器，但同一时刻最多一个 bounds
+  IPC 在途，积压值只保留最新一份，不把每个中间尺寸无界排队推给 Main；
 - Browser Tab 非活动、拖拽中、切到 Board 或被窄窗口 Navigator 覆盖时，Main-owned View 会隐藏；
 - Back、Forward、Reload、Title、Loading、Error 和 Render-process Gone 都回投为 Browser Event；
 - Permission Check/Request 默认全部拒绝；每次页面完成导航后重新应用 0.9 Zoom，避免跨 Origin 导航恢复为默认比例；
@@ -170,7 +177,7 @@ Browser 不属于 Agent Runtime，也不通过 Agent Daemon。它属于 Desktop 
 当前 Feature 最终采用：
 
 - ctxmux 作为 Local/SSH 唯一 Run/PTY/Process Owner；
-- AgentMux 明确区分 Run、AgentSession、Attachment 与 View；
+- AgentMux 明确区分 Run、AgentSession、Attachment、Runtime Subject 与真实 Client View；
 - Create/Attach、Incarnation、Incremental Output、Replay/Gap、Backpressure、Applied Size 与 Stop 作为 Kernel-neutral Conformance，而不是 AgentMux 私有实现；
 - Provider、ACP、Hook、Permission、Evidence 与 provider-native Resume 继续由 AgentMux 拥有。
 
@@ -186,9 +193,13 @@ Browser 不属于 Agent Runtime，也不通过 Agent Daemon。它属于 Desktop 
 
 ## 8. a mature workbench CLI 的 Agent 间通信边界
 
-2026-08-12 通过当时安装版本的 `a mature workbench skills get a mature workbench-cli` 与 `a mature workbench skills get orchestration` 复核了 a mature workbench 的公开通信合同。2026-08-13 又复核当前 a mature workbench `1.4.176`：`terminal switch --terminal <runtime-issued handle>` 的公开语义是让 a mature workbench UI 切换到对应 Terminal Tab；它是 Client 焦点操作，不是 Terminal Attach、Agent Resume 或进程生命周期操作。
+先通过当时安装版本的 `a mature workbench skills get a mature workbench-cli` 与 `a mature workbench skills get orchestration` 复核 a mature workbench 的公开通信合同，随后又复核 a mature workbench `1.4.176`：`terminal switch --terminal <runtime-issued handle>` 的公开语义是让 a mature workbench UI 切换到对应 Terminal Tab；它是 Client 焦点操作，不是 Terminal Attach、Agent Resume 或进程生命周期操作。
 
-AgentMux 采用这一交互合同，但保留自己的身份边界：Raw Terminal 使用 runtime-issued Terminal/View ID；Agent 调用使用稳定 `agentSessionId`，由 Core-owned Resolver 唯一映射到当前已打开 View，再通过 typed Desktop control 聚焦。unknown、ambiguous、stale、not-open 目标失败关闭；不猜测最近 Tab，不隐式 Open/Attach/Resume，也不让 CLI 或 Renderer 建立第二索引。
+AgentMux 采用“空间动作属于 Client”的边界，但当前公开面不只聚焦：受管 Agent 用稳定
+`agentSessionId` 查询自己的唯一 Desktop View，再通过同一个 typed Composition Control 执行
+`context`、`view open/focus` 与配置 Agent `launch`。Renderer 从唯一 Layout SSOT 构造 View 集合，
+Core 只提供纯解析规则和版本化合同，不拥有 View Registry。unknown、ambiguous、stale、not-open
+目标失败关闭；不猜最近 Tab，不隐式 Resume，也不让 ctxmux 或 CLI 建立第二索引。
 
 真正值得采用的也不是“向另一个终端发送字符串”，而是把低层终端输入与可恢复的 Agent 通信分开：
 

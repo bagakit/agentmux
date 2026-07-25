@@ -1,93 +1,114 @@
-# AgentMux × a mature workbench Surface 与密度清单
+# AgentMux Surface 与密度合同
 
-本文最初服务 Feature `f-2238fbdxh` / Task `T-010`，用户体验复审后由其后继任务继续维护。它固定视觉参考、层级预算和控件所有权，避免把“像 a mature workbench”误解为像素级换皮。
+> 产品交互与 Owner 边界见
+> [`interaction-review.md`](./interaction-review.md)；导航与会话栏需求见
+> [`agentmux-project-rail-navigation.md`](../plans/agentmux-project-rail-navigation.md)。
 
-## Reference Provenance
+本文只保存当前视觉规则、密度预算和控件 Owner。历史实现步骤、来源记录、截图流水和过期数值不属于设计真相。
 
-- `style_reference`：a mature workbench `34f2a62cdaf58dc5924a3b01f560f91b53a5c277`，2026-08-09 从干净 `main` 工作树读取。
-- 取证方式：先由 a mature workbench `.codegraph/` 追踪符号与调用关系，再核对当前源码。
-- T-010 参考路径：
-  - `src/renderer/src/components/right-sidebar/index.tsx`
-  - `src/renderer/src/components/right-sidebar/right-sidebar-width.ts`
-  - `src/renderer/src/components/right-sidebar/right-sidebar-titlebar-drag-regions.ts`
-  - `src/renderer/src/hooks/useSidebarResize.ts`
-  - `src/renderer/src/lib/desktop-window-chrome.ts`
-  - `src/renderer/src/store/slices/editor.ts`
-- T-011 的 Explorer / Editor 移植仍以审计时固定的 a mature workbench `6da7b8e9cfe62e5b4d34bb52e8c570036c1935fc` 为源码基线；视觉参考更新不改变该来源。
-- T-020 的 Tab Context Menu 参考成熟工作台 `c0a775454a29667c3f9fbfeef356e31e1e2acbe0` 的 Radix 浮层、Focus Surface 与 Tab Action 分组；AgentMux 保留 Graphite / Mint，不复制主题系统。
-- AgentMux 基线：`c0478938afb3eb014f45adb9f1d4f4e10fa067b8`，实现发生在当前树且不创建兼容层。
+## 保护原则
 
-a mature workbench 在本任务中证明的是成熟模式，而不是配色答案：Sidebar owner 同时拥有展开状态、所选工具、像素宽度、Resize 和活动条；36px Titlebar / Activity Strip 明确划分 drag 与 no-drag；面板只在语义边界保留分隔，内容层级主要靠 Surface 和密度建立。
-
-## Protected-Principle Gate
-
-- `protected_goal_or_principle`：保留 AgentMux 的 Graphite / Mint、Terminal-first 身份，同时删除顶部空行、线框拼装和低分辨率感；Tools 固定在右侧主区标题之前，并按 Workspace/Board 切换子 Tab。
-- `project_native_strategy`：复用 Zustand 的 Workspace UI truth、现有 File / Browser / Terminal / Agent Tab 动作、`react-resizable-panels` 的上下分栏；像素宽度拖拽直接移植并最小适配 a mature workbench 的 `useSidebarResize`。
-- `failure_boundary`：新增第二套 Terminal / Agent / Browser 生命周期、插件发现／市场／脚本运行时、假可用 Bookmark、全局配置或 Migration，均判定为失败；Board 与 mux Runtime 不在 T-010 改动。
-- `proof_plan`：状态与 Resize 纯函数测试、四个入口的真实 Store 转换、`pnpm check`、目标窗口 Rendered 截图，以及透明图标的 RGBA / ICNS 校验。
+- 保留 Graphite / Mint 与 terminal-first 的产品身份。
+- 删除顶部空行、重复标题、线框拼装和低分辨率感。
+- 描边不作为控件的主要视觉手段；Surface 填充、明度差、顶部高光和状态色承担层级。
+- 一个身份层级只在一个主要位置可见；低频信息进入 tooltip、context menu 或 Activity。
+- 视觉改动不得创建第二套 Agent、Terminal、Browser、Topic 或 Layout 生命周期。
 
 ## Surface 层级
 
 | 层级 | Surface | 用途 | 边界规则 |
 | --- | --- | --- | --- |
 | S0 | `--bg` / `--surface-0` | Window 与 Pane 工作面 | 不用连续网格包围；分屏边界除外 |
-| S1 | `--surface-1` | Project Rail、Workspace Tool Dock、Titlebar Plane | 用明度差和局部阴影分组，只保留拥有 Resize 或 Window 分区语义的边界 |
-| S2 | `--surface-2` | Hover、工具内容块、搜索与局部 Toolbar | 无默认描边；交互时才提升 |
+| S1 | `--surface-1` | Project Rail、Tool Dock、Titlebar Plane | 用明度差和局部阴影分组，只保留 resize 或窗口分区边界 |
+| S2 | `--surface-2` | Hover、工具内容块、搜索与局部 Toolbar | 默认无描边；交互时提升 |
 | S3 | `--surface-3` | Selected、Segment、Badge、浮层按钮 | 小面积使用，不铺成整列 |
 | Accent | Mint / Blue / Amber / Red | Focus、Host、Attention、Danger | 颜色表达状态，不兼任布局线 |
 
-## Density Budget
+## 控件语言
 
-| 对象 | 预算 | 理由 |
+| 层级 | 视觉语言 | 用途 |
 | --- | --- | --- |
-| Titlebar Plane | 42px | Topbar 从窗口顶边开始；左侧只为 macOS Traffic Lights 留 76px 安全区；Tools 位于右侧主区标题之前 |
-| Workspace Tool Activity Strip | 36px | 与 a mature workbench 成熟活动条一致，容纳四个 28px 命中区 |
-| Pane Tabbar | 31px | Universal Tab 使用更精巧的工作区索引高度；Split Drop Zone 消费同一 CSS truth |
-| Session Info Bar | 28px | Name / ID / Started / Active / Recent 单行投影；不重复 Tab 的 Provider + Running 文案 |
-| Explorer / Branch Section Header | 32–34px | 清晰但不形成第二层大 Topbar |
-| Tree Row | 24px | 保持专家密度与键盘扫描速度 |
-| Tool Dock Width | 默认 300px；最小 236px；最大 440px | 同时容纳 Explorer / Branches，且给主工作面保留容量 |
-| Tool Content Padding | 8–12px | 只用于局部卡片；不再以统一大 Padding 包住整栏 |
-| Tab Context Menu | 192px 宽；24px Row；6px 横向 Padding | 以 Surface、阴影与 Hover 建立层级，避免重边框和松散系统菜单感 |
-| Agent Provider Catalog | 142px 最小列宽；44px Card；最多 268px 高 | 三列优先、容器独立滚动；20 个 Provider 不扩大 Launcher 的窗口占用 |
-| 操作与元数据文字 | 11–13px；必要微标不低于 10px | 不再用 7–9px 冒充专家密度 |
-| Terminal / Editor 内容 | Terminal `12px / 1.2`；Editor `14px / 21px` | 由 xterm/Monaco 原生 DPR 渲染，不加 CSS transform 缩放；Terminal 作为高吞吐字符界面采用与周围 10–11px 操作层级相称的 12px 基线，Editor 保持面向长文阅读的 14px 基线 |
+| Primary | 实心品牌绿渐变、深色文字、顶部高光 | 页面唯一主操作 |
+| Secondary | 干净 Surface 填充、软高光、无常驻描边 | 次级操作与行内确认 |
+| Ghost / Icon | 透明底，hover 才提升 Surface | 图标按钮与工具栏动作 |
+| Selected | 单一几何信号；实心图标格或底部横条 | Project、Segment 与 Tab 选中态 |
+| Danger | 实心红色变体、深色文字、顶部高光 | 删除、移除等破坏性主操作 |
 
-小于等于 900px 时 Tool Dock 作为覆盖层出现，宽度仍取同一 Store truth；不得复制一套移动端状态。
+补充规则：
 
-## Control Ownership
+- 同一语义在不同容器中使用同一控件层级。
+- hover 提升 Surface 明度；active 用内阴影表达按下，不靠边框位移。
+- 输入聚焦统一使用 `--focus-line` 与 `--focus-ring`。
+- 圆角只使用 `--radius-sm`、`--radius`、`--radius-lg` 三档；状态点和微标可保留更小值。
+- Tab 选中态使用轻微背景和底部 2px 横条，不使用顶部高光或整圈描边。
+
+## 身份归属
+
+| 位置 | 主要身份 | 不应重复的内容 |
+| --- | --- | --- |
+| Project Rail Row | 选择了哪个 Project、Host、活动数 | 完整路径与 Session 详情 |
+| Topbar Breadcrumb | 当前主区 Workspace 与 Branch | 完整绝对路径 |
+| Tool Dock Header | 文件树根与可见路径 | 第二个同义图标或重复 Breadcrumb |
+| Session Tab | Session 名称、Provider、状态 | 第二条 Session Info Bar |
+| Tooltip / Context Menu | Session ID、Host、开始/活动时间 | 常驻占用内容高度 |
+| Activity View | 最近消息和结构化事件 | Terminal 上方的重复摘要 |
+
+## 顶行与 Tabbar
+
+- Projects 与 Workspace tools 两个固定开关位于 macOS 红绿灯之后，只用 active treatment 表达开合，不翻转图标方向。
+- 单 Pane 时根 Tabbar 与窗口顶行合并为 36px；分屏时使用 36px 全局 chrome 行和每 Pane 31px Tabbar。
+- Tool Dock header 与相邻顶行对齐。非交互品牌标记不进入功能按钮组。
+- Tab DOM 始终保留在自己的 Pane owner 下；顶行合并不得改变 DnD、split 或 focus 的状态归属。
+- Agent/Terminal Pane 不显示 Session Info Bar。Stop Run 进入 Tabbar；Recent message 回到 Activity。
+
+## 密度预算
+
+| 对象 | 预算 | 说明 |
+| --- | --- | --- |
+| Titlebar Plane / root Tabbar | 36px | 与窗口顶边和相邻 header 对齐 |
+| Pane Tabbar | 31px | 分屏 leaf 的紧凑索引高度 |
+| Project Rail Footer / Corner Badge | 32px / 28px | Footer 只容纳两个 24px 图标入口 |
+| Explorer / Branch Header | 32–34px | 不形成第二层大 Topbar |
+| Tree Row | 24px | 保持键盘扫描和专家密度 |
+| Tool Dock Width | 默认 300px；最小 236px；最大 440px | 同时容纳 Explorer / Branches，保留主工作面容量 |
+| Tool Content Padding | 8–12px | 仅用于局部卡片，不包住整栏 |
+| Tab Context Menu | 192px 宽；24px Row；6px 横向 Padding | 用 Surface、阴影和 Hover 建立层级 |
+| Agent Provider Catalog | 142px 最小列宽；44px Card；最多 268px 高 | 容器独立滚动，不扩大 Launcher |
+| 操作与元数据文字 | 11–13px；微标不低于 10px | 不用 7–9px 冒充密度 |
+| Terminal / Editor | Terminal `12px / 1.0`；Editor `14px / 21px` | 由 xterm/Monaco 原生 DPR 渲染，不使用 CSS transform |
+
+## Owner
 
 | 控件 / 状态 | Owner | 下游行为 |
 | --- | --- | --- |
-| `toolsOpen` | Renderer Store | 收起／恢复同一个二级 Tool Dock；Workspace 与 Board 共用 |
-| `workspaceTool` | Renderer Store | `files-branches / browser-favorites / terminal-shortcuts` 三选一 |
-| `toolDockWidth` | Renderer Store | Workspace/Board 共享像素宽度；拖拽中直接更新 owner DOM，结束时写回，避免 React 回弹 |
-| Explorer | Workspace Tool Panel | 展示 File / Branches；打开 File 继续进入 Focused Pane |
-| Browser Favorites | Workspace Tool Panel | 只调用 Main-owned Browser Universal Tab；收藏真相必须来自一个 owner，不能用临时按钮伪装持久化 |
-| Terminal Shortcuts | Workspace Tool Panel | 只调用 `packages/core` 既有 Terminal launch action |
-| Agent Launch | Universal New Tab | 不属于 Tools；继续由 Pane `+` 打开 Agent 创建面 |
-| Agent Provider Catalog | Universal New Tab / Renderer projection | 只投影 Config + Core Detection；开放 Agent ID，按 Available / Not installed 分组，不复制 Provider Registry |
-| Branch Board | Board Tool Panel | 只显示 Project Scope、四列图例和真实 Run 数量；Inbox 位于主矩阵，不保留单选 `boardTool` 状态 |
-| Titlebar drag | Titlebar Plane | Breadcrumb 可拖拽；按钮、Tab 和输入区全部 `no-drag` |
-| Traffic Lights Safe Area | Project Rail Titlebar | 只在窗口左上保留 76px，不再让右侧主区空出整行 |
+| `projectsOpen` | Renderer Store | 只展开或收起 Project Rail |
+| `toolsOpen` | Renderer Store | 收起或恢复同一个 Workspace Tool Dock |
+| `workspaceTool` | Renderer Store | `files-branches / agents / browser-favorites` 三选一 |
+| `toolDockWidth` | Renderer Store | 拖拽中更新 owner DOM，结束时写回唯一状态 |
+| Explorer / Topics | Workspace Tool Panel | 枚举真实文件系统并打开到 Focused View |
+| Agents | Workspace Tool Panel | 投影现有 Agent Session，不创建第二 Registry |
+| Browser Favorites | Workspace Tool Panel | 只路由 Main-owned Browser View |
+| Agent Launch | Universal New Tab / Topic Launcher | 通过 Core 创建 Session，不属于 Tools 状态 |
+| Branch Board | Board Surface | 投影 Project Scope、四列状态和真实 Run 数量 |
+| Titlebar drag | Titlebar Plane | Breadcrumb 可拖拽；按钮、Tab、输入区全部 no-drag |
 
-## 重复 Token 审计
+## 响应式与可访问性
 
-实现前 `styles.css` 有 82 条 `1px solid/dashed` 规则、63 次 `--line/--line-soft` 使用和 131 条 Padding 声明。数量本身不是错误，但当前根结构连续使用 `sidebar border → topbar border → tool header border → pane border`，形成无语义的 1px 网格；同时 `window-drag-region + sidebar/main padding-top: 38px` 让有效内容整体下移。
+- Tool Dock 变为覆盖层时仍消费同一宽度和开合 truth，不复制移动端状态。
+- 每个图标按钮必须有 tooltip、`aria-label` 和可见键盘 focus。
+- Tab 名称始终单行；过长省略，空间不足时由 Pane 内横向 overflow 解决。
+- Surface 明度和状态色必须保持足够对比；不可只靠颜色区分选中、危险或不可用。
 
-T-010 只清理根结构和新工具 Surface 的重复线，不机会主义重写 Settings、Board 或 T-011 文件树内部细节。Pane Split、Resize Handle、Editor Dirty、危险确认等具有明确语义的边界继续保留。
+## 验收
 
-## Copy / Adapt / Omit
+- Production Electron 验证真实 DOM 尺寸、DPR、Canvas backing、Tab overflow、拖拽落点与窗口 drag/no-drag。
+- 单 Pane 与分屏都不得出现重复 Topbar、第二条 Session chrome 或工具栏遮挡。
+- Rail 与 Tool Dock 的四种开关组合都保持固定顶部按钮、正确内容起点和可操作角标。
+- Terminal、Editor 和 Browser 的内容缩放由各自 owner 管理，不建立全局缩放补偿层。
+- 视觉改动通过项目统一检查和目标窗口交互验证；截图只证明渲染，不替代状态和安全测试。
 
-| 决策 | a mature workbench 模式 | AgentMux 处理 |
-| --- | --- | --- |
-| Copy | `useSidebarResize` 的 live DOM width、全屏透明 Drag Overlay、mouseup / blur 收尾 | 保留行为和纯函数，并把方向改为左侧 Dock 的 `deltaSign=1` |
-| Adapt | 36px Activity Strip、收起、所选工具、宽度 owner | 入口移到右侧主区标题之前；Workspace 三个子 Tab，Board 一个 Branch × Status 内容，配色使用 Graphite / Mint |
-| Adapt | Titlebar drag/no-drag 与 Traffic Lights 安全区 | Topbar 与 Rail Brand 同处 42px Plane；右侧无全局空行 |
-| Keep | Universal Tab、Focused Pane、Main-owned Browser、Core-owned Session | 工具只调用现有 action，不新增 lifecycle |
-| Omit | a mature workbench Plugin Panel、隐藏 Tab fallback、Activity Bar 位置菜单 | 当前需求不需要通用扩展框架或复杂兼容路径 |
-| Omit | a mature workbench Daemon、Relay、Account、WSL、Issue Integration | 不属于 T-010 或本 Feature |
+## 非目标
 
-## 图标资产边界
-
-应用图标采用 `image2` 生成的 low-poly 绿色龙形。龙形之外必须是实际 Alpha，不能使用深色圆角底板或把棋盘格画入 RGB。源 PNG、128px PNG 与 ICNS 由同一 1024px RGBA 资产机械派生；透明角像素应为 `0,0,0,0`。
+- 不建设主题导入器、任意颜色编辑器、插件市场或通用扩展框架。
+- 不为没有规模证据的虚拟列表、文件拖动或移动端布局预建状态。
+- 不在正式设计合同保留来源路径、固定 commit、Copy/Adapt/Omit 表或已完成任务流水。

@@ -1,179 +1,199 @@
-const COMMANDS = [
-  ['doctor', 'Check the AgentMux host, exact CtxMux runtime, and installed Providers.'],
-  ['list', 'List Agent Sessions. The first field is the stable AgentMux session id.'],
-  ['resolve', 'Resolve a Provider-native, ACP, or exact Run identity to one Agent Session.'],
-  ['status', 'Read one Agent Session and its exact current Run status.'],
-  ['send', 'Submit a prompt to a ready Agent Session.'],
-  ['interrupt', 'Send the portable interrupt action to the exact current Run.'],
-  ['attach', 'Replay and optionally follow the exact current Run output.'],
-  ['resume', 'Use Provider-native resume to replace a terminal Run while preserving the Agent Session.'],
-  ['stop', 'Stop or retire the exact current Run and remove the Agent Session binding.'],
-  ['switch', 'Focus one already-open Desktop View; never creates or attaches a View.']
-] as const
+export const AGENTMUX_CLI_HELP = `agentmux — typed local Agent Session and Desktop Composition control
 
-export const AGENTMUX_CLI_HELP = [
-  'agentmux — control local coding-agent sessions through AgentMux and CtxMux',
-  '',
-  'Usage: agentmux <command> [options]',
-  '       agentmux --skill',
-  '',
-  'Inspect:',
-  ...COMMANDS.slice(0, 4).map(([command, summary]) => `  ${command.padEnd(10)} ${summary}`),
-  '',
-  'Control:',
-  ...COMMANDS.slice(4, 9).map(([command, summary]) => `  ${command.padEnd(10)} ${summary}`),
-  '',
-  'Desktop:',
-  ...COMMANDS.slice(9).map(([command, summary]) => `  ${command.padEnd(10)} ${summary}`),
-  '',
-  'Learn:',
-  '  agentmux <command> --help   Show exact syntax, success semantics, and the next useful command.',
-  '  agentmux --skill            Print instructions for an Agent running inside AgentMux.',
-  '',
-  'Managed context:',
-  '  AGENTMUX_ENV=1 identifies an AgentMux-managed Run.',
-  '  AGENTMUX_AGENT_SESSION_ID is the stable current Agent Session id when the Run hosts an Agent.',
-  '  AGENTMUX_CLI is the exact CLI path; agentmux is also placed in PATH.',
-  '',
-  'Output:',
-  '  Use --json for machine-readable results and parse returned ids instead of guessing them.',
-  '',
-  'Options:',
-  '  --skill        Print Agent instructions and exit.',
-  '  --version, -V  Print version and exit.',
-  '  --help, -h     Show this help.'
-].join('\n')
+Usage: agentmux <command> [options]
+       agentmux --skill
+
+Composition:
+  context                 Resolve this caller and the current View's Region map.
+  launch                  Launch a configured Agent Executor and place its Region.
+  region open             Open an existing Agent Session in a Tab Region.
+  region focus            Focus one exact open Region.
+
+Agent Sessions:
+  session list            List Agent Sessions and exact current Runs.
+  session resolve         Resolve a native or Run identity to one Agent Session.
+  session status          Read one Agent Session and exact current Run status.
+  session send            Submit a prompt through the Provider contract.
+  session interrupt       Apply portable interrupt to the exact current Run.
+  session output          Read bounded replay or follow output as JSON Lines.
+  session resume          Resume Provider context into a replacement Run.
+  session stop            Stop the current Run and remove the Session binding.
+
+Managed caller:
+  AGENTMUX_ENV=1 and AGENTMUX_AGENT_SESSION_ID establish identity for context,
+  launch, and --relative-to self. No command guesses from UI focus or list order.
+
+Output:
+  Non-streaming success and failure output is versioned JSON by default.
+  session output --follow emits one versioned JSON object per line.
+
+Learn:
+  agentmux <command> --help        Show typed flags and success semantics.
+  agentmux <group> <command> --help
+  agentmux --skill                 Print instructions for an Agent.
+
+Options:
+  --skill        Print Agent instructions and exit.
+  --version, -V  Print version and exit.
+  --help, -h     Show help.`
 
 const HELP = new Map<string, string>([
-  ['doctor', [
-    'Check the local AgentMux and exact CtxMux runtime',
-    '',
-    'Usage: agentmux doctor [--json]',
-    '',
-    'Success means the host is reachable, the pinned CtxMux artifact is valid, and required runtime checks passed.',
-    'Provider executables may be reported as warnings without changing their identity.',
-    '',
-    'next: agentmux list --json'
-  ].join('\n')],
-  ['list', [
-    'List AgentMux Agent Sessions',
-    '',
-    'Usage: agentmux list [--json]',
-    '',
-    'The stable control key is session.agentSessionId, not a Provider-native id or CtxMux Run id.',
-    'Use --json before selecting a target programmatically.',
-    '',
-    'next: agentmux status <agent-session-id> --json'
-  ].join('\n')],
-  ['resolve', [
-    'Resolve an external identity to one AgentMux Agent Session',
-    '',
-    'Usage:',
-    '  agentmux resolve agent-session <id> [--json]',
-    '  agentmux resolve provider-native <provider-id> <native-session-id> [--json]',
-    '  agentmux resolve acp-native <adapter-id> <native-session-id> [--json]',
-    '  agentmux resolve run <run-id> [--json]',
-    '',
-    'Resolution fails closed for unknown, ambiguous, retired, or conflicting identities.',
-    'Success returns the stable AgentMux Agent Session; it does not focus or mutate a View.',
-    '',
-    'next: agentmux status <returned-agent-session-id> --json'
-  ].join('\n')],
-  ['status', [
-    'Read one Agent Session and its exact current Run status',
-    '',
-    'Usage: agentmux status <agent-session-id> [--json]',
-    '',
-    'Success proves the Agent Session still resolves to the returned exact current Run.',
-    '',
-    'next: agentmux send <agent-session-id> --text <prompt> --json'
-  ].join('\n')],
-  ['send', [
-    'Submit a prompt to a ready Agent Session',
-    '',
-    'Usage: agentmux send <agent-session-id> --text <prompt> [--json]',
-    '',
-    'The token after --text is always prompt data, including literal values such as --help.',
-    'Success means AgentMux atomically submitted the prompt through the Provider contract to the exact current Run.',
-    'A running process alone does not prove prompt readiness; not-ready Sessions fail closed.',
-    '',
-    'next: agentmux attach <agent-session-id> --json'
-  ].join('\n')],
-  ['interrupt', [
-    'Interrupt the exact current Agent Run',
-    '',
-    'Usage: agentmux interrupt <agent-session-id> [--json]',
-    '',
-    'Success means CtxMux applied its portable interrupt action; it does not stop or retire the Agent Session.',
-    '',
-    'next: agentmux status <agent-session-id> --json'
-  ].join('\n')],
-  ['attach', [
-    'Replay and optionally follow one Agent Run',
-    '',
-    'Usage: agentmux attach <agent-session-id> [--after-byte <n>] [--json]',
-    '',
-    '--after-byte is a cumulative UTF-8 byte cursor, not a character or terminal-row offset.',
-    '--json returns the bounded replay receipt and exits. Text mode follows a running Run until it exits or this CLI is interrupted.',
-    'Releasing this Attachment never stops the Run.',
-    '',
-    'next: agentmux status <agent-session-id> --json'
-  ].join('\n')],
-  ['resume', [
-    'Resume Provider-native context into a new exact Run',
-    '',
-    'Usage: agentmux resume <agent-session-id> --text <prompt> [--json]',
-    '',
-    'The token after --text is always prompt data, including literal values such as --help.',
-    'Success preserves the AgentMux Agent Session id and replaces its terminal Run through the Provider resume contract.',
-    'Unsupported Providers and still-running current Runs fail closed.',
-    '',
-    'next: agentmux status <agent-session-id> --json'
-  ].join('\n')],
-  ['stop', [
-    'Stop or retire one Agent Session current Run',
-    '',
-    'Usage: agentmux stop <agent-session-id> [--json]',
-    '',
-    'A running Run is stopped through CtxMux. A CtxMux-proven terminal Run is retired without fabricating a Stop receipt.',
-    'Success removes the Agent Session binding.',
-    '',
-    'next: agentmux list --json'
-  ].join('\n')],
-  ['switch', [
-    'Focus one already-open AgentMux Desktop View',
-    '',
-    'Usage:',
-    '  agentmux switch terminal-view <view-id> [--json]',
-    '  agentmux switch agent-session <id> [--json]',
-    '  agentmux switch provider-native <provider-id> <native-session-id> [--json]',
-    '  agentmux switch acp-native <adapter-id> <native-session-id> [--json]',
-    '  agentmux switch run <run-id> [--json]',
-    '',
-    'Success means the Desktop focused exactly one existing View.',
-    'This command never opens, attaches, resumes, spawns, splits, or otherwise changes layout.',
-    'Unknown, ambiguous, stale, closed, and not-open targets fail closed.',
-    '',
-    'next: no Run lifecycle action is implied; use an explicit Agent Session id for further control.'
-  ].join('\n')]
+  ['context', `Resolve this managed Agent's unique Desktop context
+
+Usage: agentmux context
+
+Identity comes only from AGENTMUX_AGENT_SESSION_ID. Success returns agentSessionId,
+workspaceId, viewId, regionId, tabGroupId, configured Executors, and every Region's
+normalized 0..1 bounds without focusing or opening anything. Missing, closed, stale,
+and ambiguous caller Regions fail closed.
+
+next: agentmux launch --agent codex --placement split-right --relative-to self`],
+  ['launch', `Launch a configured Agent Executor and place its Desktop Region
+
+Usage: agentmux launch --agent <executor-id> [--prompt <text>]
+                       [--placement <placement>] [--relative-to <self|region-id>]
+
+Placement: tab | split-left | split-right | split-up | split-down
+Defaults: --placement split-right --relative-to self
+
+The token after --prompt is always prompt data, including a literal --help.
+--agent selects an Executor id returned by agentmux context, not a Provider id.
+Different Executors may share one Provider while using different launch settings.
+The long-lived Desktop RuntimeController creates the Agent; this CLI never owns
+Hook ingress or creates a second Session registry. Success commits both Agent
+Session and Region. A split stays inside the current View/Tab; only an explicit
+tab placement creates another View. Lifecycle or layout failure rolls back.
+
+next: agentmux session status <returned-agent-session-id>`],
+  ['session', `Control AgentMux Agent Sessions
+
+Usage: agentmux session <command> [options]
+
+Commands: list, resolve, status, send, interrupt, output, resume, stop
+
+Agent Session ids are stable AgentMux identities. Run ids, Provider-native ids,
+View ids and Region ids are different identity spaces.
+
+next: agentmux session list`],
+  ['session.list', `List AgentMux Agent Sessions
+
+Usage: agentmux session list
+
+Success returns typed Session status entries. Select by returned agentSessionId;
+never infer a target from list position.
+
+next: agentmux session status <agent-session-id>`],
+  ['session.resolve', `Resolve an external identity to one Agent Session
+
+Usage:
+  agentmux session resolve agent-session <id>
+  agentmux session resolve provider-native <provider-id> <native-session-id>
+  agentmux session resolve acp-native <adapter-id> <native-session-id>
+  agentmux session resolve run <run-id>
+
+Resolution fails closed for unknown, ambiguous, retired, or conflicting identities.
+It does not open or focus a Region.
+
+next: agentmux session status <returned-agent-session-id>`],
+  ['session.status', `Read one Agent Session and its exact current Run
+
+Usage: agentmux session status <agent-session-id>
+
+Success proves the Session still resolves to the returned current Run.
+
+next: agentmux session send <agent-session-id> --text <prompt>`],
+  ['session.send', `Submit a prompt to a ready Agent Session
+
+Usage: agentmux session send <agent-session-id> --text <prompt>
+
+The token after --text is always prompt data, including a literal --help.
+Success means the Provider contract atomically accepted the prompt for the exact
+current Run. Process liveness alone does not prove prompt readiness.
+
+next: agentmux session output <agent-session-id> --follow`],
+  ['session.interrupt', `Interrupt the exact current Agent Run
+
+Usage: agentmux session interrupt <agent-session-id>
+
+Success means CtxMux applied portable interrupt. It does not stop or retire the
+Agent Session.
+
+next: agentmux session status <agent-session-id>`],
+  ['session.output', `Read bounded replay or follow one Agent Run
+
+Usage: agentmux session output <agent-session-id> [--after-byte <n>] [--follow]
+
+--after-byte is a cumulative UTF-8 byte cursor. Without --follow, success returns
+one JSON replay receipt and exits. --follow emits JSON Lines until the Run exits or
+this reader is interrupted. Releasing output never stops the Run.
+
+next: agentmux session status <agent-session-id>`],
+  ['session.resume', `Resume Provider-native context into a replacement Run
+
+Usage: agentmux session resume <agent-session-id> --text <prompt>
+
+The token after --text is always prompt data, including a literal --help.
+Success preserves the Agent Session identity and replaces its exact Run. Unsupported
+Providers and still-running current Runs fail closed.
+
+next: agentmux session status <agent-session-id>`],
+  ['session.stop', `Stop or retire one Agent Session current Run
+
+Usage: agentmux session stop <agent-session-id>
+
+Success removes the Agent Session binding. This is destructive to the live Run;
+use it only when the user intends to end that Agent execution.
+
+next: agentmux session list`],
+  ['region', `Control Regions inside real Desktop Views
+
+Usage: agentmux region <command> [options]
+
+Commands: open, focus
+
+A View is one Tab and may contain multiple Regions. A Region is one visible content
+area inside that Tab. Neither is an Agent Session or CtxMux Run.
+
+next: agentmux context`],
+  ['region.open', `Open an existing Agent Session in a Desktop Region
+
+Usage: agentmux region open --session <agent-session-id>
+                            [--placement <placement>] [--relative-to <self|region-id>]
+
+Placement: tab | split-left | split-right | split-up | split-down
+Defaults: --placement split-right --relative-to self
+
+This creates presentation only: it does not create, resume, attach, or replace model
+context. Split placement keeps the current View id; tab creates a new View. Unknown
+Sessions, stale targets, and ambiguous self fail closed.
+
+next: agentmux region focus --region <returned-region-id>`],
+  ['region.focus', `Focus one exact already-open Desktop Region
+
+Usage: agentmux region focus --region <region-id>
+
+Success changes only Desktop focus. It never opens, splits, launches, attaches,
+resumes, or stops an Agent Run. Unknown and stale Region ids fail closed.
+
+next: no Run lifecycle action is implied.`]
 ])
 
-export function agentMuxCommandHelp(command: string): string | null {
-  return HELP.get(command) ?? null
+export function agentMuxCommandHelp(path: string): string | null {
+  return HELP.get(path) ?? null
 }
 
 export const AGENTMUX_CLI_SKILL = `---
 name: agentmux
-description: Control the current local AgentMux Agent Session and focus existing AgentMux Desktop Views.
+description: Control AgentMux Agent Sessions and compose Desktop Tab Regions with typed JSON receipts.
 ---
 
 # AgentMux
 
-AgentMux gives every supported coding Agent a stable Agent Session identity while CtxMux owns the exact terminal Run, PTY, replay, input, interrupt, and stop facts.
+AgentMux separates four identities: Agent Session is model/provider context, CtxMux
+Run owns PTY and byte replay, Desktop View is one Tab, and Region is one content area
+inside that Tab.
 
-## Verify caller context
-
-Before controlling the current Agent, verify the managed environment:
+## Verify managed caller identity
 
 \`\`\`bash
 test "\${AGENTMUX_ENV:-}" = 1
@@ -181,60 +201,93 @@ test -n "\${AGENTMUX_AGENT_SESSION_ID:-}"
 command -v agentmux
 \`\`\`
 
-If either context check fails, do not guess the current Agent Session or a Desktop-focused target. Use an explicit id supplied by the user or report that the caller is outside a managed Agent Run.
+If these checks fail, do not use \`self\`, guess a Session, or infer UI focus. Ask for
+an explicit id or report that the caller is outside a managed Agent Run.
 
-## Learn the installed CLI
-
-The installed executable is authoritative:
+## Learn the installed surface
 
 \`\`\`bash
 agentmux --help
-agentmux <command> --help
+agentmux session --help
+agentmux region --help
 \`\`\`
 
-Prefer \`--json\`, parse returned ids, and never infer identity from terminal titles, output text, process ids, or list order.
+The installed executable is authoritative. Non-streaming output is JSON by default;
+parse returned ids and error codes instead of terminal text, titles, process ids, or
+list order.
 
-## Control the current Agent Session
-
-\`AGENTMUX_AGENT_SESSION_ID\` is the stable AgentMux identity. It is not the Provider-native session id or CtxMux Run id.
+## Inspect the current View before placing
 
 \`\`\`bash
-agentmux status "$AGENTMUX_AGENT_SESSION_ID" --json
-agentmux send "$AGENTMUX_AGENT_SESSION_ID" --text "Continue with the requested task." --json
-agentmux interrupt "$AGENTMUX_AGENT_SESSION_ID" --json
-agentmux attach "$AGENTMUX_AGENT_SESSION_ID" --json
+agentmux context
+agentmux launch --agent codex --prompt "Inspect the failing tests" \\
+  --placement split-right --relative-to self
 \`\`\`
 
-Use \`resume\` only when the user intends Provider-native context recovery into a new terminal Run. Use \`stop\` only when the user intends to end the current Run and remove its Agent Session binding.
+Use \`region open\` when the Agent Session already exists and only a new presentation is
+needed. It does not create or resume model context:
+
+\`\`\`bash
+agentmux region open --session <agent-session-id> --placement split-right --relative-to self
+agentmux region focus --region <region-id>
+\`\`\`
+
+The context receipt includes configured Executors and every Region in the current View
+with normalized \`x\`, \`y\`, \`width\`, and \`height\` bounds. Match the requested Agent
+to an available Executor by label and Provider, then pass its executorId to \`--agent\`.
+Use the Region map for directional requests in a multi-Region View. Select the Region
+occupying the requested side, then split it on the axis that keeps the View balanced. For
+example, when the right side already has top and bottom Regions and the left side is one
+tall Region, "open on the left" means:
+
+\`\`\`bash
+agentmux launch --agent traex --placement split-down \\
+  --relative-to region:<left-region-id>
+\`\`\`
+
+Use \`self\` directly only for a one-Region View, when the user explicitly asks for a Region
+next to you, or when splitting your Region is actually the balanced target. If \`self\` is
+ambiguous because the current Session has multiple Regions, use an exact \`regionId\` from a
+receipt. Never pick the most recent Region or fall back to computer-use for Composition.
+
+## Choose Split or Tab
+
+- For the same task, or whenever the user names a direction, use a split placement.
+- A direction describes the whole current View. It does not always mean split \`self\`.
+- Use \`--placement tab\` only when the user explicitly asks for a Tab.
+- If the work is clearly a different task, ask whether it should open in a new Tab;
+  do not create the Tab until the user confirms.
+- A split adds a Region to the current View. It never creates or moves a Tab.
+
+## Control Agent Sessions
+
+\`\`\`bash
+agentmux session status "\$AGENTMUX_AGENT_SESSION_ID"
+agentmux session send "\$AGENTMUX_AGENT_SESSION_ID" --text "Continue with the task."
+agentmux session output "\$AGENTMUX_AGENT_SESSION_ID" --follow
+agentmux session interrupt "\$AGENTMUX_AGENT_SESSION_ID"
+\`\`\`
+
+Use \`session resume\` only for intentional Provider-native recovery. Use \`session stop\`
+only when the user intends to end the current Run and remove its Session binding.
 
 ## Resolve another Agent
 
-Start with \`agentmux list --json\`. When the user gives a native identity, resolve it explicitly:
+Start with \`agentmux session list\`. Resolve native identities explicitly:
 
 \`\`\`bash
-agentmux resolve provider-native <provider-id> <native-session-id> --json
-agentmux resolve acp-native <adapter-id> <native-session-id> --json
-agentmux resolve run <run-id> --json
+agentmux session resolve provider-native <provider-id> <native-session-id>
+agentmux session resolve acp-native <adapter-id> <native-session-id>
+agentmux session resolve run <run-id>
 \`\`\`
 
-Resolution fails closed. Do not select a nearby or recently active Session when no unique match exists.
-
-## Focus an existing Desktop View
-
-\`switch\` changes only Desktop focus:
-
-\`\`\`bash
-agentmux switch agent-session "$AGENTMUX_AGENT_SESSION_ID" --json
-agentmux switch terminal-view <view-id> --json
-\`\`\`
-
-The current CLI does not create, split, move, open, attach, resume, or spawn Desktop Views, panes, or tabs. Do not reinterpret \`switch\` as a layout command and do not fall back to computer-use when asked for an unavailable layout mutation. Report that Desktop composition is not exposed by the installed AgentMux CLI.
+Resolution fails closed. Do not select a nearby or recently active Session.
 
 ## Safety
 
-- Prefer the current Agent Session environment or explicit returned ids over UI focus.
-- Parse JSON receipts; never predict ids.
-- Treat Run, Agent Session, Attachment, and View as different objects.
-- Terminal output does not prove a semantic reply, permission decision, or model-context continuity.
-- Inspect an error before retrying; stale, ambiguous, unsupported, and not-ready failures are deliberate fail-closed outcomes.
+- Parse every JSON receipt and use returned ids.
+- Treat Run, Agent Session, Attachment, View/Tab, Region, and Tab Group as different objects.
+- Inspect stable error codes before retrying.
+- Terminal output does not prove a semantic reply, permission decision, or context continuity.
+- Composition failure does not authorize UI automation or direct ctxmux socket access.
 `

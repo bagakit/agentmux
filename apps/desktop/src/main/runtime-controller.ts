@@ -3,21 +3,26 @@ import {
   AgentMuxMemoryAgentSessionStore,
   connectLocalAgentMux,
   connectSshAgentMux,
-  type AgentId,
+  type AgentCapabilities,
+  type AgentCatalogEntry,
+  type AgentExecutorId,
+  type AgentProviderId,
   type AgentMuxClient,
   type AgentMuxClientEvent,
   type AgentMuxAgentSessionStore,
-  type AgentMuxView,
+  type AgentMuxRuntimeSubject,
   type ExecutionHost
 } from '@agentmux/core'
 import type { WebContents } from 'electron'
 import type {
-  AgentDetection,
+  ExecutorDetection,
+  AgentLaunchResult,
   AgentLaunchInput,
   AppConfig,
   HostCheckResult,
   HostConfig,
   RuntimeEvent,
+  RuntimeSnapshot,
   SessionAttachResult,
   SessionControl,
   SessionSnapshot,
@@ -28,6 +33,12 @@ import {
   type TerminalOscColorQueryReplyColors
 } from '../shared/terminal-osc-color-query.js'
 import { createExecutionHost } from './host-factory.js'
+import { ScratchTopics, type PreparedScratchAgentTopic } from './scratch-topics.js'
+import {
+  SCRATCH_WORKSPACE_ID,
+  scratchTopicIdFromWorkspacePath,
+  workspaceOwnsSessionPath
+} from '../shared/scratch-topics.js'
 
 type RuntimeHost = {
   executionHost: ExecutionHost
@@ -64,13 +75,39 @@ function signatures(config: AppConfig): Map<string, string> {
 }
 
 function workspaceLabel(config: AppConfig, hostId: string, path: string): string {
-  return config.workspaces.find((workspace) => workspace.hostId === hostId && workspace.path === path)?.name
+  return config.workspaces.find((workspace) => workspaceOwnsSessionPath(workspace, {
+    hostId,
+    workspacePath: path
+  }))?.name
     ?? path.split(/[\\/]/).filter(Boolean).at(-1)
     ?? path
 }
 
 function terminalInputKey(hostId: string, runId: string): string {
   return JSON.stringify([hostId, runId])
+}
+
+function requireSessionExecutor(
+  config: AppConfig,
+  session: { executorId: AgentExecutorId; providerId: AgentProviderId }
+): AppConfig['executors'][AgentExecutorId] {
+  const executor = config.executors[session.executorId]
+  if (!executor) throw new Error(`Missing Agent Executor configuration: ${session.executorId}`)
+  if (executor.providerId !== session.providerId) {
+    throw new Error(
+      `Agent Executor ${session.executorId} is bound to Provider ${executor.providerId}, ` +
+      `but this Session uses Provider ${session.providerId}. Create a new Executor instead of changing its Provider.`
+    )
+  }
+  return executor
+}
+
+// The ctxmux adapter maps a dead-socket dial (daemon gone) to CTXMUX_UNAVAILABLE and a
+// not-connected client to CTXMUX_DISCONNECTED. Detect by code structurally rather than by
+// instanceof, which is brittle across the core module boundary.
+function isBackendUnavailable(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code
+  return code === 'CTXMUX_UNAVAILABLE' || code === 'CTXMUX_DISCONNECTED'
 }
 
 function sessionAttachmentKey(control: SessionControl): string {
@@ -94,8 +131,12 @@ function sessionAttachmentHostId(key: string): string {
   return value[0]
 }
 
-function projectSession(view: AgentMuxView, config: AppConfig): SessionSnapshot {
-  const run = view.run
+function projectSession(
+  subject: AgentMuxRuntimeSubject,
+  config: AppConfig,
+  capabilities?: AgentCapabilities
+): SessionSnapshot {
+  const run = subject.run
   const observedAt = run.observedAt
   const status = {
     state: run.state === 'interrupted' ? 'error' as const : run.state,
@@ -108,34 +149,48 @@ function projectSession(view: AgentMuxView, config: AppConfig): SessionSnapshot 
         : {}),
     ...(run.exitCode === undefined ? {} : { exitCode: run.exitCode })
   }
-  if (view.kind === 'agent') {
+  if (subject.kind === 'agent') {
+    const configuredExecutor = config.executors[subject.executorId]
+    const executorLabel = configuredExecutor?.providerId === subject.providerId
+      ? configuredExecutor.label
+      : subject.executorId
     return {
-      id: view.agentSession.agentSessionId,
+      id: subject.agentSession.agentSessionId,
       kind: 'agent',
-      agentId: view.agentId,
-      hostId: view.hostId,
-      workspacePath: view.workspacePath,
-      label: `${view.agentId} · ${workspaceLabel(config, view.hostId, view.workspacePath)}`,
-      createdAt: view.agentSession.createdAt,
-      updatedAt: Math.max(view.agentSession.updatedAt, observedAt),
+      providerId: subject.providerId,
+      executorId: subject.executorId,
+      capabilities: capabilities ?? {
+        terminal: true,
+        hookEvents: false,
+        timeline: 'unavailable',
+        permission: 'none',
+        providerResume: false,
+        acp: false,
+        replyCorrelation: 'none'
+      },
+      hostId: subject.hostId,
+      workspacePath: subject.workspacePath,
+      label: `${executorLabel} · ${workspaceLabel(config, subject.hostId, subject.workspacePath)}`,
+      createdAt: subject.agentSession.createdAt,
+      updatedAt: Math.max(subject.agentSession.updatedAt, observedAt),
       processState: run.state,
       status,
       latestOutputBytes: run.latestOutputBytes,
       control: {
         kind: 'agent',
-        hostId: view.hostId,
-        agentSessionId: view.agentSession.agentSessionId,
-        run: { ...view.agentSession.run }
+        hostId: subject.hostId,
+        agentSessionId: subject.agentSession.agentSessionId,
+        run: { ...subject.agentSession.run }
       }
     }
   }
   return {
     id: run.runId,
     kind: 'terminal',
-    agentId: null,
-    hostId: view.hostId,
-    workspacePath: view.workspacePath,
-    label: `Terminal · ${workspaceLabel(config, view.hostId, view.workspacePath)}`,
+    providerId: null,
+    hostId: subject.hostId,
+    workspacePath: subject.workspacePath,
+    label: `Terminal · ${workspaceLabel(config, subject.hostId, subject.workspacePath)}`,
     createdAt: run.observedAt,
     updatedAt: observedAt,
     processState: run.state,
@@ -143,7 +198,7 @@ function projectSession(view: AgentMuxView, config: AppConfig): SessionSnapshot 
     latestOutputBytes: run.latestOutputBytes,
     control: {
       kind: 'terminal',
-      hostId: view.hostId,
+      hostId: subject.hostId,
       runId: run.runId,
       run: { runId: run.runId }
     }
@@ -179,7 +234,10 @@ export class RuntimeController {
   }
   private hostSignatures = new Map<string, string>()
 
-  constructor(private readonly agentSessionStore: AgentMuxAgentSessionStore) {}
+  constructor(
+    private readonly agentSessionStore: AgentMuxAgentSessionStore,
+    private readonly scratchTopics: ScratchTopics = new ScratchTopics()
+  ) {}
 
   setTerminalViewColors(colors: TerminalOscColorQueryReplyColors): void {
     this.terminalViewColors = { ...colors }
@@ -315,55 +373,163 @@ export class RuntimeController {
     }
   }
 
-  async detect(agentId: AgentId, hostId: string, config: AppConfig): Promise<AgentDetection> {
-    const agent = config.agents[agentId]
+  providerCatalog(): AgentCatalogEntry[] {
+    const runtimeHost = this.hosts.values().next().value as RuntimeHost | undefined
+    if (!runtimeHost) throw new Error('Runtime has no configured hosts.')
+    return runtimeHost.client.providers.catalog()
+  }
+
+  async detect(executorId: AgentExecutorId, hostId: string, config: AppConfig): Promise<ExecutorDetection> {
+    const executor = config.executors[executorId]
+    if (!executor) throw new Error(`Missing Agent Executor configuration: ${executorId}`)
     const client = await this.connectedClient(hostId)
     return {
-      agentId,
+      executorId,
+      providerId: executor.providerId,
       hostId,
-      installed: (await client.probeAgent(agentId, agent?.command)).installed
+      installed: (await client.probeAgent(executor.providerId, executor.command)).installed
     }
   }
 
-  async snapshot(config: AppConfig) {
-    const workspaceViews = await Promise.all([...this.hosts.values()].map(async ({ client }) => {
+  async snapshot(config: AppConfig): Promise<RuntimeSnapshot> {
+    const projections = await Promise.all([...this.hosts.values()].map(async ({ client }) => {
       await client.connect()
-      return await client.workspaceView()
+      let projection = await client.runtimeProjection()
+      while (true) {
+        const agentSubjects = projection.subjects.filter((subject): subject is Extract<AgentMuxRuntimeSubject, { kind: 'agent' }> => (
+          subject.kind === 'agent'
+        ))
+        const timelineResults = await Promise.allSettled(agentSubjects.map(async (subject) => (
+          await client.sessionTimeline(subject.agentSession.agentSessionId)
+        )))
+        const timelineEntries = timelineResults.flatMap((result, index) => {
+          if (result.status === 'rejected') return []
+          const agentSessionId = agentSubjects[index]!.agentSession.agentSessionId
+          if (result.value.agentSessionId !== agentSessionId) {
+            throw new Error(`Runtime snapshot returned a Timeline for another Session: ${result.value.agentSessionId}`)
+          }
+          return [[agentSessionId, result.value] as const]
+        })
+        const failures = timelineResults.flatMap((result, index) => result.status === 'rejected'
+          ? [{ agentSessionId: agentSubjects[index]!.agentSession.agentSessionId, reason: result.reason }]
+          : [])
+        if (failures.length === 0) return { client, projection, timelineEntries }
+
+        const refreshed = await client.runtimeProjection()
+        const refreshedAgentIds = new Set(refreshed.subjects.flatMap((subject) => (
+          subject.kind === 'agent' ? [subject.agentSession.agentSessionId] : []
+        )))
+        const persistentFailure = failures.find((failure) => refreshedAgentIds.has(failure.agentSessionId))
+        if (persistentFailure) throw persistentFailure.reason
+        projection = refreshed
+      }
     }))
-    for (const workspaceView of workspaceViews) {
-      for (const view of workspaceView.views) {
-        if (view.kind !== 'terminal') continue
+    for (const { projection } of projections) {
+      for (const subject of projection.subjects) {
+        if (subject.kind !== 'terminal') continue
         this.terminalInputCursors.set(
-          terminalInputKey(view.hostId, view.run.runId),
-          view.run.acceptedInputBytes
+          terminalInputKey(subject.hostId, subject.run.runId),
+          subject.run.acceptedInputBytes
         )
       }
     }
-    return {
-      sessions: workspaceViews.flatMap((workspaceView) => workspaceView.views.map((view) => projectSession(view, config))),
-      activities: {}
-    }
+    const sessions = projections.flatMap(({ client, projection }) => projection.subjects.map((subject) => (
+      projectSession(
+        subject,
+        config,
+        subject.kind === 'agent'
+          ? client.providers.get(subject.providerId).catalog.capabilities
+          : undefined
+      )
+    )))
+    const timelineEntries = projections.flatMap(({ timelineEntries: entries }) => entries)
+    return { sessions, timelines: Object.fromEntries(timelineEntries) }
   }
 
-  async launchAgent(request: AgentLaunchInput, config: AppConfig): Promise<SessionSnapshot> {
+  async launchAgent(request: AgentLaunchInput, config: AppConfig): Promise<AgentLaunchResult> {
     return await this.trackHostLifecycleOperation(request.hostId, async () => {
-      const agent = config.agents[request.agentId]
-      if (!agent) throw new Error(`Missing agent configuration: ${request.agentId}`)
+      const executor = config.executors[request.executorId]
+      if (!executor) throw new Error(`Missing Agent Executor configuration: ${request.executorId}`)
       const client = await this.connectedClient(request.hostId)
-      const agentSession = await client.createAgent({
-        agentId: request.agentId,
-        workspacePath: request.workspacePath,
-        args: agent.args,
-        env: agent.env,
-        commandOverride: agent.command,
-        ...(request.agentSessionId === undefined ? {} : { agentSessionId: request.agentSessionId }),
-        ...(request.createOperationId === undefined ? {} : { createOperationId: request.createOperationId }),
-        ...(request.prompt === undefined ? {} : { prompt: request.prompt }),
-        ...(request.cols === undefined ? {} : { cols: request.cols }),
-        ...(request.rows === undefined ? {} : { rows: request.rows })
-      })
-      return await this.sessionById(client, agentSession.agentSessionId, config)
+      let preparedTopic: PreparedScratchAgentTopic | null = null
+      try {
+        if (request.scratchTopicId !== undefined) {
+          if (!request.agentSessionId) {
+            throw new Error('Scratch Topic launches require an Agent Session identity')
+          }
+          const scratch = config.workspaces.find((workspace) => workspace.id === SCRATCH_WORKSPACE_ID)
+          if (!scratch || scratch.hostId !== request.hostId || scratch.path !== request.workspacePath) {
+            throw new Error('Scratch Topic launch does not match the configured Scratch workspace')
+          }
+          preparedTopic = await this.scratchTopics.prepareAgent(scratch, request.scratchTopicId, {
+            providerId: executor.providerId,
+            sessionId: request.agentSessionId
+          })
+        }
+        const launchPrompt = preparedTopic
+          ? `${preparedTopic.prompt}\n\n${request.prompt?.trim()
+              ? `Task:\n${request.prompt}`
+              : 'No task has been given yet. Wait for the user.'}`
+          : request.prompt
+        const agentSession = await client.createAgent({
+          providerId: executor.providerId,
+          executorId: request.executorId,
+          workspacePath: preparedTopic?.absolutePath ?? request.workspacePath,
+          args: executor.args,
+          env: {
+            ...executor.env,
+            ...(preparedTopic ? { AGENTMUX_WIKI_DIR: preparedTopic.absolutePath } : {})
+          },
+          injectAgentMuxGuide: executor.injectAgentMuxGuide,
+          commandOverride: executor.command,
+          ...(request.agentSessionId === undefined ? {} : { agentSessionId: request.agentSessionId }),
+          ...(request.createOperationId === undefined ? {} : { createOperationId: request.createOperationId }),
+          ...(launchPrompt === undefined ? {} : { prompt: launchPrompt }),
+          ...(request.cols === undefined ? {} : { cols: request.cols }),
+          ...(request.rows === undefined ? {} : { rows: request.rows })
+        })
+        try {
+          const session = await this.sessionById(client, agentSession.agentSessionId, config)
+          if (session.kind !== 'agent') {
+            throw new Error(`Agent launch projected a non-Agent Session: ${agentSession.agentSessionId}`)
+          }
+          const timeline = await client.sessionTimeline(agentSession.agentSessionId)
+          if (timeline.agentSessionId !== agentSession.agentSessionId) {
+            throw new Error(`Agent launch returned a Timeline for another Session: ${timeline.agentSessionId}`)
+          }
+          return { session, timeline }
+        } catch (error) {
+          try {
+            await client.stopAgent(agentSession.agentSessionId, agentSession.run)
+          } catch (cleanupError) {
+            throw new AggregateError(
+              [error, cleanupError],
+              `Agent launch projection failed and cleanup also failed: ${agentSession.agentSessionId}`
+            )
+          }
+          throw error
+        }
+      } catch (error) {
+        try {
+          if (preparedTopic) await this.scratchTopics.discardPreparedIdentity(preparedTopic)
+        } catch (cleanupError) {
+          throw new AggregateError(
+            [error, cleanupError],
+            'Agent launch failed and its prepared Scratch identity could not be removed'
+          )
+        }
+        throw error
+      }
     })
+  }
+
+  async sessionTimeline(control: Extract<SessionControl, { kind: 'agent' }>) {
+    const client = await this.connectedClient(control.hostId)
+    const timeline = await client.sessionTimeline(control.agentSessionId)
+    if (timeline.agentSessionId !== control.agentSessionId) {
+      throw new Error(`Timeline snapshot belongs to another Session: ${timeline.agentSessionId}`)
+    }
+    return timeline
   }
 
   async launchTerminal(request: TerminalLaunchInput, config: AppConfig): Promise<SessionSnapshot> {
@@ -475,6 +641,39 @@ export class RuntimeController {
     })
   }
 
+  async resizeSessionAttachment(
+    webContentsId: number,
+    attachmentId: string,
+    cols: number,
+    rows: number
+  ): Promise<void> {
+    const lease = this.sessionAttachmentLeases.get(attachmentId)
+    if (!lease) return
+    if (lease.webContentsId !== webContentsId) {
+      throw new Error('The Session Attachment lease belongs to a different Desktop client.')
+    }
+    await this.serializeSessionAttachment(lease.key, async () => {
+      const currentLease = this.sessionAttachmentLeases.get(attachmentId)
+      if (!currentLease) return
+      if (currentLease.webContentsId !== webContentsId || currentLease.key !== lease.key) {
+        throw new Error('The Session Attachment lease owner changed before resize.')
+      }
+      const owner = this.sessionAttachmentOwners.get(lease.key)
+      if (!owner?.attachmentIds.has(attachmentId)) return
+      const client = await this.connectedClient(owner.control.hostId)
+      if (owner.control.kind === 'agent') {
+        await client.resizeAgent(
+          owner.control.agentSessionId,
+          owner.control.run,
+          cols,
+          rows
+        )
+      } else {
+        await client.resizeTerminal(owner.control.run, cols, rows)
+      }
+    })
+  }
+
   async write(control: SessionControl, data: string): Promise<void> {
     const client = await this.connectedClient(control.hostId)
     if (control.kind === 'agent') await client.writeAgent(control.agentSessionId, data)
@@ -497,15 +696,14 @@ export class RuntimeController {
         })
         return
       }
-      const agent = config.agents[status.session.agentId]
-      if (!agent) throw new Error(`Missing agent configuration: ${status.session.agentId}`)
+      const executor = requireSessionExecutor(config, status.session)
       await client.resumeAgent({
         agentSessionId: control.agentSessionId,
         operationId: randomUUID(),
         prompt,
-        args: agent.args,
-        env: agent.env,
-        commandOverride: agent.command
+        args: executor.args,
+        env: executor.env,
+        commandOverride: executor.command
       })
     })
   }
@@ -522,12 +720,6 @@ export class RuntimeController {
     else await client.signalTerminal(control.run, 'SIGINT')
   }
 
-  async resize(control: SessionControl, cols: number, rows: number): Promise<void> {
-    const client = await this.connectedClient(control.hostId)
-    if (control.kind === 'agent') await client.resizeAgent(control.agentSessionId, cols, rows)
-    else await client.resizeTerminal(control.run, cols, rows)
-  }
-
   async refresh(control: SessionControl, config: AppConfig): Promise<SessionSnapshot> {
     return await this.sessionById(
       await this.connectedClient(control.hostId),
@@ -536,15 +728,97 @@ export class RuntimeController {
     )
   }
 
-  async stopSession(control: SessionControl): Promise<void> {
+  /**
+   * Recovers a session whose PTY is gone (daemon_restart / tmux_* interruption, or exit).
+   *
+   * The PTY cannot be revived — recovery mints a fresh Run in the same cwd. Terminals
+   * relaunch the host shell (brand-new runId); agents resume via provider-native resume
+   * (stable agentSessionId, new runId). We try optimistically on the existing client
+   * first: if the daemon is still alive with live sibling sessions, tearing the client
+   * down would be needlessly destructive. Only when the operation reports the backend is
+   * unreachable (CTXMUX_UNAVAILABLE/CTXMUX_DISCONNECTED — the daemon_restart case, where
+   * the cached client short-circuits connect() forever and holds a stale daemonInstanceId)
+   * do we force a full reconnect (which respawns ctxmuxd if none is listening) and retry once.
+   */
+  async recoverSession(
+    control: SessionControl,
+    config: AppConfig,
+    workspacePath?: string
+  ): Promise<SessionSnapshot> {
+    return await this.trackHostLifecycleOperation(control.hostId, async () => {
+      try {
+        return await this.performRecovery(control, config, workspacePath)
+      } catch (error) {
+        if (!isBackendUnavailable(error)) throw error
+        // Backend is gone (daemon_restart). Force the client to drop its stale connection
+        // state and re-establish — the only path that respawns ctxmuxd and refreshes the
+        // daemon instance id — then retry the recovery once against the fresh daemon.
+        const host = this.hosts.get(control.hostId)
+        if (!host) throw error
+        host.client.disconnect()
+        await host.client.connect()
+        return await this.performRecovery(control, config, workspacePath)
+      }
+    })
+  }
+
+  private async performRecovery(
+    control: SessionControl,
+    config: AppConfig,
+    workspacePath?: string
+  ): Promise<SessionSnapshot> {
     const client = await this.connectedClient(control.hostId)
-    if (control.kind === 'agent') await client.stopAgent(control.agentSessionId)
-    else {
-      await client.stopTerminal(control.run)
-      const key = terminalInputKey(control.hostId, control.runId)
-      this.terminalInputCursors.delete(key)
-      this.terminalInputTails.delete(key)
+    if (control.kind === 'terminal') {
+      const cwd = workspacePath ?? (await this.sessionById(client, control.runId, config)).workspacePath
+      const run = await client.createTerminal({
+        createOperationId: randomUUID(),
+        workspacePath: cwd
+      })
+      this.terminalInputCursors.set(
+        terminalInputKey(control.hostId, run.runId),
+        run.acceptedInputBytes
+      )
+      return await this.sessionById(client, run.runId, config)
     }
+    // Agent: provider-native resume produces a fresh Run under the same agentSessionId.
+    // resumeAgent requires a non-empty prompt but we have no stored last prompt, so a
+    // minimal sentinel wakes the resumed process; the user steers it afterwards.
+    const status = await client.statusAgent(control.agentSessionId)
+    const executor = requireSessionExecutor(config, status.session)
+    const scratch = config.workspaces.find((workspace) => (
+      workspace.id === SCRATCH_WORKSPACE_ID && workspace.hostId === control.hostId
+    ))
+    const scratchTopicId = scratch
+      ? scratchTopicIdFromWorkspacePath(scratch.path, status.session.workspacePath)
+      : null
+    await client.resumeAgent({
+      agentSessionId: control.agentSessionId,
+      operationId: randomUUID(),
+      prompt: 'resume',
+      args: executor.args,
+      env: {
+        ...executor.env,
+        ...(scratchTopicId ? { AGENTMUX_WIKI_DIR: status.session.workspacePath } : {})
+      },
+      commandOverride: executor.command
+    })
+    return await this.sessionById(client, control.agentSessionId, config)
+  }
+
+  async stopSession(control: SessionControl): Promise<void> {
+    const attachmentKey = sessionAttachmentKey(control)
+    await this.serializeSessionAttachment(attachmentKey, async () => {
+      const client = await this.connectedClient(control.hostId)
+      if (control.kind === 'agent') {
+        await client.stopAgent(control.agentSessionId, control.run)
+      } else {
+        await client.stopTerminal(control.run)
+        const inputKey = terminalInputKey(control.hostId, control.runId)
+        this.terminalInputCursors.delete(inputKey)
+        this.terminalInputTails.delete(inputKey)
+      }
+      this.forgetSessionAttachmentOwner(attachmentKey)
+    })
   }
 
   async dispose(): Promise<void> {
@@ -696,13 +970,19 @@ export class RuntimeController {
     subjectId: string,
     config: AppConfig
   ): Promise<SessionSnapshot> {
-    const view = (await client.workspaceView()).views.find((candidate) => (
+    const subject = (await client.runtimeProjection()).subjects.find((candidate) => (
       candidate.kind === 'agent'
         ? candidate.agentSession.agentSessionId === subjectId
         : candidate.run.runId === subjectId
     ))
-    if (!view) throw new Error(`Runtime subject is not available: ${subjectId}`)
-    return projectSession(view, config)
+    if (!subject) throw new Error(`Runtime subject is not available: ${subjectId}`)
+    return projectSession(
+      subject,
+      config,
+      subject.kind === 'agent'
+        ? client.providers.get(subject.providerId).catalog.capabilities
+        : undefined
+    )
   }
 
   private async serializeSessionAttachment<T>(key: string, operation: () => Promise<T>): Promise<T> {
@@ -726,6 +1006,16 @@ export class RuntimeController {
     )
     const errors = results.flatMap((result) => result.status === 'rejected' ? [result.reason] : [])
     if (errors.length > 0) throw new AggregateError(errors, 'Desktop Session Attachment cleanup failed.')
+  }
+
+  private forgetSessionAttachmentOwner(key: string): void {
+    const owner = this.sessionAttachmentOwners.get(key)
+    if (!owner) return
+    for (const attachmentId of owner.attachmentIds) {
+      this.sessionAttachmentLeases.delete(attachmentId)
+    }
+    owner.attachmentIds.clear()
+    this.sessionAttachmentOwners.delete(key)
   }
 
   private publish(hostId: string, event: AgentMuxClientEvent): void {

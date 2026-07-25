@@ -2,7 +2,8 @@ import { FolderGit2, LoaderCircle, Play, RadioTower } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { AppConfig } from '../../../../shared/contracts'
 import { api } from '../../lib/api'
-import { agentDetectionKey, useAppStore } from '../../store'
+import { configuredExecutors } from '../../lib/executors'
+import { executorDetectionKey, useAppStore } from '../../store'
 import { agentProviderLabel } from '../AgentProviderIcon'
 
 export function WorkspaceSettingsPane({ config, onClose }: {
@@ -12,11 +13,11 @@ export function WorkspaceSettingsPane({ config, onClose }: {
   const [hostId, setHostId] = useState(config.workspaces[0]?.hostId ?? 'local')
   const [projectPath, setProjectPath] = useState('')
   const [name, setName] = useState('')
-  const [agentId, setAgentId] = useState('none')
+  const [executorId, setExecutorId] = useState('none')
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const detections = useAppStore((state) => state.agentDetections)
-  const detectAgents = useAppStore((state) => state.detectAgents)
+  const detections = useAppStore((state) => state.executorDetections)
+  const detectExecutors = useAppStore((state) => state.detectExecutors)
   const hostChecks = useAppStore((state) => state.hostChecks)
   const checkHost = useAppStore((state) => state.checkHost)
   const setConfig = useAppStore((state) => state.setConfig)
@@ -24,13 +25,12 @@ export function WorkspaceSettingsPane({ config, onClose }: {
   const launchAgent = useAppStore((state) => state.launchAgent)
   const readyHosts = config.hosts.filter((host) => hostChecks[host.id]?.state === 'ready')
   const checkingHosts = config.hosts.some((host) => !hostChecks[host.id] || hostChecks[host.id]?.state === 'checking')
-  const agents = useMemo(() => Object.keys(config.agents).map((id) => ({
-    id,
-    label: agentProviderLabel(id),
-    detection: detections[agentDetectionKey(hostId, id)]
-  })), [config.agents, detections, hostId])
-  const readyAgents = agents.filter((agent) => agent.detection?.state === 'ready')
-  const checking = agents.some((agent) => agent.detection?.state === 'checking')
+  const executors = useMemo(() => configuredExecutors(config).map((executor) => ({
+    ...executor,
+    detection: detections[executorDetectionKey(hostId, executor.id)]
+  })), [config.executors, detections, hostId])
+  const readyExecutors = executors.filter((executor) => executor.detection?.state === 'ready')
+  const checking = executors.some((executor) => executor.detection?.state === 'checking')
 
   useEffect(() => {
     for (const host of config.hosts) if (!hostChecks[host.id]) void checkHost(host)
@@ -43,14 +43,14 @@ export function WorkspaceSettingsPane({ config, onClose }: {
   }, [hostId, readyHosts])
 
   useEffect(() => {
-    if (agents.every((agent) => agent.detection)) return
-    void detectAgents(hostId)
-  }, [agents, detectAgents, hostId])
+    if (executors.every((executor) => executor.detection)) return
+    void detectExecutors(hostId)
+  }, [executors, detectExecutors, hostId])
 
   useEffect(() => {
-    if (agentId === 'none' || readyAgents.some((agent) => agent.id === agentId)) return
-    setAgentId('none')
-  }, [agentId, readyAgents])
+    if (executorId === 'none' || readyExecutors.some((executor) => executor.id === executorId)) return
+    setExecutorId('none')
+  }, [executorId, readyExecutors])
 
   async function create(): Promise<void> {
     if (creating) return
@@ -65,10 +65,10 @@ export function WorkspaceSettingsPane({ config, onClose }: {
       const latest = await api.config.get()
       setConfig(latest)
       await selectWorkspace(workspace.id)
-      if (agentId !== 'none') {
+      if (executorId !== 'none') {
         const layout = useAppStore.getState().layouts[workspace.id]
         if (!layout) throw new Error('Workspace layout was not created')
-        await launchAgent(agentId, '', layout.activeGroupId)
+        await launchAgent(executorId, '', layout.activeGroupId)
       }
       onClose()
     } catch (cause) {
@@ -86,7 +86,7 @@ export function WorkspaceSettingsPane({ config, onClose }: {
           <label className="workspace-composer__wide"><span>Project folder</span><input value={projectPath} onChange={(event) => setProjectPath(event.target.value)} placeholder="/path/to/project" /></label>
           <label><span>Run on</span><select value={readyHosts.some((host) => host.id === hostId) ? hostId : ''} disabled={readyHosts.length === 0} onChange={(event) => setHostId(event.target.value)}><option value="" disabled>{checkingHosts ? 'Checking hosts…' : 'No ready hosts'}</option>{readyHosts.map((host) => <option key={host.id} value={host.id}>{host.label}</option>)}</select><small>{readyHosts.find((host) => host.id === hostId)?.kind === 'ssh' ? <><RadioTower size={11} /> System SSH · Ready</> : readyHosts.some((host) => host.id === hostId) ? 'This Mac · Ready' : 'Open Hosts settings to fix unavailable machines.'}</small></label>
           <label><span>Name <em>optional</em></span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="Project name" /></label>
-          <label className="workspace-composer__wide"><span>Agent</span><select value={agentId} onChange={(event) => setAgentId(event.target.value)} disabled={checking}><option value="none">Open without an agent</option>{readyAgents.map((agent) => <option key={agent.id} value={agent.id}>{agent.label}</option>)}</select><small>{checking ? 'Detecting agents on this host…' : `${readyAgents.length} installed on this host`}</small></label>
+          <label className="workspace-composer__wide"><span>Agent</span><select value={executorId} onChange={(event) => setExecutorId(event.target.value)} disabled={checking}><option value="none">Open without an agent</option>{readyExecutors.map((executor) => <option key={executor.id} value={executor.id}>{executor.label} · {agentProviderLabel(executor.providerId)}</option>)}</select><small>{checking ? 'Detecting agents on this host…' : `${readyExecutors.length} available on this host`}</small></label>
         </div>
         {error ? <div className="dialog-error">{error}</div> : null}
         <footer><span>Branches and worktrees remain Git-owned and appear in the project navigator.</span><button className="primary-button" disabled={!projectPath.trim() || creating || !readyHosts.some((host) => host.id === hostId)} onClick={() => void create()}>{creating ? <LoaderCircle className="spin" size={14} /> : <Play size={14} />}{creating ? 'Adding…' : 'Add project'}</button></footer>

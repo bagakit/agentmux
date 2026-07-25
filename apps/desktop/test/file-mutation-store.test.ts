@@ -6,16 +6,155 @@ vi.hoisted(() => {
 
 import type { AppConfig, WorkspaceRecord } from '../src/shared/contracts.js'
 import { createWorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.js'
-import { documentKey, type FileWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
+import {
+  createWorkbenchTab,
+  documentKey,
+  initialWorkbenchRegionId,
+  titleWorkbenchSurface
+} from '../src/renderer/src/lib/workbench-tabs.js'
 import { useAppStore } from '../src/renderer/src/store.js'
+import { api } from '../src/renderer/src/lib/api.js'
 
 const initialState = useAppStore.getState()
 
 afterEach(() => {
+  vi.restoreAllMocks()
   useAppStore.setState(initialState, true)
 })
 
+function fileProjection() {
+  const state = useAppStore.getState()
+  return {
+    tabs: state.tabs,
+    documents: state.documents,
+    dirtyDocuments: state.dirtyDocuments,
+    documentGenerations: state.documentGenerations,
+    documentObservationGenerations: state.documentObservationGenerations,
+    documentIssues: state.documentIssues,
+    savingDocuments: state.savingDocuments,
+    layouts: state.layouts,
+    lastActiveFileByWorkspace: state.lastActiveFileByWorkspace
+  }
+}
+
 describe('file mutation resource reconciliation', () => {
+  it('rejects a destination document owner before asking Main to move', async () => {
+    const workspaceId = 'collision-workspace'
+    const sourcePath = 'src/source.ts'
+    const destinationPath = 'src/destination.ts'
+    const sourceId = `file:${workspaceId}:${sourcePath}`
+    const destinationId = `file:${workspaceId}:${destinationPath}`
+    const source = createWorkbenchTab(sourceId, {
+      regionId: initialWorkbenchRegionId(sourceId),
+      kind: 'file',
+      workspaceId,
+      path: sourcePath
+    })
+    const destination = createWorkbenchTab(destinationId, {
+      regionId: initialWorkbenchRegionId(destinationId),
+      kind: 'file',
+      workspaceId,
+      path: destinationPath
+    })
+    useAppStore.setState({
+      activeWorkspaceId: workspaceId,
+      tabs: { [sourceId]: source, [destinationId]: destination },
+      documents: {
+        [documentKey(workspaceId, sourcePath)]: { path: sourcePath, content: 'source', revision: 'source-revision' },
+        [documentKey(workspaceId, destinationPath)]: {
+          path: destinationPath,
+          content: 'destination draft',
+          revision: 'destination-revision'
+        }
+      },
+      dirtyDocuments: { [documentKey(workspaceId, destinationPath)]: true },
+      layouts: { [workspaceId]: createWorkspaceLayout('pane', [sourceId, destinationId]) }
+    })
+    const move = vi.spyOn(api.files, 'move')
+    const before = fileProjection()
+
+    await expect(useAppStore.getState().renamePath(sourcePath, destinationPath)).rejects.toMatchObject({
+      code: 'WORKSPACE_MOVE_RENDERER_DESTINATION_OWNED'
+    })
+
+    expect(move).not.toHaveBeenCalled()
+    expect(fileProjection()).toEqual(before)
+  })
+
+  it('keeps the Renderer projection unchanged when Main reports an unknown move location', async () => {
+    const workspaceId = 'unknown-move-workspace'
+    const sourcePath = 'src/source.ts'
+    const destinationPath = 'lib/source.ts'
+    const sourceId = `file:${workspaceId}:${sourcePath}`
+    const source = createWorkbenchTab(sourceId, {
+      regionId: initialWorkbenchRegionId(sourceId),
+      kind: 'file',
+      workspaceId,
+      path: sourcePath
+    })
+    useAppStore.setState({
+      activeWorkspaceId: workspaceId,
+      tabs: { [sourceId]: source },
+      documents: {
+        [documentKey(workspaceId, sourcePath)]: { path: sourcePath, content: 'draft', revision: 'source-revision' }
+      },
+      dirtyDocuments: { [documentKey(workspaceId, sourcePath)]: true },
+      layouts: { [workspaceId]: createWorkspaceLayout('pane', [sourceId]) },
+      lastActiveFileByWorkspace: { [workspaceId]: sourcePath }
+    })
+    vi.spyOn(api.files, 'move').mockResolvedValue({
+      status: 'error',
+      code: 'WORKSPACE_MOVE_RECEIPT_UNKNOWN',
+      message: 'The final location is unknown',
+      finalLocation: 'unknown'
+    })
+    const before = fileProjection()
+
+    await expect(useAppStore.getState().renamePath(sourcePath, destinationPath)).rejects.toMatchObject({
+      code: 'WORKSPACE_MOVE_RECEIPT_UNKNOWN',
+      finalLocation: 'unknown'
+    })
+
+    expect(fileProjection()).toEqual(before)
+  })
+
+  it('keeps a confirmed move committed when observation rebinding fails', async () => {
+    const workspaceId = 'observation-move-workspace'
+    const sourcePath = `source-${crypto.randomUUID()}.ts`
+    const destinationPath = `destination-${crypto.randomUUID()}.ts`
+    const sourceId = `file:${workspaceId}:${sourcePath}`
+    const source = createWorkbenchTab(sourceId, {
+      regionId: initialWorkbenchRegionId(sourceId),
+      kind: 'file',
+      workspaceId,
+      path: sourcePath
+    })
+    useAppStore.setState({
+      activeWorkspaceId: workspaceId,
+      tabs: { [sourceId]: source },
+      documents: {
+        [documentKey(workspaceId, sourcePath)]: { path: sourcePath, content: '', revision: 'source-revision' }
+      },
+      layouts: { [workspaceId]: createWorkspaceLayout('pane', [sourceId]) }
+    })
+    await api.files.create(workspaceId, { path: sourcePath, kind: 'file' })
+    const unobserve = vi.spyOn(api.files, 'unobserve').mockRejectedValueOnce(new Error('unobserve failed'))
+    const observe = vi.spyOn(api.files, 'observe').mockRejectedValueOnce(new Error('observe failed'))
+    const read = vi.spyOn(api.files, 'read')
+
+    await expect(useAppStore.getState().renamePath(sourcePath, destinationPath)).resolves.toBeUndefined()
+
+    const destinationId = `file:${workspaceId}:${destinationPath}`
+    expect(useAppStore.getState().tabs[sourceId]).toBeUndefined()
+    expect(titleWorkbenchSurface(useAppStore.getState().tabs[destinationId]!)).toMatchObject({ path: destinationPath })
+    expect(useAppStore.getState().documents[documentKey(workspaceId, sourcePath)]).toBeUndefined()
+    expect(useAppStore.getState().documents[documentKey(workspaceId, destinationPath)]).toBeDefined()
+    expect(unobserve).toHaveBeenCalledWith(workspaceId, sourcePath)
+    expect(observe).toHaveBeenCalledWith(workspaceId, destinationPath)
+    expect(read).toHaveBeenCalledWith(workspaceId, destinationPath)
+    await api.files.delete(workspaceId, destinationPath)
+  })
+
   it('renames and deletes only the exact file subtree across tabs, documents, layout, and last-active state', async () => {
     const workspace: WorkspaceRecord = {
       id: 'mutation-workspace',
@@ -25,9 +164,9 @@ describe('file mutation resource reconciliation', () => {
       kind: 'folder'
     }
     const config: AppConfig = {
-      version: 4,
+      version: 6,
       hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
-      agents: {},
+      executors: {},
       workspaces: [workspace],
       appearance: { terminalTheme: 'graphite' }
     }
@@ -42,32 +181,50 @@ describe('file mutation resource reconciliation', () => {
     await useAppStore.getState().createPath({ path: 'src/app/closed.ts', kind: 'file' })
     await useAppStore.getState().createPath({ path: 'src/application.ts', kind: 'file' })
 
-    const child: FileWorkbenchTab = {
-      id: `file:${workspace.id}:src/app/index.ts`,
+    const childPath = 'src/app/index.ts'
+    const childId = `file:${workspace.id}:${childPath}`
+    const child = createWorkbenchTab(childId, {
+      regionId: initialWorkbenchRegionId(childId),
       kind: 'file',
       workspaceId: workspace.id,
-      path: 'src/app/index.ts'
-    }
-    const neighbor: FileWorkbenchTab = {
-      id: `file:${workspace.id}:src/application.ts`,
+      path: childPath
+    })
+    const neighborPath = 'src/application.ts'
+    const neighborId = `file:${workspace.id}:${neighborPath}`
+    const neighbor = createWorkbenchTab(neighborId, {
+      regionId: initialWorkbenchRegionId(neighborId),
       kind: 'file',
       workspaceId: workspace.id,
-      path: 'src/application.ts'
-    }
+      path: neighborPath
+    })
     useAppStore.setState({
       tabs: { [child.id]: child, [neighbor.id]: neighbor },
       documents: {
-        [documentKey(workspace.id, child.path)]: { path: child.path, content: 'child', revision: 'child-revision' },
+        [documentKey(workspace.id, childPath)]: { path: childPath, content: 'child', revision: 'child-revision' },
         [documentKey(workspace.id, 'src/app/closed.ts')]: { path: 'src/app/closed.ts', content: 'closed', revision: 'closed-revision' },
-        [documentKey(workspace.id, neighbor.path)]: { path: neighbor.path, content: 'neighbor', revision: 'neighbor-revision' }
+        [documentKey(workspace.id, neighborPath)]: { path: neighborPath, content: 'neighbor', revision: 'neighbor-revision' }
       },
       dirtyDocuments: {
-        [documentKey(workspace.id, child.path)]: true,
+        [documentKey(workspace.id, childPath)]: true,
         [documentKey(workspace.id, 'src/app/closed.ts')]: true,
-        [documentKey(workspace.id, neighbor.path)]: true
+        [documentKey(workspace.id, neighborPath)]: true
+      },
+      documentGenerations: {
+        [documentKey(workspace.id, childPath)]: 3,
+        [documentKey(workspace.id, 'src/app/closed.ts')]: 4
+      },
+      documentObservationGenerations: {
+        [documentKey(workspace.id, childPath)]: 5,
+        [documentKey(workspace.id, 'src/app/closed.ts')]: 6
+      },
+      documentIssues: {
+        [documentKey(workspace.id, childPath)]: { kind: 'write-error', code: 'EIO', message: 'retry' }
+      },
+      savingDocuments: {
+        [documentKey(workspace.id, childPath)]: true
       },
       layouts: { [workspace.id]: createWorkspaceLayout('pane', [child.id, neighbor.id]) },
-      lastActiveFileByWorkspace: { [workspace.id]: neighbor.path }
+      lastActiveFileByWorkspace: { [workspace.id]: neighborPath }
     })
 
     await useAppStore.getState().renamePath('src/app', 'src/renamed')
@@ -76,7 +233,7 @@ describe('file mutation resource reconciliation', () => {
     const renamedId = `file:${workspace.id}:${renamedPath}`
     const renamed = useAppStore.getState()
     expect(renamed.tabs[child.id]).toBeUndefined()
-    expect(renamed.tabs[renamedId]).toMatchObject({ path: renamedPath })
+    expect(titleWorkbenchSurface(renamed.tabs[renamedId]!)).toMatchObject({ path: renamedPath })
     expect(renamed.tabs[neighbor.id]).toEqual(neighbor)
     expect(renamed.documents[documentKey(workspace.id, renamedPath)]).toEqual({
       path: renamedPath,
@@ -89,14 +246,21 @@ describe('file mutation resource reconciliation', () => {
       revision: 'closed-revision'
     })
     expect(renamed.dirtyDocuments[documentKey(workspace.id, 'src/renamed/closed.ts')]).toBe(true)
-    expect(renamed.documents[documentKey(workspace.id, neighbor.path)]).toEqual({
-      path: neighbor.path,
+    expect(renamed.documents[documentKey(workspace.id, neighborPath)]).toEqual({
+      path: neighborPath,
       content: 'neighbor',
       revision: 'neighbor-revision'
     })
     expect(renamed.dirtyDocuments[documentKey(workspace.id, renamedPath)]).toBe(true)
+    expect(renamed.documentGenerations[documentKey(workspace.id, renamedPath)]).toBe(3)
+    expect(renamed.documentObservationGenerations[documentKey(workspace.id, renamedPath)]).toBe(6)
+    expect(renamed.documentIssues[documentKey(workspace.id, renamedPath)]).toEqual({
+      kind: 'changed',
+      observed: { path: renamedPath, content: '', revision: expect.any(String) }
+    })
+    expect(renamed.savingDocuments[documentKey(workspace.id, renamedPath)]).toBe(false)
     expect(renamed.layouts[workspace.id]?.groups[0]?.tabOrder).toEqual([renamedId, neighbor.id])
-    expect(renamed.lastActiveFileByWorkspace[workspace.id]).toBe(neighbor.path)
+    expect(renamed.lastActiveFileByWorkspace[workspace.id]).toBe(neighborPath)
 
     useAppStore.setState({
       lastActiveFileByWorkspace: { [workspace.id]: renamedPath }
@@ -108,10 +272,14 @@ describe('file mutation resource reconciliation', () => {
     const deleted = useAppStore.getState()
     expect(deleted.tabs[neighbor.id]).toEqual(neighbor)
     expect(deleted.tabs[`file:${workspace.id}:src/final/index.ts`]).toBeUndefined()
-    expect(deleted.documents[documentKey(workspace.id, neighbor.path)]).toBeDefined()
+    expect(deleted.documents[documentKey(workspace.id, neighborPath)]).toBeDefined()
     expect(deleted.documents[documentKey(workspace.id, 'src/final/index.ts')]).toBeUndefined()
     expect(deleted.documents[documentKey(workspace.id, 'src/final/closed.ts')]).toBeUndefined()
     expect(deleted.dirtyDocuments[documentKey(workspace.id, 'src/final/closed.ts')]).toBeUndefined()
+    expect(deleted.documentGenerations[documentKey(workspace.id, 'src/final/index.ts')]).toBeUndefined()
+    expect(deleted.documentObservationGenerations[documentKey(workspace.id, 'src/final/index.ts')]).toBeUndefined()
+    expect(deleted.documentIssues[documentKey(workspace.id, 'src/final/index.ts')]).toBeUndefined()
+    expect(deleted.savingDocuments[documentKey(workspace.id, 'src/final/index.ts')]).toBeUndefined()
     expect(deleted.lastActiveFileByWorkspace[workspace.id]).toBeUndefined()
     expect(deleted.layouts[workspace.id]?.groups[0]?.tabOrder).toEqual([neighbor.id])
   })
@@ -126,9 +294,9 @@ describe('file mutation resource reconciliation', () => {
     }
     useAppStore.setState({
       config: {
-        version: 4,
+        version: 6,
         hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
-        agents: {},
+        executors: {},
         workspaces: [workspace],
         appearance: { terminalTheme: 'graphite' }
       },

@@ -7,8 +7,10 @@ export function ConfirmationDialog({
   description,
   subject,
   confirmLabel,
+  secondaryLabel,
   busy = false,
   onCancel,
+  onSecondary,
   onConfirm
 }: {
   open: boolean
@@ -16,8 +18,10 @@ export function ConfirmationDialog({
   description: string
   subject?: string
   confirmLabel: string
+  secondaryLabel?: string
   busy?: boolean
   onCancel: () => void
+  onSecondary?: () => void
   onConfirm: () => void
 }) {
   return (
@@ -31,6 +35,11 @@ export function ConfirmationDialog({
           {subject ? <p title={subject}>{subject}</p> : null}
           <footer>
             <button type="button" className="small-button" disabled={busy} onClick={onCancel}>Cancel</button>
+            {secondaryLabel && onSecondary ? (
+              <button type="button" className="small-button" disabled={busy} onClick={onSecondary}>
+                {secondaryLabel}
+              </button>
+            ) : null}
             <button
               type="button"
               className="danger-button"

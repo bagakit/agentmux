@@ -1,7 +1,7 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { dirname, isAbsolute, join } from 'node:path'
 import type { Readable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
@@ -24,10 +24,10 @@ import {
   defaultCtxmuxStateDirectory
 } from './runtime-paths.js'
 
-const CTXMUX_COMMIT = '2e32a9d647d627952ea5c455fb2efef6c636643a'
-const CTXMUX_TREE = 'd60870c2481c9b153da6bf22f829d24afb8a81a8'
+const CTXMUX_COMMIT = 'f89dabe70eba38d46992c320e40c9ebe2f09b5e5'
+const CTXMUX_TREE = '37632c41c4aae42ba40f33ebe9c54fab13d17c44'
 const CTXMUX_VERSION = '0.1.0'
-const CTXMUX_MANIFEST_SHA256 = '15c0f54980ac339251017293cf4a21c94e2fb923d22cc3998b293f1a61a997d9'
+const CTXMUX_MANIFEST_SHA256 = 'ac53b1e43e67a73841d4f6cfbd272628e47f3731f29772dbb86bfbfce77935de'
 const DAEMON_READY_TIMEOUT_MS = 5_000
 const DAEMON_POLL_INTERVAL_MS = 20
 const DAEMON_READINESS_MAX_BYTES = 8 * 1024
@@ -400,6 +400,38 @@ function expectedOwnerReceipt(
   }
 }
 
+const OWNER_RECEIPT_KEYS = [
+  'schema',
+  'sourceCommit',
+  'sourceTree',
+  'manifestSha256',
+  'daemonSha256',
+  'daemonPath',
+  'socketPath',
+  'stateDirectory',
+  'daemonInstanceId'
+].sort()
+
+function ownerReceiptMatchesExpected(receipt: unknown, expected: OwnerReceipt): boolean {
+  if (typeof receipt !== 'object' || receipt === null || Array.isArray(receipt)) return false
+  const candidate = receipt as Record<string, unknown>
+  const keys = Object.keys(candidate).sort()
+  return (
+    keys.length === OWNER_RECEIPT_KEYS.length &&
+    keys.every((key, index) => key === OWNER_RECEIPT_KEYS[index]) &&
+    candidate.schema === expected.schema &&
+    candidate.sourceCommit === expected.sourceCommit &&
+    candidate.sourceTree === expected.sourceTree &&
+    candidate.manifestSha256 === expected.manifestSha256 &&
+    candidate.daemonSha256 === expected.daemonSha256 &&
+    typeof candidate.daemonPath === 'string' &&
+    isAbsolute(candidate.daemonPath) &&
+    candidate.socketPath === expected.socketPath &&
+    candidate.stateDirectory === expected.stateDirectory &&
+    candidate.daemonInstanceId === expected.daemonInstanceId
+  )
+}
+
 async function verifyOwnerReceipt(
   artifacts: VerifiedArtifacts,
   socketPath: string,
@@ -409,12 +441,12 @@ async function verifyOwnerReceipt(
   try {
     const path = ownerReceiptPath()
     const metadata = await stat(path)
-    const receipt = JSON.parse(await readFile(path, 'utf8')) as OwnerReceipt
+    const receipt: unknown = JSON.parse(await readFile(path, 'utf8'))
     const expected = expectedOwnerReceipt(artifacts, socketPath, stateDirectory, daemonInstanceId)
     if (
       !metadata.isFile() ||
       (metadata.mode & 0o777) !== 0o600 ||
-      JSON.stringify(receipt) !== JSON.stringify(expected)
+      !ownerReceiptMatchesExpected(receipt, expected)
     ) {
       throw new Error('owner receipt mismatch')
     }

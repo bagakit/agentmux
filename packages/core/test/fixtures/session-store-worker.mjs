@@ -23,36 +23,61 @@ await waitForStart()
 
 const store = new AgentMuxFileAgentSessionStore(storePath)
 const expectedRun = { runId: 'original-run' }
-const reservation = {
-  reservationId: `${workerId}-reservation`,
-  ownerId: `${workerId}-owner`,
-  ownerPid: process.pid,
-  kind: mode,
-  agentSessionId: 'shared-semantic',
-  operationId: `${workerId}-operation`,
-  expiresAt: Date.now() + 30_000,
-  ...(mode === 'create' ? {} : { expectedRun })
-}
 
 try {
-  await store.reserveLifecycle(reservation)
-  const run = { runId: `${mode}-${workerId}-run` }
-  const current = mode === 'resume' ? (await store.load())[0] : null
-  await store.commitLifecycle(reservation, {
-    kind: 'agent',
-    agentSessionId: 'shared-semantic',
-    agentId: 'codex',
-    hostId: 'local',
-    workspacePath: '/private/tmp/store-race',
-    run,
-    retiredRuns: current ? [...current.retiredRuns, current.run].slice(-16) : [],
-    hookBindingId: `${workerId}-binding`,
-    hookToken: `${workerId}-token`,
-    outputCursorBytes: 0,
-    createdAt: current?.createdAt ?? 1,
-    updatedAt: 2
-  })
-  process.stdout.write(`${JSON.stringify({ type: 'result', workerId, ok: true, runId: run.runId })}\n`)
+  if (mode === 'timeline') {
+    const commit = await store.applyTimelineMutation({
+      type: 'append',
+      agentSessionId: 'shared-semantic',
+      item: {
+        id: `activity-${workerId}`,
+        agentSessionId: 'shared-semantic',
+        kind: 'assistant_message',
+        status: 'complete',
+        source: 'acp',
+        createdAt: 1,
+        updatedAt: 1,
+        title: `Activity ${workerId}`
+      }
+    })
+    process.stdout.write(`${JSON.stringify({
+      type: 'result',
+      workerId,
+      ok: true,
+      revision: commit.revision,
+      changed: commit.changed
+    })}\n`)
+  } else {
+    const reservation = {
+      reservationId: `${workerId}-reservation`,
+      ownerId: `${workerId}-owner`,
+      ownerPid: process.pid,
+      kind: mode,
+      agentSessionId: 'shared-semantic',
+      operationId: `${workerId}-operation`,
+      expiresAt: Date.now() + 30_000,
+      ...(mode === 'create' ? {} : { expectedRun })
+    }
+    await store.reserveLifecycle(reservation)
+    const run = { runId: `${mode}-${workerId}-run` }
+    const current = mode === 'resume' ? (await store.load())[0] : null
+    await store.commitLifecycle(reservation, {
+      kind: 'agent',
+      agentSessionId: 'shared-semantic',
+      providerId: 'codex',
+      executorId: 'codex',
+      hostId: 'local',
+      workspacePath: '/private/tmp/store-race',
+      run,
+      retiredRuns: current ? [...current.retiredRuns, current.run].slice(-16) : [],
+      hookBindingId: `${workerId}-binding`,
+      hookToken: `${workerId}-token`,
+      outputCursorBytes: 0,
+      createdAt: current?.createdAt ?? 1,
+      updatedAt: 2
+    })
+    process.stdout.write(`${JSON.stringify({ type: 'result', workerId, ok: true, runId: run.runId })}\n`)
+  }
 } catch (error) {
   process.stdout.write(`${JSON.stringify({
     type: 'result',

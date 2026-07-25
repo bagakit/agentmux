@@ -2,7 +2,7 @@
 
 状态：Protocol Revision 5 observer candidate 已通过实现期双 Runtime smoke、完整 Repository Gate 与独立静态方法 Review；正式 Result 仍等待 CtxMux owner-layer 资源修复、最终 tracked-clean SHA 和 pre-formal provenance 复核。Revision 4 因 CPU counter 与 wall denominator 的窗口错位、无证据的 `1 ns` resolution 声明被 Review 拒绝，且从未产生正式 Result。Revision 3 Round 1 已于 clean candidate `9a92bd14c3f68314354dc406da16f6766fa4c1d5` 运行并得到 `fail`，Raw Result 永久保留。Revision 1 只适用于已经删除的自建 `agentmuxd`，Revision 2 的首轮 Raw Result 保留为 characterization。历史 Revision 都不覆盖、不改写。
 
-Revision 3 Round 1 的所有 workload correctness 与 cleanup oracle 均通过，tmux 仅按冻结规则暴露完整进程树 Stop 限制；主性能维度中 AgentMux 已胜出 input、throughput、attach、reconnect、32 Run scale、steady/peak/released RSS 与完整 Stop。最终 Verdict 仍然失败：Idle RSS `5120 KiB >= 3536 KiB` 是真实 candidate gap；Per-session RSS 的 `142.5 KiB >= 32 KiB` 方向有独立证据支持，但正式样本把 AgentMux 的一个 historical Run 混入 32 live Run，而 tmux 只有 32 live Session，状态不等价；Idle CPU 两端都由百分之一秒精度的 `ps time` 观测成零，证据不可判定。不能把 `0 == 0` 改成通过、放宽严格 `<`、增加容差或从 RSS 事后扣数。完整原始证据见 `docs/benchmarks/results/revision-3-round-1-9a92bd14-darwin-arm64-2026-08-16T225516355Z.json`。
+Revision 3 Round 1 的所有 workload correctness 与 cleanup oracle 均通过，tmux 仅按冻结规则暴露完整进程树 Stop 限制；主性能维度中 AgentMux 已胜出 input、throughput、attach、reconnect、32 Run scale、steady/peak/released RSS 与完整 Stop。最终 Verdict 仍然失败：Idle RSS `5120 KiB >= 3536 KiB` 是真实 candidate gap；Per-session RSS 的 `142.5 KiB >= 32 KiB` 方向有独立证据支持，但正式样本把 AgentMux 的一个 historical Run 混入 32 live Run，而 tmux 只有 32 live Session，状态不等价；Idle CPU 两端都由百分之一秒精度的 `ps time` 观测成零，证据不可判定。不能把 `0 == 0` 改成通过、放宽严格 `<`、增加容差或从 RSS 事后扣数。完整原始证据位于 `docs/benchmarks/results/` 中带有 `revision-3-round-1-9a92bd14` 标识的结果文件。
 
 Revision 5 只修正证据合同，不调整门槛：每个 CPU counter endpoint 在同一个 C probe 内由 `CLOCK_MONOTONIC_RAW` 调用前后包围；受控的独立 CPU-burn 子进程形成全部正 counter step 和最小观测 quantum；CPU 比较使用保守区间，只有 AgentMux 上界严格小于 tmux 下界才通过，1% 预算也使用 AgentMux 上界。Released census 现在要求 AgentMux 精确为 `0 live + 33 historical`、tmux 为 `0/0/0`，FD/Run 使用已验证的实际 historical 分母。Revision 4 已修正的 fresh `1 → 32 live + 0 historical` 状态继续保留。数值阈值、样本量、统计、outlier policy、strict comparison 和 workload correctness 不变。新正式 Round 之前还必须在 CtxMux owner 层修复真实 Idle/Per-Run RSS 缺口。
 
@@ -25,7 +25,7 @@ Revision 5 只修正证据合同，不调整门槛：每个 CPU counter endpoint
 
 ### Revision 3：Baseline 与执行顺序
 
-Revision 2 原始结果永久保留在 `docs/benchmarks/results/round-1-308dd27c-darwin-arm64-2026-08-16T223750749Z.json`。它暴露了四个 Runner／Protocol 方法错误，因此只能作为 characterization，不能据此判定产品回退：
+Revision 2 原始结果保留在 `docs/benchmarks/results/` 中带有 `round-1-308dd27c` 标识的结果文件。它暴露了四个 Runner／Protocol 方法错误，因此只能作为 characterization，不能据此判定产品回退：
 
 - tmux Reconnect 收到完整 Run object，却把它当 session string 拼成 `=[object Object]`；Revision 3 统一让两个 Runtime 消费同一个 Run object，并核对 exact session 与 PID。
 - tmux 在首个 pane 已经按默认较小 history 创建后才设置 per-window `history-limit 50000`，4 MiB capture 已经丢失 ready／payload prefix；Revision 3 在任何 `new-session` 之前先设置 global window history limit，同时继续保留历史 per-window command。
@@ -45,7 +45,7 @@ Revision 2 原始结果永久保留在 `docs/benchmarks/results/round-1-308dd27c
 ### AgentMux Candidate
 
 - 当前提交从源码构建的 `@agentmux/core` 公共 `AgentMuxClient`；Runner 只能调用 package 根导出的 `connect`、`runtimeIdentity`、`runtimeDiagnostics`、`createTerminal`、`attachTerminal`、`releaseRunAttachment`、`writeTerminal`、`listRuns`、`stopTerminal`、`disconnect` 与 `dispose`。不得导入 `CtxmuxRunAdapter`、`@ctxmux/sdk`、wire、state 或其他 private module。
-- 固定 CtxMux artifact 是 clean commit `2e32a9d647d627952ea5c455fb2efef6c636643a`、tree `d60870c2481c9b153da6bf22f829d24afb8a81a8`、product `0.1.0`、protocol `9`、manifest SHA-256 `15c0f54980ac339251017293cf4a21c94e2fb923d22cc3998b293f1a61a997d9`；Runner 从 `runtimeDiagnostics()` 核对公开 identity，并把 package 中 manifest 的 SHA-256 作为只读 build-input evidence 记录，不读取 CtxMux state。
+- 固定 CtxMux artifact 是 clean commit `f89dabe70eba38d46992c320e40c9ebe2f09b5e5`、tree `37632c41c4aae42ba40f33ebe9c54fab13d17c44`、product `0.1.0`、protocol `9`、manifest SHA-256 `ac53b1e43e67a73841d4f6cfbd272628e47f3731f29772dbb86bfbfce77935de`；Runner 从 `runtimeDiagnostics()` 核对公开 identity，并把 package 中 manifest 的 SHA-256 作为只读 build-input evidence 记录，不读取 CtxMux state。
 - 每轮使用一个独立、随机、权限 `0700` 的 `AGENTMUX_RUNTIME_DIRECTORY`。CtxMux daemon 是唯一 Run Owner；Benchmark Runner 是 Client，不把 Runner RSS 计入 daemon RSS。
 - 正式 `full` Result 必须来自 tracked-clean Git SHA；Runner 把 SHA 与 dirty paths 写入 Manifest，dirty 时拒绝写发布 Verdict。`smoke` 只验证 Runner 路径，不产生 release `pass`，也不得写入正式 results 目录。
 

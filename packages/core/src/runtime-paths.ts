@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 
-const CTXMUX_RUNTIME_ID = '88e8377ecc4341b655d47306'
+const CTXMUX_RUNTIME_ID = 'ac53b1e43e67a73841d4f6cf'
 
 export function defaultAgentMuxRuntimeDirectory(): string {
   const override = process.env.AGENTMUX_RUNTIME_DIRECTORY?.trim()
@@ -25,8 +25,8 @@ export function defaultCtxmuxStateDirectory(): string {
   return join(defaultAgentMuxRuntimeDirectory(), 'state')
 }
 
-export function defaultAgentMuxDesktopFocusSocketPath(): string {
-  return join(defaultAgentMuxRuntimeDirectory(), 'desktop-focus.sock')
+export function defaultAgentMuxCompositionSocketPath(): string {
+  return join(defaultAgentMuxRuntimeDirectory(), 'composition.sock')
 }
 
 export function defaultAgentMuxHookPort(): number {

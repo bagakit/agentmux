@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { projectAgentMuxViews, resolveAgentMuxViewFocus } from '../src/runtime.js'
+import { projectAgentMuxRuntimeSubjects } from '../src/runtime.js'
 import type { AgentMuxAgentSession, AgentMuxRun } from '../src/types.js'
 
 const run: AgentMuxRun = {
   runId: 'run-1',
   kind: 'agent',
-  agentId: 'codex',
+  providerId: 'codex',
+  executorId: 'codex',
   agentSessionId: 'semantic-1',
   workspacePath: '/repo',
   pid: 42,
@@ -20,7 +21,8 @@ const run: AgentMuxRun = {
 const agentSession: AgentMuxAgentSession = {
   kind: 'agent',
   agentSessionId: 'semantic-1',
-  agentId: 'codex',
+  providerId: 'codex',
+  executorId: 'codex',
   hostId: 'local',
   workspacePath: '/repo',
   run: { runId: 'run-1' },
@@ -36,63 +38,52 @@ describe('AgentMux runtime projection', () => {
       ...run,
       runId: 'terminal-1',
       kind: 'terminal',
-      agentId: null,
+      providerId: null,
+      executorId: null,
       agentSessionId: null
     }
-    const views = projectAgentMuxViews('local', [run, terminal], [agentSession])
-    expect(views).toMatchObject([
+    const subjects = projectAgentMuxRuntimeSubjects('local', [run, terminal], [agentSession])
+    expect(subjects).toMatchObject([
       {
-        viewId: 'agent-view:local:semantic-1',
+        subjectId: 'agent:local:semantic-1',
         kind: 'agent',
         agentSession: { agentSessionId: 'semantic-1' }
       },
       {
-        viewId: 'terminal-view:local:terminal-1',
+        subjectId: 'terminal:local:terminal-1',
         kind: 'terminal',
         run: { latestOutputBytes: 12 }
       }
     ])
-    expect(JSON.stringify(views)).not.toContain('terminalSnapshot')
+    expect(JSON.stringify(subjects)).not.toContain('terminalSnapshot')
   })
 
-  it('projects two independent Views over one Agent Session without changing Agent identity', () => {
-    const views = projectAgentMuxViews('local', [run], [agentSession], [
-      { viewId: 'view-left', target: { kind: 'agent-session', agentSessionId: 'semantic-1' } },
-      { viewId: 'view-right', target: { kind: 'agent-session', agentSessionId: 'semantic-1' } }
+  it('projects two independent Runtime Subjects over one Agent Session without changing Agent identity', () => {
+    const subjects = projectAgentMuxRuntimeSubjects('local', [run], [agentSession], [
+      { subjectId: 'subject-left', target: { kind: 'agent-session', agentSessionId: 'semantic-1' } },
+      { subjectId: 'subject-right', target: { kind: 'agent-session', agentSessionId: 'semantic-1' } }
     ])
-    expect(views.map((view) => view.viewId)).toEqual(['view-left', 'view-right'])
-    expect(views).toMatchObject([
+    expect(subjects.map((subject) => subject.subjectId)).toEqual(['subject-left', 'subject-right'])
+    expect(subjects).toMatchObject([
       { agentSession: { agentSessionId: 'semantic-1' }, run: { runId: 'run-1' } },
       { agentSession: { agentSessionId: 'semantic-1' }, run: { runId: 'run-1' } }
     ])
-    expect(views[0]).not.toBe(views[1])
+    expect(subjects[0]).not.toBe(subjects[1])
   })
 
   it('fails closed when an Agent Session record points to another Run', () => {
-    expect(() => projectAgentMuxViews('local', [run], [{
-      ...agentSession,
-      run: { runId: 'stale-run' }
-    }])).toThrow('unavailable')
+    try {
+      projectAgentMuxRuntimeSubjects('local', [run], [{
+        ...agentSession,
+        run: { runId: 'stale-run' }
+      }])
+      throw new Error('Expected Runtime Subject projection to fail.')
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: 'UNKNOWN_RUNTIME_SUBJECT_TARGET',
+        message: 'Runtime Subject target is unavailable.'
+      })
+    }
   })
 
-  it('resolves only one currently open Terminal View or Agent View', () => {
-    const views = [
-      { viewId: 'terminal-left', kind: 'terminal' as const },
-      { viewId: 'agent-left', kind: 'agent' as const, agentSessionId: 'semantic-1' }
-    ]
-    expect(resolveAgentMuxViewFocus(views, { kind: 'terminal-view', viewId: 'terminal-left' })).toEqual({
-      viewId: 'terminal-left', kind: 'terminal'
-    })
-    expect(resolveAgentMuxViewFocus(views, { kind: 'agent-session', agentSessionId: 'semantic-1' })).toEqual({
-      viewId: 'agent-left', kind: 'agent'
-    })
-    expect(() => resolveAgentMuxViewFocus(views, {
-      kind: 'terminal-view', viewId: 'closed-terminal'
-    })).toThrow('not currently open')
-    expect(() => resolveAgentMuxViewFocus([...views, {
-      viewId: 'agent-right', kind: 'agent', agentSessionId: 'semantic-1'
-    }], {
-      kind: 'agent-session', agentSessionId: 'semantic-1'
-    })).toThrow('ambiguous')
-  })
 })

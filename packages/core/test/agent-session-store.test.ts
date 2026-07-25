@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   AgentMuxFileAgentSessionStore,
@@ -12,7 +12,8 @@ function storedSession() {
   return {
     kind: 'agent' as const,
     agentSessionId: 'semantic-1',
-    agentId: 'codex',
+    providerId: 'codex',
+    executorId: 'codex',
     hostId: 'local',
     workspacePath: '/tmp/work',
     run: { runId: 'daemon-1' },
@@ -61,7 +62,7 @@ function storedSession() {
     },
     hookReceipt: {
       id: 'receipt-1',
-      agentId: 'codex',
+      providerId: 'codex',
       agentSessionId: 'semantic-1',
       run: { runId: 'daemon-1' },
       eventName: 'SessionStart',
@@ -123,12 +124,60 @@ describe('semantic session persistence boundary', () => {
       async claimStaleLifecycles() { return [] },
       async releaseLifecycle() {},
       async retireRuns() {},
-      async commitLifecycle() {}
+      async commitLifecycle() {},
+      async loadTimeline(agentSessionId) {
+        return { agentSessionId, revision: 0, items: [] }
+      },
+      async applyTimelineMutation(mutation) {
+        return {
+          agentSessionId: mutation.agentSessionId,
+          revision: 0,
+          changed: false,
+          mutation
+        }
+      }
     }
     await expect(loadAgentSessions(store)).rejects.toMatchObject({ code: 'INVALID_AGENT_SESSION_STORE' })
   })
 
-  it('cancels a File Store write while it waits for another owner lock', async () => {
+  it('does not commit a Timeline mutation after an aborted lock wait', async () => {
+    const root = await mkdtemp('/private/tmp/agentmux-store-abort-')
+    const path = join(root, 'sessions.json')
+    try {
+      const store = new AgentMuxFileAgentSessionStore(path)
+      await store.compareAndSwap(null, storedSession())
+      await writeFile(`${path}.lock`, `${process.pid}\n`, { mode: 0o600 })
+      const controller = new AbortController()
+      const pending = store.applyTimelineMutation(
+        {
+          type: 'append',
+          agentSessionId: 'semantic-1',
+          item: {
+            id: 'late-item',
+            agentSessionId: 'semantic-1',
+            kind: 'assistant_message',
+            status: 'complete',
+            source: 'acp',
+            createdAt: 1,
+            updatedAt: 1,
+            title: 'Must not commit'
+          }
+        },
+        controller.signal
+      )
+      setTimeout(() => controller.abort(), 20)
+
+      await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+      await unlink(`${path}.lock`)
+      await new Promise((resolve) => setTimeout(resolve, 40))
+      await expect(new AgentMuxFileAgentSessionStore(path).loadTimeline('semantic-1'))
+        .resolves.toEqual({ agentSessionId: 'semantic-1', revision: 0, items: [] })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('does not commit a Session write after an aborted lock wait', async () => {
     const root = await mkdtemp('/private/tmp/agentmux-store-abort-')
     const path = join(root, 'sessions.json')
     try {

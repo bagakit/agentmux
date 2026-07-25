@@ -1,31 +1,30 @@
 # CtxMux Local cutover
 
-状态：T-020 Local + Codex implementation candidate；独立复核与 clean Tracker Gate pending
-更新：2026-08-17
-
+状态：T-020 Local + Codex 已完成；T-018 负责最终 Benchmark 与独立 Review，T-021 负责 Remote/SSH
 ## 固定消费身份
 
 AgentMux 当前只消费 CtxMux 的 exact clean artifact contract：
 
 | 字段 | 值 |
 | --- | --- |
-| commit | `2e32a9d647d627952ea5c455fb2efef6c636643a` |
-| tree | `d60870c2481c9b153da6bf22f829d24afb8a81a8` |
+| commit | `f89dabe70eba38d46992c320e40c9ebe2f09b5e5` |
+| tree | `37632c41c4aae42ba40f33ebe9c54fab13d17c44` |
 | protocol | `9` |
 | platform | `darwin-arm64` |
+| manifest SHA-256 | `ac53b1e43e67a73841d4f6cfbd272628e47f3731f29772dbb86bfbfce77935de` |
 | SDK tarball SHA-256 | `1e14be5fdb1193ddce4a266b03d2a8c72bad35e0d88838d504566c438b279b99` |
 | `ctxmux` SHA-256 | `d49d8c0ca268f3257ee499cedd41035c10fcd05d7e2255ea9a0da204fad6e021` |
-| `ctxmuxd` SHA-256 | `5bb6592989bfc0e77287baba63b6ae4aa0ba536825e74381a787be3d196cf9b6` |
+| `ctxmuxd` SHA-256 | `41e76b10da84a9ee018a820bab31c7c6c87ff424a7cc1eff05060cc533963132` |
 
-接入确认时 CtxMux `origin/main` 指向 `2e32a9d`；AgentMux 不消费浮动分支名，而是固定上表中的完整 commit、tree 与 artifact hash。
+AgentMux 不消费浮动分支名，而是固定上表中的完整 commit、tree 与 artifact hash。
 
 CtxMux 自己的 `npm run test:local-consumer` 已在 exact commit 上通过，receipt 为：
 
 ```text
-local artifact consumer passed commit=2e32a9d647d627952ea5c455fb2efef6c636643a target=aarch64-apple-darwin
+local artifact consumer passed commit=f89dabe70eba38d46992c320e40c9ebe2f09b5e5 target=aarch64-apple-darwin
 ```
 
-AgentMux vendor 已由 `2e32a9d` clean build 整套替换。
+AgentMux vendor 已由 `f89dabe` clean build 整套替换。
 
 ## 消费方式
 
@@ -111,7 +110,7 @@ CLI 同时是受管 Agent 可自发现的公共控制面，而不只是给人手
 - 不提供 `appmux`、旧文件名或其他 compatibility alias；品牌命令只有 `agentmux`；
 - 当前 `switch` 只聚焦已打开 View。创建、分屏、移动、打开或 Spawn Desktop Pane/Tab/View 属于独立 Desktop Composition 控制面，不偷渡进 T-020，也不因缺少 CLI 而退化为 computer-use。
 
-Herdr 的对照说明，Agent-friendly 不是多写一页帮助，而是让一个受管 Agent 能在一次发现后闭环执行：从 injected caller context 确定“我在哪”，从只读命令枚举 workspace/tab/pane/agent，用显式 target 发出一个原子 mutation，再从 JSON receipt 读取新 ID 和下一步。AgentMux 后续 Desktop Composition 竖切因此应把 layout primitive 与 Agent lifecycle 分开：先对当前 Pane 做有方向、可保留焦点与 cwd 的 split，返回新 Pane/View identity；再在该位置启动指定 Provider，并在可交互后返回稳定 Agent Session id。`switch` 继续只负责 focus，Core Session CLI 继续只负责 Agent lifecycle；不能用 UI 焦点猜 target，也不能把 computer-use 作为缺少公共命令时的 fallback。
+Agent-friendly 不是多写一页帮助，而是让受管 Agent 能在一次发现后闭环执行：从 injected caller context 确定“我在哪”，从只读命令枚举 workspace、View、Region 与 Agent，用显式 target 发出原子 mutation，再从 JSON receipt 读取新 ID 和下一步。Desktop Composition 因此把 layout primitive 与 Agent lifecycle 分开：先在当前 View 中建立有方向的 Region，再在该位置启动指定 Provider，并在可交互后返回稳定 Agent Session id。`switch` 继续只负责 focus，Core Session CLI 继续只负责 Agent lifecycle；不能用 UI 焦点猜 target，也不能把 computer-use 当成缺少公共命令时的 fallback。
 
 checkout-external packed consumer 会在真实 CtxMux PTY 内执行 `agentmux --version`，并由 fake Codex 复核相同 managed CLI environment，证明这不是仓库 PATH 或全局安装造成的偶然可用。npm Package 的 CLI 使用其声明的 Node 22 host；Desktop Package 则把同一入口物化为只调用 `.app` 自带 Electron Node mode 的 launcher，打包 smoke 在 `PATH=/usr/bin:/bin`、没有外部 Node 的条件下直接执行它，不改变用户普通 `node` 解析。
 
@@ -125,6 +124,8 @@ Interrupt 使用 retained PTY 上的 `TIOCSIG`。Stop 的 macOS public POSIX imp
 
 本项目接受 CtxMux 的 practical POSIX contract：daemon 永不提权；只支持同一用户本地运行；即时重验 session；zombie leader 作为 incarnation anchor；异常失败关闭；不宣称多租户隔离或数学零风险。为消除这条窄窗而引入私有 entitlement/API 或平台进程容器，成本和维护熵显著高于本地开发场景的实际风险。
 
-## 下一闭环
+## 剩余闭环
 
-已提交的基础为 `8322cbf`（Core Codex/identity/CLI）与 `1f74518`（Core View Resolver/typed Desktop focus）；当前 candidate 继续补齐跨进程 lifecycle、真实 Codex Hook/resume、Stop-epoch readiness、prompt crash recovery、Darwin 短 endpoint、可安装 package smoke、Desktop View lease broker 与受管 Agent CLI 自发现。2026-08-17 的 candidate 已通过完整 `pnpm check`（typecheck、209 个 fast tests、checkout-external packed Native proof 与 Core/Desktop Production build），以及安装版 Codex `0.147.0` 的真实 Hook/Auth、同 Run 重连、两阶段 `/exit`、provider-native resume 到新 exact Run 和自然退役 E2E；Production `.app`、DMG/签名/LaunchServices/CtxMux smoke 与无外部 Node 的 embedded CLI smoke 也已通过。独立复核和 clean commit 上的 Tracker Gate 完成前，不把 T-020 标记为 done。Remote/SSH 继续留给 T-021；不得重新引入 Run owner、Backend Selector、复制 wire、fallback 或 compatibility。
+Local cutover、Codex/identity/CLI、View Resolver、跨进程 lifecycle、Hook/resume、Stop-epoch readiness、prompt crash recovery、短 endpoint、package smoke、View lease broker 与受管 Agent CLI 自发现已经进入同一 ctxmux Runtime 并通过 T-020 Gate。
+
+T-018 只在最终 candidate 上重冻 Benchmark、完成独立 Review 并修复 release-blocking finding；它不能用旧自建 daemon 或旧 candidate 的结果替代。Remote/SSH 继续由 T-021 通过 ctxmux public Remote 合同关闭。两个任务都不得重新引入 Run owner、Backend Selector、wire fork、fallback 或 compatibility。

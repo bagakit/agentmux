@@ -3,12 +3,13 @@ import { execFile, spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { promisify } from 'node:util'
 import {
-  AgentMuxDesktopFocusServer,
+  AgentMuxCompositionServer,
   AgentMuxFileAgentSessionStore,
   connectLocalAgentMux,
   connectSshAgentMux
 } from '@agentmux/core'
-import { resolveAgentMuxViewFocus } from '@agentmux/core/runtime'
+import { resolveAgentMuxRegion } from '@agentmux/core/composition'
+import { normalizeAgentTimelineMutation } from '@agentmux/core/timeline'
 
 const execFileAsync = promisify(execFile)
 
@@ -36,11 +37,35 @@ process.once('exit', () => {
   }
 })
 assert.deepEqual(
-  resolveAgentMuxViewFocus(
-    [{ viewId: 'packed-agent-view', kind: 'agent', agentSessionId: 'packed-agent' }],
+  resolveAgentMuxRegion(
+    [{
+      viewId: 'packed-agent-view',
+      regionId: 'packed-agent-region',
+      kind: 'agent',
+      agentSessionId: 'packed-agent',
+      workspaceId: 'packed-workspace',
+      tabGroupId: 'packed-tab-group'
+    }],
     { kind: 'agent-session', agentSessionId: 'packed-agent' }
   ),
-  { viewId: 'packed-agent-view', kind: 'agent' }
+  {
+    viewId: 'packed-agent-view',
+    regionId: 'packed-agent-region',
+    kind: 'agent',
+    agentSessionId: 'packed-agent',
+    workspaceId: 'packed-workspace',
+    tabGroupId: 'packed-tab-group'
+  }
+)
+assert.throws(
+  () => normalizeAgentTimelineMutation({
+    type: 'update',
+    agentSessionId: 'packed-agent',
+    itemId: 'assistant-1',
+    updatedAt: 1,
+    contentDelta: 'legacy delta'
+  }),
+  (error) => error?.code === 'INVALID_AGENT_TIMELINE'
 )
 
 async function waitFor(description, predicate, timeoutMs = 8_000) {
@@ -70,7 +95,7 @@ async function processIsGone(pid) {
   return false
 }
 
-async function firstJsonLine(child) {
+async function firstJsonLine(child, description) {
   let timer
   try {
     return await Promise.race([
@@ -86,7 +111,7 @@ async function firstJsonLine(child) {
       new Promise((_resolve, reject) => {
         timer = setTimeout(() => {
           if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
-          reject(new Error('Timed out waiting for child lifecycle checkpoint.'))
+          reject(new Error(`Timed out waiting for ${description} lifecycle checkpoint.`))
         }, 5_000)
       })
     ])
@@ -205,30 +230,27 @@ await waitFor('complete stubborn process-tree stop', async () => (
 ))
 unsubscribe()
 
-const cli = async (args) => await execFileAsync(agentmuxCli, args, {
+const cli = async (args, env = {}) => await execFileAsync(agentmuxCli, args, {
   timeout: 15_000,
-  maxBuffer: 4 * 1024 * 1024
-})
-const doctor = JSON.parse((await cli(['doctor', '--json'])).stdout)
-assert.equal(doctor.ok, true)
-assert.equal(doctor.hosts.local.status, 'available')
-assert.equal(doctor.hosts.remote.status, 'unsupported')
-assert.deepEqual(doctor.runtime.ctxmux.capabilities, {
-  transport: 'local-unix',
-  orderedOutputBytes: true,
-  boundedReplay: true,
-  recoverableInput: true,
-  resize: true,
-  interrupt: true,
-  completeStop: true
+  maxBuffer: 4 * 1024 * 1024,
+  env: { ...process.env, ...env }
 })
 let codexFirst = await connectLocalAgentMux()
 const codexFirstEvents = []
-codexFirst.onEvent((event) => codexFirstEvents.push(event))
+const codexTimelinePublicationSnapshots = []
+codexFirst.onEvent((event) => {
+  codexFirstEvents.push(event)
+  if (event.type === 'agent-timeline') {
+    codexTimelinePublicationSnapshots.push(
+      codexFirst.sessionTimeline(event.agentSessionId).then((snapshot) => ({ event, snapshot }))
+    )
+  }
+})
 const codex = await codexFirst.createAgent({
   agentSessionId: 'codex-semantic-1',
   createOperationId: `packed-codex-${crypto.randomUUID()}`,
-  agentId: 'codex',
+  providerId: 'codex',
+  executorId: 'codex',
   workspacePath: process.cwd(),
   prompt: 'first',
   commandOverride: fakeCodex,
@@ -238,10 +260,10 @@ assert.equal('hookBindingId' in codex, false)
 assert.equal('hookToken' in codex, false)
 assert.equal('hookBindingId' in codexFirst.agentSessions()[0], false)
 assert.equal('hookToken' in codexFirst.agentSessions()[0], false)
-const codexView = (await codexFirst.workspaceView()).views.find((view) => view.kind === 'agent')
-assert.ok(codexView)
-assert.equal('hookBindingId' in codexView.agentSession, false)
-assert.equal('hookToken' in codexView.agentSession, false)
+const codexSubject = (await codexFirst.runtimeProjection()).subjects.find((subject) => subject.kind === 'agent')
+assert.ok(codexSubject)
+assert.equal('hookBindingId' in codexSubject.agentSession, false)
+assert.equal('hookToken' in codexSubject.agentSession, false)
 assert.deepEqual(codex.terminalHandshake, {
   run: { runId: codex.run.runId },
   operationId: codex.terminalHandshake?.operationId,
@@ -264,6 +286,28 @@ const initialStopReceipt = await waitFor('Codex ready Stop receipt', () => {
   return receipt?.readyThroughByte === undefined ? null : receipt
 })
 assert.equal(initialStopReceipt.readyThroughByte, initialStopReceipt.outputCursorBytes)
+const initialTimeline = await codexFirst.sessionTimeline(codex.agentSessionId)
+const initialTimelineEvents = codexFirstEvents.filter((event) => (
+  event.type === 'agent-timeline' && event.agentSessionId === codex.agentSessionId
+))
+assert.ok(initialTimeline.revision > 0)
+assert.equal(initialTimeline.agentSessionId, codex.agentSessionId)
+assert.equal(initialTimelineEvents.length, initialTimeline.revision)
+assert.deepEqual(
+  initialTimelineEvents.map((event) => event.revision).sort((left, right) => left - right),
+  Array.from({ length: initialTimeline.revision }, (_value, index) => index + 1)
+)
+assert.equal(initialTimeline.items.some((item) => (
+  item.kind === 'user_message' && item.source === 'user' && item.content === 'first'
+)), true)
+assert.equal(initialTimeline.items.some((item) => (
+  item.kind === 'permission' && item.source === 'native-hook' &&
+  item.toolName === 'request_user_input'
+)), true)
+for (const publication of await Promise.all(codexTimelinePublicationSnapshots)) {
+  assert.equal(publication.snapshot.agentSessionId, publication.event.agentSessionId)
+  assert.ok(publication.snapshot.revision >= publication.event.revision)
+}
 const acknowledgedThroughByte = (await codexFirst.statusAgent(codex.agentSessionId)).run.latestOutputBytes
 assert.ok(acknowledgedThroughByte > 0)
 await codexFirst.acknowledgeAgentOutput(codex.agentSessionId, acknowledgedThroughByte)
@@ -284,47 +328,151 @@ assert.ok(codexPid)
 await codexFirst.dispose()
 codexFirst = null
 
-const cliStatus = JSON.parse((await cli(['status', codex.agentSessionId, '--json'])).stdout)
-assert.equal(cliStatus.session.agentSessionId, codex.agentSessionId)
-assert.equal(cliStatus.run.runId, codex.run.runId)
-const cliList = JSON.parse((await cli(['list', '--json'])).stdout)
-assert.equal(cliList.length, 1)
-assert.equal(cliList[0].session.agentSessionId, codex.agentSessionId)
+const cliStatus = JSON.parse((await cli(['session', 'status', codex.agentSessionId])).stdout)
+assert.equal(cliStatus.schemaVersion, 1)
+assert.equal(cliStatus.operation, 'session.status')
+assert.equal(cliStatus.result.status.session.agentSessionId, codex.agentSessionId)
+assert.equal(cliStatus.result.status.run.runId, codex.run.runId)
+const cliList = JSON.parse((await cli(['session', 'list'])).stdout)
+assert.equal(cliList.operation, 'session.list')
+assert.equal(cliList.result.sessions.length, 1)
+assert.equal(cliList.result.sessions[0].session.agentSessionId, codex.agentSessionId)
 for (const args of [
   ['agent-session', codex.agentSessionId],
   ['provider-native', 'codex', 'native-codex-semantic-1'],
   ['run', codex.run.runId]
 ]) {
-  const resolved = JSON.parse((await cli(['resolve', ...args, '--json'])).stdout)
-  assert.equal(resolved.agentSessionId, codex.agentSessionId)
+  const resolved = JSON.parse((await cli(['session', 'resolve', ...args])).stdout)
+  assert.equal(resolved.operation, 'session.resolve')
+  assert.equal(resolved.result.session.agentSessionId, codex.agentSessionId)
 }
-const focusTargets = []
-const focusServer = new AgentMuxDesktopFocusServer({
-  async focus(target) {
-    focusTargets.push(target)
-    return target.kind === 'terminal-view'
-      ? { viewId: target.viewId, kind: 'terminal' }
-      : { viewId: 'packed-agent-view', kind: 'agent' }
+const compositionRequests = []
+const agentRegion = {
+  viewId: 'packed-agent-view',
+  regionId: 'packed-agent-region',
+  kind: 'agent',
+  agentSessionId: codex.agentSessionId,
+  workspaceId: 'packed-workspace',
+  tabGroupId: 'packed-tab-group'
+}
+const terminalRegion = {
+  viewId: 'packed-terminal-view',
+  regionId: 'packed-terminal-region',
+  kind: 'terminal',
+  runId: 'packed-terminal-run',
+  workspaceId: 'packed-workspace',
+  tabGroupId: 'packed-tab-group'
+}
+const compositionServer = new AgentMuxCompositionServer({
+  async execute(request) {
+    compositionRequests.push(request)
+    if (request.operation === 'context') {
+      return {
+        operation: request.operation,
+        context: {
+          agentSessionId: request.caller.agentSessionId,
+          workspaceId: agentRegion.workspaceId,
+          viewId: agentRegion.viewId,
+          regionId: agentRegion.regionId,
+          tabGroupId: agentRegion.tabGroupId,
+          regions: [{
+            regionId: agentRegion.regionId,
+            kind: 'agent',
+            providerId: 'codex',
+            executorId: 'codex',
+            agentSessionId: request.caller.agentSessionId,
+            bounds: { x: 0, y: 0, width: 1, height: 1 }
+          }],
+          executors: [{ executorId: 'codex', label: 'Codex', providerId: 'codex', available: true }]
+        }
+      }
+    }
+    if (request.operation === 'region.focus') {
+      return {
+        operation: request.operation,
+        region: request.regionId === terminalRegion.regionId ? terminalRegion : agentRegion
+      }
+    }
+    if (request.operation === 'region.open') {
+      return {
+        operation: request.operation,
+        region: {
+          ...agentRegion,
+          viewId: 'packed-opened-view',
+          regionId: 'packed-opened-region',
+          agentSessionId: request.agentSessionId
+        }
+      }
+    }
+    if (request.operation === 'launch') {
+      return {
+        operation: request.operation,
+        agentSessionId: 'packed-launched-session',
+        region: {
+          ...agentRegion,
+          regionId: 'packed-launched-region',
+          agentSessionId: 'packed-launched-session'
+        }
+      }
+    }
+    throw Object.assign(new Error('Unsupported packed Composition request.'), {
+      code: 'COMPOSITION_OPERATION_UNAVAILABLE'
+    })
   }
 })
-await focusServer.start()
-const switchedAgent = JSON.parse((await cli([
-  'switch', 'provider-native', 'codex', 'native-codex-semantic-1', '--json'
+await compositionServer.start()
+const managedEnv = { AGENTMUX_ENV: '1', AGENTMUX_AGENT_SESSION_ID: codex.agentSessionId }
+const cliContext = JSON.parse((await cli(['context'], managedEnv)).stdout)
+assert.equal(cliContext.operation, 'context')
+assert.equal(cliContext.result.context.regionId, agentRegion.regionId)
+const launchedRegion = JSON.parse((await cli([
+  'launch', '--agent', 'codex', '--prompt', '--help', '--placement', 'split-right', '--relative-to', 'self'
+], managedEnv)).stdout)
+assert.equal(launchedRegion.operation, 'launch')
+assert.equal(launchedRegion.result.region.regionId, 'packed-launched-region')
+const openedRegion = JSON.parse((await cli([
+  'region', 'open', '--session', codex.agentSessionId, '--placement', 'tab', '--relative-to', agentRegion.regionId
+], managedEnv)).stdout)
+assert.equal(openedRegion.operation, 'region.open')
+assert.equal(openedRegion.result.region.regionId, 'packed-opened-region')
+const focusedRegion = JSON.parse((await cli([
+  'region', 'focus', '--region', 'packed-terminal-region'
 ])).stdout)
-assert.deepEqual(switchedAgent, { viewId: 'packed-agent-view', kind: 'agent' })
-const switchedTerminal = JSON.parse((await cli([
-  'switch', 'terminal-view', 'packed-terminal-view', '--json'
-])).stdout)
-assert.deepEqual(switchedTerminal, { viewId: 'packed-terminal-view', kind: 'terminal' })
-assert.deepEqual(focusTargets, [
-  { kind: 'agent-session', agentSessionId: codex.agentSessionId },
-  { kind: 'terminal-view', viewId: 'packed-terminal-view' }
+assert.equal(focusedRegion.operation, 'region.focus')
+assert.deepEqual(focusedRegion.result.region, terminalRegion)
+assert.deepEqual(compositionRequests.map((request) => request.operation), [
+  'context', 'launch', 'region.open', 'region.focus'
 ])
-await focusServer.stop()
-const cliAttachment = JSON.parse((await cli(['attach', codex.agentSessionId, '--after-byte', '0', '--json'])).stdout)
-assert.equal(cliAttachment.session.agentSessionId, codex.agentSessionId)
-await cli(['send', codex.agentSessionId, '--text', 'continue', '--json'])
-await cli(['interrupt', codex.agentSessionId, '--json'])
+assert.equal(compositionRequests[1].executorId, 'codex')
+assert.equal(compositionRequests[1].prompt, '--help')
+await compositionServer.stop()
+const cliAttachment = JSON.parse((await cli([
+  'session', 'output', codex.agentSessionId, '--after-byte', '0'
+])).stdout)
+assert.equal(cliAttachment.result.session.agentSessionId, codex.agentSessionId)
+const followReader = spawnOwned(agentmuxCli, [
+  'session', 'output', codex.agentSessionId, '--after-byte', '0', '--follow'
+], { stdio: ['ignore', 'pipe', 'pipe'] })
+const followAttached = await firstJsonLine(followReader, 'session output follower')
+assert.deepEqual(
+  {
+    schemaVersion: followAttached.schemaVersion,
+    operation: followAttached.operation,
+    event: followAttached.event,
+    agentSessionId: followAttached.result.session.agentSessionId
+  },
+  {
+    schemaVersion: 1,
+    operation: 'session.output',
+    event: 'attached',
+    agentSessionId: codex.agentSessionId
+  }
+)
+followReader.kill('SIGINT')
+await once(followReader, 'exit')
+assert.equal((await cli(['session', 'status', codex.agentSessionId])).stdout.includes('"running"'), true)
+await cli(['session', 'send', codex.agentSessionId, '--text', 'continue'])
+await cli(['session', 'interrupt', codex.agentSessionId])
 
 const codexSecond = await connectLocalAgentMux()
 const codexSecondEvents = []
@@ -355,6 +503,11 @@ assert.equal(codexReplayText.includes('codex-ignored-early-enter'), false)
 assert.equal(codexReplayText.includes('codex-interrupt'), true)
 assert.equal(codexReplayText.includes('\u001b[?7u'), false)
 assert.equal(codexReplayText.includes('\u001b[13u'), false)
+const timelineAfterSubmittedPrompt = await codexSecond.sessionTimeline(codex.agentSessionId)
+assert.ok(timelineAfterSubmittedPrompt.revision > initialTimeline.revision)
+assert.equal(timelineAfterSubmittedPrompt.items.some((item) => (
+  item.kind === 'user_message' && item.source === 'user' && item.content === 'continue'
+)), true)
 const handshakeQueryIndex = codexReplayText.indexOf('\u001b[?u')
 const handshakeAckIndex = codexReplayText.indexOf('codex-handshake:kitty-flags-0')
 const initialPromptIndex = codexReplayText.indexOf('codex-ready:first')
@@ -372,13 +525,13 @@ try {
   const session = codexSecond.agentSession(codex.agentSessionId)
   const agentErrors = codexSecondEvents.filter((event) => event.type === 'agent-error')
   const debugAttachment = JSON.parse((await cli([
-    'attach', codex.agentSessionId, '--after-byte', '0', '--json'
+    'session', 'output', codex.agentSessionId, '--after-byte', '0'
   ])).stdout)
   throw new Error(`${error.message}\n${JSON.stringify({
     terminalStopReceipt: session.terminalStopReceipt,
     terminalPromptSubmission: session.terminalPromptSubmission,
     agentErrors,
-    outputTail: debugAttachment.replay.map((event) => event.data).join('').slice(-1_500)
+    outputTail: debugAttachment.result.replay.map((event) => event.data).join('').slice(-1_500)
   }, null, 2)}`)
 }
 await codexSecond.submitAgentPrompt({
@@ -392,9 +545,9 @@ await waitFor('Codex Run exit', async () => (
 await codexSecond.dispose()
 const resumePrompt = 'packed native resume prompt'
 const resumeResult = JSON.parse((await cli([
-  'resume', codex.agentSessionId, '--text', resumePrompt, '--json'
+  'session', 'resume', codex.agentSessionId, '--text', resumePrompt
 ])).stdout)
-const resumed = resumeResult.result
+const resumed = resumeResult.result.session
 assert.equal(resumed.agentSessionId, codex.agentSessionId)
 assert.notEqual(resumed.run.runId, codex.run.runId)
 assert.deepEqual(resumed.terminalHandshake?.inputByteRange, { startByte: 0, endByte: 5 })
@@ -412,6 +565,14 @@ await waitFor('native resume argv prompt', () => (
 await waitFor('resumed Codex Hook receipt', () => (
   codexThird.agentSession(resumed.agentSessionId).hookReceipt?.run.runId === resumed.run.runId
 ))
+const resumedTimeline = await codexThird.sessionTimeline(resumed.agentSessionId)
+assert.equal(resumedTimeline.agentSessionId, codex.agentSessionId)
+assert.ok(resumedTimeline.revision > timelineAfterSubmittedPrompt.revision)
+assert.equal(resumedTimeline.items.some((item) => (
+  item.kind === 'user_message' && item.source === 'user' && item.content === resumePrompt
+)), true)
+assert.equal(resumedTimeline.items.some((item) => item.content === 'continue'), true)
+assert.equal(resumedTimeline.items.some((item) => item.id.startsWith(`${resumed.run.runId}:`)), true)
 await waitFor('resumed Codex ready Stop receipt', () => (
   codexThird.agentSession(resumed.agentSessionId).terminalStopReceipt?.readyThroughByte !== undefined
 ))
@@ -419,8 +580,43 @@ assert.throws(
   () => codexThird.resolveAgentSession({ kind: 'run', run: codex.run }),
   (error) => error?.code === 'STALE_AGENT_SESSION_BINDING'
 )
+const reboundBeforeStaleResize = (await codexThird.statusAgent(resumed.agentSessionId)).run
+assert.equal(reboundBeforeStaleResize.runId, resumed.run.runId)
 await assert.rejects(
-  cli(['resolve', 'run', codex.run.runId, '--json']),
+  codexThird.resizeAgent(resumed.agentSessionId, codex.run, 111, 43),
+  (error) => error?.code === 'STALE_AGENT_SESSION'
+)
+const reboundAfterStaleResize = (await codexThird.statusAgent(resumed.agentSessionId)).run
+assert.deepEqual(
+  {
+    runId: reboundAfterStaleResize.runId,
+    cols: reboundAfterStaleResize.cols,
+    rows: reboundAfterStaleResize.rows
+  },
+  {
+    runId: reboundBeforeStaleResize.runId,
+    cols: reboundBeforeStaleResize.cols,
+    rows: reboundBeforeStaleResize.rows
+  }
+)
+assert.deepEqual(
+  await codexThird.resizeAgent(resumed.agentSessionId, resumed.run, 109, 41),
+  { runId: resumed.run.runId, cols: 109, rows: 41 }
+)
+await assert.rejects(
+  codexThird.stopAgent(resumed.agentSessionId, codex.run),
+  (error) => error?.code === 'STALE_AGENT_SESSION'
+)
+const reboundAfterStaleStop = (await codexThird.statusAgent(resumed.agentSessionId)).run
+assert.deepEqual(
+  {
+    runId: reboundAfterStaleStop.runId,
+    state: reboundAfterStaleStop.state
+  },
+  { runId: resumed.run.runId, state: 'running' }
+)
+await assert.rejects(
+  cli(['session', 'resolve', 'run', codex.run.runId]),
   (error) => error?.stderr?.includes('STALE_AGENT_SESSION_BINDING')
 )
 await codexThird.submitAgentPrompt({
@@ -432,7 +628,7 @@ await waitFor('resumed Codex Run natural exit', async () => (
   (await codexThird.statusAgent(resumed.agentSessionId)).run.state === 'exited'
 ))
 await codexThird.dispose()
-await cli(['stop', resumed.agentSessionId, '--json'])
+await cli(['session', 'stop', resumed.agentSessionId])
 const codexStopped = await connectLocalAgentMux()
 assert.deepEqual(codexStopped.agentSessions(), [])
 await codexStopped.dispose()
@@ -443,7 +639,8 @@ literalPromptClient.onEvent((event) => literalPromptEvents.push(event))
 const literalPromptAgent = await literalPromptClient.createAgent({
   agentSessionId: 'codex-literal-option-prompt',
   createOperationId: 'packed-codex-literal-option-create',
-  agentId: 'codex',
+  providerId: 'codex',
+  executorId: 'codex',
   workspacePath: process.cwd(),
   commandOverride: fakeCodex
 })
@@ -452,13 +649,13 @@ await waitFor('literal prompt Agent ready Stop receipt', () => (
   literalPromptClient.agentSession(literalPromptAgent.agentSessionId)
     .terminalStopReceipt?.readyThroughByte !== undefined
 ))
-await cli(['send', literalPromptAgent.agentSessionId, '--text', '--help', '--json'])
+await cli(['session', 'send', literalPromptAgent.agentSessionId, '--text', '--help'])
 await waitFor('literal option-like prompt submitted', () => (
   output(literalPromptEvents, literalPromptAgent.run.runId).includes('codex-submit:--help:accepted')
 ))
 await literalPromptClient.dispose()
 const literalPromptCleanup = await connectLocalAgentMux()
-await literalPromptCleanup.stopAgent(literalPromptAgent.agentSessionId)
+await literalPromptCleanup.stopAgent(literalPromptAgent.agentSessionId, literalPromptAgent.run)
 await literalPromptCleanup.dispose()
 
 const noStopClient = await connectLocalAgentMux()
@@ -467,7 +664,8 @@ noStopClient.onEvent((event) => noStopEvents.push(event))
 const noStop = await noStopClient.createAgent({
   agentSessionId: 'codex-no-stop',
   createOperationId: 'packed-codex-no-stop-create',
-  agentId: 'codex',
+  providerId: 'codex',
+  executorId: 'codex',
   workspacePath: process.cwd(),
   commandOverride: fakeCodex,
   env: { AGENTMUX_FAKE_READY_MODE: 'no-stop' }
@@ -484,20 +682,28 @@ await assert.rejects(
   }),
   (error) => error?.code === 'AGENT_PROMPT_NOT_READY'
 )
+assert.equal((await noStopClient.sessionTimeline(noStop.agentSessionId)).items.some((item) => (
+  item.kind === 'user_message' && item.content === 'must-not-reach-pty'
+)), false)
 assert.equal((await noStopClient.statusAgent(noStop.agentSessionId)).run.acceptedInputBytes, 5)
 assert.equal(output(noStopEvents, noStop.run.runId).includes('codex-dropped-pre-ready-payload'), false)
-await noStopClient.stopAgent(noStop.agentSessionId)
+await noStopClient.stopAgent(noStop.agentSessionId, noStop.run)
 await noStopClient.dispose()
 
 const afterCursorClient = await connectLocalAgentMux()
+const afterCursorEvents = []
+afterCursorClient.onEvent((event) => afterCursorEvents.push(event))
 const afterCursor = await afterCursorClient.createAgent({
   agentSessionId: 'codex-frame-after-cursor',
   createOperationId: 'packed-codex-after-create',
-  agentId: 'codex',
+  providerId: 'codex',
+  executorId: 'codex',
   workspacePath: process.cwd(),
   commandOverride: fakeCodex,
   env: { AGENTMUX_FAKE_READY_MODE: 'after' }
 })
+const afterCursorAttachment = await afterCursorClient.reattachAgent(afterCursor.agentSessionId, 0)
+const afterCursorReplay = afterCursorAttachment.attachment.replay.map((event) => event.data).join('')
 const pendingAfterCursor = await waitFor('Stop boundary before composer frame', () => (
   afterCursorClient.agentSession(afterCursor.agentSessionId).terminalStopReceipt ?? null
 ))
@@ -510,6 +716,10 @@ await assert.rejects(
   }),
   (error) => error?.code === 'AGENT_PROMPT_NOT_READY'
 )
+await waitFor('after-cursor fake control readiness', () => (
+  `${afterCursorReplay}${output(afterCursorEvents, afterCursor.run.runId)}`
+    .includes('codex-controlled-ready-pending')
+))
 await afterCursorClient.writeAgent(afterCursor.agentSessionId, '\u001d')
 const readyAfterCursor = await waitFor('composer frame after captured Stop cursor', () => {
   const receipt = afterCursorClient.agentSession(afterCursor.agentSessionId).terminalStopReceipt
@@ -524,18 +734,28 @@ await afterCursorClient.submitAgentPrompt({
 await waitFor('after-cursor fake Codex exit', async () => (
   (await afterCursorClient.statusAgent(afterCursor.agentSessionId)).run.state === 'exited'
 ))
-await afterCursorClient.stopAgent(afterCursor.agentSessionId)
+await afterCursorClient.stopAgent(afterCursor.agentSessionId, afterCursor.run)
 await afterCursorClient.dispose()
 
 const assistantMarkerClient = await connectLocalAgentMux()
+const assistantMarkerEvents = []
+assistantMarkerClient.onEvent((event) => assistantMarkerEvents.push(event))
 const assistantMarker = await assistantMarkerClient.createAgent({
   agentSessionId: 'codex-assistant-marker',
   createOperationId: 'packed-codex-assistant-marker-create',
-  agentId: 'codex',
+  providerId: 'codex',
+  executorId: 'codex',
   workspacePath: process.cwd(),
   commandOverride: fakeCodex,
   env: { AGENTMUX_FAKE_READY_MODE: 'after-assistant' }
 })
+const assistantMarkerAttachment = await assistantMarkerClient.reattachAgent(
+  assistantMarker.agentSessionId,
+  0
+)
+const assistantMarkerReplay = assistantMarkerAttachment.attachment.replay
+  .map((event) => event.data)
+  .join('')
 const assistantMarkerStop = await waitFor('Stop with assistant marker but no composer', () => (
   assistantMarkerClient.agentSession(assistantMarker.agentSessionId).terminalStopReceipt ?? null
 ))
@@ -553,19 +773,24 @@ await assert.rejects(
   }),
   (error) => error?.code === 'AGENT_PROMPT_NOT_READY'
 )
+await waitFor('assistant-marker fake control readiness', () => (
+  `${assistantMarkerReplay}${output(assistantMarkerEvents, assistantMarker.run.runId)}`
+    .includes('codex-controlled-ready-pending')
+))
 await assistantMarkerClient.writeAgent(assistantMarker.agentSessionId, '\u001d')
 await waitFor('real composer after misleading assistant marker', () => (
   assistantMarkerClient.agentSession(assistantMarker.agentSessionId)
     .terminalStopReceipt?.readyThroughByte ?? null
 ))
-await assistantMarkerClient.stopAgent(assistantMarker.agentSessionId)
+await assistantMarkerClient.stopAgent(assistantMarker.agentSessionId, assistantMarker.run)
 await assistantMarkerClient.dispose()
 
 const concurrentOwner = await connectLocalAgentMux()
 const concurrent = await concurrentOwner.createAgent({
   agentSessionId: 'codex-concurrent-stop',
   createOperationId: 'packed-codex-concurrent-create',
-  agentId: 'codex',
+  providerId: 'codex',
+  executorId: 'codex',
   workspacePath: process.cwd(),
   commandOverride: fakeCodex,
   env: { AGENTMUX_FAKE_READY_MODE: 'before' }
@@ -596,7 +821,7 @@ assert.equal(
   1
 )
 await concurrentContender.dispose()
-await concurrentOwner.stopAgent(concurrent.agentSessionId)
+await concurrentOwner.stopAgent(concurrent.agentSessionId, concurrent.run)
 await concurrentOwner.dispose()
 
 const promptCrashWorker = spawnOwned(process.execPath, [promptCrashFixture], {
@@ -604,7 +829,7 @@ const promptCrashWorker = spawnOwned(process.execPath, [promptCrashFixture], {
   stdio: ['ignore', 'pipe', 'pipe'],
   env: { ...process.env, AGENTMUX_FAKE_CODEX: fakeCodex }
 })
-const promptCrashCheckpoint = await firstJsonLine(promptCrashWorker)
+const promptCrashCheckpoint = await firstJsonLine(promptCrashWorker, 'prompt crash worker')
 assert.equal(promptCrashCheckpoint.type, 'prompt-payload-acknowledged-before-submit')
 assert.deepEqual(promptCrashCheckpoint.payloadRange, {
   startByte: 5,
@@ -648,14 +873,18 @@ assert.equal(
     .terminalPromptSubmission?.submit.acknowledged,
   true
 )
-await promptRecovered.stopAgent(promptCrashCheckpoint.agentSessionId)
+await promptRecovered.stopAgent(
+  promptCrashCheckpoint.agentSessionId,
+  { runId: promptCrashCheckpoint.runId }
+)
 await promptRecovered.dispose()
 
 const acpStore = new AgentMuxFileAgentSessionStore()
 const acpSession = {
   kind: 'agent',
   agentSessionId: 'acp-semantic',
-  agentId: 'codex',
+  providerId: 'codex',
+  executorId: 'codex',
   hostId: 'local',
   workspacePath: process.cwd(),
   run: { runId: 'acp-synthetic-run' },
@@ -669,9 +898,9 @@ const acpSession = {
 }
 await acpStore.compareAndSwap(null, acpSession)
 const resolvedAcp = JSON.parse((await cli([
-  'resolve', 'acp-native', 'packed-acp', 'packed-native', '--json'
+  'session', 'resolve', 'acp-native', 'packed-acp', 'packed-native'
 ])).stdout)
-assert.equal(resolvedAcp.agentSessionId, acpSession.agentSessionId)
+assert.equal(resolvedAcp.result.session.agentSessionId, acpSession.agentSessionId)
 await acpStore.compareAndSwap(acpSession, null)
 
 const crashWorker = spawnOwned(process.execPath, [lifecycleCrashFixture], {
@@ -679,7 +908,7 @@ const crashWorker = spawnOwned(process.execPath, [lifecycleCrashFixture], {
   stdio: ['ignore', 'pipe', 'pipe'],
   env: { ...process.env, AGENTMUX_FAKE_CODEX: fakeCodex }
 })
-const crashCheckpoint = await firstJsonLine(crashWorker)
+const crashCheckpoint = await firstJsonLine(crashWorker, 'lifecycle crash worker')
 assert.equal(crashCheckpoint.type, 'run-started-before-commit')
 const beforeCrashRecovery = await connectLocalAgentMux()
 const uncommittedRun = (await beforeCrashRecovery.listRuns()).find(
@@ -736,9 +965,8 @@ process.stdout.write(`${JSON.stringify({
     'crash-recovered-once'
   ],
   promptCrashRecovery: true,
-  doctor: true,
   cliResolveKinds: ['agent-session', 'provider-native', 'acp-native', 'run'],
-  externalSwitch: true,
+  cliComposition: true,
   naturalTerminalStop: true,
   crashRecovery: true,
   cleanupSentinelPid: cleanupSentinel.pid,

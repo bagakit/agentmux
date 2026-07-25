@@ -1,58 +1,55 @@
 #!/usr/bin/env node
 import { randomUUID } from 'node:crypto'
 import process from 'node:process'
-import { connectLocalAgentMux } from './runtime-client.js'
-import { diagnoseAgentMux, type AgentMuxDoctorReport } from './doctor.js'
-import { requestAgentMuxDesktopFocus } from './desktop-focus-control.js'
-import { AgentMuxError } from './errors.js'
-import { AgentMuxClient, type AgentMuxAgentRuntimeStatus } from './client.js'
 import type { AgentMuxAgentSessionLookup } from './agent-session-registry.js'
-import type { AgentMuxViewFocusTarget } from './runtime.js'
-import type { AgentMuxAgentSession } from './types.js'
 import {
   AGENTMUX_CLI_HELP,
   AGENTMUX_CLI_SKILL,
   agentMuxCommandHelp
 } from './agentmux-cli-help.js'
+import { AgentMuxClient } from './client.js'
+import {
+  AGENTMUX_COMPOSITION_SCHEMA_VERSION,
+  type AgentMuxRegionPlacement,
+  type AgentMuxRelativeRegion
+} from './composition.js'
+import { requestAgentMuxComposition } from './composition-control.js'
+import { AgentMuxError } from './errors.js'
+import { connectLocalAgentMux } from './runtime-client.js'
+import { OrderedSessionOutputFollow } from './session-output-follow.js'
 
 const VERSION = '0.1.0'
+const CLI_SCHEMA_VERSION = 1 as const
+const PLACEMENTS: readonly AgentMuxRegionPlacement[] = [
+  'tab', 'split-left', 'split-right', 'split-up', 'split-down'
+]
 
+type FlagKind = 'boolean' | 'value' | 'data'
 type ParsedFlags = {
   values: Map<string, string>
   booleans: Set<string>
 }
 
-function requestsCommandHelp(args: readonly string[]): boolean {
-  return args.some((argument, index) => (
-    (argument === '--help' || argument === '-h') &&
-    args[index - 1] !== '--text' &&
-    args[index - 1] !== '--after-byte'
-  ))
+function cliError(message: string): AgentMuxError {
+  return new AgentMuxError(message, 'INVALID_CLI_ARGUMENT')
 }
 
-function parseFlags(
-  args: readonly string[],
-  booleanFlags: ReadonlySet<string>,
-  valueFlags: ReadonlySet<string>
-): ParsedFlags {
+function parseFlags(args: readonly string[], specs: Readonly<Record<string, FlagKind>>): ParsedFlags {
   const values = new Map<string, string>()
   const booleans = new Set<string>()
   for (let index = 0; index < args.length; index += 1) {
     const flag = args[index]
-    if (!flag?.startsWith('--')) throw new AgentMuxError(AGENTMUX_CLI_HELP, 'INVALID_CLI_ARGUMENT')
-    if (values.has(flag) || booleans.has(flag)) {
-      throw new AgentMuxError(`Duplicate option: ${flag}`, 'INVALID_CLI_ARGUMENT')
-    }
-    if (booleanFlags.has(flag)) {
+    if (!flag?.startsWith('--')) throw cliError(`Unexpected argument: ${flag ?? ''}`)
+    if (values.has(flag) || booleans.has(flag)) throw cliError(`Duplicate option: ${flag}`)
+    const kind = specs[flag]
+    if (!kind) throw cliError(`Unsupported option: ${flag}`)
+    if (kind === 'boolean') {
       booleans.add(flag)
       continue
     }
-    if (!valueFlags.has(flag)) {
-      throw new AgentMuxError(`Unsupported option: ${flag}`, 'INVALID_CLI_ARGUMENT')
-    }
     const value = args[index + 1]
-    if (value === undefined || (value.startsWith('--') && flag !== '--text')) {
-      throw new AgentMuxError(`Missing value for ${flag}.`, 'INVALID_CLI_ARGUMENT')
+    if (value === undefined || (kind === 'value' && value.startsWith('--'))) {
+      throw cliError(`Missing value for ${flag}.`)
     }
     values.set(flag, value)
     index += 1
@@ -60,19 +57,26 @@ function parseFlags(
   return { values, booleans }
 }
 
-function subject(args: readonly string[]): { agentSessionId: string; rest: readonly string[] } {
-  const agentSessionId = args[0]
-  if (!agentSessionId || agentSessionId.startsWith('--')) {
-    throw new AgentMuxError('Agent Session id is required.', 'INVALID_CLI_ARGUMENT')
-  }
-  return { agentSessionId, rest: args.slice(1) }
+function identifier(value: string | undefined, label: string): string {
+  if (!value || value.startsWith('--')) throw cliError(`${label} is required.`)
+  return value
 }
 
-function identifier(value: string | undefined, label: string): string {
-  if (!value || value.startsWith('--')) {
-    throw new AgentMuxError(`${label} is required.`, 'INVALID_CLI_ARGUMENT')
-  }
+function requiredFlag(flags: ParsedFlags, name: string, label: string): string {
+  return identifier(flags.values.get(name), label)
+}
+
+function requiredData(flags: ParsedFlags, name: string, label: string): string {
+  const value = flags.values.get(name)
+  if (value === undefined) throw cliError(`${label} is required.`)
   return value
+}
+
+function sessionSubject(args: readonly string[]): { agentSessionId: string; rest: readonly string[] } {
+  return {
+    agentSessionId: identifier(args[0], 'Agent Session id'),
+    rest: args.slice(1)
+  }
 }
 
 function lookupSubject(args: readonly string[]): {
@@ -101,7 +105,7 @@ function lookupSubject(args: readonly string[]): {
       lookup: {
         kind,
         adapterId: identifier(args[1], 'ACP adapter id'),
-        sessionId: identifier(args[2], 'ACP session id')
+        sessionId: identifier(args[2], 'ACP native session id')
       },
       rest: args.slice(3)
     }
@@ -112,65 +116,54 @@ function lookupSubject(args: readonly string[]): {
       rest: args.slice(2)
     }
   }
-  throw new AgentMuxError('Agent lookup kind is invalid.', 'INVALID_CLI_ARGUMENT')
+  throw cliError('Agent lookup kind is invalid.')
 }
 
 function afterByte(value: string | undefined): number {
   if (value === undefined) return 0
   const parsed = Number(value)
   if (!Number.isSafeInteger(parsed) || parsed < 0) {
-    throw new AgentMuxError('--after-byte must be a non-negative safe integer.', 'INVALID_CLI_ARGUMENT')
+    throw cliError('--after-byte must be a non-negative safe integer.')
   }
   return parsed
 }
 
-function printJson(value: unknown): void {
-  process.stdout.write(`${JSON.stringify(value, null, 2)}\n`)
+function placement(value: string | undefined): AgentMuxRegionPlacement {
+  const resolved = value ?? 'split-right'
+  if (!PLACEMENTS.includes(resolved as AgentMuxRegionPlacement)) {
+    throw cliError('--placement must be tab, split-left, split-right, split-up, or split-down.')
+  }
+  return resolved as AgentMuxRegionPlacement
 }
 
-function printDoctor(report: AgentMuxDoctorReport): void {
-  process.stdout.write(`AgentMux doctor: ${report.ok ? 'PASS' : 'FAIL'}\n`)
-  if (report.host.reachable) {
-    process.stdout.write(
-      `Host: ${report.host.hostId} · ${report.host.buildIdentity} · protocol ${report.host.protocolVersion}\n`
-    )
-  } else {
-    process.stdout.write(`Host: unavailable · ${report.host.error}\n`)
-  }
-  if (report.host.action) process.stdout.write(`Host action: ${report.host.action}\n`)
-  if (report.runtime) {
-    process.stdout.write(
-      `CtxMux: ${report.runtime.ctxmux.version} · ${report.runtime.ctxmux.artifactPlatform} · ${report.runtime.ctxmux.ready ? 'ready' : 'invalid'}\n`
-    )
-    const capabilities = report.runtime.ctxmux.capabilities
-    process.stdout.write(
-      `CtxMux capabilities: ${capabilities.transport} · ordered bytes · bounded replay · recoverable input · resize · interrupt · complete stop\n`
-    )
-  }
-  process.stdout.write(
-    `Hosts: Local ${report.hosts.local.status} · Remote ${report.hosts.remote.status}\n`
-  )
-  if (report.hosts.local.action) process.stdout.write(`Local action: ${report.hosts.local.action}\n`)
-  process.stdout.write(`Remote action: ${report.hosts.remote.action}\n`)
-  for (const agent of report.agents) {
-    process.stdout.write(
-      `${agent.probe === 'found' ? 'OK' : agent.probe === 'missing' ? 'WARN' : 'BLOCKED'} ${agent.label} (${agent.executable}) · Hook ${agent.hook.kind} · ACP ${agent.acp.kind} · Permission ${agent.permission}\n`
-    )
-    if (agent.action) process.stdout.write(`  Action: ${agent.action}\n`)
-  }
-  if (report.runtimeAction) process.stdout.write(`Action: ${report.runtimeAction}\n`)
+function relativeRegion(value: string | undefined): AgentMuxRelativeRegion {
+  const resolved = value ?? 'self'
+  return resolved === 'self'
+    ? { kind: 'self' }
+    : { kind: 'region', regionId: identifier(resolved, 'Relative Region id') }
 }
 
-function printStatus(status: AgentMuxAgentRuntimeStatus): void {
-  process.stdout.write(
-    `${status.session.agentSessionId}\t${status.session.agentId}\t${status.run.state}\t${status.run.runId}\t${status.session.workspacePath}\n`
-  )
+function managedCaller(): { agentSessionId: string } {
+  const agentSessionId = process.env.AGENTMUX_AGENT_SESSION_ID?.trim()
+  if (process.env.AGENTMUX_ENV !== '1' || !agentSessionId) {
+    throw new AgentMuxError(
+      'This command requires an AgentMux-managed Agent caller.',
+      'MANAGED_AGENT_CONTEXT_REQUIRED'
+    )
+  }
+  return { agentSessionId }
 }
 
-function printResolved(session: AgentMuxAgentSession): void {
-  process.stdout.write(
-    `${session.agentSessionId}\t${session.agentId}\t${session.run.runId}\t${session.workspacePath}\n`
-  )
+function writeJson(value: unknown, stream: NodeJS.WritableStream = process.stdout): void {
+  stream.write(`${JSON.stringify(value)}\n`)
+}
+
+function printSuccess(operation: string, result: unknown): void {
+  writeJson({ schemaVersion: CLI_SCHEMA_VERSION, operation, result })
+}
+
+function printStream(operation: string, event: string, result: unknown): void {
+  writeJson({ schemaVersion: CLI_SCHEMA_VERSION, operation, event, result })
 }
 
 async function withClient<T>(operation: (client: AgentMuxClient) => Promise<T>): Promise<T> {
@@ -182,157 +175,224 @@ async function withClient<T>(operation: (client: AgentMuxClient) => Promise<T>):
   }
 }
 
-async function doctor(args: readonly string[]): Promise<number> {
-  const flags = parseFlags(args, new Set(['--json']), new Set())
-  const client = new AgentMuxClient()
-  try {
-    const report = await diagnoseAgentMux({ client })
-    if (flags.booleans.has('--json')) printJson(report)
-    else printDoctor(report)
-    return report.ok ? 0 : 1
-  } finally {
-    await client.dispose()
+async function contextCommand(args: readonly string[]): Promise<number> {
+  parseFlags(args, {})
+  const receipt = await requestAgentMuxComposition({
+    schemaVersion: AGENTMUX_COMPOSITION_SCHEMA_VERSION,
+    requestId: randomUUID(),
+    operation: 'context',
+    caller: managedCaller()
+  })
+  if (receipt.operation !== 'context') {
+    throw new AgentMuxError('Composition context receipt is invalid.', 'COMPOSITION_PROTOCOL_ERROR')
   }
-}
-
-async function list(args: readonly string[]): Promise<number> {
-  const flags = parseFlags(args, new Set(['--json']), new Set())
-  return await withClient(async (client) => {
-    const statuses = await Promise.all(
-      client.agentSessions().map(async (session) => await client.statusAgent(session.agentSessionId))
-    )
-    if (flags.booleans.has('--json')) printJson(statuses)
-    else for (const status of statuses) printStatus(status)
-    return 0
-  })
-}
-
-async function status(args: readonly string[]): Promise<number> {
-  const target = subject(args)
-  const flags = parseFlags(target.rest, new Set(['--json']), new Set())
-  return await withClient(async (client) => {
-    const result = await client.statusAgent(target.agentSessionId)
-    if (flags.booleans.has('--json')) printJson(result)
-    else printStatus(result)
-    return 0
-  })
-}
-
-async function resolveSession(args: readonly string[]): Promise<number> {
-  const target = lookupSubject(args)
-  const flags = parseFlags(target.rest, new Set(['--json']), new Set())
-  return await withClient(async (client) => {
-    const session = client.resolveAgentSession(target.lookup)
-    if (flags.booleans.has('--json')) printJson(session)
-    else printResolved(session)
-    return 0
-  })
-}
-
-async function switchView(args: readonly string[]): Promise<number> {
-  let target: AgentMuxViewFocusTarget
-  let rest: readonly string[]
-  if (args[0] === 'terminal-view') {
-    target = { kind: 'terminal-view', viewId: identifier(args[1], 'Terminal View id') }
-    rest = args.slice(2)
-  } else {
-    const parsed = lookupSubject(args)
-    const agentSessionId = await withClient(async (client) => (
-      client.resolveAgentSession(parsed.lookup).agentSessionId
-    ))
-    target = { kind: 'agent-session', agentSessionId }
-    rest = parsed.rest
-  }
-  const flags = parseFlags(rest, new Set(['--json']), new Set())
-  const focused = await requestAgentMuxDesktopFocus(target)
-  if (flags.booleans.has('--json')) printJson(focused)
-  else process.stdout.write(`switch ok: ${focused.kind} ${focused.viewId}\n`)
+  printSuccess(receipt.operation, receipt.result)
   return 0
 }
 
-async function action(
-  name: 'send' | 'interrupt' | 'resume' | 'stop',
+async function launchCommand(args: readonly string[]): Promise<number> {
+  const flags = parseFlags(args, {
+    '--agent': 'value',
+    '--prompt': 'data',
+    '--placement': 'value',
+    '--relative-to': 'value'
+  })
+  const receipt = await requestAgentMuxComposition({
+    schemaVersion: AGENTMUX_COMPOSITION_SCHEMA_VERSION,
+    requestId: randomUUID(),
+    operation: 'launch',
+    caller: managedCaller(),
+    executorId: requiredFlag(flags, '--agent', 'Agent Executor id'),
+    ...(flags.values.has('--prompt') ? { prompt: flags.values.get('--prompt')! } : {}),
+    placement: placement(flags.values.get('--placement')),
+    relativeTo: relativeRegion(flags.values.get('--relative-to'))
+  })
+  if (receipt.operation !== 'launch') {
+    throw new AgentMuxError('Composition launch receipt is invalid.', 'COMPOSITION_PROTOCOL_ERROR')
+  }
+  printSuccess(receipt.operation, receipt.result)
+  return 0
+}
+
+async function sessionList(args: readonly string[]): Promise<number> {
+  parseFlags(args, {})
+  return await withClient(async (client) => {
+    const sessions = await Promise.all(client.agentSessions().map(async (session) => (
+      await client.statusAgent(session.agentSessionId)
+    )))
+    printSuccess('session.list', { sessions })
+    return 0
+  })
+}
+
+async function sessionResolve(args: readonly string[]): Promise<number> {
+  const target = lookupSubject(args)
+  parseFlags(target.rest, {})
+  return await withClient(async (client) => {
+    printSuccess('session.resolve', { session: client.resolveAgentSession(target.lookup) })
+    return 0
+  })
+}
+
+async function sessionStatus(args: readonly string[]): Promise<number> {
+  const target = sessionSubject(args)
+  parseFlags(target.rest, {})
+  return await withClient(async (client) => {
+    printSuccess('session.status', { status: await client.statusAgent(target.agentSessionId) })
+    return 0
+  })
+}
+
+async function sessionAction(
+  operation: 'session.send' | 'session.interrupt' | 'session.resume' | 'session.stop',
   args: readonly string[]
 ): Promise<number> {
-  const target = subject(args)
-  const flags = parseFlags(
-    target.rest,
-    new Set(['--json']),
-    name === 'send' || name === 'resume' ? new Set(['--text']) : new Set()
-  )
+  const target = sessionSubject(args)
+  const needsText = operation === 'session.send' || operation === 'session.resume'
+  const flags = parseFlags(target.rest, needsText ? { '--text': 'data' } : {})
   return await withClient(async (client) => {
-    let result: unknown
-    if (name === 'send') {
-      const text = flags.values.get('--text')
-      if (text === undefined) throw new AgentMuxError('--text is required.', 'INVALID_CLI_ARGUMENT')
+    if (operation === 'session.send') {
       await client.submitAgentPrompt({
         agentSessionId: target.agentSessionId,
         operationId: randomUUID(),
-        prompt: text
+        prompt: requiredData(flags, '--text', 'Prompt text')
       })
-    } else if (name === 'interrupt') {
+      printSuccess(operation, { agentSessionId: target.agentSessionId })
+    } else if (operation === 'session.interrupt') {
       await client.signalAgent(target.agentSessionId, 'SIGINT')
-    } else if (name === 'resume') {
-      const prompt = flags.values.get('--text')
-      if (prompt === undefined) throw new AgentMuxError('--text is required.', 'INVALID_CLI_ARGUMENT')
-      result = await client.resumeAgent({
+      printSuccess(operation, { agentSessionId: target.agentSessionId })
+    } else if (operation === 'session.resume') {
+      const session = await client.resumeAgent({
         agentSessionId: target.agentSessionId,
         operationId: randomUUID(),
-        prompt
+        prompt: requiredData(flags, '--text', 'Resume prompt')
       })
+      printSuccess(operation, { session })
     } else {
-      await client.stopAgent(target.agentSessionId)
-    }
-    if (flags.booleans.has('--json')) {
-      printJson({ ok: true, action: name, agentSessionId: target.agentSessionId, ...(result ? { result } : {}) })
-    } else {
-      process.stdout.write(`${name} ok: ${target.agentSessionId}\n`)
+      const session = client.agentSession(target.agentSessionId)
+      await client.stopAgent(target.agentSessionId, session.run)
+      printSuccess(operation, { agentSessionId: target.agentSessionId })
     }
     return 0
   })
 }
 
-async function attach(args: readonly string[]): Promise<number> {
-  const target = subject(args)
-  const flags = parseFlags(target.rest, new Set(['--json']), new Set(['--after-byte']))
+async function sessionOutput(args: readonly string[]): Promise<number> {
+  const target = sessionSubject(args)
+  const flags = parseFlags(target.rest, { '--after-byte': 'value', '--follow': 'boolean' })
+  const follow = flags.booleans.has('--follow')
+  const requestedAfterByte = afterByte(flags.values.get('--after-byte'))
   return await withClient(async (client) => {
-    const currentRunId = client.agentSession(target.agentSessionId).run.runId
-    let finish: (() => void) | null = null
-    const completed = new Promise<void>((resolve) => { finish = resolve })
-    const unsubscribe = client.onEvent((event) => {
-      if (!('run' in event) || event.run.runId !== currentRunId) return
-      if (event.type === 'terminal-output') {
-        if (!flags.booleans.has('--json')) process.stdout.write(event.data)
-      }
-      if (event.type === 'process-state' && event.state !== 'running') finish?.()
+    const runId = client.agentSession(target.agentSessionId).run.runId
+    let finish: ((value: { state: string; exitCode?: number; exitSignal?: string }) => void) | null = null
+    const completed = new Promise<{ state: string; exitCode?: number; exitSignal?: string }>((resolve) => {
+      finish = resolve
     })
-    const attached = await client.reattachAgent(
-      target.agentSessionId,
-      afterByte(flags.values.get('--after-byte'))
+    const orderedFollow = new OrderedSessionOutputFollow(
+      runId,
+      requestedAfterByte,
+      (event) => {
+        printStream('session.output', 'output', {
+          runId: event.runId,
+          replay: event.replay,
+          startByte: event.startByte,
+          endByte: event.endByte,
+          data: event.data
+        })
+      },
+      (event) => finish?.(event)
     )
-    if (flags.booleans.has('--json')) {
-      printJson({
+    const unsubscribe = follow
+      ? client.onEvent((event) => orderedFollow.accept(event))
+      : () => {}
+    let attached: Awaited<ReturnType<AgentMuxClient['reattachAgent']>> | null = null
+    try {
+      attached = await client.reattachAgent(target.agentSessionId, requestedAfterByte)
+      if (!follow) {
+        printSuccess('session.output', {
+          session: attached.session,
+          run: attached.attachment.run,
+          replay: attached.attachment.replay,
+          gap: attached.attachment.gap
+        })
+        return 0
+      }
+      printStream('session.output', 'attached', {
         session: attached.session,
         run: attached.attachment.run,
-        replay: attached.attachment.replay,
         gap: attached.attachment.gap
       })
-    } else {
-      for (const event of attached.attachment.replay) process.stdout.write(event.data)
-    }
-    if (!flags.booleans.has('--json') && attached.attachment.run.state === 'running') {
-      const interrupted = () => finish?.()
+      orderedFollow.finishReplay(attached.attachment.replay)
+      if (attached.attachment.run.state !== 'running') {
+        printStream('session.output', 'end', { runId, state: attached.attachment.run.state })
+        return 0
+      }
+      const interrupted = (): void => finish?.({ state: 'reader-interrupted' })
       process.once('SIGINT', interrupted)
       try {
-        await completed
+        const ended = await completed
+        printStream('session.output', 'end', { runId, ...ended })
       } finally {
         process.off('SIGINT', interrupted)
       }
+      return 0
+    } finally {
+      unsubscribe()
+      if (attached) await client.releaseRunAttachment(attached.attachment.run)
     }
-    unsubscribe()
-    await client.releaseRunAttachment(attached.attachment.run)
-    return 0
   })
+}
+
+async function regionOpen(args: readonly string[]): Promise<number> {
+  const flags = parseFlags(args, {
+    '--session': 'value',
+    '--placement': 'value',
+    '--relative-to': 'value'
+  })
+  const receipt = await requestAgentMuxComposition({
+    schemaVersion: AGENTMUX_COMPOSITION_SCHEMA_VERSION,
+    requestId: randomUUID(),
+    operation: 'region.open',
+    caller: managedCaller(),
+    agentSessionId: requiredFlag(flags, '--session', 'Agent Session id'),
+    placement: placement(flags.values.get('--placement')),
+    relativeTo: relativeRegion(flags.values.get('--relative-to'))
+  })
+  if (receipt.operation !== 'region.open') {
+    throw new AgentMuxError('Composition Region open receipt is invalid.', 'COMPOSITION_PROTOCOL_ERROR')
+  }
+  printSuccess(receipt.operation, receipt.result)
+  return 0
+}
+
+async function regionFocus(args: readonly string[]): Promise<number> {
+  const flags = parseFlags(args, { '--region': 'value' })
+  const receipt = await requestAgentMuxComposition({
+    schemaVersion: AGENTMUX_COMPOSITION_SCHEMA_VERSION,
+    requestId: randomUUID(),
+    operation: 'region.focus',
+    regionId: requiredFlag(flags, '--region', 'Region id')
+  })
+  if (receipt.operation !== 'region.focus') {
+    throw new AgentMuxError('Composition Region focus receipt is invalid.', 'COMPOSITION_PROTOCOL_ERROR')
+  }
+  printSuccess(receipt.operation, receipt.result)
+  return 0
+}
+
+function operationPath(args: readonly string[]): string | null {
+  if (args[0] === 'context' || args[0] === 'launch') return args[0]
+  if ((args[0] === 'session' || args[0] === 'region') && args[1]) return `${args[0]}.${args[1]}`
+  if (args[0] === 'session' || args[0] === 'region') return args[0]
+  return null
+}
+
+function requestsHelp(args: readonly string[]): boolean {
+  return args.some((argument, index) => (
+    (argument === '--help' || argument === '-h') &&
+    args[index - 1] !== '--text' &&
+    args[index - 1] !== '--prompt'
+  ))
 }
 
 async function main(): Promise<number> {
@@ -349,28 +409,42 @@ async function main(): Promise<number> {
     process.stdout.write(`agentmux ${VERSION}\n`)
     return 0
   }
-  if (requestsCommandHelp(args.slice(1))) {
-    const help = agentMuxCommandHelp(args[0] ?? '')
-    if (!help) throw new AgentMuxError(AGENTMUX_CLI_HELP, 'INVALID_CLI_ARGUMENT')
+  if (requestsHelp(args)) {
+    const help = agentMuxCommandHelp(operationPath(args) ?? '')
+    if (!help) throw cliError('Unknown command. Run agentmux --help.')
     process.stdout.write(`${help}\n`)
     return 0
   }
-  if (args[0] === 'doctor') return await doctor(args.slice(1))
-  if (args[0] === 'list') return await list(args.slice(1))
-  if (args[0] === 'resolve') return await resolveSession(args.slice(1))
-  if (args[0] === 'switch') return await switchView(args.slice(1))
-  if (args[0] === 'status') return await status(args.slice(1))
-  if (args[0] === 'attach') return await attach(args.slice(1))
-  if (args[0] === 'send' || args[0] === 'interrupt' || args[0] === 'resume' || args[0] === 'stop') {
-    return await action(args[0], args.slice(1))
+  if (args[0] === 'context') return await contextCommand(args.slice(1))
+  if (args[0] === 'launch') return await launchCommand(args.slice(1))
+  if (args[0] === 'session') {
+    if (args[1] === 'list') return await sessionList(args.slice(2))
+    if (args[1] === 'resolve') return await sessionResolve(args.slice(2))
+    if (args[1] === 'status') return await sessionStatus(args.slice(2))
+    if (args[1] === 'send') return await sessionAction('session.send', args.slice(2))
+    if (args[1] === 'interrupt') return await sessionAction('session.interrupt', args.slice(2))
+    if (args[1] === 'output') return await sessionOutput(args.slice(2))
+    if (args[1] === 'resume') return await sessionAction('session.resume', args.slice(2))
+    if (args[1] === 'stop') return await sessionAction('session.stop', args.slice(2))
   }
-  throw new AgentMuxError(AGENTMUX_CLI_HELP, 'INVALID_CLI_ARGUMENT')
+  if (args[0] === 'region') {
+    if (args[1] === 'open') return await regionOpen(args.slice(2))
+    if (args[1] === 'focus') return await regionFocus(args.slice(2))
+  }
+  throw cliError('Unknown command. Run agentmux --help.')
 }
 
+const attemptedOperation = operationPath(process.argv.slice(2))
 void main().then((exitCode) => {
   process.exitCode = exitCode
 }, (error) => {
-  if (error instanceof AgentMuxError) process.stderr.write(`${error.code}: ${error.message}\n`)
-  else process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
+  const code = typeof error === 'object' && error !== null && 'code' in error
+    ? String(error.code)
+    : 'AGENTMUX_FAILED'
+  writeJson({
+    schemaVersion: CLI_SCHEMA_VERSION,
+    operation: attemptedOperation,
+    error: { code, message: error instanceof Error ? error.message : String(error) }
+  }, process.stderr)
   process.exitCode = 1
 })

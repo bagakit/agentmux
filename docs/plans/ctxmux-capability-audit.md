@@ -1,19 +1,17 @@
 # ctxmux 能力审计与 AgentMux Adapter Gate
 
-状态：T-015 已完成对历史 candidate 的审计；`b2bbc7a` **不满足原 T-016 门槛**。2026-08-14 用户明确两仓库共同所有，License、公开 npm/Release 与 SSH 不阻塞首个 Local cutover。当前 T-020 必须消费一个已提交的精确 ctxmux commit，并只以新的 public behavior 与可复现消费证据关闭 Local Gate；本文件记录的历史事实不授权在 AgentMux Adapter 内补齐 ctxmux 缺口。
-
-审计日期：2026-08-11（Asia/Shanghai）
+状态：历史审计证据；`b2bbc7a` **不满足原 T-016 门槛**，后续 T-020 已用新的精确 artifact 完成 Local cutover。本文件不再表达当前 candidate，也不授权在 AgentMux Adapter 内补齐 ctxmux 缺口。
 
 ## 1. 审计对象与结论
 
-本轮审计对象是公开仓库 [`bagaking/ctxmux`](https://github.com/bagaking/ctxmux) 的精确 commit [`b2bbc7a219753ad2664a438ab89347df180b7d31`](https://github.com/bagaking/ctxmux/commit/b2bbc7a219753ad2664a438ab89347df180b7d31)。GitHub API 显示该仓库创建于 2026-08-09，默认分支为 `main`；该 commit 的 GitHub Actions run `31330002660` 通过。
+本轮审计对象是公开仓库 [`bagaking/ctxmux`](https://github.com/bagaking/ctxmux) 的精确 commit [`b2bbc7a219753ad2664a438ab89347df180b7d31`](https://github.com/bagaking/ctxmux/commit/b2bbc7a219753ad2664a438ab89347df180b7d31)。GitHub API 显示默认分支为 `main`；该 commit 的 GitHub Actions run `31330002660` 通过。
 
-以下是 2026-08-11 对 `b2bbc7a` 的历史结论：
+以下是对 `b2bbc7a` 的历史结论：
 
 - **可用的 Local 基础**：Rust daemon、Rust CLI 和 TypeScript SDK 已通过同一 generation 2 Unix-socket 协议运行真实 PTY。Start、List、Status、Input、Attach、Detach、Replay、Live Output、Resize、Stop 与 Client 退出后重连都有真实行为证据。
 - **当时不能开始原 T-016 替换**：该 candidate 没有 License／Release／Package 和 SSH Transport；Create/Input 没有幂等 cursor 或 lost-response recovery；Output 使用 chunk sequence 而 AgentMux 合同使用 byte cursor；Stop 没有完整后代树保证；Run/Attachment/内存没有 daemon 级总预算与 GC；Runtime identity/capability negotiation、任意 Signal 和 applied-size readback 也未交付。revision 9 不把 License、公开发布和 SSH 继续作为 Local 前置，但保留其余 Local public behavior Gap。
 
-因此 T-015 可以完成“审计与冻结映射”，原 T-016 的 blocked 证据保持为历史事实。T-020 不能沿用这份 2026-08-11 审计或当前 dirty WIP 作为通过结论：它必须固定新的干净 commit，并证明累计 output byte cursor、Replay/Gap、public interrupt/signal、完整 process-tree stop，以及无需发布、相邻目录或全局安装的 exact-commit SDK/binary consumption。SSH 由 T-021 后续关闭。不得用 AgentMux 私有 daemon、Adapter 内持久 Map、隐藏 Backend、wire fork 或 fallback 填这些缺口。
+因此 T-015 完成“审计与冻结映射”，原 T-016 的 blocked 证据只保留为历史事实。T-020 没有沿用这份旧审计作为通过结论，而是用新的干净 artifact 证明累计 output byte cursor、Replay/Gap、public interrupt/signal、完整 process-tree stop 和可复现 SDK/binary consumption。SSH 仍由 T-021 关闭。不得用 AgentMux 私有 daemon、Adapter 内持久 Map、隐藏 Backend、wire fork 或 fallback 填这些缺口。
 
 ## 2. 发布、License 与供应链
 
@@ -99,7 +97,7 @@ Context7 没有 ctxmux 条目；本机常用项目目录、AgentMux lockfile、�
 
 ## 6. 冻结的 `CtxmuxRunAdapter` 映射
 
-只有新的、已提交的精确 candidate 关闭 T-020 Local 门槛后，AgentMux 才实现一个 Adapter。它不是 Backend Registry，也不接入 ctxmux 的 shell/Codex Integration：Agent 发现、Launch Plan、Hook、ACP、Permission、Resume 与 Evidence 继续由 AgentMux Provider 持有。
+最终 `CtxmuxRunAdapter` 不是 Backend Registry，也不接入 ctxmux 的 shell/Codex Integration：Agent 发现、Launch Plan、Hook、ACP、Permission、Resume 与 Evidence 继续由 AgentMux Provider 持有。
 
 | AgentMux Run Port | ctxmux public SDK | 映射约束 |
 | --- | --- | --- |
@@ -120,7 +118,7 @@ Agent identity 不属于 Adapter。`agentSessionId`、Provider + native session 
 
 ## 7. 历史 T-016 与 revision 9 执行门槛
 
-以下九项是原 T-016 blocked 时记录的历史解除条件，继续可审计，但不再作为一个不可拆分的 T-020 Gate。revision 9 的执行分为两步：
+以下九项是原 T-016 blocked 时记录的历史解除条件，只用于解释当时为何不能接入。T-020 已完成 Local 原子切换；Remote 条件仍由 T-021 独立关闭。
 
 ### T-020 Local 原子切换
 
@@ -146,7 +144,7 @@ Agent identity 不属于 Adapter。`agentSessionId`、Provider + native session 
 8. 提供同一 Run 合同的系统 SSH Transport、显式部署/升级方式和 partition recovery；
 9. 最终 candidate 在支持平台通过 AgentMux Conformance，无 `knownGaps`；AgentMux Core Store/Resolver 能以 Provider + native session ID、ACP handle 或 exact RunRef 唯一反查稳定 `agentSessionId`，并让 CLI、SDK、Desktop 共用该身份与操作合同。
 
-在这些条件满足前，AgentMux 保持当前可运行过渡实现但不继续给它增加产品能力；T-017/T-018 也不能用旧 candidate 的 Package、资源或 Benchmark 证据冒充最终结果。
+Local 条件已由 T-020 的最终 artifact 和 Gate 关闭；T-018 仍不能用本文件中的旧 candidate Package、资源或 Benchmark 证据冒充最终结果。Remote 条件只由 T-021 的 public contract 与运行证据关闭。
 
 ## 8. 审计未越权边界
 

@@ -1,13 +1,22 @@
 import { AgentMuxError } from './errors.js'
-import { randomUUID } from 'node:crypto'
-import { chmod, mkdir, open, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises'
+import { createHash, randomUUID } from 'node:crypto'
+import { mkdir, open, readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { defaultAgentMuxRuntimeDirectory } from './runtime-paths.js'
+import {
+  applyAgentTimelineMutation,
+  normalizeAgentTimeline,
+  normalizeAgentTimelineMutation
+} from './session-timeline.js'
 import type {
   AgentHookReceipt,
   AgentMuxRunRef,
   AgentMuxStoredAgentSession,
-  AgentNativeSessionHandle
+  AgentNativeSessionHandle,
+  AgentTimelineCommit,
+  AgentTimelineItem,
+  AgentTimelineMutation,
+  AgentTimelineSnapshot
 } from './types.js'
 
 const MAX_STORED_SESSIONS = 256
@@ -17,6 +26,7 @@ const MAX_ID_BYTES = 512
 const MAX_PATH_BYTES = 16 * 1024
 const MAX_RETIRED_RUNS = 16
 const MAX_STORE_BYTES = 1024 * 1024
+const MAX_TIMELINE_STORE_BYTES = 4 * 1024 * 1024
 const LOCK_ATTEMPTS = 100
 const LOCK_RETRY_MS = 10
 
@@ -58,6 +68,11 @@ export type AgentMuxAgentSessionStore = {
     reservation: AgentMuxLifecycleReservation,
     next: AgentMuxStoredAgentSession | null
   ): Promise<void>
+  loadTimeline(agentSessionId: string): Promise<AgentTimelineSnapshot>
+  applyTimelineMutation(
+    mutation: AgentTimelineMutation,
+    signal?: AbortSignal
+  ): Promise<AgentTimelineCommit>
 }
 
 function record(value: unknown, name: string): Record<string, unknown> {
@@ -86,6 +101,16 @@ function positiveInteger(value: unknown, name: string): number {
     throw new AgentMuxError(`${name} is invalid.`, 'INVALID_AGENT_SESSION_STORE')
   }
   return value as number
+}
+
+function nextTimelineRevision(current: number): number {
+  if (current >= Number.MAX_SAFE_INTEGER) {
+    throw new AgentMuxError(
+      'Agent Timeline revision limit reached.',
+      'AGENT_TIMELINE_REVISION_LIMIT'
+    )
+  }
+  return current + 1
 }
 
 function runRef(value: unknown): AgentMuxRunRef {
@@ -234,7 +259,7 @@ function hookReceipt(value: unknown): AgentHookReceipt {
   }
   return {
     id: string(source.id, 'hookReceipt.id'),
-    agentId: string(source.agentId, 'hookReceipt.agentId'),
+    providerId: string(source.providerId, 'hookReceipt.providerId'),
     agentSessionId: string(source.agentSessionId, 'hookReceipt.agentSessionId'),
     run: runRef(source.run),
     eventName,
@@ -382,7 +407,8 @@ export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgent
   const session: AgentMuxStoredAgentSession = {
     kind: 'agent',
     agentSessionId: string(source.agentSessionId, 'agentSessionId'),
-    agentId: string(source.agentId, 'agentId'),
+    providerId: string(source.providerId, 'providerId'),
+    executorId: string(source.executorId, 'executorId'),
     hostId: string(source.hostId, 'hostId'),
     workspacePath: string(source.workspacePath, 'workspacePath', MAX_PATH_BYTES),
     run: currentRun,
@@ -409,13 +435,13 @@ export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgent
     ...(source.nativeHandle === undefined ? {} : { nativeHandle: nativeHandle(source.nativeHandle) }),
     ...(source.hookReceipt === undefined ? {} : { hookReceipt: hookReceipt(source.hookReceipt) })
   }
-  if (session.nativeHandle?.kind === 'provider' && session.nativeHandle.providerId !== session.agentId) {
+  if (session.nativeHandle?.kind === 'provider' && session.nativeHandle.providerId !== session.providerId) {
     throw new AgentMuxError('Native session handle provider does not match the Agent.', 'INVALID_AGENT_SESSION_STORE')
   }
   if (
     session.hookReceipt &&
     (
-      session.hookReceipt.agentId !== session.agentId ||
+      session.hookReceipt.providerId !== session.providerId ||
       session.hookReceipt.agentSessionId !== session.agentSessionId ||
       session.hookReceipt.run.runId !== session.run.runId
     )
@@ -587,6 +613,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
   private readonly sessions = new Map<string, AgentMuxStoredAgentSession>()
   private readonly reservations = new Map<string, AgentMuxLifecycleReservation>()
   private retiredRuns: AgentMuxRunRef[] = []
+  private readonly timelines = new Map<string, AgentTimelineSnapshot>()
 
   async load(): Promise<readonly unknown[]> {
     return [...this.sessions.values()].map((session) => structuredClone(session))
@@ -625,6 +652,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
       this.sessions.set(agentSessionId, structuredClone(normalized))
     } else {
       this.sessions.delete(agentSessionId)
+      this.timelines.delete(agentSessionId)
     }
   }
 
@@ -696,10 +724,62 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     if (normalized) values.push(normalized)
     const sessions = normalizeAgentSessions(values)
     assertUnboundRetiredRuns(sessions, this.retiredRuns)
-    if (normalized) this.sessions.set(normalized.agentSessionId, structuredClone(normalized))
-    else this.sessions.delete(reservation.agentSessionId)
+    if (normalized) {
+      if (reservation.kind === 'create') this.timelines.delete(normalized.agentSessionId)
+      this.sessions.set(normalized.agentSessionId, structuredClone(normalized))
+    } else {
+      this.sessions.delete(reservation.agentSessionId)
+      this.timelines.delete(reservation.agentSessionId)
+    }
     this.reservations.delete(reservation.agentSessionId)
   }
+
+  async loadTimeline(agentSessionId: string): Promise<AgentTimelineSnapshot> {
+    return structuredClone(this.timelines.get(agentSessionId) ?? {
+      agentSessionId,
+      revision: 0,
+      items: []
+    })
+  }
+
+  async applyTimelineMutation(
+    mutation: AgentTimelineMutation,
+    signal?: AbortSignal
+  ): Promise<AgentTimelineCommit> {
+    signal?.throwIfAborted()
+    const canonicalMutation = normalizeAgentTimelineMutation(mutation)
+    if (!this.sessions.has(canonicalMutation.agentSessionId)) {
+      throw new AgentMuxError(`Unknown Agent Session: ${canonicalMutation.agentSessionId}`, 'UNKNOWN_AGENT_SESSION')
+    }
+    const current = this.timelines.get(canonicalMutation.agentSessionId) ?? {
+      agentSessionId: canonicalMutation.agentSessionId,
+      revision: 0,
+      items: []
+    }
+    const next = applyAgentTimelineMutation(
+      current.items,
+      canonicalMutation
+    )
+    const changed = JSON.stringify(next) !== JSON.stringify(current.items)
+    const commit: AgentTimelineCommit = {
+      agentSessionId: canonicalMutation.agentSessionId,
+      revision: changed ? nextTimelineRevision(current.revision) : current.revision,
+      changed,
+      mutation: canonicalMutation
+    }
+    if (changed) {
+      signal?.throwIfAborted()
+      this.timelines.set(canonicalMutation.agentSessionId, {
+        agentSessionId: canonicalMutation.agentSessionId,
+        revision: commit.revision,
+        items: next
+      })
+    } else {
+      signal?.throwIfAborted()
+    }
+    return structuredClone(commit)
+  }
+
 }
 
 type AgentSessionStoreDocument = {
@@ -707,6 +787,13 @@ type AgentSessionStoreDocument = {
   sessions: AgentMuxStoredAgentSession[]
   reservations: AgentMuxLifecycleReservation[]
   retiredRuns: AgentMuxRunRef[]
+}
+
+type AgentTimelineStoreDocument = {
+  version: 2
+  agentSessionId: string
+  revision: number
+  items: AgentTimelineItem[]
 }
 
 function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
@@ -730,12 +817,18 @@ export function defaultAgentMuxAgentSessionStorePath(): string {
 
 export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore {
   private tail: Promise<void> = Promise.resolve()
+  private lockReleaseFailure: AgentMuxError | null = null
 
   constructor(readonly path = defaultAgentMuxAgentSessionStorePath()) {}
 
   async load(): Promise<readonly unknown[]> {
-    await this.tail
-    return (await this.read()).sessions.map((session) => structuredClone(session))
+    let result: AgentMuxStoredAgentSession[] = []
+    await this.enqueue(async () => {
+      const document = await this.read()
+      await this.removeOrphanTimelineFiles(document.sessions)
+      result = document.sessions.map((session) => structuredClone(session))
+    })
+    return result
   }
 
   async loadRetiredRuns(): Promise<readonly AgentMuxRunRef[]> {
@@ -771,7 +864,9 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       else sessions.delete(agentSessionId)
       const normalized = normalizeAgentSessions([...sessions.values()])
       assertUnboundRetiredRuns(normalized, document.retiredRuns)
+      if (next && !expected) await this.removeTimelineFile(agentSessionId)
       await this.write({ ...document, sessions: normalized }, signal)
+      if (!next) await this.removeTimelineFile(agentSessionId).catch(() => {})
     }, signal)
   }
 
@@ -878,6 +973,9 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       if (normalized) sessions.push(normalized)
       const committedSessions = normalizeAgentSessions(sessions)
       assertUnboundRetiredRuns(committedSessions, document.retiredRuns)
+      if (reservation.kind === 'create') {
+        await this.removeTimelineFile(reservation.agentSessionId)
+      }
       await this.write({
         version: 2,
         sessions: committedSessions,
@@ -886,7 +984,53 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         ),
         retiredRuns: document.retiredRuns
       })
+      if (!normalized) await this.removeTimelineFile(reservation.agentSessionId).catch(() => {})
     })
+  }
+
+  async loadTimeline(agentSessionId: string): Promise<AgentTimelineSnapshot> {
+    await this.tail
+    const timeline = await this.readTimeline(agentSessionId)
+    return structuredClone({
+      agentSessionId: timeline.agentSessionId,
+      revision: timeline.revision,
+      items: timeline.items
+    })
+  }
+
+  async applyTimelineMutation(
+    mutation: AgentTimelineMutation,
+    signal?: AbortSignal
+  ): Promise<AgentTimelineCommit> {
+    let result!: AgentTimelineCommit
+    await this.enqueue(async () => {
+      signal?.throwIfAborted()
+      const canonicalMutation = normalizeAgentTimelineMutation(mutation)
+      const document = await this.read(signal)
+      if (!document.sessions.some((session) => session.agentSessionId === canonicalMutation.agentSessionId)) {
+        throw new AgentMuxError(`Unknown Agent Session: ${canonicalMutation.agentSessionId}`, 'UNKNOWN_AGENT_SESSION')
+      }
+      const timeline = await this.readTimeline(canonicalMutation.agentSessionId, signal)
+      const items = applyAgentTimelineMutation(timeline.items, canonicalMutation)
+      const changed = JSON.stringify(items) !== JSON.stringify(timeline.items)
+      result = {
+        agentSessionId: canonicalMutation.agentSessionId,
+        revision: changed ? nextTimelineRevision(timeline.revision) : timeline.revision,
+        changed,
+        mutation: canonicalMutation
+      }
+      if (!changed) {
+        signal?.throwIfAborted()
+        return
+      }
+      await this.writeTimeline({
+        version: 2,
+        agentSessionId: canonicalMutation.agentSessionId,
+        revision: result.revision,
+        items
+      }, signal)
+    }, signal)
+    return structuredClone(result)
   }
 
   private async read(signal?: AbortSignal): Promise<AgentSessionStoreDocument> {
@@ -939,26 +1083,136 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     }
     await mkdir(dirname(this.path), { recursive: true, mode: 0o700 })
     const temporaryPath = `${this.path}.${process.pid}.${randomUUID()}.tmp`
+    let committed = false
     try {
       await writeFile(temporaryPath, content, { mode: 0o600, flag: 'wx', signal })
       signal?.throwIfAborted()
       await rename(temporaryPath, this.path)
-      await chmod(this.path, 0o600)
+      committed = true
     } finally {
       await unlink(temporaryPath).catch((error: NodeJS.ErrnoException) => {
-        if (error.code !== 'ENOENT') throw error
+        if (!committed && error.code !== 'ENOENT') throw error
       })
     }
+  }
+
+  private timelinePath(agentSessionId: string): string {
+    const filename = createHash('sha256').update(agentSessionId).digest('base64url')
+    return join(dirname(this.path), 'agent-timelines', `${filename}.json`)
+  }
+
+  private async readTimeline(
+    agentSessionId: string,
+    signal?: AbortSignal
+  ): Promise<AgentTimelineStoreDocument> {
+    const path = this.timelinePath(agentSessionId)
+    try {
+      signal?.throwIfAborted()
+      const metadata = await stat(path)
+      if (!metadata.isFile() || metadata.size > MAX_TIMELINE_STORE_BYTES) {
+        throw new AgentMuxError('Agent Timeline store is invalid.', 'INVALID_AGENT_TIMELINE_STORE')
+      }
+      const value: unknown = JSON.parse(await readFile(path, { encoding: 'utf8', signal }))
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new AgentMuxError('Agent Timeline store is invalid.', 'INVALID_AGENT_TIMELINE_STORE')
+      }
+      const document = value as {
+        version?: unknown
+        agentSessionId?: unknown
+        revision?: unknown
+        items?: unknown
+      }
+      if (
+        document.version !== 2 ||
+        document.agentSessionId !== agentSessionId ||
+        !Number.isSafeInteger(document.revision) ||
+        (document.revision as number) < 0 ||
+        !Array.isArray(document.items)
+      ) {
+        throw new AgentMuxError('Agent Timeline store is invalid.', 'INVALID_AGENT_TIMELINE_STORE')
+      }
+      return {
+        version: 2,
+        agentSessionId,
+        revision: document.revision as number,
+        items: normalizeAgentTimeline(agentSessionId, document.items)
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return { version: 2, agentSessionId, revision: 0, items: [] }
+      }
+      throw error
+    }
+  }
+
+  private async writeTimeline(
+    document: AgentTimelineStoreDocument,
+    signal?: AbortSignal
+  ): Promise<void> {
+    signal?.throwIfAborted()
+    const content = `${JSON.stringify(document)}\n`
+    if (Buffer.byteLength(content) > MAX_TIMELINE_STORE_BYTES) {
+      throw new AgentMuxError('Agent Timeline store exceeds its size limit.', 'AGENT_TIMELINE_STORE_LIMIT')
+    }
+    const path = this.timelinePath(document.agentSessionId)
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 })
+    const temporaryPath = `${path}.${process.pid}.${randomUUID()}.tmp`
+    let committed = false
+    try {
+      await writeFile(temporaryPath, content, { mode: 0o600, flag: 'wx', signal })
+      signal?.throwIfAborted()
+      await rename(temporaryPath, path)
+      committed = true
+    } finally {
+      await unlink(temporaryPath).catch((error: NodeJS.ErrnoException) => {
+        if (!committed && error.code !== 'ENOENT') throw error
+      })
+    }
+  }
+
+  private async removeTimelineFile(agentSessionId: string): Promise<void> {
+    await unlink(this.timelinePath(agentSessionId)).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== 'ENOENT') throw error
+    })
+  }
+
+  private async removeOrphanTimelineFiles(
+    sessions: readonly AgentMuxStoredAgentSession[]
+  ): Promise<void> {
+    const directory = join(dirname(this.path), 'agent-timelines')
+    const currentPaths = new Set(sessions.map((session) => this.timelinePath(session.agentSessionId)))
+    let entries: string[]
+    try {
+      entries = await readdir(directory)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+      throw error
+    }
+    await Promise.all(entries
+      .filter((entry) => entry.endsWith('.json'))
+      .map(async (entry) => {
+        const path = join(directory, entry)
+        if (!currentPaths.has(path)) await unlink(path)
+      }))
   }
 
   private async enqueue(operation: () => Promise<void>, signal?: AbortSignal): Promise<void> {
     const current = this.tail.catch(() => {}).then(async () => {
       signal?.throwIfAborted()
+      if (this.lockReleaseFailure) throw this.lockReleaseFailure
       const release = await this.acquireLock(signal)
       try {
         await operation()
       } finally {
-        await release()
+        await release().catch((error) => {
+          const failure = new AgentMuxError(
+            'Agent Session store lock cleanup failed; this Store instance cannot write again.',
+            'AGENT_SESSION_STORE_LOCK_RELEASE_FAILED',
+            error instanceof Error ? error.message : String(error)
+          )
+          this.lockReleaseFailure = failure
+          process.emitWarning(failure.message, { code: failure.code })
+        })
       }
     })
     this.tail = current.then(() => {}, () => {})

@@ -11,3 +11,4 @@ coverage
 .bagakit
 .codex-output
 .playwright-cli
+.tmp

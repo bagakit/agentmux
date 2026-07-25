@@ -31,7 +31,7 @@ describe('explicit managed Hook installation', () => {
   it('previews exact files, installs once, and restores the previous generation on uninstall', async () => {
     const { installer, existingPath, createdPath } = await fixture()
     const preview = await installer.preview({
-      agentId: 'codex',
+      providerId: 'codex',
       mutations: [
         { path: existingPath, content: '{"user":true,"agentmux":true}\n' },
         { path: createdPath, content: '#!/bin/sh\nexit 0\n', mode: 0o700 }
@@ -56,7 +56,7 @@ describe('explicit managed Hook installation', () => {
   it('fails closed when a target changes after preview or after install', async () => {
     const { installer, existingPath } = await fixture()
     const stalePreview = await installer.preview({
-      agentId: 'claude',
+      providerId: 'claude',
       mutations: [{ path: existingPath, content: '{"agentmux":1}\n' }]
     })
     await writeFile(existingPath, '{"user-edited":1}\n')
@@ -64,7 +64,7 @@ describe('explicit managed Hook installation', () => {
     expect(await readFile(existingPath, 'utf8')).toBe('{"user-edited":1}\n')
 
     const currentPreview = await installer.preview({
-      agentId: 'claude',
+      providerId: 'claude',
       mutations: [{ path: existingPath, content: '{"agentmux":2}\n' }]
     })
     const receipt = await installer.install(currentPreview.id)
@@ -76,7 +76,7 @@ describe('explicit managed Hook installation', () => {
   it.runIf(process.platform !== 'win32')('rejects a receipt whose backup escapes the state directory through a symlink', async () => {
     const { installer, existingPath } = await fixture()
     const preview = await installer.preview({
-      agentId: 'codex',
+      providerId: 'codex',
       mutations: [{ path: existingPath, content: '{"agentmux":true}\n' }]
     })
     const receipt = await installer.install(preview.id)

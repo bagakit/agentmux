@@ -4,9 +4,9 @@ import type { RuntimeController, RuntimePreparation } from '../src/main/runtime-
 import { saveRuntimeConfig } from '../src/main/runtime-config-transaction.js'
 
 const config: AppConfig = {
-  version: 4,
+  version: 6,
   hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
-  agents: {},
+  executors: {},
   workspaces: [],
   appearance: { terminalTheme: 'graphite' }
 }

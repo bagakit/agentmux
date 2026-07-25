@@ -7,7 +7,7 @@ import {
   moveTab,
   removeTab,
   setSplitRatio,
-  splitTab
+  moveTabToNewGroup
 } from '../src/renderer/src/lib/workbench-layout'
 
 describe('Orca-style workspace tab-group layout', () => {
@@ -23,7 +23,7 @@ describe('Orca-style workspace tab-group layout', () => {
   it.each(['left', 'right', 'up', 'down'] as const)(
     'moves a tab into a new %s split group',
     (direction) => {
-      const layout = splitTab(
+      const layout = moveTabToNewGroup(
         createWorkspaceLayout('group-1', ['agent:one', 'file:a.ts']),
         'file:a.ts',
         'group-1',
@@ -43,13 +43,13 @@ describe('Orca-style workspace tab-group layout', () => {
 
   it('rejects the same last-tab split no-op', () => {
     const initial = createWorkspaceLayout('group-1', ['agent:one'])
-    expect(splitTab(initial, 'agent:one', 'group-1', 'group-1', 'right', 'group-2')).toBe(
+    expect(moveTabToNewGroup(initial, 'agent:one', 'group-1', 'group-1', 'right', 'group-2')).toBe(
       initial
     )
   })
 
   it('moves a tab and collapses its empty source group', () => {
-    const split = splitTab(
+    const split = moveTabToNewGroup(
       createWorkspaceLayout('group-1', ['agent:one', 'file:a.ts']),
       'file:a.ts',
       'group-1',
@@ -63,7 +63,7 @@ describe('Orca-style workspace tab-group layout', () => {
   })
 
   it('collapses a secondary group when its final tab closes', () => {
-    const split = splitTab(
+    const split = moveTabToNewGroup(
       createWorkspaceLayout('group-1', ['agent:one', 'file:a.ts']),
       'file:a.ts',
       'group-1',
@@ -76,7 +76,7 @@ describe('Orca-style workspace tab-group layout', () => {
   })
 
   it('clamps a root split ratio using Orca node paths', () => {
-    const split = splitTab(
+    const split = moveTabToNewGroup(
       createWorkspaceLayout('group-1', ['agent:one', 'file:a.ts']),
       'file:a.ts',
       'group-1',

@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { tabIdsForCloseScope } from '../src/renderer/src/lib/workbench-tab-actions'
+import {
+  WORKBENCH_TAB_SPLIT_ACTIONS,
+  tabIdsForCloseScope
+} from '../src/renderer/src/lib/workbench-tab-actions'
 
 describe('workbench tab context actions', () => {
   const tabs = ['one', 'two', 'three', 'four']
@@ -14,5 +17,14 @@ describe('workbench tab context actions', () => {
     expect(tabIdsForCloseScope(tabs, 'missing', 'others')).toEqual([])
     expect(tabIdsForCloseScope(tabs, 'missing', 'left')).toEqual([])
     expect(tabIdsForCloseScope(tabs, 'missing', 'right')).toEqual([])
+  })
+
+  it('keeps every direct split direction visible in one shared menu vocabulary', () => {
+    expect(WORKBENCH_TAB_SPLIT_ACTIONS).toEqual([
+      { direction: 'left', label: 'Split Left' },
+      { direction: 'right', label: 'Split Right' },
+      { direction: 'up', label: 'Split Up' },
+      { direction: 'down', label: 'Split Down' }
+    ])
   })
 })

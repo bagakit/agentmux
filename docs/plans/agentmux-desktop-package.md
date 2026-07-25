@@ -25,7 +25,7 @@ The command fails closed unless all of the following hold:
 1. every application symlink resolves inside `AgentMux.app`;
 2. no packaged text artifact refers to the source checkout or packaging temp
    directory;
-3. the packaged CtxMux manifest binds exact clean commit `2e32a9d`, protocol 9,
+3. the packaged CtxMux manifest binds exact clean commit `f89dabe`, protocol 9,
    and the darwin-arm64 SDK/binary hashes;
 4. packaged `ctxmux` and `ctxmuxd` report version `0.1.0 (protocol 9)` without
    a global install or source checkout;
@@ -46,6 +46,13 @@ smoke and parallel clients. It must be absolute. Normal Desktop launches leave
 it unset and continue using the stable per-user runtime endpoint; user-data
 isolation alone does not imply a second Run kernel.
 
+The stable runtime belongs to one verified CtxMux artifact identity, not to the
+absolute directory from which that artifact was launched. Moving the same Core
+build from a checkout into `AgentMux.app` must reuse the existing daemon and its
+Runs. The owner receipt keeps the launch path for diagnostics, while ownership
+continues to fail closed on source commit/tree, manifest or daemon hash, runtime
+endpoint, or daemon instance mismatch.
+
 Dependency materialization reads the pnpm lockfile-resolved workspace tree but
 writes only to a temporary application bundle. It does not run a nested install
 or rewrite workspace `node_modules` while packaging.
@@ -63,12 +70,3 @@ validation, notarization, stapling, multi-architecture artifacts, and release
 publication remain a separate explicit release boundary. The local command
 does not silently switch identities or pretend that missing credentials are a
 successful release.
-
-## a mature workbench adaptation record
-
-The package follows the runtime-closure and real-artifact verification pattern
-from a mature workbench commit `18114edb5985cc89370ba6994cf37c87302cff34`. AgentMux intentionally
-does not copy a mature workbench's updater channels, Squirrel metadata, plugin resources,
-relay/CLI assets, permission entitlements, compatibility paths, or release
-automation. AgentMux strengthens a mature workbench's manual DMG diagnostics by making mount,
-relocation, signature, packaged-runtime, and LaunchServices checks mandatory.

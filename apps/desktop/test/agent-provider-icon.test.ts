@@ -8,15 +8,15 @@ import {
 
 describe('AgentProviderIcon', () => {
   it('renders a real offline identity mark for every built-in Agent', () => {
-    for (const [agentId, element] of [
+    for (const [providerId, element] of [
       ['codex', 'svg'],
       ['claude', 'svg'],
       ['traex', 'img'],
       ['hermes', 'img'],
       ['pi', 'svg']
     ] as const) {
-      const markup = renderToStaticMarkup(createElement(AgentProviderIcon, { agentId, size: 16 }))
-      expect(markup).toContain(`data-agent-provider="${agentId}"`)
+      const markup = renderToStaticMarkup(createElement(AgentProviderIcon, { providerId, size: 16 }))
+      expect(markup).toContain(`data-agent-provider="${providerId}"`)
       expect(markup).toContain('data-agent-provider-known="true"')
       expect(markup).toContain(`<${element}`)
       expect(markup).not.toContain('<text')
@@ -25,7 +25,7 @@ describe('AgentProviderIcon', () => {
 
   it('keeps custom Provider identity neutral instead of impersonating a built-in Agent', () => {
     const markup = renderToStaticMarkup(createElement(AgentProviderIcon, {
-      agentId: 'private-agent',
+      providerId: 'private-agent',
       size: 16
     }))
 

@@ -2,10 +2,20 @@ import { AlertTriangle, ArrowLeft, ArrowRight, Globe2, LoaderCircle, RefreshCw }
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { BrowserSnapshot } from '../../../shared/contracts'
 import { api } from '../lib/api'
-import type { BrowserWorkbenchTab } from '../lib/workbench-tabs'
+import {
+  LatestBrowserBoundsSynchronizer,
+  rendererCssBoundsToWindowDip
+} from '../lib/browser-bounds-sync'
+import type { BrowserWorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
 
-export function BrowserPane({ tab, visible }: { tab: BrowserWorkbenchTab; visible: boolean }) {
+export function BrowserPane({
+  tab,
+  visible
+}: {
+  tab: BrowserWorkbenchSurface
+  visible: boolean
+}) {
   const applyBrowserEvent = useAppStore((state) => state.applyBrowserEvent)
   const reportError = useAppStore((state) => state.reportError)
   const toolsOpen = useAppStore((state) => state.toolsOpen)
@@ -21,21 +31,23 @@ export function BrowserPane({ tab, visible }: { tab: BrowserWorkbenchTab; visibl
     const stage = stageRef.current
     if (!stage) return
     let frame = 0
+    const synchronizer = new LatestBrowserBoundsSynchronizer(
+      async (bounds) => await api.browser.setBounds(tab.browserId, bounds),
+      reportError
+    )
     const update = (): void => {
       cancelAnimationFrame(frame)
       frame = requestAnimationFrame(() => {
         const navigatorCoversBrowser = toolsOpen && window.innerWidth <= 900
         if (!visible || navigatorCoversBrowser || __AGENTMUX_WEB_PREVIEW__ || tab.error || tab.url === 'about:blank') {
-          void api.browser.setBounds(tab.browserId, null)
+          synchronizer.observe(null)
           return
         }
         const rect = stage.getBoundingClientRect()
-        void api.browser.setBounds(tab.browserId, {
-          x: rect.x,
-          y: rect.y,
-          width: rect.width,
-          height: rect.height
-        }).catch(reportError)
+        synchronizer.observe(rendererCssBoundsToWindowDip(
+          { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+          api.ui.getZoomFactor()
+        ))
       })
     }
     const observer = new ResizeObserver(update)
@@ -44,6 +56,7 @@ export function BrowserPane({ tab, visible }: { tab: BrowserWorkbenchTab; visibl
     update()
     return () => {
       cancelAnimationFrame(frame)
+      synchronizer.dispose()
       observer.disconnect()
       window.removeEventListener('resize', update)
       void api.browser.setBounds(tab.browserId, null).catch(() => {})

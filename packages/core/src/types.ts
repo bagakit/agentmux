@@ -1,5 +1,26 @@
-export type BuiltInAgentId = 'codex' | 'claude' | 'traex' | 'hermes' | 'pi'
-export type AgentId = BuiltInAgentId | (string & {})
+export type BuiltInAgentProviderId =
+  | 'codex'
+  | 'claude'
+  | 'traex'
+  | 'hermes'
+  | 'pi'
+  | 'grok'
+  | 'gemini'
+  | 'antigravity'
+  | 'cursor'
+export type AgentProviderId = BuiltInAgentProviderId | (string & {})
+
+export type AgentExecutorId = string
+
+/** A user-facing launch configuration backed by one Provider implementation. */
+export type AgentExecutorConfig = {
+  label: string
+  providerId: AgentProviderId
+  command: string
+  args: string[]
+  env: Record<string, string>
+  injectAgentMuxGuide: boolean
+}
 
 export type ExecutionHostKind = 'local' | 'ssh'
 
@@ -72,7 +93,8 @@ export type AgentMuxRunRef = {
 
 export type AgentMuxRun = AgentMuxRunRef & {
   kind: 'terminal' | 'agent'
-  agentId: AgentId | null
+  providerId: AgentProviderId | null
+  executorId: AgentExecutorId | null
   agentSessionId: string | null
   workspacePath: string
   pid: number | null
@@ -146,10 +168,11 @@ export type AgentMuxEvidence = {
     endByte: number
   }
   hookReceiptId?: string
+  acpAdapterId?: string
   acpSessionId?: string
 }
 
-export type AgentPromptDelivery = 'positional-argv' | 'hermes-query'
+export type AgentPromptDelivery = 'positional-argv' | 'hermes-query' | 'flag-prompt-interactive'
 
 export type AgentReadySignal = {
   kind: 'foreground-process'
@@ -186,6 +209,7 @@ export type AgentAcpStrategy =
 export type AgentCapabilities = {
   terminal: true
   hookEvents: boolean
+  timeline: 'unavailable' | 'complete-events' | 'streaming'
   permission: 'none' | 'observe' | 'respond'
   providerResume: boolean
   acp: boolean
@@ -193,7 +217,7 @@ export type AgentCapabilities = {
 }
 
 export type AgentCatalogEntry = {
-  id: AgentId
+  id: AgentProviderId
   label: string
   executable: string
   expectedProcess: string
@@ -206,7 +230,7 @@ export type AgentCatalogEntry = {
 }
 
 export type AgentCapabilitySnapshot = {
-  agentId: AgentId
+  providerId: AgentProviderId
   executable: string
   installed: boolean
   capabilities: AgentCapabilities
@@ -215,7 +239,7 @@ export type AgentCapabilitySnapshot = {
 export type AgentNativeSessionHandle =
   | {
       kind: 'provider'
-      providerId: AgentId
+      providerId: AgentProviderId
       sessionId: string
       transcriptPath?: string
     }
@@ -227,7 +251,7 @@ export type AgentNativeSessionHandle =
 
 export type AgentHookReceipt = {
   id: string
-  agentId: AgentId
+  providerId: AgentProviderId
   agentSessionId: string
   run: AgentMuxRunRef
   eventName: string
@@ -246,7 +270,8 @@ export type AgentTerminalStopReceiptState = {
 export type AgentMuxAgentSession = {
   kind: 'agent'
   agentSessionId: string
-  agentId: AgentId
+  providerId: AgentProviderId
+  executorId: AgentExecutorId
   hostId: string
   workspacePath: string
   run: AgentMuxRunRef
@@ -327,8 +352,21 @@ export type AgentMuxAcpEvent =
     }
   | {
       type: 'activity'
-      kind: AgentActivityKind
+      operation: 'append'
+      activityId: string
+      kind: AgentTimelineItemKind
+      status: AgentTimelineItemStatus
       title: string
+      content?: string
+      toolName?: string
+      toolInput?: string
+    }
+  | {
+      type: 'activity'
+      operation: 'update'
+      activityId: string
+      status?: AgentTimelineItemStatus
+      title?: string
       content?: string
       toolName?: string
       toolInput?: string
@@ -362,6 +400,7 @@ export type AgentMuxClientEvent =
       pid: number | null
       exitCode?: number
       exitSignal?: string
+      interruptionReason?: string
       evidence: AgentMuxEvidence
     }
   | {
@@ -372,9 +411,10 @@ export type AgentMuxClientEvent =
       evidence: AgentMuxEvidence
     }
   | {
-      type: 'agent-activity'
+      type: 'agent-timeline'
       agentSessionId: string
-      activity: Omit<AgentActivity, 'sessionId' | 'source'>
+      revision: number
+      mutation: AgentTimelineMutation
       evidence: AgentMuxEvidence
     }
   | {
@@ -407,24 +447,60 @@ export type AgentStatus = {
   exitCode?: number
 }
 
-export type AgentActivityKind =
-  | 'prompt'
-  | 'assistant'
-  | 'tool'
+export type AgentTimelineItemKind =
+  | 'user_message'
+  | 'assistant_message'
+  | 'tool_call'
   | 'permission'
   | 'lifecycle'
 
-export type AgentActivity = {
+export type AgentTimelineItemStatus = 'streaming' | 'complete' | 'failed'
+
+export type AgentTimelineItem = {
   id: string
-  sessionId: string
-  kind: AgentActivityKind
+  agentSessionId: string
+  kind: AgentTimelineItemKind
+  status: AgentTimelineItemStatus
   source: AgentMuxEvidenceSource
   createdAt: number
+  updatedAt: number
   title: string
   content?: string
   toolName?: string
   toolInput?: string
   eventName?: string
+}
+
+export type AgentTimelineMutation =
+  | {
+      type: 'append'
+      agentSessionId: string
+      item: AgentTimelineItem
+    }
+  | {
+      type: 'update'
+      agentSessionId: string
+      itemId: string
+      updatedAt: number
+      status?: AgentTimelineItemStatus
+      title?: string
+      content?: string
+      toolName?: string
+      toolInput?: string
+      eventName?: string
+    }
+
+export type AgentTimelineSnapshot = {
+  agentSessionId: string
+  revision: number
+  items: AgentTimelineItem[]
+}
+
+export type AgentTimelineCommit = {
+  agentSessionId: string
+  revision: number
+  changed: boolean
+  mutation: AgentTimelineMutation
 }
 
 export type AgentLaunchPlan = {
@@ -454,7 +530,7 @@ export type NativeHookEnvelope = {
   receiptId: string
   agentSessionId: string
   runId: string
-  agentId: AgentId
+  providerId: AgentProviderId
   eventName?: string
   payload?: Record<string, unknown>
 }
@@ -462,10 +538,10 @@ export type NativeHookEnvelope = {
 export type NormalizedHookEvent = {
   agentSessionId: string
   run: AgentMuxRunRef
-  agentId: AgentId
+  providerId: AgentProviderId
   eventName: string
   semanticState: AgentSemanticState
   status: AgentStatus
-  activities: AgentActivity[]
+  timeline: AgentTimelineMutation[]
   nativeHandle?: AgentNativeSessionHandle
 }

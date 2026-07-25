@@ -10,7 +10,7 @@ import {
 import type {
   AgentCapabilitySnapshot,
   AgentCatalogEntry,
-  AgentId,
+  AgentProviderId,
   AgentLaunchPlan,
   AgentPromptInputPlan,
   AgentProviderLaunchContext,
@@ -26,7 +26,7 @@ export type AgentExecutableProbe = {
 }
 
 export type AgentProvider = {
-  readonly id: AgentId
+  readonly id: AgentProviderId
   readonly label: string
   readonly executable: string
   readonly catalog: AgentCatalogEntry
@@ -117,7 +117,7 @@ export function createCodexManagedHookPlan(workspacePath: string): AgentManagedH
     hooks: [{ type: 'command', command, timeout: 10 }]
   }]]))
   return {
-    agentId: 'codex',
+    providerId: 'codex',
     mutations: [{
       path: join(workspace, '.codex', 'hooks.json'),
       content: `${JSON.stringify({
@@ -208,7 +208,7 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     async probeCapabilities(probe, commandOverride) {
       const command = executable(commandOverride, catalog.executable)
       return {
-        agentId: catalog.id,
+        providerId: catalog.id,
         executable: command,
         installed: await probe.hasExecutable(command),
         capabilities: { ...catalog.capabilities }
@@ -247,7 +247,7 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
       }
     },
     normalizeHook(envelope) {
-      if (envelope.agentId !== catalog.id) {
+      if (envelope.providerId !== catalog.id) {
         throw new AgentMuxError('Hook event does not belong to this provider.', 'HOOK_PROVIDER_MISMATCH')
       }
       return normalizeNativeHook(definition.hook, envelope)
@@ -278,6 +278,7 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
       capabilities: {
         terminal: true,
         hookEvents: true,
+        timeline: 'complete-events',
         permission: 'observe',
         providerResume: true,
         acp: false,
@@ -317,6 +318,7 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
       capabilities: {
         terminal: true,
         hookEvents: true,
+        timeline: 'complete-events',
         permission: 'observe',
         providerResume: true,
         acp: false,
@@ -342,6 +344,7 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
       capabilities: {
         terminal: true,
         hookEvents: false,
+        timeline: 'unavailable',
         permission: 'none',
         providerResume: false,
         acp: false,
@@ -364,6 +367,7 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
       capabilities: {
         terminal: true,
         hookEvents: true,
+        timeline: 'complete-events',
         permission: 'observe',
         providerResume: false,
         acp: false,
@@ -387,6 +391,7 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
       capabilities: {
         terminal: true,
         hookEvents: true,
+        timeline: 'complete-events',
         permission: 'observe',
         providerResume: true,
         acp: false,
@@ -401,6 +406,110 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
       }
       return ['--session', transcriptPath, ...args, prompt]
     }
+  }),
+  // Terminal-only ports of Orca's TUI agents. Launch argv grammar is copied verbatim from
+  // orca `src/shared/tui-agent-{config,startup}.ts`. Resume/hook capture stay OFF: they
+  // require a hook envelope carrying a native session handle, and AgentMux does not yet run
+  // the per-agent hook relay Orca uses to originate those events for grok/gemini/antigravity.
+  // Declaring them would surface a Resume affordance that can never bind a handle.
+  defineAgentProvider({
+    catalog: catalog({
+      id: 'grok',
+      label: 'Grok',
+      executable: 'grok',
+      expectedProcess: 'grok',
+      promptDelivery: 'positional-argv',
+      hookStrategy: { kind: 'none' },
+      resumeStrategy: { kind: 'none' },
+      acpStrategy: { kind: 'none' },
+      capabilities: {
+        terminal: true,
+        hookEvents: false,
+        timeline: 'unavailable',
+        permission: 'none',
+        providerResume: false,
+        acp: false,
+        replyCorrelation: 'none'
+      }
+    }),
+    // Orca: promptInjectionMode 'argv' with argvPromptSeparator '--' → `grok -- <prompt>`
+    // (separator so prompts like `--version` aren't parsed as Grok CLI flags).
+    buildArgs: (prompt, args) => (prompt ? [...args, '--', prompt] : [...args]),
+    hook: NO_HOOKS
+  }),
+  defineAgentProvider({
+    catalog: catalog({
+      id: 'gemini',
+      label: 'Gemini',
+      executable: 'gemini',
+      expectedProcess: 'gemini',
+      promptDelivery: 'flag-prompt-interactive',
+      hookStrategy: { kind: 'none' },
+      resumeStrategy: { kind: 'none' },
+      acpStrategy: { kind: 'none' },
+      capabilities: {
+        terminal: true,
+        hookEvents: false,
+        timeline: 'unavailable',
+        permission: 'none',
+        providerResume: false,
+        acp: false,
+        replyCorrelation: 'none'
+      }
+    }),
+    // Orca: promptInjectionMode 'flag-prompt-interactive' → `gemini --prompt-interactive <prompt>`.
+    buildArgs: (prompt, args) => (prompt ? ['--prompt-interactive', prompt, ...args] : [...args]),
+    hook: NO_HOOKS
+  }),
+  defineAgentProvider({
+    catalog: catalog({
+      id: 'antigravity',
+      label: 'Antigravity',
+      executable: 'agy',
+      expectedProcess: 'agy',
+      promptDelivery: 'flag-prompt-interactive',
+      hookStrategy: { kind: 'none' },
+      resumeStrategy: { kind: 'none' },
+      acpStrategy: { kind: 'none' },
+      capabilities: {
+        terminal: true,
+        hookEvents: false,
+        timeline: 'unavailable',
+        permission: 'none',
+        providerResume: false,
+        acp: false,
+        replyCorrelation: 'none'
+      }
+    }),
+    // Orca: executable `agy`, promptInjectionMode 'flag-prompt-interactive' → `agy --prompt-interactive <prompt>`.
+    buildArgs: (prompt, args) => (prompt ? ['--prompt-interactive', prompt, ...args] : [...args]),
+    hook: NO_HOOKS
+  }),
+  defineAgentProvider({
+    catalog: catalog({
+      id: 'cursor',
+      label: 'Cursor',
+      executable: 'cursor-agent',
+      expectedProcess: 'cursor-agent',
+      promptDelivery: 'positional-argv',
+      hookStrategy: { kind: 'none' },
+      resumeStrategy: { kind: 'none' },
+      acpStrategy: { kind: 'none' },
+      capabilities: {
+        terminal: true,
+        hookEvents: false,
+        timeline: 'unavailable',
+        permission: 'none',
+        providerResume: false,
+        acp: false,
+        replyCorrelation: 'none'
+      }
+    }),
+    // Orca: executable `cursor-agent`, promptInjectionMode 'argv' (no separator) → `cursor-agent <prompt>`.
+    // Orca's `preflightTrust: 'cursor'` pre-seeds a trust marker; AgentMux has no such mechanism,
+    // so the first launch may show Cursor's trust prompt.
+    buildArgs: (prompt, args) => [...args, ...(prompt ? [prompt] : [])],
+    hook: NO_HOOKS
   })
 ]
 
@@ -418,7 +527,7 @@ export function executionHostProbe(host: ExecutionHost): AgentExecutableProbe {
 }
 
 export class AgentProviderRegistry {
-  private readonly providers = new Map<AgentId, AgentProvider>()
+  private readonly providers = new Map<AgentProviderId, AgentProvider>()
 
   constructor(providers: readonly AgentProvider[] = BUILT_IN_AGENT_PROVIDERS) {
     for (const provider of providers) this.register(provider)
@@ -435,7 +544,7 @@ export class AgentProviderRegistry {
     this.providers.set(provider.id, provider)
   }
 
-  get(id: AgentId): AgentProvider {
+  get(id: AgentProviderId): AgentProvider {
     const provider = this.providers.get(id)
     if (!provider) throw new AgentMuxError(`Unknown agent provider: ${id}`, 'UNKNOWN_PROVIDER')
     return provider

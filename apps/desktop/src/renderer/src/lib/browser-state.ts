@@ -1,7 +1,9 @@
 import type { BrowserEvent } from '../../../shared/contracts'
-import type { WorkspaceLayout } from './workbench-layout'
+import { removeTab, type WorkspaceLayout } from './workbench-layout'
 import {
-  removeTabsFromLayouts,
+  tabGroupForTab,
+  removeWorkbenchRegion,
+  workbenchSurfaces,
   type WorkbenchTab
 } from './workbench-tabs'
 
@@ -19,20 +21,45 @@ export function reduceBrowserEvent(
       ...state,
       tabs: Object.fromEntries(Object.entries(state.tabs).map(([id, tab]) => [
         id,
-        tab.kind === 'browser' && tab.browserId === event.browser.id
-          ? { ...tab, ...event.browser, id: tab.id }
-          : tab
+        {
+          ...tab,
+          regions: Object.fromEntries(Object.entries(tab.regions).map(([regionId, surface]) => [
+            regionId,
+            surface.kind === 'browser' && surface.browserId === event.browser.id
+              ? { ...surface, ...event.browser, regionId: surface.regionId }
+              : surface
+          ]))
+        }
       ]))
     }
   }
-  const removedIds = Object.values(state.tabs).flatMap((tab) =>
-    tab.kind === 'browser' && tab.browserId === event.id ? [tab.id] : []
-  )
-  if (removedIds.length === 0) return state
+  let changed = false
   const tabs = { ...state.tabs }
-  for (const tabId of removedIds) delete tabs[tabId]
+  let layouts = state.layouts
+  for (const tab of Object.values(state.tabs)) {
+    const regionIds = workbenchSurfaces(tab).flatMap((surface) => (
+      surface.kind === 'browser' && surface.browserId === event.id ? [surface.regionId] : []
+    ))
+    for (const regionId of regionIds) {
+      changed = true
+      const currentTab = tabs[tab.id]
+      if (!currentTab) continue
+      const nextTab = removeWorkbenchRegion(currentTab, regionId)
+      if (nextTab) {
+        tabs[tab.id] = nextTab
+        continue
+      }
+      delete tabs[tab.id]
+      const layout = layouts[tab.workspaceId]
+      const groupId = tabGroupForTab(layout, tab.id)
+      if (layout && groupId) {
+        layouts = { ...layouts, [tab.workspaceId]: removeTab(layout, groupId, tab.id) }
+      }
+    }
+  }
+  if (!changed) return state
   return {
     tabs,
-    layouts: removeTabsFromLayouts(state.layouts, removedIds)
+    layouts
   }
 }

@@ -1,7 +1,8 @@
-import { randomUUID } from 'node:crypto'
 import type {
-  AgentActivity,
-  AgentId,
+  AgentTimelineItem,
+  AgentTimelineItemKind,
+  AgentTimelineMutation,
+  AgentProviderId,
   AgentNativeSessionHandle,
   AgentSemanticState,
   AgentStatus,
@@ -68,7 +69,7 @@ function eventState(
 }
 
 function nativeHandle(
-  agentId: AgentId,
+  providerId: AgentProviderId,
   specification: AgentNativeHookSpecification,
   payload: Record<string, unknown>
 ): AgentNativeSessionHandle | undefined {
@@ -82,38 +83,46 @@ function nativeHandle(
   if (definition.requireTranscriptPath && !transcriptPath) return undefined
   return {
     kind: 'provider',
-    providerId: agentId,
+    providerId: providerId,
     sessionId,
     ...(transcriptPath ? { transcriptPath } : {})
   }
 }
 
-function activity(
-  agentSessionId: string,
-  kind: AgentActivity['kind'],
+function timelineItem(
+  envelope: NativeHookEnvelope,
+  index: number,
+  kind: AgentTimelineItemKind,
   title: string,
   eventName: string,
-  fields: Partial<Omit<AgentActivity, 'id' | 'sessionId' | 'kind' | 'source' | 'createdAt' | 'title'>> = {}
-): AgentActivity {
+  observedAt: number,
+  fields: Partial<Omit<AgentTimelineItem, 'id' | 'agentSessionId' | 'kind' | 'status' | 'source' | 'createdAt' | 'updatedAt' | 'title'>> = {}
+): AgentTimelineMutation {
   return {
-    id: randomUUID(),
-    sessionId: agentSessionId,
-    kind,
-    source: 'native-hook',
-    createdAt: Date.now(),
-    title,
-    eventName,
-    ...fields
+    type: 'append',
+    agentSessionId: envelope.agentSessionId,
+    item: {
+      id: `${envelope.runId}:${envelope.receiptId}:${index}`,
+      agentSessionId: envelope.agentSessionId,
+      kind,
+      status: 'complete',
+      source: 'native-hook',
+      createdAt: observedAt,
+      updatedAt: observedAt,
+      title,
+      eventName,
+      ...fields
+    }
   }
 }
 
-function buildActivities(
+function buildTimeline(
   envelope: NativeHookEnvelope,
   eventName: string,
   payload: Record<string, unknown>,
-  state: AgentSemanticState
-): AgentActivity[] {
-  const prompt = stringField(payload, 'prompt', 'user_prompt', 'userPrompt', 'user_message')
+  state: AgentSemanticState,
+  observedAt: number
+): AgentTimelineMutation[] {
   const assistant = stringField(
     payload,
     'last_assistant_message',
@@ -129,30 +138,28 @@ function buildActivities(
       : rawToolInput === undefined
         ? undefined
         : JSON.stringify(rawToolInput)
-  const activities: AgentActivity[] = []
-  if (prompt) {
-    activities.push(activity(envelope.agentSessionId, 'prompt', 'Prompt received', eventName, { content: prompt }))
+  const timeline: AgentTimelineMutation[] = []
+  const append = (
+    kind: AgentTimelineItemKind,
+    title: string,
+    fields?: Partial<Omit<AgentTimelineItem, 'id' | 'agentSessionId' | 'kind' | 'status' | 'source' | 'createdAt' | 'updatedAt' | 'title'>>
+  ): void => {
+    timeline.push(timelineItem(envelope, timeline.length, kind, title, eventName, observedAt, fields))
   }
   if (toolName) {
-    activities.push(
-      activity(
-        envelope.agentSessionId,
-        state === 'waiting' || state === 'blocked' ? 'permission' : 'tool',
-        toolName,
-        eventName,
-        { toolName, ...(toolInput ? { toolInput } : {}) }
-      )
+    append(
+      state === 'waiting' || state === 'blocked' ? 'permission' : 'tool_call',
+      toolName,
+      { toolName, ...(toolInput ? { toolInput } : {}) }
     )
   }
   if (assistant) {
-    activities.push(
-      activity(envelope.agentSessionId, 'assistant', 'Assistant response', eventName, { content: assistant })
-    )
+    append('assistant_message', 'Assistant response', { content: assistant })
   }
-  if (activities.length === 0) {
-    activities.push(activity(envelope.agentSessionId, 'lifecycle', eventName, eventName))
+  if (timeline.length === 0) {
+    append('lifecycle', eventName)
   }
-  return activities
+  return timeline
 }
 
 export function normalizeNativeHook(
@@ -162,23 +169,24 @@ export function normalizeNativeHook(
   const payload = envelope.payload ?? {}
   const eventName = envelope.eventName ?? stringField(payload, 'hook_event_name', 'hookEventName') ?? 'unknown'
   const semanticState = eventState(specification, eventName, payload)
+  const observedAt = Date.now()
   const status: AgentStatus = {
     state: semanticState === 'unknown' ? 'running' : semanticState,
     source: 'native-hook',
-    observedAt: Date.now(),
+    observedAt,
     detail: eventName
   }
-  const handle = nativeHandle(envelope.agentId, specification, payload)
+  const handle = nativeHandle(envelope.providerId, specification, payload)
   return {
     agentSessionId: envelope.agentSessionId,
     run: {
       runId: envelope.runId
     },
-    agentId: envelope.agentId,
+    providerId: envelope.providerId,
     eventName,
     semanticState,
     status,
-    activities: buildActivities(envelope, eventName, payload, semanticState),
+    timeline: buildTimeline(envelope, eventName, payload, semanticState, observedAt),
     ...(handle ? { nativeHandle: handle } : {})
   }
 }
