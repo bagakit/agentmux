@@ -18,6 +18,7 @@ const electronMocks = vi.hoisted(() => {
   const windows: FakeBrowserWindow[] = []
   let nextSetCookieResult: unknown = { success: true }
   let nextLoad: (() => Promise<void>) | null = null
+  let nextDetachError: Error | null = null
 
   class FakeBrowserWindow {
     readonly partition: string
@@ -29,7 +30,10 @@ const electronMocks = vi.hoisted(() => {
       debugger: {
         attached: false,
         attach: vi.fn(() => { this.webContents.debugger.attached = true }),
-        detach: vi.fn(() => { this.webContents.debugger.attached = false }),
+        detach: vi.fn(() => {
+          if (nextDetachError) throw nextDetachError
+          this.webContents.debugger.attached = false
+        }),
         isAttached: vi.fn(() => this.webContents.debugger.attached),
         sendCommand: this.sendCommand
       }
@@ -65,11 +69,13 @@ const electronMocks = vi.hoisted(() => {
     },
     setCookieResult(value: unknown) { nextSetCookieResult = value },
     setNextLoad(value: (() => Promise<void>) | null) { nextLoad = value },
+    setNextDetachError(value: Error | null) { nextDetachError = value },
     reset() {
       sessions.clear()
       windows.length = 0
       nextSetCookieResult = { success: true }
       nextLoad = null
+      nextDetachError = null
     }
   }
 })
@@ -237,6 +243,59 @@ describe('BrowserProfileManager', () => {
     await deleting
   })
 
+  it('waits for an active create mutation before disposal completes', async () => {
+    const { store, manager } = managerFixture()
+    await manager.initialize()
+    const createProfile = store.createProfile.bind(store)
+    let releaseCreate!: () => void
+    let createStarted = false
+    vi.spyOn(store, 'createProfile').mockImplementationOnce(async (label) => {
+      createStarted = true
+      await new Promise<void>((resolve) => { releaseCreate = resolve })
+      return await createProfile(label)
+    })
+
+    const creating = manager.createProfile('Work')
+    await vi.waitFor(() => expect(createStarted).toBe(true))
+    let disposed = false
+    const disposing = manager.dispose().then(() => { disposed = true })
+    await Promise.resolve()
+
+    expect(disposed).toBe(false)
+    releaseCreate()
+    await expect(creating).resolves.toMatchObject({ id: CREATED_ID, label: 'Work' })
+    await disposing
+    expect(disposed).toBe(true)
+    expect(() => manager.listProfiles()).toThrow('disposed')
+  })
+
+  it('waits for an active delete mutation before disposal completes', async () => {
+    const { store, manager } = managerFixture()
+    await manager.initialize()
+    await manager.createProfile('Work')
+    const deleteProfile = store.deleteProfile.bind(store)
+    let releaseDelete!: () => void
+    let deleteStarted = false
+    vi.spyOn(store, 'deleteProfile').mockImplementationOnce(async (profileId) => {
+      deleteStarted = true
+      await new Promise<void>((resolve) => { releaseDelete = resolve })
+      await deleteProfile(profileId)
+    })
+
+    const deleting = manager.deleteProfile(CREATED_ID)
+    await vi.waitFor(() => expect(deleteStarted).toBe(true))
+    let disposed = false
+    const disposing = manager.dispose().then(() => { disposed = true })
+    await Promise.resolve()
+
+    expect(disposed).toBe(false)
+    releaseDelete()
+    await deleting
+    await disposing
+    expect(disposed).toBe(true)
+    expect(store.profiles).toEqual([defaultProfile])
+  })
+
   it('publishes opaque one-generation source tokens and atomically imports a CHIPS cookie', async () => {
     const { store, manager } = managerFixture()
     await manager.initialize()
@@ -304,6 +363,22 @@ describe('BrowserProfileManager', () => {
       'pending partition could not be cleaned'
     )
     expect(store.pending).toEqual([{ profileId: IMPORT_ID, label: 'Recover later', startedAt: 3 }])
+  })
+
+  it('destroys the hidden import window even when debugger detach fails', async () => {
+    const { store, manager } = managerFixture()
+    await manager.initialize()
+    const [source] = manager.detectImportSources()
+    electronMocks.setNextDetachError(new Error('debugger detach failed'))
+
+    await expect(manager.importProfile(source!.token, 'Detach failure')).rejects.toThrow(
+      'debugger detach failed'
+    )
+
+    expect(electronMocks.windows).toHaveLength(1)
+    expect(electronMocks.windows[0]!.destroyed).toBe(true)
+    expect(store.pending).toEqual([])
+    expect(electronMocks.sessionFor(partition(IMPORT_ID)).clearStorageData).toHaveBeenCalledOnce()
   })
 
   it('destroys an active hidden import window and waits for rollback during disposal', async () => {
