@@ -106,7 +106,30 @@ describe('ActivityView', () => {
     expect(markup).toContain('3 steps')
     expect(markup).toContain('User prompt')
     expect(markup).toContain('Assistant response')
-    // Collapsed means collapsed: the repeated step titles are not in the markup at all.
-    expect(markup).not.toContain('Bash')
+    // Collapsed means collapsed: the repeated step rows are not in the log at all. (The ruler still
+    // carries a tick per event, so scope the check to the log itself.)
+    const log = markup.slice(markup.indexOf('activity-log'))
+    expect(log).not.toContain('Bash')
+  })
+
+  it('spaces the ruler by real elapsed time, and says so when there is none to show', () => {
+    const spread = render('complete-events', [
+      activity('a', { createdAt: 1_000, updatedAt: 1_000 }),
+      activity('b', { createdAt: 3_000, updatedAt: 3_000 }),
+      activity('c', { createdAt: 5_000, updatedAt: 5_000 })
+    ])
+    // The middle event sits at the middle of the track: the axis is honest about the gaps.
+    expect(spread).toContain('data-axis="temporal"')
+    expect(spread).toContain('left:50%')
+
+    // Same-instant events carry no spread to map, so they fall back to even ordinal spacing rather
+    // than stacking every tick on the left edge and reading as a single event.
+    const flat = render('complete-events', [
+      activity('a', { createdAt: 1, updatedAt: 1 }),
+      activity('b', { createdAt: 1, updatedAt: 1 }),
+      activity('c', { createdAt: 1, updatedAt: 1 })
+    ])
+    expect(flat).toContain('data-axis="ordinal"')
+    expect(flat).toContain('left:50%')
   })
 })
