@@ -38,6 +38,20 @@ export function AgentInteractionCard({
         </div>
         {request.toolInput ? <pre>{request.toolInput}</pre> : null}
         <div className="agent-interaction__actions">
+          {/* Dismissing the request is not a decision about the tool, so it sits apart from the
+              allow/deny pair rather than reading as a third verdict. */}
+          <button
+            type="button"
+            className="agent-interaction__dismiss"
+            disabled={unavailable}
+            onClick={() => void respond({
+              kind: 'permission',
+              requestId: request.id,
+              decision: { outcome: 'cancelled' }
+            })}
+          >
+            Cancel
+          </button>
           {request.options.map((option) => (
             <button
               key={option.id}
@@ -54,17 +68,6 @@ export function AgentInteractionCard({
               {option.label}
             </button>
           ))}
-          <button
-            type="button"
-            disabled={unavailable}
-            onClick={() => void respond({
-              kind: 'permission',
-              requestId: request.id,
-              decision: { outcome: 'cancelled' }
-            })}
-          >
-            Cancel
-          </button>
         </div>
       </section>
     )
@@ -101,6 +104,7 @@ export function AgentInteractionCard({
       <div className="agent-interaction__actions">
         <button
           type="button"
+          className="agent-interaction__dismiss"
           disabled={unavailable}
           onClick={() => void respond({
             kind: 'question',
