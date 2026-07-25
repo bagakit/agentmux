@@ -8,6 +8,7 @@ import {
   type AgentMuxAcpBinding
 } from './acp-adapter.js'
 import { normalizeAgentInteractionResponse } from './agent-interaction.js'
+import type { LaunchOptionSelection } from './agent-launch-option.js'
 import {
   AgentProviderRegistry,
   resolveManagedHookPlan,
@@ -91,6 +92,12 @@ export type AgentMuxAgentCreateInput = {
   injectAgentMuxGuide: boolean
   prompt?: string
   args?: readonly string[]
+  /**
+   * Chosen ids for the sealed launch options this Provider declares (see agent-launch-option.ts). The
+   * argv each choice contributes is resolved core-side and appended at spawn; an option or choice the
+   * Provider does not declare fails closed rather than launching an un-offered posture.
+   */
+  launchOptions?: LaunchOptionSelection
   env?: Readonly<Record<string, string>>
   commandOverride?: string
   cols?: number
@@ -722,10 +729,13 @@ export class AgentMuxClient {
         throw new AgentMuxError(`${provider.label} is not installed on this host.`, 'AGENT_NOT_FOUND')
       }
       const launchPrompt = composeAgentLaunchPrompt(input.prompt, input.injectAgentMuxGuide)
+      // Sealed launch options resolve to their argv core-side (fails closed on an un-declared choice) and
+      // join the caller's args ahead of the prompt, exactly as buildArgs orders every other flag.
+      const launchOptionArgv = provider.resolveLaunchArgv(input.launchOptions ?? {})
       const plan = provider.buildLaunch({
         workspacePath: input.workspacePath,
         prompt: launchPrompt,
-        args: input.args ?? [],
+        args: [...(input.args ?? []), ...launchOptionArgv],
         env: input.env ?? {},
         ...(input.commandOverride === undefined ? {} : { commandOverride: input.commandOverride })
       })

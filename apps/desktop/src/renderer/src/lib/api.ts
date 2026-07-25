@@ -13,7 +13,7 @@ import type {
   SessionSnapshot,
   WorkspaceBranchRecord
 } from '../../../shared/contracts'
-import type { AgentMuxControlRequest, AgentMuxControlResult } from '@agentmux/core'
+import type { AgentCatalogEntry, AgentMuxControlRequest, AgentMuxControlResult } from '@agentmux/core'
 import { createRendererControlApi } from './control-api'
 import {
   SCRATCH_TOPIC_TITLE_MAX_LENGTH,
@@ -32,6 +32,44 @@ const mockStructuredCapabilities = {
   acp: false,
   replyCorrelation: 'none' as const
 }
+// Mirrors the DESCRIBE half the real core catalog projects (see agent-launch-option.ts), so the
+// browser-only preview renders the same launch controls production does.
+const mockCodexLaunchOptions: AgentCatalogEntry['launchOptions'] = [
+  {
+    id: 'sandbox',
+    label: 'Sandbox',
+    description: 'How much of the machine Codex may touch when it runs commands.',
+    choices: [
+      { id: 'read-only', label: 'Read only', tier: 'safe' },
+      { id: 'workspace-write', label: 'Workspace write', description: 'Writes limited to the workspace.', tier: 'caution' },
+      { id: 'danger-full-access', label: 'Full access', description: 'No sandbox — full machine access.', tier: 'danger' }
+    ]
+  },
+  {
+    id: 'approval',
+    label: 'Approval policy',
+    description: 'When Codex pauses for human approval before running a command.',
+    choices: [
+      { id: 'on-request', label: 'On request', description: 'The model decides when to ask.', tier: 'caution' },
+      { id: 'never', label: 'Never', description: 'Never pauses for approval.', tier: 'danger' }
+    ]
+  }
+]
+const mockClaudeLaunchOptions: AgentCatalogEntry['launchOptions'] = [
+  {
+    id: 'permission-mode',
+    label: 'Permission mode',
+    description: 'How Claude handles tool-permission prompts for this session.',
+    choices: [
+      { id: 'manual', label: 'Manual', description: 'Ask for each action.', tier: 'safe' },
+      { id: 'plan', label: 'Plan', description: 'Plan first, no edits.', tier: 'safe' },
+      { id: 'acceptEdits', label: 'Accept edits', description: 'Auto-accept file edits.', tier: 'caution' },
+      { id: 'auto', label: 'Auto', tier: 'caution' },
+      { id: 'dontAsk', label: "Don't ask", tier: 'caution' },
+      { id: 'bypassPermissions', label: 'Bypass permissions', description: 'Skip all permission checks.', tier: 'danger' }
+    ]
+  }
+]
 let mockConfig: AppConfig = {
   version: 7,
   hosts: [
@@ -523,8 +561,8 @@ const mockApi: AgentMuxDesktopApi = {
   },
   providers: {
     list: async () => [
-      { id: 'codex', label: 'Codex', executable: 'codex', expectedProcess: 'codex', promptDelivery: 'positional-argv', readySignal: { kind: 'foreground-process', expectedProcess: 'codex' }, hookStrategy: { kind: 'native', installation: 'explicit-managed' }, resumeStrategy: { kind: 'provider-native', locator: 'session-id' }, acpStrategy: { kind: 'none' }, capabilities: mockStructuredCapabilities },
-      { id: 'claude', label: 'Claude', executable: 'claude', expectedProcess: 'claude', promptDelivery: 'positional-argv', readySignal: { kind: 'foreground-process', expectedProcess: 'claude' }, hookStrategy: { kind: 'native', installation: 'explicit-managed' }, resumeStrategy: { kind: 'provider-native', locator: 'session-id' }, acpStrategy: { kind: 'none' }, capabilities: mockStructuredCapabilities }
+      { id: 'codex', label: 'Codex', executable: 'codex', expectedProcess: 'codex', promptDelivery: 'positional-argv', readySignal: { kind: 'foreground-process', expectedProcess: 'codex' }, hookStrategy: { kind: 'native', installation: 'explicit-managed' }, resumeStrategy: { kind: 'provider-native', locator: 'session-id' }, acpStrategy: { kind: 'none' }, capabilities: mockStructuredCapabilities, launchOptions: mockCodexLaunchOptions },
+      { id: 'claude', label: 'Claude', executable: 'claude', expectedProcess: 'claude', promptDelivery: 'positional-argv', readySignal: { kind: 'foreground-process', expectedProcess: 'claude' }, hookStrategy: { kind: 'native', installation: 'explicit-managed' }, resumeStrategy: { kind: 'provider-native', locator: 'session-id' }, acpStrategy: { kind: 'none' }, capabilities: mockStructuredCapabilities, launchOptions: mockClaudeLaunchOptions }
     ]
   },
   executors: {

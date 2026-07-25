@@ -520,6 +520,7 @@ export class RuntimeController {
           },
           injectAgentMuxGuide: executor.injectAgentMuxGuide,
           commandOverride: executor.command,
+          ...(request.launchOptions === undefined ? {} : { launchOptions: request.launchOptions }),
           ...(request.agentSessionId === undefined ? {} : { agentSessionId: request.agentSessionId }),
           ...(request.createOperationId === undefined ? {} : { createOperationId: request.createOperationId }),
           ...(launchPrompt === undefined ? {} : { prompt: launchPrompt }),
