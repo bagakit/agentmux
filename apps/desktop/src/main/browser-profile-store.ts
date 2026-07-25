@@ -3,6 +3,12 @@ import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { app } from 'electron'
 import { z } from 'zod'
+import type {
+  BrowserProfileImportedSource,
+  BrowserProfileSummary
+} from '../shared/contracts.js'
+
+export type { BrowserProfileImportedSource, BrowserProfileSummary } from '../shared/contracts.js'
 
 const BROWSER_PROFILE_METADATA_VERSION = 1
 const BROWSER_PROFILE_FILE_NAME = 'browser-profiles.json'
@@ -96,16 +102,6 @@ const metadataSchema = z
 type BrowserProfileMetadata = z.infer<typeof metadataSchema>
 type BrowserProfileRecord = z.infer<typeof profileRecordSchema>
 
-export type BrowserProfileImportedSource = z.infer<typeof importedSourceSchema>
-
-export type BrowserProfileSummary = {
-  id: string
-  label: string
-  createdAt: number
-  isDefault: boolean
-  source: BrowserProfileImportedSource | null
-}
-
 export type PendingBrowserProfileImport = z.infer<typeof pendingImportSchema>
 
 function cloneImportedSource(source: BrowserProfileImportedSource | null): BrowserProfileImportedSource | null {
@@ -124,6 +120,10 @@ function profileSummary(profile: BrowserProfileRecord, defaultProfileId: string)
 
 function isMissingFileError(error: unknown): boolean {
   return (error as NodeJS.ErrnoException).code === 'ENOENT'
+}
+
+export function validateBrowserProfileLabel(label: string): string {
+  return profileLabelSchema.parse(label)
 }
 
 export function browserProfilePartition(profileId: string): string {
@@ -153,7 +153,7 @@ export class BrowserProfileStore {
 
   createProfile(label: string): Promise<BrowserProfileSummary> {
     return this.enqueue(async () => {
-      const validatedLabel = profileLabelSchema.parse(label)
+      const validatedLabel = validateBrowserProfileLabel(label)
       const metadata = await this.readOrInitialize()
       const profile: BrowserProfileRecord = {
         id: this.createUnusedProfileId(metadata),
@@ -190,7 +190,7 @@ export class BrowserProfileStore {
 
   beginPendingImport(label: string): Promise<PendingBrowserProfileImport> {
     return this.enqueue(async () => {
-      const validatedLabel = profileLabelSchema.parse(label)
+      const validatedLabel = validateBrowserProfileLabel(label)
       const metadata = await this.readOrInitialize()
       const pending: PendingBrowserProfileImport = {
         profileId: this.createUnusedProfileId(metadata),

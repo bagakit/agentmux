@@ -4,6 +4,8 @@ import type {
   AgentMuxPreloadApi,
   AppConfig,
   BrowserEvent,
+  BrowserProfileImportSourceSummary,
+  BrowserProfileSummary,
   BrowserSnapshot,
   BrowserViewport,
   RuntimeEvent,
@@ -229,6 +231,15 @@ const sessionListeners = new Set<(event: RuntimeEvent) => void>()
 const browserListeners = new Set<(event: BrowserEvent) => void>()
 const windowResizeListeners = new Set<(event: { active: boolean }) => void>()
 const mockBrowsers = new Map<string, BrowserSnapshot>()
+const mockDefaultBrowserProfile: BrowserProfileSummary = {
+  id: '11111111-1111-4111-8111-111111111111',
+  label: 'Default',
+  createdAt: now,
+  isDefault: true,
+  source: null
+}
+let mockBrowserProfiles: BrowserProfileSummary[] = [mockDefaultBrowserProfile]
+let mockBrowserImportSources: BrowserProfileImportSourceSummary[] = []
 
 function requireMockBrowser(id: string): BrowserSnapshot {
   const browser = mockBrowsers.get(id)
@@ -744,6 +755,7 @@ const mockApi: AgentMuxDesktopApi = {
       const browser: BrowserSnapshot = {
         id,
         navigationId: crypto.randomUUID(),
+        profileId: mockDefaultBrowserProfile.id,
         url: url.trim() || 'about:blank',
         title: 'New Tab',
         loading: false,
@@ -772,6 +784,58 @@ const mockApi: AgentMuxDesktopApi = {
       const browser = { ...requireMockBrowser(id), navigationId: crypto.randomUUID() }
       mockBrowsers.set(id, browser)
       return structuredClone(browser)
+    },
+    switchProfile: async (id, profileId) => {
+      if (!mockBrowserProfiles.some((profile) => profile.id === profileId)) {
+        throw new Error(`Unknown Browser Profile: ${profileId}`)
+      }
+      const browser = {
+        ...requireMockBrowser(id),
+        profileId,
+        navigationId: crypto.randomUUID()
+      }
+      mockBrowsers.set(id, browser)
+      browserListeners.forEach((listener) => listener({ type: 'updated', browser: structuredClone(browser) }))
+      return structuredClone(browser)
+    },
+    listProfiles: async () => structuredClone(mockBrowserProfiles),
+    createProfile: async (label) => {
+      const profile: BrowserProfileSummary = {
+        id: crypto.randomUUID(),
+        label,
+        createdAt: Date.now(),
+        isDefault: false,
+        source: null
+      }
+      mockBrowserProfiles = [...mockBrowserProfiles, profile]
+      return structuredClone(profile)
+    },
+    deleteProfile: async (profileId) => {
+      if ([...mockBrowsers.values()].some((browser) => browser.profileId === profileId)) {
+        throw new Error('Browser Profile is still used by an open Browser')
+      }
+      mockBrowserProfiles = mockBrowserProfiles.filter((profile) => profile.id !== profileId)
+    },
+    detectProfileImportSources: async () => structuredClone(mockBrowserImportSources),
+    importProfile: async (sourceToken, label) => {
+      const source = mockBrowserImportSources.find((candidate) => candidate.token === sourceToken)
+      mockBrowserImportSources = mockBrowserImportSources.filter((candidate) => candidate.token !== sourceToken)
+      if (!source) throw new Error('Unknown or already consumed Browser Profile import source')
+      const profile: BrowserProfileSummary = {
+        id: crypto.randomUUID(),
+        label,
+        createdAt: Date.now(),
+        isDefault: false,
+        source: {
+          browserLabel: source.browserLabel,
+          profileLabel: source.profileLabel,
+          importedAt: Date.now(),
+          importedCookies: 0,
+          skippedCookies: 0
+        }
+      }
+      mockBrowserProfiles = [...mockBrowserProfiles, profile]
+      return structuredClone(profile)
     },
     openDevTools: async () => {},
     setViewport: async (id, viewport: BrowserViewport) => {
