@@ -5,27 +5,11 @@ import { describe, expect, it } from 'vitest'
 
 const execFileAsync = promisify(execFile)
 const cli = fileURLToPath(new URL('../bin/agentmux', import.meta.url))
-
 async function run(args: readonly string[]): Promise<string> {
-  const result = await execFileAsync(cli, args, {
-    timeout: 5_000,
-    maxBuffer: 512 * 1024
-  })
-  return result.stdout
+  return (await execFileAsync(cli, args, { timeout: 5_000, maxBuffer: 512 * 1024 })).stdout
 }
-
-async function fail(args: readonly string[], env: NodeJS.ProcessEnv = {}): Promise<{
-  stdout: string
-  stderr: string
-  code: number
-}> {
-  try {
-    await execFileAsync(cli, args, {
-      timeout: 5_000,
-      maxBuffer: 512 * 1024,
-      env: { ...process.env, ...env }
-    })
-  } catch (error) {
+async function fail(args: readonly string[], env: NodeJS.ProcessEnv = {}) {
+  try { await execFileAsync(cli, args, { timeout: 5_000, maxBuffer: 512 * 1024, env: { ...process.env, ...env } }) } catch (error) {
     const failure = error as { stdout: string; stderr: string; code: number }
     return { stdout: failure.stdout, stderr: failure.stderr, code: failure.code }
   }
@@ -33,67 +17,44 @@ async function fail(args: readonly string[], env: NodeJS.ProcessEnv = {}): Promi
 }
 
 describe('agentmux CLI discovery', () => {
-  it('explains Composition, Session groups, managed context, and JSON receipts', async () => {
+  it('exposes only the intent-based Control surface', async () => {
     const help = await run(['--help'])
-
-    expect(help).toContain('typed local Agent Session and Desktop Composition control')
-    expect(help).toContain('Composition:')
-    expect(help).toContain('Agent Sessions:')
-    expect(help).toContain('session output')
+    expect(help).toContain('typed local Agent and Desktop control')
+    expect(help).toContain('inspect')
+    expect(help).toContain('open')
+    expect(help).toContain('send')
+    expect(help).toContain('focus')
     expect(help).toContain('AGENTMUX_AGENT_SESSION_ID')
-    expect(help).toContain('versioned JSON by default')
-    expect(help).toContain('agentmux --skill')
+    expect(help).not.toContain('Composition:')
   })
 
-  it('gives nested success and next-action guidance without contacting a runtime', async () => {
-    const send = await run(['session', 'send', '--help'])
-    const openRegion = await run(['region', 'open', '--help'])
-    const launch = await run(['launch', '--help'])
-
-    expect(send).toContain('Provider contract atomically accepted the prompt')
-    expect(send).toContain('literal --help')
-    expect(send).toContain('next: agentmux session output')
-    expect(openRegion).toContain('does not create, resume, attach, or replace model')
-    expect(openRegion).toContain('Defaults: --placement split-right')
-    expect(launch).toContain('long-lived Desktop RuntimeController')
+  it('documents typed targets and exact destinations without contacting owners', async () => {
+    expect(await run(['inspect', '--help'])).toContain('inspect --tab <tab-id|self>')
+    const open = await run(['open', 'agent', '--help'])
+    expect(open).toContain('--right-of <region-id|self>')
+    expect(open).toContain('--new-tab-after <tab-id|self>')
+    expect(open).toContain('--in-region <launcher-region-id>')
+    const send = await run(['send', '--help'])
+    expect(send).toContain('MESSAGE_TARGET_NOT_UNIQUE')
+    expect(send).toContain('never resumes')
   })
 
-  it('prints bounded Agent instructions for the delivered Composition surface', async () => {
+  it('prints bounded Agent instructions for inspect, open, and send', async () => {
     const skill = await run(['--skill'])
-
-    expect(skill).toContain('name: agentmux')
-    expect(skill).toContain('test "${AGENTMUX_ENV:-}" = 1')
-    expect(skill).toContain('agentmux session send "$AGENTMUX_AGENT_SESSION_ID"')
-    expect(skill).toContain('agentmux launch --agent codex')
-    expect(skill).toContain('agentmux region open --session')
-    expect(skill).toContain('Use `--placement tab` only when the user explicitly asks for a Tab')
-    expect(skill).toContain('ask whether it should open in a new Tab')
-    expect(skill).toContain('normalized `x`, `y`')
-    expect(skill).toContain('A direction describes the whole current View')
-    expect(skill).toContain('does not always mean split `self`')
-    expect(skill).toContain('--relative-to region:<left-region-id>')
-    expect(skill).toContain('fall back to computer-use')
+    expect(skill).toContain('agentmux inspect --tab self')
+    expect(skill).toContain('agentmux open agent --agent codex')
+    expect(skill).toContain('agentmux send --to-tab <tab-id>')
+    expect(skill).toContain('Send never broadcasts and never resumes')
+    expect(skill).toContain('No failure')
   })
 
-  it('emits stable JSON errors and deletes the flat command surface', async () => {
-    const unmanaged = await fail(['context'])
-    expect(unmanaged.code).toBe(1)
-    expect(unmanaged.stdout).toBe('')
-    expect(JSON.parse(unmanaged.stderr)).toEqual({
-      schemaVersion: 1,
-      operation: 'context',
-      error: {
-        code: 'MANAGED_AGENT_CONTEXT_REQUIRED',
-        message: 'This command requires an AgentMux-managed Agent caller.'
-      }
-    })
-
-    const retired = await fail(['status', 'old-session'])
-    expect(JSON.parse(retired.stderr)).toMatchObject({
-      schemaVersion: 1,
-      operation: null,
-      error: { code: 'INVALID_CLI_ARGUMENT' }
-    })
+  it('deletes old command trees and requires managed identity for self', async () => {
+    const unmanaged = await fail(['inspect', '--tab', 'self'], { AGENTMUX_ENV: '', AGENTMUX_AGENT_SESSION_ID: '' })
+    expect(JSON.parse(unmanaged.stderr)).toMatchObject({ error: { code: 'MANAGED_AGENT_CONTEXT_REQUIRED' } })
+    for (const old of [['context'], ['launch'], ['session', 'list'], ['region', 'focus']]) {
+      const retired = await fail(old)
+      expect(JSON.parse(retired.stderr)).toMatchObject({ error: { code: 'INVALID_CLI_ARGUMENT' } })
+    }
   })
 
   it('reports the installed CLI version', async () => {
