@@ -308,9 +308,9 @@ export async function registerIpc(args: {
     await browserProfiles.deleteProfile(profileId)
   })
   channels.push('browser:detectProfileImportSources')
-  ipcMain.handle('browser:detectProfileImportSources', (event) => {
+  ipcMain.handle('browser:detectProfileImportSources', async (event) => {
     if (event.sender !== args.window.webContents) throw new Error('Untrusted Browser Profile sender')
-    return browserProfiles.detectImportSources()
+    return await browserProfiles.detectImportSources()
   })
   channels.push('browser:importProfile')
   ipcMain.handle('browser:importProfile', async (event, sourceToken: string, label: string) => {

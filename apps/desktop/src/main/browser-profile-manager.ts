@@ -4,11 +4,9 @@ import type {
   BrowserProfileImportSourceSummary,
   BrowserProfileSummary
 } from '../shared/contracts.js'
-import {
-  detectBrowserProfileImportSources,
-  planBrowserProfileImport,
-  type BrowserProfileImportSource,
-  type BrowserProfileImportPlan
+import type {
+  BrowserProfileImportSource,
+  BrowserProfileImportPlan
 } from './browser-profile-import-source.js'
 import {
   browserProfilePartition,
@@ -114,12 +112,14 @@ export class BrowserProfileManager implements BrowserProfileResolver {
     })())
   }
 
-  detectImportSources(): BrowserProfileImportSourceSummary[] {
+  async detectImportSources(): Promise<BrowserProfileImportSourceSummary[]> {
     this.assertInitialized()
     this.sourceTokens.clear()
     const expiresAt = Date.now() + PROFILE_IMPORT_SOURCE_TOKEN_TTL_MS
     let detected: BrowserProfileImportSource[]
     try {
+      const { detectBrowserProfileImportSources } = await import('./browser-profile-import-source.js')
+      this.assertInitialized()
       detected = detectBrowserProfileImportSources()
     } catch (error) {
       throwPublicBrowserProfileError('Browser Profile sources could not be detected', error)
@@ -167,6 +167,8 @@ export class BrowserProfileManager implements BrowserProfileResolver {
     source: BrowserProfileImportSource,
     label: string
   ): Promise<BrowserProfileSummary> {
+    const { planBrowserProfileImport } = await import('./browser-profile-import-source.js')
+    this.assertActive()
     const plan = planBrowserProfileImport(source)
     this.assertActive()
     const pending = await this.store.beginPendingImport(label)
