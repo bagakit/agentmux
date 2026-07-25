@@ -305,6 +305,7 @@ type AppState = {
   clearAgentComposerDraftIfUnchanged(sessionId: string, expectedText: string): void
   send(sessionId: string, text: string): Promise<void>
   respondInteraction(sessionId: string, response: AgentMuxInteractionResponse): Promise<void>
+  setPosture(sessionId: string, modeId: string): Promise<void>
   interrupt(sessionId: string): Promise<void>
   refreshSession(sessionId: string): Promise<void>
   recoverSession(sessionId: string): Promise<void>
@@ -2751,6 +2752,19 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!session || session.kind !== 'agent') return
     try {
       await api.sessions.respondInteraction(session.control, response)
+    } catch (error) {
+      get().reportError(error)
+      throw error
+    }
+  },
+  async setPosture(sessionId, modeId) {
+    // A fire-and-forget SET: Core resolves the Provider's declared keystroke and writes it in-band. We
+    // never record a "current mode" — the live posture lives in the CLI's own TUI, which AgentMux cannot
+    // read, so claiming to know it would be a lie. The picker sends the intent and the CLI owns the state.
+    const session = get().sessions.find((item) => item.id === sessionId)
+    if (!session || session.kind !== 'agent') return
+    try {
+      await api.sessions.setPosture(session.control, modeId)
     } catch (error) {
       get().reportError(error)
       throw error

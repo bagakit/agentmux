@@ -307,6 +307,9 @@ export async function registerIpc(args: {
   ) => {
     await args.runtime.respondInteraction(session, response)
   })
+  handle('sessions:setPosture', async (session: AgentSessionControl, modeId: string) => {
+    await args.runtime.setPosture(session, modeId)
+  })
   handle('sessions:resume', async (session: AgentSessionControl, prompt: string, operationId: string) => (
     await args.runtime.resumeSession(session, prompt, operationId, config)
   ))

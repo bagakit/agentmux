@@ -1,4 +1,4 @@
-import type { LaunchOption } from './agent-launch-option.js'
+import type { LaunchOption, LaunchOptionSelection } from './agent-launch-option.js'
 
 export type BuiltInAgentProviderId =
   | 'codex'
@@ -247,6 +247,15 @@ export type AgentCatalogEntry = {
    * contributes never crosses IPC; it stays core-side (see agent-launch-option.ts).
    */
   launchOptions: LaunchOption[]
+  /**
+   * The DESCRIBE half of the sealed posture contract: a live, mid-session security-posture control the
+   * composer draws, or absent. Present only for a Provider whose posture is ADDRESSABLE in-band — each mode
+   * SET by a distinct keystroke over the existing PTY-input transport. Absent (the common case) for a
+   * Provider that has no in-band posture affordance, or only a blind cycle it cannot address to a specific
+   * mode, so the composer renders nothing. The keystroke each mode contributes never crosses IPC; it stays
+   * core-side (see agent-interaction.ts).
+   */
+  postureControl?: AgentPostureControl
 }
 
 export type AgentCapabilitySnapshot = {
@@ -300,6 +309,13 @@ export type AgentMuxAgentSession = {
   outputCursorBytes: number
   createdAt: number
   updatedAt: number
+  /**
+   * The chosen launch-option ids that fixed this Agent's security posture at spawn (sandbox, approval,
+   * permission-mode — see agent-launch-option.ts). Persisted so a stop/resume re-resolves the SAME argv
+   * the create used: the posture is fail-closed, so it must survive the Run boundary rather than silently
+   * reverting to the Provider's more permissive default. Absent when the create narrowed nothing.
+   */
+  launchOptions?: LaunchOptionSelection
   terminalHandshake?: AgentTerminalHandshakeState
   terminalPromptReadiness?: AgentTerminalPromptReadinessState
   terminalPromptSubmission?: AgentTerminalPromptSubmissionState
@@ -357,6 +373,31 @@ export type AgentMuxPermissionOption = {
   description?: string
   /** Risk state a renderer surfaces as a restrained dot; not decoration, not a stroke. */
   tier?: 'safe' | 'caution' | 'danger'
+}
+
+/**
+ * DESCRIBE half of a Provider's live posture control — pure serializable data the composer draws with no
+ * provider knowledge. A `mode` is one posture the Provider can be SET to in-band; the keystroke that sets
+ * it never rides here (it stays core-side on the declaration, see agent-interaction.ts). `tier` marks a
+ * mode a renderer surfaces as a restrained risk dot; not decoration, not a stroke.
+ */
+export type AgentPostureMode = {
+  id: string
+  label: string
+  description?: string
+  tier?: 'safe' | 'caution' | 'danger'
+}
+
+/**
+ * The composer-facing posture control, or absent. Present only for a Provider whose live posture is
+ * ADDRESSABLE: two or more modes, each SET by a distinct in-band keystroke (a slash command, not a launch
+ * flag). A Provider that has only a blind cycle it cannot read declares nothing, so the composer draws no
+ * control — absence hides it rather than offering a switch that cannot honor a specific target mode.
+ */
+export type AgentPostureControl = {
+  id: string
+  label: string
+  modes: AgentPostureMode[]
 }
 
 export type AgentMuxPermissionRequest = {
@@ -421,6 +462,14 @@ export type AgentMuxInteractionResponse =
     }
 
 export type AgentMuxInteractionInputPlan = {
+  data: string
+}
+
+/** The bytes that SET one posture mode, resolved core-side from the picked mode's declared keystroke.
+ * Same shape as an interaction plan — both are keystrokes written over the PTY-input transport — but kept
+ * a distinct type so the posture seam reads on its own. Never crosses IPC as bytes: the renderer sends a
+ * mode id, Core resolves this. */
+export type AgentPostureInputPlan = {
   data: string
 }
 

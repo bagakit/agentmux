@@ -153,6 +153,29 @@ describe('semantic session persistence boundary', () => {
     expect(normalized.terminalPromptSubmission).toEqual(storedSession().terminalPromptSubmission)
   })
 
+  it('round-trips the launch-option posture and fails closed on a malformed selection', async () => {
+    // The posture the create fixed must survive persistence so resume can re-resolve the same argv.
+    const normalized = normalizeStoredAgentSession({
+      ...storedSession(),
+      launchOptions: { sandbox: 'read-only', approval: 'never' }
+    })
+    expect(normalized.launchOptions).toEqual({ sandbox: 'read-only', approval: 'never' })
+
+    const store = new AgentMuxMemoryAgentSessionStore()
+    await store.compareAndSwap(null, normalized)
+    const [reloaded] = await loadAgentSessions(store)
+    expect(reloaded.launchOptions).toEqual({ sandbox: 'read-only', approval: 'never' })
+
+    // A create that narrowed nothing stores no field and resumes on the Provider's own default.
+    expect(normalizeStoredAgentSession(storedSession()).launchOptions).toBeUndefined()
+
+    // Fail closed: empty maps and non-string choices never reach a spawn as a posture.
+    expect(() => normalizeStoredAgentSession({ ...storedSession(), launchOptions: {} }))
+      .toThrow('launchOptions')
+    expect(() => normalizeStoredAgentSession({ ...storedSession(), launchOptions: { sandbox: 5 } }))
+      .toThrow('launchOptions')
+  })
+
   it('persists semantic status and a recoverable typed interaction response', () => {
     const value = {
       kind: 'permission' as const,

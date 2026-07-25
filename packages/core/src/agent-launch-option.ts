@@ -37,16 +37,15 @@ export type LaunchOptionChoice = {
 }
 
 /**
- * DESCRIBE half: a control the renderer draws for a Provider. `defaultChoiceId`, when present, names the
- * choice the renderer should pre-select; its absence means "leave the Provider's own default untouched",
- * and no argv is contributed until the user picks.
+ * DESCRIBE half: a control the renderer draws for a Provider. No choice is pre-selected — the renderer
+ * starts every option unset, so nothing is contributed and the Provider's own default is left untouched
+ * until the user picks.
  */
 export type LaunchOption = {
   id: string
   label: string
   description?: string
   choices: LaunchOptionChoice[]
-  defaultChoiceId?: string
 }
 
 /**
@@ -64,11 +63,35 @@ export type LaunchOptionDeclaration = {
   label: string
   description?: string
   readonly choices: readonly LaunchOptionChoiceDeclaration[]
-  defaultChoiceId?: string
 }
 
 /** UI → core: the choice id picked for each option id the renderer rendered. */
 export type LaunchOptionSelection = Readonly<Record<string, string>>
+
+/**
+ * Canonicalize a caller-supplied selection for the launch path and for persistence. Every entry must be
+ * a non-empty string keyed by a non-empty option id; the whole selection is fail-closed rejected
+ * otherwise, so a malformed posture never reaches a spawn. A selection that names nothing (absent or
+ * empty) resolves to `undefined` — an un-narrowed create contributes no argv and stores no field, so it
+ * resumes on the Provider's own default rather than a fabricated empty one.
+ */
+export function normalizeLaunchOptionSelection(value: unknown): LaunchOptionSelection | undefined {
+  if (value === undefined) return undefined
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new AgentMuxError('Launch option selection must be an object.', 'INVALID_LAUNCH_OPTION_SELECTION')
+  }
+  const selection: Record<string, string> = {}
+  for (const [optionId, choiceId] of Object.entries(value as Record<string, unknown>)) {
+    if (!optionId.trim() || typeof choiceId !== 'string' || !choiceId.trim()) {
+      throw new AgentMuxError(
+        'Launch option selection entries must be non-empty option and choice ids.',
+        'INVALID_LAUNCH_OPTION_SELECTION'
+      )
+    }
+    selection[optionId] = choiceId
+  }
+  return Object.keys(selection).length > 0 ? selection : undefined
+}
 
 /**
  * Fail closed on a malformed declaration so a Provider can never ship an option the UI cannot render or
@@ -115,12 +138,6 @@ export function validateLaunchOptionDeclarations(
       }
       seenChoiceIds.add(choice.id)
     }
-    if (option.defaultChoiceId !== undefined && !seenChoiceIds.has(option.defaultChoiceId)) {
-      throw new AgentMuxError(
-        `Launch option '${option.id}' on provider ${providerId} names an unknown defaultChoiceId '${option.defaultChoiceId}'.`,
-        'INVALID_LAUNCH_OPTION'
-      )
-    }
   }
 }
 
@@ -132,7 +149,6 @@ export function describeLaunchOptions(
     id: option.id,
     label: option.label,
     ...(option.description === undefined ? {} : { description: option.description }),
-    ...(option.defaultChoiceId === undefined ? {} : { defaultChoiceId: option.defaultChoiceId }),
     choices: option.choices.map((choice) => ({
       id: choice.id,
       label: choice.label,
@@ -187,3 +203,77 @@ export function resolveLaunchOptionArgv(
   }
   return argv
 }
+
+// SSOT launch-option declarations. Every flag below was verified against the installed CLI's own --help
+// before it was declared; nothing is invented. Each choice's argv is the exact flag pair the CLI accepts,
+// and the label is what the renderer shows — one declaration, so the two can never drift. AgentMux drives
+// these as real PTY processes, so these are honestly launch-time choices, not live switches. They live in
+// this node-free module (it imports only ./errors.js and ./types.js) so both the Provider catalog and the
+// browser-only preview mock read the SAME constant — the mock projects its DESCRIBE half via
+// describeLaunchOptions, exactly as the real catalog does, and can never hand-copy a diverging catalog.
+
+// codex top-level (interactive) flags. `-s/--sandbox <read-only|workspace-write|danger-full-access>` and
+// `-a/--ask-for-approval <on-request|never>` verified via `codex --help`. Two options that compose.
+export const CODEX_LAUNCH_OPTIONS: readonly LaunchOptionDeclaration[] = [
+  {
+    id: 'sandbox',
+    label: 'Sandbox',
+    description: 'How much of the machine Codex may touch when it runs commands.',
+    choices: [
+      { id: 'read-only', label: 'Read only', tier: 'safe', argv: ['--sandbox', 'read-only'] },
+      {
+        id: 'workspace-write',
+        label: 'Workspace write',
+        description: 'Writes limited to the workspace.',
+        tier: 'caution',
+        argv: ['--sandbox', 'workspace-write']
+      },
+      {
+        id: 'danger-full-access',
+        label: 'Full access',
+        description: 'No sandbox — full machine access.',
+        tier: 'danger',
+        argv: ['--sandbox', 'danger-full-access']
+      }
+    ]
+  },
+  {
+    id: 'approval',
+    label: 'Approval policy',
+    description: 'When Codex pauses for human approval before running a command.',
+    choices: [
+      {
+        id: 'on-request',
+        label: 'On request',
+        description: 'The model decides when to ask.',
+        tier: 'caution',
+        argv: ['--ask-for-approval', 'on-request']
+      },
+      {
+        id: 'never',
+        label: 'Never',
+        description: 'Never pauses for approval.',
+        tier: 'danger',
+        argv: ['--ask-for-approval', 'never']
+      }
+    ]
+  }
+]
+
+// claude top-level flag `--permission-mode <acceptEdits|auto|bypassPermissions|manual|dontAsk|plan>`,
+// verified via `claude --help`. One option; its argv composes cleanly with the positional prompt.
+export const CLAUDE_LAUNCH_OPTIONS: readonly LaunchOptionDeclaration[] = [
+  {
+    id: 'permission-mode',
+    label: 'Permission mode',
+    description: 'How Claude handles tool-permission prompts for this session.',
+    choices: [
+      { id: 'manual', label: 'Manual', description: 'Ask for each action.', tier: 'safe', argv: ['--permission-mode', 'manual'] },
+      { id: 'plan', label: 'Plan', description: 'Plan first, no edits.', tier: 'safe', argv: ['--permission-mode', 'plan'] },
+      { id: 'acceptEdits', label: 'Accept edits', description: 'Auto-accept file edits.', tier: 'caution', argv: ['--permission-mode', 'acceptEdits'] },
+      { id: 'auto', label: 'Auto', tier: 'caution', argv: ['--permission-mode', 'auto'] },
+      { id: 'dontAsk', label: "Don't ask", tier: 'caution', argv: ['--permission-mode', 'dontAsk'] },
+      { id: 'bypassPermissions', label: 'Bypass permissions', description: 'Skip all permission checks.', tier: 'danger', argv: ['--permission-mode', 'bypassPermissions'] }
+    ]
+  }
+]

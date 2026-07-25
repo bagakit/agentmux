@@ -35,6 +35,10 @@
     "./timeline": {
       "types": "./dist/session-timeline.d.ts",
       "import": "./dist/session-timeline.js"
+    },
+    "./launch-option": {
+      "types": "./dist/agent-launch-option.d.ts",
+      "import": "./dist/agent-launch-option.js"
     }
   },
   "bin": {

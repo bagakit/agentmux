@@ -1,12 +1,14 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { AgentCatalogEntry } from '@agentmux/core'
 import type { SessionSnapshot } from '../src/shared/contracts.js'
 
 const fixture = vi.hoisted(() => ({
   session: undefined as SessionSnapshot | undefined,
   state: {
     sessions: [] as SessionSnapshot[],
+    providerCatalog: [] as AgentCatalogEntry[],
     config: {
       workspaces: [{ id: 'workspace', name: 'Project', hostId: 'local', path: '/repo', kind: 'folder' as const }]
     },
@@ -15,7 +17,8 @@ const fixture = vi.hoisted(() => ({
     setAgentComposerDraft: vi.fn(),
     clearAgentComposerDraftIfUnchanged: vi.fn(),
     send: vi.fn(async () => {}),
-    interrupt: vi.fn(async () => {})
+    interrupt: vi.fn(async () => {}),
+    setPosture: vi.fn(async () => {})
   }
 }))
 
@@ -77,12 +80,48 @@ function agentSession(overrides: Partial<Extract<SessionSnapshot, { kind: 'agent
 
 afterEach(() => {
   fixture.state.sessions = []
+  fixture.state.providerCatalog = []
   fixture.state.agentComposerDrafts = {}
   fixture.state.send.mockClear()
   fixture.state.interrupt.mockClear()
+  fixture.state.setPosture.mockClear()
   fixture.state.setAgentComposerDraft.mockClear()
   fixture.state.clearAgentComposerDraftIfUnchanged.mockClear()
 })
+
+// A minimal grok-shaped catalog entry carrying only the fields the composer reads plus the DESCRIBE-half
+// posture control. The keystrokes stay in core; only these labels/tiers ever reach the renderer.
+function postureCatalogEntry(): AgentCatalogEntry {
+  return {
+    id: 'grok',
+    label: 'Grok',
+    executable: 'grok',
+    expectedProcess: 'grok',
+    promptDelivery: 'positional-argv',
+    readySignal: { kind: 'foreground-process', expectedProcess: 'grok' },
+    hookStrategy: { kind: 'none' },
+    resumeStrategy: { kind: 'none' },
+    acpStrategy: { kind: 'none' },
+    capabilities: {
+      terminal: true,
+      hookEvents: false,
+      timeline: 'unavailable',
+      permission: 'none',
+      providerResume: false,
+      acp: false,
+      replyCorrelation: 'none'
+    },
+    launchOptions: [],
+    postureControl: {
+      id: 'approval',
+      label: 'Approvals',
+      modes: [
+        { id: 'ask', label: 'Ask each time', tier: 'safe' },
+        { id: 'always-approve', label: 'Auto-approve', tier: 'danger' }
+      ]
+    }
+  }
+}
 
 describe('AgentSessionComposer adapter', () => {
   it('binds a running Agent and current file to the reusable Composer', () => {
@@ -175,6 +214,28 @@ describe('AgentSessionComposer adapter', () => {
     })
     expect(markup).toContain('placeholder="Agent is not running"')
     expect(markup).toMatch(/<textarea[^>]*disabled=""/)
+  })
+
+  it('renders a Provider-declared posture control on the composer, drawn from its catalog declaration', () => {
+    fixture.state.sessions = [agentSession({ providerId: 'grok', status: { state: 'running', source: 'run-process', observedAt: 2 } })]
+    fixture.state.providerCatalog = [postureCatalogEntry()]
+
+    const markup = renderToStaticMarkup(createElement(AgentSessionComposer, { sessionId: 'agent-1' }))
+
+    // The control's label (the DESCRIBE half) reaches the composer; the keystroke never does.
+    expect(markup).toContain('Approvals')
+    expect(markup).not.toContain('always-approve')
+  })
+
+  it('renders no posture control for a Provider that declares none (absence hides)', () => {
+    // codex declares no addressable posture control — its catalog entry carries no postureControl, so the
+    // composer draws nothing rather than a disabled affordance.
+    fixture.state.sessions = [agentSession({ status: { state: 'running', source: 'run-process', observedAt: 2 } })]
+    fixture.state.providerCatalog = [{ ...postureCatalogEntry(), id: 'codex', postureControl: undefined }]
+
+    const markup = renderToStaticMarkup(createElement(AgentSessionComposer, { sessionId: 'agent-1' }))
+
+    expect(markup).not.toContain('Approvals')
   })
 
   it('yields prompt entry to a pending typed Agent interaction', () => {

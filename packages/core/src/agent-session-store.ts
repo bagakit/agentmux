@@ -354,6 +354,19 @@ function assertRetiredAgentSessions(
   }
 }
 
+function launchOptionSelection(value: unknown): Record<string, string> {
+  const source = record(value, 'launchOptions')
+  const entries = Object.entries(source)
+  if (entries.length === 0 || entries.length > 32) {
+    throw new AgentMuxError('launchOptions is invalid.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  const selection: Record<string, string> = {}
+  for (const [optionId, choiceId] of entries) {
+    selection[string(optionId, 'launchOptions option id')] = string(choiceId, `launchOptions.${optionId}`)
+  }
+  return selection
+}
+
 function nativeHandle(value: unknown): AgentNativeSessionHandle {
   const source = record(value, 'nativeHandle')
   if (source.kind === 'provider') {
@@ -796,6 +809,9 @@ export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgent
     outputCursorBytes: timestamp(source.outputCursorBytes, 'outputCursorBytes'),
     createdAt: timestamp(source.createdAt, 'createdAt'),
     updatedAt: timestamp(source.updatedAt, 'updatedAt'),
+    ...(source.launchOptions === undefined
+      ? {}
+      : { launchOptions: launchOptionSelection(source.launchOptions) }),
     ...(source.terminalHandshake === undefined
       ? {}
       : { terminalHandshake: terminalHandshake(source.terminalHandshake, currentRun) }),

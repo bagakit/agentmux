@@ -8,7 +8,10 @@ import {
   type AgentMuxAcpBinding
 } from './acp-adapter.js'
 import { normalizeAgentInteractionResponse } from './agent-interaction.js'
-import type { LaunchOptionSelection } from './agent-launch-option.js'
+import {
+  normalizeLaunchOptionSelection,
+  type LaunchOptionSelection
+} from './agent-launch-option.js'
 import {
   AgentProviderRegistry,
   resolveManagedHookPlan,
@@ -139,6 +142,12 @@ export type AgentMuxAgentInteractionInput = {
   agentSessionId: string
   expectedRun: AgentMuxRunRef
   response: AgentMuxInteractionResponse
+}
+
+export type AgentMuxAgentPostureInput = {
+  agentSessionId: string
+  expectedRun: AgentMuxRunRef
+  modeId: string
 }
 
 export type AgentMuxAgentRespawnInput = Omit<
@@ -762,6 +771,7 @@ export class AgentMuxClient {
         ...(input.cols === undefined ? {} : { cols: input.cols }),
         ...(input.rows === undefined ? {} : { rows: input.rows })
       })
+      const launchOptions = normalizeLaunchOptionSelection(input.launchOptions)
       const now = Date.now()
       const session: AgentMuxStoredAgentSession = {
         kind: 'agent',
@@ -776,7 +786,8 @@ export class AgentMuxClient {
         hookToken: hookBinding.endpoint.token,
         outputCursorBytes: 0,
         createdAt: now,
-        updatedAt: now
+        updatedAt: now,
+        ...(launchOptions ? { launchOptions } : {})
       }
       if (
         !launchPrompt.trim() &&
@@ -994,11 +1005,17 @@ export class AgentMuxClient {
       if (!capability.installed) {
         throw new AgentMuxError(`${provider.label} is not installed on this host.`, 'AGENT_NOT_FOUND')
       }
+      // Re-resolve the posture the create fixed and append it to the resume args exactly as createAgent
+      // does, so the sandbox/approval/permission-mode flags survive the stop/resume boundary rather than
+      // reverting to the Provider's more permissive default. buildResumeArgs orders these per provider
+      // (codex places them after the positional prompt, claude before) and the positional prompt is a
+      // distinct token, so intermixing the option flags stays CLI-valid.
+      const resumeLaunchOptionArgv = provider.resolveLaunchArgv(current.launchOptions ?? {})
       const plan = provider.buildResumeLaunch({
         workspacePath: current.workspacePath,
         nativeHandle: current.nativeHandle,
         ...(prompt ? { prompt } : {}),
-        args: input.args ?? [],
+        args: [...(input.args ?? []), ...resumeLaunchOptionArgv],
         env: input.env ?? {},
         ...(input.commandOverride === undefined ? {} : { commandOverride: input.commandOverride })
       })
@@ -1360,6 +1377,29 @@ export class AgentMuxClient {
         plan.data
       )
     })
+  }
+
+  /**
+   * Set an Agent's live security posture in-band. The renderer sends a mode id; the Provider resolves that
+   * mode's declared keystroke core-side (its bytes never cross IPC), and it is written over the SAME
+   * PTY-input transport a prompt uses. It is not a launch flag: it drives the Provider's own in-band
+   * control, so it takes effect on the running process rather than silently no-oping. Fails closed on a
+   * Provider that declares no posture control or a mode it does not declare.
+   */
+  async setAgentPosture(input: AgentMuxAgentPostureInput): Promise<void> {
+    this.requireConnected()
+    const session = this.requireAgentSession(input.agentSessionId)
+    if (!sameRun(session.run, input.expectedRun)) {
+      throw new AgentMuxError(
+        'Agent Session changed before its posture was set.',
+        'STALE_AGENT_SESSION'
+      )
+    }
+    const plan = this.providers.get(session.providerId).planPostureSet(input.modeId)
+    if (!plan.data) {
+      throw new AgentMuxError('Provider posture keystroke cannot be empty.', 'INVALID_AGENT_PROVIDER')
+    }
+    await this.writeAgentInput(session, plan.data)
   }
 
   async resizeAgent(

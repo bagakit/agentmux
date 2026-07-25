@@ -51,8 +51,16 @@ export function AgentSessionComposer({
   const activeFile = useAppStore((state) =>
     workspace ? state.lastActiveFileByWorkspace[workspace.id] : undefined
   )
+  // The posture control is drawn purely from the Provider's catalog declaration, looked up by the
+  // session's providerId. A Provider that declares none yields undefined, so the composer draws nothing.
+  const postureControl = useAppStore((state) =>
+    session?.kind === 'agent'
+      ? state.providerCatalog.find((entry) => entry.id === session.providerId)?.postureControl
+      : undefined
+  )
   const send = useAppStore((state) => state.send)
   const interrupt = useAppStore((state) => state.interrupt)
+  const setPosture = useAppStore((state) => state.setPosture)
   const availability = agentComposerAvailability(session, disabled)
   const isWorking = session?.kind === 'agent' && session.status.state === 'working'
 
@@ -99,12 +107,14 @@ export function AgentSessionComposer({
       placeholder={availability.placeholder}
       isWorking={isWorking}
       {...(activeFile ? { activeFile } : {})}
+      {...(postureControl ? { postureControl } : {})}
       onChange={(value) => setAgentComposerDraft(sessionId, value)}
       {...(!availability.disabled ? {
         onSubmit: () => void submit(),
         onInterrupt: () => void interrupt(sessionId),
         onAttach: () => void attachFiles(),
         onPasteImage: (image: { bytes: Uint8Array; extension: string }) => void pasteImage(image),
+        ...(postureControl ? { onSetPosture: (modeId: string) => void setPosture(sessionId, modeId) } : {}),
         ...(activeFile ? { onReferenceActiveFile: addFileReference } : {})
       } : {})}
     />
