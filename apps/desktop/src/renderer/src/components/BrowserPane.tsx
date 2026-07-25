@@ -42,6 +42,15 @@ const VIEWPORT_LABELS: Record<BrowserViewport, string> = {
   desktop: 'Desktop'
 }
 
+type BrowserIdentity = Pick<BrowserSnapshot, 'id' | 'navigationId'>
+
+export function browserCaptureMatchesIdentity(
+  capture: Pick<BrowserScreenshotCapture, 'browserId' | 'navigationId'>,
+  identity: BrowserIdentity
+): boolean {
+  return capture.browserId === identity.id && capture.navigationId === identity.navigationId
+}
+
 export function BrowserPane({
   tab,
   visible
@@ -56,6 +65,11 @@ export function BrowserPane({
   const toolsOpen = useAppStore((state) => state.toolsOpen)
   const stageRef = useRef<HTMLDivElement>(null)
   const screenshotToken = useRef(0)
+  const browserIdentity = useRef<BrowserIdentity>({ id: tab.browserId, navigationId: tab.navigationId })
+  if (browserIdentity.current.id !== tab.browserId || browserIdentity.current.navigationId !== tab.navigationId) {
+    browserIdentity.current = { id: tab.browserId, navigationId: tab.navigationId }
+    screenshotToken.current += 1
+  }
   const [address, setAddress] = useState(tab.url === 'about:blank' ? '' : tab.url)
   const [busy, setBusy] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -73,7 +87,7 @@ export function BrowserPane({
   useEffect(() => {
     if (
       screenshot &&
-      (screenshot.browserId !== tab.browserId || screenshot.navigationId !== tab.navigationId)
+      !browserCaptureMatchesIdentity(screenshot, browserIdentity.current)
     ) {
       screenshotToken.current += 1
       setScreenshot(null)
@@ -157,7 +171,7 @@ export function BrowserPane({
     try {
       const captured = await api.browser.captureScreenshot(tab.browserId)
       if (screenshotToken.current !== token) return
-      if (captured.browserId !== tab.browserId || captured.navigationId !== tab.navigationId) {
+      if (!browserCaptureMatchesIdentity(captured, browserIdentity.current)) {
         throw new Error('Browser page changed before the screenshot editor opened')
       }
       setScreenshot(captured)
