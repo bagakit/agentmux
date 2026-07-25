@@ -1,6 +1,16 @@
 import { randomUUID } from 'node:crypto'
 import { basename } from 'node:path'
-import { clipboard, dialog, ipcMain, nativeImage, shell, type BrowserWindow, type IpcMainEvent } from 'electron'
+import {
+  clipboard,
+  dialog,
+  ipcMain,
+  nativeImage,
+  shell,
+  type BrowserWindow,
+  type IpcMainEvent,
+  type IpcMainInvokeEvent,
+  type WebContents
+} from 'electron'
 import {
   AgentMuxCompositionServer,
   type AgentExecutorId,
@@ -50,6 +60,15 @@ function workspace(config: AppConfig, id: string): WorkspaceRecord {
   const item = config.workspaces.find((entry) => entry.id === id)
   if (!item) throw new Error(`Unknown workspace: ${id}`)
   return item
+}
+
+export async function openExternalFromRenderer(
+  event: Pick<IpcMainInvokeEvent, 'sender'>,
+  renderer: WebContents,
+  rawUrl: string
+): Promise<void> {
+  if (event.sender !== renderer) throw new Error('Untrusted external URL sender')
+  await shell.openExternal(normalizeExternalUrl(rawUrl))
 }
 
 export async function registerIpc(args: {
@@ -205,8 +224,9 @@ export async function registerIpc(args: {
     if (event.sender !== args.window.webContents) throw new Error('Untrusted clipboard image sender')
     clipboard.writeImage(nativeImageFromBrowserPng(image, (png) => nativeImage.createFromBuffer(png)))
   })
-  handle('ui:openExternal', async (rawUrl: string) => {
-    await shell.openExternal(normalizeExternalUrl(rawUrl))
+  channels.push('ui:openExternal')
+  ipcMain.handle('ui:openExternal', async (event, rawUrl: string) => {
+    await openExternalFromRenderer(event, args.window.webContents, rawUrl)
   })
   handle('providers:list', () => args.runtime.providerCatalog())
   handle('executors:detect', async (executorId: AgentExecutorId, hostId: string) => await args.runtime.detect(executorId, hostId, config))
