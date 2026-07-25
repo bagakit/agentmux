@@ -163,8 +163,11 @@ describe('semantic session persistence boundary', () => {
 
     const store = new AgentMuxMemoryAgentSessionStore()
     await store.compareAndSwap(null, normalized)
-    const [reloaded] = await loadAgentSessions(store)
-    expect(reloaded.launchOptions).toEqual({ sandbox: 'read-only', approval: 'never' })
+    const reloaded = await loadAgentSessions(store)
+    // Assert the round-trip produced exactly the one session before reading it: an empty load would
+    // otherwise make the posture assertion below vacuous.
+    expect(reloaded).toHaveLength(1)
+    expect(reloaded[0]!.launchOptions).toEqual({ sandbox: 'read-only', approval: 'never' })
 
     // A create that narrowed nothing stores no field and resumes on the Provider's own default.
     expect(normalizeStoredAgentSession(storedSession()).launchOptions).toBeUndefined()

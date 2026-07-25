@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createHash } from 'node:crypto'
 import { access, chmod, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import type { ExecutionHost } from '@agentmux/core'
 import type { WorkspaceRecord } from '../src/shared/contracts.js'
 import { WorkspaceFiles, workspaceFileObserverCount } from '../src/main/workspace-files.js'
@@ -106,126 +106,148 @@ afterEach(async () => {
 })
 
 describe('WorkspaceFiles root confinement', () => {
-  it.runIf(process.platform === 'darwin')(
-    'pins each local operation before a checked directory is replaced by an escaping symlink',
-    async () => {
-      const fixture = await mkdtemp(join(tmpdir(), 'agentmux-files-race-'))
-      temporaryRoots.push(fixture)
-      const root = join(fixture, 'workspace')
-      await mkdir(root)
-      const workspace: WorkspaceRecord = {
-        id: 'workspace-race',
-        name: 'workspace-race',
-        hostId: 'local',
-        path: root,
-        kind: 'folder'
-      }
-      const localHost: ExecutionHost = {
-        id: 'local',
-        kind: 'local',
-        label: 'Local',
-        run: vi.fn(),
-        exposeLoopbackPort: async (port) => port,
-        dispose: async () => {}
-      }
-      const files = new WorkspaceFiles(() => localHost)
+  // Every local operation must pin the directory it already checked before the worker acts on it, so a
+  // directory swapped for an escaping symlink inside that window cannot redirect the operation outside
+  // the Workspace. One test per operation, deliberately: each scenario spawns its own worker, so
+  // running all seven under a single `it` stacked ~2.7s against the default 5s budget — and when it
+  // lost that race it named none of the operations. Split, each reports itself and finishes with room.
+  const raceIt = it.runIf(process.platform === 'darwin')
 
-      const race = async (label: string) => {
-        const requested = join(root, label)
-        const held = join(root, `${label}-held`)
-        const outside = join(fixture, `${label}-outside`)
-        await Promise.all([mkdir(requested), mkdir(outside)])
-        localWorkerRace.beforeInput = async () => {
-          await rename(requested, held)
-          await symlink(outside, requested, 'dir')
-        }
-        return { requested, held, outside }
-      }
-
-      const readRace = await race('read')
-      await Promise.all([
-        writeFile(join(readRace.requested, 'value.txt'), 'inside'),
-        writeFile(join(readRace.outside, 'value.txt'), 'outside-secret')
-      ])
-      await expect(files.read(workspace, 'read/value.txt')).resolves.toEqual({
-        status: 'read',
-        document: {
-          path: 'read/value.txt',
-          content: 'inside',
-          revision: revision('inside')
-        }
-      })
-      await expect(readFile(join(readRace.outside, 'value.txt'), 'utf8')).resolves.toBe('outside-secret')
-
-      const listRace = await race('list')
-      await Promise.all([
-        writeFile(join(listRace.requested, 'inside.txt'), 'inside'),
-        writeFile(join(listRace.outside, 'outside.txt'), 'outside')
-      ])
-      await expect(files.readDirectory(workspace, 'list')).resolves.toEqual([
-        { name: 'inside.txt', path: 'list/inside.txt', isDirectory: false, isSymlink: false }
-      ])
-
-      const revealRace = await race('reveal')
-      await Promise.all([
-        writeFile(join(revealRace.requested, 'inside.txt'), 'inside'),
-        writeFile(join(revealRace.outside, 'inside.txt'), 'outside')
-      ])
-      const revealed = await files.localPathForReveal(workspace, 'reveal/inside.txt')
-      expect(revealed).toBe(await realpath(join(revealRace.held, 'inside.txt')))
-
-      const createRace = await race('create')
-      await files.create(workspace, { path: 'create/new.txt', kind: 'file' })
-      await expect(access(join(createRace.held, 'new.txt'))).resolves.toBeUndefined()
-      await expect(access(join(createRace.outside, 'new.txt'))).rejects.toThrow()
-
-      const writeRace = await race('write')
-      await Promise.all([
-        writeFile(join(writeRace.requested, 'value.txt'), 'inside'),
-        writeFile(join(writeRace.outside, 'value.txt'), 'outside-secret')
-      ])
-      await expect(files.write(workspace, {
-        path: 'write/value.txt',
-        content: 'updated',
-        expectedRevision: revision('inside')
-      })).resolves.toEqual({ status: 'written', revision: revision('updated') })
-      await expect(readFile(join(writeRace.held, 'value.txt'), 'utf8')).resolves.toBe('updated')
-      await expect(readFile(join(writeRace.outside, 'value.txt'), 'utf8')).resolves.toBe('outside-secret')
-
-      const renameRace = await race('rename')
-      await Promise.all([
-        writeFile(join(renameRace.requested, 'before.txt'), 'inside'),
-        writeFile(join(renameRace.outside, 'before.txt'), 'outside-secret')
-      ])
-      const beforeLocalMoveCommit = localWorkerRace.beforeInput
-      localWorkerRace.beforeInput = null
-      const moveFiles = new WorkspaceFiles(() => localHost, {
-        beforeLocalMoveCommit: beforeLocalMoveCommit ?? undefined
-      })
-      await expect(moveFiles.move(workspace, workspace, {
-        source: { workspaceId: workspace.id, path: 'rename/before.txt' },
-        destination: { workspaceId: workspace.id, path: 'rename/after.txt' }
-      })).resolves.toMatchObject({
-        status: 'error',
-        code: 'WORKSPACE_PATH_ESCAPE',
-        finalLocation: 'source'
-      })
-      await expect(readFile(join(renameRace.held, 'before.txt'), 'utf8')).resolves.toBe('inside')
-      await expect(access(join(renameRace.held, 'after.txt'))).rejects.toThrow()
-      await expect(readFile(join(renameRace.outside, 'before.txt'), 'utf8')).resolves.toBe('outside-secret')
-      await expect(access(join(renameRace.outside, 'after.txt'))).rejects.toThrow()
-
-      const deleteRace = await race('delete')
-      await Promise.all([
-        writeFile(join(deleteRace.requested, 'victim.txt'), 'inside'),
-        writeFile(join(deleteRace.outside, 'victim.txt'), 'outside-secret')
-      ])
-      await files.delete(workspace, 'delete/victim.txt')
-      await expect(access(join(deleteRace.held, 'victim.txt'))).rejects.toThrow()
-      await expect(readFile(join(deleteRace.outside, 'victim.txt'), 'utf8')).resolves.toBe('outside-secret')
-      expect(localWorkerRace.beforeInput).toBeNull()
+  // Arms the swap and hands back the paths it will move. `worker-input` fires it in the window before
+  // the local worker reads its request; `move-commit` fires it in the move helper's commit window,
+  // which is the only point at which a rename can still be redirected.
+  async function raceFixture(
+    label: string,
+    at: 'worker-input' | 'move-commit' = 'worker-input'
+  ): Promise<{
+    workspace: WorkspaceRecord
+    files: WorkspaceFiles
+    requested: string
+    held: string
+    outside: string
+  }> {
+    const { root, workspace, host } = await localFixture(`files-race-${label}`)
+    const requested = join(root, label)
+    const held = join(root, `${label}-held`)
+    // A sibling of the Workspace root, so reaching it is unambiguously an escape.
+    const outside = join(dirname(root), `${label}-outside`)
+    await Promise.all([mkdir(requested), mkdir(outside)])
+    const swap = async () => {
+      await rename(requested, held)
+      await symlink(outside, requested, 'dir')
     }
-  )
+    if (at === 'worker-input') localWorkerRace.beforeInput = swap
+    return {
+      workspace,
+      files: at === 'move-commit'
+        ? new WorkspaceFiles(() => host, { beforeLocalMoveCommit: swap })
+        : new WorkspaceFiles(() => host),
+      requested,
+      held,
+      outside
+    }
+  }
+
+  // Each of these ends by asserting the hook was consumed: the mock clears it on use, so a null hook is
+  // what proves the swap actually landed inside the window and the test was not vacuously green.
+  raceIt('pins a read to the directory it already checked', async () => {
+    const race = await raceFixture('read')
+    await Promise.all([
+      writeFile(join(race.requested, 'value.txt'), 'inside'),
+      writeFile(join(race.outside, 'value.txt'), 'outside-secret')
+    ])
+    await expect(race.files.read(race.workspace, 'read/value.txt')).resolves.toEqual({
+      status: 'read',
+      document: {
+        path: 'read/value.txt',
+        content: 'inside',
+        revision: revision('inside')
+      }
+    })
+    await expect(readFile(join(race.outside, 'value.txt'), 'utf8')).resolves.toBe('outside-secret')
+    expect(localWorkerRace.beforeInput).toBeNull()
+  })
+
+  raceIt('pins a directory listing to the directory it already checked', async () => {
+    const race = await raceFixture('list')
+    await Promise.all([
+      writeFile(join(race.requested, 'inside.txt'), 'inside'),
+      writeFile(join(race.outside, 'outside.txt'), 'outside')
+    ])
+    await expect(race.files.readDirectory(race.workspace, 'list')).resolves.toEqual([
+      { name: 'inside.txt', path: 'list/inside.txt', isDirectory: false, isSymlink: false }
+    ])
+    expect(localWorkerRace.beforeInput).toBeNull()
+  })
+
+  raceIt('pins a reveal to the directory it already checked', async () => {
+    const race = await raceFixture('reveal')
+    await Promise.all([
+      writeFile(join(race.requested, 'inside.txt'), 'inside'),
+      writeFile(join(race.outside, 'inside.txt'), 'outside')
+    ])
+    const revealed = await race.files.localPathForReveal(race.workspace, 'reveal/inside.txt')
+    expect(revealed).toBe(await realpath(join(race.held, 'inside.txt')))
+    expect(localWorkerRace.beforeInput).toBeNull()
+  })
+
+  raceIt('pins a create to the directory it already checked', async () => {
+    const race = await raceFixture('create')
+    await race.files.create(race.workspace, { path: 'create/new.txt', kind: 'file' })
+    await expect(access(join(race.held, 'new.txt'))).resolves.toBeUndefined()
+    await expect(access(join(race.outside, 'new.txt'))).rejects.toThrow()
+    expect(localWorkerRace.beforeInput).toBeNull()
+  })
+
+  raceIt('pins a write to the directory it already checked', async () => {
+    const race = await raceFixture('write')
+    await Promise.all([
+      writeFile(join(race.requested, 'value.txt'), 'inside'),
+      writeFile(join(race.outside, 'value.txt'), 'outside-secret')
+    ])
+    await expect(race.files.write(race.workspace, {
+      path: 'write/value.txt',
+      content: 'updated',
+      expectedRevision: revision('inside')
+    })).resolves.toEqual({ status: 'written', revision: revision('updated') })
+    await expect(readFile(join(race.held, 'value.txt'), 'utf8')).resolves.toBe('updated')
+    await expect(readFile(join(race.outside, 'value.txt'), 'utf8')).resolves.toBe('outside-secret')
+    expect(localWorkerRace.beforeInput).toBeNull()
+  })
+
+  // The move helper cannot pin its parent the way a single-path operation can, so it fails closed
+  // instead. The escape verdict itself is the proof the swap landed: without it the move succeeds.
+  raceIt('refuses a move whose parent is replaced at commit, leaving both trees untouched', async () => {
+    const race = await raceFixture('rename', 'move-commit')
+    await Promise.all([
+      writeFile(join(race.requested, 'before.txt'), 'inside'),
+      writeFile(join(race.outside, 'before.txt'), 'outside-secret')
+    ])
+    await expect(race.files.move(race.workspace, race.workspace, {
+      source: { workspaceId: race.workspace.id, path: 'rename/before.txt' },
+      destination: { workspaceId: race.workspace.id, path: 'rename/after.txt' }
+    })).resolves.toMatchObject({
+      status: 'error',
+      code: 'WORKSPACE_PATH_ESCAPE',
+      finalLocation: 'source'
+    })
+    await expect(readFile(join(race.held, 'before.txt'), 'utf8')).resolves.toBe('inside')
+    await expect(access(join(race.held, 'after.txt'))).rejects.toThrow()
+    await expect(readFile(join(race.outside, 'before.txt'), 'utf8')).resolves.toBe('outside-secret')
+    await expect(access(join(race.outside, 'after.txt'))).rejects.toThrow()
+  })
+
+  raceIt('pins a delete to the directory it already checked', async () => {
+    const race = await raceFixture('delete')
+    await Promise.all([
+      writeFile(join(race.requested, 'victim.txt'), 'inside'),
+      writeFile(join(race.outside, 'victim.txt'), 'outside-secret')
+    ])
+    await race.files.delete(race.workspace, 'delete/victim.txt')
+    await expect(access(join(race.held, 'victim.txt'))).rejects.toThrow()
+    await expect(readFile(join(race.outside, 'victim.txt'), 'utf8')).resolves.toBe('outside-secret')
+    expect(localWorkerRace.beforeInput).toBeNull()
+  })
 
   it('reads and writes normal local files but rejects a symlink escape', async () => {
     const fixture = await mkdtemp(join(tmpdir(), 'agentmux-files-test-'))
