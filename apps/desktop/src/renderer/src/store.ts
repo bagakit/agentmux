@@ -127,6 +127,10 @@ import {
   type WorkbenchViewCloseResource
 } from './lib/workbench-view-close'
 import { isPathWithinSubtree, remapPathWithinSubtree } from './lib/workspace-paths'
+import {
+  createEmptyFileExplorerViewState,
+  type FileExplorerViewState
+} from './lib/file-explorer-selection'
 
 type ViewMode = SessionViewMode
 export type MainSurface = 'workbench' | 'board'
@@ -167,6 +171,7 @@ type AppState = {
   layouts: Record<string, WorkspaceLayout>
   closingWorkbenchViews: Record<string, WorkbenchViewClosePlan>
   workspaceFileRevisions: Record<string, number>
+  fileExplorerStates: Record<string, FileExplorerViewState | undefined>
   viewModes: Record<string, ViewMode>
   executorDetections: Record<string, ExecutorDetectionState>
   hostChecks: Record<string, HostCheckState>
@@ -226,6 +231,10 @@ type AppState = {
   setWorkspaceTool(tool: WorkspaceTool): void
   toggleTools(): void
   setToolDockWidth(width: number): void
+  updateFileExplorerState(
+    workspaceId: string,
+    update: (current: FileExplorerViewState) => FileExplorerViewState
+  ): void
   detectExecutors(hostId: string): Promise<void>
   checkHost(host: HostConfig): Promise<void>
   openFile(path: string, tabGroupId?: string): Promise<void>
@@ -798,6 +807,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   layouts: {},
   closingWorkbenchViews: {},
   workspaceFileRevisions: {},
+  fileExplorerStates: {},
   viewModes: {},
   executorDetections: {},
   hostChecks: {},
@@ -1636,6 +1646,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   setToolDockWidth(toolDockWidth) {
     set({ toolDockWidth: clampToolDockWidth(toolDockWidth) })
+  },
+  updateFileExplorerState(workspaceId, update) {
+    set((state) => ({
+      fileExplorerStates: {
+        ...state.fileExplorerStates,
+        [workspaceId]: update(
+          state.fileExplorerStates[workspaceId] ?? createEmptyFileExplorerViewState()
+        )
+      }
+    }))
   },
   async detectExecutors(hostId) {
     const executorIds = Object.keys(get().config?.executors ?? {})
