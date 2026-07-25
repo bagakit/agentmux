@@ -26,6 +26,7 @@ import { BrowserViewManager } from './browser-view-manager.js'
 import { ConfigStore } from './config-store.js'
 import { normalizeExternalUrl } from './external-url.js'
 import { FileObservationRegistry } from './file-observation-registry.js'
+import { runOwnerDisposals } from './owner-disposal.js'
 import { RuntimeController } from './runtime-controller.js'
 import { saveRuntimeConfig } from './runtime-config-transaction.js'
 import { WorkspaceFiles } from './workspace-files.js'
@@ -232,17 +233,28 @@ export async function registerIpc(args: {
   const externalFocus = new AgentMuxDesktopFocusServer({ focus: focusView })
   await externalFocus.start()
   return async () => {
-    await externalFocus.stop()
-    detach()
-    browsers.dispose()
-    ipcMain.removeListener('views:focus:response', acceptViewFocus)
-    for (const pending of pendingViewFocus.values()) {
-      clearTimeout(pending.timeout)
-      pending.reject(Object.assign(new Error('Desktop View focus owner was disposed.'), { code: 'VIEW_FOCUS_UNAVAILABLE' }))
-    }
-    pendingViewFocus.clear()
-    await fileObservations.dispose()
-    await files.dispose()
-    for (const channel of channels) ipcMain.removeHandler(channel)
+    await runOwnerDisposals([
+      async () => await externalFocus.stop(),
+      () => detach(),
+      () => browsers.dispose(),
+      () => {
+        ipcMain.removeListener('views:focus:response', acceptViewFocus)
+      },
+      () => {
+        for (const pending of pendingViewFocus.values()) {
+          clearTimeout(pending.timeout)
+          pending.reject(Object.assign(
+            new Error('Desktop View focus owner was disposed.'),
+            { code: 'VIEW_FOCUS_UNAVAILABLE' }
+          ))
+        }
+        pendingViewFocus.clear()
+      },
+      async () => await fileObservations.dispose(),
+      async () => await files.dispose(),
+      () => {
+        for (const channel of channels) ipcMain.removeHandler(channel)
+      }
+    ], 'Failed to dispose Desktop IPC owners.')
   }
 }
