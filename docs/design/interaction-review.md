@@ -16,13 +16,13 @@ Workspace、Board、Branches 和 Session 列表消费同一份 Project、Workspa
 
 ### Workspace 与 Worktree
 
-Files 和 Branches 位于同一个可调整的上下分栏。Branch 行展示真实 Worktree 绑定、路径、当前状态和 dirty 状态，并按 `hostId + worktreePath` 投影仍在运行的 Agent。Terminal、历史记录和已退出 Session 不计入运行中 Agent。
+Files 和 Branches 位于同一个可调整的上下分栏。Branch 行展示真实 Worktree 绑定、路径和当前分支状态，并按 `hostId + worktreePath` 投影仍在运行的 Agent。Terminal、历史记录和已退出 Session 不计入运行中 Agent。
 
 选择已绑定 Worktree 会一起更新 Selected Worktree、Explorer Root、Breadcrumb 和后续新 Tab 的 Workspace 上下文。已经打开的 File、Agent 和 Terminal Tab 保留原绑定，不被静默换根。选择未绑定 Branch 不执行隐式 checkout；只有 Worktree 创建成功并注册为 Workspace 后才切换。
 
 ### Board
 
-Board 的纵向行由 Branch/Worktree 决定，横向固定为 Inbox、Working、Needs You 和 Done。真实 Run 由 `(branchId, status)` 落位，状态变化只在所属 Branch 行内移动。
+Board 的纵向行由 Branch/Worktree 决定，横向固定为 Inbox、Working、Needs You 和 Done。Branch 的 Worktree 绑定先解析为 Workspace，Run 再按 `hostId + workspacePath` 进入对应行。`starting/running/working` 映射到 Working，`waiting/blocked/disconnected/error` 映射到 Needs You，`done/exited` 映射到 Done；状态变化只在所属 Branch 行内移动。
 
 Inbox 是矩阵第一列。Start discussion 打开携带 Branch 和 Workspace 上下文的创建界面，提交后仍经 Renderer Store、typed IPC 和 Core Client 创建真实 Session。启动失败恢复原创建界面，不生成占位 Run 或第二套任务数据。
 
@@ -32,7 +32,7 @@ Workspace 的布局是递归 `leaf | split` 树。每个 Leaf 拥有自己的 Ta
 
 点击 Focused Pane 的 `+` 会立即创建一个 Tab。初始内容提供 Terminal、Agent 和 Browser 选择，选定后在同一个 Tab 内完成转换。Focused Pane 同时决定文件、创建页和 Session 打开的落点。
 
-运行中的 Terminal 或 Agent 在关闭前需要明确确认。恢复、权限、断连和写入失败都显示在受影响对象旁边。跨对象故障由全局 Toast 汇总。
+关闭 Terminal 或 Agent Tab 只关闭该 View，不停止底层 Run，也不要求确认。显式 Stop Run 会影响所有 View，因此需要明确确认。恢复、权限、断连和写入失败都显示在受影响对象旁边。跨对象故障由全局 Toast 汇总。
 
 Tab 右键菜单只提供已有状态模型可以完成的操作：Close、Close Others、Close Left、Close Right，以及移动到 Right/Down Split。批量关闭遇到 dirty 文件时使用一个可访问确认框统一决定。Tab Pin、颜色和重命名没有对应模型，因此不显示占位动作。
 
@@ -58,7 +58,7 @@ xterm 的实际 `cols × rows` 是 Renderer View 真相。Replay 完成后，Ren
 
 Explorer 使用文件夹优先的层级树、展开目录缓存、stale response token、刷新时旧 children 保留、行选择、键盘导航和文件操作。Active Editor File 会展开祖先目录并滚动到真实 Row。Rename 和 Delete 会同步重映射或清理 Selection、Tab、Document 与 Last Active File 的对应子树。
 
-文件操作只经 typed preload IPC 到 Desktop Main。Main 负责 Workspace Root confinement、Local/Remote transport、Reveal、创建、同目录重命名和删除；Renderer 只持有树投影、选择和交互状态。跨目录 move 不属于当前文件操作合同。
+文件操作只经 typed preload IPC 到 Desktop Main。Main 负责 Workspace Root confinement 与 Local/Remote transport；Renderer 只持有树投影、选择和交互状态。Local 与 Remote 均支持读取、创建、重命名和删除，Reveal 与单文件观察只支持 Local。Remote revision-aware write 返回 typed unsupported。跨目录 move 不属于当前文件操作合同。
 
 Monaco 负责文本布局、DPR、tokenization 和编辑行为。语言检测使用集中式 filename/extension 注册，启动时把 detector 输出与 `monaco.languages.getLanguages()` 核对。`.vue`、`.svelte`、`.astro` 和 `.jsonl` 由 AgentMux 显式注册；`.ipynb` 使用 `json`，`.mdx` 使用 `mdx`；未注册的 `notebook`、`mermaid`、`makefile`、`cmake`、`erlang`、`haskell`、`csv`、`tsv` 和 `.nim` 回落为 `plaintext`。
 
