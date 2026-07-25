@@ -648,11 +648,9 @@ async function enqueueFileSave(
     if (documentLifetime(currentKey) !== savedLifetime || !useAppStore.getState().documents[currentKey]) return
     if (result.status === 'written') {
       const receiptState = useAppStore.getState()
-      const receiptIssue = receiptState.documentIssues[currentKey]
-      const hasObservedDiskFact = receiptIssue?.kind === 'changed' || receiptIssue?.kind === 'deleted' || receiptIssue?.kind === 'read-error'
       const needsReconciliation =
         (fileReadInFlightCounts.get(currentKey) ?? 0) > 0 ||
-        ((receiptState.documentObservationGenerations[currentKey] ?? 0) !== observationGeneration && !hasObservedDiskFact)
+        (receiptState.documentObservationGenerations[currentKey] ?? 0) !== observationGeneration
       fileReadRequestIds.set(currentKey, (fileReadRequestIds.get(currentKey) ?? 0) + 1)
       useAppStore.setState((current) => {
         const next = reduceDocumentWritten(
