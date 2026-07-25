@@ -1,0 +1,376 @@
+import { chmod, lstat, mkdir, rm } from 'node:fs/promises'
+import { createConnection, createServer, type Server, type Socket } from 'node:net'
+import { dirname } from 'node:path'
+import {
+  AGENTMUX_CONTROL_SCHEMA_VERSION,
+  type AgentMuxAgentRegion,
+  type AgentMuxControlHost,
+  type AgentMuxControlErrorReceipt,
+  type AgentMuxControlExecutor,
+  type AgentMuxControlReceipt,
+  type AgentMuxControlRequest,
+  type AgentMuxControlResult,
+  type AgentMuxControlSuccessReceipt,
+  type AgentMuxInspectedRegion,
+  type AgentMuxMessageTarget,
+  type AgentMuxOpenDestination,
+  type AgentMuxRegion,
+  type AgentMuxRegionAnchor,
+  type AgentMuxTabAnchor
+} from './control.js'
+import { AgentMuxError } from './errors.js'
+import { defaultAgentMuxControlSocketPath } from './runtime-paths.js'
+
+const MAX_MESSAGE_BYTES = 256 * 1024
+const MAX_ID_BYTES = 512
+const MAX_TAB_REGIONS = 64
+const MAX_EXECUTORS = 128
+const REQUEST_TIMEOUT_MS = 2_000
+const LONG_REQUEST_TIMEOUT_MS = 60_000
+const OPERATIONS = [
+  'inspect.tab', 'inspect.region', 'open.agent', 'send', 'focus', 'list.agents',
+  'interrupt', 'resume', 'stop'
+] as const
+
+function object(value: unknown, message: string, code: string): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new AgentMuxError(message, code)
+  return value as Record<string, unknown>
+}
+
+function id(value: unknown, message: string, code: string): string {
+  if (typeof value !== 'string' || !value || Buffer.byteLength(value) > MAX_ID_BYTES || /[\0\r\n]/u.test(value)) {
+    throw new AgentMuxError(message, code)
+  }
+  return value
+}
+
+function text(value: unknown, label: string, code = 'INVALID_CONTROL_REQUEST'): string {
+  if (typeof value !== 'string' || Buffer.byteLength(value) > MAX_MESSAGE_BYTES) {
+    throw new AgentMuxError(`${label} is invalid.`, code)
+  }
+  return value
+}
+
+function caller(value: unknown): { agentSessionId: string } {
+  const source = object(value, 'Control caller is invalid.', 'INVALID_CONTROL_REQUEST')
+  return { agentSessionId: id(source.agentSessionId, 'Control caller is invalid.', 'INVALID_CONTROL_REQUEST') }
+}
+
+function optionalCaller(value: unknown): { agentSessionId: string } | undefined {
+  return value === undefined ? undefined : caller(value)
+}
+
+function regionAnchor(value: unknown): AgentMuxRegionAnchor {
+  const source = object(value, 'Region anchor is invalid.', 'INVALID_CONTROL_REQUEST')
+  if (source.kind === 'self') return { kind: 'self' }
+  if (source.kind === 'region') return { kind: source.kind, regionId: id(source.regionId, 'Region anchor is invalid.', 'INVALID_CONTROL_REQUEST') }
+  throw new AgentMuxError('Region anchor is invalid.', 'INVALID_CONTROL_REQUEST')
+}
+
+function tabAnchor(value: unknown): AgentMuxTabAnchor {
+  const source = object(value, 'Tab anchor is invalid.', 'INVALID_CONTROL_REQUEST')
+  if (source.kind === 'self') return { kind: 'self' }
+  if (source.kind === 'tab') return { kind: source.kind, tabId: id(source.tabId, 'Tab anchor is invalid.', 'INVALID_CONTROL_REQUEST') }
+  throw new AgentMuxError('Tab anchor is invalid.', 'INVALID_CONTROL_REQUEST')
+}
+
+function messageTarget(value: unknown): AgentMuxMessageTarget {
+  const source = object(value, 'Message target is invalid.', 'INVALID_CONTROL_REQUEST')
+  if (source.kind === 'self') return { kind: source.kind }
+  if (source.kind === 'agent-session') return { kind: source.kind, agentSessionId: id(source.agentSessionId, 'Message target is invalid.', 'INVALID_CONTROL_REQUEST') }
+  if (source.kind === 'tab') return { kind: source.kind, tabId: id(source.tabId, 'Message target is invalid.', 'INVALID_CONTROL_REQUEST') }
+  if (source.kind === 'region') return { kind: source.kind, regionId: id(source.regionId, 'Message target is invalid.', 'INVALID_CONTROL_REQUEST') }
+  throw new AgentMuxError('Message target is invalid.', 'INVALID_CONTROL_REQUEST')
+}
+
+function sessionSelector(value: unknown): { kind: 'self' } | { kind: 'agent-session'; agentSessionId: string } {
+  const source = object(value, 'Agent Session target is invalid.', 'INVALID_CONTROL_REQUEST')
+  if (source.kind === 'self') return { kind: source.kind }
+  if (source.kind === 'agent-session') {
+    return {
+      kind: source.kind,
+      agentSessionId: id(source.agentSessionId, 'Agent Session target is invalid.', 'INVALID_CONTROL_REQUEST')
+    }
+  }
+  throw new AgentMuxError('Agent Session target is invalid.', 'INVALID_CONTROL_REQUEST')
+}
+
+function openDestination(value: unknown): AgentMuxOpenDestination {
+  const source = object(value, 'Open destination is invalid.', 'INVALID_CONTROL_REQUEST')
+  if (source.kind === 'split' && ['left', 'right', 'up', 'down'].includes(String(source.direction))) {
+    return { kind: source.kind, region: regionAnchor(source.region), direction: source.direction as 'left' | 'right' | 'up' | 'down' }
+  }
+  if (source.kind === 'new-tab') return { kind: source.kind, after: tabAnchor(source.after) }
+  if (source.kind === 'launcher') return { kind: source.kind, regionId: id(source.regionId, 'Open destination is invalid.', 'INVALID_CONTROL_REQUEST') }
+  throw new AgentMuxError('Open destination is invalid.', 'INVALID_CONTROL_REQUEST')
+}
+
+function destinationUsesSelf(value: AgentMuxOpenDestination): boolean {
+  return (value.kind === 'split' && value.region.kind === 'self') || (value.kind === 'new-tab' && value.after.kind === 'self')
+}
+
+export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequest {
+  const source = object(value, 'Control request is invalid.', 'INVALID_CONTROL_REQUEST')
+  if (source.schemaVersion !== AGENTMUX_CONTROL_SCHEMA_VERSION) throw new AgentMuxError('Control request version is invalid.', 'INVALID_CONTROL_REQUEST')
+  const requestId = id(source.requestId, 'Control request ID is invalid.', 'INVALID_CONTROL_REQUEST')
+  if (!(OPERATIONS as readonly unknown[]).includes(source.operation)) throw new AgentMuxError('Control operation is invalid.', 'INVALID_CONTROL_REQUEST')
+  if (source.operation === 'inspect.tab') {
+    const target = tabAnchor(source.target)
+    const owner = optionalCaller(source.caller)
+    if (target.kind === 'self' && !owner) throw new AgentMuxError('A self target requires a managed caller.', 'INVALID_CONTROL_REQUEST')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, target, ...(owner ? { caller: owner } : {}) }
+  }
+  if (source.operation === 'inspect.region') {
+    const target = regionAnchor(source.target)
+    const owner = optionalCaller(source.caller)
+    if (target.kind === 'self' && !owner) throw new AgentMuxError('A self target requires a managed caller.', 'INVALID_CONTROL_REQUEST')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, target, ...(owner ? { caller: owner } : {}) }
+  }
+  if (source.operation === 'open.agent') {
+    const contentSource = object(source.content, 'Agent open content is invalid.', 'INVALID_CONTROL_REQUEST')
+    const content = contentSource.kind === 'new-agent'
+      ? {
+          kind: contentSource.kind,
+          executorId: id(contentSource.executorId, 'Agent Executor is invalid.', 'INVALID_CONTROL_REQUEST'),
+          ...(contentSource.prompt === undefined ? {} : { prompt: text(contentSource.prompt, 'Agent prompt') })
+        } as const
+      : contentSource.kind === 'agent-session'
+        ? { kind: contentSource.kind, agentSessionId: id(contentSource.agentSessionId, 'Agent Session target is invalid.', 'INVALID_CONTROL_REQUEST') } as const
+        : (() => { throw new AgentMuxError('Agent open content is invalid.', 'INVALID_CONTROL_REQUEST') })()
+    const destination = openDestination(source.destination)
+    const owner = optionalCaller(source.caller)
+    if (destinationUsesSelf(destination) && !owner) throw new AgentMuxError('A self destination requires a managed caller.', 'INVALID_CONTROL_REQUEST')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, content, destination, ...(owner ? { caller: owner } : {}) }
+  }
+  if (source.operation === 'send') {
+    const target = messageTarget(source.target)
+    const owner = optionalCaller(source.caller)
+    if (target.kind === 'self' && !owner) throw new AgentMuxError('A self target requires a managed caller.', 'INVALID_CONTROL_REQUEST')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, target, text: text(source.text, 'Message text'), ...(owner ? { caller: owner } : {}) }
+  }
+  if (source.operation === 'list.agents') {
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation }
+  }
+  if (source.operation === 'interrupt' || source.operation === 'resume' || source.operation === 'stop') {
+    const target = sessionSelector(source.target)
+    const owner = optionalCaller(source.caller)
+    if (target.kind === 'self' && !owner) throw new AgentMuxError('A self target requires a managed caller.', 'INVALID_CONTROL_REQUEST')
+    return {
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId,
+      operation: source.operation,
+      target,
+      ...(source.operation === 'resume' ? { text: text(source.text, 'Resume text') } : {}),
+      ...(owner ? { caller: owner } : {})
+    } as AgentMuxControlRequest
+  }
+  const targetSource = object(source.target, 'Focus target is invalid.', 'INVALID_CONTROL_REQUEST')
+  const target = targetSource.kind === 'tab'
+    ? { kind: targetSource.kind, tabId: id(targetSource.tabId, 'Focus target is invalid.', 'INVALID_CONTROL_REQUEST') } as const
+    : targetSource.kind === 'region'
+      ? { kind: targetSource.kind, regionId: id(targetSource.regionId, 'Focus target is invalid.', 'INVALID_CONTROL_REQUEST') } as const
+      : (() => { throw new AgentMuxError('Focus target is invalid.', 'INVALID_CONTROL_REQUEST') })()
+  return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: 'focus', target }
+}
+
+function normalized(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) throw new AgentMuxError('Control Region bounds are invalid.', 'CONTROL_PROTOCOL_ERROR')
+  return value
+}
+
+function parseRegion(value: unknown, inspected: true): AgentMuxInspectedRegion
+function parseRegion(value: unknown, inspected?: false): AgentMuxRegion
+function parseRegion(value: unknown, inspected = false): AgentMuxRegion | AgentMuxInspectedRegion {
+  const source = object(value, 'Control Region result is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  const base = {
+    tabId: id(source.tabId, 'Control Region result is invalid.', 'CONTROL_PROTOCOL_ERROR'),
+    regionId: id(source.regionId, 'Control Region result is invalid.', 'CONTROL_PROTOCOL_ERROR'),
+    workspaceId: id(source.workspaceId, 'Control Region result is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  }
+  const region: AgentMuxRegion = source.kind === 'agent'
+    ? { ...base, kind: source.kind, agentSessionId: id(source.agentSessionId, 'Control Region result is invalid.', 'CONTROL_PROTOCOL_ERROR'), providerId: id(source.providerId, 'Control Region result is invalid.', 'CONTROL_PROTOCOL_ERROR'), executorId: id(source.executorId, 'Control Region result is invalid.', 'CONTROL_PROTOCOL_ERROR') }
+    : source.kind === 'terminal'
+      ? { ...base, kind: source.kind, runId: id(source.runId, 'Control Region result is invalid.', 'CONTROL_PROTOCOL_ERROR') }
+      : source.kind === 'browser'
+        ? { ...base, kind: source.kind, browserId: id(source.browserId, 'Control Region result is invalid.', 'CONTROL_PROTOCOL_ERROR') }
+        : source.kind === 'file'
+          ? { ...base, kind: source.kind, path: text(source.path, 'File path', 'CONTROL_PROTOCOL_ERROR') }
+          : source.kind === 'launcher'
+            ? { ...base, kind: source.kind }
+            : (() => { throw new AgentMuxError('Control Region result is invalid.', 'CONTROL_PROTOCOL_ERROR') })()
+  if (!inspected) return region
+  const rawBounds = object(source.bounds, 'Control Region bounds are invalid.', 'CONTROL_PROTOCOL_ERROR')
+  const bounds = { x: normalized(rawBounds.x), y: normalized(rawBounds.y), width: normalized(rawBounds.width), height: normalized(rawBounds.height) }
+  if (bounds.width === 0 || bounds.height === 0 || bounds.x + bounds.width > 1 + Number.EPSILON || bounds.y + bounds.height > 1 + Number.EPSILON) throw new AgentMuxError('Control Region bounds are invalid.', 'CONTROL_PROTOCOL_ERROR')
+  return { ...region, bounds }
+}
+
+function parseAgentRegion(value: unknown): AgentMuxAgentRegion {
+  const region = parseRegion(value)
+  if (region.kind !== 'agent') throw new AgentMuxError('Control Agent Region result is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  return region
+}
+
+function parseExecutors(value: unknown): AgentMuxControlExecutor[] {
+  if (!Array.isArray(value) || value.length > MAX_EXECUTORS) throw new AgentMuxError('Control Executors are invalid.', 'CONTROL_PROTOCOL_ERROR')
+  const result = value.map((item) => {
+    const source = object(item, 'Control Executor is invalid.', 'CONTROL_PROTOCOL_ERROR')
+    if (typeof source.label !== 'string' || !source.label.trim() || typeof source.available !== 'boolean') throw new AgentMuxError('Control Executor is invalid.', 'CONTROL_PROTOCOL_ERROR')
+    return { executorId: id(source.executorId, 'Control Executor is invalid.', 'CONTROL_PROTOCOL_ERROR'), label: source.label, providerId: id(source.providerId, 'Control Executor is invalid.', 'CONTROL_PROTOCOL_ERROR'), available: source.available }
+  })
+  if (new Set(result.map(({ executorId }) => executorId)).size !== result.length) throw new AgentMuxError('Control Executor identity is ambiguous.', 'CONTROL_PROTOCOL_ERROR')
+  return result
+}
+
+function successReceipt(request: AgentMuxControlRequest, result: AgentMuxControlResult): AgentMuxControlSuccessReceipt {
+  if (request.operation !== result.operation) throw new AgentMuxError('Control result operation does not match its request.', 'CONTROL_PROTOCOL_ERROR')
+  const { operation, ...body } = result
+  return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: request.requestId, ok: true, operation, result: body } as AgentMuxControlSuccessReceipt
+}
+
+function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSuccessReceipt {
+  const requestId = id(source.requestId, 'Control receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  const result = object(source.result, 'Control receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  if (source.operation === 'inspect.tab') {
+    const tab = object(result.tab, 'Control Tab result is invalid.', 'CONTROL_PROTOCOL_ERROR')
+    if (!Array.isArray(tab.regions) || tab.regions.length === 0 || tab.regions.length > MAX_TAB_REGIONS) throw new AgentMuxError('Control Tab Regions are invalid.', 'CONTROL_PROTOCOL_ERROR')
+    const regions = tab.regions.map((region) => parseRegion(region, true))
+    const tabId = id(tab.tabId, 'Control Tab result is invalid.', 'CONTROL_PROTOCOL_ERROR')
+    if (regions.some((region) => region.tabId !== tabId) || new Set(regions.map(({ regionId }) => regionId)).size !== regions.length) throw new AgentMuxError('Control Tab Regions are invalid.', 'CONTROL_PROTOCOL_ERROR')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation: source.operation, result: { tab: { tabId, workspaceId: id(tab.workspaceId, 'Control Tab result is invalid.', 'CONTROL_PROTOCOL_ERROR'), regions } } }
+  }
+  if (source.operation === 'inspect.region') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation: source.operation, result: { region: parseRegion(result.region, true) } }
+  if (source.operation === 'open.agent') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation: source.operation, result: { region: parseAgentRegion(result.region) } }
+  if (source.operation === 'send') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation: source.operation, result: { agentSessionId: id(result.agentSessionId, 'Control send result is invalid.', 'CONTROL_PROTOCOL_ERROR') } }
+  if (source.operation === 'focus') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation: source.operation, result: { tabId: id(result.tabId, 'Control focus result is invalid.', 'CONTROL_PROTOCOL_ERROR'), ...(result.regionId === undefined ? {} : { regionId: id(result.regionId, 'Control focus result is invalid.', 'CONTROL_PROTOCOL_ERROR') }) } }
+  if (source.operation === 'list.agents') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation: source.operation, result: { agents: parseExecutors(result.agents) } }
+  if (source.operation === 'interrupt') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation: source.operation, result: { agentSessionId: id(result.agentSessionId, 'Control interrupt result is invalid.', 'CONTROL_PROTOCOL_ERROR') } }
+  if (source.operation === 'resume') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation: source.operation, result: { agentSessionId: id(result.agentSessionId, 'Control resume result is invalid.', 'CONTROL_PROTOCOL_ERROR'), runId: id(result.runId, 'Control resume result is invalid.', 'CONTROL_PROTOCOL_ERROR') } }
+  if (source.operation === 'stop') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation: source.operation, result: { agentSessionId: id(result.agentSessionId, 'Control stop result is invalid.', 'CONTROL_PROTOCOL_ERROR') } }
+  throw new AgentMuxError('Control receipt operation is invalid.', 'CONTROL_PROTOCOL_ERROR')
+}
+
+function candidates(value: unknown): Array<{ agentSessionId: string; regionIds: string[] }> | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value) || value.length > MAX_TAB_REGIONS) throw new AgentMuxError('Control error candidates are invalid.', 'CONTROL_PROTOCOL_ERROR')
+  const result = value.map((item) => {
+    const source = object(item, 'Control error candidates are invalid.', 'CONTROL_PROTOCOL_ERROR')
+    if (!Array.isArray(source.regionIds) || source.regionIds.length > MAX_TAB_REGIONS) throw new AgentMuxError('Control error candidates are invalid.', 'CONTROL_PROTOCOL_ERROR')
+    return { agentSessionId: id(source.agentSessionId, 'Control error candidates are invalid.', 'CONTROL_PROTOCOL_ERROR'), regionIds: source.regionIds.map((regionId) => id(regionId, 'Control error candidates are invalid.', 'CONTROL_PROTOCOL_ERROR')) }
+  })
+  if (new Set(result.map(({ agentSessionId }) => agentSessionId)).size !== result.length) throw new AgentMuxError('Control error candidates are invalid.', 'CONTROL_PROTOCOL_ERROR')
+  return result
+}
+
+export function parseAgentMuxControlReceipt(value: unknown): AgentMuxControlReceipt {
+  const source = object(value, 'Control receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  if (source.schemaVersion !== AGENTMUX_CONTROL_SCHEMA_VERSION) throw new AgentMuxError('Control receipt version is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  if (source.ok === true) return parseSuccessReceipt(source)
+  if (source.ok !== false) throw new AgentMuxError('Control receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  const error = object(source.error, 'Control error receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  const errorCandidates = candidates(error.candidates)
+  return {
+    schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+    requestId: source.requestId === null ? null : id(source.requestId, 'Control error receipt is invalid.', 'CONTROL_PROTOCOL_ERROR'),
+    ok: false,
+    operation: source.operation === null ? null : (OPERATIONS as readonly unknown[]).includes(source.operation) ? source.operation as AgentMuxControlRequest['operation'] : (() => { throw new AgentMuxError('Control error receipt is invalid.', 'CONTROL_PROTOCOL_ERROR') })(),
+    error: { code: id(error.code, 'Control error receipt is invalid.', 'CONTROL_PROTOCOL_ERROR'), message: text(error.message, 'Control error message', 'CONTROL_PROTOCOL_ERROR'), ...(errorCandidates ? { candidates: errorCandidates } : {}) }
+  }
+}
+
+async function readMessage(socket: Socket): Promise<unknown> {
+  return await new Promise((resolve, reject) => {
+    const chunks: Buffer[] = []
+    let byteLength = 0
+    let settled = false
+    const cleanup = (): void => { socket.off('data', onData); socket.off('end', onEnd); socket.off('close', onClose); socket.off('error', onError) }
+    const parse = (content: Buffer): void => { if (settled) return; settled = true; cleanup(); try { resolve(JSON.parse(content.toString('utf8')) as unknown) } catch { reject(new AgentMuxError('Control message is invalid JSON.', 'CONTROL_PROTOCOL_ERROR')) } }
+    const onData = (chunk: Buffer): void => {
+      if (settled) return
+      chunks.push(chunk); byteLength += chunk.length
+      if (byteLength > MAX_MESSAGE_BYTES) { settled = true; cleanup(); reject(new AgentMuxError('Control message is too large.', 'CONTROL_PROTOCOL_ERROR')); return }
+      if (chunk.indexOf(0x0a) < 0) return
+      const content = Buffer.concat(chunks, byteLength); const newline = content.indexOf(0x0a)
+      if (content.subarray(newline + 1).toString('utf8').trim()) { settled = true; cleanup(); reject(new AgentMuxError('Control message has trailing data.', 'CONTROL_PROTOCOL_ERROR')); return }
+      parse(content.subarray(0, newline))
+    }
+    const onEnd = (): void => parse(Buffer.concat(chunks, byteLength))
+    const onClose = (): void => parse(Buffer.concat(chunks, byteLength))
+    const onError = (error: Error): void => { if (!settled) { settled = true; cleanup(); reject(error) } }
+    socket.on('data', onData); socket.once('end', onEnd); socket.once('close', onClose); socket.once('error', onError)
+  })
+}
+
+function requestIdentity(value: unknown): { requestId: string | null; operation: AgentMuxControlRequest['operation'] | null } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { requestId: null, operation: null }
+  const source = value as Record<string, unknown>
+  return { requestId: typeof source.requestId === 'string' ? source.requestId : null, operation: (OPERATIONS as readonly unknown[]).includes(source.operation) ? source.operation as AgentMuxControlRequest['operation'] : null }
+}
+
+function longOperation(operation: AgentMuxControlRequest['operation']): boolean {
+  return operation === 'open.agent' || operation === 'send' || operation === 'resume' || operation === 'stop'
+}
+
+async function socketIsActive(path: string): Promise<boolean> {
+  return await new Promise<boolean>((resolve, reject) => {
+    const socket = createConnection(path)
+    const timeout = setTimeout(() => { socket.destroy(); reject(new AgentMuxError('Control endpoint probe timed out.', 'CONTROL_UNAVAILABLE')) }, 250)
+    socket.once('connect', () => { clearTimeout(timeout); socket.destroy(); resolve(true) })
+    socket.once('error', (error: NodeJS.ErrnoException) => { clearTimeout(timeout); socket.destroy(); if (error.code === 'ENOENT' || error.code === 'ECONNREFUSED') resolve(false); else reject(error) })
+  })
+}
+
+export class AgentMuxControlServer {
+  private server: Server | null = null
+  constructor(private readonly control: AgentMuxControlHost, readonly path = defaultAgentMuxControlSocketPath()) {}
+
+  async start(): Promise<void> {
+    if (this.server) return
+    await mkdir(dirname(this.path), { recursive: true, mode: 0o700 }); await chmod(dirname(this.path), 0o700)
+    try {
+      const metadata = await lstat(this.path); const uid = typeof process.getuid === 'function' ? process.getuid() : metadata.uid
+      if (!metadata.isSocket() || metadata.uid !== uid || await socketIsActive(this.path)) throw new AgentMuxError('Another Control owner occupies the endpoint.', 'CONTROL_OWNER_BUSY')
+      await rm(this.path)
+    } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+    const server = createServer({ allowHalfOpen: true }, (socket) => void this.handle(socket))
+    try { await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(this.path, resolve) }); await chmod(this.path, 0o600); this.server = server } catch (error) { server.close(); throw error }
+  }
+
+  async stop(): Promise<void> {
+    const server = this.server; this.server = null
+    if (!server) return
+    await new Promise<void>((resolve) => server.close(() => resolve())); await rm(this.path, { force: true })
+  }
+
+  private async handle(socket: Socket): Promise<void> {
+    socket.setTimeout(REQUEST_TIMEOUT_MS, () => socket.destroy())
+    let raw: unknown
+    let receipt: AgentMuxControlReceipt
+    try {
+      raw = await readMessage(socket)
+      const request = parseAgentMuxControlRequest(raw)
+      socket.setTimeout(longOperation(request.operation) ? LONG_REQUEST_TIMEOUT_MS : REQUEST_TIMEOUT_MS)
+      receipt = successReceipt(request, await this.control.execute(request))
+    } catch (error) {
+      const identity = requestIdentity(raw)
+      const rawCandidates = typeof error === 'object' && error !== null && 'candidates' in error ? candidates(error.candidates) : undefined
+      receipt = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: identity.requestId, ok: false, operation: identity.operation, error: { code: typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : 'CONTROL_FAILED', message: error instanceof Error ? error.message : String(error), ...(rawCandidates ? { candidates: rawCandidates } : {}) } } satisfies AgentMuxControlErrorReceipt
+    }
+    if (!socket.destroyed) socket.end(`${JSON.stringify(receipt)}\n`)
+  }
+}
+
+export async function requestAgentMuxControl(value: AgentMuxControlRequest, path = defaultAgentMuxControlSocketPath()): Promise<AgentMuxControlSuccessReceipt> {
+  const request = parseAgentMuxControlRequest(value)
+  const response = await new Promise<unknown>((resolve, reject) => {
+    const socket = createConnection(path)
+    socket.setTimeout(longOperation(request.operation) ? LONG_REQUEST_TIMEOUT_MS : REQUEST_TIMEOUT_MS, () => socket.destroy(new AgentMuxError('Control request timed out.', 'CONTROL_TIMEOUT')))
+    socket.once('connect', () => socket.write(`${JSON.stringify(request)}\n`))
+    socket.once('error', (error: NodeJS.ErrnoException) => { if (error instanceof AgentMuxError) reject(error); else if (error.code === 'ENOENT' || error.code === 'ECONNREFUSED') reject(new AgentMuxError('Control owner is unavailable.', 'CONTROL_UNAVAILABLE')); else reject(error) })
+    void readMessage(socket).then(resolve, reject)
+  })
+  const receipt = parseAgentMuxControlReceipt(response)
+  if (!receipt.ok) throw Object.assign(new AgentMuxError(receipt.error.message, receipt.error.code), receipt.error.candidates ? { candidates: receipt.error.candidates } : {})
+  if (receipt.requestId !== request.requestId || receipt.operation !== request.operation) throw new AgentMuxError('Control receipt does not match its request.', 'CONTROL_PROTOCOL_ERROR')
+  return receipt
+}

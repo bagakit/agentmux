@@ -524,7 +524,7 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
           ],
           promptCrashRecovery: true,
           cliResolveKinds: ['agent-session', 'provider-native', 'acp-native', 'run'],
-          cliComposition: true,
+          cliControl: true,
           naturalTerminalStop: true,
           crashRecovery: true,
           remote: 'unsupported'

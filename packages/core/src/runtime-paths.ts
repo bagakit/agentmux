@@ -25,8 +25,8 @@ export function defaultCtxmuxStateDirectory(): string {
   return join(defaultAgentMuxRuntimeDirectory(), 'state')
 }
 
-export function defaultAgentMuxCompositionSocketPath(): string {
-  return join(defaultAgentMuxRuntimeDirectory(), 'composition.sock')
+export function defaultAgentMuxControlSocketPath(): string {
+  return join(defaultAgentMuxRuntimeDirectory(), 'control.sock')
 }
 
 export function defaultAgentMuxHookPort(): number {
