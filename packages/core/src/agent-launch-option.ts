@@ -377,10 +377,14 @@ export const TRAEX_LAUNCH_OPTIONS: readonly LaunchOptionDeclaration[] = [
   }
 ]
 
-// hermes top-level boolean `--yolo` ("Bypass all dangerous command approval prompts"), verified against
-// the installed binary's own `--help`. A boolean switch, so it is expressed as two choices whose argv is
-// the honest thing each does: the conservative default contributes NO argv (hermes keeps prompting) and
-// the yolo choice contributes the flag. `-m/--model` is a free string — no enum, so no model option.
+// cursor-agent top-level flags, verified against the installed binary's own `--help`:
+//   `--mode <plan|ask>` — an explicit choices list (`plan`: read-only planning; `ask`: read-only Q&A).
+//     There is no `--mode full`; full read/edit/run is the no-flag default, so the 'default' choice
+//     contributes NO argv.
+//   `--sandbox <enabled|disabled>` — an explicit choices list.
+//   `-f/--force` — a boolean ("Force allow commands unless explicitly denied"); the ask default
+//     contributes no argv. `--yolo` is a documented alias for `--force`, so it is NOT a second option.
+// Three options that compose. `--model` is a free string — no enum, so no model option.
 export const CURSOR_LAUNCH_OPTIONS: readonly LaunchOptionDeclaration[] = [
   {
     id: 'mode',
@@ -412,6 +416,10 @@ export const CURSOR_LAUNCH_OPTIONS: readonly LaunchOptionDeclaration[] = [
   }
 ]
 
+// hermes top-level boolean `--yolo` ("Bypass all dangerous command approval prompts"), verified against
+// the installed binary's own `--help`. A boolean switch, so it is expressed as two choices whose argv is
+// the honest thing each does: the conservative default contributes NO argv (hermes keeps prompting) and
+// the yolo choice contributes the flag. `-m/--model` is a free string — no enum, so no model option.
 export const HERMES_LAUNCH_OPTIONS: readonly LaunchOptionDeclaration[] = [
   {
     id: 'yolo',
