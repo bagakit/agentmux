@@ -168,7 +168,7 @@ Composition Host 是跨 Owner 事务编排边界，不保存 Provider、Run、Br
 ### Agent 如何理解“左边”
 
 - “在左边/右边/上面/下面开”默认指整张当前 Tab 的空间，不等于机械地切调用者自己的 Region。
-- Agent 先读取 `agentmux inspect --session self` 的 Region bounds，再选择要被切开的精确 `regionId`。
+- Agent 先读取 `agentmux inspect --tab self` 的 Region bounds，再选择要被切开的精确 `regionId`。
   只有当前 Tab 只有一个 Region，或用户明确说“在我旁边”时，才把 `self` 直接作为方向 anchor。
 - 例如右半边已经上下两块、左半边还是一整块时，用户说“在左边开 TraeX”，应把左边那块上下分，
   形成清楚的 2×2；不能继续把右下角调用者左右分成更窄的小块。
@@ -187,7 +187,9 @@ CLI 借鉴 lark-cli 的可发现性：稳定的用户意图动词、互斥的 ty
 ```bash
 agentmux inspect --session self
 agentmux inspect --session <session-id>
+agentmux inspect --tab self
 agentmux inspect --tab <tab-id>
+agentmux inspect --region self
 agentmux inspect --region <region-id>
 agentmux inspect --run <run-id>
 agentmux list sessions
@@ -221,8 +223,10 @@ agentmux stop --session <session-id|self>
 
 ### 类型化目标
 
-- `inspect` 恰好接受 `--session|--tab|--region|--run` 中一个。`self` 只能作为受管 Agent 的
-  Session/Tab/Region 身份缩写；解析不唯一时失败关闭。读操作不改变焦点。
+- `inspect` 恰好接受 `--session|--tab|--region|--run` 中一个。`inspect --session self` 从受管
+  环境取精确 Agent Session ID，只返回 Core Session/Run 真相；`inspect --tab self` 和
+  `inspect --region self` 由 Composition Host 从同一 caller Session 解析展示，不唯一时失败关闭。
+  Core 查询不做 Desktop enrichment，Composition 不可用时也不返回缩水结果。所有读操作都不改变焦点。
 - `send` 恰好接受 `--to-session|--to-region|--to-tab` 中一个。`--to-region` 要求该 Region
   当前展示 Agent；`--to-tab` 要求该 Tab 当前恰好只投影一个不同的 Agent Session。零个或
   多个都返回 `MESSAGE_TARGET_NOT_UNIQUE` 和按 Session 去重的精确 `candidates`，并提示先
@@ -295,7 +299,8 @@ Desktop 内置 Grok Profile 默认使用 Grok 官方的免确认参数
 
 ## 5. 验收
 
-- 受管 Agent 可用 `inspect --session self` 查询唯一 Tab 和当前 Region，并用一条
+- 受管 Agent 可用 `inspect --session self` 查询 Core Session/Run，再用 `inspect --tab self`
+  查询唯一 Tab 和当前 Region，并用一条
   `open agent --agent codex --right-of self` 在同一 Tab 右侧启动配置过的 Codex；操作前后
   Tab 数量不变。
 - Agent、Terminal 与 Browser 都通过同一个 typed `open` 合同在新 Tab 或四向
