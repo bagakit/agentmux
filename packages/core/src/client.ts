@@ -39,7 +39,7 @@ import {
 } from './agent-session-continuity.js'
 import { AgentHookServer, type AgentHookBinding } from './hook-server.js'
 import { AgentManagedHookInstaller } from './managed-hook-installer.js'
-import { defaultCtxmuxStateDirectory } from './runtime-paths.js'
+import { defaultCtxmuxStateDirectory, resolveCoreBinPath } from './runtime-paths.js'
 import { projectAgentMuxRuntimeSubjects, type AgentMuxRuntimeProjection } from './runtime.js'
 import { agentTimelineMutationFromAcpEvent } from './session-timeline.js'
 import type {
@@ -73,7 +73,7 @@ import type {
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/
 const TERMINAL_HANDSHAKE_TIMEOUT_MS = 10_000
 const TERMINAL_PROMPT_RENDER_TIMEOUT_MS = 10_000
-const AGENTMUX_CLI_PATH = fileURLToPath(new URL('../bin/agentmux', import.meta.url))
+const AGENTMUX_CLI_PATH = resolveCoreBinPath('agentmux')
 
 export type AgentMuxAgentCreateInput = {
   agentSessionId?: string
