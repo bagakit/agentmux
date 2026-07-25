@@ -1,8 +1,10 @@
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
-import { cp, mkdtemp, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { cp, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { createConnection, createServer, type Server, type Socket } from 'node:net'
+import { dirname, join, resolve } from 'node:path'
+import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { execFile } from 'node:child_process'
@@ -20,7 +22,10 @@ const promptCrashFixture = fileURLToPath(new URL('./fixtures/prompt-submit-crash
 const runtimeScopePreloadFixture = fileURLToPath(new URL('./fixtures/runtime-scope-preload.mjs', import.meta.url))
 const ownerReceiptFailureFixture = fileURLToPath(new URL('./fixtures/ctxmux-owner-receipt-failure.mjs', import.meta.url))
 const ownerRelocationFixture = fileURLToPath(new URL('./fixtures/ctxmux-owner-relocation.mjs', import.meta.url))
-const ctxmuxRuntimeId = 'ac53b1e43e67a73841d4f6cf'
+const liveRuntimeFenceFixture = fileURLToPath(new URL('./fixtures/ctxmux-live-runtime-fence.mjs', import.meta.url))
+const stopResponseLossFixture = fileURLToPath(new URL('./fixtures/ctxmux-stop-response-loss-worker.mjs', import.meta.url))
+const stopRecoveryFixture = fileURLToPath(new URL('./fixtures/ctxmux-stop-recovery-worker.mjs', import.meta.url))
+const ctxmuxRuntimeId = '2629d6d0809d4b85f4b475cc'
 const roots: string[] = []
 
 afterEach(async () => {
@@ -179,6 +184,132 @@ async function waitForNoDaemon(daemonPath: string, runtimeDirectory: string): Pr
   throw new Error('AgentMux left a ctxmuxd process after failed owner receipt commit.')
 }
 
+async function readJsonLine(
+  lines: AsyncIterator<string>,
+  label: string
+): Promise<Record<string, unknown>> {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  try {
+    const result = await Promise.race([
+      lines.next(),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(`Timed out waiting for ${label}.`)), 5_000)
+      })
+    ])
+    if (result.done) throw new Error(`Packed child closed before ${label}.`)
+    const parsed: unknown = JSON.parse(result.value)
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      throw new Error(`Packed child emitted an invalid ${label}.`)
+    }
+    return parsed as Record<string, unknown>
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
+type StopResponseLossProxy = {
+  dropped: Promise<void>
+  restore(): Promise<void>
+}
+
+async function installStopResponseLossProxy(socketPath: string): Promise<StopResponseLossProxy> {
+  const upstreamPath = join(dirname(socketPath), `.stop-${randomUUID().slice(0, 8)}.sock`)
+  await rename(socketPath, upstreamPath)
+  const pairs = new Set<{ downstream: Socket; upstream: Socket }>()
+  let settled = false
+  let resolveDropped!: () => void
+  let rejectDropped!: (error: Error) => void
+  const dropped = new Promise<void>((resolve, reject) => {
+    resolveDropped = resolve
+    rejectDropped = reject
+  })
+  void dropped.catch(() => {})
+  const fail = (error: Error): void => {
+    if (settled) return
+    settled = true
+    rejectDropped(error)
+  }
+  const server: Server = createServer((downstream) => {
+    const upstream = createConnection(upstreamPath)
+    const pair = { downstream, upstream }
+    pairs.add(pair)
+    let requestWindow = ''
+    let responseBuffer = ''
+    let recoverableStopRequested = false
+    const remove = (): void => { pairs.delete(pair) }
+    downstream.on('data', (chunk: Buffer) => {
+      requestWindow = `${requestWindow}${chunk.toString('utf8')}`.slice(-64 * 1024)
+      if (requestWindow.includes('"type":"attach_recoverable_stop"')) {
+        recoverableStopRequested = true
+      }
+      if (!upstream.destroyed) upstream.write(chunk)
+    })
+    upstream.on('data', (chunk: Buffer) => {
+      responseBuffer += chunk.toString('utf8')
+      while (true) {
+        const newline = responseBuffer.indexOf('\n')
+        if (newline < 0) return
+        const line = responseBuffer.slice(0, newline)
+        responseBuffer = responseBuffer.slice(newline + 1)
+        let frame: unknown = null
+        try { frame = JSON.parse(line) } catch {}
+        if (
+          recoverableStopRequested &&
+          typeof frame === 'object' &&
+          frame !== null &&
+          !Array.isArray(frame) &&
+          (frame as { type?: unknown }).type === 'response'
+        ) {
+          if (!settled) {
+            settled = true
+            resolveDropped()
+          }
+          downstream.destroy()
+          upstream.destroy()
+          return
+        }
+        if (!downstream.destroyed) downstream.write(`${line}\n`)
+      }
+    })
+    downstream.once('error', (error) => {
+      upstream.destroy()
+      if (!recoverableStopRequested) fail(error)
+    })
+    upstream.once('error', (error) => {
+      downstream.destroy()
+      if (!recoverableStopRequested) fail(error)
+    })
+    downstream.once('close', remove)
+    upstream.once('close', remove)
+    downstream.once('end', () => upstream.end())
+    upstream.once('end', () => downstream.end())
+  })
+  server.once('error', fail)
+  try {
+    server.listen(socketPath)
+    await once(server, 'listening')
+  } catch (error) {
+    await rm(socketPath, { force: true })
+    await rename(upstreamPath, socketPath)
+    throw error
+  }
+  let restored = false
+  return {
+    dropped,
+    async restore() {
+      if (restored) return
+      restored = true
+      for (const pair of pairs) {
+        pair.downstream.destroy()
+        pair.upstream.destroy()
+      }
+      await new Promise<void>((resolveClose) => server.close(() => resolveClose()))
+      await rm(socketPath, { force: true })
+      await rename(upstreamPath, socketPath)
+    }
+  }
+}
+
 describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
   'packed @agentmux/core ctxmux consumer',
   () => {
@@ -263,7 +394,10 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         cp(promptCrashFixture, join(consumerDirectory, 'prompt-submit-crash-worker.mjs')),
         cp(runtimeScopePreloadFixture, join(consumerDirectory, 'runtime-scope-preload.mjs')),
         cp(ownerReceiptFailureFixture, join(consumerDirectory, 'ctxmux-owner-receipt-failure.mjs')),
-        cp(ownerRelocationFixture, join(consumerDirectory, 'ctxmux-owner-relocation.mjs'))
+        cp(ownerRelocationFixture, join(consumerDirectory, 'ctxmux-owner-relocation.mjs')),
+        cp(liveRuntimeFenceFixture, join(consumerDirectory, 'ctxmux-live-runtime-fence.mjs')),
+        cp(stopResponseLossFixture, join(consumerDirectory, 'ctxmux-stop-response-loss-worker.mjs')),
+        cp(stopRecoveryFixture, join(consumerDirectory, 'ctxmux-stop-recovery-worker.mjs'))
       ])
 
       const packageRoot = join(consumerDirectory, 'node_modules', '@agentmux', 'core')
@@ -278,7 +412,7 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
           url: 'git+ssh://git@github.com/bagakit/agentmux.git',
           directory: 'packages/core'
         },
-        engines: { node: '>=22.0.0' },
+        engines: { node: '>=24.0.0' },
         os: ['darwin'],
         cpu: ['arm64'],
         exports: {
@@ -330,8 +464,8 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         'utf8'
       ))
       expect(artifactManifest.source).toMatchObject({
-        commit: 'f89dabe70eba38d46992c320e40c9ebe2f09b5e5',
-        tree: '37632c41c4aae42ba40f33ebe9c54fab13d17c44',
+        commit: '1603908a253162632e8812ceb9db19c3e416fea4',
+        tree: '464f239190234c8369799dca06a630b3b48f5cca',
         worktree_clean: true
       })
 
@@ -348,6 +482,9 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
       }
       let activeDaemon: DaemonProcess | null = null
       let replacement: ReturnType<typeof spawn> | null = null
+      let liveRuntimeFence: ReturnType<typeof spawn> | null = null
+      let stopResponseLossWorker: ReturnType<typeof spawn> | null = null
+      let stopResponseLossProxy: StopResponseLossProxy | null = null
       let cleanupSentinelPid: number | null = null
       try {
         const result = await execFileAsync(process.execPath, ['packed-consumer.mjs'], {
@@ -376,6 +513,7 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
           dedupOccurrences: 1,
           codexSemanticSession: 'codex-semantic-1',
           codexNativeSession: 'native-codex-semantic-1',
+          semanticContinuity: 'conflict-resumed-retired',
           terminalHandshake: 'query-ack-prompt',
           stopEpochReadiness: [
             'missing-stop-rejected-before-payload',
@@ -401,6 +539,96 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
           daemonSha256: string
           daemonInstanceId: string
         }
+
+        stopResponseLossWorker = spawn(
+          process.execPath,
+          ['ctxmux-stop-response-loss-worker.mjs'],
+          {
+            cwd: consumerDirectory,
+            env: {
+              ...runtimeEnvironment,
+              AGENTMUX_FAKE_CODEX: join(consumerDirectory, 'bin', 'codex')
+            },
+            stdio: ['pipe', 'pipe', 'pipe']
+          }
+        )
+        const stopResponseLossExited = once(stopResponseLossWorker, 'exit')
+        let stopResponseLossStderr = ''
+        stopResponseLossWorker.stderr?.setEncoding('utf8')
+        stopResponseLossWorker.stderr?.on('data', (chunk) => { stopResponseLossStderr += chunk })
+        const stopResponseLossLines = createInterface({
+          input: stopResponseLossWorker.stdout!,
+          crlfDelay: Infinity
+        })[Symbol.asyncIterator]()
+        let stopResponseLossReady: Record<string, unknown>
+        try {
+          stopResponseLossReady = await readJsonLine(
+            stopResponseLossLines,
+            'recoverable Stop response-loss readiness'
+          )
+        } catch (error) {
+          const [exitCode, signal] = await stopResponseLossExited
+          throw new Error(
+            `${error instanceof Error ? error.message : String(error)} ` +
+            `(exit=${String(exitCode)}, signal=${String(signal)}): ${stopResponseLossStderr}`
+          )
+        }
+        expect(stopResponseLossReady).toMatchObject({
+          phase: 'ready',
+          agentSessionId: 'packed-stop-response-loss'
+        })
+        const stopResponseLossRun = stopResponseLossReady.run as { runId: string }
+        stopResponseLossProxy = await installStopResponseLossProxy(activeDaemon.socketPath)
+        stopResponseLossWorker.stdin?.end('stop\n')
+        const stopReservation = await readJsonLine(
+          stopResponseLossLines,
+          'persisted recoverable Stop operation'
+        )
+        expect(stopReservation).toMatchObject({
+          phase: 'stop-reserved',
+          operation: {
+            daemonInstance: ownerReceipt.daemonInstanceId,
+            runId: stopResponseLossRun.runId
+          }
+        })
+        const stopResponseLossResult = await readJsonLine(
+          stopResponseLossLines,
+          'recoverable Stop lost response'
+        )
+        await stopResponseLossProxy.dropped
+        expect(stopResponseLossResult).toMatchObject({
+          phase: 'stop-result',
+          ok: false,
+          detail: 'unknown'
+        })
+        stopResponseLossWorker.kill('SIGKILL')
+        const [, stopResponseLossSignal] = await stopResponseLossExited
+        expect(stopResponseLossSignal).toBe('SIGKILL')
+        expect(stopResponseLossStderr).toBe('')
+        stopResponseLossWorker = null
+        await stopResponseLossProxy.restore()
+        stopResponseLossProxy = null
+
+        const recoveredStop = await execFileAsync(
+          process.execPath,
+          ['ctxmux-stop-recovery-worker.mjs'],
+          {
+            cwd: consumerDirectory,
+            timeout: 15_000,
+            maxBuffer: 2 * 1024 * 1024,
+            env: runtimeEnvironment
+          }
+        )
+        const recoveredStopReceipt = JSON.parse(recoveredStop.stdout.trim()) as {
+          operation: unknown
+          agentSessions: unknown[]
+          recoveredRun: { state: { type: string } } | null
+        }
+        expect(recoveredStopReceipt.operation).toEqual(stopReservation.operation)
+        expect(recoveredStopReceipt.agentSessions).toEqual([])
+        expect(recoveredStopReceipt.recoveredRun?.state.type).not.toBe('running')
+        expect((await waitForDaemonProcess(daemonPath, runtimeDirectory)).pid).toBe(activeDaemon.pid)
+
         const relocatedReceipt = {
           ...ownerReceipt,
           daemonPath: join(
@@ -431,6 +659,24 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
           instanceId: ownerReceipt.daemonInstanceId
         })
         expect((await waitForDaemonProcess(daemonPath, runtimeDirectory)).pid).toBe(activeDaemon.pid)
+
+        liveRuntimeFence = spawn(process.execPath, ['ctxmux-live-runtime-fence.mjs'], {
+          cwd: consumerDirectory,
+          env: runtimeEnvironment,
+          stdio: ['pipe', 'pipe', 'pipe']
+        })
+        const liveRuntimeFenceExited = once(liveRuntimeFence, 'exit')
+        let liveRuntimeFenceStderr = ''
+        liveRuntimeFence.stderr?.setEncoding('utf8')
+        liveRuntimeFence.stderr?.on('data', (chunk) => { liveRuntimeFenceStderr += chunk })
+        const liveRuntimeFenceLines = createInterface({
+          input: liveRuntimeFence.stdout!,
+          crlfDelay: Infinity
+        })[Symbol.asyncIterator]()
+        expect(await readJsonLine(liveRuntimeFenceLines, 'live Runtime fence readiness')).toMatchObject({
+          phase: 'ready',
+          identity: { instanceId: ownerReceipt.daemonInstanceId }
+        })
 
         await writeFile(ownerReceiptPath, `${JSON.stringify({
           ...relocatedReceipt,
@@ -480,6 +726,28 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
           () => replacementStderr,
           () => replacementError
         )
+        liveRuntimeFence.stdin?.end('dispatch\n')
+        const liveFenceResult = await readJsonLine(
+          liveRuntimeFenceLines,
+          'live Runtime replacement dispatch result'
+        )
+        expect(liveFenceResult).toMatchObject({
+          phase: 'dispatch',
+          ok: false,
+          code: 'CTXMUX_UNAVAILABLE'
+        })
+        expect(liveFenceResult.message).toMatch(/reachable Runtime identity .* does not match expected/u)
+        const replacementRuns = await execFileAsync(cliPath, [
+          '--socket', activeDaemon.socketPath, 'list'
+        ], {
+          timeout: 5_000,
+          maxBuffer: 256 * 1024
+        })
+        expect(replacementRuns.stdout.trim()).toBe('')
+        const [liveRuntimeFenceExitCode] = await liveRuntimeFenceExited
+        expect(liveRuntimeFenceExitCode).toBe(0)
+        expect(liveRuntimeFenceStderr).toBe('')
+        liveRuntimeFence = null
         const fenced = await execFileAsync(process.execPath, ['ctxmux-owner-fence.mjs'], {
           cwd: consumerDirectory,
           timeout: 15_000,
@@ -488,6 +756,25 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         })
         expect(fenced.stdout.trim()).toBe('ctxmux-owner-fence-ok')
       } finally {
+        if (
+          stopResponseLossWorker?.pid &&
+          stopResponseLossWorker.exitCode === null &&
+          stopResponseLossWorker.signalCode === null
+        ) {
+          const exited = once(stopResponseLossWorker, 'exit')
+          stopResponseLossWorker.kill('SIGKILL')
+          await exited.catch(() => {})
+        }
+        await stopResponseLossProxy?.restore()
+        if (
+          liveRuntimeFence?.pid &&
+          liveRuntimeFence.exitCode === null &&
+          liveRuntimeFence.signalCode === null
+        ) {
+          const exited = once(liveRuntimeFence, 'exit')
+          liveRuntimeFence.kill('SIGTERM')
+          await exited.catch(() => {})
+        }
         if (replacement?.pid && replacement.exitCode === null && replacement.signalCode === null) {
           const exited = once(replacement, 'exit')
           replacement.kill('SIGTERM')

@@ -117,4 +117,5 @@ describe('SessionPane Agent Composer ownership', () => {
     expect(markup).toContain('Connecting to this session')
     expect(markup).toContain('data-test-agent-composer="disabled"')
   })
+
 })

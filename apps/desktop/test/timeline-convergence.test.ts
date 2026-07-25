@@ -360,7 +360,8 @@ describe('Timeline convergence', () => {
       sessions: [session],
       timelines: {
         [session.id]: { agentSessionId: session.id, revision: 1, items: [first] }
-      }
+      },
+      recoveryCandidates: []
     })
 
     const dispose = await initialized
@@ -392,7 +393,7 @@ describe('Timeline convergence', () => {
 
     const initialized = useAppStore.getState().initialize()
     listener!(agentSessionEvent(session))
-    initialSnapshot.resolve({ sessions: [], timelines: {} })
+    initialSnapshot.resolve({ sessions: [], timelines: {}, recoveryCandidates: [] })
     const dispose = await initialized
     await vi.waitFor(() => expect(snapshot).toHaveBeenCalledTimes(2))
     listener!(timelineEvent(session, 2, second))
@@ -400,7 +401,8 @@ describe('Timeline convergence', () => {
       sessions: [session],
       timelines: {
         [session.id]: { agentSessionId: session.id, revision: 1, items: [first] }
-      }
+      },
+      recoveryCandidates: []
     })
 
     await vi.waitFor(() => expect(useAppStore.getState().timelines[session.id]).toEqual({
@@ -422,7 +424,8 @@ describe('Timeline convergence', () => {
       .mockRejectedValueOnce(new Error('membership snapshot unavailable'))
       .mockResolvedValueOnce({
         sessions: [session],
-        timelines: { [session.id]: { agentSessionId: session.id, revision: 0, items: [] } }
+        timelines: { [session.id]: { agentSessionId: session.id, revision: 0, items: [] } },
+        recoveryCandidates: []
       })
     useAppStore.setState({
       sessions: [],
@@ -498,13 +501,14 @@ describe('Timeline convergence', () => {
     })
     expect(useAppStore.getState().pendingAgentLaunches[pendingSession.id]?.events).toHaveLength(2)
 
-    firstMembership.resolve({ sessions: [], timelines: {} })
+    firstMembership.resolve({ sessions: [], timelines: {}, recoveryCandidates: [] })
     await vi.waitFor(() => expect(snapshot).toHaveBeenCalledTimes(2))
     secondMembership.resolve({
       sessions: [externalSession],
       timelines: {
         [externalSession.id]: { agentSessionId: externalSession.id, revision: 257, items: [] }
-      }
+      },
+      recoveryCandidates: []
     })
     await vi.waitFor(() => expect(useAppStore.getState().sessions).toContainEqual(externalSession))
     launchResult.resolve({
@@ -588,7 +592,8 @@ describe('Timeline convergence', () => {
       sessions: [externalSession],
       timelines: {
         [externalSession.id]: { agentSessionId: externalSession.id, revision: 0, items: [] }
-      }
+      },
+      recoveryCandidates: []
     })
     await vi.waitFor(() => expect(useAppStore.getState().sessions).toContainEqual(externalSession))
 
@@ -652,10 +657,11 @@ describe('Timeline convergence', () => {
     }
     firstSnapshot.resolve({
       sessions: [session],
-      timelines: { [session.id]: { agentSessionId: session.id, revision: 0, items: [] } }
+      timelines: { [session.id]: { agentSessionId: session.id, revision: 0, items: [] } },
+      recoveryCandidates: []
     })
     await vi.waitFor(() => expect(snapshot).toHaveBeenCalledTimes(2))
-    secondSnapshot.resolve({ sessions: [], timelines: {} })
+    secondSnapshot.resolve({ sessions: [], timelines: {}, recoveryCandidates: [] })
 
     const dispose = await initialized
     expect(useAppStore.getState().sessions).toEqual([])
@@ -714,7 +720,8 @@ describe('Timeline convergence', () => {
     useAppStore.getState().applyEvent(timelineEvent(session, 259, last))
     canonicalSnapshot.resolve({
       sessions: [session],
-      timelines: { [session.id]: baseline }
+      timelines: { [session.id]: baseline },
+      recoveryCandidates: []
     })
     await launched
 

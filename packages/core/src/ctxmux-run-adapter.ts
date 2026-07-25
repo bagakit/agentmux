@@ -11,11 +11,18 @@ import {
   CtxmuxCommandError,
   CtxmuxProtocolError,
   PROTOCOL_VERSION,
+  RUNTIME_CAPABILITY_NATIVE_RECOVERABLE_INPUT,
+  RUNTIME_CAPABILITY_NATIVE_RECOVERABLE_STOP,
+  RUNTIME_CAPABILITY_NATIVE_START,
+  RUNTIME_CAPABILITY_PERSISTENT_STATE,
+  RUNTIME_CAPABILITY_PLANNED_EXEC_UPGRADE_CONTINUITY,
   createOperationKey,
   defineRun,
   type OutputChunk,
+  type RecoverableStopOperation,
   type RunEvent,
-  type RunInfo
+  type RunInfo,
+  type RuntimeIdentity
 } from '@ctxmux/sdk'
 import { AgentMuxError } from './errors.js'
 import {
@@ -24,10 +31,18 @@ import {
   defaultCtxmuxStateDirectory
 } from './runtime-paths.js'
 
-const CTXMUX_COMMIT = 'f89dabe70eba38d46992c320e40c9ebe2f09b5e5'
-const CTXMUX_TREE = '37632c41c4aae42ba40f33ebe9c54fab13d17c44'
+const CTXMUX_COMMIT = '1603908a253162632e8812ceb9db19c3e416fea4'
+const CTXMUX_TREE = '464f239190234c8369799dca06a630b3b48f5cca'
 const CTXMUX_VERSION = '0.1.0'
-const CTXMUX_MANIFEST_SHA256 = 'ac53b1e43e67a73841d4f6cfbd272628e47f3731f29772dbb86bfbfce77935de'
+const CTXMUX_MANIFEST_SHA256 = '2629d6d0809d4b85f4b475cc0d00ee677c4f17861b1fc904f2dabd8f18592bca'
+const CTXMUX_RUNTIME_BUILD_ID = `ctxmuxd/${CTXMUX_VERSION}`
+const REQUIRED_RUNTIME_CAPABILITIES = {
+  [RUNTIME_CAPABILITY_NATIVE_START]: 1,
+  [RUNTIME_CAPABILITY_NATIVE_RECOVERABLE_INPUT]: 1,
+  [RUNTIME_CAPABILITY_NATIVE_RECOVERABLE_STOP]: 1,
+  [RUNTIME_CAPABILITY_PERSISTENT_STATE]: 1,
+  [RUNTIME_CAPABILITY_PLANNED_EXEC_UPGRADE_CONTINUITY]: 1
+} as const
 const DAEMON_READY_TIMEOUT_MS = 5_000
 const DAEMON_POLL_INTERVAL_MS = 20
 const DAEMON_READINESS_MAX_BYTES = 8 * 1024
@@ -68,6 +83,14 @@ type OwnerReceipt = {
   socketPath: string
   stateDirectory: string
   daemonInstanceId: string
+  runtimeId: string
+  runtimeBuildId: string
+}
+
+export type CtxmuxAdapterStopOperation = {
+  daemonInstance: string
+  operationKey: string
+  runId: string
 }
 
 export type CtxmuxAdapterRun = {
@@ -385,7 +408,7 @@ function expectedOwnerReceipt(
   artifacts: VerifiedArtifacts,
   socketPath: string,
   stateDirectory: string,
-  daemonInstanceId: string
+  runtime: RuntimeIdentity
 ): OwnerReceipt {
   return {
     schema: 'agentmux.ctxmux-owner.v1',
@@ -396,7 +419,9 @@ function expectedOwnerReceipt(
     daemonPath: artifacts.daemonPath,
     socketPath,
     stateDirectory,
-    daemonInstanceId
+    daemonInstanceId: runtime.daemonInstanceId,
+    runtimeId: runtime.runtimeId,
+    runtimeBuildId: runtime.buildId
   }
 }
 
@@ -409,7 +434,9 @@ const OWNER_RECEIPT_KEYS = [
   'daemonPath',
   'socketPath',
   'stateDirectory',
-  'daemonInstanceId'
+  'daemonInstanceId',
+  'runtimeId',
+  'runtimeBuildId'
 ].sort()
 
 function ownerReceiptMatchesExpected(receipt: unknown, expected: OwnerReceipt): boolean {
@@ -428,21 +455,42 @@ function ownerReceiptMatchesExpected(receipt: unknown, expected: OwnerReceipt): 
     isAbsolute(candidate.daemonPath) &&
     candidate.socketPath === expected.socketPath &&
     candidate.stateDirectory === expected.stateDirectory &&
-    candidate.daemonInstanceId === expected.daemonInstanceId
+    candidate.daemonInstanceId === expected.daemonInstanceId &&
+    candidate.runtimeId === expected.runtimeId &&
+    candidate.runtimeBuildId === expected.runtimeBuildId
   )
+}
+
+function assertRuntimeIdentity(runtime: RuntimeIdentity): void {
+  const missingCapability = Object.entries(REQUIRED_RUNTIME_CAPABILITIES).find(
+    ([capability, requiredVersion]) => runtime.capabilities[capability] !== requiredVersion
+  )
+  if (
+    runtime.protocolGeneration !== PROTOCOL_VERSION ||
+    runtime.runtimeIdPersistence !== 'state_dir' ||
+    runtime.buildId !== CTXMUX_RUNTIME_BUILD_ID ||
+    runtime.platform !== 'macos' ||
+    runtime.arch !== 'aarch64' ||
+    missingCapability
+  ) {
+    throw new AgentMuxError(
+      `The responding CtxMux Runtime does not satisfy the pinned Local contract${missingCapability ? `: ${missingCapability[0]}` : '.'}`,
+      'CTXMUX_OWNER_IDENTITY_UNPROVEN'
+    )
+  }
 }
 
 async function verifyOwnerReceipt(
   artifacts: VerifiedArtifacts,
   socketPath: string,
   stateDirectory: string,
-  daemonInstanceId: string
+  runtime: RuntimeIdentity
 ): Promise<void> {
   try {
     const path = ownerReceiptPath()
     const metadata = await stat(path)
     const receipt: unknown = JSON.parse(await readFile(path, 'utf8'))
-    const expected = expectedOwnerReceipt(artifacts, socketPath, stateDirectory, daemonInstanceId)
+    const expected = expectedOwnerReceipt(artifacts, socketPath, stateDirectory, runtime)
     if (
       !metadata.isFile() ||
       (metadata.mode & 0o777) !== 0o600 ||
@@ -462,14 +510,14 @@ async function writeOwnerReceipt(
   artifacts: VerifiedArtifacts,
   socketPath: string,
   stateDirectory: string,
-  daemonInstanceId: string
+  runtime: RuntimeIdentity
 ): Promise<void> {
   const path = ownerReceiptPath()
   const temporaryPath = join(dirname(path), `.owner-${process.pid}-${randomUUID()}.json`)
   try {
     await writeFile(
       temporaryPath,
-      `${JSON.stringify(expectedOwnerReceipt(artifacts, socketPath, stateDirectory, daemonInstanceId))}\n`,
+      `${JSON.stringify(expectedOwnerReceipt(artifacts, socketPath, stateDirectory, runtime))}\n`,
       { encoding: 'utf8', mode: 0o600, flag: 'wx' }
     )
     await rename(temporaryPath, path)
@@ -499,7 +547,7 @@ export class CtxmuxRunAdapter {
   readonly socketPath = defaultCtxmuxSocketPath()
   readonly stateDirectory = defaultCtxmuxStateDirectory()
   private client: CtxmuxClient | null = null
-  private daemonInstanceId: string | null = null
+  private runtime: RuntimeIdentity | null = null
   private readonly attachments = new Map<string, LiveAttachment>()
   private eventListener: ((event: CtxmuxAdapterEvent) => void) | null = null
   private errorListener: ((error: AgentMuxError, runId?: string) => void) | null = null
@@ -529,13 +577,14 @@ export class CtxmuxRunAdapter {
       chmod(dirname(this.socketPath), 0o700),
       chmod(this.stateDirectory, 0o700)
     ])
-    const client = new CtxmuxClient({ socketPath: this.socketPath })
-    let daemonInstanceId: string | null = null
+    const diagnosticsClient = new CtxmuxClient({ socketPath: this.socketPath })
+    let runtime: RuntimeIdentity | null = null
     try {
-      daemonInstanceId = await client.daemonInstance()
-      await verifyOwnerReceipt(artifacts, this.socketPath, this.stateDirectory, daemonInstanceId)
+      runtime = await diagnosticsClient.runtimeInfo()
+      assertRuntimeIdentity(runtime)
+      await verifyOwnerReceipt(artifacts, this.socketPath, this.stateDirectory, runtime)
     } catch {
-      if (daemonInstanceId !== null) {
+      if (runtime !== null) {
         throw new AgentMuxError(
           'An unowned CtxMux peer already occupies the exact AgentMux runtime endpoint.',
           'CTXMUX_OWNER_IDENTITY_UNPROVEN'
@@ -573,8 +622,9 @@ export class CtxmuxRunAdapter {
             )
           }
           try {
-            daemonInstanceId = await client.daemonInstance()
-            if (daemonInstanceId !== spawnedDaemonInstanceId) {
+            runtime = await diagnosticsClient.runtimeInfo()
+            assertRuntimeIdentity(runtime)
+            if (runtime.daemonInstanceId !== spawnedDaemonInstanceId) {
               throw new AgentMuxError(
                 'The CtxMux socket responder does not match the exact daemon child that AgentMux spawned.',
                 'CTXMUX_OWNER_IDENTITY_UNPROVEN'
@@ -590,12 +640,12 @@ export class CtxmuxRunAdapter {
             await delay(DAEMON_POLL_INTERVAL_MS)
           }
         }
-        if (lastError !== null || daemonInstanceId === null) throw lastError
+        if (lastError !== null || runtime === null) throw lastError
         await writeOwnerReceipt(
           artifacts,
           this.socketPath,
           this.stateDirectory,
-          daemonInstanceId
+          runtime
         )
       } catch (error) {
         try {
@@ -609,10 +659,15 @@ export class CtxmuxRunAdapter {
         throw error
       }
     }
-    if (daemonInstanceId === null) {
+    if (runtime === null) {
       throw new AgentMuxError('CtxMux did not report its daemon instance.', 'CTXMUX_OWNER_IDENTITY_UNPROVEN')
     }
-    this.daemonInstanceId = daemonInstanceId
+    const client = new CtxmuxClient({
+      socketPath: this.socketPath,
+      expectedRuntimeIdentity: runtime,
+      requiredCapabilities: REQUIRED_RUNTIME_CAPABILITIES
+    })
+    this.runtime = runtime
     this.client = client
   }
 
@@ -620,7 +675,7 @@ export class CtxmuxRunAdapter {
     for (const { attachment } of this.attachments.values()) attachment.close()
     this.attachments.clear()
     this.client = null
-    this.daemonInstanceId = null
+    this.runtime = null
   }
 
   isConnected(): boolean {
@@ -628,11 +683,11 @@ export class CtxmuxRunAdapter {
   }
 
   identity(): { daemonInstanceId: string; protocolVersion: number; buildIdentity: string } {
-    if (this.daemonInstanceId === null) {
+    if (this.runtime === null) {
       throw new AgentMuxError('AgentMux client is not connected.', 'CTXMUX_DISCONNECTED')
     }
     return {
-      daemonInstanceId: this.daemonInstanceId,
+      daemonInstanceId: this.runtime.daemonInstanceId,
       protocolVersion: PROTOCOL_VERSION,
       buildIdentity: `ctxmux@${CTXMUX_VERSION}+${CTXMUX_COMMIT}`
     }
@@ -839,26 +894,18 @@ export class CtxmuxRunAdapter {
       expectedByte: operation.expectedByte,
       data: operation.data
     }
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      try {
-        const accepted = await this.requireClient().recoverableInput(recoverable)
-        return {
-          run: projectRun(accepted.run),
-          appliedByteRange: {
-            startByte: accepted.receipt.start_byte,
-            endByte: accepted.receipt.end_byte
-          }
+    try {
+      const accepted = await this.requireClient().recoverableInput(recoverable)
+      return {
+        run: projectRun(accepted.run),
+        appliedByteRange: {
+          startByte: accepted.receipt.start_byte,
+          endByte: accepted.receipt.end_byte
         }
-      } catch (error) {
-        if (
-          attempt === 0 &&
-          error instanceof CtxmuxCommandError &&
-          error.disposition === 'unknown'
-        ) continue
-        throw translateCtxmuxError(error)
       }
+    } catch (error) {
+      throw translateCtxmuxError(error)
     }
-    throw new AgentMuxError('Recoverable CtxMux Input did not resolve.', 'CTXMUX_INPUT_UNRESOLVED')
   }
 
   async resize(runId: string, cols: number, rows: number): Promise<{ run: CtxmuxAdapterRun; cols: number; rows: number }> {
@@ -882,12 +929,29 @@ export class CtxmuxRunAdapter {
     }
   }
 
-  async stop(runId: string): Promise<void> {
+  async prepareStop(runId: string, operationKey?: string): Promise<CtxmuxAdapterStopOperation> {
+    if (this.runtime === null) {
+      throw new AgentMuxError('AgentMux client is not connected.', 'CTXMUX_DISCONNECTED')
+    }
+    return {
+      daemonInstance: this.runtime.daemonInstanceId,
+      operationKey: operationKey ?? randomUUID(),
+      runId
+    }
+  }
+
+  async stop(operation: CtxmuxAdapterStopOperation): Promise<void> {
+    let recovery: Awaited<ReturnType<CtxmuxClient['attachRecoverableStop']>> | null = null
     try {
-      await this.detach(runId)
-      await this.requireClient().stop(runId)
+      await this.detach(operation.runId)
+      recovery = await this.requireClient().attachRecoverableStop(
+        operation as RecoverableStopOperation,
+        0
+      )
     } catch (error) {
       throw translateCtxmuxError(error)
+    } finally {
+      recovery?.attachment.close()
     }
   }
 

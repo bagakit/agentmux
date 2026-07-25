@@ -1,5 +1,6 @@
 import type {
   AgentCatalogEntry,
+  AgentMuxAgentContinuityResult,
   AgentCapabilities,
   AgentDisplayState,
   AgentExecutorConfig,
@@ -216,6 +217,7 @@ export type SessionStatus = {
   observedAt: number
   detail?: string
   exitCode?: number
+  continuity?: 'unavailable' | 'conflict'
 }
 
 type SessionSnapshotBase = {
@@ -250,6 +252,20 @@ export type RuntimeEvent = {
 export type RuntimeSnapshot = {
   sessions: SessionSnapshot[]
   timelines: Record<string, AgentTimelineSnapshot>
+  recoveryCandidates: AgentSessionRecoveryCandidate[]
+}
+
+export type AgentSessionRecoveryCandidate = {
+  agentSessionId: string
+  hostId: string
+  workspacePath: string
+  providerId: AgentProviderId
+  executorId: AgentExecutorId
+  capabilities: AgentCapabilities
+  label: string
+  createdAt: number
+  updatedAt: number
+  run: AgentMuxRunRef
 }
 
 export type AgentLaunchResult = {
@@ -263,6 +279,11 @@ export type SessionAttachResult = {
   replay: AgentMuxRunDataEvent[]
   gap: AgentMuxRunReplayGap | null
 }
+
+export type SessionRecoveryResult =
+  | { kind: 'terminal-restarted'; session: SessionSnapshot }
+  | { kind: 'reattachable' | 'resumed'; session: SessionSnapshot }
+  | Extract<AgentMuxAgentContinuityResult, { kind: 'unavailable' | 'retired' | 'conflict' }>
 
 export type HostCheckResult = {
   ok: boolean
@@ -385,9 +406,10 @@ export type AgentMuxDesktopApi = {
     // Recover a session whose PTY was lost (daemon_restart / tmux_* interruption, or exit).
     // The physical PTY cannot be revived, so this mints a *fresh* Run in the same cwd:
     // terminals relaunch the host shell; agents resume via provider-native resume. If the
-    // backend daemon itself died, the main process reconnects (respawning ctxmuxd) first.
-    // Returns the new SessionSnapshot; the renderer rebinds the existing tab to it.
-    recover(session: SessionControl, workspacePath?: string): Promise<SessionSnapshot>
+    // Transport loss remains an error and never authorizes resume.
+    // Returns the Core continuity disposition; the renderer rebinds only an attached/resumed
+    // Agent or a newly restarted raw Terminal.
+    recover(session: SessionControl, workspacePath?: string): Promise<SessionRecoveryResult>
     stop(session: SessionControl): Promise<void>
     onEvent(listener: (event: RuntimeEvent) => void): () => void
   }

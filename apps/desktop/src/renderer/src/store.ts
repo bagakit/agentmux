@@ -3,6 +3,7 @@ import { createJSONStorage, persist, type StateStorage } from 'zustand/middlewar
 import type { AgentCatalogEntry, AgentMuxCompositionRequest, AgentMuxCompositionResult } from '@agentmux/core'
 import type {
   AgentLaunchResult,
+  AgentSessionRecoveryCandidate,
   AgentTimelineSnapshot,
   AppConfig,
   BrowserEvent,
@@ -14,6 +15,7 @@ import type {
   RuntimeEvent,
   ScratchTopicSnapshot,
   SessionControl,
+  SessionRecoveryResult,
   SessionSnapshot,
   WorkspaceSelectionResult
 } from '../../shared/contracts'
@@ -49,6 +51,7 @@ import {
 import { setWorkbenchRegionSplitRatio } from './lib/workbench-view-layout'
 import {
   projectPersistedWorkbench,
+  persistedAgentSessionIds,
   restorePersistedWorkbench,
   type PersistedWorkbench
 } from './lib/workbench-persistence'
@@ -72,6 +75,7 @@ import {
   pendingAgentLaunchEventId,
   discardPendingAgentLaunch,
   projectRuntimeEvent,
+  removeSessionProjection,
   reduceAgentMembershipSnapshot,
   reduceAgentSessionLaunchAttached,
   reduceDetachedAgentLaunch,
@@ -335,6 +339,59 @@ function projectRecoveredSession(
       ...state.sessions.filter((item) => item.id !== previousSessionId && item.id !== session.id),
       session
     ]
+  }
+}
+
+function continuityFailureDetail(
+  result: Extract<SessionRecoveryResult, { kind: 'unavailable' | 'conflict' }>
+): string {
+  if (result.kind === 'conflict') {
+    return result.currentRun
+      ? `This Agent Session now belongs to Run ${result.currentRun.runId}; the stale Run was not resumed.`
+      : 'Another lifecycle operation owns this Agent Session; no new Run was started.'
+  }
+  switch (result.reason) {
+    case 'unknown-session':
+      return 'Core has no current or retired binding for this Agent Session.'
+    case 'native-handle-unavailable':
+      return 'This Agent Session has no verified Provider handle for native resume.'
+    case 'provider-resume-unsupported':
+      return 'This Provider does not support native session resume.'
+    case 'provider-unavailable':
+      return 'The required Provider executable or resume capability is unavailable on this Host.'
+  }
+}
+
+function recoveryCandidateSession(
+  candidate: AgentSessionRecoveryCandidate,
+  recovery: Extract<SessionRecoveryResult, { kind: 'unavailable' | 'conflict' }>
+): SessionSnapshot {
+  return {
+    id: candidate.agentSessionId,
+    kind: 'agent',
+    providerId: candidate.providerId,
+    executorId: candidate.executorId,
+    capabilities: candidate.capabilities,
+    hostId: candidate.hostId,
+    workspacePath: candidate.workspacePath,
+    label: candidate.label,
+    createdAt: candidate.createdAt,
+    updatedAt: Math.max(candidate.updatedAt, Date.now()),
+    processState: 'interrupted',
+    status: {
+      state: 'error',
+      source: 'run-process',
+      observedAt: Date.now(),
+      continuity: recovery.kind,
+      detail: continuityFailureDetail(recovery)
+    },
+    latestOutputBytes: 0,
+    control: {
+      kind: 'agent',
+      hostId: candidate.hostId,
+      agentSessionId: candidate.agentSessionId,
+      run: { ...candidate.run }
+    }
   }
 }
 
@@ -811,6 +868,24 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         api.providers.list()
       ])
       let snapshot = initialSnapshot
+      const persistedAgentIds = persistedAgentSessionIds(get().restoredWorkbench)
+      const recoveryFailures: SessionSnapshot[] = []
+      let recovered = false
+      for (const candidate of snapshot.recoveryCandidates) {
+        if (!persistedAgentIds.has(candidate.agentSessionId)) continue
+        const recovery = await api.sessions.recover({
+          kind: 'agent',
+          hostId: candidate.hostId,
+          agentSessionId: candidate.agentSessionId,
+          run: { ...candidate.run }
+        }, candidate.workspacePath)
+        if (recovery.kind === 'reattachable' || recovery.kind === 'resumed') {
+          recovered = true
+        } else if (recovery.kind === 'unavailable' || recovery.kind === 'conflict') {
+          recoveryFailures.push(recoveryCandidateSession(candidate, recovery))
+        }
+      }
+      if (recovered) snapshot = await api.sessions.snapshot()
       let failedCleanupIds = new Set<string>()
       while (true) {
         const unclaimedSessionIds = new Set(get().unclaimedTerminalSessionIds)
@@ -827,7 +902,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         snapshot = await api.sessions.snapshot()
       }
       const unclaimedSessionIds = new Set(get().unclaimedTerminalSessionIds)
-      const visibleSessions = snapshot.sessions.filter((session) => !unclaimedSessionIds.has(session.id))
+      const visibleSessions = [
+        ...snapshot.sessions.filter((session) => !unclaimedSessionIds.has(session.id)),
+        ...recoveryFailures
+      ]
       const firstWorkspace = config.workspaces[0]?.id ?? null
       const workbench = restorePersistedWorkbench({
         config,
@@ -2400,7 +2478,33 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const current = before.sessions.find((item) => item.id === sessionId)
     if (!current) return
     try {
-      const session = await api.sessions.recover(current.control, current.workspacePath)
+      const recovery = await api.sessions.recover(current.control, current.workspacePath)
+      if (recovery.kind === 'retired') {
+        set((state) => removeSessionProjection(state, sessionId))
+        return
+      }
+      if (
+        recovery.kind === 'unavailable' ||
+        recovery.kind === 'conflict'
+      ) {
+        set((state) => ({
+          sessions: state.sessions.map((session) => (
+            session.id === sessionId && sessionOwnsControl(session, current.control)
+              ? {
+                  ...session,
+                  status: {
+                    ...session.status,
+                    state: 'error' as const,
+                    continuity: recovery.kind,
+                    detail: continuityFailureDetail(recovery)
+                  }
+                }
+              : session
+          ))
+        }))
+        return
+      }
+      const session = recovery.session
       const after = get()
       const live = after.sessions.find((item) => item.id === sessionId)
       const ownerStillCurrent = live !== undefined &&

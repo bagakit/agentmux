@@ -3,42 +3,41 @@ import {
   connectLocalAgentMux
 } from '@agentmux/core'
 
-const fakeCodex = process.env.AGENTMUX_FAKE_CODEX
-if (!fakeCodex) throw new Error('AGENTMUX_FAKE_CODEX is required.')
-
 const delegate = new AgentMuxFileAgentSessionStore()
+let claimedStopOperation = null
 const store = {
   load: async () => await delegate.load(),
   loadRetiredRuns: async () => await delegate.loadRetiredRuns(),
   loadRetiredAgentSessions: async () => await delegate.loadRetiredAgentSessions(),
   compareAndSwap: async (expected, next) => await delegate.compareAndSwap(expected, next),
   reserveLifecycle: async (reservation) => await delegate.reserveLifecycle(reservation),
-  claimStaleLifecycles: async (claim) => await delegate.claimStaleLifecycles(claim),
+  async claimStaleLifecycles(claim) {
+    const reservations = await delegate.claimStaleLifecycles(claim)
+    const stop = reservations.find((reservation) => reservation.kind === 'stop')
+    if (stop) claimedStopOperation = stop.stopOperation
+    return reservations
+  },
+  commitLifecycle: async (reservation, next) => await delegate.commitLifecycle(reservation, next),
   releaseLifecycle: async (reservation, runs) => await delegate.releaseLifecycle(reservation, runs),
   retireRuns: async (runs) => await delegate.retireRuns(runs),
   loadTimeline: async (agentSessionId) => await delegate.loadTimeline(agentSessionId),
   applyTimelineMutation: async (mutation, signal) => (
     await delegate.applyTimelineMutation(mutation, signal)
-  ),
-  async commitLifecycle(reservation, next) {
-    if (reservation.kind === 'create' && reservation.agentSessionId === 'crash-semantic') {
-      process.stdout.write(`${JSON.stringify({
-        type: 'run-started-before-commit',
-        runId: next.run.runId
-      })}\n`)
-      await new Promise(() => {})
-    }
-    await delegate.commitLifecycle(reservation, next)
-  }
+  )
 }
 
 const client = await connectLocalAgentMux({ store })
-await client.createAgent({
-  agentSessionId: 'crash-semantic',
-  createOperationId: 'crash-after-run-start',
-  providerId: 'codex',
-  executorId: 'codex',
-  workspacePath: process.cwd(),
-  prompt: 'crash-fixture',
-  commandOverride: fakeCodex
-})
+try {
+  const runId = claimedStopOperation?.runId ?? null
+  const recoveredRun = runId === null
+    ? null
+    : (await client.listRuns()).find((run) => run.runId === runId) ?? null
+  process.stdout.write(`${JSON.stringify({
+    phase: 'recovered',
+    operation: claimedStopOperation,
+    agentSessions: client.agentSessions(),
+    recoveredRun
+  })}\n`)
+} finally {
+  await client.dispose()
+}

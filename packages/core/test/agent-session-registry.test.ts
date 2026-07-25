@@ -22,6 +22,33 @@ function session(run = 'run-1'): AgentMuxStoredAgentSession {
 }
 
 describe('semantic session registry concurrency', () => {
+  it('does not confuse a user-retired Session with abandoned or other Session Runs', async () => {
+    const registry = new AgentMuxAgentSessionRegistry(new AgentMuxMemoryAgentSessionStore())
+    const current = session()
+    await registry.put(current)
+    const stop = await registry.reserveExisting(
+      'stop',
+      current.agentSessionId,
+      current.run,
+      'stop-operation',
+      {
+        daemonInstance: 'daemon-instance',
+        operationKey: 'stop-operation',
+        runId: current.run.runId
+      }
+    )
+    await registry.commitLifecycle(stop, null)
+
+    expect(registry.retiredAgentSession(current.agentSessionId, current.run)).toMatchObject({
+      agentSessionId: current.agentSessionId,
+      run: current.run,
+      source: 'user'
+    })
+    expect(registry.retiredAgentSession('another-session', current.run)).toBeUndefined()
+    expect(registry.retiredAgentSession(current.agentSessionId, { runId: 'abandoned-run' }))
+      .toBeUndefined()
+  })
+
   it('merges serialized control-state updates from the latest CAS value', async () => {
     const registry = new AgentMuxAgentSessionRegistry(new AgentMuxMemoryAgentSessionStore())
     await registry.put(session())
@@ -64,6 +91,7 @@ describe('semantic session registry concurrency', () => {
     const store: AgentMuxAgentSessionStore = {
       async load() { return await memory.load() },
       async loadRetiredRuns() { return await memory.loadRetiredRuns() },
+      async loadRetiredAgentSessions() { return await memory.loadRetiredAgentSessions() },
       async compareAndSwap(expected, next) {
         if (next?.run.runId === 'run-2') {
           enteredTransition()
@@ -106,6 +134,7 @@ describe('semantic session registry concurrency', () => {
     const store: AgentMuxAgentSessionStore = {
       async load() { return await memory.load() },
       async loadRetiredRuns() { return await memory.loadRetiredRuns() },
+      async loadRetiredAgentSessions() { return await memory.loadRetiredAgentSessions() },
       async compareAndSwap(expected, next, signal) {
         compareCalls += 1
         if (block) {
