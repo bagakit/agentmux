@@ -33,6 +33,7 @@ import {
 } from '../shared/contracts.js'
 import { terminalPalette } from '../shared/terminal-palettes.js'
 import { BrowserViewManager } from './browser-view-manager.js'
+import { BrowserProfileManager } from './browser-profile-manager.js'
 import { nativeImageFromBrowserPng } from './browser-image.js'
 import { ConfigStore } from './config-store.js'
 import { DesktopCompositionIpcBridge } from './composition-ipc-bridge.js'
@@ -67,7 +68,9 @@ export async function registerIpc(args: {
   args.runtime.commit(await args.runtime.prepare(config))
   const files = args.workspaceFiles ?? new WorkspaceFiles((id) => args.runtime.executionHost(id))
   const worktrees = new WorktreeService((id) => args.runtime.executionHost(id), args.configStore)
-  const browsers = new BrowserViewManager(args.window)
+  const browserProfiles = new BrowserProfileManager()
+  await browserProfiles.initialize()
+  const browsers = new BrowserViewManager(args.window, browserProfiles)
   const fileObservations = new FileObservationRegistry()
   const channels: string[] = []
   let acceptingComposition = true
@@ -261,6 +264,39 @@ export async function registerIpc(args: {
   handle('browser:back', async (id: string) => await browsers.back(id))
   handle('browser:forward', async (id: string) => await browsers.forward(id))
   handle('browser:reload', async (id: string) => await browsers.reload(id))
+  channels.push('browser:switchProfile')
+  ipcMain.handle('browser:switchProfile', async (event, id: string, profileId: string) => {
+    if (event.sender !== args.window.webContents) throw new Error('Untrusted Browser Profile sender')
+    return await browsers.switchProfile(id, profileId)
+  })
+  channels.push('browser:listProfiles')
+  ipcMain.handle('browser:listProfiles', (event) => {
+    if (event.sender !== args.window.webContents) throw new Error('Untrusted Browser Profile sender')
+    return browserProfiles.listProfiles()
+  })
+  channels.push('browser:createProfile')
+  ipcMain.handle('browser:createProfile', async (event, label: string) => {
+    if (event.sender !== args.window.webContents) throw new Error('Untrusted Browser Profile sender')
+    return await browserProfiles.createProfile(label)
+  })
+  channels.push('browser:deleteProfile')
+  ipcMain.handle('browser:deleteProfile', async (event, profileId: string) => {
+    if (event.sender !== args.window.webContents) throw new Error('Untrusted Browser Profile sender')
+    if (browsers.usesProfile(profileId)) {
+      throw new Error('Browser Profile is still used by an open Browser')
+    }
+    await browserProfiles.deleteProfile(profileId)
+  })
+  channels.push('browser:detectProfileImportSources')
+  ipcMain.handle('browser:detectProfileImportSources', (event) => {
+    if (event.sender !== args.window.webContents) throw new Error('Untrusted Browser Profile sender')
+    return browserProfiles.detectImportSources()
+  })
+  channels.push('browser:importProfile')
+  ipcMain.handle('browser:importProfile', async (event, sourceToken: string, label: string) => {
+    if (event.sender !== args.window.webContents) throw new Error('Untrusted Browser Profile sender')
+    return await browserProfiles.importProfile(sourceToken, label)
+  })
   handle('browser:openDevTools', (id: string) => browsers.openDevTools(id))
   handle('browser:setViewport', (id: string, viewport: BrowserViewport) => browsers.setViewport(id, viewport))
   handle('browser:captureScreenshot', async (id: string) => await browsers.captureScreenshot(id))
@@ -299,6 +335,7 @@ export async function registerIpc(args: {
       async () => await composition.stop(),
       () => detach(),
       () => browsers.dispose(),
+      async () => await browserProfiles.dispose(),
       async () => await fileObservations.dispose(),
       async () => await files.dispose(),
       () => {

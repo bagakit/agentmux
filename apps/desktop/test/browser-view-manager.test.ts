@@ -56,6 +56,8 @@ const fakeElectron = vi.hoisted(() => {
       goBack: vi.fn(),
       goForward: vi.fn()
     }
+    windowOpenHandler: null | ((details: { url: string }) => { action: string }) = null
+    loadURLImpl = async (url: string): Promise<void> => { this.finishLoad(url) }
 
     on(event: string, listener: Listener) {
       this.listeners.set(event, [...(this.listeners.get(event) ?? []), listener])
@@ -83,10 +85,13 @@ const fakeElectron = vi.hoisted(() => {
       for (const listener of this.listeners.get(event) ?? []) listener(details)
     }
 
-    setWindowOpenHandler() {}
+    setWindowOpenHandler(handler: (details: { url: string }) => { action: string }) {
+      this.windowOpenHandler = handler
+    }
     setZoomFactor(value: number) { this.zoomFactor = value }
+    getZoomFactor() { return this.zoomFactor }
 
-    async loadURL(url: string) {
+    finishLoad(url: string) {
       this.loading = true
       this.emitDetails('did-start-navigation', { url, isSameDocument: false, isMainFrame: true })
       this.emit('did-start-loading')
@@ -98,6 +103,8 @@ const fakeElectron = vi.hoisted(() => {
       this.emit('did-finish-load')
       this.emit('did-stop-loading')
     }
+
+    async loadURL(url: string) { await this.loadURLImpl(url) }
 
     getURL() { return this.url }
     getTitle() { return this.title }
@@ -115,12 +122,20 @@ const fakeElectron = vi.hoisted(() => {
 
   class FakeWebContentsView {
     static instances: FakeWebContentsView[] = []
+    static nextLoadURLImpl: null | ((contents: FakeWebContents, url: string) => Promise<void>) = null
     readonly webContents = new FakeWebContents()
+    readonly partition: string | undefined
     visible = true
     bounds = { x: 0, y: 0, width: 0, height: 0 }
 
-    constructor() {
+    constructor(options?: { webPreferences?: { partition?: string } }) {
       FakeWebContentsView.instances.push(this)
+      this.partition = options?.webPreferences?.partition
+      const nextLoadURLImpl = FakeWebContentsView.nextLoadURLImpl
+      FakeWebContentsView.nextLoadURLImpl = null
+      if (nextLoadURLImpl) {
+        this.webContents.loadURLImpl = async (url) => await nextLoadURLImpl(this.webContents, url)
+      }
     }
 
     setVisible(value: boolean) { this.visible = value }
@@ -135,9 +150,27 @@ vi.mock('electron', () => ({ WebContentsView: fakeElectron.FakeWebContentsView }
 import {
   assertAllowedBrowserUrl,
   BrowserViewManager,
+  type BrowserProfileResolver,
   DEFAULT_BROWSER_ZOOM_FACTOR,
   normalizeBrowserUrl
 } from '../src/main/browser-view-manager.js'
+
+const profiles: BrowserProfileResolver = {
+  defaultProfileId: () => 'default',
+  resolvePartition: (profileId) => {
+    const partition = {
+      default: 'persist:browser-default',
+      personal: 'persist:browser-personal',
+      work: 'persist:browser-work'
+    }[profileId]
+    if (!partition) throw new Error(`Unknown browser profile: ${profileId}`)
+    return partition
+  }
+}
+
+function browserManager(window: ReturnType<typeof fakeWindow>['window']): BrowserViewManager {
+  return new BrowserViewManager(window as never, profiles)
+}
 
 function fakeWindow() {
   const children: InstanceType<typeof fakeElectron.FakeWebContentsView>[] = []
@@ -175,11 +208,14 @@ describe('BrowserViewManager', () => {
 
   it('owns WebContentsView bounds, navigation, and close lifecycle', async () => {
     const fixture = fakeWindow()
-    const manager = new BrowserViewManager(fixture.window as never)
+    const manager = browserManager(fixture.window)
 
     const created = await manager.create('browser-1', 'about:blank')
     const view = fixture.children[0]!
-    expect(created).toMatchObject({ id: 'browser-1', url: 'about:blank' })
+    expect(created).toMatchObject({ id: 'browser-1', profileId: 'default', url: 'about:blank' })
+    expect(manager.usesProfile('default')).toBe(true)
+    expect(manager.usesProfile('work')).toBe(false)
+    expect(view.partition).toBe('persist:browser-default')
     expect(view.visible).toBe(false)
     expect(view.webContents.zoomFactor).toBe(DEFAULT_BROWSER_ZOOM_FACTOR)
     expect(view.webContents.disableDeviceEmulation).toHaveBeenCalled()
@@ -238,6 +274,7 @@ describe('BrowserViewManager', () => {
     expect(view.webContents.zoomFactor).toBe(DEFAULT_BROWSER_ZOOM_FACTOR)
 
     manager.close('browser-1')
+    expect(manager.usesProfile('default')).toBe(false)
     expect(fixture.children).toHaveLength(0)
     expect(view.webContents.isDestroyed()).toBe(true)
     expect(() => manager.setBounds('browser-1', null)).not.toThrow()
@@ -245,9 +282,156 @@ describe('BrowserViewManager', () => {
       .not.toThrow()
   })
 
+  it('atomically switches profile after loading a hidden candidate with the latest view state', async () => {
+    const fixture = fakeWindow()
+    const manager = browserManager(fixture.window)
+    const created = await manager.create('browser-profile', 'https://example.com/page')
+    const original = fixture.children[0]!
+    manager.setBounds('browser-profile', { x: 1, y: 2, width: 300, height: 200 })
+    original.webContents.zoomFactor = 1.1
+    let finishCandidate!: () => void
+    fakeElectron.FakeWebContentsView.nextLoadURLImpl = async (contents, url) => await new Promise<void>((resolve) => {
+      finishCandidate = () => {
+        contents.finishLoad(url)
+        resolve()
+      }
+    })
+
+    const pending = manager.switchProfile('browser-profile', 'work')
+    const candidate = fixture.children[1]!
+    expect(manager.usesProfile('work')).toBe(true)
+    expect(fixture.children).toEqual([original, candidate])
+    expect(original.webContents.isDestroyed()).toBe(false)
+    expect(original.visible).toBe(true)
+    expect(candidate.visible).toBe(false)
+    expect(candidate.partition).toBe('persist:browser-work')
+
+    manager.setBounds('browser-profile', { x: 10.4, y: 20.6, width: 800.2, height: 500.8 })
+    manager.setBounds('browser-profile', null)
+    manager.setViewport('browser-profile', 'mobile')
+    expect(original.visible).toBe(false)
+    original.webContents.zoomFactor = 1.25
+    finishCandidate()
+
+    await expect(pending).resolves.toMatchObject({
+      id: 'browser-profile',
+      profileId: 'work',
+      url: 'https://example.com/page',
+      viewport: 'mobile',
+      navigationId: expect.not.stringMatching(created.navigationId)
+    })
+    expect(manager.usesProfile('default')).toBe(false)
+    expect(manager.usesProfile('work')).toBe(true)
+    expect(fixture.children).toEqual([candidate])
+    expect(original.webContents.isDestroyed()).toBe(true)
+    expect(candidate.visible).toBe(false)
+    expect(candidate.bounds).toEqual({ x: 10, y: 21, width: 800, height: 501 })
+    expect(candidate.webContents.zoomFactor).toBe(1.25)
+    expect(candidate.webContents.enableDeviceEmulation).toHaveBeenLastCalledWith(expect.objectContaining({
+      screenPosition: 'mobile',
+      viewSize: { width: 390, height: 844 }
+    }))
+  })
+
+  it('keeps the authoritative view when profile resolution or candidate loading fails', async () => {
+    const fixture = fakeWindow()
+    const manager = browserManager(fixture.window)
+    await manager.create('browser-profile-failure', 'https://example.com/page')
+    const original = fixture.children[0]!
+
+    await expect(manager.switchProfile('browser-profile-failure', 'unknown'))
+      .rejects.toThrow('Unknown browser profile: unknown')
+    expect(fixture.children).toEqual([original])
+
+    fakeElectron.FakeWebContentsView.nextLoadURLImpl = async () => {
+      throw new Error('candidate load failed')
+    }
+    const pending = manager.switchProfile('browser-profile-failure', 'personal')
+    const candidate = fixture.children[1]!
+    await expect(pending).rejects.toThrow('candidate load failed')
+
+    expect(fixture.children).toEqual([original])
+    expect(original.webContents.isDestroyed()).toBe(false)
+    expect(candidate.webContents.isDestroyed()).toBe(true)
+    expect(manager.setViewport('browser-profile-failure', 'responsive')).toMatchObject({
+      profileId: 'default',
+      error: null
+    })
+  })
+
+  it('cancels and releases pending profile candidates on authoritative navigation, reload, and close', async () => {
+    const fixture = fakeWindow()
+    const manager = browserManager(fixture.window)
+    await manager.create('browser-profile-cancel', 'https://example.com/page')
+    const original = fixture.children[0]!
+    const deferNextCandidate = () => {
+      fakeElectron.FakeWebContentsView.nextLoadURLImpl = async () => await new Promise<void>(() => {})
+    }
+
+    deferNextCandidate()
+    const navigationSwitch = manager.switchProfile('browser-profile-cancel', 'work')
+    const navigationRejection = expect(navigationSwitch).rejects.toThrow('superseded by navigation')
+    const navigationCandidate = fixture.children[1]!
+    await manager.navigate('browser-profile-cancel', 'https://example.com/next')
+    await navigationRejection
+    expect(navigationCandidate.webContents.isDestroyed()).toBe(true)
+    expect(fixture.children).toEqual([original])
+
+    deferNextCandidate()
+    const reloadSwitch = manager.switchProfile('browser-profile-cancel', 'personal')
+    const reloadRejection = expect(reloadSwitch).rejects.toThrow('superseded by reload')
+    const reloadCandidate = fixture.children[1]!
+    await manager.reload('browser-profile-cancel')
+    await reloadRejection
+    expect(reloadCandidate.webContents.isDestroyed()).toBe(true)
+    expect(fixture.children).toEqual([original])
+
+    deferNextCandidate()
+    const closeSwitch = manager.switchProfile('browser-profile-cancel', 'work')
+    const closeRejection = expect(closeSwitch).rejects.toThrow('closed during profile switch')
+    const closeCandidate = fixture.children[1]!
+    manager.close('browser-profile-cancel')
+    await closeRejection
+    expect(closeCandidate.webContents.isDestroyed()).toBe(true)
+    expect(fixture.children).toHaveLength(0)
+  })
+
+  it('fences late owner callbacks after a profile switch', async () => {
+    const fixture = fakeWindow()
+    const manager = browserManager(fixture.window)
+    await manager.create('browser-profile-fence', 'https://example.com/first')
+    const original = fixture.children[0]!
+    const originalWindowOpen = original.webContents.windowOpenHandler!
+    let rejectOldNavigation!: (error: Error) => void
+    original.webContents.loadURLImpl = async () => await new Promise<void>((_resolve, reject) => {
+      rejectOldNavigation = reject
+    })
+
+    await manager.navigate('browser-profile-fence', 'https://example.com/late')
+    const switched = await manager.switchProfile('browser-profile-fence', 'work')
+    const current = fixture.children[0]!
+    fixture.sent.length = 0
+
+    rejectOldNavigation(new Error('late old-view failure'))
+    original.webContents.title = 'Stale title'
+    original.webContents.emit('page-title-updated')
+    original.webContents.emit('did-fail-load', -105, 'STALE_FAILURE', 'https://stale.invalid/', true)
+    expect(originalWindowOpen({ url: 'https://stale-popup.invalid/' })).toEqual({ action: 'deny' })
+    await new Promise<void>((resolve) => setImmediate(resolve))
+
+    expect(fixture.children).toEqual([current])
+    expect(current.webContents.getURL()).toBe(switched.url)
+    expect(manager.setViewport('browser-profile-fence', 'responsive')).toMatchObject({
+      profileId: 'work',
+      url: switched.url,
+      error: null
+    })
+    expect(fixture.sent).not.toContainEqual({ type: 'closed', id: 'browser-profile-fence' })
+  })
+
   it('blocks unsupported page navigation and redirects before commit', async () => {
     const fixture = fakeWindow()
-    const manager = new BrowserViewManager(fixture.window as never)
+    const manager = browserManager(fixture.window)
     await manager.create('browser-guarded', 'https://example.com')
     const view = fixture.children[0]!
     const navigate = view.webContents.listeners.get('will-navigate')![0]!
@@ -280,7 +464,7 @@ describe('BrowserViewManager', () => {
 
   it('projects loading, title, load failure, and renderer loss as Browser events', async () => {
     const fixture = fakeWindow()
-    const manager = new BrowserViewManager(fixture.window as never)
+    const manager = browserManager(fixture.window)
     await manager.create('browser-events', 'https://example.com')
     const view = fixture.children[0]!
 
@@ -319,7 +503,7 @@ describe('BrowserViewManager', () => {
 
   it('releases an externally destroyed WebContentsView before publishing closed', async () => {
     const fixture = fakeWindow()
-    const manager = new BrowserViewManager(fixture.window as never)
+    const manager = browserManager(fixture.window)
     await manager.create('browser-destroyed', 'https://example.com')
     const view = fixture.children[0]!
     fixture.sent.length = 0
@@ -333,7 +517,7 @@ describe('BrowserViewManager', () => {
 
   it('rejects a screenshot that completes after the page navigation changes', async () => {
     const fixture = fakeWindow()
-    const manager = new BrowserViewManager(fixture.window as never)
+    const manager = browserManager(fixture.window)
     const created = await manager.create('browser-capture', 'https://example.com')
     const view = fixture.children[0]!
     let resolveCapture!: (image: Awaited<ReturnType<typeof view.webContents.capturePage>>) => void
@@ -363,7 +547,7 @@ describe('BrowserViewManager', () => {
 
   it('rotates navigation identity for same-document main-frame navigation', async () => {
     const fixture = fakeWindow()
-    const manager = new BrowserViewManager(fixture.window as never)
+    const manager = browserManager(fixture.window)
     const created = await manager.create('browser-same-document', 'https://example.com/page')
     const view = fixture.children[0]!
 
@@ -387,7 +571,7 @@ describe('BrowserViewManager', () => {
 
   it('does not rotate navigation identity for subframe navigation', async () => {
     const fixture = fakeWindow()
-    const manager = new BrowserViewManager(fixture.window as never)
+    const manager = browserManager(fixture.window)
     const created = await manager.create('browser-subframe', 'https://example.com/page')
     const view = fixture.children[0]!
 
@@ -405,7 +589,7 @@ describe('BrowserViewManager', () => {
 
   it('rejects a capture after close even when the id is recreated', async () => {
     const fixture = fakeWindow()
-    const manager = new BrowserViewManager(fixture.window as never)
+    const manager = browserManager(fixture.window)
     await manager.create('browser-recreated', 'https://example.com/first')
     const firstView = fixture.children[0]!
     let resolveCapture!: (image: Awaited<ReturnType<typeof firstView.webContents.capturePage>>) => void
@@ -425,7 +609,7 @@ describe('BrowserViewManager', () => {
 
   it('returns only the sanitized Main-owned element selection contract', async () => {
     const fixture = fakeWindow()
-    const manager = new BrowserViewManager(fixture.window as never)
+    const manager = browserManager(fixture.window)
     const created = await manager.create('browser-selection', 'https://example.com/page')
     const view = fixture.children[0]!
     view.webContents.executeJavaScriptInIsolatedWorldImpl = async (_worldId, scripts) => (
@@ -469,7 +653,7 @@ describe('BrowserViewManager', () => {
 
   it('does not start selection after a newer cancel wins the preflight race', async () => {
     const fixture = fakeWindow()
-    const manager = new BrowserViewManager(fixture.window as never)
+    const manager = browserManager(fixture.window)
     await manager.create('browser-selection-race', 'https://example.com/page')
     const view = fixture.children[0]!
     let resolvePreflight!: (value: boolean) => void
@@ -496,7 +680,7 @@ describe('BrowserViewManager', () => {
 
   it('validates annotation identity and geometry before isolated-world injection', async () => {
     const fixture = fakeWindow()
-    const manager = new BrowserViewManager(fixture.window as never)
+    const manager = browserManager(fixture.window)
     const created = await manager.create('browser-markers', 'https://example.com/page')
     const view = fixture.children[0]!
     view.webContents.executeJavaScriptInIsolatedWorld.mockClear()
