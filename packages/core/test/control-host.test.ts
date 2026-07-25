@@ -307,16 +307,19 @@ describe('external Control control', () => {
     await server.stop()
   })
 
-  it('rejects a valid error receipt belonging to another request', async () => {
+  it.each([
+    ['request ID', 'another-request', 'send'],
+    ['operation', 'expected-request', 'stop']
+  ])('rejects a valid error receipt with another %s', async (_identity, requestId, operation) => {
     const root = await mkdtemp('/private/tmp/agentmux-control-wrong-receipt-')
     roots.push(root)
     const path = join(root, 'control.sock')
     const server = createServer((socket) => {
       socket.once('data', () => socket.end(`${JSON.stringify({
         schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
-        requestId: 'another-request',
+        requestId,
         ok: false,
-        operation: 'send',
+        operation,
         error: { code: 'REGION_NOT_OPEN', message: 'Another request failed.' }
       })}\n`))
     })
