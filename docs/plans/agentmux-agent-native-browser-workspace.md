@@ -11,6 +11,15 @@ Browser 不只负责打开网页，还要把网页上下文安全地带给 Agent
 - 视口设置保留，使用明确的预设尺寸并允许恢复默认自适应尺寸。
 - 更多菜单保留。除了固定显示的外部打开，Browser bar 上的“选择元素”“截屏”“DevTools”“视口”和“更多”都能在 Browser Tools 中配置是否显示；即使隐藏“更多”，Browser Tools 仍是恢复这些入口的权威配置面。
 - Profile 的创建、导入、切换和管理放在 Workspace 的 Browser Tools，不在 Browser bar 再维护第二套管理入口。导入 Browser Profile 的含义是把已支持浏览器的可用登录会话导入 AgentMux 自己的隔离 Session，而不是让 AgentMux 运行时读取外部浏览器目录。
+- 点击 AgentMux 一方可控的 HTTP(S) 链接时，不再直接猜“在 AgentMux 还是系统浏览器打开”。打开目的地菜单提供“在系统浏览器打开”“在新 Tab 打开”“在左边打开”“在右边打开”“在上面打开”“在下面打开”。当前最小端到端入口是 Terminal 链接；后续一方可控的 Markdown/编辑器链接复用同一组件和命令，不复制菜单。
+
+## 链接打开目的地
+
+- “在系统浏览器打开”继续走 Main 的 URL 校验与系统 `shell.openExternal`。
+- “在新 Tab 打开”在当前 Universal Pane group 中创建 Browser Tab；左、右、上、下使用现有 workbench split owner，从当前 region 派生目标 region 后创建 Browser，不另建布局 Store。
+- 目的地选择器是可复用的 `OpenDestinationMenu`，只接收经过 HTTP(S) 解析的 URL、当前 workspace/group/region 和一个明确 destination enum。菜单用方向图示同时表达落点和最终 pane 结构，键盘可导航、Escape 可关闭，不只依赖图标猜含义。
+- Renderer 只表达用户选择的布局意图；Browser WebContents、URL 导航和系统外链仍由 Electron Main 的既有 owner 执行。网页内容、Terminal output 或页面脚本不能直接提交任意布局 mutation。
+- 普通 Browser 页面内的同页导航继续保留 Chromium 原生语义；本任务不拦截所有网页点击来强行弹菜单，也不破坏 OAuth popup、下载或 opener 行为。
 
 ## 所有权与依赖方向
 
@@ -67,5 +76,6 @@ Browser 不只负责打开网页，还要把网页上下文安全地带给 Agent
 
 - Main owner 测试证明 Profile partition、显式导入、DevTools、截图、视口、元素选择、导航失效和关闭清理。
 - Typed IPC 与 Renderer 测试证明稳定 toolbar 顺序、显隐配置、外链不可隐藏、合并选择入口和 Browser Tools Profile 管理。
+- Link routing 测试证明系统浏览器与新 Tab/左/右/上/下六个目的地都映射到既有 Main/Universal Pane owner，并且菜单可由 Terminal 链接端到端触发。
 - Production Electron 验收真实 WebContentsView：外部打开、DevTools、viewport、元素选择、批注、截图 PNG、Profile 切换/导入与关闭后资源释放。
 - 未缩小的 `pnpm test:fast`、`pnpm check` 和 production build 绑定同一候选；既有 harness blocker 必须如实报告，不能用 exclude 或 fallback 冒充绿灯。
