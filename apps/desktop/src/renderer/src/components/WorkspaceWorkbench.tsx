@@ -82,6 +82,27 @@ function tabLabel(tab: WorkbenchTab): string {
   return surface.sessionId
 }
 
+export function formatAgentMuxTabHandoff(tabId: string): string {
+  const tabArgument = `'${tabId.replaceAll("'", `'"'"'`)}'`
+  return `Continue in AgentMux Tab ${tabId}.
+
+Inspect it with:
+agentmux inspect --tab ${tabArgument}
+
+Send to its Agent when the Tab has exactly one Agent Session:
+agentmux send --to-tab ${tabArgument} --text "..."
+
+Use agentSessionId from the inspect receipt. If send returns MESSAGE_TARGET_NOT_UNIQUE, choose an agentSessionId from the error candidates, then use:
+agentmux send --to-session <agentSessionId> --text "..."`
+}
+
+export function copyableAgentSessionIdForTab(tab: WorkbenchTab): string | null {
+  const agentSessionIds = new Set(workbenchSurfaces(tab).flatMap((surface) =>
+    surface.kind === 'agent' ? [surface.sessionId] : []
+  ))
+  return agentSessionIds.size === 1 ? (agentSessionIds.values().next().value ?? null) : null
+}
+
 function DragPreview({ tab }: { tab: WorkbenchTab }) {
   return (
     <div className="tab-drag-preview">
@@ -111,6 +132,7 @@ function SortableWorkbenchTab({
   const session = surface.kind === 'agent' || surface.kind === 'terminal'
     ? sessions.find((item) => item.id === surface.sessionId)
     : null
+  const copyableAgentSessionId = copyableAgentSessionIdForTab(tab)
   const dirty =
     surface.kind === 'file'
       ? Boolean(dirtyDocuments[documentKey(surface.workspaceId, surface.path)])
@@ -173,9 +195,9 @@ function SortableWorkbenchTab({
   }
 
   async function copySessionId(): Promise<void> {
-    if (!session) return
+    if (!copyableAgentSessionId) return
     try {
-      await api.ui.writeClipboardText(session.id)
+      await api.ui.writeClipboardText(copyableAgentSessionId)
     } catch (error) {
       console.warn('[session] failed to copy Session ID', error)
     }
@@ -190,18 +212,8 @@ function SortableWorkbenchTab({
   }
 
   async function copyAgentHandoff(): Promise<void> {
-    const handoff = `Continue in AgentMux Tab ${tab.id}.
-
-Inspect it with:
-agentmux inspect --tab ${tab.id}
-
-Send to its Agent when the Tab has exactly one Agent Session:
-agentmux send --to-tab ${tab.id} --text "..."
-
-If that returns MESSAGE_TARGET_NOT_UNIQUE, run agentmux list sessions, choose the exact Session, then use:
-agentmux send --to-session <session-id> --text "..."`
     try {
-      await api.ui.writeClipboardText(handoff)
+      await api.ui.writeClipboardText(formatAgentMuxTabHandoff(tab.id))
     } catch (error) {
       console.warn('[tab] failed to copy Agent handoff', error)
     }
@@ -231,7 +243,7 @@ agentmux send --to-session <session-id> --text "..."`
         onOpenChange={setTabMenuOpen}
         onCopyTabId={() => void copyTabId()}
         onCopyAgentHandoff={() => void copyAgentHandoff()}
-        {...(session ? { onCopySessionId: () => void copySessionId() } : {})}
+        {...(copyableAgentSessionId ? { onCopySessionId: () => void copySessionId() } : {})}
         onClose={() => void requestTabsClose([tab.id])}
         onCloseOthers={() => void requestTabsClose(otherTabs)}
         onCloseLeft={() => void requestTabsClose(tabsToLeft)}
