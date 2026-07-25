@@ -54,21 +54,21 @@ CtxMux 的累计 Input cursor → PTY。
 空间操作走另一条正交路径：
 
 ```text
-managed Agent → agentmux CLI → composition.sock → Desktop Main Composition Host
-                                                    │ IPC request/receipt
-                                                    ▼
-                                      Renderer Layout Store / reducer
-                                                    │ launch only
-                                                    ▼
-                                      RuntimeController → Core → ctxmuxd
+managed Agent → agentmux CLI → control.sock → Desktop Main Control Host
+                                                │ typed IPC request/receipt
+                                                ▼
+                                  Renderer Layout Store / reducer
+                                                │ Agent / Terminal creation
+                                                ▼
+                                  RuntimeController → Core → ctxmuxd
 ```
 
-Core 的 Composition 合同只表达 `context`、`view.open`、`view.focus`、`launch` 和封闭的
-`tab | split-*` placement；它不保存布局。Desktop Main 持有跨进程事务和长期 Agent lifecycle，
-Renderer 的 Workspace split tree 是 Pane/Tab/View 的唯一 SSOT。`view.open` 只改 presentation；
-`launch` 先放置 pending View，再通过长期 RuntimeController 创建 Agent，失败或 owner 丢失时
-回滚。布局变化最终只通过既有 viewport synchronizer 把稳定后的 cols/rows 提交给 ctxmux，
-CtxMux 从不接收 Pane、Tab、View 或 split direction。
+Core 的 Control 合同只表达类型化的 `inspect/open/send/focus/arrange` 请求和 receipt；它不保存
+布局。Desktop Main 持有跨进程事务和长期 Agent lifecycle，Renderer 的 Workspace split tree
+是 Tab/Region 的唯一 SSOT。Agent 与 Terminal 创建经长期 RuntimeController，Browser 创建经
+Main Browser owner；布局或 owner 丢失时只回滚本次事务。完整命令与 selector 语义只由
+`docs/plans/agentmux-ai-native-desktop-composition-cli.md` 定义。布局变化最终只通过既有 viewport
+synchronizer 把稳定后的 cols/rows 提交给 ctxmux；CtxMux 从不接收 Tab、Region 或 split direction。
 
 ## 2. 所有权矩阵
 
@@ -90,10 +90,10 @@ lineage，但只有 AgentMux Provider 可以解释这些证据。
 | --- | --- | --- |
 | PTY raw bytes（stdout/stdin 原始字节） | CtxMux daemon，经 `CtxmuxRunAdapter` 投影 | `ctxmux-run-adapter.ts:418`（`decodeChunk`）、`ctxmux-run-adapter.ts:829`（`emitRunEvent`） |
 | Run lifecycle（start/stop/interrupt/resize） | CtxMux，经 adapter 暴露稳定投影 | `ctxmux-run-adapter.ts:587`（`start`）、`:774`（`resize`）、`:787`（`interrupt`）、`:795`（`stop`） |
-| Composition transaction（context/open/focus/launch） | Desktop Main；通过一个版本化 endpoint 连接 CLI 与 Renderer | `apps/desktop/src/main/ipc.ts`、`packages/core/src/composition-control.ts` |
-| Pane/Tab/View layout 与 placement | Desktop Renderer 的 Layout Store/reducer | `apps/desktop/src/renderer/src/store.ts`、`lib/composition.ts`、`lib/workbench-layout.ts` |
-| Tab 关闭与后台保留决策 | Desktop Renderer；停止动作通过 Core public API 下达 | 关闭承载最后一个 Terminal Region 的完整 Tab View 即 Stop Run；Agent 默认 Stop，只有确认保留才继续后台运行；关闭 Tab 内 Region 只改变 View 布局 |
-| Viewport grid（何时 fit、向 PTY 提交哪个尺寸） | Desktop Renderer 决定 grid；Desktop Main 用 View 的 Attachment capability 绑定 exact Run；CtxMux 只应用最终提交的 PTY 尺寸 | `terminal-viewport-sync.ts`、`TerminalView.tsx`、`runtime-controller.ts` |
+| Control transaction（inspect/open/send/focus/arrange） | Desktop Main；通过一个版本化 endpoint 连接 CLI 与 Renderer | `apps/desktop/src/main/ipc.ts`、`packages/core/src/control-host.ts` |
+| Tab/Region layout 与 placement | Desktop Renderer 的 Layout Store/reducer | `apps/desktop/src/renderer/src/store.ts`、`lib/composition.ts`、`lib/workbench-layout.ts` |
+| Tab 关闭与后台保留决策 | Desktop Renderer；停止动作通过 Core public API 下达 | 关闭承载最后一个 Terminal Region 的完整 Tab 即 Stop Run；Agent 默认 Stop，只有确认保留才继续后台运行；关闭 Tab 内 Region 只改变布局 |
+| Viewport grid（何时 fit、向 PTY 提交哪个尺寸） | Desktop Renderer 决定 grid；Desktop Main 用 Region 的 Attachment capability 绑定 exact Run；CtxMux 只应用最终提交的 PTY 尺寸 | `terminal-viewport-sync.ts`、`TerminalView.tsx`、`runtime-controller.ts` |
 | Replay（重连时的字节回放） | CtxMux 快照，adapter 解码 | `ctxmux-run-adapter.ts:609`（`attach`）、`:641`（`replay`）、`:665`（`observeOutput`） |
 | Input（带累计 cursor 的可恢复写入） | CtxMux，adapter 用 `recoverableInput` 重试一次 | `ctxmux-run-adapter.ts:738`（`input`，`attempt < 2` + `disposition === 'unknown'`） |
 | Core Provider handshake（终端能力握手） | `AgentMuxClient` | `client.ts:1139`（`ensureTerminalHandshake`） |
