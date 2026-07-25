@@ -282,6 +282,49 @@ describe('BrowserViewManager', () => {
       .not.toThrow()
   })
 
+  it.each(['addChildView', 'attach', 'emit', 'snapshot'] as const)(
+    'atomically releases an unpublished Browser when %s fails during create',
+    async (failurePoint) => {
+      const fixture = fakeWindow()
+      const manager = browserManager(fixture.window)
+      const id = `browser-create-${failurePoint}`
+      const internals = manager as unknown as Record<
+        'attach' | 'emit' | 'snapshot',
+        (...args: unknown[]) => unknown
+      >
+      const internalFailurePoint = failurePoint === 'addChildView' ? null : failurePoint
+      const original = internalFailurePoint ? internals[internalFailurePoint] : null
+      if (failurePoint === 'addChildView') {
+        vi.spyOn(fixture.window.contentView, 'addChildView').mockImplementationOnce((view) => {
+          fixture.children.push(view)
+          throw new Error(`${failurePoint} failed`)
+        })
+      } else if (failurePoint === 'snapshot') {
+        let snapshotCalls = 0
+        fakeElectron.FakeWebContentsView.nextLoadURLImpl = async () => await new Promise<void>(() => {})
+        internals.snapshot = (...args) => {
+          snapshotCalls += 1
+          if (snapshotCalls === 2) throw new Error(`${failurePoint} failed`)
+          return original!(...args)
+        }
+      } else {
+        internals[failurePoint] = () => { throw new Error(`${failurePoint} failed`) }
+      }
+
+      const instanceCount = fakeElectron.FakeWebContentsView.instances.length
+      await expect(manager.create(id, 'https://example.com')).rejects.toThrow(`${failurePoint} failed`)
+      const failedView = fakeElectron.FakeWebContentsView.instances[instanceCount]!
+      if (internalFailurePoint && original) internals[internalFailurePoint] = original
+
+      expect(fixture.children).toEqual([])
+      expect(failedView.webContents.isDestroyed()).toBe(true)
+      expect(fixture.sent).not.toContainEqual({ type: 'closed', id })
+      await expect(manager.create(id, 'about:blank')).resolves.toMatchObject({ id })
+      expect(fixture.children).toHaveLength(1)
+      manager.close(id)
+    }
+  )
+
   it('atomically switches profile after loading a hidden candidate with the latest view state', async () => {
     const fixture = fakeWindow()
     const manager = browserManager(fixture.window)
