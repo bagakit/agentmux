@@ -48,6 +48,8 @@
   --green-text: color-mix(in srgb, var(--green) 82%, #ffffff);
   --green-bg: color-mix(in srgb, var(--green) 12%, var(--surface-0));
   --green-line: color-mix(in srgb, var(--green) 38%, var(--surface-1));
+  /* 选中行的 hover：比选中态亮一档，让已经选中的行也能给出悬停反馈。 */
+  --green-bg-hover: color-mix(in srgb, var(--green) 19%, var(--surface-0));
   --amber-text: color-mix(in srgb, var(--amber) 80%, #ffffff);
   --amber-bg: color-mix(in srgb, var(--amber) 13%, var(--surface-0));
   --amber-line: color-mix(in srgb, var(--amber) 40%, var(--surface-1));
@@ -426,9 +428,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .workspace-topic-list { width: 100%; overflow: hidden; border-radius: var(--radius-sm); background: var(--surface-2); }
 .workspace-topic-item { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) 28px 28px; align-items: center; border-bottom: 1px solid var(--line-soft); }
 .workspace-topic-item:last-child { border-bottom: 0; }
-.workspace-topic-item.current { background: var(--surface-1); box-shadow: inset 2px 0 0 var(--green-2); }
+/* 选中＝一块干净的 Surface 填充，没有贴边竖条。它必须比 hover 更实，否则选中看起来比
+   悬停还弱——此前它是 --surface-1，比 hover 的 --surface-3 更暗，全靠那根绿竖条撑住存在感。 */
+.workspace-topic-item.current { background: var(--green-bg); }
+.workspace-topic-item.current .workspace-topic-title-line strong { color: var(--text); }
 .workspace-topic-entry { min-width: 0; display: grid; grid-template-columns: 15px minmax(0, 1fr); align-items: center; gap:var(--sp-3); padding:var(--sp-3) var(--sp-2) var(--sp-3) var(--sp-4); border: 0; color: var(--text-3); background: transparent; text-align: left; }
-.workspace-topic-item:hover { background: var(--surface-3); }
+.workspace-topic-item:hover:not(.current) { background: var(--surface-3); }
+.workspace-topic-item.current:hover { background: var(--green-bg-hover); }
 .workspace-topic-entry > svg { color: var(--green-2); }
 .workspace-topic-entry > span { min-width: 0; display: grid; gap:var(--sp-1); }
 .workspace-topic-rename-form { min-width: 0; display: grid; grid-template-columns: 15px minmax(0, 1fr); align-items: center; gap:var(--sp-3); padding:var(--sp-3) var(--sp-2) var(--sp-3) var(--sp-4); }
