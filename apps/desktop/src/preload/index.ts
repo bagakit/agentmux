@@ -1,9 +1,9 @@
 import { contextBridge, ipcRenderer, webFrame } from 'electron'
-import type { AgentExecutorId, AgentMuxCompositionRequest } from '@agentmux/core'
+import type { AgentExecutorId, AgentMuxControlRequest } from '@agentmux/core'
 import {
-  COMPOSITION_CANCEL_CHANNEL,
-  COMPOSITION_REQUEST_CHANNEL,
-  COMPOSITION_RESPONSE_CHANNEL,
+  CONTROL_CANCEL_CHANNEL,
+  CONTROL_REQUEST_CHANNEL,
+  CONTROL_RESPONSE_CHANNEL,
   WINDOW_RESIZE_EVENT_CHANNEL
 } from '../shared/contracts.js'
 import type {
@@ -18,8 +18,8 @@ import type {
   CreateWorkspacePathInput,
   CreateWorktreeForBranchInput,
   CreateWorkspaceInput,
-  DesktopCompositionCancellation,
-  DesktopCompositionResponse,
+  DesktopControlCancellation,
+  DesktopControlResponse,
   HostConfig,
   MoveWorkspacePathInput,
   RuntimeEvent,
@@ -92,25 +92,25 @@ const api: AgentMuxPreloadApi = {
   executors: {
     detect: (executorId: AgentExecutorId, hostId: string) => ipcRenderer.invoke('executors:detect', executorId, hostId)
   },
-  composition: {
+  control: {
     onRequest(listener) {
-      const wrapped = (_event: Electron.IpcRendererEvent, request: AgentMuxCompositionRequest): void => {
+      const wrapped = (_event: Electron.IpcRendererEvent, request: AgentMuxControlRequest): void => {
         listener(request)
       }
-      ipcRenderer.on(COMPOSITION_REQUEST_CHANNEL, wrapped)
-      return () => ipcRenderer.off(COMPOSITION_REQUEST_CHANNEL, wrapped)
+      ipcRenderer.on(CONTROL_REQUEST_CHANNEL, wrapped)
+      return () => ipcRenderer.off(CONTROL_REQUEST_CHANNEL, wrapped)
     },
     onCancellation(listener) {
       const cancel = (
         _event: Electron.IpcRendererEvent,
-        cancellation: DesktopCompositionCancellation
+        cancellation: DesktopControlCancellation
       ): void => {
         listener(cancellation)
       }
-      ipcRenderer.on(COMPOSITION_CANCEL_CHANNEL, cancel)
-      return () => ipcRenderer.off(COMPOSITION_CANCEL_CHANNEL, cancel)
+      ipcRenderer.on(CONTROL_CANCEL_CHANNEL, cancel)
+      return () => ipcRenderer.off(CONTROL_CANCEL_CHANNEL, cancel)
     },
-    respond: (response) => ipcRenderer.send(COMPOSITION_RESPONSE_CHANNEL, response)
+    respond: (response: DesktopControlResponse) => ipcRenderer.send(CONTROL_RESPONSE_CHANNEL, response)
   },
   sessions: {
     snapshot: () => ipcRenderer.invoke('sessions:snapshot'),
@@ -123,6 +123,8 @@ const api: AgentMuxPreloadApi = {
     write: (session: SessionControl, data: string) => ipcRenderer.invoke('sessions:write', session, data),
     submitPrompt: (session: AgentSessionControl, prompt: string) =>
       ipcRenderer.invoke('sessions:submitPrompt', session, prompt),
+    resume: (session: AgentSessionControl, prompt: string, operationId: string) =>
+      ipcRenderer.invoke('sessions:resume', session, prompt, operationId),
     acknowledge: (session: SessionControl, sequence: number) =>
       ipcRenderer.invoke('sessions:acknowledge', session, sequence),
     interrupt: (session: SessionControl) => ipcRenderer.invoke('sessions:interrupt', session),

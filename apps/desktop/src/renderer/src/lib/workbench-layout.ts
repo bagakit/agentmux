@@ -224,6 +224,31 @@ export function addTab(layout: WorkspaceLayout, groupId: string, tabId: string):
   }
 }
 
+export function insertTabAfter(
+  layout: WorkspaceLayout,
+  anchorTabId: string,
+  tabId: string
+): WorkspaceLayout {
+  if (findGroupForTab(layout, tabId)) return layout
+  const group = findGroupForTab(layout, anchorTabId)
+  if (!group) return layout
+  const anchorIndex = group.tabOrder.indexOf(anchorTabId)
+  const tabOrder = [...group.tabOrder]
+  tabOrder.splice(anchorIndex + 1, 0, tabId)
+  return {
+    ...layout,
+    activeGroupId: group.id,
+    groups: layout.groups.map((candidate) => candidate.id === group.id
+      ? {
+          ...candidate,
+          tabOrder,
+          activeTabId: tabId,
+          recentTabIds: pushRecentTabId(candidate.recentTabIds, tabId)
+        }
+      : candidate)
+  }
+}
+
 export function activateTab(
   layout: WorkspaceLayout,
   groupId: string,

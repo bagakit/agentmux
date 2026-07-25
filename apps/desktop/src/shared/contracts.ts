@@ -12,8 +12,10 @@ import type {
   AgentMuxRunRef,
   AgentMuxRunReplayGap,
   AgentMuxRunState,
-  AgentMuxCompositionRequest,
-  AgentMuxCompositionResult,
+  AgentMuxControlError,
+  AgentMuxControlErrorCode,
+  AgentMuxControlRequest,
+  AgentMuxControlResult,
   AgentTimelineItem,
   AgentTimelineSnapshot
 } from '@agentmux/core'
@@ -204,6 +206,7 @@ export type TerminalLaunchInput = {
   hostId: string
   workspacePath: string
   createOperationId?: string
+  shellCommand?: string
   cols?: number
   rows?: number
 }
@@ -310,19 +313,19 @@ export type ExecutorDetection = {
   installed: boolean
 }
 
-export type DesktopCompositionResponse =
-  | { requestId: string; ok: true; result: AgentMuxCompositionResult }
-  | { requestId: string; ok: false; code: string; message: string }
+export type DesktopControlResponse =
+  | { requestId: string; ok: true; result: AgentMuxControlResult }
+  | { requestId: string; ok: false; error: AgentMuxControlError }
 
-export type DesktopCompositionCancellation = {
+export type DesktopControlCancellation = {
   requestId: string
-  code: string
+  code: AgentMuxControlErrorCode
   message: string
 }
 
-export const COMPOSITION_REQUEST_CHANNEL = 'agentmux:composition-request'
-export const COMPOSITION_CANCEL_CHANNEL = 'agentmux:composition-cancel'
-export const COMPOSITION_RESPONSE_CHANNEL = 'composition:response'
+export const CONTROL_REQUEST_CHANNEL = 'agentmux:control-request'
+export const CONTROL_CANCEL_CHANNEL = 'agentmux:control-cancel'
+export const CONTROL_RESPONSE_CHANNEL = 'control:response'
 
 export type BrowserSnapshot = {
   id: string
@@ -484,11 +487,11 @@ export type AgentMuxDesktopApi = {
   executors: {
     detect(executorId: AgentExecutorId, hostId: string): Promise<ExecutorDetection>
   }
-  composition: {
+  control: {
     onRequest(listener: (
-      request: AgentMuxCompositionRequest,
+      request: AgentMuxControlRequest,
       signal: AbortSignal
-    ) => AgentMuxCompositionResult | Promise<AgentMuxCompositionResult>): () => void
+    ) => AgentMuxControlResult | Promise<AgentMuxControlResult>): () => void
   }
   sessions: {
     snapshot(): Promise<RuntimeSnapshot>
@@ -499,6 +502,7 @@ export type AgentMuxDesktopApi = {
     detach(attachmentId: string): Promise<void>
     write(session: SessionControl, data: string): Promise<void>
     submitPrompt(session: AgentSessionControl, prompt: string): Promise<void>
+    resume(session: AgentSessionControl, prompt: string, operationId: string): Promise<SessionSnapshot>
     acknowledge(session: SessionControl, throughByte: number): Promise<void>
     interrupt(session: SessionControl): Promise<void>
     resize(attachmentId: string, cols: number, rows: number): Promise<void>
@@ -537,10 +541,10 @@ export type AgentMuxDesktopApi = {
   }
 }
 
-export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'composition'> & {
-  composition: {
-    onRequest(listener: (request: AgentMuxCompositionRequest) => void): () => void
-    onCancellation(listener: (cancellation: DesktopCompositionCancellation) => void): () => void
-    respond(response: DesktopCompositionResponse): void
+export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control'> & {
+  control: {
+    onRequest(listener: (request: AgentMuxControlRequest) => void): () => void
+    onCancellation(listener: (cancellation: DesktopControlCancellation) => void): () => void
+    respond(response: DesktopControlResponse): void
   }
 }
