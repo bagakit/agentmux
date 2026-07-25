@@ -355,10 +355,14 @@ async function beginPointerDrag(window: BrowserWindow, path: string): Promise<Po
   const point = await elementPoint(window, `draggable Explorer row ${path}`, treeRowSource(path))
   sendMouse(window, 'mouseMove', point)
   sendMouse(window, 'mouseDown', point, 'left')
-  sendMouse(window, 'mouseMove', { x: point.x + 8, y: point.y + 2 }, undefined, ['leftbuttondown'])
-  await waitFor(`PointerSensor overlay for ${path}`, async () => (
-    await window.webContents.executeJavaScript("Boolean(document.querySelector('.file-tree-drag-preview'))") as boolean
-  ))
+  sendMouse(window, 'mouseMove', { x: point.x + 10, y: point.y + 4 }, undefined, ['leftbuttondown'])
+  await waitFor(`PointerSensor overlay for ${path}`, async () => {
+    const active = await window.webContents.executeJavaScript("Boolean(document.querySelector('.file-tree-drag-preview'))") as boolean
+    if (!active) {
+      sendMouse(window, 'mouseMove', { x: point.x + 12, y: point.y + 6 }, undefined, ['leftbuttondown'])
+    }
+    return active
+  })
   return point
 }
 
@@ -705,11 +709,13 @@ async function runExplorerInteractionProbe(options: {
   const hoverTarget = await moveActivePointerDrag(window, 'hover-expand destination', treeRowSource('targets/hover'))
   await waitForActivePointerDropTarget(window, 'targets/hover', hoverTarget)
   await delay(600)
-  await waitFor('500ms hover-expanded directory', async () => (
-    await window.webContents.executeJavaScript(
+  await waitFor('500ms hover-expanded directory', async () => {
+    const expanded = await window.webContents.executeJavaScript(
       `${treeRowSource('targets/hover')}?.getAttribute('aria-expanded') === 'true'`
     ) as boolean
-  ))
+    if (!expanded) sendMouse(window, 'mouseMove', hoverTarget, undefined, ['leftbuttondown'])
+    return expanded
+  })
   cancelPointerDrag(window, hoverTarget)
   await waitFor('hover-expand PointerSensor cleanup', async () => !(
     await window.webContents.executeJavaScript("Boolean(document.querySelector('.file-tree-drag-preview'))") as boolean
