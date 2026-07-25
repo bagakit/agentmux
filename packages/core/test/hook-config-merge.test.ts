@@ -3,6 +3,8 @@ import { renderMergedHookContent } from '../src/hook-config-merge.js'
 
 const OWNED_KEY = { kind: 'json-owned-key', key: 'agentmux-status' } as const
 const MANAGED = { kind: 'json-managed-events', marker: 'agentmux-hook.js' } as const
+const YAML_MANAGED = { kind: 'yaml-managed-events', marker: 'agentmux-hook.js' } as const
+const APPROVALS = { kind: 'json-managed-approvals', marker: 'agentmux-hook.js' } as const
 
 describe('hook config merge — json-owned-key (antigravity shared ~/.gemini)', () => {
   const owned = JSON.stringify({ 'agentmux-status': { PreToolUse: [{ command: 'agentmux-hook.js' }] } })
@@ -91,6 +93,135 @@ describe('hook config merge — json-managed-events (codex .codex/hooks.json)', 
     const first = renderMergedHookContent('{}\n', owned, MANAGED)
     const second = renderMergedHookContent(first, owned, MANAGED)
     expect(second).toBe(first)
+  })
+})
+
+describe('hook config merge — yaml-managed-events (hermes ~/.hermes/config.yaml)', () => {
+  const owned = JSON.stringify({
+    hooks: {
+      pre_tool_call: [{ command: '/usr/bin/env … agentmux-hook.js', timeout: 10 }],
+      on_session_end: [{ command: '/usr/bin/env … agentmux-hook.js', timeout: 10 }]
+    }
+  })
+
+  // A realistic slice of the user's config: comments, a secret-bearing key, and their own shell hook.
+  const current = [
+    '# hermes configuration — do not commit',
+    'model: claude-opus-5',
+    'api_key: sk-secret-do-not-lose  # personal token',
+    'hooks:',
+    '  pre_tool_call:',
+    '    - command: /home/me/audit.sh  # user audit hook',
+    '      timeout: 5',
+    ''
+  ].join('\n')
+
+  it('adds our command under each event while preserving comments, secrets, and foreign hooks', () => {
+    const result = renderMergedHookContent(current, owned, YAML_MANAGED)
+    // Comments and the secret survive — the merge edits the parsed doc, never re-emits a plain object.
+    // (The serializer normalises the run of spaces before an inline comment to one; the value and the
+    // comment text are preserved, which is what matters — no key or credential is ever lost.)
+    expect(result).toContain('# hermes configuration — do not commit')
+    expect(result).toContain('api_key: sk-secret-do-not-lose')
+    expect(result).toContain('# personal token')
+    expect(result).toContain('# user audit hook')
+    // The foreign hook stays first in its shared bucket; ours is appended after it.
+    const preToolBlock = result.slice(result.indexOf('pre_tool_call:'))
+    expect(preToolBlock.indexOf('/home/me/audit.sh')).toBeLessThan(preToolBlock.indexOf('agentmux-hook.js'))
+    // Our new bucket is added.
+    expect(result).toContain('on_session_end:')
+  })
+
+  it('sweeps a stale AgentMux entry by marker instead of duplicating on reinstall, and is idempotent', () => {
+    // A previous install wrote our command under a different execPath.
+    const stale = [
+      'model: claude-opus-5',
+      'hooks:',
+      '  pre_tool_call:',
+      '    - command: /old/path/agentmux-hook.js',
+      '      timeout: 10',
+      ''
+    ].join('\n')
+    const first = renderMergedHookContent(stale, owned, YAML_MANAGED)
+    // Exactly one agentmux entry remains under pre_tool_call (the fresh one), not two.
+    expect(first.match(/agentmux-hook\.js/g)?.length).toBe(2) // pre_tool_call + on_session_end, one each
+    expect(first).not.toContain('/old/path/agentmux-hook.js')
+    // Rendering again over our own output changes nothing — required for the installer's unchanged-hash guard.
+    expect(renderMergedHookContent(first, owned, YAML_MANAGED)).toBe(first)
+  })
+
+  it('drops a bucket left empty after sweeping our only entry, keeping foreign-only buckets', () => {
+    const current = [
+      'hooks:',
+      '  legacy_event:', // only ever held our stale entry
+      '    - command: /old/agentmux-hook.js',
+      '  post_tool_call:', // foreign-only bucket, untouched
+      '    - command: /home/me/keep.sh',
+      ''
+    ].join('\n')
+    const ownedElsewhere = JSON.stringify({ hooks: { on_session_end: [{ command: 'x/agentmux-hook.js' }] } })
+    const result = renderMergedHookContent(current, ownedElsewhere, YAML_MANAGED)
+    expect(result).not.toContain('legacy_event')
+    expect(result).toContain('post_tool_call:')
+    expect(result).toContain('/home/me/keep.sh')
+  })
+
+  it('seeds hooks: into a config that has none, and treats a blank/absent file as empty', () => {
+    const noHooks = renderMergedHookContent('model: claude-opus-5\n', owned, YAML_MANAGED)
+    expect(noHooks).toContain('model: claude-opus-5')
+    expect(noHooks).toContain('agentmux-hook.js')
+    const fromBlank = renderMergedHookContent('  \n', owned, YAML_MANAGED)
+    expect(fromBlank).toContain('pre_tool_call:')
+    const fromAbsent = renderMergedHookContent(null, owned, YAML_MANAGED)
+    expect(fromAbsent).toContain('pre_tool_call:')
+  })
+
+  it('refuses to overwrite unparseable YAML or a non-mapping document (never silent data loss)', () => {
+    expect(() => renderMergedHookContent('key: [unterminated', owned, YAML_MANAGED)).toThrow(/valid YAML/)
+    expect(() => renderMergedHookContent('- just\n- a\n- list\n', owned, YAML_MANAGED)).toThrow(/YAML mapping/)
+  })
+})
+
+describe('hook config merge — json-managed-approvals (hermes shell-hooks-allowlist.json)', () => {
+  const owned = JSON.stringify({
+    approvals: [
+      { event: 'pre_tool_call', command: '/usr/bin/env … agentmux-hook.js' },
+      { event: 'on_session_end', command: '/usr/bin/env … agentmux-hook.js' }
+    ]
+  })
+
+  it('appends our approvals while preserving every foreign approval verbatim (timestamps and all)', () => {
+    const current = JSON.stringify({
+      approvals: [
+        { event: 'pre_llm_call', command: '/home/me/audit.sh', approved_at: '2026-01-01T00:00:00Z' }
+      ]
+    })
+    const result = JSON.parse(renderMergedHookContent(current, owned, APPROVALS))
+    // Foreign approval kept first, with its timestamp intact.
+    expect(result.approvals[0]).toEqual({ event: 'pre_llm_call', command: '/home/me/audit.sh', approved_at: '2026-01-01T00:00:00Z' })
+    // Our two approvals appended, carrying only {event, command}.
+    expect(result.approvals).toHaveLength(3)
+    expect(result.approvals[1]).toEqual({ event: 'pre_tool_call', command: '/usr/bin/env … agentmux-hook.js' })
+  })
+
+  it('sweeps stale AgentMux approvals by marker instead of duplicating, and is idempotent', () => {
+    const current = JSON.stringify({
+      approvals: [{ event: 'pre_tool_call', command: '/old/path/agentmux-hook.js', approved_at: 'stale' }]
+    })
+    const first = renderMergedHookContent(current, owned, APPROVALS)
+    const parsed = JSON.parse(first)
+    expect(parsed.approvals).toHaveLength(2) // stale one dropped, our two added
+    expect(first).not.toContain('/old/path/agentmux-hook.js')
+    expect(renderMergedHookContent(first, owned, APPROVALS)).toBe(first)
+  })
+
+  it('treats a blank/absent allowlist as empty rather than failing', () => {
+    expect(JSON.parse(renderMergedHookContent(null, owned, APPROVALS)).approvals).toHaveLength(2)
+    expect(JSON.parse(renderMergedHookContent('  \n', owned, APPROVALS)).approvals).toHaveLength(2)
+  })
+
+  it('refuses to overwrite an unparseable allowlist (never silent data loss)', () => {
+    expect(() => renderMergedHookContent('{ not json', owned, APPROVALS)).toThrow(/valid JSON/)
   })
 })
 
