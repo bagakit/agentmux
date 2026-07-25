@@ -401,7 +401,6 @@ describe('BrowserViewManager', () => {
     const manager = browserManager(fixture.window)
     await manager.create('browser-profile-fence', 'https://example.com/first')
     const original = fixture.children[0]!
-    const originalWindowOpen = original.webContents.windowOpenHandler!
     let rejectOldNavigation!: (error: Error) => void
     original.webContents.loadURLImpl = async () => await new Promise<void>((_resolve, reject) => {
       rejectOldNavigation = reject
@@ -416,7 +415,6 @@ describe('BrowserViewManager', () => {
     original.webContents.title = 'Stale title'
     original.webContents.emit('page-title-updated')
     original.webContents.emit('did-fail-load', -105, 'STALE_FAILURE', 'https://stale.invalid/', true)
-    expect(originalWindowOpen({ url: 'https://stale-popup.invalid/' })).toEqual({ action: 'deny' })
     await new Promise<void>((resolve) => setImmediate(resolve))
 
     expect(fixture.children).toEqual([current])
@@ -427,6 +425,15 @@ describe('BrowserViewManager', () => {
       error: null
     })
     expect(fixture.sent).not.toContainEqual({ type: 'closed', id: 'browser-profile-fence' })
+  })
+
+  it('leaves popup and opener behavior to Chromium', async () => {
+    const fixture = fakeWindow()
+    const manager = browserManager(fixture.window)
+
+    await manager.create('browser-native-window-open', 'https://example.com')
+
+    expect(fixture.children[0]!.webContents.windowOpenHandler).toBeNull()
   })
 
   it('blocks unsupported page navigation and redirects before commit', async () => {
