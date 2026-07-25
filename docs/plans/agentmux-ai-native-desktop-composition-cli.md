@@ -22,7 +22,7 @@ Region 是 Tab 内的空间位置，Surface 是 Region 当前展示的内容，A
   对象命令组”；
 - 得到版本化、类型稳定、可由 Agent 解析的 JSON receipt。
 
-第一条纵切只支持当前唯一 Local Desktop Composition Owner。Desktop 不可用、调用者
+第一条纵切只支持当前唯一 Local Desktop Control Host。Desktop 不可用、调用者
 没有唯一 Tab/Region、目标过期或歧义时失败关闭；不猜最近 Workspace、Tab 或焦点。
 
 ## 2. 原则层
@@ -43,7 +43,7 @@ Hook ingress Owner。当前 Desktop 已经同时拥有长期 RuntimeController �
 
 ### Intended generalization
 
-这一合同适用于所有愿意注册 Composition Host 的 AgentMux Client。不同 Client 可以采用不同
+这一合同适用于所有愿意注册 Control Host 的 AgentMux Client。不同 Client 可以采用不同
 布局实现，但必须区分“新 Tab”“Tab 内分屏”和“移动整张 Tab”，并接受相同的精确目标与 receipt 语义。
 
 ### Failure boundary
@@ -62,11 +62,12 @@ Hook ingress Owner。当前 Desktop 已经同时拥有长期 RuntimeController �
 
 ### Transfer checks
 
-- Headless Client 可以创建/控制 Run，但没有 Composition Host 时不能声称已经“放到右边”。
+- Headless Client 可以通过 Core API 创建/控制 Run，但没有 Control Host 时不能声称已经
+  “放到右边”，也不能让 Desktop CLI mutation 改走短命 client。
 - 同一 Agent Session 出现在两个 Region 时，使用 `self` 作为 Tab/Region anchor 必须报歧义，不能选最近焦点。
 - Desktop Renderer 消失在 Agent 创建期间时，新建 Session 必须按现有 Agent creation owner 语义回滚，
   不能留下用户不可见且无人承接 Hook 的 Agent。
-- Composition 请求超时或 Desktop 关闭时，Main 必须按 `requestId` 通知 Renderer 取消。Renderer
+- Control 请求超时或 Desktop 关闭时，Main 必须按 `requestId` 通知 Renderer 取消。Renderer
   立即撤掉 pending Tab/Region；如果 Agent 随后才启动成功，必须停止这个晚到的 Run。
 - Electron Main、Preload 和 Renderer 之间只传普通的 request、response 和 cancellation 数据。
   `AbortSignal` 不能跨 `contextBridge` 传递；真正执行布局事务的 Renderer 必须自己创建它。
@@ -100,10 +101,11 @@ Desktop Control Host                     唯一 CLI mutation 事务入口
 说得更直接一点：`packages/core` 定义“相对哪个 Region 打开”或“相对哪张 Tab 新建 Tab”，
 具体 App 保存 Workspace 的 Tab 分区树和每个 Tab 的内容分屏树，并真正计算尺寸和切换焦点。
 Core 不保存或渲染任何布局。移动整张 Tab 到新 Tab Group 是另一种产品操作，当前不扩张入
-Composition CLI。
+Control CLI。
 
-当前公共 Composition 把 Desktop Tab 命名为 View/viewId。本次直接切换后，Desktop 和公共
-Composition 只使用 Tab/tabId；Runtime 的读模型继续使用 Snapshot/Projection 术语。
+当前公共 Composition 协议把 Desktop Tab 命名为 View/viewId。本次直接切换后，它被
+宿主中立的 AgentMux Control 协议替换；Desktop 和公共类型只使用 Tab/tabId，Renderer 内部
+仍可用 Composition 指布局编排子域，Runtime 读模型继续使用 Snapshot/Projection 术语。
 公共 receipt 同时返回 `tabId` 与精确 `regionId`。
 
 ### 协议形状与依赖方向
@@ -260,8 +262,8 @@ agentmux stop --session <session-id|self>
   Core 现有的唯一身份解析，用新心智保留旧 `session resolve` 的完整能力。
   `inspect --session self` 从受管
   环境取精确 Agent Session ID，只返回 Core Session/Run 真相；`inspect --tab self` 和
-  `inspect --region self` 由 Composition Host 从同一 caller Session 解析展示，不唯一时失败关闭。
-  Core 查询不做 Desktop enrichment，Composition 不可用时也不返回缩水结果。所有读操作都不改变焦点。
+  `inspect --region self` 由 Control Host 从同一 caller Session 解析展示，不唯一时失败关闭。
+  Core 查询不做 Desktop enrichment，Control Host 不可用时也不返回缩水结果。所有读操作都不改变焦点。
 - `send` 恰好接受 `--to-session|--to-region|--to-tab` 中一个。`--to-region` 要求该 Region
   当前展示 Agent；`--to-tab` 要求该 Tab 当前恰好只投影一个不同的 Agent Session。零个或
   多个都返回 `MESSAGE_TARGET_NOT_UNIQUE` 和按 Session 去重的精确 `candidates`，并提示先
@@ -331,6 +333,8 @@ Desktop 不可用时明确失败，不改走短命 Core client。
 
 旧 `context`、`launch`、`session *`、`region *`、`surface *` 和 `layout *` 命令在新纵切跑通后直接
 删除，不保留 alias、迁移帮助或 fallback。`move/close` 等尚无需求的 CLI 不为对称性扩张。
+公共 `composition` 模块、symbol、socket path 和 Desktop bridge 同样直接改名为 `control`；旧
+`composition.sock` 与 export 被删除，不并存两套外部协议。
 
 Desktop 内置 Grok Profile 默认使用 Grok 官方的免确认参数
 `--permission-mode bypassPermissions`。这是可见、可编辑的 Profile args，不在 Provider 内藏第二套
@@ -362,7 +366,7 @@ Desktop 内置 Grok Profile 默认使用 Grok 官方的免确认参数
   预览和 receipt 字段不能混用；最终 Region 尺寸仍通过现有 resize 路径提交给 ctxmux。
 - 三列、四宫格、六宫格和九宫格产生确定的 Region bounds 与 Launcher slot；balance 和
   active-first 只在显式请求时原子重排，并保留每个 Surface 的唯一 owner。
-- Tab 菜单复制的 ID 与 Composition receipt 的 `tabId` 完全相同；复制 handoff 带入该 ID 和
+- Tab 菜单复制的 ID 与 Control receipt 的 `tabId` 完全相同；复制 handoff 带入该 ID 和
   `inspect/send` 用法。单 Agent Tab 的 `send --to-tab` 成功；零 Agent 或多 Agent Tab 以
   `MESSAGE_TARGET_NOT_UNIQUE` 失败，不改发给 active Session，不广播。
 - `send --to-session|--to-region|--to-tab` 都通过同一 Desktop RuntimeController 严格发送；已退出
@@ -371,7 +375,7 @@ Desktop 内置 Grok Profile 默认使用 Grok 官方的免确认参数
   `open agent --agent <id>`。
 - Browser open receipt 的 `browserId` 与 `regionId` 不同；Terminal `shellCommand` 只在创建时
   映射一次 shell `-lc`，不当作 executable 字符串，不在 attach 后二次输入。
-- 创建、布局、回滚与 receipt 经过 Composition Control 协议；实际 Agent prompt 仍仅由 Core
+- 创建、布局、回滚与 receipt 经过 AgentMux Control 协议；实际 Agent prompt 仍仅由 Core
   Provider 合同接收。旧命令树和 `viewId/tabGroupId` 公共字段被删除，不保留 alias。
 - 无 Desktop、unknown/stale/ambiguous caller/target、Renderer timeout 和 launch failure 都有
   确定错误码且不改变布局或泄漏 Agent Session。
@@ -379,14 +383,15 @@ Desktop 内置 Grok Profile 默认使用 Grok 官方的免确认参数
   立刻回滚 pending Region，不能把跨 world 的普通对象误当成 `AbortSignal`。
 - 慢启动 Agent 在第一段终端输出前显示明确的启动中状态；Grok 的内置默认 Profile 使用
   `--permission-mode bypassPermissions`，设置与实际启动 argv 使用同一份 args。
-- Composition socket 按原始字节收齐一条消息后再做 UTF-8 解码。中文等多字节字符即使跨 socket
+- Control socket 按原始字节收齐一条消息后再做 UTF-8 解码。中文等多字节字符即使跨 socket
   chunk 也不能损坏；对端提前关闭时请求必须结束并报错，不能一直挂住。
 - Core package consumer 能发现 CLI/Skill 并验证公共 JSON receipt；Repository `pnpm check` 通过。
 
 ## 6. 用户确认
 
 用户确认：空间属于连接中的 Client/Workspace presentation；ctxmux 只提供 Run
-Kernel；AgentMux Core 提供宿主中立 Composition 合同；具体 Desktop 持有布局；CLI 保持
+Kernel；AgentMux Core 提供宿主中立 Control 合同，Composition 只是 Client 的布局子域；具体
+Desktop 持有布局；CLI 保持
 AI 可发现、JSON 输出和 typed flag，不增加 `+shortcut` 或通用 JSON 参数。
 
 用户纠正：Tab 决定“一张完整视图”的心智；同一件事里按方向打开 Session，默认是
