@@ -30,8 +30,9 @@ Region 是 Tab 内的空间位置，Surface 是 Region 当前展示的内容，A
 ### What
 
 空间是 Client 的展示上下文，不是 Agent Session 或 CtxMux Run 的属性。一个 Tab 是一张
-完整工作面，Tab 内部可以有多个 Region。CLI 暴露 `inspect/open/send/focus/arrange`
-等用户意图；内部仍由各自 Owner 完成 Agent 生命周期、Browser 创建和 Tab 布局。统一的是
+完整工作面，Tab 内部可以有多个 Region。CLI 暴露
+`inspect/list/open/send/focus/arrange/output/interrupt/resume/stop` 用户意图；内部仍由各自 Owner
+完成 Agent 生命周期、Browser 创建和 Tab 布局。统一的是
 公共心智和 receipt，不是把所有真相塞进一个全能 Runtime Owner。
 
 ### Why
@@ -281,7 +282,7 @@ agentmux stop --session <session-id|self>
   多个展示。
 - `output/interrupt/resume/stop` 始终以 Agent Session 为语义目标；不接受 Tab/Region，
   不将展示容器偷偷升格成 Runtime Owner。
-- `list agents` 只返回 Desktop 已配置 Executor 的 `id/label/providerId/available`，为
+- `list agents` 只返回 Desktop 已配置 Executor 的 `executorId/label/providerId/available`，为
   `open agent --agent <id>` 提供可发现入口；不把配置事实重新塞回 `inspect --tab`。
 - `send` 严格只向当前 running Run 提交 prompt；Run 已退出时失败。只有 `resume` 可以
   创建 replacement Run。Desktop 现有 `submitPrompt` 中的隐式 resume 必须删除，不允许

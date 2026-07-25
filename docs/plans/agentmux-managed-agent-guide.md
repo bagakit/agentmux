@@ -36,7 +36,7 @@ User request:
 - Desktop Config v5 只保存每个 Agent Profile 的开关，并把开关连同启动数据交给 Core。
 - Core 统一组装运行环境说明和用户任务，再交给既有 Provider 启动合同。
 - Provider 继续只负责各 Agent 的参数格式，不各自保存一份 AgentMux 文案。
-- CLI Skill 继续是完整、可执行的规则真相；简短指南只负责让 Agent 发现它。
+- Control SSOT 是唯一正式规则真相；CLI Skill 是同版本的可执行投影，简短指南只负责让 Agent 发现它。
 
 ## 不做
 

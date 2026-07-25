@@ -76,7 +76,7 @@ owner；`unavailable`/`conflict` 保留可见错误，`retired` 删除对应投�
 - `outputCursorBytes`
 
 调用方不能把 JavaScript 字符数、终端列数或 wire sequence 混入这些字段。Kernel 私有 sequence 只允许在 Adapter 内映射。
-`session output --follow` 对外顺序固定为 `attached → replay → live → end`。Attach 期间的 Live
+`agentmux output --session <session-id> --follow` 对外顺序固定为 `attached → replay → live → end`。Attach 期间的 Live
 事件必须等 Replay 完成后再发；Replay 已覆盖的 byte range 只发一次。
 
 ## 4. Evidence 不互相冒充
