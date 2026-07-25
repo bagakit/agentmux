@@ -97,10 +97,24 @@ export type CreateWorkspacePathInput = {
   kind: 'file' | 'directory'
 }
 
-export type RenameWorkspacePathInput = {
+export type WorkspacePathRef = {
+  workspaceId: string
   path: string
-  nextPath: string
 }
+
+export type MoveWorkspacePathInput = {
+  source: WorkspacePathRef
+  destination: WorkspacePathRef
+}
+
+export type WorkspacePathMoveResult =
+  | { status: 'moved' }
+  | {
+      status: 'error'
+      code: string
+      message: string
+      finalLocation: 'source' | 'unknown'
+    }
 
 export type CreateWorkspaceInput = {
   hostId: string
@@ -303,7 +317,7 @@ export type AgentMuxDesktopApi = {
     unobserve(workspaceId: string, path: string): Promise<void>
     onInvalidated(listener: (event: WorkspaceFileInvalidated) => void): () => void
     create(workspaceId: string, input: CreateWorkspacePathInput): Promise<void>
-    rename(workspaceId: string, input: RenameWorkspacePathInput): Promise<void>
+    move(input: MoveWorkspacePathInput): Promise<WorkspacePathMoveResult>
     delete(workspaceId: string, path: string): Promise<void>
     reveal(workspaceId: string, path: string): Promise<void>
   }

@@ -15,7 +15,7 @@ import type {
   DesktopViewFocusResponse,
   DesktopViewFocusTarget,
   HostConfig,
-  RenameWorkspacePathInput,
+  MoveWorkspacePathInput,
   SessionControl,
   TerminalLaunchInput,
   WorkspaceFileWriteInput,
@@ -175,9 +175,11 @@ export async function registerIpc(args: {
   handle('files:create', async (workspaceId: string, input: CreateWorkspacePathInput) => {
     await files.create(workspace(config, workspaceId), input)
   })
-  handle('files:rename', async (workspaceId: string, input: RenameWorkspacePathInput) => {
-    await files.rename(workspace(config, workspaceId), input)
-  })
+  handle('files:move', async (input: MoveWorkspacePathInput) => await files.move(
+    workspace(config, input.source.workspaceId),
+    workspace(config, input.destination.workspaceId),
+    input
+  ))
   handle('files:delete', async (workspaceId: string, path: string) => {
     await files.delete(workspace(config, workspaceId), path)
   })
