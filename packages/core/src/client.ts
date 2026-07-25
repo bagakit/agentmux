@@ -663,7 +663,7 @@ export class AgentMuxClient {
         env: input.env ?? {},
         ...(input.commandOverride === undefined ? {} : { commandOverride: input.commandOverride })
       })
-      await this.ensureManagedHooks(provider, input.providerId, input.workspacePath, agentSessionId)
+      await this.ensureManagedHooks(provider, input.providerId, input.workspacePath, agentSessionId, input.env ?? {})
       await this.requireHookIngressOwner()
       hookBinding = this.hookServer.createBinding(
         agentSessionId,
@@ -777,16 +777,20 @@ export class AgentMuxClient {
    * output remains observable) — the install failure is surfaced as a non-fatal `agent-error` rather
    * than aborting the launch. Providers whose hooks are `unmanaged` (e.g. pi's TypeScript extension)
    * never reach the installer — the `explicit-managed` gate below returns before a plan is resolved.
+   *
+   * The launch `env` is threaded into plan resolution because a provider's config dir can be env-derived
+   * (hermes reads `$HERMES_HOME`): the installer must target the same dir the launched process will read.
    */
   private async ensureManagedHooks(
     provider: AgentProvider,
     providerId: AgentProviderId,
     workspacePath: string,
-    agentSessionId: string
+    agentSessionId: string,
+    env: Readonly<Record<string, string>>
   ): Promise<void> {
     const hookStrategy = provider.catalog.hookStrategy
     if (hookStrategy.kind !== 'native' || hookStrategy.installation !== 'explicit-managed') return
-    const plan = resolveManagedHookPlan(providerId, workspacePath)
+    const plan = resolveManagedHookPlan(providerId, workspacePath, env)
     if (!plan) return
     try {
       await this.hookInstaller.ensure(plan)

@@ -284,10 +284,16 @@ export function createAntigravityManagedHookPlan(homeOrWorkspacePath?: string): 
  *
  * Both mutations are idempotent (our approvals carry no timestamps; the YAML merge round-trips), so the
  * installer's install-and-leave path re-runs cheaply and never rewrites the secrets-bearing config once
- * installed. `homeOverride` exists only for tests; production always targets the real `~/.hermes`.
+ * installed.
+ *
+ * The config dir follows hermes' own resolution: `$HERMES_HOME` names the config dir directly (NOT a
+ * parent that gets `.hermes` appended — that is `hermes_constants.get_hermes_home()`), else `~/.hermes`.
+ * Threading the launch env here keeps the install target and the launched process pointed at the same
+ * dir; production launches carry no `HERMES_HOME`, so both fall back to the real `~/.hermes`.
  */
-export function createHermesManagedHookPlan(homeOverride?: string): AgentManagedHookPlan {
-  const home = homeOverride ? resolve(homeOverride) : homedir()
+export function createHermesManagedHookPlan(env?: Readonly<Record<string, string>>): AgentManagedHookPlan {
+  const hermesHome = env?.HERMES_HOME?.trim()
+  const home = hermesHome ? resolve(hermesHome) : join(homedir(), '.hermes')
   const command = hermesHookCommand()
   const hooks = Object.fromEntries(
     HERMES_HOOK_EVENTS.map((eventName) => [eventName, [{ command, timeout: 10 }]])
@@ -297,7 +303,7 @@ export function createHermesManagedHookPlan(homeOverride?: string): AgentManaged
     providerId: 'hermes',
     mutations: [
       {
-        path: join(home, '.hermes', 'config.yaml'),
+        path: join(home, 'config.yaml'),
         // The owned fragment is JSON — the YAML merge reads it as data and edits the YAML doc in place,
         // so nothing here dictates the on-disk formatting; comments and foreign keys are preserved.
         content: `${JSON.stringify({ hooks }, null, 2)}\n`,
@@ -305,7 +311,7 @@ export function createHermesManagedHookPlan(homeOverride?: string): AgentManaged
         merge: { kind: 'yaml-managed-events', marker: 'agentmux-hook.js' }
       },
       {
-        path: join(home, '.hermes', 'shell-hooks-allowlist.json'),
+        path: join(home, 'shell-hooks-allowlist.json'),
         content: `${JSON.stringify({ approvals }, null, 2)}\n`,
         mode: 0o600,
         merge: { kind: 'json-managed-approvals', marker: 'agentmux-hook.js' }
@@ -321,10 +327,15 @@ export function createHermesManagedHookPlan(homeOverride?: string): AgentManaged
  * global `~/.hermes/config.yaml` shell hooks plus the matching consent allowlist. Pi (TypeScript
  * extension) declares native hooks but installs on a surface AgentMux does not write yet, so it
  * resolves to `null` and is simply not auto-installed.
+ *
+ * `env` is the launch environment: hermes reads its config dir from `$HERMES_HOME`, so the installer
+ * must target the same dir the launched process will read. Providers with a fixed config location
+ * ignore it.
  */
 export function resolveManagedHookPlan(
   providerId: AgentProviderId,
-  workspacePath: string
+  workspacePath: string,
+  env?: Readonly<Record<string, string>>
 ): AgentManagedHookPlan | null {
   switch (providerId) {
     case 'codex':
@@ -334,7 +345,7 @@ export function resolveManagedHookPlan(
     case 'antigravity':
       return createAntigravityManagedHookPlan()
     case 'hermes':
-      return createHermesManagedHookPlan()
+      return createHermesManagedHookPlan(env)
     default:
       return null
   }
