@@ -14,7 +14,7 @@ import type {
   DesktopViewFocusResponse,
   DesktopViewFocusTarget,
   HostConfig,
-  RenameWorkspacePathInput,
+  MoveWorkspacePathInput,
   RuntimeEvent,
   SessionControl,
   TerminalLaunchInput,
@@ -53,8 +53,7 @@ const api: AgentMuxDesktopApi = {
     },
     create: (workspaceId: string, input: CreateWorkspacePathInput) =>
       ipcRenderer.invoke('files:create', workspaceId, input),
-    rename: (workspaceId: string, input: RenameWorkspacePathInput) =>
-      ipcRenderer.invoke('files:rename', workspaceId, input),
+    move: (input: MoveWorkspacePathInput) => ipcRenderer.invoke('files:move', input),
     delete: (workspaceId: string, path: string) => ipcRenderer.invoke('files:delete', workspaceId, path),
     reveal: (workspaceId: string, path: string) => ipcRenderer.invoke('files:reveal', workspaceId, path)
   },

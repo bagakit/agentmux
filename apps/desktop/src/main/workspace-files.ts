@@ -1,16 +1,18 @@
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { realpath } from 'node:fs/promises'
+import { realpath, stat } from 'node:fs/promises'
 import { basename, dirname, resolve, sep } from 'node:path'
 import { posix } from 'node:path'
+import type { Readable, Writable } from 'node:stream'
 import type { ExecutionHost } from '@agentmux/core'
 import type {
   CreateWorkspacePathInput,
-  RenameWorkspacePathInput,
+  MoveWorkspacePathInput,
   WorkspaceDirectoryEntry,
   WorkspaceFileReadResult,
   WorkspaceFileWriteInput,
   WorkspaceFileWriteResult,
+  WorkspacePathMoveResult,
   WorkspaceRecord
 } from '../shared/contracts.js'
 
@@ -19,6 +21,10 @@ const LOCAL_WORKER_READY = 'AGENTMUX_WORKSPACE_READY'
 const LOCAL_WORKER_OBSERVING = 'AGENTMUX_WORKSPACE_OBSERVING'
 const LOCAL_WORKER_INVALIDATED = 'AGENTMUX_WORKSPACE_INVALIDATED'
 const LOCAL_WORKER_ERROR = 'AGENTMUX_WORKSPACE_ERROR:'
+const WORKSPACE_MOVE_HELPER = resolve(
+  import.meta.dirname,
+  '../../resources/bin/agentmux-workspace-move'
+)
 
 type LocalWorkerRequest =
   | { action: 'read'; name: string }
@@ -32,7 +38,7 @@ type LocalWorkerRequest =
       fault?: 'temporary-write' | 'replace'
     }
   | { action: 'create'; name: string; kind: 'file' | 'directory' }
-  | { action: 'rename'; name: string; nextName: string }
+  | { action: 'exists'; name: string }
   | { action: 'delete'; name: string }
 
 type LocalExistingPath = {
@@ -54,6 +60,9 @@ type LocalObserverEntry = {
 export type WorkspaceFilesOptions = {
   beforeWrite?: (input: WorkspaceFileWriteInput) => Promise<void>
   localWriteFault?: 'temporary-write' | 'replace' | (() => 'temporary-write' | 'replace' | undefined)
+  localMoveHelperPath?: string
+  beforeLocalMoveCommit?: () => Promise<void>
+  afterLocalMoveCommit?: () => Promise<void>
 }
 
 let activeLocalFileObservers = 0
@@ -212,14 +221,14 @@ try {
       )
       await handle.close()
     }
-  } else if (request.action === 'rename') {
+  } else if (request.action === 'exists') {
     try {
-      await lstat(request.nextName)
-      throw new Error('Destination already exists: ' + request.nextName)
+      await lstat(request.name)
+      process.stdout.write('true')
     } catch (error) {
       if (error?.code !== 'ENOENT') throw error
+      process.stdout.write('false')
     }
-    await rename(request.name, request.nextName)
   } else if (request.action === 'delete') {
     await rm(request.name, { recursive: true, force: false })
   } else {
@@ -262,6 +271,19 @@ function assertMutableRelativePath(requested: string): void {
   if (!requested.trim() || requested === '.' || requested === '/') {
     throw new Error('The workspace root cannot be changed')
   }
+}
+
+function assertCanonicalWorkspacePath(requested: string): void {
+  assertMutableRelativePath(requested)
+  if (requested.startsWith('/') || posix.normalize(requested) !== requested) {
+    throw Object.assign(new Error(`Workspace path must be a canonical relative path: ${requested}`), {
+      code: 'WORKSPACE_MOVE_INVALID_PATH'
+    })
+  }
+}
+
+function isRelativePathWithin(path: string, root: string): boolean {
+  return path === root || path.startsWith(`${root}/`)
 }
 
 async function localExistingPathWithin(root: string, requested: string): Promise<LocalExistingPath> {
@@ -327,6 +349,123 @@ async function runLocalWorker(
   throw new Error(
     `Local Workspace operation failed${result.signal ? ` with ${result.signal}` : ` with exit ${result.code}`}`
   )
+}
+
+type AtomicMoveError = Error & {
+  code: string
+  definitelyUnchanged: boolean
+}
+
+function atomicMoveErrorCode(errno: number): string {
+  if (errno === 2) return 'WORKSPACE_MOVE_PATH_NOT_FOUND'
+  if (errno === 17) return 'WORKSPACE_MOVE_DESTINATION_EXISTS'
+  if (errno === 18) return 'WORKSPACE_MOVE_CROSS_DEVICE'
+  if (errno === 22) return 'WORKSPACE_MOVE_INVALID_PATH'
+  if (errno === 62) return 'WORKSPACE_PATH_ESCAPE'
+  return `WORKSPACE_MOVE_ERRNO_${errno}`
+}
+
+async function runAtomicLocalMove(
+  helperPath: string,
+  root: string,
+  rootDevice: bigint,
+  rootInode: bigint,
+  sourcePath: string,
+  destinationPath: string,
+  beforeCommit?: () => Promise<void>,
+  afterCommit?: () => Promise<void>
+): Promise<void> {
+  const child = spawn(helperPath, [
+    root,
+    rootDevice.toString(),
+    rootInode.toString(),
+    sourcePath,
+    destinationPath,
+    ...(beforeCommit ? ['--before-commit-barrier'] : []),
+    ...(afterCommit ? ['--after-commit-barrier'] : [])
+  ], {
+    stdio: [
+      'ignore',
+      'ignore',
+      'pipe',
+      beforeCommit ? 'pipe' : 'ignore',
+      beforeCommit ? 'pipe' : 'ignore',
+      afterCommit ? 'pipe' : 'ignore',
+      afterCommit ? 'pipe' : 'ignore'
+    ]
+  })
+  const errorOutput = child.stdio[2] as Readable
+  let stderr = ''
+  errorOutput.setEncoding('utf8')
+  errorOutput.on('data', (chunk: string) => { stderr += chunk })
+  let beforeBarrierError: unknown
+  if (beforeCommit) {
+    const ready = child.stdio[3] as Readable
+    const release = child.stdio[4] as Writable
+    release.on('error', () => {})
+    ready.once('data', () => {
+      void beforeCommit().then(
+        () => release.end('G'),
+        (error) => {
+          beforeBarrierError = error
+          child.kill('SIGTERM')
+        }
+      )
+    })
+  }
+  let afterBarrierError: unknown
+  if (afterCommit) {
+    const committed = child.stdio.at(5) as Readable
+    const release = child.stdio.at(6) as Writable
+    release.on('error', () => {})
+    committed.once('data', () => {
+      void afterCommit().then(
+        () => release.end('G'),
+        (error) => {
+          afterBarrierError = error
+          child.kill('SIGTERM')
+        }
+      )
+    })
+  }
+
+  const result = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolveResult, reject) => {
+    child.once('error', (error) => reject(Object.assign(error, {
+      code: 'WORKSPACE_MOVE_HELPER_UNAVAILABLE',
+      definitelyUnchanged: true
+    } satisfies Pick<AtomicMoveError, 'code' | 'definitelyUnchanged'>)))
+    child.once('close', (code, signal) => resolveResult({ code, signal }))
+  })
+  if (beforeBarrierError) {
+    throw Object.assign(
+      beforeBarrierError instanceof Error ? beforeBarrierError : new Error(String(beforeBarrierError)),
+      { code: 'WORKSPACE_MOVE_COMMIT_HOOK_FAILED', definitelyUnchanged: true }
+    ) satisfies AtomicMoveError
+  }
+  if (afterBarrierError) {
+    throw Object.assign(
+      afterBarrierError instanceof Error ? afterBarrierError : new Error(String(afterBarrierError)),
+      { code: 'WORKSPACE_MOVE_RESULT_UNKNOWN', definitelyUnchanged: false }
+    ) satisfies AtomicMoveError
+  }
+  if (result.code === 0) return
+  const errno = Number(stderr.match(/errno=(\d+)/)?.[1])
+  if (Number.isInteger(errno)) {
+    const operation = stderr.match(/operation=([^\s]+)/)?.[1]
+    throw Object.assign(
+      new Error(stderr.match(/message=([^\n]+)/)?.[1] ?? `Atomic Workspace move failed with errno ${errno}`),
+      {
+        code: operation?.startsWith('after-commit-')
+          ? 'WORKSPACE_MOVE_RESULT_UNKNOWN'
+          : atomicMoveErrorCode(errno),
+        definitelyUnchanged: !operation?.startsWith('after-commit-')
+      }
+    ) satisfies AtomicMoveError
+  }
+  throw Object.assign(
+    new Error(`Atomic Workspace move helper failed${result.signal ? ` with ${result.signal}` : ` with exit ${result.code}`}`),
+    { code: 'WORKSPACE_MOVE_RESULT_UNKNOWN', definitelyUnchanged: false }
+  ) satisfies AtomicMoveError
 }
 
 async function runLocalObserver(
@@ -487,6 +626,14 @@ function resultError(error: unknown): { status: 'error'; code: string; message: 
       : 'WORKSPACE_FILE_ERROR',
     message: error instanceof Error ? error.message : String(error)
   }
+}
+
+function moveError(
+  error: unknown,
+  finalLocation: 'source' | 'unknown'
+): Extract<WorkspacePathMoveResult, { status: 'error' }> {
+  const result = resultError(error)
+  return { ...result, finalLocation }
 }
 
 export class WorkspaceFiles {
@@ -793,44 +940,101 @@ export class WorkspaceFiles {
     }
   }
 
-  async rename(workspace: WorkspaceRecord, input: RenameWorkspacePathInput): Promise<void> {
-    const host = this.hostFor(workspace.hostId)
-    if (host.kind === 'local') {
-      const [path, nextPath] = await Promise.all([
-        localMutablePathWithin(workspace.path, input.path),
-        localMutablePathWithin(workspace.path, input.nextPath)
-      ])
-      if (path.root !== nextPath.root || path.parent !== nextPath.parent) {
-        throw new Error('Local Workspace rename cannot move a path between directories')
+  private async localPathExists(path: LocalMutablePath): Promise<boolean> {
+    return (await runLocalWorker(path.parent, path.root, {
+      action: 'exists',
+      name: path.name
+    })).toString('utf8') === 'true'
+  }
+
+  async move(
+    sourceWorkspace: WorkspaceRecord,
+    destinationWorkspace: WorkspaceRecord,
+    input: MoveWorkspacePathInput
+  ): Promise<WorkspacePathMoveResult> {
+    try {
+      if (input.source.workspaceId !== sourceWorkspace.id ||
+          input.destination.workspaceId !== destinationWorkspace.id) {
+        throw Object.assign(new Error('Workspace move references do not match their resolved owners'), {
+          code: 'WORKSPACE_MOVE_OWNER_MISMATCH'
+        })
       }
-      await runLocalWorker(path.parent, path.root, {
-        action: 'rename',
-        name: path.name,
-        nextName: nextPath.name
-      })
-      return
-    }
-    const [path, nextPath] = await Promise.all([
-      remoteMutablePathWithin(host, workspace.path, input.path),
-      remoteMutablePathWithin(host, workspace.path, input.nextPath)
-    ])
-    const result = await host.run(
-      'sh',
-      [
-        '-c',
-        'if [ -e "$2" ] || [ -L "$2" ]; then exit 17; fi; mv -- "$1" "$2"',
-        'agentmux-rename',
-        path,
-        nextPath
-      ],
-      { timeoutMs: 15_000 }
-    )
-    if (result.exitCode !== 0) {
-      throw new Error(
-        result.exitCode === 17
-          ? `Destination already exists: ${basename(nextPath)}`
-          : result.stderr.trim() || `Could not rename ${basename(path)}`
+      if (sourceWorkspace.hostId !== destinationWorkspace.hostId) {
+        throw Object.assign(new Error('Moving paths between hosts is not supported'), {
+          code: 'WORKSPACE_MOVE_CROSS_HOST'
+        })
+      }
+      if (sourceWorkspace.id !== destinationWorkspace.id) {
+        throw Object.assign(new Error('Moving paths between workspaces is not supported'), {
+          code: 'WORKSPACE_MOVE_CROSS_WORKSPACE'
+        })
+      }
+      assertCanonicalWorkspacePath(input.source.path)
+      assertCanonicalWorkspacePath(input.destination.path)
+      if (input.source.path === input.destination.path) {
+        throw Object.assign(new Error('Move source and destination must be different'), {
+          code: 'WORKSPACE_MOVE_SAME_PATH'
+        })
+      }
+      if (isRelativePathWithin(input.destination.path, input.source.path)) {
+        throw Object.assign(new Error('A Workspace path cannot be moved into itself'), {
+          code: 'WORKSPACE_MOVE_INTO_SELF'
+        })
+      }
+
+      const host = this.hostFor(sourceWorkspace.hostId)
+      if (host.kind === 'local') {
+        if (process.platform !== 'darwin') {
+          return moveError(
+            Object.assign(new Error('Atomic confined Workspace move is not available on this platform'), {
+              code: 'LOCAL_WORKSPACE_FILE_MOVE_UNSUPPORTED'
+            }),
+            'source'
+          )
+        }
+        const root = await realpath(sourceWorkspace.path)
+        const rootInfo = await stat(root, { bigint: true })
+        try {
+          await runAtomicLocalMove(
+            this.options.localMoveHelperPath ?? WORKSPACE_MOVE_HELPER,
+            root,
+            rootInfo.dev,
+            rootInfo.ino,
+            input.source.path,
+            input.destination.path,
+            this.options.beforeLocalMoveCommit,
+            this.options.afterLocalMoveCommit
+          )
+          return { status: 'moved' }
+        } catch (error) {
+          if (typeof error === 'object' && error !== null &&
+              'definitelyUnchanged' in error && error.definitelyUnchanged === true) {
+            return moveError(error, 'source')
+          }
+          try {
+            const [source, destination] = await Promise.all([
+              localMutablePathWithin(sourceWorkspace.path, input.source.path),
+              localMutablePathWithin(destinationWorkspace.path, input.destination.path)
+            ])
+            await Promise.all([
+              this.localPathExists(source),
+              this.localPathExists(destination)
+            ])
+          } catch {
+            // The typed unknown result remains authoritative when owner-fact refresh also fails.
+          }
+          return moveError(error, 'unknown')
+        }
+      }
+
+      return moveError(
+        Object.assign(new Error('Workspace move is not available for remote workspaces'), {
+          code: 'REMOTE_WORKSPACE_FILE_MOVE_UNSUPPORTED'
+        }),
+        'source'
       )
+    } catch (error) {
+      return moveError(error, 'source')
     }
   }
 
