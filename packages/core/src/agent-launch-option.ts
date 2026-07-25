@@ -277,3 +277,167 @@ export const CLAUDE_LAUNCH_OPTIONS: readonly LaunchOptionDeclaration[] = [
     ]
   }
 ]
+
+// gemini top-level flag `--approval-mode <default|auto_edit|yolo|plan>`, verified against the installed
+// binary's own `--help` choices list. `-y/--yolo` is an alias for `--approval-mode yolo`, so it is NOT
+// declared as a second option — one control, no double-set. `-m/--model` takes a free string with no
+// enum, so no model option is declared (a hand-written model list would go stale the moment the vendor
+// changes its lineup). Choices ordered safe → danger.
+export const GEMINI_LAUNCH_OPTIONS: readonly LaunchOptionDeclaration[] = [
+  {
+    id: 'approval-mode',
+    label: 'Approval mode',
+    description: 'When Gemini pauses for approval before using a tool.',
+    choices: [
+      { id: 'default', label: 'Default', description: 'Prompt for approval.', tier: 'safe', argv: ['--approval-mode', 'default'] },
+      { id: 'plan', label: 'Plan', description: 'Read-only mode.', tier: 'safe', argv: ['--approval-mode', 'plan'] },
+      { id: 'auto_edit', label: 'Auto edit', description: 'Auto-approve edit tools.', tier: 'caution', argv: ['--approval-mode', 'auto_edit'] },
+      { id: 'yolo', label: 'YOLO', description: 'Auto-approve all tools.', tier: 'danger', argv: ['--approval-mode', 'yolo'] }
+    ]
+  }
+]
+
+// grok top-level flag `--permission-mode <default|acceptEdits|auto|dontAsk|bypassPermissions|plan>`,
+// verified against the installed binary's own `--help` possible-values list. This is the SPAWN-time
+// analogue of grok's live posture control (`/always-approve [on|off]`, declared in agent-provider.ts):
+// the launch option sets the initial posture in argv, the posture control flips it in-band mid-session —
+// the two are complementary, which is why grok should carry both. `-m/--model` is a free string — no enum,
+// so no model option. Choices ordered safe → danger.
+export const GROK_LAUNCH_OPTIONS: readonly LaunchOptionDeclaration[] = [
+  {
+    id: 'permission-mode',
+    label: 'Permission mode',
+    description: 'How Grok handles tool-permission prompts for this session.',
+    choices: [
+      { id: 'default', label: 'Default', description: 'Ask for approval.', tier: 'safe', argv: ['--permission-mode', 'default'] },
+      { id: 'plan', label: 'Plan', description: 'Plan first, no edits.', tier: 'safe', argv: ['--permission-mode', 'plan'] },
+      { id: 'acceptEdits', label: 'Accept edits', description: 'Auto-accept file edits.', tier: 'caution', argv: ['--permission-mode', 'acceptEdits'] },
+      { id: 'auto', label: 'Auto', tier: 'caution', argv: ['--permission-mode', 'auto'] },
+      { id: 'dontAsk', label: "Don't ask", tier: 'caution', argv: ['--permission-mode', 'dontAsk'] },
+      { id: 'bypassPermissions', label: 'Bypass permissions', description: 'Skip all permission checks.', tier: 'danger', argv: ['--permission-mode', 'bypassPermissions'] }
+    ]
+  }
+]
+
+// traex top-level flags, verified against the installed binary's own `--help`:
+//   `-s/--sandbox <read-only|workspace-write|danger-full-access>` — an explicit possible-values list.
+//   `--permission-mode <default|bypass_permissions|auto>` — the FULL enum, confirmed by reading the
+//     complete `--help` output. The batch table flagged this as truncated because each value carries a
+//     multi-line description; the `auto` value sat below that fold. Two options that compose.
+// `-m/--model` is a free string — no enum, so no model option. Choices ordered safe → danger.
+export const TRAEX_LAUNCH_OPTIONS: readonly LaunchOptionDeclaration[] = [
+  {
+    id: 'sandbox',
+    label: 'Sandbox',
+    description: 'How much of the machine TraeX may touch when it runs commands.',
+    choices: [
+      { id: 'read-only', label: 'Read only', tier: 'safe', argv: ['--sandbox', 'read-only'] },
+      {
+        id: 'workspace-write',
+        label: 'Workspace write',
+        description: 'Writes limited to the workspace.',
+        tier: 'caution',
+        argv: ['--sandbox', 'workspace-write']
+      },
+      {
+        id: 'danger-full-access',
+        label: 'Full access',
+        description: 'No sandbox — full machine access.',
+        tier: 'danger',
+        argv: ['--sandbox', 'danger-full-access']
+      }
+    ]
+  },
+  {
+    id: 'permission-mode',
+    label: 'Permission mode',
+    description: 'How TraeX handles tool-permission prompts for this session.',
+    choices: [
+      {
+        id: 'default',
+        label: 'Default',
+        description: 'Edit the workspace and run commands; the network or other files need approval.',
+        tier: 'safe',
+        argv: ['--permission-mode', 'default']
+      },
+      {
+        id: 'auto',
+        label: 'Auto',
+        description: 'Workspace-write, with on-request approvals routed to an auto-reviewer.',
+        tier: 'caution',
+        argv: ['--permission-mode', 'auto']
+      },
+      {
+        id: 'bypass_permissions',
+        label: 'Bypass permissions',
+        description: 'Edit files outside the workspace and access the internet without approval.',
+        tier: 'danger',
+        argv: ['--permission-mode', 'bypass_permissions']
+      }
+    ]
+  }
+]
+
+// hermes top-level boolean `--yolo` ("Bypass all dangerous command approval prompts"), verified against
+// the installed binary's own `--help`. A boolean switch, so it is expressed as two choices whose argv is
+// the honest thing each does: the conservative default contributes NO argv (hermes keeps prompting) and
+// the yolo choice contributes the flag. `-m/--model` is a free string — no enum, so no model option.
+export const CURSOR_LAUNCH_OPTIONS: readonly LaunchOptionDeclaration[] = [
+  {
+    id: 'mode',
+    label: 'Execution mode',
+    description: 'How much Cursor may change while it works.',
+    choices: [
+      { id: 'default', label: 'Full', description: 'Read, edit, and run.', tier: 'caution', argv: [] },
+      { id: 'plan', label: 'Plan', description: 'Analyze and propose, no edits.', tier: 'safe', argv: ['--mode', 'plan'] },
+      { id: 'ask', label: 'Ask', description: 'Q&A only, read-only.', tier: 'safe', argv: ['--mode', 'ask'] }
+    ]
+  },
+  {
+    id: 'sandbox',
+    label: 'Sandbox',
+    description: 'Whether Cursor runs commands inside its sandbox.',
+    choices: [
+      { id: 'enabled', label: 'Sandboxed', description: 'Commands run sandboxed.', tier: 'safe', argv: ['--sandbox', 'enabled'] },
+      { id: 'disabled', label: 'Unsandboxed', description: 'Commands run without the sandbox.', tier: 'danger', argv: ['--sandbox', 'disabled'] }
+    ]
+  },
+  {
+    id: 'approvals',
+    label: 'Approvals',
+    description: 'Whether Cursor asks before running a command.',
+    choices: [
+      { id: 'default', label: 'Ask', description: 'Prompt before running commands.', tier: 'safe', argv: [] },
+      { id: 'force', label: 'Run everything', description: 'Allow every command unless explicitly denied.', tier: 'danger', argv: ['--force'] }
+    ]
+  }
+]
+
+export const HERMES_LAUNCH_OPTIONS: readonly LaunchOptionDeclaration[] = [
+  {
+    id: 'yolo',
+    label: 'Approvals',
+    description: 'Whether Hermes bypasses its dangerous-command approval prompts.',
+    choices: [
+      { id: 'default', label: 'Ask', description: 'Prompt before dangerous commands.', tier: 'safe', argv: [] },
+      { id: 'yolo', label: 'YOLO', description: 'Bypass all dangerous-command approval prompts.', tier: 'danger', argv: ['--yolo'] }
+    ]
+  }
+]
+
+// antigravity (agy) top-level boolean `--sandbox` ("Run in a sandbox with terminal restrictions enabled"),
+// verified against the installed binary's own `--help`. A boolean switch expressed as two choices: the
+// default contributes NO argv (agy's normal, unsandboxed mode) and the sandboxed choice contributes the
+// flag. The flag ADDS containment, so enabling it is the 'safe' tier; the unsandboxed default runs terminal
+// commands without restriction and honestly carries 'caution'. `--model` is a free string — no enum.
+export const ANTIGRAVITY_LAUNCH_OPTIONS: readonly LaunchOptionDeclaration[] = [
+  {
+    id: 'sandbox',
+    label: 'Sandbox',
+    description: 'Whether Antigravity runs with terminal restrictions.',
+    choices: [
+      { id: 'default', label: 'Off', description: 'No sandbox — terminal commands run unrestricted.', tier: 'caution', argv: [] },
+      { id: 'sandboxed', label: 'Sandboxed', description: 'Run with terminal restrictions enabled.', tier: 'safe', argv: ['--sandbox'] }
+    ]
+  }
+]
