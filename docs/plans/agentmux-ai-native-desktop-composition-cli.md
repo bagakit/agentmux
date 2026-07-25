@@ -75,12 +75,12 @@ Hook ingress Owner。当前 Desktop 已经同时拥有长期 RuntimeController �
 
 ```text
 agentmux CLI
-    │ typed local Composition request
+    │ typed local Control request
     ▼
-AgentMux Composition Control
+AgentMux Desktop Control
     │
     ▼
-Desktop Composition Host                 唯一外部事务入口
+Desktop Control Host                     唯一 CLI mutation 事务入口
     ├─ RuntimeController → Core → ctxmux  AgentSession / Run lifecycle
     ├─ Main Browser Owner                 Browser lifecycle
     └─ Renderer Layout Store              Tab / Region placement
@@ -124,10 +124,18 @@ type MessageTarget =
   | { kind: 'tab'; tabId: string }
   | { kind: 'region'; regionId: string }
 
+type RegionAnchor =
+  | { kind: 'caller' }
+  | { kind: 'region'; regionId: string }
+
+type TabAnchor =
+  | { kind: 'caller' }
+  | { kind: 'tab'; tabId: string }
+
 type RegionSurface =
   | { kind: 'agent'; agentSessionId: string; providerId: string; executorId: string }
   | { kind: 'terminal'; runId: string }
-  | { kind: 'browser'; browserId: string; url: string }
+  | { kind: 'browser'; browserId: string }
   | { kind: 'file'; path: string }
   | { kind: 'launcher' }
 
@@ -139,7 +147,7 @@ type OpenDestination =
 type OpenContent =
   | { kind: 'new-agent'; executorId: string; prompt?: string }
   | { kind: 'agent-session'; agentSessionId: string }
-  | { kind: 'terminal'; command?: string }
+  | { kind: 'terminal'; shellCommand?: string }
   | { kind: 'browser'; url: string }
 
 type MessageTargetNotUnique = {
@@ -149,24 +157,34 @@ type MessageTargetNotUnique = {
 }
 ```
 
-`self` 只是 CLI 输入层的受管 caller selector，不会被保存为身份。Host 必须在一次请求中
-将它解析为精确 ID；同一 Session 有多个展示时，Tab/Region `self` 都失败关闭。
+`self` 是 CLI 对 wire `caller` anchor 的输入缩写，不会被保存为身份。每个需要 `self`
+的请求同时携带受管 caller `agentSessionId`，Host 在一次请求内按目标身份域解析：
+
+- Session `self`：环境中的精确 Agent Session。
+- Tab `self`：该 Session 的所有展示按 `tabId` 去重后恰好一张 Tab。
+- Region `self`：该 Session 恰好一个 Region。
+- `send --to-tab`：Tab 中的 Agent Surface 按 `agentSessionId` 去重；同一 Session 展示多次
+  仍然是唯一收件人。
 
 公共 CLI 可以是一套心智，但内部不为此变成一个第二 Runtime Owner：
 
 | 意图 | 真相 Owner | 路由 |
 | --- | --- | --- |
-| `inspect/list/output/interrupt/resume/stop --session|--run|--*-native` | Core AgentSession / ctxmux Run | 直接调用 Core 公开 API |
-| `inspect/focus/arrange --tab|--region` | Renderer Layout Store | 经 Composition Host |
-| `open agent` | Desktop RuntimeController → Core Provider | Composition Host 编排创建与布局回滚 |
-| `open terminal` | Desktop RuntimeController → Core → ctxmux | Composition Host 编排一次 Run 创建与布局回滚 |
-| `open browser` | Main Browser Owner | Composition Host 编排 Browser 创建与布局回滚 |
-| `send --to-session` | Core Provider prompt contract | 直接调用 Core 公开 API |
-| `send --to-tab|--to-region` | Renderer 解析展示，Core 接收 prompt | Composition Host 解析精确 Session 后调用同一 Core API |
+| `inspect/list/output --session|--run|--*-native` | Core AgentSession / ctxmux Run | 短命读取直接调用 Core 公开 API |
+| `list agents` | Desktop 配置与 Executor detection | 经 Desktop Control Host |
+| `inspect/focus/arrange --tab|--region` | Renderer Layout Store | 经 Desktop Control Host |
+| `open agent` | Desktop RuntimeController → Core Provider | Control Host 编排创建与布局回滚 |
+| `open terminal` | Desktop RuntimeController → Core → ctxmux | Control Host 编排一次 Run 创建与布局回滚 |
+| `open browser` | Main Browser Owner | Control Host 编排 Browser 创建与布局回滚 |
+| `send/interrupt/resume/stop` | Desktop RuntimeController → Core/ctxmux | 全部经 Desktop Control Host，不创建短命 mutation client |
+| `send --to-tab|--to-region` | Renderer 解析展示，Core 接收 prompt | Control Host 解析精确 Session 后调用同一 RuntimeController API |
 
-Composition Host 是跨 Owner 事务编排边界，不保存 Provider、Run、Browser 或 Layout 第二份真相。
+Desktop Control Host 是跨 Owner 事务编排边界，不保存 Provider、Run、Browser 或 Layout 第二份真相。
+Core 的无 UI 独立能力继续由 `@agentmux/core` 公开 API 提供；随 Desktop 交付的 CLI 不在
+Desktop mutation Host 失败后改走短命 Core client，不存在双 backend 或 fallback。
 `inspect --tab|--region` 中的 Region 直接携带上述封闭 `RegionSurface` 投影。不保留含混的
-`kind: other`；新 Surface 种类需要显式升级 schema，不能由 Renderer 私下藏住。
+`kind: other`；新 Surface 种类需要显式升级 schema，不能由 Renderer 私下藏住。Browser
+投影只返回 Main Browser Owner 的 `browserId`，不把 Renderer 缓存的 URL 升格为公共真相。
 
 ### Agent 如何选择 Split 还是 Tab
 
@@ -206,6 +224,7 @@ agentmux inspect --run <run-id>
 agentmux inspect --provider-native <native-session-id> --provider <provider-id>
 agentmux inspect --acp-native <native-session-id> --adapter <adapter-id>
 agentmux list sessions
+agentmux list agents
 
 agentmux open agent --agent codex --prompt "Inspect the failing tests" --right-of self
 agentmux open agent --agent traex --below <left-region-id>
@@ -252,20 +271,28 @@ agentmux stop --session <session-id|self>
   多个展示。
 - `output/interrupt/resume/stop` 始终以 Agent Session 为语义目标；不接受 Tab/Region，
   不将展示容器偷偷升格成 Runtime Owner。
+- `list agents` 只返回 Desktop 已配置 Executor 的 `id/label/providerId/available`，为
+  `open agent --agent <id>` 提供可发现入口；不把配置事实重新塞回 `inspect --tab`。
+- `send` 严格只向当前 running Run 提交 prompt；Run 已退出时失败。只有 `resume` 可以
+  创建 replacement Run。Desktop 现有 `submitPrompt` 中的隐式 resume 必须删除，不允许
+  `send --to-session` 与 `send --to-tab` 产生两种语义。
 
 ### 打开和方位
 
 `open` 是 Agent、Terminal 和 Browser 共用的唯一打开入口，但负载保持类型化：
 Agent 恰好使用 `--agent + --prompt` 或 `--session`，Terminal 使用 `--command`，Browser 使用
-`--url`。不能用一个含混的 `--content` 或 JSON 参数袋抹平三种 owner。Terminal command
-必须进入一次明确的 Run 创建合同，不能在 Renderer attach 后模拟键盘输入；Browser URL
+`--url`。不能用一个含混的 `--content` 或 JSON 参数袋抹平三种 owner。CLI `--command`
+在 wire 中明确命名为 `shellCommand`；RuntimeController 只在创建时一次映射为宿主 shell executable
+与 `-lc` args。它不是 Core `createTerminal.command` 所表示的 executable，也不能在 Renderer
+attach 后模拟键盘输入。Browser URL
 继续由既有 Main Browser owner 校验和创建；Agent prompt 继续由 Provider 合同接收。
 
 `open` 必须恰好提供一个 destination，不设惊喜默认值：
 
 - `--left-of|--right-of|--above|--below <region-id|self>`：相对精确 Region 分屏。
 - `--new-tab-after <tab-id|self>`：在 anchor Tab 所在 Tab Group 新建 Tab；公共协议无需暴露
-  `tabGroupId`。
+  `tabGroupId`。新 Tab 必须紧邻 anchor 之后插入；不能复用只会追加到队尾的 reducer
+  却返回成功。
 - `--in-region <region-id>`：只填充 preset 创建的 Launcher Region；已承载其他 Surface 时失败，
   不暗中关闭或替换用户内容。
 
@@ -289,14 +316,17 @@ Launcher Region，Region 多于 slot 时失败关闭。`balance` 按每个 split
 
 `send --to-tab` 是便利 selector，不是 Tab 通信通道：Desktop 只在当前 Layout Snapshot 中解析唯一
 Agent Session，然后调用同一 Core Provider prompt 合同。Tab 不保存消息、不广播、不成为
-Session Registry。`send --to-session` 在无 Desktop 时仍直接走 Core；Tab/Region 目标没有
-Composition Host 则明确失败。
+Session Registry。所有 `send` 都通过 Desktop Control Host 进入同一 RuntimeController 方法；
+Desktop 不可用时明确失败，不改走短命 Core client。
 
 ### receipt 与删除面
 
-成功向 stdout 输出版本化 JSON；失败向 stderr 输出稳定 `code`/`message` 并非零退出。
-所有成功 receipt 固定 `schemaVersion/requestId/operation/result`；操作结果返回最终解析的
-`agentSessionId/tabId/regionId/runId` 中适用的精确身份。不返回 `viewId`、`tabGroupId`、
+成功向 stdout 输出版本化 JSON；失败向 stderr 输出版本化 typed error 并非零退出。
+成功与失败 receipt 都固定 `schemaVersion/requestId/operation`；成功携带 `result`，失败携带封闭
+`error` union。`MESSAGE_TARGET_NOT_UNIQUE` 的 `candidates` 必须在 Core parser、Main/Preload bridge 和 CLI
+端到端保留；不降级成 message 文本，不增加任意 `details`。操作结果返回最终解析的
+`agentSessionId/tabId/regionId/runId/browserId` 中适用的精确身份。Browser 创建必须独立生成
+`browserId`，不再复用 `regionId`。不返回 `viewId`、`tabGroupId`、
 `paneId` 或 Surface ID。
 
 旧 `context`、`launch`、`session *`、`region *`、`surface *` 和 `layout *` 命令在新纵切跑通后直接
@@ -324,8 +354,10 @@ Desktop 内置 Grok Profile 默认使用 Grok 官方的免确认参数
 - `inspect --tab` 返回当前 Tab 全部 Region 的精确 ID、内容种类与归一化 bounds。
   三块不对称布局中，
   Agent 可以选中左侧整块并把它上下分成 2×2，而不是只能相对自己继续切小块。
-- `--new-tab-after` 只在用户明确要求后创建新 Tab；Agent 明确判断为另一件事时先询问，
-  不自动创建。
+- `Tab self` 按 Tab 去重，`Region self` 按 Region 计数；同一 Session 在同一 Tab 投影两次时
+  前者成功、后者报歧义。
+- `--new-tab-after` 只在用户明确要求后创建新 Tab，并紧邻 anchor 之后插入；
+  Agent 明确判断为另一件事时先询问，不自动创建。
 - 四向 split 只修改当前 Tab 的内容树；Tab 分区调整只移动整张 Tab。两个 reducer、ID、焦点、
   预览和 receipt 字段不能混用；最终 Region 尺寸仍通过现有 resize 路径提交给 ctxmux。
 - 三列、四宫格、六宫格和九宫格产生确定的 Region bounds 与 Launcher slot；balance 和
@@ -333,6 +365,12 @@ Desktop 内置 Grok Profile 默认使用 Grok 官方的免确认参数
 - Tab 菜单复制的 ID 与 Composition receipt 的 `tabId` 完全相同；复制 handoff 带入该 ID 和
   `inspect/send` 用法。单 Agent Tab 的 `send --to-tab` 成功；零 Agent 或多 Agent Tab 以
   `MESSAGE_TARGET_NOT_UNIQUE` 失败，不改发给 active Session，不广播。
+- `send --to-session|--to-region|--to-tab` 都通过同一 Desktop RuntimeController 严格发送；已退出
+  Run 不会被隐式 resume。`resume` 是唯一创建 replacement Run 的 CLI 意图。
+- `list agents` 返回已配置 Executor 及 availability；删除旧 `context` 后仍可以无猜测地选择
+  `open agent --agent <id>`。
+- Browser open receipt 的 `browserId` 与 `regionId` 不同；Terminal `shellCommand` 只在创建时
+  映射一次 shell `-lc`，不当作 executable 字符串，不在 attach 后二次输入。
 - 创建、布局、回滚与 receipt 经过 Composition Control 协议；实际 Agent prompt 仍仅由 Core
   Provider 合同接收。旧命令树和 `viewId/tabGroupId` 公共字段被删除，不保留 alias。
 - 无 Desktop、unknown/stale/ambiguous caller/target、Renderer timeout 和 launch failure 都有
