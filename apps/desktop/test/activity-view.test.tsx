@@ -44,7 +44,7 @@ describe('ActivityView', () => {
     expect(markup).not.toContain('does not provide structured activity')
   })
 
-  it('renders Core Timeline status, provenance, content, and tool input without Provider branches', () => {
+  it('renders Core Timeline status, provenance, and prose without Provider branches', () => {
     const markup = render('streaming', [
       activity('streaming', {
         status: 'streaming',
@@ -74,8 +74,39 @@ describe('ActivityView', () => {
     expect(markup).toContain('native-hook')
     expect(markup).toContain('acp')
     expect(markup).toContain('user')
+    // Prose the agent and user produced is the substance of the trace and always renders.
     expect(markup).toContain('Working on it')
-    expect(markup).toContain('pnpm test')
     expect(markup).toContain('Ship it')
+    // A tool's arguments are machine payload: the row names the call and keeps the argv folded until
+    // asked for, which is what stops a repeated tool loop from burying the conversation.
+    expect(markup).toContain('Run tests')
+    expect(markup).not.toContain('pnpm test')
+  })
+
+  it('folds a run of machine-reported steps into one disclosure and counts identical repeats', () => {
+    const hook = (id: string, createdAt: number) =>
+      activity(id, {
+        kind: 'tool_call',
+        source: 'native-hook',
+        title: 'Bash',
+        toolName: 'bash',
+        toolInput: 'ls -la',
+        createdAt,
+        updatedAt: createdAt
+      })
+    const markup = render('complete-events', [
+      activity('ask', { kind: 'user_message', source: 'user', title: 'User prompt', createdAt: 1 }),
+      hook('h1', 2),
+      hook('h2', 3),
+      hook('h3', 4),
+      activity('reply', { source: 'acp', title: 'Assistant response', createdAt: 5, updatedAt: 5 })
+    ])
+
+    // The run collapses to a single summary row; the turns around it stay visible.
+    expect(markup).toContain('3 steps')
+    expect(markup).toContain('User prompt')
+    expect(markup).toContain('Assistant response')
+    // Collapsed means collapsed: the repeated step titles are not in the markup at all.
+    expect(markup).not.toContain('Bash')
   })
 })
