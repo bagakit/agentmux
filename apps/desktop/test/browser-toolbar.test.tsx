@@ -48,6 +48,7 @@ const config: AppConfig = {
 
 const tab = {
   id: 'browser-1',
+  navigationId: 'navigation-1',
   browserId: 'browser-1',
   regionId: 'region-1',
   workspaceId: 'workspace-1',
@@ -75,7 +76,7 @@ describe('Browser bar contract', () => {
       'Reload',
       'Browser address',
       'Select element — unavailable',
-      'Screenshot — unavailable',
+      'Screenshot',
       'Open DevTools',
       'Viewport',
       'More browser tools'
@@ -105,7 +106,7 @@ describe('Browser bar contract', () => {
 
     expect(markup).toContain('aria-label="Open in external browser"')
     expect(markup).not.toContain('Select element — unavailable')
-    expect(markup).not.toContain('Screenshot — unavailable')
+    expect(markup).not.toContain('aria-label="Screenshot"')
     expect(markup).not.toContain('aria-label="Open DevTools"')
     expect(markup).not.toContain('aria-label="Viewport"')
     expect(markup).not.toContain('aria-label="More browser tools"')

@@ -326,6 +326,7 @@ export const COMPOSITION_RESPONSE_CHANNEL = 'composition:response'
 
 export type BrowserSnapshot = {
   id: string
+  navigationId: string
   url: string
   title: string
   loading: boolean
@@ -343,6 +344,25 @@ export const BROWSER_VIEWPORT_PRESETS = {
 } as const
 
 export type BrowserViewport = keyof typeof BROWSER_VIEWPORT_PRESETS
+
+export const BROWSER_PNG_MAX_BASE64_CHARS = 24 * 1024 * 1024
+export const BROWSER_PNG_MAX_BYTES = 18 * 1024 * 1024
+export const BROWSER_PNG_MAX_PIXELS = 32 * 1024 * 1024
+export const BROWSER_PNG_MAX_DIMENSION = 16_384
+
+export type BrowserPng = {
+  mimeType: 'image/png'
+  dataUrl: string
+  width: number
+  height: number
+  byteLength: number
+}
+
+export type BrowserScreenshotCapture = {
+  browserId: string
+  navigationId: string
+  image: BrowserPng
+}
 
 export type BrowserEvent =
   | { type: 'updated'; browser: BrowserSnapshot }
@@ -397,6 +417,7 @@ export type AgentMuxDesktopApi = {
   ui: {
     readClipboardText(): Promise<string>
     writeClipboardText(text: string): Promise<void>
+    writeClipboardImage(image: BrowserPng): Promise<void>
     openExternal(url: string): Promise<void>
     getZoomFactor(): number
     onWindowResize(listener: (event: WindowResizeEvent) => void): () => void
@@ -444,6 +465,7 @@ export type AgentMuxDesktopApi = {
     reload(id: string): Promise<BrowserSnapshot>
     openDevTools(id: string): Promise<void>
     setViewport(id: string, viewport: BrowserViewport): Promise<BrowserSnapshot>
+    captureScreenshot(id: string): Promise<BrowserScreenshotCapture>
     setBounds(id: string, bounds: BrowserBounds | null): Promise<void>
     close(id: string): Promise<void>
     onEvent(listener: (event: BrowserEvent) => void): () => void

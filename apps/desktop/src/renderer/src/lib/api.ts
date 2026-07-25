@@ -20,6 +20,7 @@ import {
 } from '../../../shared/scratch-topics'
 
 const now = Date.now()
+const MOCK_SCREENSHOT_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADElEQVR42mNk+M/wHwAF/gL+3fVbWQAAAABJRU5ErkJggg=='
 const mockStructuredCapabilities = {
   terminal: true as const,
   hookEvents: true,
@@ -498,6 +499,7 @@ const mockApi: AgentMuxDesktopApi = {
   ui: {
     readClipboardText: async () => '',
     writeClipboardText: async () => {},
+    writeClipboardImage: async () => {},
     openExternal: async () => {},
     getZoomFactor: () => 1,
     onWindowResize(listener) {
@@ -741,6 +743,7 @@ const mockApi: AgentMuxDesktopApi = {
     create: async (id, url) => {
       const browser: BrowserSnapshot = {
         id,
+        navigationId: crypto.randomUUID(),
         url: url.trim() || 'about:blank',
         title: 'New Tab',
         loading: false,
@@ -758,13 +761,18 @@ const mockApi: AgentMuxDesktopApi = {
       if (!current) throw new Error(`Unknown browser: ${id}`)
       const url = normalizeMockBrowserUrl(rawUrl)
       const browser = { ...current, url, title: url === 'about:blank' ? 'New Tab' : new URL(url).hostname, error: null }
+      browser.navigationId = crypto.randomUUID()
       mockBrowsers.set(id, browser)
       browserListeners.forEach((listener) => listener({ type: 'updated', browser: structuredClone(browser) }))
       return structuredClone(browser)
     },
     back: async (id) => structuredClone(requireMockBrowser(id)),
     forward: async (id) => structuredClone(requireMockBrowser(id)),
-    reload: async (id) => structuredClone(requireMockBrowser(id)),
+    reload: async (id) => {
+      const browser = { ...requireMockBrowser(id), navigationId: crypto.randomUUID() }
+      mockBrowsers.set(id, browser)
+      return structuredClone(browser)
+    },
     openDevTools: async () => {},
     setViewport: async (id, viewport: BrowserViewport) => {
       const current = requireMockBrowser(id)
@@ -773,6 +781,17 @@ const mockApi: AgentMuxDesktopApi = {
       browserListeners.forEach((listener) => listener({ type: 'updated', browser: structuredClone(browser) }))
       return structuredClone(browser)
     },
+    captureScreenshot: async (id) => ({
+      browserId: id,
+      navigationId: requireMockBrowser(id).navigationId,
+      image: {
+        mimeType: 'image/png',
+        dataUrl: `data:image/png;base64,${MOCK_SCREENSHOT_BASE64}`,
+        width: 1,
+        height: 1,
+        byteLength: 70
+      }
+    }),
     setBounds: async () => {},
     close: async (id) => {
       if (!mockBrowsers.delete(id)) return
