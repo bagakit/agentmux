@@ -1,10 +1,17 @@
 import { WebContentsView, type BrowserWindow } from 'electron'
-import type { BrowserBounds, BrowserEvent, BrowserSnapshot } from '../shared/contracts.js'
+import {
+  BROWSER_VIEWPORT_PRESETS,
+  type BrowserBounds,
+  type BrowserEvent,
+  type BrowserSnapshot,
+  type BrowserViewport
+} from '../shared/contracts.js'
 
 type BrowserEntry = {
   id: string
   view: WebContentsView
   requestedUrl: string
+  viewport: BrowserViewport
   error: string | null
 }
 
@@ -48,7 +55,7 @@ export class BrowserViewManager {
         nodeIntegration: false
       }
     })
-    const entry: BrowserEntry = { id, view, requestedUrl: url, error: null }
+    const entry: BrowserEntry = { id, view, requestedUrl: url, viewport: 'responsive', error: null }
     this.entries.set(id, entry)
     this.window.contentView.addChildView(view)
     view.setVisible(false)
@@ -98,6 +105,21 @@ export class BrowserViewManager {
     const entry = this.require(id)
     entry.error = null
     entry.view.webContents.reload()
+    return this.snapshot(entry)
+  }
+
+  openDevTools(id: string): void {
+    this.require(id).view.webContents.openDevTools({ mode: 'detach', activate: true })
+  }
+
+  setViewport(id: string, viewport: BrowserViewport): BrowserSnapshot {
+    const entry = this.require(id)
+    if (!Object.hasOwn(BROWSER_VIEWPORT_PRESETS, viewport)) {
+      throw new Error(`Unknown browser viewport: ${String(viewport)}`)
+    }
+    entry.viewport = viewport
+    this.applyViewport(entry)
+    this.emit(entry)
     return this.snapshot(entry)
   }
 
@@ -155,7 +177,10 @@ export class BrowserViewManager {
     })
     contents.on('will-navigate', guardNavigation)
     contents.on('will-redirect', guardNavigation)
-    contents.on('did-finish-load', () => contents.setZoomFactor(DEFAULT_BROWSER_ZOOM_FACTOR))
+    contents.on('did-finish-load', () => {
+      contents.setZoomFactor(DEFAULT_BROWSER_ZOOM_FACTOR)
+      this.applyViewport(entry)
+    })
     contents.on('did-start-loading', () => {
       entry.error = null
       this.emit(entry)
@@ -195,6 +220,23 @@ export class BrowserViewManager {
     return entry
   }
 
+  private applyViewport(entry: BrowserEntry): void {
+    const contents = entry.view.webContents
+    if (entry.viewport === 'responsive') {
+      contents.disableDeviceEmulation()
+      return
+    }
+    const size = BROWSER_VIEWPORT_PRESETS[entry.viewport]
+    contents.enableDeviceEmulation({
+      screenPosition: entry.viewport === 'desktop' ? 'desktop' : 'mobile',
+      screenSize: size,
+      viewPosition: { x: 0, y: 0 },
+      deviceScaleFactor: 0,
+      viewSize: size,
+      scale: 1
+    })
+  }
+
   private snapshot(entry: BrowserEntry): BrowserSnapshot {
     const contents = entry.view.webContents
     return {
@@ -204,6 +246,7 @@ export class BrowserViewManager {
       loading: contents.isLoading(),
       canGoBack: contents.navigationHistory.canGoBack(),
       canGoForward: contents.navigationHistory.canGoForward(),
+      viewport: entry.viewport,
       error: entry.error
     }
   }

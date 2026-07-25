@@ -286,6 +286,7 @@ describe('Renderer resource state owners', () => {
       loading: false,
       canGoBack: false,
       canGoForward: false,
+      viewport: 'responsive',
       error: null
     }
     const browserTab = createWorkbenchTab(tabId, browserSurface)

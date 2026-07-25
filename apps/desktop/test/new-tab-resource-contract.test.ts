@@ -33,11 +33,12 @@ const fixture = vi.hoisted(() => {
     ready,
     state: {
       config: {
-        version: 6,
+        version: 7,
         hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
         executors: {},
         workspaces: [{ id: 'workspace', name: 'Project', hostId: 'local', path: '/repo', kind: 'folder' }],
-        appearance: { terminalTheme: 'graphite' }
+        appearance: { terminalTheme: 'graphite' },
+        browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
       },
       activeWorkspaceId: 'workspace',
       tabs: {},

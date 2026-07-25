@@ -9,6 +9,12 @@ const fakeElectron = vi.hoisted(() => {
     loading = false
     destroyed = false
     zoomFactor = 1
+    deviceEmulation: Record<string, unknown> | null = null
+    readonly disableDeviceEmulation = vi.fn(() => { this.deviceEmulation = null })
+    readonly enableDeviceEmulation = vi.fn((parameters: Record<string, unknown>) => {
+      this.deviceEmulation = parameters
+    })
+    readonly openDevTools = vi.fn()
     readonly session = {
       checkHandler: null as null | ((...args: any[]) => boolean),
       requestHandler: null as null | ((...args: any[]) => void),
@@ -146,6 +152,7 @@ describe('BrowserViewManager', () => {
     expect(created).toMatchObject({ id: 'browser-1', url: 'about:blank' })
     expect(view.visible).toBe(false)
     expect(view.webContents.zoomFactor).toBe(DEFAULT_BROWSER_ZOOM_FACTOR)
+    expect(view.webContents.disableDeviceEmulation).toHaveBeenCalled()
     expect(view.webContents.session.checkHandler?.(view.webContents, 'media', 'https://example.com', {})).toBe(false)
     const permissionCallback = vi.fn()
     view.webContents.session.requestHandler?.(view.webContents, 'notifications', permissionCallback, {})
@@ -157,6 +164,27 @@ describe('BrowserViewManager', () => {
     expect(view.bounds).toEqual({ x: 10, y: 21, width: 800, height: 501 })
     manager.setBounds('browser-1', null)
     expect(view.visible).toBe(false)
+
+    expect(manager.setViewport('browser-1', 'mobile')).toMatchObject({ viewport: 'mobile' })
+    expect(view.webContents.enableDeviceEmulation).toHaveBeenLastCalledWith({
+      screenPosition: 'mobile',
+      screenSize: { width: 390, height: 844 },
+      viewPosition: { x: 0, y: 0 },
+      deviceScaleFactor: 0,
+      viewSize: { width: 390, height: 844 },
+      scale: 1
+    })
+    expect(manager.setViewport('browser-1', 'desktop')).toMatchObject({ viewport: 'desktop' })
+    expect(view.webContents.enableDeviceEmulation).toHaveBeenLastCalledWith(expect.objectContaining({
+      screenPosition: 'desktop',
+      viewSize: { width: 1280, height: 800 }
+    }))
+    expect(manager.setViewport('browser-1', 'responsive')).toMatchObject({ viewport: 'responsive' })
+    expect(view.webContents.deviceEmulation).toBeNull()
+    expect(() => manager.setViewport('browser-1', 'watch' as never)).toThrow('Unknown browser viewport')
+
+    manager.openDevTools('browser-1')
+    expect(view.webContents.openDevTools).toHaveBeenCalledWith({ mode: 'detach', activate: true })
 
     expect(await manager.navigate('browser-1', 'example.com')).toMatchObject({
       url: 'https://example.com/',

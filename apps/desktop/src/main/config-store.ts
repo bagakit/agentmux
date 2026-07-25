@@ -49,11 +49,20 @@ const workspaceSchema = z
 
 const configSchema = z
   .object({
-    version: z.literal(6),
+    version: z.literal(7),
     hosts: z.array(hostSchema),
     executors: z.record(executorIdSchema, executorSchema),
     workspaces: z.array(workspaceSchema),
-    appearance: z.object({ terminalTheme: z.enum(['graphite', 'catppuccin-mocha']) }).strict()
+    appearance: z.object({ terminalTheme: z.enum(['graphite', 'catppuccin-mocha']) }).strict(),
+    browser: z.object({
+      toolbar: z.object({
+        selectElement: z.boolean(),
+        screenshot: z.boolean(),
+        devTools: z.boolean(),
+        viewport: z.boolean(),
+        more: z.boolean()
+      }).strict()
+    }).strict()
   })
   .strict()
   .superRefine((config, context) => {
@@ -110,7 +119,7 @@ const configSchema = z
   })
 
 const DEFAULT_CONFIG: AppConfig = {
-  version: 6,
+  version: 7,
   hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
   executors: {
     codex: { label: 'Codex', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: true },
@@ -131,7 +140,16 @@ const DEFAULT_CONFIG: AppConfig = {
     cursor: { label: 'Cursor', providerId: 'cursor', command: 'cursor-agent', args: [], env: {}, injectAgentMuxGuide: true }
   },
   workspaces: [],
-  appearance: { terminalTheme: 'graphite' }
+  appearance: { terminalTheme: 'graphite' },
+  browser: {
+    toolbar: {
+      selectElement: true,
+      screenshot: true,
+      devTools: true,
+      viewport: true,
+      more: true
+    }
+  }
 }
 
 /**

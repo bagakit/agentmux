@@ -85,7 +85,7 @@ function session(input: {
 
 describe('Orca-adapted shared surface tool dock resize', () => {
   it('keeps Files, Agents and Browser as the three distinct Workspace tools', () => {
-    expect(WORKSPACE_TOOL_IDS).toEqual(['files-branches', 'agents', 'browser-favorites'])
+    expect(WORKSPACE_TOOL_IDS).toEqual(['files-branches', 'agents', 'browser-tools'])
   })
 
   it('keeps every tool for Scratch and lands on the content slot (wiki-first, not Agents)', () => {
@@ -97,9 +97,9 @@ describe('Orca-adapted shared surface tool dock resize', () => {
   })
 
   it('keeps a Scratch selection that is still valid instead of forcing the content slot', () => {
-    const scratch = resolveWorkspaceTools({ workspaceTool: 'browser-favorites', isScratch: true })
+    const scratch = resolveWorkspaceTools({ workspaceTool: 'browser-tools', isScratch: true })
     expect(scratch.tools).toEqual(WORKSPACE_TOOL_IDS)
-    expect(scratch.effective).toBe('browser-favorites')
+    expect(scratch.effective).toBe('browser-tools')
   })
 
   it('leaves a real project with every tool and its stored selection intact', () => {

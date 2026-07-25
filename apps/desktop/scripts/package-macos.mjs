@@ -483,7 +483,7 @@ async function verifyLaunchServices(appPath, verificationRoot) {
     writeFile(join(workspace, 'targets', 'cancel', 'child.txt'), 'cancel child'),
     writeFile(join(alternateWorkspace, 'alternate.txt'), 'alternate workspace'),
     writeFile(join(userData, 'agentmux.config.json'), `${JSON.stringify({
-      version: 6,
+      version: 7,
       hosts: [{ id: 'local', kind: 'local', label: 'Mounted Desktop E2E' }],
       executors: {},
       workspaces: [{
@@ -499,7 +499,8 @@ async function verifyLaunchServices(appPath, verificationRoot) {
         path: alternateWorkspace,
         kind: 'folder'
       }],
-      appearance: { terminalTheme: 'graphite' }
+      appearance: { terminalTheme: 'graphite' },
+      browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
     }, null, 2)}\n`, { mode: 0o600 })
   ])
   const before = new Set(await processIdsForApplication(canonicalAppPath))

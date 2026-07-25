@@ -73,6 +73,7 @@ function browserSurface(regionId: string, browserId: string) {
     loading: false,
     canGoBack: false,
     canGoForward: false,
+    viewport: 'responsive',
     error: null
   }
 }

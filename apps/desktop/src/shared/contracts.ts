@@ -72,12 +72,25 @@ export type AppearanceConfig = {
   terminalTheme: TerminalThemeId
 }
 
+export type BrowserToolbarConfig = {
+  selectElement: boolean
+  screenshot: boolean
+  devTools: boolean
+  viewport: boolean
+  more: boolean
+}
+
+export type BrowserConfig = {
+  toolbar: BrowserToolbarConfig
+}
+
 export type AppConfig = {
-  version: 6
+  version: 7
   hosts: HostConfig[]
   executors: Record<AgentExecutorId, AgentExecutorConfig>
   workspaces: WorkspaceRecord[]
   appearance: AppearanceConfig
+  browser: BrowserConfig
 }
 
 export type FileDocument = {
@@ -318,8 +331,18 @@ export type BrowserSnapshot = {
   loading: boolean
   canGoBack: boolean
   canGoForward: boolean
+  viewport: BrowserViewport
   error: string | null
 }
+
+export const BROWSER_VIEWPORT_PRESETS = {
+  responsive: null,
+  mobile: { width: 390, height: 844 },
+  tablet: { width: 768, height: 1024 },
+  desktop: { width: 1280, height: 800 }
+} as const
+
+export type BrowserViewport = keyof typeof BROWSER_VIEWPORT_PRESETS
 
 export type BrowserEvent =
   | { type: 'updated'; browser: BrowserSnapshot }
@@ -419,6 +442,8 @@ export type AgentMuxDesktopApi = {
     back(id: string): Promise<BrowserSnapshot>
     forward(id: string): Promise<BrowserSnapshot>
     reload(id: string): Promise<BrowserSnapshot>
+    openDevTools(id: string): Promise<void>
+    setViewport(id: string, viewport: BrowserViewport): Promise<BrowserSnapshot>
     setBounds(id: string, bounds: BrowserBounds | null): Promise<void>
     close(id: string): Promise<void>
     onEvent(listener: (event: BrowserEvent) => void): () => void

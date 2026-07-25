@@ -94,11 +94,12 @@ function seed(document: FileDocument = {
     kind: 'folder'
   }
   const config: AppConfig = {
-    version: 6,
+    version: 7,
     hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
     executors: {},
     workspaces: [workspace],
-    appearance: { terminalTheme: 'graphite' }
+    appearance: { terminalTheme: 'graphite' },
+    browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
   }
   const tabId = fileTabId(workspace.id, document.path)
   const tab = {

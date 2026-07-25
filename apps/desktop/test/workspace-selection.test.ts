@@ -119,11 +119,12 @@ describe('selected worktree workspace context', () => {
     })
     const oldLayout = createWorkspaceLayout('main-pane', [oldTab.id])
     const initialConfig: AppConfig = {
-      version: 6,
+      version: 7,
       hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
       executors: {},
       workspaces: [main],
-      appearance: { terminalTheme: 'graphite' }
+      appearance: { terminalTheme: 'graphite' },
+      browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
     }
     const selectedConfig: AppConfig = {
       ...initialConfig,
@@ -224,11 +225,12 @@ describe('selected worktree workspace context', () => {
     }
     useAppStore.setState({
       config: {
-        version: 6,
+        version: 7,
         hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
         executors: { codex: { label: 'Codex', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: true } },
         workspaces: [workspace],
-        appearance: { terminalTheme: 'graphite' }
+        appearance: { terminalTheme: 'graphite' },
+        browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
       },
       sessions: [session],
       activeWorkspaceId: workspace.id,
@@ -265,11 +267,12 @@ function prepareUniversalTab(): { workspace: WorkspaceRecord; tabId: string } {
     kind: 'folder'
   }
   const config: AppConfig = {
-    version: 6,
+    version: 7,
     hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
     executors: { codex: { label: 'Codex', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: true } },
     workspaces: [workspace],
-    appearance: { terminalTheme: 'graphite' }
+    appearance: { terminalTheme: 'graphite' },
+    browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
   }
   useAppStore.setState({
     config,
@@ -458,13 +461,14 @@ describe('Scratch Topic workbench binding', () => {
     }
     useAppStore.setState({
       config: {
-        version: 6,
+        version: 7,
         hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
         executors: {
           codex: { label: 'Codex', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: true }
         },
         workspaces: [workspace],
-        appearance: { terminalTheme: 'graphite' }
+        appearance: { terminalTheme: 'graphite' },
+        browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
       },
       sessions: [],
       timelines: {},

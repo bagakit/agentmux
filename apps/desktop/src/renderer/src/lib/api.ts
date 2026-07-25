@@ -5,6 +5,7 @@ import type {
   AppConfig,
   BrowserEvent,
   BrowserSnapshot,
+  BrowserViewport,
   RuntimeEvent,
   RuntimeSnapshot,
   SessionSnapshot,
@@ -29,7 +30,7 @@ const mockStructuredCapabilities = {
   replyCorrelation: 'none' as const
 }
 let mockConfig: AppConfig = {
-  version: 6,
+  version: 7,
   hosts: [
     { id: 'local', kind: 'local', label: 'This Mac' },
     {
@@ -51,7 +52,16 @@ let mockConfig: AppConfig = {
     { id: 'workspace-demo', name: 'agentmux', hostId: 'local', path: '/Users/river/agentmux', kind: 'folder' },
     { id: 'workspace-remote', name: 'render-lab', hostId: 'studio', path: '/srv/render-lab', kind: 'worktree', branch: 'feat/materials' }
   ],
-  appearance: { terminalTheme: 'graphite' }
+  appearance: { terminalTheme: 'graphite' },
+  browser: {
+    toolbar: {
+      selectElement: true,
+      screenshot: true,
+      devTools: true,
+      viewport: true,
+      more: true
+    }
+  }
 }
 
 let mockFiles = new Map<string, string | null>([
@@ -736,6 +746,7 @@ const mockApi: AgentMuxDesktopApi = {
         loading: false,
         canGoBack: false,
         canGoForward: false,
+        viewport: 'responsive',
         error: null
       }
       mockBrowsers.set(id, browser)
@@ -754,6 +765,14 @@ const mockApi: AgentMuxDesktopApi = {
     back: async (id) => structuredClone(requireMockBrowser(id)),
     forward: async (id) => structuredClone(requireMockBrowser(id)),
     reload: async (id) => structuredClone(requireMockBrowser(id)),
+    openDevTools: async () => {},
+    setViewport: async (id, viewport: BrowserViewport) => {
+      const current = requireMockBrowser(id)
+      const browser = { ...current, viewport }
+      mockBrowsers.set(id, browser)
+      browserListeners.forEach((listener) => listener({ type: 'updated', browser: structuredClone(browser) }))
+      return structuredClone(browser)
+    },
     setBounds: async () => {},
     close: async (id) => {
       if (!mockBrowsers.delete(id)) return

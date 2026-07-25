@@ -234,11 +234,12 @@ describe('file mutation resource reconciliation', () => {
       kind: 'folder'
     }
     const config: AppConfig = {
-      version: 6,
+      version: 7,
       hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
       executors: {},
       workspaces: [workspace],
-      appearance: { terminalTheme: 'graphite' }
+      appearance: { terminalTheme: 'graphite' },
+      browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
     }
     useAppStore.setState({
       config,
@@ -402,11 +403,12 @@ describe('file mutation resource reconciliation', () => {
     }
     useAppStore.setState({
       config: {
-        version: 6,
+        version: 7,
         hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
         executors: {},
         workspaces: [workspace],
-        appearance: { terminalTheme: 'graphite' }
+        appearance: { terminalTheme: 'graphite' },
+        browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
       },
       activeWorkspaceId: workspace.id,
       layouts: { [workspace.id]: createWorkspaceLayout('pane') }
