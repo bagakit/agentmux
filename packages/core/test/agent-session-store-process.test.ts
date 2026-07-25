@@ -36,6 +36,7 @@ type WorkerMessage =
 type WorkerHandle = {
   ready: Promise<void>
   settled: Promise<WorkerResult>
+  stop(): void
 }
 
 type WorkerInput = {
@@ -50,6 +51,8 @@ type WorkerInput = {
 type WorkerOwner = {
   spawn(input: WorkerInput): WorkerHandle
   createRoot(prefix: string): Promise<string>
+  runBody<T>(body: () => Promise<T>): Promise<T>
+  stopChildren(): Promise<void>
   close(): Promise<void>
   childCount(): number
   rootCount(): number
@@ -273,7 +276,22 @@ function spawnWorker(
     else settleReject(new Error('Store worker closed without a result.'))
     children.delete(child)
   })
-  return { ready, settled }
+  return {
+    ready,
+    settled,
+    stop() {
+      if (child.exitCode === null && child.signalCode === null) child.kill()
+    }
+  }
+}
+
+async function stopChildren(
+  children: readonly (readonly [ChildProcess, Promise<WorkerResult>])[]
+): Promise<void> {
+  for (const [child] of children) {
+    if (child.exitCode === null && child.signalCode === null) child.kill()
+  }
+  await Promise.allSettled(children.map(([, settled]) => settled))
 }
 
 function createWorkerOwner(
@@ -282,6 +300,7 @@ function createWorkerOwner(
   const children = new Map<ChildProcess, Promise<WorkerResult>>()
   const pendingRoots = new Set<Promise<string>>()
   const roots = new Set<string>()
+  const bodies = new Set<Promise<unknown>>()
   let accepting = true
   let closePromise: Promise<void> | null = null
   const owner: WorkerOwner = {
@@ -304,18 +323,40 @@ function createWorkerOwner(
       )
       return pending
     },
+    runBody<T>(body: () => Promise<T>) {
+      if (!accepting) throw new Error('Store worker owner is closed.')
+      let resolveBody!: (value: T | PromiseLike<T>) => void
+      let rejectBody!: (error: unknown) => void
+      const admittedBody = new Promise<T>((resolve, reject) => {
+        resolveBody = resolve
+        rejectBody = reject
+      })
+      bodies.add(admittedBody)
+      void admittedBody.then(
+        () => bodies.delete(admittedBody),
+        () => bodies.delete(admittedBody)
+      )
+      try {
+        void body().then(resolveBody, rejectBody)
+      } catch (error) {
+        rejectBody(error)
+      }
+      return admittedBody
+    },
+    stopChildren() {
+      return stopChildren([...children])
+    },
     close() {
       if (closePromise) return closePromise
       accepting = false
-      const activeChildren = [...children]
+      const activeBodies = [...bodies]
       const activeRoots = [...pendingRoots]
-      for (const [child] of activeChildren) {
-        if (child.exitCode === null && child.signalCode === null) child.kill()
-      }
       closePromise = (async () => {
+        await owner.stopChildren()
+        await Promise.allSettled(activeBodies)
         await Promise.allSettled(activeRoots)
-        await Promise.allSettled(activeChildren.map(([, settled]) => settled))
         if (children.size > 0) throw new Error('Store worker owner closed before its children.')
+        if (bodies.size > 0) throw new Error('Store worker owner closed before its bodies.')
         if (pendingRoots.size > 0) throw new Error('Store worker owner closed before acquiring its roots.')
         await Promise.all([...roots].map(async (root) => {
           await rm(root, { recursive: true, force: true })
@@ -334,6 +375,11 @@ function createWorkerOwner(
   }
   owners.add(owner)
   return owner
+}
+
+function withWorkerOwner<T>(body: (owner: WorkerOwner) => Promise<T>): Promise<T> {
+  const owner = createWorkerOwner()
+  return owner.runBody(async () => await body(owner))
 }
 
 function worker(owner: WorkerOwner, input: WorkerInput): WorkerHandle {
@@ -364,7 +410,7 @@ function runRace(
       await Promise.all(workers.map((item) => item.ready))
       await writeFile(startPath, 'go\n', { mode: 0o600, flag: 'wx' })
     } catch (error) {
-      await owner.close()
+      for (const item of workers) item.stop()
       await settlements
       throw error
     }
@@ -495,8 +541,7 @@ describe('Store worker stdout protocol', () => {
 })
 
 describe('File Store multi-process authority', () => {
-  it('settles corrupt, trailing, and early worker failures without leaking children', async () => {
-    const owner = createWorkerOwner()
+  it('settles corrupt, trailing, and early worker failures without leaking children', () => withWorkerOwner(async (owner) => {
     const root = await owner.createRoot('/private/tmp/agentmux-store-protocol-')
     const cases: Array<{
       workerId: string
@@ -565,10 +610,9 @@ describe('File Store multi-process authority', () => {
       else expect(readiness[index]).toBe(settlement.reason)
     }
     expect(owner.childCount()).toBe(0)
-  })
+  }))
 
-  it('drains a worker left live after ready through its authoritative settlement', async () => {
-    const owner = createWorkerOwner()
+  it('drains a worker left live after ready through its authoritative settlement', () => withWorkerOwner(async (owner) => {
     const root = await owner.createRoot('/private/tmp/agentmux-store-live-worker-')
     const handle = worker(owner, {
       mode: 'timeline',
@@ -580,9 +624,9 @@ describe('File Store multi-process authority', () => {
 
     await handle.ready
     expect(owner.childCount()).toBe(1)
-  })
+  }))
 
-  it('permanently rejects stale child and root work without crossing generations', async () => {
+  it('permanently rejects stale child and root work without crossing generations', () => withWorkerOwner(async (nextOwner) => {
     let releaseRoot!: () => void
     const rootGate = new Promise<void>((resolve) => { releaseRoot = resolve })
     let acquiredLateRoot: string | null = null
@@ -591,7 +635,6 @@ describe('File Store multi-process authority', () => {
       acquiredLateRoot = await mkdtemp(prefix)
       return acquiredLateRoot
     })
-    const nextOwner = createWorkerOwner()
     const lateRoot = staleOwner.createRoot('/private/tmp/agentmux-store-stale-owner-')
     const lateRootFailure = lateRoot.then(
       () => null,
@@ -638,10 +681,62 @@ describe('File Store multi-process authority', () => {
     await nextHandle.ready
     await expect(nextHandle.settled).resolves.toMatchObject({ ok: true })
     expect(nextOwner.childCount()).toBe(0)
-  })
+  }))
 
-  it('clears an ambient fault scenario for a normal worker', async () => {
-    const owner = createWorkerOwner()
+  it('waits for an admitted body before deleting its root without polluting the next generation', () => withWorkerOwner(async (nextOwner) => {
+    let announcePaused!: () => void
+    const bodyPaused = new Promise<void>((resolve) => { announcePaused = resolve })
+    let resumeBody!: () => void
+    const bodyResume = new Promise<void>((resolve) => { resumeBody = resolve })
+    let announceWrite!: () => void
+    const bodyWrote = new Promise<void>((resolve) => { announceWrite = resolve })
+    let releaseBody!: () => void
+    const bodyRelease = new Promise<void>((resolve) => { releaseBody = resolve })
+    const staleOwner = createWorkerOwner()
+    let staleRoot = ''
+    const staleBody = staleOwner.runBody(async () => {
+      staleRoot = await staleOwner.createRoot('/private/tmp/agentmux-store-body-owner-')
+      announcePaused()
+      await bodyResume
+      await writeFile(join(staleRoot, 'late-write'), 'stale generation\n')
+      announceWrite()
+      await bodyRelease
+    })
+    await bodyPaused
+
+    const nextRoot = await nextOwner.createRoot('/private/tmp/agentmux-store-body-owner-next-')
+    const nextMarker = join(nextRoot, 'next-generation')
+    await writeFile(nextMarker, 'next generation\n')
+    let closeCompleted = false
+    const closing = staleOwner.close().then(() => { closeCompleted = true })
+    try {
+      await Promise.resolve()
+      expect(closeCompleted).toBe(false)
+      expect(() => staleOwner.runBody(async () => {}))
+        .toThrow('Store worker owner is closed.')
+
+      resumeBody()
+      await bodyWrote
+      expect(closeCompleted).toBe(false)
+      await expect(readFile(join(staleRoot, 'late-write'), 'utf8'))
+        .resolves.toBe('stale generation\n')
+      await expect(readFile(nextMarker, 'utf8')).resolves.toBe('next generation\n')
+
+      releaseBody()
+      await staleBody
+      await closing
+      expect(closeCompleted).toBe(true)
+      await expect(access(staleRoot)).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(readFile(nextMarker, 'utf8')).resolves.toBe('next generation\n')
+      await expect(access(join(nextRoot, 'late-write'))).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally {
+      resumeBody()
+      releaseBody()
+      await Promise.allSettled([staleBody, closing])
+    }
+  }))
+
+  it('clears an ambient fault scenario for a normal worker', () => withWorkerOwner(async (owner) => {
     const root = await owner.createRoot('/private/tmp/agentmux-store-scenario-isolation-')
     const scenarioKey = 'AGENTMUX_STORE_WORKER_SCENARIO'
     const hadScenario = Object.hasOwn(process.env, scenarioKey)
@@ -663,10 +758,9 @@ describe('File Store multi-process authority', () => {
     await handle.ready
     await writeFile(join(root, 'start'), 'go\n', { mode: 0o600, flag: 'wx' })
     await expect(handle.settled).resolves.toMatchObject({ ok: true })
-  })
+  }))
 
-  it('allows exactly one create and one resume binding commit across processes', async () => {
-    const owner = createWorkerOwner()
+  it('allows exactly one create and one resume binding commit across processes', () => withWorkerOwner(async (owner) => {
     const root = await owner.createRoot('/private/tmp/agentmux-store-process-')
     const storePath = join(root, 'agent-sessions.json')
     const createResults = await runRace(owner, 'create', storePath, join(root, 'start-create'))
@@ -701,10 +795,9 @@ describe('File Store multi-process authority', () => {
     })
     const documentAfterResume = JSON.parse(await readFile(storePath, 'utf8')) as { reservations: unknown[] }
     expect(documentAfterResume.reservations).toEqual([])
-  })
+  }))
 
-  it('serializes concurrent Timeline revisions without losing either process update', async () => {
-    const owner = createWorkerOwner()
+  it('serializes concurrent Timeline revisions without losing either process update', () => withWorkerOwner(async (owner) => {
     const root = await owner.createRoot('/private/tmp/agentmux-timeline-process-')
     const storePath = join(root, 'agent-sessions.json')
     const store = new AgentMuxFileAgentSessionStore(storePath)
@@ -738,5 +831,5 @@ describe('File Store multi-process authority', () => {
           expect.objectContaining({ id: 'activity-right' })
         ])
       })
-  })
+  }))
 })
