@@ -111,7 +111,13 @@ export function WorkbenchTabContextMenu({
     <ContextMenu.Root {...(onOpenChange ? { onOpenChange } : {})}>
       <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
       <ContextMenu.Portal>
-        <ContextMenu.Content className="tab-context-menu" collisionPadding={8}>
+        <ContextMenu.Content
+          className="tab-context-menu"
+          collisionPadding={8}
+          // Returning focus to the hidden trigger scrolls the tab strip back to it; the other menus
+          // already decline that, and the tab strip is the one place where the jump is visible.
+          onCloseAutoFocus={(event) => event.preventDefault()}
+        >
           <ContextMenu.Item className="tab-context-menu__item" onSelect={copyModel.tabId.onSelect}>
             <Copy size={14} />
             <span>{copyModel.tabId.label}</span>
