@@ -312,6 +312,12 @@ function SurfaceContent({
         sessionId={surface.sessionId}
         surfaceKind={surface.kind}
         interactiveResize={interactiveResize}
+        linkOrigin={{
+          workspaceId: surface.workspaceId,
+          tabGroupId: groupId,
+          tabId,
+          regionId: surface.regionId
+        }}
       />
     )
   }

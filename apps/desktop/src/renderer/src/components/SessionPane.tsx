@@ -1,6 +1,7 @@
 import { AlertTriangle, LoaderCircle, RefreshCw, RotateCcw, ServerOff } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useAppStore } from '../store'
+import type { OpenHttpLinkOrigin } from '../lib/open-destination'
 import { AgentSessionComposer } from './AgentSessionComposer'
 import { ActivityView } from './ActivityView'
 import { TerminalView } from './TerminalView'
@@ -26,11 +27,13 @@ function humanizeDetail(detail: string | undefined, exited: boolean): string {
 export function SessionPane({
   sessionId,
   surfaceKind,
-  interactiveResize
+  interactiveResize,
+  linkOrigin
 }: {
   sessionId: string
   surfaceKind: 'agent' | 'terminal'
   interactiveResize: boolean
+  linkOrigin: OpenHttpLinkOrigin
 }) {
   const session = useAppStore((state) => state.sessions.find((item) => item.id === sessionId))
   const timeline = useAppStore((state) => state.timelines[sessionId]?.items ?? NO_TIMELINE_ITEMS)
@@ -112,6 +115,7 @@ export function SessionPane({
               session={session}
               themeId={terminalThemeId}
               interactiveResize={interactiveResize}
+              linkOrigin={linkOrigin}
             />
             {disconnected || missing || exited ? (
               <div className={`terminal-recovery terminal-recovery--${disconnected ? 'disconnected' : exited ? 'exited' : 'error'}`} role="status" aria-live="polite">
