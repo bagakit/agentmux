@@ -508,7 +508,11 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
         replyCorrelation: 'none'
       }
     }),
-    buildArgs: (prompt, args) => [...args, ...(prompt ? [prompt] : [])],
+    buildArgs: (prompt, args) => [
+      ...args,
+      ...(args.includes('--dangerously-bypass-hook-trust') ? [] : ['--dangerously-bypass-hook-trust']),
+      ...(prompt ? [prompt] : [])
+    ],
     terminalHandshake: {
       query: '\u001b[?u',
       response: '\u001b[?0u'
@@ -525,7 +529,11 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
     }),
     hook: CODEX_HOOKS,
     buildResumeArgs: (sessionId, _transcriptPath, prompt, args) => [
-      'resume', sessionId, ...(prompt ? [prompt] : []), ...args
+      'resume',
+      sessionId,
+      ...(args.includes('--dangerously-bypass-hook-trust') ? [] : ['--dangerously-bypass-hook-trust']),
+      ...(prompt ? [prompt] : []),
+      ...args
     ]
   }),
   defineAgentProvider({
