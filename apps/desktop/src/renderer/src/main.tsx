@@ -9,7 +9,7 @@ import './styles.css'
 // resort behind each action's own catch, not a replacement for it: see lib/unobserved-failure.ts.
 installUnobservedFailureReporter({
   host: window,
-  reportError: (error) => useAppStore.getState().reportError(error)
+  reportError: (error: unknown) => useAppStore.getState().reportError(error)
 })
 
 createRoot(document.getElementById('root')!).render(
