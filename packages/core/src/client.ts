@@ -1660,7 +1660,11 @@ export class AgentMuxClient {
     } finally {
       clearTimeout(timer)
       unsubscribe()
-      if (attached) await this.kernel.detach(session.run.runId)
+      if (attached) {
+        try {
+          await this.kernel.detach(session.run.runId)
+        } catch {}
+      }
     }
   }
 

@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 const args = process.argv.slice(2)
-const isResume = args[0] === 'resume'
-const prompt = isResume ? args[2] ?? '' : args.at(-1) ?? ''
+const nonFlags = args.filter((arg) => !arg.startsWith('-'))
+const resumeIndex = nonFlags.indexOf('resume')
+const isResume = resumeIndex !== -1
+const prompt = isResume ? nonFlags[resumeIndex + 2] ?? '' : (args.at(-1)?.startsWith('-') ? '' : args.at(-1) ?? '')
 const hookUrl = process.env.AGENTMUX_HOOK_URL
 const hookToken = process.env.AGENTMUX_HOOK_TOKEN
 const agentSessionId = process.env.AGENTMUX_AGENT_SESSION_ID
