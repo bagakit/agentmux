@@ -692,10 +692,9 @@ export function SurfaceToolDock({
   )
   const runCounts = { working: 0, 'needs-you': 0, done: 0 }
   for (const session of projectSessions) runCounts[sessionBoardColumn(session)] += 1
-  const browserSurfaces = Object.values(tabs).flatMap((tab) => workbenchSurfaces(tab))
-    .flatMap((candidate) => (
-      candidate.kind === 'browser' && candidate.workspaceId === workspace?.id ? [candidate] : []
-    ))
+  const allBrowserSurfaces = Object.values(tabs).flatMap((tab) => workbenchSurfaces(tab))
+    .flatMap((candidate) => candidate.kind === 'browser' ? [candidate] : [])
+  const browserSurfaces = allBrowserSurfaces.filter((candidate) => candidate.workspaceId === workspace?.id)
   const currentNavigationByBrowserId = Object.fromEntries(browserSurfaces.map((browser) => [
     browser.browserId,
     browser.navigationId
@@ -786,7 +785,7 @@ export function SurfaceToolDock({
               saving={savingBrowserToolbar}
               onSave={saveBrowserToolbar}
             />
-            <BrowserProfilesPanel browsers={browserSurfaces} />
+            <BrowserProfilesPanel browsers={browserSurfaces} allBrowsers={allBrowserSurfaces} />
             <BrowserAnnotationsPanel
               annotations={browserAnnotations}
               currentNavigationByBrowserId={currentNavigationByBrowserId}
