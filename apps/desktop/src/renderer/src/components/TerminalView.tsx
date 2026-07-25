@@ -4,7 +4,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
-import { ChevronDown, ChevronUp, ExternalLink, LoaderCircle, Search, X } from 'lucide-react'
+import { ChevronDown, ChevronUp, ExternalLink, FileCode, LoaderCircle, Search, X } from 'lucide-react'
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { RuntimeEvent, SessionSnapshot, TerminalThemeId } from '../../../shared/contracts'
 import { api } from '../lib/api'
@@ -16,6 +16,7 @@ import {
   terminalLinkModifierOpensSystemBrowser,
   terminalLinkPreviewAnchor
 } from '../lib/terminal-link-gesture'
+import { detectTerminalPathLinks } from '../lib/terminal-path-link'
 import { terminalOptions, terminalTheme } from '../lib/terminal-theme'
 import { isTerminalAppShortcut } from '../lib/terminal-shortcuts'
 import { finishTerminalReplayRecovery, hydrateTerminalReplay } from '../lib/terminal-replay'
@@ -118,15 +119,23 @@ export function TerminalView({
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [linkRequest, setLinkRequest] = useState<TerminalLinkRequest | null>(null)
-  const [linkPreview, setLinkPreview] = useState<{
-    url: string
-    left: number
-    top: number
-    placement: 'above' | 'below'
-    fastPath: boolean
-  } | null>(null)
+  const [linkPreview, setLinkPreview] = useState<
+    | { kind: 'http'; url: string; left: number; top: number; placement: 'above' | 'below'; fastPath: boolean }
+    | { kind: 'file'; label: string; left: number; top: number; placement: 'above' | 'below' }
+    | null
+  >(null)
   const openHttpLink = useAppStore((state) => state.openHttpLink)
+  const openFile = useAppStore((state) => state.openFile)
   const reportError = useAppStore((state) => state.reportError)
+  // The active workspace's on-disk root — the base main resolves openFile against. Read from the
+  // WorkspaceRecord (NOT session.workspacePath) so worktree/scratch terminals still relativize
+  // absolute paths against the base main actually uses. A ref keeps it fresh for the attach-effect
+  // closure, which does not re-run on config change.
+  const activeWorkspaceRoot = useAppStore((state) =>
+    state.config?.workspaces.find((workspace) => workspace.id === state.activeWorkspaceId)?.path ?? ''
+  )
+  const activeWorkspaceRootRef = useRef(activeWorkspaceRoot)
+  activeWorkspaceRootRef.current = activeWorkspaceRoot
   const isMac = navigator.userAgent.includes('Mac')
 
   useEffect(() => {
@@ -147,6 +156,8 @@ export function TerminalView({
   useEffect(() => {
     const root = rootRef.current
     if (!root) return
+    // A const the closures below can capture without TypeScript re-widening it to null.
+    const terminalRoot = root
     const terminalGeneration = ++terminalGenerationRef.current
     setHydrating(true)
     setAttachFailed(false)
@@ -193,16 +204,9 @@ export function TerminalView({
       hover: (event, text) => {
         const url = parseTerminalHttpLink(text)
         if (!url) return
-        const rect = root.getBoundingClientRect()
-        // Cell height in CSS px, so the preview clears the whole link row whatever the pointer's
-        // vertical offset within the hovered cell. Derived from the grid to avoid a private xterm API.
-        const cellHeight = terminal.rows > 0 ? rect.height / terminal.rows : 0
-        const anchor = terminalLinkPreviewAnchor({
-          pointer: { x: event.clientX, y: event.clientY },
-          cellHeight,
-          viewport: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom }
-        })
+        const anchor = previewAnchorAt(event.clientX, event.clientY)
         setLinkPreview({
+          kind: 'http',
           url,
           left: anchor.left,
           top: anchor.top,
@@ -212,12 +216,79 @@ export function TerminalView({
       },
       leave: () => setLinkPreview(null)
     })
+    // Shared anchor math for both link previews (http URLs and file paths), so the file-path preview
+    // never covers its link either. Cell height is derived from the grid (no private xterm API).
+    function previewAnchorAt(clientX: number, clientY: number) {
+      const rect = terminalRoot.getBoundingClientRect()
+      const cellHeight = terminal.rows > 0 ? rect.height / terminal.rows : 0
+      return terminalLinkPreviewAnchor({
+        pointer: { x: clientX, y: clientY },
+        cellHeight,
+        viewport: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom }
+      })
+    }
     terminal.loadAddon(fit)
     terminal.loadAddon(search)
     terminal.loadAddon(webLinks)
     terminal.open(root)
     terminalRef.current = terminal
     searchAddonRef.current = search
+
+    // File-path link provider. Runs on the render/hover hot path, so it does ONLY string work:
+    // read the buffer line xterm already holds and scan it with the pure, conservative matcher.
+    // No disk, no IPC, no existence probe here — a path that does not exist fails visibly on click
+    // via reportError, never on this path.
+    const pathLinks = terminal.registerLinkProvider({
+      provideLinks: (bufferLineNumber, callback) => {
+        const line = terminal.buffer.active.getLine(bufferLineNumber - 1)?.translateToString(true)
+        if (!line) return callback(undefined)
+        const matches = detectTerminalPathLinks(line, activeWorkspaceRootRef.current)
+        if (matches.length === 0) return callback(undefined)
+        callback(matches.map((match) => {
+          const location = match.line !== undefined
+            ? { line: match.line, ...(match.column !== undefined ? { column: match.column } : {}) }
+            : undefined
+          const label = match.line !== undefined
+            ? `${match.path}:${match.line}${match.column !== undefined ? `:${match.column}` : ''}`
+            : match.path
+          return {
+            // 1-based, right side inclusive on start / exclusive-as-inclusive on end (xterm range).
+            range: {
+              start: { x: match.index + 1, y: bufferLineNumber },
+              end: { x: match.index + match.length, y: bufferLineNumber }
+            },
+            text: match.path,
+            activate: (event: MouseEvent) => {
+              // Same drag-guard as the http provider: a drag that ends over a path must select,
+              // not open. Shares the single linkPressRef set on pointerdown.
+              const origin = linkPressRef.current
+              linkPressRef.current = null
+              if (!isTerminalLinkClick({
+                origin,
+                release: { x: event.clientX, y: event.clientY },
+                hasSelection: terminal.hasSelection()
+              })) return
+              setLinkPreview(null)
+              // openFile ignores its workspaceId and uses the active workspace; a terminal is only
+              // clickable while its workspace is active, so linkOrigin.tabGroupId lands the file in
+              // the terminal's own Tab Group. A miss surfaces through reportError (fail visibly).
+              void openFile(match.path, linkOriginRef.current.tabGroupId, location).catch(reportError)
+            },
+            hover: (event: MouseEvent) => {
+              const anchor = previewAnchorAt(event.clientX, event.clientY)
+              setLinkPreview({
+                kind: 'file',
+                label,
+                left: anchor.left,
+                top: anchor.top,
+                placement: anchor.placement
+              })
+            },
+            leave: () => setLinkPreview(null)
+          }
+        }))
+      }
+    })
 
     let webgl: WebglAddon | null = null
     let webglContextLoss: { dispose(): void } | null = null
@@ -433,6 +504,7 @@ export function TerminalView({
       webgl?.dispose()
       colorQuerySuppression.dispose()
       selection.dispose()
+      pathLinks.dispose()
       disposeEvents()
       input.dispose()
       resize.disconnect()
@@ -527,15 +599,27 @@ export function TerminalView({
               role="tooltip"
               style={{ left: linkPreview.left, top: linkPreview.top }}
             >
-              <ExternalLink size={13} />
-              <span className="terminal-link-preview__url" title={linkPreview.url}>
-                {linkPreview.url}
-              </span>
-              <kbd className="terminal-link-preview__hint">
-                {linkPreview.fastPath
-                  ? 'Open in browser'
-                  : `${isMac ? '⌘' : 'Ctrl'}+click to open · click to choose`}
-              </kbd>
+              {linkPreview.kind === 'http' ? (
+                <>
+                  <ExternalLink size={13} />
+                  <span className="terminal-link-preview__url" title={linkPreview.url}>
+                    {linkPreview.url}
+                  </span>
+                  <kbd className="terminal-link-preview__hint">
+                    {linkPreview.fastPath
+                      ? 'Open in browser'
+                      : `${isMac ? '⌘' : 'Ctrl'}+click to open · click to choose`}
+                  </kbd>
+                </>
+              ) : (
+                <>
+                  <FileCode size={13} />
+                  <span className="terminal-link-preview__url" title={linkPreview.label}>
+                    {linkPreview.label}
+                  </span>
+                  <kbd className="terminal-link-preview__hint">click to open</kbd>
+                </>
+              )}
             </div>
           ) : null}
           {startupPhase === 'restoring' ? (
