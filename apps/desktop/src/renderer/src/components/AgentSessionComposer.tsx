@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
 import { useAppStore } from '../store'
@@ -35,7 +34,9 @@ export function AgentSessionComposer({
   sessionId: string
   disabled?: boolean
 }) {
-  const [text, setText] = useState('')
+  const text = useAppStore((state) => state.agentComposerDrafts[sessionId] ?? '')
+  const setAgentComposerDraft = useAppStore((state) => state.setAgentComposerDraft)
+  const clearAgentComposerDraftIfUnchanged = useAppStore((state) => state.clearAgentComposerDraftIfUnchanged)
   const session = useAppStore((state) => state.sessions.find((item) => item.id === sessionId))
   const workspace = useAppStore((state) =>
     state.config?.workspaces.find((item) =>
@@ -54,7 +55,7 @@ export function AgentSessionComposer({
     const value = text
     try {
       await send(sessionId, value)
-      setText((current) => current === value ? '' : current)
+      clearAgentComposerDraftIfUnchanged(sessionId, value)
     } catch {
       // The Store owns error presentation; keep the draft available for retry.
     }
@@ -62,7 +63,7 @@ export function AgentSessionComposer({
 
   function addFileReference(): void {
     if (!activeFile || availability.disabled) return
-    setText((value) => `${value}${value && !value.endsWith(' ') ? ' ' : ''}@${activeFile} `)
+    setAgentComposerDraft(sessionId, `${text}${text && !text.endsWith(' ') ? ' ' : ''}@${activeFile} `)
   }
 
   return (
@@ -71,7 +72,7 @@ export function AgentSessionComposer({
       disabled={availability.disabled}
       placeholder={availability.placeholder}
       {...(activeFile ? { activeFile } : {})}
-      onChange={setText}
+      onChange={(value) => setAgentComposerDraft(sessionId, value)}
       {...(!availability.disabled ? {
         onSubmit: () => void submit(),
         onInterrupt: () => void interrupt(sessionId),

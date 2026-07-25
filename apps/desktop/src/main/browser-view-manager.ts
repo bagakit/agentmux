@@ -2,24 +2,41 @@ import { randomUUID } from 'node:crypto'
 import { WebContentsView, type BrowserWindow } from 'electron'
 import {
   BROWSER_VIEWPORT_PRESETS,
+  type BrowserAnnotationMarker,
   type BrowserBounds,
+  type BrowserElementRect,
+  type BrowserElementSelection,
   type BrowserEvent,
   type BrowserScreenshotCapture,
   type BrowserSnapshot,
   type BrowserViewport
 } from '../shared/contracts.js'
 import { browserPngFromNativeImage } from './browser-image.js'
+import { sanitizeBrowserElementSelection } from './browser-selection.js'
+import {
+  BROWSER_SELECTION_WORLD_ID,
+  buildBrowserAnnotationMarkerScript,
+  buildCancelBrowserAnnotationMarkerScript,
+  buildBrowserElementSelectionScript,
+  buildCancelBrowserElementSelectionScript
+} from './browser-selection-script.js'
 
 type BrowserEntry = {
   id: string
   view: WebContentsView
   requestedUrl: string
   navigationId: string
+  selectionRevision: number
+  selectionOperation: number | null
+  annotationRevision: number
   viewport: BrowserViewport
   error: string | null
 }
 
 export const DEFAULT_BROWSER_ZOOM_FACTOR = 0.9
+const BROWSER_SELECTION_TIMEOUT_MS = 120_000
+const BROWSER_MARKER_MAX_COUNT = 50
+const BROWSER_MARKER_MAX_COORDINATE = 10_000_000
 
 export function assertAllowedBrowserUrl(value: string): string {
   if (value === 'about:blank') return value
@@ -64,6 +81,9 @@ export class BrowserViewManager {
       view,
       requestedUrl: url,
       navigationId: randomUUID(),
+      selectionRevision: 0,
+      selectionOperation: null,
+      annotationRevision: 0,
       viewport: 'responsive',
       error: null
     }
@@ -152,6 +172,134 @@ export class BrowserViewManager {
     }
   }
 
+  async selectElement(id: string): Promise<BrowserElementSelection | null> {
+    const entry = this.require(id)
+    const navigationId = entry.navigationId
+    entry.selectionOperation = null
+    const preflightRevision = ++entry.selectionRevision
+    await entry.view.webContents.executeJavaScriptInIsolatedWorld(
+      BROWSER_SELECTION_WORLD_ID,
+      [{ code: buildCancelBrowserElementSelectionScript(preflightRevision) }]
+    )
+    if (
+      this.entries.get(id) !== entry ||
+      entry.view.webContents.isDestroyed() ||
+      entry.navigationId !== navigationId ||
+      entry.selectionRevision !== preflightRevision
+    ) {
+      return null
+    }
+    const operation = ++entry.selectionRevision
+    entry.selectionOperation = operation
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    try {
+      const raw = await Promise.race([
+        entry.view.webContents.executeJavaScriptInIsolatedWorld(
+          BROWSER_SELECTION_WORLD_ID,
+          [{ code: buildBrowserElementSelectionScript(operation) }],
+          true
+        ),
+        new Promise<never>((_resolve, reject) => {
+          timeout = setTimeout(() => reject(new Error('Browser element selection timed out')), BROWSER_SELECTION_TIMEOUT_MS)
+        })
+      ])
+      if (raw === null) return null
+      if (
+        this.entries.get(id) !== entry ||
+        entry.view.webContents.isDestroyed() ||
+        entry.navigationId !== navigationId ||
+        entry.selectionOperation !== operation
+      ) {
+        throw new Error('Browser page changed while an element was being selected')
+      }
+      return {
+        browserId: id,
+        navigationId,
+        ...sanitizeBrowserElementSelection(raw)
+      }
+    } finally {
+      if (timeout) clearTimeout(timeout)
+      if (entry.selectionOperation === operation) entry.selectionOperation = null
+      if (this.entries.get(id) === entry && !entry.view.webContents.isDestroyed()) {
+        void entry.view.webContents.executeJavaScriptInIsolatedWorld(
+          BROWSER_SELECTION_WORLD_ID,
+          [{ code: buildCancelBrowserElementSelectionScript(operation) }]
+        ).catch(() => {})
+      }
+    }
+  }
+
+  async cancelElementSelection(id: string): Promise<void> {
+    const entry = this.entries.get(id)
+    if (!entry || entry.view.webContents.isDestroyed()) return
+    entry.selectionOperation = null
+    const revision = ++entry.selectionRevision
+    await entry.view.webContents.executeJavaScriptInIsolatedWorld(
+      BROWSER_SELECTION_WORLD_ID,
+      [{ code: buildCancelBrowserElementSelectionScript(revision) }]
+    )
+  }
+
+  async setAnnotationMarkers(
+    id: string,
+    navigationId: string,
+    markers: readonly BrowserAnnotationMarker[]
+  ): Promise<void> {
+    const entry = this.require(id)
+    if (entry.navigationId !== navigationId) {
+      return
+    }
+    if (!Array.isArray(markers) || markers.length > BROWSER_MARKER_MAX_COUNT) {
+      throw new Error('Browser annotation marker count exceeds the limit')
+    }
+    const ids = new Set<string>()
+    const indexes = new Set<number>()
+    const normalized = Array.from(markers, (marker, index): BrowserAnnotationMarker => {
+      if (
+        !marker ||
+        typeof marker.id !== 'string' ||
+        !marker.id ||
+        marker.id.length > 100 ||
+        !Number.isInteger(marker.index) ||
+        marker.index < 0 ||
+        marker.index >= BROWSER_MARKER_MAX_COUNT ||
+        typeof marker.isFixed !== 'boolean'
+      ) {
+        throw new Error(`Browser annotation marker ${index} is invalid`)
+      }
+      if (ids.has(marker.id) || indexes.has(marker.index)) {
+        throw new Error(`Browser annotation marker ${index} duplicates an id or index`)
+      }
+      ids.add(marker.id)
+      indexes.add(marker.index)
+      return {
+        id: marker.id,
+        index: marker.index,
+        isFixed: marker.isFixed,
+        rectViewport: normalizeMarkerRect(marker.rectViewport),
+        rectPage: normalizeMarkerRect(marker.rectPage)
+      }
+    })
+    const revision = ++entry.annotationRevision
+    await entry.view.webContents.executeJavaScriptInIsolatedWorld(
+      BROWSER_SELECTION_WORLD_ID,
+      [{ code: buildBrowserAnnotationMarkerScript(normalized, revision) }]
+    )
+    if (
+      this.entries.get(id) !== entry ||
+      entry.view.webContents.isDestroyed() ||
+      entry.navigationId !== navigationId ||
+      entry.annotationRevision !== revision
+    ) {
+      if (this.entries.get(id) === entry && !entry.view.webContents.isDestroyed()) {
+        void entry.view.webContents.executeJavaScriptInIsolatedWorld(
+          BROWSER_SELECTION_WORLD_ID,
+          [{ code: buildCancelBrowserAnnotationMarkerScript(revision) }]
+        ).catch(() => {})
+      }
+    }
+  }
+
   setBounds(id: string, bounds: BrowserBounds | null): void {
     const entry = this.entries.get(id)
     if (!entry) return
@@ -175,6 +323,19 @@ export class BrowserViewManager {
   close(id: string): void {
     const entry = this.entries.get(id)
     if (!entry) return
+    if (!entry.view.webContents.isDestroyed()) {
+      entry.selectionOperation = null
+      const selectionRevision = ++entry.selectionRevision
+      const annotationRevision = ++entry.annotationRevision
+      void entry.view.webContents.executeJavaScriptInIsolatedWorld(
+        BROWSER_SELECTION_WORLD_ID,
+        [{ code: buildCancelBrowserElementSelectionScript(selectionRevision) }]
+      ).catch(() => {})
+      void entry.view.webContents.executeJavaScriptInIsolatedWorld(
+        BROWSER_SELECTION_WORLD_ID,
+        [{ code: buildBrowserAnnotationMarkerScript([], annotationRevision) }]
+      ).catch(() => {})
+    }
     this.entries.delete(id)
     this.window.contentView.removeChildView(entry.view)
     if (!entry.view.webContents.isDestroyed()) entry.view.webContents.close()
@@ -212,6 +373,17 @@ export class BrowserViewManager {
     })
     contents.on('did-start-navigation', (details) => {
       if (!details.isMainFrame) return
+      entry.selectionOperation = null
+      const selectionRevision = ++entry.selectionRevision
+      const annotationRevision = ++entry.annotationRevision
+      void contents.executeJavaScriptInIsolatedWorld(
+        BROWSER_SELECTION_WORLD_ID,
+        [{ code: buildCancelBrowserElementSelectionScript(selectionRevision) }]
+      ).catch(() => {})
+      void contents.executeJavaScriptInIsolatedWorld(
+        BROWSER_SELECTION_WORLD_ID,
+        [{ code: buildBrowserAnnotationMarkerScript([], annotationRevision) }]
+      ).catch(() => {})
       entry.navigationId = randomUUID()
       entry.error = null
       this.emit(entry)
@@ -296,5 +468,25 @@ export class BrowserViewManager {
     if (!this.window.isDestroyed() && !this.window.webContents.isDestroyed()) {
       this.window.webContents.send('agentmux:browser-event', event)
     }
+  }
+}
+
+function normalizeMarkerRect(value: BrowserElementRect): BrowserElementRect {
+  if (
+    !value ||
+    !Number.isFinite(value.x) ||
+    !Number.isFinite(value.y) ||
+    !Number.isFinite(value.width) ||
+    !Number.isFinite(value.height) ||
+    value.width < 0 ||
+    value.height < 0
+  ) {
+    throw new Error('Browser annotation marker geometry is invalid')
+  }
+  return {
+    x: Math.min(BROWSER_MARKER_MAX_COORDINATE, Math.max(-BROWSER_MARKER_MAX_COORDINATE, value.x)),
+    y: Math.min(BROWSER_MARKER_MAX_COORDINATE, Math.max(-BROWSER_MARKER_MAX_COORDINATE, value.y)),
+    width: Math.min(BROWSER_MARKER_MAX_COORDINATE, value.width),
+    height: Math.min(BROWSER_MARKER_MAX_COORDINATE, value.height)
   }
 }

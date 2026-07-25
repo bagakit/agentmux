@@ -11,6 +11,7 @@ import type {
   AgentLaunchInput,
   AgentSessionControl,
   AppConfig,
+  BrowserAnnotationMarker,
   BrowserBounds,
   BrowserPng,
   BrowserViewport,
@@ -263,6 +264,26 @@ export async function registerIpc(args: {
   handle('browser:openDevTools', (id: string) => browsers.openDevTools(id))
   handle('browser:setViewport', (id: string, viewport: BrowserViewport) => browsers.setViewport(id, viewport))
   handle('browser:captureScreenshot', async (id: string) => await browsers.captureScreenshot(id))
+  channels.push('browser:selectElement')
+  ipcMain.handle('browser:selectElement', async (event, id: string) => {
+    if (event.sender !== args.window.webContents) throw new Error('Untrusted Browser selection sender')
+    return await browsers.selectElement(id)
+  })
+  channels.push('browser:cancelElementSelection')
+  ipcMain.handle('browser:cancelElementSelection', async (event, id: string) => {
+    if (event.sender !== args.window.webContents) throw new Error('Untrusted Browser selection sender')
+    await browsers.cancelElementSelection(id)
+  })
+  channels.push('browser:setAnnotationMarkers')
+  ipcMain.handle('browser:setAnnotationMarkers', async (
+    event,
+    id: string,
+    navigationId: string,
+    markers: BrowserAnnotationMarker[]
+  ) => {
+    if (event.sender !== args.window.webContents) throw new Error('Untrusted Browser annotation sender')
+    await browsers.setAnnotationMarkers(id, navigationId, markers)
+  })
   handle('browser:setBounds', (id: string, bounds: BrowserBounds | null) => browsers.setBounds(id, bounds))
   handle('browser:close', (id: string) => browsers.close(id))
   const detach = args.runtime.attach(args.window.webContents)

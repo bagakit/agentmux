@@ -1,8 +1,8 @@
 # Third-party notices
 
-## Orca Browser screenshot markup
+## Orca Browser screenshot markup and element selection
 
-Parts of the Browser screenshot drawing model, Canvas renderer, editor interaction, and PNG composition are adapted from Orca commit `4fd93ead1999dc34e13ac5915693ad8467a39a6e`.
+Parts of the Browser screenshot drawing model, Canvas renderer, editor interaction, PNG composition, element-selection overlay, and annotation marker overlay are adapted from Orca commit `4fd93ead1999dc34e13ac5915693ad8467a39a6e`.
 
 MIT License
 

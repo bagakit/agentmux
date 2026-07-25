@@ -147,6 +147,10 @@ const api: AgentMuxPreloadApi = {
     openDevTools: (id: string) => ipcRenderer.invoke('browser:openDevTools', id),
     setViewport: (id: string, viewport: BrowserViewport) => ipcRenderer.invoke('browser:setViewport', id, viewport),
     captureScreenshot: (id: string) => ipcRenderer.invoke('browser:captureScreenshot', id),
+    selectElement: (id: string) => ipcRenderer.invoke('browser:selectElement', id),
+    cancelElementSelection: (id: string) => ipcRenderer.invoke('browser:cancelElementSelection', id),
+    setAnnotationMarkers: (id, navigationId, markers) =>
+      ipcRenderer.invoke('browser:setAnnotationMarkers', id, navigationId, markers),
     setBounds: (id: string, bounds: BrowserBounds | null) => ipcRenderer.invoke('browser:setBounds', id, bounds),
     close: (id: string) => ipcRenderer.invoke('browser:close', id),
     onEvent(listener: (event: BrowserEvent) => void) {
