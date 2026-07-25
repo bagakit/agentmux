@@ -253,7 +253,7 @@ export function reduceTimelineSnapshot(
   }
 }
 
-function removeSessionProjection(
+export function removeSessionProjection(
   state: SessionProjectionState,
   sessionId: string
 ): SessionProjectionState {

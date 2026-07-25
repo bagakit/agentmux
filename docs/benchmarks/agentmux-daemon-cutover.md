@@ -45,7 +45,7 @@ Revision 2 原始结果保留在 `docs/benchmarks/results/` 中带有 `round-1-3
 ### AgentMux Candidate
 
 - 当前提交从源码构建的 `@agentmux/core` 公共 `AgentMuxClient`；Runner 只能调用 package 根导出的 `connect`、`runtimeIdentity`、`runtimeDiagnostics`、`createTerminal`、`attachTerminal`、`releaseRunAttachment`、`writeTerminal`、`listRuns`、`stopTerminal`、`disconnect` 与 `dispose`。不得导入 `CtxmuxRunAdapter`、`@ctxmux/sdk`、wire、state 或其他 private module。
-- 固定 CtxMux artifact 是 clean commit `f89dabe70eba38d46992c320e40c9ebe2f09b5e5`、tree `37632c41c4aae42ba40f33ebe9c54fab13d17c44`、product `0.1.0`、protocol `9`、manifest SHA-256 `ac53b1e43e67a73841d4f6cfbd272628e47f3731f29772dbb86bfbfce77935de`；Runner 从 `runtimeDiagnostics()` 核对公开 identity，并把 package 中 manifest 的 SHA-256 作为只读 build-input evidence 记录，不读取 CtxMux state。
+- 固定 CtxMux artifact 是 clean commit `1603908a253162632e8812ceb9db19c3e416fea4`、tree `464f239190234c8369799dca06a630b3b48f5cca`、product `0.1.0`、protocol `13`、manifest SHA-256 `2629d6d0809d4b85f4b475cc0d00ee677c4f17861b1fc904f2dabd8f18592bca`；Runner 从 `runtimeDiagnostics()` 核对公开 identity，并把 package 中 manifest 的 SHA-256 作为只读 build-input evidence 记录，不读取 CtxMux state。
 - 每轮使用一个独立、随机、权限 `0700` 的 `AGENTMUX_RUNTIME_DIRECTORY`。CtxMux daemon 是唯一 Run Owner；Benchmark Runner 是 Client，不把 Runner RSS 计入 daemon RSS。
 - 正式 `full` Result 必须来自 tracked-clean Git SHA；Runner 把 SHA 与 dirty paths 写入 Manifest，dirty 时拒绝写发布 Verdict。`smoke` 只验证 Runner 路径，不产生 release `pass`，也不得写入正式 results 目录。
 

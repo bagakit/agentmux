@@ -22,6 +22,16 @@ export type PersistedWorkbench = {
   layouts: Record<string, WorkspaceLayout>
 }
 
+export function persistedAgentSessionIds(
+  persisted: PersistedWorkbench | null
+): Set<string> {
+  return new Set(persisted ? Object.values(persisted.tabs).flatMap((tab) => (
+    workbenchSurfaces(tab).flatMap((surface) => (
+      surface.kind === 'agent' && surface.phase === 'attached' ? [surface.sessionId] : []
+    ))
+  )) : [])
+}
+
 type SessionWorkbenchSurface = AgentWorkbenchSurface | TerminalWorkbenchSurface
 
 function sessionSurface(surface: WorkbenchSurface): surface is SessionWorkbenchSurface {

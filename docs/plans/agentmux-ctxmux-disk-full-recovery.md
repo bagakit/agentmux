@@ -2,10 +2,8 @@
 
 ## 问题
 
-ctxmux 把 Run、PTY 和最后一段终端输出写进 SQLite。磁盘曾经写满时，当前版本会把
+ctxmux 把 Run、PTY 和最后一段终端输出写进 SQLite。旧 artifact 在磁盘写满后会把
 第一次 `DiskFull` 永久记住；即使后来已经腾出空间，daemon 仍拒绝所有新修改。
-AgentMux App 重启不会杀掉这个 daemon，所以旧错误会一直存在，`Restart terminal`
-也只能再次收到同一个错误。
 
 ## 目标
 
@@ -23,12 +21,6 @@ AgentMux App 重启不会杀掉这个 daemon，所以旧错误会一直存在，
 - 空间恢复后，失败批次先写入成功，后面的创建、终止和输出修改再按原顺序继续。
 - 其他持久化错误仍然进入现有 fail-stop，不被误当成可重试错误。
 
-## 当前运行中的旧 daemon
-
-已经进入 fail-stop 的旧 daemon 没有保存可恢复的失败批次，也没有在线升级接口。
-实现不能伪造这段缺失状态。安装带修复的新 artifact 时，需要结束旧 daemon；这一次切换会
-结束它仍持有的旧 PTY。修复生效后，普通 App 重启仍不会结束由新 daemon 持有的 Run。
-
 ## 验收
 
 - 强制第一次输出持久化返回 `DiskFull`，随后恢复时，同一 Run 的完整输出和最终状态可重放。
@@ -37,9 +29,10 @@ AgentMux App 重启不会杀掉这个 daemon，所以旧错误会一直存在，
 - ctxmux 的公开 artifact 来自干净、精确 commit；AgentMux 校验 manifest、binary 和 SDK。
 - AgentMux 的 Core、原生 consumer、Desktop 和打包检查通过。
 
-## 固定结果
+## 当前实现
 
-修复后的 AgentMux 只消费 ctxmux clean commit
-`f89dabe70eba38d46992c320e40c9ebe2f09b5e5`。新的 manifest 指纹同时换了
-AgentMux runtime 目录身份；新版本不会误连仍记着旧错误的 daemon。旧 daemon 与它持有的
-PTY 不会被新版本冒充或接管，是否结束它由安装切换单独决定。
+AgentMux 固定消费 Protocol 13 clean commit
+`1603908a253162632e8812ceb9db19c3e416fea4`。ctxmux 在唯一 persistence actor 中只根据
+SQLite typed `DiskFull` 保留并重试当前 append/finalize mutation；既有有界队列继续施加背压，
+shutdown 可以中断等待，其他错误继续 fail-stop。AgentMux 只原子携带并校验同一来源的 manifest、
+SDK 与两个 binary，不增加 daemon 重启、备用数据库、错误文案匹配、兼容层或 fallback。

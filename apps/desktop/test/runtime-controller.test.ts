@@ -3,7 +3,11 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AgentMuxAgentSessionStore, AgentMuxRuntimeProjection } from '@agentmux/core'
+import type {
+  AgentMuxAgentContinuityResult,
+  AgentMuxAgentSessionStore,
+  AgentMuxRuntimeProjection
+} from '@agentmux/core'
 import type { WebContents } from 'electron'
 import type { AppConfig, SessionControl, SshHostConfig } from '../src/shared/contracts.js'
 import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics.js'
@@ -107,8 +111,25 @@ const runtimeFixture = vi.hoisted(() => {
       rows
     }))
     readonly statusAgent = vi.fn()
+    readonly agentSession = vi.fn(() => ({
+      kind: 'agent' as const,
+      agentSessionId: 'agent-1',
+      providerId: 'codex',
+      executorId: 'review',
+      hostId: 'local',
+      workspacePath: '/repo',
+      run: { runId: 'run-1' },
+      retiredRuns: [],
+      outputCursorBytes: 0,
+      createdAt: 1,
+      updatedAt: 2
+    }))
+    readonly agentSessions = vi.fn(() => [])
     readonly submitAgentPrompt = vi.fn(async () => {})
     readonly resumeAgent = vi.fn(async () => {})
+    readonly ensureAgentContinuity = vi.fn(async (): Promise<AgentMuxAgentContinuityResult> => {
+      throw new Error('Agent continuity fixture is not configured')
+    })
     readonly sessionTimeline = vi.fn(async (agentSessionId: string) => ({
       agentSessionId,
       revision: 0,
@@ -174,6 +195,7 @@ import { RuntimeController } from '../src/main/runtime-controller.js'
 const store: AgentMuxAgentSessionStore = {
   async load() { return [] },
   async loadRetiredRuns() { return [] },
+  async loadRetiredAgentSessions() { return [] },
   async compareAndSwap() {},
   async reserveLifecycle() {},
   async claimStaleLifecycles() { return [] },
@@ -567,6 +589,122 @@ describe('RuntimeController configuration transaction', () => {
     }
   )
 
+  it('delegates Agent recovery to Core continuity without inventing a prompt', async () => {
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const previous = agentStatusFixture()
+    const config: AppConfig = {
+      ...localConfig,
+      executors: {
+        review: {
+          label: 'Review Codex',
+          providerId: 'codex',
+          command: 'codex',
+          args: [],
+          env: {},
+          injectAgentMuxGuide: true
+        }
+      }
+    }
+    const resumedSession = {
+      ...previous.session,
+      run: { runId: 'run-2' },
+      retiredRuns: [previous.session.run],
+      updatedAt: 3
+    }
+    const { exitCode: _exitCode, ...previousRun } = previous.run
+    const resumedRun = {
+      ...previousRun,
+      runId: 'run-2',
+      state: 'running' as const,
+      pid: 43,
+      observedAt: 3
+    }
+    client.ensureAgentContinuity.mockResolvedValueOnce({
+      kind: 'resumed',
+      session: resumedSession,
+      previousRun: previous.session.run,
+      run: resumedSession.run,
+      evidence: {
+        kind: 'provider-native',
+        providerId: 'codex',
+        nativeSessionId: 'native-1',
+        previousRun: { kind: 'run-ended', state: 'exited', observedAt: 2 }
+      }
+    })
+    client.runtimeProjection.mockResolvedValueOnce({
+      hostId: 'local',
+      subjects: [{
+        subjectId: 'agent:local:agent-1',
+        kind: 'agent',
+        hostId: 'local',
+        workspacePath: '/repo',
+        providerId: 'codex',
+        executorId: 'review',
+        agentSession: resumedSession,
+        run: resumedRun
+      }]
+    })
+
+    await expect(controller.recoverSession({
+      kind: 'agent',
+      hostId: 'local',
+      agentSessionId: 'agent-1',
+      run: { runId: 'run-1' }
+    }, config)).resolves.toMatchObject({
+      kind: 'resumed',
+      session: { id: 'agent-1', control: { run: { runId: 'run-2' } } }
+    })
+    expect(client.ensureAgentContinuity).toHaveBeenCalledWith(expect.objectContaining({
+      agentSessionId: 'agent-1',
+      expectedRun: { runId: 'run-1' },
+      commandOverride: 'codex'
+    }))
+    expect(client.ensureAgentContinuity.mock.calls[0]?.[0]).not.toHaveProperty('prompt')
+    expect(client.statusAgent).not.toHaveBeenCalled()
+    expect(client.resumeAgent).not.toHaveBeenCalled()
+  })
+
+  it('returns Core continuity unavailability without projecting a replacement Run', async () => {
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const config: AppConfig = {
+      ...localConfig,
+      executors: {
+        review: {
+          label: 'Review Codex',
+          providerId: 'codex',
+          command: 'codex',
+          args: [],
+          env: {},
+          injectAgentMuxGuide: true
+        }
+      }
+    }
+    client.ensureAgentContinuity.mockResolvedValueOnce({
+      kind: 'unavailable',
+      agentSessionId: 'agent-1',
+      previousRun: { runId: 'run-1' },
+      reason: 'native-handle-unavailable',
+      evidence: { kind: 'run-missing', observedAt: 2 }
+    })
+
+    await expect(controller.recoverSession({
+      kind: 'agent',
+      hostId: 'local',
+      agentSessionId: 'agent-1',
+      run: { runId: 'run-1' }
+    }, config)).resolves.toEqual({
+      kind: 'unavailable',
+      agentSessionId: 'agent-1',
+      previousRun: { runId: 'run-1' },
+      reason: 'native-handle-unavailable',
+      evidence: { kind: 'run-missing', observedAt: 2 }
+    })
+    expect(client.runtimeProjection).not.toHaveBeenCalled()
+    expect(client.resumeAgent).not.toHaveBeenCalled()
+  })
+
   it('does not project a rebound Executor label onto a Session owned by another Provider', async () => {
     const controller = await configuredController()
     const client = runtimeFixture.FakeClient.instances[0]!
@@ -606,6 +744,28 @@ describe('RuntimeController configuration transaction', () => {
       label: 'review · Repository'
     })
     expect(client.sessionTimeline).toHaveBeenCalledWith('agent-1')
+  })
+
+  it('projects a stored Agent with a missing Run only as an exact recovery candidate', async () => {
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const stored = client.agentSession()
+    client.agentSessions.mockReturnValue([stored])
+    client.runtimeProjection.mockResolvedValue({ hostId: 'local', subjects: [] })
+
+    await expect(controller.snapshot(localConfig)).resolves.toMatchObject({
+      sessions: [],
+      timelines: {},
+      recoveryCandidates: [{
+        agentSessionId: stored.agentSessionId,
+        hostId: stored.hostId,
+        workspacePath: stored.workspacePath,
+        providerId: stored.providerId,
+        executorId: stored.executorId,
+        run: stored.run
+      }]
+    })
+    expect(client.sessionTimeline).not.toHaveBeenCalled()
   })
 
   it('rejects a Runtime snapshot whose Timeline belongs to another Session', async () => {
@@ -653,7 +813,11 @@ describe('RuntimeController configuration transaction', () => {
       .mockResolvedValueOnce({ hostId: 'local', subjects: [] })
     client.sessionTimeline.mockRejectedValueOnce(new Error('Agent Session no longer exists'))
 
-    await expect(controller.snapshot(localConfig)).resolves.toEqual({ sessions: [], timelines: {} })
+    await expect(controller.snapshot(localConfig)).resolves.toEqual({
+      sessions: [],
+      timelines: {},
+      recoveryCandidates: []
+    })
     expect(client.runtimeProjection).toHaveBeenCalledTimes(2)
     expect(client.sessionTimeline).toHaveBeenCalledOnce()
   })

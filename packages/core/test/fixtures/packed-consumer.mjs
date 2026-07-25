@@ -543,6 +543,135 @@ await waitFor('Codex Run exit', async () => (
   (await codexSecond.statusAgent(codex.agentSessionId)).run.state === 'exited'
 ))
 await codexSecond.dispose()
+
+const continuityClient = await connectLocalAgentMux()
+const continuityContender = await connectLocalAgentMux()
+const continuityTimelineBefore = await continuityClient.sessionTimeline(codex.agentSessionId)
+const continuityResults = await Promise.all([
+  continuityContender.ensureAgentContinuity({
+    agentSessionId: codex.agentSessionId,
+    expectedRun: codex.run,
+    operationId: 'packed-continuity-owner',
+    commandOverride: fakeCodex
+  }),
+  continuityClient.ensureAgentContinuity({
+    agentSessionId: codex.agentSessionId,
+    expectedRun: codex.run,
+    operationId: 'packed-continuity-contender',
+    commandOverride: fakeCodex
+  })
+])
+assert.deepEqual(
+  continuityResults.map((result) => result.kind).sort(),
+  ['conflict', 'resumed']
+)
+const continuityConflict = continuityResults.find((result) => result.kind === 'conflict')
+assert.equal(continuityConflict?.evidence.kind, 'hook-ingress-owner')
+const continuityResumed = continuityResults.find((result) => result.kind === 'resumed')
+assert.ok(continuityResumed)
+assert.equal(continuityResumed.session.agentSessionId, codex.agentSessionId)
+assert.notEqual(continuityResumed.run.runId, codex.run.runId)
+const continuityRuns = (await continuityClient.listRuns()).filter((run) => (
+  run.kind === 'agent' && run.agentSessionId === codex.agentSessionId
+))
+assert.deepEqual(continuityRuns.map((run) => run.runId), [continuityResumed.run.runId])
+const disconnectedContinuity = await connectLocalAgentMux()
+disconnectedContinuity.disconnect()
+await assert.rejects(
+  disconnectedContinuity.ensureAgentContinuity({
+    agentSessionId: codex.agentSessionId,
+    expectedRun: continuityResumed.run,
+    operationId: 'packed-continuity-transport-error',
+    commandOverride: fakeCodex
+  }),
+  (error) => error?.code === 'CTXMUX_DISCONNECTED'
+)
+assert.deepEqual(
+  (await continuityClient.listRuns()).filter((run) => (
+    run.kind === 'agent' && run.agentSessionId === codex.agentSessionId
+  )).map((run) => run.runId),
+  [continuityResumed.run.runId]
+)
+await disconnectedContinuity.dispose()
+const continuityAttachment = await continuityClient.reattachAgent(codex.agentSessionId, 0)
+const continuityEvents = []
+continuityClient.onEvent((event) => continuityEvents.push(event))
+await waitFor('promptless native continuity', () => (
+  `${continuityAttachment.attachment.replay.map((event) => event.data).join('')}` +
+  output(continuityEvents, continuityResumed.run.runId)
+).includes('codex-ready:'))
+await waitFor('promptless continuity Stop receipt', () => (
+  continuityClient.agentSession(codex.agentSessionId).terminalStopReceipt?.readyThroughByte !== undefined
+))
+const continuityTimelineAfter = await continuityClient.sessionTimeline(codex.agentSessionId)
+assert.deepEqual(
+  continuityTimelineAfter.items.filter((item) => item.kind === 'user_message').map((item) => item.content),
+  continuityTimelineBefore.items.filter((item) => item.kind === 'user_message').map((item) => item.content)
+)
+await continuityClient.submitAgentPrompt({
+  agentSessionId: codex.agentSessionId,
+  operationId: 'packed-continuity-exit',
+  prompt: 'exit'
+})
+await waitFor('promptless continuity Run exit', async () => (
+  (await continuityClient.statusAgent(codex.agentSessionId)).run.state === 'exited'
+))
+await continuityClient.dispose()
+await continuityContender.dispose()
+
+const resumeRollbackDelegate = new AgentMuxFileAgentSessionStore()
+let failedResumeReservation = null
+let failedResumeRetiredRuns = []
+const resumeRollbackStore = {
+  load: async () => await resumeRollbackDelegate.load(),
+  loadRetiredRuns: async () => await resumeRollbackDelegate.loadRetiredRuns(),
+  loadRetiredAgentSessions: async () => await resumeRollbackDelegate.loadRetiredAgentSessions(),
+  compareAndSwap: async (...args) => await resumeRollbackDelegate.compareAndSwap(...args),
+  reserveLifecycle: async (reservation) => await resumeRollbackDelegate.reserveLifecycle(reservation),
+  claimStaleLifecycles: async (claim) => await resumeRollbackDelegate.claimStaleLifecycles(claim),
+  retireRuns: async (runs) => await resumeRollbackDelegate.retireRuns(runs),
+  loadTimeline: async (agentSessionId) => await resumeRollbackDelegate.loadTimeline(agentSessionId),
+  applyTimelineMutation: async (...args) => await resumeRollbackDelegate.applyTimelineMutation(...args),
+  async commitLifecycle(reservation, next) {
+    if (reservation.kind === 'resume') throw new Error('packed resume commit failed')
+    await resumeRollbackDelegate.commitLifecycle(reservation, next)
+  },
+  async releaseLifecycle(reservation, retiredRuns) {
+    if (reservation.kind === 'resume') {
+      failedResumeReservation = reservation
+      failedResumeRetiredRuns = retiredRuns ?? []
+      throw new Error('packed resume rollback receipt failed')
+    }
+    await resumeRollbackDelegate.releaseLifecycle(reservation, retiredRuns)
+  }
+}
+const resumeRollbackClient = await connectLocalAgentMux({ store: resumeRollbackStore })
+const runsBeforeResumeRollback = new Set((await resumeRollbackClient.listRuns()).map((run) => run.runId))
+let resumeRollbackError = null
+try {
+  await resumeRollbackClient.ensureAgentContinuity({
+    agentSessionId: codex.agentSessionId,
+    expectedRun: continuityResumed.run,
+    operationId: 'packed-continuity-resume-commit-failure',
+    commandOverride: fakeCodex
+  })
+} catch (error) {
+  resumeRollbackError = error
+}
+assert.ok(resumeRollbackError instanceof AggregateError)
+assert.ok(resumeRollbackError.errors.some((error) => `${error}`.includes('packed resume commit failed')))
+assert.ok(resumeRollbackError.errors.some((error) => `${error}`.includes('packed resume rollback receipt failed')))
+const rollbackRuns = (await resumeRollbackClient.listRuns()).filter((run) => !runsBeforeResumeRollback.has(run.runId))
+assert.equal(rollbackRuns.length, 1)
+assert.notEqual(rollbackRuns[0].state, 'running')
+assert.equal(
+  resumeRollbackClient.agentSession(codex.agentSessionId).run.runId,
+  continuityResumed.run.runId
+)
+assert.ok(failedResumeReservation)
+await resumeRollbackDelegate.releaseLifecycle(failedResumeReservation, failedResumeRetiredRuns)
+await resumeRollbackClient.dispose()
+
 const resumePrompt = 'packed native resume prompt'
 const resumeResult = JSON.parse((await cli([
   'session', 'resume', codex.agentSessionId, '--text', resumePrompt
@@ -631,6 +760,21 @@ await codexThird.dispose()
 await cli(['session', 'stop', resumed.agentSessionId])
 const codexStopped = await connectLocalAgentMux()
 assert.deepEqual(codexStopped.agentSessions(), [])
+const retiredContinuity = await codexStopped.ensureAgentContinuity({
+  agentSessionId: resumed.agentSessionId,
+  expectedRun: resumed.run,
+  operationId: 'packed-continuity-retired'
+})
+assert.deepEqual({
+  ...retiredContinuity,
+  evidence: { kind: retiredContinuity.evidence.kind }
+}, {
+  kind: 'retired',
+  agentSessionId: resumed.agentSessionId,
+  previousRun: resumed.run,
+  evidence: { kind: 'user-retired' }
+})
+assert.equal(typeof retiredContinuity.evidence.observedAt, 'number')
 await codexStopped.dispose()
 
 const literalPromptClient = await connectLocalAgentMux()
@@ -887,7 +1031,7 @@ const acpSession = {
   executorId: 'codex',
   hostId: 'local',
   workspacePath: process.cwd(),
-  run: { runId: 'acp-synthetic-run' },
+  run: { runId: '00000000-0000-4000-8000-000000000001' },
   retiredRuns: [],
   hookBindingId: 'acp-synthetic-binding',
   hookToken: 'acp-synthetic-token',
@@ -901,7 +1045,19 @@ const resolvedAcp = JSON.parse((await cli([
   'session', 'resolve', 'acp-native', 'packed-acp', 'packed-native'
 ])).stdout)
 assert.equal(resolvedAcp.result.session.agentSessionId, acpSession.agentSessionId)
-await acpStore.compareAndSwap(acpSession, null)
+const missingStopClient = await connectLocalAgentMux()
+await missingStopClient.stopAgent(acpSession.agentSessionId, acpSession.run)
+assert.equal((await missingStopClient.ensureAgentContinuity({
+  agentSessionId: acpSession.agentSessionId,
+  expectedRun: acpSession.run,
+  operationId: 'packed-missing-run-retirement'
+})).kind, 'retired')
+assert.equal((await missingStopClient.ensureAgentContinuity({
+  agentSessionId: 'another-agent-session',
+  expectedRun: acpSession.run,
+  operationId: 'packed-cross-session-retirement'
+})).kind, 'unavailable')
+await missingStopClient.dispose()
 
 const crashWorker = spawnOwned(process.execPath, [lifecycleCrashFixture], {
   cwd: process.cwd(),
@@ -956,6 +1112,7 @@ process.stdout.write(`${JSON.stringify({
   stubbornPids,
   codexSemanticSession: codex.agentSessionId,
   codexNativeSession: 'native-codex-semantic-1',
+  semanticContinuity: 'conflict-resumed-retired',
   terminalHandshake: 'query-ack-prompt',
   stopEpochReadiness: [
     'missing-stop-rejected-before-payload',

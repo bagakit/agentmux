@@ -1,36 +1,39 @@
 # CtxMux Local cutover
 
-状态：T-020 Local + Codex 已完成；T-018 负责最终 Benchmark 与独立 Review，T-021 负责 Remote/SSH
+状态：Local Runtime 固定在 Protocol 13；Remote/SSH 仍不支持。
 ## 固定消费身份
 
 AgentMux 当前只消费 CtxMux 的 exact clean artifact contract：
 
 | 字段 | 值 |
 | --- | --- |
-| commit | `f89dabe70eba38d46992c320e40c9ebe2f09b5e5` |
-| tree | `37632c41c4aae42ba40f33ebe9c54fab13d17c44` |
-| protocol | `9` |
+| commit | `1603908a253162632e8812ceb9db19c3e416fea4` |
+| tree | `464f239190234c8369799dca06a630b3b48f5cca` |
+| protocol | `13` |
 | platform | `darwin-arm64` |
-| manifest SHA-256 | `ac53b1e43e67a73841d4f6cfbd272628e47f3731f29772dbb86bfbfce77935de` |
-| SDK tarball SHA-256 | `1e14be5fdb1193ddce4a266b03d2a8c72bad35e0d88838d504566c438b279b99` |
-| `ctxmux` SHA-256 | `d49d8c0ca268f3257ee499cedd41035c10fcd05d7e2255ea9a0da204fad6e021` |
-| `ctxmuxd` SHA-256 | `41e76b10da84a9ee018a820bab31c7c6c87ff424a7cc1eff05060cc533963132` |
+| manifest SHA-256 | `2629d6d0809d4b85f4b475cc0d00ee677c4f17861b1fc904f2dabd8f18592bca` |
+| SDK tarball SHA-256 | `172966940a9f537724afeb9b334f2a225ece3db1a102c4d8e90e154b8cb5bf3d` |
+| `ctxmux` SHA-256 | `38083b21656327212c07789dcd199b7c4520a8561006841d76be9a2c23f9cb39` |
+| `ctxmuxd` SHA-256 | `c4140151e006c9e775b90c7cb7bdb37d08b1122f7f7a37762c841294633f7656` |
 
 AgentMux 不消费浮动分支名，而是固定上表中的完整 commit、tree 与 artifact hash。
 
-CtxMux 自己的 `npm run test:local-consumer` 已在 exact commit 上通过，receipt 为：
-
-```text
-local artifact consumer passed commit=f89dabe70eba38d46992c320e40c9ebe2f09b5e5 target=aarch64-apple-darwin
-```
-
-AgentMux vendor 已由 `f89dabe` clean build 整套替换。
+AgentMux vendor 只接受 manifest 声明 `worktree_clean: true` 的同一组 manifest、SDK tarball、
+`ctxmux` 与 `ctxmuxd`，不允许跨 commit 或 protocol 混用。
 
 ## 消费方式
 
 `packages/core/vendor/ctxmux/darwin-arm64` 是唯一 Artifact 输入，内容只有 CtxMux manifest、SDK tarball 与两个 binaries。Core build 先验证 manifest、platform、mode、size 与 SHA-256，再从 tarball 私有 bundle SDK 到 `CtxmuxRunAdapter`。
 
-Local endpoint 不是可选 Backend。Core 不接受外部 socket/state path；Darwin 固定使用长度有界的 `/private/tmp/amx-<uid>-<artifact-id>/`，不受调用进程 `TMPDIR` 长度影响，socket 当前为 57 bytes。Adapter 创建并复核 `0700` runtime/state 目录，启动前复核 manifest 整体 digest、binary bytes/mode 与 `ctxmuxd --version`，然后只从该随包绝对路径启动 daemon。首次启动通过 caller-owned fd 3 接收 `ctxmux.daemon-ready.v1`，只有 inherited receipt 的 daemon instance 与 public handshake 完全相等才写 owner receipt；socket race、PID、sleep 或 filesystem-only receipt 都不能证明所启动的 child。重连时响应 peer 还必须匹配 `0600` owner receipt 中的 full commit/tree/manifest/binary/path/endpoint 和 daemon instance；仅 protocol 9 相同不足以被声明为该 build。
+Local endpoint 不是可选 Backend。Core 不接受外部 socket/state path；Darwin 固定使用长度有界的 `/private/tmp/amx-<uid>-<artifact-id>/`，不受调用进程 `TMPDIR` 长度影响，socket 当前为 57 bytes。Adapter 创建并复核 `0700` runtime/state 目录，启动前复核 manifest 整体 digest、binary bytes/mode 与 `ctxmuxd --version`，然后只从该随包绝对路径启动 daemon。首次启动通过 caller-owned fd 3 接收 `ctxmux.daemon-ready.v1`，只有 inherited receipt 的 daemon instance 与 public `runtimeInfo` 完全相等才写 owner receipt；socket race、PID、sleep 或 filesystem-only receipt 都不能证明所启动的 child。重连时响应 peer 还必须匹配 `0600` owner receipt 中的 full commit/tree/manifest/binary/path/endpoint、daemon instance、runtime lineage 与 runtime build。仅 protocol 相同不足以被声明为该 build。
+
+Adapter 先用 unfenced diagnostics client 读取一次原始 `runtimeInfo()` 并核对 owner receipt，随后建立
+同时绑定完整 `expectedRuntimeIdentity` 与 required capabilities 的 business client。每次 public dispatch
+都在承载该业务帧的同一连接上先比较 Runtime identity，再直接要求 `native.start: 1`、`native.recoverable_input: 1`、
+`native.recoverable_stop: 1`、`services.persistent_state: 1` 与
+`services.planned_exec_upgrade_continuity: 1`。Adapter 还要求 `state_dir` lineage、
+`ctxmuxd/0.1.0`、`macos/aarch64`；缺一项即在业务帧发送前失败关闭，不做 runtimeInfo preflight、
+重试、错误重映射或 capability fallback。
 
 AgentMux 启动 ctxmuxd 时建立 terminal-capable 基线：`TERM=xterm-256color`、`COLORTERM=truecolor`，并删除父宿主遗留的 `NO_COLOR`、`FORCE_COLOR=0` 与 `CLICOLOR=0`。Provider/调用方仍可通过 Run env 显式覆盖终端设置。这样既保留 Codex ANSI/truecolor，也让 Core 能从同一条权威 raw PTY byte stream 重放当前 terminal screen。
 
@@ -84,7 +87,7 @@ CtxMux 不允许对已经自然退出的 Run 再调用 Stop。Provider-native Re
 
 Hook ingress 使用每次 lifecycle operation 派生的有界 binding identity；等 CtxMux 返回 daemon-issued RunId 且 Agent Session 已持久化后才把事件绑定到 exact Run。Hook command 为每次投递生成稳定 receipt id；已绑定 Run 的 HTTP ingress 只有在 owner persistence 成功后才返回 `204`，失败返回非 2xx 供同一 receipt 重试，关闭时排空已接受的事件。Core Client/CLI 重开时从同一 Store 恢复 endpoint binding，Hook/permission receipt 仍必须匹配当前 Agent Session、Provider 与 Run。
 
-File Store version 2 是 Agent Session、current Run、retired Run 与 lifecycle reservation 的唯一跨进程真相。Create/Resume/Stop 通过文件锁、CAS、带 owner/PID/lease 的 reservation 和 CtxMux Run spec 中的 lifecycle operation id 提交；Owner crash 后，新 Client 只按 public `list/status/stop` 回收匹配 operation 的未提交 Run。自然退出的 Run 只记录 retire，不伪造 Stop。没有进程内 Map 充当第二提交权威，也没有旧 Store migration/fallback。
+File Store version 3 是 Agent Session、current Run、retired Run、Semantic Session retirement 与 lifecycle reservation 的唯一跨进程真相。Create/Resume/Stop 通过文件锁、CAS、带 owner/PID/lease 的 reservation 和 CtxMux Run spec 中的 lifecycle operation id 提交；Stop reservation 在 dispatch 前保存完整 `{daemonInstance, operationKey, runId}`，并只通过 Protocol 13 recoverable Stop 路径完成。Owner crash 后，新 Client 只按 public `list/status/attachRecoverableStop` 收敛原 operation。自然退出的 Run 只记录 retire，不伪造 Stop。没有进程内 Map 充当第二提交权威，也没有旧 Store migration/fallback；version 2 直接拒绝。
 
 Codex 终端输入不是“写入成功即 ready”。初次启动先回应 Codex terminal capability query；后续 prompt 必须原子消费 exact Run 的一个未消费 Stop receipt。Core 从 CtxMux public Output byte 0 开始，以有界 `@xterm/headless` terminal emulator 连续重放 retained Replay 与 live bytes；任何 Gap、重叠或非连续 range 都失败关闭。Stop readiness 只在当前 cursor 所属 active composer 确实为空且 screen 已重放到 Stop cursor 后成立。两阶段 `payload` + `CR` 中，Core 先写 payload，随后只在当前 screen/cursor 的 composer 精确等于 payload 且 output 已越过写入前 boundary 时发送 CR。Codex 的局部更新不要求重复绘制左侧 `›`，但 assistant 行、历史全屏 redraw 或相同文本 substring 都不能冒充当前 composer。每阶段使用确定性 CtxMux Input operation id 和累计 input cursor，因而 payload/submit 任一点 crash 后都能由新 Client 恢复且不重复输入。Provider-native resume 的第一条 prompt 直接进入 native resume argv，不参与 startup composer race。
 
@@ -112,7 +115,7 @@ CLI 同时是受管 Agent 可自发现的公共控制面，而不只是给人手
 
 Agent-friendly 不是多写一页帮助，而是让受管 Agent 能在一次发现后闭环执行：从 injected caller context 确定“我在哪”，从只读命令枚举 workspace、View、Region 与 Agent，用显式 target 发出原子 mutation，再从 JSON receipt 读取新 ID 和下一步。Desktop Composition 因此把 layout primitive 与 Agent lifecycle 分开：先在当前 View 中建立有方向的 Region，再在该位置启动指定 Provider，并在可交互后返回稳定 Agent Session id。`switch` 继续只负责 focus，Core Session CLI 继续只负责 Agent lifecycle；不能用 UI 焦点猜 target，也不能把 computer-use 当成缺少公共命令时的 fallback。
 
-checkout-external packed consumer 会在真实 CtxMux PTY 内执行 `agentmux --version`，并由 fake Codex 复核相同 managed CLI environment，证明这不是仓库 PATH 或全局安装造成的偶然可用。npm Package 的 CLI 使用其声明的 Node 22 host；Desktop Package 则把同一入口物化为只调用 `.app` 自带 Electron Node mode 的 launcher，打包 smoke 在 `PATH=/usr/bin:/bin`、没有外部 Node 的条件下直接执行它，不改变用户普通 `node` 解析。
+checkout-external packed consumer 会在真实 CtxMux PTY 内执行 `agentmux --version`，并由 fake Codex 复核相同 managed CLI environment，证明这不是仓库 PATH 或全局安装造成的偶然可用。npm Package 的 CLI 使用其声明的 Node 24 host；Desktop Package 则把同一入口物化为只调用 `.app` 自带 Electron Node mode 的 launcher，打包 smoke 在 `PATH=/usr/bin:/bin`、没有外部 Node 的条件下直接执行它，不改变用户普通 `node` 解析。
 
 Desktop 的 Terminal View 不再直接一对一占有 Core Attachment。Main Process 以 exact `(hostId, runId)` 串行化 attach/detach，为第一个 View 建立一个 retained Core Attachment，为后续 View 通过 `readRunReplay` 获取各自 byte cursor 的 Replay，并给每个 View 返回 opaque `attachmentId` lease；只有最后一份 lease 释放才调用 `releaseRunAttachment(exact RunRef)`。Agent Session 的多 View acknowledgement 取最大 cursor，迟到的慢 View 不能回退持久进度。因此双 Pane、Terminal/Activity 快速切换和 Renderer 消失不会把一个 View 的 cleanup 错当成另一个 View 的 Attachment 生命周期。
 
@@ -124,8 +127,11 @@ Interrupt 使用 retained PTY 上的 `TIOCSIG`。Stop 的 macOS public POSIX imp
 
 本项目接受 CtxMux 的 practical POSIX contract：daemon 永不提权；只支持同一用户本地运行；即时重验 session；zombie leader 作为 incarnation anchor；异常失败关闭；不宣称多租户隔离或数学零风险。为消除这条窄窗而引入私有 entitlement/API 或平台进程容器，成本和维护熵显著高于本地开发场景的实际风险。
 
-## 剩余闭环
+## 剩余边界
 
-Local cutover、Codex/identity/CLI、View Resolver、跨进程 lifecycle、Hook/resume、Stop-epoch readiness、prompt crash recovery、短 endpoint、package smoke、View lease broker 与受管 Agent CLI 自发现已经进入同一 ctxmux Runtime 并通过 T-020 Gate。
+Protocol 13 当前固定 artifact 在 ctxmux 的单一 persistence owner 内按 SQLite typed `DiskFull`
+保留并有界重试同一个 mutation；队列、顺序、Replay 与终态仍由 ctxmux 持有。AgentMux 不增加
+daemon 重启、备用状态库、错误字符串分类、兼容层或 fallback。
 
-T-018 只在最终 candidate 上重冻 Benchmark、完成独立 Review 并修复 release-blocking finding；它不能用旧自建 daemon 或旧 candidate 的结果替代。Remote/SSH 继续由 T-021 通过 ctxmux public Remote 合同关闭。两个任务都不得重新引入 Run owner、Backend Selector、wire fork、fallback 或 compatibility。
+现有正式 Benchmark 结果不能外推为 Protocol 13 的测量结果。Remote/SSH 也继续保持 typed unsupported，
+直到 ctxmux public Remote 合同交付；AgentMux 不私造 Remote wire、artifact ingress 或第二 Runtime owner。

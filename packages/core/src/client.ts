@@ -19,7 +19,8 @@ import {
   CtxmuxRunAdapter,
   type CtxmuxAdapterDataEvent,
   type CtxmuxAdapterEvent,
-  type CtxmuxAdapterRun
+  type CtxmuxAdapterRun,
+  type CtxmuxAdapterStopOperation
 } from './ctxmux-run-adapter.js'
 import { AgentMuxError } from './errors.js'
 import {
@@ -30,6 +31,11 @@ import {
   AgentMuxAgentSessionRegistry,
   type AgentMuxAgentSessionLookup
 } from './agent-session-registry.js'
+import {
+  decideAgentSessionContinuity,
+  type AgentMuxAgentContinuityInput,
+  type AgentMuxAgentContinuityResult
+} from './agent-session-continuity.js'
 import { AgentHookServer, type AgentHookBinding } from './hook-server.js'
 import { projectAgentMuxRuntimeSubjects, type AgentMuxRuntimeProjection } from './runtime.js'
 import { agentTimelineMutationFromAcpEvent } from './session-timeline.js'
@@ -102,6 +108,10 @@ export type AgentMuxAgentResumeInput = {
   rows?: number
 }
 
+type AgentMuxAgentResumeOperationInput = Omit<AgentMuxAgentResumeInput, 'prompt'> & {
+  prompt?: string
+}
+
 export type AgentMuxAgentPromptInput = {
   agentSessionId: string
   operationId: string
@@ -158,7 +168,7 @@ function hookBindingIdentity(operationId: string): string {
 }
 
 function agentLifecycleOperationIdentity(
-  kind: 'create' | 'resume',
+  kind: 'create' | 'resume' | 'stop',
   agentSessionId: string,
   requestedOperationId: string
 ): string {
@@ -278,6 +288,7 @@ export class AgentMuxClient {
   private readonly hookBindings = new Map<string, AgentHookBinding>()
   private readonly agentInputCursors = new Map<string, number>()
   private readonly agentInputTails = new Map<string, Promise<void>>()
+  private readonly agentContinuityTails = new Map<string, Promise<void>>()
   private readonly terminalStopReadinessCancels = new Map<string, () => void>()
 
   constructor(options: AgentMuxClientOptions = {}) {
@@ -449,7 +460,7 @@ export class AgentMuxClient {
       ctxmux: {
         version: '0.1.0',
         protocolVersion: identity.protocolVersion,
-        sourceCommit: 'f89dabe70eba38d46992c320e40c9ebe2f09b5e5',
+        sourceCommit: '1603908a253162632e8812ceb9db19c3e416fea4',
         artifactPlatform: 'darwin-arm64',
         ready: true,
         capabilities: {
@@ -596,7 +607,7 @@ export class AgentMuxClient {
 
   async stopTerminal(ref: AgentMuxRunRef): Promise<void> {
     this.requireConnected()
-    await this.kernel.stop(ref.runId)
+    await this.kernel.stop(await this.kernel.prepareStop(ref.runId))
     this.runPids.delete(ref.runId)
     this.publisher.publish({
       type: 'run-removed',
@@ -749,11 +760,49 @@ export class AgentMuxClient {
     }
   }
 
-  async resumeAgent(input: AgentMuxAgentResumeInput): Promise<AgentMuxAgentSession> {
+  async ensureAgentContinuity(
+    input: AgentMuxAgentContinuityInput
+  ): Promise<AgentMuxAgentContinuityResult> {
     this.requireConnected()
-    const current = this.requireAgentSession(input.agentSessionId)
+    safeId(input.agentSessionId, 'Agent Session id')
+    safeId(input.operationId, 'Agent continuity operation id')
+    const previous = this.agentContinuityTails.get(input.agentSessionId) ?? Promise.resolve()
+    let result!: AgentMuxAgentContinuityResult
+    const operation = previous.catch(() => {}).then(async () => {
+      result = await this.performAgentContinuity(input)
+    })
+    const tail = operation.then(() => {}, () => {})
+    this.agentContinuityTails.set(input.agentSessionId, tail)
+    try {
+      await operation
+      return result
+    } finally {
+      if (this.agentContinuityTails.get(input.agentSessionId) === tail) {
+        this.agentContinuityTails.delete(input.agentSessionId)
+      }
+    }
+  }
+
+  async resumeAgent(input: AgentMuxAgentResumeInput): Promise<AgentMuxAgentSession> {
     const prompt = input.prompt.trim()
     if (!prompt) throw new AgentMuxError('Agent resume prompt cannot be empty.', 'INVALID_AGENT_PROMPT')
+    return await this.resumeAgentRun({ ...input, prompt })
+  }
+
+  private async resumeAgentRun(
+    input: AgentMuxAgentResumeOperationInput,
+    expectedRun?: AgentMuxRunRef,
+    knownCapability?: AgentCapabilitySnapshot
+  ): Promise<AgentMuxAgentSession> {
+    this.requireConnected()
+    const current = this.requireAgentSession(input.agentSessionId)
+    if (expectedRun && !sameRun(current.run, expectedRun)) {
+      throw new AgentMuxError(
+        'Agent Session changed before native resume.',
+        'STALE_AGENT_SESSION'
+      )
+    }
+    const prompt = input.prompt?.trim()
     const lifecycleOperationId = agentLifecycleOperationIdentity(
       'resume',
       current.agentSessionId,
@@ -768,6 +817,7 @@ export class AgentMuxClient {
     let hookBinding: AgentHookBinding | null = null
     let persisted: AgentMuxStoredAgentSession | null = null
     let abandonedRun: AgentMuxRunRef | null = null
+    let operationError: unknown = null
     try {
       if (!current.nativeHandle || current.nativeHandle.kind !== 'provider') {
         throw new AgentMuxError('Provider-native resume requires a verified provider session handle.', 'AGENT_RESUME_UNAVAILABLE')
@@ -783,14 +833,14 @@ export class AgentMuxClient {
         throw new AgentMuxError('Cannot resume while the original Run is still running.', 'AGENT_SESSION_STILL_RUNNING')
       }
       const provider = this.providers.get(current.providerId)
-      const capability = await this.probeAgent(current.providerId, input.commandOverride)
+      const capability = knownCapability ?? await this.probeAgent(current.providerId, input.commandOverride)
       if (!capability.installed) {
         throw new AgentMuxError(`${provider.label} is not installed on this host.`, 'AGENT_NOT_FOUND')
       }
       const plan = provider.buildResumeLaunch({
         workspacePath: current.workspacePath,
         nativeHandle: current.nativeHandle,
-        prompt,
+        ...(prompt ? { prompt } : {}),
         args: input.args ?? [],
         env: input.env ?? {},
         ...(input.commandOverride === undefined ? {} : { commandOverride: input.commandOverride })
@@ -868,17 +918,175 @@ export class AgentMuxClient {
       this.runPids.set(run.runId, run.pid)
       this.publisher.publish({ type: 'agent-session', session: cloneSession(readySession) })
       this.publisher.publishRunState(projectRun(run, readySession), readySession.agentSessionId)
-      await this.recordPromptAfterSideEffect(
-        readySession,
-        `prompt:${lifecycleOperationId}`,
-        'Resume prompt',
-        prompt,
-        Date.now()
-      )
+      if (prompt) {
+        await this.recordPromptAfterSideEffect(
+          readySession,
+          `prompt:${lifecycleOperationId}`,
+          'Resume prompt',
+          prompt,
+          Date.now()
+        )
+      }
       return cloneSession(readySession)
+    } catch (error) {
+      operationError = error
+      throw error
     } finally {
-      if (hookBinding && ![...this.hookBindings.values()].includes(hookBinding)) await hookBinding.close()
-      await this.registry.releaseLifecycle(reservation, abandonedRun ? [abandonedRun] : [])
+      const cleanupErrors: unknown[] = []
+      if (hookBinding && ![...this.hookBindings.values()].includes(hookBinding)) {
+        try {
+          await hookBinding.close()
+        } catch (error) {
+          cleanupErrors.push(error)
+        }
+      }
+      try {
+        await this.registry.releaseLifecycle(reservation, abandonedRun ? [abandonedRun] : [])
+      } catch (error) {
+        cleanupErrors.push(error)
+      }
+      if (cleanupErrors.length > 0) {
+        throw new AggregateError(
+          operationError === null ? cleanupErrors : [operationError, ...cleanupErrors],
+          'Resume lifecycle cleanup failed.'
+        )
+      }
+    }
+  }
+
+  private async performAgentContinuity(
+    input: AgentMuxAgentContinuityInput
+  ): Promise<AgentMuxAgentContinuityResult> {
+    let current: AgentMuxStoredAgentSession | null = null
+    try {
+      current = this.registry.get(input.agentSessionId)
+    } catch (error) {
+      if (!(error instanceof AgentMuxError) || error.code !== 'UNKNOWN_AGENT_SESSION') throw error
+    }
+
+    if (current && !sameRun(current.run, input.expectedRun)) {
+      return {
+        kind: 'conflict',
+        agentSessionId: input.agentSessionId,
+        previousRun: { ...input.expectedRun },
+        currentRun: { ...current.run },
+        reason: 'session-run-changed',
+        evidence: { kind: 'agent-session-store' }
+      }
+    }
+
+    let run: AgentMuxRun | null = null
+    if (current) {
+      try {
+        const observed = await this.kernel.status(current.run.runId)
+        this.assertAgentRun(current, observed)
+        run = projectRun(observed, current)
+      } catch (error) {
+        if (!(error instanceof AgentMuxError) || error.code !== 'CTXMUX_run_not_found') throw error
+      }
+    }
+
+    const catalog = current ? this.providers.get(current.providerId).catalog : null
+    const handle = current?.nativeHandle
+    const canProbe = catalog?.resumeStrategy.kind === 'provider-native' &&
+      handle?.kind === 'provider' &&
+      handle.providerId === current?.providerId &&
+      (catalog.resumeStrategy.locator !== 'transcript-path' || Boolean(handle.transcriptPath))
+    const capability = canProbe
+      ? await this.probeAgent(current!.providerId, input.commandOverride)
+      : null
+    const decision = decideAgentSessionContinuity({
+      agentSessionId: input.agentSessionId,
+      hostId: 'local',
+      expectedRun: input.expectedRun,
+      observedAt: Date.now(),
+      session: current ? cloneSession(current) : null,
+      retirement: (() => {
+        const retired = this.registry.retiredAgentSession(
+          input.agentSessionId,
+          input.expectedRun
+        )
+        return retired ? structuredClone(retired) : null
+      })(),
+      run,
+      catalog,
+      capability
+    })
+    if (decision.kind !== 'resume') return decision
+
+    try {
+      await this.requireHookIngressOwner()
+    } catch (error) {
+      if (error instanceof AgentMuxError && error.code === 'HOOK_INGRESS_BUSY') {
+        return {
+          kind: 'conflict',
+          agentSessionId: input.agentSessionId,
+          previousRun: { ...input.expectedRun },
+          reason: 'lifecycle-busy',
+          evidence: { kind: 'hook-ingress-owner' }
+        }
+      }
+      throw error
+    }
+
+    try {
+      const session = await this.resumeAgentRun({
+        agentSessionId: input.agentSessionId,
+        operationId: input.operationId,
+        ...(input.args === undefined ? {} : { args: input.args }),
+        ...(input.env === undefined ? {} : { env: input.env }),
+        ...(input.commandOverride === undefined ? {} : { commandOverride: input.commandOverride }),
+        ...(input.cols === undefined ? {} : { cols: input.cols }),
+        ...(input.rows === undefined ? {} : { rows: input.rows })
+      }, input.expectedRun, capability ?? undefined)
+      return {
+        kind: 'resumed',
+        session,
+        previousRun: { ...input.expectedRun },
+        run: { ...session.run },
+        evidence: {
+          kind: 'provider-native',
+          providerId: decision.nativeHandle.providerId,
+          nativeSessionId: decision.nativeHandle.sessionId,
+          previousRun: decision.evidence
+        }
+      }
+    } catch (error) {
+      if (
+        error instanceof AgentMuxError &&
+        (
+          error.code === 'AGENT_SESSION_BUSY' ||
+          error.code === 'STALE_AGENT_SESSION' ||
+          error.code === 'UNKNOWN_AGENT_SESSION'
+        )
+      ) {
+        if (error.code !== 'AGENT_SESSION_BUSY') await this.registry.load('local')
+        const retired = this.registry.retiredAgentSession(
+          input.agentSessionId,
+          input.expectedRun
+        )
+        if (retired) {
+          return {
+            kind: 'retired',
+            agentSessionId: input.agentSessionId,
+            previousRun: { ...input.expectedRun },
+            evidence: { kind: 'user-retired', observedAt: retired.observedAt }
+          }
+        }
+        let latest: AgentMuxStoredAgentSession | null = null
+        try {
+          latest = this.registry.get(input.agentSessionId)
+        } catch {}
+        return {
+          kind: 'conflict',
+          agentSessionId: input.agentSessionId,
+          previousRun: { ...input.expectedRun },
+          ...(latest ? { currentRun: { ...latest.run } } : {}),
+          reason: 'lifecycle-busy',
+          evidence: { kind: 'agent-session-store' }
+        }
+      }
+      throw error
     }
   }
 
@@ -968,22 +1176,49 @@ export class AgentMuxClient {
         'STALE_AGENT_SESSION'
       )
     }
+    const lifecycleOperationId = agentLifecycleOperationIdentity(
+      'stop',
+      agentSessionId,
+      randomUUID()
+    )
+    const stopOperation: CtxmuxAdapterStopOperation = await this.kernel.prepareStop(
+      expectedRun.runId,
+      lifecycleOperationId
+    )
     const reservation = await this.registry.reserveExisting(
       'stop',
       agentSessionId,
       expectedRun,
-      randomUUID()
+      lifecycleOperationId,
+      stopOperation
     )
+    let preserveReservation = false
     try {
-      const run = await this.requireCurrentAgentRun(session)
-      if (run.state.type === 'running') await this.stopRunningRun(session.run.runId)
-      else await this.releaseRunAttachment(session.run)
+      let run: CtxmuxAdapterRun | null = null
+      try {
+        run = await this.requireCurrentAgentRun(session)
+      } catch (error) {
+        if (!(error instanceof AgentMuxError) || error.code !== 'STALE_AGENT_SESSION_BINDING') {
+          throw error
+        }
+      }
+      if (run?.state.type === 'running') {
+        try {
+          await this.kernel.stop(stopOperation)
+        } catch (error) {
+          preserveReservation = error instanceof AgentMuxError && error.detail === 'unknown'
+          throw error
+        }
+        preserveReservation = true
+      }
+      else if (run) await this.releaseRunAttachment(session.run)
       await this.hookBindings.get(session.run.runId)?.close()
       this.hookBindings.delete(session.run.runId)
       const cleanup = await Promise.allSettled([
         this.acp.unbind(agentSessionId),
         this.registry.commitLifecycle(reservation, null)
       ])
+      preserveReservation ||= cleanup[1]?.status === 'rejected'
       if (cleanup[1]?.status === 'fulfilled') {
         this.runPids.delete(session.run.runId)
         this.agentInputCursors.delete(agentSessionId)
@@ -998,7 +1233,7 @@ export class AgentMuxClient {
       const errors = cleanup.flatMap((result) => result.status === 'rejected' ? [result.reason] : [])
       if (errors.length > 0) throw new AggregateError(errors, 'Agent stopped but Agent Session cleanup failed.')
     } finally {
-      await this.registry.releaseLifecycle(reservation)
+      if (!preserveReservation) await this.registry.releaseLifecycle(reservation)
     }
   }
 
@@ -1016,14 +1251,23 @@ export class AgentMuxClient {
     if (reservations.length === 0) return
     const runs = await this.kernel.list()
     for (const reservation of reservations) {
-      let retiredRuns: AgentMuxRunRef[] = []
-      if (reservation.kind !== 'stop') {
-        const candidates = runs.filter(
-          (run) => run.lifecycleOperationId === reservation.operationId
-        )
-        for (const run of candidates) await this.retireUncommittedRun(run.runId)
-        retiredRuns = candidates.map((run) => runRef(run.runId))
+      if (reservation.kind === 'stop') {
+        let run: CtxmuxAdapterRun | null = null
+        try {
+          run = await this.kernel.status(reservation.expectedRun.runId)
+        } catch (error) {
+          if (!(error instanceof AgentMuxError) || error.code !== 'CTXMUX_run_not_found') throw error
+        }
+        if (run?.state.type === 'running') await this.kernel.stop(reservation.stopOperation)
+        await this.registry.commitLifecycle(reservation, null)
+        continue
       }
+      let retiredRuns: AgentMuxRunRef[] = []
+      const candidates = runs.filter(
+        (run) => run.lifecycleOperationId === reservation.operationId
+      )
+      for (const run of candidates) await this.retireUncommittedRun(run.runId)
+      retiredRuns = candidates.map((run) => runRef(run.runId))
       await this.registry.releaseLifecycle(reservation, retiredRuns)
     }
   }
@@ -1040,13 +1284,7 @@ export class AgentMuxClient {
   }
 
   private async stopRunningRun(runId: string): Promise<void> {
-    try {
-      await this.kernel.stop(runId)
-    } catch (error) {
-      if (!(error instanceof AgentMuxError) || error.code !== 'CTXMUX_invalid_run_state') throw error
-      const current = await this.kernel.status(runId)
-      if (current.state.type === 'running') throw error
-    }
+    await this.kernel.stop(await this.kernel.prepareStop(runId))
   }
 
   private synchronizeAgentRuns(runs: readonly CtxmuxAdapterRun[]): void {

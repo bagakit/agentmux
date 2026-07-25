@@ -223,4 +223,42 @@ describe('built-in agent providers', () => {
       env: {}
     })).toThrow('does not support')
   })
+
+  it('omits the prompt argv token for semantic continuity recovery', () => {
+    expect(providers.get('codex').buildResumeLaunch({
+      workspacePath: '/tmp/work',
+      nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'native-1' },
+      args: ['--model', 'demo'],
+      env: {}
+    })).toEqual({
+      command: 'codex',
+      args: ['resume', 'native-1', '--model', 'demo'],
+      env: {}
+    })
+    expect(providers.get('claude').buildResumeLaunch({
+      workspacePath: '/tmp/work',
+      nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: 'native-2' },
+      args: ['--model', 'demo'],
+      env: {}
+    })).toEqual({
+      command: 'claude',
+      args: ['--resume', 'native-2', '--model', 'demo'],
+      env: {}
+    })
+    expect(providers.get('pi').buildResumeLaunch({
+      workspacePath: '/tmp/work',
+      nativeHandle: {
+        kind: 'provider',
+        providerId: 'pi',
+        sessionId: 'native-3',
+        transcriptPath: '/tmp/session.jsonl'
+      },
+      args: [],
+      env: {}
+    })).toEqual({
+      command: 'pi',
+      args: ['--session', '/tmp/session.jsonl'],
+      env: {}
+    })
+  })
 })

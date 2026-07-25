@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { mkdtemp, rm, unlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   AgentMuxFileAgentSessionStore,
+  AgentMuxMemoryAgentSessionStore,
   loadAgentSessions,
   normalizeStoredAgentSession,
   type AgentMuxAgentSessionStore
@@ -72,6 +73,66 @@ function storedSession() {
 }
 
 describe('semantic session persistence boundary', () => {
+  it('rejects the retired File Store v2 schema without rewriting or migrating it', async () => {
+    const root = await mkdtemp('/private/tmp/agentmux-store-v2-')
+    const path = join(root, 'sessions.json')
+    const retired = `${JSON.stringify({
+      version: 2,
+      sessions: [],
+      reservations: [],
+      retiredRuns: []
+    })}\n`
+    try {
+      await writeFile(path, retired, { mode: 0o600 })
+
+      await expect(new AgentMuxFileAgentSessionStore(path).load())
+        .rejects.toMatchObject({ code: 'INVALID_AGENT_SESSION_STORE' })
+      await expect(readFile(path, 'utf8')).resolves.toBe(retired)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('binds a user Stop retirement to the exact Agent Session and all of its Runs', async () => {
+    const store = new AgentMuxMemoryAgentSessionStore()
+    const current = {
+      ...storedSession(),
+      retiredRuns: [{ runId: 'daemon-old' }]
+    }
+    await store.compareAndSwap(null, current)
+    const reservation = {
+      reservationId: 'stop-reservation',
+      ownerId: 'stop-owner',
+      ownerPid: process.pid,
+      kind: 'stop' as const,
+      agentSessionId: current.agentSessionId,
+      operationId: 'stop-operation',
+      expiresAt: Date.now() + 1_000,
+      expectedRun: { ...current.run },
+      stopOperation: {
+        daemonInstance: 'daemon-instance',
+        operationKey: 'stop-operation',
+        runId: current.run.runId
+      }
+    }
+    await store.reserveLifecycle(reservation)
+    await store.commitLifecycle(reservation, null)
+
+    await expect(store.load()).resolves.toEqual([])
+    await expect(store.loadRetiredRuns()).resolves.toEqual([
+      { runId: 'daemon-old' },
+      { runId: 'daemon-1' }
+    ])
+    await expect(store.loadRetiredAgentSessions()).resolves.toEqual([
+      expect.objectContaining({
+        agentSessionId: 'semantic-1',
+        hostId: 'local',
+        run: { runId: 'daemon-1' },
+        source: 'user'
+      })
+    ])
+  })
+
   it('selects only semantic identity, run reference, native handle, receipt, and cursor fields', () => {
     const normalized = normalizeStoredAgentSession({
       ...storedSession(),
@@ -119,6 +180,7 @@ describe('semantic session persistence boundary', () => {
     const store: AgentMuxAgentSessionStore = {
       async load() { return [storedSession(), storedSession()] },
       async loadRetiredRuns() { return [] },
+      async loadRetiredAgentSessions() { return [] },
       async compareAndSwap() {},
       async reserveLifecycle() {},
       async claimStaleLifecycles() { return [] },

@@ -4,7 +4,12 @@ vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
 })
 
-import type { AppConfig, BrowserSnapshot, SessionSnapshot } from '../src/shared/contracts.js'
+import type {
+  AppConfig,
+  BrowserSnapshot,
+  SessionRecoveryResult,
+  SessionSnapshot
+} from '../src/shared/contracts.js'
 import { api } from '../src/renderer/src/lib/api.js'
 import { createWorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.js'
 import {
@@ -114,6 +119,75 @@ afterEach(() => {
 })
 
 describe('Session and Launcher lifecycle ownership', () => {
+  it('recovers a persisted Agent View whose exact Run disappeared before Desktop startup', async () => {
+    const stale = agentSession('persisted-agent')
+    const resumed = {
+      ...stale,
+      control: { ...stale.control, run: { runId: 'resumed-run' } }
+    }
+    const tab = createWorkbenchTab('persisted-view', {
+      regionId: 'persisted-region',
+      kind: 'agent',
+      phase: 'attached',
+      workspaceId: 'workspace',
+      sessionId: stale.id
+    })
+    useAppStore.setState({
+      loading: true,
+      restoredWorkbench: {
+        tabs: { [tab.id]: tab },
+        layouts: { workspace: createWorkspaceLayout('pane', [tab.id]) }
+      }
+    })
+    vi.spyOn(api.config, 'get').mockResolvedValue(config)
+    vi.spyOn(api.providers, 'list').mockResolvedValue([])
+    const snapshot = vi.spyOn(api.sessions, 'snapshot')
+      .mockResolvedValueOnce({
+        sessions: [],
+        timelines: {},
+        recoveryCandidates: [{
+          agentSessionId: stale.id,
+          hostId: stale.hostId,
+          workspacePath: stale.workspacePath,
+          providerId: 'codex',
+          executorId: 'codex',
+          capabilities: {
+            terminal: true,
+            hookEvents: true,
+            timeline: 'streaming',
+            permission: 'observe',
+            providerResume: true,
+            acp: false,
+            replyCorrelation: 'none'
+          },
+          label: stale.label,
+          createdAt: stale.createdAt,
+          updatedAt: stale.updatedAt,
+          run: { ...stale.control.run }
+        }]
+      })
+      .mockResolvedValueOnce({
+        sessions: [resumed],
+        timelines: { [resumed.id]: { agentSessionId: resumed.id, revision: 0, items: [] } },
+        recoveryCandidates: []
+      })
+    const recover = vi.spyOn(api.sessions, 'recover').mockResolvedValue({
+      kind: 'resumed',
+      session: resumed
+    })
+
+    const dispose = await useAppStore.getState().initialize()
+
+    expect(recover).toHaveBeenCalledWith(stale.control, stale.workspacePath)
+    expect(snapshot).toHaveBeenCalledTimes(2)
+    expect(useAppStore.getState().sessions).toContainEqual(resumed)
+    expect(useAppStore.getState().tabs[tab.id]?.regions['persisted-region']).toMatchObject({
+      kind: 'agent',
+      sessionId: stale.id
+    })
+    dispose()
+  })
+
   it('stops a late successful launch without recreating its closed Tab', async () => {
     const launcher = launcherFixture()
     const pending = deferred<SessionSnapshot>()
@@ -644,7 +718,10 @@ describe('Session and Launcher lifecycle ownership', () => {
       stopStarted.resolve()
       await pendingStop.promise
     })
-    const recover = vi.spyOn(api.sessions, 'recover').mockResolvedValue(session)
+    const recover = vi.spyOn(api.sessions, 'recover').mockResolvedValue({
+      kind: 'terminal-restarted',
+      session
+    })
     const refresh = vi.spyOn(api.sessions, 'refresh').mockResolvedValue(session)
 
     const firstClose = useAppStore.getState().closeTab('workspace', 'pane', tab.id)
@@ -719,7 +796,7 @@ describe('Session and Launcher lifecycle ownership', () => {
       layouts: { workspace: createWorkspaceLayout('pane', [tab.id]) },
       error: null
     })
-    const pendingRecover = deferred<SessionSnapshot>()
+    const pendingRecover = deferred<SessionRecoveryResult>()
     vi.spyOn(api.sessions, 'recover').mockImplementation(async () => await pendingRecover.promise)
     const pendingOldStop = deferred<void>()
     const oldStopStarted = deferred<void>()
@@ -735,7 +812,7 @@ describe('Session and Launcher lifecycle ownership', () => {
     const recover = useAppStore.getState().recoverSession(session.id)
     const close = useAppStore.getState().closeTab('workspace', 'pane', tab.id)
     await oldStopStarted.promise
-    pendingRecover.resolve(recovered)
+    pendingRecover.resolve({ kind: 'resumed', session: recovered })
     await recover
     expect(useAppStore.getState().sessions[0]?.control.run.runId).toBe('recovered-run')
     pendingOldStop.resolve()
@@ -745,6 +822,84 @@ describe('Session and Launcher lifecycle ownership', () => {
     expect(useAppStore.getState().tabs[tab.id]).toEqual(tab)
     expect(useAppStore.getState().sessions).toEqual([recovered])
     expect(useAppStore.getState().error).toContain('Recovered Session owner disappeared and cleanup failed')
+  })
+
+  it('projects Core continuity unavailability without replacing or stopping the Session', async () => {
+    const session = agentSession('agent-run')
+    const tab = createWorkbenchTab('agent-view', {
+      regionId: 'agent-region',
+      kind: 'agent',
+      phase: 'attached',
+      workspaceId: 'workspace',
+      sessionId: session.id
+    })
+    useAppStore.setState({
+      config,
+      activeWorkspaceId: 'workspace',
+      sessions: [session],
+      tabs: { [tab.id]: tab },
+      layouts: { workspace: createWorkspaceLayout('pane', [tab.id]) },
+      error: null
+    })
+    vi.spyOn(api.sessions, 'recover').mockResolvedValue({
+      kind: 'unavailable',
+      agentSessionId: session.id,
+      previousRun: session.control.run,
+      reason: 'native-handle-unavailable',
+      evidence: { kind: 'run-missing', observedAt: 2 }
+    })
+    const stop = vi.spyOn(api.sessions, 'stop').mockResolvedValue()
+
+    await useAppStore.getState().recoverSession(session.id)
+
+    expect(useAppStore.getState().sessions).toEqual([
+      expect.objectContaining({
+        id: session.id,
+        control: session.control,
+        status: expect.objectContaining({
+          state: 'error',
+          continuity: 'unavailable',
+          detail: expect.stringContaining('verified Provider handle')
+        })
+      })
+    ])
+    expect(stop).not.toHaveBeenCalled()
+  })
+
+  it('removes the Session and its View when Core reports persisted retirement', async () => {
+    const session = agentSession('agent-run')
+    const tab = createWorkbenchTab('agent-view', {
+      regionId: 'agent-region',
+      kind: 'agent',
+      phase: 'attached',
+      workspaceId: 'workspace',
+      sessionId: session.id
+    })
+    useAppStore.setState({
+      config,
+      activeWorkspaceId: 'workspace',
+      sessions: [session],
+      tabs: { [tab.id]: tab },
+      layouts: { workspace: createWorkspaceLayout('pane', [tab.id]) },
+      timelines: {
+        [session.id]: { agentSessionId: session.id, revision: 0, items: [] }
+      },
+      error: null
+    })
+    vi.spyOn(api.sessions, 'recover').mockResolvedValue({
+      kind: 'retired',
+      agentSessionId: session.id,
+      previousRun: session.control.run,
+      evidence: { kind: 'user-retired', observedAt: 2 }
+    })
+    const stop = vi.spyOn(api.sessions, 'stop').mockResolvedValue()
+
+    await useAppStore.getState().recoverSession(session.id)
+
+    expect(useAppStore.getState().sessions).toEqual([])
+    expect(useAppStore.getState().tabs).toEqual({})
+    expect(useAppStore.getState().timelines).toEqual({})
+    expect(stop).not.toHaveBeenCalled()
   })
 
   it('accepts an authoritative recovered Run that arrives before its recover receipt', async () => {
@@ -768,7 +923,7 @@ describe('Session and Launcher lifecycle ownership', () => {
       tabs: { [tab.id]: tab },
       layouts: { workspace: createWorkspaceLayout('pane', [tab.id]) }
     })
-    const pendingRecover = deferred<SessionSnapshot>()
+    const pendingRecover = deferred<SessionRecoveryResult>()
     vi.spyOn(api.sessions, 'recover').mockImplementation(async () => await pendingRecover.promise)
     const stop = vi.spyOn(api.sessions, 'stop').mockResolvedValue()
 
@@ -793,7 +948,7 @@ describe('Session and Launcher lifecycle ownership', () => {
         }
       }
     })
-    pendingRecover.resolve(recovered)
+    pendingRecover.resolve({ kind: 'resumed', session: recovered })
     await recover
 
     expect(stop).not.toHaveBeenCalled()
@@ -867,7 +1022,7 @@ describe('Session and Launcher lifecycle ownership', () => {
       layouts: { workspace: createWorkspaceLayout('pane', [tab.id]) },
       error: null
     })
-    const pendingRecover = deferred<SessionSnapshot>()
+    const pendingRecover = deferred<SessionRecoveryResult>()
     vi.spyOn(api.sessions, 'recover').mockImplementation(async () => await pendingRecover.promise)
     const stop = vi.spyOn(api.sessions, 'stop').mockImplementation(async (control) => {
       if (control.run.runId === recovered.control.run.runId) {
@@ -886,7 +1041,7 @@ describe('Session and Launcher lifecycle ownership', () => {
 
     const recover = useAppStore.getState().recoverSession(session.id)
     await expect(useAppStore.getState().closeTab('workspace', 'pane', tab.id)).resolves.toBe(true)
-    pendingRecover.resolve(recovered)
+    pendingRecover.resolve({ kind: 'terminal-restarted', session: recovered })
     await recover
 
     const reopened = useAppStore.getState().tabs[`session:${recovered.id}`]
@@ -1369,7 +1524,8 @@ describe('Warm terminal pool', () => {
     vi.spyOn(api.config, 'get').mockResolvedValue(config)
     vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({
       sessions: [warm, visible],
-      timelines: {}
+      timelines: {},
+      recoveryCandidates: []
     })
     const stop = vi.spyOn(api.sessions, 'stop').mockResolvedValue()
 
@@ -1396,7 +1552,8 @@ describe('Warm terminal pool', () => {
     vi.spyOn(api.config, 'get').mockResolvedValue(config)
     vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({
       sessions: [warm, visible],
-      timelines: {}
+      timelines: {},
+      recoveryCandidates: []
     })
     vi.spyOn(api.sessions, 'stop').mockRejectedValue(new Error('owner unavailable'))
 
