@@ -1092,6 +1092,12 @@ describe('RuntimeController configuration transaction', () => {
     client.releaseRunAttachment.mockRejectedValueOnce(new Error('release interrupted'))
     await expect(controller.detachSession(renderer.id, second.attachmentId)).rejects.toThrow('release interrupted')
     expect(controller.resourceOwnerCounts()).toEqual({
+      sessionAttachmentOwners: 1,
+      sessionAttachmentLeases: 1
+    })
+
+    await controller.detachSession(renderer.id, second.attachmentId)
+    expect(controller.resourceOwnerCounts()).toEqual({
       sessionAttachmentOwners: 0,
       sessionAttachmentLeases: 0
     })
@@ -1100,7 +1106,7 @@ describe('RuntimeController configuration transaction', () => {
     expect(client.attachTerminal).toHaveBeenCalledTimes(2)
     expect(client.readRunReplay).toHaveBeenCalledOnce()
     await controller.detachSession(renderer.id, third.attachmentId)
-    expect(client.releaseRunAttachment).toHaveBeenCalledTimes(2)
+    expect(client.releaseRunAttachment).toHaveBeenCalledTimes(3)
     expect(client.releaseRunAttachment).toHaveBeenCalledWith(expect.objectContaining(control.run))
     expect(controller.resourceOwnerCounts()).toEqual({
       sessionAttachmentOwners: 0,

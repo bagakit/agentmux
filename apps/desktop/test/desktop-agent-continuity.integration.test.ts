@@ -29,6 +29,9 @@ const execFileAsync = promisify(execFile)
 const fakeCodexFixture = fileURLToPath(
   new URL('../../../packages/core/test/fixtures/fake-codex-cli.mjs', import.meta.url)
 )
+const ctxmuxDaemon = fileURLToPath(
+  new URL('../../../packages/core/vendor/ctxmux/darwin-arm64/bin/ctxmuxd', import.meta.url)
+)
 
 const roots: string[] = []
 const runtimeDirectories: string[] = []
@@ -100,62 +103,88 @@ async function stopOwnedTestDaemon(runtimeDirectory: string): Promise<void> {
     const match = /^\s*(\d+)\s+(.+)$/u.exec(line)
     if (!match) return []
     const command = match[2]!
-    return command.includes('ctxmuxd') &&
+    return command.includes(ctxmuxDaemon) &&
       command.includes(`--socket ${socketPath}`) &&
       command.includes(`--state-dir ${stateDir}`)
       ? [Number(match[1])]
       : []
   })
-  for (const pid of pids) {
+  if (pids.length > 1) throw new Error('Multiple CtxMux daemons occupy the isolated test runtime.')
+  const pid = pids[0]
+  if (pid === undefined) return
+  try {
+    process.kill(pid, 'SIGTERM')
+  } catch (error) {
+    if (!(error instanceof Error && 'code' in error && error.code === 'ESRCH')) throw error
+  }
+  const deadline = Date.now() + 5_000
+  let stopped = false
+  while (Date.now() <= deadline) {
+    if (!isProcessAlive(pid)) {
+      stopped = true
+      break
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  if (!stopped) {
     try {
-      process.kill(pid, 'SIGTERM')
+      process.kill(pid, 'SIGKILL')
     } catch (error) {
       if (!(error instanceof Error && 'code' in error && error.code === 'ESRCH')) throw error
     }
-    const deadline = Date.now() + 5_000
-    let stopped = false
-    while (Date.now() <= deadline) {
-      if (!isProcessAlive(pid)) {
-        stopped = true
-        break
-      }
-      await new Promise((resolve) => setTimeout(resolve, 25))
-    }
-    if (!stopped) {
-      try { process.kill(pid, 'SIGKILL') } catch {}
-      await waitFor(`daemon ${pid} kill`, () => !isProcessAlive(pid), 3_000)
-    }
+    await waitFor(`daemon ${pid} kill`, () => !isProcessAlive(pid), 3_000)
   }
 }
 
 afterEach(async () => {
+  const cleanupErrors: unknown[] = []
   if (activeSessionControl && activeRuntime) {
     try {
       await activeRuntime.stopSession(activeSessionControl)
-    } catch {}
+    } catch (error) {
+      cleanupErrors.push(error)
+    }
     activeSessionControl = undefined
   }
   if (activePid !== undefined) {
     try {
       await waitFor(`child process ${activePid} exit`, () => !isProcessAlive(activePid!), 5_000)
-    } catch {
-      try { process.kill(activePid, 'SIGKILL') } catch {}
+    } catch (error) {
+      try {
+        process.kill(activePid, 'SIGKILL')
+        await waitFor(`child process ${activePid} kill`, () => !isProcessAlive(activePid!), 3_000)
+      } catch (killError) {
+        cleanupErrors.push(new AggregateError([error, killError], `Failed to kill child process ${activePid}`))
+      }
     }
     activePid = undefined
   }
   if (activeRuntime) {
     try {
       await activeRuntime.dispose()
-    } catch {}
+    } catch (error) {
+      cleanupErrors.push(error)
+    }
     activeRuntime = undefined
   }
   if (originalRuntimeDirectory === undefined) delete process.env.AGENTMUX_RUNTIME_DIRECTORY
   else process.env.AGENTMUX_RUNTIME_DIRECTORY = originalRuntimeDirectory
 
   for (const runtimeDirectory of runtimeDirectories.splice(0)) {
-    await stopOwnedTestDaemon(runtimeDirectory)
+    try {
+      await stopOwnedTestDaemon(runtimeDirectory)
+    } catch (error) {
+      cleanupErrors.push(error)
+    }
   }
-  await Promise.all(roots.splice(0).map(async (root) => await rm(root, { recursive: true, force: true })))
+  try {
+    await Promise.all(roots.splice(0).map(async (root) => await rm(root, { recursive: true, force: true })))
+  } catch (error) {
+    cleanupErrors.push(error)
+  }
+  if (cleanupErrors.length > 0) {
+    throw new AggregateError(cleanupErrors, 'Desktop agent continuity test cleanup failed.')
+  }
 })
 
 describe('Desktop and Renderer Agent exact run continuity integration', () => {
@@ -244,12 +273,23 @@ describe('Desktop and Renderer Agent exact run continuity integration', () => {
     // ---------------------------------------------------------------------------------------------
     // 1. Verify Ordinary Renderer Reload:
     // WebContents navigates/reloads (isDestroyed is false).
-    // did-start-navigation triggers release of old generation attachment lease.
+    // Before reload, exactly 1 owner and 1 lease are held.
+    // did-start-navigation triggers release of old generation attachment lease (0 owners, 0 leases).
     // Reloaded page on the SAME webContents connects, takes snapshot, renders View without recovery overlay,
-    // and establishes an exact reattachment to the running live agent without native handle.
+    // and establishes an exact reattachment (1 owner, 1 lease) to the running live agent without native handle.
     // ---------------------------------------------------------------------------------------------
+    expect(runtime1.resourceOwnerCounts()).toEqual({
+      sessionAttachmentOwners: 1,
+      sessionAttachmentLeases: 1
+    })
+
     webContents1.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false })
     expect(webContents1.isDestroyed()).toBe(false)
+
+    await waitFor('session attachment lease and owner release on navigation', () => {
+      const counts = runtime1.resourceOwnerCounts()
+      return counts.sessionAttachmentOwners === 0 && counts.sessionAttachmentLeases === 0
+    })
 
     const reloadSnapshot = await runtime1.snapshot(config)
     expect(reloadSnapshot.recoveryCandidates).toEqual([])
@@ -290,9 +330,16 @@ describe('Desktop and Renderer Agent exact run continuity integration', () => {
     expect(reloadedAttachment.session.id).toBe(initialSessionId)
     expect(reloadedAttachment.session.control.run.runId).toBe(initialRunId)
     expect(reloadedAttachment.session.processState).toBe('running')
-    expect(
-      reloadedAttachment.replay.some((frame) => 'data' in frame && frame.data.includes('codex-composer-ready-frame'))
-    ).toBe(true)
+    expect(runtime1.resourceOwnerCounts()).toEqual({
+      sessionAttachmentOwners: 1,
+      sessionAttachmentLeases: 1
+    })
+
+    const reloadedReplayText = reloadedAttachment.replay
+      .map((frame) => ('data' in frame ? frame.data : ''))
+      .join('')
+    expect(reloadedReplayText).toContain('codex-ready:')
+    expect(reloadedReplayText).toContain('codex-composer-ready-frame')
 
     // Send input from reloaded view and verify accumulated live streaming output reaches webContents 1
     webContents1.sentEvents.length = 0
@@ -395,9 +442,12 @@ describe('Desktop and Renderer Agent exact run continuity integration', () => {
     expect(restartedAttachment.session.id).toBe(initialSessionId)
     expect(restartedAttachment.session.control.run.runId).toBe(initialRunId)
     expect(restartedAttachment.session.processState).toBe('running')
-    expect(
-      restartedAttachment.replay.some((frame) => 'data' in frame && frame.data.includes('codex-composer-ready-frame'))
-    ).toBe(true)
+
+    const restartedReplayText = restartedAttachment.replay
+      .map((frame) => ('data' in frame ? frame.data : ''))
+      .join('')
+    expect(restartedReplayText).toContain('codex-ready:')
+    expect(restartedReplayText).toContain('codex-composer-ready-frame')
 
     // Send input from restarted Desktop and verify accumulated live streaming output reaches webContents 2
     webContents2.sentEvents.length = 0
@@ -454,4 +504,3 @@ describe('Desktop and Renderer Agent exact run continuity integration', () => {
     activeRuntime = undefined
   }, 30_000)
 })
-
