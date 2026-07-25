@@ -28,6 +28,7 @@ import {
 import { isScratchWorkspaceId } from '../../shared/contracts'
 import { api } from './lib/api'
 import type { BrowserAnnotation } from './lib/browser-annotations'
+import type { OpenDestination, OpenHttpLinkOrigin } from './lib/open-destination'
 import { rendererResourceOwnerCounts } from './lib/resource-owner-counts'
 import { terminalResourceOwnerCounts } from './lib/terminal-resource-owners'
 import {
@@ -271,7 +272,12 @@ type AppState = {
     tabGroupId: string,
     launcher?: { tabId: string; regionId: string }
   ): Promise<void>
-  createBrowser(tabGroupId: string, launcher?: { tabId: string; regionId: string }): Promise<void>
+  createBrowser(
+    tabGroupId: string,
+    launcher?: { tabId: string; regionId: string },
+    url?: string
+  ): Promise<void>
+  openHttpLink(origin: OpenHttpLinkOrigin, url: string, destination: OpenDestination): Promise<void>
   applyBrowserEvent(event: BrowserEvent): void
   addBrowserAnnotation(annotation: BrowserAnnotation): void
   deleteBrowserAnnotation(browserId: string, annotationId: string): void
@@ -293,6 +299,14 @@ type AppState = {
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+function normalizeHttpLinkUrl(rawUrl: string): string {
+  const url = new URL(rawUrl)
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error(`Link URL protocol is not allowed: ${url.protocol}`)
+  }
+  return url.toString()
 }
 
 async function settleWorkbenchViewCloseResources<Resource extends WorkbenchViewCloseResource>(
@@ -2416,7 +2430,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     void get().refreshSession(session.id)
   },
-  async createBrowser(tabGroupId, launcher) {
+  async createBrowser(tabGroupId, launcher, url = 'about:blank') {
     const state = get()
     const launcherTab = launcher ? state.tabs[launcher.tabId] : undefined
     const launcherSurface = launcherTab && launcher
@@ -2433,6 +2447,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const tabId = targetTab.id
     if (!workbenchViewCloseAllowsView(state.closingWorkbenchViews, tabId)) throw new Error('The View is closing')
     const regionId = launcher?.regionId ?? targetTab.layout.activeRegionId
+    const pendingLauncher = targetTab.regions[regionId]
+    if (pendingLauncher?.kind !== 'launcher') throw new Error('Launcher Region is no longer available')
     if (!launcher) {
       set((current) => ({
         tabs: { ...current.tabs, [tabId]: targetTab },
@@ -2440,7 +2456,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }))
     }
     try {
-      const browser = await api.browser.create(regionId, 'about:blank')
+      const browser = await api.browser.create(regionId, url)
       const surface: BrowserWorkbenchSurface = {
         ...browser,
         regionId,
@@ -2448,22 +2464,136 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         workspaceId,
         browserId: browser.id
       }
-      const currentOwner = findWorkbenchRegion(get().tabs, regionId)
-      if (
-        currentOwner?.surface.kind !== 'launcher' ||
-        !workbenchViewCloseAllowsView(get().closingWorkbenchViews, currentOwner.tab.id)
-      ) {
-        await api.browser.close(browser.id)
+      let attached = false
+      set((current) => {
+        const currentOwner = findWorkbenchRegion(current.tabs, regionId)
+        if (
+          currentOwner?.tab.id !== tabId ||
+          currentOwner.surface !== pendingLauncher ||
+          !workbenchViewCloseAllowsView(current.closingWorkbenchViews, currentOwner.tab.id)
+        ) return current
+        attached = true
+        return {
+          tabs: {
+            ...current.tabs,
+            [currentOwner.tab.id]: replaceWorkbenchRegion(currentOwner.tab, regionId, surface)
+          }
+        }
+      })
+      if (!attached) {
+        const primary = new Error('Browser launch owner disappeared before it could attach.')
+        try {
+          await api.browser.close(browser.id)
+        } catch (cleanupError) {
+          throw new AggregateError(
+            [primary, cleanupError],
+            `${primary.message} Cleanup also failed: ${message(cleanupError)}`
+          )
+        }
         return
       }
-      set((current) => ({
-        tabs: {
-          ...current.tabs,
-          [currentOwner.tab.id]: replaceWorkbenchRegion(currentOwner.tab, regionId, surface)
-        }
-      }))
     } catch (error) {
       get().reportError(error)
+      throw error
+    }
+  },
+  async openHttpLink(origin, rawUrl, destination) {
+    const url = normalizeHttpLinkUrl(rawUrl)
+    if (destination === 'system') {
+      await api.ui.openExternal(url)
+      return
+    }
+    if (destination !== 'tab' && (!origin.tabId || !origin.regionId)) {
+      throw new Error('Directional link destinations require a Tab and Region origin')
+    }
+
+    const tabId = destination === 'tab' ? `launcher:${crypto.randomUUID()}` : origin.tabId!
+    const regionId = destination === 'tab' ? initialWorkbenchRegionId(tabId) : newRegionId()
+    const pendingLauncher: LauncherWorkbenchSurface = {
+      regionId,
+      kind: 'launcher',
+      workspaceId: origin.workspaceId
+    }
+    let planned = false
+    let placementError: Error | null = null
+    set((current) => {
+      const layout = current.layouts[origin.workspaceId]
+      if (!layout) {
+        placementError = new Error('Workspace layout is unavailable')
+        return current
+      }
+      if (!findGroup(layout, origin.tabGroupId)) {
+        placementError = new Error('Link origin Tab Group is no longer available')
+        return current
+      }
+      if (destination === 'tab') {
+        const tab = createWorkbenchTab(tabId, pendingLauncher)
+        const nextLayout = addTab(layout, origin.tabGroupId, tabId)
+        if (nextLayout === layout) {
+          placementError = new Error('Link destination Tab could not be created')
+          return current
+        }
+        planned = true
+        return {
+          tabs: { ...current.tabs, [tabId]: tab },
+          layouts: { ...current.layouts, [origin.workspaceId]: nextLayout }
+        }
+      }
+
+      const originTab = current.tabs[origin.tabId!]
+      if (
+        !originTab ||
+        originTab.workspaceId !== origin.workspaceId ||
+        !originTab.regions[origin.regionId!] ||
+        tabGroupForTab(layout, originTab.id) !== origin.tabGroupId
+      ) {
+        placementError = new Error('Link origin Region is no longer available')
+        return current
+      }
+      if (!workbenchViewCloseAllowsView(current.closingWorkbenchViews, originTab.id)) {
+        placementError = new Error('The View is closing')
+        return current
+      }
+      const nextTab = addWorkbenchRegion(
+        originTab,
+        origin.regionId!,
+        destination,
+        pendingLauncher
+      )
+      if (nextTab === originTab) {
+        placementError = new Error('Link destination Region could not be created')
+        return current
+      }
+      planned = true
+      return { tabs: { ...current.tabs, [originTab.id]: nextTab } }
+    })
+    if (!planned) throw placementError ?? new Error('Link destination could not be created')
+
+    try {
+      await get().createBrowser(origin.tabGroupId, { tabId, regionId }, url)
+    } catch (error) {
+      set((current) => {
+        const liveTab = current.tabs[tabId]
+        if (!liveTab || liveTab.regions[regionId] !== pendingLauncher) return current
+        if (destination !== 'tab') {
+          const nextTab = removeWorkbenchRegion(liveTab, regionId)
+          return nextTab
+            ? { tabs: { ...current.tabs, [tabId]: nextTab } }
+            : current
+        }
+        const layout = current.layouts[origin.workspaceId]
+        const currentTabGroupId = tabGroupForTab(layout, tabId)
+        if (!layout || !currentTabGroupId) return current
+        const tabs = { ...current.tabs }
+        delete tabs[tabId]
+        return {
+          tabs,
+          layouts: {
+            ...current.layouts,
+            [origin.workspaceId]: removeLayoutTab(layout, currentTabGroupId, tabId)
+          }
+        }
+      })
       throw error
     }
   },
