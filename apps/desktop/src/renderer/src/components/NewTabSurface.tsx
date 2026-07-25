@@ -19,6 +19,7 @@ export function NewTabSurface({
   const [prompt, setPrompt] = useState('')
   const [busy, setBusy] = useState<'agent' | 'terminal' | 'browser' | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [showUnavailable, setShowUnavailable] = useState(false)
   const promptRef = useRef<HTMLTextAreaElement>(null)
   const config = useAppStore((state) => state.config)
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
@@ -87,15 +88,15 @@ export function NewTabSurface({
   return (
     <section className="launch-surface">
       <div className="launch-surface__heading">
-        <span className="launch-surface__icon"><Sparkles size={17} /></span>
-        <div>
+        <span className="launch-surface__icon" aria-hidden="true"><Sparkles size={20} /></span>
+        <div className="launch-surface__heading-content">
           <div className="eyebrow">New session</div>
           <h2>Start in {workspace?.name ?? 'this workspace'}</h2>
           <p>Pick an Agent and describe the outcome — or open a terminal or browser instead.</p>
         </div>
         <button
           type="button"
-          className="icon-button"
+          className="icon-button launch-surface__refresh"
           title="Refresh agents on this host"
           disabled={!workspace || detecting}
           onClick={() => workspace && void detectExecutors(workspace.hostId)}
@@ -103,11 +104,25 @@ export function NewTabSurface({
           {detecting ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}
         </button>
       </div>
+
       <div className="agent-catalog" aria-label="Agent executors">
         <div className="agent-catalog__group">
           <div className="agent-catalog__label">
-            <span><i className="agent-catalog__ready-dot" />Available</span>
-            <em>{installedExecutors.length}</em>
+            <span><i className="agent-catalog__ready-dot" />Available Agents</span>
+            <div className="agent-catalog__label-actions">
+              <em>{installedExecutors.length}</em>
+              {unavailableExecutors.length > 0 ? (
+                <button
+                  type="button"
+                  className={`agent-catalog__more-btn ${showUnavailable ? 'agent-catalog__more-btn--active' : ''}`}
+                  title={showUnavailable ? 'Hide unavailable agents' : `View ${unavailableExecutors.length} more uninstalled agents`}
+                  onClick={() => setShowUnavailable((prev) => !prev)}
+                >
+                  <ChevronRight size={12} className={showUnavailable ? 'icon-rotate-90' : ''} />
+                  <span>{showUnavailable ? 'Less' : `+${unavailableExecutors.length} more`}</span>
+                </button>
+              ) : null}
+            </div>
           </div>
           <div className="agent-picks">
             {installedExecutors.map((executor) => (
@@ -143,8 +158,9 @@ export function NewTabSurface({
             ) : null}
           </div>
         </div>
-        {unavailableExecutors.length > 0 ? (
-          <div className="agent-catalog__group">
+
+        {showUnavailable && unavailableExecutors.length > 0 ? (
+          <div className="agent-catalog__group agent-catalog__group--unavailable animate-fade-in">
             <div className="agent-catalog__label">
               <span>Not installed on {workspace?.hostId ?? 'this host'}</span>
               <em>{unavailableExecutors.length}</em>
@@ -160,6 +176,7 @@ export function NewTabSurface({
           </div>
         ) : null}
       </div>
+
       <textarea
         ref={promptRef}
         value={prompt}
@@ -167,6 +184,7 @@ export function NewTabSurface({
         placeholder="Describe the outcome. You can steer the agent after launch."
         rows={4}
       />
+
       <div className="launch-surface__footer">
         <span>
           {workspace?.hostId !== 'local' ? <RadioTower size={13} /> : null}
@@ -187,76 +205,100 @@ export function NewTabSurface({
         </button>
       </div>
       {error ? <div className="new-tab-error" role="alert">{error}</div> : null}
+
       <div className="launch-surface__alt">
         <div className="agent-catalog__label">
-          <span><SquareTerminal size={12} /> Terminal</span>
-          <em>reusable</em>
+          <span>Quick Surfaces</span>
         </div>
+
         {workspace && warmSession && terminalThemeId ? (
-          <div className="launch-terminal">
-            <div className="launch-terminal__head">
-              <span className="launch-terminal__hint">Ready — run a quick command here, or claim it as its own tab.</span>
+          <div className="launch-surfaces-stack">
+            <div className="launch-terminal">
+              <div className="launch-terminal__head">
+                <span className="launch-terminal__hint">
+                  <SquareTerminal size={13} className="launch-terminal__icon" />
+                  Terminal · Ready for quick commands
+                </span>
+                <button
+                  type="button"
+                  className="small-button launch-terminal__claim"
+                  aria-label="Open reusable Terminal in tab"
+                  data-agentmux-action={DESKTOP_ACTIONS.claimReusableTerminal}
+                  data-agentmux-session-id={warmSession.id}
+                  disabled={busy !== null}
+                  onClick={() => void run('terminal', () => promoteWarmTerminal(
+                    tabGroupId,
+                    tabId && regionId ? { tabId, regionId } : undefined
+                  ))}
+                >
+                  {busy === 'terminal' ? <LoaderCircle className="spin" size={12} /> : <ArrowUpRight size={12} />}
+                  {busy === 'terminal' ? 'Opening…' : 'Open in tab'}
+                </button>
+              </div>
+              <div className="launch-terminal__body">
+                <TerminalView
+                  session={warmSession}
+                  themeId={terminalThemeId}
+                  interactiveResize={false}
+                  autoFocus={false}
+                  linkOrigin={{ workspaceId: workspace.id, tabGroupId }}
+                />
+              </div>
+            </div>
+
+            <div className="launch-surface-quick-grid">
               <button
                 type="button"
-                className="small-button launch-terminal__claim"
-                aria-label="Open reusable Terminal in tab"
-                data-agentmux-action={DESKTOP_ACTIONS.claimReusableTerminal}
-                data-agentmux-session-id={warmSession.id}
-                disabled={busy !== null}
-                onClick={() => void run('terminal', () => promoteWarmTerminal(
+                className="agent-pick agent-pick--action launch-quick-card"
+                aria-label="Open Browser"
+                data-agentmux-action={DESKTOP_ACTIONS.openBrowser}
+                disabled={!workspace || busy !== null}
+                onClick={() => void run('browser', () => createBrowser(
                   tabGroupId,
                   tabId && regionId ? { tabId, regionId } : undefined
                 ))}
               >
-                {busy === 'terminal' ? <LoaderCircle className="spin" size={12} /> : <ArrowUpRight size={12} />}
-                {busy === 'terminal' ? 'Opening…' : 'Open in tab'}
+                <span className="agent-pick__icon"><Globe2 size={16} /></span>
+                <span className="agent-pick__copy"><strong>Browser</strong><small>Main-owned embedded WebContents</small></span>
+                <span className="agent-pick__go">{busy === 'browser' ? <LoaderCircle className="spin" size={14} /> : <ChevronRight size={14} />}</span>
               </button>
-            </div>
-            <div className="launch-terminal__body">
-              <TerminalView
-                session={warmSession}
-                themeId={terminalThemeId}
-                interactiveResize={false}
-                autoFocus={false}
-                linkOrigin={{ workspaceId: workspace.id, tabGroupId }}
-              />
             </div>
           </div>
         ) : (
-          <button
-            type="button"
-            className="agent-pick agent-pick--action launch-terminal__fallback"
-            aria-label="Open Terminal"
-            data-agentmux-action={DESKTOP_ACTIONS.claimReusableTerminal}
-            disabled={!workspace || busy !== null}
-            onClick={() => void run('terminal', () => promoteWarmTerminal(
-              tabGroupId,
-              tabId && regionId ? { tabId, regionId } : undefined
-            ))}
-          >
-            <span className="agent-pick__icon">{warmPending ? <LoaderCircle className="spin" size={16} /> : <SquareTerminal size={16} />}</span>
-            <span className="agent-pick__copy"><strong>Terminal</strong><small>{warmPending ? 'Warming a reusable host shell…' : 'Host shell in a recoverable core session'}</small></span>
-            <span className="agent-pick__go">{busy === 'terminal' ? <LoaderCircle className="spin" size={14} /> : <ChevronRight size={14} />}</span>
-          </button>
+          <div className="launch-surface-quick-grid">
+            <button
+              type="button"
+              className="agent-pick agent-pick--action launch-quick-card launch-terminal__fallback"
+              aria-label="Open Terminal"
+              data-agentmux-action={DESKTOP_ACTIONS.claimReusableTerminal}
+              disabled={!workspace || busy !== null}
+              onClick={() => void run('terminal', () => promoteWarmTerminal(
+                tabGroupId,
+                tabId && regionId ? { tabId, regionId } : undefined
+              ))}
+            >
+              <span className="agent-pick__icon">{warmPending ? <LoaderCircle className="spin" size={16} /> : <SquareTerminal size={16} />}</span>
+              <span className="agent-pick__copy"><strong>Terminal</strong><small>{warmPending ? 'Warming a reusable host shell…' : 'Host shell in a recoverable core session'}</small></span>
+              <span className="agent-pick__go">{busy === 'terminal' ? <LoaderCircle className="spin" size={14} /> : <ChevronRight size={14} />}</span>
+            </button>
+
+            <button
+              type="button"
+              className="agent-pick agent-pick--action launch-quick-card"
+              aria-label="Open Browser"
+              data-agentmux-action={DESKTOP_ACTIONS.openBrowser}
+              disabled={!workspace || busy !== null}
+              onClick={() => void run('browser', () => createBrowser(
+                tabGroupId,
+                tabId && regionId ? { tabId, regionId } : undefined
+              ))}
+            >
+              <span className="agent-pick__icon"><Globe2 size={16} /></span>
+              <span className="agent-pick__copy"><strong>Browser</strong><small>Main-owned embedded WebContents</small></span>
+              <span className="agent-pick__go">{busy === 'browser' ? <LoaderCircle className="spin" size={14} /> : <ChevronRight size={14} />}</span>
+            </button>
+          </div>
         )}
-        <div className="agent-catalog__label"><span>Or open</span></div>
-        <div className="agent-picks">
-          <button
-            type="button"
-            className="agent-pick agent-pick--action"
-            aria-label="Open Browser"
-            data-agentmux-action={DESKTOP_ACTIONS.openBrowser}
-            disabled={!workspace || busy !== null}
-            onClick={() => void run('browser', () => createBrowser(
-              tabGroupId,
-              tabId && regionId ? { tabId, regionId } : undefined
-            ))}
-          >
-            <span className="agent-pick__icon"><Globe2 size={16} /></span>
-            <span className="agent-pick__copy"><strong>Browser</strong><small>Main-owned embedded WebContents</small></span>
-            <span className="agent-pick__go">{busy === 'browser' ? <LoaderCircle className="spin" size={14} /> : <ChevronRight size={14} />}</span>
-          </button>
-        </div>
       </div>
     </section>
   )
