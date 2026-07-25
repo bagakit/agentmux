@@ -217,11 +217,23 @@ describe('built-in agent providers', () => {
     expect(providers.get('codex').planPromptInput('continue')).toEqual({
       kind: 'render-then-submit', payload: 'continue', submit: '\r'
     })
+    expect(providers.get('codex').planPromptInput('line1\nline2')).toEqual({
+      kind: 'render-then-submit', payload: '\u001b[200~line1\nline2\u001b[201~', submit: '\r'
+    })
+    expect(providers.get('codex').planPromptInput('text with \u001b escape')).toEqual({
+      kind: 'render-then-submit', payload: 'text with \u241b escape', submit: '\r'
+    })
     for (const id of ['claude', 'traex', 'hermes', 'pi'] as const) {
       expect(providers.get(id).terminalHandshake).toBeUndefined()
       expect(providers.get(id).terminalPromptRender).toBeUndefined()
       expect(providers.get(id).planPromptInput('continue')).toEqual({
         kind: 'single-phase', data: 'continue\r'
+      })
+      expect(providers.get(id).planPromptInput('line1\nline2')).toEqual({
+        kind: 'single-phase', data: '\u001b[200~line1\nline2\u001b[201~\r'
+      })
+      expect(providers.get(id).planPromptInput('text with \u001b escape')).toEqual({
+        kind: 'single-phase', data: 'text with \u241b escape\r'
       })
     }
   })
