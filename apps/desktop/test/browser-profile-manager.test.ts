@@ -173,6 +173,7 @@ function managerFixture(store = new FakeStore()): { store: FakeStore; manager: B
 beforeEach(() => {
   vi.useFakeTimers()
   vi.setSystemTime(10)
+  vi.spyOn(console, 'error').mockImplementation(() => {})
   electronMocks.reset()
   sourceMocks.detect.mockReset().mockReturnValue([structuredClone(detectedSource)])
   sourceMocks.plan.mockReset().mockReturnValue({
@@ -197,6 +198,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers()
+  vi.restoreAllMocks()
 })
 
 describe('BrowserProfileManager', () => {
@@ -337,13 +339,62 @@ describe('BrowserProfileManager', () => {
     expect(sourceMocks.plan).not.toHaveBeenCalled()
   })
 
+  it('keeps source detection paths inside Main errors', async () => {
+    const { manager } = managerFixture()
+    await manager.initialize()
+    sourceMocks.detect.mockImplementationOnce(() => {
+      throw new Error(("EACCES: " + _hygiene_fixturePath("private/chrome/Default/Cookies")))
+    })
+
+    let publicError: unknown
+    try {
+      manager.detectImportSources()
+    } catch (error) {
+      publicError = error
+    }
+
+    expect(publicError).toBeInstanceOf(Error)
+    expect((publicError as Error).message).toBe('Browser Profile sources could not be detected')
+    expect((publicError as Error).message).not.toContain(_hygiene_fixturePath("private/chrome"))
+    expect(publicError).not.toHaveProperty('cause')
+    expect(console.error).toHaveBeenCalledWith(
+      'Browser Profile sources could not be detected',
+      expect.objectContaining({ message: expect.stringContaining(_hygiene_fixturePath("private/chrome/Default/Cookies")) })
+    )
+  })
+
+  it('keeps source snapshot paths inside Main errors', async () => {
+    const { manager } = managerFixture()
+    await manager.initialize()
+    const [source] = manager.detectImportSources()
+    sourceMocks.plan.mockImplementationOnce(() => {
+      throw new Error(("EACCES: " + _hygiene_fixturePath("private/chrome/Default/Cookies")))
+    })
+
+    let publicError: unknown
+    try {
+      await manager.importProfile(source!.token, 'Private failure')
+    } catch (error) {
+      publicError = error
+    }
+
+    expect(publicError).toBeInstanceOf(Error)
+    expect((publicError as Error).message).toBe('Browser Profile import failed')
+    expect((publicError as Error).message).not.toContain(_hygiene_fixturePath("private/chrome"))
+    expect(publicError).not.toHaveProperty('cause')
+    expect(console.error).toHaveBeenCalledWith(
+      'Browser Profile import failed',
+      expect.objectContaining({ message: expect.stringContaining(_hygiene_fixturePath("private/chrome/Default/Cookies")) })
+    )
+  })
+
   it('rolls back every write when CDP rejects one cookie and consumes the token', async () => {
     const { store, manager } = managerFixture()
     await manager.initialize()
     const [source] = manager.detectImportSources()
     electronMocks.setCookieResult({ success: false })
 
-    await expect(manager.importProfile(source!.token, 'Rejected')).rejects.toThrow('rejected imported cookie 1')
+    await expect(manager.importProfile(source!.token, 'Rejected')).rejects.toThrow('Browser Profile import failed')
 
     expect(store.pending).toEqual([])
     expect(store.profiles).toEqual([defaultProfile])
@@ -360,9 +411,7 @@ describe('BrowserProfileManager', () => {
       new Error('partition cleanup failed')
     )
 
-    await expect(manager.importProfile(source!.token, 'Recover later')).rejects.toThrow(
-      'pending partition could not be cleaned'
-    )
+    await expect(manager.importProfile(source!.token, 'Recover later')).rejects.toThrow('Browser Profile import failed')
     expect(store.pending).toEqual([{ profileId: IMPORT_ID, label: 'Recover later', startedAt: 3 }])
   })
 
@@ -372,9 +421,7 @@ describe('BrowserProfileManager', () => {
     const [source] = manager.detectImportSources()
     electronMocks.setNextDetachError(new Error('debugger detach failed'))
 
-    await expect(manager.importProfile(source!.token, 'Detach failure')).rejects.toThrow(
-      'debugger detach failed'
-    )
+    await expect(manager.importProfile(source!.token, 'Detach failure')).rejects.toThrow('Browser Profile import failed')
 
     expect(electronMocks.windows).toHaveLength(1)
     expect(electronMocks.windows[0]!.destroyed).toBe(true)
@@ -396,7 +443,7 @@ describe('BrowserProfileManager', () => {
     releaseLoad()
     await disposing
 
-    await expect(importing).rejects.toThrow('disposed')
+    await expect(importing).rejects.toThrow('Browser Profile import failed')
     expect(store.pending).toEqual([])
     expect(electronMocks.sessionFor(partition(IMPORT_ID)).clearStorageData).toHaveBeenCalledOnce()
   })
