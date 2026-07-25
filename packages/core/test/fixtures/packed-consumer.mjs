@@ -8,7 +8,10 @@ import {
   connectLocalAgentMux,
   connectSshAgentMux
 } from '@agentmux/core'
-import { resolveAgentMuxRegion } from '@agentmux/core/control'
+import {
+  AGENTMUX_CONTROL_SCHEMA_VERSION,
+  resolveAgentMuxRegion
+} from '@agentmux/core/control'
 import { normalizeAgentTimelineMutation } from '@agentmux/core/timeline'
 
 const execFileAsync = promisify(execFile)
@@ -329,7 +332,7 @@ await codexFirst.dispose()
 codexFirst = null
 
 const cliStatus = JSON.parse((await cli(['inspect', '--session', codex.agentSessionId])).stdout)
-assert.equal(cliStatus.schemaVersion, 1)
+assert.equal(cliStatus.schemaVersion, AGENTMUX_CONTROL_SCHEMA_VERSION)
 assert.equal(cliStatus.operation, 'inspect.session')
 assert.equal(cliStatus.result.session.agentSessionId, codex.agentSessionId)
 assert.equal(cliStatus.result.session.run.runId, codex.run.runId)
@@ -468,7 +471,7 @@ assert.deepEqual(
     agentSessionId: followAttached.result.session.agentSessionId
   },
   {
-    schemaVersion: 1,
+    schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
     operation: 'output',
     event: 'attached',
     agentSessionId: codex.agentSessionId

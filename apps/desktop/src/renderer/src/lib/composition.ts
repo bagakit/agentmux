@@ -1,11 +1,40 @@
 import {
   resolveAgentMuxRegion,
-  type AgentMuxCompositionViewRegion,
   type AgentMuxRegion,
-  type AgentMuxRegionPlacement,
-  type AgentMuxRegionTarget,
-  type AgentMuxRelativeRegion
-} from '@agentmux/core/composition'
+  type AgentMuxRegionTarget
+} from '@agentmux/core/control'
+
+export type AgentMuxRegionPlacement =
+  | 'tab'
+  | 'split-left'
+  | 'split-right'
+  | 'split-up'
+  | 'split-down'
+
+export type AgentMuxRelativeRegion =
+  | { kind: 'self' }
+  | { kind: 'region'; regionId: string }
+
+export type AgentMuxCompositionViewRegion =
+  | {
+      regionId: string
+      bounds: { x: number; y: number; width: number; height: number }
+      kind: 'agent'
+      providerId: string
+      executorId: string
+      agentSessionId: string
+    }
+  | {
+      regionId: string
+      bounds: { x: number; y: number; width: number; height: number }
+      kind: 'terminal'
+      runId: string
+    }
+  | {
+      regionId: string
+      bounds: { x: number; y: number; width: number; height: number }
+      kind: 'other'
+    }
 import type { SessionSnapshot } from '../../../shared/contracts'
 import {
   activateTab,
