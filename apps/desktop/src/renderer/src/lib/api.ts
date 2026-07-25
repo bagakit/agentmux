@@ -68,8 +68,7 @@ let mockFiles = new Map<string, string | null>([
   ['apps/desktop/src/renderer', null],
   ['apps/desktop/src/renderer/src', null],
   ['apps/desktop/src/renderer/src/App.tsx', 'export function App() { return null }\n'],
-  ['docs', null],
-  ['docs/orca-agent-runtime-notes.md', '# Orca runtime notes\n']
+  ['docs', null]
 ])
 let mockRevisionSequence = 0
 let mockFileRevisions = new Map<string, string>(
