@@ -455,6 +455,8 @@ export type BrowserBounds = {
 }
 
 export const WINDOW_RESIZE_EVENT_CHANNEL = 'agentmux:window-resize'
+/** Main -> renderer: the user clicked a notification about this Agent Session. */
+export const AGENT_ATTENTION_ACTIVATE_CHANNEL = 'agentmux:agent-attention-activate'
 
 export type WindowResizeEvent = {
   active: boolean
@@ -502,6 +504,23 @@ export type AgentMuxDesktopApi = {
     chooseFiles(input?: { defaultPath?: string }): Promise<string[] | null>
     /** Persists pasted image bytes and returns the path an Agent can read them from. */
     savePastedImage(input: { bytes: Uint8Array; extension: string }): Promise<string>
+    /**
+     * Ask Desktop main to raise a native notification about one Agent Session.
+     *
+     * The renderer decides WHETHER a state change deserves a person's attention; main only delivers,
+     * because only main can reach the OS. The result distinguishes `shown` from `unsupported` so a
+     * caller can fall back to the in-window signal instead of assuming the user was told.
+     */
+    notifyAgentAttention(input: {
+      sessionId: string
+      title: string
+      body: string
+    }): Promise<{ status: 'shown' } | { status: 'unsupported'; reason: string }>
+    /**
+     * Fires when the user clicks one of those notifications, carrying the Session id it was about.
+     * Main focuses the window; WHERE to go inside it stays with the renderer, which owns View/Region.
+     */
+    onAgentAttentionActivate(listener: (sessionId: string) => void): () => void
     getZoomFactor(): number
     onWindowResize(listener: (event: WindowResizeEvent) => void): () => void
   }

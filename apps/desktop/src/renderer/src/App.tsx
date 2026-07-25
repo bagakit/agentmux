@@ -4,6 +4,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { BrandIcon } from './components/BrandIcon'
+import { useAgentAttentionNotifications } from './hooks/useAgentAttentionNotifications'
 import { useSidebarResize } from './hooks/useSidebarResize'
 import {
   TOOL_DOCK_MAX_WIDTH,
@@ -68,6 +69,10 @@ export function App() {
   }, [initialize])
 
   useEffect(() => api.ui.onWindowResize(({ active }) => setWindowResizeActive(active)), [])
+
+  // Background Agents announce themselves: a completion, a request, or a failure the user is not looking
+  // at raises a native notification that routes back to that Session.
+  useAgentAttentionNotifications()
 
   // The window's only global navigation gesture. Captured at the window so it fires before the
   // focused xterm textarea can swallow the keystroke; the toggle lets the same chord dismiss.
