@@ -32,7 +32,7 @@ Browser 不只负责打开网页，还要把网页上下文安全地带给 Agent
 - Main 在当前 WebContents 中安装一次有界选择脚本，返回经过裁剪和脱敏的结构化结果：页面标题与去查询参数 URL、元素角色与可访问名称、选择器、可见文字、安全属性、附近文字、有限 HTML、几何信息和可选 PNG。
 - 页面提供的字符串按不可信输入处理；脚本、事件属性、凭据样式属性和值、URL 查询与 fragment 不进入结果。
 - 同一选择结果可以“复制上下文”或“添加批注”。批注必须绑定 `browserId + navigation identity + element geometry`；导航后旧批注明确失效，不静默贴到另一页面。
-- 多条批注在 Browser Tools 中可查看、删除并一次发送给当前 Agent Composer；未发送批注属于 Desktop Browser 草稿，不属于 Core Activity 或 A2A Conversation。
+- 多条批注在 Browser Tools 中可查看、删除和清空。Browser 被聚焦时系统不猜“当前 Agent”；用户明确选择当前工作区里可输入的 Agent 后，批注只追加到该 Session 的 Composer 草稿，仍要由用户在 Composer 点击发送。未发送批注和 Composer 草稿都属于 Desktop 临时状态，不属于 Core Activity 或 A2A Conversation。
 
 ## 截屏
 

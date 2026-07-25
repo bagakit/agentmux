@@ -6,6 +6,7 @@ import {
   ArrowUpRight,
   Camera,
   Check,
+  Copy,
   Ellipsis,
   Globe2,
   LoaderCircle,
@@ -19,10 +20,16 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   BROWSER_VIEWPORT_PRESETS,
   type BrowserScreenshotCapture,
+  type BrowserElementSelection,
   type BrowserSnapshot,
   type BrowserViewport
 } from '../../../shared/contracts'
 import { api } from '../lib/api'
+import {
+  browserAnnotationMarkers,
+  formatBrowserElementContext,
+  normalizeBrowserAnnotationNote
+} from '../lib/browser-annotations'
 import { composeScreenshot } from './browser-screenshot/compose'
 import {
   ScreenshotEditor,
@@ -65,16 +72,23 @@ export function BrowserPane({
   const toolsOpen = useAppStore((state) => state.toolsOpen)
   const stageRef = useRef<HTMLDivElement>(null)
   const screenshotToken = useRef(0)
+  const selectionToken = useRef(0)
   const browserIdentity = useRef<BrowserIdentity>({ id: tab.browserId, navigationId: tab.navigationId })
   if (browserIdentity.current.id !== tab.browserId || browserIdentity.current.navigationId !== tab.navigationId) {
     browserIdentity.current = { id: tab.browserId, navigationId: tab.navigationId }
     screenshotToken.current += 1
+    selectionToken.current += 1
   }
   const [address, setAddress] = useState(tab.url === 'about:blank' ? '' : tab.url)
   const [busy, setBusy] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [screenshot, setScreenshot] = useState<BrowserScreenshotCapture | null>(null)
   const [screenshotBusy, setScreenshotBusy] = useState(false)
+  const [elementSelection, setElementSelection] = useState<BrowserElementSelection | null>(null)
+  const [selectionBusy, setSelectionBusy] = useState(false)
+  const [annotationNote, setAnnotationNote] = useState('')
+  const annotations = useAppStore((state) => state.browserAnnotationsByBrowserId[tab.browserId] ?? [])
+  const addBrowserAnnotation = useAppStore((state) => state.addBrowserAnnotation)
 
   useEffect(() => {
     setAddress(tab.url === 'about:blank' ? '' : tab.url)
@@ -82,18 +96,27 @@ export function BrowserPane({
 
   useEffect(() => () => {
     screenshotToken.current += 1
+    selectionToken.current += 1
+    void api.browser.cancelElementSelection(tab.browserId).catch(() => {})
   }, [])
 
   useEffect(() => {
-    if (
-      screenshot &&
-      !browserCaptureMatchesIdentity(screenshot, browserIdentity.current)
-    ) {
-      screenshotToken.current += 1
-      setScreenshot(null)
-      setScreenshotBusy(false)
-    }
-  }, [screenshot, tab.browserId, tab.navigationId])
+    setScreenshot(null)
+    setScreenshotBusy(false)
+    setElementSelection(null)
+    setAnnotationNote('')
+    setSelectionBusy(false)
+    void api.browser.cancelElementSelection(tab.browserId).catch(() => {})
+  }, [tab.browserId, tab.navigationId])
+
+  useEffect(() => {
+    const current = annotations.filter(({ navigationId }) => navigationId === tab.navigationId)
+    void api.browser.setAnnotationMarkers(
+      tab.browserId,
+      tab.navigationId,
+      browserAnnotationMarkers(current)
+    ).catch(reportError)
+  }, [annotations, reportError, tab.browserId, tab.navigationId])
 
   useLayoutEffect(() => {
     const stage = stageRef.current
@@ -111,6 +134,7 @@ export function BrowserPane({
           !visible ||
           menuOpen ||
           screenshot !== null ||
+          elementSelection !== null ||
           navigatorCoversBrowser ||
           __AGENTMUX_WEB_PREVIEW__ ||
           tab.error ||
@@ -137,7 +161,7 @@ export function BrowserPane({
       window.removeEventListener('resize', update)
       void api.browser.setBounds(tab.browserId, null).catch(() => {})
     }
-  }, [menuOpen, screenshot, toolsOpen, reportError, tab.browserId, tab.error, tab.url, visible])
+  }, [elementSelection, menuOpen, screenshot, toolsOpen, reportError, tab.browserId, tab.error, tab.url, visible])
 
   async function run(action: () => Promise<BrowserSnapshot>): Promise<void> {
     if (busy) return
@@ -165,7 +189,7 @@ export function BrowserPane({
   }
 
   async function beginScreenshot(): Promise<void> {
-    if (screenshot || screenshotBusy || busy || tab.url === 'about:blank') return
+    if (elementSelection || selectionBusy || screenshot || screenshotBusy || busy || tab.url === 'about:blank') return
     const token = ++screenshotToken.current
     setScreenshotBusy(true)
     try {
@@ -180,6 +204,57 @@ export function BrowserPane({
     } finally {
       if (screenshotToken.current === token) setScreenshotBusy(false)
     }
+  }
+
+  async function beginElementSelection(): Promise<void> {
+    if (selectionBusy || screenshot || screenshotBusy || busy || tab.url === 'about:blank') return
+    const token = ++selectionToken.current
+    setElementSelection(null)
+    setAnnotationNote('')
+    setSelectionBusy(true)
+    try {
+      const selected = await api.browser.selectElement(tab.browserId)
+      if (selectionToken.current !== token || !selected) return
+      if (!browserCaptureMatchesIdentity(selected, browserIdentity.current)) {
+        throw new Error('Browser page changed before the element selection was delivered')
+      }
+      setElementSelection(selected)
+    } catch (error) {
+      if (selectionToken.current === token) reportError(error)
+    } finally {
+      if (selectionToken.current === token) setSelectionBusy(false)
+    }
+  }
+
+  function cancelElementSelection(): void {
+    selectionToken.current += 1
+    setSelectionBusy(false)
+    setElementSelection(null)
+    setAnnotationNote('')
+    void api.browser.cancelElementSelection(tab.browserId).catch(reportError)
+  }
+
+  async function copyElementContext(): Promise<void> {
+    if (!elementSelection) return
+    try {
+      await api.ui.writeClipboardText(formatBrowserElementContext(elementSelection))
+      cancelElementSelection()
+    } catch (error) {
+      reportError(error)
+    }
+  }
+
+  function addElementAnnotation(): void {
+    if (!elementSelection) return
+    addBrowserAnnotation({
+      id: crypto.randomUUID(),
+      workspaceId: tab.workspaceId,
+      browserId: tab.browserId,
+      navigationId: tab.navigationId,
+      selection: elementSelection,
+      note: normalizeBrowserAnnotationNote(annotationNote)
+    })
+    cancelElementSelection()
   }
 
   function cancelScreenshot(): void {
@@ -245,8 +320,14 @@ export function BrowserPane({
           />
         </label>
         {toolbar?.selectElement ? (
-          <button type="button" aria-label="Select element — unavailable" title="Select element — available after Browser selection is installed" disabled>
-            <ScanSearch size={14} />
+          <button
+            type="button"
+            aria-label={selectionBusy ? 'Cancel element selection' : 'Select element'}
+            title={selectionBusy ? 'Cancel element selection' : 'Select an element for context or annotation'}
+            disabled={tab.url === 'about:blank' || busy || screenshotBusy || screenshot !== null || elementSelection !== null}
+            onClick={() => selectionBusy ? cancelElementSelection() : void beginElementSelection()}
+          >
+            {selectionBusy ? <LoaderCircle className="spin" size={14} /> : <ScanSearch size={14} />}
           </button>
         ) : null}
         {toolbar?.screenshot ? (
@@ -254,7 +335,7 @@ export function BrowserPane({
             type="button"
             aria-label="Screenshot"
             title="Capture and mark up this viewport"
-            disabled={tab.url === 'about:blank' || busy || screenshotBusy || screenshot !== null}
+            disabled={tab.url === 'about:blank' || busy || screenshotBusy || screenshot !== null || selectionBusy || elementSelection !== null}
             onClick={() => void beginScreenshot()}
           >
             {screenshotBusy && !screenshot ? <LoaderCircle className="spin" size={14} /> : <Camera size={14} />}
@@ -327,6 +408,30 @@ export function BrowserPane({
             onCancel={cancelScreenshot}
             onComplete={(input) => void copyScreenshot(input)}
           />
+        ) : elementSelection ? (
+          <section className="browser-selection-result" aria-label="Selected element context">
+            <header><ScanSearch size={17} /><span><strong>{elementSelection.accessibleName || `<${elementSelection.tagName}>`}</strong><small>{elementSelection.pageTitle || elementSelection.pageUrl}</small></span></header>
+            <dl>
+              <div><dt>Element</dt><dd>{`<${elementSelection.tagName}>${elementSelection.role ? ` · ${elementSelection.role}` : ''}`}</dd></div>
+              <div><dt>Selector</dt><dd>{elementSelection.selector || 'No stable selector'}</dd></div>
+              <div><dt>Text</dt><dd>{elementSelection.text || 'No visible text'}</dd></div>
+            </dl>
+            <label>
+              <span>Annotation note</span>
+              <textarea
+                aria-label="Annotation note"
+                value={annotationNote}
+                maxLength={1_000}
+                placeholder="What should the Agent notice about this element?"
+                onChange={(event) => setAnnotationNote(event.target.value)}
+              />
+            </label>
+            <footer>
+              <button className="small-button" type="button" onClick={cancelElementSelection}>Cancel</button>
+              <button className="small-button" type="button" onClick={() => void copyElementContext()}><Copy size={12} /> Copy context</button>
+              <button className="primary-button" type="button" onClick={addElementAnnotation}><Check size={12} /> Add annotation</button>
+            </footer>
+          </section>
         ) : tab.error ? (
           <div className="pane-state pane-state--error">
             <AlertTriangle size={20} />

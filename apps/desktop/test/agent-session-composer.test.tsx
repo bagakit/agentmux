@@ -11,6 +11,9 @@ const fixture = vi.hoisted(() => ({
       workspaces: [{ id: 'workspace', name: 'Project', hostId: 'local', path: '/repo', kind: 'folder' as const }]
     },
     lastActiveFileByWorkspace: { workspace: 'src/index.ts' } as Record<string, string>,
+    agentComposerDrafts: {} as Record<string, string>,
+    setAgentComposerDraft: vi.fn(),
+    clearAgentComposerDraftIfUnchanged: vi.fn(),
     send: vi.fn(async () => {}),
     interrupt: vi.fn(async () => {})
   }
@@ -60,8 +63,11 @@ function agentSession(overrides: Partial<Extract<SessionSnapshot, { kind: 'agent
 
 afterEach(() => {
   fixture.state.sessions = []
+  fixture.state.agentComposerDrafts = {}
   fixture.state.send.mockClear()
   fixture.state.interrupt.mockClear()
+  fixture.state.setAgentComposerDraft.mockClear()
+  fixture.state.clearAgentComposerDraftIfUnchanged.mockClear()
 })
 
 describe('AgentSessionComposer adapter', () => {
@@ -74,6 +80,46 @@ describe('AgentSessionComposer adapter', () => {
     expect(markup).toContain('placeholder="Ask, steer, or paste a command…"')
     expect(markup).toContain('index.ts')
     expect(markup).not.toMatch(/<textarea[^>]*disabled=""/)
+  })
+
+  it('projects a Browser context handoff from the shared per-session draft', () => {
+    fixture.state.sessions = [agentSession()]
+    fixture.state.agentComposerDrafts = { 'agent-1': 'Browser element context\nSelector: main > button' }
+
+    const markup = renderToStaticMarkup(createElement(AgentSessionComposer, { sessionId: 'agent-1' }))
+
+    expect(markup).toContain('Browser element context')
+    expect(markup).toContain('Selector: main &gt; button')
+  })
+
+  it('submits and compare-clears the exact shared draft snapshot', async () => {
+    fixture.state.sessions = [agentSession()]
+    fixture.state.agentComposerDrafts = { 'agent-1': 'Browser element context' }
+    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
+      props: { onSubmit(): void }
+    }
+
+    composer.props.onSubmit()
+
+    await vi.waitFor(() => {
+      expect(fixture.state.send).toHaveBeenCalledWith('agent-1', 'Browser element context')
+      expect(fixture.state.clearAgentComposerDraftIfUnchanged)
+        .toHaveBeenCalledWith('agent-1', 'Browser element context')
+    })
+  })
+
+  it('keeps the shared draft when prompt submission fails', async () => {
+    fixture.state.sessions = [agentSession()]
+    fixture.state.agentComposerDrafts = { 'agent-1': 'Retry this context' }
+    fixture.state.send.mockRejectedValueOnce(new Error('submit failed'))
+    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
+      props: { onSubmit(): void }
+    }
+
+    composer.props.onSubmit()
+
+    await vi.waitFor(() => expect(fixture.state.send).toHaveBeenCalledOnce())
+    expect(fixture.state.clearAgentComposerDraftIfUnchanged).not.toHaveBeenCalled()
   })
 
   it('does not guess that a disconnected running process can accept input', () => {

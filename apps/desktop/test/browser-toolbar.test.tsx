@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AppConfig } from '../src/shared/contracts.js'
+import type { AppConfig, SessionSnapshot } from '../src/shared/contracts.js'
+import type { BrowserAnnotation } from '../src/renderer/src/lib/browser-annotations.js'
 import {
   BROWSER_TOOLBAR_ITEM_ORDER,
   withBrowserToolbarItem
@@ -13,6 +14,8 @@ const fixture = vi.hoisted(() => {
       applyBrowserEvent: vi.fn(),
       reportError: vi.fn(),
       setConfig: vi.fn(),
+      browserAnnotationsByBrowserId: {},
+      addBrowserAnnotation: vi.fn(),
       toolsOpen: false,
       config: null as AppConfig | null
     }
@@ -31,6 +34,7 @@ import {
   BrowserPane
 } from '../src/renderer/src/components/BrowserPane.js'
 import { BrowserToolbarPreferences } from '../src/renderer/src/components/SurfaceToolDock.js'
+import { BrowserAnnotationsPanel } from '../src/renderer/src/components/SurfaceToolDock.js'
 
 const config: AppConfig = {
   version: 7,
@@ -65,6 +69,61 @@ const tab = {
   error: null
 }
 
+const annotation: BrowserAnnotation = {
+  id: 'annotation-1',
+  workspaceId: 'workspace-1',
+  browserId: 'browser-1',
+  navigationId: 'navigation-1',
+  note: 'Check this control',
+  selection: {
+    browserId: 'browser-1',
+    navigationId: 'navigation-1',
+    pageTitle: 'Example',
+    pageUrl: 'https://example.com/',
+    tagName: 'button',
+    role: 'button',
+    accessibleName: 'Open settings',
+    selector: 'button.settings',
+    text: 'Settings',
+    nearbyText: [],
+    attributes: {},
+    html: '<button>Settings</button>',
+    rectViewport: { x: 1, y: 2, width: 3, height: 4 },
+    rectPage: { x: 1, y: 2, width: 3, height: 4 },
+    isFixed: false
+  }
+}
+
+function agentSession(
+  id: string,
+  status: Extract<SessionSnapshot, { kind: 'agent' }>['status']
+): Extract<SessionSnapshot, { kind: 'agent' }> {
+  return {
+    id,
+    kind: 'agent',
+    providerId: 'codex',
+    executorId: 'codex',
+    capabilities: {
+      terminal: true,
+      hookEvents: true,
+      timeline: 'complete-events',
+      permission: 'observe',
+      providerResume: true,
+      acp: false,
+      replyCorrelation: 'none'
+    },
+    hostId: 'local',
+    workspacePath: '/repo',
+    label: id,
+    createdAt: 1,
+    updatedAt: 1,
+    processState: 'running',
+    status,
+    latestOutputBytes: 0,
+    control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId: `run-${id}` } }
+  }
+}
+
 beforeEach(() => {
   fixture.state.config = structuredClone(config)
 })
@@ -93,7 +152,7 @@ describe('Browser bar contract', () => {
       'Forward',
       'Reload',
       'Browser address',
-      'Select element — unavailable',
+      'Select element',
       'Screenshot',
       'Open DevTools',
       'Viewport',
@@ -123,7 +182,7 @@ describe('Browser bar contract', () => {
     const markup = renderToStaticMarkup(<BrowserPane tab={tab} visible />)
 
     expect(markup).toContain('aria-label="Open in external browser"')
-    expect(markup).not.toContain('Select element — unavailable')
+    expect(markup).not.toContain('aria-label="Select element"')
     expect(markup).not.toContain('aria-label="Screenshot"')
     expect(markup).not.toContain('aria-label="Open DevTools"')
     expect(markup).not.toContain('aria-label="Viewport"')
@@ -140,5 +199,35 @@ describe('Browser bar contract', () => {
     expect(markup).toContain('External open is always visible.')
     expect(markup).toContain('<span>More</span>')
     expect(markup).toContain('Save Browser bar')
+  })
+
+  it('projects current and stale annotations and only eligible Agent targets', () => {
+    const markup = renderToStaticMarkup(
+      <BrowserAnnotationsPanel
+        annotations={[
+          annotation,
+          {
+            ...annotation,
+            id: 'annotation-2',
+            navigationId: 'navigation-old',
+            selection: { ...annotation.selection, navigationId: 'navigation-old' }
+          }
+        ]}
+        currentNavigationByBrowserId={{ 'browser-1': 'navigation-1' }}
+        agentSessions={[
+          agentSession('ready-agent', { state: 'working', source: 'native-hook', observedAt: 1 }),
+          agentSession('offline-agent', { state: 'disconnected', source: 'run-process', observedAt: 1 })
+        ]}
+        onDelete={() => {}}
+        onClear={() => {}}
+        onAddToComposer={() => {}}
+      />
+    )
+
+    expect(markup).toContain('Check this control')
+    expect(markup).toContain('Page changed · annotation is stale')
+    expect(markup).toContain('value="ready-agent"')
+    expect(markup).not.toContain('value="offline-agent"')
+    expect(markup).toContain('Add to Composer')
   })
 })
