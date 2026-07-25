@@ -172,6 +172,12 @@ function projectSession(
       label: `${executorLabel} · ${workspaceLabel(config, subject.hostId, subject.workspacePath)}`,
       createdAt: subject.agentSession.createdAt,
       updatedAt: Math.max(subject.agentSession.updatedAt, observedAt),
+      // The posture the create fixed at spawn. Projected as ids only: a surface resolves them against
+      // the Provider's own catalog declaration for labels, so the argv stays in Core. Absent when the
+      // create narrowed nothing, which a surface must show as "no scope declared" rather than a guess.
+      ...(subject.agentSession.launchOptions
+        ? { launchOptions: subject.agentSession.launchOptions }
+        : {}),
       processState: run.state,
       ...(run.state === 'interrupted' && run.interruptionReason
         ? { interruptionReason: run.interruptionReason }

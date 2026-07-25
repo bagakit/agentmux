@@ -265,6 +265,15 @@ export type SessionSnapshot = SessionSnapshotBase & (
       executorId: AgentExecutorId
       capabilities: AgentCapabilities
       pendingInteraction?: AgentMuxInteractionRequest
+      /**
+       * The launch-option choice ids that fixed this Agent's security posture at spawn, projected from
+       * the Core Session record so a surface can show what this Agent is ALLOWED to do without asking
+       * the user to remember what they picked. This is the DESCRIBE half only — ids, resolved against
+       * the Provider's catalog declaration for labels. The argv these ids resolve to never leaves Core.
+       * Absent when the create narrowed nothing, in which case the Agent runs on the Provider's own
+       * defaults and no scope is displayed rather than a guess.
+       */
+      launchOptions?: LaunchOptionSelection
       control: AgentSessionControl
     }
   | { kind: 'terminal'; providerId: null; control: TerminalSessionControl }
