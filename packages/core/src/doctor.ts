@@ -136,7 +136,7 @@ export async function diagnoseAgentMux(options: DiagnoseAgentMuxOptions): Promis
         },
         remote: {
           status: 'unsupported',
-          action: 'Remote is unsupported until the ctxmux Remote contract is delivered in T-021.'
+          action: 'Remote is unsupported until the ctxmux Remote contract is delivered.'
         }
       },
       agents,
@@ -170,7 +170,7 @@ export async function diagnoseAgentMux(options: DiagnoseAgentMuxOptions): Promis
         },
         remote: {
           status: 'unsupported',
-          action: 'Remote is unsupported until the ctxmux Remote contract is delivered in T-021.'
+          action: 'Remote is unsupported until the ctxmux Remote contract is delivered.'
         }
       },
       agents: catalog.map(blockedAgent),
