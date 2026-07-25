@@ -504,11 +504,12 @@ async function runExplorerInteractionProbe(options: {
       `${projectRowSource(options.workspacePath)}?.classList.contains('project-rail-row--active') === true`
     ) as boolean
   ))
-  await waitFor('revisited active and neighbor rows and expanded collision target', async () => (
+  await waitFor('revisited active and neighbor rows and expanded collision target and restored children', async () => (
     await window.webContents.executeJavaScript(
       `${treeRowSource('explorer-source/menu.txt')}?.getAttribute('aria-selected') === 'true' && ` +
       `${treeRowSource('explorer-source/menu-neighbor.txt')}?.getAttribute('aria-selected') === 'true' && ` +
-      `${treeRowSource('targets/collision')}?.getAttribute('aria-expanded') === 'true'`
+      `${treeRowSource('targets/collision')}?.getAttribute('aria-expanded') === 'true' && ` +
+      `Boolean(${treeRowSource('targets/collision/drag-invalid.txt')})`
     ) as boolean
   ))
   const afterRevisit = await explorerProjection(window)
