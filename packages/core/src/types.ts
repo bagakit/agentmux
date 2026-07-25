@@ -17,9 +17,12 @@ export type AgentProviderId = BuiltInAgentProviderId | (string & {})
  * options, and posture modes all rank one choice's danger with these exact three values, and every
  * renderer surfaces them the same way: a restrained dot, never a stroke or fill. One identity in one
  * place — a launch choice, a permission row, and a posture mode that read as equally dangerous carry the
- * same token, so the ranking cannot drift between the three.
+ * same token, so the ranking cannot drift between the three. The tuple is the SSOT: {@link RiskTier}
+ * derives from it and a runtime validator (agent-session-store) reuses it to fail-close on foreign data,
+ * so the type and the on-disk whitelist cannot fall out of step.
  */
-export type RiskTier = 'safe' | 'caution' | 'danger'
+export const RISK_TIERS = ['safe', 'caution', 'danger'] as const
+export type RiskTier = (typeof RISK_TIERS)[number]
 
 export type AgentExecutorId = string
 

@@ -4,6 +4,7 @@ import { mkdir, open, readFile, readdir, rename, stat, unlink, writeFile } from 
 import { dirname, join } from 'node:path'
 import { defaultAgentMuxRuntimeDirectory } from './runtime-paths.js'
 import { normalizeAgentInteractionResponse } from './agent-interaction.js'
+import { RISK_TIERS } from './types.js'
 import {
   applyAgentTimelineMutation,
   normalizeAgentTimeline,
@@ -480,7 +481,7 @@ function interactionRequest(value: unknown): AgentMuxInteractionRequest {
       const description = option.description === undefined
         ? undefined
         : text(option.description, `pendingInteraction.request.options[${index}].description`)
-      if (option.tier !== undefined && !['safe', 'caution', 'danger'].includes(String(option.tier))) {
+      if (option.tier !== undefined && !RISK_TIERS.includes(option.tier as RiskTier)) {
         throw new AgentMuxError('Permission option tier is invalid.', 'INVALID_AGENT_SESSION_STORE')
       }
       return {
