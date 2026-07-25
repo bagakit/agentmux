@@ -7,7 +7,7 @@ import {
   type AgentMuxControlResult,
   type AgentMuxRegion
 } from '@agentmux/core/control'
-import type { AgentCatalogEntry } from '@agentmux/core'
+import type { AgentCatalogEntry, AgentMuxInteractionResponse } from '@agentmux/core'
 import type {
   AgentLaunchResult,
   AgentSessionRecoveryCandidate,
@@ -303,6 +303,7 @@ type AppState = {
   appendAgentComposerDraft(sessionId: string, text: string): void
   clearAgentComposerDraftIfUnchanged(sessionId: string, expectedText: string): void
   send(sessionId: string, text: string): Promise<void>
+  respondInteraction(sessionId: string, response: AgentMuxInteractionResponse): Promise<void>
   interrupt(sessionId: string): Promise<void>
   refreshSession(sessionId: string): Promise<void>
   recoverSession(sessionId: string): Promise<void>
@@ -2738,6 +2739,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!session || session.kind !== 'agent') return
     try {
       await api.sessions.submitPrompt(session.control, text)
+    } catch (error) {
+      get().reportError(error)
+      throw error
+    }
+  },
+  async respondInteraction(sessionId, response) {
+    const session = get().sessions.find((item) => item.id === sessionId)
+    if (!session || session.kind !== 'agent') return
+    try {
+      await api.sessions.respondInteraction(session.control, response)
     } catch (error) {
       get().reportError(error)
       throw error

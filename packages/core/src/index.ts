@@ -1,4 +1,5 @@
 export * from './agent-provider.js'
+export * from './agent-interaction.js'
 export * from './acp-adapter.js'
 export * from './client.js'
 export * from './control.js'

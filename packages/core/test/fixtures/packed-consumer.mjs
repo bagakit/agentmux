@@ -26,9 +26,10 @@ const fakeCodex = process.env.AGENTMUX_FAKE_CODEX
 const agentmuxCli = process.env.AGENTMUX_CLI_PATH
 const lifecycleCrashFixture = process.env.AGENTMUX_LIFECYCLE_CRASH_FIXTURE
 const promptCrashFixture = process.env.AGENTMUX_PROMPT_CRASH_FIXTURE
+const interactionCrashFixture = process.env.AGENTMUX_INTERACTION_CRASH_FIXTURE
 assert.ok(
   controlFixture && stubbornFixture && fakeCodex && agentmuxCli &&
-  lifecycleCrashFixture && promptCrashFixture
+  lifecycleCrashFixture && promptCrashFixture && interactionCrashFixture
 )
 
 const ownedChildren = new Set()
@@ -280,7 +281,10 @@ const codex = await codexFirst.createAgent({
   workspacePath: process.cwd(),
   prompt: 'first',
   commandOverride: fakeCodex,
-  env: { AGENTMUX_FAKE_PROMPT_RENDER_MODE: 'historical-match' }
+  env: {
+    AGENTMUX_FAKE_PROMPT_RENDER_MODE: 'historical-match',
+    AGENTMUX_FAKE_PERMISSION_REQUEST: '1'
+  }
 })
 assert.equal('hookBindingId' in codex, false)
 assert.equal('hookToken' in codex, false)
@@ -306,6 +310,36 @@ await waitFor('Codex native Hook identity', () => (
   codexFirstEvents.some((event) => (
     event.type === 'agent-status' && event.agentSessionId === codex.agentSessionId && event.state === 'waiting'
   ))
+))
+const initialInteraction = codexFirst.agentSession(codex.agentSessionId).pendingInteraction?.request
+assert.equal(initialInteraction?.kind, 'permission')
+assert.equal(codexFirstEvents.some((event) => (
+  event.type === 'interaction' && event.request.id === initialInteraction.id
+)), true)
+await assert.rejects(
+  codexFirst.submitAgentPrompt({
+    agentSessionId: codex.agentSessionId,
+    operationId: 'packed-prompt-while-interaction-pending',
+    prompt: 'must-not-bypass-permission'
+  }),
+  (error) => error?.code === 'AGENT_INTERACTION_PENDING'
+)
+await assert.rejects(
+  codexFirst.writeAgent(codex.agentSessionId, '1'),
+  (error) => error?.code === 'AGENT_INTERACTION_PENDING'
+)
+await codexFirst.respondAgentInteraction({
+  agentSessionId: codex.agentSessionId,
+  expectedRun: codex.run,
+  response: {
+    kind: 'permission',
+    requestId: initialInteraction.id,
+    decision: { outcome: 'selected', optionId: 'allow-once' }
+  }
+})
+await waitFor('Codex permission response settlement', () => (
+  codexFirst.agentSession(codex.agentSessionId).pendingInteraction === undefined &&
+  output(codexFirstEvents, codex.run.runId).includes('codex-permission-allowed')
 ))
 const initialReadiness = await waitFor('Codex ready prompt epoch', () => {
   const readiness = codexFirst.agentSession(codex.agentSessionId).terminalPromptReadiness
@@ -590,7 +624,7 @@ assert.equal(
     .result.session.run.runId,
   codex.run.runId
 )
-await cli(['send', '--to-session', codex.agentSessionId, '--text', 'continue'])
+await cli(['send', '--to-session', codex.agentSessionId, '--text', 'continue\nwith details'])
 await cli(['interrupt', '--session', codex.agentSessionId])
 
 const codexSecond = await connectLocalAgentMux()
@@ -606,14 +640,19 @@ const replayText = codexAttachment.attachment.replay.map((event) => event.data).
 const liveText = () => codexSecondEvents.flatMap((event) => (
   event.type === 'terminal-output' ? [event.data] : []
 )).join('')
-await waitFor('Codex Provider submit sequence', () => (
-  `${replayText}${liveText()}`.includes('codex-submit:continue:accepted')
+const normalizeOutput = (text) => text.replaceAll('\r\n', '\n')
+const currentCodexOutput = async () => {
+  const snapshot = await codexSecond.readRunReplay(codex.run, 0)
+  return normalizeOutput(snapshot.replay.map((event) => event.data).join('') + liveText())
+}
+await waitFor('Codex Provider submit sequence', async () => (
+  (await currentCodexOutput()).includes('codex-submit:continue\nwith details:accepted')
 ))
-const codexReplayText = `${replayText}${liveText()}`
+const codexReplayText = normalizeOutput(`${replayText}${await currentCodexOutput()}`)
 assert.equal(codexReplayText.includes('codex-ready:first'), true)
-assert.equal(codexReplayText.includes('codex-submit:continue:accepted'), true)
+assert.equal(codexReplayText.includes('codex-submit:continue\nwith details:accepted'), true)
 assert.equal(
-  codexReplayText.includes(`codex-composer-rendered:${Buffer.byteLength('continue')}`),
+  codexReplayText.includes(`codex-composer-rendered:${Buffer.byteLength('continue\nwith details')}`),
   true
 )
 assert.equal(codexReplayText.includes('codex-composer-near-miss'), true)
@@ -625,12 +664,12 @@ assert.equal(codexReplayText.includes('\u001b[13u'), false)
 const timelineAfterSubmittedPrompt = await codexSecond.sessionTimeline(codex.agentSessionId)
 assert.ok(timelineAfterSubmittedPrompt.revision > initialTimeline.revision)
 assert.equal(timelineAfterSubmittedPrompt.items.some((item) => (
-  item.kind === 'user_message' && item.source === 'user' && item.content === 'continue'
+  item.kind === 'user_message' && item.source === 'user' && item.content === 'continue\nwith details'
 )), true)
 const handshakeQueryIndex = codexReplayText.indexOf('\u001b[?u')
 const handshakeAckIndex = codexReplayText.indexOf('codex-handshake:kitty-flags-0')
 const initialPromptIndex = codexReplayText.indexOf('codex-ready:first')
-const submittedPromptIndex = codexReplayText.indexOf('codex-submit:continue:accepted')
+const submittedPromptIndex = codexReplayText.indexOf('codex-submit:continue\nwith details:accepted')
 assert.ok(handshakeQueryIndex >= 0)
 assert.ok(handshakeAckIndex > handshakeQueryIndex)
 assert.ok(initialPromptIndex > handshakeAckIndex)
@@ -653,6 +692,19 @@ try {
     outputTail: debugAttachment.result.replay.map((event) => event.data).join('').slice(-1_500)
   }, null, 2)}`)
 }
+const oversizedPrompt = 'x'.repeat(64 * 1024 + 1)
+await assert.rejects(
+  codexSecond.submitAgentPrompt({
+    agentSessionId: codex.agentSessionId,
+    operationId: 'packed-codex-oversized-prompt',
+    prompt: oversizedPrompt
+  }),
+  (error) => error?.code === 'INVALID_AGENT_PROMPT'
+)
+await waitFor('ready prompt epoch after long input', () => {
+  const readiness = codexSecond.agentSession(codex.agentSessionId).terminalPromptReadiness
+  return readiness?.readyThroughByte === undefined ? null : readiness
+})
 await codexSecond.submitAgentPrompt({
   agentSessionId: codex.agentSessionId,
   operationId: 'packed-codex-exit',
@@ -832,7 +884,7 @@ assert.ok(resumedTimeline.revision > timelineAfterSubmittedPrompt.revision)
 assert.equal(resumedTimeline.items.some((item) => (
   item.kind === 'user_message' && item.source === 'user' && item.content === resumePrompt
 )), true)
-assert.equal(resumedTimeline.items.some((item) => item.content === 'continue'), true)
+assert.equal(resumedTimeline.items.some((item) => item.content === 'continue\nwith details'), true)
 assert.equal(resumedTimeline.items.some((item) => item.id.startsWith(`${resumed.run.runId}:`)), true)
 await waitFor('resumed Codex ready prompt epoch', () => (
   codexThird.agentSession(resumed.agentSessionId).terminalPromptReadiness?.readyThroughByte !== undefined
@@ -1683,6 +1735,37 @@ await promptSubmitBeforeAckRecovered.stopAgent(
 )
 await promptSubmitBeforeAckRecovered.dispose()
 
+const interactionCrashWorker = spawnOwned(process.execPath, [interactionCrashFixture], {
+  cwd: process.cwd(),
+  stdio: ['ignore', 'pipe', 'pipe'],
+  env: { ...process.env, AGENTMUX_FAKE_CODEX: fakeCodex }
+})
+const interactionCrashCheckpoint = await firstJsonLine(
+  interactionCrashWorker,
+  'interaction response crash worker'
+)
+assert.equal(interactionCrashCheckpoint.type, 'interaction-input-applied-before-store-ack')
+const [interactionCrashCode] = await once(interactionCrashWorker, 'exit')
+assert.equal(interactionCrashCode, 94)
+
+const interactionRecovered = await connectLocalAgentMux()
+const recoveredInteractionSession = interactionRecovered.agentSession(
+  interactionCrashCheckpoint.agentSessionId
+)
+assert.equal(recoveredInteractionSession.pendingInteraction, undefined)
+const recoveredInteractionRun = await interactionRecovered.statusAgent(
+  interactionCrashCheckpoint.agentSessionId
+)
+assert.equal(recoveredInteractionRun.run.state, 'exited')
+assert.ok(
+  recoveredInteractionRun.run.acceptedInputBytes >= interactionCrashCheckpoint.inputByteRange.endByte
+)
+await interactionRecovered.stopAgent(
+  interactionCrashCheckpoint.agentSessionId,
+  { runId: interactionCrashCheckpoint.runId }
+)
+await interactionRecovered.dispose()
+
 const acpStore = new AgentMuxFileAgentSessionStore()
 const acpSession = {
   kind: 'agent',
@@ -1808,6 +1891,7 @@ process.stdout.write(`${JSON.stringify({
     'crash-recovered-once'
   ],
   promptCrashRecovery: true,
+  interactionCrashRecovery: true,
   cliResolveKinds: ['agent-session', 'provider-native', 'acp-native', 'run'],
   cliControl: true,
   naturalTerminalStop: true,

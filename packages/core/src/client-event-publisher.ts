@@ -5,7 +5,7 @@ import type {
   AgentMuxAgentSession,
   AgentMuxClientEvent,
   AgentMuxEvidence,
-  AgentMuxPermissionRequest,
+  AgentMuxInteractionRequest,
   AgentMuxRun,
   AgentMuxRunDataEvent,
   AgentMuxRunExitEvent,
@@ -155,18 +155,9 @@ export class AgentMuxClientEventPublisher {
       })
       return
     }
-    if (event.type === 'activity') return
-    if (event.type === 'permission') {
-      const request: AgentMuxPermissionRequest = {
-        id: event.requestId,
-        agentSessionId,
-        title: event.title,
-        options: event.options.map((option) => ({ ...option })),
-        evidence,
-        ...(event.toolName === undefined ? {} : { toolName: event.toolName }),
-        ...(event.toolInput === undefined ? {} : { toolInput: event.toolInput })
-      }
-      this.publish({ type: 'permission', request })
-    }
+  }
+
+  publishInteraction(request: AgentMuxInteractionRequest): void {
+    this.publish({ type: 'interaction', request: structuredClone(request) })
   }
 }

@@ -10,6 +10,8 @@ const agentSessionId = process.env.AGENTMUX_AGENT_SESSION_ID
 const providerId = process.env.AGENTMUX_PROVIDER_ID
 const readyMode = process.env.AGENTMUX_FAKE_READY_MODE ?? 'before-delayed'
 const promptRenderMode = process.env.AGENTMUX_FAKE_PROMPT_RENDER_MODE ?? 'normal'
+const publishPermissionRequest = process.env.AGENTMUX_FAKE_PERMISSION_REQUEST === '1'
+const exitAfterPermission = process.env.AGENTMUX_FAKE_EXIT_AFTER_PERMISSION === '1'
 const handshakeQueryDelay = Number(process.env.AGENTMUX_FAKE_HANDSHAKE_QUERY_DELAY_MS ?? '0')
 
 if (!hookUrl || !hookToken || !agentSessionId || !providerId) {
@@ -60,13 +62,38 @@ let stopGeneration = 0
 let payloadStopPublished = false
 let controlledReadyPending = false
 let resolveHandshake
+let permissionPending = false
+let resolvePermission
+let terminalProtocolInput = ''
 const handshake = new Promise((resolve) => { resolveHandshake = resolve })
+const permission = new Promise((resolve) => { resolvePermission = resolve })
+const decodeTerminalInput = (data) => {
+  const start = '\u001b[200~'
+  const end = '\u001b[201~'
+  terminalProtocolInput += data
+  if (start.startsWith(terminalProtocolInput)) return null
+  if (!terminalProtocolInput.startsWith(start)) {
+    const decoded = terminalProtocolInput
+    terminalProtocolInput = ''
+    return decoded
+  }
+  const endIndex = terminalProtocolInput.indexOf(end, start.length)
+  if (endIndex < 0) return null
+  const decoded = terminalProtocolInput.slice(start.length, endIndex) +
+    terminalProtocolInput.slice(endIndex + end.length)
+  terminalProtocolInput = ''
+  return decoded
+}
 const writeDiagnostic = (value) => {
   process.stdout.write(`\u001b[s\u001b[24;1H${value}\u001b[K\u001b[u`)
 }
 const writeComposerFrame = (value) => {
   process.stdout.write('\u001b[?2026h\u001b[22;3H')
   for (const [index, character] of Array.from(value).entries()) {
+    if (character === '\n') {
+      process.stdout.write('\u001b[K\r\n')
+      continue
+    }
     process.stdout.write(`\u001b[${index % 2 === 0 ? '32' : '36'}m${character}\u001b[0m`)
   }
   process.stdout.write('\u001b[K\u001b[?2026l')
@@ -155,6 +182,20 @@ process.stdin.on('data', (data) => {
     }
     return
   }
+  if (permissionPending) {
+    if (data === '1' || data === '\u001b') {
+      permissionPending = false
+      writeDiagnostic(data === '1' ? 'codex-permission-allowed' : 'codex-permission-cancelled')
+      resolvePermission()
+      if (exitAfterPermission) setImmediate(() => process.exit(0))
+    } else {
+      writeDiagnostic('codex-unexpected-permission-input')
+    }
+    return
+  }
+  const decodedInput = decodeTerminalInput(data)
+  if (decodedInput === null) return
+  data = decodedInput
   if (controlledReadyPending && data === '\u001d') {
     writeReadyFrame()
     return
@@ -219,11 +260,15 @@ if (process.env.AGENTMUX_FAKE_OMIT_HANDLE !== '1') {
     eventName: 'SessionStart',
     payload: { session_id: `native-${agentSessionId}`, prompt }
   })
-  await request({
-    receiptId: `permission-${agentSessionId}`,
-    eventName: 'PermissionRequest',
-    payload: { session_id: `native-${agentSessionId}`, tool_name: 'request_user_input' }
-  })
+  if (publishPermissionRequest) {
+    permissionPending = true
+    await request({
+      receiptId: `permission-${agentSessionId}`,
+      eventName: 'PermissionRequest',
+      payload: { session_id: `native-${agentSessionId}`, tool_name: 'request_user_input' }
+    })
+    await permission
+  }
 }
 process.stdout.write(`codex-ready:${prompt}\n`)
 await settleTurn()

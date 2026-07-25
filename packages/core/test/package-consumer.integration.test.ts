@@ -19,6 +19,7 @@ const stubbornFixture = fileURLToPath(new URL('./fixtures/stubborn-process-tree.
 const fakeCodexFixture = fileURLToPath(new URL('./fixtures/fake-codex-cli.mjs', import.meta.url))
 const lifecycleCrashFixture = fileURLToPath(new URL('./fixtures/lifecycle-crash-worker.mjs', import.meta.url))
 const promptCrashFixture = fileURLToPath(new URL('./fixtures/prompt-submit-crash-worker.mjs', import.meta.url))
+const interactionCrashFixture = fileURLToPath(new URL('./fixtures/interaction-response-crash-worker.mjs', import.meta.url))
 const runtimeScopePreloadFixture = fileURLToPath(new URL('./fixtures/runtime-scope-preload.mjs', import.meta.url))
 const ownerReceiptFailureFixture = fileURLToPath(new URL('./fixtures/ctxmux-owner-receipt-failure.mjs', import.meta.url))
 const ownerRelocationFixture = fileURLToPath(new URL('./fixtures/ctxmux-owner-relocation.mjs', import.meta.url))
@@ -392,6 +393,7 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         cp(fakeCodexFixture, join(consumerDirectory, 'bin', 'codex')),
         cp(lifecycleCrashFixture, join(consumerDirectory, 'lifecycle-crash-worker.mjs')),
         cp(promptCrashFixture, join(consumerDirectory, 'prompt-submit-crash-worker.mjs')),
+        cp(interactionCrashFixture, join(consumerDirectory, 'interaction-response-crash-worker.mjs')),
         cp(runtimeScopePreloadFixture, join(consumerDirectory, 'runtime-scope-preload.mjs')),
         cp(ownerReceiptFailureFixture, join(consumerDirectory, 'ctxmux-owner-receipt-failure.mjs')),
         cp(ownerRelocationFixture, join(consumerDirectory, 'ctxmux-owner-relocation.mjs')),
@@ -499,6 +501,7 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
             AGENTMUX_FAKE_CODEX: join(consumerDirectory, 'bin', 'codex'),
             AGENTMUX_LIFECYCLE_CRASH_FIXTURE: join(consumerDirectory, 'lifecycle-crash-worker.mjs'),
             AGENTMUX_PROMPT_CRASH_FIXTURE: join(consumerDirectory, 'prompt-submit-crash-worker.mjs'),
+            AGENTMUX_INTERACTION_CRASH_FIXTURE: join(consumerDirectory, 'interaction-response-crash-worker.mjs'),
             AGENTMUX_CLI_PATH: join(consumerDirectory, 'node_modules', '.bin', 'agentmux')
           }
         })
@@ -523,6 +526,7 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
             'crash-recovered-once'
           ],
           promptCrashRecovery: true,
+          interactionCrashRecovery: true,
           cliResolveKinds: ['agent-session', 'provider-native', 'acp-native', 'run'],
           cliControl: true,
           naturalTerminalStop: true,

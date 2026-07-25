@@ -108,6 +108,87 @@ describe('Renderer resource state owners', () => {
     expect(next).toBe(state)
   })
 
+  it('does not let a newer Run running event erase semantic Agent status', () => {
+    const working = {
+      ...session,
+      updatedAt: 3,
+      status: { state: 'working' as const, source: 'native-hook' as const, observedAt: 3 }
+    }
+    const state = {
+      sessions: [working],
+      timelines: {},
+      pendingAgentLaunches: {},
+      tabs: {},
+      layouts: {},
+      viewModes: {}
+    }
+
+    const next = reduceRuntimeEvent(state, core({
+      type: 'process-state',
+      agentSessionId: session.id,
+      run: session.control.run,
+      state: 'running',
+      pid: 42,
+      evidence: { source: 'run-process', observedAt: 4, run: session.control.run }
+    }))
+
+    expect(next.sessions[0]).toMatchObject({
+      processState: 'running',
+      status: { state: 'working', source: 'native-hook', observedAt: 3 }
+    })
+  })
+
+  it('projects and clears only Core-owned typed interactions', () => {
+    const state = {
+      sessions: [session],
+      timelines: {},
+      pendingAgentLaunches: {},
+      tabs: {},
+      layouts: {},
+      viewModes: {}
+    }
+    const request = {
+      kind: 'permission' as const,
+      id: 'permission-1',
+      agentSessionId: session.id,
+      title: 'Allow command?',
+      options: [{ id: 'allow', label: 'Allow', kind: 'allow-once' as const }],
+      evidence: {
+        source: 'native-hook' as const,
+        observedAt: 3,
+        run: session.control.run,
+        hookReceiptId: 'permission-1'
+      }
+    }
+    const pending = reduceRuntimeEvent(state, core({ type: 'interaction', request }))
+    expect(pending.sessions[0]).toMatchObject({ pendingInteraction: request })
+
+    const cleared = reduceRuntimeEvent(pending, core({
+      type: 'agent-session',
+      session: {
+        kind: 'agent',
+        agentSessionId: session.id,
+        providerId: 'codex',
+        executorId: 'codex',
+        hostId: 'local',
+        workspacePath: '/repo',
+        run: session.control.run,
+        retiredRuns: [],
+        outputCursorBytes: 0,
+        createdAt: 1,
+        updatedAt: 4,
+        semanticStatus: {
+          state: 'waiting',
+          source: 'native-hook',
+          observedAt: 3,
+          detail: 'PermissionRequest'
+        }
+      }
+    }))
+    expect(cleared.sessions[0]?.pendingInteraction).toBeUndefined()
+    expect(cleared.sessions[0]?.status).toMatchObject({ state: 'waiting', source: 'native-hook' })
+  })
+
   it('ignores old-Run lifecycle events but accepts committed Session Timeline revisions', () => {
     const tabId = `session:${session.id}`
     const state = {

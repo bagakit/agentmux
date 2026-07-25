@@ -12,6 +12,7 @@ coverage
 .codex-output
 .playwright-cli
 .tmp
+.claude
 docs/reviews/
 docs/plans/
 docs/handoffs/

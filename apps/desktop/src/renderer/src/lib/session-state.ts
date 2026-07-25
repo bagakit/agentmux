@@ -136,6 +136,7 @@ function applyTimelineEvent(
 
 function eventAgentSessionId(event: RuntimeEvent['event']): string | null {
   if (event.type === 'agent-timeline' || event.type === 'agent-status') return event.agentSessionId
+  if (event.type === 'interaction') return event.request.agentSessionId
   if (event.type === 'agent-session') return event.session.agentSessionId
   if (
     event.type === 'process-state' ||
@@ -374,23 +375,34 @@ export function projectRuntimeEvent(
       sessions: state.sessions.map((item) =>
         ownsRunEvent(item, core.agentSessionId, core.run) &&
         core.evidence.observedAt >= item.status.observedAt
-          ? {
-              ...item,
-              processState: core.state,
-              updatedAt: Math.max(item.updatedAt, core.evidence.observedAt),
-              status: {
-                state: displayState,
-                source: core.evidence.source,
-                observedAt: core.evidence.observedAt,
-                // 保留内核原始中断原因（如 daemon_restart）——与 refresh 路径
-                // (runtime-controller.ts projectSession) 一致，交给 SessionPane 渲染层
-                // 的 humanizeDetail 统一翻译成人类可读文案。无 reason 时回退旧句子。
-                ...(core.state === 'interrupted'
-                  ? { detail: core.interruptionReason ?? 'The Run owner interrupted this PTY.' }
+          ? (() => {
+              const { interruptionReason: _interruptionReason, ...current } = item
+              return {
+                ...current,
+                processState: core.state,
+                ...(core.state === 'interrupted' && core.interruptionReason
+                  ? { interruptionReason: core.interruptionReason }
                   : {}),
-                ...(core.exitCode === undefined ? {} : { exitCode: core.exitCode })
+                updatedAt: Math.max(item.updatedAt, core.evidence.observedAt),
+                ...(
+                  item.kind === 'agent' &&
+                  core.state === 'running' &&
+                  (item.status.source === 'native-hook' || item.status.source === 'acp')
+                    ? {}
+                    : {
+                        status: {
+                          state: displayState,
+                          source: core.evidence.source,
+                          observedAt: core.evidence.observedAt,
+                          ...(core.state === 'interrupted'
+                            ? { detail: 'The Run owner interrupted this PTY.' }
+                            : {}),
+                          ...(core.exitCode === undefined ? {} : { exitCode: core.exitCode })
+                        }
+                      }
+                )
               }
-            }
+            })()
           : item
       )
     } }
@@ -419,19 +431,38 @@ export function projectRuntimeEvent(
       ...state,
       sessions: state.sessions.map((item) => item.kind === 'agent' &&
         acceptsAgentSessionTransition(item, core.session)
-        ? {
-            ...item,
-            providerId: core.session.providerId,
-            hostId: core.session.hostId,
-            workspacePath: core.session.workspacePath,
-            updatedAt: Math.max(item.updatedAt, core.session.updatedAt),
-            control: {
-              kind: 'agent' as const,
+        ? (() => {
+            const { pendingInteraction: _pendingInteraction, ...current } = item
+            return {
+              ...current,
+              providerId: core.session.providerId,
               hostId: core.session.hostId,
-              agentSessionId: core.session.agentSessionId,
-              run: { ...core.session.run }
+              workspacePath: core.session.workspacePath,
+              updatedAt: Math.max(item.updatedAt, core.session.updatedAt),
+              ...(core.session.semanticStatus && item.processState === 'running'
+                ? { status: structuredClone(core.session.semanticStatus) }
+                : {}),
+              ...(core.session.pendingInteraction
+                ? { pendingInteraction: structuredClone(core.session.pendingInteraction.request) }
+                : {}),
+              control: {
+                kind: 'agent' as const,
+                hostId: core.session.hostId,
+                agentSessionId: core.session.agentSessionId,
+                run: { ...core.session.run }
+              }
             }
-          }
+          })()
+        : item)
+    } }
+  }
+  if (core.type === 'interaction') {
+    return { state: {
+      ...state,
+      sessions: state.sessions.map((item) => item.kind === 'agent' &&
+        item.id === core.request.agentSessionId &&
+        acceptsAgentEvidence(item, core.request.evidence)
+        ? { ...item, pendingInteraction: structuredClone(core.request) }
         : item)
     } }
   }
@@ -459,7 +490,6 @@ export function projectRuntimeEvent(
       }
     } }
   }
-  if (core.type === 'permission') return { state }
   if (core.type === 'agent-error') {
     if (!core.agentSessionId) return { state }
     return { state: {

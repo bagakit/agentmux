@@ -24,6 +24,9 @@ export function agentComposerAvailability(
   if (session.processState !== 'running') {
     return { disabled: true, placeholder: 'Agent is not running' }
   }
+  if (session.pendingInteraction) {
+    return { disabled: true, placeholder: 'Answer the Agent request above…' }
+  }
   return { disabled: false, placeholder: 'Ask, steer, or paste a command…' }
 }
 

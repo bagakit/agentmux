@@ -142,6 +142,7 @@ const runtimeFixture = vi.hoisted(() => {
     }))
     readonly agentSessions = vi.fn(() => [])
     readonly submitAgentPrompt = vi.fn(async () => {})
+    readonly respondAgentInteraction = vi.fn(async () => {})
     readonly resumeAgent = vi.fn(async () => {})
     readonly ensureAgentContinuity = vi.fn(async (): Promise<AgentMuxAgentContinuityResult> => {
       throw new Error('Agent continuity fixture is not configured')
@@ -673,6 +674,30 @@ describe('RuntimeController configuration transaction', () => {
     }))
   })
 
+  it('forwards a typed interaction response with the exact Session Run fence', async () => {
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const control = {
+      kind: 'agent' as const,
+      hostId: 'local',
+      agentSessionId: 'agent-1',
+      run: { runId: 'run-1' }
+    }
+    const response = {
+      kind: 'permission' as const,
+      requestId: 'permission-1',
+      decision: { outcome: 'selected' as const, optionId: 'allow' }
+    }
+
+    await controller.respondInteraction(control, response)
+
+    expect(client.respondAgentInteraction).toHaveBeenCalledWith({
+      agentSessionId: 'agent-1',
+      expectedRun: { runId: 'run-1' },
+      response
+    })
+  })
+
   it('rejects send for an ended Run and resumes only through the explicit operation', async () => {
     const controller = await configuredController()
     const client = runtimeFixture.FakeClient.instances[0]!
@@ -875,6 +900,61 @@ describe('RuntimeController configuration transaction', () => {
       label: 'review · Repository'
     })
     expect(client.sessionTimeline).toHaveBeenCalledWith('agent-1')
+  })
+
+  it('projects persisted semantic status and typed interaction over a live Run', async () => {
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const status = agentStatusFixture()
+    const request = {
+      kind: 'permission' as const,
+      id: 'permission-1',
+      agentSessionId: 'agent-1',
+      title: 'Allow command?',
+      options: [{ id: 'allow', label: 'Allow', kind: 'allow-once' as const }],
+      evidence: {
+        source: 'native-hook' as const,
+        observedAt: 3,
+        run: { runId: 'run-1' },
+        hookReceiptId: 'permission-1'
+      }
+    }
+    client.runtimeProjection.mockResolvedValue({
+      hostId: 'local',
+      subjects: [{
+        subjectId: 'agent:local:agent-1',
+        kind: 'agent',
+        hostId: 'local',
+        workspacePath: '/repo',
+        providerId: 'codex',
+        executorId: 'review',
+        agentSession: {
+          ...status.session,
+          updatedAt: 3,
+          semanticStatus: {
+            state: 'waiting',
+            source: 'native-hook',
+            observedAt: 3,
+            detail: 'PermissionRequest'
+          },
+          pendingInteraction: { request }
+        },
+        run: {
+          ...status.run,
+          state: 'running',
+          observedAt: 4,
+          exitCode: undefined
+        }
+      }]
+    })
+
+    const snapshot = await controller.snapshot(localConfig)
+
+    expect(snapshot.sessions[0]).toMatchObject({
+      processState: 'running',
+      status: { state: 'waiting', source: 'native-hook', detail: 'PermissionRequest' },
+      pendingInteraction: request
+    })
   })
 
   it('projects a stored Agent with a missing Run only as an exact recovery candidate', async () => {

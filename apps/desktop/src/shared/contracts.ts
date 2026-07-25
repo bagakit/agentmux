@@ -8,6 +8,8 @@ import type {
   AgentProviderId,
   AgentMuxClientEvent,
   AgentMuxEvidenceSource,
+  AgentMuxInteractionRequest,
+  AgentMuxInteractionResponse,
   AgentMuxRunDataEvent,
   AgentMuxRunRef,
   AgentMuxRunReplayGap,
@@ -244,6 +246,7 @@ type SessionSnapshotBase = {
   createdAt: number
   updatedAt: number
   processState: AgentMuxRunState
+  interruptionReason?: string
   status: SessionStatus
   latestOutputBytes: number
 }
@@ -254,6 +257,7 @@ export type SessionSnapshot = SessionSnapshotBase & (
       providerId: AgentProviderId
       executorId: AgentExecutorId
       capabilities: AgentCapabilities
+      pendingInteraction?: AgentMuxInteractionRequest
       control: AgentSessionControl
     }
   | { kind: 'terminal'; providerId: null; control: TerminalSessionControl }
@@ -502,6 +506,10 @@ export type AgentMuxDesktopApi = {
     detach(attachmentId: string): Promise<void>
     write(session: SessionControl, data: string): Promise<void>
     submitPrompt(session: AgentSessionControl, prompt: string): Promise<void>
+    respondInteraction(
+      session: AgentSessionControl,
+      response: AgentMuxInteractionResponse
+    ): Promise<void>
     resume(session: AgentSessionControl, prompt: string, operationId: string): Promise<SessionSnapshot>
     acknowledge(session: SessionControl, throughByte: number): Promise<void>
     interrupt(session: SessionControl): Promise<void>

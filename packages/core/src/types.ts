@@ -192,7 +192,14 @@ export type AgentTerminalPromptRenderMatcher = {
 
 export type AgentPromptInputPlan =
   | { kind: 'single-phase'; data: string }
-  | { kind: 'render-then-submit'; payload: string; submit: string }
+  | {
+      kind: 'render-then-submit'
+      /** Exact transport bytes written before submit. */
+      payload: string
+      /** Logical text the Provider TUI renders after consuming transport control bytes. */
+      renderedText: string
+      submit: string
+    }
 
 export type AgentHookStrategy =
   | { kind: 'none' }
@@ -287,6 +294,8 @@ export type AgentMuxAgentSession = {
   terminalHandshake?: AgentTerminalHandshakeState
   terminalPromptReadiness?: AgentTerminalPromptReadinessState
   terminalPromptSubmission?: AgentTerminalPromptSubmissionState
+  semanticStatus?: AgentStatus
+  pendingInteraction?: AgentMuxPendingInteraction
   nativeHandle?: AgentNativeSessionHandle
   hookReceipt?: AgentHookReceipt
 }
@@ -337,6 +346,7 @@ export type AgentMuxPermissionOption = {
 }
 
 export type AgentMuxPermissionRequest = {
+  kind: 'permission'
   id: string
   agentSessionId: string
   title: string
@@ -349,6 +359,73 @@ export type AgentMuxPermissionRequest = {
 export type AgentMuxPermissionDecision =
   | { outcome: 'selected'; optionId: string }
   | { outcome: 'cancelled' }
+
+export type AgentMuxQuestionOption = {
+  id: string
+  label: string
+  description?: string
+}
+
+export type AgentMuxQuestion = {
+  id: string
+  prompt: string
+  title?: string
+  options: AgentMuxQuestionOption[]
+}
+
+export type AgentMuxQuestionRequest = {
+  kind: 'question'
+  id: string
+  agentSessionId: string
+  questions: AgentMuxQuestion[]
+  evidence: AgentMuxEvidence
+}
+
+export type AgentMuxInteractionRequest = AgentMuxPermissionRequest | AgentMuxQuestionRequest
+
+export type AgentMuxQuestionAnswer = {
+  questionId: string
+  optionId: string
+}
+
+export type AgentMuxInteractionResponse =
+  | {
+      kind: 'permission'
+      requestId: string
+      decision: AgentMuxPermissionDecision
+    }
+  | {
+      kind: 'question'
+      requestId: string
+      outcome: 'answered'
+      answers: AgentMuxQuestionAnswer[]
+    }
+  | {
+      kind: 'question'
+      requestId: string
+      outcome: 'cancelled'
+    }
+
+export type AgentMuxInteractionInputPlan = {
+  data: string
+}
+
+export type AgentMuxInteractionResponseState = {
+  /** Semantic response retained so a recoverable ctxmux Input can be replayed after a crash. */
+  value: AgentMuxInteractionResponse
+  responseDigest: string
+  operationId: string
+  inputByteRange: {
+    startByte: number
+    endByte: number
+  }
+  acknowledged: boolean
+}
+
+export type AgentMuxPendingInteraction = {
+  request: AgentMuxInteractionRequest
+  response?: AgentMuxInteractionResponseState
+}
 
 export type AgentMuxAcpEvent =
   | {
@@ -424,8 +501,8 @@ export type AgentMuxClientEvent =
       evidence: AgentMuxEvidence
     }
   | {
-      type: 'permission'
-      request: AgentMuxPermissionRequest
+      type: 'interaction'
+      request: AgentMuxInteractionRequest
     }
   | {
       type: 'agent-session'
@@ -550,5 +627,6 @@ export type NormalizedHookEvent = {
   semanticState: AgentSemanticState
   status: AgentStatus
   timeline: AgentTimelineMutation[]
+  interaction?: AgentMuxInteractionRequest
   nativeHandle?: AgentNativeSessionHandle
 }

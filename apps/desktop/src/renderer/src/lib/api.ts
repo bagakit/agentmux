@@ -673,6 +673,15 @@ const mockApi: AgentMuxDesktopApi = {
     submitPrompt: async (control, prompt) => {
       await mockApi.sessions.write(control, `${prompt.trim()}\r`)
     },
+    respondInteraction: async (control, response) => {
+      const session = mockSnapshot.sessions.find((item) => item.id === control.agentSessionId)
+      if (!session || session.kind !== 'agent') throw new Error(`Session not found: ${control.agentSessionId}`)
+      if (!session.pendingInteraction || session.pendingInteraction.id !== response.requestId) {
+        throw new Error('Agent interaction is not pending')
+      }
+      delete session.pendingInteraction
+      session.updatedAt = Date.now()
+    },
     resume: async (control, prompt) => {
       const session = mockSnapshot.sessions.find((item) => item.id === control.agentSessionId)
       if (!session || session.kind !== 'agent') throw new Error(`Session not found: ${control.agentSessionId}`)
