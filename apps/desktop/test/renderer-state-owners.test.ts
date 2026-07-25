@@ -401,7 +401,17 @@ describe('Renderer resource state owners', () => {
       documentIssues: { [detailKey]: { kind: 'deleted' } },
       savingDocuments: { [detailKey]: true },
       layouts: { [workspaceId]: createWorkspaceLayout('pane', [tabId]) },
-      lastActiveFileByWorkspace: { [workspaceId]: 'src/detail/value.ts' }
+      lastActiveFileByWorkspace: { [workspaceId]: 'src/detail/value.ts' },
+      fileExplorerStates: {
+        [workspaceId]: {
+          selection: {
+            activePath: 'src/detail/value.ts',
+            anchorPath: 'src/detail/value.ts',
+            selectedPaths: new Set(['src/detail/value.ts', 'src/details.ts'])
+          },
+          expandedPaths: new Set(['src/detail', 'src/details'])
+        }
+      }
     }
 
     const renamed = reduceFileRename(state, workspaceId, 'src/detail', 'src/renamed')
@@ -416,6 +426,14 @@ describe('Renderer resource state owners', () => {
     expect(renamed.documentObservationGenerations[renamedKey]).toBe(3)
     expect(renamed.documentIssues[renamedKey]).toEqual({ kind: 'deleted' })
     expect(renamed.savingDocuments[renamedKey]).toBe(false)
+    expect(renamed.fileExplorerStates[workspaceId]?.selection).toEqual({
+      activePath: 'src/renamed/value.ts',
+      anchorPath: 'src/renamed/value.ts',
+      selectedPaths: new Set(['src/renamed/value.ts', 'src/details.ts'])
+    })
+    expect(renamed.fileExplorerStates[workspaceId]?.expandedPaths).toEqual(
+      new Set(['src/renamed', 'src/details'])
+    )
 
     const deleted = reduceFileDelete(renamed, workspaceId, 'src/renamed')
     expect(deleted.tabs[tabId]).toBeDefined()
@@ -427,5 +445,62 @@ describe('Renderer resource state owners', () => {
     expect(deleted.documentObservationGenerations[renamedKey]).toBeUndefined()
     expect(deleted.documentIssues[renamedKey]).toBeUndefined()
     expect(deleted.savingDocuments[renamedKey]).toBeUndefined()
+    expect(deleted.fileExplorerStates[workspaceId]?.selection).toEqual({
+      activePath: 'src/details.ts',
+      anchorPath: 'src/details.ts',
+      selectedPaths: new Set(['src/details.ts'])
+    })
+    expect(deleted.fileExplorerStates[workspaceId]?.expandedPaths).toEqual(new Set(['src/details']))
+  })
+
+  it('rekeys changed observation payloads without touching prefix-neighbor issues', () => {
+    const workspaceId = 'workspace-1'
+    const sourcePath = 'src/app/index.ts'
+    const neighborPath = 'src/application.ts'
+    const sourceKey = documentKey(workspaceId, sourcePath)
+    const neighborKey = documentKey(workspaceId, neighborPath)
+    const sourceTabId = `file:${workspaceId}:${sourcePath}`
+    const sourceTab = createWorkbenchTab(sourceTabId, {
+      regionId: initialWorkbenchRegionId(sourceTabId),
+      kind: 'file',
+      workspaceId,
+      path: sourcePath
+    })
+    const state: FileWorkbenchState = {
+      tabs: { [sourceTabId]: sourceTab },
+      documents: {
+        [sourceKey]: { path: sourcePath, content: 'draft', revision: 'source-revision' },
+        [neighborKey]: { path: neighborPath, content: 'neighbor', revision: 'neighbor-revision' }
+      },
+      dirtyDocuments: { [sourceKey]: true, [neighborKey]: true },
+      documentGenerations: {},
+      documentObservationGenerations: {},
+      documentIssues: {
+        [sourceKey]: {
+          kind: 'changed',
+          observed: { path: sourcePath, content: 'observed', revision: 'observed-revision' }
+        },
+        [neighborKey]: { kind: 'deleted' }
+      },
+      savingDocuments: {},
+      layouts: { [workspaceId]: createWorkspaceLayout('pane', [sourceTabId]) },
+      lastActiveFileByWorkspace: { [workspaceId]: sourcePath },
+      fileExplorerStates: {}
+    }
+
+    const renamed = reduceFileRename(state, workspaceId, 'src/app', 'src/moved')
+    const destinationKey = documentKey(workspaceId, 'src/moved/index.ts')
+
+    expect(renamed.documentIssues[sourceKey]).toBeUndefined()
+    expect(renamed.documentIssues[destinationKey]).toEqual({
+      kind: 'changed',
+      observed: {
+        path: 'src/moved/index.ts',
+        content: 'observed',
+        revision: 'observed-revision'
+      }
+    })
+    expect(renamed.documentIssues[neighborKey]).toBe(state.documentIssues[neighborKey])
+    expect(renamed.documents[neighborKey]).toBe(state.documents[neighborKey])
   })
 })

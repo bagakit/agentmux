@@ -1,10 +1,24 @@
 import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  pointerWithin,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragOverEvent,
+  type DragStartEvent
+} from '@dnd-kit/core'
+import {
   ChevronDown,
   ChevronRight,
   FilePlus2,
   Folder,
   FolderOpen,
   FolderPlus,
+  GripVertical,
   LoaderCircle,
   Pencil,
   RefreshCw,
@@ -12,7 +26,7 @@ import {
   Trash2,
   X
 } from 'lucide-react'
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from 'react'
 import { isScratchWorkspaceId } from '../../../shared/contracts'
 import { scratchTopicIdFromDirectoryName } from '../../../shared/scratch-topics'
 import { api } from '../lib/api'
@@ -26,38 +40,47 @@ import {
 } from './file-tree/file-explorer-keyboard-navigation'
 import {
   getRevealAncestorPaths,
-  isPathWithinSubtree,
-  joinWorkspacePath,
-  remapPathWithinSubtree
+  joinWorkspacePath
 } from '../lib/workspace-paths'
 import { createFileExplorerRowProjection } from './file-tree/file-explorer-row-projection'
 import {
-  createEmptyFileExplorerSelection,
   createSingleFileExplorerSelection,
+  createEmptyFileExplorerViewState,
   getFileExplorerSelectionMode,
+  revealFileExplorerPath,
   updateFileExplorerSelection,
-  updateFileExplorerSelectionPaths
-} from './file-tree/file-explorer-selection'
+  type FileExplorerSelectionState
+} from '../lib/file-explorer-selection'
 import {
   flattenFileTree,
   useWorkspaceFileTree,
   type TreeNode
 } from './file-tree/useWorkspaceFileTree'
+import { observeRejectedFileExplorerDirectoryLoads } from './file-tree/file-explorer-report-probe'
 import { FileTreeContextMenu } from './file-tree/FileTreeContextMenu'
+import {
+  fileExplorerDropDirectory,
+  fileExplorerMoveTargets,
+  isFileExplorerMenuKey,
+  planFileExplorerMove,
+  runFileExplorerMove,
+  workspacePathParent,
+  type FileExplorerMoveTarget
+} from '../lib/file-explorer-move'
 
 type InlineEdit =
   | { kind: 'create-file' | 'create-directory'; parentPath: string }
   | { kind: 'rename'; node: TreeNode }
 
+const EMPTY_EXPLORER_STATE = createEmptyFileExplorerViewState()
+
+type FileExplorerDragData = { kind: 'file-explorer-path'; path: string; name: string }
+type FileExplorerDropData = { kind: 'file-explorer-directory'; directoryPath: string }
+
 export type FileExplorerRevealRequest = {
   workspaceId: string
   path: string
   requestId: number
-}
-
-function parentPath(path: string): string {
-  const index = path.lastIndexOf('/')
-  return index < 0 ? '' : path.slice(0, index)
 }
 
 function joinPath(parent: string, name: string): string {
@@ -98,7 +121,11 @@ function FileTreeRow({
   onDelete,
   onReveal,
   onViewFile,
+  onMove,
+  moveTargets,
   canOpenTerminal,
+  canMove,
+  dropDisabled,
   canRename,
   isLocal,
   selectionSize
@@ -124,12 +151,41 @@ function FileTreeRow({
   onDelete: () => void
   onReveal: () => void
   onViewFile: () => void
+  onMove: (directoryPath: string) => void
+  moveTargets: readonly FileExplorerMoveTarget[]
   canOpenTerminal: boolean
+  canMove: boolean
+  dropDisabled: boolean
   canRename: boolean
   isLocal: boolean
   selectionSize: number
 }) {
   const FileIcon = getFileTypeIcon(node.path)
+  const {
+    attributes,
+    listeners,
+    setNodeRef: setDraggableRef,
+    isDragging
+  } = useDraggable({
+    id: `file-explorer-path:${node.path}`,
+    data: { kind: 'file-explorer-path', path: node.path, name: node.name } satisfies FileExplorerDragData,
+    disabled: editing || !canMove
+  })
+  const {
+    setNodeRef: setDroppableRef,
+    isOver
+  } = useDroppable({
+    id: `file-explorer-target:${node.path}`,
+    data: {
+      kind: 'file-explorer-directory',
+      directoryPath: fileExplorerDropDirectory(node)
+    } satisfies FileExplorerDropData,
+    disabled: editing || dropDisabled
+  })
+  const setRowRef = useCallback((element: HTMLDivElement | null) => {
+    setDraggableRef(element)
+    setDroppableRef(element)
+  }, [setDraggableRef, setDroppableRef])
   return (
     <FileTreeContextMenu
       canRename={canRename}
@@ -138,12 +194,14 @@ function FileTreeRow({
       isExpanded={expanded}
       isLocal={isLocal}
       selectionSize={selectionSize}
+      moveTargets={moveTargets}
       onOpenChange={(open) => {
         if (open) onContextMenuOpen()
       }}
       onCreate={onCreate}
       onCopyPaths={onCopyPaths}
       onOpenTerminal={onOpenTerminal}
+      onMove={onMove}
       onViewFile={onViewFile}
       onCollapse={onCollapse}
       onReveal={onReveal}
@@ -151,10 +209,14 @@ function FileTreeRow({
       onDelete={onDelete}
     >
       <div
-        className={`tree-row ${selected ? 'tree-row--selected' : ''}`}
+        ref={setRowRef}
+        {...attributes}
+        {...listeners}
+        className={`tree-row ${selected ? 'tree-row--selected' : ''} ${isDragging ? 'tree-row--dragging' : ''} ${isOver ? 'tree-row--drop-over' : ''}`}
         style={{ '--tree-depth': node.depth } as React.CSSProperties}
         data-tree-path={node.path}
         data-tree-index={rowIndex}
+        data-move-drop-disabled={dropDisabled ? 'true' : 'false'}
         role="treeitem"
         tabIndex={selected ? 0 : -1}
         aria-level={node.depth + 1}
@@ -214,6 +276,23 @@ function FileTreeRow({
   )
 }
 
+function FileExplorerRootDropTarget({ disabled }: { disabled: boolean }) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: 'file-explorer-target:workspace-root',
+    data: { kind: 'file-explorer-directory', directoryPath: '' } satisfies FileExplorerDropData,
+    disabled
+  })
+  return (
+    <div
+      ref={setNodeRef}
+      className={`file-tree-root-target ${isOver ? 'file-tree-root-target--over' : ''}`}
+      data-move-drop-disabled={disabled ? 'true' : 'false'}
+    >
+      <FolderOpen size={12} /><span>Workspace Root</span>
+    </div>
+  )
+}
+
 export function FileExplorer({
   revealRequest
 }: {
@@ -239,13 +318,16 @@ export function FileExplorer({
   const workspaceFileRevision = useAppStore((state) => (
     workspaceId ? (state.workspaceFileRevisions[workspaceId] ?? 0) : 0
   ))
+  const explorerState = useAppStore((state) => (
+    workspaceId ? state.fileExplorerStates[workspaceId] : undefined
+  )) ?? EMPTY_EXPLORER_STATE
+  const updateExplorerState = useAppStore((state) => state.updateFileExplorerState)
   const [query, setQuery] = useState('')
-  const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  const [selection, setSelection] = useState(createEmptyFileExplorerSelection)
   const [inlineEdit, setInlineEdit] = useState<InlineEdit | null>(null)
   const [editValue, setEditValue] = useState('')
   const [deleteRequest, setDeleteRequest] = useState<TreeNode | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [activeDrag, setActiveDrag] = useState<FileExplorerDragData | null>(null)
   const [scrollTarget, setScrollTarget] = useState<{
     path: string
     requestId: number
@@ -256,17 +338,77 @@ export function FileExplorer({
   const lastRevealRequestIdRef = useRef<number | null>(null)
   const autoRevealRequestIdRef = useRef(0)
   const observedFileRevisionRef = useRef(workspaceFileRevision)
+  const expanded = explorerState.expandedPaths
+  const selection = explorerState.selection
+  const selectedPath = selection.activePath
   const tree = useWorkspaceFileTree(workspaceId ?? 'missing-workspace', expanded)
   const isMac = useMemo(() => navigator.userAgent.includes('Mac'), [])
-  const selectedPath = selection.activePath
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
+  const hoverExpandRef = useRef<{ path: string; timer: number } | null>(null)
 
   useEffect(() => {
-    setExpanded(new Set())
-    setSelection(createEmptyFileExplorerSelection())
+    if (new URLSearchParams(window.location.search).get('agentmux-file-editing-report') !== '1') {
+      return
+    }
+    let total = 0
+    let byWorkspace: Record<string, number> = {}
+    let rejectedDirectoryLoads: Array<{ workspaceId: string; path: string }> = []
+    const publish = () => {
+      if (!treeRootRef.current) return
+      treeRootRef.current.dataset.fileEditingExplorerEvidence = JSON.stringify({
+        total,
+        byWorkspace,
+        rejectedDirectoryLoads
+      })
+    }
+    const unsubscribeStore = useAppStore.subscribe((state, previous) => {
+      if (state.fileExplorerStates === previous.fileExplorerStates) return
+      total += 1
+      for (const id of new Set([
+        ...Object.keys(state.fileExplorerStates),
+        ...Object.keys(previous.fileExplorerStates)
+      ])) {
+        if (state.fileExplorerStates[id] !== previous.fileExplorerStates[id]) {
+          byWorkspace[id] = (byWorkspace[id] ?? 0) + 1
+        }
+      }
+      publish()
+    })
+    const unsubscribeRejectedLoads = observeRejectedFileExplorerDirectoryLoads((receipt) => {
+      rejectedDirectoryLoads = [...rejectedDirectoryLoads, receipt]
+      publish()
+    })
+    publish()
+    return () => {
+      unsubscribeStore()
+      unsubscribeRejectedLoads()
+    }
+  }, [])
+
+  function setExpanded(update: SetStateAction<Set<string>>): void {
+    if (!workspaceId) return
+    updateExplorerState(workspaceId, (current) => ({
+      ...current,
+      expandedPaths: typeof update === 'function' ? update(current.expandedPaths) : update
+    }))
+  }
+
+  function setSelection(update: SetStateAction<FileExplorerSelectionState>): void {
+    if (!workspaceId) return
+    updateExplorerState(workspaceId, (current) => ({
+      ...current,
+      selection: typeof update === 'function' ? update(current.selection) : update
+    }))
+  }
+
+  useEffect(() => {
+    clearHoverExpand()
+    setActiveDrag(null)
     lastRevealedPathRef.current = null
     lastRevealRequestIdRef.current = null
     setScrollTarget(null)
     setInlineEdit(null)
+    return () => clearHoverExpand()
   }, [workspaceId])
 
   useEffect(() => {
@@ -275,25 +417,22 @@ export function FileExplorer({
     void tree.refreshTree()
   }, [tree.refreshTree, workspaceFileRevision])
 
-  // Orca auto-reveal adapted to AgentMux's relative Workspace paths and DOM
-  // rows: expand every ancestor, retain one selection owner, then scroll once
-  // the async directory reads have projected the target row.
+  // Expand each relative Workspace ancestor without replacing an existing
+  // multi-selection, then scroll after async reads project the target row.
   useEffect(() => {
     if (!activePath || activePath === lastRevealedPathRef.current) return
     lastRevealedPathRef.current = activePath
-    setExpanded((current) => {
-      const next = new Set(current)
-      for (const path of getRevealAncestorPaths(activePath)) next.add(path)
-      return next
-    })
-    setSelection(createSingleFileExplorerSelection(activePath))
+    const nextExplorerState = revealFileExplorerPath(explorerState, activePath)
+    if (workspaceId && nextExplorerState !== explorerState) {
+      updateExplorerState(workspaceId, (current) => revealFileExplorerPath(current, activePath))
+    }
     autoRevealRequestIdRef.current += 1
     setScrollTarget({
       path: activePath,
       requestId: autoRevealRequestIdRef.current,
       focus: false
     })
-  }, [activePath, workspaceId])
+  }, [activePath, explorerState, updateExplorerState, workspaceId])
 
   useEffect(() => {
     if (
@@ -349,7 +488,85 @@ export function FileExplorer({
     [visibleRows]
   )
   const selectedNode = selectedPath ? rowProjection.getRowByPath(selectedPath) : null
-  const createParent = selectedNode?.isDirectory ? selectedNode.path : selectedNode ? parentPath(selectedNode.path) : ''
+  const createParent = selectedNode?.isDirectory
+    ? selectedNode.path
+    : selectedNode ? workspacePathParent(selectedNode.path) : ''
+  const loadedTreeNodes = useMemo(
+    () => Object.values(tree.dirCache).flatMap((entry) => entry.children),
+    [tree.dirCache]
+  )
+
+  function clearHoverExpand(): void {
+    const pending = hoverExpandRef.current
+    if (pending) window.clearTimeout(pending.timer)
+    hoverExpandRef.current = null
+  }
+
+  function isMoveDropDisabled(directoryPath: string): boolean {
+    return activeDrag !== null &&
+      planFileExplorerMove(loadedTreeNodes, activeDrag.path, directoryPath).status === 'blocked'
+  }
+
+  async function movePath(sourcePath: string, destinationPath: string): Promise<void> {
+    await runFileExplorerMove({
+      sourcePath,
+      destinationPath,
+      move: renamePath,
+      refreshDirectory: tree.refreshDir
+    })
+  }
+
+  async function movePathToDirectory(sourcePath: string, directoryPath: string): Promise<void> {
+    const plan = planFileExplorerMove(loadedTreeNodes, sourcePath, directoryPath)
+    if (plan.status === 'blocked') return
+    await movePath(plan.sourcePath, plan.destinationPath)
+  }
+
+  function handleDragStart(event: DragStartEvent): void {
+    const data = event.active.data.current as FileExplorerDragData | undefined
+    if (data?.kind === 'file-explorer-path') {
+      setSelection(createSingleFileExplorerSelection(data.path))
+      setActiveDrag(data)
+    }
+  }
+
+  function handleDragOver(event: DragOverEvent): void {
+    const drag = event.active.data.current as FileExplorerDragData | undefined
+    const data = event.over?.data.current as FileExplorerDropData | undefined
+    const directoryPath = data?.kind === 'file-explorer-directory' ? data.directoryPath : null
+    if (
+      drag?.kind !== 'file-explorer-path' ||
+      directoryPath === null ||
+      planFileExplorerMove(loadedTreeNodes, drag.path, directoryPath).status === 'blocked' ||
+      !directoryPath ||
+      expanded.has(directoryPath)
+    ) {
+      clearHoverExpand()
+      return
+    }
+    if (hoverExpandRef.current?.path === directoryPath) return
+    clearHoverExpand()
+    hoverExpandRef.current = {
+      path: directoryPath,
+      timer: window.setTimeout(() => {
+        setExpanded((current) => new Set(current).add(directoryPath))
+        hoverExpandRef.current = null
+      }, 500)
+    }
+  }
+
+  async function handleDragEnd(event: DragEndEvent): Promise<void> {
+    const drag = event.active.data.current as FileExplorerDragData | undefined
+    const drop = event.over?.data.current as FileExplorerDropData | undefined
+    clearHoverExpand()
+    setActiveDrag(null)
+    if (drag?.kind !== 'file-explorer-path' || drop?.kind !== 'file-explorer-directory') return
+    try {
+      await movePathToDirectory(drag.path, drop.directoryPath)
+    } catch {
+      // renamePath already projects the typed failure through the app error owner.
+    }
+  }
 
   function toggle(node: TreeNode): void {
     if (!node.isDirectory) return
@@ -417,17 +634,8 @@ export function FileExplorer({
     }
     try {
       if (edit.kind === 'rename') {
-        const nextPath = joinPath(parentPath(edit.node.path), name)
-        if (nextPath !== edit.node.path) await renamePath(edit.node.path, nextPath)
-        await tree.refreshDir(parentPath(edit.node.path))
-        setSelection((current) =>
-          updateFileExplorerSelectionPaths(current, (path) =>
-            remapPathWithinSubtree(path, edit.node.path, nextPath)
-          )
-        )
-        setExpanded((current) => new Set(
-          [...current].map((path) => remapPathWithinSubtree(path, edit.node.path, nextPath))
-        ))
+        const nextPath = joinPath(workspacePathParent(edit.node.path), name)
+        if (nextPath !== edit.node.path) await movePath(edit.node.path, nextPath)
       } else {
         const path = joinPath(edit.parentPath, name)
         await createPath({ path, kind: edit.kind === 'create-file' ? 'file' : 'directory' })
@@ -446,15 +654,7 @@ export function FileExplorer({
     setDeleting(true)
     try {
       await deletePath(node.path)
-      await tree.refreshDir(parentPath(node.path))
-      setSelection((current) =>
-        updateFileExplorerSelectionPaths(current, (path) =>
-          isPathWithinSubtree(path, node.path) ? null : path
-        )
-      )
-      setExpanded((current) => new Set(
-        [...current].filter((path) => !isPathWithinSubtree(path, node.path))
-      ))
+      await tree.refreshDir(workspacePathParent(node.path))
       setDeleteRequest(null)
     } finally {
       setDeleting(false)
@@ -519,7 +719,18 @@ export function FileExplorer({
     const actionNode = currentIndex === null
       ? selectedNode
       : rowProjection.getRowAtIndex(currentIndex)
-    if ((event.key === 'Enter' || event.key === ' ') && actionNode) {
+    if (isFileExplorerMenuKey(event) && actionNode) {
+      event.preventDefault()
+      const row = treeRootRef.current?.querySelector<HTMLElement>(
+        `[data-tree-path="${CSS.escape(actionNode.path)}"]`
+      )
+      const rect = row?.getBoundingClientRect()
+      row?.dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true,
+        clientX: rect?.left ?? 0,
+        clientY: rect?.top ?? 0
+      }))
+    } else if ((event.key === 'Enter' || event.key === ' ') && actionNode) {
       event.preventDefault()
       actionNode.isDirectory ? toggle(actionNode) : void openFile(actionNode.path)
     } else if (event.key === 'F2' && actionNode) {
@@ -569,18 +780,28 @@ export function FileExplorer({
         <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find loaded files" />
         {query ? <button onClick={() => setQuery('')} title="Clear"><X size={11} /></button> : null}
       </label>
-      <div
-        className="file-tree"
-        ref={treeRootRef}
-        role="tree"
-        aria-multiselectable="true"
-        tabIndex={0}
-        onKeyDown={handleTreeKeyDown}
+      <DndContext
+        sensors={sensors}
+        collisionDetection={pointerWithin}
+        autoScroll
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDragCancel={() => { clearHoverExpand(); setActiveDrag(null) }}
+        onDragEnd={(event) => void handleDragEnd(event)}
       >
-        {createEdit && !createEdit.parentPath ? createRow : null}
-        {visibleRows.map((node, rowIndex) => (
-          <Fragment key={node.path}>
-            <FileTreeRow
+        <div
+          className="file-tree"
+          ref={treeRootRef}
+          role="tree"
+          aria-multiselectable="true"
+          tabIndex={0}
+          onKeyDown={handleTreeKeyDown}
+        >
+          <FileExplorerRootDropTarget disabled={isMoveDropDisabled('')} />
+          {createEdit && !createEdit.parentPath ? createRow : null}
+          {visibleRows.map((node, rowIndex) => (
+            <Fragment key={node.path}>
+              <FileTreeRow
             key={node.path}
             node={node}
             rowIndex={rowIndex}
@@ -599,13 +820,20 @@ export function FileExplorer({
             }}
             onCreate={(kind) => beginCreate(
               kind === 'file' ? 'create-file' : 'create-directory',
-              node.isDirectory ? node.path : parentPath(node.path)
+              node.isDirectory ? node.path : workspacePathParent(node.path)
             )}
             onCopyPaths={(kind) => void copyContextPaths(node, kind)}
             onOpenTerminal={() => void openDirectoryInTerminal(node).catch(() => {})}
             onViewFile={() => {
               if (!node.isDirectory && !node.isSymlink) void openFile(node.path)
             }}
+            onMove={(directoryPath) => {
+              setSelection(createSingleFileExplorerSelection(node.path))
+              void movePathToDirectory(node.path, directoryPath).catch(() => {})
+            }}
+            moveTargets={canRenameFileExplorerNode(workspaceId, node)
+              ? fileExplorerMoveTargets(loadedTreeNodes, node.path)
+              : []}
             onCollapse={() => setExpanded((current) => {
               const next = new Set(current)
               next.delete(node.path)
@@ -620,9 +848,8 @@ export function FileExplorer({
                 node.path,
                 mode
               ))
-              // Match Orca's selectRowWithModifiers contract: range/toggle
-              // clicks change selection only; activation belongs to a plain
-              // replacement click.
+              // Range/toggle clicks change selection only; activation belongs
+              // to a plain replacement click.
               if (mode === 'replace') {
                 if (node.isDirectory) toggle(node)
                 else if (!node.isSymlink) void openFile(node.path)
@@ -632,19 +859,27 @@ export function FileExplorer({
             onRename={() => beginRename(node)}
             onDelete={() => setDeleteRequest(node)}
             canOpenTerminal={workspace?.hostId === 'local'}
+            canMove={canRenameFileExplorerNode(workspaceId, node)}
+            dropDisabled={isMoveDropDisabled(fileExplorerDropDirectory(node))}
             canRename={canRenameFileExplorerNode(workspaceId, node)}
             isLocal={workspace?.hostId === 'local'}
             selectionSize={pathsForContext(node).length}
-            />
-            {createEdit?.parentPath === node.path ? createRow : null}
-          </Fragment>
-        ))}
-        {tree.rootError ? (
-          <div className="tree-empty tree-empty--error"><strong>Could not read workspace</strong><span>{tree.rootError}</span><button className="small-button" onClick={() => void tree.refreshTree()}>Retry</button></div>
-        ) : !tree.rootCache?.loading && visibleRows.length === 0 ? (
-          <div className="tree-empty"><strong>{query ? 'No loaded files match' : 'Workspace is empty'}</strong><span>{query ? 'Expand more folders or change the search.' : 'Create a file or folder to begin.'}</span></div>
-        ) : null}
-      </div>
+              />
+              {createEdit?.parentPath === node.path ? createRow : null}
+            </Fragment>
+          ))}
+          {tree.rootError ? (
+            <div className="tree-empty tree-empty--error"><strong>Could not read workspace</strong><span>{tree.rootError}</span><button className="small-button" onClick={() => void tree.refreshTree()}>Retry</button></div>
+          ) : !tree.rootCache?.loading && visibleRows.length === 0 ? (
+            <div className="tree-empty"><strong>{query ? 'No loaded files match' : 'Workspace is empty'}</strong><span>{query ? 'Expand more folders or change the search.' : 'Create a file or folder to begin.'}</span></div>
+          ) : null}
+        </div>
+        <DragOverlay dropAnimation={null}>
+          {activeDrag ? (
+            <div className="file-tree-drag-preview"><GripVertical size={12} /><span>{activeDrag.name}</span></div>
+          ) : null}
+        </DragOverlay>
+      </DndContext>
       <ConfirmationDialog
         open={deleteRequest !== null}
         title={`Delete ${deleteRequest?.isDirectory ? 'folder' : 'file'}?`}

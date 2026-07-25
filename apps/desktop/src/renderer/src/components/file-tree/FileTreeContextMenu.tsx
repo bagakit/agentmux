@@ -5,12 +5,14 @@ import {
   ExternalLink,
   File,
   FilePlus2,
+  FolderInput,
   FolderPlus,
   Pencil,
   SquareTerminal,
   Trash2
 } from 'lucide-react'
 import type { ReactNode } from 'react'
+import type { FileExplorerMoveTarget } from '../../lib/file-explorer-move'
 
 function stopRightButtonSelection(event: React.PointerEvent): void {
   if (event.button !== 2) return
@@ -26,12 +28,14 @@ export function FileTreeContextMenu({
   isExpanded,
   isLocal,
   selectionSize,
+  moveTargets,
   onCollapse,
   onCopyPaths,
   onCreate,
   onDelete,
   onOpenChange,
   onOpenTerminal,
+  onMove,
   onRename,
   onReveal,
   onViewFile
@@ -43,12 +47,14 @@ export function FileTreeContextMenu({
   isExpanded: boolean
   isLocal: boolean
   selectionSize: number
+  moveTargets: readonly FileExplorerMoveTarget[]
   onCollapse: () => void
   onCopyPaths: (kind: 'absolute' | 'relative') => void
   onCreate: (kind: 'file' | 'directory') => void
   onDelete: () => void
   onOpenChange: (open: boolean) => void
   onOpenTerminal: () => void
+  onMove: (directoryPath: string) => void
   onRename: () => void
   onReveal: () => void
   onViewFile: () => void
@@ -107,6 +113,24 @@ export function FileTreeContextMenu({
               <Pencil size={14} /><span>Rename</span><kbd>{isMac ? '↩' : 'Enter'}</kbd>
             </ContextMenu.Item>
           ) : null}
+          <ContextMenu.Sub>
+            <ContextMenu.SubTrigger className="tab-context-menu__item" disabled={moveTargets.length === 0}>
+              <FolderInput size={14} /><span>Move This Item to</span><span className="tab-context-menu__chevron">›</span>
+            </ContextMenu.SubTrigger>
+            <ContextMenu.Portal>
+              <ContextMenu.SubContent className="tab-context-menu file-context-menu" collisionPadding={8} sideOffset={4}>
+                {moveTargets.map((target) => (
+                  <ContextMenu.Item
+                    key={target.path || 'workspace-root'}
+                    className="tab-context-menu__item"
+                    onSelect={() => onMove(target.path)}
+                  >
+                    <FolderInput size={14} /><span>{target.label}</span>
+                  </ContextMenu.Item>
+                ))}
+              </ContextMenu.SubContent>
+            </ContextMenu.Portal>
+          </ContextMenu.Sub>
           <ContextMenu.Item className="tab-context-menu__item file-context-menu__danger" onSelect={onDelete}>
             <Trash2 size={14} /><span>Delete</span><kbd>{isMac ? '⌘⌫' : 'Del'}</kbd>
           </ContextMenu.Item>

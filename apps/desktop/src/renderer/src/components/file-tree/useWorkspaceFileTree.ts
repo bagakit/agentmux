@@ -1,10 +1,13 @@
-// Adapted from Orca right-sidebar/useFileExplorerTree.ts at the fixed T-011 commit.
-// AgentMux keeps the cache/navigation model and swaps only the transport for typed
-// Workspace IPC, which already owns both Local and system-SSH root confinement.
+// Workspace-scoped load admission owns the Explorer cache projection so late
+// Local or system-SSH reads cannot cross a Workspace identity boundary.
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../../lib/api'
-import { createFileExplorerDirLoadTracker } from './file-explorer-dir-load-tracker'
+import {
+  createFileExplorerDirLoadScope,
+  createFileExplorerDirLoadTracker
+} from './file-explorer-dir-load-tracker'
+import { recordRejectedFileExplorerDirectoryLoad } from './file-explorer-report-probe'
 import {
   collectStaleDirCachePaths,
   decideExpandedDirLoad
@@ -39,6 +42,7 @@ export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<
   const cacheRef = useRef(dirCache)
   const loadTrackerRef = useRef(createFileExplorerDirLoadTracker())
   const staleDirsRef = useRef(new Set<string>())
+  const loadScope = useMemo(() => createFileExplorerDirLoadScope(workspaceId), [workspaceId])
   cacheRef.current = dirCache
 
   const loadDir = useCallback(
@@ -47,7 +51,11 @@ export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<
       const decision = decideExpandedDirLoad(cached, staleDirsRef.current.has(path))
       if (!options?.force && decision === 'skip') return true
 
-      const token = loadTrackerRef.current.begin(path)
+      const token = loadTrackerRef.current.begin(loadScope, path)
+      if (!token) {
+        recordRejectedFileExplorerDirectoryLoad(loadScope.workspaceId, path)
+        return false
+      }
       setDirCache((previous) => ({
         ...previous,
         // Force refresh retains the old children so the tree does not collapse
@@ -76,16 +84,23 @@ export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<
         return !options?.failOnError
       }
     },
-    [workspaceId]
+    [loadScope, workspaceId]
   )
 
+  useLayoutEffect(() => {
+    loadTrackerRef.current.activate(loadScope)
+  }, [loadScope])
+
   useEffect(() => {
-    loadTrackerRef.current.reset()
     staleDirsRef.current.clear()
+    // The expanded-path effect runs in the same commit. Clear its synchronous
+    // decision source before scheduling React state so it cannot reuse the
+    // previous Workspace's loaded/loading entries.
+    cacheRef.current = {}
     setDirCache({})
     setRootError(null)
     void loadDir('', { force: true })
-  }, [loadDir, workspaceId])
+  }, [loadDir, loadScope])
 
   useEffect(() => {
     for (const path of expanded) {
@@ -100,9 +115,12 @@ export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<
   }, [expanded, loadDir])
 
   const refreshTree = useCallback(async () => {
-    for (const path of collectStaleDirCachePaths(cacheRef.current, '', expanded)) {
-      staleDirsRef.current.add(path)
-    }
+    const admitted = loadTrackerRef.current.runIfActive(loadScope, () => {
+      for (const path of collectStaleDirCachePaths(cacheRef.current, '', expanded)) {
+        staleDirsRef.current.add(path)
+      }
+    })
+    if (!admitted) return false
     const rootLoaded = await loadDir('', { force: true, failOnError: true })
     if (!rootLoaded) return false
     const paths = [...expanded]
@@ -112,7 +130,7 @@ export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<
       )
     }
     return true
-  }, [expanded, loadDir])
+  }, [expanded, loadDir, loadScope])
 
   const refreshDir = useCallback(
     async (path: string) => await loadDir(path, { force: true }),

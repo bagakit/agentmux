@@ -14,6 +14,11 @@ import {
   type WorkbenchTab
 } from './workbench-tabs'
 import { isPathWithinSubtree, remapPathWithinSubtree } from './workspace-paths'
+import {
+  deleteFileExplorerViewPaths,
+  renameFileExplorerViewPaths,
+  type FileExplorerViewState
+} from './file-explorer-selection'
 
 export type FileWorkbenchState = {
   tabs: Record<string, WorkbenchTab>
@@ -25,6 +30,7 @@ export type FileWorkbenchState = {
   savingDocuments: Record<string, boolean>
   layouts: Record<string, WorkspaceLayout>
   lastActiveFileByWorkspace: Record<string, string | undefined>
+  fileExplorerStates: Record<string, FileExplorerViewState | undefined>
 }
 
 export type FileDocumentIssue =
@@ -341,7 +347,7 @@ export function reduceFileRename(
     delete dirtyDocuments[key]
     dirtyDocuments[documentKey(workspaceId, remapPathWithinSubtree(documentPath, path, nextPath))] = dirty
   }
-  for (const collection of [documentGenerations, documentObservationGenerations, documentIssues]) {
+  for (const collection of [documentGenerations, documentObservationGenerations]) {
     for (const [key, value] of Object.entries(collection)) {
       if (!key.startsWith(documentPrefix)) continue
       const documentPath = key.slice(documentPrefix.length)
@@ -349,6 +355,22 @@ export function reduceFileRename(
       delete collection[key]
       collection[documentKey(workspaceId, remapPathWithinSubtree(documentPath, path, nextPath))] = value
     }
+  }
+  for (const [key, issue] of Object.entries(documentIssues)) {
+    if (!key.startsWith(documentPrefix)) continue
+    const documentPath = key.slice(documentPrefix.length)
+    if (!isPathWithinSubtree(documentPath, path)) continue
+    const renamedPath = remapPathWithinSubtree(documentPath, path, nextPath)
+    delete documentIssues[key]
+    documentIssues[documentKey(workspaceId, renamedPath)] = issue?.kind === 'changed'
+      ? {
+          ...issue,
+          observed: {
+            ...issue.observed,
+            path: remapPathWithinSubtree(issue.observed.path, path, nextPath)
+          }
+        }
+      : issue
   }
   for (const key of Object.keys(savingDocuments)) {
     if (!key.startsWith(documentPrefix)) continue
@@ -376,7 +398,13 @@ export function reduceFileRename(
       [workspaceId]: state.lastActiveFileByWorkspace[workspaceId]
         ? remapPathWithinSubtree(state.lastActiveFileByWorkspace[workspaceId], path, nextPath)
         : undefined
-    }
+    },
+    fileExplorerStates: state.fileExplorerStates[workspaceId]
+      ? {
+          ...state.fileExplorerStates,
+          [workspaceId]: renameFileExplorerViewPaths(state.fileExplorerStates[workspaceId], path, nextPath)
+        }
+      : state.fileExplorerStates
   }
 }
 
@@ -524,6 +552,12 @@ export function reduceFileDelete(
         isPathWithinSubtree(state.lastActiveFileByWorkspace[workspaceId], path)
         ? undefined
         : state.lastActiveFileByWorkspace[workspaceId]
-    }
+    },
+    fileExplorerStates: state.fileExplorerStates[workspaceId]
+      ? {
+          ...state.fileExplorerStates,
+          [workspaceId]: deleteFileExplorerViewPaths(state.fileExplorerStates[workspaceId], path)
+        }
+      : state.fileExplorerStates
   }
 }

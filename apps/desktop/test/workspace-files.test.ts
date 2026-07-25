@@ -697,6 +697,124 @@ describe('WorkspaceFiles root confinement', () => {
     })
   })
 
+  it('does not infer object identity from paths after a missing move receipt', async () => {
+    const { root, workspace, host } = await localFixture('move-unknown')
+
+    const prepareMove = async (label: string) => {
+      const sourceParent = join(root, `${label}-source`)
+      const destinationParent = join(root, `${label}-destination`)
+      const source = join(sourceParent, 'item.txt')
+      const destination = join(destinationParent, 'item.txt')
+      await Promise.all([mkdir(sourceParent), mkdir(destinationParent)])
+      await writeFile(source, `original ${label}`)
+      return {
+        source,
+        destination,
+        sourcePath: `${label}-source/item.txt`,
+        destinationPath: `${label}-destination/item.txt`
+      }
+    }
+
+    const moveWithMissingReceipt = async (
+      paths: Awaited<ReturnType<typeof prepareMove>>,
+      mutateAfterCommit: () => Promise<void>
+    ) => {
+      const files = new WorkspaceFiles(() => host, {
+        afterLocalMoveCommit: async () => {
+          await mutateAfterCommit()
+          throw new Error('injected move receipt failure')
+        }
+      })
+      await expect(files.move(workspace, workspace, {
+        source: { workspaceId: workspace.id, path: paths.sourcePath },
+        destination: { workspaceId: workspace.id, path: paths.destinationPath }
+      })).resolves.toMatchObject({
+        status: 'error',
+        code: 'WORKSPACE_MOVE_RESULT_UNKNOWN',
+        finalLocation: 'unknown'
+      })
+    }
+
+    const destinationOriginal = await prepareMove('destination-original')
+    await moveWithMissingReceipt(destinationOriginal, async () => {})
+    await expect(access(destinationOriginal.source)).rejects.toThrow()
+    await expect(readFile(destinationOriginal.destination, 'utf8')).resolves.toBe(
+      'original destination-original'
+    )
+
+    const sourceReplacement = await prepareMove('source-replacement')
+    await moveWithMissingReceipt(sourceReplacement, async () => {
+      await writeFile(sourceReplacement.source, 'unrelated source replacement')
+    })
+    await expect(readFile(sourceReplacement.source, 'utf8')).resolves.toBe(
+      'unrelated source replacement'
+    )
+    await expect(readFile(sourceReplacement.destination, 'utf8')).resolves.toBe(
+      'original source-replacement'
+    )
+
+    const movedBack = await prepareMove('moved-back')
+    await moveWithMissingReceipt(movedBack, async () => {
+      await rename(movedBack.destination, movedBack.source)
+    })
+    await expect(readFile(movedBack.source, 'utf8')).resolves.toBe('original moved-back')
+    await expect(access(movedBack.destination)).rejects.toThrow()
+
+    const bothAbsent = await prepareMove('both-absent')
+    await moveWithMissingReceipt(bothAbsent, async () => {
+      await rm(bothAbsent.destination)
+    })
+    await expect(access(bothAbsent.source)).rejects.toThrow()
+    await expect(access(bothAbsent.destination)).rejects.toThrow()
+
+    const destinationReplacement = await prepareMove('destination-replacement')
+    await moveWithMissingReceipt(destinationReplacement, async () => {
+      await rm(destinationReplacement.destination)
+      await writeFile(destinationReplacement.destination, 'unrelated destination replacement')
+    })
+    await expect(access(destinationReplacement.source)).rejects.toThrow()
+    await expect(readFile(destinationReplacement.destination, 'utf8')).resolves.toBe(
+      'unrelated destination replacement'
+    )
+
+    const replacedParent = await prepareMove('replaced-parent')
+    const heldDestinationParent = join(root, 'replaced-parent-destination-held')
+    await moveWithMissingReceipt(replacedParent, async () => {
+      await rename(join(root, 'replaced-parent-destination'), heldDestinationParent)
+      await mkdir(join(root, 'replaced-parent-destination'))
+    })
+    await expect(access(replacedParent.source)).rejects.toThrow()
+    await expect(readFile(join(heldDestinationParent, 'item.txt'), 'utf8')).resolves.toBe(
+      'original replaced-parent'
+    )
+    await expect(access(replacedParent.destination)).rejects.toThrow()
+
+    const interleaved = await prepareMove('interleaved')
+    let occupancyReadStarted = false
+    await moveWithMissingReceipt(interleaved, async () => {
+      localWorkerRace.beforeInput = async () => {
+        occupancyReadStarted = true
+        await rm(interleaved.destination)
+        await writeFile(interleaved.source, 'replacement during occupancy read')
+      }
+    })
+    expect(occupancyReadStarted).toBe(false)
+    localWorkerRace.beforeInput = null
+    await expect(access(interleaved.source)).rejects.toThrow()
+    await expect(readFile(interleaved.destination, 'utf8')).resolves.toBe('original interleaved')
+
+    const replacedRoot = await prepareMove('replaced-root')
+    const heldRoot = join(root, '..', 'workspace-held')
+    await moveWithMissingReceipt(replacedRoot, async () => {
+      await rename(root, heldRoot)
+      await mkdir(root)
+    })
+    await expect(access(join(root, 'replaced-root-source', 'item.txt'))).rejects.toThrow()
+    await expect(readFile(join(heldRoot, replacedRoot.destinationPath), 'utf8')).resolves.toBe(
+      'original replaced-root'
+    )
+  })
+
   it('rejects a remote symlink target resolved outside the workspace before cat or tee', async () => {
     const run = vi.fn<ExecutionHost['run']>(async (command, args) => {
       if (command !== 'realpath') throw new Error(`Unexpected command: ${command}`)

@@ -88,7 +88,11 @@ async function createWindow(appReadyAtMs: number = Date.now()): Promise<void> {
     process.env.AGENTMUX_DESKTOP_FILE_EDITING_REPORT
       ? {
           beforeWrite: async (input) => await fileEditingProbeControl.beforeWrite(input),
-          localWriteFault: () => fileEditingProbeControl.consumeFault()
+          localWriteFault: () => fileEditingProbeControl.consumeFault(),
+          afterLocalMoveCommit: async () => await fileEditingProbeControl.afterLocalMoveCommit(),
+          onReadDirectoryStart: (workspace, path) => {
+            fileEditingProbeControl.recordDirectoryRead(workspace.id, path)
+          }
         }
       : {}
   )
@@ -96,7 +100,12 @@ async function createWindow(appReadyAtMs: number = Date.now()): Promise<void> {
   await disposeIpc?.()
   disposeIpc = await registerIpc({ window, configStore, runtime, scratchTopics, workspaceFiles })
   if (process.env.ELECTRON_RENDERER_URL) await window.loadURL(process.env.ELECTRON_RENDERER_URL)
-  else await window.loadFile(join(import.meta.dirname, '../renderer/index.html'))
+  else {
+    await window.loadFile(join(import.meta.dirname, '../renderer/index.html'),
+      process.env.AGENTMUX_DESKTOP_FILE_EDITING_REPORT
+        ? { query: { 'agentmux-file-editing-report': '1' } }
+        : undefined)
+  }
   const rendererLoadedAtMs = Date.now()
   if (process.env.AGENTMUX_DESKTOP_READY_FILE) {
     await writeFile(process.env.AGENTMUX_DESKTOP_READY_FILE, `${JSON.stringify({
@@ -112,15 +121,16 @@ async function createWindow(appReadyAtMs: number = Date.now()): Promise<void> {
   }
   const fileEditingConfig = await configStore.get()
   if (process.env.AGENTMUX_DESKTOP_FILE_EDITING_REPORT) {
-    const mountedWorkspaces = fileEditingConfig.workspaces.filter((workspace) => (
-      !isScratchWorkspaceId(workspace.id)
-    ))
-    if (mountedWorkspaces.length !== 1) {
-      throw new Error('Desktop file editing probe requires exactly one non-Scratch workspace.')
+    const mountedWorkspaces = fileEditingConfig.workspaces.filter((workspace) => !isScratchWorkspaceId(workspace.id))
+    const primaryWorkspace = mountedWorkspaces.find((workspace) => workspace.id === 'workspace-file-editing-e2e')
+    const alternateWorkspace = mountedWorkspaces.find((workspace) => workspace.id === 'workspace-file-editing-alternate-e2e')
+    if (!primaryWorkspace || !alternateWorkspace) {
+      throw new Error('Desktop file editing probe requires its primary and alternate mounted workspaces.')
     }
     if (await runDesktopFileEditingProbe({
       window,
-      workspacePath: mountedWorkspaces[0]!.path,
+      workspacePath: primaryWorkspace.path,
+      alternateWorkspacePath: alternateWorkspace.path,
       control: fileEditingProbeControl
     })) {
       app.quit()

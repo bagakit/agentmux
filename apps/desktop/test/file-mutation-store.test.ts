@@ -14,6 +14,7 @@ import {
 } from '../src/renderer/src/lib/workbench-tabs.js'
 import { useAppStore } from '../src/renderer/src/store.js'
 import { api } from '../src/renderer/src/lib/api.js'
+import { revealFileExplorerPath } from '../src/renderer/src/lib/file-explorer-selection.js'
 
 const initialState = useAppStore.getState()
 
@@ -32,8 +33,9 @@ function fileProjection() {
     documentObservationGenerations: state.documentObservationGenerations,
     documentIssues: state.documentIssues,
     savingDocuments: state.savingDocuments,
-    layouts: state.layouts,
-    lastActiveFileByWorkspace: state.lastActiveFileByWorkspace
+      layouts: state.layouts,
+      lastActiveFileByWorkspace: state.lastActiveFileByWorkspace,
+      fileExplorerStates: state.fileExplorerStates
   }
 }
 
@@ -155,6 +157,74 @@ describe('file mutation resource reconciliation', () => {
     await api.files.delete(workspaceId, destinationPath)
   })
 
+  it('reloads a moved changed document from its destination payload before observation rebind completes', async () => {
+    const workspaceId = 'changed-move-workspace'
+    const sourcePath = 'src/app/index.ts'
+    const destinationPath = 'src/moved/index.ts'
+    const neighborPath = 'src/application.ts'
+    const sourceKey = documentKey(workspaceId, sourcePath)
+    const neighborKey = documentKey(workspaceId, neighborPath)
+    const sourceId = `file:${workspaceId}:${sourcePath}`
+    const source = createWorkbenchTab(sourceId, {
+      regionId: initialWorkbenchRegionId(sourceId),
+      kind: 'file',
+      workspaceId,
+      path: sourcePath
+    })
+    useAppStore.setState({
+      activeWorkspaceId: workspaceId,
+      tabs: { [sourceId]: source },
+      documents: {
+        [sourceKey]: { path: sourcePath, content: 'draft', revision: 'source-revision' },
+        [neighborKey]: { path: neighborPath, content: 'neighbor', revision: 'neighbor-revision' }
+      },
+      dirtyDocuments: { [sourceKey]: true, [neighborKey]: true },
+      documentIssues: {
+        [sourceKey]: {
+          kind: 'changed',
+          observed: { path: sourcePath, content: 'observed', revision: 'observed-revision' }
+        },
+        [neighborKey]: { kind: 'deleted' }
+      },
+      layouts: { [workspaceId]: createWorkspaceLayout('pane', [sourceId]) },
+      lastActiveFileByWorkspace: { [workspaceId]: sourcePath }
+    })
+    vi.spyOn(api.files, 'move').mockResolvedValue({ status: 'moved' })
+    let releaseUnobserve!: () => void
+    const unobserveBlocked = new Promise<void>((resolve) => { releaseUnobserve = resolve })
+    vi.spyOn(api.files, 'unobserve').mockReturnValue(unobserveBlocked)
+    vi.spyOn(api.files, 'observe').mockResolvedValue(undefined)
+    vi.spyOn(api.files, 'read').mockResolvedValue({
+      status: 'read',
+      document: { path: destinationPath, content: 'disk', revision: 'destination-revision' }
+    })
+
+    const moving = useAppStore.getState().renamePath('src/app', 'src/moved')
+    const destinationId = `file:${workspaceId}:${destinationPath}`
+    const destinationKey = documentKey(workspaceId, destinationPath)
+    await vi.waitFor(() => {
+      expect(useAppStore.getState().tabs[destinationId]).toBeDefined()
+    })
+
+    await useAppStore.getState().reloadDocument(destinationId)
+    const reloaded = useAppStore.getState()
+    expect(reloaded.documents[destinationKey]).toEqual({
+      path: destinationPath,
+      content: 'observed',
+      revision: 'observed-revision'
+    })
+    expect(reloaded.documents[sourceKey]).toBeUndefined()
+    expect(reloaded.documents[neighborKey]).toEqual({
+      path: neighborPath,
+      content: 'neighbor',
+      revision: 'neighbor-revision'
+    })
+    expect(reloaded.documentIssues[neighborKey]).toEqual({ kind: 'deleted' })
+
+    releaseUnobserve()
+    await moving
+  })
+
   it('renames and deletes only the exact file subtree across tabs, documents, layout, and last-active state', async () => {
     const workspace: WorkspaceRecord = {
       id: 'mutation-workspace',
@@ -224,9 +294,25 @@ describe('file mutation resource reconciliation', () => {
         [documentKey(workspace.id, childPath)]: true
       },
       layouts: { [workspace.id]: createWorkspaceLayout('pane', [child.id, neighbor.id]) },
-      lastActiveFileByWorkspace: { [workspace.id]: neighborPath }
+      lastActiveFileByWorkspace: { [workspace.id]: neighborPath },
+      fileExplorerStates: {
+        [workspace.id]: {
+          selection: {
+            activePath: childPath,
+            anchorPath: childPath,
+            selectedPaths: new Set([childPath, neighborPath])
+          },
+          expandedPaths: new Set(['src', 'src/app', 'src/application'])
+        }
+      }
     })
 
+    let explorerProjectionWrites = 0
+    const unsubscribe = useAppStore.subscribe((state, previous) => {
+      if (state.fileExplorerStates[workspace.id] !== previous.fileExplorerStates[workspace.id]) {
+        explorerProjectionWrites += 1
+      }
+    })
     await useAppStore.getState().renamePath('src/app', 'src/renamed')
 
     const renamedPath = 'src/renamed/index.ts'
@@ -261,12 +347,29 @@ describe('file mutation resource reconciliation', () => {
     expect(renamed.savingDocuments[documentKey(workspace.id, renamedPath)]).toBe(false)
     expect(renamed.layouts[workspace.id]?.groups[0]?.tabOrder).toEqual([renamedId, neighbor.id])
     expect(renamed.lastActiveFileByWorkspace[workspace.id]).toBe(neighborPath)
+    expect(renamed.fileExplorerStates[workspace.id]?.selection.selectedPaths).toEqual(
+      new Set([renamedPath, neighborPath])
+    )
+    expect(renamed.fileExplorerStates[workspace.id]?.expandedPaths).toEqual(
+      new Set(['src', 'src/renamed', 'src/application'])
+    )
+    expect(explorerProjectionWrites).toBe(1)
 
     useAppStore.setState({
       lastActiveFileByWorkspace: { [workspace.id]: renamedPath }
     })
     await useAppStore.getState().renamePath('src/renamed', 'src/final')
-    expect(useAppStore.getState().lastActiveFileByWorkspace[workspace.id]).toBe('src/final/index.ts')
+    const renamedAgain = useAppStore.getState()
+    expect(renamedAgain.lastActiveFileByWorkspace[workspace.id]).toBe('src/final/index.ts')
+    const renamedAgainExplorer = renamedAgain.fileExplorerStates[workspace.id]!
+    expect(renamedAgainExplorer.selection.selectedPaths).toEqual(
+      new Set(['src/final/index.ts', neighborPath])
+    )
+    expect(revealFileExplorerPath(renamedAgainExplorer, 'src/final/index.ts')).toBe(
+      renamedAgainExplorer
+    )
+    expect(explorerProjectionWrites).toBe(2)
+    unsubscribe()
 
     await useAppStore.getState().deletePath('src/final')
     const deleted = useAppStore.getState()
@@ -282,6 +385,11 @@ describe('file mutation resource reconciliation', () => {
     expect(deleted.savingDocuments[documentKey(workspace.id, 'src/final/index.ts')]).toBeUndefined()
     expect(deleted.lastActiveFileByWorkspace[workspace.id]).toBeUndefined()
     expect(deleted.layouts[workspace.id]?.groups[0]?.tabOrder).toEqual([neighbor.id])
+    expect(deleted.fileExplorerStates[workspace.id]?.selection).toEqual({
+      activePath: neighborPath,
+      anchorPath: neighborPath,
+      selectedPaths: new Set([neighborPath])
+    })
   })
 
   it('discards document memory when a file tab closes and reloads from disk when reopened', async () => {

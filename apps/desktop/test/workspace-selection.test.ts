@@ -6,6 +6,7 @@ vi.hoisted(() => {
 
 import type { AgentLaunchResult, AppConfig, SessionSnapshot, WorkspaceRecord } from '../src/shared/contracts.js'
 import { api } from '../src/renderer/src/lib/api.js'
+import { revealFileExplorerPath } from '../src/renderer/src/lib/file-explorer-selection.js'
 import { createWorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.js'
 import {
   createWorkbenchTab,
@@ -23,6 +24,54 @@ afterEach(() => {
 })
 
 describe('selected worktree workspace context', () => {
+  it('preserves each Explorer view across a Workspace A to B to A revisit', async () => {
+    const workspaceA = 'workspace-a'
+    const workspaceB = 'workspace-b'
+    const viewA = {
+      selection: {
+        activePath: 'src/a.ts',
+        anchorPath: 'src/a.ts',
+        selectedPaths: new Set(['src/a.ts', 'src/application.ts'])
+      },
+      expandedPaths: new Set(['src'])
+    }
+    const viewB = {
+      selection: {
+        activePath: 'lib/b.ts',
+        anchorPath: 'lib/b.ts',
+        selectedPaths: new Set(['lib/b.ts'])
+      },
+      expandedPaths: new Set(['lib'])
+    }
+    useAppStore.setState({
+      activeWorkspaceId: workspaceA,
+      layouts: {
+        [workspaceA]: createWorkspaceLayout('pane-a'),
+        [workspaceB]: createWorkspaceLayout('pane-b')
+      },
+      lastActiveFileByWorkspace: {
+        [workspaceA]: 'src/a.ts',
+        [workspaceB]: 'lib/b.ts'
+      },
+      fileExplorerStates: { [workspaceA]: viewA, [workspaceB]: viewB }
+    })
+    let explorerProjectionWrites = 0
+    const unsubscribe = useAppStore.subscribe((state, previous) => {
+      if (state.fileExplorerStates !== previous.fileExplorerStates) explorerProjectionWrites += 1
+    })
+
+    await useAppStore.getState().selectWorkspace(workspaceB)
+    await useAppStore.getState().selectWorkspace(workspaceA)
+    unsubscribe()
+
+    const revisited = useAppStore.getState().fileExplorerStates[workspaceA]!
+    expect(revisited).toBe(viewA)
+    expect(revealFileExplorerPath(revisited, 'src/a.ts')).toBe(revisited)
+    expect(revisited.selection.selectedPaths).toEqual(new Set(['src/a.ts', 'src/application.ts']))
+    expect(revisited.expandedPaths).toEqual(new Set(['src']))
+    expect(explorerProjectionWrites).toBe(0)
+  })
+
   it('collapses the project rail without changing Workspace or surface-tool owners', () => {
     const tabs = useAppStore.getState().tabs
     const layouts = useAppStore.getState().layouts
