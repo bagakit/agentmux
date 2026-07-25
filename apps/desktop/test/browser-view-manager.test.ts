@@ -1,5 +1,17 @@
 import { describe, expect, it, vi } from 'vitest'
 
+function png(width = 2, height = 3): Buffer {
+  const value = Buffer.alloc(33)
+  Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(value)
+  value.writeUInt32BE(13, 8)
+  value.write('IHDR', 12, 'ascii')
+  value.writeUInt32BE(width, 16)
+  value.writeUInt32BE(height, 20)
+  value[24] = 8
+  value[25] = 6
+  return value
+}
+
 const fakeElectron = vi.hoisted(() => {
   type Listener = (...args: any[]) => void
 
@@ -15,6 +27,12 @@ const fakeElectron = vi.hoisted(() => {
       this.deviceEmulation = parameters
     })
     readonly openDevTools = vi.fn()
+    capturePageImpl = async () => ({
+      isEmpty: () => false,
+      getSize: () => ({ width: 2, height: 3 }),
+      toPNG: () => png()
+    })
+    readonly capturePage = vi.fn(async () => await this.capturePageImpl())
     readonly session = {
       checkHandler: null as null | ((...args: any[]) => boolean),
       requestHandler: null as null | ((...args: any[]) => void),
@@ -55,11 +73,16 @@ const fakeElectron = vi.hoisted(() => {
       for (const listener of this.listeners.get(event) ?? []) listener({}, ...args)
     }
 
+    emitDetails(event: string, details: Record<string, unknown>) {
+      for (const listener of this.listeners.get(event) ?? []) listener(details)
+    }
+
     setWindowOpenHandler() {}
     setZoomFactor(value: number) { this.zoomFactor = value }
 
     async loadURL(url: string) {
       this.loading = true
+      this.emitDetails('did-start-navigation', { url, isSameDocument: false, isMainFrame: true })
       this.emit('did-start-loading')
       this.zoomFactor = 1
       this.url = url
@@ -75,6 +98,7 @@ const fakeElectron = vi.hoisted(() => {
     isLoading() { return this.loading }
     isDestroyed() { return this.destroyed }
     reload() {
+      this.emitDetails('did-start-navigation', { url: this.url, isSameDocument: false, isMainFrame: true })
       this.emit('did-start-loading')
       this.zoomFactor = 1
       this.emit('did-finish-load')
@@ -186,6 +210,18 @@ describe('BrowserViewManager', () => {
     manager.openDevTools('browser-1')
     expect(view.webContents.openDevTools).toHaveBeenCalledWith({ mode: 'detach', activate: true })
 
+    await expect(manager.captureScreenshot('browser-1')).resolves.toEqual({
+      browserId: 'browser-1',
+      navigationId: expect.any(String),
+      image: {
+        mimeType: 'image/png',
+        dataUrl: `data:image/png;base64,${png().toString('base64')}`,
+        width: 2,
+        height: 3,
+        byteLength: png().byteLength
+      }
+    })
+
     expect(await manager.navigate('browser-1', 'example.com')).toMatchObject({
       url: 'https://example.com/',
       title: 'example.com'
@@ -287,5 +323,97 @@ describe('BrowserViewManager', () => {
     expect(fixture.children).toHaveLength(0)
     expect(fixture.sent).toEqual([{ type: 'closed', id: 'browser-destroyed' }])
     expect(() => manager.setBounds('browser-destroyed', null)).not.toThrow()
+  })
+
+  it('rejects a screenshot that completes after the page navigation changes', async () => {
+    const fixture = fakeWindow()
+    const manager = new BrowserViewManager(fixture.window as never)
+    const created = await manager.create('browser-capture', 'https://example.com')
+    const view = fixture.children[0]!
+    let resolveCapture!: (image: Awaited<ReturnType<typeof view.webContents.capturePage>>) => void
+    view.webContents.capturePageImpl = async () => await new Promise((resolve) => { resolveCapture = resolve })
+
+    const pending = manager.captureScreenshot('browser-capture')
+    view.webContents.emitDetails('did-start-navigation', {
+      url: 'https://example.com/next',
+      isSameDocument: false,
+      isMainFrame: true
+    })
+    expect(fixture.sent.at(-1)).toEqual({
+      type: 'updated',
+      browser: expect.objectContaining({
+        id: 'browser-capture',
+        navigationId: expect.not.stringMatching(created.navigationId)
+      })
+    })
+    resolveCapture({
+      isEmpty: () => false,
+      getSize: () => ({ width: 2, height: 3 }),
+      toPNG: () => Buffer.from('late-browser-png')
+    })
+
+    await expect(pending).rejects.toThrow('Browser page changed while the screenshot was being captured')
+  })
+
+  it('rotates navigation identity for same-document main-frame navigation', async () => {
+    const fixture = fakeWindow()
+    const manager = new BrowserViewManager(fixture.window as never)
+    const created = await manager.create('browser-same-document', 'https://example.com/page')
+    const view = fixture.children[0]!
+
+    view.webContents.emitDetails('did-start-navigation', {
+      url: 'https://example.com/page#details',
+      isSameDocument: true,
+      isMainFrame: true
+    })
+    view.webContents.url = 'https://example.com/page#details'
+    view.webContents.emit('did-navigate-in-page', 'https://example.com/page#details', true)
+
+    expect(fixture.sent.at(-1)).toEqual({
+      type: 'updated',
+      browser: expect.objectContaining({
+        id: 'browser-same-document',
+        url: 'https://example.com/page#details',
+        navigationId: expect.not.stringMatching(created.navigationId)
+      })
+    })
+  })
+
+  it('does not rotate navigation identity for subframe navigation', async () => {
+    const fixture = fakeWindow()
+    const manager = new BrowserViewManager(fixture.window as never)
+    const created = await manager.create('browser-subframe', 'https://example.com/page')
+    const view = fixture.children[0]!
+
+    view.webContents.emitDetails('did-start-navigation', {
+      url: 'https://frames.example.test/ad',
+      isSameDocument: false,
+      isMainFrame: false
+    })
+
+    expect(fixture.sent.at(-1)).toEqual({
+      type: 'updated',
+      browser: expect.objectContaining({ navigationId: created.navigationId })
+    })
+  })
+
+  it('rejects a capture after close even when the id is recreated', async () => {
+    const fixture = fakeWindow()
+    const manager = new BrowserViewManager(fixture.window as never)
+    await manager.create('browser-recreated', 'https://example.com/first')
+    const firstView = fixture.children[0]!
+    let resolveCapture!: (image: Awaited<ReturnType<typeof firstView.webContents.capturePage>>) => void
+    firstView.webContents.capturePageImpl = async () => await new Promise((resolve) => { resolveCapture = resolve })
+
+    const pending = manager.captureScreenshot('browser-recreated')
+    manager.close('browser-recreated')
+    await manager.create('browser-recreated', 'https://example.com/second')
+    resolveCapture({
+      isEmpty: () => false,
+      getSize: () => ({ width: 2, height: 3 }),
+      toPNG: () => Buffer.from('old-browser-png')
+    })
+
+    await expect(pending).rejects.toThrow('Browser page changed while the screenshot was being captured')
   })
 })

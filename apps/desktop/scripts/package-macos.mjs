@@ -172,6 +172,7 @@ async function copyRuntimeApplication(appPath) {
   await mkdir(join(appResources, 'node_modules', '@agentmux'), { recursive: true })
   await cp(join(desktopRoot, 'out'), join(appResources, 'out'), { recursive: true })
   await cp(join(desktopRoot, 'resources'), join(appResources, 'resources'), { recursive: true })
+  await cp(join(repositoryRoot, 'THIRD_PARTY_NOTICES.md'), join(appResources, 'THIRD_PARTY_NOTICES.md'))
   await writeFile(join(appResources, 'package.json'), `${JSON.stringify({
     name: 'agentmux-desktop',
     productName: PRODUCT_NAME,
@@ -319,8 +320,20 @@ async function verifyIdentity(appPath) {
   }
 }
 
+async function verifyThirdPartyNotices(appPath) {
+  const [source, packaged] = await Promise.all([
+    readFile(join(repositoryRoot, 'THIRD_PARTY_NOTICES.md')),
+    readFile(join(appPath, 'Contents', 'Resources', 'app', 'THIRD_PARTY_NOTICES.md'))
+  ])
+  assert(
+    source.equals(packaged),
+    'Packaged third-party notices do not exactly match the repository notice.'
+  )
+}
+
 async function verifyPackagedRuntime(appPath, verificationRoot) {
   const appResources = join(appPath, 'Contents', 'Resources', 'app')
+  await verifyThirdPartyNotices(appPath)
   const coreRuntime = join(appResources, 'node_modules', '@agentmux', 'core')
   const binaryRoot = join(coreRuntime, 'vendor', 'ctxmux', 'darwin-arm64', 'bin')
   const workspaceMoveHelper = join(appResources, 'resources', 'bin', 'agentmux-workspace-move')
@@ -734,6 +747,7 @@ async function main() {
     await brandApplication(stagedApp)
     await copyRuntimeApplication(stagedApp)
     await verifyIdentity(stagedApp)
+    await verifyThirdPartyNotices(stagedApp)
     await auditBundleSymlinks(stagedApp)
     await auditRuntimeReferences(stagedApp, temporaryRoot)
     await run('codesign', ['--force', '--deep', '--sign', '-', stagedApp], { capture: true })

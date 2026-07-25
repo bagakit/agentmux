@@ -1,16 +1,20 @@
+import { randomUUID } from 'node:crypto'
 import { WebContentsView, type BrowserWindow } from 'electron'
 import {
   BROWSER_VIEWPORT_PRESETS,
   type BrowserBounds,
   type BrowserEvent,
+  type BrowserScreenshotCapture,
   type BrowserSnapshot,
   type BrowserViewport
 } from '../shared/contracts.js'
+import { browserPngFromNativeImage } from './browser-image.js'
 
 type BrowserEntry = {
   id: string
   view: WebContentsView
   requestedUrl: string
+  navigationId: string
   viewport: BrowserViewport
   error: string | null
 }
@@ -55,7 +59,14 @@ export class BrowserViewManager {
         nodeIntegration: false
       }
     })
-    const entry: BrowserEntry = { id, view, requestedUrl: url, viewport: 'responsive', error: null }
+    const entry: BrowserEntry = {
+      id,
+      view,
+      requestedUrl: url,
+      navigationId: randomUUID(),
+      viewport: 'responsive',
+      error: null
+    }
     this.entries.set(id, entry)
     this.window.contentView.addChildView(view)
     view.setVisible(false)
@@ -123,6 +134,24 @@ export class BrowserViewManager {
     return this.snapshot(entry)
   }
 
+  async captureScreenshot(id: string): Promise<BrowserScreenshotCapture> {
+    const entry = this.require(id)
+    const navigationId = entry.navigationId
+    const image = await entry.view.webContents.capturePage()
+    if (
+      this.entries.get(id) !== entry ||
+      entry.view.webContents.isDestroyed() ||
+      entry.navigationId !== navigationId
+    ) {
+      throw new Error('Browser page changed while the screenshot was being captured')
+    }
+    return {
+      browserId: id,
+      navigationId,
+      image: browserPngFromNativeImage(image)
+    }
+  }
+
   setBounds(id: string, bounds: BrowserBounds | null): void {
     const entry = this.entries.get(id)
     if (!entry) return
@@ -180,6 +209,12 @@ export class BrowserViewManager {
     contents.on('did-finish-load', () => {
       contents.setZoomFactor(DEFAULT_BROWSER_ZOOM_FACTOR)
       this.applyViewport(entry)
+    })
+    contents.on('did-start-navigation', (details) => {
+      if (!details.isMainFrame) return
+      entry.navigationId = randomUUID()
+      entry.error = null
+      this.emit(entry)
     })
     contents.on('did-start-loading', () => {
       entry.error = null
@@ -241,6 +276,7 @@ export class BrowserViewManager {
     const contents = entry.view.webContents
     return {
       id: entry.id,
+      navigationId: entry.navigationId,
       url: contents.getURL() || entry.requestedUrl,
       title: contents.getTitle(),
       loading: contents.isLoading(),

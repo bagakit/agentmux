@@ -18,10 +18,16 @@ import {
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   BROWSER_VIEWPORT_PRESETS,
+  type BrowserScreenshotCapture,
   type BrowserSnapshot,
   type BrowserViewport
 } from '../../../shared/contracts'
 import { api } from '../lib/api'
+import { composeScreenshot } from './browser-screenshot/compose'
+import {
+  ScreenshotEditor,
+  type ScreenshotCompleteInput
+} from './browser-screenshot/ScreenshotEditor'
 import {
   LatestBrowserBoundsSynchronizer,
   rendererCssBoundsToWindowDip
@@ -49,13 +55,31 @@ export function BrowserPane({
   const toolbar = useAppStore((state) => state.config?.browser.toolbar)
   const toolsOpen = useAppStore((state) => state.toolsOpen)
   const stageRef = useRef<HTMLDivElement>(null)
+  const screenshotToken = useRef(0)
   const [address, setAddress] = useState(tab.url === 'about:blank' ? '' : tab.url)
   const [busy, setBusy] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [screenshot, setScreenshot] = useState<BrowserScreenshotCapture | null>(null)
+  const [screenshotBusy, setScreenshotBusy] = useState(false)
 
   useEffect(() => {
     setAddress(tab.url === 'about:blank' ? '' : tab.url)
   }, [tab.url])
+
+  useEffect(() => () => {
+    screenshotToken.current += 1
+  }, [])
+
+  useEffect(() => {
+    if (
+      screenshot &&
+      (screenshot.browserId !== tab.browserId || screenshot.navigationId !== tab.navigationId)
+    ) {
+      screenshotToken.current += 1
+      setScreenshot(null)
+      setScreenshotBusy(false)
+    }
+  }, [screenshot, tab.browserId, tab.navigationId])
 
   useLayoutEffect(() => {
     const stage = stageRef.current
@@ -72,6 +96,7 @@ export function BrowserPane({
         if (
           !visible ||
           menuOpen ||
+          screenshot !== null ||
           navigatorCoversBrowser ||
           __AGENTMUX_WEB_PREVIEW__ ||
           tab.error ||
@@ -98,7 +123,7 @@ export function BrowserPane({
       window.removeEventListener('resize', update)
       void api.browser.setBounds(tab.browserId, null).catch(() => {})
     }
-  }, [menuOpen, toolsOpen, reportError, tab.browserId, tab.error, tab.url, visible])
+  }, [menuOpen, screenshot, toolsOpen, reportError, tab.browserId, tab.error, tab.url, visible])
 
   async function run(action: () => Promise<BrowserSnapshot>): Promise<void> {
     if (busy) return
@@ -122,6 +147,54 @@ export function BrowserPane({
       reportError(error)
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function beginScreenshot(): Promise<void> {
+    if (screenshot || screenshotBusy || busy || tab.url === 'about:blank') return
+    const token = ++screenshotToken.current
+    setScreenshotBusy(true)
+    try {
+      const captured = await api.browser.captureScreenshot(tab.browserId)
+      if (screenshotToken.current !== token) return
+      if (captured.browserId !== tab.browserId || captured.navigationId !== tab.navigationId) {
+        throw new Error('Browser page changed before the screenshot editor opened')
+      }
+      setScreenshot(captured)
+    } catch (error) {
+      if (screenshotToken.current === token) reportError(error)
+    } finally {
+      if (screenshotToken.current === token) setScreenshotBusy(false)
+    }
+  }
+
+  function cancelScreenshot(): void {
+    screenshotToken.current += 1
+    setScreenshotBusy(false)
+    setScreenshot(null)
+  }
+
+  async function copyScreenshot(input: ScreenshotCompleteInput): Promise<void> {
+    const captured = screenshot
+    if (!captured || screenshotBusy) return
+    const token = screenshotToken.current
+    setScreenshotBusy(true)
+    try {
+      const image = await composeScreenshot({
+        image: input.image,
+        displayWidth: input.displayWidth,
+        displayHeight: input.displayHeight,
+        outputScale: window.devicePixelRatio || 1,
+        shapes: input.shapes
+      })
+      if (screenshotToken.current !== token) return
+      await api.ui.writeClipboardImage(image)
+      if (screenshotToken.current !== token) return
+      setScreenshot(null)
+    } catch (error) {
+      if (screenshotToken.current === token) reportError(error)
+    } finally {
+      if (screenshotToken.current === token) setScreenshotBusy(false)
     }
   }
 
@@ -163,8 +236,14 @@ export function BrowserPane({
           </button>
         ) : null}
         {toolbar?.screenshot ? (
-          <button type="button" aria-label="Screenshot — unavailable" title="Screenshot — available after capture editing is installed" disabled>
-            <Camera size={14} />
+          <button
+            type="button"
+            aria-label="Screenshot"
+            title="Capture and mark up this viewport"
+            disabled={tab.url === 'about:blank' || busy || screenshotBusy || screenshot !== null}
+            onClick={() => void beginScreenshot()}
+          >
+            {screenshotBusy && !screenshot ? <LoaderCircle className="spin" size={14} /> : <Camera size={14} />}
           </button>
         ) : null}
         {toolbar?.devTools ? (
@@ -227,7 +306,14 @@ export function BrowserPane({
         ) : null}
       </form>
       <div className="browser-stage" ref={stageRef}>
-        {tab.error ? (
+        {screenshot ? (
+          <ScreenshotEditor
+            image={screenshot.image}
+            busy={screenshotBusy}
+            onCancel={cancelScreenshot}
+            onComplete={(input) => void copyScreenshot(input)}
+          />
+        ) : tab.error ? (
           <div className="pane-state pane-state--error">
             <AlertTriangle size={20} />
             <strong>Page could not be loaded</strong>

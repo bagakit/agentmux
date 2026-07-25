@@ -64,6 +64,7 @@ function terminalTab(tabId: string, regionId: string, sessionId: string) {
 function browserSurface(regionId: string, browserId: string) {
   return {
     id: browserId,
+    navigationId: `${browserId}:navigation`,
     regionId,
     kind: 'browser' as const,
     workspaceId: 'workspace',

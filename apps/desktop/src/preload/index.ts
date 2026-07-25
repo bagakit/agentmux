@@ -13,6 +13,7 @@ import type {
   AppConfig,
   BrowserBounds,
   BrowserEvent,
+  BrowserPng,
   BrowserViewport,
   CreateWorkspacePathInput,
   CreateWorktreeForBranchInput,
@@ -76,6 +77,7 @@ const api: AgentMuxPreloadApi = {
   ui: {
     readClipboardText: () => ipcRenderer.invoke('ui:readClipboardText'),
     writeClipboardText: (text: string) => ipcRenderer.invoke('ui:writeClipboardText', text),
+    writeClipboardImage: (image: BrowserPng) => ipcRenderer.invoke('ui:writeClipboardImage', image),
     openExternal: (url: string) => ipcRenderer.invoke('ui:openExternal', url),
     getZoomFactor: () => webFrame.getZoomFactor(),
     onWindowResize(listener: (event: WindowResizeEvent) => void) {
@@ -144,6 +146,7 @@ const api: AgentMuxPreloadApi = {
     reload: (id: string) => ipcRenderer.invoke('browser:reload', id),
     openDevTools: (id: string) => ipcRenderer.invoke('browser:openDevTools', id),
     setViewport: (id: string, viewport: BrowserViewport) => ipcRenderer.invoke('browser:setViewport', id, viewport),
+    captureScreenshot: (id: string) => ipcRenderer.invoke('browser:captureScreenshot', id),
     setBounds: (id: string, bounds: BrowserBounds | null) => ipcRenderer.invoke('browser:setBounds', id, bounds),
     close: (id: string) => ipcRenderer.invoke('browser:close', id),
     onEvent(listener: (event: BrowserEvent) => void) {

@@ -1087,7 +1087,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 
 .browser-surface { height: 100%; min-height: 0; display: grid; grid-template-rows: 38px minmax(0, 1fr); background: #12151b; }
 .browser-toolbar { min-width: 0; display: flex; align-items: center; gap: 3px; padding: 5px 7px; border-bottom: 1px solid var(--line); background: #171b21; }
-.browser-toolbar > button { width: 27px; height: 27px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; cursor: pointer; }
+.browser-toolbar > button { width: 27px; height: 27px; flex: none; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; cursor: pointer; }
 .browser-toolbar > button:hover:not(:disabled) { color: var(--text); background: var(--surface-3); }
 .browser-toolbar > button:disabled { opacity: .3; cursor: default; }
 .browser-toolbar label { min-width: 0; height: 28px; flex: 1; display: flex; align-items: center; gap: 7px; padding: 0 9px; border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-3); background: #0e1116; }
@@ -1110,6 +1110,36 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .browser-empty strong, .browser-preview strong { color: var(--text-2); font-size: 12px; }
 .browser-empty span, .browser-preview span { max-width: 460px; overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .browser-preview small { margin-top: 5px; color: #56615b; font-size: 10px; }
+.browser-screenshot-editor { position: absolute; inset: 0; overflow: hidden; background: #0b0e12; isolation: isolate; }
+.browser-screenshot-editor__viewport { position: absolute; z-index: 0; top: 50%; left: 50%; overflow: hidden; transform: translate(-50%, -50%); }
+.browser-screenshot-editor__viewport > img,
+.browser-screenshot-editor__viewport > canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.browser-screenshot-editor__viewport > img { z-index: 0; user-select: none; -webkit-user-drag: none; }
+.browser-screenshot-editor__viewport > canvas { z-index: 1; cursor: crosshair; touch-action: none; }
+.browser-screenshot-editor__text { position: absolute; z-index: 3; min-width: 120px; max-width: min(360px, calc(100% - 16px)); padding: 4px 6px; border: 1px solid #ffffff8c; border-radius: var(--radius-sm); outline: none; background: #0d1117d9; box-shadow: 0 6px 20px #0009; font-weight: 600; }
+.browser-screenshot-toolbar { position: absolute; z-index: 2; right: 10px; bottom: 10px; left: 10px; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px; border: 1px solid #ffffff24; border-radius: var(--radius-lg); color: var(--text-2); background: #101415f2; box-shadow: 0 18px 42px #0009, inset 0 1px #ffffff0a; backdrop-filter: blur(14px); }
+.browser-screenshot-toolbar__tools,
+.browser-screenshot-toolbar__actions,
+.browser-screenshot-toolbar__colors { min-width: 0; display: flex; align-items: center; gap: 3px; }
+.browser-screenshot-toolbar__tools { overflow-x: auto; scrollbar-width: none; }
+.browser-screenshot-toolbar__tools::-webkit-scrollbar { display: none; }
+.browser-screenshot-toolbar button { min-width: 27px; height: 27px; flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 0 7px; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font: inherit; cursor: pointer; }
+.browser-screenshot-toolbar button:hover:not(:disabled),
+.browser-screenshot-toolbar button.selected { color: var(--text); background: var(--surface-3); }
+.browser-screenshot-toolbar button:disabled { opacity: .38; cursor: default; }
+.browser-screenshot-toolbar__colors button { min-width: 16px; width: 16px; height: 16px; padding: 0; border: 1px solid #ffffff52; border-radius: 50%; box-shadow: 0 0 0 1px #0008; }
+.browser-screenshot-toolbar__colors button.selected { box-shadow: 0 0 0 2px #101415, 0 0 0 3px var(--green); }
+.browser-screenshot-toolbar select { height: 25px; flex: none; padding: 0 20px 0 6px; border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-2); background: #0e1116; font: 10px "SFMono-Regular", monospace; }
+.browser-screenshot-toolbar__divider { width: 1px; height: 18px; flex: none; margin: 0 3px; background: var(--line); }
+.browser-screenshot-toolbar__actions { flex: none; }
+.browser-screenshot-toolbar__actions > span { max-width: 220px; overflow: hidden; color: var(--text-3); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.browser-screenshot-toolbar__actions .primary-button { width: auto; color: #0c130e; background: var(--green); font-weight: 700; }
+.browser-screenshot-toolbar__actions .primary-button:hover:not(:disabled) { color: #0c130e; background: #80dfa3; }
+@media (max-width: 920px) {
+  .browser-screenshot-toolbar { align-items: stretch; flex-direction: column; }
+  .browser-screenshot-toolbar__actions { justify-content: flex-end; }
+  .browser-screenshot-toolbar__actions > span { margin-right: auto; }
+}
 
 .launch-surface { height: 100%; overflow: auto; display: flex; flex-direction: column; justify-content: safe center; gap: 0; padding: 40px clamp(20px, 6vw, 60px) 48px; background: radial-gradient(120% 78% at 50% 34%, #16211b 0, var(--surface-0) 52%, var(--surface-0) 100%); }
 .launch-surface > * { flex: 0 0 auto; width: min(640px, 100%); margin-inline: auto; }
