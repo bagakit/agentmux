@@ -10,6 +10,7 @@ import {
 } from './acp-adapter.js'
 import {
   AgentProviderRegistry,
+  resolveManagedHookPlan,
   type AgentProvider
 } from './agent-provider.js'
 import { composeAgentLaunchPrompt } from './agent-launch-prompt.js'
@@ -37,6 +38,8 @@ import {
   type AgentMuxAgentContinuityResult
 } from './agent-session-continuity.js'
 import { AgentHookServer, type AgentHookBinding } from './hook-server.js'
+import { AgentManagedHookInstaller } from './managed-hook-installer.js'
+import { defaultCtxmuxStateDirectory } from './runtime-paths.js'
 import { projectAgentMuxRuntimeSubjects, type AgentMuxRuntimeProjection } from './runtime.js'
 import { agentTimelineMutationFromAcpEvent } from './session-timeline.js'
 import type {
@@ -135,6 +138,12 @@ export type AgentMuxClientOptions = {
   providers?: readonly AgentProvider[]
   store?: AgentMuxAgentSessionStore
   permissionHandler?: AgentMuxPermissionHandler
+  /**
+   * Installs the provider's managed Hook config before its first launch. Defaults to a `hooks`
+   * subdirectory of the ctxmux state directory so backups live beside the rest of the runtime state.
+   * Tests inject one over an isolated state directory to keep hook writes out of the real `$HOME`.
+   */
+  hookInstaller?: AgentManagedHookInstaller
 }
 
 export type AgentMuxAgentRuntimeStatus = {
@@ -311,6 +320,7 @@ export class AgentMuxClient {
   private readonly publisher = new AgentMuxClientEventPublisher()
   private readonly acp: AgentMuxAcpBridge
   private readonly hookServer: AgentHookServer
+  private readonly hookInstaller: AgentManagedHookInstaller
   private unsubscribeKernel: (() => void) | null = null
   private unsubscribeKernelErrors: (() => void) | null = null
   private connecting: Promise<void> | null = null
@@ -331,6 +341,8 @@ export class AgentMuxClient {
     this.hookServer = new AgentHookServer(
       async (event, signal) => await this.acceptHookEvent(event, signal)
     )
+    this.hookInstaller = options.hookInstaller
+      ?? new AgentManagedHookInstaller(join(defaultCtxmuxStateDirectory(), 'hooks'))
     this.acp = new AgentMuxAcpBridge(
       {
         onEvent: async (agentSessionId, event, evidence) => {
@@ -674,6 +686,7 @@ export class AgentMuxClient {
         env: input.env ?? {},
         ...(input.commandOverride === undefined ? {} : { commandOverride: input.commandOverride })
       })
+      await this.ensureManagedHooks(provider, input.providerId, input.workspacePath, agentSessionId)
       await this.requireHookIngressOwner()
       hookBinding = this.hookServer.createBinding(
         agentSessionId,
@@ -756,6 +769,41 @@ export class AgentMuxClient {
     } finally {
       if (hookBinding && ![...this.hookBindings.values()].includes(hookBinding)) await hookBinding.close()
       await this.registry.releaseLifecycle(reservation, abandonedRun ? [abandonedRun] : [])
+    }
+  }
+
+  /**
+   * Ensure the provider's managed Hook config is installed before its process starts. This is the
+   * F3 launch-time trigger: idempotent (an already-current config is a no-op) and install-and-leave —
+   * the config is never uninstalled on stop, because a provider like antigravity shares one global
+   * `~/.gemini` file across every concurrent agent and ripping it out would break a running sibling.
+   *
+   * Best-effort: a native provider whose hook config cannot be written still launches (its terminal
+   * output remains observable) — the install failure is surfaced as a non-fatal `agent-error` rather
+   * than aborting the launch. Providers with no installable plan (`resolveManagedHookPlan` → null, e.g.
+   * hermes' YAML plugin or pi's TypeScript extension) are simply skipped.
+   */
+  private async ensureManagedHooks(
+    provider: AgentProvider,
+    providerId: AgentProviderId,
+    workspacePath: string,
+    agentSessionId: string
+  ): Promise<void> {
+    if (provider.catalog.hookStrategy.kind !== 'native') return
+    const plan = resolveManagedHookPlan(providerId, workspacePath)
+    if (!plan) return
+    try {
+      await this.hookInstaller.ensure(plan)
+    } catch (error) {
+      this.publisher.publish({
+        type: 'agent-error',
+        agentSessionId,
+        code: error instanceof AgentMuxError ? error.code : 'HOOK_INSTALL_FAILED',
+        message: `Managed Hook install for ${provider.label} failed; launching without status hooks. ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        evidence: { source: 'user', observedAt: Date.now() }
+      })
     }
   }
 

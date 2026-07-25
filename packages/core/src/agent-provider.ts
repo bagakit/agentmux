@@ -150,7 +150,47 @@ export function createCodexManagedHookPlan(workspacePath: string): AgentManagedH
   }
 }
 
+// Claude fires `matcher`-scoped tool events; every other lifecycle event is a flat command entry.
+const CLAUDE_HOOK_EVENTS = [
+  'SessionStart',
+  'UserPromptSubmit',
+  'PreToolUse',
+  'PostToolUse',
+  'Stop'
+] as const
+
+/**
+ * `.claude/settings.json` is the user's whole Claude Code settings file (permissions, model, MCP
+ * servers, …) with hooks under a top-level `hooks` key — the canonical shared config. AgentMux owns
+ * only its own command entries, matched by the hook script filename, and the merge preserves every
+ * foreign setting and foreign hook. Workspace-scoped (like Codex) so the bridge is project-local.
+ */
+export function createClaudeManagedHookPlan(workspacePath: string): AgentManagedHookPlan {
+  const workspace = resolve(workspacePath)
+  if (!isAbsolute(workspacePath) || workspace !== workspacePath) {
+    throw new AgentMuxError('Claude Hook workspace must be an absolute normalized path.', 'INVALID_HOOK_PLAN')
+  }
+  const command = managedHookCommand('claude')
+  const hooks = Object.fromEntries(CLAUDE_HOOK_EVENTS.map((eventName) => [eventName, [{
+    ...(eventName === 'PreToolUse' || eventName === 'PostToolUse' ? { matcher: '*' } : {}),
+    hooks: [{ type: 'command', command, timeout: 10 }]
+  }]]))
+  return {
+    providerId: 'claude',
+    mutations: [{
+      path: join(workspace, '.claude', 'settings.json'),
+      content: `${JSON.stringify({ hooks }, null, 2)}\n`,
+      mode: 0o600,
+      // settings.json carries far more than hooks; inject only AgentMux command entries and keep
+      // every foreign top-level setting and foreign hook (Claude, like Codex, uses the `hooks` key).
+      merge: { kind: 'json-managed-events', marker: 'agentmux-hook.js' }
+    }]
+  }
+}
+
 const ANTIGRAVITY_HOOK_EVENTS = [
+  'SessionStart',
+  'UserPromptSubmit',
   'PreInvocation',
   'PostInvocation',
   'PreToolUse',
@@ -211,6 +251,29 @@ export function createAntigravityManagedHookPlan(homeOrWorkspacePath?: string): 
       // `agentmux-status` top-level bundle and must leave every sibling key untouched.
       merge: { kind: 'json-owned-key', key: 'agentmux-status' }
     }]
+  }
+}
+
+/**
+ * Resolve the managed Hook plan a provider needs installed before it can report status, or `null`
+ * when the provider has no installable plan yet. Codex and Claude write a workspace-scoped hooks
+ * config; Antigravity writes the global `~/.gemini` bundle it shares with Gemini. Hermes (YAML plugin)
+ * and Pi (TypeScript extension) declare native hooks but use non-JSON install surfaces with no plan
+ * builder yet, so they resolve to `null` and are simply not auto-installed.
+ */
+export function resolveManagedHookPlan(
+  providerId: AgentProviderId,
+  workspacePath: string
+): AgentManagedHookPlan | null {
+  switch (providerId) {
+    case 'codex':
+      return createCodexManagedHookPlan(workspacePath)
+    case 'claude':
+      return createClaudeManagedHookPlan(workspacePath)
+    case 'antigravity':
+      return createAntigravityManagedHookPlan()
+    default:
+      return null
   }
 }
 
