@@ -5,6 +5,7 @@ export type AgentComposerProps = {
   disabled: boolean
   placeholder: string
   activeFile?: string
+  isWorking?: boolean
   onChange(value: string): void
   onSubmit?: () => void
   onInterrupt?: () => void
@@ -17,6 +18,7 @@ export function AgentComposer({
   disabled,
   placeholder,
   activeFile,
+  isWorking = false,
   onChange,
   onSubmit,
   onInterrupt,
@@ -33,9 +35,14 @@ export function AgentComposer({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={(event) => {
-          if (event.key === 'Enter' && !event.shiftKey && canSubmit) {
-            event.preventDefault()
-            onSubmit?.()
+          if (event.key === 'Enter' && !event.shiftKey) {
+            if (isWorking && onInterrupt) {
+              event.preventDefault()
+              onInterrupt()
+            } else if (canSubmit) {
+              event.preventDefault()
+              onSubmit?.()
+            }
           }
         }}
         placeholder={placeholder}
@@ -68,17 +75,31 @@ export function AgentComposer({
             className="composer-tool composer-tool--danger"
             disabled={disabled || !onInterrupt}
             onClick={onInterrupt}
+            title="Interrupt active agent turn"
           >
             <Square size={12} /> Stop turn
           </button>
-          <button
-            type="button"
-            className="composer-send"
-            disabled={!canSubmit}
-            onClick={onSubmit}
-          >
-            Send <CornerDownLeft size={13} />
-          </button>
+          {isWorking ? (
+            <button
+              type="button"
+              className="composer-send composer-send--working"
+              disabled={disabled || !onInterrupt}
+              onClick={onInterrupt}
+              aria-label="Stop turn"
+            >
+              Stop <Square size={12} />
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="composer-send"
+              disabled={!canSubmit}
+              onClick={onSubmit}
+              aria-label="Send"
+            >
+              Send <CornerDownLeft size={13} />
+            </button>
+          )}
         </div>
       </div>
     </div>
