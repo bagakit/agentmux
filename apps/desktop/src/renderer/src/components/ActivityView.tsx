@@ -69,16 +69,28 @@ function tally(items: AgentTimelineItem[]): Array<{ item: AgentTimelineItem; cou
 }
 
 function Ruler({ items, origin, span }: { items: AgentTimelineItem[]; origin: number; span: number }) {
+  // With no spread between the first and last event there is no honest time to map, so the axis falls
+  // back to even ordinal spacing and says so with a dashed rail — otherwise every tick would stack on
+  // the left edge and read as a single event.
+  const axis = span > 0 ? 'temporal' : 'ordinal'
+  const position = (item: AgentTimelineItem, index: number): number => {
+    if (items.length <= 1) return 0
+    return axis === 'temporal'
+      ? ((item.createdAt - origin) / span) * 100
+      : (index / (items.length - 1)) * 100
+  }
+
   return (
     <div className="activity-ruler">
-      <div className="activity-ruler__track" aria-hidden="true">
+      <div className="activity-ruler__track" data-axis={axis} aria-hidden="true">
         <span className="activity-ruler__rail" />
-        {items.map((item) => (
+        {items.map((item, index) => (
           <span
             key={item.id}
             className={`activity-ruler__tick activity-ruler__tick--${item.kind}`}
             data-status={item.status}
-            style={{ left: `${span === 0 ? 0 : ((item.createdAt - origin) / span) * 100}%` }}
+            title={`${new Date(item.createdAt).toLocaleTimeString()} · ${item.title}`}
+            style={{ left: `${position(item, index)}%` }}
           />
         ))}
       </div>
@@ -113,27 +125,43 @@ function Row({
 
   return (
     <Fragment>
-      <div
-        className={`log-row log-row--${item.kind}`}
-        data-status={item.status}
-        data-expandable={expandable ? '' : undefined}
-        onClick={expandable ? () => setOpen((value) => !value) : undefined}
-      >
-        <span className="log-row__node"><Glyph kind={item.kind} /></span>
-        <span className="log-row__time">{formatOffset(item.createdAt, origin)}</span>
-        <span className="log-row__title">
-          {item.title}
-          {count > 1 ? <span className="log-row__count">×{count}</span> : null}
-        </span>
-        <span className="log-row__meta">
-          {item.status === 'streaming' ? <span className="log-row__chip">Streaming</span> : null}
-          {item.status === 'failed' ? <span className="log-row__chip log-row__chip--failed">Failed</span> : null}
-          <span className="log-row__source" data-persistent={showSource ? '' : undefined}>{item.source}</span>
-          {expandable ? (
+      {expandable ? (
+        <button
+          type="button"
+          className={`log-row log-row--${item.kind}`}
+          data-status={item.status}
+          data-expandable=""
+          aria-expanded={open}
+          onClick={() => setOpen((value) => !value)}
+        >
+          <span className="log-row__node"><Glyph kind={item.kind} /></span>
+          <span className="log-row__time">{formatOffset(item.createdAt, origin)}</span>
+          <span className="log-row__title">
+            {item.title}
+            {count > 1 ? <span className="log-row__count">×{count}</span> : null}
+          </span>
+          <span className="log-row__meta">
+            {item.status === 'streaming' ? <span className="log-row__chip">Streaming</span> : null}
+            {item.status === 'failed' ? <span className="log-row__chip log-row__chip--failed">Failed</span> : null}
+            <span className="log-row__source" data-persistent={showSource ? '' : undefined}>{item.source}</span>
             <ChevronRight size={12} className="log-row__chevron" data-open={open ? '' : undefined} />
-          ) : null}
-        </span>
-      </div>
+          </span>
+        </button>
+      ) : (
+        <div className={`log-row log-row--${item.kind}`} data-status={item.status}>
+          <span className="log-row__node"><Glyph kind={item.kind} /></span>
+          <span className="log-row__time">{formatOffset(item.createdAt, origin)}</span>
+          <span className="log-row__title">
+            {item.title}
+            {count > 1 ? <span className="log-row__count">×{count}</span> : null}
+          </span>
+          <span className="log-row__meta">
+            {item.status === 'streaming' ? <span className="log-row__chip">Streaming</span> : null}
+            {item.status === 'failed' ? <span className="log-row__chip log-row__chip--failed">Failed</span> : null}
+            <span className="log-row__source" data-persistent={showSource ? '' : undefined}>{item.source}</span>
+          </span>
+        </div>
+      )}
       {prose ? <p className="log-row__prose">{prose}</p> : null}
       {open && payload ? <pre className="log-row__payload">{payload}</pre> : null}
     </Fragment>
