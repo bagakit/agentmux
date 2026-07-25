@@ -92,9 +92,11 @@ export function BrowserProfileCatalog({
 }
 
 export function BrowserProfilesPanel({
-  browsers
+  browsers,
+  allBrowsers
 }: {
   browsers: readonly BrowserProfileSurface[]
+  allBrowsers: readonly BrowserProfileSurface[]
 }) {
   const mounted = useRef(true)
   const importRequest = useRef(0)
@@ -229,7 +231,7 @@ export function BrowserProfilesPanel({
       ) : (
         <BrowserProfileCatalog
           profiles={profiles}
-          browsers={browsers}
+          browsers={allBrowsers}
           busy={busy}
           confirmDeleteId={confirmDeleteId}
           onConfirmDelete={setConfirmDeleteId}

@@ -52,6 +52,28 @@ describe('Browser Profile projection', () => {
     expect(browserProfileIsInUse('unused', browsers)).toBe(false)
   })
 
+  it('keeps deletion fenced when a Profile is used by a Browser in another workspace', () => {
+    const otherWorkspaceBrowser: BrowserProfileSurface = {
+      browserId: 'browser-other-workspace',
+      profileId: 'unused',
+      title: 'Other workspace',
+      url: 'https://other.example/'
+    }
+    const markup = renderToStaticMarkup(
+      <BrowserProfileCatalog
+        profiles={profiles}
+        browsers={[...browsers, otherWorkspaceBrowser]}
+        busy={null}
+        confirmDeleteId={null}
+        onConfirmDelete={() => {}}
+        onCancelDelete={() => {}}
+        onDelete={() => {}}
+      />
+    )
+
+    expect(markup).toMatch(/<button[^>]*disabled=""[^>]*aria-label="Delete Unused"/)
+  })
+
   it('shows source results without private paths and fences default or in-use deletion', () => {
     const markup = renderToStaticMarkup(
       <BrowserProfileCatalog
