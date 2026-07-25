@@ -21,13 +21,13 @@ describe('built-in agent providers', () => {
       {
         id: 'codex', executable: 'codex', expectedProcess: 'codex',
         promptDelivery: 'positional-argv', readySignal: 'foreground-process',
-        hook: 'native', permission: 'observe', resume: 'provider-native', acp: 'none',
+        hook: 'native', permission: 'respond', resume: 'provider-native', acp: 'none',
         replyCorrelation: 'none'
       },
       {
         id: 'claude', executable: 'claude', expectedProcess: 'claude',
         promptDelivery: 'positional-argv', readySignal: 'foreground-process',
-        hook: 'native', permission: 'observe', resume: 'provider-native', acp: 'none',
+        hook: 'native', permission: 'respond', resume: 'provider-native', acp: 'none',
         replyCorrelation: 'none'
       },
       {
@@ -215,13 +215,22 @@ describe('built-in agent providers', () => {
       frameEnd: '\u001b[?2026l'
     })
     expect(providers.get('codex').planPromptInput('continue')).toEqual({
-      kind: 'render-then-submit', payload: 'continue', submit: '\r'
+      kind: 'render-then-submit', payload: 'continue', renderedText: 'continue', submit: '\r'
     })
     expect(providers.get('codex').planPromptInput('line1\nline2')).toEqual({
-      kind: 'render-then-submit', payload: '\u001b[200~line1\nline2\u001b[201~', submit: '\r'
+      kind: 'render-then-submit',
+      payload: '\u001b[200~line1\nline2\u001b[201~',
+      renderedText: 'line1\nline2',
+      submit: '\r'
+    })
+    expect(providers.get('codex').planPromptInput('line1\r\nline2')).toMatchObject({
+      renderedText: 'line1\nline2'
     })
     expect(providers.get('codex').planPromptInput('text with \u001b escape')).toEqual({
-      kind: 'render-then-submit', payload: 'text with \u241b escape', submit: '\r'
+      kind: 'render-then-submit',
+      payload: 'text with \u241b escape',
+      renderedText: 'text with \u241b escape',
+      submit: '\r'
     })
     for (const id of ['claude', 'traex', 'hermes', 'pi'] as const) {
       expect(providers.get(id).terminalHandshake).toBeUndefined()
@@ -237,6 +246,39 @@ describe('built-in agent providers', () => {
       })
     }
   })
+
+  it.each(['codex', 'claude'] as const)(
+    'makes %s explicitly own its typed terminal response protocol',
+    (providerId) => {
+      const provider = providers.get(providerId)
+      const request = {
+        kind: 'permission' as const,
+        id: `${providerId}-permission`,
+        agentSessionId: `${providerId}-session`,
+        title: 'Allow command?',
+        options: [
+          { id: 'allow-once', label: 'Allow', kind: 'allow-once' as const },
+          { id: 'reject-once', label: 'Deny', kind: 'reject-once' as const }
+        ],
+        evidence: {
+          source: 'native-hook' as const,
+          observedAt: 1,
+          run: { runId: `${providerId}-run` },
+          hookReceiptId: `${providerId}-permission`
+        }
+      }
+      expect(provider.planInteractionResponse(request, {
+        kind: 'permission',
+        requestId: request.id,
+        decision: { outcome: 'selected', optionId: 'allow-once' }
+      })).toEqual({ data: '1' })
+      expect(provider.planInteractionResponse(request, {
+        kind: 'permission',
+        requestId: request.id,
+        decision: { outcome: 'cancelled' }
+      })).toEqual({ data: '\u001b' })
+    }
+  )
 
   it('probes the selected executable on the execution host', async () => {
     const probes: string[] = []
@@ -408,6 +450,7 @@ describe('built-in agent providers', () => {
       hooks: Record<string, Array<{ matcher?: string; hooks?: Array<{ command?: string; timeout?: number }> }>>
     }
     expect(parsed.hooks['SessionStart']?.[0]?.hooks?.[0]?.command).toContain('agentmux-hook.js')
+    expect(parsed.hooks['PermissionRequest']?.[0]?.hooks?.[0]?.command).toContain('agentmux-hook.js')
     expect(parsed.hooks['PreToolUse']?.[0]?.matcher).toBe('*')
     // Non-tool lifecycle events carry no matcher.
     expect(parsed.hooks['SessionStart']?.[0]?.matcher).toBeUndefined()

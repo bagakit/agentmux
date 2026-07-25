@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { createHash } from 'node:crypto'
 import { mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
@@ -75,22 +76,23 @@ function storedSession() {
 }
 
 describe('semantic session persistence boundary', () => {
-  it('rejects the retired File Store v3 schema without rewriting or migrating it', async () => {
-    const root = await mkdtemp('/private/tmp/agentmux-store-v3-')
-    const path = join(root, 'sessions.json')
-    const retired = `${JSON.stringify({
-      version: 3,
-      sessions: [],
-      reservations: [],
-      retiredRuns: [],
-      retiredAgentSessions: []
-    })}\n`
+  it('rejects retired File Store schemas without rewriting or migrating them', async () => {
+    const root = await mkdtemp('/private/tmp/agentmux-retired-store-')
     try {
-      await writeFile(path, retired, { mode: 0o600 })
-
-      await expect(new AgentMuxFileAgentSessionStore(path).load())
-        .rejects.toMatchObject({ code: 'INVALID_AGENT_SESSION_STORE' })
-      await expect(readFile(path, 'utf8')).resolves.toBe(retired)
+      for (const version of [3, 4]) {
+        const path = join(root, `sessions-v${version}.json`)
+        const retired = `${JSON.stringify({
+          version,
+          sessions: [],
+          reservations: [],
+          retiredRuns: [],
+          retiredAgentSessions: []
+        })}\n`
+        await writeFile(path, retired, { mode: 0o600 })
+        await expect(new AgentMuxFileAgentSessionStore(path).load())
+          .rejects.toMatchObject({ code: 'INVALID_AGENT_SESSION_STORE' })
+        await expect(readFile(path, 'utf8')).resolves.toBe(retired)
+      }
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -149,6 +151,119 @@ describe('semantic session persistence boundary', () => {
     expect(normalized.terminalHandshake).toEqual(storedSession().terminalHandshake)
     expect(normalized.terminalPromptReadiness).toEqual(storedSession().terminalPromptReadiness)
     expect(normalized.terminalPromptSubmission).toEqual(storedSession().terminalPromptSubmission)
+  })
+
+  it('persists semantic status and a recoverable typed interaction response', () => {
+    const value = {
+      kind: 'permission' as const,
+      requestId: 'receipt-1',
+      decision: { outcome: 'selected' as const, optionId: 'allow-once' }
+    }
+    const normalized = normalizeStoredAgentSession({
+      ...storedSession(),
+      semanticStatus: {
+        state: 'waiting',
+        source: 'native-hook',
+        observedAt: 200,
+        detail: 'PermissionRequest'
+      },
+      pendingInteraction: {
+        request: {
+          kind: 'permission',
+          id: 'receipt-1',
+          agentSessionId: 'semantic-1',
+          title: 'Allow command?',
+          options: [
+            { id: 'allow-once', label: 'Allow', kind: 'allow-once' },
+            { id: 'reject-once', label: 'Deny', kind: 'reject-once' }
+          ],
+          evidence: {
+            source: 'native-hook',
+            observedAt: 200,
+            run: { runId: 'daemon-1' },
+            hookReceiptId: 'receipt-1'
+          }
+        },
+        response: {
+          value,
+          responseDigest: createHash('sha256').update(JSON.stringify(value)).digest('base64url'),
+          operationId: 'interaction-operation-1',
+          inputByteRange: { startByte: 10, endByte: 11 },
+          acknowledged: false
+        }
+      }
+    })
+    expect(normalized.semanticStatus?.state).toBe('waiting')
+    expect(normalized.pendingInteraction?.response?.value).toEqual(value)
+
+    expect(() => normalizeStoredAgentSession({
+      ...normalized,
+      pendingInteraction: {
+        ...normalized.pendingInteraction,
+        response: {
+          ...normalized.pendingInteraction!.response,
+          responseDigest: 'tampered'
+        }
+      }
+    })).toThrow('digest')
+
+    expect(() => normalizeStoredAgentSession({
+      ...normalized,
+      pendingInteraction: {
+        ...normalized.pendingInteraction,
+        response: {
+          ...normalized.pendingInteraction!.response,
+          value: {
+            kind: 'permission',
+            requestId: 'receipt-1',
+            decision: { outcome: 'invented', optionId: 'allow-once' }
+          }
+        }
+      }
+    })).toThrow('Permission response is invalid')
+
+    expect(() => normalizeStoredAgentSession({
+      ...normalized,
+      pendingInteraction: {
+        request: {
+          ...normalized.pendingInteraction!.request,
+          options: [
+            { id: 'same', label: 'Allow', kind: 'allow-once' },
+            { id: 'same', label: 'Deny', kind: 'reject-once' }
+          ]
+        }
+      }
+    })).toThrow('duplicate identifiers')
+
+    expect(() => normalizeStoredAgentSession({
+      ...storedSession(),
+      pendingInteraction: {
+        request: {
+          kind: 'question',
+          id: 'multi-question',
+          agentSessionId: 'semantic-1',
+          questions: [
+            { id: 'first', prompt: 'First?', options: [{ id: 'a', label: 'A' }] },
+            { id: 'second', prompt: 'Second?', options: [{ id: 'b', label: 'B' }] }
+          ],
+          evidence: {
+            source: 'native-hook',
+            observedAt: 200,
+            run: { runId: 'daemon-1' },
+            hookReceiptId: 'receipt-1'
+          }
+        }
+      }
+    })).toThrow('Question request is invalid')
+
+    expect(normalizeStoredAgentSession({
+      ...normalized,
+      hookReceipt: {
+        ...normalized.hookReceipt,
+        id: 'later-receipt',
+        eventName: 'PostToolUse'
+      }
+    }).pendingInteraction?.request.id).toBe('receipt-1')
   })
 
   it('rejects mismatched receipts and duplicate semantic identities', async () => {

@@ -100,9 +100,23 @@ CtxMux 不允许对已经自然退出的 Run 再调用 Stop。Provider-native Re
 
 Hook ingress 使用每次 lifecycle operation 派生的有界 binding identity；等 CtxMux 返回 daemon-issued RunId 且 Agent Session 已持久化后才把事件绑定到 exact Run。Hook command 为每次投递生成稳定 receipt id；已绑定 Run 的 HTTP ingress 只有在 owner persistence 成功后才返回 `204`，失败返回非 2xx 供同一 receipt 重试，关闭时排空已接受的事件。Core Client/CLI 重开时从同一 Store 恢复 endpoint binding，Hook/permission receipt 仍必须匹配当前 Agent Session、Provider 与 Run。
 
-File Store version 4 是 Agent Session、current Run、retired Run、Semantic Session retirement、prompt readiness 与 lifecycle reservation 的唯一跨进程真相。Create/Resume/Stop 通过文件锁、CAS、带 owner/PID/lease 的 reservation 和 CtxMux Run spec 中的 lifecycle operation id 提交；Stop reservation 在 dispatch 前保存完整 `{daemonInstance, operationKey, runId}`，并只通过 Protocol 13 recoverable Stop 路径完成。Owner crash 后，新 Client 只按 public `list/status/attachRecoverableStop` 收敛原 operation。自然退出的 Run 只记录 retire，不伪造 Stop。没有进程内 Map 充当第二提交权威，也没有旧 Store migration/fallback；version 3 直接拒绝。
+File Store version 5 是 Agent Session、current Run、retired Run、Semantic Session retirement、prompt readiness、Provider/ACP semantic status、typed interaction 与 lifecycle reservation 的唯一跨进程真相。Create/Resume/Stop 通过文件锁、CAS、带 owner/PID/lease 的 reservation 和 CtxMux Run spec 中的 lifecycle operation id 提交；Stop reservation 在 dispatch 前保存完整 `{daemonInstance, operationKey, runId}`，并只通过 Protocol 13 recoverable Stop 路径完成。Owner crash 后，新 Client 只按 public `list/status/attachRecoverableStop` 收敛原 operation。自然退出的 Run 只记录 retire，不伪造 Stop。没有进程内 Map 充当第二提交权威，也没有旧 Store migration/fallback；旧版本直接拒绝。
 
-Codex 终端输入不是“写入成功即 ready”。每次 prompt 必须原子消费 exact Run 的一个未消费 readiness epoch，来源只有 `initial-composer` 与 `native-stop`。只有启动或续跑时没有 composed prompt、且调用方没有传任何 `args` 的空白 Run 才拥有一次 initial epoch；Core 不猜 caller args 是配置还是 prompt。Core 在回应 terminal capability query 前持久化它的 exact Output boundary，握手确认后还必须观察到 boundary 之后由当前 cursor 所属的 active empty composer 产生的新 frame。带用户 prompt、AgentMux guide、native resume prompt 或 caller args 启动的 Run 不拥有 initial epoch，必须等 native Stop；新的 native Stop 会替换当前 epoch。Core 从 CtxMux public Output byte 0 开始，以有界 `@xterm/headless` terminal emulator 连续重放 retained Replay 与 live bytes；任何 Gap、重叠或非连续 range 都失败关闭。两阶段 `payload` + `CR` 中，Core 先写 payload，随后只在当前 screen/cursor 的 composer 精确等于 payload 且 Output 已越过写入前 boundary 时发送 CR。Codex 的局部更新不要求重复绘制左侧 `›`，但 handshake、assistant 行、历史全屏 redraw 或相同文本 substring 都不能冒充当前 composer。readiness claim 与每个 Input 阶段分别使用跨进程 CAS、确定性 CtxMux operation id 和累计 input cursor；长期存活的 Client 遇到本地 not-ready、consumed 或 busy 结论时只刷新 canonical Store 一次，再按同一 claim invariant 收敛。因而并发提交只能消费一次，payload/submit 任一点 crash 后都能由新 Client 恢复且不重复输入。Provider-native resume 的第一条 prompt 直接进入 native resume argv，不参与 startup composer readiness。
+Codex 终端输入不是“写入成功即 ready”。每次 prompt 必须原子消费 exact Run 的一个未消费 readiness epoch，来源只有 `initial-composer` 与 `native-stop`。只有启动或续跑时没有 composed prompt、且调用方没有传任何 `args` 的空白 Run 才拥有一次 initial epoch；Core 不猜 caller args 是配置还是 prompt。Core 在回应 terminal capability query 前持久化它的 exact Output boundary，握手确认后还必须观察到 boundary 之后由当前 cursor 所属的 active empty composer 产生的新 frame。带用户 prompt、AgentMux guide、native resume prompt 或 caller args 启动的 Run 不拥有 initial epoch，必须等 native Stop；新的 native Stop 会替换当前 epoch。Core 从 CtxMux public Output byte 0 开始，以有界 `@xterm/headless` terminal emulator 连续重放 retained Replay 与 live bytes；任何 Gap、重叠或非连续 range 都失败关闭。两阶段 `payload` + `CR` 中，Provider 分别声明实际传输的 `payload` 与 TUI 消费控制序列后显示的 `renderedText`；Core 先写 payload，随后只在当前 screen/cursor 的 composer 精确等于 renderedText 且 Output 已越过写入前 boundary 时发送 CR。Bracketed paste 只由明确支持的 Provider 选择，不是 Core 默认输入协议。Codex 的局部更新不要求重复绘制左侧 `›`，但 handshake、assistant 行、历史全屏 redraw 或相同文本 substring 都不能冒充当前 composer。readiness claim 与每个 Input 阶段分别使用跨进程 CAS、确定性 CtxMux operation id 和累计 input cursor；长期存活的 Client 遇到本地 not-ready、consumed 或 busy 结论时只刷新 canonical Store 一次，再按同一 claim invariant 收敛。因而并发提交只能消费一次，payload/submit 任一点 crash 后都能由新 Client 恢复且不重复输入。Provider-native resume 的第一条 prompt 直接进入 native resume argv，不参与 startup composer readiness。
+
+Agent Prompt 上限固定为 64 KiB，headless screen 保留覆盖同一上限的有界 scrollback，长 Prompt
+滚出 viewport 后仍必须从 active buffer 找回 composer 起点；超过上限直接拒绝。
+
+Permission/Question 不走普通 Prompt，也不由 Renderer 直接写 PTY。Provider/ACP 先产生绑定 exact
+Session/Run evidence 的 typed request，Core 在公开前持久化 request 与 semantic status，Desktop 只投影
+它并返回 typed response。Core 校验 response 后才让 Provider 规划终端协议；Native terminal response
+在 dispatch 前持久化 semantic value、digest、确定性 operation id 与 byte range，并只经 Protocol 13
+recoverable Input 写入。receipt 丢失或 Client 重启时仍收敛同一 operation，不新增 raw Input fallback。
+Run 已退出或中断也不能跳过 response claim；Core 用持久化 range、CtxMux Input cursor 与原 recoverable
+operation 区分已应用、明确未应用和非法状态。pending interaction 期间，Core 拒绝普通 Prompt 与 raw
+Agent Input，只允许 typed response 成为用户输入 owner。ACP delivery/settlement 由 AgentMux Adapter
+完成，ctxmux 只证明 Native response byte range 到达 PTY write boundary，不解释选项、Permission、
+Question 或 Agent 状态。
 
 checkout-external packed consumer 真实证明：
 

@@ -162,4 +162,29 @@ describe('AgentSessionComposer adapter', () => {
     expect(markup).toContain('placeholder="Agent is not running"')
     expect(markup).toMatch(/<textarea[^>]*disabled=""/)
   })
+
+  it('yields prompt entry to a pending typed Agent interaction', () => {
+    const waiting = agentSession({
+      status: { state: 'waiting', source: 'native-hook', observedAt: 2 },
+      pendingInteraction: {
+        kind: 'permission',
+        id: 'permission-1',
+        agentSessionId: 'agent-1',
+        title: 'Allow command?',
+        options: [{ id: 'allow', label: 'Allow', kind: 'allow-once' }],
+        evidence: {
+          source: 'native-hook',
+          observedAt: 2,
+          run: { runId: 'run-1' },
+          hookReceiptId: 'permission-1'
+        }
+      }
+    })
+    fixture.state.sessions = [waiting]
+
+    expect(agentComposerAvailability(waiting)).toEqual({
+      disabled: true,
+      placeholder: 'Answer the Agent request above…'
+    })
+  })
 })

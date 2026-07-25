@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, open, readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { defaultAgentMuxRuntimeDirectory } from './runtime-paths.js'
+import { normalizeAgentInteractionResponse } from './agent-interaction.js'
 import {
   applyAgentTimelineMutation,
   normalizeAgentTimeline,
@@ -10,9 +11,14 @@ import {
 } from './session-timeline.js'
 import type {
   AgentHookReceipt,
+  AgentMuxEvidence,
+  AgentMuxInteractionRequest,
+  AgentMuxInteractionResponse,
+  AgentMuxPendingInteraction,
   AgentMuxRunRef,
   AgentMuxStoredAgentSession,
   AgentNativeSessionHandle,
+  AgentStatus,
   AgentTimelineCommit,
   AgentTimelineItem,
   AgentTimelineMutation,
@@ -108,6 +114,13 @@ function record(value: unknown, name: string): Record<string, unknown> {
 
 function string(value: unknown, name: string, maxBytes = MAX_ID_BYTES): string {
   if (typeof value !== 'string' || !value.trim() || Buffer.byteLength(value) > maxBytes || /[\0\r\n]/.test(value)) {
+    throw new AgentMuxError(`${name} is invalid.`, 'INVALID_AGENT_SESSION_STORE')
+  }
+  return value
+}
+
+function text(value: unknown, name: string, maxBytes = MAX_PATH_BYTES): string {
+  if (typeof value !== 'string' || !value.trim() || Buffer.byteLength(value) > maxBytes || value.includes('\0')) {
     throw new AgentMuxError(`${name} is invalid.`, 'INVALID_AGENT_SESSION_STORE')
   }
   return value
@@ -387,6 +400,219 @@ function hookReceipt(value: unknown): AgentHookReceipt {
   }
 }
 
+function semanticStatus(value: unknown): AgentStatus {
+  const source = record(value, 'semanticStatus')
+  if (!['working', 'waiting', 'blocked', 'done', 'error'].includes(String(source.state))) {
+    throw new AgentMuxError('semanticStatus.state is invalid.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  if (source.source !== 'native-hook' && source.source !== 'acp') {
+    throw new AgentMuxError('semanticStatus.source is invalid.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  const detail = source.detail === undefined
+    ? undefined
+    : text(source.detail, 'semanticStatus.detail')
+  return {
+    state: source.state as AgentStatus['state'],
+    source: source.source,
+    observedAt: timestamp(source.observedAt, 'semanticStatus.observedAt'),
+    ...(detail ? { detail } : {})
+  }
+}
+
+function interactionEvidence(value: unknown): AgentMuxEvidence {
+  const source = record(value, 'pendingInteraction.request.evidence')
+  if (source.source !== 'native-hook' && source.source !== 'acp') {
+    throw new AgentMuxError('Interaction evidence source is invalid.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  const evidence: AgentMuxEvidence = {
+    source: source.source,
+    observedAt: timestamp(source.observedAt, 'pendingInteraction.request.evidence.observedAt'),
+    run: runRef(source.run)
+  }
+  if (source.source === 'native-hook') {
+    evidence.hookReceiptId = string(
+      source.hookReceiptId,
+      'pendingInteraction.request.evidence.hookReceiptId'
+    )
+  } else {
+    evidence.acpAdapterId = string(
+      source.acpAdapterId,
+      'pendingInteraction.request.evidence.acpAdapterId'
+    )
+    evidence.acpSessionId = string(
+      source.acpSessionId,
+      'pendingInteraction.request.evidence.acpSessionId'
+    )
+  }
+  return evidence
+}
+
+function interactionRequest(value: unknown): AgentMuxInteractionRequest {
+  const source = record(value, 'pendingInteraction.request')
+  const base = {
+    id: string(source.id, 'pendingInteraction.request.id'),
+    agentSessionId: string(source.agentSessionId, 'pendingInteraction.request.agentSessionId'),
+    evidence: interactionEvidence(source.evidence)
+  }
+  if (source.kind === 'permission') {
+    if (!Array.isArray(source.options) || source.options.length === 0 || source.options.length > 16) {
+      throw new AgentMuxError('Permission options are invalid.', 'INVALID_AGENT_SESSION_STORE')
+    }
+    const options = source.options.map((value, index) => {
+      const option = record(value, `pendingInteraction.request.options[${index}]`)
+      if (!['allow-once', 'allow-always', 'reject-once', 'reject-always'].includes(String(option.kind))) {
+        throw new AgentMuxError('Permission option kind is invalid.', 'INVALID_AGENT_SESSION_STORE')
+      }
+      return {
+        id: string(option.id, `pendingInteraction.request.options[${index}].id`),
+        label: text(option.label, `pendingInteraction.request.options[${index}].label`),
+        kind: option.kind as 'allow-once' | 'allow-always' | 'reject-once' | 'reject-always'
+      }
+    })
+    if (new Set(options.map((option) => option.id)).size !== options.length) {
+      throw new AgentMuxError('Permission options contain duplicate identifiers.', 'INVALID_AGENT_SESSION_STORE')
+    }
+    const toolName = source.toolName === undefined
+      ? undefined
+      : string(source.toolName, 'pendingInteraction.request.toolName')
+    const toolInput = source.toolInput === undefined
+      ? undefined
+      : text(source.toolInput, 'pendingInteraction.request.toolInput')
+    return {
+      kind: 'permission',
+      ...base,
+      title: text(source.title, 'pendingInteraction.request.title'),
+      options,
+      ...(toolName ? { toolName } : {}),
+      ...(toolInput ? { toolInput } : {})
+    }
+  }
+  if (source.kind !== 'question' || !Array.isArray(source.questions) || source.questions.length !== 1) {
+    throw new AgentMuxError('Question request is invalid.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  const questions = source.questions.map((value, questionIndex) => {
+    const question = record(value, `pendingInteraction.request.questions[${questionIndex}]`)
+    if (!Array.isArray(question.options) || question.options.length === 0 || question.options.length > 9) {
+      throw new AgentMuxError('Question options are invalid.', 'INVALID_AGENT_SESSION_STORE')
+    }
+    const title = question.title === undefined
+      ? undefined
+      : text(question.title, `pendingInteraction.request.questions[${questionIndex}].title`)
+    const options = question.options.map((value, optionIndex) => {
+      const option = record(value, `pendingInteraction.request.questions[${questionIndex}].options[${optionIndex}]`)
+      const description = option.description === undefined
+        ? undefined
+        : text(option.description, `pendingInteraction.request.questions[${questionIndex}].options[${optionIndex}].description`)
+      return {
+        id: string(option.id, `pendingInteraction.request.questions[${questionIndex}].options[${optionIndex}].id`),
+        label: text(option.label, `pendingInteraction.request.questions[${questionIndex}].options[${optionIndex}].label`),
+        ...(description ? { description } : {})
+      }
+    })
+    if (new Set(options.map((option) => option.id)).size !== options.length) {
+      throw new AgentMuxError('Question options contain duplicate identifiers.', 'INVALID_AGENT_SESSION_STORE')
+    }
+    return {
+      id: string(question.id, `pendingInteraction.request.questions[${questionIndex}].id`),
+      prompt: text(question.prompt, `pendingInteraction.request.questions[${questionIndex}].prompt`),
+      options,
+      ...(title ? { title } : {})
+    }
+  })
+  if (new Set(questions.map((question) => question.id)).size !== questions.length) {
+    throw new AgentMuxError('Questions contain duplicate identifiers.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  return { kind: 'question', ...base, questions }
+}
+
+function pendingInteraction(value: unknown): AgentMuxPendingInteraction {
+  const source = record(value, 'pendingInteraction')
+  const request = interactionRequest(source.request)
+  if (source.response === undefined) return { request }
+  const response = record(source.response, 'pendingInteraction.response')
+  const responseValue = interactionResponse(
+    response.value,
+    request
+  )
+  const responseDigest = string(response.responseDigest, 'pendingInteraction.response.responseDigest')
+  const expectedDigest = createHash('sha256')
+    .update(JSON.stringify(responseValue))
+    .digest('base64url')
+  if (responseDigest !== expectedDigest) {
+    throw new AgentMuxError('Interaction response digest is invalid.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  if (typeof response.acknowledged !== 'boolean') {
+    throw new AgentMuxError('Interaction response acknowledgement is invalid.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  const range = record(response.inputByteRange, 'pendingInteraction.response.inputByteRange')
+  const startByte = timestamp(range.startByte, 'pendingInteraction.response.inputByteRange.startByte')
+  const endByte = timestamp(range.endByte, 'pendingInteraction.response.inputByteRange.endByte')
+  if (endByte <= startByte) {
+    throw new AgentMuxError('Interaction response byte range is invalid.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  return {
+    request,
+    response: {
+      value: responseValue,
+      responseDigest,
+      operationId: string(response.operationId, 'pendingInteraction.response.operationId'),
+      inputByteRange: { startByte, endByte },
+      acknowledged: response.acknowledged
+    }
+  }
+}
+
+function interactionResponse(
+  value: unknown,
+  request: AgentMuxInteractionRequest
+): AgentMuxInteractionResponse {
+  const source = record(value, 'pendingInteraction.response.value')
+  if (source.kind === 'permission') {
+    const decision = record(source.decision, 'pendingInteraction.response.value.decision')
+    if (decision.outcome !== 'cancelled' && decision.outcome !== 'selected') {
+      throw new AgentMuxError('Permission response is invalid.', 'INVALID_AGENT_SESSION_STORE')
+    }
+    const normalized: AgentMuxInteractionResponse = decision.outcome === 'cancelled'
+      ? {
+          kind: 'permission',
+          requestId: string(source.requestId, 'pendingInteraction.response.value.requestId'),
+          decision: { outcome: 'cancelled' }
+        }
+      : {
+          kind: 'permission',
+          requestId: string(source.requestId, 'pendingInteraction.response.value.requestId'),
+          decision: {
+            outcome: 'selected',
+            optionId: string(decision.optionId, 'pendingInteraction.response.value.decision.optionId')
+          }
+        }
+    return normalizeAgentInteractionResponse(request, normalized)
+  }
+  if (source.kind !== 'question') {
+    throw new AgentMuxError('Interaction response kind is invalid.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  const requestId = string(source.requestId, 'pendingInteraction.response.value.requestId')
+  if (source.outcome === 'cancelled') {
+    return normalizeAgentInteractionResponse(request, { kind: 'question', requestId, outcome: 'cancelled' })
+  }
+  if (source.outcome !== 'answered' || !Array.isArray(source.answers)) {
+    throw new AgentMuxError('Question response is invalid.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  const answers = source.answers.map((value, index) => {
+    const answer = record(value, `pendingInteraction.response.value.answers[${index}]`)
+    return {
+      questionId: string(answer.questionId, `pendingInteraction.response.value.answers[${index}].questionId`),
+      optionId: string(answer.optionId, `pendingInteraction.response.value.answers[${index}].optionId`)
+    }
+  })
+  return normalizeAgentInteractionResponse(request, {
+    kind: 'question',
+    requestId,
+    outcome: 'answered',
+    answers
+  })
+}
+
 function terminalPromptReadinessSource(
   value: unknown,
   name: string
@@ -581,6 +807,10 @@ export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgent
             currentRun
           )
         }),
+    ...(source.semanticStatus === undefined ? {} : { semanticStatus: semanticStatus(source.semanticStatus) }),
+    ...(source.pendingInteraction === undefined
+      ? {}
+      : { pendingInteraction: pendingInteraction(source.pendingInteraction) }),
     ...(source.nativeHandle === undefined ? {} : { nativeHandle: nativeHandle(source.nativeHandle) }),
     ...(source.hookReceipt === undefined ? {} : { hookReceipt: hookReceipt(source.hookReceipt) })
   }
@@ -596,6 +826,20 @@ export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgent
     )
   ) {
     throw new AgentMuxError('Hook receipt does not match the Agent Session.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  if (session.semanticStatus && session.semanticStatus.observedAt > session.updatedAt) {
+    throw new AgentMuxError('Semantic status is newer than its Agent Session.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  const interaction = session.pendingInteraction?.request
+  if (
+    interaction &&
+    (
+      interaction.agentSessionId !== session.agentSessionId ||
+      interaction.evidence.run?.runId !== session.run.runId ||
+      interaction.evidence.observedAt > session.updatedAt
+    )
+  ) {
+    throw new AgentMuxError('Pending interaction does not match the Agent Session.', 'INVALID_AGENT_SESSION_STORE')
   }
   const submission = session.terminalPromptSubmission
   if (
@@ -982,7 +1226,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
 }
 
 type AgentSessionStoreDocument = {
-  version: 4
+  version: 5
   sessions: AgentMuxStoredAgentSession[]
   reservations: AgentMuxLifecycleReservation[]
   retiredRuns: AgentMuxRunRef[]
@@ -1225,7 +1469,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         await this.removeTimelineFile(reservation.agentSessionId)
       }
       await this.write({
-        version: 4,
+        version: 5,
         sessions: committedSessions,
         reservations: document.reservations.filter(
           (item) => item.reservationId !== reservation.reservationId
@@ -1301,7 +1545,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         retiredAgentSessions?: unknown
       }
       if (
-        document.version !== 4 ||
+        document.version !== 5 ||
         !Array.isArray(document.sessions) ||
         !Array.isArray(document.reservations) ||
         !Array.isArray(document.retiredRuns) ||
@@ -1315,7 +1559,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       assertUnboundRetiredRuns(sessions, retiredRuns)
       assertRetiredAgentSessions(sessions, retiredRuns, retiredSessions)
       return {
-        version: 4,
+        version: 5,
         sessions,
         reservations: normalizeLifecycleReservations(document.reservations),
         retiredRuns,
@@ -1324,7 +1568,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         return {
-          version: 4,
+          version: 5,
           sessions: [],
           reservations: [],
           retiredRuns: [],

@@ -36,6 +36,7 @@ import type {
   WorkspaceFileWriteInput,
   WorkspaceRecord
 } from '../shared/contracts.js'
+import type { AgentMuxInteractionResponse } from '@agentmux/core'
 import {
   CONTROL_CANCEL_CHANNEL,
   CONTROL_REQUEST_CHANNEL,
@@ -267,6 +268,12 @@ export async function registerIpc(args: {
   })
   handle('sessions:submitPrompt', async (session: AgentSessionControl, prompt: string) => {
     await args.runtime.submitPrompt(session, prompt)
+  })
+  handle('sessions:respondInteraction', async (
+    session: AgentSessionControl,
+    response: AgentMuxInteractionResponse
+  ) => {
+    await args.runtime.respondInteraction(session, response)
   })
   handle('sessions:resume', async (session: AgentSessionControl, prompt: string, operationId: string) => (
     await args.runtime.resumeSession(session, prompt, operationId, config)

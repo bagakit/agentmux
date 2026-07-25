@@ -9,7 +9,7 @@
 | 对象 | 身份 | 持有的事实 | 明确不持有 |
 | --- | --- | --- | --- |
 | Run | CtxMux `runId` | 物理进程、工作目录、尺寸、UTF-8 byte cursor、退出事实 | 模型上下文、UI 布局 |
-| Agent Session | `agentSessionId` | Provider、Workspace 关联、当前 Run 引用、Native Handle、Hook Receipt | PTY、Replay、进程所有权 |
+| Agent Session | `agentSessionId` | Provider、Workspace 关联、当前 Run 引用、Native Handle、Hook Receipt、semantic status、待处理 typed interaction | PTY、Replay、进程所有权 |
 | Attachment | 当前 Client 对一个 Run 的附着 | 有界 Replay、Gap、增量输出和控制入口 | Run 生命周期、Agent 上下文 |
 | Tab / Region | `tabId` / `regionId` | Desktop 对 Run 或 Agent Session 的展示投影 | Core 领域真相、进程或订阅所有权 |
 
@@ -79,6 +79,32 @@ owner；`unavailable`/`conflict` 保留可见错误，`retired` 删除对应投�
 `agentmux output --session <session-id> --follow` 对外顺序固定为 `attached → replay → live → end`。Attach 期间的 Live
 事件必须等 Replay 完成后再发；Replay 已覆盖的 byte range 只发一次。
 
+Provider 必须明确区分 Prompt 的传输字节和 TUI 最终渲染的逻辑文本。以 Codex 为例，多行输入的
+`payload` 可以包含 bracketed-paste 控制序列，但 screen oracle 只能比较 Provider 声明的
+`renderedText`；不能要求终端屏幕显示传输控制字节，也不能把 bracketed paste 变成所有 Provider
+的默认行为。两阶段 Provider 先提交 payload，在 exact active composer 显示完整逻辑文本后再提交
+Enter；单阶段 Provider 仍使用自己的明确输入计划。Core 对所有 Agent Prompt 采用 64 KiB 硬上限，
+screen oracle 使用覆盖同一上限的有界 scrollback，必须能在 Prompt 超出当前 viewport 后继续找到
+active composer；超过上限直接拒绝，不能接受输入后等待一个永远无法成立的 screen 条件。
+
+Permission 与 Question 是 Agent Session 的 typed interaction，不是普通 Prompt。完整路径固定为：
+
+`Provider/ACP typed request → Core 持久化 → public Client event/API → Desktop typed IPC/UI → Core/Provider semantic response`
+
+Native Hook request 必须绑定 exact `agentSessionId + RunRef + Hook Receipt`；ACP request 必须绑定 exact
+Adapter/ACP Session evidence。Core 在公开 request 前先保存它，且同一 Agent Session 同时只允许一个
+待处理 interaction。响应先由 Core 对照原 request 校验，再由 Provider 映射到自己的终端协议；
+Renderer 不解析 `status.detail`，不发送裸 ESC、数字选项或 raw PTY fallback。Native terminal response
+在写入前持久化完整 semantic response、digest、确定性 operation id 与 byte-range claim；进程在 receipt
+前崩溃时，新 Client 即使发现 Run 已退出或中断，也必须按持久化 range、CtxMux Input cursor 与同一
+recoverable operation 收敛已应用、明确未应用或非法状态，不能留下可点击的死卡，也不能重复注入。
+待处理 interaction 是该 Agent Session 唯一用户输入面；Core 同时拒绝普通 Prompt 和 raw Agent Input，
+Desktop 也停用 xterm 键盘与粘贴。ACP typed response 只有在 Adapter delivery 与 Core semantic settlement
+都完成后才返回成功；delivery timeout 必须通过 AbortSignal 取消 Adapter 操作并向调用方失败关闭。
+ACP pending 只在原 live binding 内可回答；Core 重启后没有同一 pending binding 的旧 request 会被结算，
+不能恢复成无法响应的卡片。当前 Question 纵切只声明 Provider 已验证的单题单选，不伪造
+multi-select、custom answer 或多题协议。
+
 ## 4. Evidence 不互相冒充
 
 | Source | 能证明 | 不能证明 |
@@ -93,7 +119,7 @@ Terminal Output 和 Replay 永远不能被包装成 Tool、Reply、Permission、
 
 ## 5. Provider 与 Kernel 的所有权
 
-AgentMux 持有 Provider Catalog、能力探测、Launch/Resume Intent、Agent Session、ACP、Hook、Permission、Evidence 和 Client 投影。新增 Agent 只新增 Provider/Integration，不修改 Run 生命周期。每个 Provider 必须显式声明 Reply correlation；当前五个内置 Provider 都是 `none`，因为现有 Hook 没有稳定 Turn ID，不能拿时间邻近或 Assistant 文本冒充关联证据。
+AgentMux 持有 Provider Catalog、能力探测、Launch/Resume Intent、Agent Session、ACP、Hook、Permission、Evidence 和 Client 投影。新增 Agent 只新增 Provider/Integration，不修改 Run 生命周期。每个 Provider 必须显式声明 Reply correlation；未具备稳定 Turn ID 的 Provider 必须声明 `none`，不能拿时间邻近或 Assistant 文本冒充关联证据。
 
 Run Kernel 持有 Local/SSH 的 PTY、Process、Ordered I/O、Replay、Gap、Backpressure、Attachment、Resize、Signal 和 Stop。最终只有 `ctxmux` 实现这一层；AgentMux 不保留自建 daemon fallback，也不提供兼容 API。
 
@@ -109,7 +135,7 @@ not-open 都失败关闭，不能降级成字符串注入、UI automation、猜�
 
 ## 6. 持久化与资源边界
 
-`AgentMuxAgentSessionStore` 只保存有界 Agent Session：Provider 身份、Workspace、当前 Run Ref、必要 Output Cursor、Native Handle、Hook binding、最后一份 Hook Receipt，以及最多 16 个同 Session retired exact Run tombstone。Resume 原子退休旧 Run。用户 Stop 在删除 Session 的同一 lifecycle commit 中写入两类不同事实：所有历史 Run 进入有界 unbound retired Run 集合，另有一条以 `agentSessionId + hostId + exact current Run + user + observedAt` 为键的有界 Semantic Session retirement。只有后一条能返回 `retired`；Resume 旧 Run、abandoned lifecycle 或其他 Session 的 tombstone 绝不能冒充用户退休。当前 Store 文档版本是 3；版本 2 直接拒绝，不提供 migration、兼容读取或 fallback。Store 不保存 PID、PTY、Terminal Snapshot、Replay、Activity 列表、Tab/Region 或第三方 wire state。
+`AgentMuxAgentSessionStore` 只保存有界 Agent Session：Provider 身份、Workspace、当前 Run Ref、必要 Output Cursor、Native Handle、Hook binding、最后一份 Hook Receipt、最近的 Provider/ACP semantic status、待处理 typed interaction，以及最多 16 个同 Session retired exact Run tombstone。Resume 原子退休旧 Run，并删除旧 Run 的 semantic status 与 interaction。用户 Stop 在删除 Session 的同一 lifecycle commit 中写入两类不同事实：所有历史 Run 进入有界 unbound retired Run 集合，另有一条以 `agentSessionId + hostId + exact current Run + user + observedAt` 为键的有界 Semantic Session retirement。只有后一条能返回 `retired`；Resume 旧 Run、abandoned lifecycle 或其他 Session 的 tombstone 绝不能冒充用户退休。当前 Store 文档版本是 5；旧版本直接拒绝，不提供 migration、兼容读取或 fallback。Store 不保存 PID、PTY、Terminal Snapshot、Replay、Activity 列表、Tab/Region 或第三方 wire state。
 
 默认 File Store 是 CLI 与 Desktop 共用的唯一身份文件，使用 `0600` 原子替换与进程间锁；Memory Store 只用于显式嵌入和测试。加载器最多保留 256 个 Agent Session。Run、Attachment、Replay、Client Queue、Hook Body 和日志都必须有硬上限；释放 Attachment、关闭 Region 和停止 Run 后要有确定性的资源释放证据。
 
@@ -123,6 +149,8 @@ not-open 都失败关闭，不能降级成字符串注入、UI automation、猜�
 - Core Control Host 测试验证单一版本化 endpoint、receipt、closed/unavailable 错误；Desktop owner 测试验证 Tab/Region、三类 typed open、精确 focus、send 歧义、arrange 与 owner-loss rollback。
 - checkout-external packed consumer 从真实打包 CLI 验证受管 caller、Control intents、版本化 JSON receipt、option-looking payload、UTF-8 分片与 peer early-close。
 - Core 与 Desktop 类型检查验证 daemon wire 不再进入 Desktop 的共享合同。
+- Core interaction tests 验证 Hook request 的有界归一化、单题单选能力边界、typed response 校验与 Provider-owned 终端映射；Store tests 验证 semantic status、完整 recoverable response claim、digest 与旧版本拒绝。
+- Desktop owner tests 验证刷新时恢复 semantic status 与 pending interaction、Run `running` 不覆盖 Provider/ACP status，且 Approval/Question 只经 typed IPC 返回 Core。
 
 当前 Local implementation candidate 固定消费 CtxMux `a089708` / Protocol 13，删除旧 Run Kernel，并完成
 Codex、Local Desktop Control、Workbench 布局持久化与 Tab/Region move/close。

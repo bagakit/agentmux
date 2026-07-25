@@ -82,7 +82,7 @@ describe('AgentMux doctor', () => {
     expect(report.agents.find((agent) => agent.id === 'codex')).toMatchObject({
       probe: 'found',
       hook: { kind: 'native' },
-      permission: 'observe',
+      permission: 'respond',
       acp: { kind: 'none' }
     })
   })

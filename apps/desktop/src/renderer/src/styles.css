@@ -1143,6 +1143,21 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .composer-send:disabled { opacity: .35; cursor: default; }
 .composer-send--working { color: #fca5a5; background: #2f1d1d; border: 1px solid #6b2e2e; box-shadow: none; }
 .composer-send--working:hover:not(:disabled) { color: #fee2e2; background: #452424; }
+.agent-input-stack { min-width: 0; background: transparent; }
+.agent-interaction { margin: 6px 8px 0; padding: 9px; border: 1px solid #4a4640; border-radius: var(--radius); background: color-mix(in srgb, var(--surface-1) 88%, transparent); }
+.agent-interaction__heading { display: flex; align-items: flex-start; gap: 7px; color: var(--amber); }
+.agent-interaction__heading > div { min-width: 0; display: grid; gap: 2px; }
+.agent-interaction__heading strong { color: var(--text); font-size: 11px; }
+.agent-interaction__heading span { color: var(--text-2); font-size: 10px; }
+.agent-interaction pre { max-height: 84px; margin: 7px 0 0; padding: 6px 7px; overflow: auto; border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-2); font: 10px/1.4 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-interaction__options { display: grid; gap: 4px; margin-top: 7px; }
+.agent-interaction__options button { display: grid; gap: 1px; padding: 6px 7px; text-align: left; }
+.agent-interaction__options small { color: var(--text-3); font-size: 9px; }
+.agent-interaction__actions { display: flex; justify-content: flex-end; gap: 4px; margin-top: 7px; }
+.agent-interaction button { border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-2); font-size: 10px; cursor: pointer; }
+.agent-interaction button:hover:not(:disabled) { color: var(--text); border-color: var(--line-strong); background: var(--surface-3); }
+.agent-interaction button.is-primary { color: #0c130e; border-color: transparent; background: var(--green); }
+.agent-interaction button:disabled { opacity: .45; cursor: default; }
 
 .editor-pane { height: 100%; min-width: 0; min-height: 0; display: grid; grid-template-rows: 34px minmax(0, 1fr); background: #101315; }
 .editor-pane--issue { grid-template-rows: 34px auto minmax(0, 1fr); }

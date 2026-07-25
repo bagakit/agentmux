@@ -39,6 +39,38 @@ describe('AgentTerminalScreen', () => {
     }
   })
 
+  it('preserves explicit line breaks separately from terminal soft wrapping', async () => {
+    const screen = new AgentTerminalScreen(80, 24)
+    try {
+      await write(screen, '\u001b[22;1H› line1\r\nline2')
+      expect(screen.composerText('›')).toBeNull()
+      expect(screen.composerText('›', true)).toBe('line1\nline2')
+    } finally {
+      screen.dispose()
+    }
+  })
+
+  it('retains a composer marker after a long prompt scrolls beyond the viewport', async () => {
+    const screen = new AgentTerminalScreen(10, 3)
+    const prompt = 'x'.repeat(40)
+    try {
+      await write(screen, `› ${prompt}`)
+      expect(screen.composerText('›')).toBe(prompt)
+    } finally {
+      screen.dispose()
+    }
+  })
+
+  it('preserves intentional spaces around explicit line breaks', async () => {
+    const screen = new AgentTerminalScreen(80, 24)
+    try {
+      await write(screen, '› line1  \r\n  line2')
+      expect(screen.composerText('›', true)).toBe('line1  \n  line2')
+    } finally {
+      screen.dispose()
+    }
+  })
+
   it('fails closed on a missing or overlapping byte range', async () => {
     const screen = new AgentTerminalScreen(80, 24)
     try {

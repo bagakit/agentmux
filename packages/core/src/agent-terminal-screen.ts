@@ -3,10 +3,25 @@ import { AgentMuxError } from './errors.js'
 
 const { Terminal } = headless
 
+export const MAX_AGENT_PROMPT_BYTES = 64 * 1024
+
 export type AgentTerminalScreenChunk = {
   startByte: number
   endByte: number
   dataBytes: Uint8Array
+}
+
+type AgentTerminalLine = {
+  length: number
+  getCell(column: number): { getChars(): string } | undefined
+  translateToString(trimRight: boolean, startColumn?: number, endColumn?: number): string
+}
+
+function lineText(line: AgentTerminalLine, end?: number): string {
+  let start = 0
+  const limit = end ?? line.length
+  while (start < limit && line.getCell(start)?.getChars() === '') start += 1
+  return line.translateToString(true, start, end)
 }
 
 export class AgentTerminalScreen {
@@ -17,7 +32,7 @@ export class AgentTerminalScreen {
     this.terminal = new Terminal({
       cols,
       rows,
-      scrollback: 0,
+      scrollback: MAX_AGENT_PROMPT_BYTES,
       allowProposedApi: true,
       logLevel: 'off'
     })
@@ -38,17 +53,17 @@ export class AgentTerminalScreen {
     this.nextByte = chunk.endByte
   }
 
-  composerText(marker: string): string | null {
+  composerText(marker: string, allowHardLineBreaks = false): string | null {
     const buffer = this.terminal.buffer.active
     const cursorLine = buffer.baseY + buffer.cursorY
-    const firstVisibleLine = Math.max(buffer.viewportY, cursorLine - this.terminal.rows + 1)
-    for (let row = cursorLine; row >= firstVisibleLine; row -= 1) {
+    const firstTrackedLine = Math.max(0, cursorLine - MAX_AGENT_PROMPT_BYTES - 1)
+    for (let row = cursorLine; row >= firstTrackedLine; row -= 1) {
       const line = buffer.getLine(row)
       if (!line) continue
       const text = line.translateToString(false)
       const firstCell = text.search(/\S/u)
       if (firstCell < 0 || !text.startsWith(marker, firstCell)) continue
-      if (row < cursorLine) {
+      if (row < cursorLine && !allowHardLineBreaks) {
         let wrapsToCursor = true
         for (let continuation = row + 1; continuation <= cursorLine; continuation += 1) {
           if (!buffer.getLine(continuation)?.isWrapped) {
@@ -59,21 +74,26 @@ export class AgentTerminalScreen {
         if (!wrapsToCursor) continue
       }
       if (row === cursorLine && buffer.cursorX < firstCell + marker.length) continue
-      const parts = [line.translateToString(
-        false,
+      let result = line.translateToString(
+        true,
         firstCell + marker.length,
         row === cursorLine ? buffer.cursorX : undefined
-      ).trimStart()]
+      ).trimStart()
       for (let continuation = row + 1; continuation <= cursorLine; continuation += 1) {
         const wrapped = buffer.getLine(continuation)
         if (!wrapped) return null
-        parts.push(wrapped.translateToString(
-          false,
+        const continuationText = wrapped.translateToString(
+          true,
           0,
           continuation === cursorLine ? buffer.cursorX : undefined
-        ))
+        )
+        if (wrapped.isWrapped) {
+          result += continuationText
+        } else {
+          result = `${result}\n${lineText(wrapped, continuation === cursorLine ? buffer.cursorX : undefined)}`
+        }
       }
-      return parts.join('').trimEnd()
+      return result
     }
     return null
   }

@@ -10,6 +10,7 @@ import {
   type AgentProviderId,
   type AgentMuxClient,
   type AgentMuxClientEvent,
+  type AgentMuxInteractionResponse,
   type AgentMuxAgentSessionStore,
   type AgentMuxRuntimeSubject,
   type ExecutionHost
@@ -133,12 +134,12 @@ function projectSession(
 ): SessionSnapshot {
   const run = subject.run
   const observedAt = run.observedAt
-  const status = {
+  const processStatus = {
     state: run.state === 'interrupted' ? 'error' as const : run.state,
     source: 'run-process' as const,
     observedAt,
     ...(run.state === 'interrupted'
-      ? { detail: run.interruptionReason ?? 'The Run owner interrupted this PTY.' }
+      ? { detail: 'The Run owner interrupted this PTY.' }
       : run.exitSignal !== undefined
         ? { detail: `signal ${run.exitSignal}` }
         : {}),
@@ -149,6 +150,9 @@ function projectSession(
     const executorLabel = configuredExecutor?.providerId === subject.providerId
       ? configuredExecutor.label
       : subject.executorId
+    const status = run.state === 'running' && subject.agentSession.semanticStatus
+      ? structuredClone(subject.agentSession.semanticStatus)
+      : processStatus
     return {
       id: subject.agentSession.agentSessionId,
       kind: 'agent',
@@ -169,7 +173,13 @@ function projectSession(
       createdAt: subject.agentSession.createdAt,
       updatedAt: Math.max(subject.agentSession.updatedAt, observedAt),
       processState: run.state,
+      ...(run.state === 'interrupted' && run.interruptionReason
+        ? { interruptionReason: run.interruptionReason }
+        : {}),
       status,
+      ...(subject.agentSession.pendingInteraction
+        ? { pendingInteraction: structuredClone(subject.agentSession.pendingInteraction.request) }
+        : {}),
       latestOutputBytes: run.latestOutputBytes,
       control: {
         kind: 'agent',
@@ -189,7 +199,10 @@ function projectSession(
     createdAt: run.observedAt,
     updatedAt: observedAt,
     processState: run.state,
-    status,
+    ...(run.state === 'interrupted' && run.interruptionReason
+      ? { interruptionReason: run.interruptionReason }
+      : {}),
+    status: processStatus,
     latestOutputBytes: run.latestOutputBytes,
     control: {
       kind: 'terminal',
@@ -725,6 +738,19 @@ export class RuntimeController {
         agentSessionId: control.agentSessionId,
         operationId: randomUUID(),
         prompt
+      })
+    })
+  }
+
+  async respondInteraction(
+    control: Extract<SessionControl, { kind: 'agent' }>,
+    response: AgentMuxInteractionResponse
+  ): Promise<void> {
+    await this.trackHostLifecycleOperation(control.hostId, async () => {
+      await (await this.connectedClient(control.hostId)).respondAgentInteraction({
+        agentSessionId: control.agentSessionId,
+        expectedRun: control.run,
+        response
       })
     })
   }
