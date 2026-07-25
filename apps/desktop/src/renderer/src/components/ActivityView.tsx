@@ -1,6 +1,7 @@
 import { Bot, ChevronRight, CircleDot, Hammer, Info, ShieldAlert, UserRound } from 'lucide-react'
 import { Fragment, useMemo, useState } from 'react'
 import type { AgentTimelineItem } from '../../../shared/contracts'
+import { AgentMarkdown } from './AgentMarkdown'
 
 function Glyph({ kind, size = 12 }: { kind: AgentTimelineItem['kind']; size?: number }) {
   if (kind === 'user_message') return <UserRound size={size} />
@@ -197,7 +198,9 @@ function Turn({ item, origin }: { item: AgentTimelineItem; origin: number }) {
         {item.status === 'failed' ? <span className="log-row__chip log-row__chip--failed">Failed</span> : null}
         <span className="log-turn__time">{formatOffset(item.createdAt, origin)}</span>
       </div>
-      {item.content ? <p className="log-turn__body">{item.content}</p> : null}
+      {/* Only the TURN register renders markdown. The machine Row (log-row__prose) stays plain text: it
+          carries payload, not prose someone reads for meaning. */}
+      {item.content ? <AgentMarkdown content={item.content} className="log-turn__body" /> : null}
     </div>
   )
 }

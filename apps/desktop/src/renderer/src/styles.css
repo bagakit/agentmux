@@ -1523,6 +1523,66 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+/* Markdown inside a turn. The turn body already sets 13px/1.6 and every element below INHERITS it —
+   including headings, deliberately. Heading levels differ by weight, colour and the space above them,
+   never by size: the surface contract forbids buying hierarchy with type scale, and a transcript full of
+   large headings destroys the density that makes a trace scannable. A heading in an agent's answer is a
+   section marker, not a page title. */
+.md { display: flex; flex-direction: column; gap: 7px; white-space: normal; }
+.md > :first-child { margin-top: 0; }
+.md-paragraph { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.md-heading {
+  margin: 4px 0 0;
+  color: var(--text);
+  font-size: inherit;
+  font-weight: 680;
+  letter-spacing: -.01em;
+}
+/* Deeper levels step DOWN in emphasis, not in size: weight first, then colour. */
+.md-heading[data-level='3'] { font-weight: 620; }
+.md-heading[data-level='4'], .md-heading[data-level='5'], .md-heading[data-level='6'] {
+  color: var(--text-2);
+  font-weight: 600;
+}
+.md-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 3px; }
+.md-list li { overflow-wrap: anywhere; }
+.md-code {
+  padding: 1px 4px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+/* Code owns its own horizontal scroll so a long line cannot widen the turn and force the whole feed to
+   scroll sideways. */
+.md-block-code {
+  margin: 2px 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  box-shadow: var(--hl);
+  overflow-x: auto;
+}
+.md-block-code code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+}
+/* A link is a button because an <a href> in untrusted output is a navigation escape hatch; it still has
+   to READ as a link, so it borrows the accent and underline and nothing else. */
+.md-link {
+  padding: 0;
+  border: 0;
+  color: var(--green-2);
+  background: none;
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.md-link:hover { color: var(--green); }
+
 /* User speech gets a quiet ground so the turn has a visible start and end — Surface fill carries the
    boundary, never a stroke. The assistant reply flows open on the feed as the main narrative. */
 .log-turn--user_message .log-turn__body {
