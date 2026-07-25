@@ -10,7 +10,8 @@ const fixture = vi.hoisted(() => ({
     config: { appearance: { terminalTheme: 'graphite' } },
     viewModes: {} as Record<string, 'terminal' | 'activity'>,
     refreshSession: vi.fn(async () => {}),
-    recoverSession: vi.fn(async () => {})
+    recoverSession: vi.fn(async () => {}),
+    respondInteraction: vi.fn(async () => {})
   }
 }))
 
@@ -26,6 +27,11 @@ vi.mock('../src/renderer/src/components/ActivityView.js', () => ({
 vi.mock('../src/renderer/src/components/AgentSessionComposer.js', () => ({
   AgentSessionComposer: ({ disabled }: { disabled?: boolean }) => (
     <div data-test-agent-composer={disabled ? 'disabled' : 'enabled'} />
+  )
+}))
+vi.mock('../src/renderer/src/components/AgentInteractionCard.js', () => ({
+  AgentInteractionCard: ({ disabled }: { disabled?: boolean }) => (
+    <div data-test-interaction-card={disabled ? 'disabled' : 'enabled'} />
   )
 }))
 
@@ -118,4 +124,43 @@ describe('SessionPane Agent Composer ownership', () => {
     expect(markup).toContain('data-test-agent-composer="disabled"')
   })
 
+  it('goes inert on a pending request whose Agent process is gone', () => {
+    // A pending request outlives the process that asked it. If the card stayed live the user could
+    // answer a Run that can no longer accept input, and the answer would fail on a dead Run.
+    const dead = session('agent')
+    fixture.state.sessions = [{
+      ...dead,
+      processState: 'exited',
+      status: { state: 'exited', source: 'run-process', observedAt: 2 },
+      pendingInteraction: {
+        kind: 'permission',
+        requestId: 'req-1',
+        title: 'Allow shell?',
+        options: [{ id: 'allow-once', label: 'Allow once', kind: 'allow-once' }]
+      }
+    } as SessionSnapshot]
+    fixture.state.viewModes = { 'agent-1': 'terminal' }
+
+    const markup = render('agent-1', 'agent')
+
+    expect(markup).toContain('data-test-interaction-card="disabled"')
+  })
+
+  it('keeps a pending request answerable while its Agent process runs', () => {
+    const live = session('agent')
+    fixture.state.sessions = [{
+      ...live,
+      pendingInteraction: {
+        kind: 'permission',
+        requestId: 'req-1',
+        title: 'Allow shell?',
+        options: [{ id: 'allow-once', label: 'Allow once', kind: 'allow-once' }]
+      }
+    } as SessionSnapshot]
+    fixture.state.viewModes = { 'agent-1': 'terminal' }
+
+    const markup = render('agent-1', 'agent')
+
+    expect(markup).toContain('data-test-interaction-card="enabled"')
+  })
 })
