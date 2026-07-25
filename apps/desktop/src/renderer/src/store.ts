@@ -1,6 +1,13 @@
 import { create } from 'zustand'
 import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware'
-import type { AgentCatalogEntry, AgentMuxCompositionRequest, AgentMuxCompositionResult } from '@agentmux/core'
+import {
+  AGENTMUX_CONTROL_ERROR_CODES,
+  type AgentMuxControlErrorCode,
+  type AgentMuxControlRequest,
+  type AgentMuxControlResult,
+  type AgentMuxRegion
+} from '@agentmux/core/control'
+import type { AgentCatalogEntry } from '@agentmux/core'
 import type {
   AgentLaunchResult,
   AgentSessionRecoveryCandidate,
@@ -32,16 +39,21 @@ import type { OpenDestination, OpenHttpLinkOrigin } from './lib/open-destination
 import { rendererResourceOwnerCounts } from './lib/resource-owner-counts'
 import { terminalResourceOwnerCounts } from './lib/terminal-resource-owners'
 import {
-  listWorkbenchViewRegions,
-  placeWorkbenchRegion,
-  resolveRelativeWorkbenchRegion,
-  resolveWorkbenchRegion
-} from './lib/composition'
+  arrangeWorkbenchControlTab,
+  inspectWorkbenchControlRegion,
+  inspectWorkbenchControlTab,
+  messageTargetCandidates,
+  planControlOpen,
+  resolveWorkbenchControlRegion,
+  resolveWorkbenchControlTab,
+  rollbackControlOpen
+} from './lib/control'
 import {
   activateTab as activateLayoutTab,
   addTab,
   createWorkspaceLayout,
   findGroup,
+  findGroupForTab,
   focusGroup,
   moveTab as moveLayoutTab,
   removeTab as removeLayoutTab,
@@ -50,7 +62,11 @@ import {
   type SplitDirection,
   type WorkspaceLayout
 } from './lib/workbench-layout'
-import { setWorkbenchRegionSplitRatio } from './lib/workbench-view-layout'
+import {
+  setWorkbenchRegionSplitRatio,
+  workbenchRegionBounds,
+  workbenchRegionPresetSize
+} from './lib/workbench-view-layout'
 import {
   projectPersistedWorkbench,
   persistedAgentSessionIds,
@@ -114,6 +130,7 @@ import {
   type FileWorkbenchSurface,
   type LauncherWorkbenchSurface,
   type TerminalWorkbenchSurface,
+  type WorkbenchSurface,
   type WorkbenchTab
 } from './lib/workbench-tabs'
 import {
@@ -192,10 +209,10 @@ type AppState = {
   activateWorkspaceSelection(result: WorkspaceSelectionResult): void
   focusTabGroup(workspaceId: string, tabGroupId: string): void
   activateTab(workspaceId: string, tabGroupId: string, tabId: string): void
-  executeComposition(
-    request: AgentMuxCompositionRequest,
+  executeControl(
+    request: AgentMuxControlRequest,
     signal?: AbortSignal
-  ): Promise<AgentMuxCompositionResult>
+  ): Promise<AgentMuxControlResult>
   selectSession(id: string, tabGroupId?: string): void
   openLauncher(tabGroupId?: string): void
   closeTab(
@@ -299,6 +316,28 @@ type AppState = {
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+function controlFailure(
+  code: AgentMuxControlErrorCode,
+  detail: string,
+  extra?: object
+): Error & { code: AgentMuxControlErrorCode } {
+  return Object.assign(new Error(detail), { code }, extra)
+}
+
+const CONTROL_ERROR_CODES: ReadonlySet<string> = new Set(AGENTMUX_CONTROL_ERROR_CODES)
+
+function isControlErrorCode(value: unknown): value is AgentMuxControlErrorCode {
+  return typeof value === 'string' && CONTROL_ERROR_CODES.has(value)
+}
+
+function controlCancellation(signal?: AbortSignal): Error & { code: AgentMuxControlErrorCode } {
+  if (!(signal?.reason instanceof Error)) {
+    return controlFailure('CONTROL_CANCELLED', 'Desktop Control request was cancelled.')
+  }
+  const source = signal.reason as Error & { code?: unknown }
+  return Object.assign(source, { code: isControlErrorCode(source.code) ? source.code : 'CONTROL_CANCELLED' as const })
 }
 
 function normalizeHttpLinkUrl(rawUrl: string): string {
@@ -875,9 +914,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       else get().applyBrowserEvent(event)
     })
-    const disposeComposition = api.composition.onRequest((request, signal) => (
-      get().executeComposition(request, signal)
-    ))
+    const disposeControl = api.control?.onRequest
+      ? api.control.onRequest((request, signal) => (
+          get().executeControl(request, signal)
+        ))
+      : () => {}
     const disposeFileInvalidations = api.files.onInvalidated((event) => {
       const key = documentKey(event.workspaceId, event.path)
       fileInvalidationSequences.set(key, (fileInvalidationSequences.get(key) ?? 0) + 1)
@@ -889,7 +930,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       runtimeSubscriptionCount -= 4
       disposeSessions()
       disposeBrowsers()
-      disposeComposition()
+      disposeControl()
       disposeFileInvalidations()
       void stopWarmTerminal(get().warmTerminal).then((sessionId) => {
         if (!sessionId) return
@@ -1027,362 +1068,376 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         : {})
     }))
   },
-  async executeComposition(request, signal) {
-    const cancellationError = (): Error & { code?: string } => {
-      if (signal?.reason instanceof Error) return signal.reason
-      return Object.assign(new Error('Desktop Composition request was cancelled.'), {
-        code: 'COMPOSITION_CANCELLED'
-      })
+  async executeControl(request, signal) {
+    const input = () => {
+      const state = get()
+      return { sessions: state.sessions, tabs: state.tabs, layouts: state.layouts }
     }
-    if (signal?.aborted) throw cancellationError()
-    const state = get()
-    if (request.operation === 'context') {
-      const resolved = resolveWorkbenchRegion({
-        sessions: state.sessions,
-        tabs: state.tabs,
-        layouts: state.layouts,
-        target: { kind: 'agent-session', agentSessionId: request.caller.agentSessionId }
-      })
-      if (resolved.kind !== 'agent') {
-        throw Object.assign(
-          new Error('Composition caller is not an Agent Region.'),
-          { code: 'CALLER_REGION_INVALID' }
-        )
+    const requireActive = (): void => {
+      if (signal?.aborted) throw controlCancellation(signal)
+    }
+    const agentSession = (
+      target: { kind: 'self' } | { kind: 'agent-session'; agentSessionId: string },
+      caller?: { agentSessionId: string }
+    ): Extract<SessionSnapshot, { kind: 'agent' }> => {
+      const id = target.kind === 'self' ? caller?.agentSessionId : target.agentSessionId
+      if (!id) throw controlFailure('INVALID_CONTROL_REQUEST', 'A self selector requires a managed caller.')
+      const session = get().sessions.find((candidate) => candidate.id === id)
+      if (!session || session.kind !== 'agent') {
+        throw controlFailure('UNKNOWN_AGENT_SESSION', 'Agent Session is not available to the Desktop.')
       }
+      if (!workbenchViewCloseAllowsSession(get().closingWorkbenchViews, id)) {
+        throw controlFailure('SESSION_CLOSING', 'Agent Session is closing.')
+      }
+      return session
+    }
+    const focus = (tabId: string, region?: AgentMuxRegion) => {
+      const state = get()
+      const tab = state.tabs[tabId]
+      const layout = tab && state.layouts[tab.workspaceId]
+      const group = layout && findGroupForTab(layout, tabId)
+      if (!tab || !layout || !group) throw controlFailure('TAB_NOT_OPEN', 'Tab target is not open.')
+      set({
+        activeWorkspaceId: tab.workspaceId,
+        mainSurface: 'workbench',
+        tabs: region ? { ...state.tabs, [tab.id]: focusWorkbenchTabRegion(tab, region.regionId) } : state.tabs,
+        layouts: { ...state.layouts, [tab.workspaceId]: activateLayoutTab(layout, group.id, tab.id) }
+      })
+      return { tabId, ...(region ? { regionId: region.regionId } : {}) }
+    }
+    requireActive()
+    if (request.operation === 'inspect.tab') {
+      const tab = resolveWorkbenchControlTab(input(), request.target, request.caller)
+      return { operation: request.operation, tab: inspectWorkbenchControlTab(input(), tab) }
+    }
+    if (request.operation === 'inspect.region') {
+      const region = resolveWorkbenchControlRegion(input(), request.target, request.caller)
+      return { operation: request.operation, region: inspectWorkbenchControlRegion(input(), region) }
+    }
+    if (request.operation === 'list.agents') {
+      const state = get()
       return {
         operation: request.operation,
-        context: {
-          agentSessionId: resolved.agentSessionId,
-          workspaceId: resolved.workspaceId,
-          viewId: resolved.viewId,
-          regionId: resolved.regionId,
-          tabGroupId: resolved.tabGroupId,
-          regions: listWorkbenchViewRegions({
-            sessions: state.sessions,
-            tabs: state.tabs,
-            layouts: state.layouts
-          }, resolved.viewId),
-          executors: Object.entries(state.config?.executors ?? {}).map(([executorId, executor]) => ({
-            executorId,
-            label: executor.label,
-            providerId: executor.providerId,
-            available: state.executorDetections[
-              executorDetectionKey(
-                state.config?.workspaces.find((workspace) => workspace.id === resolved.workspaceId)?.hostId ?? 'local',
-                executorId
-              )
-            ]?.state === 'ready'
-          }))
-        }
+        agents: Object.entries(state.config?.executors ?? {}).map(([executorId, executor]) => ({
+          executorId,
+          label: executor.label,
+          providerId: executor.providerId,
+          available: state.config?.workspaces.some((workspace) => (
+            state.executorDetections[executorDetectionKey(workspace.hostId, executorId)]?.state === 'ready'
+          )) ?? false
+        }))
       }
     }
-    if (request.operation === 'region.focus') {
-      const resolved = resolveWorkbenchRegion({
-        sessions: state.sessions,
-        tabs: state.tabs,
-        layouts: state.layouts,
-        target: { kind: 'region', regionId: request.regionId }
-      })
-      const layout = state.layouts[resolved.workspaceId]!
-      const tab = state.tabs[resolved.viewId]!
-      set({
-        activeWorkspaceId: resolved.workspaceId,
-        mainSurface: 'workbench',
-        tabs: {
-          ...state.tabs,
-          [tab.id]: focusWorkbenchTabRegion(tab, resolved.regionId)
-        },
-        layouts: {
-          ...state.layouts,
-          [resolved.workspaceId]: activateLayoutTab(
-            layout,
-            resolved.tabGroupId,
-            resolved.viewId
-          )
+    if (request.operation === 'focus') {
+      if (request.target.kind === 'tab') {
+        const tab = resolveWorkbenchControlTab(input(), request.target)
+        return { operation: request.operation, ...focus(tab.id) }
+      }
+      const region = resolveWorkbenchControlRegion(input(), request.target)
+      return { operation: request.operation, ...focus(region.tabId, region) }
+    }
+    if (request.operation === 'arrange') {
+      const state = get()
+      const tab = resolveWorkbenchControlTab(input(), request.target, request.caller)
+      const current = workbenchRegionBounds(tab.layout.root).length
+      const additions = request.mode.kind === 'preset'
+        ? Array.from({ length: Math.max(0, workbenchRegionPresetSize(request.mode.preset) - current) }, newRegionId)
+        : []
+      const arranged = arrangeWorkbenchControlTab(tab, request.mode, additions)
+      set({ tabs: { ...state.tabs, [tab.id]: arranged } })
+      return { operation: request.operation, tab: inspectWorkbenchControlTab(input(), arranged) }
+    }
+    if (request.operation === 'send') {
+      let session: Extract<SessionSnapshot, { kind: 'agent' }>
+      if (request.target.kind === 'self' || request.target.kind === 'agent-session') {
+        session = agentSession(request.target, request.caller)
+      } else if (request.target.kind === 'region') {
+        const region = resolveWorkbenchControlRegion(input(), request.target)
+        if (region.kind !== 'agent') throw controlFailure('MESSAGE_TARGET_NOT_AGENT', 'Target Region is not an Agent.')
+        session = agentSession({ kind: 'agent-session', agentSessionId: region.agentSessionId })
+      } else {
+        const tab = resolveWorkbenchControlTab(input(), { kind: 'tab', tabId: request.target.tabId })
+        const candidates = messageTargetCandidates(input(), tab.id)
+        if (candidates.length !== 1) {
+          throw controlFailure('MESSAGE_TARGET_NOT_UNIQUE', 'Target Tab does not contain exactly one Agent Session.', { candidates })
         }
-      })
-      return { operation: request.operation, region: resolved }
+        session = agentSession({ kind: 'agent-session', agentSessionId: candidates[0]!.agentSessionId })
+      }
+      requireActive()
+      await api.sessions.submitPrompt(session.control, request.text)
+      return { operation: request.operation, agentSessionId: session.id }
+    }
+    if (request.operation === 'interrupt' || request.operation === 'resume' || request.operation === 'stop') {
+      const session = agentSession(request.target, request.caller)
+      requireActive()
+      if (request.operation === 'interrupt') {
+        await api.sessions.interrupt(session.control)
+        return { operation: request.operation, agentSessionId: session.id }
+      }
+      if (request.operation === 'stop') {
+        await api.sessions.stop(session.control)
+        return { operation: request.operation, agentSessionId: session.id }
+      }
+      const resumed = await api.sessions.resume(session.control, request.text, request.requestId)
+      if (resumed.kind !== 'agent' || resumed.id !== session.id) {
+        throw controlFailure('LAUNCH_RESULT_MISMATCH', 'Explicit resume returned another Agent Session.')
+      }
+      set((current) => projectRecoveredSession(current, session.id, resumed))
+      if (signal?.aborted) throw controlCancellation(signal)
+      return { operation: request.operation, agentSessionId: resumed.id, runId: resumed.control.run.runId }
     }
 
-    const relativeRegion = resolveRelativeWorkbenchRegion({
-      sessions: state.sessions,
-      tabs: state.tabs,
-      layouts: state.layouts,
-      callerAgentSessionId: request.caller.agentSessionId,
-      relativeTo: request.relativeTo
-    })
-    if (!workbenchViewCloseAllowsView(state.closingWorkbenchViews, relativeRegion.viewId)) {
-      throw Object.assign(new Error('Composition target View is closing.'), {
-        code: 'COMPOSITION_VIEW_OWNER_LOST'
-      })
+    const state = get()
+    const plan = planControlOpen(
+      input(),
+      request.destination,
+      request.caller,
+      `view:${crypto.randomUUID()}`,
+      newRegionId()
+    )
+    if (!workbenchViewCloseAllowsView(state.closingWorkbenchViews, plan.tabId)) {
+      throw controlFailure('CONTROL_OWNER_LOST', 'Control target Tab is closing.')
     }
-    const layout = state.layouts[relativeRegion.workspaceId]
-    if (!layout) {
-      throw Object.assign(new Error('Composition target Workspace is not open.'), {
-        code: 'WORKSPACE_NOT_OPEN'
+    const workspace = state.config?.workspaces.find((candidate) => candidate.id === plan.workspaceId)
+    if (!workspace) throw controlFailure('UNKNOWN_WORKSPACE', 'Control target Workspace is not configured.')
+    const rollback = (surface: WorkbenchSurface): void => {
+      set((current) => {
+        const restored = rollbackControlOpen({ tabs: current.tabs, layouts: current.layouts }, plan, surface)
+        return restored ? { tabs: restored.tabs, layouts: restored.layouts } : current
       })
     }
 
-    if (request.operation === 'region.open') {
-      const session = state.sessions.find((candidate) => candidate.id === request.agentSessionId)
-      if (!session || session.kind !== 'agent') {
-        throw Object.assign(new Error('Agent Session is not available to the Desktop.'), {
-          code: 'UNKNOWN_AGENT_SESSION'
-        })
+    if (request.operation === 'open.agent' && request.content.kind === 'agent-session') {
+      const session = agentSession({ kind: 'agent-session', agentSessionId: request.content.agentSessionId })
+      if (!workspaceOwnsSessionPath(workspace, session)) {
+        throw controlFailure('REGION_WORKSPACE_MISMATCH', 'Agent Session and destination belong to different Workspaces.')
       }
-      if (!workbenchViewCloseAllowsSession(state.closingWorkbenchViews, session.id)) {
-        throw Object.assign(new Error('Agent Session is closing.'), { code: 'SESSION_CLOSING' })
+      const topicId = topicIdForSession(state.config, session)
+      if (isScratchWorkspaceId(workspace.id)) {
+        if (!topicId) throw controlFailure('REGION_TOPIC_MISMATCH', 'Agent Session has no matching Scratch Topic.')
+        if (plan.kind === 'tab') plan.tabs[plan.tabId] = { ...plan.tabs[plan.tabId]!, topicId }
+        else if (plan.tabs[plan.tabId]?.topicId !== topicId) {
+          throw controlFailure('REGION_TOPIC_MISMATCH', 'Agent Session and destination belong to different Scratch Topics.')
+        }
       }
-      const sessionWorkspace = workspaceForSession(state.config, session)
-      if (sessionWorkspace?.id !== relativeRegion.workspaceId) {
-        throw Object.assign(new Error('Agent Session and relative Region belong to different Workspaces.'), {
-          code: 'REGION_WORKSPACE_MISMATCH'
-        })
-      }
-      const sessionTopicId = topicIdForSession(state.config, session)
-      const relativeTopicId = state.tabs[relativeRegion.viewId]?.topicId
-      if (
-        isScratchWorkspaceId(relativeRegion.workspaceId) &&
-        request.placement !== 'tab' &&
-        sessionTopicId !== relativeTopicId
-      ) {
-        throw Object.assign(new Error('Agent Session and relative Region belong to different Scratch Topics.'), {
-          code: 'REGION_TOPIC_MISMATCH'
-        })
-      }
-      const regionId = newRegionId()
       const surface: AgentWorkbenchSurface = {
-        regionId,
-        kind: 'agent',
-        phase: 'attached',
-        workspaceId: relativeRegion.workspaceId,
-        sessionId: session.id
+        regionId: plan.regionId, kind: 'agent', phase: 'attached', workspaceId: workspace.id, sessionId: session.id
       }
-      const placed = placeWorkbenchRegion({
-        layout,
-        tabs: state.tabs,
-        relativeRegion,
-        newViewId: `view:${crypto.randomUUID()}`,
-        surface,
-        placement: request.placement
-      })
-      const placedTabs = sessionTopicId && request.placement === 'tab'
-        ? {
-            ...placed.tabs,
-            [placed.viewId]: { ...placed.tabs[placed.viewId]!, topicId: sessionTopicId }
-          }
-        : placed.tabs
-      set((current) => ({
-        activeWorkspaceId: relativeRegion.workspaceId,
-        mainSurface: 'workbench',
-        tabs: placedTabs,
-        layouts: { ...current.layouts, [relativeRegion.workspaceId]: placed.layout }
-      }))
+      plan.tabs[plan.tabId] = replaceWorkbenchRegion(plan.tabs[plan.tabId]!, plan.regionId, surface)
+      set({ activeWorkspaceId: workspace.id, mainSurface: 'workbench', tabs: plan.tabs, layouts: plan.layouts })
       return {
         operation: request.operation,
         region: {
-          viewId: placed.viewId,
-          regionId,
-          kind: 'agent',
-          agentSessionId: session.id,
-          workspaceId: relativeRegion.workspaceId,
-          tabGroupId: placed.tabGroupId
+          tabId: plan.tabId, regionId: plan.regionId, workspaceId: workspace.id, kind: 'agent',
+          agentSessionId: session.id, providerId: session.providerId, executorId: session.executorId
         }
       }
     }
 
-    if (!state.config?.executors[request.executorId]) {
-      throw Object.assign(new Error(`Agent Executor is not configured: ${request.executorId}`), {
-        code: 'AGENT_EXECUTOR_NOT_CONFIGURED'
-      })
-    }
-    const workspace = state.config.workspaces.find((candidate) => candidate.id === relativeRegion.workspaceId)
-    if (!workspace) {
-      throw Object.assign(new Error('Composition target Workspace is not configured.'), {
-        code: 'UNKNOWN_WORKSPACE'
-      })
-    }
-    const regionId = newRegionId()
-    const agentSessionId = crypto.randomUUID()
-    const pendingSurface: AgentWorkbenchSurface = {
-      regionId,
-      kind: 'agent',
-      phase: 'launching',
-      workspaceId: workspace.id,
-      sessionId: agentSessionId
-    }
-    const placed = placeWorkbenchRegion({
-      layout,
-      tabs: state.tabs,
-      relativeRegion,
-      newViewId: `view:${crypto.randomUUID()}`,
-      surface: pendingSurface,
-      placement: request.placement
-    })
-    const scratchTopicId = isScratchWorkspaceId(workspace.id)
-      ? (request.placement === 'tab'
-          ? placed.viewId
-          : (state.tabs[relativeRegion.viewId]?.topicId ?? relativeRegion.viewId))
-      : undefined
-    if (scratchTopicId && !isScratchTopicId(scratchTopicId)) {
-      throw Object.assign(new Error('Scratch Agent View has an invalid Topic identity.'), {
-        code: 'SCRATCH_TOPIC_ID_INVALID'
-      })
-    }
-    const placedTabs = scratchTopicId
-      ? {
-          ...placed.tabs,
-          [placed.viewId]: { ...placed.tabs[placed.viewId]!, topicId: scratchTopicId }
-        }
-      : placed.tabs
-    set((current) => ({
-      activeWorkspaceId: workspace.id,
-      mainSurface: 'workbench',
-      tabs: placedTabs,
-      layouts: { ...current.layouts, [workspace.id]: placed.layout },
-      pendingAgentLaunches: {
-        ...current.pendingAgentLaunches,
-        [agentSessionId]: { events: [], overflowed: false }
+    if (request.operation === 'open.agent') {
+      const content = request.content
+      if (content.kind !== 'new-agent') {
+        throw controlFailure('INVALID_CONTROL_REQUEST', 'Agent open content is invalid.')
       }
-    }))
-    const rollbackPendingRegion = (): void => {
-      set((current) => {
-        const owner = findWorkbenchRegion(current.tabs, regionId)
-        if (!owner || !ownsSessionLaunch(owner.surface, 'agent', agentSessionId)) return current
-        const currentLayout = current.layouts[workspace.id]
-        if (request.placement !== 'tab') {
-          const tab = removeWorkbenchRegion(owner.tab, regionId)
-          if (!tab) return current
-          return { ...current, tabs: { ...current.tabs, [tab.id]: tab } }
-        }
-        const tabGroupId = tabGroupForTab(currentLayout, owner.tab.id)
-        if (!currentLayout || !tabGroupId) return current
-        const tabs = { ...current.tabs }
-        delete tabs[owner.tab.id]
-        return {
-          ...current,
-          tabs,
-          layouts: {
-            ...current.layouts,
-            [workspace.id]: removeLayoutTab(currentLayout, tabGroupId, owner.tab.id)
+      if (!state.config?.executors[content.executorId]) {
+        throw controlFailure('AGENT_EXECUTOR_NOT_CONFIGURED', 'Agent Executor is not configured.')
+      }
+      const agentSessionId = crypto.randomUUID()
+      const scratchTopicId = isScratchWorkspaceId(workspace.id)
+        ? (plan.kind === 'tab' ? plan.tabId : plan.tabs[plan.tabId]?.topicId)
+        : undefined
+      if (scratchTopicId && !isScratchTopicId(scratchTopicId)) {
+        throw controlFailure('REGION_TOPIC_MISMATCH', 'Control destination has an invalid Scratch Topic.')
+      }
+      if (scratchTopicId && plan.kind === 'tab') plan.tabs[plan.tabId] = { ...plan.tabs[plan.tabId]!, topicId: scratchTopicId }
+      const pending: AgentWorkbenchSurface = {
+        regionId: plan.regionId, kind: 'agent', phase: 'launching', workspaceId: workspace.id, sessionId: agentSessionId
+      }
+      plan.tabs[plan.tabId] = replaceWorkbenchRegion(plan.tabs[plan.tabId]!, plan.regionId, pending)
+      set((current) => ({
+        activeWorkspaceId: workspace.id,
+        mainSurface: 'workbench',
+        tabs: plan.tabs,
+        layouts: plan.layouts,
+        pendingAgentLaunches: { ...current.pendingAgentLaunches, [agentSessionId]: { events: [], overflowed: false } }
+      }))
+      const cancel = (): void => rollback(pending)
+      signal?.addEventListener('abort', cancel, { once: true })
+      let launched: AgentLaunchResult | null = null
+      const cleanup = async (primary: Error): Promise<never> => {
+        if (launched) {
+          try { await api.sessions.stop(launched.session.control) }
+          catch (cleanupError) {
+            set((current) => reduceDetachedAgentLaunch(current, launched!).state)
+            throw controlFailure('LAUNCH_CLEANUP_FAILED', `${primary.message} Cleanup failed: ${message(cleanupError)}`, {
+              cause: new AggregateError([primary, cleanupError])
+            })
           }
         }
-      })
-    }
-    const failAfterLaunch = async (
-      result: AgentLaunchResult,
-      primary: Error & { code?: string }
-    ): Promise<never> => {
+        throw primary
+      }
       try {
-        await api.sessions.stop(result.session.control)
-        set((current) => discardPendingAgentLaunch(current, result.session.id))
-      } catch (cleanupError) {
-        let timelineGapSessionId: string | undefined
-        set((current) => {
-          const reduced = reduceDetachedAgentLaunch(current, result)
-          timelineGapSessionId = reduced.timelineGapSessionId
-          return reduced.state
+        launched = await api.sessions.launchAgent({
+          executorId: content.executorId,
+          hostId: workspace.hostId,
+          workspacePath: workspace.path,
+          ...(scratchTopicId ? { scratchTopicId } : {}),
+          agentSessionId,
+          createOperationId: request.requestId,
+          ...(content.prompt === undefined ? {} : { prompt: content.prompt })
         })
-        if (timelineGapSessionId) void get().resyncTimeline(timelineGapSessionId)
-        throw Object.assign(
-          new Error(`${primary.message} Cleanup failed: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`),
-          { code: primary.code ?? 'COMPOSITION_LAUNCH_FAILED', cause: new AggregateError([primary, cleanupError]) }
-        )
+        if (launched.session.id !== agentSessionId || launched.timeline.agentSessionId !== agentSessionId) {
+          await cleanup(controlFailure('LAUNCH_RESULT_MISMATCH', 'Agent launch returned another Session identity.'))
+        }
+        let canonical: AgentLaunchResult | null = null
+        try {
+          canonical = await get().canonicalizeAgentLaunch(launched)
+        } catch (cause) {
+          await cleanup(Object.assign(
+            controlFailure('CONTROL_FAILED', 'Agent launch state could not be reconciled.'),
+            { cause }
+          ))
+        }
+        if (!canonical) return await cleanup(controlFailure('CONTROL_OWNER_LOST', 'Agent Session ended during launch.'))
+        const committed: AgentLaunchResult = canonical
+        launched = committed
+        if (signal?.aborted) await cleanup(controlCancellation(signal))
+        const owner = findWorkbenchRegion(get().tabs, plan.regionId)
+        if (!ownsSessionLaunch(owner?.surface, 'agent', agentSessionId)) {
+          await cleanup(controlFailure('CONTROL_OWNER_LOST', 'Control Region owner disappeared during Agent launch.'))
+        }
+        if (!workspaceOwnsSessionPath(workspace, committed.session)) {
+          await cleanup(controlFailure('LAUNCH_RESULT_MISMATCH', 'Agent launch returned another Workspace.'))
+        }
+        set((current) => reduceAgentSessionLaunchAttached(current, plan.regionId, committed).state)
+        return {
+          operation: request.operation,
+          region: {
+            tabId: plan.tabId, regionId: plan.regionId, workspaceId: workspace.id, kind: 'agent',
+            agentSessionId, providerId: committed.session.providerId, executorId: committed.session.executorId
+          }
+        }
+      } catch (error) {
+        rollback(pending)
+        set((current) => discardPendingAgentLaunch(current, agentSessionId))
+        throw error
+      } finally {
+        signal?.removeEventListener('abort', cancel)
+      }
+    }
+
+    if (request.operation === 'open.terminal') {
+      const pendingId = `terminal-launch:${crypto.randomUUID()}`
+      const pending: TerminalWorkbenchSurface = {
+        regionId: plan.regionId, kind: 'terminal', phase: 'launching', workspaceId: workspace.id, sessionId: pendingId
+      }
+      plan.tabs[plan.tabId] = replaceWorkbenchRegion(plan.tabs[plan.tabId]!, plan.regionId, pending)
+      set({ activeWorkspaceId: workspace.id, mainSurface: 'workbench', tabs: plan.tabs, layouts: plan.layouts })
+      const cancel = (): void => rollback(pending)
+      signal?.addEventListener('abort', cancel, { once: true })
+      let session: SessionSnapshot | null = null
+      const cleanup = async (primary: Error): Promise<never> => {
+        if (session) {
+          try { await api.sessions.stop(session.control) }
+          catch (cleanupError) {
+            set((current) => ({ sessions: [...current.sessions.filter((item) => item.id !== session!.id), session!] }))
+            throw controlFailure('LAUNCH_CLEANUP_FAILED', `${primary.message} Cleanup failed: ${message(cleanupError)}`, {
+              cause: new AggregateError([primary, cleanupError])
+            })
+          }
+        }
+        throw primary
+      }
+      try {
+        session = await api.sessions.launchTerminal({
+          hostId: workspace.hostId,
+          workspacePath: workspace.path,
+          createOperationId: request.requestId,
+          ...(request.shellCommand === undefined ? {} : { shellCommand: request.shellCommand })
+        })
+        if (session.kind !== 'terminal' || session.hostId !== workspace.hostId || session.workspacePath !== workspace.path) {
+          await cleanup(controlFailure('LAUNCH_RESULT_MISMATCH', 'Terminal launch result does not match its request.'))
+        }
+        if (signal?.aborted) await cleanup(controlCancellation(signal))
+        const owner = findWorkbenchRegion(get().tabs, plan.regionId)
+        if (!ownsSessionLaunch(owner?.surface, 'terminal', pendingId)) {
+          await cleanup(controlFailure('CONTROL_OWNER_LOST', 'Control Region owner disappeared during Terminal launch.'))
+        }
+        const committed = session
+        set((current) => {
+          const currentOwner = findWorkbenchRegion(current.tabs, plan.regionId)
+          if (
+            !currentOwner ||
+            currentOwner.surface.kind !== 'terminal' ||
+            !ownsSessionLaunch(currentOwner.surface, 'terminal', pendingId)
+          ) return current
+          const tabs = {
+            ...current.tabs,
+            [currentOwner.tab.id]: replaceWorkbenchRegion(currentOwner.tab, plan.regionId, { ...currentOwner.surface, sessionId: committed.id })
+          }
+          return reduceSessionLaunchAttached({ ...current, tabs }, plan.regionId, committed)
+        })
+        return {
+          operation: request.operation,
+          region: {
+            tabId: plan.tabId, regionId: plan.regionId, workspaceId: workspace.id, kind: 'terminal',
+            runId: session.control.run.runId
+          }
+        }
+      } catch (error) {
+        rollback(pending)
+        throw error
+      } finally {
+        signal?.removeEventListener('abort', cancel)
+      }
+    }
+
+    const browserId = `browser:${crypto.randomUUID()}`
+    set({ activeWorkspaceId: workspace.id, mainSurface: 'workbench', tabs: plan.tabs, layouts: plan.layouts })
+    const cancel = (): void => rollback(plan.launcher)
+    signal?.addEventListener('abort', cancel, { once: true })
+    let createdBrowserId: string | null = null
+    const cleanup = async (primary: Error): Promise<never> => {
+      if (createdBrowserId) {
+        try { await api.browser.close(createdBrowserId) }
+        catch (cleanupError) {
+          throw controlFailure('LAUNCH_CLEANUP_FAILED', `${primary.message} Cleanup failed: ${message(cleanupError)}`, {
+            cause: new AggregateError([primary, cleanupError])
+          })
+        }
       }
       throw primary
     }
-    const cancelPendingRegion = (): void => rollbackPendingRegion()
-    signal?.addEventListener('abort', cancelPendingRegion, { once: true })
     try {
-      const launched = await api.sessions.launchAgent({
-        executorId: request.executorId,
-        hostId: workspace.hostId,
-        workspacePath: workspace.path,
-        ...(scratchTopicId ? { scratchTopicId } : {}),
-        agentSessionId,
-        createOperationId: request.requestId,
-        ...(request.prompt === undefined ? {} : { prompt: request.prompt })
-      })
-      if (
-        launched.session.id !== agentSessionId ||
-        launched.timeline.agentSessionId !== agentSessionId
-      ) {
-        await failAfterLaunch(launched, Object.assign(
-          new Error('Agent launch result does not match its requested Session identity.'),
-          { code: 'COMPOSITION_LAUNCH_MISMATCH' }
-        ))
+      const browser = await api.browser.create(browserId, request.url)
+      createdBrowserId = browser.id
+      if (browser.id !== browserId) await cleanup(controlFailure('LAUNCH_RESULT_MISMATCH', 'Browser owner returned another Browser identity.'))
+      if (signal?.aborted) await cleanup(controlCancellation(signal))
+      const surface: BrowserWorkbenchSurface = {
+        ...browser, regionId: plan.regionId, kind: 'browser', workspaceId: workspace.id, browserId
       }
-      let result: AgentLaunchResult | null = null
-      try {
-        result = await get().canonicalizeAgentLaunch(launched)
-      } catch (error) {
-        await failAfterLaunch(launched, Object.assign(
-          new Error(`Agent launch state could not be reconciled: ${message(error)}`),
-          { code: 'COMPOSITION_LAUNCH_RECONCILE_FAILED', cause: error }
-        ))
-      }
-      if (!result) {
-        throw Object.assign(new Error('Agent Session ended before launch ownership settled.'), {
-          code: 'COMPOSITION_LAUNCH_ENDED'
-        })
-      }
-      const session = result.session
-      if (signal?.aborted) await failAfterLaunch(result, cancellationError())
-      const launchOwner = findWorkbenchRegion(get().tabs, regionId)
-      if (
-        !ownsSessionLaunch(launchOwner?.surface, 'agent', agentSessionId) ||
-        (launchOwner && !workbenchViewCloseAllowsView(get().closingWorkbenchViews, launchOwner.tab.id))
-      ) {
-        await failAfterLaunch(result, Object.assign(
-          new Error('Composition Region owner disappeared during Agent launch.'),
-          { code: 'COMPOSITION_REGION_OWNER_LOST' }
-        ))
-      }
-      if (
-        session.kind !== 'agent' ||
-        session.id !== agentSessionId ||
-        result.timeline.agentSessionId !== agentSessionId ||
-        !workspaceOwnsSessionPath(workspace, session)
-      ) {
-        rollbackPendingRegion()
-        await failAfterLaunch(result, Object.assign(
-          new Error('Agent launch result does not match its Composition request.'),
-          { code: 'COMPOSITION_LAUNCH_MISMATCH' }
-        ))
-      }
-      let timelineGapSessionId: string | undefined
+      let attached = false
       set((current) => {
-        const reduced = reduceAgentSessionLaunchAttached(current, regionId, result)
-        timelineGapSessionId = reduced.timelineGapSessionId
-        return scratchTopicId
-          ? {
-              ...reduced.state,
-              workspaceFileRevisions: {
-                ...current.workspaceFileRevisions,
-                [workspace.id]: (current.workspaceFileRevisions[workspace.id] ?? 0) + 1
-              }
-            }
-          : reduced.state
+        const owner = findWorkbenchRegion(current.tabs, plan.regionId)
+        if (
+          !owner ||
+          owner.tab.id !== plan.tabId ||
+          owner.surface !== plan.launcher ||
+          !workbenchViewCloseAllowsView(current.closingWorkbenchViews, owner.tab.id)
+        ) return current
+        attached = true
+        return { tabs: { ...current.tabs, [owner.tab.id]: replaceWorkbenchRegion(owner.tab, plan.regionId, surface) } }
       })
-      if (timelineGapSessionId) void get().resyncTimeline(timelineGapSessionId)
-      const region = resolveWorkbenchRegion({
-        sessions: get().sessions,
-        tabs: get().tabs,
-        layouts: get().layouts,
-        target: { kind: 'region', regionId }
-      })
-      if (region.kind !== 'agent') {
-        throw Object.assign(new Error('Launched Agent Region is invalid.'), {
-          code: 'COMPOSITION_LAUNCH_MISMATCH'
-        })
+      if (!attached) await cleanup(controlFailure('CONTROL_OWNER_LOST', 'Control Region owner disappeared during Browser creation.'))
+      return {
+        operation: request.operation,
+        region: { tabId: plan.tabId, regionId: plan.regionId, workspaceId: workspace.id, kind: 'browser', browserId }
       }
-      return { operation: request.operation, agentSessionId, region }
     } catch (error) {
-      rollbackPendingRegion()
-      set((current) => discardPendingAgentLaunch(current, agentSessionId))
+      rollback(plan.launcher)
       throw error
     } finally {
-      signal?.removeEventListener('abort', cancelPendingRegion)
+      signal?.removeEventListener('abort', cancel)
     }
   },
   selectSession(id, preferredTabGroupId) {
@@ -2468,7 +2523,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         regionId,
         kind: 'browser',
         workspaceId,
-        browserId: browser.id
+        browserId: regionId
       }
       let attached = false
       set((current) => {

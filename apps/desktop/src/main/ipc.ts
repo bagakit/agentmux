@@ -12,10 +12,10 @@ import {
   type WebContents
 } from 'electron'
 import {
-  AgentMuxCompositionServer,
+  AgentMuxControlServer,
   type AgentExecutorId,
-  type AgentMuxCompositionRequest,
-  type AgentMuxCompositionResult
+  type AgentMuxControlRequest,
+  type AgentMuxControlResult
 } from '@agentmux/core'
 import type {
   AgentLaunchInput,
@@ -28,7 +28,7 @@ import type {
   CreateWorkspacePathInput,
   CreateWorktreeForBranchInput,
   CreateWorkspaceInput,
-  DesktopCompositionResponse,
+  DesktopControlResponse,
   HostConfig,
   MoveWorkspacePathInput,
   SessionControl,
@@ -37,16 +37,16 @@ import type {
   WorkspaceRecord
 } from '../shared/contracts.js'
 import {
-  COMPOSITION_CANCEL_CHANNEL,
-  COMPOSITION_REQUEST_CHANNEL,
-  COMPOSITION_RESPONSE_CHANNEL
+  CONTROL_CANCEL_CHANNEL,
+  CONTROL_REQUEST_CHANNEL,
+  CONTROL_RESPONSE_CHANNEL
 } from '../shared/contracts.js'
 import { terminalPalette } from '../shared/terminal-palettes.js'
 import { BrowserViewManager } from './browser-view-manager.js'
 import { BrowserProfileManager } from './browser-profile-manager.js'
 import { nativeImageFromBrowserPng } from './browser-image.js'
 import { ConfigStore } from './config-store.js'
-import { DesktopCompositionIpcBridge } from './composition-ipc-bridge.js'
+import { DesktopControlIpcBridge } from './control-ipc-bridge.js'
 import { normalizeExternalUrl } from './external-url.js'
 import { FileObservationRegistry } from './file-observation-registry.js'
 import { runOwnerDisposals } from './owner-disposal.js'
@@ -92,20 +92,20 @@ export async function registerIpc(args: {
   const browsers = new BrowserViewManager(args.window, browserProfiles)
   const fileObservations = new FileObservationRegistry()
   const channels: string[] = []
-  let acceptingComposition = true
-  const compositionBridge = new DesktopCompositionIpcBridge({
-    isAvailable: () => acceptingComposition && !args.window.webContents.isDestroyed(),
-    sendRequest: (request) => args.window.webContents.send(COMPOSITION_REQUEST_CHANNEL, request),
-    sendCancellation: (cancellation) => args.window.webContents.send(COMPOSITION_CANCEL_CHANNEL, cancellation)
+  let acceptingControl = true
+  const controlBridge = new DesktopControlIpcBridge({
+    isAvailable: () => acceptingControl && !args.window.webContents.isDestroyed(),
+    sendRequest: (request) => args.window.webContents.send(CONTROL_REQUEST_CHANNEL, request),
+    sendCancellation: (cancellation) => args.window.webContents.send(CONTROL_CANCEL_CHANNEL, cancellation)
   })
-  const acceptComposition = (event: IpcMainEvent, response: DesktopCompositionResponse): void => {
+  const acceptControl = (event: IpcMainEvent, response: DesktopControlResponse): void => {
     if (event.sender !== args.window.webContents || !response || typeof response.requestId !== 'string') return
-    compositionBridge.accept(response)
+    controlBridge.accept(response)
   }
-  const executeComposition = async (
-    request: AgentMuxCompositionRequest
-  ): Promise<AgentMuxCompositionResult> => await compositionBridge.execute(request)
-  ipcMain.on(COMPOSITION_RESPONSE_CHANNEL, acceptComposition)
+  const executeControl = async (
+    request: AgentMuxControlRequest
+  ): Promise<AgentMuxControlResult> => await controlBridge.execute(request)
+  ipcMain.on(CONTROL_RESPONSE_CHANNEL, acceptControl)
   const handle = <TArgs extends unknown[], TResult>(
     channel: string,
     listener: (...values: TArgs) => Promise<TResult> | TResult
@@ -237,7 +237,7 @@ export async function registerIpc(args: {
     if (!event.sender.isDestroyed()) return result
     const primary = Object.assign(
       new Error('The Desktop View disappeared before its Agent launch was delivered.'),
-      { code: 'COMPOSITION_VIEW_OWNER_LOST' }
+      { code: 'CONTROL_OWNER_LOST' }
     )
     try {
       await args.runtime.stopSession(result.session.control)
@@ -266,8 +266,11 @@ export async function registerIpc(args: {
     await args.runtime.write(session, data)
   })
   handle('sessions:submitPrompt', async (session: AgentSessionControl, prompt: string) => {
-    await args.runtime.submitPrompt(session, prompt, config)
+    await args.runtime.submitPrompt(session, prompt)
   })
+  handle('sessions:resume', async (session: AgentSessionControl, prompt: string, operationId: string) => (
+    await args.runtime.resumeSession(session, prompt, operationId, config)
+  ))
   handle('sessions:acknowledge', async (session: SessionControl, sequence: number) => {
     await args.runtime.acknowledge(session, sequence)
   })
@@ -343,16 +346,16 @@ export async function registerIpc(args: {
   handle('browser:setBounds', (id: string, bounds: BrowserBounds | null) => browsers.setBounds(id, bounds))
   handle('browser:close', (id: string) => browsers.close(id))
   const detach = args.runtime.attach(args.window.webContents)
-  const composition = new AgentMuxCompositionServer({ execute: executeComposition })
-  await composition.start()
+  const control = new AgentMuxControlServer({ execute: executeControl })
+  await control.start()
   return async () => {
     await runOwnerDisposals([
       () => {
-        acceptingComposition = false
-        ipcMain.removeListener(COMPOSITION_RESPONSE_CHANNEL, acceptComposition)
-        compositionBridge.dispose()
+        acceptingControl = false
+        ipcMain.removeListener(CONTROL_RESPONSE_CHANNEL, acceptControl)
+        controlBridge.dispose()
       },
-      async () => await composition.stop(),
+      async () => await control.stop(),
       () => detach(),
       () => browsers.dispose(),
       async () => await browserProfiles.dispose(),
