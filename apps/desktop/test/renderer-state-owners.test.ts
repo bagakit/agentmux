@@ -278,6 +278,7 @@ describe('Renderer resource state owners', () => {
     const browserRegionId = initialWorkbenchRegionId(tabId)
     const browserSurface = {
       id: 'browser-1',
+      navigationId: 'navigation-1',
       regionId: browserRegionId,
       kind: 'browser' as const,
       workspaceId: 'workspace-1',

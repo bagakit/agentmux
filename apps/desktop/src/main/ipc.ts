@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { basename } from 'node:path'
-import { clipboard, dialog, ipcMain, shell, type BrowserWindow, type IpcMainEvent } from 'electron'
+import { clipboard, dialog, ipcMain, nativeImage, shell, type BrowserWindow, type IpcMainEvent } from 'electron'
 import {
   AgentMuxCompositionServer,
   type AgentExecutorId,
@@ -12,6 +12,7 @@ import type {
   AgentSessionControl,
   AppConfig,
   BrowserBounds,
+  BrowserPng,
   BrowserViewport,
   CreateWorkspacePathInput,
   CreateWorktreeForBranchInput,
@@ -31,6 +32,7 @@ import {
 } from '../shared/contracts.js'
 import { terminalPalette } from '../shared/terminal-palettes.js'
 import { BrowserViewManager } from './browser-view-manager.js'
+import { nativeImageFromBrowserPng } from './browser-image.js'
 import { ConfigStore } from './config-store.js'
 import { DesktopCompositionIpcBridge } from './composition-ipc-bridge.js'
 import { normalizeExternalUrl } from './external-url.js'
@@ -194,6 +196,11 @@ export async function registerIpc(args: {
   handle('ui:writeClipboardText', (text: string) => {
     clipboard.writeText(text)
   })
+  channels.push('ui:writeClipboardImage')
+  ipcMain.handle('ui:writeClipboardImage', (event, image: BrowserPng) => {
+    if (event.sender !== args.window.webContents) throw new Error('Untrusted clipboard image sender')
+    clipboard.writeImage(nativeImageFromBrowserPng(image, (png) => nativeImage.createFromBuffer(png)))
+  })
   handle('ui:openExternal', async (rawUrl: string) => {
     await shell.openExternal(normalizeExternalUrl(rawUrl))
   })
@@ -255,6 +262,7 @@ export async function registerIpc(args: {
   handle('browser:reload', async (id: string) => await browsers.reload(id))
   handle('browser:openDevTools', (id: string) => browsers.openDevTools(id))
   handle('browser:setViewport', (id: string, viewport: BrowserViewport) => browsers.setViewport(id, viewport))
+  handle('browser:captureScreenshot', async (id: string) => await browsers.captureScreenshot(id))
   handle('browser:setBounds', (id: string, bounds: BrowserBounds | null) => browsers.setBounds(id, bounds))
   handle('browser:close', (id: string) => browsers.close(id))
   const detach = args.runtime.attach(args.window.webContents)

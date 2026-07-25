@@ -102,6 +102,7 @@ function agentSession(id: string): SessionSnapshot {
 function browserSurface(regionId: string, browserId = `browser:${regionId}`) {
   return {
     id: browserId,
+    navigationId: `${browserId}:navigation`,
     regionId,
     kind: 'browser' as const,
     workspaceId: 'workspace',
@@ -1310,6 +1311,7 @@ describe('Session and Launcher lifecycle ownership', () => {
     await useAppStore.getState().closeTab('workspace', 'pane', launcher.id)
     pending.resolve({
       id: launcher.layout.activeRegionId,
+      navigationId: `${launcher.layout.activeRegionId}:navigation`,
       url: 'about:blank',
       title: 'New Tab',
       loading: false,
