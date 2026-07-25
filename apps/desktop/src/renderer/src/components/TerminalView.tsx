@@ -19,6 +19,7 @@ import {
 import { detectTerminalPathLinks } from '../lib/terminal-path-link'
 import { terminalOptions, terminalTheme } from '../lib/terminal-theme'
 import { isTerminalAppShortcut } from '../lib/terminal-shortcuts'
+import { safeTerminalFind, TERMINAL_SEARCH_DECORATIONS } from '../lib/terminal-search-safe-find'
 import { finishTerminalReplayRecovery, hydrateTerminalReplay } from '../lib/terminal-replay'
 import { acquireTerminalResourceOwners } from '../lib/terminal-resource-owners'
 import { LatestTerminalOutputAcknowledger } from '../lib/terminal-output-ack'
@@ -553,12 +554,18 @@ export function TerminalView({
   }
 
   function searchTerminal(query: string, previous = false): void {
+    const addon = searchAddonRef.current
+    if (!addon) return
     if (!query) {
-      searchAddonRef.current?.clearDecorations()
+      addon.clearDecorations()
       return
     }
-    if (previous) searchAddonRef.current?.findPrevious(query)
-    else searchAddonRef.current?.findNext(query, { incremental: true })
+    // Guarded so xterm's negative-width decoration throw cannot tear down the terminal, and carrying
+    // tokenised highlights so matches read against the dark ground (terminal-search-safe-find.ts).
+    safeTerminalFind(addon, query, previous ? 'previous' : 'next', {
+      incremental: !previous,
+      decorations: TERMINAL_SEARCH_DECORATIONS
+    })
   }
 
   const startupPhase = terminalStartupPhase({

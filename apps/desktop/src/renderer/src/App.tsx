@@ -13,6 +13,8 @@ import {
 import { SettingsPanel, type SettingsSectionId } from './components/SettingsPanel'
 import { AgentStatusBar } from './components/AgentStatusBar'
 import { ProjectRailToolbar } from './components/ProjectRailToolbar'
+import { QuickSwitcher } from './components/QuickSwitcher'
+import { isQuickSwitchShortcut } from './lib/quick-switch-shortcut'
 import { SurfaceSwitch, TopRowLeadingChrome } from './components/TopRowChrome'
 import { WorkspaceBoard } from './components/WorkspaceBoard'
 import { WorkspaceSidebar } from './components/WorkspaceSidebar'
@@ -24,6 +26,7 @@ import { useAppStore } from './store'
 export function App() {
   const [settingsRoute, setSettingsRoute] = useState<{ section: SettingsSectionId } | null>(null)
   const [windowResizeActive, setWindowResizeActive] = useState(false)
+  const [quickSwitchOpen, setQuickSwitchOpen] = useState(false)
   const initialize = useAppStore((state) => state.initialize)
   const loading = useAppStore((state) => state.loading)
   const error = useAppStore((state) => state.error)
@@ -65,6 +68,19 @@ export function App() {
   }, [initialize])
 
   useEffect(() => api.ui.onWindowResize(({ active }) => setWindowResizeActive(active)), [])
+
+  // The window's only global navigation gesture. Captured at the window so it fires before the
+  // focused xterm textarea can swallow the keystroke; the toggle lets the same chord dismiss.
+  useEffect(() => {
+    const isMac = navigator.userAgent.includes('Mac')
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (!isQuickSwitchShortcut(event, isMac)) return
+      event.preventDefault()
+      setQuickSwitchOpen((current) => !current)
+    }
+    window.addEventListener('keydown', onKeyDown, { capture: true })
+    return () => window.removeEventListener('keydown', onKeyDown, { capture: true })
+  }, [])
 
   if (loading) {
     return (
@@ -168,6 +184,7 @@ export function App() {
         {error ? <div className="error-toast"><AlertTriangle size={14} /><span>{error}</span></div> : null}
       </main>
       <AgentStatusBar />
+      <QuickSwitcher open={quickSwitchOpen} onClose={() => setQuickSwitchOpen(false)} />
     </div>
   )
 }
