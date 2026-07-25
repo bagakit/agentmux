@@ -60,12 +60,14 @@ loader.config({ monaco })
 
 const resourceWindow = window as typeof window & {
   __agentmuxMonacoModelCount?: () => number
+  __agentmuxMonacoEditorCount?: () => number
   __agentmuxFileEditingProbe?: {
     value(): string | null
     setValue(value: string): void
   }
 }
 resourceWindow.__agentmuxMonacoModelCount = () => monaco.editor.getModels().length
+resourceWindow.__agentmuxMonacoEditorCount = () => monaco.editor.getEditors().length
 const mountedEditorModel = () => monaco.editor.getEditors()
   .find((editor) => editor.getDomNode()?.isConnected)
   ?.getModel() ?? null
