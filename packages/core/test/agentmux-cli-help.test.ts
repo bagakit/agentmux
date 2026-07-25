@@ -31,11 +31,15 @@ describe('agentmux CLI discovery', () => {
 
   it('documents typed targets and exact destinations without contacting owners', async () => {
     expect(await run(['inspect', '--help'])).toContain('inspect --tab <tab-id|self>')
-    const open = await run(['open', 'agent', '--help'])
-    expect(await run(['open', '--help'])).toContain('agentmux open terminal')
+    const open = await run(['open', '--help'])
+    expect(open).toContain('agentmux open terminal')
+    expect(open).toContain('--left-of <region-id|self>')
     expect(open).toContain('--right-of <region-id|self>')
+    expect(open).toContain('--above <region-id|self>')
+    expect(open).toContain('--below <region-id|self>')
     expect(open).toContain('--new-tab-after <tab-id|self>')
     expect(open).toContain('--in-region <launcher-region-id>')
+    expect(await run(['open', 'agent', '--help'])).toContain('--right-of <region-id|self>')
     expect(await run(['open', 'terminal', '--help'])).toContain('--command <shell-command>')
     expect(await run(['open', 'browser', '--help'])).toContain('--url <url>')
     expect(await run(['arrange', '--help'])).toContain('grid-9')
