@@ -28,7 +28,8 @@ import { api } from '../lib/api'
 import {
   browserAnnotationMarkers,
   formatBrowserElementContext,
-  normalizeBrowserAnnotationNote
+  normalizeBrowserAnnotationNote,
+  type BrowserAnnotation
 } from '../lib/browser-annotations'
 import { composeScreenshot } from './browser-screenshot/compose'
 import {
@@ -48,6 +49,8 @@ const VIEWPORT_LABELS: Record<BrowserViewport, string> = {
   tablet: 'Tablet',
   desktop: 'Desktop'
 }
+
+const NO_BROWSER_ANNOTATIONS: readonly BrowserAnnotation[] = []
 
 type BrowserIdentity = Pick<BrowserSnapshot, 'id' | 'navigationId'>
 
@@ -87,7 +90,7 @@ export function BrowserPane({
   const [elementSelection, setElementSelection] = useState<BrowserElementSelection | null>(null)
   const [selectionBusy, setSelectionBusy] = useState(false)
   const [annotationNote, setAnnotationNote] = useState('')
-  const annotations = useAppStore((state) => state.browserAnnotationsByBrowserId[tab.browserId] ?? [])
+  const annotations = useAppStore((state) => state.browserAnnotationsByBrowserId[tab.browserId]) ?? NO_BROWSER_ANNOTATIONS
   const addBrowserAnnotation = useAppStore((state) => state.addBrowserAnnotation)
 
   useEffect(() => {
