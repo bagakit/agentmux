@@ -23,8 +23,8 @@ describe('AgentComposer reusable surface', () => {
     expect(markup).toContain('aria-label="Message Agent"')
     expect(markup).toContain('Review this file')
     expect(markup).toContain('review.ts')
-    expect(markup).toContain('Stop turn')
     expect(markup).toContain('Send')
+    expect(markup).not.toContain('composer-send--working')
     expect(markup).not.toMatch(/<textarea[^>]*disabled=""/)
   })
 
@@ -41,11 +41,10 @@ describe('AgentComposer reusable surface', () => {
     expect(markup).toMatch(/<textarea[^>]*disabled=""/)
     expect(markup).toContain('File')
     expect(markup).toContain('Attach')
-    expect(markup).toContain('Stop turn')
     expect(markup).toContain('Send')
   })
 
-  it('switches primary action button to Stop turn when isWorking is true', () => {
+  it('switches primary action button to Stop and only displays single Stop action when isWorking is true', () => {
     const markup = renderToStaticMarkup(createElement(AgentComposer, {
       value: 'Some text',
       disabled: false,
@@ -59,6 +58,50 @@ describe('AgentComposer reusable surface', () => {
     expect(markup).toContain('composer-send--working')
     expect(markup).toContain('aria-label="Stop turn"')
     expect(markup).toContain('Stop')
+    expect(markup).not.toContain('aria-label="Send"')
+  })
+
+  it('handles Enter key appropriately for idle and working states', () => {
+    const onSubmit = vi.fn()
+    const onInterrupt = vi.fn()
+
+    // When idle and non-empty: Enter submits
+    const idleComposer = AgentComposer({
+      value: 'Fix bug',
+      disabled: false,
+      placeholder: 'Ask the Agent…',
+      isWorking: false,
+      onChange: vi.fn(),
+      onSubmit,
+      onInterrupt
+    }) as unknown as { props: { children: [ { props: { onKeyDown(e: unknown): void } } ] } }
+
+    const textarea = idleComposer.props.children[0]
+    const preventDefault = vi.fn()
+    textarea.props.onKeyDown({ key: 'Enter', shiftKey: false, preventDefault })
+    expect(preventDefault).toHaveBeenCalled()
+    expect(onSubmit).toHaveBeenCalledTimes(1)
+    expect(onInterrupt).not.toHaveBeenCalled()
+
+    onSubmit.mockClear()
+    preventDefault.mockClear()
+
+    // When working: Enter does NOT submit and does NOT interrupt
+    const workingComposer = AgentComposer({
+      value: 'Fix bug',
+      disabled: false,
+      placeholder: 'Ask the Agent…',
+      isWorking: true,
+      onChange: vi.fn(),
+      onSubmit,
+      onInterrupt
+    }) as unknown as { props: { children: [ { props: { onKeyDown(e: unknown): void } } ] } }
+
+    const workingTextarea = workingComposer.props.children[0]
+    workingTextarea.props.onKeyDown({ key: 'Enter', shiftKey: false, preventDefault })
+    expect(preventDefault).not.toHaveBeenCalled()
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(onInterrupt).not.toHaveBeenCalled()
   })
 
   it('uses a transparent surface without a black drop shadow', () => {
@@ -71,3 +114,4 @@ describe('AgentComposer reusable surface', () => {
     expect(focusRule).not.toMatch(/#[0-9a-f]+/i)
   })
 })
+

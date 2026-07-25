@@ -2,7 +2,6 @@ import type { SessionSnapshot } from '../../../shared/contracts'
 import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
 import { useAppStore } from '../store'
 import { AgentComposer } from './AgentComposer'
-import { AgentInteractiveCard } from './AgentInteractiveCard'
 
 export type AgentComposerAvailability = {
   disabled: boolean
@@ -51,7 +50,6 @@ export function AgentSessionComposer({
   const interrupt = useAppStore((state) => state.interrupt)
   const availability = agentComposerAvailability(session, disabled)
   const isWorking = session?.kind === 'agent' && session.status.state === 'working'
-  const isWaiting = session?.kind === 'agent' && session.status.state === 'waiting'
 
   async function submit(): Promise<void> {
     if (availability.disabled || !text.trim()) return
@@ -69,7 +67,7 @@ export function AgentSessionComposer({
     setAgentComposerDraft(sessionId, `${text}${text && !text.endsWith(' ') ? ' ' : ''}@${activeFile} `)
   }
 
-  const composer = (
+  return (
     <AgentComposer
       value={text}
       disabled={availability.disabled}
@@ -84,19 +82,4 @@ export function AgentSessionComposer({
       } : {})}
     />
   )
-
-  if (isWaiting && session?.status.detail) {
-    return (
-      <>
-        <AgentInteractiveCard
-          interactivePrompt={session.status.detail}
-          onSend={(answer) => void send(sessionId, answer)}
-          onInterrupt={() => void interrupt(sessionId)}
-        />
-        {composer}
-      </>
-    )
-  }
-
-  return composer
 }
