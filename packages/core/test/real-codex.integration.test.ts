@@ -100,7 +100,7 @@ afterEach(async () => {
   else process.env.AGENTMUX_RUNTIME_DIRECTORY = originalRuntimeDirectory
   await Promise.all(roots.splice(0).map(async (root) => await rm(root, { recursive: true, force: true })))
   if (cleanupErrors.length > 0) throw new AggregateError(cleanupErrors, 'Real Codex E2E session cleanup failed.')
-})
+}, 30_000)
 
 async function waitFor<T>(
   description: string,

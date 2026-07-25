@@ -98,7 +98,7 @@ describe('built-in agent providers', () => {
     }
   })
 
-  it.each(['codex', 'claude', 'traex', 'pi'] as const)('delivers %s prompts as positional argv data', (id) => {
+  it.each(['claude', 'traex', 'pi'] as const)('delivers %s prompts as positional argv data', (id) => {
     const plan = providers.get(id).buildLaunch({
       workspacePath: '/tmp/work',
       prompt: 'fix "quoted"\ntext',
@@ -108,6 +108,20 @@ describe('built-in agent providers', () => {
     expect(plan).toEqual({
       command: id,
       args: ['--model', 'demo', 'fix "quoted"\ntext'],
+      env: {}
+    })
+  })
+
+  it('delivers codex prompts with hook trust bypass', () => {
+    const plan = providers.get('codex').buildLaunch({
+      workspacePath: '/tmp/work',
+      prompt: 'fix "quoted"\ntext',
+      args: ['--model', 'demo'],
+      env: {}
+    })
+    expect(plan).toEqual({
+      command: 'codex',
+      args: ['--model', 'demo', '--dangerously-bypass-hook-trust', 'fix "quoted"\ntext'],
       env: {}
     })
   })
@@ -135,7 +149,7 @@ describe('built-in agent providers', () => {
       commandOverride: '/opt/tools/codex'
     })
     expect(plan.command).toBe('/opt/tools/codex')
-    expect(plan.args).toEqual(['$(touch /tmp/not-executed)'])
+    expect(plan.args).toEqual(['--dangerously-bypass-hook-trust', '$(touch /tmp/not-executed)'])
   })
 
   it('launches Grok with the argv separator that guards flag-looking prompts', () => {
@@ -237,7 +251,7 @@ describe('built-in agent providers', () => {
       env: {}
     })).toEqual({
       command: 'codex',
-      args: ['resume', 'native-1', 'continue now', '--model', 'demo'],
+      args: ['resume', 'native-1', '--dangerously-bypass-hook-trust', 'continue now', '--model', 'demo'],
       env: {}
     })
     expect(() => providers.get('pi').buildResumeLaunch({
@@ -264,7 +278,7 @@ describe('built-in agent providers', () => {
       env: {}
     })).toEqual({
       command: 'codex',
-      args: ['resume', 'native-1', '--model', 'demo'],
+      args: ['resume', 'native-1', '--dangerously-bypass-hook-trust', '--model', 'demo'],
       env: {}
     })
     expect(providers.get('claude').buildResumeLaunch({

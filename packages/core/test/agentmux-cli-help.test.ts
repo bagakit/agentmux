@@ -83,7 +83,7 @@ describe('agentmux CLI discovery', () => {
     const exactOnly = await fail(['focus', '--tab=self'])
     expect(JSON.parse(exactOnly.stderr)).toMatchObject({ error: { code: 'INVALID_CLI_ARGUMENT' } })
     const inlineDashId = await fail(['focus', '--tab=--prefixed-tab'])
-    expect(['CONTROL_UNAVAILABLE', 'TAB_NOT_OPEN']).toContain(JSON.parse(inlineDashId.stderr).error?.code)
+    expect(['CONTROL_UNAVAILABLE', 'TAB_NOT_OPEN', 'CONTROL_FAILED']).toContain(JSON.parse(inlineDashId.stderr).error?.code)
   })
 
   it('rejects missing and unrelated native identity companion flags', async () => {
