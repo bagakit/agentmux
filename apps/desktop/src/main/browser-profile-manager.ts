@@ -38,6 +38,11 @@ function assertCookieWriteResult(value: unknown, index: number): void {
   }
 }
 
+function throwPublicBrowserProfileError(message: string, cause: unknown): never {
+  console.error(message, cause)
+  throw new Error(message)
+}
+
 export class BrowserProfileManager implements BrowserProfileResolver {
   private readonly profiles = new Map<string, BrowserProfileSummary>()
   private readonly sourceTokens = new Map<string, ImportSourceToken>()
@@ -113,7 +118,13 @@ export class BrowserProfileManager implements BrowserProfileResolver {
     this.assertInitialized()
     this.sourceTokens.clear()
     const expiresAt = Date.now() + PROFILE_IMPORT_SOURCE_TOKEN_TTL_MS
-    return detectBrowserProfileImportSources().map((source) => {
+    let detected: BrowserProfileImportSource[]
+    try {
+      detected = detectBrowserProfileImportSources()
+    } catch (error) {
+      throwPublicBrowserProfileError('Browser Profile sources could not be detected', error)
+    }
+    return detected.map((source) => {
       const token = randomUUID()
       this.sourceTokens.set(token, { source, expiresAt })
       return {
@@ -129,7 +140,11 @@ export class BrowserProfileManager implements BrowserProfileResolver {
     const source = this.consumeSourceToken(sourceToken)
     const validatedLabel = validateBrowserProfileLabel(label)
     const operation = this.importProfileFromSource(source, validatedLabel)
-    return await this.trackMutation(operation)
+    try {
+      return await this.trackMutation(operation)
+    } catch (error) {
+      throwPublicBrowserProfileError('Browser Profile import failed', error)
+    }
   }
 
   dispose(): Promise<void> {
