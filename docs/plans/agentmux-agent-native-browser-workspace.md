@@ -57,7 +57,7 @@ Browser 不只负责打开网页，还要把网页上下文安全地带给 Agent
 
 ## 非目标
 
-- 不引入第二份 Store、daemon、`<webview>` owner、账号系统、Remote Browser 或 Agent Browser Runtime。
+- 不为 Browser Workspace 新增 Store、daemon、`<webview>` owner、账号系统、Remote Browser 或 Agent Browser Runtime。
 - 不在 `packages/core` 新增 Browser WebContents 或 Cookie owner。
 - 不增加旧 Browser 配置兼容、migration、fallback 或双写。
 - 不把 Profile 导入扩展成浏览器密码、历史、书签或扩展同步。
