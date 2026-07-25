@@ -1,4 +1,4 @@
-import { writeFile } from 'node:fs/promises'
+import { rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { app, BrowserWindow, shell } from 'electron'
 import { AgentMuxFileAgentSessionStore } from '@agentmux/core'
@@ -108,12 +108,15 @@ async function createWindow(appReadyAtMs: number = Date.now()): Promise<void> {
   }
   const rendererLoadedAtMs = Date.now()
   if (process.env.AGENTMUX_DESKTOP_READY_FILE) {
-    await writeFile(process.env.AGENTMUX_DESKTOP_READY_FILE, `${JSON.stringify({
+    const readyPath = process.env.AGENTMUX_DESKTOP_READY_FILE
+    const temporaryReadyPath = `${readyPath}.tmp-${process.pid}`
+    await writeFile(temporaryReadyPath, `${JSON.stringify({
       productName: app.name,
       version: app.getVersion(),
       packaged: app.isPackaged,
       executable: process.execPath
     })}\n`, { mode: 0o600 })
+    await rename(temporaryReadyPath, readyPath)
     if (process.env.AGENTMUX_DESKTOP_EXIT_AFTER_READY === '1') {
       app.quit()
       return

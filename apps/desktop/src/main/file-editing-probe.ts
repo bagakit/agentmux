@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { BrowserWindow } from 'electron'
 import type { WorkspaceFileWriteInput } from '../shared/contracts.js'
@@ -115,6 +115,12 @@ function delay(ms: number): Promise<void> {
 
 function assertProbe(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
+}
+
+async function publishReport(path: string, report: Record<string, unknown>): Promise<void> {
+  const temporaryPath = `${path}.tmp-${process.pid}`
+  await writeFile(temporaryPath, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 })
+  await rename(temporaryPath, path)
 }
 
 async function waitFor(
@@ -852,18 +858,18 @@ export async function runDesktopFileEditingProbe(options: {
     phases.recovered = await snapshot(options.window, path)
     phases.explorer = await runExplorerInteractionProbe(options)
 
-    await writeFile(reportPath, `${JSON.stringify({
+    await publishReport(reportPath, {
       schema: 'agentmux.workspace-file-editing-e2e.v2',
       ok: true,
       phases
-    }, null, 2)}\n`, { mode: 0o600 })
+    })
   } catch (error) {
-    await writeFile(reportPath, `${JSON.stringify({
+    await publishReport(reportPath, {
       schema: 'agentmux.workspace-file-editing-e2e.v2',
       ok: false,
       phases,
       error: error instanceof Error ? error.message : String(error)
-    }, null, 2)}\n`, { mode: 0o600 })
+    })
     throw error
   } finally {
     options.control.cancelWriteBarrier()
