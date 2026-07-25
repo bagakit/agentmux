@@ -35,8 +35,9 @@ function storedSession() {
       run: { runId: 'daemon-1' },
       submissionId: 'prompt-submit-1',
       promptDigest: 'prompt-digest-1',
-      stopReceiptId: 'stop-receipt-1',
-      stopOutputCursorBytes: 8,
+      readinessSource: 'native-stop' as const,
+      readinessId: 'stop-receipt-1',
+      readinessOutputCursorBytes: 8,
       readyThroughByte: 12,
       outputCursorBytes: 12,
       payload: {
@@ -50,7 +51,8 @@ function storedSession() {
         acknowledged: true
       }
     },
-    terminalStopReceipt: {
+    terminalPromptReadiness: {
+      source: 'native-stop' as const,
       id: 'stop-receipt-1',
       run: { runId: 'daemon-1' },
       outputCursorBytes: 8,
@@ -74,14 +76,15 @@ function storedSession() {
 }
 
 describe('semantic session persistence boundary', () => {
-  it('rejects the retired File Store v2 schema without rewriting or migrating it', async () => {
-    const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/agentmux-store-v2-"))
+  it('rejects the retired File Store v3 schema without rewriting or migrating it', async () => {
+    const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/agentmux-store-v3-"))
     const path = join(root, 'sessions.json')
     const retired = `${JSON.stringify({
-      version: 2,
+      version: 3,
       sessions: [],
       reservations: [],
-      retiredRuns: []
+      retiredRuns: [],
+      retiredAgentSessions: []
     })}\n`
     try {
       await writeFile(path, retired, { mode: 0o600 })
@@ -145,6 +148,7 @@ describe('semantic session persistence boundary', () => {
     expect(normalized.terminalSnapshot).toBeUndefined()
     expect(normalized.replay).toBeUndefined()
     expect(normalized.terminalHandshake).toEqual(storedSession().terminalHandshake)
+    expect(normalized.terminalPromptReadiness).toEqual(storedSession().terminalPromptReadiness)
     expect(normalized.terminalPromptSubmission).toEqual(storedSession().terminalPromptSubmission)
   })
 
@@ -172,11 +176,30 @@ describe('semantic session persistence boundary', () => {
 
     expect(() => normalizeStoredAgentSession({
       ...storedSession(),
-      terminalStopReceipt: {
-        ...storedSession().terminalStopReceipt,
+      terminalPromptReadiness: {
+        ...storedSession().terminalPromptReadiness,
         consumedBySubmissionId: 'another-submission'
       }
     })).toThrow('does not identify')
+
+    expect(() => normalizeStoredAgentSession({
+      ...storedSession(),
+      terminalPromptReadiness: {
+        ...storedSession().terminalPromptReadiness,
+        source: 'handshake'
+      }
+    })).toThrow('source is invalid')
+
+    expect(() => normalizeStoredAgentSession({
+      ...storedSession(),
+      terminalPromptReadiness: {
+        source: 'initial-composer',
+        id: 'initial-readiness',
+        run: { runId: 'daemon-1' },
+        outputCursorBytes: 12,
+        readyThroughByte: 12
+      }
+    })).toThrow('does not match its Agent Run boundary')
 
     const store: AgentMuxAgentSessionStore = {
       async load() { return [storedSession(), storedSession()] },

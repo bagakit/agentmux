@@ -67,7 +67,7 @@ import type {
   AgentTimelineSnapshot,
   AgentTerminalHandshake,
   AgentTerminalPromptRenderMatcher,
-  AgentTerminalStopReceiptState,
+  AgentTerminalPromptReadinessState,
   NativeHookEnvelope
 } from './types.js'
 
@@ -161,38 +161,6 @@ function sameRun(left: AgentMuxRunRef, right: AgentMuxRunRef): boolean {
   return left.runId === right.runId
 }
 
-export type PromptReadinessStatusOutcome =
-  | { ok: true; run: CtxmuxAdapterRun }
-  | { ok: false; error: unknown }
-
-export type PromptReadinessVerdict =
-  | { kind: 'retry' }
-  | { kind: 'stale' }
-  | { kind: 'fail'; error: unknown }
-
-/**
- * Decide how the prompt-readiness retry loop should treat a `kernel.status()` outcome.
- *
- * The previous `kernel.status(...).catch(() => null)` collapsed three very different outcomes into
- * "keep waiting until the deadline": a genuinely-gone Run, a still-running Run, and an authoritative
- * runtime failure such as a ctxmux disconnect. That masked real errors and delayed the stale verdict.
- *
- * - A running Run means the native Stop receipt legitimately has not landed yet → retry.
- * - A non-running Run, or a Run ctxmux reports as gone (CTXMUX_run_not_found), is terminal: the Run
- *   this prompt targets can never become ready → stale.
- * - Any other status failure (e.g. CTXMUX_DISCONNECTED) is an authoritative error that must surface,
- *   not be silently retried until the deadline and then reported as a bare "not ready".
- */
-export function classifyPromptReadinessStatus(outcome: PromptReadinessStatusOutcome): PromptReadinessVerdict {
-  if (outcome.ok) {
-    return outcome.run.state.type === 'running' ? { kind: 'retry' } : { kind: 'stale' }
-  }
-  if (outcome.error instanceof AgentMuxError && outcome.error.code === 'CTXMUX_run_not_found') {
-    return { kind: 'stale' }
-  }
-  return { kind: 'fail', error: outcome.error }
-}
-
 function safeId(value: string, name: string): string {
   if (!SAFE_ID.test(value)) {
     throw new AgentMuxError(`${name} must contain only letters, numbers, underscore, or dash.`, 'INVALID_SESSION_ID')
@@ -249,6 +217,21 @@ function terminalPromptPhaseOperationIdentity(
       submissionId,
       phase,
       data
+    ]))
+    .digest('base64url')
+}
+
+function terminalInitialPromptReadinessIdentity(
+  session: AgentMuxAgentSession,
+  handshakeOperationId: string
+): string {
+  return createHash('sha256')
+    .update(JSON.stringify([
+      'agentmux-terminal-prompt-readiness-v1',
+      'initial-composer',
+      session.providerId,
+      session.run.runId,
+      handshakeOperationId
     ]))
     .digest('base64url')
 }
@@ -332,7 +315,7 @@ export class AgentMuxClient {
   private readonly agentInputCursors = new Map<string, number>()
   private readonly agentInputTails = new Map<string, Promise<void>>()
   private readonly agentContinuityTails = new Map<string, Promise<void>>()
-  private readonly terminalStopReadinessCancels = new Map<string, () => void>()
+  private readonly terminalPromptReadinessCancels = new Map<string, () => void>()
 
   constructor(options: AgentMuxClientOptions = {}) {
     this.providers = new AgentProviderRegistry(options.providers)
@@ -409,14 +392,6 @@ export class AgentMuxClient {
         const run = runs.find((candidate) => candidate.runId === session.run.runId)
         if (run?.state.type === 'running') {
           await this.ensureTerminalHandshake(session, run)
-          const current = this.registry.get(session.agentSessionId)
-          if (
-            current.terminalStopReceipt &&
-            current.terminalStopReceipt.readyThroughByte === undefined &&
-            current.terminalStopReceipt.consumedBySubmissionId === undefined
-          ) {
-            this.observeTerminalStopReadiness(current, current.terminalStopReceipt)
-          }
         }
       }
       this.assertConnectionEpoch(epoch)
@@ -440,8 +415,8 @@ export class AgentMuxClient {
     this.runPids.clear()
     this.agentInputCursors.clear()
     this.agentInputTails.clear()
-    for (const cancel of this.terminalStopReadinessCancels.values()) cancel()
-    this.terminalStopReadinessCancels.clear()
+    for (const cancel of this.terminalPromptReadinessCancels.values()) cancel()
+    this.terminalPromptReadinessCancels.clear()
   }
 
   async dispose(): Promise<void> {
@@ -680,9 +655,10 @@ export class AgentMuxClient {
       if (!capability.installed) {
         throw new AgentMuxError(`${provider.label} is not installed on this host.`, 'AGENT_NOT_FOUND')
       }
+      const launchPrompt = composeAgentLaunchPrompt(input.prompt, input.injectAgentMuxGuide)
       const plan = provider.buildLaunch({
         workspacePath: input.workspacePath,
-        prompt: composeAgentLaunchPrompt(input.prompt, input.injectAgentMuxGuide),
+        prompt: launchPrompt,
         args: input.args ?? [],
         env: input.env ?? {},
         ...(input.commandOverride === undefined ? {} : { commandOverride: input.commandOverride })
@@ -725,6 +701,24 @@ export class AgentMuxClient {
         outputCursorBytes: 0,
         createdAt: now,
         updatedAt: now
+      }
+      if (
+        !launchPrompt.trim() &&
+        (input.args?.length ?? 0) === 0 &&
+        provider.terminalHandshake &&
+        provider.terminalPromptRender
+      ) {
+        const handshakeOperationId = terminalHandshakeOperationIdentity(
+          session.providerId,
+          session.run.runId,
+          provider.terminalHandshake
+        )
+        session.terminalPromptReadiness = {
+          source: 'initial-composer',
+          id: terminalInitialPromptReadinessIdentity(session, handshakeOperationId),
+          run: { ...session.run },
+          outputCursorBytes: 0
+        }
       }
       let readySession = session
       try {
@@ -963,8 +957,26 @@ export class AgentMuxClient {
       }
       delete next.hookReceipt
       delete next.terminalHandshake
-      delete next.terminalStopReceipt
+      delete next.terminalPromptReadiness
       delete next.terminalPromptSubmission
+      if (
+        !prompt &&
+        (input.args?.length ?? 0) === 0 &&
+        provider.terminalHandshake &&
+        provider.terminalPromptRender
+      ) {
+        const handshakeOperationId = terminalHandshakeOperationIdentity(
+          next.providerId,
+          next.run.runId,
+          provider.terminalHandshake
+        )
+        next.terminalPromptReadiness = {
+          source: 'initial-composer',
+          id: terminalInitialPromptReadinessIdentity(next, handshakeOperationId),
+          run: { ...next.run },
+          outputCursorBytes: 0
+        }
+      }
       let readySession = next
       try {
         persisted = await this.registry.commitLifecycle(reservation, next)
@@ -1492,6 +1504,7 @@ export class AgentMuxClient {
       session.run.runId,
       handshake
     )
+    const initialReadinessId = terminalInitialPromptReadinessIdentity(session, operationId)
     const responseBytes = Buffer.byteLength(handshake.response)
     const assertState = (value: NonNullable<AgentMuxAgentSession['terminalHandshake']>): void => {
       if (
@@ -1503,6 +1516,26 @@ export class AgentMuxClient {
           'Persisted terminal handshake does not match the Provider and exact Run.',
           'AGENT_TERMINAL_HANDSHAKE_STATE_INVALID'
         )
+      }
+    }
+    const observeReadiness = (current: AgentMuxStoredAgentSession): void => {
+      if (!provider.terminalPromptRender) return
+      const readiness = current.terminalPromptReadiness
+      if (!readiness) return
+      if (
+        readiness.source === 'initial-composer' &&
+        readiness.id !== initialReadinessId
+      ) {
+        throw new AgentMuxError(
+          'Initial terminal prompt readiness does not match the Provider and exact Run.',
+          'AGENT_TERMINAL_HANDSHAKE_STATE_INVALID'
+        )
+      }
+      if (
+        readiness.readyThroughByte === undefined &&
+        readiness.consumedBySubmissionId === undefined
+      ) {
+        this.observeTerminalPromptReadiness(current, readiness)
       }
     }
     if (session.terminalHandshake) {
@@ -1521,6 +1554,7 @@ export class AgentMuxClient {
         if (knownRun?.acceptedInputBytes !== null && knownRun?.acceptedInputBytes !== undefined) {
           this.agentInputCursors.set(session.agentSessionId, knownRun.acceptedInputBytes)
         }
+        observeReadiness(session)
         return session
       }
     }
@@ -1568,36 +1602,84 @@ export class AgentMuxClient {
       for (const event of attachment.replay) observe(event.data)
       if (!queryObserved) await query
 
-      const claimed = await this.registry.update(
-        session.agentSessionId,
-        session.run,
-        (current) => {
-          if (current.terminalHandshake) {
-            assertState(current.terminalHandshake)
-            return current
-          }
-          const startByte = attachment.run.acceptedInputBytes
-          if (startByte === null) {
-            throw new AgentMuxError(
-              'CtxMux omitted its accepted Input byte cursor.',
-              'CTXMUX_INPUT_CURSOR_MISSING'
-            )
-          }
-          return {
-            ...current,
-            terminalHandshake: {
-              run: { ...current.run },
-              operationId,
-              inputByteRange: {
-                startByte,
-                endByte: startByte + responseBytes
-              },
-              acknowledged: false
-            },
-            updatedAt: Date.now()
-          }
+      const boundaryRun = await this.kernel.status(session.run.runId)
+      this.assertAgentRun(session, boundaryRun)
+      const startByte = boundaryRun.acceptedInputBytes
+      if (startByte === null) {
+        throw new AgentMuxError(
+          'CtxMux omitted its accepted Input byte cursor.',
+          'CTXMUX_INPUT_CURSOR_MISSING'
+        )
+      }
+
+      const claimHandshake = (current: AgentMuxStoredAgentSession): AgentMuxStoredAgentSession => {
+        if (current.terminalHandshake) {
+          assertState(current.terminalHandshake)
+          return current
         }
-      )
+        const initialReadiness = current.terminalPromptReadiness?.source === 'initial-composer'
+          ? current.terminalPromptReadiness
+          : undefined
+        if (
+          initialReadiness &&
+          (
+            initialReadiness.id !== initialReadinessId ||
+            initialReadiness.readyThroughByte !== undefined ||
+            initialReadiness.consumedBySubmissionId !== undefined
+          )
+        ) {
+          throw new AgentMuxError(
+            'Initial terminal prompt readiness is invalid before handshake acknowledgement.',
+            'AGENT_TERMINAL_HANDSHAKE_STATE_INVALID'
+          )
+        }
+        return {
+          ...current,
+          terminalHandshake: {
+            run: { ...current.run },
+            operationId,
+            inputByteRange: {
+              startByte,
+              endByte: startByte + responseBytes
+            },
+            acknowledged: false
+          },
+          ...(initialReadiness
+            ? {
+                terminalPromptReadiness: {
+                  ...initialReadiness,
+                  outputCursorBytes: boundaryRun.latestOutputBytes
+                }
+              }
+            : {}),
+          updatedAt: Date.now()
+        }
+      }
+      let claimed: AgentMuxStoredAgentSession
+      try {
+        claimed = await this.registry.update(
+          session.agentSessionId,
+          session.run,
+          claimHandshake
+        )
+      } catch (error) {
+        if (!(error instanceof AgentMuxError) || error.code !== 'STALE_AGENT_SESSION') throw error
+        await this.registry.load(session.hostId)
+        const canonical = this.requireAgentSession(session.agentSessionId)
+        if (!sameRun(canonical.run, session.run)) {
+          throw new AgentMuxError(
+            'Agent Session changed while adopting its terminal handshake.',
+            'STALE_AGENT_SESSION'
+          )
+        }
+        claimed = canonical.terminalHandshake
+          ? canonical
+          : await this.registry.update(
+              session.agentSessionId,
+              session.run,
+              claimHandshake
+            )
+      }
       const state = claimed.terminalHandshake
       if (!state) {
         throw new AgentMuxError(
@@ -1607,7 +1689,9 @@ export class AgentMuxClient {
       }
       assertState(state)
       if (state.acknowledged) {
-        const acceptedInputBytes = attachment.run.acceptedInputBytes
+        const currentRun = await this.kernel.status(session.run.runId)
+        this.assertAgentRun(session, currentRun)
+        const acceptedInputBytes = currentRun.acceptedInputBytes
         if (acceptedInputBytes === null || acceptedInputBytes < state.inputByteRange.endByte) {
           throw new AgentMuxError(
             'CtxMux Input cursor precedes the persisted terminal handshake receipt.',
@@ -1615,6 +1699,7 @@ export class AgentMuxClient {
           )
         }
         this.agentInputCursors.set(session.agentSessionId, acceptedInputBytes)
+        observeReadiness(claimed)
         return claimed
       }
 
@@ -1635,28 +1720,53 @@ export class AgentMuxClient {
           'AGENT_TERMINAL_HANDSHAKE_RECEIPT_MISMATCH'
         )
       }
-      const ready = await this.registry.update(
-        session.agentSessionId,
-        session.run,
-        (current) => {
-          if (!current.terminalHandshake) {
-            throw new AgentMuxError(
-              'Terminal handshake claim disappeared before acknowledgement.',
-              'AGENT_TERMINAL_HANDSHAKE_STATE_INVALID'
-            )
-          }
-          assertState(current.terminalHandshake)
-          return {
-            ...current,
-            terminalHandshake: {
-              ...current.terminalHandshake,
-              acknowledged: true
-            },
-            updatedAt: Date.now()
-          }
+      const acknowledgeHandshake = (
+        current: AgentMuxStoredAgentSession
+      ): AgentMuxStoredAgentSession => {
+        if (!current.terminalHandshake) {
+          throw new AgentMuxError(
+            'Terminal handshake claim disappeared before acknowledgement.',
+            'AGENT_TERMINAL_HANDSHAKE_STATE_INVALID'
+          )
         }
-      )
+        assertState(current.terminalHandshake)
+        if (current.terminalHandshake.acknowledged) return current
+        return {
+          ...current,
+          terminalHandshake: {
+            ...current.terminalHandshake,
+            acknowledged: true
+          },
+          updatedAt: Date.now()
+        }
+      }
+      let ready: AgentMuxStoredAgentSession
+      try {
+        ready = await this.registry.update(
+          session.agentSessionId,
+          session.run,
+          acknowledgeHandshake
+        )
+      } catch (error) {
+        if (!(error instanceof AgentMuxError) || error.code !== 'STALE_AGENT_SESSION') throw error
+        await this.registry.load(session.hostId)
+        const canonical = this.requireAgentSession(session.agentSessionId)
+        if (!sameRun(canonical.run, session.run)) {
+          throw new AgentMuxError(
+            'Agent Session changed while adopting its terminal handshake acknowledgement.',
+            'STALE_AGENT_SESSION'
+          )
+        }
+        ready = canonical.terminalHandshake?.acknowledged
+          ? canonical
+          : await this.registry.update(
+              session.agentSessionId,
+              session.run,
+              acknowledgeHandshake
+            )
+      }
       this.agentInputCursors.set(session.agentSessionId, accepted.run.acceptedInputBytes)
+      observeReadiness(ready)
       return ready
     } finally {
       clearTimeout(timer)
@@ -1726,7 +1836,7 @@ export class AgentMuxClient {
         value.run.runId !== session.run.runId ||
         value.submissionId !== submissionId ||
         value.promptDigest !== promptDigest ||
-        value.readyThroughByte < value.stopOutputCursorBytes ||
+        value.readyThroughByte < value.readinessOutputCursorBytes ||
         value.outputCursorBytes < value.readyThroughByte ||
         value.payload.operationId !== payloadOperationId ||
         value.submit.operationId !== submitOperationId ||
@@ -1744,107 +1854,111 @@ export class AgentMuxClient {
     if (expectedByte === null) {
       throw new AgentMuxError('CtxMux omitted its accepted Input byte cursor.', 'CTXMUX_INPUT_CURSOR_MISSING')
     }
-    let current!: AgentMuxStoredAgentSession
-    const deadline = Date.now() + 4000
-    while (true) {
-      try {
-        current = await this.registry.update(
-          session.agentSessionId,
-          session.run,
-          (stored) => {
-            const existing = stored.terminalPromptSubmission
-            if (existing?.submissionId === submissionId) {
-              assertSubmission(existing)
-              return stored
-            }
-            if (existing && !existing.submit.acknowledged) {
-              throw new AgentMuxError(
-                'Another Agent prompt operation is incomplete for this Run.',
-                'AGENT_PROMPT_SUBMISSION_BUSY'
-              )
-            }
-            const stopReceipt = stored.terminalStopReceipt
-            if (!stopReceipt || stopReceipt.readyThroughByte === undefined) {
-              throw new AgentMuxError(
-                'Agent prompt requires a ready native Stop receipt for this exact Run.',
-                'AGENT_PROMPT_NOT_READY'
-              )
-            }
-            if (stopReceipt.consumedBySubmissionId !== undefined) {
-              throw new AgentMuxError(
-                'The current native Stop receipt was already consumed by another prompt.',
-                'AGENT_PROMPT_STOP_RECEIPT_CONSUMED'
-              )
-            }
-            const outputCursorBytes = Math.max(run.latestOutputBytes, stopReceipt.readyThroughByte)
-            return {
-              ...stored,
-              terminalStopReceipt: {
-                ...stopReceipt,
-                consumedBySubmissionId: submissionId
-              },
-              terminalPromptSubmission: {
-                run: { ...stored.run },
-                submissionId,
-                promptDigest,
-                stopReceiptId: stopReceipt.id,
-                stopOutputCursorBytes: stopReceipt.outputCursorBytes,
-                readyThroughByte: stopReceipt.readyThroughByte,
-                outputCursorBytes,
-                payload: {
-                  operationId: payloadOperationId,
-                  inputByteRange: {
-                    startByte: expectedByte,
-                    endByte: expectedByte + payloadBytes
-                  },
-                  acknowledged: false
-                },
-                submit: {
-                  operationId: submitOperationId,
-                  inputByteRange: {
-                    startByte: expectedByte + payloadBytes,
-                    endByte: expectedByte + payloadBytes + submitBytes
-                  },
-                  acknowledged: false
-                }
-              },
-              updatedAt: Date.now()
-            }
-          }
+    const claimPromptReadiness = (
+      stored: AgentMuxStoredAgentSession
+    ): AgentMuxStoredAgentSession => {
+      const existing = stored.terminalPromptSubmission
+      if (existing?.submissionId === submissionId) {
+        assertSubmission(existing)
+        return stored
+      }
+      if (existing && !existing.submit.acknowledged) {
+        throw new AgentMuxError(
+          'Another Agent prompt operation is incomplete for this Run.',
+          'AGENT_PROMPT_SUBMISSION_BUSY'
         )
-        break
-      } catch (error) {
-        if (
-          error instanceof AgentMuxError &&
-          error.code === 'AGENT_PROMPT_NOT_READY' &&
-          Date.now() < deadline
-        ) {
-          const currentStored = this.registry.get(session.agentSessionId)
-          if (!sameRun(currentStored.run, session.run)) {
-            throw new AgentMuxError('Agent Run changed during prompt readiness wait.', 'STALE_AGENT_SESSION')
+      }
+      const readiness = stored.terminalPromptReadiness
+      if (!readiness || readiness.readyThroughByte === undefined) {
+        throw new AgentMuxError(
+          'Agent prompt requires a ready composer epoch for this exact Run.',
+          'AGENT_PROMPT_NOT_READY'
+        )
+      }
+      if (readiness.consumedBySubmissionId !== undefined) {
+        throw new AgentMuxError(
+          'The current composer readiness epoch was already consumed by another prompt.',
+          'AGENT_PROMPT_READINESS_CONSUMED'
+        )
+      }
+      const outputCursorBytes = Math.max(run.latestOutputBytes, readiness.readyThroughByte)
+      return {
+        ...stored,
+        terminalPromptReadiness: {
+          ...readiness,
+          consumedBySubmissionId: submissionId
+        },
+        terminalPromptSubmission: {
+          run: { ...stored.run },
+          submissionId,
+          promptDigest,
+          readinessSource: readiness.source,
+          readinessId: readiness.id,
+          readinessOutputCursorBytes: readiness.outputCursorBytes,
+          readyThroughByte: readiness.readyThroughByte,
+          outputCursorBytes,
+          payload: {
+            operationId: payloadOperationId,
+            inputByteRange: {
+              startByte: expectedByte,
+              endByte: expectedByte + payloadBytes
+            },
+            acknowledged: false
+          },
+          submit: {
+            operationId: submitOperationId,
+            inputByteRange: {
+              startByte: expectedByte + payloadBytes,
+              endByte: expectedByte + payloadBytes + submitBytes
+            },
+            acknowledged: false
           }
-          let statusOutcome: PromptReadinessStatusOutcome
-          try {
-            statusOutcome = { ok: true, run: await this.kernel.status(session.run.runId) }
-          } catch (statusError) {
-            statusOutcome = { ok: false, error: statusError }
-          }
-          const verdict = classifyPromptReadinessStatus(statusOutcome)
-          if (verdict.kind === 'stale') {
-            throw new AgentMuxError('Agent Run exited before prompt became ready.', 'STALE_AGENT_SESSION')
-          }
-          if (verdict.kind === 'fail') {
-            throw verdict.error
-          }
-          await new Promise((resolve) => setTimeout(resolve, 50))
-          continue
-        }
-        if (error instanceof AgentMuxError && error.code === 'STALE_AGENT_SESSION') {
+        },
+        updatedAt: Date.now()
+      }
+    }
+    const claim = async (): Promise<AgentMuxStoredAgentSession> => (
+      await this.registry.update(
+        session.agentSessionId,
+        session.run,
+        claimPromptReadiness
+      )
+    )
+    const promptReadinessMayBeStale = (error: AgentMuxError): boolean => (
+      error.code === 'AGENT_PROMPT_NOT_READY' ||
+      error.code === 'AGENT_PROMPT_READINESS_CONSUMED' ||
+      error.code === 'AGENT_PROMPT_SUBMISSION_BUSY'
+    )
+    let current: AgentMuxStoredAgentSession
+    try {
+      current = await claim()
+    } catch (error) {
+      if (error instanceof AgentMuxError && promptReadinessMayBeStale(error)) {
+        await this.registry.load(session.hostId)
+        const canonical = this.requireAgentSession(session.agentSessionId)
+        if (!sameRun(canonical.run, session.run)) {
           throw new AgentMuxError(
-            'Native Stop receipt changed or was consumed by another Client.',
-            'AGENT_PROMPT_STOP_RECEIPT_CONFLICT'
+            'Agent Session changed while refreshing prompt readiness.',
+            'STALE_AGENT_SESSION'
           )
         }
+        try {
+          current = await claim()
+        } catch (refreshError) {
+          if (refreshError instanceof AgentMuxError && refreshError.code === 'STALE_AGENT_SESSION') {
+            throw new AgentMuxError(
+              'Prompt readiness changed or was consumed by another Client.',
+              'AGENT_PROMPT_READINESS_CONFLICT'
+            )
+          }
+          throw refreshError
+        }
+      } else if (error instanceof AgentMuxError && error.code === 'STALE_AGENT_SESSION') {
+        throw new AgentMuxError(
+          'Prompt readiness changed or was consumed by another Client.',
+          'AGENT_PROMPT_READINESS_CONFLICT'
+        )
+      } else {
         throw error
       }
     }
@@ -1899,28 +2013,59 @@ export class AgentMuxClient {
         )
       }
       acceptedInputBytes = accepted.run.acceptedInputBytes
-      current = await this.registry.update(
-        session.agentSessionId,
-        session.run,
-        (stored) => {
-          const state = stored.terminalPromptSubmission
-          if (!state) {
-            throw new AgentMuxError(
-              'Agent prompt submission claim disappeared.',
-              'AGENT_PROMPT_SUBMISSION_STATE_INVALID'
-            )
-          }
-          assertSubmission(state)
-          return {
-            ...stored,
-            terminalPromptSubmission: {
-              ...state,
-              [phaseName]: { ...state[phaseName], acknowledged: true }
-            },
-            updatedAt: Date.now()
-          }
+      const acknowledgePhase = (
+        stored: AgentMuxStoredAgentSession
+      ): AgentMuxStoredAgentSession => {
+        const state = stored.terminalPromptSubmission
+        if (!state) {
+          throw new AgentMuxError(
+            'Agent prompt submission claim disappeared.',
+            'AGENT_PROMPT_SUBMISSION_STATE_INVALID'
+          )
         }
-      )
+        assertSubmission(state)
+        if (state[phaseName].acknowledged) return stored
+        return {
+          ...stored,
+          terminalPromptSubmission: {
+            ...state,
+            [phaseName]: { ...state[phaseName], acknowledged: true }
+          },
+          updatedAt: Date.now()
+        }
+      }
+      try {
+        current = await this.registry.update(
+          session.agentSessionId,
+          session.run,
+          acknowledgePhase
+        )
+      } catch (error) {
+        if (!(error instanceof AgentMuxError) || error.code !== 'STALE_AGENT_SESSION') throw error
+        await this.registry.load(session.hostId)
+        const canonical = this.requireAgentSession(session.agentSessionId)
+        if (!sameRun(canonical.run, session.run)) {
+          throw new AgentMuxError(
+            'Agent Session changed while adopting its prompt phase receipt.',
+            'STALE_AGENT_SESSION'
+          )
+        }
+        const canonicalSubmission = canonical.terminalPromptSubmission
+        if (!canonicalSubmission) {
+          throw new AgentMuxError(
+            'Agent prompt submission claim disappeared.',
+            'AGENT_PROMPT_SUBMISSION_STATE_INVALID'
+          )
+        }
+        assertSubmission(canonicalSubmission)
+        current = canonicalSubmission[phaseName].acknowledged
+          ? canonical
+          : await this.registry.update(
+              session.agentSessionId,
+              session.run,
+              acknowledgePhase
+            )
+      }
       submission = current.terminalPromptSubmission
       this.agentInputCursors.set(session.agentSessionId, acceptedInputBytes)
     }
@@ -1936,6 +2081,14 @@ export class AgentMuxClient {
         'Agent prompt submission claim disappeared.',
         'AGENT_PROMPT_SUBMISSION_STATE_INVALID'
       )
+    }
+    if (
+      !submission.submit.acknowledged &&
+      acceptedInputBytes !== null &&
+      acceptedInputBytes >= submission.submit.inputByteRange.endByte
+    ) {
+      await applyPhase('submit', plan.submit)
+      return
     }
     await this.waitForTerminalPromptRender(session, submission, plan.payload)
     await applyPhase('submit', plan.submit)
@@ -1976,6 +2129,7 @@ export class AgentMuxClient {
       timeoutMessage: string
       terminalMessage: string
       signal?: AbortSignal
+      requiredFrame?: { start: string; end: string }
     }
   ): Promise<number> {
     let observation: Awaited<ReturnType<CtxmuxRunAdapter['observeOutput']>> | null = null
@@ -1984,6 +2138,9 @@ export class AgentMuxClient {
     let settled = false
     let timer: ReturnType<typeof setTimeout> | null = null
     let tail = Promise.resolve()
+    let frameState: 'seeking-start' | 'seeking-end' = 'seeking-start'
+    let frameTail = ''
+    let requiredFrameObserved = options.requiredFrame === undefined
     const pending: CtxmuxAdapterDataEvent[] = []
     let resolveState!: (throughByte: number) => void
     let rejectState!: (error: Error) => void
@@ -2002,13 +2159,38 @@ export class AgentMuxClient {
       const crossedBoundary = requireOutputAfterBoundary
         ? screen.throughByte > outputBoundaryByte
         : screen.throughByte >= outputBoundaryByte
-      if (crossedBoundary && predicate(screen)) {
+      if (crossedBoundary && requiredFrameObserved && predicate(screen)) {
         settled = true
         resolveState(screen.throughByte)
       }
     }
+    const observeRequiredFrame = (event: CtxmuxAdapterDataEvent): void => {
+      const requiredFrame = options.requiredFrame
+      if (!requiredFrame || requiredFrameObserved || event.endByte <= outputBoundaryByte) return
+      const skipBytes = Math.max(0, outputBoundaryByte - event.startByte)
+      let candidate = frameTail + Buffer.from(event.dataBytes.subarray(skipBytes)).toString('utf8')
+      while (candidate) {
+        const marker = frameState === 'seeking-start' ? requiredFrame.start : requiredFrame.end
+        const markerIndex = candidate.indexOf(marker)
+        if (markerIndex < 0) {
+          frameTail = candidate.slice(-Math.max(0, marker.length - 1))
+          return
+        }
+        candidate = candidate.slice(markerIndex + marker.length)
+        if (frameState === 'seeking-start') {
+          frameState = 'seeking-end'
+          frameTail = ''
+          continue
+        }
+        requiredFrameObserved = true
+        frameTail = ''
+        return
+      }
+      frameTail = ''
+    }
     const apply = async (event: CtxmuxAdapterDataEvent, inspectAfterWrite: boolean): Promise<void> => {
       if (settled || !screen) return
+      observeRequiredFrame(event)
       await screen.write(event)
       if (inspectAfterWrite) inspect()
     }
@@ -2147,6 +2329,12 @@ export class AgentMuxClient {
         throw new AgentMuxError('Agent Session changed before Input was accepted.', 'STALE_AGENT_SESSION')
       }
       const run = await this.requireCurrentAgentRun(session)
+      if (run.state.type !== 'running') {
+        throw new AgentMuxError(
+          'Agent Run exited before Input could be accepted.',
+          'STALE_AGENT_SESSION'
+        )
+      }
       result = await operation(session, run)
     })
     const tail = queued.then(() => {}, () => {})
@@ -2187,35 +2375,64 @@ export class AgentMuxClient {
       observedAt: normalized.status.observedAt,
       ...(stopRun ? { outputCursorBytes: stopRun.latestOutputBytes } : {})
     }
-    const next = await this.registry.update(
-      session.agentSessionId,
-      session.run,
-      (current) => {
-        signal.throwIfAborted()
-        const existingStop = current.terminalStopReceipt?.id === receipt.id
-          ? current.terminalStopReceipt
-          : undefined
-        const persistedReceipt = existingStop
-          ? { ...receipt, outputCursorBytes: existingStop.outputCursorBytes }
-          : receipt
-        return {
-          ...current,
-          updatedAt: normalized.status.observedAt,
-          hookReceipt: persistedReceipt,
-          ...(stopRun
-            ? {
-                terminalStopReceipt: existingStop ?? {
-                  id: receipt.id,
-                  run: { ...current.run },
-                  outputCursorBytes: stopRun.latestOutputBytes
-                }
+    const persistReceipt = (
+      current: AgentMuxStoredAgentSession
+    ): AgentMuxStoredAgentSession => {
+      signal.throwIfAborted()
+      const existingReadiness = (
+        current.terminalPromptReadiness?.source === 'native-stop' &&
+        current.terminalPromptReadiness.id === receipt.id
+      )
+        ? current.terminalPromptReadiness
+        : undefined
+      const persistedReceipt = existingReadiness
+        ? { ...receipt, outputCursorBytes: existingReadiness.outputCursorBytes }
+        : receipt
+      return {
+        ...current,
+        updatedAt: normalized.status.observedAt,
+        hookReceipt: persistedReceipt,
+        ...(stopRun
+          ? {
+              terminalPromptReadiness: existingReadiness ?? {
+                source: 'native-stop' as const,
+                id: receipt.id,
+                run: { ...current.run },
+                outputCursorBytes: stopRun.latestOutputBytes
               }
-            : {}),
-          ...(normalized.nativeHandle ? { nativeHandle: normalized.nativeHandle } : {})
-        }
-      },
-      signal
-    )
+            }
+          : {}),
+        ...(normalized.nativeHandle ? { nativeHandle: normalized.nativeHandle } : {})
+      }
+    }
+    let next: AgentMuxStoredAgentSession
+    try {
+      next = await this.registry.update(
+        session.agentSessionId,
+        session.run,
+        persistReceipt,
+        signal
+      )
+    } catch (error) {
+      if (!(error instanceof AgentMuxError) || error.code !== 'STALE_AGENT_SESSION') throw error
+      await this.registry.load(session.hostId)
+      signal.throwIfAborted()
+      const canonical = this.requireAgentSession(session.agentSessionId)
+      if (!sameRun(canonical.run, session.run)) {
+        throw new AgentMuxError(
+          'Agent Session changed while adopting its native Hook receipt.',
+          'STALE_AGENT_SESSION'
+        )
+      }
+      next = canonical.hookReceipt?.id === receipt.id
+        ? canonical
+        : await this.registry.update(
+            session.agentSessionId,
+            session.run,
+            persistReceipt,
+            signal
+          )
+    }
     signal.throwIfAborted()
     const persistedReceipt = next.hookReceipt
     if (!persistedReceipt) {
@@ -2234,56 +2451,66 @@ export class AgentMuxClient {
     this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
     if (
       normalized.eventName === 'Stop' &&
-      next.terminalStopReceipt &&
-      next.terminalStopReceipt.readyThroughByte === undefined &&
-      next.terminalStopReceipt.consumedBySubmissionId === undefined
+      next.terminalPromptReadiness &&
+      next.terminalPromptReadiness.readyThroughByte === undefined &&
+      next.terminalPromptReadiness.consumedBySubmissionId === undefined
     ) {
-      this.observeTerminalStopReadiness(next, next.terminalStopReceipt)
+      this.observeTerminalPromptReadiness(next, next.terminalPromptReadiness)
     }
   }
 
-  private observeTerminalStopReadiness(
+  private observeTerminalPromptReadiness(
     session: AgentMuxAgentSession,
-    stopReceipt: NonNullable<AgentMuxAgentSession['terminalStopReceipt']>
+    readiness: AgentTerminalPromptReadinessState
   ): void {
     const matcher = this.providers.get(session.providerId).terminalPromptRender
     if (!matcher) return
-    this.terminalStopReadinessCancels.get(session.agentSessionId)?.()
+    this.terminalPromptReadinessCancels.get(session.agentSessionId)?.()
     const controller = new AbortController()
     const cancel = (): void => {
-      if (this.terminalStopReadinessCancels.get(session.agentSessionId) === cancel) {
-        this.terminalStopReadinessCancels.delete(session.agentSessionId)
+      if (this.terminalPromptReadinessCancels.get(session.agentSessionId) === cancel) {
+        this.terminalPromptReadinessCancels.delete(session.agentSessionId)
       }
       controller.abort()
     }
-    this.terminalStopReadinessCancels.set(session.agentSessionId, cancel)
+    this.terminalPromptReadinessCancels.set(session.agentSessionId, cancel)
     const persistReady = async (readyThroughByte: number): Promise<void> => {
       try {
-        const next = await this.registry.update(
-          session.agentSessionId,
-          session.run,
-          (current) => {
-            const currentStop = current.terminalStopReceipt
-            if (!currentStop || currentStop.id !== stopReceipt.id) {
-              throw new AgentMuxError(
-                'Native Stop receipt changed before readiness was persisted.',
-                'AGENT_PROMPT_STOP_RECEIPT_CONFLICT'
-              )
-            }
-            if (currentStop.readyThroughByte !== undefined) return current
-            if (currentStop.consumedBySubmissionId !== undefined) {
-              throw new AgentMuxError(
-                'Native Stop receipt was consumed before readiness was persisted.',
-                'AGENT_PROMPT_STOP_RECEIPT_CONFLICT'
-              )
-            }
-            return {
-              ...current,
-              terminalStopReceipt: { ...currentStop, readyThroughByte },
-              updatedAt: Date.now()
-            }
+        const markReady = (current: AgentMuxStoredAgentSession): AgentMuxStoredAgentSession => {
+          const currentReadiness = current.terminalPromptReadiness
+          if (!currentReadiness || currentReadiness.id !== readiness.id) {
+            throw new AgentMuxError(
+              'Prompt readiness epoch changed before readiness was persisted.',
+              'AGENT_PROMPT_READINESS_CONFLICT'
+            )
           }
-        )
+          if (currentReadiness.readyThroughByte !== undefined) return current
+          if (currentReadiness.consumedBySubmissionId !== undefined) {
+            throw new AgentMuxError(
+              'Prompt readiness epoch was consumed before readiness was persisted.',
+              'AGENT_PROMPT_READINESS_CONFLICT'
+            )
+          }
+          return {
+            ...current,
+            terminalPromptReadiness: { ...currentReadiness, readyThroughByte },
+            updatedAt: Date.now()
+          }
+        }
+        let next: AgentMuxStoredAgentSession
+        try {
+          next = await this.registry.update(session.agentSessionId, session.run, markReady)
+        } catch (error) {
+          if (!(error instanceof AgentMuxError) || error.code !== 'STALE_AGENT_SESSION') throw error
+          await this.registry.load(session.hostId)
+          const canonical = this.requireAgentSession(session.agentSessionId)
+          if (!sameRun(canonical.run, session.run)) return
+          const canonicalReadiness = canonical.terminalPromptReadiness
+          if (!canonicalReadiness || canonicalReadiness.id !== readiness.id) return
+          next = canonicalReadiness.readyThroughByte !== undefined
+            ? canonical
+            : await this.registry.update(session.agentSessionId, session.run, markReady)
+        }
         this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
       } catch (error) {
         this.publisher.publish({
@@ -2298,25 +2525,28 @@ export class AgentMuxClient {
           }
         })
       } finally {
-        if (this.terminalStopReadinessCancels.get(session.agentSessionId) === cancel) {
-          this.terminalStopReadinessCancels.delete(session.agentSessionId)
+        if (this.terminalPromptReadinessCancels.get(session.agentSessionId) === cancel) {
+          this.terminalPromptReadinessCancels.delete(session.agentSessionId)
         }
       }
     }
     void this.waitForTerminalScreenState(
       session,
-      stopReceipt.outputCursorBytes,
-      false,
+      readiness.outputCursorBytes,
+      readiness.source === 'initial-composer',
       (screen) => screen.composerText(matcher.activeComposer) === '',
       {
         timeoutMessage: 'Timed out waiting for an empty Agent composer.',
-        terminalMessage: 'Agent Run exited before its Stop receipt became ready.',
-        signal: controller.signal
+        terminalMessage: 'Agent Run exited before its composer became ready.',
+        signal: controller.signal,
+        ...(readiness.source === 'initial-composer'
+          ? { requiredFrame: { start: matcher.frameStart, end: matcher.frameEnd } }
+          : {})
       }
     ).then(persistReady).catch((error) => {
       if (error instanceof AgentMuxError && error.code === 'AGENT_PROMPT_READINESS_CANCELLED') return
-      if (this.terminalStopReadinessCancels.get(session.agentSessionId) === cancel) {
-        this.terminalStopReadinessCancels.delete(session.agentSessionId)
+      if (this.terminalPromptReadinessCancels.get(session.agentSessionId) === cancel) {
+        this.terminalPromptReadinessCancels.delete(session.agentSessionId)
       }
       this.publisher.publish({
         type: 'agent-error',

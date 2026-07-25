@@ -5,6 +5,41 @@ import {
 
 const fakeCodex = process.env.AGENTMUX_FAKE_CODEX
 if (!fakeCodex) throw new Error('AGENTMUX_FAKE_CODEX is required')
+const crashPoint = process.env.AGENTMUX_PROMPT_CRASH_POINT ?? 'after-store-ack'
+if (
+  crashPoint !== 'before-store-ack' &&
+  crashPoint !== 'after-store-ack' &&
+  crashPoint !== 'submit-before-store-ack'
+) {
+  throw new Error(`Unknown prompt crash point: ${crashPoint}`)
+}
+const beforePayloadStoreAck = crashPoint === 'before-store-ack'
+const beforeSubmitStoreAck = crashPoint === 'submit-before-store-ack'
+const agentSessionId = beforePayloadStoreAck
+  ? 'codex-prompt-before-payload-ack-crash'
+  : beforeSubmitStoreAck
+    ? 'codex-prompt-before-submit-ack-crash'
+    : 'codex-prompt-crash'
+const submissionId = `packed-${agentSessionId}-operation`
+
+const crash = async (next, submission, phase) => {
+  const type = phase === 'submit'
+    ? 'prompt-submit-applied-before-store-ack'
+    : beforePayloadStoreAck
+      ? 'prompt-payload-applied-before-store-ack'
+      : 'prompt-payload-acknowledged-before-submit'
+  const exitCode = phase === 'submit' ? 93 : beforePayloadStoreAck ? 92 : 91
+  await new Promise(() => {
+    process.stdout.write(`${JSON.stringify({
+      type,
+      agentSessionId: next.agentSessionId,
+      runId: next.run.runId,
+      operationId: submission.submissionId,
+      payloadRange: submission.payload.inputByteRange,
+      submitRange: submission.submit.inputByteRange
+    })}\n`, () => process.exit(exitCode))
+  })
+}
 
 const base = new AgentMuxFileAgentSessionStore()
 let crashArmed = false
@@ -13,23 +48,29 @@ const store = {
   async loadRetiredRuns() { return await base.loadRetiredRuns() },
   async loadRetiredAgentSessions() { return await base.loadRetiredAgentSessions() },
   async compareAndSwap(expected, next) {
-    await base.compareAndSwap(expected, next)
     const submission = next?.terminalPromptSubmission
-    if (
+    const payloadAcknowledgement = (
       crashArmed &&
-      submission?.submissionId === 'packed-prompt-crash-operation' &&
+      submission?.submissionId === submissionId &&
+      !expected?.terminalPromptSubmission?.payload.acknowledged &&
       submission.payload.acknowledged &&
       !submission.submit.acknowledged
-    ) {
-      await new Promise(() => {
-        process.stdout.write(`${JSON.stringify({
-          type: 'prompt-payload-acknowledged-before-submit',
-          agentSessionId: next.agentSessionId,
-          runId: next.run.runId,
-          payloadRange: submission.payload.inputByteRange,
-          submitRange: submission.submit.inputByteRange
-        })}\n`, () => process.exit(91))
-      })
+    )
+    const submitAcknowledgement = (
+      crashArmed &&
+      submission?.submissionId === submissionId &&
+      !expected?.terminalPromptSubmission?.submit.acknowledged &&
+      submission.submit.acknowledged
+    )
+    if (payloadAcknowledgement && beforePayloadStoreAck) {
+      await crash(next, submission, 'payload')
+    }
+    if (submitAcknowledgement && beforeSubmitStoreAck) {
+      await crash(next, submission, 'submit')
+    }
+    await base.compareAndSwap(expected, next)
+    if (payloadAcknowledgement && !beforePayloadStoreAck && !beforeSubmitStoreAck) {
+      await crash(next, submission, 'payload')
     }
   },
   async reserveLifecycle(value) { await base.reserveLifecycle(value) },
@@ -45,31 +86,46 @@ const store = {
 
 const client = await connectLocalAgentMux({ store })
 const session = await client.createAgent({
-  agentSessionId: 'codex-prompt-crash',
-  createOperationId: 'packed-prompt-crash-create',
+  agentSessionId,
+  createOperationId: `packed-${agentSessionId}-create`,
   providerId: 'codex',
   executorId: 'codex',
   workspacePath: process.cwd(),
-  commandOverride: fakeCodex
+  commandOverride: fakeCodex,
+  env: { AGENTMUX_FAKE_READY_MODE: 'stop-after-payload' }
 })
-if (client.agentSession(session.agentSessionId).terminalStopReceipt?.readyThroughByte === undefined) {
+for (let attempt = 0; attempt < 400; attempt += 1) {
+  const replay = await client.readRunReplay(session.run, 0)
+  if (replay.replay.some((event) => event.data.includes('codex-controlled-ready-pending'))) break
+  if (attempt === 399) throw new Error('Timed out waiting for controlled initial composer')
+  await new Promise((resolve) => setTimeout(resolve, 20))
+}
+await client.writeAgent(session.agentSessionId, '\u001d')
+if (client.agentSession(session.agentSessionId).terminalPromptReadiness?.readyThroughByte === undefined) {
   await new Promise((resolve) => {
     const unsubscribe = client.onEvent((event) => {
       if (
         event.type === 'agent-session' &&
         event.session.agentSessionId === session.agentSessionId &&
-        event.session.terminalStopReceipt?.readyThroughByte !== undefined
+        event.session.terminalPromptReadiness?.readyThroughByte !== undefined
       ) {
         unsubscribe()
         resolve()
       }
     })
+    if (
+      client.agentSession(session.agentSessionId)
+        .terminalPromptReadiness?.readyThroughByte !== undefined
+    ) {
+      unsubscribe()
+      resolve()
+    }
   })
 }
 crashArmed = true
 await client.submitAgentPrompt({
   agentSessionId: session.agentSessionId,
-  operationId: 'packed-prompt-crash-operation',
+  operationId: submissionId,
   prompt: 'crash-between-phases'
 })
 throw new Error('Prompt submission unexpectedly survived the crash checkpoint')

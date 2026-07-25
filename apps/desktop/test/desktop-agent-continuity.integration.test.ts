@@ -261,6 +261,19 @@ describe('Desktop and Renderer Agent exact run continuity integration', () => {
     const initialPid = runs1[0].pid
     expect(initialPid).toBeTypeOf('number')
     activePid = initialPid
+    await waitFor('controlled initial composer boundary', async () => {
+      const replay = await directClient1.readRunReplay({ runId: initialRunId }, 0)
+      return replay.replay.some((event) => (
+        event.data.includes('codex-controlled-ready-pending')
+      ))
+    })
+    await directClient1.writeAgent(initialSessionId, '\u001d')
+    await waitFor('controlled initial composer frame', async () => {
+      const replay = await directClient1.readRunReplay({ runId: initialRunId }, 0)
+      return replay.replay.some((event) => (
+        event.data.includes('codex-composer-ready-frame')
+      ))
+    })
     await directClient1.dispose()
 
     // Wait for initial prompt ready output from fake codex
@@ -380,6 +393,22 @@ describe('Desktop and Renderer Agent exact run continuity integration', () => {
         .map((msg) => (msg.args[0] as RuntimeEvent & { type: 'core'; event: { type: 'terminal-output'; data: string } }).event.data)
         .join('')
       return accumulatedOutput.includes(expectedReloadSubmitMarker)
+    })
+    await runtime1.write(reloadSession!.control, '\u001d')
+    await waitFor('next controlled composer before Desktop restart', () => {
+      const accumulatedOutput = webContents1.sentEvents
+        .filter((msg) => {
+          if (msg.channel !== 'agentmux:session-event') return false
+          const event = msg.args[0] as RuntimeEvent
+          return (
+            event.type === 'core' &&
+            event.event.type === 'terminal-output' &&
+            event.event.run.runId === initialRunId
+          )
+        })
+        .map((msg) => (msg.args[0] as RuntimeEvent & { type: 'core'; event: { type: 'terminal-output'; data: string } }).event.data)
+        .join('')
+      return accumulatedOutput.includes('codex-composer-ready-frame')
     })
 
     // ---------------------------------------------------------------------------------------------
