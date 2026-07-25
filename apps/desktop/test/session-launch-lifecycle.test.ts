@@ -122,6 +122,54 @@ afterEach(() => {
 })
 
 describe('Session and Launcher lifecycle ownership', () => {
+  it('reattaches a running Agent Session and restores its View without recovery overlay across app restart', async () => {
+    const running = agentSession('running-agent')
+    const tab = createWorkbenchTab('running-view', {
+      regionId: 'running-region',
+      kind: 'agent',
+      phase: 'attached',
+      workspaceId: 'workspace',
+      sessionId: running.id
+    })
+    useAppStore.setState({
+      loading: true,
+      restoredWorkbench: {
+        tabs: { [tab.id]: tab },
+        layouts: { workspace: createWorkspaceLayout('pane', [tab.id]) }
+      }
+    })
+    vi.spyOn(api.config, 'get').mockResolvedValue(config)
+    vi.spyOn(api.providers, 'list').mockResolvedValue([])
+    const snapshot = vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({
+      sessions: [running],
+      timelines: { [running.id]: { agentSessionId: running.id, revision: 0, items: [] } },
+      recoveryCandidates: []
+    })
+    const recover = vi.spyOn(api.sessions, 'recover')
+
+    const dispose = await useAppStore.getState().initialize()
+
+    expect(recover).not.toHaveBeenCalled()
+    expect(snapshot).toHaveBeenCalledOnce()
+    const storedSession = useAppStore.getState().sessions.find((item) => item.id === running.id)
+    expect(storedSession).toMatchObject({
+      id: running.id,
+      processState: 'running',
+      status: { state: 'running' },
+      control: {
+        kind: 'agent',
+        agentSessionId: running.id,
+        run: { runId: running.id }
+      }
+    })
+    expect(storedSession?.status.continuity).toBeUndefined()
+    expect(useAppStore.getState().tabs[tab.id]?.regions['running-region']).toMatchObject({
+      kind: 'agent',
+      sessionId: running.id
+    })
+    dispose()
+  })
+
   it('recovers a persisted Agent View whose exact Run disappeared before Desktop startup', async () => {
     const stale = agentSession('persisted-agent')
     const resumed = {
