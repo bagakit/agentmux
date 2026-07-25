@@ -1254,6 +1254,94 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 }
 .agent-status-bar__segment--action { cursor: pointer; border-radius: var(--radius-sm); }
 .agent-status-bar__segment--action:hover { color: var(--text-2); }
+
+/* The roster: the enumerable half of the attention bar's total. Surface fill + elevation + a top
+   highlight carry the layer, no stroke — the same base the context menus use. Collapsed it costs
+   nothing: the trigger IS the count segment that was already on the bar. */
+.agent-roster__trigger { gap: 5px; }
+.agent-roster__trigger > svg { color: var(--text-3); }
+.agent-roster {
+  min-width: 268px;
+  max-width: 420px;
+  max-height: 340px;
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border-radius: var(--radius);
+  color: var(--text-2);
+  background:
+    radial-gradient(120% 90% at 100% 0, #1d47303d 0, transparent 52%),
+    #1a2027f7;
+  box-shadow: var(--elev-2), var(--hl-strong), 0 0 0 1px #00000073;
+  overflow: hidden;
+  transform-origin: var(--radix-popper-transform-origin, 50% 100%);
+}
+/* Scoped to the open state deliberately — an unscoped entry animation makes Radix Presence wait for an
+   animationend that a close never fires, and the node never unmounts. See presence-exit-animation.test.ts. */
+.agent-roster[data-state='open'] { animation: menu-in 120ms cubic-bezier(.16, 1, .3, 1); }
+.agent-roster__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 8px 5px;
+  color: var(--text-3);
+  font-size: 10px;
+  font-weight: 620;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.agent-roster__heading-count { font-variant-numeric: tabular-nums; letter-spacing: 0; }
+.agent-roster__list { min-height: 0; display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
+.agent-roster__row {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  outline: 0;
+}
+.agent-roster__row[data-highlighted], .agent-roster__row:hover { color: var(--text); background: var(--surface-2); }
+.agent-roster__identity { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.agent-roster__identity strong {
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 560;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* What this Agent was authorized to do at spawn. Muted by default; the tier only colours the text when
+   the Provider declared one, so an undeclared risk stays visually undeclared too. */
+.agent-roster__scope {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-roster__scope[data-tier='caution'] { color: var(--amber); }
+.agent-roster__scope[data-tier='danger'] { color: #f2a19b; }
+.agent-roster__pending {
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  color: #10161c;
+  background: var(--amber);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+}
 .agent-status-bar__count { color: var(--text-2); }
 .agent-status-bar .status { gap: 0; }
 /* Permanent chrome: no pulse. The count carries the fact; a pulsing dot would fight the terminal. */
