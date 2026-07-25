@@ -285,6 +285,28 @@ async function localExistingPathWithin(root: string, requested: string): Promise
   return { root: realRoot, target: realTarget }
 }
 
+// Reveal must survive a deleted target: the file being gone is the most common reason it "won't
+// open", and a second error would answer nothing. Walk up to the nearest ancestor that still exists
+// inside the workspace so the caller can reveal the folder the file used to live in. Every candidate
+// is realpath-confined, so an intermediate symlink escaping the root still throws rather than reveals.
+export async function localExistingAncestorWithin(root: string, requested: string): Promise<LocalExistingPath> {
+  const realRoot = await realpath(root)
+  let lexicalTarget = localPathWithin(root, requested)
+  for (;;) {
+    try {
+      const realTarget = await realpath(lexicalTarget)
+      assertRealPathWithin(realRoot, realTarget, sep)
+      return { root: realRoot, target: realTarget }
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      if (code !== 'ENOENT' && code !== 'ENOTDIR') throw error
+      const parent = dirname(lexicalTarget)
+      if (parent === lexicalTarget) throw error
+      lexicalTarget = parent
+    }
+  }
+}
+
 async function localMutablePathWithin(root: string, requested: string): Promise<LocalMutablePath> {
   assertMutableRelativePath(requested)
   const lexicalTarget = localPathWithin(root, requested)
@@ -756,7 +778,7 @@ export class WorkspaceFiles {
   async localPathForReveal(workspace: WorkspaceRecord, requestedPath: string): Promise<string> {
     const host = this.hostFor(workspace.hostId)
     if (host.kind !== 'local') throw new Error('Reveal in file manager is available only for local paths')
-    const resolved = await localExistingPathWithin(workspace.path, requestedPath || '.')
+    const resolved = await localExistingAncestorWithin(workspace.path, requestedPath || '.')
     if (resolved.target === resolved.root) {
       return (await runLocalWorker(resolved.root, resolved.root, { action: 'reveal', name: null })).toString('utf8')
     }

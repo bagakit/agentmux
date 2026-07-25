@@ -7,7 +7,10 @@ export type AgentComposerProps = {
   disabled: boolean
   placeholder: string
   activeFile?: string
-  isWorking?: boolean
+  // Which action the primary button performs. `stop` while a turn is in flight, `send` otherwise. This is
+  // a SEPARATE question from whether Enter submits: a working Agent shows Stop yet still takes a steer, so
+  // this must not gate the Enter handler — that was the bug where one `isWorking` flag did both jobs.
+  primaryAction?: 'send' | 'stop'
   postureControl?: AgentPostureControl
   onChange(value: string): void
   onSubmit?: () => void
@@ -23,7 +26,7 @@ export function AgentComposer({
   disabled,
   placeholder,
   activeFile,
-  isWorking = false,
+  primaryAction = 'send',
   postureControl,
   onChange,
   onSubmit,
@@ -43,7 +46,14 @@ export function AgentComposer({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={(event) => {
-          if (event.key === 'Enter' && !event.shiftKey && !isWorking && canSubmit) {
+          // No !isWorking guard: a running Agent can be steered. Enter submits whenever the surface allows
+          // a submit and there is text; delivery (and codex's mid-turn refusal) is Core's call, not the
+          // renderer's. Stop stays a click on the button, so mid-turn Enter never risks an accidental stop.
+          // IME candidate confirmation also arrives as Enter (often with `isComposing` or keyCode 229).
+          // Let the IME commit first; otherwise the composer submits the pre-conversion draft and the
+          // user sees missing/replaced characters in the Agent conversation.
+          const composing = event.nativeEvent?.isComposing || event.keyCode === 229
+          if (event.key === 'Enter' && !event.shiftKey && !composing && canSubmit) {
             event.preventDefault()
             onSubmit?.()
           }
@@ -95,15 +105,20 @@ export function AgentComposer({
           ) : null}
         </div>
         <div>
-          {isWorking ? (
+          {primaryAction === 'stop' ? (
+            // ■ interrupts THIS turn (onInterrupt → Core semantic interrupt); it does not end the Run.
+            // Terminating the whole session is a separate action that lives in the Tabbar, so the mark and
+            // its accessible name/tooltip say "current turn" to keep the two objects distinct. Behaviour is
+            // unchanged — this is a mark-and-wording fix, so onInterrupt, position and weight stay put.
             <button
               type="button"
               className="composer-send composer-send--working"
               disabled={disabled || !onInterrupt}
               onClick={onInterrupt}
-              aria-label="Stop turn"
+              aria-label="Interrupt the current turn"
+              title="Interrupt the current turn — the session keeps running"
             >
-              Stop <Square size={12} />
+              <Square size={13} fill="currentColor" aria-hidden="true" />
             </button>
           ) : (
             <button

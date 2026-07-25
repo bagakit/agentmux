@@ -13,6 +13,19 @@ type ConfigWriter = {
   save(value: AppConfig): Promise<AppConfig>
 }
 
+/** One loser's fate in a keep-the-winner teardown. */
+export type FanOutTeardownOutcome =
+  | { status: 'removed'; workspaceId: string; removedPath: string }
+  // Still on disk and still registered: a dirty worktree the protection refused, or a git failure. The
+  // `reason` is git's own words, so the user knows what to review before discarding it explicitly.
+  | { status: 'retained'; workspaceId: string; reason: string }
+
+export type KeepOneOfFanOutResult = {
+  config: AppConfig
+  keptWorkspaceId: string
+  outcomes: FanOutTeardownOutcome[]
+}
+
 type GitWorktree = { path: string; branch: string | null }
 type GitBranchesSnapshot = Extract<WorkspaceBranchesSnapshot, { kind: 'git-repository' }>
 
@@ -225,6 +238,54 @@ export class WorktreeService {
       workspaces: config.workspaces.filter((item) => item.id !== workspace.id)
     })
     return { config: nextConfig, removedPath: workspace.path }
+  }
+
+  /**
+   * Keep one lane of a fan-out, tear down the rest.
+   *
+   * The closing move of a bake-off: the user picked a winner, so that lane's worktree and its Session
+   * stay exactly as they are, and the losing lanes are removed. This does not re-implement teardown — it
+   * calls `removeWorktree` once per loser, which is why the dirty-tree protection is still in force:
+   * a losing lane that still holds uncommitted work (an agent's output the user never chose to discard)
+   * is refused, left on disk, kept in the record set, and reported as retained. Silently discarding the
+   * lane a person did not pick is the one outcome this must never produce.
+   *
+   * One loser that cannot be cleaned up never strands the others that can — the clean lanes are removed
+   * and the retained ones are reported, mirroring how a fan-out's launch failures never stop its
+   * successes. Whether to throw a retained lane away is a per-lane, explicit choice made through
+   * `removeWorktree({ discardChanges: true })`; this batch has no blanket "discard every dirty loser"
+   * switch, because that is exactly the data-loss lever the protection exists to remove.
+   */
+  async keepOneOfFanOut(
+    input: { keepWorkspaceId: string; removeWorkspaceIds: readonly string[] },
+    config: AppConfig
+  ): Promise<KeepOneOfFanOutResult> {
+    // The winner must exist. Reporting a lane as kept when there is no such workspace would be a lie, and
+    // failing here is better than quietly keeping nothing while tearing the others down.
+    const kept = this.workspace(config, input.keepWorkspaceId)
+
+    const outcomes: FanOutTeardownOutcome[] = []
+    let current = config
+    for (const workspaceId of input.removeWorkspaceIds) {
+      // Never tear down the lane we were told to keep, even if a caller mistakenly lists it among the
+      // losers. Removing the winner is precisely the mistake this guard exists to refuse.
+      if (workspaceId === kept.id) continue
+      try {
+        const removal = await this.removeWorktree({ workspaceId }, current)
+        current = removal.config
+        outcomes.push({ status: 'removed', workspaceId, removedPath: removal.removedPath })
+      } catch (error) {
+        // Retained means still on disk: `removeWorktree` withdraws the record only after git confirms, so
+        // a refusal (a dirty worktree) or a git failure both leave the directory intact. Record why and
+        // move on — the point of a bake-off is not undone by one lane that would lose work if forced.
+        outcomes.push({
+          status: 'retained',
+          workspaceId,
+          reason: error instanceof Error ? error.message : String(error)
+        })
+      }
+    }
+    return { config: current, keptWorkspaceId: kept.id, outcomes }
   }
 
   private workspace(config: AppConfig, id: string): WorkspaceRecord {

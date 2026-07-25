@@ -18,9 +18,15 @@ import type {
   BrowserViewport,
   CreateWorkspacePathInput,
   CreateWorktreeForBranchInput,
+  CreatePullRequestInput,
+  RunFanOutInput,
+  KeepOneOfFanOutInput,
   CreateWorkspaceInput,
   DesktopControlCancellation,
   DesktopControlResponse,
+  GitPullStrategy,
+  GitPushOptions,
+  GitRemoteOptions,
   HostConfig,
   MoveWorkspacePathInput,
   RuntimeEvent,
@@ -46,7 +52,30 @@ const api: AgentMuxPreloadApi = {
     openBranch: (workspaceId: string, branch: string) =>
       ipcRenderer.invoke('workspaces:openBranch', workspaceId, branch),
     createWorktreeForBranch: (input: CreateWorktreeForBranchInput) =>
-      ipcRenderer.invoke('workspaces:createWorktreeForBranch', input)
+      ipcRenderer.invoke('workspaces:createWorktreeForBranch', input),
+    runFanOut: (input: RunFanOutInput) => ipcRenderer.invoke('workspaces:runFanOut', input),
+    keepOneOfFanOut: (input: KeepOneOfFanOutInput) =>
+      ipcRenderer.invoke('workspaces:keepOneOfFanOut', input)
+  },
+  git: {
+    status: (workspaceId: string) => ipcRenderer.invoke('git:status', workspaceId),
+    stage: (workspaceId: string, path: string) => ipcRenderer.invoke('git:stage', workspaceId, path),
+    commit: (workspaceId: string, message: string) =>
+      ipcRenderer.invoke('git:commit', workspaceId, message),
+    diff: (workspaceId: string, path: string) => ipcRenderer.invoke('git:diff', workspaceId, path),
+    unstage: (workspaceId: string, path: string) => ipcRenderer.invoke('git:unstage', workspaceId, path),
+    discard: (workspaceId: string, path: string, untracked: boolean) =>
+      ipcRenderer.invoke('git:discard', workspaceId, path, untracked),
+    push: (workspaceId: string, options?: GitPushOptions) => ipcRenderer.invoke('git:push', workspaceId, options),
+    pull: (workspaceId: string, options?: { strategy?: GitPullStrategy }) =>
+      ipcRenderer.invoke('git:pull', workspaceId, options),
+    fetch: (workspaceId: string, options?: GitRemoteOptions) => ipcRenderer.invoke('git:fetch', workspaceId, options),
+    aheadBehind: (workspaceId: string) => ipcRenderer.invoke('git:aheadBehind', workspaceId)
+  },
+  gh: {
+    authStatus: (workspaceId: string) => ipcRenderer.invoke('gh:authStatus', workspaceId),
+    createPullRequest: (workspaceId: string, input: CreatePullRequestInput) =>
+      ipcRenderer.invoke('gh:createPullRequest', workspaceId, input)
   },
   files: {
     readDirectory: (workspaceId: string, path: string) =>

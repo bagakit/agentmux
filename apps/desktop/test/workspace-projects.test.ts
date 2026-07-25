@@ -40,7 +40,7 @@ describe('workspace projects', () => {
         id: 'feature',
         name: 'feature-a',
         hostId: 'local',
-        path: _hygiene_fixturePath("repo/agentmux.worktrees/feature-a"),
+        path: _hygiene_fixturePath("repo/agentmux/.worktrees/feature-a"),
         kind: 'worktree',
         repoPath: _hygiene_fixturePath("repo/agentmux"),
         branch: 'feature/a'
@@ -49,7 +49,7 @@ describe('workspace projects', () => {
         id: 'remote',
         name: 'feature-a',
         hostId: 'studio',
-        path: _hygiene_fixturePath("repo/agentmux.worktrees/feature-a"),
+        path: _hygiene_fixturePath("repo/agentmux/.worktrees/feature-a"),
         kind: 'worktree',
         repoPath: _hygiene_fixturePath("repo/agentmux"),
         branch: 'feature/a'
@@ -70,12 +70,21 @@ describe('workspace projects', () => {
     expect(workspaceProjectId(workspaces[2]!)).not.toBe(workspaceProjectId(workspaces[0]!))
   })
 
-  it('derives host-neutral sibling worktree paths without leaking branch separators', () => {
+  it('derives host-neutral worktree paths inside the project without leaking branch separators', () => {
     expect(defaultWorktreePath(_hygiene_fixturePath("repo/agentmux"), 'feature/new-tab')).toBe(
-      _hygiene_fixturePath("repo/agentmux.worktrees/feature-new-tab")
+      _hygiene_fixturePath("repo/agentmux/.worktrees/feature-new-tab")
     )
     expect(defaultWorktreePath(_hygiene_win32.join("C:", _hygiene_win32.sep, "repo\\agentmux"), 'fix/ui')).toBe(
-      _hygiene_win32.join("C:", _hygiene_win32.sep, "repo\\agentmux.worktrees\\fix-ui")
+      _hygiene_win32.join("C:", _hygiene_win32.sep, "repo\\agentmux\\.worktrees\\fix-ui")
     )
+  })
+
+  it('nests the worktree inside the project rather than beside it as a sibling directory', () => {
+    const path = defaultWorktreePath(_hygiene_fixturePath("repo/agentmux"), 'feature/a')
+    // The separator before `.worktrees` is the whole fix: it keeps the worktree under the project
+    // (covered by its .gitignore, its file tree, its moves) instead of at `fixtureRoot/repo/agentmux.worktrees/...`.
+    expect(path).toBe(_hygiene_fixturePath("repo/agentmux/.worktrees/feature-a"))
+    expect(path.startsWith(_hygiene_fixturePath("repo/agentmux/"))).toBe(true)
+    expect(path).not.toBe(_hygiene_fixturePath("repo/agentmux.worktrees/feature-a"))
   })
 })

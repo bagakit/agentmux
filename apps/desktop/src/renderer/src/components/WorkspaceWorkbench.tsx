@@ -34,18 +34,21 @@ import { AgentProviderIcon } from './AgentProviderIcon'
 import { ConfirmationDialog } from './ConfirmationDialog'
 import { NewTabSurface } from './NewTabSurface'
 import { PaneSplitMenu } from './PaneSplitMenu'
+import { RegionContextMenu } from './RegionContextMenu'
+import { layoutForActiveTopic } from '../lib/scratch-topic-layout'
 import { SessionPane } from './SessionPane'
 import { StatusDot } from './StatusDot'
 import { WorkbenchTabContextMenu } from './WorkbenchTabContextMenu'
 import { WorkbenchTabStrip } from './WorkbenchTabStrip'
 import { resolvePaneColumnEdgeZone } from '../lib/tab-drop-zone'
 import { SplitRatioCommitter } from '../lib/split-ratio-commit'
-import { tabIdsForCloseScope } from '../lib/workbench-tab-actions'
+import { moveSessionViewTargets, tabIdsForCloseScope } from '../lib/workbench-tab-actions'
 import { SurfaceSwitch, TopRowLeadingChrome } from './TopRowChrome'
 import type {
   SplitDirection,
   TabGroup,
-  TabGroupLayoutNode
+  TabGroupLayoutNode,
+  WorkspaceLayout
 } from '../lib/workbench-layout'
 import type { WorkbenchRegionLayoutNode } from '../lib/workbench-view-layout'
 import {
@@ -108,11 +111,17 @@ function SortableWorkbenchTab({
   const closeTab = useAppStore((state) => state.closeTab)
   const moveTabToNewGroup = useAppStore((state) => state.moveTabToNewGroup)
   const setTabMenuOpen = useAppStore((state) => state.setTabMenuOpen)
+  const config = useAppStore((state) => state.config)
+  const moveSessionViewToWorkspace = useAppStore((state) => state.moveSessionViewToWorkspace)
   const surface = titleWorkbenchSurface(tab)
   const session = surface.kind === 'agent' || surface.kind === 'terminal'
     ? sessions.find((item) => item.id === surface.sessionId)
     : null
   const copyableAgentSessionId = copyableAgentSessionIdForTab(tab)
+  // Only a Session projection can be moved, and only the Region actually carrying it. A file or
+  // launcher View has no Session identity to relocate, so it offers no destinations at all.
+  const movableSessionRegionId =
+    surface.kind === 'agent' || surface.kind === 'terminal' ? surface.regionId : null
   const dirty =
     surface.kind === 'file'
       ? Boolean(dirtyDocuments[documentKey(surface.workspaceId, surface.path)])
@@ -210,6 +219,12 @@ function SortableWorkbenchTab({
           group.id,
           direction
         )}
+        moveSessionViewTargets={movableSessionRegionId
+          ? moveSessionViewTargets(config?.workspaces ?? [], workspaceId)
+          : []}
+        onMoveSessionView={(targetWorkspaceId) => {
+          if (movableSessionRegionId) moveSessionViewToWorkspace(movableSessionRegionId, targetWorkspaceId)
+        }}
       >
         <button
           ref={setNodeRef}
@@ -362,6 +377,12 @@ function WorkbenchRegionNode({
       dirtyDocuments[documentKey(surface.workspaceId, surface.path)]
     )
     return (
+      <RegionContextMenu
+        regionId={node.regionId}
+        // 只有承载 Agent 的一格才有语义身份可寻址。
+        agentSessionId={surface.kind === 'agent' ? surface.sessionId : null}
+        writeClipboardText={(text) => api.ui.writeClipboardText(text)}
+      >
       <section
         className={`workbench-region ${tab.layout.activeRegionId === node.regionId ? 'workbench-region--active' : ''}`}
         data-workbench-region-id={node.regionId}
@@ -403,6 +424,7 @@ function WorkbenchRegionNode({
           }}
         />
       </section>
+      </RegionContextMenu>
     )
   }
   return (
@@ -485,6 +507,7 @@ function WorkbenchRegionBranch({
 function PaneGroup({
   group,
   workspaceId,
+  layout,
   splitTarget,
   nativeSurfacesVisible,
   interactiveResize,
@@ -492,6 +515,7 @@ function PaneGroup({
 }: {
   group: TabGroup
   workspaceId: string
+  layout: WorkspaceLayout
   splitTarget: SplitTarget | null
   nativeSurfacesVisible: boolean
   interactiveResize: boolean
@@ -499,7 +523,6 @@ function PaneGroup({
 }) {
   const tabsById = useAppStore((state) => state.tabs)
   const sessions = useAppStore((state) => state.sessions)
-  const layout = useAppStore((state) => state.layouts[workspaceId])
   const focusTabGroup = useAppStore((state) => state.focusTabGroup)
   const activateTab = useAppStore((state) => state.activateTab)
   const openLauncher = useAppStore((state) => state.openLauncher)
@@ -657,6 +680,7 @@ function SplitNode({
   node,
   nodePath,
   workspaceId,
+  layout,
   splitTarget,
   nativeSurfacesVisible,
   interactiveResize = false,
@@ -665,18 +689,19 @@ function SplitNode({
   node: TabGroupLayoutNode
   nodePath: string
   workspaceId: string
+  layout: WorkspaceLayout
   splitTarget: SplitTarget | null
   nativeSurfacesVisible: boolean
   interactiveResize?: boolean
   isRootLeaf?: boolean
 }) {
-  const layout = useAppStore((state) => state.layouts[workspaceId])
   if (node.type === 'leaf') {
-    const group = layout?.groups.find((candidate) => candidate.id === node.groupId)
+    const group = layout.groups.find((candidate) => candidate.id === node.groupId)
     return group ? (
       <PaneGroup
         group={group}
         workspaceId={workspaceId}
+        layout={layout}
         splitTarget={splitTarget}
         nativeSurfacesVisible={nativeSurfacesVisible}
         interactiveResize={interactiveResize}
@@ -689,6 +714,7 @@ function SplitNode({
       node={node}
       nodePath={nodePath}
       workspaceId={workspaceId}
+      layout={layout}
       splitTarget={splitTarget}
       nativeSurfacesVisible={nativeSurfacesVisible}
       interactiveResize={interactiveResize}
@@ -700,6 +726,7 @@ function SplitBranch({
   node,
   nodePath,
   workspaceId,
+  layout,
   splitTarget,
   nativeSurfacesVisible,
   interactiveResize
@@ -707,6 +734,7 @@ function SplitBranch({
   node: Extract<TabGroupLayoutNode, { type: 'split' }>
   nodePath: string
   workspaceId: string
+  layout: WorkspaceLayout
   splitTarget: SplitTarget | null
   nativeSurfacesVisible: boolean
   interactiveResize: boolean
@@ -736,6 +764,7 @@ function SplitBranch({
           node={node.first}
           nodePath={nodePath ? `${nodePath}.first` : 'first'}
           workspaceId={workspaceId}
+          layout={layout}
           splitTarget={splitTarget}
           nativeSurfacesVisible={nativeSurfacesVisible && !dragging}
           interactiveResize={terminalResizeSuspended}
@@ -753,6 +782,7 @@ function SplitBranch({
           node={node.second}
           nodePath={nodePath ? `${nodePath}.second` : 'second'}
           workspaceId={workspaceId}
+          layout={layout}
           splitTarget={splitTarget}
           nativeSurfacesVisible={nativeSurfacesVisible && !dragging}
           interactiveResize={terminalResizeSuspended}
@@ -790,8 +820,14 @@ export function WorkspaceWorkbench({
   workspaceId: string
   interactiveResize?: boolean
 }) {
-  const layout = useAppStore((state) => state.layouts[workspaceId])
+  const storedLayout = useAppStore((state) => state.layouts[workspaceId])
   const tabs = useAppStore((state) => state.tabs)
+  const activeScratchTopicId = useAppStore((state) => state.activeScratchTopicId)
+  // 切 Topic 就像切 Branch：换掉那一组 Tab。layout 仍只有一份，这里只是一次投影。
+  const layout = useMemo(
+    () => storedLayout ? layoutForActiveTopic(storedLayout, tabs, activeScratchTopicId) : storedLayout,
+    [storedLayout, tabs, activeScratchTopicId]
+  )
   const moveTab = useAppStore((state) => state.moveTab)
   const moveTabToNewGroup = useAppStore((state) => state.moveTabToNewGroup)
   const tabMenuOpen = useAppStore((state) => state.tabMenuOpen)
@@ -866,6 +902,7 @@ export function WorkspaceWorkbench({
           node={layout.root}
           nodePath=""
           workspaceId={workspaceId}
+          layout={layout}
           splitTarget={splitTarget}
           nativeSurfacesVisible={activeDrag === null && !tabMenuOpen}
           interactiveResize={interactiveResize}

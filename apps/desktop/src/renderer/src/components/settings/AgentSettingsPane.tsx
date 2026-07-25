@@ -9,6 +9,7 @@ import {
   XCircle
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
+import parseArgsStringToArgv from 'string-argv'
 import type { AgentExecutorConfig, AppConfig } from '../../../../shared/contracts'
 import { executorDetectionKey, useAppStore } from '../../store'
 import { AgentProviderIcon, agentProviderLabel } from '../AgentProviderIcon'
@@ -78,6 +79,19 @@ export function assertExecutorProviderIdentity(
   )
 }
 
+/**
+ * Split the free-text Arguments field into the argv array core spawns with. A launch line is written the
+ * way a shell would read it — space-separated tokens with optional quoting — so `--effort 'ultracode'` is
+ * two argv entries and `--model "gpt 5"` is one whose value keeps its space. Newlines count as whitespace,
+ * so the older one-flag-per-line style still parses. Splitting only on `\n` was the bug: a whole line like
+ * `--model 'default' --effort 'ultracode'` became ONE argv token the downstream CLI rejected as an unknown
+ * option. Quotes are shell syntax, not part of the value, so they are stripped — done by string-argv rather
+ * than hand-rolled so escapes and mixed quoting are handled by a maintained parser.
+ */
+export function parseExecutorArgs(text: string): string[] {
+  return parseArgsStringToArgv(text)
+}
+
 export function AgentSettingsPane({ config, onSave }: {
   config: AppConfig
   onSave: (executors: Record<string, AgentExecutorConfig>) => Promise<void>
@@ -144,7 +158,7 @@ export function AgentSettingsPane({ config, onSave }: {
           label: draft.label.trim(),
           providerId: draft.providerId,
           command: draft.command.trim(),
-          args: draft.args.split('\n').map((value) => value.trim()).filter(Boolean),
+          args: parseExecutorArgs(draft.args),
           env: parseEnv(draft.env),
           injectAgentMuxGuide: draft.injectAgentMuxGuide
         }]
@@ -201,7 +215,7 @@ export function AgentSettingsPane({ config, onSave }: {
                     <label><span>Executor ID</span><input value={id} readOnly /><small>Stable ID used by the AgentMux CLI and existing Sessions.</small></label>
                     <label><span>Command</span><input value={draft.command} onChange={(event) => update(id, { command: event.target.value })} /></label>
                     <label className="agent-guide-toggle"><input type="checkbox" checked={draft.injectAgentMuxGuide} onChange={(event) => update(id, { injectAgentMuxGuide: event.target.checked })} /><span><strong>AgentMux guide</strong><small>Tell this Agent to inspect the current View and use configured executors for tabs and splits.</small></span></label>
-                    <label><span>Arguments <small>one per line</small></span><textarea value={draft.args} onChange={(event) => update(id, { args: event.target.value })} placeholder="--model&#10;gpt-5" rows={3} /></label>
+                    <label><span>Arguments <small>space or newline separated</small></span><textarea value={draft.args} onChange={(event) => update(id, { args: event.target.value })} placeholder="--model fable&#10;--effort 'high'" rows={3} /></label>
                     <label><span>Environment <small>NAME=value</small></span><textarea value={draft.env} onChange={(event) => update(id, { env: event.target.value })} placeholder="API_BASE=https://example.test" rows={3} /></label>
                     {detection?.detail ? <p className="settings-inline-error">{detection.detail}</p> : null}
                     <button type="button" className="small-button" onClick={() => setDrafts((current) => Object.fromEntries(Object.entries(current).filter(([candidate]) => candidate !== id)))}><Trash2 size={13} /> Delete executor</button>

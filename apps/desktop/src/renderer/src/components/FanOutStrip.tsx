@@ -4,6 +4,7 @@ import {
   fanOutGroups,
   groupLaneNeedingYou,
   groupProgress,
+  fanOutKeepSplit,
   type FanOutGroup,
   type FanOutLane
 } from '../lib/fanout-group'
@@ -27,10 +28,15 @@ function laneState(lane: FanOutLane): 'working' | 'waiting' | 'error' | null {
 
 function LaneChip({
   lane,
-  onSelect
+  onSelect,
+  onKeep,
+  loserCount
 }: {
   lane: FanOutLane
   onSelect: (sessionId: string) => void
+  // Absent when the group has only one lane: keeping the only lane tears down nothing.
+  onKeep?: (() => void) | undefined
+  loserCount: number
 }) {
   const state = laneState(lane)
   // A lane whose Agent never launched has nothing to select. It still renders — it is part of the set,
@@ -39,39 +45,60 @@ function LaneChip({
   const label = lane.session
     ? `${lane.branch} · ${lane.attention ?? lane.session.status.state}`
     : `${lane.branch} · no agent`
+  // Say what the action does to the OTHERS, not just to this lane: "keep" alone hides that the rest are
+  // about to be torn down, which is the consequential half of the decision.
+  const keepLabel = `Keep ${lane.branch} and remove the other ${loserCount}`
+  // A lane with no Agent is still a legitimate winner — its worktree exists and can be continued in.
+  const keep = onKeep ? (
+    <button
+      className="fanout-lane__keep"
+      type="button"
+      aria-label={keepLabel}
+      title={keepLabel}
+      onClick={onKeep}
+    >
+      Keep
+    </button>
+  ) : null
 
   if (!sessionId) {
     return (
       <span className="fanout-lane fanout-lane--idle" title={`${lane.branch} — no Agent running`}>
         <span className="status" aria-hidden="true"><span className="status__dot" /></span>
         <span className="fanout-lane__branch">{lane.branch}</span>
+        {keep}
       </span>
     )
   }
 
   return (
-    <button
-      className="fanout-lane"
-      type="button"
-      {...(lane.attention ? { 'data-attention': lane.attention } : {})}
-      aria-label={label}
-      title={label}
-      onClick={() => onSelect(sessionId)}
-    >
-      <span className={state ? `status status--${state}` : 'status'} aria-hidden="true">
-        <span className="status__dot" />
-      </span>
-      <span className="fanout-lane__branch">{lane.branch}</span>
-    </button>
+    <span className="fanout-lane-slot">
+      <button
+        className="fanout-lane"
+        type="button"
+        {...(lane.attention ? { 'data-attention': lane.attention } : {})}
+        aria-label={label}
+        title={label}
+        onClick={() => onSelect(sessionId)}
+      >
+        <span className={state ? `status status--${state}` : 'status'} aria-hidden="true">
+          <span className="status__dot" />
+        </span>
+        <span className="fanout-lane__branch">{lane.branch}</span>
+      </button>
+      {keep}
+    </span>
   )
 }
 
 function GroupRow({
   group,
-  onSelect
+  onSelect,
+  onKeepLane
 }: {
   group: FanOutGroup
   onSelect: (sessionId: string) => void
+  onKeepLane?: ((keepWorkspaceId: string, removeWorkspaceIds: string[]) => void) | undefined
 }) {
   const progress = groupProgress(group)
   const needsYou = groupLaneNeedingYou(group)
@@ -89,7 +116,20 @@ function GroupRow({
       </div>
       <div className="fanout-group__lanes">
         {group.lanes.map((lane) => (
-          <LaneChip key={lane.workspaceId} lane={lane} onSelect={onSelect} />
+          <LaneChip
+            key={lane.workspaceId}
+            lane={lane}
+            onSelect={onSelect}
+            loserCount={group.lanes.length - 1}
+            {...(onKeepLane && group.lanes.length > 1
+              ? {
+                  onKeep: () => {
+                    const split = fanOutKeepSplit(group, lane.workspaceId)
+                    if (split) onKeepLane(split.keepWorkspaceId, split.removeWorkspaceIds)
+                  }
+                }
+              : {})}
+          />
         ))}
       </div>
       {needsYou?.session ? (
@@ -110,11 +150,13 @@ function GroupRow({
 export function FanOutStrip({
   workspaces,
   sessions,
-  onSelectSession
+  onSelectSession,
+  onKeepLane
 }: {
   workspaces: readonly WorkspaceRecord[]
   sessions: readonly SessionSnapshot[]
   onSelectSession: (sessionId: string) => void
+  onKeepLane?: ((keepWorkspaceId: string, removeWorkspaceIds: string[]) => void) | undefined
 }) {
   const groups = fanOutGroups({ workspaces, sessions })
   if (groups.length === 0) return null
@@ -122,7 +164,12 @@ export function FanOutStrip({
   return (
     <div className="fanout-strip" role="group" aria-label="Fan-out comparisons">
       {groups.map((group) => (
-        <GroupRow key={group.stem} group={group} onSelect={onSelectSession} />
+        <GroupRow
+          key={group.stem}
+          group={group}
+          onSelect={onSelectSession}
+          {...(onKeepLane ? { onKeepLane } : {})}
+        />
       ))}
     </div>
   )

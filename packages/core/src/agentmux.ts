@@ -250,6 +250,46 @@ async function arrangeCommand(args: readonly string[]): Promise<number> {
   printSuccess(receipt.operation, receipt.result); return 0
 }
 
+/**
+ * 发起一次 Discussion：创建专属 Agent 并投递首条消息。
+ *
+ * 走 Core（`withClient`）而非 Control socket：消息真相归 Core，而 Control 面的 handler
+ * 住在 Desktop。把账本挂到 Control 上等于让布局层拥有消息真相。
+ *
+ * 身份不靠 `AGENTMUX_AGENT_SESSION_ID` 自证——那只是上下文提示，改一下就能冒充。
+ * raw 凭证从环境里取出交回 Core 验证，Core 据此解析 author。
+ */
+async function discussCommand(args: readonly string[]): Promise<number> {
+  const flags = parseFlags(args, { '--agent': 'value', '--text': 'data', '--provider': 'value' })
+  const caller = managedCaller()
+  const capability = process.env.AGENTMUX_AGENT_CAPABILITY?.trim()
+  if (!capability) {
+    throw new AgentMuxError(
+      'This command requires an AgentMux-managed Agent caller.',
+      'MANAGED_AGENT_CONTEXT_REQUIRED'
+    )
+  }
+  const executorId = identifier(flags.values.get('--agent') ?? '', 'Agent Executor id')
+  const providerId = identifier(flags.values.get('--provider') ?? executorId, 'Agent Provider id')
+  const body = requiredData(flags, '--text', 'Message text')
+  const result = await withClient(async (client) => await client.startDiscussion({
+    capability,
+    callerAgentSessionId: caller.agentSessionId,
+    executorId,
+    providerId,
+    workspacePath: process.cwd(),
+    body,
+    operationId: CLI_REQUEST_ID
+  }))
+  printSuccess('discuss', {
+    threadId: result.thread.threadId,
+    // 只声明证据支持的状态：启动投递最多证明 delivered。
+    delivery: result.thread.delivery.state,
+    targetAgentSessionId: result.session.agentSessionId
+  })
+  return 0
+}
+
 async function sendCommand(args: readonly string[]): Promise<number> {
   const flags = parseFlags(args, { '--to-session': 'value', '--to-region': 'value', '--to-tab': 'value', '--text': 'data' })
   const selected = exactlyOne(flags, ['--to-session', '--to-region', '--to-tab'], 'send')
@@ -352,6 +392,7 @@ async function main(): Promise<number> {
   if (args[0] === 'list') return await listCommand(args.slice(1))
   if (args[0] === 'open') return await openCommand(args.slice(1))
   if (args[0] === 'send') return await sendCommand(args.slice(1))
+  if (args[0] === 'discuss') return await discussCommand(args.slice(1))
   if (args[0] === 'focus') return await focusCommand(args.slice(1))
   if (args[0] === 'arrange') return await arrangeCommand(args.slice(1))
   if (args[0] === 'output') return await outputCommand(args.slice(1))

@@ -41,6 +41,7 @@ function RosterRowView({
       aria-label={[
         row.label,
         row.awaitingReply ? 'awaiting your reply' : row.state,
+        ...(row.unacknowledgedThreads > 0 ? [`${row.unacknowledgedThreads} unacknowledged messages`] : []),
         scopeText || 'no launch scope declared'
       ].join(' · ')}
       onSelect={() => onSelect(row.sessionId)}
@@ -59,6 +60,12 @@ function RosterRowView({
         ) : null}
       </span>
       {row.awaitingReply ? <span className="agent-roster__pending">reply</span> : null}
+      {/* 未确认的 Thread 是这一行的另一件待办；与 reply 同一枚样式，因为它们是同一类事。 */}
+      {row.unacknowledgedThreads > 0 ? (
+        <span className="agent-roster__pending" title={`${row.unacknowledgedThreads} unacknowledged`}>
+          {row.unacknowledgedThreads} msg
+        </span>
+      ) : null}
     </DropdownMenu.Item>
   )
 }

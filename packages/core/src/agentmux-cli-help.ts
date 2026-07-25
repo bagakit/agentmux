@@ -8,6 +8,7 @@ Intents:
   list        List configured agents or active Agent Sessions from their owners.
   open        Open typed content at one exact spatial destination.
   send        Send one prompt to an exact Session or uniquely resolved presentation target.
+  discuss     Start a Discussion: create a dedicated Agent and deliver the first message.
   focus       Focus one exact Tab or Region.
   arrange     Apply one explicit layout operation to a Tab.
   output      Read or follow one Agent Session's ordered output.
@@ -94,6 +95,21 @@ Usage: agentmux open browser --url <url> <destination>
 
 Exactly one destination from open --help is required. The Main Browser owner validates
 and opens the URL; Renderer layout state does not own Browser navigation truth.`],
+  ['discuss', `Start a Discussion with a dedicated Agent
+
+Usage:
+  agentmux discuss --agent <executor-id> --text <first message> [--provider <provider-id>]
+
+Core creates a dedicated Agent Session and delivers the first message as its launch Prompt.
+The author is resolved by Core from your invocation capability — the caller cannot claim to be
+another Agent. AGENTMUX_AGENT_SESSION_ID is context only, never authentication.
+
+The launch Prompt is transport for the first ledger message; the Message ledger stays the only
+message truth. A launch delivery proves at most \`delivered\` — never that the target accepted
+or replied. Re-running with the same request id returns the same Thread and never re-injects
+the Prompt.
+
+Cross-workspace delivery is refused. Remote targets are not supported yet.`],
   ['send', `Send one prompt without resuming or broadcasting
 
 Usage:

@@ -24,7 +24,12 @@ import type {
   SessionControl,
   SessionRecoveryResult,
   SessionSnapshot,
-  WorkspaceSelectionResult
+  WorkspaceSelectionResult,
+  RunFanOutInput,
+  RunFanOutResult,
+  KeepOneOfFanOutInput,
+  KeepOneOfFanOutOutcome,
+  CreatePullRequestResult
 } from '../../shared/contracts'
 import {
   isScratchTopicId,
@@ -150,6 +155,17 @@ import {
   createEmptyFileExplorerViewState,
   type FileExplorerViewState
 } from './lib/file-explorer-selection'
+import { moveSessionViewToWorkspace as reduceMoveSessionView } from './lib/move-session-view'
+import {
+  evaluateCreatePrIntent,
+  type CreatePrToken,
+  type CreatePrIntentState
+} from './lib/create-pr-intent'
+import {
+  evaluatePrEligibility,
+  PR_BLOCKER_MESSAGES,
+  type PrEligibilityInput
+} from './lib/pr-eligibility'
 
 type ViewMode = SessionViewMode
 export type MainSurface = 'workbench' | 'board'
@@ -179,6 +195,11 @@ type AppState = {
   timelines: Record<string, AgentTimelineSnapshot>
   pendingAgentLaunches: Record<string, PendingAgentLaunch>
   activeWorkspaceId: string | null
+  /** Scratch 当前选中的 Topic。切它就像切 Branch 一样换掉那一组 Tab。 */
+  activeScratchTopicId: string | null
+  /** 用户拖出来的 Topic 顺序。是一份偏好，不是真相来源——磁盘上没有的不会因它出现。 */
+  scratchTopicOrder: string[]
+  setScratchTopicOrder(order: readonly string[]): void
   documents: Record<string, FileDocument>
   dirtyDocuments: Record<string, boolean>
   documentGenerations: Record<string, number>
@@ -211,6 +232,18 @@ type AppState = {
   initialize(): Promise<() => void>
   selectWorkspace(id: string): Promise<void>
   activateWorkspaceSelection(result: WorkspaceSelectionResult): void
+  runFanOut(input: RunFanOutInput): Promise<RunFanOutResult>
+  keepOneOfFanOut(input: KeepOneOfFanOutInput): Promise<KeepOneOfFanOutOutcome | null>
+  createPullRequest(input: {
+    workspaceId: string
+    title: string
+    body: string
+    draft?: boolean
+    token: CreatePrToken
+    current: CreatePrIntentState
+    /** Optional: when present the ladder runs first so blockers surface as actionable copy. */
+    eligibility?: PrEligibilityInput
+  }): Promise<CreatePullRequestResult>
   focusTabGroup(workspaceId: string, tabGroupId: string): void
   activateTab(workspaceId: string, tabGroupId: string, tabId: string): void
   executeControl(
@@ -240,6 +273,11 @@ type AppState = {
     direction: SplitDirection
   ): void
   focusRegion(workspaceId: string, tabId: string, regionId: string): void
+  // Explicitly relocate one Session projection (the Region named by regionId) into another
+  // workspace's View. This moves DISPLAY identity only — the Agent's cwd is Core's
+  // session.workspacePath and is never touched. Navigation reuses focusRegion; a closing source
+  // View is refused via reportError rather than half-moved.
+  moveSessionViewToWorkspace(regionId: string, targetWorkspaceId: string): void
   splitRegion(
     workspaceId: string,
     tabId: string,
@@ -279,7 +317,12 @@ type AppState = {
   overwriteDocument(tabId: string, regionId?: string): Promise<void>
   reloadDocument(tabId: string, regionId?: string): Promise<void>
   refreshDocument(workspaceId: string, path: string): Promise<void>
-  launchBoardAgent(workspaceId: string, executorId: string, prompt: string): Promise<void>
+  launchBoardAgent(
+    workspaceId: string,
+    executorId: string,
+    prompt: string,
+    topicId?: string
+  ): Promise<void>
   launchAgent(
     executorId: string,
     prompt: string,
@@ -326,8 +369,16 @@ type AppState = {
   reportError(error: unknown): void
 }
 
+// Electron wraps every rejection that crosses `ipcRenderer.invoke` as
+// `Error invoking remote method '<channel>': <name>: <message>` and drops the original error's `.code`
+// (see the preload bridge). That transport framing is noise to a user — strip it back to the message the
+// main process actually raised, so the banner reads as an explanation rather than an IPC stack detail.
+const IPC_INVOKE_PREFIX = /^Error invoking remote method '[^']*':\s*/u
+const AGENTMUX_ERROR_NAME_PREFIX = /^AgentMuxError:\s*/u
+
 function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+  const raw = error instanceof Error ? error.message : String(error)
+  return raw.replace(IPC_INVOKE_PREFIX, '').replace(AGENTMUX_ERROR_NAME_PREFIX, '')
 }
 
 function controlFailure(
@@ -874,6 +925,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   timelines: {},
   pendingAgentLaunches: {},
   activeWorkspaceId: null,
+  activeScratchTopicId: null,
+  scratchTopicOrder: [],
   documents: {},
   dirtyDocuments: {},
   documentGenerations: {},
@@ -1057,6 +1110,103 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           : { ...state.layouts, [workspace.id]: createWorkspaceLayout(newTabGroupId()) }
       }
     })
+  },
+  async runFanOut(input) {
+    try {
+      const result = await api.workspaces.runFanOut(input)
+      if (result.kind === 'rejected') {
+        get().reportError(new Error(result.reason))
+        return result
+      }
+      if (result.kind === 'fanout') {
+        // Config changed in main (each lane registered a worktree); pull the new truth rather than
+        // reconstructing it here.
+        set({ config: await api.config.get() })
+        // A partial failure is neither swallowed nor promoted to total failure: the lanes that did
+        // launch stay launched, and the ones that did not are named through the existing error surface.
+        const failed = result.lanes.filter((lane) => lane.status !== 'launched')
+        if (failed.length > 0) {
+          get().reportError(new Error(
+            `${failed.length} of ${result.lanes.length} lanes did not start: ${failed
+              .map((lane) => `${lane.branch} (${lane.error})`)
+              .join('; ')}`
+          ))
+        }
+      }
+      return result
+    } catch (error) {
+      get().reportError(error)
+      return { kind: 'rejected', reason: message(error) }
+    }
+  },
+  async createPullRequest(input) {
+    // The click's intent, captured before any await. Every later step checks it.
+    const token = input.token
+    try {
+      const verdict = evaluateCreatePrIntent(token, input.current)
+      if (verdict.kind === 'conflict') {
+        // Aborting is the honest outcome: the payload no longer describes what the user asked for.
+        // Switching to another worktree does NOT reach here — that returns proceed-detached.
+        get().reportError(new Error(verdict.reason))
+        return { kind: 'refused', reason: verdict.reason }
+      }
+      // The eligibility ladder runs first so the user gets the actionable reason ("push it first",
+      // "run gh auth login") instead of whatever gh happens to say when it fails. It is a HINT, not
+      // the authority: main re-checks the base against the remote and refuses on its own terms.
+      if (input.eligibility) {
+        const verdictLadder = evaluatePrEligibility(input.eligibility)
+        if (!verdictLadder.eligible) {
+          const reason = verdictLadder.blockers.map((key) => PR_BLOCKER_MESSAGES[key]).join(' ')
+          get().reportError(new Error(reason))
+          return { kind: 'refused', reason }
+        }
+      }
+      // gh is a Desktop-main capability reached through the preload bridge, not the shared mock `api`
+      // (the web preview has no gh and no processes). Absent bridge is a refusal, never a pretend PR.
+      const bridge = window.agentmux?.gh
+      if (!bridge) {
+        const reason = 'Opening a pull request needs the desktop app.'
+        get().reportError(new Error(reason))
+        return { kind: 'refused', reason }
+      }
+      // Main re-checks the base against the remote and is the final authority; an unavailable check
+      // is a refusal there, not a pass.
+      const result = await bridge.createPullRequest(input.workspaceId, {
+        title: input.title,
+        body: input.body,
+        base: token.baseRef,
+        ...(input.draft === undefined ? {} : { draft: input.draft })
+      })
+      // A refusal or failure is surfaced but NOT swallowed into a cleared composer: the caller keeps
+      // the title and body so one bad network moment does not eat what the user wrote.
+      if (result.kind !== 'created') {
+        get().reportError(new Error(result.kind === 'refused' ? result.reason : result.message))
+      }
+      return result
+    } catch (error) {
+      get().reportError(error)
+      return { kind: 'failed', message: message(error) }
+    }
+  },
+  async keepOneOfFanOut(input) {
+    try {
+      const result = await api.workspaces.keepOneOfFanOut(input)
+      set({ config: await api.config.get() })
+      // A lane refused because it still holds uncommitted work is reported, never silently dropped —
+      // losing a bake-off is not a reason to discard someone's work.
+      const retained = result.outcomes.filter((outcome) => outcome.status === 'retained')
+      if (retained.length > 0) {
+        get().reportError(new Error(
+          `${retained.length} worktree(s) kept because they still hold changes: ${retained
+            .map((outcome) => outcome.reason)
+            .join('; ')}`
+        ))
+      }
+      return result
+    } catch (error) {
+      get().reportError(error)
+      return null
+    }
   },
   focusTabGroup(workspaceId, tabGroupId) {
     const layout = get().layouts[workspaceId]
@@ -1255,13 +1405,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         throw controlFailure('AGENT_EXECUTOR_NOT_CONFIGURED', 'Agent Executor is not configured.')
       }
       const agentSessionId = crypto.randomUUID()
+      // The target Topic is carried explicitly by the destination View's binding. A brand-new
+      // Tab has no binding and therefore no Topic — we never mint one from the Tab identity.
       const scratchTopicId = isScratchWorkspaceId(workspace.id)
-        ? (plan.kind === 'tab' ? plan.tabId : plan.tabs[plan.tabId]?.topicId)
+        ? plan.tabs[plan.tabId]?.topicId
         : undefined
       if (scratchTopicId && !isScratchTopicId(scratchTopicId)) {
         throw controlFailure('REGION_TOPIC_MISMATCH', 'Control destination has an invalid Scratch Topic.')
       }
-      if (scratchTopicId && plan.kind === 'tab') plan.tabs[plan.tabId] = { ...plan.tabs[plan.tabId]!, topicId: scratchTopicId }
       const pending: AgentWorkbenchSurface = {
         regionId: plan.regionId, kind: 'agent', phase: 'launching', workspaceId: workspace.id, sessionId: agentSessionId
       }
@@ -1658,6 +1809,40 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
     }))
   },
+  moveSessionViewToWorkspace(regionId, targetWorkspaceId) {
+    const state = get()
+    const owner = findWorkbenchRegion(state.tabs, regionId)
+    if (!owner) return
+    const surface = owner.surface
+    // Only a Session projection can be moved; a file/launcher/browser Region has no cwd to protect
+    // and no Session identity to relocate.
+    if (surface.kind !== 'agent' && surface.kind !== 'terminal') return
+    // A closing source View must not be half-moved out from under its own teardown. Surface the
+    // refusal on the existing error banner rather than mutating the layout.
+    if (!workbenchViewCloseAllowsView(state.closingWorkbenchViews, owner.tab.id)) {
+      get().reportError(new Error('The View is closing'))
+      return
+    }
+    const result = reduceMoveSessionView({
+      tabs: state.tabs,
+      layouts: state.layouts,
+      regionId,
+      sessionId: surface.sessionId,
+      targetWorkspaceId,
+      workspaceIds: (state.config?.workspaces ?? []).map((workspace) => workspace.id),
+      mint: { tabId: `view:${crypto.randomUUID()}`, tabGroupId: newTabGroupId(), regionId: newRegionId() }
+    })
+    if (result.kind !== 'moved') return
+    // One atomic layout replacement, then navigate with the same focus path selectSession uses —
+    // no second navigation route, no fabricated cwd.
+    set({
+      activeWorkspaceId: result.target.workspaceId,
+      mainSurface: 'workbench',
+      tabs: result.tabs,
+      layouts: result.layouts
+    })
+    get().focusRegion(result.target.workspaceId, result.target.tabId, result.target.regionId)
+  },
   splitRegion(workspaceId, tabId, regionId, direction) {
     const current = get()
     if (!workbenchViewCloseAllowsView(current.closingWorkbenchViews, tabId)) return
@@ -1950,6 +2135,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     })
     return snapshot
   },
+  setScratchTopicOrder(order) {
+    set({ scratchTopicOrder: [...order] })
+  },
   async openScratchTopic(topicId) {
     const state = get()
     const workspace = state.config?.workspaces.find((item) => item.id === state.activeWorkspaceId)
@@ -1969,6 +2157,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (boundTab) {
         const groupId = tabGroupForTab(layout, boundTab.id)!
         return {
+          // 切 Topic 就像切 Branch：换掉那一组 Tab。真相仍是这一份 layout，
+          // 过滤发生在渲染时（scratch-topic-layout.ts），不建第二份 Tab 状态。
+          activeScratchTopicId: topicId,
           layouts: {
             ...current.layouts,
             [workspace.id]: activateLayoutTab(layout, groupId, boundTab.id)
@@ -1977,6 +2168,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       const tab = { ...newLauncherTab(workspace.id), topicId }
       return {
+        activeScratchTopicId: topicId,
         tabs: { ...current.tabs, [tab.id]: tab },
         layouts: {
           ...current.layouts,
@@ -2132,12 +2324,25 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   async refreshDocument(workspaceId, path) {
     await refreshFileDocument(workspaceId, path)
   },
-  async launchBoardAgent(workspaceId, executorId, prompt) {
+  async launchBoardAgent(workspaceId, executorId, prompt, topicId) {
     await get().selectWorkspace(workspaceId)
     set({ mainSurface: 'board' })
+    // Topic 行的 Inbox 带 Topic 上下文起 Agent。绑定不在这里重造：`openScratchTopic` 已经是
+    // 「找到或新建一个绑到该 Topic 的 View」的唯一路径，走它一遍，新 Agent 的 workspacePath 与
+    // scratchTopicId 就与从 Topic 面板起的完全一致——Board 不是第二条 Topic 绑定路径。
+    if (topicId) await get().openScratchTopic(topicId)
     const layout = get().layouts[workspaceId]
     if (!layout) throw new Error('Workspace layout is unavailable')
-    await get().launchAgent(executorId, prompt, layout.activeGroupId)
+    const group = findGroup(layout, layout.activeGroupId)
+    const boundTab = topicId && group?.activeTabId ? get().tabs[group.activeTabId] : undefined
+    if (topicId && boundTab?.topicId !== topicId) {
+      throw new Error('Scratch Topic View is unavailable')
+    }
+    const launcher = boundTab &&
+      boundTab.regions[boundTab.layout.activeRegionId]?.kind === 'launcher'
+      ? { tabId: boundTab.id, regionId: boundTab.layout.activeRegionId }
+      : undefined
+    await get().launchAgent(executorId, prompt, layout.activeGroupId, launcher)
   },
   async launchAgent(executorId, prompt, tabGroupId, launcher, launchOptions) {
     const state = get()
@@ -2156,8 +2361,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const targetTab = launcherTab ?? newLauncherTab(workspace.id)
     const tabId = targetTab.id
     if (!workbenchViewCloseAllowsView(state.closingWorkbenchViews, tabId)) throw new Error('The View is closing')
+    // The target Topic is the View's explicit binding. An unbound View launches with no Topic;
+    // we never fabricate one from the Tab identity (a Tab id is not a Topic).
     const scratchTopicId = isScratchWorkspaceId(workspace.id)
-      ? (targetTab.topicId ?? tabId)
+      ? targetTab.topicId
       : undefined
     if (scratchTopicId && !isScratchTopicId(scratchTopicId)) {
       throw new Error('Scratch Agent View has an invalid Topic identity')
@@ -2977,6 +3184,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   )),
   partialize: (state) => ({
     restoredWorkbench: projectPersistedWorkbench({ tabs: state.tabs, layouts: state.layouts }),
-    unclaimedTerminalSessionIds: state.unclaimedTerminalSessionIds
+    unclaimedTerminalSessionIds: state.unclaimedTerminalSessionIds,
+    // 拖出来的顺序是用户意图，重开应该还在。它只是偏好：恢复时对不上磁盘的条目会被 orderTopics 丢掉。
+    scratchTopicOrder: state.scratchTopicOrder
   })
 }))

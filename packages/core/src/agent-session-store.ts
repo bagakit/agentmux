@@ -808,6 +808,11 @@ export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgent
     retiredRuns: retiredRuns(source.retiredRuns, currentRun),
     hookBindingId: string(source.hookBindingId, 'hookBindingId'),
     hookToken: string(source.hookToken, 'hookToken'),
+    // 只有 hash 落盘。缺失是合法的（旧记录或尚未激活），故按可选读取——
+    // 但一旦有值就必须是字符串，不接受混入别的类型。
+    ...(source.capabilityHash === undefined
+      ? {}
+      : { capabilityHash: string(source.capabilityHash, 'capabilityHash') }),
     outputCursorBytes: timestamp(source.outputCursorBytes, 'outputCursorBytes'),
     createdAt: timestamp(source.createdAt, 'createdAt'),
     updatedAt: timestamp(source.updatedAt, 'updatedAt'),
