@@ -557,6 +557,12 @@ export class RuntimeController {
       const run = await client.createTerminal({
         createOperationId: request.createOperationId ?? randomUUID(),
         workspacePath: request.workspacePath,
+        ...(request.shellCommand === undefined
+          ? {}
+          : {
+              command: process.env.SHELL ?? '/bin/sh',
+              args: ['-lc', request.shellCommand]
+            }),
         ...(request.cols === undefined ? {} : { cols: request.cols }),
         ...(request.rows === undefined ? {} : { rows: request.rows })
       })
@@ -701,29 +707,50 @@ export class RuntimeController {
 
   async submitPrompt(
     control: Extract<SessionControl, { kind: 'agent' }>,
-    prompt: string,
-    config: AppConfig
+    prompt: string
   ): Promise<void> {
     await this.trackHostLifecycleOperation(control.hostId, async () => {
       const client = await this.connectedClient(control.hostId)
       const status = await client.statusAgent(control.agentSessionId)
-      if (status.run.state === 'running') {
-        await client.submitAgentPrompt({
-          agentSessionId: control.agentSessionId,
-          operationId: randomUUID(),
-          prompt
-        })
-        return
+      if (status.run.runId !== control.run.runId) {
+        throw new AgentMuxError('Agent Session changed before prompt submission.', 'STALE_AGENT_SESSION')
       }
-      const executor = requireSessionExecutor(config, status.session)
-      await client.resumeAgent({
+      if (status.run.state !== 'running') {
+        throw new AgentMuxError('Agent Session is not running. Use explicit resume.', 'SESSION_NOT_RUNNING')
+      }
+      await client.submitAgentPrompt({
         agentSessionId: control.agentSessionId,
         operationId: randomUUID(),
+        prompt
+      })
+    })
+  }
+
+  async resumeSession(
+    control: Extract<SessionControl, { kind: 'agent' }>,
+    prompt: string,
+    operationId: string,
+    config: AppConfig
+  ): Promise<SessionSnapshot> {
+    return await this.trackHostLifecycleOperation(control.hostId, async () => {
+      const client = await this.connectedClient(control.hostId)
+      const status = await client.statusAgent(control.agentSessionId)
+      if (status.run.runId !== control.run.runId) {
+        throw new AgentMuxError('Agent Session changed before explicit resume.', 'STALE_AGENT_SESSION')
+      }
+      const executor = requireSessionExecutor(config, status.session)
+      const resumed = await client.resumeAgent({
+        agentSessionId: control.agentSessionId,
+        operationId,
         prompt,
         args: executor.args,
         env: executor.env,
         commandOverride: executor.command
       })
+      if (resumed.agentSessionId !== control.agentSessionId) {
+        throw new AgentMuxError('Agent resume returned another Session identity.', 'LAUNCH_RESULT_MISMATCH')
+      }
+      return await this.sessionById(client, control.agentSessionId, config)
     })
   }
 

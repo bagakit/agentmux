@@ -13,8 +13,8 @@ import type {
   SessionSnapshot,
   WorkspaceBranchRecord
 } from '../../../shared/contracts'
-import type { AgentMuxCompositionRequest, AgentMuxCompositionResult } from '@agentmux/core'
-import { createRendererCompositionApi } from './composition-api'
+import type { AgentMuxControlRequest, AgentMuxControlResult } from '@agentmux/core'
+import { createRendererControlApi } from './control-api'
 import {
   SCRATCH_TOPIC_TITLE_MAX_LENGTH,
   scratchTopicDirectoryName,
@@ -156,10 +156,10 @@ const mockOutput = new Map<string, string>([
   ['session-claude', 'Claude Code\r\n\r\nI need permission to run the material snapshot suite.\r\n']
 ])
 
-const mockCompositionListeners = new Set<(
-  request: AgentMuxCompositionRequest,
+const mockControlListeners = new Set<(
+  request: AgentMuxControlRequest,
   signal: AbortSignal
-) => AgentMuxCompositionResult | Promise<AgentMuxCompositionResult>>()
+) => AgentMuxControlResult | Promise<AgentMuxControlResult>>()
 
 const mockTimelines: Record<string, AgentTimelineSnapshot> = {
   'session-codex': {
@@ -532,10 +532,10 @@ const mockApi: AgentMuxDesktopApi = {
       installed: !(hostId === 'studio' && ['hermes', 'pi'].includes(executorId))
     })
   },
-  composition: {
+  control: {
     onRequest(listener) {
-      mockCompositionListeners.add(listener)
-      return () => mockCompositionListeners.delete(listener)
+      mockControlListeners.add(listener)
+      return () => mockControlListeners.delete(listener)
     }
   },
   sessions: {
@@ -672,6 +672,17 @@ const mockApi: AgentMuxDesktopApi = {
     },
     submitPrompt: async (control, prompt) => {
       await mockApi.sessions.write(control, `${prompt.trim()}\r`)
+    },
+    resume: async (control, prompt) => {
+      const session = mockSnapshot.sessions.find((item) => item.id === control.agentSessionId)
+      if (!session || session.kind !== 'agent') throw new Error(`Session not found: ${control.agentSessionId}`)
+      const runId = crypto.randomUUID()
+      session.processState = 'running'
+      session.status = { state: 'running', source: 'run-process', observedAt: Date.now() }
+      session.updatedAt = Date.now()
+      session.control = { ...session.control, run: { runId } }
+      await mockApi.sessions.write(session.control, `${prompt.trim()}\r`)
+      return structuredClone(session)
     },
     acknowledge: async () => {},
     interrupt: async () => {},
@@ -876,7 +887,7 @@ function requireDesktopApi(): AgentMuxDesktopApi {
   const preload: AgentMuxPreloadApi = window.agentmux
   return {
     ...preload,
-    composition: createRendererCompositionApi(preload.composition)
+    control: createRendererControlApi(preload.control)
   }
 }
 

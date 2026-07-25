@@ -103,6 +103,21 @@ const runtimeFixture = vi.hoisted(() => {
     readonly createAgent = vi.fn(async () => {
       throw new Error('Agent launch fixture stopped after input capture')
     })
+    readonly createTerminal = vi.fn(async () => ({
+      runId: 'terminal-run',
+      kind: 'terminal' as const,
+      providerId: null,
+      executorId: null,
+      agentSessionId: null,
+      workspacePath: '/repo',
+      pid: 44,
+      state: 'running' as const,
+      cols: 80,
+      rows: 24,
+      observedAt: 1,
+      latestOutputBytes: 0,
+      acceptedInputBytes: 0
+    }))
     readonly stopAgent = vi.fn(async () => {})
     readonly stopTerminal = vi.fn(async () => {})
     readonly resizeAgent = vi.fn(async () => ({ runId: 'agent-run', cols: 80, rows: 24 }))
@@ -350,6 +365,39 @@ describe('RuntimeController configuration transaction', () => {
     controller.commit(preparation)
   })
 
+  it('maps one Terminal shell command only at the Desktop creation boundary', async () => {
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    client.runtimeProjection.mockResolvedValue({
+      hostId: 'local',
+      subjects: [{
+        subjectId: 'terminal:local:terminal-run',
+        kind: 'terminal',
+        hostId: 'local',
+        workspacePath: '/repo',
+        run: await client.createTerminal.mock.results[0]?.value ?? {
+          runId: 'terminal-run', kind: 'terminal', providerId: null, executorId: null,
+          agentSessionId: null, workspacePath: '/repo', pid: 44, state: 'running', cols: 80,
+          rows: 24, observedAt: 1, latestOutputBytes: 0, acceptedInputBytes: 0
+        }
+      }]
+    })
+
+    await controller.launchTerminal({
+      hostId: 'local',
+      workspacePath: '/repo',
+      createOperationId: 'terminal-op',
+      shellCommand: 'pnpm test:fast'
+    }, localConfig)
+
+    expect(client.createTerminal).toHaveBeenCalledWith({
+      createOperationId: 'terminal-op',
+      workspacePath: '/repo',
+      command: process.env.SHELL ?? '/bin/sh',
+      args: ['-lc', 'pnpm test:fast']
+    })
+  })
+
   it.each([true, false])('passes the Executor guide setting and Provider identity to Core (%s)', async (injectAgentMuxGuide) => {
     const controller = await configuredController()
     const client = runtimeFixture.FakeClient.instances[0]!
@@ -564,7 +612,7 @@ describe('RuntimeController configuration transaction', () => {
     expect(client.stopAgent).toHaveBeenCalledWith('agent-1', { runId: 'run-1' })
   })
 
-  it.each(['submitPrompt', 'recoverSession'] as const)(
+  it.each(['resumeSession', 'recoverSession'] as const)(
     'fails %s closed when an existing Executor was rebound to another Provider',
     async (operation) => {
       const controller = await configuredController()
@@ -590,8 +638,8 @@ describe('RuntimeController configuration transaction', () => {
         run: { runId: 'run-1' }
       }
 
-      const result = operation === 'submitPrompt'
-        ? controller.submitPrompt(control, 'continue', config)
+      const result = operation === 'resumeSession'
+        ? controller.resumeSession(control, 'continue', 'op-1', config)
         : controller.recoverSession(control, config)
 
       await expect(result).rejects.toThrow(
@@ -622,6 +670,53 @@ describe('RuntimeController configuration transaction', () => {
     expect(client.submitAgentPrompt).toHaveBeenCalledWith(expect.objectContaining({
       agentSessionId: 'agent-1',
       prompt: 'hello'
+    }))
+  })
+
+  it('rejects send for an ended Run and resumes only through the explicit operation', async () => {
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const previous = agentStatusFixture()
+    client.statusAgent.mockResolvedValue(previous)
+    const control = {
+      kind: 'agent' as const,
+      hostId: 'local',
+      agentSessionId: 'agent-1',
+      run: { runId: 'run-1' }
+    }
+
+    await expect(controller.submitPrompt(control, 'continue')).rejects.toMatchObject({
+      code: 'SESSION_NOT_RUNNING'
+    })
+    expect(client.resumeAgent).not.toHaveBeenCalled()
+
+    client.resumeAgent.mockResolvedValue({ ...previous.session, run: { runId: 'run-2' } })
+    client.runtimeProjection.mockResolvedValue({
+      hostId: 'local',
+      subjects: [{
+        subjectId: 'agent:local:agent-1',
+        kind: 'agent',
+        hostId: 'local',
+        workspacePath: '/repo',
+        providerId: 'codex',
+        executorId: 'review',
+        agentSession: { ...previous.session, run: { runId: 'run-2' } },
+        run: { ...previous.run, runId: 'run-2', state: 'running', exitCode: undefined }
+      }]
+    })
+    const resumeConfig: AppConfig = {
+      ...localConfig,
+      executors: {
+        review: {
+          label: 'Review Codex', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: true
+        }
+      }
+    }
+    await expect(controller.resumeSession(control, 'continue', 'resume-op', resumeConfig)).resolves.toMatchObject({
+      id: 'agent-1', control: { run: { runId: 'run-2' } }
+    })
+    expect(client.resumeAgent).toHaveBeenCalledWith(expect.objectContaining({
+      agentSessionId: 'agent-1', operationId: 'resume-op', prompt: 'continue'
     }))
   })
 
