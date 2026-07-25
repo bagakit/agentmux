@@ -1,6 +1,17 @@
 import { Bot, ChevronRight, CircleDot, Hammer, Info, ShieldAlert, UserRound } from 'lucide-react'
-import { Fragment, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentTimelineItem } from '../../../shared/contracts'
+import {
+  createRulerScale,
+  describeReadout,
+  describeRulerAxis,
+  formatOffset,
+  rulerBand,
+  stepRulerSelection,
+  type RulerReadoutText,
+  type RulerScale
+} from '../lib/activity-ruler'
+import { terminalLinkPreviewAnchor } from '../lib/terminal-link-gesture'
 import { AgentMarkdown } from './AgentMarkdown'
 
 function Glyph({ kind, size = 12 }: { kind: AgentTimelineItem['kind']; size?: number }) {
@@ -18,15 +29,6 @@ function Glyph({ kind, size = 12 }: { kind: AgentTimelineItem['kind']; size?: nu
  */
 function isTurn(kind: AgentTimelineItem['kind']): boolean {
   return kind === 'user_message' || kind === 'assistant_message'
-}
-
-/** Offset from the first event. Tabular numerals keep the gutter from shifting as it ticks. */
-function formatOffset(createdAt: number, origin: number): string {
-  const ms = Math.max(0, createdAt - origin)
-  if (ms < 1_000) return `+${ms}ms`
-  if (ms < 60_000) return `+${(ms / 1_000).toFixed(1)}s`
-  const minutes = Math.floor(ms / 60_000)
-  return `+${minutes}m${String(Math.floor((ms % 60_000) / 1_000)).padStart(2, '0')}s`
 }
 
 /**
@@ -81,39 +83,186 @@ function tally(items: AgentTimelineItem[]): Array<{ item: AgentTimelineItem; cou
   return rows
 }
 
-function Ruler({ items, origin, span }: { items: AgentTimelineItem[]; origin: number; span: number }) {
-  // With no spread between the first and last event there is no honest time to map, so the axis falls
-  // back to even ordinal spacing and says so with a dashed rail — otherwise every tick would stack on
-  // the left edge and read as a single event.
-  const axis = span > 0 ? 'temporal' : 'ordinal'
-  const position = (item: AgentTimelineItem, index: number): number => {
-    if (items.length <= 1) return 0
-    return axis === 'temporal'
-      ? ((item.createdAt - origin) / span) * 100
-      : (index / (items.length - 1)) * 100
+/** The client-space rectangle the readout must stay clear of and inside — the whole ruler track. */
+function readoutAnchor(
+  trackRect: DOMRect,
+  feedRect: DOMRect,
+  pointerX: number
+): { left: number; top: number; placement: 'above' | 'below' } {
+  // Reuse the exact anchoring the terminal link preview established: clear a full "cell" (here, half
+  // the track height from its centre) plus the gap so the readout never covers the segment it
+  // describes, and flip below when there is no room above. Keeping one implementation means the two
+  // hovering surfaces can never drift apart on where "not covering the thing" lands.
+  return terminalLinkPreviewAnchor({
+    pointer: { x: pointerX, y: trackRect.top + trackRect.height / 2 },
+    cellHeight: trackRect.height / 2,
+    viewport: {
+      left: feedRect.left,
+      top: feedRect.top,
+      right: feedRect.right,
+      bottom: feedRect.bottom
+    }
+  })
+}
+
+type Readout = {
+  text: RulerReadoutText
+  left: number
+  top: number
+  placement: 'above' | 'below'
+}
+
+/**
+ * The interactive temporal axis. Ticks sit at their real elapsed fraction (or even ordinal spacing
+ * when there is no spread to map). It is one focusable slider: click or keyboard both resolve a
+ * position to a real event through the shared {@link RulerScale} and ask the log to scroll there;
+ * hover and focus read the same scale for the moment (or ordinal) at a position without ever moving
+ * the selection.
+ */
+function Ruler({
+  items,
+  scale,
+  selectedIndex,
+  band,
+  onSelect
+}: {
+  items: AgentTimelineItem[]
+  scale: RulerScale
+  selectedIndex: number | null
+  band: ReturnType<typeof rulerBand>
+  onSelect: (index: number) => void
+}) {
+  const trackRef = useRef<HTMLDivElement>(null)
+  const [readout, setReadout] = useState<Readout | null>(null)
+  const axisLabel = describeRulerAxis(scale)
+
+  const feedRect = (): DOMRect | null =>
+    trackRef.current?.closest('.activity-feed')?.getBoundingClientRect() ?? null
+
+  const showReadout = (index: number, pointerX: number): void => {
+    const track = trackRef.current
+    const feed = feedRect()
+    if (!track || !feed) return
+    const trackRect = track.getBoundingClientRect()
+    const anchor = readoutAnchor(trackRect, feed, pointerX)
+    setReadout({ text: describeReadout(scale.readoutOf(index), scale.count), ...anchor })
   }
+
+  const fractionFromClientX = (clientX: number): number => {
+    const rect = trackRef.current?.getBoundingClientRect()
+    if (!rect || rect.width === 0) return 0
+    return (clientX - rect.left) / rect.width
+  }
+
+  const handleClick = (event: React.MouseEvent<HTMLDivElement>): void => {
+    const readoutAt = scale.readoutAtFraction(fractionFromClientX(event.clientX))
+    if (readoutAt) onSelect(readoutAt.index)
+  }
+
+  const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>): void => {
+    const at = scale.readoutAtFraction(fractionFromClientX(event.clientX))
+    if (at) showReadout(at.index, event.clientX)
+  }
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+    const next = stepRulerSelection(selectedIndex, event.key, scale.count)
+    if (next === null || next === selectedIndex) {
+      // Home/End with an existing selection can equal current; still consume the navigation keys so
+      // the surrounding scroll container does not also act on them.
+      if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) {
+        event.preventDefault()
+      }
+      return
+    }
+    event.preventDefault()
+    onSelect(next)
+    // Focus keeps the same readout the pointer would show, anchored over the newly selected tick.
+    const track = trackRef.current
+    if (track) {
+      const rect = track.getBoundingClientRect()
+      showReadout(next, rect.left + scale.fractionOf(next) * rect.width)
+    }
+  }
+
+  const handleFocus = (): void => {
+    if (selectedIndex === null) return
+    const track = trackRef.current
+    if (track) {
+      const rect = track.getBoundingClientRect()
+      showReadout(selectedIndex, rect.left + scale.fractionOf(selectedIndex) * rect.width)
+    }
+  }
+
+  const selectedText =
+    selectedIndex === null ? undefined : describeReadout(scale.readoutOf(selectedIndex), scale.count).summary
 
   return (
     <div className="activity-ruler">
-      <div className="activity-ruler__track" data-axis={axis} aria-hidden="true">
+      <div
+        ref={trackRef}
+        className="activity-ruler__track"
+        data-axis={scale.axis}
+        role="slider"
+        tabIndex={0}
+        aria-label={axisLabel}
+        aria-valuemin={1}
+        aria-valuemax={scale.count}
+        aria-valuenow={(selectedIndex ?? 0) + 1}
+        aria-valuetext={selectedText ?? axisLabel}
+        onClick={handleClick}
+        onPointerMove={handlePointerMove}
+        onPointerLeave={() => setReadout(null)}
+        onKeyDown={handleKeyDown}
+        onFocus={handleFocus}
+        onBlur={() => setReadout(null)}
+      >
         <span className="activity-ruler__rail" />
+        {band ? (
+          <span
+            className="activity-ruler__band"
+            data-axis={scale.axis}
+            style={{ left: `${band.startFraction * 100}%`, right: `${(1 - band.endFraction) * 100}%` }}
+            aria-hidden="true"
+          />
+        ) : null}
         {items.map((item, index) => (
           <span
             key={item.id}
             className={`activity-ruler__tick activity-ruler__tick--${item.kind}`}
             data-status={item.status}
-            title={`${new Date(item.createdAt).toLocaleTimeString()} · ${item.title}`}
-            style={{ left: `${position(item, index)}%` }}
+            data-selected={index === selectedIndex ? '' : undefined}
+            style={{ left: `${scale.fractionOf(index) * 100}%` }}
           />
         ))}
       </div>
-      <span className="activity-ruler__span">{formatOffset(origin + span, origin)}</span>
+      <span className="activity-ruler__span">{formatOffset(scale.origin + scale.span, scale.origin)}</span>
       <span
         className="activity-ruler__note"
         title="Structured Session activity only · never Terminal output or private chain-of-thought"
       >
         <Info size={12} />
       </span>
+      {readout ? (
+        <div
+          className="activity-ruler__readout"
+          data-placement={readout.placement}
+          role="status"
+          style={{ left: readout.left, top: readout.top }}
+        >
+          {readout.text.axis === 'temporal' ? (
+            <Fragment>
+              <span className="activity-ruler__readout-time">
+                {new Date(readout.text.at).toLocaleTimeString()}
+              </span>
+              <span className="activity-ruler__readout-offset">{readout.text.offsetText} from start</span>
+            </Fragment>
+          ) : (
+            <span className="activity-ruler__readout-ordinal">
+              Event {readout.text.ordinal} of {readout.text.total}
+            </span>
+          )}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -236,6 +385,22 @@ function Run({ items, origin }: { items: AgentTimelineItem[]; origin: number }) 
   )
 }
 
+/** A segment paired with the half-open range of event indices it covers, so a position on the ruler
+ *  can find the row that hosts that event and the band can read which events are on screen. */
+type PlacedSegment = { entry: Segment; key: string; from: number; to: number }
+
+function placeSegments(segments: Segment[]): PlacedSegment[] {
+  const placed: PlacedSegment[] = []
+  let index = 0
+  for (const entry of segments) {
+    const size = entry.kind === 'run' ? entry.items.length : 1
+    const key = entry.kind === 'run' ? entry.id : entry.item.id
+    placed.push({ entry, key, from: index, to: index + size - 1 })
+    index += size
+  }
+  return placed
+}
+
 export function ActivityView({
   items,
   capability
@@ -244,8 +409,69 @@ export function ActivityView({
   capability: 'unavailable' | 'complete-events' | 'streaming'
 }) {
   const segments = useMemo(() => segment(items), [items])
+  const placed = useMemo(() => placeSegments(segments), [segments])
   const origin = items[0]?.createdAt ?? 0
-  const span = Math.max(0, (items[items.length - 1]?.createdAt ?? origin) - origin)
+  // The scale is the single source both the ruler and the log read from — width is irrelevant to it
+  // because every position is expressed as a 0..1 fraction and rendered as a percentage.
+  const scale = useMemo(() => createRulerScale(items.map((item) => item.createdAt), 1), [items])
+
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
+  const [visible, setVisible] = useState<{ from: number; to: number } | null>(null)
+  const band = useMemo(() => rulerBand(scale, visible), [scale, visible])
+
+  const logRef = useRef<HTMLDivElement>(null)
+  // Segment elements keyed by segment key, so a resolved event index can find its host row and the
+  // observer can watch each one.
+  const segmentEls = useRef(new Map<string, HTMLElement>())
+
+  const segmentForIndex = (index: number): PlacedSegment | undefined =>
+    placed.find((entry) => index >= entry.from && index <= entry.to)
+
+  const selectEvent = (index: number): void => {
+    setSelectedIndex(index)
+    const host = segmentForIndex(index)
+    const el = host ? segmentEls.current.get(host.key) : undefined
+    // Reuse the same scroll primitive the rest of the app uses to bring a row into view; there is no
+    // second scroll controller for the Activity log.
+    el?.scrollIntoView({ block: 'nearest' })
+  }
+
+  // The visible-range band is driven by an IntersectionObserver, not by a scroll handler: the browser
+  // reports crossings when they happen instead of us recomputing layout on every scroll frame. This is
+  // what keeps a reading decoration out of the scroll hot path.
+  useEffect(() => {
+    const root = logRef.current?.closest('.activity-feed')
+    if (!(root instanceof HTMLElement)) return
+    const onscreen = new Set<string>()
+    const ranges = new Map(placed.map((entry) => [entry.key, { from: entry.from, to: entry.to }]))
+    const recompute = (): void => {
+      let from = Infinity
+      let to = -Infinity
+      for (const key of onscreen) {
+        const range = ranges.get(key)
+        if (!range) continue
+        from = Math.min(from, range.from)
+        to = Math.max(to, range.to)
+      }
+      setVisible(to >= from ? { from, to } : null)
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const key = (entry.target as HTMLElement).dataset.segmentKey
+          if (!key) continue
+          if (entry.isIntersecting) onscreen.add(key)
+          else onscreen.delete(key)
+        }
+        recompute()
+      },
+      // The sticky ruler occupies the top of the scroll port; discount it so a row hidden behind the
+      // ruler is not counted as visible.
+      { root, rootMargin: '-34px 0px 0px 0px', threshold: 0 }
+    )
+    for (const el of segmentEls.current.values()) observer.observe(el)
+    return () => observer.disconnect()
+  }, [placed])
 
   if (capability === 'unavailable') {
     return (
@@ -266,19 +492,43 @@ export function ActivityView({
     )
   }
 
+  const registerSegment = (key: string) => (el: HTMLDivElement | null): void => {
+    if (el) {
+      el.dataset.segmentKey = key
+      segmentEls.current.set(key, el)
+    } else {
+      segmentEls.current.delete(key)
+    }
+  }
+
   return (
     <div className="activity-feed">
-      <Ruler items={items} origin={origin} span={span} />
-      <div className="activity-log">
-        {segments.map((entry) =>
-          entry.kind === 'run' ? (
-            <Run key={entry.id} items={entry.items} origin={origin} />
-          ) : isTurn(entry.item.kind) ? (
-            <Turn key={entry.item.id} item={entry.item} origin={origin} />
-          ) : (
-            <Row key={entry.item.id} item={entry.item} origin={origin} count={1} showSource />
-          )
-        )}
+      <Ruler
+        items={items}
+        scale={scale}
+        selectedIndex={selectedIndex}
+        band={band}
+        onSelect={selectEvent}
+      />
+      <div className="activity-log" ref={logRef}>
+        {placed.map(({ entry, key, from }) => (
+          // One wrapper per segment carries the scroll target, the observer key, and the selection
+          // marker, so the three log registers below stay unaware of the ruler wiring.
+          <div
+            key={key}
+            className="activity-log__segment"
+            ref={registerSegment(key)}
+            data-selected={from === selectedIndex ? '' : undefined}
+          >
+            {entry.kind === 'run' ? (
+              <Run items={entry.items} origin={origin} />
+            ) : isTurn(entry.item.kind) ? (
+              <Turn item={entry.item} origin={origin} />
+            ) : (
+              <Row item={entry.item} origin={origin} count={1} showSource />
+            )}
+          </div>
+        ))}
       </div>
     </div>
   )

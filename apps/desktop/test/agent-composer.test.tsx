@@ -86,41 +86,50 @@ describe('AgentComposer reusable surface', () => {
     expect(markup.match(/disabled=""/gu) ?? []).toHaveLength(1)
   })
 
-  it('switches primary action button to Stop and only displays single Stop action when isWorking is true', () => {
+  it('offers a single ■ that names interrupting THIS turn, not stopping the session', () => {
+    // The button calls Core's semantic interrupt, which ends the current turn and leaves the Run alive.
+    // Terminating the whole session is a different action living in the Tabbar, so this one must not say
+    // "Stop" — a word a user reads as "I lose the session", which makes them afraid to press it. The mark
+    // is ■ and the accessible name says "current turn"; the two entry points stay tellable apart.
     const markup = renderToStaticMarkup(createElement(AgentComposer, {
       value: 'Some text',
       disabled: false,
       placeholder: 'Ask the Agent…',
-      isWorking: true,
+      primaryAction: 'stop',
       onChange: vi.fn(),
       onSubmit: vi.fn(),
       onInterrupt: vi.fn()
     }))
 
     expect(markup).toContain('composer-send--working')
-    expect(markup).toContain('aria-label="Stop turn"')
-    expect(markup).toContain('Stop')
+    expect(markup).toContain('aria-label="Interrupt the current turn"')
+    // The mark carries it: a filled ■ glyph, no word that could be read as ending the session.
+    expect(markup).toContain('lucide-square')
+    expect(markup).not.toContain('>Stop')
+    // Exactly one primary action — Send is not also present while a turn is in flight.
     expect(markup).not.toContain('aria-label="Send"')
   })
 
-  it('handles Enter key appropriately for idle and working states', () => {
+  it('submits on Enter whether the primary action is Send or Stop — a working Agent can be steered', () => {
+    // The bug: one !isWorking flag made the working state swallow Enter, so a running Agent could only be
+    // stopped, never steered. Enter now submits in BOTH modes; Stop stays a button click, so mid-turn
+    // Enter can never be an accidental stop. Delivery (incl. codex's mid-turn refusal) is Core's call.
     const onSubmit = vi.fn()
     const onInterrupt = vi.fn()
 
-    // When idle and non-empty: Enter submits
     const idleComposer = AgentComposer({
       value: 'Fix bug',
       disabled: false,
       placeholder: 'Ask the Agent…',
-      isWorking: false,
+      primaryAction: 'send',
       onChange: vi.fn(),
       onSubmit,
       onInterrupt
     }) as unknown as { props: { children: [ { props: { onKeyDown(e: unknown): void } } ] } }
 
-    const textarea = idleComposer.props.children[0]
+    const idleTextarea = idleComposer.props.children[0]
     const preventDefault = vi.fn()
-    textarea.props.onKeyDown({ key: 'Enter', shiftKey: false, preventDefault })
+    idleTextarea.props.onKeyDown({ key: 'Enter', shiftKey: false, preventDefault })
     expect(preventDefault).toHaveBeenCalled()
     expect(onSubmit).toHaveBeenCalledTimes(1)
     expect(onInterrupt).not.toHaveBeenCalled()
@@ -128,12 +137,12 @@ describe('AgentComposer reusable surface', () => {
     onSubmit.mockClear()
     preventDefault.mockClear()
 
-    // When working: Enter does NOT submit and does NOT interrupt
+    // While working (primaryAction 'stop'): Enter STILL submits the steer, and never interrupts.
     const workingComposer = AgentComposer({
-      value: 'Fix bug',
+      value: 'Actually, try the other file',
       disabled: false,
       placeholder: 'Ask the Agent…',
-      isWorking: true,
+      primaryAction: 'stop',
       onChange: vi.fn(),
       onSubmit,
       onInterrupt
@@ -141,9 +150,44 @@ describe('AgentComposer reusable surface', () => {
 
     const workingTextarea = workingComposer.props.children[0]
     workingTextarea.props.onKeyDown({ key: 'Enter', shiftKey: false, preventDefault })
-    expect(preventDefault).not.toHaveBeenCalled()
-    expect(onSubmit).not.toHaveBeenCalled()
+    expect(preventDefault).toHaveBeenCalled()
+    expect(onSubmit).toHaveBeenCalledTimes(1)
     expect(onInterrupt).not.toHaveBeenCalled()
+  })
+
+  it('does not submit while an IME is confirming a candidate', () => {
+    const onSubmit = vi.fn()
+    const composer = AgentComposer({
+      value: '中文草稿',
+      disabled: false,
+      placeholder: 'Ask the Agent…',
+      onChange: vi.fn(),
+      onSubmit
+    }) as unknown as { props: { children: [{ props: { onKeyDown(e: unknown): void } }] } }
+    const textarea = composer.props.children[0]
+    const preventDefault = vi.fn()
+
+    // macOS/Chromium reports the candidate-confirming Enter with isComposing. Some IMEs use the
+    // legacy keyCode=229 instead, so both signals must remain submit-safe.
+    textarea.props.onKeyDown({
+      key: 'Enter',
+      shiftKey: false,
+      isComposing: true,
+      nativeEvent: { isComposing: true },
+      keyCode: 13,
+      preventDefault
+    })
+    textarea.props.onKeyDown({
+      key: 'Enter',
+      shiftKey: false,
+      isComposing: false,
+      nativeEvent: { isComposing: false },
+      keyCode: 229,
+      preventDefault
+    })
+
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(preventDefault).not.toHaveBeenCalled()
   })
 
   it('uses a transparent surface without a black drop shadow', () => {
@@ -156,4 +200,3 @@ describe('AgentComposer reusable surface', () => {
     expect(focusRule).not.toMatch(/#[0-9a-f]+/i)
   })
 })
-

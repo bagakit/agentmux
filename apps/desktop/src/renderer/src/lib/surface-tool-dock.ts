@@ -1,6 +1,12 @@
 import type { SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
 import { sessionBoardColumn } from './project-board'
-import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
+import { categoryFor, type AttentionCategory } from './attention-event'
+import type { AgentDisplayState } from '@agentmux/core'
+import {
+  scratchTopicIdFromWorkspacePath,
+  workspaceOwnsSessionPath,
+  type ScratchTopicSnapshot
+} from '../../../shared/scratch-topics'
 
 export const TOOL_DOCK_DEFAULT_WIDTH = 300
 export const TOOL_DOCK_MIN_WIDTH = 236
@@ -102,6 +108,57 @@ export function workspaceAgentGroups(
   }))
 }
 
+// One Agent as it appears under a Topic. `sessionId` is the stable identity used to dedupe the
+// on-disk collaborator record against a live Session projection; `live` is present only when a
+// running Session currently projects into this Topic.
+export type TopicAgent = {
+  sessionId: string
+  providerId: string
+  live: AgentSessionSnapshot | null
+}
+
+export type TopicWithAgents = ScratchTopicSnapshot & { agents: TopicAgent[] }
+
+// Projects each filesystem Topic's Agents as the union of its on-disk collaborators (durable
+// short memory in `.agents/`) and the live Agent Sessions whose cwd currently resolves to that
+// Topic directory. The Topic list is authoritative and comes straight from the filesystem
+// snapshot — Sessions are only *matched onto* it by their own workspace path, never used to
+// invent or reverse-derive a Topic. A Topic with zero Agents keeps an empty list rather than
+// disappearing.
+export function topicsWithAgents(
+  topics: readonly ScratchTopicSnapshot[],
+  sessions: readonly SessionSnapshot[],
+  workspace: Pick<WorkspaceRecord, 'id' | 'hostId' | 'path'>
+): TopicWithAgents[] {
+  const liveByTopic = new Map<string, Map<string, AgentSessionSnapshot>>()
+  for (const session of sessions) {
+    if (session.kind !== 'agent' || !workspaceOwnsSessionPath(workspace, session)) continue
+    const topicId = scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath)
+    if (!topicId) continue
+    const bucket = liveByTopic.get(topicId) ?? new Map<string, AgentSessionSnapshot>()
+    bucket.set(session.id, session)
+    liveByTopic.set(topicId, bucket)
+  }
+  return topics.map((topic) => {
+    const live = liveByTopic.get(topic.id) ?? new Map<string, AgentSessionSnapshot>()
+    const seen = new Set<string>()
+    const agents: TopicAgent[] = []
+    for (const collaborator of topic.collaborators) {
+      seen.add(collaborator.sessionId)
+      agents.push({
+        sessionId: collaborator.sessionId,
+        providerId: live.get(collaborator.sessionId)?.providerId ?? collaborator.providerId,
+        live: live.get(collaborator.sessionId) ?? null
+      })
+    }
+    for (const [sessionId, session] of live) {
+      if (seen.has(sessionId)) continue
+      agents.push({ sessionId, providerId: session.providerId, live: session })
+    }
+    return { ...topic, agents }
+  })
+}
+
 export function clampToolDockWidth(width: number): number {
   return Math.min(TOOL_DOCK_MAX_WIDTH, Math.max(TOOL_DOCK_MIN_WIDTH, width))
 }
@@ -115,4 +172,23 @@ export function getRenderedToolDockWidth(width: number, projectRailOpen: boolean
     TOOL_DOCK_MAX_WIDTH,
     Math.max(width, getToolDockMinimumWidth(projectRailOpen))
   )
+}
+
+/**
+ * 一个 Topic 里某个 Agent 现在怎么样了。
+ *
+ * Topic 行要回答的是状态，不是把每个 Agent 的全名平铺出来——名字用户已经知道，
+ * 他想知道的是"有没有在等我"。状态语汇复用窗口里那一套（`categoryFor` + `status--<state>`），
+ * 使这里的一个点与 Tab 角、名册行、注意力栏含义完全一致，不发明第三套。
+ *
+ * 没有 live Session 的协作者如实报 `disconnected`——它在磁盘上留了记录，但此刻没在跑，
+ * 假装它在运行会让整行的状态失去意义。
+ */
+export function topicAgentPresentation(agent: TopicAgent): {
+  state: AgentDisplayState
+  attention: AttentionCategory | null
+} {
+  if (!agent.live) return { state: 'disconnected', attention: null }
+  const state = agent.live.status.state
+  return { state, attention: categoryFor(state) }
 }

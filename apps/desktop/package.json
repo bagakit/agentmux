@@ -38,11 +38,16 @@
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-resizable-panels": "^2.1.7",
+    "remark-gfm": "^4.0.1",
+    "remark-parse": "^11.0.0",
+    "string-argv": "^0.3.2",
     "tldts": "7.4.10",
+    "unified": "^11.0.5",
     "zod": "^4.0.0",
     "zustand": "^5.0.0"
   },
   "devDependencies": {
+    "@types/mdast": "^4.0.4",
     "@types/node": "^24.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

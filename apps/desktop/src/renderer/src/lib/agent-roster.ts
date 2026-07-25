@@ -38,6 +38,9 @@ export type RosterRow = {
   // True when Core is holding a typed request for this Agent — the rows that make this a work queue
   // rather than a status list.
   awaitingReply: boolean
+  // 有多少条 Thread 还没被确认。与 awaitingReply 并列，因为它们回答的是同一个问题——
+  // "这一行需要我做点什么吗"——所以它是这份名册的一列，不是另开的第二个收件箱。
+  unacknowledgedThreads: number
   // What this Agent was authorized to do at spawn. Empty when the create declared nothing: absence
   // shows nothing at all, never a placeholder or an inferred default.
   scopes: RosterScope[]
@@ -89,6 +92,8 @@ export function resolveRosterScopes(
 export function buildAgentRoster(input: {
   sessions: readonly SessionSnapshot[]
   providerCatalog: readonly AgentCatalogEntry[]
+  /** 每个 Agent 名下未确认的 Thread 数。缺席读作 0——没有 Thread 不是缺数据。 */
+  unacknowledgedThreads?: Readonly<Record<string, number>>
 }): RosterRow[] {
   // A store that has not hydrated its catalog yet has none: that is an empty scope list, not a crash.
   // The roster must survive being opened during startup.
@@ -105,6 +110,7 @@ export function buildAgentRoster(input: {
       attention: categoryFor(session.status.state),
       observedAt: session.status.observedAt,
       awaitingReply: session.pendingInteraction !== undefined,
+      unacknowledgedThreads: input.unacknowledgedThreads?.[session.id] ?? 0,
       scopes: resolveRosterScopes(session.launchOptions, catalog.get(session.providerId))
     })
   }

@@ -6,6 +6,7 @@ import {
   ArrowUp,
   Columns2,
   Copy,
+  FolderSymlink,
   Send,
   ListX,
   PanelLeftClose,
@@ -13,9 +14,9 @@ import {
   X
 } from 'lucide-react'
 import type { ReactNode } from 'react'
-import { WORKBENCH_TAB_SPLIT_ACTIONS } from '../lib/workbench-tab-actions'
+import { WORKBENCH_TAB_SPLIT_ACTIONS, type MoveSessionViewTarget } from '../lib/workbench-tab-actions'
 import type { SplitDirection } from '../lib/workbench-layout'
-import { formatAgentMuxTabHandoff } from '../lib/tab-control-handoff'
+import { formatSessionAddress, formatViewAddress } from '../lib/agent-address'
 
 const SPLIT_ICONS = {
   left: ArrowLeft,
@@ -25,14 +26,19 @@ const SPLIT_ICONS = {
 } satisfies Record<SplitDirection, typeof ArrowRight>
 
 type WorkbenchTabCopyAction = {
-  label: 'Copy Tab ID' | 'Copy Agent Handoff' | 'Copy Session ID'
+  label: 'Copy View Address' | 'Copy Session Address'
   onSelect(): Promise<void>
 }
 
+/**
+ * 复制出去的是寻址方式，不是 id。裸 id 把工作留给接收方——它得先猜出这是哪一层身份、
+ * 再想该配哪个 flag——而那正是这次复制本该省掉的一步。地址一律来自 `agent-address`，
+ * 与 Region 菜单同源：同一个 Session 从两处复制出来必须逐字一致。
+ */
 export type WorkbenchTabCopyModel = {
-  tabId: WorkbenchTabCopyAction
-  agentHandoff: WorkbenchTabCopyAction
-  sessionId?: WorkbenchTabCopyAction
+  viewAddress: WorkbenchTabCopyAction
+  /** 只有这张 View 恰好承载唯一一个 Agent 时才有无歧义的 Session 地址可给。 */
+  sessionAddress?: WorkbenchTabCopyAction
 }
 
 export function createWorkbenchTabCopyModel({
@@ -52,19 +58,15 @@ export function createWorkbenchTabCopyModel({
     }
   }
   return {
-    tabId: {
-      label: 'Copy Tab ID',
-      onSelect: async () => copy(tabId, 'Copy Tab ID')
-    },
-    agentHandoff: {
-      label: 'Copy Agent Handoff',
-      onSelect: async () => copy(formatAgentMuxTabHandoff(tabId), 'Copy Agent Handoff')
+    viewAddress: {
+      label: 'Copy View Address',
+      onSelect: async () => copy(formatViewAddress(tabId), 'Copy View Address')
     },
     ...(agentSessionId
       ? {
-          sessionId: {
-            label: 'Copy Session ID' as const,
-            onSelect: async () => copy(agentSessionId, 'Copy Session ID')
+          sessionAddress: {
+            label: 'Copy Session Address' as const,
+            onSelect: async () => copy(formatSessionAddress(agentSessionId), 'Copy Session Address')
           }
         }
       : {})
@@ -85,7 +87,9 @@ export function WorkbenchTabContextMenu({
   onCloseOthers,
   onCloseLeft,
   onCloseRight,
-  onMoveToNewGroup
+  onMoveToNewGroup,
+  moveSessionViewTargets,
+  onMoveSessionView
 }: {
   children: ReactNode
   canCloseOthers: boolean
@@ -101,6 +105,10 @@ export function WorkbenchTabContextMenu({
   onCloseLeft(): void
   onCloseRight(): void
   onMoveToNewGroup(direction: SplitDirection): void
+  // 目的地来自纯模型。承载不了 Session 的 View、或没有别的 workspace 时为空——
+  // 搬过去是 no-op，故以缺席表达而非禁用的假按钮。
+  moveSessionViewTargets: ReadonlyArray<MoveSessionViewTarget>
+  onMoveSessionView(targetWorkspaceId: string): void
 }) {
   const copyModel = createWorkbenchTabCopyModel({
     tabId,
@@ -118,18 +126,14 @@ export function WorkbenchTabContextMenu({
           // already decline that, and the tab strip is the one place where the jump is visible.
           onCloseAutoFocus={(event) => event.preventDefault()}
         >
-          <ContextMenu.Item className="tab-context-menu__item" onSelect={copyModel.tabId.onSelect}>
-            <Copy size={14} />
-            <span>{copyModel.tabId.label}</span>
-          </ContextMenu.Item>
-          <ContextMenu.Item className="tab-context-menu__item" onSelect={copyModel.agentHandoff.onSelect}>
+          <ContextMenu.Item className="tab-context-menu__item" onSelect={copyModel.viewAddress.onSelect}>
             <Send size={14} />
-            <span>{copyModel.agentHandoff.label}</span>
+            <span>{copyModel.viewAddress.label}</span>
           </ContextMenu.Item>
-          {copyModel.sessionId ? (
-            <ContextMenu.Item className="tab-context-menu__item" onSelect={copyModel.sessionId.onSelect}>
+          {copyModel.sessionAddress ? (
+            <ContextMenu.Item className="tab-context-menu__item" onSelect={copyModel.sessionAddress.onSelect}>
               <Copy size={14} />
-              <span>{copyModel.sessionId.label}</span>
+              <span>{copyModel.sessionAddress.label}</span>
             </ContextMenu.Item>
           ) : null}
           <ContextMenu.Separator className="tab-context-menu__separator" />
@@ -157,6 +161,29 @@ export function WorkbenchTabContextMenu({
               </ContextMenu.SubContent>
             </ContextMenu.Portal>
           </ContextMenu.Sub>
+          {moveSessionViewTargets.length > 0 ? (
+            <ContextMenu.Sub>
+              <ContextMenu.SubTrigger className="tab-context-menu__item">
+                <FolderSymlink size={14} />
+                <span>Move to Workspace</span>
+                <span className="tab-context-menu__chevron">›</span>
+              </ContextMenu.SubTrigger>
+              <ContextMenu.Portal>
+                <ContextMenu.SubContent className="tab-context-menu" collisionPadding={8} sideOffset={4}>
+                  {moveSessionViewTargets.map((target) => (
+                    <ContextMenu.Item
+                      key={target.workspaceId}
+                      className="tab-context-menu__item"
+                      onSelect={() => onMoveSessionView(target.workspaceId)}
+                    >
+                      <FolderSymlink size={14} />
+                      <span>{target.name}</span>
+                    </ContextMenu.Item>
+                  ))}
+                </ContextMenu.SubContent>
+              </ContextMenu.Portal>
+            </ContextMenu.Sub>
+          ) : null}
           <ContextMenu.Separator className="tab-context-menu__separator" />
           <ContextMenu.Item className="tab-context-menu__item" onSelect={onClose}>
             <X size={14} />

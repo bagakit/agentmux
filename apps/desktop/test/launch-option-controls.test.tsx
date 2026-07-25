@@ -2,6 +2,12 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import type { LaunchOption } from '@agentmux/core'
+import {
+  CLAUDE_LAUNCH_OPTIONS,
+  CODEX_LAUNCH_OPTIONS,
+  CURSOR_LAUNCH_OPTIONS,
+  describeLaunchOptions
+} from '@agentmux/core'
 import { LaunchRefine } from '../src/renderer/src/components/LaunchOptionControls.js'
 
 const sandbox: LaunchOption = {
@@ -163,5 +169,59 @@ describe('LaunchRefine', () => {
     const segments = rowNode.props.children[1].props.children
     segments[0].props.onClick() // "Read only" — already selected
     expect(onSelect).toHaveBeenCalledWith('sandbox', null)
+  })
+})
+
+// The launcher (NewTabSurface) reads options purely from the selected Provider's catalog declaration —
+// `providerCatalog.find(entry => entry.id === selectedProviderId)?.launchOptions`, no providerId branch.
+// The catalog carries the DESCRIBE half projected through describeLaunchOptions (agent-provider.ts), so
+// projecting the SAME SSOT constant here reproduces exactly what the launcher hands LaunchRefine when each
+// Provider is selected. This proves the T-001 declaration reaches the launcher through the sealed contract
+// with NO renderer change — and that codex/cursor, declaring no model/effort, grow no such control.
+describe('claude model/effort reach the launcher through the sealed catalog projection', () => {
+  const launcherOptionsFor = (declarations: Parameters<typeof describeLaunchOptions>[0]): LaunchOption[] =>
+    describeLaunchOptions(declarations)
+
+  it('renders model and effort groups when claude is the selected Provider', () => {
+    const markup = renderToStaticMarkup(createElement(LaunchRefine, {
+      options: launcherOptionsFor(CLAUDE_LAUNCH_OPTIONS),
+      selection: {},
+      expanded: true,
+      onToggle: vi.fn(),
+      onSelect: vi.fn()
+    }))
+    // The two new option groups are present by their declared labels, alongside the unchanged permission-mode.
+    expect(markup).toContain('Model')
+    expect(markup).toContain('Effort')
+    expect(markup).toContain('Permission mode')
+    // Each group's enumerated choices render as segments — proving the whole declaration crossed, not a stub.
+    for (const label of ['Fable', 'Opus', 'Sonnet', 'Low', 'Medium', 'High', 'Extra high', 'Max']) {
+      expect(markup).toContain(label)
+    }
+    // argv NEVER reaches the renderer: the DESCRIBE half carries labels only, so the flag tokens the spawn
+    // path uses are absent from what the user's browser ever sees.
+    expect(markup).not.toContain('--model')
+    expect(markup).not.toContain('--effort')
+  })
+
+  it('grows no model or effort control for codex or cursor — absence hides, it never disables', () => {
+    for (const declarations of [CODEX_LAUNCH_OPTIONS, CURSOR_LAUNCH_OPTIONS]) {
+      const options = launcherOptionsFor(declarations)
+      // Neither provider declares a model or effort option, so the launcher hands LaunchRefine none.
+      expect(options.some((option) => option.id === 'model' || option.id === 'effort')).toBe(false)
+      const markup = renderToStaticMarkup(createElement(LaunchRefine, {
+        options,
+        selection: {},
+        expanded: true,
+        onToggle: vi.fn(),
+        onSelect: vi.fn()
+      }))
+      // The expanded panel draws these providers' real options but no Model/Effort group heading, and no
+      // launch argv leaks into the markup.
+      expect(markup).not.toContain('>Model<')
+      expect(markup).not.toContain('>Effort<')
+      expect(markup).not.toContain('--model')
+      expect(markup).not.toContain('--effort')
+    }
   })
 })

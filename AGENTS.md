@@ -31,3 +31,27 @@
     Run lifecycle、ordered bytes、Replay、Gap、Attachment 与权威 Runtime 事实由 ctxmux 持有；
     Provider、AgentSession、Hook、Permission、Prompt readiness、Agent status 与 semantic resume
     由 AgentMux 持有。不得在任一侧保留第二份实现或把 Level B 暗中降为 Level A。
+
+# 需求落地流程
+
+用户每提出一条需求（无论是新功能、体验抱怨还是技术债），**在动手改代码之前**必须先完成这两件事，
+缺一不可：
+
+1. **更新设计文档**。产品交互与行为约束写进 `docs/design/agentmux-desktop-interaction.md`，
+   视觉、密度与控件语言写进 `docs/design/agentmux-surface-density.md`。这两份是设计 SSOT，
+   用贴近用户原话的表述记录**约束**（"什么必须成立"），不记录实现步骤。
+   同一件事只写在一处，另一处引用它。
+2. **建或更新 feature-tracker**。用
+   `python3 /Users/bytedance/proj/priv/bagakit/bagakit/skills/harness/bagakit-feature-tracker/scripts/feature-tracker.py`
+   驱动：新需求若与现有 Feature 的 Closure 不同就 `create-feature`（`--tasks-file` 要
+   `schema: "bagakit.feature-task-plan.v1"` + 已 approved 的 review artifact），
+   同一 Closure 内则给现有 Feature 追加 task。每个 task 必须有可证伪的 acceptance 与
+   verification command。
+
+判 task done 要过两把尺，缺任一把都不算交付：
+
+- **变异测试**：改坏实现，确认对应测试变红。证明"这行代码在被测试用到"。
+- **零调用者检查**：`grep -rn "<symbol>" src | grep -v test`，**并排除定义它的那个文件本身**。
+  证明"这条能力接到了产品上"。命中全在定义文件内即为竖切未闭合，如实标 blocked。
+
+变异全绿不能替代零调用者检查——纯函数被纯函数的测试覆盖，那证明不了能力交付了。

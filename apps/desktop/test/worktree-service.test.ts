@@ -694,4 +694,128 @@ describe('WorktreeService', () => {
     expect(save).not.toHaveBeenCalled()
     expect((await stat(strandedPath)).isDirectory()).toBe(true)
   }, 20000)
+
+  // A real repository with several fan-out lanes, for the keep-the-winner teardown cases. Lanes are
+  // named <stem>-1, <stem>-2, … exactly as a fan-out plan produces them, so the projection that reads
+  // them as one bake-off (fanout-group) is exercised by the same shapes this service leaves behind.
+  const buildFanOutFixture = async (stem: string, count: number) => {
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-fanout-teardown-test-'))
+    temporaryRoots.push(root)
+    const repoPath = join(root, 'repo')
+    await mkdir(repoPath)
+    const executionHost = new LocalExecutionHost()
+    const git = async (...args: string[]) => {
+      const result = await executionHost.run('git', ['-C', repoPath, ...args])
+      expect(result.exitCode).toBe(0)
+      return result
+    }
+    await git('init', '-b', 'main')
+    await writeFile(join(repoPath, 'README.md'), '# fixture\n')
+    await git('add', 'README.md')
+    await git('-c', 'user.name=AgentMux Test', '-c', 'user.email=agentmux@example.invalid', 'commit', '-m', 'fixture')
+    const lanes: { id: string; branch: string; path: string }[] = []
+    for (let ordinal = 1; ordinal <= count; ordinal += 1) {
+      const branch = `${stem}-${ordinal}`
+      const path = join(root, 'worktrees', branch)
+      await git('worktree', 'add', '-b', branch, '--', path, 'HEAD')
+      lanes.push({ id: `lane-${branch}`, branch, path })
+    }
+    const fixtureConfig: AppConfig = {
+      ...config,
+      workspaces: [
+        { id: 'repo', name: 'repo', hostId: 'local', path: repoPath, kind: 'folder' },
+        ...lanes.map((lane) => ({
+          id: lane.id, name: lane.branch, hostId: 'local', path: lane.path,
+          kind: 'worktree' as const, repoPath, branch: lane.branch
+        }))
+      ]
+    }
+    return { root, repoPath, executionHost, lanes, config: fixtureConfig }
+  }
+
+  it('keeps the chosen lane untouched and tears the clean losers down', async () => {
+    const { executionHost, lanes, config: fixtureConfig } = await buildFanOutFixture('retry', 3)
+    const [winner, loserA, loserB] = lanes
+    const save = vi.fn(async (value: AppConfig) => value)
+    const service = new WorktreeService(() => executionHost, { save })
+
+    const result = await service.keepOneOfFanOut({
+      keepWorkspaceId: winner!.id,
+      removeWorkspaceIds: [loserA!.id, loserB!.id]
+    }, fixtureConfig)
+
+    // The winner's worktree stays exactly as it was — that is what "keep this one" means.
+    expect((await stat(winner!.path)).isDirectory()).toBe(true)
+    expect(result.config.workspaces.some((item) => item.id === winner!.id)).toBe(true)
+    expect(result.keptWorkspaceId).toBe(winner!.id)
+    // Both losers are gone from disk and from the record set.
+    expect(result.outcomes.every((outcome) => outcome.status === 'removed')).toBe(true)
+    await expect(stat(loserA!.path)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(stat(loserB!.path)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(result.config.workspaces.some((item) => item.id === loserA!.id || item.id === loserB!.id)).toBe(false)
+  }, 30000)
+
+  it('does not silently discard a losing lane that still holds uncommitted work', async () => {
+    const { executionHost, lanes, config: fixtureConfig } = await buildFanOutFixture('retry', 3)
+    const [winner, dirtyLoser, cleanLoser] = lanes
+    // The lane the user did not pick still carries an agent's untracked output. Discarding it because it
+    // lost the bake-off is data loss: the whole point of the T-002 protection is that this cannot happen
+    // silently. Removing that guard from removeWorktree must turn THIS assertion red.
+    await writeFile(join(dirtyLoser!.path, 'AGENT_NOTES.md'), 'work the agent did not commit\n')
+    const save = vi.fn(async (value: AppConfig) => value)
+    const service = new WorktreeService(() => executionHost, { save })
+
+    const result = await service.keepOneOfFanOut({
+      keepWorkspaceId: winner!.id,
+      removeWorkspaceIds: [dirtyLoser!.id, cleanLoser!.id]
+    }, fixtureConfig)
+
+    // The dirty loser survives on disk AND in the record set, reported as retained with git's reason.
+    const dirtyOutcome = result.outcomes.find((outcome) => outcome.workspaceId === dirtyLoser!.id)
+    expect(dirtyOutcome).toMatchObject({ status: 'retained' })
+    expect(dirtyOutcome && 'reason' in dirtyOutcome ? dirtyOutcome.reason : '').toMatch(/uncommitted changes/)
+    expect((await stat(dirtyLoser!.path)).isDirectory()).toBe(true)
+    expect((await stat(join(dirtyLoser!.path, 'AGENT_NOTES.md'))).isFile()).toBe(true)
+    expect(result.config.workspaces.some((item) => item.id === dirtyLoser!.id)).toBe(true)
+    // …and one lane refusing to go never strands the clean lane: it is torn down as normal.
+    const cleanOutcome = result.outcomes.find((outcome) => outcome.workspaceId === cleanLoser!.id)
+    expect(cleanOutcome).toMatchObject({ status: 'removed' })
+    await expect(stat(cleanLoser!.path)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(result.config.workspaces.some((item) => item.id === cleanLoser!.id)).toBe(false)
+  }, 30000)
+
+  it('refuses to tear down the very lane it was asked to keep', async () => {
+    const { executionHost, lanes, config: fixtureConfig } = await buildFanOutFixture('retry', 2)
+    const [winner, loser] = lanes
+    const save = vi.fn(async (value: AppConfig) => value)
+    const service = new WorktreeService(() => executionHost, { save })
+
+    // A caller that mistakenly lists the winner among the losers must not lose it — removing the lane the
+    // user chose to keep is the exact mistake this guard refuses.
+    const result = await service.keepOneOfFanOut({
+      keepWorkspaceId: winner!.id,
+      removeWorkspaceIds: [winner!.id, loser!.id]
+    }, fixtureConfig)
+
+    expect((await stat(winner!.path)).isDirectory()).toBe(true)
+    expect(result.config.workspaces.some((item) => item.id === winner!.id)).toBe(true)
+    // Only the genuine loser was acted on; the winner never appears in the outcomes.
+    expect(result.outcomes.map((outcome) => outcome.workspaceId)).toEqual([loser!.id])
+  }, 30000)
+
+  it('fails closed when asked to keep a lane that does not exist', async () => {
+    const { executionHost, lanes, config: fixtureConfig } = await buildFanOutFixture('retry', 2)
+    const [, loser] = lanes
+    const save = vi.fn(async (value: AppConfig) => value)
+    const service = new WorktreeService(() => executionHost, { save })
+
+    // Reporting a lane as kept when no such workspace exists would be a lie, and tearing the losers down
+    // around a phantom winner is worse than refusing outright.
+    await expect(service.keepOneOfFanOut({
+      keepWorkspaceId: 'ghost',
+      removeWorkspaceIds: [loser!.id]
+    }, fixtureConfig)).rejects.toThrow('Unknown workspace')
+    expect(save).not.toHaveBeenCalled()
+    expect((await stat(loser!.path)).isDirectory()).toBe(true)
+  }, 30000)
 })

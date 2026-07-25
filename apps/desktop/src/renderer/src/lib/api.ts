@@ -342,7 +342,11 @@ const mockApi: AgentMuxDesktopApi = {
       }
       mockConfig.workspaces.push(workspace)
       return { config: structuredClone(mockConfig), workspace: structuredClone(workspace) }
-    }
+    },
+    // The web preview has no git and no processes, so a fan-out cannot be simulated honestly. Refusing
+    // is the truthful answer — a fake set of "launched" lanes would be worse than no answer.
+    runFanOut: async () => ({ kind: 'rejected', reason: 'Fan-out needs the desktop app.' }),
+    keepOneOfFanOut: async (input) => ({ keptWorkspaceId: input.keepWorkspaceId, outcomes: [] })
   },
   files: {
     readDirectory: async (_workspaceId, path) =>

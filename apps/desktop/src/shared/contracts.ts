@@ -176,6 +176,60 @@ export type CreateWorktreeForBranchInput = {
   createBranch?: boolean
 }
 
+/**
+ * One fan-out: the same prompt taken down N lanes, each on its own new branch and worktree.
+ *
+ * `baseName` is only a stem — the concrete branch names and paths are derived in main by the single
+ * planning source, never chosen here, so a re-run of the same request is reproducible and no caller
+ * can mint a second naming scheme.
+ */
+export type RunFanOutInput = {
+  workspaceId: string
+  prompt: string
+  count: number
+  baseName: string
+  /** Executors to spread the lanes across, reused cyclically when there are fewer than lanes. */
+  executorIds: readonly string[]
+}
+
+/**
+ * What became of one lane. Mirrors the orchestrator's own three states exactly — a partial failure is
+ * neither reported as total failure nor dressed up as success, and a lane that built a worktree but
+ * could not launch says whether that directory is still on disk, or it becomes an orphan nobody claims.
+ */
+export type FanOutLaneOutcome =
+  | { status: 'launched'; branch: string; path: string; sessionId: string }
+  | { status: 'launch-failed'; branch: string; path: string; error: string; worktreeRetained: boolean }
+  | { status: 'worktree-failed'; branch: string; path: string; error: string }
+
+/**
+ * `rejected` carries the planner's own reason (a count below one, past the ceiling, or no executors).
+ * `single` is not a failure: one lane is not a bake-off, so the caller should take the ordinary launch
+ * path rather than pay for orchestration to compare a result with nothing.
+ */
+export type RunFanOutResult =
+  | { kind: 'fanout'; lanes: FanOutLaneOutcome[] }
+  | { kind: 'single'; executorId: string }
+  | { kind: 'rejected'; reason: string }
+
+export type KeepOneOfFanOutInput = {
+  keepWorkspaceId: string
+  removeWorkspaceIds: readonly string[]
+}
+
+/**
+ * `retained` means still on disk and still registered: the dirty-tree protection refused it, or git
+ * failed. `reason` is git's own words so the user knows what to review before discarding it explicitly.
+ */
+export type FanOutTeardownResult =
+  | { status: 'removed'; workspaceId: string; removedPath: string }
+  | { status: 'retained'; workspaceId: string; reason: string }
+
+export type KeepOneOfFanOutOutcome = {
+  keptWorkspaceId: string
+  outcomes: FanOutTeardownResult[]
+}
+
 export type WorkspaceBranchRecord = {
   name: string
   worktreePath: string | null
@@ -200,6 +254,141 @@ export type WorkspaceSelectionResult = {
   config: AppConfig
   workspace: WorkspaceRecord
 }
+
+/**
+ * One entry from `git status`. `index`/`worktree` are git's own two status columns (X and Y), kept
+ * raw so the UI can label states precisely without the parser pre-deciding; the booleans are the
+ * common questions derived from them. `origPath` is the pre-rename path, present only for a rename or
+ * copy. Every path is repo-root-relative, exactly as git emits it.
+ */
+export type GitFileChange = {
+  path: string
+  origPath: string | null
+  index: string
+  worktree: string
+  staged: boolean
+  unstaged: boolean
+  untracked: boolean
+}
+
+/**
+ * Result of reading source-control status for a workspace. A discriminated union mirroring
+ * `WorkspaceBranchesSnapshot`: a plain folder is a first-class, non-error answer, not a thrown
+ * exception. `branch` is null on a detached HEAD.
+ */
+export type GitStatusResult =
+  | {
+      kind: 'git-repository'
+      hostId: string
+      repoPath: string
+      branch: string | null
+      changes: GitFileChange[]
+    }
+  | {
+      kind: 'not-a-git-repository'
+      hostId: string
+      workspacePath: string
+    }
+
+/**
+ * One side (old = HEAD blob, new = worktree file) of a single-file diff. Absent is a first-class
+ * state, not empty text: a missing old side is how an added file is drawn, a missing new side a
+ * deleted one. `binary` carries no `text` — a file with a NUL byte or one too large to read is
+ * reported as binary rather than having raw bytes stuffed into a string field.
+ */
+export type GitDiffSide =
+  | { present: false }
+  | { present: true; binary: true }
+  | { present: true; binary: false; text: string }
+
+/**
+ * A structured single-file diff built by reading blobs, not by parsing unified-diff text. `change`
+ * is derived from which sides are present and whether their text differs; `binary` is true when
+ * either side is binary. The renderer decides how to draw added/deleted/modified/unchanged from
+ * this shape without re-deciding anything the service already knows.
+ */
+export type GitFileDiff = {
+  path: string
+  old: GitDiffSide
+  new: GitDiffSide
+  binary: boolean
+  change: 'added' | 'deleted' | 'modified' | 'unchanged'
+}
+
+/** How a pull reconciles with its upstream when the caller pins a strategy rather than leaving it to git. */
+export type GitPullStrategy = 'ff-only' | 'merge' | 'rebase'
+
+/** Common remote-verb inputs. `remote`/`refspec` default to `origin`/`HEAD` and are `-`-prefix rejected. */
+export type GitRemoteOptions = {
+  remote?: string
+  refspec?: string
+}
+
+export type GitPushOptions = GitRemoteOptions & {
+  /** Use `--force-with-lease` (never a bare `--force`); opt-in for a deliberate history rewrite. */
+  forceWithLease?: boolean
+}
+
+/**
+ * Outcome of a remote verb (push/pull/fetch). `ok` is success; every failure is a classification of
+ * git's own output, and its `message` is already credential-scrubbed — a remote URL can carry a
+ * `user:token@`, which must never surface. `no-upstream` is the one benign failure (nothing to push
+ * to / compare against); `non-fast-forward` and `diverged` are actionable ("sync first"); `error` is
+ * everything else (auth, transport, corruption) surfaced rather than hidden.
+ */
+export type GitRemoteResult =
+  | { kind: 'ok'; message?: undefined }
+  | { kind: 'no-upstream'; message: string }
+  | { kind: 'non-fast-forward'; message: string }
+  | { kind: 'diverged'; message: string }
+  | { kind: 'error'; message: string }
+
+/**
+ * How far the current branch is ahead of / behind its effective upstream. `upstream` is the resolved
+ * full ref name the counts are relative to (the push target `@{push}` when it exists, else the
+ * configured `@{upstream}`), or null when the branch has no upstream at all.
+ */
+export type GitAheadBehind = {
+  upstream: string | null
+  ahead: number
+  behind: number
+}
+
+/**
+ * The result of probing GitHub CLI availability and authentication for a workspace. Three states the
+ * UI must keep distinct: `not-installed` (the gh binary is absent — the fix is to install it),
+ * `not-authenticated` (gh is present but logged out — the fix is `gh auth login`), and `authenticated`
+ * (ready). Authentication is entirely delegated to `gh auth`; AgentMux only *probes* `gh auth status`
+ * and never reads, stores, or forwards a token — gh inherits GH_TOKEN/GITHUB_TOKEN from the process on
+ * its own, so this adds no new credential-storage surface.
+ */
+export type GhAuthProbe =
+  | { kind: 'not-installed' }
+  | { kind: 'not-authenticated' }
+  | { kind: 'authenticated' }
+
+export type CreatePullRequestInput = {
+  title: string
+  body: string
+  base: string
+  /** Omitted lets gh infer the current branch, which is the ordinary case. */
+  head?: string
+  draft?: boolean
+}
+
+/**
+ * Three outcomes, kept apart because they call for different responses.
+ *
+ * `refused` is a decision made *before* anything was created — a failed preflight, a missing binary,
+ * an empty title — so nothing exists on GitHub and the composer keeps its content for a retry.
+ * `failed` means gh ran and did not succeed; the message is already credential-scrubbed. Neither is
+ * retried automatically: a write that may have partly landed must never be repeated on its own, or the
+ * user ends up with two pull requests.
+ */
+export type CreatePullRequestResult =
+  | { kind: 'created'; url: string }
+  | { kind: 'refused'; reason: string }
+  | { kind: 'failed'; message: string }
 
 export type AgentLaunchInput = {
   executorId: AgentExecutorId
@@ -484,6 +673,8 @@ export type AgentMuxDesktopApi = {
     listBranches(workspaceId: string): Promise<WorkspaceBranchesSnapshot>
     openBranch(workspaceId: string, branch: string): Promise<WorkspaceSelectionResult>
     createWorktreeForBranch(input: CreateWorktreeForBranchInput): Promise<WorkspaceSelectionResult>
+    runFanOut(input: RunFanOutInput): Promise<RunFanOutResult>
+    keepOneOfFanOut(input: KeepOneOfFanOutInput): Promise<KeepOneOfFanOutOutcome>
   }
   files: {
     readDirectory(workspaceId: string, path: string): Promise<WorkspaceDirectoryEntry[]>
@@ -604,5 +795,31 @@ export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control'> & {
     onRequest(listener: (request: AgentMuxControlRequest) => void): () => void
     onCancellation(listener: (cancellation: DesktopControlCancellation) => void): () => void
     respond(response: DesktopControlResponse): void
+  }
+  /**
+   * Local Git source control. Lives on the preload API only, not the shared `AgentMuxDesktopApi`,
+   * because it is a Desktop-main capability with no meaningful web-preview mock — the renderer reaches
+   * it through `window.agentmux.git`, never through the shared mock `api`.
+   */
+  git: {
+    status(workspaceId: string): Promise<GitStatusResult>
+    stage(workspaceId: string, path: string): Promise<void>
+    commit(workspaceId: string, message: string): Promise<void>
+    diff(workspaceId: string, path: string): Promise<GitFileDiff>
+    unstage(workspaceId: string, path: string): Promise<void>
+    discard(workspaceId: string, path: string, untracked: boolean): Promise<void>
+    push(workspaceId: string, options?: GitPushOptions): Promise<GitRemoteResult>
+    pull(workspaceId: string, options?: { strategy?: GitPullStrategy }): Promise<GitRemoteResult>
+    fetch(workspaceId: string, options?: GitRemoteOptions): Promise<GitRemoteResult>
+    aheadBehind(workspaceId: string): Promise<GitAheadBehind>
+  }
+  /**
+   * GitHub CLI capability probing. Like `git`, a Desktop-main capability with no web-preview mock —
+   * the renderer reaches it through `window.agentmux.gh`. Only *probes* `gh auth status`; it never
+   * reads or persists a token, so it adds no credential-storage surface.
+   */
+  gh: {
+    authStatus(workspaceId: string): Promise<GhAuthProbe>
+    createPullRequest(workspaceId: string, input: CreatePullRequestInput): Promise<CreatePullRequestResult>
   }
 }

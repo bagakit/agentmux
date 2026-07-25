@@ -374,6 +374,8 @@ export type AgentTerminalPromptSubmissionState = {
 export type AgentMuxStoredAgentSession = AgentMuxAgentSession & {
   hookBindingId: string
   hookToken: string
+  /** Agent 说话凭证的 sha256。raw 只在受管进程的 env 里，Core 侧只留 hash。 */
+  capabilityHash?: string
 }
 
 export type AgentMuxPermissionOption = {

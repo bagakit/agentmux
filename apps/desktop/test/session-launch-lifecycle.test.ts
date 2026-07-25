@@ -1400,6 +1400,26 @@ describe('Session and Launcher lifecycle ownership', () => {
     )
     expect(useAppStore.getState().error).toBe('agent input is not ready')
   })
+
+  it('strips Electron IPC transport framing from the error banner', async () => {
+    // Everything the main process throws crosses ipcRenderer.invoke, which Electron re-wraps as
+    // `Error invoking remote method '<channel>': <name>: <message>` (and drops the original `.code`). The
+    // user reported seeing exactly this raw string when steering codex mid-turn. The banner must show the
+    // message the main process actually raised, not the transport envelope.
+    const session = agentSession('agent-run')
+    useAppStore.setState({ sessions: [session], error: null })
+    vi.spyOn(api.sessions, 'submitPrompt').mockRejectedValue(new Error(
+      "Error invoking remote method 'sessions:submitPrompt': AgentMuxError: " +
+      'The agent is still working on its current turn and cannot take a new message yet. ' +
+      'Wait for it to finish, then send again.'
+    ))
+
+    await expect(useAppStore.getState().send(session.id, 'steer mid-turn')).rejects.toThrow()
+    expect(useAppStore.getState().error).toBe(
+      'The agent is still working on its current turn and cannot take a new message yet. ' +
+      'Wait for it to finish, then send again.'
+    )
+  })
 })
 
 describe('Warm terminal pool', () => {

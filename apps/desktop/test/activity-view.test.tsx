@@ -111,14 +111,15 @@ describe('ActivityView', () => {
         updatedAt: createdAt
       })
     const markup = render('complete-events', [
-      activity('ask', { kind: 'user_message', source: 'user', title: 'User prompt', createdAt: 1 }),
+      activity('ask', { kind: 'user_message', source: 'user', title: 'User prompt', content: 'User prompt', createdAt: 1 }),
       hook('h1', 2),
       hook('h2', 3),
       hook('h3', 4),
-      activity('reply', { source: 'acp', title: 'Assistant response', createdAt: 5, updatedAt: 5 })
+      activity('reply', { source: 'acp', title: 'Assistant response', content: 'Assistant response', createdAt: 5, updatedAt: 5 })
     ])
 
-    // The run collapses to a single summary row; the turns around it stay visible.
+    // The run collapses to a single summary row; the turns around it stay visible — their words render
+    // in the turn register, not (as they once incidentally did) in a ruler tick's tooltip.
     expect(markup).toContain('3 steps')
     expect(markup).toContain('User prompt')
     expect(markup).toContain('Assistant response')
@@ -179,6 +180,75 @@ describe('ActivityView', () => {
     expect(markup).not.toContain('packages/core/src/runtime.ts')
   })
 
+  it('renders a mid-turn steer as an interjection in the turn register, between the machine steps', () => {
+    // A steer submitted while the Agent is working is recorded by Core as a `source: 'user'`
+    // `user_message` landing BETWEEN the run's native-hook steps. It must read as conversation — a full
+    // turn, never folded into the "N steps" run around it — so the trace shows when the human interjected
+    // and why the Agent changed course. It keeps source 'user'; it never masquerades as native-hook.
+    const markup = render('complete-events', [
+      activity('h1', {
+        kind: 'tool_call', source: 'native-hook', title: 'Edit', toolName: 'Edit', toolInput: 'a.ts',
+        createdAt: 1, updatedAt: 1
+      }),
+      activity('h2', {
+        kind: 'tool_call', source: 'native-hook', title: 'Edit', toolName: 'Edit', toolInput: 'b.ts',
+        createdAt: 2, updatedAt: 2
+      }),
+      activity('steer', {
+        kind: 'user_message', source: 'user', title: 'Prompt',
+        content: 'Actually, focus on the parser instead.', createdAt: 3, updatedAt: 3
+      }),
+      activity('h3', {
+        kind: 'tool_call', source: 'native-hook', title: 'Edit', toolName: 'Edit', toolInput: 'parser.ts',
+        createdAt: 4, updatedAt: 4
+      }),
+      activity('h4', {
+        kind: 'tool_call', source: 'native-hook', title: 'Edit', toolName: 'Edit', toolInput: 'parser2.ts',
+        createdAt: 5, updatedAt: 5
+      })
+    ])
+
+    // The steer renders as a turn with its words on screen — not a machine row, never behind a fold.
+    expect(markup).toContain('log-turn log-turn--user_message')
+    expect(markup).toContain('Actually, focus on the parser instead.')
+    expect(markup).toContain('You')
+    expect(markup).not.toContain('log-row log-row--user_message')
+
+    // It is bracketed by machine steps, proving it landed mid-turn: the two runs on either side each fold
+    // to "2 steps", and the steer sits between them rather than being swept into either.
+    const log = markup.slice(markup.indexOf('activity-log'))
+    expect(log).toContain('2 steps')
+    const turnAt = log.indexOf('log-turn--user_message')
+    const firstFold = log.indexOf('2 steps')
+    const lastFold = log.lastIndexOf('2 steps')
+    expect(firstFold).toBeGreaterThanOrEqual(0)
+    expect(lastFold).toBeGreaterThan(firstFold) // two distinct folds exist
+    expect(turnAt).toBeGreaterThan(firstFold) // steer comes after the first run
+    expect(turnAt).toBeLessThan(lastFold) // and before the second — i.e. between the machine steps
+  })
+
+  it('shows no turn for a refused steer — a rejected submit records nothing', () => {
+    // Core throws its readiness/interaction refusal BEFORE recordPromptAfterSideEffect, so a refused steer
+    // appends no timeline item at all. The trace for a run whose steer was rejected therefore carries only
+    // the machine steps — no user turn and no failed placeholder. Without this assertion a future real
+    // dropped event would look identical to normal and pass silently.
+    const markup = render('complete-events', [
+      activity('h1', {
+        kind: 'tool_call', source: 'native-hook', title: 'Edit', toolName: 'Edit', toolInput: 'a.ts',
+        createdAt: 1, updatedAt: 1
+      }),
+      activity('h2', {
+        kind: 'tool_call', source: 'native-hook', title: 'Edit', toolName: 'Edit', toolInput: 'b.ts',
+        createdAt: 2, updatedAt: 2
+      })
+    ])
+
+    expect(markup).not.toContain('log-turn--user_message')
+    expect(markup).not.toContain('log-turn__body')
+    // The machine steps that did happen are still there — the trace is not empty, it simply has no turn.
+    expect(markup).toContain('2 steps')
+  })
+
   it('spaces the ruler by real elapsed time, and says so when there is none to show', () => {
     const spread = render('complete-events', [
       activity('a', { createdAt: 1_000, updatedAt: 1_000 }),
@@ -198,5 +268,45 @@ describe('ActivityView', () => {
     ])
     expect(flat).toContain('data-axis="ordinal"')
     expect(flat).toContain('left:50%')
+  })
+
+  it('exposes the ruler as one focusable slider whose accessible value is honest per axis', () => {
+    // The ruler is a single interactive control: focusable (tabindex, role=slider), and its accessible
+    // name/value describe the axis without over-claiming. A temporal axis may name elapsed time; an
+    // ordinal axis says only that the spacing is order. This is the a11y contract for click+keyboard.
+    const temporal = render('complete-events', [
+      activity('a', { createdAt: 1_000, updatedAt: 1_000 }),
+      activity('b', { createdAt: 3_000, updatedAt: 3_000 })
+    ])
+    expect(temporal).toContain('role="slider"')
+    expect(temporal).toContain('tabindex="0"')
+    expect(temporal).toContain('aria-valuemin="1"')
+    expect(temporal).toContain('aria-valuemax="2"')
+    // The temporal axis is allowed to name the elapsed span in its label.
+    expect(temporal).toMatch(/aria-label="Activity timeline, 2 events over [^"]*s"/)
+
+    const ordinal = render('complete-events', [
+      activity('a', { createdAt: 5, updatedAt: 5 }),
+      activity('b', { createdAt: 5, updatedAt: 5 }),
+      activity('c', { createdAt: 5, updatedAt: 5 })
+    ])
+    // The ordinal axis must NOT smuggle a duration into its label — order only, no fabricated span.
+    expect(ordinal).toContain('aria-label="Activity timeline, 3 events in order"')
+    expect(ordinal).not.toMatch(/aria-(label|valuetext)="[^"]*over[^"]*"/)
+    // And nothing in the ordinal ruler renders a wall-clock time — no ":" time string leaks into a
+    // tick title the way the pre-interactive ruler used to unconditionally emit one.
+    const ruler = ordinal.slice(ordinal.indexOf('activity-ruler'), ordinal.indexOf('activity-log'))
+    expect(ruler).not.toMatch(/title="[^"]*\d{1,2}:\d{2}/)
+  })
+
+  it('wraps each log segment in a scroll target the ruler can jump to, without a second scroller', () => {
+    // Click/keyboard resolve a position to an event and scroll its host segment into view. The wiring is
+    // the per-segment wrapper carrying a data key; the scroll itself reuses the shared scrollIntoView
+    // primitive at runtime. Asserting the wrapper exists proves the target the jump lands on is real.
+    const markup = render('complete-events', [
+      activity('ask', { kind: 'user_message', source: 'user', title: 'Prompt', content: 'Hi', createdAt: 1 }),
+      activity('reply', { source: 'native-hook', content: 'There', createdAt: 2_000, updatedAt: 2_000 })
+    ])
+    expect(markup).toContain('activity-log__segment')
   })
 })

@@ -3,6 +3,7 @@ import {
   Check,
   FolderGit2,
   GitBranch,
+  GitCompareArrows,
   LoaderCircle,
   Plus,
   RefreshCw,
@@ -16,6 +17,7 @@ import type {
   WorkspaceRecord
 } from '../../../shared/contracts'
 import { useWorkspaceBranches } from '../hooks/useWorkspaceBranches'
+import { buildFanOutRequest, MAX_FANOUT_LANES } from '../lib/fanout-request'
 import { api } from '../lib/api'
 import {
   runningAgentPresenceByWorktree,
@@ -32,12 +34,18 @@ function message(error: unknown): string {
 
 export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
   const activateWorkspaceSelection = useAppStore((state) => state.activateWorkspaceSelection)
+  const runFanOut = useAppStore((state) => state.runFanOut)
+  const config = useAppStore((state) => state.config)
   const sessions = useAppStore((state) => state.sessions)
   const [selectedBranch, setSelectedBranch] = useState(workspace.branch ?? null)
   const [createBranch, setCreateBranch] = useState<WorkspaceBranchRecord | null>(null)
   const [worktreePath, setWorktreePath] = useState('')
   const [busyBranch, setBusyBranch] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [fanOutOpen, setFanOutOpen] = useState(false)
+  const [fanOutPrompt, setFanOutPrompt] = useState('')
+  const [fanOutCount, setFanOutCount] = useState(3)
+  const [fanningOut, setFanningOut] = useState(false)
   const { snapshot, loading, error: loadError, refresh } = useWorkspaceBranches(workspace.id)
 
   useEffect(() => {
@@ -106,6 +114,41 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
       setActionError(message(cause))
     } finally {
       setBusyBranch(null)
+    }
+  }
+
+  async function startFanOut(event: React.FormEvent): Promise<void> {
+    event.preventDefault()
+    if (fanningOut) return
+    // The surface only validates shape; branch names and paths are derived in main from the single
+    // planning source, so nothing here invents them.
+    const draft = buildFanOutRequest({ prompt: fanOutPrompt, count: fanOutCount, config })
+    if (draft.kind === 'invalid') {
+      setActionError(draft.reason)
+      return
+    }
+    if (draft.kind === 'single') {
+      setActionError('One lane is not a comparison — launch an Agent the ordinary way.')
+      return
+    }
+    setFanningOut(true)
+    setActionError(null)
+    try {
+      const result = await runFanOut({
+        workspaceId: workspace.id,
+        prompt: draft.prompt,
+        count: draft.count,
+        baseName: draft.baseName,
+        executorIds: draft.executorIds
+      })
+      // Partial failures are already named on the shared error surface by the store; closing here would
+      // hide a rejection the user never saw, so only a real fan-out dismisses the dialog.
+      if (result.kind === 'fanout') setFanOutOpen(false)
+      else if (result.kind === 'rejected') setActionError(result.reason)
+    } catch (cause) {
+      setActionError(message(cause))
+    } finally {
+      setFanningOut(false)
     }
   }
 
@@ -180,6 +223,18 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
     <section className="branches-panel">
       <header className="branches-header">
         <div><span>Branches</span><small>{snapshot?.kind === 'git-repository' ? snapshot.branches.length : 0}</small></div>
+        {/* Absent outside a git repository: a fan-out needs branches, and a button that could only fail
+            answers nothing. */}
+        {snapshot?.kind === 'git-repository' ? (
+          <button
+            type="button"
+            title="Fan one prompt across N new worktrees"
+            aria-label="Fan out a prompt"
+            onClick={() => { setActionError(null); setFanOutOpen(true) }}
+          >
+            <GitCompareArrows size={13} />
+          </button>
+        ) : null}
         <button type="button" title="Refresh branches" onClick={() => void refresh()} disabled={loading}>
           {loading ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}
         </button>
@@ -248,6 +303,71 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
                 <button className="primary-button" type="submit" disabled={!worktreePath.trim() || busyBranch !== null}>
                   {busyBranch ? <LoaderCircle className="spin" size={12} /> : <Plus size={12} />}
                   {busyBranch ? 'Creating…' : 'Create Worktree'}
+                </button>
+              </footer>
+            </form>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+      {/* Fan one prompt across N fresh branches. Lives beside "create worktree" because it is the same
+          act repeated — the branch names and paths are main's to derive, never chosen here. */}
+      <Dialog.Root
+        open={fanOutOpen}
+        onOpenChange={(open) => {
+          if (fanningOut) return
+          setFanOutOpen(open)
+          if (!open) setActionError(null)
+        }}
+      >
+        <Dialog.Portal>
+          <Dialog.Overlay className="confirmation-dialog__overlay" />
+          <Dialog.Content
+            className="branch-create-dialog"
+            onEscapeKeyDown={(event) => fanningOut && event.preventDefault()}
+          >
+            <form onSubmit={(event) => void startFanOut(event)}>
+              <header>
+                <span><GitCompareArrows size={16} /></span>
+                <div>
+                  <Dialog.Title>Fan out a prompt</Dialog.Title>
+                  <Dialog.Description>
+                    Run the same request on N new branches, each in its own worktree, then keep one.
+                  </Dialog.Description>
+                </div>
+                <Dialog.Close asChild>
+                  <button type="button" className="icon-button" aria-label="Close fan-out dialog" disabled={fanningOut}>
+                    <X size={14} />
+                  </button>
+                </Dialog.Close>
+              </header>
+              <label>
+                <span>Prompt</span>
+                <input
+                  autoFocus
+                  value={fanOutPrompt}
+                  onChange={(event) => setFanOutPrompt(event.target.value)}
+                  placeholder="Add retry to the uploader"
+                  spellCheck={false}
+                />
+              </label>
+              <label>
+                <span>Lanes</span>
+                <input
+                  type="number"
+                  min={2}
+                  max={MAX_FANOUT_LANES}
+                  value={fanOutCount}
+                  onChange={(event) => setFanOutCount(Number(event.target.value))}
+                />
+              </label>
+              {actionError ? <p role="alert">{actionError}</p> : null}
+              <footer>
+                <Dialog.Close asChild>
+                  <button className="small-button" type="button" disabled={fanningOut}>Cancel</button>
+                </Dialog.Close>
+                <button className="primary-button" type="submit" disabled={!fanOutPrompt.trim() || fanningOut}>
+                  {fanningOut ? <LoaderCircle className="spin" size={12} /> : <GitCompareArrows size={12} />}
+                  {fanningOut ? 'Starting…' : `Fan out ${fanOutCount} lanes`}
                 </button>
               </footer>
             </form>

@@ -40,6 +40,8 @@ import type { MainSurface } from '../store'
 import {
   contentSlotPresentation,
   resolveWorkspaceTools,
+  topicAgentPresentation,
+  topicsWithAgents,
   workspaceAgentGroups,
   type WorkspaceAgentGroupId,
   type WorkspaceTool
@@ -53,10 +55,27 @@ import {
   type BrowserAnnotation
 } from '../lib/browser-annotations'
 import { workbenchSurfaces } from '../lib/workbench-tabs'
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+import { orderTopics, reorderTopics } from '../lib/topic-order'
 import { useAppStore } from '../store'
 import { agentComposerAvailability } from './AgentSessionComposer'
 import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
 import { BranchesPanel } from './BranchesPanel'
+import { ChangesPanel } from './ChangesPanel'
 import { BrowserProfilesPanel } from './BrowserProfilesPanel'
 import { FileExplorer, type FileExplorerRevealRequest } from './FileExplorer'
 import { StatusDot } from './StatusDot'
@@ -249,6 +268,9 @@ function WorkspaceFilesTool({
   const presentation = contentSlotPresentation(isScratch)
   const [explorerRevealRequest, setExplorerRevealRequest] = useState<FileExplorerRevealRequest>()
   const explorerRevealRequestId = useRef(0)
+  // The content slot's bottom half is Branches by default (unchanged behavior); a real project can
+  // switch it to Source Control changes. Scratch never shows this — it renders Topics instead.
+  const [bottomView, setBottomView] = useState<'branches' | 'changes'>('branches')
 
   function revealDirectoryInExplorer(path: string): void {
     explorerRevealRequestId.current += 1
@@ -286,7 +308,33 @@ function WorkspaceFilesTool({
               onRevealDirectory={revealDirectoryInExplorer}
             />
           ) : (
-            <BranchesPanel workspace={workspace} />
+            <div className="content-slot-source-control">
+              <div className="source-control-switch" role="tablist" aria-label="Source control view">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={bottomView === 'branches'}
+                  className={bottomView === 'branches' ? 'selected' : ''}
+                  onClick={() => setBottomView('branches')}
+                >
+                  Branches
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={bottomView === 'changes'}
+                  className={bottomView === 'changes' ? 'selected' : ''}
+                  onClick={() => setBottomView('changes')}
+                >
+                  Changes
+                </button>
+              </div>
+              {bottomView === 'branches' ? (
+                <BranchesPanel workspace={workspace} />
+              ) : (
+                <ChangesPanel workspace={workspace} />
+              )}
+            </div>
           )}
         </Panel>
       </PanelGroup>
@@ -305,6 +353,7 @@ function WorkspaceTopicsPanel({
   const activeTabId = layout?.groups.find((group) => group.id === layout.activeGroupId)?.activeTabId
   const topicId = useAppStore((state) => activeTabId ? state.tabs[activeTabId]?.topicId : undefined)
   const fileRevision = useAppStore((state) => state.workspaceFileRevisions[workspace.id] ?? 0)
+  const sessions = useAppStore((state) => state.sessions)
   const createScratchTopic = useAppStore((state) => state.createScratchTopic)
   const openScratchTopic = useAppStore((state) => state.openScratchTopic)
   const renameScratchTopic = useAppStore((state) => state.renameScratchTopic)
@@ -313,7 +362,24 @@ function WorkspaceTopicsPanel({
   const [editingTopicId, setEditingTopicId] = useState<string | null>(null)
   const [editTitle, setEditTitle] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const currentTopic = topics?.find((topic) => topic.id === topicId)
+  // The Topic list is authoritative and comes from the filesystem snapshot. Live Sessions are
+  // matched onto it here for display; they never add or remove a Topic.
+  // 拖拽要有一小段距离才启动，否则点一下打开 Topic 会被误判成拖动。键盘 sensor 提供等价路径。
+  const topicSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  )
+  const topicOrder = useAppStore((state) => state.scratchTopicOrder)
+  const setTopicOrder = useAppStore((state) => state.setScratchTopicOrder)
+  // 文件系统仍是 Topic 存在与否的真相；用户顺序只决定怎么排。
+  const projected = topics
+    ? (() => {
+        const withAgents = topicsWithAgents(topics, sessions, workspace)
+        const shown = orderTopics(withAgents.map((topic) => topic.id), topicOrder)
+        return shown.flatMap((id) => withAgents.filter((topic) => topic.id === id))
+      })()
+    : null
+  const currentTopic = projected?.find((topic) => topic.id === topicId)
   const compact = topics === null || topics.length > 0
 
   useEffect(() => {
@@ -430,13 +496,26 @@ function WorkspaceTopicsPanel({
           </button>
         </>
       )}
-      {topics && topics.length > 0 ? (
+      {projected && projected.length > 0 ? (
+        <DndContext
+          sensors={topicSensors}
+          collisionDetection={closestCenter}
+          onDragEnd={(event) => {
+            const movedId = String(event.active.id)
+            const targetId = event.over ? String(event.over.id) : movedId
+            setTopicOrder(reorderTopics(projected.map((entry) => entry.id), movedId, targetId))
+          }}
+        >
+        <SortableContext
+          items={projected.map((entry) => entry.id)}
+          strategy={verticalListSortingStrategy}
+        >
         <div className="workspace-topic-list" aria-label="Scratch Topics">
-          {topics.map((topic) => {
+          {projected.map((topic) => {
             const isCurrent = topic.id === currentTopic?.id
             const editing = editingTopicId === topic.id
             return (
-              <div className={`workspace-topic-item${isCurrent ? ' current' : ''}`} key={topic.id}>
+              <SortableTopicItem topicId={topic.id} isCurrent={isCurrent} key={topic.id}>
                 {editing ? (
                   <form
                     className="workspace-topic-rename-form"
@@ -471,11 +550,31 @@ function WorkspaceTopicsPanel({
                     <span>
                       <span className="workspace-topic-title-line">
                         <strong>{topic.title}</strong>
-                        {isCurrent ? <em>Current</em> : null}
+                        {/* 每个 Agent 一枚状态点：用户想知道的是「有没有在等我」，不是重读一遍名字。
+                            语汇与 Tab 角、名册行、注意力栏同源，一个点在哪儿都表示同一件事。 */}
+                        {topic.agents.length > 0 ? (
+                          <span
+                            className="workspace-topic-agents"
+                            aria-label={`${topic.agents.length} agents in ${topic.title}`}
+                          >
+                            {topic.agents.map((agent) => {
+                              const shown = topicAgentPresentation(agent)
+                              return (
+                                <span
+                                  className={`status status--${shown.state}`}
+                                  key={agent.sessionId}
+                                  {...(shown.attention ? { 'data-attention': shown.attention } : {})}
+                                  title={`${agent.live?.label ?? agent.sessionId} · ${shown.state}`}
+                                >
+                                  <span className="status__dot" />
+                                </span>
+                              )
+                            })}
+                          </span>
+                        ) : null}
                       </span>
                       <small>
                         <span>{topic.summary || topic.directoryPath}</span>
-                        <em>{topic.collaborators.length} {topic.collaborators.length === 1 ? 'agent' : 'agents'}</em>
                       </small>
                     </span>
                   </button>
@@ -502,10 +601,12 @@ function WorkspaceTopicsPanel({
                 >
                   <FolderOpen size={13} />
                 </button>
-              </div>
+              </SortableTopicItem>
             )
           })}
         </div>
+        </SortableContext>
+        </DndContext>
       ) : null}
       {error ? <div className="new-tab-error" role="alert">{error}</div> : null}
     </section>
@@ -632,6 +733,37 @@ function BoardToolSummary({
         <div><CheckCircle2 size={13} /><span><strong>Done</strong><small>Completed runs</small></span><em>{doneCount}</em></div>
       </div>
     </section>
+  )
+}
+
+/**
+ * 一行 Topic，可拖拽重排。
+ *
+ * 复用 Tab 条已经在用的 @dnd-kit/sortable，不自写拖拽；键盘 sensor 一并挂上，
+ * 使重排不因为"改成拖拽"而只剩鼠标一条路。
+ */
+function SortableTopicItem({
+  topicId,
+  isCurrent,
+  children
+}: {
+  topicId: string
+  isCurrent: boolean
+  children: ReactNode
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: topicId
+  })
+  return (
+    <div
+      ref={setNodeRef}
+      className={`workspace-topic-item${isCurrent ? ' current' : ''}${isDragging ? ' dragging' : ''}`}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      {...attributes}
+      {...listeners}
+    >
+      {children}
+    </div>
   )
 }
 

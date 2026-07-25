@@ -340,6 +340,28 @@ describe('built-in agent providers', () => {
     expect(probes).toEqual(['/opt/claude'])
   })
 
+  it('decides installed from the configured command, staying honest when it changed but is unavailable', async () => {
+    // The installed verdict tracks the executable the user actually configured, never a hardcoded
+    // provider default and never a string match: pointing the command at a present wrapper reports
+    // installed, and pointing it at a path that does not resolve reports not installed. Both halves
+    // matter — a bug fix that forced installed to true would be a different dishonesty.
+    const probed: string[] = []
+    const probe = {
+      async hasExecutable(executable: string) {
+        probed.push(executable)
+        return executable === '/opt/wrappers/my-claude'
+      }
+    }
+    await expect(providers.get('claude').probeCapabilities(probe, '/opt/wrappers/my-claude'))
+      .resolves.toMatchObject({ executable: '/opt/wrappers/my-claude', installed: true })
+    await expect(providers.get('claude').probeCapabilities(probe, '/opt/wrappers/missing'))
+      .resolves.toMatchObject({ executable: '/opt/wrappers/missing', installed: false })
+    await expect(providers.get('claude').probeCapabilities(probe))
+      .resolves.toMatchObject({ executable: 'claude', installed: false })
+    // The exact strings probed are the configured command, not the catalog default, for each call.
+    expect(probed).toEqual(['/opt/wrappers/my-claude', '/opt/wrappers/missing', 'claude'])
+  })
+
   it('builds provider-native resume argv only from a matching verified handle', () => {
     expect(providers.get('codex').buildResumeLaunch({
       workspacePath: '/tmp/work',
@@ -624,7 +646,9 @@ describe('built-in agent providers', () => {
     // cursor because its executable exposes no such flag we chose to declare, pi likewise — so the
     // renderer draws no launch control for them (absence hides, never a disabled affordance).
     expect(catalog.get('codex')?.map((option) => option.id)).toEqual(['sandbox', 'approval'])
-    expect(catalog.get('claude')?.map((option) => option.id)).toEqual(['permission-mode'])
+    // claude declares model + effort ahead of permission-mode; both --model and --effort are enumerated by
+    // `claude --help`, so they are honestly declared (declaration order is what resolveLaunchArgv locks).
+    expect(catalog.get('claude')?.map((option) => option.id)).toEqual(['model', 'effort', 'permission-mode'])
     expect(catalog.get('gemini')?.map((option) => option.id)).toEqual(['approval-mode'])
     expect(catalog.get('grok')?.map((option) => option.id)).toEqual(['permission-mode'])
     expect(catalog.get('traex')?.map((option) => option.id)).toEqual(['sandbox', 'permission-mode'])
@@ -655,9 +679,18 @@ describe('built-in agent providers', () => {
       .toEqual(['--sandbox', 'workspace-write'])
     expect(providers.get('codex').resolveLaunchArgv({ sandbox: 'read-only', approval: 'never' }))
       .toEqual(['--sandbox', 'read-only', '--ask-for-approval', 'never'])
-    // Verified against `claude --help`: `--permission-mode <mode>`.
+    // Verified against `claude --help`: `--model <alias>` enumerates fable/opus/sonnet, `--effort <level>`
+    // enumerates low..max, and `--permission-mode <mode>`. Each resolves to its exact flag pair on its own.
     expect(providers.get('claude').resolveLaunchArgv({ 'permission-mode': 'plan' }))
       .toEqual(['--permission-mode', 'plan'])
+    expect(providers.get('claude').resolveLaunchArgv({ model: 'opus' }))
+      .toEqual(['--model', 'opus'])
+    expect(providers.get('claude').resolveLaunchArgv({ effort: 'high' }))
+      .toEqual(['--effort', 'high'])
+    // All three selected compose in DECLARATION order (model, effort, permission-mode) regardless of the
+    // key order the selection was serialized in — this locks the argv the spawn path appends.
+    expect(providers.get('claude').resolveLaunchArgv({ 'permission-mode': 'plan', effort: 'max', model: 'sonnet' }))
+      .toEqual(['--model', 'sonnet', '--effort', 'max', '--permission-mode', 'plan'])
   })
 
   it('fails closed when a launch-option selection names an option or choice the provider never declared', () => {

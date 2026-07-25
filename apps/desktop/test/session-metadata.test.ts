@@ -21,6 +21,7 @@ describe('single-line session tab projection', () => {
       label: 'codex · agentmux',
       id: 'd1df756e-18f5-4d3e-b309-0635b8d2999b',
       hostId: 'local',
+      workspacePath: '/repos/agentmux',
       createdAt: 0,
       updatedAt: 60_000
     })
@@ -28,6 +29,9 @@ describe('single-line session tab projection', () => {
     expect(tooltip).toContain('codex · agentmux')
     expect(tooltip).toContain('Session ID: d1df756e-18f5-4d3e-b309-0635b8d2999b')
     expect(tooltip).toContain('Host: local')
+    // The Agent's own cwd is always in the tooltip, so a moved View cannot pass off its host
+    // workspace's name as the Agent's working directory.
+    expect(tooltip).toContain('Working directory: /repos/agentmux')
     expect(tooltip).toContain('Started:')
     expect(tooltip).toContain('Active:')
   })
@@ -42,7 +46,9 @@ describe('single-line session tab projection', () => {
     expect(sessionPaneSource).not.toContain('session-info-bar')
     expect(sessionPaneSource).not.toContain('Stop Run')
     expect(workspaceWorkbenchSource).toContain('pane-action pane-action--stop')
-    expect(workbenchTabMenuSource).toContain('Copy Session ID')
+    // Tab 菜单仍提供 Session 身份的复制；它现在产出的是自足的**地址**而非裸 id
+    // （见 agent-address.ts），所以这里跟着标签走。
+    expect(workbenchTabMenuSource).toContain('Copy Session Address')
   })
 
   it('makes stopping the default Agent Tab close action while preserving an explicit background option', () => {

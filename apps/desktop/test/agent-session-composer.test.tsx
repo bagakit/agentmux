@@ -187,6 +187,80 @@ describe('AgentSessionComposer adapter', () => {
     expect(fixture.state.clearAgentComposerDraftIfUnchanged).not.toHaveBeenCalled()
   })
 
+  it('steers a working Agent: Enter submits mid-turn through the existing send path', () => {
+    // The whole point of the feature. The default fixture session is `working`; before this change the
+    // composer swallowed Enter and passed no onSubmit while working. Now the steer must reach store.send —
+    // the SAME channel a normal prompt uses, not a second write path.
+    fixture.state.sessions = [agentSession({ status: { state: 'working', source: 'native-hook', observedAt: 1 } })]
+    fixture.state.agentComposerDrafts = { 'agent-1': 'Actually, edit the other file' }
+    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
+      props: { onSubmit?: () => void; onInterrupt?: () => void; primaryAction: 'send' | 'stop' }
+    }
+
+    // onSubmit is wired while working (it was undefined before), and the Enter path invokes it.
+    expect(composer.props.onSubmit).toBeTypeOf('function')
+    composer.props.onSubmit?.()
+
+    expect(fixture.state.send).toHaveBeenCalledWith('agent-1', 'Actually, edit the other file')
+  })
+
+  it('keeps Stop as the working primary action even though steer submits', () => {
+    // Steer must not move or replace the Stop button — a user mid-turn must not mis-click. Both an Enter
+    // submit path AND a Stop interrupt path exist at once; they are different questions.
+    fixture.state.sessions = [agentSession({ status: { state: 'working', source: 'native-hook', observedAt: 1 } })]
+    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
+      props: { onSubmit?: () => void; onInterrupt?: () => void; primaryAction: 'send' | 'stop' }
+    }
+
+    expect(composer.props.primaryAction).toBe('stop')
+    expect(composer.props.onInterrupt).toBeTypeOf('function')
+  })
+
+  it('honours a codex mid-turn refusal: draft stays and no user turn is claimed', async () => {
+    // codex is the one render-then-submit Provider; a mid-turn steer is fail-closed by Core
+    // (AGENT_PROMPT_NOT_READY / _READINESS_CONFLICT). That is a FIRST-CLASS expected outcome, not a bug:
+    // send() rejects, so the draft must survive (the honest "not sent" signal) and compare-clear must not
+    // run. We deliberately do NOT assert "working always delivers" — that is false for codex and would
+    // pressure someone to weaken its sealed readiness gate.
+    fixture.state.sessions = [agentSession({ status: { state: 'working', source: 'native-hook', observedAt: 1 } })]
+    fixture.state.agentComposerDrafts = { 'agent-1': 'Steer while codex is mid-turn' }
+    fixture.state.send.mockRejectedValueOnce(new Error('AGENT_PROMPT_NOT_READY'))
+    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
+      props: { onSubmit?: () => void }
+    }
+
+    composer.props.onSubmit?.()
+
+    await vi.waitFor(() => expect(fixture.state.send).toHaveBeenCalledOnce())
+    // Draft preserved for retry; nothing cleared — the user's words are still in the box.
+    expect(fixture.state.clearAgentComposerDraftIfUnchanged).not.toHaveBeenCalled()
+    expect(fixture.state.setAgentComposerDraft).not.toHaveBeenCalled()
+  })
+
+  it('does not submit while an interaction is pending: no onSubmit is wired at all', () => {
+    // The card is the only input surface. canType is false, so no submit handler reaches the composer and
+    // Enter cannot fire one — belt to Core's AGENT_INTERACTION_PENDING braces.
+    const waiting = agentSession({
+      status: { state: 'working', source: 'native-hook', observedAt: 2 },
+      pendingInteraction: {
+        kind: 'permission',
+        id: 'permission-1',
+        agentSessionId: 'agent-1',
+        title: 'Allow command?',
+        options: [{ id: 'allow', label: 'Allow', kind: 'allow-once' }],
+        evidence: { source: 'native-hook', observedAt: 2, run: { runId: 'run-1' }, hookReceiptId: 'permission-1' }
+      }
+    })
+    fixture.state.sessions = [waiting]
+    fixture.state.agentComposerDrafts = { 'agent-1': 'This must not go out' }
+    const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
+      props: { onSubmit?: () => void; disabled: boolean }
+    }
+
+    expect(composer.props.disabled).toBe(true)
+    expect(composer.props.onSubmit).toBeUndefined()
+  })
+
   it('does not guess that a disconnected running process can accept input', () => {
     const disconnected = agentSession({
       status: { state: 'disconnected', source: 'run-process', observedAt: 2 }

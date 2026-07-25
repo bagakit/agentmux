@@ -5,6 +5,7 @@ import type { AgentDisplayState } from '@agentmux/core'
 import type { SessionSnapshot, WorkspaceRecord } from '../src/shared/contracts.js'
 import {
   fanOutGroups,
+  fanOutKeepSplit,
   groupLaneNeedingYou,
   groupProgress
 } from '../src/renderer/src/lib/fanout-group.js'
@@ -165,8 +166,16 @@ describe('fan-out group projection', () => {
   })
 
   it('lets a group disappear once its lanes are torn down, leaving no empty shell', () => {
-    // After keeping a winner and removing the rest, one lane remains — which is not a comparison, so the
-    // group is gone rather than lingering as a husk.
+    // The keep-the-winner teardown (see worktree-service) removes every lane but the chosen one. Before,
+    // three lanes read as one bake-off; after, only the winner's worktree remains — and one lane is not a
+    // comparison, so the group is gone rather than lingering as a husk pointing at torn-down lanes.
+    const before = fanOutGroups({
+      workspaces: [worktree('retry-1'), worktree('retry-2'), worktree('retry-3')],
+      sessions: []
+    })
+    expect(before).toHaveLength(1)
+    expect(before[0]!.lanes).toHaveLength(3)
+
     const after = fanOutGroups({ workspaces: [worktree('retry-2')], sessions: [] })
     expect(after).toEqual([])
   })
@@ -223,5 +232,53 @@ describe('fan-out group projection', () => {
     expect(markup).toContain('y-2')
     // One button for the launched lane; the idle lane is a span.
     expect((markup.match(/<button/gu) ?? []).length).toBe(1)
+  })
+
+  // Closing the bake-off. Without this the comparison surface can only be read, never resolved: the
+  // teardown primitive exists and is tested, but a user has no way to say which lane won.
+  it('offers a keep action per lane, naming the losers it would tear down', () => {
+    const onKeep = vi.fn()
+    const markup = renderToStaticMarkup(createElement(FanOutStrip, {
+      workspaces: [worktree('z-1'), worktree('z-2'), worktree('z-3')],
+      sessions: [agent('z-1', 'working'), agent('z-2', 'working'), agent('z-3', 'working')],
+      onSelectSession: vi.fn(),
+      onKeepLane: onKeep
+    }))
+
+    // One keep control per lane, and the label says what it does rather than just "keep".
+    expect((markup.match(/fanout-lane__keep/gu) ?? []).length).toBe(3)
+    expect(markup).toContain('Keep z-1 and remove the other 2')
+  })
+
+  it('hands the store exactly the winner and the other lanes of that group', () => {
+    const groups = fanOutGroups({
+      workspaces: [worktree('z-1'), worktree('z-2'), worktree('z-3')],
+      sessions: [agent('z-1', 'working')]
+    })
+    const split = fanOutKeepSplit(groups[0]!, 'ws-z-2')!
+
+    expect(split.keepWorkspaceId).toBe('ws-z-2')
+    // The consequential half: the winner must never appear among the lanes about to be torn down.
+    expect(split.removeWorkspaceIds).not.toContain('ws-z-2')
+    expect([...split.removeWorkspaceIds].sort()).toEqual(['ws-z-1', 'ws-z-3'])
+  })
+
+  it('does not reach outside its own group when resolving a bake-off', () => {
+    // Two independent fan-outs running at once. Resolving one must not tear down the other's lanes.
+    const groups = fanOutGroups({
+      workspaces: [worktree('a-1'), worktree('a-2'), worktree('b-1'), worktree('b-2')],
+      sessions: []
+    })
+    const groupA = groups.find((group) => group.stem === 'a')!
+    const split = fanOutKeepSplit(groupA, 'ws-a-1')!
+
+    expect(split.removeWorkspaceIds).toEqual(['ws-a-2'])
+    expect(split.removeWorkspaceIds.some((id) => id.startsWith('ws-b'))).toBe(false)
+  })
+
+  it('refuses to resolve with a lane that is not in the group', () => {
+    const groups = fanOutGroups({ workspaces: [worktree('c-1'), worktree('c-2')], sessions: [] })
+    // Keeping a lane that does not exist would otherwise mean "remove everything".
+    expect(fanOutKeepSplit(groups[0]!, 'ws-not-here')).toBeNull()
   })
 })

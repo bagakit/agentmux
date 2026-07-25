@@ -155,3 +155,25 @@ export function groupProgress(group: FanOutGroup): {
   }
   return { total: group.lanes.length, done, needsYou, error, working, idle }
 }
+
+/**
+ * Split a group into the lane to keep and the lanes to tear down.
+ *
+ * Pure, and deliberately separate from the surface: the consequential half of "keep this one" is what
+ * happens to the OTHERS, so the split is asserted directly rather than inferred from rendered markup.
+ * The winner is never in the removal list — tearing down the lane the user just chose is precisely the
+ * mistake this exists to make impossible — and only this group's lanes are listed, because a concurrent
+ * bake-off elsewhere is not ours to resolve.
+ */
+export function fanOutKeepSplit(
+  group: FanOutGroup,
+  keepWorkspaceId: string
+): { keepWorkspaceId: string; removeWorkspaceIds: string[] } | null {
+  if (!group.lanes.some((lane) => lane.workspaceId === keepWorkspaceId)) return null
+  return {
+    keepWorkspaceId,
+    removeWorkspaceIds: group.lanes
+      .filter((lane) => lane.workspaceId !== keepWorkspaceId)
+      .map((lane) => lane.workspaceId)
+  }
+}

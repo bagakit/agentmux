@@ -2,6 +2,7 @@ import type { SessionSnapshot } from '../../../shared/contracts'
 import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
 import { api } from '../lib/api'
 import { appendFileReferences } from '../lib/composer-file-reference'
+import { composerSubmitMode } from '../lib/composer-submit-mode'
 import { useAppStore } from '../store'
 import { AgentComposer } from './AgentComposer'
 
@@ -62,27 +63,31 @@ export function AgentSessionComposer({
   const interrupt = useAppStore((state) => state.interrupt)
   const setPosture = useAppStore((state) => state.setPosture)
   const reportError = useAppStore((state) => state.reportError)
-  const availability = agentComposerAvailability(session, disabled)
-  const isWorking = session?.kind === 'agent' && session.status.state === 'working'
+  // One decision answers three questions the old `availability + isWorking` pair conflated: can the user
+  // type, does the surface permit a submit (true while working — that IS steer), and is the primary button
+  // Send or Stop. availability stays for other consumers; this component reads only submitMode.
+  const submitMode = composerSubmitMode(session, disabled)
 
   async function submit(): Promise<void> {
-    if (availability.disabled || !text.trim()) return
+    if (!submitMode.canSubmit || !text.trim()) return
     const value = text
     try {
       await send(sessionId, value)
       clearAgentComposerDraftIfUnchanged(sessionId, value)
     } catch {
-      // The Store owns error presentation; keep the draft available for retry.
+      // The Store owns error presentation; keep the draft available for retry. A codex mid-turn steer that
+      // Core refuses (fail-closed readiness) lands here too — the draft staying put is the honest "not
+      // sent" signal, and no user turn is recorded because Core throws before it appends one.
     }
   }
 
   function addFileReference(): void {
-    if (!activeFile || availability.disabled) return
+    if (!activeFile || !submitMode.canType) return
     setAgentComposerDraft(sessionId, appendFileReferences(text, [activeFile]))
   }
 
   async function attachFiles(): Promise<void> {
-    if (availability.disabled) return
+    if (!submitMode.canType) return
     const workspacePath = session?.kind === 'agent' ? session.workspacePath : undefined
     try {
       const chosen = await api.ui.chooseFiles(workspacePath ? { defaultPath: workspacePath } : undefined)
@@ -96,7 +101,7 @@ export function AgentSessionComposer({
   }
 
   async function pasteImage(image: { bytes: Uint8Array; extension: string }): Promise<void> {
-    if (availability.disabled) return
+    if (!submitMode.canType) return
     // The prompt channel is text with a hard size cap and no Provider speaks ACP, so an image can only
     // reach the Agent as a file it opens itself. Save it, then reference the path like any other file.
     try {
@@ -116,13 +121,13 @@ export function AgentSessionComposer({
   return (
     <AgentComposer
       value={text}
-      disabled={availability.disabled}
-      placeholder={availability.placeholder}
-      isWorking={isWorking}
+      disabled={!submitMode.canType}
+      placeholder={submitMode.placeholder}
+      primaryAction={submitMode.primaryAction}
       {...(activeFile ? { activeFile } : {})}
       {...(postureControl ? { postureControl } : {})}
       onChange={(value) => setAgentComposerDraft(sessionId, value)}
-      {...(!availability.disabled ? {
+      {...(submitMode.canType ? {
         onSubmit: () => void submit(),
         onInterrupt: () => void interrupt(sessionId),
         onAttach: () => void attachFiles(),
