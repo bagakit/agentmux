@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionSnapshot } from '../src/shared/contracts.js'
-import { resolveWorkbenchControlRegion } from '../src/renderer/src/lib/control.js'
+import {
+  planControlOpen,
+  resolveWorkbenchControlRegion
+} from '../src/renderer/src/lib/control.js'
 import { createWorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.js'
 import {
   createWorkbenchTab,
@@ -107,5 +110,55 @@ describe('Desktop Control Region resolver', () => {
       kind: 'region', regionId: 'closed'
     })).toThrow('not currently open')
     expect({ sessions, tabs, layouts }).toEqual(before)
+  })
+
+  it('resolves Launcher destinations through the open-only unique Region owner', () => {
+    const openFile = createWorkbenchTab('open-file', {
+      regionId: 'open-file-region',
+      kind: 'file',
+      workspaceId: 'workspace',
+      path: 'README.md'
+    })
+    const orphanLauncher = createWorkbenchTab('orphan-launcher', {
+      regionId: 'launcher-target',
+      kind: 'launcher',
+      workspaceId: 'workspace'
+    })
+    const firstLauncher = createWorkbenchTab('first-launcher', {
+      regionId: 'duplicate-launcher',
+      kind: 'launcher',
+      workspaceId: 'workspace'
+    })
+    const secondLauncher = createWorkbenchTab('second-launcher', {
+      regionId: 'duplicate-launcher',
+      kind: 'launcher',
+      workspaceId: 'workspace'
+    })
+    const nonLauncher = createWorkbenchTab('non-launcher', {
+      regionId: 'non-launcher-region',
+      kind: 'file',
+      workspaceId: 'workspace',
+      path: 'package.json'
+    })
+    const attempt = (tabs: Record<string, WorkbenchTab>, openTabIds: string[], regionId: string) => (
+      planControlOpen({
+        sessions: [],
+        tabs,
+        layouts: { workspace: createWorkspaceLayout('pane', openTabIds) }
+      }, { kind: 'launcher', regionId }, undefined, 'new-tab', 'new-region')
+    )
+
+    expect(() => attempt({
+      [openFile.id]: openFile,
+      [orphanLauncher.id]: orphanLauncher
+    }, [openFile.id], 'launcher-target')).toThrow(expect.objectContaining({ code: 'REGION_NOT_OPEN' }))
+    expect(() => attempt({
+      [firstLauncher.id]: firstLauncher,
+      [secondLauncher.id]: secondLauncher
+    }, [firstLauncher.id, secondLauncher.id], 'duplicate-launcher')).toThrow(expect.objectContaining({
+      code: 'AMBIGUOUS_REGION_TARGET'
+    }))
+    expect(() => attempt({ [nonLauncher.id]: nonLauncher }, [nonLauncher.id], 'non-launcher-region'))
+      .toThrow(expect.objectContaining({ code: 'LAUNCHER_REGION_REQUIRED' }))
   })
 })

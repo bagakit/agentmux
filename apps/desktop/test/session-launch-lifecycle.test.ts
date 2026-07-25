@@ -122,6 +122,23 @@ afterEach(() => {
 })
 
 describe('Session and Launcher lifecycle ownership', () => {
+  it('fails initialization closed when the required Control contract is missing', async () => {
+    const mutableApi = api as unknown as { control?: typeof api.control }
+    const control = mutableApi.control
+    const subscribeSessions = vi.spyOn(api.sessions, 'onEvent')
+    const subscribeBrowsers = vi.spyOn(api.browser, 'onEvent')
+    delete mutableApi.control
+
+    try {
+      await expect(useAppStore.getState().initialize()).rejects.toThrow('AgentMux Control API is unavailable')
+    } finally {
+      mutableApi.control = control
+    }
+
+    expect(subscribeSessions).not.toHaveBeenCalled()
+    expect(subscribeBrowsers).not.toHaveBeenCalled()
+  })
+
   it('reattaches a running Agent Session and restores its View without recovery overlay across app restart', async () => {
     const running = agentSession('running-agent')
     const tab = createWorkbenchTab('running-view', {
