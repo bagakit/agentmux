@@ -1209,6 +1209,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .browser-toolbar label:focus-within { border-color: var(--focus-line); color: var(--green); }
 .browser-toolbar input { min-width: 0; flex: 1; border: 0; outline: 0; color: var(--text-2); background: transparent; font: 11px "SFMono-Regular", monospace; }
 .browser-menu { min-width: 210px; z-index: 130; padding: 4px; border: 1px solid var(--line-soft); border-radius: var(--radius); color: var(--text-2); background: #13171e; box-shadow: var(--elev-2, 0 10px 24px #0007), 0 14px 36px rgba(0, 0, 0, 0.45); }
+.browser-menu [role="group"] { display: grid; gap: 1px; }
 .browser-menu [role="menuitemradio"], .browser-menu [role="menuitemcheckbox"] { position: relative; }
 .browser-menu > [role="menuitemradio"] + [role="menuitemradio"] { margin-top: 1px; }
 .browser-menu > [data-radix-menu-content] { outline: none; }
