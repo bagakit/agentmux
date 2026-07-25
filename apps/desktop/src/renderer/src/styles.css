@@ -1267,20 +1267,56 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .composer-send--working { color: #fca5a5; background: #2f1d1d; border: 1px solid #6b2e2e; box-shadow: none; }
 .composer-send--working:hover:not(:disabled) { color: #fee2e2; background: #452424; }
 .agent-input-stack { min-width: 0; background: transparent; }
-.agent-interaction { margin: 6px 8px 0; padding: 9px; border: 1px solid #4a4640; border-radius: var(--radius); background: color-mix(in srgb, var(--surface-1) 88%, transparent); }
-.agent-interaction__heading { display: flex; align-items: flex-start; gap: 7px; color: var(--amber); }
+/* The request is an interruption, so it gets amber status colour and elevation rather than an outline;
+   a stroke here would compete with the composer directly beneath it. */
+.agent-interaction {
+  margin: 6px 8px 0;
+  padding: 10px;
+  border-radius: var(--radius);
+  background: var(--surface-1);
+  box-shadow: var(--elev-2), var(--hl), inset 2px 0 var(--amber);
+}
+.agent-interaction__heading { display: flex; align-items: flex-start; gap: 8px; color: var(--amber); }
 .agent-interaction__heading > div { min-width: 0; display: grid; gap: 2px; }
-.agent-interaction__heading strong { color: var(--text); font-size: 11px; }
-.agent-interaction__heading span { color: var(--text-2); font-size: 10px; }
-.agent-interaction pre { max-height: 84px; margin: 7px 0 0; padding: 6px 7px; overflow: auto; border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-2); font: 10px/1.4 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
-.agent-interaction__options { display: grid; gap: 4px; margin-top: 7px; }
-.agent-interaction__options button { display: grid; gap: 1px; padding: 6px 7px; text-align: left; }
-.agent-interaction__options small { color: var(--text-3); font-size: 9px; }
-.agent-interaction__actions { display: flex; justify-content: flex-end; gap: 4px; margin-top: 7px; }
-.agent-interaction button { border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-2); font-size: 10px; cursor: pointer; }
-.agent-interaction button:hover:not(:disabled) { color: var(--text); border-color: var(--line-strong); background: var(--surface-3); }
-.agent-interaction button.is-primary { color: #0c130e; border-color: transparent; background: var(--green); }
+.agent-interaction__heading strong { color: var(--text); font-size: 12px; line-height: 1.35; }
+.agent-interaction__heading span { color: var(--text-2); font-size: 11px; }
+.agent-interaction pre { max-height: 84px; margin: 8px 0 0; padding: 7px 8px; overflow: auto; border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-0); font: 11px/1.45 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-interaction__options { display: grid; gap: 4px; margin-top: 8px; }
+.agent-interaction__options button { display: grid; gap: 2px; padding: 7px 9px; text-align: left; }
+.agent-interaction__options small { color: var(--text-3); font-size: 10px; line-height: 1.4; }
+.agent-interaction__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin-top: 9px; }
+/* Every action is the same button: one height, one padding, icon and label centred on a shared axis —
+   so a row of mixed icon and text-only actions lines up instead of stepping. */
+.agent-interaction button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  background: var(--surface-2);
+  box-shadow: var(--hl);
+  font-size: 11px;
+  font-weight: 450;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 90ms ease, background 90ms ease;
+}
+.agent-interaction__options button { justify-content: start; min-height: 0; padding: 7px 9px; line-height: 1.4; }
+.agent-interaction button > svg { flex: 0 0 auto; }
+.agent-interaction button:hover:not(:disabled) { color: var(--text); background: var(--surface-3); }
+.agent-interaction button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+/* The one affirmative action carries the solid brand fill; everything else stays secondary. */
+.agent-interaction button.is-primary { color: #0c130e; background: var(--green); box-shadow: var(--hl-strong); }
+.agent-interaction button.is-primary:hover:not(:disabled) { color: #0c130e; background: color-mix(in srgb, var(--green) 88%, #ffffff); }
 .agent-interaction button:disabled { opacity: .45; cursor: default; }
+/* Dismissing is an exit, not a verdict on the tool: it sits on the far side of the row and stays
+   ghost-weight so the actual decision keeps the emphasis. */
+.agent-interaction__dismiss { margin-right: auto; color: var(--text-3); background: none; box-shadow: none; }
+.agent-interaction__dismiss:hover:not(:disabled) { color: var(--text-2); background: var(--surface-2); }
 
 .editor-pane { height: 100%; min-width: 0; min-height: 0; display: grid; grid-template-rows: 34px minmax(0, 1fr); background: #101315; }
 .editor-pane--issue { grid-template-rows: 34px auto minmax(0, 1fr); }
