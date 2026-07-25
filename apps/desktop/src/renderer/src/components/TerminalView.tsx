@@ -11,6 +11,7 @@ import { api } from '../lib/api'
 import type { OpenHttpLinkOrigin } from '../lib/open-destination'
 import { useAppStore } from '../store'
 import { installTerminalColorQueryReplyHandlers } from '../lib/terminal-capability-replies'
+import { isTerminalLinkClick } from '../lib/terminal-link-gesture'
 import { terminalOptions, terminalTheme } from '../lib/terminal-theme'
 import { isTerminalAppShortcut } from '../lib/terminal-shortcuts'
 import { finishTerminalReplayRecovery, hydrateTerminalReplay } from '../lib/terminal-replay'
@@ -85,6 +86,8 @@ export function TerminalView({
   const terminalGenerationRef = useRef(0)
   const nextLinkRequestIdRef = useRef(0)
   const linkRequestRef = useRef<TerminalLinkRequest | null>(null)
+  /** Where the current press began, so a drag that ends over a link is not mistaken for a click. */
+  const linkPressRef = useRef<{ x: number; y: number } | null>(null)
   const interactiveResizeRef = useRef(interactiveResize)
   interactiveResizeRef.current = interactiveResize
   // canControlRun 随 processState 翻转，但 attach effect 不能依赖它——否则同 runId 的
@@ -144,6 +147,16 @@ export function TerminalView({
     const webLinks = new WebLinksAddon((event, uri) => {
       const url = parseTerminalHttpLink(uri)
       if (!url) return
+      // The addon activates on any mouse-up over a URL, so a drag that selects text across a link
+      // would otherwise raise the open menu instead of selecting. Only a gesture that stayed put and
+      // left no selection is a click on the link.
+      const origin = linkPressRef.current
+      linkPressRef.current = null
+      if (!isTerminalLinkClick({
+        origin,
+        release: { x: event.clientX, y: event.clientY },
+        hasSelection: terminal.hasSelection()
+      })) return
       const request = {
         id: ++nextLinkRequestIdRef.current,
         url,
@@ -456,7 +469,10 @@ export function TerminalView({
           <div
             className={`terminal-view__xterm ${hydrating ? 'terminal-view__xterm--hydrating' : ''}`}
             ref={rootRef}
-            onPointerDown={() => terminalRef.current?.focus()}
+            onPointerDown={(event) => {
+              linkPressRef.current = { x: event.clientX, y: event.clientY }
+              terminalRef.current?.focus()
+            }}
           />
           {startupPhase === 'restoring' ? (
             <div className="terminal-hydration" role="status" aria-live="polite">
