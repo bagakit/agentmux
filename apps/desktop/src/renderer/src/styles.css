@@ -174,6 +174,24 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .project-rail-row__identity small { min-width: 0; display: flex; align-items: center; gap: 3px; overflow: hidden; font-size: 10px; color: var(--text-3); text-overflow: ellipsis; white-space: nowrap; }
 .project-rail-row__count { min-width: 20px; height: 20px; padding: 0 6px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); color: var(--text-3); background: var(--surface-3); font-size: 10px; font-variant-numeric: tabular-nums; }
 .project-rail-row--active .project-rail-row__count { color: var(--text-2); background: var(--surface-3); box-shadow: var(--hl); }
+/* Attention rolled up to a collapsed row. The count badge already occupies the row's right edge, so
+   this recolours THAT rather than adding a competing mark — one signal per row. It reuses the shared
+   status colours so a lit row and a lit dot mean the same thing, and carries a glyph rather than
+   relying on colour alone (same rule as the full-size status dot). `done` never lights a row: a
+   permanently lit rail would drown out the one signal that means someone is waiting on you. */
+.project-rail-row[data-attention] .project-rail-row__count::after { margin-left: 3px; font-weight: 700; }
+.project-rail-row[data-attention='needs-you'] .project-rail-row__count {
+  color: #10161c;
+  background: var(--amber);
+  box-shadow: var(--hl);
+}
+.project-rail-row[data-attention='needs-you'] .project-rail-row__count::after { content: '?'; }
+.project-rail-row[data-attention='error'] .project-rail-row__count {
+  color: #10161c;
+  background: var(--red);
+  box-shadow: var(--hl);
+}
+.project-rail-row[data-attention='error'] .project-rail-row__count::after { content: '!'; }
 .project-rail-row:not(.project-rail-row--active) .scratch-workspace-row__icon { color: var(--green-2); background: #1d2922; }
 .scratch-workspace-row__meta { display: inline-flex; align-items: center; gap: 3px; color: var(--text-3); font-size: 10px; font-variant-numeric: tabular-nums; }
 .project-rail-row--active .scratch-workspace-row__meta { color: var(--text-2); }
