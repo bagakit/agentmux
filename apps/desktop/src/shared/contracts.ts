@@ -482,6 +482,10 @@ export type AgentMuxDesktopApi = {
     writeClipboardText(text: string): Promise<void>
     writeClipboardImage(image: BrowserPng): Promise<void>
     openExternal(url: string): Promise<void>
+    /** Native file picker. Returns absolute paths, or null when dismissed. */
+    chooseFiles(input?: { defaultPath?: string }): Promise<string[] | null>
+    /** Persists pasted image bytes and returns the path an Agent can read them from. */
+    savePastedImage(input: { bytes: Uint8Array; extension: string }): Promise<string>
     getZoomFactor(): number
     onWindowResize(listener: (event: WindowResizeEvent) => void): () => void
   }

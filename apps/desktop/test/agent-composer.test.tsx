@@ -39,9 +39,51 @@ describe('AgentComposer reusable surface', () => {
     expect(markup).toContain('data-agent-composer="true"')
     expect(markup).toContain('placeholder="Agent is not running"')
     expect(markup).toMatch(/<textarea[^>]*disabled=""/)
-    expect(markup).toContain('File')
     expect(markup).toContain('Attach')
     expect(markup).toContain('Send')
+  })
+
+  it('offers the active-file shortcut only when there is an active file to reference', () => {
+    // The shortcut names the open file, so with nothing open it has nothing to say. It hides rather
+    // than sitting greyed out next to Attach, which is what made the toolbar read as broken.
+    const withoutFile = renderToStaticMarkup(createElement(AgentComposer, {
+      value: '',
+      disabled: false,
+      placeholder: 'Ask the Agent…',
+      onChange: vi.fn(),
+      onAttach: vi.fn()
+    }))
+    expect(withoutFile).toContain('Attach')
+    expect(withoutFile).not.toContain('lucide-at-sign')
+
+    const withFile = renderToStaticMarkup(createElement(AgentComposer, {
+      value: '',
+      disabled: false,
+      placeholder: 'Ask the Agent…',
+      activeFile: 'src/index.ts',
+      onChange: vi.fn(),
+      onAttach: vi.fn(),
+      onReferenceActiveFile: vi.fn()
+    }))
+    expect(withFile).toContain('lucide-at-sign')
+    expect(withFile).toContain('index.ts')
+  })
+
+  it('leaves Attach usable whenever the Agent can take input', () => {
+    // Attach was permanently inert because no caller ever supplied its handler; it must now be gated
+    // only by whether the Agent can accept input at all.
+    const markup = renderToStaticMarkup(createElement(AgentComposer, {
+      value: '',
+      disabled: false,
+      placeholder: 'Ask the Agent…',
+      onChange: vi.fn(),
+      onAttach: vi.fn()
+    }))
+
+    expect(markup).not.toContain('not available yet')
+    expect(markup).toMatch(/Attach/u)
+    // The only disabled control in a live composer with an empty draft is Send.
+    expect(markup.match(/disabled=""/gu) ?? []).toHaveLength(1)
   })
 
   it('switches primary action button to Stop and only displays single Stop action when isWorking is true', () => {
