@@ -14,6 +14,72 @@
 - 一个身份层级只在一个主要位置可见；低频信息进入 tooltip、context menu 或 Activity。
 - 视觉改动不得创建第二套 Agent、Terminal、Browser、Topic 或 Layout 生命周期。
 
+## 尺度系统（字号、间距、颜色的唯一来源）
+
+设计语言要能被执行，前提是它在代码里**有一个可引用的名字**。散落的字面值不是"细微调整"，是把设计决策
+藏进 2000 多行样式表里：改一档字号要靠 grep，改错一处没人发现。因此三类尺度全部收进 token，
+**样式表里不再出现裸字面值**。
+
+### 字号阶梯
+
+七档，够用且不多。每一档有明确职责，选档看**这段文字是什么**，不看它想显得多大。
+
+| Token | 值 | 职责 |
+| --- | --- | --- |
+| `--fs-micro` | 10px | 微标、角标、计数、时间戳。密度下限，不得更小 |
+| `--fs-meta` | 11px | 元信息、caption、次级说明、工具栏文字 |
+| `--fs-body` | 12px | 列表行标题、按钮、输入框、菜单项——界面默认字号 |
+| `--fs-prose` | 13px | 可读正文：Agent 回合、对话、长文本 |
+| `--fs-title` | 14px | 卡片与对话框标题、区块 header |
+| `--fs-display` | 20px | 页面级标题（Board、Settings、New Tab、Welcome） |
+| `--fs-code` | 12px | 等宽内容，与 `--font-mono` 配对 |
+
+约束：
+
+- **页面级标题只有一档**。Board 用 23px、Settings 用 24px、New Tab 用 20px、Welcome 用 31px、
+  Discussion 用 19px，这五处说的是同一件事——"这一屏叫什么"——却给了五个字号。它们全部收敛到
+  `--fs-display`，层级差异靠留白与位置表达，不靠尺度买。
+- **不使用半像素字号**。10.5/11.5px 在 DPR 切换时渲染不稳定，且它们的存在证明作者当时在两档之间
+  犹豫——那说明档位选错了，不是需要第八档。
+- **不低于 10px**。7px 与 9px 在密集界面里不是密度是失明。唯一例外是**状态点内嵌字形**
+  （`.status__dot::after` 的 `?`），它不是文字而是图形符号，随点尺寸缩放，故不受字号阶梯约束，
+  但必须在例外清单里具名。
+- 多级标题**字号相同**（见 Activity Turn Prose），这条与本节一致：层级不靠放大。
+
+### 间距刻度
+
+4px 基准，允许半档（2px）用于紧凑控件内部。
+
+| Token | 值 | 用途 |
+| --- | --- | --- |
+| `--sp-1` | 2px | 图标与文字之间、微标内缩 |
+| `--sp-2` | 4px | 紧凑控件内部、列表项内部行距 |
+| `--sp-3` | 6px | 行内元素间距、小按钮 padding |
+| `--sp-4` | 8px | 标准间距——默认先试它 |
+| `--sp-5` | 12px | 区块之间、卡片 padding |
+| `--sp-6` | 16px | 大区块分隔 |
+| `--sp-7` | 24px | 页面级留白 |
+
+约束：**奇数像素间距不进入刻度**。当前 5px/7px/9px 合计出现三百余次，它们不是设计决定而是"看着差一点
+就 ±1"的累积；这种微调在单个控件上无感，在整屏上表现为节奏抖动——同一层级的两个元素间距差 2px，
+眼睛读得出但说不清哪里不对。刻度之外的值必须在例外清单里具名并写明理由（例如 hairline 的 1px、
+Activity spine 的 104px 对齐点）。
+
+### 颜色
+
+- **样式表内不出现裸 hex**。当前非 `:root` 区域有三百余处硬编码颜色，其中大量是
+  `#12151b`/`#13171d`/`#14171d` 这种彼此相差不到 2% 亮度的近似值——它们本该是同一个 Surface，
+  却因为分头手调而分裂成十几个。颜色一律走 token；确需混合时用 `color-mix()` 基于 token 组合，
+  这样调 token 能真正传导到所有下游。
+- **引用不存在的 token 是 bug，不是笔误**。`var(--text-1)`、`var(--border-subtle)`、`var(--shadow)`
+  当前被引用却从未定义，这些声明**静默失效**——那两行 Topic 标题的颜色实际上从未生效过。CSS 不会
+  报错，所以必须由检查报错。
+- 定义了却无人引用的 token 一律删除，不留"以后可能用得上"。
+
+这三节由 `apps/desktop/test/surface-scale-contract.test.ts` 守住：它从样式表反推出全部字号、
+间距与颜色字面值，核对是否落在 token 或已声明的例外清单内，并断言不存在悬空 token 引用。加一个
+未声明的字面值会红——这正是意图，一个新字面值要么该用 token，要么该被论证进例外清单。
+
 ## Surface 层级
 
 | 层级 | Surface | 用途 | 边界规则 |
@@ -119,8 +185,37 @@
 - 视觉改动通过项目统一检查和目标窗口交互验证；截图只证明渲染，不替代状态和安全测试。
 - 受 Radix `Presence` 管理的节点（Dialog/Menu 的 `Content`、`SubContent`、`Overlay`）上的 keyframe 动画**必须**限定在 `[data-state='open']`。Presence 在关闭时读计算出的 `animation-name` 判断是否有退场动画在跑；一个无条件声明的入场动画会让它等一个关闭永不触发的 `animationend`，节点因此永久留在 DOM——菜单项继续命中查询，Escape 关不掉任何可观测的东西。这条由一个静态检查守住（`apps/desktop/test/presence-exit-animation.test.ts`）：它从组件源码推出受管类名而非手工清单，因此后加的菜单自动被覆盖；同时断言入场动画仍在，使这条规则不能靠删掉动效来满足。
 
+## 样式表的组织
+
+一个 2464 行的 `styles.css` 不是"文件大"的问题，是**找不到东西**的问题：改 Topic 行要先 grep 出
+它散在哪几段，改完不知道有没有漏。样式按**表面**分文件，与组件目录同构：
+
+```
+styles/
+  tokens.css      唯一的 :root——颜色、字号、间距、圆角、阴影、动效
+  base.css        reset、html/body、滚动条、共享原子（.icon-button/.small-button/.eyebrow）
+  chrome.css      Titlebar、Project Rail、Tabbar、Attention Bar
+  dock.css        Tool Dock 及其面板（Explorer、Topics、Branches、Agents）
+  workbench.css   Pane、Region、分屏、拖放
+  surfaces.css    Board、Settings、New Tab、Launch、Welcome
+  agent.css       Activity、Composer、Markdown 回合、Roster
+  overlays.css    Dialog、Context Menu、Quick Switch、Tooltip
+```
+
+约束：
+
+- **`:root` 只有一处**，在 `tokens.css`。其余文件不得声明全局 token，只能引用。
+- 分文件是**按表面切**而不是按属性切（不设 `typography.css`/`colors.css`）——改一个表面时想看到的是
+  它的全部规则，而不是在三个文件间来回跳。
+- 入口按上述顺序 `@import`，层叠顺序即文件顺序；不依赖选择器特异性打架来决定胜负。
+- 单文件超过 400 行时按表面继续拆，不靠注释分节假装分层。
+
 ## 非目标
 
 - 不建设主题导入器、任意颜色编辑器、插件市场或通用扩展框架。
 - 不为没有规模证据的虚拟列表、文件拖动或移动端布局预建状态。
 - 不在正式设计合同保留来源路径、固定 commit、Copy/Adapt/Omit 表或已完成任务流水。
+- **不引入 CSS-in-JS、Tailwind 或预处理器**。问题是"字面值没有名字"，不是"CSS 不够强"；
+  原生 custom property 已经足以给尺度命名，换一套构建期方案只会在解决同一个问题的同时新增一层工具链。
+- 不做设计 token 的运行时主题切换。当前只有一套深色语言，`color-scheme: dark` 是事实而非临时状态。
+
