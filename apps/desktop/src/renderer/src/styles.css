@@ -1320,14 +1320,15 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .composer-send--working { color: #fca5a5; background: #2f1d1d; border: 1px solid #6b2e2e; box-shadow: none; }
 .composer-send--working:hover:not(:disabled) { color: #fee2e2; background: #452424; }
 .agent-input-stack { min-width: 0; background: transparent; }
-/* The request is an interruption, so it gets amber status colour and elevation rather than an outline;
-   a stroke here would compete with the composer directly beneath it. */
+/* The request is an interruption, so it earns weight from surface fill + elevation and an amber STATUS
+   icon — not from a permanent coloured rail (accent expresses state, not decoration) and not from an
+   outline (a stroke here would compete with the composer directly beneath it). */
 .agent-interaction {
   margin: 6px 8px 0;
   padding: 10px;
   border-radius: var(--radius);
   background: var(--surface-1);
-  box-shadow: var(--elev-2), var(--hl), inset 2px 0 var(--amber);
+  box-shadow: var(--elev-2), var(--hl);
 }
 .agent-interaction__heading { display: flex; align-items: flex-start; gap: 8px; color: var(--amber); }
 .agent-interaction__heading > div { min-width: 0; display: grid; gap: 2px; }
@@ -1369,6 +1370,26 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
    ghost-weight so the actual decision keeps the emphasis. */
 .agent-interaction__dismiss { margin-right: auto; color: var(--text-3); background: none; box-shadow: none; }
 .agent-interaction__dismiss:hover:not(:disabled) { color: var(--text-2); background: var(--surface-2); }
+/* When a provider offers more than one affirmative (allow-once + allow-always), the affirmatives adopt
+   the CLI's own vertical numbered rhythm: full-width, left-aligned rows carrying a tier dot + label +
+   scope description. This mirrors .agent-interaction__options and keeps the compact row for the 1-allow case. */
+.agent-interaction__grants { display: grid; gap: 4px; margin-top: 8px; }
+.agent-interaction__grants button {
+  justify-content: start;
+  min-height: 34px;
+  padding: 8px 10px;
+  gap: 8px;
+  line-height: 1.4;
+  text-align: left;
+}
+.agent-interaction__grant-text { min-width: 0; display: grid; gap: 2px; }
+.agent-interaction__grant-text small { color: var(--text-3); font-size: 10px; line-height: 1.4; }
+.agent-interaction button.is-primary .agent-interaction__grant-text small { color: #0c130e9c; }
+/* Risk state, encoded as a restrained 6px dot — the only accent, and never a rail or a border. */
+.agent-interaction__tier { flex: 0 0 auto; width: 6px; height: 6px; margin-top: 5px; border-radius: 50%; background: var(--text-3); }
+.agent-interaction__tier--safe { background: var(--green); }
+.agent-interaction__tier--caution { background: var(--amber); }
+.agent-interaction__tier--danger { background: var(--red); }
 
 .editor-pane { height: 100%; min-width: 0; min-height: 0; display: grid; grid-template-rows: 34px minmax(0, 1fr); background: #101315; }
 .editor-pane--issue { grid-template-rows: 34px auto minmax(0, 1fr); }
@@ -1557,13 +1578,25 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .launch-terminal__body .terminal-view { border-radius: 0 0 var(--radius-sm) var(--radius-sm); }
 .launch-surface textarea { width: min(640px, 100%); margin-inline: auto; padding: 11px 12px; resize: vertical; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); outline: none; color: var(--text); background: var(--surface-1); font-size: 11.5px; line-height: 1.5; transition: border-color 140ms ease, box-shadow 140ms ease; }
 .launch-surface textarea:focus { border-color: var(--focus-line); box-shadow: var(--focus-ring); background: var(--surface-0); }
-.launch-options { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
-.launch-options__label { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 0 2px; color: var(--text-3); font-size: 10px; font-weight: 650; letter-spacing: .07em; text-transform: uppercase; }
-.launch-options__label em { font-size: 10px; font-weight: 500; font-style: normal; letter-spacing: 0; text-transform: none; color: var(--text-3); opacity: .8; }
-.launch-option { display: flex; flex-direction: column; gap: 6px; padding: 9px 10px; border-radius: var(--radius-sm); background: var(--surface-1); }
-.launch-option__head { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.launch-option__head strong { color: var(--text-2); font-size: 11.5px; font-weight: 600; }
-.launch-option__head small { color: var(--text-3); font-size: 10px; line-height: 1.4; }
+.launch-refine { margin-top: 10px; container-type: inline-size; }
+.launch-refine__toggle { width: 100%; min-height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); cursor: pointer; transition: background 120ms ease; }
+.launch-refine__toggle:hover, .launch-refine__toggle--expanded { background: var(--surface-1); }
+.launch-refine__toggle-icon { flex: none; color: inherit; }
+.launch-refine__toggle-label { flex: none; font-size: 10px; font-weight: 650; letter-spacing: .07em; text-transform: uppercase; }
+.launch-refine__summary { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; font-size: 11px; color: var(--text-3); }
+.launch-refine__summary--empty { font-style: italic; opacity: .85; }
+.launch-refine__val { color: var(--text-2); }
+.launch-refine__val[data-tier="caution"] { color: var(--amber); }
+.launch-refine__val[data-tier="danger"] { color: var(--red); }
+.launch-refine__sep { color: var(--text-3); }
+.launch-refine__count { flex: none; padding: 1px 5px; border-radius: var(--radius-sm); color: #7f8983; background: #ffffff08; font-size: 10px; font-style: normal; }
+.launch-refine__chevron { flex: none; color: var(--text-3); transition: transform 120ms ease; }
+.launch-refine__panel { margin-top: 6px; display: flex; flex-direction: column; padding: 4px 8px; border-radius: var(--radius-sm); background: var(--surface-1); box-shadow: var(--hl); }
+.launch-refine__row { display: grid; grid-template-columns: minmax(120px, .85fr) minmax(0, 1.4fr); align-items: center; column-gap: 12px; row-gap: 6px; padding: 9px 2px; }
+.launch-refine__row + .launch-refine__row { border-top: 1px solid var(--line-soft); }
+.launch-refine__head { min-width: 0; }
+.launch-refine__head strong { color: var(--text-2); font-size: 11.5px; font-weight: 600; }
+.launch-refine__head small { display: block; margin-top: 1px; color: var(--text-3); font-size: 10px; line-height: 1.4; }
 .launch-option__segments { display: flex; flex-wrap: wrap; gap: 4px; }
 .launch-option__segment { min-height: 24px; padding: 3px 10px; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: var(--surface-2); font-size: 11px; font-weight: 500; cursor: pointer; transition: background 120ms ease, color 120ms ease, box-shadow 120ms ease; }
 .launch-option__segment:hover:not(:disabled) { color: var(--text); background: var(--surface-3); }
@@ -1571,6 +1604,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .launch-option__segment--selected, .launch-option__segment--selected:hover { color: var(--text); background: var(--surface-3); box-shadow: var(--hl); }
 .launch-option__segment--selected[data-tier="caution"] { color: var(--amber); }
 .launch-option__segment--selected[data-tier="danger"] { color: var(--red); }
+/* First container query in the sheet: .launch-refine is a min(640px,100%) column child, so it tracks the
+   real available inline-size even inside a narrow split Region. Below 400px the two-column option row
+   collapses so the label/description stacks above its (already-wrapping) segments. */
+@container (max-width: 400px) {
+  .launch-refine__row { grid-template-columns: minmax(0, 1fr); row-gap: 6px; padding: 8px 2px; }
+}
 .launch-surface__footer { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; }
 .launch-surface__footer > span { display: flex; align-items: center; gap: 5px; color: var(--text-3); font-size: 11px; }
 .launch-host-health { padding: 2px 5px; border-radius: var(--radius); color: var(--text-3); background: var(--surface-3); font-size: 10px; font-style: normal; }

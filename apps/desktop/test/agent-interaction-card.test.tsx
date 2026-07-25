@@ -59,6 +59,48 @@ describe('AgentInteractionCard', () => {
     expect(markup.match(/disabled=""/gu) ?? []).toHaveLength(3)
   })
 
+  it('lays a second allow into a scoped vertical column instead of the action row', () => {
+    const markup = renderToStaticMarkup(createElement(AgentInteractionCard, {
+      request: {
+        kind: 'permission',
+        id: 'permission-scoped',
+        agentSessionId: 'agent-1',
+        title: 'Allow Edit?',
+        toolName: 'Edit',
+        options: [
+          { id: 'allow-once', label: 'Allow once', kind: 'allow-once', tier: 'safe' },
+          {
+            id: 'allow-always',
+            label: "Allow & don't ask again",
+            description: 'This tool, this directory.',
+            kind: 'allow-always',
+            tier: 'caution'
+          },
+          { id: 'deny', label: 'Deny', kind: 'reject-once', tier: 'safe' }
+        ],
+        evidence: {
+          source: 'native-hook',
+          observedAt: 1,
+          run: { runId: 'run-1' },
+          hookReceiptId: 'permission-scoped'
+        }
+      },
+      onRespond: async () => {}
+    }))
+
+    // A second allow promotes the affirmatives into the scoped vertical list; deny stays in the row.
+    expect(markup).toContain('agent-interaction__grants')
+    expect(markup).toContain('Allow once')
+    expect(markup).toContain('ask again')
+    expect(markup).toContain('This tool, this directory.')
+    // Each affirmative carries exactly one tier dot; allow-once is safe, allow-always is caution.
+    expect(markup).toContain('agent-interaction__tier--safe')
+    expect(markup).toContain('agent-interaction__tier--caution')
+    // Even across the scoped layout, allow-once is the sole primary; allow-always and deny are not.
+    expect(markup.match(/is-primary/gu) ?? []).toHaveLength(1)
+    expect(markup).toContain('agent-interaction__dismiss')
+  })
+
   it('renders one Core-validated single-select question', () => {
     const markup = renderToStaticMarkup(createElement(AgentInteractionCard, {
       request: {
