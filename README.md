@@ -57,9 +57,9 @@ lineage 作为 Evidence，但语义解释仍由 AgentMux 持有。
 - Codex 继续使用 AgentMux Provider 的 Launch/Resume/Hook/Permission 语义，只把物化后的通用 `RunSpec` 和物理 Run 操作交给同一个 `CtxmuxRunAdapter`；ctxmux 不提供第二份 Agent-specific Provider；
 - Core File Store/Resolver 是 `agentSessionId ↔ exact runId ↔ Provider native session id/ACP handle` 的唯一身份 Owner，Desktop 与 CLI 不再各存一份；
 - checkout-external packed consumer 已证明 Codex create、Hook/permission、native-id 反查、跨 Client 同 Run/PID reconnect、send、Interrupt、provider-native Resume 保持 AgentMux ID 但切换 RunId、旧 Run 失败关闭和 Stop；
-- `agentmux inspect/list/send/output/interrupt/resume/stop` 以 AgentMux `agentSessionId` 为语义主键；非流式输出是版本化 JSON，`output --follow` 输出 JSON Lines；
+- `agentmux inspect --session|--run|--*-native`、`list sessions` 与 `output` 由短命 CLI 直接读取 Core；Session 操作使用 `agentSessionId`，Run 操作使用 ctxmux `runId`，`output --follow` 输出 JSON Lines；
 - Core 的 `RuntimeProjection` 只投影 Run 与 Agent Session，不表示界面。Desktop 只用 Tab、Region 与 Surface 表达展示；
-- `agentmux inspect/list/open/send/focus/arrange/output/interrupt/resume/stop` 通过一个版本化 Control Host 进入各自 Owner。Renderer 是 Tab/Region Layout SSOT，Desktop Main 持有长期 RuntimeController 与 Browser owner，`ctxmuxd` 仍只持有最终产生的 Run、PTY 与 Replay；
+- `inspect --tab|--region`、`list agents` 与 `open/send/focus/arrange/interrupt/resume/stop` 通过一个版本化 Control Host 进入各自 Owner。Renderer 是 Tab/Region Layout SSOT，Desktop Main 持有长期 RuntimeController 与 Browser owner，`ctxmuxd` 仍只持有最终产生的 Run、PTY 与 Replay；
 - Agent、Terminal 与 Browser 共用 `--left-of/--right-of/--above/--below/--new-tab-after/--in-region` 这组精确 destination，不读取 UI 焦点，也不猜最近 Region。
 
 Remote/SSH 仍明确 unsupported；Claude、TraeX、Hermes、Pi 与 Codex 共享同一
