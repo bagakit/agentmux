@@ -133,4 +133,28 @@ describe('explicit managed Hook installation', () => {
     await installer.install(secondPreview.id)
     expect(await readFile(existingPath, 'utf8')).toBe(afterFirst)
   })
+
+  it('ensure() installs once then no-ops on relaunch (install-and-leave)', async () => {
+    const { installer, existingPath } = await fixture()
+    await writeFile(existingPath, `${JSON.stringify({ other: 1 }, null, 2)}\n`)
+    const plan = {
+      providerId: 'antigravity' as const,
+      mutations: [{
+        path: existingPath,
+        content: `${JSON.stringify({ 'agentmux-status': { PreToolUse: [{ command: 'agentmux-hook.js' }] } })}\n`,
+        merge: { kind: 'json-owned-key', key: 'agentmux-status' } as const
+      }]
+    }
+    // First launch: a write happens, so a receipt is returned and the foreign key is preserved.
+    const firstReceipt = await installer.ensure(plan)
+    expect(firstReceipt).not.toBeNull()
+    const installed = JSON.parse(await readFile(existingPath, 'utf8'))
+    expect(installed['other']).toBe(1)
+    expect(installed['agentmux-status']).toBeDefined()
+    const afterFirst = await readFile(existingPath, 'utf8')
+    // Every subsequent launch: nothing to do, so ensure() returns null and never touches disk.
+    expect(await installer.ensure(plan)).toBeNull()
+    expect(await installer.ensure(plan)).toBeNull()
+    expect(await readFile(existingPath, 'utf8')).toBe(afterFirst)
+  })
 })
