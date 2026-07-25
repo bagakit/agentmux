@@ -1,7 +1,8 @@
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import { api } from '../lib/api'
 import { createAttentionNotifier } from '../lib/attention-notifier'
 import { visibleSessionIds } from '../lib/session-visibility'
+import { visibleTabGroupsForState } from '../lib/visible-tab-groups'
 import { useAppStore } from '../store'
 
 // Wires the attention decision to the OS.
@@ -13,10 +14,6 @@ import { useAppStore } from '../store'
 export function useAgentAttentionNotifications(): void {
   const reportError = useAppStore((state) => state.reportError)
   const selectSession = useAppStore((state) => state.selectSession)
-  // Held in a ref so the subscription below is installed once rather than being torn down and rebuilt on
-  // every Session change — a rebuild would reset the notifier's baseline and re-announce old work.
-  const notifierRef = useRef<ReturnType<typeof createAttentionNotifier> | null>(null)
-
   useEffect(() => {
     const notifier = createAttentionNotifier({
       notify: (input) => api.ui.notifyAgentAttention(input),
@@ -24,7 +21,6 @@ export function useAgentAttentionNotifications(): void {
       // so once instead of the feature silently doing nothing.
       onUnsupported: (reason) => reportError(new Error(`Agent notifications are unavailable: ${reason}`))
     })
-    notifierRef.current = notifier
 
     // Seed from whatever is already projected, WITHOUT notifying: Agents that finished before this window
     // opened are not news, and announcing them would train the user to ignore the channel.
@@ -44,9 +40,12 @@ export function useAgentAttentionNotifications(): void {
           windowFocused,
           visibleSessionIds: visibleSessionIds({
             tabs: state.tabs,
-            // Every workspace's layout contributes its tab groups: a Session is on screen when it sits in
-            // the active tab of any group, in any workspace the window currently shows.
-            tabGroups: Object.values(state.layouts ?? {}).flatMap((layout) => layout.groups ?? [])
+            // ONLY the rendered workspace's groups. The window mounts one WorkspaceWorkbench at a time
+            // (App.tsx), while `layouts` accumulates a layout for every workspace ever visited — so
+            // collecting them all marked background-workspace Agents as "on screen" and silently
+            // suppressed exactly the completions this feature exists to announce. And on the Board no
+            // Session Region is mounted at all, so nothing is visible there.
+            tabGroups: visibleTabGroupsForState(state)
           })
         })
         // The reconcile itself must never become a silent failure: it is exactly the kind of
@@ -65,7 +64,6 @@ export function useAgentAttentionNotifications(): void {
       unsubscribe()
       window.removeEventListener('focus', onFocus)
       window.removeEventListener('blur', onBlur)
-      notifierRef.current = null
     }
   }, [reportError])
 
