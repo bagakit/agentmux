@@ -95,6 +95,7 @@ export class TerminalViewportSynchronizer {
   async startLiveSynchronization(): Promise<void> {
     if (this.disposed || this.live) return
     this.live = true
+    this.lastRequestedGrid = null
     try {
       await this.fitAndSynchronize()
     } catch (error) {

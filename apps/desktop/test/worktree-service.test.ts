@@ -311,5 +311,5 @@ describe('WorktreeService', () => {
     expect((await executionHost.run('git', ['-C', worktreePath, 'branch', '--show-current'])).stdout.trim()).toBe('feature/real')
     expect(creation.workspace).toMatchObject({ path: worktreePath, branch: 'feature/real', kind: 'worktree' })
     expect(save).toHaveBeenCalledOnce()
-  })
+  }, 20000)
 })

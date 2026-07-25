@@ -1623,19 +1623,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .discussion-canvas__footer > span { margin-right: auto; display: inline-flex; align-items: center; gap: 4px; color: var(--text-3); font-size: 10px; }
 
 @media (max-width: 1120px) {
-  .app-shell { grid-template-columns: 190px minmax(0, 1fr); }
+  .app-shell:not(.app-shell--project-rail-collapsed) { grid-template-columns: 190px minmax(0, 1fr); }
   .topbar-button { font-size: 0; gap: 0; }
   .launch-surface { padding: 30px 20px 44px; }
 }
 @media (max-width: 900px) {
-  .app-shell { grid-template-columns: 180px minmax(0, 1fr); }
-  .surface-tool-dock {
-    max-width: calc(100% - 48px);
-    position: absolute;
-    z-index: 20;
-    inset: 0 auto 0 0;
-    box-shadow: 18px 0 36px #000a;
-  }
+  .app-shell:not(.app-shell--project-rail-collapsed) { grid-template-columns: 180px minmax(0, 1fr); }
   .settings-page { grid-template-columns: 210px minmax(0, 1fr); }
   .settings-content > header, .settings-content__scroll { padding-right: 24px; padding-left: 24px; }
   .host-settings-card > header { grid-template-columns: 32px minmax(0, 1fr) auto auto; }
