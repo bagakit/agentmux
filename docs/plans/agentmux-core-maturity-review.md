@@ -54,7 +54,9 @@ Reattach 原 Run、Provider-native resume、创建新 AgentSession、Spawn 新 R
   create、reattach、send、interrupt、resume、stop 与 View switch。
 - Remote/SSH 在公共合同交付前返回 typed unsupported，不存在旧 SSH path 或隐藏 fallback。
 
-## 剩余闭环
+## 成熟度闭环
+
+以下是 Core 成熟度的长期验收维度，不表示 Feature Tracker 中的任务状态或执行顺序。
 
 ### 最终 Kernel、Package 与 Benchmark 验收
 

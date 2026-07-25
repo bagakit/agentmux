@@ -1,6 +1,7 @@
 # AgentMux AI-Native Desktop Composition CLI
 
-状态：用户已纠正分屏语义；本版覆盖此前的 Pane/Tab Placement 表述。历史 Feature `f-2298fjkx4` 已归档，后续修正由当前 Desktop Feature 承接。
+本合同固定分屏语义：Tab 是完整 View，Tab 内的内容区域承载分屏；Pane/Tab Placement
+不再作为产品术语或兼容入口。
 
 ## 1. 目标
 
