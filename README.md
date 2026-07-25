@@ -10,7 +10,7 @@ Desktop / CLI / external Node client
                   ▼
              @agentmux/core
  Provider / AgentSession / Hook / ACP / Runtime Projection
- Host-neutral Composition contracts
+ Host-neutral Control contracts
                   │
                   ▼
        private CtxmuxRunAdapter
@@ -44,7 +44,7 @@ lineage 作为 Evidence，但语义解释仍由 AgentMux 持有。
 
 ## 当前实现状态
 
-当前 Local Run、Codex 代表纵切与第一条 Desktop Composition 纵切已经跑通：
+当前 Local Run、Codex 代表纵切与 Desktop Control 纵切已经跑通：
 
 - 固定 CtxMux clean commit `a0897087fdd0eb131c39c43d4d6791901335d69e`、protocol 13；
 - `packages/core/vendor/ctxmux/darwin-arm64` 携带其 manifest、SDK tarball、`ctxmux` 与 `ctxmuxd`；
@@ -57,10 +57,10 @@ lineage 作为 Evidence，但语义解释仍由 AgentMux 持有。
 - Codex 继续使用 AgentMux Provider 的 Launch/Resume/Hook/Permission 语义，只把物化后的通用 `RunSpec` 和物理 Run 操作交给同一个 `CtxmuxRunAdapter`；ctxmux 不提供第二份 Agent-specific Provider；
 - Core File Store/Resolver 是 `agentSessionId ↔ exact runId ↔ Provider native session id/ACP handle` 的唯一身份 Owner，Desktop 与 CLI 不再各存一份；
 - checkout-external packed consumer 已证明 Codex create、Hook/permission、native-id 反查、跨 Client 同 Run/PID reconnect、send、Interrupt、provider-native Resume 保持 AgentMux ID 但切换 RunId、旧 Run 失败关闭和 Stop；
-- `agentmux session list/resolve/status/send/interrupt/output/resume/stop` 全部以 AgentMux `agentSessionId` 为主键；非流式输出默认是版本化 JSON，`session output --follow` 输出 JSON Lines；
-- Core 的 `RuntimeProjection` 只投影 Run 与 Agent Session，不表示界面。真实 `View` 是 Desktop 的 Pane/Tab presentation；
-- `agentmux context/launch/view open/view focus` 通过一个版本化 Composition Control 进入 Desktop。Renderer 是 Layout SSOT，Desktop Main 持有长期 RuntimeController，`ctxmuxd` 仍只持有最终产生的 Run、PTY 与 Replay；
-- `tab` 与四向 `split-left/right/up/down` 使用精确 View 或唯一 caller View，不读取 UI 焦点，也不猜最近 Pane。
+- `agentmux inspect/list/send/output/interrupt/resume/stop` 以 AgentMux `agentSessionId` 为语义主键；非流式输出是版本化 JSON，`output --follow` 输出 JSON Lines；
+- Core 的 `RuntimeProjection` 只投影 Run 与 Agent Session，不表示界面。Desktop 只用 Tab、Region 与 Surface 表达展示；
+- `agentmux inspect/list/open/send/focus/arrange/output/interrupt/resume/stop` 通过一个版本化 Control Host 进入各自 Owner。Renderer 是 Tab/Region Layout SSOT，Desktop Main 持有长期 RuntimeController 与 Browser owner，`ctxmuxd` 仍只持有最终产生的 Run、PTY 与 Replay；
+- Agent、Terminal 与 Browser 共用 `--left-of/--right-of/--above/--below/--new-tab-after/--in-region` 这组精确 destination，不读取 UI 焦点，也不猜最近 Region。
 
 Remote/SSH 仍明确 unsupported；Claude、TraeX、Hermes、Pi 与 Codex 共享同一
 Provider/Agent Session 合同，当前真实端到端覆盖以 Codex 为代表。
@@ -85,27 +85,26 @@ await client.dispose()
 ```
 
 ```bash
-agentmux context
-agentmux launch --agent codex --prompt "Inspect the failing tests" \
-  --placement split-right --relative-to self
+agentmux list agents
+agentmux list sessions
+agentmux inspect --session <agent-session-id>
+agentmux open agent --agent codex --prompt "Inspect the failing tests" \
+  --right-of <region-id>
+agentmux send --to-session <agent-session-id> --text "Run the focused tests"
+agentmux output --session <agent-session-id> --follow
+agentmux interrupt --session <agent-session-id>
+agentmux resume --session <agent-session-id> --text "Continue from the provider context"
+agentmux stop --session <agent-session-id>
 
-agentmux session list
-agentmux session status <agent-session-id>
-agentmux session send <agent-session-id> --text "Run the focused tests"
-agentmux session output <agent-session-id> --follow
-agentmux session interrupt <agent-session-id>
-agentmux session resume <agent-session-id> --text "Continue from the provider context"
-agentmux session stop <agent-session-id>
-
-agentmux view open --session <agent-session-id> \
-  --placement tab --relative-to self
-agentmux view focus --view <view-id>
+agentmux inspect --tab <tab-id>
+agentmux focus --region <region-id>
+agentmux arrange --tab <tab-id> --preset columns-3
 ```
 
-`context`、`launch` 与 `--relative-to self` 只接受受管 Agent 注入的
-`AGENTMUX_AGENT_SESSION_ID`。同一 Agent Session 打开多个 View 时，`self` 会失败关闭；调用方
-必须改用 receipt 返回的精确 `viewId`。Desktop 不可用时，Composition 命令不会退化为 UI
-automation 或直接访问 ctxmux socket。
+`self` 只接受受管 Agent 注入的 `AGENTMUX_ENV=1` 与 `AGENTMUX_AGENT_SESSION_ID`。
+`inspect --tab self` 或方位 destination 不能唯一解析时会失败关闭，调用方必须改用 receipt
+返回的精确 Tab/Region ID。Desktop 不可用时，Control 命令不会退化为 UI automation、直接
+访问 ctxmux socket 或另一套命令。
 
 ## 使用 Local Terminal
 

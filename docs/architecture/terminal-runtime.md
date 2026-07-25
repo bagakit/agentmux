@@ -63,7 +63,8 @@ managed Agent → agentmux CLI → control.sock → Desktop Main Control Host
                                   RuntimeController → Core → ctxmuxd
 ```
 
-Core 的 Control 合同只表达类型化的 `inspect/open/send/focus/arrange` 请求和 receipt；它不保存
+Core 的 Control 合同只表达类型化的 `inspect/list/open/send/focus/arrange/output/interrupt/resume/stop`
+请求和 receipt；它不保存
 布局。Desktop Main 持有跨进程事务和长期 Agent lifecycle，Renderer 的 Workspace split tree
 是 Tab/Region 的唯一 SSOT。Agent 与 Terminal 创建经长期 RuntimeController，Browser 创建经
 Main Browser owner；布局或 owner 丢失时只回滚本次事务。完整命令与 selector 语义只由
@@ -90,7 +91,7 @@ lineage，但只有 AgentMux Provider 可以解释这些证据。
 | --- | --- | --- |
 | PTY raw bytes（stdout/stdin 原始字节） | CtxMux daemon，经 `CtxmuxRunAdapter` 投影 | `ctxmux-run-adapter.ts:418`（`decodeChunk`）、`ctxmux-run-adapter.ts:829`（`emitRunEvent`） |
 | Run lifecycle（start/stop/interrupt/resize） | CtxMux，经 adapter 暴露稳定投影 | `ctxmux-run-adapter.ts:587`（`start`）、`:774`（`resize`）、`:787`（`interrupt`）、`:795`（`stop`） |
-| Control transaction（inspect/open/send/focus/arrange） | Desktop Main；通过一个版本化 endpoint 连接 CLI 与 Renderer | `apps/desktop/src/main/ipc.ts`、`packages/core/src/control-host.ts` |
+| Control transaction（inspect/list/open/send/focus/arrange/output/interrupt/resume/stop） | Desktop Main；通过一个版本化 endpoint 连接 CLI 与 Renderer | `apps/desktop/src/main/ipc.ts`、`packages/core/src/control-host.ts` |
 | Tab/Region layout 与 placement | Desktop Renderer 的 Layout Store/reducer | `apps/desktop/src/renderer/src/store.ts`、`lib/composition.ts`、`lib/workbench-layout.ts` |
 | Tab 关闭与后台保留决策 | Desktop Renderer；停止动作通过 Core public API 下达 | 关闭承载最后一个 Terminal Region 的完整 Tab 即 Stop Run；Agent 默认 Stop，只有确认保留才继续后台运行；关闭 Tab 内 Region 只改变布局 |
 | Viewport grid（何时 fit、向 PTY 提交哪个尺寸） | Desktop Renderer 决定 grid；Desktop Main 用 Region 的 Attachment capability 绑定 exact Run；CtxMux 只应用最终提交的 PTY 尺寸 | `terminal-viewport-sync.ts`、`TerminalView.tsx`、`runtime-controller.ts` |
