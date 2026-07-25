@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -9,17 +9,11 @@ import {
 } from '../src/agent-session-store.js'
 
 const workerFixture = fileURLToPath(new URL('./fixtures/session-store-worker.mjs', import.meta.url))
-const roots: string[] = []
-const children = new Map<ChildProcess, Promise<WorkerResult>>()
+const owners = new Set<WorkerOwner>()
 
 afterEach(async () => {
-  const active = [...children]
-  for (const [child] of active) {
-    if (child.exitCode === null && child.signalCode === null) child.kill()
-  }
-  await Promise.allSettled(active.map(([, settled]) => settled))
-  expect(children.size).toBe(0)
-  await Promise.all(roots.splice(0).map(async (root) => await rm(root, { recursive: true, force: true })))
+  await Promise.all([...owners].map(async (owner) => await owner.close()))
+  expect(owners.size).toBe(0)
 })
 
 type WorkerMode = 'create' | 'resume' | 'timeline'
@@ -42,6 +36,23 @@ type WorkerMessage =
 type WorkerHandle = {
   ready: Promise<void>
   settled: Promise<WorkerResult>
+}
+
+type WorkerInput = {
+  mode: WorkerMode
+  storePath: string
+  startPath: string
+  workerId: string
+  executable?: string
+  fixtureScenario?: WorkerFixtureScenario
+}
+
+type WorkerOwner = {
+  spawn(input: WorkerInput): WorkerHandle
+  createRoot(prefix: string): Promise<string>
+  close(): Promise<void>
+  childCount(): number
+  rootCount(): number
 }
 
 type WorkerFixtureScenario =
@@ -192,14 +203,10 @@ function createWorkerStdoutProtocol(
   }
 }
 
-function worker(input: {
-  mode: WorkerMode
-  storePath: string
-  startPath: string
-  workerId: string
-  executable?: string
-  fixtureScenario?: WorkerFixtureScenario
-}): WorkerHandle {
+function spawnWorker(
+  input: WorkerInput,
+  children: Map<ChildProcess, Promise<WorkerResult>>
+): WorkerHandle {
   const child = spawn(input.executable ?? process.execPath, [workerFixture], {
     stdio: ['ignore', 'pipe', 'pipe'],
     env: {
@@ -208,9 +215,7 @@ function worker(input: {
       AGENTMUX_STORE_PATH: input.storePath,
       AGENTMUX_STORE_START_PATH: input.startPath,
       AGENTMUX_STORE_WORKER_ID: input.workerId,
-      ...(input.fixtureScenario
-        ? { AGENTMUX_STORE_WORKER_SCENARIO: input.fixtureScenario }
-        : {})
+      AGENTMUX_STORE_WORKER_SCENARIO: input.fixtureScenario ?? ''
     }
   })
   let announceReady!: () => void
@@ -271,6 +276,70 @@ function worker(input: {
   return { ready, settled }
 }
 
+function createWorkerOwner(
+  rootFactory: (prefix: string) => Promise<string> = mkdtemp
+): WorkerOwner {
+  const children = new Map<ChildProcess, Promise<WorkerResult>>()
+  const pendingRoots = new Set<Promise<string>>()
+  const roots = new Set<string>()
+  let accepting = true
+  let closePromise: Promise<void> | null = null
+  const owner: WorkerOwner = {
+    spawn(input) {
+      if (!accepting) throw new Error('Store worker owner is closed.')
+      return spawnWorker(input, children)
+    },
+    createRoot(prefix) {
+      if (!accepting) throw new Error('Store worker owner is closed.')
+      let pending!: Promise<string>
+      pending = rootFactory(prefix).then((root) => {
+        roots.add(root)
+        if (!accepting) throw new Error('Store worker owner is closed.')
+        return root
+      })
+      pendingRoots.add(pending)
+      void pending.then(
+        () => pendingRoots.delete(pending),
+        () => pendingRoots.delete(pending)
+      )
+      return pending
+    },
+    close() {
+      if (closePromise) return closePromise
+      accepting = false
+      const activeChildren = [...children]
+      const activeRoots = [...pendingRoots]
+      for (const [child] of activeChildren) {
+        if (child.exitCode === null && child.signalCode === null) child.kill()
+      }
+      closePromise = (async () => {
+        await Promise.allSettled(activeRoots)
+        await Promise.allSettled(activeChildren.map(([, settled]) => settled))
+        if (children.size > 0) throw new Error('Store worker owner closed before its children.')
+        if (pendingRoots.size > 0) throw new Error('Store worker owner closed before acquiring its roots.')
+        await Promise.all([...roots].map(async (root) => {
+          await rm(root, { recursive: true, force: true })
+        }))
+        roots.clear()
+        owners.delete(owner)
+      })()
+      return closePromise
+    },
+    childCount() {
+      return children.size
+    },
+    rootCount() {
+      return roots.size
+    }
+  }
+  owners.add(owner)
+  return owner
+}
+
+function worker(owner: WorkerOwner, input: WorkerInput): WorkerHandle {
+  return owner.spawn(input)
+}
+
 function settledResults(outcomes: readonly PromiseSettledResult<WorkerResult>[]): WorkerResult[] {
   const results: WorkerResult[] = []
   for (const outcome of outcomes) {
@@ -280,20 +349,27 @@ function settledResults(outcomes: readonly PromiseSettledResult<WorkerResult>[])
   return results
 }
 
-async function runRace(mode: WorkerMode, storePath: string, startPath: string) {
-  const workers = ['left', 'right'].map((workerId) => worker({ mode, storePath, startPath, workerId }))
+function runRace(
+  owner: WorkerOwner,
+  mode: WorkerMode,
+  storePath: string,
+  startPath: string
+): Promise<WorkerResult[]> {
+  const workers = ['left', 'right'].map((workerId) => (
+    worker(owner, { mode, storePath, startPath, workerId })
+  ))
   const settlements = Promise.allSettled(workers.map((item) => item.settled))
-  try {
-    await Promise.all(workers.map((item) => item.ready))
-    await writeFile(startPath, 'go\n', { mode: 0o600, flag: 'wx' })
-  } catch (error) {
-    for (const child of children.keys()) {
-      if (child.exitCode === null && child.signalCode === null) child.kill()
+  return (async () => {
+    try {
+      await Promise.all(workers.map((item) => item.ready))
+      await writeFile(startPath, 'go\n', { mode: 0o600, flag: 'wx' })
+    } catch (error) {
+      await owner.close()
+      await settlements
+      throw error
     }
-    await settlements
-    throw error
-  }
-  return settledResults(await settlements)
+    return settledResults(await settlements)
+  })()
 }
 
 function frame(value: unknown): string {
@@ -420,8 +496,8 @@ describe('Store worker stdout protocol', () => {
 
 describe('File Store multi-process authority', () => {
   it('settles corrupt, trailing, and early worker failures without leaking children', async () => {
-    const root = await mkdtemp('/private/tmp/agentmux-store-protocol-')
-    roots.push(root)
+    const owner = createWorkerOwner()
+    const root = await owner.createRoot('/private/tmp/agentmux-store-protocol-')
     const cases: Array<{
       workerId: string
       fixtureScenario?: WorkerFixtureScenario
@@ -455,7 +531,7 @@ describe('File Store multi-process authority', () => {
       }
     ]
     const observed = cases.map((testCase) => {
-      const handle = worker({
+      const handle = worker(owner, {
         mode: 'timeline',
         storePath: join(root, 'agent-sessions.json'),
         startPath: join(root, `start-${testCase.workerId}`),
@@ -488,13 +564,13 @@ describe('File Store multi-process authority', () => {
       if (testCase.ready) expect(readiness[index]).toBeNull()
       else expect(readiness[index]).toBe(settlement.reason)
     }
-    expect(children.size).toBe(0)
+    expect(owner.childCount()).toBe(0)
   })
 
   it('drains a worker left live after ready through its authoritative settlement', async () => {
-    const root = await mkdtemp('/private/tmp/agentmux-store-live-worker-')
-    roots.push(root)
-    const handle = worker({
+    const owner = createWorkerOwner()
+    const root = await owner.createRoot('/private/tmp/agentmux-store-live-worker-')
+    const handle = worker(owner, {
       mode: 'timeline',
       storePath: join(root, 'agent-sessions.json'),
       startPath: join(root, 'unused-start'),
@@ -503,14 +579,97 @@ describe('File Store multi-process authority', () => {
     })
 
     await handle.ready
-    expect(children.size).toBe(1)
+    expect(owner.childCount()).toBe(1)
+  })
+
+  it('permanently rejects stale child and root work without crossing generations', async () => {
+    let releaseRoot!: () => void
+    const rootGate = new Promise<void>((resolve) => { releaseRoot = resolve })
+    let acquiredLateRoot: string | null = null
+    const staleOwner = createWorkerOwner(async (prefix) => {
+      await rootGate
+      acquiredLateRoot = await mkdtemp(prefix)
+      return acquiredLateRoot
+    })
+    const nextOwner = createWorkerOwner()
+    const lateRoot = staleOwner.createRoot('/private/tmp/agentmux-store-stale-owner-')
+    const lateRootFailure = lateRoot.then(
+      () => null,
+      (error: unknown) => error
+    )
+    const nextRoot = await nextOwner.createRoot('/private/tmp/agentmux-store-next-owner-')
+    const staleSpawnRoot = join(nextRoot, 'stale-spawn')
+    const input: WorkerInput = {
+      mode: 'create',
+      storePath: join(staleSpawnRoot, 'agent-sessions.json'),
+      startPath: join(nextRoot, 'already-started'),
+      workerId: 'stale-worker'
+    }
+    await writeFile(input.startPath, 'go\n')
+    const staleContinuation = () => worker(staleOwner, input)
+
+    const closing = staleOwner.close()
+    expect(staleContinuation).toThrow('Store worker owner is closed.')
+    expect(() => staleOwner.createRoot('/private/tmp/agentmux-store-too-late-'))
+      .toThrow('Store worker owner is closed.')
+    releaseRoot()
+    await closing
+
+    expect(() => runRace(
+      staleOwner,
+      'create',
+      input.storePath,
+      input.startPath
+    )).toThrow('Store worker owner is closed.')
+    expect(staleOwner.childCount()).toBe(0)
+    expect(staleOwner.rootCount()).toBe(0)
+    expect(nextOwner.childCount()).toBe(0)
+    expect(nextOwner.rootCount()).toBe(1)
+    expect(await lateRootFailure).toEqual(new Error('Store worker owner is closed.'))
+    if (!acquiredLateRoot) throw new Error('The delayed root was not acquired.')
+    await expect(access(acquiredLateRoot)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(access(staleSpawnRoot)).rejects.toMatchObject({ code: 'ENOENT' })
+
+    const nextHandle = worker(nextOwner, {
+      ...input,
+      storePath: join(nextRoot, 'agent-sessions.json'),
+      workerId: 'next-worker'
+    })
+    await nextHandle.ready
+    await expect(nextHandle.settled).resolves.toMatchObject({ ok: true })
+    expect(nextOwner.childCount()).toBe(0)
+  })
+
+  it('clears an ambient fault scenario for a normal worker', async () => {
+    const owner = createWorkerOwner()
+    const root = await owner.createRoot('/private/tmp/agentmux-store-scenario-isolation-')
+    const scenarioKey = 'AGENTMUX_STORE_WORKER_SCENARIO'
+    const hadScenario = Object.hasOwn(process.env, scenarioKey)
+    const previousScenario = process.env[scenarioKey]
+    let handle: WorkerHandle
+    try {
+      process.env[scenarioKey] = 'exit-before-ready'
+      handle = worker(owner, {
+        mode: 'create',
+        storePath: join(root, 'agent-sessions.json'),
+        startPath: join(root, 'start'),
+        workerId: 'normal-worker'
+      })
+    } finally {
+      if (hadScenario) process.env[scenarioKey] = previousScenario
+      else delete process.env[scenarioKey]
+    }
+
+    await handle.ready
+    await writeFile(join(root, 'start'), 'go\n', { mode: 0o600, flag: 'wx' })
+    await expect(handle.settled).resolves.toMatchObject({ ok: true })
   })
 
   it('allows exactly one create and one resume binding commit across processes', async () => {
-    const root = await mkdtemp('/private/tmp/agentmux-store-process-')
-    roots.push(root)
+    const owner = createWorkerOwner()
+    const root = await owner.createRoot('/private/tmp/agentmux-store-process-')
     const storePath = join(root, 'agent-sessions.json')
-    const createResults = await runRace('create', storePath, join(root, 'start-create'))
+    const createResults = await runRace(owner, 'create', storePath, join(root, 'start-create'))
     expect(createResults.filter((result) => result.ok)).toHaveLength(1)
     expect(createResults.filter((result) => !result.ok).map((result) => result.code)).toEqual([
       expect.stringMatching(/^(?:AGENT_SESSION_BUSY|DUPLICATE_AGENT_SESSION)$/u)
@@ -530,7 +689,7 @@ describe('File Store multi-process authority', () => {
     })
     await store.compareAndSwap(original, normalizedOriginal)
 
-    const resumeResults = await runRace('resume', storePath, join(root, 'start-resume'))
+    const resumeResults = await runRace(owner, 'resume', storePath, join(root, 'start-resume'))
     expect(resumeResults.filter((result) => result.ok), JSON.stringify(resumeResults)).toHaveLength(1)
     expect(resumeResults.filter((result) => !result.ok).map((result) => result.code)).toEqual([
       expect.stringMatching(/^(?:AGENT_SESSION_BUSY|STALE_AGENT_SESSION)$/u)
@@ -545,8 +704,8 @@ describe('File Store multi-process authority', () => {
   })
 
   it('serializes concurrent Timeline revisions without losing either process update', async () => {
-    const root = await mkdtemp('/private/tmp/agentmux-timeline-process-')
-    roots.push(root)
+    const owner = createWorkerOwner()
+    const root = await owner.createRoot('/private/tmp/agentmux-timeline-process-')
     const storePath = join(root, 'agent-sessions.json')
     const store = new AgentMuxFileAgentSessionStore(storePath)
     await store.compareAndSwap(null, normalizeStoredAgentSession({
@@ -565,7 +724,7 @@ describe('File Store multi-process authority', () => {
       updatedAt: 1
     }))
 
-    const results = await runRace('timeline', storePath, join(root, 'start-timeline'))
+    const results = await runRace(owner, 'timeline', storePath, join(root, 'start-timeline'))
     expect(results.every((result) => result.ok), JSON.stringify(results)).toBe(true)
     expect(results.map((result) => result.revision).sort((left, right) => (left ?? 0) - (right ?? 0)))
       .toEqual([1, 2])
