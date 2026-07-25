@@ -129,6 +129,56 @@ export function createCodexManagedHookPlan(workspacePath: string): AgentManagedH
   }
 }
 
+const ANTIGRAVITY_HOOK_EVENTS = [
+  'PreInvocation',
+  'PostInvocation',
+  'PreToolUse',
+  'PostToolUse',
+  'Stop'
+] as const
+
+const ANTIGRAVITY_HOOKS: AgentNativeHookSpecification = {
+  rules: [
+    {
+      events: ['PreToolUse'],
+      toolNames: ['ask_question', 'ask_permission', 'request_user_input', 'askuserquestion'],
+      state: 'waiting'
+    },
+    { events: ['Stop'], state: 'done' },
+    {
+      events: ['PreInvocation', 'PostInvocation', 'PreToolUse', 'PostToolUse', 'SessionStart'],
+      state: 'working'
+    }
+  ],
+  nativeHandle: {
+    sessionIdKeys: ['session_id', 'sessionId'],
+    transcriptPathKeys: ['transcript_path', 'transcriptPath']
+  }
+}
+
+export function createAntigravityManagedHookPlan(workspacePath: string): AgentManagedHookPlan {
+  const workspace = resolve(workspacePath)
+  if (!isAbsolute(workspacePath) || workspace !== workspacePath) {
+    throw new AgentMuxError('Antigravity Hook workspace must be an absolute normalized path.', 'INVALID_HOOK_PLAN')
+  }
+  const commandPath = fileURLToPath(new URL('../bin/agentmux-hook.js', import.meta.url))
+  const command = `${shellQuote(process.execPath)} ${shellQuote(commandPath)}`
+  const hooks = Object.fromEntries(ANTIGRAVITY_HOOK_EVENTS.map((eventName) => [eventName, [{
+    hooks: [{ type: 'command', command, timeout: 10 }]
+  }]]))
+  return {
+    providerId: 'antigravity',
+    mutations: [{
+      path: join(workspace, '.gemini', 'hooks.json'),
+      content: `${JSON.stringify({
+        description: 'AgentMux Antigravity lifecycle bridge.',
+        hooks
+      }, null, 2)}\n`,
+      mode: 0o600
+    }]
+  }
+}
+
 const PI_HOOKS: AgentNativeHookSpecification = {
   rules: [
     {
@@ -468,14 +518,14 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
       executable: 'agy',
       expectedProcess: 'agy',
       promptDelivery: 'flag-prompt-interactive',
-      hookStrategy: { kind: 'none' },
+      hookStrategy: { kind: 'native', installation: 'explicit-managed' },
       resumeStrategy: { kind: 'none' },
       acpStrategy: { kind: 'none' },
       capabilities: {
         terminal: true,
-        hookEvents: false,
-        timeline: 'unavailable',
-        permission: 'none',
+        hookEvents: true,
+        timeline: 'complete-events',
+        permission: 'observe',
         providerResume: false,
         acp: false,
         replyCorrelation: 'none'
@@ -483,7 +533,7 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
     }),
     // Orca: executable `agy`, promptInjectionMode 'flag-prompt-interactive' → `agy --prompt-interactive <prompt>`.
     buildArgs: (prompt, args) => (prompt ? ['--prompt-interactive', prompt, ...args] : [...args]),
-    hook: NO_HOOKS
+    hook: ANTIGRAVITY_HOOKS
   }),
   defineAgentProvider({
     catalog: catalog({

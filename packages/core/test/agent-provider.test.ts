@@ -62,7 +62,7 @@ describe('built-in agent providers', () => {
       {
         id: 'antigravity', executable: 'agy', expectedProcess: 'agy',
         promptDelivery: 'flag-prompt-interactive', readySignal: 'foreground-process',
-        hook: 'none', permission: 'none', resume: 'none', acp: 'none',
+        hook: 'native', permission: 'observe', resume: 'none', acp: 'none',
         replyCorrelation: 'none'
       },
       {
@@ -148,7 +148,7 @@ describe('built-in agent providers', () => {
     })).toEqual({ command: 'cursor-agent', args: ['--force', 'review this'], env: {} })
   })
 
-  it.each(['grok', 'gemini', 'antigravity', 'cursor'] as const)('exposes %s as terminal-only (no resume/hook)', (id) => {
+  it.each(['grok', 'gemini', 'antigravity', 'cursor'] as const)('exposes %s as not supporting provider-native resume', (id) => {
     expect(() => providers.get(id).buildResumeLaunch({
       workspacePath: '/tmp/work',
       nativeHandle: { kind: 'provider', providerId: id, sessionId: 'native-x' },
@@ -260,5 +260,49 @@ describe('built-in agent providers', () => {
       args: ['--session', '/tmp/session.jsonl'],
       env: {}
     })
+  })
+
+  it('normalizes Antigravity hook events into structured activity and states', () => {
+    const provider = providers.get('antigravity')
+    const preInvocation = provider.normalizeHook({
+      providerId: 'antigravity',
+      agentSessionId: 'agy-session-1',
+      runId: 'agy-run-1',
+      receiptId: 'rcpt-1',
+      eventName: 'PreInvocation',
+      payload: { session_id: 'native-agy-1', transcript_path: '/tmp/agy.jsonl' }
+    })
+    expect(preInvocation.status.state).toBe('working')
+    expect(preInvocation.nativeHandle).toEqual({
+      kind: 'provider',
+      providerId: 'antigravity',
+      sessionId: 'native-agy-1',
+      transcriptPath: '/tmp/agy.jsonl'
+    })
+
+    const toolUse = provider.normalizeHook({
+      providerId: 'antigravity',
+      agentSessionId: 'agy-session-1',
+      runId: 'agy-run-1',
+      receiptId: 'rcpt-2',
+      eventName: 'PreToolUse',
+      payload: { tool_name: 'ask_question', tool_input: { prompt: 'Allow write?' } }
+    })
+    expect(toolUse.status.state).toBe('waiting')
+    expect(toolUse.timeline).toHaveLength(1)
+    expect(toolUse.timeline[0].item.kind).toBe('permission')
+
+    const stop = provider.normalizeHook({
+      providerId: 'antigravity',
+      agentSessionId: 'agy-session-1',
+      runId: 'agy-run-1',
+      receiptId: 'rcpt-3',
+      eventName: 'Stop',
+      payload: { last_assistant_message: 'Done all work.' }
+    })
+    expect(stop.status.state).toBe('done')
+    expect(stop.timeline).toHaveLength(1)
+    expect(stop.timeline[0].item.kind).toBe('assistant_message')
+    expect(stop.timeline[0].item.content).toBe('Done all work.')
   })
 })
