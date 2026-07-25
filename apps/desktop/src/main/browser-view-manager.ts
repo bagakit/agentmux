@@ -109,16 +109,41 @@ export class BrowserViewManager {
       error: null
     }
     this.entries.set(id, entry)
-    this.window.contentView.addChildView(view)
-    view.setVisible(false)
-    this.attach(entry, view)
-    this.emit(entry)
-    void view.webContents.loadURL(url).catch((error) => {
-      if (!this.owns(entry, view)) return
-      entry.error = error instanceof Error ? error.message : String(error)
+    let childRegistrationAttempted = false
+    try {
+      childRegistrationAttempted = true
+      this.window.contentView.addChildView(view)
+      view.setVisible(false)
+      this.attach(entry, view)
       this.emit(entry)
-    })
-    return this.snapshot(entry)
+      void view.webContents.loadURL(url).catch((error) => {
+        if (!this.owns(entry, view)) return
+        entry.error = error instanceof Error ? error.message : String(error)
+        this.emit(entry)
+      })
+      return this.snapshot(entry)
+    } catch (error) {
+      this.entries.delete(id)
+      const cleanupErrors: unknown[] = []
+      if (childRegistrationAttempted && !this.window.isDestroyed()) {
+        try {
+          this.window.contentView.removeChildView(view)
+        } catch (cleanupError) {
+          cleanupErrors.push(cleanupError)
+        }
+      }
+      if (!view.webContents.isDestroyed()) {
+        try {
+          view.webContents.close()
+        } catch (cleanupError) {
+          cleanupErrors.push(cleanupError)
+        }
+      }
+      if (cleanupErrors.length > 0) {
+        throw new AggregateError([error, ...cleanupErrors], 'Browser creation and owner rollback failed')
+      }
+      throw error
+    }
   }
 
   async navigate(id: string, rawUrl: string): Promise<BrowserSnapshot> {
