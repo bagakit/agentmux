@@ -26,7 +26,10 @@ vi.mock('../src/renderer/src/store.js', () => ({
   )
 }))
 
-import { BrowserPane } from '../src/renderer/src/components/BrowserPane.js'
+import {
+  browserCaptureMatchesIdentity,
+  BrowserPane
+} from '../src/renderer/src/components/BrowserPane.js'
 import { BrowserToolbarPreferences } from '../src/renderer/src/components/SurfaceToolDock.js'
 
 const config: AppConfig = {
@@ -67,6 +70,21 @@ beforeEach(() => {
 })
 
 describe('Browser bar contract', () => {
+  it('rejects a capture returned for a Browser identity that is no longer current', () => {
+    expect(browserCaptureMatchesIdentity(
+      { browserId: 'browser-a', navigationId: 'navigation-a' },
+      { id: 'browser-b', navigationId: 'navigation-b' }
+    )).toBe(false)
+    expect(browserCaptureMatchesIdentity(
+      { browserId: 'browser-b', navigationId: 'navigation-a' },
+      { id: 'browser-b', navigationId: 'navigation-b' }
+    )).toBe(false)
+    expect(browserCaptureMatchesIdentity(
+      { browserId: 'browser-b', navigationId: 'navigation-b' },
+      { id: 'browser-b', navigationId: 'navigation-b' }
+    )).toBe(true)
+  })
+
   it('keeps external open fixed first and projects the stable tool order', () => {
     const markup = renderToStaticMarkup(<BrowserPane tab={tab} visible />)
     const labels = [
