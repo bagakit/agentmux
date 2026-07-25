@@ -62,7 +62,7 @@ describe('built-in agent providers', () => {
       {
         id: 'antigravity', executable: 'agy', expectedProcess: 'agy',
         promptDelivery: 'flag-prompt-interactive', readySignal: 'foreground-process',
-        hook: 'native', permission: 'observe', resume: 'none', acp: 'none',
+        hook: 'native', permission: 'observe', resume: 'provider-native', acp: 'none',
         replyCorrelation: 'none'
       },
       {
@@ -148,7 +148,7 @@ describe('built-in agent providers', () => {
     })).toEqual({ command: 'cursor-agent', args: ['--force', 'review this'], env: {} })
   })
 
-  it.each(['grok', 'gemini', 'antigravity', 'cursor'] as const)('exposes %s as not supporting provider-native resume', (id) => {
+  it.each(['grok', 'gemini', 'cursor'] as const)('exposes %s as not supporting provider-native resume', (id) => {
     expect(() => providers.get(id).buildResumeLaunch({
       workspacePath: '/tmp/work',
       nativeHandle: { kind: 'provider', providerId: id, sessionId: 'native-x' },
@@ -156,6 +156,21 @@ describe('built-in agent providers', () => {
       args: [],
       env: {}
     })).toThrow('does not support')
+  })
+
+  it('builds Antigravity resume launch with --conversation and --prompt-interactive', () => {
+    const plan = providers.get('antigravity').buildResumeLaunch({
+      workspacePath: '/tmp/work',
+      nativeHandle: { kind: 'provider', providerId: 'antigravity', sessionId: 'conv-123' },
+      prompt: 'continue this task',
+      args: ['--effort', 'high'],
+      env: {}
+    })
+    expect(plan).toEqual({
+      command: 'agy',
+      args: ['--conversation', 'conv-123', '--effort', 'high', '--prompt-interactive', 'continue this task'],
+      env: {}
+    })
   })
 
   it('plans interactive prompt submission with the Provider terminal protocol', () => {
@@ -270,7 +285,7 @@ describe('built-in agent providers', () => {
       runId: 'agy-run-1',
       receiptId: 'rcpt-1',
       eventName: 'PreInvocation',
-      payload: { session_id: 'native-agy-1', transcript_path: '/tmp/agy.jsonl' }
+      payload: { conversationId: 'native-agy-1', transcript_path: '/tmp/agy.jsonl' }
     })
     expect(preInvocation.status.state).toBe('working')
     expect(preInvocation.nativeHandle).toEqual({

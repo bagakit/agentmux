@@ -151,7 +151,7 @@ const ANTIGRAVITY_HOOKS: AgentNativeHookSpecification = {
     }
   ],
   nativeHandle: {
-    sessionIdKeys: ['session_id', 'sessionId'],
+    sessionIdKeys: ['conversationId', 'conversation_id', 'session_id', 'sessionId'],
     transcriptPathKeys: ['transcript_path', 'transcriptPath']
   }
 }
@@ -519,21 +519,24 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
       expectedProcess: 'agy',
       promptDelivery: 'flag-prompt-interactive',
       hookStrategy: { kind: 'native', installation: 'explicit-managed' },
-      resumeStrategy: { kind: 'none' },
+      resumeStrategy: { kind: 'provider-native', locator: 'session-id' },
       acpStrategy: { kind: 'none' },
       capabilities: {
         terminal: true,
         hookEvents: true,
         timeline: 'complete-events',
         permission: 'observe',
-        providerResume: false,
+        providerResume: true,
         acp: false,
         replyCorrelation: 'none'
       }
     }),
     // Orca: executable `agy`, promptInjectionMode 'flag-prompt-interactive' → `agy --prompt-interactive <prompt>`.
     buildArgs: (prompt, args) => (prompt ? ['--prompt-interactive', prompt, ...args] : [...args]),
-    hook: ANTIGRAVITY_HOOKS
+    hook: ANTIGRAVITY_HOOKS,
+    buildResumeArgs: (sessionId, _transcriptPath, prompt, args) => [
+      '--conversation', sessionId, ...args, ...(prompt ? ['--prompt-interactive', prompt] : [])
+    ]
   }),
   defineAgentProvider({
     catalog: catalog({
