@@ -512,6 +512,9 @@ const mockApi: AgentMuxDesktopApi = {
     writeClipboardText: async () => {},
     writeClipboardImage: async () => {},
     openExternal: async () => {},
+    // No native dialog outside Electron; dismissing is the honest answer.
+    chooseFiles: async () => null,
+    savePastedImage: async () => { throw new Error('Pasting images requires the desktop app.') },
     getZoomFactor: () => 1,
     onWindowResize(listener) {
       windowResizeListeners.add(listener)

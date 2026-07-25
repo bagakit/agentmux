@@ -1,6 +1,13 @@
 import { randomUUID } from 'node:crypto'
-import { basename } from 'node:path'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { basename, join } from 'node:path'
+
+/** A pasted screenshot is large but bounded; anything past this is a mistake, not a screenshot. */
+const MAX_PASTED_IMAGE_BYTES = 16 * 1024 * 1024
+const PASTED_IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp'])
+
 import {
+  app,
   clipboard,
   dialog,
   ipcMain,
@@ -133,6 +140,16 @@ export async function registerIpc(args: {
       return { ok: false, detail: error instanceof Error ? error.message : String(error) }
     }
   })
+  // The renderer is sandboxed and cannot open a native dialog, so choosing files to reference is a
+  // main-process capability. It returns paths only — reading the file is the Agent's own job.
+  handle('ui:chooseFiles', async (_event, input: { defaultPath?: string } | undefined) => {
+    const selection = await dialog.showOpenDialog(args.window, {
+      properties: ['openFile', 'multiSelections'],
+      ...(input?.defaultPath ? { defaultPath: input.defaultPath } : {})
+    })
+    if (selection.canceled || selection.filePaths.length === 0) return null
+    return selection.filePaths
+  })
   handle('workspaces:chooseLocalFolder', async () => {
     const selection = await dialog.showOpenDialog(args.window, { properties: ['openDirectory'] })
     const path = selection.filePaths[0]
@@ -228,6 +245,21 @@ export async function registerIpc(args: {
   channels.push('ui:openExternal')
   ipcMain.handle('ui:openExternal', async (event, rawUrl: string) => {
     await openExternalFromRenderer(event, args.window.webContents, rawUrl)
+  })
+  channels.push('ui:savePastedImage')
+  ipcMain.handle('ui:savePastedImage', async (event, input: { bytes: Uint8Array; extension: string }) => {
+    if (event.sender !== args.window.webContents) throw new Error('Untrusted pasted image sender')
+    // A CLI Agent reads images from disk, so a paste becomes a file it can open. The renderer supplies
+    // bytes only — never a destination — so it cannot aim this write anywhere.
+    const bytes = Buffer.from(input.bytes)
+    if (bytes.byteLength === 0) throw new Error('Pasted image is empty.')
+    if (bytes.byteLength > MAX_PASTED_IMAGE_BYTES) throw new Error('Pasted image exceeds the size limit.')
+    const extension = PASTED_IMAGE_EXTENSIONS.has(input.extension) ? input.extension : 'png'
+    const directory = join(app.getPath('home'), '.agentmux', 'pasted')
+    await mkdir(directory, { recursive: true, mode: 0o700 })
+    const path = join(directory, `paste-${Date.now()}-${randomUUID().slice(0, 8)}.${extension}`)
+    await writeFile(path, bytes, { mode: 0o600 })
+    return path
   })
   handle('providers:list', () => args.runtime.providerCatalog())
   handle('executors:detect', async (executorId: AgentExecutorId, hostId: string) => await args.runtime.detect(executorId, hostId, config))

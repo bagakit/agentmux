@@ -20,7 +20,21 @@ const fixture = vi.hoisted(() => ({
 }))
 
 vi.mock('../src/renderer/src/store.js', () => ({
-  useAppStore: (selector: (state: typeof fixture.state) => unknown) => selector(fixture.state)
+  useAppStore: Object.assign(
+    (selector: (state: typeof fixture.state) => unknown) => selector(fixture.state),
+    { getState: () => fixture.state }
+  )
+}))
+
+// The composer reaches for native capabilities (file picker, pasted-image persistence) that only the
+// desktop shell provides; the module itself resolves a build-time constant, so it is stubbed here.
+vi.mock('../src/renderer/src/lib/api.js', () => ({
+  api: {
+    ui: {
+      chooseFiles: vi.fn(async () => null),
+      savePastedImage: vi.fn(async () => '/tmp/pasted.png')
+    }
+  }
 }))
 
 import {
