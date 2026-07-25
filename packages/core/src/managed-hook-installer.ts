@@ -181,6 +181,20 @@ export class AgentManagedHookInstaller {
     return structuredClone(preview)
   }
 
+  /**
+   * Install a plan idempotently. Previews first and, when every target is already current, discards
+   * the preview and returns `null` without touching disk — so re-running it on every agent launch is
+   * cheap and safe (install-and-leave). Returns a receipt only when a write actually happened.
+   */
+  async ensure(plan: AgentManagedHookPlan): Promise<AgentManagedHookInstallReceipt | null> {
+    const preview = await this.preview(plan)
+    if (preview.changes.every((change) => change.action === 'unchanged')) {
+      this.previews.delete(preview.id)
+      return null
+    }
+    return await this.install(preview.id)
+  }
+
   async install(previewId: string): Promise<AgentManagedHookInstallReceipt> {
     const prepared = this.previews.get(previewId)
     if (!prepared) throw new AgentMuxError('Managed Hook preview is unknown or already used.', 'UNKNOWN_HOOK_PREVIEW')

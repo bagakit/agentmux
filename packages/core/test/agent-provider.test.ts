@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { AgentProviderRegistry, createAntigravityManagedHookPlan, createCodexManagedHookPlan } from '../src/agent-provider.js'
+import { AgentProviderRegistry, createAntigravityManagedHookPlan, createClaudeManagedHookPlan, createCodexManagedHookPlan, resolveManagedHookPlan } from '../src/agent-provider.js'
 
 describe('built-in agent providers', () => {
   const providers = new AgentProviderRegistry()
@@ -351,6 +351,35 @@ describe('built-in agent providers', () => {
   it('declares Codex managed hooks as a marker-scoped merge so committed project hooks survive', () => {
     const mutation = createCodexManagedHookPlan('/tmp/work').mutations[0]
     expect(mutation?.merge).toEqual({ kind: 'json-managed-events', marker: 'agentmux-hook.js' })
+  })
+
+  it('generates a workspace-scoped Claude settings.json merge that preserves foreign settings', () => {
+    const plan = createClaudeManagedHookPlan('/tmp/work')
+    expect(plan.providerId).toBe('claude')
+    const mutation = plan.mutations[0]
+    expect(mutation?.path).toBe('/tmp/work/.claude/settings.json')
+    // Claude keeps hooks under a top-level `hooks` key alongside permissions/model/MCP — like Codex,
+    // AgentMux owns only its marked command entries, so the whole file cannot be replaced.
+    expect(mutation?.merge).toEqual({ kind: 'json-managed-events', marker: 'agentmux-hook.js' })
+    const parsed = JSON.parse(mutation?.content ?? '{}') as {
+      hooks: Record<string, Array<{ matcher?: string; hooks?: Array<{ command?: string; timeout?: number }> }>>
+    }
+    expect(parsed.hooks['SessionStart']?.[0]?.hooks?.[0]?.command).toContain('agentmux-hook.js')
+    expect(parsed.hooks['PreToolUse']?.[0]?.matcher).toBe('*')
+    // Non-tool lifecycle events carry no matcher.
+    expect(parsed.hooks['SessionStart']?.[0]?.matcher).toBeUndefined()
+  })
+
+  it('resolves the managed hook plan only for JSON-config native providers, null for the rest', () => {
+    // JSON-config providers: codex and claude write into the workspace, antigravity into global ~/.gemini.
+    expect(resolveManagedHookPlan('codex', '/tmp/work')?.mutations[0]?.path).toBe('/tmp/work/.codex/hooks.json')
+    expect(resolveManagedHookPlan('claude', '/tmp/work')?.mutations[0]?.path).toBe('/tmp/work/.claude/settings.json')
+    expect(resolveManagedHookPlan('antigravity', '/tmp/work')?.providerId).toBe('antigravity')
+    // hermes (YAML plugin) and pi (TypeScript extension) declare native hooks but have no JSON plan
+    // builder, so they resolve to null and are not auto-installed. Non-hook providers likewise.
+    expect(resolveManagedHookPlan('hermes', '/tmp/work')).toBeNull()
+    expect(resolveManagedHookPlan('pi', '/tmp/work')).toBeNull()
+    expect(resolveManagedHookPlan('traex', '/tmp/work')).toBeNull()
   })
 
   it('bakes the packaged-Electron node runner and provider id into the managed hook command', () => {
