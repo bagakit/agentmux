@@ -301,7 +301,7 @@ describe('BrowserProfileManager', () => {
   it('publishes opaque one-generation source tokens and atomically imports a CHIPS cookie', async () => {
     const { store, manager } = managerFixture()
     await manager.initialize()
-    const [source] = manager.detectImportSources()
+    const [source] = await manager.detectImportSources()
 
     expect(source).toEqual({
       token: expect.any(String),
@@ -329,8 +329,8 @@ describe('BrowserProfileManager', () => {
   it('expires tokens and invalidates the prior detection generation', async () => {
     const { manager } = managerFixture()
     await manager.initialize()
-    const [oldGeneration] = manager.detectImportSources()
-    const [newGeneration] = manager.detectImportSources()
+    const [oldGeneration] = await manager.detectImportSources()
+    const [newGeneration] = await manager.detectImportSources()
 
     await expect(manager.importProfile(oldGeneration!.token, 'Old')).rejects.toThrow('already consumed')
     vi.advanceTimersByTime(5 * 60_000 + 1)
@@ -347,7 +347,7 @@ describe('BrowserProfileManager', () => {
 
     let publicError: unknown
     try {
-      manager.detectImportSources()
+      await manager.detectImportSources()
     } catch (error) {
       publicError = error
     }
@@ -365,7 +365,7 @@ describe('BrowserProfileManager', () => {
   it('keeps source snapshot paths inside Main errors', async () => {
     const { manager } = managerFixture()
     await manager.initialize()
-    const [source] = manager.detectImportSources()
+    const [source] = await manager.detectImportSources()
     sourceMocks.plan.mockImplementationOnce(() => {
       throw new Error('EACCES: /private/chrome/Default/Cookies')
     })
@@ -390,7 +390,7 @@ describe('BrowserProfileManager', () => {
   it('rolls back every write when CDP rejects one cookie and consumes the token', async () => {
     const { store, manager } = managerFixture()
     await manager.initialize()
-    const [source] = manager.detectImportSources()
+    const [source] = await manager.detectImportSources()
     electronMocks.setCookieResult({ success: false })
 
     await expect(manager.importProfile(source!.token, 'Rejected')).rejects.toThrow('Browser Profile import failed')
@@ -404,7 +404,7 @@ describe('BrowserProfileManager', () => {
   it('keeps the pending journal when rollback cleanup fails', async () => {
     const { store, manager } = managerFixture()
     await manager.initialize()
-    const [source] = manager.detectImportSources()
+    const [source] = await manager.detectImportSources()
     electronMocks.setCookieResult({ success: false })
     electronMocks.sessionFor(partition(IMPORT_ID)).clearStorageData.mockRejectedValueOnce(
       new Error('partition cleanup failed')
@@ -417,7 +417,7 @@ describe('BrowserProfileManager', () => {
   it('destroys the hidden import window even when debugger detach fails', async () => {
     const { store, manager } = managerFixture()
     await manager.initialize()
-    const [source] = manager.detectImportSources()
+    const [source] = await manager.detectImportSources()
     electronMocks.setNextDetachError(new Error('debugger detach failed'))
 
     await expect(manager.importProfile(source!.token, 'Detach failure')).rejects.toThrow('Browser Profile import failed')
@@ -431,7 +431,7 @@ describe('BrowserProfileManager', () => {
   it('destroys an active hidden import window and waits for rollback during disposal', async () => {
     const { store, manager } = managerFixture()
     await manager.initialize()
-    const [source] = manager.detectImportSources()
+    const [source] = await manager.detectImportSources()
     let releaseLoad!: () => void
     electronMocks.setNextLoad(async () => await new Promise<void>((resolve) => { releaseLoad = resolve }))
     const importing = manager.importProfile(source!.token, 'Interrupted')
