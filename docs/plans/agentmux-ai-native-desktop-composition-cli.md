@@ -114,6 +114,8 @@ Core 只定义类型化 discriminated union，不定义一个全能 JSON 参数�
 type InspectTarget =
   | { kind: 'agent-session'; agentSessionId: string }
   | { kind: 'run'; runId: string }
+  | { kind: 'provider-native'; providerId: string; nativeSessionId: string }
+  | { kind: 'acp-native'; adapterId: string; nativeSessionId: string }
   | { kind: 'tab'; tabId: string }
   | { kind: 'region'; regionId: string }
 
@@ -147,7 +149,7 @@ type MessageTargetNotUnique = {
 
 | 意图 | 真相 Owner | 路由 |
 | --- | --- | --- |
-| `inspect/list/output/interrupt/resume/stop --session|--run` | Core AgentSession / ctxmux Run | 直接调用 Core 公开 API |
+| `inspect/list/output/interrupt/resume/stop --session|--run|--*-native` | Core AgentSession / ctxmux Run | 直接调用 Core 公开 API |
 | `inspect/focus/arrange --tab|--region` | Renderer Layout Store | 经 Composition Host |
 | `open agent` | Desktop RuntimeController → Core Provider | Composition Host 编排创建与布局回滚 |
 | `open terminal` | Desktop RuntimeController → Core → ctxmux | Composition Host 编排一次 Run 创建与布局回滚 |
@@ -192,6 +194,8 @@ agentmux inspect --tab <tab-id>
 agentmux inspect --region self
 agentmux inspect --region <region-id>
 agentmux inspect --run <run-id>
+agentmux inspect --provider-native <native-session-id> --provider <provider-id>
+agentmux inspect --acp-native <native-session-id> --adapter <adapter-id>
 agentmux list sessions
 
 agentmux open agent --agent codex --prompt "Inspect the failing tests" --right-of self
@@ -223,7 +227,10 @@ agentmux stop --session <session-id|self>
 
 ### 类型化目标
 
-- `inspect` 恰好接受 `--session|--tab|--region|--run` 中一个。`inspect --session self` 从受管
+- `inspect` 恰好接受 `--session|--tab|--region|--run|--provider-native|--acp-native` 中一个。
+  `--provider-native` 额外要求 `--provider`，`--acp-native` 额外要求 `--adapter`；它们直接复用
+  Core 现有的唯一身份解析，用新心智保留旧 `session resolve` 的完整能力。
+  `inspect --session self` 从受管
   环境取精确 Agent Session ID，只返回 Core Session/Run 真相；`inspect --tab self` 和
   `inspect --region self` 由 Composition Host 从同一 caller Session 解析展示，不唯一时失败关闭。
   Core 查询不做 Desktop enrichment，Composition 不可用时也不返回缩水结果。所有读操作都不改变焦点。
