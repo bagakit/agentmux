@@ -373,7 +373,11 @@ export function BrowserPane({
                     const size = BROWSER_VIEWPORT_PRESETS[viewport]
                     return (
                       <DropdownMenu.RadioItem key={viewport} value={viewport} className="browser-menu__item">
-                        <DropdownMenu.ItemIndicator><Check size={12} /></DropdownMenu.ItemIndicator>
+                        <span className="browser-menu__indicator">
+                          <DropdownMenu.ItemIndicator>
+                            <Check size={12} />
+                          </DropdownMenu.ItemIndicator>
+                        </span>
                         <span>{VIEWPORT_LABELS[viewport]}</span>
                         <small>{size ? `${size.width} × ${size.height}` : 'Fit pane'}</small>
                       </DropdownMenu.RadioItem>
