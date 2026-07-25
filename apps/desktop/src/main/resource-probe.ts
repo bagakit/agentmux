@@ -27,6 +27,7 @@ const RELEASE_CYCLES = 7
 
 type ResourceOwners = {
   browserWebContents: number
+  monacoEditors: number
   monacoModels: number
   documents: number
   fileWatchers: number
@@ -61,6 +62,7 @@ async function ownerCounts(
     const { observed: _observed, ...owners } = event.detail
     return owners
   })()`) as {
+    monacoEditors: number
     monacoModels: number
     documents: number
     runtimeSubscriptions: number
@@ -150,6 +152,7 @@ function ownersEqual(left: ResourceOwners, right: ResourceOwners): boolean {
 function isReadyLauncherOwnerBaseline(owners: ResourceOwners): boolean {
   return (
     owners.browserWebContents === 0 &&
+    owners.monacoEditors === 0 &&
     owners.monacoModels === 0 &&
     owners.documents === 0 &&
     owners.fileWatchers === 0 &&
@@ -330,6 +333,7 @@ export async function runDesktopResourceProbe(options: {
     const editorSample = await sample('monaco-editor', options.window, options.runtime)
     const editorOwners: ResourceOwners = {
       ...readyLauncherOwners,
+      monacoEditors: 1,
       monacoModels: 1,
       documents: 1,
       fileWatchers: 1,
@@ -340,7 +344,7 @@ export async function runDesktopResourceProbe(options: {
       sessionAttachmentLeases: 0
     }
     if (!ownersEqual(editorSample.owners, editorOwners)) {
-      throw new Error(`Desktop editor did not own exactly one Document and Monaco Model: ${JSON.stringify(editorSample.owners)}`)
+      throw new Error(`Desktop editor did not own exactly one Document, Monaco Editor, and Monaco Model: ${JSON.stringify(editorSample.owners)}`)
     }
     if (!runningTerminal((await options.runtime.snapshot(config)).sessions, launcherTerminal.id)) {
       throw new Error('Desktop editor did not retain the claimed Terminal backend.')
@@ -521,6 +525,7 @@ export async function runDesktopResourceProbe(options: {
     for (const phase of [released, ...releaseCycles, browserReleased]) {
       if (
         phase.owners.monacoModels !== idle.owners.monacoModels ||
+        phase.owners.monacoEditors !== idle.owners.monacoEditors ||
         phase.owners.documents !== idle.owners.documents ||
         phase.owners.fileWatchers !== idle.owners.fileWatchers ||
         phase.owners.browserWebContents !== idle.owners.browserWebContents ||
