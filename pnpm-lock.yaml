@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  '@ctxmux/sdk@0.0.0': file:packages/core/vendor/ctxmux/darwin-arm64/ctxmux-sdk-0.0.0.tgz
+
 importers:
 
   .:
@@ -112,6 +115,9 @@ importers:
         specifier: 5.5.0
         version: 5.5.0
     devDependencies:
+      '@ctxmux/sdk':
+        specifier: file:vendor/ctxmux/darwin-arm64/ctxmux-sdk-0.0.0.tgz
+        version: file:packages/core/vendor/ctxmux/darwin-arm64/ctxmux-sdk-0.0.0.tgz
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3
@@ -215,6 +221,11 @@ packages:
   '@babel/types@7.29.8':
     resolution: {integrity: sha512-Vj1jF3cPfxg7OAfoI7QnVKLoILlm2JF9pnVHrX8qx7AHMiYWT+NDAA7jChlNgRS4WTLc/fD1lXLmPixluj+3Gg==}
     engines: {node: '>=6.9.0'}
+
+  '@ctxmux/sdk@file:packages/core/vendor/ctxmux/darwin-arm64/ctxmux-sdk-0.0.0.tgz':
+    resolution: {integrity: sha512-QZPb3KYg/BU8HF0e4IGGP7MpiglnH52rjBGESEY4dRHztq51p/aJ6hNmak9MTyZOcC12+sTV/EZ+/ly0dJHJVw==, tarball: file:packages/core/vendor/ctxmux/darwin-arm64/ctxmux-sdk-0.0.0.tgz}
+    version: 0.0.0
+    engines: {node: '>=24'}
 
   '@dnd-kit/accessibility@3.1.1':
     resolution: {integrity: sha512-2P+YgaXF+gRsIihwwY1gCsQSYnu9Zyj2py8kY5fFvUM1qm2WA2u639R6YNVfU4GWr+ZM5mqEsfHZZLoRONbemw==}
@@ -1858,6 +1869,8 @@ snapshots:
     dependencies:
       '@babel/helper-string-parser': 7.29.7
       '@babel/helper-validator-identifier': 7.29.7
+
+  '@ctxmux/sdk@file:packages/core/vendor/ctxmux/darwin-arm64/ctxmux-sdk-0.0.0.tgz': {}
 
   '@dnd-kit/accessibility@3.1.1(react@19.2.8)':
     dependencies:

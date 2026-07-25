@@ -32,7 +32,7 @@ ctxmux 把 Run、PTY 和最后一段终端输出写进 SQLite。旧 artifact 在
 ## 当前实现
 
 AgentMux 固定消费 Protocol 13 clean commit
-`1603908a253162632e8812ceb9db19c3e416fea4`。ctxmux 在唯一 persistence actor 中只根据
+`a0897087fdd0eb131c39c43d4d6791901335d69e`。ctxmux 在唯一 persistence actor 中只根据
 SQLite typed `DiskFull` 保留并重试当前 append/finalize mutation；既有有界队列继续施加背压，
 shutdown 可以中断等待，其他错误继续 fail-stop。AgentMux 只原子携带并校验同一来源的 manifest、
 SDK 与两个 binary，不增加 daemon 重启、备用数据库、错误文案匹配、兼容层或 fallback。

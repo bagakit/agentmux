@@ -114,6 +114,6 @@ not-open 都失败关闭，不能降级成字符串注入、UI automation、猜�
 - checkout-external packed consumer 从真实打包 CLI 验证受管 caller、context/launch/open/focus、版本化 JSON receipt、option-looking prompt、JSON Lines output 与已删除 flat 命令面。
 - Core 与 Desktop 类型检查验证 daemon wire 不再进入 Desktop 的共享合同。
 
-当前 Local implementation candidate 固定消费 CtxMux `1603908` / Protocol 13，删除旧 Run Kernel，并完成
+当前 Local implementation candidate 固定消费 CtxMux `a089708` / Protocol 13，删除旧 Run Kernel，并完成
 Codex、分组 Session CLI、Local Desktop Composition、Workbench 布局持久化与 View move/close。
 多 Desktop、Remote/SSH 和 headless Composition Owner 仍未交付，不能从 Local 证明外推。

@@ -25,7 +25,7 @@ const ownerRelocationFixture = fileURLToPath(new URL('./fixtures/ctxmux-owner-re
 const liveRuntimeFenceFixture = fileURLToPath(new URL('./fixtures/ctxmux-live-runtime-fence.mjs', import.meta.url))
 const stopResponseLossFixture = fileURLToPath(new URL('./fixtures/ctxmux-stop-response-loss-worker.mjs', import.meta.url))
 const stopRecoveryFixture = fileURLToPath(new URL('./fixtures/ctxmux-stop-recovery-worker.mjs', import.meta.url))
-const ctxmuxRuntimeId = '2629d6d0809d4b85f4b475cc'
+const ctxmuxRuntimeId = '5e67346cf1fedd60eba15e2b'
 const roots: string[] = []
 
 afterEach(async () => {
@@ -464,8 +464,8 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         'utf8'
       ))
       expect(artifactManifest.source).toMatchObject({
-        commit: '1603908a253162632e8812ceb9db19c3e416fea4',
-        tree: '464f239190234c8369799dca06a630b3b48f5cca',
+        commit: 'a0897087fdd0eb131c39c43d4d6791901335d69e',
+        tree: '54d0f0631a51063a5f4c18088f4e8cba1f80444a',
         worktree_clean: true
       })
 

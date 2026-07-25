@@ -7,11 +7,11 @@ AgentMux 当前只消费 CtxMux 的 exact clean artifact contract：
 
 | 字段 | 值 |
 | --- | --- |
-| commit | `1603908a253162632e8812ceb9db19c3e416fea4` |
-| tree | `464f239190234c8369799dca06a630b3b48f5cca` |
+| commit | `a0897087fdd0eb131c39c43d4d6791901335d69e` |
+| tree | `54d0f0631a51063a5f4c18088f4e8cba1f80444a` |
 | protocol | `13` |
 | platform | `darwin-arm64` |
-| manifest SHA-256 | `2629d6d0809d4b85f4b475cc0d00ee677c4f17861b1fc904f2dabd8f18592bca` |
+| manifest SHA-256 | `5e67346cf1fedd60eba15e2b58aac3005df632684891ad086d613014276dc639` |
 | SDK tarball SHA-256 | `172966940a9f537724afeb9b334f2a225ece3db1a102c4d8e90e154b8cb5bf3d` |
 | `ctxmux` SHA-256 | `38083b21656327212c07789dcd199b7c4520a8561006841d76be9a2c23f9cb39` |
 | `ctxmuxd` SHA-256 | `c4140151e006c9e775b90c7cb7bdb37d08b1122f7f7a37762c841294633f7656` |
@@ -44,14 +44,27 @@ macOS LaunchServices 启动的 packaged Electron 不天然继承 Terminal 的登
 猜常见路径；探测超时、启动失败或输出不可解析时保留原环境并明确记录失败。SSH Host 的环境仍由
 远端执行边界负责，不误用本机登录 Shell。
 
-这不是 `file:` dependency：
+SDK 的唯一来源仍是上表固定的 vendored tarball：
 
-- `package.json` 不声明 `@ctxmux/sdk` 路径依赖；
+- Core 的 dev dependency 只声明官方 SDK version `0.0.0`，workspace pnpm owner 再把该开发期解析精确锁到这份 tarball；packed manifest 不携带 `file:`/`link:` 路径，也不再保留手写 SDK/wire 声明；
+- build 复核同一 manifest 与 tarball hash，并把这份 SDK 私有 bundle 进 Adapter；
 - runtime 不读取相邻 CtxMux checkout；
 - runtime 不接受调用方插入的 CtxMux endpoint/state；
 - 不依赖全局 `ctxmux`、npm publish、GitHub Release 或下载；
 - CtxMux SDK/wire type 不进入 AgentMux public `.d.ts`；
 - packed package 自带 manifest、SDK source artifact、`ctxmux` 与 `ctxmuxd`。
+
+## 当前公开能力取用
+
+| CtxMux public contract | AgentMux 当前取用边界 |
+| --- | --- |
+| exact Runtime identity + required capabilities | Bootstrap 只做一次 raw inspection；所有业务帧在同一 dispatch connection 上先匹配完整 identity 与五项必需 capability。 |
+| persistent state + typed DiskFull retry | 直接依赖 ctxmux 唯一 persistence actor 的有界原 mutation 重试；AgentMux 不重启 daemon、不匹配错误文案，也不建备用 Store。 |
+| recoverable Input / Stop | Core 持久化完整 operation，并允许新 Client 只重放同一个 operation；不把 PTY receipt 解释成 Agent 已理解 Prompt。 |
+| replay `Gap` / `observation_discontinuity` | Gap 只按调用方累计 byte cursor reattach；native Agent Run 收到非输出 observation discontinuity 时立即失败关闭，不伪造 terminal state。 |
+| planned exec-in-place upgrade continuity | 当前只把 capability 作为 Runtime 基线，不由 AgentMux 扫描 PID 或私发 `SIGHUP`。在 ctxmux 提供可绑定 exact Runtime identity 的公开升级入口前，不宣称跨 artifact 热升级。 |
+| native Level A fork / materialized Level B / tmux import | 不用于 Agent Session：Provider-native resume 与 Level B provenance 仍由 Core 持有，tmux 不作为隐藏 Backend。 |
+| Remote/OpenSSH StreamLocal | 当前未交付，Local 不冒充 Remote，也没有 proxy/fallback。 |
 
 ## Shell vertical 已完成
 

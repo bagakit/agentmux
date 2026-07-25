@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 
-const CTXMUX_RUNTIME_ID = '2629d6d0809d4b85f4b475cc'
+const CTXMUX_RUNTIME_ID = '5e67346cf1fedd60eba15e2b'
 
 export function defaultAgentMuxRuntimeDirectory(): string {
   const override = process.env.AGENTMUX_RUNTIME_DIRECTORY?.trim()

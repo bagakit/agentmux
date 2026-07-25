@@ -25,7 +25,7 @@ The command fails closed unless all of the following hold:
 1. every application symlink resolves inside `AgentMux.app`;
 2. no packaged text artifact refers to the source checkout or packaging temp
    directory;
-3. the packaged CtxMux manifest binds exact clean commit `1603908`, protocol 13,
+3. the packaged CtxMux manifest binds exact clean commit `a089708`, protocol 13,
    and the darwin-arm64 SDK/binary hashes;
 4. packaged `ctxmux` and `ctxmuxd` report version `0.1.0 (protocol 13)` without
    a global install or source checkout;
