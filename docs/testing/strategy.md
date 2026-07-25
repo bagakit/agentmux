@@ -41,7 +41,7 @@ Security/Fuzz 的 Input 证据由 public recoverable Input、option-like prompt�
 | cross-process lifecycle | 两个真实 Node 进程竞争 Create/Resume，只允许一个 File Store reservation/CAS commit；Owner crash 按 CtxMux Run spec operation id 回收 orphan |
 | natural terminal retire | public CtxMux status 证明 Run 已 terminal 后只退休语义绑定，不伪造 Stop 成功 |
 | Codex terminal handshake | fake + real Codex 发出 terminal query；Core 只回复 flags 0 并持久化可恢复 Input receipt |
-| Stop-epoch readiness | Core 用有界 headless terminal emulator 从 byte 0 连续重放 CtxMux public Replay/live；只有当前 cursor 所属 composer 为空且 screen 已穿过 Stop cursor 才 ready，Gap/overlap 失败关闭，assistant 或历史行里的 `›` 不能伪造 composer |
+| Prompt readiness epoch | Core 用有界 headless terminal emulator 从 byte 0 连续重放 CtxMux public Replay/live；无 composed prompt 且无 caller args 的空白 Run 只有在 handshake 后观察到 boundary 之后的 active empty composer 才产生一次 `initial-composer` epoch，其他 Run 必须等 `native-stop`；两种来源都由 exact Run 的跨进程 CAS 原子消费，长期存活 Client 从 canonical Store 采纳下一 epoch，Gap/overlap 失败关闭，handshake、assistant 或历史行里的 `›` 不能伪造 composer |
 | prompt crash recovery | payload 与 submit 各自使用确定性 operation id；只有当前 screen/cursor 的 composer 精确等于 payload 且 output 越过写入前 boundary 才发送 CR；局部更新不要求重画 marker，历史同文、丢失 receipt 或进程 crash 都不能造成重复 payload/CR |
 | terminal color capability | packed consumer 在父环境显式设置 `NO_COLOR=1`，真实 daemon/PTY child 仍观察到 `TERM=xterm-256color`、`COLORTERM=truecolor` 且 `NO_COLOR` 不存在 |
 | Terminal appearance query | Desktop Main 在 Renderer 未 attach 时识别完整及跨 chunk OSC 10/11 query，等待 Core 发布 ready Agent Session 后才经 Core → CtxMux Input 回复当前 shared palette，不能与 Core Terminal handshake 竞争 Input cursor；Renderer replay handler 消费旧 query 而不重复注入 |

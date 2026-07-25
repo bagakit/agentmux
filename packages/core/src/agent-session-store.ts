@@ -387,33 +387,54 @@ function hookReceipt(value: unknown): AgentHookReceipt {
   }
 }
 
-function terminalStopReceipt(
+function terminalPromptReadinessSource(
+  value: unknown,
+  name: string
+): 'initial-composer' | 'native-stop' {
+  if (value !== 'initial-composer' && value !== 'native-stop') {
+    throw new AgentMuxError(`${name} is invalid.`, 'INVALID_AGENT_SESSION_STORE')
+  }
+  return value
+}
+
+function terminalPromptReadiness(
   value: unknown,
   currentRun: AgentMuxRunRef
-): NonNullable<AgentMuxStoredAgentSession['terminalStopReceipt']> {
-  const source = record(value, 'terminalStopReceipt')
+): NonNullable<AgentMuxStoredAgentSession['terminalPromptReadiness']> {
+  const source = record(value, 'terminalPromptReadiness')
   const run = runRef(source.run)
+  const readinessSource = terminalPromptReadinessSource(
+    source.source,
+    'Terminal prompt readiness source'
+  )
   const outputCursorBytes = timestamp(
     source.outputCursorBytes,
-    'terminalStopReceipt.outputCursorBytes'
+    'terminalPromptReadiness.outputCursorBytes'
   )
   const readyThroughByte = source.readyThroughByte === undefined
     ? undefined
-    : timestamp(source.readyThroughByte, 'terminalStopReceipt.readyThroughByte')
+    : timestamp(source.readyThroughByte, 'terminalPromptReadiness.readyThroughByte')
   const consumedBySubmissionId = source.consumedBySubmissionId === undefined
     ? undefined
-    : string(source.consumedBySubmissionId, 'terminalStopReceipt.consumedBySubmissionId')
+    : string(source.consumedBySubmissionId, 'terminalPromptReadiness.consumedBySubmissionId')
   if (
     run.runId !== currentRun.runId ||
-    (readyThroughByte !== undefined && readyThroughByte < outputCursorBytes)
+    (
+      readyThroughByte !== undefined &&
+      (readinessSource === 'initial-composer'
+        ? readyThroughByte <= outputCursorBytes
+        : readyThroughByte < outputCursorBytes)
+    ) ||
+    (consumedBySubmissionId !== undefined && readyThroughByte === undefined)
   ) {
     throw new AgentMuxError(
-      'Terminal Stop receipt does not match its Agent Run boundary.',
+      'Terminal prompt readiness does not match its Agent Run boundary.',
       'INVALID_AGENT_SESSION_STORE'
     )
   }
   return {
-    id: string(source.id, 'terminalStopReceipt.id'),
+    source: readinessSource,
+    id: string(source.id, 'terminalPromptReadiness.id'),
     run,
     outputCursorBytes,
     ...(readyThroughByte === undefined ? {} : { readyThroughByte }),
@@ -499,13 +520,17 @@ function terminalPromptSubmission(
     run,
     submissionId: string(source.submissionId, 'terminalPromptSubmission.submissionId'),
     promptDigest: string(source.promptDigest, 'terminalPromptSubmission.promptDigest'),
-    stopReceiptId: string(
-      source.stopReceiptId,
-      'terminalPromptSubmission.stopReceiptId'
+    readinessSource: terminalPromptReadinessSource(
+      source.readinessSource,
+      'terminalPromptSubmission.readinessSource'
     ),
-    stopOutputCursorBytes: timestamp(
-      source.stopOutputCursorBytes,
-      'terminalPromptSubmission.stopOutputCursorBytes'
+    readinessId: string(
+      source.readinessId,
+      'terminalPromptSubmission.readinessId'
+    ),
+    readinessOutputCursorBytes: timestamp(
+      source.readinessOutputCursorBytes,
+      'terminalPromptSubmission.readinessOutputCursorBytes'
     ),
     readyThroughByte: timestamp(
       source.readyThroughByte,
@@ -540,9 +565,14 @@ export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgent
     ...(source.terminalHandshake === undefined
       ? {}
       : { terminalHandshake: terminalHandshake(source.terminalHandshake, currentRun) }),
-    ...(source.terminalStopReceipt === undefined
+    ...(source.terminalPromptReadiness === undefined
       ? {}
-      : { terminalStopReceipt: terminalStopReceipt(source.terminalStopReceipt, currentRun) }),
+      : {
+          terminalPromptReadiness: terminalPromptReadiness(
+            source.terminalPromptReadiness,
+            currentRun
+          )
+        }),
     ...(source.terminalPromptSubmission === undefined
       ? {}
       : {
@@ -571,41 +601,46 @@ export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgent
   if (
     submission &&
     (
-      submission.readyThroughByte < submission.stopOutputCursorBytes ||
+      submission.readyThroughByte < submission.readinessOutputCursorBytes ||
+      (
+        submission.readinessSource === 'initial-composer' &&
+        submission.readyThroughByte === submission.readinessOutputCursorBytes
+      ) ||
       submission.outputCursorBytes < submission.readyThroughByte
     )
   ) {
     throw new AgentMuxError(
-      'Terminal prompt submission does not preserve its ready Stop boundary.',
+      'Terminal prompt submission does not preserve its readiness boundary.',
       'INVALID_AGENT_SESSION_STORE'
     )
   }
-  const stopReceipt = session.terminalStopReceipt
+  const readiness = session.terminalPromptReadiness
   if (
-    stopReceipt?.consumedBySubmissionId !== undefined &&
+    readiness?.consumedBySubmissionId !== undefined &&
     (
-      stopReceipt.readyThroughByte === undefined ||
+      readiness.readyThroughByte === undefined ||
       !submission ||
-      submission.submissionId !== stopReceipt.consumedBySubmissionId ||
-      submission.stopReceiptId !== stopReceipt.id
+      submission.submissionId !== readiness.consumedBySubmissionId ||
+      submission.readinessId !== readiness.id
     )
   ) {
     throw new AgentMuxError(
-      'Consumed terminal Stop receipt does not identify its prompt submission.',
+      'Consumed terminal prompt readiness does not identify its prompt submission.',
       'INVALID_AGENT_SESSION_STORE'
     )
   }
   if (
     submission &&
-    stopReceipt?.id === submission.stopReceiptId &&
+    readiness?.id === submission.readinessId &&
     (
-      stopReceipt.outputCursorBytes !== submission.stopOutputCursorBytes ||
-      stopReceipt.readyThroughByte !== submission.readyThroughByte ||
-      stopReceipt.consumedBySubmissionId !== submission.submissionId
+      readiness.source !== submission.readinessSource ||
+      readiness.outputCursorBytes !== submission.readinessOutputCursorBytes ||
+      readiness.readyThroughByte !== submission.readyThroughByte ||
+      readiness.consumedBySubmissionId !== submission.submissionId
     )
   ) {
     throw new AgentMuxError(
-      'Terminal prompt submission did not atomically consume its Stop receipt.',
+      'Terminal prompt submission did not atomically consume its readiness epoch.',
       'INVALID_AGENT_SESSION_STORE'
     )
   }
@@ -947,7 +982,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
 }
 
 type AgentSessionStoreDocument = {
-  version: 3
+  version: 4
   sessions: AgentMuxStoredAgentSession[]
   reservations: AgentMuxLifecycleReservation[]
   retiredRuns: AgentMuxRunRef[]
@@ -1190,7 +1225,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         await this.removeTimelineFile(reservation.agentSessionId)
       }
       await this.write({
-        version: 3,
+        version: 4,
         sessions: committedSessions,
         reservations: document.reservations.filter(
           (item) => item.reservationId !== reservation.reservationId
@@ -1266,7 +1301,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         retiredAgentSessions?: unknown
       }
       if (
-        document.version !== 3 ||
+        document.version !== 4 ||
         !Array.isArray(document.sessions) ||
         !Array.isArray(document.reservations) ||
         !Array.isArray(document.retiredRuns) ||
@@ -1280,7 +1315,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       assertUnboundRetiredRuns(sessions, retiredRuns)
       assertRetiredAgentSessions(sessions, retiredRuns, retiredSessions)
       return {
-        version: 3,
+        version: 4,
         sessions,
         reservations: normalizeLifecycleReservations(document.reservations),
         retiredRuns,
@@ -1289,7 +1324,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         return {
-          version: 3,
+          version: 4,
           sessions: [],
           reservations: [],
           retiredRuns: [],
