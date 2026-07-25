@@ -60,7 +60,7 @@ async function storeFixture(): Promise<{ store: ConfigStore; path: string }> {
 }
 
 describe('ConfigStore workspace identity', () => {
-  it('rejects retired config without migration or fallback', async () => {
+  it('resets retired config to current default without migration or fallback', async () => {
     const { store, path } = await storeFixture()
     await writeFile(path, JSON.stringify({
       ...baseConfig,
@@ -79,8 +79,19 @@ describe('ConfigStore workspace identity', () => {
       }]
     }))
 
-    await expect(store.get()).rejects.toBeInstanceOf(Error)
-    expect(await readFile(path, 'utf8')).toContain('"version":4')
+    const loaded = await store.get()
+    expect(loaded.version).toBe(7)
+    expect(JSON.parse(await readFile(path, 'utf8'))).toMatchObject({ version: 7 })
+  })
+
+  it('rejects corrupted current-version config strictly', async () => {
+    const { store, path } = await storeFixture()
+    await writeFile(path, JSON.stringify({
+      version: 7,
+      invalidField: true
+    }))
+
+    await expect(store.get()).rejects.toThrow()
   })
 
   it('rejects duplicate workspace ids without replacing the persisted config', async () => {
