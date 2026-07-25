@@ -58,6 +58,7 @@ import {
   type WorkbenchTab
 } from '../lib/workbench-tabs'
 import { canStopSessionRun, sessionTabTooltip } from '../lib/session-metadata'
+import { copyableAgentSessionIdForTab } from '../lib/tab-control-handoff'
 import { api } from '../lib/api'
 import { useAppStore } from '../store'
 
@@ -80,27 +81,6 @@ function tabLabel(tab: WorkbenchTab): string {
       : surface.url === 'about:blank' ? 'New Tab' : surface.url
   }
   return surface.sessionId
-}
-
-export function formatAgentMuxTabHandoff(tabId: string): string {
-  const tabArgument = `'${tabId.replaceAll("'", `'"'"'`)}'`
-  return `Continue in AgentMux Tab ${tabId}.
-
-Inspect it with:
-agentmux inspect --tab ${tabArgument}
-
-Send to its Agent when the Tab has exactly one Agent Session:
-agentmux send --to-tab ${tabArgument} --text "..."
-
-Use agentSessionId from the inspect receipt. If send returns MESSAGE_TARGET_NOT_UNIQUE, choose an agentSessionId from the error candidates, then use:
-agentmux send --to-session <agentSessionId> --text "..."`
-}
-
-export function copyableAgentSessionIdForTab(tab: WorkbenchTab): string | null {
-  const agentSessionIds = new Set(workbenchSurfaces(tab).flatMap((surface) =>
-    surface.kind === 'agent' ? [surface.sessionId] : []
-  ))
-  return agentSessionIds.size === 1 ? (agentSessionIds.values().next().value ?? null) : null
 }
 
 function DragPreview({ tab }: { tab: WorkbenchTab }) {
@@ -194,31 +174,6 @@ function SortableWorkbenchTab({
     await requestTabsClose([tab.id])
   }
 
-  async function copySessionId(): Promise<void> {
-    if (!copyableAgentSessionId) return
-    try {
-      await api.ui.writeClipboardText(copyableAgentSessionId)
-    } catch (error) {
-      console.warn('[session] failed to copy Session ID', error)
-    }
-  }
-
-  async function copyTabId(): Promise<void> {
-    try {
-      await api.ui.writeClipboardText(tab.id)
-    } catch (error) {
-      console.warn('[tab] failed to copy Tab ID', error)
-    }
-  }
-
-  async function copyAgentHandoff(): Promise<void> {
-    try {
-      await api.ui.writeClipboardText(formatAgentMuxTabHandoff(tab.id))
-    } catch (error) {
-      console.warn('[tab] failed to copy Agent handoff', error)
-    }
-  }
-
   async function confirmClose(keepAgentSessions = false): Promise<void> {
     if (closing || !pendingClose) return
     setClosing(true)
@@ -241,9 +196,9 @@ function SortableWorkbenchTab({
         canCloseRight={tabsToRight.length > 0}
         canMoveToNewGroup={group.tabOrder.length > 1}
         onOpenChange={setTabMenuOpen}
-        onCopyTabId={() => void copyTabId()}
-        onCopyAgentHandoff={() => void copyAgentHandoff()}
-        {...(copyableAgentSessionId ? { onCopySessionId: () => void copySessionId() } : {})}
+        tabId={tab.id}
+        copyableAgentSessionId={copyableAgentSessionId}
+        writeClipboardText={(text) => api.ui.writeClipboardText(text)}
         onClose={() => void requestTabsClose([tab.id])}
         onCloseOthers={() => void requestTabsClose(otherTabs)}
         onCloseLeft={() => void requestTabsClose(tabsToLeft)}
