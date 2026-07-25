@@ -222,7 +222,8 @@ async function main() {
     if (!reportText) throw new Error(`Desktop resource probe did not produce a report. ${stderr.trim()}`)
     report = JSON.parse(reportText)
     if (exitCode !== 0 || report.error) {
-      throw new Error(report.error ?? `Desktop resource probe exited ${exitCode}.`)
+      const detail = report.error ?? `Desktop resource probe exited ${exitCode}.`
+      throw new Error(stderr.trim() ? `${detail}\nElectron stderr:\n${stderr.trim()}` : detail)
     }
   } catch (error) {
     failure = error
