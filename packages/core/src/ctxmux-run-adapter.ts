@@ -31,10 +31,10 @@ import {
   defaultCtxmuxStateDirectory
 } from './runtime-paths.js'
 
-const CTXMUX_COMMIT = '1603908a253162632e8812ceb9db19c3e416fea4'
-const CTXMUX_TREE = '464f239190234c8369799dca06a630b3b48f5cca'
+const CTXMUX_COMMIT = 'a0897087fdd0eb131c39c43d4d6791901335d69e'
+const CTXMUX_TREE = '54d0f0631a51063a5f4c18088f4e8cba1f80444a'
 const CTXMUX_VERSION = '0.1.0'
-const CTXMUX_MANIFEST_SHA256 = '5aebfefaf7d5f9c6b6f6be75adef82e5b7cf1a6122ecd654b6fa15fe7f525829'
+const CTXMUX_MANIFEST_SHA256 = '2bb56c00778fc5d7e20e1470b98e7fcc3687bc8a3e8d68d58f53dcd8337d6bf3'
 const CTXMUX_RUNTIME_BUILD_ID = `ctxmuxd/${CTXMUX_VERSION}`
 const REQUIRED_RUNTIME_CAPABILITIES = {
   [RUNTIME_CAPABILITY_NATIVE_START]: 1,
@@ -137,6 +137,10 @@ export type CtxmuxAdapterEvent =
   | CtxmuxAdapterDataEvent
   | CtxmuxAdapterExitEvent
   | CtxmuxAdapterGapEvent
+
+export type CtxmuxAdapterObservationEvent =
+  | CtxmuxAdapterEvent
+  | { type: 'error'; runId: string; error: AgentMuxError }
 
 export type CtxmuxAdapterAttachment = {
   run: CtxmuxAdapterRun
@@ -809,7 +813,7 @@ export class CtxmuxRunAdapter {
   async observeOutput(
     runId: string,
     afterByte: number,
-    listener: (event: CtxmuxAdapterEvent) => void
+    listener: (event: CtxmuxAdapterObservationEvent) => void
   ): Promise<CtxmuxAdapterOutputObservation> {
     let attachment: Attachment | null = null
     try {
@@ -825,11 +829,15 @@ export class CtxmuxRunAdapter {
               listener(decodeChunk(runId, decoder, event.chunk))
             } else if (event.type === 'gap') {
               listener({ type: 'gap', runId, latestOutputBytes: event.latest_output_bytes })
-            } else if (event.type === 'tmux') {
-              this.errorListener?.(new AgentMuxError(
-                'A native AgentMux Run received an unexpected tmux event.',
-                'CTXMUX_EVENT_INVALID'
-              ), runId)
+            } else if (event.type === 'tmux' || event.type === 'observation_discontinuity') {
+              listener({
+                type: 'error',
+                runId,
+                error: new AgentMuxError(
+                  `A native AgentMux Run received an unexpected ${event.type} event.`,
+                  'CTXMUX_EVENT_INVALID'
+                )
+              })
             } else {
               listener({
                 type: 'exit',
@@ -989,9 +997,9 @@ export class CtxmuxRunAdapter {
       this.eventListener?.({ type: 'gap', runId, latestOutputBytes: event.latest_output_bytes })
       return
     }
-    if (event.type === 'tmux') {
+    if (event.type === 'tmux' || event.type === 'observation_discontinuity') {
       this.errorListener?.(new AgentMuxError(
-        'A native AgentMux Run received an unexpected tmux event.',
+        `A native AgentMux Run received an unexpected ${event.type} event.`,
         'CTXMUX_EVENT_INVALID'
       ), runId)
       return

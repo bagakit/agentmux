@@ -66,6 +66,7 @@
     "benchmark:daemon-cutover:smoke": "pnpm build && node scripts/run-daemon-cutover-benchmark.mjs --smoke"
   },
   "devDependencies": {
+    "@ctxmux/sdk": "0.0.0",
     "@types/node": "^24.0.0",
     "esbuild": "^0.25.0",
     "typescript": "^5.9.0",
