@@ -46,10 +46,22 @@ describe('ActivityView', () => {
 
   it('renders Core Timeline status, provenance, and prose without Provider branches', () => {
     const markup = render('streaming', [
-      activity('streaming', {
-        status: 'streaming',
+      activity('ask', {
+        kind: 'user_message',
+        source: 'user',
+        title: 'Prompt',
+        content: 'Ship it',
+        createdAt: 1,
+        updatedAt: 1
+      }),
+      activity('edit', {
+        kind: 'tool_call',
         source: 'native-hook',
-        content: 'Working on it'
+        title: 'Edit',
+        toolName: 'Edit',
+        toolInput: 'runtime.ts',
+        createdAt: 2,
+        updatedAt: 2
       }),
       activity('failed', {
         kind: 'tool_call',
@@ -57,13 +69,16 @@ describe('ActivityView', () => {
         source: 'acp',
         title: 'Run tests',
         toolName: 'shell',
-        toolInput: 'pnpm test'
+        toolInput: 'pnpm test',
+        createdAt: 3,
+        updatedAt: 3
       }),
-      activity('prompt', {
-        kind: 'user_message',
-        source: 'user',
-        title: 'User prompt',
-        content: 'Ship it'
+      activity('reply', {
+        status: 'streaming',
+        source: 'native-hook',
+        content: 'Working on it',
+        createdAt: 4,
+        updatedAt: 4
       })
     ])
 
@@ -71,9 +86,10 @@ describe('ActivityView', () => {
     expect(markup).toContain('never Terminal output or private chain-of-thought')
     expect(markup).toContain('Streaming')
     expect(markup).toContain('Failed')
+    // Provenance lives on the machine rows; a turn carries its speaker in the caption and glyph, not a
+    // native-hook/user label, so the register split is what keeps the conversation from reading machine.
     expect(markup).toContain('native-hook')
     expect(markup).toContain('acp')
-    expect(markup).toContain('user')
     // Prose the agent and user produced is the substance of the trace and always renders.
     expect(markup).toContain('Working on it')
     expect(markup).toContain('Ship it')
@@ -110,6 +126,57 @@ describe('ActivityView', () => {
     // carries a tick per event, so scope the check to the log itself.)
     const log = markup.slice(markup.indexOf('activity-log'))
     expect(log).not.toContain('Bash')
+  })
+
+  it('renders a user turn in the turn register — a speaker caption over the words, not a machine row', () => {
+    const markup = render('complete-events', [
+      activity('ask', {
+        kind: 'user_message',
+        source: 'user',
+        title: 'Prompt',
+        content: 'Make the adapter observable.'
+      })
+    ])
+
+    // The turn lands in the conversation register, not the machine Row.
+    expect(markup).toContain('log-turn log-turn--user_message')
+    expect(markup).not.toContain('log-row log-row--user_message')
+    // The words are the substance; the caption is the human speaker, not the generic machine title.
+    expect(markup).toContain('log-turn__body')
+    expect(markup).toContain('Make the adapter observable.')
+    expect(markup).toContain('You')
+  })
+
+  it('never folds the assistant reply into a machine run, even when it is native-hook next to a tool call', () => {
+    // Mirrors the shipped trace: a native-hook tool_call immediately followed by the native-hook
+    // assistant reply. Folding by source alone would sweep the reply into "2 steps" and hide it.
+    const markup = render('complete-events', [
+      activity('a2', {
+        kind: 'tool_call',
+        source: 'native-hook',
+        title: 'Edit',
+        toolName: 'Edit',
+        toolInput: 'packages/core/src/runtime.ts',
+        createdAt: 1,
+        updatedAt: 1
+      }),
+      activity('a3', {
+        kind: 'assistant_message',
+        source: 'native-hook',
+        title: 'Assistant response',
+        content: 'The runtime now emits typed session events from one owner.',
+        createdAt: 2,
+        updatedAt: 2
+      })
+    ])
+
+    // The reply is a turn, on screen, in full — never behind a default-closed disclosure.
+    expect(markup).toContain('log-turn log-turn--assistant_message')
+    expect(markup).toContain('The runtime now emits typed session events from one owner.')
+    expect(markup).toContain('Assistant')
+    // The lone tool_call renders as a machine row; its argv stays folded.
+    expect(markup).toContain('Edit')
+    expect(markup).not.toContain('packages/core/src/runtime.ts')
   })
 
   it('spaces the ruler by real elapsed time, and says so when there is none to show', () => {
