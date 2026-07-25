@@ -57,6 +57,7 @@ import { useAppStore } from '../store'
 import { agentComposerAvailability } from './AgentSessionComposer'
 import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
 import { BranchesPanel } from './BranchesPanel'
+import { BrowserProfilesPanel } from './BrowserProfilesPanel'
 import { FileExplorer, type FileExplorerRevealRequest } from './FileExplorer'
 import { StatusDot } from './StatusDot'
 import { SidebarToggleChrome } from './TopRowChrome'
@@ -785,6 +786,7 @@ export function SurfaceToolDock({
               saving={savingBrowserToolbar}
               onSave={saveBrowserToolbar}
             />
+            <BrowserProfilesPanel browsers={browserSurfaces} />
             <BrowserAnnotationsPanel
               annotations={browserAnnotations}
               currentNavigationByBrowserId={currentNavigationByBrowserId}
