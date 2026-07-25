@@ -711,11 +711,15 @@ async function runExplorerInteractionProbe(options: {
   await beginPointerDrag(window, 'explorer-source/drag-invalid.txt')
   const hoverTarget = await moveActivePointerDrag(window, 'hover-expand destination', treeRowSource('targets/hover'))
   await waitForActivePointerDropTarget(window, 'targets/hover', hoverTarget)
-  await waitFor('500ms hover-expanded directory', async () => (
-    await window.webContents.executeJavaScript(
+  await waitFor('500ms hover-expanded directory', async () => {
+    const expanded = await window.webContents.executeJavaScript(
       `${treeRowSource('targets/hover')}?.getAttribute('aria-expanded') === 'true'`
     ) as boolean
-  ))
+    if (!expanded) {
+      sendMouse(window, 'mouseMove', hoverTarget, undefined, ['leftbuttondown'])
+    }
+    return expanded
+  })
   cancelPointerDrag(window, hoverTarget)
   await waitFor('hover-expand PointerSensor cleanup', async () => !(
     await window.webContents.executeJavaScript("Boolean(document.querySelector('.file-tree-drag-preview'))") as boolean
