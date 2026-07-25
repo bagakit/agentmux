@@ -195,8 +195,6 @@ type AppState = {
   timelines: Record<string, AgentTimelineSnapshot>
   pendingAgentLaunches: Record<string, PendingAgentLaunch>
   activeWorkspaceId: string | null
-  /** Scratch 当前选中的 Topic。切它就像切 Branch 一样换掉那一组 Tab。 */
-  activeScratchTopicId: string | null
   /** 用户拖出来的 Topic 顺序。是一份偏好，不是真相来源——磁盘上没有的不会因它出现。 */
   scratchTopicOrder: string[]
   setScratchTopicOrder(order: readonly string[]): void
@@ -925,7 +923,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   timelines: {},
   pendingAgentLaunches: {},
   activeWorkspaceId: null,
-  activeScratchTopicId: null,
   scratchTopicOrder: [],
   documents: {},
   dirtyDocuments: {},
@@ -2157,9 +2154,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (boundTab) {
         const groupId = tabGroupForTab(layout, boundTab.id)!
         return {
-          // 切 Topic 就像切 Branch：换掉那一组 Tab。真相仍是这一份 layout，
-          // 过滤发生在渲染时（scratch-topic-layout.ts），不建第二份 Tab 状态。
-          activeScratchTopicId: topicId,
+          // 切 Topic 就像切 Branch：换掉那一组 Tab。真相仍是这一份 layout——激活该 Topic 的
+          // Tab 就够了，当前 Topic 由活动 Tab 派生（scratch-topic-layout.ts），不另存一份。
           layouts: {
             ...current.layouts,
             [workspace.id]: activateLayoutTab(layout, groupId, boundTab.id)
@@ -2168,7 +2164,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       const tab = { ...newLauncherTab(workspace.id), topicId }
       return {
-        activeScratchTopicId: topicId,
         tabs: { ...current.tabs, [tab.id]: tab },
         layouts: {
           ...current.layouts,
