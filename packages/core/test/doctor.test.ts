@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
 import type { AgentMuxClient } from '../src/client.js'
 import { diagnoseAgentMux } from '../src/doctor.js'
-import type { AgentId, AgentMuxRuntimeDiagnostics } from '../src/types.js'
+import type { AgentProviderId, AgentMuxRuntimeDiagnostics } from '../src/types.js'
 
 const runtime: AgentMuxRuntimeDiagnostics = {
   nodeVersion: '22.0.0',
@@ -12,7 +12,7 @@ const runtime: AgentMuxRuntimeDiagnostics = {
   ctxmux: {
     version: '0.1.0',
     protocolVersion: 9,
-    sourceCommit: '2e32a9d647d627952ea5c455fb2efef6c636643a',
+    sourceCommit: 'f89dabe70eba38d46992c320e40c9ebe2f09b5e5',
     artifactPlatform: 'darwin-arm64',
     ready: true,
     capabilities: {
@@ -40,11 +40,11 @@ function client(overrides: Partial<AgentMuxClient> = {}): AgentMuxClient {
       instanceId: 'daemon-fixture'
     }),
     runtimeDiagnostics: vi.fn(async () => runtime),
-    probeAgent: vi.fn(async (agentId: AgentId) => ({
-      agentId,
-      executable: catalog.find((entry) => entry.id === agentId)!.executable,
-      installed: agentId === 'codex',
-      capabilities: catalog.find((entry) => entry.id === agentId)!.capabilities
+    probeAgent: vi.fn(async (providerId: AgentProviderId) => ({
+      providerId,
+      executable: catalog.find((entry) => entry.id === providerId)!.executable,
+      installed: providerId === 'codex',
+      capabilities: catalog.find((entry) => entry.id === providerId)!.capabilities
     })),
     ...overrides
   } as unknown as AgentMuxClient

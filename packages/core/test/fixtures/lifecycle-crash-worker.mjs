@@ -15,6 +15,10 @@ const store = {
   claimStaleLifecycles: async (claim) => await delegate.claimStaleLifecycles(claim),
   releaseLifecycle: async (reservation, runs) => await delegate.releaseLifecycle(reservation, runs),
   retireRuns: async (runs) => await delegate.retireRuns(runs),
+  loadTimeline: async (agentSessionId) => await delegate.loadTimeline(agentSessionId),
+  applyTimelineMutation: async (mutation, signal) => (
+    await delegate.applyTimelineMutation(mutation, signal)
+  ),
   async commitLifecycle(reservation, next) {
     if (reservation.kind === 'create' && reservation.agentSessionId === 'crash-semantic') {
       process.stdout.write(`${JSON.stringify({
@@ -31,7 +35,8 @@ const client = await connectLocalAgentMux({ store })
 await client.createAgent({
   agentSessionId: 'crash-semantic',
   createOperationId: 'crash-after-run-start',
-  agentId: 'codex',
+  providerId: 'codex',
+  executorId: 'codex',
   workspacePath: process.cwd(),
   prompt: 'crash-fixture',
   commandOverride: fakeCodex

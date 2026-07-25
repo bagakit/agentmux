@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto'
 import { AgentMuxError } from './errors.js'
 import type {
   AgentHookReceipt,
@@ -10,6 +9,7 @@ import type {
   AgentMuxRun,
   AgentMuxRunDataEvent,
   AgentMuxRunExitEvent,
+  AgentTimelineCommit,
   NormalizedHookEvent
 } from './types.js'
 
@@ -128,15 +128,16 @@ export class AgentMuxClientEventPublisher {
       detail: normalized.eventName,
       evidence
     })
-    for (const activity of normalized.activities) {
-      const { sessionId: _sessionId, source: _source, ...publicActivity } = activity
-      this.publish({
-        type: 'agent-activity',
-        agentSessionId: session.agentSessionId,
-        activity: publicActivity,
-        evidence
-      })
-    }
+  }
+
+  publishTimeline(commit: AgentTimelineCommit, evidence: AgentMuxEvidence): void {
+    this.publish({
+      type: 'agent-timeline',
+      agentSessionId: commit.agentSessionId,
+      revision: commit.revision,
+      mutation: commit.mutation,
+      evidence
+    })
   }
 
   publishAcp(
@@ -154,23 +155,7 @@ export class AgentMuxClientEventPublisher {
       })
       return
     }
-    if (event.type === 'activity') {
-      this.publish({
-        type: 'agent-activity',
-        agentSessionId,
-        activity: {
-          id: randomUUID(),
-          kind: event.kind,
-          createdAt: evidence.observedAt,
-          title: event.title,
-          ...(event.content === undefined ? {} : { content: event.content }),
-          ...(event.toolName === undefined ? {} : { toolName: event.toolName }),
-          ...(event.toolInput === undefined ? {} : { toolInput: event.toolInput })
-        },
-        evidence
-      })
-      return
-    }
+    if (event.type === 'activity') return
     if (event.type === 'permission') {
       const request: AgentMuxPermissionRequest = {
         id: event.requestId,

@@ -44,10 +44,10 @@ type AgentSessionWriteDrain = {
 
 export class AgentMuxAgentSessionRegistry {
   private readonly sessions = new Map<string, AgentMuxStoredAgentSession>()
-  private readonly agentIdByRun = new Map<string, string>()
-  private readonly agentIdByRetiredRun = new Map<string, string>()
+  private readonly providerIdByRun = new Map<string, string>()
+  private readonly providerIdByRetiredRun = new Map<string, string>()
   private readonly unboundRetiredRuns = new Set<string>()
-  private readonly agentIdByNative = new Map<string, string>()
+  private readonly providerIdByNative = new Map<string, string>()
   private readonly writeQueues = new Map<string, AgentSessionWrite[]>()
   private readonly activeWrites = new Set<string>()
   private readonly writeDrains = new Map<string, AgentSessionWriteDrain>()
@@ -63,10 +63,10 @@ export class AgentMuxAgentSessionRegistry {
       this.store.loadRetiredRuns()
     ])
     this.sessions.clear()
-    this.agentIdByRun.clear()
-    this.agentIdByRetiredRun.clear()
+    this.providerIdByRun.clear()
+    this.providerIdByRetiredRun.clear()
     this.unboundRetiredRuns.clear()
-    this.agentIdByNative.clear()
+    this.providerIdByNative.clear()
     for (const session of sessions) {
       if (session.hostId === hostId) this.remember(session)
     }
@@ -92,15 +92,15 @@ export class AgentMuxAgentSessionRegistry {
   resolve(lookup: AgentMuxAgentSessionLookup): AgentMuxStoredAgentSession {
     if (lookup.kind === 'agent-session') return this.get(lookup.agentSessionId)
     const agentSessionId = lookup.kind === 'run'
-      ? this.agentIdByRun.get(lookup.run.runId)
-      : this.agentIdByNative.get(lookup.kind === 'provider-native'
+      ? this.providerIdByRun.get(lookup.run.runId)
+      : this.providerIdByNative.get(lookup.kind === 'provider-native'
           ? JSON.stringify(['provider', lookup.providerId, lookup.sessionId])
           : JSON.stringify(['acp', lookup.adapterId, lookup.sessionId]))
     const session = agentSessionId ? this.sessions.get(agentSessionId) : undefined
     if (
       !session &&
       lookup.kind === 'run' &&
-      (this.agentIdByRetiredRun.has(lookup.run.runId) || this.unboundRetiredRuns.has(lookup.run.runId))
+      (this.providerIdByRetiredRun.has(lookup.run.runId) || this.unboundRetiredRuns.has(lookup.run.runId))
     ) {
       throw new AgentMuxError('Run binding is retired.', 'STALE_AGENT_SESSION_BINDING')
     }
@@ -123,14 +123,21 @@ export class AgentMuxAgentSessionRegistry {
   async reserveExisting(
     kind: 'resume' | 'stop',
     agentSessionId: string,
+    expectedRun: AgentMuxRunRef,
     operationId: string
   ): Promise<AgentMuxLifecycleReservation> {
     const session = this.get(agentSessionId)
+    if (!sameRun(session.run, expectedRun)) {
+      throw new AgentMuxError(
+        'Agent Session changed before lifecycle reservation.',
+        'STALE_AGENT_SESSION'
+      )
+    }
     return await this.reserveLifecycle({
       kind,
       agentSessionId,
       operationId,
-      expectedRun: session.run
+      expectedRun
     })
   }
 
@@ -233,13 +240,13 @@ export class AgentMuxAgentSessionRegistry {
   }
 
   findByRun(ref: AgentMuxRunRef): AgentMuxStoredAgentSession | undefined {
-    const agentSessionId = this.agentIdByRun.get(ref.runId)
+    const agentSessionId = this.providerIdByRun.get(ref.runId)
     const session = agentSessionId ? this.sessions.get(agentSessionId) : undefined
     return session && sameRun(session.run, ref) ? session : undefined
   }
 
   isRetiredRun(ref: AgentMuxRunRef): boolean {
-    return this.agentIdByRetiredRun.has(ref.runId) || this.unboundRetiredRuns.has(ref.runId)
+    return this.providerIdByRetiredRun.has(ref.runId) || this.unboundRetiredRuns.has(ref.runId)
   }
 
   private async reserveLifecycle(input: {
@@ -343,12 +350,12 @@ export class AgentMuxAgentSessionRegistry {
     this.assertAvailable(session)
     const copy = structuredClone(session)
     this.sessions.set(copy.agentSessionId, copy)
-    this.agentIdByRun.set(copy.run.runId, copy.agentSessionId)
+    this.providerIdByRun.set(copy.run.runId, copy.agentSessionId)
     for (const retired of copy.retiredRuns) {
-      this.agentIdByRetiredRun.set(retired.runId, copy.agentSessionId)
+      this.providerIdByRetiredRun.set(retired.runId, copy.agentSessionId)
     }
     const key = nativeKey(copy)
-    if (key) this.agentIdByNative.set(key, copy.agentSessionId)
+    if (key) this.providerIdByNative.set(key, copy.agentSessionId)
   }
 
   private assertAvailable(session: AgentMuxStoredAgentSession): void {
@@ -358,17 +365,17 @@ export class AgentMuxAgentSessionRegistry {
     ) {
       throw new AgentMuxError('Run is retired by an abandoned lifecycle.', 'AGENT_SESSION_IDENTITY_CONFLICT')
     }
-    const runOwner = this.agentIdByRun.get(session.run.runId)
+    const runOwner = this.providerIdByRun.get(session.run.runId)
     if (runOwner && runOwner !== session.agentSessionId) {
       throw new AgentMuxError('Run is already bound to another Agent Session.', 'AGENT_SESSION_IDENTITY_CONFLICT')
     }
-    const retiredCurrentOwner = this.agentIdByRetiredRun.get(session.run.runId)
+    const retiredCurrentOwner = this.providerIdByRetiredRun.get(session.run.runId)
     if (retiredCurrentOwner && retiredCurrentOwner !== session.agentSessionId) {
       throw new AgentMuxError('Run is retired by another Agent Session.', 'AGENT_SESSION_IDENTITY_CONFLICT')
     }
     for (const retired of session.retiredRuns) {
-      const currentOwner = this.agentIdByRun.get(retired.runId)
-      const retiredOwner = this.agentIdByRetiredRun.get(retired.runId)
+      const currentOwner = this.providerIdByRun.get(retired.runId)
+      const retiredOwner = this.providerIdByRetiredRun.get(retired.runId)
       if (
         (currentOwner && currentOwner !== session.agentSessionId) ||
         (retiredOwner && retiredOwner !== session.agentSessionId)
@@ -377,24 +384,24 @@ export class AgentMuxAgentSessionRegistry {
       }
     }
     const key = nativeKey(session)
-    const nativeOwner = key ? this.agentIdByNative.get(key) : undefined
+    const nativeOwner = key ? this.providerIdByNative.get(key) : undefined
     if (nativeOwner && nativeOwner !== session.agentSessionId) {
       throw new AgentMuxError('Native handle is already bound to another Agent Session.', 'AGENT_SESSION_IDENTITY_CONFLICT')
     }
   }
 
   private forget(session: AgentMuxStoredAgentSession): void {
-    if (this.agentIdByRun.get(session.run.runId) === session.agentSessionId) {
-      this.agentIdByRun.delete(session.run.runId)
+    if (this.providerIdByRun.get(session.run.runId) === session.agentSessionId) {
+      this.providerIdByRun.delete(session.run.runId)
     }
     for (const retired of session.retiredRuns) {
-      if (this.agentIdByRetiredRun.get(retired.runId) === session.agentSessionId) {
-        this.agentIdByRetiredRun.delete(retired.runId)
+      if (this.providerIdByRetiredRun.get(retired.runId) === session.agentSessionId) {
+        this.providerIdByRetiredRun.delete(retired.runId)
       }
     }
     const key = nativeKey(session)
-    if (key && this.agentIdByNative.get(key) === session.agentSessionId) {
-      this.agentIdByNative.delete(key)
+    if (key && this.providerIdByNative.get(key) === session.agentSessionId) {
+      this.providerIdByNative.delete(key)
     }
   }
 }

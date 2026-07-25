@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { AgentMuxError } from './errors.js'
-import type { AgentId, NativeHookEnvelope } from './types.js'
+import type { AgentProviderId, NativeHookEnvelope } from './types.js'
 import { defaultAgentMuxHookPort } from './runtime-paths.js'
 
 const MAX_BODY_BYTES = 128 * 1024
@@ -85,7 +85,7 @@ export type AgentHookBinding = {
 type PendingBinding = {
   token: string
   agentSessionId: string
-  agentId: AgentId
+  providerId: AgentProviderId
   runId: string | null
   events: HookIngressEvent[]
   tail: Promise<void>
@@ -162,7 +162,7 @@ export class AgentHookServer {
 
   createBinding(
     agentSessionId: string,
-    agentId: AgentId,
+    providerId: AgentProviderId,
     requestedBindingId?: string,
     requestedToken?: string
   ): AgentHookBinding {
@@ -182,7 +182,7 @@ export class AgentHookServer {
     const binding: PendingBinding = {
       token,
       agentSessionId,
-      agentId,
+      providerId,
       runId: null,
       events: [],
       tail: Promise.resolve(),
@@ -301,7 +301,7 @@ export class AgentHookServer {
       receiptId: event.receiptId,
       agentSessionId: binding.agentSessionId,
       runId: binding.runId,
-      agentId: binding.agentId,
+      providerId: binding.providerId,
       ...(event.eventName === undefined ? {} : { eventName: event.eventName }),
       ...(event.payload === undefined ? {} : { payload: event.payload })
     }

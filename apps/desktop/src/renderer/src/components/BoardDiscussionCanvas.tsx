@@ -13,8 +13,9 @@ import {
 import { useEffect, useMemo, useState } from 'react'
 import type { WorkspaceRecord } from '../../../shared/contracts'
 import { api } from '../lib/api'
+import { configuredExecutors } from '../lib/executors'
 import type { ProjectBranchLane } from '../lib/project-board'
-import { agentDetectionKey, useAppStore } from '../store'
+import { executorDetectionKey, useAppStore } from '../store'
 import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
 
 export function BoardDiscussionCanvas({
@@ -29,32 +30,31 @@ export function BoardDiscussionCanvas({
   onOpenBranches: (lane: ProjectBranchLane) => void
 }) {
   const config = useAppStore((state) => state.config)
-  const detections = useAppStore((state) => state.agentDetections)
-  const detectAgents = useAppStore((state) => state.detectAgents)
+  const detections = useAppStore((state) => state.executorDetections)
+  const detectExecutors = useAppStore((state) => state.detectExecutors)
   const activateWorkspaceSelection = useAppStore((state) => state.activateWorkspaceSelection)
   const setMainSurface = useAppStore((state) => state.setMainSurface)
   const launchBoardAgent = useAppStore((state) => state.launchBoardAgent)
-  const [agentId, setAgentId] = useState('codex')
+  const [executorId, setExecutorId] = useState('codex')
   const [prompt, setPrompt] = useState('')
   const [launching, setLaunching] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const hostId = lane?.workspace?.hostId ?? anchor.hostId
-  const agents = useMemo(
-    () => Object.keys(config?.agents ?? {}).map((id) => ({
-      id,
-      label: agentProviderLabel(id),
-      detection: detections[agentDetectionKey(hostId, id)]
+  const executors = useMemo(
+    () => configuredExecutors(config).map((executor) => ({
+      ...executor,
+      detection: detections[executorDetectionKey(hostId, executor.id)]
     })),
-    [config?.agents, detections, hostId]
+    [config?.executors, detections, hostId]
   )
-  const installedAgents = agents.filter((agent) => agent.detection?.state === 'ready')
-  const unavailableAgents = agents.filter((agent) => agent.detection?.state !== 'ready')
-  const detecting = agents.some((agent) => agent.detection?.state === 'checking')
+  const installedExecutors = executors.filter((executor) => executor.detection?.state === 'ready')
+  const unavailableExecutors = executors.filter((executor) => executor.detection?.state !== 'ready')
+  const detecting = executors.some((executor) => executor.detection?.state === 'checking')
   const canLaunch = Boolean(
     lane?.branch.worktreePath &&
     prompt.trim() &&
-    installedAgents.some((agent) => agent.id === agentId)
+    installedExecutors.some((executor) => executor.id === executorId)
   )
 
   useEffect(() => {
@@ -64,15 +64,15 @@ export function BoardDiscussionCanvas({
   }, [lane])
 
   useEffect(() => {
-    if (!lane || agents.every((agent) => agent.detection)) return
-    void detectAgents(hostId)
-  }, [agents, detectAgents, hostId, lane])
+    if (!lane || executors.every((executor) => executor.detection)) return
+    void detectExecutors(hostId)
+  }, [executors, detectExecutors, hostId, lane])
 
   useEffect(() => {
-    if (installedAgents.some((agent) => agent.id === agentId)) return
-    const first = installedAgents[0]
-    if (first) setAgentId(first.id)
-  }, [agentId, installedAgents])
+    if (installedExecutors.some((executor) => executor.id === executorId)) return
+    const first = installedExecutors[0]
+    if (first) setExecutorId(first.id)
+  }, [executorId, installedExecutors])
 
   async function startDiscussion(): Promise<void> {
     if (!lane || !canLaunch || launching) return
@@ -86,7 +86,7 @@ export function BoardDiscussionCanvas({
         setMainSurface('board')
         workspace = result.workspace
       }
-      await launchBoardAgent(workspace.id, agentId, prompt.trim())
+      await launchBoardAgent(workspace.id, executorId, prompt.trim())
       onClose()
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
@@ -150,29 +150,29 @@ export function BoardDiscussionCanvas({
                 <>
                   <section className="discussion-section">
                     <header>
-                      <div><span>Provider</span><small>Detected on {hostId === 'local' ? 'this Mac' : hostId}</small></div>
-                      <button type="button" className="icon-button" title="Refresh providers" disabled={detecting} onClick={() => void detectAgents(hostId)}>
+                      <div><span>Agent</span><small>Detected on {hostId === 'local' ? 'this Mac' : hostId}</small></div>
+                      <button type="button" className="icon-button" title="Refresh Agents" disabled={detecting} onClick={() => void detectExecutors(hostId)}>
                         {detecting ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}
                       </button>
                     </header>
                     <div className="discussion-provider-grid">
-                      {installedAgents.map((agent) => (
+                      {installedExecutors.map((executor) => (
                         <button
                           type="button"
-                          key={agent.id}
-                          className={agent.id === agentId ? 'selected' : ''}
-                          aria-pressed={agent.id === agentId}
-                          onClick={() => setAgentId(agent.id)}
+                          key={executor.id}
+                          className={executor.id === executorId ? 'selected' : ''}
+                          aria-pressed={executor.id === executorId}
+                          onClick={() => setExecutorId(executor.id)}
                         >
-                          <span><AgentProviderIcon agentId={agent.id} size={22} /></span>
-                          <strong>{agent.label}</strong>
-                          <small>Ready</small>
+                          <span><AgentProviderIcon providerId={executor.providerId} size={22} /></span>
+                          <strong>{executor.label}</strong>
+                          <small>{agentProviderLabel(executor.providerId)} · Ready</small>
                         </button>
                       ))}
                     </div>
-                    {unavailableAgents.length > 0 ? (
+                    {unavailableExecutors.length > 0 ? (
                       <p className="discussion-provider-unavailable">
-                        Not available: {unavailableAgents.map((agent) => agent.label).join(', ')}
+                        Not available: {unavailableExecutors.map((executor) => executor.label).join(', ')}
                       </p>
                     ) : null}
                   </section>

@@ -18,7 +18,8 @@ function session(index: number) {
   return {
     kind: 'agent' as const,
     agentSessionId: `semantic-${index}`,
-    agentId: 'codex',
+    providerId: 'codex',
+    executorId: 'codex',
     hostId: 'local',
     workspacePath: upstreamFixturePath("tmp/work"),
     run: { runId: `run-${index}` },
@@ -40,7 +41,16 @@ function store(values: readonly unknown[]): AgentMuxAgentSessionStore {
     async claimStaleLifecycles() { return [] },
     async releaseLifecycle() {},
     async retireRuns() {},
-    async commitLifecycle() {}
+    async commitLifecycle() {},
+    async loadTimeline(agentSessionId) { return { agentSessionId, revision: 0, items: [] } },
+    async applyTimelineMutation(mutation) {
+      return {
+        agentSessionId: mutation.agentSessionId,
+        revision: 0,
+        changed: false,
+        mutation
+      }
+    }
   }
 }
 

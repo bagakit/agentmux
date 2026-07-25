@@ -1,21 +1,29 @@
-import type { AgentId, BuiltInAgentId } from '@agentmux/core'
+import type { AgentProviderId, BuiltInAgentProviderId } from '@agentmux/core'
 import { Bot } from 'lucide-react'
 import type { ReactNode } from 'react'
 import hermesIconUrl from '../assets/agent-icons/hermes.png'
 import traexIconUrl from '../assets/agent-icons/traex.png'
+import grokIconUrl from '../assets/agent-icons/grok.png'
+import geminiIconUrl from '../assets/agent-icons/gemini.png'
+import antigravityIconUrl from '../assets/agent-icons/antigravity.png'
+import cursorIconUrl from '../assets/agent-icons/cursor.png'
 
 const BUILT_IN_AGENT_LABELS = {
   codex: 'Codex',
   claude: 'Claude',
   traex: 'TraeX',
   hermes: 'Hermes',
-  pi: 'Pi'
-} satisfies Record<BuiltInAgentId, string>
+  pi: 'Pi',
+  grok: 'Grok',
+  gemini: 'Gemini',
+  antigravity: 'Antigravity',
+  cursor: 'Cursor'
+} satisfies Record<BuiltInAgentProviderId, string>
 
-export function agentProviderLabel(agentId: AgentId): string {
-  return Object.prototype.hasOwnProperty.call(BUILT_IN_AGENT_LABELS, agentId)
-    ? BUILT_IN_AGENT_LABELS[agentId as BuiltInAgentId]
-    : agentId
+export function agentProviderLabel(providerId: AgentProviderId): string {
+  return Object.prototype.hasOwnProperty.call(BUILT_IN_AGENT_LABELS, providerId)
+    ? BUILT_IN_AGENT_LABELS[providerId as BuiltInAgentProviderId]
+    : providerId
 }
 
 function CodexIcon({ size }: { size: number }) {
@@ -46,21 +54,25 @@ function PiIcon({ size }: { size: number }) {
   )
 }
 
-export function AgentProviderIcon({ agentId, size = 14 }: { agentId: AgentId; size?: number }) {
+export function AgentProviderIcon({ providerId, size = 14 }: { providerId: AgentProviderId; size?: number }) {
   let icon: ReactNode
-  switch (agentId) {
+  switch (providerId) {
     case 'codex': icon = <CodexIcon size={size} />; break
     case 'claude': icon = <ClaudeIcon size={size} />; break
     case 'traex': icon = <img src={traexIconUrl} width={size} height={size} alt="" draggable={false} />; break
     case 'hermes': icon = <img src={hermesIconUrl} width={size} height={size} alt="" draggable={false} />; break
     case 'pi': icon = <PiIcon size={size} />; break
+    case 'grok': icon = <img src={grokIconUrl} width={size} height={size} alt="" draggable={false} />; break
+    case 'gemini': icon = <img src={geminiIconUrl} width={size} height={size} alt="" draggable={false} />; break
+    case 'antigravity': icon = <img src={antigravityIconUrl} width={size} height={size} alt="" draggable={false} />; break
+    case 'cursor': icon = <img src={cursorIconUrl} width={size} height={size} alt="" draggable={false} />; break
     default: icon = <Bot size={size} strokeWidth={1.8} />
   }
   return (
     <span
       className="agent-provider-icon"
-      data-agent-provider={agentId}
-      data-agent-provider-known={Object.prototype.hasOwnProperty.call(BUILT_IN_AGENT_LABELS, agentId)}
+      data-agent-provider={providerId}
+      data-agent-provider-known={Object.prototype.hasOwnProperty.call(BUILT_IN_AGENT_LABELS, providerId)}
       style={{ width: size, height: size }}
       aria-hidden="true"
     >

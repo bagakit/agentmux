@@ -2,26 +2,21 @@ import '../monaco'
 import Editor from '@monaco-editor/react'
 import { AlertTriangle, RefreshCw, Save } from 'lucide-react'
 import { detectLanguage } from '../lib/language-detect'
-import { documentKey } from '../lib/workbench-tabs'
+import { documentKey, type FileWorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
 
-export function EditorPane({ tabId }: { tabId: string }) {
-  const tab = useAppStore((state) => state.tabs[tabId])
+export function EditorPane({ tabId, surface }: { tabId: string; surface: FileWorkbenchSurface }) {
   const document = useAppStore((state) => {
-    if (tab?.kind !== 'file') return null
-    return state.documents[documentKey(tab.workspaceId, tab.path)] ?? null
+    return state.documents[documentKey(surface.workspaceId, surface.path)] ?? null
   })
   const dirty = useAppStore((state) => {
-    if (tab?.kind !== 'file') return false
-    return Boolean(state.dirtyDocuments[documentKey(tab.workspaceId, tab.path)])
+    return Boolean(state.dirtyDocuments[documentKey(surface.workspaceId, surface.path)])
   })
   const issue = useAppStore((state) => {
-    if (tab?.kind !== 'file') return undefined
-    return state.documentIssues[documentKey(tab.workspaceId, tab.path)]
+    return state.documentIssues[documentKey(surface.workspaceId, surface.path)]
   })
   const saving = useAppStore((state) => {
-    if (tab?.kind !== 'file') return false
-    return Boolean(state.savingDocuments[documentKey(tab.workspaceId, tab.path)])
+    return Boolean(state.savingDocuments[documentKey(surface.workspaceId, surface.path)])
   })
   const update = useAppStore((state) => state.updateDocument)
   const save = useAppStore((state) => state.saveDocument)
@@ -29,7 +24,7 @@ export function EditorPane({ tabId }: { tabId: string }) {
   const overwrite = useAppStore((state) => state.overwriteDocument)
   const conflict = issue?.kind === 'changed' || issue?.kind === 'deleted'
 
-  if (tab?.kind !== 'file' || !document) {
+  if (!document) {
     return (
       <section className="pane-state pane-state--error">
         <strong>File is no longer available</strong>
@@ -48,19 +43,19 @@ export function EditorPane({ tabId }: { tabId: string }) {
         <div className="editor-header__actions">
           {conflict ? (
             <>
-              <button className="small-button" disabled={saving} onClick={() => void reload(tabId)}>
+              <button className="small-button" disabled={saving} onClick={() => void reload(tabId, surface.regionId)}>
                 <RefreshCw size={13} /> Reload
               </button>
-              <button className="small-button small-button--warning" disabled={saving} onClick={() => void overwrite(tabId)}>
+              <button className="small-button small-button--warning" disabled={saving} onClick={() => void overwrite(tabId, surface.regionId)}>
                 <Save size={13} /> {saving ? 'Overwriting…' : 'Overwrite'}
               </button>
             </>
           ) : issue?.kind === 'read-error' ? (
-            <button className="small-button" disabled={saving} onClick={() => void reload(tabId)}>
+            <button className="small-button" disabled={saving} onClick={() => void reload(tabId, surface.regionId)}>
               <RefreshCw size={13} /> Retry
             </button>
           ) : (
-            <button className="small-button" disabled={!dirty || saving} onClick={() => void save(tabId)}>
+            <button className="small-button" disabled={!dirty || saving} onClick={() => void save(tabId, surface.regionId)}>
               <Save size={13} /> {saving ? 'Saving…' : dirty ? 'Save' : 'Saved'}
             </button>
           )}
@@ -82,10 +77,10 @@ export function EditorPane({ tabId }: { tabId: string }) {
       ) : null}
       <div className="editor-canvas">
         <Editor
-          path={`${tab.workspaceId}:${document.path}`}
+          path={`${surface.workspaceId}:${document.path}`}
           language={detectLanguage(document.path)}
           value={document.content}
-          onChange={(value) => update(tabId, value ?? '')}
+          onChange={(value) => update(tabId, value ?? '', surface.regionId)}
           theme="vs-dark"
           options={{
             minimap: { enabled: false },

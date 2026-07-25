@@ -2,7 +2,9 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join, normalize as normalizeLocalPath, posix } from 'node:path'
 import { app } from 'electron'
 import { z } from 'zod'
-import type { AppConfig } from '../shared/contracts.js'
+import { BUILT_IN_AGENT_PROVIDERS } from '@agentmux/core'
+import type { AppConfig, WorkspaceRecord } from '../shared/contracts.js'
+import { SCRATCH_WORKSPACE_ID, SCRATCH_WORKSPACE_NAME } from '../shared/contracts.js'
 
 const hostSchema = z.discriminatedUnion('kind', [
   z.object({ id: z.literal('local'), kind: z.literal('local'), label: z.string().min(1) }).strict(),
@@ -19,11 +21,17 @@ const hostSchema = z.discriminatedUnion('kind', [
     .strict()
 ])
 
-const agentSchema = z
+const providerIds = new Set(BUILT_IN_AGENT_PROVIDERS.map((provider) => provider.id))
+const executorIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/)
+
+const executorSchema = z
   .object({
+    label: z.string().min(1),
+    providerId: z.string().min(1),
     command: z.string().min(1),
     args: z.array(z.string()),
-    env: z.record(z.string(), z.string())
+    env: z.record(z.string(), z.string()),
+    injectAgentMuxGuide: z.boolean()
   })
   .strict()
 
@@ -41,9 +49,9 @@ const workspaceSchema = z
 
 const configSchema = z
   .object({
-    version: z.literal(4),
+    version: z.literal(6),
     hosts: z.array(hostSchema),
-    agents: z.record(z.string().min(1), agentSchema),
+    executors: z.record(executorIdSchema, executorSchema),
     workspaces: z.array(workspaceSchema),
     appearance: z.object({ terminalTheme: z.enum(['graphite', 'catppuccin-mocha']) }).strict()
   })
@@ -56,6 +64,15 @@ const configSchema = z
     }
     if (!hostIds.has('local')) {
       context.addIssue({ code: 'custom', path: ['hosts'], message: 'Local host is required' })
+    }
+    for (const [executorId, executor] of Object.entries(config.executors)) {
+      if (!providerIds.has(executor.providerId)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['executors', executorId, 'providerId'],
+          message: `Unknown Agent Provider: ${executor.providerId}`
+        })
+      }
     }
     const workspaceIds = new Set<string>()
     const workspaceLocations = new Set<string>()
@@ -93,38 +110,119 @@ const configSchema = z
   })
 
 const DEFAULT_CONFIG: AppConfig = {
-  version: 4,
+  version: 6,
   hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
-  agents: {
-    codex: { command: 'codex', args: [], env: {} },
-    claude: { command: 'claude', args: [], env: {} },
-    traex: { command: 'traex', args: [], env: {} },
-    hermes: { command: 'hermes', args: [], env: {} },
-    pi: { command: 'pi', args: [], env: {} }
+  executors: {
+    codex: { label: 'Codex', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: true },
+    claude: { label: 'Claude', providerId: 'claude', command: 'claude', args: [], env: {}, injectAgentMuxGuide: true },
+    traex: { label: 'TraeX', providerId: 'traex', command: 'traex', args: [], env: {}, injectAgentMuxGuide: true },
+    hermes: { label: 'Hermes', providerId: 'hermes', command: 'hermes', args: [], env: {}, injectAgentMuxGuide: true },
+    pi: { label: 'Pi', providerId: 'pi', command: 'pi', args: [], env: {}, injectAgentMuxGuide: true },
+    grok: {
+      label: 'Grok',
+      providerId: 'grok',
+      command: 'grok',
+      args: ['--permission-mode', 'bypassPermissions'],
+      env: {},
+      injectAgentMuxGuide: true
+    },
+    gemini: { label: 'Gemini', providerId: 'gemini', command: 'gemini', args: [], env: {}, injectAgentMuxGuide: true },
+    antigravity: { label: 'Antigravity', providerId: 'antigravity', command: 'agy', args: [], env: {}, injectAgentMuxGuide: true },
+    cursor: { label: 'Cursor', providerId: 'cursor', command: 'cursor-agent', args: [], env: {}, injectAgentMuxGuide: true }
   },
   workspaces: [],
   appearance: { terminalTheme: 'graphite' }
 }
 
+/**
+ * Dedicated on-disk directory that backs the "no project" scratch workspace. A hidden
+ * subdirectory of home keeps it out of the way (vs. exposing the whole home to the file
+ * explorer) while giving terminals/agents a real, stable cwd.
+ */
+const SCRATCH_BACKING_PATH = join(app.getPath('home'), '.agentmux', 'scratch')
+
+function normalizedLocalPath(path: string): string {
+  return normalizeLocalPath(join(path, '.'))
+}
+
+function scratchWorkspace(): WorkspaceRecord {
+  return {
+    id: SCRATCH_WORKSPACE_ID,
+    name: SCRATCH_WORKSPACE_NAME,
+    hostId: 'local',
+    path: SCRATCH_BACKING_PATH,
+    kind: 'folder'
+  }
+}
+
+/**
+ * Ensure the always-present scratch workspace is in the config. Guarded by both the
+ * reserved id and the backing path so we never violate the unique-id / unique-path
+ * refinements (e.g. if a user manually registered the same folder).
+ */
+function withScratchWorkspace(config: AppConfig): { config: AppConfig; added: boolean } {
+  const scratchLocation = normalizedLocalPath(SCRATCH_BACKING_PATH)
+  const present = config.workspaces.some(
+    (workspace) =>
+      workspace.id === SCRATCH_WORKSPACE_ID ||
+      (workspace.hostId === 'local' && normalizedLocalPath(workspace.path) === scratchLocation)
+  )
+  if (present) return { config, added: false }
+  return {
+    config: { ...config, workspaces: [...config.workspaces, scratchWorkspace()] },
+    added: true
+  }
+}
+
 export class ConfigStore {
+  private saveTail: Promise<void> = Promise.resolve()
+
   constructor(private readonly path = join(app.getPath('userData'), 'agentmux.config.json')) {}
 
   async get(): Promise<AppConfig> {
+    await mkdir(SCRATCH_BACKING_PATH, { recursive: true })
+    let loaded: AppConfig
+    let persist = false
     try {
-      return configSchema.parse(JSON.parse(await readFile(this.path, 'utf8'))) as AppConfig
+      loaded = configSchema.parse(JSON.parse(await readFile(this.path, 'utf8'))) as AppConfig
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-      await this.save(DEFAULT_CONFIG)
-      return structuredClone(DEFAULT_CONFIG)
+      loaded = structuredClone(DEFAULT_CONFIG)
+      persist = true
     }
+    const scratch = withScratchWorkspace(loaded)
+    if (scratch.added) persist = true
+    if (persist) return await this.save(scratch.config)
+    return scratch.config
   }
 
   async save(value: AppConfig): Promise<AppConfig> {
     const config = configSchema.parse(value) as AppConfig
-    await mkdir(dirname(this.path), { recursive: true })
-    const tempPath = `${this.path}.${process.pid}.tmp`
-    await writeFile(tempPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 })
-    await rename(tempPath, this.path)
-    return structuredClone(config)
+    let saved!: AppConfig
+    const operation = this.saveTail.catch(() => {}).then(async () => {
+      let current: AppConfig | null = null
+      try {
+        current = configSchema.parse(JSON.parse(await readFile(this.path, 'utf8'))) as AppConfig
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      }
+      for (const [executorId, executor] of Object.entries(current?.executors ?? {})) {
+        const next = config.executors[executorId]
+        if (next && next.providerId !== executor.providerId) {
+          throw new Error(
+            `Agent Executor ${executorId} is already bound to Provider ${executor.providerId}. ` +
+            'Create a new Executor to choose another Provider.'
+          )
+        }
+      }
+      await mkdir(dirname(this.path), { recursive: true })
+      const tempPath = `${this.path}.${process.pid}.tmp`
+      await writeFile(tempPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 })
+      await rename(tempPath, this.path)
+      saved = structuredClone(config)
+    })
+    this.saveTail = operation.then(() => {}, () => {})
+    await operation
+    return saved
   }
 }

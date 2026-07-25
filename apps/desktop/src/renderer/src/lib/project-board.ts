@@ -99,7 +99,7 @@ export function buildProjectBranchLanes(
           snapshot.hostId,
           ...branchSessions.flatMap((session) => [
             session.label,
-            session.agentId ?? 'terminal',
+            session.providerId ?? 'terminal',
             session.status.state,
             session.status.detail
           ])

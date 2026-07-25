@@ -11,6 +11,7 @@ coverage
 .bagakit
 .codex-output
 .playwright-cli
+.tmp
 docs/reviews/
 docs/plans/
 docs/handoffs/

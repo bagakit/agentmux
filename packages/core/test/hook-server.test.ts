@@ -36,7 +36,7 @@ describe('AgentHookServer', () => {
     expect(events[0]).toMatchObject({
       agentSessionId: 'semantic-1',
       runId: 'daemon-1',
-      agentId: 'claude',
+      providerId: 'claude',
       receiptId: 'receipt-permission-1',
       eventName: 'PermissionRequest'
     })

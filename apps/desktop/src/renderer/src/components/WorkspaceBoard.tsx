@@ -66,7 +66,7 @@ function RunCard({ session, onOpen }: { session: SessionSnapshot; onOpen: () => 
       <span className="board-run-card__status"><StatusDot status={session.status} /></span>
       <span className="board-run-card__identity">
         <strong>{session.label}</strong>
-        <small>{session.agentId ? <><AgentProviderIcon agentId={session.agentId} size={11} /> {agentProviderLabel(session.agentId)}</> : <><SquareTerminal size={11} /> terminal</>}</small>
+        <small>{session.providerId ? <><AgentProviderIcon providerId={session.providerId} size={11} /> {agentProviderLabel(session.providerId)}</> : <><SquareTerminal size={11} /> terminal</>}</small>
       </span>
       <span className="board-run-card__meta">
         <em>{session.status.state}</em>

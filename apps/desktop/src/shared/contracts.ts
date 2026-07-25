@@ -1,14 +1,29 @@
 import type {
+  AgentCatalogEntry,
+  AgentCapabilities,
   AgentDisplayState,
-  AgentId,
+  AgentExecutorConfig,
+  AgentExecutorId,
+  AgentProviderId,
   AgentMuxClientEvent,
   AgentMuxEvidenceSource,
   AgentMuxRunDataEvent,
   AgentMuxRunRef,
   AgentMuxRunReplayGap,
   AgentMuxRunState,
-  AgentMuxViewFocusTarget
+  AgentMuxCompositionRequest,
+  AgentMuxCompositionResult,
+  AgentTimelineItem,
+  AgentTimelineSnapshot
 } from '@agentmux/core'
+import {
+  SCRATCH_WORKSPACE_ID,
+  SCRATCH_WORKSPACE_NAME,
+  type ScratchTopicSnapshot
+} from './scratch-topics'
+
+export { SCRATCH_WORKSPACE_ID, SCRATCH_WORKSPACE_NAME }
+export type { ScratchTopicSnapshot } from './scratch-topics'
 
 export type LocalHostConfig = {
   id: 'local'
@@ -28,11 +43,7 @@ export type SshHostConfig = {
 
 export type HostConfig = LocalHostConfig | SshHostConfig
 
-export type AgentConfig = {
-  command: string
-  args: string[]
-  env: Record<string, string>
-}
+export type { AgentExecutorConfig, AgentExecutorId, AgentTimelineItem, AgentTimelineSnapshot }
 
 export type WorkspaceRecord = {
   id: string
@@ -44,6 +55,16 @@ export type WorkspaceRecord = {
   branch?: string
 }
 
+/**
+ * Reserved id for the always-present "no project" scratch workspace. It is a real
+ * `kind:'folder'` record backed by a dedicated on-disk directory (so it satisfies the
+ * strict config schema and every file/launch path works unchanged), rendered distinctly
+ * in the sidebar. See `ConfigStore.get` (main) for provisioning.
+ */
+export function isScratchWorkspaceId(id: string | null | undefined): boolean {
+  return id === SCRATCH_WORKSPACE_ID
+}
+
 export type TerminalThemeId = 'graphite' | 'catppuccin-mocha'
 
 export type AppearanceConfig = {
@@ -51,9 +72,9 @@ export type AppearanceConfig = {
 }
 
 export type AppConfig = {
-  version: 4
+  version: 6
   hosts: HostConfig[]
-  agents: Record<string, AgentConfig>
+  executors: Record<AgentExecutorId, AgentExecutorConfig>
   workspaces: WorkspaceRecord[]
   appearance: AppearanceConfig
 }
@@ -154,9 +175,10 @@ export type WorkspaceSelectionResult = {
 }
 
 export type AgentLaunchInput = {
-  agentId: AgentId
+  executorId: AgentExecutorId
   hostId: string
   workspacePath: string
+  scratchTopicId?: string
   agentSessionId?: string
   createOperationId?: string
   prompt?: string
@@ -209,22 +231,15 @@ type SessionSnapshotBase = {
 }
 
 export type SessionSnapshot = SessionSnapshotBase & (
-  | { kind: 'agent'; agentId: AgentId; control: AgentSessionControl }
-  | { kind: 'terminal'; agentId: null; control: TerminalSessionControl }
+  | {
+      kind: 'agent'
+      providerId: AgentProviderId
+      executorId: AgentExecutorId
+      capabilities: AgentCapabilities
+      control: AgentSessionControl
+    }
+  | { kind: 'terminal'; providerId: null; control: TerminalSessionControl }
 )
-
-export type AgentActivity = {
-  id: string
-  sessionId: string
-  kind: 'prompt' | 'assistant' | 'tool' | 'permission' | 'lifecycle'
-  source: AgentMuxEvidenceSource
-  createdAt: number
-  title: string
-  content?: string
-  toolName?: string
-  toolInput?: string
-  eventName?: string
-}
 
 export type RuntimeEvent = {
   type: 'core'
@@ -234,7 +249,12 @@ export type RuntimeEvent = {
 
 export type RuntimeSnapshot = {
   sessions: SessionSnapshot[]
-  activities: Record<string, AgentActivity[]>
+  timelines: Record<string, AgentTimelineSnapshot>
+}
+
+export type AgentLaunchResult = {
+  session: Extract<SessionSnapshot, { kind: 'agent' }>
+  timeline: AgentTimelineSnapshot
 }
 
 export type SessionAttachResult = {
@@ -249,29 +269,26 @@ export type HostCheckResult = {
   detail: string
 }
 
-export type AgentDetection = {
-  agentId: AgentId
+export type ExecutorDetection = {
+  executorId: AgentExecutorId
+  providerId: AgentProviderId
   hostId: string
   installed: boolean
 }
 
-export type DesktopViewFocusTarget = AgentMuxViewFocusTarget
-
-export type DesktopViewFocusResult = {
-  viewId: string
-  kind: 'terminal' | 'agent'
-  workspaceId: string
-  paneId: string
-}
-
-export type DesktopViewFocusRequest = {
-  requestId: string
-  target: DesktopViewFocusTarget
-}
-
-export type DesktopViewFocusResponse =
-  | { requestId: string; ok: true; result: DesktopViewFocusResult }
+export type DesktopCompositionResponse =
+  | { requestId: string; ok: true; result: AgentMuxCompositionResult }
   | { requestId: string; ok: false; code: string; message: string }
+
+export type DesktopCompositionCancellation = {
+  requestId: string
+  code: string
+  message: string
+}
+
+export const COMPOSITION_REQUEST_CHANNEL = 'agentmux:composition-request'
+export const COMPOSITION_CANCEL_CHANNEL = 'agentmux:composition-cancel'
+export const COMPOSITION_RESPONSE_CHANNEL = 'composition:response'
 
 export type BrowserSnapshot = {
   id: string
@@ -292,6 +309,12 @@ export type BrowserBounds = {
   y: number
   width: number
   height: number
+}
+
+export const WINDOW_RESIZE_EVENT_CHANNEL = 'agentmux:window-resize'
+
+export type WindowResizeEvent = {
+  active: boolean
 }
 
 export type AgentMuxDesktopApi = {
@@ -321,30 +344,50 @@ export type AgentMuxDesktopApi = {
     delete(workspaceId: string, path: string): Promise<void>
     reveal(workspaceId: string, path: string): Promise<void>
   }
+  scratch: {
+    listTopics(workspaceId: string): Promise<ScratchTopicSnapshot[]>
+    readTopic(workspaceId: string, topicId: string): Promise<ScratchTopicSnapshot | null>
+    ensureTopic(workspaceId: string, topicId: string): Promise<ScratchTopicSnapshot>
+    renameTitle(workspaceId: string, topicId: string, title: string): Promise<ScratchTopicSnapshot>
+  }
   ui: {
     readClipboardText(): Promise<string>
     writeClipboardText(text: string): Promise<void>
     openExternal(url: string): Promise<void>
+    getZoomFactor(): number
+    onWindowResize(listener: (event: WindowResizeEvent) => void): () => void
   }
-  agents: {
-    detect(agentId: AgentId, hostId: string): Promise<AgentDetection>
+  providers: {
+    list(): Promise<AgentCatalogEntry[]>
   }
-  views: {
-    focus(target: DesktopViewFocusTarget): Promise<DesktopViewFocusResult>
-    onFocusRequest(listener: (target: DesktopViewFocusTarget) => DesktopViewFocusResult | Promise<DesktopViewFocusResult>): () => void
+  executors: {
+    detect(executorId: AgentExecutorId, hostId: string): Promise<ExecutorDetection>
+  }
+  composition: {
+    onRequest(listener: (
+      request: AgentMuxCompositionRequest,
+      signal: AbortSignal
+    ) => AgentMuxCompositionResult | Promise<AgentMuxCompositionResult>): () => void
   }
   sessions: {
     snapshot(): Promise<RuntimeSnapshot>
-    launchAgent(input: AgentLaunchInput): Promise<SessionSnapshot>
+    launchAgent(input: AgentLaunchInput): Promise<AgentLaunchResult>
     launchTerminal(input: TerminalLaunchInput): Promise<SessionSnapshot>
+    timeline(session: AgentSessionControl): Promise<AgentTimelineSnapshot>
     attach(session: SessionControl, afterByte?: number): Promise<SessionAttachResult>
     detach(attachmentId: string): Promise<void>
     write(session: SessionControl, data: string): Promise<void>
     submitPrompt(session: AgentSessionControl, prompt: string): Promise<void>
     acknowledge(session: SessionControl, throughByte: number): Promise<void>
     interrupt(session: SessionControl): Promise<void>
-    resize(session: SessionControl, cols: number, rows: number): Promise<void>
+    resize(attachmentId: string, cols: number, rows: number): Promise<void>
     refresh(session: SessionControl): Promise<SessionSnapshot>
+    // Recover a session whose PTY was lost (daemon_restart / tmux_* interruption, or exit).
+    // The physical PTY cannot be revived, so this mints a *fresh* Run in the same cwd:
+    // terminals relaunch the host shell; agents resume via provider-native resume. If the
+    // backend daemon itself died, the main process reconnects (respawning ctxmuxd) first.
+    // Returns the new SessionSnapshot; the renderer rebinds the existing tab to it.
+    recover(session: SessionControl, workspacePath?: string): Promise<SessionSnapshot>
     stop(session: SessionControl): Promise<void>
     onEvent(listener: (event: RuntimeEvent) => void): () => void
   }
@@ -357,5 +400,13 @@ export type AgentMuxDesktopApi = {
     setBounds(id: string, bounds: BrowserBounds | null): Promise<void>
     close(id: string): Promise<void>
     onEvent(listener: (event: BrowserEvent) => void): () => void
+  }
+}
+
+export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'composition'> & {
+  composition: {
+    onRequest(listener: (request: AgentMuxCompositionRequest) => void): () => void
+    onCancellation(listener: (cancellation: DesktopCompositionCancellation) => void): () => void
+    respond(response: DesktopCompositionResponse): void
   }
 }

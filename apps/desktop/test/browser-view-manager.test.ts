@@ -105,9 +105,10 @@ import {
 
 function fakeWindow() {
   const children: InstanceType<typeof fakeElectron.FakeWebContentsView>[] = []
+  const sent: unknown[] = []
   return {
     children,
-    sent: [] as unknown[],
+    sent,
     window: {
       contentView: {
         addChildView(view: InstanceType<typeof fakeElectron.FakeWebContentsView>) { children.push(view) },
@@ -119,8 +120,7 @@ function fakeWindow() {
       isDestroyed: () => false,
       webContents: {
         isDestroyed: () => false,
-        send(_channel: string, value: unknown) { this.sent?.push?.(value) },
-        sent: [] as unknown[]
+        send(_channel: string, value: unknown) { sent.push(value) }
       }
     }
   }
@@ -155,6 +155,8 @@ describe('BrowserViewManager', () => {
     manager.setBounds('browser-1', { x: 10.4, y: 20.6, width: 800.2, height: 500.8 })
     expect(view.visible).toBe(true)
     expect(view.bounds).toEqual({ x: 10, y: 21, width: 800, height: 501 })
+    manager.setBounds('browser-1', null)
+    expect(view.visible).toBe(false)
 
     expect(await manager.navigate('browser-1', 'example.com')).toMatchObject({
       url: 'https://example.com/',
@@ -170,7 +172,7 @@ describe('BrowserViewManager', () => {
     expect(view.webContents.isDestroyed()).toBe(true)
     expect(() => manager.setBounds('browser-1', null)).not.toThrow()
     expect(() => manager.setBounds('browser-1', { x: 0, y: 0, width: 100, height: 100 }))
-      .toThrow('Unknown browser: browser-1')
+      .not.toThrow()
   })
 
   it('blocks unsupported page navigation and redirects before commit', async () => {
@@ -204,5 +206,58 @@ describe('BrowserViewManager', () => {
     }
     navigate(allowedNavigation)
     expect(allowedNavigation.preventDefault).not.toHaveBeenCalled()
+  })
+
+  it('projects loading, title, load failure, and renderer loss as Browser events', async () => {
+    const fixture = fakeWindow()
+    const manager = new BrowserViewManager(fixture.window as never)
+    await manager.create('browser-events', 'https://example.com')
+    const view = fixture.children[0]!
+
+    expect(fixture.sent).toContainEqual({
+      type: 'updated',
+      browser: expect.objectContaining({ id: 'browser-events', loading: true })
+    })
+    expect(fixture.sent).toContainEqual({
+      type: 'updated',
+      browser: expect.objectContaining({
+        id: 'browser-events',
+        title: 'example.com',
+        loading: false
+      })
+    })
+
+    view.webContents.title = 'AgentMux Docs'
+    view.webContents.emit('page-title-updated')
+    expect(fixture.sent.at(-1)).toEqual({
+      type: 'updated',
+      browser: expect.objectContaining({ title: 'AgentMux Docs' })
+    })
+
+    view.webContents.emit('did-fail-load', -105, 'NAME_NOT_RESOLVED', 'https://missing.invalid/', true)
+    expect(fixture.sent.at(-1)).toEqual({
+      type: 'updated',
+      browser: expect.objectContaining({ error: 'NAME_NOT_RESOLVED (-105)' })
+    })
+
+    view.webContents.emit('render-process-gone', { reason: 'crashed' })
+    expect(fixture.sent.at(-1)).toEqual({
+      type: 'updated',
+      browser: expect.objectContaining({ error: 'Browser renderer stopped: crashed' })
+    })
+  })
+
+  it('releases an externally destroyed WebContentsView before publishing closed', async () => {
+    const fixture = fakeWindow()
+    const manager = new BrowserViewManager(fixture.window as never)
+    await manager.create('browser-destroyed', 'https://example.com')
+    const view = fixture.children[0]!
+    fixture.sent.length = 0
+
+    view.webContents.close()
+
+    expect(fixture.children).toHaveLength(0)
+    expect(fixture.sent).toEqual([{ type: 'closed', id: 'browser-destroyed' }])
+    expect(() => manager.setBounds('browser-destroyed', null)).not.toThrow()
   })
 })

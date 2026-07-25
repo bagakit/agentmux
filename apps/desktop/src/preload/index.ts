@@ -1,8 +1,14 @@
-import { contextBridge, ipcRenderer } from 'electron'
-import type { AgentId } from '@agentmux/core'
+import { contextBridge, ipcRenderer, webFrame } from 'electron'
+import type { AgentExecutorId, AgentMuxCompositionRequest } from '@agentmux/core'
+import {
+  COMPOSITION_CANCEL_CHANNEL,
+  COMPOSITION_REQUEST_CHANNEL,
+  COMPOSITION_RESPONSE_CHANNEL,
+  WINDOW_RESIZE_EVENT_CHANNEL
+} from '../shared/contracts.js'
 import type {
   AgentLaunchInput,
-  AgentMuxDesktopApi,
+  AgentMuxPreloadApi,
   AgentSessionControl,
   AppConfig,
   BrowserBounds,
@@ -10,19 +16,19 @@ import type {
   CreateWorkspacePathInput,
   CreateWorktreeForBranchInput,
   CreateWorkspaceInput,
-  DesktopViewFocusRequest,
-  DesktopViewFocusResponse,
-  DesktopViewFocusTarget,
+  DesktopCompositionCancellation,
+  DesktopCompositionResponse,
   HostConfig,
   MoveWorkspacePathInput,
   RuntimeEvent,
   SessionControl,
   TerminalLaunchInput,
   WorkspaceFileInvalidated,
-  WorkspaceFileWriteInput
+  WorkspaceFileWriteInput,
+  WindowResizeEvent
 } from '../shared/contracts.js'
 
-const api: AgentMuxDesktopApi = {
+const api: AgentMuxPreloadApi = {
   config: {
     get: () => ipcRenderer.invoke('config:get'),
     save: (config: AppConfig) => ipcRenderer.invoke('config:save', config)
@@ -57,41 +63,57 @@ const api: AgentMuxDesktopApi = {
     delete: (workspaceId: string, path: string) => ipcRenderer.invoke('files:delete', workspaceId, path),
     reveal: (workspaceId: string, path: string) => ipcRenderer.invoke('files:reveal', workspaceId, path)
   },
+  scratch: {
+    listTopics: (workspaceId: string) => ipcRenderer.invoke('scratch:listTopics', workspaceId),
+    readTopic: (workspaceId: string, topicId: string) =>
+      ipcRenderer.invoke('scratch:readTopic', workspaceId, topicId),
+    ensureTopic: (workspaceId: string, topicId: string) =>
+      ipcRenderer.invoke('scratch:ensureTopic', workspaceId, topicId),
+    renameTitle: (workspaceId: string, topicId: string, title: string) =>
+      ipcRenderer.invoke('scratch:renameTitle', workspaceId, topicId, title)
+  },
   ui: {
     readClipboardText: () => ipcRenderer.invoke('ui:readClipboardText'),
     writeClipboardText: (text: string) => ipcRenderer.invoke('ui:writeClipboardText', text),
-    openExternal: (url: string) => ipcRenderer.invoke('ui:openExternal', url)
-  },
-  agents: {
-    detect: (agentId: AgentId, hostId: string) => ipcRenderer.invoke('agents:detect', agentId, hostId)
-  },
-  views: {
-    focus: (target: DesktopViewFocusTarget) => ipcRenderer.invoke('views:focus', target),
-    onFocusRequest(listener) {
-      const wrapped = (_event: Electron.IpcRendererEvent, request: DesktopViewFocusRequest): void => {
-        void Promise.resolve(listener(request.target)).then((result) => {
-          const response: DesktopViewFocusResponse = { requestId: request.requestId, ok: true, result }
-          ipcRenderer.send('views:focus:response', response)
-        }, (error) => {
-          const response: DesktopViewFocusResponse = {
-            requestId: request.requestId,
-            ok: false,
-            code: typeof error === 'object' && error !== null && 'code' in error
-              ? String(error.code)
-              : 'VIEW_FOCUS_FAILED',
-            message: error instanceof Error ? error.message : String(error)
-          }
-          ipcRenderer.send('views:focus:response', response)
-        })
-      }
-      ipcRenderer.on('agentmux:view-focus-request', wrapped)
-      return () => ipcRenderer.off('agentmux:view-focus-request', wrapped)
+    openExternal: (url: string) => ipcRenderer.invoke('ui:openExternal', url),
+    getZoomFactor: () => webFrame.getZoomFactor(),
+    onWindowResize(listener: (event: WindowResizeEvent) => void) {
+      const wrapped = (_event: Electron.IpcRendererEvent, value: WindowResizeEvent): void => listener(value)
+      ipcRenderer.on(WINDOW_RESIZE_EVENT_CHANNEL, wrapped)
+      return () => ipcRenderer.off(WINDOW_RESIZE_EVENT_CHANNEL, wrapped)
     }
+  },
+  providers: {
+    list: () => ipcRenderer.invoke('providers:list')
+  },
+  executors: {
+    detect: (executorId: AgentExecutorId, hostId: string) => ipcRenderer.invoke('executors:detect', executorId, hostId)
+  },
+  composition: {
+    onRequest(listener) {
+      const wrapped = (_event: Electron.IpcRendererEvent, request: AgentMuxCompositionRequest): void => {
+        listener(request)
+      }
+      ipcRenderer.on(COMPOSITION_REQUEST_CHANNEL, wrapped)
+      return () => ipcRenderer.off(COMPOSITION_REQUEST_CHANNEL, wrapped)
+    },
+    onCancellation(listener) {
+      const cancel = (
+        _event: Electron.IpcRendererEvent,
+        cancellation: DesktopCompositionCancellation
+      ): void => {
+        listener(cancellation)
+      }
+      ipcRenderer.on(COMPOSITION_CANCEL_CHANNEL, cancel)
+      return () => ipcRenderer.off(COMPOSITION_CANCEL_CHANNEL, cancel)
+    },
+    respond: (response) => ipcRenderer.send(COMPOSITION_RESPONSE_CHANNEL, response)
   },
   sessions: {
     snapshot: () => ipcRenderer.invoke('sessions:snapshot'),
     launchAgent: (input: AgentLaunchInput) => ipcRenderer.invoke('sessions:launchAgent', input),
     launchTerminal: (input: TerminalLaunchInput) => ipcRenderer.invoke('sessions:launchTerminal', input),
+    timeline: (session: AgentSessionControl) => ipcRenderer.invoke('sessions:timeline', session),
     attach: (session: SessionControl, afterSequence = 0) =>
       ipcRenderer.invoke('sessions:attach', session, afterSequence),
     detach: (attachmentId: string) => ipcRenderer.invoke('sessions:detach', attachmentId),
@@ -101,9 +123,11 @@ const api: AgentMuxDesktopApi = {
     acknowledge: (session: SessionControl, sequence: number) =>
       ipcRenderer.invoke('sessions:acknowledge', session, sequence),
     interrupt: (session: SessionControl) => ipcRenderer.invoke('sessions:interrupt', session),
-    resize: (session: SessionControl, cols: number, rows: number) =>
-      ipcRenderer.invoke('sessions:resize', session, cols, rows),
+    resize: (attachmentId: string, cols: number, rows: number) =>
+      ipcRenderer.invoke('sessions:resize', attachmentId, cols, rows),
     refresh: (session: SessionControl) => ipcRenderer.invoke('sessions:refresh', session),
+    recover: (session: SessionControl, workspacePath?: string) =>
+      ipcRenderer.invoke('sessions:recover', session, workspacePath),
     stop: (session: SessionControl) => ipcRenderer.invoke('sessions:stop', session),
     onEvent(listener: (event: RuntimeEvent) => void) {
       const wrapped = (_event: Electron.IpcRendererEvent, value: RuntimeEvent): void => listener(value)

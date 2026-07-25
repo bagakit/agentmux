@@ -1,8 +1,8 @@
 {
   "schema": "ctxmux.local-artifacts.v1",
   "source": {
-    "commit": "2e32a9d647d627952ea5c455fb2efef6c636643a",
-    "tree": "d60870c2481c9b153da6bf22f829d24afb8a81a8",
+    "commit": "f89dabe70eba38d46992c320e40c9ebe2f09b5e5",
+    "tree": "37632c41c4aae42ba40f33ebe9c54fab13d17c44",
     "worktree_clean": true
   },
   "product": {
@@ -51,8 +51,8 @@
       "version": "0.1.0",
       "protocol": 9,
       "path": "bin/ctxmuxd",
-      "sha256": "3eb391b10413d93cd933153fb24dfa5a592157bc5a575df39086ed2e513f275b",
-      "bytes": 4892816,
+      "sha256": "b8c6f01dee7511ab695087cc4e7c57a26f2aebec2389051bd32beb7c89ea5964",
+      "bytes": 4893280,
       "mode": "0755"
     }
   ],

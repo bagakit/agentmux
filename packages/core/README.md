@@ -2,9 +2,25 @@
 
 无 Electron、React 依赖的 AgentMux Runtime Core。
 
-当前 Local Run 只由固定的 CtxMux `2e32a9d647d627952ea5c455fb2efef6c636643a` 持有。包内携带 exact-commit manifest、SDK tarball 和 darwin-arm64 binaries；构建把官方 SDK 私有 bundle 进唯一 `CtxmuxRunAdapter`。公共 API 不导出 CtxMux SDK/wire 类型，也不需要相邻仓库、`file:` dependency、全局 `ctxmux` 或运行时下载。
+当前 Local Run 只由固定的 CtxMux `f89dabe70eba38d46992c320e40c9ebe2f09b5e5` 持有。包内携带 exact-commit manifest、SDK tarball 和 darwin-arm64 binaries；构建把官方 SDK 私有 bundle 进唯一 `CtxmuxRunAdapter`。公共 API 不导出 CtxMux SDK/wire 类型，也不需要相邻仓库、`file:` dependency、全局 `ctxmux` 或运行时下载。
 
 Local Client 不接受外部 socket/state 注入。Endpoint 路径由 exact commit 与 manifest digest 派生，只启动经过 hash、mode 和公开 `--version` 合同验证的随包 `ctxmuxd`。已存在的 peer 还必须匹配当时启动时写入的 owner receipt 与 daemon instance；同协议的其他 daemon 失败关闭，不会被标记成该 exact build。
+
+## Runtime 边界
+
+`@agentmux/core` 是 ctxmux 的 Client，不是 ctxmux 的宿主。ctxmux 自己的 daemon、CLI、
+协议和 SDK 构成可独立使用的通用 Run Runtime；Core 随包固定 artifact 只是当前产品的
+供应链和 endpoint policy。
+
+Core 只消费 ctxmux 能权威证明的 Run 事实：identity、capability、lifecycle、ordered
+bytes、replay、gap、input、resize、interrupt、stop、revision 和时间。Core 自己持有
+Provider、AgentSession、provider-native identity、Launch/Resume Plan、Hook、Permission、
+Prompt readiness、Agent status 和 Evidence 解释。新增 Provider 不得要求 ctxmux 增加
+Agent-specific Run 类型或解析 Provider 输出。
+
+Provider-native Resume 由 Core 从自己的 Session/provenance 物化新的通用 `RunSpec`，再
+请求 ctxmux 创建并记录相应 lineage。调用方请求 Level B 而 provenance 不足时必须失败；
+Core 和 ctxmux 都不能把它暗中降为 Level A restart。
 
 ```ts
 import { connectLocalAgentMux } from '@agentmux/core'
@@ -32,8 +48,10 @@ Hook 的 stable binding identity 与随机 bearer 只存在于权限为 `0600` �
 
 ```ts
 const session = await client.createAgent({
-  agentId: 'codex',
+  providerId: 'codex',
+  executorId: 'codex-full-auto',
   workspacePath: process.cwd(),
+  injectAgentMuxGuide: true,
   prompt: 'Inspect the failing test'
 })
 const status = await client.statusAgent(session.agentSessionId)
@@ -48,4 +66,6 @@ const byNative = client.resolveAgentSession({
 
 Packed consumer 已覆盖 Core API 与 `agentmux list/status/send/interrupt/attach/resume/stop` 的真实 Codex 生命周期。Provider-native Resume 保留 `agentSessionId`，创建新的 CtxMux RunId；旧 Run 只保留有界 stale tombstone，不能再被操作或投影成 Raw Terminal。
 
-浏览器侧只需要 View 投影和 focus resolver 时，从 `@agentmux/core/runtime` 导入。该子路径不加载 Agent Client、Hook Server、File Store 或 CtxMux Adapter 等 Node-only Runtime 模块。
+浏览器侧只需要 View 投影和 focus resolver 时，从 `@agentmux/core/runtime` 导入。只需要合并 Session Timeline snapshot 与 committed revision 时，从 `@agentmux/core/timeline` 导入。两个子路径都不会加载 Agent Client、Hook Server、File Store 或 CtxMux Adapter 等 Node-only Runtime 模块。
+
+`client.sessionTimeline(agentSessionId)` 返回 `{ agentSessionId, revision, items }`。Timeline 事件也带 revision；Core 一定先保存，再发布事件。Store 是 revision 的唯一 owner，只有内容真的变化才加一，完全相同的重试不会改文件，也不会再次发事件。消费者先读取 snapshot，再按 revision 接事件；遇到断号就重新读取 snapshot，不要自己猜缺失内容。流式更新提交当前完整 content，不提交字符串 delta。

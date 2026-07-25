@@ -23,13 +23,16 @@ export type AgentMuxPermissionHandler = (
 ) => Promise<AgentMuxPermissionDecision | undefined>
 
 export type AgentMuxAcpBridgeCallbacks = {
-  onEvent(agentSessionId: string, event: AgentMuxAcpEvent, evidence: AgentMuxEvidence): void
+  onEvent(agentSessionId: string, event: AgentMuxAcpEvent, evidence: AgentMuxEvidence): void | Promise<void>
   onNativeHandle(agentSessionId: string, handle: AgentNativeSessionHandle): void | Promise<void>
 }
 
 type BoundAcpSession = {
   binding: AgentMuxAcpBinding
   unsubscribe: () => void
+  nativeSessionId: string
+  pendingEvents: AgentMuxAcpEvent[] | null
+  eventTail: Promise<void>
 }
 
 function rejectDecision(request: AgentMuxPermissionRequest): AgentMuxPermissionDecision {
@@ -52,6 +55,12 @@ function assertBoundedEvent(event: AgentMuxAcpEvent): void {
   if (Buffer.byteLength(JSON.stringify(event)) > MAX_ACP_EVENT_BYTES) {
     throw new AgentMuxError('ACP event exceeds the maximum size.', 'ACP_EVENT_TOO_LARGE')
   }
+  if (event.type === 'activity' && Object.hasOwn(event, 'contentDelta')) {
+    throw new AgentMuxError(
+      'ACP activity updates require complete content.',
+      'INVALID_AGENT_TIMELINE'
+    )
+  }
 }
 
 export class AgentMuxAcpBridge {
@@ -71,19 +80,32 @@ export class AgentMuxAcpBridge {
       adapterId: binding.adapterId,
       sessionId: binding.sessionId
     }
-    const unsubscribe = binding.onEvent((event) => {
-      void this.accept(agentSessionId, binding, event).catch(() => {
-        // If a rejecting Permission response cannot be delivered, close the ACP
-        // binding instead of leaving the Agent waiting on an ambiguous approval.
-        void this.unbind(agentSessionId).catch(() => {})
-      })
-    })
-    this.bindings.set(agentSessionId, { binding, unsubscribe })
+    const bound: BoundAcpSession = {
+      binding,
+      unsubscribe: () => {},
+      nativeSessionId: binding.sessionId,
+      pendingEvents: [],
+      eventTail: Promise.resolve()
+    }
+    this.bindings.set(agentSessionId, bound)
     try {
+      const unsubscribe = binding.onEvent((event) => {
+        if (bound.pendingEvents) {
+          assertBoundedEvent(event)
+          bound.pendingEvents.push(event)
+          return
+        }
+        this.enqueueEvent(agentSessionId, bound, event)
+      })
+      bound.unsubscribe = unsubscribe
       await this.callbacks.onNativeHandle(agentSessionId, nativeHandle)
+      const pendingEvents = bound.pendingEvents ?? []
+      while (pendingEvents.length > 0) await this.accept(agentSessionId, bound, pendingEvents.shift()!)
+      bound.pendingEvents = null
     } catch (error) {
       this.bindings.delete(agentSessionId)
-      unsubscribe()
+      bound.pendingEvents = null
+      bound.unsubscribe()
       await binding.close().catch(() => {})
       throw error
     }
@@ -104,20 +126,39 @@ export class AgentMuxAcpBridge {
     if (errors.length > 0) throw new AggregateError(errors, 'Failed to close ACP bindings.')
   }
 
+  private enqueueEvent(
+    agentSessionId: string,
+    bound: BoundAcpSession,
+    event: AgentMuxAcpEvent
+  ): void {
+    const accepted = bound.eventTail.then(async () => await this.accept(agentSessionId, bound, event))
+    bound.eventTail = accepted
+    void accepted.catch(() => {
+      // If a rejecting Permission response cannot be delivered, close the ACP
+      // binding instead of leaving the Agent waiting on an ambiguous approval.
+      void this.unbind(agentSessionId).catch(() => {})
+    })
+  }
+
   private async accept(
     agentSessionId: string,
-    binding: AgentMuxAcpBinding,
+    bound: BoundAcpSession,
     event: AgentMuxAcpEvent
   ): Promise<void> {
+    if (this.bindings.get(agentSessionId) !== bound) return
     assertBoundedEvent(event)
+    const previousNativeSessionId = bound.nativeSessionId
+    if (event.type === 'native-session') bound.nativeSessionId = event.sessionId
+    const binding = bound.binding
     const evidence: AgentMuxEvidence = {
       source: 'acp',
       observedAt: Date.now(),
-      acpSessionId: binding.sessionId
+      acpAdapterId: binding.adapterId,
+      acpSessionId: bound.nativeSessionId
     }
     if (event.type !== 'permission') {
-      this.callbacks.onEvent(agentSessionId, event, evidence)
-      if (event.type === 'native-session' && event.sessionId !== binding.sessionId) {
+      await this.callbacks.onEvent(agentSessionId, event, evidence)
+      if (event.type === 'native-session' && event.sessionId !== previousNativeSessionId) {
         await this.callbacks.onNativeHandle(agentSessionId, {
           kind: 'acp',
           adapterId: binding.adapterId,
@@ -136,7 +177,7 @@ export class AgentMuxAcpBridge {
       ...(event.toolName !== undefined ? { toolName: event.toolName } : {}),
       ...(event.toolInput !== undefined ? { toolInput: event.toolInput } : {})
     }
-    this.callbacks.onEvent(agentSessionId, event, evidence)
+    await this.callbacks.onEvent(agentSessionId, event, evidence)
     let decision: AgentMuxPermissionDecision | null = null
     try {
       decision = explicitDecision(request, await this.permissionDecision(request))

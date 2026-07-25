@@ -126,7 +126,7 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
     const visibleAgents = runningAgents.slice(0, 4)
     const hiddenAgentTypes = runningAgents.length - visibleAgents.length
     const runningAgentLabel = runningAgents
-      .map((agent) => `${agentProviderLabel(agent.agentId)}${agent.count > 1 ? ` ×${agent.count}` : ''}`)
+      .map((agent) => `${agentProviderLabel(agent.providerId)}${agent.count > 1 ? ` ×${agent.count}` : ''}`)
       .join(', ')
     return (
       <BranchContextMenu
@@ -159,8 +159,8 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
                 title={`Running agents: ${runningAgentLabel}`}
               >
                 {visibleAgents.map((agent) => (
-                  <span className="branch-row__agent" key={agent.agentId}>
-                    <AgentProviderIcon agentId={agent.agentId} size={11} />
+                  <span className="branch-row__agent" key={agent.providerId}>
+                    <AgentProviderIcon providerId={agent.providerId} size={11} />
                     {agent.count > 1 ? <small>{agent.count}</small> : null}
                   </span>
                 ))}

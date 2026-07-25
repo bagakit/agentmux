@@ -2,13 +2,16 @@ import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { app, BrowserWindow, shell } from 'electron'
 import { AgentMuxFileAgentSessionStore } from '@agentmux/core'
+import { isScratchWorkspaceId } from '../shared/contracts.js'
 import { ConfigStore } from './config-store.js'
 import { registerIpc } from './ipc.js'
 import { hydrateProcessPathFromLoginShell } from './login-shell-path.js'
 import { RuntimeController } from './runtime-controller.js'
+import { ScratchTopics } from './scratch-topics.js'
 import { runDesktopResourceProbe } from './resource-probe.js'
 import { runDesktopFileEditingProbe, WorkspaceFileEditingProbeControl } from './file-editing-probe.js'
 import { WorkspaceFiles } from './workspace-files.js'
+import { registerWindowResizeEvents } from './window-resize-events.js'
 
 const appIconPath = join(import.meta.dirname, '../../resources/icon.png')
 const packagedUserDataPath = join(app.getPath('appData'), 'dev.agentmux.desktop')
@@ -22,7 +25,8 @@ if (process.env.AGENTMUX_DESKTOP_USER_DATA) {
   app.setPath('userData', packagedUserDataPath)
 }
 app.setName('AgentMux')
-const runtime = new RuntimeController(new AgentMuxFileAgentSessionStore())
+const scratchTopics = new ScratchTopics()
+const runtime = new RuntimeController(new AgentMuxFileAgentSessionStore(), scratchTopics)
 const configStore = new ConfigStore()
 
 function disposeOwners(): Promise<void> {
@@ -88,8 +92,9 @@ async function createWindow(appReadyAtMs: number = Date.now()): Promise<void> {
         }
       : {}
   )
+  registerWindowResizeEvents(window)
   await disposeIpc?.()
-  disposeIpc = await registerIpc({ window, configStore, runtime, workspaceFiles })
+  disposeIpc = await registerIpc({ window, configStore, runtime, scratchTopics, workspaceFiles })
   if (process.env.ELECTRON_RENDERER_URL) await window.loadURL(process.env.ELECTRON_RENDERER_URL)
   else await window.loadFile(join(import.meta.dirname, '../renderer/index.html'))
   const rendererLoadedAtMs = Date.now()
@@ -107,12 +112,15 @@ async function createWindow(appReadyAtMs: number = Date.now()): Promise<void> {
   }
   const fileEditingConfig = await configStore.get()
   if (process.env.AGENTMUX_DESKTOP_FILE_EDITING_REPORT) {
-    if (fileEditingConfig.workspaces.length !== 1) {
-      throw new Error('Desktop file editing probe requires exactly one workspace.')
+    const mountedWorkspaces = fileEditingConfig.workspaces.filter((workspace) => (
+      !isScratchWorkspaceId(workspace.id)
+    ))
+    if (mountedWorkspaces.length !== 1) {
+      throw new Error('Desktop file editing probe requires exactly one non-Scratch workspace.')
     }
     if (await runDesktopFileEditingProbe({
       window,
-      workspacePath: fileEditingConfig.workspaces[0]!.path,
+      workspacePath: mountedWorkspaces[0]!.path,
       control: fileEditingProbeControl
     })) {
       app.quit()

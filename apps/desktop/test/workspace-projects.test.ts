@@ -1,14 +1,38 @@
 import { win32 as _hygiene_win32 } from "node:path"
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { describe, expect, it } from 'vitest'
-import type { WorkspaceRecord } from '../src/shared/contracts'
+import { SCRATCH_WORKSPACE_ID, type WorkspaceRecord } from '../src/shared/contracts'
 import {
   defaultWorktreePath,
+  projectRailNavigation,
   projectWorkspaces,
   workspaceProjectId
 } from '../src/renderer/src/lib/workspace-projects'
 
 describe('workspace projects', () => {
+  it('pins Scratch outside the repository project projection regardless of config order', () => {
+    const scratch: WorkspaceRecord = {
+      id: SCRATCH_WORKSPACE_ID,
+      name: 'Scratch',
+      hostId: 'local',
+      path: _hygiene_fixturePath("data/scratch"),
+      kind: 'folder'
+    }
+    const project: WorkspaceRecord = {
+      id: 'project',
+      name: 'AgentMux',
+      hostId: 'local',
+      path: _hygiene_fixturePath("repo/agentmux"),
+      kind: 'folder'
+    }
+
+    const navigation = projectRailNavigation([project, scratch])
+
+    expect(navigation.scratch).toBe(scratch)
+    expect(navigation.projects).toHaveLength(1)
+    expect(navigation.projects[0]?.workspaces).toEqual([project])
+  })
+
   it('groups a project folder and its worktrees by host and repository path', () => {
     const workspaces: WorkspaceRecord[] = [
       { id: 'root', name: 'AgentMux', hostId: 'local', path: _hygiene_fixturePath("repo/agentmux"), kind: 'folder' },

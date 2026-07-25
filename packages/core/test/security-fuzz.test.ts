@@ -49,19 +49,19 @@ describe('deterministic AgentMux boundary fuzz', () => {
 
     for (let index = 0; index < 1_000; index += 1) {
       const payload = randomJson(next)
-      const agentId = ids[integer(next, ids.length)]!
-      const normalized = providers.get(agentId).normalizeHook({
+      const providerId = ids[integer(next, ids.length)]!
+      const normalized = providers.get(providerId).normalizeHook({
         receiptId: `receipt-${index}`,
         agentSessionId: `semantic-${index}`,
         runId: `run-${index}`,
-        agentId,
+        providerId,
         eventName: randomString(next),
         payload: payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : { value: payload }
       })
 
       expect(normalized.agentSessionId).toBe(`semantic-${index}`)
       expect(normalized.run).toEqual({ runId: `run-${index}` })
-      expect(normalized.activities.length).toBeGreaterThan(0)
+      expect(normalized.timeline.length).toBeGreaterThan(0)
       if (normalized.nativeHandle?.kind === 'provider') {
         expect(Buffer.byteLength(normalized.nativeHandle.sessionId)).toBeLessThanOrEqual(512)
         expect(normalized.nativeHandle.sessionId).not.toMatch(/[\0-\x1f\x7f]/u)
