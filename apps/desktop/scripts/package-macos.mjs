@@ -213,6 +213,7 @@ async function copyRuntimeApplication(appPath) {
     coreManifest.dependencies ?? {},
     join(coreRuntime, 'node_modules')
   )
+  await materializeDependency(desktopRoot, 'tldts', join(appResources, 'node_modules', 'tldts'))
   await materializeDependency(desktopRoot, 'zod', join(appResources, 'node_modules', 'zod'))
   await Promise.all([
     chmod(join(coreRuntime, 'vendor', 'ctxmux', 'darwin-arm64', 'bin', 'ctxmux'), 0o755),
