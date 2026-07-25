@@ -82,6 +82,15 @@
 - Renderer 负责把最新 `cols × rows` 通过 Core 公共 Resize 提交给 ctxmux；resize 热路径只保留一个在途请求和一个最新 pending size。
 - Replay、Live、Gap、ACK 与 Attachment lease 均服从 ctxmux/Core 的 ordered-byte 合同，View 不建立补偿状态机。
 
+### Browser 工作面
+
+- Browser 是 AgentMux 内的一等工作面，不是外链跳板：它可导航、可标记、可被 Agent 安全消费，且生命周期与权限事实**只由 Desktop Main 持有**。Renderer 既不拥有 WebContents，也不持有第二份导航或权限状态。
+- 页面**元素选择**产出结构化上下文——tagName、role、可访问名、selector、文本、邻近文本、白名单属性与净化后的 HTML——并以文本形式进入 Composer 草稿，与其他附件同一条通路。净化在 Main 侧完成，Renderer 不把原始 DOM 当证据传递。当前**不采集 computed CSS**，截图也**只进剪贴板、不并入 prompt**：这两点是已知边界，不以"看起来完整"的措辞掩盖。
+- 截屏与标记编辑属于 Browser 自己的工具，产物是可验证证据而非装饰：标记后的图像仍是同一次观察的产物，不重建第二份截图生命周期。
+- 链接打开使用统一的**目的地菜单**（当前 Region / 分屏 / 新 Tab），与 Terminal 链接共享同一套目的地语汇，不让浏览器另发明一套打开语义。
+- Browser Profile 由 Browser Tools 导入，凭据与 Cookie 归 Main；导入路径落在 Workspace/Profile 约束内，逃出约束一律 typed 失败关闭，不静默降级到默认 Profile。
+- 内置浏览器只能打开本机可达的地址。**没有 SSH 转发或隧道**，因此"看远端主机的 dev server"当前不成立——这与 Remote 能力整体延后一致，不为它单开一条私有通路。
+
 ### Explorer 与 Editor
 
 - Explorer 以 Selected Worktree 为根，使用层级目录、文件夹优先排序、多选、键盘导航、Reveal、刷新和受 Workspace Root 约束的文件操作。Move 当前明确为单项操作：Pointer drag 在开始时收敛到被拖动项；Context Menu/`Shift+F10` 使用 `Move This Item to` 子菜单，并在执行时收敛到该项，不用多选外观暗示尚未实现的批量移动。
