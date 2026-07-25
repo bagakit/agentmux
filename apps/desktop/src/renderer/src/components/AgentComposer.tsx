@@ -35,14 +35,9 @@ export function AgentComposer({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={(event) => {
-          if (event.key === 'Enter' && !event.shiftKey) {
-            if (isWorking && onInterrupt) {
-              event.preventDefault()
-              onInterrupt()
-            } else if (canSubmit) {
-              event.preventDefault()
-              onSubmit?.()
-            }
+          if (event.key === 'Enter' && !event.shiftKey && !isWorking && canSubmit) {
+            event.preventDefault()
+            onSubmit?.()
           }
         }}
         placeholder={placeholder}
@@ -70,15 +65,6 @@ export function AgentComposer({
           </button>
         </div>
         <div>
-          <button
-            type="button"
-            className="composer-tool composer-tool--danger"
-            disabled={disabled || !onInterrupt}
-            onClick={onInterrupt}
-            title="Interrupt active agent turn"
-          >
-            <Square size={12} /> Stop turn
-          </button>
           {isWorking ? (
             <button
               type="button"

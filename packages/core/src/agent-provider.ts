@@ -482,7 +482,7 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     planPromptInput(prompt) {
       return definition.planPromptInput?.(prompt) ?? {
         kind: 'single-phase',
-        data: `${buildPromptInputPayload(prompt)}\r`
+        data: `${prompt}\r`
       }
     },
     normalizeHook(envelope) {
