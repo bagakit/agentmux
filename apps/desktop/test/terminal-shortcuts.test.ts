@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isTerminalAppShortcut } from '../src/renderer/src/lib/terminal-shortcuts.js'
+import { isTerminalAppShortcut, terminalSelectionForCopy } from '../src/renderer/src/lib/terminal-shortcuts.js'
 
 function key(overrides: Partial<KeyboardEvent> = {}): KeyboardEvent {
   return {
@@ -22,5 +22,11 @@ describe('Terminal app shortcuts', () => {
     expect(isTerminalAppShortcut(key({ ctrlKey: true, shiftKey: true }), 'f', false)).toBe(true)
     expect(isTerminalAppShortcut(key({ ctrlKey: true }), 'f', false)).toBe(false)
     expect(isTerminalAppShortcut(key({ ctrlKey: true, shiftKey: true, altKey: true }), 'f', false)).toBe(false)
+  })
+
+  it('keeps the last non-empty selection when a context-menu focus transition clears xterm selection', () => {
+    expect(terminalSelectionForCopy('live text', 'remembered text')).toBe('live text')
+    expect(terminalSelectionForCopy('', 'remembered text')).toBe('remembered text')
+    expect(terminalSelectionForCopy('', '')).toBe('')
   })
 })

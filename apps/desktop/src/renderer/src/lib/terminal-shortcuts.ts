@@ -13,3 +13,12 @@ export function isTerminalAppShortcut(
     ? event.metaKey && !event.ctrlKey
     : event.ctrlKey && event.shiftKey && !event.metaKey
 }
+
+/**
+ * xterm can clear its live selection while a context menu takes focus. Keep the
+ * last non-empty selection as a copy source so a right-click Copy remains
+ * deterministic even after that focus transition.
+ */
+export function terminalSelectionForCopy(liveSelection: string, rememberedSelection: string): string {
+  return liveSelection || rememberedSelection
+}

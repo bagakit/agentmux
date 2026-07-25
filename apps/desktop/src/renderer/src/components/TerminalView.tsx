@@ -18,7 +18,7 @@ import {
 } from '../lib/terminal-link-gesture'
 import { detectTerminalPathLinks } from '../lib/terminal-path-link'
 import { terminalOptions, terminalTheme } from '../lib/terminal-theme'
-import { isTerminalAppShortcut } from '../lib/terminal-shortcuts'
+import { isTerminalAppShortcut, terminalSelectionForCopy } from '../lib/terminal-shortcuts'
 import { safeTerminalFind, TERMINAL_SEARCH_DECORATIONS } from '../lib/terminal-search-safe-find'
 import { finishTerminalReplayRecovery, hydrateTerminalReplay } from '../lib/terminal-replay'
 import { acquireTerminalResourceOwners } from '../lib/terminal-resource-owners'
@@ -111,6 +111,7 @@ export function TerminalView({
   acceptsInputRef.current = acceptsInput
   const searchAddonRef = useRef<SearchAddon | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const rememberedSelectionRef = useRef('')
   const [hasSelection, setHasSelection] = useState(false)
   const [hydrating, setHydrating] = useState(true)
   const [attachFailed, setAttachFailed] = useState(false)
@@ -165,6 +166,7 @@ export function TerminalView({
     setHasOutput(false)
     setReplayGap(false)
     setRedrawing(false)
+    rememberedSelectionRef.current = ''
     const terminal = new Terminal({
       ...terminalOptions(themeId),
       scrollback: 5_000
@@ -396,7 +398,11 @@ export function TerminalView({
         void api.sessions.write(session.control, data)
       }
     })
-    const selection = terminal.onSelectionChange(() => setHasSelection(terminal.hasSelection()))
+    const selection = terminal.onSelectionChange(() => {
+      const text = terminal.getSelection()
+      if (text) rememberedSelectionRef.current = text
+      setHasSelection(text.length > 0)
+    })
     const colorQuerySuppression = installTerminalColorQueryReplyHandlers(terminal, {
       isReplaying: () => !readyForLiveOutput,
       respondFromRenderer: session.kind === 'terminal',
@@ -412,7 +418,11 @@ export function TerminalView({
         return false
       }
       if (isTerminalAppShortcut(event, 'c', isMac) && terminal.hasSelection()) {
-        if (event.type === 'keydown') void api.ui.writeClipboardText(terminal.getSelection())
+        if (event.type === 'keydown') {
+          const text = terminal.getSelection()
+          if (text) rememberedSelectionRef.current = text
+          void api.ui.writeClipboardText(text).catch(reportError)
+        }
         return false
       }
       // Paste is intentionally NOT claimed here. Returning false from this handler does not
@@ -536,7 +546,10 @@ export function TerminalView({
 
   function copySelection(): void {
     const terminal = terminalRef.current
-    if (terminal?.hasSelection()) void api.ui.writeClipboardText(terminal.getSelection())
+    const text = terminalSelectionForCopy(terminal?.getSelection() ?? '', rememberedSelectionRef.current)
+    if (!text) return
+    rememberedSelectionRef.current = text
+    void api.ui.writeClipboardText(text).catch(reportError)
   }
 
   function pasteClipboard(): void {
@@ -595,6 +608,15 @@ export function TerminalView({
             className={`terminal-view__xterm ${hydrating ? 'terminal-view__xterm--hydrating' : ''}`}
             ref={rootRef}
             onPointerDown={(event) => {
+              // xterm may clear its live selection while the native context-menu gesture
+              // moves focus. Snapshot it before that transition so Radix Copy stays enabled.
+              if (event.button === 2) {
+                const text = terminalRef.current?.getSelection() ?? ''
+                if (text) {
+                  rememberedSelectionRef.current = text
+                  setHasSelection(true)
+                }
+              }
               linkPressRef.current = { x: event.clientX, y: event.clientY }
               terminalRef.current?.focus()
             }}
