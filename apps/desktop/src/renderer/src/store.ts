@@ -890,6 +890,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   loading: true,
   error: null,
   async initialize() {
+    if (!api.control || typeof api.control.onRequest !== 'function') {
+      throw new Error('AgentMux Control API is unavailable')
+    }
     const pendingSessionEvents: RuntimeEvent[] = []
     let sessionEventBufferOverflowed = false
     const pendingBrowserEvents: BrowserEvent[] = []
@@ -914,11 +917,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       else get().applyBrowserEvent(event)
     })
-    const disposeControl = api.control?.onRequest
-      ? api.control.onRequest((request, signal) => (
-          get().executeControl(request, signal)
-        ))
-      : () => {}
+    const disposeControl = api.control.onRequest((request, signal) => (
+      get().executeControl(request, signal)
+    ))
     const disposeFileInvalidations = api.files.onInvalidated((event) => {
       const key = documentKey(event.workspaceId, event.path)
       fileInvalidationSequences.set(key, (fileInvalidationSequences.get(key) ?? 0) + 1)

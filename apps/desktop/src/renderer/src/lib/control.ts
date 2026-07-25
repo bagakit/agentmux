@@ -211,14 +211,22 @@ export function planControlOpen(
   const tabs = { ...input.tabs }
   const layouts = { ...input.layouts }
   if (destination.kind === 'launcher') {
-    const owner = findWorkbenchRegion(tabs, destination.regionId)
-    if (!owner || owner.surface.kind !== 'launcher') throw error('LAUNCHER_REGION_REQUIRED', 'Target Region is not an open Launcher.')
+    const target = resolveWorkbenchControlRegion(input, {
+      kind: 'region',
+      regionId: destination.regionId
+    }, caller)
+    if (target.kind !== 'launcher') throw error('LAUNCHER_REGION_REQUIRED', 'Target Region is not an open Launcher.')
+    const tab = tabs[target.tabId]
+    const launcher = tab?.regions[target.regionId]
+    if (!tab || launcher?.kind !== 'launcher') {
+      throw error('CONTROL_OWNER_LOST', 'Launcher Region owner changed while planning Control open.')
+    }
     return {
-      workspaceId: owner.tab.workspaceId,
-      tabId: owner.tab.id,
-      regionId: owner.surface.regionId,
+      workspaceId: tab.workspaceId,
+      tabId: tab.id,
+      regionId: launcher.regionId,
       kind: 'launcher',
-      launcher: owner.surface,
+      launcher,
       tabs,
       layouts
     }
