@@ -122,16 +122,19 @@ type InspectTarget =
   | { kind: 'region'; regionId: string }
 
 type MessageTarget =
+  | { kind: 'self' }
   | { kind: 'agent-session'; agentSessionId: string }
   | { kind: 'tab'; tabId: string }
   | { kind: 'region'; regionId: string }
 
+type SelfSelector = { kind: 'self' }
+
 type RegionAnchor =
-  | { kind: 'caller' }
+  | SelfSelector
   | { kind: 'region'; regionId: string }
 
 type TabAnchor =
-  | { kind: 'caller' }
+  | SelfSelector
   | { kind: 'tab'; tabId: string }
 
 type RegionSurface =
@@ -159,8 +162,9 @@ type MessageTargetNotUnique = {
 }
 ```
 
-`self` 是 CLI 对 wire `caller` anchor 的输入缩写，不会被保存为身份。每个需要 `self`
-的请求同时携带受管 caller `agentSessionId`，Host 在一次请求内按目标身份域解析：
+`self` 在 wire 中保留为 `{ kind: 'self' }` selector，但不是一个被保存的身份。每个使用
+`self` 的请求同时在独立 `caller` 字段携带受管 `agentSessionId`，Host 在一次请求内按
+目标身份域解析：
 
 - Session `self`：环境中的精确 Agent Session。
 - Tab `self`：该 Session 的所有展示按 `tabId` 去重后恰好一张 Tab。
