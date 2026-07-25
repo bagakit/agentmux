@@ -230,10 +230,10 @@ describe('built-in agent providers', () => {
         kind: 'single-phase', data: 'continue\r'
       })
       expect(providers.get(id).planPromptInput('line1\nline2')).toEqual({
-        kind: 'single-phase', data: '\u001b[200~line1\nline2\u001b[201~\r'
+        kind: 'single-phase', data: 'line1\nline2\r'
       })
       expect(providers.get(id).planPromptInput('text with \u001b escape')).toEqual({
-        kind: 'single-phase', data: 'text with \u241b escape\r'
+        kind: 'single-phase', data: 'text with \u001b escape\r'
       })
     }
   })
