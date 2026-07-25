@@ -1,9 +1,9 @@
 {
   "schema": "ctxmux.local-artifacts.v1",
   "source": {
-    "commit": "1603908a253162632e8812ceb9db19c3e416fea4",
-    "tree": "464f239190234c8369799dca06a630b3b48f5cca",
-    "commit_time_unix": "1787521484",
+    "commit": "a0897087fdd0eb131c39c43d4d6791901335d69e",
+    "tree": "54d0f0631a51063a5f4c18088f4e8cba1f80444a",
+    "commit_time_unix": "1787525113",
     "worktree_clean": true
   },
   "product": {
@@ -19,7 +19,7 @@
   "build": {
     "profile": "release",
     "locked": true,
-    "source_date_epoch": "1787521484",
+    "source_date_epoch": "1787525113",
     "rustc": "1.96.0",
     "cargo": "cargo 1.96.0 (30a34c682 2026-05-25)",
     "node": "v24.14.1",

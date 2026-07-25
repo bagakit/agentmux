@@ -46,9 +46,9 @@ lineage 作为 Evidence，但语义解释仍由 AgentMux 持有。
 
 当前 Local Run、Codex 代表纵切与第一条 Desktop Composition 纵切已经跑通：
 
-- 固定 CtxMux clean commit `1603908a253162632e8812ceb9db19c3e416fea4`、protocol 13；
+- 固定 CtxMux clean commit `a0897087fdd0eb131c39c43d4d6791901335d69e`、protocol 13；
 - `packages/core/vendor/ctxmux/darwin-arm64` 携带其 manifest、SDK tarball、`ctxmux` 与 `ctxmuxd`；
-- Core 构建时从固定 tarball 私有打包 SDK，不暴露 CtxMux 类型，不使用 `file:` 依赖、相邻 checkout、全局安装或下载；
+- Core typecheck 与构建直接消费固定 tarball 的官方 SDK 类型和实现，不保留手写 wire 声明；公开包仍不暴露 CtxMux 类型，也不读取相邻 checkout、全局安装或下载；
 - Local endpoint 由 exact artifact identity 隔离，调用方不能插入另一个同协议 daemon；
 - `AgentMuxRunRef` 只包含 CtxMux `runId`，没有第二个 incarnation identity；
 - Local Terminal 已通过同 Run/PID 重连、累计 byte replay、fragmented UTF-8、丢失 Input receipt 后的跨 Client 去重恢复、Resize、Interrupt-still-live 与 stubborn process-tree Stop；
