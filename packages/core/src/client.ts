@@ -151,6 +151,38 @@ function sameRun(left: AgentMuxRunRef, right: AgentMuxRunRef): boolean {
   return left.runId === right.runId
 }
 
+export type PromptReadinessStatusOutcome =
+  | { ok: true; run: CtxmuxAdapterRun }
+  | { ok: false; error: unknown }
+
+export type PromptReadinessVerdict =
+  | { kind: 'retry' }
+  | { kind: 'stale' }
+  | { kind: 'fail'; error: unknown }
+
+/**
+ * Decide how the prompt-readiness retry loop should treat a `kernel.status()` outcome.
+ *
+ * The previous `kernel.status(...).catch(() => null)` collapsed three very different outcomes into
+ * "keep waiting until the deadline": a genuinely-gone Run, a still-running Run, and an authoritative
+ * runtime failure such as a ctxmux disconnect. That masked real errors and delayed the stale verdict.
+ *
+ * - A running Run means the native Stop receipt legitimately has not landed yet → retry.
+ * - A non-running Run, or a Run ctxmux reports as gone (CTXMUX_run_not_found), is terminal: the Run
+ *   this prompt targets can never become ready → stale.
+ * - Any other status failure (e.g. CTXMUX_DISCONNECTED) is an authoritative error that must surface,
+ *   not be silently retried until the deadline and then reported as a bare "not ready".
+ */
+export function classifyPromptReadinessStatus(outcome: PromptReadinessStatusOutcome): PromptReadinessVerdict {
+  if (outcome.ok) {
+    return outcome.run.state.type === 'running' ? { kind: 'retry' } : { kind: 'stale' }
+  }
+  if (outcome.error instanceof AgentMuxError && outcome.error.code === 'CTXMUX_run_not_found') {
+    return { kind: 'stale' }
+  }
+  return { kind: 'fail', error: outcome.error }
+}
+
 function safeId(value: string, name: string): string {
   if (!SAFE_ID.test(value)) {
     throw new AgentMuxError(`${name} must contain only letters, numbers, underscore, or dash.`, 'INVALID_SESSION_ID')
@@ -1737,9 +1769,18 @@ export class AgentMuxClient {
           if (!sameRun(currentStored.run, session.run)) {
             throw new AgentMuxError('Agent Run changed during prompt readiness wait.', 'STALE_AGENT_SESSION')
           }
-          const runStatus = await this.kernel.status(session.run.runId).catch(() => null)
-          if (runStatus && runStatus.state.type !== 'running') {
+          let statusOutcome: PromptReadinessStatusOutcome
+          try {
+            statusOutcome = { ok: true, run: await this.kernel.status(session.run.runId) }
+          } catch (statusError) {
+            statusOutcome = { ok: false, error: statusError }
+          }
+          const verdict = classifyPromptReadinessStatus(statusOutcome)
+          if (verdict.kind === 'stale') {
             throw new AgentMuxError('Agent Run exited before prompt became ready.', 'STALE_AGENT_SESSION')
+          }
+          if (verdict.kind === 'fail') {
+            throw verdict.error
           }
           await new Promise((resolve) => setTimeout(resolve, 50))
           continue
