@@ -22,7 +22,8 @@ import type {
   AgentTimelineCommit,
   AgentTimelineItem,
   AgentTimelineMutation,
-  AgentTimelineSnapshot
+  AgentTimelineSnapshot,
+  RiskTier
 } from './types.js'
 
 const MAX_STORED_SESSIONS = 256
@@ -487,7 +488,7 @@ function interactionRequest(value: unknown): AgentMuxInteractionRequest {
         label: text(option.label, `pendingInteraction.request.options[${index}].label`),
         kind: option.kind as 'allow-once' | 'allow-always' | 'reject-once' | 'reject-always',
         ...(description ? { description } : {}),
-        ...(option.tier === undefined ? {} : { tier: option.tier as 'safe' | 'caution' | 'danger' })
+        ...(option.tier === undefined ? {} : { tier: option.tier as RiskTier })
       }
     })
     if (new Set(options.map((option) => option.id)).size !== options.length) {

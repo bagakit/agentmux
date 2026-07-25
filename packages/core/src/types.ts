@@ -12,6 +12,15 @@ export type BuiltInAgentProviderId =
   | 'cursor'
 export type AgentProviderId = BuiltInAgentProviderId | (string & {})
 
+/**
+ * The single risk vocabulary the three sealed control surfaces share — launch options, live permission
+ * options, and posture modes all rank one choice's danger with these exact three values, and every
+ * renderer surfaces them the same way: a restrained dot, never a stroke or fill. One identity in one
+ * place — a launch choice, a permission row, and a posture mode that read as equally dangerous carry the
+ * same token, so the ranking cannot drift between the three.
+ */
+export type RiskTier = 'safe' | 'caution' | 'danger'
+
 export type AgentExecutorId = string
 
 /** A user-facing launch configuration backed by one Provider implementation. */
@@ -372,7 +381,7 @@ export type AgentMuxPermissionOption = {
    * option never rides here — it stays core-side on the Provider's declaration. */
   description?: string
   /** Risk state a renderer surfaces as a restrained dot; not decoration, not a stroke. */
-  tier?: 'safe' | 'caution' | 'danger'
+  tier?: RiskTier
 }
 
 /**
@@ -385,7 +394,7 @@ export type AgentPostureMode = {
   id: string
   label: string
   description?: string
-  tier?: 'safe' | 'caution' | 'danger'
+  tier?: RiskTier
 }
 
 /**
