@@ -177,6 +177,10 @@ export function SessionPane({
           {session.pendingInteraction ? (
             <AgentInteractionCard
               request={session.pendingInteraction}
+              // A pending request outlives the process that asked it, so the card must go inert on the
+              // same terms as the composer below it — otherwise a dead Run still shows live buttons and
+              // answering it fails on a Run that can no longer accept input.
+              disabled={session.processState !== 'running' || session.status.state === 'disconnected'}
               onRespond={async (response) => await respondInteraction(session.id, response)}
             />
           ) : null}
