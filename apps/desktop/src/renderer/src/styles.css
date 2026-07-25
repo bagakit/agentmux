@@ -509,8 +509,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .branch-row__meta { min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
 .branch-row__agents { display: flex; align-items: center; padding-left: 3px; }
 .branch-row__agent { position: relative; width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; margin-left: -3px; border: 1px solid #313a36; border-radius: 50%; color: var(--text-2); background: #1e232a; box-shadow: 0 0 0 1px #12151b; }
-.branch-row__agent small { position: absolute; right: -3px; bottom: -3px; min-width: 9px; height: 9px; padding: 0 2px; border-radius: var(--radius-sm); color: #d8e6dd; background: #31523b; font: 10px/9px ui-monospace, SFMono-Regular, monospace; text-align: center; }
-.branch-row__agents em { margin-left: 2px; color: var(--text-3); font: 10px/1 ui-monospace, SFMono-Regular, monospace; font-style: normal; }
+.branch-row__agent small { position: absolute; right: -3px; bottom: -3px; min-width: 9px; height: 9px; padding: 0 2px; border-radius: var(--radius-sm); color: #d8e6dd; background: #31523b; font: 10px/9px var(--font-mono); text-align: center; }
+.branch-row__agents em { margin-left: 2px; color: var(--text-3); font: 10px/1 var(--font-mono); font-style: normal; }
 .branch-row__state { display: inline-flex; align-items: center; gap: 2px; padding: 1px 4px; border-radius: var(--radius-sm); color: var(--green); background: #16271d; font-size: 10px; line-height: 13px; white-space: nowrap; }
 .branch-row__state--unbound { color: var(--amber); background: #2b2417; }
 .branches-empty { min-height: 90px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; padding: 12px; color: var(--text-3); font-size: 10px; text-align: center; }
@@ -526,7 +526,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .branch-create-dialog__context { min-width: 0; display: flex; align-items: center; gap: 7px; margin: 13px 15px 0; padding: 7px 8px; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); color: var(--green-2); background: #0d1112; }
 .branch-create-dialog__context > span { min-width: 0; display: flex; flex-direction: column; }
 .branch-create-dialog__context small { color: var(--text-3); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
-.branch-create-dialog__context strong { overflow: hidden; color: var(--text-2); font: 10px/1.4 ui-monospace, SFMono-Regular, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.branch-create-dialog__context strong { overflow: hidden; color: var(--text-2); font: 10px/1.4 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
 .branch-create-dialog label { display: grid; gap: 5px; padding: 12px 15px 0; color: var(--text-3); font-size: 10px; }
 .branch-create-dialog input { width: 100%; padding: 7px 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); outline: 0; color: var(--text); background: #0e1116; font: 11px/1.4 "SFMono-Regular", monospace; }
 .branch-create-dialog input:focus { border-color: var(--focus-line); box-shadow: var(--focus-ring); }
@@ -822,7 +822,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .tab-context-menu__item[data-highlighted] { color: var(--text); background: #ffffff14; }
 .tab-context-menu__item[data-highlighted] > svg { color: var(--green); }
 .tab-context-menu__item[data-disabled] { opacity: .35; }
-.tab-context-menu__item kbd { margin-left: auto; color: var(--text-3); font: 10px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.tab-context-menu__item kbd { margin-left: auto; color: var(--text-3); font: 10px/1.2 var(--font-mono); }
 .tab-context-menu__chevron { margin-left: auto; color: var(--text-3); font-size: 14px; }
 .tab-context-menu__separator { height: 1px; margin: 5px 6px; background: #ffffff10; }
 .open-destination-menu {
@@ -843,7 +843,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .open-destination-menu__url > span:nth-child(2) {
   min-width: 0;
   overflow: hidden;
-  font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font: 10px/1.4 var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1141,7 +1141,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   box-shadow: 0 10px 28px #0008, inset 0 1px #ffffff0a;
   backdrop-filter: blur(18px);
 }
-.terminal-search input { min-width: 0; flex: 1; border: 0; outline: 0; color: var(--text); background: transparent; font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.terminal-search input { min-width: 0; flex: 1; border: 0; outline: 0; color: var(--text); background: transparent; font: 11px/1.4 var(--font-mono); }
 .terminal-search button { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; cursor: pointer; }
 .terminal-search button:hover { color: var(--text); background: #ffffff10; }
 .terminal-recovery {
@@ -1250,7 +1250,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .activity-ruler__tick--assistant_message { background: var(--green); height: 14px; margin-top: -7px; }
 .activity-ruler__tick--permission { background: var(--amber); }
 .activity-ruler__tick[data-status='failed'] { background: var(--red); }
-.activity-ruler__span { color: var(--text-3); font: 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
+.activity-ruler__span { color: var(--text-3); font: 10px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
 .activity-ruler__note { display: inline-flex; color: var(--text-3); cursor: help; }
 .activity-log { padding: 4px 0; }
 /* One hairline spine runs the whole log; each node knocks a hole in it with a fill halo rather than
@@ -1294,7 +1294,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .log-row[data-status='failed'] .log-row__node { color: var(--red); }
 .log-row__time {
   color: var(--text-3);
-  font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font: 11px/1 var(--font-mono);
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
@@ -1334,7 +1334,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   border-radius: var(--radius-sm);
   color: var(--text-2);
   background: var(--surface-1);
-  font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font: 11px/1.5 var(--font-mono);
   white-space: pre-wrap;
 }
 .log-fold__chevron { transition: transform 120ms ease; }
