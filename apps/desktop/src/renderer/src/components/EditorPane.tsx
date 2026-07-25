@@ -1,28 +1,54 @@
 import '../monaco'
-import Editor from '@monaco-editor/react'
+import Editor, { type OnMount } from '@monaco-editor/react'
 import { AlertTriangle, RefreshCw, Save } from 'lucide-react'
+import { useEffect, useRef } from 'react'
 import { detectLanguage } from '../lib/language-detect'
 import { documentKey, type FileWorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
 
+type MonacoStandaloneEditor = Parameters<OnMount>[0]
+
 export function EditorPane({ tabId, surface }: { tabId: string; surface: FileWorkbenchSurface }) {
+  const key = documentKey(surface.workspaceId, surface.path)
   const document = useAppStore((state) => {
-    return state.documents[documentKey(surface.workspaceId, surface.path)] ?? null
+    return state.documents[key] ?? null
   })
   const dirty = useAppStore((state) => {
-    return Boolean(state.dirtyDocuments[documentKey(surface.workspaceId, surface.path)])
+    return Boolean(state.dirtyDocuments[key])
   })
   const issue = useAppStore((state) => {
-    return state.documentIssues[documentKey(surface.workspaceId, surface.path)]
+    return state.documentIssues[key]
   })
   const saving = useAppStore((state) => {
-    return Boolean(state.savingDocuments[documentKey(surface.workspaceId, surface.path)])
+    return Boolean(state.savingDocuments[key])
   })
+  const revealTarget = useAppStore((state) => state.documentRevealTargets[key])
   const update = useAppStore((state) => state.updateDocument)
   const save = useAppStore((state) => state.saveDocument)
   const reload = useAppStore((state) => state.reloadDocument)
   const overwrite = useAppStore((state) => state.overwriteDocument)
+  const clearRevealTarget = useAppStore((state) => state.clearDocumentRevealTarget)
   const conflict = issue?.kind === 'changed' || issue?.kind === 'deleted'
+  const editorRef = useRef<MonacoStandaloneEditor | null>(null)
+
+  // Consume a one-shot reveal target (set when the file was opened with a :line location, e.g. a
+  // terminal path link). Both entry points call this: `onMount` handles the first open (Monaco
+  // loads async, so the editor may not exist when the effect below first runs), and the effect
+  // handles a fresh target arriving for an already-mounted editor (re-clicking a link).
+  function consumeRevealTarget(editor: MonacoStandaloneEditor): void {
+    const target = useAppStore.getState().documentRevealTargets[key]
+    if (!target) return
+    editor.revealLineInCenter(target.line)
+    editor.setPosition({ lineNumber: target.line, column: target.column ?? 1 })
+    editor.focus()
+    clearRevealTarget(key)
+  }
+
+  useEffect(() => {
+    if (editorRef.current && revealTarget) consumeRevealTarget(editorRef.current)
+    // consumeRevealTarget reads the latest target from the store; revealTarget only drives when.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revealTarget, key])
 
   if (!document) {
     return (
@@ -81,6 +107,10 @@ export function EditorPane({ tabId, surface }: { tabId: string; surface: FileWor
           language={detectLanguage(document.path)}
           value={document.content}
           onChange={(value) => update(tabId, value ?? '', surface.regionId)}
+          onMount={(editor) => {
+            editorRef.current = editor
+            consumeRevealTarget(editor)
+          }}
           theme="vs-dark"
           options={{
             minimap: { enabled: false },

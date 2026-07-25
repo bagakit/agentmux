@@ -185,6 +185,10 @@ type AppState = {
   documentObservationGenerations: Record<string, number>
   documentIssues: Record<string, FileDocumentIssue | undefined>
   savingDocuments: Record<string, boolean>
+  // One-shot reveal targets keyed by documentKey. Set when a file is opened with a :line location
+  // (e.g. a terminal path link), consumed once by EditorPane on Monaco mount, then cleared. Never
+  // persisted — a reveal is a navigation, not document state.
+  documentRevealTargets: Record<string, { line: number; column?: number } | undefined>
   lastActiveFileByWorkspace: Record<string, string | undefined>
   tabs: Record<string, WorkbenchTab>
   layouts: Record<string, WorkspaceLayout>
@@ -258,7 +262,12 @@ type AppState = {
   ): void
   detectExecutors(hostId: string): Promise<void>
   checkHost(host: HostConfig): Promise<void>
-  openFile(path: string, tabGroupId?: string): Promise<void>
+  openFile(
+    path: string,
+    tabGroupId?: string,
+    location?: { line: number; column?: number }
+  ): Promise<void>
+  clearDocumentRevealTarget(key: string): void
   createScratchTopic(): Promise<ScratchTopicSnapshot>
   openScratchTopic(topicId: string): Promise<void>
   renameScratchTopic(topicId: string, title: string): Promise<ScratchTopicSnapshot>
@@ -871,6 +880,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   documentObservationGenerations: {},
   documentIssues: {},
   savingDocuments: {},
+  documentRevealTargets: {},
   lastActiveFileByWorkspace: {},
   tabs: {},
   layouts: {},
@@ -1820,11 +1830,19 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }))
     }
   },
-  async openFile(path, tabGroupId) {
+  async openFile(path, tabGroupId, location) {
     const workspaceId = get().activeWorkspaceId
     const layout = workspaceId ? get().layouts[workspaceId] : undefined
     if (!workspaceId || !layout) return
     const key = documentKey(workspaceId, path)
+    // Stash the reveal target before opening. EditorPane consumes it once on Monaco mount (new
+    // document) or on the `line` prop it reads (already-open document), then clears it. Setting it
+    // for both paths means re-clicking a `:line` link on an open file re-reveals that line.
+    if (location) {
+      set((state) => ({
+        documentRevealTargets: { ...state.documentRevealTargets, [key]: location }
+      }))
+    }
     try {
       const existing = get().documents[key]
       if (existing) {
@@ -1884,6 +1902,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     } catch (error) {
       get().reportError(error)
     }
+  },
+  clearDocumentRevealTarget(key) {
+    set((state) => {
+      if (!state.documentRevealTargets[key]) return state
+      const next = { ...state.documentRevealTargets }
+      delete next[key]
+      return { documentRevealTargets: next }
+    })
   },
   async createScratchTopic() {
     const state = get()
