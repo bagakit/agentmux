@@ -470,15 +470,6 @@ export class BrowserViewManager {
         this.emit(entry)
       }
     }
-    contents.setWindowOpenHandler(({ url }) => {
-      if (!this.owns(entry, view)) return { action: 'deny' }
-      void this.navigate(entry.id, url).catch((error) => {
-        if (!this.owns(entry, view)) return
-        entry.error = error instanceof Error ? error.message : String(error)
-        this.emit(entry)
-      })
-      return { action: 'deny' }
-    })
     contents.on('will-navigate', guardNavigation)
     contents.on('will-redirect', guardNavigation)
     contents.on('did-finish-load', () => {
