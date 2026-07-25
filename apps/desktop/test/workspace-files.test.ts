@@ -19,6 +19,7 @@ vi.mock('node:child_process', async (importOriginal) => {
     ...actual,
     spawn: (...args: any[]) => {
       const child = (actual.spawn as (...values: any[]) => ReturnType<typeof actual.spawn>)(...args)
+      if (args[0] !== process.execPath) return child
       const request = JSON.parse(args[1]?.[3] ?? 'null') as { action?: string } | null
       const input = child.stdin
       if (!input) return child
@@ -196,8 +197,21 @@ describe('WorkspaceFiles root confinement', () => {
         writeFile(join(renameRace.requested, 'before.txt'), 'inside'),
         writeFile(join(renameRace.outside, 'before.txt'), 'outside-secret')
       ])
-      await files.rename(workspace, { path: 'rename/before.txt', nextPath: 'rename/after.txt' })
-      await expect(readFile(join(renameRace.held, 'after.txt'), 'utf8')).resolves.toBe('inside')
+      const beforeLocalMoveCommit = localWorkerRace.beforeInput
+      localWorkerRace.beforeInput = null
+      const moveFiles = new WorkspaceFiles(() => localHost, {
+        beforeLocalMoveCommit: beforeLocalMoveCommit ?? undefined
+      })
+      await expect(moveFiles.move(workspace, workspace, {
+        source: { workspaceId: workspace.id, path: 'rename/before.txt' },
+        destination: { workspaceId: workspace.id, path: 'rename/after.txt' }
+      })).resolves.toMatchObject({
+        status: 'error',
+        code: 'WORKSPACE_PATH_ESCAPE',
+        finalLocation: 'source'
+      })
+      await expect(readFile(join(renameRace.held, 'before.txt'), 'utf8')).resolves.toBe('inside')
+      await expect(access(join(renameRace.held, 'after.txt'))).rejects.toThrow()
       await expect(readFile(join(renameRace.outside, 'before.txt'), 'utf8')).resolves.toBe('outside-secret')
       await expect(access(join(renameRace.outside, 'after.txt'))).rejects.toThrow()
 
@@ -467,9 +481,14 @@ describe('WorkspaceFiles root confinement', () => {
     ])
     await files.create(workspace, { path: 'src/new.ts', kind: 'file' })
     await files.create(workspace, { path: 'src/lib', kind: 'directory' })
-    await expect(files.rename(workspace, { path: 'src/new.ts', nextPath: 'moved.ts' }))
-      .rejects.toThrow('cannot move a path between directories')
-    await files.rename(workspace, { path: 'src/new.ts', nextPath: 'src/renamed.ts' })
+    await expect(files.move(workspace, workspace, {
+      source: { workspaceId: workspace.id, path: 'src/new.ts' },
+      destination: { workspaceId: workspace.id, path: 'moved.ts' }
+    })).resolves.toEqual({ status: 'moved' })
+    await expect(files.move(workspace, workspace, {
+      source: { workspaceId: workspace.id, path: 'moved.ts' },
+      destination: { workspaceId: workspace.id, path: 'src/renamed.ts' }
+    })).resolves.toEqual({ status: 'moved' })
     await expect(access(join(root, 'src', 'renamed.ts'))).resolves.toBeUndefined()
     await expect(files.create(workspace, { path: 'escape/stolen.txt', kind: 'file' })).rejects.toThrow(
       'Path escapes the workspace root'
@@ -477,6 +496,205 @@ describe('WorkspaceFiles root confinement', () => {
     await files.delete(workspace, 'src/lib')
     await expect(access(join(root, 'src', 'lib'))).rejects.toThrow()
     await expect(files.delete(workspace, '')).rejects.toThrow('workspace root cannot be changed')
+  })
+
+  it('moves files and directories across parents without clobbering or self-containment', async () => {
+    const { root, workspace, host } = await localFixture('move')
+    await Promise.all([
+      mkdir(join(root, 'source')),
+      mkdir(join(root, 'destination'))
+    ])
+    await writeFile(join(root, 'source', 'file.txt'), 'file bytes')
+    const files = new WorkspaceFiles(() => host)
+
+    await expect(files.move(workspace, workspace, {
+      source: { workspaceId: workspace.id, path: 'source/file.txt' },
+      destination: { workspaceId: workspace.id, path: 'destination/file.txt' }
+    })).resolves.toEqual({ status: 'moved' })
+    await expect(access(join(root, 'source', 'file.txt'))).rejects.toThrow()
+    await expect(readFile(join(root, 'destination', 'file.txt'), 'utf8')).resolves.toBe('file bytes')
+
+    await mkdir(join(root, 'source', 'tree'))
+    await writeFile(join(root, 'source', 'tree', 'child.txt'), 'source child')
+    await mkdir(join(root, 'destination', 'tree'))
+    await writeFile(join(root, 'destination', 'tree', 'sentinel.txt'), 'destination child')
+    await expect(files.move(workspace, workspace, {
+      source: { workspaceId: workspace.id, path: 'source/tree' },
+      destination: { workspaceId: workspace.id, path: 'destination/tree' }
+    })).resolves.toMatchObject({
+      status: 'error',
+      code: 'WORKSPACE_MOVE_DESTINATION_EXISTS',
+      finalLocation: 'source'
+    })
+    await expect(readFile(join(root, 'source', 'tree', 'child.txt'), 'utf8')).resolves.toBe('source child')
+    await expect(readFile(join(root, 'destination', 'tree', 'sentinel.txt'), 'utf8')).resolves.toBe('destination child')
+
+    await expect(files.move(workspace, workspace, {
+      source: { workspaceId: workspace.id, path: 'source/tree' },
+      destination: { workspaceId: workspace.id, path: 'source/tree/nested' }
+    })).resolves.toMatchObject({
+      status: 'error',
+      code: 'WORKSPACE_MOVE_INTO_SELF',
+      finalLocation: 'source'
+    })
+    await expect(readFile(join(root, 'source', 'tree', 'child.txt'), 'utf8')).resolves.toBe('source child')
+  })
+
+  it('atomically refuses a destination created after validation and derives final location', async () => {
+    const { root, workspace, host } = await localFixture('move-fault')
+    await Promise.all([
+      mkdir(join(root, 'source')),
+      mkdir(join(root, 'destination'))
+    ])
+    await writeFile(join(root, 'source', 'racing.txt'), 'source bytes')
+    const racingMove = new WorkspaceFiles(() => host, {
+      beforeLocalMoveCommit: async () => {
+        await writeFile(join(root, 'destination', 'racing.txt'), 'competing bytes')
+      }
+    })
+    await expect(racingMove.move(workspace, workspace, {
+      source: { workspaceId: workspace.id, path: 'source/racing.txt' },
+      destination: { workspaceId: workspace.id, path: 'destination/racing.txt' }
+    })).resolves.toMatchObject({
+      status: 'error',
+      code: 'WORKSPACE_MOVE_DESTINATION_EXISTS',
+      finalLocation: 'source'
+    })
+    await expect(readFile(join(root, 'source', 'racing.txt'), 'utf8')).resolves.toBe('source bytes')
+    await expect(readFile(join(root, 'destination', 'racing.txt'), 'utf8')).resolves.toBe('competing bytes')
+
+    const relocatedParent = join(root, '..', 'relocated-destination')
+    await Promise.all([
+      mkdir(join(root, 'relocating-destination')),
+      writeFile(join(root, 'source', 'relocated-parent.txt'), 'confined source bytes')
+    ])
+    const relocatingParentMove = new WorkspaceFiles(() => host, {
+      beforeLocalMoveCommit: async () => {
+        await rename(join(root, 'relocating-destination'), relocatedParent)
+      }
+    })
+    await expect(relocatingParentMove.move(workspace, workspace, {
+      source: { workspaceId: workspace.id, path: 'source/relocated-parent.txt' },
+      destination: { workspaceId: workspace.id, path: 'relocating-destination/relocated-parent.txt' }
+    })).resolves.toMatchObject({
+      status: 'error',
+      code: 'WORKSPACE_MOVE_PATH_NOT_FOUND',
+      finalLocation: 'source'
+    })
+    await expect(readFile(join(root, 'source', 'relocated-parent.txt'), 'utf8')).resolves.toBe(
+      'confined source bytes'
+    )
+    await expect(access(join(relocatedParent, 'relocated-parent.txt'))).rejects.toThrow()
+
+    await writeFile(join(root, 'source', 'missing-helper.txt'), 'source survives')
+    const missingHelperMove = new WorkspaceFiles(() => host, {
+      localMoveHelperPath: join(root, 'missing-workspace-move-helper')
+    })
+    await expect(missingHelperMove.move(workspace, workspace, {
+      source: { workspaceId: workspace.id, path: 'source/missing-helper.txt' },
+      destination: { workspaceId: workspace.id, path: 'destination/missing-helper.txt' }
+    })).resolves.toMatchObject({
+      status: 'error',
+      code: 'WORKSPACE_MOVE_HELPER_UNAVAILABLE',
+      finalLocation: 'source'
+    })
+    await expect(readFile(join(root, 'source', 'missing-helper.txt'), 'utf8')).resolves.toBe('source survives')
+    await expect(access(join(root, 'destination', 'missing-helper.txt'))).rejects.toThrow()
+
+    await writeFile(join(root, 'source', 'before.txt'), 'before')
+    const beforeMove = new WorkspaceFiles(() => host, {
+      beforeLocalMoveCommit: async () => {
+        throw new Error('injected before move failure')
+      }
+    })
+    await expect(beforeMove.move(workspace, workspace, {
+      source: { workspaceId: workspace.id, path: 'source/before.txt' },
+      destination: { workspaceId: workspace.id, path: 'destination/before.txt' }
+    })).resolves.toMatchObject({
+      status: 'error',
+      code: 'WORKSPACE_MOVE_COMMIT_HOOK_FAILED',
+      finalLocation: 'source'
+    })
+    await expect(readFile(join(root, 'source', 'before.txt'), 'utf8')).resolves.toBe('before')
+    await expect(access(join(root, 'destination', 'before.txt'))).rejects.toThrow()
+
+    await writeFile(join(root, 'source', 'after.txt'), 'after')
+    const afterMove = new WorkspaceFiles(() => host, {
+      afterLocalMoveCommit: async () => {
+        throw new Error('injected move receipt failure')
+      }
+    })
+    await expect(afterMove.move(workspace, workspace, {
+      source: { workspaceId: workspace.id, path: 'source/after.txt' },
+      destination: { workspaceId: workspace.id, path: 'destination/after.txt' }
+    })).resolves.toMatchObject({
+      status: 'error',
+      code: 'WORKSPACE_MOVE_RESULT_UNKNOWN',
+      finalLocation: 'unknown'
+    })
+    await expect(access(join(root, 'source', 'after.txt'))).rejects.toThrow()
+    await expect(readFile(join(root, 'destination', 'after.txt'), 'utf8')).resolves.toBe('after')
+
+    await writeFile(join(root, 'source', 'ambiguous.txt'), 'original bytes')
+    const ambiguousMove = new WorkspaceFiles(() => host, {
+      afterLocalMoveCommit: async () => {
+        await writeFile(join(root, 'source', 'ambiguous.txt'), 'replacement bytes')
+        throw new Error('injected ambiguous move receipt failure')
+      }
+    })
+    await expect(ambiguousMove.move(workspace, workspace, {
+      source: { workspaceId: workspace.id, path: 'source/ambiguous.txt' },
+      destination: { workspaceId: workspace.id, path: 'destination/ambiguous.txt' }
+    })).resolves.toMatchObject({ status: 'error', finalLocation: 'unknown' })
+    await expect(readFile(join(root, 'source', 'ambiguous.txt'), 'utf8')).resolves.toBe('replacement bytes')
+    await expect(readFile(join(root, 'destination', 'ambiguous.txt'), 'utf8')).resolves.toBe('original bytes')
+
+    await expect(afterMove.move(workspace, workspace, {
+      source: { workspaceId: 'forged-workspace', path: 'source/missing.txt' },
+      destination: { workspaceId: workspace.id, path: 'destination/missing.txt' }
+    })).resolves.toMatchObject({
+      status: 'error',
+      code: 'WORKSPACE_MOVE_OWNER_MISMATCH',
+      finalLocation: 'source'
+    })
+    await expect(afterMove.move(workspace, workspace, {
+      source: { workspaceId: workspace.id, path: '../outside.txt' },
+      destination: { workspaceId: workspace.id, path: 'destination/outside.txt' }
+    })).resolves.toMatchObject({
+      status: 'error',
+      code: 'WORKSPACE_MOVE_INVALID_PATH',
+      finalLocation: 'source'
+    })
+    await expect(afterMove.move(workspace, workspace, {
+      source: { workspaceId: workspace.id, path: 'source/same.txt' },
+      destination: { workspaceId: workspace.id, path: 'source/same.txt' }
+    })).resolves.toMatchObject({
+      status: 'error',
+      code: 'WORKSPACE_MOVE_SAME_PATH',
+      finalLocation: 'source'
+    })
+
+    const otherWorkspace = { ...workspace, id: 'other-workspace' }
+    await expect(afterMove.move(workspace, otherWorkspace, {
+      source: { workspaceId: workspace.id, path: 'source/missing.txt' },
+      destination: { workspaceId: otherWorkspace.id, path: 'destination/missing.txt' }
+    })).resolves.toMatchObject({
+      status: 'error',
+      code: 'WORKSPACE_MOVE_CROSS_WORKSPACE',
+      finalLocation: 'source'
+    })
+    await expect(afterMove.move(workspace, {
+      ...workspace,
+      id: 'other-host-workspace',
+      hostId: 'other-host'
+    }, {
+      source: { workspaceId: workspace.id, path: 'source/missing.txt' },
+      destination: { workspaceId: 'other-host-workspace', path: 'destination/missing.txt' }
+    })).resolves.toMatchObject({
+      status: 'error',
+      code: 'WORKSPACE_MOVE_CROSS_HOST',
+      finalLocation: 'source'
+    })
   })
 
   it('rejects a remote symlink target resolved outside the workspace before cat or tee', async () => {
@@ -554,8 +772,15 @@ describe('WorkspaceFiles root confinement', () => {
       { name: 'README.md', path: 'README.md', isDirectory: false, isSymlink: false }
     ])
     await files.create(workspace, { path: 'src/new.ts', kind: 'file' })
-    await files.rename(workspace, { path: 'src/new.ts', nextPath: 'src/renamed.ts' })
-    await files.delete(workspace, 'src/renamed.ts')
+    await expect(files.move(workspace, workspace, {
+      source: { workspaceId: workspace.id, path: 'src/new.ts' },
+      destination: { workspaceId: workspace.id, path: 'src/renamed.ts' }
+    })).resolves.toMatchObject({
+      status: 'error',
+      code: 'REMOTE_WORKSPACE_FILE_MOVE_UNSUPPORTED',
+      finalLocation: 'source'
+    })
+    await files.delete(workspace, 'src/new.ts')
 
     expect(run).toHaveBeenCalledWith(
       'find',
@@ -567,8 +792,9 @@ describe('WorkspaceFiles root confinement', () => {
       ['-c', 'umask 077; set -C; : > "$1"', 'agentmux-create', '/srv/project/src/new.ts'],
       { timeoutMs: 15_000 }
     )
-    expect(run).toHaveBeenCalledWith('rm', ['-rf', '--', '/srv/project/src/renamed.ts'], {
+    expect(run).toHaveBeenCalledWith('rm', ['-rf', '--', '/srv/project/src/new.ts'], {
       timeoutMs: 15_000
     })
+    expect(run.mock.calls.flatMap(([, args]) => args).join('\n')).not.toContain('mv --')
   })
 })

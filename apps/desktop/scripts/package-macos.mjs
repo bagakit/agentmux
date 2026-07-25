@@ -302,6 +302,57 @@ async function verifyPackagedRuntime(appPath, verificationRoot) {
   const appResources = join(appPath, 'Contents', 'Resources', 'app')
   const coreRuntime = join(appResources, 'node_modules', '@agentmux', 'core')
   const binaryRoot = join(coreRuntime, 'vendor', 'ctxmux', 'darwin-arm64', 'bin')
+  const workspaceMoveHelper = join(appResources, 'resources', 'bin', 'agentmux-workspace-move')
+  const workspaceMoveRoot = join(verificationRoot, 'workspace-move-helper')
+  const workspaceMoveSource = join(workspaceMoveRoot, 'source')
+  const workspaceMoveDestination = join(workspaceMoveRoot, 'destination')
+  await Promise.all([
+    mkdir(workspaceMoveSource, { recursive: true }),
+    mkdir(workspaceMoveDestination, { recursive: true })
+  ])
+  const workspaceMoveHelperInfo = await stat(workspaceMoveHelper)
+  assert(
+    workspaceMoveHelperInfo.isFile() && (workspaceMoveHelperInfo.mode & 0o111) !== 0,
+    'Packaged Workspace move helper is missing or not executable.'
+  )
+  const workspaceMoveRootInfo = await stat(workspaceMoveRoot, { bigint: true })
+  const workspaceMoveArgs = (source, destination) => [
+    workspaceMoveRoot,
+    workspaceMoveRootInfo.dev.toString(),
+    workspaceMoveRootInfo.ino.toString(),
+    source,
+    destination
+  ]
+  await writeFile(join(workspaceMoveSource, 'moved.txt'), 'packaged helper bytes')
+  await run(workspaceMoveHelper, workspaceMoveArgs('source/moved.txt', 'destination/moved.txt'), { capture: true })
+  assert(
+    await readFile(join(workspaceMoveDestination, 'moved.txt'), 'utf8') === 'packaged helper bytes',
+    'Packaged Workspace move helper did not move the source bytes.'
+  )
+  await Promise.all([
+    writeFile(join(workspaceMoveSource, 'collision.txt'), 'source bytes'),
+    writeFile(join(workspaceMoveDestination, 'collision.txt'), 'destination bytes')
+  ])
+  let collisionError
+  try {
+    await run(
+      workspaceMoveHelper,
+      workspaceMoveArgs('source/collision.txt', 'destination/collision.txt'),
+      { capture: true }
+    )
+  } catch (error) {
+    collisionError = error
+  }
+  assert(
+    collisionError instanceof Error && collisionError.message.includes('errno=17'),
+    'Packaged Workspace move helper did not report the destination collision.'
+  )
+  assert(
+    await readFile(join(workspaceMoveSource, 'collision.txt'), 'utf8') === 'source bytes' &&
+      await readFile(join(workspaceMoveDestination, 'collision.txt'), 'utf8') === 'destination bytes',
+    'Packaged Workspace move helper changed bytes after a destination collision.'
+  )
+  process.stdout.write('packaged_workspace_move_helper=passed\n')
   const [cli, daemon, agentmux] = await Promise.all([
     run(join(binaryRoot, 'ctxmux'), ['--version'], { capture: true }),
     run(join(binaryRoot, 'ctxmuxd'), ['--version'], { capture: true }),

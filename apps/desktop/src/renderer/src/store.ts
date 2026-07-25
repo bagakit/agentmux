@@ -806,7 +806,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       return isPathWithinSubtree(documentPath, path) ? [documentPath] : []
     })
     try {
-      await api.files.rename(workspaceId, { path, nextPath })
+      const result = await api.files.move({
+        source: { workspaceId, path },
+        destination: { workspaceId, path: nextPath }
+      })
+      if (result.status === 'error') {
+        throw Object.assign(new Error(result.message), {
+          code: result.code,
+          finalLocation: result.finalLocation
+        })
+      }
       set((state) => reduceFileRename(state, workspaceId, path, nextPath))
       for (const observedPath of observedPaths) {
         const renamedPath = remapPathWithinSubtree(observedPath, path, nextPath)

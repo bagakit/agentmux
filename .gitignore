@@ -2,6 +2,7 @@
 node_modules
 dist
 apps/desktop/release
+apps/desktop/resources/bin/agentmux-workspace-move
 out
 .vite
 coverage
