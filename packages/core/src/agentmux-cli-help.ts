@@ -61,6 +61,11 @@ Usage:
   agentmux open terminal [--command <shell-command>] <destination>
   agentmux open browser --url <url> <destination>
 
+Exactly one destination is required:
+  --left-of <region-id|self>      --right-of <region-id|self>
+  --above <region-id|self>        --below <region-id|self>
+  --new-tab-after <tab-id|self>   --in-region <launcher-region-id>
+
 Agent prompt, Terminal shell command, and Browser URL are delivered once to their
 respective owner. Every form requires exactly one destination.`],
   ['open.agent', `Open a new or existing Agent Session
