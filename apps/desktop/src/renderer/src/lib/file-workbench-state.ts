@@ -187,9 +187,16 @@ export function reduceDocumentRead(
   }
   if (result.document.revision === current.revision) {
     const issue = state.documentIssues[key]
-    return issue?.kind === 'changed' || issue?.kind === 'deleted' || issue?.kind === 'read-error'
-      ? { ...state, documentObservationGenerations, documentIssues: withoutIssue(state.documentIssues, key) }
-      : { ...state, documentObservationGenerations }
+    const clearsIssue = issue?.kind === 'changed' || issue?.kind === 'deleted' || issue?.kind === 'read-error'
+    const matchesCurrentContent = result.document.content === current.content
+    return {
+      ...state,
+      documentObservationGenerations,
+      ...(matchesCurrentContent
+        ? { dirtyDocuments: { ...state.dirtyDocuments, [key]: false } }
+        : {}),
+      ...(clearsIssue ? { documentIssues: withoutIssue(state.documentIssues, key) } : {})
+    }
   }
   if (state.dirtyDocuments[key]) return {
     ...state,
