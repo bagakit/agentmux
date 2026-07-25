@@ -526,6 +526,15 @@ const mockApi: AgentMuxDesktopApi = {
     // No native dialog outside Electron; dismissing is the honest answer.
     chooseFiles: async () => null,
     savePastedImage: async () => { throw new Error('Pasting images requires the desktop app.') },
+    // A browser tab has no OS notification channel we own, so this reports unsupported rather than
+    // claiming delivery. The caller's contract already handles that by falling back to the in-window
+    // signal, which is all a web view can honestly offer.
+    notifyAgentAttention: async () => ({
+      status: 'unsupported' as const,
+      reason: 'Native notifications require the desktop app.'
+    }),
+    // Nothing can raise one here, so nothing can be clicked; the unsubscribe is still real.
+    onAgentAttentionActivate: () => () => {},
     getZoomFactor: () => 1,
     onWindowResize(listener) {
       windowResizeListeners.add(listener)

@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webFrame } from 'electron'
 import type { AgentExecutorId, AgentMuxControlRequest } from '@agentmux/core'
 import {
+  AGENT_ATTENTION_ACTIVATE_CHANNEL,
   CONTROL_CANCEL_CHANNEL,
   CONTROL_REQUEST_CHANNEL,
   CONTROL_RESPONSE_CHANNEL,
@@ -82,6 +83,13 @@ const api: AgentMuxPreloadApi = {
     chooseFiles: (input?: { defaultPath?: string }) => ipcRenderer.invoke('ui:chooseFiles', input),
     savePastedImage: (input: { bytes: Uint8Array; extension: string }) =>
       ipcRenderer.invoke('ui:savePastedImage', input),
+    notifyAgentAttention: (input: { sessionId: string; title: string; body: string }) =>
+      ipcRenderer.invoke('ui:notifyAgentAttention', input),
+    onAgentAttentionActivate(listener: (sessionId: string) => void) {
+      const wrapped = (_event: Electron.IpcRendererEvent, sessionId: string): void => listener(sessionId)
+      ipcRenderer.on(AGENT_ATTENTION_ACTIVATE_CHANNEL, wrapped)
+      return () => ipcRenderer.off(AGENT_ATTENTION_ACTIVATE_CHANNEL, wrapped)
+    },
     getZoomFactor: () => webFrame.getZoomFactor(),
     onWindowResize(listener: (event: WindowResizeEvent) => void) {
       const wrapped = (_event: Electron.IpcRendererEvent, value: WindowResizeEvent): void => listener(value)
