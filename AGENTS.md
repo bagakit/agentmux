@@ -12,7 +12,7 @@
 
 ## 2. Agent 原生编辑器
 
-第二个目标是提供一个对标 a mature workbench 和 a mature workbench 的好用编辑器。它不是另一套 Agent Runtime，而是 `packages/core` 的第一方 client 和完整参考实现，用真实的编辑、终端、会话、工作区、worktree 与多 Agent 协作流程验证核心包的可用性。
+第二个目标是提供一个达到成熟产品水准的 Agent 原生编辑器。它不是另一套 Agent Runtime，而是 `packages/core` 的第一方 client 和完整参考实现，用真实的编辑、终端、会话、工作区、worktree 与多 Agent 协作流程验证核心包的可用性。
 
 编辑器要保持 Agent-first 和 terminal-first：Agent 状态清晰可见，人机交互顺畅，工作区和多会话管理高效，并在信息架构、交互细节和视觉完成度上达到成熟产品水准。所有 Agent 生命周期能力都必须通过 `packages/core` 的公开 API 实现，编辑器不得绕过核心包直接管理 Agent 进程。
 

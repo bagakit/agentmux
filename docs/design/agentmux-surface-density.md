@@ -1,7 +1,7 @@
 # AgentMux Surface 与密度合同
 
 > 产品交互与 Owner 边界见
-> [`interaction-review.md`](./interaction-review.md)；导航与会话栏需求见
+> [`agentmux-desktop-interaction.md`](./agentmux-desktop-interaction.md)；导航与会话栏需求见
 > [`agentmux-project-rail-navigation.md`](../plans/agentmux-project-rail-navigation.md)。
 
 本文只保存当前视觉规则、密度预算和控件 Owner。历史实现步骤、来源记录、截图流水和过期数值不属于设计真相。
