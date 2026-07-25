@@ -531,4 +531,51 @@ describe('built-in agent providers', () => {
     // unchanged-hash guard, and we never write the global auto-accept opt-in.
     expect(approvals.every((approval) => Object.keys(approval).sort().join(',') === 'command,event')).toBe(true)
   })
+
+  it('projects launch options only for providers that declare them (absence hides the control)', () => {
+    const catalog = new Map(providers.catalog().map((provider) => [provider.id, provider.launchOptions]))
+    // Codex and Claude declare launch options; every other built-in declares none, so the renderer
+    // draws no control for them.
+    expect(catalog.get('codex')?.map((option) => option.id)).toEqual(['sandbox', 'approval'])
+    expect(catalog.get('claude')?.map((option) => option.id)).toEqual(['permission-mode'])
+    for (const id of ['traex', 'hermes', 'pi', 'grok', 'gemini', 'antigravity', 'cursor'] as const) {
+      expect(catalog.get(id)).toEqual([])
+    }
+  })
+
+  it('projects the DESCRIBE half without leaking any argv across the catalog', () => {
+    const codex = new Map(providers.catalog().map((provider) => [provider.id, provider]))
+    const sandbox = codex.get('codex')?.launchOptions.find((option) => option.id === 'sandbox')
+    expect(sandbox?.choices.map((choice) => choice.id)).toEqual([
+      'read-only', 'workspace-write', 'danger-full-access'
+    ])
+    // The serializable descriptor carries labels/tiers the UI renders, never the launch argv.
+    for (const choice of sandbox?.choices ?? []) {
+      expect('argv' in choice).toBe(false)
+      expect(typeof choice.label).toBe('string')
+    }
+    expect(sandbox?.choices.find((choice) => choice.id === 'danger-full-access')?.tier).toBe('danger')
+  })
+
+  it('resolves declared launch-option argv through the provider and composes two options', () => {
+    // Verified against `codex --help`: `--sandbox <mode>` and `--ask-for-approval <policy>`.
+    expect(providers.get('codex').resolveLaunchArgv({ sandbox: 'workspace-write' }))
+      .toEqual(['--sandbox', 'workspace-write'])
+    expect(providers.get('codex').resolveLaunchArgv({ sandbox: 'read-only', approval: 'never' }))
+      .toEqual(['--sandbox', 'read-only', '--ask-for-approval', 'never'])
+    // Verified against `claude --help`: `--permission-mode <mode>`.
+    expect(providers.get('claude').resolveLaunchArgv({ 'permission-mode': 'plan' }))
+      .toEqual(['--permission-mode', 'plan'])
+  })
+
+  it('fails closed when a launch-option selection names an option or choice the provider never declared', () => {
+    // A provider with no options rejects any selection rather than silently dropping it.
+    expect(() => providers.get('traex').resolveLaunchArgv({ sandbox: 'read-only' }))
+      .toThrowError(/does not declare launch option 'sandbox'/)
+    // A declared option rejects an un-offered choice.
+    expect(() => providers.get('codex').resolveLaunchArgv({ sandbox: 'yolo' }))
+      .toThrowError(/has no choice 'yolo'/)
+    // An empty selection contributes nothing.
+    expect(providers.get('codex').resolveLaunchArgv({})).toEqual([])
+  })
 })
