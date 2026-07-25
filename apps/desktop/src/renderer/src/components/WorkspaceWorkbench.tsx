@@ -325,6 +325,7 @@ function SurfaceContent({
   if (surface.kind === 'browser') {
     return (
       <BrowserPane
+        key={surface.browserId}
         tab={surface}
         visible={nativeSurfacesVisible}
       />
