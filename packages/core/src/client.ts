@@ -775,8 +775,8 @@ export class AgentMuxClient {
    *
    * Best-effort: a native provider whose hook config cannot be written still launches (its terminal
    * output remains observable) — the install failure is surfaced as a non-fatal `agent-error` rather
-   * than aborting the launch. Providers with no installable plan (`resolveManagedHookPlan` → null, e.g.
-   * hermes' YAML plugin or pi's TypeScript extension) are simply skipped.
+   * than aborting the launch. Providers whose hooks are `unmanaged` (e.g. pi's TypeScript extension)
+   * never reach the installer — the `explicit-managed` gate below returns before a plan is resolved.
    */
   private async ensureManagedHooks(
     provider: AgentProvider,
