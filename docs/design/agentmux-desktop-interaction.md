@@ -70,7 +70,8 @@
 - Composer 的附件与粘贴图片都产出**路径引用**，由 Agent 自行读取，Composer 不内联文件内容。这是运行时事实决定的：prompt 通道是有字节上限的纯文本，且当前没有 Provider 走 ACP，不存在把二进制送进模型上下文的通路。粘贴的图片由 Desktop main 落盘（渲染进程只提供字节，不指定写入位置与文件名），再以与附件相同的引用形式进入草稿。工作区内的路径写成相对路径，因为那才是 Agent 的工作目录能解析的形式。
 - 引用当前打开文件的快捷方式只在确有打开文件时出现。它是快捷方式而非第二条附件通道，没有可引用对象时隐藏，不以禁用态占位。
 - Terminal 使用 xterm 的真实字符网格、DPR 和 TUI 输入。没有 pending interaction 时，Agent Terminal 的 xterm TUI 输入与 Agent Composer 是同一 Agent 的两条明确输入路径；Raw Terminal 只保留 TUI 输入。
-- Terminal 链接只在手势确实是**点击**时才响应：指针位移超过阈值或留下选区，都判定为选择文本而非点击链接——拖选跨过 URL 不得弹出打开菜单。悬停显示目标与打开方式，锚定位置永不遮挡它所描述的那一行链接。Cmd（非 macOS 为 Ctrl）+ 点击直接在系统浏览器打开，普通点击仍走目标选择菜单。
+- Terminal 链接只在手势确实是**点击**时才响应：指针位移超过阈值或留下选区，都判定为选择文本而非点击链接——拖选跨过链接不得触发打开。悬停显示目标与打开方式，锚定位置永不遮挡它所描述的那一行链接。链接分两类，共用同一套手势守卫与悬停预览：http(s) URL 由 web-links 拥有，Cmd（非 macOS 为 Ctrl）+ 点击直接在系统浏览器打开，普通点击走目标选择菜单；文件路径由一个独立 link provider 拥有，普通点击在编辑器 Region 打开该文件。
+- Terminal 文件路径识别是**纯语法、保守**的：检测在 xterm 渲染/悬停热路径上运行，只做字符串工作——读 xterm 已持有的那一行 buffer 文本并用纯函数匹配，热路径上没有磁盘或 IPC，更不做存在性探测。规则的关键判据是「core 含 `/` 或带 `:line` 后缀」，据此丢弃裸词（`e.g.`、`1.2.3`、`README`）却仍捕获 `README.md:3:1` 与真实相对/绝对路径；绝对路径仅当落在活动 Workspace 根内才识别，`~/`、逃出根的相对路径不识别。识别出的路径归一为 Workspace 相对路径，交给与 Explorer 同一个 `openFile` seam 打开；带 `:line[:col]` 时通过一次性 reveal target 落到该行。误报或不存在的路径在点击打开时经 reportError 明确失败，绝不静默——「点击开不出来」而非污染状态。相对路径按 Workspace 根解析（非终端 live cwd）。
 - Terminal 主题只属于 Desktop Renderer。ctxmux、RunSpec 和 Core 公共合同不出现主题字段。
 - Renderer 负责把最新 `cols × rows` 通过 Core 公共 Resize 提交给 ctxmux；resize 热路径只保留一个在途请求和一个最新 pending size。
 - Replay、Live、Gap、ACK 与 Attachment lease 均服从 ctxmux/Core 的 ordered-byte 合同，View 不建立补偿状态机。
