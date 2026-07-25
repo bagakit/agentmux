@@ -640,15 +640,17 @@ describe('WorktreeService', () => {
     expect(save).not.toHaveBeenCalled()
   }, 20000)
 
-  it('prunes Git metadata so a worktree can be recreated at the same path', async () => {
+  it('leaves the path immediately re-addable after removal', async () => {
     const { repoPath, worktreePath, executionHost, config: fixtureConfig } = await buildLocalWorktreeFixture()
     const save = vi.fn(async (value: AppConfig) => value)
     const service = new WorktreeService(() => executionHost, { save })
 
     await service.removeWorktree({ workspaceId: 'lane' }, fixtureConfig)
 
-    // Without the prune step git keeps a dangling record and refuses to add here; a clean re-add at the
-    // same path is the observable proof that prune actually ran.
+    // `git worktree remove` deletes the admin entry itself, so the path is free again with no prune —
+    // verified against real git. This test's earlier name claimed it proved prune ran; it never could,
+    // because it passes with or without prune. It pins the property that actually matters: after a
+    // removal the lane's path can be reused, which is what a repeat fan-out needs.
     const readd = await executionHost.run('git', ['-C', repoPath, 'worktree', 'add', '--', worktreePath, 'feature/lane'])
     expect(readd.exitCode).toBe(0)
     expect((await stat(join(worktreePath, 'README.md'))).isFile()).toBe(true)
