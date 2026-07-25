@@ -1658,80 +1658,100 @@ export class AgentMuxClient {
     if (expectedByte === null) {
       throw new AgentMuxError('CtxMux omitted its accepted Input byte cursor.', 'CTXMUX_INPUT_CURSOR_MISSING')
     }
-    let current: AgentMuxStoredAgentSession
-    try {
-      current = await this.registry.update(
-        session.agentSessionId,
-        session.run,
-        (stored) => {
-          const existing = stored.terminalPromptSubmission
-          if (existing?.submissionId === submissionId) {
-            assertSubmission(existing)
-            return stored
-          }
-          if (existing && !existing.submit.acknowledged) {
-            throw new AgentMuxError(
-              'Another Agent prompt operation is incomplete for this Run.',
-              'AGENT_PROMPT_SUBMISSION_BUSY'
-            )
-          }
-          const stopReceipt = stored.terminalStopReceipt
-          if (!stopReceipt || stopReceipt.readyThroughByte === undefined) {
-            throw new AgentMuxError(
-              'Agent prompt requires a ready native Stop receipt for this exact Run.',
-              'AGENT_PROMPT_NOT_READY'
-            )
-          }
-          if (stopReceipt.consumedBySubmissionId !== undefined) {
-            throw new AgentMuxError(
-              'The current native Stop receipt was already consumed by another prompt.',
-              'AGENT_PROMPT_STOP_RECEIPT_CONSUMED'
-            )
-          }
-          const outputCursorBytes = Math.max(run.latestOutputBytes, stopReceipt.readyThroughByte)
-          return {
-            ...stored,
-            terminalStopReceipt: {
-              ...stopReceipt,
-              consumedBySubmissionId: submissionId
-            },
-            terminalPromptSubmission: {
-              run: { ...stored.run },
-              submissionId,
-              promptDigest,
-              stopReceiptId: stopReceipt.id,
-              stopOutputCursorBytes: stopReceipt.outputCursorBytes,
-              readyThroughByte: stopReceipt.readyThroughByte,
-              outputCursorBytes,
-              payload: {
-                operationId: payloadOperationId,
-                inputByteRange: {
-                  startByte: expectedByte,
-                  endByte: expectedByte + payloadBytes
-                },
-                acknowledged: false
+    let current!: AgentMuxStoredAgentSession
+    const deadline = Date.now() + 4000
+    while (true) {
+      try {
+        current = await this.registry.update(
+          session.agentSessionId,
+          session.run,
+          (stored) => {
+            const existing = stored.terminalPromptSubmission
+            if (existing?.submissionId === submissionId) {
+              assertSubmission(existing)
+              return stored
+            }
+            if (existing && !existing.submit.acknowledged) {
+              throw new AgentMuxError(
+                'Another Agent prompt operation is incomplete for this Run.',
+                'AGENT_PROMPT_SUBMISSION_BUSY'
+              )
+            }
+            const stopReceipt = stored.terminalStopReceipt
+            if (!stopReceipt || stopReceipt.readyThroughByte === undefined) {
+              throw new AgentMuxError(
+                'Agent prompt requires a ready native Stop receipt for this exact Run.',
+                'AGENT_PROMPT_NOT_READY'
+              )
+            }
+            if (stopReceipt.consumedBySubmissionId !== undefined) {
+              throw new AgentMuxError(
+                'The current native Stop receipt was already consumed by another prompt.',
+                'AGENT_PROMPT_STOP_RECEIPT_CONSUMED'
+              )
+            }
+            const outputCursorBytes = Math.max(run.latestOutputBytes, stopReceipt.readyThroughByte)
+            return {
+              ...stored,
+              terminalStopReceipt: {
+                ...stopReceipt,
+                consumedBySubmissionId: submissionId
               },
-              submit: {
-                operationId: submitOperationId,
-                inputByteRange: {
-                  startByte: expectedByte + payloadBytes,
-                  endByte: expectedByte + payloadBytes + submitBytes
+              terminalPromptSubmission: {
+                run: { ...stored.run },
+                submissionId,
+                promptDigest,
+                stopReceiptId: stopReceipt.id,
+                stopOutputCursorBytes: stopReceipt.outputCursorBytes,
+                readyThroughByte: stopReceipt.readyThroughByte,
+                outputCursorBytes,
+                payload: {
+                  operationId: payloadOperationId,
+                  inputByteRange: {
+                    startByte: expectedByte,
+                    endByte: expectedByte + payloadBytes
+                  },
+                  acknowledged: false
                 },
-                acknowledged: false
-              }
-            },
-            updatedAt: Date.now()
+                submit: {
+                  operationId: submitOperationId,
+                  inputByteRange: {
+                    startByte: expectedByte + payloadBytes,
+                    endByte: expectedByte + payloadBytes + submitBytes
+                  },
+                  acknowledged: false
+                }
+              },
+              updatedAt: Date.now()
+            }
           }
-        }
-      )
-    } catch (error) {
-      if (error instanceof AgentMuxError && error.code === 'STALE_AGENT_SESSION') {
-        throw new AgentMuxError(
-          'Native Stop receipt changed or was consumed by another Client.',
-          'AGENT_PROMPT_STOP_RECEIPT_CONFLICT'
         )
+        break
+      } catch (error) {
+        if (
+          error instanceof AgentMuxError &&
+          error.code === 'AGENT_PROMPT_NOT_READY' &&
+          Date.now() < deadline
+        ) {
+          const currentStored = this.registry.get(session.agentSessionId)
+          if (!sameRun(currentStored.run, session.run)) {
+            throw new AgentMuxError('Agent Run changed during prompt readiness wait.', 'STALE_AGENT_SESSION')
+          }
+          const runStatus = await this.kernel.status(session.run.runId).catch(() => null)
+          if (runStatus && runStatus.state.type !== 'running') {
+            throw new AgentMuxError('Agent Run exited before prompt became ready.', 'STALE_AGENT_SESSION')
+          }
+          await new Promise((resolve) => setTimeout(resolve, 50))
+          continue
+        }
+        if (error instanceof AgentMuxError && error.code === 'STALE_AGENT_SESSION') {
+          throw new AgentMuxError(
+            'Native Stop receipt changed or was consumed by another Client.',
+            'AGENT_PROMPT_STOP_RECEIPT_CONFLICT'
+          )
+        }
+        throw error
       }
-      throw error
     }
     let submission = current.terminalPromptSubmission
     if (!submission) {

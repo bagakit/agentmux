@@ -84,6 +84,30 @@ describe('ConfigStore workspace identity', () => {
     expect(JSON.parse(await readFile(path, 'utf8'))).toMatchObject({ version: 7 })
   })
 
+  it('rejects future-version config strictly and retains the file', async () => {
+    const { store, path } = await storeFixture()
+    await writeFile(path, JSON.stringify({
+      ...baseConfig,
+      version: 8
+    }))
+
+    await expect(store.get()).rejects.toThrow()
+    const content = JSON.parse(await readFile(path, 'utf8'))
+    expect(content.version).toBe(8)
+  })
+
+  it('rejects malformed-version config strictly and retains the file', async () => {
+    const { store, path } = await storeFixture()
+    await writeFile(path, JSON.stringify({
+      ...baseConfig,
+      version: '7'
+    }))
+
+    await expect(store.get()).rejects.toThrow()
+    const content = JSON.parse(await readFile(path, 'utf8'))
+    expect(content.version).toBe('7')
+  })
+
   it('rejects corrupted current-version config strictly', async () => {
     const { store, path } = await storeFixture()
     await writeFile(path, JSON.stringify({

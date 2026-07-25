@@ -1,4 +1,5 @@
 import { AgentMuxError } from './errors.js'
+import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { ExecutionHost } from './execution-host.js'
@@ -156,24 +157,36 @@ const ANTIGRAVITY_HOOKS: AgentNativeHookSpecification = {
   }
 }
 
-export function createAntigravityManagedHookPlan(workspacePath: string): AgentManagedHookPlan {
-  const workspace = resolve(workspacePath)
-  if (!isAbsolute(workspacePath) || workspace !== workspacePath) {
-    throw new AgentMuxError('Antigravity Hook workspace must be an absolute normalized path.', 'INVALID_HOOK_PLAN')
-  }
+export function createAntigravityManagedHookPlan(homeOrWorkspacePath?: string): AgentManagedHookPlan {
+  const targetRoot = homeOrWorkspacePath ? resolve(homeOrWorkspacePath) : homedir()
+  const targetPath = targetRoot.endsWith('.json')
+    ? targetRoot
+    : join(targetRoot, '.gemini', 'config', 'hooks.json')
   const commandPath = fileURLToPath(new URL('../bin/agentmux-hook.js', import.meta.url))
   const command = `${shellQuote(process.execPath)} ${shellQuote(commandPath)}`
-  const hooks = Object.fromEntries(ANTIGRAVITY_HOOK_EVENTS.map((eventName) => [eventName, [{
-    hooks: [{ type: 'command', command, timeout: 10 }]
-  }]]))
+
+  const bundle: Record<string, unknown> = {}
+  for (const eventName of ANTIGRAVITY_HOOK_EVENTS) {
+    const eventCmd = `${command} --event ${eventName}`
+    if (eventName === 'PreToolUse' || eventName === 'PostToolUse') {
+      bundle[eventName] = [
+        {
+          matcher: '*',
+          hooks: [{ type: 'command', command: eventCmd, timeout: 10 }]
+        }
+      ]
+    } else {
+      bundle[eventName] = [
+        { type: 'command', command: eventCmd, timeout: 10 }
+      ]
+    }
+  }
+
   return {
     providerId: 'antigravity',
     mutations: [{
-      path: join(workspace, '.gemini', 'hooks.json'),
-      content: `${JSON.stringify({
-        description: 'AgentMux Antigravity lifecycle bridge.',
-        hooks
-      }, null, 2)}\n`,
+      path: targetPath,
+      content: `${JSON.stringify({ 'agentmux-status': bundle }, null, 2)}\n`,
       mode: 0o600
     }]
   }

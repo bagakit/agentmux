@@ -602,20 +602,13 @@ describe('RuntimeController configuration transaction', () => {
     }
   )
 
-  it('retries submitPrompt when Core reports AGENT_PROMPT_NOT_READY until ready', async () => {
+  it('submits prompt to running agent through single Core submitAgentPrompt invocation', async () => {
     const controller = await configuredController()
     const client = runtimeFixture.FakeClient.instances[0]!
     const running = agentStatusFixture()
     client.statusAgent.mockResolvedValue({
       ...running,
       run: { ...running.run, state: 'running' as const }
-    })
-    let attempts = 0
-    client.submitAgentPrompt.mockImplementation(async () => {
-      attempts++
-      if (attempts < 3) {
-        throw new AgentMuxError('Agent prompt requires a ready native Stop receipt.', 'AGENT_PROMPT_NOT_READY')
-      }
     })
     const control = {
       kind: 'agent' as const,
@@ -625,8 +618,11 @@ describe('RuntimeController configuration transaction', () => {
     }
 
     await controller.submitPrompt(control, 'hello', localConfig)
-    expect(attempts).toBe(3)
-    expect(client.submitAgentPrompt).toHaveBeenCalledTimes(3)
+    expect(client.submitAgentPrompt).toHaveBeenCalledTimes(1)
+    expect(client.submitAgentPrompt).toHaveBeenCalledWith(expect.objectContaining({
+      agentSessionId: 'agent-1',
+      prompt: 'hello'
+    }))
   })
 
   it('delegates Agent recovery to Core continuity without inventing a prompt', async () => {
