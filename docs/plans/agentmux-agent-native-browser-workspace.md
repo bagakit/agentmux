@@ -17,7 +17,7 @@ Browser 不只负责打开网页，还要把网页上下文安全地带给 Agent
 
 - “在系统浏览器打开”继续走 Main 的 URL 校验与系统 `shell.openExternal`。
 - “在新 Tab 打开”在当前 Universal Pane group 中创建 Browser Tab；左、右、上、下使用现有 workbench split owner，从当前 region 派生目标 region 后创建 Browser，不另建布局 Store。
-- 目的地选择器是可复用的 `OpenDestinationMenu`，只接收经过 HTTP(S) 解析的 URL、当前 workspace/group/region 和一个明确 destination enum。菜单用方向图示同时表达落点和最终 pane 结构，键盘可导航、Escape 可关闭，不只依赖图标猜含义。
+- 目的地选择器是可复用的 `OpenDestinationMenu`，只接收经过 HTTP(S) 解析的 URL、点击位置和当前是否具备精确可分割 pane，并返回一个明确 destination enum。调用它的 Renderer controller 持有当前 workspace/group/tab/region origin，并把用户选择交给既有 Store；菜单本身不持有布局事实。菜单用方向图示同时表达落点和最终 pane 结构，键盘可导航、Escape 可关闭，不只依赖图标猜含义。
 - Renderer 只表达用户选择的布局意图；Browser WebContents、URL 导航和系统外链仍由 Electron Main 的既有 owner 执行。网页内容、Terminal output 或页面脚本不能直接提交任意布局 mutation。
 - 普通 Browser 页面内的同页导航继续保留 Chromium 原生语义；本任务不拦截所有网页点击来强行弹菜单，也不破坏 OAuth popup、下载或 opener 行为。
 
