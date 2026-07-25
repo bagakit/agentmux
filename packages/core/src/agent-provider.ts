@@ -122,6 +122,20 @@ function managedHookCommand(providerId: AgentProviderId): string {
   return `ELECTRON_RUN_AS_NODE=1 AGENTMUX_HOOK_PROVIDER=${shellQuote(providerId)} ${shellQuote(process.execPath)} ${shellQuote(commandPath)}`
 }
 
+/**
+ * The hermes variant of {@link managedHookCommand}. hermes runs a shell hook as
+ * `subprocess.run(shlex.split(command), shell=False)` — no shell — so the bare `VAR=val exec …` prefix
+ * used everywhere else would make `ELECTRON_RUN_AS_NODE=1` the argv[0] hermes tries to exec. Prefixing
+ * `/usr/bin/env` restores the environment assignment: `env` itself parses the `NAME=value` operands and
+ * then execs the interpreter, so `ELECTRON_RUN_AS_NODE` and the baked-in `AGENTMUX_HOOK_PROVIDER` reach
+ * the hook exactly as the other providers get them. Because the hook `.js` is interpreter-prefixed (not
+ * argv[0]), hermes only requires it to be readable, never executable.
+ */
+function hermesHookCommand(): string {
+  const commandPath = fileURLToPath(new URL('../bin/agentmux-hook.js', import.meta.url))
+  return `/usr/bin/env ELECTRON_RUN_AS_NODE=1 AGENTMUX_HOOK_PROVIDER=${shellQuote('hermes')} ${shellQuote(process.execPath)} ${shellQuote(commandPath)}`
+}
+
 export function createCodexManagedHookPlan(workspacePath: string): AgentManagedHookPlan {
   const workspace = resolve(workspacePath)
   if (!isAbsolute(workspacePath) || workspace !== workspacePath) {
@@ -255,11 +269,57 @@ export function createAntigravityManagedHookPlan(homeOrWorkspacePath?: string): 
 }
 
 /**
+ * hermes' shell hooks live in the user's global `~/.hermes/config.yaml` — a comment-rich file that also
+ * holds their model, credentials, and their own `hooks:` — plus a consent gate in
+ * `~/.hermes/shell-hooks-allowlist.json`. AgentMux writes two mutations:
+ *
+ *   1. A comment-preserving YAML merge that adds our command entry under each event bucket in `hooks:`,
+ *      owning only entries whose command carries the `agentmux-hook.js` marker and leaving every foreign
+ *      key, foreign hook, and comment intact.
+ *   2. A JSON merge that adds our `(event, command)` approvals to the allowlist, since hermes gates each
+ *      shell hook on an exact approval and a non-TTY launch would otherwise skip our hooks. We add ONLY
+ *      our own entries — never the global `hooks_auto_accept` / `HERMES_ACCEPT_HOOKS` opt-in, which would
+ *      auto-approve every hook the user or another tool ever configures.
+ *
+ * Both mutations are idempotent (our approvals carry no timestamps; the YAML merge round-trips), so the
+ * installer's install-and-leave path re-runs cheaply and never rewrites the secrets-bearing config once
+ * installed. `homeOverride` exists only for tests; production always targets the real `~/.hermes`.
+ */
+export function createHermesManagedHookPlan(homeOverride?: string): AgentManagedHookPlan {
+  const home = homeOverride ? resolve(homeOverride) : homedir()
+  const command = hermesHookCommand()
+  const hooks = Object.fromEntries(
+    HERMES_HOOK_EVENTS.map((eventName) => [eventName, [{ command, timeout: 10 }]])
+  )
+  const approvals = HERMES_HOOK_EVENTS.map((eventName) => ({ event: eventName, command }))
+  return {
+    providerId: 'hermes',
+    mutations: [
+      {
+        path: join(home, '.hermes', 'config.yaml'),
+        // The owned fragment is JSON — the YAML merge reads it as data and edits the YAML doc in place,
+        // so nothing here dictates the on-disk formatting; comments and foreign keys are preserved.
+        content: `${JSON.stringify({ hooks }, null, 2)}\n`,
+        mode: 0o600,
+        merge: { kind: 'yaml-managed-events', marker: 'agentmux-hook.js' }
+      },
+      {
+        path: join(home, '.hermes', 'shell-hooks-allowlist.json'),
+        content: `${JSON.stringify({ approvals }, null, 2)}\n`,
+        mode: 0o600,
+        merge: { kind: 'json-managed-approvals', marker: 'agentmux-hook.js' }
+      }
+    ]
+  }
+}
+
+/**
  * Resolve the managed Hook plan a provider needs installed before it can report status, or `null`
  * when the provider has no installable plan yet. Codex and Claude write a workspace-scoped hooks
- * config; Antigravity writes the global `~/.gemini` bundle it shares with Gemini. Hermes (YAML plugin)
- * and Pi (TypeScript extension) declare native hooks but use non-JSON install surfaces with no plan
- * builder yet, so they resolve to `null` and are simply not auto-installed.
+ * config; Antigravity writes the global `~/.gemini` bundle it shares with Gemini; Hermes writes its
+ * global `~/.hermes/config.yaml` shell hooks plus the matching consent allowlist. Pi (TypeScript
+ * extension) declares native hooks but installs on a surface AgentMux does not write yet, so it
+ * resolves to `null` and is simply not auto-installed.
  */
 export function resolveManagedHookPlan(
   providerId: AgentProviderId,
@@ -272,6 +332,8 @@ export function resolveManagedHookPlan(
       return createClaudeManagedHookPlan(workspacePath)
     case 'antigravity':
       return createAntigravityManagedHookPlan()
+    case 'hermes':
+      return createHermesManagedHookPlan()
     default:
       return null
   }
@@ -304,15 +366,27 @@ const PI_HOOKS: AgentNativeHookSpecification = {
   }
 }
 
+// hermes fires only these six lifecycle events on the CLI path (agent/turn_finalizer.py,
+// agent/conversation_loop.py, model_tools.py, hermes_cli/plugins.py). `post_llm_call` fires once per
+// turn after the tool loop completes — not per LLM round-trip — so it maps cleanly to `done` without
+// mid-turn flicker. hermes has no resume, so the spec needs no nativeHandle.
+const HERMES_HOOK_EVENTS = [
+  'on_session_start',
+  'pre_llm_call',
+  'pre_tool_call',
+  'post_tool_call',
+  'post_llm_call',
+  'on_session_end'
+] as const
+
 const HERMES_HOOKS: AgentNativeHookSpecification = {
   rules: [
-    { events: ['pre_approval_request'], state: 'waiting' },
+    // hermes' interactive ask-user tool is `clarify` — a pending tool call on it means AgentMux is
+    // waiting on the user. This rule precedes the generic pre_tool_call rule so it wins the match.
+    { events: ['pre_tool_call'], toolNames: ['clarify'], state: 'waiting' },
+    { events: ['post_llm_call', 'on_session_end'], state: 'done' },
     {
-      events: ['post_llm_call', 'on_session_end', 'on_session_finalize', 'on_session_reset'],
-      state: 'done'
-    },
-    {
-      events: ['on_session_start', 'pre_llm_call', 'pre_tool_call', 'post_tool_call', 'post_approval_response'],
+      events: ['on_session_start', 'pre_llm_call', 'pre_tool_call', 'post_tool_call'],
       state: 'working'
     }
   ]
@@ -509,8 +583,9 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
       executable: 'hermes',
       expectedProcess: 'hermes',
       promptDelivery: 'hermes-query',
-      // Native hooks live in a YAML plugin config AgentMux does not install into yet — unmanaged.
-      hookStrategy: { kind: 'native', installation: 'unmanaged' },
+      // AgentMux writes hermes' shell hooks into ~/.hermes/config.yaml plus the consent allowlist,
+      // preserving the user's credentials, foreign hooks, and comments (see createHermesManagedHookPlan).
+      hookStrategy: { kind: 'native', installation: 'explicit-managed' },
       resumeStrategy: { kind: 'none' },
       acpStrategy: { kind: 'none' },
       capabilities: {

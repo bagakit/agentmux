@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { AgentProviderRegistry, createAntigravityManagedHookPlan, createClaudeManagedHookPlan, createCodexManagedHookPlan, resolveManagedHookPlan } from '../src/agent-provider.js'
+import { homedir } from 'node:os'
+import { AgentProviderRegistry, createAntigravityManagedHookPlan, createClaudeManagedHookPlan, createCodexManagedHookPlan, createHermesManagedHookPlan, resolveManagedHookPlan } from '../src/agent-provider.js'
 
 describe('built-in agent providers', () => {
   const providers = new AgentProviderRegistry()
@@ -83,15 +84,14 @@ describe('built-in agent providers', () => {
 
   it('distinguishes explicit-managed hook install from unmanaged native providers', () => {
     const catalog = new Map(providers.catalog().map((provider) => [provider.id, provider.hookStrategy]))
-    // AgentMux writes and owns these providers' hook config.
-    for (const id of ['codex', 'claude', 'antigravity'] as const) {
+    // AgentMux writes and owns these providers' hook config. Hermes joins them: AgentMux merges its
+    // shell hooks into ~/.hermes/config.yaml plus the consent allowlist (see createHermesManagedHookPlan).
+    for (const id of ['codex', 'claude', 'antigravity', 'hermes'] as const) {
       expect(catalog.get(id)).toEqual({ kind: 'native', installation: 'explicit-managed' })
     }
-    // Native hooks AgentMux understands but cannot install yet (hermes YAML plugin, pi TS extension):
-    // they must NOT claim explicit-managed, so the launch-time trigger honestly skips them.
-    for (const id of ['hermes', 'pi'] as const) {
-      expect(catalog.get(id)).toEqual({ kind: 'native', installation: 'unmanaged' })
-    }
+    // Native hooks AgentMux understands but cannot install yet (pi TS extension has no surface AgentMux
+    // writes): it must NOT claim explicit-managed, so the launch-time trigger honestly skips it.
+    expect(catalog.get('pi')).toEqual({ kind: 'native', installation: 'unmanaged' })
     // Providers with no hooks at all stay `none`, never a fake native.
     for (const id of ['traex', 'grok', 'gemini', 'cursor'] as const) {
       expect(catalog.get(id)).toEqual({ kind: 'none' })
@@ -387,14 +387,22 @@ describe('built-in agent providers', () => {
     expect(parsed.hooks['SessionStart']?.[0]?.matcher).toBeUndefined()
   })
 
-  it('resolves the managed hook plan only for JSON-config native providers, null for the rest', () => {
+  it('resolves the managed hook plan for JSON- and YAML-config native providers, null for the rest', () => {
     // JSON-config providers: codex and claude write into the workspace, antigravity into global ~/.gemini.
     expect(resolveManagedHookPlan('codex', '/tmp/work')?.mutations[0]?.path).toBe('/tmp/work/.codex/hooks.json')
     expect(resolveManagedHookPlan('claude', '/tmp/work')?.mutations[0]?.path).toBe('/tmp/work/.claude/settings.json')
     expect(resolveManagedHookPlan('antigravity', '/tmp/work')?.providerId).toBe('antigravity')
-    // hermes (YAML plugin) and pi (TypeScript extension) declare native hooks but have no JSON plan
-    // builder, so they resolve to null and are not auto-installed. Non-hook providers likewise.
-    expect(resolveManagedHookPlan('hermes', '/tmp/work')).toBeNull()
+    // hermes writes into its global ~/.hermes: the YAML config plus the consent allowlist (two mutations).
+    const hermesPlan = resolveManagedHookPlan('hermes', '/tmp/work')
+    expect(hermesPlan?.providerId).toBe('hermes')
+    expect(hermesPlan?.mutations.map((mutation) => mutation.path.replace(homedir(), '~'))).toEqual([
+      '~/.hermes/config.yaml',
+      '~/.hermes/shell-hooks-allowlist.json'
+    ])
+    expect(hermesPlan?.mutations[0]?.merge).toEqual({ kind: 'yaml-managed-events', marker: 'agentmux-hook.js' })
+    expect(hermesPlan?.mutations[1]?.merge).toEqual({ kind: 'json-managed-approvals', marker: 'agentmux-hook.js' })
+    // pi (TypeScript extension) declares native hooks but has no plan builder, so it resolves to null and
+    // is not auto-installed. Non-hook providers likewise.
     expect(resolveManagedHookPlan('pi', '/tmp/work')).toBeNull()
     expect(resolveManagedHookPlan('traex', '/tmp/work')).toBeNull()
   })
@@ -419,5 +427,31 @@ describe('built-in agent providers', () => {
     )['agentmux-status']['PreInvocation']?.[0]?.command ?? ''
     expect(antigravityCommand).toContain('ELECTRON_RUN_AS_NODE=1')
     expect(antigravityCommand).toContain("AGENTMUX_HOOK_PROVIDER='antigravity'")
+  })
+
+  it('prefixes /usr/bin/env for hermes so the env assignments survive shlex.split under shell=False', () => {
+    // hermes execs a shell hook as `subprocess.run(shlex.split(command), shell=False)`, so the bare
+    // `VAR=val exec …` prefix the other providers use would make `ELECTRON_RUN_AS_NODE=1` argv[0].
+    // `/usr/bin/env` parses the NAME=value operands itself, then execs the interpreter with them applied.
+    const command = (
+      JSON.parse(createHermesManagedHookPlan('/tmp/fake-home').mutations[0]?.content ?? '{}') as {
+        hooks: Record<string, Array<{ command?: string }>>
+      }
+    ).hooks['pre_tool_call']?.[0]?.command ?? ''
+    expect(command.startsWith('/usr/bin/env ')).toBe(true)
+    expect(command).toContain('ELECTRON_RUN_AS_NODE=1')
+    expect(command).toContain("AGENTMUX_HOOK_PROVIDER='hermes'")
+    expect(command).toContain('agentmux-hook.js')
+    // The allowlist approval must gate the SAME command string, byte-for-byte — hermes matches (event,
+    // command) exactly, so any divergence would leave the hook un-approved and silently skipped.
+    const approvals = (
+      JSON.parse(createHermesManagedHookPlan('/tmp/fake-home').mutations[1]?.content ?? '{}') as {
+        approvals: Array<{ event?: string; command?: string }>
+      }
+    ).approvals
+    expect(approvals).toContainEqual({ event: 'pre_tool_call', command })
+    // Approvals carry ONLY {event, command} — no timestamps — so the merge stays pure for the installer's
+    // unchanged-hash guard, and we never write the global auto-accept opt-in.
+    expect(approvals.every((approval) => Object.keys(approval).sort().join(',') === 'command,event')).toBe(true)
   })
 })
