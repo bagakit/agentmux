@@ -102,7 +102,10 @@ describe('AgentMux doctor', () => {
     expect(report.runtimeAction).toContain('macOS arm64')
     expect(report.runtimeAction).not.toContain('Linux')
     expect(report.hosts.local.status).toBe('unavailable')
-    expect(report.hosts.remote.status).toBe('unsupported')
+    expect(report.hosts.remote).toEqual({
+      status: 'unsupported',
+      action: 'Remote is unsupported until the ctxmux Remote contract is delivered.'
+    })
   })
 
   it('turns an unreachable runtime into actionable blocked diagnostics', async () => {
@@ -120,7 +123,10 @@ describe('AgentMux doctor', () => {
       runtime: null,
       hosts: {
         local: { status: 'unavailable' },
-        remote: { status: 'unsupported' }
+        remote: {
+          status: 'unsupported',
+          action: 'Remote is unsupported until the ctxmux Remote contract is delivered.'
+        }
       }
     })
     expect(report.agents.every((agent) => agent.probe === 'blocked')).toBe(true)
