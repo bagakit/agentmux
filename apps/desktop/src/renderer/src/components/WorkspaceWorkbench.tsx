@@ -181,6 +181,32 @@ function SortableWorkbenchTab({
     }
   }
 
+  async function copyTabId(): Promise<void> {
+    try {
+      await api.ui.writeClipboardText(tab.id)
+    } catch (error) {
+      console.warn('[tab] failed to copy Tab ID', error)
+    }
+  }
+
+  async function copyAgentHandoff(): Promise<void> {
+    const handoff = `Continue in AgentMux Tab ${tab.id}.
+
+Inspect it with:
+agentmux inspect --tab ${tab.id}
+
+Send to its Agent when the Tab has exactly one Agent Session:
+agentmux send --to-tab ${tab.id} --text "..."
+
+If that returns MESSAGE_TARGET_NOT_UNIQUE, run agentmux list sessions, choose the exact Session, then use:
+agentmux send --to-session <session-id> --text "..."`
+    try {
+      await api.ui.writeClipboardText(handoff)
+    } catch (error) {
+      console.warn('[tab] failed to copy Agent handoff', error)
+    }
+  }
+
   async function confirmClose(keepAgentSessions = false): Promise<void> {
     if (closing || !pendingClose) return
     setClosing(true)
@@ -203,6 +229,8 @@ function SortableWorkbenchTab({
         canCloseRight={tabsToRight.length > 0}
         canMoveToNewGroup={group.tabOrder.length > 1}
         onOpenChange={setTabMenuOpen}
+        onCopyTabId={() => void copyTabId()}
+        onCopyAgentHandoff={() => void copyAgentHandoff()}
         {...(session ? { onCopySessionId: () => void copySessionId() } : {})}
         onClose={() => void requestTabsClose([tab.id])}
         onCloseOthers={() => void requestTabsClose(otherTabs)}

@@ -6,6 +6,7 @@ import {
   ArrowUp,
   Columns2,
   Copy,
+  Send,
   ListX,
   PanelLeftClose,
   PanelRightClose,
@@ -29,6 +30,8 @@ export function WorkbenchTabContextMenu({
   canCloseRight,
   canMoveToNewGroup,
   onOpenChange,
+  onCopyTabId,
+  onCopyAgentHandoff,
   onCopySessionId,
   onClose,
   onCloseOthers,
@@ -42,6 +45,8 @@ export function WorkbenchTabContextMenu({
   canCloseRight: boolean
   canMoveToNewGroup: boolean
   onOpenChange?: (open: boolean) => void
+  onCopyTabId(): void
+  onCopyAgentHandoff(): void
   onCopySessionId?: () => void
   onClose(): void
   onCloseOthers(): void
@@ -54,15 +59,21 @@ export function WorkbenchTabContextMenu({
       <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
       <ContextMenu.Portal>
         <ContextMenu.Content className="tab-context-menu" collisionPadding={8}>
+          <ContextMenu.Item className="tab-context-menu__item" onSelect={onCopyTabId}>
+            <Copy size={14} />
+            <span>Copy Tab ID</span>
+          </ContextMenu.Item>
+          <ContextMenu.Item className="tab-context-menu__item" onSelect={onCopyAgentHandoff}>
+            <Send size={14} />
+            <span>Copy Agent Handoff</span>
+          </ContextMenu.Item>
           {onCopySessionId ? (
-            <>
-              <ContextMenu.Item className="tab-context-menu__item" onSelect={onCopySessionId}>
-                <Copy size={14} />
-                <span>Copy Session ID</span>
-              </ContextMenu.Item>
-              <ContextMenu.Separator className="tab-context-menu__separator" />
-            </>
+            <ContextMenu.Item className="tab-context-menu__item" onSelect={onCopySessionId}>
+              <Copy size={14} />
+              <span>Copy Session ID</span>
+            </ContextMenu.Item>
           ) : null}
+          <ContextMenu.Separator className="tab-context-menu__separator" />
           <ContextMenu.Sub>
             <ContextMenu.SubTrigger className="tab-context-menu__item" disabled={!canMoveToNewGroup}>
               <Columns2 size={14} />
