@@ -61,6 +61,7 @@ export function AgentSessionComposer({
   const send = useAppStore((state) => state.send)
   const interrupt = useAppStore((state) => state.interrupt)
   const setPosture = useAppStore((state) => state.setPosture)
+  const reportError = useAppStore((state) => state.reportError)
   const availability = agentComposerAvailability(session, disabled)
   const isWorking = session?.kind === 'agent' && session.status.state === 'working'
 
@@ -83,21 +84,33 @@ export function AgentSessionComposer({
   async function attachFiles(): Promise<void> {
     if (availability.disabled) return
     const workspacePath = session?.kind === 'agent' ? session.workspacePath : undefined
-    const chosen = await api.ui.chooseFiles(workspacePath ? { defaultPath: workspacePath } : undefined)
-    if (!chosen || chosen.length === 0) return
-    // Read the draft at completion, not at click: the dialog is modal but the store is the owner.
-    const current = useAppStore.getState().agentComposerDrafts[sessionId] ?? ''
-    setAgentComposerDraft(sessionId, appendFileReferences(current, chosen, workspacePath))
+    try {
+      const chosen = await api.ui.chooseFiles(workspacePath ? { defaultPath: workspacePath } : undefined)
+      if (!chosen || chosen.length === 0) return
+      // Read the draft at completion, not at click: the dialog is modal but the store is the owner.
+      const current = useAppStore.getState().agentComposerDrafts[sessionId] ?? ''
+      setAgentComposerDraft(sessionId, appendFileReferences(current, chosen, workspacePath))
+    } catch (error) {
+      reportError(error)
+    }
   }
 
   async function pasteImage(image: { bytes: Uint8Array; extension: string }): Promise<void> {
     if (availability.disabled) return
     // The prompt channel is text with a hard size cap and no Provider speaks ACP, so an image can only
     // reach the Agent as a file it opens itself. Save it, then reference the path like any other file.
-    const path = await api.ui.savePastedImage(image)
-    const workspacePath = session?.kind === 'agent' ? session.workspacePath : undefined
-    const current = useAppStore.getState().agentComposerDrafts[sessionId] ?? ''
-    setAgentComposerDraft(sessionId, appendFileReferences(current, [path], workspacePath))
+    try {
+      const path = await api.ui.savePastedImage(image)
+      const workspacePath = session?.kind === 'agent' ? session.workspacePath : undefined
+      const current = useAppStore.getState().agentComposerDrafts[sessionId] ?? ''
+      setAgentComposerDraft(sessionId, appendFileReferences(current, [path], workspacePath))
+    } catch (error) {
+      // Main refuses an empty image, one over the byte cap, or a failed write. Every one of those is
+      // reachable, and each is fired as `void pasteImage(...)` from a paste handler — so without this
+      // the rejection is unobserved and the paste just appears to do nothing. Surface it where the
+      // sibling actions on this same Composer already surface theirs.
+      reportError(error)
+    }
   }
 
   return (
