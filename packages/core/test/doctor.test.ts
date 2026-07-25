@@ -70,7 +70,7 @@ describe('AgentMux doctor', () => {
       local: { status: 'available', action: null },
       remote: {
         status: 'unsupported',
-        action: 'Remote is unsupported until the ctxmux Remote contract is delivered in T-021.'
+        action: 'Remote is unsupported until the ctxmux Remote contract is delivered.'
       }
     })
     expect(report.integration).toEqual({
