@@ -185,7 +185,7 @@
       "source_refs": [
         "AGENTS.md",
         "docs/plans/agentmux-core-maturity-review.md",
-        "docs/design/interaction-review.md"
+        "docs/design/agentmux-desktop-interaction.md"
       ],
       "supersedes": []
     },
