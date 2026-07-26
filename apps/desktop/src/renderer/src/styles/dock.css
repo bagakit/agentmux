@@ -96,7 +96,8 @@
 .workspace-topic-item.current:hover { background: var(--green-bg-hover); }
 .workspace-topic-entry > span { min-width: 0; display: grid; gap:var(--sp-1); }
 .workspace-topic-rename-form { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; gap:var(--sp-3); padding:var(--sp-3) var(--sp-2) var(--sp-3) var(--sp-4); }
-.workspace-topic-rename-form input { min-width: 0; height: 25px; padding:0 var(--sp-3); border: 1px solid var(--green-2); border-radius: var(--radius-sm); color: var(--text); background: var(--surface-1); font: inherit; font-size: var(--fs-meta); outline: none; }
+.workspace-topic-rename-form input { min-width: 0; height: 25px; padding:0 var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text); background: var(--bg); font: inherit; font-size: var(--fs-meta); outline: 0; }
+.workspace-topic-rename-form input:focus { border-color: var(--focus-line); box-shadow: var(--focus-ring); }
 .workspace-topic-title-line,
 .workspace-topic-entry small { min-width: 0; display: flex; align-items: center; gap:var(--sp-2); white-space: nowrap; }
 .workspace-topic-title-line strong,
