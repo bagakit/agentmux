@@ -73,20 +73,24 @@
   margin:var(--sp-3) var(--sp-4) var(--sp-3) var(--sp-5);
   color: var(--text-3);
   font-size: var(--fs-micro);
-  font-weight: 700;
-  letter-spacing: .09em;
-  text-transform: uppercase;
+  font-weight: 560;
+  letter-spacing: .04em;
+  text-transform: none;
+  opacity: .78;
 }
 .sidebar__heading-actions { display: flex; align-items: center; gap:1px; }
 .project-list { min-height: 0; flex: 1; display: grid; align-content: start; gap:var(--sp-1); padding:0 var(--sp-4) var(--sp-4); overflow: auto; }
-.project-rail-row { width: 100%; min-width: 0; display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap:var(--sp-4); padding:var(--sp-3) var(--sp-4); border: 0; border-radius: var(--radius); color: var(--text-3); background: transparent; text-align: left; cursor: pointer; transition: background .12s ease, color .12s ease; }
+.project-rail-row { width: 100%; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap:var(--sp-3); padding:var(--sp-3) var(--sp-4); border: 0; border-radius: var(--radius); color: var(--text-3); background: transparent; text-align: left; cursor: pointer; transition: background .12s ease, color .12s ease; }
+.scratch-workspace-row { grid-template-columns: 30px minmax(0, 1fr) auto; }
 .project-rail-row:hover { color: var(--text-2); background: var(--surface-2); }
 .project-rail-row--active, .project-rail-row--active:hover { color: var(--text); background: var(--surface-2); }
 .project-rail-row__icon { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); color: var(--text-3); background: var(--surface-3); transition: background .12s ease, color .12s ease; }
-.project-rail-row--active .project-rail-row__icon { color: var(--bg); background: var(--green); box-shadow: var(--hl-strong); }
 .project-rail-row__identity { min-width: 0; display: flex; flex-direction: column; gap:var(--sp-1); }
 .project-rail-row__identity strong { overflow: hidden; font-size: var(--fs-meta); font-weight: 620; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
 .project-rail-row__identity small { min-width: 0; display: flex; align-items: center; gap:var(--sp-1); overflow: hidden; font-size: var(--fs-micro); color: var(--text-3); text-overflow: ellipsis; white-space: nowrap; }
+.project-rail-row__activity { width: 14px; min-width: 14px; height: 18px; display: inline-flex; align-items: center; justify-content: center; color: var(--green); opacity: 0; }
+.project-rail-row[data-running='true'] .project-rail-row__activity { opacity: 1; }
+.project-rail-row__activity .status__dot { width: 6px; height: 6px; }
 .project-rail-row__count { min-width: 20px; height: 20px; padding:0 var(--sp-3); display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); color: var(--text-3); background: var(--surface-3); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
 .project-rail-row--active .project-rail-row__count { color: var(--text-2); background: var(--surface-3); box-shadow: var(--hl); }
 /* Attention rolled up to a collapsed row. The count badge already occupies the row's right edge, so
