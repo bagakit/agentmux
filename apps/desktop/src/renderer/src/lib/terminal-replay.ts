@@ -24,9 +24,25 @@ export async function finishTerminalReplayRecovery(options: {
   releaseLiveOutput(): Promise<void>
   redrawCurrentScreen(): Promise<boolean>
   onRedrawError?(error: unknown): void
+  onRecoveryError?(error: unknown): void
 }): Promise<boolean> {
-  if (options.canControlRun) await options.startLiveSynchronization()
-  await options.releaseLiveOutput()
+  // Release the startup buffer before resize/fit. Resize crosses the same per-Run
+  // serialization boundary as attach; waiting for it first can leave a visible but
+  // permanently frozen terminal when that optional sync is the step that stalled.
+  try {
+    await options.releaseLiveOutput()
+  } catch (error) {
+    options.onRecoveryError?.(error)
+  }
+  if (options.canControlRun) {
+    try {
+      await options.startLiveSynchronization()
+    } catch (error) {
+      // Attach and replay already succeeded. A viewport-sync failure is a local
+      // recovery degradation, not an attach failure and must not replace the pane.
+      options.onRecoveryError?.(error)
+    }
+  }
   if (!options.gap || !options.canControlRun) return false
   try {
     return await options.redrawCurrentScreen()

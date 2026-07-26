@@ -40,7 +40,7 @@ describe('hydrateTerminalReplay', () => {
       }
     })).resolves.toBe(true)
 
-    expect(calls).toEqual(['live', 'release', 'redraw'])
+    expect(calls).toEqual(['release', 'live', 'redraw'])
   })
 
   it('keeps historical Gap replay read-only', async () => {
@@ -73,5 +73,25 @@ describe('hydrateTerminalReplay', () => {
     })).resolves.toBe(false)
 
     expect(onRedrawError).toHaveBeenCalledOnce()
+  })
+
+  it('releases live output even when viewport synchronization rejects', async () => {
+    const calls: string[] = []
+    const onRecoveryError = vi.fn()
+
+    await expect(finishTerminalReplayRecovery({
+      gap: false,
+      canControlRun: true,
+      startLiveSynchronization: async () => {
+        calls.push('live')
+        throw new Error('resize unavailable')
+      },
+      releaseLiveOutput: async () => { calls.push('release') },
+      redrawCurrentScreen: async () => { calls.push('redraw'); return true },
+      onRecoveryError
+    })).resolves.toBe(false)
+
+    expect(calls).toEqual(['release', 'live'])
+    expect(onRecoveryError).toHaveBeenCalledOnce()
   })
 })
