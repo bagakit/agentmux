@@ -30,8 +30,10 @@ const RUNNABLE: readonly RegExp[] = [
   /^agentmux list (?:agents|sessions)$/u
 ]
 
-/** 一段文本里每一行 `agentmux …` 都必须能跑；返回检查过的行数，供调用方防"一行都没检查"。 */
-function assertEveryCommandRunnable(text: string, where: string): number {
+/** 恢复文本里那条"列出活着的 Agent"的命令。是 sessions 不是 agents——后者列的是配好的 executor 类型。 */
+const LIST_SESSIONS_COMMAND = 'agentmux list sessions'
+
+/** 一段文本里每一行 `agentmux …` 都必须能跑；返回检查过的行数，供调用方防"一行都没检查"。 */function assertEveryCommandRunnable(text: string, where: string): number {
   let seen = 0
   for (const line of text.split('\n')) {
     if (!line.startsWith('agentmux')) continue
@@ -204,7 +206,8 @@ describe('寻址失败自带下一步命令，而不只是候选清单', () => {
   })
 
   it('拿不到 id 的分支老实不给命令，而不是凑一条跑不了的', () => {
-    // MESSAGE_TARGET_NOT_AGENT 想给的是 `inspect --tab=<tabId>`，但 tabId 在抛出点就丢了。
+    // MESSAGE_TARGET_NOT_AGENT 想给的是 `inspect --region=<regionId>`——这个码只在 Region 分支
+    // 抛（store.ts:1624，全仓仅此一处），但 regionId 在抛出点就丢了。
     // 此时凑一条命令形状的文字比不给更糟：看着像出路，粘过去撞第二次失败。
     const notAgent = addressingRecovery({ code: 'MESSAGE_TARGET_NOT_AGENT' })
     expect(notAgent).not.toMatch(/^agentmux (?:inspect|send)\s*$/mu)
@@ -304,6 +307,28 @@ describe('寻址失败自带下一步命令，而不只是候选清单', () => {
     expect(DELIBERATELY_SILENT.length).toBeGreaterThan(0)
   })
 
+  it('三个 self 码说的是"相对寻址塌了"，不是"粘来的地址有歧义"', () => {
+    // 这条钉的是语义，不是形状。AMBIGUOUS_* / CALLER_NOT_OPEN 只从 `self` 分支抛：
+    // control.ts:133-134 在 `target.kind === 'self'` 之内，:162-163 在 `target.kind === 'tab'`
+    // 提前 return 之后。显式 id 走不到——region id 是 `region:${crypto.randomUUID()}`
+    // （store.ts:960），全局唯一，跨 Tab 撞号不成立。
+    //
+    // 本轮初版把它们写成"这个地址匹配到不止一个目标"，那是**把粘贴地址的失败张冠李戴**：
+    // 用户照着改地址不会有任何效果，因为问题出在"我在哪"这个前提上。两个 agent 独立
+    // 复核才逼出这个区分，所以单独钉住。
+    for (const code of ['AMBIGUOUS_REGION_TARGET', 'AMBIGUOUS_TAB_TARGET', 'CALLER_NOT_OPEN']) {
+      const recovery = addressingRecovery({ code })!
+      expect(recovery, `${code} 该有下一步`).not.toBeNull()
+      // 必须点名 self：不说是相对寻址塌了，用户就会去改地址，白忙一场。
+      expect(recovery, `${code} 没说清这是 self 失败`).toMatch(/self/u)
+      // 不许把它描述成"地址匹配到多个"——那是 MESSAGE_TARGET_NOT_UNIQUE 的剧本。
+      expect(recovery).not.toMatch(/这个地址匹配到不止一个/u)
+      // 给的是与位置无关的身份，而不是"再挑一个候选"。
+      expect(recovery).toContain(LIST_SESSIONS_COMMAND)
+      expect(recovery).not.toContain('--to-region=')
+    }
+  })
+
   it('不是寻址失败的码返回 null，而不是一句放之四海的"再试一次"', () => {
     // 一句通用套话既没信息、又会盖住真正的原因。这里必须缺席，让原始 message 独自说话。
     for (const code of ['SESSION_CLOSING', 'AGENT_EXECUTOR_NOT_CONFIGURED', 'CONTROL_CANCELLED']) {
@@ -356,7 +381,9 @@ describe('恢复命令与复制地址共用同一个格式化出口', () => {
     // 这条锁住的是另一件事：两侧各自都有**独立的字面断言**钉住命令长什么样。
     // 复制侧钉在 `agentmux send --to-region='…'`（本文件上方三个地址 describe），
     // 恢复侧钉在同一段字面（下方 recovery describe）——所以改一次格式，两组断言一起塌。
-    // 实测：把命令出口的 `=` 改成空格，本文件 11 条红，横跨复制侧与恢复侧。
+    // 实测（2026-08-31 复测）：把命令出口的 `=` 改成空格，本文件 15 条红，横跨复制侧与恢复侧。
+    // 这个数字随本文件的用例增减而变——它只是"确实横跨两侧"的一次佐证，不是被守护的不变量。
+    // 上一版写 11，后来加了 RUNNABLE 与分类两组用例就过时了；再引用前请重跑一次，别照抄。
     const region = 'region:1'
     const literal = `agentmux send --to-region='${region}'`
     expect(formatRegionAddress(region)).toContain(literal)
