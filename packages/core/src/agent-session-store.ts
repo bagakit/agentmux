@@ -1886,7 +1886,6 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     } catch (error) {
       if (error instanceof AgentMuxError && error.code === 'AGENT_SESSION_STORE_LIMIT') throw error
       await this.quarantineCorruptStore(raw, signal)
-      throw error // MUTATION A: rethrow instead of salvaging
       return this.salvageStoreDocument(value as Record<string, unknown>)
     }
   }
