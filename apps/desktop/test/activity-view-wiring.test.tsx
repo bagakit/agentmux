@@ -160,6 +160,58 @@ describe('对话体接线', () => {
   })
 })
 
+describe('「在进行」指示接线', () => {
+  const working = (items: AgentTimelineItem[]): string =>
+    renderToStaticMarkup(createElement(ActivityView, {
+      capability: 'streaming' as const, items, displayState: 'working' as const
+    }))
+
+  it('刚发完 prompt、还没有条目时显示「在进行」而不是空状态——今天最刺眼的那一幕', () => {
+    const markup = working([])
+
+    expect(markup).toContain('Working')
+    expect(markup).not.toContain('No structured activity yet')
+  })
+
+  it('指示对辅助技术可感知，不是纯视觉动画', () => {
+    const markup = working([])
+
+    expect(markup).toContain('role="status"')
+    expect(markup).toContain('aria-live="polite"')
+  })
+
+  it('只有工具步骤、还没有正文时指示还在', () => {
+    const markup = working([activity('t', {
+      kind: 'tool_call', source: 'native-hook', title: 'Bash', toolName: 'Bash', toolInput: '{}'
+    })])
+
+    expect(markup).toContain('Working')
+  })
+
+  it('助手正文一到就退场，不与正文并存造成两个「在动」的信号', () => {
+    const markup = working([activity('reply', { content: 'Here is the plan' })])
+
+    expect(markup).toContain('Here is the plan')
+    expect(markup).not.toContain('role="status"')
+  })
+
+  it('没在工作、也没有条目时仍是空状态，且两种空因保持可区分', () => {
+    // 「此 Provider 不报结构化活动」与「还没有活动」是两回事——这是既有的优点，不许退化成一句话。
+    const idle = renderToStaticMarkup(createElement(ActivityView, {
+      capability: 'streaming' as const, items: [], displayState: 'done' as const
+    }))
+    expect(idle).toContain('No structured activity yet')
+    expect(idle).not.toContain('role="status"')
+
+    const unavailable = renderToStaticMarkup(createElement(ActivityView, {
+      capability: 'unavailable' as const, items: [], displayState: 'working' as const
+    }))
+    // 能力缺失优先于"在进行"：Provider 根本不报，就不该假装它在报。
+    expect(unavailable).toContain('does not provide structured activity')
+    expect(unavailable).not.toContain('role="status"')
+  })
+})
+
 // 展开态藏在 useState 后面，而本仓库没有能跑 effect / 触发事件的 harness，所以"展开后长什么样"
 // 只能直接渲染 DiffBlock 来断言。这一层守的是**渲染成果**：加删行各自有自己的类名与 +/- 字符槽。
 // 注意它守不住"Row 里那行 <DiffBlock> 是否还在"——把它换回原来的 <pre> 不会让任何测试变红。

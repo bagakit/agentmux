@@ -215,6 +215,7 @@ export function SessionPane({
           <ActivityView
             items={timeline}
             capability={session.kind === 'agent' ? session.capabilities.timeline : 'unavailable'}
+            displayState={session.status.state}
             workspaceRoot={activeWorkspaceRoot}
             openWorkspaceFile={openWorkspaceFile}
           />

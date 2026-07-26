@@ -28,7 +28,11 @@ vi.mock('../src/renderer/src/components/TerminalView.js', () => ({
   TerminalView: () => <div data-test-view="terminal" />
 }))
 vi.mock('../src/renderer/src/components/ActivityView.js', () => ({
-  ActivityView: () => <div data-test-view="activity" />
+  // displayState 透传出来断言：判定再对，Pane 不把它交出去，整个「在进行」指示就是死的，
+  // 而且所有只测判定的用例仍会绿。这条把那个静默失效变成可见的红。
+  ActivityView: ({ displayState }: { displayState?: string }) => (
+    <div data-test-view="activity" data-display-state={displayState ?? 'absent'} />
+  )
 }))
 vi.mock('../src/renderer/src/components/AgentSessionComposer.js', () => ({
   AgentSessionComposer: ({ disabled }: { disabled?: boolean }) => (
@@ -117,6 +121,18 @@ describe('SessionPane Agent Composer ownership', () => {
 
     expect(markup).toContain('data-test-view="activity"')
     expect(markup).toContain('data-test-agent-composer="enabled"')
+  })
+
+  it('把 Session 的显示状态交给 Activity——不交出去，「在进行」指示就是死的', () => {
+    // 「这个 turn 在不在工作」的唯一真相在 Session 上，Activity 自己推不出来。删掉 Pane 上那行
+    // displayState，判定层的测试全都还是绿的，只有这条会红。
+    fixture.state.sessions = [session('agent')]
+    fixture.state.viewModes = { 'agent-1': 'activity' }
+
+    const markup = render('agent-1', 'agent')
+
+    expect(markup).toContain('data-display-state="running"')
+    expect(markup).not.toContain('data-display-state="absent"')
   })
 
   it('never adds an Agent Composer to Raw Terminal', () => {
