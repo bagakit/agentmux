@@ -105,7 +105,8 @@ function sessionBelongsToWorkspace(
 function restoreTab(
   config: AppConfig,
   sessions: ReadonlyMap<string, SessionSnapshot>,
-  tab: WorkbenchTab
+  tab: WorkbenchTab,
+  preserveUnknownSessionViews = false
 ): WorkbenchTab | null {
   let next: WorkbenchTab | null = tab
   for (const surface of workbenchSurfaces(tab)) {
@@ -114,6 +115,17 @@ function restoreTab(
       return null
     }
     const session = sessions.get(surface.sessionId)
+    // A Runtime snapshot can be temporarily unavailable while the persisted presentation is still
+    // perfectly usable. Keep the exact Region identity in that narrow fail-open state; Core remains
+    // the owner of whether the Session/Run exists and SessionPane will show its neutral connecting
+    // state until a later canonical snapshot arrives. Never apply this to a successful snapshot: a
+    // known missing or mismatched Session must still be removed by the normal verified restore path.
+    if (
+      preserveUnknownSessionViews &&
+      !session &&
+      config.workspaces.some((workspace) => workspace.id === tab.workspaceId) &&
+      surface.workspaceId === tab.workspaceId
+    ) continue
     if (
       session?.kind === surface.kind &&
       sessionBelongsToWorkspace(config, session, tab.workspaceId)
@@ -128,6 +140,12 @@ export function restorePersistedWorkbench(input: {
   sessions: readonly SessionSnapshot[]
   persisted: PersistedWorkbench | null
   createTabGroupId(): string
+  /**
+   * Keep session Regions whose identities could not be checked because the Runtime snapshot failed.
+   * This is a one-shot presentation projection, not a second Session truth source; callers should
+   * set it only for an explicitly rejected snapshot and let the next canonical snapshot reconcile it.
+   */
+  preserveUnknownSessionViews?: boolean
 }): PersistedWorkbench {
   if (!input.persisted) {
     return {
@@ -142,7 +160,12 @@ export function restorePersistedWorkbench(input: {
   const sessions = new Map(input.sessions.map((session) => [session.id, session]))
   const tabs = Object.fromEntries(
     Object.values(input.persisted.tabs).flatMap((tab) => {
-      const restored = restoreTab(input.config, sessions, tab)
+      const restored = restoreTab(
+        input.config,
+        sessions,
+        tab,
+        input.preserveUnknownSessionViews === true
+      )
       return restored ? [[restored.id, restored]] : []
     })
   )

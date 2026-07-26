@@ -23,6 +23,10 @@ import { SurfaceToolDock } from './components/SurfaceToolDock'
 import { WorkspaceWorkbench } from './components/WorkspaceWorkbench'
 import { api } from './lib/api'
 import { useAppStore } from './store'
+import {
+  TerminalParkingProvider,
+  useTerminalColdParking
+} from './lib/terminal-cold-parking-coordinator'
 
 export function App() {
   const [settingsRoute, setSettingsRoute] = useState<{ section: SettingsSectionId } | null>(null)
@@ -55,6 +59,12 @@ export function App() {
   // 主区不再占用独立 topbar 行；Board 与欢迎页仍走顶栏。
   const mergedTopRow = mainSurface === 'workbench' && Boolean(workspace)
   const workbenchVisible = mainSurface === 'workbench' && !settingsRoute
+  const terminalParkingMeasurement = typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).has('agentmux-resource-probe')
+  const parkedTerminalRegionIds = useTerminalColdParking({
+    workbenchVisible,
+    measurementActive: terminalParkingMeasurement
+  })
   const { containerRef, isResizing, onResizeStart } = useSidebarResize<HTMLDivElement>({
     isOpen: toolsVisible,
     width: toolDockWidth,
@@ -120,6 +130,7 @@ export function App() {
 
   return (
     <>
+      <TerminalParkingProvider parkedRegionIds={parkedTerminalRegionIds}>
       <div
         className={`app-shell ${projectRailOpen ? '' : 'app-shell--project-rail-collapsed'}`}
         aria-hidden={settingsRoute ? true : undefined}
@@ -218,6 +229,7 @@ export function App() {
       <AgentStatusBar />
       <QuickSwitcher open={quickSwitchOpen} onClose={() => setQuickSwitchOpen(false)} />
       </div>
+      </TerminalParkingProvider>
       {settingsRoute ? (
         <SettingsPanel
           initialSection={settingsRoute.section}

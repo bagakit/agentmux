@@ -4,8 +4,10 @@ vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
 })
 
-import type { AppConfig } from '../src/shared/contracts.js'
+import type { AppConfig, AgentSessionRecoveryCandidate } from '../src/shared/contracts.js'
 import { api } from '../src/renderer/src/lib/api.js'
+import { createWorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.js'
+import { createWorkbenchTab, initialWorkbenchRegionId } from '../src/renderer/src/lib/workbench-tabs.js'
 import { restorePersistedUiState, useAppStore } from '../src/renderer/src/store.js'
 
 const initialState = useAppStore.getState()
@@ -160,5 +162,116 @@ describe('Renderer persistence boundary', () => {
     })
     dispose()
   })
-})
 
+  it('keeps the saved Workbench visible when the Runtime snapshot is temporarily unavailable', async () => {
+    const tab = createWorkbenchTab('snapshot-outage-view', {
+      regionId: initialWorkbenchRegionId('snapshot-outage-view'),
+      kind: 'agent',
+      phase: 'attached',
+      workspaceId: 'workspace-a',
+      sessionId: 'agent-during-snapshot-outage'
+    })
+    useAppStore.setState({
+      loading: true,
+      restoredWorkbench: {
+        tabs: { [tab.id]: tab },
+        layouts: { 'workspace-a': createWorkspaceLayout('pane', [tab.id]) }
+      }
+    })
+    vi.spyOn(useAppStore.persist, 'hasHydrated').mockReturnValue(true)
+    vi.spyOn(api.config, 'get').mockResolvedValue(config)
+    vi.spyOn(api.providers, 'list').mockResolvedValue([])
+    vi.spyOn(api.sessions, 'snapshot').mockRejectedValue(new Error('Runtime snapshot timed out'))
+
+    const dispose = await useAppStore.getState().initialize()
+    const state = useAppStore.getState()
+
+    expect(state.loading).toBe(false)
+    expect(state.config).toEqual(config)
+    expect(state.sessions).toEqual([])
+    expect(state.tabs[tab.id]).toEqual(tab)
+    expect(state.layouts['workspace-a']?.groups[0]?.tabOrder).toEqual([tab.id])
+    expect(state.error).toContain('Runtime Session snapshot did not complete: Runtime snapshot timed out')
+    expect(state.error).toContain('The saved Workbench remains visible')
+    dispose()
+  })
+
+  it('keeps existing Sessions usable when the Provider catalog lookup fails', async () => {
+    useAppStore.setState({ loading: true, restoredWorkbench: null })
+    vi.spyOn(useAppStore.persist, 'hasHydrated').mockReturnValue(true)
+    vi.spyOn(api.config, 'get').mockResolvedValue(config)
+    vi.spyOn(api.providers, 'list').mockRejectedValue(new Error('Provider catalog unavailable'))
+    vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({
+      sessions: [],
+      timelines: {},
+      recoveryCandidates: []
+    })
+
+    const dispose = await useAppStore.getState().initialize()
+    const state = useAppStore.getState()
+
+    expect(state.loading).toBe(false)
+    expect(state.config).toEqual(config)
+    expect(state.providerCatalog).toEqual([])
+    expect(state.error).toContain('Provider catalog lookup did not complete: Provider catalog unavailable')
+    expect(state.error).toContain('Existing Sessions remain usable')
+    dispose()
+  })
+
+  it('does not discard a persisted Region when an automatic recovery call rejects', async () => {
+    const sessionId = 'agent-recovery-workflow-outage'
+    const tab = createWorkbenchTab('recovery-outage-view', {
+      regionId: initialWorkbenchRegionId('recovery-outage-view'),
+      kind: 'agent',
+      phase: 'attached',
+      workspaceId: 'workspace-a',
+      sessionId
+    })
+    const candidate: AgentSessionRecoveryCandidate = {
+      agentSessionId: sessionId,
+      hostId: 'local',
+      workspacePath: '/repo/a',
+      providerId: 'codex',
+      executorId: 'codex',
+      capabilities: {
+        terminal: true,
+        hookEvents: true,
+        timeline: 'streaming',
+        permission: 'observe',
+        providerResume: true,
+        acp: false,
+        replyCorrelation: 'none'
+      },
+      label: 'Codex · recovery outage',
+      createdAt: 1,
+      updatedAt: 1,
+      run: { runId: 'run-recovery-workflow-outage' }
+    }
+    useAppStore.setState({
+      loading: true,
+      restoredWorkbench: {
+        tabs: { [tab.id]: tab },
+        layouts: { 'workspace-a': createWorkspaceLayout('pane', [tab.id]) }
+      }
+    })
+    vi.spyOn(useAppStore.persist, 'hasHydrated').mockReturnValue(true)
+    vi.spyOn(api.config, 'get').mockResolvedValue(config)
+    vi.spyOn(api.providers, 'list').mockResolvedValue([])
+    vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({
+      sessions: [],
+      timelines: {},
+      recoveryCandidates: [candidate]
+    })
+    vi.spyOn(api.sessions, 'recover').mockRejectedValue(new Error('Provider handshake unavailable'))
+
+    const dispose = await useAppStore.getState().initialize()
+    const state = useAppStore.getState()
+
+    expect(state.loading).toBe(false)
+    expect(state.tabs[tab.id]).toEqual(tab)
+    expect(state.layouts['workspace-a']?.groups[0]?.tabOrder).toEqual([tab.id])
+    expect(state.error).toContain('Automatic Agent recovery did not complete: Provider handshake unavailable')
+    expect(state.error).toContain('The original Region remains visible')
+    dispose()
+  })
+})

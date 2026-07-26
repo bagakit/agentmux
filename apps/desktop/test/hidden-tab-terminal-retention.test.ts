@@ -22,6 +22,14 @@ const terminalView = readFileSync(
   new URL('../src/renderer/src/components/TerminalView.tsx', import.meta.url),
   'utf8'
 )
+const sessionPane = readFileSync(
+  new URL('../src/renderer/src/components/SessionPane.tsx', import.meta.url),
+  'utf8'
+)
+const parkingCoordinator = readFileSync(
+  new URL('../src/renderer/src/lib/terminal-cold-parking-coordinator.tsx', import.meta.url),
+  'utf8'
+)
 
 /** pane-body 那段 JSX——所有 Tab 的内容都在这里决定要不要进 DOM。 */
 function paneBody(): string {
@@ -33,7 +41,7 @@ function paneBody(): string {
 describe('隐藏的 Tab 保住终端实例', () => {
   it('每个 Tab 都渲染进 DOM，而不是只挂活动的那个', () => {
     const body = paneBody()
-    expect(body).toContain('tabs.map(')
+    expect(body).toContain('bodyTabs.map(')
     // 这是回退的确切形状：只把 activeTab 挂进去。
     expect(body).not.toContain('{activeTab ? (')
     expect(body).not.toContain('tab={activeTab}')
@@ -128,5 +136,14 @@ describe('实例的存活边界等于 Region 的存活边界', () => {
     expect(body).not.toContain('setInterval')
     expect(body).not.toContain('new ResizeObserver')
     expect(body).not.toContain('IntersectionObserver')
+  })
+
+  it('长期隐藏时只释放 TerminalView，不删除 Region/Session/Composer 真相', () => {
+    expect(sessionPane).toContain('parked?: boolean')
+    expect(sessionPane).toContain('Terminal parked')
+    expect(sessionPane).toContain('<AgentSessionComposer sessionId={session.id} />')
+    expect(parkingCoordinator).toContain('TerminalParkingProvider')
+    expect(parkingCoordinator).toContain('collectTerminalColdParkCandidates')
+    expect(parkingCoordinator).toContain('nextTerminalColdParkDelayMs')
   })
 })

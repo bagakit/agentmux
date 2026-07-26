@@ -13,6 +13,9 @@ import { runDesktopResourceProbe } from './resource-probe.js'
 import { runDesktopFileEditingProbe, WorkspaceFileEditingProbeControl } from './file-editing-probe.js'
 import { WorkspaceFiles } from './workspace-files.js'
 import { registerWindowResizeEvents } from './window-resize-events.js'
+import { WindowGeometryStore } from './window-geometry-store.js'
+import { windowConstructorGeometry } from './window-geometry.js'
+import { registerWindowStatePersistence } from './window-state-persistence.js'
 
 const appIconPath = join(import.meta.dirname, '../../resources/icon.png')
 const packagedUserDataPath = join(app.getPath('appData'), 'dev.agentmux.desktop')
@@ -32,6 +35,7 @@ const runtime = new RuntimeController(
   scratchTopics
 )
 const configStore = new ConfigStore()
+const windowGeometryStore = new WindowGeometryStore()
 
 function disposeOwners(): Promise<void> {
   if (!ownerDisposal) {
@@ -67,9 +71,11 @@ async function exitAfterFailure(error: unknown): Promise<void> {
 
 async function createWindow(appReadyAtMs: number = Date.now()): Promise<void> {
   const windowCreationStartedAtMs = Date.now()
+  // The window reopens where it was last left. Only a first launch (or a corrupt record) falls back
+  // to the default size — the fixed 1480×940 literal is no longer the every-launch size.
+  const persistedGeometry = await windowGeometryStore.load()
   const window = new BrowserWindow({
-    width: 1480,
-    height: 940,
+    ...windowConstructorGeometry(persistedGeometry),
     minWidth: 980,
     minHeight: 660,
     icon: appIconPath,
@@ -82,6 +88,9 @@ async function createWindow(appReadyAtMs: number = Date.now()): Promise<void> {
       nodeIntegration: false
     }
   })
+  // A window persisted while maximized reopens maximized on top of its restored normal bounds, so
+  // unmaximize returns to the size the user actually chose rather than the default.
+  if (persistedGeometry?.maximized) window.maximize()
   window.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://')) void shell.openExternal(url)
     return { action: 'deny' }
@@ -101,14 +110,18 @@ async function createWindow(appReadyAtMs: number = Date.now()): Promise<void> {
       : {}
   )
   registerWindowResizeEvents(window)
+  registerWindowStatePersistence(window, windowGeometryStore)
   await disposeIpc?.()
   disposeIpc = await registerIpc({ window, configStore, runtime, scratchTopics, workspaceFiles })
   if (process.env.ELECTRON_RENDERER_URL) await window.loadURL(process.env.ELECTRON_RENDERER_URL)
   else {
+    const probeQuery = process.env.AGENTMUX_DESKTOP_FILE_EDITING_REPORT
+      ? { 'agentmux-file-editing-report': '1' }
+      : process.env.AGENTMUX_DESKTOP_RESOURCE_REPORT
+        ? { 'agentmux-resource-probe': '1' }
+        : undefined
     await window.loadFile(join(import.meta.dirname, '../renderer/index.html'),
-      process.env.AGENTMUX_DESKTOP_FILE_EDITING_REPORT
-        ? { query: { 'agentmux-file-editing-report': '1' } }
-        : undefined)
+      probeQuery ? { query: probeQuery } : undefined)
   }
   const rendererLoadedAtMs = Date.now()
   if (process.env.AGENTMUX_DESKTOP_READY_FILE) {
