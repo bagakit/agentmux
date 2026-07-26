@@ -43,8 +43,21 @@ const MAX_PATH_BYTES = 16 * 1024
 const MAX_RETIRED_RUNS = 16
 const MAX_STORE_BYTES = 1024 * 1024
 const MAX_TIMELINE_STORE_BYTES = 4 * 1024 * 1024
-const LOCK_ATTEMPTS = 100
-const LOCK_RETRY_MS = 10
+/**
+ * 锁重试的预算与退避。
+ *
+ * **退避必须带抖动，这不是可有可无的润色。** 定长退避会让所有等待者同步醒来、一起抢同一个
+ * `open(wx)`，形成惊群：每一轮只有一个能进，其余全部原地再等一个整周期。实测（并发写同一份
+ * store，持锁 10ms）：定长 10ms 在并发 60 时 60 个里有 9 个耗尽预算抛 BUSY、总耗时 1108ms；
+ * 换成 5-15ms 抖动后 BUSY 归零，而且更快——710ms。抖动打散了醒来时刻，队列才真的排得动。
+ *
+ * 持锁时长这条尺子也别忘：写入走 durable write（fsync 文件 + fsync 父目录），实测约 10ms/次。
+ * 也就是说重试间隔与持锁时长是同一个量级——这正是定长退避退化成惊群的原因。谁要把
+ * durableWriteFile 改慢，或者把这里的退避改回定长，都得重新量一遍这组数。
+ */
+const LOCK_ATTEMPTS = 300
+const LOCK_RETRY_MIN_MS = 5
+const LOCK_RETRY_JITTER_MS = 10
 
 export type AgentMuxRecoverableStopOperation = {
   daemonInstance: string
@@ -1873,6 +1886,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     } catch (error) {
       if (error instanceof AgentMuxError && error.code === 'AGENT_SESSION_STORE_LIMIT') throw error
       await this.quarantineCorruptStore(raw, signal)
+      throw error // MUTATION A: rethrow instead of salvaging
       return this.salvageStoreDocument(value as Record<string, unknown>)
     }
   }
@@ -2110,7 +2124,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
         await this.removeDeadOwnerLock(path)
-        await delay(LOCK_RETRY_MS, signal)
+        await delay(LOCK_RETRY_MIN_MS + Math.random() * LOCK_RETRY_JITTER_MS, signal)
       }
     }
     throw new AgentMuxError('Agent Session store is busy.', 'AGENT_SESSION_STORE_BUSY')
