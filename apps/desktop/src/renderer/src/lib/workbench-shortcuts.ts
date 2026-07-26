@@ -42,6 +42,23 @@ function isPrimaryChord(event: WorkbenchShortcutEvent, isMac: boolean): boolean 
   return isMac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey
 }
 
+/**
+ * 这个和弦是否落在「非终端的可编辑控件」里——Agent composer 的文本框、Tab 内联重命名框这类原生输入。
+ *
+ * 窗口级 capture 监听存在的唯一理由，是抢在聚焦的 xterm 文本代理之前拿到键（终端要独占它们）。所以
+ * **终端里的输入不放行**（`insideTerminal` 为真时返回 false，让快捷键照常接管）；但普通表单控件里用户是
+ * 在打字/改名，Cmd+D 不该顺手把这一格分屏、Cmd+W 不该关掉正在打字的那一格。DOM 侧由 App 判定
+ * `insideTerminal`（`.xterm` 子树内即为真），这里只做与 DOM 无关的纯判定，测试够得着。
+ */
+export function isEditableChordTarget(target: {
+  tagName: string
+  isContentEditable: boolean
+  insideTerminal: boolean
+}): boolean {
+  if (target.insideTerminal) return false
+  return target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable
+}
+
 function arrowDirection(key: string): SplitDirection | null {
   switch (key) {
     case 'arrowleft': return 'left'
@@ -188,6 +205,10 @@ export type WorkbenchShortcutStore = {
   tabs: Readonly<Record<string, WorkbenchTab>>
   activateTab(workspaceId: string, tabGroupId: string, tabId: string): void
   closeRegion(workspaceId: string, tabId: string, regionId: string): void | Promise<void>
+  // 关整张 Tab（含未保存/在跑 Agent 的确认）走的是这条「意图」而不是 store.closeTab：那份确认只活在
+  // 组件里（requestTabsClose→ConfirmationDialog），裸调 store.closeTab 会静默弃掉未存改动、停掉在跑的
+  // Agent——鼠标点 X 都不会那样。所以键盘关 Tab 只投一个意图，交给活动 Tab 组件用它既有的确认流处理。
+  requestCloseTab(workspaceId: string, tabGroupId: string, tabId: string): void
   splitRegion(workspaceId: string, tabId: string, regionId: string, direction: SplitDirection): void
   focusRegion(workspaceId: string, tabId: string, regionId: string): void
 }
@@ -238,6 +259,14 @@ export function handleWorkbenchShortcut(
   const activeRegionId = tab.layout.activeRegionId
 
   if (command.kind === 'close-region') {
+    // 单 Region 的 Tab（launcher/session/file 默认都是单格，分屏是显式操作，所以任意时刻大多数 Tab
+    // 都是单格）没有「格」可关：closeRegion 到 removeWorkbenchRegion 见只剩一格会静默不动。这正是任务
+    // 头号诉求「关不掉」的常见现场——对齐 iTerm/VS Code「最后一格时 Cmd+W 关 Tab」，回退到关整张 Tab。
+    // 关 Tab 必须走确认流（见 requestCloseTab 注释），不能裸调 closeRegion 或 store.closeTab。
+    if (regionIds(tab.layout.root).length <= 1) {
+      store.requestCloseTab(workspaceId, group.id, tabId)
+      return true
+    }
     void store.closeRegion(workspaceId, tabId, activeRegionId)
     return true
   }
