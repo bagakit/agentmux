@@ -1,6 +1,7 @@
 import type {
   AgentCatalogEntry,
   AgentMuxAgentContinuityResult,
+  AgentMuxAgentContinuityUnavailableReason,
   AgentCapabilities,
   AgentDisplayState,
   AgentExecutorConfig,
@@ -455,6 +456,16 @@ export type SessionStatus = {
   detail?: string
   exitCode?: number
   continuity?: 'unavailable' | 'conflict'
+  /**
+   * WHY a continuity recovery could not happen, carried verbatim from Core.
+   *
+   * `continuity` alone answers "did it fail", and folding Core's distinct reasons into that single bit
+   * is what makes every dead Agent read as one indistinguishable "resume unavailable". The three cases
+   * call for different things from the user — a Provider that cannot resume at all is permanent, a
+   * missing handle is about this one Session, and a conflict means something else already owns it — so
+   * the reason has to survive the trip to the renderer. Absent for `conflict`, which is its own reason.
+   */
+  continuityReason?: AgentMuxAgentContinuityUnavailableReason
 }
 
 type SessionSnapshotBase = {

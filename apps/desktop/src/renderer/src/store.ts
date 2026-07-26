@@ -110,6 +110,7 @@ import {
 } from './lib/session-state'
 import {
   TOOL_DOCK_DEFAULT_WIDTH,
+  WORKSPACE_TOOL_IDS,
   clampToolDockWidth,
   type WorkspaceTool
 } from './lib/surface-tool-dock'
@@ -120,6 +121,7 @@ import {
   documentKey,
   findWorkbenchRegion,
   focusWorkbenchTabRegion,
+  inheritedTopicIdForNewTab,
   initialWorkbenchRegionId,
   tabGroupForTab,
   removeWorkbenchRegion,
@@ -517,7 +519,14 @@ function continuityFailureDetail(
   }
 }
 
-function recoveryCandidateSession(
+/**
+ * Project a Core recovery failure into the Session snapshot the surface renders.
+ *
+ * Exported for assertion: the reason Core gave is the whole payload of this projection, and a test
+ * that seeds `continuityReason` into a fixture proves nothing about whether this function ever wrote
+ * it. Asserting on the RETURNED snapshot is what makes dropping the field turn red.
+ */
+export function recoveryCandidateSession(
   candidate: AgentSessionRecoveryCandidate,
   recovery: Extract<SessionRecoveryResult, { kind: 'unavailable' | 'conflict' }>
 ): SessionSnapshot {
@@ -527,6 +536,9 @@ function recoveryCandidateSession(
     providerId: candidate.providerId,
     executorId: candidate.executorId,
     capabilities: candidate.capabilities,
+    ...(candidate.terminalCapability
+      ? { terminalCapability: structuredClone(candidate.terminalCapability) }
+      : {}),
     hostId: candidate.hostId,
     workspacePath: candidate.workspacePath,
     label: candidate.label,
@@ -538,6 +550,9 @@ function recoveryCandidateSession(
       source: 'run-process',
       observedAt: Date.now(),
       continuity: recovery.kind,
+      // Carry Core's reason through instead of flattening it into the failure bit. Which of the
+      // three cases this is decides what the user should do next, and only Core knows it.
+      ...(recovery.kind === 'unavailable' ? { continuityReason: recovery.reason } : {}),
       detail: continuityFailureDetail(recovery)
     },
     latestOutputBytes: 0,
@@ -915,25 +930,143 @@ function newRegionId(): string {
   return `region:${crypto.randomUUID()}`
 }
 
-function newLauncherTab(workspaceId: string): WorkbenchTab {
+function newLauncherTab(workspaceId: string, topicId?: string): WorkbenchTab {
   const tabId = `launcher:${crypto.randomUUID()}`
   const surface: LauncherWorkbenchSurface = {
     regionId: initialWorkbenchRegionId(tabId),
     kind: 'launcher',
     workspaceId
   }
-  return createWorkbenchTab(tabId, surface)
+  const tab = createWorkbenchTab(tabId, surface)
+  return topicId ? { ...tab, topicId } : tab
 }
 
 type PersistedAppState = {
   restoredWorkbench: PersistedWorkbench
   unclaimedTerminalSessionIds: string[]
+  scratchTopicOrder?: string[]
+  agentNames?: Record<string, string>
+  activeWorkspaceId?: string | null
+  mainSurface?: MainSurface
+  projectRailOpen?: boolean
+  toolsOpen?: boolean
+  workspaceTool?: WorkspaceTool
+  toolDockWidth?: number
+}
+
+export type RestoredUiState = Pick<
+  AppState,
+  'activeWorkspaceId' | 'mainSurface' | 'projectRailOpen' | 'toolsOpen' | 'workspaceTool' | 'toolDockWidth'
+>
+
+/**
+ * Validate persisted presentation state at the configuration boundary. Persisted JSON is user data,
+ * not a trusted in-memory AppState: a removed Workspace, an old enum value, or a corrupt dock width
+ * must not make startup render an unusable surface. Missing fields intentionally resolve to the
+ * current defaults, which keeps older records readable without a compatibility branch.
+ */
+export function restorePersistedUiState(
+  config: AppConfig,
+  persisted: Pick<
+    PersistedAppState,
+    'activeWorkspaceId' | 'mainSurface' | 'projectRailOpen' | 'toolsOpen' | 'workspaceTool' | 'toolDockWidth'
+  >
+): RestoredUiState {
+  return {
+    activeWorkspaceId: restoredWorkspaceId(config, persisted.activeWorkspaceId),
+    mainSurface: restoredMainSurface(persisted.mainSurface),
+    projectRailOpen: restoredBoolean(persisted.projectRailOpen, true),
+    toolsOpen: restoredBoolean(persisted.toolsOpen, true),
+    workspaceTool: restoredWorkspaceTool(persisted.workspaceTool),
+    toolDockWidth: clampToolDockWidth(
+      typeof persisted.toolDockWidth === 'number'
+        ? persisted.toolDockWidth
+        : TOOL_DOCK_DEFAULT_WIDTH
+    )
+  }
 }
 
 const nonBrowserWorkbenchStorage: StateStorage = {
   getItem: () => null,
   setItem: () => undefined,
   removeItem: () => undefined
+}
+
+let persistWritesEnabled = false
+
+function workbenchStorage(): StateStorage {
+  return typeof window === 'undefined' ? nonBrowserWorkbenchStorage : window.localStorage
+}
+
+// A failed hydration must not be followed by the initial `set(...)` overwriting the only durable
+// copy of the user's layout with an empty default. Reads remain available while hydration runs;
+// writes are opened only after startup has either loaded the record or explicitly finished with a
+// visible warning. This is a narrow write fence, not a second persistence store.
+const guardedWorkbenchStorage: StateStorage = {
+  getItem: (name) => workbenchStorage().getItem(name),
+  setItem: (name, value) => {
+    if (!persistWritesEnabled) return undefined
+    return workbenchStorage().setItem(name, value)
+  },
+  removeItem: (name) => workbenchStorage().removeItem(name)
+}
+
+let persistHydrationPromise: Promise<void> | null = null
+let persistHydrationError: unknown | null = null
+
+/**
+ * Persist hydration is an input to startup recovery, not a background UI nicety. Zustand starts
+ * hydration asynchronously, so reading `restoredWorkbench` before this barrier can make a cold
+ * launch look like a brand-new window and permanently skip Agent recovery for that launch.
+ *
+ * Keep one in-flight promise so React StrictMode or another startup caller cannot trigger two
+ * storage reads. The promise is cleared after settlement to allow an explicit later rehydrate
+ * (for example after a storage repair) without keeping a stale promise forever.
+ */
+async function ensurePersistHydrated(): Promise<unknown | null> {
+  if (useAppStore.persist.hasHydrated()) return null
+  if (!persistHydrationPromise) {
+    persistHydrationError = null
+    persistHydrationPromise = Promise.resolve()
+      .then(() => useAppStore.persist.rehydrate())
+      .catch((error: unknown) => {
+        // A broken storage layer is a Renderer workflow failure, not proof that a healthy Agent is
+        // dead. Keep startup moving with the in-memory defaults and leave a durable, visible warning
+        // on the completed shell below.
+        persistHydrationError = error
+      })
+      .then(() => {
+        if (!useAppStore.persist.hasHydrated() && !persistHydrationError) {
+          persistHydrationError = new Error('Persisted Renderer state could not be hydrated.')
+        }
+      })
+      .finally(() => { persistHydrationPromise = null })
+  }
+  await persistHydrationPromise
+  return persistHydrationError
+}
+
+function restoredWorkspaceId(config: AppConfig, candidate: unknown): string | null {
+  if (
+    typeof candidate === 'string' &&
+    config.workspaces.some((workspace) => workspace.id === candidate)
+  ) return candidate
+  return config.workspaces[0]?.id ?? null
+}
+
+function restoredMainSurface(candidate: unknown): MainSurface {
+  return candidate === 'board' ? 'board' : 'workbench'
+}
+
+function restoredWorkspaceTool(candidate: unknown): WorkspaceTool {
+  return typeof candidate === 'string' &&
+    (WORKSPACE_TOOL_IDS as readonly string[]).includes(candidate)
+    ? candidate as WorkspaceTool
+    : 'files-branches'
+}
+
+function restoredBoolean(candidate: unknown, fallback: boolean): boolean {
+  return typeof candidate === 'boolean' ? candidate : fallback
 }
 
 export const useAppStore = create<AppState>()(persist<AppState, [], [], PersistedAppState>((set, get) => ({
@@ -1030,6 +1163,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       set({ warmTerminal: null })
     }
     try {
+      // Do not let the runtime snapshot race the Renderer persistence layer. The persisted Workbench
+      // is the index that selects recovery candidates; observing it before hydration would turn a
+      // restart into an empty first Workspace and make a healthy Agent appear unrecoverable. The
+      // subscriptions above intentionally start first so events arriving during this storage read
+      // stay in the existing boot buffer instead of being missed.
+      const persistWarning = await ensurePersistHydrated()
+      // A successful read can safely accept the normal persistence writes produced by startup. On
+      // a failed read, keep the write fence closed until the complete fallback shell is installed.
+      if (!persistWarning) persistWritesEnabled = true
       const [config, initialSnapshot, providerCatalog] = await Promise.all([
         api.config.get(),
         api.sessions.snapshot(),
@@ -1074,11 +1216,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         ...snapshot.sessions.filter((session) => !unclaimedSessionIds.has(session.id)),
         ...recoveryFailures
       ]
-      const firstWorkspace = config.workspaces[0]?.id ?? null
+      const persistedState = get()
+      const restoredUi = restorePersistedUiState(config, persistedState)
       const workbench = restorePersistedWorkbench({
         config,
         sessions: visibleSessions,
-        persisted: get().restoredWorkbench,
+        persisted: persistedState.restoredWorkbench,
         createTabGroupId: newTabGroupId
       })
       set({
@@ -1089,12 +1232,18 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         unclaimedTerminalSessionIds: [...failedCleanupIds],
         timelines: snapshot.timelines,
         pendingAgentLaunches: {},
-        activeWorkspaceId: firstWorkspace,
+        ...restoredUi,
         tabs: workbench.tabs,
         layouts: workbench.layouts,
-        loading: false
+        loading: false,
+        ...(persistWarning
+          ? { error: `Saved workspace state could not be restored: ${message(persistWarning)}` }
+          : {})
       })
-      if (firstWorkspace) void get().selectWorkspace(firstWorkspace)
+      // The Runtime and its Agents remain usable; only the optional persisted presentation projection
+      // was unavailable. Open the fence after the fallback state is installed so that this warning
+      // itself cannot serialize the empty fallback over the user's last good record.
+      persistWritesEnabled = true
       booting = false
       for (const event of pendingSessionEvents) get().applyEvent(event)
       for (const event of pendingBrowserEvents) get().applyBrowserEvent(event)
@@ -1105,6 +1254,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       booting = false
       disposeRuntimeSubscriptions()
       set({ loading: false, error: message(error) })
+      // Any state written while the startup path was failing must not leave the fence closed forever;
+      // subsequent user edits are the first intentional opportunity to replace the old record.
+      persistWritesEnabled = true
       return () => {}
     }
   },
@@ -1667,11 +1819,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (existing) get().focusRegion(workspace.id, tabId, regionId)
   },
   openLauncher(tabGroupId) {
-    const workspaceId = get().activeWorkspaceId
-    const layout = workspaceId ? get().layouts[workspaceId] : undefined
+    const state = get()
+    const workspaceId = state.activeWorkspaceId
+    const layout = workspaceId ? state.layouts[workspaceId] : undefined
     if (!workspaceId || !layout) return
     const targetTabGroupId = tabGroupId ?? layout.activeGroupId
-    const tab = newLauncherTab(workspaceId)
+    const topicId = inheritedTopicIdForNewTab(workspaceId, layout, state.tabs, targetTabGroupId)
+    const tab = newLauncherTab(workspaceId, topicId)
     set((state) => ({
       mainSurface: 'workbench',
       tabs: { ...state.tabs, [tab.id]: tab },
@@ -2396,7 +2550,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!workspace) throw new Error('Select a workspace first')
     const layout = state.layouts[workspace.id]
     if (!layout) throw new Error('Workspace layout is unavailable')
-    const targetTab = launcherTab ?? newLauncherTab(workspace.id)
+    const inheritedTopicId = launcherTab
+      ? undefined
+      : inheritedTopicIdForNewTab(workspace.id, layout, state.tabs, tabGroupId)
+    const targetTab = launcherTab ?? newLauncherTab(workspace.id, inheritedTopicId)
     const tabId = targetTab.id
     if (!workbenchViewCloseAllowsView(state.closingWorkbenchViews, tabId)) throw new Error('The View is closing')
     // The target Topic is the View's explicit binding. An unbound View launches with no Topic;
@@ -2566,7 +2723,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!workspace) throw new Error('Select a workspace first')
     const layout = state.layouts[workspace.id]
     if (!layout) throw new Error('Workspace layout is unavailable')
-    const targetTab = launcherTab ?? newLauncherTab(workspace.id)
+    const inheritedTopicId = launcherTab
+      ? undefined
+      : inheritedTopicIdForNewTab(workspace.id, layout, state.tabs, tabGroupId)
+    const targetTab = launcherTab ?? newLauncherTab(workspace.id, inheritedTopicId)
     const tabId = targetTab.id
     if (!workbenchViewCloseAllowsView(state.closingWorkbenchViews, tabId)) throw new Error('The View is closing')
     const regionId = launcher?.regionId ?? targetTab.layout.activeRegionId
@@ -2711,7 +2871,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       throw new Error('Workspace layout is unavailable')
     }
-    const targetTab = launcherTab ?? newLauncherTab(workspace.id)
+    const inheritedTopicId = launcherTab
+      ? undefined
+      : inheritedTopicIdForNewTab(workspace.id, get().layouts[workspace.id], state.tabs, tabGroupId)
+    const targetTab = launcherTab ?? newLauncherTab(workspace.id, inheritedTopicId)
     const tabId = targetTab.id
     const regionId = launcher?.regionId ?? targetTab.layout.activeRegionId
     const surface: TerminalWorkbenchSurface = {
@@ -2786,7 +2949,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!workspaceId) throw new Error('Select a workspace first')
     const layout = state.layouts[workspaceId]
     if (!layout) throw new Error('Workspace layout is unavailable')
-    const targetTab = launcherTab ?? newLauncherTab(workspaceId)
+    const inheritedTopicId = launcherTab
+      ? undefined
+      : inheritedTopicIdForNewTab(workspaceId, layout, state.tabs, tabGroupId)
+    const targetTab = launcherTab ?? newLauncherTab(workspaceId, inheritedTopicId)
     const tabId = targetTab.id
     if (!workbenchViewCloseAllowsView(state.closingWorkbenchViews, tabId)) throw new Error('The View is closing')
     const regionId = launcher?.regionId ?? targetTab.layout.activeRegionId
@@ -2870,7 +3036,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         return current
       }
       if (destination === 'tab') {
-        const tab = createWorkbenchTab(tabId, pendingLauncher)
+        const topicId = inheritedTopicIdForNewTab(
+          origin.workspaceId,
+          layout,
+          current.tabs,
+          origin.tabGroupId
+        )
+        const createdTab = createWorkbenchTab(tabId, pendingLauncher)
+        const tab = topicId ? { ...createdTab, topicId } : createdTab
         const nextLayout = addTab(layout, origin.tabGroupId, tabId)
         if (nextLayout === layout) {
           placementError = new Error('Link destination Tab could not be created')
@@ -3095,6 +3268,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
                     ...session.status,
                     state: 'error' as const,
                     continuity: recovery.kind,
+                    ...(recovery.kind === 'unavailable' ? { continuityReason: recovery.reason } : {}),
                     detail: continuityFailureDetail(recovery)
                   }
                 }
@@ -3225,9 +3399,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
 }), {
   name: 'agentmux-workbench-v1',
   version: 1,
-  storage: createJSONStorage(() => (
-    typeof window === 'undefined' ? nonBrowserWorkbenchStorage : window.localStorage
-  )),
+  storage: createJSONStorage(() => guardedWorkbenchStorage),
+  // Startup owns the hydration boundary explicitly. `initialize()` must not ask Core for recovery
+  // candidates until the persisted Workbench and UI projection have been merged.
+  skipHydration: true,
+  onRehydrateStorage: () => (_state, error) => {
+    if (error) persistHydrationError = error
+  },
   partialize: (state) => ({
     restoredWorkbench: projectPersistedWorkbench({ tabs: state.tabs, layouts: state.layouts }),
     unclaimedTerminalSessionIds: state.unclaimedTerminalSessionIds,
@@ -3235,6 +3413,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     scratchTopicOrder: state.scratchTopicOrder,
     // Agent 手改名是用户意图，重开要还在。key 是 session id；已消失的 session 留一条死名字无害——
     // 它不投影到任何界面（没有对应 session），下次同 id 复现的概率是 uuid 级零。
-    agentNames: state.agentNames
+    agentNames: state.agentNames,
+    // These are Renderer presentation facts. They are deliberately persisted beside Workbench
+    // topology, while PTY/Run/scrollback/Provider transcript state remains Core-owned.
+    activeWorkspaceId: state.activeWorkspaceId,
+    mainSurface: state.mainSurface,
+    projectRailOpen: state.projectRailOpen,
+    toolsOpen: state.toolsOpen,
+    workspaceTool: state.workspaceTool,
+    toolDockWidth: state.toolDockWidth
   })
 }))
