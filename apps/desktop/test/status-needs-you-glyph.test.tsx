@@ -41,9 +41,11 @@ describe('needs-you shape glyph', () => {
     const disconnected = ruleBody('.status--disconnected .status__dot')
     expect(disconnected).not.toContain('--amber')
     expect(disconnected).toContain('transparent')
-    // And only the needs-you states keep the amber fill.
-    const needsYou = ruleBody('.status--waiting .status__dot, .status--blocked .status__dot')
-    expect(needsYou).toContain('var(--amber)')
+    // And only the needs-you states own amber. The colour itself now lives on the state class as
+    // --status-ink (one definition feeding dot fill and avatar border alike), so that is where the
+    // ownership is asserted; the dot rule below it only shapes the pip.
+    expect(ruleBody('.status--waiting, .status--blocked')).toContain('var(--amber)')
+    expect(ruleBody('.status--disconnected {')).not.toContain('var(--amber)')
   })
 
   it('suppresses the glyph on the 5px corner marks where it cannot seat', () => {
