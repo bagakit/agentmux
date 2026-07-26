@@ -5,6 +5,7 @@ import {
 import { useEffect, useState } from 'react'
 import { BrandIcon } from './components/BrandIcon'
 import { useAgentAttentionNotifications } from './hooks/useAgentAttentionNotifications'
+import { useAgentStatusDecay } from './lib/agent-status-decay'
 import { useSidebarResize } from './hooks/useSidebarResize'
 import {
   TOOL_DOCK_MAX_WIDTH,
@@ -93,6 +94,9 @@ export function App() {
   // Background Agents announce themselves: a completion, a request, or a failure the user is not looking
   // at raises a native notification that routes back to that Session.
   useAgentAttentionNotifications()
+
+  // 掉了 hook 流的 `working` 会永远转圈——这个 hook 让无新证据的非终态衰减为中性态，圈就此停下。
+  useAgentStatusDecay()
 
   // The window's only global navigation gesture. Captured at the window so it fires before the
   // focused xterm textarea can swallow the keystroke; the toggle lets the same chord dismiss.
