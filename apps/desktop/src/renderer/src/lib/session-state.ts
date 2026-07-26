@@ -446,7 +446,15 @@ export function projectRuntimeEvent(
               ...(core.session.terminalCapability
                 ? { terminalCapability: structuredClone(core.session.terminalCapability) }
                 : {}),
-              ...(core.session.semanticStatus && item.processState === 'running'
+              // status 走 observedAt 严格单调门禁，与核心侧 persistSemanticStatus 的 `>` 同口径。
+              // agent-session 是「会话快照」：同一条 semanticStatus 会随任意会话变更（终端能力降级、
+              // prompt 投递清理等约十处）被反复重发，其 observedAt 不变。若无门禁，一条被本地衰减为
+              // running（衰减刻意保留 observedAt）的状态会被这类陈旧重发按原 observedAt 又贴回 working，
+              // 闪一帧再被重新衰减；一条滞后的旧快照也会盖掉更新的状态。要求严格新于当前观测才套用：
+              // 真正的新证据 observedAt 一定更大、照常点亮，同 observedAt 的重发一律跳过。
+              ...(core.session.semanticStatus &&
+                item.processState === 'running' &&
+                core.session.semanticStatus.observedAt > item.status.observedAt
                 ? { status: structuredClone(core.session.semanticStatus) }
                 : {}),
               ...(core.session.pendingInteraction

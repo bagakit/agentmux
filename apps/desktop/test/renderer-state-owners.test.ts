@@ -189,6 +189,86 @@ describe('Renderer resource state owners', () => {
     expect(cleared.sessions[0]?.status).toMatchObject({ state: 'waiting', source: 'native-hook' })
   })
 
+  it('does not let a stale agent-session republish bounce a decayed status back to working', () => {
+    // 衰减把 working→running 时刻意保留了 observedAt（衰减不是新观察）。core 侧那条 semanticStatus 仍
+    // 停在 working、observedAt 不变，且会随任意会话变更（终端能力降级、prompt 投递清理等）被反复重发。
+    // 若 agent-session reducer 无门禁地套用它，就会把已衰减的 running 按原 observedAt 又贴回 working——
+    // 闪一帧。门禁要求严格新于当前观测，这条同 observedAt 的重发必须被跳过。
+    const decayed = {
+      ...session,
+      updatedAt: 5,
+      // 衰减后的样子：显示态已是 running，但 observedAt 仍是那次 working 观测的 3。
+      status: { state: 'running' as const, source: 'native-hook' as const, observedAt: 3 }
+    }
+    const state = {
+      sessions: [decayed],
+      timelines: {},
+      pendingAgentLaunches: {},
+      tabs: {},
+      layouts: {},
+      viewModes: {}
+    }
+
+    const republished = reduceRuntimeEvent(state, core({
+      type: 'agent-session',
+      session: {
+        kind: 'agent',
+        agentSessionId: session.id,
+        providerId: session.providerId,
+        executorId: session.executorId,
+        hostId: session.hostId,
+        workspacePath: session.workspacePath,
+        run: session.control.run,
+        retiredRuns: [],
+        outputCursorBytes: 0,
+        createdAt: session.createdAt,
+        updatedAt: 6,
+        // 陈旧的 working——observedAt 不比当前的 3 新，不许把圈重新转起来。
+        semanticStatus: { state: 'working', source: 'native-hook', observedAt: 3 }
+      }
+    }))
+
+    expect(republished.sessions[0]?.status).toMatchObject({ state: 'running', observedAt: 3 })
+  })
+
+  it('lets a genuinely newer agent-session semanticStatus relight a decayed agent', () => {
+    // 对偶：一条真正的新证据（observedAt 更大）必须照常点亮，证明门禁不是把 agent-session 的
+    // semanticStatus 一律封死，只挡「同/更旧 observedAt 的重发」。
+    const decayed = {
+      ...session,
+      updatedAt: 5,
+      status: { state: 'running' as const, source: 'native-hook' as const, observedAt: 3 }
+    }
+    const state = {
+      sessions: [decayed],
+      timelines: {},
+      pendingAgentLaunches: {},
+      tabs: {},
+      layouts: {},
+      viewModes: {}
+    }
+
+    const relit = reduceRuntimeEvent(state, core({
+      type: 'agent-session',
+      session: {
+        kind: 'agent',
+        agentSessionId: session.id,
+        providerId: session.providerId,
+        executorId: session.executorId,
+        hostId: session.hostId,
+        workspacePath: session.workspacePath,
+        run: session.control.run,
+        retiredRuns: [],
+        outputCursorBytes: 0,
+        createdAt: session.createdAt,
+        updatedAt: 7,
+        semanticStatus: { state: 'working', source: 'native-hook', observedAt: 9 }
+      }
+    }))
+
+    expect(relit.sessions[0]?.status).toMatchObject({ state: 'working', observedAt: 9 })
+  })
+
   it('projects the Core-owned degraded terminal capability and clears it on acknowledgement', () => {
     const state = {
       sessions: [session],

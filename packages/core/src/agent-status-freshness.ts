@@ -31,13 +31,16 @@ function semanticStatusCanDecay(state: AgentStatus['state']): boolean {
 /**
  * 衰减阈值：`working` 无新证据多久之后不再算数。
  *
- * 定值的理由不是拍脑袋，而是「`working` 靠什么刷新」：唯一的刷新源是 hook 事件，全仓没有心跳
+ * 定值的理由不是拍脑袋，而是「`working` 靠什么刷新」：刷新只来自离散的活动事件——原生 hook 回执，或
+ * ACP 提供方的 status 事件（见 client.ts 里 acp 回调把 status 落成 semanticStatus）。全仓没有心跳
  * （grep 过 heartbeat/keepalive/ping/setInterval，core 侧一个都没有；终端字节按设计**不作**语义活动
- * 证据，见 types.ts 的 AgentMuxEvidenceSource 注释）。于是真正在干活的 Agent 的最长静默 = 一次工具
- * 调用的最长耗时——一条跑满的测试套件或一次构建，执行期间不产出任何 hook 事件（Pre 在工具开始时落，
- * Post 要等它结束），几分钟很常见。阈值必须**明确高过**这个上界，否则会把一个正跑长命令的健康 Agent
- * 误降级（这比慢一点更糟，见 AGENTS.md 原则 11：绝不许我们的流程挤掉健康 Agent）。取 15 分钟：稳稳
- * 盖过一次长构建/长测试，又把「永远转的圈」收敛成「最多在最后一次真实活动后 15 分钟」。
+ * 证据，见 types.ts 的 AgentMuxEvidenceSource 注释）。于是真正在干活的 Agent 的最长静默 = 相邻两次
+ * 活动事件的最大间隔——一条跑满的测试套件或一次构建，执行期间不产出任何事件（hook 的 Pre 在工具开始
+ * 时落、Post 要等它结束；ACP 同理只在有可汇报的进展时才发 status），几分钟很常见。阈值必须**明确高过**
+ * 这个上界，否则会把一个正跑长命令的健康 Agent 误降级（这比慢一点更糟，见 AGENTS.md 原则 11：绝不许
+ * 我们的流程挤掉健康 Agent）。取 15 分钟：稳稳盖过一次长构建/长测试，又把「永远转的圈」收敛成「最多
+ * 在最后一次真实活动后 15 分钟」。衰减落 `unknown`（诚实的不知道，不伪造 done/error），且下一条 observedAt
+ * 更大的证据——无论来自 hook 还是 acp——会经 session-state 的门禁把它重新点亮，故对两种刷新源都自愈。
  *
  * 不导出：它只是下面两个函数据以判定的内部阈值，产品侧从不直接读它——按 SSOT/零调用者原则，没有
  * 产品调用方的符号不外露。
