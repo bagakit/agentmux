@@ -1,9 +1,11 @@
 import { rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, crashReporter, shell } from 'electron'
 import { AgentMuxFileAgentSessionStore } from '@agentmux/core'
 import { isScratchWorkspaceId } from '../shared/contracts.js'
 import { desktopAgentSessionStorePath } from './agent-session-store-path.js'
+import { CrashLog } from './crash-log.js'
+import { crashReporterOptions, registerCrashCapture } from './crash-capture-wiring.js'
 import { ConfigStore } from './config-store.js'
 import { registerIpc } from './ipc.js'
 import { hydrateProcessPathFromLoginShell } from './login-shell-path.js'
@@ -29,6 +31,12 @@ if (process.env.AGENTMUX_DESKTOP_USER_DATA) {
   app.setPath('userData', packagedUserDataPath)
 }
 app.setName('AgentMux')
+// 崩溃事后要有痕迹。原生崩溃（含渲染进程）交给 crashReporter 落本地崩溃目录，且恒不上传；主进程
+// 层面的四类信号（未捕获异常/拒绝、渲染进程消失、子进程消失）归一成 NDJSON 追加到 userData，体量
+// 有硬顶。两者都只落盘、无网络出口。尽可能早挂，才能网住 whenReady 之前就发生的崩溃。
+crashReporter.start(crashReporterOptions())
+const crashLog = new CrashLog()
+registerCrashCapture({ app, process, sink: (record) => crashLog.append(record) })
 const scratchTopics = new ScratchTopics()
 const runtime = new RuntimeController(
   new AgentMuxFileAgentSessionStore(desktopAgentSessionStorePath()),
