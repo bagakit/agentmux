@@ -1,8 +1,7 @@
 import {
   AGENTMUX_CONTROL_ERROR_CODES,
   type AgentMuxControlError,
-  type AgentMuxControlErrorCode,
-  type AgentMuxMessageTargetCandidate
+  type AgentMuxControlErrorCode
 } from '@agentmux/core/control'
 import type {
   AgentMuxDesktopApi,
@@ -21,9 +20,27 @@ function controlErrorCode(value: unknown): value is AgentMuxControlErrorCode {
   return typeof value === 'string' && CONTROL_ERROR_CODES.has(value)
 }
 
-function messageTargetCandidates(value: unknown): AgentMuxMessageTargetCandidate[] | null {
+/**
+ * 校验过的候选：`regionIds` 是**非空元组**。
+ *
+ * 非空不是这里新加的约束，是上游本就成立的事实（生产者只在遇到一格 Agent 时才建候选）。把它
+ * 写进类型，下游就不必再为一个到不了的情况留分支——那种分支没有调用者、不会被执行，却要一直
+ * 被读、被维护、还会让测试假装覆盖了它。
+ */
+type ValidatedCandidate = { agentSessionId: string; regionIds: [string, ...string[]] }
+
+/** 单个 region id 的校验：非空、非 `self`、无换行/空字符、在本候选内不重复。 */
+function validRegionId(value: unknown, seen: Set<string>): string | null {
+  if (typeof value !== 'string' || !value || value === 'self' || /[\0\r\n]/u.test(value) || seen.has(value)) {
+    return null
+  }
+  seen.add(value)
+  return value
+}
+
+function messageTargetCandidates(value: unknown): ValidatedCandidate[] | null {
   if (!Array.isArray(value) || value.length > 64) return null
-  const candidates: AgentMuxMessageTargetCandidate[] = []
+  const candidates: ValidatedCandidate[] = []
   const sessionIds = new Set<string>()
   for (const valueCandidate of value) {
     if (!valueCandidate || typeof valueCandidate !== 'object' || Array.isArray(valueCandidate)) return null
@@ -35,20 +52,18 @@ function messageTargetCandidates(value: unknown): AgentMuxMessageTargetCandidate
       /[\0\r\n]/u.test(candidate.agentSessionId) ||
       sessionIds.has(candidate.agentSessionId) ||
       !Array.isArray(candidate.regionIds) ||
-      candidate.regionIds.length === 0 ||
       candidate.regionIds.length > 64
     ) return null
-    const regionIds: string[] = []
+    // 拆头尾而不是先 `length === 0` 再遍历：一个没有任何一格的候选本就无从寻址，`first` 缺席
+    // 与"某一格非法"是同一种拒绝，合成一处判断，元组类型也就自然成立，不需要断言。
+    const [first, ...rest] = candidate.regionIds
     const seenRegionIds = new Set<string>()
-    for (const regionId of candidate.regionIds) {
-      if (
-        typeof regionId !== 'string' ||
-        !regionId ||
-        regionId === 'self' ||
-        /[\0\r\n]/u.test(regionId) ||
-        seenRegionIds.has(regionId)
-      ) return null
-      seenRegionIds.add(regionId)
+    const firstRegionId = validRegionId(first, seenRegionIds)
+    if (firstRegionId === null) return null
+    const regionIds: [string, ...string[]] = [firstRegionId]
+    for (const value of rest) {
+      const regionId = validRegionId(value, seenRegionIds)
+      if (regionId === null) return null
       regionIds.push(regionId)
     }
     sessionIds.add(candidate.agentSessionId)
@@ -71,7 +86,7 @@ function messageTargetCandidates(value: unknown): AgentMuxMessageTargetCandidate
  */
 function withRecovery(
   message: string,
-  error: { code: string; candidates?: readonly AgentMuxMessageTargetCandidate[] }
+  error: { code: string; candidates?: readonly ValidatedCandidate[] }
 ): string {
   const recovery = addressingRecovery(error)
   return recovery === null ? message : `${message}\n\n${recovery}`
