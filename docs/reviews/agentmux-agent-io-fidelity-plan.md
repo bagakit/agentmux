@@ -113,3 +113,28 @@ T-002 排第二因为 T-004 的握手文本要走信封；T-006 排最后因为�
 文件本身**的调用者检查（`grep -rn "<symbol>" src | grep -v test`），命中全在定义文件内即为
 竖切未闭合。此条来自 `f-2248f4yx5/T-019` 的教训——12 处变异验证全绿，但七个动作在 `client.ts`
 之外零调用者。变异测试证明代码被测试用到，不证明能力接到产品上。
+
+## T-005 落地时查明：Handoff 的语义前提尚未建立
+
+实现 T-005 时按上面这条做调用者检查，查出的不是"接线接了一半"，而是这条能力的**语义前提
+本身缺席**。三层，从果到根：
+
+1. **无存储。** `HandoffResult` 在全仓没有任何持久化落点。Agent Session 上所有 `owner*`
+   字段（`lifecycleOwnerId`、`ownerId`/`ownerPid`、`runOwner`）讲的都是进程与 Run 的生命周期
+   归属，与"某个任务归某个 Agent"无关。
+2. **无读者。** `HandoffResult` / `ownerAgentSessionId` / `originAwaits` 在 `client.ts` 之外
+   零消费者，Desktop 侧同样为空。`openDispatch` 是同一形状——两个方法都只造一个 frozen 对象
+   返回。`AgentDelivery` 承载不了它：那是**一条消息**的投递状态机（queued→delivered→…），
+   而 handoff 按边界不投递任何 message，硬塞一个 `ownership-transferred` 进去等于扩状态机
+   兼造 receipt，正撞上面那条否决线。
+3. **无实体（根因）。** `grep "^export type.*Task" packages/core/src/types.ts` 零命中——
+   **Core 没有 Task 这个概念**，`taskId` 是一个不指向任何东西的自由字符串。
+
+第 3 条决定了前两条**不能靠"补一张表"解决**：此刻加一个 `ownedTaskIds` 字段，存进去的会是
+一串无人能验证有效性、无人知道何时算完成的自由文本——那比不存更糟，因为它看起来像事实。
+
+因此 T-005 的范围守在"把已有能力接到 CLI 上"是对的，**且比原以为的更该守**：所有权要落地，
+先要有一个可被指向的实体（是引入 Task，还是把所有权挂到已存在的 Thread 上），那是 Feature
+级决策。T-005 交付时必须如实标注：验收「新增符号有产品调用者」**字面满足**（`client.handOff`
+有了 CLI 调用者）、**用意未满足**（转移下一秒即蒸发）。不得用"机制已就绪"含混带过——
+`f-2248f4yx5/T-019` 正是被这句话放行的。
