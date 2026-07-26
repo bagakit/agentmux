@@ -702,6 +702,36 @@ describe('timeline JSONL 追加与 compaction', () => {
 })
 
 describe('并发写同一份 store 的锁竞争', () => {
+  it('只读 load 不会被活写锁挡住，争用时把孤立 Timeline 清理留到下一次', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-store-read-lock-'))
+    const path = join(root, 'agent-sessions.json')
+    const lockPath = `${path}.lock`
+    const timelineDirectory = join(root, 'agent-timelines')
+    const orphan = join(timelineDirectory, 'orphan.jsonl')
+    try {
+      const writer = new AgentMuxFileAgentSessionStore(path)
+      await writer.compareAndSwap(null, storedSession())
+      await mkdir(timelineDirectory, { recursive: true })
+      await writeFile(orphan, '{"orphan":true}\n', { mode: 0o600 })
+      await writeFile(lockPath, `${process.pid}\n`, { mode: 0o600 })
+
+      const reader = new AgentMuxFileAgentSessionStore(path)
+      const loaded = await Promise.race([
+        reader.load().then(() => 'loaded' as const),
+        new Promise<'timed-out'>((resolve) => setTimeout(() => resolve('timed-out'), 300))
+      ])
+      expect(loaded).toBe('loaded')
+      // 活 owner 仍在，维护旁路必须让出，不能为了删孤立文件抢走它的锁。
+      await expect(readFile(orphan, 'utf8')).resolves.toContain('orphan')
+
+      await unlink(lockPath)
+      await reader.load()
+      await expect(readFile(orphan, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('回收进程崩溃留下的空锁，并允许新的 Session 写入', async () => {
     const root = await mkdtemp(join(tmpdir(), 'agentmux-store-stale-lock-'))
     const path = join(root, 'agent-sessions.json')

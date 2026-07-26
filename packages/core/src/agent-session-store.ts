@@ -1575,13 +1575,30 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   constructor(readonly path = defaultAgentMuxAgentSessionStorePath()) {}
 
   async load(): Promise<readonly unknown[]> {
-    let result: AgentMuxStoredAgentSession[] = []
-    await this.enqueue(async () => {
+    // Loading is a read path.  Taking the writer lock here solely to sweep orphan Timeline files
+    // made every short-lived CLI (`list`, `inspect`, `output`) contend with the Desktop's high-rate
+    // semantic-status writes, so a lifecycle create could exhaust its retry budget without another
+    // writer ever being stuck.  Read the atomically-replaced document first, then make cleanup an
+    // opportunistic sidecar: if a writer currently owns the lock, leave the orphan for a later load.
+    await this.tail
+    const document = await this.read()
+    const result = document.sessions.map((session) => structuredClone(session))
+    await this.sweepOrphanTimelines()
+    return result
+  }
+
+  private async sweepOrphanTimelines(): Promise<void> {
+    let release: (() => Promise<void>) | null = null
+    try {
+      // One attempt is deliberate: cleanup is maintenance, never a reason to block a read caller.
+      release = await this.acquireLock(undefined, 1)
       const document = await this.read()
       await this.removeOrphanTimelineFiles(document.sessions)
-      result = document.sessions.map((session) => structuredClone(session))
-    })
-    return result
+    } catch (error) {
+      if (!(error instanceof AgentMuxError) || error.code !== 'AGENT_SESSION_STORE_BUSY') throw error
+    } finally {
+      await release?.()
+    }
   }
 
   async loadRetiredRuns(): Promise<readonly AgentMuxRunRef[]> {
@@ -2208,10 +2225,13 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     await current
   }
 
-  private async acquireLock(signal?: AbortSignal): Promise<() => Promise<void>> {
+  private async acquireLock(
+    signal?: AbortSignal,
+    attempts = LOCK_ATTEMPTS
+  ): Promise<() => Promise<void>> {
     const path = `${this.path}.lock`
     await mkdir(dirname(path), { recursive: true, mode: 0o700 })
-    for (let attempt = 0; attempt < LOCK_ATTEMPTS; attempt += 1) {
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
       signal?.throwIfAborted()
       try {
         const handle = await open(path, 'wx', 0o600)
