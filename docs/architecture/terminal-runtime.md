@@ -284,8 +284,22 @@ xterm 的 `onRender` 只用于证明首帧已经可测量：`TerminalView` 在�
 
 Attach replay 是状态恢复，不是历史动画。`TerminalView` 将 CtxMux 返回的有序 replay chunk
 合并为一次 xterm parser write，并在 replay 与启动期 pending output 排空前保持终端画布不可见，
-只展示 `Restoring terminal…`。最终状态完成后再原子揭示画布；真实 attach 失败则揭示红色错误。
+只展示恢复态。最终状态完成后再原子揭示画布；真实 attach 失败则揭示红色错误。
 这样既保留字节顺序与最终 TUI 状态，也不会把数千个历史重绘帧播放成“终端自己 resize”。
+
+**原子揭示有 deadline，超时后揭示优先于原子性。** 隐藏画布的正当理由只有一个：避免把历史重绘
+帧当动画播出去。它**不是**一个可以无限期持有的权利——`AGENTS.md` 原则 11 在这里的含义是，
+一个我们等不到的步骤不得把一个健康的终端永久藏起来。恢复态此前只有两个出口（全链成功、attach
+抛错），于是"链上某处永不 settle"这一类在界面上表现为**永久转圈**，而 ctxmux、Run、PTY 全都好着。
+
+因此揭示的前提收敛为**画面正确所真正依赖的那一步**：replay 字节写完。live 视口同步与 gap redraw
+移到揭示之后继续（它们改善画面，但不决定画面是否可看），**不再阻塞揭示**——此前 `startLiveSynchronization`
+排在揭示之前，它经由 resize 与 attach 争用同一把按 Run 串行的锁，该 Run 上任一卡住的操作都会让
+揭示永不到来。此外揭示本身带一个 deadline：到点仍未揭示则**强制揭示**，画布交还给用户。
+
+强制揭示不得静默：它按原则 11 走服务窗告示（第 2 类——我们的步骤没走通，Agent 没坏），说清哪一步
+没走通、现在按什么状态在跑、怎么恢复完整能力。恢复态本身仍是诚实信号，不因"看着烦"而删除；
+被削弱的只是它无限期遮挡画布的权利。
 
 CtxMux 的原始 Replay 有界；Gap 表示请求 cursor 与 `firstAvailableByte` 之间的字节已经淘汰，
 保留后缀不能被宣称为完整终端屏幕。`TerminalView` 因此不再把 Gap 文案写进 xterm 字节流，

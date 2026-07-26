@@ -33,8 +33,11 @@ type ProcessStep = {
 /**
  * 一个步骤的结局。步骤走通了就没有可分类的失败；没走通才进入分类，且必须带上 Agent 的存活判定。
  * 用 discriminated union 让「走通了」这一支根本不需要提供文案——没有失败就没有服务窗。
+ *
+ * 导出是因为消费方不止一个（握手降级、终端揭示超时……），它们各自把自己那一步映成这个类型，
+ * 再共用下面的分类器。让每个消费方自带一份等价定义，等于让「什么算一次失败」有第二个说法。
  */
-type StepOutcome =
+export type StepOutcome =
   | { completed: true }
   | { completed: false; step: ProcessStep; agentViability: AgentViability }
 
