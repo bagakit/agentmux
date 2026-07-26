@@ -1,3 +1,5 @@
+import { AGENTMUX_SELF_CONTEXT_VERB } from './agentmux-cli-help.js'
+
 /**
  * AgentMux 对 Agent 说的话，收敛到这一个模块。
  *
@@ -25,8 +27,11 @@
 /** 信封上的署名。声明这段话出自 AgentMux 自身，而非某个 Agent 或用户。 */
 const AMUX_FROM = 'amux'
 
+// 启动定向握手挂在这段引导里：让 Agent 第一步就去问自己的坐标与能力，而不是等到要开分屏那一刻才发现
+// 自己在 AgentMux 里。引导只点出握手动词（whoami）与"确切语法去 --skill 查"，绝不把 flag 语法抄进来
+// ——语法的唯一真相在 skill，抄进来会在语法演进时立刻过期（与《不与 skill 争夺唯一真相》同源）。
 const AGENTMUX_RUNTIME_GUIDE = `AgentMux runtime guide:
-You are running inside AgentMux, where you can open a terminal, a browser, or another agent into a split beside your view — left, right, above, or below — and rearrange a tab's layout. When a request needs any of that, run "$AGENTMUX_CLI" --skill for the exact commands before acting.`
+You are running inside AgentMux. Before acting, run "$AGENTMUX_CLI" ${AGENTMUX_SELF_CONTEXT_VERB} once to learn who and where you are — your Session, View, Region, Workspace, and which capabilities are available to you. You can open a terminal, a browser, or another agent into a split beside your view — left, right, above, or below — and rearrange a tab's layout. For the exact commands behind whoami or any capability, run "$AGENTMUX_CLI" --skill before acting.`
 
 // 引出紧随其后的用户原文——这句是 AgentMux 的引导语，不是用户的话，因此留在信封内。
 const USER_REQUEST_FOLLOWS = 'The user request follows.'
