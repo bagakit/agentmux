@@ -1,6 +1,19 @@
 import { Bot, ChevronRight, CircleDot, Hammer, Info, ShieldAlert, UserRound } from 'lucide-react'
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type JSX } from 'react'
 import type { AgentTimelineItem } from '../../../shared/contracts'
+import {
+  initFollowState,
+  onContentChange,
+  onScroll,
+  shouldShowJumpToLatest,
+  type ScrollGeometry
+} from '../lib/activity-autoscroll'
+import {
+  MAX_DIFF_LINES,
+  parseUnifiedDiff,
+  toolCallToDiff,
+  type ToolDiff
+} from '../lib/activity-diff'
 import {
   createRulerScale,
   describeReadout,
@@ -284,6 +297,14 @@ function Row({
   const prose = item.kind === 'tool_call' ? undefined : item.content
   const payload = item.toolInput ?? (item.kind === 'tool_call' ? item.content : undefined)
   const expandable = Boolean(payload)
+  // 一次编辑的实质是"哪几行没了、哪几行来了"，而不是一段转义 JSON——把 old/new 摊成加删行，
+  // 用户就不必在脑子里反转义再做行对比。算不出 diff 时（工具不是编辑类、JSON 坏了）如实退回
+  // 原始 payload，不猜、不半渲染。
+  const diff = useMemo(() => {
+    if (!payload) return null
+    const fromTool = item.toolInput ? toolCallToDiff(item.title, item.toolInput) : null
+    return fromTool ?? parseUnifiedDiff(payload)
+  }, [payload, item.toolInput, item.title])
 
   return (
     <Fragment>
@@ -325,8 +346,36 @@ function Row({
         </div>
       )}
       {prose ? <p className="log-row__prose">{prose}</p> : null}
-      {open && payload ? <pre className="log-row__payload">{payload}</pre> : null}
+      {open && diff ? <DiffBlock diff={diff} /> : null}
+      {open && !diff && payload ? <pre className="log-row__payload">{payload}</pre> : null}
     </Fragment>
+  )
+}
+
+/**
+ * 一次编辑摊成加删行。
+ *
+ * 颜色不是唯一的载体：每行前面留一个 `+`/`-`/空槽，色觉差异或高对比模式下仍读得出增删。
+ * 长 diff 由 lib 截断并给出 `truncated`，这里如实说明被截了——静默截断会让用户以为自己看到了全部。
+ */
+export function DiffBlock({ diff }: { diff: ToolDiff }): JSX.Element {
+  return (
+    <div className="log-diff">
+      {diff.filePath ? <div className="log-diff__path">{diff.filePath}</div> : null}
+      <pre className="log-diff__body">
+        {diff.lines.map((line, index) => (
+          <span key={index} className={`log-diff__line log-diff__line--${line.kind}`}>
+            <span className="log-diff__marker" aria-hidden="true">
+              {line.kind === 'added' ? '+' : line.kind === 'removed' ? '-' : ' '}
+            </span>
+            {line.text}
+          </span>
+        ))}
+      </pre>
+      {diff.truncated ? (
+        <div className="log-diff__truncated">Diff truncated at {MAX_DIFF_LINES} lines.</div>
+      ) : null}
+    </div>
   )
 }
 
@@ -442,6 +491,61 @@ export function ActivityView({
   const band = useMemo(() => rulerBand(scale, visible), [scale, visible])
 
   const logRef = useRef<HTMLDivElement>(null)
+  // 跟随状态是一个**值**，判定全在 lib 里；组件只负责把几何量喂进去、把决定执行掉。
+  // 这样"什么时候该贴底"能被断言，而不是埋在一个 effect 里——本仓库测试不跑 effect。
+  const followRef = useRef(initFollowState())
+  const [showJump, setShowJump] = useState(false)
+
+  const feedGeometry = (): ScrollGeometry | null => {
+    const el = logRef.current?.closest('.activity-feed')
+    if (!(el instanceof HTMLElement)) return null
+    return { scrollTop: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight }
+  }
+
+  const pinToBottom = (): void => {
+    const el = logRef.current?.closest('.activity-feed')
+    if (el instanceof HTMLElement) el.scrollTop = el.scrollHeight
+  }
+
+  const jumpToLatest = (): void => {
+    pinToBottom()
+    const geometry = feedGeometry()
+    if (geometry) followRef.current = onScroll(followRef.current, { ...geometry, scrollTop: geometry.scrollHeight })
+    followRef.current = { ...followRef.current, following: true }
+    setShowJump(shouldShowJumpToLatest(followRef.current))
+  }
+
+  // 用户主动往上滚才脱离；内容变长不算——两者都会让"离底部的距离"变大，能区分它们的证据是
+  // scrollTop 本身有没有减少。判定在 lib 里，这里只把事件折进去。
+  useEffect(() => {
+    const el = logRef.current?.closest('.activity-feed')
+    if (!(el instanceof HTMLElement)) return
+    const handle = (): void => {
+      const geometry = feedGeometry()
+      if (!geometry) return
+      followRef.current = onScroll(followRef.current, geometry)
+      setShowJump(shouldShowJumpToLatest(followRef.current))
+    }
+    el.addEventListener('scroll', handle, { passive: true })
+    return () => el.removeEventListener('scroll', handle)
+  }, [])
+
+  // 新内容到达时贴底。追加与原地变长都算"新内容"——流式回答最常见的形态正是后者（尾项没换，
+  // 只是变长了）。只有仍在跟随时才贴，否则会把已经滚上去的读者拽回来。
+  useEffect(() => {
+    const geometry = feedGeometry()
+    if (!geometry) return
+    const last = items.at(-1)
+    const decision = onContentChange(followRef.current, {
+      itemCount: items.length,
+      lastItemId: last?.id ?? null,
+      lastItemLength: last?.content?.length ?? 0
+    }, geometry)
+    followRef.current = decision.state
+    if (decision.scrollToBottom) pinToBottom()
+    setShowJump(shouldShowJumpToLatest(followRef.current))
+  }, [items])
+
   // Segment elements keyed by segment key, so a resolved event index can find its host row and the
   // observer can watch each one.
   const segmentEls = useRef(new Map<string, HTMLElement>())
@@ -557,6 +661,11 @@ export function ActivityView({
           </div>
         ))}
       </div>
+      {showJump ? (
+        <button type="button" className="activity-feed__jump" onClick={jumpToLatest}>
+          Jump to latest
+        </button>
+      ) : null}
     </div>
   )
 }

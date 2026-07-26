@@ -173,6 +173,56 @@
   font: 11px/1.5 var(--font-mono);
   white-space: pre-wrap;
 }
+/* 一次编辑摊成加删行。颜色不是唯一载体：每行左侧固定一个 +/-/空 的字符槽，色觉差异或高对比
+   模式下仍读得出增删。缩进与 log-row__payload 对齐，折叠展开时不跳位。 */
+.log-diff {
+  margin:var(--sp-1) var(--sp-5) var(--sp-2) 104px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  overflow: hidden;
+}
+.log-diff__path {
+  padding:var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--text-3);
+  font: 11px/1.5 var(--font-mono);
+}
+.log-diff__body {
+  margin:0;
+  padding:var(--sp-3) 0;
+  max-height: 320px;
+  overflow: auto;
+  font: 11px/1.5 var(--font-mono);
+  white-space: pre;
+}
+.log-diff__line { display: block; padding:0 var(--sp-4); color: var(--text-2); }
+.log-diff__marker { display: inline-block; width: 1ch; margin-right: var(--sp-2); opacity: .7; }
+.log-diff__line--added { color: var(--green-text); background: var(--green-bg); }
+.log-diff__line--removed { color: var(--red-text); background: var(--red-bg); }
+.log-diff__line--hunk { color: var(--text-3); background: var(--surface-2); }
+.log-diff__truncated {
+  padding:var(--sp-2) var(--sp-4);
+  border-top: 1px solid var(--line-soft);
+  color: var(--text-3);
+  font-size: var(--fs-micro);
+}
+/* 回到最新。它只在脱离跟随时出现——正在跟随时视口已经在最新处，按钮会是个白点。
+   浮在滚动区之上而不占据文档流，否则它一出现整条 feed 就会跳一下。 */
+.activity-feed__jump {
+  position: sticky;
+  bottom: var(--sp-4);
+  left: 50%;
+  transform: translateX(-50%);
+  padding:var(--sp-2) var(--sp-5);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--text);
+  background: var(--surface-2);
+  box-shadow: var(--elev-1);
+  font-size: var(--fs-meta);
+  cursor: pointer;
+}
+.activity-feed__jump:hover { background: var(--surface-3); }
 .log-fold__chevron { transition: transform 120ms ease; }
 .log-fold[data-open] .log-fold__chevron { transform: rotate(90deg); }
 .log-fold__label { display: inline-flex; align-items: center; gap:var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); }
