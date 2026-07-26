@@ -35,7 +35,14 @@ import { acquireTerminalResourceOwners } from '../lib/terminal-resource-owners'
 import { LatestTerminalOutputAcknowledger } from '../lib/terminal-output-ack'
 import { TerminalViewportSynchronizer } from '../lib/terminal-viewport-sync'
 import { terminalStartupPhase } from '../lib/terminal-startup'
+import {
+  TERMINAL_REVEAL_DEADLINE_MS,
+  terminalRevealDecision,
+  terminalRevealServiceOutcome
+} from '../lib/terminal-reveal'
+import { classifyServiceNotice, serviceNoticeToRender } from '../lib/service-window-notice'
 import { agentProviderLabel } from './AgentProviderIcon'
+import { ServiceWindowNotice } from './ServiceWindowNotice'
 import {
   OpenDestinationMenu,
   type OpenDestinationMenuRequest
@@ -130,6 +137,13 @@ export function TerminalView({
   const rememberedSelectionRef = useRef('')
   const [hasSelection, setHasSelection] = useState(false)
   const [hydrating, setHydrating] = useState(true)
+  /**
+   * 揭示是被我们自己的步骤逼出来的，而不是走通了（`lib/terminal-reveal.ts`）。
+   *
+   * 独立于 `hydrating`：揭示之后 `hydrating` 就是假，无从区分"正常走完"与"到点硬揭示"，
+   * 而后者必须留下一条告示——只揭示不说话就是静默降级（AGENTS.md 原则 11 的两条边界之一）。
+   */
+  const [revealOverdue, setRevealOverdue] = useState(false)
   const [attachFailed, setAttachFailed] = useState(false)
   const [hasOutput, setHasOutput] = useState(false)
   const [replayGap, setReplayGap] = useState(false)
@@ -182,6 +196,7 @@ export function TerminalView({
     const terminalRoot = root
     const terminalGeneration = ++terminalGenerationRef.current
     setHydrating(true)
+    setRevealOverdue(false)
     setAttachFailed(false)
     setHasOutput(false)
     setReplayGap(false)
@@ -474,6 +489,35 @@ export function TerminalView({
       return true
     })
 
+    /**
+     * 揭示的兜底时限（AGENTS.md 原则 11）。
+     *
+     * 恢复态此前只有两个出口——全链成功、attach 抛错——所以链上任一处"既不成功也不抛错"就是
+     * 永久转圈，而 ctxmux / Run / PTY 全都好着。这个 timer 是那一类的唯一出口：到点把画布交还
+     * 用户，并置 `revealOverdue` 让服务窗说清情况。用 `setTimeout` 而非 `setInterval`——后者是
+     * 常驻开销，且在 retention 测试的黑名单里。
+     */
+    let revealed = false
+    const reveal = (): void => {
+      if (disposed || revealed) return
+      revealed = true
+      setHydrating(false)
+    }
+    const revealStartedAtMs = Date.now()
+    const revealDeadline = setTimeout(() => {
+      if (disposed) return
+      const decision = terminalRevealDecision({
+        revealed,
+        startedAtMs: revealStartedAtMs,
+        nowMs: Date.now(),
+        deadlineMs: TERMINAL_REVEAL_DEADLINE_MS
+      })
+      if (!decision.reveal) return
+      // 强制揭示绝不静默：先记账，再揭示。
+      setRevealOverdue(decision.overdue)
+      reveal()
+    }, TERMINAL_REVEAL_DEADLINE_MS)
+
     void (async () => {
       try {
         const result = await api.sessions.attach(session.control, 0)
@@ -503,6 +547,12 @@ export function TerminalView({
           )
           cursor = droppedPendingThrough
         }
+        // 画面正确真正依赖的就是上面这些字节写完——隐藏画布的正当理由到此结束，先揭示。
+        // 恢复收尾（live 视口同步 / gap redraw）继续跑，但不再决定画面何时可看：它经
+        // api.sessions.resize 与 attach 争用同一把按 Run 串行的锁，排在揭示之前时，该 Run 上
+        // 任一不 settle 的操作都会让一个健康的终端被永久藏起来。
+        reveal()
+        if (autoFocusRef.current) terminal.focus()
         await finishTerminalReplayRecovery({
           gap: Boolean(result.gap),
           canControlRun: canControlRunRef.current,
@@ -520,9 +570,6 @@ export function TerminalView({
           },
           onRedrawError: (error) => console.warn('[terminal] failed to redraw after replay gap', error)
         })
-        if (disposed) return
-        setHydrating(false)
-        if (autoFocusRef.current) terminal.focus()
       } catch (error) {
         if (!disposed) {
           setAttachFailed(true)
@@ -532,7 +579,7 @@ export function TerminalView({
             terminal,
             `\r\n\u001b[31m[Attach failed: ${detail}]\u001b[0m\r\n`
           )
-          setHydrating(false)
+          reveal()
         }
       }
     })()
@@ -541,6 +588,7 @@ export function TerminalView({
     if (autoFocusRef.current) requestAnimationFrame(() => terminal.focus())
     return () => {
       disposed = true
+      clearTimeout(revealDeadline)
       setLinkPreview(null)
       setLinkRequest((current) => {
         const next = current?.terminalGeneration === terminalGeneration ? null : current
@@ -631,6 +679,12 @@ export function TerminalView({
     hasOutput
   })
 
+  const revealNotice = serviceNoticeToRender(
+    classifyServiceNotice(
+      terminalRevealServiceOutcome({ overdue: revealOverdue, processState: session.processState })
+    )
+  )
+
   return (
     <Fragment>
       <TerminalContextMenu
@@ -705,6 +759,15 @@ export function TerminalView({
                 <strong>Starting {agentProviderLabel(session.providerId)}…</strong>
                 <span>Waiting for its first terminal output.</span>
               </div>
+            </div>
+          ) : null}
+          {/* 服务窗（原则 11）：揭示是被 deadline 逼出来的时，绝不静默——画布已交还，同时说清
+              哪一步没走通、终端此刻可用、怎么恢复完整滚动历史。判据是这个 Run 还能不能干活，
+              判定全在 lib/terminal-reveal.ts，这里只渲染结果。没有告示就连容器都不挂，
+              否则一个空壳会盖在画布上吃掉指针事件。 */}
+          {revealNotice ? (
+            <div className="terminal-service-window">
+              <ServiceWindowNotice notice={revealNotice} />
             </div>
           ) : null}
           {!hydrating && replayGap ? (

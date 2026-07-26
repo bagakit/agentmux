@@ -94,6 +94,7 @@
 - **第二类绝不阻断**。启动握手超时是这一类的样板：`[?u` 这个能力探测在 10 秒内没等到，通常只说明 CLI 还没走到吐出它的那一步（冷启动慢、机器负载高），进程活得好好的；而当前实现四个调用点全部 fatal 且带回滚，等于用我们的一次探测失败杀掉一个健康的 Agent。**超时的正确含义是"这项能力当前未知"，不是"这个 Agent 坏了"**。
 - **提醒的形态是服务窗**：像窗口上贴的一条告示，说清楚三件事——哪一步没走通、现在按什么状态在跑、要恢复完整能力该做什么。它停在旁边不挡路，不抢焦点，也不自动消失（消失了用户就再也无从知道自己在降级状态里）。它不是 toast，也不是错误弹窗——那两者一个留不住、一个在说"你完了"，都不符合"能干活，只是少一项能力"这个事实。
 - **两条边界**：不许**静默**降级——用户有权知道自己在降级状态下工作，少一项能力可能改变他对 Agent 行为的判断；也不许**把未知当成好的**——分不清是哪一类时，如实说"分不清"，而不是猜一个然后照着做。
+- **终端恢复态是这条原则的第二个消费方**。用户原话："现在有个 ctxmux 明明存在还在打开时显示 restoring"。恢复态此前只有两个出口——全链成功、attach 抛错——于是"我们的揭示流程卡住了"这一类在界面上表现为**永久转圈**，而 ctxmux、Run、PTY 全都好着。这是第 2 类被写成了"无限期等待"，比写成第 1 类更糟：连"哪里不对"都不告诉用户。**一个我们等不到的步骤，不得把一个健康的终端永久藏起来。** 揭示因此带 deadline，到点强制把画布交还给用户，并按同一个服务窗说清哪一步没走通、现在按什么状态在跑、怎么恢复（架构侧的揭示时序与锁竞争见 [`terminal-runtime.md`](../architecture/terminal-runtime.md)）。恢复态本身保留——真正需要重放时它仍是诚实信号，被削弱的只是它无限期遮挡画布的权利。
 - 这条与《寻址与复制》里"失败结果要自带下一步命令"同源：失败不是终点，是一个要说清楚"现在怎么办"的时刻。
 
 ## 界面结构### 顶部与项目栏
@@ -134,6 +135,7 @@
     行列数，那正是要消掉的那一帧。隐藏格必须 absolute 叠放，留在文档流里会把活动格挤变形。
 - **切换 Project/Workspace 也遵守同一条保活合同**。所有已打开 Workspace 的 Workbench 由窗口级 owner 保持挂载；非当前 Workspace 只隐藏并停工，不卸载其 Session Region。切换回来不得重新 attach、重新 loading TUI 或从 replay 起点重放一遍。Workbench 真的关闭、Region 被删除或 Session 被用户明确停止时，才释放对应实例与 attachment。
 - **保活不等于无限常驻重资源**。活动 Workspace 与近期访问的工作面保持 warm，确保回访不触发恢复态；长期隐藏、超出明确 hot-retain 数量的 Terminal/Monaco/Browser surface 可以进入 cold-park，但只能在该 surface 有可验证的重建或 replay 路径、且不切断 Core Session/Run 事实时进行。cold-park 必须有 TTL、数量上限与 cooldown，避免在项目来回切换时反复卸载/挂载；语义 Session、Topic/Region 布局和可恢复的 attachment 归属不得因内存预算被删除。
+- **内存归因必须按进程和 owner 分层**。比较 AgentMux 与其他客户端时，不能把 Chromium helper 的 RSS、共享页或 V8 保留容量直接相加后称为“应用泄漏”；至少要分别记录 Main、Renderer、GPU/Utility、Browser target，以及 Terminal/Monaco/Browser/attachment owner。只有在同一场景的 working-set 与 owner count 同时收敛时，才把 cold-park 记为有效回收；没有证据的数值不得写成产品承诺。
 
 ### Agent Composer 与 Terminal
 

@@ -91,6 +91,15 @@
   color: var(--text-3);
   font-size: var(--fs-micro);
 }
+/* 服务窗在终端投影里的落点（形态由 agent.css 的 .service-window 定义，这里只定位）。
+   贴左下角、限宽、可点：它是告示不是遮挡，所以不铺满、不吃掉画布的指针事件。 */
+.terminal-service-window {
+  position: absolute;
+  z-index: 36;
+  bottom: 12px;
+  left: 12px;
+  max-width: 420px;
+}
 .terminal-replay-gap {
   position: absolute;
   z-index: 25;
