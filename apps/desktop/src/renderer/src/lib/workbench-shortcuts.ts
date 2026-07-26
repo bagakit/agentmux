@@ -79,7 +79,9 @@ export function resolveWorkbenchShortcut(
   }
 
   // 关闭当前 Region：mac Cmd+W / 非 mac Ctrl+Shift+W。裸 Ctrl+W 是 readline 的删词，绝不吃。
-  // App 侧解析出命令后必然 preventDefault，Cmd+W 因此不会漏到系统菜单的「关闭窗口」。
+  // 注意：让 Cmd+W 真正落到这里、而不是被系统菜单抢去关窗口，靠的是主进程换掉了默认应用菜单
+  // （application-menu.ts 去掉了绑 Cmd+W 的 close/fileMenu/windowMenu role）——渲染层的
+  // preventDefault 拦不住原生菜单加速键，那个保证不在这一层。
   if (key === 'w' && letterChordMatches(event, isMac)) {
     return { kind: 'close-region' }
   }

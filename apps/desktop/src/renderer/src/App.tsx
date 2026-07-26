@@ -116,8 +116,10 @@ export function App() {
   // quick switcher so it wins before the focused xterm swallows the chord. The whole decision —
   // classify the chord, project the same Topic-filtered layout the Workbench renders, resolve the
   // target, and dispatch — lives in the pure handleWorkbenchShortcut, read against a fresh Store
-  // snapshot; this listener only forwards and consumes. A chord it handles is always consumed
-  // (preventDefault), so Cmd+W does not fall through to closing the window.
+  // snapshot; this listener only forwards and consumes. preventDefault here stops the browser default
+  // for a chord we handle; the reason Cmd+W reaches us at all (rather than the native menu closing the
+  // window) is that the main process replaces the default menu with one that binds no Cmd+W — a
+  // renderer preventDefault cannot cancel a native menu accelerator. See main/application-menu.ts.
   useEffect(() => {
     const isMac = navigator.userAgent.includes('Mac')
     const onKeyDown = (event: KeyboardEvent): void => {

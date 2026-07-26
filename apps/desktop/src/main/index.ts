@@ -1,7 +1,8 @@
 import { rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { app, BrowserWindow, crashReporter, shell } from 'electron'
+import { app, BrowserWindow, crashReporter, Menu, shell } from 'electron'
 import { AgentMuxFileAgentSessionStore } from '@agentmux/core'
+import { applicationMenuTemplate } from './application-menu.js'
 import { isScratchWorkspaceId } from '../shared/contracts.js'
 import { desktopAgentSessionStorePath } from './agent-session-store-path.js'
 import { CrashLog } from './crash-log.js'
@@ -228,6 +229,11 @@ function startPrimaryInstance(): void {
 
   app.whenReady().then(async () => {
     const appReadyAtMs = Date.now()
+    // 换掉默认应用菜单：默认菜单把 Cmd+W 绑到「关闭窗口」，会抢走 Workbench「关闭当前 Region」的
+    // 主键位（原生加速键在按键进渲染进程前就被 AppKit 处理，渲染层 preventDefault 拦不住）。这份模板
+    // 不含任何绑 Cmd+W 的 role，同时保留 Edit 菜单——终端粘贴走的是原生 Paste role。菜单是应用级、
+    // 全窗口共享的，建窗前设一次即可。
+    Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenuTemplate(process.platform === 'darwin')))
     const pathHydration = await hydrateProcessPathFromLoginShell()
     if (!pathHydration.ok && pathHydration.reason !== 'unsupported-platform') {
       process.stderr.write(`Unable to load login shell PATH: ${pathHydration.reason}\n`)
