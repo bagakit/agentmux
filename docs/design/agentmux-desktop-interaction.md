@@ -56,12 +56,25 @@
 - **歧义在源头消除，不甩给接收方**。一张 View 分屏承载多个 Agent 时，Tab 地址本身就是歧义的；此时复制出的地址必须**直接是 Region 地址**，而不是一段"先 inspect、若返回 `MESSAGE_TARGET_NOT_UNIQUE` 再从 candidates 里挑一个"的操作指引——把消歧工作转嫁给接收方，等于这次复制没有把寻址方式说清楚。歧义只在源头可见：复制发生时我们知道用户点的是哪一格，接收方不知道。
 - **复制入口按其能消除的歧义就近放置**：**Region 右键菜单**产出 Region 地址（用户点哪一格就是哪一格，无需推断当前聚焦，而想寻址的那一格往往恰恰不是聚焦的那一格）；**Tab 右键菜单**产出 View 级地址，语义收敛为"整张工作面"。同一 Session 在两处产出的 Session 地址必须一致——它们是同一份真相的两个入口，不是两套格式。
 - 复制的地址**只使用已被 CLI 与 Control 面接受的寻址方式**（`--to-session` / `--to-region` / `--to-tab` 及 `inspect` 的对应 flag），不为复制发明第二套语法。地址里的 id 一律按 shell 语义转义，使带空格或引号的 id 粘贴即可执行。
+- **按意图给入口命名，而不是按地址种类**。"复制 View 地址"要求用户先知道自己想要哪一层身份，可用户想的是"把这个 Agent 交给别人"。因此交接类入口按意图呈现（"给这个 Agent 发消息"），并由我们解析成**最精确的那个地址**：指向某一格分屏时是 Region，目标唯一时是 Session。View 地址不因此消失，但它的意图是"分享/检查整张工作面"，不是交接的默认落点——这与上一条同源：知道用户点了哪一格的是我们，不是接收方。
+- **失败结果要自带下一步命令，而不只是候选清单**。`MESSAGE_TARGET_NOT_UNIQUE` 已经带 `candidates`，但候选清单仍要求接收方自己拼出命令——那正是"歧义不甩给接收方"这条原则在错误路径上的漏洞。因此这类失败要额外返回**可直接执行的恢复命令**；stale View、目标不是 Agent、Agent 已退出各自给自己的恢复入口。恢复命令与复制出去的地址**共用同一个格式化出口**，不为错误路径另写一份拼接（两份拼接会各自演进，且漂移时不会有测试变红）。
 - 后台 Agent 由 Agents 工具重新发现和打开，不建立第二份 Session Registry。
 - **Agent 自己就能把 terminal、browser 或文件开到某个方向的分栏里**，走的是既有的 `open` / `arrange` CLI——那已经是"Agent 驱动界面"的接口，**不新建第二条通路、不新增 surface kind**。缺的从来不是能力而是发现：因此由启动时注入的提示负责让每个 Agent 知道这件事存在、并知道去哪查确切用法，而**不把完整 CLI 语法抄进提示**（那会与 skill 争夺唯一真相，并在语法演进时立刻过期）。这条的验收是行为断言——证明启动路径确实携带了该提示，而不是断言 skill 文本里含某个字符串：后者在改动前也会通过，证明不了任何事。
 
-## 界面结构
+### AgentMux 对 Agent 说的话
 
-### 顶部与项目栏
+- **AgentMux 自己发给 Agent 的话，收敛到一个模块**。今天这类文本散在启动提示、discuss 首条消息、send、resume 四处各拼各的，唯一共用的只有终端粘贴的字节封装（bracketed paste），那是**字节层**的包裹，不是**语义层**的署名。散着拼的后果不是难看而是不可演进：想给所有出站消息加一个字段，得记得改四个地方，漏掉的那个不会有测试变红。
+- **出站消息要结构化，让 Agent 能分辨这句话是谁说的**。形如 `<amux from="amux" …>…</amux>` 的显式信封，把"AgentMux 在对你说话"与"用户在对你说话"分开——没有信封时，一段系统注入的运行时说明和用户的真实请求在 Agent 眼里是同一段文本，它只能靠措辞猜。信封是**给 Agent 读的**，因此格式要人类可读、可嵌套在自然语言里，而不是另造一套需要解析器的线协议。
+- **信封承载的是已有的事实，不新建第二份消息台账**。作者、因果、投递状态已经在 Core 的 Message/Delivery 类型里；信封只是把其中该让 Agent 知道的那几项序列化进它真正读到的文本。这条明确划清与已否决的 agent 间可信通信（capability 签名、幂等 ledger）的边界：那套东西的前提是 **Agent 之间要互相认证**，而我们的模型里**人是信任锚**——信封不做认证，它只做署名与可读性。
+- **用户内容永远不被信封改写**。信封包裹的是 AgentMux 自己的话；用户那句原文照旧原样送达，不被塞进属性、不被转义成另一种形状。Agent 收到的用户文本必须与用户敲的一致，否则复现问题时没人知道 Agent 究竟读到了什么。
+
+### 启动握手与自命名
+
+- **Agent 启动时应当先认识自己所处的环境**。今天的启动提示只在"需要分屏时"指向 `--skill`，于是 Agent 直到真的想开分屏那一刻才知道自己在 AgentMux 里——在此之前它既不知道自己是谁（Session/Region/Topic/Workspace），也不知道有哪些能力可用。因此启动时先做一次握手，让 Agent 从第一步就拿到自己的坐标与可用能力，而不是等到需要时才发现。
+- **握手要一次问答就够，且不与 skill 争夺唯一真相**。返回坐标与能力清单，而不把完整 CLI 语法抄进提示（与上文同源：抄进去会在语法演进时立刻过期）。验收沿用同一条行为断言口径——证明启动路径确实携带并执行了握手，而不是断言提示文本里含某个字符串。
+- **等命名能力齐备后，让 Agent 给自己起名**。名字的优先级链里已有"从成员/首条 prompt 派生"这一档（见《显示名与身份》），Agent 自命名是同一档上更好的一个来源：它比从首条 prompt 截一段更贴近这个 Agent 实际在做的事。它仍然**低于用户手改**——自动命名绝不覆盖用户意图这条不因来源变成 Agent 而松动。这条**排在命名链落地之后**，否则会先造出一个没有归属的名字字段。
+
+## 界面结构### 顶部与项目栏
 
 - macOS 红绿灯之后固定放 Projects 与 Workspace tools 两个开关，顺序和位置不随面板状态变化。
 - 单 Pane 时，根 Tabbar 与窗口顶行合并；分屏时保留全局 chrome 行，每个 Pane 使用自己的紧凑 Tabbar。
@@ -109,7 +122,11 @@
   - 这**不是**"working 时提交一律送达"的承诺。能否送达仍由 Core 裁决：render-then-submit Provider（9 家里只有 codex）的 mid-turn steer 会被 Core fail-closed 拒绝，那是一等预期而非缺陷。被拒时草稿保留（这就是诚实的"没送出去"信号），且不产生任何 user 回合——Core 在记录回合之前就抛错。合同不得被改写成普遍送达承诺，那会与 codex 已封的 readiness 门自相矛盾，并诱导后人去削弱它。
   - pending interaction 期间**不允许** steer：待答请求期间卡片是唯一输入面（既有合同），Renderer 侧不提供提交、Core 侧亦抛 `AGENT_INTERACTION_PENDING`，双重保险。
   - 不做输入队列：下游 CLI 自带输入行，且就绪门控对 8/9 Provider 不可实现，排队只会制造一份界面以为已送达、进程并不知情的假状态。
-- Provider/ACP 报告的 semantic status 与 pending interaction 由 Core 持久化。Desktop 刷新或重新 Attach 时优先投影这份 Agent 语义；新的 Run `running` 事实只更新进程态，不能覆盖 `working`、`waiting`、`blocked` 或 `done`。Run 退出或中断仍由进程事实结束当前可交互态。
+- **终端要像终端：宿主不许悄悄改写按键与选择行为**。Agent 跑的是它自己的 TUI，用户练熟的是那套 TUI 的手感；我们只是宿主。宿主把某个键翻译错了，用户会以为是那个 CLI 坏了——这类缺陷最难归因，因为它在 CLI 自己的终端里复现不出来。两条当前已知、且必须进测试集的具体事实：
+  - **Shift+Enter 换行，不提交**。在 Claude Code 自己的 TUI 里 Shift+Enter 是换行；在我们的终端里若送出与 Enter 相同的字节，下游只能读成提交，用户就写不了多行。终端默认对这两者不可分辨（都送 `\r`），所以"分得开"必须是我们**显式**兑现的一件事，而不是指望默认行为。
+  - **能用鼠标选中并复制**。终端里的选中/复制是读日志、抄报错的基本动作。Electron 里它有两个各自独立的失效点：选择本身被覆盖层或 `user-select` 吃掉，以及没有应用菜单时 Cmd+C 根本不触发。两者都要有断言，因为它们表现相同（"复制没反应"）而成因不同。
+  - 这两条**易错且回归无声**，因此验收是端到端的按键/选择行为断言，不是"某个 handler 存在"。断言要落在"送出的字节"与"剪贴板内容"这类可观察结果上——断言 handler 注册过，在 handler 写错时同样会绿。
+Desktop 刷新或重新 Attach 时优先投影这份 Agent 语义；新的 Run `running` 事实只更新进程态，不能覆盖 `working`、`waiting`、`blocked` 或 `done`。Run 退出或中断仍由进程事实结束当前可交互态。
 - Approval/Question 卡片只渲染 Core 的 typed request，选择后只经 typed IPC 调用 Core 的 semantic response API。Renderer 不解析 `status.detail`，不发送裸 ESC、数字选项、普通 Prompt 或 raw PTY fallback。Run interruption 使用独立 typed reason 控制恢复分支，`status.detail` 只做人类可读展示。Permission request 携带 Provider **声明**的每一个 scoped option（allow-once、可选 allow-always、deny），与 launch option 同构地在紧邻 interaction protocol 处按 Provider 声明，沿用相同的 DESCRIBE/CONTRIBUTE 拆分：兑现某一行的按键（`input`）只留在 Core，DESCRIBE 半边（id/label/kind/description/tier）跨 IPC 供 Renderer 渲染；回复时按用户实际选中的 option 解析出它声明的按键，绝不固定发 '1'。只声明位置**稳定**的行——Claude 的三行提示（Yes / Yes 并不再询问该工具 / No）行 2 位置不变，故 Claude 诚实获得 live 的 allow-always；Codex 的中间行按命令/主机/文件动态出现和重排，故其 live 列表只保留 allow-once 与 deny，更激进的 auto/never 姿态由既有 launch option 在启动时提供。只有 codex 与 claude 走到这条 permission 管线（其余 Provider 为 `none` | `observe`）。当前 Question 只展示 Core 已验证的单题单选能力。
 - 待处理 interaction 出现时，卡片成为当前 Agent 唯一用户输入面；Composer 保持挂载和草稿但禁用 Prompt，Agent Terminal 的键盘、粘贴和 capability reply 也停用，直到 request 被 Core 结算。卡片提交只有在 Provider delivery 与 Core settlement 完成后才显示成功；失败保留明确错误，不提前消失。`working` 时 Composer 的主动作是一枚 ■ 记号，它**中断当轮**并调用 Core semantic interrupt；Run 与 session 继续存活。**终止整个 Run/session 是另一个动作，位置在 Tabbar**（Run owner 的既有动作）。两者对象不同，不得合并、不得共用措辞：把 ■ 写成 "Stop" 会被读成"我会丢掉整个 session"，从而让用户不敢按一个本该轻量的动作。■ 的可访问名与 tooltip 都必须说的是"当前这一轮"。它的位置与权重不随 steer 改变，避免用户在 Agent 跑动中误按。启动姿态（sandbox/approval/permission-mode）只在 Launcher 一次性设定；Composer 上的 live permission 控制有且仅有两条诚实通路：其一是用更宽的 scope 回答挂在 agent-input-stack 上那张 pending request 卡片；其二是 Provider 声明了**可寻址**的 in-band posture 控件时（见下文 posture control），在 Composer 上直接切到某个具名 mode。两者都经 PTY-input 通道兑现运行中进程的自有 affordance——启动 argv flag 永不作为 live composer 开关出现，因为它对运行中的 PTY 进程静默 no-op。
 - Composer 表面不使用描边，靠比所在 Region 高一档的 Surface 填充与顶部高光表达层级，不使用黑色填充或黑色投影；focus 由 `--focus-ring` 加一道 inset `--focus-line` 承担（详见密度合同的控件语言）。Approval/Question 卡片同样不用描边——原先的理由是"描边会与紧邻其下的 Composer 争夺同一条边界"，Composer 去掉描边后这条争夺已不存在，但卡片依旧靠实心 Surface 填充与 elevation 承载重量，并以一枚琥珀 STATUS 图标表达"需要注意"这一状态，也不用常驻的彩色边（accent 表达状态，不作装饰）。卡片内的动作是同一种等高按钮，图标与文字共享中轴；allow-once 是唯一实心品牌绿主操作（最安全的肯定动作才承载最重的分量，绝不让最宽 scope 的按钮成为主操作），scoped 升级为 secondary 并以一枚克制的 tier 圆点表达风险状态；deny/dismiss 分置一侧，Dismiss 是退出而非裁决并降为 ghost 权重。option 数≥2 个 allow 时，allow 采用 CLI 自身的竖排编号节奏，否则保持紧凑动作行。
