@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
 import { decideAgentSessionContinuity } from '../src/agent-session-continuity.js'
+import { AgentMuxClient } from '../src/client.js'
+import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
 import type { AgentMuxAgentSession, AgentMuxRun } from '../src/types.js'
 
 const providers = new AgentProviderRegistry()
@@ -208,5 +210,63 @@ describe('Agent Session continuity decision', () => {
         capabilities: { ...providers.get('pi').catalog.capabilities }
       }
     }))).toMatchObject({ kind: 'unavailable', reason: 'provider-unavailable' })
+  })
+
+  it('keeps a remote user-retirement visible after the Session record is removed', async () => {
+    const store = new AgentMuxMemoryAgentSessionStore()
+    const current = {
+      ...session(),
+      hostId: 'ssh-production',
+      hookBindingId: 'binding-remote',
+      hookToken: 'token-remote'
+    }
+    await store.compareAndSwap(null, current)
+
+    const client = new AgentMuxClient({ store })
+    const registry = (client as unknown as {
+      registry: {
+        load(hostId: string): Promise<void>
+        reserveExisting(
+          kind: 'stop',
+          agentSessionId: string,
+          expectedRun: { runId: string },
+          operationId: string,
+          stopOperation: { daemonInstance: string; operationKey: string; runId: string }
+        ): Promise<unknown>
+        commitLifecycle(reservation: unknown, next: null): Promise<void>
+      }
+    }).registry
+    await registry.load('ssh-production')
+    const reservation = await registry.reserveExisting(
+      'stop',
+      current.agentSessionId,
+      current.run,
+      'retire-remote-agent',
+      {
+        daemonInstance: 'daemon-remote',
+        operationKey: 'retire-remote-agent',
+        runId: current.run.runId
+      }
+    )
+    await registry.commitLifecycle(reservation, null)
+
+    const kernel = (client as unknown as {
+      kernel: { isConnected(): boolean }
+      connected: boolean
+    })
+    kernel.kernel.isConnected = () => true
+    kernel.connected = true
+
+    await expect(client.ensureAgentContinuity({
+      agentSessionId: current.agentSessionId,
+      expectedRun: current.run,
+      operationId: 'recover-remote-agent'
+    })).resolves.toMatchObject({
+      kind: 'retired',
+      agentSessionId: current.agentSessionId,
+      previousRun: current.run,
+      evidence: { kind: 'user-retired' }
+    })
+    await client.dispose()
   })
 })

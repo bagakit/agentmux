@@ -98,4 +98,15 @@ describe('Terminal interaction latency owners', () => {
     expect(terminalStartupPhase({ ...waiting, running: false })).toBeNull()
     expect(terminalStartupPhase({ ...waiting, agent: false })).toBeNull()
   })
+
+  it('never puts a startup overlay back over the canvas after the reveal deadline', () => {
+    expect(terminalStartupPhase({
+      hydrating: false,
+      attachFailed: false,
+      agent: true,
+      running: true,
+      hasOutput: false,
+      revealOverdue: true
+    })).toBeNull()
+  })
 })
