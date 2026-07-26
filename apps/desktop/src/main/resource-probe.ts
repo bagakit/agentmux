@@ -336,12 +336,7 @@ export async function runDesktopResourceProbe(options: {
       monacoEditors: 1,
       monacoModels: 1,
       documents: 1,
-      fileWatchers: 1,
-      terminalViews: 0,
-      terminalAddons: 0,
-      terminalListeners: 0,
-      sessionAttachmentOwners: 0,
-      sessionAttachmentLeases: 0
+      fileWatchers: 1
     }
     if (!ownersEqual(editorSample.owners, editorOwners)) {
       throw new Error(`Desktop editor did not own exactly one Document, Monaco Editor, and Monaco Model: ${JSON.stringify(editorSample.owners)}`)

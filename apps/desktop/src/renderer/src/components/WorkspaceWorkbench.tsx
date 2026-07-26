@@ -71,6 +71,7 @@ import { copyableAgentSessionIdForTab } from '../lib/tab-control-handoff'
 import { handleTopicRenameKeyDown } from '../lib/topic-rename'
 import { api } from '../lib/api'
 import { useAppStore } from '../store'
+import { useTerminalRegionParked } from '../lib/terminal-cold-parking-coordinator'
 
 const EditorPane = lazy(async () => {
   const module = await import('./EditorPane')
@@ -412,6 +413,7 @@ function SurfaceContent({
   nativeSurfacesVisible: boolean
   interactiveResize: boolean
 }) {
+  const parked = useTerminalRegionParked(surface.regionId)
   if (surface.kind === 'agent' || surface.kind === 'terminal') {
     return (
       <SessionPane
@@ -419,6 +421,7 @@ function SurfaceContent({
         surfaceKind={surface.kind}
         interactiveResize={interactiveResize}
         visible={nativeSurfacesVisible}
+        parked={parked}
         linkOrigin={{
           workspaceId: surface.workspaceId,
           tabGroupId: groupId,
@@ -612,6 +615,7 @@ function PaneGroup({
   group,
   workspaceId,
   layout,
+  allLayout,
   splitTarget,
   nativeSurfacesVisible,
   interactiveResize,
@@ -620,6 +624,8 @@ function PaneGroup({
   group: TabGroup
   workspaceId: string
   layout: WorkspaceLayout
+  /** Unprojected layout keeps Topic-hidden tabs mounted while the projected layout drives chrome. */
+  allLayout: WorkspaceLayout
   splitTarget: SplitTarget | null
   nativeSurfacesVisible: boolean
   interactiveResize: boolean
@@ -642,6 +648,10 @@ function PaneGroup({
     data: { kind: 'pane', groupId: group.id } satisfies DropData
   })
   const tabs = group.tabOrder.flatMap((id) => (tabsById[id] ? [tabsById[id]] : []))
+  const allGroup = allLayout.groups.find((candidate) => candidate.id === group.id)
+  const bodyTabs = (allGroup?.tabOrder ?? group.tabOrder).flatMap((id) => (
+    tabsById[id] ? [tabsById[id]] : []
+  ))
   const activeTab = tabs.find((tab) => tab.id === group.activeTabId) ?? null
   const activeSurface = activeTab ? activeWorkbenchSurface(activeTab) : null
   const activeRuntimeSession =
@@ -754,7 +764,7 @@ function PaneGroup({
             于是每一次切 Tab / 切 Topic 都亮一遍 "Restoring terminal…"。
             实例活着就没有东西需要恢复，所以修法在保住实例，而不是把重放做快。
             隐藏格必须 absolute 定位：留在文档流里的隐藏子树仍会参与布局，把活动格挤变形。 */}
-        {tabs.length > 0 ? tabs.map((tab) => (
+        {bodyTabs.length > 0 ? bodyTabs.map((tab) => (
           <div
             className="pane-body__region"
             key={tab.id}
@@ -803,6 +813,7 @@ function SplitNode({
   nodePath,
   workspaceId,
   layout,
+  allLayout,
   splitTarget,
   nativeSurfacesVisible,
   interactiveResize = false,
@@ -812,6 +823,7 @@ function SplitNode({
   nodePath: string
   workspaceId: string
   layout: WorkspaceLayout
+  allLayout: WorkspaceLayout
   splitTarget: SplitTarget | null
   nativeSurfacesVisible: boolean
   interactiveResize?: boolean
@@ -824,6 +836,7 @@ function SplitNode({
         group={group}
         workspaceId={workspaceId}
         layout={layout}
+        allLayout={allLayout}
         splitTarget={splitTarget}
         nativeSurfacesVisible={nativeSurfacesVisible}
         interactiveResize={interactiveResize}
@@ -837,6 +850,7 @@ function SplitNode({
       nodePath={nodePath}
       workspaceId={workspaceId}
       layout={layout}
+      allLayout={allLayout}
       splitTarget={splitTarget}
       nativeSurfacesVisible={nativeSurfacesVisible}
       interactiveResize={interactiveResize}
@@ -849,6 +863,7 @@ function SplitBranch({
   nodePath,
   workspaceId,
   layout,
+  allLayout,
   splitTarget,
   nativeSurfacesVisible,
   interactiveResize
@@ -857,6 +872,7 @@ function SplitBranch({
   nodePath: string
   workspaceId: string
   layout: WorkspaceLayout
+  allLayout: WorkspaceLayout
   splitTarget: SplitTarget | null
   nativeSurfacesVisible: boolean
   interactiveResize: boolean
@@ -887,6 +903,7 @@ function SplitBranch({
           nodePath={nodePath ? `${nodePath}.first` : 'first'}
           workspaceId={workspaceId}
           layout={layout}
+          allLayout={allLayout}
           splitTarget={splitTarget}
           nativeSurfacesVisible={nativeSurfacesVisible && !dragging}
           interactiveResize={terminalResizeSuspended}
@@ -905,6 +922,7 @@ function SplitBranch({
           nodePath={nodePath ? `${nodePath}.second` : 'second'}
           workspaceId={workspaceId}
           layout={layout}
+          allLayout={allLayout}
           splitTarget={splitTarget}
           nativeSurfacesVisible={nativeSurfacesVisible && !dragging}
           interactiveResize={terminalResizeSuspended}
@@ -1044,6 +1062,7 @@ export function WorkspaceWorkbench({
           nodePath=""
           workspaceId={workspaceId}
           layout={layout}
+          allLayout={storedLayout ?? layout}
           splitTarget={splitTarget}
           nativeSurfacesVisible={visible && activeDrag === null && !tabMenuOpen}
           interactiveResize={interactiveResize}

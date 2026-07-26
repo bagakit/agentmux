@@ -20,6 +20,7 @@ import type {
   HostCheckResult,
   ExecutorDetection,
   RuntimeEvent,
+  RuntimeSnapshot,
   ScratchTopicSnapshot,
   SessionControl,
   SessionRecoveryResult,
@@ -402,6 +403,18 @@ const AGENTMUX_ERROR_NAME_PREFIX = /^AgentMuxError:\s*/u
 function message(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error)
   return raw.replace(IPC_INVOKE_PREFIX, '').replace(AGENTMUX_ERROR_NAME_PREFIX, '')
+}
+
+function emptyRuntimeSnapshot(): RuntimeSnapshot {
+  return {
+    sessions: [],
+    timelines: {},
+    recoveryCandidates: []
+  }
+}
+
+function startupWorkflowWarning(step: string, error: unknown, recovery: string): string {
+  return `${step} did not complete: ${message(error)}. ${recovery}`
 }
 
 function controlFailure(
@@ -1172,30 +1185,94 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // A successful read can safely accept the normal persistence writes produced by startup. On
       // a failed read, keep the write fence closed until the complete fallback shell is installed.
       if (!persistWarning) persistWritesEnabled = true
-      const [config, initialSnapshot, providerCatalog] = await Promise.all([
+      // Config is the boundary that tells us which Workspace a persisted Region belongs to, so a
+      // config failure genuinely prevents a safe shell. Session membership and the Provider catalog
+      // are narrower runtime observations: either can be temporarily unavailable while the saved
+      // Workbench and an already-running Agent remain usable. Keep those failures scoped to a visible
+      // startup notice instead of letting Promise.all turn them into a full-window connection error.
+      const [configResult, initialSnapshotResult, providerCatalogResult] = await Promise.allSettled([
         api.config.get(),
         api.sessions.snapshot(),
         api.providers.list()
       ])
-      let snapshot = initialSnapshot
+      if (configResult.status === 'rejected') throw configResult.reason
+      const config = configResult.value
+      const startupWarnings: string[] = []
+      let snapshot = initialSnapshotResult.status === 'fulfilled'
+        ? initialSnapshotResult.value
+        : emptyRuntimeSnapshot()
+      let snapshotVerified = initialSnapshotResult.status === 'fulfilled'
+      let retainUnknownSessionViews = !snapshotVerified
+      let recoveryWorkflowFailed = false
+      if (initialSnapshotResult.status === 'rejected') {
+        startupWarnings.push(startupWorkflowWarning(
+          'Runtime Session snapshot',
+          initialSnapshotResult.reason,
+          'The saved Workbench remains visible; Session status will reconcile when the Runtime is available.'
+        ))
+      }
+      const providerCatalog = providerCatalogResult.status === 'fulfilled'
+        ? providerCatalogResult.value
+        : []
+      if (providerCatalogResult.status === 'rejected') {
+        startupWarnings.push(startupWorkflowWarning(
+          'Provider catalog lookup',
+          providerCatalogResult.reason,
+          'Existing Sessions remain usable; restart startup to restore Provider choices for new Agents.'
+        ))
+      }
+      const readCanonicalSnapshot = async (step: string): Promise<RuntimeSnapshot | null> => {
+        try {
+          const next = await api.sessions.snapshot()
+          snapshotVerified = true
+          retainUnknownSessionViews = recoveryWorkflowFailed
+          return next
+        } catch (error) {
+          snapshotVerified = false
+          retainUnknownSessionViews = true
+          startupWarnings.push(startupWorkflowWarning(
+            step,
+            error,
+            'The saved Workbench remains visible; the Runtime will reconcile it on a later canonical snapshot.'
+          ))
+          return null
+        }
+      }
       const persistedAgentIds = persistedAgentSessionIds(get().restoredWorkbench)
       const recoveryFailures: SessionSnapshot[] = []
       let recovered = false
-      for (const candidate of snapshot.recoveryCandidates) {
+      for (const candidate of snapshotVerified ? snapshot.recoveryCandidates : []) {
         if (!persistedAgentIds.has(candidate.agentSessionId)) continue
-        const recovery = await api.sessions.recover({
-          kind: 'agent',
-          hostId: candidate.hostId,
-          agentSessionId: candidate.agentSessionId,
-          run: { ...candidate.run }
-        }, candidate.workspacePath)
-        if (recovery.kind === 'reattachable' || recovery.kind === 'resumed') {
-          recovered = true
-        } else if (recovery.kind === 'unavailable' || recovery.kind === 'conflict') {
-          recoveryFailures.push(recoveryCandidateSession(candidate, recovery))
+        try {
+          const recovery = await api.sessions.recover({
+            kind: 'agent',
+            hostId: candidate.hostId,
+            agentSessionId: candidate.agentSessionId,
+            run: { ...candidate.run }
+          }, candidate.workspacePath)
+          if (recovery.kind === 'reattachable' || recovery.kind === 'resumed') {
+            recovered = true
+          } else if (recovery.kind === 'unavailable' || recovery.kind === 'conflict') {
+            recoveryFailures.push(recoveryCandidateSession(candidate, recovery))
+          }
+        } catch (error) {
+          // A rejected recovery call is a failed workflow step, not proof that the Agent is dead. Do
+          // not invent a continuity reason; retain its persisted Region through the unverified
+          // projection path and leave the exact cause in the service-window notice.
+          snapshotVerified = false
+          retainUnknownSessionViews = true
+          recoveryWorkflowFailed = true
+          startupWarnings.push(startupWorkflowWarning(
+            'Automatic Agent recovery',
+            error,
+            'The original Region remains visible; retry recovery after the Runtime is reachable.'
+          ))
         }
       }
-      if (recovered) snapshot = await api.sessions.snapshot()
+      if (recovered) {
+        const refreshedSnapshot = await readCanonicalSnapshot('Runtime Session snapshot after recovery')
+        if (refreshedSnapshot) snapshot = refreshedSnapshot
+      }
       let failedCleanupIds = new Set<string>()
       while (true) {
         const unclaimedSessionIds = new Set(get().unclaimedTerminalSessionIds)
@@ -1209,7 +1286,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         if (!sessionEventBufferOverflowed) break
         pendingSessionEvents.length = 0
         sessionEventBufferOverflowed = false
-        snapshot = await api.sessions.snapshot()
+        const refreshedSnapshot = await readCanonicalSnapshot('Runtime Session snapshot during startup reconciliation')
+        if (!refreshedSnapshot) break
+        snapshot = refreshedSnapshot
       }
       const unclaimedSessionIds = new Set(get().unclaimedTerminalSessionIds)
       const visibleSessions = [
@@ -1222,8 +1301,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         config,
         sessions: visibleSessions,
         persisted: persistedState.restoredWorkbench,
-        createTabGroupId: newTabGroupId
+        createTabGroupId: newTabGroupId,
+        preserveUnknownSessionViews: retainUnknownSessionViews
       })
+      const startupError = [
+        ...(persistWarning
+          ? [`Saved workspace state could not be restored: ${message(persistWarning)}`]
+          : []),
+        ...startupWarnings
+      ].join(' ')
       set({
         restoredWorkbench: null,
         config,
@@ -1236,9 +1322,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         tabs: workbench.tabs,
         layouts: workbench.layouts,
         loading: false,
-        ...(persistWarning
-          ? { error: `Saved workspace state could not be restored: ${message(persistWarning)}` }
-          : {})
+        error: startupError || null
       })
       // The Runtime and its Agents remain usable; only the optional persisted presentation projection
       // was unavailable. Open the fence after the fallback state is installed so that this warning
