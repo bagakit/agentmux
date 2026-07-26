@@ -15,6 +15,7 @@ import type {
   AgentMuxRunRef,
   AgentMuxRunReplayGap,
   AgentMuxRunState,
+  AgentTerminalCapabilityState,
   AgentMuxControlError,
   AgentMuxControlErrorCode,
   AgentMuxControlRequest,
@@ -475,6 +476,8 @@ export type SessionSnapshot = SessionSnapshotBase & (
       providerId: AgentProviderId
       executorId: AgentExecutorId
       capabilities: AgentCapabilities
+      /** Core-owned terminal capability fact; absent means no active degradation marker. */
+      terminalCapability?: AgentTerminalCapabilityState
       pendingInteraction?: AgentMuxInteractionRequest
       /**
        * The launch-option choice ids that fixed this Agent's security posture at spawn, projected from
@@ -509,6 +512,7 @@ export type AgentSessionRecoveryCandidate = {
   providerId: AgentProviderId
   executorId: AgentExecutorId
   capabilities: AgentCapabilities
+  terminalCapability?: AgentTerminalCapabilityState
   label: string
   createdAt: number
   updatedAt: number

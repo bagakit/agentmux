@@ -160,6 +160,33 @@ describe('semantic session persistence boundary', () => {
     expect(normalized.terminalPromptSubmission).toEqual(storedSession().terminalPromptSubmission)
   })
 
+  it('round-trips the terminal capability unknown/degraded fact and binds it to the current Run', () => {
+    const capability = {
+      state: 'unknown' as const,
+      mode: 'degraded' as const,
+      reason: 'handshake-timeout' as const,
+      run: { runId: 'daemon-1' },
+      observedAt: 200
+    }
+    const normalized = normalizeStoredAgentSession({
+      ...storedSession(),
+      terminalCapability: capability
+    })
+    expect(normalized.terminalCapability).toEqual(capability)
+    expect(() => normalizeStoredAgentSession({
+      ...storedSession(),
+      terminalCapability: { ...capability, run: { runId: 'another-run' } }
+    })).toThrow('Terminal capability')
+    expect(() => normalizeStoredAgentSession({
+      ...storedSession(),
+      terminalCapability: { ...capability, state: 'verified' }
+    })).toThrow('Terminal capability')
+    expect(() => normalizeStoredAgentSession({
+      ...storedSession(),
+      terminalCapability: { ...capability, observedAt: 201 }
+    })).toThrow('Terminal capability state is newer')
+  })
+
   it('round-trips the launch-option posture and fails closed on a malformed selection', async () => {
     // The posture the create fixed must survive persistence so resume can re-resolve the same argv.
     const normalized = normalizeStoredAgentSession({

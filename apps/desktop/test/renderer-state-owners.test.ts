@@ -189,6 +189,60 @@ describe('Renderer resource state owners', () => {
     expect(cleared.sessions[0]?.status).toMatchObject({ state: 'waiting', source: 'native-hook' })
   })
 
+  it('projects the Core-owned degraded terminal capability and clears it on acknowledgement', () => {
+    const state = {
+      sessions: [session],
+      timelines: {},
+      pendingAgentLaunches: {},
+      tabs: {},
+      layouts: {},
+      viewModes: {}
+    }
+    const capability = {
+      state: 'unknown' as const,
+      mode: 'degraded' as const,
+      reason: 'handshake-timeout' as const,
+      run: session.control.run,
+      observedAt: 4
+    }
+    const degraded = reduceRuntimeEvent(state, core({
+      type: 'agent-session',
+      session: {
+        kind: 'agent',
+        agentSessionId: session.id,
+        providerId: session.providerId,
+        executorId: session.executorId,
+        hostId: session.hostId,
+        workspacePath: session.workspacePath,
+        run: session.control.run,
+        retiredRuns: [],
+        outputCursorBytes: 0,
+        createdAt: session.createdAt,
+        updatedAt: 4,
+        terminalCapability: capability
+      }
+    }))
+    expect(degraded.sessions[0]).toMatchObject({ terminalCapability: capability })
+
+    const acknowledged = reduceRuntimeEvent(degraded, core({
+      type: 'agent-session',
+      session: {
+        kind: 'agent',
+        agentSessionId: session.id,
+        providerId: session.providerId,
+        executorId: session.executorId,
+        hostId: session.hostId,
+        workspacePath: session.workspacePath,
+        run: session.control.run,
+        retiredRuns: [],
+        outputCursorBytes: 0,
+        createdAt: session.createdAt,
+        updatedAt: 5,
+      }
+    }))
+    expect(acknowledged.sessions[0]?.terminalCapability).toBeUndefined()
+  })
+
   it('ignores old-Run lifecycle events but accepts committed Session Timeline revisions', () => {
     const tabId = `session:${session.id}`
     const state = {

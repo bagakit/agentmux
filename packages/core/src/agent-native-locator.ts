@@ -15,9 +15,6 @@ function hasUnsafeControlCharacters(value: string): boolean {
     // Match Unicode's control-character ranges (C0, DEL, and C1). These
     // bytes must never reach a native resume argv token or filesystem path,
     // even when they are invisible in a persisted JSON record.
-    // Match Unicode's control-character ranges (C0, DEL, and C1). These
-    // bytes must never reach a native resume argv token or filesystem path,
-    // even when they are invisible in a persisted JSON record.
     if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) return true
   }
   return false

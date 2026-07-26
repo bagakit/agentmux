@@ -28,6 +28,13 @@ import {
 } from './agent-delivery-queue.js'
 import { answerAsk, cancelAsk, type AgentAsk } from './agent-ask.js'
 import {
+  AGENT_TERMINAL_CAPABILITY_PERSIST_FAILED,
+  AGENT_TERMINAL_HANDSHAKE_FAILED,
+  AGENT_TERMINAL_HANDSHAKE_TIMEOUT,
+  classifyTerminalHandshakeFailure,
+  degradedInputCursor
+} from './agent-terminal-handshake-outcome.js'
+import {
   handOff,
   openDispatch,
   recordDispatchEvent,
@@ -89,6 +96,7 @@ import type {
   AgentMuxRuntimeDiagnostics,
   AgentMuxRuntimeIdentity,
   AgentNativeSessionHandle,
+  AgentTerminalCapabilityState,
   AgentTimelineItem,
   AgentTimelineMutation,
   AgentTimelineSnapshot,
@@ -312,7 +320,7 @@ function assertAgentPromptSize(prompt: string): void {
   }
 }
 
-function terminalEnvironment(
+export function terminalEnvironment(
   environment: Readonly<Record<string, string>>,
   agentSessionStorePath?: string
 ): Record<string, string> {
@@ -494,7 +502,10 @@ export class AgentMuxClient {
       for (const session of this.registry.list()) {
         const run = runs.find((candidate) => candidate.runId === session.run.runId)
         if (run?.state.type === 'running') {
-          await this.ensureTerminalHandshake(session, run)
+          // 爆炸半径收敛到单个 session。这个 catch 存在的唯一理由：外层 catch 会
+          // `kernel.disconnect()`，所以一条慢探测冒到这里就会拆掉整条连接，把所有健康的 Agent
+          // 一起带走。降级的那一类必须在这里就被吃掉——只有它，中止的那一类照旧往外抛。
+          await this.ensureTerminalHandshakeOrDegrade(session, run)
         }
       }
       await this.recoverPendingInteractionResponses(runs)
@@ -1001,7 +1012,9 @@ export class AgentMuxClient {
       try {
         persisted = await this.registry.commitLifecycle(reservation, session)
         await hookBinding.bindRun(run.runId)
-        readySession = await this.ensureTerminalHandshake(session, run)
+        // 超时不回滚。下面的 catch 会关 hook 绑定、退休 run、删 session——那是在用我们一次
+        // 慢探测杀掉一个刚启动好的健康 Agent。只有 run 真的退出了才该走那条路。
+        readySession = await this.ensureTerminalHandshakeOrDegrade(session, run)
       } catch (error) {
         const rollbackErrors: unknown[] = [error]
         try {
@@ -1250,6 +1263,7 @@ export class AgentMuxClient {
       }
       delete next.hookReceipt
       delete next.terminalHandshake
+      delete next.terminalCapability
       delete next.terminalPromptReadiness
       delete next.terminalPromptSubmission
       delete next.semanticStatus
@@ -1276,7 +1290,8 @@ export class AgentMuxClient {
       try {
         persisted = await this.registry.commitLifecycle(reservation, next)
         await hookBinding.bindRun(run.runId)
-        readySession = await this.ensureTerminalHandshake(next, run)
+        // 同 launch：超时降级，只有 run 退出才回滚。
+        readySession = await this.ensureTerminalHandshakeOrDegrade(next, run)
       } catch (error) {
         const rollbackErrors: unknown[] = [error]
         try {
@@ -1506,9 +1521,11 @@ export class AgentMuxClient {
     if (!content) throw new AgentMuxError('Agent prompt cannot be empty.', 'INVALID_AGENT_PROMPT')
     assertAgentPromptSize(content)
     const operationId = safeId(input.operationId, 'Agent prompt operation id')
-    const session = await this.ensureTerminalHandshake(
-      this.requireAgentSession(input.agentSessionId)
-    )
+    // 握手绝不做发 prompt 的前置门。这里不是生命周期路径——run 早就活着，用户此刻正在提交。
+    // 而 `[?u` 是 codex 一次性的启动输出，对一个几分钟前启动的 run 早已不可达，于是一旦拦在
+    // 这里，**那个 run 之后的每一条 prompt 都被永久挡住**。栅栏起点由 daemon 的权威
+    // acceptedInputBytes 兜底（submitAgentInputPlan 本来就这么取），不依赖握手是否完成。
+    const session = this.requireAgentSession(input.agentSessionId)
     const plan = this.providers.get(session.providerId).planPromptInput(content)
     await this.serializeAgentInput(session, async (current, run) => {
       if (current.pendingInteraction) {
@@ -1939,6 +1956,178 @@ export class AgentMuxClient {
     }
   }
 
+  /**
+   * 握手的降级包装：超时不再中止任何东西，其余照旧抛。
+   *
+   * 四个调用点里有三个（connect 循环、launch、resume）过去把任何握手错误都当成致命：connect
+   * 会 `kernel.disconnect()` 拆掉整条连接，launch/resume 会回滚——**用一次慢探测杀掉一个刚
+   * 启动好的、健康的 Agent**。这里只吃掉超时那一类：Agent 还在跑，我们没等到 `[?u` 而已。
+   *
+   * 降级时做两件事，一件都不能少：
+   * 1. 从 daemon 播种输入游标（与无握手 provider 同一条兜底），否则首条 prompt 的栅栏起点是错的。
+   * 2. 发一条 agent-session 事件把降级说出去。**绝不静默**——静默降级本身就是原则 11 的违例，
+   *    用户必须看得见自己在降级状态里。
+   *
+   * 绝不做的一件事：伪造受据。没送出 `[?0u` 就不写 `acknowledged: true`，`terminalHandshake`
+   * 保持未设（状态＝未知，而不是编一个）。伪造会撞上 `acceptedInputBytes >= endByte` 的断言，
+   * 并污染崩溃恢复的幂等性。
+   */
+  private async ensureTerminalHandshakeOrDegrade(
+    requestedSession: AgentMuxStoredAgentSession,
+    knownRun?: CtxmuxAdapterRun
+  ): Promise<AgentMuxStoredAgentSession> {
+    try {
+      return await this.ensureTerminalHandshake(requestedSession, knownRun)
+    } catch (error) {
+      const outcome = classifyTerminalHandshakeFailure(error)
+      if (outcome.kind === 'abort') throw error
+      // A timeout is only degradable while the exact Run is still alive. The Run returned by
+      // `list()`/`start()` is a useful hint, but it may already be stale by the time the timer fires;
+      // ask CtxMux for the authoritative state before allowing the lifecycle to continue.
+      const run = await this.requireRunningTerminalHandshakeRun(requestedSession)
+      const cursor = degradedInputCursor(run.acceptedInputBytes)
+      if (cursor === undefined) {
+        // Without the daemon cursor we cannot fence the next input write. This is a broken CtxMux
+        // contract, not a Provider capability timeout, so fail closed instead of guessing zero.
+        throw new AgentMuxError(
+          'CtxMux omitted its accepted Input byte cursor while terminal capability was degraded.',
+          'CTXMUX_INPUT_CURSOR_MISSING'
+        )
+      }
+      this.agentInputCursors.set(requestedSession.agentSessionId, cursor)
+      const observedAt = Date.now()
+      const degraded: AgentTerminalCapabilityState = {
+        state: 'unknown',
+        mode: 'degraded',
+        reason: 'handshake-timeout',
+        run: { ...requestedSession.run },
+        observedAt
+      }
+      let next: AgentMuxStoredAgentSession
+      try {
+        next = await this.persistTerminalCapabilityState(requestedSession, degraded)
+      } catch (error) {
+        // The Store is an observability/continuity surface, not the Agent's input transport. A
+        // transient lock, disk, or permission failure must not make create/resume roll back a Run
+        // that CtxMux just proved is still running. Keep the marker for this call only, and report
+        // that it cannot survive a restart. Identity/data conflicts remain fatal below: returning a
+        // marker for a different Session would be worse than blocking honestly.
+        if (
+          error instanceof AgentMuxError &&
+          ['STALE_AGENT_SESSION', 'UNKNOWN_AGENT_SESSION', 'STALE_AGENT_SESSION_BINDING',
+            'AGENT_SESSION_BUSY', 'INVALID_AGENT_SESSION_STORE'].includes(error.code)
+        ) {
+          throw error
+        }
+        const canonical = this.requireAgentSession(requestedSession.agentSessionId)
+        if (!sameRun(canonical.run, requestedSession.run)) {
+          throw new AgentMuxError(
+            'Agent Session changed while terminal capability degradation was being persisted.',
+            'STALE_AGENT_SESSION'
+          )
+        }
+        // A concurrent acknowledgement is stronger evidence than this timeout. Preserve it if the
+        // Store did manage to apply that other write; only attach an ephemeral marker to an otherwise
+        // unacknowledged canonical Session.
+        next = canonical.terminalHandshake?.acknowledged
+          ? canonical
+          : {
+              ...structuredClone(canonical),
+              terminalCapability: structuredClone(degraded),
+              updatedAt: Math.max(canonical.updatedAt, degraded.observedAt)
+            }
+        if (!canonical.terminalHandshake?.acknowledged) {
+          this.publisher.publish({
+            type: 'agent-error',
+            // Deliberately omit agentSessionId. The renderer's agent-error reducer treats a scoped
+            // error as a semantic Agent failure; this is only a Store diagnostic and the Agent remains
+            // healthy. The adjacent agent-session projection carries the actionable marker.
+            code: AGENT_TERMINAL_CAPABILITY_PERSIST_FAILED,
+            message: `Terminal capability degradation could not be persisted; continuing with an in-memory warning. ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+            evidence: {
+              source: 'user',
+              observedAt,
+              run: { ...requestedSession.run }
+            }
+          })
+        }
+      }
+      // The session event is the Core-owned projection seam consumed by Desktop. Do not surface this
+      // as an ordinary agent-error: the Agent is still healthy and must not be painted as failed.
+      this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
+      return next
+    }
+  }
+
+  /**
+   * Resolve the Run state after a degradable timeout. A stale `knownRun` must never turn an exited
+   * Agent into a supposedly live degraded Session.
+   */
+  private async requireRunningTerminalHandshakeRun(
+    session: AgentMuxStoredAgentSession
+  ): Promise<CtxmuxAdapterRun> {
+    const run = await this.kernel.status(session.run.runId)
+    this.assertAgentRun(session, run)
+    if (run.state.type !== 'running') {
+      throw new AgentMuxError(
+        'Agent Run exited before its terminal capability query was observed.',
+        AGENT_TERMINAL_HANDSHAKE_FAILED
+      )
+    }
+    return run
+  }
+
+  private async persistTerminalCapabilityState(
+    requestedSession: AgentMuxStoredAgentSession,
+    degraded: AgentTerminalCapabilityState
+  ): Promise<AgentMuxStoredAgentSession> {
+    return await this.updateExactAgentSession(
+      requestedSession.agentSessionId,
+      requestedSession.run,
+      (current) => {
+        // A concurrent handshake may have acknowledged while the timeout was being classified. Its
+        // receipt is stronger evidence; clear the stale degraded marker and preserve the receipt.
+        if (current.terminalHandshake?.acknowledged) {
+          if (!current.terminalCapability) return current
+          const next = { ...current }
+          delete next.terminalCapability
+          return { ...next, updatedAt: Math.max(next.updatedAt, degraded.observedAt) }
+        }
+        if (
+          current.terminalCapability &&
+          current.terminalCapability.observedAt >= degraded.observedAt
+        ) return current
+        return {
+          ...current,
+          terminalCapability: structuredClone(degraded),
+          updatedAt: Math.max(current.updatedAt, degraded.observedAt)
+        }
+      }
+    )
+  }
+
+  private async clearTerminalCapability(
+    requestedSession: AgentMuxStoredAgentSession
+  ): Promise<AgentMuxStoredAgentSession> {
+    if (!requestedSession.terminalCapability) return requestedSession
+    const next = await this.updateExactAgentSession(
+      requestedSession.agentSessionId,
+      requestedSession.run,
+      (current) => {
+        if (!current.terminalCapability) return current
+        const cleared = { ...current }
+        delete cleared.terminalCapability
+        return { ...cleared, updatedAt: Math.max(cleared.updatedAt, Date.now()) }
+      }
+    )
+    if (next !== requestedSession) {
+      this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
+    }
+    return next
+  }
+
   private async ensureTerminalHandshake(
     requestedSession: AgentMuxStoredAgentSession,
     knownRun?: CtxmuxAdapterRun
@@ -1949,7 +2138,9 @@ export class AgentMuxClient {
       if (knownRun?.acceptedInputBytes !== null && knownRun?.acceptedInputBytes !== undefined) {
         this.agentInputCursors.set(requestedSession.agentSessionId, knownRun.acceptedInputBytes)
       }
-      return this.requireAgentSession(requestedSession.agentSessionId)
+      return await this.clearTerminalCapability(
+        this.requireAgentSession(requestedSession.agentSessionId)
+      )
     }
 
     const session = this.requireAgentSession(requestedSession.agentSessionId)
@@ -1958,6 +2149,17 @@ export class AgentMuxClient {
         'Agent Session changed before terminal handshake completed.',
         'STALE_AGENT_SESSION'
       )
+    }
+    // A prior timeout is durable evidence that this exact Run's capability is unknown. Do not arm a
+    // second ten-second observer on every reconnect/prompt; the Run remains usable and its input
+    // fencing is owned by CtxMux. A later Run gets a fresh field (resume clears it below).
+    if (
+      session.terminalCapability &&
+      !session.terminalHandshake?.acknowledged
+    ) {
+      const cursor = degradedInputCursor(knownRun?.acceptedInputBytes)
+      if (cursor !== undefined) this.agentInputCursors.set(session.agentSessionId, cursor)
+      return session
     }
     const operationId = terminalHandshakeOperationIdentity(
       session.providerId,
@@ -2014,8 +2216,11 @@ export class AgentMuxClient {
         if (knownRun?.acceptedInputBytes !== null && knownRun?.acceptedInputBytes !== undefined) {
           this.agentInputCursors.set(session.agentSessionId, knownRun.acceptedInputBytes)
         }
-        observeReadiness(session)
-        return session
+        const readySession = session.terminalCapability
+          ? await this.clearTerminalCapability(session)
+          : session
+        observeReadiness(readySession)
+        return readySession
       }
     }
 
@@ -2045,14 +2250,14 @@ export class AgentMuxClient {
       } else if (event.state !== 'running') {
         rejectQuery(new AgentMuxError(
           'Agent Run exited before its terminal capability query was observed.',
-          'AGENT_TERMINAL_HANDSHAKE_FAILED'
+          AGENT_TERMINAL_HANDSHAKE_FAILED
         ))
       }
     })
     const timer = setTimeout(() => {
       rejectQuery(new AgentMuxError(
         'Timed out waiting for the Provider terminal capability query.',
-        'AGENT_TERMINAL_HANDSHAKE_TIMEOUT'
+        AGENT_TERMINAL_HANDSHAKE_TIMEOUT
       ))
     }, TERMINAL_HANDSHAKE_TIMEOUT_MS)
     let attached = false
@@ -2093,7 +2298,7 @@ export class AgentMuxClient {
             'AGENT_TERMINAL_HANDSHAKE_STATE_INVALID'
           )
         }
-        return {
+        const next: AgentMuxStoredAgentSession = {
           ...current,
           terminalHandshake: {
             run: { ...current.run },
@@ -2114,6 +2319,8 @@ export class AgentMuxClient {
             : {}),
           updatedAt: Date.now()
         }
+        delete next.terminalCapability
+        return next
       }
       let claimed: AgentMuxStoredAgentSession
       try {
@@ -2191,7 +2398,7 @@ export class AgentMuxClient {
         }
         assertState(current.terminalHandshake)
         if (current.terminalHandshake.acknowledged) return current
-        return {
+        const next: AgentMuxStoredAgentSession = {
           ...current,
           terminalHandshake: {
             ...current.terminalHandshake,
@@ -2199,6 +2406,8 @@ export class AgentMuxClient {
           },
           updatedAt: Date.now()
         }
+        delete next.terminalCapability
+        return next
       }
       let ready: AgentMuxStoredAgentSession
       try {

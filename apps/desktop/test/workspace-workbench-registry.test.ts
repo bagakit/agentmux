@@ -17,7 +17,7 @@ const newTab = readFileSync(
 const styles = allStyles()
 
 describe('window-owned Workspace Workbench registry', () => {
-  it('mounts every Workspace with an existing layout instead of routing only the active one', () => {
+  it('mounts the active and previously populated Workspaces instead of routing only the active one', () => {
     expect(app).toContain('const mountedWorkspaces = config?.workspaces.filter')
     expect(app).toContain('layouts[candidate.id]?.groups.some((group) => group.tabOrder.length > 0)')
     expect(app).toContain('{mountedWorkspaces.map((candidate) =>')
@@ -56,5 +56,13 @@ describe('window-owned Workspace Workbench registry', () => {
   it('does not use a second terminal cache or remount key for parked Workbenches', () => {
     expect(app + workbench).not.toMatch(/(terminal|workbench)[A-Za-z]*Pool|parkedTerminals|instancePool/)
     expect(app).toContain('key={candidate.id}')
+  })
+
+  it('keeps the registry mounted while Settings is open', () => {
+    expect(app).toContain('inert={Boolean(settingsRoute)}')
+    expect(app).toContain("const workbenchVisible = mainSurface === 'workbench' && !settingsRoute")
+    expect(app).toContain('const visible = workbenchVisible && candidate.id === activeWorkspaceId')
+    expect(app).toContain('{settingsRoute ? (')
+    expect(app).not.toContain('if (settingsRoute) return (')
   })
 })
