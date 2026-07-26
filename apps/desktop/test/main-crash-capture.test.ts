@@ -8,6 +8,7 @@ import { dirname } from 'node:path'
 import {
   appendWithinBudget,
   crashRecordFrom,
+  isFatalToMainProcess,
   serializeCrashRecord,
   type CrashRecord
 } from '../src/main/crash-capture.js'
@@ -131,56 +132,98 @@ describe('registerCrashCapture: 四类事件都接到 sink', () => {
     const fakeApp = new EventEmitter()
     const fakeProcess = new EventEmitter()
     const records: CrashRecord[] = []
+    const persisted: CrashRecord[] = []
+    const exits: number[] = []
     const dispose = registerCrashCapture({
       app: fakeApp as never,
       process: fakeProcess as never,
       sink: (record) => {
         records.push(record)
       },
+      persistSync: (record) => {
+        persisted.push(record)
+      },
+      exit: (code) => {
+        exits.push(code)
+      },
       now: () => FIXED_MS,
       logStderr: () => {}
     })
-    return { fakeApp, fakeProcess, records, dispose }
+    return { fakeApp, fakeProcess, records, persisted, exits, dispose }
   }
 
-  it('uncaughtException 进 sink', () => {
-    const { fakeProcess, records } = harness()
+  it('uncaughtException 同步落盘并 fail-fast，不走异步 sink', () => {
+    const { fakeProcess, records, persisted, exits } = harness()
     fakeProcess.emit('uncaughtException', new Error('main died'))
-    expect(records).toHaveLength(1)
-    expect(records[0]?.kind).toBe('uncaught-exception')
-    expect(records[0]?.summary).toBe('main died')
+    // 致命崩溃：exit 前必须同步落地那一条，再补回被处理器抑制掉的 Node 默认退出。
+    expect(persisted).toHaveLength(1)
+    expect(persisted[0]?.kind).toBe('uncaught-exception')
+    expect(persisted[0]?.summary).toBe('main died')
+    expect(exits).toEqual([1])
+    // 绝不能只记录不退出——那会让主进程带着半损坏运行时静默续命。异步 sink 不该被用于致命路径。
+    expect(records).toHaveLength(0)
   })
 
-  it('unhandledRejection 进 sink', () => {
-    const { fakeProcess, records } = harness()
+  it('unhandledRejection 同样 fail-fast', () => {
+    const { fakeProcess, persisted, exits } = harness()
     fakeProcess.emit('unhandledRejection', new Error('no one caught me'))
-    expect(records).toHaveLength(1)
-    expect(records[0]?.kind).toBe('unhandled-rejection')
+    expect(persisted).toHaveLength(1)
+    expect(persisted[0]?.kind).toBe('unhandled-rejection')
+    expect(exits).toEqual([1])
   })
 
-  it('render-process-gone 进 sink，且带上 webContents 的 URL', () => {
-    const { fakeApp, records } = harness()
+  it('render-process-gone 只异步留证、绝不退出主进程', () => {
+    const { fakeApp, records, exits } = harness()
     fakeApp.emit('render-process-gone', {}, { getURL: () => 'file:///r' }, { reason: 'crashed', exitCode: 5 })
     expect(records).toHaveLength(1)
     expect(records[0]?.kind).toBe('render-process-gone')
     expect(records[0]?.detail).toBe('file:///r')
+    // Electron 主进程按设计能在渲染器死后存活，为一个渲染器崩溃杀主进程是更糟的回归。
+    expect(exits).toEqual([])
   })
 
-  it('child-process-gone 进 sink', () => {
-    const { fakeApp, records } = harness()
+  it('child-process-gone 也只异步留证、不退出', () => {
+    const { fakeApp, records, exits } = harness()
     fakeApp.emit('child-process-gone', {}, { type: 'Utility', reason: 'crashed', exitCode: 9 })
     expect(records).toHaveLength(1)
     expect(records[0]?.kind).toBe('child-process-gone')
+    expect(exits).toEqual([])
+  })
+
+  it('致命崩溃：同步落盘抛错也绝不阻断退出，失败落到 stderr', () => {
+    const fakeApp = new EventEmitter()
+    const fakeProcess = new EventEmitter()
+    const stderr: string[] = []
+    const exits: number[] = []
+    registerCrashCapture({
+      app: fakeApp as never,
+      process: fakeProcess as never,
+      sink: () => {},
+      persistSync: () => {
+        throw new Error('disk full')
+      },
+      exit: (code) => {
+        exits.push(code)
+      },
+      now: () => FIXED_MS,
+      logStderr: (line) => stderr.push(line)
+    })
+    fakeProcess.emit('uncaughtException', new Error('x'))
+    // 留证失败也必须退出——带病续命比丢一条崩溃日志更糟。
+    expect(exits).toEqual([1])
+    expect(stderr.some((l) => l.includes('crash sink failed') && l.includes('disk full'))).toBe(true)
   })
 
   it('disposer 摘除监听后事件不再进 sink', () => {
-    const { fakeProcess, records, dispose } = harness()
+    const { fakeProcess, records, persisted, exits, dispose } = harness()
     dispose()
     fakeProcess.emit('uncaughtException', new Error('after dispose'))
     expect(records).toHaveLength(0)
+    expect(persisted).toHaveLength(0)
+    expect(exits).toEqual([])
   })
 
-  it('sink 同步抛出不会把崩溃处理器搞崩，且失败落到 stderr', () => {
+  it('非致命的 sink 同步抛出不会把崩溃处理器搞崩，且失败落到 stderr', () => {
     const fakeApp = new EventEmitter()
     const fakeProcess = new EventEmitter()
     const stderr: string[] = []
@@ -190,16 +233,20 @@ describe('registerCrashCapture: 四类事件都接到 sink', () => {
       sink: () => {
         throw new Error('disk full')
       },
+      persistSync: () => {},
+      exit: () => {},
       now: () => FIXED_MS,
       logStderr: (line) => stderr.push(line)
     })
-    // 不抛即通过：留证失败绝不放大故障。
-    expect(() => fakeProcess.emit('uncaughtException', new Error('x'))).not.toThrow()
+    // 不抛即通过：留证失败绝不放大故障。用非致命的 child-process-gone 走异步 sink 路径。
+    expect(() =>
+      fakeApp.emit('child-process-gone', {}, { type: 'Utility', reason: 'crashed', exitCode: 1 })
+    ).not.toThrow()
     // 但失败必须可见——落到 stderr，不许悄悄吞掉。
     expect(stderr.some((l) => l.includes('crash sink failed') && l.includes('disk full'))).toBe(true)
   })
 
-  it('sink 异步 reject 也落到 stderr，不变成又一个没人接的 rejection', async () => {
+  it('非致命的 sink 异步 reject 也落到 stderr，不变成又一个没人接的 rejection', async () => {
     const fakeApp = new EventEmitter()
     const fakeProcess = new EventEmitter()
     const stderr: string[] = []
@@ -207,14 +254,62 @@ describe('registerCrashCapture: 四类事件都接到 sink', () => {
       app: fakeApp as never,
       process: fakeProcess as never,
       sink: () => Promise.reject(new Error('async disk full')),
+      persistSync: () => {},
+      exit: () => {},
       now: () => FIXED_MS,
       logStderr: (line) => stderr.push(line)
     })
-    fakeProcess.emit('uncaughtException', new Error('x'))
+    fakeApp.emit('child-process-gone', {}, { type: 'Utility', reason: 'crashed', exitCode: 1 })
     // 让微任务队列排空，异步 reject 的 catch 才跑到。
     await Promise.resolve()
     await Promise.resolve()
     expect(stderr.some((l) => l.includes('crash sink failed') && l.includes('async disk full'))).toBe(true)
+  })
+})
+
+describe('isFatalToMainProcess: 只有未捕获异常/拒绝才致命', () => {
+  it('未捕获异常与未处理拒绝致命——挂上 process 处理器会抑制 Node 默认退出，必须手动补回', () => {
+    expect(isFatalToMainProcess('uncaught-exception')).toBe(true)
+    expect(isFatalToMainProcess('unhandled-rejection')).toBe(true)
+  })
+
+  it('渲染/子进程消失不致命——Electron 主进程按设计能在它们死后继续存活', () => {
+    expect(isFatalToMainProcess('render-process-gone')).toBe(false)
+    expect(isFatalToMainProcess('child-process-gone')).toBe(false)
+  })
+})
+
+describe('crashRecordFrom: 字段有字节上界，每行始终可 JSON.parse', () => {
+  it('超长栈只截 detail 字段并补省略号，记录整体仍是合法 JSON', () => {
+    const error = new Error('boom')
+    error.stack = 'S'.repeat(300 * 1024) // 远超 detail 上界
+    const record = crashRecordFrom({ kind: 'uncaught-exception', error }, FIXED_MS)
+    // 序列化后必须能被严格解析——不能像整行截断那样切出半条 JSON。
+    const line = serializeCrashRecord(record)
+    expect(() => JSON.parse(line)).not.toThrow()
+    // detail 被裁到上界内，且末尾有省略号标记「这里被截过」。
+    expect(Buffer.byteLength(record.detail ?? '', 'utf8')).toBeLessThanOrEqual(128 * 1024)
+    expect(record.detail?.endsWith('…')).toBe(true)
+    // 一整行也远小于文件 1 MiB 上界，appendWithinBudget 永远走不到整行截断那条坏路。
+    expect(Buffer.byteLength(`${line}\n`, 'utf8')).toBeLessThan(1024 * 1024)
+  })
+
+  it('超长 summary 也被截断补省略号，仍可解析', () => {
+    const record = crashRecordFrom({ kind: 'unhandled-rejection', reason: 'm'.repeat(10 * 1024) }, FIXED_MS)
+    expect(() => JSON.parse(serializeCrashRecord(record))).not.toThrow()
+    expect(Buffer.byteLength(record.summary, 'utf8')).toBeLessThanOrEqual(4 * 1024)
+    expect(record.summary.endsWith('…')).toBe(true)
+  })
+
+  it('多字节字符不会被从中间切开，截断后仍是合法 UTF-8（无 \\uFFFD 替换符）', () => {
+    // 每个字符 3 字节，撑爆 summary 上界；若按字节硬切会切出坏字节序列。
+    const record = crashRecordFrom({ kind: 'unhandled-rejection', reason: '中'.repeat(3000) }, FIXED_MS)
+    const line = serializeCrashRecord(record)
+    expect(() => JSON.parse(line)).not.toThrow()
+    // 截断绝不在字符中间落刀：结果里不能出现 UTF-8 解码失败的替换符。
+    expect(record.summary).not.toContain('�')
+    expect(Buffer.byteLength(record.summary, 'utf8')).toBeLessThanOrEqual(4 * 1024)
+    expect(record.summary.endsWith('…')).toBe(true)
   })
 })
 
@@ -229,6 +324,9 @@ describe('index.ts 接线守卫（源码扫描）', () => {
     expect(source).toContain('crashReporter.start(crashReporterOptions())')
     expect(source).toContain('registerCrashCapture(')
     expect(source).toContain('new CrashLog()')
+    // 致命崩溃的 fail-fast 必须真的接上：同步落盘 + app.exit 都喂进接线层，否则只记录不退出。
+    expect(source).toContain('crashLog.appendSync(record)')
+    expect(source).toContain('exit: (code) => app.exit(code)')
   })
 })
 

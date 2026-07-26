@@ -1,4 +1,5 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { app } from 'electron'
 import { appendWithinBudget, serializeCrashRecord, type CrashRecord } from './crash-capture.js'
@@ -39,5 +40,25 @@ export class CrashLog {
     })
     this.writeTail = operation.then(() => {}, () => {})
     await operation
+  }
+
+  /**
+   * 同步落盘，专供致命崩溃的 exit 前留证——那时事件循环即将结束，异步 append 的 Promise 根本排不上。
+   * 用同步 fs：读旧内容、字节上界内追加、原子替换，与 append 同一套裁量，只是不排队（进程马上就退了，
+   * 没有并发写的余地）。任何 IO 失败都往上抛，由接线层落到 stderr——留证尽力而为，绝不阻断退出。
+   */
+  appendSync(record: CrashRecord): void {
+    const line = serializeCrashRecord(record)
+    let existing = ''
+    try {
+      existing = readFileSync(this.path, 'utf8')
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') existing = ''
+    }
+    const next = appendWithinBudget(existing, line, this.maxBytes)
+    mkdirSync(dirname(this.path), { recursive: true })
+    const tempPath = `${this.path}.${process.pid}.sync.tmp`
+    writeFileSync(tempPath, next, { mode: 0o600 })
+    renameSync(tempPath, this.path)
   }
 }
