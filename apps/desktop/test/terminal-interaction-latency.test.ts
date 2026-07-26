@@ -12,9 +12,10 @@ describe('Terminal interaction latency owners', () => {
       .map((line) => line.replace(/\/\/.*$/u, ''))
       .join('\n')
     const outputDrain = source.slice(
-      source.indexOf('outputTail = outputTail.then('),
+      source.indexOf('const drainLiveOutput = async ()'),
       source.indexOf('const disposeEvents = api.sessions.onEvent')
     )
+    expect(outputDrain).toContain('takeTerminalLiveOutputBatch(liveOutputQueue)')
     expect(outputDrain).toContain('await yieldTerminalWork()')
   })
 
