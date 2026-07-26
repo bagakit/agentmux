@@ -329,6 +329,7 @@ export type AgentMuxAgentSession = {
    */
   launchOptions?: LaunchOptionSelection
   terminalHandshake?: AgentTerminalHandshakeState
+  terminalCapability?: AgentTerminalCapabilityState
   terminalPromptReadiness?: AgentTerminalPromptReadinessState
   terminalPromptSubmission?: AgentTerminalPromptSubmissionState
   semanticStatus?: AgentStatus
@@ -345,6 +346,22 @@ export type AgentTerminalHandshakeState = {
     endByte: number
   }
   acknowledged: boolean
+}
+
+/**
+ * The durable fact that the Provider terminal capability could not be verified for this exact Run.
+ *
+ * `unknown` is intentional: a missing capability receipt is not evidence that the Agent itself is
+ * broken. `mode: 'degraded'` tells clients that Core continues to accept input using CtxMux's
+ * authoritative cursor, while the optional handshake receipt remains absent. The record is cleared
+ * when a later handshake is acknowledged or when the Run is replaced.
+ */
+export type AgentTerminalCapabilityState = {
+  state: 'unknown'
+  mode: 'degraded'
+  reason: 'handshake-timeout'
+  run: AgentMuxRunRef
+  observedAt: number
 }
 
 export type AgentTerminalInputPhaseState = {

@@ -54,6 +54,7 @@ export function App() {
   // MERGE：workbench + workspace 时顶行下沉进 pane（root tabbar / chromeline），
   // 主区不再占用独立 topbar 行；Board 与欢迎页仍走顶栏。
   const mergedTopRow = mainSurface === 'workbench' && Boolean(workspace)
+  const workbenchVisible = mainSurface === 'workbench' && !settingsRoute
   const { containerRef, isResizing, onResizeStart } = useSidebarResize<HTMLDivElement>({
     isOpen: toolsVisible,
     width: toolDockWidth,
@@ -117,15 +118,13 @@ export function App() {
     )
   }
 
-  if (settingsRoute) return (
-    <SettingsPanel
-      initialSection={settingsRoute.section}
-      onClose={() => setSettingsRoute(null)}
-    />
-  )
-
   return (
-    <div className={`app-shell ${projectRailOpen ? '' : 'app-shell--project-rail-collapsed'}`}>
+    <>
+      <div
+        className={`app-shell ${projectRailOpen ? '' : 'app-shell--project-rail-collapsed'}`}
+        aria-hidden={settingsRoute ? true : undefined}
+        inert={Boolean(settingsRoute)}
+      >
       {projectRailOpen ? (
         <WorkspaceSidebar
           onOpenSettings={(section) => setSettingsRoute({ section })}
@@ -186,12 +185,12 @@ export function App() {
               {mainSurface === 'board' ? <WorkspaceBoard /> : null}
               {workspace ? (
                 <div
-                  className={`workspace-workbench-registry ${mainSurface === 'workbench' ? '' : 'workspace-workbench-registry--parked'}`}
-                  aria-hidden={mainSurface !== 'workbench'}
-                  inert={mainSurface !== 'workbench'}
+                  className={`workspace-workbench-registry ${workbenchVisible ? '' : 'workspace-workbench-registry--parked'}`}
+                  aria-hidden={!workbenchVisible}
+                  inert={!workbenchVisible}
                 >
                   {mountedWorkspaces.map((candidate) => {
-                    const visible = mainSurface === 'workbench' && candidate.id === activeWorkspaceId
+                    const visible = workbenchVisible && candidate.id === activeWorkspaceId
                     return (
                       <div
                         key={candidate.id}
@@ -218,6 +217,13 @@ export function App() {
       </main>
       <AgentStatusBar />
       <QuickSwitcher open={quickSwitchOpen} onClose={() => setQuickSwitchOpen(false)} />
-    </div>
+      </div>
+      {settingsRoute ? (
+        <SettingsPanel
+          initialSection={settingsRoute.section}
+          onClose={() => setSettingsRoute(null)}
+        />
+      ) : null}
+    </>
   )
 }

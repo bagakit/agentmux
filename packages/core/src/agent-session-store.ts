@@ -24,6 +24,7 @@ import type {
   AgentMuxStoredAgentSession,
   AgentNativeSessionHandle,
   AgentStatus,
+  AgentTerminalCapabilityState,
   AgentTimelineCommit,
   AgentTimelineItem,
   AgentTimelineMutation,
@@ -741,6 +742,32 @@ function terminalHandshake(
   }
 }
 
+function terminalCapability(
+  value: unknown,
+  currentRun: AgentMuxRunRef
+): AgentTerminalCapabilityState {
+  const source = record(value, 'terminalCapability')
+  const run = runRef(source.run)
+  if (
+    source.state !== 'unknown' ||
+    source.mode !== 'degraded' ||
+    source.reason !== 'handshake-timeout' ||
+    run.runId !== currentRun.runId
+  ) {
+    throw new AgentMuxError(
+      'Terminal capability state does not match its Agent Run.',
+      'INVALID_AGENT_SESSION_STORE'
+    )
+  }
+  return {
+    state: 'unknown',
+    mode: 'degraded',
+    reason: 'handshake-timeout',
+    run,
+    observedAt: timestamp(source.observedAt, 'terminalCapability.observedAt')
+  }
+}
+
 function terminalInputPhase(
   value: unknown,
   name: string
@@ -839,6 +866,9 @@ export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgent
     ...(source.terminalHandshake === undefined
       ? {}
       : { terminalHandshake: terminalHandshake(source.terminalHandshake, currentRun) }),
+    ...(source.terminalCapability === undefined
+      ? {}
+      : { terminalCapability: terminalCapability(source.terminalCapability, currentRun) }),
     ...(source.terminalPromptReadiness === undefined
       ? {}
       : {
@@ -877,6 +907,12 @@ export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgent
   }
   if (session.semanticStatus && session.semanticStatus.observedAt > session.updatedAt) {
     throw new AgentMuxError('Semantic status is newer than its Agent Session.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  if (session.terminalCapability && session.terminalCapability.observedAt > session.updatedAt) {
+    throw new AgentMuxError(
+      'Terminal capability state is newer than its Agent Session.',
+      'INVALID_AGENT_SESSION_STORE'
+    )
   }
   const interaction = session.pendingInteraction?.request
   if (

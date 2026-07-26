@@ -119,6 +119,25 @@ export function serviceNoticeToRender(classification: ServiceNoticeClass): Rende
  */
 export function agentSessionServiceOutcome(session: SessionSnapshot | undefined): StepOutcome {
   if (!session || session.kind !== 'agent') return { completed: true }
+
+  // Core's durable marker is stronger than an inferred disconnected status: it says exactly which
+  // workflow step timed out while this Run remained usable. Project it directly so a healthy Agent is
+  // never painted as failed and the notice survives reconnect/restart snapshots.
+  if (session.terminalCapability?.reason === 'handshake-timeout') {
+    const step: ProcessStep = {
+      label: 'Checking terminal capabilities',
+      degradedMode: 'The Agent is still usable; terminal capability is unknown and prompts remain available',
+      restore: 'Resume this session to retry the capability check'
+    }
+    if (session.processState === 'running') {
+      return { completed: false, step, agentViability: 'alive' }
+    }
+    if (session.processState === 'exited') {
+      return { completed: false, step, agentViability: 'dead' }
+    }
+    return { completed: false, step, agentViability: 'unknown' }
+  }
+
   if (session.status.state !== 'disconnected') return { completed: true }
 
   const step: ProcessStep = {
