@@ -128,17 +128,20 @@ async function publishReport(path: string, report: Record<string, unknown>): Pro
   await rename(temporaryPath, path)
 }
 
+// 返回 `true` 而不是 void，是为了让「观察到了」这件事能被**赋值**出去。证据字段若写成字面量
+// `const x = true`，那么把上面那句 waitFor 删掉，字段仍是 true、下游断言仍然通过——断言就成了摆设。
+// 让字段接住 waitFor 的返回值，删掉观察就没有值可接，证据与观察从此绑死。
 async function waitFor(
   description: string,
   predicate: () => boolean | Promise<boolean>,
   timeoutMs = 20_000
-): Promise<void> {
+): Promise<true> {
   const deadline = Date.now() + timeoutMs
   reportProbeProgress('waiting', description)
   while (Date.now() < deadline) {
     if (await predicate()) {
       reportProbeProgress('completed', description)
-      return
+      return true
     }
     await delay(25)
   }
@@ -531,12 +534,11 @@ async function runExplorerInteractionProbe(options: {
 
   await window.webContents.executeJavaScript(`${treeRowSource('explorer-source/menu.txt')}?.focus()`)
   sendKey(window, 'F10', ['shift'])
-  await waitFor('Shift+F10 Radix Move submenu trigger', async () => (
+  const shiftF10Opened = await waitFor('Shift+F10 Radix Move submenu trigger', async () => (
     await window.webContents.executeJavaScript(
       `Boolean(${visibleMenuItemSource('Move This Item to')})`
     ) as boolean
   ))
-  const shiftF10Opened = true
   const multiSelectionPreserved = await window.webContents.executeJavaScript(
     `Boolean(${visibleMenuItemSource('Copy Paths')})`
   ) as boolean
@@ -602,6 +604,14 @@ async function runExplorerInteractionProbe(options: {
   const alternateRowsAfterRelease = await explorerRowPaths(window)
   const stalePrimaryReads = options.control.directoryReadsSince(directoryReadCursor)
     .filter((read) => read.workspaceId === 'workspace-file-editing-e2e')
+  // 下面那条断言是「没有陈旧读」——一个**缺席**断言，而缺席断言在探测器自己死掉时会静默通过：
+  // 若 index.ts 的 onReadDirectoryStart 接线被重构掉，directoryReads 永远是空的，"0 条陈旧读"
+  // 照样成立，它本该抓的回归就此蒙混过关。所以先证明这个证据通道真的活着、真的在记录。
+  assertProbe(
+    options.control.directoryReadCursor() > 0,
+    'Directory-read detector never recorded a single read: the onReadDirectoryStart hook is disconnected, ' +
+      'so the stale-read assertion below would pass vacuously.'
+  )
   assertProbe(
     stalePrimaryReads.length === 0,
     `Stale primary Workspace refresh reached Main while alternate was active: ${JSON.stringify(stalePrimaryReads)}`
@@ -617,7 +627,7 @@ async function runExplorerInteractionProbe(options: {
       `${projectRowSource(options.workspacePath)}?.classList.contains('project-rail-row--active') === true`
     ) as boolean
   ))
-  await waitFor('moved Radix menu row', async () => (
+  const menuMoveObserved = await waitFor('moved Radix menu row', async () => (
     await window.webContents.executeJavaScript(
       `Boolean(${treeRowSource('targets/menu/menu.txt')})`
     ) as boolean
@@ -634,7 +644,7 @@ async function runExplorerInteractionProbe(options: {
   const menu = {
     shiftF10Opened,
     multiSelectionPreserved,
-    moved: true,
+    moved: menuMoveObserved,
     singleSelection: menuSelection.selected.length === 1 &&
       menuSelection.selected[0] === 'targets/menu/menu.txt',
     workspaceRace: {
@@ -670,7 +680,7 @@ async function runExplorerInteractionProbe(options: {
   const validTarget = await moveActivePointerDrag(window, 'valid PointerSensor destination', treeRowSource('targets/valid'))
   await waitForActivePointerDropTarget(window, 'targets/valid', validTarget)
   endPointerDrag(window, validTarget)
-  await waitFor('PointerSensor disk move', async () => (
+  const pointerMoveObserved = await waitFor('PointerSensor disk move', async () => (
     await pathExists(join(options.workspacePath, 'targets', 'valid', 'drag-valid.txt')) &&
       !await pathExists(join(options.workspacePath, 'explorer-source', 'drag-valid.txt'))
   ))
@@ -682,7 +692,7 @@ async function runExplorerInteractionProbe(options: {
     ) as boolean
   ))
   const pointerMove = {
-    moved: true,
+    moved: pointerMoveObserved,
     singleSelection: pointerDragState.sourceSelected && !pointerDragState.neighborSelected,
     fileOverlayOnly: pointerDragState.fileOverlay && !pointerDragState.workbenchOverlay
   }
@@ -735,13 +745,13 @@ async function runExplorerInteractionProbe(options: {
   await waitFor('hover-expand PointerSensor cleanup', async () => !(
     await window.webContents.executeJavaScript("Boolean(document.querySelector('.file-tree-drag-preview'))") as boolean
   ))
-  await waitFor('loaded hover-expanded directory', async () => (
+  const hoverExpandObserved = await waitFor('loaded hover-expanded directory', async () => (
     await window.webContents.executeJavaScript(
       `Boolean(${treeRowSource('targets/hover/child.txt')})`
     ) as boolean
   ))
   const hover = {
-    expanded: true,
+    expanded: hoverExpandObserved,
     cancelledStayedCollapsed
   }
 
