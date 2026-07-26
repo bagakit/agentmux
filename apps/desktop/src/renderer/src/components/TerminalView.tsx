@@ -74,12 +74,16 @@ export function TerminalView({
   session,
   themeId,
   interactiveResize,
+  visible = true,
   autoFocus = true,
   linkOrigin
 }: {
   session: SessionSnapshot
   themeId: TerminalThemeId
   interactiveResize: boolean
+  // 这一格看不看得见。隐藏的 Tab 仍留在 DOM 里保住 xterm 实例（切回才不必重放），
+  // 但它必须停工：不 fit、不 resize、不渲染。默认 true 供创建页等单格场景。
+  visible?: boolean
   // The reusable terminal on the create page must not steal focus from the prompt.
   autoFocus?: boolean
   linkOrigin: OpenHttpLinkOrigin
@@ -100,6 +104,8 @@ export function TerminalView({
   const linkPressRef = useRef<{ x: number; y: number } | null>(null)
   const interactiveResizeRef = useRef(interactiveResize)
   interactiveResizeRef.current = interactiveResize
+  const visibleRef = useRef(visible)
+  visibleRef.current = visible
   // canControlRun 随 processState 翻转，但 attach effect 不能依赖它——否则同 runId 的
   // 状态跳变（exit/interrupt/recovery）会整块拆/重建 xterm 并回放 scrollback，造成卡顿闪屏。
   // 用 ref 让输入 guard / resize gate 跨状态保持响应，同时不触发 effect 重挂。
@@ -147,6 +153,10 @@ export function TerminalView({
   useLayoutEffect(() => {
     viewportRef.current?.setInteractiveResize(interactiveResize)
   }, [interactiveResize])
+
+  useLayoutEffect(() => {
+    viewportRef.current?.setVisible(visible)
+  }, [visible])
 
   // 变为 running 时启动 live 视口同步。attach effect 不再随 processState 重挂，
   // 所以这条独立小 effect 覆盖"attach 时非 running、随后恢复运行"的场景。
@@ -343,6 +353,7 @@ export function TerminalView({
       onResizeError: (error) => console.warn('[terminal] failed to synchronize PTY viewport', error)
     })
     viewport.setInteractiveResize(interactiveResizeRef.current)
+    viewport.setVisible(visibleRef.current)
     viewportRef.current = viewport
     renderReady = terminal.onRender(() => {
       renderReady?.dispose()

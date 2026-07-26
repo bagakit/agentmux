@@ -414,4 +414,142 @@ describe('TerminalViewportSynchronizer', () => {
     expect(resize).toHaveBeenLastCalledWith({ cols: 140, rows: 40 })
     expect(fit).toHaveBeenCalled()
   })
+  /**
+   * 隐藏的终端一律停工。
+   *
+   * 保住实例（不卸载）才能让切回不重放，但代价必须为零：一个看不见的终端如果还在 fit /
+   * resize / 排帧，开十个 Tab 就是十份持续开销，那是拿一种卡顿换另一种。这类退化不会让
+   * 任何既有测试变红，所以必须显式断言。
+   */
+  it('一个看不见的终端不排帧、不 fit、不 resize', async () => {
+    const frames = frameHarness()
+    let proposed = { cols: 100, rows: 30 }
+    let actual = { ...proposed }
+    const fit = vi.fn(() => { actual = { ...proposed } })
+    const resize = vi.fn(async (_size: { cols: number; rows: number }) => {})
+    const sync = new TerminalViewportSynchronizer({
+      proposeGrid: () => proposed,
+      fit,
+      readGrid: () => actual,
+      resize,
+      requestFrame: frames.request,
+      cancelFrame: frames.cancel,
+      measureViewport: () => ({ width: proposed.cols * 10, height: proposed.rows * 20 })
+    })
+
+    await sync.startLiveSynchronization()
+    frames.runNext()
+    await vi.waitFor(() => expect(resize).toHaveBeenCalled())
+    fit.mockClear()
+    resize.mockClear()
+
+    sync.setVisible(false)
+    // 窗口在它隐藏期间被拉大过好几次——它一次都不该动。
+    proposed = { cols: 140, rows: 30 }
+    sync.observeViewport()
+    proposed = { cols: 160, rows: 44 }
+    sync.observeViewport()
+
+    expect(frames.count()).toBe(0)
+    expect(fit).not.toHaveBeenCalled()
+    expect(resize).not.toHaveBeenCalled()
+  })
+
+  it('切回时一次性追上隐藏期间错过的几何，而不是逐次补做', async () => {
+    const frames = frameHarness()
+    let proposed = { cols: 100, rows: 30 }
+    let actual = { ...proposed }
+    const fit = vi.fn(() => { actual = { ...proposed } })
+    const resize = vi.fn(async (_size: { cols: number; rows: number }) => {})
+    const sync = new TerminalViewportSynchronizer({
+      proposeGrid: () => proposed,
+      fit,
+      readGrid: () => actual,
+      resize,
+      requestFrame: frames.request,
+      cancelFrame: frames.cancel,
+      measureViewport: () => ({ width: proposed.cols * 10, height: proposed.rows * 20 })
+    })
+
+    await sync.startLiveSynchronization()
+    frames.runNext()
+    await vi.waitFor(() => expect(resize).toHaveBeenCalled())
+    fit.mockClear()
+    resize.mockClear()
+
+    sync.setVisible(false)
+    proposed = { cols: 140, rows: 30 }
+    sync.observeViewport()
+    proposed = { cols: 160, rows: 44 }
+    sync.observeViewport()
+
+    sync.setVisible(true)
+    expect(frames.count()).toBe(1)
+    expect(frames.runNext()).toBe(true)
+
+    // 中间那个 140x30 从未发生过——只同步最终几何一次。
+    await vi.waitFor(() => expect(resize).toHaveBeenCalledTimes(1))
+    expect(resize).toHaveBeenCalledWith({ cols: 160, rows: 44 })
+    expect(fit).toHaveBeenCalledTimes(1)
+  })
+
+  it('隐藏与拖拽是两个独立原因：松手时若仍不可见，就仍然不动', async () => {
+    const frames = frameHarness()
+    let proposed = { cols: 100, rows: 30 }
+    let actual = { ...proposed }
+    const fit = vi.fn(() => { actual = { ...proposed } })
+    const resize = vi.fn(async (_size: { cols: number; rows: number }) => {})
+    const sync = new TerminalViewportSynchronizer({
+      proposeGrid: () => proposed,
+      fit,
+      readGrid: () => actual,
+      resize,
+      requestFrame: frames.request,
+      cancelFrame: frames.cancel,
+      measureViewport: () => ({ width: proposed.cols * 10, height: proposed.rows * 20 })
+    })
+
+    await sync.startLiveSynchronization()
+    frames.runNext()
+    await vi.waitFor(() => expect(resize).toHaveBeenCalled())
+    fit.mockClear()
+    resize.mockClear()
+
+    // 拖动分隔条的同时切走了这张 Tab：两个原因叠加。
+    sync.setInteractiveResize(true)
+    sync.setVisible(false)
+    proposed = { cols: 150, rows: 40 }
+    sync.observeViewport()
+
+    // 松手了，但它仍然看不见——一个布尔的实现会在这里恢复同步。
+    sync.setInteractiveResize(false)
+    expect(frames.count()).toBe(0)
+    expect(fit).not.toHaveBeenCalled()
+    expect(resize).not.toHaveBeenCalled()
+
+    // 真正切回来时才动，且只动一次。
+    sync.setVisible(true)
+    expect(frames.count()).toBe(1)
+    expect(frames.runNext()).toBe(true)
+    await vi.waitFor(() => expect(resize).toHaveBeenCalledTimes(1))
+    expect(resize).toHaveBeenCalledWith({ cols: 150, rows: 40 })
+  })
+
+  it('看不见时不接受重绘请求——重放缺口的补画等切回来再说', async () => {
+    const frames = frameHarness()
+    const proposed = { cols: 100, rows: 30 }
+    const sync = new TerminalViewportSynchronizer({
+      proposeGrid: () => proposed,
+      fit: () => {},
+      readGrid: () => proposed,
+      resize: async () => {},
+      requestFrame: frames.request,
+      cancelFrame: frames.cancel,
+      measureViewport: () => ({ width: 1000, height: 600 })
+    })
+
+    await sync.startLiveSynchronization()
+    sync.setVisible(false)
+    expect(await sync.requestContentRedraw()).toBe(false)
+  })
 })
