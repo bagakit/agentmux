@@ -223,6 +223,33 @@
   cursor: pointer;
 }
 .activity-feed__jump:hover { background: var(--surface-3); }
+/* 「在进行」。一个正在工作的窗格显示成空，比慢更糟——用户会以为没发出去，然后再发一遍。
+   动画只是修饰：文字本身就说明了状态，因此 prefers-reduced-motion 下停掉点的跳动不损失信息。 */
+.activity-working {
+  display: flex;
+  align-items: center;
+  gap:var(--sp-3);
+  padding:var(--sp-4) var(--sp-5);
+  color: var(--text-3);
+  font-size: var(--fs-meta);
+}
+.activity-working__dots { display: inline-flex; gap:3px; }
+.activity-working__dots i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--text-3);
+  animation: activity-working-pulse 1.2s ease-in-out infinite;
+}
+.activity-working__dots i:nth-child(2) { animation-delay: .15s; }
+.activity-working__dots i:nth-child(3) { animation-delay: .3s; }
+@keyframes activity-working-pulse {
+  0%, 60%, 100% { opacity: .28; }
+  30% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .activity-working__dots i { animation: none; opacity: .6; }
+}
 .log-fold__chevron { transition: transform 120ms ease; }
 .log-fold[data-open] .log-fold__chevron { transform: rotate(90deg); }
 .log-fold__label { display: inline-flex; align-items: center; gap:var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); }
