@@ -82,4 +82,24 @@ describe('Tab Region store actions', () => {
     expect(state.layouts.workspace?.groups).toHaveLength(2)
     expect(state.tabs[tabId]?.layout).toEqual(before)
   })
+
+  it('requestCloseTab 只投意图不真关，clearCloseTabRequest 只清自己那一条', () => {
+    // 键盘关 Tab 的落点是「投意图 → 组件消费」。这里守 store 侧的两半：意图带齐落点、每投一次 nonce 递增
+    // （连按能各触发一次），以及清除只认自己的 nonce——被更晚一次按键覆盖后不该把新意图也抹掉。
+    useAppStore.getState().requestCloseTab('workspace', 'group-one', 'view-one')
+    const first = useAppStore.getState().closeTabRequest
+    expect(first).toMatchObject({ workspaceId: 'workspace', tabGroupId: 'group-one', tabId: 'view-one' })
+
+    useAppStore.getState().requestCloseTab('workspace', 'group-one', 'view-one')
+    const second = useAppStore.getState().closeTabRequest
+    expect(second?.nonce).toBe((first?.nonce ?? 0) + 1)
+
+    // 用过时的 nonce 清：被更晚的意图覆盖了，不该清掉。
+    useAppStore.getState().clearCloseTabRequest(first!.nonce)
+    expect(useAppStore.getState().closeTabRequest).toBe(second)
+
+    // 用当前 nonce 清：意图归零。
+    useAppStore.getState().clearCloseTabRequest(second!.nonce)
+    expect(useAppStore.getState().closeTabRequest).toBeNull()
+  })
 })

@@ -17,7 +17,7 @@ import { AgentStatusBar } from './components/AgentStatusBar'
 import { ProjectRailToolbar } from './components/ProjectRailToolbar'
 import { QuickSwitcher } from './components/QuickSwitcher'
 import { isQuickSwitchShortcut } from './lib/quick-switch-shortcut'
-import { handleWorkbenchShortcut } from './lib/workbench-shortcuts'
+import { handleWorkbenchShortcut, isEditableChordTarget } from './lib/workbench-shortcuts'
 import { SurfaceSwitch, TopRowLeadingChrome } from './components/TopRowChrome'
 import { WorkspaceBoard } from './components/WorkspaceBoard'
 import { WorkspaceSidebar } from './components/WorkspaceSidebar'
@@ -123,6 +123,15 @@ export function App() {
   useEffect(() => {
     const isMac = navigator.userAgent.includes('Mac')
     const onKeyDown = (event: KeyboardEvent): void => {
+      // 在非终端的可编辑控件里打字/改名时放行这些和弦（Cmd+D 不分屏、Cmd+W 不关正在打字的格）。终端
+      // 焦点仍接管——capture 存在的唯一理由就是抢在聚焦的 xterm 文本代理前拿到键。判定是纯函数，这里只
+      // 把 DOM 事实（标签名、contentEditable、是否在 .xterm 子树内）喂进去。
+      const target = event.target
+      if (target instanceof HTMLElement && isEditableChordTarget({
+        tagName: target.tagName,
+        isContentEditable: target.isContentEditable,
+        insideTerminal: target.closest('.xterm') !== null
+      })) return
       if (handleWorkbenchShortcut(event, isMac, useAppStore.getState())) event.preventDefault()
     }
     window.addEventListener('keydown', onKeyDown, { capture: true })

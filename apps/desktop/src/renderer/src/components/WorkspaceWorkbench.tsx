@@ -160,6 +160,11 @@ function SortableWorkbenchTab({
   const setTabMenuOpen = useAppStore((state) => state.setTabMenuOpen)
   const config = useAppStore((state) => state.config)
   const moveSessionViewToWorkspace = useAppStore((state) => state.moveSessionViewToWorkspace)
+  // 键盘 Cmd+W 在单 Region Tab 上关整张 Tab 的意图：窗口监听够不着这里的确认流，所以它只投一个意图，
+  // 由目标 Tab（intent 的 tabId 命中自己）跑既有的 requestTabsClose——与鼠标点 X 同一条路，含未保存/在跑
+  // Agent 的确认。跑完清掉意图。
+  const closeTabRequest = useAppStore((state) => state.closeTabRequest)
+  const clearCloseTabRequest = useAppStore((state) => state.clearCloseTabRequest)
   const surface = titleWorkbenchSurface(tab)
   const session = surface.kind === 'agent' || surface.kind === 'terminal'
     ? sessions.find((item) => item.id === surface.sessionId)
@@ -240,6 +245,23 @@ function SortableWorkbenchTab({
     event.stopPropagation()
     await requestTabsClose([tab.id])
   }
+
+  // 消费键盘关 Tab 意图：只有意图点名的这张 Tab 才响应，跑既有的确认流，然后清掉意图。effect 里读 store
+  // 派发出的意图对象；本仓库 renderToStaticMarkup 不跑 effect，所以这条接线的断言在 store 层（意图被投出/
+  // 清除）与判定层（handleWorkbenchShortcut 单格时调 requestCloseTab）各自守，见对应测试。
+  useEffect(() => {
+    if (
+      !closeTabRequest ||
+      closeTabRequest.tabId !== tab.id ||
+      closeTabRequest.workspaceId !== workspaceId ||
+      closeTabRequest.tabGroupId !== group.id
+    ) return
+    const nonce = closeTabRequest.nonce
+    clearCloseTabRequest(nonce)
+    void requestTabsClose([tab.id])
+    // requestTabsClose 是每次渲染新建的闭包，不进依赖；只由意图对象驱动。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [closeTabRequest, tab.id, workspaceId, group.id, clearCloseTabRequest])
 
   async function confirmClose(keepAgentSessions = false): Promise<void> {
     if (closing || !pendingClose) return

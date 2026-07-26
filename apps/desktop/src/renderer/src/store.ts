@@ -217,6 +217,10 @@ type AppState = {
   tabs: Record<string, WorkbenchTab>
   layouts: Record<string, WorkspaceLayout>
   closingWorkbenchViews: Record<string, WorkbenchViewClosePlan>
+  // 键盘请求关整张 Tab 的「意图」——键盘层够不着组件里的确认流（未保存/在跑 Agent 的对话框只活在
+  // WorkspaceWorkbench），所以窗口监听只投一个意图，活动 Tab 组件读到它就跑自己既有的 requestTabsClose
+  // （与鼠标点 X 同一条路），跑完清掉。同 documentRevealTargets 的 consume-and-clear 套路。
+  closeTabRequest: { workspaceId: string; tabGroupId: string; tabId: string; nonce: number } | null
   workspaceFileRevisions: Record<string, number>
   fileExplorerStates: Record<string, FileExplorerViewState | undefined>
   viewModes: Record<string, ViewMode>
@@ -294,6 +298,9 @@ type AppState = {
     direction: SplitDirection
   ): void
   closeRegion(workspaceId: string, tabId: string, regionId: string): Promise<void>
+  // 键盘关 Tab 的入口：只投意图，真正的关闭（含确认）由活动 Tab 组件消费。见 closeTabRequest 状态注释。
+  requestCloseTab(workspaceId: string, tabGroupId: string, tabId: string): void
+  clearCloseTabRequest(nonce: number): void
   updateRegionSplitRatio(workspaceId: string, tabId: string, nodePath: string, ratio: number): void
   updateSplitRatio(workspaceId: string, nodePath: string, ratio: number): void
   setViewMode(sessionId: string, mode: ViewMode): void
@@ -1110,6 +1117,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   tabs: {},
   layouts: {},
   closingWorkbenchViews: {},
+  closeTabRequest: null,
   workspaceFileRevisions: {},
   fileExplorerStates: {},
   viewModes: {},
@@ -2150,6 +2158,18 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         : { tabs }
     })
     if (surface.kind === 'file') await disposeClosedFileOwners(previousTabs, get().tabs)
+  },
+  requestCloseTab(workspaceId, tabGroupId, tabId) {
+    // 只投意图，不在这里关：真正的关闭要经组件的 requestTabsClose（未保存/在跑 Agent 的确认对话框只活在
+    // 组件里）。nonce 让「连按两次 Cmd+W 关同一张 Tab」也能各触发一次——同一 tabId 重复投递不会因对象
+    // 相等而被 selector 忽略。
+    set((state) => ({
+      closeTabRequest: { workspaceId, tabGroupId, tabId, nonce: (state.closeTabRequest?.nonce ?? 0) + 1 }
+    }))
+  },
+  clearCloseTabRequest(nonce) {
+    // 只清掉自己消费的那一条：若清的瞬间已被更晚一次按键覆盖成新 nonce，别把新意图也抹掉。
+    set((state) => (state.closeTabRequest?.nonce === nonce ? { closeTabRequest: null } : state))
   },
   updateRegionSplitRatio(workspaceId, tabId, nodePath, ratio) {
     const tab = get().tabs[tabId]

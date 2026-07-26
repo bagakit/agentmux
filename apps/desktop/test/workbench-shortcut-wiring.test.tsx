@@ -65,6 +65,18 @@ describe('App 把 workbench 快捷键接到窗口监听', () => {
     const effect = code.slice(code.lastIndexOf('useEffect(', idx), effectEnd)
     expect(effect).toContain("removeEventListener('keydown'")
   })
+
+  it('在非终端可编辑控件里先放行：effect 把 DOM 事实喂给 isEditableChordTarget 并提前 return', () => {
+    // 组件测试跑不了 effect，所以这条接线只能读源码钉住：删掉这个守卫，Cmd+D 会在 composer/重命名框里
+    // 误分屏、Cmd+W 会关掉正在打字的格，而任何判定测试都不会红。
+    const idx = code.indexOf('handleWorkbenchShortcut(')
+    const effect = code.slice(code.lastIndexOf('useEffect(', idx), code.indexOf('}, [])', idx))
+    expect(effect).toContain('isEditableChordTarget(')
+    // 终端焦点必须仍接管——守卫靠 .xterm 子树判定「在不在终端里」。
+    expect(effect).toContain(".closest('.xterm')")
+    // 判定为真时提前 return，快捷键这一轮不接管。
+    expect(effect).toMatch(/isEditableChordTarget\([\s\S]*?\)\)\s*return/)
+  })
 })
 
 // --- handleWorkbenchShortcut 的转发：喂假 store，看动作有没有真打到 store action 上 ----------
@@ -117,6 +129,7 @@ function layout(groupId: string, tabOrder: string[], activeTabId: string | null)
 type Spies = {
   activateTab: ReturnType<typeof vi.fn>
   closeRegion: ReturnType<typeof vi.fn>
+  requestCloseTab: ReturnType<typeof vi.fn>
   splitRegion: ReturnType<typeof vi.fn>
   focusRegion: ReturnType<typeof vi.fn>
 }
@@ -126,6 +139,7 @@ function store(overrides: Partial<WorkbenchShortcutStore> = {}): WorkbenchShortc
   const spies: Spies = {
     activateTab: vi.fn(),
     closeRegion: vi.fn(),
+    requestCloseTab: vi.fn(),
     splitRegion: vi.fn(),
     focusRegion: vi.fn()
   }
@@ -159,6 +173,21 @@ describe('handleWorkbenchShortcut 把命令转发到 store action', () => {
     const s = store()
     expect(handleWorkbenchShortcut(event({ key: 'w', metaKey: true }), true, s)).toBe(true)
     expect(s.closeRegion).toHaveBeenCalledWith('ws', 't2', 'r2b')
+  })
+
+  it('关整张 Tab：Cmd+W 在单 Region Tab 上调 requestCloseTab（交给组件确认流），不空调 closeRegion', () => {
+    // 把活动 Tab 换成单格：这是最常见的状态，也是「关不掉」的常见现场。必须投 requestCloseTab
+    // （带组 id），而不是调 closeRegion——后者在只剩一格时静默不动，键却被吞。
+    const s = store({
+      tabs: {
+        t1: leafTab('t1', 'r1'),
+        t2: leafTab('t2', 'r2'),
+        t3: leafTab('t3', 'r3')
+      }
+    })
+    expect(handleWorkbenchShortcut(event({ key: 'w', metaKey: true }), true, s)).toBe(true)
+    expect(s.requestCloseTab).toHaveBeenCalledWith('ws', 'g', 't2')
+    expect(s.closeRegion).not.toHaveBeenCalled()
   })
 
   it('分屏：Cmd+D 调 splitRegion(活动格, right)，方向原样带过去', () => {
