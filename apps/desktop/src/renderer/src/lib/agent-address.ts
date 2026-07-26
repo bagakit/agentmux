@@ -107,13 +107,14 @@ ${inspectCommand('tab', tabId)}`
 /**
  * 交接入口解析出的最精确地址。
  *
- * 入口按意图命名（"给这个 Agent 发消息"），因此这里要替用户决定该给哪一层身份——用户想的是
- * 把这个 Agent 交出去，不是"我要 Region 还是 Session"。解析顺序只有一条规则：**指向某一格
- * 分屏时给 Region 地址，否则给 Session 地址**。
+ * 入口按意图命名（"给这个 Agent 发消息"），因此这里要替用户决定该给哪一层身份——用户想的是把这个
+ * Agent 交出去，不是"我要 Region 还是 Session"。解析只有一条规则：**调用方知道是哪一格就给 Region
+ * 地址，不知道就给 Session 地址**。
  *
- * 为什么分屏时反而给"更窄"的 Region 而不是跨 View 稳定的 Session：歧义只在源头可见。点击发生在
- * 某一格上，我们知道是哪一格，接收方不知道；此时给 Region 才是把消歧做在源头。不分屏时没有这个
- * 歧义，Session 是更稳的那个身份——它在 View 被关掉、移动、分屏之后依然指向同一个 Agent。
+ * 判据是`调用方知不知道`，不是`有没有分屏`：歧义只在源头可见。Region 菜单的点击天然发生在某一格上，
+ * 它知道是哪一格而接收方不知道，此时给 Region 才是把消歧做在源头——哪怕这张 View 眼下没分屏，下一秒
+ * 分屏了这个地址依然指得准。Tab 菜单没有这个信息，于是落到 Session：它在 View 被关掉、移动、分屏之后
+ * 依然指向同一个 Agent。
  */
 export function formatHandoffAddress(target: {
   agentSessionId: string

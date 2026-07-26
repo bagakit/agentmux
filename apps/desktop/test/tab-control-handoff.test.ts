@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createWorkbenchTabCopyModel } from '../src/renderer/src/components/WorkbenchTabContextMenu.js'
 import { createRegionCopyModel } from '../src/renderer/src/components/RegionContextMenu.js'
-import { formatSessionAddress, formatViewAddress } from '../src/renderer/src/lib/agent-address.js'
+import {
+  formatHandoffAddress,
+  formatSessionAddress,
+  formatViewAddress
+} from '../src/renderer/src/lib/agent-address.js'
 import { copyableAgentSessionIdForTab } from '../src/renderer/src/lib/tab-control-handoff.js'
 import {
   addWorkbenchRegion,
@@ -126,6 +130,42 @@ describe('Tab 菜单与 Region 菜单同源', () => {
     expect(copied).toMatch(/Region/u)
     // 旧 handoff 把消歧甩给接收方，新地址不这么干。
     expect(copied).not.toContain('MESSAGE_TARGET_NOT_UNIQUE')
+  })
+
+  it('同一个 Session 从两处交接出去，Tab 侧给 Session、Region 侧给那一格', async () => {
+    // 两处共用同一个交接出口，但解析结果**有意不同**：Region 菜单知道用户点的是哪一格，
+    // 那个信息接收方没有，所以在源头就该消歧；Tab 菜单没有这个信息，于是落到跨 View
+    // 稳定的 Session。把 Region 侧也退化成 Session，等于把已知的东西丢掉。
+    const fromTab = vi.fn(async (_text: string) => {})
+    const tabModel = createWorkbenchTabCopyModel({
+      tabId: 'view:x',
+      agentSessionId: 'agent-7',
+      writeClipboardText: fromTab
+    })
+    expect(tabModel.handoff?.label).toBe('Message this Agent')
+    await tabModel.handoff?.onSelect()
+    expect(fromTab).toHaveBeenCalledWith(formatHandoffAddress({ agentSessionId: 'agent-7' }))
+    expect(fromTab.mock.calls[0]![0]).toBe(formatSessionAddress('agent-7'))
+
+    const fromRegion = vi.fn(async (_text: string) => {})
+    await createRegionCopyModel({
+      regionId: 'region:y',
+      agentSessionId: 'agent-7',
+      writeClipboardText: fromRegion
+    }).handoff?.onSelect()
+    expect(fromRegion.mock.calls[0]![0]).toContain("--to-region='region:y'")
+    expect(fromRegion.mock.calls[0]![0]).not.toBe(fromTab.mock.calls[0]![0])
+  })
+
+  it('没有可交接的 Agent 时交接入口缺席，不画禁用的假按钮', () => {
+    // 多 Agent 的 View 同样没有唯一目标——此时该去那一格上右键，而不是给一个点了会错的入口。
+    for (const agentSessionId of [null, copyableAgentSessionIdForTab(tabWithAgentSessions('agent-1', 'agent-2'))]) {
+      expect(createWorkbenchTabCopyModel({
+        tabId: 'view:x',
+        agentSessionId,
+        writeClipboardText: vi.fn(async () => {})
+      }).handoff).toBeUndefined()
+    }
   })
 
   it('不再产出裸 id——那不是寻址方式', () => {
