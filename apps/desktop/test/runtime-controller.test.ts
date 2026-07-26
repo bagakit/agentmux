@@ -219,6 +219,7 @@ vi.mock('../src/main/host-factory.js', () => ({
 }))
 
 import { RuntimeController } from '../src/main/runtime-controller.js'
+import { ProcessResourceSampler } from '../src/main/process-resource-sampler.js'
 
 const store: AgentMuxAgentSessionStore = {
   async load() { return [] },
@@ -1431,5 +1432,88 @@ describe('RuntimeController configuration transaction', () => {
       'exact Run Attachment'
     )
     expect(client.releaseRunAttachment).toHaveBeenCalledWith(expect.objectContaining({ runId: 'new-run' }))
+  })
+
+  /**
+   * 资源采样的 pid 从哪来，以及退出时谁把它关掉。
+   *
+   * 这两条都不会自己变红：pid 来源接错了，面板只是显示不出数；退出时漏掉 dispose，
+   * 采样定时器在应用关掉之后还在起 `ps`——用户看不到，测试也看不到。
+   */
+  describe('资源采样的接线', () => {
+    const TABLE = `  PID  PPID    RSS  %CPU\n 4242     1  10000   5.0`
+
+    function sampledController(): { controller: RuntimeController; sampler: ProcessResourceSampler } {
+      // 注入假的 `ps`：真实进程会让断言依赖机器当时的负载。
+      const sampler = new ProcessResourceSampler(
+        async () => TABLE,
+        () => 1_000_000,
+        () => []
+      )
+      const controller = new RuntimeController(store, undefined, sampler)
+      return { controller, sampler }
+    }
+
+    /** 经由订阅读一帧——那是产品唯一的读取口（ipc.ts 的 resourceUsage:subscribe）。 */
+    async function runsInOneFrame(sampler: ProcessResourceSampler): Promise<string[]> {
+      const runs: string[] = []
+      const stop = sampler.subscribe((snapshot) => {
+        runs.push(...snapshot.runs.map((run) => run.runId))
+      })
+      await vi.waitFor(() => expect(runs.length).toBeGreaterThanOrEqual(0))
+      await Promise.resolve()
+      await Promise.resolve()
+      stop()
+      return runs
+    }
+
+    const processState = (runId: string, state: string, pid: number | null) => ({
+      type: 'process-state' as const,
+      state,
+      run: { runId },
+      pid
+    })
+
+    it('pid 取自 Core 已经在报的 process-state，不另建一份台账', async () => {
+      const { controller, sampler } = sampledController()
+      controller.commit(await controller.prepare(localConfig))
+      const client = runtimeFixture.FakeClient.instances.at(-1)!
+
+      client.eventListener?.(processState('run-a', 'running', 4242))
+      // 事件里带着 pid，采样器就该认得这个 run；认不得说明接线断了或接到了别处。
+      expect(await runsInOneFrame(sampler)).toContain('run-a')
+      await controller.dispose()
+    })
+
+    it('run 结束就不再为它采样——退出的进程留在表里会一直报不可用', async () => {
+      const { controller, sampler } = sampledController()
+      controller.commit(await controller.prepare(localConfig))
+      const client = runtimeFixture.FakeClient.instances.at(-1)!
+
+      client.eventListener?.(processState('run-a', 'running', 4242))
+      client.eventListener?.(processState('run-a', 'exited', 4242))
+      expect(await runsInOneFrame(sampler)).not.toContain('run-a')
+      await controller.dispose()
+    })
+
+    it('run-removed 同样注销——两条路径都要走到，只堵一条等于没堵', async () => {
+      const { controller, sampler } = sampledController()
+      controller.commit(await controller.prepare(localConfig))
+      const client = runtimeFixture.FakeClient.instances.at(-1)!
+
+      client.eventListener?.(processState('run-a', 'running', 4242))
+      client.eventListener?.({ type: 'run-removed', run: { runId: 'run-a' } })
+      expect(await runsInOneFrame(sampler)).not.toContain('run-a')
+      await controller.dispose()
+    })
+
+    it('controller dispose 会把采样器一并关掉，不留后台采样', async () => {
+      const { controller, sampler } = sampledController()
+      controller.commit(await controller.prepare(localConfig))
+      const disposeSampler = vi.spyOn(sampler, 'dispose')
+      await controller.dispose()
+      // 漏掉这一步，应用退出后采样定时器还在跑，且没有任何别的断言够得着它。
+      expect(disposeSampler).toHaveBeenCalledOnce()
+    })
   })
 })

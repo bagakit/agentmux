@@ -27,8 +27,10 @@ import {
   SCRATCH_WORKSPACE_NAME,
   type ScratchTopicSnapshot
 } from './scratch-topics'
+import type { UsageSnapshot } from './process-usage'
 
 export { SCRATCH_WORKSPACE_ID, SCRATCH_WORKSPACE_NAME }
+export type { RunUsage, UsageSnapshot } from './process-usage'
 export type { ScratchTopicSnapshot } from './scratch-topics'
 
 export type LocalHostConfig = {
@@ -765,6 +767,16 @@ export type AgentMuxDesktopApi = {
     recover(session: SessionControl, workspacePath?: string): Promise<SessionRecoveryResult>
     stop(session: SessionControl): Promise<void>
     onEvent(listener: (event: RuntimeEvent) => void): () => void
+  }
+  /**
+   * 进程资源用量。**只在有人订阅时才采样**——折叠态一次 `ps` 都不发生。
+   *
+   * 做成订阅而不是"查一次"，是因为零开销这件事必须由生命周期本身保证：给一个查询接口，
+   * 调用方一开定时器就又回到了常驻轮询，而那不会让任何测试变红。
+   */
+  resourceUsage: {
+    /** 开始采样并接收快照，返回退订函数；最后一个订阅者离开时采样停止。 */
+    subscribe(listener: (snapshot: UsageSnapshot) => void): () => void
   }
   browser: {
     create(id: string, url: string): Promise<BrowserSnapshot>

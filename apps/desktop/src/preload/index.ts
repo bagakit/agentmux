@@ -32,6 +32,7 @@ import type {
   RuntimeEvent,
   SessionControl,
   TerminalLaunchInput,
+  UsageSnapshot,
   WorkspaceFileInvalidated,
   WorkspaceFileWriteInput,
   WindowResizeEvent
@@ -182,6 +183,18 @@ const api: AgentMuxPreloadApi = {
       const wrapped = (_event: Electron.IpcRendererEvent, value: RuntimeEvent): void => listener(value)
       ipcRenderer.on('agentmux:session-event', wrapped)
       return () => ipcRenderer.off('agentmux:session-event', wrapped)
+    }
+  },
+  resourceUsage: {
+    subscribe(listener: (snapshot: UsageSnapshot) => void) {
+      const wrapped = (_event: Electron.IpcRendererEvent, value: UsageSnapshot): void => listener(value)
+      ipcRenderer.on('agentmux:resource-usage', wrapped)
+      void ipcRenderer.invoke('resourceUsage:subscribe')
+      return () => {
+        ipcRenderer.off('agentmux:resource-usage', wrapped)
+        // 退订必须一路传到主进程：只摘掉监听器会让采样继续跑，而面板已经关了。
+        void ipcRenderer.invoke('resourceUsage:unsubscribe')
+      }
     }
   },
   browser: {

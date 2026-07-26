@@ -6,7 +6,9 @@ import {
   parseProcessTable,
   pruneSamples,
   rollUpSubtrees,
-  type UsageSample
+  type RunUsage,
+  type UsageSample,
+  type UsageSnapshot
 } from '../shared/process-usage.js'
 
 /**
@@ -39,27 +41,10 @@ function readProcessTable(): Promise<string> {
   })
 }
 
-/** 一个 run 现在吃多少资源。`null` 表示不可用（进程已退出、采样失败、还没采到）。 */
-export type RunUsage = {
-  runId: string
-  processCount: number
-  cpuPercent: number | null
-  rssKib: number | null
-}
-
-export type UsageSnapshot = {
-  observedAt: number
-  runs: RunUsage[]
-  /** Electron 自身进程，与 Agent 子树分开——混成一个数就没法回答"是谁在吃"。 */
-  app: { processCount: number; rssKib: number } | null
-  /** 采样失败时的原因。有它就说明下面的数字是旧的，不是此刻的。 */
-  unavailable: string | null
-}
-
 export class ProcessResourceSampler {
   private readonly runPids = new Map<string, number>()
   private readonly samples = new Map<string, UsageSample[]>()
-  private readonly subscribers = new Set<() => void>()
+  private readonly subscribers = new Set<(snapshot: UsageSnapshot) => void>()
   private timer: NodeJS.Timeout | null = null
   private inFlight: Promise<void> | null = null
   private latest: UsageSnapshot | null = null
@@ -90,7 +75,7 @@ export class ProcessResourceSampler {
   /**
    * 开始采样，返回退订函数。没有订阅者时定时器不存在，因此折叠态零开销。
    */
-  subscribe(onSample: () => void): () => void {
+  subscribe(onSample: (snapshot: UsageSnapshot) => void): () => void {
     this.subscribers.add(onSample)
     if (this.timer === null) {
       // 立刻采一次，否则面板要空等一个周期才有数。
@@ -111,17 +96,13 @@ export class ProcessResourceSampler {
     this.latest = null
   }
 
-  snapshot(): UsageSnapshot | null {
-    return this.latest
-  }
-
   /**
    * 采一次。
    *
-   * 并发调用共享同一次进行中的采样——一次轮询风暴只产生一个子进程。没有这层去重，定时器与
-   * 手动刷新撞在一起就会同时起两个 `ps`。
+   * 上一次还没回来时不再起第二个——`ps` 比采样周期慢时，定时器照常到点，没有这层去重，
+   * 一台负载高的机器会越采越慢、越慢越堆，正好在用户最需要看资源的时候把机器压垮。
    */
-  async sampleOnce(): Promise<void> {
+  private async sampleOnce(): Promise<void> {
     if (this.inFlight) return this.inFlight
     this.inFlight = this.runSample().finally(() => { this.inFlight = null })
     return this.inFlight
@@ -181,7 +162,9 @@ export class ProcessResourceSampler {
   }
 
   private notify(): void {
-    for (const subscriber of this.subscribers) subscriber()
+    const snapshot = this.latest
+    if (!snapshot) return
+    for (const subscriber of this.subscribers) subscriber(snapshot)
   }
 
   dispose(): void {

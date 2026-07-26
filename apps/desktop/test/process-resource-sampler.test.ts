@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   USAGE_METRIC_SPECS,
   USAGE_SAMPLE_INTERVAL_MS,
@@ -9,6 +9,7 @@ import {
   type ProcessRow,
   type UsageSample
 } from '../src/shared/process-usage.js'
+import { ProcessResourceSampler } from '../src/main/process-resource-sampler.js'
 
 /**
  * 归并的正确性。
@@ -165,5 +166,213 @@ describe('聚合口径', () => {
   it('环形缓冲按最长窗口裁剪，不无限增长', () => {
     const samples = [at(30_000, 1, 1), at(11_000, 2, 2), at(9_000, 3, 3), at(0, 4, 4)]
     expect(pruneSamples(samples, now).map((sample) => sample.cpuPercent)).toEqual([3, 4])
+  })
+})
+
+/**
+ * 采样器本身：什么时候采、采几次、采不到时说什么。
+ *
+ * 全部注入假的 `ps` 读取器，不起真实子进程——真实进程会让断言依赖机器当时的负载，
+ * 那种测试红起来没人知道是代码坏了还是机器忙。
+ */
+describe('ProcessResourceSampler', () => {
+  const TABLE_TEXT = `  PID  PPID    RSS  %CPU
+    1     0  17104   0.2
+  100     1  10000   5.0
+  101   100   2000   1.0`
+
+  function harness(options: { table?: () => Promise<string> } = {}) {
+    let now = 1_000_000
+    const readTable = vi.fn(options.table ?? (async () => TABLE_TEXT))
+    const sampler = new ProcessResourceSampler(
+      readTable,
+      () => now,
+      () => [{ memory: { workingSetSize: 4096 } }] as Electron.ProcessMetric[]
+    )
+    // 全部经由 subscribe 观察，因为那是产品唯一的读取口（ipc.ts:359）。给测试单开一个
+    // `snapshot()` 取数口，等于让断言走一条用户永远不走的路——那条路完好，产品那条坏了，
+    // 测试照样绿。
+    const seen: UsageSnapshot[] = []
+    const watch = () => sampler.subscribe((snapshot) => { seen.push(snapshot) })
+    const latest = () => seen.at(-1) ?? null
+    return { readTable, sampler, seen, watch, latest, advance: (ms: number) => { now += ms } }
+  }
+
+  it('没有订阅者时一次采样都不发生——折叠态零开销', async () => {
+    // 首要约束。一个常驻的全主机 ps 轮询不会让任何测试变红，只会让空闲窗口持续耗电，
+    // 所以这件事必须由一条显式断言守住。
+    vi.useFakeTimers()
+    try {
+      const { readTable, sampler, seen } = harness()
+      sampler.trackRun('run-a', 100)
+      // 把时间推得远远超过采样周期：真有常驻定时器，这里必然已经采过很多次。
+      await vi.advanceTimersByTimeAsync(USAGE_SAMPLE_INTERVAL_MS * 20)
+      expect(readTable).not.toHaveBeenCalled()
+      expect(seen).toEqual([])
+      sampler.dispose()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('最后一个订阅者离开后停止采样，不留下孤儿定时器', async () => {
+    vi.useFakeTimers()
+    try {
+      const { readTable, sampler, watch } = harness()
+      sampler.trackRun('run-a', 100)
+      const stopA = watch()
+      const stopB = watch()
+      await vi.advanceTimersByTimeAsync(0)
+      const whileOpen = readTable.mock.calls.length
+      expect(whileOpen).toBeGreaterThan(0)
+
+      // 只走一个订阅者：另一个还在看，采样必须继续。
+      stopA()
+      await vi.advanceTimersByTimeAsync(USAGE_SAMPLE_INTERVAL_MS * 2)
+      expect(readTable.mock.calls.length).toBeGreaterThan(whileOpen)
+
+      const whenClosed = readTable.mock.calls.length
+      stopB()
+      await vi.advanceTimersByTimeAsync(USAGE_SAMPLE_INTERVAL_MS * 5)
+      expect(readTable.mock.calls.length).toBe(whenClosed)
+      sampler.dispose()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('上一次还没回来时不再起第二个 ps——慢 ps 不会堆出一片子进程', async () => {
+    // 真实的并发来源就是这个：`ps` 比采样周期慢，定时器照常到点。没有去重，一台负载高的
+    // 机器会越采越慢、越慢越堆，正好在用户最需要看资源的时候把机器压垮。
+    vi.useFakeTimers()
+    try {
+      let release: (value: string) => void = () => {}
+      const { readTable, sampler, watch } = harness({
+        table: () => new Promise<string>((resolve) => { release = resolve })
+      })
+      sampler.trackRun('run-a', 100)
+      const stop = watch()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(readTable).toHaveBeenCalledTimes(1)
+
+      // 卡住不放，让定时器空转好几个周期。
+      await vi.advanceTimersByTimeAsync(USAGE_SAMPLE_INTERVAL_MS * 5)
+      expect(readTable).toHaveBeenCalledTimes(1)
+
+      // 放行之后，下一个周期照常再采——去重只作用于"同时进行中"的那一批，
+      // 否则面板会永远停在第一帧。
+      release(TABLE_TEXT)
+      await vi.advanceTimersByTimeAsync(USAGE_SAMPLE_INTERVAL_MS)
+      expect(readTable.mock.calls.length).toBeGreaterThan(1)
+      release(TABLE_TEXT)
+      stop()
+      sampler.dispose()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('采样失败降级为不可用，而不是崩溃或报 0', async () => {
+    vi.useFakeTimers()
+    try {
+      const { sampler, watch, latest } = harness({
+        table: async () => { throw new Error('ps timed out') }
+      })
+      sampler.trackRun('run-a', 100)
+      const stop = watch()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(latest()?.unavailable).toContain('ps timed out')
+      // 0 会被读成"它在跑但不吃资源"这个真值，比没有这个数字更糟。
+      expect(latest()?.runs.every((run) => run.cpuPercent !== 0)).toBe(true)
+      stop()
+      sampler.dispose()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('pid 已消失的 run 报不可用，Electron 自身指标单独分桶', async () => {
+    vi.useFakeTimers()
+    try {
+      const { sampler, watch, latest } = harness()
+      sampler.trackRun('gone', 99999)
+      sampler.trackRun('run-a', 100)
+      const stop = watch()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(latest()?.runs.find((run) => run.runId === 'gone')?.rssKib).toBeNull()
+      expect(latest()?.runs.find((run) => run.runId === 'run-a')?.rssKib).toBe(12_000)
+      // 混成一个数就没法回答"是谁在吃"。
+      expect(latest()?.app).toEqual({ processCount: 1, rssKib: 4096 })
+      stop()
+      sampler.dispose()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('forgetRun 之后不再为它采样，也不留旧样本', async () => {
+    vi.useFakeTimers()
+    try {
+      const { sampler, watch, latest } = harness()
+      sampler.trackRun('run-a', 100)
+      const stop = watch()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(latest()?.runs).toHaveLength(1)
+      sampler.forgetRun('run-a')
+      await vi.advanceTimersByTimeAsync(USAGE_SAMPLE_INTERVAL_MS)
+      expect(latest()?.runs).toHaveLength(0)
+      stop()
+      sampler.dispose()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('面板重开时不拿旧样本充数', async () => {
+    vi.useFakeTimers()
+    try {
+      // 关键是**很快**重开：隔 60 秒重开，旧样本早被聚合窗口滤掉了，这条断言就白写了——
+      // 真正会出错的是关掉两秒又打开，此时旧样本还在 10 秒窗口内，若没被丢掉，
+      // 面板会把关闭之前的那个峰值当成"此刻"显示出来。
+      let cpu = '90.0'
+      const { sampler, watch, latest, advance } = harness({
+        table: async () => `  PID  PPID    RSS  %CPU\n  100     1  10000  ${cpu}`
+      })
+      sampler.trackRun('run-a', 100)
+      const stop = watch()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(latest()?.runs[0]?.cpuPercent).toBe(90)
+      stop()
+
+      // 关闭期间那个进程安静下来了，但我们没在采——中间发生过什么并不知道。
+      cpu = '3.0'
+      advance(2_000)
+      const reopened = watch()
+      await vi.advanceTimersByTimeAsync(0)
+      // 显示的必须是重开后新采到的 3%，而不是关闭前留下的 90% 峰值。
+      expect(latest()?.runs[0]?.cpuPercent).toBe(3)
+      reopened()
+      sampler.dispose()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('dispose 之后定时器不再走——退出时不留后台采样', async () => {
+    // RuntimeController.dispose 会调它。漏掉这一步，应用退出后采样定时器还在跑。
+    vi.useFakeTimers()
+    try {
+      const { readTable, sampler, watch } = harness()
+      sampler.trackRun('run-a', 100)
+      watch()
+      await vi.advanceTimersByTimeAsync(0)
+      const before = readTable.mock.calls.length
+      expect(before).toBeGreaterThan(0)
+      sampler.dispose()
+      await vi.advanceTimersByTimeAsync(USAGE_SAMPLE_INTERVAL_MS * 5)
+      expect(readTable.mock.calls.length).toBe(before)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
