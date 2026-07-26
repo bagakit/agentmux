@@ -60,9 +60,9 @@ function messageTargetCandidates(value: unknown): AgentMuxMessageTargetCandidate
 /**
  * 寻址失败自带下一步。
  *
- * 挂在这里而不是每个抛出点：`TAB_NOT_OPEN` 一个码在 `control.ts` 里就抛 6 处，逐点拼接必然漂移，
- * 而漂移那天不会有测试变红。控制错误离开渲染进程只有这一个出口，恢复文本要给的正是**出口对面
- * 那个调用方**——所以这层是它唯一该长出来的地方。
+ * 挂在这里而不是每个抛出点：`TAB_NOT_OPEN` 与 `REGION_NOT_OPEN` 在 `control.ts` 里各抛 3 处，逐点拼接
+ * 必然漂移，而漂移那天不会有测试变红。控制错误离开渲染进程只有这一个出口，恢复文本要给的正是**出口
+ * 对面那个调用方**——所以这层是它唯一该长出来的地方。
  *
  * 哪些码算"寻址失败"由 `addressingRecovery` 说了算，这里不再列第二份码表。
  *
