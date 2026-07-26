@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
+import { releaseSubagentRoster } from '../src/hook-normalizer.js'
 import { applyAgentTimelineMutation } from '../src/session-timeline.js'
 
 afterEach(() => {
@@ -348,6 +349,40 @@ describe('native hook normalization', () => {
       expect(mutation.item.status).toBe('complete')
       expect(mutation.item.id).toBe('run-corr:receipt-ask:0')
     })
+
+    it('askuserquestion 的 PostToolUse 也是 append 不是 update——kind 认工具身份而非当前事件 state', () => {
+      // 回归守卫：Post 的当前 state 是 working，若按 state 定 kind 会被判成 tool_call，去 update 一条
+      // `run:tool:toolu_ASK`——而 Pre 落的是 permission 行、id 是 receiptId 派生的，从没按 tool 关联过。
+      // 那样 applyTimelineMutation 会抛 UNKNOWN_AGENT_TIMELINE_ITEM，把用户每次答题都变成 503+丢答复。
+      const event = claude(
+        { tool_name: 'askuserquestion', tool_input: { question: 'ok?' }, tool_use_id: 'toolu_ASK', tool_response: 'answered' },
+        'PostToolUse',
+        'receipt-ask-post'
+      )
+      const mutation = event.timeline[0]
+      expect(mutation?.type).toBe('append')
+      if (mutation?.type !== 'append') throw new Error('expected append')
+      expect(mutation.item.kind).toBe('permission')
+      // 关键：绝不能是 `run-corr:tool:toolu_ASK`——那是 Pre 从没落过的关联 id。
+      expect(mutation.item.id).toBe('run-corr:receipt-ask-post:0')
+    })
+
+    it('端到端：askuserquestion 的 Pre→Post 都能落进时间轴，不抛 UNKNOWN_AGENT_TIMELINE_ITEM', () => {
+      // 这条是 blocker 的直接复现：把 Pre、Post 依次喂给真正的时间轴校验器。修复前 Post 会走 update
+      // 命中不存在的 item 抛错；修复后两条都是 append，各自成行、互不冲突。
+      const pre = claude(
+        { tool_name: 'askuserquestion', tool_input: { question: 'ship?' }, tool_use_id: 'toolu_ASK' },
+        'PreToolUse',
+        'receipt-ask-pre'
+      )
+      const post = claude(
+        { tool_name: 'askuserquestion', tool_input: { question: 'ship?' }, tool_use_id: 'toolu_ASK', tool_response: 'yes' },
+        'PostToolUse',
+        'receipt-ask-post'
+      )
+      const afterPre = applyAgentTimelineMutation([], pre.timeline[0]!)
+      expect(() => applyAgentTimelineMutation(afterPre, post.timeline[0]!)).not.toThrow()
+    })
   })
 
   /**
@@ -449,6 +484,36 @@ describe('native hook normalization', () => {
       const mine = claudeRun('run-mine')
       const stop = mine('Stop', { last_assistant_message: 'ok' })
       expect(stop.semanticState).toBe('done')
+    })
+
+    it('run 进程退出清掉花名册：子代理事件丢失后不再永久泄漏、也不永久压住主 Stop', () => {
+      // major 修复：子代理被杀 / SubagentStop 永不投递时，只靠 SubagentStop 归零的 happy path 走不到，
+      // 花名册那条 id 永不删除。releaseSubagentRoster 是 run 进程退出时的终结路径（client.acceptKernelEvent
+      // 在 exit 事件里调它）。这里断言：release 后同一 runId 的记账被彻底清空——真删掉过才返回 true，
+      // 且此后该 run 的 Stop 不再被幽灵子代理压制。
+      const hook = claudeRun('run-lost-substop')
+      hook('SubagentStart', { agent_id: 'ghost' })
+      const suppressed = hook('Stop', { last_assistant_message: 'main thinks it is done' })
+      expect(suppressed.semanticState).toBe('working')
+      // 进程退出：清账。返回 true 证明确实有一条被清除（而非空操作）。
+      expect(releaseSubagentRoster('run-lost-substop')).toBe(true)
+      // 清完再无残留：重复清返回 false。
+      expect(releaseSubagentRoster('run-lost-substop')).toBe(false)
+      // 花名册已空，此后同 runId 的 Stop 不再被 ghost 压住，正常收敛。
+      const afterRelease = hook('Stop', { last_assistant_message: 'settled' })
+      expect(afterRelease.semanticState).toBe('done')
+    })
+
+    it('releaseSubagentRoster 只清指定 runId，不误伤并发 run 的在途', () => {
+      const victim = claudeRun('run-keep')
+      victim('SubagentStart', { agent_id: 'still-alive' })
+      // 清另一个不相干的 run 不该动到本 run。
+      expect(releaseSubagentRoster('run-unrelated')).toBe(false)
+      const stop = victim('Stop', { last_assistant_message: 'main done' })
+      // still-alive 仍在册，主 Stop 照旧被压住。
+      expect(stop.semanticState).toBe('working')
+      // 收尾：正常路径归零，避免给后续用例留脏账。
+      victim('SubagentStop', { agent_id: 'still-alive' })
     })
   })
 })

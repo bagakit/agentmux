@@ -54,13 +54,15 @@ export type AgentNativeHookSpecification = {
  * 一个 run 一份子代理花名册。
  *
  * `live` 按 `agent_id` 去重——hook 会重投（agent-hook-command.ts 的 fetch 重试用同一 receiptId），
- * 用 Set 而不是裸计数器，重复的 start/stop 天然幂等。`anon` 是没有 id 的降级计数（当前内建 Provider
- * 都带 id，用不到；留作不带 id 的 Provider 的安全网）。`mainStopPending` 记「主 Agent 已请求收尾但
- * 被子代理压住」——好让最后一个子代理结束时能收敛到 `done`，而不是永远卡在 working。
+ * 用 Set 而不是裸计数器，重复的 start/stop 天然幂等。`mainStopPending` 记「主 Agent 已请求收尾但被子
+ * 代理压住」——好让最后一个子代理结束时能收敛到 `done`，而不是永远卡在 working。
+ *
+ * 只按 id 记账，不为「不带 id 的 Provider」留降级计数：当前内建 Provider（claude/codex）的子代理事件
+ * 都带 `agent_id`，真出现无 id 的 Provider 再按其真实形状设计，别预支一个够不到测试、还会和 id 记账混
+ * 算的抽象。
  */
 type SubagentRoster = {
   live: Set<string>
-  anon: number
   mainStopPending: boolean
 }
 
@@ -74,8 +76,20 @@ function subagentRosterKey(envelope: NativeHookEnvelope): string {
   return envelope.runId
 }
 
+/**
+ * run 进程终结（exited/interrupted）时清掉它的子代理花名册。
+ *
+ * 为什么必须有这条路径：子代理被信号/OOM 杀死、或它的 SubagentStop 两次 fetch 都失败时，SubagentStop
+ * 永不投递——花名册里那条 id 永不删除，Map 条目随进程泄漏，主 Stop 被压住的 pending 也再无事件兑现。
+ * 进程退出是「这个 run 再不会有 hook 事件」的权威终点，在此归零给「子代理事件丢失」一个终结路径。
+ * 返回是否确实清掉了一条，供调用方判定是否需要把语义状态收敛。
+ */
+export function releaseSubagentRoster(runId: string): boolean {
+  return subagentRosters.delete(runId)
+}
+
 function subagentRosterAlive(roster: SubagentRoster): boolean {
-  return roster.live.size > 0 || roster.anon > 0
+  return roster.live.size > 0
 }
 
 /**
@@ -99,17 +113,19 @@ function applySubagentTracking(
   const key = subagentRosterKey(envelope)
   const id = stringField(payload, ...(tracking.idKeys ?? ['agent_id', 'agentId', 'subagent_id']))
   if (tracking.startEvents.includes(eventName)) {
-    const roster = subagentRosters.get(key) ?? { live: new Set<string>(), anon: 0, mainStopPending: false }
-    if (id) roster.live.add(id)
-    else roster.anon += 1
-    subagentRosters.set(key, roster)
+    // 只按 id 记账。内建 Provider 的子代理事件都带 id；无 id 时不虚记一个够不到 stop 的幽灵条目，
+    // Agent 照旧显示 working（子代理确实在跑），但不会把主 Stop 永远压住。
+    if (id) {
+      const roster = subagentRosters.get(key) ?? { live: new Set<string>(), mainStopPending: false }
+      roster.live.add(id)
+      subagentRosters.set(key, roster)
+    }
     return 'working'
   }
   if (tracking.stopEvents.includes(eventName)) {
     const roster = subagentRosters.get(key)
     if (!roster) return 'working'
     if (id) roster.live.delete(id)
-    else roster.anon = Math.max(0, roster.anon - 1)
     if (subagentRosterAlive(roster)) return 'working'
     const pending = roster.mainStopPending
     subagentRosters.delete(key)
@@ -173,6 +189,25 @@ function eventState(
     return rule.state
   }
   return 'unknown'
+}
+
+/**
+ * 这个工具本身是否是「等待用户」类工具——判定只看工具名，与 Pre/Post 无关。
+ *
+ * askuserquestion / request_user_input / clarify 这类工具在 `PreToolUse` 被规则判成 waiting/blocked，
+ * 落的是 append-only 的 permission 行（id 由 receiptId 派生），它等的是用户、不是一次有 Post 收尾的执行。
+ * 可这类工具的 `PostToolUse` 语义是 working——若只按**当前事件**的 state 决定 kind，Post 会被判成
+ * tool_call，去 `update` 一条 `runId:tool:<toolCallId>`，而 Pre 从没按 tool 关联落过这条，
+ * applyTimelineMutation 必抛 UNKNOWN_AGENT_TIMELINE_ITEM 并吞掉下游 publish。所以 kind 判定要从 rules
+ * 这个 SSOT 认出「这是个等待工具」，让 Pre 与 Post 得到同一个 kind，两端都留在 append-only。
+ */
+function toolAwaitsUser(specification: AgentNativeHookSpecification, toolName: string): boolean {
+  const lower = toolName.toLowerCase()
+  return specification.rules.some(
+    (rule) =>
+      (rule.state === 'waiting' || rule.state === 'blocked') &&
+      (rule.toolNames?.includes(lower) ?? false)
+  )
 }
 
 function nativeHandle(
@@ -244,10 +279,10 @@ const TOOL_CALL_ID_KEYS = [
 ] as const
 
 function buildTimeline(
+  specification: AgentNativeHookSpecification,
   envelope: NativeHookEnvelope,
   eventName: string,
   payload: Record<string, unknown>,
-  state: AgentSemanticState,
   observedAt: number
 ): AgentTimelineMutation[] {
   const assistant = stringField(
@@ -274,8 +309,11 @@ function buildTimeline(
     timeline.push(timelineItem(envelope, timeline.length, kind, title, eventName, observedAt, fields))
   }
   if (toolName) {
-    const kind: AgentTimelineItemKind =
-      state === 'waiting' || state === 'blocked' ? 'permission' : 'tool_call'
+    // kind 由**工具身份**决定，不由当前事件的 state 决定：等待用户的工具（askuserquestion 等）在 Pre 判
+    // waiting→permission，其 Post 的 state 却是 working。若按 state 定 kind，Post 会变成 tool_call 走
+    // 关联 update 去更新 Pre 从未按 tool 落过的那条 item，必抛 UNKNOWN_AGENT_TIMELINE_ITEM。让 Pre/Post
+    // 对同一工具得到同一个 kind，等待类一律留在 append-only 的 permission 通路。
+    const kind: AgentTimelineItemKind = toolAwaitsUser(specification, toolName) ? 'permission' : 'tool_call'
     const isPost = eventName.startsWith('Post')
     const toolCallId = stringField(payload, ...TOOL_CALL_ID_KEYS)
     // 结果只有事后才知道，所以只在事后事件上采集——`PreToolUse` 那一行谈不上成败，给它盖任何
@@ -364,7 +402,7 @@ export function normalizeNativeHook(
     eventName,
     semanticState,
     status,
-    timeline: buildTimeline(envelope, eventName, payload, semanticState, observedAt),
+    timeline: buildTimeline(specification, envelope, eventName, payload, observedAt),
     ...(handle ? { nativeHandle: handle } : {})
   }
 }
