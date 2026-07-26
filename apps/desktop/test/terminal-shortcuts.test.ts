@@ -87,6 +87,25 @@ describe('kitty keyboard 协议探测', () => {
     expect(isKittyKeyboardActive(fold('hello world\r\n'))).toBe(false)
   })
 
+  it('只认宣告（> = <），不认查询/应答（?）——降级安全就架在这条上', () => {
+    // 这不是一条挑剔的解析规则，它是"握手降级不会改变按键编码"这个结论的唯一支点：
+    // 渲染层跟的是 codex 自己推的宣告，不是任何人对 `CSI ? u` 的应答。真跑过一次
+    // codex 双分支抓包（见 docs/reviews/agentmux-handshake-degrade-plan.md）：回与不回
+    // `[?0u`，PTY 输出逐字节相同，两次都推 `ESC[>7u`。若这里哪天开始匹配 `?` 形式，
+    // 那份实测结论立即失效——而失效的表现是 Shift+Enter 静默送错字节，没有别的报警。
+    expect(isKittyKeyboardActive(fold(`${ESC}[?u`))).toBe(false)
+    expect(isKittyKeyboardActive(fold(`${ESC}[?0u`))).toBe(false)
+    // 查询与应答夹在真宣告两侧时，也不许干扰那次真宣告的读数。
+    expect(isKittyKeyboardActive(fold(`${ESC}[?u`, `${ESC}[>7u`, `${ESC}[?0u`))).toBe(true)
+  })
+
+  it('codex 实测的开场序列会被读成"已启用"', () => {
+    // 逐字节取自真实抓包的开头（偏移 0..53）。codex 是先推后问：`>7u` 在查询之前就出现，
+    // 因此它根本没有"等应答再决定"这个决策点——降级不参与它的任何判断。
+    const opening = `${ESC}[?2004h${ESC}[>4;0m${ESC}[>7u${ESC}[?1004h${ESC}[6n${ESC}]10;?${ESC}\\${ESC}]11;?${ESC}\\${ESC}[?u${ESC}[c`
+    expect(isKittyKeyboardActive(fold(opening))).toBe(true)
+  })
+
   it('程序 push 标志位后启用，pop 回去后停用', () => {
     const pushed = fold(`${ESC}[>1u`)
     expect(isKittyKeyboardActive(pushed)).toBe(true)
