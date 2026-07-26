@@ -42,6 +42,15 @@ describe('main window setup wiring', () => {
     const source = stripComments(await readFile(indexPath, 'utf8'))
     expect(source).toContain('registerWindowStatePersistence(window, windowGeometryStore)')
   })
+
+  it('routes all window creation through the single-flight guard so triggers cannot race into two windows', async () => {
+    const source = stripComments(await readFile(indexPath, 'utf8'))
+    // 建窗必须经单飞去重，否则 whenReady/second-instance/activate 会在空档里并发建出两个窗口。
+    expect(source).toContain('const createWindow = singleFlight(buildWindow)')
+    // 三处触发点都调 createWindow（被去重的那个），而不是直接调裸的 buildWindow。
+    expect(source).not.toMatch(/void buildWindow\(\)/)
+    expect(source).toContain('await createWindow(appReadyAtMs)')
+  })
 })
 
 describe('single-instance guard: pure decisions', () => {
@@ -49,9 +58,9 @@ describe('single-instance guard: pure decisions', () => {
     expect(instanceRoleFromLock(true)).toEqual({ role: 'primary' })
   })
 
-  it('failing to get the lock makes us a secondary that exits with code 0', () => {
-    // 退出码 0 是硬约束：用户又点了一次图标是预期行为，非 0 会让外层误判成启动失败。
-    expect(instanceRoleFromLock(false)).toEqual({ role: 'secondary', exitCode: 0 })
+  it('failing to get the lock makes us a secondary', () => {
+    // secondary 只是角色判别；退出走接线层的 app.quit()（默认码 0），角色数据里不再带退出码。
+    expect(instanceRoleFromLock(false)).toEqual({ role: 'secondary' })
   })
 
   it('a live minimized window is restored then focused — never a no-op', () => {

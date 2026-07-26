@@ -17,6 +17,18 @@ export type CrashKind =
   | 'render-process-gone'
   | 'child-process-gone'
 
+/**
+ * 这次崩溃是否致命到主进程本身。为真时接线层必须留证后 fail-fast——挂上 process 处理器会抑制
+ * Node 对 uncaughtException（默认 print+exit(1)）和 unhandledRejection（默认 throw 终止）的兜底，
+ * 若只记录不退出，主进程会带着半损坏的运行时继续活着，把硬崩溃变成用户毫无察觉的静默崩溃。
+ *
+ * 渲染进程/子进程消失不算致命：Electron 主进程按设计能在渲染器、GPU、Utility 进程死掉后继续存活，
+ * 为一个 GPU 进程崩溃就杀掉整个主进程反而是更糟的回归。这类只需异步留证、进程照常运行。
+ */
+export function isFatalToMainProcess(kind: CrashKind): boolean {
+  return kind === 'uncaught-exception' || kind === 'unhandled-rejection'
+}
+
 /** 各来源的原始入参。用可辨识联合而不是一个大 any，让「该记成什么」的分支有编译器兜底。 */
 export type CrashEventInput =
   | { kind: 'uncaught-exception'; error: unknown }
@@ -59,6 +71,28 @@ function stackOf(value: unknown): string | undefined {
 }
 
 /**
+ * 单条记录里两个字段的字节上界。summary 是一句话，detail 才可能很长（整条栈）。给它们各设上界，
+ * 保证一行序列化后远小于文件体量上界（默认 1 MiB）——这样 appendWithinBudget 永远不会走到「整行
+ * 拦腰截断」那条路，每一行都始终是可 JSON.parse 的完整记录。截断处补省略号，读的人知道被裁过。
+ */
+const SUMMARY_MAX_BYTES = 4 * 1024
+const DETAIL_MAX_BYTES = 128 * 1024
+const ELLIPSIS = '…'
+
+/** 把字段截到字节上界内，超了就补省略号，让读取端一眼看出这条被裁过。未超则原样返回。 */
+function clampField(value: string, maxBytes: number): string {
+  if (Buffer.byteLength(value, 'utf8') <= maxBytes) return value
+  const ellipsisBytes = Buffer.byteLength(ELLIPSIS, 'utf8')
+  return `${truncateToBytes(value, maxBytes - ellipsisBytes)}${ELLIPSIS}`
+}
+
+/** 归一记录的统一出口：summary/detail 都过一遍字节上界，保证序列化后每行始终可解析。 */
+function buildRecord(at: string, kind: CrashKind, summary: string, detail?: string): CrashRecord {
+  const record: CrashRecord = { at, kind, summary: clampField(summary, SUMMARY_MAX_BYTES) }
+  return detail === undefined ? record : { ...record, detail: clampField(detail, DETAIL_MAX_BYTES) }
+}
+
+/**
  * 决定一次崩溃「该记成什么」。nowMs 注入而不是内部读时钟，这样测试能断言确定的时间戳，
  * 也让归一逻辑本身没有任何隐藏输入。
  *
@@ -67,45 +101,21 @@ function stackOf(value: unknown): string | undefined {
 export function crashRecordFrom(input: CrashEventInput, nowMs: number): CrashRecord {
   const at = new Date(nowMs).toISOString()
   switch (input.kind) {
-    case 'uncaught-exception': {
-      const record: CrashRecord = {
-        at,
-        kind: input.kind,
-        summary: messageOf(input.error)
-      }
-      const detail = stackOf(input.error)
-      return detail ? { ...record, detail } : record
-    }
-    case 'unhandled-rejection': {
-      const record: CrashRecord = {
-        at,
-        kind: input.kind,
-        summary: messageOf(input.reason)
-      }
-      const detail = stackOf(input.reason)
-      return detail ? { ...record, detail } : record
-    }
+    case 'uncaught-exception':
+      return buildRecord(at, input.kind, messageOf(input.error), stackOf(input.error))
+    case 'unhandled-rejection':
+      return buildRecord(at, input.kind, messageOf(input.reason), stackOf(input.reason))
     case 'render-process-gone': {
       const reason = input.details.reason ?? 'unknown'
       const exitCode = input.details.exitCode ?? 0
-      const record: CrashRecord = {
-        at,
-        kind: input.kind,
-        summary: `renderer ${reason} (exit ${exitCode})`
-      }
-      return input.url ? { ...record, detail: input.url } : record
+      return buildRecord(at, input.kind, `renderer ${reason} (exit ${exitCode})`, input.url)
     }
     case 'child-process-gone': {
       const type = input.details.type ?? 'unknown'
       const reason = input.details.reason ?? 'unknown'
       const exitCode = input.details.exitCode ?? 0
       const named = input.details.serviceName ?? input.details.name
-      const record: CrashRecord = {
-        at,
-        kind: input.kind,
-        summary: `${type} ${reason} (exit ${exitCode})`
-      }
-      return named ? { ...record, detail: named } : record
+      return buildRecord(at, input.kind, `${type} ${reason} (exit ${exitCode})`, named)
     }
   }
 }
@@ -142,8 +152,11 @@ export function appendWithinBudget(existing: string, line: string, maxBytes: num
 /** 按 UTF-8 字节数截断，绝不在多字节字符中间切开，避免写出坏字节序列。 */
 function truncateToBytes(value: string, maxBytes: number): string {
   if (maxBytes <= 0) return ''
-  if (Buffer.byteLength(value, 'utf8') <= maxBytes) return value
-  let end = value.length
-  while (end > 0 && Buffer.byteLength(value.slice(0, end), 'utf8') > maxBytes) end -= 1
-  return value.slice(0, end)
+  const buf = Buffer.from(value, 'utf8')
+  if (buf.length <= maxBytes) return value
+  // 从上界处往回退到字符边界：UTF-8 的续接字节高两位恒为 10，退到第一个非续接字节就是下一个字符的
+  // 起点，在那里切。走 Buffer 按字节退，避免按 code unit 逐次重算 byteLength 的 O(n²)。
+  let end = maxBytes
+  while (end > 0 && ((buf[end] ?? 0) & 0xc0) === 0x80) end -= 1
+  return buf.toString('utf8', 0, end)
 }

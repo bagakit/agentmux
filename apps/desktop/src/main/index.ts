@@ -19,6 +19,7 @@ import { WindowGeometryStore } from './window-geometry-store.js'
 import { windowConstructorGeometry } from './window-geometry.js'
 import { registerWindowStatePersistence } from './window-state-persistence.js'
 import { foregroundActionsForSecondInstance, instanceRoleFromLock } from './single-instance.js'
+import { singleFlight } from './single-flight.js'
 
 const appIconPath = join(import.meta.dirname, '../../resources/icon.png')
 const packagedUserDataPath = join(app.getPath('appData'), 'dev.agentmux.desktop')
@@ -32,9 +33,17 @@ app.setName('AgentMux')
 // 崩溃事后要有痕迹。原生崩溃（含渲染进程）交给 crashReporter 落本地崩溃目录，且恒不上传；主进程
 // 层面的四类信号（未捕获异常/拒绝、渲染进程消失、子进程消失）归一成 NDJSON 追加到 userData，体量
 // 有硬顶。两者都只落盘、无网络出口。尽可能早挂，才能网住 whenReady 之前就发生的崩溃。
+// 致命崩溃（未捕获异常/拒绝）留证后 fail-fast：挂上 process 处理器会抑制 Node 的默认退出，若只记录
+// 不退出，主进程会带着半损坏的运行时静默续命。所以致命崩溃走同步落盘（exit 前必须落地）再 app.exit(1)。
 crashReporter.start(crashReporterOptions())
 const crashLog = new CrashLog()
-registerCrashCapture({ app, process, sink: (record) => crashLog.append(record) })
+registerCrashCapture({
+  app,
+  process,
+  sink: (record) => crashLog.append(record),
+  persistSync: (record) => crashLog.appendSync(record),
+  exit: (code) => app.exit(code)
+})
 
 // 双开守卫必须在任何运行时/daemon 引导之前。用户双击图标是必然场景：两个实例会各自构造
 // RuntimeController、各自 spawn/adopt daemon，在会话存储和运行时状态目录上互相踩。会话存储内部的
@@ -96,7 +105,7 @@ function startPrimaryInstance(): void {
     app.exit(1)
   }
 
-  async function createWindow(appReadyAtMs: number = Date.now()): Promise<void> {
+  async function buildWindow(appReadyAtMs: number = Date.now()): Promise<void> {
     const windowCreationStartedAtMs = Date.now()
     // The window reopens where it was last left. Only a first launch (or a corrupt record) falls back
     // to the default size — the fixed 1480×940 literal is no longer the every-launch size.
@@ -196,6 +205,11 @@ function startPrimaryInstance(): void {
       }
     })) app.quit()
   }
+
+  // 三处建窗触发点（whenReady 首建、second-instance 用户又双击、activate 全关后点 dock）都可能在
+  // 「窗口尚未构造出来」的空档里各自判断「当前没窗口」而并发建窗，开出两个窗口。单飞去重：在途只建
+  // 一次，后来的调用复用同一次在途，结算后才允许下一次真正建窗。
+  const createWindow = singleFlight(buildWindow)
 
   // 第二实例来敲门时把已有窗口带到用户眼前。最小化的先还原再聚焦，否则聚焦一个最小化窗口用户还是
   // 看不见；窗口全关了（macOS 上 app 还活着）则新开一个。决策在纯函数里，这里只执行动作。
