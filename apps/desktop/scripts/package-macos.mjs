@@ -20,6 +20,13 @@ import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import process from 'node:process'
 import { materializeFileEditingFixture } from './file-editing-fixture.mjs'
+import {
+  assertPackageIdentity,
+  canonicalInstallPath,
+  createPackageIdentity,
+  packageIdentityPath,
+  readPackageIdentity
+} from './package-identity.mjs'
 
 const PRODUCT_NAME = 'AgentMux'
 const BUNDLE_ID = 'dev.agentmux.desktop'
@@ -86,16 +93,20 @@ async function pathExists(path) {
 async function sourceIdentity() {
   const [commit, tree, status] = await Promise.all([
     run('git', ['rev-parse', 'HEAD'], { cwd: repositoryRoot, capture: true }),
-    run('git', ['rev-parse', 'HEAD^{tree}'], { cwd: repositoryRoot, capture: true }),
+    run('git', ['write-tree'], { cwd: repositoryRoot, capture: true }),
     run('git', ['status', '--porcelain=v1', '--untracked-files=all'], {
       cwd: repositoryRoot,
       capture: true
     })
   ])
+  const dirtyWorktree = status.stdout
+    .split('\n')
+    .filter((line) => line.length > 0 && (line.startsWith('??') || line[1] !== ' '))
+    .join('\n')
   return {
     commit: commit.stdout.trim(),
     tree: tree.stdout.trim(),
-    status: status.stdout.trim()
+    status: dirtyWorktree
   }
 }
 
@@ -167,7 +178,7 @@ async function brandApplication(appPath) {
   await rm(join(resources, 'default_app.asar'), { force: true })
 }
 
-async function copyRuntimeApplication(appPath) {
+async function copyRuntimeApplication(appPath, source) {
   const resources = join(appPath, 'Contents', 'Resources')
   const appResources = join(resources, 'app')
   await mkdir(join(appResources, 'node_modules', '@agentmux'), { recursive: true })
@@ -182,6 +193,16 @@ async function copyRuntimeApplication(appPath) {
     type: 'module',
     main: 'out/main/index.js'
   }, null, 2)}\n`)
+  await writeFile(
+    packageIdentityPath(appPath),
+    `${JSON.stringify(createPackageIdentity({
+      sourceCommit: source.commit,
+      sourceTree: source.tree,
+      appVersion: manifest.version,
+      platform: process.platform,
+      arch: process.arch
+    }), null, 2)}\n`
+  )
 
   const coreRuntime = join(appResources, 'node_modules', '@agentmux', 'core')
   await mkdir(coreRuntime, { recursive: true })
@@ -338,8 +359,16 @@ async function verifyThirdPartyNotices(appPath) {
   )
 }
 
-async function verifyPackagedRuntime(appPath, verificationRoot) {
+async function verifyPackagedRuntime(appPath, verificationRoot, source) {
   const appResources = join(appPath, 'Contents', 'Resources', 'app')
+  const packageIdentity = await readPackageIdentity(appPath)
+  assertPackageIdentity(packageIdentity, {
+    sourceCommit: source.commit,
+    sourceTree: source.tree,
+    appVersion: manifest.version,
+    platform: process.platform,
+    arch: process.arch
+  })
   await verifyThirdPartyNotices(appPath)
   const coreRuntime = join(appResources, 'node_modules', '@agentmux', 'core')
   const binaryRoot = join(coreRuntime, 'vendor', 'ctxmux', 'darwin-arm64', 'bin')
@@ -405,12 +434,12 @@ async function verifyPackagedRuntime(appPath, verificationRoot) {
   assert(cli.stdout.trim() === 'ctxmux 0.1.0 (protocol 13)', 'Packaged ctxmux identity is wrong.')
   assert(daemon.stdout.trim() === 'ctxmuxd 0.1.0 (protocol 13)', 'Packaged ctxmuxd identity is wrong.')
   assert(agentmux.stdout.trim() === 'agentmux 0.1.0', 'Packaged AgentMux CLI cannot use the embedded runtime.')
-  const manifest = JSON.parse(await readFile(
+  const ctxmuxManifest = JSON.parse(await readFile(
     join(coreRuntime, 'vendor', 'ctxmux', 'darwin-arm64', 'manifest.json'),
     'utf8'
   ))
   assert(
-    manifest.source.commit === '073e206407ce28331aa882c2c80e9354cfe2879a',
+    ctxmuxManifest.source.commit === '073e206407ce28331aa882c2c80e9354cfe2879a',
     'Packaged ctxmux manifest commit is wrong.'
   )
 }
@@ -732,7 +761,7 @@ async function verifyLaunchServices(appPath, verificationRoot) {
   process.stdout.write('mounted_desktop_interactions=passed\n')
 }
 
-async function createDmg(appPath, temporaryRoot) {
+async function createDmg(appPath, dmgPath, temporaryRoot) {
   const dmgRoot = join(temporaryRoot, 'dmg-root')
   await mkdir(dmgRoot)
   await run('cp', ['-cR', appPath, join(dmgRoot, basename(appPath))], { capture: true })
@@ -743,10 +772,10 @@ async function createDmg(appPath, temporaryRoot) {
     '-srcfolder', dmgRoot,
     '-format', 'UDZO',
     '-ov',
-    outputDmg
+    dmgPath
   ], { capture: true })
-  await detachCreatedImage(outputDmg)
-  await run('hdiutil', ['verify', outputDmg], { capture: true })
+  await detachCreatedImage(dmgPath)
+  await run('hdiutil', ['verify', dmgPath], { capture: true })
 }
 
 async function detachCreatedImage(imagePath) {
@@ -766,14 +795,14 @@ async function detachCreatedImage(imagePath) {
   }
 }
 
-async function verifyDmg(temporaryRoot) {
+async function verifyDmg(dmgPath, temporaryRoot, source) {
   const mountPoint = join(temporaryRoot, 'mounted-dmg')
   const verificationRoot = join(temporaryRoot, 'verification')
   const applicationsRoot = join(verificationRoot, 'Applications')
   const installedApp = join(applicationsRoot, `${PRODUCT_NAME}.app`)
   await mkdir(mountPoint)
   await mkdir(applicationsRoot, { recursive: true })
-  await run('hdiutil', ['attach', '-readonly', '-nobrowse', '-mountpoint', mountPoint, outputDmg], { capture: true })
+  await run('hdiutil', ['attach', '-readonly', '-nobrowse', '-mountpoint', mountPoint, dmgPath], { capture: true })
   try {
     const entries = (await readdir(mountPoint)).sort()
     assert(entries.includes(`${PRODUCT_NAME}.app`), 'DMG does not contain AgentMux.app.')
@@ -785,13 +814,13 @@ async function verifyDmg(temporaryRoot) {
   await verifyIdentity(installedApp)
   await auditBundleSymlinks(installedApp)
   await run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', installedApp], { capture: true })
-  await verifyPackagedRuntime(installedApp, verificationRoot)
+  await verifyPackagedRuntime(installedApp, verificationRoot, source)
   await verifyLaunchServices(installedApp, verificationRoot)
 }
 
 async function installApplication(appPath) {
-  const applicationsRoot = join(homedir(), 'Applications')
-  const destination = join(applicationsRoot, `${PRODUCT_NAME}.app`)
+  const destination = canonicalInstallPath(homedir())
+  const applicationsRoot = dirname(destination)
   const next = join(applicationsRoot, `.${PRODUCT_NAME}.install-${process.pid}.app`)
   await mkdir(applicationsRoot, { recursive: true })
   await rm(next, { recursive: true, force: true })
@@ -817,10 +846,13 @@ async function main() {
   assert(await pathExists(electronApp), 'The locked Electron application is missing.')
   const temporaryRoot = await mkdtemp(join(tmpdir(), 'agentmux-macos-package-'))
   try {
-    const stagedApp = join(temporaryRoot, `${PRODUCT_NAME}.app`)
+    const candidateRoot = join(temporaryRoot, 'candidate')
+    const stagedApp = join(candidateRoot, `${PRODUCT_NAME}.app`)
+    const stagedDmg = join(candidateRoot, `${PRODUCT_NAME}-${manifest.version}-${process.platform}-${process.arch}.dmg`)
+    await mkdir(candidateRoot, { recursive: true })
     await run('cp', ['-cR', electronApp, stagedApp], { capture: true })
     await brandApplication(stagedApp)
-    await copyRuntimeApplication(stagedApp)
+    await copyRuntimeApplication(stagedApp, initialSource)
     await verifyIdentity(stagedApp)
     await verifyThirdPartyNotices(stagedApp)
     await auditBundleSymlinks(stagedApp)
@@ -828,11 +860,19 @@ async function main() {
     await run('codesign', ['--force', '--deep', '--sign', '-', stagedApp], { capture: true })
     await run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', stagedApp], { capture: true })
 
+    await createDmg(stagedApp, stagedDmg, temporaryRoot)
+    await verifyDmg(stagedDmg, temporaryRoot, initialSource)
+    const finalSource = await sourceIdentity()
+    assert(
+      finalSource.commit === initialSource.commit &&
+        finalSource.tree === initialSource.tree &&
+        finalSource.status === initialSource.status,
+      `Source tree changed during macOS packaging: ${JSON.stringify({ initialSource, finalSource })}`
+    )
     await rm(releaseRoot, { recursive: true, force: true })
     await mkdir(releaseRoot, { recursive: true })
     await rename(stagedApp, outputApp)
-    await createDmg(outputApp, temporaryRoot)
-    await verifyDmg(temporaryRoot)
+    await rename(stagedDmg, outputDmg)
     if (installRequested) await installApplication(outputApp)
     await run(process.execPath, [join(desktopRoot, 'scripts', 'report-desktop-package.mjs')])
     const [appHash, dmgHash, appSizeResult, dmgInfo] = await Promise.all([
@@ -841,13 +881,6 @@ async function main() {
       run('du', ['-sk', outputApp], { capture: true }),
       stat(outputDmg)
     ])
-    const finalSource = await sourceIdentity()
-    assert(
-      finalSource.commit === initialSource.commit &&
-        finalSource.tree === initialSource.tree &&
-        finalSource.status === initialSource.status,
-      `Source tree changed during macOS packaging: ${JSON.stringify({ initialSource, finalSource })}`
-    )
     const appSize = appSizeResult.stdout.trim().split(/\s+/)[0]
     process.stdout.write([
       `app=${outputApp}`,
