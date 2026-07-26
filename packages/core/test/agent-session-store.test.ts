@@ -11,6 +11,7 @@ import {
   normalizeStoredAgentSession,
   type AgentMuxAgentSessionStore
 } from '../src/agent-session-store.js'
+import type { AgentTimelineItem } from '../src/types.js'
 import {
   defaultAgentMuxRuntimeDirectory,
   defaultCtxmuxSocketPath,
@@ -536,6 +537,166 @@ describe('durable session identity root', () => {
       else process.env.AGENTMUX_RUNTIME_DIRECTORY = previousOverride
       await rm(durableRoot, { recursive: true, force: true })
       await rm(legacyRuntime, { recursive: true, force: true })
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// f-23q8faabh / T-003：Timeline 落盘改 JSONL 追加。热路径一条 mutation 只追加一行，
+// 不整写全文件；加载容忍崩溃撕裂的尾行；越过阈值时 compaction 成单行快照且语义不变。
+// ---------------------------------------------------------------------------
+
+describe('timeline JSONL 追加与 compaction', () => {
+  function timelineItem(id: string): AgentTimelineItem {
+    return {
+      id,
+      agentSessionId: 'semantic-1',
+      kind: 'assistant_message' as const,
+      status: 'complete' as const,
+      source: 'acp' as const,
+      createdAt: 1,
+      updatedAt: 1,
+      title: `Item ${id}`
+    }
+  }
+
+  async function timelineFile(path: string): Promise<{ content: string; lines: string[] }> {
+    const directory = join(dirname(path), 'agent-timelines')
+    const entries = await readdir(directory)
+    const file = entries.find((entry) => entry.endsWith('.jsonl'))
+    expect(file).toBeDefined()
+    const content = await readFile(join(directory, file!), 'utf8')
+    return { content, lines: content.split('\n').filter((line) => line !== '') }
+  }
+
+  async function timelineFilePath(path: string): Promise<string> {
+    const directory = join(dirname(path), 'agent-timelines')
+    const entries = await readdir(directory)
+    return join(directory, entries.find((entry) => entry.endsWith('.jsonl'))!)
+  }
+
+  it('热路径追加一行而不整写：已有内容保持字节级前缀', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-timeline-jsonl-'))
+    const path = join(root, 'agent-sessions.json')
+    try {
+      const store = new AgentMuxFileAgentSessionStore(path)
+      await store.compareAndSwap(null, storedSession())
+      await store.applyTimelineMutation({
+        type: 'append',
+        agentSessionId: 'semantic-1',
+        item: timelineItem('item-1')
+      })
+      const afterFirst = await timelineFile(path)
+      expect(afterFirst.lines).toHaveLength(1)
+
+      await store.applyTimelineMutation({
+        type: 'append',
+        agentSessionId: 'semantic-1',
+        item: timelineItem('item-2')
+      })
+      const afterSecond = await timelineFile(path)
+      // 全量 rewrite 基线下这里的前缀会被重排；追加路径必须保持旧内容原封不动。
+      expect(afterSecond.content.startsWith(afterFirst.content)).toBe(true)
+      expect(afterSecond.lines).toHaveLength(2)
+
+      const reopened = await new AgentMuxFileAgentSessionStore(path).loadTimeline('semantic-1')
+      expect(reopened.revision).toBe(2)
+      expect(reopened.items.map((item) => item.id)).toEqual(['item-1', 'item-2'])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('崩溃撕裂的尾行被容忍，之前的行照常加载', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-timeline-torn-'))
+    const path = join(root, 'agent-sessions.json')
+    try {
+      const store = new AgentMuxFileAgentSessionStore(path)
+      await store.compareAndSwap(null, storedSession())
+      for (const id of ['item-1', 'item-2', 'item-3']) {
+        await store.applyTimelineMutation({
+          type: 'append',
+          agentSessionId: 'semantic-1',
+          item: timelineItem(id)
+        })
+      }
+      const filePath = await timelineFilePath(path)
+      const content = await readFile(filePath, 'utf8')
+      await writeFile(filePath, content.slice(0, content.length - 12), { mode: 0o600 })
+
+      const reopened = await new AgentMuxFileAgentSessionStore(path).loadTimeline('semantic-1')
+      expect(reopened.items.map((item) => item.id)).toEqual(['item-1', 'item-2'])
+      expect(reopened.revision).toBe(2)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('坏在中间的行是数据损坏，fail-closed 而不是静默丢弃', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-timeline-corrupt-'))
+    const path = join(root, 'agent-sessions.json')
+    try {
+      const store = new AgentMuxFileAgentSessionStore(path)
+      await store.compareAndSwap(null, storedSession())
+      for (const id of ['item-1', 'item-2', 'item-3']) {
+        await store.applyTimelineMutation({
+          type: 'append',
+          agentSessionId: 'semantic-1',
+          item: timelineItem(id)
+        })
+      }
+      const filePath = await timelineFilePath(path)
+      const lines = (await readFile(filePath, 'utf8')).split('\n')
+      lines[1] = lines[1]!.slice(0, 10)
+      await writeFile(filePath, lines.join('\n'), { mode: 0o600 })
+
+      await expect(new AgentMuxFileAgentSessionStore(path).loadTimeline('semantic-1'))
+        .rejects.toMatchObject({ code: 'INVALID_AGENT_TIMELINE_STORE' })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('越过行数阈值触发 compaction：文件收敛为单行快照且语义不变', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-timeline-compact-'))
+    const path = join(root, 'agent-sessions.json')
+    try {
+      const store = new AgentMuxFileAgentSessionStore(path)
+      await store.compareAndSwap(null, storedSession())
+      await store.applyTimelineMutation({
+        type: 'append',
+        agentSessionId: 'semantic-1',
+        item: timelineItem('item-1')
+      })
+      // 快照 1 行 + 256 条追加 mutation：正好到 compaction 阈值边缘。
+      for (let step = 1; step <= 256; step += 1) {
+        await store.applyTimelineMutation({
+          type: 'update',
+          agentSessionId: 'semantic-1',
+          itemId: 'item-1',
+          updatedAt: 1 + step,
+          content: `revision ${step}`
+        })
+      }
+      const beforeCompaction = await timelineFile(path)
+      expect(beforeCompaction.lines).toHaveLength(257)
+
+      const compacting = await store.applyTimelineMutation({
+        type: 'update',
+        agentSessionId: 'semantic-1',
+        itemId: 'item-1',
+        updatedAt: 500,
+        content: 'after compaction'
+      })
+      const afterCompaction = await timelineFile(path)
+      expect(afterCompaction.lines).toHaveLength(1)
+
+      const reopened = await new AgentMuxFileAgentSessionStore(path).loadTimeline('semantic-1')
+      expect(reopened.revision).toBe(compacting.revision)
+      expect(reopened.items).toHaveLength(1)
+      expect(reopened.items[0]!.content).toBe('after compaction')
+    } finally {
+      await rm(root, { recursive: true, force: true })
     }
   })
 })

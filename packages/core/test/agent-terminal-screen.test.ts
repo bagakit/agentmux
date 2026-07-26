@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { AgentTerminalScreen } from '../src/agent-terminal-screen.js'
+import {
+  AgentTerminalScreen,
+  AgentTerminalScreenEvidence
+} from '../src/agent-terminal-screen.js'
+import { AgentMuxClient } from '../src/client.js'
+import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
+import type { CtxmuxAdapterObservationEvent, CtxmuxAdapterRun } from '../src/ctxmux-run-adapter.js'
+import type { AgentMuxStoredAgentSession } from '../src/types.js'
 
 const encoder = new TextEncoder()
 
@@ -93,5 +100,242 @@ describe('AgentTerminalScreen', () => {
     } finally {
       screen.dispose()
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// f-23q8faabh / T-002：有界增量屏幕证据。同一 Session 的提交/readiness 观察共享一份长命
+// 增量屏幕：已消费的前缀不再从 byte 0 重放，重放字节量相对会话历史长度有界；gap 失效后
+// 重建仍能正确判定 composer。
+// ---------------------------------------------------------------------------
+
+const FRAME_START = '\u001b[?2026h'
+const FRAME_END = '\u001b[?2026l'
+
+function evidenceChunk(evidence: AgentTerminalScreenEvidence, data: string): void {
+  const dataBytes = encoder.encode(data)
+  evidence.accept({
+    type: 'data',
+    startByte: evidence.throughByte,
+    endByte: evidence.throughByte + dataBytes.byteLength,
+    dataBytes
+  })
+}
+
+async function settle(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 10))
+}
+
+describe('AgentTerminalScreenEvidence 帧游标', () => {
+  it('boundary 之前完成的帧不算数，boundary 之后的完整帧才放行', async () => {
+    const evidence = new AgentTerminalScreenEvidence(80, 24, { start: FRAME_START, end: FRAME_END })
+    try {
+      const firstFrame = `${FRAME_START}\u001b[22;1H› \u001b[22;3H${FRAME_END}`
+      const boundary = encoder.encode(firstFrame).byteLength
+      evidenceChunk(evidence, firstFrame)
+      await settle()
+      expect(evidence.lastCompleteFrame).toEqual({ startByte: 0, endByte: boundary })
+
+      let ready = false
+      const waiting = evidence.wait({
+        boundaryByte: boundary,
+        requireOutputAfterBoundary: true,
+        requireFrameAfterBoundary: true,
+        predicate: (screen) => screen.composerText('›') === '',
+        timeoutMessage: 'fixture timeout',
+        terminalMessage: 'fixture exit'
+      }).then((throughByte) => {
+        ready = true
+        return throughByte
+      })
+      await settle()
+      // 第一帧完成于 boundary 之前：即便 composer 已空，也不许用它当作 boundary 之后的证据。
+      expect(ready).toBe(false)
+
+      evidenceChunk(evidence, `${FRAME_START}\u001b[22;3H${FRAME_END}`)
+      await expect(waiting).resolves.toBeGreaterThan(boundary)
+      expect(evidence.lastCompleteFrame?.startByte).toBe(boundary)
+    } finally {
+      evidence.dispose()
+    }
+  })
+
+  it('跨块的帧标记按字节精确定位', async () => {
+    const evidence = new AgentTerminalScreenEvidence(80, 24, { start: FRAME_START, end: FRAME_END })
+    try {
+      const frame = `${FRAME_START}hi${FRAME_END}`
+      const half = Math.floor(frame.length / 2)
+      evidenceChunk(evidence, frame.slice(0, half))
+      await settle()
+      expect(evidence.lastCompleteFrame).toBeNull()
+      evidenceChunk(evidence, frame.slice(half))
+      await settle()
+      expect(evidence.lastCompleteFrame).toEqual({
+        startByte: 0,
+        endByte: encoder.encode(frame).byteLength
+      })
+    } finally {
+      evidence.dispose()
+    }
+  })
+})
+
+function screenStoredSession(): AgentMuxStoredAgentSession {
+  return {
+    kind: 'agent',
+    agentSessionId: 'screen-agent',
+    providerId: 'codex',
+    executorId: 'codex',
+    hostId: 'local',
+    workspacePath: '/tmp/screen-agent',
+    run: { runId: 'screen-run' },
+    retiredRuns: [],
+    hookBindingId: 'binding-screen',
+    hookToken: 'token-screen',
+    outputCursorBytes: 0,
+    createdAt: 100,
+    updatedAt: 100
+  }
+}
+
+function screenRun(): CtxmuxAdapterRun {
+  return {
+    runId: 'screen-run',
+    lifecycleOperationId: null,
+    program: 'codex',
+    args: [],
+    workspacePath: '/tmp/screen-agent',
+    pid: 321,
+    state: { type: 'running' },
+    cols: 80,
+    rows: 24,
+    latestOutputBytes: 0,
+    firstAvailableByte: 0,
+    acceptedInputBytes: 0
+  }
+}
+
+type ScreenWaiter = {
+  waitForTerminalScreenState(
+    session: AgentMuxStoredAgentSession,
+    outputBoundaryByte: number,
+    requireOutputAfterBoundary: boolean,
+    predicate: (screen: AgentTerminalScreen) => boolean,
+    options: { timeoutMs?: number; timeoutMessage: string; terminalMessage: string }
+  ): Promise<number>
+}
+
+async function screenClient(replays: string[]): Promise<{
+  client: AgentMuxClient
+  waiter: ScreenWaiter
+  observeCalls: () => number
+  replayedBytes: () => number
+  emit: (event: CtxmuxAdapterObservationEvent) => void
+}> {
+  const store = new AgentMuxMemoryAgentSessionStore()
+  await store.compareAndSwap(null, screenStoredSession())
+  const client = new AgentMuxClient({ store })
+  const internals = client as unknown as {
+    registry: { load(hostId: string): Promise<void> }
+    kernel: Record<string, unknown>
+  }
+  await internals.registry.load('local')
+  let observeCalls = 0
+  let replayedBytes = 0
+  let listener: ((event: CtxmuxAdapterObservationEvent) => void) | null = null
+  internals.kernel.observeOutput = async (
+    _runId: string,
+    _afterByte: number,
+    accept: (event: CtxmuxAdapterObservationEvent) => void
+  ) => {
+    const replay = replays[Math.min(observeCalls, replays.length - 1)] ?? ''
+    observeCalls += 1
+    listener = accept
+    const dataBytes = Uint8Array.from(Buffer.from(replay))
+    replayedBytes += dataBytes.byteLength
+    return {
+      run: screenRun(),
+      replay: replay
+        ? [{
+            type: 'data' as const,
+            runId: 'screen-run',
+            startByte: 0,
+            endByte: dataBytes.byteLength,
+            data: replay,
+            dataBytes
+          }]
+        : [],
+      gap: null,
+      close: async () => {}
+    }
+  }
+  return {
+    client,
+    waiter: client as unknown as ScreenWaiter,
+    observeCalls: () => observeCalls,
+    replayedBytes: () => replayedBytes,
+    emit: (event) => listener?.(event)
+  }
+}
+
+describe('有界增量屏幕证据接到 client 观察路径', () => {
+  it('同一 Session 连续两次观察只从 byte 0 重放一次，重放字节量相对全量基线有界', async () => {
+    // 大体积历史：全量基线下第二次观察会把它整个再重放一遍（2x）。
+    const history = `${'x'.repeat(64 * 1024)}\r\n${FRAME_START}\u001b[2J\u001b[22;1H› hello${FRAME_END}`
+    const historyBytes = Buffer.byteLength(history)
+    const { client, waiter, observeCalls, replayedBytes } = await screenClient([history])
+    const session = screenStoredSession()
+
+    const first = await waiter.waitForTerminalScreenState(
+      session,
+      0,
+      true,
+      (screen) => screen.composerText('›') === 'hello',
+      { timeoutMs: 1_000, timeoutMessage: 'fixture timeout', terminalMessage: 'fixture exit' }
+    )
+    expect(first).toBe(historyBytes)
+
+    const second = await waiter.waitForTerminalScreenState(
+      session,
+      0,
+      true,
+      (screen) => screen.composerText('›') === 'hello',
+      { timeoutMs: 1_000, timeoutMessage: 'fixture timeout', terminalMessage: 'fixture exit' }
+    )
+    expect(second).toBe(historyBytes)
+
+    // 有界性的两把尺：不再有第二次 byte-0 观察；重放总量 = 历史一份（全量基线是 2 份）。
+    expect(observeCalls()).toBe(1)
+    expect(replayedBytes()).toBe(historyBytes)
+    expect(replayedBytes()).toBeLessThan(2 * historyBytes)
+    await client.dispose()
+  })
+
+  it('gap 失效后丢弃重建，重建仍能正确判定 composer', async () => {
+    const first = `${FRAME_START}\u001b[22;1H› one\u001b[22;7H${FRAME_END}`
+    const second = `${FRAME_START}\u001b[22;1H› two\u001b[22;7H${FRAME_END}`
+    const { client, waiter, observeCalls, emit } = await screenClient([first, second])
+    const session = screenStoredSession()
+
+    await expect(waiter.waitForTerminalScreenState(
+      session,
+      0,
+      true,
+      (screen) => screen.composerText('›') === 'one',
+      { timeoutMs: 1_000, timeoutMessage: 'fixture timeout', terminalMessage: 'fixture exit' }
+    )).resolves.toBeGreaterThan(0)
+
+    // CtxMux 驱逐了旧输出：长命证据必须失效，不许拿旧屏幕继续作证。
+    emit({ type: 'gap', runId: 'screen-run', latestOutputBytes: 8192 })
+
+    await expect(waiter.waitForTerminalScreenState(
+      session,
+      0,
+      true,
+      (screen) => screen.composerText('›') === 'two',
+      { timeoutMs: 1_000, timeoutMessage: 'fixture timeout', terminalMessage: 'fixture exit' }
+    )).resolves.toBeGreaterThan(0)
+    expect(observeCalls()).toBe(2)
+    await client.dispose()
   })
 })
