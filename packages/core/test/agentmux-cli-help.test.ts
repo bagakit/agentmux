@@ -125,4 +125,39 @@ describe('agentmux CLI discovery', () => {
   it('reports the installed CLI version', async () => {
     await expect(run(['--version'])).resolves.toBe('agentmux 0.1.0\n')
   })
+
+  // T-004 验收 #1：whoami 进入既有的 verb 注册、help 与分发，不另起一套。这些断言区分"真的分发到了
+  // whoamiCommand"与"落进了 Unknown command 兜底"——两者可区分，所以不会因为本机没跑 Desktop Host
+  // 而假绿（未注册命令得到的是 INVALID_CLI_ARGUMENT + "Unknown command"）。
+  it('lists whoami in --help and resolves whoami --help through the shared registry', async () => {
+    const help = await run(['--help'])
+    expect(help).toContain('whoami')
+    // whoami --help 走的是与其它 verb 同一个 agentMuxCommandHelp 注册表，不另写一套。
+    const whoamiHelp = await run(['whoami', '--help'])
+    expect(whoamiHelp).toContain('agentmux whoami')
+    // 语法的唯一真相在 skill：per-verb help 说明 Topic 为何不由 verb 产出、指向文件。
+    expect(whoamiHelp).toContain('topic.md')
+  })
+
+  it('documents whoami in --skill as the startup orientation step, not a second dispatch', async () => {
+    const skill = await run(['--skill'])
+    expect(skill).toContain('agentmux whoami')
+    // skill 是确切用法的唯一真相——whoami 的坐标各项在这里被点到。
+    expect(skill).toContain('Session')
+    expect(skill).toContain('capabilities')
+  })
+
+  it('dispatches whoami as a real command that requires a managed caller, not an unknown one', async () => {
+    // 无 managed 身份时 whoami 必须走到 MANAGED_AGENT_CONTEXT_REQUIRED——证明它被分发到了
+    // whoamiCommand（managedCaller() 在那里抛），而不是落进 Unknown command 兜底。
+    const unmanaged = await fail(['whoami'], { AGENTMUX_ENV: '', AGENTMUX_AGENT_SESSION_ID: '' })
+    const payload = JSON.parse(unmanaged.stderr)
+    expect(payload).toMatchObject({ error: { code: 'MANAGED_AGENT_CONTEXT_REQUIRED' } })
+    expect(payload.error.message).not.toContain('Unknown command')
+    // 参数校验也证明分发到位：whoami 无参，多给一个会走到它自己的校验错误，而非 Unknown command。
+    const extra = await fail(['whoami', 'extra'], { AGENTMUX_ENV: '1', AGENTMUX_AGENT_SESSION_ID: 'agent-self' })
+    expect(JSON.parse(extra.stderr)).toMatchObject({
+      error: { code: 'INVALID_CLI_ARGUMENT', message: 'whoami takes no arguments.' }
+    })
+  })
 })
