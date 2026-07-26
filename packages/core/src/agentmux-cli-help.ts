@@ -17,6 +17,7 @@ Intents:
   open        Open typed content at one exact spatial destination.
   send        Send one prompt to an exact Session or uniquely resolved presentation target.
   discuss     Start a Discussion: create a dedicated Agent and deliver the first message.
+  handoff     Hand a task and its ownership to another Agent Session in one atomic act.
   focus       Focus one exact Tab or Region.
   arrange     Apply one explicit layout operation to a Tab.
   output      Read or follow one Agent Session's ordered output.
@@ -130,6 +131,19 @@ or replied. Re-running with the same request id returns the same Thread and neve
 the Prompt.
 
 Cross-workspace delivery is refused. Remote targets are not supported yet.`],
+  ['handoff', `Hand a task and its ownership to another Agent Session
+
+Usage:
+  agentmux handoff --to-session <session-id> --task <task-id>
+
+Handoff is the atomic ownership transfer: the task and the responsibility for it move together to
+the receiver, and the origin stops awaiting it (originAwaits=false). That single fact is the only
+difference between a Handoff and a Dispatch, and it is decided by Core, not by wording in a message.
+
+Core resolves the author from your invocation capability; AGENTMUX_AGENT_SESSION_ID is context only,
+never authentication. Handoff transfers ownership only — it does not deliver a message, open a
+Session, or prove the receiver accepted. Use send or discuss to deliver text. This is not a delivery
+receipt, an idempotency ledger, or a signed capability.`],
   ['send', `Send one prompt without resuming or broadcasting
 
 Usage:
@@ -286,6 +300,18 @@ resolve to exactly one caller Region. Zero or multiple matches fail closed.
 Every receipt has stable \`schemaVersion\`, \`requestId\`, \`operation\`, and exactly one of
 \`result\` or \`error\`. A \`MESSAGE_TARGET_NOT_UNIQUE\` error includes typed
 \`candidates[].agentSessionId\` and \`candidates[].regionIds\`; never parse its message.
+
+## Hand off ownership
+
+\`\`\`bash
+agentmux handoff --to-session <session-id> --task <task-id>
+\`\`\`
+
+Use handoff when you are giving a task away, not delegating it: ownership and responsibility move
+to the receiver and you stop awaiting it. The receipt reports \`ownerAgentSessionId\`,
+\`originAwaits: false\`, and \`taskId\`. Handoff transfers ownership only — it delivers no message and
+opens no Session; deliver any text with send or discuss. Do not simulate a handoff by wording a
+send: the ownership transfer is a Core fact, not a phrase.
 
 ## Runtime intents
 
