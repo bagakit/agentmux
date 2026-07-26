@@ -46,6 +46,23 @@ export type AgentMuxControlErrorCode = typeof AGENTMUX_CONTROL_ERROR_CODES[numbe
 
 export type AgentMuxControlCaller = { agentSessionId: string }
 export type AgentMuxRegionBounds = { x: number; y: number; width: number; height: number }
+
+/**
+ * 「我右边是什么」的答案。
+ *
+ * 方向本来只存在于**创建**一侧（`AgentMuxOpenDestination` 的 `split` 带 direction），于是 Agent
+ * 造得出一个右边、却问不出自己右边是什么。这里把方向补到**查看**一侧。
+ *
+ * 答案只会是既有的 Region 地址或 Tab 地址：不新增第四级寻址身份，Agent 拿到之后能直接喂回
+ * `inspect.region` / `focus` / `send`。`none` 与报错是两回事——最右一格问 right 是合法问题的
+ * 合法答案，不是失败。
+ */
+export type AgentMuxRegionNeighbor =
+  | { kind: 'region'; regionId: string }
+  | { kind: 'tab'; tabId: string }
+  | { kind: 'none' }
+/** 四个方向各自的邻居。up/down 永远不会答成 Tab——Tab 条是一维水平序列。 */
+export type AgentMuxRegionNeighbors = Record<'left' | 'right' | 'up' | 'down', AgentMuxRegionNeighbor>
 type AgentMuxRegionBase = { tabId: string; regionId: string; workspaceId: string }
 
 export type AgentMuxAgentRegion = AgentMuxRegionBase & {
@@ -64,7 +81,7 @@ export type AgentMuxRegionTarget =
   | { kind: 'region'; regionId: string }
   | { kind: 'agent-session'; agentSessionId: string }
 
-export type AgentMuxInspectedRegion = AgentMuxRegion & { bounds: AgentMuxRegionBounds }
+export type AgentMuxInspectedRegion = AgentMuxRegion & { bounds: AgentMuxRegionBounds; neighbors: AgentMuxRegionNeighbors }
 export type AgentMuxInspectedTab = { tabId: string; workspaceId: string; regions: AgentMuxInspectedRegion[] }
 
 export type AgentMuxControlExecutor = {

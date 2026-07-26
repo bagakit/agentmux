@@ -456,6 +456,10 @@ const terminalRegion = {
   runId: 'packed-terminal-run',
   workspaceId: 'packed-workspace'
 }
+// 只有一格、也只有一张 Tab 时的邻居：四个方向都到边。
+const soleRegionNeighbors = {
+  left: { kind: 'none' }, right: { kind: 'none' }, up: { kind: 'none' }, down: { kind: 'none' }
+}
 const controlServer = new AgentMuxControlServer({
   async execute(request) {
     controlRequests.push(request)
@@ -465,7 +469,7 @@ const controlServer = new AgentMuxControlServer({
         tab: {
           tabId: agentRegion.tabId,
           workspaceId: agentRegion.workspaceId,
-          regions: [{ ...agentRegion, bounds: { x: 0, y: 0, width: 1, height: 1 } }]
+          regions: [{ ...agentRegion, bounds: { x: 0, y: 0, width: 1, height: 1 }, neighbors: soleRegionNeighbors }]
         }
       }
     }
@@ -510,7 +514,7 @@ const controlServer = new AgentMuxControlServer({
         tab: {
           tabId: agentRegion.tabId,
           workspaceId: agentRegion.workspaceId,
-          regions: [{ ...agentRegion, bounds: { x: 0, y: 0, width: 1, height: 1 } }]
+          regions: [{ ...agentRegion, bounds: { x: 0, y: 0, width: 1, height: 1 }, neighbors: soleRegionNeighbors }]
         }
       }
     }
