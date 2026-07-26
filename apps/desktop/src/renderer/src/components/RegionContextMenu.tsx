@@ -52,7 +52,7 @@ export function createRegionCopyModel({
       ? {
           // 交接入口按意图命名：用户想的是"把这个 Agent 交给别人"，不是"我要哪一层身份"。
           // 点击发生在某一格上，我们知道是哪一格而接收方不知道，所以这里解析成 Region 地址——
-          // 分屏下唯一无歧义的那个，消歧做在源头。
+          // 消歧做在源头。这与眼下分没分屏无关：知道就给，下一秒分屏了这个地址依然指得准。
           handoff: {
             label: 'Message this Agent' as const,
             onSelect: async () =>

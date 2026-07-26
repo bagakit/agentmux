@@ -71,8 +71,8 @@ export function createWorkbenchTabCopyModel({
     },
     ...(agentSessionId
       ? {
-          // 同一个交接意图，从 Tab 菜单进来时没有"哪一格"这个信息——不分屏也就没有那个歧义，
-          // 于是解析成 Session 地址：它在 View 被关掉、移动、分屏之后依然指向同一个 Agent。
+          // 同一个交接意图，从 Tab 菜单进来时没有"哪一格"这个信息，于是解析成 Session 地址：
+          // 它在 View 被关掉、移动、分屏之后依然指向同一个 Agent。
           handoff: {
             label: 'Message this Agent' as const,
             onSelect: async () =>
