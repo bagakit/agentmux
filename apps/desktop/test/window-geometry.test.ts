@@ -146,6 +146,24 @@ describe('clampGeometryToVisibleArea: an off-screen window is re-homed, not lost
     expect(clamped.y + clamped.height).toBeLessThanOrEqual(primary.y + primary.height)
   })
 
+  it('re-homes a window whose body overlaps but whose title bar is above the screen top', () => {
+    // The distinguishing case for the vertical check: y=-400 with height 800 leaves 400px of BODY
+    // below y=0, so a body-overlap test would wrongly pass it — but the title bar at y=-400 is off
+    // the top edge and cannot be grabbed on macOS. Reachability is about the top edge, not the body,
+    // so this must be re-homed to a y inside the work area.
+    const geometry: WindowGeometry = { width: 1200, height: 800, x: 100, y: -400, maximized: false }
+    const clamped = clampGeometryToVisibleArea(geometry, [primary])
+    expect(clamped.y).toBeGreaterThanOrEqual(primary.y)
+    expect(clamped.y).not.toBe(-400)
+  })
+
+  it('keeps a window whose title bar is inside the work area even if its bottom runs off-screen', () => {
+    // The inverse: a tall window whose top edge (title bar) is on-screen is reachable — the user can
+    // grab it and drag — so it is left as saved even though its bottom extends past the display.
+    const geometry: WindowGeometry = { width: 1200, height: 1040, x: 100, y: 100, maximized: false }
+    expect(clampGeometryToVisibleArea(geometry, [primary])).toEqual(geometry)
+  })
+
   it('returns a window with no saved position unchanged (the OS will place it)', () => {
     const geometry: WindowGeometry = { width: 1200, height: 800, maximized: false }
     expect(clampGeometryToVisibleArea(geometry, [primary])).toEqual(geometry)

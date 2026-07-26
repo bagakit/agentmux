@@ -82,8 +82,11 @@ export function windowConstructorGeometry(
  * of any Electron import and the clamp below can be asserted with plain rectangles. */
 export type VisibleArea = { x: number; y: number; width: number; height: number }
 
-// The window must present at least this much of itself inside some visible area, or its title bar is
-// unreachable. 48px is enough to grab and drag it back regardless of platform chrome height.
+// The window must present at least this much of itself inside some visible area, or it cannot be
+// grabbed. On the horizontal axis any 48px sliver of the window is enough to see and click; on the
+// vertical axis it is specifically the title bar — the window's TOP edge — that must land inside the
+// work area, since that is the strip the user drags. A window shoved above the screen top can still
+// poke its body below y=0, but its title bar is unreachable, so body overlap is not the test.
 const MIN_VISIBLE_EXTENT = 48
 
 function overlapExtent(start: number, length: number, areaStart: number, areaLength: number): number {
@@ -101,10 +104,13 @@ function clampOrigin(origin: number, extent: number, areaStart: number, areaLeng
 /**
  * Re-home a persisted window that would open where the user can never reach it. A monitor that was
  * unplugged, a resolution change, or a profile carried between machines can leave the saved position
- * on coordinates no live display covers. If the window still shows at least a grabbable strip on some
- * visible area it is left exactly as saved (spanning two monitors is legitimate); only when it is
- * effectively off-screen is its origin clamped into the primary visible area. Size and the maximized
- * flag are never touched — this corrects position, not the shape the user chose.
+ * on coordinates no live display covers. A window is reachable when, on some visible area, it shows a
+ * grabbable horizontal sliver AND its title bar (the top edge) sits inside that area's vertical span
+ * with room left to grab it — a window whose top edge is above the work area top or below its bottom
+ * has no draggable strip on screen even if the body overlaps. Reachable windows are left exactly as
+ * saved (spanning two monitors is legitimate); only an effectively off-screen one has its origin
+ * clamped into the primary visible area. Size and the maximized flag are never touched — this corrects
+ * position, not the shape the user chose.
  *
  * `visibleAreas[0]` is treated as primary (the caller passes the primary display first). A window with
  * no saved position, or a call with no displays, is returned unchanged: the OS then places it.
@@ -119,7 +125,10 @@ export function clampGeometryToVisibleArea(
   const savedY = geometry.y
   const reachable = visibleAreas.some((area) => (
     overlapExtent(savedX, geometry.width, area.x, area.width) >= MIN_VISIBLE_EXTENT &&
-    overlapExtent(savedY, geometry.height, area.y, area.height) >= MIN_VISIBLE_EXTENT
+    // Title bar visibility: the top edge must be at or below the work-area top and far enough above
+    // its bottom to leave a grabbable strip. Body overlap alone is not enough.
+    savedY >= area.y &&
+    savedY <= area.y + area.height - MIN_VISIBLE_EXTENT
   ))
   if (reachable) return geometry
   const primary = visibleAreas[0]!
