@@ -144,6 +144,14 @@
   - **收起只是隐藏，不是卸载**。草稿必须活过收起再展开——Composer 挂载点不变（同一 Region、同一 adapter），否则收起就成了一次静默的清空，与"切换投影时不能清空未发送草稿"是同一条约束。
   - **收起状态按 Region 记，且只在 TUI 投影下有意义**。切回对话投影时无条件展示，不去记忆"用户在对话模式下也收起过"——那是一个用户没法表达的状态。
   - **悬浮按钮要能表达有未发送草稿**。收起之后草稿不可见，若按钮只是一枚静态图标，用户会忘记自己写了一半——按钮需带上"有草稿"这一事实，否则收起就在制造丢失感。
+- **Composer 要认 skill 与 slash 命令**。用户原话：「现在对话组件对 skill 的支持不太好」。今天的缺口是**整条链路都没有这个概念**：Composer 是一个纯 textarea，没有 `/` 触发、没有补全、没有发现；Core 的 timeline kind 是一个被校验器封住的闭集（`user_message | assistant_message | tool_call | permission | lifecycle`），没有 skill 的位置。于是一次 skill 调用要么根本不进 timeline，要么塌进一条**与任何别的工具无法区分**的 `tool_call`（同一枚 Hammer）。
+  - **触发前缀由 Provider 声明，不在 Renderer 里按 providerId 分支**。各家 CLI 的前缀并不统一（有用 `/` 的，也有用 `$` 的），这正是既有 Provider 能力声明（posture、interaction 同处）该多一条的东西——与 permission option 的 DESCRIBE/CONTRIBUTE 拆分同构：声明半边跨 IPC 供 Renderer 渲染，兑现半边留在 Core。
+  - **两个来源合并成一个选择器**：一份**手工维护的命令目录**（CLI 不提供任何机器可读的命令列表，这是事实约束，不是偷懒），加一份**磁盘发现的 skill**（扫 skill 根下 `SKILL.md` 的 frontmatter 取名字与描述）。前者是纯数据，可以自由生长。
+  - **发送时按"行首 token"分流，且不得先 trim**。一句以空格开头的正文即便看着像命令也仍是正文——抢一条"已派发"的记号给一段从未派发的文本，是在制造假状态。这条与"不做输入队列"同源。
+  - **一次派发在 timeline 里要看得出是派发**，既不是用户气泡，也不是一张完整工具卡。这需要 Core 侧动那个闭集（新增一个 kind 是**公共合同变更**，不是 Renderer 的自由），否则 Renderer 无论怎么画都是在给 `tool_call` 打补丁。
+  - **有歧义就显示歧义，不替用户裁决**：一个名字同时是命令又是 skill、或来自多个来源时，标注出来交给 Agent 解析。参数是**自由文本**，不做 schema、不做发送前校验——参数语义归 CLI 所有，我们插入 token 加一个空格就收手。
+  - **发现按 skill 真正运行的位置取值**，带明确超时与 Retry；**远端 host 下明确"不可用"而不是给一个空列表**——空列表说的是"这儿没有 skill"，那是假话。与 Editor 失败态的 Reveal 在远端**以缺席表达**是同一条规矩。
+  - 未验证、动手前要先确认的一件事：**我们消费的 hook 里，一次 skill 到底以什么 toolName 到达**。这决定了 timeline 侧是"补一个 kind"还是"先得能认出它"。
 - Composer 使用独立、受控、无 Store 依赖的可复用输入组件；Session adapter 负责草稿、当前文件、Submit 与 Interrupt 绑定，为附件和其他富输入能力保留唯一扩展面。
 - Renderer 不根据 `working`、`waiting`、`blocked` 或 `done` 猜测 Prompt readiness。Core 拒绝提交时保留草稿供重试；semantic resume 和恢复动作继续由现有 Owner 负责。
 - **运行中可 steer**：Agent 处于 `working` 时界面仍允许提交，补的那句话经**既有** send 通路（store.send → submitPrompt → Core.submitAgentPrompt）送出，与普通 prompt 同一条路——不新增 Renderer 侧第二条写通道。「界面是否允许提交」与「主动作是 Send 还是 ■」是两个不同问题：working 时前者为真而后者仍是 ■，一个跑动中的 Agent 既要能被补话也要能被叫停，二者不互斥。判定收敛为一个纯函数（`lib/composer-submit-mode.ts`），不读 Store、不按 providerId 分支。
@@ -164,6 +172,12 @@ Desktop 刷新或重新 Attach 时优先投影这份 Agent 语义；新的 Run `
 - **切回一个已经打开过的终端不得重放"Restoring terminal…"**。切 Tab 不是重新连接：一个已经 attach 上、字节已经在屏上的终端，切走再切回应当就在那儿。当前每次切换都闪一次恢复态，是因为非活动 Tab 的终端视图被卸载、xterm 实例被销毁，切回时从零重建并重放。修法在**保住实例**而不在加速重放：不可见的终端**保留其 xterm 实例与 attachment**，切换只改变可见性。据此有三条边界：**不可见的终端不做布局与渲染工作**（否则保实例换来的是持续开销）；**实例的存活边界是 Region 的存活边界**——Region 真的关掉时实例必须销毁，不建第二个绕过 Region 生命周期的缓存池；**恢复态只在真正需要重放时出现**（首次 attach、断连重连、replay gap），它仍是一个诚实信号，不能因为"看着烦"就删掉。
 - Terminal 链接只在手势确实是**点击**时才响应：指针位移超过阈值或留下选区，都判定为选择文本而非点击链接——拖选跨过链接不得触发打开。悬停显示目标与打开方式，锚定位置永不遮挡它所描述的那一行链接。链接分两类，共用同一套手势守卫与悬停预览：http(s) URL 由 web-links 拥有，Cmd（非 macOS 为 Ctrl）+ 点击直接在系统浏览器打开，普通点击走目标选择菜单；文件路径由一个独立 link provider 拥有，普通点击在编辑器 Region 打开该文件。
 - Terminal 文件路径识别是**纯语法、保守**的：检测在 xterm 渲染/悬停热路径上运行，只做字符串工作——读 xterm 已持有的那一行 buffer 文本并用纯函数匹配，热路径上没有磁盘或 IPC，更不做存在性探测。规则的关键判据是「core 含 `/` 或带 `:line` 后缀」，据此丢弃裸词（`e.g.`、`1.2.3`、`README`）却仍捕获 `README.md:3:1` 与真实相对/绝对路径；绝对路径仅当落在活动 Workspace 根内才识别，`~/`、逃出根的相对路径不识别。识别出的路径归一为 Workspace 相对路径，交给与 Explorer 同一个 `openFile` seam 打开；带 `:line[:col]` 时通过一次性 reveal target 落到该行。误报或不存在的路径在点击打开时经 reportError 明确失败，绝不静默——「点击开不出来」而非污染状态。相对路径按 Workspace 根解析（非终端 live cwd）。
+- **Activity 里 Markdown 引用到的项目内文件同样可点开，走的必须是同一个 seam**。用户原话：「在对话中的 Markdown 解析中，如果有些引用的是项目内的文件，点击时要支持打开（就像在文件系统中点击的一样），同时在文件导航中也要指向并打开该文件」。这句话有两半，第二半是关键：**"在文件导航中指向并打开"不是要新写的第二个功能，而是复用既有 `openFile` 的自然结果**——`openFile` 会更新该 Workspace 的 last active file，Explorer 据此自动展开祖先、选中并滚动到该行（与 Terminal 点击路径、Explorer 自身打开文件完全同一条通路）。反过来说：任何"就地开个 Tab"的手写实现都会**静默丢掉用户明确要的第二半**，而且丢得没有任何报错。这就是此处只许复用、不许另起一条的全部理由。
+  - **归一化与根内约束复用 Terminal 那份纯函数**，不写第二套路径解析。判据、拒绝规则（裸词、`~/`、逃出 Workspace 根的相对路径、根外绝对路径）与 `:line[:col]` 的一次性 reveal 全部同源；两处若各有一份，会在"什么算路径"上无声漂移，而漂移时误判只表现为"这个链接点不动"，没人会报。
+  - **分流点只有一个**：一个引用要么是 http(s)（既有 `openExternal`，Main 裁决 scheme），要么是 Workspace 内的文件（`openFile`）。**今天所有 Markdown link 一律送进 `openExternal`**，于是 `[x](./src/x.ts)` 会被丢给系统浏览器——这是现状的缺口，不是新增能力的边角。分流写成纯函数，不在渲染组件里分支。
+  - **要认的主要不是 Markdown link，而是行内 code 与正文里的裸路径**。Agent 写路径时几乎不写成 `[](…)`，写的是 `` `src/foo.ts` `` 或直接散在句子里；只处理 link 语法等于对真实输出基本不生效。这决定了识别落在 inline 节点上而非只看 `href`。
+  - **注入而非 import**，与既有 `openExternal` 同形。`AgentMarkdown` 是无 Store 依赖的纯组件，直接 import Store 或 api 会让每个渲染回合的测试都要先记得 mock——那个坑已经付过一次调试代价。
+  - 验收落在**可观察结果**上：给定一段 Markdown，分流函数对哪些 token 判为文件、判成什么归一路径。断言"某个 handler 挂上了"在 handler 写错时同样会绿（测试栈是 `renderToStaticMarkup`，本就跑不了 effect、点不动 DOM），所以载荷逻辑必须是 `lib/` 里的纯函数。
 - Terminal 主题只属于 Desktop Renderer。ctxmux、RunSpec 和 Core 公共合同不出现主题字段。
 - Renderer 负责把最新 `cols × rows` 通过 Core 公共 Resize 提交给 ctxmux；resize 热路径只保留一个在途请求和一个最新 pending size。
 - Replay、Live、Gap、ACK 与 Attachment lease 均服从 ctxmux/Core 的 ordered-byte 合同，View 不建立补偿状态机。
