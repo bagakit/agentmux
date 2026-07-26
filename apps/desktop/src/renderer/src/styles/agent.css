@@ -157,6 +157,22 @@
 }
 .agent-status-bar__count { color: var(--text-2); }
 .agent-status-bar .status { gap:0; }
+/* 按 Provider 的活跃/待机。它靠右自成一组，与左侧的关注度汇总分开——两者回答的是不同的问题。 */
+.agent-status-bar__providers {
+  display: inline-flex;
+  align-items: center;
+  gap:var(--sp-4);
+  margin-left:auto;
+}
+.agent-status-bar__provider {
+  display: inline-flex;
+  align-items: center;
+  gap:var(--sp-2);
+  color: var(--text-3);
+}
+/* 全闲的 Provider 压到底色：它在场是为了回答"总共几个"，不该和在跑的抢注意力。 */
+.agent-status-bar__provider[data-active="false"] { opacity: .55; }
+.agent-status-bar__idle { color: var(--text-3); }
 /* Permanent chrome: no pulse. The count carries the fact; a pulsing dot would fight the terminal. */
 .agent-status-bar .status--working .status__dot { animation: none; }
 /* Flat by contract: no resting stroke — Surface luminance, the tool actions and the focus ring carry
