@@ -73,7 +73,10 @@
 .launch-terminal__body { position: relative; height: 240px; min-height: 0; overflow: hidden; }
 .launch-terminal__body .terminal-view { border-radius: 0 0 var(--radius-sm) var(--radius-sm); }
 .launch-surface textarea { width: min(640px, 100%); margin-inline:auto; padding:var(--sp-5) var(--sp-5); resize: vertical; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); outline: none; color: var(--text); background: var(--surface-1); font-size: var(--fs-body); line-height: 1.5; transition: border-color 140ms ease, box-shadow 140ms ease; }
-.launch-surface textarea:focus { border-color: var(--focus-line); box-shadow: var(--focus-ring); background: var(--surface-0); }
+.launch-surface textarea:focus, .launch-names__input:focus { border-color: var(--focus-line); box-shadow: var(--focus-ring); background: var(--surface-0); }
+/* 两个可选命名输入：焦点语汇与 textarea 共用同一条规则，列宽居中由 `.launch-surface > *` 给，只降一级字号。 */
+.launch-names { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:var(--sp-4); margin-top:var(--sp-4); }
+.launch-names__input { min-width: 0; padding:var(--sp-3) var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); outline: none; color: var(--text); background: var(--surface-1); font-size: var(--fs-meta); transition: border-color 140ms ease, box-shadow 140ms ease; }
 .launch-refine { margin-top:var(--sp-4); container-type: inline-size; }
 .launch-refine__toggle { width: 100%; min-height: 32px; display: flex; align-items: center; gap:var(--sp-4); padding:0 var(--sp-4); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); cursor: pointer; transition: background 120ms ease; }
 .launch-refine__toggle:hover, .launch-refine__toggle--expanded { background: var(--surface-1); }

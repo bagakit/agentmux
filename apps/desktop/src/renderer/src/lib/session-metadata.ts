@@ -1,10 +1,14 @@
 import type { SessionSnapshot } from '../../../shared/contracts'
 
 export function sessionTabTooltip(
-  session: Pick<SessionSnapshot, 'label' | 'id' | 'hostId' | 'workspacePath' | 'createdAt' | 'updatedAt'>
+  session: Pick<SessionSnapshot, 'label' | 'id' | 'hostId' | 'workspacePath' | 'createdAt' | 'updatedAt'>,
+  // The tab's shown name, when it differs from the Provider·Workspace label — a user rename, a single
+  // Agent's own name, or a family name. The tooltip leads with what the user sees, then keeps the
+  // low-frequency identity (id/host/cwd/times) below it. Absent falls back to session.label.
+  displayName?: string
 ): string {
   return [
-    session.label,
+    displayName ?? session.label,
     `Session ID: ${session.id}`,
     `Host: ${session.hostId}`,
     // The Agent's working directory is Core's session.workspacePath — the cwd of the running process.

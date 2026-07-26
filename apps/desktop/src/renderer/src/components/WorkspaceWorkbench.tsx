@@ -30,7 +30,7 @@ import {
 import { lazy, Suspense, useMemo, useRef, useState } from 'react'
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
 import { BrowserPane } from './BrowserPane'
-import { AgentProviderIcon } from './AgentProviderIcon'
+import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
 import { ConfirmationDialog } from './ConfirmationDialog'
 import { NewTabSurface } from './NewTabSurface'
 import { PaneSplitMenu } from './PaneSplitMenu'
@@ -51,17 +51,24 @@ import type {
   WorkspaceLayout
 } from '../lib/workbench-layout'
 import type { WorkbenchRegionLayoutNode } from '../lib/workbench-view-layout'
+import type { SessionSnapshot } from '../../../shared/contracts'
+import type { AgentTimelineSnapshot } from '@agentmux/core'
 import {
   activeWorkbenchSurface,
+  agentDisplayName,
   documentKey,
+  firstPromptFromTimeline,
   sessionIdsWithoutViewsAfterClosingTabs,
+  tabDisplayName,
   titleWorkbenchSurface,
   workbenchSurfaces,
+  type AgentNameFacts,
   type WorkbenchSurface,
   type WorkbenchTab
 } from '../lib/workbench-tabs'
 import { canStopSessionRun, sessionTabTooltip } from '../lib/session-metadata'
 import { copyableAgentSessionIdForTab } from '../lib/tab-control-handoff'
+import { handleTopicRenameKeyDown } from '../lib/topic-rename'
 import { api } from '../lib/api'
 import { useAppStore } from '../store'
 
@@ -74,7 +81,7 @@ type DragTabData = { kind: 'tab'; tabId: string; groupId: string }
 type DropData = DragTabData | { kind: 'pane'; groupId: string }
 type SplitTarget = { groupId: string; direction: SplitDirection }
 
-function tabLabel(tab: WorkbenchTab): string {
+function tabSurfaceFallback(tab: WorkbenchTab, sessions: readonly SessionSnapshot[]): string {
   const surface = titleWorkbenchSurface(tab)
   if (surface.kind === 'file') return surface.path.split('/').at(-1) ?? surface.path
   if (surface.kind === 'launcher') return 'New Tab'
@@ -83,14 +90,49 @@ function tabLabel(tab: WorkbenchTab): string {
       ? surface.title
       : surface.url === 'about:blank' ? 'New Tab' : surface.url
   }
-  return surface.sessionId
+  // Agent/terminal title surface: the Provider·Workspace fact is the session's own label (built once in
+  // Main), used verbatim as the chain's lowest tier — the renderer never re-derives that string.
+  const session = sessions.find((item) => item.id === surface.sessionId)
+  return session?.label ?? surface.sessionId
+}
+
+/**
+ * The renderer-side seam that feeds the naming SSOT chain: it turns a Store's Session projection into the
+ * per-Agent facts `tabDisplayName`/`agentDisplayName` consume. Every fact here already lives in the Store
+ * — user rename (`agentNames`), first prompt (`timelines`), the Provider·Workspace label (`session.label`)
+ * — so no second source of truth is introduced.
+ */
+function makeAgentFactsFor(
+  sessions: readonly SessionSnapshot[],
+  agentNames: Record<string, string>,
+  timelines: Record<string, AgentTimelineSnapshot>
+): (sessionId: string) => AgentNameFacts | null {
+  const sessionById = new Map(sessions.map((session) => [session.id, session]))
+  return (sessionId) => {
+    const session = sessionById.get(sessionId)
+    if (!session || session.kind !== 'agent') return null
+    return {
+      userName: agentNames[sessionId],
+      firstPrompt: firstPromptFromTimeline(timelines[sessionId]),
+      fallbackLabel: session.label,
+      providerLabel: agentProviderLabel(session.providerId)
+    }
+  }
 }
 
 function DragPreview({ tab }: { tab: WorkbenchTab }) {
+  const sessions = useAppStore((state) => state.sessions)
+  const agentNames = useAppStore((state) => state.agentNames)
+  const timelines = useAppStore((state) => state.timelines)
+  const label = tabDisplayName({
+    tab,
+    fallback: tabSurfaceFallback(tab, sessions),
+    agentFactsFor: makeAgentFactsFor(sessions, agentNames, timelines)
+  })
   return (
     <div className="tab-drag-preview">
       <GripVertical size={12} />
-      <span>{tabLabel(tab)}</span>
+      <span>{label}</span>
     </div>
   )
 }
@@ -105,10 +147,14 @@ function SortableWorkbenchTab({
   workspaceId: string
 }) {
   const sessions = useAppStore((state) => state.sessions)
+  const agentNames = useAppStore((state) => state.agentNames)
+  const timelines = useAppStore((state) => state.timelines)
   const dirtyDocuments = useAppStore((state) => state.dirtyDocuments)
   const tabsById = useAppStore((state) => state.tabs)
   const activateTab = useAppStore((state) => state.activateTab)
   const closeTab = useAppStore((state) => state.closeTab)
+  const renameTab = useAppStore((state) => state.renameTab)
+  const renameAgent = useAppStore((state) => state.renameAgent)
   const moveTabToNewGroup = useAppStore((state) => state.moveTabToNewGroup)
   const setTabMenuOpen = useAppStore((state) => state.setTabMenuOpen)
   const config = useAppStore((state) => state.config)
@@ -117,6 +163,14 @@ function SortableWorkbenchTab({
   const session = surface.kind === 'agent' || surface.kind === 'terminal'
     ? sessions.find((item) => item.id === surface.sessionId)
     : null
+  // The one place a tab's shown name is decided: the naming SSOT chain, fed the Store's own facts. It is
+  // NOT `session.label` — that is only the chain's lowest tier (Provider·Workspace), overridden by a user
+  // rename, a single Agent's own name, or the multi-Agent family name.
+  const displayName = tabDisplayName({
+    tab,
+    fallback: tabSurfaceFallback(tab, sessions),
+    agentFactsFor: makeAgentFactsFor(sessions, agentNames, timelines)
+  })
   const copyableAgentSessionId = copyableAgentSessionIdForTab(tab)
   // Only a Session projection can be moved, and only the Region actually carrying it. A file or
   // launcher View has no Session identity to relocate, so it offers no destinations at all.
@@ -136,6 +190,9 @@ function SortableWorkbenchTab({
     agentSessionCount: number
   } | null>(null)
   const [closing, setClosing] = useState(false)
+  // Inline rename reuses the topic-row pattern: a right-click menu entry flips the tab into an input, no
+  // second menu infrastructure. `rename` says which name this edit targets so one input serves both.
+  const [rename, setRename] = useState<{ target: 'tab' | 'agent'; value: string } | null>(null)
 
   async function closeTabs(
     tabIds: readonly string[],
@@ -197,6 +254,21 @@ function SortableWorkbenchTab({
   const tabsToRight = tabIdsForCloseScope(group.tabOrder, tab.id, 'right')
   const otherTabs = tabIdsForCloseScope(group.tabOrder, tab.id, 'others')
 
+  function beginRename(target: 'tab' | 'agent'): void {
+    // Seed the input with the CURRENT shown name, so an edit refines rather than starts blank. For a
+    // tab that is still on the derived strategy, `tab.name` is empty and the field seeds from displayName.
+    const seed = target === 'tab' ? (tab.name ?? displayName) : displayName
+    setRename({ target, value: seed })
+  }
+
+  function commitRename(): void {
+    if (!rename) return
+    const value = rename.value.trim()
+    if (rename.target === 'tab') renameTab(tab.id, value.length > 0 ? value : null)
+    else if (copyableAgentSessionId) renameAgent(copyableAgentSessionId, value.length > 0 ? value : null)
+    setRename(null)
+  }
+
   return (
     <>
       <WorkbenchTabContextMenu
@@ -208,6 +280,8 @@ function SortableWorkbenchTab({
         tabId={tab.id}
         copyableAgentSessionId={copyableAgentSessionId}
         writeClipboardText={(text) => api.ui.writeClipboardText(text)}
+        onRenameTab={() => beginRename('tab')}
+        {...(copyableAgentSessionId ? { onRenameAgent: () => beginRename('agent') } : {})}
         onClose={() => void requestTabsClose([tab.id])}
         onCloseOthers={() => void requestTabsClose(otherTabs)}
         onCloseLeft={() => void requestTabsClose(tabsToLeft)}
@@ -234,7 +308,7 @@ function SortableWorkbenchTab({
             isDragging ? 'workbench-tab--dragging' : ''
           }`}
           style={{ transform: CSS.Translate.toString(transform), transition }}
-          title={session ? sessionTabTooltip(session) : tabLabel(tab)}
+          title={session ? sessionTabTooltip(session, displayName) : displayName}
           onClick={() => activateTab(workspaceId, group.id, tab.id)}
           {...attributes}
           {...listeners}
@@ -250,13 +324,35 @@ function SortableWorkbenchTab({
           ) : (
             <Sparkles size={12} />
           )}
-          <span className="workbench-tab__label">{session?.label ?? tabLabel(tab)}</span>
+          {rename ? (
+            <input
+              autoFocus
+              className="workbench-tab__rename"
+              aria-label={rename.target === 'tab' ? 'Rename tab' : 'Rename agent'}
+              value={rename.value}
+              onChange={(event) => setRename({ target: rename.target, value: event.target.value })}
+              onClick={(event) => event.stopPropagation()}
+              onPointerDown={(event) => event.stopPropagation()}
+              onBlur={commitRename}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  commitRename()
+                  return
+                }
+                // 与 Topic 行同一套：拦下每个键不让拖拽 sensor 吞掉空格/方向键；Escape 取消。
+                handleTopicRenameKeyDown(event, { cancel: () => setRename(null) })
+              }}
+            />
+          ) : (
+            <span className="workbench-tab__label">{displayName}</span>
+          )}
           {dirty ? <i className="workbench-tab__dirty" aria-label="Unsaved" /> : null}
           <span
             role="button"
             tabIndex={0}
             className="workbench-tab__close"
-            aria-label={`Close ${session?.label ?? tabLabel(tab)}`}
+            aria-label={`Close ${displayName}`}
             onPointerDown={(event) => event.stopPropagation()}
             onClick={(event) => void requestClose(event)}
             onKeyDown={(event) => {
@@ -285,7 +381,7 @@ function SortableWorkbenchTab({
               pendingClose.agentSessionCount ? `${pendingClose.agentSessionCount} Agent Sessions` : null,
               pendingClose.dirtyCount ? `${pendingClose.dirtyCount} unsaved` : null
             ].filter(Boolean).join(' · ')
-          : session?.label ?? tabLabel(tab)}
+          : displayName}
         confirmLabel={pendingClose?.agentSessionCount ? 'Stop & Close' : 'Discard & Close'}
         {...(pendingClose?.agentSessionCount
           ? {

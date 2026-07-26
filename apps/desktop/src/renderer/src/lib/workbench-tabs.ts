@@ -3,6 +3,7 @@ import type {
   BrowserSnapshot,
   SessionSnapshot
 } from '../../../shared/contracts'
+import type { AgentTimelineSnapshot } from '@agentmux/core'
 import {
   findGroupForTab,
   removeTab,
@@ -21,6 +22,11 @@ import {
   scratchTopicIdFromWorkspacePath,
   workspaceOwnsSessionPath
 } from '../../../shared/scratch-topics'
+import {
+  resolveAgentName,
+  resolveTabName,
+  type TabAgentMember
+} from './display-name'
 
 export type AgentWorkbenchSurface = {
   regionId: string
@@ -72,6 +78,15 @@ export type WorkbenchTab = {
   titleRegionId: string
   layout: WorkbenchViewLayout
   regions: Record<string, WorkbenchSurface>
+  /**
+   * 用户手改的 Tab 显示名——最高优先级的那一档（见 `display-name.ts` 的优先级链）。
+   *
+   * 它是显示名，绝不进入 id/寻址 key：它是这个对象上的一个值，对象仍按 `id` 寻址，`titleRegionId`、
+   * `regions` 的 key、View 地址（`formatViewAddress(id)`）都与它无关，因此改名不动三级地址。
+   * 缺席即让默认策略接管（一个 Agent 对齐其名、多 Agent 用家族名）；一旦被设过，两条自动策略对
+   * 这张 Tab 永久停手。**只有这一个 Tab 模型**——名字是它的一个字段，不另建第二个 tab 对象承载它。
+   */
+  name?: string
 }
 
 export function initialWorkbenchRegionId(tabId: string): string {
@@ -80,15 +95,32 @@ export function initialWorkbenchRegionId(tabId: string): string {
 
 export function createWorkbenchTab(
   id: string,
-  surface: WorkbenchSurface
+  surface: WorkbenchSurface,
+  name?: string
 ): WorkbenchTab {
   return {
     id,
     workspaceId: surface.workspaceId,
     titleRegionId: surface.regionId,
     layout: createWorkbenchViewLayout(surface.regionId),
-    regions: { [surface.regionId]: surface }
+    regions: { [surface.regionId]: surface },
+    ...(name && name.trim().length > 0 ? { name: name.trim() } : {})
   }
+}
+
+/**
+ * 给 Tab 设一个用户手改名，或（传空）清除它交还给默认策略。
+ *
+ * 只动 `name` 这一个字段。id、titleRegionId、layout、regions 的 key 全部原样保留——这正是"改名绝不
+ * 破坏引用"这条前置约束在代码里的落点：session/region/tab 三级地址都不读 `name`，故改名后寻址与复制
+ * 路径完全不变。空白名视为清除（回到默认策略），不留一个空串把这张 Tab 钉死成手改态。
+ */
+export function renameWorkbenchTab(tab: WorkbenchTab, name: string | null): WorkbenchTab {
+  const trimmed = name?.trim() ?? ''
+  if (trimmed.length > 0) return { ...tab, name: trimmed }
+  if (tab.name === undefined) return tab
+  const { name: _cleared, ...rest } = tab
+  return rest
 }
 
 export function activeWorkbenchSurface(tab: WorkbenchTab): WorkbenchSurface {
@@ -229,6 +261,73 @@ export function tabStillOpen(layouts: Record<string, WorkspaceLayout>, tabId: st
 
 export function tabGroupForTab(layout: WorkspaceLayout | undefined, tabId: string): string | null {
   return layout ? (findGroupForTab(layout, tabId)?.id ?? null) : null
+}
+
+/**
+ * 从 timeline 里取首条用户消息作为"首条 prompt"派生源。取不到返回 null——没有对话不是错误。
+ * timeline 是 Store 已持有的投影，这里不新建第二份对话记录。
+ */
+export function firstPromptFromTimeline(timeline: AgentTimelineSnapshot | undefined): string | null {
+  const first = timeline?.items.find((item) => item.kind === 'user_message')
+  return first?.content ?? first?.title ?? null
+}
+
+/** 求一个 Agent 的显示名所需的全部投影事实。都是既有 Store 里已有的东西，本模块不新增来源。 */
+export type AgentNameFacts = {
+  /** 用户手改名（store.agentNames[sessionId]）。 */
+  userName?: string | null | undefined
+  /** 启动时指定名（当前由启动路径写入 agentNames，故与 userName 同源；保留独立入参供派生链表达该档）。 */
+  launchName?: string | null | undefined
+  /** 首条 prompt，用于派生。 */
+  firstPrompt?: string | null | undefined
+  /** Provider·Workspace 派生的兜底串，即 session.label（Main 唯一构建处）。 */
+  fallbackLabel: string
+  /** Provider 展示标签（如 "Codex"），用于多 Agent 时的家族名。 */
+  providerLabel: string
+}
+
+/**
+ * 一个 Agent 的最终显示名。所有展示 Agent 名的地方都调它，经《显示名与身份》那条唯一优先级链求值，
+ * 不各自拼一份。返回纯字符串即可满足展示；需要断言是哪一档胜出的调用方直接用 `resolveAgentName`。
+ */
+export function agentDisplayName(facts: AgentNameFacts): string {
+  return resolveAgentName({
+    userName: facts.userName,
+    launchName: facts.launchName,
+    firstPrompt: facts.firstPrompt,
+    fallback: facts.fallbackLabel
+  }).name
+}
+
+/**
+ * 一张 Tab 的最终显示名——Tab 名策略的唯一落点。
+ *
+ * 它把 Tab 上每个 Agent Region 经同一条链求出各自的名字，再按成员数量套用默认策略：
+ *   - 用户手改过（`tab.name` 存在）→ 用它，两条自动策略永久停手；
+ *   - 恰好一个 Agent → 对齐该 Agent 名；两个及以上 → 家族名（不冒充任一成员、不随 title region 跳变）；
+ *   - 没有 Agent 成员 → `fallback`（文件名 / "New Tab" / 浏览器标题等既有表面派生，由调用方给出）。
+ *
+ * 关键：家族名与"对齐单 Agent"都**不读** `tab.titleRegionId`——它遍历 `tab.regions` 里全部 agent
+ * 表面，故换 title region 不改变 Tab 名（这正是合同要求的"不随 title region 变化而跳变"）。
+ */
+export function tabDisplayName(input: {
+  tab: WorkbenchTab
+  fallback: string
+  /** 把一个 agent 表面的 sessionId 解析成它的显示名事实。取不到（如 session 尚未 attach）返回 null 跳过。 */
+  agentFactsFor(sessionId: string): AgentNameFacts | null
+}): string {
+  const agents: TabAgentMember[] = []
+  for (const surface of workbenchSurfaces(input.tab)) {
+    if (surface.kind !== 'agent') continue
+    const facts = input.agentFactsFor(surface.sessionId)
+    if (!facts) continue
+    agents.push({ name: agentDisplayName(facts), providerLabel: facts.providerLabel })
+  }
+  return resolveTabName({
+    userName: input.tab.name,
+    agents,
+    fallback: input.fallback
+  }).name
 }
 
 export function remapLayoutTabIds(

@@ -123,6 +123,7 @@ import {
   initialWorkbenchRegionId,
   tabGroupForTab,
   removeWorkbenchRegion,
+  renameWorkbenchTab,
   replaceWorkbenchRegion,
   sessionTabId,
   tabStillOpen,
@@ -219,6 +220,12 @@ type AppState = {
   hostChecks: Record<string, HostCheckState>
   browserAnnotationsByBrowserId: Record<string, BrowserAnnotation[]>
   agentComposerDrafts: Record<string, string>
+  /**
+   * 用户手改的 Agent 显示名，按 Agent Session id 存。这是《显示名与身份》优先级链最高的那一档——
+   * 名字只用于显示，绝不进入 id/寻址：这里的 key 是既有的 session id（寻址身份），value 只是一个
+   * 展示字符串，改它不动任何地址。Tab 手改名不在这里——它是 WorkbenchTab.name，与 Tab 同生命周期。
+   */
+  agentNames: Record<string, string>
   mainSurface: MainSurface
   projectRailOpen: boolean
   toolsOpen: boolean
@@ -307,6 +314,16 @@ type AppState = {
   createScratchTopic(): Promise<ScratchTopicSnapshot>
   openScratchTopic(topicId: string): Promise<void>
   renameScratchTopic(topicId: string, title: string): Promise<ScratchTopicSnapshot>
+  /**
+   * 给一个 Agent 设用户手改名（传空清除，交还派生链）。只写 `agentNames[sessionId]`，不碰 session id、
+   * run、寻址或 Core——名字是纯展示投影，永不进 Core Session 事实。
+   */
+  renameAgent(sessionId: string, name: string | null): void
+  /**
+   * 给一张 Tab 设用户手改名（传空清除，交还默认策略）。只改 `WorkbenchTab.name` 一个字段，id 与三级
+   * 地址原样不动。用户手改后，"单 Agent 对齐 / 多 Region 家族名"两条自动策略对这张 Tab 永久停手。
+   */
+  renameTab(tabId: string, name: string | null): void
   createPath(input: CreateWorkspacePathInput): Promise<void>
   renamePath(path: string, nextPath: string): Promise<void>
   deletePath(path: string): Promise<void>
@@ -326,7 +343,13 @@ type AppState = {
     prompt: string,
     tabGroupId: string,
     launcher?: { tabId: string; regionId: string },
-    launchOptions?: LaunchOptionSelection
+    launchOptions?: LaunchOptionSelection,
+    /**
+     * 启动对话框里填的名字。两个都留空是正常情况——此时不写任何名字，显示名交还派生链
+     * （见 lib/display-name.ts 的优先级链）。名字在这里写而不由调用方写，是因为 sessionId
+     * 与 tabId 都在本函数内部生成，从不出参。
+     */
+    names?: { agentName?: string | undefined; tabName?: string | undefined }
   ): Promise<void>
   launchTerminal(
     tabGroupId: string,
@@ -942,6 +965,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   hostChecks: {},
   browserAnnotationsByBrowserId: {},
   agentComposerDrafts: {},
+  agentNames: {},
   mainSurface: 'workbench',
   projectRailOpen: true,
   toolsOpen: true,
@@ -1909,6 +1933,25 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   setViewMode(sessionId, mode) {
     set((state) => ({ viewModes: { ...state.viewModes, [sessionId]: mode } }))
   },
+  renameAgent(sessionId, name) {
+    const trimmed = name?.trim() ?? ''
+    set((state) => {
+      if (trimmed.length > 0) {
+        return { agentNames: { ...state.agentNames, [sessionId]: trimmed } }
+      }
+      if (state.agentNames[sessionId] === undefined) return state
+      const { [sessionId]: _cleared, ...rest } = state.agentNames
+      return { agentNames: rest }
+    })
+  },
+  renameTab(tabId, name) {
+    set((state) => {
+      const tab = state.tabs[tabId]
+      if (!tab) return state
+      const renamed = renameWorkbenchTab(tab, name)
+      return renamed === tab ? state : { tabs: { ...state.tabs, [tabId]: renamed } }
+    })
+  },
   setMainSurface(mainSurface) {
     set({ mainSurface })
   },
@@ -2339,7 +2382,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       : undefined
     await get().launchAgent(executorId, prompt, layout.activeGroupId, launcher)
   },
-  async launchAgent(executorId, prompt, tabGroupId, launcher, launchOptions) {
+  async launchAgent(executorId, prompt, tabGroupId, launcher, launchOptions, names) {
     const state = get()
     const launcherTab = launcher ? state.tabs[launcher.tabId] : undefined
     const launcherSurface = launcherTab && launcher
@@ -2490,6 +2533,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // 失败路径（下方 catch → reduceSessionLaunchFailed）绝不清：region 会翻回 launcher 且沿用同一个
       // regionId，草稿留在原地供用户直接重试。这正是用户报告"报错退回初始页、之前输入没缓存"要修的行为。
       get().clearAgentComposerDraftIfUnchanged(regionId, prompt)
+      // 名字与草稿同一时机落地：Agent 已经挂上，两个 id 才真正指向一个存在的东西。失败路径不写，
+      // 否则会留下一个指向已消失 session 的孤儿名字。留空即不写，显示名交还派生链。
+      if (names?.agentName) get().renameAgent(sessionId, names.agentName)
+      if (names?.tabName) get().renameTab(tabId, names.tabName)
       if (timelineGapSessionId) void get().resyncTimeline(timelineGapSessionId)
     } catch (error) {
       if (!ownsSessionLaunch(findWorkbenchRegion(get().tabs, regionId)?.surface, 'agent', sessionId)) {
@@ -3185,6 +3232,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     restoredWorkbench: projectPersistedWorkbench({ tabs: state.tabs, layouts: state.layouts }),
     unclaimedTerminalSessionIds: state.unclaimedTerminalSessionIds,
     // 拖出来的顺序是用户意图，重开应该还在。它只是偏好：恢复时对不上磁盘的条目会被 orderTopics 丢掉。
-    scratchTopicOrder: state.scratchTopicOrder
+    scratchTopicOrder: state.scratchTopicOrder,
+    // Agent 手改名是用户意图，重开要还在。key 是 session id；已消失的 session 留一条死名字无害——
+    // 它不投影到任何界面（没有对应 session），下次同 id 复现的概率是 uuid 级零。
+    agentNames: state.agentNames
   })
 }))
