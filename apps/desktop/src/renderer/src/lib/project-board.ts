@@ -95,6 +95,22 @@ export function sessionBoardColumn(
   }
 }
 
+/**
+ * Count the live Agent Sessions that belong to the Board's working column.
+ *
+ * Project Rail uses this as a presence signal, rather than re-interpreting individual status
+ * strings. Keeping the predicate on the Board projection means `starting`, `running`, and `working`
+ * stay in lockstep everywhere a surface says that an Agent is running.
+ */
+export function workingAgentCount(sessions: readonly SessionSnapshot[]): number {
+  return sessions.reduce(
+    (count, session) => (
+      session.kind === 'agent' && sessionBoardColumn(session) === 'working' ? count + 1 : count
+    ),
+    0
+  )
+}
+
 function groupRuns(
   sessions: readonly SessionSnapshot[]
 ): Record<ProjectBoardColumn, SessionSnapshot[]> {

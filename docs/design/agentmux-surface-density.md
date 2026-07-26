@@ -162,6 +162,7 @@
 - 同一语义在不同容器中使用同一控件层级。
 - **选中态一律不用左侧竖条（inset 竖线）**。一条贴边的亮色竖线是"AI 生成的管理后台"最容易辨认的印记：它既不是填充也不是描边，只是一根贴在行左缘的装饰，在密集列表里连成一片噪音。选中由**单一几何信号**表达——干净的 Surface 填充，必要时配实心图标格。这条对所有列表行成立（Project Rail、Topic、Tree、Segment、Settings 分区），没有例外；`box-shadow: inset <n>px 0 ...` 这一形状不得用于表达选中。这条由 `apps/desktop/test/surface-selection-contract.test.ts` 守住：它从 CSS 推出所有水平方向的 inset 竖条并在选中态类名上断言其不存在，加回一条会红。
 - **一列全同的图标不是信息，是宽度开销**。若某个列表里每一行的行首图标都相同（Topic 行的 Topic 图标、纯文件列表的文件图标），去掉它——图标的价值在于区分，无可区分时它只在挤压标题的可读宽度。行首位置留给真正有区分度的东西（状态、Provider 身份）或干脆留白。
+- Project Rail 还要把状态槽和选择槽分开：选中行使用中性 Surface 填充与文字层级，运行中的 Agent 使用独立的小状态点/状态槽；不得用选中态的图标增亮来暗示“只有这个项目在运行”。普通 Project 行去掉重复的文件夹图标，标题从统一的左缘开始；只有有身份区分价值的特殊工作区图标可以保留。`Projects` 分组标签使用 `--fs-micro` 的元信息尺度与轻字重，不得比项目行标题更醒目。
 - hover 提升 Surface 明度；active 用内阴影表达按下，不靠边框位移。
 - 输入聚焦统一使用 `--focus-line` 与 `--focus-ring`。
 - 圆角只使用 `--radius-sm`、`--radius`、`--radius-lg` 三档，**两类例外据实开放**：其一是紧凑交互控件——24px 图标按钮、Tree/File Row、Tab 与 Region 的关闭键、pane 动作等在 6px 下会显得过圆，故取 4–5px；其二是微标与装饰件——状态点、hairline 轨道、ruler tick、图标裁角、选中标记等取 1–3px。例外只对**这两类**成立：面性容器（卡片、菜单、弹窗、输入框、工具坞）一律走 token，不得因为"看起来更合适"而硬编码。这条由 `apps/desktop/test/surface-radius-contract.test.ts` 守住：它从 CSS 推出所有低于最小 token 的圆角并核对是否落在已声明的例外清单内，新增一个未声明的硬编码圆角会红。
@@ -202,6 +203,8 @@
 | Titlebar Plane / root Tabbar | 36px | 与窗口顶边和相邻 header 对齐 |
 | Pane Tabbar | 31px | 分屏 leaf 的紧凑索引高度 |
 | Project Rail Footer / Corner Badge | 32px / 28px | Footer 只容纳两个 24px 图标入口 |
+| Project Rail Section Label | `--fs-micro`；轻字重；紧凑上下留白 | `Projects` 是分组标签，不是页面标题；项目名称保持主要阅读层级 |
+| Project Rail Row | 28–32px；标题从统一左缘起；尾部独立运行状态槽 | 选中只用中性 Surface；运行中的 Agent 在所有相关项目行显示独立状态点；普通行不占重复图标槽 |
 | Explorer / Branch Header | 32–34px | 不形成第二层大 Topbar |
 | Tree Row | 24px | 保持键盘扫描和专家密度 |
 | Tool Dock Width | 默认 300px；最小 236px；最大 440px | 同时容纳 Explorer / Branches，保留主工作面容量 |
