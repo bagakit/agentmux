@@ -68,8 +68,14 @@ const resourceWindow = window as typeof window & {
 }
 resourceWindow.__agentmuxMonacoModelCount = () => monaco.editor.getModels().length
 resourceWindow.__agentmuxMonacoEditorCount = () => monaco.editor.getEditors().length
+// 隐藏的 Tab 不再被卸载（改用 visibility:hidden 保活），而 visibility:hidden 的节点 isConnected
+// 仍是 true——所以「第一个连着的 editor」会一直是先打开的那个，读数永远停在旧文件上。判定必须再问
+// 一句「它在不在隐藏区里」，取用户真正看得见的那个。
 const mountedEditorModel = () => monaco.editor.getEditors()
-  .find((editor) => editor.getDomNode()?.isConnected)
+  .find((editor) => {
+    const node = editor.getDomNode()
+    return node?.isConnected === true && node.closest('.pane-body__region[data-active="false"]') === null
+  })
   ?.getModel() ?? null
 resourceWindow.__agentmuxFileEditingProbe = {
   value: () => mountedEditorModel()?.getValue() ?? null,
