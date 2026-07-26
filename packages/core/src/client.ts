@@ -537,24 +537,26 @@ export class AgentMuxClient {
         })
       })
       await this.tryRestoreHookIngress(runs)
-      for (const session of this.registry.list()) {
+      // Probe every running Session together. A serial `await` here makes N healthy Agents
+      // wait behind N ten-second capability windows, which is especially visible when the
+      // user opens several sessions at once. Each promise still owns one exact Run; only the
+      // scoped vanished-Run classification is consumed here. Unknown errors remain fatal, but
+      // we wait for all probes to settle first so a slow sibling cannot be abandoned halfway
+      // through its cleanup and leave a shared attachment behind.
+      const handshakeErrors: unknown[] = []
+      await Promise.all(this.registry.list().map(async (session) => {
         const run = runs.find((candidate) => candidate.runId === session.run.runId)
-        if (run?.state.type === 'running') {
-          // 爆炸半径收敛到单个 session。这个 catch 存在的唯一理由：外层 catch 会
-          // `kernel.disconnect()`，所以一条慢探测冒到这里就会拆掉整条连接，把所有健康的 Agent
-          // 一起带走。降级的那一类必须在这里就被吃掉——只有它，中止的那一类照旧往外抛。
-          try {
-            await this.ensureTerminalHandshakeOrDegrade(session, run)
-          } catch (error) {
+        if (run?.state.type !== 'running') return
+        try {
+          await this.ensureTerminalHandshakeOrDegrade(session, run)
+        } catch (error) {
+          if (
+            error instanceof AgentMuxError &&
+            error.code === AGENT_TERMINAL_HANDSHAKE_FAILED
+          ) {
             // A Run that vanished during this Session's handshake is a real failure for this exact
             // Agent, but it is not a failure of the shared CtxMux connection. Keep the other Sessions
-            // attachable and make the scoped failure visible to the renderer. Unknown errors and Store
-            // invariant failures still escape to the outer guard, which tears down the connection
-            // rather than guessing that an unclassified condition is harmless.
-            if (
-              !(error instanceof AgentMuxError) ||
-              error.code !== AGENT_TERMINAL_HANDSHAKE_FAILED
-            ) throw error
+            // attachable and make the scoped failure visible to the renderer.
             this.publisher.publish({
               type: 'agent-error',
               agentSessionId: session.agentSessionId,
@@ -566,9 +568,15 @@ export class AgentMuxClient {
                 run: { ...session.run }
               }
             })
+            return
           }
+          // Preserve the existing fail-closed behavior for Store invariant failures and
+          // unclassified transport errors. Promise.all waits for sibling probes rather than
+          // serializing their ten-second timers.
+          handshakeErrors.push(error)
         }
-      }
+      }))
+      if (handshakeErrors.length > 0) throw handshakeErrors[0]
       await this.recoverPendingInteractionResponses(runs)
       this.assertConnectionEpoch(epoch)
       this.connected = true
