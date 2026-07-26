@@ -88,6 +88,23 @@ function workspaceLabel(config: AppConfig, hostId: string, path: string): string
     ?? path
 }
 
+/**
+ * The Provider·Workspace derived name — the LOWEST tier of the display-name priority chain (see the
+ * renderer's `display-name.ts`). This is the ONE place that builds that string; it rides on `session.label`
+ * and the renderer consumes it verbatim as the chain's fallback, never re-deriving it. Every agent Session
+ * and recovery candidate takes its label from here so the three sites cannot drift apart.
+ */
+function agentFallbackLabel(
+  config: AppConfig,
+  session: { executorId: AgentExecutorId; providerId: AgentProviderId; hostId: string; workspacePath: string }
+): string {
+  const configuredExecutor = config.executors[session.executorId]
+  const executorLabel = configuredExecutor?.providerId === session.providerId
+    ? configuredExecutor.label
+    : session.executorId
+  return `${executorLabel} · ${workspaceLabel(config, session.hostId, session.workspacePath)}`
+}
+
 function terminalInputKey(hostId: string, runId: string): string {
   return JSON.stringify([hostId, runId])
 }
@@ -147,10 +164,6 @@ function projectSession(
     ...(run.exitCode === undefined ? {} : { exitCode: run.exitCode })
   }
   if (subject.kind === 'agent') {
-    const configuredExecutor = config.executors[subject.executorId]
-    const executorLabel = configuredExecutor?.providerId === subject.providerId
-      ? configuredExecutor.label
-      : subject.executorId
     const status = run.state === 'running' && subject.agentSession.semanticStatus
       ? structuredClone(subject.agentSession.semanticStatus)
       : processStatus
@@ -170,7 +183,7 @@ function projectSession(
       },
       hostId: subject.hostId,
       workspacePath: subject.workspacePath,
-      label: `${executorLabel} · ${workspaceLabel(config, subject.hostId, subject.workspacePath)}`,
+      label: agentFallbackLabel(config, subject),
       createdAt: subject.agentSession.createdAt,
       updatedAt: Math.max(subject.agentSession.updatedAt, observedAt),
       // The posture the create fixed at spawn. Projected as ids only: a surface resolves them against
@@ -498,10 +511,6 @@ export class RuntimeController {
       )))
       return client.agentSessions().flatMap((session): AgentSessionRecoveryCandidate[] => {
         if (projected.has(session.agentSessionId)) return []
-        const configuredExecutor = config.executors[session.executorId]
-        const executorLabel = configuredExecutor?.providerId === session.providerId
-          ? configuredExecutor.label
-          : session.executorId
         return [{
           agentSessionId: session.agentSessionId,
           hostId: session.hostId,
@@ -509,7 +518,7 @@ export class RuntimeController {
           providerId: session.providerId,
           executorId: session.executorId,
           capabilities: client.providers.get(session.providerId).catalog.capabilities,
-          label: `${executorLabel} · ${workspaceLabel(config, session.hostId, session.workspacePath)}`,
+          label: agentFallbackLabel(config, session),
           createdAt: session.createdAt,
           updatedAt: session.updatedAt,
           run: { ...session.run }
