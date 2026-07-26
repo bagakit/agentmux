@@ -1,7 +1,7 @@
 import { execFile, spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { createRequire } from 'node:module'
-import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, chmod, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
@@ -16,11 +16,48 @@ const manifestPath = join(coreRoot, 'vendor', 'ctxmux', 'darwin-arm64', 'manifes
 const directory = await mkdtemp(join(tmpdir(), 'agentmux-desktop-resource-'))
 const runtimeDirectory = await mkdtemp('/private/tmp/amx-desktop-resource-')
 const userData = join(directory, 'user-data')
-const workspace = join(directory, 'workspace')
+const workspaceRoot = join(directory, 'workspaces')
+const measuredWorkspaces = [
+  { id: 'resource-workspace-a', name: 'Resource Probe A', path: join(workspaceRoot, 'a') },
+  { id: 'resource-workspace-b', name: 'Resource Probe B', path: join(workspaceRoot, 'b') },
+  { id: 'resource-workspace-c', name: 'Resource Probe C', path: join(workspaceRoot, 'c') }
+]
+const workspace = measuredWorkspaces[0].path
 const reportPath = join(directory, 'report.json')
 const entry = resolve(import.meta.dirname, '../out/main/index.js')
 const socketPath = join(runtimeDirectory, 'ctxmux.sock')
 const stateDirectory = join(runtimeDirectory, 'state')
+
+async function pathExists(path) {
+  try {
+    await access(path)
+    return true
+  } catch (error) {
+    if (error && typeof error === 'object' && error.code === 'ENOENT') return false
+    throw error
+  }
+}
+
+async function assertProbePathsRemoved() {
+  const paths = [
+    directory,
+    runtimeDirectory,
+    userData,
+    workspaceRoot,
+    ...measuredWorkspaces.map(({ path }) => path),
+    reportPath,
+    socketPath,
+    stateDirectory,
+    join(runtimeDirectory, 'owner.json')
+  ]
+  const remaining = []
+  for (const path of paths) {
+    if (await pathExists(path)) remaining.push(path)
+  }
+  if (remaining.length > 0) {
+    throw new Error(`Desktop resource probe cleanup left paths behind: ${remaining.join(', ')}`)
+  }
+}
 
 async function ownedDaemonPids() {
   let receipt = null
@@ -151,13 +188,15 @@ async function main() {
   let daemonCount = 0
   let sourceCommit = null
   let trackedDiff = null
+  let finalCommit = null
+  let finalStatus = null
   let manifest = null
   let receiptlessDaemonCleanup = false
 
   try {
     const evidence = await Promise.all([
       execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: repositoryRoot }),
-      execFileAsync('git', ['status', '--porcelain=v1', '--untracked-files=no'], { cwd: repositoryRoot }),
+      execFileAsync('git', ['status', '--porcelain=v1', '--untracked-files=all'], { cwd: repositoryRoot }),
       readFile(manifestPath, 'utf8')
     ])
     sourceCommit = evidence[0]
@@ -166,11 +205,14 @@ async function main() {
     await Promise.all([
       mkdir(userData, { recursive: true }),
       chmod(runtimeDirectory, 0o700),
-      mkdir(workspace, { recursive: true })
+      mkdir(workspaceRoot, { recursive: true }),
+      ...measuredWorkspaces.map(({ path }) => mkdir(path, { recursive: true }))
     ])
     await exerciseReceiptlessDaemonCleanup()
     receiptlessDaemonCleanup = true
-    await writeFile(join(workspace, 'resource-probe.ts'), 'export const value = 1\n'.repeat(20_000))
+    await Promise.all(measuredWorkspaces.map(({ path }) => (
+      writeFile(join(path, 'resource-probe.ts'), 'export const value = 1\n'.repeat(20_000))
+    )))
     await writeFile(join(userData, 'agentmux.config.json'), `${JSON.stringify({
       version: 7,
       hosts: [{ id: 'local', kind: 'local', label: 'Resource Probe' }],
@@ -192,16 +234,39 @@ async function main() {
         antigravity: { label: 'Antigravity', providerId: 'antigravity', command: 'agy', args: [], env: {}, injectAgentMuxGuide: true },
         cursor: { label: 'Cursor', providerId: 'cursor', command: 'cursor-agent', args: [], env: {}, injectAgentMuxGuide: true }
       },
-      workspaces: [{ id: 'resource-workspace', name: 'Resource Probe', hostId: 'local', path: workspace, kind: 'folder' }],
+      workspaces: measuredWorkspaces.map(({ id, name, path }) => ({
+        id,
+        name,
+        hostId: 'local',
+        path,
+        kind: 'folder'
+      })),
       appearance: { terminalTheme: 'graphite' },
       browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
     }, null, 2)}\n`, { mode: 0o600 })
 
-    child = spawn(electron, [`--user-data-dir=${userData}`, entry], {
+    child = spawn(electron, [`--user-data-dir=${userData}`, '--js-flags=--expose-gc', entry], {
       env: {
         ...process.env,
+        // The main process deliberately binds Electron's userData path so dev and packaged
+        // launches share durable state. A probe must override that binding with its own
+        // isolated directory; otherwise an already-running desktop instance owns the
+        // single-instance lock and the probe exits before writing a report.
+        AGENTMUX_DESKTOP_USER_DATA: userData,
         AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory,
         AGENTMUX_DESKTOP_RESOURCE_REPORT: reportPath,
+        AGENTMUX_DESKTOP_RESOURCE_IDENTITY: JSON.stringify({
+          agentmuxCommit: sourceCommit.stdout.trim(),
+          worktreeStatus: trackedDiff.stdout,
+          ctxmux: {
+            sourceCommit: manifest.source.commit,
+            sourceTree: manifest.source.tree,
+            protocolVersion: manifest.product.protocol,
+            artifactPlatform: `${manifest.support.platform}-${manifest.support.architecture}`,
+            daemonSha256: manifest.binaries.find((binary) => binary.name === 'ctxmuxd')?.sha256 ?? null
+          },
+          platform: `${process.platform}-${process.arch}`
+        }),
         AGENTMUX_DESKTOP_SPAWNED_AT_MS: String(Date.now()),
         ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
       },
@@ -246,24 +311,24 @@ async function main() {
     if (!sourceCommit || !trackedDiff || !manifest) {
       throw new Error('Desktop resource probe identity evidence is incomplete.')
     }
-    const [finalCommit, finalStatus] = await Promise.all([
+    ;[finalCommit, finalStatus] = await Promise.all([
       execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: repositoryRoot }),
-      execFileAsync('git', ['status', '--porcelain=v1', '--untracked-files=no'], { cwd: repositoryRoot })
+      execFileAsync('git', ['status', '--porcelain=v1', '--untracked-files=all'], { cwd: repositoryRoot })
     ])
-    if (
-      finalCommit.stdout !== sourceCommit.stdout ||
-      finalStatus.stdout !== trackedDiff.stdout
-    ) {
-      throw new Error('Desktop resource probe repository identity changed during measurement.')
-    }
+    const worktreeStable = finalStatus.stdout === trackedDiff.stdout
+    const sourceCommitStable = finalCommit.stdout === sourceCommit.stdout
     const daemon = manifest.binaries.find((binary) => binary.name === 'ctxmuxd')
     const receipt = {
       ...report,
       identity: {
         agentmux: {
           sourceCommit: sourceCommit.stdout.trim(),
+          endCommit: finalCommit.stdout.trim(),
           trackedDiffClean: trackedDiff.stdout.trim().length === 0,
-          worktreeStable: true
+          worktreeStable,
+          sourceCommitStable,
+          statusAtStart: trackedDiff.stdout,
+          statusAtEnd: finalStatus.stdout
         },
         ctxmux: {
           sourceCommit: manifest.source.commit,
@@ -282,10 +347,17 @@ async function main() {
     }
     process.stdout.write(`T017_DESKTOP_RESOURCE_RECEIPT=${JSON.stringify(receipt)}\n`)
   }
-  await Promise.all([
-    rm(directory, { recursive: true, force: true }),
-    rm(runtimeDirectory, { recursive: true, force: true })
-  ])
+  try {
+    await Promise.all([
+      rm(directory, { recursive: true, force: true }),
+      rm(runtimeDirectory, { recursive: true, force: true })
+    ])
+    await assertProbePathsRemoved()
+  } catch (cleanupError) {
+    failure = failure
+      ? new AggregateError([failure, cleanupError], 'Desktop resource probe cleanup failed.')
+      : cleanupError
+  }
   if (failure) throw failure
 }
 

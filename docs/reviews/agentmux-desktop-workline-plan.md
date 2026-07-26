@@ -1,12 +1,27 @@
 # Task Plan Review — AgentMux Desktop Workline Surfaces
 
-日期：2026-08-29
-Plan revision：2
+日期：2026-08-30
+Plan revision：3
 设计 SSOT：`docs/design/agentmux-desktop-interaction.md`（《Board 与 Settings》《状态栏》《显示名与身份》三节，通知相关约束在《顶部与项目栏》）
 
 ## 结论
 
-**approved.** 七个 task 各自可独立验收，依赖关系与用户确认的落地顺序一致。
+**approved.** 八个 task 各自可独立验收，依赖关系与用户确认的落地顺序一致。
+
+## Revision 3：新增 T-008（Project Rail 视觉语义与简化）
+
+本轮用户反馈为：左侧 `Projects` 文字存在感过强；选中项目的图标变亮容易被误读成
+“只有这个项目有 Agent 在跑”；普通项目行的重复图标没有信息价值，希望改成参考图那样的
+紧凑列表。
+
+落点是同一个 Project Rail Closure，不新增 Runtime 或 Session 状态：
+
+1. `Projects` 只作为分组标签，使用低于项目行标题的元信息层级。
+2. 选中只由中性整行 Surface/`aria-current` 表达；运行状态由 `sessionBoardColumn` 的
+   `working` 列派生，在每个有运行中 Agent 的项目行独立显示，不受选中与否影响。
+3. 普通项目去掉重复 `FolderGit2` 槽；Scratch 的独特图标只有在承担工作区身份时保留。
+
+T-008 的验收会同时覆盖选中/运行的四种组合，避免回到“亮图标=选中且运行”的单一信号。
 
 ## Revision 2：新增 T-007（通知内容与停留时长）
 

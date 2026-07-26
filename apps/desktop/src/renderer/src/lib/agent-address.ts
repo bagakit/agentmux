@@ -162,9 +162,10 @@ export function addressingRecovery(error: {
     return formatTargetNotUnique(error.candidates ?? [])
   }
   if (error.code === 'MESSAGE_TARGET_NOT_AGENT') {
-    // 这里**故意不给命令**。想给的那条是 `agentmux inspect --tab=<tabId>`，但 tabId 在抛出点
-    // 就被丢掉了（store.ts 只带 code 与 message 过来），恢复层拿不到。凑一条跑不了的命令比不给
-    // 更糟：它看起来像出路，粘贴过去却只会撞 INVALID_CLI_ARGUMENT，把人引向第二次失败。
+    // 这里**故意不给命令**。想给的那条是 `agentmux inspect --region=<regionId>`——这个码只在
+    // Region 分支抛（store.ts:1624 的 `region.kind !== 'agent'`，全仓仅此一处），所以丢掉的是
+    // regionId 而不是 tabId。但抛出点只带 code 与 message 过来，恢复层拿不到它。凑一条跑不了的
+    // 命令比不给更糟：它看起来像出路，粘贴过去却只会撞 INVALID_CLI_ARGUMENT，把人引向第二次失败。
     return `这一格不是 Agent（是终端、浏览器或文件）。
 在承载 Agent 的那一格上右键重取地址；或按语义身份寻址：
 ${LIST_SESSIONS}`
@@ -179,6 +180,21 @@ ${LIST_SESSIONS}`
     // 界面里做，这一句没有对应命令。能给的是另一条路：Session 跨 View 稳定，用它照样够得到。
     return `这个地址指向的 View 或 Region 已经不存在了（被关掉或重新分屏过）。
 要回到那个位置，在界面里重新取一次地址；要够到同一个 Agent，用它跨 View 稳定的 Session 身份：
+${LIST_SESSIONS}`
+  }
+  if (error.code === 'AMBIGUOUS_REGION_TARGET' || error.code === 'AMBIGUOUS_TAB_TARGET') {
+    // 与 MESSAGE_TARGET_NOT_UNIQUE 同形（"匹配到不止一个"），但少一样东西：那边带 candidates，
+    // 这边不带——抛出点只知道"不唯一"，没把匹配到的是哪几个带过来。所以这里给不出逐个候选的
+    // 命令，只能给一条真能跑的、能自己看出有哪些的路。
+    return `这个地址匹配到不止一个目标，无法唯一寻址。
+列出活着的 Agent，改用唯一的 Session 身份：
+${LIST_SESSIONS}`
+  }
+  if (error.code === 'CALLER_NOT_OPEN') {
+    // 这是 `self` 相对寻址失败：调用方自己没显示在任何一格里，于是"我旁边那个"无从算起。
+    // 下一步不是换个 flag，而是换一种身份——别再相对定位，直接指名道姓。
+    return `发起方自己没有显示在任何一格里，相对寻址（self）无从算起。
+改用绝对身份寻址，先列出活着的 Agent：
 ${LIST_SESSIONS}`
   }
   // 不是寻址失败。别硬编一句放之四海的"再试一次"——那种话等于没说，还会盖住真正的原因。

@@ -1,9 +1,10 @@
-import { FolderGit2, Pin, Plus, RadioTower, Sparkles } from 'lucide-react'
+import { Pin, Plus, RadioTower, Sparkles } from 'lucide-react'
 import { useMemo } from 'react'
 import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
 import { api } from '../lib/api'
 import { projectRailNavigation, workspaceProjectId } from '../lib/workspace-projects'
 import { rowAttention, rowAttentionLabel } from '../lib/row-attention'
+import { workingAgentCount } from '../lib/project-board'
 import { useAppStore } from '../store'
 import type { SettingsSectionId } from './SettingsPanel'
 import { ProjectRailToolbar } from './ProjectRailToolbar'
@@ -33,6 +34,9 @@ export function WorkspaceSidebar({
   const scratchSessionCount = scratch
     ? sessions.filter((session) => workspaceOwnsSessionPath(scratch, session)).length
     : 0
+  const scratchWorkingAgentCount = scratch
+    ? workingAgentCount(sessions.filter((session) => workspaceOwnsSessionPath(scratch, session)))
+    : 0
 
   async function chooseFolder(): Promise<void> {
     const workspace = await api.workspaces.chooseLocalFolder()
@@ -51,6 +55,12 @@ export function WorkspaceSidebar({
           <button
             className={`project-rail-row scratch-workspace-row ${activeWorkspaceId === scratch.id ? 'project-rail-row--active' : ''}`}
             aria-current={activeWorkspaceId === scratch.id ? 'page' : undefined}
+            aria-label={[
+              'Scratch',
+              ...(scratchWorkingAgentCount > 0
+                ? [`${scratchWorkingAgentCount} ${scratchWorkingAgentCount === 1 ? 'Agent is' : 'Agents are'} running`]
+                : [])
+            ].join(' · ')}
             title={scratch.path}
             onClick={() => void selectWorkspace(scratch.id)}
           >
@@ -63,6 +73,15 @@ export function WorkspaceSidebar({
               className="scratch-workspace-row__meta"
               title={`Pinned workspace · ${scratchSessionCount} sessions`}
             >
+              {scratchWorkingAgentCount > 0 ? (
+                <span
+                  className="project-rail-row__activity status status--working"
+                  aria-hidden="true"
+                  title={`${scratchWorkingAgentCount} ${scratchWorkingAgentCount === 1 ? 'Agent is' : 'Agents are'} running`}
+                >
+                  <span className="status__dot" />
+                </span>
+              ) : null}
               <Pin size={10} />
               <span>{scratchSessionCount}</span>
             </span>
@@ -83,6 +102,11 @@ export function WorkspaceSidebar({
           // collapsed project can no longer hide an Agent that is waiting on you.
           const attention = rowAttention(projectSessions)
           const attentionLabel = rowAttentionLabel(attention)
+          const runningAgentCount = workingAgentCount(projectSessions)
+          const runningLabel = runningAgentCount > 0
+            ? `${runningAgentCount} ${runningAgentCount === 1 ? 'Agent is' : 'Agents are'} running`
+            : null
+          const rowStateLabel = [runningLabel, attentionLabel].filter(Boolean).join(' · ')
           const active = project.id === activeProjectId
           const preferred = active
             ? activeWorkspaceId
@@ -91,9 +115,11 @@ export function WorkspaceSidebar({
             <button
               key={project.id}
               className={`project-rail-row ${active ? 'project-rail-row--active' : ''}`}
-              title={attentionLabel ? `${project.repoPath} · ${attentionLabel}` : project.repoPath}
-              {...(attentionLabel ? { 'aria-label': `${project.name} · ${attentionLabel}` } : {})}
+              title={rowStateLabel ? `${project.repoPath} · ${rowStateLabel}` : project.repoPath}
+              aria-label={rowStateLabel ? `${project.name} · ${rowStateLabel}` : project.name}
+              data-workspace-id={preferred ?? undefined}
               {...(attention.category ? { 'data-attention': attention.category } : {})}
+              {...(runningAgentCount > 0 ? { 'data-running': 'true' } : {})}
               onClick={() => {
                 if (!preferred) return
                 const keepBoardOpen = mainSurface === 'board'
@@ -102,10 +128,16 @@ export function WorkspaceSidebar({
                 })
               }}
             >
-              <span className="project-rail-row__icon"><FolderGit2 size={15} /></span>
               <span className="project-rail-row__identity">
                 <strong>{project.name}</strong>
                 <small>{project.hostId === 'local' ? 'This Mac' : <><RadioTower size={9} /> {project.hostId}</>}</small>
+              </span>
+              <span
+                className="project-rail-row__activity status status--working"
+                aria-hidden="true"
+                title={runningLabel ?? undefined}
+              >
+                {runningAgentCount > 0 ? <span className="status__dot" /> : null}
               </span>
               <span className="project-rail-row__count" title={`${project.workspaces.length} workspaces · ${sessionCount} sessions`}>
                 {project.workspaces.length}
