@@ -805,6 +805,11 @@ const mockApi: AgentMuxDesktopApi = {
       return () => sessionListeners.delete(listener)
     }
   },
+  resourceUsage: {
+    // Web 预览没有真实进程可采。返回一个不做任何事的退订函数，面板因此渲染"不可用"
+    // 而不是编造数字——预览里显示一个假的 CPU 读数，比不显示更糟。
+    subscribe: () => () => {}
+  },
   browser: {
     create: async (id, url) => {
       const browser: BrowserSnapshot = {
