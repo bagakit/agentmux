@@ -32,11 +32,14 @@ export function SessionPane({
   sessionId,
   surfaceKind,
   interactiveResize,
+  visible,
   linkOrigin
 }: {
   sessionId: string
   surfaceKind: 'agent' | 'terminal'
   interactiveResize: boolean
+  // 这一格看不看得见。隐藏的 Tab 留在 DOM 里保住终端实例，但里面的终端一律停工。
+  visible: boolean
   linkOrigin: OpenHttpLinkOrigin
 }) {
   const session = useAppStore((state) => state.sessions.find((item) => item.id === sessionId))
@@ -120,6 +123,7 @@ export function SessionPane({
               session={session}
               themeId={terminalThemeId}
               interactiveResize={interactiveResize}
+              visible={visible}
               linkOrigin={linkOrigin}
             />
             {disconnected || missing || exited ? (

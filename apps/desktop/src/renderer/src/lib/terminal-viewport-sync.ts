@@ -51,15 +51,15 @@ export class TerminalViewportSynchronizer {
   private pendingResize: TerminalGridSize | null = null
   private resizeDrain: Promise<void> | null = null
   private lastFittedPixels: TerminalViewportPixels | null = null
-  private interactiveResize = false
-  private observedDuringInteractiveResize = false
+  private readonly suspendReasons = new Set<'interactive-resize' | 'hidden'>()
+  private observedWhileSuspended = false
 
   constructor(private readonly options: TerminalViewportSynchronizerOptions) {}
 
   observeViewport(): void {
     if (this.disposed) return
-    if (this.interactiveResize) {
-      this.observedDuringInteractiveResize = true
+    if (this.suspended) {
+      this.observedWhileSuspended = true
       return
     }
     if (this.frameId !== null) return
@@ -70,19 +70,49 @@ export class TerminalViewportSynchronizer {
   }
 
   setInteractiveResize(active: boolean): void {
-    if (this.disposed || active === this.interactiveResize) return
-    this.interactiveResize = active
-    if (active) {
-      this.observedDuringInteractiveResize = true
+    this.setSuspended('interactive-resize', active)
+  }
+
+  /**
+   * 这一格现在看不看得见。
+   *
+   * 不可见的终端一律停工：隐藏的 Tab 仍留在 DOM 里（保住 xterm 实例，切回才不必重放），
+   * 但它不该继续 fit / resize / 渲染——保住实例的前提是它闲着不花钱，否则开十个 Tab
+   * 就是十份持续开销。切回时补一次 observe，把隐藏期间错过的几何变化一次性追上。
+   */
+  setVisible(visible: boolean): void {
+    this.setSuspended('hidden', !visible)
+  }
+
+  /**
+   * 暂停 viewport 同步，按原因记账。
+   *
+   * 拖拽 resize 与"这一格被隐藏"是两个独立原因，可以同时成立：拖动分隔条时切走 Tab，
+   * 松手若无条件恢复同步，一个看不见的终端就会开始 fit。所以记的是原因集合而非一个布尔，
+   * 只有全部原因都消失才恢复，并补一次 observe——挂起期间到达的观察不能就这么丢掉，
+   * 否则切回时行列数还停在隐藏前的几何上。
+   */
+  private setSuspended(reason: 'interactive-resize' | 'hidden', active: boolean): void {
+    if (this.disposed) return
+    const had = this.suspended
+    if (active) this.suspendReasons.add(reason)
+    else this.suspendReasons.delete(reason)
+    if (this.suspended === had) return
+    if (this.suspended) {
+      this.observedWhileSuspended = true
       if (this.frameId !== null) this.options.cancelFrame(this.frameId)
       this.frameId = null
       this.previousProposedGrid = null
       this.stabilityFrames = 0
       return
     }
-    if (!this.observedDuringInteractiveResize) return
-    this.observedDuringInteractiveResize = false
+    if (!this.observedWhileSuspended) return
+    this.observedWhileSuspended = false
     this.observeViewport()
+  }
+
+  private get suspended(): boolean {
+    return this.suspendReasons.size > 0
   }
 
   private requestStabilityFrame(): void {
@@ -115,7 +145,7 @@ export class TerminalViewportSynchronizer {
    * viewport size.
    */
   async requestContentRedraw(): Promise<boolean> {
-    if (this.disposed || !this.live || this.interactiveResize) return false
+    if (this.disposed || !this.live || this.suspended) return false
     const proposed = this.options.proposeGrid()
     if (!proposed || !isUsableGrid(proposed)) return false
     const size = this.options.readGrid()
@@ -145,13 +175,13 @@ export class TerminalViewportSynchronizer {
     this.frameId = null
     this.previousProposedGrid = null
     this.pendingResize = null
-    this.observedDuringInteractiveResize = false
+    this.observedWhileSuspended = false
   }
 
   private async continueStableFit(): Promise<void> {
     if (this.disposed) return
-    if (this.interactiveResize) {
-      this.observedDuringInteractiveResize = true
+    if (this.suspended) {
+      this.observedWhileSuspended = true
       return
     }
     const proposed = this.options.proposeGrid()
@@ -179,8 +209,8 @@ export class TerminalViewportSynchronizer {
 
   private async fitAndSynchronize(proposed = this.options.proposeGrid()): Promise<void> {
     if (this.disposed || !proposed || !isUsableGrid(proposed)) return
-    if (this.interactiveResize) {
-      this.observedDuringInteractiveResize = true
+    if (this.suspended) {
+      this.observedWhileSuspended = true
       return
     }
 
