@@ -205,6 +205,31 @@
 .terminal-search input { min-width: 0; flex: 1; border: 0; outline: 0; color: var(--text); background: transparent; font: 11px/1.4 var(--font-mono); }
 .terminal-search button { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; padding:0; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; cursor: pointer; }
 .terminal-search button:hover { color: var(--text); background: var(--wash-2); }
+/* 三个开关的字形是文字（Aa / .* / ab|）不是图标，所以要自己定字体——按钮不继承正文字体。
+   等宽让三枚宽度一致，排起来是一条整齐的段，不是三块参差的补丁。 */
+.terminal-search__toggle { font: 600 var(--fs-micro)/1 var(--font-mono); letter-spacing: -0.2px; }
+/* 开启态是**实心填充**，不是描边或变色描边：控件语言里选中只用一个几何信号（见
+   docs/design/agentmux-surface-density.md 控件语言节）。深色字压在绿底上，读得出是"按下去了"
+   而不是"高亮了一下"。hover 规则写在后面，否则上面那条 button:hover 会把开启态洗掉。 */
+.terminal-search__toggle[data-active] { color: var(--bg); background: var(--green); box-shadow: var(--hl-strong); }
+.terminal-search__toggle[data-active]:hover { color: var(--bg); background: color-mix(in srgb, var(--green) 88%, #ffffff); }
+/* 提示挂在搜索条**下面**而不是挤进那一行：挤进去会压掉输入框本就不宽的可用宽度，
+   而这句话是对上面那个输入框的说明，位置在它下方才读得通。 */
+.terminal-search__notice {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: var(--sp-2);
+  max-width: 100%;
+  padding:var(--sp-1) var(--sp-4);
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  background: var(--overlay-surface);
+  box-shadow: 0 6px 18px var(--scrim-2), var(--hl);
+  backdrop-filter: blur(18px);
+  font-size: var(--fs-micro);
+  white-space: nowrap;
+}
 .terminal-recovery {
   position: absolute;
   z-index: 35;

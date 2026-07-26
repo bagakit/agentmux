@@ -29,7 +29,12 @@ import {
   isKittyKeyboardActive,
   readKittyKeyboardOutput
 } from '../lib/terminal-kitty-keyboard'
-import { safeTerminalFind, TERMINAL_SEARCH_DECORATIONS } from '../lib/terminal-search-safe-find'
+import {
+  DEFAULT_TERMINAL_SEARCH_TOGGLES,
+  runTerminalSearch,
+  toggleTerminalSearch,
+  type TerminalSearchToggles
+} from '../lib/terminal-search'
 import { finishTerminalReplayRecovery, hydrateTerminalReplay } from '../lib/terminal-replay'
 import { acquireTerminalResourceOwners } from '../lib/terminal-resource-owners'
 import { LatestTerminalOutputAcknowledger } from '../lib/terminal-output-ack'
@@ -57,6 +62,20 @@ function terminalWrite(terminal: Terminal, data: string): Promise<void> {
 
 const MAX_PENDING_OUTPUT_EVENTS = 256
 const MAX_PENDING_OUTPUT_BYTES = 512 * 1024
+
+/**
+ * 搜索的三个开关。字形沿用终端搜索的通用惯例（Aa 大小写、.* 正则、ab| 全词），
+ * 让认得其他编辑器的人不用学。`label` 同时作 title 与 aria-label——鼠标和读屏看到同一句话。
+ */
+const SEARCH_TOGGLES: ReadonlyArray<{
+  key: keyof TerminalSearchToggles
+  label: string
+  glyph: string
+}> = Object.freeze([
+  { key: 'caseSensitive', label: 'Match case', glyph: 'Aa' },
+  { key: 'regex', label: 'Use regular expression', glyph: '.*' },
+  { key: 'wholeWord', label: 'Match whole word', glyph: 'ab|' }
+])
 
 type TerminalLinkRequest = OpenDestinationMenuRequest & { terminalGeneration: number }
 
@@ -152,6 +171,9 @@ export function TerminalView({
   const [redrawing, setRedrawing] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [searchToggles, setSearchToggles] = useState<TerminalSearchToggles>(DEFAULT_TERMINAL_SEARCH_TOGGLES)
+  // 「为什么这次没搜」——只在用户需要知道时有值（正则还没打完）。空查询不给理由。
+  const [searchNotice, setSearchNotice] = useState<string | undefined>(undefined)
   const [linkRequest, setLinkRequest] = useState<TerminalLinkRequest | null>(null)
   const [linkPreview, setLinkPreview] = useState<
     | { kind: 'http'; url: string; left: number; top: number; placement: 'above' | 'below'; fastPath: boolean }
@@ -678,22 +700,28 @@ export function TerminalView({
   function closeSearch(): void {
     searchAddonRef.current?.clearDecorations()
     setSearchOpen(false)
+    // 提示是对**这一次**输入的说明，关掉就过期了。留着它，下次打开面板会挂着一句上次的
+    // 「正则还不完整」——那时用户还没输任何东西，这句话就成了假话。开关本身不重置：
+    // 成熟编辑器都记住它们，打开搜索发现上次的条件还在才是符合预期的。
+    setSearchNotice(undefined)
     terminalRef.current?.focus()
   }
 
-  function searchTerminal(query: string, previous = false): void {
+  function searchWith(
+    query: string,
+    toggles: TerminalSearchToggles,
+    previous = false
+  ): void {
     const addon = searchAddonRef.current
     if (!addon) return
-    if (!query) {
-      addon.clearDecorations()
-      return
-    }
-    // Guarded so xterm's negative-width decoration throw cannot tear down the terminal, and carrying
-    // tokenised highlights so matches read against the dark ground (terminal-search-safe-find.ts).
-    safeTerminalFind(addon, query, previous ? 'previous' : 'next', {
-      incremental: !previous,
-      decorations: TERMINAL_SEARCH_DECORATIONS
-    })
+    const outcome = runTerminalSearch(addon, query, toggles, previous ? 'previous' : 'next')
+    setSearchNotice(outcome.notice)
+  }
+
+  // 开关翻转时必须把**新**状态显式传进去：setState 是异步的，读 searchToggles 会拿到翻转前的值，
+  // 于是第一次点开关不生效、第二次才生效——那种"慢一拍"的开关比没有开关更让人不信任。
+  function searchTerminal(query: string, previous = false): void {
+    searchWith(query, searchToggles, previous)
   }
 
   const startupPhase = terminalStartupPhase({
@@ -832,7 +860,29 @@ export function TerminalView({
               />
               <button type="button" title="Previous match" onClick={() => searchTerminal(searchQuery, true)}><ChevronUp size={13} /></button>
               <button type="button" title="Next match" onClick={() => searchTerminal(searchQuery)}><ChevronDown size={13} /></button>
+              {/* 三个开关。能力本来就在 addon 里，这里只是把它露出来。翻转后**立刻按新条件重搜**
+                  ——留着上一次的结果会让开关看起来没生效，那比没有开关更糟。
+                  aria-pressed 而非颜色单独承载状态：色觉差异下仍读得出哪个开着。 */}
+              {SEARCH_TOGGLES.map(({ key, label, glyph }) => (
+                <button
+                  key={key}
+                  type="button"
+                  className="terminal-search__toggle"
+                  title={label}
+                  aria-label={label}
+                  aria-pressed={searchToggles[key]}
+                  data-active={searchToggles[key] ? '' : undefined}
+                  onClick={() => {
+                    const next = toggleTerminalSearch(searchToggles, key)
+                    setSearchToggles(next)
+                    searchWith(searchQuery, next)
+                  }}
+                >{glyph}</button>
+              ))}
               <button type="button" title="Close find" onClick={closeSearch}><X size={13} /></button>
+              {searchNotice ? (
+                <span className="terminal-search__notice" role="status">{searchNotice}</span>
+              ) : null}
             </div>
           ) : null}
         </div>
