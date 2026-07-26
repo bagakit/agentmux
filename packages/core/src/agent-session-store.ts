@@ -1077,17 +1077,26 @@ function normalizeAgentSessions(values: readonly unknown[]): AgentMuxStoredAgent
  * v5 存储是 `JSON.stringify(document, null, 2)`：每个会话对象独占一段，起止花括号固定落在 4 空格缩进，
  * 更深的嵌套缩进更多。据此按缩进把会话分帧——被截断的尾块或被污染的单块只损失自己，完好的邻居原样取出。
  * 这是在当前格式内抢救，不另立一套落盘格式，故不构成版本迁移。
+ *
+ * 同时报出 `complete`：分帧是否覆盖到了记录列表的结尾。只有 complete 时 `blocks.length` 才等于
+ * 「盘上原本有多少条记录」，可以充当丢失量的分母；截断（走到 EOF 也没见到闭合的 `]`）或锚点行被
+ * 污染时，被抹掉的记录根本不在字节流里，数不出来，分母不可知——差别见 recordCorruptStoreSalvage。
  */
-function extractSessionBlocks(content: string): string[] {
+function extractSessionBlocks(content: string): { blocks: string[]; complete: boolean } {
   const lines = content.split('\n')
   const start = lines.indexOf('  "sessions": [')
-  if (start === -1) return []
+  // 锚点行都没了：连从哪开始数都不知道，别把「没找到」冒充成「一条都没有」。
+  if (start === -1) return { blocks: [], complete: false }
   const blocks: string[] = []
   let current: string[] | null = null
+  let closed = false
   for (let index = start + 1; index < lines.length; index += 1) {
     const line = lines[index]!
     if (current === null) {
-      if (line === '  ]' || line === '  ],') break
+      if (line === '  ]' || line === '  ],') {
+        closed = true
+        break
+      }
       if (/^ {4}\{$/u.test(line)) current = [line]
       continue
     }
@@ -1097,13 +1106,14 @@ function extractSessionBlocks(content: string): string[] {
       current = null
     }
   }
-  return blocks
+  // 见到闭合的 `]` 且没有块悬在半空，才说明这份列表被完整扫过。
+  return { blocks, complete: closed && current === null }
 }
 
 /** 从原始文本抢救会话：按缩进分帧后逐块 JSON.parse，撕裂/乱码的块解析失败即跳过。 */
 function parseSessionBlocks(content: string): unknown[] {
   const values: unknown[] = []
-  for (const block of extractSessionBlocks(content)) {
+  for (const block of extractSessionBlocks(content).blocks) {
     try {
       values.push(JSON.parse(block))
     } catch {
@@ -1554,6 +1564,8 @@ export function defaultAgentMuxAgentSessionStorePath(): string {
 export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore {
   private tail: Promise<void> = Promise.resolve()
   private lockReleaseFailure: AgentMuxError | null = null
+  /** 已报过的抢救事件（键是隔离文件的内容寻址路径），防同一份坏字节在一次加载里刷多条告警。 */
+  private readonly reportedSalvages = new Set<string>()
 
   constructor(readonly path = defaultAgentMuxAgentSessionStorePath()) {}
 
@@ -1870,9 +1882,13 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       value = JSON.parse(text)
     } catch {
       // 整份 JSON 都解析不了（尾块被截断、注入了乱码）：按缩进从原始文本里逐块抢救会话。
-      // 分帧后的块数才是「本应有多少条记录」的诚实分母——坏到 parse 不了的块也是丢掉的一条，
-      // 只数 parse 成功的块会把丢失量少报。
-      const blocks = extractSessionBlocks(text)
+      //
+      // 分母是否诚实，取决于分帧有没有完整扫过记录列表。乱码注入时列表结构还在，块数就是盘上
+      // 原本的记录数，`lost N` 算得准；而截断把尾部记录连同其后的一切整段抹掉、锚点行被污染时
+      // 连从哪开始数都不知道——被抹掉的记录不在字节流里，「原本有多少条」不可知。那种情况下报
+      // `lost 0` 会主动骗运维「一条没丢」，比不报更糟，所以只报救回数、把总数标成 unknown，
+      // 由隔离文件承担事后取证。
+      const framing = extractSessionBlocks(text)
       const document: AgentSessionStoreDocument = {
         version: 5,
         sessions: salvageSessionList(parseSessionBlocks(text)),
@@ -1880,7 +1896,12 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         retiredRuns: [],
         retiredAgentSessions: []
       }
-      await this.recordCorruptStoreSalvage(raw, document.sessions.length, blocks.length, signal)
+      await this.recordCorruptStoreSalvage(
+        raw,
+        document.sessions.length,
+        framing.complete ? framing.blocks.length : 'unknown',
+        signal
+      )
       return document
     }
     if (
@@ -1956,24 +1977,36 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
    * 让运维看得见「救回几条、丢了几条、隔离文件在哪」——否则用户丢了 200/256 条会话
    * 收不到任何信号，唯一痕迹是没人盯的 sidecar。隔离是 best-effort（见 quarantineCorruptStore）：
    * 写盘失败不影响已救回的结果返回，但那次失败本身也要 warn，绝不静默吞掉。
+   *
+   * `candidates` 传 `'unknown'` 表示**原始记录数不可知**（截断/锚点损坏，见 parseStoreDocument）。
+   * 这时绝不报 `lost N`：一个编出来的 0 会让运维以为没丢，而这正是本模块要防的那种沉默。
+   *
+   * 同一份坏字节在一次进程生命周期里只报一次。registry 的一次逻辑加载会串三次 read()
+   * （sessions / retiredRuns / retiredAgentSessions），若不去重，一次损坏会刷三条一模一样的
+   * warning，运维会读成「坏了三次」。去重键就是隔离文件用的那个内容摘要——同内容同一份告警，
+   * 内容变了（另一次损坏）照常再报。
    */
   private async recordCorruptStoreSalvage(
     raw: Buffer,
     recovered: number,
-    candidates: number,
+    candidates: number | 'unknown',
     signal?: AbortSignal
   ): Promise<void> {
     const quarantinePath = this.corruptStorePath(raw)
     const quarantined = await this.quarantineCorruptStore(raw, quarantinePath, signal)
-    const lost = Math.max(0, candidates - recovered)
+    if (this.reportedSalvages.has(quarantinePath)) return
+    this.reportedSalvages.add(quarantinePath)
+    const tally =
+      candidates === 'unknown'
+        ? `salvaged ${recovered} readable record(s); the store was truncated or its record framing was ` +
+          `destroyed, so the original record count is UNKNOWN — an unknown number of records is lost`
+        : `salvaged ${recovered} of ${candidates} readable record(s), lost ${Math.max(0, candidates - recovered)}`
     const where = quarantined
       ? `quarantined to ${quarantinePath}`
       : `quarantine write FAILED (bytes not isolated; see prior warning): would-be ${quarantinePath}`
-    process.emitWarning(
-      `Agent Session store was corrupt: salvaged ${recovered} of ${candidates} readable record(s), ` +
-        `lost ${lost}; ${where}.`,
-      { code: 'AGENT_SESSION_STORE_SALVAGED' }
-    )
+    process.emitWarning(`Agent Session store was corrupt: ${tally}; ${where}.`, {
+      code: 'AGENT_SESSION_STORE_SALVAGED'
+    })
   }
 
   private corruptStorePath(raw: Buffer): string {
