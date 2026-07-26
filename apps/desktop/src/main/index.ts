@@ -182,7 +182,14 @@ function startPrimaryInstance(): void {
       const primaryWorkspace = mountedWorkspaces.find((workspace) => workspace.id === 'workspace-file-editing-e2e')
       const alternateWorkspace = mountedWorkspaces.find((workspace) => workspace.id === 'workspace-file-editing-alternate-e2e')
       if (!primaryWorkspace || !alternateWorkspace) {
-        throw new Error('Desktop file editing probe requires its primary and alternate mounted workspaces.')
+        // These two ids must match the ones scripts/file-editing-fixture.mjs writes into the config. They
+        // cannot be imported from there — that fixture lives in the scripts build graph, not this bundle —
+        // so the coupling is checked here, at startup, by failing loudly and naming where to look.
+        throw new Error(
+          'Desktop file editing probe requires its primary and alternate mounted workspaces. ' +
+            'Their ids must match FILE_EDITING_PRIMARY_WORKSPACE_ID / FILE_EDITING_ALTERNATE_WORKSPACE_ID ' +
+            'in apps/desktop/scripts/file-editing-fixture.mjs.'
+        )
       }
       if (await runDesktopFileEditingProbe({
         window,
