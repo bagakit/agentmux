@@ -1,9 +1,13 @@
 import { useEffect } from 'react'
+// 从 @agentmux/core/agent-status 这个 node-free 子路径导入（它只 import type ./types.js），而不是从
+// 桶文件 '@agentmux/core'。桶文件会把 runtime-paths.js 一路拖进渲染器包，那里的 node:crypto
+// createHash 在浏览器构建下解析成 __vite-browser-external，整个 renderer 构建直接失败。
+// 同 api.ts 用 '@agentmux/core/launch-option' 的理由。
 import {
   DECAYED_SEMANTIC_STATE,
   msUntilSemanticStatusStale,
   semanticStatusStale
-} from '@agentmux/core'
+} from '@agentmux/core/agent-status'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { useAppStore } from '../store'
 
