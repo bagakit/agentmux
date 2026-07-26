@@ -204,6 +204,66 @@ describe('Control protocol', () => {
       }
     ]) expect(() => parseAgentMuxControlReceipt(receipt)).toThrow('invalid')
   })
+
+  // 方向邻居会被 Agent 直接当作地址喂回 focus/send，所以它是一条**信任边界**：主机说什么就
+  // 信什么，等于放行一个没人验证过的寻址目标。此前这一整段校验没有任何断言经过——四个方向
+  // 全是 none 的 fixture 走不到 region/tab 两个分支，把校验整段删掉测试照样绿。
+  it('校验线上的方向邻居，而不是照单全收', () => {
+    const inspected = (neighbors: unknown): unknown => ({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId: 'inspect-region',
+      ok: true,
+      operation: 'inspect.region',
+      result: {
+        region: {
+          tabId: 'tab-main', regionId: 'region-1', workspaceId: 'workspace', kind: 'launcher',
+          bounds: { x: 0, y: 0, width: 1, height: 1 },
+          neighbors
+        }
+      }
+    })
+    const none = { kind: 'none' } as const
+
+    // 合法的 Region / Tab 邻居原样通过——校验不能严到把真答案也挡掉。
+    const ok = parseAgentMuxControlReceipt(inspected({
+      left: { kind: 'tab', tabId: 'tab-prev' },
+      right: { kind: 'region', regionId: 'region-2' },
+      up: none,
+      down: none
+    }))
+    expect(ok).toMatchObject({
+      operation: 'inspect.region',
+      result: { region: { neighbors: { right: { kind: 'region', regionId: 'region-2' } } } }
+    })
+
+    // `self` 不是一个具体地址，把它当邻居交出来会让接收方寻址到自己。
+    expect(() => parseAgentMuxControlReceipt(inspected({
+      left: none, right: { kind: 'region', regionId: 'self' }, up: none, down: none
+    }))).toThrow('invalid')
+
+    // 空 id、控制字符同理：这些会被原样拼进后续命令。
+    for (const bad of ['', 'region\n2']) {
+      expect(() => parseAgentMuxControlReceipt(inspected({
+        left: none, right: { kind: 'region', regionId: bad }, up: none, down: none
+      }))).toThrow('invalid')
+    }
+
+    // 上下答成 Tab 是**语义错误**：Tab 条是一维水平序列。放行它，Agent 会以为自己拿到了上方
+    // 的东西，实际拿到的是左邻那张，且无从发现自己被骗。
+    for (const direction of ['up', 'down']) {
+      expect(() => parseAgentMuxControlReceipt(inspected({
+        left: none, right: none, up: none, down: none, [direction]: { kind: 'tab', tabId: 'tab-x' }
+      }))).toThrow('invalid')
+    }
+
+    // 认不出的 kind、缺字段、整段缺失，都不该被当成"没有邻居"悄悄放过。
+    for (const neighbors of [
+      { left: none, right: { kind: 'window', windowId: 'w1' }, up: none, down: none },
+      { left: none, right: { kind: 'tab' }, up: none, down: none },
+      { left: none, right: none, up: none },
+      undefined
+    ]) expect(() => parseAgentMuxControlReceipt(inspected(neighbors))).toThrow('invalid')
+  })
 })
 
 describe('external Control control', () => {
