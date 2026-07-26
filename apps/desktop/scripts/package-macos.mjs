@@ -19,6 +19,7 @@ import { createRequire } from 'node:module'
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import process from 'node:process'
+import { materializeFileEditingFixture } from './file-editing-fixture.mjs'
 
 const PRODUCT_NAME = 'AgentMux'
 const BUNDLE_ID = 'dev.agentmux.desktop'
@@ -529,47 +530,7 @@ async function verifyLaunchServices(appPath, verificationRoot) {
     'bin',
     'ctxmuxd'
   )
-  await Promise.all([
-    mkdir(userData, { recursive: true }),
-    mkdir(join(workspace, 'explorer-source'), { recursive: true }),
-    mkdir(join(workspace, 'targets', 'valid'), { recursive: true }),
-    mkdir(join(workspace, 'targets', 'collision'), { recursive: true }),
-    mkdir(join(workspace, 'targets', 'menu'), { recursive: true }),
-    mkdir(join(workspace, 'targets', 'hover'), { recursive: true }),
-    mkdir(join(workspace, 'targets', 'cancel'), { recursive: true }),
-    mkdir(alternateWorkspace, { recursive: true })
-  ])
-  await Promise.all([
-    writeFile(join(workspace, 'revision-probe.txt'), 'alpha', { mode: 0o640 }),
-    writeFile(join(workspace, 'explorer-source', 'drag-valid.txt'), 'pointer move'),
-    writeFile(join(workspace, 'explorer-source', 'drag-invalid.txt'), 'must stay put'),
-    writeFile(join(workspace, 'explorer-source', 'menu.txt'), 'menu move'),
-    writeFile(join(workspace, 'explorer-source', 'menu-neighbor.txt'), 'selection neighbor'),
-    writeFile(join(workspace, 'targets', 'collision', 'drag-invalid.txt'), 'collision owner'),
-    writeFile(join(workspace, 'targets', 'hover', 'child.txt'), 'hover child'),
-    writeFile(join(workspace, 'targets', 'cancel', 'child.txt'), 'cancel child'),
-    writeFile(join(alternateWorkspace, 'alternate.txt'), 'alternate workspace'),
-    writeFile(join(userData, 'agentmux.config.json'), `${JSON.stringify({
-      version: 7,
-      hosts: [{ id: 'local', kind: 'local', label: 'Mounted Desktop E2E' }],
-      executors: {},
-      workspaces: [{
-        id: 'workspace-file-editing-e2e',
-        name: 'Workspace File Editing E2E',
-        hostId: 'local',
-        path: workspace,
-        kind: 'folder'
-      }, {
-        id: 'workspace-file-editing-alternate-e2e',
-        name: 'Workspace File Editing Alternate E2E',
-        hostId: 'local',
-        path: alternateWorkspace,
-        kind: 'folder'
-      }],
-      appearance: { terminalTheme: 'graphite' },
-      browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
-    }, null, 2)}\n`, { mode: 0o600 })
-  ])
+  await materializeFileEditingFixture({ userData, workspace, alternateWorkspace })
   const before = new Set(await processIdsForApplication(canonicalAppPath))
   const ownedApplicationPids = async () => (
     (await processIdsForApplication(canonicalAppPath)).filter((pid) => !before.has(pid))
