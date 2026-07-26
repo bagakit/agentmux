@@ -37,6 +37,7 @@ import { TerminalViewportSynchronizer } from '../lib/terminal-viewport-sync'
 import { terminalStartupPhase } from '../lib/terminal-startup'
 import {
   TERMINAL_REVEAL_DEADLINE_MS,
+  terminalAcceptsInput,
   terminalRevealDecision,
   terminalRevealServiceOutcome
 } from '../lib/terminal-reveal'
@@ -144,6 +145,7 @@ export function TerminalView({
    * 而后者必须留下一条告示——只揭示不说话就是静默降级（AGENTS.md 原则 11 的两条边界之一）。
    */
   const [revealOverdue, setRevealOverdue] = useState(false)
+  const [liveOutputReady, setLiveOutputReady] = useState(false)
   const [attachFailed, setAttachFailed] = useState(false)
   const [hasOutput, setHasOutput] = useState(false)
   const [replayGap, setReplayGap] = useState(false)
@@ -197,6 +199,11 @@ export function TerminalView({
     const terminalGeneration = ++terminalGenerationRef.current
     setHydrating(true)
     setRevealOverdue(false)
+    // A Region can keep this component mounted while its Run changes (for example after a
+    // continuity recovery).  The previous Run may already have completed the replay-to-live
+    // handoff; reset the presentation bit before the new attachment starts so a stalled handoff
+    // cannot be reported as ready or accidentally invite input.
+    setLiveOutputReady(false)
     setAttachFailed(false)
     setHasOutput(false)
     setReplayGap(false)
@@ -434,8 +441,18 @@ export function TerminalView({
     const disposeEvents = api.sessions.onEvent(accept)
     const resize = new ResizeObserver(() => viewport.observeViewport())
     resize.observe(root)
+    /**
+     * 输入是否可以送出。三条输入通路（onData、OSC 回复、Shift+Enter）共用这一处判定——
+     * 少卡一条就等于没卡，用户总会找到那一条。判定本身在 lib/terminal-reveal.ts 被断言。
+     */
+    const acceptsInputNow = (): boolean =>
+      terminalAcceptsInput({
+        canControlRun: canControlRunRef.current,
+        acceptsInput: acceptsInputRef.current,
+        liveReady: readyForLiveOutput
+      })
     const input = terminal.onData((data) => {
-      if (canControlRunRef.current && acceptsInputRef.current && readyForLiveOutput) {
+      if (acceptsInputNow()) {
         void api.sessions.write(session.control, data)
       }
     })
@@ -448,7 +465,7 @@ export function TerminalView({
       isReplaying: () => !readyForLiveOutput,
       respondFromRenderer: session.kind === 'terminal',
       sendInput: (data) => {
-        if (canControlRunRef.current && acceptsInputRef.current && readyForLiveOutput) {
+        if (acceptsInputNow()) {
           void api.sessions.write(session.control, data)
         }
       }
@@ -457,7 +474,7 @@ export function TerminalView({
       if (isShiftEnterNewline(event)) {
         // xterm 对 Enter 与 Shift+Enter 送同一个裸 \r（终端线路上没有表达修饰键的位置），
         // 下游 TUI 因此只能把 Shift+Enter 读成提交，用户写不了多行。这里显式送出不同的字节。
-        if (event.type === 'keydown' && canControlRunRef.current && acceptsInputRef.current) {
+        if (event.type === 'keydown' && acceptsInputNow()) {
           void api.sessions.write(
             session.control,
             shiftEnterInput(isKittyKeyboardActive(kittyKeyboard))
@@ -498,7 +515,7 @@ export function TerminalView({
      * 常驻开销，且在 retention 测试的黑名单里。
      */
     let revealed = false
-    const reveal = (forced = false): void => {
+    const reveal = (forced = false, clearNotice = true): void => {
       if (disposed) return
       if (!revealed) {
         revealed = true
@@ -506,7 +523,7 @@ export function TerminalView({
       }
       // A late successful attach/replay supersedes the deadline notice. The local `revealed` guard
       // still prevents a second DOM transition, while this state update removes a stale warning.
-      setRevealOverdue(forced)
+      if (clearNotice) setRevealOverdue(forced)
     }
     const revealStartedAtMs = Date.now()
     const revealDeadline = setTimeout(() => {
@@ -563,6 +580,7 @@ export function TerminalView({
           startLiveSynchronization: async () => await viewport.startLiveSynchronization(),
           releaseLiveOutput: async () => {
             readyForLiveOutput = true
+            if (!disposed) setLiveOutputReady(true)
             if (cursor > 0) acknowledger.queue(cursor)
             for (const event of pending.splice(0)) accept(event)
             await outputTail
@@ -572,7 +590,8 @@ export function TerminalView({
             await outputTail
             return redrawn
           },
-          onRedrawError: (error) => console.warn('[terminal] failed to redraw after replay gap', error)
+          onRedrawError: (error) => console.warn('[terminal] failed to redraw after replay gap', error),
+          onRecoveryError: (error) => console.warn('[terminal] live viewport recovery degraded', error)
         })
       } catch (error) {
         if (!disposed) {
@@ -583,7 +602,9 @@ export function TerminalView({
             terminal,
             `\r\n\u001b[31m[Attach failed: ${detail}]\u001b[0m\r\n`
           )
-          reveal()
+          // Preserve an already-visible deadline warning when attach fails late. Clearing it would
+          // turn the only honest diagnosis into a silent failure after the canvas was handed back.
+          reveal(false, false)
         }
       }
     })()
@@ -686,7 +707,11 @@ export function TerminalView({
 
   const revealNotice = serviceNoticeToRender(
     classifyServiceNotice(
-      terminalRevealServiceOutcome({ overdue: revealOverdue, processState: session.processState })
+      terminalRevealServiceOutcome({
+        overdue: revealOverdue,
+        processState: session.processState,
+        liveReady: liveOutputReady
+      })
     )
   )
 
