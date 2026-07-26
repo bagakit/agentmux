@@ -171,6 +171,6 @@ describe('store.ts wiring: the persist layer uses the debounced writer with an u
 
   it('registers the unload trailing flush so a shutdown mid-drag keeps the last layout write', async () => {
     const source = stripComments(await readFile(storePath, 'utf8'))
-    expect(source).toContain('registerUnloadFlush(flushPersistedUiWrites)')
+    expect(source).toContain('registerUnloadFlush(() => persistentWorkbenchStorage.flush())')
   })
 })

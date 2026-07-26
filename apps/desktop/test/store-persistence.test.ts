@@ -4,10 +4,14 @@ vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
 })
 
-import type { AppConfig, AgentSessionRecoveryCandidate } from '../src/shared/contracts.js'
+import type { AppConfig, AgentSessionRecoveryCandidate, AgentTimelineSnapshot } from '../src/shared/contracts.js'
 import { api } from '../src/renderer/src/lib/api.js'
 import { createWorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.js'
-import { createWorkbenchTab, initialWorkbenchRegionId } from '../src/renderer/src/lib/workbench-tabs.js'
+import {
+  addWorkbenchRegion,
+  createWorkbenchTab,
+  initialWorkbenchRegionId
+} from '../src/renderer/src/lib/workbench-tabs.js'
 import { restorePersistedUiState, useAppStore } from '../src/renderer/src/store.js'
 
 const initialState = useAppStore.getState()
@@ -57,6 +61,99 @@ describe('Renderer persistence boundary', () => {
       workspaceTool: 'agents',
       toolDockWidth: 372
     })
+  })
+
+  it('never persists Core-owned runtime state — no timelines, sessions, or pending launches on disk', () => {
+    // acceptance 3 forbids writing PTY / scrollback / PID / Provider transcript. The round-trip test
+    // above uses toMatchObject, which only proves the presentation fields are PRESENT — a newly ADDED
+    // runtime field slips past it silently. This is the negative guard: seed the store with the exact
+    // Core-owned facts (a full Provider transcript lives in `timelines`) and prove the persisted
+    // projection carries none of them. Adding `timelines`/`sessions`/`pendingAgentLaunches` to the
+    // partialize whitelist must turn this red.
+    const timeline: AgentTimelineSnapshot = {
+      agentSessionId: 'agent-secret',
+      revision: 1,
+      items: []
+    }
+    useAppStore.setState({
+      timelines: { 'agent-secret': timeline },
+      sessions: [{
+        id: 'agent-secret',
+        kind: 'agent',
+        providerId: 'codex',
+        executorId: 'codex',
+        hostId: 'local',
+        workspacePath: '/repo/a',
+        label: 'secret',
+        createdAt: 1,
+        updatedAt: 1,
+        processState: 'running',
+        status: { state: 'running', source: 'run-process', observedAt: 1 },
+        latestOutputBytes: 4096,
+        control: { kind: 'agent', hostId: 'local', agentSessionId: 'agent-secret', run: { runId: 'run-secret' } }
+      }],
+      pendingAgentLaunches: { 'agent-secret': { events: [], overflowed: false } }
+    })
+
+    const partialize = useAppStore.persist.getOptions().partialize
+    const persisted = partialize!(useAppStore.getState()) as Record<string, unknown>
+    expect(persisted).not.toHaveProperty('timelines')
+    expect(persisted).not.toHaveProperty('sessions')
+    expect(persisted).not.toHaveProperty('pendingAgentLaunches')
+    expect(persisted).not.toHaveProperty('documents')
+  })
+
+  it('strips runtime content out of the persisted Workbench projection (browser url/title, file path)', () => {
+    // The Workbench projection persisted under `restoredWorkbench` is the other door runtime content
+    // could walk through: a browser Region carries its live `url`/`title`, a file Region its `path`.
+    // `projectPersistedWorkbench` keeps only attached Session skeletons, so these must not appear. A
+    // future surface field or a projection change that leaks them must turn this red.
+    const viewId = 'view:leaky'
+    const agentRegionId = initialWorkbenchRegionId(viewId)
+    let tab = createWorkbenchTab(viewId, {
+      regionId: agentRegionId,
+      kind: 'agent' as const,
+      phase: 'attached' as const,
+      workspaceId: 'workspace-a',
+      sessionId: 'agent-keep'
+    })
+    tab = addWorkbenchRegion(tab, agentRegionId, 'right', {
+      regionId: 'region-browser',
+      kind: 'browser',
+      workspaceId: 'workspace-a',
+      browserId: 'browser-1',
+      id: 'browser-1',
+      navigationId: 'nav-1',
+      profileId: 'profile-1',
+      url: 'https://secret.example.com/private-path',
+      title: 'Secret internal dashboard',
+      loading: false,
+      canGoBack: false,
+      canGoForward: false,
+      viewport: 'desktop',
+      error: null
+    })
+    tab = addWorkbenchRegion(tab, 'region-browser', 'down', {
+      regionId: 'region-file',
+      kind: 'file',
+      workspaceId: 'workspace-a',
+      path: '/repo/a/secret/credentials.env'
+    })
+
+    useAppStore.setState({
+      tabs: { [tab.id]: tab },
+      layouts: { 'workspace-a': createWorkspaceLayout('group', [tab.id]) }
+    })
+
+    const partialize = useAppStore.persist.getOptions().partialize
+    const persisted = partialize!(useAppStore.getState()) as { restoredWorkbench: unknown }
+    const serialized = JSON.stringify(persisted.restoredWorkbench)
+    expect(serialized).not.toContain('https://secret.example.com/private-path')
+    expect(serialized).not.toContain('Secret internal dashboard')
+    expect(serialized).not.toContain('/repo/a/secret/credentials.env')
+    // The attached Agent skeleton it legitimately keeps proves the projection ran (rather than the
+    // absences coming from an empty projection): sessionId identity is display state, not content.
+    expect(serialized).toContain('agent-keep')
   })
 
   it('validates persisted presentation values against current configured Workspaces and enums', () => {
