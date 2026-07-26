@@ -18,7 +18,20 @@ export function NewTabSurface({
   regionId?: string
 }) {
   const [executorId, setExecutorId] = useState('codex')
-  const [prompt, setPrompt] = useState('')
+  // 草稿存进 store，按 regionId 归属。启动的一瞬间本组件就被换成 pending agent surface 而卸载，
+  // 若草稿只活在组件里，启动失败翻回 launcher（reduceSessionLaunchFailed 沿用同一 regionId）就会
+  // 重挂一个空的新实例——正是用户报告的"报错退回初始页、之前输入没缓存"。store 是唯一数据源，
+  // 复用 Agent Composer 同一套 agentComposerDrafts，不另起第二套草稿机制。
+  const storedDraft = useAppStore((state) => regionId ? (state.agentComposerDrafts[regionId] ?? '') : undefined)
+  const setAgentComposerDraft = useAppStore((state) => state.setAgentComposerDraft)
+  // 空分组占位（无 regionId）没有可跨卸载存活的稳定键，且它启动后由 store 新建带 region 的 Tab、
+  // 失败时重挂的是另一个组件，天然无法保草稿；退回本地 state 保持原行为，不引入伪键污染共享表。
+  const [localPrompt, setLocalPrompt] = useState('')
+  const prompt = regionId ? storedDraft ?? '' : localPrompt
+  const setPrompt = (value: string): void => {
+    if (regionId) setAgentComposerDraft(regionId, value)
+    else setLocalPrompt(value)
+  }
   const [launchOptionSelection, setLaunchOptionSelection] = useState<LaunchOptionSelection>({})
   const [optionsExpanded, setOptionsExpanded] = useState(false)
   const [busy, setBusy] = useState<'agent' | 'terminal' | 'browser' | null>(null)
