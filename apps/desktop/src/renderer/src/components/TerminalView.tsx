@@ -35,7 +35,7 @@ import {
   toggleTerminalSearch,
   type TerminalSearchToggles
 } from '../lib/terminal-search'
-import { finishTerminalReplayRecovery, hydrateTerminalReplay } from '../lib/terminal-replay'
+import { finishTerminalReplayRecovery, hydrateTerminalReplay, yieldTerminalWork } from '../lib/terminal-replay'
 import { acquireTerminalResourceOwners } from '../lib/terminal-resource-owners'
 import { LatestTerminalOutputAcknowledger } from '../lib/terminal-output-ack'
 import { TerminalViewportSynchronizer } from '../lib/terminal-viewport-sync'
@@ -468,6 +468,10 @@ export function TerminalView({
         kittyKeyboard = readKittyKeyboardOutput(kittyKeyboard, output.data)
         cursor = output.endByte
         acknowledger.queue(cursor)
+        // xterm's write callback only yields a microtask. Explicitly yield a macrotask after each
+        // queued live chunk so a burst accumulated while this Tab was hidden cannot starve input,
+        // tab switching, or close actions while outputTail drains.
+        await yieldTerminalWork()
       })
     }
     const disposeEvents = api.sessions.onEvent(accept)

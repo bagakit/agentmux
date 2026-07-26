@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   finishTerminalReplayRecovery,
-  hydrateTerminalReplay
+  hydrateTerminalReplay,
+  TERMINAL_REPLAY_BATCH_CHARS
 } from '../src/renderer/src/lib/terminal-replay'
 
 describe('hydrateTerminalReplay', () => {
@@ -24,6 +25,25 @@ describe('hydrateTerminalReplay', () => {
 
     await expect(hydrateTerminalReplay([], write)).resolves.toBeNull()
     expect(write).not.toHaveBeenCalled()
+  })
+
+  it('splits a large replay into bounded writes and yields between parser batches', async () => {
+    const writes: string[] = []
+    const yields: number[] = []
+    const data = 'x'.repeat(TERMINAL_REPLAY_BATCH_CHARS * 2 + 17)
+
+    const cursor = await hydrateTerminalReplay([
+      { data, endByte: data.length }
+    ], async (chunk) => { writes.push(chunk) }, async () => { yields.push(writes.length) })
+
+    expect(writes.map((chunk) => chunk.length)).toEqual([
+      TERMINAL_REPLAY_BATCH_CHARS,
+      TERMINAL_REPLAY_BATCH_CHARS,
+      17
+    ])
+    expect(writes.join('')).toBe(data)
+    expect(yields).toEqual([1, 2, 3])
+    expect(cursor).toBe(data.length)
   })
 
   it('redraws a running Gap only after replay hands off to ordered live output', async () => {
