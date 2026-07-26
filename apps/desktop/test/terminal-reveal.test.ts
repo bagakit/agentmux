@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import {
   TERMINAL_REVEAL_DEADLINE_MS,
+  terminalAcceptsInput,
   terminalRevealDecision,
   terminalRevealServiceOutcome
 } from '../src/renderer/src/lib/terminal-reveal.js'
@@ -63,14 +64,14 @@ describe('揭示的 deadline', () => {
 
 describe('强制揭示绝不静默', () => {
   it('到点揭示的同时必定产出一条告示', () => {
-    const outcome = terminalRevealServiceOutcome({ overdue: true, processState: 'running' })
+    const outcome = terminalRevealServiceOutcome({ overdue: true, processState: 'running', liveReady: true })
     expect(outcome.completed).toBe(false)
     // 走既有分类器，不新建第二条失败通路。
     expect(serviceNoticeToRender(classifyServiceNotice(outcome))).not.toBeNull()
   })
 
   it('没到点就没有告示——恢复态正常走完不该留下任何降级痕迹', () => {
-    const outcome = terminalRevealServiceOutcome({ overdue: false, processState: 'running' })
+    const outcome = terminalRevealServiceOutcome({ overdue: false, processState: 'running', liveReady: true })
     expect(outcome.completed).toBe(true)
     expect(serviceNoticeToRender(classifyServiceNotice(outcome))).toBeNull()
   })
@@ -78,7 +79,9 @@ describe('强制揭示绝不静默', () => {
 
 describe('三态分流：判据是 Run 还能干活吗，不是我们的步骤过了吗', () => {
   function classify(processState: 'running' | 'exited' | 'interrupted') {
-    return classifyServiceNotice(terminalRevealServiceOutcome({ overdue: true, processState }))
+    return classifyServiceNotice(
+      terminalRevealServiceOutcome({ overdue: true, processState, liveReady: true })
+    )
   }
 
   it('Run 还在跑：第 2 类，放行并提醒', () => {
@@ -109,7 +112,7 @@ describe('三态分流：判据是 Run 还能干活吗，不是我们的步骤�
 
 describe('告示说清三件事', () => {
   const notice = serviceNoticeToRender(
-    classifyServiceNotice(terminalRevealServiceOutcome({ overdue: true, processState: 'running' }))
+    classifyServiceNotice(terminalRevealServiceOutcome({ overdue: true, processState: 'running', liveReady: true }))
   )
 
   it('哪一步没走通、现在按什么状态在跑、怎么恢复——缺任一件要红', () => {
@@ -125,6 +128,81 @@ describe('告示说清三件事', () => {
 
   it('说清终端此刻可用——这正是"放行"的意思，用户不该以为自己还在等', () => {
     expect(notice!.notice.mode.toLowerCase()).toContain('usable')
+  })
+
+  it('attachment 尚未交接时不宣称输入已经可用', () => {
+    const pendingNotice = serviceNoticeToRender(classifyServiceNotice(
+      terminalRevealServiceOutcome({ overdue: true, processState: 'running', liveReady: false })
+    ))
+    expect(pendingNotice!.notice.mode.toLowerCase()).toContain('unlock')
+    expect(pendingNotice!.notice.mode.toLowerCase()).not.toContain('usable now')
+  })
+})
+
+/**
+ * "放行"不等于"什么都通了"。
+ *
+ * 这是原则 11 第 2 类最容易做错的半句：画布交还用户之后，replay→live 的交接可能还没完成，
+ * 此刻键盘敲下去会写进一个还没接上的 attachment。所以两件事必须同时成立——告示如实说输入
+ * 还没通（上面那条），且输入**真的**没通（下面这些）。
+ *
+ * 这些断言是补一个真空洞：三条输入通路的 liveReady 卡口此前一条测试都没有，
+ * 三个 gate 一起删掉全仓 1512 个测试照样全绿（变异实测）。
+ */
+describe('揭示了不等于输入通了', () => {
+  const ready = { canControlRun: true, acceptsInput: true, liveReady: true }
+
+  it('三个条件都成立才送输入', () => {
+    expect(terminalAcceptsInput(ready)).toBe(true)
+  })
+
+  it('交接未完成时不送——写进一个还没接上的 attachment 等于按键丢失', () => {
+    expect(terminalAcceptsInput({ ...ready, liveReady: false })).toBe(false)
+  })
+
+  it('进程不可控时不送——Run 已经退了，键入无处可去', () => {
+    expect(terminalAcceptsInput({ ...ready, canControlRun: false })).toBe(false)
+  })
+
+  it('Session 此刻不收输入时不送——Agent 有待答交互，键入会插进那个问题里', () => {
+    expect(terminalAcceptsInput({ ...ready, acceptsInput: false })).toBe(false)
+  })
+
+  it('三个条件各自都是必要的——去掉任一个都要红', () => {
+    // 逐个单独置假：三次都必须为 false。少卡一条就等于没卡，用户总会找到那一条。
+    const blocked = (['canControlRun', 'acceptsInput', 'liveReady'] as const).map((key) =>
+      terminalAcceptsInput({ ...ready, [key]: false })
+    )
+    expect(blocked).toEqual([false, false, false])
+  })
+})
+
+/**
+ * 三条输入通路共用同一处判定。
+ *
+ * 只能用源码断言守住——它们长在 attach effect 里，本仓跑不了 effect。少卡一条就等于没卡：
+ * 用户总会找到那一条，而"有两条卡住了"在体验上与"一条都没卡"没有区别。
+ */
+describe('输入卡口三条通路一致', () => {
+  const terminalView = readFileSync(
+    new URL('../src/renderer/src/components/TerminalView.tsx', import.meta.url),
+    'utf8'
+  )
+
+  it('每一处 api.sessions.write 都在同一个判定之后', () => {
+    // 输入通路的数量会随功能增长，所以断言的是"每一处都过了闸"，不是"恰好有三处"。
+    const writes = [...terminalView.matchAll(/api\.sessions\.write\(/g)]
+    expect(writes.length).toBeGreaterThanOrEqual(3)
+    const gates = [...terminalView.matchAll(/acceptsInputNow\(\)/g)]
+    expect(gates.length).toBeGreaterThanOrEqual(writes.length)
+  })
+
+  it('判定走共享纯函数，不在组件里各写一遍布尔表达式', () => {
+    // 各写一遍等于让"什么算可以输入"有第二个说法，且下一处新增通路会漏掉最新的那个条件。
+    expect(terminalView).toContain('terminalAcceptsInput({')
+    expect(terminalView).not.toMatch(
+      /canControlRunRef\.current && acceptsInputRef\.current && readyForLiveOutput/
+    )
   })
 })
 
