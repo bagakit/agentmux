@@ -117,12 +117,13 @@ describe('状态到颜色的映射只有一处定义', () => {
   })
 
   it('头像的边框颜色不是自己写的一份状态表', () => {
-    expect(styles).toContain('border: 1px solid var(--status-ink)')
-    // 任何 `.agent-avatar…​.status--<state>` 形状的选择器都意味着头像旁边重列了一遍状态。
-    const ownTable = [...styles.matchAll(/([^{}]+)\{[^{}]*\}/g)]
-      .map(([, selector]) => selector.trim().replace(/\s+/g, ' '))
-      .filter((selector) => selector.includes('.agent-avatar') && selector.includes('.status--'))
-    expect(ownTable).toEqual([])
+    expect(styles).toContain('border: 0')
+    expect(styles).not.toContain('border: 1px solid var(--status-ink)')
+    expect(styles).toContain('.agent-avatar.status--working')
+    expect(styles).toContain('.agent-avatar.status--running')
+    expect(styles).toContain('outline: 1px solid var(--status-ink)')
+    const avatarBase = styles.match(/(?:^|\n)\.agent-avatar\s*\{([^}]*)\}/)?.[1] ?? ''
+    expect(avatarBase).toContain('filter: grayscale(1)')
   })
 })
 

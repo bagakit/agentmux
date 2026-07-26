@@ -53,7 +53,7 @@
 - Topic 面板与文件树共用内容槽时，**默认高度偏向 Topic 面板**：Topic 是 Scratch 的一等对象，文件树是它的底料。文件树默认占更小的一份。
 - Topic 行的动作按频次分层：**定位到该 Topic 的目录**是高频、留在行上（图标要表达"聚焦定位"而不是"打开文件夹"，因为它不离开 AgentMux）；**改名**是低频，收进行的右键菜单，不在行上常驻一个图标——每多一个常驻图标，行的可读宽度就少一分。
 - Topic 行**不用左侧竖条表达选中**。选中态是单一几何信号（干净的 Surface 填充），与全局控件语言一致；行首也不放没有区分意义的装饰图标——一列全同的图标不携带任何信息，只在消耗宽度。
-- **Topic 行的 Agent 呈现为一组头像**，不是一排抽象的点。每个 Agent 用缩小的 Provider 图标（用户据此一眼看出这一行里跑着谁），**状态由边框表达**而不是另一枚色点；悬停有轻量抬升与 tooltip 给出名字与状态，点击直接定位到该 Agent。这三件事——身份、状态、导航——过去要用户读完整行文字才知道，头像列把它们压进一个可点的小方块里。
+- **Topic 行的 Agent 呈现为一组头像**，不是一排抽象的点。每个 Agent 用缩小的 Provider 图标（用户据此一眼看出这一行里跑着谁）；头像**默认不画常驻边框**，只有确实处于 `working`/`running` 的 Agent 才显示外描边/发光，其他状态用灰度处理，避免把静态身份误读成正在运行。悬停有轻量抬升与 tooltip 给出名字与状态，点击直接定位到该 Agent。这三件事——身份、状态、导航——过去要用户读完整行文字才知道，头像列把它们压进一个可点的小方块里。
 - Project Rail 与 Workspace Tools 分别开关，不能共享状态或互相改变布局身份。
 
 ### Tab、Tab Group 与 Region
@@ -73,7 +73,9 @@
 - Desktop 只持久化 Session/Run 在哪张 View 的哪个 Region，不复制 PTY、Replay、Agent 状态或进程生命周期。**布局恢复与 Session 恢复必须分开看待**：布局是 Renderer 的展示事实，Session 身份与 Provider-native resume token 是 Core 的语义事实；任何一侧失败都不能把另一侧静默删掉。
 - **重新打开项目要无缝接回原来的工作面**。切换 Workspace/Project 只是改变可见投影，不能销毁仍在使用中的 Workbench、xterm 实例或 ctxmux attachment；回到项目时应直接看到离开前的终端画面，不再闪 `Restoring terminal…`，也不因为 replay 起点变化把用户误导成“历史丢了”。真正发生 replay gap 时仍需显示 gap 的诚实提示，但项目切换本身不得制造 gap。
 - **应用重启与机器重启都先恢复布局，再恢复语义 Session**。启动时以持久化布局为索引，自动尝试对每个仍有有效 Provider-native handle 的 Agent Session 建立新 Run/attachment；用户不需要先点 `Resume` 才能看到可恢复的 Agent。恢复成功沿用原 View/Region，Run id 可以变化但 Session id 不变。
+- **重启恢复必须使用同一个持久化根目录**。Renderer 的 Workbench 布局与 Core 的 Agent Session store 都绑定 Electron `app.getPath('userData')`；开发启动、打包 App、DMG 安装副本不得各自生成一份 store。启动恢复前若发现路径身份不一致，必须保留原布局并在服务窗说明实际路径，不能把空 store 当成“没有 Session”。
 - **启动探测失败不能遮住已保存的工作面**。配置、Session snapshot 或 Provider capability 的单项 Host/runtime 失败时，Renderer 仍必须先提交已恢复的布局与可见 Region，再把失败作为作用域明确的服务窗/状态行呈现；只有布局本身无法读取时才进入无布局错误态。一次暂时不可达的 Host 不得让整个窗口回到空白 loading，也不得覆盖最后一份可恢复布局。若 snapshot 未能确认 Session 身份，原 Region 先保留为“待 Runtime 校验”的投影；下一次权威 snapshot 到达后再按已知缺失或匹配结果收敛，不能用空 snapshot 静默裁剪它。
+- **Host 探测必须对 GUI 启动可靠**。登录 shell 探测失败时不得把所有 Provider 静默判为 missing；应合并已有环境并使用非交互登录 shell等可靠路径重试，同时在状态面明确“探测未完成/当前按已有 PATH 运行”。只要 CLI 仍可执行，Host 探测流程不得阻断布局、Session 或用户操作。
 - **恢复候选不能静默消失**。Provider 不支持 native resume、Session 从未记录过 verified handle、handle 已失效或 Core 返回冲突时，原布局位置仍保留一个可理解的失败/待处理投影，明确说明原因与下一步；不能开一个全新的 Run 冒充旧上下文，也不能因为恢复失败而把整张布局裁掉。
 - **Session 恢复是独立的一等功能**。应用启动、切换回项目和机器重启后的首次打开，都必须自动尝试恢复；用户不需要先进入 Topic 再显式点击 `Resume`。恢复失败只能在 Core 已给出明确结果时出现，并且必须伴随保留原投影的服务窗说明；不能把“没有 verified Provider handle”当成唯一的无上下文黑箱错误。
 - **「恢复不了」不是一句话，是四类结果加一个冲突，界面必须把它们分开说**。Core 的 unavailable 有四个原因（`provider-resume-unsupported` / `native-handle-unavailable` / `provider-unavailable` / `unknown-session`），另有 conflict 自成一类。合成一句「Agent resume unavailable」等于没说：**Provider 根本不支持 resume 是永久的**（这个 Agent 换个时间点也回不来，该新开一个），**handle 缺失只关乎这一条 Session**（别的 Agent 不受影响），**Provider 在这台 Host 上缺席则是可恢复的**（装回来/Host 回来就能续，此时叫用户新开 Agent 等于让他丢掉一个还活着的 Session），**conflict 说明东西还在、只是被占着**。用户此刻唯一要做的决定就是在「重试」「新开」「等一下」之间选，而这个决定完全由类别决定。

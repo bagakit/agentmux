@@ -14,6 +14,15 @@ type ProfileShellRunner = (
   env: NodeJS.ProcessEnv
 ) => Promise<string>
 
+function mergePath(primary: string, inherited: string | undefined): string {
+  const seen = new Set<string>()
+  return [primary, inherited ?? '']
+    .flatMap((value) => value.split(':'))
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0 && !seen.has(entry) && seen.add(entry))
+    .join(':')
+}
+
 function profileShell(platform: NodeJS.Platform, env: NodeJS.ProcessEnv): string | null {
   const configured = env.SHELL?.trim()
   if (configured) return configured
@@ -64,18 +73,26 @@ export async function hydrateProcessPathFromLoginShell(options: {
   if (!shell) return { ok: false, reason: 'unavailable-shell' }
 
   const command = `printf '%s' '${PATH_MARKER}'; printf '%s' "$PATH"; printf '%s' '${PATH_MARKER}'`
-  let stdout: string
-  try {
-    stdout = await (options.runner ?? runProfileShell)(shell, ['-ilc', command], env)
-  } catch {
-    return { ok: false, reason: 'probe-failed' }
+  const runner = options.runner ?? runProfileShell
+  let stdout: string | null = null
+  let probeFailed = false
+  for (const args of [['-ilc', command], ['-lc', command]] as const) {
+    try {
+      stdout = await runner(shell, args, env)
+    } catch {
+      probeFailed = true
+      continue
+    }
+    const parsed = parseLoginShellPath(stdout)
+    if (parsed) {
+      // A packaged GUI can inherit a sparse PATH. Keep the profile result first, but retain any
+      // already-provided entries so a shell profile that intentionally omits them cannot make an
+      // otherwise executable Host disappear.
+      const path = args[0] === '-lc' ? mergePath(parsed, env.PATH) : parsed
+      env.PATH = path
+      return { ok: true, path, shell }
+    }
   }
-  const path = parseLoginShellPath(stdout)
-  if (!path) return { ok: false, reason: 'empty-path' }
-
-  // The profile-loading shell is authoritative. Core detection and every local
-  // CtxMux child now inherit exactly the same PATH instead of separately
-  // guessing tool locations from a packaged GUI process.
-  env.PATH = path
-  return { ok: true, path, shell }
+  if (probeFailed) return { ok: false, reason: 'probe-failed' }
+  return { ok: false, reason: 'empty-path' }
 }

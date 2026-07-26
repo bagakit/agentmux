@@ -274,4 +274,37 @@ describe('Renderer persistence boundary', () => {
     expect(state.error).toContain('The original Region remains visible')
     dispose()
   })
+
+  it('keeps persisted Agent Regions when an initial snapshot is empty and has no recovery candidates', async () => {
+    const sessionId = 'agent-empty-snapshot'
+    const tab = createWorkbenchTab('empty-snapshot-view', {
+      regionId: initialWorkbenchRegionId('empty-snapshot-view'),
+      kind: 'agent',
+      phase: 'attached',
+      workspaceId: 'workspace-a',
+      sessionId
+    })
+    useAppStore.setState({
+      loading: true,
+      restoredWorkbench: {
+        tabs: { [tab.id]: tab },
+        layouts: { 'workspace-a': createWorkspaceLayout('pane', [tab.id]) }
+      }
+    })
+    vi.spyOn(useAppStore.persist, 'hasHydrated').mockReturnValue(true)
+    vi.spyOn(api.config, 'get').mockResolvedValue(config)
+    vi.spyOn(api.providers, 'list').mockResolvedValue([])
+    vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({
+      sessions: [],
+      timelines: {},
+      recoveryCandidates: []
+    })
+
+    const dispose = await useAppStore.getState().initialize()
+    const state = useAppStore.getState()
+    expect(state.tabs[tab.id]).toEqual(tab)
+    expect(state.layouts['workspace-a']?.groups[0]?.tabOrder).toEqual([tab.id])
+    expect(state.error).toContain('returned no Session facts')
+    dispose()
+  })
 })
