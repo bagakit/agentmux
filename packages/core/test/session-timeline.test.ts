@@ -412,7 +412,7 @@ describe('Agent Session Timeline', () => {
       items: unknown[]
     }
     await writeFile(timelinePath, `${JSON.stringify({
-      version: 2,
+      version: 3,
       agentSessionId: 'session-1',
       revision: Number.MAX_SAFE_INTEGER,
       items: timeline.items
