@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import type { DesktopControlResponse } from '../src/shared/contracts.js'
 import {
   addressingRecovery,
@@ -210,6 +211,50 @@ describe('恢复命令与复制地址共用同一个格式化出口', () => {
     // 合法内容——"列出所有"本来就没有 id 可带，它不是第二处寻址拼接。
     const flaggedInspects = module.match(/agentmux inspect \S*=/gu) ?? []
     expect(flaggedInspects).toHaveLength(1)
+  })
+
+  // 上面那条只读本模块一个文件：它锁住的是"出口内部只拼一次"，够不着"别的文件没有另拼一份"——
+  // 而后者才是这条不变量真正要防的事。有人在 store.ts 里手拼一句 `agentmux send --to-region=...`，
+  // 上面那条纹丝不动。所以这里把扫描面抬到整棵 renderer 源码树。
+  const RENDERER_SRC = fileURLToPath(new URL('../src/renderer/src', import.meta.url))
+  const SOLE_ASSEMBLER = 'lib/agent-address.ts'
+  // 动词命令，或三个 send flag 之一。注释里描述规则的文字不是规则本身，先去注释（沿用
+  // rendered-class-has-rule.test.ts 的写法；`[^:]` 是为了不误伤 `https://` 里的双斜杠）。
+  const ASSEMBLY = /agentmux\s+(?:send|inspect)\b|--to-(?:tab|region|session)\b/u
+
+  function sourceFiles(dir: string): string[] {
+    const out: string[] = []
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = `${dir}/${entry.name}`
+      if (entry.isDirectory()) out.push(...sourceFiles(path))
+      else if (/\.tsx?$/u.test(entry.name)) out.push(path)
+    }
+    return out
+  }
+
+  function withoutComments(source: string): string {
+    return source.replace(/\/\*[\s\S]*?\*\//gu, '').replace(/(^|[^:])\/\/[^\n]*/gu, '$1')
+  }
+
+  it('整棵 renderer 源码树里只有寻址出口拼命令', () => {
+    const offenders: string[] = []
+    for (const file of sourceFiles(RENDERER_SRC)) {
+      const relative = file.slice(RENDERER_SRC.length + 1)
+      if (relative === SOLE_ASSEMBLER) continue
+      withoutComments(readFileSync(file, 'utf8')).split('\n').forEach((line, index) => {
+        if (ASSEMBLY.test(line)) offenders.push(`${relative}:${index + 1}  ${line.trim()}`)
+      })
+    }
+    // 报出 file:line 而不是只给个数字——漂移点要一眼看得到，否则红了还得自己找。
+    expect(offenders, `寻址命令只能在 ${SOLE_ASSEMBLER} 拼接，这些文件另拼了一份：\n${offenders.join('\n')}`).toEqual([])
+  })
+
+  it('自检：扫描面真的覆盖到了寻址出口本身', () => {
+    // 少了这条，上面那条会以最难发现的方式假绿：路径写错、后缀过滤写错、去注释把整个文件吃空，
+    // 任何一种都让 offenders 恒为空数组，而"没扫到"和"扫过了没问题"打印出来一模一样。
+    const files = sourceFiles(RENDERER_SRC).map((file) => file.slice(RENDERER_SRC.length + 1))
+    expect(files).toContain(SOLE_ASSEMBLER)
+    expect(ASSEMBLY.test(withoutComments(readFileSync(`${RENDERER_SRC}/${SOLE_ASSEMBLER}`, 'utf8')))).toBe(true)
   })
 })
 
