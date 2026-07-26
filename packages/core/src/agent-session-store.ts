@@ -58,6 +58,11 @@ const MAX_TIMELINE_STORE_BYTES = 4 * 1024 * 1024
 const LOCK_ATTEMPTS = 300
 const LOCK_RETRY_MIN_MS = 5
 const LOCK_RETRY_JITTER_MS = 10
+// `open(path, 'wx')` and the following owner write are two syscalls. If the process dies between them,
+// contenders can observe an empty lock. Keep a just-created owner-less lock for a short grace window so
+// a healthy acquirer that is still writing its PID cannot be mistaken for a dead owner; after that window
+// the lock is stale because no valid owner could have been recorded.
+const LOCK_OWNER_WRITE_GRACE_MS = 250
 
 export type AgentMuxRecoverableStopOperation = {
   daemonInstance: string
@@ -2227,14 +2232,42 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   }
 
   private async removeDeadOwnerLock(path: string): Promise<void> {
+    let content: string
     try {
-      const pid = Number((await readFile(path, 'utf8')).trim())
-      if (!Number.isSafeInteger(pid) || pid <= 0) return
+      content = await readFile(path, 'utf8')
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      return
+    }
+
+    const firstToken = content.trim().split(/\s+/u)[0]
+    const pid = Number(firstToken)
+    if (!Number.isSafeInteger(pid) || pid <= 0) {
+      // An empty/malformed lock has no owner to probe. It is only reclaimable once the two-syscall
+      // acquisition grace period has elapsed; otherwise the original acquirer may still be writing.
+      let metadata
+      try {
+        metadata = await stat(path)
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        return
+      }
+      if (Date.now() - metadata.mtimeMs < LOCK_OWNER_WRITE_GRACE_MS) return
+    } else {
       try {
         process.kill(pid, 0)
+        // The owner is alive; never reclaim its lock. Keep waiting for the owner to release it.
+        return
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ESRCH') await unlink(path)
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') return
       }
+    }
+
+    // Re-read before unlinking so a contender that already replaced the observed bytes is not removed.
+    // The unlink still remains best-effort: another contender may win the race first.
+    try {
+      if (await readFile(path, 'utf8') !== content) return
+      await unlink(path)
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     }
