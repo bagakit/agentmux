@@ -13,6 +13,25 @@
 - 选择、键盘、拖拽、菜单和可访问性交互使用维护中的成熟依赖与平台模式。
 - Desktop 只组合 Core 的公共能力。所有 Agent 生命周期都经过 `packages/core`；所有 PTY、进程、Run、Replay 和 Attachment 事实都由 ctxmux 持有。
 
+### 打包、安装与启动事实
+
+- **用户启动的必须是同一份已验证候选**。`package:mac` 只产生
+  `apps/desktop/release/mac/AgentMux.app` 与同批 DMG；`package:mac:install`
+  只把这份候选原子替换到约定的 `~/Applications/AgentMux.app`。`apps/desktop/out`
+  是构建中间产物，不能被当作可安装版本；其他路径下的同名 App 不属于当前
+  安装事实。
+- **候选必须携带可核对的来源身份**：至少包含源码 commit、tree、应用版本、平台与
+  架构。安装前后都核对同一身份；版本号相同不等于产物相同，启动排障不能只看
+  `CFBundleVersion`。
+- **安装面只保留一个活动副本**。安装动作完成后，旧的 AgentMux App 不得继续被
+  LaunchServices 选中；清理旧副本时保留到系统 Trash 以便恢复，不删除用户的
+  Application Support、Session、Run 或其他运行数据。
+- **打包失败不能阻断已安装的健康版本**。构建、签名或验证失败时，保留现有安装，
+  明确报告失败阶段与候选来源；只有验证通过的候选才允许替换活动副本。
+- **这是一条发布边界，不新增运行时事实**。安装路径、候选身份和报告属于打包工具的
+  事实；Desktop Runtime 仍只有 Core/ctxmux 的既有 Owner，不在应用内复制一份
+  Session、Run 或布局状态。
+
 ## 产品对象
 
 ### Project 与 Workspace
