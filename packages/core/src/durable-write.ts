@@ -21,7 +21,9 @@ export interface DurableWriteOptions {
  */
 export async function durableWriteFile(
   path: string,
-  content: string | Buffer,
+  // 用 Uint8Array 而不是 Buffer：Buffer 是 Node 全局，写进导出面就等于要求每个消费者装 @types/node。
+  // Buffer 本身就是 Uint8Array 的子类，调用方传 Buffer 照样通过（见 durable-write.test.ts 的二进制用例）。
+  content: string | Uint8Array,
   options: DurableWriteOptions = {}
 ): Promise<void> {
   const { mode = 0o600, signal } = options
