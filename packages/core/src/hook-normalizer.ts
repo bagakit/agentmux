@@ -124,7 +124,11 @@ function applySubagentTracking(
   }
   if (tracking.stopEvents.includes(eventName)) {
     const roster = subagentRosters.get(key)
-    if (!roster) return 'working'
+    // 花名册不存在：可能这个 run 从没记过子代理，也可能是最后一个 SubagentStop 已收敛并删掉了 roster、
+    // 而这一条是它的网络重投（服务端已处理，客户端 2s 超时又发了同一条）。硬编码 'working' 会把已经 done
+    // 的主 Agent 翻回运行中——归零后迟到的 stop 反倒成了假信号。退回 baseState（SubagentStop 无匹配 rule，
+    // baseState 即 'unknown'，落点中性、不落库不改写既有状态），让这条迟到 stop 成为无害幂等。
+    if (!roster) return baseState
     if (id) roster.live.delete(id)
     if (subagentRosterAlive(roster)) return 'working'
     const pending = roster.mainStopPending
@@ -197,9 +201,9 @@ function eventState(
  * askuserquestion / request_user_input / clarify 这类工具在 `PreToolUse` 被规则判成 waiting/blocked，
  * 落的是 append-only 的 permission 行（id 由 receiptId 派生），它等的是用户、不是一次有 Post 收尾的执行。
  * 可这类工具的 `PostToolUse` 语义是 working——若只按**当前事件**的 state 决定 kind，Post 会被判成
- * tool_call，去 `update` 一条 `runId:tool:<toolCallId>`，而 Pre 从没按 tool 关联落过这条，
- * applyTimelineMutation 必抛 UNKNOWN_AGENT_TIMELINE_ITEM 并吞掉下游 publish。所以 kind 判定要从 rules
- * 这个 SSOT 认出「这是个等待工具」，让 Pre 与 Post 得到同一个 kind，两端都留在 append-only。
+ * tool_call，去 upsert 一条 `runId:tool:<toolCallId>`，而 Pre 落的是 permission 行、从没按 tool 关联过：
+ * 这条 upsert 命不中目标，就补落一条 kind=tool_call 的重影行，把一次等待硬生生显示成两条。所以 kind
+ * 判定要从 rules 这个 SSOT 认出「这是个等待工具」，让 Pre 与 Post 得到同一个 kind，两端都留在 append-only。
  */
 function toolAwaitsUser(specification: AgentNativeHookSpecification, toolName: string): boolean {
   const lower = toolName.toLowerCase()
@@ -239,11 +243,13 @@ function timelineItem(
   eventName: string,
   observedAt: number,
   // `id` 可被覆盖：关联 id 存在时，Pre 落的 item 要用 `runId:tool:<toolCallId>` 而不是 receiptId
-  // 派生的默认 id，好让 Post 的 `update` 能命中同一条。`...fields` 排在 `id:` 之后，故覆盖生效。
-  fields: Partial<Omit<AgentTimelineItem, 'agentSessionId' | 'kind' | 'source' | 'createdAt' | 'updatedAt' | 'title'>> = {}
+  // 派生的默认 id，好让 Post 的 upsert 能命中同一条。`...fields` 排在 `id:` 之后，故覆盖生效。
+  fields: Partial<Omit<AgentTimelineItem, 'agentSessionId' | 'kind' | 'source' | 'createdAt' | 'updatedAt' | 'title'>> = {},
+  // Pre 用 append（首落）；Post 用 upsert（目标在就替换、丢投/被逐出就补落），绝不因缺目标抛错。
+  type: 'append' | 'upsert' = 'append'
 ): AgentTimelineMutation {
   return {
-    type: 'append',
+    type,
     agentSessionId: envelope.agentSessionId,
     item: {
       id: `${envelope.runId}:${envelope.receiptId}:${index}`,
@@ -325,21 +331,20 @@ function buildTimeline(
       // 时间轴上一次调用就是一条，而不是两条。receiptId 方案在这里被彻底取代——不是两套并存。
       const itemId = `${envelope.runId}:tool:${toolCallId}`
       if (isPost) {
-        // 事后：翻成终态并挂上结果。走 `update` 而不是再 append——Pre 已经落过这条 id，append
-        // 同 id 会撞 `AGENT_TIMELINE_ID_CONFLICT`。Pre 与 Post 在同一 binding 上按序投递，
-        // Pre 的时间轴在 Post 的 onEvent 开始前已持久化，所以更新目标总是就位。
-        timeline.push({
-          type: 'update',
-          agentSessionId: envelope.agentSessionId,
-          itemId,
-          updatedAt: observedAt,
+        // 事后：翻成终态并挂上结果。走 `upsert` 而不是 `update`——正常情况命中 Pre 落的那条替换掉，
+        // 但 Pre 可能压根没落库：它的两次 fetch 都失败、或在 Pre/Post 之间被 200 条上限逐出（子代理
+        // 场景尤甚）。`update` 命中不到目标会抛 UNKNOWN_AGENT_TIMELINE_ITEM，冒泡出 client 的 timeline
+        // 循环、跳过 publishHook、把整条 hook 事件打成 503，这一步的结果和完成态永久丢失。upsert 目标
+        // 缺失就补落一条自洽的终态行——携带完整 item（kind/source/title 俱全），不靠残缺字段合成。
+        timeline.push(timelineItem(envelope, timeline.length, kind, toolName, eventName, observedAt, {
+          id: itemId,
+          toolName,
           // 失败是**观察到的事实**，不是默认值：采集判定失败才翻 failed，否则收敛为 complete
           // （不再是 streaming——调用已结束）。
           status: outcome?.failed ? 'failed' : 'complete',
-          eventName,
           ...(toolInput ? { toolInput } : {}),
           ...(outcome?.output ? { toolOutput: outcome.output } : {})
-        })
+        }, 'upsert'))
       } else {
         // 事前：先落在途态。`streaming` 徽标此前只有 ACP 会点亮，而所有 Provider 的 ACP 都是
         // none——hook 驱动的 Agent 由此第一次能显示「这一步正在跑」。
