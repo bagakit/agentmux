@@ -51,6 +51,31 @@ describe('native hook normalization', () => {
     expect(event.nativeHandle).toMatchObject({ transcriptPath: '/tmp/pi-session.jsonl' })
   })
 
+  it('does not promote unsafe ids or relative transcript paths to verified handles', () => {
+    const codex = providers.get('codex').normalizeHook({
+      receiptId: 'unsafe-id',
+      agentSessionId: 'semantic-unsafe',
+      runId: 'run-unsafe-id',
+      providerId: 'codex',
+      eventName: 'SessionStart',
+      payload: { session_id: '-resume-me' }
+    })
+    expect(codex.nativeHandle).toBeUndefined()
+
+    const pi = providers.get('pi').normalizeHook({
+      receiptId: 'relative-path',
+      agentSessionId: 'semantic-relative',
+      runId: 'run-relative-path',
+      providerId: 'pi',
+      eventName: 'agent_start',
+      payload: {
+        session_id: 'pi-native-relative',
+        session_file: 'sessions/current.jsonl'
+      }
+    })
+    expect(pi.nativeHandle).toBeUndefined()
+  })
+
   it('treats a Hook retry with only a later observation time as idempotent', () => {
     vi.useFakeTimers()
     const envelope = {

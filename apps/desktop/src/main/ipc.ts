@@ -44,6 +44,7 @@ import type {
   KeepOneOfFanOutInput,
   KeepOneOfFanOutOutcome,
   MoveWorkspacePathInput,
+  NotificationModeId,
   RunFanOutInput,
   RunFanOutResult,
   SessionControl,
@@ -402,9 +403,11 @@ export async function registerIpc(args: {
     sessionId: string
     title: string
     body: string
+    mode: NotificationModeId
   }) => {
     if (event.sender !== args.window.webContents) throw new Error('Untrusted notification sender')
-    // The renderer decided this deserves attention; main only delivers, and says so when it cannot.
+    // The renderer decided this deserves attention and which dwell mode to use; main only delivers, and
+    // says so honestly when it cannot present in that mode.
     return notifier.notify(input)
   })
   handle('providers:list', () => args.runtime.providerCatalog())

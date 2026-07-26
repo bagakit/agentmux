@@ -8,6 +8,7 @@ import {
   type AppConfig,
   type WorkspaceRecord
 } from '../src/shared/contracts.js'
+import { DEFAULT_NOTIFICATION_MODE_ID } from '../src/shared/notification-presentation.js'
 
 vi.mock('electron', () => ({ app: { getPath: () => tmpdir() } }))
 
@@ -144,7 +145,9 @@ describe('ConfigStore workspace identity', () => {
           path: join(tmpdir(), '.agentmux', 'scratch'),
           kind: 'folder'
         }
-      ]
+      ],
+      // get() back-fills the notification default for a config saved before the field existed.
+      notifications: { mode: DEFAULT_NOTIFICATION_MODE_ID }
     })
   })
 
@@ -164,6 +167,31 @@ describe('ConfigStore workspace identity', () => {
       ...baseConfig,
       appearance: { terminalTheme: 'retired-theme' },
       browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
+    } as never)).rejects.toThrow()
+  })
+
+  it('materializes the notification default when a stored config has no notifications field', async () => {
+    // A config written before this field existed is valid on disk (optional field), but get() must
+    // resolve a concrete default tier — never undefined, and never off — and persist it once.
+    const { store, path } = await storeFixture()
+    await writeFile(path, JSON.stringify(baseConfig))
+    expect('notifications' in baseConfig).toBe(false)
+
+    const loaded = await store.get()
+    expect(loaded.notifications).toEqual({ mode: DEFAULT_NOTIFICATION_MODE_ID })
+    // Back-filled defaults are persisted, so the resolved value is stable across restarts.
+    expect(JSON.parse(await readFile(path, 'utf8')).notifications).toEqual({ mode: DEFAULT_NOTIFICATION_MODE_ID })
+  })
+
+  it('keeps a chosen notification mode and rejects an unknown one', async () => {
+    const { store } = await storeFixture()
+    const saved = await store.save({ ...baseConfig, notifications: { mode: 'until-acknowledged' } })
+    expect(saved.notifications).toEqual({ mode: 'until-acknowledged' })
+    expect((await store.get()).notifications).toEqual({ mode: 'until-acknowledged' })
+
+    await expect(store.save({
+      ...baseConfig,
+      notifications: { mode: 'forever' }
     } as never)).rejects.toThrow()
   })
 

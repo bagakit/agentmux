@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { app, BrowserWindow, shell } from 'electron'
 import { AgentMuxFileAgentSessionStore } from '@agentmux/core'
 import { isScratchWorkspaceId } from '../shared/contracts.js'
+import { desktopAgentSessionStorePath } from './agent-session-store-path.js'
 import { ConfigStore } from './config-store.js'
 import { registerIpc } from './ipc.js'
 import { hydrateProcessPathFromLoginShell } from './login-shell-path.js'
@@ -26,7 +27,10 @@ if (process.env.AGENTMUX_DESKTOP_USER_DATA) {
 }
 app.setName('AgentMux')
 const scratchTopics = new ScratchTopics()
-const runtime = new RuntimeController(new AgentMuxFileAgentSessionStore(), scratchTopics)
+const runtime = new RuntimeController(
+  new AgentMuxFileAgentSessionStore(desktopAgentSessionStorePath()),
+  scratchTopics
+)
 const configStore = new ConfigStore()
 
 function disposeOwners(): Promise<void> {

@@ -29,6 +29,7 @@ import type {
   GitRemoteOptions,
   HostConfig,
   MoveWorkspacePathInput,
+  NotificationModeId,
   RuntimeEvent,
   SessionControl,
   TerminalLaunchInput,
@@ -113,7 +114,7 @@ const api: AgentMuxPreloadApi = {
     chooseFiles: (input?: { defaultPath?: string }) => ipcRenderer.invoke('ui:chooseFiles', input),
     savePastedImage: (input: { bytes: Uint8Array; extension: string }) =>
       ipcRenderer.invoke('ui:savePastedImage', input),
-    notifyAgentAttention: (input: { sessionId: string; title: string; body: string }) =>
+    notifyAgentAttention: (input: { sessionId: string; title: string; body: string; mode: NotificationModeId }) =>
       ipcRenderer.invoke('ui:notifyAgentAttention', input),
     onAgentAttentionActivate(listener: (sessionId: string) => void) {
       const wrapped = (_event: Electron.IpcRendererEvent, sessionId: string): void => listener(sessionId)

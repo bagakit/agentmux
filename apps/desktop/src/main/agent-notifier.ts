@@ -1,28 +1,30 @@
 import { Notification } from 'electron'
 import type { BrowserWindow } from 'electron'
+import type { NotificationDelivery, NotificationModeId } from '../shared/contracts.js'
+import { presentationForMode, resolveNotificationMode } from '../shared/notification-presentation.js'
 
 // Desktop main owns native notifications, because only main can reach the OS and the renderer is
 // sandboxed. The renderer decides WHETHER something deserves attention (see the renderer's
-// attention-event decision); this module only delivers, and reports honestly when it cannot.
+// attention-event decision) and WHICH dwell mode the user picked; this module only delivers, and
+// reports honestly when it cannot present in the requested mode.
 //
-// The delivery result matters: a caller must be able to tell "shown" from "this platform will not show
-// it". Returning void would let the app believe it had told the user something it never did.
+// The delivery result matters: a caller must be able to tell "shown as requested" from "the platform
+// downgraded a persistent request to an ordinary banner" from "this platform will not show it at all".
+// Returning void would let the app believe it had told the user something it never did.
 
 export type NotificationRequest = {
   // The Session this is about; handed back on click so the caller can route to it without a second map.
   sessionId: string
   title: string
   body: string
+  // The dwell tier the user chose. `off` never reaches here — the renderer drops it before the IPC.
+  mode: NotificationModeId
   // Attention notifications are informational, not alarms — no sound. The user asked for a heads-up,
   // not an interruption they have to silence.
   silent?: boolean
 }
 
-export type NotificationDelivery =
-  | { status: 'shown' }
-  // The OS or the user's system settings will not show it. Explicit, so the caller can fall back to the
-  // in-window signal instead of assuming delivery.
-  | { status: 'unsupported'; reason: string }
+export type { NotificationDelivery }
 
 export type AgentNotifier = {
   notify(request: NotificationRequest): NotificationDelivery
@@ -35,15 +37,21 @@ export type AgentNotifier = {
  * `onActivate` is invoked with the Session id when the user clicks a notification. Focusing the window
  * is done here because that is a main-side capability; WHERE to go inside the window stays with the
  * renderer, which owns the View and Region truth.
+ *
+ * `platform` is injected (defaulting to the real host) so the downgrade decision is testable without a
+ * real OS — the same reason the presentation policy takes a platform string.
  */
 export function createAgentNotifier(input: {
   window: BrowserWindow
   onActivate: (sessionId: string) => void
+  platform?: string
 }): AgentNotifier {
+  const platform = input.platform ?? process.platform
   // Every live notification, so dispose can detach their listeners rather than leaving them to be
   // collected whenever. A notification outlives the call that created it — it sits in the OS centre —
   // so its click handler must not point at a torn-down window.
   const live = new Set<Notification>()
+  const timers = new Set<ReturnType<typeof setTimeout>>()
   let disposed = false
 
   return {
@@ -55,10 +63,19 @@ export function createAgentNotifier(input: {
         return { status: 'unsupported', reason: 'This system does not support notifications.' }
       }
 
+      const mode = resolveNotificationMode(request.mode)
+      const presentation = presentationForMode(mode, platform)
+
       const notification = new Notification({
         title: request.title,
         body: request.body,
-        silent: request.silent ?? true
+        silent: request.silent ?? true,
+        // Ask the platform to pin it open only when the mode wants persistence AND the platform can
+        // honour it; otherwise a default (self-dismissing) banner. macOS ignores this entirely, which
+        // is exactly why `presentation` above reports the downgrade rather than pretending it stuck.
+        timeoutType: mode.kind === 'until-acknowledged' && presentation === 'as-requested'
+          ? 'never'
+          : 'default'
       })
 
       const onClick = (): void => {
@@ -77,11 +94,24 @@ export function createAgentNotifier(input: {
       notification.once('close', onClose)
       live.add(notification)
       notification.show()
-      return { status: 'shown' }
+
+      // A dwell mode asks for a bounded banner. The OS owns the real floor, but where it lets us we
+      // close it after the chosen dwell so "brief" and "patient" are actually different.
+      if (mode.kind === 'dwell') {
+        const timer = setTimeout(() => {
+          timers.delete(timer)
+          if (!disposed && !input.window.isDestroyed()) notification.close()
+        }, mode.dwellMs)
+        timers.add(timer)
+      }
+
+      return { status: 'shown', presentation }
     },
 
     dispose() {
       disposed = true
+      for (const timer of timers) clearTimeout(timer)
+      timers.clear()
       for (const notification of live) {
         notification.removeAllListeners()
         // Close what is still on screen: a click after teardown would reach a window that is gone.

@@ -313,7 +313,8 @@ function assertAgentPromptSize(prompt: string): void {
 }
 
 function terminalEnvironment(
-  environment: Readonly<Record<string, string>>
+  environment: Readonly<Record<string, string>>,
+  agentSessionStorePath?: string
 ): Record<string, string> {
   const inheritedPath = environment.PATH ?? process.env.PATH ?? ''
   return {
@@ -325,7 +326,11 @@ function terminalEnvironment(
     ...environment,
     PATH: [dirname(AGENTMUX_CLI_PATH), inheritedPath].filter(Boolean).join(delimiter),
     AGENTMUX_ENV: '1',
-    AGENTMUX_CLI: AGENTMUX_CLI_PATH
+    AGENTMUX_CLI: AGENTMUX_CLI_PATH,
+    // Tell every process AgentMux spawns where the Agent Session store lives, so the CLI an Agent runs
+    // resolves sessions out of the SAME file this Client writes — not the temp default it would otherwise
+    // reach. The path's authority is whoever constructed the store (the desktop points it at userData).
+    ...(agentSessionStorePath ? { AGENTMUX_AGENT_SESSION_STORE: agentSessionStorePath } : {})
   }
 }
 
@@ -639,7 +644,7 @@ export class AgentMuxClient {
       program: input.command ?? process.env.SHELL ?? '/bin/sh',
       args: input.args ?? [],
       cwd: input.workspacePath,
-      env: terminalEnvironment(input.env ?? {}),
+      env: terminalEnvironment(input.env ?? {}, this.agentSessionStorePath()),
       ...(input.cols === undefined ? {} : { cols: input.cols }),
       ...(input.rows === undefined ? {} : { rows: input.rows })
     })
@@ -1904,6 +1909,13 @@ export class AgentMuxClient {
     return run
   }
 
+  private agentSessionStorePath(): string | undefined {
+    // Only a file-backed store has a durable path worth telling spawned processes about. A memory store
+    // (checkHost probes, tests) has none, and the CLI reaching it would be meaningless — leave the
+    // variable unset so nothing is misdirected.
+    return this.store instanceof AgentMuxFileAgentSessionStore ? this.store.path : undefined
+  }
+
   private agentEnvironment(
     environment: Readonly<Record<string, string>>,
     agentSessionId: string,
@@ -1914,7 +1926,7 @@ export class AgentMuxClient {
     capability: string
   ): Record<string, string> {
     return {
-      ...terminalEnvironment(environment),
+      ...terminalEnvironment(environment, this.agentSessionStorePath()),
       AGENTMUX_HOOK_URL: binding.endpoint.url,
       AGENTMUX_HOOK_TOKEN: binding.endpoint.token,
       AGENTMUX_AGENT_SESSION_ID: agentSessionId,

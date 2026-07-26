@@ -1,7 +1,7 @@
 import { AgentMuxError } from './errors.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, open, readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { defaultAgentMuxRuntimeDirectory } from './runtime-paths.js'
 import { normalizeAgentInteractionResponse } from './agent-interaction.js'
 import { RISK_TIERS } from './types.js'
@@ -10,6 +10,10 @@ import {
   normalizeAgentTimeline,
   normalizeAgentTimelineMutation
 } from './session-timeline.js'
+import {
+  normalizeNativeSessionId,
+  normalizeNativeTranscriptPath
+} from './agent-native-locator.js'
 import type {
   AgentHookReceipt,
   AgentMuxEvidence,
@@ -372,21 +376,34 @@ function launchOptionSelection(value: unknown): Record<string, string> {
 function nativeHandle(value: unknown): AgentNativeSessionHandle {
   const source = record(value, 'nativeHandle')
   if (source.kind === 'provider') {
+    const providerId = normalizeNativeSessionId(source.providerId)
+    const sessionId = normalizeNativeSessionId(source.sessionId)
+    if (!providerId || !sessionId) {
+      throw new AgentMuxError('nativeHandle provider locator is invalid.', 'INVALID_AGENT_SESSION_STORE')
+    }
     const transcriptPath = source.transcriptPath === undefined
       ? undefined
-      : string(source.transcriptPath, 'nativeHandle.transcriptPath', MAX_PATH_BYTES)
+      : normalizeNativeTranscriptPath(source.transcriptPath)
+    if (source.transcriptPath !== undefined && !transcriptPath) {
+      throw new AgentMuxError('nativeHandle.transcriptPath is invalid.', 'INVALID_AGENT_SESSION_STORE')
+    }
     return {
       kind: 'provider',
-      providerId: string(source.providerId, 'nativeHandle.providerId'),
-      sessionId: string(source.sessionId, 'nativeHandle.sessionId'),
+      providerId,
+      sessionId,
       ...(transcriptPath ? { transcriptPath } : {})
     }
   }
   if (source.kind === 'acp') {
+    const adapterId = normalizeNativeSessionId(source.adapterId)
+    const sessionId = normalizeNativeSessionId(source.sessionId)
+    if (!adapterId || !sessionId) {
+      throw new AgentMuxError('nativeHandle ACP locator is invalid.', 'INVALID_AGENT_SESSION_STORE')
+    }
     return {
       kind: 'acp',
-      adapterId: string(source.adapterId, 'nativeHandle.adapterId'),
-      sessionId: string(source.sessionId, 'nativeHandle.sessionId')
+      adapterId,
+      sessionId
     }
   }
   throw new AgentMuxError('nativeHandle.kind is invalid.', 'INVALID_AGENT_SESSION_STORE')
@@ -1287,6 +1304,20 @@ function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
 }
 
 export function defaultAgentMuxAgentSessionStorePath(): string {
+  // The process that owns the durable location (the desktop, which knows Electron userData) tells every
+  // other process — including the CLI each Agent runs — where the store lives. Core must not import Electron
+  // or re-derive userData, so it learns the path only from this variable. Absent it, fall back to the
+  // machine-level runtime temp directory: the same location the daemon socket/state use.
+  const injected = process.env.AGENTMUX_AGENT_SESSION_STORE?.trim()
+  if (injected) {
+    if (!isAbsolute(injected)) {
+      throw new AgentMuxError(
+        'AGENTMUX_AGENT_SESSION_STORE must be an absolute path.',
+        'INVALID_AGENT_SESSION_STORE'
+      )
+    }
+    return resolve(injected)
+  }
   return join(defaultAgentMuxRuntimeDirectory(), 'agent-sessions.json')
 }
 
