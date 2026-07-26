@@ -160,4 +160,48 @@ describe('agentmux CLI discovery', () => {
       error: { code: 'INVALID_CLI_ARGUMENT', message: 'whoami takes no arguments.' }
     })
   })
+
+  // T-005 验收 #1/#5：handoff 进入既有 verb 注册/help/skill 与分发，不另起一套；失败沿用 typed 错误。
+  // 这个文件经 bin/agentmux 走 dist——删掉 src 里的 handoff 分发再 build，下面「真被分发」那条会红
+  // （落回 Unknown command）。这正是 gate agent-handoff.test.ts（只测纯函数）守不住的那一侧。
+  it('lists handoff in --help and resolves handoff --help through the shared registry', async () => {
+    const help = await run(['--help'])
+    expect(help).toContain('handoff')
+    const handoffHelp = await run(['handoff', '--help'])
+    expect(handoffHelp).toContain('agentmux handoff --to-session')
+    // help 说清边界：只转移所有权，不投递消息（呼应验收 #2/#3）。
+    expect(handoffHelp).toContain('--task <task-id>')
+    expect(handoffHelp).toContain('originAwaits')
+  })
+
+  it('documents handoff in --skill as ownership transfer, not a message', async () => {
+    const skill = await run(['--skill'])
+    expect(skill).toContain('agentmux handoff --to-session')
+    expect(skill).toContain('--task <task-id>')
+    // skill 明说不要用 send 措辞模拟交接——所有权转移是 Core 事实。
+    expect(skill).toContain('ownership')
+  })
+
+  it('dispatches handoff as a real command requiring managed identity, not an unknown one', async () => {
+    // 无 managed 身份时 handoff 必须走到 MANAGED_AGENT_CONTEXT_REQUIRED——证明它分发到了
+    // handoffCommand（managedCaller() 在那里抛），而不是落进 Unknown command 兜底。删掉 src 的分发
+    // 行、重建 dist，这条会翻成 INVALID_CLI_ARGUMENT + "Unknown command"。
+    const unmanaged = await fail(['handoff', '--to-session', 'agent-b', '--task', 't-1'], { AGENTMUX_ENV: '', AGENTMUX_AGENT_SESSION_ID: '' })
+    const payload = JSON.parse(unmanaged.stderr)
+    expect(payload).toMatchObject({ error: { code: 'MANAGED_AGENT_CONTEXT_REQUIRED' } })
+    expect(payload.error.message).not.toContain('Unknown command')
+  })
+
+  it('handoff fails closed on missing target/task and rejects self as a target', async () => {
+    const managed = { AGENTMUX_ENV: '1', AGENTMUX_AGENT_SESSION_ID: 'agent-self', AGENTMUX_AGENT_CAPABILITY: 'cap-x' }
+    // 缺目标：typed INVALID_CLI_ARGUMENT，不静默。
+    const noTarget = await fail(['handoff', '--task', 't-1'], managed)
+    expect(JSON.parse(noTarget.stderr)).toMatchObject({ error: { code: 'INVALID_CLI_ARGUMENT' } })
+    // 缺 task：同样 typed 失败。
+    const noTask = await fail(['handoff', '--to-session', 'agent-b'], managed)
+    expect(JSON.parse(noTask.stderr)).toMatchObject({ error: { code: 'INVALID_CLI_ARGUMENT' } })
+    // 交给"自己"没有意义——self 是保留选择器，目标必须是显式 id。
+    const selfTarget = await fail(['handoff', '--to-session', 'self', '--task', 't-1'], managed)
+    expect(JSON.parse(selfTarget.stderr)).toMatchObject({ error: { code: 'INVALID_CLI_ARGUMENT' } })
+  })
 })
