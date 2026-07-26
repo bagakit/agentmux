@@ -14,4 +14,5 @@
 @import './browser.css';
 @import './agent.css';
 @import './activity.css';
+@import './activity-conversation.css';
 @import './overlays.css';
