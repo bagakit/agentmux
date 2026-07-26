@@ -17,7 +17,7 @@ import {
   terminalLinkPreviewAnchor
 } from '../lib/terminal-link-gesture'
 import { detectTerminalPathLinks } from '../lib/terminal-path-link'
-import { terminalOptions, terminalTheme } from '../lib/terminal-theme'
+import { terminalOptions, terminalTheme, activateTerminalUnicodeWidth, UNICODE_WIDTH_VERSION } from '../lib/terminal-theme'
 import {
   isShiftEnterNewline,
   isTerminalAppShortcut,
@@ -300,6 +300,16 @@ export function TerminalView({
     terminal.open(root)
     terminalRef.current = terminal
     searchAddonRef.current = search
+
+    // 宽度表必须在**任何回放字节写入之前**激活：单元格宽度在字节写入那一刻按当时的
+    // Unicode 版本定型，先写进去的 CJK/emoji 会按默认的 v6 宽度串行，之后再切版本也救不回来。
+    // 所以这一步紧跟 open()、排在下面 attach 里首个 replay write 之前。返回值就地断言，
+    // 把"只 load 没激活"（loadAddon 只登记版本、不改 activeVersion）这种静默失效挡在启动期。
+    // 这个 addon 的 dispose 是空操作、不持有任何可泄漏资源，故不计入下方的 addon owner 账。
+    const activeUnicodeVersion = activateTerminalUnicodeWidth(terminal)
+    if (activeUnicodeVersion !== UNICODE_WIDTH_VERSION) {
+      console.warn(`[terminal] Unicode width table did not activate (active=${activeUnicodeVersion})`)
+    }
 
     // File-path link provider. Runs on the render/hover hot path, so it does ONLY string work:
     // read the buffer line xterm already holds and scan it with the pure, conservative matcher.
