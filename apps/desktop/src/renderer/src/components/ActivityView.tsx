@@ -1,5 +1,6 @@
 import { Bot, ChevronRight, CircleDot, Hammer, Info, ShieldAlert, UserRound } from 'lucide-react'
 import { Fragment, useEffect, useMemo, useRef, useState, type JSX } from 'react'
+import type { AgentDisplayState } from '@agentmux/core'
 import type { AgentTimelineItem } from '../../../shared/contracts'
 import {
   initFollowState,
@@ -25,6 +26,7 @@ import {
   type RulerScale
 } from '../lib/activity-ruler'
 import { stepTitle } from '../lib/activity-step-summary'
+import { showEmptyState, showWorkingIndicator } from '../lib/activity-working-state'
 import { terminalLinkPreviewAnchor } from '../lib/terminal-link-gesture'
 import { AgentMarkdown, type OpenWorkspaceFile } from './AgentMarkdown'
 
@@ -471,14 +473,34 @@ function placeSegments(segments: Segment[]): PlacedSegment[] {
   return placed
 }
 
+/**
+ * 「在进行」。
+ *
+ * 用 aria-live 而不是纯视觉动画：读屏用户同样需要知道 Agent 已经在做事了，否则那一段静默对他们
+ * 而言与"没发出去"无法区分。`polite` 是因为这不是需要打断当前朗读的紧急事件。
+ */
+function WorkingIndicator(): JSX.Element {
+  return (
+    <div className="activity-working" role="status" aria-live="polite">
+      <span className="activity-working__dots" aria-hidden="true">
+        <i /><i /><i />
+      </span>
+      Working…
+    </div>
+  )
+}
+
 export function ActivityView({
   items,
   capability,
+  displayState,
   openWorkspaceFile,
   workspaceRoot = ''
 }: {
   items: AgentTimelineItem[]
   capability: 'unavailable' | 'complete-events' | 'streaming'
+  /** Session 的显示状态——「这个 turn 在不在工作」的唯一真相，不从时间轴形状反推。 */
+  displayState?: AgentDisplayState
   /** Absent means file references in agent prose stay plain text. */
   openWorkspaceFile?: OpenWorkspaceFile
   workspaceRoot?: string
@@ -612,12 +634,21 @@ export function ActivityView({
       </div>
     )
   }
-  if (items.length === 0) {
+  if (showEmptyState(displayState, items)) {
     return (
       <div className="activity-feed">
         <div className="activity-feed__empty">
           No structured activity yet. Terminal remains available.
         </div>
+      </div>
+    )
+  }
+  // 正在想、但首行还没落地：显示"在进行"而不是空状态。一个正在工作的东西显示成空，
+  // 比慢更糟——用户会以为自己没发出去，然后再发一遍。
+  if (items.length === 0) {
+    return (
+      <div className="activity-feed">
+        <WorkingIndicator />
       </div>
     )
   }
@@ -665,6 +696,7 @@ export function ActivityView({
           </div>
         ))}
       </div>
+      {showWorkingIndicator(displayState, items) ? <WorkingIndicator /> : null}
       {showJump ? (
         <button type="button" className="activity-feed__jump" onClick={jumpToLatest}>
           Jump to latest
