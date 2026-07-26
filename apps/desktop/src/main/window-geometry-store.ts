@@ -1,6 +1,7 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { mkdir, readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { app } from 'electron'
+import { durableWriteFile } from '@agentmux/core'
 import { parseStoredGeometry, type WindowGeometry } from './window-geometry.js'
 
 /**
@@ -30,14 +31,12 @@ export class WindowGeometryStore {
 
   /**
    * Serialize writes through a tail so overlapping saves (a resize immediately followed by a close)
-   * cannot interleave and leave a half-written file. Atomic temp-then-rename mirrors ConfigStore.
+   * cannot interleave and leave a half-written file. Durable temp-then-rename mirrors ConfigStore.
    */
   async save(geometry: WindowGeometry): Promise<void> {
     const operation = this.saveTail.catch(() => {}).then(async () => {
       await mkdir(dirname(this.path), { recursive: true })
-      const tempPath = `${this.path}.${process.pid}.tmp`
-      await writeFile(tempPath, `${JSON.stringify(geometry, null, 2)}\n`, { mode: 0o600 })
-      await rename(tempPath, this.path)
+      await durableWriteFile(this.path, `${JSON.stringify(geometry, null, 2)}\n`)
     })
     this.saveTail = operation.then(() => {}, () => {})
     await operation

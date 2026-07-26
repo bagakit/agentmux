@@ -1,8 +1,8 @@
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm } from 'node:fs/promises'
 import { dirname, join, normalize as normalizeLocalPath, posix } from 'node:path'
 import { app } from 'electron'
 import { z } from 'zod'
-import { BUILT_IN_AGENT_PROVIDERS } from '@agentmux/core'
+import { BUILT_IN_AGENT_PROVIDERS, durableWriteFile } from '@agentmux/core'
 import type { AppConfig, WorkspaceRecord } from '../shared/contracts.js'
 import { SCRATCH_WORKSPACE_ID, SCRATCH_WORKSPACE_NAME } from '../shared/contracts.js'
 import { DEFAULT_NOTIFICATION_MODE_ID, NOTIFICATION_TIERS } from '../shared/notification-presentation.js'
@@ -274,9 +274,7 @@ export class ConfigStore {
         }
       }
       await mkdir(dirname(this.path), { recursive: true })
-      const tempPath = `${this.path}.${process.pid}.tmp`
-      await writeFile(tempPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 })
-      await rename(tempPath, this.path)
+      await durableWriteFile(this.path, `${JSON.stringify(config, null, 2)}\n`)
       saved = structuredClone(config)
     })
     this.saveTail = operation.then(() => {}, () => {})
