@@ -8,3 +8,14 @@ allowBuilds:
 
 overrides:
   '@ctxmux/sdk@0.0.0': file:packages/core/vendor/ctxmux/darwin-arm64/ctxmux-sdk-0.0.0.tgz
+
+# @ctxmux/sdk is a locally vendored `file:` tarball (see overrides above), not a
+# registry package. pnpm 11.5's default `minimumReleaseAge` supply-chain gate
+# treats its lockfile entry (which carries an integrity hash + `tarball:` field)
+# as a registry dependency and tries to look up a publish date on npmjs, which
+# 404s and fails every install/build. A `file:` tarball has no registry release
+# date, so it is categorically outside what minimumReleaseAge is meant to guard.
+# Excluding only this one vendored package keeps the release-age policy fully in
+# force for every real registry dependency.
+minimumReleaseAgeExclude:
+  - '@ctxmux/sdk'
