@@ -18,7 +18,7 @@ import {
   type AgentProvider
 } from './agent-provider.js'
 import { releaseSubagentRoster } from './hook-normalizer.js'
-import { composeAgentLaunchPrompt } from './agent-launch-prompt.js'
+import { composeAgentLaunchPrompt, composeOutboundMessage } from './agent-outbound-message.js'
 import { hashAgentCapability, issueAgentCapability, resolveCapabilityAuthor } from './agent-capability.js'
 import { planDiscussion } from './agent-discussion.js'
 import {
@@ -1243,7 +1243,9 @@ export class AgentMuxClient {
         'STALE_AGENT_SESSION'
       )
     }
-    const prompt = input.prompt?.trim()
+    const trimmedPrompt = input.prompt?.trim()
+    // resume 是纯用户话：非空时经唯一出口产出，不加 amux 信封——用户原文逐字节透传。
+    const prompt = trimmedPrompt ? composeOutboundMessage({ user: trimmedPrompt }) : undefined
     const lifecycleOperationId = agentLifecycleOperationIdentity(
       'resume',
       current.agentSessionId,
@@ -1593,13 +1595,15 @@ export class AgentMuxClient {
     const content = input.prompt.trim()
     if (!content) throw new AgentMuxError('Agent prompt cannot be empty.', 'INVALID_AGENT_PROMPT')
     assertAgentPromptSize(content)
+    // send 是纯用户话：出站文本经唯一出口产出，但不加 amux 信封——用户原文逐字节透传。
+    const outbound = composeOutboundMessage({ user: content })
     const operationId = safeId(input.operationId, 'Agent prompt operation id')
     // 握手绝不做发 prompt 的前置门。这里不是生命周期路径——run 早就活着，用户此刻正在提交。
     // 而 `[?u` 是 codex 一次性的启动输出，对一个几分钟前启动的 run 早已不可达，于是一旦拦在
     // 这里，**那个 run 之后的每一条 prompt 都被永久挡住**。栅栏起点由 daemon 的权威
     // acceptedInputBytes 兜底（submitAgentInputPlan 本来就这么取），不依赖握手是否完成。
     const session = this.requireAgentSession(input.agentSessionId)
-    const plan = this.providers.get(session.providerId).planPromptInput(content)
+    const plan = this.providers.get(session.providerId).planPromptInput(outbound)
     await this.serializeAgentInput(session, async (current, run) => {
       if (current.pendingInteraction) {
         throw new AgentMuxError(
@@ -1607,13 +1611,13 @@ export class AgentMuxClient {
           'AGENT_INTERACTION_PENDING'
         )
       }
-      await this.submitAgentInputPlan(current, run, operationId, content, plan)
+      await this.submitAgentInputPlan(current, run, operationId, outbound, plan)
     })
     await this.recordPromptAfterSideEffect(
       this.requireAgentSession(input.agentSessionId),
       `prompt:${operationId}`,
       'Prompt',
-      content,
+      outbound,
       Date.now()
     )
   }

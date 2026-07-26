@@ -126,7 +126,7 @@ describe('四个调用点都走降级包装', () => {
   it('submitAgentPrompt 不被握手拦住——降级后 prompt 照发', () => {
     const submit = clientCode.slice(
       clientCode.indexOf('async submitAgentPrompt('),
-      clientCode.indexOf('const plan = this.providers.get(session.providerId).planPromptInput(content)')
+      clientCode.indexOf('const plan = this.providers.get(session.providerId).planPromptInput(outbound)')
     )
     expect(submit).toContain('this.requireAgentSession(input.agentSessionId)')
     expect(submit).not.toContain('ensureTerminalHandshake(')
