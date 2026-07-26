@@ -247,7 +247,10 @@ export function planControlOpen(
   const layout = layouts[anchor.workspaceId]
   if (!layout) throw error('TAB_NOT_OPEN', 'Anchor Tab is not currently open.')
   const launcher: LauncherWorkbenchSurface = { regionId, kind: 'launcher', workspaceId: anchor.workspaceId }
-  const tab = createWorkbenchTab(tabId, launcher)
+  // A Control `placement=tab` is still a new View opened from an existing work line. Preserve the
+  // anchor Tab's explicit Topic binding; the Tab id is not a Topic and must never become one.
+  const createdTab = createWorkbenchTab(tabId, launcher)
+  const tab = anchor.topicId ? { ...createdTab, topicId: anchor.topicId } : createdTab
   const nextLayout = insertTabAfter(layout, anchor.id, tab.id)
   if (nextLayout === layout) throw error('CONTROL_FAILED', 'Tab destination could not be created.')
   tabs[tab.id] = tab
