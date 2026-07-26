@@ -40,9 +40,13 @@
 | --- | --- | --- |
 | 权威 Run 仍在且身份精确匹配 | attach 原 Run | 直接显示，不创建第二个 Run |
 | Run 已丢失且 Provider handle verified、capability positive | native resume，保留 Session ID，创建新 Run | 自动恢复，无需点击 Resume |
-| Provider 不支持 resume | 不伪造新上下文 | 原 Region 保留，显示 `provider-unsupported` |
-| handle 缺失/未验证/失效 | 不猜 token、不 fallback 到新 Run | 原 Region 保留，显示 `native-handle-unavailable` |
-| Core identity/ownership conflict | 停止该候选，不重复 spawn | 原 Region 保留，显示 `continuity-conflict` |
+| Provider 不支持 resume | 不伪造新上下文 | 原 Region 保留，按 `provider-resume-unsupported` 归类 |
+| handle 缺失/未验证/失效 | 不猜 token、不 fallback 到新 Run | 原 Region 保留，按 `native-handle-unavailable` 归类 |
+| Provider 在这台 Host 上缺席 | 不改判为永久失败 | 原 Region 保留，按 `provider-unavailable` 归类——这一类**可重试** |
+| Core 无该 Session 的任何绑定 | 不凭空重建身份 | 原 Region 保留，按 `unknown-session` 归类 |
+| Core identity/ownership conflict | 停止该候选，不重复 spawn | 原 Region 保留，按 conflict 归类（无 reason 码，冲突自己就是原因） |
+
+> 这一列写的是**归类**，不是显示给用户的字符串。原始 code 不出现在界面上：每一类给出自己的标题、原因与下一步动作，见交互合同《Session 恢复》。上表原先只列了三类且其中两个 code 名（`provider-unsupported`、`continuity-conflict`）在 Core 中并不存在，已按 `agent-session-continuity.ts:21` 的实际 union 更正。
 | 用户显式 stop/retire | 不自动复活 | 投影按明确的 retired 状态处理 |
 
 未知状态不得静默放行或静默删除；应显示“无法判定”并保留诊断入口。
