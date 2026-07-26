@@ -6,29 +6,24 @@ import {
 const fakeCodex = process.env.AGENTMUX_FAKE_CODEX
 if (!fakeCodex) throw new Error('AGENTMUX_FAKE_CODEX is required')
 const crashPoint = process.env.AGENTMUX_PROMPT_CRASH_POINT ?? 'after-store-ack'
-if (
-  crashPoint !== 'before-store-ack' &&
-  crashPoint !== 'after-store-ack' &&
-  crashPoint !== 'submit-before-store-ack'
-) {
+if (crashPoint !== 'after-store-ack' && crashPoint !== 'submit-before-store-ack') {
   throw new Error(`Unknown prompt crash point: ${crashPoint}`)
 }
-const beforePayloadStoreAck = crashPoint === 'before-store-ack'
+// 提交路径上只剩一次 CAS：payload 受据不再单独整写，随 submit 受据一次落盘
+// （client.ts:2776-2781 提前 return，:2799-2800 一次翻两个受据）。所以真实崩溃窗口只有两个
+// ——那次 CAS 落盘之前、之后。原来还有个 before-store-ack 挂在「payload 已 ack、submit 还没」
+// 这个中间态上，该态已不存在，用 compareAndSwap 拦截器再也拦不到，已连同断言一并删除。
 const beforeSubmitStoreAck = crashPoint === 'submit-before-store-ack'
-const agentSessionId = beforePayloadStoreAck
-  ? 'codex-prompt-before-payload-ack-crash'
-  : beforeSubmitStoreAck
-    ? 'codex-prompt-before-submit-ack-crash'
-    : 'codex-prompt-crash'
+const agentSessionId = beforeSubmitStoreAck
+  ? 'codex-prompt-before-submit-ack-crash'
+  : 'codex-prompt-crash'
 const submissionId = `packed-${agentSessionId}-operation`
 
 const crash = async (next, submission, phase) => {
   const type = phase === 'submit'
     ? 'prompt-submit-applied-before-store-ack'
-    : beforePayloadStoreAck
-      ? 'prompt-payload-applied-before-store-ack'
-      : 'prompt-payload-acknowledged-before-submit'
-  const exitCode = phase === 'submit' ? 93 : beforePayloadStoreAck ? 92 : 91
+    : 'prompt-payload-acknowledged-before-submit'
+  const exitCode = phase === 'submit' ? 93 : 91
   await new Promise(() => {
     process.stdout.write(`${JSON.stringify({
       type,
@@ -49,27 +44,18 @@ const store = {
   async loadRetiredAgentSessions() { return await base.loadRetiredAgentSessions() },
   async compareAndSwap(expected, next) {
     const submission = next?.terminalPromptSubmission
-    const payloadAcknowledgement = (
-      crashArmed &&
-      submission?.submissionId === submissionId &&
-      !expected?.terminalPromptSubmission?.payload.acknowledged &&
-      submission.payload.acknowledged &&
-      !submission.submit.acknowledged
-    )
-    const submitAcknowledgement = (
+    // 唯一那次受据 CAS：两个受据在同一个 next 里一起从 false 翻成 true。
+    const acknowledgement = (
       crashArmed &&
       submission?.submissionId === submissionId &&
       !expected?.terminalPromptSubmission?.submit.acknowledged &&
       submission.submit.acknowledged
     )
-    if (payloadAcknowledgement && beforePayloadStoreAck) {
-      await crash(next, submission, 'payload')
-    }
-    if (submitAcknowledgement && beforeSubmitStoreAck) {
+    if (acknowledgement && beforeSubmitStoreAck) {
       await crash(next, submission, 'submit')
     }
     await base.compareAndSwap(expected, next)
-    if (payloadAcknowledgement && !beforePayloadStoreAck && !beforeSubmitStoreAck) {
+    if (acknowledgement && !beforeSubmitStoreAck) {
       await crash(next, submission, 'payload')
     }
   },
