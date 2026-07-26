@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createHash } from 'node:crypto'
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, unlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, unlink, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import {
@@ -702,6 +702,41 @@ describe('timeline JSONL 追加与 compaction', () => {
 })
 
 describe('并发写同一份 store 的锁竞争', () => {
+  it('回收进程崩溃留下的空锁，并允许新的 Session 写入', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-store-stale-lock-'))
+    const path = join(root, 'agent-sessions.json')
+    const lockPath = `${path}.lock`
+    try {
+      await writeFile(lockPath, '', { mode: 0o600 })
+      const staleAt = new Date(Date.now() - 5_000)
+      await utimes(lockPath, staleAt, staleAt)
+
+      const store = new AgentMuxFileAgentSessionStore(path)
+      await store.compareAndSwap(null, storedSession())
+
+      await expect(store.load()).resolves.toHaveLength(1)
+      await expect(readFile(lockPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('回收 owner 字段截断且已过 grace window 的锁', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-store-truncated-lock-'))
+    const path = join(root, 'agent-sessions.json')
+    const lockPath = `${path}.lock`
+    try {
+      await writeFile(lockPath, 'not-a-pid', { mode: 0o600 })
+      const staleAt = new Date(Date.now() - 5_000)
+      await utimes(lockPath, staleAt, staleAt)
+
+      await new AgentMuxFileAgentSessionStore(path).compareAndSwap(null, storedSession())
+      await expect(readFile(lockPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   // 这条守的是「多个 Owner 同时落盘不会有人被饿死」。它曾经真的会：写入改走 durable write
   // （fsync 文件 + fsync 父目录，实测约 10ms/次）之后，持锁时长和当时的定长 10ms 退避成了同一个
   // 量级，所有等待者同步醒来一起抢，形成惊群——并发 60 时约 15% 的写入耗尽重试预算抛 BUSY。
