@@ -5,14 +5,13 @@ import {
   Bot,
   CheckCircle2,
   Columns3,
-  FolderOpen,
+  Crosshair,
   FolderGit2,
   Globe2,
   History,
   LoaderCircle,
   MessageSquarePlus,
   NotebookText,
-  Pencil,
   Plus,
   RadioTower,
   Send,
@@ -71,6 +70,7 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { orderTopics, reorderTopics } from '../lib/topic-order'
+import { TopicContextMenu } from './TopicContextMenu'
 import { useAppStore } from '../store'
 import { agentComposerAvailability } from './AgentSessionComposer'
 import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
@@ -515,7 +515,14 @@ function WorkspaceTopicsPanel({
             const isCurrent = topic.id === currentTopic?.id
             const editing = editingTopicId === topic.id
             return (
-              <SortableTopicItem topicId={topic.id} isCurrent={isCurrent} key={topic.id}>
+              <SortableTopicItem
+                topicId={topic.id}
+                isCurrent={isCurrent}
+                key={topic.id}
+                onCopyPath={() => void api.ui.writeClipboardText(topic.directoryPath)}
+                onRename={() => beginRename(topic)}
+                onReveal={() => onRevealDirectory(topic.directoryPath)}
+              >
                 {editing ? (
                   <form
                     className="workspace-topic-rename-form"
@@ -524,7 +531,6 @@ function WorkspaceTopicsPanel({
                       void commitRename(topic)
                     }}
                   >
-                    <Pencil size={13} />
                     <input
                       autoFocus
                       aria-label={`Rename ${topic.title}`}
@@ -546,7 +552,9 @@ function WorkspaceTopicsPanel({
                     disabled={pending !== null}
                     onClick={() => void openTopic(topic.id)}
                   >
-                    {pending === topic.id ? <LoaderCircle className="spin" size={14} /> : <NotebookText size={14} />}
+                    {/* 行首不放 Topic 图标：一列全同的图标不携带信息，只在挤压标题宽度。
+                        这个位置只在真的有话说时才占用——正在打开时的那枚 spinner。 */}
+                    {pending === topic.id ? <LoaderCircle className="spin" size={14} /> : null}
                     <span>
                       <span className="workspace-topic-title-line">
                         <strong>{topic.title}</strong>
@@ -579,27 +587,17 @@ function WorkspaceTopicsPanel({
                     </span>
                   </button>
                 )}
-                <button
-                  className="icon-button workspace-topic-rename"
-                  type="button"
-                  aria-label={`Rename ${topic.title}`}
-                  title="Rename Topic"
-                  disabled={pending !== null}
-                  onClick={() => editing ? cancelRename() : beginRename(topic)}
-                >
-                  {pending === `rename:${topic.id}`
-                    ? <LoaderCircle className="spin" size={12} />
-                    : <Pencil size={12} />}
-                </button>
+                {/* 行上只留最高频的那个动作。改名收进右键菜单——它一天用不了一次，
+                    占一个常驻图标位是在跟标题抢宽度。 */}
                 <button
                   className="icon-button workspace-topic-reveal"
                   type="button"
-                  aria-label={`Show ${topic.title} directory in Explorer`}
-                  title="Show Topic in Explorer"
+                  aria-label={`Reveal ${topic.title} in Explorer`}
+                  title="Reveal in Explorer"
                   disabled={pending !== null}
                   onClick={() => onRevealDirectory(topic.directoryPath)}
                 >
-                  <FolderOpen size={13} />
+                  <Crosshair size={13} />
                 </button>
               </SortableTopicItem>
             )
@@ -745,25 +743,33 @@ function BoardToolSummary({
 function SortableTopicItem({
   topicId,
   isCurrent,
-  children
+  children,
+  onCopyPath,
+  onRename,
+  onReveal
 }: {
   topicId: string
   isCurrent: boolean
   children: ReactNode
+  onCopyPath(): void
+  onRename(): void
+  onReveal(): void
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: topicId
   })
   return (
-    <div
-      ref={setNodeRef}
-      className={`workspace-topic-item${isCurrent ? ' current' : ''}${isDragging ? ' dragging' : ''}`}
-      style={{ transform: CSS.Transform.toString(transform), transition }}
-      {...attributes}
-      {...listeners}
-    >
-      {children}
-    </div>
+    <TopicContextMenu onCopyPath={onCopyPath} onRename={onRename} onReveal={onReveal}>
+      <div
+        ref={setNodeRef}
+        className={`workspace-topic-item${isCurrent ? ' current' : ''}${isDragging ? ' dragging' : ''}`}
+        style={{ transform: CSS.Transform.toString(transform), transition }}
+        {...attributes}
+        {...listeners}
+      >
+        {children}
+      </div>
+    </TopicContextMenu>
   )
 }
 
