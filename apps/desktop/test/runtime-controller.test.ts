@@ -466,7 +466,10 @@ describe('RuntimeController configuration transaction', () => {
           EXECUTOR_SETTING: 'kept',
           AGENTMUX_WIKI_DIR: expect.stringMatching(/topic--view--shared-work$/)
         }),
-        prompt: expect.stringContaining('Inspect .agents/')
+        // Topic 说明是 AgentMux 自己的话：作为 agentMuxNote 分开传给 Core 的信封出口署名，
+        // 不再被拼进用户段。用户的真实请求原样留在 prompt。
+        agentMuxNote: expect.stringContaining('Inspect .agents/'),
+        prompt: 'Ship the result'
       }))
     } finally {
       await rm(root, { recursive: true, force: true })

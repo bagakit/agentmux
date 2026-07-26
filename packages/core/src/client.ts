@@ -125,6 +125,11 @@ export type AgentMuxAgentCreateInput = {
   workspacePath: string
   injectAgentMuxGuide: boolean
   prompt?: string
+  /**
+   * AgentMux 自己要对 Agent 说的额外上下文（如 Scratch Topic 说明），署名进出站信封而非混进用户段。
+   * 与 `prompt`（用户/发起者的原话，逐字节透传）分层：调用方分开传，信封组装由 Core 的出口负责。
+   */
+  agentMuxNote?: string
   args?: readonly string[]
   /**
    * Chosen ids for the sealed launch options this Provider declares (see agent-launch-option.ts). The
@@ -1005,7 +1010,11 @@ export class AgentMuxClient {
       if (!capability.installed) {
         throw new AgentMuxError(`${provider.label} is not installed on this host.`, 'AGENT_NOT_FOUND')
       }
-      const launchPrompt = composeAgentLaunchPrompt(input.prompt, input.injectAgentMuxGuide)
+      const launchPrompt = composeAgentLaunchPrompt(
+        input.prompt,
+        input.injectAgentMuxGuide,
+        input.agentMuxNote
+      )
       // Sealed launch options resolve to their argv core-side (fails closed on an un-declared choice) and
       // join the caller's args ahead of the prompt, exactly as buildArgs orders every other flag.
       const launchOptionArgv = provider.resolveLaunchArgv(input.launchOptions ?? {})
