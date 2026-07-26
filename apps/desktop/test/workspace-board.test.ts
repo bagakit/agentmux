@@ -19,20 +19,27 @@ function read(relative: string): string {
 }
 
 const board = read('../src/renderer/src/components/WorkspaceBoard.tsx')
+const boardRows = read('../src/renderer/src/hooks/useBoardRows.ts')
 const canvas = read('../src/renderer/src/components/BoardDiscussionCanvas.tsx')
 const store = read('../src/renderer/src/store.ts')
 const projectBoard = read('../src/renderer/src/lib/project-board.ts')
 
 describe('T-001 Topic rows are wired into the one Board', () => {
   it('renders Topic rows from the parameterized row source on a Scratch workspace', () => {
-    expect(board).toContain('buildTopicBoardRows(topics, scratch, sessions)')
-    expect(board).toContain('buildProjectBranchLanes(snapshot, project.workspaces, sessions)')
-    // 分叉只在行来源处发生一次；筛选、计数、渲染都吃同一个 rows。
+    // 行来源住在 useBoardRows：Board 主视图与 Board 工具面板都调它，因此"这个 Board 有哪些行"
+    // 只有一份答案。分叉本身仍然只发生一次，只是不再住在渲染组件里。
+    expect(boardRows).toContain('buildTopicBoardRows(topics, scratch, sessions)')
+    expect(boardRows).toContain('buildProjectBranchLanes(snapshot, project.workspaces, sessions)')
+    // 消费方吃的是同一个 rows；分叉之后没有第二次按 kind 的判断。
+    expect(board).toContain('const { rows } = useBoardRows()')
     expect(board).toContain('filterBoardRows(rows, query, column, binding)')
+    // 渲染组件不得再自己构造行——那正是"两份答案"重新长出来的样子。
+    expect(board).not.toContain('buildTopicBoardRows(')
+    expect(board).not.toContain('buildProjectBranchLanes(')
   })
 
   it('reuses the Topic panel’s own ordering preference rather than a second order', () => {
-    expect(board).toContain('orderTopics(built.map((row) => row.id), topicOrder)')
+    expect(boardRows).toContain('orderTopics(built.map((row) => row.id), topicOrder)')
   })
 
   it('launches a Topic Inbox Agent through the existing Topic binding path', () => {

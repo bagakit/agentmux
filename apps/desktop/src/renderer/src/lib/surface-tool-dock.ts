@@ -192,3 +192,25 @@ export function topicAgentPresentation(agent: TopicAgent): {
   const state = agent.live.status.state
   return { state, attention: categoryFor(state) }
 }
+
+/**
+ * Board 工具次级面板里的一段清单。
+ *
+ * 行数没有上限（一个仓库可以有几十条分支），但面板宽度有。所以清单只完整列出前几条，其余
+ * 折叠成一条可展开的"其余 N 条"——不无限撑长，也不粗暴截断到看不见后面还有东西。
+ *
+ * 这是纯粹的呈现取舍，不碰行的来源与状态归类：`rows` 已经是 Board 那一份行，这里只决定
+ * 显示到第几条。
+ */
+export const BOARD_LIST_VISIBLE_ROWS = 6
+
+export function boardListSegments<Row>(
+  rows: readonly Row[],
+  expanded: boolean
+): { shown: Row[]; hidden: number } {
+  if (expanded || rows.length <= BOARD_LIST_VISIBLE_ROWS) return { shown: [...rows], hidden: 0 }
+  return {
+    shown: rows.slice(0, BOARD_LIST_VISIBLE_ROWS),
+    hidden: rows.length - BOARD_LIST_VISIBLE_ROWS
+  }
+}

@@ -22,17 +22,15 @@ import type { SessionSnapshot } from '../../../shared/contracts'
 import { isScratchWorkspaceId } from '../../../shared/contracts'
 import { useWorkspaceBranches } from '../hooks/useWorkspaceBranches'
 import { useScratchTopics } from '../hooks/useScratchTopics'
+import { useBoardRows } from '../hooks/useBoardRows'
 import { api } from '../lib/api'
 import {
   PROJECT_BOARD_COLUMNS,
-  buildProjectBranchLanes,
-  buildTopicBoardRows,
   filterBoardRows,
   type BoardRow,
   type BranchBindingFilter,
   type ProjectBoardColumn
 } from '../lib/project-board'
-import { orderTopics } from '../lib/topic-order'
 import { projectWorkspaces } from '../lib/workspace-projects'
 import { useAppStore } from '../store'
 import { BoardDiscussionCanvas } from './BoardDiscussionCanvas'
@@ -130,7 +128,6 @@ export function WorkspaceBoard() {
   const keepOneOfFanOut = useAppStore((state) => state.keepOneOfFanOut)
   const activateWorkspaceSelection = useAppStore((state) => state.activateWorkspaceSelection)
   const setWorkspaceTool = useAppStore((state) => state.setWorkspaceTool)
-  const topicOrder = useAppStore((state) => state.scratchTopicOrder)
   const [query, setQuery] = useState('')
   const [column, setColumn] = useState<ProjectBoardColumn | 'all'>('all')
   const [binding, setBinding] = useState<BranchBindingFilter>('all')
@@ -165,19 +162,9 @@ export function WorkspaceBoard() {
     setDiscussionRow(null)
   }, [project?.id, scratch?.id])
 
-  // 行来源是唯一按 Workspace 分叉的地方。分叉之后，下面每一行代码都不再关心它是 Branch 还是 Topic。
-  const rows = useMemo<BoardRow[]>(() => {
-    if (scratch) {
-      if (!topics) return []
-      const built = buildTopicBoardRows(topics, scratch, sessions)
-      // 顺序复用 Topic 面板那份用户拖拽偏好，两处顺序不会互相打架。
-      const shown = orderTopics(built.map((row) => row.id), topicOrder)
-      return shown.flatMap((id) => built.filter((row) => row.id === id))
-    }
-    return snapshot && project
-      ? buildProjectBranchLanes(snapshot, project.workspaces, sessions)
-      : []
-  }, [project, scratch, sessions, snapshot, topicOrder, topics])
+  // 行来源与排序由 useBoardRows 持有——Board 工具的次级面板显示的是同一张 Board，
+  // 它调用同一个 hook，因此"这个 Board 有哪些行"只有一份答案。
+  const { rows } = useBoardRows()
   const kind: BoardRow['kind'] = scratch ? 'topic' : 'branch'
   const meta = ROW_KIND_META[kind]
   const filteredRows = useMemo(
