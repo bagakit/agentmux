@@ -435,10 +435,16 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
       await Promise.all([
         writeFile(join(consumerDirectory, 'consumer.ts'), [
           "import type { AgentMuxAgentSession, AgentMuxRuntimeDiagnostics } from '@agentmux/core'",
+          // 整个导出面也要一起编。只 import 两个 type 时，其余 .d.ts 全靠 skipLibCheck:false 顺带扫到——
+          // 那是碰巧，不是保证。types:[] 下这行让「导出面不依赖 Node 全局」变成显式契约：
+          // 任何一处把 Buffer / NodeJS.* 写进公共签名，这条立刻红（durable-write 就这么漏过一次）。
+          "import type * as AgentMuxCore from '@agentmux/core'",
           "const platform: AgentMuxRuntimeDiagnostics['platform'] = 'darwin'",
           'const session = null as AgentMuxAgentSession | null',
+          'const surface = null as unknown as typeof AgentMuxCore',
           'void platform',
           'void session',
+          'void surface',
           ''
         ].join('\n')),
         writeFile(join(consumerDirectory, 'tsconfig.json'), `${JSON.stringify({
@@ -455,13 +461,22 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
           files: ['consumer.ts']
         }, null, 2)}\n`)
       ])
-      await execFileAsync(join(repositoryRoot, 'node_modules', '.bin', 'tsc'), [
-        '--project', join(consumerDirectory, 'tsconfig.json')
-      ], {
-        cwd: consumerDirectory,
-        timeout: 15_000,
-        maxBuffer: 2 * 1024 * 1024
-      })
+      // tsc 把诊断写在 stdout，execFile 的 Error 只带一句 "Command failed"。吞掉诊断会让「打包出去的
+      // .d.ts 编不过」退化成一条无从下手的报错——把诊断原样抛出来，失败时才指得到具体那一行。
+      try {
+        await execFileAsync(join(repositoryRoot, 'node_modules', '.bin', 'tsc'), [
+          '--project', join(consumerDirectory, 'tsconfig.json')
+        ], {
+          cwd: consumerDirectory,
+          timeout: 15_000,
+          maxBuffer: 2 * 1024 * 1024
+        })
+      } catch (error) {
+        const failure = error as { stdout?: string; stderr?: string; message: string }
+        throw new Error(`Packed @agentmux/core types do not compile for a consumer:\n${
+          [failure.stdout, failure.stderr].filter(Boolean).join('\n').trim() || failure.message
+        }`)
+      }
 
       const artifactManifest = JSON.parse(await readFile(
         join(packageRoot, 'vendor', 'ctxmux', 'darwin-arm64', 'manifest.json'),
