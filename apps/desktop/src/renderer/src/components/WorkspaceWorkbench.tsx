@@ -322,6 +322,7 @@ function SurfaceContent({
         sessionId={surface.sessionId}
         surfaceKind={surface.kind}
         interactiveResize={interactiveResize}
+        visible={nativeSurfacesVisible}
         linkOrigin={{
           workspaceId: surface.workspaceId,
           tabGroupId: groupId,
@@ -644,16 +645,34 @@ function PaneGroup({
         ) : null}
       </header>
       <div className="pane-body">
-        {activeTab ? (
-          <WorkbenchRegionNode
-            node={activeTab.layout.root}
-            nodePath=""
-            tab={activeTab}
-            groupId={group.id}
-            nativeSurfacesVisible={nativeSurfacesVisible}
-            interactiveResize={interactiveResize}
-          />
-        ) : (
+        {/* 每个 Tab 都留在 DOM 里，不活动的靠 CSS 隐藏。
+            此前这里只挂 activeTab，"不可见"实现为"不渲染"——切走即卸载整棵子树，xterm 实例
+            随之销毁；切回时 TerminalView 的 hydrating 从 true 起步，必然重放全部 scrollback，
+            于是每一次切 Tab / 切 Topic 都亮一遍 "Restoring terminal…"。
+            实例活着就没有东西需要恢复，所以修法在保住实例，而不是把重放做快。
+            隐藏格必须 absolute 定位：留在文档流里的隐藏子树仍会参与布局，把活动格挤变形。 */}
+        {tabs.length > 0 ? tabs.map((tab) => (
+          <div
+            className="pane-body__region"
+            key={tab.id}
+            // display:none 会让隐藏格测不到尺寸；这里用 visibility+inert，几何仍在，
+            // 切回时不需要重新 fit 一次才显示对的行列数。
+            data-active={tab.id === group.activeTabId ? 'true' : 'false'}
+            // 隐藏的格子退出可交互树：它仍在 DOM 里，但不该被 Tab 键走到、不该被搜索命中。
+            inert={tab.id !== group.activeTabId}
+          >
+            <WorkbenchRegionNode
+              node={tab.layout.root}
+              nodePath=""
+              tab={tab}
+              groupId={group.id}
+              // 隐藏的格子里，原生表面与终端一律停工：不 fit、不 resize、不渲染。
+              // 保住实例的前提是它闲着不花钱，否则开十个 Tab 就是十份持续开销。
+              nativeSurfacesVisible={nativeSurfacesVisible && tab.id === group.activeTabId}
+              interactiveResize={interactiveResize}
+            />
+          </div>
+        )) : (
           <NewTabSurface tabGroupId={group.id} />
         )}
       </div>
