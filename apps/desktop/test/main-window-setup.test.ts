@@ -51,6 +51,17 @@ describe('main window setup wiring', () => {
     expect(source).not.toMatch(/void buildWindow\(\)/)
     expect(source).toContain('await createWindow(appReadyAtMs)')
   })
+
+  it('installs the custom application menu so Cmd+W is not stolen by the native close-window role', async () => {
+    const source = stripComments(await readFile(indexPath, 'utf8'))
+    // 默认菜单把 Cmd+W 绑到关窗口，原生加速键渲染层 preventDefault 拦不住——必须换成自建的、不绑
+    // Cmd+W 的菜单。删掉这句接线，Cmd+W 关格在 mac 上会退化成关掉整个窗口（数据丢失）。
+    expect(source).toContain('applicationMenuTemplate(')
+    expect(source).toContain('Menu.setApplicationMenu(')
+    expect(source).toContain('Menu.buildFromTemplate(')
+    // 平台位喂进去：mac 与非 mac 的 File/Window 段不同。
+    expect(source).toMatch(/applicationMenuTemplate\(\s*process\.platform === 'darwin'\s*\)/)
+  })
 })
 
 describe('single-instance guard: pure decisions', () => {
