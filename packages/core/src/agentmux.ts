@@ -292,6 +292,44 @@ async function discussCommand(args: readonly string[]): Promise<number> {
   return 0
 }
 
+/**
+ * 交出去（Handoff）：把一个任务连同所有权原子地交给另一个 Agent Session。
+ *
+ * 走 Core（`withClient`）而非 Control socket——所有权转移是通信事实，归 Core；它也因此不依赖
+ * Desktop Host 活着。CLI 只把既有的 `client.handOff` 接上，不在这一侧重实现所有权转移：Handoff
+ * 与 Dispatch 的唯一分界（`originAwaits`）留在 Core，CLI 连这个值都不复述，如实回显 Core 给的。
+ *
+ * 身份同 discuss：raw 凭证从环境取出交回 Core 验证，`AGENTMUX_AGENT_SESSION_ID` 只是上下文提示。
+ * 目标用 `--to-session <session-id>`（复用 CLI 既有寻址词汇），必须是显式 id——交给"自己"没有意义，
+ * 故不接受 self。handoff 只转移所有权，不投递消息、不开 Session：要送文本走 send/discuss。
+ */
+async function handoffCommand(args: readonly string[]): Promise<number> {
+  const flags = parseFlags(args, { '--to-session': 'value', '--task': 'value' })
+  const caller = managedCaller()
+  const capability = process.env.AGENTMUX_AGENT_CAPABILITY?.trim()
+  if (!capability) {
+    throw new AgentMuxError(
+      'This command requires an AgentMux-managed Agent caller.',
+      'MANAGED_AGENT_CONTEXT_REQUIRED'
+    )
+  }
+  const toAgentSessionId = explicitSelectorId(flags.values.get('--to-session'), 'Handoff target Agent Session id')
+  const taskId = identifier(flags.values.get('--task'), 'Task id')
+  const result = await withClient(async (client) => client.handOff({
+    capability,
+    callerAgentSessionId: caller.agentSessionId,
+    toAgentSessionId,
+    taskId
+  }))
+  printSuccess('handoff', {
+    ownerAgentSessionId: result.ownerAgentSessionId,
+    // originAwaits 恒 false 由 Core 的 handOff 决定——如实回显，不在 CLI 侧另判。
+    originAwaits: result.originAwaits,
+    taskId: result.taskId
+  })
+  return 0
+}
+
 async function sendCommand(args: readonly string[]): Promise<number> {
   const flags = parseFlags(args, { '--to-session': 'value', '--to-region': 'value', '--to-tab': 'value', '--text': 'data' })
   const selected = exactlyOne(flags, ['--to-session', '--to-region', '--to-tab'], 'send')
@@ -448,6 +486,7 @@ async function main(): Promise<number> {
   if (args[0] === 'open') return await openCommand(args.slice(1))
   if (args[0] === 'send') return await sendCommand(args.slice(1))
   if (args[0] === 'discuss') return await discussCommand(args.slice(1))
+  if (args[0] === 'handoff') return await handoffCommand(args.slice(1))
   if (args[0] === 'focus') return await focusCommand(args.slice(1))
   if (args[0] === 'arrange') return await arrangeCommand(args.slice(1))
   if (args[0] === 'output') return await outputCommand(args.slice(1))
