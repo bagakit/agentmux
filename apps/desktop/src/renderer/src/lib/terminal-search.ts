@@ -37,15 +37,13 @@ export const DEFAULT_TERMINAL_SEARCH_TOGGLES: TerminalSearchToggles = Object.fre
 })
 
 /**
- * 这一步做了什么。
+ * 这一步的结果。
  *
- * `notice` 只在**用户还需要知道点什么**时出现。空查询不给理由：面板刚打开就挂一句提示是噪音。
+ * 只说「用户还需要知道点什么」——不自报"我搜了没有"：那种自报是**比事实弱的证据**，
+ * 测试要证明搜索真的发生了，该看 addon 有没有被调到，而不是听这个返回值怎么说自己。
+ * `notice` 缺席就是没话说；空查询不给理由，面板刚打开就挂一句提示是噪音。
  */
-type TerminalSearchOutcome = {
-  /** 有没有真的调到 addon。false 表示这次输入被拦下了。 */
-  searched: boolean
-  notice?: string
-}
+type TerminalSearchOutcome = { notice?: string }
 
 /**
  * 正则模式是否可用。
@@ -95,17 +93,17 @@ export function runTerminalSearch(
 ): TerminalSearchOutcome {
   if (!query) {
     addon.clearDecorations()
-    return { searched: false }
+    return {}
   }
   if (toggles.regex && !regexUsable(query)) {
-    return { searched: false, notice: 'Incomplete regular expression' }
+    return { notice: 'Incomplete regular expression' }
   }
   // 装饰色带在这里而不是让调用方拼：调用方漏掉它，匹配就会用 xterm 的默认色画在深底上。
   safeTerminalFind(addon, query, direction, {
     ...searchOptions(toggles, direction),
     decorations: TERMINAL_SEARCH_DECORATIONS
   })
-  return { searched: true }
+  return {}
 }
 
 /** 翻转一个开关，返回新状态——不原地改，让 React 认得出变化。 */
