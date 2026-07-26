@@ -163,7 +163,7 @@
 - Board 是 `行 × Inbox/Working/Needs You/Done` 的二维矩阵。状态变化只在同一行内移动。
 - **行的身份取决于 Workspace 是什么，不是另一种 Board**。Git 项目的行是 Branch/Worktree；Scratch 的行是 Topic。两者共用同一套列、同一套状态归类、同一个 Inbox 语义——**一个 Board 组件按行来源参数化，不是两个 Board**。理由与 `Files + Branches` / `Files + Topics` 同源：Topic 与 Branch 都是"一条并行的工作线"，只是承载物一个是 worktree、一个是 topic 目录。为 Topic 复制一份 Board 会让状态归类、列定义、Inbox 入口各出现第二份，日后必然漂移。
 - **Topic 与 Branch 一样有 Inbox**。Inbox 是矩阵第一列和带上下文的创建入口，不是 Tools 中的重复页面——Branch Inbox 带 Branch 上下文，Topic Inbox 带 Topic 上下文，走同一个创建路径。
-- **Board 工具的次级面板是工作清单，不是说明页**。它列出当前 Board 的行与行内 Agent，可展开、可点击定位——用户来这里是找一条具体的工作线，不是读一段介绍 Board 是什么的文案。图例式的静态说明只在没有任何行时作为空态出现。清单的行与 Agent 状态点复用共享状态语汇，不发明第二套。
+- **Board 工具的次级面板是工作清单，不是说明页**。它列出当前 Board 的行与行内 Agent，可展开、可点击定位——用户来这里是找一条具体的工作线，不是读一段介绍 Board 是什么的文案。图例式的静态说明只在没有任何行时作为空态出现。清单的行与 Agent 状态点复用共享状态语汇，不发明第二套。**行必须与 Board 主视图同源**：一份行来源分叉（Scratch 出 Topic 行、Git 项目出 Branch 行）、一份排序，由 `useBoardRows` 持有，两处都调它。让面板自己再查一遍 topics/branches，就等于给"这个 Board 有哪些行"开第二份答案——两处会在筛选、排序、加载时序上各自漂移，而漂移时谁都不会响。行数超出时其余折叠为可展开的一条，不无限撑长也不截断丢弃。守护：`surface-tool-dock.test.tsx`。
 - Settings 按可操作资源优先组织为 Workspaces、Hosts、Agents、Appearance、General；默认打开第一个可操作分区。
 - Agent Detection 以 Host 为键，由 Core discovery 统一投影到 Settings、Launcher 和状态面。
 

@@ -307,6 +307,49 @@
 .board-tool-legend strong { font-size: var(--fs-micro); }
 .board-tool-legend small { overflow: hidden; color: var(--text-3); font-size: var(--fs-micro); text-overflow: ellipsis; white-space: nowrap; }
 .board-tool-legend em { min-width: 20px; padding:var(--sp-1) var(--sp-2); border-radius: var(--radius); color: var(--text-3); background: var(--surface-3); font-size: var(--fs-micro); font-style: normal; text-align: center; }
+
+/* Board 工具的工作清单。图例（上面那组）现在只在空态出现，这里是常态：行 + 可展开的行内 Agent。 */
+.board-tool-list { display: flex; flex-direction: column; gap:var(--sp-2); min-width: 0; }
+.board-tool-row { min-width: 0; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-0); overflow: hidden; }
+.board-tool-row__head {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  align-items: center;
+  gap:var(--sp-3);
+  padding:var(--sp-3) var(--sp-4);
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-micro);
+  text-align: left;
+  cursor: pointer;
+}
+.board-tool-row__head:hover { background: var(--surface-2); }
+.board-tool-row__head strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.board-tool-row__head em { min-width: 18px; padding:var(--sp-1) var(--sp-2); border-radius: var(--radius); color: var(--text-3); background: var(--surface-3); font-size: var(--fs-micro); font-style: normal; text-align: center; }
+.board-tool-row__agents { display: flex; flex-direction: column; border-top: 1px solid var(--line-soft); }
+.board-tool-row__empty { padding:var(--sp-3) var(--sp-4); color: var(--text-3); font-size: var(--fs-micro); }
+.board-tool-agent {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap:var(--sp-2);
+  padding:var(--sp-2) var(--sp-4);
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: var(--fs-micro);
+  text-align: left;
+  cursor: pointer;
+}
+.board-tool-agent:hover { background: var(--surface-2); color: var(--text-2); }
+.board-tool-agent > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.board-tool-more { padding:var(--sp-3); border: 1px dashed var(--line-soft); border-radius: var(--radius-sm); background: transparent; color: var(--text-3); font: inherit; font-size: var(--fs-micro); cursor: pointer; }
+.board-tool-more:hover { border-style: solid; color: var(--text-2); }
 .discussion-canvas__overlay { position: fixed; z-index: 60; inset: 0; background: var(--scrim-3); backdrop-filter: blur(8px); }
 .discussion-canvas { width: min(760px, calc(100vw - 36px)); max-height: min(780px, calc(100vh - 40px)); position: fixed; z-index: 61; top: 50%; left: 50%; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden; transform: translate(-50%, -50%); border: 1px solid var(--green-line); border-radius: var(--radius-lg); outline: none; color: var(--text); background: radial-gradient(circle at 18% 0%, var(--overlay-line), transparent 32%), var(--surface-0); box-shadow: 0 34px 100px var(--scrim-3); }
 .discussion-canvas__header { display: grid; grid-template-columns: 38px minmax(0, 1fr) 28px; align-items: start; gap:var(--sp-4); padding:var(--sp-6) var(--sp-6); border-bottom: 1px solid var(--line); }
