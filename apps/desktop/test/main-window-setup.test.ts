@@ -43,6 +43,14 @@ describe('main window setup wiring', () => {
     expect(source).toContain('registerWindowStatePersistence(window, windowGeometryStore)')
   })
 
+  it('re-homes an off-screen persisted window into a live display before opening it', async () => {
+    const source = stripComments(await readFile(indexPath, 'utf8'))
+    // A saved position on an unplugged monitor must be clamped into a live work area, or the window
+    // opens where the user cannot reach it. Dropping this clamp leaves a null-safe raw load that
+    // feeds the constructor an off-screen origin — exactly the regression criterion 2 forbids.
+    expect(source).toContain('clampGeometryToVisibleArea(loadedGeometry, liveVisibleAreas())')
+  })
+
   it('binds development and packaged launches to the same durable userData root', async () => {
     const source = stripComments(await readFile(indexPath, 'utf8'))
     expect(source).toContain("app.setPath('userData', process.env.AGENTMUX_DESKTOP_USER_DATA ?? packagedUserDataPath)")

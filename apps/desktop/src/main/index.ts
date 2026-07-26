@@ -17,7 +17,8 @@ import { runDesktopFileEditingProbe, WorkspaceFileEditingProbeControl } from './
 import { WorkspaceFiles } from './workspace-files.js'
 import { registerWindowResizeEvents } from './window-resize-events.js'
 import { WindowGeometryStore } from './window-geometry-store.js'
-import { windowConstructorGeometry } from './window-geometry.js'
+import { clampGeometryToVisibleArea, windowConstructorGeometry } from './window-geometry.js'
+import { liveVisibleAreas } from './window-visible-area.js'
 import { registerWindowStatePersistence } from './window-state-persistence.js'
 import { foregroundActionsForSecondInstance, instanceRoleFromLock } from './single-instance.js'
 import { singleFlight } from './single-flight.js'
@@ -109,8 +110,13 @@ function startPrimaryInstance(): void {
   async function buildWindow(appReadyAtMs: number = Date.now()): Promise<void> {
     const windowCreationStartedAtMs = Date.now()
     // The window reopens where it was last left. Only a first launch (or a corrupt record) falls back
-    // to the default size — the fixed 1480×940 literal is no longer the every-launch size.
-    const persistedGeometry = await windowGeometryStore.load()
+    // to the default size — the fixed 1480×940 literal is no longer the every-launch size. A saved
+    // position that no live display still covers (an unplugged monitor, a resolution change) is
+    // re-homed into the primary work area so the window can never open where the user cannot reach it.
+    const loadedGeometry = await windowGeometryStore.load()
+    const persistedGeometry = loadedGeometry
+      ? clampGeometryToVisibleArea(loadedGeometry, liveVisibleAreas())
+      : null
     const window = new BrowserWindow({
       ...windowConstructorGeometry(persistedGeometry),
       minWidth: 980,
