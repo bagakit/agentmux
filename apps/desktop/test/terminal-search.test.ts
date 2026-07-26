@@ -111,7 +111,7 @@ describe('打到一半的正则不能掀掉终端', () => {
       // 这里同时钉住"不抛"：抛出去就是终端被卸载。
       const outcome = runTerminalSearch(addon, half, { ...ALL_ON, regex: true }, 'next')
       expect(addon.findNext).not.toHaveBeenCalled()
-      expect(outcome.searched).toBe(false)
+      expect(addon.findPrevious).not.toHaveBeenCalled()
       expect(outcome.notice).toBeTruthy()
     })
   }
@@ -122,7 +122,8 @@ describe('打到一半的正则不能掀掉终端', () => {
     // 判断必须交给最终执行这个模式的那个引擎，任何近似都会和它分歧。
     expect(() => new RegExp('a{', 'g')).not.toThrow()
     const addon = fakeAddon()
-    expect(runTerminalSearch(addon, 'a{', { ...ALL_ON, regex: true }, 'next').searched).toBe(true)
+    expect(runTerminalSearch(addon, 'a{', { ...ALL_ON, regex: true }, 'next')).toEqual({})
+    expect(addon.findNext).toHaveBeenCalled()
   })
 
   it('同样的模式在正则关着时是普通字面量，照常搜', () => {
@@ -130,15 +131,16 @@ describe('打到一半的正则不能掀掉终端', () => {
     // `[` 作为字面量完全合法——校验只能在开了正则时生效，否则等于把方括号从搜索里禁掉了。
     const outcome = runTerminalSearch(addon, '[', DEFAULT_TERMINAL_SEARCH_TOGGLES, 'next')
     expect(addon.findNext).toHaveBeenCalled()
-    expect(outcome).toEqual({ searched: true })
+    expect(outcome).toEqual({})
   })
 
   it('打完整了就恢复搜索，提示消失', () => {
     const addon = fakeAddon()
     const regexOn = { ...DEFAULT_TERMINAL_SEARCH_TOGGLES, regex: true }
-    expect(runTerminalSearch(addon, '[warn', regexOn, 'next').searched).toBe(false)
+    expect(runTerminalSearch(addon, '[warn', regexOn, 'next').notice).toBeTruthy()
+    expect(addon.findNext).not.toHaveBeenCalled()
     const done = runTerminalSearch(addon, '[warn]', regexOn, 'next')
-    expect(done.searched).toBe(true)
+    expect(addon.findNext).toHaveBeenCalled()
     // notice 必须真的消失。留着上一次的提示，用户看到的是"搜到了但还说我写错了"。
     expect(done.notice).toBeUndefined()
     expect(optionsSentTo(addon).regex).toBe(true)
@@ -202,6 +204,13 @@ describe('搜索面板把三个开关露出来', () => {
     }
   })
 
+  it('那份开关清单真的被渲染出来，不是躺在常量里', () => {
+    // 上一条断言的字符串全在 SEARCH_TOGGLES 常量里——只测常量的话，把 .map 整段删掉它还是绿的。
+    // 这条盯渲染本身：清单要被 map 成按钮，每个按钮的开启态读的是这一项自己的 key。
+    expect(view).toMatch(/SEARCH_TOGGLES\.map\(/)
+    expect(view).toMatch(/aria-pressed=\{searchToggles\[key\]\}/)
+  })
+
   it('开启态同时走 aria-pressed 和 data-active', () => {
     // 只有颜色的话，色觉差异下读不出哪个开着；aria-pressed 让屏幕阅读器也读得出。
     expect(view).toContain('aria-pressed={searchToggles[key]}')
@@ -209,15 +218,47 @@ describe('搜索面板把三个开关露出来', () => {
   })
 
   it('点开关时把翻转后的新状态传进搜索，不读 state', () => {
-    // setState 是异步的：这里若写成 setSearchToggles(next) 之后调 searchTerminal(query)，
+    // setState 是异步的：这里若在 setSearchToggles(next) 之后传 searchToggles，
     // 读到的还是翻转前的值，于是第一次点不生效、第二次才生效。
     expect(view).toMatch(/const next = toggleTerminalSearch\(searchToggles, key\)/)
     expect(view).toMatch(/searchWith\(searchQuery,\s*next\)/)
   })
 
+  it('每一处搜索调用都带上当前开关，一处都不能漏', () => {
+    // 第一轮 review 抓到的洞：打字/回车/上一个/下一个这条**最常走**的路曾经经过一个替你读
+    // state 的 searchTerminal(query) 包装，把它换成默认开关，30 条断言一条都不红——
+    // 而用户点完开关后的下一次击键就会静默退回全关。现在没有那个包装了，
+    // 这条把"所有调用点都显式传开关"钉死：漏一处就会红。
+    //
+    // 先去注释：注释里描述规则的文字不是规则本身（同 surface-selection-contract.test.ts）。
+    const code = view.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+    // 只取**调用**，排除 `function searchWith(` 那行定义。
+    const calls = [...code.matchAll(/(?<!function\s)\bsearchWith\(([^)]*)\)/g)].map((m) =>
+      m[1]!.trim()
+    )
+    // 扫描式断言必须自证扫到了东西——扫到空集的 for 循环永远是绿的。
+    expect(calls.length).toBeGreaterThanOrEqual(5)
+    for (const args of calls) {
+      expect(args).toMatch(/,\s*(searchToggles|next)\b/)
+    }
+    // 那个会读 state 的便捷包装不能回来。
+    expect(code).not.toContain('function searchTerminal')
+  })
+
+  it('提示的 live region 常驻，只换里面的文字', () => {
+    // 读屏播报的是**已存在区域内的内容变化**；连同区域一起插进来的文字，好几款读屏都不念。
+    // 所以 role="status" 那个节点不能条件挂载，只能靠 hidden 收起来。
+    expect(view).toMatch(/role="status" hidden=\{!searchNotice\}/)
+    // 条件挂载的写法不能回来（`?? ''` 是内容兜底，不是条件挂载，别误伤）。
+    expect(view).not.toMatch(/\{searchNotice \?\s*\(/)
+  })
+
   it('提示由 runTerminalSearch 的结果驱动，不由组件自己判', () => {
-    expect(view).toContain('runTerminalSearch(addon, query, toggles')
-    expect(view).toContain('setSearchNotice(outcome.notice)')
+    // 断言 notice 真的被**接到 state 上**。只断言出现过 `setSearchNotice(` 是不够的：
+    // closeSearch 里也有一个，于是把搜索这条路径的 notice 整个丢掉仍然是绿的（实测会存活）。
+    expect(view).toMatch(
+      /setSearchNotice\(\s*runTerminalSearch\(addon, query, toggles[^)]*\)[^)]*\.notice\s*\)/
+    )
   })
 
   it('关掉面板时清掉提示', () => {

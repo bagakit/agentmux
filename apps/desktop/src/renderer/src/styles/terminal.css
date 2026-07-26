@@ -214,7 +214,10 @@
 .terminal-search__toggle[data-active] { color: var(--bg); background: var(--green); box-shadow: var(--hl-strong); }
 .terminal-search__toggle[data-active]:hover { color: var(--bg); background: color-mix(in srgb, var(--green) 88%, #ffffff); }
 /* 提示挂在搜索条**下面**而不是挤进那一行：挤进去会压掉输入框本就不宽的可用宽度，
-   而这句话是对上面那个输入框的说明，位置在它下方才读得通。 */
+   而这句话是对上面那个输入框的说明，位置在它下方才读得通。
+   区域常驻（读屏要靠它播报内容变化），没话说时收起来——`position` 不覆盖 `display`，
+   浏览器默认的 `[hidden]{display:none}` 本来就管用，这里写明是为了不依赖那条默认值。 */
+.terminal-search__notice[hidden] { display: none; }
 .terminal-search__notice {
   position: absolute;
   top: 100%;
