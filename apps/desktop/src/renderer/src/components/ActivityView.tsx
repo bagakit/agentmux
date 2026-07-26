@@ -24,6 +24,7 @@ import {
   type RulerReadoutText,
   type RulerScale
 } from '../lib/activity-ruler'
+import { stepTitle } from '../lib/activity-step-summary'
 import { terminalLinkPreviewAnchor } from '../lib/terminal-link-gesture'
 import { AgentMarkdown, type OpenWorkspaceFile } from './AgentMarkdown'
 
@@ -305,6 +306,9 @@ function Row({
     const fromTool = item.toolInput ? toolCallToDiff(item.title, item.toolInput) : null
     return fromTool ?? parseUnifiedDiff(payload)
   }, [payload, item.toolInput, item.title])
+  // 折叠起来的一行只有裸工具名时，三行 `Bash` 分不出跑的是哪条命令——而不展开就认得出，
+  // 正是折叠的前提。带上那个最具识别性的参数。
+  const heading = stepTitle(item.title, item.toolName, item.toolInput)
 
   return (
     <Fragment>
@@ -320,7 +324,7 @@ function Row({
           <span className="log-row__node"><Glyph kind={item.kind} /></span>
           <span className="log-row__time">{formatOffset(item.createdAt, origin)}</span>
           <span className="log-row__title">
-            {item.title}
+            {heading}
             {count > 1 ? <span className="log-row__count">×{count}</span> : null}
           </span>
           <span className="log-row__meta">
@@ -335,7 +339,7 @@ function Row({
           <span className="log-row__node"><Glyph kind={item.kind} /></span>
           <span className="log-row__time">{formatOffset(item.createdAt, origin)}</span>
           <span className="log-row__title">
-            {item.title}
+            {heading}
             {count > 1 ? <span className="log-row__count">×{count}</span> : null}
           </span>
           <span className="log-row__meta">

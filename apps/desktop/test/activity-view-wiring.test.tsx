@@ -106,6 +106,58 @@ describe('对话体接线', () => {
 
     expect(followSpy.initFollowState).toHaveBeenCalled()
   })
+
+  // 这一组不用 spy：标题是**折叠态就渲染出来的文本**，静态渲染够得着，直接断言成果比断言
+  // "某个函数被调用了"更强——后者在渲染结果被丢弃时仍会绿。
+  it('折叠着的一行带上那条命令，不用展开就知道跑了什么', () => {
+    const markup = render([activity('run', {
+      kind: 'tool_call', source: 'native-hook', title: 'Bash', toolName: 'Bash',
+      toolInput: JSON.stringify({ command: 'pnpm test' })
+    })])
+
+    expect(markup).toContain('pnpm test')
+  })
+
+  it('读不到参数时只显示工具名，不显示空壳', () => {
+    const markup = render([activity('run', {
+      kind: 'tool_call', source: 'native-hook', title: 'Bash', toolName: 'Bash', toolInput: '{bad'
+    })])
+
+    expect(markup).toContain('Bash')
+    expect(markup).not.toContain('Bash ()')
+    expect(markup).not.toContain('Bash undefined')
+    expect(markup).not.toContain('Bash null')
+  })
+
+  it('重复合并与 Failed chip 不因摘要而退化——这是我们既有的优势', () => {
+    // 注意：连续的机器步骤会被折成一个 fold，折起来时里面的行不渲染，所以这里断言的是
+    // fold 自己那层（N steps / M unique / FAILED），而不是里面某一行的摘要。
+    const step = (id: string, createdAt: number) => activity(id, {
+      kind: 'tool_call', source: 'native-hook', title: 'Bash', toolName: 'Bash',
+      toolInput: JSON.stringify({ command: 'ls -la' }), createdAt, updatedAt: createdAt
+    })
+    const markup = render([
+      activity('ask', { kind: 'user_message', source: 'user', title: 'Prompt', content: 'go', createdAt: 1 }),
+      step('h1', 2), step('h2', 3), step('h3', 4)
+    ])
+
+    expect(markup).toContain('3 steps')
+    expect(markup).toContain('1 unique')
+  })
+
+  it('未被折叠的单步仍然带上摘要，且 Failed chip 还在', () => {
+    // 单独一步不进 fold（见 segment 的注释），因此它的标题就是折叠态下用户直接看到的文本。
+    const markup = render([
+      activity('ask', { kind: 'user_message', source: 'user', title: 'Prompt', content: 'go', createdAt: 1 }),
+      activity('bad', {
+        kind: 'tool_call', status: 'failed', source: 'acp', title: 'Run tests',
+        toolName: 'Bash', toolInput: JSON.stringify({ command: 'pnpm test' }), createdAt: 2, updatedAt: 2
+      })
+    ])
+
+    expect(markup).toContain('pnpm test')
+    expect(markup).toContain('Failed')
+  })
 })
 
 // 展开态藏在 useState 后面，而本仓库没有能跑 effect / 触发事件的 harness，所以"展开后长什么样"
