@@ -432,13 +432,20 @@ export function projectRuntimeEvent(
       sessions: state.sessions.map((item) => item.kind === 'agent' &&
         acceptsAgentSessionTransition(item, core.session)
         ? (() => {
-            const { pendingInteraction: _pendingInteraction, ...current } = item
+            const {
+              pendingInteraction: _pendingInteraction,
+              terminalCapability: _terminalCapability,
+              ...current
+            } = item
             return {
               ...current,
               providerId: core.session.providerId,
               hostId: core.session.hostId,
               workspacePath: core.session.workspacePath,
               updatedAt: Math.max(item.updatedAt, core.session.updatedAt),
+              ...(core.session.terminalCapability
+                ? { terminalCapability: structuredClone(core.session.terminalCapability) }
+                : {}),
               ...(core.session.semanticStatus && item.processState === 'running'
                 ? { status: structuredClone(core.session.semanticStatus) }
                 : {}),

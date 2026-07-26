@@ -192,6 +192,9 @@ function projectSession(
       ...(subject.agentSession.launchOptions
         ? { launchOptions: subject.agentSession.launchOptions }
         : {}),
+      ...(subject.agentSession.terminalCapability
+        ? { terminalCapability: structuredClone(subject.agentSession.terminalCapability) }
+        : {}),
       processState: run.state,
       ...(run.state === 'interrupted' && run.interruptionReason
         ? { interruptionReason: run.interruptionReason }
@@ -518,6 +521,9 @@ export class RuntimeController {
           providerId: session.providerId,
           executorId: session.executorId,
           capabilities: client.providers.get(session.providerId).catalog.capabilities,
+          ...(session.terminalCapability
+            ? { terminalCapability: structuredClone(session.terminalCapability) }
+            : {}),
           label: agentFallbackLabel(config, session),
           createdAt: session.createdAt,
           updatedAt: session.updatedAt,

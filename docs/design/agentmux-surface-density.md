@@ -159,6 +159,7 @@
 - Tool Dock header 与相邻顶行对齐。非交互品牌标记不进入功能按钮组。
 - Tab DOM 始终保留在自己的 Pane owner 下；顶行合并不得改变 DnD、split 或 focus 的状态归属。
 - Workspace/Project 切换不以卸载 DOM 换取密度：非当前 Workbench 使用隐藏与停工状态保留 xterm/TUI attachment，回访时不出现 `Restoring terminal…` 或二次 loading；只有 Region/Workbench 真正关闭才销毁实例。窗口重启后的布局与 Session 恢复约束归交互合同，见 [`agentmux-desktop-interaction.md`](./agentmux-desktop-interaction.md)。
+- 资源密度采用有限 hot-retain：活动与近期使用的重资源 surface 保持 warm，长期隐藏或超过预算的 surface 才允许 cold-park。具体保活/重建约束归交互合同，见 [`agentmux-desktop-interaction.md`](./agentmux-desktop-interaction.md)；本层只要求内存回收不能靠额外常驻缓存、不能让隐藏 surface 继续执行高频工作，并以同场景 owner count 与 working-set before/after 证明收益。
 - Session 恢复状态使用现有服务窗/状态行表达，不新增一条常驻的“Resume”工具栏或第二套 Tab chrome；自动恢复成功不占视觉空间，只有分类失败或待处理状态才在原 Region 旁给出短告示和动作入口。
 - 新建 Tab 的视觉归属沿用当前工作线，不增加额外的 Topic 标签、层级条或第二条 Tab chrome；Topic 绑定与继承规则以交互合同为准（见 [`agentmux-desktop-interaction.md`](./agentmux-desktop-interaction.md)）。
 - Agent/Terminal Pane 不显示 Session Info Bar。Stop Run 进入 Tabbar；Recent message 回到 Activity。

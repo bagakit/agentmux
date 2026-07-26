@@ -20,6 +20,7 @@ function agentSession(overrides: {
   state?: SessionSnapshot['status']['state']
   processState?: SessionSnapshot['processState']
   kind?: 'agent' | 'terminal'
+  terminalCapability?: Extract<SessionSnapshot, { kind: 'agent' }>['terminalCapability']
 }): SessionSnapshot {
   return {
     id: 's',
@@ -33,11 +34,23 @@ function agentSession(overrides: {
     providerId: 'claude',
     executorId: 'claude-code',
     capabilities: {},
+    ...(overrides.terminalCapability ? { terminalCapability: overrides.terminalCapability } : {}),
     status: { state: overrides.state ?? 'working', source: 'run-process', observedAt: 0 },
     latestOutputBytes: 0,
     control: { kind: 'agent', hostId: 'local', agentSessionId: 's', run: { runId: 'r', hostId: 'local' } }
   } as unknown as SessionSnapshot
 }
+
+const handshakeDegraded = agentSession({
+  state: 'working',
+  terminalCapability: {
+    state: 'unknown',
+    mode: 'degraded',
+    reason: 'handshake-timeout',
+    run: { runId: 'r', hostId: 'local' },
+    observedAt: 10
+  }
+})
 
 /** 断连但存活 = 第 2 类（我们的流程坏了）。 */
 const aliveButDisconnected = agentSession({ state: 'disconnected', processState: 'running' })
@@ -104,6 +117,15 @@ describe('把一处失败分成四类', () => {
 })
 
 describe('把一个 Agent Session 映成步骤结局：看进程，不看我们的连接', () => {
+  it('Core 的握手超时事实即使 status 仍是 working 也必须显示服务窗', () => {
+    const outcome = agentSessionServiceOutcome(handshakeDegraded)
+    const rendered = serviceNoticeToRender(classifyServiceNotice(outcome))
+    expect(classifyServiceNotice(outcome).kind).toBe('process-degraded')
+    expect(rendered?.notice.step).toContain('terminal capabilities')
+    expect(rendered?.notice.mode).toContain('prompts remain available')
+    expect(rendered?.notice.restore).toContain('retry')
+  })
+
   it('非 Agent Session 没有服务窗', () => {
     expect(agentSessionServiceOutcome(agentSession({ kind: 'terminal' }))).toEqual({ completed: true })
     expect(agentSessionServiceOutcome(undefined)).toEqual({ completed: true })
