@@ -1,8 +1,9 @@
 import { AgentMuxError } from './errors.js'
-import { createHash, randomUUID } from 'node:crypto'
-import { appendFile, mkdir, open, readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { appendFile, mkdir, open, readFile, readdir, stat, unlink } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { defaultAgentMuxRuntimeDirectory } from './runtime-paths.js'
+import { durableWriteFile } from './durable-write.js'
 import { normalizeAgentInteractionResponse } from './agent-interaction.js'
 import { RISK_TIERS } from './types.js'
 import {
@@ -1059,6 +1060,104 @@ function normalizeAgentSessions(values: readonly unknown[]): AgentMuxStoredAgent
   return sessions
 }
 
+/**
+ * v5 存储是 `JSON.stringify(document, null, 2)`：每个会话对象独占一段，起止花括号固定落在 4 空格缩进，
+ * 更深的嵌套缩进更多。据此按缩进把会话分帧——被截断的尾块或被污染的单块只损失自己，完好的邻居原样取出。
+ * 这是在当前格式内抢救，不另立一套落盘格式，故不构成版本迁移。
+ */
+function extractSessionBlocks(content: string): string[] {
+  const lines = content.split('\n')
+  const start = lines.indexOf('  "sessions": [')
+  if (start === -1) return []
+  const blocks: string[] = []
+  let current: string[] | null = null
+  for (let index = start + 1; index < lines.length; index += 1) {
+    const line = lines[index]!
+    if (current === null) {
+      if (line === '  ]' || line === '  ],') break
+      if (/^ {4}\{$/u.test(line)) current = [line]
+      continue
+    }
+    current.push(line)
+    if (/^ {4}\},?$/u.test(line)) {
+      blocks.push(current.join('\n').replace(/,$/u, ''))
+      current = null
+    }
+  }
+  return blocks
+}
+
+/** 从原始文本抢救会话：按缩进分帧后逐块 JSON.parse，撕裂/乱码的块解析失败即跳过。 */
+function parseSessionBlocks(content: string): unknown[] {
+  const values: unknown[] = []
+  for (const block of extractSessionBlocks(content)) {
+    try {
+      values.push(JSON.parse(block))
+    } catch {
+      // 撕裂或被污染的块无法成为候选，跳过——它的字节已随整份文件进了隔离文件。
+    }
+  }
+  return values
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : []
+}
+
+/** 各字段独立抢救：过不了校验的整段字段宁可回退成空，也不让它拖垮整份读取。 */
+function safeNormalize<T>(normalize: () => T[], fallback: T[]): T[] {
+  try {
+    return normalize()
+  } catch {
+    return fallback
+  }
+}
+
+/**
+ * 逐条规范化候选会话：坏的略过（它的原始字节已随整份文件进了隔离文件），好的保留；
+ * 与已保留记录冲突的后来者让位，硬上限照常生效。全有或全无由此变成尽力抢救。
+ */
+function salvageSessionList(values: readonly unknown[]): AgentMuxStoredAgentSession[] {
+  const sessions: AgentMuxStoredAgentSession[] = []
+  const ids = new Set<string>()
+  const runs = new Set<string>()
+  const nativeHandles = new Set<string>()
+  const promptSubmissions = new Set<string>()
+  for (const value of values) {
+    if (sessions.length >= MAX_STORED_SESSIONS) break
+    let session: AgentMuxStoredAgentSession
+    try {
+      session = normalizeStoredAgentSession(value)
+    } catch {
+      continue
+    }
+    const nativeHandleKey = session.nativeHandle?.kind === 'provider'
+      ? JSON.stringify(['provider', session.nativeHandle.providerId, session.nativeHandle.sessionId])
+      : session.nativeHandle?.kind === 'acp'
+        ? JSON.stringify(['acp', session.nativeHandle.adapterId, session.nativeHandle.sessionId])
+        : null
+    if (
+      ids.has(session.agentSessionId) ||
+      runs.has(session.run.runId) ||
+      session.retiredRuns.some((run) => runs.has(run.runId)) ||
+      (nativeHandleKey !== null && nativeHandles.has(nativeHandleKey)) ||
+      (session.terminalPromptSubmission !== undefined &&
+        promptSubmissions.has(session.terminalPromptSubmission.submissionId))
+    ) {
+      continue
+    }
+    ids.add(session.agentSessionId)
+    runs.add(session.run.runId)
+    for (const run of session.retiredRuns) runs.add(run.runId)
+    if (nativeHandleKey !== null) nativeHandles.add(nativeHandleKey)
+    if (session.terminalPromptSubmission !== undefined) {
+      promptSubmissions.add(session.terminalPromptSubmission.submissionId)
+    }
+    sessions.push(session)
+  }
+  return sessions
+}
+
 export async function loadAgentSessions(
   store: AgentMuxAgentSessionStore
 ): Promise<AgentMuxStoredAgentSession[]> {
@@ -1711,44 +1810,16 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   }
 
   private async read(signal?: AbortSignal): Promise<AgentSessionStoreDocument> {
+    let raw: Buffer
     try {
       signal?.throwIfAborted()
       const metadata = await stat(this.path)
       if (!metadata.isFile() || metadata.size > MAX_STORE_BYTES) {
         throw new AgentMuxError('Agent Session store is invalid.', 'INVALID_AGENT_SESSION_STORE')
       }
-      const value: unknown = JSON.parse(await readFile(this.path, { encoding: 'utf8', signal }))
-      if (!value || typeof value !== 'object' || Array.isArray(value)) {
-        throw new AgentMuxError('Agent Session store is invalid.', 'INVALID_AGENT_SESSION_STORE')
-      }
-      const document = value as {
-        version?: unknown
-        sessions?: unknown
-        reservations?: unknown
-        retiredRuns?: unknown
-        retiredAgentSessions?: unknown
-      }
-      if (
-        document.version !== 5 ||
-        !Array.isArray(document.sessions) ||
-        !Array.isArray(document.reservations) ||
-        !Array.isArray(document.retiredRuns) ||
-        !Array.isArray(document.retiredAgentSessions)
-      ) {
-        throw new AgentMuxError('Agent Session store is invalid.', 'INVALID_AGENT_SESSION_STORE')
-      }
-      const sessions = normalizeAgentSessions(document.sessions)
-      const retiredRuns = unboundRetiredRuns(document.retiredRuns)
-      const retiredSessions = retiredAgentSessions(document.retiredAgentSessions)
-      assertUnboundRetiredRuns(sessions, retiredRuns)
-      assertRetiredAgentSessions(sessions, retiredRuns, retiredSessions)
-      return {
-        version: 5,
-        sessions,
-        reservations: normalizeLifecycleReservations(document.reservations),
-        retiredRuns,
-        retiredAgentSessions: retiredSessions
-      }
+      // 先拿到字节再解析。瞬时读取错误（EACCES/EIO）在此抛出并原样上抛——绝不进入抢救路径，
+      // 否则一次权限抖动就会把一份完好的文件截断进降级态。只有「字节到手但内容坏了」才算真损坏。
+      raw = await readFile(this.path, { signal })
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         return {
@@ -1761,7 +1832,111 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       }
       throw error
     }
+    return await this.parseStoreDocument(raw, signal)
   }
+
+  /**
+   * 字节到手后的解析与抢救分界：能严格解析就走快路径，绝不留下隔离文件；
+   * 一旦是当前格式内的真损坏（撕裂、乱码、单条记录过不了校验），先把原始字节整段隔离，
+   * 再尽力救回能读的记录。版本不符按 INVALID 上抛——那是迁移的活，本任务只在 v5 内抢救。
+   */
+  private async parseStoreDocument(
+    raw: Buffer,
+    signal?: AbortSignal
+  ): Promise<AgentSessionStoreDocument> {
+    const text = raw.toString('utf8')
+    let value: unknown
+    try {
+      value = JSON.parse(text)
+    } catch {
+      // 整份 JSON 都解析不了（尾块被截断、注入了乱码）：按缩进从原始文本里逐块抢救会话。
+      await this.quarantineCorruptStore(raw, signal)
+      return {
+        version: 5,
+        sessions: salvageSessionList(parseSessionBlocks(text)),
+        reservations: [],
+        retiredRuns: [],
+        retiredAgentSessions: []
+      }
+    }
+    if (
+      !value ||
+      typeof value !== 'object' ||
+      Array.isArray(value) ||
+      (value as { version?: unknown }).version !== 5
+    ) {
+      // 版本不符不是损坏，是退役 schema：fail-closed，既不抢救也不隔离，交给不引入迁移层的约束。
+      throw new AgentMuxError('Agent Session store is invalid.', 'INVALID_AGENT_SESSION_STORE')
+    }
+    try {
+      return this.strictStoreDocument(value as Record<string, unknown>)
+    } catch (error) {
+      if (error instanceof AgentMuxError && error.code === 'AGENT_SESSION_STORE_LIMIT') throw error
+      await this.quarantineCorruptStore(raw, signal)
+      return this.salvageStoreDocument(value as Record<string, unknown>)
+    }
+  }
+
+  private strictStoreDocument(document: Record<string, unknown>): AgentSessionStoreDocument {
+    if (
+      !Array.isArray(document.sessions) ||
+      !Array.isArray(document.reservations) ||
+      !Array.isArray(document.retiredRuns) ||
+      !Array.isArray(document.retiredAgentSessions)
+    ) {
+      throw new AgentMuxError('Agent Session store is invalid.', 'INVALID_AGENT_SESSION_STORE')
+    }
+    const sessions = normalizeAgentSessions(document.sessions)
+    const retiredRuns = unboundRetiredRuns(document.retiredRuns)
+    const retiredSessions = retiredAgentSessions(document.retiredAgentSessions)
+    assertUnboundRetiredRuns(sessions, retiredRuns)
+    assertRetiredAgentSessions(sessions, retiredRuns, retiredSessions)
+    return {
+      version: 5,
+      sessions,
+      reservations: normalizeLifecycleReservations(document.reservations),
+      retiredRuns,
+      retiredAgentSessions: retiredSessions
+    }
+  }
+
+  /**
+   * v5 文档内的逐字段抢救：会话逐条救，附属层（reservation / 退役 Run / 退役会话）各自独立校验，
+   * 过不了的整层回退成空而不是拖垮整份读取。跨层不变量若因抢救而不成立，就把退役层清空以自洽。
+   */
+  private salvageStoreDocument(document: Record<string, unknown>): AgentSessionStoreDocument {
+    const sessions = salvageSessionList(asArray(document.sessions))
+    const reservations = safeNormalize(
+      () => normalizeLifecycleReservations(asArray(document.reservations)),
+      []
+    )
+    let retiredRuns = safeNormalize(() => unboundRetiredRuns(asArray(document.retiredRuns)), [])
+    let retiredSessions = safeNormalize(
+      () => retiredAgentSessions(asArray(document.retiredAgentSessions)),
+      []
+    )
+    try {
+      assertUnboundRetiredRuns(sessions, retiredRuns)
+      assertRetiredAgentSessions(sessions, retiredRuns, retiredSessions)
+    } catch {
+      retiredRuns = []
+      retiredSessions = []
+    }
+    return { version: 5, sessions, reservations, retiredRuns, retiredAgentSessions: retiredSessions }
+  }
+
+  /**
+   * 把损坏的原始字节原样落到一个内容寻址的隔离文件（sha256 命名），不静默丢弃——事后可据此诊断。
+   * 内容寻址让同一份坏文件被反复读到时只隔离一次，不会堆积。写到旁路文件，与主文件互不干扰。
+   */
+  private async quarantineCorruptStore(raw: Buffer, signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted()
+    const digest = createHash('sha256').update(raw).digest('base64url').slice(0, 16)
+    const path = `${this.path}.corrupt-${digest}`
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 })
+    await durableWriteFile(path, raw, { mode: 0o600, ...(signal ? { signal } : {}) })
+  }
+
 
   private async write(document: AgentSessionStoreDocument, signal?: AbortSignal): Promise<void> {
     signal?.throwIfAborted()
@@ -1770,18 +1945,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       throw new AgentMuxError('Agent Session store exceeds its size limit.', 'AGENT_SESSION_STORE_LIMIT')
     }
     await mkdir(dirname(this.path), { recursive: true, mode: 0o700 })
-    const temporaryPath = `${this.path}.${process.pid}.${randomUUID()}.tmp`
-    let committed = false
-    try {
-      await writeFile(temporaryPath, content, { mode: 0o600, flag: 'wx', signal })
-      signal?.throwIfAborted()
-      await rename(temporaryPath, this.path)
-      committed = true
-    } finally {
-      await unlink(temporaryPath).catch((error: NodeJS.ErrnoException) => {
-        if (!committed && error.code !== 'ENOENT') throw error
-      })
-    }
+    await durableWriteFile(this.path, content, { mode: 0o600, ...(signal ? { signal } : {}) })
   }
 
   private timelinePath(agentSessionId: string): string {
@@ -1864,18 +2028,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     }
     const path = this.timelinePath(document.agentSessionId)
     await mkdir(dirname(path), { recursive: true, mode: 0o700 })
-    const temporaryPath = `${path}.${process.pid}.${randomUUID()}.tmp`
-    let committed = false
-    try {
-      await writeFile(temporaryPath, content, { mode: 0o600, flag: 'wx', signal })
-      signal?.throwIfAborted()
-      await rename(temporaryPath, path)
-      committed = true
-    } finally {
-      await unlink(temporaryPath).catch((error: NodeJS.ErrnoException) => {
-        if (!committed && error.code !== 'ENOENT') throw error
-      })
-    }
+    await durableWriteFile(path, content, { mode: 0o600, ...(signal ? { signal } : {}) })
   }
 
   private async appendTimelineMutation(
