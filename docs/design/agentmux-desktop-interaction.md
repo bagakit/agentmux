@@ -140,6 +140,10 @@
 - Composer 属于 Agent Session Region，不属于 Activity。Agent 的 Terminal 与 Activity 只是同一 Session 的两种投影；切换投影时 Composer 必须保持挂载，不能清空未发送草稿。
 - Activity 投影画成时序日志而非卡片流，但日志有**两个寄存器共用同一条 spine**。机器上报（tool_call / permission / lifecycle）保持 24px 紧凑行：一连串 native-hook 步骤折叠成一条 “N steps” 摘要，展开后字节完全相同的重复合并为一行并标 xN，重试循环因此读作一个事实；工具调用的 argv 默认折叠、按需展开。人真正要读的**对话回合**（user_message、assistant_message）脱离这条机器寄存器：它们沿同一条 spine、同一个 20px 节点槽渲染，但正文用 13px 主色、caption 只是一枚安静的 speaker 标签，始终完整渲染、永不折叠——那是 trace 的实质，不是 payload。折叠只按 kind 收机器步骤，assistant 回合虽是 native-hook 也绝不被卷进折叠；不为任一回合重建 per-hook 卡片。User 正文用 `--surface-1` 圆角填充给出起止边界（描边不作手段），Assistant 正文在工作面上流动，二者靠 blue/green 图标与填充差别在一眼之内区分。顶部 ruler 的诚实时间轴与无跨度时的序数退化见 [`agentmux-surface-density.md`](./agentmux-surface-density.md) 的 Activity Ruler。
 - 每个 Agent Region 都显示同一个 Composer。Agent 尚在启动、已经断连、退出或中断时仍显示，但在 Agent Run 不可交互时禁用；Raw Terminal 永远不显示 Agent Composer。
+- **Composer 在 TUI 投影下可收起成一枚悬浮按钮，在对话投影下始终展示**。用户原话：「在对话模式下始终展示，但在 TUI 模式下要能够支持收起，收起到一个小的悬浮按钮里面」。两种投影要的东西不同：对话投影里 Composer 就是主输入，收起等于把这个界面的用途拿掉；TUI 投影里用户是在直接和 CLI 的全屏界面打交道，此时固定占一条高度的 Composer 会挤掉正被阅读的终端内容。三条边界：
+  - **收起只是隐藏，不是卸载**。草稿必须活过收起再展开——Composer 挂载点不变（同一 Region、同一 adapter），否则收起就成了一次静默的清空，与"切换投影时不能清空未发送草稿"是同一条约束。
+  - **收起状态按 Region 记，且只在 TUI 投影下有意义**。切回对话投影时无条件展示，不去记忆"用户在对话模式下也收起过"——那是一个用户没法表达的状态。
+  - **悬浮按钮要能表达有未发送草稿**。收起之后草稿不可见，若按钮只是一枚静态图标，用户会忘记自己写了一半——按钮需带上"有草稿"这一事实，否则收起就在制造丢失感。
 - Composer 使用独立、受控、无 Store 依赖的可复用输入组件；Session adapter 负责草稿、当前文件、Submit 与 Interrupt 绑定，为附件和其他富输入能力保留唯一扩展面。
 - Renderer 不根据 `working`、`waiting`、`blocked` 或 `done` 猜测 Prompt readiness。Core 拒绝提交时保留草稿供重试；semantic resume 和恢复动作继续由现有 Owner 负责。
 - **运行中可 steer**：Agent 处于 `working` 时界面仍允许提交，补的那句话经**既有** send 通路（store.send → submitPrompt → Core.submitAgentPrompt）送出，与普通 prompt 同一条路——不新增 Renderer 侧第二条写通道。「界面是否允许提交」与「主动作是 Send 还是 ■」是两个不同问题：working 时前者为真而后者仍是 ■，一个跑动中的 Agent 既要能被补话也要能被叫停，二者不互斥。判定收敛为一个纯函数（`lib/composer-submit-mode.ts`），不读 Store、不按 providerId 分支。
