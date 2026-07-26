@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { cp, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { createConnection, createServer, type Server, type Socket } from 'node:net'
@@ -9,6 +9,8 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { execFile } from 'node:child_process'
 import { afterEach, describe, expect, it } from 'vitest'
+
+import { CTXMUX_MANIFEST_SHA256 } from '../src/runtime-paths.js'
 
 const execFileAsync = promisify(execFile)
 const repositoryRoot = resolve(import.meta.dirname, '../../..')
@@ -26,7 +28,7 @@ const ownerRelocationFixture = fileURLToPath(new URL('./fixtures/ctxmux-owner-re
 const liveRuntimeFenceFixture = fileURLToPath(new URL('./fixtures/ctxmux-live-runtime-fence.mjs', import.meta.url))
 const stopResponseLossFixture = fileURLToPath(new URL('./fixtures/ctxmux-stop-response-loss-worker.mjs', import.meta.url))
 const stopRecoveryFixture = fileURLToPath(new URL('./fixtures/ctxmux-stop-recovery-worker.mjs', import.meta.url))
-const ctxmuxRuntimeId = '5e67346cf1fedd60eba15e2b'
+const ctxmuxRuntimeId = createHash('sha256').update(CTXMUX_MANIFEST_SHA256).digest('hex').slice(0, 24)
 const roots: string[] = []
 
 afterEach(async () => {
