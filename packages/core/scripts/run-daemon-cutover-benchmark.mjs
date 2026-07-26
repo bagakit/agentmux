@@ -24,11 +24,11 @@ export const WORKLOAD_EXECUTION_ORDER = Object.freeze([
   'stopCleanup'
 ])
 export const CTXMUX_ARTIFACT = Object.freeze({
-  commit: 'a0897087fdd0eb131c39c43d4d6791901335d69e',
-  tree: '54d0f0631a51063a5f4c18088f4e8cba1f80444a',
+  commit: '073e206407ce28331aa882c2c80e9354cfe2879a',
+  tree: '3ddf0706c35517c0dd6bdf4d4f7fa251d88c0e0a',
   version: '0.1.0',
   protocol: 13,
-  manifestSha256: '5e67346cf1fedd60eba15e2b58aac3005df632684891ad086d613014276dc639'
+  manifestSha256: '346f47c04091623e4daccb8ae2ee8963f72bb881e9712db6e9142546ef3ae7a6'
 })
 
 const packageRoot = fileURLToPath(new URL('../', import.meta.url))

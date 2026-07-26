@@ -466,8 +466,8 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         'utf8'
       ))
       expect(artifactManifest.source).toMatchObject({
-        commit: 'a0897087fdd0eb131c39c43d4d6791901335d69e',
-        tree: '54d0f0631a51063a5f4c18088f4e8cba1f80444a',
+        commit: '073e206407ce28331aa882c2c80e9354cfe2879a',
+        tree: '3ddf0706c35517c0dd6bdf4d4f7fa251d88c0e0a',
         worktree_clean: true
       })
 
