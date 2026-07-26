@@ -148,4 +148,81 @@ describe('native hook normalization', () => {
     expect(event.semanticState).toBe('unknown')
     expect(event.status).toMatchObject({ state: 'running', source: 'native-hook' })
   })
+
+  /**
+   * 接线层。采集规则再对，normalizer 不去调它、或调了不把结果放进 item，整个功能就是死的——
+   * 而只测 `hookToolOutcome` 的用例仍会全绿。本仓库这一季反复栽在这个位置，所以这几条专守接线。
+   */
+  describe('工具结果进时间轴', () => {
+    const post = (payload: Record<string, unknown>, eventName = 'PostToolUse') =>
+      providers.get('claude').normalizeHook({
+        receiptId: 'receipt-out',
+        agentSessionId: 'semantic-out',
+        runId: 'run-out',
+        providerId: 'claude',
+        eventName,
+        payload
+      })
+
+    const item = (event: ReturnType<typeof post>) => {
+      const mutation = event.timeline[0]
+      if (!mutation || mutation.type !== 'append') throw new Error('expected an appended item')
+      return mutation.item
+    }
+
+    it('把 PostToolUse 的输出带进 item，而不只是入参', () => {
+      const appended = item(post({
+        tool_name: 'Bash',
+        tool_input: { command: 'ls' },
+        tool_response: 'total 24'
+      }))
+      expect(appended.toolOutput).toBe('total 24')
+      expect(appended.toolInput).toContain('ls')
+    })
+
+    it('失败的命令和成功的命令在 item 上就不一样——这是本 task 的全部理由', () => {
+      const failed = item(post({
+        tool_name: 'Bash',
+        tool_input: { command: 'exit 1' },
+        tool_response: { is_error: true, stderr: 'command failed' }
+      }))
+      const succeeded = item(post({
+        tool_name: 'Bash',
+        tool_input: { command: 'exit 0' },
+        tool_response: 'ok'
+      }))
+      expect(failed.status).toBe('failed')
+      expect(succeeded.status).toBe('complete')
+      // 状态相同即等于没做——这条不许被"两边都 complete"糊弄过去。
+      expect(failed.status).not.toBe(succeeded.status)
+    })
+
+    it('PreToolUse 不带结果——那时候还没有成败可言，盖任何结论都是编造', () => {
+      const appended = item(post({
+        tool_name: 'Bash',
+        tool_input: { command: 'ls' },
+        // 就算负载里混进了结果字段，事前事件也不该采信。
+        tool_response: { is_error: true }
+      }, 'PreToolUse'))
+      expect(appended.toolOutput).toBeUndefined()
+      expect(appended.status).toBe('complete')
+    })
+
+    it('没有结果的历史条目照常成立，不因为新字段缺席就报错或塞空壳', () => {
+      const appended = item(post({ tool_name: 'Read', tool_input: { file_path: '/a.ts' } }))
+      expect(appended.status).toBe('complete')
+      expect(Object.hasOwn(appended, 'toolOutput')).toBe(false)
+    })
+
+    it('结果穿得过时间轴校验，不是只在 normalizer 内部成立', () => {
+      // Core 合同的另一半：normalizer 造得出，`applyAgentTimelineMutation` 却认不得，就等于没接上。
+      const event = post({
+        tool_name: 'Bash',
+        tool_input: { command: 'exit 1' },
+        tool_response: { is_error: true, stdout: 'boom' }
+      })
+      const items = applyAgentTimelineMutation([], event.timeline[0]!)
+      expect(items[0]).toMatchObject({ toolOutput: 'boom', status: 'failed' })
+    })
+  })
 })

@@ -173,6 +173,25 @@
   font: 11px/1.5 var(--font-mono);
   white-space: pre-wrap;
 }
+/* 结果与入参分开呈现，缩进对齐，展开时不跳位。左侧一道竖线把"跑出来的东西"与"喂进去的东西"
+   在视觉上分开——失败时这道线转红，于是不必读文字就知道这一步炸了。颜色不是唯一载体：折叠行
+   上的 Failed 徽标承载同一事实，色觉差异下仍读得出。 */
+.log-row__output {
+  margin:var(--sp-1) var(--sp-5) var(--sp-2) 104px;
+  padding:var(--sp-3) var(--sp-4);
+  max-height: 220px;
+  overflow: auto;
+  border-radius: var(--radius-sm);
+  border-left: 2px solid var(--line);
+  color: var(--text-2);
+  background: var(--surface-1);
+  font: 11px/1.5 var(--font-mono);
+  white-space: pre-wrap;
+}
+.log-row__output[data-status='failed'] {
+  border-left-color: var(--red-text);
+  background: var(--red-wash);
+}
 /* 一次编辑摊成加删行。颜色不是唯一载体：每行左侧固定一个 +/-/空 的字符槽，色觉差异或高对比
    模式下仍读得出增删。缩进与 log-row__payload 对齐，折叠展开时不跳位。 */
 .log-diff {
