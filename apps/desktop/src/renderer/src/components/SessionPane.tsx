@@ -8,6 +8,7 @@ import { ActivityView } from './ActivityView'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { TerminalView } from './TerminalView'
 import { agentSessionServiceOutcome, classifyServiceNotice, serviceNoticeToRender } from '../lib/service-window-notice'
+import { classifyContinuityFailure, continuityRetryEnabled } from '../lib/continuity-failure-notice'
 
 const NO_TIMELINE_ITEMS: never[] = []
 
@@ -35,6 +36,7 @@ export function SessionPane({
   surfaceKind,
   interactiveResize,
   visible,
+  parked = false,
   linkOrigin
 }: {
   sessionId: string
@@ -42,6 +44,8 @@ export function SessionPane({
   interactiveResize: boolean
   // 这一格看不看得见。隐藏的 Tab 留在 DOM 里保住终端实例，但里面的终端一律停工。
   visible: boolean
+  /** Long-hidden, replayable terminal views may release xterm/addons while keeping this Region alive. */
+  parked?: boolean
   linkOrigin: OpenHttpLinkOrigin
 }) {
   const session = useAppStore((state) => state.sessions.find((item) => item.id === sessionId))
@@ -79,6 +83,8 @@ export function SessionPane({
   const exited = session?.processState === 'exited'
   const interruptionReason = session?.interruptionReason
   const continuity = session?.status.continuity
+  // Which of Core's reasons this is decides the title, the body and whether retry can work.
+  const continuityNotice = classifyContinuityFailure(continuity, session?.status.continuityReason)
 
   async function recover(): Promise<void> {
     if (recovering) return
@@ -116,11 +122,10 @@ export function SessionPane({
   }
 
   const noun = session.kind === 'agent' ? 'Agent' : 'Terminal'
-  const recoveryTitle = continuity === 'conflict'
-      ? 'Agent continuity conflict'
-      : continuity === 'unavailable'
-        ? 'Agent resume unavailable'
-        : disconnected
+  // A continuity failure names its own class; the generic banner copy only covers the rest.
+  const recoveryTitle = continuityNotice
+      ? continuityNotice.title
+      : disconnected
           ? 'Remote terminal disconnected'
           : exited
             ? `${noun} process exited`
@@ -138,13 +143,20 @@ export function SessionPane({
       <div className="agent-body">
         {session.kind === 'terminal' || viewMode === 'terminal' ? (
           <div className="agent-terminal-stage">
-            <TerminalView
-              session={session}
-              themeId={terminalThemeId}
-              interactiveResize={interactiveResize}
-              visible={visible}
-              linkOrigin={linkOrigin}
-            />
+            {parked ? (
+              <div className="terminal-cold-parked" role="status" aria-live="polite">
+                <strong>Terminal parked</strong>
+                <span>Switch back to this tab to restore its terminal view.</span>
+              </div>
+            ) : (
+              <TerminalView
+                session={session}
+                themeId={terminalThemeId}
+                interactiveResize={interactiveResize}
+                visible={visible}
+                linkOrigin={linkOrigin}
+              />
+            )}
             {disconnected || missing || exited ? (
               <div className={`terminal-recovery terminal-recovery--${disconnected ? 'disconnected' : exited ? 'exited' : 'error'}`} role="status" aria-live="polite">
                 <span className="terminal-recovery__icon">
@@ -152,7 +164,11 @@ export function SessionPane({
                 </span>
                 <div>
                   <strong>{recoveryTitle}</strong>
-                  <span>{humanizeDetail(session.interruptionReason, session.status.detail, exited)}</span>
+                  <span>{
+                    continuityNotice
+                      ? continuityNotice.reason
+                      : humanizeDetail(session.interruptionReason, session.status.detail, exited)
+                  }</span>
                 </div>
                 <div className="terminal-recovery__actions">
                   {session.kind === 'terminal' ? (
@@ -166,17 +182,24 @@ export function SessionPane({
                         <RotateCcw size={12} /> {recovering ? 'Restarting…' : 'Restart terminal'}
                       </button>
                     )
-                  ) : continuity ? (
+                  ) : continuityNotice ? (
+                    // Three distinct reasons, three distinct things to do. A retry that cannot
+                    // succeed is worse than a disabled button: it promises something untrue.
                     <button
                       type="button"
                       className="small-button"
-                      disabled
-                      title={session.status.detail}
+                      disabled={!continuityRetryEnabled(continuityNotice) || recovering}
+                      title={continuityNotice.reason}
+                      onClick={
+                        continuityRetryEnabled(continuityNotice)
+                          ? () => void recover()
+                          : undefined
+                      }
                     >
                       <RotateCcw size={12} /> {
-                        continuity === 'conflict'
-                            ? 'Resolve conflict first'
-                            : 'Resume unavailable'
+                        recovering && continuityRetryEnabled(continuityNotice)
+                          ? 'Resuming…'
+                          : continuityNotice.actionLabel
                       }
                     </button>
                   ) : (

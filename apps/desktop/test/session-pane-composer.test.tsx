@@ -80,12 +80,13 @@ function session(kind: 'agent' | 'terminal'): SessionSnapshot {
       }
 }
 
-function render(sessionId: string, surfaceKind: 'agent' | 'terminal'): string {
+function render(sessionId: string, surfaceKind: 'agent' | 'terminal', parked = false): string {
   return renderToStaticMarkup(createElement(SessionPane, {
     sessionId,
     surfaceKind,
     interactiveResize: false,
     visible: true,
+    parked,
     // Required props the pane really takes. They were omitted while nothing read them; the file
     // references in agent prose open into this Tab Group, exactly as a terminal path click does.
     linkOrigin: { workspaceId: 'workspace-1', tabGroupId: 'group-1' }
@@ -172,5 +173,67 @@ describe('SessionPane Agent Composer ownership', () => {
     const markup = render('agent-1', 'agent')
 
     expect(markup).toContain('data-test-interaction-card="enabled"')
+  })
+
+  it('cold-parks only the terminal view while retaining the Agent composer', () => {
+    fixture.state.sessions = [session('agent')]
+    fixture.state.viewModes = { 'agent-1': 'terminal' }
+
+    const markup = render('agent-1', 'agent', true)
+
+    expect(markup).toContain('Terminal parked')
+    expect(markup).not.toContain('data-test-view="terminal"')
+    expect(markup).toContain('data-test-agent-composer="enabled"')
+  })
+
+  it('tells apart the reasons an Agent could not resume, instead of one dead button', () => {
+    // Two sessions that used to render identically: both said "Resume unavailable" on a disabled
+    // button. One is permanent (this Provider has no resume at all), the other is temporary (the
+    // Provider is just missing here). Collapsing them hides the only thing the user can act on.
+    function renderWithReason(reason: string, retryable: boolean): string {
+      const dead = session('agent')
+      fixture.state.sessions = [{
+        ...dead,
+        processState: 'interrupted',
+        status: {
+          state: 'error',
+          source: 'run-process',
+          observedAt: 2,
+          continuity: 'unavailable',
+          continuityReason: reason
+        }
+      } as SessionSnapshot]
+      fixture.state.viewModes = { 'agent-1': 'terminal' }
+      const markup = render('agent-1', 'agent')
+      // The retryable one must offer a live button; the permanent one must not pretend it can retry.
+      expect(markup).toContain(retryable ? 'Try resuming again' : 'Start a new Agent')
+      return markup
+    }
+
+    const permanent = renderWithReason('provider-resume-unsupported', false)
+    const temporary = renderWithReason('provider-unavailable', true)
+
+    expect(permanent).not.toBe(temporary)
+    expect(permanent).not.toContain('Resume unavailable')
+  })
+
+  it('says a conflict is held by someone else, not lost', () => {
+    const held = session('agent')
+    fixture.state.sessions = [{
+      ...held,
+      processState: 'interrupted',
+      status: {
+        state: 'error',
+        source: 'run-process',
+        observedAt: 2,
+        continuity: 'conflict'
+      }
+    } as SessionSnapshot]
+    fixture.state.viewModes = { 'agent-1': 'terminal' }
+
+    const markup = render('agent-1', 'agent')
+
+    expect(markup).toContain('another operation')
+    expect(markup).toContain('Resolve conflict first')
   })
 })

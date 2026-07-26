@@ -70,6 +70,12 @@
 - 复制的地址**只使用已被 CLI 与 Control 面接受的寻址方式**（`--to-session` / `--to-region` / `--to-tab` 及 `inspect` 的对应 flag），不为复制发明第二套语法。地址里的 id 一律按 shell 语义转义，使带空格或引号的 id 粘贴即可执行。
 - **按意图给入口命名，而不是按地址种类**。"复制 View 地址"要求用户先知道自己想要哪一层身份，可用户想的是"把这个 Agent 交给别人"。因此交接类入口按意图呈现（"给这个 Agent 发消息"），并由我们解析成**最精确的那个地址**：指向某一格分屏时是 Region，目标唯一时是 Session。View 地址不因此消失，但它的意图是"分享/检查整张工作面"，不是交接的默认落点——这与上一条同源：知道用户点了哪一格的是我们，不是接收方。
 - **失败结果要自带下一步命令，而不只是候选清单**。`MESSAGE_TARGET_NOT_UNIQUE` 已经带 `candidates`，但候选清单仍要求接收方自己拼出命令——那正是"歧义不甩给接收方"这条原则在错误路径上的漏洞。因此这类失败要额外返回**可直接执行的恢复命令**；stale View、目标不是 Agent、Agent 已退出各自给自己的恢复入口。恢复命令与复制出去的地址**共用同一个格式化出口**，不为错误路径另写一份拼接（两份拼接会各自演进，且漂移时不会有测试变红）。
+- **「左边/右边/上面/下面」在创建时是分栏，在查看时也能落到 Tab**。用户原话：「当描述"右边"、"左边"的时候，除了识别 region，也可以去识别 tab（也就是 tab 的关系也应该能查到）」「如果要创建一个"左边、右边、上面、下面"，那应该就是 split」「但如果让他去查看"左边、右边、上面、下面"的时候，如果没有 split，tab 应该也要能识别」。今天方向只存在于 `open` 的 `destination`（`{kind:'split', region, direction}`），`inspect` 一侧根本没有方向这个概念——于是 Agent 能造出一个右边，却问不出"我右边是什么"，除非那一格恰好是它已知 id 的 Region。
+  - **创建与查看的默认落点不同，这是有意的，不是不一致**：创建一个方向只有一种诚实解释——用户要多一格，那就是 split（新开一个 Tab 不叫"在右边"）；而查看一个方向时，屏幕上"右边"的东西可能是同一 View 里的另一格 Region，**也可能在没有分栏时就是 Tab 条上相邻的那张 Tab**。查看端拒绝回答"没有分栏所以没有右边"，等于对着用户眼睛看得见的东西说不存在。
+  - **优先级由"屏幕上更近"决定：先 Region 后 Tab**。同一 View 内有分栏时，方向解析必须落在 Region 上——那才是用户视线里紧挨着的那一格；只有当该方向上没有兄弟 Region 时，才退到 Tab 邻接。反过来（先 Tab）会让一个分了栏的 View 把用户指向另一张 Tab，与所见不符。
+  - **上下方向对 Tab 不成立**。Tab 条是一维水平序列，"上面那张 Tab"没有所指；此时如实回答该方向没有邻居，**不许把 up/down 悄悄折成 prev/next**——那会让 Agent 以为自己拿到了上方的东西，实际拿到的是左边那张。
+  - **"哪个算右边"只有一处定义**。创建与查看做的**不是**同一件事——split 是在 Region 树上劈开一个节点，查看是在已排好的版面上找邻居——但两者对 left/right/up/down 的**轴向解释**必须来自同一处（横向轴属 left/right，纵向轴属 up/down）。方向查询自身写成纯函数，从既有的版面几何（Region 的归一化 bounds）与既有的 Tab 序列推导，不为它另建一份布局真相；否则漂移时只表现为 Agent 偶尔寻址到隔壁，而没有测试会红。
+  - 这是**寻址能力的补齐，不是新身份**：解析结果仍然是既有的 Region 地址或 Tab 地址，走既有的 `--to-region` / `--to-tab`，不发明第四级地址，也不新增 surface kind。
 - 后台 Agent 由 Agents 工具重新发现和打开，不建立第二份 Session Registry。
 - **Agent 自己就能把 terminal、browser 或文件开到某个方向的分栏里**，走的是既有的 `open` / `arrange` CLI——那已经是"Agent 驱动界面"的接口，**不新建第二条通路、不新增 surface kind**。缺的从来不是能力而是发现：因此由启动时注入的提示负责让每个 Agent 知道这件事存在、并知道去哪查确切用法，而**不把完整 CLI 语法抄进提示**（那会与 skill 争夺唯一真相，并在语法演进时立刻过期）。这条的验收是行为断言——证明启动路径确实携带了该提示，而不是断言 skill 文本里含某个字符串：后者在改动前也会通过，证明不了任何事。
 
@@ -183,6 +189,13 @@ Desktop 刷新或重新 Attach 时优先投影这份 Agent 语义；新的 Run `
 - Terminal 主题只属于 Desktop Renderer。ctxmux、RunSpec 和 Core 公共合同不出现主题字段。
 - Renderer 负责把最新 `cols × rows` 通过 Core 公共 Resize 提交给 ctxmux；resize 热路径只保留一个在途请求和一个最新 pending size。
 - Replay、Live、Gap、ACK 与 Attachment lease 均服从 ctxmux/Core 的 ordered-byte 合同，View 不建立补偿状态机。
+
+### Durable Runtime 健康
+
+- **打开 Terminal 不得被一次瞬态 WAL checkpoint 争用永久阻断**。ctxmux 是 WAL、SQLite durable state 与 persistence actor 的唯一 Owner；AgentMux 只消费它公开的可用性结果，不在 Desktop 另建 checkpoint、截断或修复逻辑。
+- **可恢复的 busy 不是永久失败**。当 WAL checkpoint 因短暂 reader/attachment 争用未能归零时，ctxmux 必须在有界窗口内重试并继续 FIFO 写入；一次可恢复的 busy 不得把 persistence actor 锁存在 `durable state rejected`，也不得让后续 Terminal 创建或 semantic resume 永久失败。
+- **真正的数据完整性或不变量失败仍需 fail closed**。无法确认 WAL 已安全回收、SQLite 报告 corruption、磁盘空间不足或 checkpoint 在有界窗口内持续失败时，界面要保留原投影并给出可操作的服务窗告示；不得静默丢掉 Run、Session 或布局，也不得手工删除/截断用户状态。
+- **健康边界必须可观测**。ctxmux 对外给出可区分的 recovered、busy-retry-exhausted、disk-full 与 corruption 结果；Desktop 的 Terminal/Resume 入口沿用同一结果分类，不把所有底层错误折叠成“Agent resume unavailable”。
 
 ### Browser 工作面
 
