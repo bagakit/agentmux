@@ -34,6 +34,14 @@ const fileExplorerSource = readFileSync(
   new URL('../src/renderer/src/components/FileExplorer.tsx', import.meta.url),
   'utf8'
 )
+const topicContextMenuSource = readFileSync(
+  new URL('../src/renderer/src/components/TopicContextMenu.tsx', import.meta.url),
+  'utf8'
+)
+const stylesSource = readFileSync(
+  new URL('../src/renderer/src/styles.css', import.meta.url),
+  'utf8'
+)
 
 const workspace: WorkspaceRecord = {
   id: 'workspace',
@@ -128,14 +136,45 @@ describe('Orca-adapted shared surface tool dock resize', () => {
 
   it('reveals a Topic directory inside the built-in Explorer instead of Finder', () => {
     expect(surfaceToolDockSource).toContain('onRevealDirectory(topic.directoryPath)')
-    expect(surfaceToolDockSource).toContain('title="Show Topic in Explorer"')
+    // 图标要表达「聚焦定位」而不是「打开文件夹」——它把 Explorer 定位到这个目录，
+    // 不是在 Finder 里开一个窗口。
+    expect(surfaceToolDockSource).toContain('title="Reveal in Explorer"')
+    expect(surfaceToolDockSource).toContain('<Crosshair size={13} />')
     expect(surfaceToolDockSource).not.toContain('api.files.reveal(workspace.id, topic.directoryPath)')
     expect(fileExplorerSource).toContain('next.add(revealRequest.path)')
     expect(fileExplorerSource).toContain('setSelection(createSingleFileExplorerSelection(revealRequest.path))')
   })
 
+  it('keeps exactly one always-visible action on a Topic row', () => {
+    // 用户："改名不用给个专门图标, 可以放进 topic 右键菜单"。行上只留最高频的那个动作，
+    // 其余进右键菜单——两个常驻图标按钮会一直跟标题抢宽度。
+    const topicRow = surfaceToolDockSource.slice(
+      surfaceToolDockSource.indexOf('<SortableTopicItem'),
+      surfaceToolDockSource.indexOf('</SortableTopicItem>')
+    )
+    expect(topicRow.match(/className="icon-button workspace-topic-/g)).toHaveLength(1)
+    expect(topicRow).toContain('workspace-topic-reveal')
+    expect(topicRow).not.toContain('workspace-topic-rename"')
+  })
+
+  it('drops the decorative icon from the head of every Topic row', () => {
+    // 一列全同的图标不是信息，是宽度开销（密度合同《控件语言》）。行首只在真的有话说时占位——
+    // 打开中的 spinner——所以网格用 auto 列，而不是留一个常驻的图标槽。
+    const topicRow = surfaceToolDockSource.slice(
+      surfaceToolDockSource.indexOf('className="workspace-topic-entry"'),
+      surfaceToolDockSource.indexOf('</button>', surfaceToolDockSource.indexOf('className="workspace-topic-entry"'))
+    )
+    expect(topicRow).not.toContain('<NotebookText')
+    expect(topicRow).toContain('<LoaderCircle')
+    expect(stylesSource).toContain(
+      '.workspace-topic-entry { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr);'
+    )
+  })
+
   it('renames Topic titles inline while keeping stable Topic directories out of generic Rename', () => {
-    expect(surfaceToolDockSource).toContain('title="Rename Topic"')
+    // 改名移进了右键菜单，但功能不退化：菜单项仍走同一个 beginRename/commitRename。
+    expect(topicContextMenuSource).toContain('<span>Rename Topic</span>')
+    expect(surfaceToolDockSource).toContain('onRename={() => beginRename(topic)}')
     expect(surfaceToolDockSource).toContain('void commitRename(topic)')
     expect(surfaceToolDockSource).toContain("if (event.key === 'Escape')")
     expect(fileExplorerSource).toContain('scratchTopicIdFromDirectoryName(node.path) !== null')

@@ -426,19 +426,19 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .workspace-topic-index-header em { min-width: 17px; padding:1px var(--sp-2); border-radius: var(--radius-sm); color: var(--text-3); background: var(--surface-3); font-size: var(--fs-micro); font-style: normal; text-align: center; }
 .workspace-topic-index-header .icon-button { width: 24px; height: 24px; }
 .workspace-topic-list { width: 100%; overflow: hidden; border-radius: var(--radius-sm); background: var(--surface-2); }
-.workspace-topic-item { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) 28px 28px; align-items: center; border-bottom: 1px solid var(--line-soft); }
+.workspace-topic-item { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) 28px; align-items: center; border-bottom: 1px solid var(--line-soft); }
 .workspace-topic-item:last-child { border-bottom: 0; }
 /* 选中＝一块干净的 Surface 填充，没有贴边竖条。它必须比 hover 更实，否则选中看起来比
    悬停还弱——此前它是 --surface-1，比 hover 的 --surface-3 更暗，全靠那根绿竖条撑住存在感。 */
 .workspace-topic-item.current { background: var(--green-bg); }
 .workspace-topic-item.current .workspace-topic-title-line strong { color: var(--text); }
-.workspace-topic-entry { min-width: 0; display: grid; grid-template-columns: 15px minmax(0, 1fr); align-items: center; gap:var(--sp-3); padding:var(--sp-3) var(--sp-2) var(--sp-3) var(--sp-4); border: 0; color: var(--text-3); background: transparent; text-align: left; }
+/* 行首没有常驻图标槽——一列全同的图标不携带信息。打开中的 spinner 是唯一会出现在这里的
+   东西，用 auto 列让它出现时才占位，不出现时标题从最左缘开始。 */
+.workspace-topic-entry { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap:var(--sp-3); padding:var(--sp-3) var(--sp-2) var(--sp-3) var(--sp-4); border: 0; color: var(--text-3); background: transparent; text-align: left; }
 .workspace-topic-item:hover:not(.current) { background: var(--surface-3); }
 .workspace-topic-item.current:hover { background: var(--green-bg-hover); }
-.workspace-topic-entry > svg { color: var(--green-2); }
 .workspace-topic-entry > span { min-width: 0; display: grid; gap:var(--sp-1); }
-.workspace-topic-rename-form { min-width: 0; display: grid; grid-template-columns: 15px minmax(0, 1fr); align-items: center; gap:var(--sp-3); padding:var(--sp-3) var(--sp-2) var(--sp-3) var(--sp-4); }
-.workspace-topic-rename-form > svg { color: var(--green-2); }
+.workspace-topic-rename-form { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; gap:var(--sp-3); padding:var(--sp-3) var(--sp-2) var(--sp-3) var(--sp-4); }
 .workspace-topic-rename-form input { min-width: 0; height: 25px; padding:0 var(--sp-3); border: 1px solid var(--green-2); border-radius: var(--radius-sm); color: var(--text); background: var(--surface-1); font: inherit; font-size: var(--fs-meta); outline: none; }
 .workspace-topic-title-line,
 .workspace-topic-entry small { min-width: 0; display: flex; align-items: center; gap:var(--sp-2); white-space: nowrap; }
@@ -454,7 +454,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .workspace-topic-entry small { color: var(--text-3); font-size: var(--fs-micro); }
 .workspace-topic-entry small > span { flex: 1; }
 .workspace-topic-entry small > em { flex: 0 0 auto; color: var(--text-3); font-style: normal; }
-.workspace-topic-rename.icon-button,
 .workspace-topic-reveal.icon-button { width: 24px; height: 24px; color: var(--text-3); }
 .surface-tool-action-surface > .primary-button { margin-bottom:var(--sp-6); }
 .browser-tools-preferences { width: 100%; display: grid; gap:var(--sp-4); padding:var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-1); }
