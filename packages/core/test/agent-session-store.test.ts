@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createHash } from 'node:crypto'
-import { mkdtemp, readdir, readFile, rm, unlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, readdir, readFile, rm, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import {
@@ -11,7 +11,7 @@ import {
   normalizeStoredAgentSession,
   type AgentMuxAgentSessionStore
 } from '../src/agent-session-store.js'
-import type { AgentTimelineItem } from '../src/types.js'
+import type { AgentMuxStoredAgentSession, AgentTimelineItem } from '../src/types.js'
 import {
   defaultAgentMuxRuntimeDirectory,
   defaultCtxmuxSocketPath,
@@ -742,6 +742,196 @@ describe('并发写同一份 store 的锁竞争', () => {
       expect([...claimed.map((entry) => entry.reservationId)].sort()).toEqual(
         writers.map((_writer, index) => `race-reservation-${index}`).sort()
       )
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// f-23r8fq5nw / T-005：会话存储损坏要能救回来，不是整份作废。
+// 参考同文件里 timeline 读取路径对崩溃撕裂尾行的容忍（见上方 timeline 用例）——把同样的韧性
+// 延伸到主存储文档：这些用例都真的把落盘文件截断/注入 NUL/翻字节，再从一个全新的 Store 实例
+// 读回，断言「能读的记录被救出、坏字节进了隔离文件、瞬时错误不被当成损坏而锁定降级态」。
+// ---------------------------------------------------------------------------
+
+describe('Agent Session store corruption salvage', () => {
+  function salvageSession(index: number): AgentMuxStoredAgentSession {
+    return {
+      kind: 'agent',
+      agentSessionId: `semantic-${index}`,
+      providerId: 'codex',
+      executorId: 'codex',
+      hostId: 'local',
+      workspacePath: '/private/tmp/work',
+      run: { runId: `run-${index}` },
+      retiredRuns: [],
+      hookBindingId: `hook-${index}`,
+      hookToken: `token-${index}`,
+      outputCursorBytes: 0,
+      createdAt: 1,
+      updatedAt: 1
+    }
+  }
+
+  /** 用 Store 自己把 count 条真会话写盘，拿到的正是生产写路径产出的规范字节。 */
+  async function seedSalvage(count: number): Promise<{ path: string; root: string }> {
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-salvage-'))
+    const path = join(root, 'agent-sessions.json')
+    const store = new AgentMuxFileAgentSessionStore(path)
+    for (let index = 0; index < count; index += 1) {
+      await store.compareAndSwap(null, salvageSession(index))
+    }
+    return { path, root }
+  }
+
+  /**
+   * 往第 index 条记录的 agentSessionId 值里塞一个 NUL 字节。NUL 是 JSON 字符串里的非法控制字符，
+   * 整份 JSON.parse 因此失败——走「按缩进分帧、逐块抢救」的分支。
+   * 注意别用可打印乱码（` GARBAGE`、` !` 之类）：那种字节落进字符串值里 JSON 依然合法，
+   * 记录会带着脏 id 原样存活，根本触发不了抢救——那样的用例是自欺，测不到任何东西。
+   */
+  function injectNulByte(text: string, index: number): Buffer {
+    const cut = text.indexOf(`semantic-${index}`)
+    if (cut < 0) throw new Error(`seed marker semantic-${index} not found`)
+    return Buffer.concat([
+      Buffer.from(text.slice(0, cut), 'utf8'),
+      Buffer.from([0x00]),
+      Buffer.from(text.slice(cut), 'utf8')
+    ])
+  }
+
+  async function salvageQuarantineFiles(root: string): Promise<string[]> {
+    return (await readdir(root)).filter((entry) => entry.includes('.corrupt-'))
+  }
+
+  it('救出被截断文件里完好的记录，而不是整份作废', async () => {
+    const { path, root } = await seedSalvage(3)
+    try {
+      const original = await readFile(path)
+      // 从记录中间截断：尾部记录被撕裂，靠前的完整记录必须活下来。
+      await writeFile(path, original.subarray(0, Math.floor(original.length * 0.6)), { mode: 0o600 })
+
+      const salvaged = await new AgentMuxFileAgentSessionStore(path).load()
+      // 抢救到的是一个非空子集——扫到了东西才有意义（本仓已知的空集假绿）。
+      expect(salvaged.length).toBeGreaterThan(0)
+      expect(salvaged.length).toBeLessThan(3)
+      expect((salvaged[0] as AgentMuxStoredAgentSession).agentSessionId).toBe('semantic-0')
+
+      // 坏字节进了隔离文件，且逐字节等于损坏后的整份文件内容——没有静默丢弃。
+      const [quarantine] = await salvageQuarantineFiles(root)
+      expect(quarantine).toBeDefined()
+      const corruptOnDisk = await readFile(path)
+      expect(await readFile(join(root, quarantine!))).toEqual(corruptOnDisk)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('把注入 NUL 的那一条隔离掉，两侧完好记录都救回来（部分抢救而非全有全无）', async () => {
+    const { path, root } = await seedSalvage(3)
+    try {
+      const text = (await readFile(path)).toString('utf8')
+      const corrupt = injectNulByte(text, 1)
+      // 证明这确实已经不是合法 JSON——走的是「整份解析失败、按缩进分帧抢救」的分支，
+      // 而不是把脏字节混进某个字符串值里蒙混过关。
+      expect(() => JSON.parse(corrupt.toString('utf8'))).toThrow()
+      await writeFile(path, corrupt, { mode: 0o600 })
+
+      const salvaged = await new AgentMuxFileAgentSessionStore(path).load()
+      const ids = salvaged.map((item) => (item as AgentMuxStoredAgentSession).agentSessionId)
+      // 恰好丢掉坏的那一条，另外两条原样回来。
+      expect(ids).toEqual(['semantic-0', 'semantic-2'])
+
+      const [quarantine] = await salvageQuarantineFiles(root)
+      expect(quarantine).toBeDefined()
+      // 隔离文件里必须真含被注入的坏字节，而不是清洗过的版本。
+      const quarantined = await readFile(join(root, quarantine!))
+      expect(quarantined).toEqual(corrupt)
+      expect(quarantined.includes(0)).toBe(true)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('翻字节让一条记录过不了校验（JSON 仍合法）时，隔离原始文件并救回其余记录', async () => {
+    const { path, root } = await seedSalvage(3)
+    try {
+      const text = (await readFile(path)).toString('utf8')
+      // 翻掉中间那条记录 kind 判别字段的一个字节：JSON 依然合法，但 normalize 会拒绝它。
+      const marker = '"kind": "agent"'
+      const first = text.indexOf(marker)
+      const second = text.indexOf(marker, first + 1)
+      expect(second).toBeGreaterThan(first)
+      const corrupt = `${text.slice(0, second)}"kind": "agenX"${text.slice(second + marker.length)}`
+      // 证明这确实还是合法 JSON——走的是「解析成功但单条校验失败」的抢救分支。
+      expect(() => JSON.parse(corrupt)).not.toThrow()
+      await writeFile(path, corrupt, { mode: 0o600 })
+
+      const salvaged = await new AgentMuxFileAgentSessionStore(path).load()
+      const ids = salvaged.map((item) => (item as AgentMuxStoredAgentSession).agentSessionId)
+      expect(ids).toEqual(['semantic-0', 'semantic-2'])
+
+      const quarantine = await salvageQuarantineFiles(root)
+      expect(quarantine.length).toBe(1)
+      expect((await readFile(join(root, quarantine[0]!))).toString('utf8')).toBe(corrupt)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('loadAgentSessions 端到端也拿到被救出的子集', async () => {
+    const { path, root } = await seedSalvage(3)
+    try {
+      const text = (await readFile(path)).toString('utf8')
+      const corrupt = injectNulByte(text, 1)
+      expect(() => JSON.parse(corrupt.toString('utf8'))).toThrow()
+      await writeFile(path, corrupt, { mode: 0o600 })
+
+      const sessions = await loadAgentSessions(new AgentMuxFileAgentSessionStore(path))
+      expect(sessions.map((item) => item.agentSessionId)).toEqual(['semantic-0', 'semantic-2'])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('瞬时读取错误（EACCES）不被当成损坏：既不隔离也不改动原文件', async () => {
+    const { path, root } = await seedSalvage(3)
+    try {
+      const before = await readFile(path)
+      await chmod(path, 0o000)
+      try {
+        await expect(new AgentMuxFileAgentSessionStore(path).load())
+          .rejects.toMatchObject({ code: 'EACCES' })
+      } finally {
+        await chmod(path, 0o600)
+      }
+      // 权限抖动绝不能触发抢救与截断：没有隔离文件，原文件逐字节不变。
+      expect(await salvageQuarantineFiles(root)).toEqual([])
+      expect(await readFile(path)).toEqual(before)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('退役 schema（版本不符）仍 fail-closed，不抢救也不隔离——本任务不引入迁移层', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-salvage-version-'))
+    const path = join(root, 'agent-sessions.json')
+    try {
+      const retired = `${JSON.stringify({
+        version: 4,
+        sessions: [salvageSession(0), salvageSession(1)],
+        reservations: [],
+        retiredRuns: [],
+        retiredAgentSessions: []
+      }, null, 2)}\n`
+      await writeFile(path, retired, { mode: 0o600 })
+
+      await expect(new AgentMuxFileAgentSessionStore(path).load())
+        .rejects.toMatchObject({ code: 'INVALID_AGENT_SESSION_STORE' })
+      // 版本不符不是损坏：不得隔离，也不得改写原文件。
+      expect(await salvageQuarantineFiles(root)).toEqual([])
+      expect(await readFile(path, 'utf8')).toBe(retired)
     } finally {
       await rm(root, { recursive: true, force: true })
     }
