@@ -2,7 +2,8 @@
 import { randomUUID } from 'node:crypto'
 import process from 'node:process'
 import type { AgentMuxAgentSessionLookup } from './agent-session-registry.js'
-import { AGENTMUX_CLI_HELP, AGENTMUX_CLI_SKILL, agentMuxCommandHelp } from './agentmux-cli-help.js'
+import { classifySelfViewFailure, SELF_CONTEXT_TOPIC_HINT } from './agent-self-context.js'
+import { AGENTMUX_CLI_HELP, AGENTMUX_CLI_SKILL, AGENTMUX_SELF_CONTEXT_VERB, agentMuxCommandHelp } from './agentmux-cli-help.js'
 import { AgentMuxClient } from './client.js'
 import {
   AGENTMUX_CONTROL_ERROR_CODES,
@@ -380,6 +381,42 @@ function requestsHelp(args: readonly string[]): boolean {
 }
 
 /**
+ * 启动定向握手：报出这个 Agent 自己的坐标与可用能力，让它从第一步就认识所处环境。
+ *
+ * 坐标不新建第二份身份来源：Session/Provider/Executor/host/Workspace/当前 Run 与可用能力全取自
+ * `statusAgent(self)`——那是每个 intent 读的同一份 Session 投影。View/Region/邻居复用既有的
+ * `inspect.region self`；查不到 View 不是握手失败（没投影到画布是正常态），但也不静默——把缺席
+ * 的原因如实带出（`no-desktop-view` 还是 `view-unavailable` + 错误码）。Topic 不在这里产出：它的
+ * 唯一真相是工作区里的 `topic.md` 与 `.agents/`，Core 复刻那套目录约定只会造出第二份会漂移的来源，
+ * 因此只给一句指向文件的话（见 {@link SELF_CONTEXT_TOPIC_HINT}）。语法不抄进来——确切用法在 --skill。
+ */
+async function whoamiCommand(args: readonly string[]): Promise<number> {
+  if (args.length > 0) throw cliError('whoami takes no arguments.')
+  const self = managedCaller().agentSessionId
+  const status = await withClient(async (client) => await client.statusAgent(self))
+  let view: ReturnType<typeof classifySelfViewFailure> | { attached: true; region: unknown }
+  try {
+    const receipt = await requestAgentMuxControl({
+      ...requestBase(), operation: 'inspect.region', target: { kind: 'self' }, caller: { agentSessionId: self }
+    })
+    // 收窄到 inspect.region 那一枝：requestAgentMuxControl 的返回是所有 operation 的联合。
+    view = receipt.operation === 'inspect.region'
+      ? { attached: true, region: receipt.result.region }
+      : classifySelfViewFailure(new AgentMuxError('Control returned an unexpected operation for whoami.', 'CONTROL_PROTOCOL_ERROR'))
+  } catch (error) {
+    view = classifySelfViewFailure(error)
+  }
+  printSuccess('whoami', {
+    session: status.session,
+    run: status.run,
+    capabilities: status.capabilities,
+    view,
+    topic: { present: false, hint: SELF_CONTEXT_TOPIC_HINT }
+  })
+  return 0
+}
+
+/**
  * 诊断当前本地运行时。这是 doctor 报告唯一的用户可达入口——报告里 endpoint 目录占用与回收结果这两
  * 段，若没有这个命令就等于算了没人看：占用只能等磁盘告警才发现，回收失败则完全无声。
  */
@@ -404,6 +441,7 @@ async function main(): Promise<number> {
     if (!help) throw cliError('Unknown command. Run agentmux --help.')
     process.stdout.write(`${help}\n`); return 0
   }
+  if (args[0] === AGENTMUX_SELF_CONTEXT_VERB) return await whoamiCommand(args.slice(1))
   if (args[0] === 'doctor') return await doctorCommand(args.slice(1))
   if (args[0] === 'inspect') return await inspectCommand(args.slice(1))
   if (args[0] === 'list') return await listCommand(args.slice(1))

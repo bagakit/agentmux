@@ -1,9 +1,16 @@
+/**
+ * 启动定向握手的动词名。启动引导（agent-outbound-message 的 runtime guide）指向它、CLI 分发注册它、
+ * help/skill 记它的确切用法——名字只有这一处定义，改名时三处一起动，不各写一份等着漂移。
+ */
+export const AGENTMUX_SELF_CONTEXT_VERB = 'whoami'
+
 export const AGENTMUX_CLI_HELP = `agentmux — typed local Agent and Desktop control
 
 Usage: agentmux <intent> [options]
        agentmux --skill
 
 Intents:
+  whoami      Report your own Session, View, Region, Workspace, and available capabilities.
   doctor      Diagnose the local Runtime: capabilities, agents, endpoint storage and reclamation.
   inspect     Inspect one Agent Session, Run, Tab, or Region without changing focus.
   list        List configured agents or active Agent Sessions from their owners.
@@ -35,6 +42,18 @@ Options:
   --help, -h     Show help.`
 
 const HELP = new Map<string, string>([
+  ['whoami', `Report your own coordinates and available capabilities
+
+Usage:
+  agentmux whoami
+
+Answers the startup question "who and where am I" from existing Session projection facts:
+your Agent Session id, Provider and Executor, host, Workspace path, current Run, and the
+capabilities available to you. When a Desktop View is attached it also reports your View,
+Region, and the neighbors you can split against. Topic is not reported here: the Scratch
+topic.md and .agents/ files on disk are its source of truth — read them to find your Topic
+and collaborators. Requires a managed Agent caller. No View attached is a normal answer,
+not a failure.`],
   ['inspect', `Inspect one exact owner identity without changing focus
 
 Usage:
@@ -184,6 +203,19 @@ command -v agentmux
 \`\`\`
 
 If these checks fail, do not use \`self\`. Use an explicit typed id.
+
+## Orient at startup
+
+\`\`\`bash
+agentmux whoami
+\`\`\`
+
+Run this first. It reports who and where you are — Agent Session, Provider, Executor, host,
+Workspace, current Run, and the capabilities available to you — from the same Session
+projection every other intent reads. When a Desktop View displays you, it also reports your
+View, Region, and split neighbors. Topic is deliberately absent: the Scratch \`topic.md\` and
+\`.agents/\` files on disk are the only source of truth for your Topic and collaborators, so
+read them rather than expecting a field here. A missing View is a normal answer.
 
 ## Inspect before acting
 
