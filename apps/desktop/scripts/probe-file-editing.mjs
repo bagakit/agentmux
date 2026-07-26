@@ -36,7 +36,10 @@ const execFileAsync = promisify(execFile)
 
 const require = createRequire(import.meta.url)
 const desktopRoot = resolve(import.meta.dirname, '..')
+const workspaceRoot = resolve(desktopRoot, '..', '..')
 const electronExecutable = require('electron')
+// `--no-build` reuses the existing out/ and packages/core/dist for the tightest loop, when only main-process
+// TS changed and was already built. It also skips the prebuild move-helper step.
 const skipBuild = process.argv.includes('--no-build')
 // The whole probe budget: ~50 sequential assertions, each waitFor bounded at 20s. A healthy run finishes in
 // well under a minute; this ceiling only guards a wedged main process so the runner never hangs forever.
@@ -82,7 +85,17 @@ async function reapProbeDaemon(runtimeRoot) {
       }
     }
   }
-  signal(await pidsFor(), 'SIGTERM')
+  // A daemon only becomes findable once execve has replaced its argv with `ctxmuxd --socket <path>`; between
+  // core's fork and that execve the child still wears Electron's command line and matches nothing. If the run
+  // dies mid-`connect()`, a single snapshot can land in that window and miss the daemon entirely. So when the
+  // first sweep comes up empty, look again a few times before concluding there is nothing to reap. The window
+  // is microseconds wide, so the common "no daemon spawned at all" case costs a handful of cheap `ps` calls.
+  let pids = await pidsFor()
+  for (let attempt = 0; pids.length === 0 && attempt < 6; attempt += 1) {
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 50))
+    pids = await pidsFor()
+  }
+  signal(pids, 'SIGTERM')
   const deadline = Date.now() + 3_000
   let remaining = await pidsFor()
   while (remaining.length > 0 && Date.now() < deadline) {
@@ -97,8 +110,12 @@ async function reapProbeDaemon(runtimeRoot) {
 
 async function main() {
   if (!skipBuild) {
-    // Rebuild out/ so the probe runs against current source. `--no-build` reuses the existing out/ for the
-    // tightest loop when only main-process TS changed and was already built.
+    // Rebuild BOTH halves so the probe runs against current source. `@agentmux/core` is externalized by
+    // electron-vite and loaded at runtime from the workspace symlink into packages/core/dist — so a desktop-only
+    // build leaves core's dist stale, and an edit to the adapter / runtime-paths / endpoint logic would be
+    // invisible here while the package gate (which builds both, package-macos.mjs) still goes red. That gap
+    // would break the one promise this runner makes: green here means green there.
+    await run('pnpm', ['--filter', '@agentmux/core', 'build'], { cwd: workspaceRoot })
     await run('pnpm', ['build'], { cwd: desktopRoot })
   }
 
@@ -110,7 +127,15 @@ async function main() {
   const readyFile = join(temporaryRoot, 'desktop-ready.json')
   const fileEditingReport = join(temporaryRoot, 'workspace-file-editing.json')
 
-  await materializeFileEditingFixture({ userData, workspace, alternateWorkspace })
+  // Between `mkdtemp` and the point where `cleanup`/SIGINT are wired below, nothing else would remove this
+  // directory — so a throw in here (full disk, permissions, a fixture bug) would leave a tree under
+  // /private/tmp on every failed run. Nothing is spawned yet, so the temp dir is the only thing to undo.
+  try {
+    await materializeFileEditingFixture({ userData, workspace, alternateWorkspace })
+  } catch (error) {
+    await rm(temporaryRoot, { recursive: true, force: true })
+    throw error
+  }
 
   let child = null
   let killTimer = null
@@ -206,8 +231,11 @@ async function main() {
     })
   })
 
-  // The report is the authority on pass/fail. `ok: true` is the only success; anything else (missing report,
-  // a false report, a non-zero Electron exit) is a failure, and we surface the failing probe's description.
+  // The report is the authority on whether the FEATURE works, but it is written before `app.quit()`, so it
+  // cannot speak for teardown. `before-quit` disposes the runtime (client + daemon); if that throws, the main
+  // process exits 1 *after* a truthful `ok:true` landed. Gating on the report alone would paint a broken
+  // daemon disposal — exactly the resource-safety class this repo cares about — bright green. Success
+  // therefore requires all three: a report saying ok, a clean Electron exit, and no timeout.
   let report = null
   try {
     report = JSON.parse(await readFile(fileEditingReport, 'utf8'))
@@ -218,13 +246,23 @@ async function main() {
   await cleanup()
   process.removeListener('SIGINT', onSigint)
 
-  if (report?.ok === true) {
+  if (report?.ok === true && exitCode === 0 && !timedOut) {
     process.stdout.write('file_editing_probe=ok\n')
     return 0
   }
 
   const failingProbe = lastWaiting ?? '(no probe reported waiting — check stderr above)'
   process.stderr.write('\n=== file-editing probe FAILED ===\n')
+  if (report?.ok === true) {
+    // The assertions all passed; the failure is in shutdown. Say so plainly, or the next reader wastes their
+    // time hunting a probe that never failed.
+    process.stderr.write(
+      timedOut
+        ? 'all probes passed, but Electron did not exit within the budget — it wedged during teardown\n'
+        : `all probes passed, but Electron exited ${exitCode} — teardown (runtime/daemon disposal) failed\n`
+    )
+    return 1
+  }
   process.stderr.write(`failing probe: ${failingProbe}\n`)
   if (report?.error) process.stderr.write(`report error: ${report.error}\n`)
   else if (report === null) process.stderr.write(`report: missing (Electron ${timedOut ? 'timed out' : `exited ${exitCode}`})\n`)
