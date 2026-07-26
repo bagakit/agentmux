@@ -39,6 +39,15 @@ import { finishTerminalReplayRecovery, hydrateTerminalReplay, yieldTerminalWork 
 import { acquireTerminalResourceOwners } from '../lib/terminal-resource-owners'
 import { LatestTerminalOutputAcknowledger } from '../lib/terminal-output-ack'
 import { TerminalViewportSynchronizer } from '../lib/terminal-viewport-sync'
+import {
+  rememberTerminalViewport,
+  restoreTerminalViewport,
+  type TerminalViewportMemory
+} from '../lib/terminal-viewport-memory'
+import {
+  takeTerminalLiveOutputBatch,
+  type TerminalLiveOutputChunk
+} from '../lib/terminal-live-output'
 import { terminalStartupPhase } from '../lib/terminal-startup'
 import {
   TERMINAL_REVEAL_DEADLINE_MS,
@@ -130,6 +139,7 @@ export function TerminalView({
   const rootRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<Terminal | null>(null)
   const viewportRef = useRef<TerminalViewportSynchronizer | null>(null)
+  const viewportMemoryRef = useRef<TerminalViewportMemory>({ kind: 'latest' })
   const terminalGenerationRef = useRef(0)
   const nextLinkRequestIdRef = useRef(0)
   const linkRequestRef = useRef<TerminalLinkRequest | null>(null)
@@ -194,6 +204,15 @@ export function TerminalView({
   activeWorkspaceRootRef.current = activeWorkspaceRoot
   const isMac = navigator.userAgent.includes('Mac')
 
+  function restoreRememberedViewport(terminal: Terminal): void {
+    const target = restoreTerminalViewport(
+      viewportMemoryRef.current,
+      terminal.buffer.active.baseY
+    )
+    if (target.kind === 'latest') terminal.scrollToBottom()
+    else terminal.scrollToLine(target.line)
+  }
+
   useEffect(() => {
     if (searchOpen) searchInputRef.current?.focus()
   }, [searchOpen])
@@ -203,7 +222,22 @@ export function TerminalView({
   }, [interactiveResize])
 
   useLayoutEffect(() => {
+    const terminal = terminalRef.current
+    if (!visible && terminal) {
+      const buffer = terminal.buffer.active
+      viewportMemoryRef.current = rememberTerminalViewport(buffer.viewportY, buffer.baseY)
+    }
     viewportRef.current?.setVisible(visible)
+    if (!visible || !terminal) return
+    // Restore after the synchronizer's first visibility frame as well: fit/resize can otherwise
+    // move xterm's DOM viewport before the user sees the reactivated Region.
+    const restore = () => {
+      if (!visibleRef.current || terminalRef.current !== terminal) return
+      restoreRememberedViewport(terminal)
+    }
+    restore()
+    const frame = requestAnimationFrame(restore)
+    return () => cancelAnimationFrame(frame)
   }, [visible])
 
   // 变为 running 时启动 live 视口同步。attach effect 不再随 processState 重挂，
@@ -219,6 +253,7 @@ export function TerminalView({
     // A const the closures below can capture without TypeScript re-widening it to null.
     const terminalRoot = root
     const terminalGeneration = ++terminalGenerationRef.current
+    viewportMemoryRef.current = { kind: 'latest' }
     setHydrating(true)
     setRevealOverdue(false)
     // A Region can keep this component mounted while its Run changes (for example after a
@@ -392,6 +427,8 @@ export function TerminalView({
     let readyForLiveOutput = false
     let cursor = 0
     let outputTail = Promise.resolve()
+    const liveOutputQueue: TerminalLiveOutputChunk[] = []
+    let liveDrain: Promise<void> | null = null
     const pending: RuntimeEvent[] = []
     let pendingBytes = 0
     let droppedPendingThrough = 0
@@ -437,6 +474,49 @@ export function TerminalView({
       setHasOutput(true)
     }
 
+    const drainLiveOutput = async (): Promise<void> => {
+      // Let same-turn IPC events accumulate so xterm sees one visual write instead of one write
+      // per RuntimeEvent. The loop remains bounded and yields between batches when output is large.
+      await yieldTerminalWork()
+      while (!disposed && liveOutputQueue.length > 0) {
+        const taken = takeTerminalLiveOutputBatch(liveOutputQueue)
+        liveOutputQueue.splice(0, liveOutputQueue.length, ...taken.rest)
+        const parts: string[] = []
+        let nextCursor = cursor
+        for (const output of taken.batch) {
+          if (output.endByte <= nextCursor) continue
+          if (output.startByte !== nextCursor) {
+            parts.push('\r\n\u001b[33m[Output sequence gap; earlier bytes are unavailable]\u001b[0m\r\n')
+          }
+          parts.push(output.data)
+          nextCursor = output.endByte
+        }
+        if (parts.length === 0) continue
+        const data = parts.join('')
+        await terminalWrite(terminal, data)
+        kittyKeyboard = readKittyKeyboardOutput(kittyKeyboard, data)
+        cursor = nextCursor
+        acknowledger.queue(cursor)
+        if (liveOutputQueue.length > 0) await yieldTerminalWork()
+      }
+    }
+
+    const scheduleLiveOutputDrain = (output: TerminalLiveOutputChunk): void => {
+      if (disposed) return
+      liveOutputQueue.push(output)
+      if (liveDrain) return
+      const drain = drainLiveOutput()
+      liveDrain = drain
+      outputTail = drain
+      void drain.finally(() => {
+        if (liveDrain !== drain) return
+        liveDrain = null
+        // A late event can arrive in the same turn the drain observes an empty queue. Keep the
+        // queue live without turning it into a second output owner.
+        if (!disposed && liveOutputQueue.length > 0) scheduleLiveOutputDrain(liveOutputQueue.shift()!)
+      }).catch(() => {})
+    }
+
     const accept = (event: RuntimeEvent): void => {
       const output = outputForSession(event, session)
       if (!output) return
@@ -457,21 +537,10 @@ export function TerminalView({
         }
         return
       }
-      outputTail = outputTail.then(async () => {
-        if (disposed || output.endByte <= cursor) return
-        if (output.startByte !== cursor) {
-          await terminalWrite(terminal, '\r\n\u001b[33m[Output sequence gap; earlier bytes are unavailable]\u001b[0m\r\n')
-        }
-        await terminalWrite(terminal, output.data)
-        // Shift+Enter 的编码取决于下游程序有没有协商 kitty keyboard 协议，而它只会在自己的
-        // 输出里说这件事——所以在写进终端的同一条路上顺带读掉，不另开一条输出订阅。
-        kittyKeyboard = readKittyKeyboardOutput(kittyKeyboard, output.data)
-        cursor = output.endByte
-        acknowledger.queue(cursor)
-        // xterm's write callback only yields a microtask. Explicitly yield a macrotask after each
-        // queued live chunk so a burst accumulated while this Tab was hidden cannot starve input,
-        // tab switching, or close actions while outputTail drains.
-        await yieldTerminalWork()
+      scheduleLiveOutputDrain({
+        data: output.data,
+        startByte: output.startByte,
+        endByte: output.endByte
       })
     }
     const disposeEvents = api.sessions.onEvent(accept)
@@ -597,6 +666,10 @@ export function TerminalView({
             kittyKeyboard = readKittyKeyboardOutput(kittyKeyboard, data)
           }
         ) ?? cursor
+        // Initial attaches and true rebuilds have no previous viewport to restore. Explicitly pin
+        // their first visible frame to the latest output instead of relying on xterm's parser
+        // default, which can be the top of a freshly-created normal buffer.
+        if (visibleRef.current) restoreRememberedViewport(terminal)
         if (droppedPendingThrough > cursor) {
           await terminalWrite(
             terminal,
