@@ -135,12 +135,12 @@ export function normalizeAgentTimelineMutation(value: unknown): AgentTimelineMut
     )
   }
   const agentSessionId = text(source.agentSessionId, 'Timeline Agent Session id')
-  if (source.type === 'append') {
+  if (source.type === 'append' || source.type === 'upsert') {
     const item = normalizeItem(source.item)
     if (item.agentSessionId !== agentSessionId) {
       throw new AgentMuxError('Timeline item belongs to another Agent Session.', 'INVALID_AGENT_TIMELINE')
     }
-    return { type: 'append', agentSessionId, item }
+    return { type: source.type, agentSessionId, item }
   }
   if (source.type !== 'update') {
     throw new AgentMuxError('Timeline mutation type is invalid.', 'INVALID_AGENT_TIMELINE')
@@ -179,6 +179,20 @@ export function applyAgentTimelineMutation(
       throw new AgentMuxError('Timeline item identity conflicts with existing content.', 'AGENT_TIMELINE_ID_CONFLICT')
     }
     return [...items, structuredClone(mutation.item)].slice(-MAX_AGENT_TIMELINE_ITEMS)
+  }
+  if (mutation.type === 'upsert') {
+    const index = items.findIndex((item) => item.id === mutation.item.id)
+    if (index < 0) {
+      // 目标不在（事前那条丢投或被逐出）：补落一条自洽的终态行，而不是抛错吞掉整条 hook 事件。
+      return [...items, structuredClone(mutation.item)].slice(-MAX_AGENT_TIMELINE_ITEMS)
+    }
+    // 就地替换。保留最初的 createdAt——这仍是「同一件事」，创建时刻不该被事后投递改写；
+    // 语义未变则原样返回，避免推空的 revision。
+    const previous = items[index]!
+    const next: AgentTimelineItem = { ...structuredClone(mutation.item), createdAt: previous.createdAt }
+    if (sameItemSemantics(previous, next)) return items
+    items[index] = next
+    return items
   }
   const index = items.findIndex((item) => item.id === mutation.itemId)
   if (index < 0) {
