@@ -1,5 +1,6 @@
 import { useAppStore } from '../store'
-import { summarizeAgentAttention } from '../lib/agent-attention'
+import { summarizeAgentAttention, summarizeProviderActivity } from '../lib/agent-attention'
+import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
 import { AgentRoster } from './AgentRoster'
 
 // The window's only cross-session attention rollup. Every other status indicator is scoped — the
@@ -30,6 +31,35 @@ function StatusCount({
       <span className="agent-status-bar__count">{count}</span>
       <span className="agent-status-bar__label">{label}</span>
     </>
+  )
+}
+
+// 一个 Provider 现在几个在跑、几个闲着。整窗的 working/needs-you 汇总回答"谁在等我"，这一段
+// 回答另一个问题——"哪个 Provider 在干活"——所以它按 Provider 分，而不是再报一次总数。
+// 活跃的定义来自 Board 那一个开关（见 summarizeProviderActivity），因此同一个 Session 不会
+// Board 判在跑、状态栏判待机。
+function ProviderActivity() {
+  const sessions = useAppStore((state) => state.sessions)
+  const providers = summarizeProviderActivity(sessions)
+  if (providers.length === 0) return null
+  return (
+    <span className="agent-status-bar__providers">
+      {providers.map(({ providerId, active, idle }) => (
+        <span
+          className="agent-status-bar__provider"
+          key={providerId}
+          data-active={active > 0 ? 'true' : 'false'}
+          // 计数在 tooltip 与可访问名里都说全，屏幕阅读器听到的是事实而不是两个裸数字。
+          title={`${agentProviderLabel(providerId)} · ${active} active · ${idle} idle`}
+          aria-label={`${agentProviderLabel(providerId)}: ${active} active, ${idle} idle`}
+        >
+          <AgentProviderIcon providerId={providerId} size={11} />
+          <span className="agent-status-bar__count">{active}</span>
+          {/* 闲着的那部分是次要事实：压低而不是省掉，省掉就没法回答"总共几个"。 */}
+          <span className="agent-status-bar__idle">/{active + idle}</span>
+        </span>
+      ))}
+    </span>
   )
 }
 
@@ -81,6 +111,7 @@ export function AgentStatusBar() {
           <StatusCount state={null} count={rollup.error} label="error" />
         </span>
       )}
+      <ProviderActivity />
     </div>
   )
 }

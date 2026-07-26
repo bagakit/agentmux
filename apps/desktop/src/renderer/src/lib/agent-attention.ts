@@ -1,4 +1,6 @@
+import type { AgentProviderId } from '@agentmux/core'
 import type { SessionSnapshot } from '../../../shared/contracts'
+import { sessionBoardColumn } from './project-board'
 
 // A window-wide cross-session rollup of Agent attention. Every other indicator in the window is
 // scoped — the tab dot is one Session, Board columns are one Project, the Agents tool total is one
@@ -50,4 +52,38 @@ export function summarizeAgentAttention(
     needsYouSessionId: earliest(sessions, (state) => state === 'waiting' || state === 'blocked'),
     errorSessionId: earliest(sessions, (state) => state === 'error')
   }
+}
+
+// 一个 Provider 现在有几个 Agent 在跑、几个闲着。
+//
+// "活跃"与"待机"不在这里定义——它们是 `sessionBoardColumn` 的 working 列与其余列，也就是
+// Board 用的那一个开关。照抄一份 switch 会让同一个 Session 出现两种说法：Board 判它在跑
+// （`starting`/`running` 都在 working 列），状态栏却因为只认 `state === 'working'` 判它待机。
+// 所以这里调用那个函数，而不是复述它。
+//
+// 上面的 `working`/`needsYou`/`error` 是另一套刻意不同的口径（关注度：谁需要我现在就去看），
+// 两套并存是有意的——本函数回答的是"哪个 Provider 在干活"，不是"谁在等我"。
+export type ProviderActivityCount = {
+  providerId: AgentProviderId
+  // Board working 列：starting / running / working。
+  active: number
+  // 该 Provider 其余的 Agent——needs-you 列与 done 列合起来，即"没在跑"。
+  idle: number
+}
+
+export function summarizeProviderActivity(
+  sessions: readonly SessionSnapshot[]
+): ProviderActivityCount[] {
+  // 首次出现的顺序决定展示顺序：它随 Session 投影稳定，不会因为计数变化而让整排图标跳位。
+  const byProvider = new Map<AgentProviderId, ProviderActivityCount>()
+  for (const session of sessions) {
+    if (!isAgent(session)) continue
+    const entry = byProvider.get(session.providerId)
+      ?? { providerId: session.providerId, active: 0, idle: 0 }
+    if (sessionBoardColumn(session) === 'working') entry.active += 1
+    else entry.idle += 1
+    byProvider.set(session.providerId, entry)
+  }
+  // 零 Agent 的 Provider 从来不会进这张表——只有出现过的 Provider 才有条目，因此不占位。
+  return [...byProvider.values()]
 }
