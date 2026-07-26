@@ -12,7 +12,7 @@ import {
   type RulerScale
 } from '../lib/activity-ruler'
 import { terminalLinkPreviewAnchor } from '../lib/terminal-link-gesture'
-import { AgentMarkdown } from './AgentMarkdown'
+import { AgentMarkdown, type OpenWorkspaceFile } from './AgentMarkdown'
 
 function Glyph({ kind, size = 12 }: { kind: AgentTimelineItem['kind']; size?: number }) {
   if (kind === 'user_message') return <UserRound size={size} />
@@ -336,7 +336,17 @@ function Row({
  * caption is a quiet speaker tag, and the body is the largest, brightest text in the view. Never folded,
  * always on screen. This is the register the machine Row deliberately is not.
  */
-function Turn({ item, origin }: { item: AgentTimelineItem; origin: number }) {
+function Turn({
+  item,
+  origin,
+  openWorkspaceFile,
+  workspaceRoot
+}: {
+  item: AgentTimelineItem
+  origin: number
+  openWorkspaceFile?: OpenWorkspaceFile
+  workspaceRoot: string
+}) {
   const who = item.kind === 'user_message' ? 'You' : 'Assistant'
   return (
     <div className={`log-turn log-turn--${item.kind}`} data-status={item.status}>
@@ -349,7 +359,14 @@ function Turn({ item, origin }: { item: AgentTimelineItem; origin: number }) {
       </div>
       {/* Only the TURN register renders markdown. The machine Row (log-row__prose) stays plain text: it
           carries payload, not prose someone reads for meaning. */}
-      {item.content ? <AgentMarkdown content={item.content} className="log-turn__body" /> : null}
+      {item.content ? (
+        <AgentMarkdown
+          content={item.content}
+          className="log-turn__body"
+          workspaceRoot={workspaceRoot}
+          {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
+        />
+      ) : null}
     </div>
   )
 }
@@ -403,10 +420,15 @@ function placeSegments(segments: Segment[]): PlacedSegment[] {
 
 export function ActivityView({
   items,
-  capability
+  capability,
+  openWorkspaceFile,
+  workspaceRoot = ''
 }: {
   items: AgentTimelineItem[]
   capability: 'unavailable' | 'complete-events' | 'streaming'
+  /** Absent means file references in agent prose stay plain text. */
+  openWorkspaceFile?: OpenWorkspaceFile
+  workspaceRoot?: string
 }) {
   const segments = useMemo(() => segment(items), [items])
   const placed = useMemo(() => placeSegments(segments), [segments])
@@ -523,7 +545,12 @@ export function ActivityView({
             {entry.kind === 'run' ? (
               <Run items={entry.items} origin={origin} />
             ) : isTurn(entry.item.kind) ? (
-              <Turn item={entry.item} origin={origin} />
+              <Turn
+                item={entry.item}
+                origin={origin}
+                workspaceRoot={workspaceRoot}
+                {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
+              />
             ) : (
               <Row item={entry.item} origin={origin} count={1} showSource />
             )}

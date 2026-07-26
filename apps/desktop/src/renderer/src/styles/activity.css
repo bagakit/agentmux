@@ -317,6 +317,21 @@
 }
 .md-link:hover { color: var(--green); }
 
+/* A workspace file reference opens IN the app rather than leaving it, so it reads as a path — mono,
+   text colour — and earns the link underline only on hover. Underlining every path an agent mentions
+   would stripe a whole paragraph; the target still has to be legible as prose first. */
+.md-link--file {
+  color: inherit;
+  font-family: var(--font-mono);
+  text-decoration: none;
+}
+.md-link--file:hover {
+  color: var(--green);
+  text-decoration: underline;
+}
+/* Inside a code span the mono face and ground already come from `.md-code`. */
+.md-code .md-link--file { font-family: inherit; }
+
 /* User speech gets a quiet ground so the turn has a visible start and end — Surface fill carries the
    boundary, never a stroke. The assistant reply flows open on the feed as the main narrative. */
 .log-turn--user_message .log-turn__body {

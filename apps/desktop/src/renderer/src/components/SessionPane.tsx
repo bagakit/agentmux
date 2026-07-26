@@ -1,5 +1,5 @@
 import { AlertTriangle, LoaderCircle, RefreshCw, RotateCcw, ServerOff } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAppStore } from '../store'
 import type { OpenHttpLinkOrigin } from '../lib/open-destination'
 import { AgentSessionComposer } from './AgentSessionComposer'
@@ -51,6 +51,23 @@ export function SessionPane({
   const refreshSession = useAppStore((state) => state.refreshSession)
   const recoverSession = useAppStore((state) => state.recoverSession)
   const respondInteraction = useAppStore((state) => state.respondInteraction)
+  // Same two reads TerminalView makes for its path links, for the same reason: an Agent that writes
+  // `src/foo.ts` means the same file in the Activity projection as in the Terminal one. The root comes
+  // from the WorkspaceRecord (NOT session.workspacePath) so worktree/scratch sessions still relativize
+  // absolute paths against the base main actually resolves against.
+  const openFile = useAppStore((state) => state.openFile)
+  const reportError = useAppStore((state) => state.reportError)
+  const activeWorkspaceRoot = useAppStore((state) =>
+    state.config?.workspaces.find((workspace) => workspace.id === state.activeWorkspaceId)?.path ?? ''
+  )
+  // Lands the file in this pane's own Tab Group, exactly as a terminal path click does. A miss
+  // surfaces through reportError — "click opened nothing" is never silent.
+  const openWorkspaceFile = useCallback(
+    (path: string, location?: { line: number; column?: number }) => {
+      void openFile(path, linkOrigin.tabGroupId, location).catch(reportError)
+    },
+    [openFile, reportError, linkOrigin.tabGroupId]
+  )
   const [refreshing, setRefreshing] = useState(false)
   const [recovering, setRecovering] = useState(false)
   // daemon_restart auto-recovery fires at most once per dead session id, so a flapping
@@ -175,6 +192,8 @@ export function SessionPane({
           <ActivityView
             items={timeline}
             capability={session.kind === 'agent' ? session.capabilities.timeline : 'unavailable'}
+            workspaceRoot={activeWorkspaceRoot}
+            openWorkspaceFile={openWorkspaceFile}
           />
         )}
       </div>
