@@ -12,14 +12,16 @@
  * 拿到/没拿到单实例锁之后，这个实例该扮演什么角色。
  * - primary：我们是唯一实例，照常引导运行时。
  * - secondary：已经有实例在跑，我们立刻退出，把「带窗口到前台」交给已在运行的主实例。
- *   退出码恒为 0：这是预期行为（用户又点了一下图标），不是错误——非 0 会让外层误判成启动失败。
+ *
+ * 退出走 `app.quit()`（默认退出码 0）：第二实例退出是预期行为（用户又点了一下图标），不是错误。
+ * 这里只做角色判别，不携带退出码——退出码是接线层 quit 的语义，塞进纯数据里没有任何消费者。
  */
 export type InstanceRole =
   | { role: 'primary' }
-  | { role: 'secondary'; exitCode: 0 }
+  | { role: 'secondary' }
 
 export function instanceRoleFromLock(gotLock: boolean): InstanceRole {
-  return gotLock ? { role: 'primary' } : { role: 'secondary', exitCode: 0 }
+  return gotLock ? { role: 'primary' } : { role: 'secondary' }
 }
 
 /** 已有窗口的当前状态，决定要用哪几步把它带到用户眼前。 */
