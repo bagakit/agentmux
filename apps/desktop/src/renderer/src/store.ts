@@ -1253,6 +1253,22 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         }
       }
       const persistedAgentIds = persistedAgentSessionIds(get().restoredWorkbench)
+      // An empty Runtime snapshot cannot distinguish "there are no Sessions" from a freshly
+      // connected/incorrectly rooted store. If the persisted Workbench still names Agent Regions,
+      // keep those Regions as pending projections until Core returns a candidate or an explicit
+      // retirement. Treating this one response as authoritative is what made a restart erase the
+      // user's layout when the GUI and Runtime addressed different userData roots.
+      if (
+        snapshotVerified &&
+        persistedAgentIds.size > 0 &&
+        snapshot.sessions.length === 0 &&
+        snapshot.recoveryCandidates.length === 0
+      ) {
+        retainUnknownSessionViews = true
+        startupWarnings.push(
+          'Runtime Session snapshot returned no Session facts. The saved Agent Regions remain visible until a canonical snapshot confirms their identity.'
+        )
+      }
       const recoveryFailures: SessionSnapshot[] = []
       let recovered = false
       for (const candidate of snapshotVerified ? snapshot.recoveryCandidates : []) {

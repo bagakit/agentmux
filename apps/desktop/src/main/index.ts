@@ -25,11 +25,11 @@ import { singleFlight } from './single-flight.js'
 const appIconPath = join(import.meta.dirname, '../../resources/icon.png')
 const packagedUserDataPath = join(app.getPath('appData'), 'dev.agentmux.desktop')
 
-if (process.env.AGENTMUX_DESKTOP_USER_DATA) {
-  app.setPath('userData', process.env.AGENTMUX_DESKTOP_USER_DATA)
-} else if (app.isPackaged) {
-  app.setPath('userData', packagedUserDataPath)
-}
+// Development launches and packaged launches must address the same durable user-data root. Electron's
+// default path is derived from the app name and differs between a Vite dev process and the signed App;
+// without this explicit binding each mode creates a separate config, Workbench localStorage and
+// Agent Session store, making a restart look like a clean install.
+app.setPath('userData', process.env.AGENTMUX_DESKTOP_USER_DATA ?? packagedUserDataPath)
 app.setName('AgentMux')
 // 崩溃事后要有痕迹。原生崩溃（含渲染进程）交给 crashReporter 落本地崩溃目录，且恒不上传；主进程
 // 层面的四类信号（未捕获异常/拒绝、渲染进程消失、子进程消失）归一成 NDJSON 追加到 userData，体量

@@ -45,6 +45,24 @@ describe('login shell PATH hydration', () => {
     expect(env.PATH).toBe(["/usr/bin", "/bin"].join(":"))
   })
 
+  it('falls back to a non-interactive login shell and merges the inherited PATH', async () => {
+    const env: NodeJS.ProcessEnv = { PATH: ["/usr/bin", _hygiene_fixturePath("Users/test/.local/bin")].join(":"), SHELL: '/bin/zsh' }
+    const runner = vi.fn()
+      .mockRejectedValueOnce(new Error('interactive profile failed'))
+      .mockResolvedValueOnce(
+        ("__AGENTMUX_LOGIN_SHELL_PATH__" + _hygiene_fixturePath("opt/homebrew/bin") + ":/usr/bin__AGENTMUX_LOGIN_SHELL_PATH__")
+      )
+
+    await expect(hydrateProcessPathFromLoginShell({ platform: 'darwin', env, runner }))
+      .resolves.toEqual({
+        ok: true,
+        path: [_hygiene_fixturePath("opt/homebrew/bin"), "/usr/bin", _hygiene_fixturePath("Users/test/.local/bin")].join(":"),
+        shell: '/bin/zsh'
+      })
+    expect(runner).toHaveBeenCalledTimes(2)
+    expect(runner.mock.calls[1]?.[1].slice(0, 1)).toEqual(['-lc'])
+  })
+
   it('does not invent shell or executable paths on unsupported platforms', async () => {
     const env: NodeJS.ProcessEnv = { PATH: _hygiene_win32.join("C:", _hygiene_win32.sep, "Windows\\System32") }
 
