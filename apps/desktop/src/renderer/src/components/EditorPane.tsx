@@ -3,11 +3,13 @@ import Editor, { type OnMount } from '@monaco-editor/react'
 import { AlertTriangle, FolderOpen, RefreshCw, Save } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import { api } from '../lib/api'
+import { editorSaveAction } from '../lib/editor-save-shortcut'
 import { detectLanguage } from '../lib/language-detect'
 import { documentKey, type FileWorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
 
 type MonacoStandaloneEditor = Parameters<OnMount>[0]
+type MonacoApi = Parameters<OnMount>[1]
 
 // The failure state of a file surface. It stays hookless so it can be exercised without a Monaco
 // render context: the reveal action is the one output an unopenable file must still offer, and the
@@ -95,6 +97,29 @@ export function EditorPane({ tabId, surface }: { tabId: string; surface: FileWor
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [revealTarget, key])
 
+  // Cmd/Ctrl+S. Registered as a Monaco command rather than a window listener so it fires only for
+  // the editor that actually has focus — with several file Regions open at once, a window-level
+  // handler would have to guess which one the user meant, and Monaco already knows.
+  //
+  // The handler reads live state through getState() instead of closing over `dirty`/`saving`/`issue`.
+  // Monaco keeps the callback given at registration, so a captured value would be whatever it was on
+  // mount: the shortcut would decide using a stale view of the file and could write on a conflict it
+  // cannot see.
+  function registerSaveShortcut(editor: MonacoStandaloneEditor, monaco: MonacoApi): void {
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+      const state = useAppStore.getState()
+      const currentKey = documentKey(surface.workspaceId, surface.path)
+      const action = editorSaveAction({
+        dirty: Boolean(state.dirtyDocuments[currentKey]),
+        saving: Boolean(state.savingDocuments[currentKey]),
+        ...(state.documentIssues[currentKey] ? { issue: state.documentIssues[currentKey]!.kind } : {})
+      })
+      // 'conflict' deliberately does nothing: Reload and Overwrite are already on screen, and
+      // silently overwriting someone else's change is the one irreversible outcome here.
+      if (action === 'save') void state.saveDocument(tabId, surface.regionId)
+    })
+  }
+
   if (!document) {
     return (
       <EditorUnavailableState
@@ -152,8 +177,9 @@ export function EditorPane({ tabId, surface }: { tabId: string; surface: FileWor
           language={detectLanguage(document.path)}
           value={document.content}
           onChange={(value) => update(tabId, value ?? '', surface.regionId)}
-          onMount={(editor) => {
+          onMount={(editor, monaco) => {
             editorRef.current = editor
+            registerSaveShortcut(editor, monaco)
             consumeRevealTarget(editor)
           }}
           theme="vs-dark"
