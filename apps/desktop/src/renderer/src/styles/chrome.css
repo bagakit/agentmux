@@ -204,7 +204,7 @@
    `animationend` that a close would have to fire. An unscoped entry animation makes the node look
    animated on close too, so that event never arrives and the menu stays in the DOM forever. */
 .tab-context-menu[data-state='open'] {
-  animation: menu-in 120ms cubic-bezier(.16, 1, .3, 1);
+  animation: menu-in var(--dur-enter) var(--ease-enter);
 }
 .tab-context-menu__item {
   display: flex;
@@ -257,7 +257,7 @@
 .status--disconnected { --status-ink: var(--text-3); }
 .status__dot { position: relative; width: 7px; height: 7px; border-radius: 50%; background: var(--status-ink); box-shadow: 0 0 0 2px var(--overlay-line); }
 .status--working .status__dot, .status--running .status__dot { box-shadow: 0 0 0 3px var(--overlay-line); }
-.status--working .status__dot { animation: pulse 1.8s infinite; }
+.status--working .status__dot { animation: pulse var(--dur-breath) infinite; }
 /* Needs-you (waiting/blocked) carries a SHAPE, not only a colour: an amber pip bearing a "?" so the
    one "an agent needs you" state survives colour-blindness and a fast glance, and never reads the
    same as any other amber. This is the shared status seam — StatusDot and the status bar's

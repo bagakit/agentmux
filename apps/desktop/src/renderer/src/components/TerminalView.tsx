@@ -749,7 +749,13 @@ export function TerminalView({
           ) : null}
           {startupPhase === 'restoring' ? (
             <div className="terminal-hydration" role="status" aria-live="polite">
-              <LoaderCircle className="spin" size={13} /> Restoring terminal…
+              <div className="terminal-hydration__content">
+                <div className="terminal-hydration__line">
+                  <span className="terminal-hydration__cursor" aria-hidden="true" />
+                  <strong className="terminal-hydration__label">Restoring terminal…</strong>
+                </div>
+                <span className="terminal-hydration__hint">Replaying retained output.</span>
+              </div>
             </div>
           ) : null}
           {startupPhase === 'starting-agent' && session.kind === 'agent' ? (
