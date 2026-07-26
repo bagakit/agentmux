@@ -1,6 +1,6 @@
 import { AgentMuxError } from './errors.js'
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdir, open, readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, open, readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { defaultAgentMuxRuntimeDirectory } from './runtime-paths.js'
 import { normalizeAgentInteractionResponse } from './agent-interaction.js'
@@ -25,6 +25,7 @@ import type {
   AgentNativeSessionHandle,
   AgentStatus,
   AgentTerminalCapabilityState,
+  AgentTerminalPromptDeliveryState,
   AgentTimelineCommit,
   AgentTimelineItem,
   AgentTimelineMutation,
@@ -768,6 +769,33 @@ function terminalCapability(
   }
 }
 
+function terminalPromptDelivery(
+  value: unknown,
+  currentRun: AgentMuxRunRef
+): AgentTerminalPromptDeliveryState {
+  const source = record(value, 'terminalPromptDelivery')
+  const run = runRef(source.run)
+  if (
+    source.state !== 'unverified' ||
+    source.mode !== 'degraded' ||
+    (source.reason !== 'screen-evidence-gap' && source.reason !== 'prompt-render-timeout') ||
+    run.runId !== currentRun.runId
+  ) {
+    throw new AgentMuxError(
+      'Terminal prompt delivery state does not match its Agent Run.',
+      'INVALID_AGENT_SESSION_STORE'
+    )
+  }
+  return {
+    state: 'unverified',
+    mode: 'degraded',
+    reason: source.reason,
+    submissionId: string(source.submissionId, 'terminalPromptDelivery.submissionId'),
+    run,
+    observedAt: timestamp(source.observedAt, 'terminalPromptDelivery.observedAt')
+  }
+}
+
 function terminalInputPhase(
   value: unknown,
   name: string
@@ -885,6 +913,9 @@ export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgent
             currentRun
           )
         }),
+    ...(source.terminalPromptDelivery === undefined
+      ? {}
+      : { terminalPromptDelivery: terminalPromptDelivery(source.terminalPromptDelivery, currentRun) }),
     ...(source.semanticStatus === undefined ? {} : { semanticStatus: semanticStatus(source.semanticStatus) }),
     ...(source.pendingInteraction === undefined
       ? {}
@@ -911,6 +942,12 @@ export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgent
   if (session.terminalCapability && session.terminalCapability.observedAt > session.updatedAt) {
     throw new AgentMuxError(
       'Terminal capability state is newer than its Agent Session.',
+      'INVALID_AGENT_SESSION_STORE'
+    )
+  }
+  if (session.terminalPromptDelivery && session.terminalPromptDelivery.observedAt > session.updatedAt) {
+    throw new AgentMuxError(
+      'Terminal prompt delivery state is newer than its Agent Session.',
       'INVALID_AGENT_SESSION_STORE'
     )
   }
@@ -1317,11 +1354,56 @@ type AgentSessionStoreDocument = {
   retiredAgentSessions: AgentMuxRetiredAgentSession[]
 }
 
-type AgentTimelineStoreDocument = {
-  version: 2
+type AgentTimelineFileState = {
   agentSessionId: string
   revision: number
   items: AgentTimelineItem[]
+  mutationLines: number
+  fileBytes: number
+  exists: boolean
+}
+
+/** JSONL 追加行数或体积越过阈值时整写一次快照，把重放成本重新压回常数。 */
+const TIMELINE_COMPACTION_MUTATION_LINES = 256
+const TIMELINE_COMPACTION_BYTES = MAX_TIMELINE_STORE_BYTES / 2
+
+function shouldCompactTimeline(timeline: AgentTimelineFileState): boolean {
+  return (
+    timeline.mutationLines >= TIMELINE_COMPACTION_MUTATION_LINES ||
+    timeline.fileBytes >= TIMELINE_COMPACTION_BYTES
+  )
+}
+
+function parseTimelineSnapshotLine(
+  line: string | undefined,
+  agentSessionId: string
+): { revision: number; items: unknown[] } {
+  // 快照行由临时文件加原子 rename 写入，不会被撕裂；解析失败就是损坏，fail-closed。
+  let value: unknown
+  try {
+    value = JSON.parse(line ?? '')
+  } catch {
+    throw new AgentMuxError('Agent Timeline store is invalid.', 'INVALID_AGENT_TIMELINE_STORE')
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new AgentMuxError('Agent Timeline store is invalid.', 'INVALID_AGENT_TIMELINE_STORE')
+  }
+  const snapshot = value as {
+    version?: unknown
+    agentSessionId?: unknown
+    revision?: unknown
+    items?: unknown
+  }
+  if (
+    snapshot.version !== 3 ||
+    snapshot.agentSessionId !== agentSessionId ||
+    !Number.isSafeInteger(snapshot.revision) ||
+    (snapshot.revision as number) < 0 ||
+    !Array.isArray(snapshot.items)
+  ) {
+    throw new AgentMuxError('Agent Timeline store is invalid.', 'INVALID_AGENT_TIMELINE_STORE')
+  }
+  return { revision: snapshot.revision as number, items: snapshot.items }
 }
 
 function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
@@ -1614,12 +1696,16 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         signal?.throwIfAborted()
         return
       }
-      await this.writeTimeline({
-        version: 2,
-        agentSessionId: canonicalMutation.agentSessionId,
-        revision: result.revision,
-        items
-      }, signal)
+      // 热路径是 JSONL 追加一行；只有文件缺失或超过 compaction 阈值才整写快照。
+      if (!timeline.exists || shouldCompactTimeline(timeline)) {
+        await this.writeTimelineSnapshot({
+          agentSessionId: canonicalMutation.agentSessionId,
+          revision: result.revision,
+          items
+        }, signal)
+      } else {
+        await this.appendTimelineMutation(canonicalMutation, signal)
+      }
     }, signal)
     return structuredClone(result)
   }
@@ -1700,59 +1786,79 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
 
   private timelinePath(agentSessionId: string): string {
     const filename = createHash('sha256').update(agentSessionId).digest('base64url')
-    return join(dirname(this.path), 'agent-timelines', `${filename}.json`)
+    return join(dirname(this.path), 'agent-timelines', `${filename}.jsonl`)
   }
 
+  /**
+   * Timeline 文件是 JSONL：首行是原子写入的快照（version 3），其后每行一条已生效的 mutation，
+   * 加载时按序重放。追加行可能被崩溃撕裂——只容忍**最后一行**解析或重放失败（当它没发生过），
+   * 中间行坏了是数据损坏，fail-closed。
+   */
   private async readTimeline(
     agentSessionId: string,
     signal?: AbortSignal
-  ): Promise<AgentTimelineStoreDocument> {
+  ): Promise<AgentTimelineFileState> {
     const path = this.timelinePath(agentSessionId)
+    let content: string
     try {
       signal?.throwIfAborted()
       const metadata = await stat(path)
       if (!metadata.isFile() || metadata.size > MAX_TIMELINE_STORE_BYTES) {
         throw new AgentMuxError('Agent Timeline store is invalid.', 'INVALID_AGENT_TIMELINE_STORE')
       }
-      const value: unknown = JSON.parse(await readFile(path, { encoding: 'utf8', signal }))
-      if (!value || typeof value !== 'object' || Array.isArray(value)) {
-        throw new AgentMuxError('Agent Timeline store is invalid.', 'INVALID_AGENT_TIMELINE_STORE')
-      }
-      const document = value as {
-        version?: unknown
-        agentSessionId?: unknown
-        revision?: unknown
-        items?: unknown
-      }
-      if (
-        document.version !== 2 ||
-        document.agentSessionId !== agentSessionId ||
-        !Number.isSafeInteger(document.revision) ||
-        (document.revision as number) < 0 ||
-        !Array.isArray(document.items)
-      ) {
-        throw new AgentMuxError('Agent Timeline store is invalid.', 'INVALID_AGENT_TIMELINE_STORE')
-      }
-      return {
-        version: 2,
-        agentSessionId,
-        revision: document.revision as number,
-        items: normalizeAgentTimeline(agentSessionId, document.items)
-      }
+      content = await readFile(path, { encoding: 'utf8', signal })
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return { version: 2, agentSessionId, revision: 0, items: [] }
+        return {
+          agentSessionId,
+          revision: 0,
+          items: [],
+          mutationLines: 0,
+          fileBytes: 0,
+          exists: false
+        }
       }
       throw error
     }
+    const lines = content.split('\n').filter((line, index) => line !== '' || index === 0)
+    const snapshot = parseTimelineSnapshotLine(lines[0], agentSessionId)
+    let revision = snapshot.revision
+    let items = normalizeAgentTimeline(agentSessionId, snapshot.items)
+    let mutationLines = 0
+    for (let index = 1; index < lines.length; index += 1) {
+      const line = lines[index]!
+      try {
+        const mutation = normalizeAgentTimelineMutation(JSON.parse(line))
+        if (mutation.agentSessionId !== agentSessionId) {
+          throw new AgentMuxError('Agent Timeline store is invalid.', 'INVALID_AGENT_TIMELINE_STORE')
+        }
+        const next = applyAgentTimelineMutation(items, mutation)
+        if (JSON.stringify(next) !== JSON.stringify(items)) revision = nextTimelineRevision(revision)
+        items = next
+      } catch (error) {
+        if (index === lines.length - 1) break
+        throw error instanceof AgentMuxError
+          ? error
+          : new AgentMuxError('Agent Timeline store is invalid.', 'INVALID_AGENT_TIMELINE_STORE')
+      }
+      mutationLines += 1
+    }
+    return {
+      agentSessionId,
+      revision,
+      items,
+      mutationLines,
+      fileBytes: Buffer.byteLength(content),
+      exists: true
+    }
   }
 
-  private async writeTimeline(
-    document: AgentTimelineStoreDocument,
+  private async writeTimelineSnapshot(
+    document: { agentSessionId: string; revision: number; items: readonly AgentTimelineItem[] },
     signal?: AbortSignal
   ): Promise<void> {
     signal?.throwIfAborted()
-    const content = `${JSON.stringify(document)}\n`
+    const content = `${JSON.stringify({ version: 3, ...document })}\n`
     if (Buffer.byteLength(content) > MAX_TIMELINE_STORE_BYTES) {
       throw new AgentMuxError('Agent Timeline store exceeds its size limit.', 'AGENT_TIMELINE_STORE_LIMIT')
     }
@@ -1770,6 +1876,19 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         if (!committed && error.code !== 'ENOENT') throw error
       })
     }
+  }
+
+  private async appendTimelineMutation(
+    mutation: AgentTimelineMutation,
+    signal?: AbortSignal
+  ): Promise<void> {
+    signal?.throwIfAborted()
+    await appendFile(
+      this.timelinePath(mutation.agentSessionId),
+      `${JSON.stringify(mutation)}\n`,
+      { mode: 0o600 }
+    )
+    signal?.throwIfAborted()
   }
 
   private async removeTimelineFile(agentSessionId: string): Promise<void> {
@@ -1791,7 +1910,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       throw error
     }
     await Promise.all(entries
-      .filter((entry) => entry.endsWith('.json'))
+      .filter((entry) => entry.endsWith('.json') || entry.endsWith('.jsonl'))
       .map(async (entry) => {
         const path = join(directory, entry)
         if (!currentPaths.has(path)) await unlink(path)

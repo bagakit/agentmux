@@ -46,7 +46,9 @@ import { advanceDelivery, type AgentThread } from './agent-message.js'
 import { AgentMuxClientEventPublisher } from './client-event-publisher.js'
 import {
   AgentTerminalScreen,
-  MAX_AGENT_PROMPT_BYTES
+  AgentTerminalScreenEvidence,
+  MAX_AGENT_PROMPT_BYTES,
+  type AgentTerminalScreenEvidenceEvent
 } from './agent-terminal-screen.js'
 import {
   CtxmuxRunAdapter,
@@ -97,6 +99,7 @@ import type {
   AgentMuxRuntimeIdentity,
   AgentNativeSessionHandle,
   AgentTerminalCapabilityState,
+  AgentTerminalPromptDeliveryState,
   AgentTimelineItem,
   AgentTimelineMutation,
   AgentTimelineSnapshot,
@@ -426,6 +429,13 @@ export class AgentMuxClient {
   private readonly agentInputTails = new Map<string, Promise<void>>()
   private readonly agentContinuityTails = new Map<string, Promise<void>>()
   private readonly terminalPromptReadinessCancels = new Map<string, () => void>()
+  private readonly terminalScreenEvidence = new Map<string, {
+    runId: string
+    evidence: AgentTerminalScreenEvidence
+    close: () => void
+  }>()
+
+  private readonly terminalScreenEvidenceBuilds = new Map<string, Promise<AgentTerminalScreenEvidence>>()
 
   constructor(options: AgentMuxClientOptions = {}) {
     this.providers = new AgentProviderRegistry(options.providers)
@@ -576,6 +586,10 @@ export class AgentMuxClient {
     this.agentInputTails.clear()
     for (const cancel of this.terminalPromptReadinessCancels.values()) cancel()
     this.terminalPromptReadinessCancels.clear()
+    for (const agentSessionId of [...this.terminalScreenEvidence.keys()]) {
+      this.discardTerminalScreenEvidence(agentSessionId)
+    }
+    this.terminalScreenEvidenceBuilds.clear()
   }
 
   async dispose(): Promise<void> {
@@ -1310,6 +1324,7 @@ export class AgentMuxClient {
       delete next.terminalCapability
       delete next.terminalPromptReadiness
       delete next.terminalPromptSubmission
+      delete next.terminalPromptDelivery
       delete next.semanticStatus
       delete next.pendingInteraction
       if (
@@ -1674,7 +1689,10 @@ export class AgentMuxClient {
         'STALE_AGENT_SESSION'
       )
     }
-    return await this.resizeTerminal(expectedRun, cols, rows)
+    const applied = await this.resizeTerminal(expectedRun, cols, rows)
+    // 屏幕几何变了，长命屏幕证据随之失效；下一次观察按新尺寸重建。
+    this.discardTerminalScreenEvidence(agentSessionId)
+    return applied
   }
 
   async signalAgent(agentSessionId: string, signal: string): Promise<void> {
@@ -2743,6 +2761,13 @@ export class AgentMuxClient {
         )
       }
       acceptedInputBytes = accepted.run.acceptedInputBytes
+      if (phaseName === 'payload') {
+        // 高频受据合并（f-23q8faabh / T-003）：payload 受据不单独整写一次 CAS JSON，随后续
+        // submit 受据一次落盘。崩溃窗口内它可从 ctxmux 事实重推——同一 operationId 重放拿到
+        // 幂等回执，上面的 appliedByteRange 校验就是恢复路径。
+        this.agentInputCursors.set(session.agentSessionId, acceptedInputBytes)
+        return
+      }
       const acknowledgePhase = (
         stored: AgentMuxStoredAgentSession
       ): AgentMuxStoredAgentSession => {
@@ -2754,12 +2779,13 @@ export class AgentMuxClient {
           )
         }
         assertSubmission(state)
-        if (state[phaseName].acknowledged) return stored
+        if (state.submit.acknowledged) return stored
         return {
           ...stored,
           terminalPromptSubmission: {
             ...state,
-            [phaseName]: { ...state[phaseName], acknowledged: true }
+            payload: { ...state.payload, acknowledged: true },
+            submit: { ...state.submit, acknowledged: true }
           },
           updatedAt: Date.now()
         }
@@ -2820,8 +2846,113 @@ export class AgentMuxClient {
       await applyPhase('submit', plan.submit)
       return
     }
-    await this.waitForTerminalPromptRender(session, submission, plan.renderedText)
+    await this.confirmTerminalPromptRenderOrDegrade(session, submissionId, submission, plan.renderedText)
     await applyPhase('submit', plan.submit)
+  }
+
+  /**
+   * 渲染验证的降级包装（原则 11 第 2 类）。走到这里时 payload 的 CtxMux 受据已经确认，Run 的
+   * 输入通道是好的；replay 被截断（OUTPUT_GAP）或渲染确认超时只说明**我们的证据链**没走通。
+   * 这两类绝不阻断 `\r`：先向 daemon 要权威 Run 状态确认 Agent 还活着，然后放行提交，同时把
+   * 「本次交付未经完整屏幕确认」持久成服务窗事实并广播——绝不静默。
+   *
+   * 仍然 fail-closed 的两类：Run 已退出或消失（第 1 类，阻断是诚实的），以及 gap/超时之外的
+   * 任何错误（状态冲突、受据不匹配——那是数据损坏，不是慢证据）。
+   */
+  private async confirmTerminalPromptRenderOrDegrade(
+    session: AgentMuxAgentSession,
+    submissionId: string,
+    submission: NonNullable<AgentMuxAgentSession['terminalPromptSubmission']>,
+    renderedText: string
+  ): Promise<void> {
+    try {
+      await this.waitForTerminalPromptRender(session, submission, renderedText)
+    } catch (error) {
+      if (
+        !(error instanceof AgentMuxError) ||
+        (error.code !== 'OUTPUT_GAP' && error.code !== 'AGENT_PROMPT_RENDER_TIMEOUT')
+      ) {
+        throw error
+      }
+      // 判据是「Agent 还能干活吗」，不是「我们的检查过了吗」。观察开始时的 Run 状态可能已经
+      // 过期，向 daemon 要权威状态；Run 真没了就让原始验证错误照常阻断。
+      let run: CtxmuxAdapterRun
+      try {
+        run = await this.kernel.status(session.run.runId)
+      } catch (statusError) {
+        if (statusError instanceof AgentMuxError && statusError.code === 'CTXMUX_run_not_found') throw error
+        throw statusError
+      }
+      this.assertAgentRun(session, run)
+      if (run.state.type !== 'running') throw error
+      await this.publishTerminalPromptDeliveryDegrade(session, {
+        state: 'unverified',
+        mode: 'degraded',
+        reason: error.code === 'OUTPUT_GAP' ? 'screen-evidence-gap' : 'prompt-render-timeout',
+        submissionId,
+        run: { ...session.run },
+        observedAt: Date.now()
+      })
+      return
+    }
+    // 完整验证成功就是恢复路径：上一轮遗留的服务窗告示到此撤下。
+    await this.clearTerminalPromptDelivery(session)
+  }
+
+  private async publishTerminalPromptDeliveryDegrade(
+    session: AgentMuxAgentSession,
+    degraded: AgentTerminalPromptDeliveryState
+  ): Promise<void> {
+    let next: AgentMuxStoredAgentSession
+    try {
+      next = await this.updateExactAgentSession(
+        session.agentSessionId,
+        session.run,
+        (current) => ({
+          ...current,
+          terminalPromptDelivery: structuredClone(degraded),
+          updatedAt: Math.max(current.updatedAt, degraded.observedAt)
+        })
+      )
+    } catch (persistError) {
+      // Store 是观测面，不是输入通道：告示写不进去不许反过来挡住已受据的提交，否则第 2 类
+      // 降级又被我们自己的持久化流程变回了阻断。诊断事件刻意不带 agentSessionId——Agent 是
+      // 健康的，不能被渲染层涂成失败；相邻的 agent-session 事件才是有作用域的服务窗告示。
+      const canonical = this.requireAgentSession(session.agentSessionId)
+      if (!sameRun(canonical.run, session.run)) throw persistError
+      this.publisher.publish({
+        type: 'agent-error',
+        code: 'AGENT_PROMPT_DELIVERY_PERSIST_FAILED',
+        message: `Prompt delivery degradation could not be persisted; continuing with an in-memory notice. ${
+          persistError instanceof Error ? persistError.message : String(persistError)
+        }`,
+        evidence: {
+          source: 'user',
+          observedAt: degraded.observedAt,
+          run: { ...session.run }
+        }
+      })
+      next = {
+        ...structuredClone(canonical),
+        terminalPromptDelivery: structuredClone(degraded)
+      }
+    }
+    this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
+  }
+
+  private async clearTerminalPromptDelivery(session: AgentMuxAgentSession): Promise<void> {
+    if (!this.requireAgentSession(session.agentSessionId).terminalPromptDelivery) return
+    const next = await this.updateExactAgentSession(
+      session.agentSessionId,
+      session.run,
+      (current) => {
+        if (!current.terminalPromptDelivery) return current
+        const cleared = { ...current }
+        delete cleared.terminalPromptDelivery
+        return { ...cleared, updatedAt: Math.max(cleared.updatedAt, Date.now()) }
+      }
+    )
+    this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
   }
 
   private async waitForTerminalPromptRender(
@@ -2859,128 +2990,125 @@ export class AgentMuxClient {
       timeoutMessage: string
       terminalMessage: string
       signal?: AbortSignal
-      requiredFrame?: { start: string; end: string }
+      requireFrameAfterBoundary?: boolean
     }
   ): Promise<number> {
-    let observation: Awaited<ReturnType<CtxmuxRunAdapter['observeOutput']>> | null = null
-    let screen: AgentTerminalScreen | null = null
-    let initialized = false
-    let settled = false
-    let timer: ReturnType<typeof setTimeout> | null = null
-    let tail = Promise.resolve()
-    let frameState: 'seeking-start' | 'seeking-end' = 'seeking-start'
-    let frameTail = ''
-    let requiredFrameObserved = options.requiredFrame === undefined
-    const pending: CtxmuxAdapterDataEvent[] = []
-    let resolveState!: (throughByte: number) => void
-    let rejectState!: (error: Error) => void
-    const state = new Promise<number>((resolve, reject) => {
-      resolveState = resolve
-      rejectState = reject
+    if (options.signal?.aborted) {
+      throw new AgentMuxError(
+        'Terminal screen observation was cancelled.',
+        'AGENT_PROMPT_READINESS_CANCELLED'
+      )
+    }
+    const evidence = await this.ensureTerminalScreenEvidence(session)
+    return await evidence.wait({
+      boundaryByte: outputBoundaryByte,
+      requireOutputAfterBoundary,
+      predicate,
+      timeoutMessage: options.timeoutMessage,
+      terminalMessage: options.terminalMessage,
+      ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+      ...(options.requireFrameAfterBoundary === undefined
+        ? {}
+        : { requireFrameAfterBoundary: options.requireFrameAfterBoundary })
     })
-    void state.catch(() => {})
-    const fail = (error: Error): void => {
-      if (settled) return
-      settled = true
-      rejectState(error)
-    }
-    const inspect = (): void => {
-      if (settled || !screen) return
-      const crossedBoundary = requireOutputAfterBoundary
-        ? screen.throughByte > outputBoundaryByte
-        : screen.throughByte >= outputBoundaryByte
-      if (crossedBoundary && requiredFrameObserved && predicate(screen)) {
-        settled = true
-        resolveState(screen.throughByte)
+  }
+
+  /**
+   * 有界屏幕证据 owner（f-23q8faabh / T-002）：每个活跃 Session 只保留一份长命增量 xterm 屏幕
+   * 和一条持久 Attachment。提交与 readiness 观察共享它——只有首次（或失效重建时）从 byte 0
+   * 重放一次以恢复完整屏幕，此后所有观察都在已消费游标之后增量续读，验证路径的重放字节量
+   * 相对会话历史长度有界。ctxmux 仍是唯一字节权威：这里只有屏幕状态与帧游标，没有第二份
+   * Run 字节史。失效（gap / Run 退出 / 观察错误 / resize / Run 更换）是粘性的，下一次观察
+   * 丢弃重建。
+   */
+  private async ensureTerminalScreenEvidence(
+    session: AgentMuxAgentSession
+  ): Promise<AgentTerminalScreenEvidence> {
+    for (;;) {
+      const existing = this.terminalScreenEvidence.get(session.agentSessionId)
+      if (existing && existing.runId === session.run.runId && !existing.evidence.failed) {
+        return existing.evidence
       }
+      const building = this.terminalScreenEvidenceBuilds.get(session.agentSessionId)
+      if (!building) break
+      await building.catch(() => {})
     }
-    const observeRequiredFrame = (event: CtxmuxAdapterDataEvent): void => {
-      const requiredFrame = options.requiredFrame
-      if (!requiredFrame || requiredFrameObserved || event.endByte <= outputBoundaryByte) return
-      const skipBytes = Math.max(0, outputBoundaryByte - event.startByte)
-      let candidate = frameTail + Buffer.from(event.dataBytes.subarray(skipBytes)).toString('utf8')
-      while (candidate) {
-        const marker = frameState === 'seeking-start' ? requiredFrame.start : requiredFrame.end
-        const markerIndex = candidate.indexOf(marker)
-        if (markerIndex < 0) {
-          frameTail = candidate.slice(-Math.max(0, marker.length - 1))
-          return
-        }
-        candidate = candidate.slice(markerIndex + marker.length)
-        if (frameState === 'seeking-start') {
-          frameState = 'seeking-end'
-          frameTail = ''
-          continue
-        }
-        requiredFrameObserved = true
-        frameTail = ''
-        return
-      }
-      frameTail = ''
-    }
-    const apply = async (event: CtxmuxAdapterDataEvent, inspectAfterWrite: boolean): Promise<void> => {
-      if (settled || !screen) return
-      observeRequiredFrame(event)
-      await screen.write(event)
-      if (inspectAfterWrite) inspect()
-    }
-    const enqueue = (event: CtxmuxAdapterDataEvent): void => {
-      tail = tail.then(async () => await apply(event, true))
-      void tail.catch((error) => fail(error instanceof Error ? error : new Error(String(error))))
-    }
-    const abort = (): void => fail(new AgentMuxError(
-      'Terminal screen observation was cancelled.',
-      'AGENT_PROMPT_READINESS_CANCELLED'
-    ))
-    options.signal?.addEventListener('abort', abort, { once: true })
-    if (options.signal?.aborted) abort()
-    if (options.timeoutMs !== undefined) {
-      timer = setTimeout(() => fail(new AgentMuxError(
-        options.timeoutMessage,
-        'AGENT_PROMPT_RENDER_TIMEOUT'
-      )), options.timeoutMs)
-    }
+    const build = this.buildTerminalScreenEvidence(session)
+    this.terminalScreenEvidenceBuilds.set(session.agentSessionId, build)
     try {
-      observation = await this.kernel.observeOutput(session.run.runId, 0, (event) => {
-        if (event.type === 'data') {
-          if (initialized) enqueue(event)
-          else pending.push(event)
-        } else if (event.type === 'gap') {
-          fail(new AgentMuxError(
-            'Terminal screen evidence was evicted from CtxMux replay.',
-            'OUTPUT_GAP'
-          ))
-        } else if (event.type === 'error') {
-          fail(event.error)
-        } else if (event.type === 'exit') {
-          fail(new AgentMuxError(options.terminalMessage, 'AGENT_PROMPT_RENDER_FAILED'))
-        }
-      })
-      if (observation.gap) {
-        throw new AgentMuxError(
-          'Terminal screen evidence was evicted from CtxMux replay.',
-          'OUTPUT_GAP'
-        )
-      }
-      screen = new AgentTerminalScreen(observation.run.cols, observation.run.rows)
-      for (const event of observation.replay) await apply(event, false)
-      pending.sort((left, right) => left.startByte - right.startByte)
-      initialized = true
-      for (const event of pending.splice(0)) enqueue(event)
-      await tail
-      inspect()
-      return await state
-    } catch (error) {
-      fail(error instanceof Error ? error : new Error(String(error)))
-      return await state
+      return await build
     } finally {
-      initialized = false
-      if (timer) clearTimeout(timer)
-      options.signal?.removeEventListener('abort', abort)
-      await tail.catch(() => {})
-      await observation?.close().catch(() => {})
-      screen?.dispose()
+      if (this.terminalScreenEvidenceBuilds.get(session.agentSessionId) === build) {
+        this.terminalScreenEvidenceBuilds.delete(session.agentSessionId)
+      }
     }
+  }
+
+  private async buildTerminalScreenEvidence(
+    session: AgentMuxAgentSession
+  ): Promise<AgentTerminalScreenEvidence> {
+    this.discardTerminalScreenEvidence(session.agentSessionId)
+    const matcher = this.providers.get(session.providerId).terminalPromptRender
+    let evidence: AgentTerminalScreenEvidence | null = null
+    const pending: AgentTerminalScreenEvidenceEvent[] = []
+    const forward = (event: AgentTerminalScreenEvidenceEvent): void => {
+      if (evidence) evidence.accept(event)
+      else pending.push(event)
+    }
+    const observation = await this.kernel.observeOutput(session.run.runId, 0, (event) => {
+      if (event.type === 'data') {
+        forward(event)
+      } else if (event.type === 'gap') {
+        forward({ type: 'gap' })
+      } else if (event.type === 'error') {
+        forward({ type: 'error', error: event.error })
+      } else if (event.type === 'exit') {
+        forward({ type: 'exit' })
+      }
+    })
+    if (observation.gap) {
+      await observation.close().catch(() => {})
+      throw new AgentMuxError(
+        'Terminal screen evidence was evicted from CtxMux replay.',
+        'OUTPUT_GAP'
+      )
+    }
+    const built = new AgentTerminalScreenEvidence(
+      observation.run.cols,
+      observation.run.rows,
+      matcher ? { start: matcher.frameStart, end: matcher.frameEnd } : null
+    )
+    for (const event of observation.replay) built.accept(event)
+    pending.sort((left, right) => (
+      (left.type === 'data' ? left.startByte : Number.MAX_SAFE_INTEGER) -
+      (right.type === 'data' ? right.startByte : Number.MAX_SAFE_INTEGER)
+    ))
+    evidence = built
+    for (const event of pending.splice(0)) built.accept(event)
+    // 失效时立刻关掉 Attachment，别让一条死观察挂着资源等下一次 ensure 才回收。
+    const unsubscribe = built.subscribe(() => {
+      if (!built.failed) return
+      unsubscribe()
+      void observation.close().catch(() => {})
+    })
+    this.terminalScreenEvidence.set(session.agentSessionId, {
+      runId: session.run.runId,
+      evidence: built,
+      close: () => {
+        unsubscribe()
+        void observation.close().catch(() => {})
+      }
+    })
+    return built
+  }
+
+  private discardTerminalScreenEvidence(agentSessionId: string): void {
+    const entry = this.terminalScreenEvidence.get(agentSessionId)
+    if (!entry) return
+    this.terminalScreenEvidence.delete(agentSessionId)
+    entry.close()
+    entry.evidence.dispose()
   }
 
   private async recordPromptAfterSideEffect(
@@ -3534,7 +3662,7 @@ export class AgentMuxClient {
         terminalMessage: 'Agent Run exited before its composer became ready.',
         signal: controller.signal,
         ...(readiness.source === 'initial-composer'
-          ? { requiredFrame: { start: matcher.frameStart, end: matcher.frameEnd } }
+          ? { requireFrameAfterBoundary: true }
           : {})
       }
     ).then(persistReady).catch((error) => {
