@@ -3,8 +3,10 @@ import type {
   BrowserSnapshot,
   SessionSnapshot
 } from '../../../shared/contracts'
+import { isScratchWorkspaceId } from '../../../shared/contracts'
 import type { AgentTimelineSnapshot } from '@agentmux/core'
 import {
+  findGroup,
   findGroupForTab,
   removeTab,
   type WorkspaceLayout
@@ -251,6 +253,30 @@ export function workspaceForSession(config: AppConfig | null, session: SessionSn
 export function topicIdForSession(config: AppConfig | null, session: SessionSnapshot): string | null {
   const workspace = workspaceForSession(config, session)
   return workspace ? scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath) : null
+}
+
+/**
+ * Resolve the Topic binding for a brand-new Tab/View from the active work line.
+ *
+ * `WorkbenchTab.topicId` is the only Renderer-side binding truth. A new surface must copy the
+ * active Tab's binding at its creation boundary; deriving a Topic from the new tab id or keeping a
+ * second `activeTopic` field would make one Topic-per-tab and drift when navigation enters through
+ * another path. The workspace and group checks keep ordinary Git Workspaces and stale anchors
+ * explicitly unbound.
+ */
+export function inheritedTopicIdForNewTab(
+  workspaceId: string,
+  layout: WorkspaceLayout | undefined,
+  tabs: Readonly<Record<string, WorkbenchTab>>,
+  targetGroupId?: string
+): string | undefined {
+  if (!isScratchWorkspaceId(workspaceId) || !layout) return undefined
+  const group = findGroup(layout, targetGroupId ?? layout.activeGroupId)
+  const activeTabId = group?.activeTabId
+  if (!activeTabId) return undefined
+  const activeTab = tabs[activeTabId]
+  if (!activeTab || activeTab.workspaceId !== workspaceId) return undefined
+  return activeTab.topicId
 }
 
 export function tabStillOpen(layouts: Record<string, WorkspaceLayout>, tabId: string): boolean {
