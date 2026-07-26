@@ -73,6 +73,7 @@ import { orderTopics, reorderTopics } from '../lib/topic-order'
 import { TopicContextMenu } from './TopicContextMenu'
 import { useAppStore } from '../store'
 import { agentComposerAvailability } from './AgentSessionComposer'
+import { AgentAvatar } from './AgentAvatar'
 import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
 import { BranchesPanel } from './BranchesPanel'
 import { ChangesPanel } from './ChangesPanel'
@@ -357,6 +358,9 @@ function WorkspaceTopicsPanel({
   const createScratchTopic = useAppStore((state) => state.createScratchTopic)
   const openScratchTopic = useAppStore((state) => state.openScratchTopic)
   const renameScratchTopic = useAppStore((state) => state.renameScratchTopic)
+  // 头像点击走全局那一个 selectSession——跳转到某个 Agent 全窗口只有这一条路径，
+  // 在这里另写一段"找到它的 Tab 再激活"就是第二条，两条迟早对不上。
+  const selectSession = useAppStore((state) => state.selectSession)
   const [topics, setTopics] = useState<ScratchTopicSnapshot[] | null>(null)
   const [pending, setPending] = useState<string | null>(null)
   const [editingTopicId, setEditingTopicId] = useState<string | null>(null)
@@ -558,24 +562,21 @@ function WorkspaceTopicsPanel({
                     <span>
                       <span className="workspace-topic-title-line">
                         <strong>{topic.title}</strong>
-                        {/* 每个 Agent 一枚状态点：用户想知道的是「有没有在等我」，不是重读一遍名字。
-                            语汇与 Tab 角、名册行、注意力栏同源，一个点在哪儿都表示同一件事。 */}
+                        {/* 每个 Agent 一枚头像：身份看图标、状态看边框，一枚方块答完两件事。
+                            这里不给 `N agents` 计数——头像逐个在场，计数是把同一事实说第二遍。 */}
                         {topic.agents.length > 0 ? (
-                          <span
-                            className="workspace-topic-agents"
-                            aria-label={`${topic.agents.length} agents in ${topic.title}`}
-                          >
+                          <span className="workspace-topic-agents">
                             {topic.agents.map((agent) => {
                               const shown = topicAgentPresentation(agent)
                               return (
-                                <span
-                                  className={`status status--${shown.state}`}
+                                <AgentAvatar
+                                  attention={shown.attention}
                                   key={agent.sessionId}
-                                  {...(shown.attention ? { 'data-attention': shown.attention } : {})}
-                                  title={`${agent.live?.label ?? agent.sessionId} · ${shown.state}`}
-                                >
-                                  <span className="status__dot" />
-                                </span>
+                                  label={agent.live?.label ?? agent.sessionId}
+                                  onOpen={() => selectSession(agent.sessionId)}
+                                  providerId={agent.providerId}
+                                  state={shown.state}
+                                />
                               )
                             })}
                           </span>

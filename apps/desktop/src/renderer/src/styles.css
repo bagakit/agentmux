@@ -445,10 +445,26 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .workspace-topic-title-line strong,
 .workspace-topic-entry small > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-topic-title-line strong { color: var(--text); font-size: var(--fs-meta); }
-/* 每个 Agent 一枚状态点。它们靠右成一簇，不与标题争夺左缘；点本身沿用共享的
-   status 语汇，因此这里只管排布，不定义颜色——颜色改了三处会一起改。 */
+/* 每个 Agent 一枚头像，靠右成一簇，不与标题争夺左缘。这里只管排布与形状，
+   颜色来自 .status--<state> 继承下来的 --status-ink——状态语汇只在一处定义。 */
 .workspace-topic-agents { flex: 0 0 auto; display: flex; align-items: center; gap:var(--sp-1); margin-left:auto; }
-.workspace-topic-agents .status { flex: 0 0 auto; }
+.workspace-topic-agents .agent-avatar { flex: 0 0 auto; }
+/* 身份看图标、状态看边框：18px 的方块里坐一枚 12px Provider 图标，边框取该状态的颜色。
+   头像不是文字，把 .status 从父类继承来的 gap/字号/大小写清掉。 */
+.agent-avatar {
+  width: 18px; height: 18px; padding: 0; gap: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--status-ink); border-radius: var(--radius-sm);
+  background: var(--surface-2); color: var(--text-2);
+  cursor: pointer;
+  transition: transform .12s ease, background .12s ease, box-shadow .12s ease;
+}
+/* macOS 导航栏那种轻量抬升：起来一点、底色提一档，不放大到挤动同排的其它头像。 */
+.agent-avatar:hover { transform: translateY(-1px); background: var(--surface-3); box-shadow: var(--elev-1); }
+.agent-avatar:active { transform: translateY(0); }
+/* 需要你处理的那一枚要在一簇里先被看到：给状态色一圈晕，形状不变。 */
+.agent-avatar[data-attention="needs-you"] { box-shadow: 0 0 0 2px var(--amber-wash); }
+.agent-avatar[data-attention="error"] { box-shadow: 0 0 0 2px var(--red-wash); }
 /* 拖动中的那一行抬起来一点，让落点看得见；不改变行高，避免列表在拖动时跳动。 */
 .workspace-topic-item.dragging { position: relative; z-index: 1; background: var(--surface-3); box-shadow: var(--hl-strong); }
 .workspace-topic-entry small { color: var(--text-3); font-size: var(--fs-micro); }
@@ -1285,9 +1301,18 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   align-items: center;
   gap:var(--sp-3);
 }
-.status { display: inline-flex; align-items: center; gap:var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); text-transform: capitalize; }
-.status__dot { position: relative; width: 7px; height: 7px; border-radius: 50%; background: var(--neutral-3); box-shadow: 0 0 0 2px var(--overlay-line); }
-.status--working .status__dot, .status--running .status__dot { background: var(--green); box-shadow: 0 0 0 3px var(--overlay-line); }
+/* 状态→颜色只在这里说一次。
+   `--status-ink` 由每个 .status--<state> 赋值，点用它填充、头像用它描边、将来任何形状也读它。
+   把它写成一个继承下去的自定义属性，是为了让"一个状态在哪儿都是同一个颜色"成为结构事实而非
+   靠人盯：新表面只需要 `var(--status-ink)`，不必也不能再列一遍九个状态。 */
+.status { --status-ink: var(--neutral-3); display: inline-flex; align-items: center; gap:var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); text-transform: capitalize; }
+.status--working, .status--running { --status-ink: var(--green); }
+.status--waiting, .status--blocked { --status-ink: var(--amber); }
+.status--error, .status--exited { --status-ink: var(--red); }
+.status--done { --status-ink: var(--blue); }
+.status--disconnected { --status-ink: var(--text-3); }
+.status__dot { position: relative; width: 7px; height: 7px; border-radius: 50%; background: var(--status-ink); box-shadow: 0 0 0 2px var(--overlay-line); }
+.status--working .status__dot, .status--running .status__dot { box-shadow: 0 0 0 3px var(--overlay-line); }
 .status--working .status__dot { animation: pulse 1.8s infinite; }
 /* Needs-you (waiting/blocked) carries a SHAPE, not only a colour: an amber pip bearing a "?" so the
    one "an agent needs you" state survives colour-blindness and a fast glance, and never reads the
@@ -1295,14 +1320,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
    StatusCount both render .status--waiting/.status--blocked, so the pip lifts every full-size
    surface at once (tab, board card, quick switcher, attention bar) from one rule. Accent expresses
    state, not decoration (design SSOT: "颜色表达状态，不兼任布局线"). */
-.status--waiting .status__dot, .status--blocked .status__dot { width: 9px; height: 9px; background: var(--amber); box-shadow: 0 0 0 3px var(--amber-wash); }
+.status--waiting .status__dot, .status--blocked .status__dot { width: 9px; height: 9px; box-shadow: 0 0 0 3px var(--amber-wash); }
 .status--waiting .status__dot::after, .status--blocked .status__dot::after { content: "?"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--amber-bg); font-size: 7px; font-weight: 800; line-height: 1; }
 /* Disconnected is a dropped link, not an attention request — split off amber (which now means "needs
    you") onto a neutral hollow dot so a lost connection can never be mistaken for one. Ring, not fill:
    a distinct shape as well as a neutral colour. */
-.status--disconnected .status__dot { background: transparent; box-shadow: inset 0 0 0 1.5px var(--text-3); }
-.status--error .status__dot, .status--exited .status__dot { background: var(--red); }
-.status--done .status__dot { background: var(--blue); }
+.status--disconnected .status__dot { background: transparent; box-shadow: inset 0 0 0 1.5px var(--status-ink); }
 /* Peripheral 5px marks (tab corner, rail row) can't seat a glyph and don't need one — colour plus
    corner position already differentiates them. Higher specificity than the needs-you rule above, so
    it restores the tight badge dot regardless of source order. */
