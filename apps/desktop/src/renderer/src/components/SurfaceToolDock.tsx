@@ -71,6 +71,7 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { orderTopics, reorderTopics } from '../lib/topic-order'
+import { handleTopicRenameKeyDown } from '../lib/topic-rename'
 import { TopicContextMenu } from './TopicContextMenu'
 import { useAppStore } from '../store'
 import { agentComposerAvailability } from './AgentSessionComposer'
@@ -443,6 +444,9 @@ function WorkspaceTopicsPanel({
   }
 
   async function commitRename(topic: ScratchTopicSnapshot): Promise<void> {
+    // 现在 blur 也会走到这里。Escape 先 cancelRename 清空了状态，紧接着输入框失焦触发的这次
+    // commit 必须是个空操作——否则用户按 Esc 反而会看到一条「标题不能为空」的错误。
+    if (editingTopicId !== topic.id) return
     const title = editTitle.trim()
     if (pending) return
     if (!title) {
@@ -542,12 +546,11 @@ function WorkspaceTopicsPanel({
                       value={editTitle}
                       maxLength={SCRATCH_TOPIC_TITLE_MAX_LENGTH}
                       onChange={(event) => setEditTitle(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Escape') {
-                          event.preventDefault()
-                          cancelRename()
-                        }
-                      }}
+                      onBlur={() => void commitRename(topic)}
+                      onClick={(event) => event.stopPropagation()}
+                      onKeyDown={(event) =>
+                        handleTopicRenameKeyDown(event, { cancel: cancelRename })
+                      }
                     />
                   </form>
                 ) : (

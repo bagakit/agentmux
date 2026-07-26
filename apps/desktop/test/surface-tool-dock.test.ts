@@ -174,7 +174,10 @@ describe('Orca-adapted shared surface tool dock resize', () => {
     expect(topicContextMenuSource).toContain('<span>Rename Topic</span>')
     expect(surfaceToolDockSource).toContain('onRename={() => beginRename(topic)}')
     expect(surfaceToolDockSource).toContain('void commitRename(topic)')
-    expect(surfaceToolDockSource).toContain("if (event.key === 'Escape')")
+    // Escape 取消已经搬进 lib/topic-rename.ts 的按键决策点（那里同时拦下冒泡，
+    // 否则空格与方向键会被 dnd-kit 的 KeyboardSensor 吞掉）。这里只断言接线还在，
+    // 行为本身由 topic-rename.test.tsx 守。
+    expect(surfaceToolDockSource).toContain('handleTopicRenameKeyDown(event, { cancel: cancelRename })')
     expect(fileExplorerSource).toContain('scratchTopicIdFromDirectoryName(node.path) !== null')
     expect(fileExplorerSource).toContain('canRename={canRenameFileExplorerNode(workspaceId, node)}')
     const topicDirectory = {
