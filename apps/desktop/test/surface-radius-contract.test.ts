@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { allStyles } from './helpers/styles.js'
 
 // Guards the radius clause of the surface contract (docs/design/agentmux-surface-density.md).
 //
@@ -14,11 +14,8 @@ import { describe, expect, it } from 'vitest'
 // every sub-token radius must belong to a declared exception. A new hardcoded radius on a surface-level
 // container (card, menu, dialog, input, dock) has to either use a token or be argued into this list.
 
-const styles = readFileSync(
-  new URL('../src/renderer/src/styles.css', import.meta.url),
-  'utf8'
-  // Comments are stripped so prose mentioning a radius cannot register as a rule.
-).replace(/\/\*[\s\S]*?\*\//g, '')
+// Comments are stripped so prose mentioning a radius cannot register as a rule.
+const styles = allStyles().replace(/\/\*[\s\S]*?\*\//g, '')
 
 // The smallest token. Anything below this is a hardcoded exception by definition.
 const SMALLEST_TOKEN_PX = 6

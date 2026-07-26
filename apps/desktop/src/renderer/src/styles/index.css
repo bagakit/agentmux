@@ -1,0 +1,17 @@
+/**
+ * 样式入口。@import 的顺序就是层叠顺序：先 token，再全局原子，然后按表面由外向内。
+ *
+ * 一个表面的规则全在它自己那个文件里——改 Topic 行不必先 grep 出它散在哪几段。
+ * 单文件超过 400 行时按表面继续拆，不靠注释分节假装分层。
+ */
+@import './tokens.css';
+@import './base.css';
+@import './chrome.css';
+@import './dock.css';
+@import './workbench.css';
+@import './terminal.css';
+@import './surfaces.css';
+@import './browser.css';
+@import './agent.css';
+@import './activity.css';
+@import './overlays.css';

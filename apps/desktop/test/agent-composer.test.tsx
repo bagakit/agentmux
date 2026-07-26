@@ -1,10 +1,10 @@
-import { readFileSync } from 'node:fs'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import { AgentComposer } from '../src/renderer/src/components/AgentComposer.js'
+import { allStyles } from './helpers/styles.js'
 
-const styles = readFileSync(new URL('../src/renderer/src/styles.css', import.meta.url), 'utf8')
+const styles = allStyles()
 
 describe('AgentComposer reusable surface', () => {
   it('renders from controlled props without a Session Store', () => {

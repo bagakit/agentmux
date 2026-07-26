@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { allStyles } from './helpers/styles.js'
 
 // 守住尺度合同（docs/design/agentmux-surface-density.md《尺度系统》）。
 //
@@ -12,11 +12,8 @@ import { describe, expect, it } from 'vitest'
 // 核对是否落在 token 或已声明的例外清单内。加一个未声明的字面值会红——这正是意图：它要么该用
 // token，要么该被论证进合同的例外清单。
 
-const styles = readFileSync(
-  new URL('../src/renderer/src/styles.css', import.meta.url),
-  'utf8'
-  // 注释里提到的数值不是规则，先剥掉，否则一句解释性的 "12px" 会被当成声明。
-).replace(/\/\*[\s\S]*?\*\//g, '')
+// 注释里提到的数值不是规则，先剥掉，否则一句解释性的 "12px" 会被当成声明。
+const styles = allStyles().replace(/\/\*[\s\S]*?\*\//g, '')
 
 const rootBlock = styles.match(/:root\s*\{([\s\S]*?)\n\}/)?.[1] ?? ''
 

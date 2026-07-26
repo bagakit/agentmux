@@ -1,0 +1,293 @@
+/**
+ * 工作区骨架：Pane、Region、分屏、Tab 拖放、Editor。
+ *
+ * 按表面分文件（见 docs/design/agentmux-surface-density.md「样式表的组织」）。
+ * 层叠顺序即 index.css 里的 @import 顺序，不靠特异性打架决定胜负。
+ */
+
+.workbench-shell { min-width: 0; min-height: 0; display: flex; position: relative; overflow: hidden; }
+.pane-split { width: 100%; height: 100%; min-width: 0; min-height: 0; }
+.pane-resize-handle { position: relative; z-index: 5; flex: 0 0 1px; background: var(--line); }
+.pane-resize-handle::after { content: ''; position: absolute; inset: -3px; }
+.pane-resize-handle[data-resize-handle-active] { background: var(--green-2); }
+.pane-group {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: var(--pane-tabbar-height) minmax(0, 1fr);
+  position: relative;
+  overflow: hidden;
+  background: var(--surface-0);
+  box-shadow: inset 0 0 0 1px transparent;
+}
+.pane-group--focused { box-shadow: inset 0 0 0 1px var(--green-line); }
+.pane-group--drop-over { background: var(--bg); }
+.pane-tabbar {
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-0);
+}
+.workbench-tab-strip { min-width: 0; flex: 1 1 auto; position: relative; overflow: hidden; }
+.pane-tabbar__tabs {
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: end;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: none;
+}
+.pane-tabbar__tabs::-webkit-scrollbar { display: none; }
+.workbench-tab-strip--overflow .pane-tabbar__tabs { padding-inline:var(--sp-7); scroll-padding-inline:var(--sp-7); }
+.workbench-tab-strip__nav {
+  width: 22px;
+  height: 22px;
+  position: absolute;
+  z-index: 3;
+  top: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  translate: 0 -50%;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  color: var(--text-2);
+  background: color-mix(in srgb, var(--surface-0) 92%, transparent);
+  box-shadow: 0 2px 8px var(--scrim-2);
+}
+.workbench-tab-strip__nav--start { left: 2px; }
+.workbench-tab-strip__nav--end { right: 2px; }
+.workbench-tab-strip__nav:hover:not(:disabled) { color: var(--text); background: var(--surface-3); }
+.workbench-tab-strip__nav:disabled { color: var(--text-3); opacity: .42; }
+.pane-tabbar__actions { flex: 0 0 auto; display: flex; align-items: center; gap:var(--sp-1); padding:0 var(--sp-2); border-left: 1px solid var(--line-soft); }
+/* MERGE：root pane 的 tabbar 即顶行。--pane-tabbar-height 提到 36px，
+   grid 行高、tab 高、split drop overlay 偏移都由这一个变量联动。 */
+.pane-group--root { --pane-tabbar-height: 36px; }
+.pane-tabbar--root { align-items: stretch; border-bottom: 0; background: var(--surface-1); box-shadow: inset 0 -1px var(--line), var(--hl); -webkit-app-region: drag; }
+.pane-tabbar__chrome { flex: 0 0 auto; display: flex; align-items: center; gap:var(--sp-4); }
+.pane-tabbar__chrome--trailing { padding:0 var(--sp-1) 0 var(--sp-4); margin-left:var(--sp-1); border-left: 1px solid var(--line-soft); }
+.pane-tabbar--root .workbench-tab-strip { flex: 1; }
+.pane-tabbar--root .workbench-tab,
+.pane-tabbar--root .workbench-tab-strip__nav,
+.pane-tabbar--root .pane-tabbar__actions,
+.pane-tabbar--root .pane-tabbar__chrome .icon-button,
+.pane-tabbar--root .surface-switch { -webkit-app-region: no-drag; }
+/* 分屏时 tabbar 无法承载全局 chrome，改用一条惰性顶行（无 tab、无命中语义） */
+.workbench-chromeline { height: 36px; flex: 0 0 36px; min-width: 0; display: flex; align-items: center; justify-content: space-between; padding:0 var(--sp-4) 0 0; background: var(--surface-1); box-shadow: inset 0 -1px var(--line), var(--hl); -webkit-app-region: drag; }
+.workbench-chromeline .icon-button,
+.workbench-chromeline .surface-switch { -webkit-app-region: no-drag; }
+.workbench-tab {
+  width: 168px;
+  min-width: 112px;
+  max-width: 168px;
+  flex: 0 1 168px;
+  height: var(--pane-tabbar-height);
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap:var(--sp-2);
+  padding:0 var(--sp-3);
+  overflow: hidden;
+  border: 0;
+  border-right: 1px solid var(--line-soft);
+  color: var(--text-3);
+  background: transparent;
+  font-size: var(--fs-micro);
+  cursor: default;
+  touch-action: none;
+}
+.workbench-tab__label { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workbench-tab:hover { color: var(--text-2); }
+/* 选中＝底部 2px 中性横条（Orca 语言）+ 极淡背景抬升 + 文字转 full foreground */
+.workbench-tab--active { color: var(--text); background: color-mix(in srgb, var(--text) 6%, var(--surface-1)); }
+.workbench-tab--active::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 2px;
+  background: var(--tab-select-bar);
+  z-index: 1;
+}
+.workbench-tab--dragging { opacity: .22; }
+.workbench-tab__agent-mark { width: 14px; height: 14px; flex: none; position: relative; display: inline-flex; font-style: normal; }
+.workbench-tab__agent-mark > .status { position: absolute; right: -3px; bottom: -3px; padding:1px; border-radius: 50%; background: var(--surface-0); }
+.workbench-tab__agent-mark .status__dot { width: 5px; height: 5px; }
+.workbench-tab--active .workbench-tab__agent-mark > .status { background: color-mix(in srgb, var(--text) 6%, var(--surface-1)); }
+.workbench-tab__dirty { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%; background: var(--amber); }
+.workbench-tab__close {
+  width: 16px;
+  height: 16px;
+  margin-left:auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border-radius: 4px;
+  opacity: 0;
+}
+.workbench-tab:hover .workbench-tab__close, .workbench-tab--active .workbench-tab__close { opacity: .7; }
+.workbench-tab__close:hover { opacity: 1; background: var(--surface-3); }
+.open-destination-menu {
+  width: min(318px, calc(100vw - 20px));
+  padding:var(--sp-2);
+  background:
+    radial-gradient(120% 90% at 100% 0, var(--overlay-line) 0, transparent 52%),
+    var(--overlay-surface);
+  box-shadow: var(--elev-3), var(--hl-strong), 0 0 0 1px var(--scrim-2);
+}
+.open-destination-menu__url {
+  min-height: 30px;
+  color: var(--text-3);
+  background: var(--wash-1);
+  cursor: default;
+}
+.open-destination-menu__url > svg { color: var(--green); }
+.open-destination-menu__url > span:nth-child(2) {
+  min-width: 0;
+  overflow: hidden;
+  font: 10px/1.4 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.open-destination-menu__item {
+  min-height: 34px;
+  gap:var(--sp-4);
+  transition: color 100ms ease, background 100ms ease, transform 100ms ease;
+}
+.open-destination-menu__item[data-highlighted] { transform: translateX(2px); }
+.open-destination-menu__item > svg:last-child {
+  width: 24px;
+  height: 19px;
+  padding:1px;
+  color: var(--green-text);
+  border-radius: 4px;
+  background: var(--overlay-line);
+}
+.open-destination-menu__hint {
+  align-items: flex-start;
+  padding-block:var(--sp-3);
+  color: var(--amber-text);
+  font-size: var(--fs-micro);
+  line-height: 1.35;
+  cursor: default;
+}
+.open-destination-menu__hint > svg { margin-top:1px; color: var(--amber-text); }
+.pane-action {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 4px;
+  color: var(--text-3);
+  background: transparent;
+  cursor: pointer;
+}
+.pane-action:hover { color: var(--text); background: var(--surface-3); }
+.pane-action:disabled { color: var(--text-3); background: transparent; cursor: default; opacity: 0.55; }
+.pane-action--split { width: auto; gap:var(--sp-2); padding:0 var(--sp-3); font-size: var(--fs-micro); }
+.pane-action--split > svg:last-child { margin-left:-1px; opacity: .65; }
+.pane-split-menu { min-width: 148px; max-height: var(--radix-dropdown-menu-content-available-height); }
+.pane-action--stop:hover { color: var(--red); }
+.pane-view-toggle { display: flex; padding:var(--sp-1); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg); }
+.pane-view-toggle button {
+  width: 24px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 3px;
+  color: var(--text-3);
+  background: transparent;
+  cursor: pointer;
+}
+.pane-view-toggle button.selected { color: var(--bg); background: var(--green); box-shadow: var(--hl-strong); }
+/* 一个 pane 里所有 Tab 的内容都在这儿，彼此叠放，只有活动的那层可见。
+   这是"切回终端不再重放"的结构前提：隐藏的 Tab 仍在 DOM 里，xterm 实例因此活着。 */
+.pane-body { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
+.pane-body__region { position: absolute; inset: 0; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+/* 隐藏用 visibility 而非 display:none：display:none 的子树量不到尺寸，切回时终端得先
+   重新 fit 一次才显示对的行列数，那正是我们要消掉的那一帧。visibility:hidden 保留几何，
+   同时不绘制、不接受命中测试。 */
+.pane-body__region[data-active="false"] { visibility: hidden; pointer-events: none; }
+.workbench-region-split,
+.workbench-region {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+.workbench-region-split { overflow: hidden; }
+.workbench-region {
+  position: relative;
+  overflow: hidden;
+  background: var(--surface-0);
+  box-shadow: inset 0 0 0 1px transparent;
+}
+.workbench-region--active { box-shadow: inset 0 0 0 1px var(--green-line); }
+.workbench-region-resize-handle {
+  position: relative;
+  z-index: 8;
+  flex: 0 0 1px;
+  background: var(--line);
+}
+.workbench-region-resize-handle::after { content: ''; position: absolute; inset: -3px; }
+.workbench-region-resize-handle[data-resize-handle-active] { background: var(--green-2); }
+.workbench-region__close {
+  width: 22px;
+  height: 22px;
+  position: absolute;
+  z-index: 12;
+  top: 5px;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  color: var(--text-3);
+  background: color-mix(in srgb, var(--surface-1) 92%, transparent);
+  box-shadow: 0 2px 8px var(--scrim-2);
+  opacity: 0;
+}
+.workbench-region:hover > .workbench-region__close,
+.workbench-region--active > .workbench-region__close { opacity: .78; }
+.workbench-region__close:hover { color: var(--text); background: var(--surface-3); opacity: 1; }
+.pane-drop-overlay {
+  position: absolute;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--green-text);
+  color: var(--green-text);
+  background: var(--overlay-line);
+  pointer-events: none;
+}
+.pane-drop-overlay span { padding:var(--sp-2) var(--sp-3); border-radius: 4px; background: var(--green-bg); font-size: var(--fs-meta); }
+.pane-drop-overlay--left { inset: var(--pane-tabbar-height) 50% 0 0; }
+.pane-drop-overlay--right { inset: var(--pane-tabbar-height) 0 0 50%; }
+.pane-drop-overlay--up { inset: var(--pane-tabbar-height) 0 50% 0; }
+.pane-drop-overlay--down { inset: 50% 0 0 0; }
+
+.editor-pane { height: 100%; min-width: 0; min-height: 0; display: grid; grid-template-rows: 34px minmax(0, 1fr); background: var(--surface-0); }
+.editor-pane--issue { grid-template-rows: 34px auto minmax(0, 1fr); }
+.editor-header { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap:var(--sp-4); padding:0 var(--sp-4) 0 var(--sp-5); border-bottom: 1px solid var(--line-soft); color: var(--text-2); font-size: var(--fs-micro); }
+.editor-header > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.editor-header__actions { display: flex; align-items: center; gap:var(--sp-2); }
+.editor-file-notice { min-width: 0; display: flex; align-items: center; gap:var(--sp-3); padding:var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--amber-line); color: var(--amber-text); background: var(--amber-bg); font-size: var(--fs-micro); line-height: 1.4; }
+.editor-file-notice > svg { flex: 0 0 auto; }
+.editor-file-notice--read-error, .editor-file-notice--write-error { border-bottom-color: var(--red-line); color: var(--red-text); background: var(--red-bg); }
+.editor-canvas { min-width: 0; min-height: 0; overflow: hidden; }
+.pane-state { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap:var(--sp-3); padding: var(--sp-8); color: var(--text-3); background: var(--surface-0); font-size: var(--fs-micro); text-align: center; }
+.pane-state strong { color: var(--text-2); font-size: var(--fs-body); }
+.pane-state--error svg { color: var(--red); }

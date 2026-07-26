@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { App } from './App'
 import { installUnobservedFailureReporter } from './lib/unobserved-failure'
 import { useAppStore } from './store'
-import './styles.css'
+import './styles/index.css'
 
 // Installed before the first render so a failure during startup is reported too. This is the last
 // resort behind each action's own catch, not a replacement for it: see lib/unobserved-failure.ts.
