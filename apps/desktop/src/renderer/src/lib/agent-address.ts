@@ -48,6 +48,14 @@ function inspectCommand(kind: AddressKind, id: string): string {
 }
 
 /**
+ * 列出还活着的 Agent Session。
+ *
+ * 是 `list sessions` 不是 `list agents`：后者列的是配好的 executor 类型（codex / claude / …），
+ * 不是此刻活着的 Session——名字像，答非所问。
+ */
+const LIST_SESSIONS = 'agentmux list sessions'
+
+/**
  * 哪个 Agent。
  *
  * Session 是 Provider 语义身份，与它此刻显示在哪张 View 的哪一格无关，因此这是唯一一个
@@ -130,7 +138,12 @@ export function formatHandoffAddress(target: {
  *
  * 失败不是终点，是一个要说清楚"现在怎么办"的时刻。`MESSAGE_TARGET_NOT_UNIQUE` 已经带
  * `candidates`，但一份候选清单仍然要求接收方自己拼出命令——那正是"歧义不甩给接收方"这条原则
- * 在错误路径上的漏洞。所以这里产出的每一条都是**可直接执行的命令**，而不是让人再拼一次的素材。
+ * 在错误路径上的漏洞。所以这里每出现一行命令，它就必须真能跑。
+ *
+ * 反过来也成立：**没有可跑的命令时就不写命令**。恢复层只拿得到错误码，拿不到 tabId、regionId
+ * （抛出点没带过来），而 View / Region id 本就是界面上的临时身份，CLI 无从重建。此时凑一条
+ * 命令形状的文字比不给更糟——它看起来像出路，粘贴过去只会撞 INVALID_CLI_ARGUMENT，把人引向
+ * 第二次失败。这种分支给界面里的下一步，外加一条真能跑的旁路（按 Session 身份寻址）。
  *
  * 命令来自上面那三个地址出口，不另写一份拼接：两份拼接会各自演进，漂移时不会有测试变红。
  *
@@ -146,19 +159,24 @@ export function addressingRecovery(error: {
     return formatTargetNotUnique(error.candidates ?? [])
   }
   if (error.code === 'MESSAGE_TARGET_NOT_AGENT') {
+    // 这里**故意不给命令**。想给的那条是 `agentmux inspect --tab=<tabId>`，但 tabId 在抛出点
+    // 就被丢掉了（store.ts 只带 code 与 message 过来），恢复层拿不到。凑一条跑不了的命令比不给
+    // 更糟：它看起来像出路，粘贴过去却只会撞 INVALID_CLI_ARGUMENT，把人引向第二次失败。
     return `这一格不是 Agent（是终端、浏览器或文件）。
-在承载 Agent 的那一格上重试，或先列出这张 View 的每一格：
-agentmux inspect`
+在承载 Agent 的那一格上右键重取地址；或按语义身份寻址：
+${LIST_SESSIONS}`
   }
   if (error.code === 'UNKNOWN_AGENT_SESSION') {
     return `这个 Agent 已经不在了（已退出或已被回收）。
 列出还活着的 Agent：
-agentmux inspect`
+${LIST_SESSIONS}`
   }
   if (error.code === 'TAB_NOT_OPEN' || error.code === 'REGION_NOT_OPEN') {
+    // View / Region id 是界面上的临时身份，关掉就没了，CLI 无从重建——所以"重新取一次"只能在
+    // 界面里做，这一句没有对应命令。能给的是另一条路：Session 跨 View 稳定，用它照样够得到。
     return `这个地址指向的 View 或 Region 已经不存在了（被关掉或重新分屏过）。
-重新取一次当前地址：
-agentmux inspect`
+要回到那个位置，在界面里重新取一次地址；要够到同一个 Agent，用它跨 View 稳定的 Session 身份：
+${LIST_SESSIONS}`
   }
   // 不是寻址失败。别硬编一句放之四海的"再试一次"——那种话等于没说，还会盖住真正的原因。
   return null
