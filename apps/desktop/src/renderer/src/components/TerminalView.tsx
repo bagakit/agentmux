@@ -18,7 +18,17 @@ import {
 } from '../lib/terminal-link-gesture'
 import { detectTerminalPathLinks } from '../lib/terminal-path-link'
 import { terminalOptions, terminalTheme } from '../lib/terminal-theme'
-import { isTerminalAppShortcut, terminalSelectionForCopy } from '../lib/terminal-shortcuts'
+import {
+  isShiftEnterNewline,
+  isTerminalAppShortcut,
+  shiftEnterInput,
+  terminalSelectionForCopy
+} from '../lib/terminal-shortcuts'
+import {
+  initialKittyKeyboardState,
+  isKittyKeyboardActive,
+  readKittyKeyboardOutput
+} from '../lib/terminal-kitty-keyboard'
 import { safeTerminalFind, TERMINAL_SEARCH_DECORATIONS } from '../lib/terminal-search-safe-find'
 import { finishTerminalReplayRecovery, hydrateTerminalReplay } from '../lib/terminal-replay'
 import { acquireTerminalResourceOwners } from '../lib/terminal-resource-owners'
@@ -331,6 +341,8 @@ export function TerminalView({
     const pending: RuntimeEvent[] = []
     let pendingBytes = 0
     let droppedPendingThrough = 0
+    // 下游程序自己声明的 kitty keyboard 状态，决定 Shift+Enter 送 CSI-u 还是退回 ESC+CR。
+    let kittyKeyboard = initialKittyKeyboardState()
     let renderReady: { dispose(): void } | null = null
     const viewport = new TerminalViewportSynchronizer({
       proposeGrid: () => fit.proposeDimensions() ?? null,
@@ -397,6 +409,9 @@ export function TerminalView({
           await terminalWrite(terminal, '\r\n\u001b[33m[Output sequence gap; earlier bytes are unavailable]\u001b[0m\r\n')
         }
         await terminalWrite(terminal, output.data)
+        // Shift+Enter 的编码取决于下游程序有没有协商 kitty keyboard 协议，而它只会在自己的
+        // 输出里说这件事——所以在写进终端的同一条路上顺带读掉，不另开一条输出订阅。
+        kittyKeyboard = readKittyKeyboardOutput(kittyKeyboard, output.data)
         cursor = output.endByte
         acknowledger.queue(cursor)
       })
@@ -424,6 +439,17 @@ export function TerminalView({
       }
     })
     terminal.attachCustomKeyEventHandler((event) => {
+      if (isShiftEnterNewline(event)) {
+        // xterm 对 Enter 与 Shift+Enter 送同一个裸 \r（终端线路上没有表达修饰键的位置），
+        // 下游 TUI 因此只能把 Shift+Enter 读成提交，用户写不了多行。这里显式送出不同的字节。
+        if (event.type === 'keydown' && canControlRunRef.current && acceptsInputRef.current) {
+          void api.sessions.write(
+            session.control,
+            shiftEnterInput(isKittyKeyboardActive(kittyKeyboard))
+          )
+        }
+        return false
+      }
       if (isTerminalAppShortcut(event, 'f', isMac)) {
         if (event.type === 'keydown') setSearchOpen(true)
         return false
@@ -463,7 +489,12 @@ export function TerminalView({
         if (result.replay.some((chunk) => chunk.data.length > 0)) observeOutput()
         cursor = await hydrateTerminalReplay(
           result.replay,
-          async (data) => await terminalWrite(terminal, data)
+          async (data) => {
+            await terminalWrite(terminal, data)
+            // 回放也要读：重新 attach 到一个早已协商过的 Agent 时，那次协商就在回放里。
+            // 漏掉它会让协议状态静默退回"没协商过"，Shift+Enter 于是送错编码。
+            kittyKeyboard = readKittyKeyboardOutput(kittyKeyboard, data)
+          }
         ) ?? cursor
         if (droppedPendingThrough > cursor) {
           await terminalWrite(
