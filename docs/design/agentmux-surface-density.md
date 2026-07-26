@@ -265,7 +265,8 @@ styles/
   surfaces.css    Board、Settings、New Tab、Launch、Welcome
   browser.css     Browser 工具与地址栏
   agent.css       Composer、Markdown 回合、Roster
-  activity.css    Activity 时间线与标尺
+  activity.css    Activity 时间线、机器步骤与标尺
+  activity-conversation.css  Activity 对话回合与 Markdown 内容
   overlays.css    Dialog、Context Menu、Quick Switch、Tooltip
 ```
 

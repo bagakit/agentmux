@@ -124,6 +124,11 @@
   border-radius: 50%;
 }
 .log-row:hover .log-row__node, .log-fold:hover .log-fold__node { background: var(--surface-1); }
+/* 折叠头自己的两件家具，紧跟在共用的 .log-fold 规则后面——它们是机器日志的控件，不是对话内容，
+   所以留在这个文件里而不是跟着对话寄存器搬走。 */
+.log-fold__chevron { transition: transform 120ms ease; }
+.log-fold[data-open] .log-fold__chevron { transform: rotate(90deg); }
+.log-fold__label { display: inline-flex; align-items: center; gap:var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); }
 .log-row--user_message .log-row__node { color: var(--blue); }
 .log-row--assistant_message .log-row__node { color: var(--green); }
 .log-row--permission .log-row__node { color: var(--amber); }
@@ -252,7 +257,7 @@
   color: var(--text-3);
   font-size: var(--fs-meta);
 }
-.activity-working__dots { display: inline-flex; gap:3px; }
+.activity-working__dots { display: inline-flex; gap:var(--sp-1); }
 .activity-working__dots i {
   width: 4px;
   height: 4px;
@@ -268,170 +273,4 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .activity-working__dots i { animation: none; opacity: .6; }
-}
-.log-fold__chevron { transition: transform 120ms ease; }
-.log-fold[data-open] .log-fold__chevron { transform: rotate(90deg); }
-.log-fold__label { display: inline-flex; align-items: center; gap:var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); }
-/* The conversation register. A turn threads the SAME spine as a machine row — identical 20px node
-   hole-punch at left:21px — but it is taller, its caption is a quiet tag, and its body is the primary,
-   brightest text in the view. No hover: a turn is content, not a control, and a block hover would break
-   the node hole over the user's own surface-1 body. */
-.log-turn {
-  position: relative;
-  display: grid;
-  grid-template-columns: 20px minmax(0, 1fr);
-  grid-template-rows: auto auto;
-  column-gap:var(--sp-4);
-  padding:var(--sp-4) var(--sp-5) var(--sp-4);
-  margin:var(--sp-3) 0;
-}
-.log-turn__node {
-  grid-column: 1;
-  grid-row: 1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  color: var(--text-3);
-  background: var(--surface-0);
-  border-radius: 50%;
-}
-.log-turn--user_message .log-turn__node { color: var(--blue); }
-.log-turn--assistant_message .log-turn__node { color: var(--green); }
-.log-turn[data-status='failed'] .log-turn__node { color: var(--red); }
-.log-turn__head {
-  grid-column: 2;
-  grid-row: 1;
-  display: flex;
-  align-items: baseline;
-  gap:var(--sp-4);
-  min-height: 20px;
-}
-.log-turn__who { color: var(--text-3); font-size: var(--fs-meta); letter-spacing: .04em; text-transform: uppercase; }
-.log-turn__time {
-  margin-left:auto;
-  color: var(--text-3);
-  font: 11px/1 var(--font-mono);
-  font-variant-numeric: tabular-nums;
-}
-.log-turn__body {
-  grid-column: 2;
-  grid-row: 2;
-  margin:var(--sp-1) 0 0;
-  color: var(--text);
-  font-size: var(--fs-prose);
-  line-height: 1.6;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-/* Markdown inside a turn. The turn body already sets 13px/1.6 and every element below INHERITS it —
-   including headings, deliberately. Heading levels differ by weight, colour and the space above them,
-   never by size: the surface contract forbids buying hierarchy with type scale, and a transcript full of
-   large headings destroys the density that makes a trace scannable. A heading in an agent's answer is a
-   section marker, not a page title. */
-.md { display: flex; flex-direction: column; gap:var(--sp-3); white-space: normal; }
-.md > :first-child { margin-top:0; }
-.md-paragraph { margin:0; white-space: pre-wrap; overflow-wrap: anywhere; }
-.md-heading {
-  margin:var(--sp-2) 0 0;
-  color: var(--text);
-  font-size: inherit;
-  font-weight: 680;
-  letter-spacing: -.01em;
-}
-/* Deeper levels step DOWN in emphasis, not in size: weight first, then colour. */
-.md-heading[data-level='3'] { font-weight: 620; }
-.md-heading[data-level='4'], .md-heading[data-level='5'], .md-heading[data-level='6'] {
-  color: var(--text-2);
-  font-weight: 600;
-}
-/* GFM table. It scrolls inside its own container because agents emit wide comparison tables, and a long
-   row must never widen the turn or push the whole feed sideways (density contract: wide content scrolls
-   in its own overflow container). */
-.md-table-scroll { max-width: 100%; overflow-x: auto; }
-.md-table { border-collapse: collapse; font-size: inherit; }
-.md-table th, .md-table td {
-  padding:var(--sp-2) var(--sp-4);
-  /* A hairline grid is the one place a rule genuinely carries meaning — it says which cell belongs to
-     which column. Kept at the lowest contrast that still separates. */
-  border-bottom: 1px solid var(--wash-2);
-  text-align: left;
-  white-space: nowrap;
-}
-.md-table th { color: var(--text-2); font-weight: 620; }
-.md-table td { color: var(--text); }
-.md-table th[data-align='center'], .md-table td[data-align='center'] { text-align: center; }
-.md-table th[data-align='right'], .md-table td[data-align='right'] { text-align: right; }
-.md-table tr:last-child td { border-bottom: 0; }
-/* A quote is set in from the spine and quieter — no oversized glyph, no size change. */
-.md-quote {
-  margin:0;
-  padding-left:var(--sp-4);
-  border-left: 2px solid var(--wash-2);
-  color: var(--text-2);
-}
-.md-rule { height: 0; margin:var(--sp-1) 0; border: 0; border-top: 1px solid var(--wash-2); }
-.md-list .md-list { margin-top:var(--sp-1); }
-.md-list .md-paragraph { margin:0; }
-.md-list { margin:0; padding-left:var(--sp-6); display: flex; flex-direction: column; gap:var(--sp-1); }
-.md-list li { overflow-wrap: anywhere; }
-.md-code {
-  padding:1px var(--sp-2);
-  border-radius: var(--radius-sm);
-  background: var(--surface-2);
-  font-family: var(--font-mono);
-  font-size: var(--fs-body);
-}
-/* Code owns its own horizontal scroll so a long line cannot widen the turn and force the whole feed to
-   scroll sideways. */
-.md-block-code {
-  margin:var(--sp-1) 0;
-  padding:var(--sp-4) var(--sp-4);
-  border-radius: var(--radius-sm);
-  background: var(--surface-1);
-  box-shadow: var(--hl);
-  overflow-x: auto;
-}
-.md-block-code code {
-  font-family: var(--font-mono);
-  font-size: var(--fs-body);
-  line-height: 1.5;
-  white-space: pre;
-}
-/* A link is a button because an <a href> in untrusted output is a navigation escape hatch; it still has
-   to READ as a link, so it borrows the accent and underline and nothing else. */
-.md-link {
-  padding:0;
-  border: 0;
-  color: var(--green-2);
-  background: none;
-  font: inherit;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  cursor: pointer;
-}
-.md-link:hover { color: var(--green); }
-
-/* A workspace file reference opens IN the app rather than leaving it, so it reads as a path — mono,
-   text colour — and earns the link underline only on hover. Underlining every path an agent mentions
-   would stripe a whole paragraph; the target still has to be legible as prose first. */
-.md-link--file {
-  color: inherit;
-  font-family: var(--font-mono);
-  text-decoration: none;
-}
-.md-link--file:hover {
-  color: var(--green);
-  text-decoration: underline;
-}
-/* Inside a code span the mono face and ground already come from `.md-code`. */
-.md-code .md-link--file { font-family: inherit; }
-
-/* User speech gets a quiet ground so the turn has a visible start and end — Surface fill carries the
-   boundary, never a stroke. The assistant reply flows open on the feed as the main narrative. */
-.log-turn--user_message .log-turn__body {
-  padding:var(--sp-4) var(--sp-4);
-  border-radius: var(--radius);
-  background: var(--surface-1);
 }
