@@ -676,6 +676,17 @@ export type AgentTimelineMutation =
       item: AgentTimelineItem
     }
   | {
+      // create-or-replace：携带**完整 item**。目标已存在则合并（保留原 createdAt），不存在则追加。
+      // 用于「一次调用两端投递、但事前那条可能压根没落库」的场景：hook 的 PostToolUse 命中同一
+      // `runId:tool:<id>`，正常情况更新在途的 Pre 行；可 Pre 的两次 fetch 都失败、或被 200 上限逐出
+      // 时那条从未存在——`update` 会抛 UNKNOWN_AGENT_TIMELINE_ITEM 把整条 hook 事件打成 503、跳过
+      // publish、结果与完成态永久丢失。upsert 目标缺失就补落一条自洽的终态行，绝不因丢了 Pre 而把
+      // 整个事件打死。与 `append` 的区别是它不因 id 撞车报 ID_CONFLICT，而是就地替换。
+      type: 'upsert'
+      agentSessionId: string
+      item: AgentTimelineItem
+    }
+  | {
       type: 'update'
       agentSessionId: string
       itemId: string

@@ -9,6 +9,7 @@ import {
 import {
   agentTimelineMutationFromAcpEvent,
   applyAgentTimelineMutation,
+  normalizeAgentTimeline,
   normalizeAgentTimelineMutation
 } from '../src/session-timeline.js'
 import type {
@@ -108,6 +109,93 @@ describe('Agent Session Timeline', () => {
     })).toThrowError(expect.objectContaining({ code: 'UNKNOWN_AGENT_TIMELINE_ITEM' }))
     expect(() => applyAgentTimelineMutation(current, assistantAppend('session-2')))
       .toThrowError(expect.objectContaining({ code: 'INVALID_AGENT_TIMELINE' }))
+  })
+
+  describe('upsert：目标缺失时补落而非抛错', () => {
+    // 一条完整的 tool_call item，模拟 normalizer 的 Post upsert 会携带的形状。
+    const toolItem = (
+      id: string,
+      overrides: Partial<Extract<AgentTimelineMutation, { type: 'append' }>['item']> = {}
+    ): Extract<AgentTimelineMutation, { type: 'upsert' }> => ({
+      type: 'upsert',
+      agentSessionId: 'session-1',
+      item: {
+        id,
+        agentSessionId: 'session-1',
+        kind: 'tool_call',
+        status: 'complete',
+        source: 'native-hook',
+        createdAt: 20,
+        updatedAt: 20,
+        title: 'Bash',
+        toolName: 'Bash',
+        toolInput: 'ls',
+        toolOutput: 'total 24',
+        ...overrides
+      }
+    })
+
+    it('目标不存在时补落一条自洽的终态行，绝不抛 UNKNOWN_AGENT_TIMELINE_ITEM', () => {
+      // 这是 major 修复的核心：丢了 Pre（两次 fetch 全失败）或被 200 上限逐出后，Post 的目标压根不在。
+      // 若这里抛错，client 的 timeline 循环会把它冒泡出去、跳过 publishHook、整条 hook 事件回 503。
+      // 变异守卫：把实现里 upsert 的 index<0 分支改成沿用 update 的 `throw UNKNOWN_AGENT_TIMELINE_ITEM`，
+      // 这条 not.toThrow 立即变红。
+      expect(() => applyAgentTimelineMutation([], toolItem('run-x:tool:toolu_1'))).not.toThrow()
+      const items = applyAgentTimelineMutation([], toolItem('run-x:tool:toolu_1'))
+      expect(items).toHaveLength(1)
+      // 补落的是完整 item（kind/source/title 俱全），不是靠残缺字段合成的空壳。
+      expect(items[0]).toMatchObject({
+        id: 'run-x:tool:toolu_1',
+        kind: 'tool_call',
+        source: 'native-hook',
+        status: 'complete',
+        toolOutput: 'total 24'
+      })
+    })
+
+    it('目标存在时就地替换，并保留最初的 createdAt', () => {
+      // Pre 落在途态（streaming, createdAt=10），Post upsert 翻成终态。一条，不是两条。
+      const afterPre = applyAgentTimelineMutation([], {
+        type: 'append',
+        agentSessionId: 'session-1',
+        item: {
+          id: 'run-x:tool:toolu_2',
+          agentSessionId: 'session-1',
+          kind: 'tool_call',
+          status: 'streaming',
+          source: 'native-hook',
+          createdAt: 10,
+          updatedAt: 10,
+          title: 'Bash',
+          toolName: 'Bash',
+          toolInput: 'ls'
+        }
+      })
+      const afterPost = applyAgentTimelineMutation(afterPre, toolItem('run-x:tool:toolu_2', { updatedAt: 20 }))
+      expect(afterPost).toHaveLength(1)
+      expect(afterPost[0]).toMatchObject({ status: 'complete', toolOutput: 'total 24', updatedAt: 20 })
+      // createdAt 仍是 Pre 的 10——这仍是「同一件事」，事后投递不该改写它的创建时刻。
+      // 变异守卫：把实现里 `createdAt: previous.createdAt` 删掉（让 item 自带的 20 生效），这条变红。
+      expect(afterPost[0]!.createdAt).toBe(10)
+    })
+
+    it('upsert 语义未变时不推空 revision（幂等重投）', () => {
+      const once = applyAgentTimelineMutation([], toolItem('run-x:tool:toolu_3'))
+      // 同一条再来一次（网络重投）——内容一致就原样返回，不产生新版本。
+      expect(applyAgentTimelineMutation(once, toolItem('run-x:tool:toolu_3'))).toEqual(once)
+    })
+
+    it('upsert 也受 200 上限约束——补落一条时最旧的被逐出', () => {
+      let items = normalizeAgentTimeline('session-1', [])
+      for (let index = 0; index < 200; index += 1) {
+        items = applyAgentTimelineMutation(items, toolItem(`run-x:tool:fill_${index}`, { createdAt: index + 1, updatedAt: index + 1 }))
+      }
+      expect(items).toHaveLength(200)
+      const grown = applyAgentTimelineMutation(items, toolItem('run-x:tool:fresh', { createdAt: 999, updatedAt: 999 }))
+      expect(grown).toHaveLength(200)
+      expect(grown.some((item) => item.id === 'run-x:tool:fill_0')).toBe(false)
+      expect(grown.some((item) => item.id === 'run-x:tool:fresh')).toBe(true)
+    })
   })
 
   it('maps ACP updates to full content and scopes raw ids by adapter and native Session', () => {

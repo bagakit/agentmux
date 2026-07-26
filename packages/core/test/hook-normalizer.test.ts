@@ -261,18 +261,18 @@ describe('native hook normalization', () => {
       expect(mutation.item.status).toBe('streaming')
     })
 
-    it('PostToolUse 带同一 tool_use_id 时发 update 命中 Pre 那条，不再 append 第二条', () => {
+    it('PostToolUse 带同一 tool_use_id 时发 upsert 命中 Pre 那条，不再 append 第二条', () => {
       const event = claude(
         { tool_name: 'Bash', tool_input: { command: 'ls' }, tool_use_id: 'toolu_01ABC', tool_response: 'total 24' },
         'PostToolUse',
         'receipt-post'
       )
       const mutation = event.timeline[0]
-      expect(mutation?.type).toBe('update')
-      if (mutation?.type !== 'update') throw new Error('expected update')
-      expect(mutation.itemId).toBe('run-corr:tool:toolu_01ABC')
-      expect(mutation.status).toBe('complete')
-      expect(mutation.toolOutput).toBe('total 24')
+      expect(mutation?.type).toBe('upsert')
+      if (mutation?.type !== 'upsert') throw new Error('expected upsert')
+      expect(mutation.item.id).toBe('run-corr:tool:toolu_01ABC')
+      expect(mutation.item.status).toBe('complete')
+      expect(mutation.item.toolOutput).toBe('total 24')
     })
 
     it('端到端：一次调用在时间轴上是一条，经历 streaming → complete', () => {
@@ -317,6 +317,66 @@ describe('native hook normalization', () => {
       )
       expect(items).toHaveLength(1)
       expect(items[0]).toMatchObject({ status: 'failed', toolOutput: 'boom' })
+    })
+
+    it('丢了 Pre：Post 的 upsert 目标不存在时补落一条终态行，不抛错吞掉整条 hook 事件', () => {
+      // major 复现路径之一：PreToolUse 的两次 fetch 都失败（binding 短暂 503/超时），Pre 永不落库。
+      // 稍后 Post 成功到达——它的 upsert 命不中目标。修复前用 update 会抛 UNKNOWN_AGENT_TIMELINE_ITEM，
+      // 冒泡出 client 的 timeline 循环、跳过 publishHook、这一步的结果与完成态永久丢失（503）。
+      // 现在：只喂 Post（模拟 Pre 从未落库），直接对空时间轴 apply，必须不抛且如实补落。
+      const post = claude(
+        { tool_name: 'Bash', tool_input: { command: 'ls' }, tool_use_id: 'toolu_LOSTPRE', tool_response: 'recovered' },
+        'PostToolUse',
+        'receipt-post-only'
+      )
+      const mutation = post.timeline[0]
+      expect(mutation?.type).toBe('upsert')
+      // 承重断言：对**空**时间轴 apply 这条 Post，绝不抛。变异守卫：把实现里 upsert 的 index<0 分支
+      // 改回 `throw UNKNOWN_AGENT_TIMELINE_ITEM`，这条立即变红。
+      expect(() => applyAgentTimelineMutation([], mutation!)).not.toThrow()
+      const items = applyAgentTimelineMutation([], mutation!)
+      expect(items).toHaveLength(1)
+      expect(items[0]).toMatchObject({
+        id: 'run-corr:tool:toolu_LOSTPRE',
+        kind: 'tool_call',
+        status: 'complete',
+        toolOutput: 'recovered'
+      })
+    })
+
+    it('Pre 被 200 上限逐出：Post 的 upsert 命不中时补落，而不是把子代理场景打成 503', () => {
+      // major 复现路径之二：父 Task 的 Pre 落一条 streaming 后，子代理在 Pre/Post 之间于同一时间轴上
+      // 发 ≥200 条工具事件，把父 Pre 挤出 200 上限。父 Post 到达时目标已被逐出——upsert 补落即可，
+      // update 会抛。这里用真正的 applyAgentTimelineMutation 造出「Pre 被逐出」的真实状态。
+      const parentPre = claude(
+        { tool_name: 'Task', tool_input: { subagent_type: 'Explore' }, tool_use_id: 'toolu_PARENT' },
+        'PreToolUse',
+        'receipt-parent-pre'
+      )
+      let items = applyAgentTimelineMutation([], parentPre.timeline[0]!)
+      expect(items.some((item) => item.id === 'run-corr:tool:toolu_PARENT')).toBe(true)
+      // 子代理灌满 200 条，把父 Pre 挤出去。
+      for (let index = 0; index < 200; index += 1) {
+        const child = claude(
+          { tool_name: 'Bash', tool_input: { command: `echo ${index}` }, tool_use_id: `toolu_CHILD_${index}` },
+          'PreToolUse',
+          `receipt-child-${index}`
+        )
+        items = applyAgentTimelineMutation(items, child.timeline[0]!)
+      }
+      expect(items.some((item) => item.id === 'run-corr:tool:toolu_PARENT')).toBe(false)
+      // 父 Post 到达：目标已被逐出。upsert 必须补落而不抛。
+      const parentPost = claude(
+        { tool_name: 'Task', tool_input: { subagent_type: 'Explore' }, tool_use_id: 'toolu_PARENT', tool_response: 'subagent done' },
+        'PostToolUse',
+        'receipt-parent-post'
+      )
+      expect(() => applyAgentTimelineMutation(items, parentPost.timeline[0]!)).not.toThrow()
+      const after = applyAgentTimelineMutation(items, parentPost.timeline[0]!)
+      expect(after.find((item) => item.id === 'run-corr:tool:toolu_PARENT')).toMatchObject({
+        status: 'complete',
+        toolOutput: 'subagent done'
+      })
     })
 
     it('Provider 不给调用 id 时如实退回 append-only，Post 是 append 不是 update，不伪造关联', () => {
@@ -514,6 +574,25 @@ describe('native hook normalization', () => {
       expect(stop.semanticState).toBe('working')
       // 收尾：正常路径归零，避免给后续用例留脏账。
       victim('SubagentStop', { agent_id: 'still-alive' })
+    })
+
+    it('花名册归零后迟到/重投的 SubagentStop 落中性 unknown，不把已 done 的主 Agent 翻回 working', () => {
+      // minor 修复：最后一个 SubagentStop 首投已收敛 done 并删掉 roster；它的网络重投（服务端已处理、
+      // 客户端 2s 超时又发同一条）再次进入 normalizer 时 roster 已不存在。此前硬编码返回 'working'，
+      // 会被 client 落库并发布，把刚 done 的主 Agent 翻回运行中——归零后迟到的 stop 成了反向假信号。
+      // 现在退回 baseState：SubagentStop 无匹配 rule，baseState 即 'unknown'，落点中性、client 不落库。
+      const hook = claudeRun('run-late-substop')
+      hook('SubagentStart', { agent_id: 'only' })
+      hook('Stop', { last_assistant_message: 'main thinks done' }) // 被压住
+      const converge = hook('SubagentStop', { agent_id: 'only' })
+      expect(converge.semanticState).toBe('done') // 归零兑现 done，roster 被删
+      // 重投：roster 已删。变异守卫：把实现改回硬编码 `return 'working'`，这条立即变红。
+      const redelivered = hook('SubagentStop', { agent_id: 'only' })
+      expect(redelivered.semanticState).toBe('unknown')
+      expect(redelivered.semanticState).not.toBe('working')
+      // 一个从没记过子代理的 run 收到孤立 SubagentStop 也一样中性，不虚构 working。
+      const neverTracked = claudeRun('run-never-tracked')
+      expect(neverTracked('SubagentStop', { agent_id: 'ghost' }).semanticState).toBe('unknown')
     })
   })
 })
