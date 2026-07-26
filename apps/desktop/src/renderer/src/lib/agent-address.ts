@@ -183,18 +183,22 @@ ${LIST_SESSIONS}`
 ${LIST_SESSIONS}`
   }
   if (error.code === 'AMBIGUOUS_REGION_TARGET' || error.code === 'AMBIGUOUS_TAB_TARGET') {
-    // 与 MESSAGE_TARGET_NOT_UNIQUE 同形（"匹配到不止一个"），但少一样东西：那边带 candidates，
-    // 这边不带——抛出点只知道"不唯一"，没把匹配到的是哪几个带过来。所以这里给不出逐个候选的
-    // 命令，只能给一条真能跑的、能自己看出有哪些的路。
-    return `这个地址匹配到不止一个目标，无法唯一寻址。
-列出活着的 Agent，改用唯一的 Session 身份：
+    // 这**不是**"粘来的地址匹配到多个"。两个码都只从 `self` 分支抛（control.ts:134 在
+    // `target.kind === 'self'` 之内；:163 在 `target.kind === 'tab'` 提前 return 之后），
+    // 意思是"发起方自己同时显示在多处"。显式 id 那条路走不到这里：region id 是
+    // `region:${crypto.randomUUID()}`（store.ts:960），全局唯一，跨 Tab 撞号不成立。
+    //
+    // 所以下一步不是"再挑一个候选"，而是**别再用 self**：self 依赖"我在哪"，而发起方此刻
+    // 在多处，这个前提本身就塌了。改用与"在哪"无关的 Session 身份。
+    return `相对寻址（self）失败：发起方自己同时显示在多个位置，"我这一格"指向不唯一。
+改用与位置无关的 Session 身份，先列出活着的 Agent：
 ${LIST_SESSIONS}`
   }
   if (error.code === 'CALLER_NOT_OPEN') {
-    // 这是 `self` 相对寻址失败：调用方自己没显示在任何一格里，于是"我旁边那个"无从算起。
-    // 下一步不是换个 flag，而是换一种身份——别再相对定位，直接指名道姓。
-    return `发起方自己没有显示在任何一格里，相对寻址（self）无从算起。
-改用绝对身份寻址，先列出活着的 Agent：
+    // 同样是 `self` 失败，只是方向相反：上面是"在多处"，这里是"一处都不在"（control.ts:133/162）。
+    // 两者前提相同——self 要求发起方恰好显示在一处——所以下一步也相同：换成绝对身份。
+    return `相对寻址（self）失败：发起方自己没有显示在任何一格里，"我这一格"无从算起。
+改用与位置无关的 Session 身份，先列出活着的 Agent：
 ${LIST_SESSIONS}`
   }
   // 不是寻址失败。别硬编一句放之四海的"再试一次"——那种话等于没说，还会盖住真正的原因。
