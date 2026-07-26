@@ -13,6 +13,7 @@ import {
   normalizeNativeSessionId,
   normalizeNativeTranscriptPath
 } from './agent-native-locator.js'
+import { hookToolOutcome } from './hook-tool-outcome.js'
 
 export type AgentNativeHookStateRule = {
   events: readonly string[]
@@ -101,7 +102,7 @@ function timelineItem(
   title: string,
   eventName: string,
   observedAt: number,
-  fields: Partial<Omit<AgentTimelineItem, 'id' | 'agentSessionId' | 'kind' | 'status' | 'source' | 'createdAt' | 'updatedAt' | 'title'>> = {}
+  fields: Partial<Omit<AgentTimelineItem, 'id' | 'agentSessionId' | 'kind' | 'source' | 'createdAt' | 'updatedAt' | 'title'>> = {}
 ): AgentTimelineMutation {
   return {
     type: 'append',
@@ -110,6 +111,8 @@ function timelineItem(
       id: `${envelope.runId}:${envelope.receiptId}:${index}`,
       agentSessionId: envelope.agentSessionId,
       kind,
+      // 默认成立，但**可被观察到的失败覆盖**——此前这里写死在 spread 之后，于是无论采集到什么
+      // 结果，每一步都盖 complete。失败的命令因此和成功的长得一模一样。
       status: 'complete',
       source: 'native-hook',
       createdAt: observedAt,
@@ -147,15 +150,24 @@ function buildTimeline(
   const append = (
     kind: AgentTimelineItemKind,
     title: string,
-    fields?: Partial<Omit<AgentTimelineItem, 'id' | 'agentSessionId' | 'kind' | 'status' | 'source' | 'createdAt' | 'updatedAt' | 'title'>>
+    fields?: Partial<Omit<AgentTimelineItem, 'id' | 'agentSessionId' | 'kind' | 'source' | 'createdAt' | 'updatedAt' | 'title'>>
   ): void => {
     timeline.push(timelineItem(envelope, timeline.length, kind, title, eventName, observedAt, fields))
   }
   if (toolName) {
+    // 结果只有事后才知道，所以只在事后事件上采集——`PreToolUse` 那一行谈不上成败，给它盖任何
+    // 结论都是编造。事件名以 `Post` 开头的才带结果，其余照旧只有入参。
+    const outcome = eventName.startsWith('Post') ? hookToolOutcome(payload) : undefined
     append(
       state === 'waiting' || state === 'blocked' ? 'permission' : 'tool_call',
       toolName,
-      { toolName, ...(toolInput ? { toolInput } : {}) }
+      {
+        toolName,
+        ...(toolInput ? { toolInput } : {}),
+        ...(outcome?.output ? { toolOutput: outcome.output } : {}),
+        // 失败是**观察到的事实**，不是默认值：只有采集判定为失败时才改写状态，否则维持 complete。
+        ...(outcome?.failed ? { status: 'failed' as const } : {})
+      }
     )
   }
   if (assistant) {

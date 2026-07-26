@@ -15,6 +15,7 @@ import {
   toolCallToDiff,
   type ToolDiff
 } from '../lib/activity-diff'
+import { timelineRows } from '../lib/activity-timeline-rows'
 import {
   createRulerScale,
   describeReadout,
@@ -78,25 +79,6 @@ function segment(items: AgentTimelineItem[]): Segment[] {
   }
   flush()
   return segments
-}
-
-/** Identical repeats inside a run collapse to one line with a count, so a retry loop reads as one fact. */
-function tally(items: AgentTimelineItem[]): Array<{ item: AgentTimelineItem; count: number }> {
-  const rows: Array<{ item: AgentTimelineItem; count: number }> = []
-  for (const item of items) {
-    const previous = rows[rows.length - 1]
-    if (
-      previous &&
-      previous.item.kind === item.kind &&
-      previous.item.title === item.title &&
-      previous.item.toolInput === item.toolInput
-    ) {
-      previous.count += 1
-      continue
-    }
-    rows.push({ item, count: 1 })
-  }
-  return rows
 }
 
 /** The client-space rectangle the readout must stay clear of and inside — the whole ruler track. */
@@ -299,7 +281,10 @@ function Row({
   // Prose stays on the page, machine arguments fold away — that is the noise the run view is hiding.
   const prose = item.kind === 'tool_call' ? undefined : item.content
   const payload = item.toolInput ?? (item.kind === 'tool_call' ? item.content : undefined)
-  const expandable = Boolean(payload)
+  // 结果和入参一样值得展开——而且比入参更值得：一步跑失败了，用户第一件想看的是它说了什么。
+  // 只有入参能展开的话，失败行点开只有参数，等于把唯一有用的信息挡在外面。
+  const output = item.toolOutput
+  const expandable = Boolean(payload) || Boolean(output)
   // 一次编辑的实质是"哪几行没了、哪几行来了"，而不是一段转义 JSON——把 old/new 摊成加删行，
   // 用户就不必在脑子里反转义再做行对比。算不出 diff 时（工具不是编辑类、JSON 坏了）如实退回
   // 原始 payload，不猜、不半渲染。
@@ -354,6 +339,9 @@ function Row({
       {prose ? <p className="log-row__prose">{prose}</p> : null}
       {open && diff ? <DiffBlock diff={diff} /> : null}
       {open && !diff && payload ? <pre className="log-row__payload">{payload}</pre> : null}
+      {open && output ? (
+        <pre className="log-row__output" data-status={item.status}>{output}</pre>
+      ) : null}
     </Fragment>
   )
 }
@@ -428,7 +416,7 @@ function Turn({
 
 function Run({ items, origin }: { items: AgentTimelineItem[]; origin: number }) {
   const [open, setOpen] = useState(false)
-  const rows = useMemo(() => tally(items), [items])
+  const rows = useMemo(() => timelineRows(items), [items])
   const failed = items.some((item) => item.status === 'failed')
 
   return (

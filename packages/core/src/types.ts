@@ -332,6 +332,7 @@ export type AgentMuxAgentSession = {
   terminalCapability?: AgentTerminalCapabilityState
   terminalPromptReadiness?: AgentTerminalPromptReadinessState
   terminalPromptSubmission?: AgentTerminalPromptSubmissionState
+  terminalPromptDelivery?: AgentTerminalPromptDeliveryState
   semanticStatus?: AgentStatus
   pendingInteraction?: AgentMuxPendingInteraction
   nativeHandle?: AgentNativeSessionHandle
@@ -360,6 +361,21 @@ export type AgentTerminalCapabilityState = {
   state: 'unknown'
   mode: 'degraded'
   reason: 'handshake-timeout'
+  run: AgentMuxRunRef
+  observedAt: number
+}
+
+/**
+ * 服务窗事实（原则 11 第 2 类）：一次 prompt 交付的 payload 受据已确认、Run 仍存活，但屏幕
+ * 验证没走通——replay 被截断（`screen-evidence-gap`）或渲染确认超时（`prompt-render-timeout`）。
+ * Core 照常发出提交键；这条记录告诉 client 哪一步没走通、现在按什么状态在跑。恢复路径：
+ * 下一次完整验证成功的 prompt 交付会清除它；Run 被替换时随 Run 级状态一起清除。
+ */
+export type AgentTerminalPromptDeliveryState = {
+  state: 'unverified'
+  mode: 'degraded'
+  reason: 'screen-evidence-gap' | 'prompt-render-timeout'
+  submissionId: string
   run: AgentMuxRunRef
   observedAt: number
 }
@@ -645,6 +661,11 @@ export type AgentTimelineItem = {
   content?: string
   toolName?: string
   toolInput?: string
+  /**
+   * 这一步跑出来的东西。缺席就是缺席——没观察到结果时不写空串，那会把「还没结果」伪装成
+   * 「结果是空的」。体量由采集侧封顶并在文本里明说截断，时间轴不吞整份 stdout。
+   */
+  toolOutput?: string
   eventName?: string
 }
 
@@ -664,6 +685,7 @@ export type AgentTimelineMutation =
       content?: string
       toolName?: string
       toolInput?: string
+      toolOutput?: string
       eventName?: string
     }
 

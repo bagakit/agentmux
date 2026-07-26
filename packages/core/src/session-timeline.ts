@@ -118,6 +118,7 @@ function normalizeItem(value: unknown): AgentTimelineItem {
     ...optionalField(source, 'content'),
     ...optionalField(source, 'toolName'),
     ...optionalField(source, 'toolInput'),
+    ...optionalField(source, 'toolOutput'),
     ...optionalField(source, 'eventName')
   }
 }
@@ -157,6 +158,7 @@ export function normalizeAgentTimelineMutation(value: unknown): AgentTimelineMut
     ...optionalField(source, 'content'),
     ...optionalField(source, 'toolName'),
     ...optionalField(source, 'toolInput'),
+    ...optionalField(source, 'toolOutput'),
     ...optionalField(source, 'eventName')
   }
 }
@@ -194,6 +196,7 @@ export function applyAgentTimelineMutation(
     ...(mutation.content === undefined ? {} : { content: mutation.content }),
     ...(mutation.toolName === undefined ? {} : { toolName: mutation.toolName }),
     ...(mutation.toolInput === undefined ? {} : { toolInput: mutation.toolInput }),
+    ...(mutation.toolOutput === undefined ? {} : { toolOutput: mutation.toolOutput }),
     ...(mutation.eventName === undefined ? {} : { eventName: mutation.eventName })
   }
   if (sameItemSemantics(previous, next)) return items

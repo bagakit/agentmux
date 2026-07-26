@@ -309,4 +309,72 @@ describe('ActivityView', () => {
     ])
     expect(markup).toContain('activity-log__segment')
   })
+
+  /**
+   * 结果接线。判定层（`activity-timeline-rows`、Core 的 `hook-tool-outcome`）再对，View 不把
+   * 结果交出去，对话里失败与成功仍然长得一模一样，而那两处的用例照样全绿。
+   */
+  it('失败的一步在对话里就与成功的不一样，不必展开也看得出', () => {
+    const markup = render('complete-events', [
+      activity('ok', {
+        kind: 'tool_call', title: 'Bash', toolName: 'Bash',
+        toolInput: '{"command":"echo hi"}', toolOutput: 'hi', createdAt: 1
+      }),
+      activity('bad', {
+        kind: 'tool_call', title: 'Bash', toolName: 'Bash', status: 'failed',
+        toolInput: '{"command":"exit 1"}', toolOutput: 'command failed', createdAt: 2
+      })
+    ])
+
+    // 折叠状态下的可见区分：状态属性 + Failed 徽标。两者都不依赖展开。
+    expect(markup).toContain('data-status="failed"')
+    expect(markup).toContain('log-row__chip--failed')
+    // 成功那一行不许也被标成失败——「两者显示相同即等于没做」。
+    expect(markup).toContain('data-status="complete"')
+  })
+
+  it('只有结果没有入参的一步仍然可展开——否则唯一有用的信息被挡在外面', () => {
+    // `expandable` 曾经只看 payload。一条没有入参却有输出（或失败）的步骤会退化成不可点的死行。
+    const markup = render('complete-events', [
+      activity('out-only', {
+        kind: 'tool_call', title: 'Bash', toolName: 'Bash', toolOutput: 'boom', createdAt: 1
+      })
+    ])
+
+    expect(markup).toContain('data-expandable')
+    expect(markup).toContain('aria-expanded="false"')
+  })
+
+  it('同一步的入参行与结果行在对话里只占一行，且留下的是带结果的那条', () => {
+    // View 把折叠换成 `timelineRows` 这件事本身要被守住：换回旧的按顺序折叠，这条会红。
+    // 多步会被 Run 折叠体包起来（展开前只显示 "N steps / M unique"），所以这里断言的是折叠体
+    // 给出的计数——两条折成一条 unique，且整个 Run 被标为失败。
+    const markup = render('complete-events', [
+      activity('pre', {
+        kind: 'tool_call', title: 'Bash', toolName: 'Bash',
+        toolInput: '{"command":"exit 1"}', createdAt: 1
+      }),
+      activity('post', {
+        kind: 'tool_call', title: 'Bash', toolName: 'Bash', status: 'failed',
+        toolInput: '{"command":"exit 1"}', createdAt: 2, updatedAt: 2
+      })
+    ])
+
+    expect(markup).toContain('2 steps')
+    expect(markup).toContain('1 unique')
+    expect(markup).toContain('log-row__chip--failed')
+  })
+
+  it('没有结果的历史条目照常渲染，不因为新字段缺席就报错或显示空壳', () => {
+    const markup = render('complete-events', [
+      activity('legacy', {
+        kind: 'tool_call', title: 'Read', toolName: 'Read',
+        toolInput: '{"file_path":"/a.ts"}', createdAt: 1
+      })
+    ])
+
+    expect(markup).toContain('Read')
+    expect(markup).not.toContain('log-row__output')
+    expect(markup).not.toContain('log-row__chip--failed')
+  })
 })
