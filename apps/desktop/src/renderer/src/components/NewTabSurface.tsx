@@ -33,6 +33,10 @@ export function NewTabSurface({
     else setLocalPrompt(value)
   }
   const [launchOptionSelection, setLaunchOptionSelection] = useState<LaunchOptionSelection>({})
+  // 启动时给名字是可选的。两个都留空是最常见的情况，此时一个字都不写，显示名交还派生链
+  // （lib/display-name.ts）。名字只在启动成功后由 store 落地——它自己才握有 sessionId 与 tabId。
+  const [agentName, setAgentName] = useState('')
+  const [tabName, setTabName] = useState('')
   const [optionsExpanded, setOptionsExpanded] = useState(false)
   const [busy, setBusy] = useState<'agent' | 'terminal' | 'browser' | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -220,6 +224,25 @@ export function NewTabSurface({
         rows={4}
       />
 
+      <div className="launch-names">
+        <input
+          className="launch-names__input"
+          value={agentName}
+          onChange={(event) => setAgentName(event.target.value)}
+          placeholder="Agent name (optional)"
+          aria-label="Agent name"
+          disabled={busy !== null}
+        />
+        <input
+          className="launch-names__input"
+          value={tabName}
+          onChange={(event) => setTabName(event.target.value)}
+          placeholder="Tab name (optional)"
+          aria-label="Tab name"
+          disabled={busy !== null}
+        />
+      </div>
+
       <LaunchRefine
         options={launchOptions}
         selection={launchOptionSelection}
@@ -251,7 +274,9 @@ export function NewTabSurface({
             prompt,
             tabGroupId,
             tabId && regionId ? { tabId, regionId } : undefined,
-            launchOptionSelection
+            launchOptionSelection,
+            // trim 后为空即不传：空白不该变成一个 "launch" 档的名字，也绝不阻塞启动。
+            { agentName: agentName.trim() || undefined, tabName: tabName.trim() || undefined }
           ))}
         >
           {busy === 'agent' ? <LoaderCircle className="spin" size={14} /> : <Play size={14} />} {busy === 'agent' ? 'Launching…' : 'Launch agent'}

@@ -7,6 +7,7 @@ import {
   Columns2,
   Copy,
   FolderSymlink,
+  Pencil,
   Send,
   ListX,
   PanelLeftClose,
@@ -83,6 +84,8 @@ export function WorkbenchTabContextMenu({
   tabId,
   copyableAgentSessionId,
   writeClipboardText,
+  onRenameTab,
+  onRenameAgent,
   onClose,
   onCloseOthers,
   onCloseLeft,
@@ -100,6 +103,10 @@ export function WorkbenchTabContextMenu({
   tabId: string
   copyableAgentSessionId: string | null
   writeClipboardText(text: string): Promise<void>
+  // 改名复用这套既有右键菜单，不新增第二套菜单基建。Tab 名总能改；Agent 名只有这张 View 恰好承载
+  // 唯一一个 Agent 时才在这里给（多 Agent 时该在 Region 菜单上对那一格改，此处不冒充）。
+  onRenameTab(): void
+  onRenameAgent?(): void
   onClose(): void
   onCloseOthers(): void
   onCloseLeft(): void
@@ -126,6 +133,17 @@ export function WorkbenchTabContextMenu({
           // already decline that, and the tab strip is the one place where the jump is visible.
           onCloseAutoFocus={(event) => event.preventDefault()}
         >
+          <ContextMenu.Item className="tab-context-menu__item" onSelect={onRenameTab}>
+            <Pencil size={14} />
+            <span>Rename Tab</span>
+          </ContextMenu.Item>
+          {onRenameAgent ? (
+            <ContextMenu.Item className="tab-context-menu__item" onSelect={onRenameAgent}>
+              <Pencil size={14} />
+              <span>Rename Agent</span>
+            </ContextMenu.Item>
+          ) : null}
+          <ContextMenu.Separator className="tab-context-menu__separator" />
           <ContextMenu.Item className="tab-context-menu__item" onSelect={copyModel.viewAddress.onSelect}>
             <Send size={14} />
             <span>{copyModel.viewAddress.label}</span>
