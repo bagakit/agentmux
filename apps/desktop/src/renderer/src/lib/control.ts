@@ -7,9 +7,11 @@ import {
   type AgentMuxOpenDestination,
   type AgentMuxRegion,
   type AgentMuxRegionAnchor,
+  type AgentMuxRegionNeighbors,
   type AgentMuxTabAnchor
 } from '@agentmux/core/control'
 import type { SessionSnapshot } from '../../../shared/contracts'
+import { directionalNeighbor, type DirectionalNeighborInput } from './directional-addressing'
 import {
   activateTab,
   findGroupForTab,
@@ -162,6 +164,32 @@ export function resolveWorkbenchControlTab(
   return input.tabs[ids[0]!]!
 }
 
+/**
+ * 一个 Region 四个方向的邻居。
+ *
+ * 序列真相全部取自既有结构：几何来自 `workbenchRegionBounds`，Tab 顺序来自
+ * `findGroupForTab(...).tabOrder`。不为方向另建第二份布局真相——那会在分屏拖动后立刻对不上。
+ */
+function regionNeighbors(
+  input: WorkbenchControlState,
+  tab: WorkbenchTab,
+  regionId: string
+): AgentMuxRegionNeighbors {
+  const layout = input.layouts[tab.workspaceId]
+  const resolverInput: DirectionalNeighborInput = {
+    regionId,
+    regions: workbenchRegionBounds(tab.layout.root),
+    tabId: tab.id,
+    tabOrder: (layout && findGroupForTab(layout, tab.id)?.tabOrder) ?? []
+  }
+  return {
+    left: directionalNeighbor(resolverInput, 'left'),
+    right: directionalNeighbor(resolverInput, 'right'),
+    up: directionalNeighbor(resolverInput, 'up'),
+    down: directionalNeighbor(resolverInput, 'down')
+  }
+}
+
 export function inspectWorkbenchControlTab(input: WorkbenchControlState, tab: WorkbenchTab): AgentMuxInspectedTab {
   const sessions = new Map(input.sessions.map((session) => [session.id, session]))
   const regions = new Map(projectTabRegions(tab, sessions).map((region) => [region.regionId, region]))
@@ -171,7 +199,7 @@ export function inspectWorkbenchControlTab(input: WorkbenchControlState, tab: Wo
     regions: workbenchRegionBounds(tab.layout.root).map(({ regionId, bounds }) => {
       const region = regions.get(regionId)
       if (!region) throw error('CONTROL_OWNER_LOST', 'Tab Region has no stable Control projection.')
-      return { ...region, bounds }
+      return { ...region, bounds, neighbors: regionNeighbors(input, tab, regionId) }
     })
   }
 }
@@ -183,7 +211,7 @@ export function inspectWorkbenchControlRegion(
   const tab = input.tabs[region.tabId]
   const bounds = tab && workbenchRegionBounds(tab.layout.root).find((item) => item.regionId === region.regionId)?.bounds
   if (!bounds) throw error('REGION_NOT_OPEN', 'Region target is not currently open.')
-  return { ...region, bounds }
+  return { ...region, bounds, neighbors: regionNeighbors(input, tab, region.regionId) }
 }
 
 export function messageTargetCandidates(
