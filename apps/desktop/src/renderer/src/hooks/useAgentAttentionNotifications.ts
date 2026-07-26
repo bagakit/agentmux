@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { resolveNotificationModeId } from '../../../shared/notification-presentation'
 import { api } from '../lib/api'
 import { createAttentionNotifier } from '../lib/attention-notifier'
 import { visibleSessionIds } from '../lib/session-visibility'
@@ -19,7 +20,12 @@ export function useAgentAttentionNotifications(): void {
       notify: (input) => api.ui.notifyAgentAttention(input),
       // Surfaced through the same error seam as everything else, so a platform that will not notify says
       // so once instead of the feature silently doing nothing.
-      onUnsupported: (reason) => reportError(new Error(`Agent notifications are unavailable: ${reason}`))
+      onUnsupported: (reason) => reportError(new Error(`Agent notifications are unavailable: ${reason}`)),
+      // A downgrade is not a failure — the banner showed — but the user asked for a persistent one and
+      // did not get it, so tell them once through the same seam instead of quietly not honouring it.
+      onDowngraded: () => reportError(new Error(
+        'This platform cannot keep a notification open until dismissed; it was shown as a normal banner.'
+      ))
     })
 
     // Seed from whatever is already projected, WITHOUT notifying: Agents that finished before this window
@@ -46,7 +52,13 @@ export function useAgentAttentionNotifications(): void {
             // suppressed exactly the completions this feature exists to announce. And on the Board no
             // Session Region is mounted at all, so nothing is visible there.
             tabGroups: visibleTabGroupsForState(state)
-          })
+          }),
+          // The chosen dwell tier, defaulting when unset. `off` makes reconcile raise nothing while
+          // still advancing its baseline.
+          mode: resolveNotificationModeId(state.config),
+          // The body's conversation summary comes from the Activity timelines already in the Store — no
+          // second message record is kept for notifications.
+          timelines: state.timelines
         })
         // The reconcile itself must never become a silent failure: it is exactly the kind of
         // fire-and-forget path the renderer's net was added for, but a local catch says more.

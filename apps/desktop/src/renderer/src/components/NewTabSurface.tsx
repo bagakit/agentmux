@@ -11,11 +11,14 @@ import { TerminalView } from './TerminalView'
 export function NewTabSurface({
   tabGroupId,
   tabId,
-  regionId
+  regionId,
+  visible = true
 }: {
   tabGroupId: string
   tabId?: string
   regionId?: string
+  /** Hidden Workbench slots stay mounted, but only the visible launcher may own the warm PTY. */
+  visible?: boolean
 }) {
   const [executorId, setExecutorId] = useState('codex')
   // 草稿存进 store，按 regionId 归属。启动的一瞬间本组件就被换成 pending agent surface 而卸载，
@@ -91,19 +94,20 @@ export function NewTabSurface({
   }, [launchOptions])
 
   useEffect(() => {
-    promptRef.current?.focus()
-  }, [])
+    if (visible) promptRef.current?.focus()
+  }, [visible])
 
   useEffect(() => {
     // The create page owns the prewarm trigger. Promoting the shell does not create
     // another hidden terminal; a future create page will warm its own shell on mount.
-    if (workspace) prewarmTerminal(workspace.id)
-  }, [prewarmTerminal, workspace?.id])
+    if (workspace && visible) prewarmTerminal(workspace.id)
+  }, [prewarmTerminal, visible, workspace?.id])
 
   useEffect(() => {
     if (!workspace || executors.every((executor) => executor.detection)) return
+    if (!visible) return
     void detectExecutors(workspace.hostId)
-  }, [executors, detectExecutors, workspace])
+  }, [executors, detectExecutors, visible, workspace])
 
   useEffect(() => {
     if (installedExecutors.some((executor) => executor.id === executorId)) return
@@ -318,6 +322,7 @@ export function NewTabSurface({
                   session={warmSession}
                   themeId={terminalThemeId}
                   interactiveResize={false}
+                  visible={visible}
                   autoFocus={false}
                   linkOrigin={{ workspaceId: workspace.id, tabGroupId }}
                 />

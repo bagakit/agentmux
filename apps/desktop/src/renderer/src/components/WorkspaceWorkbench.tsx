@@ -27,7 +27,7 @@ import {
   SquareTerminal,
   X
 } from 'lucide-react'
-import { lazy, Suspense, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
 import { BrowserPane } from './BrowserPane'
 import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
@@ -444,7 +444,14 @@ function SurfaceContent({
       />
     )
   }
-  return <NewTabSurface tabGroupId={groupId} tabId={tabId} regionId={surface.regionId} />
+  return (
+    <NewTabSurface
+      tabGroupId={groupId}
+      tabId={tabId}
+      regionId={surface.regionId}
+      visible={nativeSurfacesVisible}
+    />
+  )
 }
 
 function WorkbenchRegionNode({
@@ -769,7 +776,7 @@ function PaneGroup({
             />
           </div>
         )) : (
-          <NewTabSurface tabGroupId={group.id} />
+          <NewTabSurface tabGroupId={group.id} visible={nativeSurfacesVisible} />
         )}
       </div>
       <ConfirmationDialog
@@ -930,10 +937,17 @@ function splitTargetAtPoint(point: { x: number; y: number }): SplitTarget | null
 
 export function WorkspaceWorkbench({
   workspaceId,
-  interactiveResize = false
+  interactiveResize = false,
+  visible = true
 }: {
   workspaceId: string
   interactiveResize?: boolean
+  /**
+   * Whether this window-level Workbench slot is currently on screen. The slot stays mounted while
+   * false so SessionPane/xterm/ctxmux attachments survive Workspace navigation; native surfaces use
+   * this seam to stop fit/bounds work until the slot is visible again.
+   */
+  visible?: boolean
 }) {
   const storedLayout = useAppStore((state) => state.layouts[workspaceId])
   const tabs = useAppStore((state) => state.tabs)
@@ -953,6 +967,15 @@ export function WorkspaceWorkbench({
   const [activeDrag, setActiveDrag] = useState<DragTabData | null>(null)
   const [splitTarget, setSplitTarget] = useState<SplitTarget | null>(null)
   const activeTab = activeDrag ? tabs[activeDrag.tabId] : null
+
+  // A Workspace switch can happen while a drag is in flight (for example through a keyboard command).
+  // The parked DndContext must not retain a DragOverlay or finish the gesture against a stale layout
+  // when this Workbench becomes visible again.
+  useEffect(() => {
+    if (visible) return
+    setActiveDrag(null)
+    setSplitTarget(null)
+  }, [visible])
 
   const groupById = useMemo(
     () => new Map(layout?.groups.map((group) => [group.id, group]) ?? []),
@@ -1022,7 +1045,7 @@ export function WorkspaceWorkbench({
           workspaceId={workspaceId}
           layout={layout}
           splitTarget={splitTarget}
-          nativeSurfacesVisible={activeDrag === null && !tabMenuOpen}
+          nativeSurfacesVisible={visible && activeDrag === null && !tabMenuOpen}
           interactiveResize={interactiveResize}
           isRootLeaf={rootIsLeaf}
         />

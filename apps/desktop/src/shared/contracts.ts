@@ -28,10 +28,18 @@ import {
   type ScratchTopicSnapshot
 } from './scratch-topics'
 import type { UsageSnapshot } from './process-usage'
+import type {
+  NotificationDelivery,
+  NotificationModeId,
+  NotificationSettings
+} from './notification-presentation'
 
 export { SCRATCH_WORKSPACE_ID, SCRATCH_WORKSPACE_NAME }
 export type { RunUsage, UsageSnapshot } from './process-usage'
 export type { ScratchTopicSnapshot } from './scratch-topics'
+// Only the two names product code imports through the contracts path are re-exported here; the rest of
+// the notification vocabulary is imported straight from ./notification-presentation where it is used.
+export type { NotificationDelivery, NotificationModeId } from './notification-presentation'
 
 export type LocalHostConfig = {
   id: 'local'
@@ -98,6 +106,10 @@ export type AppConfig = {
   workspaces: WorkspaceRecord[]
   appearance: AppearanceConfig
   browser: BrowserConfig
+  // Optional so the field can land without a version bump or a migration: `ConfigStore.get` fills the
+  // explicit default when it is absent (same shape as the scratch-workspace back-fill), and every read
+  // goes through resolveNotificationModeId, which also defaults. Absence therefore never means "off".
+  notifications?: NotificationSettings
 }
 
 export type FileDocument = {
@@ -708,15 +720,17 @@ export type AgentMuxDesktopApi = {
     /**
      * Ask Desktop main to raise a native notification about one Agent Session.
      *
-     * The renderer decides WHETHER a state change deserves a person's attention; main only delivers,
-     * because only main can reach the OS. The result distinguishes `shown` from `unsupported` so a
-     * caller can fall back to the in-window signal instead of assuming the user was told.
+     * The renderer decides WHETHER a state change deserves a person's attention and passes the chosen
+     * dwell `mode`; main only delivers, because only main can reach the OS. The result distinguishes
+     * `shown` from `unsupported`, and within `shown` reports whether the requested mode was honoured
+     * or the platform downgraded it — so a caller never assumes a persistent banner it did not get.
      */
     notifyAgentAttention(input: {
       sessionId: string
       title: string
       body: string
-    }): Promise<{ status: 'shown' } | { status: 'unsupported'; reason: string }>
+      mode: NotificationModeId
+    }): Promise<NotificationDelivery>
     /**
      * Fires when the user clicks one of those notifications, carrying the Session id it was about.
      * Main focuses the window; WHERE to go inside it stays with the renderer, which owns View/Region.

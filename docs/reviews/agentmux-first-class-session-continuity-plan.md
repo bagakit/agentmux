@@ -1,0 +1,73 @@
+# Task Plan Review — First-class Agent Session Continuity
+
+日期：2026-08-30
+
+## 用户原话
+
+> 我重启以后，进入一个 topic，执行 resume 就是 `Agent resume unavailable` / `This Agent Session has no verified Provider handle for native resume`。
+> 这个能恢复是当前项目的第一性功能，我觉得可以提到一个独立的 feature 里头彻底实现。
+>
+> 切换项目再回来，Earlier scrollback is unavailable，agent tui 需要重新 loading；重启以后要无缝衔接，打开就看。
+
+## 结论
+
+**approved**。这是一个独立的产品 Closure，不是旧 `session-resume` Feature 的单文件修补：
+
+1. Core 必须持久化 Agent Session 的语义身份和经过校验的 Provider-native locator；
+2. Desktop 启动要自动恢复所有已持久化 Workspace/Topic 投影，不要求用户先点 Resume；
+3. 恢复失败的投影仍留在原 Region，原因可区分、可继续处理；
+4. Workspace 切换只改变可见性，不能卸载仍打开的 Workbench、xterm 或 ctxmux attachment；
+5. active Workspace、布局和窗口几何要在正常退出、崩溃/硬重启边界尽可能保留；
+6. 机器重启只承诺 Session 语义和 Provider-native resume，不伪装旧 PTY、scrollback 或 pending interaction 仍存在。
+
+## 架构边界（SSOT）
+
+- `packages/core` 是 Agent Session / Provider / semantic continuity 的唯一 owner。它负责 durable session record、verified handle、恢复决策、去重和结果分类；不得依赖 Electron、React 或第二份 Runtime。
+- `ctxmux` 是 Run/PTY/ordered bytes/Replay/Gap/Attachment 的唯一 owner。机器重启后 Run、PTY、内存 scrollback 消失是合法边界；Core 只能用 Provider-native resume 建立新 Run。
+- `apps/desktop` 只投影 Core 的恢复结果并保存展示布局。Renderer 不拼 provider argv、不维护第二个恢复状态机；布局失败不能删除 Session 语义事实。
+- Workspace/Topic/Tab/Region 是展示身份。跨 Workspace 切换由窗口级 Workbench owner 保持挂载，非活动实例隐藏并停工；真正关闭 Region/Workbench 或用户显式停止时才释放。
+
+## 当前根因证据
+
+- `AgentMuxFileAgentSessionStore` 默认根目录来自临时 runtime，机器重启后 native handle 消失；`agent-timelines` 与它同根。
+- Desktop `store.initialize()` 只 sweep 旧的 attached id，并在恢复失败时裁剪 Tab/Region；这把“恢复失败”伪装成“布局不存在”。
+- `activeWorkspaceId` 被启动逻辑硬编码成第一个 Workspace，若干 dock/rail 字段和窗口几何没有完整持久化。
+- `App.tsx` 只挂载 active Workspace 的一个 Workbench；切换 Workspace 会销毁 xterm/attachment，从而制造 loading 和 replay gap。
+
+## 失败与恢复合同
+
+| 情况 | 合法动作 | 用户可见结果 |
+| --- | --- | --- |
+| 权威 Run 仍在且身份精确匹配 | attach 原 Run | 直接显示，不创建第二个 Run |
+| Run 已丢失且 Provider handle verified、capability positive | native resume，保留 Session ID，创建新 Run | 自动恢复，无需点击 Resume |
+| Provider 不支持 resume | 不伪造新上下文 | 原 Region 保留，显示 `provider-unsupported` |
+| handle 缺失/未验证/失效 | 不猜 token、不 fallback 到新 Run | 原 Region 保留，显示 `native-handle-unavailable` |
+| Core identity/ownership conflict | 停止该候选，不重复 spawn | 原 Region 保留，显示 `continuity-conflict` |
+| 用户显式 stop/retire | 不自动复活 | 投影按明确的 retired 状态处理 |
+
+未知状态不得静默放行或静默删除；应显示“无法判定”并保留诊断入口。
+
+## 机器重启边界
+
+旧 PTY、ctxmux Run、内存 scrollback、pending ACP interaction 不承诺恢复。成功恢复的判据是：同一个 Agent Session ID、经 Provider 验证的 native locator、一个新的权威 Run/attachment，以及原 View/Region/Topic 投影仍在。
+
+## 任务 DAG 与独立验收
+
+| Task | 依赖 | 交付 |
+| --- | --- | --- |
+| T-001 | — | Core durable session store、verified locator 持久化与 reopen round-trip |
+| T-002 | T-001 | Core/Provider 恢复候选、去重、失败分类的单一公共结果 |
+| T-003 | T-002 | Desktop 启动自动恢复所有 Workspace 投影；失败不裁剪布局 |
+| T-004 | — | 窗口级 Workbench registry，跨 Workspace 切换 keep-alive 且非活动实例停工 |
+| T-005 | — | active Workspace、布局字段、窗口几何与 shutdown/pagehide flush |
+| T-006 | T-003,T-004,T-005 | 端到端回归、变异测试、零调用者检查、独立架构/工艺审计 |
+
+每个 Task 必须有可执行 command gate；完成还要提供“故意改坏对应实现后测试变红”和定义文件之外的零调用者证据。旧 `f-23f8f4eb2` 的 durable-path 任务可作为实现输入，但不作为本 Feature 的唯一验收真相。
+
+## 外部成熟模式对照
+
+- a mature workbench 的 `use-app-session-persistence`、field-level persisted UI writer、sleeping-agent resume 和 window-bounds 校验说明：持久化应有 debounced writer、unload/shutdown checkpoint、几何合法性校验，恢复失败保留记录。
+- Herdr 的 `PersistedAgentSession`、provider ref/argv 集中构造、dedupe key 和 geometry-ready 后后台 resume 说明：不要从 session id 猜 transcript path；恢复计划应集中、去重并在布局可见后异步执行。
+
+这里只抽取 project-native 最小模式，不复制第二套 Runtime、daemon 或 UI 状态机。
+

@@ -1,14 +1,21 @@
 import { describe, expect, it } from 'vitest'
 import { createHash } from 'node:crypto'
-import { mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { mkdtemp, readdir, readFile, rm, unlink, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
 import {
   AgentMuxFileAgentSessionStore,
   AgentMuxMemoryAgentSessionStore,
+  defaultAgentMuxAgentSessionStorePath,
   loadAgentSessions,
   normalizeStoredAgentSession,
   type AgentMuxAgentSessionStore
 } from '../src/agent-session-store.js'
+import {
+  defaultAgentMuxRuntimeDirectory,
+  defaultCtxmuxSocketPath,
+  defaultCtxmuxStateDirectory
+} from '../src/runtime-paths.js'
 
 function storedSession() {
   return {
@@ -419,6 +426,89 @@ describe('semantic session persistence boundary', () => {
       await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
     } finally {
       await rm(root, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('durable session identity root', () => {
+  it('round-trips the nativeHandle from a fresh instance and derives agent-timelines from the same root', async () => {
+    // Root cause of the reported bug: the nativeHandle (the `claude --resume` / `codex resume` token)
+    // must survive a restart. A second instance opened at the same path must read it back intact.
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-durable-store-'))
+    const path = join(root, 'agent-sessions.json')
+    try {
+      const writer = new AgentMuxFileAgentSessionStore(path)
+      await writer.compareAndSwap(null, storedSession())
+      await writer.applyTimelineMutation({
+        type: 'append',
+        agentSessionId: 'semantic-1',
+        item: {
+          id: 'timeline-item-1',
+          agentSessionId: 'semantic-1',
+          kind: 'assistant_message',
+          status: 'complete',
+          source: 'acp',
+          createdAt: 1,
+          updatedAt: 1,
+          title: 'Must survive restart'
+        }
+      })
+
+      // A fresh instance simulates the next AgentMux launch reading the persisted identity.
+      const reopened = new AgentMuxFileAgentSessionStore(path)
+      const sessions = await loadAgentSessions(reopened)
+      expect(sessions).toHaveLength(1)
+      expect(sessions[0]!.nativeHandle).toEqual({
+        kind: 'provider',
+        providerId: 'codex',
+        sessionId: 'native-1'
+      })
+
+      // agent-timelines derives from dirname(this.path) — one durable root fixes both files.
+      const timelineDirectory = join(dirname(path), 'agent-timelines')
+      const timelineFiles = await readdir(timelineDirectory)
+      expect(timelineFiles.length).toBeGreaterThan(0)
+      const reopenedTimeline = await reopened.loadTimeline('semantic-1')
+      expect(reopenedTimeline.items.map((item) => item.id)).toEqual(['timeline-item-1'])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps the ctxmux socket and state in the machine-level runtime temp directory', () => {
+    // BOUNDARY: the daemon's socket/state are ephemeral machine-level runtime; moving them would change
+    // the daemon adopt path. They must stay under the temp runtime directory, not follow the session file.
+    const runtimeDirectory = defaultAgentMuxRuntimeDirectory()
+    const temporaryRoot = process.platform === 'darwin' ? '/private/tmp' : tmpdir()
+    expect(runtimeDirectory.startsWith(temporaryRoot)).toBe(true)
+    expect(defaultCtxmuxSocketPath().startsWith(runtimeDirectory)).toBe(true)
+    expect(defaultCtxmuxStateDirectory().startsWith(runtimeDirectory)).toBe(true)
+    // The default (unfixed) session store path is exactly the temp location this task moves off of.
+    expect(defaultAgentMuxAgentSessionStorePath().startsWith(runtimeDirectory)).toBe(true)
+  })
+
+  it('reads only its own path — no migration, no fallback to the old temp location', async () => {
+    // The old temp location's data is deleted by the OS on reboot; reading or dual-writing it would be a
+    // compatibility layer for an asset that no longer exists. Plant a session at the exact old temp
+    // location (via the runtime-directory override) and prove a fresh durable store never surfaces it.
+    const durableRoot = await mkdtemp(join(tmpdir(), 'agentmux-durable-only-'))
+    const legacyRuntime = await mkdtemp(join(tmpdir(), 'agentmux-legacy-runtime-'))
+    const previousOverride = process.env.AGENTMUX_RUNTIME_DIRECTORY
+    process.env.AGENTMUX_RUNTIME_DIRECTORY = legacyRuntime
+    try {
+      const oldTempPath = defaultAgentMuxAgentSessionStorePath()
+      expect(oldTempPath.startsWith(legacyRuntime)).toBe(true)
+      const legacy = new AgentMuxFileAgentSessionStore(oldTempPath)
+      await legacy.compareAndSwap(null, storedSession())
+      await expect(legacy.load()).resolves.toHaveLength(1)
+
+      const durable = new AgentMuxFileAgentSessionStore(join(durableRoot, 'agent-sessions.json'))
+      await expect(durable.load()).resolves.toEqual([])
+    } finally {
+      if (previousOverride === undefined) delete process.env.AGENTMUX_RUNTIME_DIRECTORY
+      else process.env.AGENTMUX_RUNTIME_DIRECTORY = previousOverride
+      await rm(durableRoot, { recursive: true, force: true })
+      await rm(legacyRuntime, { recursive: true, force: true })
     }
   })
 })
