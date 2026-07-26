@@ -107,6 +107,15 @@ async function processIsGone(pid) {
 
 async function firstJsonLine(child, description) {
   let timer
+  // worker 用 stdio ['ignore','pipe','pipe'] 起，但 stderr 从没人读——它一崩，死因就整个消失，
+  // 只剩 "Child exited before reporting its lifecycle checkpoint."，指不到任何一行代码。
+  // 边收边攒，失败时原样附上。
+  let stderr = ''
+  child.stderr?.on('data', (chunk) => { stderr += chunk.toString('utf8') })
+  const withStderr = (message) => {
+    const trailing = stderr.trim()
+    return new Error(trailing ? `${message}\n--- ${description} stderr ---\n${trailing}` : message)
+  }
   try {
     return await Promise.race([
       (async () => {
@@ -116,12 +125,12 @@ async function firstJsonLine(child, description) {
           const newline = buffer.indexOf('\n')
           if (newline >= 0) return JSON.parse(buffer.slice(0, newline))
         }
-        throw new Error('Child exited before reporting its lifecycle checkpoint.')
+        throw withStderr(`Child exited before reporting its ${description} lifecycle checkpoint.`)
       })(),
       new Promise((_resolve, reject) => {
         timer = setTimeout(() => {
           if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
-          reject(new Error(`Timed out waiting for ${description} lifecycle checkpoint.`))
+          reject(withStderr(`Timed out waiting for ${description} lifecycle checkpoint.`))
         }, 5_000)
       })
     ])
