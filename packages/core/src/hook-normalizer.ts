@@ -21,14 +21,115 @@ export type AgentNativeHookStateRule = {
   toolNames?: readonly string[]
 }
 
+/**
+ * 子代理在途记账的 SSOT 声明——每个 Provider 声明自己的事件名，normalizer 据此按会话记「有几个
+ * 子代理还活着」。只有归零时主 Agent 的收尾事件才算真正 done。
+ *
+ * 为什么需要：主 Agent 报收尾（Claude/Codex 的 `Stop`）时，子代理可能还在干活。此前 `Stop` 被照单
+ * 全收判成 `done`，于是界面提前翻成完成、误报完成通知，而工作还在继续。这里把主收尾压住，直到子代理
+ * 全部结束。
+ */
+export type AgentNativeSubagentTracking = {
+  /** 子代理开始事件（roster 加一）。 */
+  startEvents: readonly string[]
+  /** 子代理结束事件（roster 减一）。归零且主 Agent 已请求收尾时，这一步收敛为 `done`。 */
+  stopEvents: readonly string[]
+  /** 主 Agent 的收尾事件——roster 非空时压成 `working`，为空时才放行 rules 给出的 `done`。 */
+  mainStopEvents: readonly string[]
+  /** 关联同一个子代理 start/stop 的 id 键。Claude/Codex 都给 `agent_id`。取第一个能读出的。 */
+  idKeys?: readonly string[]
+}
+
 export type AgentNativeHookSpecification = {
   rules: readonly AgentNativeHookStateRule[]
+  subagentTracking?: AgentNativeSubagentTracking
   nativeHandle?: {
     sessionIdKeys: readonly string[]
     transcriptPathKeys?: readonly string[]
     requireTranscriptPath?: boolean
   }
 }
+
+/**
+ * 一个 run 一份子代理花名册。
+ *
+ * `live` 按 `agent_id` 去重——hook 会重投（agent-hook-command.ts 的 fetch 重试用同一 receiptId），
+ * 用 Set 而不是裸计数器，重复的 start/stop 天然幂等。`anon` 是没有 id 的降级计数（当前内建 Provider
+ * 都带 id，用不到；留作不带 id 的 Provider 的安全网）。`mainStopPending` 记「主 Agent 已请求收尾但
+ * 被子代理压住」——好让最后一个子代理结束时能收敛到 `done`，而不是永远卡在 working。
+ */
+type SubagentRoster = {
+  live: Set<string>
+  anon: number
+  mainStopPending: boolean
+}
+
+// 进程级、按 `runId` 归档。normalizer 本身是纯函数逐事件调用，子代理在途是**跨事件**的事实（一个孤立
+// 的 Stop 信封看不出还有没有子代理活着），所以状态必须落在这里。runId 由 ctxmux 全局唯一签发、`bindRun`
+// 拒绝任何 runId 变更，故它单独就够区分并发的 run——这与本文件 T-002 给时间轴 item 定 id 的口径一致
+// （`${runId}:…`，不掺 session/provider）。仅 subagentTracking 的 Provider 会写入；归零即删除条目。
+const subagentRosters = new Map<string, SubagentRoster>()
+
+function subagentRosterKey(envelope: NativeHookEnvelope): string {
+  return envelope.runId
+}
+
+function subagentRosterAlive(roster: SubagentRoster): boolean {
+  return roster.live.size > 0 || roster.anon > 0
+}
+
+/**
+ * 把一条 hook 事件并入子代理花名册，返回**经过在途压制后**的语义状态。
+ *
+ * 非子代理、非主收尾事件原样返回 `baseState`。三类被接管的事件：
+ * - 子代理开始：记一个在途，Agent 仍在 `working`。
+ * - 子代理结束：去掉一个在途；若归零且主 Agent 早已请求收尾，则这一步收敛为 `done`（否则 `working`，
+ *   主 turn 还没结束）。
+ * - 主 Agent 收尾：roster 非空则压成 `working` 并记下 pending；为空才放行 rules 的 `done`。
+ */
+function applySubagentTracking(
+  specification: AgentNativeHookSpecification,
+  envelope: NativeHookEnvelope,
+  eventName: string,
+  payload: Record<string, unknown>,
+  baseState: AgentSemanticState
+): AgentSemanticState {
+  const tracking = specification.subagentTracking
+  if (!tracking) return baseState
+  const key = subagentRosterKey(envelope)
+  const id = stringField(payload, ...(tracking.idKeys ?? ['agent_id', 'agentId', 'subagent_id']))
+  if (tracking.startEvents.includes(eventName)) {
+    const roster = subagentRosters.get(key) ?? { live: new Set<string>(), anon: 0, mainStopPending: false }
+    if (id) roster.live.add(id)
+    else roster.anon += 1
+    subagentRosters.set(key, roster)
+    return 'working'
+  }
+  if (tracking.stopEvents.includes(eventName)) {
+    const roster = subagentRosters.get(key)
+    if (!roster) return 'working'
+    if (id) roster.live.delete(id)
+    else roster.anon = Math.max(0, roster.anon - 1)
+    if (subagentRosterAlive(roster)) return 'working'
+    const pending = roster.mainStopPending
+    subagentRosters.delete(key)
+    // 最后一个子代理落地：主 Agent 之前被压住的收尾在此刻兑现为 done——否则会永远卡在 working。
+    return pending ? 'done' : 'working'
+  }
+  if (tracking.mainStopEvents.includes(eventName)) {
+    const roster = subagentRosters.get(key)
+    if (roster && subagentRosterAlive(roster)) {
+      // 主 Agent 说完成了，但子代理还在跑——压住，别让界面提前翻成完成、别误报完成通知。
+      roster.mainStopPending = true
+      return 'working'
+    }
+    // 没有在途子代理：清掉可能残留的空条目，放行 rules 给出的收尾状态。
+    subagentRosters.delete(key)
+    return baseState
+  }
+  return baseState
+}
+
 
 function stringField(payload: Record<string, unknown>, ...names: string[]): string | undefined {
   for (const name of names) {
@@ -237,7 +338,15 @@ export function normalizeNativeHook(
 ): NormalizedHookEvent {
   const payload = envelope.payload ?? {}
   const eventName = envelope.eventName ?? stringField(payload, 'hook_event_name', 'hookEventName') ?? 'unknown'
-  const semanticState = eventState(specification, eventName, payload)
+  // 先按 rules 定出这条事件本身的语义，再经子代理在途记账压制：主 Agent 报收尾时若子代理还活着，
+  // rules 给出的 `done` 会被压回 `working`，直到最后一个子代理落地才兑现。
+  const semanticState = applySubagentTracking(
+    specification,
+    envelope,
+    eventName,
+    payload,
+    eventState(specification, eventName, payload)
+  )
   const observedAt = Date.now()
   const status: AgentStatus = {
     state: semanticState === 'unknown' ? 'running' : semanticState,

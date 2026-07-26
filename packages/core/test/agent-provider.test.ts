@@ -544,6 +544,13 @@ describe('built-in agent providers', () => {
   it('declares Codex managed hooks as a marker-scoped merge so committed project hooks survive', () => {
     const mutation = createCodexManagedHookPlan('/tmp/work').mutations[0]
     expect(mutation?.merge).toEqual({ kind: 'json-managed-events', marker: 'agentmux-hook.js' })
+    // 子代理在途压制的产品接线：SubagentStop 必须被真正安装，否则 Provider CLI 永不发这个事件，
+    // 花名册永不减一，主 Stop 被永远压住，Agent 卡在 working 出不来。start 同样必须在，否则记不上。
+    const parsed = JSON.parse(mutation?.content ?? '{}') as {
+      hooks: Record<string, unknown>
+    }
+    expect(parsed.hooks['SubagentStart']).toBeDefined()
+    expect(parsed.hooks['SubagentStop']).toBeDefined()
   })
 
   it('generates a workspace-scoped Claude settings.json merge that preserves foreign settings', () => {
@@ -562,6 +569,9 @@ describe('built-in agent providers', () => {
     expect(parsed.hooks['PreToolUse']?.[0]?.matcher).toBe('*')
     // Non-tool lifecycle events carry no matcher.
     expect(parsed.hooks['SessionStart']?.[0]?.matcher).toBeUndefined()
+    // 同 Codex：子代理 start/stop 都要安装，否则子代理在途压制在产品上是死的。
+    expect(parsed.hooks['SubagentStart']?.[0]?.hooks?.[0]?.command).toContain('agentmux-hook.js')
+    expect(parsed.hooks['SubagentStop']?.[0]?.hooks?.[0]?.command).toContain('agentmux-hook.js')
   })
 
   it('resolves the managed hook plan for JSON- and YAML-config native providers, null for the rest', () => {

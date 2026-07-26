@@ -127,6 +127,7 @@ const CODEX_HOOK_EVENTS = [
   'PostToolUse',
   'UserPromptSubmit',
   'SubagentStart',
+  'SubagentStop',
   'Stop'
 ] as const
 
@@ -140,6 +141,14 @@ const CLAUDE_HOOKS: AgentNativeHookSpecification = {
       state: 'working'
     }
   ],
+  // 主 Agent 报 Stop 时子代理可能还在跑——按会话记 SubagentStart/SubagentStop 的在途，任一存活就把
+  // 主 Stop 压成 working，全部结束后才兑现 done。Claude 的子代理事件都带 `agent_id`。
+  subagentTracking: {
+    startEvents: ['SubagentStart'],
+    stopEvents: ['SubagentStop'],
+    mainStopEvents: ['Stop', 'StopFailure'],
+    idKeys: ['agent_id', 'agentId']
+  },
   nativeHandle: {
     sessionIdKeys: ['session_id'],
     transcriptPathKeys: ['transcript_path', 'transcriptPath']
@@ -160,6 +169,13 @@ const CODEX_HOOKS: AgentNativeHookSpecification = {
       state: 'working'
     }
   ],
+  // 同 Claude：子代理在途时压住主 Stop。Codex 的 SubagentStart/SubagentStop 也带 `agent_id`。
+  subagentTracking: {
+    startEvents: ['SubagentStart'],
+    stopEvents: ['SubagentStop'],
+    mainStopEvents: ['Stop'],
+    idKeys: ['agent_id', 'agentId']
+  },
   nativeHandle: {
     sessionIdKeys: ['session_id'],
     transcriptPathKeys: ['transcript_path', 'transcriptPath']
@@ -235,6 +251,8 @@ const CLAUDE_HOOK_EVENTS = [
   'UserPromptSubmit',
   'PreToolUse',
   'PostToolUse',
+  'SubagentStart',
+  'SubagentStop',
   'Stop'
 ] as const
 

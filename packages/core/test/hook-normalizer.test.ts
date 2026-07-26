@@ -349,4 +349,106 @@ describe('native hook normalization', () => {
       expect(mutation.item.id).toBe('run-corr:receipt-ask:0')
     })
   })
+
+  /**
+   * 子代理还在跑时，主 Agent 的 done 不算数。
+   *
+   * SubagentStart 被平铺映射成 working、Stop 被照单全收判成 done——于是主 Agent 报 Stop 时即便子代理
+   * 还在干活，界面也会提前翻成完成、误报完成通知。这里按会话记在途计数，任一子代理存活就把主 Stop
+   * 压成 working，全部结束后才收敛 done。
+   *
+   * 花名册是进程级跨事件状态，所以每条用例用**互不相同**的 runId，避免相互串味。
+   */
+  describe('子代理在途压制主 done', () => {
+    const claudeRun = (runId: string) =>
+      (eventName: string, payload: Record<string, unknown>, receiptId = `r-${eventName}-${Math.random()}`) =>
+        providers.get('claude').normalizeHook({
+          receiptId,
+          agentSessionId: `sess-${runId}`,
+          runId,
+          providerId: 'claude',
+          eventName,
+          payload
+        })
+
+    it('子代理存活时，主 Agent 的 Stop 被压成 working 而不是 done', () => {
+      const hook = claudeRun('run-suppress')
+      hook('SubagentStart', { agent_id: 'sub-1', agent_type: 'Explore' })
+      const stop = hook('Stop', { last_assistant_message: 'All done.' })
+      // 主 Agent 说完成了，但子代理还在跑——不许翻成 done。
+      expect(stop.semanticState).toBe('working')
+      expect(stop.status.state).toBe('working')
+    })
+
+    it('两个子代理，只结束一个时主 Stop 仍被压住', () => {
+      const hook = claudeRun('run-partial')
+      hook('SubagentStart', { agent_id: 'a' })
+      hook('SubagentStart', { agent_id: 'b' })
+      hook('SubagentStop', { agent_id: 'a' })
+      const stop = hook('Stop', { last_assistant_message: 'done?' })
+      expect(stop.semanticState).toBe('working')
+    })
+
+    it('子代理全部结束后，主 Agent 正常收敛到 done', () => {
+      const hook = claudeRun('run-converge')
+      hook('SubagentStart', { agent_id: 'only' })
+      const stopWhileAlive = hook('Stop', { last_assistant_message: 'wait' })
+      expect(stopWhileAlive.semanticState).toBe('working')
+      // 最后一个子代理落地——此刻兑现之前被压住的收尾，而不是卡在 working 出不来。
+      const lastStop = hook('SubagentStop', { agent_id: 'only' })
+      expect(lastStop.semanticState).toBe('done')
+    })
+
+    it('没有子代理时，主 Agent 的 Stop 照旧直接判 done——压制不误伤常规收尾', () => {
+      const hook = claudeRun('run-nosubs')
+      const stop = hook('Stop', { last_assistant_message: 'finished' })
+      expect(stop.semanticState).toBe('done')
+      expect(stop.status.state).toBe('done')
+    })
+
+    it('子代理结束但主 Agent 尚未收尾时，停在 working 不擅自判 done', () => {
+      const hook = claudeRun('run-noStopYet')
+      hook('SubagentStart', { agent_id: 'x' })
+      const subStop = hook('SubagentStop', { agent_id: 'x' })
+      // 主 turn 还没结束（没有 Stop pending），子代理归零不该独自宣布完成。
+      expect(subStop.semanticState).toBe('working')
+    })
+
+    it('重复投递的 SubagentStart（同一 agent_id）幂等，不会虚增在途数', () => {
+      const hook = claudeRun('run-dupe')
+      hook('SubagentStart', { agent_id: 'dup' }, 'same-receipt')
+      hook('SubagentStart', { agent_id: 'dup' }, 'same-receipt')
+      // 只结束一次就应归零——若按裸计数器实现，这里会残留 1 个在途，主 Stop 被永远压住。
+      hook('SubagentStop', { agent_id: 'dup' })
+      const stop = hook('Stop', { last_assistant_message: 'ok' })
+      expect(stop.semanticState).toBe('done')
+    })
+
+    it('Codex 同样按 agent_id 记账压制主 Stop', () => {
+      const codex = (eventName: string, payload: Record<string, unknown>) =>
+        providers.get('codex').normalizeHook({
+          receiptId: `cx-${eventName}-${Math.random()}`,
+          agentSessionId: 'sess-codex-sub',
+          runId: 'run-codex-sub',
+          providerId: 'codex',
+          eventName,
+          payload
+        })
+      codex('SubagentStart', { agent_id: 'cx-1', agent_type: 'reviewer' })
+      const stop = codex('Stop', { last_assistant_message: 'done' })
+      expect(stop.semanticState).toBe('working')
+      const converge = codex('SubagentStop', { agent_id: 'cx-1' })
+      expect(converge.semanticState).toBe('done')
+    })
+
+    it('花名册按 runId 隔离：另一个 run 的子代理不会压住本 run 的 Stop', () => {
+      const other = claudeRun('run-other')
+      other('SubagentStart', { agent_id: 'foreign' })
+      // 本 run 自己没有子代理，Stop 应正常 done，不被别的 run 的在途污染——若 roster key 把并发的
+      // run 混成一格，foreign 会压住这里，断言随即变红。
+      const mine = claudeRun('run-mine')
+      const stop = mine('Stop', { last_assistant_message: 'ok' })
+      expect(stop.semanticState).toBe('done')
+    })
+  })
 })
