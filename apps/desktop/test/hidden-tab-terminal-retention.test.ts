@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { allStyles } from './helpers/styles.js'
 
 /**
  * 切回一个已经打开过的终端，不该再看到 "Restoring terminal…"。
@@ -16,10 +17,7 @@ const workbench = readFileSync(
   new URL('../src/renderer/src/components/WorkspaceWorkbench.tsx', import.meta.url),
   'utf8'
 )
-const styles = readFileSync(
-  new URL('../src/renderer/src/styles.css', import.meta.url),
-  'utf8'
-)
+const styles = allStyles()
 const terminalView = readFileSync(
   new URL('../src/renderer/src/components/TerminalView.tsx', import.meta.url),
   'utf8'

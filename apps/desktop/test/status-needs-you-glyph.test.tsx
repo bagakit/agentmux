@@ -1,10 +1,10 @@
-import { readFileSync } from 'node:fs'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { StatusDot } from '../src/renderer/src/components/StatusDot.js'
+import { allStyles } from './helpers/styles.js'
 
-const styles = readFileSync(new URL('../src/renderer/src/styles.css', import.meta.url), 'utf8')
+const styles = allStyles()
 
 // Isolate one CSS rule body by its selector text so an assertion is about that rule, not an
 // accidental match elsewhere in the sheet.

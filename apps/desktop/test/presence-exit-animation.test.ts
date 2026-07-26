@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { allStyles } from './helpers/styles.js'
 
 // A regression guard for a failure mode that cost three packaging runs and looked nothing like its
 // cause. Radix wraps a Dialog/Menu `Content` in `Presence`, which keeps the node MOUNTED after close
@@ -20,7 +21,7 @@ const rendererDir = new URL('../src/renderer/src/', import.meta.url)
 // Comments are stripped before parsing: they sit between rules, so a naive brace walk would fold a
 // comment into the following rule's selector text — enough for prose that merely mentions a class to
 // fabricate a match, or to make a real offender's message unreadable.
-const styles = readFileSync(new URL('styles.css', rendererDir), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+const styles = allStyles().replace(/\/\*[\s\S]*?\*\//g, '')
 
 // Radix parts whose rendered node is wrapped in `Presence` — verified against the installed
 // @radix-ui/react-menu and @radix-ui/react-dialog, which both mount Content/SubContent/Overlay

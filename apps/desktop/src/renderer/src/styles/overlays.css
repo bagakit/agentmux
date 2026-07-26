@@ -1,0 +1,87 @@
+/**
+ * 浮层：Dialog、Context Menu、Quick Switch、Tooltip。
+ *
+ * 按表面分文件（见 docs/design/agentmux-surface-density.md「样式表的组织」）。
+ * 层叠顺序即 index.css 里的 @import 顺序，不靠特异性打架决定胜负。
+ */
+
+.confirmation-dialog__overlay { position: fixed; z-index: 110; inset: 0; background: var(--scrim-3); backdrop-filter: blur(2px); }
+.confirmation-dialog {
+  position: fixed;
+  z-index: 111;
+  top: 50%;
+  left: 50%;
+  width: min(380px, calc(100vw - 32px));
+  padding:var(--sp-6);
+  transform: translate(-50%, -50%);
+  border: 1px solid var(--neutral-1);
+  border-radius: var(--radius-lg);
+  outline: none;
+  color: var(--text);
+  background: var(--surface-2);
+  box-shadow: 0 30px 90px var(--scrim-3);
+}
+.confirmation-dialog__icon { width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; margin-bottom:var(--sp-5); border: 1px solid var(--red-line); border-radius: var(--radius); color: var(--red-text); background: var(--red-bg); }
+.confirmation-dialog__title { margin:0; font-size: var(--fs-title); letter-spacing: -.015em; }
+.confirmation-dialog__description { margin:var(--sp-3) 0 0; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.55; }
+.confirmation-dialog > p { margin:var(--sp-5) 0 0; padding:var(--sp-4) var(--sp-4); overflow: hidden; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-0); font-family: "SFMono-Regular", monospace; font-size: var(--fs-meta); text-overflow: ellipsis; white-space: nowrap; }
+.confirmation-dialog footer { display: flex; justify-content: flex-end; gap:var(--sp-3); margin-top:var(--sp-6); padding-top:var(--sp-5); border-top: 1px solid var(--line); }
+
+/* Quick switcher — the window's one global navigation overlay. Graphite surface at the top elevation
+   and largest radius; layered by surface fill + top highlight + shadow, not a stroke (density SSOT:
+   "描边不作为控件的主要视觉手段"). Accent appears only to express a row's STATE (needs-you / error),
+   never as decoration; row title ≥12px, subtitle at the 10–11px metadata floor. */
+.quick-switch__overlay { position: fixed; z-index: 120; inset: 0; background: var(--scrim-3); backdrop-filter: blur(2px); }
+.quick-switch {
+  position: fixed;
+  z-index: 121;
+  top: 14vh;
+  left: 50%;
+  width: min(560px, calc(100vw - 32px));
+  max-height: 62vh;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(-50%);
+  border-radius: var(--radius-lg);
+  outline: none;
+  color: var(--text);
+  background: var(--surface-2);
+  box-shadow: var(--elev-3), var(--hl-strong);
+  overflow: hidden;
+}
+/* The title/description name the dialog for assistive tech without spending vertical chrome. */
+.quick-switch__title, .quick-switch__description { position: absolute; width: 1px; height: 1px; padding:0; margin:-1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.quick-switch__input { display: flex; align-items: center; gap:var(--sp-4); padding:var(--sp-5) var(--sp-6); color: var(--text-3); box-shadow: inset 0 -1px var(--line-soft); }
+.quick-switch__input > svg { flex: none; }
+.quick-switch__input input { flex: 1; min-width: 0; border: 0; padding:0; background: transparent; color: var(--text); font-size: var(--fs-title); }
+.quick-switch__input input::placeholder { color: var(--text-3); }
+.quick-switch__input input:focus-visible { outline: none; }
+.quick-switch__list { flex: 1; min-height: 0; overflow-y: auto; padding:var(--sp-3); }
+.quick-switch__empty { padding:var(--sp-7) var(--sp-5); color: var(--text-3); font-size: var(--fs-body); text-align: center; }
+.quick-switch__row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap:var(--sp-4);
+  padding:var(--sp-3) var(--sp-4);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+/* hover/active row lifts by surface brightness, not a border (SSOT control language). */
+.quick-switch__row[data-active="true"] { background: var(--surface-3); }
+.quick-switch__glyph { flex: none; width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-2); }
+.quick-switch__labels { flex: 1; min-width: 0; display: flex; flex-direction: column; gap:1px; }
+.quick-switch__row-title { font-size: var(--fs-body); line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.quick-switch__row-subtitle { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* State expresses through the shared StatusDot on the right; the row tint is a quiet echo of that
+   same state, kept to needs-you/error so a scan finds who needs you without reading every label. */
+.quick-switch__row[data-attention="needs-you"] .quick-switch__row-title { color: var(--amber); }
+.quick-switch__row[data-attention="error"] .quick-switch__row-title { color: var(--red); }
+.quick-switch__row .status { flex: none; }
+.quick-switch__footer { display: flex; justify-content: space-between; gap:var(--sp-5); padding:var(--sp-4) var(--sp-5); color: var(--text-3); font-size: var(--fs-micro); box-shadow: inset 0 1px var(--line-soft); }
+.quick-switch__footer kbd { display: inline-flex; align-items: center; padding:1px var(--sp-2); border-radius: var(--radius-sm); background: var(--surface-3); color: var(--text-2); font-family: var(--font-mono); font-size: var(--fs-micro); }
+.dialog-error { margin-bottom:var(--sp-4); padding:var(--sp-4); border: 1px solid var(--red-line); border-radius: var(--radius-sm); color: var(--red-text); background: var(--red-bg); font-size: var(--fs-meta); }

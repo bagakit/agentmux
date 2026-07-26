@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { allStyles } from './helpers/styles.js'
 
 // 守住控件语言里的选中态禁令（docs/design/agentmux-surface-density.md《控件语言》）。
 //
@@ -14,11 +14,8 @@ import { describe, expect, it } from 'vitest'
 // 一刀切禁掉全部 inset 竖条会误伤前者，只盯 `.workspace-topic-item` 会放过后来的新列表。
 // 判据是**这条竖条有没有出现在一个表达选中的选择器上**。
 
-const styles = readFileSync(
-  new URL('../src/renderer/src/styles.css', import.meta.url),
-  'utf8'
-  // 注释里描述规则的文字不是规则本身。
-).replace(/\/\*[\s\S]*?\*\//g, '')
+// 注释里描述规则的文字不是规则本身。
+const styles = allStyles().replace(/\/\*[\s\S]*?\*\//g, '')
 
 /**
  * 什么样的选择器在表达"选中"。
