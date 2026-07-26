@@ -39,6 +39,10 @@
     "./launch-option": {
       "types": "./dist/agent-launch-option.d.ts",
       "import": "./dist/agent-launch-option.js"
+    },
+    "./agent-status": {
+      "types": "./dist/agent-status-freshness.d.ts",
+      "import": "./dist/agent-status-freshness.js"
     }
   },
   "bin": {
