@@ -53,8 +53,9 @@ describe('App 把 workbench 快捷键接到窗口监听', () => {
     // 掐掉这行注册（只保留 onKeyDown 定义）——单测里判定仍全绿，这里会红。
     expect(effect).toContain("window.addEventListener('keydown'")
     expect(effect).toContain('{ capture: true }')
-    // capture 段是关键：抢在聚焦的 xterm textarea 吞掉击键之前拿到它。
-    // 命中本层的键必须 preventDefault，否则 Cmd+W 会漏到系统菜单去关窗口。
+    // capture 段是关键：抢在聚焦的 xterm textarea 吞掉击键之前拿到它。命中本层的键必须
+    // preventDefault，压掉浏览器默认行为。（Cmd+W 不落到系统关窗，靠的是主进程换掉了默认菜单，
+    // 见 main/application-menu.ts——那条保证在主进程测里守，不在这里。）
     expect(effect).toContain('event.preventDefault()')
   })
 
