@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { app } from 'electron'
+import { durableWriteFile } from '@agentmux/core'
 import { z } from 'zod'
 import type {
   BrowserProfileImportedSource,
@@ -285,26 +286,6 @@ export class BrowserProfileStore {
   private async writeMetadata(metadata: BrowserProfileMetadata): Promise<void> {
     const validated = metadataSchema.parse(metadata)
     await mkdir(dirname(this.path), { recursive: true })
-    const tempPath = `${this.path}.${process.pid}.${randomUUID()}.tmp`
-    try {
-      await writeFile(tempPath, `${JSON.stringify(validated, null, 2)}\n`, {
-        encoding: 'utf8',
-        flag: 'wx',
-        mode: 0o600
-      })
-      await rename(tempPath, this.path)
-    } catch (error) {
-      try {
-        await unlink(tempPath)
-      } catch (cleanupError) {
-        if (!isMissingFileError(cleanupError)) {
-          throw new AggregateError(
-            [error, cleanupError],
-            'Failed to persist Browser Profile metadata and clean up its temporary file'
-          )
-        }
-      }
-      throw error
-    }
+    await durableWriteFile(this.path, `${JSON.stringify(validated, null, 2)}\n`)
   }
 }
