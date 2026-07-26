@@ -225,11 +225,118 @@ function runningRun(acceptedInputBytes: number | null = 37): CtxmuxAdapterRun {
   }
 }
 
+function sessionFor(agentSessionId: string, runId: string, workspacePath: string) {
+  return {
+    ...storedSession(),
+    agentSessionId,
+    workspacePath,
+    run: { runId },
+    hookBindingId: `binding-${agentSessionId}`,
+    hookToken: `token-${agentSessionId}`
+  }
+}
+
+function runFor(runId: string, workspacePath: string, acceptedInputBytes = 37): CtxmuxAdapterRun {
+  return {
+    ...runningRun(acceptedInputBytes),
+    runId,
+    workspacePath
+  }
+}
+
 afterEach(() => {
   vi.useRealTimers()
 })
 
 describe('AgentMuxClient 握手超时行为（真实 registry/store 边界）', () => {
+  it('public connect isolates one vanished Run and still connects the other Session', async () => {
+    vi.useFakeTimers()
+    const store = new AgentMuxMemoryAgentSessionStore()
+    const failed = sessionFor('failed-agent', 'failed-run', '/tmp/failed-agent')
+    const healthy = sessionFor('healthy-agent', 'healthy-run', '/tmp/healthy-agent')
+    await store.compareAndSwap(null, failed)
+    await store.compareAndSwap(null, healthy)
+
+    const client = new AgentMuxClient({ store })
+    const kernel = (client as unknown as { kernel: Record<string, unknown> }).kernel
+    const failedRun = runFor('failed-run', '/tmp/failed-agent')
+    const healthyRun = runFor('healthy-run', '/tmp/healthy-agent')
+    const query = '\u001b[?u'
+    const queryEvent = {
+      type: 'data' as const,
+      runId: healthyRun.runId,
+      startByte: 0,
+      endByte: Buffer.byteLength(query),
+      data: query,
+      dataBytes: Uint8Array.from(Buffer.from(query))
+    }
+    let connected = false
+    const disconnect = vi.fn()
+    kernel.connect = async () => { connected = true }
+    kernel.isConnected = () => connected
+    kernel.disconnect = disconnect
+    kernel.list = async () => [failedRun, healthyRun]
+    kernel.onEvent = () => () => {}
+    kernel.onError = () => () => {}
+    kernel.attach = async (runId: string) => ({
+      run: runId === failedRun.runId ? failedRun : healthyRun,
+      replay: runId === healthyRun.runId ? [queryEvent] : [],
+      gap: null
+    })
+    kernel.status = async (runId: string) => {
+      if (runId === failedRun.runId) {
+        throw new AgentMuxError(
+          'fixture Run disappeared',
+          'CTXMUX_run_not_found',
+          'daemon no longer owns failed-run'
+        )
+      }
+      return healthyRun
+    }
+    kernel.detach = async () => undefined
+    kernel.identity = () => ({
+      daemonInstanceId: 'daemon',
+      protocolVersion: 1,
+      buildIdentity: 'ctxmux@test'
+    })
+    kernel.input = async (_runId: string, operation: { expectedByte: number; data: string }) => ({
+      run: { ...healthyRun, acceptedInputBytes: operation.expectedByte + Buffer.byteLength(operation.data) },
+      appliedByteRange: {
+        startByte: operation.expectedByte,
+        endByte: operation.expectedByte + Buffer.byteLength(operation.data)
+      }
+    });
+    // Keep this public-connect test focused on the per-Session handshake boundary. Hook restoration is
+    // independently owned and would otherwise require a real listener/token fixture here.
+    (client as unknown as { tryRestoreHookIngress: () => Promise<void> }).tryRestoreHookIngress = async () => {}
+    const events: Array<{
+      type: string
+      agentSessionId?: string
+      code?: string
+    }> = []
+    client.onEvent((event) => {
+      if (event.type === 'agent-error' || event.type === 'agent-session') {
+        events.push(event.type === 'agent-error'
+          ? { type: event.type, ...(event.agentSessionId ? { agentSessionId: event.agentSessionId } : {}), code: event.code }
+          : { type: event.type, agentSessionId: event.session.agentSessionId })
+      }
+    })
+
+    const connecting = client.connect()
+    await vi.advanceTimersByTimeAsync(10_000)
+    await connecting
+
+    expect(disconnect).not.toHaveBeenCalled()
+    expect(client.agentSessions()).toHaveLength(2)
+    expect(events).toContainEqual({
+      type: 'agent-error',
+      agentSessionId: 'failed-agent',
+      code: AGENT_TERMINAL_HANDSHAKE_FAILED
+    })
+    expect(client.agentSession('healthy-agent').terminalHandshake?.acknowledged).toBe(true)
+    await client.dispose()
+  })
+
   async function clientWithFakeKernel(
     status: () => CtxmuxAdapterRun,
     store: AgentMuxMemoryAgentSessionStore = new AgentMuxMemoryAgentSessionStore()
@@ -358,8 +465,13 @@ describe('AgentMuxClient 握手超时行为（真实 registry/store 边界）', 
     vi.useFakeTimers()
     const { client, session } = await clientWithFakeKernel(() => runningRun(37))
     const kernel = (client as unknown as { kernel: { status: () => Promise<never> } }).kernel
+    const transportError = new AgentMuxError(
+      'fixture run disappeared',
+      'CTXMUX_run_not_found',
+      'daemon said the run was already gone'
+    )
     kernel.status = async () => {
-      throw new AgentMuxError('fixture run disappeared', 'CTXMUX_run_not_found')
+      throw transportError
     }
     const operation = (client as unknown as {
       ensureTerminalHandshakeOrDegrade(
@@ -367,9 +479,14 @@ describe('AgentMuxClient 握手超时行为（真实 registry/store 边界）', 
         run: CtxmuxAdapterRun
       ): Promise<unknown>
     }).ensureTerminalHandshakeOrDegrade(session, runningRun(37))
-    const rejected = expect(operation).rejects.toMatchObject({ code: AGENT_TERMINAL_HANDSHAKE_FAILED })
+    const rejected = operation.catch((error: unknown) => error)
     await vi.advanceTimersByTimeAsync(10_000)
-    await rejected
+    const observed = await rejected
+    expect(observed).toMatchObject({
+      code: AGENT_TERMINAL_HANDSHAKE_FAILED,
+      detail: 'daemon said the run was already gone'
+    })
+    expect(observed).toHaveProperty('cause', transportError)
     expect(client.agentSession('degrade-agent').terminalCapability).toBeUndefined()
     await client.dispose()
   })
