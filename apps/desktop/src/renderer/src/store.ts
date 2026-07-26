@@ -170,6 +170,7 @@ import {
   PR_BLOCKER_MESSAGES,
   type PrEligibilityInput
 } from './lib/pr-eligibility'
+import { decayStaleAgentStatuses as computeDecayedAgentStatuses } from './lib/agent-status-decay'
 
 type ViewMode = SessionViewMode
 export type MainSurface = 'workbench' | 'board'
@@ -389,6 +390,11 @@ type AppState = {
   canonicalizeAgentLaunch(result: AgentLaunchResult): Promise<AgentLaunchResult | null>
   resyncTimeline(sessionId: string): Promise<void>
   applyEvent(event: RuntimeEvent): void
+  /**
+   * 把所有已陈旧的 `working` Agent 降为中性态（见 lib/agent-status-decay）。传 `now` 而非内部读
+   * Date.now()，判定才可断言、测试才不 flake。什么都不该降时不写入，避免无谓的重渲染。
+   */
+  decayStaleAgentStatuses(now: number): void
   setConfig(config: AppConfig): void
   reportError(error: unknown): void
 }
@@ -3471,6 +3477,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     })
     if (sessionMembershipGap) startSessionMembershipResync(event)
     if (timelineGapSessionId) void get().resyncTimeline(timelineGapSessionId)
+  },
+  decayStaleAgentStatuses(now) {
+    set((state) => {
+      const decayed = computeDecayedAgentStatuses(state.sessions, now)
+      // computeDecayedAgentStatuses 无变化时返回原引用——原样返回，Zustand 不做无谓写入。
+      return decayed === state.sessions ? state : { sessions: decayed }
+    })
   },
   setConfig(config) {
     detectionRequestIds.clear()
