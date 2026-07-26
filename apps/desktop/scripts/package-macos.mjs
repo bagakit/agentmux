@@ -839,8 +839,11 @@ async function main() {
     initialSource.status === '',
     `macOS packaging requires a clean source tree, found:\n${initialSource.status}`
   )
-  await run('pnpm', ['build'], { cwd: desktopRoot })
+  // The Renderer imports Core's public subpaths (for example `@agentmux/core/agent-status`).
+  // Build Core first so a clean checkout never asks Vite to resolve a dist file that has not
+  // been emitted yet; the packaged runtime still copies the exact Core output from this build.
   await run('pnpm', ['--filter', '@agentmux/core', 'build'], { cwd: repositoryRoot })
+  await run('pnpm', ['build'], { cwd: desktopRoot })
   const electronRoot = dirname(require.resolve('electron/package.json'))
   const electronApp = join(electronRoot, 'dist', 'Electron.app')
   assert(await pathExists(electronApp), 'The locked Electron application is missing.')
