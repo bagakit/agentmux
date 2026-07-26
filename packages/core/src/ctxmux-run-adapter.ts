@@ -26,6 +26,10 @@ import {
 } from '@ctxmux/sdk'
 import { AgentMuxError } from './errors.js'
 import {
+  reclaimOrphanEndpointDirectories,
+  type EndpointReclaimOutcome
+} from './runtime-endpoint-reclaim.js'
+import {
   CTXMUX_MANIFEST_SHA256,
   defaultAgentMuxRuntimeDirectory,
   defaultCtxmuxSocketPath,
@@ -552,6 +556,14 @@ export class CtxmuxRunAdapter {
   readonly stateDirectory = defaultCtxmuxStateDirectory()
   private client: CtxmuxClient | null = null
   private runtime: RuntimeIdentity | null = null
+  /**
+   * 本次 connect() 那趟孤儿目录回收的结果。null 表示还没连过。
+   *
+   * 回收在启动路径上自愈式地跑，成功时不该打扰任何人；但失败必须能被看见，否则一个每次都删不掉的
+   * 目录会无声地一直堆着。诊断读这里，而不是让回收自己去打日志——Core 没有日志设施，为这一个用途
+   * 造一个是没必要的熵。
+   */
+  lastEndpointReclaim: EndpointReclaimOutcome | null = null
   private readonly attachments = new Map<string, LiveAttachment>()
   private eventListener: ((event: CtxmuxAdapterEvent) => void) | null = null
   private errorListener: ((error: AgentMuxError, runId?: string) => void) | null = null
@@ -577,6 +589,13 @@ export class CtxmuxRunAdapter {
       mkdir(dirname(this.socketPath), { recursive: true, mode: 0o700 }),
       mkdir(this.stateDirectory, { recursive: true, mode: 0o700 })
     ])
+    // 每次 artifact 升级都会派生一个新的 endpoint 目录，旧的连同它 110MB 级的 state.sqlite3 会永远
+    // 留在盘上。连接是唯一必经、且此刻我们恰好知道「当前 endpoint 是哪个」的时点，回收挂在这里。
+    // 它自己吞掉所有失败（返回 outcome、不抛），所以回收不了也绝不阻断启动。
+    //
+    // 结果留在实例上，供 `agentmux doctor` 读取：回收失败若无处可看，「不阻断启动、只留可诊断信息」
+    // 就只剩前半句——每次启动都删不掉的目录会无声地一直堆着。
+    this.lastEndpointReclaim = await reclaimOrphanEndpointDirectories(dirname(this.socketPath))
     await Promise.all([
       chmod(dirname(this.socketPath), 0o700),
       chmod(this.stateDirectory, 0o700)
