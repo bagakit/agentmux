@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import type { DesktopControlResponse } from '../src/shared/contracts.js'
 import {
+  addressingRecovery,
+  formatHandoffAddress,
   formatRegionAddress,
   formatSessionAddress,
   formatViewAddress
@@ -69,5 +73,250 @@ describe('shell 转义：粘贴即可执行', () => {
     const nasty = "a'b c"
     expect(formatRegionAddress(nasty)).toContain(`--to-region='a'"'"'b c'`)
     expect(formatViewAddress(nasty)).toContain(`--to-tab='a'"'"'b c'`)
+  })
+})
+
+describe('交接入口：按意图命名，替用户解析出最精确的地址', () => {
+  // 用户想的是"把这个 Agent 交给别人"，不是"我要 Region 还是 Session"。解析顺序只有一条规则：
+  // 指向某一格分屏时给 Region，目标唯一时给 Session。两条分支都要有断言。
+
+  it('指向某一格分屏时给 Region 地址——消歧做在源头', () => {
+    const handoff = formatHandoffAddress({ agentSessionId: 'agent-7', regionId: 'region:pane-2' })
+    expect(handoff).toBe(formatRegionAddress('region:pane-2'))
+    expect(handoff).toContain("agentmux send --to-region='region:pane-2'")
+    // 点击发生在那一格上，此时给 Session 就是把"是哪一格"这个我们已知、接收方未知的信息丢掉。
+    expect(handoff).not.toContain('--to-session')
+  })
+
+  it('没有那一格时给 Session 地址——它跨 View 稳定', () => {
+    const handoff = formatHandoffAddress({ agentSessionId: 'agent-7' })
+    expect(handoff).toBe(formatSessionAddress('agent-7'))
+    expect(handoff).toContain("agentmux send --to-session='agent-7'")
+    expect(handoff).not.toContain('--to-region')
+  })
+
+  it('同一 Session 从交接入口与复制入口产出的地址逐字一致', () => {
+    // 同一份真相的两个入口，不是两套格式。
+    expect(formatHandoffAddress({ agentSessionId: "a'b" })).toBe(formatSessionAddress("a'b"))
+  })
+})
+
+describe('寻址失败自带下一步命令，而不只是候选清单', () => {
+  it('多 Agent：每个候选都给一条能直接跑的命令，不是让人自己拼', () => {
+    const recovery = addressingRecovery({
+      code: 'MESSAGE_TARGET_NOT_UNIQUE',
+      candidates: [
+        { agentSessionId: 'agent-a', regionIds: ['region:1'] },
+        { agentSessionId: 'agent-b', regionIds: ['region:2'] }
+      ]
+    })
+    // 有 Region 就用 Region：分屏下唯一无歧义的那一格。
+    expect(recovery).toContain("agentmux send --to-region='region:1'")
+    expect(recovery).toContain("agentmux send --to-region='region:2'")
+    // 判据是"能不能直接跑"，所以必须是完整命令而不是裸 id。
+    expect(recovery).not.toMatch(/^\s*region:1\s*$/mu)
+  })
+
+  it('候选没有 Region 时退到 Session，仍是完整命令', () => {
+    const recovery = addressingRecovery({
+      code: 'MESSAGE_TARGET_NOT_UNIQUE',
+      candidates: [{ agentSessionId: "agent'x", regionIds: [] }]
+    })
+    expect(recovery).toContain(`agentmux send --to-session='agent'"'"'x'`)
+  })
+
+  it('一个 Agent 都没有，与"有多个"是不同的下一步', () => {
+    const recovery = addressingRecovery({ code: 'MESSAGE_TARGET_NOT_UNIQUE', candidates: [] })
+    // 没有目标可挑，给出的必须是"怎么才能有一个"，而不是一份空清单。
+    expect(recovery).not.toContain('agentmux send --to-')
+    expect(recovery).toMatch(/没有 Agent/u)
+  })
+
+  it('stale View、目标不是 Agent、Agent 已退出各自有自己的恢复入口', () => {
+    // 码取自真实抛出点：TAB_NOT_OPEN 见 lib/control.ts，UNKNOWN_AGENT_SESSION 见 store.ts。
+    const notAgent = addressingRecovery({ code: 'MESSAGE_TARGET_NOT_AGENT' })
+    const stale = addressingRecovery({ code: 'TAB_NOT_OPEN' })
+    const gone = addressingRecovery({ code: 'UNKNOWN_AGENT_SESSION' })
+    for (const recovery of [notAgent, stale, gone]) expect(recovery).toContain('agentmux inspect')
+    // 三种失败的原因不同，下一步也不该是同一句话——否则等于没有分类。
+    expect(new Set([notAgent, stale, gone]).size).toBe(3)
+    // REGION_NOT_OPEN 与 TAB_NOT_OPEN 是同一件事的两个粒度，共用一条下一步是有意的。
+    expect(addressingRecovery({ code: 'REGION_NOT_OPEN' })).toBe(stale)
+  })
+
+  it('不是寻址失败的码返回 null，而不是一句放之四海的"再试一次"', () => {
+    // 一句通用套话既没信息、又会盖住真正的原因。这里必须缺席，让原始 message 独自说话。
+    for (const code of ['SESSION_CLOSING', 'AGENT_EXECUTOR_NOT_CONFIGURED', 'CONTROL_CANCELLED']) {
+      expect(addressingRecovery({ code })).toBeNull()
+    }
+  })
+
+  it('MESSAGE_TARGET_NOT_UNIQUE 缺 candidates 时按"一个都没有"处理，不抛', () => {
+    // 边界处 candidates 是可选的；缺席不该让恢复本身炸掉，那会把一个可解释的失败变成崩溃。
+    expect(addressingRecovery({ code: 'MESSAGE_TARGET_NOT_UNIQUE' })).toMatch(/没有 Agent/u)
+  })
+})
+
+describe('恢复命令与复制地址共用同一个格式化出口', () => {
+  // 这条是本 task 的架构核心：两份拼接会各自演进，漂移时不会有任何测试变红。
+  // 因此这里不是"看起来一样"，而是断言两侧逐字来自同一处。
+
+  it('同一个 Region，复制出的命令与恢复给出的命令逐字一致', () => {
+    const copied = formatRegionAddress('region:1')
+    const recovered = addressingRecovery({
+      code: 'MESSAGE_TARGET_NOT_UNIQUE',
+      candidates: [{ agentSessionId: 'agent-a', regionIds: ['region:1'] }]
+    })
+    // 从复制出的地址里取出那一行 send 命令，它必须原样出现在恢复文本里。
+    const sendLine = copied.split('\n').find((line) => line.startsWith('agentmux send '))
+    expect(sendLine).toBeDefined()
+    expect(recovered).toContain(sendLine!)
+  })
+
+  it('同一个 Session，两侧同样逐字一致', () => {
+    const copied = formatSessionAddress('agent-a')
+    const recovered = addressingRecovery({
+      code: 'MESSAGE_TARGET_NOT_UNIQUE',
+      candidates: [{ agentSessionId: 'agent-a', regionIds: [] }]
+    })
+    const sendLine = copied.split('\n').find((line) => line.startsWith('agentmux send '))
+    expect(recovered).toContain(sendLine!)
+  })
+
+  it('复制侧与恢复侧断言的是同一段文本，改格式必然一起红', () => {
+    // 上面两条断言"两侧一致"，但共用出口时它们在任何格式下都一致——那证明不了"同时变红"。
+    // 这条锁住的是另一件事：两侧各自都有**独立的字面断言**钉住命令长什么样。
+    // 复制侧钉在 `agentmux send --to-region='…'`（本文件上方三个地址 describe），
+    // 恢复侧钉在同一段字面（下方 recovery describe）——所以改一次格式，两组断言一起塌。
+    // 实测：把命令出口的 `=` 改成空格，本文件 11 条红，横跨复制侧与恢复侧。
+    const region = 'region:1'
+    const literal = `agentmux send --to-region='${region}'`
+    expect(formatRegionAddress(region)).toContain(literal)
+    expect(
+      addressingRecovery({
+        code: 'MESSAGE_TARGET_NOT_UNIQUE',
+        candidates: [{ agentSessionId: 'agent-a', regionIds: [region] }]
+      })
+    ).toContain(literal)
+  })
+
+  it('仓库里不存在第二处拼接寻址命令', () => {
+    // 上面两条证明当下一致，但挡不住有人另写一份拼接、且恰好写得一样。这条锁住结构：
+    // 整个 renderer 里 `agentmux send --to-` 这种字面拼接只允许出现在本模块的命令出口。
+    const module = readFileSync(new URL('../src/renderer/src/lib/agent-address.ts', import.meta.url), 'utf8')
+    const literalSends = module.match(/agentmux send /gu) ?? []
+    expect(literalSends).toHaveLength(1)
+    // 带 flag 的 inspect 也只允许拼一次。裸 `agentmux inspect`（不带 flag）是恢复文本里的
+    // 合法内容——"列出所有"本来就没有 id 可带，它不是第二处寻址拼接。
+    const flaggedInspects = module.match(/agentmux inspect \S*=/gu) ?? []
+    expect(flaggedInspects).toHaveLength(1)
+  })
+})
+
+describe('入口接线：菜单真的调用了交接出口，并且真的把它画出来', () => {
+  // 纯函数正确不代表菜单接上了，而"model 里造了一项"也不代表用户点得到——本轮实测踩过：
+  // 两个菜单都构造了 handoff，却都没渲染它，于是那条能力对用户根本不存在。所以这里查两件事：
+  // 解析走的是交接出口（而不是退回直接复制地址），以及那一项确实被渲染成菜单项。
+
+  it('Region 菜单把那一格交给交接出口，并渲染出这一项', () => {
+    const source = readFileSync(
+      new URL('../src/renderer/src/components/RegionContextMenu.tsx', import.meta.url),
+      'utf8'
+    )
+    expect(source).toContain('formatHandoffAddress({ agentSessionId, regionId })')
+    // 造了不画等于没有。onSelect 被接到某个菜单项上，才谈得上"用户点得到"。
+    expect(source).toContain('model.handoff.onSelect')
+    expect(source).toContain('model.handoff.label')
+  })
+
+  it('Tab 菜单不带那一格，于是落到 Session，并渲染出这一项', () => {
+    const source = readFileSync(
+      new URL('../src/renderer/src/components/WorkbenchTabContextMenu.tsx', import.meta.url),
+      'utf8'
+    )
+    expect(source).toContain('formatHandoffAddress({ agentSessionId })')
+    expect(source).toContain('copyModel.handoff.onSelect')
+    expect(source).toContain('copyModel.handoff.label')
+  })
+
+  it('两个菜单的 model 类型都声明了 handoff——否则它连类型上都不存在', () => {
+    // 上一轮的死代码正是这样溜过去的：对象字面量里多写一个字段，类型里没有，
+    // 组件那侧也就永远取不到它，而 tsc 不会为"多写"报错。
+    for (const file of ['RegionContextMenu.tsx', 'WorkbenchTabContextMenu.tsx']) {
+      const source = readFileSync(
+        new URL(`../src/renderer/src/components/${file}`, import.meta.url),
+        'utf8'
+      )
+      expect(source).toMatch(/handoff\?: \w+CopyAction/u)
+    }
+  })
+
+  it('send 的失败路径真的把恢复命令塞进了错误消息', async () => {
+    // 不读源码字面，真跑一次控制响应边界：这是控制错误离开渲染进程的唯一出口。
+    const { createRendererControlApi } = await import('../src/renderer/src/lib/control-api.js')
+    const responses: DesktopControlResponse[] = []
+    const listeners: ((request: { requestId: string }) => void)[] = []
+    const api = createRendererControlApi({
+      onRequest: (listener) => {
+        listeners.push(listener as (request: { requestId: string }) => void)
+        return () => {}
+      },
+      onCancellation: () => () => {},
+      respond: (response) => responses.push(response)
+    } as never)
+
+    const failures = [
+      Object.assign(new Error('Target Tab does not contain exactly one Agent Session.'), {
+        code: 'MESSAGE_TARGET_NOT_UNIQUE',
+        candidates: [{ agentSessionId: 'agent-a', regionIds: ['region:1'] }]
+      }),
+      Object.assign(new Error('Target Region is not an Agent.'), { code: 'MESSAGE_TARGET_NOT_AGENT' }),
+      Object.assign(new Error('Tab target is not currently open.'), { code: 'TAB_NOT_OPEN' }),
+      Object.assign(new Error('Agent Session is not available to the Desktop.'), { code: 'UNKNOWN_AGENT_SESSION' }),
+      Object.assign(new Error('Agent Session is closing.'), { code: 'SESSION_CLOSING' })
+    ]
+    let next = 0
+    api.onRequest(async () => { throw failures[next++]! })
+    for (const [index] of failures.entries()) listeners[0]!({ requestId: `r-${index}` })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const messages = responses.map((response) => (response.ok ? '' : response.error.message))
+    // 先钉住"五条都结算了"。否则微任务没排干时 messages 是短数组，下面的循环会少跑几轮却依然全绿。
+    expect(messages).toHaveLength(failures.length)
+    // 每种寻址失败都带上了能直接跑的下一步，而不只是"发生了什么"。
+    expect(messages[0]).toContain("agentmux send --to-region='region:1'")
+    for (const index of [1, 2, 3]) expect(messages[index]).toContain('agentmux inspect')
+    // 原始 message 不能被恢复文本顶掉——"怎么办"是附加，不是替代。
+    expect(messages[2]).toContain('Tab target is not currently open.')
+    // 不是寻址失败的码保持原样：一句通用套话会盖住真正的原因。
+    expect(messages[4]).toBe('Agent Session is closing.')
+  })
+
+  it('未通过校验的 candidates 不会被拿去生成命令', async () => {
+    // 带换行的 id 会把恢复文本切成两段假命令。既有校验已经挡下这类响应，恢复不得绕过它。
+    const { createRendererControlApi } = await import('../src/renderer/src/lib/control-api.js')
+    const responses: DesktopControlResponse[] = []
+    const listeners: ((request: { requestId: string }) => void)[] = []
+    const api = createRendererControlApi({
+      onRequest: (listener) => {
+        listeners.push(listener as (request: { requestId: string }) => void)
+        return () => {}
+      },
+      onCancellation: () => () => {},
+      respond: (response) => responses.push(response)
+    } as never)
+    api.onRequest(async () => {
+      throw Object.assign(new Error('ambiguous'), {
+        code: 'MESSAGE_TARGET_NOT_UNIQUE',
+        candidates: [{ agentSessionId: 'agent-a', regionIds: ['region:1\nrm -rf /'] }]
+      })
+    })
+    listeners[0]!({ requestId: 'r-evil' })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(responses).toHaveLength(1)
+    const response = responses[0]!
+    if (response.ok) throw new Error('校验应当把这次响应判为失败，它却成功了')
+    expect(response.error.code).toBe('CONTROL_FAILED')
+    expect(response.error.message).not.toContain('rm -rf')
   })
 })

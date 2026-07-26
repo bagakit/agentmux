@@ -6,6 +6,7 @@ import {
   ArrowUp,
   Columns2,
   Copy,
+  Crosshair,
   FolderSymlink,
   Pencil,
   Send,
@@ -17,7 +18,7 @@ import {
 import type { ReactNode } from 'react'
 import { WORKBENCH_TAB_SPLIT_ACTIONS, type MoveSessionViewTarget } from '../lib/workbench-tab-actions'
 import type { SplitDirection } from '../lib/workbench-layout'
-import { formatSessionAddress, formatViewAddress } from '../lib/agent-address'
+import { formatHandoffAddress, formatSessionAddress, formatViewAddress } from '../lib/agent-address'
 
 const SPLIT_ICONS = {
   left: ArrowLeft,
@@ -27,7 +28,7 @@ const SPLIT_ICONS = {
 } satisfies Record<SplitDirection, typeof ArrowRight>
 
 type WorkbenchTabCopyAction = {
-  label: 'Copy View Address' | 'Copy Session Address'
+  label: 'Copy View Address' | 'Copy Session Address' | 'Message this Agent'
   onSelect(): Promise<void>
 }
 
@@ -38,6 +39,11 @@ type WorkbenchTabCopyAction = {
  */
 export type WorkbenchTabCopyModel = {
   viewAddress: WorkbenchTabCopyAction
+  /**
+   * 按意图命名的交接入口。它排在地址项前面：用户来这个菜单，绝大多数时候想的是"把这个 Agent
+   * 交出去"，而不是"我要哪一层身份"——后者是达成前者的手段，不该占据第一位。
+   */
+  handoff?: WorkbenchTabCopyAction
   /** 只有这张 View 恰好承载唯一一个 Agent 时才有无歧义的 Session 地址可给。 */
   sessionAddress?: WorkbenchTabCopyAction
 }
@@ -65,6 +71,13 @@ export function createWorkbenchTabCopyModel({
     },
     ...(agentSessionId
       ? {
+          // 同一个交接意图，从 Tab 菜单进来时没有"哪一格"这个信息——不分屏也就没有那个歧义，
+          // 于是解析成 Session 地址：它在 View 被关掉、移动、分屏之后依然指向同一个 Agent。
+          handoff: {
+            label: 'Message this Agent' as const,
+            onSelect: async () =>
+              copy(formatHandoffAddress({ agentSessionId }), 'Message this Agent')
+          },
           sessionAddress: {
             label: 'Copy Session Address' as const,
             onSelect: async () => copy(formatSessionAddress(agentSessionId), 'Copy Session Address')
@@ -144,8 +157,14 @@ export function WorkbenchTabContextMenu({
             </ContextMenu.Item>
           ) : null}
           <ContextMenu.Separator className="tab-context-menu__separator" />
+          {copyModel.handoff ? (
+            <ContextMenu.Item className="tab-context-menu__item" onSelect={copyModel.handoff.onSelect}>
+              <Send size={14} />
+              <span>{copyModel.handoff.label}</span>
+            </ContextMenu.Item>
+          ) : null}
           <ContextMenu.Item className="tab-context-menu__item" onSelect={copyModel.viewAddress.onSelect}>
-            <Send size={14} />
+            <Crosshair size={14} />
             <span>{copyModel.viewAddress.label}</span>
           </ContextMenu.Item>
           {copyModel.sessionAddress ? (

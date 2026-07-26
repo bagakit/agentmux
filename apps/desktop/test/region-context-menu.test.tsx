@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createRegionCopyModel } from '../src/renderer/src/components/RegionContextMenu.js'
 import {
+  formatHandoffAddress,
   formatRegionAddress,
   formatSessionAddress
 } from '../src/renderer/src/lib/agent-address.js'
@@ -43,6 +44,25 @@ describe('Region 右键菜单：点哪格就是哪格', () => {
     expect(copied).not.toContain('pane-1')
   })
 
+  it('承载 Agent 的一格给出交接入口，复制的是那一格的 Region 地址', async () => {
+    // 交接是这个菜单的主要意图。点击发生在某一格上，我们知道是哪一格而接收方不知道，
+    // 所以它解析成 Region 而非 Session——把消歧做在源头。
+    const writeClipboardText = vi.fn(async (_text: string) => {})
+    const model = createRegionCopyModel({
+      regionId: 'region:pane-2',
+      agentSessionId: 'agent-7',
+      writeClipboardText
+    })
+    expect(model.handoff?.label).toBe('Message this Agent')
+    await model.handoff?.onSelect()
+    expect(writeClipboardText).toHaveBeenCalledWith(formatHandoffAddress({
+      agentSessionId: 'agent-7',
+      regionId: 'region:pane-2'
+    }))
+    // 退化成 Session 地址会丢掉"是哪一格"，那正是这个入口要保住的信息。
+    expect(writeClipboardText).not.toHaveBeenCalledWith(formatSessionAddress('agent-7'))
+  })
+
   it('非 Agent 的 Region 不提供 Session 地址——缺席表达，不画禁用的假按钮', () => {
     const model = createRegionCopyModel({
       regionId: 'region:a-file',
@@ -51,6 +71,8 @@ describe('Region 右键菜单：点哪格就是哪格', () => {
     })
     // 一格文件/浏览器/launcher 没有 Agent 语义身份可寻址。
     expect(model.sessionAddress).toBeUndefined()
+    // 没有 Agent 就没有可交接的对象，交接入口同样缺席。
+    expect(model.handoff).toBeUndefined()
     // 但它仍然是一格，Region 地址照样有意义（inspect 得到它显示什么）。
     expect(model.regionAddress).toBeDefined()
   })
