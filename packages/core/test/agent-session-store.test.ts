@@ -700,3 +700,50 @@ describe('timeline JSONL 追加与 compaction', () => {
     }
   })
 })
+
+describe('并发写同一份 store 的锁竞争', () => {
+  // 这条守的是「多个 Owner 同时落盘不会有人被饿死」。它曾经真的会：写入改走 durable write
+  // （fsync 文件 + fsync 父目录，实测约 10ms/次）之后，持锁时长和当时的定长 10ms 退避成了同一个
+  // 量级，所有等待者同步醒来一起抢，形成惊群——并发 60 时约 15% 的写入耗尽重试预算抛 BUSY。
+  //
+  // 断言落在**可观察结果**（一个都不许失败、每条记录都在）而不是常量值上：把退避改回定长、
+  // 或把 durableWriteFile 改慢，这条都会红；而单纯调整常量数值不会误红。
+  it('并发落盘不会有人被饿死，也不会互相覆盖', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-store-race-'))
+    const path = join(root, 'agent-sessions.json')
+    try {
+      const writers = Array.from({ length: 48 }, () => new AgentMuxFileAgentSessionStore(path))
+      // 每个 writer 抢一次 lifecycle reservation：走的是同一把文件锁，但各占各的槽位，互不覆盖。
+      const outcomes = await Promise.allSettled(writers.map(async (writer, index) => {
+        await writer.reserveLifecycle({
+          reservationId: `race-reservation-${index}`,
+          ownerId: `race-owner-${index}`,
+          ownerPid: process.pid,
+          kind: 'create',
+          agentSessionId: `race-${index}`,
+          operationId: `race-operation-${index}`,
+          expiresAt: 4_000_000_000_000
+        })
+      }))
+
+      const rejected = outcomes.flatMap((outcome) => (
+        outcome.status === 'rejected' ? [outcome.reason] : []
+      ))
+      expect(rejected.map((error) => (error as { code?: string })?.code ?? String(error))).toEqual([])
+
+      // 不只是「没抛错」——每个槽位都得真的落在盘上，证明锁确实轮转过而不是有人被跳过。
+      const reader = new AgentMuxFileAgentSessionStore(path)
+      const claimed = await reader.claimStaleLifecycles({
+        ownerId: 'race-auditor',
+        ownerPid: process.pid,
+        now: 5_000_000_000_000,
+        expiresAt: 5_000_060_000_000
+      })
+      expect([...claimed.map((entry) => entry.reservationId)].sort()).toEqual(
+        writers.map((_writer, index) => `race-reservation-${index}`).sort()
+      )
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+})
