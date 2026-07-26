@@ -153,7 +153,10 @@ export function formatHandoffAddress(target: {
  */
 export function addressingRecovery(error: {
   code: string
-  candidates?: readonly { agentSessionId: string; regionIds: readonly string[] }[]
+  // `regionIds` 是非空元组：候选只从边界校验器出来，那里已经证明了每个候选至少有一格
+  // （见 control-api.ts 的 ValidatedCandidate）。这里跟着收窄，下游就不必为一个到不了的
+  // 情况留分支——留了也没有调用者，只会被读、被维护、被测试假装覆盖。
+  candidates?: readonly { agentSessionId: string; regionIds: readonly [string, ...string[]] }[]
 }): string | null {
   if (error.code === 'MESSAGE_TARGET_NOT_UNIQUE') {
     return formatTargetNotUnique(error.candidates ?? [])
@@ -183,20 +186,19 @@ ${LIST_SESSIONS}`
 }
 
 function formatTargetNotUnique(
-  candidates: readonly { agentSessionId: string; regionIds: readonly string[] }[]
+  // `[string, ...string[]]`：每个候选**至少**有一格。这不是防御性收窄，是把上游已经成立的事实
+  // 写进类型——生产者只在遇到一格 Agent 时才建候选（lib/control.ts），边界校验又直接拒掉
+  // `regionIds` 为空的候选（control-api.ts）。写成 `string[]` 就得在这里处理一个到不了的情况，
+  // 那段代码没有调用者、不会被执行，却要一直被读、被维护、被测试假装覆盖。
+  candidates: readonly { agentSessionId: string; regionIds: readonly [string, ...string[]] }[]
 ): string {
-  // 每个候选都给一条能直接跑的命令：有 Region 就用 Region（分屏下唯一无歧义的那一格），
-  // 否则退到 Session。候选为空是"这张 View 里一个 Agent 都没有"，与"有多个"是不同的下一步。
+  // 候选为空是"这张 View 里一个 Agent 都没有"，与"有多个"是不同的下一步。
   if (candidates.length === 0) {
     return `这张 View 里没有 Agent，没有可交接的目标。
 先在这张 View 里启动一个 Agent，或改为在承载 Agent 的那一格上操作。`
   }
-  const lines = candidates.map((candidate) => {
-    const region = candidate.regionIds[0]
-    return region === undefined
-      ? sendCommand('session', candidate.agentSessionId)
-      : sendCommand('region', region)
-  })
+  // 每个候选都给那一格的命令：Region 是分屏下唯一无歧义的身份。
+  const lines = candidates.map((candidate) => sendCommand('region', candidate.regionIds[0]))
   return `这张 View 承载多个 Agent，--to-tab 无法唯一寻址。挑一个直接跑：
 
 ${lines.join('\n')}`

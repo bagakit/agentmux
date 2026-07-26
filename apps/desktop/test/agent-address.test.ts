@@ -118,14 +118,6 @@ describe('寻址失败自带下一步命令，而不只是候选清单', () => {
     expect(recovery).not.toMatch(/^\s*region:1\s*$/mu)
   })
 
-  it('候选没有 Region 时退到 Session，仍是完整命令', () => {
-    const recovery = addressingRecovery({
-      code: 'MESSAGE_TARGET_NOT_UNIQUE',
-      candidates: [{ agentSessionId: "agent'x", regionIds: [] }]
-    })
-    expect(recovery).toContain(`agentmux send --to-session='agent'"'"'x'`)
-  })
-
   it('一个 Agent 都没有，与"有多个"是不同的下一步', () => {
     const recovery = addressingRecovery({ code: 'MESSAGE_TARGET_NOT_UNIQUE', candidates: [] })
     // 没有目标可挑，给出的必须是"怎么才能有一个"，而不是一份空清单。
@@ -226,14 +218,22 @@ describe('恢复命令与复制地址共用同一个格式化出口', () => {
     expect(recovered).toContain(sendLine!)
   })
 
-  it('同一个 Session，两侧同样逐字一致', () => {
-    const copied = formatSessionAddress('agent-a')
+  it('恢复给的是那一格，不是退回 Session——已知的东西不许丢', () => {
+    // 这条原来叫"同一个 Session 两侧逐字一致"，测的是候选没有 Region 时退到 Session。
+    // 那条路已经删了：候选的 regionIds 现在是非空元组，"没有 Region"在类型上就不成立。
+    // 留下的这条问的是另一件事——恢复必须给最精确的那个身份。多 Agent 的 View 里，
+    // 我们知道每个候选在哪一格，接收方不知道；给 Session 等于把这个信息丢掉，
+    // 让接收方再撞一次歧义。
     const recovered = addressingRecovery({
       code: 'MESSAGE_TARGET_NOT_UNIQUE',
-      candidates: [{ agentSessionId: 'agent-a', regionIds: [] }]
+      candidates: [{ agentSessionId: 'agent-a', regionIds: ['region:1'] }]
     })
-    const sendLine = copied.split('\n').find((line) => line.startsWith('agentmux send '))
-    expect(recovered).toContain(sendLine!)
+    const sessionSendLine = formatSessionAddress('agent-a')
+      .split('\n')
+      .find((line) => line.startsWith('agentmux send '))
+    expect(sessionSendLine).toBeDefined()
+    expect(recovered).not.toContain(sessionSendLine!)
+    expect(recovered).toContain("agentmux send --to-region='region:1'")
   })
 
   it('复制侧与恢复侧断言的是同一段文本，改格式必然一起红', () => {
