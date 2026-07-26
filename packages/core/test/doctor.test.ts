@@ -12,7 +12,7 @@ const runtime: AgentMuxRuntimeDiagnostics = {
   ctxmux: {
     version: '0.1.0',
     protocolVersion: 12,
-    sourceCommit: 'a0897087fdd0eb131c39c43d4d6791901335d69e',
+    sourceCommit: '073e206407ce28331aa882c2c80e9354cfe2879a',
     artifactPlatform: 'darwin-arm64',
     ready: true,
     capabilities: {
