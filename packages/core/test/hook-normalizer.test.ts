@@ -225,4 +225,128 @@ describe('native hook normalization', () => {
       expect(items[0]).toMatchObject({ toolOutput: 'boom', status: 'failed' })
     })
   })
+
+  /**
+   * 一次工具调用就是一行：`tool_use_id` 把 Pre/Post 关联成同一条 item。
+   *
+   * 这是本 task 的承重接线：Pre 落在途态（streaming）、Post 发 `update` 翻成终态并挂结果，
+   * 两端用 `runId:tool:<id>` 命中同一条。只测采集或只测折叠都够不到这里——normalizer 不把
+   * id 绑对、或事后不发 update 而是又 append 一条，整个功能就是死的，而那些用例照样全绿。
+   */
+  describe('Pre/Post 关联成一条', () => {
+    const claude = (payload: Record<string, unknown>, eventName: string, receiptId: string) =>
+      providers.get('claude').normalizeHook({
+        receiptId,
+        agentSessionId: 'semantic-corr',
+        runId: 'run-corr',
+        providerId: 'claude',
+        eventName,
+        payload
+      })
+
+    it('PreToolUse 带 tool_use_id 时落在途态，item id 绑调用 id 而不是 receiptId', () => {
+      const event = claude(
+        { tool_name: 'Bash', tool_input: { command: 'ls' }, tool_use_id: 'toolu_01ABC' },
+        'PreToolUse',
+        'receipt-pre'
+      )
+      const mutation = event.timeline[0]
+      expect(mutation?.type).toBe('append')
+      if (mutation?.type !== 'append') throw new Error('expected append')
+      // id 必须来自调用 id——绑 receiptId（receipt-pre）就永远关联不上 Post，功能即死。
+      expect(mutation.item.id).toBe('run-corr:tool:toolu_01ABC')
+      expect(mutation.item.id).not.toContain('receipt-pre')
+      // 在途态：hook 驱动的 Agent 由此第一次点亮 Streaming 徽标。
+      expect(mutation.item.status).toBe('streaming')
+    })
+
+    it('PostToolUse 带同一 tool_use_id 时发 update 命中 Pre 那条，不再 append 第二条', () => {
+      const event = claude(
+        { tool_name: 'Bash', tool_input: { command: 'ls' }, tool_use_id: 'toolu_01ABC', tool_response: 'total 24' },
+        'PostToolUse',
+        'receipt-post'
+      )
+      const mutation = event.timeline[0]
+      expect(mutation?.type).toBe('update')
+      if (mutation?.type !== 'update') throw new Error('expected update')
+      expect(mutation.itemId).toBe('run-corr:tool:toolu_01ABC')
+      expect(mutation.status).toBe('complete')
+      expect(mutation.toolOutput).toBe('total 24')
+    })
+
+    it('端到端：一次调用在时间轴上是一条，经历 streaming → complete', () => {
+      const pre = claude(
+        { tool_name: 'Bash', tool_input: { command: 'ls' }, tool_use_id: 'toolu_END' },
+        'PreToolUse',
+        'receipt-pre'
+      )
+      const post = claude(
+        { tool_name: 'Bash', tool_input: { command: 'ls' }, tool_use_id: 'toolu_END', tool_response: 'ok' },
+        'PostToolUse',
+        'receipt-post'
+      )
+      const afterPre = applyAgentTimelineMutation([], pre.timeline[0]!)
+      expect(afterPre).toHaveLength(1)
+      expect(afterPre[0]).toMatchObject({ status: 'streaming' })
+      const afterPost = applyAgentTimelineMutation(afterPre, post.timeline[0]!)
+      // 一条，不是两条——这是本 task 的全部理由。
+      expect(afterPost).toHaveLength(1)
+      expect(afterPost[0]).toMatchObject({ status: 'complete', toolOutput: 'ok' })
+    })
+
+    it('端到端：失败的 Post 把那一条翻成 failed，而不是新增一条', () => {
+      const pre = claude(
+        { tool_name: 'Bash', tool_input: { command: 'exit 1' }, tool_use_id: 'toolu_FAIL' },
+        'PreToolUse',
+        'receipt-pre'
+      )
+      const post = claude(
+        {
+          tool_name: 'Bash',
+          tool_input: { command: 'exit 1' },
+          tool_use_id: 'toolu_FAIL',
+          tool_response: { is_error: true, stderr: 'boom' }
+        },
+        'PostToolUse',
+        'receipt-post'
+      )
+      const items = applyAgentTimelineMutation(
+        applyAgentTimelineMutation([], pre.timeline[0]!),
+        post.timeline[0]!
+      )
+      expect(items).toHaveLength(1)
+      expect(items[0]).toMatchObject({ status: 'failed', toolOutput: 'boom' })
+    })
+
+    it('Provider 不给调用 id 时如实退回 append-only，Post 是 append 不是 update，不伪造关联', () => {
+      const post = claude(
+        { tool_name: 'Bash', tool_input: { command: 'ls' }, tool_response: 'ok' },
+        'PostToolUse',
+        'receipt-noid'
+      )
+      const mutation = post.timeline[0]
+      expect(mutation?.type).toBe('append')
+      if (mutation?.type !== 'append') throw new Error('expected append')
+      // 退回旧的 receiptId 派生 id——没有关联依据就不造关联。
+      expect(mutation.item.id).toBe('run-corr:receipt-noid:0')
+      // 无关联时结果仍带上，靠渲染层折叠让带结果的那行胜出。
+      expect(mutation.item).toMatchObject({ status: 'complete', toolOutput: 'ok' })
+    })
+
+    it('等待用户的 permission 行即使带 id 也不走 update 通路——它不是一次会收敛的工具执行', () => {
+      // Claude 的 askuserquestion 在 PreToolUse 上判 waiting，落 permission 行。它等的是用户，
+      // 不是一次有 Post 收尾的执行，所以必须留在 append-only，不能被当作在途工具压成 streaming。
+      const event = claude(
+        { tool_name: 'askuserquestion', tool_input: { question: 'ok?' }, tool_use_id: 'toolu_ASK' },
+        'PreToolUse',
+        'receipt-ask'
+      )
+      const mutation = event.timeline[0]
+      expect(mutation?.type).toBe('append')
+      if (mutation?.type !== 'append') throw new Error('expected append')
+      expect(mutation.item.kind).toBe('permission')
+      expect(mutation.item.status).toBe('complete')
+      expect(mutation.item.id).toBe('run-corr:receipt-ask:0')
+    })
+  })
 })

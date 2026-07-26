@@ -102,7 +102,9 @@ function timelineItem(
   title: string,
   eventName: string,
   observedAt: number,
-  fields: Partial<Omit<AgentTimelineItem, 'id' | 'agentSessionId' | 'kind' | 'source' | 'createdAt' | 'updatedAt' | 'title'>> = {}
+  // `id` 可被覆盖：关联 id 存在时，Pre 落的 item 要用 `runId:tool:<toolCallId>` 而不是 receiptId
+  // 派生的默认 id，好让 Post 的 `update` 能命中同一条。`...fields` 排在 `id:` 之后，故覆盖生效。
+  fields: Partial<Omit<AgentTimelineItem, 'agentSessionId' | 'kind' | 'source' | 'createdAt' | 'updatedAt' | 'title'>> = {}
 ): AgentTimelineMutation {
   return {
     type: 'append',
@@ -123,6 +125,22 @@ function timelineItem(
     }
   }
 }
+
+/**
+ * 各家 Provider 用来标识**同一次工具调用**的关联键。
+ *
+ * Claude Code 与 Codex 的 `PreToolUse`/`PostToolUse` 都带 `tool_use_id`（值形如 `toolu_01…`），
+ * 一次调用的事前事后两条信封携带同一个 id——这是把「入参」和「结果」认成同一次调用的唯一权威依据。
+ * 其余是同族命名变体，留给尚未接入的 Provider；取第一个能读出的。顺序即优先级。
+ */
+const TOOL_CALL_ID_KEYS = [
+  'tool_use_id',
+  'toolUseId',
+  'tool_call_id',
+  'toolCallId',
+  'call_id',
+  'callId'
+] as const
 
 function buildTimeline(
   envelope: NativeHookEnvelope,
@@ -155,20 +173,54 @@ function buildTimeline(
     timeline.push(timelineItem(envelope, timeline.length, kind, title, eventName, observedAt, fields))
   }
   if (toolName) {
+    const kind: AgentTimelineItemKind =
+      state === 'waiting' || state === 'blocked' ? 'permission' : 'tool_call'
+    const isPost = eventName.startsWith('Post')
+    const toolCallId = stringField(payload, ...TOOL_CALL_ID_KEYS)
     // 结果只有事后才知道，所以只在事后事件上采集——`PreToolUse` 那一行谈不上成败，给它盖任何
     // 结论都是编造。事件名以 `Post` 开头的才带结果，其余照旧只有入参。
-    const outcome = eventName.startsWith('Post') ? hookToolOutcome(payload) : undefined
-    append(
-      state === 'waiting' || state === 'blocked' ? 'permission' : 'tool_call',
-      toolName,
-      {
+    const outcome = isPost ? hookToolOutcome(payload) : undefined
+    if (toolCallId && kind === 'tool_call') {
+      // Provider 给了关联 id：把一次调用的入参与结果收敛到**同一条 item**。
+      // id 从 receiptId（Pre/Post 各不相同）改绑 toolCallId（同一次调用两端一致），于是
+      // 时间轴上一次调用就是一条，而不是两条。receiptId 方案在这里被彻底取代——不是两套并存。
+      const itemId = `${envelope.runId}:tool:${toolCallId}`
+      if (isPost) {
+        // 事后：翻成终态并挂上结果。走 `update` 而不是再 append——Pre 已经落过这条 id，append
+        // 同 id 会撞 `AGENT_TIMELINE_ID_CONFLICT`。Pre 与 Post 在同一 binding 上按序投递，
+        // Pre 的时间轴在 Post 的 onEvent 开始前已持久化，所以更新目标总是就位。
+        timeline.push({
+          type: 'update',
+          agentSessionId: envelope.agentSessionId,
+          itemId,
+          updatedAt: observedAt,
+          // 失败是**观察到的事实**，不是默认值：采集判定失败才翻 failed，否则收敛为 complete
+          // （不再是 streaming——调用已结束）。
+          status: outcome?.failed ? 'failed' : 'complete',
+          eventName,
+          ...(toolInput ? { toolInput } : {}),
+          ...(outcome?.output ? { toolOutput: outcome.output } : {})
+        })
+      } else {
+        // 事前：先落在途态。`streaming` 徽标此前只有 ACP 会点亮，而所有 Provider 的 ACP 都是
+        // none——hook 驱动的 Agent 由此第一次能显示「这一步正在跑」。
+        timeline.push(timelineItem(envelope, timeline.length, kind, toolName, eventName, observedAt, {
+          id: itemId,
+          toolName,
+          status: 'streaming',
+          ...(toolInput ? { toolInput } : {})
+        }))
+      }
+    } else {
+      // 没有关联 id（或是 permission 行）：如实退回 append-only，绝不伪造关联。此路径仍带上
+      // 事后结果，靠渲染层的折叠让带结果的那行胜出（f-23p8fsbs8/T-001 在无关联前提下的最简解）。
+      append(kind, toolName, {
         toolName,
         ...(toolInput ? { toolInput } : {}),
         ...(outcome?.output ? { toolOutput: outcome.output } : {}),
-        // 失败是**观察到的事实**，不是默认值：只有采集判定为失败时才改写状态，否则维持 complete。
         ...(outcome?.failed ? { status: 'failed' as const } : {})
-      }
-    )
+      })
+    }
   }
   if (assistant) {
     append('assistant_message', 'Assistant response', { content: assistant })
