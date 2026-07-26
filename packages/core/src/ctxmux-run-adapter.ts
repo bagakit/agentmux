@@ -26,6 +26,7 @@ import {
 } from '@ctxmux/sdk'
 import { AgentMuxError } from './errors.js'
 import {
+  CTXMUX_MANIFEST_SHA256,
   defaultAgentMuxRuntimeDirectory,
   defaultCtxmuxSocketPath,
   defaultCtxmuxStateDirectory
@@ -34,7 +35,6 @@ import {
 const CTXMUX_COMMIT = '073e206407ce28331aa882c2c80e9354cfe2879a'
 const CTXMUX_TREE = '3ddf0706c35517c0dd6bdf4d4f7fa251d88c0e0a'
 const CTXMUX_VERSION = '0.1.0'
-const CTXMUX_MANIFEST_SHA256 = '346f47c04091623e4daccb8ae2ee8963f72bb881e9712db6e9142546ef3ae7a6'
 const CTXMUX_RUNTIME_BUILD_ID = `ctxmuxd/${CTXMUX_VERSION}`
 const REQUIRED_RUNTIME_CAPABILITIES = {
   [RUNTIME_CAPABILITY_NATIVE_START]: 1,
