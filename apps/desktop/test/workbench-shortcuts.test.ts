@@ -5,6 +5,7 @@ import type { WorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
 import {
   adjacentRegionId,
   handleWorkbenchShortcut,
+  isEditableChordTarget,
   resolveWorkbenchShortcut,
   tabIdForOrdinal,
   type WorkbenchShortcutEvent,
@@ -114,6 +115,25 @@ describe('平台底线', () => {
 
   it('Alt 单独作用于非方向键时不解析成任何命令', () => {
     expect(resolveWorkbenchShortcut(event({ key: 'd', metaKey: true, altKey: true }), true)).toBeNull()
+  })
+})
+
+describe('isEditableChordTarget：非终端可编辑控件放行，终端焦点仍接管', () => {
+  it('Agent composer 的 textarea、Tab 重命名 input、contentEditable 都放行', () => {
+    expect(isEditableChordTarget({ tagName: 'TEXTAREA', isContentEditable: false, insideTerminal: false })).toBe(true)
+    expect(isEditableChordTarget({ tagName: 'INPUT', isContentEditable: false, insideTerminal: false })).toBe(true)
+    expect(isEditableChordTarget({ tagName: 'DIV', isContentEditable: true, insideTerminal: false })).toBe(true)
+  })
+
+  it('终端里的元素一律不放行——capture 存在就是为了抢在 xterm 前拿到键', () => {
+    // 即便 xterm 的辅助层本身是个 textarea，在终端子树内也必须让快捷键接管。
+    expect(isEditableChordTarget({ tagName: 'TEXTAREA', isContentEditable: false, insideTerminal: true })).toBe(false)
+    expect(isEditableChordTarget({ tagName: 'DIV', isContentEditable: true, insideTerminal: true })).toBe(false)
+  })
+
+  it('普通非可编辑元素不放行（快捷键照常接管）', () => {
+    expect(isEditableChordTarget({ tagName: 'BUTTON', isContentEditable: false, insideTerminal: false })).toBe(false)
+    expect(isEditableChordTarget({ tagName: 'DIV', isContentEditable: false, insideTerminal: false })).toBe(false)
   })
 })
 
@@ -298,6 +318,7 @@ function spyStore(overrides: Partial<WorkbenchShortcutStore> = {}): WorkbenchSho
     tabs: { t1: tab('t1', 'r1'), t2: tab('t2', 'r2'), t3: tab('t3', 'r3') },
     activateTab: (w, g, t) => calls.push(`activateTab:${w}:${g}:${t}`),
     closeRegion: (w, t, r) => { calls.push(`closeRegion:${w}:${t}:${r}`) },
+    requestCloseTab: (w, g, t) => calls.push(`requestCloseTab:${w}:${g}:${t}`),
     splitRegion: (w, t, r, d) => calls.push(`splitRegion:${w}:${t}:${r}:${d}`),
     focusRegion: (w, t, r) => calls.push(`focusRegion:${w}:${t}:${r}`),
     ...overrides
@@ -312,12 +333,41 @@ describe('接线：handleWorkbenchShortcut 把每条键接到 store', () => {
     expect(store.calls).toEqual(['activateTab:ws:g:t2'])
   })
 
-  it('Cmd+W 调 closeRegion，作用在活动 Tab 的活动 Region 上', () => {
+  it('Cmd+W 在单 Region Tab 上关整张 Tab（走确认流的意图），不是空关 Region', () => {
+    // 默认 store 的 t2 是单格 r2——这是最常见的 Tab 状态。任务头号诉求「关不掉」正出在这里：
+    // 若还调 closeRegion，removeWorkbenchRegion 见只剩一格会静默不动，键却被吞。改成投 requestCloseTab。
     const store = spyStore()
     const handled = handleWorkbenchShortcut(event({ key: 'w', metaKey: true }), true, store)
     expect(handled).toBe(true)
-    // 焦点组活动 Tab 是 t2，其活动 Region 是 r2。
-    expect(store.calls).toEqual(['closeRegion:ws:t2:r2'])
+    // 焦点组活动 Tab 是 t2；关 Tab 要带上组 id 交给组件的确认流。
+    expect(store.calls).toEqual(['requestCloseTab:ws:g:t2'])
+  })
+
+  it('Cmd+W 在多 Region Tab 上只关活动格，不关整张 Tab', () => {
+    // 分屏后的 Tab（t2 分成左右两格，活动在右格 r2R）：Cmd+W 关的是那一格，不是整张 Tab。
+    const splitTab: WorkbenchTab = {
+      id: 't2',
+      workspaceId: 'ws',
+      titleRegionId: 'r2L',
+      layout: {
+        root: {
+          type: 'split',
+          direction: 'horizontal',
+          first: { type: 'leaf', regionId: 'r2L' },
+          second: { type: 'leaf', regionId: 'r2R' },
+          ratio: 0.5
+        },
+        activeRegionId: 'r2R'
+      },
+      regions: {
+        r2L: { regionId: 'r2L', kind: 'launcher', workspaceId: 'ws' },
+        r2R: { regionId: 'r2R', kind: 'launcher', workspaceId: 'ws' }
+      }
+    }
+    const store = spyStore({ tabs: { t2: splitTab } })
+    const handled = handleWorkbenchShortcut(event({ key: 'w', metaKey: true }), true, store)
+    expect(handled).toBe(true)
+    expect(store.calls).toEqual(['closeRegion:ws:t2:r2R'])
   })
 
   it('Cmd+D 调 splitRegion，方向原样带过去', () => {
