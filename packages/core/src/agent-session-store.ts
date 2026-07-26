@@ -1850,8 +1850,15 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
 
   /**
    * 字节到手后的解析与抢救分界：能严格解析就走快路径，绝不留下隔离文件；
-   * 一旦是当前格式内的真损坏（撕裂、乱码、单条记录过不了校验），先把原始字节整段隔离，
-   * 再尽力救回能读的记录。版本不符按 INVALID 上抛——那是迁移的活，本任务只在 v5 内抢救。
+   * 一旦是当前格式内的真损坏（撕裂、乱码、单条记录过不了校验），先把还能读的记录救出来，
+   * 再把原始字节整段隔离——**顺序不可颠倒**：隔离是尽力而为的旁路诊断，绝不能把它的写盘
+   * 成功当成返回抢救结果的前提。磁盘故障既是 store 损坏的主因，又是隔离写失败的主因，
+   * 最需要救援的场景恰恰是隔离最可能失败的场景；若让 quarantine 抛错把整份读取带崩，
+   * 一个读恢复能力就被一次写成功绑架了。版本不符按 INVALID 上抛——那是迁移的活，本任务只在 v5 内抢救。
+   *
+   * 断电边界：salvage 只对「盘上还留着可解析记录字节」的残余损坏有效。全零填充和 0 字节
+   * （最典型的断电结果）无数据可救，一条也救不回来——真正防住断电的是写入侧的 fsync（T-004），
+   * salvage 只是残余损坏的兜底，别指望它包治断电。
    */
   private async parseStoreDocument(
     raw: Buffer,
@@ -1863,14 +1870,18 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       value = JSON.parse(text)
     } catch {
       // 整份 JSON 都解析不了（尾块被截断、注入了乱码）：按缩进从原始文本里逐块抢救会话。
-      await this.quarantineCorruptStore(raw, signal)
-      return {
+      // 分帧后的块数才是「本应有多少条记录」的诚实分母——坏到 parse 不了的块也是丢掉的一条，
+      // 只数 parse 成功的块会把丢失量少报。
+      const blocks = extractSessionBlocks(text)
+      const document: AgentSessionStoreDocument = {
         version: 5,
         sessions: salvageSessionList(parseSessionBlocks(text)),
         reservations: [],
         retiredRuns: [],
         retiredAgentSessions: []
       }
+      await this.recordCorruptStoreSalvage(raw, document.sessions.length, blocks.length, signal)
+      return document
     }
     if (
       !value ||
@@ -1885,8 +1896,10 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       return this.strictStoreDocument(value as Record<string, unknown>)
     } catch (error) {
       if (error instanceof AgentMuxError && error.code === 'AGENT_SESSION_STORE_LIMIT') throw error
-      await this.quarantineCorruptStore(raw, signal)
-      return this.salvageStoreDocument(value as Record<string, unknown>)
+      const document = this.salvageStoreDocument(value as Record<string, unknown>)
+      const candidateCount = asArray((value as Record<string, unknown>).sessions).length
+      await this.recordCorruptStoreSalvage(raw, document.sessions.length, candidateCount, signal)
+      return document
     }
   }
 
@@ -1939,15 +1952,66 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   }
 
   /**
-   * 把损坏的原始字节原样落到一个内容寻址的隔离文件（sha256 命名），不静默丢弃——事后可据此诊断。
-   * 内容寻址让同一份坏文件被反复读到时只隔离一次，不会堆积。写到旁路文件，与主文件互不干扰。
+   * 抢救事件的唯一可观察出口：把原始字节尽力隔离，并**无论隔离成败都**发一条 warning，
+   * 让运维看得见「救回几条、丢了几条、隔离文件在哪」——否则用户丢了 200/256 条会话
+   * 收不到任何信号，唯一痕迹是没人盯的 sidecar。隔离是 best-effort（见 quarantineCorruptStore）：
+   * 写盘失败不影响已救回的结果返回，但那次失败本身也要 warn，绝不静默吞掉。
    */
-  private async quarantineCorruptStore(raw: Buffer, signal?: AbortSignal): Promise<void> {
-    signal?.throwIfAborted()
+  private async recordCorruptStoreSalvage(
+    raw: Buffer,
+    recovered: number,
+    candidates: number,
+    signal?: AbortSignal
+  ): Promise<void> {
+    const quarantinePath = this.corruptStorePath(raw)
+    const quarantined = await this.quarantineCorruptStore(raw, quarantinePath, signal)
+    const lost = Math.max(0, candidates - recovered)
+    const where = quarantined
+      ? `quarantined to ${quarantinePath}`
+      : `quarantine write FAILED (bytes not isolated; see prior warning): would-be ${quarantinePath}`
+    process.emitWarning(
+      `Agent Session store was corrupt: salvaged ${recovered} of ${candidates} readable record(s), ` +
+        `lost ${lost}; ${where}.`,
+      { code: 'AGENT_SESSION_STORE_SALVAGED' }
+    )
+  }
+
+  private corruptStorePath(raw: Buffer): string {
     const digest = createHash('sha256').update(raw).digest('base64url').slice(0, 16)
-    const path = `${this.path}.corrupt-${digest}`
-    await mkdir(dirname(path), { recursive: true, mode: 0o700 })
-    await durableWriteFile(path, raw, { mode: 0o600, ...(signal ? { signal } : {}) })
+    return `${this.path}.corrupt-${digest}`
+  }
+
+  /**
+   * 把损坏的原始字节原样落到一个内容寻址的隔离文件（sha256 命名），事后可据此诊断。
+   * **Best-effort**：写盘失败不抛给调用方——抢救结果绝不能被这次旁路写成功绑架。返回是否落盘成功；
+   * 失败时自己 warn（含原因）后返回 false，交由上层把这次失败一并写进 salvage warning，不静默吞掉。
+   * 调用方 abort 属于取消而非 I/O 故障，照常上抛。
+   *
+   * 去重是内容寻址的：同一份坏文件被反复读到只隔离一次。但这只对**相同内容**成立——
+   * 不同内容的损坏会各自留一份 sidecar，每份最多 MAX_STORE_BYTES(1 MiB)，既不回收也无总量上限。
+   * 当前需求下损坏是罕见事件，堆积不构成实际问题，故不加清理/预算层（那会是预防性抽象）；
+   * 若日后 sidecar 真的堆起来，再引入有界回收，别把这里的注释读成「永不堆积」。
+   */
+  private async quarantineCorruptStore(
+    raw: Buffer,
+    path: string,
+    signal?: AbortSignal
+  ): Promise<boolean> {
+    signal?.throwIfAborted()
+    try {
+      await mkdir(dirname(path), { recursive: true, mode: 0o700 })
+      await durableWriteFile(path, raw, { mode: 0o600, ...(signal ? { signal } : {}) })
+      return true
+    } catch (error) {
+      // 调用方取消不是磁盘故障：照常上抛，尊重取消语义。
+      if (signal?.aborted) throw error
+      process.emitWarning(
+        `Agent Session store salvage could not isolate corrupt bytes to ${path}: ` +
+          `${error instanceof Error ? error.message : String(error)}`,
+        { code: 'AGENT_SESSION_STORE_QUARANTINE_FAILED' }
+      )
+      return false
+    }
   }
 
 

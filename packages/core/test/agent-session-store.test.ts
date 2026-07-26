@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createHash } from 'node:crypto'
-import { chmod, mkdtemp, readdir, readFile, rm, unlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import {
@@ -805,6 +805,30 @@ describe('Agent Session store corruption salvage', () => {
     return (await readdir(root)).filter((entry) => entry.includes('.corrupt-'))
   }
 
+  interface CapturedWarning {
+    message: string
+    code: string | undefined
+  }
+
+  /** 捕获一段代码期间的所有 process.emitWarning，测「抢救事件必须可观察」。 */
+  async function captureWarnings(run: () => Promise<void>): Promise<CapturedWarning[]> {
+    const captured: CapturedWarning[] = []
+    const original = process.emitWarning
+    // Node 的 emitWarning 有多个重载；这里只关心 (message, {code}) 这一种用法。
+    process.emitWarning = ((warning: string | Error, options?: unknown): void => {
+      const code = options && typeof options === 'object' && 'code' in options
+        ? String((options as { code?: unknown }).code)
+        : undefined
+      captured.push({ message: warning instanceof Error ? warning.message : warning, code })
+    }) as typeof process.emitWarning
+    try {
+      await run()
+    } finally {
+      process.emitWarning = original
+    }
+    return captured
+  }
+
   it('救出被截断文件里完好的记录，而不是整份作废', async () => {
     const { path, root } = await seedSalvage(3)
     try {
@@ -932,6 +956,87 @@ describe('Agent Session store corruption salvage', () => {
       // 版本不符不是损坏：不得隔离，也不得改写原文件。
       expect(await salvageQuarantineFiles(root)).toEqual([])
       expect(await readFile(path, 'utf8')).toBe(retired)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('隔离写盘失败也要把能读的记录救回来，绝不被一次写成功绑架', async () => {
+    // MAJOR-1：磁盘故障既是 store 损坏的主因、又是隔离写失败的主因，最需要救援的场景恰恰是
+    // 隔离最可能失败的场景。这里 lock 与 read 都成功，只让 quarantine 写盘失败——
+    // 做法是把内容寻址出来的 sidecar 路径先占成一个目录，durableWriteFile 的 rename 撞上必失败。
+    const { path, root } = await seedSalvage(3)
+    try {
+      const text = (await readFile(path)).toString('utf8')
+      const corrupt = injectNulByte(text, 1)
+      await writeFile(path, corrupt, { mode: 0o600 })
+
+      // 预先把 quarantine 目标路径占成目录，逼真地制造「隔离写失败但 store 可读」。
+      const digest = createHash('sha256').update(corrupt).digest('base64url').slice(0, 16)
+      const sidecar = `${path}.corrupt-${digest}`
+      await mkdir(sidecar, { recursive: true })
+      await writeFile(join(sidecar, 'blocker'), 'x')
+
+      // 关键断言：即便隔离写不进去，能读的记录照样救回来，load() 不抛。
+      const salvaged = await new AgentMuxFileAgentSessionStore(path).load()
+      const ids = salvaged.map((item) => (item as AgentMuxStoredAgentSession).agentSessionId)
+      expect(ids).toEqual(['semantic-0', 'semantic-2'])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('抢救事件对运维可见：发 warning 报明救回几条、丢了几条、隔离文件在哪', async () => {
+    // MAJOR-2：抢救不能完全静默。整份 JSON 坏掉后逐块抢救，必须发一条 warning 让运维看得见。
+    const { path, root } = await seedSalvage(3)
+    try {
+      const text = (await readFile(path)).toString('utf8')
+      const corrupt = injectNulByte(text, 1)
+      await writeFile(path, corrupt, { mode: 0o600 })
+
+      let salvagedIds: string[] = []
+      const warnings = await captureWarnings(async () => {
+        const salvaged = await new AgentMuxFileAgentSessionStore(path).load()
+        salvagedIds = salvaged.map((item) => (item as AgentMuxStoredAgentSession).agentSessionId)
+      })
+      expect(salvagedIds).toEqual(['semantic-0', 'semantic-2'])
+
+      const salvageWarning = warnings.find((w) => w.code === 'AGENT_SESSION_STORE_SALVAGED')
+      expect(salvageWarning).toBeDefined()
+      // warning 里要能看出救回数、丢弃数，以及隔离文件在哪。
+      expect(salvageWarning!.message).toContain('salvaged 2 of 3')
+      expect(salvageWarning!.message).toContain('lost 1')
+      const [quarantine] = await salvageQuarantineFiles(root)
+      expect(quarantine).toBeDefined()
+      expect(salvageWarning!.message).toContain(quarantine!)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('隔离写失败时也发 warning，绝不静默吞掉写失败', async () => {
+    // MAJOR-1 与 MAJOR-2 的交互：quarantine 改成 best-effort 之后，写失败不能变成静默——
+    // 既要有「隔离失败」的 warning，也要在 salvage warning 里标明字节没能隔离。
+    const { path, root } = await seedSalvage(3)
+    try {
+      const text = (await readFile(path)).toString('utf8')
+      const corrupt = injectNulByte(text, 1)
+      await writeFile(path, corrupt, { mode: 0o600 })
+
+      const digest = createHash('sha256').update(corrupt).digest('base64url').slice(0, 16)
+      const sidecar = `${path}.corrupt-${digest}`
+      await mkdir(sidecar, { recursive: true })
+      await writeFile(join(sidecar, 'blocker'), 'x')
+
+      const warnings = await captureWarnings(async () => {
+        await new AgentMuxFileAgentSessionStore(path).load()
+      })
+      const quarantineFailure = warnings.find((w) => w.code === 'AGENT_SESSION_STORE_QUARANTINE_FAILED')
+      expect(quarantineFailure).toBeDefined()
+      const salvageWarning = warnings.find((w) => w.code === 'AGENT_SESSION_STORE_SALVAGED')
+      expect(salvageWarning).toBeDefined()
+      // salvage warning 必须点明字节没能隔离，而不是假装隔离成功。
+      expect(salvageWarning!.message).toContain('FAILED')
     } finally {
       await rm(root, { recursive: true, force: true })
     }
