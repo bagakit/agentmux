@@ -85,6 +85,16 @@
   --amber-wash: color-mix(in srgb, var(--amber) 12%, transparent);
 
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* 动效刻度：节奏与曲线也是 token，不在各表面手写毫秒数（见 agentmux-surface-density.md《动效》）。
+     按"这个动作是什么"选，不按"想显得多快"选——四档跨三个数量级，因为它们是三类不同的事：
+     微交互要跟手、入场要有减速、长时状态要慢到不抢注意力。 */
+  --dur-fast: 120ms;   /* 微交互：hover、图标着色、按钮态 */
+  --dur-enter: 120ms;  /* 浮层入场：菜单、tooltip、卡片 */
+  --dur-breath: 1.8s;  /* 长时呼吸：状态点脉动、恢复态光标 */
+  --dur-sweep: 2.4s;   /* 长时扫掠：恢复态扫描线 */
+  /* 入场减速曲线：浮层从指针处生长的那条。此前在三处手写同一串 cubic-bezier，
+     调一次传导不到另外两处。 */
+  --ease-enter: cubic-bezier(.16, 1, .3, 1);
   /* focus：输入聚焦的统一描边色与光晕，收敛散落的硬编码绿边 */
   --focus-line: #4c6a58;
   --focus-ring: 0 0 0 2px #83dca61a;
