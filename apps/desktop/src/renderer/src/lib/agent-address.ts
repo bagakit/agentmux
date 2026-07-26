@@ -20,22 +20,49 @@ function shellArgument(value: string): string {
 }
 
 /**
+ * 寻址命令的唯一出处。
+ *
+ * 三级地址与失败恢复都从这里取命令文本，谁都不自己拼。这不是为了少写几行——复制出去的地址和
+ * 失败时给出的下一步必须**逐字一致**，否则接收方会看到同一件事的两种写法；而两处拼接一定会各自
+ * 演进，漂移的那天不会有任何测试变红。改这里的格式，复制与恢复两侧的断言必须同时红。
+ *
+ * flag 只用已被 CLI 与 Control 面接受的那套（`--to-session` / `--to-region` / `--to-tab` 及
+ * `inspect` 的对应 flag），不为任何新入口发明第二套语法。
+ */
+const ADDRESS_FLAGS = {
+  session: { send: '--to-session', inspect: '--session' },
+  region: { send: '--to-region', inspect: '--region' },
+  tab: { send: '--to-tab', inspect: '--tab' }
+} as const
+
+type AddressKind = keyof typeof ADDRESS_FLAGS
+
+/** 发消息给这个地址的命令。 */
+function sendCommand(kind: AddressKind, id: string): string {
+  return `agentmux send ${ADDRESS_FLAGS[kind].send}=${shellArgument(id)} --text "..."`
+}
+
+/** 查看这个地址的命令。 */
+function inspectCommand(kind: AddressKind, id: string): string {
+  return `agentmux inspect ${ADDRESS_FLAGS[kind].inspect}=${shellArgument(id)}`
+}
+
+/**
  * 哪个 Agent。
  *
  * Session 是 Provider 语义身份，与它此刻显示在哪张 View 的哪一格无关，因此这是唯一一个
  * 在 View 被关掉、被移动、被分屏之后依然指向同一个 Agent 的地址。
  */
 export function formatSessionAddress(agentSessionId: string): string {
-  const id = shellArgument(agentSessionId)
   return `AgentMux Agent Session ${agentSessionId}
 
 这是 Agent 的语义身份，与它显示在哪张 View、哪一格无关。
 
 发消息给它：
-agentmux send --to-session=${id} --text "..."
+${sendCommand('session', agentSessionId)}
 
 查看它：
-agentmux inspect --session=${id}`
+${inspectCommand('session', agentSessionId)}`
 }
 
 /**
@@ -46,16 +73,15 @@ agentmux inspect --session=${id}`
  * 而不是让接收方自己去 inspect 消歧。
  */
 export function formatRegionAddress(regionId: string): string {
-  const id = shellArgument(regionId)
   return `AgentMux Region ${regionId}
 
 这是 View 里的一格。分屏承载多个 Agent 时，它 unambiguous 地指向这一格，View 地址做不到。
 
 发消息给这一格里的 Agent：
-agentmux send --to-region=${id} --text "..."
+${sendCommand('region', regionId)}
 
 查看这一格：
-agentmux inspect --region=${id}`
+${inspectCommand('region', regionId)}`
 }
 
 /**
@@ -66,15 +92,93 @@ agentmux inspect --region=${id}`
  * MESSAGE_TARGET_NOT_UNIQUE 再自己从 candidates 里挑。
  */
 export function formatViewAddress(tabId: string): string {
-  const id = shellArgument(tabId)
   return `AgentMux View ${tabId}
 
 这是一张完整工作面。它用于 Agent 寻址的前提是：这张 View 里 exactly one Agent。
 这张 View 分屏承载多个 Agent 时，改用那一格的 Region 地址——在那一格上右键复制。
 
 发消息给它（前提如上）：
-agentmux send --to-tab=${id} --text "..."
+${sendCommand('tab', tabId)}
 
 查看它（列出它的每一格）：
-agentmux inspect --tab=${id}`
+${inspectCommand('tab', tabId)}`
+}
+
+/**
+ * 交接入口解析出的最精确地址。
+ *
+ * 入口按意图命名（"给这个 Agent 发消息"），因此这里要替用户决定该给哪一层身份——用户想的是
+ * 把这个 Agent 交出去，不是"我要 Region 还是 Session"。解析顺序只有一条规则：**指向某一格
+ * 分屏时给 Region 地址，否则给 Session 地址**。
+ *
+ * 为什么分屏时反而给"更窄"的 Region 而不是跨 View 稳定的 Session：歧义只在源头可见。点击发生在
+ * 某一格上，我们知道是哪一格，接收方不知道；此时给 Region 才是把消歧做在源头。不分屏时没有这个
+ * 歧义，Session 是更稳的那个身份——它在 View 被关掉、移动、分屏之后依然指向同一个 Agent。
+ */
+export function formatHandoffAddress(target: {
+  agentSessionId: string
+  regionId?: string
+}): string {
+  return target.regionId === undefined
+    ? formatSessionAddress(target.agentSessionId)
+    : formatRegionAddress(target.regionId)
+}
+
+/**
+ * 寻址失败时的下一步。
+ *
+ * 失败不是终点，是一个要说清楚"现在怎么办"的时刻。`MESSAGE_TARGET_NOT_UNIQUE` 已经带
+ * `candidates`，但一份候选清单仍然要求接收方自己拼出命令——那正是"歧义不甩给接收方"这条原则
+ * 在错误路径上的漏洞。所以这里产出的每一条都是**可直接执行的命令**，而不是让人再拼一次的素材。
+ *
+ * 命令来自上面那三个地址出口，不另写一份拼接：两份拼接会各自演进，漂移时不会有测试变红。
+ *
+ * 入参是**未收窄的错误码**、返回 `string | null`，这是有意的：哪些码算"寻址失败"由本模块说了
+ * 算。调用方（控制响应边界）拿到任何码都往这里问一次，不在边界处再列一份码表——两份码表一定会
+ * 漂移，而漂移的那天没有测试会红。
+ */
+export function addressingRecovery(error: {
+  code: string
+  candidates?: readonly { agentSessionId: string; regionIds: readonly string[] }[]
+}): string | null {
+  if (error.code === 'MESSAGE_TARGET_NOT_UNIQUE') {
+    return formatTargetNotUnique(error.candidates ?? [])
+  }
+  if (error.code === 'MESSAGE_TARGET_NOT_AGENT') {
+    return `这一格不是 Agent（是终端、浏览器或文件）。
+在承载 Agent 的那一格上重试，或先列出这张 View 的每一格：
+agentmux inspect`
+  }
+  if (error.code === 'UNKNOWN_AGENT_SESSION') {
+    return `这个 Agent 已经不在了（已退出或已被回收）。
+列出还活着的 Agent：
+agentmux inspect`
+  }
+  if (error.code === 'TAB_NOT_OPEN' || error.code === 'REGION_NOT_OPEN') {
+    return `这个地址指向的 View 或 Region 已经不存在了（被关掉或重新分屏过）。
+重新取一次当前地址：
+agentmux inspect`
+  }
+  // 不是寻址失败。别硬编一句放之四海的"再试一次"——那种话等于没说，还会盖住真正的原因。
+  return null
+}
+
+function formatTargetNotUnique(
+  candidates: readonly { agentSessionId: string; regionIds: readonly string[] }[]
+): string {
+  // 每个候选都给一条能直接跑的命令：有 Region 就用 Region（分屏下唯一无歧义的那一格），
+  // 否则退到 Session。候选为空是"这张 View 里一个 Agent 都没有"，与"有多个"是不同的下一步。
+  if (candidates.length === 0) {
+    return `这张 View 里没有 Agent，没有可交接的目标。
+先在这张 View 里启动一个 Agent，或改为在承载 Agent 的那一格上操作。`
+  }
+  const lines = candidates.map((candidate) => {
+    const region = candidate.regionIds[0]
+    return region === undefined
+      ? sendCommand('session', candidate.agentSessionId)
+      : sendCommand('region', region)
+  })
+  return `这张 View 承载多个 Agent，--to-tab 无法唯一寻址。挑一个直接跑：
+
+${lines.join('\n')}`
 }

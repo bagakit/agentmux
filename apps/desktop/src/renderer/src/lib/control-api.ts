@@ -9,6 +9,7 @@ import type {
   AgentMuxPreloadApi,
   DesktopControlResponse
 } from '../../../shared/contracts'
+import { addressingRecovery } from './agent-address'
 
 function cancellationError(code: AgentMuxControlErrorCode, message: string): Error & { code: AgentMuxControlErrorCode } {
   return Object.assign(new Error(message), { code })
@@ -56,6 +57,26 @@ function messageTargetCandidates(value: unknown): AgentMuxMessageTargetCandidate
   return candidates
 }
 
+/**
+ * 寻址失败自带下一步。
+ *
+ * 挂在这里而不是每个抛出点：`TAB_NOT_OPEN` 一个码在 `control.ts` 里就抛 6 处，逐点拼接必然漂移，
+ * 而漂移那天不会有测试变红。控制错误离开渲染进程只有这一个出口，恢复文本要给的正是**出口对面
+ * 那个调用方**——所以这层是它唯一该长出来的地方。
+ *
+ * 哪些码算"寻址失败"由 `addressingRecovery` 说了算，这里不再列第二份码表。
+ *
+ * 候选只接**已校验**的那份：未校验的 id 可能带换行或 `self`，会把恢复文本变成一段执行不了、
+ * 甚至误导人的命令。所以这里不接 `unknown` 再自己判类型——那等于把校验又做了一遍。
+ */
+function withRecovery(
+  message: string,
+  error: { code: string; candidates?: readonly AgentMuxMessageTargetCandidate[] }
+): string {
+  const recovery = addressingRecovery(error)
+  return recovery === null ? message : `${message}\n\n${recovery}`
+}
+
 function responseError(error: unknown): AgentMuxControlError {
   const source = typeof error === 'object' && error !== null ? error as Record<string, unknown> : null
   const message = error instanceof Error ? error.message : String(error)
@@ -65,7 +86,7 @@ function responseError(error: unknown): AgentMuxControlError {
     if (!candidates) return { code: 'CONTROL_FAILED', message: 'Desktop Control owner returned invalid message target candidates.' }
     return {
       code,
-      message,
+      message: withRecovery(message, { code, candidates }),
       candidates
     }
   }
@@ -74,7 +95,7 @@ function responseError(error: unknown): AgentMuxControlError {
   }
   return {
     code,
-    message
+    message: withRecovery(message, { code })
   }
 }
 
