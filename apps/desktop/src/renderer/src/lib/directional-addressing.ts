@@ -33,14 +33,6 @@ export type DirectionalNeighborInput = {
 }
 
 /**
- * 方向解析的答案——**就是 Control 契约里的那个类型**，不在渲染层另抄一份结构相同的。
- *
- * `none` 与"报错"是两回事：最右一格问 right 是一个**合法问题的合法答案**，不是失败。抛异常会
- * 让 Agent 以为自己问错了，而它只是到边了。
- */
-export type DirectionalNeighbor = AgentMuxRegionNeighbor
-
-/**
  * 归一化几何的比较容差。
  *
  * bounds 由 ratio 连乘得出，`0.5 + 0.25 + 0.25` 这类拆分会留下浮点尾数；不留容差的话，两格明明
@@ -141,11 +133,15 @@ export function tabNeighbor(
  * **优先级由"屏幕上更近"决定：先 Region 后 Tab**。同一 View 内有分栏时，方向必须落在 Region
  * 上——那才是用户视线里紧挨着的那一格；只有该方向上没有兄弟 Region 时，才退到 Tab 邻接。反过来
  * （先 Tab）会让一个分了栏的 View 把用户指向另一张 Tab，与所见不符。
+ *
+ * 返回的就是 Control 契约里的 `AgentMuxRegionNeighbor`，不在渲染层另抄一份结构相同的类型。
+ * 其中 `none` 与"报错"是两回事：最右一格问 right 是一个**合法问题的合法答案**，不是失败。
+ * 抛异常会让 Agent 以为自己问错了，而它只是到边了。
  */
 export function directionalNeighbor(
   input: DirectionalNeighborInput,
   direction: AddressDirection
-): DirectionalNeighbor {
+): AgentMuxRegionNeighbor {
   const region = regionNeighbor(input, direction)
   if (region) return { kind: 'region', regionId: region }
   const tab = tabNeighbor(input, direction)
