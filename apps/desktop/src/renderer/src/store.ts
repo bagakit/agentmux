@@ -2486,6 +2486,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             }
           : reduced.state
       })
+      // 只有启动成功、region 从 launcher 变成 agent 之后，才清掉这条 launcher 草稿——此刻它已失去归属。
+      // 失败路径（下方 catch → reduceSessionLaunchFailed）绝不清：region 会翻回 launcher 且沿用同一个
+      // regionId，草稿留在原地供用户直接重试。这正是用户报告"报错退回初始页、之前输入没缓存"要修的行为。
+      get().clearAgentComposerDraftIfUnchanged(regionId, prompt)
       if (timelineGapSessionId) void get().resyncTimeline(timelineGapSessionId)
     } catch (error) {
       if (!ownsSessionLaunch(findWorkbenchRegion(get().tabs, regionId)?.surface, 'agent', sessionId)) {
