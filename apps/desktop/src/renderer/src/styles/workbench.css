@@ -6,6 +6,13 @@
  */
 
 .workbench-shell { min-width: 0; min-height: 0; display: flex; position: relative; overflow: hidden; }
+.workspace-workbench-registry { position: absolute; z-index: 1; inset: 0; min-width: 0; min-height: 0; overflow: hidden; }
+.workspace-workbench-registry--parked { visibility: hidden; pointer-events: none; }
+.workspace-workbench-slot { position: absolute; inset: 0; min-width: 0; min-height: 0; visibility: hidden; pointer-events: none; }
+.workspace-workbench-slot:not(.workspace-workbench-slot--parked) { visibility: visible; pointer-events: auto; }
+/* Parking is a CSS visibility decision, not a React conditional: the Workbench subtree (and its
+   xterm/ctxmux attachment) remains mounted while the inactive Workspace contributes no hit testing.
+   `visible` still reaches Terminal/Browser so their owners suspend observers and native bounds. */
 .pane-split { width: 100%; height: 100%; min-width: 0; min-height: 0; }
 .pane-resize-handle { position: relative; z-index: 5; flex: 0 0 1px; background: var(--line); }
 .pane-resize-handle::after { content: ''; position: absolute; inset: -3px; }

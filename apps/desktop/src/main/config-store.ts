@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { BUILT_IN_AGENT_PROVIDERS } from '@agentmux/core'
 import type { AppConfig, WorkspaceRecord } from '../shared/contracts.js'
 import { SCRATCH_WORKSPACE_ID, SCRATCH_WORKSPACE_NAME } from '../shared/contracts.js'
+import { DEFAULT_NOTIFICATION_MODE_ID, NOTIFICATION_TIERS } from '../shared/notification-presentation.js'
 
 const hostSchema = z.discriminatedUnion('kind', [
   z.object({ id: z.literal('local'), kind: z.literal('local'), label: z.string().min(1) }).strict(),
@@ -47,6 +48,8 @@ const workspaceSchema = z
   })
   .strict()
 
+const notificationModeIds = NOTIFICATION_TIERS.map((tier) => tier.id) as [string, ...string[]]
+
 const configSchema = z
   .object({
     version: z.literal(7),
@@ -62,7 +65,11 @@ const configSchema = z
         viewport: z.boolean(),
         more: z.boolean()
       }).strict()
-    }).strict()
+    }).strict(),
+    // Optional: a config written before this field existed is still valid, and `get()` back-fills the
+    // explicit default. The mode is validated against the one tier table so an unknown id is rejected
+    // rather than silently meaning "off".
+    notifications: z.object({ mode: z.enum(notificationModeIds) }).strict().optional()
   })
   .strict()
   .superRefine((config, context) => {
@@ -149,7 +156,8 @@ const DEFAULT_CONFIG: AppConfig = {
       viewport: true,
       more: true
     }
-  }
+  },
+  notifications: { mode: DEFAULT_NOTIFICATION_MODE_ID }
 }
 
 /**
@@ -192,6 +200,20 @@ function withScratchWorkspace(config: AppConfig): { config: AppConfig; added: bo
   }
 }
 
+/**
+ * Back-fill the notification default for a config written before the field existed. Same pattern as the
+ * scratch-workspace back-fill: fill an absent optional in `get()` and persist once, so every later read
+ * sees a concrete default rather than `undefined` reaching the notifier. Present but unknown ids are
+ * left for the schema to reject.
+ */
+function withNotificationDefault(config: AppConfig): { config: AppConfig; added: boolean } {
+  if (config.notifications) return { config, added: false }
+  return {
+    config: { ...config, notifications: { mode: DEFAULT_NOTIFICATION_MODE_ID } },
+    added: true
+  }
+}
+
 export class ConfigStore {
   private saveTail: Promise<void> = Promise.resolve()
 
@@ -226,8 +248,10 @@ export class ConfigStore {
     }
     const scratch = withScratchWorkspace(loaded)
     if (scratch.added) persist = true
-    if (persist) return await this.save(scratch.config)
-    return scratch.config
+    const notifications = withNotificationDefault(scratch.config)
+    if (notifications.added) persist = true
+    if (persist) return await this.save(notifications.config)
+    return notifications.config
   }
 
   async save(value: AppConfig): Promise<AppConfig> {

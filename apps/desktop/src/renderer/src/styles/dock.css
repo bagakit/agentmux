@@ -14,7 +14,7 @@
 .surface-switch button { height: 20px; display: inline-flex; align-items: center; gap:var(--sp-2); padding:0 var(--sp-4); border: 0; border-radius: 4px; color: var(--text-3); background: transparent; font-size: var(--fs-meta); cursor: pointer; transition: background .12s ease, color .12s ease; }
 .surface-switch button:hover { color: var(--text-2); }
 .surface-switch button.selected { color: var(--bg); background: var(--green); box-shadow: var(--hl-strong); }
-.workspace-main-surface { min-width: 0; min-height: 0; flex: 1; overflow: hidden; }
+.workspace-main-surface { min-width: 0; min-height: 0; position: relative; flex: 1; overflow: hidden; }
 .surface-tool-dock {
   width: 300px;
   min-width: 236px;

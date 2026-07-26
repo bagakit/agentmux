@@ -376,3 +376,21 @@
 .resource-usage__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .resource-usage__metric { text-align: right; font-variant-numeric: tabular-nums; }
 .resource-usage__empty { padding:var(--sp-2) var(--sp-4); color: var(--text-3); }
+
+/* 服务窗（AGENTS.md 原则 11）：像窗口上贴的一条告示。停在旁边，不挡路，也不消失。
+   语汇沿用紧邻其下的审批卡片——Surface 填充 + elevation + 一枚 STATUS 图标，不用描边（描边会与
+   Composer 争同一条边界），accent 表达状态而非装饰。用琥珀而非红：事实是「能干活，只是少一项能力」，
+   不是「你完了」。它随条件消失而非随用户点关闭，因此不给关闭键。 */
+.service-window {
+  margin:var(--sp-3) var(--sp-4) 0; padding:var(--sp-4);
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap:var(--sp-4); align-items: start;
+  border-radius: var(--radius); background: var(--surface-1); box-shadow: var(--elev-2), var(--hl);
+}
+.service-window__icon { display: inline-flex; color: var(--amber); }
+/* 分不清是哪一类时语气更沉：从琥珀让出到中性，因为没有证据说该染成「需要注意」。 */
+.service-window[data-kind='indeterminate'] .service-window__icon { color: var(--text-3); }
+.service-window__body { min-width: 0; display: grid; gap:var(--sp-1); }
+/* 三行：哪一步没走通（主）、现在按什么状态在跑、要恢复该做什么。 */
+.service-window__step { color: var(--text); font-size: var(--fs-body); line-height: 1.35; }
+.service-window__mode { color: var(--text-2); font-size: var(--fs-meta); line-height: 1.4; }
+.service-window__restore { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.4; }

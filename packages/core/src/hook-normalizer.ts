@@ -9,9 +9,10 @@ import type {
   NativeHookEnvelope,
   NormalizedHookEvent
 } from './types.js'
-
-const MAX_NATIVE_SESSION_ID_BYTES = 512
-const MAX_TRANSCRIPT_PATH_BYTES = 4 * 1024
+import {
+  normalizeNativeSessionId,
+  normalizeNativeTranscriptPath
+} from './agent-native-locator.js'
 
 export type AgentNativeHookStateRule = {
   events: readonly string[]
@@ -36,22 +37,26 @@ function stringField(payload: Record<string, unknown>, ...names: string[]): stri
   return undefined
 }
 
-function hasUnsafeControlCharacters(value: string): boolean {
-  for (let index = 0; index < value.length; index += 1) {
-    const code = value.charCodeAt(index)
-    if (code <= 0x1f || code === 0x7f) return true
+function sessionIdField(
+  payload: Record<string, unknown>,
+  names: readonly string[]
+): string | undefined {
+  for (const name of names) {
+    const value = normalizeNativeSessionId(payload[name])
+    if (value) return value
   }
-  return false
+  return undefined
 }
 
-function boundedField(
+function transcriptPathField(
   payload: Record<string, unknown>,
-  names: readonly string[],
-  maxBytes: number
+  names: readonly string[]
 ): string | undefined {
-  const value = stringField(payload, ...names)
-  if (!value || Buffer.byteLength(value) > maxBytes || hasUnsafeControlCharacters(value)) return undefined
-  return value
+  for (const name of names) {
+    const value = normalizeNativeTranscriptPath(payload[name])
+    if (value) return value
+  }
+  return undefined
 }
 
 function eventState(
@@ -75,10 +80,10 @@ function nativeHandle(
 ): AgentNativeSessionHandle | undefined {
   const definition = specification.nativeHandle
   if (!definition) return undefined
-  const sessionId = boundedField(payload, definition.sessionIdKeys, MAX_NATIVE_SESSION_ID_BYTES)
-  if (!sessionId || sessionId.startsWith('-')) return undefined
+  const sessionId = sessionIdField(payload, definition.sessionIdKeys)
+  if (!sessionId) return undefined
   const transcriptPath = definition.transcriptPathKeys
-    ? boundedField(payload, definition.transcriptPathKeys, MAX_TRANSCRIPT_PATH_BYTES)
+    ? transcriptPathField(payload, definition.transcriptPathKeys)
     : undefined
   if (definition.requireTranscriptPath && !transcriptPath) return undefined
   return {

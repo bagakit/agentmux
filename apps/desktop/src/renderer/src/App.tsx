@@ -33,12 +33,20 @@ export function App() {
   const error = useAppStore((state) => state.error)
   const config = useAppStore((state) => state.config)
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
+  const layouts = useAppStore((state) => state.layouts ?? {})
   const mainSurface = useAppStore((state) => state.mainSurface)
   const projectRailOpen = useAppStore((state) => state.projectRailOpen)
   const toolsOpen = useAppStore((state) => state.toolsOpen)
   const toolDockWidth = useAppStore((state) => state.toolDockWidth)
   const setToolDockWidth = useAppStore((state) => state.setToolDockWidth)
   const workspace = config?.workspaces.find((item) => item.id === activeWorkspaceId)
+  // A Workbench is a window-owned surface, not a route component. Keep only Workspaces the user has
+  // a persisted surface for (plus the active one during its first layout frame) mounted: switching
+  // back then changes visibility instead of destroying SessionPane/xterm/ctxmux attachments, while an
+  // untouched configured project does not allocate a hidden launcher/editor/browser tree at startup.
+  const mountedWorkspaces = config?.workspaces.filter((candidate) => (
+    candidate.id === activeWorkspaceId || layouts[candidate.id]?.groups.some((group) => group.tabOrder.length > 0)
+  )) ?? []
   const toolsAvailable = mainSurface === 'board' || Boolean(workspace)
   const toolsVisible = toolsAvailable && toolsOpen
   const toolDockMinimumWidth = getToolDockMinimumWidth(projectRailOpen)
@@ -175,14 +183,34 @@ export function App() {
               </div>
             ) : null}
             <section className="workspace-main-surface">
-              {mainSurface === 'board'
-                ? <WorkspaceBoard />
-                : workspace ? (
-                  <WorkspaceWorkbench
-                    workspaceId={workspace.id}
-                    interactiveResize={windowResizeActive || isResizing}
-                  />
-                ) : null}
+              {mainSurface === 'board' ? <WorkspaceBoard /> : null}
+              {workspace ? (
+                <div
+                  className={`workspace-workbench-registry ${mainSurface === 'workbench' ? '' : 'workspace-workbench-registry--parked'}`}
+                  aria-hidden={mainSurface !== 'workbench'}
+                  inert={mainSurface !== 'workbench'}
+                >
+                  {mountedWorkspaces.map((candidate) => {
+                    const visible = mainSurface === 'workbench' && candidate.id === activeWorkspaceId
+                    return (
+                      <div
+                        key={candidate.id}
+                        className={`workspace-workbench-slot ${visible ? '' : 'workspace-workbench-slot--parked'}`}
+                        data-workspace-id={candidate.id}
+                        data-visible={visible ? 'true' : 'false'}
+                        aria-hidden={!visible}
+                        inert={!visible}
+                      >
+                        <WorkspaceWorkbench
+                          workspaceId={candidate.id}
+                          visible={visible}
+                          interactiveResize={windowResizeActive || isResizing}
+                        />
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : null}
             </section>
           </div>
         )}
