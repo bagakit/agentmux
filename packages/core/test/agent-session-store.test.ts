@@ -1041,4 +1041,86 @@ describe('Agent Session store corruption salvage', () => {
       await rm(root, { recursive: true, force: true })
     }
   })
+
+  it('截断丢失量不可知时，warning 说 UNKNOWN 而不是编一个 lost 0', async () => {
+    // Review 抓到的假分母：截断把尾部记录连同其后的一切整段抹掉，被抹掉的记录不在字节流里，
+    // 分帧数不到——若拿分帧块数当分母，「丢了 2 条」会被报成 `lost 0`，主动告诉运维「一条没丢」。
+    // 对数据丢失报 false-negative 比不报更糟，正好击穿本 feature 要解决的问题。
+    const { path, root } = await seedSalvage(3)
+    try {
+      const original = await readFile(path)
+      await writeFile(path, original.subarray(0, Math.floor(original.length * 0.6)), { mode: 0o600 })
+
+      let salvagedCount = 0
+      const warnings = await captureWarnings(async () => {
+        salvagedCount = (await new AgentMuxFileAgentSessionStore(path).load()).length
+      })
+      // 前提锁死：确实发生了真实丢失（救回的比盘上原有的 3 条少），否则这条测试证明不了什么。
+      expect(salvagedCount).toBeGreaterThan(0)
+      expect(salvagedCount).toBeLessThan(3)
+
+      const salvageWarning = warnings.find((w) => w.code === 'AGENT_SESSION_STORE_SALVAGED')
+      expect(salvageWarning).toBeDefined()
+      // 必须承认原始条数不可知，绝不出现任何形式的 `lost N`——那是在无中生有一个分母。
+      expect(salvageWarning!.message).toContain('UNKNOWN')
+      expect(salvageWarning!.message).not.toMatch(/lost \d/u)
+      expect(salvageWarning!.message).toContain(`salvaged ${salvagedCount} readable record(s)`)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('锚点行被污染时同样报 UNKNOWN，不把「数不到」冒充成「一条都没有」', async () => {
+    // 分帧靠 `  "sessions": [` 定位起点。这行一坏，indexOf 返回 -1、分帧返回空——
+    // 此时救回 0 条，但盘上原本有 3 条。若报 `salvaged 0 of 0, lost 0`，就是全丢却宣称没丢。
+    const { path, root } = await seedSalvage(3)
+    try {
+      const text = (await readFile(path)).toString('utf8')
+      expect(text).toContain('  "sessions": [')
+      // 破坏锚点行本身（塞进 JSON 非法的控制字符），记录块原样留在盘上——
+      // 损坏的是「从哪开始数」，不是记录。同时锁死前提：这确实已不是合法 JSON，
+      // 否则走的根本不是分帧抢救分支（本仓踩过「构造的损坏不是损坏」这种假绿）。
+      const corrupt = text.replace('  "sessions": [', '  "sessions\u0000": [')
+      expect(() => JSON.parse(corrupt)).toThrow()
+      await writeFile(path, corrupt, { mode: 0o600 })
+
+      let salvagedCount = -1
+      const warnings = await captureWarnings(async () => {
+        salvagedCount = (await new AgentMuxFileAgentSessionStore(path).load()).length
+      })
+      expect(salvagedCount).toBe(0)
+
+      const salvageWarning = warnings.find((w) => w.code === 'AGENT_SESSION_STORE_SALVAGED')
+      expect(salvageWarning).toBeDefined()
+      expect(salvageWarning!.message).toContain('UNKNOWN')
+      // 「0 of 0」是这个 bug 最恶劣的形态：全丢了，却读起来像什么都没发生。
+      expect(salvageWarning!.message).not.toContain('0 of 0')
+      expect(salvageWarning!.message).not.toMatch(/lost \d/u)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('一次 registry 加载只为同一份坏字节报一次，不刷三条重复告警', async () => {
+    // registry 的一次逻辑加载串了三次 read()（sessions / retiredRuns / retiredAgentSessions），
+    // 同一份坏字节被 parse 三遍。Node 不按 code 去重（实测同 code 连发三次触发三次），
+    // 不去重的话运维会看到同一条 salvage 报三遍，读成「坏了三次」。
+    const { path, root } = await seedSalvage(3)
+    try {
+      const text = (await readFile(path)).toString('utf8')
+      await writeFile(path, injectNulByte(text, 1), { mode: 0o600 })
+
+      const store = new AgentMuxFileAgentSessionStore(path)
+      const warnings = await captureWarnings(async () => {
+        // 复现 registry.load() 的三次读取路径。
+        await store.load()
+        await store.loadRetiredRuns()
+        await store.loadRetiredAgentSessions()
+      })
+      const salvageWarnings = warnings.filter((w) => w.code === 'AGENT_SESSION_STORE_SALVAGED')
+      expect(salvageWarnings).toHaveLength(1)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
 })
