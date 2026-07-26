@@ -124,6 +124,17 @@ describe('四个调用点都走降级包装', () => {
     expect(loop).toContain('Promise.all(this.registry.list().map(async (session)')
   })
 
+  it('connect 时先校正当前 App 的 managed Hook 命令再恢复绑定', () => {
+    const open = clientCode.slice(
+      clientCode.indexOf('private async open('),
+      clientCode.indexOf('  } catch (error) {', clientCode.indexOf('private async open('))
+    )
+    expect(open).toContain('await this.repairManagedHooks()')
+    expect(open.indexOf('await this.repairManagedHooks()'))
+      .toBeLessThan(open.indexOf('await this.tryRestoreHookIngress(runs)'))
+    expect(clientCode).toContain('private async repairManagedHooks()')
+  })
+
   it('submitAgentPrompt 不被握手拦住——降级后 prompt 照发', () => {
     const submit = clientCode.slice(
       clientCode.indexOf('async submitAgentPrompt('),
@@ -323,6 +334,7 @@ describe('AgentMuxClient 握手超时行为（真实 registry/store 边界）', 
     // Keep this public-connect test focused on the per-Session handshake boundary. Hook restoration is
     // independently owned and would otherwise require a real listener/token fixture here.
     (client as unknown as { tryRestoreHookIngress: () => Promise<void> }).tryRestoreHookIngress = async () => {}
+    ;(client as unknown as { repairManagedHooks: () => Promise<void> }).repairManagedHooks = async () => {}
     const events: Array<{
       type: string
       agentSessionId?: string
