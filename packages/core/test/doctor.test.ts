@@ -1,4 +1,7 @@
-import { describe, expect, it, vi } from 'vitest'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
 import type { AgentMuxClient } from '../src/client.js'
 import { diagnoseAgentMux } from '../src/doctor.js'
@@ -40,6 +43,7 @@ function client(overrides: Partial<AgentMuxClient> = {}): AgentMuxClient {
       instanceId: 'daemon-fixture'
     }),
     runtimeDiagnostics: vi.fn(async () => runtime),
+    endpointReclaim: () => null,
     probeAgent: vi.fn(async (providerId: AgentProviderId) => ({
       providerId,
       executable: catalog.find((entry) => entry.id === providerId)!.executable,
@@ -50,7 +54,49 @@ function client(overrides: Partial<AgentMuxClient> = {}): AgentMuxClient {
   } as unknown as AgentMuxClient
 }
 
+const UID = typeof process.getuid === 'function' ? process.getuid() : 0
+
+afterEach(() => { delete process.env.AGENTMUX_RUNTIME_DIRECTORY })
+
 describe('AgentMux doctor', () => {
+  // 「让 endpoint 占用可见」这条只有真的算出体积才算数。把 runtime 目录指到一棵自造的树上，
+  // 断言报告里报出了那个已知字节数——若 endpointStorage 退化成空表或写死的 []，这条立刻变红。
+  it('reports real endpoint storage usage, not an empty placeholder', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'amx-doctor-'))
+    const current = join(root, `amx-${UID}-${'a'.repeat(24)}`)
+    await mkdir(current, { recursive: true })
+    await writeFile(join(current, 'state.sqlite3'), 'x'.repeat(2048))
+    process.env.AGENTMUX_RUNTIME_DIRECTORY = current
+
+    const report = await diagnoseAgentMux({ client: client() })
+
+    expect(report.endpointStorage).toEqual([{ path: current, bytes: 2048, current: true }])
+    await rm(root, { recursive: true, force: true })
+  })
+
+  // 回收失败若无处可看，「不阻断启动、只留可诊断信息」就只剩前半句：每次启动都删不掉的目录会一直
+  // 无声堆着。这条把回收结果真的从 client 端穿到报告里——把 `endpointReclaim` 写死成 null 会变红。
+  it('carries the startup reclamation outcome, failures included', async () => {
+    const outcome = {
+      reclaimed: ['/private/tmp/amx-501-aaaaaaaaaaaaaaaaaaaaaaaa'],
+      skippedLive: [],
+      failed: [{ path: '/private/tmp/amx-501-bbbbbbbbbbbbbbbbbbbbbbbb', reason: 'EACCES: permission denied' }]
+    }
+
+    const report = await diagnoseAgentMux({ client: client({ endpointReclaim: () => outcome }) })
+
+    expect(report.endpointReclaim).toEqual(outcome)
+  })
+
+  // 没连上运行时就没跑过回收。这时必须是 null——空 outcome 会被读成「回收跑过且一切正常」。
+  it('reports no reclamation at all when the runtime is unreachable', async () => {
+    const report = await diagnoseAgentMux({
+      client: client({ connect: vi.fn(async () => { throw new Error('owner receipt mismatch') }) })
+    })
+
+    expect(report.endpointReclaim).toBeNull()
+  })
+
   it('reports the exact ctxmux capability, integration, permission, and Host boundaries', async () => {
     const report = await diagnoseAgentMux({ client: client() })
 

@@ -1,4 +1,9 @@
 import type { AgentMuxClient } from './client.js'
+import {
+  endpointDirectoryUsage,
+  type EndpointDirectoryUsage,
+  type EndpointReclaimOutcome
+} from './runtime-endpoint-reclaim.js'
 import type { AgentProviderId, AgentCapabilities, AgentCatalogEntry } from './types.js'
 
 export type AgentMuxDoctorProbeState = 'found' | 'missing' | 'blocked'
@@ -29,6 +34,20 @@ export type AgentMuxDoctorReport = {
   }
   runtime: Awaited<ReturnType<AgentMuxClient['runtimeDiagnostics']>> | null
   runtimeAction: string | null
+  /**
+   * 每个 endpoint 目录当前占多少盘，当前那个标 `current`。
+   *
+   * artifact 每升一次版就派生一个新 endpoint 目录，旧的连同 100MB 级的 state.sqlite3 留在盘上。
+   * 回收在启动时自动做，但「现在到底占了多少」得有地方看得见，否则只有磁盘告警时才会发现。
+   */
+  endpointStorage: EndpointDirectoryUsage[]
+  /**
+   * 启动时那趟孤儿目录回收的结果；未连上运行时则为 null。
+   *
+   * 回收失败不阻断启动，所以失败本身是静默的——这里是它唯一能被看见的地方。`failed` 非空意味着有
+   * 目录每次启动都删不掉（典型是权限被收紧），会一直堆着。
+   */
+  endpointReclaim: EndpointReclaimOutcome | null
   hosts: {
     local: {
       status: 'available' | 'unavailable'
@@ -122,6 +141,11 @@ export async function diagnoseAgentMux(options: DiagnoseAgentMuxOptions): Promis
         action: null
       },
       runtime,
+      // 与失败路径同样兜底。这个 helper 目前内部是全函数（每个 readdir/stat 都有 .catch），但若哪天
+      // 那个性质回退，一次体积扫描失败会被外层 try/catch 吞成「运行时不可达」——把一个健康的运行时
+      // 误报成 ok:false、所有 agent 全部 blocked。容量统计不该有权否决整份诊断。
+      endpointStorage: await endpointDirectoryUsage().catch(() => []),
+      endpointReclaim: options.client.endpointReclaim(),
       runtimeAction: !runtime.supported
         ? 'Use Node 24 or newer on macOS arm64 with the bundled darwin-arm64 ctxmux artifacts.'
         : !runtime.ctxmux.ready
@@ -162,6 +186,10 @@ export async function diagnoseAgentMux(options: DiagnoseAgentMuxOptions): Promis
         action: 'Verify the bundled ctxmux artifacts, then rerun doctor.'
       },
       runtime: null,
+      // 这条是失败路径：诊断本身已经出错了，容量统计再抛就会把真正的病因盖掉。兜底成空表。
+      endpointStorage: await endpointDirectoryUsage().catch(() => []),
+      // 连都没连上，本次就没跑过回收——不是「回收成功且无失败」，所以是 null 而不是空 outcome。
+      endpointReclaim: null,
       runtimeAction: null,
       hosts: {
         local: {

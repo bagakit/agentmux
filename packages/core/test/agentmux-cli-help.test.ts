@@ -98,6 +98,30 @@ describe('agentmux CLI discovery', () => {
     }
   })
 
+  // doctor 报告里的 endpoint 目录占用与回收结果，若没有一个用户真能敲出来的入口，就等于算了没人看
+  // ——占用只能等磁盘告警才发现，回收失败完全无声。这条证明命令真的被 main() 分发到了：跑不通运行时
+  // 会得到 typed 失败（本机没有 Desktop Host 时的正常结果），而**未注册**的命令得到的是
+  // INVALID_CLI_ARGUMENT + "Unknown command"。两者可区分，所以这条不会因为环境没跑 Host 而假绿。
+  it('dispatches doctor as a real command, not an unknown one', async () => {
+    const help = await run(['--help'])
+    expect(help).toContain('doctor')
+
+    let payload: { ok?: boolean; error?: { code?: string; message?: string } }
+    try {
+      payload = JSON.parse(await run(['doctor']))
+    } catch (error) {
+      payload = JSON.parse((error as { stdout: string; stderr: string }).stderr)
+    }
+    expect(payload.error?.message ?? '').not.toContain('Unknown command')
+    expect(payload.error?.code).not.toBe('INVALID_CLI_ARGUMENT')
+
+    // 参数校验也证明分发到位：未注册的命令根本走不到这句错误。
+    const extra = await fail(['doctor', 'extra'])
+    expect(JSON.parse(extra.stderr)).toMatchObject({
+      error: { code: 'INVALID_CLI_ARGUMENT', message: 'doctor takes no arguments.' }
+    })
+  })
+
   it('reports the installed CLI version', async () => {
     await expect(run(['--version'])).resolves.toBe('agentmux 0.1.0\n')
   })

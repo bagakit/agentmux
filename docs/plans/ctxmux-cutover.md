@@ -161,7 +161,35 @@ Interrupt 使用 retained PTY 上的 `TIOCSIG`。Stop 的 macOS public POSIX imp
 
 本项目接受 CtxMux 的 practical POSIX contract：daemon 永不提权；只支持同一用户本地运行；即时重验 session；zombie leader 作为 incarnation anchor；异常失败关闭；不宣称多租户隔离或数学零风险。为消除这条窄窗而引入私有 entitlement/API 或平台进程容器，成本和维护熵显著高于本地开发场景的实际风险。
 
-## 剩余边界
+## Endpoint 目录回收边界
+
+endpoint 目录由本项目按 pinned manifest SHA 派生（`amx-<uid>-<24 位十六进制>`），所以每升一次 artifact
+就多一个目录，旧的连同其 `state.sqlite3` 永久留在盘上——实测单个旧目录 110.2MB。派生方是本项目，
+判定与回收因此可以在本侧独立闭环，不需要 ctxmux 增加任何能力。
+
+回收粒度是**整个已废弃的目录**，绝不是 SQLite 里的行。那个库是 ctxmux 的私有存储：跨进程写它会与活着的
+daemon 抢写，随时踩坏 stop/attach/replay 语义。**当前版本正在用的那份库内部如何回收，属 ctxmux 的上游
+能力，本项目不碰。**
+
+删除动作是 `rm -rf`，而 endpoint 根目录 `/private/tmp` 是公共地界（本机就并存着一个无关的
+`amx-npm-cache-4127wQ`），所以四道闸全过才动手，任何一道判不准都算「有人在用」：
+
+1. 目录名必须完整匹配本方派生形状且 uid 段等于本进程 uid——只按 `amx-` 前缀匹配会删掉别人的东西；
+2. 不能是当前 artifact 派生的那一个；
+3. 必须是真目录而非符号链接（显式 `lstat`，不依赖 `fs.rm` 恰好不跟进符号链接这个实现细节）；
+4. 必须安静超过 10 分钟，且 socket 上没有监听者。
+
+第 4 条的两半互补，缺一不可。存活探测只能看「此刻」：另一个**不同版本**的实例可能刚 mkdir 完、daemon
+还没 listen，或正在重启、socket 刚被 unlink——这两个窗口里删下去，就是删一个活着的 daemon 的持久状态。
+静默期用**顶层目录**的 mtime 计时，因为往 `state/` 里写数据不更新顶层 mtime，而创建/删除 `ctxmux.sock`
+会（已实测）。于是：危险的启动/重启窗口里 socket 刚动过、mtime 必新鲜，被时间闸挡住；长命 daemon 的
+mtime 虽陈旧，但它正在监听，被存活闸挡住。把时钟换成 `state/` 的 mtime 或递归最新 mtime，会让长命
+daemon 的目录一直「新鲜」，时间闸退化成永不回收。
+
+回收挂在适配器 `connect()` 上——那是必经、且此刻恰好知道「当前 endpoint 是哪个」的时点，不需要用户手工
+执行。它绝不抛异常：失败条目落在返回的 `failed` 里，启动照常继续。
+
+
 
 Protocol 13 当前固定 artifact 在 ctxmux 的单一 persistence owner 内按 SQLite typed `DiskFull`
 保留并有界重试同一个 mutation；队列、顺序、Replay 与终态仍由 ctxmux 持有。AgentMux 不增加
