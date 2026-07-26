@@ -39,13 +39,14 @@ import type { MainSurface } from '../store'
 import {
   contentSlotPresentation,
   resolveWorkspaceTools,
+  boardListSegments,
   topicAgentPresentation,
   topicsWithAgents,
   workspaceAgentGroups,
   type WorkspaceAgentGroupId,
   type WorkspaceTool
 } from '../lib/surface-tool-dock'
-import { sessionBoardColumn } from '../lib/project-board'
+import { useBoardRows } from '../hooks/useBoardRows'
 import { projectWorkspaces } from '../lib/workspace-projects'
 import { api } from '../lib/api'
 import {
@@ -700,37 +701,100 @@ function WorkspaceAgentsTool({
   )
 }
 
-function BoardToolSummary({
-  projectName,
-  hostId,
-  workspaceCount,
-  workingCount,
-  needsYouCount,
-  doneCount
-}: {
-  projectName: string
-  hostId: string
-  workspaceCount: number
-  workingCount: number
-  needsYouCount: number
-  doneCount: number
-}) {
+/**
+ * Board 工具的次级面板：当前 Board 的工作清单。
+ *
+ * 用户打开它是来找一条具体的工作线，不是读一段介绍 Board 是什么的文案。行与 Board 主视图
+ * 同源（`useBoardRows`），因此不会出现面板列了一条 Board 上没有的行。图例式静态说明降级为
+ * 空态——没有任何行时它才有话说。
+ */
+export function BoardToolList({ hostId }: { hostId: string }) {
+  const { rows, kind, loading } = useBoardRows()
+  const selectSession = useAppStore((state) => state.selectSession)
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
+  const [showAll, setShowAll] = useState(false)
+  const { shown, hidden } = boardListSegments(rows, showAll)
+
+  function toggleRow(id: string): void {
+    setExpandedRows((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  if (rows.length === 0) {
+    return (
+      <section className="surface-tool-summary">
+        <div className="surface-tool-summary__icon"><Columns3 size={18} /></div>
+        <div className="eyebrow">Project board</div>
+        <h2>{kind === 'topic' ? 'Topic × status' : 'Branch × status'}</h2>
+        <p>
+          {loading
+            ? 'Reading the board…'
+            : `No ${kind === 'topic' ? 'Topics' : 'branches'} yet. ${kind === 'topic' ? 'Create a Topic from the Topics panel' : 'Create a branch with Git'}, then it appears here as a row.`}
+        </p>
+        <div className="board-tool-legend">
+          <div><MessageSquarePlus size={13} /><span><strong>Inbox</strong><small>Start a discussion</small></span></div>
+          <div><Activity size={13} /><span><strong>Working</strong><small>Running now</small></span></div>
+          <div><BellRing size={13} /><span><strong>Needs You</strong><small>Waiting or blocked</small></span></div>
+          <div><CheckCircle2 size={13} /><span><strong>Done</strong><small>Completed runs</small></span></div>
+        </div>
+      </section>
+    )
+  }
+
   return (
-    <section className="surface-tool-summary">
-      <div className="surface-tool-summary__icon"><Columns3 size={18} /></div>
-      <div className="eyebrow">Project board</div>
-      <h2>Branch × status</h2>
-      <p>{projectName} uses Branches as rows and run state as columns. Inbox lives in the board itself.</p>
+    <section className="board-tool-list">
       <div className="board-tool-context">
         <span><RadioTower size={12} /> {hostId === 'local' ? 'This Mac' : hostId}</span>
-        <em>{workspaceCount} worktree{workspaceCount === 1 ? '' : 's'}</em>
+        <em>{rows.length} {kind === 'topic' ? 'topic' : 'branch'}{rows.length === 1 ? '' : 'es'}</em>
       </div>
-      <div className="board-tool-legend">
-        <div><MessageSquarePlus size={13} /><span><strong>Inbox</strong><small>Start a Branch discussion</small></span><em>Open</em></div>
-        <div><Activity size={13} /><span><strong>Working</strong><small>Running now</small></span><em>{workingCount}</em></div>
-        <div><BellRing size={13} /><span><strong>Needs You</strong><small>Waiting or blocked</small></span><em>{needsYouCount}</em></div>
-        <div><CheckCircle2 size={13} /><span><strong>Done</strong><small>Completed runs</small></span><em>{doneCount}</em></div>
-      </div>
+      {shown.map((row) => {
+        const isOpen = expandedRows.has(row.id)
+        return (
+          <div className="board-tool-row" key={row.id}>
+            <button
+              className="board-tool-row__head"
+              type="button"
+              aria-expanded={isOpen}
+              onClick={() => toggleRow(row.id)}
+              title={row.name}
+            >
+              {row.kind === 'topic' ? <NotebookText size={12} /> : <FolderGit2 size={12} />}
+              <strong>{row.name}</strong>
+              <em>{row.sessions.length}</em>
+            </button>
+            {isOpen ? (
+              <div className="board-tool-row__agents">
+                {row.sessions.length === 0
+                  ? <small className="board-tool-row__empty">No agents on this row</small>
+                  : row.sessions.map((session) => (
+                    <button
+                      className="board-tool-agent"
+                      key={session.id}
+                      type="button"
+                      // 定位走全局那一个 selectSession，不新增第二条导航路径。
+                      onClick={() => selectSession(session.id)}
+                      aria-label={`Open ${session.label} · ${session.status.state}`}
+                      title={`${session.label} · ${session.status.state}`}
+                    >
+                      <StatusDot status={session.status} />
+                      {session.providerId ? <AgentProviderIcon providerId={session.providerId} size={11} /> : null}
+                      <span>{session.label}</span>
+                    </button>
+                  ))}
+              </div>
+            ) : null}
+          </div>
+        )
+      })}
+      {hidden > 0 ? (
+        <button className="board-tool-more" type="button" onClick={() => setShowAll(true)}>
+          其余 {hidden} 条
+        </button>
+      ) : null}
     </section>
   )
 }
@@ -825,12 +889,6 @@ export function SurfaceToolDock({
         candidate.workspaces.some((item) => item.id === workspace.id)
       )
     : null
-  const workspaceCount = project?.workspaces.length ?? 0
-  const projectSessions = sessions.filter((session) =>
-    Boolean(project?.workspaces.some((item) => workspaceOwnsSessionPath(item, session)))
-  )
-  const runCounts = { working: 0, 'needs-you': 0, done: 0 }
-  for (const session of projectSessions) runCounts[sessionBoardColumn(session)] += 1
   const allBrowserSurfaces = Object.values(tabs).flatMap((tab) => workbenchSurfaces(tab))
     .flatMap((candidate) => candidate.kind === 'browser' ? [candidate] : [])
   const browserSurfaces = allBrowserSurfaces.filter((candidate) => candidate.workspaceId === workspace?.id)
@@ -942,16 +1000,7 @@ export function SurfaceToolDock({
             />
           </ToolActionSurface>
         ) : null}
-        {isBoard && project ? (
-          <BoardToolSummary
-            projectName={project.name}
-            hostId={project.hostId}
-            workspaceCount={workspaceCount}
-            workingCount={runCounts.working}
-            needsYouCount={runCounts['needs-you']}
-            doneCount={runCounts.done}
-          />
-        ) : null}
+        {isBoard ? <BoardToolList hostId={project?.hostId ?? workspace?.hostId ?? 'local'} /> : null}
         {error ? <div className="surface-tool-error" role="alert">{error}</div> : null}
       </div>
     </aside>
