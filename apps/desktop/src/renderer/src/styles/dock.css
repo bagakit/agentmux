@@ -107,6 +107,22 @@
    颜色来自 .status--<state> 继承下来的 --status-ink——状态语汇只在一处定义。 */
 .workspace-topic-agents { flex: 0 0 auto; display: flex; align-items: center; gap:var(--sp-1); margin-left:auto; }
 .workspace-topic-agents .agent-avatar { flex: 0 0 auto; }
+/* Topic 头像默认只表达身份；只有 live work 才用共享状态色产生外描边/发光。 */
+.agent-avatar {
+  width: 18px; height: 18px; padding: 0; gap: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0; border-radius: var(--radius-sm);
+  background: var(--surface-2); color: var(--text-2); cursor: pointer;
+  filter: grayscale(1); opacity: .72;
+  transition: transform .12s ease, background .12s ease, box-shadow .12s ease, filter .12s ease, opacity .12s ease;
+}
+.agent-avatar.status--working, .agent-avatar.status--running {
+  outline: 1px solid var(--status-ink); outline-offset: 1px;
+  box-shadow: 0 0 7px var(--status-ink); filter: none; opacity: 1;
+}
+.agent-avatar:hover { transform: translateY(-1px); background: var(--surface-3); box-shadow: var(--elev-1); }
+.agent-avatar.status--working:hover, .agent-avatar.status--running:hover { box-shadow: var(--elev-1), 0 0 7px var(--status-ink); }
+.agent-avatar:active { transform: translateY(0); }
 /* 拖动中的那一行抬起来一点，让落点看得见；不改变行高，避免列表在拖动时跳动。 */
 .workspace-topic-item.dragging { position: relative; z-index: 1; background: var(--surface-3); box-shadow: var(--hl-strong); }
 .workspace-topic-entry small { color: var(--text-3); font-size: var(--fs-micro); }

@@ -3,12 +3,11 @@ import type { AttentionCategory } from '../lib/attention-event'
 import { AgentProviderIcon } from './AgentProviderIcon'
 
 /**
- * 一个 Agent 的头像：身份看图标，状态看边框。
+ * 一个 Agent 的头像：身份看图标，只有运行态才看外描边；停止态用灰度保留身份。
  *
  * 一枚方块同时承载两件事，省掉"点讲状态、文字讲身份"要读两处。边框色不在这里挑——它读
  * `.status--<state>` 继承下来的 `--status-ink`，那是"状态到颜色"的唯一定义处（styles.css 的
- * 状态语汇段）。在这里补一份 state→color 的对照表，就等于让同一个状态在两个地方各说一次，
- * 迟早说岔。
+ * 状态语汇段）。运行态 CSS 读取它绘制 outline/glow；其他状态不画常驻边界。
  *
  * 点击定位到该 Agent；调用方给的 `onOpen` 必须是全局那个 `selectSession`，不另开跳转路径。
  */

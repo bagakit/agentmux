@@ -8,23 +8,6 @@
 /* The window-wide agent rollup spans the full width under both the rail and the main surface, so it
    reads as a property of the window rather than of any one pane. */
 .agent-status-bar { grid-column: 1 / -1; }
-/* 身份看图标、状态看边框：18px 的方块里坐一枚 12px Provider 图标，边框取该状态的颜色。
-   头像不是文字，把 .status 从父类继承来的 gap/字号/大小写清掉。 */
-.agent-avatar {
-  width: 18px; height: 18px; padding: 0; gap: 0;
-  display: inline-flex; align-items: center; justify-content: center;
-  border: 1px solid var(--status-ink); border-radius: var(--radius-sm);
-  background: var(--surface-2); color: var(--text-2);
-  cursor: pointer;
-  transition: transform .12s ease, background .12s ease, box-shadow .12s ease;
-}
-/* macOS 导航栏那种轻量抬升：起来一点、底色提一档，不放大到挤动同排的其它头像。 */
-.agent-avatar:hover { transform: translateY(-1px); background: var(--surface-3); box-shadow: var(--elev-1); }
-.agent-avatar:active { transform: translateY(0); }
-/* 需要你处理的那一枚要在一簇里先被看到：给状态色一圈晕，形状不变。 */
-.agent-avatar[data-attention="needs-you"] { box-shadow: 0 0 0 2px var(--amber-wash); }
-.agent-avatar[data-attention="error"] { box-shadow: 0 0 0 2px var(--red-wash); }
-
 .agent-surface { height: 100%; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; background: var(--surface-0); }
 .agent-provider-mark {
   width: 17px;

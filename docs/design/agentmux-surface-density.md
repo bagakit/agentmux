@@ -103,9 +103,9 @@
   它让下一个人以为这里已经有答案了。
 - **状态到颜色只说一次**。九个 Agent 状态（working/running、waiting/blocked、error/exited、done、
   disconnected）到颜色的对照表只存在于状态语汇段：每个 `.status--<state>` 赋一次 `--status-ink`，
-  状态点用它填充、Agent 头像用它描边，将来任何形状也读它。**新表面不得再列一遍九个状态**——
-  那等于让同一个状态在两处各说一次，迟早说岔（用户看到 Tab 角是绿的、头像却是灰的，无从判断
-  哪个是真的）。这条由 `apps/desktop/test/topic-agent-status.test.ts` 守住。
+  状态点使用它填充；Topic 头像只在 `working`/`running` 时读取它绘制外描边/发光，其他状态保持灰度，
+  不再给头像加常驻边框。**新表面不得再列一遍九个状态**——那等于让同一个状态在两处各说一次，迟早说岔。
+  这条由 `apps/desktop/test/topic-agent-status.test.ts` 守住。
 
 
 这三节由 `apps/desktop/test/surface-scale-contract.test.ts` 守住：它从样式表反推出全部字号、
@@ -208,7 +208,7 @@
 | Tool Content Padding | 8–12px | 仅用于局部卡片，不包住整栏 |
 | Context Menu | 176px 最小宽；26px Row；8px 横向 Padding；5px 容器 Padding | 全部 Context Menu 共用一套基座。Surface 填充 + 阴影 + 顶部高光建立层级，**不使用描边**；hover 提升明度并把图标转为品牌绿；破坏性项 hover 保持红色语义，不被绿色 hover 覆盖。菜单从指针处生长（120ms），表明它是这次点击召唤出来的，而非盖在界面上的一层浮层 |
 | Activity Log Row | 24px Row；20px 节点槽；56px 等宽时间槽；12px 横向 Padding | 与 Tree Row 同一节奏。整列共用一条 hairline spine，节点用填充光晕挖空它而非画环。展开内容与该行标题同一左缘（104px），不得比自己的标题突出。**仅**机器上报（tool_call / permission / lifecycle）走这一寄存器 |
-| Scratch Topic Row | 标题 11px 与 Agent 头像同一行，摘要 10px 次行；头像 18px 成簇靠右、`--sp-1` 间距 | 一行只回答**这个 Topic 里的 Agent 现在怎么样了**。**Agent 呈现为一组头像而非一排抽象点**：缩小的 Provider 图标给出身份（这一行里跑着谁），**状态由头像边框表达**而非另加一枚色点——同一枚方块同时承载身份与状态，避免"点讲状态、文字讲身份"要求用户读两处。边框色沿用共享状态语汇（`status--<state>` 加 AttentionCategory），一个状态在哪儿都是同一个颜色。悬停有 macOS 导航栏那种轻量抬升，配 tooltip 给出名字与状态；点击直接定位到该 Agent，走全局同一个 `selectSession`。**不重复呈现同一事实**：既然逐个 Agent 已经在场，就不再另给一个 `N agents` 计数；既然当前项整行高亮，就不再另挂一枚 `Current` 文字标签。没有 live Session 的协作者如实显示 disconnected，不假装在跑。**行首不放 Topic 图标**——一列全同的图标不携带信息（见控件语言）。**选中态是干净的 Surface 填充，不用左侧竖条**。行上只留"定位到目录"一个高频动作，改名收进右键菜单。**顺序可由用户拖拽决定**，复用 Tab 条同一套 sortable 与键盘路径；用户顺序是一份偏好而非真相来源——磁盘上没有的 Topic 不会因排过而出现，没排过的保持彼此既有次序落在后面，新建的不会跳到不可预期的位置 |
+| Scratch Topic Row | 标题 11px 与 Agent 头像同一行，摘要 10px 次行；头像 18px 成簇靠右、`--sp-1` 间距 | 一行只回答**这个 Topic 里的 Agent 现在怎么样了**。**Agent 呈现为一组头像而非一排抽象点**：缩小的 Provider 图标给出身份；头像默认无常驻边框，只有 `working`/`running` 才显示外描边/发光，未运行状态灰度处理。悬停有 macOS 导航栏那种轻量抬升，配 tooltip 给出名字与状态；点击直接定位到该 Agent，走全局同一个 `selectSession`。**不重复呈现同一事实**：既然逐个 Agent 已经在场，就不再另给一个 `N agents` 计数；既然当前项整行高亮，就不再另挂一枚 `Current` 文字标签。没有 live Session 的协作者如实显示 disconnected，不假装在跑。**行首不放 Topic 图标**——一列全同的图标不携带信息（见控件语言）。**选中态是干净的 Surface 填充，不用左侧竖条**。行上只留"定位到目录"一个高频动作，改名收进右键菜单。**顺序可由用户拖拽决定**，复用 Tab 条同一套 sortable 与键盘路径；用户顺序是一份偏好而非真相来源——磁盘上没有的 Topic 不会因排过而出现，没排过的保持彼此既有次序落在后面，新建的不会跳到不可预期的位置 |
 | Activity Turn Row | 与 Log Row 共用同一 spine 与 20px 节点槽（14px 图标）；正文 13px/1.6 用 `--text` 主色，caption 11px `--text-3` 大写，时间移到行首右侧的 mono 戳；上下各 6px 呼吸 | user_message、assistant_message 两个可读回合脱离 24px 机器寄存器：正文是主体不是 payload，永不裁剪、永不折叠。User 正文用 `--surface-1` 圆角填充建立起止边界（描边不作手段），Assistant 正文在 S0 上流动。native-hook 的 assistant 回合不进入折叠 |
 | Activity Turn Prose | 标题全部 13px（与正文同号）靠 600 字重与上下留白分级；表格 4×9px 单元、hairline 行分隔；引用块左缩 9px 配 2px 竖线；水平线 1px | 对话回合的正文渲染 GFM 子集：标题、强调、删除线、行内与围栏代码、有序/无序含嵌套列表、表格（含列对齐）、引用块、水平线、链接。**多级标题字号完全相同**——密度合同对字号设下限并禁止用尺度买层级，故 h1..h6 只靠字重、颜色与留白区分，绝不放大。解析器（remark-parse + remark-gfm）只产 mdast **语法树、从不产 HTML**：节点映射为 React 元素，`dangerouslySetInnerHTML` 从不出现，因此不可信的 Agent 输出**没有东西需要 sanitise**——风险面是构造性为零而非"已过滤"。raw HTML 节点按字面文本呈现，绝不成为标签。宽表在自己的 `overflow-x` 容器里横向滚动，不得撑宽回合、更不得让整个 feed 横向滚动。链接渲染为 button 而非 `<a href>`，经既有 openExternal seam 打开（不可信输出里的 `<a>` 是导航逃逸口）。只在 turn register 渲染；机器行保持纯文本，纯文本也不进解析器以免重排从来不是 markdown 的句子 |
 | Activity Ruler | 顶部 sticky；18px track | tick 按真实经过时间比例定位——密集事件自然聚簇、长思考自然留白。首末时间戳无跨度时退化为序数轴并用虚线明示，不得让间距宣称数据没有的精度。ruler 可交互，三项均由**同一个双向纯映射**（像素位置 ↔ timeline 位置）驱动，不各自重算：**点击**跳到对应事件（落在两事件之间时就近取一个**真实事件**，绝不插值出不存在的时刻），并有键盘等价路径与可见 focus；**可视范围**在 track 上框出日志当前看到的那一段，来源是真实可见区域；**悬停/聚焦**读出该位置的具体时间，锚定不遮挡它所描述的那段 ruler（沿用终端链接预览的同一条规则），且不改变选中状态。**零跨度时三者全部退化为序数语义**——只说"第 N 个事件"，不显示也不暗示任何时刻；这条由返回类型强制：ordinal 变体在类型上就没有承载时刻的字段，因此伪造精度无法通过编译。可视范围的更新**不在滚动热路径上**：由观察式 API 驱动而非每帧 scroll 处理器，一条阅读用的装饰不该成为滚动卡顿的原因。范围为空或日志短于一屏时不画占满全宽的假框（那会读作"什么都看得见"）|

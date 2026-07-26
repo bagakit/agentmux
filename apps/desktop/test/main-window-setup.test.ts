@@ -43,6 +43,12 @@ describe('main window setup wiring', () => {
     expect(source).toContain('registerWindowStatePersistence(window, windowGeometryStore)')
   })
 
+  it('binds development and packaged launches to the same durable userData root', async () => {
+    const source = stripComments(await readFile(indexPath, 'utf8'))
+    expect(source).toContain("app.setPath('userData', process.env.AGENTMUX_DESKTOP_USER_DATA ?? packagedUserDataPath)")
+    expect(source).not.toMatch(/else\s+if\s*\(app\.isPackaged\)/)
+  })
+
   it('routes all window creation through the single-flight guard so triggers cannot race into two windows', async () => {
     const source = stripComments(await readFile(indexPath, 'utf8'))
     // 建窗必须经单飞去重，否则 whenReady/second-instance/activate 会在空档里并发建出两个窗口。
