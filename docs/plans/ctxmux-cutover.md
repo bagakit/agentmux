@@ -7,14 +7,14 @@ AgentMux 当前只消费 CtxMux 的 exact clean artifact contract：
 
 | 字段 | 值 |
 | --- | --- |
-| commit | `a0897087fdd0eb131c39c43d4d6791901335d69e` |
-| tree | `54d0f0631a51063a5f4c18088f4e8cba1f80444a` |
+| commit | `073e206407ce28331aa882c2c80e9354cfe2879a` |
+| tree | `3ddf0706c35517c0dd6bdf4d4f7fa251d88c0e0a` |
 | protocol | `13` |
 | platform | `darwin-arm64` |
-| manifest SHA-256 | `5e67346cf1fedd60eba15e2b58aac3005df632684891ad086d613014276dc639` |
+| manifest SHA-256 | `346f47c04091623e4daccb8ae2ee8963f72bb881e9712db6e9142546ef3ae7a6` |
 | SDK tarball SHA-256 | `172966940a9f537724afeb9b334f2a225ece3db1a102c4d8e90e154b8cb5bf3d` |
 | `ctxmux` SHA-256 | `38083b21656327212c07789dcd199b7c4520a8561006841d76be9a2c23f9cb39` |
-| `ctxmuxd` SHA-256 | `c4140151e006c9e775b90c7cb7bdb37d08b1122f7f7a37762c841294633f7656` |
+| `ctxmuxd` SHA-256 | `cb9ce8c9d1a43ec3e314c424e5fb46ad8978b780cae2f608ec746375319eb98b` |
 
 AgentMux 不消费浮动分支名，而是固定上表中的完整 commit、tree 与 artifact hash。
 

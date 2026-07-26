@@ -409,7 +409,7 @@ async function verifyPackagedRuntime(appPath, verificationRoot) {
     'utf8'
   ))
   assert(
-    manifest.source.commit === 'a0897087fdd0eb131c39c43d4d6791901335d69e',
+    manifest.source.commit === '073e206407ce28331aa882c2c80e9354cfe2879a',
     'Packaged ctxmux manifest commit is wrong.'
   )
 }

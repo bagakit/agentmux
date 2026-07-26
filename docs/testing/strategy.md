@@ -25,7 +25,7 @@ Security/Fuzz 的 Input 证据由 public recoverable Input、option-like prompt�
 
 | 不变量 | AgentMux public oracle |
 | --- | --- |
-| exact artifact identity | pack 内 manifest 固定 commit `a0897087fdd0eb131c39c43d4d6791901335d69e`、tree `54d0f0631a51063a5f4c18088f4e8cba1f80444a`、protocol 13，并在 build/runtime 复核 size/mode/SHA-256 |
+| exact artifact identity | pack 内 manifest 固定 commit `073e206407ce28331aa882c2c80e9354cfe2879a`、tree `3ddf0706c35517c0dd6bdf4d4f7fa251d88c0e0a`、protocol 13，并在 build/runtime 复核 size/mode/SHA-256 |
 | exact endpoint owner | 首次启动 inherited readiness receipt 与 public handshake 的 daemon instance 必须相等；socket/state 根再由 commit + manifest identity 派生，replacement peer 因 owner receipt/daemon instance 不匹配失败关闭 |
 | checkout independence | `package-consumer.integration.test.ts` 在 `/private/tmp` 执行 `pnpm pack` 和 offline/no-save npm install；真实 package root 不在 checkout |
 | one Run identity | 公共 `AgentMuxRunRef` 只有 CtxMux `runId`；重连后 RunId 与 PID 均不变 |
