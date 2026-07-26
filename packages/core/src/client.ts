@@ -536,6 +536,12 @@ export class AgentMuxClient {
           }
         })
       })
+      // Hook config files outlive an App bundle. Re-ensure the managed entries from the current
+      // executable before restoring bindings so a moved/replaced install cannot leave old
+      // `/Applications/AgentMux.app` commands behind. This is deliberately best-effort and
+      // deduplicated by Provider + Workspace; a hook repair failure is an advisory diagnostic,
+      // never a reason to block the runtime or healthy Agent Runs.
+      await this.repairManagedHooks()
       await this.tryRestoreHookIngress(runs)
       // Probe every running Session together. A serial `await` here makes N healthy Agents
       // wait behind N ten-second capability windows, which is especially visible when the
@@ -1167,9 +1173,9 @@ export class AgentMuxClient {
   ): Promise<void> {
     const hookStrategy = provider.catalog.hookStrategy
     if (hookStrategy.kind !== 'native' || hookStrategy.installation !== 'explicit-managed') return
-    const plan = resolveManagedHookPlan(providerId, workspacePath, env)
-    if (!plan) return
     try {
+      const plan = resolveManagedHookPlan(providerId, workspacePath, env)
+      if (!plan) return
       await this.hookInstaller.ensure(plan)
     } catch (error) {
       this.publisher.publish({
@@ -1181,6 +1187,34 @@ export class AgentMuxClient {
         }`,
         evidence: { source: 'user', observedAt: Date.now() }
       })
+    }
+  }
+
+  private async repairManagedHooks(): Promise<void> {
+    const repaired = new Set<string>()
+    for (const session of this.registry.list()) {
+      let provider: AgentProvider
+      try {
+        provider = this.providers.get(session.providerId)
+      } catch {
+        // A persisted Session for an unavailable Provider is handled by the existing Session
+        // projection. It must not prevent other Providers' hook paths from being repaired.
+        continue
+      }
+      if (
+        provider.catalog.hookStrategy.kind !== 'native' ||
+        provider.catalog.hookStrategy.installation !== 'explicit-managed'
+      ) continue
+      const key = `${session.providerId}\u0000${session.workspacePath}`
+      if (repaired.has(key)) continue
+      repaired.add(key)
+      await this.ensureManagedHooks(
+        provider,
+        session.providerId,
+        session.workspacePath,
+        session.agentSessionId,
+        {}
+      )
     }
   }
 
