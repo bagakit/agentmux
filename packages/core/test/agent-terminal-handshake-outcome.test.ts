@@ -244,6 +244,18 @@ function runFor(runId: string, workspacePath: string, acceptedInputBytes = 37): 
   }
 }
 
+function capabilityQueryReplay(runId: string) {
+  const query = '\u001b[?u'
+  return [{
+    type: 'data' as const,
+    runId,
+    startByte: 0,
+    endByte: Buffer.byteLength(query),
+    data: query,
+    dataBytes: Uint8Array.from(Buffer.from(query))
+  }]
+}
+
 afterEach(() => {
   vi.useRealTimers()
 })
@@ -488,6 +500,83 @@ describe('AgentMuxClient 握手超时行为（真实 registry/store 边界）', 
     })
     expect(observed).toHaveProperty('cause', transportError)
     expect(client.agentSession('degrade-agent').terminalCapability).toBeUndefined()
+    await client.dispose()
+  })
+
+  it('maps a vanished Run from attach/replay to the handshake-failed contract', async () => {
+    const { client, session } = await clientWithFakeKernel(() => runningRun(37))
+    const kernel = (client as unknown as { kernel: Record<string, unknown> }).kernel
+    const transportError = new AgentMuxError(
+      'fixture attach lost the Run',
+      'CTXMUX_run_not_found',
+      'attach no longer owns degrade-run'
+    )
+    kernel.attach = async () => { throw transportError }
+    const operation = (client as unknown as {
+      ensureTerminalHandshakeOrDegrade(
+        session: ReturnType<typeof storedSession>,
+        run: CtxmuxAdapterRun
+      ): Promise<unknown>
+    }).ensureTerminalHandshakeOrDegrade(session, runningRun(37))
+    const observed = await operation.catch((error: unknown) => error)
+    expect(observed).toMatchObject({
+      code: AGENT_TERMINAL_HANDSHAKE_FAILED,
+      detail: 'attach no longer owns degrade-run'
+    })
+    expect(observed).toHaveProperty('cause', transportError)
+    await client.dispose()
+  })
+
+  it('maps a vanished Run from the post-replay status boundary to the handshake-failed contract', async () => {
+    const { client, session } = await clientWithFakeKernel(() => runningRun(37))
+    const kernel = (client as unknown as { kernel: Record<string, unknown> }).kernel
+    const run = runningRun(37)
+    const transportError = new AgentMuxError(
+      'fixture boundary lost the Run',
+      'CTXMUX_run_not_found',
+      'boundary status no longer owns degrade-run'
+    )
+    kernel.attach = async () => ({ run, replay: capabilityQueryReplay(run.runId), gap: null })
+    kernel.status = async () => { throw transportError }
+    const operation = (client as unknown as {
+      ensureTerminalHandshakeOrDegrade(
+        session: ReturnType<typeof storedSession>,
+        run: CtxmuxAdapterRun
+      ): Promise<unknown>
+    }).ensureTerminalHandshakeOrDegrade(session, run)
+    const observed = await operation.catch((error: unknown) => error)
+    expect(observed).toMatchObject({
+      code: AGENT_TERMINAL_HANDSHAKE_FAILED,
+      detail: 'boundary status no longer owns degrade-run'
+    })
+    expect(observed).toHaveProperty('cause', transportError)
+    await client.dispose()
+  })
+
+  it('maps a vanished Run from the capability Input write to the handshake-failed contract', async () => {
+    const { client, session } = await clientWithFakeKernel(() => runningRun(37))
+    const kernel = (client as unknown as { kernel: Record<string, unknown> }).kernel
+    const run = runningRun(37)
+    const transportError = new AgentMuxError(
+      'fixture input lost the Run',
+      'CTXMUX_run_not_found',
+      'input no longer owns degrade-run'
+    )
+    kernel.attach = async () => ({ run, replay: capabilityQueryReplay(run.runId), gap: null })
+    kernel.status = async () => run
+    kernel.input = async () => { throw transportError }
+    const operation = (client as unknown as {
+      ensureTerminalHandshakeOrDegrade(
+        session: ReturnType<typeof storedSession>,
+        run: CtxmuxAdapterRun
+      ): Promise<unknown>
+    }).ensureTerminalHandshakeOrDegrade(session, run)
+    const observed = await operation.catch((error: unknown) => error)
+    expect(observed).toMatchObject({
+      code: AGENT_TERMINAL_HANDSHAKE_FAILED,
+      detail: 'input no longer owns degrade-run'
+    })
+    expect(observed).toHaveProperty('cause', transportError)
     await client.dispose()
   })
 

@@ -214,6 +214,27 @@ function sameRun(left: AgentMuxRunRef, right: AgentMuxRunRef): boolean {
   return left.runId === right.runId
 }
 
+/**
+ * Normalize the one transport error which has a precise meaning inside the terminal handshake.
+ *
+ * CtxMux may report a vanished Run from any of the handshake's three I/O phases (attach/replay,
+ * the post-replay status boundary, or the capability Input write). Keeping this mapping at the
+ * handshake boundary gives the public connect loop one stable, Session-scoped classification while
+ * lifecycle callers can still fail closed on the resulting `AGENT_TERMINAL_HANDSHAKE_FAILED`.
+ */
+function mapVanishedTerminalHandshakeRun(error: unknown): unknown {
+  if (!(error instanceof AgentMuxError) || error.code !== 'CTXMUX_run_not_found') return error
+  const mapped = new AgentMuxError(
+    'Agent Run disappeared before its terminal capability query was observed.',
+    AGENT_TERMINAL_HANDSHAKE_FAILED,
+    error.detail
+  )
+  // Keep the transport error available to diagnostics without leaking its transport-specific code
+  // into the public handshake contract.
+  mapped.cause = error
+  return mapped
+}
+
 function safeId(value: string, name: string): string {
   if (!SAFE_ID.test(value)) {
     throw new AgentMuxError(`${name} must contain only letters, numbers, underscore, or dash.`, 'INVALID_SESSION_ID')
@@ -2002,6 +2023,10 @@ export class AgentMuxClient {
     try {
       return await this.ensureTerminalHandshake(requestedSession, knownRun)
     } catch (error) {
+      // Any exact-Run disappearance during attach, boundary status, or capability Input is a real
+      // failure for this Session but not a reason to guess that an unrelated Session is unhealthy.
+      // Normalize it before classification so `open()` can contain the blast radius per Session.
+      error = mapVanishedTerminalHandshakeRun(error)
       const outcome = classifyTerminalHandshakeFailure(error)
       if (outcome.kind === 'abort') throw error
       // A timeout is only degradable while the exact Run is still alive. The Run returned by
@@ -2099,16 +2124,7 @@ export class AgentMuxClient {
       // exited state; callers must not leak a transport-specific `run_not_found` through the
       // handshake contract or accidentally treat a missing Run as a healthy degraded Agent.
       if (error instanceof AgentMuxError && error.code === 'CTXMUX_run_not_found') {
-        const mapped = new AgentMuxError(
-          'Agent Run disappeared before its terminal capability query was observed.',
-          AGENT_TERMINAL_HANDSHAKE_FAILED,
-          error.detail
-        )
-        // Preserve the transport error as a cause for diagnostics without leaking its transport code
-        // into the public handshake classification. Callers can inspect the original detail while all
-        // lifecycle paths consistently receive AGENT_TERMINAL_HANDSHAKE_FAILED.
-        mapped.cause = error
-        throw mapped
+        throw mapVanishedTerminalHandshakeRun(error)
       }
       throw error
     }
