@@ -1,0 +1,104 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/agentmux-package-identity-plan.md"
+  },
+  "source_refs": [
+    "docs/reviews/agentmux-package-identity-plan.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "apps/desktop/scripts/package-macos.mjs",
+    "apps/desktop/scripts/report-desktop-package.mjs"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "把源码身份写进唯一 macOS 候选",
+      "objective": "让 release bundle 携带与 clean build 同源的 commit/tree/version/platform/arch 身份，并由 package Gate 校验。",
+      "outcome": "同一个 0.1.0 下也能区分旧包与当前候选；out 不再被误当作独立可安装事实。",
+      "acceptance": [
+        "`AgentMux.app/Contents/Resources/app/package-identity.json` 包含 sourceCommit、sourceTree、appVersion、platform、arch 五个字段。",
+        "package Gate 比对 bundle 身份与初始 clean source identity；任一字段不匹配都失败关闭。",
+        "故意删除身份写入或把 commit/tree 改成另一值时对应测试变红；身份 helper 有定义文件之外的 package/report 生产调用者。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/package-identity.test.ts",
+          "proves": "身份生成、字段完整性和 mismatch 行为。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop report:package",
+          "proves": "release 候选 report 读取并输出 bundle 内身份。"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/scripts/package-macos.mjs",
+        "apps/desktop/scripts/report-desktop-package.mjs"
+      ],
+      "supersedes": []
+    },
+    {
+      "id": "T-002",
+      "depends_on": ["T-001"],
+      "title": "收敛安装入口并验证替换结果",
+      "objective": "让 package:mac:install 只替换约定的用户安装路径，并在安装前后报告同一候选身份与 hash。",
+      "outcome": "用户不会再因为 LaunchServices 中另一份同名 App 而启动旧逻辑；失败不会破坏现有安装。",
+      "acceptance": [
+        "安装目标固定为 `~/Applications/AgentMux.app`，使用 staged ditto + codesign verify + atomic rename。",
+        "安装前后 package identity、Main bundle hash 和代码签名可核对；验证失败不替换现有目标。",
+        "脚本输出明确的 canonical installed_app 与 source_commit/source_tree，且不删除 Application Support 或 Runtime 数据。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop package:mac:install",
+          "proves": "clean candidate 的 production package、安装和 mounted smoke 全链路。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/package-identity.test.ts test/package-install-path.test.ts",
+          "proves": "canonical path 与失败不替换行为。"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/scripts/package-macos.mjs",
+        "docs/plans/agentmux-desktop-package.md"
+      ],
+      "supersedes": []
+    },
+    {
+      "id": "T-003",
+      "depends_on": ["T-002"],
+      "title": "完成用户可读的候选/安装审计",
+      "objective": "让 report 与文档明确区分 source checkout、release candidate 和 canonical installed app，形成一次可复制的排障路径。",
+      "outcome": "出现功能缺失时先能定位到具体 commit/tree/hash/path，不再靠猜测或反复重打包。",
+      "acceptance": [
+        "report 明确列出 candidate path、canonical install path、身份字段、Main/DMG hash 和签名状态。",
+        "文档只把 release candidate 与 canonical install 作为发布事实，并明确 out 是中间产物。",
+        "变异测试与定义文件之外 zero-caller 检查完成，完整 typecheck/test 保持通过。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop report:package",
+          "proves": "候选审计输出具备来源身份和 hash。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck && pnpm --filter @agentmux/desktop exec vitest run test/package-identity.test.ts test/package-install-path.test.ts",
+          "proves": "接线和回归契约保持类型安全、行为可验证。"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "apps/desktop/scripts/report-desktop-package.mjs"
+      ],
+      "supersedes": []
+    }
+  ]
+}

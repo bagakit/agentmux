@@ -9,6 +9,11 @@ and emits these local candidates under `apps/desktop/release/mac/`:
 - `AgentMux.app`
 - `AgentMux-<version>-darwin-<architecture>.dmg`
 
+The app bundle also contains `Contents/Resources/app/package-identity.json`.
+It binds the clean source commit/tree, desktop version, platform and
+architecture used for that candidate. `apps/desktop/out` remains build output,
+not an installable artifact.
+
 The package uses `dev.agentmux.desktop`, `AgentMux` executables and Helper
 names, the AgentMux icon, and the current-schema Application Support directory.
 It does not inspect, import, migrate, or fall back to an older data directory.
@@ -20,7 +25,10 @@ deployment symlinks that escape the bundle are rejected.
 
 ## Package Gate
 
-The command fails closed unless all of the following hold:
+The command fails closed unless all of the following hold. A staged candidate
+is allowed when the worktree matches the index; unstaged or untracked files
+still fail the Gate. The recorded tree is the exact index tree used for the
+candidate, not a guessed timestamp or bundle version.
 
 1. every application symlink resolves inside `AgentMux.app`;
 2. no packaged text artifact refers to the source checkout or packaging temp
@@ -57,9 +65,11 @@ Dependency materialization reads the pnpm lockfile-resolved workspace tree but
 writes only to a temporary application bundle. It does not run a nested install
 or rewrite workspace `node_modules` while packaging.
 
-`package:mac:install` runs the same Gate before replacing
-`~/Applications/AgentMux.app` with the verified candidate. It does not publish
-or push anything.
+`package:mac:install` runs the same Gate before atomically replacing the single
+canonical user install at `~/Applications/AgentMux.app` with the verified
+candidate. Its output includes the candidate source identity and installed
+path. It does not publish or push anything, and it never deletes Application
+Support or Runtime data.
 
 ## Signing and release truth
 
