@@ -555,11 +555,8 @@ export class RuntimeController {
             sessionId: request.agentSessionId
           })
         }
-        const launchPrompt = preparedTopic
-          ? `${preparedTopic.prompt}\n\n${request.prompt?.trim()
-              ? `Task:\n${request.prompt}`
-              : 'No task has been given yet. Wait for the user.'}`
-          : request.prompt
+        // Topic 说明是 AgentMux 自己的话，作为 agentMuxNote 交给 Core 的出口署名进信封；
+        // 用户的真实请求原样留在 prompt（user 段）。desktop 不自己拼信封，也不再把两者混成一段。
         const agentSession = await client.createAgent({
           providerId: executor.providerId,
           executorId: request.executorId,
@@ -571,10 +568,11 @@ export class RuntimeController {
           },
           injectAgentMuxGuide: executor.injectAgentMuxGuide,
           commandOverride: executor.command,
+          ...(preparedTopic ? { agentMuxNote: preparedTopic.prompt } : {}),
           ...(request.launchOptions === undefined ? {} : { launchOptions: request.launchOptions }),
           ...(request.agentSessionId === undefined ? {} : { agentSessionId: request.agentSessionId }),
           ...(request.createOperationId === undefined ? {} : { createOperationId: request.createOperationId }),
-          ...(launchPrompt === undefined ? {} : { prompt: launchPrompt }),
+          ...(request.prompt === undefined ? {} : { prompt: request.prompt }),
           ...(request.cols === undefined ? {} : { cols: request.cols }),
           ...(request.rows === undefined ? {} : { rows: request.rows })
         })
