@@ -53,7 +53,7 @@
 - Desktop 只持久化 Session/Run 在哪张 View 的哪个 Region，不复制 PTY、Replay、Agent 状态或进程生命周期。**布局恢复与 Session 恢复必须分开看待**：布局是 Renderer 的展示事实，Session 身份与 Provider-native resume token 是 Core 的语义事实；任何一侧失败都不能把另一侧静默删掉。
 - **重新打开项目要无缝接回原来的工作面**。切换 Workspace/Project 只是改变可见投影，不能销毁仍在使用中的 Workbench、xterm 实例或 ctxmux attachment；回到项目时应直接看到离开前的终端画面，不再闪 `Restoring terminal…`，也不因为 replay 起点变化把用户误导成“历史丢了”。真正发生 replay gap 时仍需显示 gap 的诚实提示，但项目切换本身不得制造 gap。
 - **应用重启与机器重启都先恢复布局，再恢复语义 Session**。启动时以持久化布局为索引，自动尝试对每个仍有有效 Provider-native handle 的 Agent Session 建立新 Run/attachment；用户不需要先点 `Resume` 才能看到可恢复的 Agent。恢复成功沿用原 View/Region，Run id 可以变化但 Session id 不变。
-- **启动探测失败不能遮住已保存的工作面**。配置、Session snapshot 或 Provider capability 的单项 Host/runtime 失败时，Renderer 仍必须先提交已恢复的布局与可见 Region，再把失败作为作用域明确的服务窗/状态行呈现；只有布局本身无法读取时才进入无布局错误态。一次暂时不可达的 Host 不得让整个窗口回到空白 loading，也不得覆盖最后一份可恢复布局。
+- **启动探测失败不能遮住已保存的工作面**。配置、Session snapshot 或 Provider capability 的单项 Host/runtime 失败时，Renderer 仍必须先提交已恢复的布局与可见 Region，再把失败作为作用域明确的服务窗/状态行呈现；只有布局本身无法读取时才进入无布局错误态。一次暂时不可达的 Host 不得让整个窗口回到空白 loading，也不得覆盖最后一份可恢复布局。若 snapshot 未能确认 Session 身份，原 Region 先保留为“待 Runtime 校验”的投影；下一次权威 snapshot 到达后再按已知缺失或匹配结果收敛，不能用空 snapshot 静默裁剪它。
 - **恢复候选不能静默消失**。Provider 不支持 native resume、Session 从未记录过 verified handle、handle 已失效或 Core 返回冲突时，原布局位置仍保留一个可理解的失败/待处理投影，明确说明原因与下一步；不能开一个全新的 Run 冒充旧上下文，也不能因为恢复失败而把整张布局裁掉。
 - **Session 恢复是独立的一等功能**。应用启动、切换回项目和机器重启后的首次打开，都必须自动尝试恢复；用户不需要先进入 Topic 再显式点击 `Resume`。恢复失败只能在 Core 已给出明确结果时出现，并且必须伴随保留原投影的服务窗说明；不能把“没有 verified Provider handle”当成唯一的无上下文黑箱错误。
 - **「恢复不了」不是一句话，是四类结果加一个冲突，界面必须把它们分开说**。Core 的 unavailable 有四个原因（`provider-resume-unsupported` / `native-handle-unavailable` / `provider-unavailable` / `unknown-session`），另有 conflict 自成一类。合成一句「Agent resume unavailable」等于没说：**Provider 根本不支持 resume 是永久的**（这个 Agent 换个时间点也回不来，该新开一个），**handle 缺失只关乎这一条 Session**（别的 Agent 不受影响），**Provider 在这台 Host 上缺席则是可恢复的**（装回来/Host 回来就能续，此时叫用户新开 Agent 等于让他丢掉一个还活着的 Session），**conflict 说明东西还在、只是被占着**。用户此刻唯一要做的决定就是在「重试」「新开」「等一下」之间选，而这个决定完全由类别决定。
@@ -149,6 +149,7 @@
     行列数，那正是要消掉的那一帧。隐藏格必须 absolute 叠放，留在文档流里会把活动格挤变形。
 - **切换 Project/Workspace 也遵守同一条保活合同**。所有已打开 Workspace 的 Workbench 由窗口级 owner 保持挂载；非当前 Workspace 只隐藏并停工，不卸载其 Session Region。切换回来不得重新 attach、重新 loading TUI 或从 replay 起点重放一遍。Workbench 真的关闭、Region 被删除或 Session 被用户明确停止时，才释放对应实例与 attachment。
 - **保活不等于无限常驻重资源**。活动 Workspace 与近期访问的工作面保持 warm，确保回访不触发恢复态；长期隐藏、超出明确 hot-retain 数量的 Terminal/Monaco/Browser surface 可以进入 cold-park，但只能在该 surface 有可验证的重建或 replay 路径、且不切断 Core Session/Run 事实时进行。cold-park 必须有 TTL、数量上限与 cooldown，避免在项目来回切换时反复卸载/挂载；语义 Session、Topic/Region 布局和可恢复的 attachment 归属不得因内存预算被删除。
+- **项目切换本身不得触发 cold-park**。非当前 Workspace 的 Workbench 虽然隐藏，仍受保活合同保护；只有当前 Workspace 内长期隐藏且满足重建条件的非活动 Tab 才能进入 cold-park。这样切换项目后立即回来不会因为 30 秒计时器卸载 TerminalView/attachment，因而不会凭空制造 replay gap；真正关闭 Workbench/Region 或用户明确停止 Session 的释放边界不变。
 - **内存归因必须按进程和 owner 分层**。比较 AgentMux 与其他客户端时，不能把 Chromium helper 的 RSS、共享页或 V8 保留容量直接相加后称为“应用泄漏”；至少要分别记录 Main、Renderer、GPU/Utility、Browser target，以及 Terminal/Monaco/Browser/attachment owner。只有在同一场景的 working-set 与 owner count 同时收敛时，才把 cold-park 记为有效回收；没有证据的数值不得写成产品承诺。
 
 ### Agent Composer 与 Terminal

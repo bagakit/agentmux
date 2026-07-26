@@ -39,6 +39,8 @@
 .agent-provider-icon > img { border-radius: 3px; }
 .agent-body { min-height: 0; overflow: hidden; }
 .agent-terminal-stage { position: relative; width: 100%; height: 100%; overflow: hidden; }
+.terminal-cold-parked { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-2); color: var(--text-3); background: var(--surface-0); font-size: var(--fs-meta); text-align: center; }
+.terminal-cold-parked strong { color: var(--text-2); font-size: var(--fs-meta); }
 /* Window-wide agent attention rollup. Permanent chrome, so the working dot never pulses here — a
    count states the fact and a pulsing dot would compete with the terminal. Colour appears only when
    a count crosses zero; until then every dot is the neutral grey of a bare .status. */
