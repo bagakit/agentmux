@@ -2,7 +2,7 @@
 import { randomUUID } from 'node:crypto'
 import process from 'node:process'
 import type { AgentMuxAgentSessionLookup } from './agent-session-registry.js'
-import { classifySelfViewFailure, SELF_CONTEXT_TOPIC_HINT } from './agent-self-context.js'
+import { classifySelfViewFailure, SELF_CONTEXT_TOPIC_HINT, type SelfViewOutcome } from './agent-self-context.js'
 import { AGENTMUX_CLI_HELP, AGENTMUX_CLI_SKILL, AGENTMUX_SELF_CONTEXT_VERB, agentMuxCommandHelp } from './agentmux-cli-help.js'
 import { AgentMuxClient } from './client.js'
 import {
@@ -394,7 +394,7 @@ async function whoamiCommand(args: readonly string[]): Promise<number> {
   if (args.length > 0) throw cliError('whoami takes no arguments.')
   const self = managedCaller().agentSessionId
   const status = await withClient(async (client) => await client.statusAgent(self))
-  let view: ReturnType<typeof classifySelfViewFailure> | { attached: true; region: unknown }
+  let view: SelfViewOutcome
   try {
     const receipt = await requestAgentMuxControl({
       ...requestBase(), operation: 'inspect.region', target: { kind: 'self' }, caller: { agentSessionId: self }
