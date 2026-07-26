@@ -4,6 +4,7 @@ Usage: agentmux <intent> [options]
        agentmux --skill
 
 Intents:
+  doctor      Diagnose the local Runtime: capabilities, agents, endpoint storage and reclamation.
   inspect     Inspect one Agent Session, Run, Tab, or Region without changing focus.
   list        List configured agents or active Agent Sessions from their owners.
   open        Open typed content at one exact spatial destination.

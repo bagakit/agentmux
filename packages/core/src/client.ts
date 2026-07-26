@@ -59,6 +59,7 @@ import {
   type CtxmuxAdapterStopOperation
 } from './ctxmux-run-adapter.js'
 import { AgentMuxError } from './errors.js'
+import type { EndpointReclaimOutcome } from './runtime-endpoint-reclaim.js'
 import {
   AgentMuxFileAgentSessionStore,
   type AgentMuxAgentSessionStore
@@ -668,6 +669,16 @@ export class AgentMuxClient {
         }
       }
     }
+  }
+
+  /**
+   * 本次连接顺带做的孤儿 endpoint 目录回收结果；未连接过时为 null。
+   *
+   * 回收本身是启动路径上的自愈动作，成功不打扰任何人。但失败必须能被看见——否则一个每次都删不掉的
+   * 目录会无声堆积，直到磁盘告警才浮出来。诊断经这里读取。
+   */
+  endpointReclaim(): EndpointReclaimOutcome | null {
+    return this.kernel.lastEndpointReclaim
   }
 
   async probeAgent(providerId: AgentProviderId, commandOverride?: string): Promise<AgentCapabilitySnapshot> {

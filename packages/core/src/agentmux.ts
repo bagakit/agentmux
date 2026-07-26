@@ -11,6 +11,7 @@ import {
   type AgentMuxOpenDestination
 } from './control.js'
 import { requestAgentMuxControl } from './control-host.js'
+import { diagnoseAgentMux } from './doctor.js'
 import { AgentMuxError } from './errors.js'
 import { connectLocalAgentMux } from './runtime-client.js'
 import { OrderedSessionOutputFollow } from './session-output-follow.js'
@@ -378,6 +379,21 @@ function requestsHelp(args: readonly string[]): boolean {
   ))
 }
 
+/**
+ * 诊断当前本地运行时。这是 doctor 报告唯一的用户可达入口——报告里 endpoint 目录占用与回收结果这两
+ * 段，若没有这个命令就等于算了没人看：占用只能等磁盘告警才发现，回收失败则完全无声。
+ */
+async function doctorCommand(args: readonly string[]): Promise<number> {
+  if (args.length > 0) throw cliError('doctor takes no arguments.')
+  const client = await connectLocalAgentMux()
+  try {
+    printSuccess('doctor', await diagnoseAgentMux({ client }))
+  } finally {
+    await client.dispose()
+  }
+  return 0
+}
+
 async function main(): Promise<number> {
   const args = process.argv.slice(2)
   if (args.length === 0 || args[0] === '--help' || args[0] === '-h') { process.stdout.write(`${AGENTMUX_CLI_HELP}\n`); return 0 }
@@ -388,6 +404,7 @@ async function main(): Promise<number> {
     if (!help) throw cliError('Unknown command. Run agentmux --help.')
     process.stdout.write(`${help}\n`); return 0
   }
+  if (args[0] === 'doctor') return await doctorCommand(args.slice(1))
   if (args[0] === 'inspect') return await inspectCommand(args.slice(1))
   if (args[0] === 'list') return await listCommand(args.slice(1))
   if (args[0] === 'open') return await openCommand(args.slice(1))
