@@ -7,11 +7,17 @@ const fixture = vi.hoisted(() => ({
   state: {
     sessions: [] as SessionSnapshot[],
     timelines: {} as Record<string, { items: never[] }>,
-    config: { appearance: { terminalTheme: 'graphite' } },
+    // `workspaces` is required on the real config, and the pane reads it to resolve file references
+    // in agent prose the same way the terminal does. An empty list is the honest "no active
+    // workspace" case: absolute paths then resolve to nothing rather than to a guess.
+    config: { appearance: { terminalTheme: 'graphite' }, workspaces: [] },
+    activeWorkspaceId: undefined as string | undefined,
     viewModes: {} as Record<string, 'terminal' | 'activity'>,
     refreshSession: vi.fn(async () => {}),
     recoverSession: vi.fn(async () => {}),
-    respondInteraction: vi.fn(async () => {})
+    respondInteraction: vi.fn(async () => {}),
+    openFile: vi.fn(async () => {}),
+    reportError: vi.fn()
   }
 }))
 
@@ -78,7 +84,11 @@ function render(sessionId: string, surfaceKind: 'agent' | 'terminal'): string {
   return renderToStaticMarkup(createElement(SessionPane, {
     sessionId,
     surfaceKind,
-    interactiveResize: false
+    interactiveResize: false,
+    visible: true,
+    // Required props the pane really takes. They were omitted while nothing read them; the file
+    // references in agent prose open into this Tab Group, exactly as a terminal path click does.
+    linkOrigin: { workspaceId: 'workspace-1', tabGroupId: 'group-1' }
   }))
 }
 
