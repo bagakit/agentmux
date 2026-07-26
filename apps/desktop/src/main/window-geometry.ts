@@ -78,6 +78,58 @@ export function windowConstructorGeometry(
   return geometry
 }
 
+/** A display's usable area (menu bar / taskbar excluded). Kept structural so this module stays free
+ * of any Electron import and the clamp below can be asserted with plain rectangles. */
+export type VisibleArea = { x: number; y: number; width: number; height: number }
+
+// The window must present at least this much of itself inside some visible area, or its title bar is
+// unreachable. 48px is enough to grab and drag it back regardless of platform chrome height.
+const MIN_VISIBLE_EXTENT = 48
+
+function overlapExtent(start: number, length: number, areaStart: number, areaLength: number): number {
+  return Math.max(0, Math.min(start + length, areaStart + areaLength) - Math.max(start, areaStart))
+}
+
+function clampOrigin(origin: number, extent: number, areaStart: number, areaLength: number): number {
+  // A window larger than the work area can only start at its edge; otherwise keep the saved origin
+  // but pull it inside so the whole window lands on the reachable display.
+  const maxStart = areaStart + areaLength - extent
+  if (maxStart <= areaStart) return areaStart
+  return Math.min(Math.max(origin, areaStart), maxStart)
+}
+
+/**
+ * Re-home a persisted window that would open where the user can never reach it. A monitor that was
+ * unplugged, a resolution change, or a profile carried between machines can leave the saved position
+ * on coordinates no live display covers. If the window still shows at least a grabbable strip on some
+ * visible area it is left exactly as saved (spanning two monitors is legitimate); only when it is
+ * effectively off-screen is its origin clamped into the primary visible area. Size and the maximized
+ * flag are never touched — this corrects position, not the shape the user chose.
+ *
+ * `visibleAreas[0]` is treated as primary (the caller passes the primary display first). A window with
+ * no saved position, or a call with no displays, is returned unchanged: the OS then places it.
+ */
+export function clampGeometryToVisibleArea(
+  geometry: WindowGeometry,
+  visibleAreas: readonly VisibleArea[]
+): WindowGeometry {
+  if (geometry.x === undefined || geometry.y === undefined) return geometry
+  if (visibleAreas.length === 0) return geometry
+  const savedX = geometry.x
+  const savedY = geometry.y
+  const reachable = visibleAreas.some((area) => (
+    overlapExtent(savedX, geometry.width, area.x, area.width) >= MIN_VISIBLE_EXTENT &&
+    overlapExtent(savedY, geometry.height, area.y, area.height) >= MIN_VISIBLE_EXTENT
+  ))
+  if (reachable) return geometry
+  const primary = visibleAreas[0]!
+  return {
+    ...geometry,
+    x: clampOrigin(savedX, geometry.width, primary.x, primary.width),
+    y: clampOrigin(savedY, geometry.height, primary.y, primary.height)
+  }
+}
+
 /**
  * Project a live window into a persistable record. When maximized we store the *normal* bounds (the
  * size the window returns to on unmaximize) plus the maximized flag — storing the maximized bounds

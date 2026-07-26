@@ -171,6 +171,10 @@ import {
   type PrEligibilityInput
 } from './lib/pr-eligibility'
 import { decayStaleAgentStatuses as computeDecayedAgentStatuses } from './lib/agent-status-decay'
+import {
+  createDebouncedPersistentStorage,
+  registerUnloadFlush
+} from './lib/persisted-ui-writer'
 
 type ViewMode = SessionViewMode
 export type MainSurface = 'workbench' | 'board'
@@ -1035,6 +1039,29 @@ const guardedWorkbenchStorage: StateStorage = {
     return workbenchStorage().setItem(name, value)
   },
   removeItem: (name) => workbenchStorage().removeItem(name)
+}
+
+// A layout gesture (dock drag, split-ratio, tab reorder) produces many state changes per second.
+// Debounce the durable writes so the newest value lands once after the gesture settles instead of
+// synchronously on every frame; the trailing flush closes the in-memory window a hard shutdown would
+// otherwise lose. Only layout presentation facts reach here — `partialize` already excludes PTY,
+// scrollback, PID and Provider transcript state, so nothing runtime-owned is ever written.
+const persistentWorkbenchStorage = createDebouncedPersistentStorage(guardedWorkbenchStorage)
+
+/**
+ * Force any debounced layout write to disk now. Registered on `pagehide`/`beforeunload` so a quit or
+ * navigation mid-drag still keeps the last layout change; also the seam a test drives to prove the
+ * trailing flush exists without waiting on the debounce timer.
+ */
+export function flushPersistedUiWrites(): void {
+  persistentWorkbenchStorage.flush()
+}
+
+// Renderer-side trailing flush on unload. This complements the main process's
+// `session.flushStorageData()` on window close: this lands the debounced value into localStorage,
+// and main forces Chromium's async localStorage buffer to disk. A DOM-less environment gets a no-op.
+if (typeof window !== 'undefined') {
+  registerUnloadFlush(flushPersistedUiWrites)
 }
 
 let persistHydrationPromise: Promise<void> | null = null
@@ -3532,7 +3559,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
 }), {
   name: 'agentmux-workbench-v1',
   version: 1,
-  storage: createJSONStorage(() => guardedWorkbenchStorage),
+  storage: createJSONStorage(() => persistentWorkbenchStorage.storage),
   // Startup owns the hydration boundary explicitly. `initialize()` must not ask Core for recovery
   // candidates until the persisted Workbench and UI projection have been merged.
   skipHydration: true,
