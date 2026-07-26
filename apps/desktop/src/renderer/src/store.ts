@@ -1048,20 +1048,12 @@ const guardedWorkbenchStorage: StateStorage = {
 // scrollback, PID and Provider transcript state, so nothing runtime-owned is ever written.
 const persistentWorkbenchStorage = createDebouncedPersistentStorage(guardedWorkbenchStorage)
 
-/**
- * Force any debounced layout write to disk now. Registered on `pagehide`/`beforeunload` so a quit or
- * navigation mid-drag still keeps the last layout change; also the seam a test drives to prove the
- * trailing flush exists without waiting on the debounce timer.
- */
-export function flushPersistedUiWrites(): void {
-  persistentWorkbenchStorage.flush()
-}
-
-// Renderer-side trailing flush on unload. This complements the main process's
-// `session.flushStorageData()` on window close: this lands the debounced value into localStorage,
+// Renderer-side trailing flush on unload: force any debounced layout write to disk now so a quit or
+// navigation mid-drag still keeps the last layout change. This complements the main process's
+// `session.flushStorageData()` on window close — this lands the debounced value into localStorage,
 // and main forces Chromium's async localStorage buffer to disk. A DOM-less environment gets a no-op.
 if (typeof window !== 'undefined') {
-  registerUnloadFlush(flushPersistedUiWrites)
+  registerUnloadFlush(() => persistentWorkbenchStorage.flush())
 }
 
 let persistHydrationPromise: Promise<void> | null = null
