@@ -147,6 +147,64 @@ describe('Desktop Control owner', () => {
     expect(result.tab.regions.find(({ kind }) => kind === 'browser')).not.toHaveProperty('url')
   })
 
+  // 用户原话：「当描述"右边"、"左边"的时候，除了识别 region，也可以去识别 tab」「如果让他去查看的
+  // 时候，如果没有 split，tab 应该也要能识别」。判定本身在 directional-addressing.test.ts 里；
+  // 这一层证明的是**它真的被接到了 inspect 上**——判定再对，没人调用等于没做。
+  it('inspect 把方向邻居一起交给 Agent——分了栏答 Region', async () => {
+    let tab = fixture([terminal('terminal-run')])
+    tab = addWorkbenchRegion(tab, 'region-caller', 'right', {
+      regionId: 'region-terminal', kind: 'terminal', phase: 'attached', workspaceId: 'workspace', sessionId: 'terminal-run'
+    })
+    useAppStore.setState((state) => ({ tabs: { ...state.tabs, [tab.id]: tab } }))
+
+    const result = await useAppStore.getState().executeControl(request({
+      operation: 'inspect.region', target: { kind: 'region', regionId: 'region-caller' }
+    }))
+
+    if (result.operation !== 'inspect.region') throw new Error('Unexpected result')
+    expect(result.region.neighbors.right).toEqual({ kind: 'region', regionId: 'region-terminal' })
+    expect(result.region.neighbors.left).toEqual({ kind: 'none' })
+  })
+
+  it('没有分栏时 inspect 的右邻是 Tab 条上那张——这正是用户要补的那件事', async () => {
+    const tab = fixture()
+    const second = createWorkbenchTab('tab-second', {
+      regionId: 'region-second', kind: 'launcher', workspaceId: 'workspace'
+    })
+    useAppStore.setState((state) => ({
+      tabs: { ...state.tabs, [second.id]: second },
+      layouts: { workspace: createWorkspaceLayout('group', [tab.id, second.id]) }
+    }))
+
+    const result = await useAppStore.getState().executeControl(request({
+      operation: 'inspect.region', target: { kind: 'region', regionId: 'region-caller' }
+    }))
+
+    if (result.operation !== 'inspect.region') throw new Error('Unexpected result')
+    // 只有一格，却仍然答得出右边——退到 Tab 邻接。答 none 就是对着用户看得见的东西说不存在。
+    expect(result.region.neighbors.right).toEqual({ kind: 'tab', tabId: 'tab-second' })
+    // up/down 对 Tab 不成立：Tab 条是一维水平序列。把 up 折成 prev 这里会红。
+    expect(result.region.neighbors.up).toEqual({ kind: 'none' })
+    expect(result.region.neighbors.down).toEqual({ kind: 'none' })
+  })
+
+  it('inspect.tab 的每一格都带上自己的邻居', async () => {
+    let tab = fixture()
+    tab = addWorkbenchRegion(tab, 'region-caller', 'down', {
+      regionId: 'region-file', kind: 'file', workspaceId: 'workspace', path: '/repo/a.ts'
+    })
+    useAppStore.setState((state) => ({ tabs: { ...state.tabs, [tab.id]: tab } }))
+
+    const result = await useAppStore.getState().executeControl(request({
+      operation: 'inspect.tab', target: { kind: 'tab', tabId: tab.id }
+    }))
+
+    if (result.operation !== 'inspect.tab') throw new Error('Unexpected result')
+    const byId = new Map(result.tab.regions.map((region) => [region.regionId, region.neighbors]))
+    expect(byId.get('region-caller')?.down).toEqual({ kind: 'region', regionId: 'region-file' })
+    expect(byId.get('region-file')?.up).toEqual({ kind: 'region', regionId: 'region-caller' })
+  })
+
   it('deduplicates Tab Agent Sessions and returns typed ambiguity candidates', async () => {
     let tab = fixture([agent('reviewer')])
     tab = addWorkbenchRegion(tab, 'region-caller', 'right', {

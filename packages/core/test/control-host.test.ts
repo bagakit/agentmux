@@ -41,6 +41,10 @@ const terminalRegion = {
 const browserRegion = {
   tabId: 'tab-main', regionId: 'browser-right', workspaceId: 'workspace', kind: 'browser', browserId: 'browser-1'
 } as const
+/** 只有一格、也只有一张 Tab 时的邻居：四个方向都到边。 */
+const soleRegionNeighbors = {
+  left: { kind: 'none' }, right: { kind: 'none' }, up: { kind: 'none' }, down: { kind: 'none' }
+} as const
 
 describe('Control protocol', () => {
   it('uses only closed Tab, Region, AgentSession, Run, and owner surface identities', () => {
@@ -217,7 +221,7 @@ describe('external Control control', () => {
             tab: {
               tabId: 'tab-main',
               workspaceId: 'workspace',
-              regions: [{ ...agentRegion, bounds: { x: 0, y: 0, width: 1, height: 1 } }]
+              regions: [{ ...agentRegion, bounds: { x: 0, y: 0, width: 1, height: 1 }, neighbors: soleRegionNeighbors }]
             }
           }
         }
@@ -240,10 +244,10 @@ describe('external Control control', () => {
           tab: {
             tabId: 'tab-main',
             workspaceId: 'workspace',
-            regions: [{ ...agentRegion, bounds: { x: 0, y: 0, width: 1, height: 1 } }]
+            regions: [{ ...agentRegion, bounds: { x: 0, y: 0, width: 1, height: 1 }, neighbors: soleRegionNeighbors }]
           }
         }
-        if (request.operation === 'inspect.region') return { operation: request.operation, region: { ...agentRegion, bounds: { x: 0, y: 0, width: 1, height: 1 } } }
+        if (request.operation === 'inspect.region') return { operation: request.operation, region: { ...agentRegion, bounds: { x: 0, y: 0, width: 1, height: 1 }, neighbors: soleRegionNeighbors } }
         if (request.operation === 'resume') return { operation: request.operation, agentSessionId: 'semantic-1', runId: 'run-resumed' }
         if (request.operation === 'interrupt' || request.operation === 'stop') return { operation: request.operation, agentSessionId: 'semantic-1' }
         throw new Error('Unexpected operation')

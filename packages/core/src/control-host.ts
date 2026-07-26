@@ -20,6 +20,8 @@ import {
   type AgentMuxOpenDestination,
   type AgentMuxRegion,
   type AgentMuxRegionAnchor,
+  type AgentMuxRegionNeighbor,
+  type AgentMuxRegionNeighbors,
   type AgentMuxTabAnchor,
   type AgentMuxTerminalRegion
 } from './control.js'
@@ -234,6 +236,34 @@ function normalized(value: unknown): number {
   return value
 }
 
+/**
+ * 方向邻居的线上解析。
+ *
+ * 三种 kind 各自只带自己那一个地址字段，多余的字段一律不透传——邻居答案会被 Agent 直接当作
+ * 地址喂回 focus/send，放行未经校验的字段等于放行一个没人验证过的寻址目标。
+ */
+function parseNeighbor(value: unknown): AgentMuxRegionNeighbor {
+  const source = object(value, 'Control Region neighbors are invalid.', 'CONTROL_PROTOCOL_ERROR')
+  if (source.kind === 'none') return { kind: 'none' }
+  if (source.kind === 'region') return { kind: 'region', regionId: identity(source.regionId, 'Control Region neighbors are invalid.', 'CONTROL_PROTOCOL_ERROR') }
+  if (source.kind === 'tab') return { kind: 'tab', tabId: identity(source.tabId, 'Control Region neighbors are invalid.', 'CONTROL_PROTOCOL_ERROR') }
+  throw new AgentMuxError('Control Region neighbors are invalid.', 'CONTROL_PROTOCOL_ERROR')
+}
+
+function parseNeighbors(value: unknown): AgentMuxRegionNeighbors {
+  const source = object(value, 'Control Region neighbors are invalid.', 'CONTROL_PROTOCOL_ERROR')
+  const neighbors = {
+    left: parseNeighbor(source.left),
+    right: parseNeighbor(source.right),
+    up: parseNeighbor(source.up),
+    down: parseNeighbor(source.down)
+  }
+  // up/down 落到 Tab 是**语义错误**而不是取值错误：Tab 条没有上下。放行它，Agent 会以为
+  // 自己拿到了上方的东西，实际拿到的是左邻那张，且无从发现自己被骗。
+  if (neighbors.up.kind === 'tab' || neighbors.down.kind === 'tab') throw new AgentMuxError('Control Region neighbors are invalid.', 'CONTROL_PROTOCOL_ERROR')
+  return neighbors
+}
+
 function parseRegion(value: unknown, inspected: true): AgentMuxInspectedRegion
 function parseRegion(value: unknown, inspected?: false): AgentMuxRegion
 function parseRegion(value: unknown, inspected = false): AgentMuxRegion | AgentMuxInspectedRegion {
@@ -258,7 +288,7 @@ function parseRegion(value: unknown, inspected = false): AgentMuxRegion | AgentM
   const rawBounds = object(source.bounds, 'Control Region bounds are invalid.', 'CONTROL_PROTOCOL_ERROR')
   const bounds = { x: normalized(rawBounds.x), y: normalized(rawBounds.y), width: normalized(rawBounds.width), height: normalized(rawBounds.height) }
   if (bounds.width === 0 || bounds.height === 0 || bounds.x + bounds.width > 1 + Number.EPSILON || bounds.y + bounds.height > 1 + Number.EPSILON) throw new AgentMuxError('Control Region bounds are invalid.', 'CONTROL_PROTOCOL_ERROR')
-  return { ...region, bounds }
+  return { ...region, bounds, neighbors: parseNeighbors(source.neighbors) }
 }
 
 function parseAgentRegion(value: unknown): AgentMuxAgentRegion {
