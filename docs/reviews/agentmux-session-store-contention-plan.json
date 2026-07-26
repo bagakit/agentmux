@@ -1,0 +1,47 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/agentmux-session-store-contention-plan.md"
+  },
+  "source_refs": [
+    "AGENTS.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/reviews/agentmux-session-store-contention-plan.md",
+    "packages/core/src/agent-session-store.ts",
+    "packages/core/test/agent-session-store.test.ts"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "让只读加载让出 Session store 写锁",
+      "objective": "避免多个 Agent 高频状态写入时，CLI 的列举/恢复加载抢占写锁并让生命周期写入耗尽重试预算。",
+      "outcome": "load 在活写锁下快速返回一致性 Session 快照；孤立 Timeline 清理在无争用时执行、争用时延后；新建/恢复/停止仍沿用活 owner 保护的有限重试。",
+      "acceptance": [
+        "活写锁存在时只读 load 在有界时间内返回 Session 快照，不等待完整写锁预算。",
+        "活写锁存在时孤立 Timeline 不被删除；下一次无争用 load 会完成清理。",
+        "生命周期写入路径和 AGENT_SESSION_STORE_BUSY 活 owner 保护保持不变。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core exec vitest run test/agent-session-store.test.ts",
+          "proves": "只读争用旁路、孤立 Timeline 清理、活锁保护与并发写入行为通过定向测试。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core typecheck",
+          "proves": "Core 文件型 Session store 的公开类型边界保持完整。"
+        }
+      ],
+      "source_refs": [
+        "AGENTS.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "packages/core/src/agent-session-store.ts",
+        "packages/core/test/agent-session-store.test.ts"
+      ],
+      "supersedes": []
+    }
+  ]
+}
