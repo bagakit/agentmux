@@ -498,10 +498,15 @@ export function TerminalView({
      * 常驻开销，且在 retention 测试的黑名单里。
      */
     let revealed = false
-    const reveal = (): void => {
-      if (disposed || revealed) return
-      revealed = true
-      setHydrating(false)
+    const reveal = (forced = false): void => {
+      if (disposed) return
+      if (!revealed) {
+        revealed = true
+        setHydrating(false)
+      }
+      // A late successful attach/replay supersedes the deadline notice. The local `revealed` guard
+      // still prevents a second DOM transition, while this state update removes a stale warning.
+      setRevealOverdue(forced)
     }
     const revealStartedAtMs = Date.now()
     const revealDeadline = setTimeout(() => {
@@ -514,8 +519,7 @@ export function TerminalView({
       })
       if (!decision.reveal) return
       // 强制揭示绝不静默：先记账，再揭示。
-      setRevealOverdue(decision.overdue)
-      reveal()
+      reveal(decision.overdue)
     }, TERMINAL_REVEAL_DEADLINE_MS)
 
     void (async () => {
@@ -676,7 +680,8 @@ export function TerminalView({
     attachFailed,
     agent: session.kind === 'agent',
     running: canControlRun,
-    hasOutput
+    hasOutput,
+    revealOverdue
   })
 
   const revealNotice = serviceNoticeToRender(

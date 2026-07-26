@@ -1435,6 +1435,14 @@ export class AgentMuxClient {
     }
 
     const catalog = current ? this.providers.get(current.providerId).catalog : null
+    // A Session can be absent here after an explicit stop while its retirement record still proves
+    // that this exact identity was intentionally retired.  Preserve that record's Host when feeding
+    // the continuity decision; hard-coding `local` makes a remote retirement look like an unrelated
+    // unknown Session and loses the only honest terminal classification.
+    const retirement = this.registry.retiredAgentSession(
+      input.agentSessionId,
+      input.expectedRun
+    )
     const handle = current?.nativeHandle
     const canProbe = catalog?.resumeStrategy.kind === 'provider-native' &&
       handle?.kind === 'provider' &&
@@ -1445,17 +1453,11 @@ export class AgentMuxClient {
       : null
     const decision = decideAgentSessionContinuity({
       agentSessionId: input.agentSessionId,
-      hostId: 'local',
+      hostId: current?.hostId ?? retirement?.hostId ?? 'local',
       expectedRun: input.expectedRun,
       observedAt: Date.now(),
       session: current ? cloneSession(current) : null,
-      retirement: (() => {
-        const retired = this.registry.retiredAgentSession(
-          input.agentSessionId,
-          input.expectedRun
-        )
-        return retired ? structuredClone(retired) : null
-      })(),
+      retirement: retirement ? structuredClone(retirement) : null,
       run,
       catalog,
       capability
