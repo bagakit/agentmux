@@ -188,8 +188,9 @@ describe('terminal Unicode 11 width table', () => {
 })
 
 // 纯函数全绿证明不了它接到了产品上。TerminalView 在本仓无法跑 effect（无 jsdom），
-// 所以承重的接线——「激活确实被调用，且排在首个回放写入之前」——由源码断言守住。
-// 只 loadAddon 不激活、或把激活挪到 write 之后，这两种最容易犯的静默失效都会让下面变红。
+// 所以承重的接线——「激活确实被调用，且排在 open() 之后、任何字节写入之前」——由源码断言守住。
+// 只 loadAddon 不激活、或把激活挪到 write 之后、或在 open() 与激活之间插一条同步写入，
+// 这三种最容易犯的静默失效都会让下面变红。
 describe('Unicode width table is wired before the first replayed byte', () => {
   const terminalView = readFileSync(
     new URL('../src/renderer/src/components/TerminalView.tsx', import.meta.url),
@@ -200,12 +201,21 @@ describe('Unicode width table is wired before the first replayed byte', () => {
     expect(terminalView).toContain('activateTerminalUnicodeWidth(terminal)')
   })
 
-  it('activates the width table before the first replay write', () => {
+  it('activates the width table after open() and before the first terminal write', () => {
+    const openAt = terminalView.indexOf('terminal.open(root)')
     const activateAt = terminalView.indexOf('activateTerminalUnicodeWidth(terminal)')
-    const firstReplayWriteAt = terminalView.indexOf('hydrateTerminalReplay(')
-    expect(activateAt).toBeGreaterThan(0)
-    expect(firstReplayWriteAt).toBeGreaterThan(0)
-    // 顺序错了等于没做：激活的调用点必须在回放写入之前出现。
-    expect(activateAt).toBeLessThan(firstReplayWriteAt)
+    // 首写入的代理点收紧到真正的首写入，而不是靠后的 hydrate：本文件唯一的写终端通路是
+    // terminalWrite（其调用形 `terminalWrite(terminal,` 靠逗号与定义 `terminalWrite(terminal:` 区分），
+    // 回放走 hydrate；取两者更靠前的一个。只盯 hydrate 会漏掉"在 open() 与激活之间插一条同步写入"
+    // 这种把宽字符按 v6 落格的静默回归——它会排在 hydrate 之前、却仍让旧守卫判绿。
+    const firstTerminalWriteAt = terminalView.indexOf('terminalWrite(terminal,')
+    const firstHydrateAt = terminalView.indexOf('hydrateTerminalReplay(')
+    expect(openAt).toBeGreaterThan(0)
+    expect(firstTerminalWriteAt).toBeGreaterThan(0)
+    expect(firstHydrateAt).toBeGreaterThan(0)
+    const firstWriteAt = Math.min(firstTerminalWriteAt, firstHydrateAt)
+    // 顺序错了等于没做：激活必须排在 open() 之后、任何写入之前。
+    expect(activateAt).toBeGreaterThan(openAt)
+    expect(activateAt).toBeLessThan(firstWriteAt)
   })
 })
