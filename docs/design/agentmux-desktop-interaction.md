@@ -54,7 +54,11 @@
 - **重新打开项目要无缝接回原来的工作面**。切换 Workspace/Project 只是改变可见投影，不能销毁仍在使用中的 Workbench、xterm 实例或 ctxmux attachment；回到项目时应直接看到离开前的终端画面，不再闪 `Restoring terminal…`，也不因为 replay 起点变化把用户误导成“历史丢了”。真正发生 replay gap 时仍需显示 gap 的诚实提示，但项目切换本身不得制造 gap。
 - **应用重启与机器重启都先恢复布局，再恢复语义 Session**。启动时以持久化布局为索引，自动尝试对每个仍有有效 Provider-native handle 的 Agent Session 建立新 Run/attachment；用户不需要先点 `Resume` 才能看到可恢复的 Agent。恢复成功沿用原 View/Region，Run id 可以变化但 Session id 不变。
 - **恢复候选不能静默消失**。Provider 不支持 native resume、Session 从未记录过 verified handle、handle 已失效或 Core 返回冲突时，原布局位置仍保留一个可理解的失败/待处理投影，明确说明原因与下一步；不能开一个全新的 Run 冒充旧上下文，也不能因为恢复失败而把整张布局裁掉。
-- **Session 恢复是独立的一等功能**。应用启动、切换回项目和机器重启后的首次打开，都必须自动尝试恢复；用户不需要先进入 Topic 再显式点击 `Resume`。`Agent resume unavailable` 只能在 Core 已给出明确的 `provider-unsupported`、`native-handle-unavailable` 或 `continuity-conflict` 结果时出现，并且必须伴随保留原投影的服务窗说明；不能把“没有 verified Provider handle”当成唯一的无上下文黑箱错误。
+- **Session 恢复是独立的一等功能**。应用启动、切换回项目和机器重启后的首次打开，都必须自动尝试恢复；用户不需要先进入 Topic 再显式点击 `Resume`。恢复失败只能在 Core 已给出明确结果时出现，并且必须伴随保留原投影的服务窗说明；不能把“没有 verified Provider handle”当成唯一的无上下文黑箱错误。
+- **「恢复不了」不是一句话，是四类结果加一个冲突，界面必须把它们分开说**。Core 的 unavailable 有四个原因（`provider-resume-unsupported` / `native-handle-unavailable` / `provider-unavailable` / `unknown-session`），另有 conflict 自成一类。合成一句「Agent resume unavailable」等于没说：**Provider 根本不支持 resume 是永久的**（这个 Agent 换个时间点也回不来，该新开一个），**handle 缺失只关乎这一条 Session**（别的 Agent 不受影响），**Provider 在这台 Host 上缺席则是可恢复的**（装回来/Host 回来就能续，此时叫用户新开 Agent 等于让他丢掉一个还活着的 Session），**conflict 说明东西还在、只是被占着**。用户此刻唯一要做的决定就是在「重试」「新开」「等一下」之间选，而这个决定完全由类别决定。
+  - **恢复按钮上永远写得出"现在能做什么"，不留一个只写着"不可用"的死按钮**。只有可重试的那一类给可按的重试；其余给出各自该做的事。**一个按下去必然失败的按钮比禁用更糟——它承诺了一件做不到的事**；禁用态的说明由该类别的原因文本承载，不是空着。
+  - **Core 没给原因时如实说不知道，不挑一类当默认**。把未知显示成"Provider 不支持"会把用户支去新开 Agent，而真相可能只是 Host 掉线。分不清就说分不清，这与「未知不得当作正常」同源。
+  - 分类判定落在渲染层之外的纯函数里，且**对原因的分支不设 default**：Core 日后新增一个原因时，这里必须**编译不过**，而不是安静折进某句通用文案。
 - **恢复动作必须幂等**。同一 Agent Session 在重复启动、窗口重新聚焦或 Topic 重进时，若已有精确匹配的 live Run 只能 attach；若 Run 已丢失且 handle 有效，只允许创建一个新的 Provider-native Run。任何迟到的旧 Run 事件都不得覆盖新的绑定。
 - **机器重启后的边界必须如实表达**：旧 PTY 进程、ctxmux 内存 scrollback 与 pending interaction 不承诺可恢复；可恢复的是持久化的 Agent Session 语义身份及 Provider 自己支持的 resume。于是重启后终端可能从新 Run 的首屏开始，但布局、Agent 身份与自动恢复动作必须仍在。
 
