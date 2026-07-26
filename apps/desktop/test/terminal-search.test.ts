@@ -116,6 +116,43 @@ describe('打到一半的正则不能掀掉终端', () => {
     })
   }
 
+  it('校验的是 addon 真正会编译的那个串——不区分大小写时是小写形态', () => {
+    // 第二轮 review 抓到的真漏洞。addon 在不区分大小写时编译的是 `term.toLowerCase()`
+    // （`caseSensitive ? term : term.toLowerCase()` 紧接着裸的 `RegExp(_, 'g')`），
+    // 于是这一类模式**原样合法、小写后非法**：校验原串就放它过去，然后在 addon 里抛，
+    // 整个终端被卸载——而且是在**默认**的不区分大小写模式下。
+    for (const pattern of ['[Z-a]', '(?<AB>x)(?<ab>y)', '[A-_]']) {
+      // 先钉住前提本身：原样合法、小写非法。前提哪天不成立了，这条要先红。
+      expect(() => new RegExp(pattern, 'g')).not.toThrow()
+      expect(() => new RegExp(pattern.toLowerCase(), 'g')).toThrow()
+
+      const addon = fakeAddon()
+      const outcome = runTerminalSearch(
+        addon,
+        pattern,
+        { caseSensitive: false, regex: true, wholeWord: false },
+        'next'
+      )
+      // 不能发起搜索——发起了就是把 SyntaxError 送进 addon。
+      expect(addon.findNext).not.toHaveBeenCalled()
+      expect(outcome.notice).toBeTruthy()
+    }
+  })
+
+  it('同一个模式在区分大小写时是合法的，不该被误挡', () => {
+    // 反过来也要成立：开了区分大小写，addon 编译的就是原串，`[Z-a]` 完全能用。
+    // 只validate小写形态会把它误挡掉——那是另一个方向的错。
+    const addon = fakeAddon()
+    const outcome = runTerminalSearch(
+      addon,
+      '[Z-a]',
+      { caseSensitive: true, regex: true, wholeWord: false },
+      'next'
+    )
+    expect(addon.findNext).toHaveBeenCalled()
+    expect(outcome).toEqual({})
+  })
+
   it('合不合法以 RegExp 自己为准，不以直觉为准', () => {
     // `a{` 看着像打了一半的量词，但 JS 按 Annex B 的 web 兼容规则把它当字面量收下——**合法**。
     // 手写校验八成会拒掉它，于是用户明明能搜的东西被挡住。这条钉住的是那个设计选择本身：
@@ -227,19 +264,33 @@ describe('搜索面板把三个开关露出来', () => {
   it('每一处搜索调用都带上当前开关，一处都不能漏', () => {
     // 第一轮 review 抓到的洞：打字/回车/上一个/下一个这条**最常走**的路曾经经过一个替你读
     // state 的 searchTerminal(query) 包装，把它换成默认开关，30 条断言一条都不红——
-    // 而用户点完开关后的下一次击键就会静默退回全关。现在没有那个包装了，
-    // 这条把"所有调用点都显式传开关"钉死：漏一处就会红。
+    // 而用户点完开关后的下一次击键就会静默退回全关。
+    //
+    // 真正的保证是 searchWith 的 toggles 参数**没有默认值**：漏传编译不过。类型挡不住的是
+    // "传了，但传的是常量而不是当前状态"——那正是当初那个洞的形状，所以这一条专盯它。
     //
     // 先去注释：注释里描述规则的文字不是规则本身（同 surface-selection-contract.test.ts）。
     const code = view.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
-    // 只取**调用**，排除 `function searchWith(` 那行定义。
-    const calls = [...code.matchAll(/(?<!function\s)\bsearchWith\(([^)]*)\)/g)].map((m) =>
-      m[1]!.trim()
-    )
+    // 括号要配平地取完整实参：`[^)]*` 会在第一个右括号处截断，于是
+    // `searchWith(q, resolveToggles(searchToggles))` 这种完全正确的写法会被误判成红。
+    const calls: string[] = []
+    for (const match of code.matchAll(/(?<!function\s)\bsearchWith\(/g)) {
+      let depth = 1
+      let i = match.index! + match[0].length
+      const start = i
+      while (i < code.length && depth > 0) {
+        if (code[i] === '(') depth += 1
+        else if (code[i] === ')') depth -= 1
+        i += 1
+      }
+      calls.push(code.slice(start, i - 1).trim())
+    }
     // 扫描式断言必须自证扫到了东西——扫到空集的 for 循环永远是绿的。
     expect(calls.length).toBeGreaterThanOrEqual(5)
     for (const args of calls) {
-      expect(args).toMatch(/,\s*(searchToggles|next)\b/)
+      // 开关必须**来自当前状态**（searchToggles，或由它翻转出来的 next），不能是常量。
+      expect(args).toMatch(/\b(searchToggles|next)\b/)
+      expect(args).not.toContain('DEFAULT_TERMINAL_SEARCH_TOGGLES')
     }
     // 那个会读 state 的便捷包装不能回来。
     expect(code).not.toContain('function searchTerminal')

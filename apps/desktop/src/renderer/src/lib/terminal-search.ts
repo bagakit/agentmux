@@ -46,15 +46,23 @@ export const DEFAULT_TERMINAL_SEARCH_TOGGLES: TerminalSearchToggles = Object.fre
 type TerminalSearchOutcome = { notice?: string }
 
 /**
- * 正则模式是否可用。
+ * 这个模式**在 addon 会真的编译的那个形态下**能不能用。
  *
  * 用 `RegExp` 自己来判，不自己写校验——它才是最终执行这个模式的东西，任何手写的近似判断
  * 都会和它产生分歧，而分歧的那一侧就是崩溃。
+ *
+ * 但"交给 RegExp 判"还不够，**得判对那个字符串**：addon 在不区分大小写时编译的是
+ * `term.toLowerCase()`（`_findInLine` 里 `caseSensitive ? term : term.toLowerCase()`，
+ * 紧接着裸的 `RegExp(_, 'g')`）。于是存在一类模式**原样合法、小写后非法**——
+ * `[Z-a]`（Z 到 a 之间那段 ASCII，是个真实写法）小写成 `[z-a]` 就是逆序区间；
+ * 同理 `(?<AB>x)(?<ab>y)` 小写后成了重名捕获组。校验原串就会放它过去，
+ * 然后在 addon 里抛出来——正好落在这个功能要挡的那个崩溃上，而且是在**默认**的
+ * 不区分大小写模式下。所以按开关决定校验哪一个形态。
  */
-function regexUsable(pattern: string): boolean {
+function regexUsable(pattern: string, caseSensitive: boolean): boolean {
   try {
     // eslint-disable-next-line no-new
-    new RegExp(pattern, 'g')
+    new RegExp(caseSensitive ? pattern : pattern.toLowerCase(), 'g')
     return true
   } catch {
     return false
@@ -95,7 +103,7 @@ export function runTerminalSearch(
     addon.clearDecorations()
     return {}
   }
-  if (toggles.regex && !regexUsable(query)) {
+  if (toggles.regex && !regexUsable(query, toggles.caseSensitive)) {
     return { notice: 'Incomplete regular expression' }
   }
   // 装饰色带在这里而不是让调用方拼：调用方漏掉它，匹配就会用 xterm 的默认色画在深底上。
