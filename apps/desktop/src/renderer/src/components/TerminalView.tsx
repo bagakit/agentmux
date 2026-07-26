@@ -707,6 +707,14 @@ export function TerminalView({
     terminalRef.current?.focus()
   }
 
+  // 开关状态**永远显式传入**，没有"用当前 state"这个省事的重载。
+  //
+  // 原本这里有两个函数：searchWith(query, toggles) 和一个替你读 state 的 searchTerminal(query)。
+  // 后者是个陷阱：setState 是异步的，点开关那条路径必须传翻转后的新值，读 state 会拿到旧的，
+  // 于是第一次点不生效、第二次才生效。更糟的是它把「用哪份开关」变成了调用点的自由，
+  // 而这个自由在测试里够不着——把某一条路径的 toggles 换成默认值，30 条断言一条都不会红
+  // （第一轮 review 实测如此）。参数没有默认值，漏传就编译不过，于是"传错开关"这种事
+  // 从运行期缺陷降级成编译期错误。
   function searchWith(
     query: string,
     toggles: TerminalSearchToggles,
@@ -714,14 +722,7 @@ export function TerminalView({
   ): void {
     const addon = searchAddonRef.current
     if (!addon) return
-    const outcome = runTerminalSearch(addon, query, toggles, previous ? 'previous' : 'next')
-    setSearchNotice(outcome.notice)
-  }
-
-  // 开关翻转时必须把**新**状态显式传进去：setState 是异步的，读 searchToggles 会拿到翻转前的值，
-  // 于是第一次点开关不生效、第二次才生效——那种"慢一拍"的开关比没有开关更让人不信任。
-  function searchTerminal(query: string, previous = false): void {
-    searchWith(query, searchToggles, previous)
+    setSearchNotice(runTerminalSearch(addon, query, toggles, previous ? 'previous' : 'next').notice)
   }
 
   const startupPhase = terminalStartupPhase({
@@ -851,15 +852,15 @@ export function TerminalView({
                 aria-label="Find in terminal"
                 onChange={(event) => {
                   setSearchQuery(event.target.value)
-                  searchTerminal(event.target.value)
+                  searchWith(event.target.value, searchToggles)
                 }}
                 onKeyDown={(event) => {
-                  if (event.key === 'Enter') searchTerminal(searchQuery, event.shiftKey)
+                  if (event.key === 'Enter') searchWith(searchQuery, searchToggles, event.shiftKey)
                   if (event.key === 'Escape') closeSearch()
                 }}
               />
-              <button type="button" title="Previous match" onClick={() => searchTerminal(searchQuery, true)}><ChevronUp size={13} /></button>
-              <button type="button" title="Next match" onClick={() => searchTerminal(searchQuery)}><ChevronDown size={13} /></button>
+              <button type="button" title="Previous match" onClick={() => searchWith(searchQuery, searchToggles, true)}><ChevronUp size={13} /></button>
+              <button type="button" title="Next match" onClick={() => searchWith(searchQuery, searchToggles)}><ChevronDown size={13} /></button>
               {/* 三个开关。能力本来就在 addon 里，这里只是把它露出来。翻转后**立刻按新条件重搜**
                   ——留着上一次的结果会让开关看起来没生效，那比没有开关更糟。
                   aria-pressed 而非颜色单独承载状态：色觉差异下仍读得出哪个开着。 */}
@@ -880,9 +881,12 @@ export function TerminalView({
                 >{glyph}</button>
               ))}
               <button type="button" title="Close find" onClick={closeSearch}><X size={13} /></button>
-              {searchNotice ? (
-                <span className="terminal-search__notice" role="status">{searchNotice}</span>
-              ) : null}
+              {/* live region **常驻**，只换里面的文字。读屏软件播报的是已存在区域内的**内容变化**；
+                  连同区域一起插进来的文字，好几款读屏都不会念——那等于这句话只对看得见的人说。
+                  没话说时用 hidden 收起来，区域还在，但不占位、不画那层玻璃背景。 */}
+              <span className="terminal-search__notice" role="status" hidden={!searchNotice}>
+                {searchNotice ?? ''}
+              </span>
             </div>
           ) : null}
         </div>
