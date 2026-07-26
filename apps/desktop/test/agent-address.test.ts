@@ -14,6 +14,32 @@ import {
 // 能不能不问人、不查文档就完成寻址。因此每条断言都在问"这段文本自足吗"，
 // 而不是"字符串长得对不对"。
 
+// CLI 真实语法（见 packages/core/src/agentmux.ts 的 verb 分发）：
+//   - inspect 必须恰好带一个选择器 flag；
+//   - send 除了选择器，**还必须带 `--text`**——`requiredData(flags, '--text', 'Message text')`，
+//     少了它是 INVALID_CLI_ARGUMENT（实跑确认："Message text is required."）；
+//   - list 必须带 agents 或 sessions 子命令。
+// send 与 inspect 不能共用一条形状：合写成 `(?:send|inspect)` 会让漏掉 `--text` 的 send 照样匹配，
+// 和本轮修掉的裸 inspect 是同一个洞——断言的粒度比它要防的 bug 更粗，于是分不清能跑与不能跑。
+// 选择器的值用 `\S.*` 而不是 `\S+`：id 经 shell 转义后合法地含空格（`'a'"'"'b c'`），
+// `\S+` 会在第一个空格处断掉，把一条真能跑的命令误判为跑不了。
+const RUNNABLE: readonly RegExp[] = [
+  /^agentmux send --to-(?:session|region|tab)=\S.* --text ./u,
+  /^agentmux inspect --(?:session|region|tab|run|provider-native|acp-native)=\S/u,
+  /^agentmux list (?:agents|sessions)$/u
+]
+
+/** 一段文本里每一行 `agentmux …` 都必须能跑；返回检查过的行数，供调用方防"一行都没检查"。 */
+function assertEveryCommandRunnable(text: string, where: string): number {
+  let seen = 0
+  for (const line of text.split('\n')) {
+    if (!line.startsWith('agentmux')) continue
+    seen += 1
+    expect(RUNNABLE.some((shape) => shape.test(line)), `跑不了的命令：${where} → ${line}`).toBe(true)
+  }
+  return seen
+}
+
 describe('Session 地址：哪个 Agent', () => {
   const address = formatSessionAddress('agent-7')
 
@@ -65,6 +91,22 @@ describe('View 地址：哪张完整工作面', () => {
 })
 
 describe('shell 转义：粘贴即可执行', () => {
+  it('复制出的三级地址，每一行命令都真能跑', () => {
+    // 恢复侧早有这条，复制侧一直没有——而"粘贴即可执行"本就是复制这件事的全部意义。
+    // 缺口是实测撞出来的：把命令出口的 `--text` 改名，只有 tab-control-handoff.test.ts 里
+    // 一条断言变红，本文件三个地址 describe 纹丝不动；它们只 toContain 到 id 就收手了。
+    let seen = 0
+    for (const [where, address] of [
+      ['session', formatSessionAddress("a'b c")],
+      ['region', formatRegionAddress("a'b c")],
+      ['view', formatViewAddress("a'b c")]
+    ] as const) {
+      seen += assertEveryCommandRunnable(address, where)
+    }
+    // 每个地址至少一条 send、一条 inspect。少于 6 说明扫描本身漏了，不是命令都合格。
+    expect(seen).toBeGreaterThanOrEqual(6)
+  })
+
   it('转义带单引号与空格的 id', () => {
     const address = formatSessionAddress("--evil id$'quoted")
     expect(address).toContain(`--to-session='--evil id$'"'"'quoted'`)
@@ -141,12 +183,6 @@ describe('寻址失败自带下一步命令，而不只是候选清单', () => {
   // 而裸 inspect 跑起来是 INVALID_CLI_ARGUMENT（"requires exactly one of --session/--run/…"）。
   // 断言分不清能跑与不能跑，于是三条恢复全是死路，测试却一直绿着。
   it('恢复里的每一行命令都真能跑，不是长得像命令', () => {
-    // CLI 真实语法：inspect/send 必须恰好带一个选择器 flag；list 必须带 agents 或 sessions
-    // 子命令（见 packages/core/src/agentmux.ts 的 verb 分发）。
-    const RUNNABLE = [
-      /^agentmux (?:send|inspect) --(?:to-)?(?:session|region|tab|run|provider-native|acp-native)=\S/u,
-      /^agentmux list (?:agents|sessions)$/u
-    ]
     const codes = [
       'MESSAGE_TARGET_NOT_UNIQUE',
       'MESSAGE_TARGET_NOT_AGENT',
@@ -160,11 +196,7 @@ describe('寻址失败自带下一步命令，而不只是候选清单', () => {
         code,
         candidates: [{ agentSessionId: 'agent-a', regionIds: ['region:1'] }]
       })
-      for (const line of (recovery ?? '').split('\n')) {
-        if (!line.startsWith('agentmux')) continue
-        seen += 1
-        expect(RUNNABLE.some((shape) => shape.test(line)), `跑不了的命令：${code} → ${line}`).toBe(true)
-      }
+      seen += assertEveryCommandRunnable(recovery ?? '', code)
     }
     // 没有这条，把所有命令都删光也会绿——"一条都没检查"和"每条都合格"打印出来一样。
     expect(seen).toBeGreaterThanOrEqual(codes.length)
