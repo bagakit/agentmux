@@ -340,6 +340,35 @@ export async function registerIpc(args: {
   handle('scratch:renameTitle', async (workspaceId: string, topicId: string, title: string) =>
     await args.scratchTopics.renameTitle(workspace(config, workspaceId), topicId, title)
   )
+  /**
+   * 资源采样的订阅与退订。
+   *
+   * 采样只在有订阅者时进行，因此这两个 handler 就是"折叠态零开销"这条约束的兑现处。
+   * 退订必须可靠：Renderer 崩溃或刷新时若没人退订，采样会永远跑下去——所以除了显式
+   * 退订，还监听 sender 的销毁与导航。
+   */
+  const usageSubscriptions = new Map<number, () => void>()
+  const stopUsageSubscription = (webContentsId: number): void => {
+    usageSubscriptions.get(webContentsId)?.()
+    usageSubscriptions.delete(webContentsId)
+  }
+  channels.push('resourceUsage:subscribe')
+  ipcMain.handle('resourceUsage:subscribe', (event) => {
+    const sender = event.sender
+    stopUsageSubscription(sender.id)
+    const unsubscribe = args.runtime.resourceSampler.subscribe((snapshot) => {
+      if (sender.isDestroyed()) return
+      sender.send('agentmux:resource-usage', snapshot)
+    })
+    usageSubscriptions.set(sender.id, unsubscribe)
+    const cleanup = (): void => stopUsageSubscription(sender.id)
+    sender.once('destroyed', cleanup)
+    sender.once('did-start-navigation', cleanup)
+  })
+  channels.push('resourceUsage:unsubscribe')
+  ipcMain.handle('resourceUsage:unsubscribe', (event) => {
+    stopUsageSubscription(event.sender.id)
+  })
   handle('ui:readClipboardText', () => clipboard.readText())
   handle('ui:writeClipboardText', (text: string) => {
     clipboard.writeText(text)

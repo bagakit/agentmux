@@ -1,6 +1,13 @@
 import { createElement, type ReactElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
+
+// 状态栏现在挂着资源面板，而资源面板要读 api，api 在模块加载时就要判断跑在哪个宿主里。
+// 不先立起这个全局，import 阶段就炸，一条断言都跑不到。
+vi.hoisted(() => {
+  vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
+})
+
 import type { SessionSnapshot } from '../src/shared/contracts.js'
 import type { AgentDisplayState } from '@agentmux/core'
 import { summarizeAgentAttention, summarizeProviderActivity } from '../src/renderer/src/lib/agent-attention.js'

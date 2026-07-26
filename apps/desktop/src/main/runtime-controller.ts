@@ -38,6 +38,7 @@ import {
 } from '../shared/terminal-osc-color-query.js'
 import { createExecutionHost } from './host-factory.js'
 import { ScratchTopics, type PreparedScratchAgentTopic } from './scratch-topics.js'
+import { ProcessResourceSampler } from './process-resource-sampler.js'
 import {
   SCRATCH_WORKSPACE_ID,
   scratchTopicIdFromWorkspacePath,
@@ -273,7 +274,13 @@ export class RuntimeController {
 
   constructor(
     private readonly agentSessionStore: AgentMuxAgentSessionStore,
-    private readonly scratchTopics: ScratchTopics = new ScratchTopics()
+    private readonly scratchTopics: ScratchTopics = new ScratchTopics(),
+    /**
+     * 进程资源采样器。挂在 controller 上是因为 pid 从这条事件流上流过；采样本身仍由订阅
+     * 驱动，没人看面板时它一次 `ps` 都不会起。可注入是为了让测试喂假的 `ps` 输出——
+     * 否则只能给它开一个测试专用的取数口，那条口用户永远不走，坏了也不会有人知道。
+     */
+    readonly resourceSampler: ProcessResourceSampler = new ProcessResourceSampler()
   ) {}
 
   setTerminalViewColors(colors: TerminalOscColorQueryReplyColors): void {
@@ -962,6 +969,7 @@ export class RuntimeController {
     this.terminalColorQueryRemainders.clear()
     this.pendingAgentColorQueryReplies.clear()
     this.readyAgentColorQueryRuns.clear()
+    this.resourceSampler.dispose()
     for (const [, host] of hosts) host.unsubscribe()
     await disposePrepared(hosts.map(([id, host]) => ({ id, ...host })))
   }
@@ -1184,6 +1192,14 @@ export class RuntimeController {
       this.terminalColorQueryRemainders.delete(queryKey)
       this.pendingAgentColorQueryReplies.delete(queryKey)
       this.readyAgentColorQueryRuns.delete(queryKey)
+    }
+    // 资源采样要知道每个 run 的 pid，而 Core 已经在这条事件里报了它——顺手记下即可，
+    // 不新建第二份 pid 台账（第二份会与 Core 漂移，且漂移时不会有任何测试变红）。
+    if (event.type === 'process-state') {
+      if (event.state === 'running') this.resourceSampler.trackRun(event.run.runId, event.pid)
+      else this.resourceSampler.forgetRun(event.run.runId)
+    } else if (event.type === 'run-removed') {
+      this.resourceSampler.forgetRun(event.run.runId)
     }
     const runtimeEvent: RuntimeEvent = { type: 'core', hostId, event }
     for (const client of this.clients) {

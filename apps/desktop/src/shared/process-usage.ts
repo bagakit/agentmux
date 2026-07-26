@@ -173,3 +173,26 @@ export function pruneSamples(
   const longest = Math.max(specs.cpu.windowMs, specs.rss.windowMs)
   return samples.filter((sample) => now - sample.observedAt <= longest)
 }
+
+/** 一个 run 现在吃多少资源。`null` 表示不可用（进程已退出、采样失败、还没采到）。 */
+export type RunUsage = {
+  runId: string
+  processCount: number
+  cpuPercent: number | null
+  rssKib: number | null
+}
+
+/**
+ * 一次采样的成品。
+ *
+ * 放在 shared 层是因为它要跨 IPC：主进程产出，Renderer 渲染。类型只有一处定义，
+ * 两侧不各写一份形状相同的接口——那种重复漂移时不会有任何测试变红。
+ */
+export type UsageSnapshot = {
+  observedAt: number
+  runs: RunUsage[]
+  /** Electron 自身进程，与 Agent 子树分开——混成一个数就没法回答"是谁在吃"。 */
+  app: { processCount: number; rssKib: number } | null
+  /** 采样失败时的原因。有它就说明下面的数字是旧的，不是此刻的。 */
+  unavailable: string | null
+}

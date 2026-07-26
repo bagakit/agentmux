@@ -2,6 +2,7 @@ import { useAppStore } from '../store'
 import { summarizeAgentAttention, summarizeProviderActivity } from '../lib/agent-attention'
 import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
 import { AgentRoster } from './AgentRoster'
+import { ResourceUsagePanel } from './ResourceUsagePanel'
 
 // The window's only cross-session attention rollup. Every other status indicator is scoped — the
 // tab dot to one Session, Board columns to one Project, the Agents tool total to one open Workspace
@@ -112,6 +113,9 @@ export function AgentStatusBar() {
         </span>
       )}
       <ProviderActivity />
+      {/* 资源面板排在最后：它回答的是"机器还扛得住吗"，比"谁在等你"次要一档。
+          折叠时它只是一枚图标，采样在打开那一刻才开始。 */}
+      <ResourceUsagePanel />
     </div>
   )
 }
