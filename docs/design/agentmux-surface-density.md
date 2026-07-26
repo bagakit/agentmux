@@ -217,6 +217,7 @@
 | Agent Provider Catalog | 142px 最小列宽；44px Card；最多 268px 高 | 容器独立滚动，不扩大 Launcher |
 | 操作与元数据文字 | 11–13px；微标不低于 10px | 不用 7–9px 冒充密度 |
 | Terminal / Editor | Terminal `12px / 1.0`；Editor `14px / 21px` | 由 xterm/Monaco 原生 DPR 渲染，不使用 CSS transform |
+| Terminal replay recovery | 有界批次；批次间让出事件循环；输入/切换控件不被输出队列饿死 | 大量 scrollback 恢复时优先保持界面可操作，避免一次性 parser 工作造成假死 |
 
 ## Owner
 

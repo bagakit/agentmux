@@ -116,11 +116,12 @@ describe('四个调用点都走降级包装', () => {
   it('connect 循环用降级包装——一个 session 的慢探测不许拆掉整条连接', () => {
     // 这是爆炸半径那一条：外层 catch 会 kernel.disconnect()，所以超时必须在循环内被吃掉。
     const loop = clientCode.slice(
-      clientCode.indexOf('for (const session of this.registry.list())'),
+      clientCode.indexOf('const handshakeErrors: unknown[] = []'),
       clientCode.indexOf('await this.recoverPendingInteractionResponses(runs)')
     )
     expect(loop).toContain('ensureTerminalHandshakeOrDegrade(session, run)')
     expect(loop).not.toContain('this.ensureTerminalHandshake(session, run)')
+    expect(loop).toContain('Promise.all(this.registry.list().map(async (session)')
   })
 
   it('submitAgentPrompt 不被握手拦住——降级后 prompt 照发', () => {
@@ -290,11 +291,12 @@ describe('AgentMuxClient 握手超时行为（真实 registry/store 边界）', 
     kernel.list = async () => [failedRun, healthyRun]
     kernel.onEvent = () => () => {}
     kernel.onError = () => () => {}
-    kernel.attach = async (runId: string) => ({
+    const attach = vi.fn(async (runId: string) => ({
       run: runId === failedRun.runId ? failedRun : healthyRun,
       replay: runId === healthyRun.runId ? [queryEvent] : [],
       gap: null
-    })
+    }))
+    kernel.attach = attach
     kernel.status = async (runId: string) => {
       if (runId === failedRun.runId) {
         throw new AgentMuxError(
@@ -335,6 +337,11 @@ describe('AgentMuxClient 握手超时行为（真实 registry/store 边界）', 
     })
 
     const connecting = client.connect()
+    // Both probes must be armed before either ten-second timeout is allowed to complete. Under
+    // the old serial loop the vanished first Run parked here and healthy-run attach was never
+    // reached, so this assertion is the concurrency/connection-blast-radius guard.
+    for (let i = 0; i < 40 && attach.mock.calls.length < 2; i += 1) await Promise.resolve()
+    expect(attach.mock.calls.map(([runId]) => runId)).toEqual(['failed-run', 'healthy-run'])
     await vi.advanceTimersByTimeAsync(10_000)
     await connecting
 

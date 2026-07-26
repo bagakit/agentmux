@@ -1,9 +1,23 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import { SplitRatioCommitter } from '../src/renderer/src/lib/split-ratio-commit'
 import { LatestTerminalOutputAcknowledger } from '../src/renderer/src/lib/terminal-output-ack'
 import { terminalStartupPhase } from '../src/renderer/src/lib/terminal-startup'
 
 describe('Terminal interaction latency owners', () => {
+  it('lets the live output drain yield to the renderer between queued chunks', () => {
+    const source = readFileSync(new URL('../src/renderer/src/components/TerminalView.tsx', import.meta.url), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//gu, '')
+      .split('\n')
+      .map((line) => line.replace(/\/\/.*$/u, ''))
+      .join('\n')
+    const outputDrain = source.slice(
+      source.indexOf('outputTail = outputTail.then('),
+      source.indexOf('const disposeEvents = api.sessions.onEvent')
+    )
+    expect(outputDrain).toContain('await yieldTerminalWork()')
+  })
+
   it('coalesces an acknowledgement burst and eventually sends the latest cursor', async () => {
     let releaseFirst = () => {}
     const firstPending = new Promise<void>((resolve) => { releaseFirst = resolve })
