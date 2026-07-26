@@ -13,6 +13,7 @@ import {
   getNextSidebarResizeWidth,
   getRenderedSidebarWidthCssValue
 } from '../src/renderer/src/hooks/useSidebarResize.js'
+import { allStyles } from './helpers/styles.js'
 import {
   TOOL_DOCK_COLLAPSED_RAIL_MIN_WIDTH,
   TOOL_DOCK_MAX_WIDTH,
@@ -38,10 +39,7 @@ const topicContextMenuSource = readFileSync(
   new URL('../src/renderer/src/components/TopicContextMenu.tsx', import.meta.url),
   'utf8'
 )
-const stylesSource = readFileSync(
-  new URL('../src/renderer/src/styles.css', import.meta.url),
-  'utf8'
-)
+const stylesSource = allStyles()
 
 const workspace: WorkspaceRecord = {
   id: 'workspace',

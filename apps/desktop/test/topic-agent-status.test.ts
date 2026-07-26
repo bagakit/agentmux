@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { topicAgentPresentation } from '../src/renderer/src/lib/surface-tool-dock.js'
 import type { AgentSessionSnapshot } from '../src/shared/contracts.js'
+import { allStyles } from './helpers/styles.js'
 
 // Topic 行要回答的是"这个 Topic 里的 Agent 现在怎么样了"，而不是把每个 Agent 的全名平铺出来。
 // 状态语汇必须复用窗口里那一套（status status--<state>），不发明第三套。
@@ -79,10 +80,7 @@ describe('Topic 行的视觉收敛', () => {
  * 漂移，且漂移时它自己不会响。
  */
 describe('状态到颜色的映射只有一处定义', () => {
-  const styles = readFileSync(
-    new URL('../src/renderer/src/styles.css', import.meta.url),
-    'utf8'
-  )
+  const styles = allStyles()
 
   /** 每条给 `--status-ink` 赋值的规则，连同它覆盖的状态。 */
   function inkDefinitions(): Array<{ selector: string; states: string[] }> {
@@ -137,10 +135,7 @@ describe('Agent 头像：身份看图标，点击到人', () => {
     new URL('../src/renderer/src/components/SurfaceToolDock.tsx', import.meta.url),
     'utf8'
   )
-  const styles = readFileSync(
-    new URL('../src/renderer/src/styles.css', import.meta.url),
-    'utf8'
-  )
+  const styles = allStyles()
 
   it('身份由 Provider 图标给出，不是一排看不出谁是谁的抽象点', () => {
     expect(avatar).toContain('<AgentProviderIcon providerId={providerId}')

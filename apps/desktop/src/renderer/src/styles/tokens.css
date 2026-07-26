@@ -1,0 +1,103 @@
+/**
+ * 尺度系统的唯一来源：颜色、字号、间距、圆角、阴影、动效。
+ * 这是全表唯一的 :root——其余文件只引用 token，不声明。
+ *
+ * 按表面分文件（见 docs/design/agentmux-surface-density.md「样式表的组织」）。
+ * 层叠顺序即 index.css 里的 @import 顺序，不靠特异性打架决定胜负。
+ */
+
+:root {
+  color-scheme: dark;
+  /* 底色脱离纯黑，给阴影留出向下的空间；五层 surface 拉开可辨明度阶梯 */
+  --bg: #0c0e12;
+  --surface-0: #111419;
+  --surface-1: #171b21;
+  --surface-2: #1f242b;
+  --surface-3: #2a3138;
+  --line: #313941;
+  --line-soft: #232a31;
+  --text: #edf1ee;
+  --text-2: #b6bfb9;
+  --text-3: #808a82;
+  --green: #8de3ae;
+  --green-2: #5ec488;
+  --amber: #ecc16a;
+  /* Tab 选中标记：Orca 语言＝底部 2px 中性横条（foreground/card 混色），非顶部绿条 */
+  --tab-select-bar: color-mix(in srgb, var(--text) 60%, var(--surface-1));
+  --red: #ef7773;
+  --blue: #82b3f2;
+  --radius: 9px;
+  --radius-sm: 6px;
+  --radius-lg: 12px;
+  /* 字号阶梯：七档，按"这段文字是什么"选，不按"想显得多大"选。
+     多级标题字号相同、页面标题只有一档——层级靠字重、留白与位置，不靠尺度买。 */
+  --fs-micro: 10px;    /* 微标、角标、计数、时间戳。密度下限 */
+  --fs-meta: 11px;     /* 元信息、caption、次级说明 */
+  --fs-body: 12px;     /* 列表行标题、按钮、输入框、菜单项——界面默认 */
+  --fs-prose: 13px;    /* 可读正文：Agent 回合、对话 */
+  --fs-title: 14px;    /* 卡片与对话框标题、区块 header */
+  --fs-display: 20px;  /* 页面级标题，全站唯一一档 */
+  /* 间距刻度：4px 基准，2px 半档给紧凑控件内部。奇数像素不进刻度——
+     "看着差一点就 ±1"的累积在整屏上表现为节奏抖动。 */
+  --sp-1: 2px;
+  --sp-2: 4px;
+  --sp-3: 6px;
+  --sp-4: 8px;   /* 标准间距，默认先试它 */
+  --sp-5: 12px;
+  --sp-6: 16px;
+  --sp-7: 24px;
+  --sp-8: 32px;  /* 空态与页面级留白 */
+  /* 状态色家族：每个语义色派生出「浅文字 / 深底 / 中边框」三件套。
+     它们此前是手调出来的三十多个近似 hex——调一次基色传导不到任何一处。改用 color-mix
+     从基色派生后，调 --red 就等于调整整个危险语汇，且深浅关系不会各自漂移。 */
+  --red-text: color-mix(in srgb, var(--red) 78%, #ffffff);
+  --red-bg: color-mix(in srgb, var(--red) 14%, var(--surface-0));
+  --red-line: color-mix(in srgb, var(--red) 42%, var(--surface-1));
+  --green-text: color-mix(in srgb, var(--green) 82%, #ffffff);
+  --green-bg: color-mix(in srgb, var(--green) 12%, var(--surface-0));
+  --green-line: color-mix(in srgb, var(--green) 38%, var(--surface-1));
+  /* 选中行的 hover：比选中态亮一档，让已经选中的行也能给出悬停反馈。 */
+  --green-bg-hover: color-mix(in srgb, var(--green) 19%, var(--surface-0));
+  --amber-text: color-mix(in srgb, var(--amber) 80%, #ffffff);
+  --amber-bg: color-mix(in srgb, var(--amber) 13%, var(--surface-0));
+  --amber-line: color-mix(in srgb, var(--amber) 40%, var(--surface-1));
+  --amber-bg-hover: color-mix(in srgb, var(--amber) 21%, var(--surface-0));
+  --amber-text-hover: color-mix(in srgb, var(--amber) 62%, #ffffff);
+  /* 叠加：黑色遮罩与白色高光的固定档位。此前散成四十多个 alpha 值，
+     其中大量只差 1/255——那是手抖不是设计。 */
+  --scrim-1: #00000040;
+  --scrim-2: #00000073;
+  --scrim-3: #000000a6;
+  --wash-1: #ffffff08;
+  --wash-2: #ffffff14;
+  --wash-3: #ffffff24;
+  /* 浮层底：菜单、tooltip、预览这类盖在内容之上的面。高不透明度而非全实心，
+     让下层隐约透出以说明层级关系。此前散成 f2/f5/f7 三个只差几个 alpha 的手调值。 */
+  --overlay-surface: color-mix(in srgb, var(--surface-2) 96%, transparent);
+  --overlay-line: color-mix(in srgb, var(--green) 22%, transparent);
+  /* 中性灰阶：--text-3 与 --line 之间的中间层，此前手调出七八个近似值。
+     用途是禁用文字、次级图标、滚动条与终端选区这类既不是正文也不是分隔线的东西。 */
+  --neutral-1: #3b403e;  /* 滚动条轨道、终端选区底 */
+  --neutral-2: #56615b;  /* 禁用态文字、次级图标 */
+  --neutral-3: #747d77;  /* 可读的次级文字，比 --text-3 略沉 */
+  /* 状态色的极淡叠加：hover 高亮、脏标记光晕这类只需要一点色相暗示的地方。 */
+  --red-wash: color-mix(in srgb, var(--red) 12%, transparent);
+  --amber-wash: color-mix(in srgb, var(--amber) 12%, transparent);
+
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* focus：输入聚焦的统一描边色与光晕，收敛散落的硬编码绿边 */
+  --focus-line: #4c6a58;
+  --focus-ring: 0 0 0 2px #83dca61a;
+  --pane-tabbar-height: 31px;
+  /* elevation：阴影梯度让表面浮起来 */
+  --elev-1: 0 1px 2px #00000045;
+  --elev-2: 0 6px 18px #0000005a;
+  --elev-3: 0 16px 44px #00000070;
+  /* highlight：顶部内高光模拟受光面，是"高级感"的关键细节 */
+  --hl: inset 0 1px 0 #ffffff0c;
+  --hl-strong: inset 0 1px 0 #ffffff14;
+  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  background: var(--bg);
+  color: var(--text);
+}

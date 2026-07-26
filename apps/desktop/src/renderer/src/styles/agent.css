@@ -1,0 +1,306 @@
+/**
+ * Agent 表面：会话外壳、Composer、Provider 选择。
+ *
+ * 按表面分文件（见 docs/design/agentmux-surface-density.md「样式表的组织」）。
+ * 层叠顺序即 index.css 里的 @import 顺序，不靠特异性打架决定胜负。
+ */
+
+/* The window-wide agent rollup spans the full width under both the rail and the main surface, so it
+   reads as a property of the window rather than of any one pane. */
+.agent-status-bar { grid-column: 1 / -1; }
+/* 身份看图标、状态看边框：18px 的方块里坐一枚 12px Provider 图标，边框取该状态的颜色。
+   头像不是文字，把 .status 从父类继承来的 gap/字号/大小写清掉。 */
+.agent-avatar {
+  width: 18px; height: 18px; padding: 0; gap: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--status-ink); border-radius: var(--radius-sm);
+  background: var(--surface-2); color: var(--text-2);
+  cursor: pointer;
+  transition: transform .12s ease, background .12s ease, box-shadow .12s ease;
+}
+/* macOS 导航栏那种轻量抬升：起来一点、底色提一档，不放大到挤动同排的其它头像。 */
+.agent-avatar:hover { transform: translateY(-1px); background: var(--surface-3); box-shadow: var(--elev-1); }
+.agent-avatar:active { transform: translateY(0); }
+/* 需要你处理的那一枚要在一簇里先被看到：给状态色一圈晕，形状不变。 */
+.agent-avatar[data-attention="needs-you"] { box-shadow: 0 0 0 2px var(--amber-wash); }
+.agent-avatar[data-attention="error"] { box-shadow: 0 0 0 2px var(--red-wash); }
+
+.agent-surface { height: 100%; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; background: var(--surface-0); }
+.agent-provider-mark {
+  width: 17px;
+  height: 17px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--green);
+}
+.agent-provider-icon { display: inline-flex; flex: none; align-items: center; justify-content: center; color: currentColor; line-height: 0; }
+.agent-provider-icon > svg, .agent-provider-icon > img { width: 100%; height: 100%; display: block; object-fit: contain; }
+.agent-provider-icon > img { border-radius: 3px; }
+.agent-body { min-height: 0; overflow: hidden; }
+.agent-terminal-stage { position: relative; width: 100%; height: 100%; overflow: hidden; }
+/* Window-wide agent attention rollup. Permanent chrome, so the working dot never pulses here — a
+   count states the fact and a pulsing dot would compete with the terminal. Colour appears only when
+   a count crosses zero; until then every dot is the neutral grey of a bare .status. */
+.agent-status-bar {
+  height: 24px;
+  display: flex;
+  align-items: center;
+  gap:var(--sp-5);
+  padding:0 var(--sp-5);
+  background: var(--surface-1);
+  border-top: 1px solid var(--line-soft);
+  box-shadow: var(--hl);
+  font-size: var(--fs-meta);
+  font-variant-numeric: tabular-nums;
+}
+.agent-status-bar__segment {
+  display: inline-flex;
+  align-items: center;
+  gap:var(--sp-2);
+  border: 0;
+  padding:0;
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+.agent-status-bar__segment--action { cursor: pointer; border-radius: var(--radius-sm); }
+.agent-status-bar__segment--action:hover { color: var(--text-2); }
+
+/* The roster: the enumerable half of the attention bar's total. Surface fill + elevation + a top
+   highlight carry the layer, no stroke — the same base the context menus use. Collapsed it costs
+   nothing: the trigger IS the count segment that was already on the bar. */
+.agent-roster__trigger { gap:var(--sp-2); }
+.agent-roster__trigger > svg { color: var(--text-3); }
+.agent-roster {
+  min-width: 268px;
+  max-width: 420px;
+  max-height: 340px;
+  padding:var(--sp-2);
+  display: flex;
+  flex-direction: column;
+  gap:var(--sp-1);
+  border-radius: var(--radius);
+  color: var(--text-2);
+  background:
+    radial-gradient(120% 90% at 100% 0, var(--overlay-line) 0, transparent 52%),
+    var(--overlay-surface);
+  box-shadow: var(--elev-2), var(--hl-strong), 0 0 0 1px var(--scrim-2);
+  overflow: hidden;
+  transform-origin: var(--radix-popper-transform-origin, 50% 100%);
+}
+/* Scoped to the open state deliberately — an unscoped entry animation makes Radix Presence wait for an
+   animationend that a close never fires, and the node never unmounts. See presence-exit-animation.test.ts. */
+.agent-roster[data-state='open'] { animation: menu-in 120ms cubic-bezier(.16, 1, .3, 1); }
+.agent-roster__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap:var(--sp-4);
+  padding:var(--sp-1) var(--sp-4) var(--sp-2);
+  color: var(--text-3);
+  font-size: var(--fs-micro);
+  font-weight: 620;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.agent-roster__heading-count { font-variant-numeric: tabular-nums; letter-spacing: 0; }
+.agent-roster__list { min-height: 0; display: flex; flex-direction: column; gap:var(--sp-1); overflow-y: auto; }
+.agent-roster__row {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: center;
+  gap:var(--sp-4);
+  padding:var(--sp-2) var(--sp-4);
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  outline: 0;
+}
+.agent-roster__row[data-highlighted], .agent-roster__row:hover { color: var(--text); background: var(--surface-2); }
+.agent-roster__identity { min-width: 0; display: flex; flex-direction: column; gap:1px; }
+.agent-roster__identity strong {
+  overflow: hidden;
+  font-size: var(--fs-meta);
+  font-weight: 560;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* What this Agent was authorized to do at spawn. Muted by default; the tier only colours the text when
+   the Provider declared one, so an undeclared risk stays visually undeclared too. */
+.agent-roster__scope {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap:var(--sp-1);
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: var(--fs-micro);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-roster__scope[data-tier='caution'] { color: var(--amber); }
+.agent-roster__scope[data-tier='danger'] { color: var(--red-text); }
+.agent-roster__pending {
+  padding:1px var(--sp-2);
+  border-radius: var(--radius-sm);
+  color: var(--surface-0);
+  background: var(--amber);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+}
+.agent-status-bar__count { color: var(--text-2); }
+.agent-status-bar .status { gap:0; }
+/* Permanent chrome: no pulse. The count carries the fact; a pulsing dot would fight the terminal. */
+.agent-status-bar .status--working .status__dot { animation: none; }
+/* Flat by contract: no resting stroke — Surface luminance, the tool actions and the focus ring carry
+   hierarchy (surface-density.md), so the Composer reads as part of its Region, not a box floating on it.
+   Margin is uniform 6px top/bottom and 8px sides, the same inset the approval card above it uses, so the
+   whole input stack sits at one consistent gap from the Region edge instead of a ring of whitespace. */
+.composer { margin:var(--sp-3) var(--sp-4); overflow: hidden; border-radius: var(--radius); background: transparent; box-shadow: none; }
+/* Focus stays clearly visible without a resting border: the --focus-ring glow plus a 1px inset line in
+   --focus-line take over the boundary the removed stroke used to draw only while focused. */
+.composer:focus-within { box-shadow: var(--focus-ring), inset 0 0 0 1px var(--focus-line); }
+.composer textarea { width: 100%; min-height: 34px; max-height: 132px; field-sizing: content; display: block; resize: none; padding:var(--sp-4) var(--sp-5) var(--sp-1); border: 0; outline: 0; color: var(--text); background: transparent; font-size: var(--fs-meta); line-height: 1.45; }
+.composer textarea::placeholder { color: var(--neutral-2); }
+.composer textarea:disabled { color: var(--text-3); cursor: not-allowed; }
+.composer__toolbar { display: flex; justify-content: space-between; padding:var(--sp-1) var(--sp-2) var(--sp-2); }
+.composer__toolbar > div { min-width: 0; display: flex; gap:var(--sp-1); }
+.composer-tool { max-width: 180px; display: flex; align-items: center; gap:var(--sp-2); padding:var(--sp-2) var(--sp-3); overflow: hidden; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font-size: var(--fs-micro); cursor: pointer; white-space: nowrap; }
+.composer-tool:hover:not(:disabled) { color: var(--text); background: var(--surface-3); }
+.composer-tool--danger:hover:not(:disabled) { color: var(--red); }
+.composer-send { display: flex; align-items: center; gap:var(--sp-2); padding:var(--sp-2) var(--sp-4); border: 0; border-radius: var(--radius-sm); color: var(--bg); background: linear-gradient(180deg, var(--green), var(--green-2)); font-size: var(--fs-micro); font-weight: 620; box-shadow: var(--hl-strong); cursor: pointer; transition: background .12s ease; }
+.composer-send:hover:not(:disabled) { background: linear-gradient(180deg, var(--green-text), var(--green)); }
+.composer-send:active:not(:disabled) { box-shadow: inset 0 1px 3px var(--scrim-1); }
+.composer-send:disabled { opacity: .35; cursor: default; }
+.composer-send--working { color: var(--red-text); background: var(--red-bg); border: 1px solid var(--red-line); box-shadow: none; }
+.composer-send--working:hover:not(:disabled) { color: var(--red-text); background: var(--red-bg); }
+.agent-input-stack { min-width: 0; background: transparent; }
+/* The request is an interruption, so it earns weight from surface fill + elevation and an amber STATUS
+   icon — not from a permanent coloured rail (accent expresses state, not decoration) and not from an
+   outline (a stroke here would compete with the composer directly beneath it). */
+.agent-interaction {
+  margin:var(--sp-3) var(--sp-4) 0;
+  padding:var(--sp-4);
+  border-radius: var(--radius);
+  background: var(--surface-1);
+  box-shadow: var(--elev-2), var(--hl);
+}
+.agent-interaction__heading { display: flex; align-items: flex-start; gap:var(--sp-4); color: var(--amber); }
+.agent-interaction__heading > div { min-width: 0; display: grid; gap:var(--sp-1); }
+.agent-interaction__heading strong { color: var(--text); font-size: var(--fs-body); line-height: 1.35; }
+.agent-interaction__heading span { color: var(--text-2); font-size: var(--fs-meta); }
+.agent-interaction pre { max-height: 84px; margin:var(--sp-4) 0 0; padding:var(--sp-3) var(--sp-4); overflow: auto; border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-0); font: 11px/1.45 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-interaction__options { display: grid; gap:var(--sp-2); margin-top:var(--sp-4); }
+.agent-interaction__options button { display: grid; gap:var(--sp-1); padding:var(--sp-3) var(--sp-4); text-align: left; }
+.agent-interaction__options small { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.4; }
+.agent-interaction__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap:var(--sp-3); margin-top:var(--sp-4); }
+/* Every action is the same button: one height, one padding, icon and label centred on a shared axis —
+   so a row of mixed icon and text-only actions lines up instead of stepping. */
+.agent-interaction button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap:var(--sp-2);
+  min-height: 26px;
+  padding:0 var(--sp-4);
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  background: var(--surface-2);
+  box-shadow: var(--hl);
+  font-size: var(--fs-meta);
+  font-weight: 450;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 90ms ease, background 90ms ease;
+}
+.agent-interaction__options button { justify-content: start; min-height: 0; padding:var(--sp-3) var(--sp-4); line-height: 1.4; }
+.agent-interaction button > svg { flex: 0 0 auto; }
+.agent-interaction button:hover:not(:disabled) { color: var(--text); background: var(--surface-3); }
+/* The one affirmative action carries the solid brand fill; everything else stays secondary. */
+.agent-interaction button.is-primary { color: var(--bg); background: var(--green); box-shadow: var(--hl-strong); }
+.agent-interaction button.is-primary:hover:not(:disabled) { color: var(--bg); background: color-mix(in srgb, var(--green) 88%, #ffffff); }
+.agent-interaction button:disabled { opacity: .45; cursor: default; }
+/* Dismissing is an exit, not a verdict on the tool: it sits on the far side of the row and stays
+   ghost-weight so the actual decision keeps the emphasis. */
+.agent-interaction__dismiss { margin-right:auto; color: var(--text-3); background: none; box-shadow: none; }
+.agent-interaction__dismiss:hover:not(:disabled) { color: var(--text-2); background: var(--surface-2); }
+/* When a provider offers more than one affirmative (allow-once + allow-always), the affirmatives adopt
+   the CLI's own vertical numbered rhythm: full-width, left-aligned rows carrying a tier dot + label +
+   scope description. This mirrors .agent-interaction__options and keeps the compact row for the 1-allow case. */
+.agent-interaction__grants { display: grid; gap:var(--sp-2); margin-top:var(--sp-4); }
+.agent-interaction__grants button {
+  justify-content: start;
+  min-height: 34px;
+  padding:var(--sp-4) var(--sp-4);
+  gap:var(--sp-4);
+  line-height: 1.4;
+  text-align: left;
+}
+.agent-interaction__grant-text { min-width: 0; display: grid; gap:var(--sp-1); }
+.agent-interaction__grant-text small { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.4; }
+.agent-interaction button.is-primary .agent-interaction__grant-text small { color: var(--scrim-3); }
+/* Risk state, encoded as a restrained 6px dot — the only accent, and never a rail or a border. */
+.agent-interaction__tier { flex: 0 0 auto; width: 6px; height: 6px; margin-top:var(--sp-2); border-radius: 50%; background: var(--text-3); }
+.agent-interaction__tier--safe { background: var(--green); }
+.agent-interaction__tier--caution { background: var(--amber); }
+.agent-interaction__tier--danger { background: var(--red); }
+.agent-catalog { margin:var(--sp-6) auto var(--sp-5); }
+.agent-catalog__group + .agent-catalog__group { margin-top:var(--sp-3); padding-top:var(--sp-4); border-top: 1px solid var(--line-soft); }
+.agent-catalog__label { height: 22px; display: flex; align-items: center; justify-content: space-between; padding:0 var(--sp-2) var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); font-weight: 650; letter-spacing: .07em; text-transform: uppercase; }
+.agent-catalog__label > span { min-width: 0; display: flex; align-items: center; gap:var(--sp-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-catalog__label em { padding:1px var(--sp-2); border-radius: var(--radius-sm); color: var(--text-3); background: var(--wash-1); font-size: var(--fs-micro); font-style: normal; letter-spacing: 0; }
+.agent-catalog__label-actions { display: flex; align-items: center; gap:var(--sp-3); }
+.agent-catalog__more-btn { display: inline-flex; align-items: center; gap:var(--sp-1); padding:var(--sp-1) var(--sp-3); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font-size: var(--fs-micro); font-weight: 500; cursor: pointer; transition: color 120ms ease, background 120ms ease; }
+.agent-catalog__more-btn:hover, .agent-catalog__more-btn--active { color: var(--text); background: var(--surface-2); }
+.agent-catalog__ready-dot { width: 5px; height: 5px; flex: none; border-radius: 50%; background: var(--green-2); box-shadow: 0 0 0 2px var(--overlay-line); }
+.agent-picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap:var(--sp-3); }
+.agent-pick { position: relative; min-width: 0; min-height: 46px; display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap:var(--sp-4); padding:var(--sp-3) var(--sp-4); border: 0; border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-1); font-size: var(--fs-micro); text-align: left; cursor: pointer; transition: background 140ms ease, color 140ms ease; }
+.agent-pick:hover { color: var(--text); background: var(--surface-2); }
+.agent-pick__icon { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-2); transition: background 140ms ease, color 140ms ease; }
+.agent-pick__copy { min-width: 0; display: flex; flex-direction: column; gap:var(--sp-1); }
+.agent-pick__copy strong, .agent-pick__copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-pick__copy strong { color: inherit; font-size: var(--fs-body); font-weight: 600; }
+.agent-pick__copy small { color: var(--text-3); font-size: var(--fs-micro); }
+.agent-pick__check { width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; color: var(--green); background: rgba(84, 188, 123, 0.16); }
+.agent-pick--selected, .agent-pick--selected:hover { color: var(--text); background: rgba(255, 255, 255, 0.08); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2); }
+.agent-pick--selected::before { content: ''; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; border-radius: 0 2px 2px 0; background: var(--green-2); }
+.agent-pick--selected .agent-pick__icon { color: var(--text); background: rgba(255, 255, 255, 0.08); }
+.agent-pick--unavailable { color: var(--neutral-3); background: var(--surface-0); cursor: default; opacity: .62; }
+.agent-pick--unavailable .agent-pick__icon { color: var(--neutral-3); filter: grayscale(1); }
+.agent-catalog__empty { padding:var(--sp-4) var(--sp-3); color: var(--text-3); font-size: var(--fs-micro); }
+.agent-catalog__empty--action { grid-column: 1 / -1; display: flex; flex-direction: column; align-items: flex-start; gap:var(--sp-3); padding:var(--sp-5); border: 1px dashed var(--line); border-radius: var(--radius-sm); background: var(--surface-0); }
+.agent-catalog__empty--action strong { color: var(--text-2); font-size: var(--fs-body); font-weight: 600; }
+.agent-catalog__empty--action small { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.45; }
+.agent-catalog__empty--action .small-button { margin-top:var(--sp-1); }
+.agent-pick--action { grid-template-columns: 28px minmax(0, 1fr) 16px; }
+.agent-pick--action:disabled { opacity: .5; cursor: default; }
+.agent-pick__go { width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-3); transition: color 120ms ease, transform 120ms ease; }
+.agent-pick--action:hover:not(:disabled) .agent-pick__go { color: var(--green); transform: translateX(1px); }
+.agent-settings-list, .host-settings-list { display: grid; gap:var(--sp-4); }
+.agent-settings-list { padding:var(--sp-4); }
+.agent-settings-card { border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-1); }
+.agent-settings-card > summary { min-height: 48px; display: grid; grid-template-columns: 25px minmax(0, 1fr) auto 16px; align-items: center; gap:var(--sp-4); padding:var(--sp-3) var(--sp-4); list-style: none; cursor: pointer; }
+.agent-settings-card > summary::-webkit-details-marker, .host-edit-disclosure > summary::-webkit-details-marker { display: none; }
+.agent-settings-card > summary > span:nth-child(2) { min-width: 0; display: flex; flex-direction: column; gap:var(--sp-1); }
+.agent-settings-card > summary strong { font-size: var(--fs-micro); }
+.agent-settings-card > summary small { overflow: hidden; color: var(--text-3); font-size: var(--fs-micro); font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+.agent-settings-card[open] .settings-disclosure-icon, .host-edit-disclosure[open] > summary svg { transform: rotate(180deg); }
+.agent-settings-fields { display: grid; grid-template-columns: 1fr 1fr; gap:var(--sp-4); padding:var(--sp-5); border-top: 1px solid var(--line-soft); }
+.agent-settings-fields label, .host-edit-grid label, .workspace-composer label { display: grid; gap:var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); }
+.agent-settings-fields label:first-child, .agent-settings-fields .settings-inline-error { grid-column: 1 / -1; }
+.agent-settings-fields .agent-guide-toggle { grid-column: 1 / -1; display: flex; grid-template-columns: none; align-items: flex-start; gap:var(--sp-4); padding:var(--sp-4) var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-0); cursor: pointer; }
+.agent-settings-fields .agent-guide-toggle input { flex: 0 0 auto; width: 14px; height: 14px; margin:1px 0 0; padding:0; border: 0; background: none; accent-color: var(--green); }
+.agent-settings-fields .agent-guide-toggle > span { display: grid; justify-content: normal; gap:var(--sp-1); }
+.agent-settings-fields .agent-guide-toggle strong { color: var(--text); font-size: var(--fs-meta); font-weight: 600; }
+.agent-settings-fields label > span, .host-edit-grid label > span, .workspace-composer label > span { display: flex; justify-content: space-between; }
+.agent-settings-fields label small, .host-edit-grid label small { color: var(--text-3); font-size: var(--fs-micro); font-weight: 400; }
+.agent-settings-fields input, .agent-settings-fields textarea, .host-edit-grid input, .workspace-composer input, .workspace-composer select { width: 100%; padding:var(--sp-3) var(--sp-4); resize: vertical; border: 1px solid var(--line); border-radius: var(--radius-sm); outline: none; color: var(--text); background: var(--bg); font: 11px/1.5 "SFMono-Regular", monospace; }
+.agent-settings-fields input:focus, .agent-settings-fields textarea:focus, .host-edit-grid input:focus, .workspace-composer input:focus, .workspace-composer select:focus { border-color: var(--focus-line); box-shadow: var(--focus-ring); }

@@ -217,18 +217,22 @@
 
 ## 样式表的组织
 
-一个 2464 行的 `styles.css` 不是"文件大"的问题，是**找不到东西**的问题：改 Topic 行要先 grep 出
+一个 2551 行的 `styles.css` 不是"文件大"的问题，是**找不到东西**的问题：改 Topic 行要先 grep 出
 它散在哪几段，改完不知道有没有漏。样式按**表面**分文件，与组件目录同构：
 
 ```
 styles/
+  index.css       入口：@import 的顺序即层叠顺序
   tokens.css      唯一的 :root——颜色、字号、间距、圆角、阴影、动效
-  base.css        reset、html/body、滚动条、共享原子（.icon-button/.small-button/.eyebrow）
+  base.css        reset、html/body、滚动条、共享原子（.icon-button/.small-button/.eyebrow/.status）
   chrome.css      Titlebar、Project Rail、Tabbar、Attention Bar
   dock.css        Tool Dock 及其面板（Explorer、Topics、Branches、Agents）
   workbench.css   Pane、Region、分屏、拖放
+  terminal.css    终端表面与它的状态覆盖层
   surfaces.css    Board、Settings、New Tab、Launch、Welcome
-  agent.css       Activity、Composer、Markdown 回合、Roster
+  browser.css     Browser 工具与地址栏
+  agent.css       Composer、Markdown 回合、Roster
+  activity.css    Activity 时间线与标尺
   overlays.css    Dialog、Context Menu、Quick Switch、Tooltip
 ```
 
@@ -239,6 +243,10 @@ styles/
   它的全部规则，而不是在三个文件间来回跳。
 - 入口按上述顺序 `@import`，层叠顺序即文件顺序；不依赖选择器特异性打架来决定胜负。
 - 单文件超过 400 行时按表面继续拆，不靠注释分节假装分层。
+- **没有孤儿文件**：每个 `.css` 都要在 `index.css` 里 `@import`。一个没进入口的样式文件是死文件——
+  规则永不生效，而契约测试会照常扫描它并放行。
+- 契约测试读的是**整张表**（`test/helpers/styles.ts` 按 `@import` 顺序拼接），不硬编码单个文件路径；
+  否则下一次再拆一刀，它们会扫到空内容却全绿。守护：`stylesheet-organisation.test.ts`。
 
 ## 非目标
 
