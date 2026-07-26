@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { AGENTMUX_CONTROL_ERROR_CODES } from '@agentmux/core/control'
 import type { DesktopControlResponse } from '../src/shared/contracts.js'
 import {
   addressingRecovery,
@@ -219,6 +220,88 @@ describe('寻址失败自带下一步命令，而不只是候选清单', () => {
       expect(recovery).toContain('agentmux list sessions')
       expect(recovery).not.toContain('agentmux list agents')
     }
+  })
+
+  it('每个控制错误码都被显式分类过，新增码不能默默落进"没有下一步"', () => {
+    // 本模块自称是"哪些码算寻址失败"的唯一权威。但 `return null` 兜底意味着：有人在 Core 加一个
+    // 新的寻址失败码，这里什么都不做也照样绿——权威悄悄失守，而漂移那天没有测试会红。
+    // 本轮实测就撞到了：AMBIGUOUS_REGION_TARGET / AMBIGUOUS_TAB_TARGET / CALLER_NOT_OPEN
+    // 三个码抛在同一条 send/inspect 解析路径上（lib/control.ts:133-163），却都落进了兜底。
+    //
+    // 所以这条不断言"某某码有恢复"，而是断言**每个码都被想过**：要么在 WITH_RECOVERY 里，
+    // 要么在 DELIBERATELY_SILENT 里。加了新码而两边都没列，这条就红——它逼人做一次选择，
+    // 而不是让沉默成为默认值。
+    const WITH_RECOVERY = new Set([
+      'MESSAGE_TARGET_NOT_UNIQUE',
+      'MESSAGE_TARGET_NOT_AGENT',
+      'UNKNOWN_AGENT_SESSION',
+      'TAB_NOT_OPEN',
+      'REGION_NOT_OPEN',
+      'AMBIGUOUS_TAB_TARGET',
+      'AMBIGUOUS_REGION_TARGET',
+      'CALLER_NOT_OPEN'
+    ])
+    // 这些不是寻址失败：传输层、生命周期、启动配置等。它们的原始 message 已经说清了原因，
+    // 硬塞一句"下一步"只会盖住它。
+    //
+    // 必须**逐个列出**，不能写成 `CODES.filter(c => !WITH_RECOVERY.has(c))`。那样写是个恒等式：
+    // 新码会被自动吸收进这一侧，下面的加法永远成立，这条测试就永远绿。本轮初版正是这么写的，
+    // 变异（往码表塞一个没分类的码）照样通过——守卫自己成了假绿的第七种形态。
+    const DELIBERATELY_SILENT = [
+      'INVALID_CONTROL_REQUEST',
+      'CONTROL_PROTOCOL_ERROR',
+      'CONTROL_TIMEOUT',
+      'CONTROL_UNAVAILABLE',
+      'CONTROL_OWNER_BUSY',
+      'CONTROL_FAILED',
+      'CONTROL_CANCELLED',
+      'CONTROL_REQUEST_CONFLICT',
+      'CONTROL_OWNER_LOST',
+      'AGENT_EXECUTOR_NOT_CONFIGURED',
+      'SESSION_CLOSING',
+      'SESSION_NOT_RUNNING',
+      'UNKNOWN_WORKSPACE',
+      'REGION_WORKSPACE_MISMATCH',
+      'REGION_TOPIC_MISMATCH',
+      'LAUNCH_RESULT_MISMATCH',
+      'LAUNCH_CLEANUP_FAILED',
+      'LAYOUT_CAPACITY_EXCEEDED',
+      'LAUNCHER_REGION_REQUIRED',
+      'AGENT_NOT_FOUND',
+      'INVALID_AGENT_PROMPT',
+      'AGENT_SESSION_STILL_RUNNING',
+      'AGENT_RESUME_UNAVAILABLE',
+      'AGENT_RESUME_UNSUPPORTED',
+      'STALE_AGENT_SESSION',
+      'STALE_AGENT_SESSION_BINDING',
+      'CTXMUX_DISCONNECTED',
+      'CTXMUX_INPUT_CURSOR_MISSING',
+      'SIGNAL_UNSUPPORTED'
+    ]
+
+    for (const code of AGENTMUX_CONTROL_ERROR_CODES) {
+      const recovery = addressingRecovery({
+        code,
+        candidates: [{ agentSessionId: 'agent-a', regionIds: ['region:1'] }]
+      })
+      if (WITH_RECOVERY.has(code)) {
+        expect(recovery, `${code} 该有下一步，却是 null`).not.toBeNull()
+        assertEveryCommandRunnable(recovery!, code)
+      } else {
+        expect(recovery, `${code} 不该有下一步，却给了一句：${recovery}`).toBeNull()
+      }
+    }
+    // 防这条自己假绿：两份名单合起来必须与码表**逐个相等**。比个数不够——一个新码顶掉一个
+    // 被删的码，个数照样对得上。所以两个方向都要查：码表里有而两边都没列的（新码没分类），
+    // 以及名单里有而码表里没有的（臆造码，会把个数凑平）。
+    const classified = new Set([...WITH_RECOVERY, ...DELIBERATELY_SILENT])
+    const unclassified = AGENTMUX_CONTROL_ERROR_CODES.filter((code) => !classified.has(code))
+    expect(unclassified, `这些码没被分类，请在 WITH_RECOVERY 或 DELIBERATELY_SILENT 里做个决定：\n${unclassified.join('\n')}`).toEqual([])
+    const invented = [...classified].filter((code) => !(AGENTMUX_CONTROL_ERROR_CODES as readonly string[]).includes(code))
+    expect(invented, `这些码不在 Core 码表里，删掉：\n${invented.join('\n')}`).toEqual([])
+    // 两边都非空，否则"全给恢复"或"全不给"也能满足上面两条。
+    expect(WITH_RECOVERY.size).toBeGreaterThan(0)
+    expect(DELIBERATELY_SILENT.length).toBeGreaterThan(0)
   })
 
   it('不是寻址失败的码返回 null，而不是一句放之四海的"再试一次"', () => {
