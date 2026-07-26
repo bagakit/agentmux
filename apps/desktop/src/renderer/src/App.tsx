@@ -16,6 +16,7 @@ import { AgentStatusBar } from './components/AgentStatusBar'
 import { ProjectRailToolbar } from './components/ProjectRailToolbar'
 import { QuickSwitcher } from './components/QuickSwitcher'
 import { isQuickSwitchShortcut } from './lib/quick-switch-shortcut'
+import { handleWorkbenchShortcut } from './lib/workbench-shortcuts'
 import { SurfaceSwitch, TopRowLeadingChrome } from './components/TopRowChrome'
 import { WorkspaceBoard } from './components/WorkspaceBoard'
 import { WorkspaceSidebar } from './components/WorkspaceSidebar'
@@ -101,6 +102,22 @@ export function App() {
       if (!isQuickSwitchShortcut(event, isMac)) return
       event.preventDefault()
       setQuickSwitchOpen((current) => !current)
+    }
+    window.addEventListener('keydown', onKeyDown, { capture: true })
+    return () => window.removeEventListener('keydown', onKeyDown, { capture: true })
+  }, [])
+
+  // Keyboard reach for the split/tab actions that otherwise need the mouse: close the focused Region,
+  // jump to a Tab by ordinal, split, and move focus between Regions. Registered at the window like the
+  // quick switcher so it wins before the focused xterm swallows the chord. The whole decision —
+  // classify the chord, project the same Topic-filtered layout the Workbench renders, resolve the
+  // target, and dispatch — lives in the pure handleWorkbenchShortcut, read against a fresh Store
+  // snapshot; this listener only forwards and consumes. A chord it handles is always consumed
+  // (preventDefault), so Cmd+W does not fall through to closing the window.
+  useEffect(() => {
+    const isMac = navigator.userAgent.includes('Mac')
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (handleWorkbenchShortcut(event, isMac, useAppStore.getState())) event.preventDefault()
     }
     window.addEventListener('keydown', onKeyDown, { capture: true })
     return () => window.removeEventListener('keydown', onKeyDown, { capture: true })
