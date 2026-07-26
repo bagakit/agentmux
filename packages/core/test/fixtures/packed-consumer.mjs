@@ -1518,78 +1518,6 @@ await concurrentContender.dispose()
 await concurrentOwner.stopAgent(concurrent.agentSessionId, concurrent.run)
 await concurrentOwner.dispose()
 
-const promptBeforeAckCrashWorker = spawnOwned(process.execPath, [promptCrashFixture], {
-  cwd: process.cwd(),
-  stdio: ['ignore', 'pipe', 'pipe'],
-  env: {
-    ...process.env,
-    AGENTMUX_FAKE_CODEX: fakeCodex,
-    AGENTMUX_PROMPT_CRASH_POINT: 'before-store-ack'
-  }
-})
-const promptBeforeAckCrashCheckpoint = await firstJsonLine(
-  promptBeforeAckCrashWorker,
-  'prompt before-ack crash worker'
-)
-assert.equal(
-  promptBeforeAckCrashCheckpoint.type,
-  'prompt-payload-applied-before-store-ack'
-)
-assert.deepEqual(promptBeforeAckCrashCheckpoint.payloadRange, {
-  startByte: 6,
-  endByte: 6 + Buffer.byteLength('crash-between-phases')
-})
-const [promptBeforeAckCrashCode] = await once(promptBeforeAckCrashWorker, 'exit')
-assert.equal(promptBeforeAckCrashCode, 92)
-
-const promptBeforeAckRecovered = await connectLocalAgentMux()
-const promptBeforeAckRecoveredEvents = []
-promptBeforeAckRecovered.onEvent((event) => promptBeforeAckRecoveredEvents.push(event))
-const promptBeforeAckRecoveredAttachment = await promptBeforeAckRecovered.reattachAgent(
-  promptBeforeAckCrashCheckpoint.agentSessionId,
-  0
-)
-const promptBeforeAckSubmission = promptBeforeAckRecovered.agentSession(
-  promptBeforeAckCrashCheckpoint.agentSessionId
-).terminalPromptSubmission
-assert.equal(promptBeforeAckSubmission?.payload.acknowledged, false)
-assert.equal(
-  (await promptBeforeAckRecovered.statusAgent(
-    promptBeforeAckCrashCheckpoint.agentSessionId
-  )).run.acceptedInputBytes,
-  promptBeforeAckCrashCheckpoint.payloadRange.endByte
-)
-await promptBeforeAckRecovered.submitAgentPrompt({
-  agentSessionId: promptBeforeAckCrashCheckpoint.agentSessionId,
-  operationId: promptBeforeAckCrashCheckpoint.operationId,
-  prompt: 'crash-between-phases'
-})
-await waitFor('before-ack crash-recovered prompt submit phase', () => (
-  output(promptBeforeAckRecoveredEvents, promptBeforeAckCrashCheckpoint.runId)
-    .includes('codex-submit:crash-between-phases:accepted')
-))
-const promptBeforeAckRecoveryOutput = promptBeforeAckRecoveredAttachment.attachment.replay
-  .map((event) => event.data).join('') +
-  output(promptBeforeAckRecoveredEvents, promptBeforeAckCrashCheckpoint.runId)
-assert.equal(
-  promptBeforeAckRecoveryOutput.match(/codex-composer-rendered:20/gu)?.length ?? 0,
-  1
-)
-assert.equal(
-  promptBeforeAckRecoveryOutput.match(/codex-submit:crash-between-phases:accepted/gu)?.length ?? 0,
-  1
-)
-assert.equal(
-  promptBeforeAckRecovered.agentSession(promptBeforeAckCrashCheckpoint.agentSessionId)
-    .terminalPromptSubmission?.payload.acknowledged,
-  true
-)
-await promptBeforeAckRecovered.stopAgent(
-  promptBeforeAckCrashCheckpoint.agentSessionId,
-  { runId: promptBeforeAckCrashCheckpoint.runId }
-)
-await promptBeforeAckRecovered.dispose()
-
 const promptCrashWorker = spawnOwned(process.execPath, [promptCrashFixture], {
   cwd: process.cwd(),
   stdio: ['ignore', 'pipe', 'pipe'],
@@ -1631,9 +1559,14 @@ await promptRecovered.submitAgentPrompt({
   operationId: promptCrashCheckpoint.operationId,
   prompt: 'crash-between-phases'
 })
+// 崩在 CAS 落盘之后，所以 submit 字节早在崩溃前就投给 ctxmux 了——那行 accepted 落在 replay 里，
+// 重连后的事件流不会再出一次。只看新事件必然空等到超时，得和 1566 一样把 replay 一起算进来。
+// 这条同时守住「不重发」：幂等重放若真的二次投递，下面 accepted 的计数就会变成 2。
 await waitFor('crash-recovered prompt submit phase', () => (
-  output(promptRecoveredEvents, promptCrashCheckpoint.runId)
-    .includes('codex-submit:crash-between-phases:accepted')
+  (
+    promptRecoveredAttachment.attachment.replay.map((event) => event.data).join('') +
+    output(promptRecoveredEvents, promptCrashCheckpoint.runId)
+  ).includes('codex-submit:crash-between-phases:accepted')
 ))
 const promptRecoveryOutput = promptRecoveredAttachment.attachment.replay
   .map((event) => event.data).join('') + output(promptRecoveredEvents, promptCrashCheckpoint.runId)
@@ -1692,7 +1625,10 @@ const promptSubmitBeforeAckRecoveredAttachment = await promptSubmitBeforeAckReco
 const promptSubmitBeforeAckSubmission = promptSubmitBeforeAckRecovered.agentSession(
   promptSubmitBeforeAckCrashCheckpoint.agentSessionId
 ).terminalPromptSubmission
-assert.equal(promptSubmitBeforeAckSubmission?.payload.acknowledged, true)
+// 崩在那唯一一次 CAS 之前，所以两个受据都还没落盘。payload 受据不再单独整写一次 CAS
+// （client.ts:2776-2781 提前 return，随 submit 受据一次落盘），「payload 已 ack、submit 还没」
+// 这个中间持久态已不存在——恢复端只能从 ctxmux 的 acceptedInputBytes 重推，就是下面那条。
+assert.equal(promptSubmitBeforeAckSubmission?.payload.acknowledged, false)
 assert.equal(promptSubmitBeforeAckSubmission?.submit.acknowledged, false)
 assert.equal(
   (await promptSubmitBeforeAckRecovered.statusAgent(
