@@ -505,7 +505,30 @@ export class AgentMuxClient {
           // 爆炸半径收敛到单个 session。这个 catch 存在的唯一理由：外层 catch 会
           // `kernel.disconnect()`，所以一条慢探测冒到这里就会拆掉整条连接，把所有健康的 Agent
           // 一起带走。降级的那一类必须在这里就被吃掉——只有它，中止的那一类照旧往外抛。
-          await this.ensureTerminalHandshakeOrDegrade(session, run)
+          try {
+            await this.ensureTerminalHandshakeOrDegrade(session, run)
+          } catch (error) {
+            // A Run that vanished during this Session's handshake is a real failure for this exact
+            // Agent, but it is not a failure of the shared CtxMux connection. Keep the other Sessions
+            // attachable and make the scoped failure visible to the renderer. Unknown errors and Store
+            // invariant failures still escape to the outer guard, which tears down the connection
+            // rather than guessing that an unclassified condition is harmless.
+            if (
+              !(error instanceof AgentMuxError) ||
+              error.code !== AGENT_TERMINAL_HANDSHAKE_FAILED
+            ) throw error
+            this.publisher.publish({
+              type: 'agent-error',
+              agentSessionId: session.agentSessionId,
+              code: error.code,
+              message: error.message,
+              evidence: {
+                source: 'run-process',
+                observedAt: Date.now(),
+                run: { ...session.run }
+              }
+            })
+          }
         }
       }
       await this.recoverPendingInteractionResponses(runs)
@@ -2076,10 +2099,16 @@ export class AgentMuxClient {
       // exited state; callers must not leak a transport-specific `run_not_found` through the
       // handshake contract or accidentally treat a missing Run as a healthy degraded Agent.
       if (error instanceof AgentMuxError && error.code === 'CTXMUX_run_not_found') {
-        throw new AgentMuxError(
+        const mapped = new AgentMuxError(
           'Agent Run disappeared before its terminal capability query was observed.',
-          AGENT_TERMINAL_HANDSHAKE_FAILED
+          AGENT_TERMINAL_HANDSHAKE_FAILED,
+          error.detail
         )
+        // Preserve the transport error as a cause for diagnostics without leaking its transport code
+        // into the public handshake classification. Callers can inspect the original detail while all
+        // lifecycle paths consistently receive AGENT_TERMINAL_HANDSHAKE_FAILED.
+        mapped.cause = error
+        throw mapped
       }
       throw error
     }
