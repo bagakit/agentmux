@@ -2068,7 +2068,21 @@ export class AgentMuxClient {
   private async requireRunningTerminalHandshakeRun(
     session: AgentMuxStoredAgentSession
   ): Promise<CtxmuxAdapterRun> {
-    const run = await this.kernel.status(session.run.runId)
+    let run: CtxmuxAdapterRun
+    try {
+      run = await this.kernel.status(session.run.runId)
+    } catch (error) {
+      // A timeout raced with Run removal. Keep this branch in the same fatal bucket as an observed
+      // exited state; callers must not leak a transport-specific `run_not_found` through the
+      // handshake contract or accidentally treat a missing Run as a healthy degraded Agent.
+      if (error instanceof AgentMuxError && error.code === 'CTXMUX_run_not_found') {
+        throw new AgentMuxError(
+          'Agent Run disappeared before its terminal capability query was observed.',
+          AGENT_TERMINAL_HANDSHAKE_FAILED
+        )
+      }
+      throw error
+    }
     this.assertAgentRun(session, run)
     if (run.state.type !== 'running') {
       throw new AgentMuxError(

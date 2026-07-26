@@ -354,6 +354,26 @@ describe('AgentMuxClient 握手超时行为（真实 registry/store 边界）', 
     await client.dispose()
   })
 
+  it('maps a Run that disappears during the timeout race to the handshake-failed contract', async () => {
+    vi.useFakeTimers()
+    const { client, session } = await clientWithFakeKernel(() => runningRun(37))
+    const kernel = (client as unknown as { kernel: { status: () => Promise<never> } }).kernel
+    kernel.status = async () => {
+      throw new AgentMuxError('fixture run disappeared', 'CTXMUX_run_not_found')
+    }
+    const operation = (client as unknown as {
+      ensureTerminalHandshakeOrDegrade(
+        session: ReturnType<typeof storedSession>,
+        run: CtxmuxAdapterRun
+      ): Promise<unknown>
+    }).ensureTerminalHandshakeOrDegrade(session, runningRun(37))
+    const rejected = expect(operation).rejects.toMatchObject({ code: AGENT_TERMINAL_HANDSHAKE_FAILED })
+    await vi.advanceTimersByTimeAsync(10_000)
+    await rejected
+    expect(client.agentSession('degrade-agent').terminalCapability).toBeUndefined()
+    await client.dispose()
+  })
+
   it('does not arm another ten-second wait after the degraded fact is durable', async () => {
     vi.useFakeTimers()
     const { client, session } = await clientWithFakeKernel(() => runningRun(37))
