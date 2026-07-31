@@ -177,4 +177,20 @@ describe('对话体两条轴的定位与筛选', () => {
     // 纯函数的边界承诺。
     expect(conversationAxis([], speaksAsHuman)).toEqual([])
   })
+
+  it('不改传进来的条目——`readonly` 只护数组槽位，护不住元素对象', () => {
+    // 这条补的是一个实测的洞：在循环里插一行 `item.updatedAt = 0`，**10 条全绿且 typecheck
+    // 退 0**。原因是签名的 `readonly AgentTimelineItem[]` 只让数组本身不可变（不能 push/赋值下标），
+    // 而 `AgentTimelineItem` 的字段一个都没标 readonly（packages/core/src/types.ts），所以改元素
+    // 对象是合法 TS。给字段加 readonly 要动 Core 公共合同，不在本 task；那就用断言把它钉住。
+    //
+    // 为什么值得钉：两条轴会在同一批 item 上各调一次（说话人轴、自我 Agent 轴），T-004 还会在
+    // 每次渲染时重算。一次意外的字段写入会变成"第二条轴的结果和第一条不一样"或"滚动一下就不同"
+    // 这类只在特定调用次序下复现的 bug——比一次干脆的报错难查得多。
+    const items = conversationFixture()
+    const snapshot = structuredClone(items)
+    conversationAxis(items, speaksAsHuman)
+    conversationAxis(items, speaksAsAgent)
+    expect(items).toEqual(snapshot)
+  })
 })
