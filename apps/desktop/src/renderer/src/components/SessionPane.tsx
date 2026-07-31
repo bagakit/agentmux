@@ -12,7 +12,7 @@ import type { LinkClickModifiers } from './AgentMarkdown'
 import { AgentSessionComposer } from './AgentSessionComposer'
 import { AgentInteractionCard } from './AgentInteractionCard'
 import { ActivityView } from './ActivityView'
-import { OpenDestinationMenu, type OpenDestinationMenuRequest } from './OpenDestinationMenu'
+import { OpenDestinationPopover, type OpenDestinationRequest } from './OpenDestinationBar'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { TerminalView } from './TerminalView'
 import { agentSessionServiceOutcome, classifyServiceNotice, serviceNoticeToRender } from '../lib/service-window-notice'
@@ -92,7 +92,7 @@ export function SessionPane({
   // pane's own Region — never a jump straight to the system browser. This is the host that owns the menu
   // because it is the host that holds the Region origin, mirroring TerminalView exactly.
   const openHttpLink = useAppStore((state) => state.openHttpLink)
-  const [linkRequest, setLinkRequest] = useState<OpenDestinationMenuRequest | null>(null)
+  const [linkRequest, setLinkRequest] = useState<OpenDestinationRequest | null>(null)
   const nextLinkRequestIdRef = useRef(0)
   // canSplit reports the TRUTH of this origin: a directional destination needs a precise Tab+Region, and
   // choosing one without them throws in the Store. Only when both are present are the split items live.
@@ -274,7 +274,7 @@ export function SessionPane({
           />
         )}
       </div>
-      <OpenDestinationMenu
+      <OpenDestinationPopover
         request={linkRequest}
         canSplit={canSplit}
         onDismiss={(requestId) =>

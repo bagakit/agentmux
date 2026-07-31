@@ -9,7 +9,7 @@ import type { OpenDestination, OpenHttpLinkOrigin } from '../src/renderer/src/li
 // The conversation's http links must reach the SAME destination menu + Store exit the Terminal uses,
 // opening into this pane's Region — never a jump straight to the system browser. This harness has no DOM
 // and cannot click, so we capture the click handler SessionPane hands to ActivityView and the props it
-// hands to OpenDestinationMenu, then drive them by hand and assert on the Store call that results.
+// hands to OpenDestinationPopover, then drive them by hand and assert on the Store call that results.
 const captured = vi.hoisted(() => ({
   onProseLinkClick: null as ((url: string, event: LinkClickModifiers) => void) | null,
   onMenuSelect: null as ((destination: OpenDestination) => void) | null,
@@ -55,9 +55,9 @@ vi.mock('../src/renderer/src/components/ActivityView.js', () => ({
     return <div data-test-view="activity" data-display-state={displayState ?? 'absent'} />
   }
 }))
-vi.mock('../src/renderer/src/components/OpenDestinationMenu.js', () => ({
-  // 俘获 canSplit 与 request：canSplit 必须如实反映 origin 有没有精确 pane，request 有值才代表菜单浮出。
-  OpenDestinationMenu: ({ request, canSplit, onSelect }: {
+vi.mock('../src/renderer/src/components/OpenDestinationBar.js', () => ({
+  // 俘获 canSplit 与 request：canSplit 必须如实反映 origin 有没有精确 pane，request 有值才代表浮窗浮出。
+  OpenDestinationPopover: ({ request, canSplit, onSelect }: {
     request: { id: number; url: string; x: number; y: number } | null
     canSplit: boolean
     onSelect(destination: OpenDestination): void
