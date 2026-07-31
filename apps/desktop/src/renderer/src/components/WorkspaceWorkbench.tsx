@@ -964,7 +964,7 @@ function SplitBranch({
 }
 
 function dragPoint(event: DragMoveEvent): { x: number; y: number } | null {
-  // 与 Orca 的 pointer lane 一样，Drop Zone 必须跟真实指针而不是 DragOverlay
+  // 与常见 tab 拖拽实现的 pointer lane 一样，Drop Zone 必须跟真实指针而不是 DragOverlay
   // 的中心点；从 Tab 边缘起拖时两者会相差半个 Tab，最右侧因此可能越出 viewport。
   const activator = event.activatorEvent
   if (activator instanceof PointerEvent || activator instanceof MouseEvent) {
