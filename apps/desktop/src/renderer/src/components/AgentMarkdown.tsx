@@ -24,11 +24,20 @@ import {
 // that makes a trace readable. Levels are carried by weight, colour and the space above them instead —
 // which is enough, because a heading in an agent's answer is a section marker, not a page title.
 
-// How to open a link is INJECTED rather than imported. The api module resolves a build-time constant, so
-// importing it here would make every test that renders a turn fail to load until it remembered a mock —
-// exactly the trap that already cost one debugging round. The default routes to the desktop bridge
-// lazily, so production callers pass nothing.
-export type OpenExternal = (url: string) => void
+// How to open an http(s) link is INJECTED rather than imported. An agent-prose link must offer the same
+// destination menu the Terminal does — system browser, new Tab, or a split — so a click hands the URL and
+// its modifier state up to the host that owns the menu and the Store, instead of leaving straight through
+// `shell.openExternal`. Injected (not imported) because the host resolves it against the Store and the
+// Region origin, and a direct import would drag both into a component whose whole point is not having
+// them — the same trap the file seam below documents. Absent by default: a caller that passes nothing
+// gets a rendered link that raises no menu, never a second, silent path back out to the system browser.
+export type LinkClickModifiers = {
+  metaKey: boolean
+  ctrlKey: boolean
+  clientX: number
+  clientY: number
+}
+export type OpenHttpLink = (url: string, event: LinkClickModifiers) => void
 
 /**
  * Open a Workspace file, revealing `location` when the reference carried `:line[:col]`.
@@ -43,14 +52,15 @@ export type OpenWorkspaceFile = (
   location?: { line: number; column?: number }
 ) => void
 
-function defaultOpenExternal(url: string): void {
-  // Imported at call time, not module load, so the constant is only touched when a link is clicked.
-  void import('../lib/api').then(({ api }) => api.ui.openExternal(url))
+function defaultOpenHttpLink(): void {
+  // No host wired a link seam, so there is deliberately no menu and no open. The alternative — falling
+  // back to a direct `shell.openExternal` — is exactly the escape hatch this change removes: it is what
+  // let a conversation link skip the destination menu and jump straight to the system browser.
 }
 
 /** Shared by every inline renderer: the two open seams plus the root paths resolve against. */
 type InlineContext = {
-  openExternal: OpenExternal
+  openHttpLink: OpenHttpLink
   openWorkspaceFile?: OpenWorkspaceFile
   workspaceRoot: string
 }
@@ -152,13 +162,22 @@ function Inline({ nodes, context }: { nodes: InlineNode[]; context: InlineContex
         return (
           // A button, not an anchor: an <a href> inside untrusted output is a navigation escape hatch out
           // of the renderer. Main owns the decision and normalises the URL, so a hostile scheme is
-          // refused there rather than trusted here.
+          // refused there rather than trusted here. The click hands the URL and its modifier/pointer
+          // state up to the host, which raises the same destination menu the Terminal does (or, with
+          // Cmd/Ctrl held, opens the system browser directly through the one shared judgement).
           <button
             key={key}
             type="button"
             className="md-link"
             title={node.href}
-            onClick={() => context.openExternal(node.href)}
+            onClick={(event) =>
+              context.openHttpLink(node.href, {
+                metaKey: event.metaKey,
+                ctrlKey: event.ctrlKey,
+                clientX: event.clientX,
+                clientY: event.clientY
+              })
+            }
           >
             <Inline nodes={node.children} context={context} />
           </button>
@@ -253,20 +272,20 @@ function Block({ node, context }: { node: BlockNode; context: InlineContext }) {
 export function AgentMarkdown({
   content,
   className,
-  openExternal = defaultOpenExternal,
+  openHttpLink = defaultOpenHttpLink,
   openWorkspaceFile,
   workspaceRoot = ''
 }: {
   content: string
   className?: string
-  openExternal?: OpenExternal
+  openHttpLink?: OpenHttpLink
   /** Absent means file references stay plain text — see `OpenWorkspaceFile`. */
   openWorkspaceFile?: OpenWorkspaceFile
   /** Active Workspace root, for the within-root test on absolute paths. */
   workspaceRoot?: string
 }) {
   const context: InlineContext = {
-    openExternal,
+    openHttpLink,
     workspaceRoot,
     ...(openWorkspaceFile ? { openWorkspaceFile } : {})
   }

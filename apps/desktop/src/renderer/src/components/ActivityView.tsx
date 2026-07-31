@@ -29,7 +29,7 @@ import {
 import { stepTitle } from '../lib/activity-step-summary'
 import { showEmptyState, showWorkingIndicator } from '../lib/activity-working-state'
 import { terminalLinkPreviewAnchor } from '../lib/terminal-link-gesture'
-import { AgentMarkdown, type OpenWorkspaceFile } from './AgentMarkdown'
+import { AgentMarkdown, type LinkClickModifiers, type OpenWorkspaceFile } from './AgentMarkdown'
 
 function Glyph({ kind, size = 12 }: { kind: AgentTimelineItem['kind']; size?: number }) {
   if (kind === 'user_message') return <UserRound size={size} />
@@ -383,11 +383,13 @@ function Turn({
   item,
   origin,
   openWorkspaceFile,
+  openHttpLink,
   workspaceRoot
 }: {
   item: AgentTimelineItem
   origin: number
   openWorkspaceFile?: OpenWorkspaceFile
+  openHttpLink?: (url: string, event: LinkClickModifiers) => void
   workspaceRoot: string
 }) {
   const who = item.kind === 'user_message' ? 'You' : 'Assistant'
@@ -408,6 +410,7 @@ function Turn({
           className="log-turn__body"
           workspaceRoot={workspaceRoot}
           {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
+          {...(openHttpLink ? { openHttpLink } : {})}
         />
       ) : null}
     </div>
@@ -483,6 +486,7 @@ export function ActivityView({
   capability,
   displayState,
   openWorkspaceFile,
+  openHttpLink,
   workspaceRoot = ''
 }: {
   items: AgentTimelineItem[]
@@ -491,6 +495,9 @@ export function ActivityView({
   displayState?: AgentDisplayState
   /** Absent means file references in agent prose stay plain text. */
   openWorkspaceFile?: OpenWorkspaceFile
+  /** Absent means an http(s) link in agent prose raises no menu. Set by the host that owns the
+   *  destination menu and the Region origin (SessionPane), never resolved here. */
+  openHttpLink?: (url: string, event: LinkClickModifiers) => void
   workspaceRoot?: string
 }) {
   const segments = useMemo(() => segment(items), [items])
@@ -677,6 +684,7 @@ export function ActivityView({
                 origin={origin}
                 workspaceRoot={workspaceRoot}
                 {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
+                {...(openHttpLink ? { openHttpLink } : {})}
               />
             ) : (
               <Row item={entry.item} origin={origin} count={1} showSource />
