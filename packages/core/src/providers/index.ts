@@ -1,0 +1,57 @@
+import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
+import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
+import type { AgentProviderId } from '../types.js'
+import { createAntigravityManagedHookPlan, createAntigravityProvider } from './antigravity.js'
+import { createClaudeManagedHookPlan, createClaudeProvider } from './claude.js'
+import { createCodexManagedHookPlan, createCodexProvider } from './codex.js'
+import { createCursorProvider } from './cursor.js'
+import { createGeminiProvider } from './gemini.js'
+import { createGrokProvider } from './grok.js'
+import { createHermesManagedHookPlan, createHermesProvider } from './hermes.js'
+import { createPiProvider } from './pi.js'
+import { createTraexProvider } from './traex.js'
+
+export type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
+export type ManagedHookPlanResolver = (
+  workspacePath: string,
+  env?: Readonly<Record<string, string>>
+) => AgentManagedHookPlan
+
+/** Composition-only list. Provider-specific definitions live in their own modules. */
+export function createBuiltInAgentProviders(defineAgentProvider: ProviderFactory): readonly AgentProvider[] {
+  return [
+    createCodexProvider(defineAgentProvider),
+    createClaudeProvider(defineAgentProvider),
+    createTraexProvider(defineAgentProvider),
+    createHermesProvider(defineAgentProvider),
+    createPiProvider(defineAgentProvider),
+    createGrokProvider(defineAgentProvider),
+    createGeminiProvider(defineAgentProvider),
+    createAntigravityProvider(defineAgentProvider),
+    createCursorProvider(defineAgentProvider)
+  ]
+}
+
+/** Managed hook installers are composed by Provider id; the registry has no provider-specific branches. */
+export const MANAGED_HOOK_PLAN_RESOLVERS: Partial<Record<AgentProviderId, ManagedHookPlanResolver>> = {
+  codex: (workspacePath) => createCodexManagedHookPlan(workspacePath),
+  claude: (workspacePath) => createClaudeManagedHookPlan(workspacePath),
+  antigravity: (_workspacePath) => createAntigravityManagedHookPlan(),
+  hermes: (_workspacePath, env) => createHermesManagedHookPlan(env)
+}
+
+export {
+  createAntigravityManagedHookPlan,
+  createClaudeManagedHookPlan,
+  createCodexManagedHookPlan,
+  createHermesManagedHookPlan
+}
+export { createAntigravityProvider } from './antigravity.js'
+export { createClaudeProvider } from './claude.js'
+export { createCodexProvider } from './codex.js'
+export { createCursorProvider } from './cursor.js'
+export { createGeminiProvider } from './gemini.js'
+export { createGrokProvider } from './grok.js'
+export { createHermesProvider } from './hermes.js'
+export { createPiProvider } from './pi.js'
+export { createTraexProvider } from './traex.js'
