@@ -23,6 +23,7 @@ describe('样式表的组织', () => {
       'agent.css',
       'activity.css',
       'activity-conversation.css',
+      'conversation-avatar.css',
       'overlays.css'
     ])
   })

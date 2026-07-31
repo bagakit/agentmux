@@ -1,0 +1,43 @@
+/**
+ * Conversation speaker avatar: the identity mark shared by both conversation axes.
+ *
+ * A deliberate own file rather than an append to agent.css (already at the surface-size ceiling) or to
+ * activity-conversation.css (a sibling surface owned elsewhere). index.css @imports it right after the
+ * conversation register it belongs to, so cascade order stays "outermost surface first".
+ *
+ * The colour system: an agent's identity colour is a single derived HUE (see conversation-avatar-color.ts);
+ * saturation and lightness are FIXED here inside the same soft-on-dark band the token accents live in
+ * (green hsl(143 61 72), blue hsl(214 81 73), amber hsl(40 77 67) — all ~S60-80% / L~70%). Fixing S/L is
+ * what keeps "colour = f(id)" harmonious with every theme: hue is the only axis that moves, and any hue at
+ * this S/L reads as a member of the same family rather than clashing with the surface.
+ */
+
+/* The mark itself: a round chip that seats a glyph. No stroke (strokes are not a device here), no glow
+   (the density contract forbids decorative glow on avatars) — the fill and the glyph carry it. width/height
+   come from the inline `size` so the same rule serves both the 16px and 20px axes. */
+.conversation-avatar {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  line-height: 0;
+}
+
+/* Human. Blue is already the user's colour in the prose register (activity-conversation.css paints the
+   user_message node --blue); the speaker mark keeps that pairing rather than deriving a colour for the one
+   fixed human id. A quiet tinted ground plus the blue silhouette — recognisable by SHAPE at 16px, never by
+   colour alone. */
+.conversation-avatar--human {
+  color: var(--blue);
+  background: color-mix(in srgb, var(--blue) 16%, var(--surface-0));
+}
+
+/* Agent. Hue is driven by the id via the `--speaker-hue` custom property the component sets; two agents on
+   the same provider therefore share one brand glyph but get different chip colours, which is how the open
+   set of A2A identities stays distinguishable. The fallback hue (145, the green family) only applies if the
+   property is ever missing, so the chip is never colourless. */
+.conversation-avatar--agent {
+  color: hsl(var(--speaker-hue, 145) 62% 72%);
+  background: hsl(var(--speaker-hue, 145) 45% 68% / 0.18);
+}
