@@ -783,6 +783,13 @@ async function loadPersistedFileDocument(workspaceId: string, path: string): Pro
   const openedLifetime = advanceDocumentLifetime(key)
   const request = Promise.resolve().then(async () => {
     try {
+      // Capture the invalidation counter BEFORE reading, the same way `openFile` does. A watcher can
+      // report the file changed while this read is in flight, and that report lands nowhere:
+      // `refreshFileDocument` early-returns while `documents[key]` is still absent. Without the
+      // comparison below, the pane would hold content one revision stale with no `changed` flag until
+      // the next disk change — the first save would still be caught by the revision check, but the
+      // user would be told "changed on disk" about a change that happened before they ever saw the file.
+      const invalidationSequence = fileInvalidationSequences.get(key) ?? 0
       await api.files.observe(workspaceId, path)
       const result = await api.files.read(workspaceId, path)
       if (result.status !== 'read') {
@@ -810,8 +817,24 @@ async function loadPersistedFileDocument(workspaceId: string, path: string): Pro
         return false
       }
       useAppStore.setState((state) => reduceDocumentAttached(state, workspaceId, path, result.document))
+      // Only now can a refresh land: `refreshFileDocument` needs the document to already be here.
+      // Dropping the open request first is what lets it run — it takes the same in-flight slot.
+      if (fileOpenRequests.get(key) === request) fileOpenRequests.delete(key)
+      if ((fileInvalidationSequences.get(key) ?? 0) !== invalidationSequence) {
+        await refreshFileDocument(workspaceId, path, openedLifetime)
+      }
       return true
     } catch (error) {
+      // An IPC fault, not a read verdict. Record it as a read error for the same reason the verdict
+      // paths do: it is the pane's only stop condition, and without one this surface sits on the
+      // generic unavailable state with no way to tell the user what went wrong. Retry is the Retry
+      // button on that state, not a silent loop.
+      await api.files.unobserve(workspaceId, path).catch(() => undefined)
+      useAppStore.setState((state) => reduceDocumentLoadFailed(state, workspaceId, path, {
+        kind: 'read-error',
+        code: 'WORKSPACE_FILE_READ_FAILED',
+        message: error instanceof Error ? error.message : String(error)
+      }))
       useAppStore.getState().reportError(error)
       return false
     } finally {
