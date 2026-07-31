@@ -117,8 +117,8 @@ export function SelectorRow({
   leading?: ReactNode
   title: ReactNode
   subtitle?: ReactNode
-  titleTooltip?: string
-  subtitleTooltip?: string
+  titleTooltip?: string | undefined
+  subtitleTooltip?: string | undefined
   presence?: ReactNode
   trailing?: ReactNode
 }) {
