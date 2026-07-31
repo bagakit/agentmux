@@ -857,6 +857,10 @@ export class WorkspaceFiles {
       const host = this.hostFor(workspace.hostId)
       if (host.kind === 'local') {
         const resolved = await localExistingPathWithin(workspace.path, requestedPath)
+        // A directory is not a read failure: the caller reveals it in the file tree. Only Main can
+        // tell — path detection in the Renderer is pure-string. `resolved.target` is already the
+        // root-confined realpath, so this stat classifies exactly the object the worker would open.
+        if ((await stat(resolved.target)).isDirectory()) return { status: 'directory' }
         const bytes = await runLocalWorker(dirname(resolved.target), resolved.root, {
           action: 'read',
           name: basename(resolved.target)
@@ -871,10 +875,18 @@ export class WorkspaceFiles {
         }
       }
       const path = await remoteExistingPathWithin(host, workspace.path, requestedPath)
-      const result = await host.run('cat', ['--', path], {
-        timeoutMs: 15_000,
-        maxOutputBytes: 4 * 1024 * 1024
-      })
+      // Ask once: if the target is a directory, exit 3 so the caller can reveal it; otherwise stream
+      // it. Folding the classification into the same round-trip avoids a locale-fragile "Is a
+      // directory" stderr parse and keeps directory a first-class answer, not a decoded error.
+      const result = await host.run(
+        'sh',
+        ['-c', 'if [ -d "$1" ]; then exit 3; fi; exec cat -- "$1"', 'agentmux-read', path],
+        {
+          timeoutMs: 15_000,
+          maxOutputBytes: 4 * 1024 * 1024
+        }
+      )
+      if (result.exitCode === 3) return { status: 'directory' }
       if (result.exitCode !== 0) {
         throw new Error(result.stderr.trim() || `Could not read ${basename(path)}`)
       }
