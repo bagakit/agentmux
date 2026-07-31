@@ -80,6 +80,33 @@ describe('对话体的说话人判定', () => {
     }
   })
 
+  it('两个字段互相矛盾时，source 赢——两个方向都要钉，不只人这一侧', () => {
+    // 上面那条循环刻意跳过了 `source:'user'`，因为它会返回 human 而不是 agent。于是
+    // 「source 优先于 kind」在 assistant 方向上一直没有断言守着：一个先看 kind 的实现
+    // （`if (kind === 'assistant_message') return agent` 放在 source 判断之前）能让上面每一条
+    // 都绿，却在这里把人说的话画成 Agent 的话。
+    //
+    // 这个组合今天不可达（Core 里 assistant_message 永远不带 source:'user'），钉它是因为判据的
+    // **优先级**本身是这个函数的契约——两个字段哪个是权威，不能只在一半的取值上成立。
+    expect(speakerOf(item({ kind: 'assistant_message', source: 'user' })))
+      .toEqual({ role: 'human', id: HUMAN_SPEAKER_ID })
+  })
+
+  it('human 哨兵与 agentSessionId 共用 id 空间，所以只按 id 寻址会把两个身份并成一个', () => {
+    // Core 侧 agentSessionId 只过字符集校验（SAFE_ID），字面量 'human' 完全合法，而 createAgent
+    // 接受调用方传入的 agentSessionId。今天桌面端传 randomUUID() 所以碰不上，但类型没挡住。
+    //
+    // 这条不是要求实现去避免碰撞（那要动 Core 公共合同），而是把「碰撞真的会发生」这个事实钉成
+    // 可执行的：任何按 id 建映射的消费方（头像、配色、轴上的位置）都必须带上 role。若日后有人
+    // 写了 `avatars[speaker.id]`，这条断言就是它该被驳回的依据。
+    const human = speakerOf(item({ source: 'user', kind: 'user_message' }))
+    const collidingAgent = speakerOf(item({ kind: 'assistant_message', agentSessionId: HUMAN_SPEAKER_ID }))
+    // id 相同——这是事实，不是缺陷。
+    expect(collidingAgent?.id).toBe(human?.id)
+    // 而 role 不同，所以 (role, id) 仍然把两者分得开。寻址必须用这一对。
+    expect(collidingAgent?.role).not.toBe(human?.role)
+  })
+
   it('「是一轮对话」与「有说话人」是同一个判据的两种问法，不是两份实现', () => {
     // 渲染层原先有一个只看 kind 的 isTurn，与 caption 的判据各写一遍。这条钉住两者不可能漂移：
     // 任何一条有说话人的都是 turn，任何一条没说话人的都不是。若有人日后给 isConversationTurn
