@@ -30,13 +30,15 @@
   top: 50%;
   width: 2px;
   height: 10px;
-  margin-top:-var(--sp-2);
   border-radius: 1px;
   background: var(--text-3);
-  transform: translateX(-1px);
+  /* 垂直居中走 translate 而不是负 margin-top：tick 有四种高度（10/14/18px 与 band 的 16px），
+     负 margin 要为每一种各写一个数，写错了没人看得出来。translate 的 -50% 跟着自身高度走，
+     一处写对就全部对。水平方向本来就在这里 -1px 把 2px 宽的 tick 压在位置上。 */
+  transform: translate(-1px, -50%);
 }
-.activity-ruler__tick--user_message { background: var(--blue); height: 14px; margin-top:-var(--sp-3); }
-.activity-ruler__tick--assistant_message { background: var(--green); height: 14px; margin-top:-var(--sp-3); }
+.activity-ruler__tick--user_message { background: var(--blue); height: 14px; }
+.activity-ruler__tick--assistant_message { background: var(--green); height: 14px; }
 .activity-ruler__tick--permission { background: var(--amber); }
 .activity-ruler__tick[data-status='failed'] { background: var(--red); }
 .activity-ruler__span { color: var(--text-3); font: 10px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
@@ -47,7 +49,7 @@
 .activity-ruler__track:focus-visible { border-radius: var(--radius-sm); box-shadow: var(--focus-ring); }
 /* The selected tick — where a click or keyboard landed — stands off the rail so the jump target reads
    at a glance without disturbing the honest tick positions around it. */
-.activity-ruler__tick[data-selected] { width: 3px; height: 18px; margin-top:-var(--sp-4); transform: translateX(-1.5px); box-shadow: 0 0 0 2px var(--surface-0); }
+.activity-ruler__tick[data-selected] { width: 3px; height: 18px; transform: translate(-1.5px, -50%); box-shadow: 0 0 0 2px var(--surface-0); }
 /* The visible-range band frames which stretch of the trace the log is currently showing. It is only
    ever rendered when the range is a real subset (see rulerBand), so it never spans the full width and
    claims "everything is on screen". A dashed variant keeps it honest on the ordinal axis. */
@@ -55,7 +57,8 @@
   position: absolute;
   top: 50%;
   height: 16px;
-  margin-top:-var(--sp-4);
+  /* 与 tick 同一条居中规则。band 没有水平偏移——它的 left/width 就是它要框的那段范围本身。 */
+  transform: translateY(-50%);
   min-width: 2px;
   border-radius: 2px;
   background: color-mix(in oklab, var(--green) 16%, transparent);
