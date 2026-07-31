@@ -34,6 +34,14 @@ function deferred<T>() {
   return { promise, resolve }
 }
 
+async function waitFor(predicate: () => boolean): Promise<void> {
+  for (let tick = 0; tick < 200; tick += 1) {
+    if (predicate()) return
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  }
+  throw new Error('Timed out waiting for the Store operation')
+}
+
 afterEach(() => {
   vi.restoreAllMocks()
   useAppStore.setState(initialState, true)
@@ -587,6 +595,113 @@ describe('Renderer persistence boundary', () => {
     expect(state.documentIssues[`workspace-a\0${filePath}`]).toEqual({ kind: 'deleted' })
     // 不刷 startup error：那会在服务窗里多出一条用户已经能从编辑器面里看懂的话。
     expect(state.error).toBeNull()
+  })
+
+  it('装载途中文件被改了，装完要补读一次——否则面上是旧内容且不带 changed 标', async () => {
+    // 这条钉的是一个只在「读在途」窗口里存在的漏报。watcher 的失效通知会调 refreshDocument，而
+    // refreshFileDocument 在 `documents[key]` 还不存在时早退（store.ts:706）——也就是说这个通知
+    // 落在了地上。装载路径必须自己认下它：读之前记下失效序号，装好之后发现变了就补读一次。
+    //
+    // 少了这个调和，面上会稳定停在比磁盘旧一版的内容上，而且**没有** changed 提示；下一次磁盘变动
+    // 之前用户不会知道。保存时的 revision 检查确实还会挡住写坏，但那时报的「文件已在磁盘上更改」
+    // 说的是用户根本没见过的那次更改——诊断成本远高于此刻多读一次。
+    const filePath = 'src/racing.ts'
+    const tabId = `file:workspace-a:${filePath}`
+    const tab = createWorkbenchTab(tabId, {
+      regionId: initialWorkbenchRegionId(tabId),
+      kind: 'file',
+      workspaceId: 'workspace-a',
+      path: filePath
+    })
+    // 失效序号只有 initialize() 注册的 onInvalidated 回调会 bump（store.ts:1306 是唯一写入点），
+    // 所以这里必须真的走一遍 initialize 把那个回调拿到手，不能绕过它自己造一个。
+    let invalidate: ((event: { workspaceId: string; path: string }) => void) | null = null
+    vi.spyOn(api.files, 'onInvalidated').mockImplementation((handler) => {
+      invalidate = handler as typeof invalidate
+      return () => {}
+    })
+    vi.spyOn(useAppStore.persist, 'hasHydrated').mockReturnValue(true)
+    vi.spyOn(api.config, 'get').mockResolvedValue(config)
+    vi.spyOn(api.providers, 'list').mockResolvedValue([])
+    vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({
+      sessions: [],
+      timelines: {},
+      recoveryCandidates: []
+    })
+    const dispose = await useAppStore.getState().initialize()
+    expect(invalidate).toBeTypeOf('function')
+
+    useAppStore.setState({
+      activeWorkspaceId: 'workspace-a',
+      config,
+      tabs: { [tabId]: tab },
+      layouts: { 'workspace-a': createWorkspaceLayout('pane', [tabId]) }
+    })
+    vi.spyOn(api.files, 'observe').mockResolvedValue(undefined)
+    const firstRead = deferred<{ status: 'read'; document: { path: string; content: string; revision: string } }>()
+    const reads: Array<'load' | 'refresh'> = []
+    vi.spyOn(api.files, 'read').mockImplementation(async () => {
+      if (reads.length === 0) {
+        reads.push('load')
+        return firstRead.promise
+      }
+      reads.push('refresh')
+      return { status: 'read', document: { path: filePath, content: 'fresh from disk\n', revision: 'rev-2' } }
+    })
+
+    const loading = useAppStore.getState().attachPersistedFileDocument('workspace-a', filePath)
+    // 等第一次读真的发出去，再让 watcher 报变化——这就是那个在途窗口。
+    await waitFor(() => reads.length === 1)
+    invalidate!({ workspaceId: 'workspace-a', path: filePath })
+    firstRead.resolve({
+      status: 'read',
+      document: { path: filePath, content: 'stale at load time\n', revision: 'rev-1' }
+    })
+    await loading
+
+    // 补读发生了，而且面上是磁盘上的那一版，不是装载时读到的旧版。
+    expect(reads).toEqual(['load', 'refresh'])
+    expect(useAppStore.getState().documents[`workspace-a\0${filePath}`]?.content).toBe('fresh from disk\n')
+    dispose()
+  })
+
+  it('读这一步自己抛（IPC 断了，不是读到了坏结果）也要记下原因', async () => {
+    // 三条 read 判决（deleted/directory/error）都会记 issue，唯独 await 本身抛出时曾经只 reportError
+    // 就走了。issue 是那个面唯一的停止条件（见下一条用例），所以没有它，这个面会退回通用的
+    // 「不可用」，既不告诉用户是 IPC 断了，也不给 Retry 一个已知的失败态去重试。
+    const filePath = 'src/ipc-down.ts'
+    const tabId = `file:workspace-a:${filePath}`
+    const tab = createWorkbenchTab(tabId, {
+      regionId: initialWorkbenchRegionId(tabId),
+      kind: 'file',
+      workspaceId: 'workspace-a',
+      path: filePath
+    })
+    useAppStore.setState({
+      activeWorkspaceId: 'workspace-a',
+      config,
+      tabs: { [tabId]: tab },
+      layouts: { 'workspace-a': createWorkspaceLayout('pane', [tabId]) }
+    })
+    vi.spyOn(api.files, 'observe').mockResolvedValue(undefined)
+    const unobserve = vi.spyOn(api.files, 'unobserve').mockResolvedValue(undefined)
+    const read = vi.spyOn(api.files, 'read').mockRejectedValue(new Error('IPC channel closed'))
+
+    await useAppStore.getState().attachPersistedFileDocument('workspace-a', filePath)
+    const state = useAppStore.getState()
+
+    expect(state.documents[`workspace-a\0${filePath}`]).toBeUndefined()
+    // 记的是 read-error，与三条判决走同一种 issue——不新造一种失败态。
+    expect(state.documentIssues[`workspace-a\0${filePath}`]).toMatchObject({
+      kind: 'read-error',
+      code: 'WORKSPACE_FILE_READ_FAILED',
+      message: 'IPC channel closed'
+    })
+    // watcher 不许留下：这个路径此刻读不到，占着一个 observe 就是泄漏。
+    expect(unobserve).toHaveBeenCalledWith('workspace-a', filePath)
+    // 而且既然记下了，它同样构成停止条件：第二次不到 IPC。
+    await useAppStore.getState().attachPersistedFileDocument('workspace-a', filePath)
+    expect(read).toHaveBeenCalledTimes(1)
   })
 
   it('读失败的原因记下之后，不再对同一个路径重复发读', async () => {

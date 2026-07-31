@@ -83,6 +83,28 @@ describe('EditorPane Monaco owner lifetime', () => {
     expect(source).toContain('editorRef.current = null')
     expect(source).toMatch(/editor\.onDidDispose\(\(\) => \{[\s\S]*editorRef\.current === editor[\s\S]*editorRef\.current = null/)
   })
+
+  it('恢复出来的文件面会主动要文档——恢复路径唯一的触发器就在这里', async () => {
+    // 这条是源码文本断言，因为它守的东西**没有任何行为测试够得着**：本仓的 EditorPane 测试用
+    // `renderToStaticMarkup`（react-dom/server），它根本不跑 useEffect；而 store 侧的测试是直接
+    // 调 `attachPersistedFileDocument` action，不挂组件。也就是说把下面这个 effect 整个删掉，
+    // store-persistence(16) + workbench-persistence(14) + editor-pane-reveal(15) +
+    // editor-save-wiring(5) 共 50 条全绿——实测过，不是推测。
+    //
+    // 而这个 effect 是「重启后 tab 在、点开报不可用」这个修复的**唯一**触发器：持久化侧保住了
+    // 面，store 侧能装文档，但没有它，两半永远接不上，用户看到的就是原来那个 bug。所以它必须
+    // 有一个会因删除而变红的守卫，哪怕只能是文本断言。
+    const source = await readFile(new URL('../src/renderer/src/components/EditorPane.tsx', import.meta.url), 'utf8')
+
+    // 触发器本身：拿到 action，并在 effect 里对着这个面自己的 workspace/path 调用它。
+    expect(source).toContain('state.attachPersistedFileDocument')
+    expect(source).toMatch(
+      /useEffect\(\(\) => \{[\s\S]*attachPersistedDocument\(surface\.workspaceId, surface\.path\)/
+    )
+    // 三个守卫条件一个都不能少，各自的理由不同：`document` 挡住已加载的；`issue` 挡住已知读不到
+    // 的（否则每次依赖变化都对一个坏路径重读一遍）；`released` 挡住 cold-park 占位面。
+    expect(source).toMatch(/if \(document \|\| issue \|\| released\) return\s*\n\s*void attachPersistedDocument/)
+  })
 })
 
 afterEach(() => {
