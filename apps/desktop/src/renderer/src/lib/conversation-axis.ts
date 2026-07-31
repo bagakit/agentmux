@@ -53,11 +53,18 @@ export const speaksAsAgent: SpeakerPredicate = (speaker) => speaker.role === 'ag
  * 这条轴上的一个标记。
  *
  * - `item` 是**反查回原话的出处**（设计 SSOT：hover 面板取原话，用的是这条对应的 timeline item），
- *   T-005 会读它的 `content` 逐字展示。直接带 item 而非只带 id，是因为面板要的是原话本身，带 id 会
- *   逼调用方再维护一张 id→item 的表。
+ *   T-005 会读它的 `content` 逐字展示。带的是**同一个引用**而不是拷贝。
+ *   真正的替代方案不是「带 id 再建一张 id→item 表」——`index` 就在这里，调用方本来也持有 `items`，
+ *   所以替代方案是 `items[mark.index]`，不多任何簿记。带 item 是**便利**而非结构上必需：它让 T-005
+ *   的组件只吃一个 `mark` 就自洽，不必把 `items` 和 `index` 一起穿进去。
  * - `index` 是这条 item 在**全量** items 里的原始下标，也是定位的依据（见 `fraction`）。
  * - `fraction` 是 0..1 的位置，来自全量 scale 的 `fractionOf(index)`，直接驱动 CSS 定位。刻意不带
  *   `at`：位置是诚实的（序数轴上也均匀），但时刻不能在这里被制造出来。
+ *
+ *   **由此有一条约束落在下游**：ruler 的诚实性是**类型级**的——序数轴上 `RulerReadout` 根本没有 `at`
+ *   字段，所以「在没有时间跨度的轴上显示钟点」写不出来。这个标记**继承不到**那层保护：它手里的
+ *   `item.createdAt` 永远是个数。所以要显示时刻必须走 `scale.readoutOf(mark.index)`，绝不能直接读
+ *   `mark.item.createdAt`——后者会把 ruler 特意做成不可表达的那种不诚实又请回来。
  * - `speaker` 是身份 `{role, id}`：role 选头像画法（human 给人形、agent 复用图标），id 用于寻址取
  *   providerId。身份表示两条轴共用，正是「共用同一套身份表示」的兑现。
  */

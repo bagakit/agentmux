@@ -6,6 +6,7 @@ import {
   speaksAsAgent,
   speaksAsHuman
 } from '../src/renderer/src/lib/conversation-axis.js'
+import { HUMAN_SPEAKER_ID, speakerOf } from '../src/renderer/src/lib/conversation-speaker.js'
 
 /**
  * 两条轴（说话人轴、自我 Agent 轴）收敛成一个纯函数之后，这里钉的是那个函数的四条验收：
@@ -54,6 +55,26 @@ describe('对话体两条轴的定位与筛选', () => {
     expect(marks.map((m) => m.item.id)).toEqual(['u1', 'u2'])
     expect(marks.map((m) => m.index)).toEqual([0, 4])
     for (const mark of marks) expect(mark.speaker.role).toBe('human')
+  })
+
+  it('标记带的身份就是 speakerOf 判出的那个，本函数不在它之后改造 id', () => {
+    // 这条补的是一个实测存在的洞：只断言 `speaker.role` 时，把 `speaker` 换成
+    // `{ role: speaker.role, id: item.agentSessionId }` 能让全部 9 条绿。
+    // 那个改动是真缺陷——人类的标记会拿到「它恰好出现在谁的时间轴里」的 agentSessionId 当身份，
+    // 于是同一个人在两个 Agent 的轴上成为两个身份，而 speakerOf 的返回本来就是对的。
+    //
+    // 所以这里逐个字段钉死：human 的 id 必须是那个哨兵常量，agent 的 id 必须是它的
+    // agentSessionId，且**整个 speaker 对象**要与 speakerOf 的返回一致——不允许本函数在中间
+    // 重新组装身份。身份判定只有一个出处，这条就是那句话的可执行形式。
+    const items = conversationFixture()
+    for (const mark of conversationAxis(items, speaksAsHuman)) {
+      expect(mark.speaker).toEqual({ role: 'human', id: HUMAN_SPEAKER_ID })
+      expect(mark.speaker).toEqual(speakerOf(mark.item))
+    }
+    for (const mark of conversationAxis(items, speaksAsAgent)) {
+      expect(mark.speaker).toEqual({ role: 'agent', id: mark.item.agentSessionId })
+      expect(mark.speaker).toEqual(speakerOf(mark.item))
+    }
   })
 
   it('自我 Agent 轴只收该 Agent 说话的位置', () => {
