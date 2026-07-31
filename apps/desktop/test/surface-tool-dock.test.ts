@@ -14,6 +14,7 @@ import {
   getRenderedSidebarWidthCssValue
 } from '../src/renderer/src/hooks/useSidebarResize.js'
 import { allStyles } from './helpers/styles.js'
+import { SELECTOR_PRESENCE_MAX } from '../src/renderer/src/components/SelectorList.js'
 import {
   TOOL_DOCK_COLLAPSED_RAIL_MIN_WIDTH,
   TOOL_DOCK_MAX_WIDTH,
@@ -37,6 +38,14 @@ const fileExplorerSource = readFileSync(
 )
 const topicContextMenuSource = readFileSync(
   new URL('../src/renderer/src/components/TopicContextMenu.tsx', import.meta.url),
+  'utf8'
+)
+const branchesPanelSource = readFileSync(
+  new URL('../src/renderer/src/components/BranchesPanel.tsx', import.meta.url),
+  'utf8'
+)
+const selectorListSource = readFileSync(
+  new URL('../src/renderer/src/components/SelectorList.tsx', import.meta.url),
   'utf8'
 )
 const stylesSource = allStyles()
@@ -164,9 +173,39 @@ describe('shared surface tool dock resize', () => {
     )
     expect(topicRow).not.toContain('<NotebookText')
     expect(topicRow).toContain('<LoaderCircle')
-    expect(stylesSource).toContain(
-      '.workspace-topic-entry { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr);'
-    )
+    // 断言的是**意图**而不是那一整条 CSS 字面量：钉死字符串的写法下一次微调格子就假红，
+    // 而它想守的其实只有两件事——行首是可伸缩的 auto 列（不是固定图标槽），以及 identity
+    // 那列显式吃满剩余宽度。后者不是风格选择：隐式 auto 列按内容定尺，尾部的头像簇于是
+    // 贴内容盒右缘而不是行右缘，各行摘要一长一短，右缘就参差成好几档。
+    const entry = stylesSource.match(/\.workspace-topic-entry\s*\{([^}]*)\}/)?.[1] ?? ''
+    expect(entry.length).toBeGreaterThan(0)
+    const columns = entry.match(/grid-template-columns:\s*([^;]+)/)?.[1]?.trim() ?? ''
+    expect(columns).not.toBe('')
+    expect(columns.startsWith('auto')).toBe(true)
+    expect(columns).toContain('minmax(0, 1fr)')
+  })
+
+  it('anchors the Agent cluster to the row edge, not to the end of the summary text', () => {
+    // 用户："右边的 icon 没有对齐"。真因不是间距而是网格：头像簇必须是行网格里**独立的一列**，
+    // 这样它对齐的是行；只要它还长在 identity 内部，`margin-left:auto` 顶到的就是内容盒右缘。
+    const entry = stylesSource.match(/\.workspace-topic-entry\s*\{([^}]*)\}/)?.[1] ?? ''
+    const columns = entry.match(/grid-template-columns:\s*([^;]+)/)?.[1]?.trim() ?? ''
+    // 三列：行首 auto ＋ identity 1fr ＋ 尾列 auto。两列意味着尾列又被塞回了 identity 里。
+    expect(columns.split(/\s+(?![^(]*\))/).length).toBe(3)
+    const meta = stylesSource.match(/\.selector-row__meta\s*\{([^}]*)\}/)?.[1] ?? ''
+    expect(meta).toContain('justify-content: flex-end')
+  })
+
+  it('stacks the avatars instead of tiling them, with the rightmost on top', () => {
+    // 用户要"会中参与者"那种沉陷效果。叠压是**相邻两枚之间**的关系——写在每一枚上会把整簇
+    // 往左推、第一枚越过自己的左缘（这个错误在声明失效期间完全看不出来）。
+    const overlap = stylesSource.match(
+      /\.selector-presence__slot \+ \.selector-presence__slot\s*\{([^}]*)\}/
+    )?.[1] ?? ''
+    expect(overlap.length).toBeGreaterThan(0)
+    expect(overlap).toMatch(/margin-left:\s*calc\(-1 \* var\(--sp-\d\)\)/)
+    // 负值绝不写成 `-var(...)`：那不是合法 CSS，整条声明会被静默丢弃，叠压根本不会发生。
+    // 这一族由 stylesheet-organisation.test.ts 全表扫描守住，这里只钉住本条的正确形态。
   })
 
   it('renames Topic titles inline while keeping stable Topic directories out of generic Rename', () => {
@@ -210,6 +249,37 @@ describe('shared surface tool dock resize', () => {
       ['needs-you', ['blocked']],
       ['recent', ['finished']]
     ])
+  })
+
+  it('shares one presentation layer between the Branch bar and the Topic bar', () => {
+    // 用户第 5 条：两个 bar "底层是不是可以复用一个可复用组件"。判据不是"看起来一样"，是
+    // **真的是同一段代码**——竖切闭合检查：只接一侧就等于抽了个组件却没接上，两处仍会各自漂移
+    // （此前正是如此：Branch 侧头像截断到 4 给 +N，Topic 侧无上限铺完；一个 header 用 small
+    // 一个用 em）。这条断言两个面板都经同一批共享符号渲染。
+    for (const source of [surfaceToolDockSource, branchesPanelSource]) {
+      expect(source).toContain("from './SelectorList'")
+      expect(source).toContain('<SelectorListHeader')
+      expect(source).toContain('<SelectorRow')
+      expect(source).toContain('<SelectorPresence')
+    }
+    // 反向：两侧都不得再留一份自己的写法。
+    expect(branchesPanelSource).not.toContain('branch-row__agents')
+    expect(branchesPanelSource).not.toContain('branch-row__identity')
+    expect(surfaceToolDockSource).not.toContain('workspace-topic-agents')
+    expect(surfaceToolDockSource).not.toContain('workspace-topic-title-line')
+    // 而那些写法的 CSS 也要一起走，否则死规则会留在表里让人以为还有第二套。
+    expect(stylesSource).not.toContain('.branch-row__agents')
+    expect(stylesSource).not.toContain('.workspace-topic-title-line')
+  })
+
+  it('caps the avatar cluster on both bars with one shared number', () => {
+    // 叠压省宽度但不是无限的。Topic 侧此前无上限（直接 map 全量），一个 8 人的 Topic 会把
+    // 标题挤没；共享后两侧取同一个上限，超出折成 +N 且全名进 tooltip。
+    expect(SELECTOR_PRESENCE_MAX).toBeGreaterThan(0)
+    expect(selectorListSource).toContain('agents.slice(0, max)')
+    expect(selectorListSource).toContain('const hidden = agents.length - visible.length')
+    // 折起来的不能就此消失：簇整体的 tooltip 仍报全部名字。
+    expect(selectorListSource).toContain('const roster = agents')
   })
 
   it('clamps the persisted panel width to the density budget', () => {
