@@ -11,8 +11,8 @@ cold-park 没有被复用成另一套判据。Main 侧 Browser release/restore �
 桥接，Renderer 只提交 URL/Profile/Viewport 等重建输入。
 
 资源探针与实现共同把 RSS/working-set 定义为观测，不把 allocator 或 Chromium helper 的高水位
-直接称为泄漏。正式 receipt 仍须在最终 Feature commit 后重跑，因为 receipt 的 commit 身份和
-工作树指纹必须绑定到最终候选。
+直接称为泄漏。正式 receipt 已在最终 Feature commit `7deb81d81f7a429a729d64a5405b862fdd9f1a79`
+上重跑，并验证 `sourceCommitStable=true`、`worktreeStable=true`。
 
 ## 正确性与生命周期边界
 
@@ -91,17 +91,17 @@ AgentMux commit、Electron、ctxmux manifest、平台、隔离目录清理和 re
 探针使用 `--expose-gc` 报告 `heapUsedAfterGc`，并明确 RSS 高水位是 diagnostic-only；只有非有限
 数据、owner 不收敛或清理失败会阻断。
 
-最近一次已成功 receipt（最终提交前的测量，仅作更新依据）显示：
+正式 receipt（绑定最终提交）显示：
 
 | 阶段 | 总 working set KiB | Browser owner | Monaco editor/model | Terminal views |
 | --- | ---: | ---: | ---: | ---: |
-| idle | 562,713 | 0 | 0/0 | 1 |
-| single hidden Workspace | 594,993 | 0 | 0/0 | 2 |
-| multiple hidden Workspaces/Tabs | 607,395 | 0 | 0/0 | 4 |
-| Terminal | 610,086 | 0 | 0/0 | 3 |
-| Monaco | 879,796 | 0 | 1/1 | 3 |
-| Browser | 1,090,685 | 1 | 0/0 | 2 |
-| Browser released | 1,000,717 | 0 | 0/0 | 3 |
+| idle | 575,600 | 0 | 0/0 | 1 |
+| single hidden Workspace | 576,557 | 0 | 0/0 | 2 |
+| multiple hidden Workspaces/Tabs | 596,883 | 0 | 0/0 | 4 |
+| Terminal | 595,985 | 0 | 0/0 | 3 |
+| Monaco | 868,170 | 0 | 1/1 | 3 |
+| Browser | 1,061,767 | 1 | 0/0 | 2 |
+| Browser released | 979,686 | 0 | 0/0 | 3 |
 
 这组数只能说明同条件下的观测与 owner 收敛，不构成产品 RSS 承诺，也不单独证明泄漏。
 
@@ -120,6 +120,5 @@ AgentMux commit、Electron、ctxmux manifest、平台、隔离目录清理和 re
 
 ## 处置
 
-以上均不阻断当前 T-003：没有 P0/P1，且不改变本 Feature 的 acceptance。正式 closeout 前需在
-最终 Feature commit/HEAD 上重新运行 `pnpm --filter @agentmux/desktop measure:desktop`，将新的
-receipt 同步到 baseline JSON/Markdown，再执行 Feature Tracker gates。
+以上均不阻断当前 T-003：没有 P0/P1，且不改变本 Feature 的 acceptance。正式 receipt 已同步到
+baseline JSON/Markdown；可继续执行 Feature Tracker gates 与 closeout。

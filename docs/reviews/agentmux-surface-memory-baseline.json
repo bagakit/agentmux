@@ -1,20 +1,22 @@
 {
   "schema": "agentmux.t001-desktop-resources.baseline.v1",
   "sourceReceiptSchema": "agentmux.t001-desktop-resources.v2",
-  "measuredAt": "2026-08-30T19:04:26.200Z",
+  "measuredAt": "2026-08-30T19:57:11.931Z",
   "platform": "darwin-arm64",
   "node": "v24.18.1",
   "electron": "43.3.0",
   "identity": {
     "agentmux": {
-      "sourceCommit": "36a732561992aab56a2ed4fb89d3f2f37b8ad594",
-      "endCommit": "36a732561992aab56a2ed4fb89d3f2f37b8ad594",
-      "sourceCommitStable": true,
+      "sourceCommit": "7deb81d81f7a429a729d64a5405b862fdd9f1a79",
+      "endCommit": "7deb81d81f7a429a729d64a5405b862fdd9f1a79",
+      "trackedDiffClean": true,
       "worktreeStable": true,
-      "trackedDiffClean": false,
-      "statusEntryCount": 38,
-      "statusSha256AtStart": "87ee827b962ca5415dfd0dfb2c7bf4a325b0f2ab0579888995d81c509a9f2d1a",
-      "statusSha256AtEnd": "87ee827b962ca5415dfd0dfb2c7bf4a325b0f2ab0579888995d81c509a9f2d1a"
+      "sourceCommitStable": true,
+      "statusAtStart": "",
+      "statusAtEnd": "",
+      "statusEntryCount": 0,
+      "statusSha256AtStart": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "statusSha256AtEnd": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     "ctxmux": {
       "sourceCommit": "073e206407ce28331aa882c2c80e9354cfe2879a",
@@ -46,64 +48,913 @@
   "phases": [
     {
       "id": "idle",
-      "totalWorkingSetKiB": 571268,
-      "owners": {"browserWebContents": 0, "monacoEditors": 0, "monacoModels": 0, "documents": 0, "fileWatchers": 0, "runtimeSubscriptions": 4, "terminalViews": 1, "terminalAddons": 4, "terminalListeners": 6, "sessionAttachmentOwners": 1, "sessionAttachmentLeases": 1},
-      "coreCtxmux": {"sessionCount": 1, "runCount": 1, "runningRunCount": 1, "attachmentOwners": 1, "attachmentLeases": 1},
-      "processWorkingSetKiB": {"main": 238029, "renderer": 173933, "gpu": 114074, "utility": 45232, "other": 0},
-      "rendererMemory": {"heapUsedBeforeKiB": 14844, "heapUsedAfterGcKiB": 14844, "gcAvailable": true}
+      "label": "idle",
+      "surface": "idle",
+      "totalWorkingSetKiB": 575600,
+      "owners": {
+        "browserWebContents": 0,
+        "fileWatchers": 0,
+        "monacoEditors": 0,
+        "monacoModels": 0,
+        "documents": 0,
+        "runtimeSubscriptions": 4,
+        "terminalViews": 1,
+        "terminalAddons": 4,
+        "terminalListeners": 6,
+        "sessionAttachmentOwners": 1,
+        "sessionAttachmentLeases": 1
+      },
+      "coreCtxmux": {
+        "sessionCount": 1,
+        "runCount": 1,
+        "runningRunCount": 1,
+        "attachmentOwners": 1,
+        "attachmentLeases": 1,
+        "runtimeSubscriptions": 4,
+        "note": "Core/ctxmux lifecycle and attachment facts; these counts are not Renderer/Main memory."
+      },
+      "rendererMainSurface": {
+        "terminalViews": 1,
+        "terminalAddons": 4,
+        "terminalListeners": 6,
+        "monacoEditors": 0,
+        "monacoModels": 0,
+        "documents": 0,
+        "fileWatchers": 0,
+        "browserWebContents": 0,
+        "processWorkingSetKiB": {
+          "main": 238845,
+          "renderer": 175667,
+          "gpu": 115712,
+          "utility": 45376,
+          "other": 0
+        },
+        "note": "Renderer/Main surface owner counts and process working-set observations; Browser helpers/shared pages are not assigned to Terminal or Monaco."
+      },
+      "rendererMemory": {
+        "supported": true,
+        "gcAvailable": true,
+        "heapUsedBeforeKiB": 14844,
+        "heapUsedAfterGcKiB": 14844,
+        "heapTotalKiB": 18848,
+        "note": "heapUsedAfterGc is an observation; RSS/working-set may retain allocator pages."
+      },
+      "processes": [
+        {
+          "pid": 50581,
+          "type": "Browser",
+          "workingSetKiB": 238845,
+          "privateKiB": 0
+        },
+        {
+          "pid": 51110,
+          "type": "GPU",
+          "workingSetKiB": 115712,
+          "privateKiB": 0
+        },
+        {
+          "pid": 51111,
+          "type": "Utility",
+          "workingSetKiB": 45376,
+          "privateKiB": 0
+        },
+        {
+          "pid": 51478,
+          "type": "Tab",
+          "workingSetKiB": 175667,
+          "privateKiB": 0
+        }
+      ]
     },
     {
       "id": "single-hidden-workspace",
-      "totalWorkingSetKiB": 596733,
-      "owners": {"browserWebContents": 0, "monacoEditors": 0, "monacoModels": 0, "documents": 0, "fileWatchers": 0, "runtimeSubscriptions": 4, "terminalViews": 2, "terminalAddons": 8, "terminalListeners": 12, "sessionAttachmentOwners": 2, "sessionAttachmentLeases": 2},
-      "coreCtxmux": {"sessionCount": 2, "runCount": 2, "runningRunCount": 2, "attachmentOwners": 2, "attachmentLeases": 2},
-      "processWorkingSetKiB": {"main": 233542, "renderer": 195178, "gpu": 122771, "utility": 45242, "other": 0},
-      "rendererMemory": {"heapUsedBeforeKiB": 14844, "heapUsedAfterGcKiB": 14844, "gcAvailable": true}
+      "label": "single-hidden-workspace",
+      "surface": "workspace",
+      "totalWorkingSetKiB": 576557,
+      "owners": {
+        "browserWebContents": 0,
+        "fileWatchers": 0,
+        "monacoEditors": 0,
+        "monacoModels": 0,
+        "documents": 0,
+        "runtimeSubscriptions": 4,
+        "terminalViews": 2,
+        "terminalAddons": 8,
+        "terminalListeners": 12,
+        "sessionAttachmentOwners": 2,
+        "sessionAttachmentLeases": 2
+      },
+      "coreCtxmux": {
+        "sessionCount": 2,
+        "runCount": 2,
+        "runningRunCount": 2,
+        "attachmentOwners": 2,
+        "attachmentLeases": 2,
+        "runtimeSubscriptions": 4,
+        "note": "Core/ctxmux lifecycle and attachment facts; these counts are not Renderer/Main memory."
+      },
+      "rendererMainSurface": {
+        "terminalViews": 2,
+        "terminalAddons": 8,
+        "terminalListeners": 12,
+        "monacoEditors": 0,
+        "monacoModels": 0,
+        "documents": 0,
+        "fileWatchers": 0,
+        "browserWebContents": 0,
+        "processWorkingSetKiB": {
+          "main": 228314,
+          "renderer": 186944,
+          "gpu": 115923,
+          "utility": 45376,
+          "other": 0
+        },
+        "note": "Renderer/Main surface owner counts and process working-set observations; Browser helpers/shared pages are not assigned to Terminal or Monaco."
+      },
+      "rendererMemory": {
+        "supported": true,
+        "gcAvailable": true,
+        "heapUsedBeforeKiB": 14844,
+        "heapUsedAfterGcKiB": 14844,
+        "heapTotalKiB": 18848,
+        "note": "heapUsedAfterGc is an observation; RSS/working-set may retain allocator pages."
+      },
+      "processes": [
+        {
+          "pid": 50581,
+          "type": "Browser",
+          "workingSetKiB": 228314,
+          "privateKiB": 0
+        },
+        {
+          "pid": 51110,
+          "type": "GPU",
+          "workingSetKiB": 115923,
+          "privateKiB": 0
+        },
+        {
+          "pid": 51111,
+          "type": "Utility",
+          "workingSetKiB": 45376,
+          "privateKiB": 0
+        },
+        {
+          "pid": 51478,
+          "type": "Tab",
+          "workingSetKiB": 186944,
+          "privateKiB": 0
+        }
+      ]
     },
     {
       "id": "multiple-hidden-workspaces-tabs",
-      "totalWorkingSetKiB": 609392,
-      "owners": {"browserWebContents": 0, "monacoEditors": 0, "monacoModels": 0, "documents": 0, "fileWatchers": 0, "runtimeSubscriptions": 4, "terminalViews": 4, "terminalAddons": 16, "terminalListeners": 24, "sessionAttachmentOwners": 4, "sessionAttachmentLeases": 4},
-      "coreCtxmux": {"sessionCount": 4, "runCount": 4, "runningRunCount": 4, "attachmentOwners": 4, "attachmentLeases": 4},
-      "processWorkingSetKiB": {"main": 236784, "renderer": 204854, "gpu": 122474, "utility": 45280, "other": 0},
-      "rendererMemory": {"heapUsedBeforeKiB": 14844, "heapUsedAfterGcKiB": 14844, "gcAvailable": true}
+      "label": "multiple-hidden-workspaces-tabs",
+      "surface": "workspace",
+      "totalWorkingSetKiB": 596883,
+      "owners": {
+        "browserWebContents": 0,
+        "fileWatchers": 0,
+        "monacoEditors": 0,
+        "monacoModels": 0,
+        "documents": 0,
+        "runtimeSubscriptions": 4,
+        "terminalViews": 4,
+        "terminalAddons": 16,
+        "terminalListeners": 24,
+        "sessionAttachmentOwners": 4,
+        "sessionAttachmentLeases": 4
+      },
+      "coreCtxmux": {
+        "sessionCount": 4,
+        "runCount": 4,
+        "runningRunCount": 4,
+        "attachmentOwners": 4,
+        "attachmentLeases": 4,
+        "runtimeSubscriptions": 4,
+        "note": "Core/ctxmux lifecycle and attachment facts; these counts are not Renderer/Main memory."
+      },
+      "rendererMainSurface": {
+        "terminalViews": 4,
+        "terminalAddons": 16,
+        "terminalListeners": 24,
+        "monacoEditors": 0,
+        "monacoModels": 0,
+        "documents": 0,
+        "fileWatchers": 0,
+        "browserWebContents": 0,
+        "processWorkingSetKiB": {
+          "main": 231779,
+          "renderer": 201440,
+          "gpu": 118240,
+          "utility": 45424,
+          "other": 0
+        },
+        "note": "Renderer/Main surface owner counts and process working-set observations; Browser helpers/shared pages are not assigned to Terminal or Monaco."
+      },
+      "rendererMemory": {
+        "supported": true,
+        "gcAvailable": true,
+        "heapUsedBeforeKiB": 14844,
+        "heapUsedAfterGcKiB": 14844,
+        "heapTotalKiB": 18848,
+        "note": "heapUsedAfterGc is an observation; RSS/working-set may retain allocator pages."
+      },
+      "processes": [
+        {
+          "pid": 50581,
+          "type": "Browser",
+          "workingSetKiB": 231779,
+          "privateKiB": 0
+        },
+        {
+          "pid": 51110,
+          "type": "GPU",
+          "workingSetKiB": 118240,
+          "privateKiB": 0
+        },
+        {
+          "pid": 51111,
+          "type": "Utility",
+          "workingSetKiB": 45424,
+          "privateKiB": 0
+        },
+        {
+          "pid": 51478,
+          "type": "Tab",
+          "workingSetKiB": 201440,
+          "privateKiB": 0
+        }
+      ]
     },
     {
       "id": "terminal",
-      "totalWorkingSetKiB": 609258,
-      "owners": {"browserWebContents": 0, "monacoEditors": 0, "monacoModels": 0, "documents": 0, "fileWatchers": 0, "runtimeSubscriptions": 4, "terminalViews": 3, "terminalAddons": 12, "terminalListeners": 18, "sessionAttachmentOwners": 3, "sessionAttachmentLeases": 3},
-      "coreCtxmux": {"sessionCount": 4, "runCount": 4, "runningRunCount": 3, "attachmentOwners": 3, "attachmentLeases": 3},
-      "processWorkingSetKiB": {"main": 235312, "renderer": 209504, "gpu": 119194, "utility": 45248, "other": 0},
-      "rendererMemory": {"heapUsedBeforeKiB": 14844, "heapUsedAfterGcKiB": 14844, "gcAvailable": true}
+      "label": "terminal",
+      "surface": "terminal",
+      "totalWorkingSetKiB": 595985,
+      "owners": {
+        "browserWebContents": 0,
+        "fileWatchers": 0,
+        "monacoEditors": 0,
+        "monacoModels": 0,
+        "documents": 0,
+        "runtimeSubscriptions": 4,
+        "terminalViews": 3,
+        "terminalAddons": 12,
+        "terminalListeners": 18,
+        "sessionAttachmentOwners": 3,
+        "sessionAttachmentLeases": 3
+      },
+      "coreCtxmux": {
+        "sessionCount": 4,
+        "runCount": 4,
+        "runningRunCount": 3,
+        "attachmentOwners": 3,
+        "attachmentLeases": 3,
+        "runtimeSubscriptions": 4,
+        "note": "Core/ctxmux lifecycle and attachment facts; these counts are not Renderer/Main memory."
+      },
+      "rendererMainSurface": {
+        "terminalViews": 3,
+        "terminalAddons": 12,
+        "terminalListeners": 18,
+        "monacoEditors": 0,
+        "monacoModels": 0,
+        "documents": 0,
+        "fileWatchers": 0,
+        "browserWebContents": 0,
+        "processWorkingSetKiB": {
+          "main": 230410,
+          "renderer": 205101,
+          "gpu": 115130,
+          "utility": 45344,
+          "other": 0
+        },
+        "note": "Renderer/Main surface owner counts and process working-set observations; Browser helpers/shared pages are not assigned to Terminal or Monaco."
+      },
+      "rendererMemory": {
+        "supported": true,
+        "gcAvailable": true,
+        "heapUsedBeforeKiB": 14844,
+        "heapUsedAfterGcKiB": 14844,
+        "heapTotalKiB": 18848,
+        "note": "heapUsedAfterGc is an observation; RSS/working-set may retain allocator pages."
+      },
+      "processes": [
+        {
+          "pid": 50581,
+          "type": "Browser",
+          "workingSetKiB": 230410,
+          "privateKiB": 0
+        },
+        {
+          "pid": 51110,
+          "type": "GPU",
+          "workingSetKiB": 115130,
+          "privateKiB": 0
+        },
+        {
+          "pid": 51111,
+          "type": "Utility",
+          "workingSetKiB": 45344,
+          "privateKiB": 0
+        },
+        {
+          "pid": 51478,
+          "type": "Tab",
+          "workingSetKiB": 205101,
+          "privateKiB": 0
+        }
+      ]
     },
     {
       "id": "monaco",
-      "totalWorkingSetKiB": 880570,
-      "owners": {"browserWebContents": 0, "monacoEditors": 1, "monacoModels": 1, "documents": 1, "fileWatchers": 1, "runtimeSubscriptions": 4, "terminalViews": 3, "terminalAddons": 12, "terminalListeners": 18, "sessionAttachmentOwners": 3, "sessionAttachmentLeases": 3},
-      "coreCtxmux": {"sessionCount": 4, "runCount": 4, "runningRunCount": 3, "attachmentOwners": 3, "attachmentLeases": 3},
-      "processWorkingSetKiB": {"main": 238640, "renderer": 473232, "gpu": 123226, "utility": 45472, "other": 0},
-      "rendererMemory": {"heapUsedBeforeKiB": 14844, "heapUsedAfterGcKiB": 14844, "gcAvailable": true}
+      "label": "monaco",
+      "surface": "monaco",
+      "totalWorkingSetKiB": 868170,
+      "owners": {
+        "browserWebContents": 0,
+        "fileWatchers": 1,
+        "monacoEditors": 1,
+        "monacoModels": 1,
+        "documents": 1,
+        "runtimeSubscriptions": 4,
+        "terminalViews": 3,
+        "terminalAddons": 12,
+        "terminalListeners": 18,
+        "sessionAttachmentOwners": 3,
+        "sessionAttachmentLeases": 3
+      },
+      "coreCtxmux": {
+        "sessionCount": 4,
+        "runCount": 4,
+        "runningRunCount": 3,
+        "attachmentOwners": 3,
+        "attachmentLeases": 3,
+        "runtimeSubscriptions": 4,
+        "note": "Core/ctxmux lifecycle and attachment facts; these counts are not Renderer/Main memory."
+      },
+      "rendererMainSurface": {
+        "terminalViews": 3,
+        "terminalAddons": 12,
+        "terminalListeners": 18,
+        "monacoEditors": 1,
+        "monacoModels": 1,
+        "documents": 1,
+        "fileWatchers": 1,
+        "browserWebContents": 0,
+        "processWorkingSetKiB": {
+          "main": 233456,
+          "renderer": 469901,
+          "gpu": 119261,
+          "utility": 45552,
+          "other": 0
+        },
+        "note": "Renderer/Main surface owner counts and process working-set observations; Browser helpers/shared pages are not assigned to Terminal or Monaco."
+      },
+      "rendererMemory": {
+        "supported": true,
+        "gcAvailable": true,
+        "heapUsedBeforeKiB": 14844,
+        "heapUsedAfterGcKiB": 14844,
+        "heapTotalKiB": 18848,
+        "note": "heapUsedAfterGc is an observation; RSS/working-set may retain allocator pages."
+      },
+      "processes": [
+        {
+          "pid": 50581,
+          "type": "Browser",
+          "workingSetKiB": 233456,
+          "privateKiB": 0
+        },
+        {
+          "pid": 51110,
+          "type": "GPU",
+          "workingSetKiB": 119261,
+          "privateKiB": 0
+        },
+        {
+          "pid": 51111,
+          "type": "Utility",
+          "workingSetKiB": 45552,
+          "privateKiB": 0
+        },
+        {
+          "pid": 51478,
+          "type": "Tab",
+          "workingSetKiB": 469901,
+          "privateKiB": 0
+        }
+      ]
     },
     {
       "id": "browser",
-      "totalWorkingSetKiB": 1085111,
-      "owners": {"browserWebContents": 1, "monacoEditors": 0, "monacoModels": 0, "documents": 0, "fileWatchers": 0, "runtimeSubscriptions": 4, "terminalViews": 2, "terminalAddons": 8, "terminalListeners": 12, "sessionAttachmentOwners": 2, "sessionAttachmentLeases": 2},
-      "coreCtxmux": {"sessionCount": 11, "runCount": 11, "runningRunCount": 3, "attachmentOwners": 2, "attachmentLeases": 2},
-      "processWorkingSetKiB": {"main": 308525, "renderer": 606986, "gpu": 123760, "utility": 45840, "other": 0},
-      "rendererMemory": {"heapUsedBeforeKiB": 14844, "heapUsedAfterGcKiB": 14844, "gcAvailable": true}
+      "label": "browser",
+      "surface": "browser",
+      "totalWorkingSetKiB": 1061767,
+      "owners": {
+        "browserWebContents": 1,
+        "fileWatchers": 0,
+        "monacoEditors": 0,
+        "monacoModels": 0,
+        "documents": 0,
+        "runtimeSubscriptions": 4,
+        "terminalViews": 2,
+        "terminalAddons": 8,
+        "terminalListeners": 12,
+        "sessionAttachmentOwners": 2,
+        "sessionAttachmentLeases": 2
+      },
+      "coreCtxmux": {
+        "sessionCount": 11,
+        "runCount": 11,
+        "runningRunCount": 3,
+        "attachmentOwners": 2,
+        "attachmentLeases": 2,
+        "runtimeSubscriptions": 4,
+        "note": "Core/ctxmux lifecycle and attachment facts; these counts are not Renderer/Main memory."
+      },
+      "rendererMainSurface": {
+        "terminalViews": 2,
+        "terminalAddons": 8,
+        "terminalListeners": 12,
+        "monacoEditors": 0,
+        "monacoModels": 0,
+        "documents": 0,
+        "fileWatchers": 0,
+        "browserWebContents": 1,
+        "processWorkingSetKiB": {
+          "main": 299741,
+          "renderer": 596810,
+          "gpu": 119136,
+          "utility": 46080,
+          "other": 0
+        },
+        "note": "Renderer/Main surface owner counts and process working-set observations; Browser helpers/shared pages are not assigned to Terminal or Monaco."
+      },
+      "rendererMemory": {
+        "supported": true,
+        "gcAvailable": true,
+        "heapUsedBeforeKiB": 14844,
+        "heapUsedAfterGcKiB": 14844,
+        "heapTotalKiB": 18848,
+        "note": "heapUsedAfterGc is an observation; RSS/working-set may retain allocator pages."
+      },
+      "processes": [
+        {
+          "pid": 50581,
+          "type": "Browser",
+          "workingSetKiB": 299741,
+          "privateKiB": 0
+        },
+        {
+          "pid": 51110,
+          "type": "GPU",
+          "workingSetKiB": 119136,
+          "privateKiB": 0
+        },
+        {
+          "pid": 51111,
+          "type": "Utility",
+          "workingSetKiB": 46080,
+          "privateKiB": 0
+        },
+        {
+          "pid": 51478,
+          "type": "Tab",
+          "workingSetKiB": 515616,
+          "privateKiB": 0
+        },
+        {
+          "pid": 62409,
+          "type": "Tab",
+          "workingSetKiB": 81194,
+          "privateKiB": 0
+        }
+      ]
     },
     {
-      "id": "browser-released",
-      "totalWorkingSetKiB": 1002077,
-      "owners": {"browserWebContents": 0, "monacoEditors": 0, "monacoModels": 0, "documents": 0, "fileWatchers": 0, "runtimeSubscriptions": 4, "terminalViews": 3, "terminalAddons": 12, "terminalListeners": 18, "sessionAttachmentOwners": 3, "sessionAttachmentLeases": 3},
-      "coreCtxmux": {"sessionCount": 11, "runCount": 11, "runningRunCount": 3, "attachmentOwners": 3, "attachmentLeases": 3},
-      "processWorkingSetKiB": {"main": 307437, "renderer": 525056, "gpu": 123744, "utility": 45840, "other": 0},
-      "rendererMemory": {"heapUsedBeforeKiB": 14844, "heapUsedAfterGcKiB": 14844, "gcAvailable": true}
+      "id": "terminalBaseline",
+      "label": "terminal-baseline",
+      "surface": "terminal",
+      "totalWorkingSetKiB": 595533,
+      "owners": {
+        "browserWebContents": 0,
+        "fileWatchers": 0,
+        "monacoEditors": 0,
+        "monacoModels": 0,
+        "documents": 0,
+        "runtimeSubscriptions": 4,
+        "terminalViews": 3,
+        "terminalAddons": 12,
+        "terminalListeners": 18,
+        "sessionAttachmentOwners": 3,
+        "sessionAttachmentLeases": 3
+      },
+      "coreCtxmux": {
+        "sessionCount": 4,
+        "runCount": 4,
+        "runningRunCount": 3,
+        "attachmentOwners": 3,
+        "attachmentLeases": 3,
+        "runtimeSubscriptions": 4,
+        "note": "Core/ctxmux lifecycle and attachment facts; these counts are not Renderer/Main memory."
+      },
+      "rendererMainSurface": {
+        "terminalViews": 3,
+        "terminalAddons": 12,
+        "terminalListeners": 18,
+        "monacoEditors": 0,
+        "monacoModels": 0,
+        "documents": 0,
+        "fileWatchers": 0,
+        "browserWebContents": 0,
+        "processWorkingSetKiB": {
+          "main": 229373,
+          "renderer": 202947,
+          "gpu": 117869,
+          "utility": 45344,
+          "other": 0
+        },
+        "note": "Renderer/Main surface owner counts and process working-set observations; Browser helpers/shared pages are not assigned to Terminal or Monaco."
+      },
+      "rendererMemory": {
+        "supported": true,
+        "gcAvailable": true,
+        "heapUsedBeforeKiB": 14844,
+        "heapUsedAfterGcKiB": 14844,
+        "heapTotalKiB": 18848,
+        "note": "heapUsedAfterGc is an observation; RSS/working-set may retain allocator pages."
+      },
+      "processes": [
+        {
+          "pid": 50581,
+          "type": "Browser",
+          "workingSetKiB": 229373,
+          "privateKiB": 0
+        },
+        {
+          "pid": 51110,
+          "type": "GPU",
+          "workingSetKiB": 117869,
+          "privateKiB": 0
+        },
+        {
+          "pid": 51111,
+          "type": "Utility",
+          "workingSetKiB": 45344,
+          "privateKiB": 0
+        },
+        {
+          "pid": 51478,
+          "type": "Tab",
+          "workingSetKiB": 202947,
+          "privateKiB": 0
+        }
+      ]
+    },
+    {
+      "id": "editor",
+      "label": "monaco",
+      "surface": "monaco",
+      "totalWorkingSetKiB": 868170,
+      "owners": {
+        "browserWebContents": 0,
+        "fileWatchers": 1,
+        "monacoEditors": 1,
+        "monacoModels": 1,
+        "documents": 1,
+        "runtimeSubscriptions": 4,
+        "terminalViews": 3,
+        "terminalAddons": 12,
+        "terminalListeners": 18,
+        "sessionAttachmentOwners": 3,
+        "sessionAttachmentLeases": 3
+      },
+      "coreCtxmux": {
+        "sessionCount": 4,
+        "runCount": 4,
+        "runningRunCount": 3,
+        "attachmentOwners": 3,
+        "attachmentLeases": 3,
+        "runtimeSubscriptions": 4,
+        "note": "Core/ctxmux lifecycle and attachment facts; these counts are not Renderer/Main memory."
+      },
+      "rendererMainSurface": {
+        "terminalViews": 3,
+        "terminalAddons": 12,
+        "terminalListeners": 18,
+        "monacoEditors": 1,
+        "monacoModels": 1,
+        "documents": 1,
+        "fileWatchers": 1,
+        "browserWebContents": 0,
+        "processWorkingSetKiB": {
+          "main": 233456,
+          "renderer": 469901,
+          "gpu": 119261,
+          "utility": 45552,
+          "other": 0
+        },
+        "note": "Renderer/Main surface owner counts and process working-set observations; Browser helpers/shared pages are not assigned to Terminal or Monaco."
+      },
+      "rendererMemory": {
+        "supported": true,
+        "gcAvailable": true,
+        "heapUsedBeforeKiB": 14844,
+        "heapUsedAfterGcKiB": 14844,
+        "heapTotalKiB": 18848,
+        "note": "heapUsedAfterGc is an observation; RSS/working-set may retain allocator pages."
+      },
+      "processes": [
+        {
+          "pid": 50581,
+          "type": "Browser",
+          "workingSetKiB": 233456,
+          "privateKiB": 0
+        },
+        {
+          "pid": 51110,
+          "type": "GPU",
+          "workingSetKiB": 119261,
+          "privateKiB": 0
+        },
+        {
+          "pid": 51111,
+          "type": "Utility",
+          "workingSetKiB": 45552,
+          "privateKiB": 0
+        },
+        {
+          "pid": 51478,
+          "type": "Tab",
+          "workingSetKiB": 469901,
+          "privateKiB": 0
+        }
+      ]
+    },
+    {
+      "id": "released",
+      "label": "released-panes",
+      "surface": "release",
+      "totalWorkingSetKiB": 897475,
+      "owners": {
+        "browserWebContents": 0,
+        "fileWatchers": 0,
+        "monacoEditors": 0,
+        "monacoModels": 0,
+        "documents": 0,
+        "runtimeSubscriptions": 4,
+        "terminalViews": 3,
+        "terminalAddons": 12,
+        "terminalListeners": 18,
+        "sessionAttachmentOwners": 3,
+        "sessionAttachmentLeases": 3
+      },
+      "coreCtxmux": {
+        "sessionCount": 5,
+        "runCount": 5,
+        "runningRunCount": 3,
+        "attachmentOwners": 3,
+        "attachmentLeases": 3,
+        "runtimeSubscriptions": 4,
+        "note": "Core/ctxmux lifecycle and attachment facts; these counts are not Renderer/Main memory."
+      },
+      "rendererMainSurface": {
+        "terminalViews": 3,
+        "terminalAddons": 12,
+        "terminalListeners": 18,
+        "monacoEditors": 0,
+        "monacoModels": 0,
+        "documents": 0,
+        "fileWatchers": 0,
+        "browserWebContents": 0,
+        "processWorkingSetKiB": {
+          "main": 253942,
+          "renderer": 478429,
+          "gpu": 119536,
+          "utility": 45568,
+          "other": 0
+        },
+        "note": "Renderer/Main surface owner counts and process working-set observations; Browser helpers/shared pages are not assigned to Terminal or Monaco."
+      },
+      "rendererMemory": {
+        "supported": true,
+        "gcAvailable": true,
+        "heapUsedBeforeKiB": 14844,
+        "heapUsedAfterGcKiB": 14844,
+        "heapTotalKiB": 18848,
+        "note": "heapUsedAfterGc is an observation; RSS/working-set may retain allocator pages."
+      },
+      "processes": [
+        {
+          "pid": 50581,
+          "type": "Browser",
+          "workingSetKiB": 253942,
+          "privateKiB": 0
+        },
+        {
+          "pid": 51110,
+          "type": "GPU",
+          "workingSetKiB": 119536,
+          "privateKiB": 0
+        },
+        {
+          "pid": 51111,
+          "type": "Utility",
+          "workingSetKiB": 45568,
+          "privateKiB": 0
+        },
+        {
+          "pid": 51478,
+          "type": "Tab",
+          "workingSetKiB": 478429,
+          "privateKiB": 0
+        }
+      ]
+    },
+    {
+      "id": "browserReleased",
+      "label": "browser-released",
+      "surface": "browser",
+      "totalWorkingSetKiB": 979686,
+      "owners": {
+        "browserWebContents": 0,
+        "fileWatchers": 0,
+        "monacoEditors": 0,
+        "monacoModels": 0,
+        "documents": 0,
+        "runtimeSubscriptions": 4,
+        "terminalViews": 3,
+        "terminalAddons": 12,
+        "terminalListeners": 18,
+        "sessionAttachmentOwners": 3,
+        "sessionAttachmentLeases": 3
+      },
+      "coreCtxmux": {
+        "sessionCount": 11,
+        "runCount": 11,
+        "runningRunCount": 3,
+        "attachmentOwners": 3,
+        "attachmentLeases": 3,
+        "runtimeSubscriptions": 4,
+        "note": "Core/ctxmux lifecycle and attachment facts; these counts are not Renderer/Main memory."
+      },
+      "rendererMainSurface": {
+        "terminalViews": 3,
+        "terminalAddons": 12,
+        "terminalListeners": 18,
+        "monacoEditors": 0,
+        "monacoModels": 0,
+        "documents": 0,
+        "fileWatchers": 0,
+        "browserWebContents": 0,
+        "processWorkingSetKiB": {
+          "main": 299488,
+          "renderer": 515056,
+          "gpu": 119062,
+          "utility": 46080,
+          "other": 0
+        },
+        "note": "Renderer/Main surface owner counts and process working-set observations; Browser helpers/shared pages are not assigned to Terminal or Monaco."
+      },
+      "rendererMemory": {
+        "supported": true,
+        "gcAvailable": true,
+        "heapUsedBeforeKiB": 14844,
+        "heapUsedAfterGcKiB": 14844,
+        "heapTotalKiB": 18848,
+        "note": "heapUsedAfterGc is an observation; RSS/working-set may retain allocator pages."
+      },
+      "processes": [
+        {
+          "pid": 50581,
+          "type": "Browser",
+          "workingSetKiB": 299488,
+          "privateKiB": 0
+        },
+        {
+          "pid": 51110,
+          "type": "GPU",
+          "workingSetKiB": 119062,
+          "privateKiB": 0
+        },
+        {
+          "pid": 51111,
+          "type": "Utility",
+          "workingSetKiB": 46080,
+          "privateKiB": 0
+        },
+        {
+          "pid": 51478,
+          "type": "Tab",
+          "workingSetKiB": 515056,
+          "privateKiB": 0
+        }
+      ]
     }
   ],
-  "topology": {"hiddenWorkspaceCount": 2, "workspaceSlots": [{"id": "resource-workspace-a", "visible": false, "tabs": 1, "terminalTabs": 1}, {"id": "resource-workspace-b", "visible": false, "tabs": 1, "terminalTabs": 1}, {"id": "resource-workspace-c", "visible": true, "tabs": 2, "terminalTabs": 2}]},
-  "releaseCycles": {"labels": ["released-panes", "released-panes-2", "released-panes-3", "released-panes-4", "released-panes-5", "released-panes-6", "released-panes-7"], "totalWorkingSetKiB": [911699, 943162, 972323, 993126, 995363, 990346, 1001514], "ownerConvergence": "all seven samples plus browser-released retained terminalViews=3, monacoEditors=0, monacoModels=0, documents=0, fileWatchers=0, browserWebContents=0, runtimeSubscriptions=4, sessionAttachmentOwners=3, sessionAttachmentLeases=3"},
-  "deltasKiB": {"terminalWorkingSet": -4326, "terminalWorkingSetFromIdle": 37990, "editorWorkingSet": 266986, "editorWorkingSetFromIdle": 309302, "browserWorkingSet": 173412, "browserReleasedWorkingSet": 90378, "maxReleasedWorkingSet": 1002077, "maxReleasedIncrement": 90378, "totalReleaseDrift": 89815, "warmupReleaseDrift": 31463, "steadyReleaseDrift": 29191},
-  "diagnostics": {"mode": "diagnostic-only", "exceededWorkingSetDiagnostics": [], "note": "Reference working-set limits are diagnostic only; allocator/Chromium high-water marks do not fail the probe or prove a leak.", "referenceLimitsKiB": {"terminalIncrement": 262144, "editorIncrement": 524288, "browserIncrement": 262144, "browserReleasedIncrement": 262144, "maxReleasedIncrement": 589824, "maxReleasedTotal": 1048576, "releaseDrift": 131072}},
-  "harness": {"isolatedRuntime": true, "receiptlessDaemonCleanup": true, "ownedDaemonCount": 1, "daemonCleanup": true}
+  "topology": {
+    "workspaceSlots": [
+      {
+        "id": "resource-workspace-a",
+        "visible": false,
+        "tabs": 1,
+        "terminalTabs": 1
+      },
+      {
+        "id": "resource-workspace-b",
+        "visible": false,
+        "tabs": 1,
+        "terminalTabs": 1
+      },
+      {
+        "id": "resource-workspace-c",
+        "visible": true,
+        "tabs": 2,
+        "terminalTabs": 2
+      }
+    ],
+    "hiddenWorkspaceCount": 2
+  },
+  "releaseCycles": {
+    "labels": [
+      "released-panes",
+      "released-panes-2",
+      "released-panes-3",
+      "released-panes-4",
+      "released-panes-5",
+      "released-panes-6",
+      "released-panes-7"
+    ],
+    "totalWorkingSetKiB": [
+      897475,
+      933412,
+      948048,
+      973764,
+      993852,
+      973891,
+      977961
+    ],
+    "ownerConvergence": "all seven samples plus browser-released retained terminalViews=3, monacoEditors=0, monacoModels=0, documents=0, fileWatchers=0, browserWebContents=0, runtimeSubscriptions=4, sessionAttachmentOwners=3, sessionAttachmentLeases=3"
+  },
+  "deltas": {
+    "terminalWorkingSetKiB": 452,
+    "terminalWorkingSetFromIdleKiB": 20385,
+    "editorWorkingSetKiB": 272637,
+    "editorWorkingSetFromIdleKiB": 292570,
+    "browserWorkingSetKiB": 164292,
+    "browserReleasedWorkingSetKiB": 82211,
+    "maxReleasedWorkingSetKiB": 993852,
+    "maxReleasedIncrementKiB": 96377,
+    "totalReleaseDriftKiB": 96377,
+    "warmupReleaseDriftKiB": 35937,
+    "releaseDriftKiB": 45804
+  },
+  "diagnostics": {
+    "workingSet": {
+      "terminalIncrement": {
+        "actualKiB": 452,
+        "limitKiB": 262144,
+        "exceeded": false
+      },
+      "editorIncrement": {
+        "actualKiB": 272637,
+        "limitKiB": 524288,
+        "exceeded": false
+      },
+      "browserIncrement": {
+        "actualKiB": 164292,
+        "limitKiB": 262144,
+        "exceeded": false
+      },
+      "browserReleasedIncrement": {
+        "actualKiB": 82211,
+        "limitKiB": 262144,
+        "exceeded": false
+      },
+      "maxReleasedIncrement": {
+        "actualKiB": 96377,
+        "limitKiB": 589824,
+        "exceeded": false
+      },
+      "maxReleasedTotal": {
+        "actualKiB": 993852,
+        "limitKiB": 1048576,
+        "exceeded": false
+      },
+      "releaseDrift": {
+        "actualKiB": 45804,
+        "limitKiB": 131072,
+        "exceeded": false
+      }
+    },
+    "exceededWorkingSetDiagnostics": [],
+    "note": "Reference working-set limits are diagnostic only; allocator/Chromium high-water marks do not fail the probe or prove a leak."
+  },
+  "harness": {
+    "isolatedRuntime": true,
+    "receiptlessDaemonCleanup": true,
+    "ownedDaemonCount": 1,
+    "daemonCleanup": true
+  }
 }
