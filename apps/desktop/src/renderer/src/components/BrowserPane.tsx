@@ -63,10 +63,13 @@ export function browserCaptureMatchesIdentity(
 
 export function BrowserPane({
   tab,
-  visible
+  visible,
+  released = false
 }: {
   tab: BrowserWorkbenchSurface
   visible: boolean
+  /** Main-owned WebContentsView is released for a long-hidden, rebuildable Region. */
+  released?: boolean
 }) {
   const applyBrowserEvent = useAppStore((state) => state.applyBrowserEvent)
   const reportError = useAppStore((state) => state.reportError)
@@ -89,6 +92,11 @@ export function BrowserPane({
   const [screenshotBusy, setScreenshotBusy] = useState(false)
   const [elementSelection, setElementSelection] = useState<BrowserElementSelection | null>(null)
   const [selectionBusy, setSelectionBusy] = useState(false)
+  const [restoring, setRestoring] = useState(false)
+  const nativeLifecycleRef = useRef<'present' | 'releasing' | 'released' | 'restoring'>(
+    released ? 'released' : 'present'
+  )
+  const lifecycleTokenRef = useRef(0)
   const [annotationNote, setAnnotationNote] = useState('')
   const annotations = useAppStore((state) => state.browserAnnotationsByBrowserId[tab.browserId]) ?? NO_BROWSER_ANNOTATIONS
   const addBrowserAnnotation = useAppStore((state) => state.addBrowserAnnotation)
@@ -97,7 +105,56 @@ export function BrowserPane({
     setAddress(tab.url === 'about:blank' ? '' : tab.url)
   }, [tab.url])
 
+  // Browser release/restore is a Main-owned lifecycle.  The Region snapshot remains in the Store;
+  // restoring uses its URL/Profile/Viewport and publishes a fresh navigation identity through the
+  // ordinary Browser updated event.  A token prevents a quick tab switch from committing a stale
+  // restore after the policy has changed its mind.
+  useEffect(() => {
+    const token = ++lifecycleTokenRef.current
+    if (released) {
+      if (nativeLifecycleRef.current === 'released' || nativeLifecycleRef.current === 'releasing') return
+      nativeLifecycleRef.current = 'releasing'
+      void api.browser.release(tab.browserId)
+        .then(() => {
+          if (lifecycleTokenRef.current !== token) return
+          nativeLifecycleRef.current = 'released'
+        })
+        .catch((error) => {
+          if (lifecycleTokenRef.current !== token) return
+          nativeLifecycleRef.current = 'present'
+          reportError(error)
+        })
+      return
+    }
+    if (nativeLifecycleRef.current === 'present' || nativeLifecycleRef.current === 'restoring') return
+    nativeLifecycleRef.current = 'restoring'
+    setRestoring(true)
+    void api.browser.restore(tab.browserId, {
+      profileId: tab.profileId,
+      viewport: tab.viewport
+    }).then((browser) => {
+      if (lifecycleTokenRef.current !== token || released) {
+        void api.browser.release(browser.id).catch(() => {})
+        return
+      }
+      nativeLifecycleRef.current = 'present'
+      setRestoring(false)
+      applyBrowserEvent({ type: 'updated', browser })
+    }).catch((error) => {
+      if (lifecycleTokenRef.current !== token) return
+      nativeLifecycleRef.current = 'released'
+      setRestoring(false)
+      reportError(error)
+    })
+    return () => {
+      // Invalidate an in-flight Main request; the request itself remains owned by Main and will
+      // either commit through the token check above or be released as soon as it resolves.
+      lifecycleTokenRef.current += 1
+    }
+  }, [applyBrowserEvent, released, reportError, tab.browserId, tab.profileId, tab.url, tab.viewport])
+
   useEffect(() => () => {
+    lifecycleTokenRef.current += 1
     screenshotToken.current += 1
     selectionToken.current += 1
     void api.browser.cancelElementSelection(tab.browserId).catch(() => {})
@@ -113,13 +170,16 @@ export function BrowserPane({
   }, [tab.browserId, tab.navigationId])
 
   useEffect(() => {
+    // A parked Browser has no Main-owned WebContentsView. Annotation writes must wait for restore
+    // instead of turning the expected parked state into a spurious "Unknown browser" error.
+    if (released) return
     const current = annotations.filter(({ navigationId }) => navigationId === tab.navigationId)
     void api.browser.setAnnotationMarkers(
       tab.browserId,
       tab.navigationId,
       browserAnnotationMarkers(current)
     ).catch(reportError)
-  }, [annotations, reportError, tab.browserId, tab.navigationId])
+  }, [annotations, released, reportError, tab.browserId, tab.navigationId])
 
   useLayoutEffect(() => {
     const stage = stageRef.current
@@ -135,6 +195,8 @@ export function BrowserPane({
         const navigatorCoversBrowser = toolsOpen && window.innerWidth <= 900
         if (
           !visible ||
+          released ||
+          restoring ||
           menuOpen ||
           screenshot !== null ||
           elementSelection !== null ||
@@ -164,7 +226,7 @@ export function BrowserPane({
       window.removeEventListener('resize', update)
       void api.browser.setBounds(tab.browserId, null).catch(() => {})
     }
-  }, [elementSelection, menuOpen, screenshot, toolsOpen, reportError, tab.browserId, tab.error, tab.url, visible])
+  }, [elementSelection, menuOpen, released, restoring, screenshot, toolsOpen, reportError, tab.browserId, tab.error, tab.url, visible])
 
   async function run(action: () => Promise<BrowserSnapshot>): Promise<void> {
     if (busy) return
@@ -288,6 +350,15 @@ export function BrowserPane({
     } finally {
       if (screenshotToken.current === token) setScreenshotBusy(false)
     }
+  }
+
+  if (released || restoring) {
+    return (
+      <section className="surface-memory-released" role="status" aria-live="polite">
+        <strong>{restoring ? 'Restoring browser' : 'Browser parked'}</strong>
+        <span>{restoring ? 'Rebuilding the Main-owned page surface…' : 'Switch back to this tab to restore the browser.'}</span>
+      </section>
+    )
   }
 
   return (

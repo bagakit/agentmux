@@ -190,6 +190,13 @@ describe('Browser bar contract', () => {
     expect('openExternal' in fixture.state.config.browser.toolbar).toBe(false)
   })
 
+  it('renders an explicit release state without pretending a hidden Browser still owns WebContents', () => {
+    const markup = renderToStaticMarkup(<BrowserPane tab={tab} visible={false} released />)
+    expect(markup).toContain('Browser parked')
+    expect(markup).toContain('restore the browser')
+    expect(markup).not.toContain('Browser address')
+  })
+
   it('keeps Browser Tools as the recovery surface when More is hidden', () => {
     const toolbar = { ...config.browser.toolbar, more: false }
     const markup = renderToStaticMarkup(

@@ -38,6 +38,19 @@ type BrowserEntry = {
   error: string | null
 }
 
+/** Metadata retained while a hidden Browser native owner is released. */
+type ReleasedBrowser = {
+  id: string
+  profileId: string
+  requestedUrl: string
+  viewport: BrowserViewport
+}
+
+type BrowserRestoreInput = {
+  profileId: string
+  viewport: BrowserViewport
+}
+
 type PendingProfileSwitch = {
   token: number
   profileId: string
@@ -80,6 +93,7 @@ export function normalizeBrowserUrl(value: string): string {
 
 export class BrowserViewManager {
   private readonly entries = new Map<string, BrowserEntry>()
+  private readonly releasedEntries = new Map<string, ReleasedBrowser>()
 
   constructor(
     private readonly window: BrowserWindow,
@@ -88,9 +102,75 @@ export class BrowserViewManager {
 
   async create(id: string, rawUrl: string): Promise<BrowserSnapshot> {
     if (!id.trim()) throw new Error('Browser id is required')
-    if (this.entries.has(id)) throw new Error(`Browser already exists: ${id}`)
+    if (this.entries.has(id) || this.releasedEntries.has(id)) throw new Error(`Browser already exists: ${id}`)
     const url = normalizeBrowserUrl(rawUrl)
     const profileId = this.profiles.defaultProfileId()
+    return await this.createEntry(id, url, profileId)
+  }
+
+  /**
+   * Release only the Main-owned WebContentsView for a hidden Region. The Browser projection and its
+   * URL/Profile/Viewport metadata remain in the Renderer; no `closed` event is emitted, so Region
+   * identity cannot disappear as a side effect of a memory policy decision.
+   */
+  async release(id: string): Promise<void> {
+    const entry = this.entries.get(id)
+    if (!entry) return
+    this.cancelPendingSwitch(entry, new Error('Browser released during profile switch'))
+    const contents = entry.view.webContents
+    // `getURL()` is the last committed document. During an in-flight navigation it can still
+    // point at the previous page, which would make a release/restore silently rewind the Browser
+    // Region. `requestedUrl` is updated at the navigation boundary and is the durable projection
+    // fact to retain while the native owner is gone.
+    const requestedUrl = entry.requestedUrl
+    const released: ReleasedBrowser = {
+      id,
+      profileId: entry.profileId,
+      requestedUrl,
+      viewport: entry.viewport
+    }
+    this.entries.delete(id)
+    this.releasedEntries.set(id, released)
+    if (!this.window.isDestroyed()) {
+      try { this.window.contentView.removeChildView(entry.view) } catch { /* already detached */ }
+    }
+    if (!contents.isDestroyed()) contents.close()
+  }
+
+  /** Rebuild a previously released Browser native owner from its retained projection metadata. */
+  async restore(id: string, input?: Partial<BrowserRestoreInput>): Promise<BrowserSnapshot> {
+    if (this.entries.has(id)) return this.snapshot(this.entries.get(id)!)
+    const released = this.releasedEntries.get(id)
+    if (!released) throw new Error(`Unknown released browser: ${id}`)
+    const profileId = input?.profileId ?? released.profileId
+    // The retained Main descriptor is the only authoritative URL while the native owner is gone.
+    // Renderer tab.url can lag did-start-navigation, so accepting it here could restore an older
+    // committed page and silently change the Region's identity.
+    const url = released.requestedUrl
+    const viewport = input?.viewport ?? released.viewport
+    if (!Object.hasOwn(BROWSER_VIEWPORT_PRESETS, viewport)) {
+      throw new Error(`Unknown browser viewport: ${String(viewport)}`)
+    }
+    // Validate the profile before removing the retained descriptor. A failed restore must leave the
+    // original profile ownership intact so deleting/repairing a profile cannot orphan this Region.
+    this.resolvePartition(profileId)
+    this.releasedEntries.delete(id)
+    try {
+      const snapshot = await this.createEntry(id, url, profileId, viewport)
+      return snapshot
+    } catch (error) {
+      this.releasedEntries.set(id, { ...released, profileId, requestedUrl: url, viewport })
+      throw error
+    }
+  }
+
+  private async createEntry(
+    id: string,
+    url: string,
+    profileId: string,
+    viewport: BrowserViewport = 'responsive'
+  ): Promise<BrowserSnapshot> {
+    if (this.entries.has(id)) throw new Error(`Browser already exists: ${id}`)
     const view = this.createView(this.resolvePartition(profileId))
     const entry: BrowserEntry = {
       id,
@@ -105,7 +185,7 @@ export class BrowserViewManager {
       pendingSwitch: null,
       bounds: null,
       visible: false,
-      viewport: 'responsive',
+      viewport,
       error: null
     }
     this.entries.set(id, entry)
@@ -195,7 +275,9 @@ export class BrowserViewManager {
     if (entry.profileId === profileId) return this.snapshot(entry)
 
     const authoritativeView = entry.view
-    const url = assertAllowedBrowserUrl(authoritativeView.webContents.getURL() || entry.requestedUrl)
+    // Keep profile switching consistent with release: the committed URL may lag the latest
+    // navigation request while Chromium is loading.
+    const url = assertAllowedBrowserUrl(entry.requestedUrl)
     const candidate = this.createView(partition)
     candidate.setVisible(false)
     let rejectCancellation!: (error: Error) => void
@@ -265,7 +347,7 @@ export class BrowserViewManager {
   usesProfile(profileId: string): boolean {
     return [...this.entries.values()].some((entry) => (
       entry.profileId === profileId || entry.pendingSwitch?.profileId === profileId
-    ))
+    )) || [...this.releasedEntries.values()].some((entry) => entry.profileId === profileId)
   }
 
   setViewport(id: string, viewport: BrowserViewport): BrowserSnapshot {
@@ -457,7 +539,11 @@ export class BrowserViewManager {
 
   close(id: string): void {
     const entry = this.entries.get(id)
-    if (!entry) return
+    if (!entry) {
+      if (!this.releasedEntries.delete(id)) return
+      this.send({ type: 'closed', id })
+      return
+    }
     this.cancelPendingSwitch(entry, new Error('Browser closed during profile switch'))
     if (!entry.view.webContents.isDestroyed()) {
       entry.selectionOperation = null
@@ -480,6 +566,7 @@ export class BrowserViewManager {
 
   dispose(): void {
     for (const id of [...this.entries.keys()]) this.close(id)
+    for (const id of [...this.releasedEntries.keys()]) this.close(id)
   }
 
   private attach(entry: BrowserEntry, view: WebContentsView): void {
@@ -504,6 +591,14 @@ export class BrowserViewManager {
     })
     contents.on('did-start-navigation', (details) => {
       if (!details.isMainFrame || !this.owns(entry, view)) return
+      let requestedUrl: string
+      try {
+        requestedUrl = assertAllowedBrowserUrl(details.url)
+      } catch {
+        // `will-navigate`/`will-redirect` owns rejection and error publication. Do not replace a
+        // known-good projection with an unsupported target if an embedder emits this callback first.
+        return
+      }
       this.cancelPendingSwitch(entry, new Error('Browser profile switch was superseded by navigation'))
       entry.selectionOperation = null
       const selectionRevision = ++entry.selectionRevision
@@ -516,6 +611,7 @@ export class BrowserViewManager {
         BROWSER_SELECTION_WORLD_ID,
         [{ code: buildBrowserAnnotationMarkerScript([], annotationRevision) }]
       ).catch(() => {})
+      entry.requestedUrl = requestedUrl
       entry.navigationId = randomUUID()
       entry.error = null
       this.emit(entry)

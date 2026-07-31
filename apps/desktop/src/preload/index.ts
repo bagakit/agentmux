@@ -219,6 +219,9 @@ const api: AgentMuxPreloadApi = {
     setAnnotationMarkers: (id, navigationId, markers) =>
       ipcRenderer.invoke('browser:setAnnotationMarkers', id, navigationId, markers),
     setBounds: (id: string, bounds: BrowserBounds | null) => ipcRenderer.invoke('browser:setBounds', id, bounds),
+    release: (id: string) => ipcRenderer.invoke('browser:release', id),
+    restore: (id: string, input: { profileId: string; viewport: BrowserViewport }) =>
+      ipcRenderer.invoke('browser:restore', id, input),
     close: (id: string) => ipcRenderer.invoke('browser:close', id),
     onEvent(listener: (event: BrowserEvent) => void) {
       const wrapped = (_event: Electron.IpcRendererEvent, value: BrowserEvent): void => listener(value)

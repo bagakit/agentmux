@@ -72,6 +72,11 @@ import { handleTopicRenameKeyDown } from '../lib/topic-rename'
 import { api } from '../lib/api'
 import { useAppStore } from '../store'
 import { useTerminalRegionParked } from '../lib/terminal-cold-parking-coordinator'
+import {
+  useBrowserSurfaceReleased,
+  useMonacoSurfaceReleased
+} from '../lib/surface-memory-budget-coordinator'
+import { DESKTOP_SESSION_ATTRIBUTE } from '../../../shared/desktop-actions'
 
 const EditorPane = lazy(async () => {
   const module = await import('./EditorPane')
@@ -330,6 +335,7 @@ function SortableWorkbenchTab({
           className={`workbench-tab ${group.activeTabId === tab.id ? 'workbench-tab--active' : ''} ${
             isDragging ? 'workbench-tab--dragging' : ''
           }`}
+          {...(session ? { [DESKTOP_SESSION_ATTRIBUTE]: session.id } : {})}
           style={{ transform: CSS.Translate.toString(transform), transition }}
           title={session ? sessionTabTooltip(session, displayName) : displayName}
           onClick={() => activateTab(workspaceId, group.id, tab.id)}
@@ -436,6 +442,8 @@ function SurfaceContent({
   interactiveResize: boolean
 }) {
   const parked = useTerminalRegionParked(surface.regionId)
+  const monacoReleased = useMonacoSurfaceReleased(surface.regionId)
+  const browserReleased = useBrowserSurfaceReleased(surface.regionId)
   if (surface.kind === 'agent' || surface.kind === 'terminal') {
     return (
       <SessionPane
@@ -456,7 +464,7 @@ function SurfaceContent({
   if (surface.kind === 'file') {
     return (
       <Suspense fallback={<section className="pane-state"><strong>Loading editor…</strong></section>}>
-        <EditorPane tabId={tabId} surface={surface} />
+        <EditorPane tabId={tabId} surface={surface} released={monacoReleased} />
       </Suspense>
     )
   }
@@ -466,6 +474,7 @@ function SurfaceContent({
         key={surface.browserId}
         tab={surface}
         visible={nativeSurfacesVisible}
+        released={browserReleased}
       />
     )
   }

@@ -203,6 +203,11 @@ function projectSession(
       ...(subject.agentSession.pendingInteraction
         ? { pendingInteraction: structuredClone(subject.agentSession.pendingInteraction.request) }
         : {}),
+      // 最近一 turn 的真实原生用量，随收尾事件的 hook 回执落在会话上。缺席就不投影，UI 据此显示
+      // "此 Provider 不报 token 用量"或"还没有一 turn 的用量"，绝不落成 0。
+      ...(subject.agentSession.turnUsage
+        ? { turnUsage: structuredClone(subject.agentSession.turnUsage) }
+        : {}),
       latestOutputBytes: run.latestOutputBytes,
       control: {
         kind: 'agent',

@@ -42,7 +42,10 @@ function RosterRowView({
         row.label,
         row.awaitingReply ? 'awaiting your reply' : row.state,
         ...(row.unacknowledgedThreads > 0 ? [`${row.unacknowledgedThreads} unacknowledged messages`] : []),
-        scopeText || 'no launch scope declared'
+        scopeText || 'no launch scope declared',
+        // 用量作为可访问名的一部分：屏幕阅读器听到的是"最近一 turn 多少 token"或"此 Provider 不报用量"，
+        // 而不是把这行事实漏掉。三态各自读得出，绝不读成 0。
+        row.usage.title
       ].join(' · ')}
       onSelect={() => onSelect(row.sessionId)}
     >
@@ -66,6 +69,15 @@ function RosterRowView({
           {row.unacknowledgedThreads} msg
         </span>
       ) : null}
+      {/* token 用量：真实数用常规色，"不报"/"还没有"压低成静默灰——它们是缺席，不该抢注意力，
+          更不能被读成一个跑出来的 0。 */}
+      <span
+        className="agent-roster__usage"
+        data-usage={row.usage.kind}
+        title={row.usage.title}
+      >
+        {row.usage.text}
+      </span>
     </DropdownMenu.Item>
   )
 }

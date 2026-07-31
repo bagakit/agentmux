@@ -239,6 +239,45 @@ export type AgentCapabilities = {
   providerResume: boolean
   acp: boolean
   replyCorrelation: 'none' | 'native-turn-id' | 'acp-turn-id'
+  /**
+   * 这个 Provider 是否报**真实**的原生 token 用量，以及它从哪条通道到达。
+   *
+   * 只声明证据支持的口径（设计 SSOT《状态栏》节）：`kind: 'native-transcript'` 表示 Provider 把每
+   * turn 的 token 数写进它自己拥有格式的 transcript，AgentMux 的 hook 命令进程在既有收尾事件上读一次
+   * 尾部、随既有回执带回——不新增轮询、不新增通道。**缺席（`undefined`）是一等公民的事实**，读作
+   * "此 Provider 不报 token 用量"，UI 据此显示这句话而不是 0 或估算值。绝不为缺席补一个默认口径：
+   * 一个编出来的 0 比没有这个数字更糟。
+   */
+  usage?: AgentUsageCapability
+}
+
+/**
+ * usage 能力的声明形状。目前只有一种真实通道：Provider 原生 transcript。
+ *
+ * 刻意做成一个带 `kind` 的对象而不是布尔：将来若出现「原生事件流直接带 usage」的 Provider，它是
+ * `kind` 的另一个成员，而不是把布尔改语义。`transcriptFormat` 让读取侧（hook 命令进程）按 Provider
+ * 的 transcript 格式取数——这份格式知识关在 hook 进程里，Core 只见到已抽好的数。
+ */
+export type AgentUsageCapability = {
+  kind: 'native-transcript'
+  transcriptFormat: 'claude-jsonl' | 'codex-rollout'
+}
+
+/**
+ * 一个 turn 的**真实**原生 token 用量。分子（token 数）全部由 Provider 报出、可验证；这里刻意
+ * **不含任何速率**——`tokens/s` 的分母（turn 墙钟时长）含用户思考、审批等待、工具执行、网络往返，
+ * 是我们自己拼的、不可验证的数，真实分子除以编出来的分母仍是编出来的数（设计 SSOT《状态栏》节）。
+ * 所以只上报累计量，UI 明说这是「最近一个 turn」的用量。
+ */
+export type AgentTurnUsage = {
+  /** 本 turn 生成的 output token 数——状态栏首要显示的量，它最接近"这一步产出了多少"。 */
+  outputTokens: number
+  /** 本 turn 的 input token 数（含被 Provider 计入的上下文）。 */
+  inputTokens: number
+  /** 本 turn 的合计 token（Provider 报的口径，可能与 in+out 不等，比如含 reasoning/cache）。 */
+  totalTokens: number
+  /** 采到这条用量的收尾事件观测时刻（epoch ms）——UI 用它说明"哪一段时间"的用量。 */
+  observedAt: number
 }
 
 export type AgentCatalogEntry = {
@@ -337,6 +376,13 @@ export type AgentMuxAgentSession = {
   pendingInteraction?: AgentMuxPendingInteraction
   nativeHandle?: AgentNativeSessionHandle
   hookReceipt?: AgentHookReceipt
+  /**
+   * 最近一个 turn 的真实原生 token 用量，随收尾事件的 hook 回执到达并被覆盖式更新（只保留最新一
+   * turn，不累加历史——状态栏回答的是"刚跑完这一 turn 花了多少"）。仅 usage 能力声明为
+   * `native-transcript` 的 Provider 会写入；缺席读作"还没有一 turn 的用量"或"此 Provider 不报用量"，
+   * 两者在 UI 上都不显示 0。
+   */
+  turnUsage?: AgentTurnUsage
 }
 
 export type AgentTerminalHandshakeState = {
@@ -756,4 +802,9 @@ export type NormalizedHookEvent = {
   timeline: AgentTimelineMutation[]
   interaction?: AgentMuxInteractionRequest
   nativeHandle?: AgentNativeSessionHandle
+  /**
+   * 从收尾事件 payload 里抽出的本 turn 真实 token 用量，仅当 Provider 声明了 usage 能力、hook 命令
+   * 进程读到 transcript 尾部时存在。normalizer 只做投影，不读文件——读文件是 hook 进程的事。
+   */
+  turnUsage?: AgentTurnUsage
 }
