@@ -112,6 +112,22 @@ export function reduceFileOpened(
  * So this writes the document keys and nothing else. It requires the Tab to exist: a document with no
  * surface behind it is unreachable state, and creating the surface here would duplicate the one act
  * `reduceFileOpened` owns.
+ *
+ * 这里按 canonical tab id 查（`fileTabId(workspaceId, path)`），而回收与持久化侧按「任意 tab 里的
+ * file Region」扫（`openFileRefs`）。两条规则不等价，今天不冲突只是因为**文件面只有一条放置路径**：
+ * 全部 UI 入口都汇到 `openFile` → `reduceFileOpened`，而它只认 canonical id，且从不调
+ * `addWorkbenchRegion`（所有 `addWorkbenchRegion` 站点装的都是 launcher，而 `NewTabSurface` 只能起
+ * agent/terminal/browser，没有 openFile 入口——所以「拆分后在新格里开另一个文件」这条路不存在）。
+ * 已于 2026-08-31 枚举全部放置站点核实过：不可达。
+ *
+ * 但这个不变量是隐式的，一旦有人给出下面任一改动，这里就会**静默**退化成「读成功却装不上」——
+ * `documents[key]` 恒缺 → EditorPane 反复重读一个好文件 → 永久显示「不可用」：
+ *   1. 任何把 `kind:'file'` 面装进 id ≠ `fileTabId(...)` 的 tab 的新调用（复制 tab、拖文件进某个
+ *      Region、"拆分后开文件"）；
+ *   2. 给 `openFile`/`reduceFileOpened` 加一个目标 Region/tab 参数，去填一个既有 launcher 格。
+ * 真要走到那一步，**正确的收敛方向是让这里改成扫描（`openFileRefs` 那条规则）**，而不是反过来让持久化
+ * 侧去依赖 canonical id：`WorkbenchTab.regions` 本来就允许一个 tab 装多个混合 kind 的面（生产里已有
+ * file + agent 同 tab），扫描规则才是与数据模型自由度相符的那条。
  */
 export function reduceDocumentAttached(
   state: FileWorkbenchState,
@@ -146,6 +162,9 @@ export function reduceDocumentAttached(
  * The issue kinds are the existing ones, deliberately: a file deleted while the app was closed is the
  * same fact as one deleted while open, and it should reach the same failure state (which already
  * offers Reveal, falling back to the nearest surviving ancestor) rather than a second, restore-only one.
+ *
+ * 这里的 canonical-tab 查法与 `reduceDocumentAttached` 完全同一条不成文不变量，理由与失效后果都写在
+ * 那个函数的注释里——两处必须一起改，否则失败态与成功态会按不同规则认宿主 tab。
  */
 export function reduceDocumentLoadFailed(
   state: FileWorkbenchState,
