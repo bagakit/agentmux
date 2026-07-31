@@ -34,6 +34,22 @@ const RESERVED_HUES = [1.9, 40.2, 143, 213.8] as const
 const RESERVED_HALF_WIDTH = 22
 
 /**
+ * 一个色相是否让开了所有语义色。
+ *
+ * 导出的是**规则**而不是保留色表：CSS 里那个兜底色相（`--speaker-hue` 的声明值）必须遵守同一条
+ * 规则，而两个该联动的常量分居两文件必然漂移——曾经真的漂过，CSS 兜底写着 145，离 green 只有 2°，
+ * 正落在这个派生函数存在要避开的那片弧里。所以让测试拿这个谓词去问那个声明值，而不是在测试里
+ * 手抄一份保留色表（那只是把同一份数据抄到了第三个地方）。
+ */
+export function clearsSemanticHues(hue: number): boolean {
+  return RESERVED_HUES.every((reserved) => {
+    const delta = Math.abs(hue - reserved)
+    // 环上距离：red 在 1.9°，359° 离它只有 2.9° 而不是 357.1°。
+    return Math.min(delta, 360 - delta) >= RESERVED_HALF_WIDTH
+  })
+}
+
+/**
  * 允许的色相区间（整数度，闭区间），从保留弧的补集算出来，按起点升序。
  *
  * 实测得到三条：`[63,121] [165,191] [236,339]`。**三条而不是四条**——red 在 1.9°、amber 在 40.2°，
@@ -47,13 +63,7 @@ const RESERVED_HALF_WIDTH = 22
  *
  * 逐度扫一圈而不是对端点排序：跨零那段不需要任何特例，而 360 次谓词调用是模块初始化时的一次性开销。
  */
-const ALLOWED_HUES: readonly number[] = Array.from({ length: 360 }, (_, hue) => hue).filter((hue) =>
-  RESERVED_HUES.every((reserved) => {
-    const delta = Math.abs(hue - reserved)
-    // 环上距离：red 在 1.9°，359° 离它只有 2.9° 而不是 357.1°。
-    return Math.min(delta, 360 - delta) >= RESERVED_HALF_WIDTH
-  })
-)
+const ALLOWED_HUES: readonly number[] = Array.from({ length: 360 }, (_, hue) => hue).filter(clearsSemanticHues)
 
 /**
  * 把身份 id 映射到一个色相（整数度），避开语义色所在的那几段弧。纯函数。
