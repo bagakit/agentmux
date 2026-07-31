@@ -16,11 +16,13 @@ const fixture = vi.hoisted(() => ({
     activeWorkspaceId: 'project-a',
     mainSurface: 'workbench' as const,
     projectRailOpen: true,
+    collapsedProjectGroups: {} as Record<string, true>,
     toolsOpen: false,
     selectWorkspace: vi.fn(async () => {}),
     setMainSurface: vi.fn(),
     setConfig: vi.fn(),
     toggleProjectRail: vi.fn(),
+    toggleProjectGroup: vi.fn(),
     toggleTools: vi.fn()
   }
 }))
@@ -122,6 +124,7 @@ afterEach(() => {
   fixture.state.config = structuredClone(config)
   fixture.state.sessions = []
   fixture.state.activeWorkspaceId = 'project-a'
+  fixture.state.collapsedProjectGroups = {}
 })
 
 describe('workingAgentCount', () => {
@@ -370,16 +373,108 @@ describe('Project Rail 的分组与嵌套', () => {
     expect(depthOf(exactRow(markup, 'agentmux-preview'))).toBe(0)
   })
 
-  it('renders the group header as a label, not as a selectable row', () => {
-    // 分组头不是 Project：点它没有任何东西可以被激活，所以它不能是 button，也不该有选中态。
+  it('renders the group header as a disclosure control, not as a selectable project row', () => {
+    // **这条断言换过方向。** 它原来钉的是「分组头不是 button」，理由是"点它没有任何东西可以被
+    // 激活"。用户报告分组头与项目行读起来太像之后，那个前提不成立了：折叠是这个位置真实存在的
+    // 动作（rail 上项目一多，不看的那几组该能收起来），而"它是个控件"恰恰是把它和项目行区分开
+    // 的手段——区分不能靠把它做得更醒目，密度合同禁止父目录名比项目名还响。
+    //
+    // 所以现在它是 button 且有 aria-expanded，但仍**不是项目行**：这里两侧都判，只判前者会让
+    // 一个直接复用 .project-rail-row 的实现照样绿，而那正是"太像"的极端形态。
     useWorkspaces([['one', '/proj/kit/one'], ['two', '/proj/kit/two']])
     const markup = renderRail()
-    const header = markup.match(/<[a-z]+[^>]*class="project-rail-group__label"[^>]*>/)?.[0] ?? ''
-    expect(header).not.toBe('')
-    expect(header.startsWith('<button')).toBe(false)
+    const header = markup.match(/<button[^>]*class="project-rail-group__header"[^>]*>/)?.[0] ?? ''
+    expect(header, '分组头不再存在，或者不是一个 disclosure 控件').not.toBe('')
+    expect(header).toContain('aria-expanded="true"')
+    // 不借项目行的类：借了就连 hover 填充和选中态一起借来了，那是"又一行条目"的语言。
+    expect(header).not.toContain('project-rail-row')
     expect(header).not.toContain('aria-current')
-    expect(header).not.toContain('project-rail-row__count')
-    // 完整路径进 tooltip——分组头只显示最后一段，但要答得出它是哪个目录。
-    expect(header).toContain('title="/proj/kit"')
+    // 完整路径仍进 tooltip——展开时它只显示最后一段，但要答得出它是哪个目录。
+    expect(header).toContain('/proj/kit')
+    // 可访问名不能只是一个目录名，否则分组头与项目行在读屏上才真的无从区分。
+    expect(header).toMatch(/aria-label="[^"]*2 projects[^"]*"/)
+  })
+
+  /** 分组头的 `aria-expanded`，按出现顺序。 */
+  function expandedStates(markup: string): string[] {
+    return [
+      ...markup.matchAll(/class="project-rail-group__header"[^>]*aria-expanded="(true|false)"/g)
+    ].map((match) => match[1]!)
+  }
+
+  it('展开时不显示地址与角标——那两个事实此刻由下面的项目行自己带着', () => {
+    // 用户要的地址是「后退的时候」才需要的。展开着还挂一条路径，就是同一个事实占两行；而每一行
+    // 项目自己已经有角标了，分组头再来一个总数就是把同一批 Agent 数了两遍。
+    useWorkspaces([['one', '/proj/kit/one'], ['two', '/proj/kit/two']])
+    const markup = renderRail()
+    expect(expandedStates(markup)).toEqual(['true'])
+    expect(markup).not.toContain('project-rail-group__address')
+    expect(markup).not.toContain('project-rail-group__count')
+    // 展开时成员行都在。
+    expect(exactRow(markup, 'one')).toContain('project-rail-row')
+    expect(exactRow(markup, 'two')).toContain('project-rail-row')
+  })
+
+  it('折叠后藏掉成员行，并在头上补出地址', () => {
+    // 用户：「后退的时候，是不是应该显示它的地址之类的元信息呀」。成员一藏，这一行就是那几个
+    // 项目在界面上唯一的痕迹，所以它必须自己答出"这是磁盘上哪儿"。
+    //
+    // 父目录故意取得够深（4 段）：`/proj/kit` 那种两段路径根本不会被缩短，拿它断言"保留尾部"
+    // 会得出一个与实现无关的绿——这条本来就是要判缩短方向的。
+    useWorkspaces([['one', '/Users/me/proj/kit/one'], ['two', '/Users/me/proj/kit/two']])
+    fixture.state.collapsedProjectGroups = { [JSON.stringify(['local', '/Users/me/proj/kit'])]: true }
+    const markup = renderRail()
+    expect(expandedStates(markup)).toEqual(['false'])
+    // 成员行真的不在了——只把 chevron 转个方向而不藏行，是这个功能最容易的假实现。
+    expect(markup).not.toMatch(/aria-label="one"/)
+    expect(markup).not.toMatch(/aria-label="two"/)
+    // 保留尾部而不是砍尾部：靠后的段才有分辨力，`/Users/me` 那一头对区分身份毫无帮助。
+    expect(markup).toContain('…/me/proj/kit')
+    expect(markup).not.toContain('/Users/me/proj/kit</span>')
+  })
+
+  it('折叠的分组把里面等你的 Agent 卷到头上——不是藏起来', () => {
+    // 这条守的是一个**已经犯过一次**的错。row-attention.ts 的注释记着：项目行只显示 workspace
+    // 计数时，"一个 Agent 正在里面等你"的折叠项目看起来和空闲的一模一样。分组折叠会在分组这一
+    // 层原样复现那个洞，所以这里必须复用同一个 rollup。
+    useWorkspaces([['one', '/proj/kit/one'], ['two', '/proj/kit/two']])
+    fixture.state.collapsedProjectGroups = { [JSON.stringify(['local', '/proj/kit'])]: true }
+    fixture.state.sessions = [session('s1', '/proj/kit/two', 'waiting')]
+    const markup = renderRail()
+    const header = markup.match(/<button[^>]*class="project-rail-group__header"[^>]*>/)?.[0] ?? ''
+    expect(header, 'needs-you 被折叠吃掉了').toContain('data-attention="needs-you"')
+    expect(header).toMatch(/aria-label="[^"]*needs you[^"]*"/)
+    expect(markup).toContain('project-rail-group__count')
+  })
+
+  it('跨 host 的同名父目录是两个分组，折叠一个不影响另一个', () => {
+    // 折叠状态的 key 必须带 hostId。只用路径做 key 时，两台机器上同名的 `…/kit` 会被当成一个
+    // 分组——折叠本机那个，远端那个跟着一起消失，而那是用户完全没要求的事。
+    fixture.state.config = {
+      ...structuredClone(config),
+      workspaces: [
+        { id: 'l1', name: 'l1', hostId: 'local', path: '/proj/kit/one', kind: 'folder' },
+        { id: 'l2', name: 'l2', hostId: 'local', path: '/proj/kit/two', kind: 'folder' },
+        { id: 'r1', name: 'r1', hostId: 'remote', path: '/proj/kit/three', kind: 'folder' },
+        { id: 'r2', name: 'r2', hostId: 'remote', path: '/proj/kit/four', kind: 'folder' }
+      ]
+    }
+    fixture.state.activeWorkspaceId = null
+    fixture.state.collapsedProjectGroups = { [JSON.stringify(['local', '/proj/kit'])]: true }
+    const markup = renderRail()
+    // 两个分组头，一折一展。
+    expect(expandedStates(markup).sort()).toEqual(['false', 'true'])
+    // local 那组的成员藏了，remote 那组的还在。
+    expect(markup).not.toMatch(/aria-label="l1"/)
+    expect(markup).toMatch(/aria-label="r1"/)
+  })
+
+  it('单例分组不给折叠控件——没有分组头就没有可折叠的东西', () => {
+    // 分组头只领一个成员时本来就不渲染（它说不出"这几个是一伙的"）。那种情况下若仍冒出一个
+    // chevron，用户就能把一个**没有分组**的项目折叠掉，然后再也找不到它。
+    useWorkspaces([['solo', '/elsewhere/solo']])
+    const markup = renderRail()
+    expect(markup).not.toContain('project-rail-group__header')
+    expect(exactRow(markup, 'solo')).toContain('project-rail-row')
   })
 })

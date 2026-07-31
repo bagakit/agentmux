@@ -3,9 +3,11 @@ import { SCRATCH_WORKSPACE_ID, type WorkspaceRecord } from '../src/shared/contra
 import {
   PROJECT_RAIL_MAX_DEPTH,
   defaultWorktreePath,
+  projectGroupKey,
   projectRailNavigation,
   projectRailTree,
   projectWorkspaces,
+  railGroupAddress,
   workspaceProjectId
 } from '../src/renderer/src/lib/workspace-projects'
 
@@ -180,5 +182,53 @@ describe('project rail tree', () => {
     // 没有分组头：这一组虽有 5 个节点，但只有 l0 真的位于 `/w`——其余四个是它的子孙，
     // 归属已由缩进表达。成组与否数的是**顶层**成员，不是节点总数。
     expect(deep).toEqual(['l0', '  l1', '    l2', '      l3', '      l4'])
+  })
+})
+
+describe('折叠分组头显示的地址', () => {
+  it('保留尾部几段——分辨力全在末尾', () => {
+    // 同一台机器上所有路径的开头几段大概都一样（`/Users/<name>/…`），能区分身份的是尾部。
+    // 这条断言能分辨"从尾部保留"与"从开头保留"：后者会给出 `/Users/someone/…`。
+    expect(railGroupAddress('/Users/someone/proj/priv/kit')).toBe('…/proj/priv/kit')
+  })
+
+  it('短到装得下就原样给出——不给无谓的省略号', () => {
+    // 边界两侧各钉一次。只钉"会缩短"的话，一个无条件加 `…/` 前缀的实现照样绿。
+    expect(railGroupAddress('/proj/kit')).toBe('/proj/kit')
+    expect(railGroupAddress('/a/b/c')).toBe('/a/b/c')
+    expect(railGroupAddress('/a/b/c/d')).toBe('…/b/c/d')
+  })
+
+  it('段数可调，且调的是保留几段而不是砍几段', () => {
+    expect(railGroupAddress('/a/b/c/d/e', 2)).toBe('…/d/e')
+    expect(railGroupAddress('/a/b/c/d/e', 4)).toBe('…/b/c/d/e')
+  })
+
+  it('Windows 路径不会被改写成正斜杠', () => {
+    // 重组时必须沿用原路径的分隔符，否则显示出来的地址在那台机器上根本不是一个合法路径。
+    expect(railGroupAddress('C:\\Users\\someone\\proj\\kit')).toBe('…\\someone\\proj\\kit')
+  })
+})
+
+describe('分组的折叠状态键', () => {
+  it('跨 host 的同名父目录得到不同的键', () => {
+    // 只用路径做键时，两台机器上同名的 `/proj/kit` 会被当成同一个分组——折叠本机那个，远端
+    // 那个跟着一起消失。这条断言能分辨"键里有 hostId"与"键里只有路径"。
+    const local = projectGroupKey({ hostId: 'local', groupPath: '/proj/kit' })
+    const remote = projectGroupKey({ hostId: 'remote', groupPath: '/proj/kit' })
+    expect(local).not.toBe(remote)
+    expect(local).not.toBeNull()
+  })
+
+  it('同一个 host 同一个目录得到同一个键——折叠状态因此认得回来', () => {
+    expect(projectGroupKey({ hostId: 'local', groupPath: '/proj/kit' })).toBe(
+      projectGroupKey({ hostId: 'local', groupPath: '/proj/kit' })
+    )
+  })
+
+  it('单例分组没有键——它根本没有分组头可以折叠', () => {
+    // `groupPath: null` 是 projectRailTree 表达"这一组不成组"的方式。给它一个键就等于允许
+    // 用户折叠一个没有分组头的项目，然后再也找不到它。
+    expect(projectGroupKey({ hostId: 'local', groupPath: null })).toBeNull()
   })
 })

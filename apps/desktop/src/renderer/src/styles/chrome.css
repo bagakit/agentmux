@@ -83,16 +83,53 @@
 /* 一组同处一个父目录的 Project。组之间留一点空档，让分组头归属于它下面那几行而不是漂在中间。 */
 .project-rail-group { display: grid; align-content: start; gap:var(--sp-1); }
 .project-rail-group + .project-rail-group { margin-top:var(--sp-2); }
-/* 分组头是标签，不是行：没有 hover、没有选中填充、不可点击。层级压到 Projects 那一档，
-   免得父目录名比项目名还响（密度合同《Project Rail Group Header》）。 */
+/* 分组头：一个 disclosure 控件，不是又一行条目（密度合同《Project Rail Group Header》）。
+   与项目行的区分**不靠字号或颜色**——它必须比项目名更轻，那条不许动。靠的是角色本身：
+   一枚 chevron、大写字距展开的分类学写法、以及不占项目名那条左缘。
+   grid 而不是 flex：chevron 一个固定槽，标签吃掉剩下的宽度，右侧地址与角标各占自己的一格，
+   于是标签变长时挤掉的是自己的尾巴，不会把角标推出可视区。 */
+.project-rail-group__header {
+  width: 100%; min-width: 0; min-height: 22px;
+  display: grid; grid-template-columns: 14px minmax(0, auto) 1fr auto;
+  align-items: center; gap:var(--sp-2);
+  padding:0 var(--sp-4) 0 var(--sp-1);
+  border: 0; border-radius: var(--radius-sm);
+  color: var(--text-3); background: transparent;
+  text-align: left; cursor: pointer;
+  transition: color .12s ease;
+}
+/* 只提亮文字，**不上填充**：填充是项目行表达 hover 与选中的手段，分组头借了它就又变回"一行条目"。 */
+.project-rail-group__header:hover { color: var(--text-2); }
+.project-rail-group__chevron {
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--text-3); opacity: .7;
+}
+.project-rail-group__header:hover .project-rail-group__chevron { opacity: 1; }
+/* 大写 + 字距是"分类标签"的写法，与 .sidebar__section-heading 同族。字重压在 560：它比项目名的
+   620 轻，密度合同要的就是这个次序。 */
 .project-rail-group__label {
-  min-width: 0; min-height: 22px;
-  display: flex; align-items: center;
-  padding:0 var(--sp-4);
+  min-width: 0;
   overflow: hidden;
-  color: var(--text-3); font-size: var(--fs-micro); font-weight: 500;
-  letter-spacing: .04em;
+  font-size: var(--fs-micro); font-weight: 560;
+  letter-spacing: .07em; text-transform: uppercase;
   text-overflow: ellipsis; white-space: nowrap;
+}
+/* 折叠后才出现的地址。等宽体现"这是一条路径"，且从末尾保留几段（railGroupAddress 已经砍过头部，
+   这里的 ellipsis 只是宽度不够时的第二道兜底）。 */
+.project-rail-group__address {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-3); font: 10px/1 var(--font-mono); opacity: .8;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+/* 折叠后的角标与项目行的角标同形，因为它答的是同一个问题（里面有没有人在等你）。它复用
+   .project-rail-row__count 的 attention 配色，见下面那组 [data-attention] 规则。 */
+.project-rail-group__count {
+  min-width: 18px; height: 18px; padding:0 var(--sp-2);
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-sm);
+  color: var(--text-3); background: var(--surface-3);
+  font-size: var(--fs-micro); font-variant-numeric: tabular-nums;
 }
 /* 缩进量 = 层数 × 一格。`--rail-depth` 由 WorkspaceSidebar 按节点深度内联注入，**这里必须
    声明默认值**：注入式自定义属性不给默认，未注入的行就会拿到无效值而整条 padding 失效
@@ -116,20 +153,29 @@
    this recolours THAT rather than adding a competing mark — one signal per row. It reuses the shared
    status colours so a lit row and a lit dot mean the same thing, and carries a glyph rather than
    relying on colour alone (same rule as the full-size status dot). `done` never lights a row: a
-   permanently lit rail would drown out the one signal that means someone is waiting on you. */
-.project-rail-row[data-attention] .project-rail-row__count::after { margin-left:var(--sp-1); font-weight: 700; }
-.project-rail-row[data-attention='needs-you'] .project-rail-row__count {
+   permanently lit rail would drown out the one signal that means someone is waiting on you.
+
+   折叠的**分组头**走同一组规则而不是另抄一份：它答的是同一个问题（里面有没有人在等你），两处若
+   各写一份配色，改一处就会漂。分组折叠会在分组这一层复现"折叠藏掉了等你的 Agent"那个洞，所以
+   分组头的角标必须和项目行的角标读作同一件事。 */
+.project-rail-row[data-attention] .project-rail-row__count::after,
+.project-rail-group__header[data-attention] .project-rail-group__count::after { margin-left:var(--sp-1); font-weight: 700; }
+.project-rail-row[data-attention='needs-you'] .project-rail-row__count,
+.project-rail-group__header[data-attention='needs-you'] .project-rail-group__count {
   color: var(--surface-0);
   background: var(--amber);
   box-shadow: var(--hl);
 }
-.project-rail-row[data-attention='needs-you'] .project-rail-row__count::after { content: '?'; }
-.project-rail-row[data-attention='error'] .project-rail-row__count {
+.project-rail-row[data-attention='needs-you'] .project-rail-row__count::after,
+.project-rail-group__header[data-attention='needs-you'] .project-rail-group__count::after { content: '?'; }
+.project-rail-row[data-attention='error'] .project-rail-row__count,
+.project-rail-group__header[data-attention='error'] .project-rail-group__count {
   color: var(--surface-0);
   background: var(--red);
   box-shadow: var(--hl);
 }
-.project-rail-row[data-attention='error'] .project-rail-row__count::after { content: '!'; }
+.project-rail-row[data-attention='error'] .project-rail-row__count::after,
+.project-rail-group__header[data-attention='error'] .project-rail-group__count::after { content: '!'; }
 /* 项目 icon 自带形状与颜色，不需要再给它一个 Surface 色块托底——那会读作"图标外面还有一个按钮"。
    这也顺带让选中与否不再改变这枚图标的任何东西（T-008 的那条约束）。 */
 .scratch-workspace-row__icon { background: transparent; }
