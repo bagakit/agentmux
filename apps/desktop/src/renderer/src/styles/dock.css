@@ -96,15 +96,9 @@
 .workspace-topic-rename-form { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; gap:var(--sp-3); padding:var(--sp-3) var(--sp-2) var(--sp-3) var(--sp-4); }
 .workspace-topic-rename-form input { min-width: 0; height: 25px; padding:0 var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text); background: var(--bg); font: inherit; font-size: var(--fs-meta); outline: 0; }
 .workspace-topic-rename-form input:focus { border-color: var(--focus-line); box-shadow: var(--focus-ring); }
-.workspace-topic-title-line,
-.workspace-topic-entry small { min-width: 0; display: flex; align-items: center; gap:var(--sp-2); white-space: nowrap; }
-.workspace-topic-title-line strong,
-.workspace-topic-entry small > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.workspace-topic-title-line strong { color: var(--text); font-size: var(--fs-meta); }
-/* 每个 Agent 一枚头像，靠右成一簇，不与标题争夺左缘。这里只管排布与形状，
-   颜色来自 .status--<state> 继承下来的 --status-ink——状态语汇只在一处定义。 */
-.workspace-topic-agents { flex: 0 0 auto; display: flex; align-items: center; gap:var(--sp-1); margin-left:auto; }
-.workspace-topic-agents .agent-avatar { flex: 0 0 auto; }
+/* Topic 行的 identity 排版走共享的 .selector-row__identity；这里只留本面板的两点差异：
+   摘要用 micro 字号，且整行不换行。 */
+.workspace-topic-entry .selector-row__identity small { font-size: var(--fs-micro); }
 /* Topic 头像默认只表达身份；只有 live work 才用共享状态色产生外描边/发光。 */
 .agent-avatar {
   width: 18px; height: 18px; padding: 0; gap: 0;
@@ -118,14 +112,13 @@
   outline: 1px solid var(--status-ink); outline-offset: 1px;
   box-shadow: 0 0 7px var(--status-ink); filter: none; opacity: 1;
 }
-.agent-avatar:hover { transform: translateY(-1px); background: var(--surface-3); box-shadow: var(--elev-1); }
+/* 悬停抬升由共享层在叠压容器上负责（selector.css）——叠压之后必须有东西能让被压住的那枚
+   完整露出来，所以抬升与放大是同一个动作的两半，不在这里各写一半。 */
 .agent-avatar.status--working:hover, .agent-avatar.status--running:hover { box-shadow: var(--elev-1), 0 0 7px var(--status-ink); }
+.agent-avatar:hover { background: var(--surface-3); box-shadow: var(--elev-1); }
 .agent-avatar:active { transform: translateY(0); }
 /* 拖动中的那一行抬起来一点，让落点看得见；不改变行高，避免列表在拖动时跳动。 */
 .workspace-topic-item.dragging { position: relative; z-index: 1; background: var(--surface-3); box-shadow: var(--hl-strong); }
-.workspace-topic-entry small { color: var(--text-3); font-size: var(--fs-micro); }
-.workspace-topic-entry small > span { flex: 1; }
-.workspace-topic-entry small > em { flex: 0 0 auto; color: var(--text-3); font-style: normal; }
 .workspace-topic-reveal.icon-button { width: 24px; height: 24px; color: var(--text-3); }
 .surface-tool-action-surface > .primary-button { margin-bottom:var(--sp-6); }
 .surface-tool-unavailable { width: 100%; min-width: 0; display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap:var(--sp-3); padding:var(--sp-4); border-radius: var(--radius); color: var(--text-3); background: var(--surface-2); }
@@ -164,10 +157,8 @@
 .workspace-agent-row > svg { color: var(--green-2); }
 
 .branches-panel { height: 100%; min-height: 0; display: flex; flex-direction: column; background: var(--surface-0); }
-.branches-header { height: 30px; flex: 0 0 30px; display: flex; align-items: center; justify-content: space-between; padding:0 var(--sp-2) 0 var(--sp-4); color: var(--text-3); }
-.branches-header > div { display: flex; align-items: center; gap:var(--sp-3); }
-.branches-header span { font-size: var(--fs-meta); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-.branches-header small { min-width: 17px; padding:var(--sp-1) var(--sp-2); border-radius: var(--radius); background: var(--surface-3); font-size: var(--fs-micro); text-align: center; }
+/* 排版走共享的 .selector-list__header；这里只固定它在这一列里的高度。 */
+.branches-header { flex: 0 0 30px; }
 .branches-header button { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; cursor: pointer; }
 .branches-header button:hover:not(:disabled) { color: var(--text); background: var(--surface-3); }
 .branches-repo { min-width: 0; height: 22px; flex: 0 0 22px; display: flex; align-items: center; gap:var(--sp-2); padding:0 var(--sp-4); border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); color: var(--text-3); }
@@ -178,22 +169,12 @@
 .branch-row { width: 100%; min-width: 0; display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; gap:var(--sp-2); min-height: 30px; padding:var(--sp-1) var(--sp-2); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; text-align: left; cursor: pointer; transition: background 120ms ease, color 120ms ease; }
 .branch-row:hover { color: var(--text-2); background: var(--surface-2); }
 .branch-row--selected, .branch-row--selected:hover { color: var(--text); background: var(--surface-2); box-shadow: var(--hl); }
-.branch-row--selected .branch-row__icon { color: var(--green); }
-.branch-row__icon { display: inline-flex; align-items: center; justify-content: center; color: var(--green-2); }
-.branch-row__identity { min-width: 0; display: flex; flex-direction: column; gap:0; }
-.branch-row__identity strong, .branch-row__identity small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.branch-row__identity strong { font-size: var(--fs-meta); }
-.branch-row__identity small { color: var(--text-3); font-family: "SFMono-Regular", monospace; font-size: var(--fs-micro); line-height: 12px; }
-.branch-row__meta { min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap:var(--sp-2); }
-.branch-row__agents { display: flex; align-items: center; padding-left:var(--sp-1); }
-.branch-row__agent { position: relative; width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 50%; color: var(--text-2); background: var(--surface-2); box-shadow: 0 0 0 1px var(--surface-0); }
-/* 叠压只发生在相邻两枚之间——写在每一枚上会把整簇往左推，第一枚就该贴着自己的左缘。
-   4px 是 16px 头像的四分之一，足以读作"一摞"又不遮住 provider 图标；此前这里写的是不合法的
-   负 var 形式（整条声明被浏览器丢弃、叠压从未渲染过），2px 也太浅——声明失效的这些年里
-   没人验证过那个值。负值一律走 calc，见密度合同《控件语言》。 */
-.branch-row__agent + .branch-row__agent { margin-left: calc(-1 * var(--sp-2)); }
-.branch-row__agent small { position: absolute; right: -3px; bottom: -3px; min-width: 9px; height: 9px; padding:0 var(--sp-1); border-radius: var(--radius-sm); color: var(--green-text); background: var(--green-line); font: 10px/9px var(--font-mono); text-align: center; }
-.branch-row__agents em { margin-left:var(--sp-1); color: var(--text-3); font: 10px/1 var(--font-mono); font-style: normal; }
+/* 行网格与 identity/尾列排版走共享层（selector.css）。这里只留 Branch 侧真正不同的两点：
+   行首那枚 GitBranch 图标着绿，以及 worktree 路径用等宽体——它是路径不是标题。 */
+.branch-row .selector-row__leading { color: var(--green-2); }
+.branch-row--selected .selector-row__leading { color: var(--green); }
+.branch-row .selector-row__identity strong { color: inherit; }
+.branch-row .selector-row__identity small { font-family: "SFMono-Regular", monospace; line-height: 12px; }
 .branch-row__state { display: inline-flex; align-items: center; gap:var(--sp-1); padding:1px var(--sp-2); border-radius: var(--radius-sm); color: var(--green); background: var(--green-bg); font-size: var(--fs-micro); line-height: 13px; white-space: nowrap; }
 .branch-row__state--unbound { color: var(--amber); background: var(--green-bg); }
 .branches-empty { min-height: 90px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap:var(--sp-2); padding:var(--sp-5); color: var(--text-3); font-size: var(--fs-micro); text-align: center; }

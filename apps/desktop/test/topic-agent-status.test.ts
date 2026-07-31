@@ -136,6 +136,14 @@ describe('Agent 头像：身份看图标，点击到人', () => {
     new URL('../src/renderer/src/components/SurfaceToolDock.tsx', import.meta.url),
     'utf8'
   )
+  const selector = readFileSync(
+    new URL('../src/renderer/src/components/SelectorList.tsx', import.meta.url),
+    'utf8'
+  )
+  const branches = readFileSync(
+    new URL('../src/renderer/src/components/BranchesPanel.tsx', import.meta.url),
+    'utf8'
+  )
   const styles = allStyles()
 
   it('身份由 Provider 图标给出，不是一排看不出谁是谁的抽象点', () => {
@@ -143,7 +151,7 @@ describe('Agent 头像：身份看图标，点击到人', () => {
   })
 
   it('点击走全局那一个 selectSession，不另开跳转路径', () => {
-    expect(dock).toContain('onOpen={() => selectSession(agent.sessionId)}')
+    expect(dock).toContain('selectSession(agent.sessionId)')
     expect(avatar).toContain('onOpen()')
   })
 
@@ -157,14 +165,25 @@ describe('Agent 头像：身份看图标，点击到人', () => {
     expect(avatar).toContain('title={`${label} · ${state}`}')
   })
 
-  it('悬停是轻量抬升，不是放大——放大会挤动同排的其它头像', () => {
-    const hover = styles.match(/\.agent-avatar:hover\s*\{([^}]*)\}/)?.[1] ?? ''
-    expect(hover).toContain('translateY(-1px)')
-    expect(hover).not.toContain('scale(')
+  it('悬停抬升并放大，且不推动同排其它头像', () => {
+    // 这条曾写作"轻量抬升，不是放大——放大会挤动同排的其它头像"。**那个理由是错的**：
+    // `transform` 不参与布局，一枚头像 scale 起来不会让邻座移动一个像素（会挤动的是改宽高
+    // 或 margin）。用户要的正是 macOS 程序坞那种抬升放大，而当初挡住它的是一条搞错了机制的
+    // 注释。现在放大在叠压容器上生效——叠压之后必须有东西能让被压住的那枚完整露出来。
+    const lift = styles.match(/\.selector-presence__slot:hover \.agent-avatar[^{]*\{([^}]*)\}/)?.[1] ?? ''
+    expect(lift.length).toBeGreaterThan(0)
+    expect(lift).toContain('scale(')
+    expect(lift).toContain('translateY(')
+    // 放大只能走 transform：换成 width/height 就真的会挤动同排。
+    expect(lift).not.toMatch(/\b(width|height|margin)\s*:/)
   })
 
-  it('在 Topic 面板里有真实调用者（零调用者检查）', () => {
-    expect(dock).toContain("import { AgentAvatar } from './AgentAvatar'")
-    expect(dock).toContain('<AgentAvatar')
+  it('AgentAvatar 有真实调用者，且两个面板都经同一条链路到达它（零调用者检查）', () => {
+    // 竖切闭合：共享层渲染头像，两个 bar 都用共享层。任何一环断了，头像就只在一侧在场，
+    // 或者退回成"两处长得像的写法"。
+    expect(selector).toContain("import { AgentAvatar } from './AgentAvatar'")
+    expect(selector).toContain('<AgentAvatar')
+    expect(dock).toContain('<SelectorPresence')
+    expect(branches).toContain('<SelectorPresence')
   })
 })
