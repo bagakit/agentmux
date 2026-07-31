@@ -84,16 +84,16 @@ T-008 的验收会同时覆盖选中/运行的四种组合，避免回到“亮�
 ## 需求来源与两处前提修正
 
 五条需求来自用户，原话为：状态栏显示各类 agent 的活跃/待机数量和 tps 及总 tps（统计开销要低）、
-状态栏显示 CPU RSS、抄 a mature workbench 的启动时同时命名 agent 与 tab 及运行中改名并做成默认行为、
-Topic 也应该有 inbox 和 board 视图、board 工具的次级菜单换成工作清单。用户指明前两条"大部分可以从 a mature workbench 直接抄"。
+状态栏显示 CPU RSS、抄别的同类工具的启动时同时命名 agent 与 tab 及运行中改名并做成默认行为、
+Topic 也应该有 inbox 和 board 视图、board 工具的次级菜单换成工作清单。用户指明前两条"大部分可以从别的同类工具直接抄"。
 
-对 a mature workbench（MIT，`/Users/bytedance/proj/github/a mature workbench`）做只读调研后，两处前提不成立，已与用户确认：
+对一个成熟的同类桌面工具（MIT 许可）做只读机制调研后，两处前提不成立，已与用户确认：
 
-1. **a mature workbench 没有 tps。** 全仓 `tps`/`tokens per second`/`throughput`/`token rate` 零命中；
+1. **该工具没有 tps。** 全仓 `tps`/`tokens per second`/`throughput`/`token rate` 零命中；
    它只有累计 token 用量（计费面板），没有速率。这部分无可抄。用户据此决定：先接 Provider
    原生 usage 再做 tps，本轮状态栏只出活跃/待机计数（T-003 出计数，T-006 出 tps）。
-2. **a mature workbench 里 agent 名 ≡ tab 名，是同一个字段**，不存在"同时命名两处"。它启动对话框里用户填的
-   Name 命名的是 workspace，与 agent 选择是两个独立控件。我们与 a mature workbench 的结构差异在于**一个 Tab
+2. **该工具里 agent 名 ≡ tab 名，是同一个字段**，不存在"同时命名两处"。它启动对话框里用户填的
+   Name 命名的是 workspace，与 agent 选择是两个独立控件。我们与它的结构差异在于**一个 Tab
    可分屏承载多个 Agent**，所以不能照搬合一模型。用户决定两个独立名字字段，并补充了关键策略：
    "Tab 比 Agent 所在的 Region 高一级，所以如果只有一个 Agent，Tab 默认就对齐 Agent 名字，
    但是可能再开 Region，这个时候 Tab 应该要能体现出是一个 Agent 家族。所以名字要分开，
@@ -102,7 +102,7 @@ Topic 也应该有 inbox 和 board 视图、board 工具的次级菜单换成工
 可抄的部分（只学机制，不抄代码）：CPU/RSS 的采样架构——仅面板打开时轮询、in-flight 去重、
 一次全主机 `ps` 扫描按 pid 子树归并、共享祖先按注册顺序只归第一个。均已落入 T-004 验收。
 
-从 a mature workbench 学到的两条反面教训也已落入验收：它的 tab 改名要双写 legacy 与 unified 两个模型
+从该工具学到的两条反面教训也已落入验收：它的 tab 改名要双写 legacy 与 unified 两个模型
 （T-005 要求只有一个 Tab 模型）；它的 workspace 名进了路径与 session key，改名会炸引用，
 只能靠 `priorWorktreeIds` 别名和"已删名不复用"打补丁（T-005 要求名字绝不进 id 与 key，
 并有断言证明改名后三级地址不变）。
@@ -132,7 +132,7 @@ Topic 也应该有 inbox 和 board 视图、board 工具的次级菜单换成工
 - **T-004 不得改造 `apps/desktop/src/main/resource-probe.ts`。** 它是一次性验收探针（跑完写
   报告退出），与常驻采样器职责不同，混用会让验收探针的语义漂移。
 - **T-005 的名字绝不进 key。** 这是前置约束而非事后优化：一旦名字进了 id 或持久化 key，就只能
-  靠别名表打补丁（a mature workbench 的现状即为证）。
+  靠别名表打补丁（这类工具的现状即为证）。
 - **T-006 的诚实口径。** 字节数除以系数冒充 token 数会产出一个无法验证的数字，比没有这个数字
   更糟；未接入 usage 的 Provider 必须表现为"不报用量"而不是 0。
 - **T-007 的"等待用户确认"是平台能力，不是我们能单方面保证的。** Electron 的 `Notification`

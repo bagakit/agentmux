@@ -4,12 +4,12 @@
 
 ## 用户原话
 
-> Agentmux 的内存占用相当夸张，比 a mature workbench 高得多，这是为什么？
+> Agentmux 的内存占用相当夸张，比别的同类工具高得多，这是为什么？
 
 ## 结论
 
 当前差异首先是生命周期策略，不足以直接判定存在泄漏。AgentMux 为了切换项目时不丢
-xterm/attachment，把所有已有布局的 Workbench 子树同时挂载；a mature workbench 对隐藏终端采用有限
+xterm/attachment，把所有已有布局的 Workbench 子树同时挂载；成熟的同类实现对隐藏终端采用有限
 hot-retain、TTL、数量上限和 cold-park。AgentMux 必须先用同条件的进程/owner 数据建立基线，
 再在不破坏 Session、Region、Replay 与 attachment 事实的前提下移植有限 parking。
 
@@ -23,9 +23,9 @@ hot-retain、TTL、数量上限和 cold-park。AgentMux 必须先用同条件的
   和 resource-owner counts 证明。
 - 未有实测前不承诺某个 RSS 数字，也不以卸载所有隐藏 Workbench 作为修复。
 
-## a mature workbench 参考
+## 参考实现
 
-a mature workbench 的 `terminal-hidden-view-parking.ts` / `use-terminal-tab-cold-parking.ts` 使用 30s cold-park
+一个成熟的同类实现在隐藏终端 parking 上使用 30s cold-park
 延迟、5min hot-retain 和有限数量（Tab 6、Worktree 4），并在 pending startup、activity portal、
 PTY 可恢复性、测量窗口等条件不满足时禁止 parking。该模式是比较证据，不是 AgentMux 的第二个
 Runtime；迁移时只复用策略思想和可验证条件。

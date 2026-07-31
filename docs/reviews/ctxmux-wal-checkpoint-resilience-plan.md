@@ -35,3 +35,14 @@ SQLite reader/attachment 争用会返回 busy，随后 actor 把错误写入共�
 每个 Task 都必须有可执行 command gate。完成还需证明：故意移除 retry 或恢复
 接线时对应测试变红；新增公开 symbol 在定义文件之外有生产调用者。不要手工截断
 真实用户 WAL，也不要删除旧状态作为“修复”。
+
+## T-003 消费决策（2026-08-31）
+
+ctxmux 最新 `main` 为 `c13ab114f6ddf0cf8eb22c6cc39bb16f7aa0dec7`，其中
+`14955258d443b5582616bc962449d39aba03ab41` 保留 SQLite extended result code，
+只把 `SQLITE_IOERR_WRITE`、`SQLITE_IOERR_FSYNC`、`SQLITE_IOERR_DIR_FSYNC` 与
+`SQLITE_IOERR_TRUNCATE` 纳入空间压力重试；READ、LOCK、DELETE、MMAP、裸
+`SQLITE_IOERR` 与未知 extended code 继续 fail closed。最新 artifact 为 protocol 14，
+SDK 已在 wire validation 边界把 base64 output 解码成 `Uint8Array`，AgentMux
+`CtxmuxRunAdapter` 的 ordered-byte 输入合同无需改变。因此 T-003 消费最新 main 的
+完整 daemon/CLI/SDK/manifest artifact，不维护 protocol 13 私有 backport。

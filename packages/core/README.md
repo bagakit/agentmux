@@ -2,7 +2,7 @@
 
 无 Electron、React 依赖的 AgentMux Runtime Core。
 
-当前 Local Run 只由固定的 CtxMux `073e206407ce28331aa882c2c80e9354cfe2879a` 持有。包内携带 exact-commit manifest、SDK tarball 和 darwin-arm64 binaries；开发期依赖只从这份 tarball 取得官方类型，构建再把同一 SDK 私有 bundle 进唯一 `CtxmuxRunAdapter`，不保留手写 wire 声明。公共 API 不导出 CtxMux SDK/wire 类型，发布后的 runtime 也不需要相邻仓库、外部 `@ctxmux/sdk`、全局 `ctxmux` 或运行时下载。
+当前 Local Run 只由固定的 CtxMux `c13ab114f6ddf0cf8eb22c6cc39bb16f7aa0dec7` 持有。包内携带 exact-commit manifest、SDK tarball 和 darwin-arm64 binaries；开发期依赖只从这份 tarball 取得官方类型，构建再把同一 SDK 私有 bundle 进唯一 `CtxmuxRunAdapter`，不保留手写 wire 声明。公共 API 不导出 CtxMux SDK/wire 类型，发布后的 runtime 也不需要相邻仓库、外部 `@ctxmux/sdk`、全局 `ctxmux` 或运行时下载。
 
 Local Client 不接受外部 socket/state 注入。Endpoint 路径由 exact artifact identity 派生，只启动经过 hash、mode 和公开 `--version` 合同验证的随包 `ctxmuxd`。已存在的 peer 还必须匹配 owner receipt、daemon instance、persistent runtime lineage、runtime build 和五项必需 capability；bootstrap 只读取一次原始 `runtimeInfo()`，随后每次业务 dispatch 都在承载该业务帧的同一连接上匹配完整 expected Runtime identity。同协议的替换 daemon 也会在业务帧发送前失败关闭。
 

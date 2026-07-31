@@ -1,0 +1,80 @@
+/**
+ * 同一族列表行的共享表现层。
+ *
+ * Branch/Worktree 条与 Topic 条在视觉上是同一种东西：一个带计数的 header，下面一列可选中的行，
+ * 每行是「状态槽 + identity + 尾部 Agent 簇」。此前这些规则在 dock.css 里分居两处、各写一遍，
+ * 于是同一件事有了两套数值。这里是那一套。
+ *
+ * 各面板自己的东西（Topic 的拖拽抬升、Branch 的 worktree 状态胶囊）仍留在 dock.css——
+ * 那些不是这一族共有的形状。
+ */
+
+.selector-list__header {
+  width: 100%;
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding:0 var(--sp-2) 0 var(--sp-4);
+  color: var(--text-3);
+}
+.selector-list__header > span { min-width: 0; display: flex; align-items: center; gap:var(--sp-3); }
+/* 标题是分组标签而不是页面标题：与项目栏 `Projects` 同一寄存器——元信息字号、克制的字距，
+   不靠字重和大写把自己喊成一屏之主（密度合同《尺度系统》：层级不靠放大买）。 */
+.selector-list__header strong {
+  color: var(--text-2);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+/* 计数是这行里最弱的一件事，不该是一枚实心药丸。去掉 Surface 填充后它读作"标题的一部分"，
+   而不是"标题旁边还有个按钮"；等宽数字让 9→10 时标题不跳。 */
+.selector-list__header em {
+  color: var(--text-3);
+  font-size: var(--fs-micro);
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+}
+.selector-list__actions { flex: 0 0 auto; display: flex; align-items: center; gap:1px; }
+.selector-list__actions .icon-button { width: 24px; height: 24px; }
+
+.selector-row__leading { display: inline-flex; align-items: center; justify-content: center; }
+.selector-row__identity { min-width: 0; display: flex; flex-direction: column; gap:0; }
+.selector-row__identity strong,
+.selector-row__identity small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.selector-row__identity strong { color: var(--text); font-size: var(--fs-meta); }
+.selector-row__identity small { color: var(--text-3); font-size: var(--fs-micro); }
+/* 尾列贴住行的右缘。它是网格里的独立一列，不是 identity 里的浮动块——所以它对齐的是行，
+   与本行摘要有多长无关。 */
+.selector-row__meta { min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap:var(--sp-2); }
+
+/* 一摞头像，像会议里的参与者列。 */
+.selector-presence { flex: 0 0 auto; display: flex; align-items: center; }
+.selector-presence__slot { position: relative; display: inline-flex; align-items: center; }
+/* 叠压是**相邻两枚之间**的关系，所以写在相邻选择器上：写在每一枚上会把整簇往左推，
+   第一枚越过自己的左缘。6px 相对 18px 头像约三分之一——足以读作一摞，又不遮住 provider 图标。
+   负值一律走 calc：`-var(--sp-3)` 不是合法 CSS，浏览器会静默丢弃整条声明（见控件语言）。 */
+.selector-presence__slot + .selector-presence__slot { margin-left: calc(-1 * var(--sp-3)); }
+/* 悬停：上浮 + 放大 + 盖过邻座。用 transform 而不是改 margin——transform 不参与布局，
+   因此这一枚变大时同排其它头像纹丝不动；改 margin 会让整摞在指针下面横向抖动。
+   放大到 1.18 使它完整露出被压住的那部分，读作"这一枚被拎起来了"。 */
+.selector-presence__slot:hover,
+.selector-presence__slot:focus-within { z-index: 20 !important; }
+.selector-presence__slot:hover .agent-avatar,
+.selector-presence__slot:focus-within .agent-avatar { transform: translateY(-2px) scale(1.18); }
+/* 同一个 provider 归并了几个 Session 时的角标。 */
+.selector-presence__slot small {
+  position: absolute; right: -3px; bottom: -3px;
+  min-width: 9px; height: 9px; padding:0 var(--sp-1);
+  border-radius: var(--radius-sm);
+  color: var(--green-text); background: var(--green-line);
+  font: 10px/9px var(--font-mono); text-align: center;
+}
+/* 折起来的那些。它跟在最后一枚之后，不参与叠压——`+3` 被压掉一半就不成其为数字了。 */
+.selector-presence em {
+  margin-left:var(--sp-2);
+  color: var(--text-3);
+  font: 10px/1 var(--font-mono);
+  font-style: normal;
+}

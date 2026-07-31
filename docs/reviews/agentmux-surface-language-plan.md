@@ -32,7 +32,7 @@ Plan revision：1
 
 ### 二、终端恢复态
 
-> 现在切换是都会 restoring terminal, 但是 /Users/bytedance/proj/github/a mature workbench 就不会,
+> 现在切换是都会 restoring terminal, 但是别的同类工具就不会,
 > 可以看看差距在哪儿, 记个技术需求并放进 tracker 优化
 
 ### 三、全局设计语言
@@ -69,12 +69,12 @@ Plan revision：1
 切回时组件重新挂载，`TerminalView.tsx:115` 的 `useState(true)` 让 `hydrating` 从 true 起步，
 `terminal-startup.ts:11` 据此判定为 `'restoring'`，于是必然重放"Restoring terminal…"。
 
-**a mature workbench**（MIT，只读机制调研，不抄代码）：隐藏 tab 用 `display:none` **保活**，实例不销毁。
-其 `terminal-pane/TerminalPane.tsx` 的注释写明 "ordinary hidden tabs are display:none and refit
-on visibility resume"，配套有 `use-terminal-container-fit-sync.ts` 处理"display:none 的 pane
+**一个成熟的同类工具**（MIT，只读机制调研，不抄代码）：隐藏 tab 用 `display:none` **保活**，实例不销毁。
+其 terminal pane 组件的注释写明 "ordinary hidden tabs are display:none and refit
+on visibility resume"，配套有 container fit-sync 逻辑处理"display:none 的 pane
 量不出尺寸"这一后果，以及 reveal 时补发目标网格的路径。
 
-**差距是一个决定**：AgentMux 把"这个 tab 不可见"实现为**不渲染**，a mature workbench 实现为**渲染但隐藏**。
+**差距是一个决定**：AgentMux 把"这个 tab 不可见"实现为**不渲染**，成熟同类工具实现为**渲染但隐藏**。
 恢复态不是加载慢，是实例真的没了——所以修法在保住实例，而不在加速重放。这条已写入 SSOT 的
 Terminal 节，连同三条边界：不可见终端不做布局与渲染工作、实例存活边界是 Region 的存活边界
 （不建绕过 Region 生命周期的缓存池）、恢复态只在真正需要重放时出现（首次 attach、断连重连、replay gap）。

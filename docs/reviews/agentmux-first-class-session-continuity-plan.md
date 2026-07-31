@@ -70,7 +70,7 @@
 
 ## 外部成熟模式对照
 
-- a mature workbench 的 `use-app-session-persistence`、field-level persisted UI writer、sleeping-agent resume 和 window-bounds 校验说明：持久化应有 debounced writer、unload/shutdown checkpoint、几何合法性校验，恢复失败保留记录。
+- 一个成熟桌面工具的 `use-app-session-persistence`、field-level persisted UI writer、sleeping-agent resume 和 window-bounds 校验说明：持久化应有 debounced writer、unload/shutdown checkpoint、几何合法性校验，恢复失败保留记录。
 - Herdr 的 `PersistedAgentSession`、provider ref/argv 集中构造、dedupe key 和 geometry-ready 后后台 resume 说明：不要从 session id 猜 transcript path；恢复计划应集中、去重并在布局可见后异步执行。
 
 这里只抽取 project-native 最小模式，不复制第二套 Runtime、daemon 或 UI 状态机。

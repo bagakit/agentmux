@@ -17,10 +17,10 @@ Plan revision：1
 > 另外, 当起名能力齐全了以后, 可以在欢迎语句里头给出指令 agent 给自己起名
 
 > shift + enter, 正常在 Claude 的 TUI 里头应该是换行，但是在 Agent_Marks 里面打开的话，
-> 它就直接发出去了。看看是不是抄 a mature workbench 没抄对
+> 它就直接发出去了。看看是不是抄别的工具没抄对
 
 > 这个 shift + enter 对不对, 以及能不能选中 copy, 要放进需求细节和测试集, 因为容易出错.
-> 而且要仔细 review 这里是照抄 a mature workbench, 还是自由发挥了
+> 而且要仔细 review 这里是照抄别的工具, 还是自由发挥了
 
 > 终端要像终端, 说的很好, 不像终端不光用户理解不了, 我们的复杂度也很高
 
