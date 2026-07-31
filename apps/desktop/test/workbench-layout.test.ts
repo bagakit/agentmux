@@ -10,7 +10,7 @@ import {
   moveTabToNewGroup
 } from '../src/renderer/src/lib/workbench-layout'
 
-describe('Orca-style workspace tab-group layout', () => {
+describe('workspace tab-group layout', () => {
   it('adds and activates tabs in one group', () => {
     const layout = addTab(createWorkspaceLayout('group-1', ['agent:one']), 'group-1', 'file:a.ts')
     expect(findGroup(layout, 'group-1')).toMatchObject({
@@ -75,7 +75,7 @@ describe('Orca-style workspace tab-group layout', () => {
     expect(closed.root).toEqual({ type: 'leaf', groupId: 'group-1' })
   })
 
-  it('clamps a root split ratio using Orca node paths', () => {
+  it('clamps a root split ratio using node paths', () => {
     const split = moveTabToNewGroup(
       createWorkspaceLayout('group-1', ['agent:one', 'file:a.ts']),
       'file:a.ts',

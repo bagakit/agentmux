@@ -36,7 +36,7 @@ if (unregisteredDetectedLanguages.length > 0) {
   )
 }
 
-// Adapt Orca's sandboxed Monaco setup to AgentMux's editable, single-file
+// A sandboxed Monaco setup adapted to AgentMux's editable, single-file
 // surface. The worker cannot resolve the Workspace module graph, so semantic
 // and suggestion diagnostics create false unresolved-import errors. Keep
 // syntax validation enabled because AgentMux edits complete files, not diffs.

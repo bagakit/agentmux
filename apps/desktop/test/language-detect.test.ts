@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { detectLanguage } from '../src/renderer/src/lib/language-detect.js'
 
-describe('Orca-derived language detection', () => {
+describe('Monaco-based language detection', () => {
   it('maps Monaco built-in code and config languages case-insensitively', () => {
     expect(detectLanguage('src/App.TSX')).toBe('typescript')
     expect(detectLanguage('scripts/build.mjs')).toBe('javascript')
@@ -15,14 +15,14 @@ describe('Orca-derived language detection', () => {
     expect(detectLanguage('/repo/.gitignore')).toBe('ini')
   })
 
-  it('covers the copied Orca custom language registrations', () => {
+  it('covers the custom language registrations beyond Monaco built-ins', () => {
     expect(detectLanguage('src/App.vue')).toBe('vue')
     expect(detectLanguage('src/Widget.svelte')).toBe('svelte')
     expect(detectLanguage('src/Page.astro')).toBe('astro')
     expect(detectLanguage('sessions/log.JSONL')).toBe('jsonl')
   })
 
-  it('does not advertise Orca languages whose tokenizer was intentionally omitted', () => {
+  it('does not advertise languages whose tokenizer was intentionally omitted', () => {
     expect(detectLanguage('src/main.nim')).toBe('plaintext')
     expect(detectLanguage('Makefile')).toBe('plaintext')
     expect(detectLanguage('CMakeLists.txt')).toBe('plaintext')

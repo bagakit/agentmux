@@ -79,7 +79,7 @@ export function getNextSidebarResizeDraftWidth({
   })
 }
 
-// Adapted from Orca's useSidebarResize at 34f2a62. Live drag width stays out of
+// Live drag width stays out of
 // React state so unrelated renders cannot pull the handle back under the pointer.
 export function useSidebarResize<T extends HTMLElement>({
   isOpen,

@@ -16,7 +16,7 @@ export type ResolvedNavigation =
   | { type: 'no-op' }
   | { type: 'unhandled' }
 
-// Direct Orca navigation model: arrows move in visible tree order, Right enters
+// Standard tree navigation model: arrows move in visible tree order, Right enters
 // a child, Left returns to a parent, and page/home/end preserve tree semantics.
 export function resolveFileExplorerNavigationTarget(args: {
   key: NavigationKey

@@ -89,7 +89,7 @@ function session(input: {
       }
 }
 
-describe('Orca-adapted shared surface tool dock resize', () => {
+describe('shared surface tool dock resize', () => {
   it('keeps Files, Agents and Browser as the three distinct Workspace tools', () => {
     expect(WORKSPACE_TOOL_IDS).toEqual(['files-branches', 'agents', 'browser-tools'])
   })

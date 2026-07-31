@@ -21,7 +21,7 @@ import {
 import { describe, expect, it } from 'vitest'
 import { getFileTypeIcon } from '../src/renderer/src/lib/file-type-icons.js'
 
-describe('Orca-derived file type icons', () => {
+describe('file type icons', () => {
   it('prefers known filenames over generic extensions', () => {
     expect(getFileTypeIcon('package.json')).toBe(FileBox)
     expect(getFileTypeIcon('/repo/tsconfig.json')).toBe(FileSliders)
