@@ -28,6 +28,73 @@ function render(
   return renderToStaticMarkup(createElement(ActivityView, { capability, items }))
 }
 
+/**
+ * 带上说话人解析后的渲染。既有的 `render` 刻意不传 `describeSpeaker`——那既是「不给就不画轴」这条
+ * 退化路径的实测，也让本文件既有的每条断言与两条新轴完全解耦（轴根本没渲染）。
+ */
+function renderWithSpeakers(items: AgentTimelineItem[]): string {
+  return renderToStaticMarkup(
+    createElement(ActivityView, {
+      capability: 'complete-events',
+      items,
+      describeSpeaker: (speaker: { role: 'human' | 'agent'; id: string }) =>
+        speaker.role === 'human' ? { name: 'You' } : { name: 'Claude', providerId: 'claude' as const }
+    })
+  )
+}
+
+describe('ActivityView 与两条对话轴的接线', () => {
+  it('两条轴都接上了，且各自只收自己那一类身份', () => {
+    // 这条守的是**接线本身**。轴组件自己的验收在 conversation-axis-render.test.tsx，但那证明不了
+    // ActivityView 真的渲染了它——一个组件写好却没人调用，两边的测试都会绿。
+    const markup = renderWithSpeakers([
+      activity('u1', { kind: 'user_message', source: 'user', createdAt: 0, content: '问' }),
+      activity('t1', { kind: 'tool_call', source: 'native-hook', createdAt: 100 }),
+      activity('a1', { kind: 'assistant_message', source: 'native-hook', createdAt: 200, content: '答' })
+    ])
+    // 两条轴各有自己的可访问名，两枚头像各是自己那一路的画法。
+    expect(markup).toContain('aria-label="Speakers"')
+    expect(markup).toContain('aria-label="This agent"')
+    expect(markup).toContain('conversation-avatar--human')
+    expect(markup).toContain('conversation-avatar--agent')
+    // 机器上报不在任何一条轴上：两条轴合起来恰好两枚标记（u1 与 a1），tool_call 不占位。
+    expect(markup.match(/conversation-axis__mark/g)).toHaveLength(2)
+  })
+
+  it('不给 describeSpeaker 就不画轴——名字缺席时头像认不出谁，画出来只是装饰', () => {
+    // 本文件其余每条断言都走这条路（`render` 不传该 prop），所以这条同时是那些断言与新轴解耦的
+    // 证明：轴根本没渲染，既有断言不可能被它影响。
+    const markup = render('complete-events', [
+      activity('u1', { kind: 'user_message', source: 'user', createdAt: 0, content: '问' })
+    ])
+    expect(markup).not.toContain('conversation-axis')
+    expect(markup).not.toContain('aria-label="Speakers"')
+    // 但主刻度照旧在：轴是加在它之上的，不是替换它。
+    expect(markup).toContain('activity-ruler')
+  })
+
+  it('轴在主刻度之上，且三者共用一条时间基准——同一事件的横向位置一致', () => {
+    // 「在既有 ruler 之上分轴，不是替换它」的结构证据：轴的标记在标记流里出现在 ruler 轨道之前，
+    // 而两者对同一个事件给出同一个百分比。位置一致是轴有用的全部前提——轴上一枚头像要能指向
+    // 下面那根 tick。
+    const items = [
+      activity('u1', { kind: 'user_message', source: 'user', createdAt: 0, content: '问' }),
+      activity('t1', { kind: 'tool_call', source: 'native-hook', createdAt: 250 }),
+      activity('a1', { kind: 'assistant_message', source: 'native-hook', createdAt: 1_000, content: '答' })
+    ]
+    const markup = renderWithSpeakers(items)
+    expect(markup.indexOf('conversation-axis')).toBeLessThan(markup.indexOf('activity-ruler__track'))
+    // a1 在 1000/1000 = 100%：轴上的头像与主刻度上的 tick 都落在 100%。
+    const axes = markup.slice(0, markup.indexOf('activity-ruler__track'))
+    const ruler = markup.slice(markup.indexOf('activity-ruler__track'))
+    expect(axes).toContain('left:100%')
+    expect(ruler).toContain('left:100%')
+    // 而 tool_call 在 25%，只出现在主刻度上——轴不吞机器上报。
+    expect(ruler).toContain('left:25%')
+    expect(axes).not.toContain('left:25%')
+  })
+})
+
 describe('ActivityView', () => {
   it('states that structured Activity is unavailable without inventing Terminal-derived items', () => {
     const markup = render('unavailable', [activity('stale-item')])
