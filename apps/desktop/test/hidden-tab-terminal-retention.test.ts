@@ -5,7 +5,7 @@ import { allStyles } from './helpers/styles.js'
 /**
  * 切回一个已经打开过的终端，不该再看到 "Restoring terminal…"。
  *
- * 用户的说法是："现在切换是都会 restoring terminal, 但是 orca 就不会, 可以看看差距在哪儿"。
+ * 用户的说法是："现在切换是都会 restoring terminal, 但是别的工具就不会, 可以看看差距在哪儿"。
  * 差距是一个决定：把"不可见"实现为"不渲染"，还是实现为"渲染但隐藏"。前者切走即卸载整棵
  * 子树，xterm 实例随之销毁，切回时只能从头重放全部 scrollback——恢复态不是慢，是必然发生。
  *

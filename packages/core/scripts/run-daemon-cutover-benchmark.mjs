@@ -1783,8 +1783,7 @@ export async function runBenchmark(options) {
         tmux: { available: true, version: environment.environment.tmux },
         zellij: { available: await commandAvailable('zellij') },
         weztermMux: { available: await commandAvailable('wezterm') },
-        orca: { status: 'not_comparable' },
-        paseo: { status: 'not_comparable' }
+        agentDesktops: { status: 'not_comparable' }
       },
       workloads,
       correctness: Object.fromEntries(

@@ -7,7 +7,7 @@ import {
 const colors = { foreground: '#ffffff', background: '#282c34' }
 
 describe('Terminal OSC color query replies', () => {
-  it('uses the same 16-bit rgb reply form as Orca', () => {
+  it('uses the standard 16-bit rgb reply form', () => {
     expect(cssColorToOscRgb('#282c34')).toBe('rgb:2828/2c2c/3434')
     expect(cssColorToOscRgb('rgb(40 44 52)')).toBe('rgb:2828/2c2c/3434')
   })

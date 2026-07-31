@@ -1,5 +1,5 @@
-// 该状态内核直接移植并裁剪自 Orca 的 tab-group Store：
-// src/renderer/src/store/slices/tabs.ts 与 pane-column-split-drop-no-op.ts。
+// 该状态内核移植并裁剪自一个成熟的 tab-group Store（tabs slice 与
+// pane-column-split-drop-no-op 逻辑）。
 // AgentMux 只移除了 Browser/Relay/Persistence 等当前不存在的分支。
 
 export type SplitDirection = 'left' | 'right' | 'up' | 'down'

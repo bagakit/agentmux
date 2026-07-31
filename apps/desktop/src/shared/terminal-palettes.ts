@@ -25,7 +25,7 @@ export type TerminalPalette = Readonly<{
   brightWhite: string
 }>
 
-// Keep Orca's proven ANSI role palette, but use a true-black terminal work area
+// Keep a proven ANSI role palette, but use a true-black terminal work area
 // so Codex's own gray composer and message surfaces remain visibly distinct.
 // The main process also uses these foreground/background values to answer a
 // Run's OSC 10/11 color queries while no Renderer is attached.
