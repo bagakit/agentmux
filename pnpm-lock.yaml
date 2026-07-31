@@ -250,7 +250,7 @@ packages:
     engines: {node: '>=6.9.0'}
 
   '@ctxmux/sdk@file:packages/core/vendor/ctxmux/darwin-arm64/ctxmux-sdk-0.0.0.tgz':
-    resolution: {integrity: sha512-QZPb3KYg/BU8HF0e4IGGP7MpiglnH52rjBGESEY4dRHztq51p/aJ6hNmak9MTyZOcC12+sTV/EZ+/ly0dJHJVw==, tarball: file:packages/core/vendor/ctxmux/darwin-arm64/ctxmux-sdk-0.0.0.tgz}
+    resolution: {integrity: sha512-hSaN8NRVIjIeH/J03A/DQXdcA6xJfu9b2DFWhNqpCiLfnUJX3xlW0OepXhwr7JZaD3osGYrUkHjLpSraNGyeDg==, tarball: file:packages/core/vendor/ctxmux/darwin-arm64/ctxmux-sdk-0.0.0.tgz}
     version: 0.0.0
     engines: {node: '>=24'}
 

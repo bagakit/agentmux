@@ -75,8 +75,8 @@ import { handleTopicRenameKeyDown } from '../lib/topic-rename'
 import { TopicContextMenu } from './TopicContextMenu'
 import { useAppStore } from '../store'
 import { agentComposerAvailability } from './AgentSessionComposer'
-import { AgentAvatar } from './AgentAvatar'
 import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
+import { SelectorListHeader, SelectorPresence, SelectorRow } from './SelectorList'
 import { BranchesPanel } from './BranchesPanel'
 import { ChangesPanel } from './ChangesPanel'
 import { BrowserProfilesPanel } from './BrowserProfilesPanel'
@@ -474,25 +474,25 @@ function WorkspaceTopicsPanel({
   return (
     <section className={`surface-tool-summary workspace-topics-panel workspace-topics-panel--${compact ? 'index' : 'empty'}`}>
       {compact ? (
-        <header className="workspace-topic-index-header">
-          <span>
-            <NotebookText size={14} />
-            <strong>Topics</strong>
-            {topics ? <em>{topics.length}</em> : null}
-          </span>
-          <button
-            className="icon-button"
-            type="button"
-            aria-label="Create new Topic"
-            title="Create new Topic"
-            disabled={pending !== null || topics === null}
-            onClick={() => void createTopic()}
-          >
-            {topics === null || pending === 'create'
-              ? <LoaderCircle className="spin" size={13} />
-              : <Plus size={14} />}
-          </button>
-        </header>
+        <SelectorListHeader
+          className="workspace-topic-index-header"
+          title="Topics"
+          count={topics?.length ?? null}
+          actions={
+            <button
+              className="icon-button"
+              type="button"
+              aria-label="Create new Topic"
+              title="Create new Topic"
+              disabled={pending !== null || topics === null}
+              onClick={() => void createTopic()}
+            >
+              {topics === null || pending === 'create'
+                ? <LoaderCircle className="spin" size={13} />
+                : <Plus size={14} />}
+            </button>
+          }
+        />
       ) : (
         <>
           <div className="surface-tool-summary__icon"><NotebookText size={18} /></div>
@@ -562,34 +562,29 @@ function WorkspaceTopicsPanel({
                   >
                     {/* 行首不放 Topic 图标：一列全同的图标不携带信息，只在挤压标题宽度。
                         这个位置只在真的有话说时才占用——正在打开时的那枚 spinner。 */}
-                    {pending === topic.id ? <LoaderCircle className="spin" size={14} /> : null}
-                    <span>
-                      <span className="workspace-topic-title-line">
-                        <strong>{topic.title}</strong>
-                        {/* 每个 Agent 一枚头像：身份看图标、状态看边框，一枚方块答完两件事。
-                            这里不给 `N agents` 计数——头像逐个在场，计数是把同一事实说第二遍。 */}
-                        {topic.agents.length > 0 ? (
-                          <span className="workspace-topic-agents">
-                            {topic.agents.map((agent) => {
-                              const shown = topicAgentPresentation(agent)
-                              return (
-                                <AgentAvatar
-                                  attention={shown.attention}
-                                  key={agent.sessionId}
-                                  label={agent.live?.label ?? agent.sessionId}
-                                  onOpen={() => selectSession(agent.sessionId)}
-                                  providerId={agent.providerId}
-                                  state={shown.state}
-                                />
-                              )
-                            })}
-                          </span>
-                        ) : null}
-                      </span>
-                      <small>
-                        <span>{topic.summary || topic.directoryPath}</span>
-                      </small>
-                    </span>
+                    <SelectorRow
+                      leading={pending === topic.id ? <LoaderCircle className="spin" size={14} /> : null}
+                      title={topic.title}
+                      subtitle={topic.summary || topic.directoryPath}
+                      /* 每个 Agent 一枚头像：身份看图标、状态看边框，一枚方块答完两件事。
+                         这里不给 `N agents` 计数——头像逐个在场，计数是把同一事实说第二遍。
+                         簇是网格里的尾列，因此右缘对齐的是行，与本行摘要多长无关。 */
+                      presence={
+                        <SelectorPresence
+                          agents={topic.agents.map((agent) => {
+                            const shown = topicAgentPresentation(agent)
+                            return {
+                              key: agent.sessionId,
+                              providerId: agent.providerId,
+                              label: agent.live?.label ?? agent.sessionId,
+                              state: shown.state,
+                              attention: shown.attention,
+                              onOpen: () => selectSession(agent.sessionId)
+                            }
+                          })}
+                        />
+                      }
+                    />
                   </button>
                 )}
                 {/* 行上只留最高频的那个动作。改名收进右键菜单——它一天用不了一次，

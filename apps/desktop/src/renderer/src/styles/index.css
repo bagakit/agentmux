@@ -7,6 +7,7 @@
 @import './tokens.css';
 @import './base.css';
 @import './chrome.css';
+@import './selector.css';
 @import './dock.css';
 @import './workbench.css';
 @import './terminal.css';

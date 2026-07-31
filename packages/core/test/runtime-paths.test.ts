@@ -24,11 +24,11 @@ describe('AgentMux runtime paths', () => {
     // the manifest sha makes the endpoint assertions below go red on purpose — forcing whoever
     // bumps the artifact to re-pin the endpoint here and confirm the version isolation is intended.
     expect(CTXMUX_MANIFEST_SHA256).toBe(
-      '632cea69e4fe31b5958ca67a168a546d294b273354713601027d7f5afc23eebc'
+      '7da18fea240abf0b7160cf460a99b6547ef101d020186858c03c01a99b3e1c1a'
     )
     // Manifest normalization preserves the original release namespace.
-    const originalArtifactIdentity = '346f47c04091623e4daccb8ae2ee8963f72bb881e9712db6e9142546ef3ae7a6'
-    const expectedRuntimeId = '139e4b745e85ea4ced20f99e'
+    const originalArtifactIdentity = '3a790a05eebc576a2f1a91f8481e140eef57665a04d4dd6033598cf7c98176c9'
+    const expectedRuntimeId = '037937530b7b82d5ee47f20d'
     expect(createHash('sha256').update(originalArtifactIdentity).digest('hex').slice(0, 24)).toBe(
       expectedRuntimeId
     )

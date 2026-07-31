@@ -1,13 +1,13 @@
 {
   "schema": "ctxmux.local-artifacts.v1",
   "source": {
-    "commit": "073e206407ce28331aa882c2c80e9354cfe2879a",
-    "tree": "3ddf0706c35517c0dd6bdf4d4f7fa251d88c0e0a",
+    "commit": "c13ab114f6ddf0cf8eb22c6cc39bb16f7aa0dec7",
+    "tree": "c43e3992e2e127d4b4e65e447fd23b9037be7f9c",
     "worktree_clean": true
   },
   "product": {
     "version": "0.1.0",
-    "protocol": 13
+    "protocol": 14
   },
   "support": {
     "platform": "darwin",
@@ -26,13 +26,13 @@
   "sdk": {
     "name": "@ctxmux/sdk",
     "version": "0.0.0",
-    "protocol": 13,
+    "protocol": 14,
     "entry_count": 238,
-    "unpacked_bytes": 306496,
+    "unpacked_bytes": 386302,
     "archive": {
       "path": "ctxmux-sdk-0.0.0.tgz",
-      "sha256": "b0de15b7ffea85fa74bf4013d90a9a6b548ad3f392de3056260e315c56cd0117",
-      "bytes": 67416,
+      "sha256": "e7ba57b358e1f60f78a2148c45d6276772c455ed7c4da7f4464c60bd37094397",
+      "bytes": 84544,
       "mode": "0644"
     }
   },
@@ -40,19 +40,19 @@
     {
       "name": "ctxmux",
       "version": "0.1.0",
-      "protocol": 13,
+      "protocol": 14,
       "path": "bin/ctxmux",
-      "sha256": "3d07820a24546b5e28dad64cb2fcaa17c7d1a865734b993e4d76586648deefdd",
-      "bytes": 2687472,
+      "sha256": "924201d6d13f42b867c270459bccfead88294d66eb7a0abe45de22386cecca96",
+      "bytes": 2708320,
       "mode": "0755"
     },
     {
       "name": "ctxmuxd",
       "version": "0.1.0",
-      "protocol": 13,
+      "protocol": 14,
       "path": "bin/ctxmuxd",
-      "sha256": "f1f3123e20153a054143880db81a406c308ff20b16c486e355233de53f08d8fa",
-      "bytes": 5471920,
+      "sha256": "5e8312f7ce375728bb7044964f563b5e5984700ea1daa9f8603131f1ddc352a8",
+      "bytes": 5474896,
       "mode": "0755"
     }
   ],
