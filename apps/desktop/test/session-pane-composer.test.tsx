@@ -252,4 +252,36 @@ describe('SessionPane Agent Composer ownership', () => {
     expect(markup).toContain('another operation')
     expect(markup).toContain('Resolve conflict first')
   })
+
+  // f-23r8fq5nw / T-012：退出横幅要能说清「是你关的还是它崩的」。三种 exitReason 必须给出彼此不同的
+  // 文案；把 humanizeDetail 的 exitReason 分支剪断（退回统一那句「The process is no longer running.」）
+  // 时，下面 not-same 与 unknown 的诚实措辞断言一起变红。
+  it('tells a user stop apart from a crash apart from an undetermined exit', () => {
+    function renderExit(exitReason: 'user-stopped' | 'crashed' | 'unknown'): string {
+      const dead = session('agent')
+      fixture.state.sessions = [{
+        ...dead,
+        processState: 'exited',
+        status: { state: 'exited', source: 'run-process', observedAt: 2, exitReason }
+      } as SessionSnapshot]
+      fixture.state.viewModes = { 'agent-1': 'terminal' }
+      return render('agent-1', 'agent')
+    }
+
+    const userStopped = renderExit('user-stopped')
+    const crashed = renderExit('crashed')
+    const unknown = renderExit('unknown')
+
+    // 我关的：明说是用户停止。
+    expect(userStopped).toContain('You stopped this session')
+    // 它崩的：明说是进程自退，绝不与「你关的」同文案。
+    expect(crashed).toContain('exited on its own')
+    // 读不出结论：诚实说未知，绝不冒充干净完成。
+    expect(unknown).toContain('could not be determined')
+
+    // 三者两两不同——合成一句就等于没做。
+    expect(userStopped).not.toBe(crashed)
+    expect(crashed).not.toBe(unknown)
+    expect(userStopped).not.toBe(unknown)
+  })
 })
