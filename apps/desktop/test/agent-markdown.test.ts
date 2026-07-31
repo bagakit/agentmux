@@ -1,6 +1,6 @@
-import { createElement } from 'react'
+import { createElement, Fragment, isValidElement, type ReactElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import {
   looksLikeMarkdown,
@@ -15,7 +15,47 @@ function parseInline(source: string): InlineNode[] {
   if (!first || first.kind !== 'paragraph') return []
   return first.children
 }
-import { AgentMarkdown } from '../src/renderer/src/components/AgentMarkdown.js'
+import { AgentMarkdown, type LinkClickModifiers } from '../src/renderer/src/components/AgentMarkdown.js'
+
+// This harness has no DOM and cannot dispatch a click. AgentMarkdown and its inner Inline/Block are
+// pure, hookless render functions, so we invoke the tree by hand and read a rendered element's onClick
+// off its props — the same drill the reveal-action and launch-control tests already use. Finding the
+// `md-link` button and firing its handler is the only way to assert the BEHAVIOUR of a click (which seam
+// it calls, with what) rather than merely that the class rendered.
+type AnyElement = ReactElement<Record<string, unknown>>
+
+function renderTree(element: ReactElement): unknown {
+  const type = element.type
+  if (typeof type === 'function') {
+    return (type as (props: unknown) => unknown)(element.props)
+  }
+  return element
+}
+
+function findByClass(node: unknown, className: string): AnyElement | null {
+  // Walk the rendered element tree, expanding any function component we meet, until we hit the host
+  // element carrying the class we want. Returns the first match in document order.
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = findByClass(child, className)
+      if (found) return found
+    }
+    return null
+  }
+  if (!isValidElement(node)) return null
+  const element = node as AnyElement
+  if (typeof element.type === 'function') {
+    return findByClass(renderTree(element), className)
+  }
+  if (element.type === Fragment) {
+    return findByClass(element.props.children, className)
+  }
+  const classes = element.props.className
+  if (typeof classes === 'string' && classes.split(/\s+/u).includes(className)) return element
+  return findByClass(element.props.children, className)
+}
+
+const CLICK: LinkClickModifiers = { metaKey: false, ctrlKey: false, clientX: 12, clientY: 34 }
 
 describe('agent markdown parser', () => {
   it('never produces markup — only a node tree the renderer maps to elements', () => {
@@ -228,6 +268,43 @@ describe('agent markdown parser', () => {
     expect(markup).toContain('md-link')
     expect(markup).toContain('<button')
     expect(markup).not.toContain('href=')
+  })
+
+  it('routes a clicked http link through the injected menu seam, never straight out to the system', () => {
+    // 用户报的缺陷本体：对话里的链接以前 onClick 直接 openExternal，绕过浮窗菜单直接拉起系统浏览器。
+    // 修复后点击必须把 URL 交给注入的 openHttpLink 出口（宿主据此浮出与终端相同的菜单），而不是自己开。
+    // 把 onClick 改回 `context.openExternal(node.href)` 之类的直开，这条就会红——它是整个修复的意义所在。
+    const openHttpLink = vi.fn()
+    const button = findByClass(
+      renderTree(createElement(AgentMarkdown, {
+        content: 'see [docs](https://example.com/a?b=1)',
+        openHttpLink
+      }) as ReactElement),
+      'md-link'
+    )
+    expect(button, 'expected an md-link button in the rendered turn').not.toBeNull()
+
+    const onClick = button!.props.onClick as (event: LinkClickModifiers) => void
+    onClick(CLICK)
+
+    // 出口收到的是这条链接的 URL 与本次点击的修饰键/坐标——菜单要浮在点击处、要能判 Cmd/Ctrl 直开。
+    expect(openHttpLink).toHaveBeenCalledTimes(1)
+    expect(openHttpLink).toHaveBeenCalledWith('https://example.com/a?b=1', CLICK)
+  })
+
+  it('raises no second, silent path to the system browser when no seam is wired', () => {
+    // 没有注入出口时，点击必须什么都不做，而不是退回直开系统浏览器——那个 fallback 正是缺陷复活的形状。
+    // 这条守着「不留兼容层」：默认实现里若偷偷 import api.ui.openExternal，这条无从直接断言，但配合
+    // 上一条（必须走注入出口）与源码里删掉 defaultOpenExternal，方向是明确的。这里断言点击不抛、不navigate。
+    const button = findByClass(
+      renderTree(createElement(AgentMarkdown, {
+        content: 'see [docs](https://example.com)'
+      }) as ReactElement),
+      'md-link'
+    )
+    expect(button).not.toBeNull()
+    const onClick = button!.props.onClick as (event: LinkClickModifiers) => void
+    expect(() => onClick(CLICK)).not.toThrow()
   })
 
   it('leaves plain prose exactly as written', () => {

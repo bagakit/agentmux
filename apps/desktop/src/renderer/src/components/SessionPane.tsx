@@ -2,10 +2,17 @@ import { AlertTriangle, LoaderCircle, RefreshCw, RotateCcw, ServerOff } from 'lu
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAppStore } from '../store'
 import type { AgentMuxRunExitReason } from '@agentmux/core'
-import type { OpenHttpLinkOrigin } from '../lib/open-destination'
+import {
+  dismissOpenDestinationRequest,
+  type OpenDestination,
+  type OpenHttpLinkOrigin
+} from '../lib/open-destination'
+import { terminalLinkModifierOpensSystemBrowser } from '../lib/terminal-link-gesture'
+import type { LinkClickModifiers } from './AgentMarkdown'
 import { AgentSessionComposer } from './AgentSessionComposer'
 import { AgentInteractionCard } from './AgentInteractionCard'
 import { ActivityView } from './ActivityView'
+import { OpenDestinationMenu, type OpenDestinationMenuRequest } from './OpenDestinationMenu'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { TerminalView } from './TerminalView'
 import { agentSessionServiceOutcome, classifyServiceNotice, serviceNoticeToRender } from '../lib/service-window-notice'
@@ -80,6 +87,42 @@ export function SessionPane({
       void openFile(path, linkOrigin.tabGroupId, location).catch(reportError)
     },
     [openFile, reportError, linkOrigin.tabGroupId]
+  )
+  // An http(s) link in agent prose gets the SAME destination menu the Terminal gives, opening into this
+  // pane's own Region — never a jump straight to the system browser. This is the host that owns the menu
+  // because it is the host that holds the Region origin, mirroring TerminalView exactly.
+  const openHttpLink = useAppStore((state) => state.openHttpLink)
+  const [linkRequest, setLinkRequest] = useState<OpenDestinationMenuRequest | null>(null)
+  const nextLinkRequestIdRef = useRef(0)
+  // canSplit reports the TRUTH of this origin: a directional destination needs a precise Tab+Region, and
+  // choosing one without them throws in the Store. Only when both are present are the split items live.
+  const canSplit = Boolean(linkOrigin.tabId && linkOrigin.regionId)
+  const onProseLinkClick = useCallback(
+    (url: string, event: LinkClickModifiers) => {
+      const isMac = navigator.userAgent.includes('Mac')
+      // Cmd (macOS) / Ctrl (elsewhere) + click opens the system browser immediately, skipping the menu —
+      // the SAME judgement the Terminal uses, so the two surfaces cannot drift on the modifier.
+      if (terminalLinkModifierOpensSystemBrowser(event, isMac)) {
+        void openHttpLink(linkOrigin, url, 'system').catch(reportError)
+        return
+      }
+      setLinkRequest({
+        id: ++nextLinkRequestIdRef.current,
+        url,
+        x: event.clientX,
+        y: event.clientY
+      })
+    },
+    [openHttpLink, linkOrigin, reportError]
+  )
+  const onProseLinkSelect = useCallback(
+    (destination: OpenDestination) => {
+      const request = linkRequest
+      if (!request) return
+      setLinkRequest((current) => dismissOpenDestinationRequest(current, request.id))
+      void openHttpLink(linkOrigin, request.url, destination).catch(reportError)
+    },
+    [linkRequest, openHttpLink, linkOrigin, reportError]
   )
   const [refreshing, setRefreshing] = useState(false)
   const [recovering, setRecovering] = useState(false)
@@ -227,9 +270,18 @@ export function SessionPane({
             displayState={session.status.state}
             workspaceRoot={activeWorkspaceRoot}
             openWorkspaceFile={openWorkspaceFile}
+            openHttpLink={onProseLinkClick}
           />
         )}
       </div>
+      <OpenDestinationMenu
+        request={linkRequest}
+        canSplit={canSplit}
+        onDismiss={(requestId) =>
+          setLinkRequest((current) => dismissOpenDestinationRequest(current, requestId))
+        }
+        onSelect={onProseLinkSelect}
+      />
       {surfaceKind === 'agent' && session.kind === 'agent' ? (
         <div className="agent-input-stack">
           {/* 服务窗（原则 11）：一处我们的流程失败，在阻断用户之前先分清是哪一类。这里的 disconnected
