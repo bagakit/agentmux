@@ -404,4 +404,68 @@ describe('Renderer persistence boundary', () => {
     expect(state.error).toContain('returned no Session facts')
     dispose()
   })
+
+  it('说清一个被退役的 Agent Region 是被关掉了，而不是让它静默消失', async () => {
+    // 退役与「不可用/冲突」的差别：后两者留下带 continuity 的错误骨架告诉用户发生了什么，
+    // 而 retired 此前两个分支都不进，Region 被删掉且 error 为 null——用户离开时留下的一格，
+    // 回来就没了，一个字都没有。删掉 Region 本身是对的（手动 recoverSession 在 retired 时同样
+    // removeSessionProjection，空快照守卫也把「显式退役」列为停止保留的正当理由），所以这条
+    // 断言不能落在 tabs 缺席上：那在修复前后都成立，检测不到缺失的告知。它必须落在 error 文本上。
+    const sessionId = 'agent-retired-candidate'
+    const tab = createWorkbenchTab('retired-candidate-view', {
+      regionId: initialWorkbenchRegionId('retired-candidate-view'),
+      kind: 'agent',
+      phase: 'attached',
+      workspaceId: 'workspace-a',
+      sessionId
+    })
+    const candidate: AgentSessionRecoveryCandidate = {
+      agentSessionId: sessionId,
+      hostId: 'local',
+      workspacePath: '/repo/a',
+      providerId: 'codex',
+      executorId: 'codex',
+      capabilities: {
+        terminal: true,
+        hookEvents: true,
+        timeline: 'streaming',
+        permission: 'observe',
+        providerResume: true,
+        acp: false,
+        replyCorrelation: 'none'
+      },
+      label: 'Codex · retired',
+      createdAt: 1,
+      updatedAt: 1,
+      run: { runId: 'run-retired-candidate' }
+    }
+    useAppStore.setState({
+      loading: true,
+      restoredWorkbench: {
+        tabs: { [tab.id]: tab },
+        layouts: { 'workspace-a': createWorkspaceLayout('pane', [tab.id]) }
+      }
+    })
+    vi.spyOn(useAppStore.persist, 'hasHydrated').mockReturnValue(true)
+    vi.spyOn(api.config, 'get').mockResolvedValue(config)
+    vi.spyOn(api.providers, 'list').mockResolvedValue([])
+    vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({
+      sessions: [],
+      timelines: {},
+      recoveryCandidates: [candidate]
+    })
+    vi.spyOn(api.sessions, 'recover').mockResolvedValue({ kind: 'retired' })
+
+    const dispose = await useAppStore.getState().initialize()
+    const state = useAppStore.getState()
+
+    // 告知这一侧：删掉那条 retired 分支，这两行变红。
+    expect(state.error).toContain('was retired')
+    expect(state.error).toContain(candidate.label)
+    // 不保留这一侧：若有人「顺手」把 retired 也塞进 recoveryFailures 去保住 Region，这行变红——
+    // 那会让被明确退役的 Agent 赖着不走，与手动路径矛盾。两侧同时钉住，才不是只守一半。
+    expect(state.tabs[tab.id]).toBeUndefined()
+    expect(state.loading).toBe(false)
+    dispose()
+  })
 })
