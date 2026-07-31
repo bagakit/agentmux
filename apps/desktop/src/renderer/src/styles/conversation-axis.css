@@ -93,23 +93,59 @@
   box-shadow: var(--focus-ring);
 }
 
-/* Selection is a shared value, shown here and on the ruler tick below for the same event. The ring
-   is drawn in the surface colour so it reads as a gap punched around the avatar rather than as a
-   stroke added to it — strokes are not a device in this language. */
+/* Selection is a shared value, shown here and on the ruler tick below for the same event — so it has
+   to be shown the SAME WAY. The tick's recipe (`activity.css`) is: grow the geometry (2→3px wide,
+   14→18px tall) and punch a `--surface-0` gap around it. No colour is added, because in this language
+   selection is a single geometric signal and a stroke is not a device. So the mark grows too, and
+   keeps the same gap, rather than gaining a ring in some third colour. An earlier version drew a
+   `--text-3` ring here: that was a third selection recipe, and a stroke at that, in a language whose
+   own rule says strokes are not the means.
+   The scale goes on the glyph, not the button: the button's own transform is what centres it on its
+   position, and overwriting that would slide the mark off the tick it points at. */
+.conversation-axis__mark[data-selected] .conversation-axis__glyph {
+  transform: scale(1.25);
+}
 .conversation-axis__mark[data-selected] .conversation-avatar {
-  box-shadow: 0 0 0 2px var(--surface-0), 0 0 0 3px var(--text-3);
+  box-shadow: 0 0 0 2px var(--surface-0);
 }
 
-/* Marks crowd whenever two turns land close in time — at 320px, turns 5% apart put two 24px hit areas
-   8px into each other. Hovering one lifts it clear, following the same idiom the presence cluster
-   already uses (`selector.css`): raise the stack order and scale with `transform` so the neighbours do
-   not move. The scale goes on the AVATAR, not on the button — the button's own transform is what
-   centres it on its position, and overwriting that would slide the mark off the tick it points at. */
+/* The current selection wins any overlap. Marks are positioned by time, so two turns close together
+   overlap in DOM order — without this, a selected mark that happens to come earlier is drawn UNDER
+   its neighbour and its whole selected treatment is invisible. Hover/focus below raise higher still,
+   which is correct: whichever one the pointer is on should be the one you can see. */
+.conversation-axis__mark[data-selected] {
+  z-index: 1;
+}
+
+/* Marks crowd whenever two turns land close in time. At 320px the track is only ~190px wide once the
+   row padding and the span/note siblings are taken out, so two turns 5% apart put two 24px hit areas
+   about 14px into each other. Hovering one lifts it clear: raise the stack order and scale it up so
+   the neighbours do not move. The scale goes on the AVATAR, not on the button — the button's own
+   transform is what centres it on its position, and overwriting that would slide the mark off the tick
+   it points at. (`selector.css`'s presence cluster raises and scales on hover for the same reason; its
+   own `translateY` lift is deliberately NOT copied here — these marks sit 2px from the next axis row,
+   so a vertical lift would push one row's avatar into the other's.) */
 .conversation-axis__mark:hover,
 .conversation-axis__mark:focus-visible {
-  z-index: 1;
+  z-index: 2;
 }
 .conversation-axis__mark:hover .conversation-axis__glyph,
 .conversation-axis__mark:focus-visible .conversation-axis__glyph {
   transform: scale(1.18);
+}
+/* Selected-and-hovered must not shrink. The selected scale is the larger one, so it has to win, and it
+   wins by being declared after the hover rule — without this pair the pointer would pull a selected
+   mark from 1.25 back down to 1.18, making the current selection look *less* selected on hover. */
+.conversation-axis__mark[data-selected]:hover .conversation-axis__glyph,
+.conversation-axis__mark[data-selected]:focus-visible .conversation-axis__glyph {
+  transform: scale(1.25);
+}
+
+/* The scale itself stays — it is what makes selection and hover legible, and selection must remain
+   visible however the viewer feels about motion. Only the animation between the states is dropped,
+   the same way the working dots drop their pulse (`activity.css`). */
+@media (prefers-reduced-motion: reduce) {
+  .conversation-axis__glyph {
+    transition: none;
+  }
 }
