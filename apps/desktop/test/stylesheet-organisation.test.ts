@@ -52,6 +52,26 @@ describe('样式表的组织', () => {
     expect(styleFiles().length).toBeGreaterThan(1)
   })
 
+  it('没有被浏览器静默丢弃的声明——`-var(...)` 不是合法 CSS', () => {
+    // 这条守的是一整类**不会有任何东西变红**的错误：写 `margin-top:-var(--sp-2)` 想表达"负一个
+    // 尺度令牌"，但 CSS 里减号不能这样前置到 var() 上，整条声明会被解析器直接丢掉——没有控制台
+    // 报错、没有 lint、没有行为测试会红，页面只是悄悄少了一条规则。
+    //
+    // 实测过一次真实后果：`.activity-ruler__tick`/`__band` 用 `top:50%` + 负 margin-top 做垂直
+    // 居中，声明被丢弃后负 margin 归零，每根 tick 都比中线低半个身位。全表当时有 7 处。
+    //
+    // 正确写法是 `calc(-1 * var(--sp-N))`，或者干脆用不依赖高度的 `translate` 做居中。这条断言
+    // 报出每一处的文件与行号，因为一处一处地找是这类 bug 唯一的排查方式。
+    const offenders: string[] = []
+    for (const { name, text } of styleFiles()) {
+      text.split('\n').forEach((line, index) => {
+        // 只找减号紧贴 var( 的写法。`calc(-1 * var(...))` 与 `--custom-prop: value` 都不匹配。
+        if (/(?<![\w)])-var\(/.test(line)) offenders.push(`${name}:${index + 1}`)
+      })
+    }
+    expect(offenders).toEqual([])
+  })
+
   it('全表拼起来仍是可扫描的一张表，契约测试因此不会扫到空内容', () => {
     const styles = allStyles()
     expect(styles.length).toBeGreaterThan(100_000)
