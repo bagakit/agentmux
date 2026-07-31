@@ -1,13 +1,14 @@
 import { AlertTriangle, LoaderCircle, RefreshCw, RotateCcw, ServerOff } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppStore } from '../store'
-import type { AgentMuxRunExitReason } from '@agentmux/core'
+import type { AgentMuxRunExitReason, AgentProviderId } from '@agentmux/core'
 import {
   dismissOpenDestinationRequest,
   type OpenDestination,
   type OpenHttpLinkOrigin
 } from '../lib/open-destination'
 import { terminalLinkModifierOpensSystemBrowser } from '../lib/terminal-link-gesture'
+import type { ConversationSpeaker } from '../lib/conversation-speaker'
 import type { LinkClickModifiers } from './AgentMarkdown'
 import { AgentSessionComposer } from './AgentSessionComposer'
 import { AgentInteractionCard } from './AgentInteractionCard'
@@ -68,6 +69,23 @@ export function SessionPane({
   const timeline = useAppStore((state) => state.timelines[sessionId]?.items ?? NO_TIMELINE_ITEMS)
   const terminalThemeId = useAppStore((state) => state.config?.appearance.terminalTheme)
   const viewMode = useAppStore((state) => state.viewModes[sessionId] ?? 'terminal')
+  // 说话人身份 → 「叫什么、画哪个 provider」。这一层是唯一持有 Session 的地方，所以查 store 归这里；
+  // ActivityView 与两条轴都保持受控，可以在无 DOM 的测试里直接求值。
+  //
+  // 名字是身份的判别器（见设计 SSOT 里那条实测：颜色在同 provider 下不足以区分），所以 agent 这一路
+  // 用 Session 自己的 label 而不是 provider 的品牌名——两条 Claude 会有两个不同的 label，却共用同一枚
+  // 品牌图标与可能相近的色相。人类这一路今天只有一个身份。
+  const describeSpeaker = useMemo(
+    () =>
+      (speaker: ConversationSpeaker): { name: string; providerId?: AgentProviderId } =>
+        speaker.role === 'human'
+          ? { name: 'You' }
+          : {
+              name: session?.label ?? 'Agent',
+              ...(session?.kind === 'agent' && session.providerId ? { providerId: session.providerId } : {})
+            },
+    [session?.label, session?.kind, session?.kind === 'agent' ? session.providerId : undefined]
+  )
   const refreshSession = useAppStore((state) => state.refreshSession)
   const recoverSession = useAppStore((state) => state.recoverSession)
   const respondInteraction = useAppStore((state) => state.respondInteraction)
@@ -271,6 +289,7 @@ export function SessionPane({
             workspaceRoot={activeWorkspaceRoot}
             openWorkspaceFile={openWorkspaceFile}
             openHttpLink={onProseLinkClick}
+            describeSpeaker={describeSpeaker}
           />
         )}
       </div>
