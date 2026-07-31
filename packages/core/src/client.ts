@@ -18,6 +18,7 @@ import {
   type AgentProvider
 } from './agent-provider.js'
 import { releaseSubagentRoster } from './hook-normalizer.js'
+import { classifyRunExit } from './agent-run-exit.js'
 import { composeAgentLaunchPrompt, composeOutboundMessage } from './agent-outbound-message.js'
 import { hashAgentCapability, issueAgentCapability, resolveCapabilityAuthor } from './agent-capability.js'
 import { planDiscussion } from './agent-discussion.js'
@@ -401,6 +402,10 @@ export class AgentMuxClient {
   private readonly agentInputCursors = new Map<string, number>()
   private readonly agentInputTails = new Map<string, Promise<void>>()
   private readonly agentContinuityTails = new Map<string, Promise<void>>()
+  // 「用户为这个 runId 发起过停止」这条**意图**事实的台账。与内核报的退出**结果**分居两处：控制面在
+  // stop 路径写入意图，acceptKernelEvent 在退出事件里读它、合成 exitReason。一个 runId 只会退出一次，
+  // 分类后即删，不留驻。裸集合足矣——意图是布尔（在场即「我们关的」），不需要携带别的。
+  private readonly stopRequestedRuns = new Set<string>()
   private readonly screenEvidence: AgentScreenEvidenceStore
   private readonly promptSubmission: AgentPromptSubmissionCoordinator
 
@@ -579,6 +584,7 @@ export class AgentMuxClient {
     this.unsubscribeKernelErrors = null
     this.kernel.disconnect()
     this.runPids.clear()
+    this.stopRequestedRuns.clear()
     this.agentInputCursors.clear()
     this.agentInputTails.clear()
     this.promptSubmission.cancelAllReadiness()
@@ -803,6 +809,8 @@ export class AgentMuxClient {
 
   async stopTerminal(ref: AgentMuxRunRef): Promise<void> {
     this.requireConnected()
+    // 先记停止意图，再动内核：若退出事件在 stop 返回前就到（自退与我们的 stop 撞车），分类仍读得到意图。
+    this.stopRequestedRuns.add(ref.runId)
     await this.kernel.stop(await this.kernel.prepareStop(ref.runId))
     this.runPids.delete(ref.runId)
     this.publisher.publish({
@@ -1761,6 +1769,9 @@ export class AgentMuxClient {
         'STALE_AGENT_SESSION'
       )
     }
+    // 停止意图落台账。用户主动停止走的干净路径是 run-removed（下方），但进程可能在我们的 stop 生效前就
+    // 自退——那条 exit 事件会先到 acceptKernelEvent；先记意图，才能让它诚实归为 user-stopped 而非 crashed。
+    this.stopRequestedRuns.add(expectedRun.runId)
     const lifecycleOperationId = agentLifecycleOperationIdentity(
       'stop',
       agentSessionId,
@@ -1947,6 +1958,8 @@ export class AgentMuxClient {
   }
 
   private async stopRunningRun(runId: string): Promise<void> {
+    // 恢复期主动停掉的 uncommitted run 也是「我们关的」——记下意图，让其退出事件同样归为 user-stopped。
+    this.stopRequestedRuns.add(runId)
     await this.kernel.stop(await this.kernel.prepareStop(runId))
   }
 
@@ -3109,6 +3122,16 @@ export class AgentMuxClient {
     // SubagentStop 投递失败，normalizer 的花名册里那条 id 永不删除、Map 条目随进程泄漏。在此清掉，
     // 给「子代理事件丢失」一个终结路径——否则那个 runId 的记账会长驻内存。
     releaseSubagentRoster(event.runId)
+    // 退出时把停止意图（我们记的）与观察到的 code/signal（内核报的）合成诚实的 exitReason。意图是一次性的：
+    // 一个 runId 只退出一次，读完即删，绝不留驻。非 exited 的终结（interrupted）不参与本分类。
+    const stopRequested = this.stopRequestedRuns.delete(event.runId)
+    const exitReason = event.state.type === 'exited'
+      ? classifyRunExit({
+          stopRequested,
+          exitCode: event.state.code,
+          ...(event.state.signal === null ? {} : { exitSignal: event.state.signal })
+        })
+      : undefined
     this.publisher.publish({
       type: 'process-state',
       ...(agentSession ? { agentSessionId: agentSession.agentSessionId } : {}),
@@ -3118,7 +3141,8 @@ export class AgentMuxClient {
       ...(event.state.type === 'exited'
         ? {
             exitCode: event.state.code,
-            ...(event.state.signal === null ? {} : { exitSignal: event.state.signal })
+            ...(event.state.signal === null ? {} : { exitSignal: event.state.signal }),
+            ...(exitReason ? { exitReason } : {})
           }
         : event.state.type === 'interrupted'
           ? { interruptionReason: event.state.reason }

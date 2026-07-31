@@ -13,6 +13,7 @@ import type {
   AgentMuxInteractionRequest,
   AgentMuxInteractionResponse,
   AgentMuxRunDataEvent,
+  AgentMuxRunExitReason,
   AgentMuxRunRef,
   AgentMuxRunReplayGap,
   AgentMuxRunState,
@@ -456,6 +457,13 @@ export type SessionStatus = {
   observedAt: number
   detail?: string
   exitCode?: number
+  /**
+   * WHY an `exited` Run ended, carried verbatim from Core — synthesized there from the stop intent we
+   * recorded and the code/signal the kernel observed. Absent unless the Run exited. Lets the surface tell
+   * "you stopped it" (`user-stopped`) apart from "it died" (`crashed`) and from a bare 0 with no intent
+   * (`unknown`), which we refuse to dress up as a clean finish.
+   */
+  exitReason?: AgentMuxRunExitReason
   continuity?: 'unavailable' | 'conflict'
   /**
    * WHY a continuity recovery could not happen, carried verbatim from Core.

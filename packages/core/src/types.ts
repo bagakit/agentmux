@@ -1,4 +1,5 @@
 import type { LaunchOption, LaunchOptionSelection } from './agent-launch-option.js'
+import type { AgentMuxRunExitReason } from './agent-run-exit.js'
 
 export type BuiltInAgentProviderId =
   | 'codex'
@@ -640,6 +641,12 @@ export type AgentMuxClientEvent =
       exitCode?: number
       exitSignal?: string
       interruptionReason?: string
+      /**
+       * 一次 `exited` 退出「为什么会这样」的诚实分类，由停止意图（我们记的）与退出结果（内核报的）合成。
+       * 只在 `state: 'exited'` 时在场：`user-stopped` 是我们关的，`crashed` 是带故障信号/非零码地自己死的，
+       * `unknown` 是裸 0 又无停止意图——读不出结论就如实说未知，绝不冒充「干净完成」。
+       */
+      exitReason?: AgentMuxRunExitReason
       evidence: AgentMuxEvidence
     }
   | {

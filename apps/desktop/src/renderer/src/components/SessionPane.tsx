@@ -1,6 +1,7 @@
 import { AlertTriangle, LoaderCircle, RefreshCw, RotateCcw, ServerOff } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAppStore } from '../store'
+import type { AgentMuxRunExitReason } from '@agentmux/core'
 import type { OpenHttpLinkOrigin } from '../lib/open-destination'
 import { AgentSessionComposer } from './AgentSessionComposer'
 import { AgentInteractionCard } from './AgentInteractionCard'
@@ -22,10 +23,18 @@ const INTERRUPTION_REASON_COPY: Record<string, string> = {
 function humanizeDetail(
   interruptionReason: string | undefined,
   detail: string | undefined,
-  exited: boolean
+  exited: boolean,
+  exitReason: AgentMuxRunExitReason | undefined
 ): string {
   if (interruptionReason && INTERRUPTION_REASON_COPY[interruptionReason]) {
     return INTERRUPTION_REASON_COPY[interruptionReason]
+  }
+  // 退出时，先按 Core 合成的原因说清「是你关的还是它崩的」——这正是 T-012 要区分的事。
+  if (exited && exitReason) {
+    if (exitReason === 'user-stopped') return 'You stopped this session.'
+    if (exitReason === 'crashed') return 'The process exited on its own.'
+    // unknown：诚实说读不出结论，绝不把裸 0 冒充成干净完成。
+    return 'The process is no longer running; the reason could not be determined.'
   }
   if (!detail) return exited ? 'The process is no longer running.' : 'Check the host and try again.'
   return detail
@@ -167,7 +176,7 @@ export function SessionPane({
                   <span>{
                     continuityNotice
                       ? continuityNotice.reason
-                      : humanizeDetail(session.interruptionReason, session.status.detail, exited)
+                      : humanizeDetail(session.interruptionReason, session.status.detail, exited, session.status.exitReason)
                   }</span>
                 </div>
                 <div className="terminal-recovery__actions">
