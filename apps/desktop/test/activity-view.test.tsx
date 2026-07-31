@@ -377,4 +377,29 @@ describe('ActivityView', () => {
     expect(markup).not.toContain('log-row__output')
     expect(markup).not.toContain('log-row__chip--failed')
   })
+
+  it('说话人由 source 认定，渲染层不按 kind 反推身份', () => {
+    // 这条守的是判据来源，不是显示结果。`kind:'user_message'` 与 `source:'user'` 在今天恒等价
+    // （Core 里只有 launch/send 一处产生用户消息，同时写死两个字段），所以上面每一条既有断言在
+    // 「按 source 认」和「按 kind 认」两种实现下都会绿——把身份判定收敛进 conversation-speaker
+    // 这件事本身没有任何渲染断言守着。
+    //
+    // 所以这里构造一条只有 source 说话的条目：source 是 'user'，kind 不是 user_message。按 kind
+    // 反推的实现会把人说的话画成 Assistant 的话（设计 SSOT 明令禁止渲染层按 kind 反推身份），
+    // 这条会红；按 source 认的实现给出 'You'。
+    const markup = render('complete-events', [
+      activity('steer-only-source', {
+        source: 'user',
+        kind: 'lifecycle',
+        title: 'Prompt',
+        content: '换个方向'
+      })
+    ])
+
+    expect(markup).toContain('You')
+    expect(markup).not.toContain('>Assistant<')
+    // 而且它必须走 turn register，不能被当成机器行——「是一轮对话」与「谁说的」是同一个判据。
+    expect(markup).toContain('log-turn')
+    expect(markup).not.toContain('log-row log-row--lifecycle')
+  })
 })
