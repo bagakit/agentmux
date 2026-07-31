@@ -1,4 +1,4 @@
-// Portions adapted from Orca commit 4fd93ead1999dc34e13ac5915693ad8467a39a6e.
+// Portions adapted from a third-party MIT-licensed implementation (commit 4fd93ead1999dc34e13ac5915693ad8467a39a6e).
 // Copyright (c) 2026 Lovecast Inc., MIT License. See THIRD_PARTY_NOTICES.md.
 
 import { clampScreenshotScale } from './compose'

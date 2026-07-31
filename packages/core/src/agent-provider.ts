@@ -879,10 +879,9 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
       return ['--session', transcriptPath, ...args, ...(prompt ? [prompt] : [])]
     }
   }),
-  // Terminal-only ports of Orca's TUI agents. Launch argv grammar is copied verbatim from
-  // orca `src/shared/tui-agent-{config,startup}.ts`. Resume/hook capture stay OFF: they
+  // Terminal-only TUI agents. Resume/hook capture stay OFF: they
   // require a hook envelope carrying a native session handle, and AgentMux does not yet run
-  // the per-agent hook relay Orca uses to originate those events for grok/gemini/antigravity.
+  // the per-agent hook relay needed to originate those events for grok/gemini/antigravity.
   // Declaring them would surface a Resume affordance that can never bind a handle.
   defineAgentProvider({
     catalog: catalog({
@@ -904,7 +903,7 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
         replyCorrelation: 'none'
       }
     }),
-    // Orca: promptInjectionMode 'argv' with argvPromptSeparator '--' → `grok -- <prompt>`
+    // grok argv grammar: promptInjectionMode 'argv' with argvPromptSeparator '--' → `grok -- <prompt>`
     // (separator so prompts like `--version` aren't parsed as Grok CLI flags).
     buildArgs: (prompt, args) => (prompt ? [...args, '--', prompt] : [...args]),
     posture: GROK_POSTURE,
@@ -931,7 +930,7 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
         replyCorrelation: 'none'
       }
     }),
-    // Orca: promptInjectionMode 'flag-prompt-interactive' → `gemini --prompt-interactive <prompt>`.
+    // gemini argv grammar: promptInjectionMode 'flag-prompt-interactive' → `gemini --prompt-interactive <prompt>`.
     buildArgs: (prompt, args) => (prompt ? ['--prompt-interactive', prompt, ...args] : [...args]),
     hook: NO_HOOKS,
     launchOptions: GEMINI_LAUNCH_OPTIONS
@@ -956,7 +955,7 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
         replyCorrelation: 'none'
       }
     }),
-    // Orca: executable `agy`, promptInjectionMode 'flag-prompt-interactive' → `agy --prompt-interactive <prompt>`.
+    // antigravity argv grammar: executable `agy`, promptInjectionMode 'flag-prompt-interactive' → `agy --prompt-interactive <prompt>`.
     buildArgs: (prompt, args) => (prompt ? ['--prompt-interactive', prompt, ...args] : [...args]),
     hook: ANTIGRAVITY_HOOKS,
     launchOptions: ANTIGRAVITY_LAUNCH_OPTIONS,
@@ -985,8 +984,8 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
       }
     }),
     launchOptions: CURSOR_LAUNCH_OPTIONS,
-    // Orca: executable `cursor-agent`, promptInjectionMode 'argv' (no separator) → `cursor-agent <prompt>`.
-    // Orca's `preflightTrust: 'cursor'` pre-seeds a trust marker; AgentMux has no such mechanism,
+    // cursor argv grammar: executable `cursor-agent`, promptInjectionMode 'argv' (no separator) → `cursor-agent <prompt>`.
+    // Some cursor-agent integrations pre-seed a trust marker (preflightTrust 'cursor'); AgentMux has no such mechanism,
     // so the first launch may show Cursor's trust prompt.
     buildArgs: (prompt, args) => [...args, ...(prompt ? [prompt] : [])],
     hook: NO_HOOKS

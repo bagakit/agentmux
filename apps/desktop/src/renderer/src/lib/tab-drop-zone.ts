@@ -1,4 +1,4 @@
-// 直接移植自 Orca components/tab-group/tab-drop-zone.ts；保留其经过验证的
+// 移植自一个成熟的 tab-group drop-zone 实现；保留其经过验证的
 // Center Merge 与四向 Edge Split 判定，删去 AgentMux 当前不需要的类型依赖。
 
 export type TabDropZone = 'center' | 'left' | 'right' | 'up' | 'down'

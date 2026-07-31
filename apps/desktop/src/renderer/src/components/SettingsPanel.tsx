@@ -13,8 +13,8 @@ import { WorkspaceSettingsPane } from './settings/WorkspaceSettingsPane'
 export type SettingsSectionId = 'general' | 'appearance' | 'notifications' | 'agents' | 'hosts' | 'workspaces'
 type SettingsGroupId = 'setup' | 'preferences'
 
-// Grouped navigation, mirroring orca's `group`-tagged sections but at this app's smaller scale
-// (two groups, not orca's eight). "Setup" leads because those are the resources you actually
+// Grouped navigation, using `group`-tagged sections at this app's small scale
+// (two groups). "Setup" leads because those are the resources you actually
 // register and configure; app-level "Preferences" follow. Section order within SECTIONS is the
 // display order — keep the actionable panes ahead of read-only General.
 const GROUPS: { id: SettingsGroupId; title: string }[] = [
