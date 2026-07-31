@@ -188,7 +188,12 @@
 .branch-row__identity small { color: var(--text-3); font-family: "SFMono-Regular", monospace; font-size: var(--fs-micro); line-height: 12px; }
 .branch-row__meta { min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap:var(--sp-2); }
 .branch-row__agents { display: flex; align-items: center; padding-left:var(--sp-1); }
-.branch-row__agent { position: relative; width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; margin-left:-var(--sp-1); border: 1px solid var(--line); border-radius: 50%; color: var(--text-2); background: var(--surface-2); box-shadow: 0 0 0 1px var(--surface-0); }
+.branch-row__agent { position: relative; width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 50%; color: var(--text-2); background: var(--surface-2); box-shadow: 0 0 0 1px var(--surface-0); }
+/* 叠压只发生在相邻两枚之间——写在每一枚上会把整簇往左推，第一枚就该贴着自己的左缘。
+   4px 是 16px 头像的四分之一，足以读作"一摞"又不遮住 provider 图标；此前这里写的是不合法的
+   负 var 形式（整条声明被浏览器丢弃、叠压从未渲染过），2px 也太浅——声明失效的这些年里
+   没人验证过那个值。负值一律走 calc，见密度合同《控件语言》。 */
+.branch-row__agent + .branch-row__agent { margin-left: calc(-1 * var(--sp-2)); }
 .branch-row__agent small { position: absolute; right: -3px; bottom: -3px; min-width: 9px; height: 9px; padding:0 var(--sp-1); border-radius: var(--radius-sm); color: var(--green-text); background: var(--green-line); font: 10px/9px var(--font-mono); text-align: center; }
 .branch-row__agents em { margin-left:var(--sp-1); color: var(--text-3); font: 10px/1 var(--font-mono); font-style: normal; }
 .branch-row__state { display: inline-flex; align-items: center; gap:var(--sp-1); padding:1px var(--sp-2); border-radius: var(--radius-sm); color: var(--green); background: var(--green-bg); font-size: var(--fs-micro); line-height: 13px; white-space: nowrap; }
