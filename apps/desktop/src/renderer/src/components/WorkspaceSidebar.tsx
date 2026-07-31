@@ -1,4 +1,4 @@
-import { Pin, Plus, RadioTower, Sparkles } from 'lucide-react'
+import { Pin, Plus, RadioTower } from 'lucide-react'
 import { useMemo } from 'react'
 import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
 import { api } from '../lib/api'
@@ -7,6 +7,7 @@ import { rowAttention, rowAttentionLabel } from '../lib/row-attention'
 import { workingAgentCount } from '../lib/project-board'
 import { useAppStore } from '../store'
 import type { SettingsSectionId } from './SettingsPanel'
+import { BrandIcon } from './BrandIcon'
 import { ProjectRailToolbar } from './ProjectRailToolbar'
 import { SidebarToggleChrome } from './TopRowChrome'
 
@@ -64,14 +65,13 @@ export function WorkspaceSidebar({
             title={scratch.path}
             onClick={() => void selectWorkspace(scratch.id)}
           >
-            <span className="project-rail-row__icon scratch-workspace-row__icon"><Sparkles size={15} /></span>
+            <span className="project-rail-row__icon scratch-workspace-row__icon"><BrandIcon size={16} /></span>
             <span className="project-rail-row__identity scratch-workspace-row__identity">
               <strong>Scratch</strong>
-              <small>Unscoped workspace</small>
             </span>
             <span
               className="scratch-workspace-row__meta"
-              title={`Pinned workspace · ${scratchSessionCount} sessions`}
+              title={`Pinned workspace · ${scratchSessionCount} ${scratchSessionCount === 1 ? 'session' : 'sessions'}`}
             >
               {scratchWorkingAgentCount > 0 ? (
                 <span
@@ -82,8 +82,11 @@ export function WorkspaceSidebar({
                   <span className="status__dot" />
                 </span>
               ) : null}
+              {/* Pin is the one thing that distinguishes this row from every other — it stays.
+                  The number beside it follows the same rule as the project rows: it counts running
+                  Agents and disappears at zero, rather than showing a session total nobody asked for. */}
               <Pin size={10} />
-              <span>{scratchSessionCount}</span>
+              {scratchWorkingAgentCount > 0 ? <span>{scratchWorkingAgentCount}</span> : null}
             </span>
           </button>
         </div>
@@ -107,6 +110,17 @@ export function WorkspaceSidebar({
             ? `${runningAgentCount} ${runningAgentCount === 1 ? 'Agent is' : 'Agents are'} running`
             : null
           const rowStateLabel = [runningLabel, attentionLabel].filter(Boolean).join(' · ')
+          // One badge, one number, and it is the number for whatever the row is currently signalling.
+          // Attention outranks running because the CSS recolours THIS badge and hangs the `?`/`!` glyph
+          // on it — hiding it whenever nothing is working would take the needs-you signal down with it,
+          // which is the exact gap the rollup was built to close.
+          const railBadge = attention.category ? attention.count : runningAgentCount || null
+          // Everything the row stopped showing still has to be answerable, so it lands here.
+          const countTitle = [
+            `${project.workspaces.length} ${project.workspaces.length === 1 ? 'worktree' : 'worktrees'}`,
+            `${sessionCount} ${sessionCount === 1 ? 'session' : 'sessions'}`,
+            ...(rowStateLabel ? [rowStateLabel] : [])
+          ].join(' · ')
           const active = project.id === activeProjectId
           const preferred = active
             ? activeWorkspaceId
@@ -130,7 +144,12 @@ export function WorkspaceSidebar({
             >
               <span className="project-rail-row__identity">
                 <strong>{project.name}</strong>
-                <small>{project.hostId === 'local' ? 'This Mac' : <><RadioTower size={9} /> {project.hostId}</>}</small>
+                {/* Host only earns a slot when it is NOT this machine. `This Mac` on every row is a
+                    column of identical metadata — it distinguishes nothing and costs the title its
+                    width (same rule as the identical leading icons, 控件语言). */}
+                {project.hostId !== 'local' ? (
+                  <small><RadioTower size={9} /> {project.hostId}</small>
+                ) : null}
               </span>
               <span
                 className="project-rail-row__activity status status--working"
@@ -139,9 +158,16 @@ export function WorkspaceSidebar({
               >
                 {runningAgentCount > 0 ? <span className="status__dot" /> : null}
               </span>
-              <span className="project-rail-row__count" title={`${project.workspaces.length} workspaces · ${sessionCount} sessions`}>
-                {project.workspaces.length}
-              </span>
+              {/* The badge answers "is anyone working in there right now" — so it counts running
+                  Agents, not worktrees. A worktree count is repository structure; it answers a
+                  different question and reads as a column of `1`s. It keeps its place in the
+                  tooltip, where low-frequency facts belong (身份归属). Zero renders nothing at
+                  all: a badge that is always the same number carries no information. */}
+              {railBadge !== null ? (
+                <span className="project-rail-row__count" title={countTitle}>
+                  {railBadge}
+                </span>
+              ) : null}
             </button>
           )
         })}
