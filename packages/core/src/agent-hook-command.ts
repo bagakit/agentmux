@@ -1,7 +1,40 @@
 import process from 'node:process'
 import { randomUUID } from 'node:crypto'
+import {
+  HOOK_PAYLOAD_USAGE_KEY,
+  readTurnUsageFromTranscript
+} from './agent-usage-transcript.js'
+import type { AgentUsageCapability } from './types.js'
 
 const MAX_HOOK_INPUT_BYTES = 128 * 1024
+
+/**
+ * 只有这些收尾类事件才谈得上"这一 turn 花了多少 token"——turn 结束、用量已在 transcript 落定。
+ * 在别的事件（工具前后、prompt 提交）上读 transcript 既读不到本 turn 终值，也白白多一次 IO，
+ * 所以用量抽取只挂在收尾事件上，这也是「开销可忽略」的一半。
+ */
+const USAGE_FINALIZATION_EVENTS = new Set(['Stop', 'StopFailure'])
+
+/**
+ * 从 hook 环境读出这个 Provider 声明的 usage transcript 格式。
+ *
+ * 这个变量由 Core 从 catalog SSOT 注入（见 client.ts 的 agentEnvironment）——未声明 usage 的 Provider
+ * 根本不带这个变量，于是这里返回 `null`，hook 进程对它们连尾部读都不做。值域收窄到已知的两种格式，
+ * 任何意外值都当作"没声明"处理，绝不放一个 hook 进程不认识的格式进去。
+ */
+function resolveUsageCapability(env: NodeJS.ProcessEnv = process.env): AgentUsageCapability | null {
+  const format = env.AGENTMUX_USAGE_TRANSCRIPT_FORMAT
+  if (format === 'claude-jsonl' || format === 'codex-rollout') {
+    return { kind: 'native-transcript', transcriptFormat: format }
+  }
+  return null
+}
+
+/** 从 hook payload 里取出 transcript 路径——各 Provider 的键名与 normalizer 侧保持一致。 */
+function transcriptPathFromPayload(payload: Record<string, unknown>): string | null {
+  const value = payload.transcript_path ?? payload.transcriptPath
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
 
 function parseEventFromArgv(): string | null {
   const args = process.argv.slice(2)
@@ -104,6 +137,16 @@ export async function runAgentHookCommand(): Promise<void> {
   const token = process.env.AGENTMUX_HOOK_TOKEN
 
   if (url && token && eventName) {
+    // 在收尾事件上，为声明了 usage 能力的 Provider 读一次 transcript 尾部，把本 turn 的真实 token 数并进
+    // 既有回执——usage 由此「随既有事件流到达」，不新增轮询、不新增通道。读失败/无用量一律不写，缺席保持缺席。
+    const usageCapability = resolveUsageCapability()
+    if (usageCapability && USAGE_FINALIZATION_EVENTS.has(eventName)) {
+      const transcriptPath = transcriptPathFromPayload(payload)
+      if (transcriptPath) {
+        const usage = await readTurnUsageFromTranscript(usageCapability, transcriptPath, Date.now())
+        if (usage) payload = { ...payload, [HOOK_PAYLOAD_USAGE_KEY]: usage }
+      }
+    }
     const receiptId = randomUUID()
     let response: Response | null = null
     let lastError: unknown

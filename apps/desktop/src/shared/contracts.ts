@@ -17,6 +17,7 @@ import type {
   AgentMuxRunReplayGap,
   AgentMuxRunState,
   AgentTerminalCapabilityState,
+  AgentTurnUsage,
   AgentMuxControlError,
   AgentMuxControlErrorCode,
   AgentMuxControlRequest,
@@ -499,6 +500,11 @@ export type SessionSnapshot = SessionSnapshotBase & (
        * defaults and no scope is displayed rather than a guess.
        */
       launchOptions?: LaunchOptionSelection
+      /**
+       * 最近一个 turn 的真实原生 token 用量，仅 usage 能力声明的 Provider（claude/codex）会有。缺席读作
+       * "此 Provider 不报 token 用量"或"还没有一 turn 的用量"，UI 两者都不显示 0 或估算值。
+       */
+      turnUsage?: AgentTurnUsage
       control: AgentSessionControl
     }
   | { kind: 'terminal'; providerId: null; control: TerminalSessionControl }
@@ -826,6 +832,13 @@ export type AgentMuxDesktopApi = {
     cancelElementSelection(id: string): Promise<void>
     setAnnotationMarkers(id: string, navigationId: string, markers: BrowserAnnotationMarker[]): Promise<void>
     setBounds(id: string, bounds: BrowserBounds | null): Promise<void>
+    /** Release only the Main-owned native page surface; the Renderer Region remains present. */
+    release(id: string): Promise<void>
+    /** Rebuild a previously released native page from the retained Region projection. */
+    restore(id: string, input: {
+      profileId: string
+      viewport: BrowserViewport
+    }): Promise<BrowserSnapshot>
     close(id: string): Promise<void>
     onEvent(listener: (event: BrowserEvent) => void): () => void
   }

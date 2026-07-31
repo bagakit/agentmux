@@ -29,6 +29,10 @@ import {
   TerminalParkingProvider,
   useTerminalColdParking
 } from './lib/terminal-cold-parking-coordinator'
+import {
+  SurfaceMemoryBudgetProvider,
+  useSurfaceMemoryBudget
+} from './lib/surface-memory-budget-coordinator'
 
 export function App() {
   const [settingsRoute, setSettingsRoute] = useState<{ section: SettingsSectionId } | null>(null)
@@ -64,6 +68,10 @@ export function App() {
   const terminalParkingMeasurement = typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).has('agentmux-resource-probe')
   const parkedTerminalRegionIds = useTerminalColdParking({
+    workbenchVisible,
+    measurementActive: terminalParkingMeasurement
+  })
+  const surfaceMemoryBudget = useSurfaceMemoryBudget({
     workbenchVisible,
     measurementActive: terminalParkingMeasurement
   })
@@ -163,6 +171,7 @@ export function App() {
   return (
     <>
       <TerminalParkingProvider parkedRegionIds={parkedTerminalRegionIds}>
+      <SurfaceMemoryBudgetProvider state={surfaceMemoryBudget}>
       <div
         className={`app-shell ${projectRailOpen ? '' : 'app-shell--project-rail-collapsed'}`}
         aria-hidden={settingsRoute ? true : undefined}
@@ -261,6 +270,7 @@ export function App() {
       <AgentStatusBar />
       <QuickSwitcher open={quickSwitchOpen} onClose={() => setQuickSwitchOpen(false)} />
       </div>
+      </SurfaceMemoryBudgetProvider>
       </TerminalParkingProvider>
       {settingsRoute ? (
         <SettingsPanel

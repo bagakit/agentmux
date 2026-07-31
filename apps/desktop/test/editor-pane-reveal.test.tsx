@@ -1,6 +1,7 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { readFile } from 'node:fs/promises'
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -52,6 +53,7 @@ import {
   EditorUnavailableState,
   revealFileInFileManager
 } from '../src/renderer/src/components/EditorPane.js'
+import { EditorReleasedState } from '../src/renderer/src/components/EditorReleasedState.js'
 import { WorkspaceFiles, localExistingAncestorWithin } from '../src/main/workspace-files.js'
 
 const localWorkspace: WorkspaceRecord = {
@@ -73,6 +75,15 @@ const remoteWorkspace: WorkspaceRecord = {
 function fileSurface(workspaceId: string, path: string) {
   return { regionId: 'region', kind: 'file' as const, workspaceId, path }
 }
+
+describe('EditorPane Monaco owner lifetime', () => {
+  it('clears stale refs on release/document loss and fences late Monaco disposal', async () => {
+    const source = await readFile(new URL('../src/renderer/src/components/EditorPane.tsx', import.meta.url), 'utf8')
+    expect(source).toContain('if (released || !document)')
+    expect(source).toContain('editorRef.current = null')
+    expect(source).toMatch(/editor\.onDidDispose\(\(\) => \{[\s\S]*editorRef\.current === editor[\s\S]*editorRef\.current = null/)
+  })
+})
 
 afterEach(() => {
   filesApi.reveal.mockReset()
@@ -130,6 +141,23 @@ describe('revealFileInFileManager', () => {
 })
 
 describe('EditorPane failure state wiring', () => {
+  it('renders the Monaco release state while retaining the Region document projection', () => {
+    const markup = renderToStaticMarkup(
+      createElement(EditorPane, {
+        tabId: 'tab',
+        surface: fileSurface('workspace', 'src/parked.ts'),
+        released: true
+      })
+    )
+    expect(markup).toContain('Editor parked')
+    expect(markup).toContain('restore the editor')
+    expect(markup).not.toContain('Loading editor')
+  })
+
+  it('exposes a standalone release state for mutation-proof rendering tests', () => {
+    expect(renderToStaticMarkup(createElement(EditorReleasedState))).toContain('Editor parked')
+  })
+
   it('shows the Reveal action for a missing document in a local workspace', () => {
     fixture.state.config.workspaces = [localWorkspace]
     const markup = renderToStaticMarkup(
@@ -243,4 +271,3 @@ describe('WorkspaceFiles reveal fallback for the failure state', () => {
     )
   })
 })
-

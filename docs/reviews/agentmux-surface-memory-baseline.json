@@ -1,0 +1,109 @@
+{
+  "schema": "agentmux.t001-desktop-resources.baseline.v1",
+  "sourceReceiptSchema": "agentmux.t001-desktop-resources.v2",
+  "measuredAt": "2026-08-30T19:04:26.200Z",
+  "platform": "darwin-arm64",
+  "node": "v24.18.1",
+  "electron": "43.3.0",
+  "identity": {
+    "agentmux": {
+      "sourceCommit": "36a732561992aab56a2ed4fb89d3f2f37b8ad594",
+      "endCommit": "36a732561992aab56a2ed4fb89d3f2f37b8ad594",
+      "sourceCommitStable": true,
+      "worktreeStable": true,
+      "trackedDiffClean": false,
+      "statusEntryCount": 38,
+      "statusSha256AtStart": "87ee827b962ca5415dfd0dfb2c7bf4a325b0f2ab0579888995d81c509a9f2d1a",
+      "statusSha256AtEnd": "87ee827b962ca5415dfd0dfb2c7bf4a325b0f2ab0579888995d81c509a9f2d1a"
+    },
+    "ctxmux": {
+      "sourceCommit": "073e206407ce28331aa882c2c80e9354cfe2879a",
+      "sourceTree": "3ddf0706c35517c0dd6bdf4d4f7fa251d88c0e0a",
+      "protocolVersion": 13,
+      "artifactPlatform": "darwin-arm64",
+      "daemonSha256": "cb9ce8c9d1a43ec3e314c424e5fb46ad8978b780cae2f608ec746375319eb98b"
+    }
+  },
+  "method": {
+    "phaseOrder": [
+      "idle",
+      "single-hidden-workspace",
+      "multiple-hidden-workspaces-tabs",
+      "terminal",
+      "monaco",
+      "browser"
+    ],
+    "fixture": "three isolated workspaces, one built-in Scratch workspace, 20,000-line file, 300,000-byte terminal output",
+    "workingSetSampling": "five app.getAppMetrics samples per phase, averaged per pid",
+    "rendererHeap": "performance.memory with --js-flags=--expose-gc; heapUsedAfterGc is observational",
+    "cleanup": "isolated userData/runtime/workspace plus exact receiptless ctxmuxd ownership cleanup"
+  },
+  "attribution": {
+    "coreCtxmux": "Session/Run/Replay/Attachment facts are owned by Core/ctxmux; counts below do not claim process-memory ownership.",
+    "rendererMainSurface": "Terminal, Monaco, Browser and Main/Renderer/GPU/Utility working-set observations are kept separate.",
+    "rssInterpretation": "working-set/RSS is an observation only. V8 and macOS allocators may retain pages after heapUsed falls; owner counts, heap/GC and repeated steady-state samples are required before calling a leak."
+  },
+  "phases": [
+    {
+      "id": "idle",
+      "totalWorkingSetKiB": 571268,
+      "owners": {"browserWebContents": 0, "monacoEditors": 0, "monacoModels": 0, "documents": 0, "fileWatchers": 0, "runtimeSubscriptions": 4, "terminalViews": 1, "terminalAddons": 4, "terminalListeners": 6, "sessionAttachmentOwners": 1, "sessionAttachmentLeases": 1},
+      "coreCtxmux": {"sessionCount": 1, "runCount": 1, "runningRunCount": 1, "attachmentOwners": 1, "attachmentLeases": 1},
+      "processWorkingSetKiB": {"main": 238029, "renderer": 173933, "gpu": 114074, "utility": 45232, "other": 0},
+      "rendererMemory": {"heapUsedBeforeKiB": 14844, "heapUsedAfterGcKiB": 14844, "gcAvailable": true}
+    },
+    {
+      "id": "single-hidden-workspace",
+      "totalWorkingSetKiB": 596733,
+      "owners": {"browserWebContents": 0, "monacoEditors": 0, "monacoModels": 0, "documents": 0, "fileWatchers": 0, "runtimeSubscriptions": 4, "terminalViews": 2, "terminalAddons": 8, "terminalListeners": 12, "sessionAttachmentOwners": 2, "sessionAttachmentLeases": 2},
+      "coreCtxmux": {"sessionCount": 2, "runCount": 2, "runningRunCount": 2, "attachmentOwners": 2, "attachmentLeases": 2},
+      "processWorkingSetKiB": {"main": 233542, "renderer": 195178, "gpu": 122771, "utility": 45242, "other": 0},
+      "rendererMemory": {"heapUsedBeforeKiB": 14844, "heapUsedAfterGcKiB": 14844, "gcAvailable": true}
+    },
+    {
+      "id": "multiple-hidden-workspaces-tabs",
+      "totalWorkingSetKiB": 609392,
+      "owners": {"browserWebContents": 0, "monacoEditors": 0, "monacoModels": 0, "documents": 0, "fileWatchers": 0, "runtimeSubscriptions": 4, "terminalViews": 4, "terminalAddons": 16, "terminalListeners": 24, "sessionAttachmentOwners": 4, "sessionAttachmentLeases": 4},
+      "coreCtxmux": {"sessionCount": 4, "runCount": 4, "runningRunCount": 4, "attachmentOwners": 4, "attachmentLeases": 4},
+      "processWorkingSetKiB": {"main": 236784, "renderer": 204854, "gpu": 122474, "utility": 45280, "other": 0},
+      "rendererMemory": {"heapUsedBeforeKiB": 14844, "heapUsedAfterGcKiB": 14844, "gcAvailable": true}
+    },
+    {
+      "id": "terminal",
+      "totalWorkingSetKiB": 609258,
+      "owners": {"browserWebContents": 0, "monacoEditors": 0, "monacoModels": 0, "documents": 0, "fileWatchers": 0, "runtimeSubscriptions": 4, "terminalViews": 3, "terminalAddons": 12, "terminalListeners": 18, "sessionAttachmentOwners": 3, "sessionAttachmentLeases": 3},
+      "coreCtxmux": {"sessionCount": 4, "runCount": 4, "runningRunCount": 3, "attachmentOwners": 3, "attachmentLeases": 3},
+      "processWorkingSetKiB": {"main": 235312, "renderer": 209504, "gpu": 119194, "utility": 45248, "other": 0},
+      "rendererMemory": {"heapUsedBeforeKiB": 14844, "heapUsedAfterGcKiB": 14844, "gcAvailable": true}
+    },
+    {
+      "id": "monaco",
+      "totalWorkingSetKiB": 880570,
+      "owners": {"browserWebContents": 0, "monacoEditors": 1, "monacoModels": 1, "documents": 1, "fileWatchers": 1, "runtimeSubscriptions": 4, "terminalViews": 3, "terminalAddons": 12, "terminalListeners": 18, "sessionAttachmentOwners": 3, "sessionAttachmentLeases": 3},
+      "coreCtxmux": {"sessionCount": 4, "runCount": 4, "runningRunCount": 3, "attachmentOwners": 3, "attachmentLeases": 3},
+      "processWorkingSetKiB": {"main": 238640, "renderer": 473232, "gpu": 123226, "utility": 45472, "other": 0},
+      "rendererMemory": {"heapUsedBeforeKiB": 14844, "heapUsedAfterGcKiB": 14844, "gcAvailable": true}
+    },
+    {
+      "id": "browser",
+      "totalWorkingSetKiB": 1085111,
+      "owners": {"browserWebContents": 1, "monacoEditors": 0, "monacoModels": 0, "documents": 0, "fileWatchers": 0, "runtimeSubscriptions": 4, "terminalViews": 2, "terminalAddons": 8, "terminalListeners": 12, "sessionAttachmentOwners": 2, "sessionAttachmentLeases": 2},
+      "coreCtxmux": {"sessionCount": 11, "runCount": 11, "runningRunCount": 3, "attachmentOwners": 2, "attachmentLeases": 2},
+      "processWorkingSetKiB": {"main": 308525, "renderer": 606986, "gpu": 123760, "utility": 45840, "other": 0},
+      "rendererMemory": {"heapUsedBeforeKiB": 14844, "heapUsedAfterGcKiB": 14844, "gcAvailable": true}
+    },
+    {
+      "id": "browser-released",
+      "totalWorkingSetKiB": 1002077,
+      "owners": {"browserWebContents": 0, "monacoEditors": 0, "monacoModels": 0, "documents": 0, "fileWatchers": 0, "runtimeSubscriptions": 4, "terminalViews": 3, "terminalAddons": 12, "terminalListeners": 18, "sessionAttachmentOwners": 3, "sessionAttachmentLeases": 3},
+      "coreCtxmux": {"sessionCount": 11, "runCount": 11, "runningRunCount": 3, "attachmentOwners": 3, "attachmentLeases": 3},
+      "processWorkingSetKiB": {"main": 307437, "renderer": 525056, "gpu": 123744, "utility": 45840, "other": 0},
+      "rendererMemory": {"heapUsedBeforeKiB": 14844, "heapUsedAfterGcKiB": 14844, "gcAvailable": true}
+    }
+  ],
+  "topology": {"hiddenWorkspaceCount": 2, "workspaceSlots": [{"id": "resource-workspace-a", "visible": false, "tabs": 1, "terminalTabs": 1}, {"id": "resource-workspace-b", "visible": false, "tabs": 1, "terminalTabs": 1}, {"id": "resource-workspace-c", "visible": true, "tabs": 2, "terminalTabs": 2}]},
+  "releaseCycles": {"labels": ["released-panes", "released-panes-2", "released-panes-3", "released-panes-4", "released-panes-5", "released-panes-6", "released-panes-7"], "totalWorkingSetKiB": [911699, 943162, 972323, 993126, 995363, 990346, 1001514], "ownerConvergence": "all seven samples plus browser-released retained terminalViews=3, monacoEditors=0, monacoModels=0, documents=0, fileWatchers=0, browserWebContents=0, runtimeSubscriptions=4, sessionAttachmentOwners=3, sessionAttachmentLeases=3"},
+  "deltasKiB": {"terminalWorkingSet": -4326, "terminalWorkingSetFromIdle": 37990, "editorWorkingSet": 266986, "editorWorkingSetFromIdle": 309302, "browserWorkingSet": 173412, "browserReleasedWorkingSet": 90378, "maxReleasedWorkingSet": 1002077, "maxReleasedIncrement": 90378, "totalReleaseDrift": 89815, "warmupReleaseDrift": 31463, "steadyReleaseDrift": 29191},
+  "diagnostics": {"mode": "diagnostic-only", "exceededWorkingSetDiagnostics": [], "note": "Reference working-set limits are diagnostic only; allocator/Chromium high-water marks do not fail the probe or prove a leak.", "referenceLimitsKiB": {"terminalIncrement": 262144, "editorIncrement": 524288, "browserIncrement": 262144, "browserReleasedIncrement": 262144, "maxReleasedIncrement": 589824, "maxReleasedTotal": 1048576, "releaseDrift": 131072}},
+  "harness": {"isolatedRuntime": true, "receiptlessDaemonCleanup": true, "ownedDaemonCount": 1, "daemonCleanup": true}
+}

@@ -216,7 +216,7 @@ function screenRun(): CtxmuxAdapterRun {
 }
 
 type ScreenWaiter = {
-  waitForTerminalScreenState(
+  wait(
     session: AgentMuxStoredAgentSession,
     outputBoundaryByte: number,
     requireOutputAfterBoundary: boolean,
@@ -238,6 +238,7 @@ async function screenClient(replays: string[]): Promise<{
   const internals = client as unknown as {
     registry: { load(hostId: string): Promise<void> }
     kernel: Record<string, unknown>
+    screenEvidence: ScreenWaiter
   }
   await internals.registry.load('local')
   let observeCalls = 0
@@ -271,7 +272,7 @@ async function screenClient(replays: string[]): Promise<{
   }
   return {
     client,
-    waiter: client as unknown as ScreenWaiter,
+    waiter: internals.screenEvidence,
     observeCalls: () => observeCalls,
     replayedBytes: () => replayedBytes,
     emit: (event) => listener?.(event)
@@ -286,7 +287,7 @@ describe('有界增量屏幕证据接到 client 观察路径', () => {
     const { client, waiter, observeCalls, replayedBytes } = await screenClient([history])
     const session = screenStoredSession()
 
-    const first = await waiter.waitForTerminalScreenState(
+    const first = await waiter.wait(
       session,
       0,
       true,
@@ -295,7 +296,7 @@ describe('有界增量屏幕证据接到 client 观察路径', () => {
     )
     expect(first).toBe(historyBytes)
 
-    const second = await waiter.waitForTerminalScreenState(
+    const second = await waiter.wait(
       session,
       0,
       true,
@@ -317,7 +318,7 @@ describe('有界增量屏幕证据接到 client 观察路径', () => {
     const { client, waiter, observeCalls, emit } = await screenClient([first, second])
     const session = screenStoredSession()
 
-    await expect(waiter.waitForTerminalScreenState(
+    await expect(waiter.wait(
       session,
       0,
       true,
@@ -328,7 +329,7 @@ describe('有界增量屏幕证据接到 client 观察路径', () => {
     // CtxMux 驱逐了旧输出：长命证据必须失效，不许拿旧屏幕继续作证。
     emit({ type: 'gap', runId: 'screen-run', latestOutputBytes: 8192 })
 
-    await expect(waiter.waitForTerminalScreenState(
+    await expect(waiter.wait(
       session,
       0,
       true,

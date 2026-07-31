@@ -268,6 +268,7 @@ async function main() {
           platform: `${process.platform}-${process.arch}`
         }),
         AGENTMUX_DESKTOP_SPAWNED_AT_MS: String(Date.now()),
+        AGENTMUX_DESKTOP_RESOURCE_DEBUG: process.env.AGENTMUX_DESKTOP_RESOURCE_DEBUG ?? '0',
         ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
       },
       stdio: ['ignore', 'ignore', 'pipe']
@@ -278,7 +279,11 @@ async function main() {
       stderr += chunk
       if (Buffer.byteLength(stderr) > 1024 * 1024) child?.kill('SIGKILL')
     })
-    timer = setTimeout(() => child?.kill('SIGKILL'), 60_000)
+    const timeoutMs = Number(process.env.AGENTMUX_DESKTOP_RESOURCE_TIMEOUT_MS ?? 180_000)
+    timer = setTimeout(
+      () => child?.kill('SIGKILL'),
+      Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 180_000
+    )
     timer.unref()
     const [exitCode] = await once(child, 'exit')
     clearTimeout(timer)

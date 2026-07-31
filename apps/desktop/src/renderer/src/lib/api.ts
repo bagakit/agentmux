@@ -920,6 +920,41 @@ const mockApi: AgentMuxDesktopApi = {
     cancelElementSelection: async () => {},
     setAnnotationMarkers: async () => {},
     setBounds: async () => {},
+    release: async (id) => {
+      // The preview has no native WebContentsView, but keeping the id in the mock map models the
+      // same ownership boundary: release does not emit `closed` or remove the Renderer Region.
+      if (!mockBrowsers.has(id)) return
+    },
+    restore: async (id, input) => {
+      const current = mockBrowsers.get(id)
+      if (!current) {
+        const browser: BrowserSnapshot = {
+          id,
+          navigationId: crypto.randomUUID(),
+          profileId: input.profileId,
+          url: 'about:blank',
+          title: 'New Tab',
+          loading: false,
+          canGoBack: false,
+          canGoForward: false,
+          viewport: input.viewport,
+          error: null
+        }
+        mockBrowsers.set(id, browser)
+        browserListeners.forEach((listener) => listener({ type: 'updated', browser: structuredClone(browser) }))
+        return structuredClone(browser)
+      }
+      const browser = {
+        ...current,
+        navigationId: crypto.randomUUID(),
+        profileId: input.profileId,
+        url: current.url,
+        viewport: input.viewport
+      }
+      mockBrowsers.set(id, browser)
+      browserListeners.forEach((listener) => listener({ type: 'updated', browser: structuredClone(browser) }))
+      return structuredClone(browser)
+    },
     close: async (id) => {
       if (!mockBrowsers.delete(id)) return
       browserListeners.forEach((listener) => listener({ type: 'closed', id }))

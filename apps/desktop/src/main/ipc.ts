@@ -535,6 +535,11 @@ export async function registerIpc(args: {
     await browsers.setAnnotationMarkers(id, navigationId, markers)
   })
   handle('browser:setBounds', (id: string, bounds: BrowserBounds | null) => browsers.setBounds(id, bounds))
+  handle('browser:release', async (id: string) => await browsers.release(id))
+  handle('browser:restore', async (
+    id: string,
+    input: { profileId: string; viewport: BrowserViewport }
+  ) => await browsers.restore(id, input))
   handle('browser:close', (id: string) => browsers.close(id))
   const detach = args.runtime.attach(args.window.webContents)
   const control = new AgentMuxControlServer({ execute: executeControl })

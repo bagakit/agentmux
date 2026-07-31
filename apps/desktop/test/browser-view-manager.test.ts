@@ -282,6 +282,92 @@ describe('BrowserViewManager', () => {
       .not.toThrow()
   })
 
+  it('releases a hidden native owner without deleting the Browser Region and restores its projection', async () => {
+    const fixture = fakeWindow()
+    const manager = browserManager(fixture.window)
+    const created = await manager.create('browser-release', 'https://example.com/page')
+    const view = fixture.children[0]!
+    manager.setViewport('browser-release', 'mobile')
+    manager.setBounds('browser-release', { x: 2, y: 3, width: 400, height: 500 })
+    fixture.sent.length = 0
+
+    await manager.release('browser-release')
+
+    expect(fixture.children).toEqual([])
+    expect(view.webContents.isDestroyed()).toBe(true)
+    expect(manager.usesProfile('default')).toBe(true)
+    // A budget release is not a user close: no closed event may remove the Region projection.
+    expect(fixture.sent).toEqual([])
+    await expect(manager.restore('browser-release', {
+      profileId: created.profileId,
+      viewport: 'mobile'
+    })).resolves.toMatchObject({
+      id: 'browser-release',
+      profileId: 'default',
+      url: 'https://example.com/page',
+      viewport: 'mobile',
+      navigationId: expect.not.stringMatching(created.navigationId)
+    })
+    expect(fixture.children).toHaveLength(1)
+    expect(fixture.children[0]!.partition).toBe('persist:browser-default')
+    expect(manager.usesProfile('default')).toBe(true)
+    manager.close('browser-release')
+    expect(manager.usesProfile('default')).toBe(false)
+  })
+
+  it('restores the latest navigation target when release races an in-flight load', async () => {
+    const fixture = fakeWindow()
+    const manager = browserManager(fixture.window)
+    await manager.create('browser-release-loading', 'https://example.com/first')
+    const view = fixture.children[0]!
+    let finishNavigation!: () => void
+    view.webContents.loadURLImpl = async (url) => await new Promise<void>((resolve) => {
+      finishNavigation = () => {
+        // Keep this callback pending until after release to model Chromium's old native owner.
+        view.webContents.finishLoad(url)
+        resolve()
+      }
+    })
+
+    await manager.navigate('browser-release-loading', 'https://example.com/next')
+    // The did-start-navigation callback is the path used by links/history, where `navigate()` is
+    // not involved in setting the projection target before Chromium commits the page.
+    view.webContents.emitDetails('did-start-navigation', {
+      url: 'https://example.com/next#loading',
+      isSameDocument: false,
+      isMainFrame: true
+    })
+    await manager.release('browser-release-loading')
+    finishNavigation()
+
+    await expect(manager.restore('browser-release-loading', {
+      // A stale Renderer snapshot must not override Main's retained navigation target.
+      profileId: 'default',
+      viewport: 'responsive'
+    })).resolves.toMatchObject({
+      id: 'browser-release-loading',
+      url: 'https://example.com/next#loading'
+    })
+    manager.close('browser-release-loading')
+  })
+
+  it('keeps released Browser profile ownership and allows retry after restore validation failure', async () => {
+    const fixture = fakeWindow()
+    const manager = browserManager(fixture.window)
+    await manager.create('browser-release-failure', 'https://example.com')
+    await manager.release('browser-release-failure')
+    await expect(manager.restore('browser-release-failure', {
+      profileId: 'unknown',
+      viewport: 'responsive'
+    })).rejects.toThrow('Unknown browser profile: unknown')
+    expect(manager.usesProfile('default')).toBe(true)
+    await expect(manager.restore('browser-release-failure', {
+      profileId: 'work',
+      viewport: 'responsive'
+    })).resolves.toMatchObject({ profileId: 'work' })
+    manager.close('browser-release-failure')
+  })
+
   it.each(['addChildView', 'attach', 'emit', 'snapshot'] as const)(
     'atomically releases an unpublished Browser when %s fails during create',
     async (failurePoint) => {
