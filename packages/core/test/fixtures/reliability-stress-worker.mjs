@@ -345,15 +345,31 @@ try {
   const daemonFdDelta = afterRuns.daemon.fds - baseline.daemon.fds
   assert.ok(afterRuns.daemon.rssKiB <= budgets.maxDaemonRssKiB)
   assert.ok(afterReplay.daemon.rssKiB <= budgets.maxReplayDaemonRssKiB)
-  assert.ok(Math.max(
-    baseline.clientRssKiB,
-    afterRuns.clientRssKiB,
-    afterAttachments.clientRssKiB,
-    afterCleanup.clientRssKiB,
-    afterReplay.clientRssKiB,
-    recoveredSample.clientRssKiB,
-    disposedClientRssKiB
-  ) <= budgets.maxClientRssKiB)
+  // Report every client-RSS sample against the budget so a failure names which
+  // point overshot and by how much, instead of a bare "false". The amplification
+  // source is the upstream PTY output encoding (raw bytes as a JSON integer
+  // array), not a defect in this repository; maxClientRssKiB is a frozen baseline
+  // and must not be raised to make this pass.
+  const clientRssSamples = [
+    ['baseline', baseline.clientRssKiB],
+    ['afterRuns', afterRuns.clientRssKiB],
+    ['afterAttachments', afterAttachments.clientRssKiB],
+    ['afterCleanup', afterCleanup.clientRssKiB],
+    ['afterReplay', afterReplay.clientRssKiB],
+    ['recoveredSample', recoveredSample.clientRssKiB],
+    ['disposed', disposedClientRssKiB]
+  ]
+  const clientRssOverBudget = clientRssSamples.filter(
+    ([, kib]) => kib > budgets.maxClientRssKiB
+  )
+  assert.ok(
+    clientRssOverBudget.length === 0,
+    `client RSS exceeded budget ${budgets.maxClientRssKiB} KiB at ${clientRssOverBudget
+      .map(([label, kib]) => `${label}=${kib}KiB (${(kib / budgets.maxClientRssKiB).toFixed(2)}x)`)
+      .join(', ')}; all samples: ${clientRssSamples
+      .map(([label, kib]) => `${label}=${kib}`)
+      .join(' ')}`
+  )
   assert.ok(disposedClientRssKiB <= budgets.maxDisposedClientRssKiB)
   assert.ok(
     (afterAttachments.clientRssKiB - afterRuns.clientRssKiB) / budgets.runCount <=
