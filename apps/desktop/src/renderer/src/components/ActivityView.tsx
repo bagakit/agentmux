@@ -28,8 +28,9 @@ import {
 } from '../lib/activity-ruler'
 import { stepTitle } from '../lib/activity-step-summary'
 import { showEmptyState, showWorkingIndicator } from '../lib/activity-working-state'
-import { speaksAsAgent, speaksAsHuman } from '../lib/conversation-axis'
+import { speaksAsAgent, speaksAsHuman, type ConversationAxisMark } from '../lib/conversation-axis'
 import { isConversationTurn, speakerOf, type ConversationSpeaker } from '../lib/conversation-speaker'
+import { conversationQuote } from '../lib/conversation-quote'
 import { terminalLinkPreviewAnchor } from '../lib/terminal-link-gesture'
 import { AgentMarkdown, type LinkClickModifiers, type OpenWorkspaceFile } from './AgentMarkdown'
 import { ConversationAxis, type DescribeSpeaker } from './ConversationAxis'
@@ -103,8 +104,21 @@ function readoutAnchor(
   })
 }
 
+/**
+ * 面板要显示的内容。**一个面板、两种内容源**，不是两个面板。
+ *
+ * 主刻度悬停给的是「什么时候」（`RulerReadoutText`）；轴上的头像标记给的是「说了什么」（原话）。
+ * 两者共用同一个浮层、同一套锚定几何、同一条关闭路径——因为它们回答的是同一个问题的两半，而且
+ * 在屏幕上占的是同一个位置：两个各自管自己显隐的浮层会在标记与刻度都被指到时同时浮出来，互相
+ * 叠住。用一个可辨别联合类型而不是两个可选字段：「既有时间又有原话」和「两者都没有」都不是合法
+ * 状态，让类型直接说出这件事，而不是靠渲染时的 if 去防。
+ */
+type ReadoutBody =
+  | { kind: 'moment'; text: RulerReadoutText }
+  | { kind: 'quote'; name: string; quote: string }
+
 type Readout = {
-  text: RulerReadoutText
+  body: ReadoutBody
   left: number
   top: number
   placement: 'above' | 'below'
@@ -117,7 +131,13 @@ type Readout = {
  * hover and focus read the same scale for the moment (or ordinal) at a position without ever moving
  * the selection.
  */
-function Ruler({
+/**
+ * 导出**只为可判**：`renderToStaticMarkup` 不输出任何 handler，所以「hover 出面板 / Escape 关面板 /
+ * 空引文不开面板」这三条接线在标记流上完全不可见。测试把这个组件当函数求值、从 element 树上取到那些
+ * handler 并真的调用（先例：`ConversationAxis` 的点击接线就是这么判的）。
+ * 生产调用者只有本文件的 {@link ActivityView}。
+ */
+export function Ruler({
   items,
   scale,
   selectedIndex,
@@ -130,8 +150,17 @@ function Ruler({
   selectedIndex: number | null
   band: ReturnType<typeof rulerBand>
   onSelect: (index: number) => void
-  /** 与 track 共用一个坐标盒的那些轴，摆在 track 之上。见 render 里的注释。 */
-  axes?: JSX.Element | null
+  /**
+   * 与 track 共用一个坐标盒的那些轴，摆在 track 之上。见 render 里的注释。
+   *
+   * 是个函数而不是一个现成元素：轴需要接到**这一层**的面板出口上（`Ruler` 才持有面板状态与那个
+   * 共享坐标盒），而轴本身需要身份解析（`describe`），那只有 ActivityView 有。于是这一层把出口
+   * 递出去，调用方把身份补上——两边各给自己知道的那一半，谁都不必知道对方的。
+   */
+  axes?: (peek: {
+    onPeek: (peek: { rect: DOMRect; mark: ConversationAxisMark; name: string }) => void
+    onPeekEnd: () => boolean
+  }) => JSX.Element | null
 }) {
   const trackRef = useRef<HTMLDivElement>(null)
   const [readout, setReadout] = useState<Readout | null>(null)
@@ -146,7 +175,56 @@ function Ruler({
     if (!track || !feed) return
     const trackRect = track.getBoundingClientRect()
     const anchor = readoutAnchor(trackRect, feed, pointerX)
-    setReadout({ text: describeReadout(scale.readoutOf(index), scale.count), ...anchor })
+    setReadout({ body: { kind: 'moment', text: describeReadout(scale.readoutOf(index), scale.count) }, ...anchor })
+  }
+
+  /**
+   * 轴上一枚标记要展示的原话。走的是与 {@link showReadout} 同一个 setter、同一个锚定函数、同一条
+   * 关闭路径——面板只有一个，这里只是换了内容源。
+   *
+   * 锚定用**标记自己的矩形**而不是指针位置：标记是个 24px 的圆形命中区，按指针锚定会让面板随指针
+   * 在标记内部漂移；按标记中心锚定，面板与它所描述的那枚头像是固定关系。`cellHeight` 取标记高的
+   * 一半（与主刻度取 track 半高同一个算法），于是「让开它所描述的东西」这句话在两处是同一个几何。
+   *
+   * 没有话的 item 不开面板（`conversationQuote` 返回 null）：一个空面板会让「这条没内容」与「面板
+   * 坏了」看起来是同一件事。
+   */
+  const showQuote = ({
+    rect,
+    mark,
+    name
+  }: {
+    rect: DOMRect
+    mark: ConversationAxisMark
+    name: string
+  }): void => {
+    const feed = feedRect()
+    if (!feed) return
+    const quote = conversationQuote(mark.item)
+    if (quote === null) return
+    const anchor = terminalLinkPreviewAnchor({
+      pointer: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 },
+      cellHeight: rect.height / 2,
+      viewport: { left: feed.left, top: feed.top, right: feed.right, bottom: feed.bottom }
+    })
+    setReadout({ body: { kind: 'quote', name, quote }, ...anchor })
+  }
+
+  /**
+   * 关面板，并回答「刚才真的关掉了一个开着的面板吗」。
+   *
+   * 这个返回值只为 Escape 存在：轴不持有面板状态，所以「该不该吃掉那个键」只能由持有状态的这一层
+   * 回答。无条件吞掉会让 Escape 在面板关着时也被静默吃掉，而外层可能正等着用它关一个更大的东西
+   * （Region、对话框）。
+   *
+   * 直接读闭包里的 `readout` 就够：Escape 是一次**独立的后续事件**，触发它的那一轮渲染早已带上了
+   * 开面板之后的新值。这里曾经另存一份 ref，理由写的是"同一帧内按 Escape 会读到过期值"——那个理由
+   * 是错的（同一帧内不存在第二个键盘事件），而它换来的是两份必须同步的状态。删掉了。
+   */
+  const closeReadout = (): boolean => {
+    const wasOpen = readout !== null
+    setReadout(null)
+    return wasOpen
   }
 
   const fractionFromClientX = (clientX: number): number => {
@@ -205,7 +283,7 @@ function Ruler({
           `axes` 由调用方传入而不是在这里组装，是因为轴需要身份解析（`describeSpeaker`），而 Ruler
           对身份一无所知；它只提供那个共享坐标盒。 */}
       <div className="activity-ruler__stack">
-        {axes}
+        {axes?.({ onPeek: showQuote, onPeekEnd: closeReadout })}
         <div
           ref={trackRef}
           className="activity-ruler__track"
@@ -219,10 +297,10 @@ function Ruler({
         aria-valuetext={selectedText ?? axisLabel}
         onClick={handleClick}
         onPointerMove={handlePointerMove}
-        onPointerLeave={() => setReadout(null)}
+        onPointerLeave={closeReadout}
         onKeyDown={handleKeyDown}
         onFocus={handleFocus}
-        onBlur={() => setReadout(null)}
+        onBlur={closeReadout}
       >
         <span className="activity-ruler__rail" />
         {band ? (
@@ -255,19 +333,25 @@ function Ruler({
         <div
           className="activity-ruler__readout"
           data-placement={readout.placement}
+          data-body={readout.body.kind}
           role="status"
           style={{ left: readout.left, top: readout.top }}
         >
-          {readout.text.axis === 'temporal' ? (
+          {readout.body.kind === 'quote' ? (
+            <Fragment>
+              <span className="activity-ruler__readout-speaker">{readout.body.name}</span>
+              <span className="activity-ruler__readout-quote">{readout.body.quote}</span>
+            </Fragment>
+          ) : readout.body.text.axis === 'temporal' ? (
             <Fragment>
               <span className="activity-ruler__readout-time">
-                {new Date(readout.text.at).toLocaleTimeString()}
+                {new Date(readout.body.text.at).toLocaleTimeString()}
               </span>
-              <span className="activity-ruler__readout-offset">{readout.text.offsetText} from start</span>
+              <span className="activity-ruler__readout-offset">{readout.body.text.offsetText} from start</span>
             </Fragment>
           ) : (
             <span className="activity-ruler__readout-ordinal">
-              Event {readout.text.ordinal} of {readout.text.total}
+              Event {readout.body.text.ordinal} of {readout.body.text.total}
             </span>
           )}
         </div>
@@ -703,7 +787,7 @@ export function ActivityView({
         selectedIndex={selectedIndex}
         band={band}
         onSelect={selectEvent}
-        axes={
+        axes={({ onPeek, onPeekEnd }) =>
           describeSpeaker ? (
             // 两条轴在既有 ruler **之上**分轴，而不是替换它：ruler 那三条更强的性质（诚实时间轴、
             // 每行偏移、无跨度时退化为序数）是既有资产。轴与 track 由 `Ruler` 摆进同一个坐标盒，
@@ -712,6 +796,9 @@ export function ActivityView({
             //
             // 顺序是「说话人在上、自我 Agent 在下、主刻度在最下」：自上而下正是从"谁在说话"到
             // "这个 Agent 在干什么"到"整条时间轴"的收敛，越往下越细。
+            //
+            // 面板出口（onPeek/onPeekEnd）由 Ruler 递进来：面板与主刻度的 readout 是同一个浮层，
+            // 而它的锚定要用 Ruler 才有的那个共享坐标盒。这一层只补上身份解析。
             <Fragment>
               <ConversationAxis
                 items={items}
@@ -721,6 +808,8 @@ export function ActivityView({
                 describe={describeSpeaker}
                 selectedIndex={selectedIndex}
                 onSelect={selectEvent}
+                onPeek={onPeek}
+                onPeekEnd={onPeekEnd}
               />
               <ConversationAxis
                 items={items}
@@ -730,6 +819,8 @@ export function ActivityView({
                 describe={describeSpeaker}
                 selectedIndex={selectedIndex}
                 onSelect={selectEvent}
+                onPeek={onPeek}
+                onPeekEnd={onPeekEnd}
               />
             </Fragment>
           ) : null
