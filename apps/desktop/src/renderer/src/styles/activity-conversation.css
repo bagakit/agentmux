@@ -19,6 +19,10 @@
   padding:var(--sp-4) var(--sp-5) var(--sp-4);
   margin:var(--sp-3) 0;
 }
+/* The node seats a 20px speaker avatar, which brings its own ground and identity colour — so the hole
+   punch here is only the spine gap, and the colour that used to be set per kind now comes from the
+   avatar's own identity rule. `failed` still overrides, because a failed turn is a state of the turn,
+   not of who spoke it. */
 .log-turn__node {
   grid-column: 1;
   grid-row: 1;
@@ -27,12 +31,9 @@
   justify-content: center;
   width: 20px;
   height: 20px;
-  color: var(--text-3);
   background: var(--surface-0);
   border-radius: 50%;
 }
-.log-turn--user_message .log-turn__node { color: var(--blue); }
-.log-turn--assistant_message .log-turn__node { color: var(--green); }
 .log-turn[data-status='failed'] .log-turn__node { color: var(--red); }
 .log-turn__head {
   grid-column: 2;
@@ -163,8 +164,10 @@
 .md-code .md-link--file { font-family: inherit; }
 
 /* User speech gets a quiet ground so the turn has a visible start and end — Surface fill carries the
-   boundary, never a stroke. The assistant reply flows open on the feed as the main narrative. */
-.log-turn--user_message .log-turn__body {
+   boundary, never a stroke. The assistant reply flows open on the feed as the main narrative.
+   Selected by SPEAKER ROLE, not by kind: `human` is a property of who spoke, and once A2A lands the
+   agent side stays one shape for every agent identity while their avatars and names differ. */
+.log-turn[data-speaker-role='human'] .log-turn__body {
   padding:var(--sp-4) var(--sp-4);
   border-radius: var(--radius);
   background: var(--surface-1);

@@ -32,8 +32,14 @@ import { speaksAsAgent, speaksAsHuman } from '../lib/conversation-axis'
 import { isConversationTurn, speakerOf, type ConversationSpeaker } from '../lib/conversation-speaker'
 import { terminalLinkPreviewAnchor } from '../lib/terminal-link-gesture'
 import { AgentMarkdown, type LinkClickModifiers, type OpenWorkspaceFile } from './AgentMarkdown'
-import { ConversationAxis } from './ConversationAxis'
+import { ConversationAxis, type DescribeSpeaker } from './ConversationAxis'
+import { ConversationSpeakerAvatar } from './ConversationSpeakerAvatar'
 
+/**
+ * 机器上报那一路的图标：按 `kind` 画，而这是对的——`tool_call` 是一把锤子、`permission` 是一枚盾，
+ * 回答的是「这是一条什么事件」。**对话回合不走这里**：那一路的形状由身份驱动（见 {@link Turn}），
+ * 因为「谁说的」不是一种事件类型。两个寄存器各有各的判据，不是同一个判据的两次调用。
+ */
 function Glyph({ kind, size = 12 }: { kind: AgentTimelineItem['kind']; size?: number }) {
   if (kind === 'user_message') return <UserRound size={size} />
   if (kind === 'assistant_message') return <Bot size={size} />
@@ -116,13 +122,16 @@ function Ruler({
   scale,
   selectedIndex,
   band,
-  onSelect
+  onSelect,
+  axes
 }: {
   items: AgentTimelineItem[]
   scale: RulerScale
   selectedIndex: number | null
   band: ReturnType<typeof rulerBand>
   onSelect: (index: number) => void
+  /** 与 track 共用一个坐标盒的那些轴，摆在 track 之上。见 render 里的注释。 */
+  axes?: JSX.Element | null
 }) {
   const trackRef = useRef<HTMLDivElement>(null)
   const [readout, setReadout] = useState<Readout | null>(null)
@@ -190,9 +199,16 @@ function Ruler({
 
   return (
     <div className="activity-ruler">
-      <div
-        ref={trackRef}
-        className="activity-ruler__track"
+      {/* 轴与 track 必须在**同一个盒**里，否则两处的 `left: N%` 参照不同的宽度。这一行的其余两件
+          （span 读数、info note）与 track 同排且占掉右侧近百像素，所以 track 自己不能当那个共享盒
+          ——`__stack` 才是：它是这一行的 flex 子项，内部纵向摆「说话人轴 / 自我 Agent 轴 / track」。
+          `axes` 由调用方传入而不是在这里组装，是因为轴需要身份解析（`describeSpeaker`），而 Ruler
+          对身份一无所知；它只提供那个共享坐标盒。 */}
+      <div className="activity-ruler__stack">
+        {axes}
+        <div
+          ref={trackRef}
+          className="activity-ruler__track"
         data-axis={scale.axis}
         role="slider"
         tabIndex={0}
@@ -226,6 +242,7 @@ function Ruler({
             style={{ left: `${scale.fractionOf(index) * 100}%` }}
           />
         ))}
+        </div>
       </div>
       <span className="activity-ruler__span">{formatOffset(scale.origin + scale.span, scale.origin)}</span>
       <span
@@ -376,26 +393,42 @@ export function DiffBlock({ diff }: { diff: ToolDiff }): JSX.Element {
 function Turn({
   item,
   origin,
+  speaker,
+  describeSpeaker,
   openWorkspaceFile,
   openHttpLink,
   workspaceRoot
 }: {
   item: AgentTimelineItem
   origin: number
+  /** 这一轮的说话人。由调用方从唯一判据（`speakerOf`）取得——Turn 只在有说话人时才被渲染。 */
+  speaker: ConversationSpeaker
+  describeSpeaker?: DescribeSpeaker
   openWorkspaceFile?: OpenWorkspaceFile
   openHttpLink?: (url: string, event: LinkClickModifiers) => void
   workspaceRoot: string
 }) {
-  // 谁说的这件事只有一个判据（`speakerOf`），不在这里按 kind 再判一次。caption 的文字仍由 role
-  // 决定，但 role 是那个判据给出的结论，而不是这里对 kind 的第二次解读。身份（speaker.id）本轮
-  // 还没有消费者——头像是下一个任务——但它已经是这条路上唯一的身份出处。
-  const speaker = speakerOf(item)
-  const who = speaker?.role === 'human' ? 'You' : 'Assistant'
+  // 形状由**身份**驱动，不由 kind。这是本任务的全部：`log-turn--${item.kind}` 会让「谁说的」永远
+  // 只有两种可能，A2A 落地后第三个身份无处可去；而 `data-speaker-role` 上挂的是身份判定的结论。
+  // role 是**画法**的维度（human 一种画法、agent 一种画法），身份本身是 speaker.id——所以这里没有
+  // 把开放集压回二值：多个 Agent 共享 `agent` 这一种画法，各自的头像与名字仍然不同。
+  const described = describeSpeaker?.(speaker)
   return (
-    <div className={`log-turn log-turn--${item.kind}`} data-status={item.status}>
-      <span className="log-turn__node"><Glyph kind={item.kind} size={14} /></span>
+    <div className="log-turn" data-speaker-role={speaker.role} data-status={item.status}>
+      <span className="log-turn__node">
+        {/* 头像与两条轴上用的是同一个组件、同一套身份表示——不是「正文一套、轴一套」。缺 describe
+            时退回 role 形状（人形/Bot），因为没有名字的头像认不出谁，此时颜色与图标也不再承载身份。 */}
+        <ConversationSpeakerAvatar
+          speaker={speaker}
+          name={described?.name ?? (speaker.role === 'human' ? 'You' : 'Agent')}
+          size={20}
+          {...(described?.providerId === undefined ? {} : { providerId: described.providerId })}
+        />
+      </span>
       <div className="log-turn__head">
-        <span className="log-turn__who">{who}</span>
+        {/* 名字是身份的判别器（同 provider 的两个 Agent 共用一枚图标、色相有 52% 概率撞在 20° 内，
+            已实测），所以 caption 给的是 describe 出来的名字，不是 role 的字面量。 */}
+        <span className="log-turn__who">{described?.name ?? (speaker.role === 'human' ? 'You' : 'Assistant')}</span>
         {item.status === 'streaming' ? <span className="log-row__chip">Streaming</span> : null}
         {item.status === 'failed' ? <span className="log-row__chip log-row__chip--failed">Failed</span> : null}
         <span className="log-turn__time">{formatOffset(item.createdAt, origin)}</span>
@@ -503,7 +536,7 @@ export function ActivityView({
    * 本组件不读 Store，所以 `providerId` 与显示名只能从外面进来。缺省时两条对话轴不渲染：轴的
    * 价值在于认出身份，没有名字的头像认不出谁，画出来只是一排装饰。
    */
-  describeSpeaker?: (speaker: ConversationSpeaker) => { name: string; providerId?: AgentProviderId }
+  describeSpeaker?: DescribeSpeaker
 }) {
   const segments = useMemo(() => segment(items), [items])
   const placed = useMemo(() => placeSegments(segments), [segments])
@@ -664,66 +697,77 @@ export function ActivityView({
 
   return (
     <div className="activity-feed">
-      {describeSpeaker ? (
-        // 两条轴在既有 ruler **之上**分轴，而不是替换它：ruler 那三条更强的性质（诚实时间轴、
-        // 每行偏移、无跨度时退化为序数）是既有资产。两条轴共用同一个 `items` 与同一条时间基准，
-        // 所以三者的横向位置严格对齐。
-        //
-        // 顺序是「说话人在上、自我 Agent 在下、主刻度在最下」：自上而下正是从"谁在说话"到
-        // "这个 Agent 在干什么"到"整条时间轴"的收敛，越往下越细。
-        <div className="activity-ruler__axes">
-          <ConversationAxis
-            items={items}
-            belongs={speaksAsHuman}
-            label="Speakers"
-            size={16}
-            describe={describeSpeaker}
-            selectedIndex={selectedIndex}
-            onSelect={selectEvent}
-          />
-          <ConversationAxis
-            items={items}
-            belongs={speaksAsAgent}
-            label="This agent"
-            size={16}
-            describe={describeSpeaker}
-            selectedIndex={selectedIndex}
-            onSelect={selectEvent}
-          />
-        </div>
-      ) : null}
       <Ruler
         items={items}
         scale={scale}
         selectedIndex={selectedIndex}
         band={band}
         onSelect={selectEvent}
+        axes={
+          describeSpeaker ? (
+            // 两条轴在既有 ruler **之上**分轴，而不是替换它：ruler 那三条更强的性质（诚实时间轴、
+            // 每行偏移、无跨度时退化为序数）是既有资产。轴与 track 由 `Ruler` 摆进同一个坐标盒，
+            // 所以「同一个 fraction 落在同一个像素」这句话在布局上真的成立，而不只是两个都写着
+            // 同一个百分比——后者在两个不同宽度的盒里是两个位置。
+            //
+            // 顺序是「说话人在上、自我 Agent 在下、主刻度在最下」：自上而下正是从"谁在说话"到
+            // "这个 Agent 在干什么"到"整条时间轴"的收敛，越往下越细。
+            <Fragment>
+              <ConversationAxis
+                items={items}
+                belongs={speaksAsHuman}
+                label="Speakers"
+                size={16}
+                describe={describeSpeaker}
+                selectedIndex={selectedIndex}
+                onSelect={selectEvent}
+              />
+              <ConversationAxis
+                items={items}
+                belongs={speaksAsAgent}
+                label="This agent"
+                size={16}
+                describe={describeSpeaker}
+                selectedIndex={selectedIndex}
+                onSelect={selectEvent}
+              />
+            </Fragment>
+          ) : null
+        }
       />
       <div className="activity-log" ref={logRef}>
-        {placed.map(({ entry, key, from }) => (
-          // One wrapper per segment carries the scroll target, the observer key, and the selection
-          // marker, so the three log registers below stay unaware of the ruler wiring.
-          <div
-            key={key}
-            className="activity-log__segment"
-            ref={registerSegment(key)}
-            data-selected={from === selectedIndex ? '' : undefined}
-          >
-            {entry.kind === 'run' ? (
-              <Run items={entry.items} origin={origin} />
-            ) : isConversationTurn(entry.item) ? (
-              <Turn
-                item={entry.item}
-                origin={origin}
-                workspaceRoot={workspaceRoot}
-                {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
-                {...(openHttpLink ? { openHttpLink } : {})}
-              />
-            ) : (
-              <Row item={entry.item} origin={origin} count={1} showSource />
-            )}
-          </div>
-        ))}
+        {placed.map(({ entry, key, from }) => {
+          // 判据只问一次：`speakerOf` 的**结论**既决定走哪个寄存器，又是 Turn 需要的那个身份。
+          // 原先这里问 `isConversationTurn`、Turn 里再问一遍 `speakerOf`，两处必须一致却各调一次；
+          // 现在结论直接传下去，Turn 拿到的是非空身份，"有说话人"与"是一轮对话"不可能再漂移。
+          const speaker = entry.kind === 'run' ? null : speakerOf(entry.item)
+          return (
+            // One wrapper per segment carries the scroll target, the observer key, and the selection
+            // marker, so the three log registers below stay unaware of the ruler wiring.
+            <div
+              key={key}
+              className="activity-log__segment"
+              ref={registerSegment(key)}
+              data-selected={from === selectedIndex ? '' : undefined}
+            >
+              {entry.kind === 'run' ? (
+                <Run items={entry.items} origin={origin} />
+              ) : speaker ? (
+                <Turn
+                  item={entry.item}
+                  origin={origin}
+                  speaker={speaker}
+                  workspaceRoot={workspaceRoot}
+                  {...(describeSpeaker ? { describeSpeaker } : {})}
+                  {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
+                  {...(openHttpLink ? { openHttpLink } : {})}
+                />
+              ) : (
+                <Row item={entry.item} origin={origin} count={1} showSource />
+              )}
+            </div>
+          )
+        })}
       </div>
       {showWorkingIndicator(displayState, items) ? <WorkingIndicator /> : null}
       {showJump ? (
