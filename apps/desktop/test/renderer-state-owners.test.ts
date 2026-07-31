@@ -323,6 +323,60 @@ describe('Renderer resource state owners', () => {
     expect(acknowledged.sessions[0]?.terminalCapability).toBeUndefined()
   })
 
+  it('mirrors Core turnUsage: copies a fresh value in, then clears a Core-side clear', () => {
+    // fix #1：Core 侧的 turnUsage 覆盖式更新（收尾带就复制、Core 清空就丢弃）必须原样穿过 renderer 的
+    // agent-session reducer。两半成对——条件复制把新值带进来，destructure 把陈旧值从 ...current 剔掉。
+    const usage = { inputTokens: 11, outputTokens: 22, totalTokens: 33, observedAt: 100 }
+    const state = {
+      sessions: [session],
+      timelines: {},
+      pendingAgentLaunches: {},
+      tabs: {},
+      layouts: {},
+      viewModes: {}
+    }
+
+    // 防假绿的锚：先让一条带 turnUsage 的 agent-session 快照把值真正复制进去。
+    const withUsage = reduceRuntimeEvent(state, core({
+      type: 'agent-session',
+      session: {
+        kind: 'agent',
+        agentSessionId: session.id,
+        providerId: session.providerId,
+        executorId: session.executorId,
+        hostId: session.hostId,
+        workspacePath: session.workspacePath,
+        run: session.control.run,
+        retiredRuns: [],
+        outputCursorBytes: 0,
+        createdAt: session.createdAt,
+        updatedAt: 4,
+        turnUsage: usage
+      }
+    }))
+    expect(withUsage.sessions[0]?.turnUsage).toEqual(usage)
+
+    // Core 侧清空（读 transcript 失败那一轮）：下一条快照不带 turnUsage，陈旧数字必须从 UI 状态里消失。
+    // 若只加条件复制、漏了 destructure，这里会红——上一轮的值会一直挂在「Last turn」下。
+    const cleared = reduceRuntimeEvent(withUsage, core({
+      type: 'agent-session',
+      session: {
+        kind: 'agent',
+        agentSessionId: session.id,
+        providerId: session.providerId,
+        executorId: session.executorId,
+        hostId: session.hostId,
+        workspacePath: session.workspacePath,
+        run: session.control.run,
+        retiredRuns: [],
+        outputCursorBytes: 0,
+        createdAt: session.createdAt,
+        updatedAt: 5
+      }
+    }))
+    expect(cleared.sessions[0]?.turnUsage).toBeUndefined()
+  })
+
   it('ignores old-Run lifecycle events but accepts committed Session Timeline revisions', () => {
     const tabId = `session:${session.id}`
     const state = {

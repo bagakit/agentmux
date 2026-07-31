@@ -18,6 +18,7 @@ import {
   type AgentProvider
 } from './agent-provider.js'
 import { releaseSubagentRoster } from './hook-normalizer.js'
+import { USAGE_FINALIZATION_EVENTS } from './agent-hook-command.js'
 import { classifyRunExit } from './agent-run-exit.js'
 import { composeAgentLaunchPrompt, composeOutboundMessage } from './agent-outbound-message.js'
 import { hashAgentCapability, issueAgentCapability, resolveCapabilityAuthor } from './agent-capability.js'
@@ -2943,8 +2944,9 @@ export class AgentMuxClient {
       const persistedReceipt = existingReadiness
         ? { ...receipt, outputCursorBytes: existingReadiness.outputCursorBytes }
         : receipt
+      const { turnUsage: _staleTurnUsage, ...currentBase } = current
       const next: AgentMuxStoredAgentSession = {
-        ...current,
+        ...currentBase,
         updatedAt: Math.max(current.updatedAt, normalized.status.observedAt),
         hookReceipt: persistedReceipt,
         ...(normalized.semanticState === 'unknown'
@@ -2961,9 +2963,20 @@ export class AgentMuxClient {
             }
           : {}),
         ...(normalized.nativeHandle ? { nativeHandle: normalized.nativeHandle } : {}),
-        // 覆盖式更新：只保留最新一 turn 的真实用量。缺席（本条回执没带 usage）时保留上一 turn 的值，
-        // 不清零——收尾事件才带 usage，一个不带 usage 的迟到事件不该抹掉刚采到的那一 turn。
-        ...(normalized.turnUsage ? { turnUsage: normalized.turnUsage } : {})
+        // turnUsage 三分支权威解析。清空这一半与上面把 turnUsage 从 ...currentBase 里 destructure 掉
+        // 的那半成对（同 fix #1 陷阱）：turnUsage 已从基础展开剔出，此处「不写入」等于「清掉」，而非「保留」。
+        // 1) 本条回执带 usage → 用新的（fresh number wins）。
+        // 2) 无 usage 且属收尾事件（USAGE_FINALIZATION_EVENTS = Stop/StopFailure，两侧共用 SSOT）→ 清掉：
+        //    收尾本该带用量，它没带说明这一 turn 的用量读取失败（读 transcript 失败/竞态截断/记录落在
+        //    256KiB 窗口外），把上一 turn 的数字继续挂在「Last turn」标签下是撒谎，清掉让 UI 落回等待记号「—」。
+        // 3) 无 usage 且是 mid-turn 事件 → 保留上一 turn 的值：迟到的不带 usage 事件不该抹掉刚采到的那一 turn。
+        ...(normalized.turnUsage
+          ? { turnUsage: normalized.turnUsage }
+          : USAGE_FINALIZATION_EVENTS.has(normalized.eventName)
+            ? {}
+            : current.turnUsage
+              ? { turnUsage: current.turnUsage }
+              : {})
       }
       if (normalized.interaction) {
         const interaction = normalized.interaction
