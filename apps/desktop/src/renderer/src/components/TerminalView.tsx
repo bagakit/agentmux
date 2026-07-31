@@ -8,7 +8,7 @@ import { ChevronDown, ChevronUp, ExternalLink, FileCode, LoaderCircle, Search, X
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { RuntimeEvent, SessionSnapshot, TerminalThemeId } from '../../../shared/contracts'
 import { api } from '../lib/api'
-import type { OpenHttpLinkOrigin } from '../lib/open-destination'
+import { dismissOpenDestinationRequest, type OpenHttpLinkOrigin } from '../lib/open-destination'
 import { useAppStore } from '../store'
 import { installTerminalColorQueryReplyHandlers } from '../lib/terminal-capability-replies'
 import {
@@ -102,7 +102,7 @@ export function dismissTerminalLinkRequest<T extends OpenDestinationMenuRequest>
   current: T | null,
   requestId: number
 ): T | null {
-  return current?.id === requestId ? null : current
+  return dismissOpenDestinationRequest(current, requestId)
 }
 
 function outputForSession(event: RuntimeEvent, session: SessionSnapshot) {

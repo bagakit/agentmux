@@ -1,7 +1,22 @@
 import { createElement } from 'react'
+import { readFileSync } from 'node:fs'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SessionSnapshot } from '../src/shared/contracts.js'
+import type { LinkClickModifiers } from '../src/renderer/src/components/AgentMarkdown.js'
+import type { OpenDestination, OpenHttpLinkOrigin } from '../src/renderer/src/lib/open-destination.js'
+
+// The conversation's http links must reach the SAME destination menu + Store exit the Terminal uses,
+// opening into this pane's Region — never a jump straight to the system browser. This harness has no DOM
+// and cannot click, so we capture the click handler SessionPane hands to ActivityView and the props it
+// hands to OpenDestinationMenu, then drive them by hand and assert on the Store call that results.
+const captured = vi.hoisted(() => ({
+  onProseLinkClick: null as ((url: string, event: LinkClickModifiers) => void) | null,
+  onMenuSelect: null as ((destination: OpenDestination) => void) | null,
+  menuCanSplit: null as boolean | null,
+  menuRequest: null as { id: number; url: string; x: number; y: number } | null,
+  openHttpLink: vi.fn(async (_origin: OpenHttpLinkOrigin, _url: string, _dest: OpenDestination) => {})
+}))
 
 const fixture = vi.hoisted(() => ({
   state: {
@@ -17,6 +32,7 @@ const fixture = vi.hoisted(() => ({
     recoverSession: vi.fn(async () => {}),
     respondInteraction: vi.fn(async () => {}),
     openFile: vi.fn(async () => {}),
+    openHttpLink: captured.openHttpLink,
     reportError: vi.fn()
   }
 }))
@@ -30,9 +46,27 @@ vi.mock('../src/renderer/src/components/TerminalView.js', () => ({
 vi.mock('../src/renderer/src/components/ActivityView.js', () => ({
   // displayState 透传出来断言：判定再对，Pane 不把它交出去，整个「在进行」指示就是死的，
   // 而且所有只测判定的用例仍会绿。这条把那个静默失效变成可见的红。
-  ActivityView: ({ displayState }: { displayState?: string }) => (
-    <div data-test-view="activity" data-display-state={displayState ?? 'absent'} />
-  )
+  // openHttpLink 也俘获出来：这是对话链接点击的唯一出口，SessionPane 不交出去就等于没接线。
+  ActivityView: ({ displayState, openHttpLink }: {
+    displayState?: string
+    openHttpLink?: (url: string, event: LinkClickModifiers) => void
+  }) => {
+    captured.onProseLinkClick = openHttpLink ?? null
+    return <div data-test-view="activity" data-display-state={displayState ?? 'absent'} />
+  }
+}))
+vi.mock('../src/renderer/src/components/OpenDestinationMenu.js', () => ({
+  // 俘获 canSplit 与 request：canSplit 必须如实反映 origin 有没有精确 pane，request 有值才代表菜单浮出。
+  OpenDestinationMenu: ({ request, canSplit, onSelect }: {
+    request: { id: number; url: string; x: number; y: number } | null
+    canSplit: boolean
+    onSelect(destination: OpenDestination): void
+  }) => {
+    captured.menuCanSplit = canSplit
+    captured.menuRequest = request
+    captured.onMenuSelect = onSelect
+    return request ? <div data-test-menu="open" data-can-split={String(canSplit)} /> : null
+  }
 }))
 vi.mock('../src/renderer/src/components/AgentSessionComposer.js', () => ({
   AgentSessionComposer: ({ disabled }: { disabled?: boolean }) => (
@@ -84,7 +118,12 @@ function session(kind: 'agent' | 'terminal'): SessionSnapshot {
       }
 }
 
-function render(sessionId: string, surfaceKind: 'agent' | 'terminal', parked = false): string {
+function render(
+  sessionId: string,
+  surfaceKind: 'agent' | 'terminal',
+  parked = false,
+  linkOrigin: OpenHttpLinkOrigin = { workspaceId: 'workspace-1', tabGroupId: 'group-1' }
+): string {
   return renderToStaticMarkup(createElement(SessionPane, {
     sessionId,
     surfaceKind,
@@ -93,13 +132,18 @@ function render(sessionId: string, surfaceKind: 'agent' | 'terminal', parked = f
     parked,
     // Required props the pane really takes. They were omitted while nothing read them; the file
     // references in agent prose open into this Tab Group, exactly as a terminal path click does.
-    linkOrigin: { workspaceId: 'workspace-1', tabGroupId: 'group-1' }
+    linkOrigin
   }))
 }
 
 afterEach(() => {
   fixture.state.sessions = []
   fixture.state.viewModes = {}
+  captured.onProseLinkClick = null
+  captured.onMenuSelect = null
+  captured.menuCanSplit = null
+  captured.menuRequest = null
+  captured.openHttpLink.mockClear()
 })
 
 describe('SessionPane Agent Composer ownership', () => {
@@ -283,5 +327,74 @@ describe('SessionPane Agent Composer ownership', () => {
     expect(userStopped).not.toBe(crashed)
     expect(crashed).not.toBe(unknown)
     expect(userStopped).not.toBe(unknown)
+  })
+})
+
+describe('SessionPane 对话链接的浮窗出口', () => {
+  function renderAgentActivity(linkOrigin?: OpenHttpLinkOrigin): string {
+    fixture.state.sessions = [session('agent')]
+    fixture.state.viewModes = { 'agent-1': 'activity' }
+    return linkOrigin
+      ? render('agent-1', 'agent', false, linkOrigin)
+      : render('agent-1', 'agent')
+  }
+
+  const FULL_ORIGIN: OpenHttpLinkOrigin = {
+    workspaceId: 'workspace-1',
+    tabGroupId: 'group-1',
+    tabId: 'tab-1',
+    regionId: 'region-1'
+  }
+
+  it('把点击出口交给 Activity——不交，对话里的链接就点了没反应', () => {
+    // 这是接线本身：SessionPane 必须把 onProseLinkClick 交给 ActivityView。不交出去，链接点击无处可去。
+    renderAgentActivity(FULL_ORIGIN)
+    expect(captured.onProseLinkClick).toBeTypeOf('function')
+  })
+
+  it('普通点击浮出菜单、不直接开系统浏览器；带 Cmd/Ctrl 才直开——共用终端那套修饰键判定', () => {
+    // 尺子三：修饰键直开的判定必须在。删掉它（让 Cmd/Ctrl 也走菜单），普通点击那半段仍绿，
+    // 但「带修饰键必须立刻 openHttpLink('system')」这半段会红。
+    renderAgentActivity(FULL_ORIGIN)
+    const click = captured.onProseLinkClick!
+
+    // 普通点击：不立刻调 openHttpLink（改为浮出菜单，等用户选目标）。
+    click('https://example.com/a', { metaKey: false, ctrlKey: false, clientX: 5, clientY: 6 })
+    expect(captured.openHttpLink).not.toHaveBeenCalled()
+
+    // Cmd+click（本机 navigator.userAgent 为 'Node.js/24'，isMac=false，所以用 Ctrl 命中）：立刻直开系统浏览器。
+    click('https://example.com/b', { metaKey: false, ctrlKey: true, clientX: 7, clientY: 8 })
+    expect(captured.openHttpLink).toHaveBeenCalledTimes(1)
+    expect(captured.openHttpLink).toHaveBeenCalledWith(FULL_ORIGIN, 'https://example.com/b', 'system')
+  })
+
+  it('选中某个目标后，openHttpLink 收到的正是那个 destination——源码接线断言', () => {
+    // 尺子一的另一面：菜单选择必须把用户挑的 destination 与当前 request 的 URL 一起原样送进 openHttpLink。
+    // 本仓库的 renderToStaticMarkup 不重渲染，无法在“菜单已浮出(request 非空)”的那一帧驱动 onSelect，
+    // 故按仓内既有约定（topic-rename）改为源码接线断言：防的是把 destination 写死、或丢掉 request.url。
+    const source = readFileSync(
+      new URL('../src/renderer/src/components/SessionPane.tsx', import.meta.url),
+      'utf8'
+    )
+    const select = source.slice(
+      source.indexOf('const onProseLinkSelect'),
+      source.indexOf('const [refreshing')
+    )
+    // destination 必须原样透传（不是写死的 'system'/'tab'），URL 必须取自当前 request。
+    expect(select).toContain('openHttpLink(linkOrigin, request.url, destination)')
+    // 选完要消掉当前 request，避免菜单赖着不走。
+    expect(select).toContain('dismissOpenDestinationRequest(current, request.id)')
+  })
+
+  it('canSplit 如实反映 origin：有精确 Tab+Region 才为真', () => {
+    // 尺子二：canSplit 谎报会让用户点了分屏项后撞上 Store 那个抛错。它必须等于 Boolean(tabId && regionId)。
+    // 把 SessionPane 里的 canSplit 改成恒 true，这条的「缺 pane 时为 false」断言会红。
+    // 用一次普通点击把 request 立起来，让菜单真的渲染，从而俘获 canSplit——但静态渲染只跑一次，
+    // 无法在 setState 后重渲染。所以改为断言 SessionPane 传给菜单的 canSplit 初值（request 为 null 时也会算）。
+    renderAgentActivity(FULL_ORIGIN)
+    expect(captured.menuCanSplit).toBe(true)
+
+    renderAgentActivity({ workspaceId: 'workspace-1', tabGroupId: 'group-1' })
+    expect(captured.menuCanSplit).toBe(false)
   })
 })
