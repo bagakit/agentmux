@@ -217,11 +217,36 @@ describe('对话轴的渲染', () => {
     // ruler 的诚实性是类型级的：序数轴上 RulerReadout 根本没有 `at` 字段，所以"在没有跨度的轴上
     // 显示钟点"写不出来。但轴标记手里的 `item.createdAt` 永远是个裸数字，继承不到那层保护。
     //
-    // 判据必须是**白名单**而不是"没有下列几种时间串"。实测过：黑名单版（挡 `HH:MM` 与裸的
-    // 4000/1000）对 `title={`+${createdAt/1000}s`}` 完全失明——`+4s` 不含 4000 也不像钟点，11 条
-    // 全绿。所以这里改成枚举标记上允许出现的属性：多一个属性就红，无论它装的是什么形状的时间。
+    // 这条守卫被收紧过两次，每次都是因为上一版**声称**的不变式比它实际执行的宽：
+    //
+    // 1. 黑名单版（挡 `HH:MM` 与裸的 4000/1000）对 `title={`+${createdAt/1000}s`}` 完全失明——
+    //    `+4s` 不含 4000 也不像钟点，11 条全绿。于是改成白名单。
+    // 2. 白名单版只枚举 `<button>` 上的属性**名**，于是有三条实测可绕的路（每条都真的渗进了 DOM
+    //    而测试全绿）：塞进允许属性的**值**里（`class="… at-4000"`）；塞进 style 的一个自定义属性
+    //    （`--at:4000`，没有时间单位，逃过 `\d{2,}(?:ms|s\b)`）；塞到**子节点**上（glyph span 的
+    //    `title="+4s"`，而正则只扫 `<button…>`）。
+    //
+    // 所以判据现在覆盖整枚标记的子树，且换了一种更强的说法：**枚举允许出现数字的通道**，而不是枚举
+    // 禁止的形状。轴自己渲染的那三层（button、glyph 包装、头像圆片）上，除了 style 里那四条几何声明，
+    // 任何属性值里出现数字就红。这比「不许出现 4000」强得多——时刻能被格式化成无穷多种不含原数字的
+    // 形状（`+4s`、`just now`、一个自增序号），而一枚身份标记本来就没有任何需要携带数字的理由。
+    //
+    // 反过来也必须成立：判据不许误报正确代码。第一版写成「任何属性值不许包含 createdAt 的字符串」，
+    // 结果 `createdAt: 0` 的 `"0"` 落在 `left:0%` 里，正确实现直接红。会误报的守卫下一个人只会删掉，
+    // 所以数字这件事只能按通道判，不能按数值判。
+    //
+    // 扫描范围止于**轴自己渲染的节点**（按它们各自的 class 认领）。再往里是 provider 图标与它的 SVG
+    // 或 png：那些属性天生全是数字（`viewBox`、path 的 `d`、img 的 `width`），且轴的代码根本到不了
+    // 那一层——把它们纳进来只会让这条守卫在换一个 provider 图标时误报，而挡不住任何轴侧的变异。
     const items = conversationFixture()
-    const ALLOWED = new Set(['type', 'class', 'style', 'data-selected', 'aria-label'])
+    // 轴自己那三层，各自允许出现的属性名。头像是共享组件，它的 role/aria-label/title 是正文那一路
+    // 唯一的名字来源，不能在这里要求它消失。
+    const AXIS_NODES = ['conversation-axis__mark', 'conversation-axis__glyph', 'conversation-avatar']
+    const MARK_ATTRS = new Set(['type', 'class', 'style', 'data-selected', 'aria-label', 'aria-hidden', 'role', 'title'])
+    // style 里允许出现的声明：`left` 是标记的位置，`width`/`height` 是头像边长（size 那条验收的可观测
+    // 信号），`--speaker-hue` 是 id 派生的身份色相。这四条之外多一条声明就红，无论它装的是什么——
+    // 「塞进一个无单位自定义属性」正是逃过所有"像不像时间"判据的那条路。
+    const STYLE_PROPS = new Set(['left', 'width', 'height', '--speaker-hue'])
     for (const belongs of [speaksAsHuman, speaksAsAgent]) {
       const markup = render(
         <ConversationAxis
@@ -234,18 +259,39 @@ describe('对话轴的渲染', () => {
           onSelect={() => {}}
         />
       )
-      for (const [, attrs] of markup.matchAll(/<button([^>]*)>/g)) {
-        const names = [...attrs!.matchAll(/(?:^|\s)([a-z-]+)(?==|\s|$)/g)].map((m) => m[1]!)
-        expect(names.length).toBeGreaterThan(0)
-        expect(names.filter((name) => !ALLOWED.has(name))).toEqual([])
+      let axisNodes = 0
+      let styles = 0
+      for (const [, tag, rawAttrs] of markup.matchAll(/<([a-zA-Z][\w-]*)((?:\s+[^>]*?)?)\/?>/g)) {
+        const attrs = [...rawAttrs!.matchAll(/([a-zA-Z-][\w:-]*)="([^"]*)"/g)].map(([, name, value]) => ({
+          name: name!,
+          value: value!
+        }))
+        const className = attrs.find((attr) => attr.name === 'class')?.value ?? ''
+        // 只认领轴自己渲染的节点；provider 图标及其内部（class 是 agent-provider-icon、或干脆没有
+        // class 的 svg/path/img）不在这条守卫的范围里。
+        if (!AXIS_NODES.some((axisClass) => className.split(/\s+/).includes(axisClass))) continue
+        axisNodes += 1
+        for (const { name, value } of attrs) {
+          expect(MARK_ATTRS, `<${tag} class="${className}"> 带了未登记的属性 ${name}="${value}"`).toContain(name)
+          if (name === 'style') {
+            styles += 1
+            for (const declaration of value.split(';').filter((part) => part.trim() !== '')) {
+              const property = declaration.slice(0, declaration.indexOf(':')).trim()
+              expect(STYLE_PROPS, `<${tag}> 的 style 里多了一条声明：${declaration.trim()}`).toContain(property)
+            }
+            continue
+          }
+          expect(value, `<${tag} ${name}="${value}"> 里有数字——标记上没有该带数字的东西`).not.toMatch(/\d/)
+        }
       }
-      // style 只承载定位，不许把时刻塞进自定义属性里绕过上面那圈。
-      expect(markup).not.toMatch(/style="[^"]*\d{2,}(?:ms|s\b)/)
-      // 而 aria-label 就是那个名字本身——不是名字加时刻的拼接。两条轴的名字不同（human 'You'、
-      // agent 'Claude'），所以这里判「不含数字」而不是钉某一个字面量：钉字面量会在另一条轴上误报，
-      // 而一条会误报正确代码的守卫，下一个人只会把它删掉。
+      // 扫描确实扫到了东西。空集上的白名单永远绿，是本仓最常见的假绿形态；这两条把"一个轴节点也
+      // 没认领到"（class 改名后守卫静默失效）与"一条 style 都没看到"都变成红。Agent 轴只有一枚标记，
+      // 所以下界按最少的那条轴取：3 个节点、2 条 style。
+      expect(axisNodes).toBeGreaterThanOrEqual(3)
+      expect(styles).toBeGreaterThanOrEqual(2)
+      // aria-label 就是那个名字本身。两条轴的名字不同（human 'You'、agent 'Claude'），所以判
+      // 「是这两个之一」而不是钉某一个字面量——钉字面量会在另一条轴上误报正确代码。
       expect(markup).toMatch(/aria-label="(You|Claude)"/)
-      expect(markup).not.toMatch(/aria-label="[^"]*\d/)
     }
   })
 
