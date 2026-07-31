@@ -46,6 +46,18 @@ function sessionOnlyTab(tab: WorkbenchTab): WorkbenchTab | null {
   for (const surface of workbenchSurfaces(tab)) {
     if (sessionSurface(surface)) continue
     if (tab.topicId && surface.kind === 'launcher') continue
+    // 文件面必须活过重启——它就是用户报的「重启后 tab 和分屏没了」的一半：一个纯 file tab 曾被整面剥成
+    // 0 面（整 tab 消失），agent+file 分屏曾塌成单面。file 面本身只有 {regionId,kind,workspaceId,path}，
+    // 没有运行时内容可剥，且 tab id 本就是 `file:${workspaceId}:${path}`——存 file 面与存路径是同一件事，
+    // 分不开。path 原样保留（相对存相对、绝对存绝对，不 normalize/重写）。
+    //
+    // 为什么 file 留而 browser 的 url/title 不留：browser 面内嵌整个活体 BrowserSnapshot（url/title/
+    // navigationId… 全是 required 运行时快照），浏览历史与文件路径是两类敏感度；且冷启动没有一条能把
+    // 持久 browser 结构复活成可用空白页的生命周期（BrowserPane 的 restore 只在 released 态触发，冷启动
+    // 可见 browser 是 released=false，restore/create 都不发），硬存结构标识只会 ship 一个死面板。故
+    // browser 面仍整面剥离（沿用旧行为）。谁若日后以「过时的直接删」为由把下面这行 file 也一并剥掉，
+    // 就会原样重犯这个 bug——这个机制不是冗余，删它=回归。
+    if (surface.kind === 'file') continue
     next = next ? removeWorkbenchRegion(next, surface.regionId) : null
   }
   return next
@@ -112,7 +124,25 @@ function restoreTab(
   for (const surface of workbenchSurfaces(tab)) {
     if (!sessionSurface(surface)) {
       if (tab.topicId && surface.kind === 'launcher') continue
-      return null
+      // 一个文件面在其 workspace 仍被配置时生还，原样保留（含 path）。文件是否还在磁盘上不在这里判：
+      // 本函数是纯 presentation 投影，无磁盘/无 IPC——stat 会把同步启动恢复变成异步，且新增一个与 Core/
+      // 主进程并存的文件存在性真相源（违反 SSOT）。
+      //
+      // 代价是这里交出一个没有文档的面，所以必须有人在它上屏时把文档装上，否则 tab 在、点开报「不可用」
+      // ——看起来像文件坏了。那个人是 `EditorPane`：它缺文档就调 `attachPersistedFileDocument`
+      // （store 侧 `loadPersistedFileDocument` → `reduceDocumentAttached`）。「文件已删」也在那条路上
+      // 惰性表达（`reduceDocumentLoadFailed` 记 `documentIssues.deleted`），与「打开着的文件被删」
+      // 同一条既有失败态。**留下这一行而不接那个加载入口，等于把一个整 tab 消失的 bug 换成一个更难
+      // 诊断的 bug。**
+      //
+      // 关键：这里绝不能退回旧的 `return null`——那会把整 tab 连同存活的 agent 面一起毙掉（正是用户报的
+      // 「分屏没了」）。越界面只删该 Region，让 removeWorkbenchRegion 走与 session 面完全同一条收敛出口。
+      if (
+        surface.kind === 'file' &&
+        config.workspaces.some((workspace) => workspace.id === surface.workspaceId)
+      ) continue
+      next = next ? removeWorkbenchRegion(next, surface.regionId) : null
+      continue
     }
     const session = sessions.get(surface.sessionId)
     // A Runtime snapshot can be temporarily unavailable while the persisted presentation is still
