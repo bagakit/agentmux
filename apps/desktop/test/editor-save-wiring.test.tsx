@@ -36,6 +36,7 @@ vi.mock('@monaco-editor/react', () => ({
       addCommand: (keybinding: number, handler: () => void) => {
         monacoSpy.commands.push({ keybinding, handler })
       },
+      onDidDispose: vi.fn(() => ({ dispose: vi.fn() })),
       revealLineInCenter: vi.fn(),
       setPosition: vi.fn(),
       focus: vi.fn()
