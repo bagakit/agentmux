@@ -397,7 +397,9 @@ export function projectRuntimeEvent(
                           ...(core.state === 'interrupted'
                             ? { detail: 'The Run owner interrupted this PTY.' }
                             : {}),
-                          ...(core.exitCode === undefined ? {} : { exitCode: core.exitCode })
+                          ...(core.exitCode === undefined ? {} : { exitCode: core.exitCode }),
+                          // 退出原因随退出事件到达就贴到 status 上，让「Exited」横幅能说清是你关的还是它崩的。
+                          ...(core.exitReason === undefined ? {} : { exitReason: core.exitReason })
                         }
                       }
                 )
