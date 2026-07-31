@@ -57,7 +57,9 @@ export function ConversationAxis({
   size,
   describe,
   selectedIndex,
-  onSelect
+  onSelect,
+  onPeek,
+  onPeekEnd
 }: {
   /** 全量 timeline。scale 在全量上建，位置按原始下标取——两条轴因此与主刻度时间基准同源。 */
   items: readonly AgentTimelineItem[]
@@ -73,13 +75,45 @@ export function ConversationAxis({
   selectedIndex: number | null
   /** 点一枚头像＝选中它对应的那条 item，走调用方那一个选择出口。 */
   onSelect: (index: number) => void
+  /**
+   * 指到（或聚焦到）一枚标记：交出这枚标记的**矩形**、它对应的那条 item、以及已解析好的身份名。
+   *
+   * 交矩形而不是指针坐标：标记是个 24px 的圆形命中区，按指针锚定会让浮层在标记内部随指针漂移；
+   * 按标记自身的矩形锚定，浮层与它所描述的那枚头像是固定关系。交名字是因为名字**已经**在这里解析
+   * 过一次（`describe` 是轴的入参、button 的 aria-label 就是它）——让调用方再解析一遍就是把同一个
+   * 判断复制到两处，两处必须逐字一致却各调一次。交 item 而不是已经取好的引文：「展示什么」是调用
+   * 方的决定，轴不知道也不该知道面板里放什么。
+   */
+  onPeek?: (peek: { rect: DOMRect; mark: ConversationAxisMark; name: string }) => void
+  /**
+   * 指针离开、失焦、或按下 Escape：与 {@link onPeek} 同一条出口的另一半。
+   *
+   * 返回「刚才真的关掉了一个开着的面板吗」。轴不持有面板状态，所以它无法自己判断该不该吃掉
+   * Escape；由唯一知道答案的那一层回答，轴据此决定是否阻止冒泡。
+   */
+  onPeekEnd?: () => boolean
 }) {
   const marks = conversationAxis(items, belongs)
   // 空轴不画空槽：一条还没有人说话的 Session 上，说话人轴什么也不表达。
   if (marks.length === 0) return null
 
   return (
-    <div className="conversation-axis" role="group" aria-label={label}>
+    <div
+      className="conversation-axis"
+      role="group"
+      aria-label={label}
+      // Escape 关面板。挂在轴容器而不是每枚标记上：事件从聚焦的那枚标记冒上来，一处足够，而挂在
+      // 标记上就是同一个 handler 写 N 遍。面板本身 `pointer-events: none`，永远拿不到焦点，所以
+      // 「关它」这件事只能由触发它的那个控件所在的子树来承担。
+      //
+      // `onPeekEnd` 返回「刚才真的关掉了一个开着的面板吗」，只有为真时才 stopPropagation：轴不
+      // 知道面板开没开，而无条件吞掉 Escape 会让它在面板关着时也被静默吃掉，外层可能正等着用它
+      // 关一个更大的东西（Region、对话框）。把这个判断留给唯一知道答案的那一层。
+      onKeyDown={(event) => {
+        if (event.key !== 'Escape') return
+        if (onPeekEnd?.() === true) event.stopPropagation()
+      }}
+    >
       {marks.map((mark) => (
         <AxisMark
           key={mark.item.id}
@@ -88,6 +122,8 @@ export function ConversationAxis({
           describe={describe}
           selected={mark.index === selectedIndex}
           onSelect={onSelect}
+          {...(onPeek === undefined ? {} : { onPeek })}
+          {...(onPeekEnd === undefined ? {} : { onPeekEnd })}
         />
       ))}
     </div>
@@ -106,15 +142,25 @@ function AxisMark({
   size,
   describe,
   selected,
-  onSelect
+  onSelect,
+  onPeek,
+  onPeekEnd
 }: {
   mark: ConversationAxisMark
   size: number
   describe: DescribeSpeaker
   selected: boolean
   onSelect: (index: number) => void
+  onPeek?: (peek: { rect: DOMRect; mark: ConversationAxisMark; name: string }) => void
+  onPeekEnd?: () => boolean
 }) {
   const { name, providerId } = describe(mark.speaker)
+  // hover 与 focus 走**同一个** peek，pointerleave 与 blur 走同一个 peekEnd：触屏上没有 hover，
+  // 键盘上没有指针，若两条通路各写一份，移动端与键盘就成了两套要各自维护的实现。这里让四个事件
+  // 收敛到一对出口上，于是「不存在只能靠鼠标 hover 才能获得的信息」是结构性的，不靠自觉。
+  const peek = (event: { currentTarget: HTMLButtonElement }): void => {
+    onPeek?.({ rect: event.currentTarget.getBoundingClientRect(), mark, name })
+  }
   return (
     <button
       type="button"
@@ -124,9 +170,13 @@ function AxisMark({
       data-selected={selected ? '' : undefined}
       // 名字挂在 button 上，不拼时刻：诚实的时刻只能从 scale 的 readout 取，而这枚标记手里的
       // `createdAt` 是个裸数字——把它格式化进任何属性，就把 ruler 特意做成类型上不可表达的那种
-      // 不诚实（序数轴上没有时刻）又请了回来。时刻归 T-005 的面板，走 readout。
+      // 不诚实（序数轴上没有时刻）又请了回来。时刻归面板，走 readout。
       aria-label={name}
       onClick={() => onSelect(mark.index)}
+      onPointerEnter={peek}
+      onFocus={peek}
+      onPointerLeave={() => onPeekEnd?.()}
+      onBlur={() => onPeekEnd?.()}
     >
       {/* 头像在这里是**装饰**：可访问名已由 button 给出，头像自带的 `role="img"` + `aria-label` 会
           让读屏把同一个名字念两遍。`aria-hidden` 只作用在这一处包装，头像组件本身不动——它在对话
