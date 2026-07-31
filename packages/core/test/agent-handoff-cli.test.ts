@@ -32,8 +32,11 @@ describe('handoff verb 接到 Core 既有 handOff，不退化成 send', () => {
     // 与 discuss 同口径：raw capability 从环境取出交回 Core，callerAgentSessionId 只是上下文。
     expect(handoff).toContain('managedCaller()')
     expect(handoff).toContain('AGENTMUX_AGENT_CAPABILITY')
-    expect(handoff).toContain('capability')
-    expect(handoff).toContain('callerAgentSessionId')
+    // 光有这些符号"出现"还不够——必须把它们真的绑进 handOff 的入参：capability 交回 Core，
+    // caller 是 managedCaller() 解析出来的那个，而不是硬编码 'self' 之类的自证值。只测 presence
+    // 时，把 callerAgentSessionId 写死成 'self' 仍会绿；测 value binding 才挡得住。
+    expect(handoff).toContain('capability,')
+    expect(handoff).toContain('callerAgentSessionId: caller.agentSessionId')
   })
 
   it('目标与 task 用既有 CLI 寻址词汇：--to-session（显式 id）+ --task', () => {
@@ -52,7 +55,7 @@ describe('handoff verb 接到 Core 既有 handOff，不退化成 send', () => {
     expect(handoff).not.toContain("'--text'")
   })
 
-  it('originAwaits 由 Core 决定，CLI 如实回显不另判', () => {
+  it('originAwaits 由 Core 决定，CLI 如实回显不另判；回执贴 handoff 标签且回显 Core 的 taskId', () => {
     const handoff = handoffSlice()
     // CLI 输出的是 Core 返回的 result.originAwaits，不是 CLI 自己写死的 false——后者会让 CLI 与
     // Core 的分界各写一份，漂移时不会有测试变红。
@@ -61,5 +64,9 @@ describe('handoff verb 接到 Core 既有 handOff，不退化成 send', () => {
     // 不在 CLI 侧硬编码 originAwaits 的值。
     expect(handoff).not.toContain('originAwaits: false')
     expect(handoff).not.toContain('originAwaits: true')
+    // 成功回执必须打 'handoff' 标签——写成 'send' 就把交接伪装成普通投递，这条会红。
+    expect(handoff).toContain("printSuccess('handoff'")
+    // taskId 如实回显 Core 返回的那个，而不是 CLI 从入参里回抄或省略。
+    expect(handoff).toContain('taskId: result.taskId')
   })
 })
