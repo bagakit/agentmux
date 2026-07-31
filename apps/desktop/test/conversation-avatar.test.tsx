@@ -25,6 +25,26 @@ describe('说话人头像：颜色由身份 id 确定性派生（验收 2）', (
     expect(speakerColorHue(HUMAN_SPEAKER_ID)).toBe(speakerColorHue(HUMAN_SPEAKER_ID))
   })
 
+  it('一批相邻 id 全都散得开，不只是抽查的那一对——塌成两簇也要红', () => {
+    // 这条补的是一个实测存在的洞：下一条只探了 agent-1 / agent-2 这**一对**，而把 avalanche 那一步
+    // 删掉（只留 FNV-1a 的 `hash % 360`）时**9 条全绿**。原因是 FNV-1a 对末字节递增的输入产出等差
+    // 数列，8 个 id 会塌成两簇——实测 agent-1..8 得 64,241,62,239,60,237,58,235：奇数号挤在 58–64、
+    // 偶数号挤在 235–241，四个 Agent 互相只差 2 度。而恰好 agent-1 与 agent-2 分属两簇、差 177 度，
+    // 于是抽查那一对反而是**唯一**看不出问题的取样。断言粒度比 bug 更粗，这就是那个形态。
+    //
+    // 所以这里不抽查，而是要求整批**两两**都拉开。阈值取 12 度：低于这个数在固定 S/L 的柔和带里
+    // 已经是同色（同一批实测里 agent-1 与 agent-8 差 3 度，肉眼同色——那是散列的固有性质，可分性
+    // 由形状与 aria-label 承担，见文件末尾兜底那条；但**一整簇**都挤在几度内是另一回事：那说明
+    // 派生根本没在做扩散）。要求全部两两 ≥12 度会被 3 度那对否掉，所以判据落在"最近邻的中位数"：
+    // 塌成两簇时中位最近邻 ≈2 度，健康时 ≈45 度，两者相差一个数量级，阈值放哪都分得开。
+    const hues = Array.from({ length: 8 }, (_, i) => speakerColorHue(`agent-${i + 1}`))
+    const nearest = hues.map((h, i) =>
+      Math.min(...hues.filter((_, j) => j !== i).map((o) => Math.min(Math.abs(h - o), 360 - Math.abs(h - o))))
+    )
+    const median = [...nearest].sort((a, b) => a - b)[Math.floor(nearest.length / 2)]!
+    expect(median).toBeGreaterThan(12)
+  })
+
   it('不同 id 派生出能区分的色相——相邻 id 也不许挤在一度之内', () => {
     // 这是「不同 id 要能区分」的核心，也是变异 (a) 的靶子：把派生换成常量，两个不同 id 会拿到
     // 同一个色相，下面第一条断言就报「两个不同 id 得到了同色」。相邻 id（只差一个字节）尤其危险，
@@ -113,6 +133,12 @@ describe('说话人头像：两个尺寸都可用（验收 4）', () => {
     expect(svgWidth(small)).toBeGreaterThanOrEqual(8)
     expect(svgWidth(large)).toBeGreaterThanOrEqual(8)
     expect(svgWidth(small)).not.toBe(svgWidth(large))
+    // 上面三条只说了"两个尺寸下 glyph 不同且非零"，**没说它比外框小**：把内缩改成 `glyphSize = size`
+    // 时它们仍全绿（实测）。而 glyph 等于外框意味着圆片没有边距、图形贴着圆边被裁——圆片形态就没了。
+    // 所以这里钉住内缩本身：glyph 严格小于外框，且留白不超过外框的一半（否则 glyph 缩到看不清）。
+    expect(svgWidth(small)).toBeLessThan(16)
+    expect(svgWidth(large)).toBeLessThan(20)
+    expect(svgWidth(large)).toBeGreaterThan(10)
   })
 })
 

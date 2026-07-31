@@ -149,8 +149,6 @@ function danglingVariables(): string[] {
     const name = match[1]!
     // Radix 在运行时注入自己的变量，样式表里定义不到它们。
     if (name.startsWith('--radix-')) continue
-    // 组件按树深注入的行内变量。
-    if (name === '--tree-depth') continue
     if (!defined.has(name)) dangling.add(name)
   }
   return [...dangling].sort()
