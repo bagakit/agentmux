@@ -79,6 +79,43 @@ describe('样式表的组织', () => {
     expect(offenders).toEqual([])
   })
 
+  it('共用坐标框的承重声明——删掉它们不会报错，只会让两条轴悄悄与刻度错位', () => {
+    // 这条守的是一类**没有任何可见报错**的失效。`.activity-ruler__stack` 是接替 `__track` 当 ruler
+    // 行 flex 子项的那个元素（见 conversation-axis.css 的文件头），所以它必须继承 `flex: 1`：少了
+    // 它，stack 收缩成内容宽度，每枚标记的 `left: N%` 又回到一个更窄的盒子上算——正是这个 stack
+    // 存在要消掉的那个漂移。页面不报错、不空白，只是轴与刻度不再对齐，而对齐是这两条轴存在的
+    // 全部理由。
+    //
+    // 渲染层那侧已经有断言（activity-view.test.tsx 判 stack/轴/track 的嵌套结构），但结构对了、
+    // 声明被删掉，那条仍然全绿——本仓没有能跑布局的测试环境，所以这三条只有在样式表上判。
+    // 落点选这个文件而不是渲染测试：读 CSS 这件事集中在契约测试里，渲染测试不碰文件系统。
+    const files = new Map(styleFiles().map((file) => [file.name, file.text]))
+    const axisCss = files.get('conversation-axis.css')
+    expect(axisCss, 'conversation-axis.css 不在 @import 列表里了').toBeDefined()
+
+    const ruleOf = (selector: string): string => {
+      const escaped = selector.replace(/[.[\]]/g, '\\$&')
+      const match = new RegExp(`${escaped}\\s*\\{([^}]*)\\}`).exec(axisCss!)
+      expect(match, `${selector} 的规则不见了`).not.toBeNull()
+      return match![1]!
+    }
+
+    // 共用盒：必须占满 ruler 行的剩余宽度，且纵向排布（三行叠起来才谈得上"同一列"）。
+    const stack = ruleOf('.activity-ruler__stack')
+    expect(stack).toMatch(/flex:\s*1\b/)
+    expect(stack).toMatch(/flex-direction:\s*column/)
+    // 每条轴：它是每枚标记 `left: N%` 解析的那个包含块，所以必须自己建立定位上下文；高度要与组件
+    // 传下去的头像边长（16）相等——短了裁掉头像，高了在 ruler 上方加一条死白。
+    const axis = ruleOf('.conversation-axis')
+    expect(axis).toMatch(/position:\s*relative/)
+    expect(axis).toMatch(/height:\s*16px/)
+    // 标记：`translate(-50%, -50%)` 的两半各有承重理由——横向把中心（而非左边缘）拉到它所指的刻度
+    // 上，纵向让命中区能在不移动头像的前提下变大。少任何一半都会让整条轴系统性偏移半个头像。
+    const mark = ruleOf('.conversation-axis__mark')
+    expect(mark).toMatch(/position:\s*absolute/)
+    expect(mark).toMatch(/transform:\s*translate\(-50%,\s*-50%\)/)
+  })
+
   it('全表拼起来仍是可扫描的一张表，契约测试因此不会扫到空内容', () => {
     const styles = allStyles()
     expect(styles.length).toBeGreaterThan(100_000)
