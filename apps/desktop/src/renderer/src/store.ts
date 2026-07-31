@@ -333,10 +333,12 @@ type AppState = {
    *
    * 这条路只有一个来源：从持久化恢复出来的文件面。它只带 `{regionId,kind,workspaceId,path}`，
    * 没有任何内容，而 EditorPane 一旦 `documents[key]` 缺失就渲染「不可用」——于是 tab 在、
-   * 点开报不可用，看起来像文件坏了。由 EditorPane 自己在上屏时调用，而不是启动时扫一遍：
-   * 这样非活动 Workspace 的文件面同样被覆盖（启动扫描只能对着活动 Workspace 解析路径），
-   * 且冷启动不必在窗口可用之前读完每个持久化文件。与 `openFile` 分开是因为后者还负责「打开」
-   * ——它会激活 Tab、可能搬动它、并写 reveal target，而这里 Tab 已经在用户留下的位置上了。
+   * 点开报不可用，看起来像文件坏了。由 EditorPane 自己调用而不是启动时扫一遍，是为了覆盖
+   * 非活动 Workspace 的文件面（启动扫描只能对着活动 Workspace 解析路径，那些 tab 会一直坏到
+   * 下次重启）。注意隐藏 tab 是刻意保持挂载的，所以冷启动会读该 group 的每个文件面而不只是
+   * 活动那个——代价是每个打开着的文件面一次 read，换来每个恢复出的 tab 首次点击就能用。
+   * 与 `openFile` 分开是因为后者还负责「打开」——它会激活 Tab、可能搬动它、并写 reveal
+   * target，而这里 Tab 已经在用户留下的位置上了。
    */
   attachPersistedFileDocument(workspaceId: string, path: string): Promise<void>
   clearDocumentRevealTarget(key: string): void
@@ -752,11 +754,19 @@ async function refreshFileDocument(
  * that produced a surface with no document behind it, so the user saw a Tab that is present and
  * reports "unavailable" — which reads as a broken file rather than an unloaded one.
  *
- * This is called by the pane that would otherwise render that unavailable state, so the trigger is
- * the surface coming on screen rather than a startup sweep. Two things follow, both deliberate:
- * a file Region in a Workspace the user has not switched to yet is covered too (a startup sweep can
- * only resolve paths against the active Workspace, so it would leave those Tabs broken until the
- * next restart), and cold start does not read every persisted file before the window is usable.
+ * This is called by the pane that would otherwise render that unavailable state, rather than by a
+ * startup sweep, so that a file Region in a Workspace the user has not switched back to yet is
+ * covered too: a sweep can only resolve paths against the active Workspace, and would leave those
+ * Tabs broken until the next restart with no later trigger (`selectWorkspace` does not load).
+ *
+ * Do not read this as "only the visible Tab reads its file". Hidden Tabs stay mounted on purpose —
+ * that is what keeps a terminal instance alive across Tab switches (see hidden-tab-terminal-retention),
+ * and `ownerPresent: false` also keeps a document-less file surface out of the memory-budget parking
+ * set, so `released` is false and this does fire. So a cold start reads every persisted file Region in
+ * the Workspace's Tab group, not just the active one. That is affordable — one `files.read` per open
+ * file Region, the same read a click would do — and it is what makes every restored Tab work on first
+ * click instead of only the one that happened to be active. If that cost ever stops being affordable,
+ * the fix is to gate the read on real visibility, NOT to move it back into a startup sweep.
  *
  * It reads through the same `api.files` seam as a click, but must not reuse `openFile`: that one
  * also *opens* — it targets the active group, can move the Tab, and writes reveal targets. Here the
