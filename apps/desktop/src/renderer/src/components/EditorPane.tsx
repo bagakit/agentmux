@@ -94,6 +94,10 @@ export function EditorPane({
   // broken file rather than an unloaded one. Asking for it here, from the very pane that would render
   // that state, is what makes a Region in a Workspace the user has not switched back to yet work too.
   //
+  // Hidden Tabs stay mounted by design (that is what keeps terminal instances alive across switches),
+  // so this fires for every restored file Region in the group, not only the visible one. That is the
+  // accepted cost: one read per open file Region, and every restored Tab works on first click.
+  //
   // Guarded on `issue`, not just on `document`: a read that failed (the file was deleted while the app
   // was closed, or the read errored) records the reason and leaves `document` null, so without that
   // guard this would re-read a known-unreadable path on every dependency change. The user's route out
