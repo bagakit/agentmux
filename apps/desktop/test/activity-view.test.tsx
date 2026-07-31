@@ -73,25 +73,126 @@ describe('ActivityView 与两条对话轴的接线', () => {
     expect(markup).toContain('activity-ruler')
   })
 
-  it('轴在主刻度之上，且三者共用一条时间基准——同一事件的横向位置一致', () => {
-    // 「在既有 ruler 之上分轴，不是替换它」的结构证据：轴的标记在标记流里出现在 ruler 轨道之前，
-    // 而两者对同一个事件给出同一个百分比。位置一致是轴有用的全部前提——轴上一枚头像要能指向
-    // 下面那根 tick。
+  it('轴与主刻度在同一个坐标盒里，所以同一个百分比是同一个像素', () => {
+    // 这条守的是 review 抓出来的真缺陷：两条轴原先是 `.activity-ruler` 的**兄弟**（全宽无 padding），
+    // 而 tick 的 `left:N%` 解析在 `.activity-ruler__track` 里——那个盒被 12px 侧 padding 内推、右侧
+    // 还被 `__span` 读数与 `__note` 挤掉近百像素。于是两处的同一个 fraction 落在不同像素上，越往右
+    // 偏得越多，最后一枚头像会浮在它该指向的 tick 右边一个时间戳的宽度处。
+    //
+    // 判据必须是**结构**（两者共享同一个 position 容器），不能只是"轴出现在 track 之前"——后者在
+    // 修好之后恒为真，是一条守不住任何东西的断言。
+    const markup = renderWithSpeakers([
+      activity('u1', { kind: 'user_message', source: 'user', createdAt: 0, content: '问' }),
+      activity('a1', { kind: 'assistant_message', source: 'native-hook', createdAt: 1_000, content: '答' })
+    ])
+    // 共享盒存在，且轴与 track 都在它**里面**：stack 开始之后才出现轴，轴与 track 之间没有它的闭合。
+    const stackAt = markup.indexOf('activity-ruler__stack')
+    const axisAt = markup.indexOf('conversation-axis')
+    const trackAt = markup.indexOf('activity-ruler__track')
+    expect(stackAt).toBeGreaterThanOrEqual(0)
+    expect(stackAt).toBeLessThan(axisAt)
+    expect(axisAt).toBeLessThan(trackAt)
+    // 轴不再是 ruler 的兄弟：`.activity-ruler` 与轴之间只能隔着 stack，不能隔着 ruler 的闭合标签。
+    const rulerAt = markup.indexOf('class="activity-ruler"')
+    expect(rulerAt).toBeGreaterThanOrEqual(0)
+    expect(rulerAt).toBeLessThan(stackAt)
+    // 而右侧那两件（读数、note）必须留在共享盒之外——它们正是 track 自己不能当共享盒的原因。
+    expect(markup.indexOf('activity-ruler__span')).toBeGreaterThan(trackAt)
+  })
+
+  it('轴与主刻度对同一事件给出同一个百分比', () => {
     const items = [
       activity('u1', { kind: 'user_message', source: 'user', createdAt: 0, content: '问' }),
       activity('t1', { kind: 'tool_call', source: 'native-hook', createdAt: 250 }),
       activity('a1', { kind: 'assistant_message', source: 'native-hook', createdAt: 1_000, content: '答' })
     ]
     const markup = renderWithSpeakers(items)
-    expect(markup.indexOf('conversation-axis')).toBeLessThan(markup.indexOf('activity-ruler__track'))
-    // a1 在 1000/1000 = 100%：轴上的头像与主刻度上的 tick 都落在 100%。
     const axes = markup.slice(0, markup.indexOf('activity-ruler__track'))
     const ruler = markup.slice(markup.indexOf('activity-ruler__track'))
+    // a1 在 1000/1000 = 100%：轴上的头像与主刻度上的 tick 都落在 100%。
     expect(axes).toContain('left:100%')
     expect(ruler).toContain('left:100%')
     // 而 tool_call 在 25%，只出现在主刻度上——轴不吞机器上报。
     expect(ruler).toContain('left:25%')
     expect(axes).not.toContain('left:25%')
+  })
+})
+
+describe('对话正文的说话人形状', () => {
+  /** 只取正文那一段——轴上也有头像，不切开就会把轴的头像误当成正文的。 */
+  function logOf(markup: string): string {
+    return markup.slice(markup.indexOf('activity-log'))
+  }
+
+  const conversation = [
+    activity('u1', { kind: 'user_message', source: 'user', createdAt: 0, content: '人说的话' }),
+    activity('a1', { kind: 'assistant_message', source: 'native-hook', createdAt: 100, content: 'Agent 说的话' })
+  ]
+
+  it('user 与 Agent 的话在正文里形状不同——两个身份各自一枚头像，不再共用一种形状', () => {
+    // 这条是 T-006 的实质，也是用户报的那句「user 消息也会被收进 Agent 的历史, 感觉不够优雅」的
+    // 直接验收：两条发言过去共用一枚按 kind 选的图标，现在各带自己身份的头像。
+    const log = logOf(renderWithSpeakers(conversation))
+    expect(log).toContain('data-speaker-role="human"')
+    expect(log).toContain('data-speaker-role="agent"')
+    // 头像真的在正文里，不只在轴上——组件写好却没在这一路被调用，其他断言都会绿。
+    expect(log).toContain('conversation-avatar--human')
+    expect(log).toContain('conversation-avatar--agent')
+    // 正文两枚头像各一枚，且都坐在 spine 的节点槽里。
+    expect(log.match(/log-turn__node/g)).toHaveLength(2)
+  })
+
+  it('caption 给的是 describe 出来的名字，不是 role 的字面量——名字才是身份的判别器', () => {
+    // 色相有约 52%（4 个身份）概率撞在 20° 内、同 provider 又共用一枚品牌图标，所以两个 Agent 能不
+    // 能被认出来只能压在名字上。这条钉住正文 caption 走 describe：写死 'Assistant' 会红。
+    const log = logOf(renderWithSpeakers(conversation))
+    expect(log).toContain('Claude')
+    expect(log).not.toContain('>Assistant<')
+  })
+
+  it('没有 describeSpeaker 时仍按身份分形状，只是退回 role 的名字', () => {
+    // 退化路径要仍然分得开：`describeSpeaker` 缺席时头像认不出「具体是谁」，但「人 还是 Agent」这
+    // 一层由 role 决定，与 store 无关，所以形状不许一起塌掉。
+    const log = logOf(render('complete-events', conversation))
+    expect(log).toContain('data-speaker-role="human"')
+    expect(log).toContain('data-speaker-role="agent"')
+    expect(log).toContain('conversation-avatar--human')
+    expect(log).toContain('conversation-avatar--agent')
+    // 轴没画（那条已单独实测），所以这些头像只可能来自正文。
+    expect(log).not.toContain('conversation-axis')
+  })
+
+  it('形状属性、头像、caption 三者同源——不许有一个脱离身份单独漂移', () => {
+    // 实测出来的洞：把 `data-speaker-role` 单独改成按 kind 反推（头像与 caption 仍走 speaker.role），
+    // 上面每一条断言都绿——因为它们各自只看三者之一，没有人看见「同一个元素上两个矛盾的答案」。
+    // 那种状态下 CSS 按属性选到的是 agent 的排版，而里面画的是人的头像。
+    //
+    // 判据用 `source:'user'` 但 `kind:'lifecycle'` 这条：两个字段在这里故意不一致，于是「按 source
+    // 认」与「按 kind 反推」给出相反的结论，三者必须一致地站在 source 那一边。
+    const log = logOf(
+      render('complete-events', [
+        activity('steer-only-source', { source: 'user', kind: 'lifecycle', title: 'Prompt', content: '换个方向' })
+      ])
+    )
+    expect(log).toContain('data-speaker-role="human"')
+    expect(log).toContain('conversation-avatar--human')
+    expect(log).toContain('log-turn__who">You')
+    // 反向：agent 的三件套一个都不许出现在这条人说的话上。
+    expect(log).not.toContain('data-speaker-role="agent"')
+    expect(log).not.toContain('conversation-avatar--agent')
+  })
+
+  it('机器上报仍按 kind 画自己的图标——两个寄存器各有各的判据', () => {
+    // 反向边界：把 `Glyph` 的 kind 分支也改成身份驱动是错的，`tool_call` 是一把锤子回答的是「这是
+    // 什么事件」。这条钉住机器行不长出头像、也不带说话人属性。
+    const log = logOf(
+      renderWithSpeakers([
+        activity('t1', { kind: 'tool_call', source: 'native-hook', title: 'Edit', toolName: 'Edit', createdAt: 0 })
+      ])
+    )
+    expect(log).toContain('log-row')
+    expect(log).not.toContain('data-speaker-role')
+    expect(log).not.toContain('conversation-avatar')
   })
 })
 
@@ -206,9 +307,13 @@ describe('ActivityView', () => {
       })
     ])
 
-    // The turn lands in the conversation register, not the machine Row.
-    expect(markup).toContain('log-turn log-turn--user_message')
+    // The turn lands in the conversation register, not the machine Row. The register is selected by
+    // SPEAKER, not by kind — `data-speaker-role` is what the identity verdict puts on the element.
+    expect(markup).toContain('class="log-turn" data-speaker-role="human"')
     expect(markup).not.toContain('log-row log-row--user_message')
+    // kind 不再驱动对话体的形状：留下这条，是因为回到 `log-turn--user_message` 就等于把「谁说的」
+    // 重新压回二值，而 A2A 落地后第三个身份无处可去。
+    expect(markup).not.toContain('log-turn--user_message')
     // The words are the substance; the caption is the human speaker, not the generic machine title.
     expect(markup).toContain('log-turn__body')
     expect(markup).toContain('Make the adapter observable.')
@@ -238,8 +343,9 @@ describe('ActivityView', () => {
       })
     ])
 
-    // The reply is a turn, on screen, in full — never behind a default-closed disclosure.
-    expect(markup).toContain('log-turn log-turn--assistant_message')
+    // The reply is a turn, on screen, in full — never behind a default-closed disclosure. Identity,
+    // not kind, puts it in the conversation register.
+    expect(markup).toContain('class="log-turn" data-speaker-role="agent"')
     expect(markup).toContain('The runtime now emits typed session events from one owner.')
     expect(markup).toContain('Assistant')
     // The lone tool_call renders as a machine row; its argv stays folded.
@@ -276,7 +382,7 @@ describe('ActivityView', () => {
     ])
 
     // The steer renders as a turn with its words on screen — not a machine row, never behind a fold.
-    expect(markup).toContain('log-turn log-turn--user_message')
+    expect(markup).toContain('class="log-turn" data-speaker-role="human"')
     expect(markup).toContain('Actually, focus on the parser instead.')
     expect(markup).toContain('You')
     expect(markup).not.toContain('log-row log-row--user_message')
@@ -285,7 +391,7 @@ describe('ActivityView', () => {
     // to "2 steps", and the steer sits between them rather than being swept into either.
     const log = markup.slice(markup.indexOf('activity-log'))
     expect(log).toContain('2 steps')
-    const turnAt = log.indexOf('log-turn--user_message')
+    const turnAt = log.indexOf('data-speaker-role="human"')
     const firstFold = log.indexOf('2 steps')
     const lastFold = log.lastIndexOf('2 steps')
     expect(firstFold).toBeGreaterThanOrEqual(0)
@@ -310,7 +416,9 @@ describe('ActivityView', () => {
       })
     ])
 
-    expect(markup).not.toContain('log-turn--user_message')
+    // 判据是「没有任何说话人落到对话寄存器」，不是「没有某个 kind 的类名」——后者在形状改成身份
+    // 驱动之后会恒为真，也就是一条守不住任何东西的断言。
+    expect(markup).not.toContain('data-speaker-role')
     expect(markup).not.toContain('log-turn__body')
     // The machine steps that did happen are still there — the trace is not empty, it simply has no turn.
     expect(markup).toContain('2 steps')

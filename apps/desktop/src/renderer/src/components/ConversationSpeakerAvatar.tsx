@@ -65,7 +65,7 @@ export function ConversationSpeakerAvatar({
   name: string
   /** 这个 agent 怎么画；由调用方用 `speaker.id` 去 store 查得。human 不需要。 */
   providerId?: AgentProviderId
-  /** 轴上的边长。16 与 20 是两条轴的实际取值，两者都要可用。 */
+  /** 边长。轴上取 16、对话正文取 20，两者都有生产调用者，所以两条尺寸路径都要可用。 */
   size?: number
 }) {
   // glyph 比圆片内缩，留出圆片的边距；下限钳到 8px，避免极小尺寸下 glyph 归零。
