@@ -1,14 +1,14 @@
 {
   "schema": "agentmux.t001-desktop-resources.baseline.v1",
   "sourceReceiptSchema": "agentmux.t001-desktop-resources.v2",
-  "measuredAt": "2026-08-30T19:57:11.931Z",
+  "measuredAt": "2026-08-30T20:12:01.652Z",
   "platform": "darwin-arm64",
   "node": "v24.18.1",
   "electron": "43.3.0",
   "identity": {
     "agentmux": {
-      "sourceCommit": "7deb81d81f7a429a729d64a5405b862fdd9f1a79",
-      "endCommit": "7deb81d81f7a429a729d64a5405b862fdd9f1a79",
+      "sourceCommit": "c32a171cd9e1bf8ddb3d039ba9fccec484cae8ef",
+      "endCommit": "c32a171cd9e1bf8ddb3d039ba9fccec484cae8ef",
       "trackedDiffClean": true,
       "worktreeStable": true,
       "sourceCommitStable": true,
@@ -50,7 +50,7 @@
       "id": "idle",
       "label": "idle",
       "surface": "idle",
-      "totalWorkingSetKiB": 575600,
+      "totalWorkingSetKiB": 546260,
       "owners": {
         "browserWebContents": 0,
         "fileWatchers": 0,
@@ -83,10 +83,10 @@
         "fileWatchers": 0,
         "browserWebContents": 0,
         "processWorkingSetKiB": {
-          "main": 238845,
-          "renderer": 175667,
-          "gpu": 115712,
-          "utility": 45376,
+          "main": 219546,
+          "renderer": 169130,
+          "gpu": 112522,
+          "utility": 45062,
           "other": 0
         },
         "note": "Renderer/Main surface owner counts and process working-set observations; Browser helpers/shared pages are not assigned to Terminal or Monaco."
@@ -94,34 +94,34 @@
       "rendererMemory": {
         "supported": true,
         "gcAvailable": true,
-        "heapUsedBeforeKiB": 14844,
-        "heapUsedAfterGcKiB": 14844,
-        "heapTotalKiB": 18848,
+        "heapUsedBeforeKiB": 12402,
+        "heapUsedAfterGcKiB": 12402,
+        "heapTotalKiB": 16699,
         "note": "heapUsedAfterGc is an observation; RSS/working-set may retain allocator pages."
       },
       "processes": [
         {
-          "pid": 50581,
+          "pid": 20817,
           "type": "Browser",
-          "workingSetKiB": 238845,
+          "workingSetKiB": 219546,
           "privateKiB": 0
         },
         {
-          "pid": 51110,
+          "pid": 23103,
           "type": "GPU",
-          "workingSetKiB": 115712,
+          "workingSetKiB": 112522,
           "privateKiB": 0
         },
         {
-          "pid": 51111,
+          "pid": 23104,
           "type": "Utility",
-          "workingSetKiB": 45376,
+          "workingSetKiB": 45062,
           "privateKiB": 0
         },
         {
-          "pid": 51478,
+          "pid": 23771,
           "type": "Tab",
-          "workingSetKiB": 175667,
+          "workingSetKiB": 169130,
           "privateKiB": 0
         }
       ]
@@ -130,7 +130,7 @@
       "id": "single-hidden-workspace",
       "label": "single-hidden-workspace",
       "surface": "workspace",
-      "totalWorkingSetKiB": 576557,
+      "totalWorkingSetKiB": 498941,
       "owners": {
         "browserWebContents": 0,
         "fileWatchers": 0,
@@ -163,10 +163,10 @@
         "fileWatchers": 0,
         "browserWebContents": 0,
         "processWorkingSetKiB": {
-          "main": 228314,
-          "renderer": 186944,
-          "gpu": 115923,
-          "utility": 45376,
+          "main": 176371,
+          "renderer": 172093,
+          "gpu": 113053,
+          "utility": 37424,
           "other": 0
         },
         "note": "Renderer/Main surface owner counts and process working-set observations; Browser helpers/shared pages are not assigned to Terminal or Monaco."
@@ -174,34 +174,34 @@
       "rendererMemory": {
         "supported": true,
         "gcAvailable": true,
-        "heapUsedBeforeKiB": 14844,
-        "heapUsedAfterGcKiB": 14844,
-        "heapTotalKiB": 18848,
+        "heapUsedBeforeKiB": 12402,
+        "heapUsedAfterGcKiB": 12402,
+        "heapTotalKiB": 16699,
         "note": "heapUsedAfterGc is an observation; RSS/working-set may retain allocator pages."
       },
       "processes": [
         {
-          "pid": 50581,
+          "pid": 20817,
           "type": "Browser",
-          "workingSetKiB": 228314,
+          "workingSetKiB": 176371,
           "privateKiB": 0
         },
         {
-          "pid": 51110,
+          "pid": 23103,
           "type": "GPU",
-          "workingSetKiB": 115923,
+          "workingSetKiB": 113053,
           "privateKiB": 0
         },
         {
-          "pid": 51111,
+          "pid": 23104,
           "type": "Utility",
-          "workingSetKiB": 45376,
+          "workingSetKiB": 37424,
           "privateKiB": 0
         },
         {
-          "pid": 51478,
+          "pid": 23771,
           "type": "Tab",
-          "workingSetKiB": 186944,
+          "workingSetKiB": 172093,
           "privateKiB": 0
         }
       ]
@@ -210,7 +210,7 @@
       "id": "multiple-hidden-workspaces-tabs",
       "label": "multiple-hidden-workspaces-tabs",
       "surface": "workspace",
-      "totalWorkingSetKiB": 596883,
+      "totalWorkingSetKiB": 517021,
       "owners": {
         "browserWebContents": 0,
         "fileWatchers": 0,
@@ -243,10 +243,10 @@
         "fileWatchers": 0,
         "browserWebContents": 0,
         "processWorkingSetKiB": {
-          "main": 231779,
-          "renderer": 201440,
-          "gpu": 118240,
-          "utility": 45424,
+          "main": 181018,
+          "renderer": 186189,
+          "gpu": 112390,
+          "utility": 37424,
           "other": 0
         },
         "note": "Renderer/Main surface owner counts and process working-set observations; Browser helpers/shared pages are not assigned to Terminal or Monaco."
@@ -254,34 +254,34 @@
       "rendererMemory": {
         "supported": true,
         "gcAvailable": true,
-        "heapUsedBeforeKiB": 14844,
-        "heapUsedAfterGcKiB": 14844,
-        "heapTotalKiB": 18848,
+        "heapUsedBeforeKiB": 12402,
+        "heapUsedAfterGcKiB": 12402,
+        "heapTotalKiB": 16699,
         "note": "heapUsedAfterGc is an observation; RSS/working-set may retain allocator pages."
       },
       "processes": [
         {
-          "pid": 50581,
+          "pid": 20817,
           "type": "Browser",
-          "workingSetKiB": 231779,
+          "workingSetKiB": 181018,
           "privateKiB": 0
         },
         {
-          "pid": 51110,
+          "pid": 23103,
           "type": "GPU",
-          "workingSetKiB": 118240,
+          "workingSetKiB": 112390,
           "privateKiB": 0
         },
         {
-          "pid": 51111,
+          "pid": 23104,
           "type": "Utility",
-          "workingSetKiB": 45424,
+          "workingSetKiB": 37424,
           "privateKiB": 0
         },
         {
-          "pid": 51478,
+          "pid": 23771,
           "type": "Tab",
-          "workingSetKiB": 201440,
+          "workingSetKiB": 186189,
           "privateKiB": 0
         }
       ]
@@ -290,7 +290,7 @@
       "id": "terminal",
       "label": "terminal",
       "surface": "terminal",
-      "totalWorkingSetKiB": 595985,
+      "totalWorkingSetKiB": 510809,
       "owners": {
         "browserWebContents": 0,
         "fileWatchers": 0,
@@ -323,10 +323,10 @@
         "fileWatchers": 0,
         "browserWebContents": 0,
         "processWorkingSetKiB": {
-          "main": 230410,
-          "renderer": 205101,
-          "gpu": 115130,
-          "utility": 45344,
+          "main": 184976,
+          "renderer": 183526,
+          "gpu": 104883,
+          "utility": 37424,
           "other": 0
         },
         "note": "Renderer/Main surface owner counts and process working-set observations; Browser helpers/shared pages are not assigned to Terminal or Monaco."
@@ -334,34 +334,34 @@
       "rendererMemory": {
         "supported": true,
         "gcAvailable": true,
-        "heapUsedBeforeKiB": 14844,
-        "heapUsedAfterGcKiB": 14844,
-        "heapTotalKiB": 18848,
+        "heapUsedBeforeKiB": 12402,
+        "heapUsedAfterGcKiB": 12402,
+        "heapTotalKiB": 16699,
         "note": "heapUsedAfterGc is an observation; RSS/working-set may retain allocator pages."
       },
       "processes": [
         {
-          "pid": 50581,
+          "pid": 20817,
           "type": "Browser",
-          "workingSetKiB": 230410,
+          "workingSetKiB": 184976,
           "privateKiB": 0
         },
         {
-          "pid": 51110,
+          "pid": 23103,
           "type": "GPU",
-          "workingSetKiB": 115130,
+          "workingSetKiB": 104883,
           "privateKiB": 0
         },
         {
-          "pid": 51111,
+          "pid": 23104,
           "type": "Utility",
-          "workingSetKiB": 45344,
+          "workingSetKiB": 37424,
           "privateKiB": 0
         },
         {
-          "pid": 51478,
+          "pid": 23771,
           "type": "Tab",
-          "workingSetKiB": 205101,
+          "workingSetKiB": 183526,
           "privateKiB": 0
         }
       ]
@@ -370,7 +370,7 @@
       "id": "monaco",
       "label": "monaco",
       "surface": "monaco",
-      "totalWorkingSetKiB": 868170,
+      "totalWorkingSetKiB": 759133,
       "owners": {
         "browserWebContents": 0,
         "fileWatchers": 1,
@@ -403,10 +403,10 @@
         "fileWatchers": 1,
         "browserWebContents": 0,
         "processWorkingSetKiB": {
-          "main": 233456,
-          "renderer": 469901,
-          "gpu": 119261,
-          "utility": 45552,
+          "main": 186138,
+          "renderer": 429034,
+          "gpu": 105654,
+          "utility": 38307,
           "other": 0
         },
         "note": "Renderer/Main surface owner counts and process working-set observations; Browser helpers/shared pages are not assigned to Terminal or Monaco."
@@ -414,34 +414,34 @@
       "rendererMemory": {
         "supported": true,
         "gcAvailable": true,
-        "heapUsedBeforeKiB": 14844,
-        "heapUsedAfterGcKiB": 14844,
-        "heapTotalKiB": 18848,
+        "heapUsedBeforeKiB": 12402,
+        "heapUsedAfterGcKiB": 12402,
+        "heapTotalKiB": 16699,
         "note": "heapUsedAfterGc is an observation; RSS/working-set may retain allocator pages."
       },
       "processes": [
         {
-          "pid": 50581,
+          "pid": 20817,
           "type": "Browser",
-          "workingSetKiB": 233456,
+          "workingSetKiB": 186138,
           "privateKiB": 0
         },
         {
-          "pid": 51110,
+          "pid": 23103,
           "type": "GPU",
-          "workingSetKiB": 119261,
+          "workingSetKiB": 105654,
           "privateKiB": 0
         },
         {
-          "pid": 51111,
+          "pid": 23104,
           "type": "Utility",
-          "workingSetKiB": 45552,
+          "workingSetKiB": 38307,
           "privateKiB": 0
         },
         {
-          "pid": 51478,
+          "pid": 23771,
           "type": "Tab",
-          "workingSetKiB": 469901,
+          "workingSetKiB": 429034,
           "privateKiB": 0
         }
       ]
@@ -450,7 +450,7 @@
       "id": "browser",
       "label": "browser",
       "surface": "browser",
-      "totalWorkingSetKiB": 1061767,
+      "totalWorkingSetKiB": 693707,
       "owners": {
         "browserWebContents": 1,
         "fileWatchers": 0,
@@ -483,10 +483,10 @@
         "fileWatchers": 0,
         "browserWebContents": 1,
         "processWorkingSetKiB": {
-          "main": 299741,
-          "renderer": 596810,
-          "gpu": 119136,
-          "utility": 46080,
+          "main": 222179,
+          "renderer": 336533,
+          "gpu": 95629,
+          "utility": 39366,
           "other": 0
         },
         "note": "Renderer/Main surface owner counts and process working-set observations; Browser helpers/shared pages are not assigned to Terminal or Monaco."
@@ -494,40 +494,40 @@
       "rendererMemory": {
         "supported": true,
         "gcAvailable": true,
-        "heapUsedBeforeKiB": 14844,
-        "heapUsedAfterGcKiB": 14844,
-        "heapTotalKiB": 18848,
+        "heapUsedBeforeKiB": 12402,
+        "heapUsedAfterGcKiB": 12402,
+        "heapTotalKiB": 16699,
         "note": "heapUsedAfterGc is an observation; RSS/working-set may retain allocator pages."
       },
       "processes": [
         {
-          "pid": 50581,
+          "pid": 20817,
           "type": "Browser",
-          "workingSetKiB": 299741,
+          "workingSetKiB": 222179,
           "privateKiB": 0
         },
         {
-          "pid": 51110,
+          "pid": 23103,
           "type": "GPU",
-          "workingSetKiB": 119136,
+          "workingSetKiB": 95629,
           "privateKiB": 0
         },
         {
-          "pid": 51111,
+          "pid": 23104,
           "type": "Utility",
-          "workingSetKiB": 46080,
+          "workingSetKiB": 39366,
           "privateKiB": 0
         },
         {
-          "pid": 51478,
+          "pid": 23771,
           "type": "Tab",
-          "workingSetKiB": 515616,
+          "workingSetKiB": 260397,
           "privateKiB": 0
         },
         {
-          "pid": 62409,
+          "pid": 36861,
           "type": "Tab",
-          "workingSetKiB": 81194,
+          "workingSetKiB": 76136,
           "privateKiB": 0
         }
       ]
@@ -536,7 +536,7 @@
       "id": "terminalBaseline",
       "label": "terminal-baseline",
       "surface": "terminal",
-      "totalWorkingSetKiB": 595533,
+      "totalWorkingSetKiB": 503411,
       "owners": {
         "browserWebContents": 0,
         "fileWatchers": 0,
@@ -569,10 +569,10 @@
         "fileWatchers": 0,
         "browserWebContents": 0,
         "processWorkingSetKiB": {
-          "main": 229373,
-          "renderer": 202947,
-          "gpu": 117869,
-          "utility": 45344,
+          "main": 179488,
+          "renderer": 182189,
+          "gpu": 104310,
+          "utility": 37424,
           "other": 0
         },
         "note": "Renderer/Main surface owner counts and process working-set observations; Browser helpers/shared pages are not assigned to Terminal or Monaco."
@@ -580,34 +580,34 @@
       "rendererMemory": {
         "supported": true,
         "gcAvailable": true,
-        "heapUsedBeforeKiB": 14844,
-        "heapUsedAfterGcKiB": 14844,
-        "heapTotalKiB": 18848,
+        "heapUsedBeforeKiB": 12402,
+        "heapUsedAfterGcKiB": 12402,
+        "heapTotalKiB": 16699,
         "note": "heapUsedAfterGc is an observation; RSS/working-set may retain allocator pages."
       },
       "processes": [
         {
-          "pid": 50581,
+          "pid": 20817,
           "type": "Browser",
-          "workingSetKiB": 229373,
+          "workingSetKiB": 179488,
           "privateKiB": 0
         },
         {
-          "pid": 51110,
+          "pid": 23103,
           "type": "GPU",
-          "workingSetKiB": 117869,
+          "workingSetKiB": 104310,
           "privateKiB": 0
         },
         {
-          "pid": 51111,
+          "pid": 23104,
           "type": "Utility",
-          "workingSetKiB": 45344,
+          "workingSetKiB": 37424,
           "privateKiB": 0
         },
         {
-          "pid": 51478,
+          "pid": 23771,
           "type": "Tab",
-          "workingSetKiB": 202947,
+          "workingSetKiB": 182189,
           "privateKiB": 0
         }
       ]
@@ -616,7 +616,7 @@
       "id": "editor",
       "label": "monaco",
       "surface": "monaco",
-      "totalWorkingSetKiB": 868170,
+      "totalWorkingSetKiB": 759133,
       "owners": {
         "browserWebContents": 0,
         "fileWatchers": 1,
@@ -649,10 +649,10 @@
         "fileWatchers": 1,
         "browserWebContents": 0,
         "processWorkingSetKiB": {
-          "main": 233456,
-          "renderer": 469901,
-          "gpu": 119261,
-          "utility": 45552,
+          "main": 186138,
+          "renderer": 429034,
+          "gpu": 105654,
+          "utility": 38307,
           "other": 0
         },
         "note": "Renderer/Main surface owner counts and process working-set observations; Browser helpers/shared pages are not assigned to Terminal or Monaco."
@@ -660,34 +660,34 @@
       "rendererMemory": {
         "supported": true,
         "gcAvailable": true,
-        "heapUsedBeforeKiB": 14844,
-        "heapUsedAfterGcKiB": 14844,
-        "heapTotalKiB": 18848,
+        "heapUsedBeforeKiB": 12402,
+        "heapUsedAfterGcKiB": 12402,
+        "heapTotalKiB": 16699,
         "note": "heapUsedAfterGc is an observation; RSS/working-set may retain allocator pages."
       },
       "processes": [
         {
-          "pid": 50581,
+          "pid": 20817,
           "type": "Browser",
-          "workingSetKiB": 233456,
+          "workingSetKiB": 186138,
           "privateKiB": 0
         },
         {
-          "pid": 51110,
+          "pid": 23103,
           "type": "GPU",
-          "workingSetKiB": 119261,
+          "workingSetKiB": 105654,
           "privateKiB": 0
         },
         {
-          "pid": 51111,
+          "pid": 23104,
           "type": "Utility",
-          "workingSetKiB": 45552,
+          "workingSetKiB": 38307,
           "privateKiB": 0
         },
         {
-          "pid": 51478,
+          "pid": 23771,
           "type": "Tab",
-          "workingSetKiB": 469901,
+          "workingSetKiB": 429034,
           "privateKiB": 0
         }
       ]
@@ -696,7 +696,7 @@
       "id": "released",
       "label": "released-panes",
       "surface": "release",
-      "totalWorkingSetKiB": 897475,
+      "totalWorkingSetKiB": 762256,
       "owners": {
         "browserWebContents": 0,
         "fileWatchers": 0,
@@ -729,10 +729,10 @@
         "fileWatchers": 0,
         "browserWebContents": 0,
         "processWorkingSetKiB": {
-          "main": 253942,
-          "renderer": 478429,
-          "gpu": 119536,
-          "utility": 45568,
+          "main": 208307,
+          "renderer": 413088,
+          "gpu": 102586,
+          "utility": 38275,
           "other": 0
         },
         "note": "Renderer/Main surface owner counts and process working-set observations; Browser helpers/shared pages are not assigned to Terminal or Monaco."
@@ -740,34 +740,34 @@
       "rendererMemory": {
         "supported": true,
         "gcAvailable": true,
-        "heapUsedBeforeKiB": 14844,
-        "heapUsedAfterGcKiB": 14844,
-        "heapTotalKiB": 18848,
+        "heapUsedBeforeKiB": 12402,
+        "heapUsedAfterGcKiB": 12402,
+        "heapTotalKiB": 16699,
         "note": "heapUsedAfterGc is an observation; RSS/working-set may retain allocator pages."
       },
       "processes": [
         {
-          "pid": 50581,
+          "pid": 20817,
           "type": "Browser",
-          "workingSetKiB": 253942,
+          "workingSetKiB": 208307,
           "privateKiB": 0
         },
         {
-          "pid": 51110,
+          "pid": 23103,
           "type": "GPU",
-          "workingSetKiB": 119536,
+          "workingSetKiB": 102586,
           "privateKiB": 0
         },
         {
-          "pid": 51111,
+          "pid": 23104,
           "type": "Utility",
-          "workingSetKiB": 45568,
+          "workingSetKiB": 38275,
           "privateKiB": 0
         },
         {
-          "pid": 51478,
+          "pid": 23771,
           "type": "Tab",
-          "workingSetKiB": 478429,
+          "workingSetKiB": 413088,
           "privateKiB": 0
         }
       ]
@@ -776,7 +776,7 @@
       "id": "browserReleased",
       "label": "browser-released",
       "surface": "browser",
-      "totalWorkingSetKiB": 979686,
+      "totalWorkingSetKiB": 672461,
       "owners": {
         "browserWebContents": 0,
         "fileWatchers": 0,
@@ -809,10 +809,10 @@
         "fileWatchers": 0,
         "browserWebContents": 0,
         "processWorkingSetKiB": {
-          "main": 299488,
-          "renderer": 515056,
-          "gpu": 119062,
-          "utility": 46080,
+          "main": 217117,
+          "renderer": 318966,
+          "gpu": 97018,
+          "utility": 39360,
           "other": 0
         },
         "note": "Renderer/Main surface owner counts and process working-set observations; Browser helpers/shared pages are not assigned to Terminal or Monaco."
@@ -820,34 +820,34 @@
       "rendererMemory": {
         "supported": true,
         "gcAvailable": true,
-        "heapUsedBeforeKiB": 14844,
-        "heapUsedAfterGcKiB": 14844,
-        "heapTotalKiB": 18848,
+        "heapUsedBeforeKiB": 12402,
+        "heapUsedAfterGcKiB": 12402,
+        "heapTotalKiB": 16699,
         "note": "heapUsedAfterGc is an observation; RSS/working-set may retain allocator pages."
       },
       "processes": [
         {
-          "pid": 50581,
+          "pid": 20817,
           "type": "Browser",
-          "workingSetKiB": 299488,
+          "workingSetKiB": 217117,
           "privateKiB": 0
         },
         {
-          "pid": 51110,
+          "pid": 23103,
           "type": "GPU",
-          "workingSetKiB": 119062,
+          "workingSetKiB": 97018,
           "privateKiB": 0
         },
         {
-          "pid": 51111,
+          "pid": 23104,
           "type": "Utility",
-          "workingSetKiB": 46080,
+          "workingSetKiB": 39360,
           "privateKiB": 0
         },
         {
-          "pid": 51478,
+          "pid": 23771,
           "type": "Tab",
-          "workingSetKiB": 515056,
+          "workingSetKiB": 318966,
           "privateKiB": 0
         }
       ]
@@ -887,63 +887,63 @@
       "released-panes-7"
     ],
     "totalWorkingSetKiB": [
-      897475,
-      933412,
-      948048,
-      973764,
-      993852,
-      973891,
-      977961
+      762256,
+      806791,
+      764576,
+      791386,
+      805891,
+      761056,
+      596957
     ],
     "ownerConvergence": "all seven samples plus browser-released retained terminalViews=3, monacoEditors=0, monacoModels=0, documents=0, fileWatchers=0, browserWebContents=0, runtimeSubscriptions=4, sessionAttachmentOwners=3, sessionAttachmentLeases=3"
   },
   "deltas": {
-    "terminalWorkingSetKiB": 452,
-    "terminalWorkingSetFromIdleKiB": 20385,
-    "editorWorkingSetKiB": 272637,
-    "editorWorkingSetFromIdleKiB": 292570,
-    "browserWorkingSetKiB": 164292,
-    "browserReleasedWorkingSetKiB": 82211,
-    "maxReleasedWorkingSetKiB": 993852,
-    "maxReleasedIncrementKiB": 96377,
-    "totalReleaseDriftKiB": 96377,
-    "warmupReleaseDriftKiB": 35937,
-    "releaseDriftKiB": 45804
+    "terminalWorkingSetKiB": 7398,
+    "terminalWorkingSetFromIdleKiB": -35451,
+    "editorWorkingSetKiB": 255722,
+    "editorWorkingSetFromIdleKiB": 212873,
+    "browserWorkingSetKiB": -68549,
+    "browserReleasedWorkingSetKiB": -89795,
+    "maxReleasedWorkingSetKiB": 806791,
+    "maxReleasedIncrementKiB": 44535,
+    "totalReleaseDriftKiB": 209834,
+    "warmupReleaseDriftKiB": 44535,
+    "releaseDriftKiB": 41315
   },
   "diagnostics": {
     "workingSet": {
       "terminalIncrement": {
-        "actualKiB": 452,
+        "actualKiB": 7398,
         "limitKiB": 262144,
         "exceeded": false
       },
       "editorIncrement": {
-        "actualKiB": 272637,
+        "actualKiB": 255722,
         "limitKiB": 524288,
         "exceeded": false
       },
       "browserIncrement": {
-        "actualKiB": 164292,
+        "actualKiB": -68549,
         "limitKiB": 262144,
         "exceeded": false
       },
       "browserReleasedIncrement": {
-        "actualKiB": 82211,
+        "actualKiB": -89795,
         "limitKiB": 262144,
         "exceeded": false
       },
       "maxReleasedIncrement": {
-        "actualKiB": 96377,
+        "actualKiB": 44535,
         "limitKiB": 589824,
         "exceeded": false
       },
       "maxReleasedTotal": {
-        "actualKiB": 993852,
+        "actualKiB": 806791,
         "limitKiB": 1048576,
         "exceeded": false
       },
       "releaseDrift": {
-        "actualKiB": 45804,
+        "actualKiB": 41315,
         "limitKiB": 131072,
         "exceeded": false
       }
