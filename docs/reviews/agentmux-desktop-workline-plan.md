@@ -1,12 +1,50 @@
 # Task Plan Review — AgentMux Desktop Workline Surfaces
 
-日期：2026-08-30
-Plan revision：3
-设计 SSOT：`docs/design/agentmux-desktop-interaction.md`（《Board 与 Settings》《状态栏》《显示名与身份》三节，通知相关约束在《顶部与项目栏》）
+日期：2026-08-31（最近一次修订）
+Plan revision：5
+设计 SSOT：`docs/design/agentmux-desktop-interaction.md`（《Board 与 Settings》《状态栏》《显示名与身份》三节，通知与项目行相关约束在《顶部与项目栏》）；
+视觉 SSOT：`docs/design/agentmux-surface-density.md`（密度预算的 Project Rail Row / Scratch Topic Row 两行，与《控件语言》《样式表的组织》两段）
 
 ## 结论
 
-**approved.** 八个 task 各自可独立验收，依赖关系与用户确认的落地顺序一致。
+**approved.** 十个 task 各自可独立验收，依赖关系与用户确认的落地顺序一致。
+
+## Revision 5：新增 T-009、T-010（Project Rail 单行三信号 / 同族列表行共享表现层）
+
+本轮用户看最新截图后提了五条。逐条查过代码后，其中**两条的真因与用户的猜测不同**，据此
+拆成两个 task 而不是五个——它们各自是一个能独立验收的闭环，按五条切会把同一份改动切开。
+
+**T-009（用户第 1、3 条）——"Agent 数字不准"的真因不是算错，是算的另一件事。**
+`WorkspaceSidebar.tsx:142-144` 显示的是 `project.workspaces.length`（worktree 数），
+而密度合同《身份归属》早就写明这行答的是"在跑几个 Agent"。**代码与设计文档已经漂移**，
+所以修法是让代码回到文档，不是调样式。同一行还有两处一列全同的内容：每行都写 `This Mac`
+（本机 host），以及计数恒为 `1` 的徽章——按《控件语言》"一列全同的图标不是信息"同一条理由，
+两者都该消失。用户第 3 条（Scratch 前的 `Sparkles` 换成项目 icon）落在同一个组件的同一行
+结构上，与前者同批改动，故合并进 T-009；经与用户确认，用的是已存在的 `BrandIcon`
+（`resources/icon-128.png`），**不新造 per-project 图标体系**。
+
+**T-010（用户第 2、4、5 条）——"图标没对齐"的真因是隐式 auto 网格列。**
+`dock.css` 里 `.workspace-topic-entry > span` 只有一个隐式 auto 列，该列按内容宽度定尺，
+于是 `.workspace-topic-agents { margin-left: auto }` 靠的是**内容盒右缘**而非行右缘。
+截图逐行量过：头像右缘恰好按描述文字长度分成三档。修法是把那一列显式写成 `minmax(0, 1fr)`。
+用户第 5 条要求 branch bar 与 topic bar 复用——**确认只抽表现层**：两者的选中真相模型确实
+不同（Branch 换 `activeWorkspaceId`，worktree 自成一个 workspace；Topic 是对同一份 Scratch
+layout 做投影，见 `scratch-topic-layout.ts:42`），不得为了"统一"把其中一侧改成另一侧。
+第 4 条（Topics 标题与计数排版）正是共享容器 header 的一部分，故与第 5 条同属 T-010。
+
+### 需要盯住的风险
+
+- **T-010 最大的风险是竖切未闭合**：抽出共享组件却只接了一侧，或两侧各自保留一份"长得像"
+  的写法。判据不是"测试绿"，是**两个 bar 上看起来相同的东西必须真的是同一段代码**——
+  沿用本 Feature 全局的零调用者检查，并额外要求断言两侧渲染出同一批共享类名。
+- **不得把 Topic 的头像上限做成无限**。当前 Topic 侧无上限（直接 map 全量），branch 侧截断
+  到 4 并给 `+N`。共享后统一取 branch 的做法：叠压省宽度但不是无限的。
+- **`dock.css` 已 393 行、上限 400**，三项改动都落在它身上，必须按表面再拆一刀
+  （新建 `selector.css`）。新样式文件必须同时进 `index.css` 的 `@import` 序列与
+  `stylesheet-organisation.test.ts` 的精确顺序数组——只做前者不会红，只做后者会直接红。
+- **既有测试里有钉死 CSS 字面量的写法**（`surface-tool-dock.test.ts` 断言了一整条
+  `.workspace-topic-entry { ... }` 字符串）。修对齐必然改到它；改的时候要把断言从"字面量
+  相等"改成**断言意图**，否则下一次调格子它还会假红。
 
 ## Revision 3：新增 T-008（Project Rail 视觉语义与简化）
 

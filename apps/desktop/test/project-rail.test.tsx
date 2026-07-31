@@ -104,6 +104,20 @@ function renderRail(): string {
   return renderToStaticMarkup(createElement(WorkspaceSidebar, { onOpenSettings: vi.fn() }))
 }
 
+/** 取出某一行的完整标记。按 aria-label 定位，因为那是这一行对辅助技术自称的名字。 */
+function rowFor(markup: string, name: string): string {
+  const rows = [...markup.matchAll(/<button[^>]*class="[^"]*project-rail-row[^"]*"[\s\S]*?<\/button>/g)]
+    .map((match) => match[0])
+    .filter((row) => new RegExp(`aria-label="${name}(?:[^"]*)?"`).test(row))
+  expect(`${name}: ${rows.length} 行`).toBe(`${name}: 1 行`)
+  return rows[0]!
+}
+
+/** 这一行徽章上的数字，没有徽章时为 null——「零不显示」与「显示 0」是两件事。 */
+function badgeOf(row: string): string | null {
+  return row.match(/class="project-rail-row__count"[^>]*>([^<]*)</)?.[1] ?? null
+}
+
 afterEach(() => {
   fixture.state.config = structuredClone(config)
   fixture.state.sessions = []
@@ -173,6 +187,91 @@ describe('Project Rail selection and running signals', () => {
     expect(regularRows).toHaveLength(3)
     expect(regularRows.every((row) => !row.includes('project-rail-row__icon'))).toBe(true)
     expect(markup).toContain('scratch-workspace-row__icon')
+  })
+
+  it('counts running Agents in the badge, not worktrees', () => {
+    // 这一条守的是**代码与设计文档的漂移**，不是样式：徽章此前显示 project.workspaces.length
+    // （worktree 数），而密度合同《身份归属》写明这行答的是"在跑几个 Agent"。用户报"数字不准"，
+    // 真因是它算的压根是另一件事——一个 3 worktree、0 Agent 的项目会显示 3。
+    fixture.state.config = structuredClone(config)
+    fixture.state.config!.workspaces.push(
+      // 同一个项目的两个 worktree：归属靠 repoPath 相同，不是路径前缀。
+      { id: 'project-a-wt1', name: 'x', hostId: 'local', path: '/alpha/.worktrees/x', repoPath: '/alpha', kind: 'worktree', branch: 'x' },
+      { id: 'project-a-wt2', name: 'y', hostId: 'local', path: '/alpha/.worktrees/y', repoPath: '/alpha', kind: 'worktree', branch: 'y' }
+    )
+    fixture.state.sessions = [
+      session('agent-a1', '/alpha', 'working'),
+      session('agent-a2', '/alpha', 'running'),
+      session('agent-a3', '/alpha', 'done')
+    ]
+    const markup = renderRail()
+    const alpha = rowFor(markup, 'Alpha')
+    // 三个 worktree、两个在跑：徽章必须是 2。改回 workspaces.length 会让它变成 3。
+    expect(badgeOf(alpha)).toBe('2')
+    // 降级掉的事实不许消失，只许换位置。
+    expect(alpha).toContain('3 worktrees')
+    expect(alpha).toContain('3 sessions')
+  })
+
+  it('hides the badge entirely when nothing is running', () => {
+    // 一列全是同一个数字的徽章不携带信息，只在挤压标题宽度（《控件语言》同一条理由）。
+    // 截图里每一行都写着 1，因为每个项目恰好一个 worktree——那不是信息，是噪音。
+    fixture.state.config = structuredClone(config)
+    fixture.state.sessions = [session('agent-b', '/beta', 'working')]
+    const markup = renderRail()
+    expect(badgeOf(rowFor(markup, 'Beta'))).toBe('1')
+    expect(badgeOf(rowFor(markup, 'Alpha'))).toBeNull()
+    expect(badgeOf(rowFor(markup, 'Gamma'))).toBeNull()
+  })
+
+  it('keeps the attention badge lit even when no Agent is working', () => {
+    // 徽章同时是 attention 的载体（CSS 把 ?/! 挂在它的 ::after 上）。若"零在跑就不渲染"写成
+    // 无条件的，一个只有 waiting Agent 的项目会连同它的 needs-you 信号一起消失——那正是
+    // rowAttention 当初要补的那个洞。
+    fixture.state.config = structuredClone(config)
+    fixture.state.sessions = [session('agent-c', '/gamma', 'waiting')]
+    const gamma = rowFor(renderRail(), 'Gamma')
+    expect(gamma).toContain('data-attention="needs-you"')
+    expect(badgeOf(gamma)).toBe('1')
+  })
+
+  it('gives Host a slot only when it is not this machine', () => {
+    // `This Mac` 在每一行上逐字相同——它不区分任何东西，只占掉标题的宽度。
+    fixture.state.config = structuredClone(config)
+    fixture.state.config!.hosts.push({ id: 'studio', kind: 'ssh', label: 'Studio', address: 'studio' })
+    fixture.state.config!.workspaces.push(
+      { id: 'project-d', name: 'Delta', hostId: 'studio', path: '/delta', kind: 'folder' }
+    )
+    const markup = renderRail()
+    expect(markup).not.toContain('This Mac')
+    expect(rowFor(markup, 'Delta')).toContain('studio')
+    // 本机行连 <small> 都不该有——留一个空的次级槽仍然会撑出行高。
+    expect(rowFor(markup, 'Alpha')).not.toContain('<small')
+  })
+
+  it('keeps every row on a single line', () => {
+    // 「一行只占一行」是密度预算里写死的一条，而两行结构的印记是 identity 里的 flex-direction:
+    // column。这里连着断言 DOM 与 CSS 两侧：DOM 侧证明没有常驻次行内容，CSS 侧证明就算有
+    // 内容也不会被摞成两行。
+    fixture.state.config = structuredClone(config)
+    const markup = renderRail()
+    expect(rowFor(markup, 'Alpha')).not.toContain('Unscoped workspace')
+    expect(markup).not.toContain('Unscoped workspace')
+    const identity = readFileSync(
+      new URL('../src/renderer/src/styles/chrome.css', import.meta.url),
+      'utf8'
+    ).match(/\.project-rail-row__identity\s*\{([^}]*)\}/)?.[1] ?? ''
+    expect(identity.length).toBeGreaterThan(0)
+    expect(identity).not.toContain('flex-direction: column')
+  })
+
+  it('uses the app icon for Scratch rather than a decorative glyph', () => {
+    // 用户："Scratch 前面的图标有点难看, 是不是换成项目 icon, 现在项目 ICON 哪里都没有"。
+    // 用的是已存在的 BrandIcon（resources/icon-128.png），不新造 per-project 图标体系。
+    fixture.state.config = structuredClone(config)
+    const scratch = rowFor(renderRail(), 'Scratch')
+    expect(scratch).toContain('brand-icon')
+    expect(scratch).not.toContain('lucide-sparkles')
   })
 })
 

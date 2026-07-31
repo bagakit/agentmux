@@ -80,14 +80,16 @@
 }
 .sidebar__heading-actions { display: flex; align-items: center; gap:1px; }
 .project-list { min-height: 0; flex: 1; display: grid; align-content: start; gap:var(--sp-1); padding:0 var(--sp-4) var(--sp-4); overflow: auto; }
-.project-rail-row { width: 100%; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap:var(--sp-3); padding:var(--sp-3) var(--sp-4); border: 0; border-radius: var(--radius); color: var(--text-3); background: transparent; text-align: left; cursor: pointer; transition: background .12s ease, color .12s ease; }
-.scratch-workspace-row { grid-template-columns: 30px minmax(0, 1fr) auto; }
+.project-rail-row { width: 100%; min-width: 0; min-height: 28px; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap:var(--sp-3); padding:var(--sp-2) var(--sp-4); border: 0; border-radius: var(--radius); color: var(--text-3); background: transparent; text-align: left; cursor: pointer; transition: background .12s ease, color .12s ease; }
+.scratch-workspace-row { grid-template-columns: 24px minmax(0, 1fr) auto; }
 .project-rail-row:hover { color: var(--text-2); background: var(--surface-2); }
 .project-rail-row--active, .project-rail-row--active:hover { color: var(--text); background: var(--surface-2); }
-.project-rail-row__icon { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); color: var(--text-3); background: var(--surface-3); transition: background .12s ease, color .12s ease; }
-.project-rail-row__identity { min-width: 0; display: flex; flex-direction: column; gap:var(--sp-1); }
-.project-rail-row__identity strong { overflow: hidden; font-size: var(--fs-meta); font-weight: 620; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
-.project-rail-row__identity small { min-width: 0; display: flex; align-items: center; gap:var(--sp-1); overflow: hidden; font-size: var(--fs-micro); color: var(--text-3); text-overflow: ellipsis; white-space: nowrap; }
+.project-rail-row__icon { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); color: var(--text-3); background: var(--surface-3); transition: background .12s ease, color .12s ease; }
+/* 一行只占一行：标题与它的元信息同处一行，不为常驻元信息另起次行（密度预算 Project Rail Row）。
+   小字跟在标题之后而不是它下面，且只有真的有话说时才在场——本机 host 不占位。 */
+.project-rail-row__identity { min-width: 0; display: flex; align-items: baseline; gap:var(--sp-2); }
+.project-rail-row__identity strong { min-width: 0; overflow: hidden; font-size: var(--fs-meta); font-weight: 620; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
+.project-rail-row__identity small { flex: 0 1 auto; min-width: 0; display: flex; align-items: center; gap:var(--sp-1); overflow: hidden; font-size: var(--fs-micro); color: var(--text-3); text-overflow: ellipsis; white-space: nowrap; }
 .project-rail-row__activity { width: 14px; min-width: 14px; height: 18px; display: inline-flex; align-items: center; justify-content: center; color: var(--green); opacity: 0; }
 .project-rail-row[data-running='true'] .project-rail-row__activity { opacity: 1; }
 .project-rail-row__activity .status__dot { width: 6px; height: 6px; }
@@ -111,7 +113,9 @@
   box-shadow: var(--hl);
 }
 .project-rail-row[data-attention='error'] .project-rail-row__count::after { content: '!'; }
-.project-rail-row:not(.project-rail-row--active) .scratch-workspace-row__icon { color: var(--green-2); background: var(--surface-2); }
+/* 项目 icon 自带形状与颜色，不需要再给它一个 Surface 色块托底——那会读作"图标外面还有一个按钮"。
+   这也顺带让选中与否不再改变这枚图标的任何东西（T-008 的那条约束）。 */
+.scratch-workspace-row__icon { background: transparent; }
 .project-rail-row--active .scratch-workspace-row__meta { color: var(--text-2); }
 .project-rail-toolbar {
   min-height: 32px;
