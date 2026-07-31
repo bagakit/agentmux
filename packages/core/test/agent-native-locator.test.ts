@@ -59,6 +59,51 @@ describe('native resume locator contract', () => {
     }
   })
 
+  it('rejects a native provider locator whose providerId is not the Agent provider', () => {
+    // acceptance#3 「providerId/sessionId 不匹配」: a well-formed provider locator that names a
+    // different provider than the Agent must be refused, not silently persisted. Every other
+    // locator case here is codex↔codex, so this cross-field mismatch was never constructed.
+    // The message (not merely the shared code) pins THIS guard: deleting it lets the record
+    // normalize cleanly because no other guard inspects nativeHandle.providerId.
+    expect(() => normalizeStoredAgentSession(session({
+      kind: 'provider',
+      providerId: 'claude',
+      sessionId: 'native-1'
+    }))).toThrowError(expect.objectContaining({
+      code: 'INVALID_AGENT_SESSION_STORE',
+      message: 'Native session handle provider does not match the Agent.'
+    }))
+  })
+
+  it('rejects a hook receipt that does not identify its Agent Session', () => {
+    // acceptance#2 「Hook 后更新是原子且可重复的」+ objective「Provider hook 到达前后安全 round-trip」:
+    // the persisted hook receipt is the hook-after update, so it must name the same provider,
+    // Agent Session and Run as the record it rides on — otherwise a stale or foreign hook would
+    // corrupt the Session on reload. Each variant violates exactly one arm of the guard, and the
+    // message assertion pins this specific guard rather than the code shared across the family.
+    const base = {
+      id: 'receipt-locator',
+      providerId: 'codex',
+      agentSessionId: 'semantic-locator-test',
+      run: { runId: 'run-locator-test' },
+      eventName: 'PostToolUse',
+      observedAt: 1
+    }
+    for (const hookReceipt of [
+      { ...base, providerId: 'claude' },
+      { ...base, agentSessionId: 'other-session' },
+      { ...base, run: { runId: 'other-run' } }
+    ]) {
+      expect(() => normalizeStoredAgentSession({
+        ...session({ kind: 'provider', providerId: 'codex', sessionId: 'native-1' }),
+        hookReceipt
+      })).toThrowError(expect.objectContaining({
+        code: 'INVALID_AGENT_SESSION_STORE',
+        message: 'Hook receipt does not match the Agent Session.'
+      }))
+    }
+  })
+
   it('canonicalizes locator whitespace before persistence', () => {
     const normalized = normalizeStoredAgentSession(session({
       kind: 'provider',
