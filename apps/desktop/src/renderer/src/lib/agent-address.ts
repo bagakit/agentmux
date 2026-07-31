@@ -113,18 +113,22 @@ ${inspectCommand('tab', tabId)}`
 }
 
 /**
- * 交接入口解析出的最精确地址。
+ * 「给这个 Agent 发消息」这个入口解析出的最精确地址。
  *
- * 入口按意图命名（"给这个 Agent 发消息"），因此这里要替用户决定该给哪一层身份——用户想的是把这个
- * Agent 交出去，不是"我要 Region 还是 Session"。解析只有一条规则：**调用方知道是哪一格就给 Region
- * 地址，不知道就给 Session 地址**。
+ * **它与 Core 的 Handoff（交出所有权，`originAwaits: false`）没有任何关系**——这里产出的只是一段
+ * 可粘贴的地址文本，供人拿去发消息。曾经叫 `formatHandoffAddress`，那个名字会让人以为 Desktop 侧
+ * 已经有了所有权转移的入口，而实际上两个调用点的菜单标签都是 "Message this Agent"。
+ *
+ * 入口按意图命名，因此这里要替用户决定该给哪一层身份——用户想的是"把话送到这个 Agent"，不是
+ * "我要 Region 还是 Session"。解析只有一条规则：**调用方知道是哪一格就给 Region 地址，不知道就给
+ * Session 地址**。
  *
  * 判据是`调用方知不知道`，不是`有没有分屏`：歧义只在源头可见。Region 菜单的点击天然发生在某一格上，
  * 它知道是哪一格而接收方不知道，此时给 Region 才是把消歧做在源头——哪怕这张 View 眼下没分屏，下一秒
  * 分屏了这个地址依然指得准。Tab 菜单没有这个信息，于是落到 Session：它在 View 被关掉、移动、分屏之后
  * 依然指向同一个 Agent。
  */
-export function formatHandoffAddress(target: {
+export function formatMessagingAddress(target: {
   agentSessionId: string
   regionId?: string
 }): string {

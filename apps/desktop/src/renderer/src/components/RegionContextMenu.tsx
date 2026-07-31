@@ -1,7 +1,7 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import { Copy, Crosshair, Send } from 'lucide-react'
 import type { ReactNode } from 'react'
-import { formatHandoffAddress, formatRegionAddress, formatSessionAddress } from '../lib/agent-address'
+import { formatMessagingAddress, formatRegionAddress, formatSessionAddress } from '../lib/agent-address'
 
 /**
  * 一格的右键菜单。
@@ -56,7 +56,7 @@ export function createRegionCopyModel({
           handoff: {
             label: 'Message this Agent' as const,
             onSelect: async () =>
-              copy(formatHandoffAddress({ agentSessionId, regionId }), 'Message this Agent')
+              copy(formatMessagingAddress({ agentSessionId, regionId }), 'Message this Agent')
           },
           sessionAddress: {
             label: 'Copy Session Address' as const,

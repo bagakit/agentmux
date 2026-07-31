@@ -5,7 +5,7 @@ import { AGENTMUX_CONTROL_ERROR_CODES } from '@agentmux/core/control'
 import type { DesktopControlResponse } from '../src/shared/contracts.js'
 import {
   addressingRecovery,
-  formatHandoffAddress,
+  formatMessagingAddress,
   formatRegionAddress,
   formatSessionAddress,
   formatViewAddress
@@ -127,7 +127,7 @@ describe('交接入口：按意图命名，替用户解析出最精确的地址'
   // 指向某一格分屏时给 Region，目标唯一时给 Session。两条分支都要有断言。
 
   it('指向某一格分屏时给 Region 地址——消歧做在源头', () => {
-    const handoff = formatHandoffAddress({ agentSessionId: 'agent-7', regionId: 'region:pane-2' })
+    const handoff = formatMessagingAddress({ agentSessionId: 'agent-7', regionId: 'region:pane-2' })
     expect(handoff).toBe(formatRegionAddress('region:pane-2'))
     expect(handoff).toContain("agentmux send --to-region='region:pane-2'")
     // 点击发生在那一格上，此时给 Session 就是把"是哪一格"这个我们已知、接收方未知的信息丢掉。
@@ -135,7 +135,7 @@ describe('交接入口：按意图命名，替用户解析出最精确的地址'
   })
 
   it('没有那一格时给 Session 地址——它跨 View 稳定', () => {
-    const handoff = formatHandoffAddress({ agentSessionId: 'agent-7' })
+    const handoff = formatMessagingAddress({ agentSessionId: 'agent-7' })
     expect(handoff).toBe(formatSessionAddress('agent-7'))
     expect(handoff).toContain("agentmux send --to-session='agent-7'")
     expect(handoff).not.toContain('--to-region')
@@ -143,7 +143,7 @@ describe('交接入口：按意图命名，替用户解析出最精确的地址'
 
   it('同一 Session 从交接入口与复制入口产出的地址逐字一致', () => {
     // 同一份真相的两个入口，不是两套格式。
-    expect(formatHandoffAddress({ agentSessionId: "a'b" })).toBe(formatSessionAddress("a'b"))
+    expect(formatMessagingAddress({ agentSessionId: "a'b" })).toBe(formatSessionAddress("a'b"))
   })
 })
 
@@ -469,7 +469,7 @@ describe('入口接线：菜单真的调用了交接出口，并且真的把它�
       new URL('../src/renderer/src/components/RegionContextMenu.tsx', import.meta.url),
       'utf8'
     )
-    expect(source).toContain('formatHandoffAddress({ agentSessionId, regionId })')
+    expect(source).toContain('formatMessagingAddress({ agentSessionId, regionId })')
     // 造了不画等于没有。onSelect 被接到某个菜单项上，才谈得上"用户点得到"。
     expect(source).toContain('model.handoff.onSelect')
     expect(source).toContain('model.handoff.label')
@@ -480,7 +480,7 @@ describe('入口接线：菜单真的调用了交接出口，并且真的把它�
       new URL('../src/renderer/src/components/WorkbenchTabContextMenu.tsx', import.meta.url),
       'utf8'
     )
-    expect(source).toContain('formatHandoffAddress({ agentSessionId })')
+    expect(source).toContain('formatMessagingAddress({ agentSessionId })')
     expect(source).toContain('copyModel.handoff.onSelect')
     expect(source).toContain('copyModel.handoff.label')
   })
