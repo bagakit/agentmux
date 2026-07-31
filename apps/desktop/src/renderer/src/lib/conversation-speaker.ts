@@ -55,6 +55,16 @@ export type ConversationSpeaker = {
  *
  * 是个常量而不是从 item 里读出来的，因为今天说话人轴上只会有人类用户的发言，Core 侧也没有区分
  * 多个人类用户的事实。A2A 预留的是 agent 侧的多身份，不是多个人类。
+ *
+ * **消费方必须按 `(role, id)` 寻址，不能只按 `id`。** 这个哨兵与 agentSessionId **共用一个 id
+ * 空间**：Core 侧 `agentSessionId` 只过 `SAFE_ID` 字符集校验，字面量 `'human'` 是合法的，而
+ * `createAgent` 接受调用方传入的 agentSessionId。今天桌面端传 `randomUUID()` 所以不会碰撞，但
+ * 类型和这个常量都没有挡住它。于是一个 `agentSessionId === 'human'` 的 Agent 会得到
+ * `{role:'agent', id:'human'}`，与人类的 `{role:'human', id:'human'}` 在**只看 id** 的映射里
+ * collapse 成同一个身份——头像、颜色、轴上的位置会全部串。
+ *
+ * 修法不是在 Core 里加保留字校验（那要动公共合同，且 `role` 本来就在返回里，够用了），而是
+ * **一切按 id 建的映射都要带上 role**。这条也顺着往长做：A2A 落地后 role 依然是正确的判别维度。
  */
 export const HUMAN_SPEAKER_ID = 'human'
 
