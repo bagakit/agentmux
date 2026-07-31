@@ -367,6 +367,7 @@ const mockApi: AgentMuxDesktopApi = {
         ),
     read: async (_workspaceId, path) => {
       const content = mockFiles.get(path)
+      if (content === null) return { status: 'directory' }
       if (typeof content !== 'string') return { status: 'deleted' }
       return {
         status: 'read',

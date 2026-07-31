@@ -157,6 +157,7 @@ import {
 import { isPathWithinSubtree, remapPathWithinSubtree } from './lib/workspace-paths'
 import {
   createEmptyFileExplorerViewState,
+  revealFileExplorerPath,
   type FileExplorerViewState
 } from './lib/file-explorer-selection'
 import { moveSessionViewToWorkspace as reduceMoveSessionView } from './lib/move-session-view'
@@ -2386,6 +2387,17 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
               const invalidationSequence = fileInvalidationSequences.get(key) ?? 0
               await api.files.observe(workspaceId, path)
               const result = await api.files.read(workspaceId, path)
+              if (result.status === 'directory') {
+                // A clicked path can be a directory (detection is pure-string and cannot know), and
+                // a directory is not a document. Reveal it in the file tree — the same behaviour the
+                // explorer already gives a directory click — and surface the Files dock so the reveal
+                // is visible even when the click came from a terminal or a chat message.
+                await api.files.unobserve(workspaceId, path)
+                get().updateFileExplorerState(workspaceId, (current) =>
+                  revealFileExplorerPath(current, path))
+                set({ workspaceTool: 'files-branches', toolsOpen: true, mainSurface: 'workbench' })
+                return false
+              }
               if (result.status !== 'read') {
                 await api.files.unobserve(workspaceId, path)
                 throw new Error(result.status === 'deleted'

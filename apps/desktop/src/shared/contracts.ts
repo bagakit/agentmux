@@ -125,6 +125,10 @@ export type FileDocument = {
 export type WorkspaceFileReadResult =
   | { status: 'read'; document: FileDocument }
   | { status: 'deleted' }
+  // The target exists but is a directory. Not an error: the caller reveals it in the file tree
+  // instead of opening it as a document. Path detection is pure-string, so a directory path is a
+  // valid clickable link; only Main can tell it is a directory, so Main says so here.
+  | { status: 'directory' }
   | { status: 'error'; code: string; message: string }
 
 export type WorkspaceFileWriteInput = {

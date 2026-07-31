@@ -301,6 +301,59 @@ describe('WorkspaceFiles root confinement', () => {
     await expect(readFile(join(outside, 'secret.txt'), 'utf8')).resolves.toBe('secret')
   })
 
+  it('reports a local directory as a directory rather than a read error', async () => {
+    const { root, workspace, host } = await localFixture('local-directory-read')
+    await mkdir(join(root, 'docs'))
+    await writeFile(join(root, 'docs', 'design.md'), 'body')
+    const files = new WorkspaceFiles(() => host)
+
+    // Anchor: a real file under it still reads, so the directory answer is a classification of the
+    // target, not a blanket failure of the subtree.
+    await expect(files.read(workspace, 'docs/design.md')).resolves.toEqual({
+      status: 'read',
+      document: { path: 'docs/design.md', content: 'body', revision: revision('body') }
+    })
+    await expect(files.read(workspace, 'docs')).resolves.toEqual({ status: 'directory' })
+  })
+
+  it('reports a remote directory as a directory without parsing cat stderr', async () => {
+    const run = vi.fn<ExecutionHost['run']>(async (command, args) => {
+      if (command === 'realpath') {
+        return { stdout: `${String(args.at(-1))}\n`, stderr: '', exitCode: 0 }
+      }
+      if (command === 'sh') {
+        const target = args.at(-1)
+        // The classify-or-stream probe exits 3 for a directory and streams bytes otherwise.
+        return target === '/srv/project/docs'
+          ? { stdout: '', stderr: '', exitCode: 3 }
+          : { stdout: 'body', stderr: '', exitCode: 0 }
+      }
+      throw new Error(`Unexpected command: ${command}`)
+    })
+    const remoteHost: ExecutionHost = {
+      id: 'remote',
+      kind: 'ssh',
+      label: 'Remote',
+      run,
+      exposeLoopbackPort: async (port) => port,
+      dispose: async () => {}
+    }
+    const workspace: WorkspaceRecord = {
+      id: 'remote-workspace',
+      name: 'project',
+      hostId: 'remote',
+      path: '/srv/project',
+      kind: 'folder'
+    }
+    const files = new WorkspaceFiles(() => remoteHost)
+
+    await expect(files.read(workspace, 'docs/design.md')).resolves.toEqual({
+      status: 'read',
+      document: { path: 'docs/design.md', content: 'body', revision: revision('body') }
+    })
+    await expect(files.read(workspace, 'docs')).resolves.toEqual({ status: 'directory' })
+  })
+
   it('returns revisions, serializes competing saves, and rejects stale expected revisions', async () => {
     const { root, workspace, host } = await localFixture('revision')
     const path = join(root, 'document.txt')
@@ -394,10 +447,7 @@ describe('WorkspaceFiles root confinement', () => {
 
     await mkdir(path)
     await waitFor(() => invalidations > 2)
-    await expect(files.read(workspace, 'document.txt')).resolves.toMatchObject({
-      status: 'error',
-      message: 'Workspace path is not a regular file'
-    })
+    await expect(files.read(workspace, 'document.txt')).resolves.toEqual({ status: 'directory' })
 
     await dispose()
     expect(workspaceFileObserverCount()).toBe(0)

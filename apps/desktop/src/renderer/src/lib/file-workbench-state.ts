@@ -180,6 +180,18 @@ export function reduceDocumentRead(
     documentObservationGenerations,
     documentIssues: { ...state.documentIssues, [key]: { kind: 'deleted' } }
   }
+  // An open file replaced on disk by a directory can no longer be read as a document. There is no
+  // dedicated issue kind and inventing one buys nothing here, so surface it through the read-error
+  // channel. openFile intercepts a directory before a document is ever created, so this only guards
+  // the refresh of an already-open document.
+  if (result.status === 'directory') return {
+    ...state,
+    documentObservationGenerations,
+    documentIssues: {
+      ...state.documentIssues,
+      [key]: { kind: 'read-error', code: 'WORKSPACE_PATH_IS_DIRECTORY', message: 'Workspace path is now a directory' }
+    }
+  }
   if (result.status === 'error') return {
     ...state,
     documentObservationGenerations,

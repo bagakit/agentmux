@@ -433,4 +433,52 @@ describe('file mutation resource reconciliation', () => {
     expect(useAppStore.getState().dirtyDocuments[documentKey(workspace.id, path)]).toBeUndefined()
     await useAppStore.getState().deletePath(path)
   })
+
+  it('reveals a directory in the file tree instead of opening it as a document', async () => {
+    const workspace: WorkspaceRecord = {
+      id: 'directory-reveal-workspace',
+      name: 'Directory reveal fixture',
+      hostId: 'local',
+      path: '/fixture',
+      kind: 'folder'
+    }
+    useAppStore.setState({
+      config: {
+        version: 7,
+        hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
+        executors: {},
+        workspaces: [workspace],
+        appearance: { terminalTheme: 'graphite' },
+        browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
+      },
+      activeWorkspaceId: workspace.id,
+      layouts: { [workspace.id]: createWorkspaceLayout('pane') },
+      workspaceTool: 'agents',
+      toolsOpen: false
+    })
+    const directoryPath = `docs-${crypto.randomUUID()}/design`
+    await useAppStore.getState().createPath({ path: directoryPath.split('/')[0]!, kind: 'directory' })
+    await useAppStore.getState().createPath({ path: directoryPath, kind: 'directory' })
+    const observe = vi.spyOn(api.files, 'observe')
+    const unobserve = vi.spyOn(api.files, 'unobserve')
+
+    await useAppStore.getState().openFile(directoryPath, 'pane')
+
+    const state = useAppStore.getState()
+    // Anchor: the reveal path was actually taken — a directory read releases the observation it took.
+    expect(observe).toHaveBeenCalledWith(workspace.id, directoryPath)
+    expect(unobserve).toHaveBeenCalledWith(workspace.id, directoryPath)
+    // No document or tab was built for the directory.
+    expect(state.documents[documentKey(workspace.id, directoryPath)]).toBeUndefined()
+    expect(state.tabs[`file:${workspace.id}:${directoryPath}`]).toBeUndefined()
+    // The directory and its ancestor are revealed and selected in the file tree.
+    const explorer = state.fileExplorerStates[workspace.id]!
+    expect(explorer.selection.selectedPaths.has(directoryPath)).toBe(true)
+    expect(explorer.expandedPaths.has(directoryPath.split('/')[0]!)).toBe(true)
+    // The Files dock is surfaced so the reveal is visible even from a terminal or chat click.
+    expect(state.workspaceTool).toBe('files-branches')
+    expect(state.toolsOpen).toBe(true)
+
+    await useAppStore.getState().deletePath(directoryPath.split('/')[0]!)
+  })
 })
