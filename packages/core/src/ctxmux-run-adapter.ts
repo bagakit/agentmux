@@ -36,8 +36,8 @@ import {
   defaultCtxmuxStateDirectory
 } from './runtime-paths.js'
 
-const CTXMUX_COMMIT = '073e206407ce28331aa882c2c80e9354cfe2879a'
-const CTXMUX_TREE = '3ddf0706c35517c0dd6bdf4d4f7fa251d88c0e0a'
+const CTXMUX_COMMIT = 'c13ab114f6ddf0cf8eb22c6cc39bb16f7aa0dec7'
+const CTXMUX_TREE = 'c43e3992e2e127d4b4e65e447fd23b9037be7f9c'
 const CTXMUX_VERSION = '0.1.0'
 const CTXMUX_RUNTIME_BUILD_ID = `ctxmuxd/${CTXMUX_VERSION}`
 const REQUIRED_RUNTIME_CAPABILITIES = {

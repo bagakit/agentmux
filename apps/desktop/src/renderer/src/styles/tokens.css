@@ -22,7 +22,7 @@
   --green: #8de3ae;
   --green-2: #5ec488;
   --amber: #ecc16a;
-  /* Tab 选中标记：Orca 语言＝底部 2px 中性横条（foreground/card 混色），非顶部绿条 */
+  /* Tab 选中标记：本项目的选中语言＝底部 2px 中性横条（foreground/card 混色），非顶部绿条 */
   --tab-select-bar: color-mix(in srgb, var(--text) 60%, var(--surface-1));
   --red: #ef7773;
   --blue: #82b3f2;

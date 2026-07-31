@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 // imports it to verify the packed manifest bytes and the owner receipt; the
 // endpoint id below derives from it so each artifact version claims its own
 // socket/state root.
-export const CTXMUX_MANIFEST_SHA256 = '346f47c04091623e4daccb8ae2ee8963f72bb881e9712db6e9142546ef3ae7a6'
+export const CTXMUX_MANIFEST_SHA256 = '3a790a05eebc576a2f1a91f8481e140eef57665a04d4dd6033598cf7c98176c9'
 
 // Derive the endpoint identity from the pinned manifest so an artifact upgrade
 // lands on a fresh socket/state root instead of colliding with a stale detached
@@ -68,4 +68,3 @@ export function resolveCoreBinPath(binaryName: 'agentmux' | 'agentmux-hook.js'):
   }
   return candidates[0]!
 }
-

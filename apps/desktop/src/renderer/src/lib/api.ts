@@ -274,7 +274,7 @@ const mockApi: AgentMuxDesktopApi = {
   },
   hosts: { check: async (host) => host.kind === 'ssh'
     ? { ok: false, detail: 'Remote Runs are not yet supported.' }
-    : { ok: true, detail: 'CtxMux 0.1.0 · protocol 13' } },
+    : { ok: true, detail: 'CtxMux 0.1.0 · protocol 14' } },
   workspaces: {
     chooseLocalFolder: async () => null,
     add: async (input) => {

@@ -166,11 +166,6 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
     const runningAgents = branch.worktreePath && snapshot?.kind === 'git-repository'
       ? runningAgentsByWorktree.get(worktreePresenceKey(snapshot.hostId, branch.worktreePath)) ?? []
       : []
-    const visibleAgents = runningAgents.slice(0, 4)
-    const hiddenAgentTypes = runningAgents.length - visibleAgents.length
-    const runningAgentLabel = runningAgents
-      .map((agent) => `${agentProviderLabel(agent.providerId)}${agent.count > 1 ? ` ×${agent.count}` : ''}`)
-      .join(', ')
     return (
       <BranchContextMenu
         key={branch.name}
@@ -187,33 +182,31 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
           onClick={() => void openBranch(branch)}
           onContextMenu={() => setSelectedBranch(branch.name)}
         >
-          <span className="branch-row__icon">
-            {busyBranch === branch.name ? <LoaderCircle className="spin" size={12} /> : <GitBranch size={12} />}
-          </span>
-          <span className="branch-row__identity">
-            <strong title={branch.name}>{branch.name}</strong>
-            <small title={branch.worktreePath ?? undefined}>{branch.worktreePath ?? 'No worktree'}</small>
-          </span>
-          <span className="branch-row__meta">
-            {visibleAgents.length > 0 ? (
-              <span
-                className="branch-row__agents"
-                aria-label={`Running agents: ${runningAgentLabel}`}
-                title={`Running agents: ${runningAgentLabel}`}
-              >
-                {visibleAgents.map((agent) => (
-                  <span className="branch-row__agent" key={agent.providerId}>
-                    <AgentProviderIcon providerId={agent.providerId} size={11} />
-                    {agent.count > 1 ? <small>{agent.count}</small> : null}
-                  </span>
-                ))}
-                {hiddenAgentTypes > 0 ? <em>+{hiddenAgentTypes}</em> : null}
+          <SelectorRow
+            leading={busyBranch === branch.name ? <LoaderCircle className="spin" size={12} /> : <GitBranch size={12} />}
+            title={branch.name}
+            titleTooltip={branch.name}
+            subtitle={branch.worktreePath ?? 'No worktree'}
+            subtitleTooltip={branch.worktreePath ?? undefined}
+            presence={
+              <SelectorPresence
+                agents={runningAgents.map((agent) => ({
+                  key: agent.providerId,
+                  providerId: agent.providerId,
+                  label: agentProviderLabel(agent.providerId),
+                  // 这一簇是按 provider 归并的运行中 Run，不是逐个 Session——它们按定义都在跑。
+                  state: 'running',
+                  attention: null,
+                  count: agent.count
+                }))}
+              />
+            }
+            trailing={
+              <span className={`branch-row__state ${branch.worktreePath ? '' : 'branch-row__state--unbound'}`}>
+                {branch.isCurrent ? <><Check size={9} /> Current</> : branch.worktreePath ? 'Worktree' : <><Unlink size={9} /> Branch</>}
               </span>
-            ) : null}
-            <span className={`branch-row__state ${branch.worktreePath ? '' : 'branch-row__state--unbound'}`}>
-              {branch.isCurrent ? <><Check size={9} /> Current</> : branch.worktreePath ? 'Worktree' : <><Unlink size={9} /> Branch</>}
-            </span>
-          </span>
+            }
+          />
         </button>
       </BranchContextMenu>
     )
@@ -221,24 +214,30 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
 
   return (
     <section className="branches-panel">
-      <header className="branches-header">
-        <div><span>Branches</span><small>{snapshot?.kind === 'git-repository' ? snapshot.branches.length : 0}</small></div>
-        {/* Absent outside a git repository: a fan-out needs branches, and a button that could only fail
-            answers nothing. */}
-        {snapshot?.kind === 'git-repository' ? (
-          <button
-            type="button"
-            title="Fan one prompt across N new worktrees"
-            aria-label="Fan out a prompt"
-            onClick={() => { setActionError(null); setFanOutOpen(true) }}
-          >
-            <GitCompareArrows size={13} />
-          </button>
-        ) : null}
-        <button type="button" title="Refresh branches" onClick={() => void refresh()} disabled={loading}>
-          {loading ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}
-        </button>
-      </header>
+      <SelectorListHeader
+        className="branches-header"
+        title="Branches"
+        count={snapshot?.kind === 'git-repository' ? snapshot.branches.length : 0}
+        actions={
+          <>
+            {/* Absent outside a git repository: a fan-out needs branches, and a button that could only fail
+                answers nothing. */}
+            {snapshot?.kind === 'git-repository' ? (
+              <button
+                type="button"
+                title="Fan one prompt across N new worktrees"
+                aria-label="Fan out a prompt"
+                onClick={() => { setActionError(null); setFanOutOpen(true) }}
+              >
+                <GitCompareArrows size={13} />
+              </button>
+            ) : null}
+            <button type="button" title="Refresh branches" onClick={() => void refresh()} disabled={loading}>
+              {loading ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}
+            </button>
+          </>
+        }
+      />
       {snapshot?.kind === 'git-repository' ? <div className="branches-repo"><FolderGit2 size={11} /><span>{snapshot.repoPath}</span></div> : null}
       <div className="branches-scroll">
         {bound.length > 0 ? <div className="branch-group"><span>Worktrees</span>{bound.map(branchRow)}</div> : null}

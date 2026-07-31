@@ -112,7 +112,7 @@
 }
 .workbench-tab__label { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workbench-tab:hover { color: var(--text-2); }
-/* 选中＝底部 2px 中性横条（Orca 语言）+ 极淡背景抬升 + 文字转 full foreground */
+/* 选中＝底部 2px 中性横条（本项目选中语言）+ 极淡背景抬升 + 文字转 full foreground */
 .workbench-tab--active { color: var(--text); background: color-mix(in srgb, var(--text) 6%, var(--surface-1)); }
 .workbench-tab--active::after {
   content: "";

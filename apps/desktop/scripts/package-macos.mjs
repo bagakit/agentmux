@@ -431,15 +431,15 @@ async function verifyPackagedRuntime(appPath, verificationRoot, source) {
       env: { PATH: '/usr/bin:/bin' }
     })
   ])
-  assert(cli.stdout.trim() === 'ctxmux 0.1.0 (protocol 13)', 'Packaged ctxmux identity is wrong.')
-  assert(daemon.stdout.trim() === 'ctxmuxd 0.1.0 (protocol 13)', 'Packaged ctxmuxd identity is wrong.')
+  assert(cli.stdout.trim() === 'ctxmux 0.1.0 (protocol 14)', 'Packaged ctxmux identity is wrong.')
+  assert(daemon.stdout.trim() === 'ctxmuxd 0.1.0 (protocol 14)', 'Packaged ctxmuxd identity is wrong.')
   assert(agentmux.stdout.trim() === 'agentmux 0.1.0', 'Packaged AgentMux CLI cannot use the embedded runtime.')
   const ctxmuxManifest = JSON.parse(await readFile(
     join(coreRuntime, 'vendor', 'ctxmux', 'darwin-arm64', 'manifest.json'),
     'utf8'
   ))
   assert(
-    ctxmuxManifest.source.commit === '073e206407ce28331aa882c2c80e9354cfe2879a',
+    ctxmuxManifest.source.commit === 'c13ab114f6ddf0cf8eb22c6cc39bb16f7aa0dec7',
     'Packaged ctxmux manifest commit is wrong.'
   )
 }
