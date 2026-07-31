@@ -1232,6 +1232,15 @@ export class AgentMuxClient {
     }
   }
 
+  // Per-Agent-Session serialization of continuity attempts. NOT what bounds new Runs to one — the
+  // store's `reserveLifecycle` is an atomic check-and-set, so a concurrent loser fails its
+  // reservation before ever reaching `kernel.start` even with this tail removed (measured).
+  // What the tail buys is the loser's CLASSIFICATION: serialized behind the winner, its expectedRun
+  // fence sees the Run already replaced and reports `session-run-changed` with `currentRun` pointing
+  // at the real new Run. Run them concurrently and the loser's fence passes on the stale Run, then
+  // trips the reservation and surfaces a bare `lifecycle-busy` carrying an outdated `currentRun` —
+  // a worse answer to "why did my recovery not happen". Guarded by the concurrency tests in
+  // agent-session-continuity.test.ts; deleting this makes them red on the reason, not on the count.
   async ensureAgentContinuity(
     input: AgentMuxAgentContinuityInput
   ): Promise<AgentMuxAgentContinuityResult> {
