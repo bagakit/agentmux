@@ -243,6 +243,14 @@ type AppState = {
   agentNames: Record<string, string>
   mainSurface: MainSurface
   projectRailOpen: boolean
+  /**
+   * 折叠起来的 Project 分组，key 由 {@link projectGroupKey} 从 hostId + 父目录派生。
+   *
+   * 只存**折叠**的那些（默认展开）：分组是从磁盘路径派生的，用户新加一个项目就可能凭空多出一组，
+   * 而它该是展开的。存"折叠集合"时新分组天然展开；存"展开集合"则要为每个新分组补一条记录，
+   * 漏了就默认折叠——那是把一个派生结构当成了需要注册的实体。
+   */
+  collapsedProjectGroups: Record<string, true>
   toolsOpen: boolean
   tabMenuOpen: boolean
   workspaceTool: WorkspaceTool
@@ -313,6 +321,7 @@ type AppState = {
   setViewMode(sessionId: string, mode: ViewMode): void
   setMainSurface(surface: MainSurface): void
   toggleProjectRail(): void
+  toggleProjectGroup(key: string): void
   setTabMenuOpen(open: boolean): void
   setWorkspaceTool(tool: WorkspaceTool): void
   toggleTools(): void
@@ -1096,6 +1105,7 @@ type PersistedAppState = {
   activeWorkspaceId?: string | null
   mainSurface?: MainSurface
   projectRailOpen?: boolean
+  collapsedProjectGroups?: Record<string, true>
   toolsOpen?: boolean
   workspaceTool?: WorkspaceTool
   toolDockWidth?: number
@@ -1103,8 +1113,30 @@ type PersistedAppState = {
 
 export type RestoredUiState = Pick<
   AppState,
-  'activeWorkspaceId' | 'mainSurface' | 'projectRailOpen' | 'toolsOpen' | 'workspaceTool' | 'toolDockWidth'
+  | 'activeWorkspaceId'
+  | 'mainSurface'
+  | 'projectRailOpen'
+  | 'collapsedProjectGroups'
+  | 'toolsOpen'
+  | 'workspaceTool'
+  | 'toolDockWidth'
 >
+
+/**
+ * 折叠集合的读回。只收「key 是字符串、值恰好是 true」的条目。
+ *
+ * 一条坏记录不该让整份布局回退到默认：逐条筛比整体丢弃更贴近这个函数已有的立场（缺字段走默认、
+ * 坏枚举走默认）。收成 `true` 而不是任意真值，是因为写入侧只写 true——读回时放宽会让"存折叠集合"
+ * 这个约定在读写两侧不一致。
+ */
+function restoredCollapsedGroups(candidate: unknown): Record<string, true> {
+  if (typeof candidate !== 'object' || candidate === null || Array.isArray(candidate)) return {}
+  const restored: Record<string, true> = {}
+  for (const [key, value] of Object.entries(candidate)) {
+    if (key !== '' && value === true) restored[key] = true
+  }
+  return restored
+}
 
 /**
  * Validate persisted presentation state at the configuration boundary. Persisted JSON is user data,
@@ -1116,13 +1148,20 @@ export function restorePersistedUiState(
   config: AppConfig,
   persisted: Pick<
     PersistedAppState,
-    'activeWorkspaceId' | 'mainSurface' | 'projectRailOpen' | 'toolsOpen' | 'workspaceTool' | 'toolDockWidth'
+    | 'activeWorkspaceId'
+    | 'mainSurface'
+    | 'projectRailOpen'
+    | 'collapsedProjectGroups'
+    | 'toolsOpen'
+    | 'workspaceTool'
+    | 'toolDockWidth'
   >
 ): RestoredUiState {
   return {
     activeWorkspaceId: restoredWorkspaceId(config, persisted.activeWorkspaceId),
     mainSurface: restoredMainSurface(persisted.mainSurface),
     projectRailOpen: restoredBoolean(persisted.projectRailOpen, true),
+    collapsedProjectGroups: restoredCollapsedGroups(persisted.collapsedProjectGroups),
     toolsOpen: restoredBoolean(persisted.toolsOpen, true),
     workspaceTool: restoredWorkspaceTool(persisted.workspaceTool),
     toolDockWidth: clampToolDockWidth(
@@ -1264,6 +1303,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   agentNames: {},
   mainSurface: 'workbench',
   projectRailOpen: true,
+  collapsedProjectGroups: {},
   toolsOpen: true,
   tabMenuOpen: false,
   workspaceTool: 'files-branches',
@@ -2385,6 +2425,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   toggleProjectRail() {
     set((state) => ({ projectRailOpen: !state.projectRailOpen }))
+  },
+  toggleProjectGroup(key) {
+    set((state) => {
+      // 折叠集合里**删掉**而不是写 false：只存折叠的那些，展开就是不在集合里（见状态声明）。
+      // 写 `{...state, [key]: false}` 会让这份记录随着用户开合越攒越多，且和"新分组默认展开"
+      // 变成两条规则。
+      const { [key]: collapsed, ...rest } = state.collapsedProjectGroups
+      return { collapsedProjectGroups: collapsed ? rest : { ...rest, [key]: true } }
+    })
   },
   setTabMenuOpen(tabMenuOpen) {
     set({ tabMenuOpen })
@@ -3714,6 +3763,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     activeWorkspaceId: state.activeWorkspaceId,
     mainSurface: state.mainSurface,
     projectRailOpen: state.projectRailOpen,
+    // 折叠了哪几组是用户意图，重开要还在。key 里带的是父目录路径——与同一份记录里已经逐字
+    // 持久化的 file Region path 同一档事实，没有引入新的敏感面。
+    collapsedProjectGroups: state.collapsedProjectGroups,
     toolsOpen: state.toolsOpen,
     workspaceTool: state.workspaceTool,
     toolDockWidth: state.toolDockWidth
