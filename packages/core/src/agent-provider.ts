@@ -722,7 +722,10 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
         permission: 'respond',
         providerResume: true,
         acp: false,
-        replyCorrelation: 'none'
+        replyCorrelation: 'none',
+        // Codex 把每 turn 的真实 token 数写进它的 rollout JSONL（`event_msg` 的 token_count 记录，
+        // payload.info.last_token_usage）。收尾事件的 hook payload 已带 transcript_path，故用量随既有事件流到达。
+        usage: { kind: 'native-transcript', transcriptFormat: 'codex-rollout' }
       }
     }),
     buildArgs: (prompt, args) => [
@@ -777,7 +780,10 @@ export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = [
         permission: 'respond',
         providerResume: true,
         acp: false,
-        replyCorrelation: 'none'
+        replyCorrelation: 'none',
+        // Claude 把每 turn 的真实 token 数写进它的 transcript JSONL（`type:"assistant"` 记录的
+        // message.usage）。收尾事件的 hook payload 已带 transcript_path，故用量随既有事件流到达。
+        usage: { kind: 'native-transcript', transcriptFormat: 'claude-jsonl' }
       }
     }),
     buildArgs: (prompt, args) => [...args, ...(prompt ? [prompt] : [])],

@@ -31,6 +31,7 @@ import type {
   AgentTimelineItem,
   AgentTimelineMutation,
   AgentTimelineSnapshot,
+  AgentTurnUsage,
   RiskTier
 } from './types.js'
 
@@ -469,6 +470,18 @@ function semanticStatus(value: unknown): AgentStatus {
     source: source.source,
     observedAt: timestamp(source.observedAt, 'semanticStatus.observedAt'),
     ...(detail ? { detail } : {})
+  }
+}
+
+function turnUsage(value: unknown): AgentTurnUsage {
+  const source = record(value, 'turnUsage')
+  // token 数与观测时刻都是非负安全整数——沿用 timestamp 的校验（它正是这个约束），任一字段不合就整条拒绝，
+  // 绝不落一个半残的用量。
+  return {
+    inputTokens: timestamp(source.inputTokens, 'turnUsage.inputTokens'),
+    outputTokens: timestamp(source.outputTokens, 'turnUsage.outputTokens'),
+    totalTokens: timestamp(source.totalTokens, 'turnUsage.totalTokens'),
+    observedAt: timestamp(source.observedAt, 'turnUsage.observedAt')
   }
 }
 
@@ -940,7 +953,8 @@ export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgent
       ? {}
       : { pendingInteraction: pendingInteraction(source.pendingInteraction) }),
     ...(source.nativeHandle === undefined ? {} : { nativeHandle: nativeHandle(source.nativeHandle) }),
-    ...(source.hookReceipt === undefined ? {} : { hookReceipt: hookReceipt(source.hookReceipt) })
+    ...(source.hookReceipt === undefined ? {} : { hookReceipt: hookReceipt(source.hookReceipt) }),
+    ...(source.turnUsage === undefined ? {} : { turnUsage: turnUsage(source.turnUsage) })
   }
   if (session.nativeHandle?.kind === 'provider' && session.nativeHandle.providerId !== session.providerId) {
     throw new AgentMuxError('Native session handle provider does not match the Agent.', 'INVALID_AGENT_SESSION_STORE')

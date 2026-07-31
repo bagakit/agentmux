@@ -140,6 +140,16 @@
   letter-spacing: .03em;
   text-transform: uppercase;
 }
+/* token 用量。真实数用常规次级色；"不报"/"还没有"是缺席，压到最静默的一档，绝不抢眼、更不冒充数据。 */
+.agent-roster__usage {
+  flex: none;
+  font-size: var(--fs-micro);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.agent-roster__usage[data-usage='awaiting'],
+.agent-roster__usage[data-usage='unsupported'] { color: var(--text-3); }
 .agent-status-bar__count { color: var(--text-2); }
 .agent-status-bar .status { gap:0; }
 /* 按 Provider 的活跃/待机。它靠右自成一组，与左侧的关注度汇总分开——两者回答的是不同的问题。 */

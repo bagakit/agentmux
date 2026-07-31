@@ -1,6 +1,7 @@
 import type { AgentCatalogEntry, LaunchOptionSelection, RiskTier } from '@agentmux/core'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { categoryFor, type AttentionCategory } from './attention-event'
+import { agentUsageDisplay, type AgentUsageDisplay } from './agent-usage'
 
 // An enumerable, window-wide roster of Agents.
 //
@@ -44,6 +45,9 @@ export type RosterRow = {
   // What this Agent was authorized to do at spawn. Empty when the create declared nothing: absence
   // shows nothing at all, never a placeholder or an inferred default.
   scopes: RosterScope[]
+  // 这个 Agent 最近一 turn 的真实 token 用量，或"此 Provider 不报用量"/"还没有一 turn"。三态都由
+  // SessionSnapshot 自描述算出，绝不塌成 0（见 agent-usage.ts）。
+  usage: AgentUsageDisplay
 }
 
 // needs-you first, then error, then working, then everything idle — the same ranking the quick switcher
@@ -111,7 +115,8 @@ export function buildAgentRoster(input: {
       observedAt: session.status.observedAt,
       awaitingReply: session.pendingInteraction !== undefined,
       unacknowledgedThreads: input.unacknowledgedThreads?.[session.id] ?? 0,
-      scopes: resolveRosterScopes(session.launchOptions, catalog.get(session.providerId))
+      scopes: resolveRosterScopes(session.launchOptions, catalog.get(session.providerId)),
+      usage: agentUsageDisplay(session)
     })
   }
   rows.sort((left, right) => {

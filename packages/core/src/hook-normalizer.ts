@@ -14,6 +14,7 @@ import {
   normalizeNativeTranscriptPath
 } from './agent-native-locator.js'
 import { hookToolOutcome } from './hook-tool-outcome.js'
+import { HOOK_PAYLOAD_USAGE_KEY, parseTurnUsage } from './agent-usage-transcript.js'
 
 export type AgentNativeHookStateRule = {
   events: readonly string[]
@@ -398,6 +399,9 @@ export function normalizeNativeHook(
     detail: eventName
   }
   const handle = nativeHandle(envelope.providerId, specification, payload)
+  // usage 由 hook 命令进程读 transcript 后并进 payload；normalizer 只把它校验回结构化用量，绝不自己读文件。
+  // 缺席（Provider 不报 usage、非收尾事件、读失败）时它就是 undefined，一路缺席到 UI。
+  const turnUsage = parseTurnUsage(payload[HOOK_PAYLOAD_USAGE_KEY]) ?? undefined
   return {
     agentSessionId: envelope.agentSessionId,
     run: {
@@ -408,6 +412,7 @@ export function normalizeNativeHook(
     semanticState,
     status,
     timeline: buildTimeline(specification, envelope, eventName, payload, observedAt),
-    ...(handle ? { nativeHandle: handle } : {})
+    ...(handle ? { nativeHandle: handle } : {}),
+    ...(turnUsage ? { turnUsage } : {})
   }
 }

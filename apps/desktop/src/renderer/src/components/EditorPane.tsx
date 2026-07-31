@@ -7,6 +7,7 @@ import { editorSaveAction } from '../lib/editor-save-shortcut'
 import { detectLanguage } from '../lib/language-detect'
 import { documentKey, type FileWorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
+import { EditorReleasedState } from './EditorReleasedState'
 
 type MonacoStandaloneEditor = Parameters<OnMount>[0]
 type MonacoApi = Parameters<OnMount>[1]
@@ -51,7 +52,15 @@ export async function revealFileInFileManager(
   }
 }
 
-export function EditorPane({ tabId, surface }: { tabId: string; surface: FileWorkbenchSurface }) {
+export function EditorPane({
+  tabId,
+  surface,
+  released = false
+}: {
+  tabId: string
+  surface: FileWorkbenchSurface
+  released?: boolean
+}) {
   const key = documentKey(surface.workspaceId, surface.path)
   const document = useAppStore((state) => {
     return state.documents[key] ?? null
@@ -92,10 +101,18 @@ export function EditorPane({ tabId, surface }: { tabId: string; surface: FileWor
   }
 
   useEffect(() => {
+    // A released Region has no live Monaco owner. In particular, do not replay a stale reveal
+    // target into the disposed instance while the parked placeholder is mounted.
+    if (released || !document) {
+      editorRef.current = null
+      return
+    }
     if (editorRef.current && revealTarget) consumeRevealTarget(editorRef.current)
     // consumeRevealTarget reads the latest target from the store; revealTarget only drives when.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [revealTarget, key])
+  }, [revealTarget, key, released, Boolean(document)])
+
+  if (released) return <EditorReleasedState />
 
   // Cmd/Ctrl+S. Registered as a Monaco command rather than a window listener so it fires only for
   // the editor that actually has focus — with several file Regions open at once, a window-level
@@ -179,6 +196,11 @@ export function EditorPane({ tabId, surface }: { tabId: string; surface: FileWor
           onChange={(value) => update(tabId, value ?? '', surface.regionId)}
           onMount={(editor, monaco) => {
             editorRef.current = editor
+            // Monaco owns the editor lifetime. Clear only the instance that disposed itself so a
+            // late dispose from an old Region cannot erase a newer editor reference after restore.
+            editor.onDidDispose(() => {
+              if (editorRef.current === editor) editorRef.current = null
+            })
             registerSaveShortcut(editor, monaco)
             consumeRevealTarget(editor)
           }}

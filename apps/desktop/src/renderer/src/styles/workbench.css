@@ -298,3 +298,5 @@
 .pane-state { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap:var(--sp-3); padding: var(--sp-8); color: var(--text-3); background: var(--surface-0); font-size: var(--fs-micro); text-align: center; }
 .pane-state strong { color: var(--text-2); font-size: var(--fs-body); }
 .pane-state--error svg { color: var(--red); }
+.surface-memory-released { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap:var(--sp-2); padding:var(--sp-6); color:var(--text-3); background:var(--surface-0); font-size:var(--fs-meta); text-align:center; }
+.surface-memory-released strong { color:var(--text-2); font-size:var(--fs-body); }
