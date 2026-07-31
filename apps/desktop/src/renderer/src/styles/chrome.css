@@ -80,7 +80,24 @@
 }
 .sidebar__heading-actions { display: flex; align-items: center; gap:1px; }
 .project-list { min-height: 0; flex: 1; display: grid; align-content: start; gap:var(--sp-1); padding:0 var(--sp-4) var(--sp-4); overflow: auto; }
-.project-rail-row { width: 100%; min-width: 0; min-height: 28px; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap:var(--sp-3); padding:var(--sp-2) var(--sp-4); border: 0; border-radius: var(--radius); color: var(--text-3); background: transparent; text-align: left; cursor: pointer; transition: background .12s ease, color .12s ease; }
+/* 一组同处一个父目录的 Project。组之间留一点空档，让分组头归属于它下面那几行而不是漂在中间。 */
+.project-rail-group { display: grid; align-content: start; gap:var(--sp-1); }
+.project-rail-group + .project-rail-group { margin-top:var(--sp-2); }
+/* 分组头是标签，不是行：没有 hover、没有选中填充、不可点击。层级压到 Projects 那一档，
+   免得父目录名比项目名还响（密度合同《Project Rail Group Header》）。 */
+.project-rail-group__label {
+  min-width: 0; min-height: 22px;
+  display: flex; align-items: center;
+  padding:0 var(--sp-4);
+  overflow: hidden;
+  color: var(--text-3); font-size: var(--fs-micro); font-weight: 500;
+  letter-spacing: .04em;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+/* 缩进量 = 层数 × 一格。`--rail-depth` 由 WorkspaceSidebar 按节点深度内联注入，**这里必须
+   声明默认值**：注入式自定义属性不给默认，未注入的行就会拿到无效值而整条 padding 失效
+   （先例见 dock.css 的 --tree-depth，控件语言《注入的 CSS 属性要声明默认值》）。 */
+.project-rail-row { --rail-depth: 0; width: 100%; min-width: 0; min-height: 28px; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap:var(--sp-3); padding:var(--sp-2) var(--sp-4); padding-left: calc(var(--sp-4) + var(--rail-depth) * var(--sp-4)); border: 0; border-radius: var(--radius); color: var(--text-3); background: transparent; text-align: left; cursor: pointer; transition: background .12s ease, color .12s ease; }
 .scratch-workspace-row { grid-template-columns: 24px minmax(0, 1fr) auto; }
 .project-rail-row:hover { color: var(--text-2); background: var(--surface-2); }
 .project-rail-row--active, .project-rail-row--active:hover { color: var(--text); background: var(--surface-2); }
