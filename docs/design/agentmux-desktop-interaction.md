@@ -73,7 +73,10 @@
 - Agent Session 是 Provider 语义身份；Run 是 ctxmux 进程身份；View/Region 是 Desktop 展示身份。
 - 一个 Session 可以没有 View，也可以投影到多个 View。关闭 Tab 内的 Region 只改变该 View 的内容布局；关闭承载某个 Session 最后一个 Region 的完整 View 时，Terminal 直接停止 Run，Agent 默认停止并二次确认，同时明确提供保留 Session 的选项。
 - **投影可以被显式移动到另一个 Workspace 的 View**，这只搬动展示身份、不动 Agent 事实。cwd 归 Core（`session.workspacePath`，一个已在运行的进程的工作目录），移动**绝不改变** `session.workspacePath`——没有任何通道能让运行中的进程改换工作目录，所以移动后这条 Session 的 Tab **仍**如实显示它自己的工作目录（cwd），不冒用目标 Workspace 的磁盘路径或名字。移动是用户按 Region 显式发起的（Tab 菜单选目标 Workspace），落点复用既有的 selectSession 导航；新建 worktree **绝不**把任何 Session 的投影**自动移动**过去，创建 worktree 与移动投影是两个独立动作。
-- Desktop 只持久化 Session/Run 在哪张 View 的哪个 Region，不复制 PTY、Replay、Agent 状态或进程生命周期。**布局恢复与 Session 恢复必须分开看待**：布局是 Renderer 的展示事实，Session 身份与 Provider-native resume token 是 Core 的语义事实；任何一侧失败都不能把另一侧静默删掉。
+- Desktop 持久化的是**展示身份**，不复制 PTY、Replay、Agent 状态或进程生命周期。**布局恢复与 Session 恢复必须分开看待**：布局是 Renderer 的展示事实，Session 身份与 Provider-native resume token 是 Core 的语义事实；任何一侧失败都不能把另一侧静默删掉。
+  - **判据是「这一面有没有可在冷启动复活的身份」，不是「它属于哪一类面」**。Agent/Terminal 面持久化 Session/Run 落在哪张 View 的哪个 Region；**文件面同样持久化，含它的路径原样**——一个文件面只有 `{regionId, kind, workspaceId, path}`，没有运行时内容可剥，而它的 Tab id 本就是 `file:<workspaceId>:<path>`，所以「存这一面」与「存这个路径」是同一件事，分不开。把文件面剥掉曾经让一个纯文件 Tab 整个消失、让 agent+文件的分屏塌成单面，这正是用户报的「重启后 tab 和分屏没了」。
+  - **Browser 面反过来整面不持久化**。它内嵌活体页面快照（url/title/navigationId 全是必填的运行时事实），浏览历史与文件路径是两类不同的敏感度；更关键的是冷启动**没有**一条能把持久化的 browser 结构复活成可用空白页的生命周期，硬存一个结构标识只会 ship 一个死面板。**以缺席表达，而不是画一个打不开的面**。
+  - **持久化了一个面，就必须有人在冷启动把它的内容装上**。文件面能存下来只是一半：若启动恢复不去加载那份文档，Tab 在、编辑器却报「不可用」——这比整个 Tab 消失更难诊断，因为看起来像文件坏了。**凡是新增一类可持久化的面，都要同时指明它冷启动时的加载入口**；没有加载入口的持久化是半成品，不许上线。
 - **重新打开项目要无缝接回原来的工作面**。切换 Workspace/Project 只是改变可见投影，不能销毁仍在使用中的 Workbench、xterm 实例或 ctxmux attachment；回到项目时应直接看到离开前的终端画面，不再闪 `Restoring terminal…`，也不因为 replay 起点变化把用户误导成“历史丢了”。真正发生 replay gap 时仍需显示 gap 的诚实提示，但项目切换本身不得制造 gap。
 - **应用重启与机器重启都先恢复布局，再恢复语义 Session**。启动时以持久化布局为索引，自动尝试对每个仍有有效 Provider-native handle 的 Agent Session 建立新 Run/attachment；用户不需要先点 `Resume` 才能看到可恢复的 Agent。恢复成功沿用原 View/Region，Run id 可以变化但 Session id 不变。
 - **重启恢复必须使用同一个持久化根目录**。Renderer 的 Workbench 布局与 Core 的 Agent Session store 都绑定 Electron `app.getPath('userData')`；开发启动、打包 App、DMG 安装副本不得各自生成一份 store。启动恢复前若发现路径身份不一致，必须保留原布局并在服务窗说明实际路径，不能把空 store 当成“没有 Session”。
@@ -89,7 +92,7 @@
   - **Core 没给原因时如实说不知道，不挑一类当默认**。把未知显示成"Provider 不支持"会把用户支去新开 Agent，而真相可能只是 Host 掉线。分不清就说分不清，这与「未知不得当作正常」同源。
   - 分类判定落在渲染层之外的纯函数里，且**对原因的分支不设 default**：Core 日后新增一个原因时，这里必须**编译不过**，而不是安静折进某句通用文案。
 - **恢复动作必须幂等**。同一 Agent Session 在重复启动、窗口重新聚焦或 Topic 重进时，若已有精确匹配的 live Run 只能 attach；若 Run 已丢失且 handle 有效，只允许创建一个新的 Provider-native Run。任何迟到的旧 Run 事件都不得覆盖新的绑定。
-- **机器重启后的边界必须如实表达**：旧 PTY 进程、ctxmux 内存 scrollback 与 pending interaction 不承诺可恢复；可恢复的是持久化的 Agent Session 语义身份及 Provider 自己支持的 resume。于是重启后终端可能从新 Run 的首屏开始，但布局、Agent 身份与自动恢复动作必须仍在。
+- **机器重启后的边界必须如实表达**：旧 PTY 进程、ctxmux 内存 scrollback 与 pending interaction 不承诺可恢复；可恢复的是持久化的 Agent Session 语义身份及 Provider 自己支持的 resume。于是重启后终端可能从新 Run 的首屏开始，但布局、Agent 身份与自动恢复动作必须仍在。**布局仍在的含义是它的每一面都能用**：一个恢复出来的文件面必须真的把文档装上，而不是留一个报「不可用」的空壳；文件确已不在磁盘上时，走的是与「打开着的文件被删」完全同一条既有失败态，不另造一种。
 
 ### 寻址与复制
 
@@ -204,6 +207,16 @@
 - Composer 属于 Agent Session Region，不属于 Activity。Agent 的 Terminal 与 Activity 只是同一 Session 的两种投影；切换投影时 Composer 必须保持挂载，不能清空未发送草稿。
 - Activity 投影画成时序日志而非卡片流，但日志有**两个寄存器共用同一条 spine**。机器上报（tool_call / permission / lifecycle）保持 24px 紧凑行：一连串 native-hook 步骤折叠成一条 “N steps” 摘要，展开后字节完全相同的重复合并为一行并标 xN，重试循环因此读作一个事实；工具调用的 argv 默认折叠、按需展开。人真正要读的**对话回合**（user_message、assistant_message）脱离这条机器寄存器：它们沿同一条 spine、同一个 20px 节点槽渲染，但正文用 13px 主色、caption 只是一枚安静的 speaker 标签，始终完整渲染、永不折叠——那是 trace 的实质，不是 payload。折叠只按 kind 收机器步骤，assistant 回合虽是 native-hook 也绝不被卷进折叠；不为任一回合重建 per-hook 卡片。User 正文用 `--surface-1` 圆角填充给出起止边界（描边不作手段），Assistant 正文在工作面上流动，二者靠 blue/green 图标与填充差别在一眼之内区分。顶部 ruler 的诚实时间轴与无跨度时的序数退化见 [`agentmux-surface-density.md`](./agentmux-surface-density.md) 的 Activity Ruler。
 - 每个 Agent Region 都显示同一个 Composer。Agent 尚在启动、已经断连、退出或中断时仍显示，但在 Agent Run 不可交互时禁用；Raw Terminal 永远不显示 Agent Composer。
+- **对话体的说话人要有头像与身份，而不是一枚文字 caption；ruler 分两条轴**。用户原话：「现在有很多 bug, 比如 user 消息也会被收进 Agent 的历史, 感觉不够优雅」「在进度条上, 也可以分成自我 Agent 轴, 和 说话人 轴, 说话人这条轴, 考虑到接下来可能有 A2A, 所以最好的方法是, 在说话人轴上显示头像, hover 是有面板展现原话, 然后自我 Agent 轴上, Agent 说话了的情况也可以用头像」「要做成可复用组件」。
+  - **今天的缺口是身份被压成了一个二值**：`Turn` 只按 `kind === 'user_message'` 在 `'You'` 与 `'Assistant'` 之间选一个文字 caption，于是"谁说的"只有两种可能。A2A 一旦落地（见 [`发起协作`](#交出去与派出去) 与 A2A 设计包），说话人就是**开放集**——多个 Agent、以及代表用户的那个身份，都要能在同一条对话里被认出来。把开放集塞进二值 caption，就是今天这个"不够优雅"的根：user 消息与 Agent 自己的话共用一种形状，读起来像是被"收进"了 Agent 的历史。
+  - **两条轴回答两个不同问题，所以是两条而不是一条**。**自我 Agent 轴**回答"这个 Agent 这一轮在干什么"（机器上报的节奏、工具步骤、这一轮的跨度）；**说话人轴**回答"这段话是谁说的"。二者时间基准同源（同一条诚实时间轴），但值域不同——前者是一个 Agent 的活动强度，后者是若干个身份的出现位置。合成一条会让"Agent 在忙"与"有人说话"抢同一个视觉通道，而这恰恰是用户要分开看的两件事。
+  - **说话人轴上是头像，hover 出面板展现原话**。**当前这条轴上只会有人类用户的发言**——用户原话：「所以现在在用户或者说话人的这条轴上, 应该只会有人类用户的发言」。A2A 只做**设计预留**，不要求真的完成：身份按开放集建模（轴能并置多个头像、身份不由 `kind` 反推），但今天的实际值域就是一个人类用户。这个区分很重要——预留的是**形状**，不是一条现在就要点亮的功能；把 A2A 当成本轮交付会让一个还没有真实数据源的轴先长出空槽。头像是开放集在窄轴上唯一站得住的表示：文字 caption 在多身份下会挤成一团，而头像既能表达身份、又能在一个 16-20px 的轴上并置多个。**自我 Agent 轴上，Agent 说话了的那些位置同样用头像**——两条轴共用同一套身份表示，不是各画一套。hover 面板给的是**原话**，不是摘要：轴的作用是让人在不滚动的情况下找到"那句话在哪儿"，摘要会让这个用途失效。
+  - **必须是一个可复用组件，按轴的语义参数化，不是两个组件**。这与 Board「一个 Board 组件按行来源参数化，不是两个 Board」同源：两条轴共用时间基准、共用头像表示、共用 hover 锚定（复用既有 `terminalLinkPreviewAnchor`，那条"永不遮挡它所描述的东西"的规矩已经在 ruler 与终端链接预览之间共用了一次，不能在这里开第三份）。分成两个组件，就等于给"轴怎么定位、头像怎么画、面板怎么锚"各开两份答案，日后必然漂移。
+  - **主视觉要服务 A 端快速交互，不是服务阅读一篇文章**。用户原话：「着重考虑主视觉和相关设计语言, 是否最符合和 Agent / A 端的快速交互特点」。与 Agent 交互的实际节奏是**扫**而不是**读**：用户要在一屏里判断"轮到我了吗、上一句我说了什么、它现在卡在哪"。所以视觉权重给这三件事，而不是给装饰——头像与轴让"谁说的"在一眼之内落位，正文保持既有的 13px 主色不被削弱，机器上报继续压在 24px 紧凑行。任何让扫视变慢的处理（额外描边、每条消息一张卡、头像加光晕）都与这条相悖。
+  - **样式要能移植到手机**。用户原话：「这个样式要能够比较好地移植到手机上去, 尽量照顾到」。这对轴的实现有硬约束：hover 在触屏上不存在，所以"hover 出面板"必须有一条**同源的**点按通路（同一个面板、同一套锚定，不是另写一个移动端组件）；轴的命中区要够大（触屏最小命中尺寸远大于鼠标）；两条轴在窄屏下要能退化而不是横向溢出。这条不要求本轮真的出移动端，但**不许做出一个只能靠 hover 才能用的轴**——那会让移植变成重写。
+  - **顶部那条从 DSH 炼化来的进度条要保留**。它比其他实现更强的部分（诚实时间轴、每行偏移、无跨度时退化为序数）是既有资产，新增的两条轴是**在它之上分轴**，不是替换它。任何"重写一个更简单的 ruler"的方案都要先解释它如何不丢这三条。
+  - **身份来源必须有唯一权威，不在渲染层猜**。头像取自哪个身份事实（Agent 的 providerId/label、还是 A2A 的参与者身份）需要在 Core 侧有明确出处；渲染层不得按 `kind` 反推身份，那正是今天二值 caption 的形态。这条与「显示名与身份严格分离」同一条约束：身份用于寻址与取头像，显示名只用于显示。
+  - 未验证、动手前要先确认的：**timeline 上今天有没有能承载"开放集说话人"的字段**。`AgentTimelineItem` 的 `source`/`kind` 是闭集（见上文 skill 那条同样撞到这个闭集），若没有身份字段，这就是一次**公共合同变更**而不是 Renderer 的自由——与 skill 派发需要新增 kind 是同一类判断，不得在 Renderer 里靠 `label` 字符串凑。
 - **Composer 在 TUI 投影下可收起成一枚悬浮按钮，在对话投影下始终展示**。用户原话：「在对话模式下始终展示，但在 TUI 模式下要能够支持收起，收起到一个小的悬浮按钮里面」。两种投影要的东西不同：对话投影里 Composer 就是主输入，收起等于把这个界面的用途拿掉；TUI 投影里用户是在直接和 CLI 的全屏界面打交道，此时固定占一条高度的 Composer 会挤掉正被阅读的终端内容。三条边界：
   - **收起只是隐藏，不是卸载**。草稿必须活过收起再展开——Composer 挂载点不变（同一 Region、同一 adapter），否则收起就成了一次静默的清空，与"切换投影时不能清空未发送草稿"是同一条约束。
   - **收起状态按 Region 记，且只在 TUI 投影下有意义**。切回对话投影时无条件展示，不去记忆"用户在对话模式下也收起过"——那是一个用户没法表达的状态。
@@ -256,6 +269,7 @@ Desktop 刷新或重新 Attach 时优先投影这份 Agent 语义；新的 Run `
 - **可恢复的 busy 不是永久失败**。当 WAL checkpoint 因短暂 reader/attachment 争用未能归零时，ctxmux 必须在有界窗口内重试并继续 FIFO 写入；一次可恢复的 busy 不得把 persistence actor 锁存在 `durable state rejected`，也不得让后续 Terminal 创建或 semantic resume 永久失败。
 - **真正的数据完整性或不变量失败仍需 fail closed**。无法确认 WAL 已安全回收、SQLite 报告 corruption、磁盘空间不足或 checkpoint 在有界窗口内持续失败时，界面要保留原投影并给出可操作的服务窗告示；不得静默丢掉 Run、Session 或布局，也不得手工删除/截断用户状态。
 - **健康边界必须可观测**。ctxmux 对外给出可区分的 recovered、busy-retry-exhausted、disk-full 与 corruption 结果；Desktop 的 Terminal/Resume 入口沿用同一结果分类，不把所有底层错误折叠成“Agent resume unavailable”。
+- **持久化故障回归必须是隔离注入，而不是破坏宿主**。测试在临时 state-dir 中注入一次可控的 SQLite I/O 失败，验证 mutation 的失败分类、后续写入的边界以及 daemon 重启后的恢复；不得填满宿主磁盘、触碰用户 runtime、杀掉宿主应用或把测试故障伪装成真实用户数据损坏。
 
 ### Browser 工作面
 
