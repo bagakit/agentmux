@@ -33,11 +33,17 @@
   background: color-mix(in srgb, var(--blue) 16%, var(--surface-0));
 }
 
-/* Agent. Hue is driven by the id via the `--speaker-hue` custom property the component sets; two agents on
-   the same provider therefore share one brand glyph but get different chip colours, which is how the open
-   set of A2A identities stays distinguishable. The fallback hue (145, the green family) only applies if the
-   property is ever missing, so the chip is never colourless. */
+/* Agent. Hue is driven by the id: the component sets `--speaker-hue` inline, and inline wins over this class
+   selector, so two agents on the same provider share one brand glyph but get different chip colours — that is
+   how the open set of A2A identities stays distinguishable.
+
+   The default is DECLARED here rather than hidden in a `var(..., 145)` fallback. Two reasons, both structural.
+   A declared default is visible to a reader scanning this rule, and to the sheet-wide guard that reports a
+   `var()` referencing a name nothing declares — that guard reads declarations, so an undeclared property with
+   an inline-only writer looks exactly like the silent-failure bug it exists to catch. Declaring it is also the
+   pattern already established here for a component-injected property (see `--tree-depth` in dock.css). */
 .conversation-avatar--agent {
-  color: hsl(var(--speaker-hue, 145) 62% 72%);
-  background: hsl(var(--speaker-hue, 145) 45% 68% / 0.18);
+  --speaker-hue: 145;
+  color: hsl(var(--speaker-hue) 62% 72%);
+  background: hsl(var(--speaker-hue) 45% 68% / 0.18);
 }

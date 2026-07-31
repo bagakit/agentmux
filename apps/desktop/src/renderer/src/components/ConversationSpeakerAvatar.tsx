@@ -82,7 +82,6 @@ export function ConversationSpeakerAvatar({
   return (
     <span
       className={`conversation-avatar conversation-avatar--${speaker.role}`}
-      data-speaker-role={speaker.role}
       role="img"
       aria-label={name}
       title={name}
