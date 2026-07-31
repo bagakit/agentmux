@@ -297,3 +297,89 @@ describe('Project Rail style contract', () => {
     expect(source).toContain('.project-rail-row__activity .status__dot')
   })
 })
+
+describe('Project Rail 的分组与嵌套', () => {
+  const chrome = readFileSync(
+    new URL('../src/renderer/src/styles/chrome.css', import.meta.url),
+    'utf8'
+  )
+
+  /** 分组头的标签，按出现顺序。 */
+  function groupLabels(markup: string): string[] {
+    return [...markup.matchAll(/class="project-rail-group__label"[^>]*>([^<]*)</g)].map(
+      (match) => match[1]!
+    )
+  }
+
+  /**
+   * 按 aria-label **精确**取一行。不能复用上面的 `rowFor`：它允许 label 后面跟别的字符
+   * （那是为了匹配 `Alpha · 2 Agents are running` 这种带状态后缀的名字），于是
+   * `agentmux` 会同时命中 `agentmux-preview`——而这两个正是本节要区分的东西。
+   */
+  function exactRow(markup: string, name: string): string {
+    const rows = [...markup.matchAll(/<button[^>]*class="[^"]*project-rail-row[^"]*"[\s\S]*?<\/button>/g)]
+      .map((match) => match[0])
+      .filter((row) => new RegExp(`aria-label="${name}"`).test(row))
+    expect(`${name}: ${rows.length} 行`).toBe(`${name}: 1 行`)
+    return rows[0]!
+  }
+
+  /** 这一行的缩进层数；没有注入就是 0（样式表里声明了默认值）。 */
+  function depthOf(row: string): number {
+    return Number(row.match(/--rail-depth:\s*(\d+)/)?.[1] ?? 0)
+  }
+
+  function useWorkspaces(paths: [string, string][], hostId = 'local'): void {
+    fixture.state.config = {
+      ...structuredClone(config),
+      workspaces: [
+        { id: '__scratch__', name: 'Scratch', hostId: 'local', path: '/scratch', kind: 'folder' },
+        ...paths.map(([id, path]) => ({ id, name: id, hostId, path, kind: 'folder' as const }))
+      ]
+    }
+    fixture.state.activeWorkspaceId = '__scratch__'
+  }
+
+  it('groups siblings under their shared parent directory and leaves a lone project ungrouped', () => {
+    // 用户：「假设两个 projects 在同一个目录下，就在界面中显示它们的分组」。
+    useWorkspaces([['agentmux', '/proj/kit/agentmux'], ['avatars', '/proj/kit/avatars'], ['solo', '/elsewhere/solo']])
+    const markup = renderRail()
+    // 只有一个分组头：`kit` 领着两个，`elsewhere` 只领 solo 一个所以不成组。
+    expect(groupLabels(markup)).toEqual(['kit'])
+    expect(exactRow(markup, 'solo')).toContain('project-rail-row')
+  })
+
+  it('indents a nested project without pushing its title onto a second line', () => {
+    // 用户：「把处于子目录的 project 向前缩进，形成一个树结构」。缩进走 padding 不换行——
+    // 密度合同要求项目行**一行只占一行**，缩进不能把它撑成两行。
+    useWorkspaces([['outer', '/w/outer'], ['inner', '/w/outer/inner'], ['other', '/w/other']])
+    const markup = renderRail()
+    expect(depthOf(exactRow(markup, 'outer'))).toBe(0)
+    expect(depthOf(exactRow(markup, 'inner'))).toBe(1)
+    expect(depthOf(exactRow(markup, 'other'))).toBe(0)
+    // 注入的自定义属性必须在样式表里有默认值，否则未注入的行整条 padding 失效。
+    expect(chrome).toContain('--rail-depth: 0')
+    expect(chrome).toContain('var(--rail-depth)')
+  })
+
+  it('keeps a name-prefix neighbour at the top level instead of nesting it', () => {
+    // `…/agentmux-preview` 以 `…/agentmux` 开头但不在它里面。裸 startsWith 会把它错判成子节点。
+    useWorkspaces([['agentmux', '/proj/agentmux'], ['agentmux-preview', '/proj/agentmux-preview']])
+    const markup = renderRail()
+    expect(depthOf(exactRow(markup, 'agentmux'))).toBe(0)
+    expect(depthOf(exactRow(markup, 'agentmux-preview'))).toBe(0)
+  })
+
+  it('renders the group header as a label, not as a selectable row', () => {
+    // 分组头不是 Project：点它没有任何东西可以被激活，所以它不能是 button，也不该有选中态。
+    useWorkspaces([['one', '/proj/kit/one'], ['two', '/proj/kit/two']])
+    const markup = renderRail()
+    const header = markup.match(/<[a-z]+[^>]*class="project-rail-group__label"[^>]*>/)?.[0] ?? ''
+    expect(header).not.toBe('')
+    expect(header.startsWith('<button')).toBe(false)
+    expect(header).not.toContain('aria-current')
+    expect(header).not.toContain('project-rail-row__count')
+    // 完整路径进 tooltip——分组头只显示最后一段，但要答得出它是哪个目录。
+    expect(header).toContain('title="/proj/kit"')
+  })
+})
