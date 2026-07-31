@@ -1304,6 +1304,18 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             recovered = true
           } else if (recovery.kind === 'unavailable' || recovery.kind === 'conflict') {
             recoveryFailures.push(recoveryCandidateSession(candidate, recovery))
+          } else if (recovery.kind === 'retired') {
+            // Retired means an actor deliberately ended this Agent, so the Region must NOT be retained
+            // — the same judgement the manual path makes (`recoverSession` removes the projection on
+            // `retired`), and the reason the empty-snapshot guard above names "an explicit retirement"
+            // as legitimate grounds to stop retaining. What was missing is the *telling*: unavailable
+            // and conflict both leave a visible error skeleton, while a retirement removed the Region
+            // in total silence, so a Region the user left behind was simply gone with `error` null.
+            // Say it instead. Deleting this arm turns the startup notice assertion red, not a tab
+            // count — the tab is correctly absent either way.
+            startupWarnings.push(
+              `The Agent in a saved Region was retired and could not be restored (${candidate.label}). Its Region was closed; start a new Agent to continue there.`
+            )
           }
         } catch (error) {
           // A rejected recovery call is a failed workflow step, not proof that the Agent is dead. Do
