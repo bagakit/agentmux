@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createWorkbenchTabCopyModel } from '../src/renderer/src/components/WorkbenchTabContextMenu.js'
 import { createRegionCopyModel } from '../src/renderer/src/components/RegionContextMenu.js'
 import {
-  formatHandoffAddress,
+  formatMessagingAddress,
   formatSessionAddress,
   formatViewAddress
 } from '../src/renderer/src/lib/agent-address.js'
@@ -144,7 +144,7 @@ describe('Tab 菜单与 Region 菜单同源', () => {
     })
     expect(tabModel.handoff?.label).toBe('Message this Agent')
     await tabModel.handoff?.onSelect()
-    expect(fromTab).toHaveBeenCalledWith(formatHandoffAddress({ agentSessionId: 'agent-7' }))
+    expect(fromTab).toHaveBeenCalledWith(formatMessagingAddress({ agentSessionId: 'agent-7' }))
     expect(fromTab.mock.calls[0]![0]).toBe(formatSessionAddress('agent-7'))
 
     const fromRegion = vi.fn(async (_text: string) => {})

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createRegionCopyModel } from '../src/renderer/src/components/RegionContextMenu.js'
 import {
-  formatHandoffAddress,
+  formatMessagingAddress,
   formatRegionAddress,
   formatSessionAddress
 } from '../src/renderer/src/lib/agent-address.js'
@@ -55,7 +55,7 @@ describe('Region 右键菜单：点哪格就是哪格', () => {
     })
     expect(model.handoff?.label).toBe('Message this Agent')
     await model.handoff?.onSelect()
-    expect(writeClipboardText).toHaveBeenCalledWith(formatHandoffAddress({
+    expect(writeClipboardText).toHaveBeenCalledWith(formatMessagingAddress({
       agentSessionId: 'agent-7',
       regionId: 'region:pane-2'
     }))

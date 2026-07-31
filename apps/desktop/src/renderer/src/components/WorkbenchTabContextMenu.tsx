@@ -18,7 +18,7 @@ import {
 import type { ReactNode } from 'react'
 import { WORKBENCH_TAB_SPLIT_ACTIONS, type MoveSessionViewTarget } from '../lib/workbench-tab-actions'
 import type { SplitDirection } from '../lib/workbench-layout'
-import { formatHandoffAddress, formatSessionAddress, formatViewAddress } from '../lib/agent-address'
+import { formatMessagingAddress, formatSessionAddress, formatViewAddress } from '../lib/agent-address'
 
 const SPLIT_ICONS = {
   left: ArrowLeft,
@@ -76,7 +76,7 @@ export function createWorkbenchTabCopyModel({
           handoff: {
             label: 'Message this Agent' as const,
             onSelect: async () =>
-              copy(formatHandoffAddress({ agentSessionId }), 'Message this Agent')
+              copy(formatMessagingAddress({ agentSessionId }), 'Message this Agent')
           },
           sessionAddress: {
             label: 'Copy Session Address' as const,
