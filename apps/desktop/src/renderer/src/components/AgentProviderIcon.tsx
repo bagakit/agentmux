@@ -54,7 +54,19 @@ function PiIcon({ size }: { size: number }) {
   )
 }
 
-export function AgentProviderIcon({ providerId, size = 14 }: { providerId: AgentProviderId; size?: number }) {
+/**
+ * 一个 Provider 的离线身份标记。
+ *
+ * `providerId` 是**可选**的，因为「这个 Session 归哪个 Provider」本身就可能不存在或查不到：终端
+ * Session 没有 Provider（`WorkspaceBoard` 的 `session.providerId` 就是 optional），而按 id 去 store
+ * 反查也会在 Session 已退场、store 未装载时落空。缺失时走 `Bot` 兜底，这与未知的自定义 provider
+ * 是同一条路——都不冒充某个内置 Agent。
+ *
+ * 这个签名是可选而不是必填，为的是**不让每个调用方各造一个绕法**：必填时调用方要么在外面写
+ * `providerId ? <Icon/> : null`（于是缺失时整枚标记消失，留一个无法解释的空位），要么传 `''`
+ * 之类的假值把「不存在」编码成一个合法值。两种都是把同一个判断复制到调用处。
+ */
+export function AgentProviderIcon({ providerId, size = 14 }: { providerId?: AgentProviderId; size?: number }) {
   let icon: ReactNode
   switch (providerId) {
     case 'codex': icon = <CodexIcon size={size} />; break
@@ -72,7 +84,9 @@ export function AgentProviderIcon({ providerId, size = 14 }: { providerId: Agent
     <span
       className="agent-provider-icon"
       data-agent-provider={providerId}
-      data-agent-provider-known={Object.prototype.hasOwnProperty.call(BUILT_IN_AGENT_LABELS, providerId)}
+      data-agent-provider-known={
+        providerId !== undefined && Object.prototype.hasOwnProperty.call(BUILT_IN_AGENT_LABELS, providerId)
+      }
       style={{ width: size, height: size }}
       aria-hidden="true"
     >

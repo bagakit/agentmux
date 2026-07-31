@@ -34,6 +34,21 @@ describe('AgentProviderIcon', () => {
     expect(markup).toContain('<svg')
   })
 
+  it('provider 缺失时仍画出一枚中性标记——不消失、也不冒充某个内置 Agent', () => {
+    // `providerId` 是 optional，因为「这个 Session 归哪个 Provider」本身可能不存在（终端 Session
+    // 没有 Provider）或查不到（Session 已退场、store 未装载）。缺失这条路以前不是合法输入，于是
+    // 三个调用方各自在外面写 `providerId ? <Icon/> : null`（WorkspaceBoard:109、SurfaceToolDock:787、
+    // QuickSwitcher:23）——那让标记在缺失时**整枚消失**，留下一个无法解释的空位。
+    //
+    // 这条钉住缺失有它自己的画法：有 glyph、known 为 false（不冒充内置）、尺寸仍生效。
+    const markup = renderToStaticMarkup(createElement(AgentProviderIcon, { size: 16 }))
+    expect(markup).toContain('<svg')
+    expect(markup).toContain('data-agent-provider-known="false"')
+    // 且不许把缺失编码成某个字符串值：`data-agent-provider` 要么缺席，要么不是空串那种假值。
+    expect(markup).not.toContain('data-agent-provider=""')
+    expect(markup).toContain('width:16px')
+  })
+
   it('uses one shared display label mapping across Agent surfaces', () => {
     expect(['codex', 'claude', 'traex', 'hermes', 'pi'].map(agentProviderLabel)).toEqual([
       'Codex',

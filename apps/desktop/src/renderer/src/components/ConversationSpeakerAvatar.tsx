@@ -88,7 +88,10 @@ export function ConversationSpeakerAvatar({
       style={style}
     >
       {isAgent ? (
-        <AgentProviderIcon providerId={providerId ?? ''} size={glyphSize} />
+        // `providerId` 原样传下去，缺失就是缺失——`AgentProviderIcon` 的签名承认这一路（缺失走 Bot
+        // 兜底），所以这里不需要把「查不到」编码成一个假值。`exactOptionalPropertyTypes` 下显式
+        // `undefined` 不能喂给 optional 属性，故按缺席传，而不是退回 `?? ''` 那种假值。
+        <AgentProviderIcon {...(providerId === undefined ? {} : { providerId })} size={glyphSize} />
       ) : (
         <UserRound size={glyphSize} strokeWidth={1.9} aria-hidden="true" />
       )}
