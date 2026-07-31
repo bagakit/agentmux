@@ -1,8 +1,13 @@
 import { Pin, Plus, RadioTower } from 'lucide-react'
-import { useMemo } from 'react'
+import { useMemo, type CSSProperties } from 'react'
 import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
 import { api } from '../lib/api'
-import { projectRailNavigation, workspaceProjectId } from '../lib/workspace-projects'
+import {
+  projectRailNavigation,
+  projectRailTree,
+  workspaceProjectId,
+  type ProjectRailNode
+} from '../lib/workspace-projects'
 import { rowAttention, rowAttentionLabel } from '../lib/row-attention'
 import { workingAgentCount } from '../lib/project-board'
 import { useAppStore } from '../store'
@@ -44,6 +49,85 @@ export function WorkspaceSidebar({
     if (!workspace || !config) return
     setConfig({ ...config, workspaces: [...config.workspaces, workspace] })
     await selectWorkspace(workspace.id)
+  }
+
+  function projectRow({ project, depth }: ProjectRailNode) {
+    const projectSessions = sessions.filter((session) =>
+      project.workspaces.some((workspace) => workspaceOwnsSessionPath(workspace, session))
+    )
+    const sessionCount = projectSessions.length
+    // Rolled up from the same Session projection the window bar and the tab dots read, so a
+    // collapsed project can no longer hide an Agent that is waiting on you.
+    const attention = rowAttention(projectSessions)
+    const attentionLabel = rowAttentionLabel(attention)
+    const runningAgentCount = workingAgentCount(projectSessions)
+    const runningLabel = runningAgentCount > 0
+      ? `${runningAgentCount} ${runningAgentCount === 1 ? 'Agent is' : 'Agents are'} running`
+      : null
+    const rowStateLabel = [runningLabel, attentionLabel].filter(Boolean).join(' · ')
+    // One badge, one number, and it is the number for whatever the row is currently signalling.
+    // Attention outranks running because the CSS recolours THIS badge and hangs the `?`/`!` glyph
+    // on it — hiding it whenever nothing is working would take the needs-you signal down with it,
+    // which is the exact gap the rollup was built to close.
+    const railBadge = attention.category ? attention.count : runningAgentCount || null
+    // Everything the row stopped showing still has to be answerable, so it lands here.
+    const countTitle = [
+      `${project.workspaces.length} ${project.workspaces.length === 1 ? 'worktree' : 'worktrees'}`,
+      `${sessionCount} ${sessionCount === 1 ? 'session' : 'sessions'}`,
+      ...(rowStateLabel ? [rowStateLabel] : [])
+    ].join(' · ')
+    const active = project.id === activeProjectId
+    const preferred = active
+      ? activeWorkspaceId
+      : project.preferredWorkspaceId
+    return (
+      <button
+        key={project.id}
+        className={`project-rail-row ${active ? 'project-rail-row--active' : ''}`}
+        title={rowStateLabel ? `${project.repoPath} · ${rowStateLabel}` : project.repoPath}
+        aria-label={rowStateLabel ? `${project.name} · ${rowStateLabel}` : project.name}
+        data-workspace-id={preferred ?? undefined}
+        // 缩进只表达"这个 Project 在上一个 Project 的目录里"。深度走自定义属性而不是内联
+        // padding：具体几像素归样式表（密度合同《Project Rail Nesting Indent》），这里只报层数。
+        {...(depth > 0 ? { style: { '--rail-depth': depth } as CSSProperties } : {})}
+        {...(attention.category ? { 'data-attention': attention.category } : {})}
+        {...(runningAgentCount > 0 ? { 'data-running': 'true' } : {})}
+        onClick={() => {
+          if (!preferred) return
+          const keepBoardOpen = mainSurface === 'board'
+          void selectWorkspace(preferred).then(() => {
+            if (keepBoardOpen) setMainSurface('board')
+          })
+        }}
+      >
+        <span className="project-rail-row__identity">
+          <strong>{project.name}</strong>
+          {/* Host only earns a slot when it is NOT this machine. `This Mac` on every row is a
+              column of identical metadata — it distinguishes nothing and costs the title its
+              width (same rule as the identical leading icons, 控件语言). */}
+          {project.hostId !== 'local' ? (
+            <small><RadioTower size={9} /> {project.hostId}</small>
+          ) : null}
+        </span>
+        <span
+          className="project-rail-row__activity status status--working"
+          aria-hidden="true"
+          title={runningLabel ?? undefined}
+        >
+          {runningAgentCount > 0 ? <span className="status__dot" /> : null}
+        </span>
+        {/* The badge answers "is anyone working in there right now" — so it counts running
+            Agents, not worktrees. A worktree count is repository structure; it answers a
+            different question and reads as a column of `1`s. It keeps its place in the
+            tooltip, where low-frequency facts belong (身份归属). Zero renders nothing at
+            all: a badge that is always the same number carries no information. */}
+        {railBadge !== null ? (
+          <span className="project-rail-row__count" title={countTitle}>
+            {railBadge}
+          </span>
+        ) : null}
+      </button>
+    )
   }
 
   return (
@@ -96,81 +180,18 @@ export function WorkspaceSidebar({
         <button className="icon-button" onClick={() => void chooseFolder()} title="Add project folder"><Plus size={15} /></button>
       </div>
       <nav className="project-list" aria-label="Projects">
-        {projects.map((project) => {
-          const projectSessions = sessions.filter((session) =>
-            project.workspaces.some((workspace) => workspaceOwnsSessionPath(workspace, session))
-          )
-          const sessionCount = projectSessions.length
-          // Rolled up from the same Session projection the window bar and the tab dots read, so a
-          // collapsed project can no longer hide an Agent that is waiting on you.
-          const attention = rowAttention(projectSessions)
-          const attentionLabel = rowAttentionLabel(attention)
-          const runningAgentCount = workingAgentCount(projectSessions)
-          const runningLabel = runningAgentCount > 0
-            ? `${runningAgentCount} ${runningAgentCount === 1 ? 'Agent is' : 'Agents are'} running`
-            : null
-          const rowStateLabel = [runningLabel, attentionLabel].filter(Boolean).join(' · ')
-          // One badge, one number, and it is the number for whatever the row is currently signalling.
-          // Attention outranks running because the CSS recolours THIS badge and hangs the `?`/`!` glyph
-          // on it — hiding it whenever nothing is working would take the needs-you signal down with it,
-          // which is the exact gap the rollup was built to close.
-          const railBadge = attention.category ? attention.count : runningAgentCount || null
-          // Everything the row stopped showing still has to be answerable, so it lands here.
-          const countTitle = [
-            `${project.workspaces.length} ${project.workspaces.length === 1 ? 'worktree' : 'worktrees'}`,
-            `${sessionCount} ${sessionCount === 1 ? 'session' : 'sessions'}`,
-            ...(rowStateLabel ? [rowStateLabel] : [])
-          ].join(' · ')
-          const active = project.id === activeProjectId
-          const preferred = active
-            ? activeWorkspaceId
-            : project.preferredWorkspaceId
-          return (
-            <button
-              key={project.id}
-              className={`project-rail-row ${active ? 'project-rail-row--active' : ''}`}
-              title={rowStateLabel ? `${project.repoPath} · ${rowStateLabel}` : project.repoPath}
-              aria-label={rowStateLabel ? `${project.name} · ${rowStateLabel}` : project.name}
-              data-workspace-id={preferred ?? undefined}
-              {...(attention.category ? { 'data-attention': attention.category } : {})}
-              {...(runningAgentCount > 0 ? { 'data-running': 'true' } : {})}
-              onClick={() => {
-                if (!preferred) return
-                const keepBoardOpen = mainSurface === 'board'
-                void selectWorkspace(preferred).then(() => {
-                  if (keepBoardOpen) setMainSurface('board')
-                })
-              }}
-            >
-              <span className="project-rail-row__identity">
-                <strong>{project.name}</strong>
-                {/* Host only earns a slot when it is NOT this machine. `This Mac` on every row is a
-                    column of identical metadata — it distinguishes nothing and costs the title its
-                    width (same rule as the identical leading icons, 控件语言). */}
-                {project.hostId !== 'local' ? (
-                  <small><RadioTower size={9} /> {project.hostId}</small>
-                ) : null}
-              </span>
-              <span
-                className="project-rail-row__activity status status--working"
-                aria-hidden="true"
-                title={runningLabel ?? undefined}
-              >
-                {runningAgentCount > 0 ? <span className="status__dot" /> : null}
-              </span>
-              {/* The badge answers "is anyone working in there right now" — so it counts running
-                  Agents, not worktrees. A worktree count is repository structure; it answers a
-                  different question and reads as a column of `1`s. It keeps its place in the
-                  tooltip, where low-frequency facts belong (身份归属). Zero renders nothing at
-                  all: a badge that is always the same number carries no information. */}
-              {railBadge !== null ? (
-                <span className="project-rail-row__count" title={countTitle}>
-                  {railBadge}
-                </span>
-              ) : null}
-            </button>
-          )
-        })}
+        {projectRailTree(projects).map((group) => (
+          <div className="project-rail-group" key={`${group.hostId}:${group.groupPath ?? group.nodes[0]?.project.id}`}>
+            {/* 分组头是标签不是行：不可点击、无选中态、无计数。它只在真的领着两个以上顶层
+                Project 时才出现——只领一个成员时它说不出"这几个是一伙的"，就只是又一行占位。 */}
+            {group.label ? (
+              <div className="project-rail-group__label" title={group.groupPath ?? undefined}>
+                {group.label}
+              </div>
+            ) : null}
+            {group.nodes.map((node) => projectRow(node))}
+          </div>
+        ))}
         {projects.length === 0 ? (
           <div className="workspace-list__empty"><strong>No projects yet</strong><span>Add a local folder, then manage its branches and worktrees from the navigator.</span><button className="small-button" onClick={() => void chooseFolder()}><Plus size={12} /> Add project</button></div>
         ) : null}

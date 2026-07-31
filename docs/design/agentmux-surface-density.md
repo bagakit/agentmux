@@ -206,7 +206,9 @@
 | Pane Tabbar | 31px | 分屏 leaf 的紧凑索引高度 |
 | Project Rail Footer / Corner Badge | 32px / 28px | Footer 只容纳两个 24px 图标入口 |
 | Project Rail Section Label | `--fs-micro`；轻字重；紧凑上下留白 | `Projects` 是分组标签，不是页面标题；项目名称保持主要阅读层级 |
+| Project Rail Group Header | 22–24px；`--fs-micro`；轻字重；不可点击 | 共同父目录的名字（只显示最后一段，完整路径进 tooltip）。它是标签不是行：无选中态、无计数、无 hover 填充。**只领一个成员时不渲染**——分组头答的是"这几个是一伙的"，领一个人时不携带信息 |
 | Project Rail Row | 28–32px 单行；标题从统一左缘起；尾部独立运行状态槽 | 选中只用中性 Surface；运行中的 Agent 在所有相关项目行显示独立状态点；普通行不占重复图标槽。**一行只占一行**——标题与状态同处一行，不为常驻元信息另起次行。尾部计数是**在跑的 Agent 数**，不是 worktree 数：用户问的是"这个项目现在有没有人在干活"，worktree 有几个是仓库结构，答的不是同一个问题，降级进 tooltip。计数为零时不显示数字（一列全是 `1` 的徽章不携带信息，见控件语言同一条理由）。Host 只在**不是本机**时占位——`This Mac` 每行都一样，属于一列全同的元信息 |
+| Project Rail Nesting Indent | 每层 `var(--sp-4)`；最多 3 层 | 只有**真嵌套**（一个 Project 在另一个 Project 目录内）才缩进，同父目录的兄弟不缩进——缩进表达的是包含关系，不是分组。深度经 CSS 自定义属性注入，且必须在样式表里声明默认值（见控件语言「注入的自定义属性要声明默认值」）。层数封顶避免深目录把标题挤没 |
 | Explorer / Branch Header | 32–34px | 不形成第二层大 Topbar |
 | Tree Row | 24px | 保持键盘扫描和专家密度 |
 | Tool Dock Width | 默认 300px；最小 236px；最大 440px | 同时容纳 Explorer / Branches，保留主工作面容量 |
