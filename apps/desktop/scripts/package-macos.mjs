@@ -764,7 +764,10 @@ async function verifyLaunchServices(appPath, verificationRoot) {
 async function createDmg(appPath, dmgPath, temporaryRoot) {
   const dmgRoot = join(temporaryRoot, 'dmg-root')
   await mkdir(dmgRoot)
-  await run('cp', ['-cR', appPath, join(dmgRoot, basename(appPath))], { capture: true })
+  // `cp -cR` falls back to a very slow cross-volume copy on macOS when the staging root is under
+  // /private/tmp. `ditto` is the same resource-preserving primitive used for installation and keeps
+  // this DMG staging step bounded without changing the bundle bytes or symlink policy.
+  await run('ditto', ['--rsrc', '--extattr', appPath, join(dmgRoot, basename(appPath))], { capture: true })
   await symlink('/Applications', join(dmgRoot, 'Applications'))
   await run('hdiutil', [
     'create',
