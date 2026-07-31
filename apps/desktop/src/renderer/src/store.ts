@@ -81,7 +81,9 @@ import {
 } from './lib/workbench-persistence'
 import { reduceBrowserEvent } from './lib/browser-state'
 import {
+  reduceDocumentAttached,
   reduceDocumentContent,
+  reduceDocumentLoadFailed,
   reduceDocumentRead,
   reduceDocumentReloaded,
   reduceDocumentSaving,
@@ -326,6 +328,17 @@ type AppState = {
     tabGroupId?: string,
     location?: { line: number; column?: number }
   ): Promise<void>
+  /**
+   * 给一个已在板上、但还没有文档的文件面装上它的文档。
+   *
+   * 这条路只有一个来源：从持久化恢复出来的文件面。它只带 `{regionId,kind,workspaceId,path}`，
+   * 没有任何内容，而 EditorPane 一旦 `documents[key]` 缺失就渲染「不可用」——于是 tab 在、
+   * 点开报不可用，看起来像文件坏了。由 EditorPane 自己在上屏时调用，而不是启动时扫一遍：
+   * 这样非活动 Workspace 的文件面同样被覆盖（启动扫描只能对着活动 Workspace 解析路径），
+   * 且冷启动不必在窗口可用之前读完每个持久化文件。与 `openFile` 分开是因为后者还负责「打开」
+   * ——它会激活 Tab、可能搬动它、并写 reveal target，而这里 Tab 已经在用户留下的位置上了。
+   */
+  attachPersistedFileDocument(workspaceId: string, path: string): Promise<void>
   clearDocumentRevealTarget(key: string): void
   createScratchTopic(): Promise<ScratchTopicSnapshot>
   openScratchTopic(topicId: string): Promise<void>
@@ -727,6 +740,76 @@ async function refreshFileDocument(
     if (remaining === 0) fileReadInFlightCounts.delete(key)
     else fileReadInFlightCounts.set(key, remaining)
   }
+}
+
+/**
+ * Load the document for a file Region that has one persisted but not loaded.
+ *
+ * A file surface is only `{regionId,kind,workspaceId,path}` — the restore path rebuilds the layout,
+ * but nothing in a surface holds content, and `EditorPane` renders its unavailable state for any
+ * surface whose `documents[key]` is missing. Every other way a file surface appears (Explorer click,
+ * terminal link, chat link) loads the document as part of opening it; restore was the one entrance
+ * that produced a surface with no document behind it, so the user saw a Tab that is present and
+ * reports "unavailable" — which reads as a broken file rather than an unloaded one.
+ *
+ * This is called by the pane that would otherwise render that unavailable state, so the trigger is
+ * the surface coming on screen rather than a startup sweep. Two things follow, both deliberate:
+ * a file Region in a Workspace the user has not switched to yet is covered too (a startup sweep can
+ * only resolve paths against the active Workspace, so it would leave those Tabs broken until the
+ * next restart), and cold start does not read every persisted file before the window is usable.
+ *
+ * It reads through the same `api.files` seam as a click, but must not reuse `openFile`: that one
+ * also *opens* — it targets the active group, can move the Tab, and writes reveal targets. Here the
+ * Tab already exists exactly where the user left it, so only the document is missing.
+ */
+async function loadPersistedFileDocument(workspaceId: string, path: string): Promise<void> {
+  const key = documentKey(workspaceId, path)
+  const state = useAppStore.getState()
+  // Three ways this is already answered: the document is here, a read is in flight, or a previous read
+  // recorded why it cannot be loaded. The third is the one that has to live here rather than only in
+  // the calling pane — otherwise every caller would need to remember the stop condition, and a known
+  // unreadable path would be re-read once per caller.
+  if (state.documents[key] || fileOpenRequests.has(key) || state.documentIssues[key]) return
+  const openedLifetime = advanceDocumentLifetime(key)
+  const request = Promise.resolve().then(async () => {
+    try {
+      await api.files.observe(workspaceId, path)
+      const result = await api.files.read(workspaceId, path)
+      if (result.status !== 'read') {
+        await api.files.unobserve(workspaceId, path)
+        // Say which failure it was. A file deleted while the app was closed is the same fact as one
+        // deleted while open, so it lands in the same existing issue kind — whose failure state already
+        // offers Reveal (falling back to the nearest surviving ancestor). Recording it also tells the
+        // pane to stop asking: without an issue there is nothing to distinguish "not loaded yet" from
+        // "cannot be loaded", and the pane would re-read a known-bad path on every dependency change.
+        useAppStore.setState((state) => reduceDocumentLoadFailed(state, workspaceId, path,
+          result.status === 'deleted'
+            ? { kind: 'deleted' }
+            : result.status === 'directory'
+              // The persisted path is now a directory. Not a read error — the same "this is not a
+              // document" fact the click path reports, without hijacking the Files dock the way a
+              // deliberate click does: nothing the user just did warrants moving their tool panel.
+              ? { kind: 'read-error', code: 'WORKSPACE_FILE_IS_DIRECTORY', message: `Not a file: ${path}` }
+              : { kind: 'read-error', code: result.code, message: result.message }))
+        return false
+      }
+      // A Workspace removed from config between restarts, or a second load that won this race, must
+      // not install a document for a surface that is no longer there.
+      if (documentLifetime(key) !== openedLifetime || useAppStore.getState().documents[key]) {
+        await api.files.unobserve(workspaceId, path)
+        return false
+      }
+      useAppStore.setState((state) => reduceDocumentAttached(state, workspaceId, path, result.document))
+      return true
+    } catch (error) {
+      useAppStore.getState().reportError(error)
+      return false
+    } finally {
+      if (fileOpenRequests.get(key) === request) fileOpenRequests.delete(key)
+    }
+  })
+  fileOpenRequests.set(key, request)
+  await request
 }
 
 async function enqueueFileSave(
@@ -2450,6 +2533,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     } catch (error) {
       get().reportError(error)
     }
+  },
+  async attachPersistedFileDocument(workspaceId, path) {
+    await loadPersistedFileDocument(workspaceId, path)
   },
   clearDocumentRevealTarget(key) {
     set((state) => {

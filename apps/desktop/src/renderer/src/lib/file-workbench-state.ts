@@ -100,6 +100,65 @@ export function reduceFileOpened(
   }
 }
 
+/**
+ * Attach a document to a file surface that is already on the board.
+ *
+ * `reduceFileOpened` answers "the user opened this file", so it also activates the Tab and sets the
+ * Workspace's last-active file — correct for a click, wrong for a surface that is merely coming back
+ * on screen. A restored file Region already sits exactly where the user left it and only lacks its
+ * content; activating it would reorder the board (with many restored Tabs, the last one loaded would
+ * win the active slot) and rewrite last-active to a file nobody chose.
+ *
+ * So this writes the document keys and nothing else. It requires the Tab to exist: a document with no
+ * surface behind it is unreachable state, and creating the surface here would duplicate the one act
+ * `reduceFileOpened` owns.
+ */
+export function reduceDocumentAttached(
+  state: FileWorkbenchState,
+  workspaceId: string,
+  path: string,
+  document: FileDocument
+): FileWorkbenchState {
+  const key = documentKey(workspaceId, path)
+  if (state.documents[key]) return state
+  if (!state.tabs[fileTabId(workspaceId, path)]) return state
+  return {
+    ...state,
+    documents: { ...state.documents, [key]: document },
+    documentGenerations: { ...state.documentGenerations, [key]: state.documentGenerations[key] ?? 0 },
+    documentObservationGenerations: {
+      ...state.documentObservationGenerations,
+      [key]: state.documentObservationGenerations[key] ?? 0
+    },
+    documentIssues: withoutIssue(state.documentIssues, key)
+  }
+}
+
+/**
+ * Record why a persisted file surface could not be loaded, for a surface that has no document yet.
+ *
+ * `reduceDocumentRead` owns this for an OPEN document and returns state unchanged when there is none
+ * (`!current`), which is exactly the restore case: the surface is on the board, the document never
+ * loaded. Without somewhere to put the reason, `EditorPane` can only fall back to its generic
+ * unavailable state, so "this file was deleted while you were away" and "reading it failed" look
+ * identical — and the pane has no way to know it should stop retrying.
+ *
+ * The issue kinds are the existing ones, deliberately: a file deleted while the app was closed is the
+ * same fact as one deleted while open, and it should reach the same failure state (which already
+ * offers Reveal, falling back to the nearest surviving ancestor) rather than a second, restore-only one.
+ */
+export function reduceDocumentLoadFailed(
+  state: FileWorkbenchState,
+  workspaceId: string,
+  path: string,
+  issue: FileDocumentIssue
+): FileWorkbenchState {
+  const key = documentKey(workspaceId, path)
+  if (state.documents[key]) return state
+  if (!state.tabs[fileTabId(workspaceId, path)]) return state
+  return { ...state, documentIssues: { ...state.documentIssues, [key]: issue } }
+}
+
 export function reduceDocumentContent(
   state: FileWorkbenchState,
   tabId: string,

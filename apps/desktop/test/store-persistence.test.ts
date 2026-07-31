@@ -103,11 +103,16 @@ describe('Renderer persistence boundary', () => {
     expect(persisted).not.toHaveProperty('documents')
   })
 
-  it('strips runtime content out of the persisted Workbench projection (browser url/title, file path)', () => {
-    // The Workbench projection persisted under `restoredWorkbench` is the other door runtime content
-    // could walk through: a browser Region carries its live `url`/`title`, a file Region its `path`.
-    // `projectPersistedWorkbench` keeps only attached Session skeletons, so these must not appear. A
-    // future surface field or a projection change that leaks them must turn this red.
+  it('persists the file path verbatim while stripping browser page content (url/title/nav)', () => {
+    // The Workbench projection persisted under `restoredWorkbench` must carry back the file Regions a
+    // user had open — a file Region is only {regionId,kind,workspaceId,path}, has no runtime content,
+    // and its very tab id is `file:${workspaceId}:${path}`, so persisting the Region and persisting
+    // the path are the same act. This is the fix for「重启后 tab 和分屏没了」: stripping file Regions is
+    // what erased whole tabs and collapsed splits. A browser Region is different — it embeds the live
+    // BrowserSnapshot (url/title/navigationId), browsing history is a different sensitivity class, and
+    // there is no cold-start lifecycle that revives a persisted browser into a usable blank page — so
+    // the whole browser Region stays stripped. This guard must redden if a future change re-strips the
+    // file path, or starts leaking a browser's url/title/navigationId.
     const viewId = 'view:leaky'
     const agentRegionId = initialWorkbenchRegionId(viewId)
     let tab = createWorkbenchTab(viewId, {
@@ -146,14 +151,24 @@ describe('Renderer persistence boundary', () => {
     })
 
     const partialize = useAppStore.persist.getOptions().partialize
-    const persisted = partialize!(useAppStore.getState()) as { restoredWorkbench: unknown }
+    const persisted = partialize!(useAppStore.getState()) as {
+      restoredWorkbench: { tabs: Record<string, { regions: Record<string, { kind: string }> }> }
+    }
     const serialized = JSON.stringify(persisted.restoredWorkbench)
+    // Browser page content must NOT leak — the browser Region is stripped whole.
     expect(serialized).not.toContain('https://secret.example.com/private-path')
     expect(serialized).not.toContain('Secret internal dashboard')
-    expect(serialized).not.toContain('/repo/a/secret/credentials.env')
+    expect(serialized).not.toContain('nav-1')
+    // The file path is now persisted verbatim (this is the reversed decision).
+    expect(serialized).toContain('/repo/a/secret/credentials.env')
     // The attached Agent skeleton it legitimately keeps proves the projection ran (rather than the
-    // absences coming from an empty projection): sessionId identity is display state, not content.
+    // file path surviving from an empty projection): sessionId identity is display state, not content.
     expect(serialized).toContain('agent-keep')
+    // Strongest guard: the browser Region is gone entirely, not merely emptied of some fields. Any
+    // change that reintroduces a persisted browser Region (with or without its snapshot) reddens here.
+    const projectedTab = persisted.restoredWorkbench.tabs[tab.id]!
+    const persistedKinds = Object.values(projectedTab.regions).map((region) => region.kind).sort()
+    expect(persistedKinds).toEqual(['agent', 'file'])
   })
 
   it('validates persisted presentation values against current configured Workspaces and enums', () => {
@@ -467,5 +482,139 @@ describe('Renderer persistence boundary', () => {
     expect(state.tabs[tab.id]).toBeUndefined()
     expect(state.loading).toBe(false)
     dispose()
+  })
+
+  it('给恢复出来的文件面装上文档时，不许动用户留下的布局', async () => {
+    // 用户报的「重启后 tab 和分屏没了」有两半。第一半是文件面被整面剥掉（持久化侧）；第二半是
+    // 布局回来了但没人读那份文档，而 EditorPane 只要 documents[key] 缺失就渲染 unavailable 态——
+    // tab 在、点开报「不可用」，看起来像文件坏了。
+    //
+    // 装文档这件事必须与「打开文件」分开：reduceFileOpened 会 activateTab 并改写 last-active
+    // file（点击时正确），若恢复时复用它，多个恢复出的文件面会一个个抢激活位，最后加载完的那个
+    // 赢，用户离开时的活动 tab 就被换掉了。所以这里两侧都钉：文档要装上，布局一个字节不许动。
+    const filePath = 'src/restored.ts'
+    const tabId = `file:workspace-a:${filePath}`
+    const otherTabId = `file:workspace-a:src/other.ts`
+    const tab = createWorkbenchTab(tabId, {
+      regionId: initialWorkbenchRegionId(tabId),
+      kind: 'file',
+      workspaceId: 'workspace-a',
+      path: filePath
+    })
+    const otherTab = createWorkbenchTab(otherTabId, {
+      regionId: initialWorkbenchRegionId(otherTabId),
+      kind: 'file',
+      workspaceId: 'workspace-a',
+      path: 'src/other.ts'
+    })
+    // 用户离开时活动的是 otherTab；装 tab 的文档不得把活动位抢过去。
+    const layout = createWorkspaceLayout('pane', [otherTabId, tabId])
+    useAppStore.setState({
+      activeWorkspaceId: 'workspace-a',
+      config,
+      tabs: { [tabId]: tab, [otherTabId]: otherTab },
+      layouts: { 'workspace-a': layout }
+    })
+    const observe = vi.spyOn(api.files, 'observe').mockResolvedValue(undefined)
+    const read = vi.spyOn(api.files, 'read').mockResolvedValue({
+      status: 'read',
+      document: { path: filePath, content: 'export const restored = true\n', revision: 'rev-1' }
+    })
+
+    await useAppStore.getState().attachPersistedFileDocument('workspace-a', filePath)
+    const state = useAppStore.getState()
+
+    // 走的是与点击同一条 api.files seam：observe 之后 read。
+    expect(observe).toHaveBeenCalledWith('workspace-a', filePath)
+    expect(read).toHaveBeenCalledWith('workspace-a', filePath)
+    // 决定 EditorPane 画编辑器还是画 unavailable 的，就是这个 key 上有没有文档。
+    expect(state.documents[`workspace-a\0${filePath}`]?.content).toBe('export const restored = true\n')
+    // 布局这一侧：活动 tab 仍是用户离开时那个，tab 顺序不变，last-active 没被改写成没人选的文件。
+    // 若有人「顺手」把这里改成复用 reduceFileOpened，下面三条会红。
+    expect(state.layouts['workspace-a']?.groups[0]?.activeTabId).toBe(otherTabId)
+    expect(state.layouts['workspace-a']?.groups[0]?.tabOrder).toEqual([otherTabId, tabId])
+    expect(state.lastActiveFileByWorkspace['workspace-a']).toBeUndefined()
+    // 文档没有被误标脏——用户什么都没改。
+    expect(state.dirtyDocuments[`workspace-a\0${filePath}`]).toBeFalsy()
+  })
+
+  it('一个面还没上板时不许装文档——不留没有面的孤儿文档', async () => {
+    // reduceDocumentAttached 要求那个 Tab 存在。没有面的文档是不可达状态：没人会显示它、没人会
+    // 释放它的 observe，而 disposeClosedFileOwners 是按面枚举来回收的，于是它会一直挂着。
+    vi.spyOn(api.files, 'observe').mockResolvedValue(undefined)
+    vi.spyOn(api.files, 'read').mockResolvedValue({
+      status: 'read',
+      document: { path: 'src/ghost.ts', content: 'ghost\n', revision: 'rev-1' }
+    })
+    useAppStore.setState({ activeWorkspaceId: 'workspace-a', config, tabs: {}, layouts: {} })
+
+    await useAppStore.getState().attachPersistedFileDocument('workspace-a', 'src/ghost.ts')
+
+    expect(useAppStore.getState().documents['workspace-a\0src/ghost.ts']).toBeUndefined()
+  })
+
+  it('文件在关闭期间被删掉时，不另造一个错误态', async () => {
+    // 「关着的时候文件被删了」与「开着的时候文件被删了」是同一件事，走同一条既有失败态
+    // （EditorPane 的 unavailable + Reveal 回退到最近存在的祖先）。这里不许多报一个 error。
+    const filePath = 'src/gone.ts'
+    const tabId = `file:workspace-a:${filePath}`
+    const tab = createWorkbenchTab(tabId, {
+      regionId: initialWorkbenchRegionId(tabId),
+      kind: 'file',
+      workspaceId: 'workspace-a',
+      path: filePath
+    })
+    useAppStore.setState({
+      activeWorkspaceId: 'workspace-a',
+      config,
+      error: null,
+      tabs: { [tabId]: tab },
+      layouts: { 'workspace-a': createWorkspaceLayout('pane', [tabId]) }
+    })
+    vi.spyOn(api.files, 'observe').mockResolvedValue(undefined)
+    const unobserve = vi.spyOn(api.files, 'unobserve').mockResolvedValue(undefined)
+    vi.spyOn(api.files, 'read').mockResolvedValue({ status: 'deleted' })
+
+    await useAppStore.getState().attachPersistedFileDocument('workspace-a', filePath)
+    const state = useAppStore.getState()
+
+    expect(state.documents[`workspace-a\0${filePath}`]).toBeUndefined()
+    // observe 必须撤掉，否则一个读不到的文件会永久占着一个 watcher。
+    expect(unobserve).toHaveBeenCalledWith('workspace-a', filePath)
+    // 原因必须记下来，走的是「打开着的文件被删」那条既有 issue 而不是新造一种：没有它，
+    // EditorPane 只能退回通用的「不可用」，「关闭期间被删」与「读失败」长得一模一样，
+    // 而且那个面无从知道自己该停止重读。
+    expect(state.documentIssues[`workspace-a\0${filePath}`]).toEqual({ kind: 'deleted' })
+    // 不刷 startup error：那会在服务窗里多出一条用户已经能从编辑器面里看懂的话。
+    expect(state.error).toBeNull()
+  })
+
+  it('读失败的原因记下之后，不再对同一个路径重复发读', async () => {
+    // EditorPane 的 effect 依赖 document 与 issue 两者。若失败时什么都不记，issue 恒为空、
+    // document 恒为空，任何一次依赖变化都会对一个已知读不到的路径再读一遍。这条钉的是
+    // 「记下原因」本身构成了停止条件：第二次调用必须在到达 IPC 之前就返回。
+    const filePath = 'src/gone-twice.ts'
+    const tabId = `file:workspace-a:${filePath}`
+    const tab = createWorkbenchTab(tabId, {
+      regionId: initialWorkbenchRegionId(tabId),
+      kind: 'file',
+      workspaceId: 'workspace-a',
+      path: filePath
+    })
+    useAppStore.setState({
+      activeWorkspaceId: 'workspace-a',
+      config,
+      tabs: { [tabId]: tab },
+      layouts: { 'workspace-a': createWorkspaceLayout('pane', [tabId]) }
+    })
+    vi.spyOn(api.files, 'observe').mockResolvedValue(undefined)
+    vi.spyOn(api.files, 'unobserve').mockResolvedValue(undefined)
+    const read = vi.spyOn(api.files, 'read').mockResolvedValue({ status: 'deleted' })
+
+    await useAppStore.getState().attachPersistedFileDocument('workspace-a', filePath)
+    expect(read).toHaveBeenCalledTimes(1)
+    await useAppStore.getState().attachPersistedFileDocument('workspace-a', filePath)
+    // 仍然是 1：第二次没有到达 IPC。
+    expect(read).toHaveBeenCalledTimes(1)
   })
 })

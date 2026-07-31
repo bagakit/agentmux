@@ -84,8 +84,24 @@ export function EditorPane({
     state.config?.workspaces.find((item) => item.id === surface.workspaceId)?.hostId === 'local'
   )
   const reportError = useAppStore((state) => state.reportError)
+  const attachPersistedDocument = useAppStore((state) => state.attachPersistedFileDocument)
   const conflict = issue?.kind === 'changed' || issue?.kind === 'deleted'
   const editorRef = useRef<MonacoStandaloneEditor | null>(null)
+
+  // A file Region restored from persistence arrives with no document behind it: the surface is only
+  // {regionId,kind,workspaceId,path}, and every other way a file Region appears loads its document as
+  // part of opening it. Without this the Tab is present and reports "unavailable" — which reads as a
+  // broken file rather than an unloaded one. Asking for it here, from the very pane that would render
+  // that state, is what makes a Region in a Workspace the user has not switched back to yet work too.
+  //
+  // Guarded on `issue`, not just on `document`: a read that failed (the file was deleted while the app
+  // was closed, or the read errored) records the reason and leaves `document` null, so without that
+  // guard this would re-read a known-unreadable path on every dependency change. The user's route out
+  // of that state is the Reveal action below, not a silent retry.
+  useEffect(() => {
+    if (document || issue || released) return
+    void attachPersistedDocument(surface.workspaceId, surface.path)
+  }, [document, issue, released, attachPersistedDocument, surface.workspaceId, surface.path])
 
   // Consume a one-shot reveal target (set when the file was opened with a :line location, e.g. a
   // terminal path link). Both entry points call this: `onMount` handles the first open (Monaco
