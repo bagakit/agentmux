@@ -37,13 +37,21 @@
    selector, so two agents on the same provider share one brand glyph but get different chip colours — that is
    how the open set of A2A identities stays distinguishable.
 
-   The default is DECLARED here rather than hidden in a `var(..., 145)` fallback. Two reasons, both structural.
+   The default is DECLARED here rather than hidden in a `var(..., 288)` fallback. Two reasons, both structural.
    A declared default is visible to a reader scanning this rule, and to the sheet-wide guard that reports a
    `var()` referencing a name nothing declares — that guard reads declarations, so an undeclared property with
    an inline-only writer looks exactly like the silent-failure bug it exists to catch. Declaring it is also the
-   pattern already established here for a component-injected property (see `--tree-depth` in dock.css). */
+   pattern already established here for a component-injected property (see `--tree-depth` in dock.css).
+
+   288 is not an arbitrary pick: identity hues must clear the arcs the semantic colours own (red, amber, green,
+   blue — an identity that lands on amber reads as "this agent needs you"), and 288 is the centre of the widest
+   allowed arc, 73 degrees from the nearest reserved hue. An earlier default of 145 sat 2 degrees from `--green`,
+   i.e. inside the very zone the derivation exists to avoid — every derived hue cleared it while the fallback,
+   the one hue a reader would take as representative, did not. Two constants that must agree living in two
+   files will drift, so a test asserts this value against the module's own exclusion rule rather than trusting
+   the pair to be maintained by hand. */
 .conversation-avatar--agent {
-  --speaker-hue: 145;
+  --speaker-hue: 288;
   color: hsl(var(--speaker-hue) 62% 72%);
   background: hsl(var(--speaker-hue) 45% 68% / 0.18);
 }

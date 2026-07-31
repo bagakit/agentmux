@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { clearsSemanticHues } from '../src/renderer/src/lib/conversation-avatar-color.js'
 import { allStyles, styleFiles } from './helpers/styles.js'
 
 /**
@@ -114,6 +115,22 @@ describe('样式表的组织', () => {
     const mark = ruleOf('.conversation-axis__mark')
     expect(mark).toMatch(/position:\s*absolute/)
     expect(mark).toMatch(/transform:\s*translate\(-50%,\s*-50%\)/)
+  })
+
+  it('身份色的 CSS 兜底值也要让开语义色——它是唯一不经过派生函数的那个色相', () => {
+    // 派生出的每个色相都被 conversation-avatar.test.tsx 钉住让开了语义色，但 CSS 里声明的那个兜底
+    // 值走的是另一条路：它不经过 speakerColorHue，所以那条守卫对它完全失明。实测漂过——兜底写着
+    // 145，离 `--green`（143°）只有 2°，正落在派生函数存在要避开的那片弧里。于是「派生色相不冒充
+    // 状态」这条性质对每个真实身份都成立，唯独对读者最可能当作代表色的那一个不成立。
+    //
+    // 判据用模块自己导出的谓词，而不是在这里手抄一份保留色表：手抄就是把同一份数据放到第三个地方，
+    // 而两个该联动的常量分居两文件必然漂移——这条断言存在的全部理由就是上一次的漂移。
+    const avatarCss = new Map(styleFiles().map((file) => [file.name, file.text])).get('conversation-avatar.css')
+    expect(avatarCss, 'conversation-avatar.css 不在 @import 列表里了').toBeDefined()
+    const declared = /--speaker-hue:\s*([0-9.]+)\s*;/.exec(avatarCss!)
+    expect(declared, '--speaker-hue 的兜底声明不见了——组件注入的自定义属性必须有声明的默认值').not.toBeNull()
+    const hue = Number(declared![1])
+    expect(clearsSemanticHues(hue), `兜底色相 ${hue}° 落在语义色的禁区里`).toBe(true)
   })
 
   it('全表拼起来仍是可扫描的一张表，契约测试因此不会扫到空内容', () => {
