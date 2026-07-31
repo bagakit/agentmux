@@ -15,6 +15,7 @@ describe('样式表的组织', () => {
       'tokens.css',
       'base.css',
       'chrome.css',
+      'selector.css',
       'dock.css',
       'workbench.css',
       'terminal.css',
@@ -65,7 +66,11 @@ describe('样式表的组织', () => {
     // 报出每一处的文件与行号，因为一处一处地找是这类 bug 唯一的排查方式。
     const offenders: string[] = []
     for (const { name, text } of styleFiles()) {
-      text.split('\n').forEach((line, index) => {
+      // 注释里出现 `-var(` 通常正是在**告诫**别这么写（selector.css 就有一句），那不是声明，
+      // 报出来会把一句正确的提醒变成红灯。所以先剥注释，只在真声明上找。剥注释也顺带避免
+      // 「注释里写了个反例」与「代码里真写错」在报告里长得一样。
+      const code = text.replace(/\/\*[\s\S]*?\*\//g, (block) => block.replace(/[^\n]/g, ' '))
+      code.split('\n').forEach((line, index) => {
         // 只找减号紧贴 var( 的写法。`calc(-1 * var(...))` 与 `--custom-prop: value` 都不匹配。
         if (/(?<![\w)])-var\(/.test(line)) offenders.push(`${name}:${index + 1}`)
       })
