@@ -2,29 +2,46 @@
  * Conversation axes: the speaker axis and this-agent axis that sit above the ruler.
  *
  * These are TRACKS OF IDENTITY, not a second ruler. The ruler below answers "when, and how long";
- * these answer "who". They share one time base (positions come from the same scale, expressed as a
- * percentage) so the three rows line up column-for-column — that alignment is the whole reason the
- * axes are worth having: a mark here points at a tick down there.
+ * these answer "who".
  *
- * The track's height IS declared, and has to be: every mark is absolutely positioned, so the track
+ * ## The shared coordinate box
+ *
+ * A mark's `left: N%` and a ruler tick's `left: N%` must resolve against the SAME width, or the two
+ * rows only agree on the fraction and disagree on the pixel. They do not agree by default: the ruler
+ * row is `.activity-ruler` (12px side padding) laying out `__track` as `flex: 1` NEXT TO the span
+ * readout and the info note, so the track's box is inset on the left by the padding and on the right
+ * by ~90-110px of siblings. An axis that spanned the feed would drift further right the later the
+ * event — the last avatar floating a timestamp's width away from the tick it points at.
+ *
+ * So the axes are not siblings of the ruler; they live INSIDE the same `.activity-ruler` row, in the
+ * same `.activity-ruler__track` column (`.activity-ruler__stack` is that column). One box, one
+ * percentage basis, three rows that line up column-for-column — and that alignment is the whole
+ * reason the axes are worth having.
+ *
+ * ## The declared height
+ *
+ * Each track's height IS declared, and has to be: every mark is absolutely positioned, so the track
  * has no content to take its height from. It is therefore a number that must be kept equal to the
  * avatar `size` the component passes (16px today) — the marks are centred on the track's midline, so
- * a track shorter than the avatar clips it and a taller one adds dead space above the ruler. Change
- * one and change the other; there is no way to derive it here without giving up absolute positioning,
- * which is what buys the shared time base with the ruler.
+ * a track shorter than the avatar clips it and a taller one adds dead space above the ruler.
  */
 
-/* The stack of axes. `gap` rather than per-axis margins so an axis that renders nothing (no marks)
-   contributes no space at all — the empty-axis case is handled by rendering nothing, and flex `gap`
-   is what makes that absence actually free. */
-.activity-ruler__axes {
+/* The column that holds the two axes and the ruler track, so all three share one width. It replaces
+   the track as the ruler row's flex child; the span readout and info note stay outside it, which is
+   exactly why the track alone could not be that shared box. */
+.activity-ruler__stack {
+  flex: 1;
   display: flex;
   flex-direction: column;
+  /* `gap` rather than per-axis margins so an axis that renders nothing (no marks) contributes no
+     space at all — the empty-axis case is handled by rendering nothing, and flex `gap` is what makes
+     that absence actually free. */
   gap: var(--sp-1);
 }
 
-/* One axis. `position: relative` is the coordinate space every mark's `left: N%` resolves against,
-   so the percentage means the same thing here as it does on the ruler track below.
+/* One axis. `position: relative` is the coordinate space every mark's `left: N%` resolves against —
+   and because this element is a block inside the shared stack, that space is byte-identical to the
+   ruler track's below it.
    `height` equals the avatar size the component renders (see the file header) — not a spacing value
    that happens to be 16, but the same number as the mark it seats. */
 .conversation-axis {
@@ -50,14 +67,25 @@
   background: none;
   cursor: pointer;
   /* Touch targets are far larger than mouse ones, so the hit area is grown around the 16px avatar
-     while the avatar itself stays 16px. This is the mobile-portability requirement met at the source
-     rather than deferred: the axis is usable by finger today, and growing the target costs no layout
-     because the button is absolutely positioned and centred on its own centre. */
-  min-width: var(--sp-6);
-  min-height: var(--sp-6);
+     while the avatar itself stays 16px. `--sp-7` is 24px — the smallest target worth calling one;
+     `--sp-6` is 16px and would leave the hit area exactly the size of the content, i.e. no growth at
+     all while reading like a deliberate touch affordance. This is the mobile-portability requirement
+     met at the source rather than deferred, and it costs no layout because the button is absolutely
+     positioned and centred on its own centre. */
+  min-width: var(--sp-7);
+  min-height: var(--sp-7);
   align-items: center;
   justify-content: center;
   border-radius: 50%;
+}
+
+/* The avatar wrapper. It exists to mark the avatar as decorative for screen readers (the button
+   already carries the name), and it is also the right thing to transform on hover: the button's own
+   transform is what centres it on its position, so scaling the button would slide the mark off the
+   tick it points at. */
+.conversation-axis__glyph {
+  display: inline-flex;
+  transition: transform 120ms ease;
 }
 
 .conversation-axis__mark:focus-visible {
@@ -72,8 +100,16 @@
   box-shadow: 0 0 0 2px var(--surface-0), 0 0 0 3px var(--text-3);
 }
 
-/* Marks can crowd on a busy turn. Raising the hovered one keeps its identity readable instead of
-   leaving a pile where no single avatar is legible. */
-.conversation-axis__mark:hover {
+/* Marks crowd whenever two turns land close in time — at 320px, turns 5% apart put two 24px hit areas
+   8px into each other. Hovering one lifts it clear, following the same idiom the presence cluster
+   already uses (`selector.css`): raise the stack order and scale with `transform` so the neighbours do
+   not move. The scale goes on the AVATAR, not on the button — the button's own transform is what
+   centres it on its position, and overwriting that would slide the mark off the tick it points at. */
+.conversation-axis__mark:hover,
+.conversation-axis__mark:focus-visible {
   z-index: 1;
+}
+.conversation-axis__mark:hover .conversation-axis__glyph,
+.conversation-axis__mark:focus-visible .conversation-axis__glyph {
+  transform: scale(1.18);
 }

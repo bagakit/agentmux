@@ -59,6 +59,36 @@ describe('说话人头像：颜色由身份 id 确定性派生（验收 2）', (
     }
   })
 
+  it('派生出的色相不许落在语义色上——身份色不能冒充状态', () => {
+    // 状态色是**词汇**不是配色：amber 专表「需要你」、red 表失败、green 表成功、blue 表人类说话人。
+    // 一个散列到 40° 的 Agent 会被读成「这个在等你」，而它只是名字碰巧落在那里——身份色误报状态，
+    // 比两个 Agent 撞色难查得多（撞色你会去看名字，误报状态你会去点那个 Agent）。
+    //
+    // 这条守的是一个实测过的假绿：把整段排除删掉（`>= RESERVED_HALF_WIDTH` 改成 `>= 0`，回到整圈
+    // 都能用），本文件与 conversation-axis-render 的 22 条**全绿**、typecheck 也过。既有断言只钉
+    // 「均匀、确定、能分开」，对「散到哪里」完全失明——所以这条必须逐个身份检查落点。
+    //
+    // 判据是**环上**距离：red 在 1.9°，359° 离它只有 2.9° 而不是 357.1°。只判 |a-b| 的版本会漏掉
+    // 整个跨零区间，那正是我第一版实现踩的坑（实测 10.8% 的身份仍落在 red 附近却没人报）。
+    const RESERVED = { red: 1.9, amber: 40.2, green: 143, blue: 213.8 }
+    const ids = [
+      ...Array.from({ length: 200 }, (_, i) => `agent-session-${i}`),
+      ...Array.from({ length: 8 }, (_, i) => `agent-${i + 1}`),
+      'a',
+      'zzzzzzzz',
+      HUMAN_SPEAKER_ID
+    ]
+    for (const id of ids) {
+      const hue = speakerColorHue(id)
+      for (const [role, reserved] of Object.entries(RESERVED)) {
+        const delta = Math.abs(hue - reserved)
+        const onCircle = Math.min(delta, 360 - delta)
+        // 20 度是这套柔和带里「能不能被认成那个状态」的界；实现让开 22 度，留 2 度余量。
+        expect(onCircle, `${id} -> ${hue}° 离 ${role}(${reserved}°) 只有 ${onCircle}°`).toBeGreaterThan(20)
+      }
+    }
+  })
+
   it('两个 Agent 头像把各自的 id 色相写进标记——同一条对话里的两个 Agent 因此可分', () => {
     // 组件层复核变异 (a)：即便派生函数本身没被换成常量，如果组件忘了把 speaker.id 喂进派生、
     // 或把色相写死，两枚头像的 --speaker-hue 就会相同。这里比较的是渲染出来的内联样式。

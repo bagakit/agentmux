@@ -1,8 +1,9 @@
 import { renderToStaticMarkup } from 'react-dom/server'
+import type { ReactElement } from 'react'
 import { describe, expect, it } from 'vitest'
 import type { AgentTimelineItem } from '../src/shared/contracts.js'
 import { ConversationAxis } from '../src/renderer/src/components/ConversationAxis.js'
-import { speaksAsAgent, speaksAsHuman } from '../src/renderer/src/lib/conversation-axis.js'
+import { conversationAxis, speaksAsAgent, speaksAsHuman } from '../src/renderer/src/lib/conversation-axis.js'
 import { HUMAN_SPEAKER_ID } from '../src/renderer/src/lib/conversation-speaker.js'
 import type { ConversationSpeaker } from '../src/renderer/src/lib/conversation-speaker.js'
 
@@ -212,11 +213,15 @@ describe('对话轴的渲染', () => {
     expect(markup).not.toMatch(/<span[^>]*class="conversation-axis__mark"/)
   })
 
-  it('轴上不渲染任何钟点——时刻只能从 scale 的 readout 取', () => {
+  it('轴上不渲染任何时刻——连人性化的偏移也不行，时刻只能从 scale 的 readout 取', () => {
     // ruler 的诚实性是类型级的：序数轴上 RulerReadout 根本没有 `at` 字段，所以"在没有跨度的轴上
-    // 显示钟点"写不出来。但轴标记手里的 `item.createdAt` 永远是个裸数字，继承不到那层保护——
-    // 把它格式化进 title 就把那种不诚实又请了回来。这条钉住轴上一个时钟串都没有。
+    // 显示钟点"写不出来。但轴标记手里的 `item.createdAt` 永远是个裸数字，继承不到那层保护。
+    //
+    // 判据必须是**白名单**而不是"没有下列几种时间串"。实测过：黑名单版（挡 `HH:MM` 与裸的
+    // 4000/1000）对 `title={`+${createdAt/1000}s`}` 完全失明——`+4s` 不含 4000 也不像钟点，11 条
+    // 全绿。所以这里改成枚举标记上允许出现的属性：多一个属性就红，无论它装的是什么形状的时间。
     const items = conversationFixture()
+    const ALLOWED = new Set(['type', 'class', 'style', 'data-selected', 'aria-label'])
     for (const belongs of [speaksAsHuman, speaksAsAgent]) {
       const markup = render(
         <ConversationAxis
@@ -225,14 +230,22 @@ describe('对话轴的渲染', () => {
           label="Axis"
           size={16}
           describe={describeSpeaker}
-          selectedIndex={null}
+          selectedIndex={0}
           onSelect={() => {}}
         />
       )
-      expect(markup).not.toMatch(/\d{1,2}:\d{2}/)
-      // 也不许把裸时间戳塞进标记的任何属性。
-      expect(markup).not.toContain('4000')
-      expect(markup).not.toContain('1000')
+      for (const [, attrs] of markup.matchAll(/<button([^>]*)>/g)) {
+        const names = [...attrs!.matchAll(/(?:^|\s)([a-z-]+)(?==|\s|$)/g)].map((m) => m[1]!)
+        expect(names.length).toBeGreaterThan(0)
+        expect(names.filter((name) => !ALLOWED.has(name))).toEqual([])
+      }
+      // style 只承载定位，不许把时刻塞进自定义属性里绕过上面那圈。
+      expect(markup).not.toMatch(/style="[^"]*\d{2,}(?:ms|s\b)/)
+      // 而 aria-label 就是那个名字本身——不是名字加时刻的拼接。两条轴的名字不同（human 'You'、
+      // agent 'Claude'），所以这里判「不含数字」而不是钉某一个字面量：钉字面量会在另一条轴上误报，
+      // 而一条会误报正确代码的守卫，下一个人只会把它删掉。
+      expect(markup).toMatch(/aria-label="(You|Claude)"/)
+      expect(markup).not.toMatch(/aria-label="[^"]*\d/)
     }
   })
 
@@ -276,23 +289,64 @@ describe('对话轴的渲染', () => {
     expect(markup).not.toContain('data-agent-provider="claude"')
   })
 
-  it('人类哨兵 id 与 agentSessionId 共用 id 空间，所以两条轴的标记不许按 id 归并', () => {
-    // 这条守的是一个结构性的陷阱：HUMAN_SPEAKER_ID 与 agentSessionId 都是字符串、同一个命名空间
-    // （Core 的 SAFE_ID 允许 'human'）。若实现用 id 作为 React key 或作为归并依据，两条人类发言会
-    // 因为共享同一个 id 而被折成一枚。这里断言两枚都在。
-    const items = conversationFixture()
-    const markup = render(
-      <ConversationAxis
-        items={items}
-        belongs={speaksAsHuman}
-        label="Speakers"
-        size={16}
-        describe={describeSpeaker}
-        selectedIndex={null}
-        onSelect={() => {}}
-      />
-    )
-    expect(markup.match(/conversation-axis__mark/g)).toHaveLength(2)
-    expect(HUMAN_SPEAKER_ID).toBe('human')
+  it('两条人类发言各占一枚标记——哨兵 id 被两条共享，不许让它们塌成一枚', () => {
+    // HUMAN_SPEAKER_ID 与 agentSessionId 同处一个 id 空间（Core 的 SAFE_ID 允许 'human'），所以人类
+    // 的每条发言拿到的都是**同一个** speaker.id。判据只能落在「按 index 区分」上：这里断言两枚标记
+    // 各带自己的全量下标（0 与 3），而不是断言渲染出两个节点——`renderToStaticMarkup` 不按 key 归并，
+    // 那种断言即便实现真的拿 speaker.id 当 key 也照样绿，是一条守不住它自己所命名的 bug 的断言。
+    const marks = conversationAxis(conversationFixture(), speaksAsHuman)
+    expect(marks.map((mark) => mark.index)).toEqual([0, 3])
+    expect(new Set(marks.map((mark) => mark.speaker.id))).toEqual(new Set([HUMAN_SPEAKER_ID]))
+  })
+
+  it('可访问名由 button 给出、头像被标为装饰——名字有且只有一处', () => {
+    // 两个变异都曾全绿：删掉 button 的 aria-label（名字只剩在一个 aria-hidden 的子节点里，读屏什么
+    // 也拿不到），以及拿掉 aria-hidden（同一个名字被念两遍）。标记流上抓不到，因为两种写法下
+    // `aria-label="You"` 都还在 markup 里——粒度比 bug 粗。所以这条在 element 树上判：名字必须在
+    // button 上，且它的子包装必须是装饰。
+    const axis = ConversationAxis({
+      items: conversationFixture(),
+      belongs: speaksAsHuman,
+      label: 'Speakers',
+      size: 16,
+      describe: describeSpeaker,
+      selectedIndex: null,
+      onSelect: () => {}
+    })
+    const marks = (axis as ReactElement<{ children: ReactElement[] }>).props.children
+    for (const mark of marks) {
+      const button = (mark.type as (props: unknown) => ReactElement<Record<string, unknown>>)(mark.props)
+      expect(button.props['aria-label']).toBe('You')
+      const glyph = button.props.children as ReactElement<Record<string, unknown>>
+      expect(glyph.props['aria-hidden']).toBe('true')
+    }
+  })
+
+  it('点一枚标记就选中它对应的那条 item——用全量下标，不是轴内序号', () => {
+    // 轴的全部用途是「不滚动就跳到那句话」，而 `renderToStaticMarkup` 不输出任何 handler，所以标记
+    // 流上的断言对点击接线**完全失明**：实测把 `onClick` 整行删掉，本文件与 activity-view 的断言
+    // 35 条全绿、typecheck 也不报（未开 noUnusedLocals）。这条因此绕开 SSR：把组件当函数求值，从
+    // element 树上取到那个 handler 并真的调用它。无需 DOM，也不引入新依赖。
+    const picked: number[] = []
+    const axis = ConversationAxis({
+      items: conversationFixture(),
+      belongs: speaksAsHuman,
+      label: 'Speakers',
+      size: 16,
+      describe: describeSpeaker,
+      selectedIndex: null,
+      onSelect: (index: number) => picked.push(index)
+    })
+    expect(axis).not.toBeNull()
+    const marks = (axis as ReactElement<{ children: ReactElement[] }>).props.children
+    expect(marks).toHaveLength(2)
+    // 逐枚点过去。两枚人类发言在全量里是第 0 与第 3 条——轴内序号是 0/1，若实现传的是后者，
+    // 第二枚会选错到 tool_call 上。
+    for (const mark of marks) {
+      const button = (mark.type as (props: unknown) => ReactElement<{ onClick: () => void }>)(mark.props)
+      expect(button.type).toBe('button')
+      button.props.onClick()
+    }
+    expect(picked).toEqual([0, 3])
   })
 })

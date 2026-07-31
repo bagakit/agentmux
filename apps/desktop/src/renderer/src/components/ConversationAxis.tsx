@@ -5,6 +5,22 @@ import type { ConversationSpeaker } from '../lib/conversation-speaker'
 import { ConversationSpeakerAvatar } from './ConversationSpeakerAvatar'
 
 /**
+ * 把一个身份解析成「叫什么、画哪个 provider」。
+ *
+ * 是一个具名类型而不是行内写四遍：轴、轴标记、Activity 的正文回合、以及接线层都要说这同一句话，
+ * 而它们必须逐字一致——providerId 是 optional 且在 `exactOptionalPropertyTypes` 下「缺席」与
+ * 「显式 undefined」不是一回事，抄第四遍就是给漂移开一个口子。
+ *
+ * 解析发生在**调用方**（唯一持有 session 的那一层），不在这些组件里：组件因此不读 store，可在无
+ * DOM 的测试里直接求值。返回的 `name` 是身份的判别器——同 provider 的两个 Agent 共用一枚品牌图标、
+ * 色相又有约 52% 概率撞在 20° 内（已实测，见设计 SSOT），所以接线方必须给出互相可分的名字。
+ */
+export type DescribeSpeaker = (speaker: ConversationSpeaker) => {
+  name: string
+  providerId?: AgentProviderId
+}
+
+/**
  * 一条说话人轴：把某一类身份的发言画成时间轴上的若干枚头像。
  *
  * ## 一个组件、两条轴
@@ -49,10 +65,10 @@ export function ConversationAxis({
   belongs: SpeakerPredicate
   /** 这条轴是什么的可读名，作为轨道的可访问名。 */
   label: string
-  /** 头像边长。说话人轴与自我 Agent 轴各取一个值。 */
+  /** 头像边长。两条轴今天同取 16；对话正文里同一个头像取 20，所以两个值都有生产调用者。 */
   size: number
   /** 把身份解析成「叫什么、画哪个 provider」。调用方查 store，组件本身不查。 */
-  describe: (speaker: ConversationSpeaker) => { name: string; providerId?: AgentProviderId }
+  describe: DescribeSpeaker
   /** 主刻度当前选中的下标，用于把同一个选择在轴上也标出来。 */
   selectedIndex: number | null
   /** 点一枚头像＝选中它对应的那条 item，走调用方那一个选择出口。 */
@@ -94,7 +110,7 @@ function AxisMark({
 }: {
   mark: ConversationAxisMark
   size: number
-  describe: (speaker: ConversationSpeaker) => { name: string; providerId?: AgentProviderId }
+  describe: DescribeSpeaker
   selected: boolean
   onSelect: (index: number) => void
 }) {
@@ -106,18 +122,24 @@ function AxisMark({
       // 位置来自全量 scale 的 fraction，与主刻度同一条时间基准。
       style={{ left: `${mark.fraction * 100}%` }}
       data-selected={selected ? '' : undefined}
-      // 名字就是可访问名，不拼时刻：诚实的时刻只能从 scale 的 readout 取，而这枚标记手里的
-      // `createdAt` 是个裸数字——把它格式化进 title，就把 ruler 特意做成类型上不可表达的那种
+      // 名字挂在 button 上，不拼时刻：诚实的时刻只能从 scale 的 readout 取，而这枚标记手里的
+      // `createdAt` 是个裸数字——把它格式化进任何属性，就把 ruler 特意做成类型上不可表达的那种
       // 不诚实（序数轴上没有时刻）又请了回来。时刻归 T-005 的面板，走 readout。
       aria-label={name}
       onClick={() => onSelect(mark.index)}
     >
+      {/* 头像在这里是**装饰**：可访问名已由 button 给出，头像自带的 `role="img"` + `aria-label` 会
+          让读屏把同一个名字念两遍。`aria-hidden` 只作用在这一处包装，头像组件本身不动——它在对话
+          正文里外层是纯 span，那里那份 aria-label 正是唯一的名字来源，删掉它会让正文的头像变成只有
+          视觉能识别的身份。 */}
+      <span className="conversation-axis__glyph" aria-hidden="true">
       <ConversationSpeakerAvatar
         speaker={mark.speaker}
         name={name}
         size={size}
         {...(providerId === undefined ? {} : { providerId })}
       />
+      </span>
     </button>
   )
 }
