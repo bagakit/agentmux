@@ -59,9 +59,9 @@ import { classifyServiceNotice, serviceNoticeToRender } from '../lib/service-win
 import { agentProviderLabel } from './AgentProviderIcon'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import {
-  OpenDestinationMenu,
-  type OpenDestinationMenuRequest
-} from './OpenDestinationMenu'
+  OpenDestinationPopover,
+  type OpenDestinationRequest
+} from './OpenDestinationBar'
 import { TerminalContextMenu } from './TerminalContextMenu'
 import { TerminalReplayGapNotice } from './TerminalReplayGapNotice'
 
@@ -86,7 +86,7 @@ const SEARCH_TOGGLES: ReadonlyArray<{
   { key: 'wholeWord', label: 'Match whole word', glyph: 'ab|' }
 ])
 
-type TerminalLinkRequest = OpenDestinationMenuRequest & { terminalGeneration: number }
+type TerminalLinkRequest = OpenDestinationRequest & { terminalGeneration: number }
 
 export function parseTerminalHttpLink(rawUrl: string): string | null {
   try {
@@ -98,7 +98,7 @@ export function parseTerminalHttpLink(rawUrl: string): string | null {
   }
 }
 
-export function dismissTerminalLinkRequest<T extends OpenDestinationMenuRequest>(
+export function dismissTerminalLinkRequest<T extends OpenDestinationRequest>(
   current: T | null,
   requestId: number
 ): T | null {
@@ -978,7 +978,7 @@ export function TerminalView({
           ) : null}
         </div>
       </TerminalContextMenu>
-      <OpenDestinationMenu
+      <OpenDestinationPopover
         request={linkRequest}
         canSplit={Boolean(linkOrigin.tabId && linkOrigin.regionId)}
         onDismiss={(requestId) => {
