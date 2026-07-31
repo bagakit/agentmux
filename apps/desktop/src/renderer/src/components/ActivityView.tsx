@@ -28,6 +28,7 @@ import {
 } from '../lib/activity-ruler'
 import { stepTitle } from '../lib/activity-step-summary'
 import { showEmptyState, showWorkingIndicator } from '../lib/activity-working-state'
+import { isConversationTurn, speakerOf } from '../lib/conversation-speaker'
 import { terminalLinkPreviewAnchor } from '../lib/terminal-link-gesture'
 import { AgentMarkdown, type LinkClickModifiers, type OpenWorkspaceFile } from './AgentMarkdown'
 
@@ -37,15 +38,6 @@ function Glyph({ kind, size = 12 }: { kind: AgentTimelineItem['kind']; size?: nu
   if (kind === 'tool_call') return <Hammer size={size} />
   if (kind === 'permission') return <ShieldAlert size={size} />
   return <CircleDot size={size} />
-}
-
-/**
- * The two turns a person actually reads — what they typed and what the agent said back. They are carved
- * out of the machine Row/fold path (see {@link segment}) so a sentence never wears the same 24px log
- * rhythm as a lifecycle hook firing.
- */
-function isTurn(kind: AgentTimelineItem['kind']): boolean {
-  return kind === 'user_message' || kind === 'assistant_message'
 }
 
 /**
@@ -68,10 +60,10 @@ function segment(items: AgentTimelineItem[]): Segment[] {
     run = []
   }
   for (const item of items) {
-    // A run holds machine reporting only. user_message already breaks it (source 'user'); the assistant
-    // reply is native-hook too, so without the kind guard segment() would sweep it into a collapsed
+    // A run holds machine reporting only. A human turn already breaks it (source 'user'); the assistant
+    // reply is native-hook too, so without the speaker guard segment() would sweep it into a collapsed
     // "N steps" fold and hide the agent's half of the conversation.
-    if (item.source === 'native-hook' && !isTurn(item.kind)) run.push(item)
+    if (item.source === 'native-hook' && !isConversationTurn(item)) run.push(item)
     else {
       flush()
       segments.push({ kind: 'item', item })
@@ -392,7 +384,11 @@ function Turn({
   openHttpLink?: (url: string, event: LinkClickModifiers) => void
   workspaceRoot: string
 }) {
-  const who = item.kind === 'user_message' ? 'You' : 'Assistant'
+  // 谁说的这件事只有一个判据（`speakerOf`），不在这里按 kind 再判一次。caption 的文字仍由 role
+  // 决定，但 role 是那个判据给出的结论，而不是这里对 kind 的第二次解读。身份（speaker.id）本轮
+  // 还没有消费者——头像是下一个任务——但它已经是这条路上唯一的身份出处。
+  const speaker = speakerOf(item)
+  const who = speaker?.role === 'human' ? 'You' : 'Assistant'
   return (
     <div className={`log-turn log-turn--${item.kind}`} data-status={item.status}>
       <span className="log-turn__node"><Glyph kind={item.kind} size={14} /></span>
@@ -678,7 +674,7 @@ export function ActivityView({
           >
             {entry.kind === 'run' ? (
               <Run items={entry.items} origin={origin} />
-            ) : isTurn(entry.item.kind) ? (
+            ) : isConversationTurn(entry.item) ? (
               <Turn
                 item={entry.item}
                 origin={origin}
