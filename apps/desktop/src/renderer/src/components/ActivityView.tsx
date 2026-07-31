@@ -1,6 +1,6 @@
 import { Bot, ChevronRight, CircleDot, Hammer, Info, ShieldAlert, UserRound } from 'lucide-react'
 import { Fragment, useEffect, useMemo, useRef, useState, type JSX } from 'react'
-import type { AgentDisplayState } from '@agentmux/core'
+import type { AgentDisplayState, AgentProviderId } from '@agentmux/core'
 import type { AgentTimelineItem } from '../../../shared/contracts'
 import {
   initFollowState,
@@ -28,9 +28,11 @@ import {
 } from '../lib/activity-ruler'
 import { stepTitle } from '../lib/activity-step-summary'
 import { showEmptyState, showWorkingIndicator } from '../lib/activity-working-state'
-import { isConversationTurn, speakerOf } from '../lib/conversation-speaker'
+import { speaksAsAgent, speaksAsHuman } from '../lib/conversation-axis'
+import { isConversationTurn, speakerOf, type ConversationSpeaker } from '../lib/conversation-speaker'
 import { terminalLinkPreviewAnchor } from '../lib/terminal-link-gesture'
 import { AgentMarkdown, type LinkClickModifiers, type OpenWorkspaceFile } from './AgentMarkdown'
+import { ConversationAxis } from './ConversationAxis'
 
 function Glyph({ kind, size = 12 }: { kind: AgentTimelineItem['kind']; size?: number }) {
   if (kind === 'user_message') return <UserRound size={size} />
@@ -483,7 +485,8 @@ export function ActivityView({
   displayState,
   openWorkspaceFile,
   openHttpLink,
-  workspaceRoot = ''
+  workspaceRoot = '',
+  describeSpeaker
 }: {
   items: AgentTimelineItem[]
   capability: 'unavailable' | 'complete-events' | 'streaming'
@@ -495,6 +498,12 @@ export function ActivityView({
    *  destination menu and the Region origin (SessionPane), never resolved here. */
   openHttpLink?: (url: string, event: LinkClickModifiers) => void
   workspaceRoot?: string
+  /**
+   * 把一个说话人身份解析成「叫什么、画哪个 provider 的图标」。由持有 Session 的那一层给出——
+   * 本组件不读 Store，所以 `providerId` 与显示名只能从外面进来。缺省时两条对话轴不渲染：轴的
+   * 价值在于认出身份，没有名字的头像认不出谁，画出来只是一排装饰。
+   */
+  describeSpeaker?: (speaker: ConversationSpeaker) => { name: string; providerId?: AgentProviderId }
 }) {
   const segments = useMemo(() => segment(items), [items])
   const placed = useMemo(() => placeSegments(segments), [segments])
@@ -655,6 +664,34 @@ export function ActivityView({
 
   return (
     <div className="activity-feed">
+      {describeSpeaker ? (
+        // 两条轴在既有 ruler **之上**分轴，而不是替换它：ruler 那三条更强的性质（诚实时间轴、
+        // 每行偏移、无跨度时退化为序数）是既有资产。两条轴共用同一个 `items` 与同一条时间基准，
+        // 所以三者的横向位置严格对齐。
+        //
+        // 顺序是「说话人在上、自我 Agent 在下、主刻度在最下」：自上而下正是从"谁在说话"到
+        // "这个 Agent 在干什么"到"整条时间轴"的收敛，越往下越细。
+        <div className="activity-ruler__axes">
+          <ConversationAxis
+            items={items}
+            belongs={speaksAsHuman}
+            label="Speakers"
+            size={16}
+            describe={describeSpeaker}
+            selectedIndex={selectedIndex}
+            onSelect={selectEvent}
+          />
+          <ConversationAxis
+            items={items}
+            belongs={speaksAsAgent}
+            label="This agent"
+            size={16}
+            describe={describeSpeaker}
+            selectedIndex={selectedIndex}
+            onSelect={selectEvent}
+          />
+        </div>
+      ) : null}
       <Ruler
         items={items}
         scale={scale}
