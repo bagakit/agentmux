@@ -437,6 +437,7 @@ export function projectRuntimeEvent(
             const {
               pendingInteraction: _pendingInteraction,
               terminalCapability: _terminalCapability,
+              turnUsage: _turnUsage,
               ...current
             } = item
             return {
@@ -447,6 +448,13 @@ export function projectRuntimeEvent(
               updatedAt: Math.max(item.updatedAt, core.session.updatedAt),
               ...(core.session.terminalCapability
                 ? { terminalCapability: structuredClone(core.session.terminalCapability) }
+                : {}),
+              // 最近一 turn 的真实用量随收尾事件的 agent-session 快照到达 —— 权威镜像 Core：带就复制、
+              // 缺就丢弃（destructure 把陈旧值从 ...current 里剔掉）。缺一条条件复制，live 路径就永远读不到
+              // 真数、状态栏卡在等待记号「—」；只加复制不加 destructure，则 Core 侧清空（读 transcript 失败
+              // 那一轮）永远传不到 UI，上一轮的数字会一直挂在「Last turn」标签下。两半必须成对。
+              ...(core.session.turnUsage
+                ? { turnUsage: structuredClone(core.session.turnUsage) }
                 : {}),
               // status 走 observedAt 严格单调门禁，与核心侧 persistSemanticStatus 的 `>` 同口径。
               // agent-session 是「会话快照」：同一条 semanticStatus 会随任意会话变更（终端能力降级、
