@@ -25,7 +25,8 @@ import {
 } from '../lib/branch-agent-presence'
 import { defaultWorktreePath } from '../lib/workspace-projects'
 import { useAppStore } from '../store'
-import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
+import { agentProviderLabel } from './AgentProviderIcon'
+import { SelectorListHeader, SelectorPresence, SelectorRow } from './SelectorList'
 import { BranchContextMenu } from './BranchContextMenu'
 
 function message(error: unknown): string {

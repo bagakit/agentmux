@@ -76,22 +76,20 @@
 .surface-tool-summary > p { margin:0 0 var(--sp-5); color: var(--text-3); font-size: var(--fs-meta); line-height: 1.55; }
 .workspace-topics-panel > .primary-button { margin-bottom:var(--sp-5); }
 .workspace-topics-panel--index { padding:var(--sp-3); background: var(--surface-1); }
-.workspace-topic-index-header { width: 100%; min-height: 32px; display: flex; align-items: center; justify-content: space-between; padding:0 var(--sp-1) 0 var(--sp-4); }
-.workspace-topic-index-header > span { min-width: 0; display: flex; align-items: center; gap:var(--sp-3); color: var(--text-2); }
-.workspace-topic-index-header > span > svg { color: var(--green-2); }
-.workspace-topic-index-header strong { font-size: var(--fs-meta); letter-spacing: .06em; text-transform: uppercase; }
-.workspace-topic-index-header em { min-width: 17px; padding:1px var(--sp-2); border-radius: var(--radius-sm); color: var(--text-3); background: var(--surface-3); font-size: var(--fs-micro); font-style: normal; text-align: center; }
-.workspace-topic-index-header .icon-button { width: 24px; height: 24px; }
+/* 定位与背景归本面板；里面的排版走共享的 .selector-list__header（见 selector.css）。 */
+.workspace-topic-index-header { padding:0 var(--sp-1) 0 var(--sp-4); }
 .workspace-topic-list { width: 100%; overflow: hidden; border-radius: var(--radius-sm); background: var(--surface-2); }
 .workspace-topic-item { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) 28px; align-items: center; border-bottom: 1px solid var(--line-soft); }
 .workspace-topic-item:last-child { border-bottom: 0; }
 /* 选中＝一块干净的 Surface 填充，没有贴边竖条。它必须比 hover 更实，否则选中看起来比
    悬停还弱——此前它是 --surface-1，比 hover 的 --surface-3 更暗，全靠那根绿竖条撑住存在感。 */
 .workspace-topic-item.current { background: var(--green-bg); }
-.workspace-topic-item.current .workspace-topic-title-line strong { color: var(--text); }
+.workspace-topic-item.current .selector-row__identity strong { color: var(--text); }
 /* 行首没有常驻图标槽——一列全同的图标不携带信息。打开中的 spinner 是唯一会出现在这里的
-   东西，用 auto 列让它出现时才占位，不出现时标题从最左缘开始。 */
-.workspace-topic-entry { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap:var(--sp-3); padding:var(--sp-3) var(--sp-2) var(--sp-3) var(--sp-4); border: 0; color: var(--text-3); background: transparent; text-align: left; }
+   东西，用 auto 列让它出现时才占位，不出现时标题从最左缘开始。identity 那列必须**显式**写成
+   minmax(0, 1fr)：隐式 auto 列按内容定尺，尾部的头像簇于是贴的是内容盒右缘而不是行右缘，
+   各行摘要一长一短，右缘就参差成好几档（用户："右边的 icon 没有对齐"）。 */
+.workspace-topic-entry { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap:var(--sp-3); padding:var(--sp-3) var(--sp-2) var(--sp-3) var(--sp-4); border: 0; color: var(--text-3); background: transparent; text-align: left; }
 .workspace-topic-item:hover:not(.current) { background: var(--surface-3); }
 .workspace-topic-item.current:hover { background: var(--green-bg-hover); }
 .workspace-topic-entry > span { min-width: 0; display: grid; gap:var(--sp-1); }
