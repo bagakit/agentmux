@@ -184,6 +184,7 @@ describe('Renderer persistence boundary', () => {
       activeWorkspaceId: 'deleted-workspace',
       mainSurface: 'unknown-surface' as never,
       projectRailOpen: 'yes' as never,
+      collapsedProjectGroups: 'all' as never,
       toolsOpen: 1 as never,
       workspaceTool: 'old-tool' as never,
       toolDockWidth: Number.POSITIVE_INFINITY
@@ -191,10 +192,42 @@ describe('Renderer persistence boundary', () => {
       activeWorkspaceId: 'workspace-a',
       mainSurface: 'workbench',
       projectRailOpen: true,
+      collapsedProjectGroups: {},
       toolsOpen: true,
       workspaceTool: 'files-branches',
       toolDockWidth: 440
     })
+  })
+
+  it('筛掉坏掉的折叠记录，但保住好的那些——一条坏记录不该让整份折叠状态回退', () => {
+    // 与这个函数已有的立场一致：缺字段走默认、坏枚举走默认，而不是整体丢弃。逐条筛因此比
+    // "有一条不对就全清"更贴近它。
+    //
+    // 只收恰好是 `true` 的值：写入侧只写 true（折叠集合里"在"就是折叠），读回时放宽会让这个
+    // 约定在读写两侧不一致——`false` 被收下之后，那一组就会既"在集合里"又"没被折叠"。
+    const restored = restorePersistedUiState(config, {
+      collapsedProjectGroups: {
+        '["local","/proj/kit"]': true,
+        '["local","/proj/other"]': false as never,
+        '["local","/proj/third"]': 'yes' as never,
+        '': true
+      }
+    })
+    expect(restored.collapsedProjectGroups).toEqual({ '["local","/proj/kit"]': true })
+  })
+
+  it('折叠状态进持久化——折起来的分组重开还在', () => {
+    // 用户折叠一个不看的分组是个持久意图，不是一次性手势。这条同时钉住它**在** partialize 里：
+    // 漏掉它的话每次重启所有分组都弹回展开，而那个 bug 只在重启后才看得见。
+    const state = useAppStore.getState()
+    useAppStore.setState({ collapsedProjectGroups: { '["local","/proj/kit"]': true } })
+    try {
+      const partialize = useAppStore.persist.getOptions().partialize
+      const persisted = partialize!(useAppStore.getState()) as Record<string, unknown>
+      expect(persisted.collapsedProjectGroups).toEqual({ '["local","/proj/kit"]': true })
+    } finally {
+      useAppStore.setState({ collapsedProjectGroups: state.collapsedProjectGroups })
+    }
   })
 
   it('waits for persistence hydration before asking Core for a recovery snapshot', async () => {
