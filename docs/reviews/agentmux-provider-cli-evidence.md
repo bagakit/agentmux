@@ -99,19 +99,33 @@ grok 的 `Stop` 因此只会以「报告」身份触发一次。这个前提由�
 
 ## Gemini（T-004）
 
-复验：`gemini --help`、`gemini hooks --help`
+复验：`gemini --help`、`gemini hooks --help`、`gemini --version`（本机 0.55.1）、
+以及**读实现**：`npm pack @google/gemini-cli@0.57.0` 后在 bundle 里读 `findSession`／`resolveSession`
+（本机 0.55.1 的 `chunk-4PTN4HDB.js` 与 0.57.0 逐字一致）。
 
 - **有 hooks 子命令**：`gemini hooks migrate` 的作用是 "Migrate hooks from Claude Code to Gemini CLI"
   ——说明 Gemini 的 hook 形状与 Claude 同族。具体事件名需在 T-004 用 Gemini 自身文档核实，
   **不得**照抄 Claude 的事件清单。
-- **Resume 语义与 T-004 描述不同**：`-r, --resume` 的 help 原文是
-  `Resume a previous session. Use "latest" for most recent or index number (e.g. --resume 5)`
-  ——它接受 `latest` 或**序号**，而不是会话 UUID。另有 `--session-id <UUID>`（给新会话指定 UUID）、
-  `--session-file <JSON>`、`--list-sessions`、`--delete-session`。
-  因此 `gemini --resume <id>` 这一形式**在本机版本上未被证实**；T-004 必须核实到底哪种形式能定位
-  一个确定的历史会话，否则 resume 能力不得声明为 session-id locator。
+  配置面：`~/.gemini/settings.json` 有真实的 `hooks` 键。注意它与 Antigravity 的
+  `~/.gemini/config/hooks.json` 是**不同文件**（见 `createAntigravityManagedHookPlan`），
+  同在 `~/.gemini` 下但互不覆盖——T-004 的「不把 Antigravity 的共享配置误当成 Gemini 事件」成立且可满足。
+- **Resume 接受 UUID，`--help` 少说了**：`-r, --resume` 的 help 只写
+  `Use "latest" for most recent or index number (e.g. --resume 5)`，据此会误判成「只能按序号」。
+  但实现里的 `findSession(identifier)` 明确是 **UUID 优先**：
+  先 `sortedSessions.find(s => s.id === trimmedIdentifier)`，命中即返回；**只有**在 UUID 匹配不上时
+  才回退到 1-based 序号。其自身 doc comment 也写 `--resume {number}, --resume {uuid}, or --resume latest`。
+  故 `gemini --resume <session-uuid>` 是真实且稳定的定位方式，T-004 的 session-id locator 描述**正确**。
+
+  这条与 grok 的「hooks 不在 --help 里」是同一类陷阱：**只读 `--help` 会漏掉真实能力**。
+  凡 `--help` 与参考实现冲突，必须读实现或实测再判，不能拿 help 文本当能力上限。
+  （反面：若当真只按序号实现，序号是位置性的——删一条其余全移位——存进去的 5 之后可能恢复到
+  另一段对话，正是 Prime Directive 点名要避免的「把用户上下文接到错误会话上」。）
+- **本机认证已失效**（与能力判定无关，但影响端到端实测）：`gemini --list-sessions` 报
+  `IneligibleTierError: This client is no longer supported for Gemini Code Assist for individuals`，
+  官方指向 Antigravity。因此 Gemini 的 resume/hook 只能靠读实现 + 单测证明，**不能**声称做过真实会话恢复。
 - 其他实测：`--acp`（ACP 模式真实存在）、`-i/--prompt-interactive`（现有 promptDelivery 正确）、
-  `--approval-mode default|auto_edit|yolo|plan`、`-y/--yolo`、`--skip-trust`。
+  `--approval-mode default|auto_edit|yolo|plan`、`-y/--yolo`、`--skip-trust`、`--session-id <UUID>`
+  （**给新会话指定** UUID，不是恢复）、`--session-file <JSON>`、`--list-sessions`、`--delete-session`。
 
 ---
 
