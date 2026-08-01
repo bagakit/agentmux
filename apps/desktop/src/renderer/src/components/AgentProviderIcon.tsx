@@ -17,8 +17,23 @@ const BUILT_IN_AGENT_LABELS = {
   grok: 'Grok',
   gemini: 'Gemini',
   antigravity: 'Antigravity',
-  cursor: 'Cursor'
+  cursor: 'Cursor',
+  // Kimi 有名字但**没有**离线品牌图形：仓库里没有 kimi 的图标资源，也不会凭空画一个近似的
+  // 冒充它。于是它走下面 switch 的 `Bot` 兜底——「认得这个 Provider」与「有它的品牌标记」是
+  // 两件事，这里如实分开：label 认得，标记中性。
+  kimi: 'Kimi'
 } satisfies Record<BuiltInAgentProviderId, string>
+
+/**
+ * 有离线品牌标记的 Provider。**不是**内置 Provider 的全集：见上面 `kimi` 那条。
+ *
+ * 单独导出是为了让测试能按这份清单去质询"每个声称有标记的都真画得出来"，而不是在测试里
+ * 手抄一份会跟着漏的副本——此前那份手抄清单只列了 5 个，另外 4 个内置 Provider 加进来时
+ * 一条断言都没红。
+ */
+export const AGENT_PROVIDERS_WITH_BRAND_MARK = [
+  'codex', 'claude', 'traex', 'hermes', 'pi', 'grok', 'gemini', 'antigravity', 'cursor'
+] as const
 
 export function agentProviderLabel(providerId: AgentProviderId): string {
   return Object.prototype.hasOwnProperty.call(BUILT_IN_AGENT_LABELS, providerId)
