@@ -70,18 +70,26 @@ export type AgentNativeHookSpecification = {
    * - `payload`：Provider 的负载自带事件名，`payloadKey` 指明是三拼法里的哪一个。这是**投递侧**的拼法，
    *   与**配置侧**可能不同（grok 配置写 PascalCase、负载报 snake_case），所以必须单独声明、单独佐证——
    *   守卫因此把「装了对的事件名」（配置侧）与「子进程解析得出事件名」（投递侧）分成两条。
+   * - `generated-code`：上面两条都**不适用**——这家 Provider 的 hook 面不是「一条命令」，而是一份
+   *   AgentMux 生成的代码文件（pi 的 `extensions/agentmux.js`、opencode 的 `plugin/agentmux.js`）。
+   *   代码跑在 Provider 自己的进程里，**自己直接 POST**，`agent-hook-command` 那个子进程整个不在链路上。
+   *   于是事件名不是「解析出来的」而是生成时就写死在每个回调里，本条注释开头那种静默跳过**结构上不可能**
+   *   发生——但它不可能发生这件事必须由守卫钉住，不能只写在注释里（见本仓「声明了却静默不做的能力」）。
    *
-   * 缺省是**刻意允许**的两种情形，都不是「忘了填」：
+   * 缺省是**刻意允许**的一种情形，不是「忘了填」：
    * - `hookStrategy.kind === 'none'`（traex）：根本没有 hook，谈不上事件名来源。
-   * - `installation === 'unmanaged'` 且来源未经第一方核实（pi）：AgentMux 不写它的配置，无法保证
-   *   `--event`；而它的负载键又查不到第一方证据，按「未核实就不声明」如实留空，绝不编一个键。
-   *   守卫因此只对 `explicit-managed` 强制此声明——那正是 AgentMux 亲手写配置、能静默漏掉事件名的那批。
+   *
+   * `installation === 'unmanaged'` 的那些同样不强制——AgentMux 不写它们的配置，保证不了 `--event`。
+   * 守卫只对 `explicit-managed` 强制此声明：那正是 AgentMux 亲手写配置、能静默漏掉事件名的那批。
    */
   eventNameSource?: AgentHookEventNameSource
 }
 
 /**
- * 事件名来源的判别联合。两个分支对应子进程解析事件名的两条**真实在用**的路。
+ * 事件名来源的判别联合。三个分支对应事件名到达服务端的三条**真实在用**的路。
+ *
+ * 前两条是「子进程解析」：Provider 装的是一条命令，`agent-hook-command` 从 argv 或负载里解析事件名。
+ * 第三条是「生成代码直送」：装的是代码文件，代码自己 POST，不经子进程——它与前两条互斥，别混。
  *
  * 刻意不含 `env` 分支：子进程确实也读 `AGENTMUX_HOOK_EVENT`，但今天没有任何 Provider 靠它送事件名
  * （client.ts 注入 url/token/provider 三样，从不注入事件名）。真到有 Provider 需要时再加，不预支一个
@@ -90,6 +98,7 @@ export type AgentNativeHookSpecification = {
 export type AgentHookEventNameSource =
   | { kind: 'flag' }
   | { kind: 'payload'; payloadKey: HookEventNamePayloadKey }
+  | { kind: 'generated-code' }
 
 /**
  * 一个 run 一份子代理花名册。
