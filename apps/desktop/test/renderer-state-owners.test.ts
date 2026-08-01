@@ -138,6 +138,45 @@ describe('Renderer resource state owners', () => {
     })
   })
 
+  it('does not let a newer Run running event erase an ACP-sourced semantic status', () => {
+    // 姊妹用例，钉死守卫的 `|| item.status.source === 'acp'` 那半：ACP agent 的转圈/等待记号
+    // 走 status.source === 'acp' 进来，一条更新的 process-state=running 到达时，语义状态必须保住、
+    // 不能降级成裸 `running`。single-change 变异：删掉 `|| item.status.source === 'acp'` → 这条红；
+    // native-hook 那侧的用例（上一条）此时仍绿，两侧各有独立断言，粗断言吃不掉这里的信号。
+    const acpWaiting: SessionSnapshot = {
+      ...session,
+      updatedAt: 3,
+      // 语义态由 ACP 侧观测得来；observedAt=3 严格早于下面 process-state 的 4，确保事件真的被 own 并进入分支。
+      status: { state: 'waiting' as const, source: 'acp' as const, observedAt: 3 }
+    }
+    const state = {
+      sessions: [acpWaiting],
+      timelines: {},
+      pendingAgentLaunches: {},
+      tabs: {},
+      layouts: {},
+      viewModes: {}
+    }
+
+    const next = reduceRuntimeEvent(state, core({
+      type: 'process-state',
+      agentSessionId: session.id,
+      run: session.control.run,
+      state: 'running',
+      pid: 42,
+      // 注意 evidence.source 是 run-process：守卫一旦坏掉，status 会被这条覆盖成
+      // { state: 'running', source: 'run-process', observedAt: 4 }，与下面的期望字面量三个字段全不同。
+      evidence: { source: 'run-process', observedAt: 4, run: session.control.run }
+    }))
+
+    // processState 已推进到 running，证明事件确实被 own 并跑进了 process-state 分支（排除「没触碰=看着像保住」的假绿）；
+    // 而语义 status 原样保留在 ACP 观测上——期望值锚成写死字面量，不由被测对象算出。
+    expect(next.sessions[0]).toMatchObject({
+      processState: 'running',
+      status: { state: 'waiting', source: 'acp', observedAt: 3 }
+    })
+  })
+
   it('projects and clears only Core-owned typed interactions', () => {
     const state = {
       sessions: [session],

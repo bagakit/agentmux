@@ -4,117 +4,44 @@ import type { WorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.j
 import type { WorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
 import {
   adjacentRegionId,
-  handleWorkbenchShortcut,
+  commandForWorkbenchId,
+  dispatchWorkbenchCommand,
   isEditableChordTarget,
-  resolveWorkbenchShortcut,
   tabIdForOrdinal,
-  type WorkbenchShortcutEvent,
+  windowShortcutHandlers,
+  workbenchWindowBindingIds,
   type WorkbenchShortcutStore
 } from '../src/renderer/src/lib/workbench-shortcuts.js'
+import { SHORTCUT_BINDINGS } from '../src/renderer/src/lib/shortcut-registry.js'
 
-// T-007：应用此前只有一个窗口级快捷键（QuickSwitcher）。这一层证明「哪个键是哪个动作、往哪个方向、
-// 切第几张」这套判定是对的，且平台切分守住了「非 mac 不吃裸 Ctrl+字母」这条底线。接线另有一层
-// （workbench-shortcut-wiring.test.tsx）——只测判定不够：删掉注册那行时判定测试全绿。
+// 哪个键是哪个动作（含平台切分、非 mac 底线、门）由 shortcut-registry.test.ts 守。这里守的是本层的三件
+// 事：1) id → 命令的翻译；2) 命令 → 落点 → store action 的转发（接线，删掉任一转发都要红）；3) window
+// handler map 覆盖注册表里每一条 window 绑定（「路由一半」的补法）。
 
-function event(overrides: Partial<WorkbenchShortcutEvent>): WorkbenchShortcutEvent {
-  return { key: 'a', metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, ...overrides }
-}
-
-describe('选 Tab：Cmd/Ctrl+数字', () => {
-  it('mac 上 Cmd+1 选第一张（绝对序号，不是相对切换）', () => {
-    expect(resolveWorkbenchShortcut(event({ key: '1', metaKey: true }), true))
-      .toEqual({ kind: 'select-tab', ordinal: 1 })
+// ---------------------------------------------------------------------------
+// id → 命令翻译。改错某条的方向/序号、把两条 id 对调，都要红。期望值锚字面量。
+// ---------------------------------------------------------------------------
+describe('commandForWorkbenchId：绑定 id 翻译成命令', () => {
+  it('select-tab.1..8 是绝对序号，.9 恒指最后一张', () => {
+    expect(commandForWorkbenchId('workbench.select-tab.1')).toEqual({ kind: 'select-tab', ordinal: 1 })
+    expect(commandForWorkbenchId('workbench.select-tab.8')).toEqual({ kind: 'select-tab', ordinal: 8 })
+    expect(commandForWorkbenchId('workbench.select-tab.9')).toEqual({ kind: 'select-tab', ordinal: 'last' })
   })
 
-  it('非 mac 上用裸 Ctrl+数字（数字不是 readline 键，可以裸 Ctrl）', () => {
-    expect(resolveWorkbenchShortcut(event({ key: '3', ctrlKey: true }), false))
-      .toEqual({ kind: 'select-tab', ordinal: 3 })
+  it('close / split / focus 各自翻译到对的 kind 与方向', () => {
+    expect(commandForWorkbenchId('workbench.close-region')).toEqual({ kind: 'close-region' })
+    expect(commandForWorkbenchId('workbench.split.right')).toEqual({ kind: 'split', direction: 'right' })
+    expect(commandForWorkbenchId('workbench.split.down')).toEqual({ kind: 'split', direction: 'down' })
+    expect(commandForWorkbenchId('workbench.focus-region.left')).toEqual({ kind: 'focus-region', direction: 'left' })
+    expect(commandForWorkbenchId('workbench.focus-region.right')).toEqual({ kind: 'focus-region', direction: 'right' })
+    expect(commandForWorkbenchId('workbench.focus-region.up')).toEqual({ kind: 'focus-region', direction: 'up' })
+    expect(commandForWorkbenchId('workbench.focus-region.down')).toEqual({ kind: 'focus-region', direction: 'down' })
   })
 
-  it('第 9 键恒指最后一张，而不是要求正好九张', () => {
-    expect(resolveWorkbenchShortcut(event({ key: '9', metaKey: true }), true))
-      .toEqual({ kind: 'select-tab', ordinal: 'last' })
-  })
-
-  it('带 Shift 的 Cmd+数字不是选 Tab', () => {
-    expect(resolveWorkbenchShortcut(event({ key: '1', metaKey: true, shiftKey: true }), true)).toBeNull()
-  })
-
-  it('0 不是有效序号（只认 1..9）', () => {
-    expect(resolveWorkbenchShortcut(event({ key: '0', metaKey: true }), true)).toBeNull()
-  })
-})
-
-describe('关闭当前 Region', () => {
-  it('mac 上是 Cmd+W', () => {
-    expect(resolveWorkbenchShortcut(event({ key: 'w', metaKey: true }), true))
-      .toEqual({ kind: 'close-region' })
-  })
-
-  it('非 mac 上是 Ctrl+Shift+W——裸 Ctrl+W 是 readline 删词，绝不吃', () => {
-    expect(resolveWorkbenchShortcut(event({ key: 'w', ctrlKey: true }), false)).toBeNull()
-    expect(resolveWorkbenchShortcut(event({ key: 'w', ctrlKey: true, shiftKey: true }), false))
-      .toEqual({ kind: 'close-region' })
-  })
-
-  it('mac 上带 Shift 的 Cmd+W 不是关闭 Region（那不是 mac 的关闭键形状）', () => {
-    expect(resolveWorkbenchShortcut(event({ key: 'w', metaKey: true, shiftKey: true }), true)).toBeNull()
-  })
-})
-
-describe('分屏', () => {
-  it('mac 上 Cmd+D 向右、Cmd+Shift+D 向下', () => {
-    expect(resolveWorkbenchShortcut(event({ key: 'd', metaKey: true }), true))
-      .toEqual({ kind: 'split', direction: 'right' })
-    expect(resolveWorkbenchShortcut(event({ key: 'd', metaKey: true, shiftKey: true }), true))
-      .toEqual({ kind: 'split', direction: 'down' })
-  })
-
-  it('非 mac 上裸 Ctrl+D 绝不分屏（那是 shell 的 EOF）', () => {
-    expect(resolveWorkbenchShortcut(event({ key: 'd', ctrlKey: true }), false)).toBeNull()
-    expect(resolveWorkbenchShortcut(event({ key: 'd', ctrlKey: true, shiftKey: true }), false)).toBeNull()
-  })
-
-  it('非 mac 上用 Ctrl+Shift+E 向右、Ctrl+Shift+O 向下（基础和弦已含 Shift，改用字母区分方向）', () => {
-    expect(resolveWorkbenchShortcut(event({ key: 'e', ctrlKey: true, shiftKey: true }), false))
-      .toEqual({ kind: 'split', direction: 'right' })
-    expect(resolveWorkbenchShortcut(event({ key: 'o', ctrlKey: true, shiftKey: true }), false))
-      .toEqual({ kind: 'split', direction: 'down' })
-  })
-})
-
-describe('切换焦点格：Cmd/Ctrl+Alt+方向键', () => {
-  it('mac 上 Cmd+Alt+方向 给出 focus-region 命令', () => {
-    expect(resolveWorkbenchShortcut(event({ key: 'ArrowRight', metaKey: true, altKey: true }), true))
-      .toEqual({ kind: 'focus-region', direction: 'right' })
-    expect(resolveWorkbenchShortcut(event({ key: 'ArrowUp', metaKey: true, altKey: true }), true))
-      .toEqual({ kind: 'focus-region', direction: 'up' })
-  })
-
-  it('非 mac 上是 Ctrl+Alt+方向', () => {
-    expect(resolveWorkbenchShortcut(event({ key: 'ArrowLeft', ctrlKey: true, altKey: true }), false))
-      .toEqual({ kind: 'focus-region', direction: 'left' })
-    expect(resolveWorkbenchShortcut(event({ key: 'ArrowDown', ctrlKey: true, altKey: true }), false))
-      .toEqual({ kind: 'focus-region', direction: 'down' })
-  })
-
-  it('方向键不带 Alt 不是焦点移动（避免与别的 Cmd+方向 惯例撞车）', () => {
-    expect(resolveWorkbenchShortcut(event({ key: 'ArrowRight', metaKey: true }), true)).toBeNull()
-  })
-})
-
-describe('平台底线', () => {
-  it('mac 上不吃 Cmd+Ctrl 同按的混合和弦', () => {
-    expect(resolveWorkbenchShortcut(event({ key: '1', metaKey: true, ctrlKey: true }), true)).toBeNull()
-  })
-
-  it('没有主修饰键时任何键都不是本层的键', () => {
-    expect(resolveWorkbenchShortcut(event({ key: '1' }), true)).toBeNull()
-    expect(resolveWorkbenchShortcut(event({ key: 'w' }), true)).toBeNull()
-  })
-
-  it('Alt 单独作用于非方向键时不解析成任何命令', () => {
-    expect(resolveWorkbenchShortcut(event({ key: 'd', metaKey: true, altKey: true }), true)).toBeNull()
+  it('非 workbench 动作（quick-switch）与未知 id 返回 null', () => {
+    expect(commandForWorkbenchId('quick-switch.toggle')).toBeNull()
+    expect(commandForWorkbenchId('terminal.search')).toBeNull()
+    expect(commandForWorkbenchId('nope')).toBeNull()
   })
 })
 
@@ -290,9 +217,11 @@ describe('adjacentRegionId：按屏幕几何找相邻格', () => {
   })
 })
 
-// 接线层：只测判定不够——删掉 handleWorkbenchShortcut 里任一条 store 调用时，上面的判定测试全绿。
-// 这一层证明每条判定真的接到了对应的 store action 上，且不该动手时（非 Workbench 面、落点解析失败）
-// 一个 action 都不调、也不吞掉这个键。
+// ---------------------------------------------------------------------------
+// 接线层：只测翻译不够——删掉 dispatchWorkbenchCommand 里任一条 store 调用时，上面的翻译测试全绿。
+// 这一层证明每条命令真的接到了对应的 store action 上，且不该动手时（非 Workbench 面、落点解析失败）
+// 一个 action 都不调、也不吞掉这个键。落点用 id → 命令 → dispatch 全链跑，与 App 走同一条路。
+// ---------------------------------------------------------------------------
 
 function spyStore(overrides: Partial<WorkbenchShortcutStore> = {}): WorkbenchShortcutStore & {
   calls: string[]
@@ -326,29 +255,32 @@ function spyStore(overrides: Partial<WorkbenchShortcutStore> = {}): WorkbenchSho
   }
 }
 
-describe('接线：handleWorkbenchShortcut 把每条键接到 store', () => {
-  it('Cmd+2 调 activateTab，落到焦点组第二张，并吞掉这个键', () => {
+/** 走与 App 相同的全链：id → 命令 → dispatch。命令翻译不出来（非 workbench id）视为不吃这个键。 */
+function dispatchId(id: string, store: WorkbenchShortcutStore): boolean {
+  const command = commandForWorkbenchId(id)
+  return command ? dispatchWorkbenchCommand(command, store) : false
+}
+
+describe('接线：命令转发到 store action', () => {
+  it('select-tab.2 调 activateTab，落到焦点组第二张，并吞掉这个键', () => {
     const store = spyStore()
-    const handled = handleWorkbenchShortcut(event({ key: '2', metaKey: true }), true, store)
-    expect(handled).toBe(true)
+    expect(dispatchId('workbench.select-tab.2', store)).toBe(true)
     expect(store.calls).toEqual(['activateTab:ws:g:t2'])
   })
 
-  it('Cmd+W 在单 Region Tab 上关整张 Tab（走确认流的意图），不是空关 Region', () => {
+  it('close-region 在单 Region Tab 上关整张 Tab（走确认流的意图），不是空关 Region', () => {
     // 默认 store 的 t2 是单格 r2——这是最常见的 Tab 状态。任务头号诉求「关不掉」正出在这里：
     // 若还调 closeRegion，removeWorkbenchRegion 见只剩一格会静默不动，键却被吞。改成投 requestCloseTab。
     const store = spyStore()
-    const handled = handleWorkbenchShortcut(event({ key: 'w', metaKey: true }), true, store)
-    expect(handled).toBe(true)
-    // 焦点组活动 Tab 是 t2；关 Tab 要带上组 id 交给组件的确认流。
+    expect(dispatchId('workbench.close-region', store)).toBe(true)
     expect(store.calls).toEqual(['requestCloseTab:ws:g:t2'])
   })
 
-  it('Cmd+W 在多 Region Tab 上投「关这一格」的意图，不裸调 closeRegion（脏检查要留在组件确认流里）', () => {
-    // 分屏后的 Tab（t2 分成左右两格，活动在右格 r2R）：Cmd+W 关的是那一格，不是整张 Tab。但不能裸调
+  it('close-region 在多 Region Tab 上投「关这一格」的意图，不裸调 closeRegion', () => {
+    // 分屏后的 Tab（t2 分成左右两格，活动在右格 r2R）：关的是那一格，不是整张 Tab。但不能裸调
     // closeRegion——那条路没有脏检查，会静默弃掉那一格未保存的编辑器改动，而鼠标点这一格的 X 会先弹
-    // 「未保存确认」。同一个「关这一格」的概念只能有一个决定出口，于是键盘也投意图、交给组件跑与 X 相同的
-    // dirty→确认→closeRegion。把这行改回 `void store.closeRegion(...)`（只接了一侧出口），这条断言就红。
+    // 「未保存确认」。同一个「关这一格」只能有一个决定出口。把这行改回 `void store.closeRegion(...)`
+    // （只接了一侧出口），这条断言就红。
     const splitTab: WorkbenchTab = {
       id: 't2',
       workspaceId: 'ws',
@@ -369,20 +301,17 @@ describe('接线：handleWorkbenchShortcut 把每条键接到 store', () => {
       }
     }
     const store = spyStore({ tabs: { t2: splitTab } })
-    const handled = handleWorkbenchShortcut(event({ key: 'w', metaKey: true }), true, store)
-    expect(handled).toBe(true)
-    // 只投意图，且绝不出现裸 closeRegion（回退到裸调时这里立刻红）。
+    expect(dispatchId('workbench.close-region', store)).toBe(true)
     expect(store.calls).toEqual(['requestCloseRegion:ws:t2:r2R'])
   })
 
-  it('Cmd+D 调 splitRegion，方向原样带过去', () => {
+  it('split.down 调 splitRegion，方向原样带过去', () => {
     const store = spyStore()
-    const handled = handleWorkbenchShortcut(event({ key: 'd', metaKey: true, shiftKey: true }), true, store)
-    expect(handled).toBe(true)
+    expect(dispatchId('workbench.split.down', store)).toBe(true)
     expect(store.calls).toEqual(['splitRegion:ws:t2:r2:down'])
   })
 
-  it('Cmd+Alt+方向 调 focusRegion，落到几何相邻格', () => {
+  it('focus-region.right 调 focusRegion，落到几何相邻格', () => {
     // 活动 Tab t2 分成左右两格，活动在左格 r2L，向右应聚焦 r2R。
     const splitTab: WorkbenchTab = {
       id: 't2',
@@ -404,47 +333,32 @@ describe('接线：handleWorkbenchShortcut 把每条键接到 store', () => {
       }
     }
     const store = spyStore({ tabs: { t2: splitTab } })
-    const handled = handleWorkbenchShortcut(
-      event({ key: 'ArrowRight', metaKey: true, altKey: true }), true, store
-    )
-    expect(handled).toBe(true)
+    expect(dispatchId('workbench.focus-region.right', store)).toBe(true)
     expect(store.calls).toEqual(['focusRegion:ws:t2:r2R'])
   })
 
-  it('不是本层的键：一个 action 都不调，也不吞键', () => {
-    const store = spyStore()
-    const handled = handleWorkbenchShortcut(event({ key: 'z', metaKey: true }), true, store)
-    expect(handled).toBe(false)
-    expect(store.calls).toEqual([])
-  })
-
-  it('非 Workbench 主面时不接管：Cmd+2 原样放行', () => {
+  it('非 Workbench 主面时不接管：一个 action 都不调，也不吞键', () => {
     const store = spyStore({ mainSurface: 'board' })
-    const handled = handleWorkbenchShortcut(event({ key: '2', metaKey: true }), true, store)
-    expect(handled).toBe(false)
+    expect(dispatchId('workbench.select-tab.2', store)).toBe(false)
     expect(store.calls).toEqual([])
   })
 
-  it('序号越界：解析成命令但落点为空，不调 action、不吞键', () => {
+  it('序号越界：翻译成命令但落点为空，不调 action、不吞键', () => {
     const store = spyStore()
-    const handled = handleWorkbenchShortcut(event({ key: '5', metaKey: true }), true, store)
-    expect(handled).toBe(false)
+    expect(dispatchId('workbench.select-tab.5', store)).toBe(false)
     expect(store.calls).toEqual([])
   })
 
   it('单格 Tab 向右移焦点没有邻居：不调 focusRegion、不吞键', () => {
     // 默认 store 的 t2 是单格 r2，向右无邻居。
     const store = spyStore()
-    const handled = handleWorkbenchShortcut(
-      event({ key: 'ArrowRight', metaKey: true, altKey: true }), true, store
-    )
-    expect(handled).toBe(false)
+    expect(dispatchId('workbench.focus-region.right', store)).toBe(false)
     expect(store.calls).toEqual([])
   })
 
   it('序号切 Tab 用的是 Topic 投影后的顺序，与用户所见对齐', () => {
     // 两张 Tab 属于不同 Topic：活动 Tab t-b 绑 topic-b，t-a 绑 topic-a。投影后只剩 topic-b 的 Tab，
-    // 于是 Cmd+1 应落到 t-b（投影后的第一张），而不是未过滤时的 t-a。
+    // 于是 select-tab.1 应落到 t-b（投影后的第一张），而不是未过滤时的 t-a。
     const layout: WorkspaceLayout = {
       root: { type: 'leaf', groupId: 'g' },
       groups: [{ id: 'g', tabOrder: ['t-a', 't-b'], activeTabId: 't-b', recentTabIds: ['t-b'] }],
@@ -462,8 +376,54 @@ describe('接线：handleWorkbenchShortcut 把每条键接到 store', () => {
       layouts: { ws: layout },
       tabs: { 't-a': tabWithTopic('t-a', 'topic-a'), 't-b': tabWithTopic('t-b', 'topic-b') }
     })
-    const handled = handleWorkbenchShortcut(event({ key: '1', metaKey: true }), true, store)
-    expect(handled).toBe(true)
+    expect(dispatchId('workbench.select-tab.1', store)).toBe(true)
     expect(store.calls).toEqual(['activateTab:ws:g:t-b'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// window handler map 覆盖率：「路由一半」的补法。这份 map 必须为注册表里每一条 window scope 绑定都提供
+// handler——漏一条（比如新增一个 workbench 绑定却忘了接线），那个键按了就静默什么都不发生。
+// ---------------------------------------------------------------------------
+describe('windowShortcutHandlers 覆盖注册表每一条 window 绑定', () => {
+  it('每条 window scope 绑定 id 在 handler map 里都有 handler', () => {
+    const store = spyStore()
+    let toggled = 0
+    let helpToggled = 0
+    const handlers = windowShortcutHandlers(store, {
+      toggleQuickSwitch: () => { toggled += 1 },
+      toggleShortcutsHelp: () => { helpToggled += 1 }
+    })
+    const windowIds = SHORTCUT_BINDINGS.filter((b) => b.scope === 'window').map((b) => b.id)
+    for (const id of windowIds) {
+      expect(typeof handlers[id], `no handler for window binding ${id}`).toBe('function')
+    }
+    // 反向自证：map 里没有多出注册表以外的 window id（除 quick-switch/help 外全部来自 workbench 定义域）。
+    expect(new Set(Object.keys(handlers))).toEqual(new Set(windowIds))
+    // quick-switch handler 真的接到了 toggle 上，且返回吃下（纯切换恒 true）。
+    expect(handlers['quick-switch.toggle']!()).toBe(true)
+    expect(toggled).toBe(1)
+    // help handler 同样接到了自己的 toggle 上——它是 quick-switch 之外第二条非 workbench 的 window 绑定，
+    // 接错到别的 action 上（或漏接）这里就红。
+    expect(handlers['help.shortcuts']!()).toBe(true)
+    expect(helpToggled).toBe(1)
+    expect(toggled).toBe(1)
+  })
+
+  it('workbench handler 转发到 dispatch：select-tab.2 打到 activateTab', () => {
+    const store = spyStore()
+    const handlers = windowShortcutHandlers(store, { toggleQuickSwitch: () => {}, toggleShortcutsHelp: () => {} })
+    expect(handlers['workbench.select-tab.2']!()).toBe(true)
+    expect(store.calls).toEqual(['activateTab:ws:g:t2'])
+  })
+
+  it('workbenchWindowBindingIds 恰好是注册表里能翻译成命令的 window 绑定', () => {
+    // SSOT 自证：从注册表过滤出来的 id 集合，与「scope window 且 commandForWorkbenchId 认得」一致。
+    const expected = SHORTCUT_BINDINGS
+      .filter((b) => b.scope === 'window' && commandForWorkbenchId(b.id) !== null)
+      .map((b) => b.id)
+    expect(new Set(workbenchWindowBindingIds())).toEqual(new Set(expected))
+    // 且不含 quick-switch（它不是 workbench 命令）。
+    expect(workbenchWindowBindingIds()).not.toContain('quick-switch.toggle')
   })
 })

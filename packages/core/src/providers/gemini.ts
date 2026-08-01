@@ -90,10 +90,10 @@ export function createGeminiProvider(defineAgentProvider: ProviderFactory): Agen
       // `--acp` 真实存在，但 AgentMux 侧的 ACP 适配未接，故如实声明 none/false。
       acpStrategy: { kind: 'none' },
       capabilities: {
-        terminal: true, hookEvents: true, timeline: 'complete-events',
+        terminal: true, timeline: 'complete-events',
         // observe 而非 respond：与 grok 同理——回决定需要把 fire-and-forget 的 hook 变成阻塞 RPC。
         permission: 'observe',
-        providerResume: true, acp: false, replyCorrelation: 'none'
+        providerResume: true, replyCorrelation: 'none'
         // usage 刻意不声明：Gemini 每个事件都带 transcript_path，但它那份 transcript 是**整文件
         // JSON** 的 conversation record（`loadConversationRecord`），既不是 claude-jsonl 也不是
         // codex-rollout——今天两个 reader 都读不了它。声明 usage 就得先加第三种解析器，那超出本 task

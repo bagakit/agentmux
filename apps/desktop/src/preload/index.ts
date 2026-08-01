@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webFrame } from 'electron'
-import type { AgentExecutorId, AgentMuxControlRequest } from '@agentmux/core'
+import type { AgentExecutorId, AgentMuxControlRequest, AgentMuxRunInputData } from '@agentmux/core'
 import {
   AGENT_ATTENTION_ACTIVATE_CHANNEL,
   CONTROL_CANCEL_CHANNEL,
@@ -163,7 +163,7 @@ const api: AgentMuxPreloadApi = {
     attach: (session: SessionControl, afterSequence = 0) =>
       ipcRenderer.invoke('sessions:attach', session, afterSequence),
     detach: (attachmentId: string) => ipcRenderer.invoke('sessions:detach', attachmentId),
-    write: (session: SessionControl, data: string) => ipcRenderer.invoke('sessions:write', session, data),
+    write: (session: SessionControl, data: AgentMuxRunInputData) => ipcRenderer.invoke('sessions:write', session, data),
     submitPrompt: (session: AgentSessionControl, prompt: string) =>
       ipcRenderer.invoke('sessions:submitPrompt', session, prompt),
     respondInteraction: (session, response) =>

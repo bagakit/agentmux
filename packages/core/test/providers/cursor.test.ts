@@ -58,7 +58,6 @@ describe('Cursor provider', () => {
     it('Hook 与 native resume 都声明，且 acp/usage 保持未声明', () => {
       const { capabilities, hookStrategy, resumeStrategy, acpStrategy } = cursor.catalog
       expect(hookStrategy).toEqual({ kind: 'native', installation: 'explicit-managed' })
-      expect(capabilities.hookEvents).toBe(true)
       expect(capabilities.timeline).toBe('complete-events')
       // `--resume [chatId]` 直传 chat id（bundle: `else fe=o.resume`），故 locator 是 session-id。
       expect(resumeStrategy).toEqual({ kind: 'provider-native', locator: 'session-id' })
@@ -66,7 +65,6 @@ describe('Cursor provider', () => {
       // 三个门读 stdout 的 permission，但我们只观察不应答。
       expect(capabilities.permission).toBe('observe')
       expect(acpStrategy).toEqual({ kind: 'none' })
-      expect(capabilities.acp).toBe(false)
       // stop 负载直接带 input_tokens/output_tokens，但今天的 usage 通路只有 native-transcript
       // 一种形状——声明它等于承诺解析一个 Cursor 从不产出的 transcript 文件。
       expect(capabilities.usage).toBeUndefined()

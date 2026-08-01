@@ -51,7 +51,6 @@ describe('Grok provider', () => {
       const { capabilities, hookStrategy, resumeStrategy } = grok.catalog
       // `grok inspect` 报 Hooks (18)，且 ~/.grok/hooks/*.json 是 always-trusted 的安装位。
       expect(hookStrategy).toEqual({ kind: 'native', installation: 'explicit-managed' })
-      expect(capabilities.hookEvents).toBe(true)
       expect(capabilities.timeline).toBe('complete-events')
       // `grok --help`: -r, --resume [<SESSION_ID_OR_TITLE>]；--session-id 是给新会话指定 UUID。
       expect(resumeStrategy).toEqual({ kind: 'provider-native', locator: 'session-id' })

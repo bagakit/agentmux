@@ -158,11 +158,9 @@ const runtimeFixture = vi.hoisted(() => {
         catalog: {
           capabilities: {
             terminal: true as const,
-            hookEvents: true,
             timeline: 'complete-events' as const,
             permission: 'observe' as const,
             providerResume: true,
-            acp: false,
             replyCorrelation: 'none' as const
           }
         }
@@ -309,11 +307,9 @@ function agentStatusFixture() {
     run,
     capabilities: {
       terminal: true as const,
-      hookEvents: true,
       timeline: 'complete-events' as const,
       permission: 'observe' as const,
       providerResume: true,
-      acp: false,
       replyCorrelation: 'none' as const
     }
   }
@@ -968,6 +964,111 @@ describe('RuntimeController configuration transaction', () => {
       label: 'review · Repository'
     })
     expect(client.sessionTimeline).toHaveBeenCalledWith('agent-1')
+  })
+
+  it('carries the exit reason through the snapshot — reload must not degrade it to a bare signal', async () => {
+    // 这条守的是 reload / 冷启动那条路。exitReason 由 Core 在退出那一刻合成后挂在 run 上；projectSession
+    // 若不把它抄到 status，横幅就从「它自己崩了」退化成 detail:"signal SIGKILL"——同一个已死的 Agent，
+    // 在场时说得清，重开窗口就说不清了。事件路径的那一半在 session-state 里另有断言，两条路必须同答案。
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const status = agentStatusFixture()
+    client.runtimeProjection.mockResolvedValue({
+      hostId: 'local',
+      subjects: [{
+        subjectId: 'agent:local:agent-1',
+        kind: 'agent',
+        hostId: 'local',
+        workspacePath: '/repo',
+        providerId: status.session.providerId,
+        executorId: status.session.executorId,
+        agentSession: status.session,
+        run: { ...status.run, state: 'exited' as const, exitCode: 0, exitSignal: 'SIGKILL', exitReason: 'crashed' as const }
+      }]
+    })
+
+    const snapshot = await controller.snapshot(localConfig)
+
+    expect(snapshot.sessions[0]?.status).toMatchObject({ state: 'exited', exitReason: 'crashed' })
+  })
+
+  it('carries the killing signal into the visible detail — the same sentence the live path shows', async () => {
+    // 两条路径同一句话那一半。这段投影现在是 Core 的共享实现（@agentmux/core/run-status），实时路径的
+    // 姊妹断言在 run-process-status-convergence.test.ts；两个文件各自独立红，因为「一条路走了共享投影、
+    // 另一条还留着手抄版」正是这个缺陷此前活下来的形状。
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const status = agentStatusFixture()
+    client.runtimeProjection.mockResolvedValue({
+      hostId: 'local',
+      subjects: [{
+        subjectId: 'agent:local:agent-1',
+        kind: 'agent',
+        hostId: 'local',
+        workspacePath: '/repo',
+        providerId: status.session.providerId,
+        executorId: status.session.executorId,
+        agentSession: status.session,
+        run: { ...status.run, state: 'exited' as const, exitCode: 139, exitSignal: 'SIGSEGV' }
+      }]
+    })
+
+    const snapshot = await controller.snapshot(localConfig)
+
+    expect(snapshot.sessions[0]?.status).toMatchObject({ state: 'exited', detail: 'signal SIGSEGV' })
+  })
+
+  it('says the PTY went away in the same words the live path uses', async () => {
+    // interrupted 那条分支：它既没有退出码也没有信号可给，不解释一句用户只会看到一个没有下文的 error。
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const status = agentStatusFixture()
+    client.runtimeProjection.mockResolvedValue({
+      hostId: 'local',
+      subjects: [{
+        subjectId: 'agent:local:agent-1',
+        kind: 'agent',
+        hostId: 'local',
+        workspacePath: '/repo',
+        providerId: status.session.providerId,
+        executorId: status.session.executorId,
+        agentSession: status.session,
+        run: { ...status.run, state: 'interrupted' as const }
+      }]
+    })
+
+    const snapshot = await controller.snapshot(localConfig)
+
+    expect(snapshot.sessions[0]?.status).toMatchObject({
+      state: 'error',
+      detail: 'The Run owner interrupted this PTY.'
+    })
+  })
+
+  it('does not invent an exit reason the Run never carried', async () => {
+    // 反向那一侧：run 上没有 exitReason 时不许凭空造一个。少了它，「一律填 crashed」这种过宽的抄法
+    // 也会让上面那条全绿——而那会把一个我们自己关掉的 Agent 说成崩溃。
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const status = agentStatusFixture()
+    client.runtimeProjection.mockResolvedValue({
+      hostId: 'local',
+      subjects: [{
+        subjectId: 'agent:local:agent-1',
+        kind: 'agent',
+        hostId: 'local',
+        workspacePath: '/repo',
+        providerId: status.session.providerId,
+        executorId: status.session.executorId,
+        agentSession: status.session,
+        run: { ...status.run, state: 'exited' as const, exitCode: 0 }
+      }]
+    })
+
+    const snapshot = await controller.snapshot(localConfig)
+
+    expect(snapshot.sessions[0]?.status).toMatchObject({ state: 'exited' })
+    expect(snapshot.sessions[0]?.status.exitReason).toBeUndefined()
   })
 
   it('projects persisted semantic status and typed interaction over a live Run', async () => {

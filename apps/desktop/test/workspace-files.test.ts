@@ -10,7 +10,10 @@ import { WorkspaceFiles, workspaceFileObserverCount } from '../src/main/workspac
 const localWorkerRace = vi.hoisted(() => ({
   beforeInput: null as null | (() => Promise<void>),
   beforeObserverInput: null as null | (() => Promise<void>),
-  beforeObserverKill: null as null | (() => Promise<void>)
+  beforeObserverKill: null as null | (() => Promise<void>),
+  // Every observer child this suite spawns, oldest first. The only way a test can kill a worker the
+  // way the OS does — the failure the respawn exists for — is to hold its real pid.
+  observerPids: [] as number[]
 }))
 
 vi.mock('node:child_process', async (importOriginal) => {
@@ -37,6 +40,7 @@ vi.mock('node:child_process', async (importOriginal) => {
         return input
       }) as typeof input.end
       if (request?.action === 'observe') {
+        if (typeof child.pid === 'number') localWorkerRace.observerPids.push(child.pid)
         const originalKill = child.kill.bind(child)
         child.kill = ((signal?: NodeJS.Signals | number) => {
           const hook = localWorkerRace.beforeObserverKill
@@ -102,6 +106,7 @@ afterEach(async () => {
   localWorkerRace.beforeInput = null
   localWorkerRace.beforeObserverInput = null
   localWorkerRace.beforeObserverKill = null
+  localWorkerRace.observerPids.length = 0
   await Promise.all(temporaryRoots.splice(0).map(async (path) => await rm(path, { recursive: true, force: true })))
 })
 
@@ -455,6 +460,119 @@ describe('WorkspaceFiles root confinement', () => {
     await rm(path, { recursive: true })
     await new Promise((resolve) => setTimeout(resolve, 100))
     expect(invalidations).toBe(afterDispose)
+  })
+
+  it('keeps reporting changes after its worker dies mid-observation, and says the gap happened', async () => {
+    // `observe` promises "you hear about every change until you dispose". The worker underneath cannot
+    // promise that: it watches the PARENT DIRECTORY, so it dies when that directory is renamed or
+    // deleted and when the OS runs out of watch descriptors — and a death AFTER it reports OBSERVING
+    // used to vanish without a trace, because `ready` had already resolved and there was nothing left
+    // to reject. The editor then sat on the content it last read, forever, looking exactly like a file
+    // nobody was touching.
+    //
+    // So this kills the established child for real (SIGKILL, so it cannot run its own shutdown) and
+    // then writes to the file. Two facts have to hold, and neither one did before:
+    //   - the death itself reaches the listener, because the file may have changed while nothing was
+    //     watching and only a re-read can close that gap;
+    //   - a change made AFTERWARDS still arrives, which is only true if a live worker replaced the
+    //     dead one.
+    // A test that only asserted the second could pass on a lucky race; the observer count pins that a
+    // replacement really exists rather than the old child somehow surviving.
+    const { root, workspace, host } = await localFixture('observer-death')
+    const path = join(root, 'document.txt')
+    await writeFile(path, 'alpha')
+    const files = new WorkspaceFiles(() => host)
+    let invalidations = 0
+    const dispose = await files.observe(workspace, 'document.txt', () => {
+      invalidations += 1
+    })
+    expect(workspaceFileObserverCount()).toBe(1)
+
+    // `workspaceFileObserverCount` is module-global, so a failed assertion partway through would leak
+    // a live worker into every later test and report itself as three unrelated failures. Disposal
+    // therefore happens whatever the outcome, and the assertions live inside.
+    try {
+      // The observer children are recorded by the spawn mock, so this is the real pid of the real
+      // worker — killable exactly the way the OS kills it.
+      const pids = [...localWorkerRace.observerPids]
+      expect(pids).toHaveLength(1)
+      process.kill(pids[0]!, 'SIGKILL')
+
+      // The death is a change report in its own right: the file went unwatched, so the caller has to
+      // re-read to find out what it missed.
+      await waitFor(() => invalidations > 0)
+      // And the observation is live again, not merely reported dead. A new pid is the proof — the count
+      // alone would also read 1 if the dead child had somehow stayed registered.
+      await waitFor(() => (
+        workspaceFileObserverCount() === 1 &&
+        localWorkerRace.observerPids.length === 2 &&
+        localWorkerRace.observerPids[1] !== pids[0]
+      ))
+
+      const afterRespawn = invalidations
+      await writeFile(path, 'bravo')
+      await waitFor(() => invalidations > afterRespawn)
+    } finally {
+      await dispose()
+      await files.dispose()
+    }
+    expect(workspaceFileObserverCount()).toBe(0)
+  })
+
+  it('stops observing when the directory is gone for good, and lets a later reopen start clean', async () => {
+    // The other half of a worker death: the respawn cannot even start, because the watched directory
+    // really is gone. There is nothing to keep alive, so the observation ends — but the cached entry
+    // has to go with it. `WorkspaceFiles` hands the entry under this key to every later `observe` of
+    // the same file, so a kept entry means the next editor that opens it attaches to a subscription
+    // nobody is serving, and never hears about a change again.
+    //
+    // Measured on this fixture: deleting the directory alone does NOT kill the worker (a Darwin watch
+    // descriptor outlives the directory it was opened on), so both halves are needed to reach this
+    // path — the directory gone AND the child dead.
+    const { root, workspace, host } = await localFixture('observer-lost')
+    await mkdir(join(root, 'sub'))
+    const path = join(root, 'sub', 'document.txt')
+    await writeFile(path, 'alpha')
+    const files = new WorkspaceFiles(() => host)
+    let invalidations = 0
+    const dispose = await files.observe(workspace, 'sub/document.txt', () => {
+      invalidations += 1
+    })
+    expect(workspaceFileObserverCount()).toBe(1)
+
+    try {
+      const [pid] = localWorkerRace.observerPids
+      await rm(join(root, 'sub'), { recursive: true })
+      process.kill(pid!, 'SIGKILL')
+
+      // The listener still hears one report — the file went unwatched, and only a re-read can say
+      // what happened to it. That read is what reports the deletion.
+      await waitFor(() => invalidations > 0)
+      // No worker is left running, and no respawn is looping trying to reach a directory that is gone.
+      await waitFor(() => workspaceFileObserverCount() === 0)
+      const attempts = localWorkerRace.observerPids.length
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      expect(localWorkerRace.observerPids).toHaveLength(attempts)
+
+      // Reopening the same file gets a NEW worker, which only happens if the dead entry was dropped.
+      await mkdir(join(root, 'sub'))
+      await writeFile(path, 'bravo')
+      let reopened = 0
+      const disposeReopened = await files.observe(workspace, 'sub/document.txt', () => {
+        reopened += 1
+      })
+      try {
+        expect(localWorkerRace.observerPids.length).toBeGreaterThan(attempts)
+        await writeFile(path, 'charlie')
+        await waitFor(() => reopened > 0)
+      } finally {
+        await disposeReopened()
+      }
+    } finally {
+      await dispose()
+      await files.dispose()
+    }
+    expect(workspaceFileObserverCount()).toBe(0)
   })
 
   it('does not finish WorkspaceFiles disposal before observer children close', async () => {

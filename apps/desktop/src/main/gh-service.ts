@@ -152,7 +152,9 @@ export class GhService {
 
     const bodyFile = join(tmpdir(), `agentmux-pr-${randomUUID()}.md`)
     try {
-      await writeFile(bodyFile, input.body, 'utf8')
+      // 0o600 because this is the user's prose sitting in a world-readable shared tmpdir for as long
+      // as `gh` takes to run. Every other user-content write in this app already picks that mode.
+      await writeFile(bodyFile, input.body, { encoding: 'utf8', mode: 0o600 })
       const argv = ['pr', 'create', '--base', base, '--title', title, '--body-file', bodyFile]
       if (head) argv.push('--head', head)
       if (input.draft) argv.push('--draft')

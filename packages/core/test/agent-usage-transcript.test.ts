@@ -56,7 +56,12 @@ const CODEX_ROLLOUT = [
           cached_input_tokens: 58112,
           output_tokens: 3381,
           reasoning_output_tokens: 2650,
-          total_tokens: 64389
+          // 故意**不等于** input+output（61008+3381=64389）：codex 自报的 total 会把
+          // reasoning_output_tokens 这类不在 input/output 里的量也算进去，所以真实数据里
+          // 它本来就可以大于两者之和。这个差额是本 fixture 的判据本体——三数自洽时，
+          // 「用它报的 total」与「自己加一遍」给出同一个数字，那条取值就无人守（实测：
+          // 把 `total ?? input + output` 改成 `input + output`，23 条全绿）。
+          total_tokens: 67039
         }
       }
     }
@@ -73,8 +78,12 @@ describe('native usage extraction from provider transcripts', () => {
   it('reads codex last_token_usage (this turn) — never the session total', () => {
     const usage = extractTurnUsage(CODEX, CODEX_ROLLOUT, 5678)
     // 必须取 last_token_usage（本 turn 增量），不是 total_token_usage（会话累计）。若抽错字段，
-    // 下面这三个数会变成 999999/888888/1888887——断言会红。codex 自报单一 total 就用它报的 64389。
-    expect(usage).toEqual({ inputTokens: 61008, outputTokens: 3381, totalTokens: 64389, observedAt: 5678 })
+    // 下面这三个数会变成 999999/888888/1888887——断言会红。codex 自报单一 total 就用它报的。
+    expect(usage).toEqual({ inputTokens: 61008, outputTokens: 3381, totalTokens: 67039, observedAt: 5678 })
+    // 而且 total 必须是**它报的那个**，不是我们自己加的：fixture 里 61008+3381=64389 ≠ 67039，
+    // 差额就是 reasoning_output_tokens。这一行把「谁算的」单独钉住——不写它的话，只要哪天有人
+    // 把 fixture 改回三数自洽，`total ?? input + output` 换成 `input + output` 又会静默全绿。
+    expect(usage?.totalTokens).not.toBe(61008 + 3381)
   })
 
   it('returns null when the transcript has no usage record yet (no fabricated zero)', () => {
@@ -85,6 +94,25 @@ describe('native usage extraction from provider transcripts', () => {
     // 缺席如实是缺席：绝不返回一个 {0,0,0} 冒充"这一 turn 花了 0 个 token"。
     expect(extractTurnUsage(CLAUDE, noUsage, 1)).toBeNull()
     expect(extractTurnUsage(CODEX, noUsage, 1)).toBeNull()
+  })
+
+  // `total ?? input + output` 有两条出口，上面那条 codex 用例只走了「它报了」那一侧。
+  // 老格式（codex 早期 rollout 不写 total_tokens）走另一侧，而它此前无人守：把整个表达式
+  // 换成 `total as number`，23 条全绿（实测）——真实后果是老 rollout 的总量变成 undefined，
+  // 一路灌进 POST 负载与用量面板。两条出口各要一条用例，不是一条。
+  it('falls back to in+out only when codex reports no single total (legacy rollout)', () => {
+    const legacy = JSON.stringify({
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: { last_token_usage: { input_tokens: 700, output_tokens: 42 } }
+      }
+    }) + '\n'
+    const usage = extractTurnUsage(CODEX, legacy, 99)
+    expect(usage).toEqual({ inputTokens: 700, outputTokens: 42, totalTokens: 742, observedAt: 99 })
+    // 这一侧的判据是「有个数」而不只是「等于 742」：删掉 fallback 时得到的是 undefined，
+    // 而 undefined 会顺着可选字段一路静默走远，所以先把「在场且有限」单独钉住。
+    expect(Number.isFinite(usage?.totalTokens)).toBe(true)
   })
 
   it('ignores a usage-shaped record missing a core field rather than half-reporting', () => {

@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import {
   TERMINAL_REVEAL_DEADLINE_MS,
+  encodeTerminalBinaryInput,
+  subscribeTerminalInput,
   terminalAcceptsInput,
   terminalInputSender,
   terminalRevealDecision,
-  terminalRevealServiceOutcome
+  terminalRevealServiceOutcome,
+  type TerminalInputEventSource
 } from '../src/renderer/src/lib/terminal-reveal.js'
 import { classifyServiceNotice, serviceNoticeToRender } from '../src/renderer/src/lib/service-window-notice.js'
 
@@ -242,9 +245,12 @@ describe('输入只有一个出口', () => {
     const code = terminalView.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
     expect(code).not.toMatch(/if\s*\(!?\s*acceptsInputNow\(\)/)
     expect(code).toContain('terminalInputSender({')
-    // 三条通路都送进那一个出口，各自钉住自己的形状（宽松的 `/sendInput/` 会被任意一处满足，
-    // 于是"某条通路没接上"照旧全绿）。
-    expect(code, 'onData 没接到 sender').toContain('terminal.onData(sendInput)')
+    // 各通路都送进那一个出口，各自钉住自己的形状（宽松的 `/sendInput/` 会被任意一处满足，
+    // 于是"某条通路没接上"照旧全绿）。onData 与 onBinary 一起经 subscribeTerminalInput 接到
+    // 同一个 sender——两者的 accepts 极性由下面「两个输入事件源共用一把闸一个出口」那组**真跑**
+    // 的断言守，源码文本只钉"确实经那个共享出口接上了"。
+    expect(code, 'onData/onBinary 没经 subscribeTerminalInput 接到 sender')
+      .toContain('subscribeTerminalInput(terminal, sendInput)')
     expect(code, 'Shift+Enter 没接到 sender').toMatch(/sendInput\(shiftEnterInput\(/)
     expect(code, 'OSC 回复没接到 sender').toMatch(/sendInput\s*\n\s*\}\)/)
   })
@@ -255,6 +261,112 @@ describe('输入只有一个出口', () => {
     expect(terminalView).not.toMatch(
       /canControlRunRef\.current && acceptsInputRef\.current && readyForLiveOutput/
     )
+  })
+})
+
+/**
+ * 两个输入事件源共用一把闸、一个出口，且各自的字节编码正确。
+ *
+ * xterm 对鼠标上报有两个出口：SGR 编码（程序开了 DECSET ?1006）走 `triggerDataEvent → onData`，
+ * 是 ASCII；只开了旧式协议（?1000/?1002/?1003 或 ?9 而没开 ?1006）时，坐标字节可能 ≥128、是
+ * latin1 语义，xterm 为了不被 UTF-8 破坏改走 `triggerBinaryEvent → onBinary`（实读 @xterm/xterm
+ * CoreService 坐实）。少订阅 onBinary，旧式鼠标 TUI 里鼠标就完全没反应。
+ *
+ * 这一族**真跑**，不是源码文本断言——本仓有直接教训：同一个文件的输入闸曾"可取反而 26 条全绿"，
+ * 因为文本判据数得出闸的个数、数不出极性。所以这里让两个事件源都真的触发一次，按**出口数**判：
+ *  - 删掉 onBinary 订阅 → onBinary 那条断言红（write 收不到它的字节）；
+ *  - 把 onBinary 接到一个绕过 accepts 的 write → 「不收输入时一个字节都不许送出」红；
+ *  - 把 onBinary 的 latin1 字节当字符串走 UTF-8（naive「共用 sendInput」的错法）→ 坐标字节
+ *    那条红（0x80 会变成 0xC2 0x80 两字节）。
+ */
+describe('两个输入事件源共用一把闸一个出口', () => {
+  /** 一个可被驱动的 xterm 输入事件源替身：记录 dispose，并允许测试主动触发两个事件。 */
+  function fakeSource() {
+    let onData: ((data: string) => void) | null = null
+    let onBinary: ((data: string) => void) | null = null
+    let dataDisposed = false
+    let binaryDisposed = false
+    const source: TerminalInputEventSource = {
+      onData: (listener) => {
+        onData = listener
+        return { dispose() { dataDisposed = true } }
+      },
+      onBinary: (listener) => {
+        onBinary = listener
+        return { dispose() { binaryDisposed = true } }
+      }
+    }
+    return {
+      source,
+      fireData: (data: string) => onData?.(data),
+      fireBinary: (data: string) => onBinary?.(data),
+      get dataDisposed() { return dataDisposed },
+      get binaryDisposed() { return binaryDisposed }
+    }
+  }
+
+  it('两个事件源都到达同一个 write 出口', () => {
+    const sent: Array<string | Uint8Array> = []
+    const src = fakeSource()
+    subscribeTerminalInput(src.source, terminalInputSender({ accepts: () => true, write: (d) => sent.push(d) }))
+
+    src.fireData('k')
+    // 旧式鼠标：左键点在 col=96（1-based），X10 报文是 ESC [ M <button> <32+col> <32+row>。
+    // 32+96 = 128 → 0x80，正是 latin1 走 onBinary 的那类字节。
+    src.fireBinary('\x1b[M\x20\x80\x21')
+
+    expect(sent.length, 'onData 或 onBinary 有一条没接到 write').toBe(2)
+    expect(sent[0], 'onData 的文本没原样到达 write').toBe('k')
+    expect(sent[1], 'onBinary 的字节没到达 write').toBeInstanceOf(Uint8Array)
+  })
+
+  it('不收输入时两个事件源都不许送出——闸对两条一视同仁', () => {
+    // accepts=false 时，onData 与 onBinary 谁漏卡一条，用户就会从那条把字节送进一个不该收的
+    // attachment。把 onBinary 接到绕过 accepts 的 write，这条会红。
+    const sent: Array<string | Uint8Array> = []
+    const src = fakeSource()
+    subscribeTerminalInput(src.source, terminalInputSender({ accepts: () => false, write: (d) => sent.push(d) }))
+
+    src.fireData('k')
+    src.fireBinary('\x1b[M\x20\x80\x21')
+
+    expect(sent, '闸关着却送出了字节——某条通路绕过了 accepts').toEqual([])
+  })
+
+  it('onBinary 的 latin1 坐标字节以字节身份透传，不被 UTF-8 拆坏', () => {
+    // 这条钉的是 naive「让 onBinary 复用 onData 的字符串出口」会引入的静默损坏：ctxmux SDK 的
+    // 入站编码是 string → new TextEncoder().encode()（UTF-8）、Uint8Array 原样透传（实读坐实）。
+    // col=96 的坐标字节 0x80 若当字符串上线，UTF-8 会拆成 0xC2 0x80——凭空多一个字节、坐标毁掉。
+    // 所以源头必须编成字节，让它以 Uint8Array 透传。
+    const sent: Uint8Array[] = []
+    const src = fakeSource()
+    subscribeTerminalInput(src.source, terminalInputSender({
+      accepts: () => true,
+      // 模拟真实上线：字节原样、字符串才 UTF-8 编码（与 SDK bytes() 同构）。
+      write: (d) => sent.push(typeof d === 'string' ? new TextEncoder().encode(d) : d)
+    }))
+
+    src.fireBinary('\x1b[M\x20\x80\x21')
+
+    expect(sent.length).toBe(1)
+    // 报文原本 6 字节；UTF-8 误编码会变成 7 字节（0x80 → 0xC2 0x80）。
+    expect(Array.from(sent[0]!), 'latin1 坐标字节被 UTF-8 拆坏了').toEqual([0x1b, 0x5b, 0x4d, 0x20, 0x80, 0x21])
+  })
+
+  it('encodeTerminalBinaryInput 把 latin1 字符串按字节还原，>=128 也不失真', () => {
+    // 编码器本身是纯函数，单独钉一遍：每个 char code 就是一个字节，0x80 不许变成两字节。
+    const bytes = encodeTerminalBinaryInput('\x1b[M\x20\x80\xff')
+    expect(Array.from(bytes)).toEqual([0x1b, 0x5b, 0x4d, 0x20, 0x80, 0xff])
+  })
+
+  it('两个订阅都随合并的 disposable 一起释放——不漏一条监听', () => {
+    const src = fakeSource()
+    const subscription = subscribeTerminalInput(
+      src.source,
+      terminalInputSender({ accepts: () => true, write: () => {} })
+    )
+    subscription.dispose()
+    expect(src.dataDisposed && src.binaryDisposed, 'onData 或 onBinary 的订阅没在 dispose 里释放').toBe(true)
   })
 })
 

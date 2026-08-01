@@ -46,8 +46,10 @@ describe('packed consumer merges agent replay into observed output', () => {
     const offenders = bareReattachLines(SOURCE)
       .filter((index) => waitsOnEventOutput(index))
       // 合流出口自己就含一次 `reattachAgent`，它是被允许的那一处。
-      .filter((index) => !/const\s*\{\s*attachment\s*\}\s*=/.test(LINES[index]))
-      .map((index) => `${index + 1}: ${LINES[index].trim()}`)
+      // `?? ''` 只为 noUncheckedIndexedAccess 收窄：index 由 bareReattachLines 扫同一数组得来、
+      // 必在界内，而空串既不含 `output(` 也不匹配这个解构模式，兜底值不改变任何判据。
+      .filter((index) => !/const\s*\{\s*attachment\s*\}\s*=/.test(LINES[index] ?? ''))
+      .map((index) => `${index + 1}: ${(LINES[index] ?? '').trim()}`)
 
     expect(offenders).toEqual([])
   })
@@ -66,7 +68,7 @@ describe('packed consumer merges agent replay into observed output', () => {
     const mutatedLines = mutated.split('\n')
     const detected = bareReattachLines(mutated).filter((index) => (
       mutatedLines.slice(index + 1, index + 17).some((line) => /\boutput\s*\(/.test(line)) &&
-      !/const\s*\{\s*attachment\s*\}\s*=/.test(mutatedLines[index])
+      !/const\s*\{\s*attachment\s*\}\s*=/.test(mutatedLines[index] ?? '')
     ))
 
     expect(detected.length).toBeGreaterThan(0)

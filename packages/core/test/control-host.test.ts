@@ -1,4 +1,4 @@
-import { mkdtemp, rm, stat } from 'node:fs/promises'
+import { chmod, mkdtemp, rm, stat } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -267,6 +267,51 @@ describe('Control protocol', () => {
 })
 
 describe('external Control control', () => {
+  // -------------------------------------------------------------------------
+  // 接管一条已存在的 Control socket 之前那道存活闸。三态判定（alive/dead/unknown）与 endpoint
+  // 回收共用一份实现（socket-liveness.ts）；本侧要钉的是**这一侧对 unknown 的取舍**：抛
+  // CONTROL_UNAVAILABLE，而不是当成「没人占用」继续。
+  //
+  // 为什么这一条必须存在：start() 判出「没人占用」之后紧接着就 rm 掉那条 socket 并自己 listen
+  // 上去。若探不准（权限、超时）被读成「没人」，那次 rm 就会打在一个**活着的** owner 的 socket 上，
+  // 于是两个进程同时认为自己拥有同一条 Control 端点。删掉那句 unknown 守卫时本文件全绿（实测），
+  // 所以它此前无人守。
+  // -------------------------------------------------------------------------
+  it('refuses to take over an endpoint whose liveness cannot be determined', async () => {
+    const root = await mkdtemp('/private/tmp/agentmux-control-probe-')
+    roots.push(root)
+    const path = join(root, 'control.sock')
+
+    // 造一个「探不动但确实存在」的 socket：先真的 listen 出一个 socket 节点，再把它 chmod 000。
+    // 这样 lstat/isSocket/uid 三道前置检查全部通过（实测 isSocket() 仍为 true），探测才会真的发生，
+    // 而 connect 得 EACCES（实测）——正是「说不准」的真实来路之一。
+    const occupant = createServer()
+    await new Promise<void>((resolve, reject) => {
+      occupant.once('error', reject)
+      occupant.listen(path, () => resolve())
+    })
+    await chmod(path, 0o000)
+
+    const server = new AgentMuxControlServer({
+      async execute(): Promise<AgentMuxControlResult> {
+        throw new Error('must not be reached: start() should refuse before serving')
+      }
+    }, path)
+
+    try {
+      // 必须抛，而且必须是「判不准」这条码，不能是 CONTROL_OWNER_BUSY——后者是「确认有人」，
+      // 而我们恰恰不知道。也不能静默成功：那意味着它已经把占用者的 socket 删掉了。
+      await expect(server.start()).rejects.toMatchObject({ code: 'CONTROL_UNAVAILABLE' })
+      // 判据同时落在文件系统上：占用者的 socket 必须还在，一个字节都不许动。
+      await chmod(path, 0o600)
+      expect((await stat(path)).isSocket()).toBe(true)
+    } finally {
+      await chmod(path, 0o700).catch(() => {})
+      await server.stop().catch(() => {})
+      await new Promise<void>((resolve) => occupant.close(() => resolve()))
+    }
+  })
+
   it('carries the new protocol through one owner endpoint', async () => {
     const root = await mkdtemp('/private/tmp/agentmux-composition-control-')
     roots.push(root)

@@ -1,3 +1,4 @@
+import { readFileSync, statSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import type { ExecutionHost } from '@agentmux/core'
 import type { AppConfig } from '../src/shared/contracts.js'
@@ -131,6 +132,31 @@ describe('GhService.createPullRequest (contract, fake executor)', () => {
     // The prose goes through --body-file; a long body must never become an argv entry.
     expect(ghArgs).toContain('--body-file')
     expect(ghArgs.join(' ')).not.toContain('Uploads fail')
+  })
+
+  it('keeps the body file unreadable by anyone but the owner while gh runs', async () => {
+    // The body is the user's prose, and it sits in the shared tmpdir for as long as `gh` takes to run.
+    // Default write mode there is 0o644 under a normal umask — same-machine other users could read it.
+    // So this observes the REAL mode of the REAL file, from inside the window when gh would be reading
+    // it. A source-text check for `mode:` would not: it cannot see a umask, and it would stay green if
+    // the write moved to a helper that dropped the option.
+    let observed: { mode: number; body: string } | undefined
+    const host = ghHost(async (command, args) => {
+      if (command === 'git') return { stdout: '', stderr: '', exitCode: 0 }
+      const bodyFile = args[args.indexOf('--body-file') + 1]!
+      observed = { mode: statSync(bodyFile).mode & 0o777, body: readFileSync(bodyFile, 'utf8') }
+      return { stdout: 'https://github.com/o/r/pull/7\n', stderr: '', exitCode: 0 }
+    })
+    const { service, config: cfg } = withWorkspace(host)
+
+    await service.createPullRequest('repo', { title: 'T', body: 'private prose', base: 'main' }, cfg)
+
+    expect(observed).toBeDefined()
+    // Pin the body too: a mode of 0 would satisfy the permission check while breaking gh outright,
+    // so the file has to be both private AND actually carrying the user's text.
+    expect(observed!.body).toBe('private prose')
+    // Group and other must have no bits at all — not merely "not writable".
+    expect(observed!.mode & 0o077).toBe(0)
   })
 
   // Backend preflight is the final authority: the base must be verified to EXIST on the remote.

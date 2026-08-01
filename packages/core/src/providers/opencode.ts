@@ -210,11 +210,11 @@ export function createOpenCodeProvider(defineAgentProvider: ProviderFactory): Ag
       resumeStrategy: { kind: 'provider-native', locator: 'session-id' },
       acpStrategy: { kind: 'none' },
       capabilities: {
-        terminal: true, hookEvents: true, timeline: 'complete-events',
+        terminal: true, timeline: 'complete-events',
         // observe 而非 respond：`permission.updated` 能看见 Agent 在等一个授权决定，但回决定要走
         // SDK 的 permission 接口，是另一条通路。今天靠 PTY 注入按键回答，与其余各家一致。
         permission: 'observe',
-        providerResume: true, acp: false,
+        providerResume: true,
         // 没有工具关联 id：工具调用不是独立事件，而是流式 `message.part.updated` 里的 part
         // （`types.gen.ts:406-412`），一次调用的两端拿不到同一个 id。如实声明 none。
         replyCorrelation: 'none'

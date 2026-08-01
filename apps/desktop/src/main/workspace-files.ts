@@ -482,11 +482,12 @@ async function runAtomicLocalMove(
   ) satisfies AtomicMoveError
 }
 
-async function runLocalObserver(
+async function spawnLocalObserver(
   cwd: string,
   root: string,
   name: string,
-  invalidated: () => void
+  invalidated: () => void,
+  died: () => void
 ): Promise<() => Promise<void>> {
   const environment: NodeJS.ProcessEnv = { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
   delete environment.NODE_OPTIONS
@@ -556,7 +557,23 @@ async function runLocalObserver(
         activeLocalFileObservers -= 1
       }
       if (!disposed) {
-        fail(new Error(
+        // Two different failures share this handler, and `fail` only speaks for one of them.
+        //
+        // Before the worker says OBSERVING, a close means the observation never started, and `fail`
+        // rejects the `ready` promise — the caller learns about it by exception.
+        //
+        // After OBSERVING, `ready` has already resolved, so `fail` is a no-op (`settled` is true) and
+        // there is nothing left to reject. That is the case that used to vanish entirely: this worker
+        // watches the PARENT DIRECTORY, so it dies when that directory is deleted or renamed, and when
+        // the OS runs out of watch descriptors. The editor then sat on the last content it read and
+        // never heard about another disk change — indistinguishable, to the person reading it, from a
+        // file nobody else is touching.
+        //
+        // So route that case out separately. `died` is `runLocalObserver`'s seam for replacing this
+        // dead child, which is the only layer that can: everything above caches the observation by key
+        // and would just hand out this dead subscription again.
+        if (settled) died()
+        else fail(new Error(
           `Local Workspace observer failed${signal ? ` with ${signal}` : ` with exit ${code}`}`
         ))
       }
@@ -577,6 +594,61 @@ async function runLocalObserver(
       if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM')
     }
     await closed
+  }
+}
+
+/**
+ * A directory observation that keeps its own promise: the caller hears about every change to `name`
+ * until it disposes.
+ *
+ * The worker underneath cannot promise that. It watches the PARENT DIRECTORY, so it dies when that
+ * directory is renamed or deleted, and when the OS runs out of watch descriptors — and a death AFTER
+ * it says OBSERVING used to vanish entirely: `ready` had already resolved, so the rejection path had
+ * nothing left to reject, and the editor kept showing the content it last read. To the person reading
+ * it that is indistinguishable from a file nobody is touching.
+ *
+ * Keeping the promise belongs here rather than above, for two reasons. Every layer above caches the
+ * observation by key — `WorkspaceFiles.observers` and the IPC `FileObservationRegistry` both — so a
+ * death merely reported upward leaves each of them holding a subscription only this function can
+ * rebuild, and their re-`observe` hits their own cache and changes nothing. And a death before the
+ * entry is even published upward has no upward path at all. Respawning here covers both, with no
+ * ordering premise.
+ *
+ * Two rules keep the respawn from becoming a hot loop:
+ *   - Every respawn first tells the listeners the file may have changed, because it did go unwatched.
+ *     A caller answering that by re-reading is what makes the gap recoverable — and it is also what
+ *     surfaces a directory that is gone for good, since that read reports the deletion.
+ *   - A respawn that cannot even start is the end of this observation: it calls `lost` and stops,
+ *     rather than retrying a directory that will never come back. `lost` takes no error on purpose.
+ *     The re-read the listeners were just asked for is what reports the reason, from the file itself;
+ *     a spawn error handed up from here has no channel to a person and would only invite a caller to
+ *     pass it off as one.
+ */
+async function runLocalObserver(
+  cwd: string,
+  root: string,
+  name: string,
+  invalidated: () => void,
+  lost: () => void
+): Promise<() => Promise<void>> {
+  let disposed = false
+  let current = await spawnLocalObserver(cwd, root, name, invalidated, respawn)
+  function respawn(): void {
+    if (disposed) return
+    invalidated()
+    void spawnLocalObserver(cwd, root, name, invalidated, respawn).then(
+      async (next) => {
+        current = next
+        if (disposed) await next()
+      },
+      () => {
+        if (!disposed) lost()
+      }
+    )
+  }
+  return async () => {
+    disposed = true
+    await current()
   }
 }
 
@@ -718,9 +790,19 @@ export class WorkspaceFiles {
       let start = this.observerStarts.get(key)
       if (!start) {
         const listeners = new Set<() => void>()
-        start = runLocalObserver(parent, resolved.root, name, () => {
+        const notify = (): void => {
           for (const listener of listeners) listener()
-        }).then(async (disposeWorker) => {
+        }
+        // `runLocalObserver` keeps the observation alive across a worker death on its own. It calls
+        // back here only when it has given up — the watched directory is gone for good — and then the
+        // cached entry has to go too, or the next editor opening this file would be handed a
+        // subscription nobody is serving. The listeners were already told to re-read before the last
+        // respawn attempt, and that read is what reports the deletion.
+        const lost = (): void => {
+          const entry = this.observers.get(key)
+          if (entry?.listeners === listeners) this.observers.delete(key)
+        }
+        start = runLocalObserver(parent, resolved.root, name, notify, lost).then(async (disposeWorker) => {
           const startedEntry = { listeners, disposeWorker }
           if (this.disposed) {
             await this.disposeObserver(startedEntry)

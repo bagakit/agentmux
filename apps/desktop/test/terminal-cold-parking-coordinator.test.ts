@@ -94,6 +94,45 @@ describe('window terminal parking coordinator', () => {
     ])
   })
 
+  it('keeps a Session that failed continuity recovery rendered, on the state its writers actually produce', () => {
+    // 恢复失败的 Session 必须留在屏上，否则用户看不到恢复过程。但守住它的是 `state !== 'error'`，
+    // 不是 `continuity` 这个字段本身：`continuityStatusFields`（启动候选投影与用户点「恢复」两条路
+    // 共用的唯一产出口）把 `state` 钉成 `'error'`，而后续任何状态事件都整体替换 `status`
+    // （session-state.ts 的 agent-status / process-state 两处），所以 `continuity` 在场时 `state`
+    // 必然是 `error`。
+    //
+    // 这条断言因此喂**真实写入点造出来的形状**，而不是手拼一个 `state: 'running'` +
+    // `continuity: 'unavailable'` 的组合——那个组合 production 里不存在，据它写的判据是自证：
+    // 实测加一条 `continuity === undefined` 子句后，删掉它只有那条合成 fixture 会红（2258 条里 1 条）。
+    const tab = terminalTab('recovering')
+    const layout = createWorkspaceLayout('group', [tab.id])
+    // 形状取自真写入点 `continuityStatusFields`（store.ts）：它把 `state` 钉成 'error' 并附上
+    // continuity 三兄弟。那个函数确实这么产出，由 continuity-failure-notice.test.ts 直接调
+    // `recoveryCandidateSession` 断言。这里不 import 它——本文件把整个 store mock 掉了（coordinator
+    // 依赖 store），所以这份形状是手抄的：它与真产出漂移时，红的会是那一侧而不是这一侧。
+    const recovering = {
+      ...session('recovering'),
+      status: {
+        state: 'error' as const,
+        source: 'run-process' as const,
+        observedAt: 1,
+        continuity: 'unavailable' as const,
+        continuityReason: 'provider-unavailable' as const
+      }
+    }
+
+    const candidates = collectTerminalColdParkCandidates({
+      tabs: { [tab.id]: tab },
+      layouts: { 'workspace-1': layout },
+      sessions: [recovering],
+      activeWorkspaceId: 'other-workspace',
+      workbenchVisible: true
+    })
+
+    expect(candidates[0]?.id).toBe('region:recovering')
+    expect(candidates[0]?.canRebuild).toBe(false)
+  })
+
   it('keeps a hidden Region warm when only the Workspace context changed', () => {
     const tab = terminalTab('remote-project')
     const layout = createWorkspaceLayout('group', [tab.id])

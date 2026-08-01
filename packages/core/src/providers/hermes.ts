@@ -99,8 +99,8 @@ export function createHermesProvider(defineAgentProvider: ProviderFactory): Agen
       resumeStrategy: { kind: 'none' },
       acpStrategy: { kind: 'none' },
       capabilities: {
-        terminal: true, hookEvents: true, timeline: 'complete-events', permission: 'observe',
-        providerResume: false, acp: false, replyCorrelation: 'none'
+        terminal: true, timeline: 'complete-events', permission: 'observe',
+        providerResume: false, replyCorrelation: 'none'
       }
     }),
     buildArgs: (prompt, args) => prompt ? ['chat', '--query', prompt, ...args, '--tui'] : [...args, '--tui'],

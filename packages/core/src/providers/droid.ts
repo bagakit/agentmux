@@ -113,12 +113,12 @@ export function createDroidProvider(defineAgentProvider: ProviderFactory): Agent
       resumeStrategy: { kind: 'provider-native', locator: 'session-id' },
       acpStrategy: { kind: 'none' },
       capabilities: {
-        terminal: true, hookEvents: true, timeline: 'complete-events',
+        terminal: true, timeline: 'complete-events',
         // observe 而非 respond：它的 `PreToolUse` 确实能拦（stdout 回 `continue:false`，或退出码
         // 2/3 直接中止），但那要求这个 fire-and-forget 的 hook 变成一条阻塞 RPC、把执行按住等用户
         // 点击。那条通路今天不存在。AgentMux 靠 PTY 注入按键回答它自己的授权提示。
         permission: 'observe',
-        providerResume: true, acp: false, replyCorrelation: 'none'
+        providerResume: true, replyCorrelation: 'none'
         // usage 刻意不声明：收尾负载（`Stop`）里只有 `tool_execution_count`/`elapsed_time`，
         // **没有任何 token 字段**。它报 `transcript_path`，但那份文件的格式未经核实，
         // 今天两个 reader（claude-jsonl / codex-rollout）都不能假定适用。按「未核实就不声明」留空。

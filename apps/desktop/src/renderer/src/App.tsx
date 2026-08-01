@@ -16,8 +16,9 @@ import { SettingsPanel, type SettingsSectionId } from './components/SettingsPane
 import { AgentStatusBar } from './components/AgentStatusBar'
 import { ProjectRailToolbar } from './components/ProjectRailToolbar'
 import { QuickSwitcher } from './components/QuickSwitcher'
-import { isQuickSwitchShortcut } from './lib/quick-switch-shortcut'
-import { handleWorkbenchShortcut, isEditableChordTarget } from './lib/workbench-shortcuts'
+import { ShortcutsCheatSheet } from './components/ShortcutsCheatSheet'
+import { isEditableChordTarget, windowShortcutHandlers } from './lib/workbench-shortcuts'
+import { routeWindowShortcut } from './lib/shortcut-registry'
 import { SurfaceSwitch, TopRowLeadingChrome } from './components/TopRowChrome'
 import { WorkspaceBoard } from './components/WorkspaceBoard'
 import { WorkspaceSidebar } from './components/WorkspaceSidebar'
@@ -38,6 +39,7 @@ export function App() {
   const [settingsRoute, setSettingsRoute] = useState<{ section: SettingsSectionId } | null>(null)
   const [windowResizeActive, setWindowResizeActive] = useState(false)
   const [quickSwitchOpen, setQuickSwitchOpen] = useState(false)
+  const [shortcutsHelpOpen, setShortcutsHelpOpen] = useState(false)
   const initialize = useAppStore((state) => state.initialize)
   const loading = useAppStore((state) => state.loading)
   const error = useAppStore((state) => state.error)
@@ -106,41 +108,33 @@ export function App() {
   // 掉了 hook 流的 `working` 会永远转圈——这个 hook 让无新证据的非终态衰减为中性态，圈就此停下。
   useAgentStatusDecay()
 
-  // The window's only global navigation gesture. Captured at the window so it fires before the
-  // focused xterm textarea can swallow the keystroke; the toggle lets the same chord dismiss.
+  // The window's global keyboard router. One capture-phase keydown listener owns every window-scope
+  // binding — the quick switcher and the workbench actions — so there is exactly one place the focused
+  // xterm textarea is beaten to the keystroke. The whole decision (match the chord against the registry,
+  // gate on the editable-target fact, dispatch to the id's handler, report whether it was consumed) lives
+  // in the pure routeWindowShortcut + windowShortcutHandlers, read against a fresh Store snapshot each
+  // keypress; this shell has NO branches of its own — it derives the editable fact, calls the router, and
+  // preventDefaults iff a binding consumed the key. (Cmd+W reaches us rather than closing the native
+  // window because the main process installs a menu binding no Cmd+W — a renderer preventDefault cannot
+  // cancel a native menu accelerator. See main/application-menu.ts.)
   useEffect(() => {
     const isMac = navigator.userAgent.includes('Mac')
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (!isQuickSwitchShortcut(event, isMac)) return
-      event.preventDefault()
-      setQuickSwitchOpen((current) => !current)
-    }
-    window.addEventListener('keydown', onKeyDown, { capture: true })
-    return () => window.removeEventListener('keydown', onKeyDown, { capture: true })
-  }, [])
-
-  // Keyboard reach for the split/tab actions that otherwise need the mouse: close the focused Region,
-  // jump to a Tab by ordinal, split, and move focus between Regions. Registered at the window like the
-  // quick switcher so it wins before the focused xterm swallows the chord. The whole decision —
-  // classify the chord, project the same Topic-filtered layout the Workbench renders, resolve the
-  // target, and dispatch — lives in the pure handleWorkbenchShortcut, read against a fresh Store
-  // snapshot; this listener only forwards and consumes. preventDefault here stops the browser default
-  // for a chord we handle; the reason Cmd+W reaches us at all (rather than the native menu closing the
-  // window) is that the main process replaces the default menu with one that binds no Cmd+W — a
-  // renderer preventDefault cannot cancel a native menu accelerator. See main/application-menu.ts.
-  useEffect(() => {
-    const isMac = navigator.userAgent.includes('Mac')
-    const onKeyDown = (event: KeyboardEvent): void => {
-      // 在非终端的可编辑控件里打字/改名时放行这些和弦（Cmd+D 不分屏、Cmd+W 不关正在打字的格）。终端
-      // 焦点仍接管——capture 存在的唯一理由就是抢在聚焦的 xterm 文本代理前拿到键。判定是纯函数，这里只
-      // 把 DOM 事实（标签名、contentEditable、是否在 .xterm 子树内）喂进去。
+      // 在非终端的可编辑控件里打字/改名时，带 `not-in-editable` 门的绑定（Cmd+D 分屏、Cmd+W 关格）先放行；
+      // 全局导航（quick switch）不带门，照常触发。终端焦点仍接管——capture 存在的唯一理由就是抢在聚焦的
+      // xterm 文本代理前拿到键。判定是纯函数，这里只把 DOM 事实（标签名、contentEditable、是否在 .xterm
+      // 子树内）折成一个布尔喂进去。
       const target = event.target
-      if (target instanceof HTMLElement && isEditableChordTarget({
+      const editableTarget = target instanceof HTMLElement && isEditableChordTarget({
         tagName: target.tagName,
         isContentEditable: target.isContentEditable,
         insideTerminal: target.closest('.xterm') !== null
-      })) return
-      if (handleWorkbenchShortcut(event, isMac, useAppStore.getState())) event.preventDefault()
+      })
+      const handlers = windowShortcutHandlers(useAppStore.getState(), {
+        toggleQuickSwitch: () => setQuickSwitchOpen((current) => !current),
+        toggleShortcutsHelp: () => setShortcutsHelpOpen((current) => !current)
+      })
+      if (routeWindowShortcut(event, isMac, editableTarget, handlers)) event.preventDefault()
     }
     window.addEventListener('keydown', onKeyDown, { capture: true })
     return () => window.removeEventListener('keydown', onKeyDown, { capture: true })
@@ -269,6 +263,11 @@ export function App() {
       </main>
       <AgentStatusBar />
       <QuickSwitcher open={quickSwitchOpen} onClose={() => setQuickSwitchOpen(false)} />
+      <ShortcutsCheatSheet
+        open={shortcutsHelpOpen}
+        onClose={() => setShortcutsHelpOpen(false)}
+        isMac={navigator.userAgent.includes('Mac')}
+      />
       </div>
       </SurfaceMemoryBudgetProvider>
       </TerminalParkingProvider>

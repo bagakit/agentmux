@@ -126,13 +126,13 @@ export function createKimiProvider(defineAgentProvider: ProviderFactory): AgentP
       // 适配未接，故如实声明 none/false——与 Gemini 同一处理。
       acpStrategy: { kind: 'none' },
       capabilities: {
-        terminal: true, hookEvents: true, timeline: 'complete-events',
+        terminal: true, timeline: 'complete-events',
         // observe 而非 respond：Kimi 的 PreToolUse 确实能在 stdout 上回 permissionDecision:deny
         // 来拦一次调用，但那要求这个 fire-and-forget 的 hook 变成一条阻塞 RPC。那条通路今天不存在。
         // 且它的 hook 引擎是 **fail-open**（超时/崩溃/正则错一律 allow，hooks/runner.py:30,44-55），
         // 本就不能当安全边界。AgentMux 靠 PTY 注入按键回答授权提示。
         permission: 'observe',
-        providerResume: true, acp: false, replyCorrelation: 'none'
+        providerResume: true, replyCorrelation: 'none'
         // usage 刻意不声明：Kimi 的收尾负载（Stop / StopFailure，hooks/events.py:73-96）里
         // **没有任何 token 字段**，它也不报 transcript 路径。今天两个 reader（claude-jsonl /
         // codex-rollout）都无从下手。按「能力未核实就不声明」留空，UI 据此说"此 Provider 不报用量"。

@@ -40,11 +40,9 @@ function agent(
     executorId: 'codex',
     capabilities: {
       terminal: true,
-      hookEvents: true,
       timeline: 'complete-events',
       permission: 'observe',
       providerResume: true,
-      acp: false,
       replyCorrelation: 'none'
     },
     hostId: 'local',
@@ -86,6 +84,29 @@ describe('decayStaleAgentStatuses：把陈旧的 working 降成中性态', () =>
     const [decayed] = decayStaleAgentStatuses([agent('a', 'working', 1_000)], 1_000 + STALE_AFTER_MS + 1)
     expect(decayed!.status.observedAt).toBe(1_000)
     expect(decayed!.status.source).toBe('native-hook')
+  })
+
+  it('保留 continuity 与 continuityReason——衰减是重新解读 state，不是重写整个 status', () => {
+    // 衰减只动 `state` 一个字段，其余原样保留。这条契约承重的地方是**恢复失败横幅**：
+    // SessionPane 用 `status.continuity` / `continuityReason` / `continuityConflict` 三个字段
+    // 分类失败原因并决定按钮做什么（continuity-failure-notice.ts）。一次「顺手把 status 重写成
+    // state/source/observedAt 三个字段」的改动会让别处全绿，而用户看到的是恢复失败的原因与
+    // 那个按钮一起消失，只剩一条不说原因的通用横幅。
+    //
+    // 注意这个组合本身在 production 里到不了：写 continuity 的唯一产出口把 state 钉成 'error'，
+    // 而衰减只对陈旧的 `working` 触发。所以这条守的是「保字段」这条契约本身，不是某个具体现场——
+    // 冷泊车曾被认为靠 `continuity === undefined` 挡住衰减产物，实测那是死代码（已删）。
+    const stale = agent('a', 'working', 1_000)
+    const withContinuity = {
+      ...stale,
+      status: { ...stale.status, continuity: 'unavailable', continuityReason: 'provider-unavailable' }
+    } as unknown as SessionSnapshot
+
+    const [decayed] = decayStaleAgentStatuses([withContinuity], 1_000 + STALE_AFTER_MS + 1)
+
+    expect(decayed!.status.state).toBe('running')
+    expect(decayed!.status.continuity).toBe('unavailable')
+    expect(decayed!.status.continuityReason).toBe('provider-unavailable')
   })
 
   it('阈值内、正跑长命令的 working 不被误降级', () => {

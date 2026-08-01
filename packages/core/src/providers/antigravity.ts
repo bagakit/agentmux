@@ -57,8 +57,8 @@ export function createAntigravityProvider(defineAgentProvider: ProviderFactory):
       resumeStrategy: { kind: 'provider-native', locator: 'session-id' },
       acpStrategy: { kind: 'none' },
       capabilities: {
-        terminal: true, hookEvents: true, timeline: 'complete-events', permission: 'observe',
-        providerResume: true, acp: false, replyCorrelation: 'none'
+        terminal: true, timeline: 'complete-events', permission: 'observe',
+        providerResume: true, replyCorrelation: 'none'
       }
     }),
     buildArgs: (prompt, args) => prompt ? ['--prompt-interactive', prompt, ...args] : [...args],

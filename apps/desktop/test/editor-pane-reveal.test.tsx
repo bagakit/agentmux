@@ -16,29 +16,27 @@ vi.mock('@monaco-editor/react', () => ({
   default: () => null
 }))
 
+// store 替身的键集与动作 spy 都来自 test/helpers/editor-pane-store，不在这里手抄：EditorPane 新读一个
+// slice 时，手抄的字面量会缺键，而缺键只在**渲染期**炸（宽类型让 tsc 全程沉默）。那份 helper 带一条
+// 双向比对的检测器（editor-pane-store-fixture.test.ts），键集漏了会在那里点名。
+//
+// 为什么不在 vi.hoisted 里取：hoisted 回调提到所有 import 之前执行，那时 helper 还没加载，而 ESM 下
+// 没有 require。vi.mock 的工厂相反是懒执行的，所以键集在那里填；hoisted 只留空壳共享引用。
 const fixture = vi.hoisted(() => ({
-  state: {
-    documents: {} as Record<string, unknown>,
-    dirtyDocuments: {} as Record<string, boolean>,
-    documentIssues: {} as Record<string, unknown>,
-    savingDocuments: {} as Record<string, boolean>,
-    documentRevealTargets: {} as Record<string, unknown>,
-    config: { workspaces: [] as WorkspaceRecord[] },
-    updateDocument: vi.fn(),
-    saveDocument: vi.fn(),
-    reloadDocument: vi.fn(),
-    overwriteDocument: vi.fn(),
-    clearDocumentRevealTarget: vi.fn(),
-    reportError: vi.fn()
-  }
+  state: {} as Record<string, unknown> & { reportError: ReturnType<typeof vi.fn> }
 }))
 
-vi.mock('../src/renderer/src/store.js', () => ({
-  useAppStore: Object.assign(
-    (selector: (state: typeof fixture.state) => unknown) => selector(fixture.state),
-    { getState: () => fixture.state }
-  )
-}))
+vi.mock('../src/renderer/src/store.js', async () => {
+  // 懒执行：到这里 helper 已经可以 import 了。键集与动作 spy 都由它给。
+  const { editorPaneStoreState } = await import('./helpers/editor-pane-store.js')
+  Object.assign(fixture.state, editorPaneStoreState())
+  return {
+    useAppStore: Object.assign(
+      (selector: (state: typeof fixture.state) => unknown) => selector(fixture.state),
+      { getState: () => fixture.state }
+    )
+  }
+})
 
 const filesApi = vi.hoisted(() => ({
   reveal: vi.fn(async () => {})

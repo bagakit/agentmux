@@ -233,6 +233,17 @@
   font-size: var(--fs-micro);
   white-space: nowrap;
 }
+/* 计数挂在搜索条**行内**（提示挂在下方）：它是对输入框内容的即时回答，和上下箭头是一组，
+   移到下面就和导航按钮断开了。tabular-nums 让位数变化（9→10）时数字不左右跳。
+   flex-shrink:0 保住它——输入框是 flex:1，不锁住的话长文案会先把这几个字压没。 */
+.terminal-search__count[hidden] { display: none; }
+.terminal-search__count {
+  flex-shrink: 0;
+  color: var(--text-3);
+  font: var(--fs-micro)/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 .terminal-recovery {
   position: absolute;
   z-index: 35;

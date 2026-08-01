@@ -360,8 +360,9 @@ describe('Copilot provider', () => {
     it('acp 与 usage 都不声明——两条真实存在但今天接不上的通路', () => {
       // `--acp`（"Start as Agent Client Protocol server"）在这个 CLI 里真的存在，但 AgentMux 今天
       // 没有任何 Provider 声明 adapter 策略，那条通路一端还没有。声明一个接不上的能力比不声明更坏。
+      // 判据落在 `acpStrategy`——它是真正被消费的那个字段（capabilities 上那份同名布尔是零消费者的
+      // 副本，已随 AgentCapabilities 的收敛一并删掉）。
       expect(copilot.catalog.acpStrategy).toEqual({ kind: 'none' })
-      expect(copilot.catalog.capabilities.acp).toBe(false)
       // 收尾负载里只有 stopReason/transcriptPath，没有任何 token 字段；transcript 格式未核实。
       expect(copilot.catalog.capabilities.usage).toBeUndefined()
     })
