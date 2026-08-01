@@ -3020,6 +3020,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       get().reportError(error)
       throw error
     }
+    // FileExplorer refreshes its own tree after this resolves, but it is not the only reader: the
+    // Topics panel and the Board invalidate on this counter alone. Bumping here rather than relying
+    // on "FileExplorer is the sole caller" — that reason expires the moment something else calls it.
+    set((current) => ({
+      workspaceFileRevisions: bumpWorkspaceFileRevision(current.workspaceFileRevisions, workspaceId)
+    }))
     return workspaceId
   },
   async createNote() {
@@ -3083,7 +3089,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       for (const observedPath of observedPaths) {
         advanceDocumentLifetime(documentKey(workspaceId, observedPath))
       }
-      set((state) => reduceFileRename(state, workspaceId, path, nextPath))
+      set((state) => ({
+        ...reduceFileRename(state, workspaceId, path, nextPath),
+        // Same reason as `createPath`: the Topics panel and the Board read this counter and nothing
+        // else. Moving a Topic's `topic.md` out breaks the Topic's identity, and only the file tree
+        // would notice. Folded into the projection's own `set` so it is one render, not two.
+        workspaceFileRevisions: bumpWorkspaceFileRevision(state.workspaceFileRevisions, workspaceId)
+      }))
       for (const observedPath of observedPaths) {
         const renamedPath = remapPathWithinSubtree(observedPath, path, nextPath)
         transferFileSaveTail(workspaceId, observedPath, renamedPath)
@@ -3120,7 +3132,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         for (const observedPath of observedPaths) {
           advanceDocumentLifetime(documentKey(workspaceId, observedPath))
         }
-        set((state) => reduceFileDelete(state, workspaceId, path))
+        set((state) => ({
+          ...reduceFileDelete(state, workspaceId, path),
+          // Deleting a Topic's directory is the only way to delete a Topic (there is no
+          // `scratch.deleteTopic`, and the delete affordance is deliberately ungated for Topic
+          // directories where rename and move are not). Without this the tree row vanishes —
+          // `confirmDelete` refreshes it directly — while the Topics panel and the Board keep
+          // showing the deleted Topic until an unrelated write happens to bump.
+          workspaceFileRevisions: bumpWorkspaceFileRevision(state.workspaceFileRevisions, workspaceId)
+        }))
         await Promise.all(observedPaths.map(async (observedPath) => {
           await api.files.unobserve(workspaceId, observedPath)
         }))
