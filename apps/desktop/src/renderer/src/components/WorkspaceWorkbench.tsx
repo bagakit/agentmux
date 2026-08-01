@@ -39,7 +39,7 @@ import { WorkbenchTabMarks } from './WorkbenchTabMarks'
 import { WorkbenchTabStrip } from './WorkbenchTabStrip'
 import { resolvePaneColumnEdgeZone } from '../lib/tab-drop-zone'
 import { SplitRatioCommitter } from '../lib/split-ratio-commit'
-import { moveSessionViewMenu, tabIdsForCloseScope } from '../lib/workbench-tab-actions'
+import { moveSessionViewMenu, tabIdsForCloseScope, workbenchSplitMenuEntries } from '../lib/workbench-tab-actions'
 import { SurfaceSwitch, TopRowLeadingChrome } from './TopRowChrome'
 import type {
   SplitDirection,
@@ -168,6 +168,7 @@ function SortableWorkbenchTab({
   const renameTab = useAppStore((state) => state.renameTab)
   const renameAgent = useAppStore((state) => state.renameAgent)
   const moveTabToNewGroup = useAppStore((state) => state.moveTabToNewGroup)
+  const arrangeTabRegions = useAppStore((state) => state.arrangeTabRegions)
   const setTabMenuOpen = useAppStore((state) => state.setTabMenuOpen)
   const config = useAppStore((state) => state.config)
   const moveSessionViewToWorkspace = useAppStore((state) => state.moveSessionViewToWorkspace)
@@ -366,6 +367,10 @@ function SortableWorkbenchTab({
           group.id,
           direction
         )}
+        // 重排的是**这张**被右键点中的 Tab，不是当前活动的那张——非活动 Tab 上右键时，
+        // 用活动 Tab 的格数会按错的容量过滤预设（列出摆不成的档，或藏掉摆得成的档）。
+        regionCount={Object.keys(tab.regions).length}
+        onArrange={(preset) => arrangeTabRegions(workspaceId, tab.id, preset)}
         moveSessionViewTargets={moveSessionView.targets}
         onMoveSessionView={moveSessionView.onSelect}
       >
@@ -578,13 +583,16 @@ function WorkbenchRegionLeaf({
 }) {
   const focusRegion = useAppStore((state) => state.focusRegion)
   const closeRegion = useAppStore((state) => state.closeRegion)
+  const splitRegion = useAppStore((state) => state.splitRegion)
+  const arrangeTabRegions = useAppStore((state) => state.arrangeTabRegions)
   const dirtyDocuments = useAppStore((state) => state.dirtyDocuments)
   const closeRegionRequest = useAppStore((state) => state.closeRegionRequest)
   const clearCloseRegionRequest = useAppStore((state) => state.clearCloseRegionRequest)
   const reportError = useAppStore((state) => state.reportError)
   const [confirmingClose, setConfirmingClose] = useState(false)
   const surface = tab.regions[node.regionId]
-  const canClose = Object.keys(tab.regions).length > 1
+  const regionCount = Object.keys(tab.regions).length
+  const canClose = regionCount > 1
   const dirty = surface?.kind === 'file' && Boolean(
     dirtyDocuments[documentKey(surface.workspaceId, surface.path)]
   )
@@ -621,6 +629,14 @@ function WorkbenchRegionLeaf({
       writeClipboardText={async (text) => {
         await copyTextToClipboard(text, reportError)
       }}
+      // 分屏落在**右键点中的这一格**上，不是「当前聚焦的那一格」。这正是这个菜单存在的理由
+      // （见 RegionContextMenu 顶部注释）：Tab 条上那个 Split 下拉只能拿 activeSurface，于是
+      // 想切旁边那一格时它切错格；这里 regionId 由右键事件本身给定，没有推断。
+      splitMenu={workbenchSplitMenuEntries({
+        regionCount,
+        split: (direction) => splitRegion(tab.workspaceId, tab.id, node.regionId, direction),
+        arrange: (preset) => arrangeTabRegions(tab.workspaceId, tab.id, preset)
+      })}
     >
     <section
       className={`workbench-region ${tab.layout.activeRegionId === node.regionId ? 'workbench-region--active' : ''}`}

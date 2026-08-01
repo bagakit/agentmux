@@ -1,34 +1,15 @@
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import {
-  ArrowDown,
-  ArrowLeft,
-  ArrowRight,
-  ArrowUp,
-  ChevronDown,
-  Columns2,
-  Columns3,
-  Grid2x2,
-  Grid3x3,
-  LayoutGrid
-} from 'lucide-react'
-import { WORKBENCH_TAB_SPLIT_ACTIONS, workbenchRegionPresetMenu } from '../lib/workbench-tab-actions'
+import { ChevronDown, Columns2 } from 'lucide-react'
+import { workbenchSplitMenuEntries } from '../lib/workbench-tab-actions'
 import type { SplitDirection } from '../lib/workbench-layout'
 import type { WorkbenchRegionLayoutPreset } from '../lib/workbench-view-layout'
+import { workbenchSplitMenuIcon, workbenchSplitMenuKey } from './workbench-split-menu-icons'
 
-const SPLIT_ICONS = {
-  left: ArrowLeft,
-  right: ArrowRight,
-  up: ArrowUp,
-  down: ArrowDown
-} satisfies Record<SplitDirection, typeof ArrowRight>
-
-const PRESET_ICONS = {
-  'columns-3': Columns3,
-  'grid-4': Grid2x2,
-  'grid-6': LayoutGrid,
-  'grid-9': Grid3x3
-} satisfies Record<WorkbenchRegionLayoutPreset, typeof Grid2x2>
-
+/**
+ * Tab 条上的 Split 下拉。内容与「一格的右键菜单」「Tab 的右键菜单」逐项相同，所以三者都只
+ * map `workbenchSplitMenuEntries` 给出的那一份清单——见那个函数的注释（为什么在场与顺序必须
+ * 是数据而不是 JSX 里的条件）。这层壳只负责它自己的触发按钮与 Radix 容器。
+ */
 export function PaneSplitMenu({
   disabled = false,
   regionCount,
@@ -43,7 +24,7 @@ export function PaneSplitMenu({
   onSplit(direction: SplitDirection): void
   onArrange(preset: WorkbenchRegionLayoutPreset): void
 }) {
-  const presetMenu = workbenchRegionPresetMenu({ regionCount, arrange: onArrange })
+  const entries = workbenchSplitMenuEntries({ regionCount, split: onSplit, arrange: onArrange })
   return (
     <DropdownMenu.Root onOpenChange={onOpenChange}>
       <DropdownMenu.Trigger asChild>
@@ -66,32 +47,20 @@ export function PaneSplitMenu({
           sideOffset={4}
           collisionPadding={8}
         >
-          {WORKBENCH_TAB_SPLIT_ACTIONS.map((action) => {
-            const Icon = SPLIT_ICONS[action.direction]
+          {entries.map((entry, index) => {
+            const key = workbenchSplitMenuKey(entry, index)
+            if (entry.kind === 'separator') {
+              return <DropdownMenu.Separator key={key} className="tab-context-menu__separator" />
+            }
+            const Icon = workbenchSplitMenuIcon(entry)
             return (
               <DropdownMenu.Item
-                key={action.direction}
+                key={key}
                 className="tab-context-menu__item"
-                onSelect={() => onSplit(action.direction)}
+                onSelect={entry.onSelect}
               >
                 <Icon size={14} />
-                <span>{action.label}</span>
-              </DropdownMenu.Item>
-            )
-          })}
-          {presetMenu.presets.length > 0 ? (
-            <DropdownMenu.Separator className="tab-context-menu__separator" />
-          ) : null}
-          {presetMenu.presets.map((action) => {
-            const Icon = PRESET_ICONS[action.preset]
-            return (
-              <DropdownMenu.Item
-                key={action.preset}
-                className="tab-context-menu__item"
-                onSelect={() => presetMenu.onSelect(action.preset)}
-              >
-                <Icon size={14} />
-                <span>{action.label}</span>
+                <span>{entry.label}</span>
               </DropdownMenu.Item>
             )
           })}
