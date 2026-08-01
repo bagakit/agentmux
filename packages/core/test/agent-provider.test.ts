@@ -57,7 +57,7 @@ describe('built-in agent providers', () => {
       {
         id: 'gemini', executable: 'gemini', expectedProcess: 'gemini',
         promptDelivery: 'flag-prompt-interactive', readySignal: 'foreground-process',
-        hook: 'none', permission: 'none', resume: 'none', acp: 'none',
+        hook: 'native', permission: 'observe', resume: 'provider-native', acp: 'none',
         replyCorrelation: 'none'
       },
       {
@@ -95,7 +95,7 @@ describe('built-in agent providers', () => {
     // writes): it must NOT claim explicit-managed, so the launch-time trigger honestly skips it.
     expect(catalog.get('pi')).toEqual({ kind: 'native', installation: 'unmanaged' })
     // Providers with no hooks at all stay `none`, never a fake native.
-    for (const id of ['traex', 'gemini', 'cursor'] as const) {
+    for (const id of ['traex', 'cursor'] as const) {
       expect(catalog.get(id)).toEqual({ kind: 'none' })
     }
   })
@@ -181,9 +181,10 @@ describe('built-in agent providers', () => {
     })).toEqual({ command: 'cursor-agent', args: ['--force', 'review this'], env: {} })
   })
 
-  // grok left this group in T-003: `grok --resume <SESSION_ID_OR_TITLE>` is real (verified against
-  // `grok --help` on this host), and its resume argv is asserted in test/providers/grok.test.ts.
-  it.each(['gemini', 'cursor'] as const)('exposes %s as not supporting provider-native resume', (id) => {
+  // grok 与 gemini 都已离开这一组：grok 的 `--resume <SESSION_ID_OR_TITLE>` 来自本机 `--help`；
+  // gemini 的 `--resume <uuid>` 来自读实现（findSession 是 UUID 优先，help 文本少说了）。
+  // 两者的 resume argv 分别在 test/providers/{grok,gemini}.test.ts 里断言。
+  it.each(['cursor'] as const)('exposes %s as not supporting provider-native resume', (id) => {
     expect(() => providers.get(id).buildResumeLaunch({
       workspacePath: '/tmp/work',
       nativeHandle: { kind: 'provider', providerId: id, sessionId: 'native-x' },
