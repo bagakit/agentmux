@@ -319,6 +319,28 @@ export function authoredConfigCarryOver(raw: unknown): {
    * still looks healthy because the built-in defaults are spread in underneath.
    */
   executorsUnreadable: boolean
+
+  /**
+   * How many Executors the user minted, and how many of those the record schema could still read.
+   *
+   * Two numbers rather than one because the interesting loss is per-record and total: a container
+   * that is a healthy record, holding entries that are all objects, every one of which the current
+   * `.strict()` schema rejects at once. `executorsUnreadable` cannot see it (the container is fine)
+   * and neither can any surviving-count (there are no survivors to compare against a total).
+   *
+   * Counted *before* the Provider-existence filter, so an Executor dropped because this build
+   * retired its Provider stays silent salvage — that loss is forced by the data and is not ours.
+   */
+  authoredExecutorsFound: number
+  authoredExecutorsReadable: number
+
+  /**
+   * The same pair for hosts, excluding `local` on both sides: it is in the defaults, so a damaged
+   * local record is repaired by the back-fill rather than lost, and counting it would make this
+   * fire on a case that loses nothing.
+   */
+  authoredHostsFound: number
+  authoredHostsCarried: number
 } {
   // Every key is `z.unknown().optional()`, including the three containers. In zod v4 a bare
   // `z.unknown()` key is **required** — an absent key fails the whole object — and this outer parse
@@ -377,7 +399,7 @@ export function authoredConfigCarryOver(raw: unknown): {
     const value = outer.data.workspaces
     if (Array.isArray(value)) return value.length
     if (value === undefined || value === null) return 0
-    if (typeof value === 'object') return Object.keys(value).length > 0 ? 1 : 0
+    if (typeof value === 'object') return Object.keys(value).length > 0 ? 1 : 1
     // A primitive where an array belongs: unreadable, but it was written by something. Treat it as
     // evidence rather than as "no projects" — the honest answer is "we cannot tell", and between
     // refusing to launch and overwriting the file, only one of those is recoverable.
@@ -402,6 +424,23 @@ export function authoredConfigCarryOver(raw: unknown): {
   const hosts = rawHosts
     .map((host) => hostSchema.safeParse(host))
     .flatMap((parsed) => (parsed.success ? [parsed.data] : []))
+
+  // Entry-level evidence, and deliberately narrower than "how many entries survived". `:391-395`
+  // records an attempt that counted survivors and had to be reverted: it fired on a single damaged
+  // entry (which `strandedByDamagedHost` already reports, by name) and on a damaged **local** record
+  // (which the back-fill repairs correctly, losing nothing). Both are excluded here at the source:
+  //
+  //   - `local` is not authored content, so it never counts as evidence on either side.
+  //   - The count is of *authored* records, and the guard only fires when **none** of them survived.
+  //     One bad host among several leaves survivors, so the stranded guard keeps that case.
+  //
+  // What this catches is the case no existing guard can see: the container is a well-formed array,
+  // every entry is an object, and every one of them fails the record schema at once — which is what
+  // adding any field to `hostSchema` does to a stored config, because it is `.strict()`.
+  const authoredHostsFound = rawHosts.filter(
+    (host) => !(typeof host === 'object' && host !== null && (host as { id?: unknown }).id === 'local')
+  ).length
+  const authoredHostsCarried = hosts.filter((host) => host.id !== 'local').length
   // The local host is not authored content — it is always present in the defaults — so a config
   // whose local entry is damaged still gets one, and its workspaces stay resolvable.
   const withLocal = hosts.some((host) => host.id === 'local')
@@ -436,15 +475,27 @@ export function authoredConfigCarryOver(raw: unknown): {
 
   // Built-in ids are reset from the catalog; every other id is the user's own creation. Order puts
   // the defaults first so the carried entries are the ones a reader sees as additions.
+  //
+  // The two reasons an entry is dropped are separated rather than folded into one filter, because
+  // only one of them is ambiguous:
+  //
+  //   - **Provider retired.** The record is intact; this build no longer ships that Provider, and
+  //     keeping the entry would fail the schema's Provider-existence refinement so `save()` could
+  //     never write the config. Nothing can be done about it and the loss is forced. Silent salvage.
+  //   - **Record unreadable.** The record is whatever the user last saved, and the only thing that
+  //     changed is what this build's `.strict()` schema demands of it. That is our doing, not theirs,
+  //     and it is exactly what adding any field to `executorSchema` does to every stored Executor.
+  //
+  // An earlier single filter treated both as the same deliberate salvage, and the comment below the
+  // guards said so — which left the second class with no signal at all.
+  const authoredExecutors = Object.entries(rawExecutors)
+    .filter(([executorId]) => !(executorId in DEFAULT_CONFIG.executors))
+    .filter(([executorId]) => executorIdSchema.safeParse(executorId).success)
+    .map(([executorId, executor]) => [executorId, executorSchema.safeParse(executor)] as const)
+  const readableExecutors = authoredExecutors.filter(([, parsed]) => parsed.success)
   const carriedExecutors = Object.fromEntries(
-    Object.entries(rawExecutors)
-      .filter(([executorId]) => !(executorId in DEFAULT_CONFIG.executors))
-      .filter(([executorId]) => executorIdSchema.safeParse(executorId).success)
-      .map(([executorId, executor]) => [executorId, executorSchema.safeParse(executor)] as const)
-      // An Executor pointing at a Provider this build no longer ships would fail the schema's
-      // Provider-existence refinement, so it cannot be carried for the same reason as a homeless
-      // workspace: keeping it would make the whole config unsavable.
-      .filter(([, parsed]) => parsed.success && providerIds.has(parsed.data.providerId))
+    readableExecutors
+      .filter(([, parsed]) => providerIds.has(parsed.data!.providerId))
       .map(([executorId, parsed]) => [executorId, parsed.data!])
   )
 
@@ -473,6 +524,10 @@ export function authoredConfigCarryOver(raw: unknown): {
     found: evidenceOfWorkspaces,
     hostsUnreadable,
     executorsUnreadable,
+    authoredExecutorsFound: authoredExecutors.length,
+    authoredExecutorsReadable: readableExecutors.length,
+    authoredHostsFound,
+    authoredHostsCarried,
     strandedByDamagedHost: [...strandedByHost].map(([hostId, workspaceIds]) => ({ hostId, workspaceIds }))
   }
 }
@@ -493,6 +548,10 @@ export function authoredConfigCarryOver(raw: unknown): {
  *     most: one damaged `hosts` entry drops every project on it, and as long as a single local
  *     project survives, `workspaces.length` is non-zero and the total-loss check never fires.
  *     Measured: a `port: "twenty-two"` in one SSH host silently cost 4 of 5 projects plus the host.
+ *   - **Not one authored host, or not one authored Executor, could be carried.** The container is
+ *     well-formed and every record in it is rejected at once. Neither the container guards (the
+ *     shape is fine) nor the stranding guard (nothing survived to be named, and nothing need sit on
+ *     those hosts) can see this, and it is the shape every future `.strict()` field addition takes.
  *
  * The second class is deliberately not softened into "carry the workspace and drop the host": the
  * schema's host-existence refinement would reject that config, so `save()` could never write it.
@@ -542,16 +601,39 @@ function retiredConfigReplacement(raw: unknown): AppConfig {
       'schema accepts: the file on disk is unchanged and still holds them.'
     )
   }
+  // Hosts, per-record. Ordered after `strandedByDamagedHost` on purpose: that guard fires whenever
+  // *some* host survived and can name which one broke and which projects it cost, which is the
+  // actionable message. This one is for the case it cannot see — **every** authored host record
+  // rejected at once, with no project on any of them, so nothing is stranded, the container is a
+  // well-formed array, and the local back-fill puts a healthy-looking `hosts` back. All three
+  // existing guards stay silent while the machines the user configured are gone.
+  if (carried.authoredHostsFound > 0 && carried.authoredHostsCarried === 0) {
+    throw new Error(
+      `Refusing to retire a config holding ${carried.authoredHostsFound} host record(s) that none ` +
+      'of the current schema accepts: the file on disk is unchanged and still holds them. Only the ' +
+      'default local entry would be left.'
+    )
+  }
   // Executors are the third container, and the same argument applies: a custom Executor id is one
-  // the user minted, so its presence is unambiguous. Only the *container* being unreadable throws —
-  // an individual entry dropped for a retired Provider is deliberate salvage, and is what the
-  // per-record filter above does. The built-in defaults spread in underneath are what make this
-  // silent: the result looks like a healthy Executor table with the user's own entries missing.
+  // the user minted, so its presence is unambiguous. Two guards, for the two ways they vanish —
+  // the container being unreadable, and every record in a readable container being rejected.
   if (carried.executorsUnreadable) {
     throw new Error(
       'Refusing to retire a config whose Executor table the current schema cannot read: the file on ' +
       'disk is unchanged and still holds it. Every Executor you created would be replaced by the ' +
       'built-in defaults.'
+    )
+  }
+  // Per-record total loss. The count is taken before the Provider-existence filter, so an Executor
+  // dropped because this build retired its Provider does not reach here — that one is forced by the
+  // data and stays silent salvage. This fires only when the *records themselves* became unreadable,
+  // which is what adding a field to `executorSchema` does to every stored Executor at once. The
+  // built-in defaults spread in underneath are what make it silent otherwise: the result looks like
+  // a healthy Executor table with the user's own entries missing.
+  if (carried.authoredExecutorsFound > 0 && carried.authoredExecutorsReadable === 0) {
+    throw new Error(
+      `Refusing to retire a config holding ${carried.authoredExecutorsFound} Executor(s) that none ` +
+      'of the current schema accepts: the file on disk is unchanged and still holds them.'
     )
   }
   // A preference the current schema rejects falls back to the default rather than failing the
