@@ -661,10 +661,16 @@ export function FileExplorer({
         if (nextPath !== edit.node.path) await movePath(edit.node.path, nextPath)
       } else {
         const path = joinPath(edit.parentPath, name)
-        await createPath({ path, kind: edit.kind === 'create-file' ? 'file' : 'directory' })
+        // createPath 返回它**实际建在**哪个 Workspace。下面几个 await 之间侧栏完全可点，
+        // 若让 openFile 自己再解析一次活动 Workspace，用户切了项目就会打开另一个项目里的
+        // 同名文件——症状不是报错而是静默开错文件（index.ts / README.md 这类名字很容易撞）。
+        const createdIn = await createPath({
+          path,
+          kind: edit.kind === 'create-file' ? 'file' : 'directory'
+        })
         await tree.refreshDir(edit.parentPath)
         setSelection(createSingleFileExplorerSelection(path))
-        if (edit.kind === 'create-file') await openFile(path)
+        if (edit.kind === 'create-file') await openFile(path, undefined, undefined, createdIn)
       }
     } finally {
       setInlineEdit(null)
