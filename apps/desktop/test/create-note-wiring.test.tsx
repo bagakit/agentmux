@@ -435,10 +435,61 @@ describe('launcher Workspace 判定只有一处', () => {
   const readSource = (relative: string): string =>
     readFileSync(new URL(`../src/renderer/src/${relative}`, import.meta.url), 'utf8')
 
-  it('没有任何地方重新手抄 `?? activeWorkspaceId` 这条规则', () => {
-    // 判据是**这条规则的每一种拼法**，不是某个符号名——原缺陷的写法里根本没有符号，
-    // 就是一句裸表达式。三种能表达它的写法：读 Tab 上的字段、读组件 selector 的取值、
-    // 以及 store 里那个 launcherTab 变量。
+  /**
+   * 每个收 `launcher` 形参的 store action，函数体里必须恰好调一次 `resolveLauncherWorkspaceId`。
+   *
+   * 这是这一族的**主判据**。下面那条数拼法的是补充，它单独**挡不住原缺陷**：实测原 createNote
+   * 的逐字形状（`const workspaceId = get().activeWorkspaceId`，见 cc0e62e^ store.ts:3100）在那
+   * 三条正则上是 0 命中——因为那句话里既没有 `??` 也没有 `launcherTab`。同一条正则也漏掉「把
+   * 局部变量改名再手抄一遍」（`boundTab?.workspaceId ?? active`）。
+   *
+   * 方向错了才会那样：数拼法问的是「有没有人手抄这条规则」，要枚举无穷种写法；而缺陷问的是
+   * 「有没有人**不走**那个唯一实现」，只要枚举那几个动作——它们有一个可枚举的共同标记，就是
+   * 形参表里的 `launcher`。收了它却不调那个实现，就是又自己判了一次。
+   *
+   * 「恰好一次」两侧都承重：0 次是漏掉 launcher 那一侧（原缺陷），2 次以上是同一个动作里判了
+   * 两遍（本仓 two-resolutions-that-happen-to-agree 那一族）。
+   */
+  it('每个收 launcher 的 store action 都必须调 resolveLauncherWorkspaceId', () => {
+    const source = readSource('store.ts')
+    const lines = source.split('\n')
+    // 形参表里带 `launcher` 的 async action 声明。判形参而不是判名字：第七个动作叫什么都逃不掉。
+    const declarations = lines
+      .map((line, index) => ({ line, index }))
+      .filter(({ line }) => /^ {2}async \w+\([^)]*\blauncher\b/.test(line))
+
+    // 前提自检：这个正则必须真的抓到今天那五个。抓到 0 个（或漏掉某个）时下面的循环恒绿——
+    // 正是这一条要防的形状。
+    //
+    // 判「至少覆盖这五个」而不是「恰好是这五个」：后者会把第七个动作先撞在这条白名单上，红出来
+    // 的原因就变成「清单该更新了」，而真正的原因是「你收了 launcher 却没调那个实现」。判据的红
+    // 必须指向缺陷本身，所以在场性归这一条，是否调用全部交给下面的循环。
+    const names = declarations.map(({ line }) => line.trim().match(/async (\w+)/)![1])
+    expect(
+      names.filter((name) => [
+        'createBrowser', 'createNote', 'launchAgent', 'launchTerminal', 'promoteWarmTerminal'
+      ].includes(name)).sort(),
+      '收 launcher 形参的 action 没有全被抓到，判据对漏掉的那些失效'
+    ).toEqual(['createBrowser', 'createNote', 'launchAgent', 'launchTerminal', 'promoteWarmTerminal'])
+
+    for (const { line, index } of declarations) {
+      const name = line.trim().match(/async (\w+)/)![1]
+      // 函数体到下一个同缩进的 `},` 为止。store 的 action 全是两空格缩进的对象方法。
+      let end = lines.length
+      for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+        if (/^ {2}\},?$/.test(lines[cursor])) { end = cursor; break }
+      }
+      const body = lines.slice(index, end).join('\n')
+      expect(
+        body.match(/resolveLauncherWorkspaceId\(/g) ?? [],
+        `${name} 收了 launcher 却没有恰好一次走 resolveLauncherWorkspaceId——它在自己判 Workspace 归属`
+      ).toHaveLength(1)
+    }
+  })
+
+  it('补充判据：也没有地方重新手抄 `?? activeWorkspaceId` 这条规则', () => {
+    // 只是补充。它数的是符号，因此对上一条注释里那两种形状失明（已实测）；留着是因为它能抓到
+    // 「走了那个实现、又在别处顺手多判一次」这类不在 action 体内的手抄。
     const spellings = [
       /\?\?\s*(?:state\.|get\(\)\.|current\.)?activeWorkspaceId/g,
       /launcherTab\?\.workspaceId/g,

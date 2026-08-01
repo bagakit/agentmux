@@ -9,12 +9,22 @@
  *   - `NewTabSurface`（决定卡片上写「Start in ⟨谁⟩」）：`tabWorkspaceId ?? activeWorkspaceId`
  *   - `createNote`：**只有** `get().activeWorkspaceId`
  *
- * 于是 launcher 挂在绑定 A 的 Tab 上、而活动 Workspace 是 B 时（切一下侧栏即可，Tab 不动）：
- * 标题写「Start in A」，点 Launch / Terminal / Browser 都落在 A，点 Note **建到 B**。全程零报错、
- * 界面一切正常，只是笔记出现在另一个项目里——名字只是当天日期，那边有同名文件的概率还很高。
+ * 分岔的后果：launcher 挂在绑定 A 的 Tab 上、而活动 Workspace 是 B 时，标题写「Start in A」，
+ * 点 Launch / Terminal / Browser 都落在 A，而点 Note 会建到 B——全程零报错，笔记出现在另一个项目
+ * 里，名字只是当天日期，那边有同名文件的概率还很高。
  *
- * 「今天恰好一致」不构成可以各判一次的理由：这一族缺陷本仓已经中过两轮（createPath 与 openFile
- * 各读一次活动 Workspace）。判定必须只有一处，让它不可能分岔。
+ * 但要说准：**这个后果今天还走不到**。非活动 Workspace 的整块 workbench 带 `inert`
+ * （App.tsx:247 `inert={!visible}`，visible = `workbenchVisible && candidate.id === activeWorkspaceId`），
+ * 所以「切侧栏到 B、再回头点 A 那个 launcher 的 Note」这一步点不动；按钮可点时 activeWorkspaceId
+ * 必然就是 A，旧写法读到的也是 A。故这次收敛是**行为保持 + 防御**，不是修一个当天能触发的 bug。
+ *
+ * 之所以仍然值得先做：可达性是 `inert` 这一个前提买来的，而 #265 的浮动工作区恰好要拆掉它——浮层
+ * 里的 launcher 悬在主区之上，它绑的 Workspace 与背后活动的那个本就可以不同，那时上面那段就从
+ * 「不可达」变成常态。把「今天恰好一致」留在原地等那一天，就是本仓 expired-reason 那一族：刻意不
+ * 处理的理由读起来像已决之事，前提变了却没人回头看。
+ *
+ * 「今天恰好一致」也不构成可以各判一次的理由：这一族本仓已经中过两轮（createPath 与 openFile 各读
+ * 一次活动 Workspace，那两次是真的漂了）。判定只有一处，才让它不可能分岔。
  *
  * 两个字段都是**必填**的，这是刻意的：原缺陷的形状正是「整条 launcher 那一侧根本没写」，而漏掉一个
  * 必填字段是编译错误。若把 launcher 那侧做成可选，第七个动作可以什么都不传、拿到一个看起来合理的
