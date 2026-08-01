@@ -199,6 +199,43 @@ export const CURSOR_HOOK_DIALECT: AgentHookLifecycleDialect = {
 }
 
 /**
+ * Copilot 的 camelCase 方言。
+ *
+ * 事件名与 Cursor 同为 camelCase 且**三个键逐字重合**（`preToolUse`/`postToolUse`/
+ * `postToolUseFailure`），映射也逐字相同——那是合法复用（同名同结构），不是冲突。但**负载键与
+ * Cursor 相反**：Copilot 两侧都是 camelCase（`toolName`/`toolArgs`/`toolResult`），Cursor 的负载
+ * 反倒是 snake_case。所以"事件名像"推不出"负载键像"，两者必须各自佐证。
+ *
+ * `userPromptSubmitted` 是它的 user-prompt-submit。这个名字**必须逐字**：`userPromptSubmit`
+ * （Claude 一族的拼法，也是最自然的猜法）在它的解析器里会被**静默丢弃**——不报错、不告警，
+ * 配置照样"装好了"，只是那个事件永远不响。本机实测如此（见 providers/copilot.ts 的实测记录）。
+ *
+ * `agentStop` 是**一轮**收尾。`sessionEnd` 不进表：它是会话终结（带 `reason`），与 droid/Gemini
+ * 同一个既定判断——轮次收尾靠 agentStop，会话终结由 PTY 事实回答。
+ *
+ * `subagentStart`/`subagentStop` 进表：这是继 Claude 之后第二个**真的成对**的 Provider（实测两个
+ * 事件都触发、都带 `agentName`）。
+ *
+ * `permissionRequest` 进表映射 permission-request：它是「授权规则引擎之前的那一步」，结构上确实是
+ * 一次授权请求（上游描述逐字："run before the permission rules engine for a tool decision"）。
+ *
+ * `userPromptTransformed`/`errorOccurred`/`preCompact`/`notification`/`preMcpToolCall` 刻意不映射：
+ * Core 今天没有判断需要它们，且 `preMcpToolCall` 尤其不能进 tool-use-start——同一次 MCP 调用会先过
+ * 它、再走 `preToolUse`，两条都算事前会让一次执行在时间轴上落两条（与 Cursor 的两个授权门同理）。
+ */
+export const COPILOT_HOOK_DIALECT: AgentHookLifecycleDialect = {
+  sessionStart: 'session-start',
+  userPromptSubmitted: 'user-prompt-submit',
+  permissionRequest: 'permission-request',
+  preToolUse: 'tool-use-start',
+  postToolUse: 'tool-use-end',
+  postToolUseFailure: 'tool-use-end',
+  subagentStart: 'subagent-start',
+  subagentStop: 'subagent-stop',
+  agentStop: 'turn-end'
+}
+
+/**
  * Core 认识的全部方言，按 Provider 组合。
  *
  * 每个 Provider 一块声明、这里一行 spread：新接一个 Provider 只在本文件追加自己那块，不必去动
@@ -215,7 +252,8 @@ const HOOK_LIFECYCLE_DIALECTS: readonly AgentHookLifecycleDialect[] = [
   PI_HOOK_DIALECT,
   GROK_HOOK_DIALECT,
   GEMINI_HOOK_DIALECT,
-  CURSOR_HOOK_DIALECT
+  CURSOR_HOOK_DIALECT,
+  COPILOT_HOOK_DIALECT
 ]
 
 /** 合并后的查表面。重复键必须映射到同一个 canonical 事件，否则是真冲突——见下方构造时的断言。 */

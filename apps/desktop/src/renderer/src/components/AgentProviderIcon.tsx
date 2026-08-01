@@ -20,9 +20,10 @@ const BUILT_IN_AGENT_LABELS = {
   cursor: 'Cursor',
   // Kimi 有名字但**没有**离线品牌图形：仓库里没有 kimi 的图标资源，也不会凭空画一个近似的
   // 冒充它。于是它走下面 switch 的 `Bot` 兜底——「认得这个 Provider」与「有它的品牌标记」是
-  // 两件事，这里如实分开：label 认得，标记中性。Droid 同理。
+  // 两件事，这里如实分开：label 认得，标记中性。Droid 与 Copilot 同理。
   kimi: 'Kimi',
-  droid: 'Droid'
+  droid: 'Droid',
+  copilot: 'Copilot'
 } satisfies Record<BuiltInAgentProviderId, string>
 
 /**

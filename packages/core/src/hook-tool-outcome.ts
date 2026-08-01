@@ -38,7 +38,9 @@ const TRUNCATION_MARKER = '\n[output truncated]'
  *
  * Claude 的 `PostToolUse` 给 `tool_response`；Cursor 给 `tool_output`；Hermes 的 `post_tool_call`
  * 给 `result`（本机 `agent/shell_hooks.py` 逐字："result – tool return value (serialised string)"）；
- * 其余是同族命名变体。顺序即优先级，取第一个能读出内容的。
+ * Copilot 给 `toolResult`，且它是一个**对象**而不是字符串——正文在 `toolResult.textResultForLlm`，
+ * 由下面 `NESTED_TEXT_KEYS` 取出（实测：把一个字符串塞进 `toolResult` 会被它的强类型负载剥成 `{}`，
+ * 所以这里只可能拿到对象）。其余是同族命名变体。顺序即优先级，取第一个能读出内容的。
  *
  * `result` 此前在 `STATUS_KEYS` 里被当作**成败标签**——那没有任何 Provider 证据支持，也没有测试守着，
  * 而 Hermes 的证据说它是正文。留在成败族里的后果是 Hermes 每次成功调用的输出都被丢掉（读不出
@@ -55,7 +57,19 @@ const OUTPUT_KEYS = [
  * 三种形态都见过：布尔的 `is_error`、字符串的 `status: 'error'`、以及非零 `exit_code`。
  */
 const ERROR_FLAG_KEYS = ['is_error', 'isError', 'error'] as const
-const STATUS_KEYS = ['status'] as const
+/**
+ * 承载「成败标签」的字段。
+ *
+ * `status` 是 Hermes/Claude 一族的拼法。`resultType` 是 Copilot 的：它的工具结果对象逐字
+ * `resultType: "success" | "failure" | "rejected" | "denied" | "timeout"`（SDK 类型定义），
+ * 五个取值里四个都是「这一步没跑成」。
+ *
+ * 为什么必须读它：Copilot 的 `postToolUseFailure` **只在** `resultType === 'failure'` 时触发
+ * （它自己的类型注释逐字写明 `"rejected"`/`"denied"`/`"timeout"` 都不触发），而那三种结果会照常走
+ * `postToolUse`。也就是说一次被拒/被否/超时的调用，走的是**成功那条事件**，负载里唯一说出真相的
+ * 就是这个字段。不读它，那三类失败在时间轴上和成功长得一模一样——正是本文件开头描述的缺陷。
+ */
+const STATUS_KEYS = ['status', 'resultType'] as const
 const EXIT_CODE_KEYS = ['exit_code', 'exitCode', 'code'] as const
 
 /**
@@ -85,8 +99,15 @@ const FAILURE_ONLY_KEYS = ['error_message', 'errorMessage', 'failure_type', 'fai
  */
 const FAILURE_TEXT_KEYS = ['error', 'error_message', 'errorMessage', 'error_details', 'errorDetails'] as const
 
-/** 结果对象里，正文通常挂在这些键下。 */
-const NESTED_TEXT_KEYS = ['stdout', 'output', 'content', 'text', 'stderr', 'message', 'error'] as const
+/**
+ * 结果对象里，正文通常挂在这些键下。
+ *
+ * `textResultForLlm` 是 Copilot 的：它的 `toolResult` 是对象而非字符串，正文在这个键下
+ * （SDK 类型逐字 `ToolResultObject { textResultForLlm: string; resultType: ToolResultType; … }`）。
+ * 少了它，`readText` 会退回整体序列化，用户看到的是 `{"resultType":"success","textResultForLlm":"…"}`
+ * 这样一段带引号转义的机器噪音，而不是命令真正的输出。
+ */
+const NESTED_TEXT_KEYS = ['stdout', 'output', 'content', 'text', 'textResultForLlm', 'stderr', 'message', 'error'] as const
 
 /**
  * 纯粹表示成败、不含正文的键。
@@ -99,7 +120,7 @@ const NESTED_TEXT_KEYS = ['stdout', 'output', 'content', 'text', 'stderr', 'mess
  */
 const FLAG_ONLY_KEYS: ReadonlySet<string> = new Set([
   ...['is_error', 'isError'],
-  ...['status'],
+  ...['status', 'resultType'],
   ...['exit_code', 'exitCode', 'code']
 ])
 
@@ -158,7 +179,14 @@ function readFailure(source: Record<string, unknown>): boolean {
     // `blocked` 同样是「这一步没跑成」：Hermes 的 pre_tool_call 拦下一次调用时发的
     // `post_tool_call` 带 `status: 'blocked'` + `error_type: 'plugin_block'` + `error_message`
     // （本机 model_tools.py 实测）。判 complete 会把「被规则挡住」画成「跑成了」。
-    if (normalized === 'error' || normalized === 'failed' || normalized === 'failure' || normalized === 'blocked') {
+    //
+    // `rejected`/`denied`/`timeout` 是 Copilot 的 `resultType` 取值。它们尤其不能漏：那三种结果
+    // **不触发**它的失败事件，只走成功那条 `postToolUse`，所以这个字段是唯一的判据。
+    if (
+      normalized === 'error' || normalized === 'failed' || normalized === 'failure' ||
+      normalized === 'blocked' || normalized === 'rejected' || normalized === 'denied' ||
+      normalized === 'timeout'
+    ) {
       return true
     }
   }
