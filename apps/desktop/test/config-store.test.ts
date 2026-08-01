@@ -453,6 +453,32 @@ describe('ConfigStore workspace identity', () => {
     expect(loaded.workspaces.map((entry) => entry.id)).toEqual([SCRATCH_WORKSPACE_ID])
   })
 
+  it('an empty map container is also "no projects" — 空容器那一侧同样要能启动', async () => {
+    // 上面那条空数组走的是 `Array.isArray` 那一支，**map 容器的空侧从来没被执行过**。
+    // 这一侧被静默改坏过一次：`Object.keys(value).length > 0 ? 1 : 0` 的 `: 0` 变成 `: 1` 时，
+    // 其余 49 条全绿——一个空的 map 容器（`workspaces: {}`）会被算成「持有项目」，于是全损守卫
+    // 开火，用户第一次启动就被拒，而盘上根本没有东西可丢。
+    //
+    // 为什么这一条与空数组那条不能合并：两者走的是 `evidenceOfWorkspaces` 里不同的分支，而
+    // 判据要落在「这个分支的这一侧」。合并只会让其中一侧继续无人守。
+    //
+    // 方向说明：空 map 与非空 map 是同一个三元的两侧，非空侧由上面「容器不可读」那条守着。
+    // 两侧都要有人守，否则改坏一侧的代价是「误拒启动」，改坏另一侧的代价是「覆盖用户配置」。
+    const { store, path } = await storeFixture()
+    await writeFile(path, JSON.stringify({
+      ...baseConfig,
+      version: DEFAULT_CONFIG.version - 1,
+      workspaces: {}
+    }))
+
+    const loaded = await store.get()
+
+    expect(
+      loaded.workspaces.map((entry) => entry.id),
+      '空的 map 容器被当成「持有项目」——新用户第一次启动会被守卫拒掉'
+    ).toEqual([SCRATCH_WORKSPACE_ID])
+  })
+
   it('one damaged container does not collapse the others', async () => {
     // 三个容器共用一次 parse 时，坏一个就三个一起没。这条钉住它们各自独立：`executors` 写坏
     // 不该让项目列表读不出来。判据取 `found`（它必须仍然看见那两个项目）而不是最终 workspaces，
