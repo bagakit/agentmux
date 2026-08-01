@@ -13,7 +13,7 @@ import { DEFAULT_NOTIFICATION_MODE_ID, NOTIFICATION_TIERS } from '../src/shared/
 
 vi.mock('electron', () => ({ app: { getPath: () => tmpdir() } }))
 
-import { ConfigStore, DEFAULT_CONFIG } from '../src/main/config-store.js'
+import { authoredConfigCarryOver, ConfigStore, DEFAULT_CONFIG } from '../src/main/config-store.js'
 import type { RuntimeController, RuntimePreparation } from '../src/main/runtime-controller.js'
 import { saveRuntimeConfig } from '../src/main/runtime-config-transaction.js'
 
@@ -285,6 +285,102 @@ describe('ConfigStore workspace identity', () => {
     await expect(store.get()).rejects.toThrow(/2 project/)
     // 关键：文件必须还在，且还是原来那份。这是「响亮失败可恢复」的全部依据。
     expect(await readFile(path, 'utf8')).toBe(original)
+  })
+
+  it('refuses to launch rather than silently drop intact projects whose host record is unreadable', async () => {
+    // #273。上一条守的是「一条都读不出来」；这一条守**部分**丢失，而那正是原来沉默的地方：
+    // 一条坏掉的 host 记录会连带丢掉挂在它上面的每个项目，而只要还剩一个本机项目，
+    // `workspaces.length` 就不为零，全空那条判据永远不触发。实测一个 `port: "twenty-two"`
+    // 静默吃掉 5 个项目里的 4 个外加那台 host，界面上一切正常。
+    //
+    // 与上一条的区别是**种类**上的，不是程度上的：被丢的这些 workspace 记录本身完好，
+    // id / name / path 全读得出来，丢它们的原因在它们外面。所以判据不能只是「抛了」——
+    // 错误里必须点名是哪台 host、哪几个项目，那是用户唯一能据以修那一个字节的信息。
+    const { store, path } = await storeFixture()
+    const original = JSON.stringify({
+      ...baseConfig,
+      version: DEFAULT_CONFIG.version - 1,
+      hosts: [
+        { id: 'local', kind: 'local', label: 'This Mac' },
+        // port 该是 number。半截写入 / 手改 / 未来某次 schema 收紧都能造出这条。
+        { id: 'remote', kind: 'ssh', label: 'Build box', hostname: 'build.example.test', port: 'twenty-two' }
+      ],
+      workspaces: [
+        // 幸存者：它让「全空」那条判据保持沉默，这条用例的全部意义就在它在场。
+        workspace({ id: 'ws-local', hostId: 'local', path: '/projects/one' }),
+        workspace({ id: 'ws-r1', hostId: 'remote', path: '/srv/a' }),
+        workspace({ id: 'ws-r2', hostId: 'remote', path: '/srv/b' })
+      ]
+    })
+    await writeFile(path, original)
+
+    // 前提自检：这份 fixture 真的会留下一个幸存者。否则本条会退化成上一条的重复，
+    // 而「全空」那条判据会替真正的判据背书——删掉新守卫也照旧红。
+    const survivors = authoredConfigCarryOver(JSON.parse(original)).workspaces
+    expect(survivors.map((entry) => entry.id)).toEqual(['ws-local'])
+
+    const failure = await store.get().then(
+      () => undefined,
+      (error: unknown) => error as Error
+    )
+
+    expect(failure, '坏掉的 host 连带丢掉两个完好项目，启动却成功了').toBeDefined()
+    // 点名那台 host：只说「丢了 2 个项目」不足以让用户知道去改哪一行。
+    expect(failure!.message).toContain('remote')
+    // 点名那几个项目，且**只**点这几个：把幸存者也算进去会让用户以为本机项目也坏了。
+    expect(failure!.message).toContain('ws-r1')
+    expect(failure!.message).toContain('ws-r2')
+    expect(failure!.message, '幸存的项目被算成了受害者').not.toContain('ws-local')
+    // 与另一条守卫共用的机制：响亮失败之所以是对的，全部依据是磁盘上那份原封不动。
+    expect(await readFile(path, 'utf8')).toBe(original)
+  })
+
+  it('separates the two loss classes, so a damaged project record is not reported as a host problem', async () => {
+    // 两族的边界。上一条与这一条若共用一条判据，就会把「这个项目读不出来」和
+    // 「这个项目好得很、是它的 host 读不出来」说成同一件事，而用户能做的动作完全不同。
+    // 判据：一条坏 workspace 记录旁边，`strandedByDamagedHost` 必须是空的——那条记录
+    // 不是被 host 牵连的，它自己就读不出来。
+    const carried = authoredConfigCarryOver({
+      ...baseConfig,
+      version: DEFAULT_CONFIG.version - 1,
+      hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
+      workspaces: [
+        workspace({ id: 'ws-ok', hostId: 'local', path: '/projects/one' }),
+        { ...workspace({ id: 'ws-damaged', hostId: 'local', path: '/projects/two' }), tags: ['x'] }
+      ]
+    })
+
+    expect(carried.workspaces.map((entry) => entry.id)).toEqual(['ws-ok'])
+    expect(carried.found, '原始条数必须数原始记录，否则「真的没有项目」会被当成损坏').toBe(2)
+    expect(
+      carried.strandedByDamagedHost,
+      '自己读不出来的记录被归成了「被 host 牵连」，用户会去改一台没问题的 host'
+    ).toEqual([])
+  })
+
+  it('reports every stranded project of every damaged host, not just the first', async () => {
+    // 只报第一台 / 每台只报第一个项目，都能让上面那条用例通过（它只有一台 host、两个项目）。
+    // 这条把两个维度都摆开：两台坏 host，各挂两个项目。
+    const carried = authoredConfigCarryOver({
+      ...baseConfig,
+      version: DEFAULT_CONFIG.version - 1,
+      hosts: [
+        { id: 'local', kind: 'local', label: 'This Mac' },
+        { id: 'box-a', kind: 'ssh', label: 'A', hostname: 'a.test', port: 'nope' },
+        { id: 'box-b', kind: 'ssh', label: 'B', hostname: 'b.test', port: -1 }
+      ],
+      workspaces: [
+        workspace({ id: 'a1', hostId: 'box-a', path: '/a/1' }),
+        workspace({ id: 'a2', hostId: 'box-a', path: '/a/2' }),
+        workspace({ id: 'b1', hostId: 'box-b', path: '/b/1' }),
+        workspace({ id: 'b2', hostId: 'box-b', path: '/b/2' })
+      ]
+    })
+
+    expect(carried.strandedByDamagedHost).toEqual([
+      { hostId: 'box-a', workspaceIds: ['a1', 'a2'] },
+      { hostId: 'box-b', workspaceIds: ['b1', 'b2'] }
+    ])
   })
 
   it('treats a config that genuinely had no projects as no projects, not as an error', async () => {
