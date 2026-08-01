@@ -34,7 +34,10 @@ export const KIMI_HOOKS: AgentNativeHookSpecification = {
     // `except Exception` 里，而 `CancelledError` 自 py3.8 起是 `BaseException`、抓不到，
     // `MaxStepsReached` 的 raise 点也在那个 try 之上。且中断后 Kimi 进程仍活在 composer 上
     // （SIGINT 只取消当前 turn），于是连"进程退出"这个兜底事实都没有。
-    // 后果：用户中断或撞上步数上限后，这个 Agent 会一直显示运行中。
+    // 后果：用户中断或撞上步数上限后，这个 Agent 会继续显示运行中——但**不是永远**：
+    // 通用衰减（agent-status-freshness.ts）会在 15 分钟无新证据后把 working 落成 unknown，
+    // 那条衰减兜的正是"该发收尾却没发"这一类，所以这里不需要为 Kimi 单独加机制。
+    // 真实失效形态因此是"最多 15 分钟的错误运行中"，别把它写成永久卡死。
     // 与 grok 的区别要认清——grok 是**发了**另一个事件（`StopCancelled`）而我们没接，
     // Kimi 是真的什么都不发（config.py:5-19 的 13 个事件里没有任何 cancel 类），
     // 所以这里正确的做法是如实记录这个限制，而不是编一个收尾事件出来。
