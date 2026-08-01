@@ -30,6 +30,58 @@ export interface StartupFailureExitIo {
 }
 
 /**
+ * 壳能提供的那几样**原样**的东西：electron 与 node 自己的 API，加上配置路径。
+ *
+ * 为什么要有这一层：把 `StartupFailureExitIo` 直接在 `index.ts` 里拼出来时，壳里出现了三个箭头
+ * 函数，而**实参**在那里可以静默写错，接线层的文本守卫看不见——`toMatch(/app\.exit\(/)` 对
+ * `app.exit(code)` 与 `app.exit(0)` 一视同仁。实测把壳里的 `exit` 换成 `() => app.exit(0)`，
+ * 33 条全绿且 tsc 干净（`noUnusedParameters` 没开，未用的 `code` 参数不报）：启动失败退 0，
+ * shell、launchd、打包冒烟脚本全都把这次崩溃读成成功——而「退出码是 1」那条测试正是为了防这个。
+ * 同形的还有 `showErrorBox(body, title)` 参数对调、`disposeOwners` 换成一个 no-op。
+ *
+ * 于是把适配挪到这里：壳只传**宿主对象本身**（`app`、`dialog`、`process.stderr`），没有实参位置
+ * 可写错，而这个函数的组装由 `startup-failure-exit.test.ts` 真跑一遍钉住。
+ * 这是「抽进 lib 只解决一半」的第二半（记忆 extracting-to-lib-only-fixes-half）：那条记忆说的是
+ * 内容变可测之后「壳有没有被执行到」仍无人守，而这里治的是壳里**还剩下的那点逻辑**。
+ *
+ * 传的是**对象**而不是从对象上摘下来的方法（`app` 而非 `app.exit`）：electron 的 `app` 是 gin
+ * 原生绑定，方法摘下来之后 receiver 就没了，调用时拿不到 holder 会抛 Illegal invocation——那正是
+ * 这条路径最怕的结局：启动失败既不弹框也不退出，留下一个挂着的进程。而 tsc 与本文件的测试都看不见
+ * 这件事（测试注入的是普通对象，摘下来照样能调）。同一个 `index.ts` 里 `registerCrashCapture`
+ * 也是把 `app` 整个传进去的。下面那条「通过宿主对象调用」的断言就是钉这个的。
+ */
+export interface StartupFailureHostApis {
+  /** 主配置文件路径，取自 ConfigStore 自己。 */
+  configPath: string
+  /** `electron` 的 `dialog`，整个传进来（不摘 `showErrorBox`，见上）。 */
+  dialog: { showErrorBox(title: string, body: string): void }
+  /** 运行时 owner 的清理。闭包里的函数声明，没有 receiver 可丢。 */
+  disposeOwners(): Promise<void>
+  /** `process.stderr`，只用它的 `write`（换行在这里补，壳里不补）。 */
+  stderr: { write(chunk: string): unknown }
+  /** `electron` 的 `app`，整个传进来（不摘 `exit`，见上）。 */
+  app: { exit(code: number): void }
+}
+
+/**
+ * 把宿主的裸 API 组装成这条路径要的 io。
+ *
+ * 每一项都只是转发，但**转发的正确性在这里可测**：参数顺序、退出码来自入参而非常量、诊断行末尾
+ * 补换行——三件事在壳里都是无人守的实参，在这里各有一条断言。
+ */
+export function startupFailureExitIo(host: StartupFailureHostApis): StartupFailureExitIo {
+  return {
+    configPath: host.configPath,
+    showErrorBox: (title, body) => host.dialog.showErrorBox(title, body),
+    disposeOwners: () => host.disposeOwners(),
+    writeDiagnostic: (line) => {
+      host.stderr.write(`${line}\n`)
+    },
+    exit: (code) => host.app.exit(code)
+  }
+}
+
+/**
  * 告知用户 → 清理 → 退出。
  *
  * 顺序是承重的，不是风格：`disposeOwners()` 里任何一个 owner 卡住，「先清理再告知」的版本就
