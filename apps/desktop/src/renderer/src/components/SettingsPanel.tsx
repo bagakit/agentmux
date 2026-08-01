@@ -59,6 +59,29 @@ export function visibleSettingsSections(query: string): typeof SECTIONS {
   )
 }
 
+/**
+ * 侧栏导航的完整取值：按分组切开、丢掉空分组，一次算完。
+ *
+ * 为什么连"按 group 分组"也搬出来：原先壳里留着一句 `visibleSections.filter(…group…)`，那一句
+ * 才是侧栏真正渲染用的列表。守卫当时按源文本数 `\bSECTIONS\.filter` 出现几次，于是把那一句改成
+ * `[...SECTIONS].filter(…)`（中间隔了个 `]`，正则失配）就完全绕过——侧栏从此**永不随搜索词过滤**，
+ * 而 4 条测试全绿。这是"数符号名守不住别的拼法"的又一次现形：只要壳里还留着一句过滤，就总有
+ * 另一种拼法能把它换成不读 query 的版本。
+ *
+ * 所以这里不再去猜拼法，而是消除分岔本身：分组也归这个函数算，壳里一句 `.filter(` 都不该剩。
+ * 判据随之变成"壳里没有任何 `.filter(` 调用"——与怎么拼无关（记忆 extracting-to-lib-only-fixes-half：
+ * 抽进函数只解决一半，"壳里恰好只有转发"才是另一半）。
+ */
+export function settingsNavGroups(
+  query: string
+): { id: SettingsGroupId; title: string; items: typeof SECTIONS }[] {
+  const visible = visibleSettingsSections(query)
+  return GROUPS.flatMap((group) => {
+    const items = visible.filter((section) => section.group === group.id)
+    return items.length === 0 ? [] : [{ ...group, items }]
+  })
+}
+
 export function SettingsPanel({ onClose, initialSection = 'workspaces' }: {
   onClose: () => void
   initialSection?: SettingsSectionId
@@ -68,6 +91,9 @@ export function SettingsPanel({ onClose, initialSection = 'workspaces' }: {
   const [active, setActive] = useState<SettingsSectionId>(initialSection)
   const [query, setQuery] = useState('')
   const visibleSections = useMemo(() => visibleSettingsSections(query), [query])
+  // 侧栏渲染用的分组列表也从纯函数来。壳里不留任何过滤，否则那一句总能被换成不读 query 的拼法
+  // （实测 `[...SECTIONS].filter(…)` 绕过了按符号名计数的守卫，侧栏从此永不过滤而 4 条全绿）。
+  const navGroups = useMemo(() => settingsNavGroups(query), [query])
 
   useEffect(() => {
     if (visibleSections.some((section) => section.id === active)) return
@@ -118,19 +144,15 @@ export function SettingsPanel({ onClose, initialSection = 'workspaces' }: {
         <header><div><Boxes size={17} /><span><strong>AgentMux</strong><small>Settings</small></span></div><button className="icon-button" onClick={onClose} aria-label="Close settings"><X size={16} /></button></header>
         <label className="settings-search"><Search size={14} /><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search settings" />{query ? <button onClick={() => setQuery('')}><X size={12} /></button> : null}</label>
         <nav>
-          {GROUPS.map((group) => {
-            const items = visibleSections.filter((section) => section.group === group.id)
-            if (items.length === 0) return null
-            return (
-              <Fragment key={group.id}>
-                <p>{group.title}</p>
-                {items.map((item) => {
-                  const Icon = item.icon
-                  return <button key={item.id} className={active === item.id ? 'selected' : ''} aria-current={active === item.id ? 'page' : undefined} onClick={() => setActive(item.id)}><Icon size={15} /><span><strong>{item.title}</strong><small>{item.description}</small></span></button>
-                })}
-              </Fragment>
-            )
-          })}
+          {navGroups.map((group) => (
+            <Fragment key={group.id}>
+              <p>{group.title}</p>
+              {group.items.map((item) => {
+                const Icon = item.icon
+                return <button key={item.id} className={active === item.id ? 'selected' : ''} aria-current={active === item.id ? 'page' : undefined} onClick={() => setActive(item.id)}><Icon size={15} /><span><strong>{item.title}</strong><small>{item.description}</small></span></button>
+              })}
+            </Fragment>
+          ))}
           {visibleSections.length === 0 ? <span className="settings-nav-empty">No settings match “{query}”.</span> : null}
         </nav>
         <footer><span>Core API</span><code>@agentmux/core</code></footer>
