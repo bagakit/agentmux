@@ -187,6 +187,33 @@ export type AgentMuxEvidence = {
   acpSessionId?: string
 }
 
+/**
+ * Core 对 Hook 生命周期的 **canonical 词汇表**——所有 Provider 方言归一化后的落点。
+ *
+ * 为什么需要它：Provider 的事件名分属至少两种命名法（Claude/Codex 的 `PostToolUse`，Hermes 的
+ * `post_tool_call`，Pi 的 `tool_execution_end`），而 Core 有几处判断真的需要知道「这条事件是什么」。
+ * 此前那些判断靠事件名的**形状**来猜（`eventName.startsWith('Post')`），于是只对 PascalCase 的
+ * Provider 成立：Hermes 与 Pi 虽然都声明了 `timeline: 'complete-events'`，它们的工具结果与失败态
+ * 却永远读不出来——一条失败的命令和一条成功的命令在时间轴上长得一模一样。这份词汇表把「事件是什么」
+ * 变成显式映射（见 agent-hook-event.ts 的映射表），Core 只对 canonical 值做判断。
+ *
+ * 刻意保持小：只收录 Core **真的会据以分支**的事件。Provider 的其他事件不进这份词汇表，它们的语义
+ * 状态照旧完全由 Provider 自己声明的 `rules` 给出——归一化不是给每个厂商事件都发一张 Core 身份证，
+ * 而是让 Core 需要的那几个判断在所有 Provider 上一致成立。
+ */
+export type AgentHookLifecycleEvent =
+  | 'session-start'
+  | 'user-prompt-submit'
+  | 'permission-request'
+  /** 一次工具调用的事前：只有入参，此刻谈不上成败。 */
+  | 'tool-use-start'
+  /** 一次工具调用的事后：结果与成败在此刻才存在。 */
+  | 'tool-use-end'
+  | 'subagent-start'
+  | 'subagent-stop'
+  /** 一个 turn 收尾：本 turn 的 token 用量已在 transcript 落定。 */
+  | 'turn-end'
+
 export type AgentPromptDelivery = 'positional-argv' | 'hermes-query' | 'flag-prompt-interactive'
 
 export type AgentReadySignal = {
@@ -281,6 +308,30 @@ export type AgentTurnUsage = {
   observedAt: number
 }
 
+/**
+ * 一个 Provider 的**完整公共合同**——Core 之外的任何一侧（Desktop 渲染层、CLI）认识一个 Provider
+ * 所需的全部事实，且**只**从这里认识它。
+ *
+ * 七条能力轴，每条都由下面一个具名字段承载，缺一不可：
+ * 1. **capability**：`capabilities`——这个 Provider 能做什么，逐项声明，未核实即不声明。
+ * 2. **evidence**：`readySignal` 说「凭什么算就绪」；运行期每条事实再由 `AgentMuxEvidence.source`
+ *    指名观察者（`native-hook`/`terminal-output`/`run-process`/`acp`/`user`）。AgentMux 绝不从终端
+ *    字节推断语义活动，所以「谁观察到的」和「观察到什么」一样是合同的一部分。
+ * 3. **Hook**：`hookStrategy`——有没有原生 hook，以及它的配置由谁安装（managed / unmanaged / 无）。
+ * 4. **permission**：`capabilities.permission` 声明观察或应答的档位，`postureControl` 承载可寻址的
+ *    在途安全姿态。二者都是 DESCRIBE 半边：键位（`input`）永不过 IPC，留在 Core 侧解析。
+ * 5. **resume**：`resumeStrategy`——原生续跑的有无与**定位器种类**（session-id / transcript-path）。
+ * 6. **prompt delivery**：`promptDelivery`——首个 Prompt 如何随启动送达（argv 位置参数 / 专用旗标 /
+ *    子命令）；turn 内的送达形状另由 `AgentPromptInputPlan` 表达。
+ * 7. **reply-correlation**：`capabilities.replyCorrelation`——能不能把一次回复关联回它的 turn，
+ *    以及凭什么关联（原生 turn id / ACP turn id / 不能）。
+ *
+ * 这份合同是**纯可序列化数据**：没有函数、没有类实例。argv、键位、hook 规则这些 Provider 特有的
+ * 知识全部留在 Core 侧（见 agent-launch-option.ts、agent-interaction.ts、hook-normalizer.ts），
+ * 只有声明本身跨边界。因此**新增一个 Provider 是在 packages/core 里新增一个模块**——它填这七条轴，
+ * Desktop 照这份声明渲染，ctxmux 继续只拥有 Run/PTY/ordered bytes/Replay/Gap/Attachment 与进程事实，
+ * 两侧都不需要为它长出一条分支。
+ */
 export type AgentCatalogEntry = {
   id: AgentProviderId
   label: string
@@ -795,7 +846,22 @@ export type NativeHookEnvelope = {
   agentSessionId: string
   runId: string
   providerId: AgentProviderId
+  /**
+   * 投递方明说的事件名（来自 hook 命令的 `--event` 旗标或环境变量）。缺席时 Core 从 `payload` 里按
+   * `HOOK_EVENT_NAME_PAYLOAD_KEYS`（`hook_event_name` / `hookEventName` / `eventName`）依次读取。
+   */
   eventName?: string
+  /**
+   * Provider 的原始 hook 负载，**逐字保留、不由 Core 改写**。
+   *
+   * 这是 Provider 与 Core 的分工线：Core 归一化的是**事件名**（它需要据以分支），而负载里的 handle
+   * ——`session_id`/`sessionId`、`transcript_path`/`transcriptPath`、Antigravity 的 `conversationId`
+   * ——一律留在这里由**声明它们的 Provider 自己解释**（见 `AgentNativeHookSpecification.nativeHandle`
+   * 的 `sessionIdKeys`/`transcriptPathKeys`）。Core 不认识、也不该认识「哪个键装着会话 id」：那是
+   * Provider 的私有知识，一个新 Provider 声明自己的键名即可接入，不必修改 Core。Core 只对读出来的值
+   * 做与 Provider 无关的**安全归一化**（控制字符、长度、前导 `-`、相对路径——见 agent-native-locator.ts），
+   * 因为那些约束来自「这个值会成为 argv token 或文件路径」，而不是来自某个 Provider。
+   */
   payload?: Record<string, unknown>
 }
 
@@ -803,7 +869,21 @@ export type NormalizedHookEvent = {
   agentSessionId: string
   run: AgentMuxRunRef
   providerId: AgentProviderId
+  /**
+   * Provider 报出的**原始**事件名，逐字保留。
+   *
+   * 刻意不换成 canonical 值：诊断一条「Core 没认出来的事件」时，唯一有用的就是 Provider 到底叫它
+   * 什么。归一化的结果放在 `lifecycleEvent`，两者并存——原始名负责可诊断，canonical 值负责可判断。
+   */
   eventName: string
+  /**
+   * 这条事件归一化后的 Core canonical 生命周期事件，**认不出时缺席**。
+   *
+   * 缺席是一等公民的事实，读作「Core 对这条事件没有 canonical 语义」：此时 `semanticState` 仍由
+   * Provider 自己的 `rules` 给出（多半是 `unknown`），绝不因为归一化失败就伪造 `working`/`done`。
+   * 缺席时 `eventName` 里的原始名就是诊断线索。
+   */
+  lifecycleEvent?: AgentHookLifecycleEvent
   semanticState: AgentSemanticState
   status: AgentStatus
   timeline: AgentTimelineMutation[]

@@ -185,4 +185,73 @@ describe('agent hook command usage relay', () => {
       await rm(dir, { recursive: true, force: true })
     }
   })
+
+  /**
+   * 事件名的三个拼法在这个**子进程**里同权——它与 normalizer 共用 agent-hook-event.ts 那一份键顺序。
+   *
+   * 为什么必须在这里单独钉：此前这个子进程只认 `hook_event_name` 与 `eventName`，**漏掉
+   * `hookEventName`**。于是一个只给 camelCase 的 Provider，其事件名在这里读成 null——`eventName`
+   * 为空会让整段 POST 被跳过（见 `if (url && token && eventName)`），状态与用量双双静默丢失，
+   * 而 normalizer 侧的测试全绿，因为事件压根没送到 Core。
+   */
+  it('reads the event name from all three payload spellings, so no spelling silently drops the POST', async () => {
+    for (const key of ['hook_event_name', 'hookEventName', 'eventName']) {
+      const dir = await mkdtemp(join(tmpdir(), 'agentmux-hookcmd-'))
+      try {
+        const transcriptPath = join(dir, 'transcript.jsonl')
+        await writeFile(transcriptPath, CLAUDE_TRANSCRIPT)
+        vi.stubEnv('AGENTMUX_HOOK_URL', 'http://127.0.0.1:65535/hook')
+        vi.stubEnv('AGENTMUX_HOOK_TOKEN', 'test-token')
+        // 关键：不给旗标、不给环境变量——事件名只能从 stdin 负载的这个拼法读出来。
+        vi.stubEnv('AGENTMUX_HOOK_EVENT', '')
+        vi.stubEnv('AGENTMUX_USAGE_TRANSCRIPT_FORMAT', 'claude-jsonl')
+        const { bodies } = captureHookPost()
+        feedStdin(JSON.stringify({ [key]: 'Stop', session_id: 'sess-spelling', transcript_path: transcriptPath }))
+
+        await runAgentHookCommand()
+
+        // POST 真的发出去了（事件名读出来了），且事件名逐字是 Stop。
+        expect(bodies, `payload key ${key} must resolve the event name`).toHaveLength(1)
+        expect(bodies[0]!.eventName).toBe('Stop')
+        // 而且被认成 turn 收尾，所以用量真的抽到了——这一步同时守住派生出来的收尾事件集合。
+        const payload = bodies[0]!.payload as Record<string, unknown>
+        expect(payload.agentmuxUsage).toMatchObject({ inputTokens: 2, outputTokens: 5, totalTokens: 7 })
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+        vi.unstubAllGlobals()
+        vi.restoreAllMocks()
+      }
+    }
+  })
+
+  /**
+   * 收尾事件集合是从 canonical 映射表派生的，所以 snake_case 的收尾方言也能抽到用量。
+   * 此前硬编码 `['Stop','StopFailure']`：Hermes 的 `on_session_end` 与 Pi 的 `agent_end` 永远读不到。
+   */
+  it('extracts usage on a snake_case turn-end dialect, not only on PascalCase Stop', async () => {
+    for (const eventName of ['on_session_end', 'agent_end']) {
+      const dir = await mkdtemp(join(tmpdir(), 'agentmux-hookcmd-'))
+      try {
+        const transcriptPath = join(dir, 'transcript.jsonl')
+        await writeFile(transcriptPath, CLAUDE_TRANSCRIPT)
+        vi.stubEnv('AGENTMUX_HOOK_URL', 'http://127.0.0.1:65535/hook')
+        vi.stubEnv('AGENTMUX_HOOK_TOKEN', 'test-token')
+        vi.stubEnv('AGENTMUX_HOOK_EVENT', eventName)
+        vi.stubEnv('AGENTMUX_USAGE_TRANSCRIPT_FORMAT', 'claude-jsonl')
+        const { bodies } = captureHookPost()
+        feedStdin(JSON.stringify({ session_id: 'sess-snake', transcript_path: transcriptPath }))
+
+        await runAgentHookCommand()
+
+        expect(bodies).toHaveLength(1)
+        const payload = bodies[0]!.payload as Record<string, unknown>
+        expect(payload.agentmuxUsage, `${eventName} is a turn end and must yield usage`)
+          .toMatchObject({ inputTokens: 2, outputTokens: 5, totalTokens: 7 })
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+        vi.unstubAllGlobals()
+        vi.restoreAllMocks()
+      }
+    }
+  })
 })
