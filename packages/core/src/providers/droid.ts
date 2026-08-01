@@ -75,7 +75,8 @@ export const DROID_HOOKS: AgentNativeHookSpecification = {
  * 照 Claude 的形状多包一层 `hooks` 会让整份配置被 zod 判为无效——不是少响几个事件，是一个都不响。
  */
 export function createDroidManagedHookPlan(env?: Readonly<Record<string, string>>): AgentManagedHookPlan {
-  const home = homedir()
+  const override = env?.FACTORY_HOME_OVERRIDE?.trim()
+  const home = override ? resolve(override) : homedir()
   const command = managedHookCommand('droid')
   const events = Object.fromEntries(DROID_HOOK_EVENTS.map((eventName) => [eventName, [{
     // matcher 测的是工具名，只有两个工具事件有这个语义。其余事件上写 matcher 是噪音。
