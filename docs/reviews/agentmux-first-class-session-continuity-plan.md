@@ -98,4 +98,27 @@ Session 自带的 `hostId`/`workspacePath` 与 tab 对不上。已补 G6b
 **这条的方法论教训**：一个 `&&` 有两侧出口，覆盖了「拒绝」侧不等于覆盖了「接受」侧。守卫要按
 **出口**数，不按条件数。
 
+**第二处真缺陷（独立审计，同族但在另一条路上）**：`reduceAgentMembershipSnapshot`
+（`apps/desktop/src/renderer/src/lib/session-state.ts:308`）的 `canonicalIds` 只从
+`snapshot.sessions` 建，`recoveryCandidates` 仅参与「整份快照是否为空」。一个 run 退出后 Core 不再
+把它当投影主体，于是它从 `sessions` 消失、只留在 `recoveryCandidates` 里——**Core 正在说这个 agent
+可以恢复**——却会在任何一次无关的成员 resync 中被连 tab 带 layout 摘掉，`partialize` 随后把删剩的
+投影落盘：不可逆，且不给任何理由。
+
+这正是本 Feature 承诺消灭的失败（用户原话「切换走再切换回来, 有些 Region 会消失」）在**运行时**
+那条路上的真身；此前只修了启动那条。启动侧对同一个候选是「保留 + 恢复」——两条路对同一个 Core
+概念给出了相反语义。已修（commit `f87fa60`）：候选 id 进入 `removalProtectedIds`。变异证据：去掉
+保护 → 2 红；改成「有候选就谁都不删」的过宽修法 → 2 红（证明守的是精度，不是存在性）。
+
+同时修掉一处**使测试失明的 fixture**：既有那条候选测试把 `SessionSnapshot` 摊进候选位置，而两者
+身份字段不同名（`id` vs `agentSessionId`），得到的假候选 `agentSessionId` 是 `undefined`——它能通过
+「候选数不为零」这类只看长度的判断，却在任何按 id 比对的地方都对不上。**用错形状的 fixture 写出来
+的测试会看起来覆盖了那条路径，实际一次也没有。**
+
+**待决（不在本 Task 内）**：`continuity-failure-notice.ts:54` 把 Core 的两类 `conflict`
+（`session-run-changed` / `lifecycle-busy`）折成同一条 remedy `wait`；对前者「等」是错建议。但
+`contracts.ts:479` 明确规定 `continuityReason` 对 `conflict` 缺席，故 renderer 收不到区分信息——
+修法跨 Core／contract／renderer 三层，且要先定两类各自该给用户什么动作，属交互合同决策。
+
+
 
