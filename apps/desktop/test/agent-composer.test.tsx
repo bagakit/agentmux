@@ -190,6 +190,145 @@ describe('AgentComposer reusable surface', () => {
     expect(preventDefault).not.toHaveBeenCalled()
   })
 
+  // -------------------------------------------------------------------------
+  // 提交门的三个合取各自被谁守。
+  //
+  // `canSubmit = !disabled && Boolean(onSubmit) && Boolean(value.trim())`。此前这三条**一条都没人守**：
+  // 把整个表达式换成 `Boolean(onSubmit)`，本文件与 agent-session-composer.test.tsx 共 25 条全绿。
+  //
+  // 成因是 fixture 的形状，不是断言不够多：四个 `value: ''` 的 fixture 全都**没传 onSubmit**，于是
+  // `Boolean(onSubmit)` 先短路，后两个合取从来没有参与过判定——那个判据永远走不到（记忆
+  // guard-must-check-reachability-not-presence 的同族：在场不等于可达）。
+  //
+  // 每个合取的失效各有各的症状，所以下面按合取分条，每条只让**一个**合取成为唯一的决定因素：
+  // 空草稿门失效 → 空 composer 上 Send 可点、Enter 发一条空消息给 agent；
+  // disabled 门失效 → agent 没跑、或有待决权限交互时也能提交（那正是 disabled 的用途）；
+  // trim 失效 → 只按了几个空格也算有内容，agent 收到一条纯空白的 turn。
+  // -------------------------------------------------------------------------
+  describe('提交门的三个合取', () => {
+    /** 把组件当函数调，拿到 textarea 的 props——Enter 路径与 Send 按钮共用同一个 canSubmit。 */
+    function composerParts(props: Parameters<typeof AgentComposer>[0]) {
+      const tree = AgentComposer(props) as unknown as {
+        props: { children: [{ props: { onKeyDown(e: unknown): void } }, unknown] }
+      }
+      return { textarea: tree.props.children[0] }
+    }
+
+    function pressEnter(props: Parameters<typeof AgentComposer>[0]) {
+      const preventDefault = vi.fn()
+      composerParts(props).textarea.props.onKeyDown({
+        key: 'Enter',
+        shiftKey: false,
+        preventDefault
+      })
+      return { preventDefault }
+    }
+
+    it('空草稿：onSubmit 在场且未 disabled，仍不能提交——唯一的拦路者是空草稿', () => {
+      // onSubmit **必须**传进来，否则 Boolean(onSubmit) 先短路，这一条就测不到空草稿门。
+      const onSubmit = vi.fn()
+      const { preventDefault } = pressEnter({
+        value: '',
+        disabled: false,
+        placeholder: 'Ask the Agent…',
+        onChange: vi.fn(),
+        onSubmit
+      })
+      expect(onSubmit, '空草稿也提交了：agent 会收到一条空消息').not.toHaveBeenCalled()
+      expect(preventDefault, '空草稿时吃掉了 Enter：连换行都打不出来').not.toHaveBeenCalled()
+
+      const markup = renderToStaticMarkup(createElement(AgentComposer, {
+        value: '',
+        disabled: false,
+        placeholder: 'Ask the Agent…',
+        onChange: vi.fn(),
+        onSubmit
+      }))
+      expect(markup, 'Send 在空草稿上是可点的').toMatch(/class="composer-send"[^>]*disabled=""/)
+    })
+
+    it('只有空白的草稿等同于空——trim 之后没内容就不是内容', () => {
+      const onSubmit = vi.fn()
+      for (const value of ['   ', '\n\n', ' \t \n ']) {
+        const { preventDefault } = pressEnter({
+          value,
+          disabled: false,
+          placeholder: 'Ask the Agent…',
+          onChange: vi.fn(),
+          onSubmit
+        })
+        expect(onSubmit, `${JSON.stringify(value)} 被当成有内容：agent 收到一条纯空白的 turn`)
+          .not.toHaveBeenCalled()
+        expect(preventDefault).not.toHaveBeenCalled()
+      }
+    })
+
+    it('disabled：草稿有内容、onSubmit 也在场，仍不能提交——唯一的拦路者是 disabled', () => {
+      // disabled 是「这个面此刻不能写」的唯一表达（agent 没跑、有待决权限交互）。它失效时
+      // 用户能往一个不接受输入的会话里发消息，而消息去哪了没人知道。
+      const onSubmit = vi.fn()
+      const { preventDefault } = pressEnter({
+        value: 'Fix the bug',
+        disabled: true,
+        placeholder: 'Agent is not running',
+        onChange: vi.fn(),
+        onSubmit
+      })
+      expect(onSubmit, 'disabled 的 composer 提交了：消息发进一个不接受输入的会话')
+        .not.toHaveBeenCalled()
+      expect(preventDefault).not.toHaveBeenCalled()
+    })
+
+    it('三个合取同时满足时才提交——这一条是上面三条的对照面', () => {
+      // 没有它，把 canSubmit 直接写成 false 会让上面三条全绿（都在断言"不提交"）。
+      const onSubmit = vi.fn()
+      const { preventDefault } = pressEnter({
+        value: 'Fix the bug',
+        disabled: false,
+        placeholder: 'Ask the Agent…',
+        onChange: vi.fn(),
+        onSubmit
+      })
+      expect(onSubmit, '三个条件都满足却不提交：composer 彻底发不出消息').toHaveBeenCalledTimes(1)
+      expect(preventDefault).toHaveBeenCalled()
+    })
+
+    it('Send 按钮与 Enter 走的是同一个门——不是各判一次', () => {
+      // 两处各判一次必漂移，症状是「按钮灰着但 Enter 发得出去」或反过来。判据是让三个合取
+      // 各失败一次，两条路径的结论每次都一致。
+      const onSubmit = vi.fn()
+      const cases = [
+        { value: '', disabled: false, submittable: false },
+        { value: '   ', disabled: false, submittable: false },
+        { value: 'text', disabled: true, submittable: false },
+        { value: 'text', disabled: false, submittable: true }
+      ] as const
+      for (const { value, disabled, submittable } of cases) {
+        onSubmit.mockClear()
+        const props = {
+          value,
+          disabled,
+          placeholder: 'Ask the Agent…',
+          onChange: vi.fn(),
+          onSubmit
+        }
+        pressEnter(props)
+        const enterSubmitted = onSubmit.mock.calls.length > 0
+        // 按钮那侧读 markup 上的 disabled 属性；两条路径必须给出同一个结论。
+        const markup = renderToStaticMarkup(createElement(AgentComposer, props))
+        const buttonEnabled = /class="composer-send"(?![^>]*disabled="")/.test(markup)
+        expect(
+          enterSubmitted,
+          `Enter 与预期不符（value=${JSON.stringify(value)} disabled=${disabled}）`
+        ).toBe(submittable)
+        expect(
+          buttonEnabled,
+          `Send 按钮与 Enter 判得不一样：按钮 ${buttonEnabled ? '可点' : '灰着'}、Enter ${enterSubmitted ? '发得出' : '发不出'}`
+        ).toBe(enterSubmitted)
+      }
+    })
+  })
+
   it('uses a transparent surface without a black drop shadow', () => {
     const baseRule = styles.match(/\.composer \{([^}]*)\}/)?.[1]
     const focusRule = styles.match(/\.composer:focus-within \{([^}]*)\}/)?.[1]
