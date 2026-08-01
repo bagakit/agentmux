@@ -1,4 +1,4 @@
-import type { AgentProviderId, BuiltInAgentProviderId } from '@agentmux/core'
+import { BUILT_IN_AGENT_PROVIDER_IDS, type AgentProviderId, type BuiltInAgentProviderId } from '@agentmux/core'
 import { Bot } from 'lucide-react'
 import type { ReactNode } from 'react'
 import hermesIconUrl from '../assets/agent-icons/hermes.png'
@@ -27,15 +27,25 @@ const BUILT_IN_AGENT_LABELS = {
 } satisfies Record<BuiltInAgentProviderId, string>
 
 /**
- * 有离线品牌标记的 Provider。**不是**内置 Provider 的全集：见上面 `kimi` 那条。
+ * 没有离线品牌图形的内置 Provider。仓库里没有它们的图标资源，也不会凭空画一个近似的冒充——
+ * 「认得这个 Provider」与「有它的品牌标记」是两件事，这里如实分开：label 认得，标记中性（走 `Bot`）。
  *
- * 单独导出是为了让测试能按这份清单去质询"每个声称有标记的都真画得出来"，而不是在测试里
- * 手抄一份会跟着漏的副本——此前那份手抄清单只列了 5 个，另外 4 个内置 Provider 加进来时
- * 一条断言都没红。
+ * 记的是**没有**的那几家而不是有的那些，因为这样新增一家 Provider 时它默认落进"应当有标记"，
+ * 于是忘了加图标会被守卫抓住；反过来记"有的那些"则是新增一家默认被漏掉、一条断言都不红。
+ *
+ * 但这份豁免清单本身就是个消音器：往里加一个 id 就能让"必须画出品牌标记"那条断言对它闭嘴。
+ * 所以它单独导出，让测试反过来质询它——每个声称"没有图形"的 id 必须**真的**落到 Bot 兜底。
  */
-export const AGENT_PROVIDERS_WITH_BRAND_MARK = [
-  'codex', 'claude', 'traex', 'hermes', 'pi', 'grok', 'gemini', 'antigravity', 'cursor'
-] as const
+export const AGENT_PROVIDERS_WITHOUT_BRAND_MARK: readonly BuiltInAgentProviderId[] = ['kimi', 'droid', 'copilot']
+
+/**
+ * 有离线品牌标记的 Provider。**不是**内置 Provider 的全集：见上面那条。
+ *
+ * 从 Core 的运行时 SSOT 派生而不是手抄——此前那份手抄清单只列了 5 个，另外 4 个内置 Provider
+ * 加进来时一条断言都没红。单独导出是为了让测试能按这份清单质询"每个声称有标记的都真画得出来"。
+ */
+export const AGENT_PROVIDERS_WITH_BRAND_MARK = BUILT_IN_AGENT_PROVIDER_IDS
+  .filter((id) => !AGENT_PROVIDERS_WITHOUT_BRAND_MARK.includes(id))
 
 export function agentProviderLabel(providerId: AgentProviderId): string {
   return Object.prototype.hasOwnProperty.call(BUILT_IN_AGENT_LABELS, providerId)
