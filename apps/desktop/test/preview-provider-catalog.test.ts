@@ -77,6 +77,44 @@ describe('web-preview provider mocks derive from the built-in SSOT', () => {
     }
   })
 
+  // 守的缺陷（#200/#303）：preview 的展示名曾是一句算法——`id.charAt(0).toUpperCase() + id.slice(1)`。
+  // 它对 13 家里的 2 家算错：`traex → Traex`（真值 `TraeX`）、`opencode → Opencode`（真值 `OpenCode`），
+  // 于是 `pnpm dev` 的浏览器预览里这两家的名字是错的，而 Provider 侧一切正常。修复是让 preview 从
+  // node-free 的 `builtInAgentProviderLabel` 取值。
+  //
+  // 为什么原来的守卫没抓住：当时唯一的 label 断言是 desktop 侧的
+  // `expect(agentProviderLabel(id)).not.toBe(id)`——「不等于 id」对 `Traex` 也成立。判据比缺陷粗
+  // 一档，11 家恰好对上就够它全绿（记忆 sampled-pair-can-be-the-blind-spot）。所以这条比**取值**。
+  //
+  // 期望值取自**真注册表** `BUILT_IN_AGENT_PROVIDERS` 的 `catalog.label`——绝不取 preview 所依据的
+  // `builtInAgentProviderLabel`：拿后者当期望会和被测对象一起漂（那张表改错时两侧同步变错、假绿）。
+  // core 侧另有一条把那张 node-free 表逐 id 双向钉在同一批 catalog label 上
+  //（provider-conformance.test.ts:231）；两条各守一段：那条守「表对不对」，这条守「preview 有没有
+  // 真的接上去」。缺哪一段，都能让预览里的名字无声地错。
+  //
+  // 两个容器各钉一次：`config.executors` 与 `providers.list` 是 api.ts 里两处独立的取值点
+  //（:76 与 :581），只钉一处时另一处可以静默留着旧算法（记忆 counting-a-symbol-misses-other-spellings
+  // 的同族：容器也要各钉一次）。
+  it('preview 两处 mock 的展示名都逐 id 等于真 catalog 的 label', async () => {
+    const expected = new Map(BUILT_IN_AGENT_PROVIDERS.map((provider) => [provider.id, provider.catalog.label]))
+    // 前提自检：这两家正是算法答错的那两家。若真值退化成「首字母大写」，本条守的缺陷就不再可观测，
+    // 此时要响亮地红——而不是让一条恒真的断言继续假装在守（记忆 property-unobservable-in-default-env）。
+    expect(expected.get('traex'), '前提自检：TraeX 的真值不许退化成首字母大写').toBe('TraeX')
+    expect(expected.get('opencode'), '前提自检：OpenCode 的真值不许退化成首字母大写').toBe('OpenCode')
+
+    const catalog = await api.providers.list()
+    const fromCatalog = new Map(catalog.map((entry) => [entry.id, entry.label]))
+    const config = await api.config.get()
+    const fromExecutors = new Map(
+      Object.values(config.executors).map((executor) => [executor.providerId, executor.label])
+    )
+
+    for (const [id, label] of expected) {
+      expect(fromCatalog.get(id), `providers.list 里 ${id} 的展示名`).toBe(label)
+      expect(fromExecutors.get(id), `config.executors 里 ${id} 的展示名`).toBe(label)
+    }
+  })
+
   // 守的缺陷：preview 的 launchOptions 曾用 `id === 'codex' ? … : id === 'claude' ? … : []` 回答，
   // 注释还声称「那两个是唯一 node-free 导出的声明」并把缺失说成诚实的隐藏。事实是 8 个
   // `*_LAUNCH_OPTIONS` 全在同一个 node-free 模块里（agent-launch-option.ts，只 import ./errors.js 与

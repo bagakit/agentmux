@@ -10,6 +10,7 @@ import {
 import { createCodexProvider } from '../src/providers/index.js'
 import { AgentMuxError } from '../src/errors.js'
 import { BUILT_IN_AGENT_PROVIDER_IDS } from '../src/types.js'
+import { BUILT_IN_AGENT_LABELS } from '../src/agent-provider-id.js'
 
 function resumeContext(provider: AgentProvider) {
   return {
@@ -225,6 +226,24 @@ describe('built-in provider id 三方一致性', () => {
     // 三方两两相等 ⇒ 三者互等。任一方多/少一个 id 都会让这两条之一发红。
     expect(moduleIds).toEqual(unionIds)
     expect(registeredIds).toEqual(unionIds)
+  })
+
+  it('BUILT_IN_AGENT_LABELS 与各 catalog 的 label 逐 id 双向相等', () => {
+    // 展示名有两份取值：各 `providers/*.ts` 的 catalog（真 SSOT），与 node-free 的
+    // `BUILT_IN_AGENT_LABELS`（渲染进程与 Web 预览唯一能 import 的那份，因为 catalog 那条路
+    // 会拖进 node 内置模块）。这条把两份钉成一份。
+    //
+    // 为什么不能只判「取值不等于 id」：那正是此前 Desktop 侧守卫的判据，而 Web 预览用
+    // `id.charAt(0).toUpperCase()+id.slice(1)` 算出的 `Traex`（真值 `TraeX`）也满足它——
+    // 13 家里 11 家恰好对上，判据比缺陷粗一档就够全绿了。所以这里逐 id 比**取值**。
+    //
+    // 双向：`toEqual` 比整个对象，多一家（表里有而 catalog 没有）与少一家（catalog 有而表里
+    // 没有）都红，不必分别写两条。
+    const fromCatalog = Object.fromEntries(
+      new AgentProviderRegistry().list().map((provider) => [provider.id, provider.catalog.label])
+    )
+    expect(BUILT_IN_AGENT_LABELS.traex, '前提自检：这张表不许退化成把 id 首字母大写').toBe('TraeX')
+    expect({ ...BUILT_IN_AGENT_LABELS }).toEqual(fromCatalog)
   })
 })
 
