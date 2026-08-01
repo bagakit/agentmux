@@ -1,4 +1,4 @@
-import { ArrowUpRight, Check, ChevronRight, Globe2, LoaderCircle, Play, RadioTower, RefreshCw, Sparkles, SquareTerminal } from 'lucide-react'
+import { ArrowUpRight, Check, ChevronRight, Globe2, LoaderCircle, NotebookPen, Play, RadioTower, RefreshCw, Sparkles, SquareTerminal } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { LaunchOptionSelection } from '@agentmux/core'
 import { DESKTOP_ACTIONS } from '../../../shared/desktop-actions'
@@ -57,7 +57,7 @@ export function NewTabSurface({
     writeLocal: (field, value) => setLocalNames((current) => ({ ...current, [field]: value }))
   })
   const [optionsExpanded, setOptionsExpanded] = useState(false)
-  const [busy, setBusy] = useState<'agent' | 'terminal' | 'browser' | null>(null)
+  const [busy, setBusy] = useState<'agent' | 'terminal' | 'browser' | 'note' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [showUnavailable, setShowUnavailable] = useState(false)
   const promptRef = useRef<HTMLTextAreaElement>(null)
@@ -73,6 +73,7 @@ export function NewTabSurface({
   const warmTerminal = useAppStore((state) => state.warmTerminal)
   const terminalThemeId = useAppStore((state) => state.config?.appearance.terminalTheme)
   const createBrowser = useAppStore((state) => state.createBrowser)
+  const createNote = useAppStore((state) => state.createNote)
   const workspace = config?.workspaces.find((item) => item.id === (tabWorkspaceId ?? activeWorkspaceId))
   const hostLabel = workspace ? (config?.hosts.find((host) => host.id === workspace.hostId)?.label ?? workspace.hostId) : 'No host'
   const hostCheck = useAppStore((state) => workspace ? state.hostChecks[workspace.hostId] : undefined)
@@ -131,7 +132,7 @@ export function NewTabSurface({
     if (first) setExecutorId(first.id)
   }, [executorId, installedExecutors])
 
-  async function run<T>(kind: 'agent' | 'terminal' | 'browser', action: () => Promise<T>): Promise<void> {
+  async function run<T>(kind: 'agent' | 'terminal' | 'browser' | 'note', action: () => Promise<T>): Promise<void> {
     if (busy) return
     setBusy(kind)
     setError(null)
@@ -309,8 +310,14 @@ export function NewTabSurface({
           <span>Quick Surfaces</span>
         </div>
 
-        {workspace && warmSession && terminalThemeId ? (
-          <div className="launch-surfaces-stack">
+        {/*
+          热终端在场时它自己占满一行（带实时预览），不在场时退化成 grid 里的一张卡。分支只包住
+          终端这一件东西——Browser / Note 两张卡在**分支之外**只写一次。原先是整个 quick-grid
+          分两份、Browser 卡逐字抄两遍，那种形状下「加一张卡只加进一条分支」会让用户在另一条
+          分支里彻底看不到入口，而组件照旧渲染成功、测试照旧全绿（实测删掉其中一处，7 条全过）。
+        */}
+        <div className="launch-surfaces-stack">
+          {workspace && warmSession && terminalThemeId ? (
             <div className="launch-terminal">
               <div className="launch-terminal__head">
                 <span className="launch-terminal__hint">
@@ -344,42 +351,26 @@ export function NewTabSurface({
                 />
               </div>
             </div>
+          ) : null}
 
-            <div className="launch-surface-quick-grid">
+          <div className="launch-surface-quick-grid">
+            {workspace && warmSession && terminalThemeId ? null : (
               <button
                 type="button"
-                className="agent-pick agent-pick--action launch-quick-card"
-                aria-label="Open Browser"
-                data-agentmux-action={DESKTOP_ACTIONS.openBrowser}
+                className="agent-pick agent-pick--action launch-quick-card launch-terminal__fallback"
+                aria-label="Open Terminal"
+                data-agentmux-action={DESKTOP_ACTIONS.claimReusableTerminal}
                 disabled={!workspace || busy !== null}
-                onClick={() => void run('browser', () => createBrowser(
+                onClick={() => void run('terminal', () => promoteWarmTerminal(
                   tabGroupId,
                   tabId && regionId ? { tabId, regionId } : undefined
                 ))}
               >
-                <span className="agent-pick__icon"><Globe2 size={16} /></span>
-                <span className="agent-pick__copy"><strong>Browser</strong><small>Main-owned embedded WebContents</small></span>
-                <span className="agent-pick__go">{busy === 'browser' ? <LoaderCircle className="spin" size={14} /> : <ChevronRight size={14} />}</span>
+                <span className="agent-pick__icon">{warmPending ? <LoaderCircle className="spin" size={16} /> : <SquareTerminal size={16} />}</span>
+                <span className="agent-pick__copy"><strong>Terminal</strong><small>{warmPending ? 'Warming a reusable host shell…' : 'Host shell in a recoverable core session'}</small></span>
+                <span className="agent-pick__go">{busy === 'terminal' ? <LoaderCircle className="spin" size={14} /> : <ChevronRight size={14} />}</span>
               </button>
-            </div>
-          </div>
-        ) : (
-          <div className="launch-surface-quick-grid">
-            <button
-              type="button"
-              className="agent-pick agent-pick--action launch-quick-card launch-terminal__fallback"
-              aria-label="Open Terminal"
-              data-agentmux-action={DESKTOP_ACTIONS.claimReusableTerminal}
-              disabled={!workspace || busy !== null}
-              onClick={() => void run('terminal', () => promoteWarmTerminal(
-                tabGroupId,
-                tabId && regionId ? { tabId, regionId } : undefined
-              ))}
-            >
-              <span className="agent-pick__icon">{warmPending ? <LoaderCircle className="spin" size={16} /> : <SquareTerminal size={16} />}</span>
-              <span className="agent-pick__copy"><strong>Terminal</strong><small>{warmPending ? 'Warming a reusable host shell…' : 'Host shell in a recoverable core session'}</small></span>
-              <span className="agent-pick__go">{busy === 'terminal' ? <LoaderCircle className="spin" size={14} /> : <ChevronRight size={14} />}</span>
-            </button>
+            )}
 
             <button
               type="button"
@@ -396,8 +387,21 @@ export function NewTabSurface({
               <span className="agent-pick__copy"><strong>Browser</strong><small>Main-owned embedded WebContents</small></span>
               <span className="agent-pick__go">{busy === 'browser' ? <LoaderCircle className="spin" size={14} /> : <ChevronRight size={14} />}</span>
             </button>
+
+            <button
+              type="button"
+              className="agent-pick agent-pick--action launch-quick-card"
+              aria-label="Create note"
+              data-agentmux-action={DESKTOP_ACTIONS.createNote}
+              disabled={!workspace || busy !== null}
+              onClick={() => void run('note', () => createNote())}
+            >
+              <span className="agent-pick__icon"><NotebookPen size={16} /></span>
+              <span className="agent-pick__copy"><strong>Note</strong><small>Date-stamped markdown in this workspace</small></span>
+              <span className="agent-pick__go">{busy === 'note' ? <LoaderCircle className="spin" size={14} /> : <ChevronRight size={14} />}</span>
+            </button>
           </div>
-        )}
+        </div>
       </div>
     </section>
   )

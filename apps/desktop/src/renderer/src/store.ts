@@ -44,6 +44,7 @@ import { api } from './lib/api'
 import type { BrowserAnnotation } from './lib/browser-annotations'
 import { EMPTY_LAUNCHER_NAMES, type LauncherNameField, type LauncherNames } from './lib/launcher-name-draft'
 import type { OpenDestination, OpenHttpLinkOrigin } from './lib/open-destination'
+import { createNoteWithAvailableName } from './lib/note-names'
 import { rendererResourceOwnerCounts } from './lib/resource-owner-counts'
 import { terminalResourceOwnerCounts } from './lib/terminal-resource-owners'
 import {
@@ -441,6 +442,14 @@ type AppState = {
    */
   renameTab(tabId: string, name: string | null): void
   createPath(input: CreateWorkspacePathInput): Promise<void>
+  /**
+   * 在当前 Workspace 里建一条按日期命名的笔记并打开它，返回真正建出来的文件名。
+   *
+   * 命名判定在 `lib/note-names.ts`：写入面是 `O_CREAT | O_EXCL`（撞名失败而非截断），所以名字必须
+   * 是一个候选序列、由文件系统裁决，不能先列目录再挑（那是 check-then-act，同一 tick 两条笔记会
+   * 挑中同一个名字）。
+   */
+  createNote(): Promise<string>
   renamePath(path: string, nextPath: string): Promise<void>
   deletePath(path: string): Promise<void>
   updateDocument(tabId: string, content: string, regionId?: string): void
@@ -2988,6 +2997,29 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       get().reportError(error)
       throw error
     }
+  },
+  async createNote() {
+    const workspaceId = get().activeWorkspaceId
+    if (!workspaceId) throw new Error('Select a workspace first')
+    // 落点是「当前 Workspace」而不是另选一个：`openFile` 自己读 activeWorkspaceId，若这里为 create
+    // 单独解析一个 Workspace，两次解析就会漂移，而漂移的症状是「文件建出来了但打不开」——建在 A、
+    // 去 B 里找。所以整条路只解析一次，create 与 open 共用同一个 workspaceId。
+    const name = await createNoteWithAvailableName(
+      new Date(),
+      // 刻意不走 createPath：那条路每次失败都 reportError，而撞名重试是这里的**正常**流程，
+      // 会把一串「文件已存在」推到全局错误面上。只有走完全部候选后的那次真失败才该冒出去，
+      // 由调用方（launcher 的 run()）显示。
+      async (candidate) => { await api.files.create(workspaceId, { path: candidate, kind: 'file' }) }
+    )
+    // 让文件树看到新文件。createScratchTopic 等写入面用的是同一个计数器，不另起一套失效机制。
+    set((current) => ({
+      workspaceFileRevisions: {
+        ...current.workspaceFileRevisions,
+        [workspaceId]: (current.workspaceFileRevisions[workspaceId] ?? 0) + 1
+      }
+    }))
+    await get().openFile(name)
+    return name
   },
   async renamePath(path, nextPath) {
     const workspaceId = get().activeWorkspaceId
