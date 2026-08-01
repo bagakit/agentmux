@@ -1,4 +1,5 @@
 import { basename, join } from 'node:path'
+import { MAX_FANOUT_LANES } from '../shared/fanout-limits.js'
 
 // Turning "this prompt, five ways" into a concrete plan.
 //
@@ -10,9 +11,11 @@ import { basename, join } from 'node:path'
 // It deliberately does NOT create anything. It reads what already exists and says what SHOULD exist;
 // whether that is achievable is the caller's problem, and failing halfway is the caller's problem too.
 
-/** Hard ceiling on one fan-out. Beyond this a bake-off stops being reviewable by a person, and N
- *  concurrent agents on one machine stops being a fair comparison. Refuse rather than silently trim. */
-export const MAX_FANOUT = 8
+/** Hard ceiling on one fan-out. Both this module and the surface refuse above it; the number itself
+ *  lives in {@link MAX_FANOUT_LANES} so the two sides cannot drift. Refuse rather than silently trim. */
+
+/** Hard ceiling on one fan-out. Both this module and the surface refuse above it; the number itself
+ *  lives in {@link MAX_FANOUT_LANES} so the two sides cannot drift. Refuse rather than silently trim. */
 
 export type FanOutBranch = {
   /** The branch to create from HEAD. Guaranteed not to collide with an existing branch. */
@@ -67,10 +70,10 @@ export function planFanOut(request: FanOutRequest): FanOutPlan {
   if (!Number.isFinite(count) || count < 1) {
     return { kind: 'rejected', reason: 'A fan-out needs at least one lane.' }
   }
-  if (count > MAX_FANOUT) {
+  if (count > MAX_FANOUT_LANES) {
     // Refuse rather than clamp: silently giving someone 8 lanes when they asked for 40 is a worse
     // outcome than telling them the limit.
-    return { kind: 'rejected', reason: `A fan-out is limited to ${MAX_FANOUT} lanes.` }
+    return { kind: 'rejected', reason: `A fan-out is limited to ${MAX_FANOUT_LANES} lanes.` }
   }
   const executorIds = request.executorIds.filter((id) => id.trim() !== '')
   if (executorIds.length === 0) {
