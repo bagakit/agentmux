@@ -170,9 +170,57 @@ describe('continuity failure classes', () => {
 
   it('never offers a button that cannot work', () => {
     // A retry that is guaranteed to fail is worse than a disabled button: it promises a result.
+    //
+    // 两个判据都要查。此前这里只查 retry 那一侧，于是「给出一个按了也没用的**重读**按钮」这半边
+    // 完全没人守——把某个 unavailable 类的 remedy 改成 'refresh' 能静默绕过整条守卫，而那恰恰是
+    // 它声称要禁止的形状（notice 源文件 :141-142 也是这么写的）。实测见过这颗变异。
+    //
+    // refresh 对这三类都是错的答案：它的语义是「session 还活着，只是我们手里的 Run 过期了，重读
+    // 快照就能追上」（源文件 :26-33）。而这三类要么这个 Provider 根本不能 resume、要么从来没记下
+    // 凭据、要么 Core 连 retired binding 都没有——没有"当前快照"可读，按下去必然再失败一次。
     for (const reason of ['provider-resume-unsupported', 'native-handle-unavailable', 'unknown-session'] as const) {
-      expect(continuityRetryEnabled(classifyContinuityFailure('unavailable', reason))).toBe(false)
+      const notice = classifyContinuityFailure('unavailable', reason)
+      expect(continuityRetryEnabled(notice), `${reason} 不该给可按的「重试恢复」`).toBe(false)
+      expect(continuityRefreshEnabled(notice), `${reason} 不该给可按的「重读」——没有可重读的快照`).toBe(false)
     }
+  })
+
+  it('每个 unavailable 原因的 remedy 都被钉死，没有一个只靠"不是 retry"过关', () => {
+    // 上面那条查的是「哪些按钮不能给」，这条查「该给哪个」。两者缺一不可：只有否定式断言时，
+    // 把 start-new 换成另一个同样不可按的 remedy 也能全绿，而那会换掉 actionLabel、给用户
+    // 一句不同的指示。unknown-session 此前是五个原因里唯一一个 remedy 从未被任何 toEqual 钉死的。
+    //
+    // 判据取自每一类的事实，不是照抄现状：
+    //   - provider-resume-unsupported / native-handle-unavailable：换个时间点也不会变 → start-new
+    //   - unknown-session：Core 连 retired binding 都没有，同样回不来 → start-new
+    //   - provider-unavailable：Session 完好，Provider 装回来就能继续 → retry
+    expect(classifyContinuityFailure('unavailable', 'provider-resume-unsupported')?.remedy).toEqual({ kind: 'start-new' })
+    expect(classifyContinuityFailure('unavailable', 'native-handle-unavailable')?.remedy).toEqual({ kind: 'start-new' })
+    expect(classifyContinuityFailure('unavailable', 'unknown-session')?.remedy).toEqual({ kind: 'start-new' })
+    expect(classifyContinuityFailure('unavailable', 'provider-unavailable')?.remedy).toEqual({ kind: 'retry' })
+  })
+
+  it('两个判据互斥：一次通知只落在一个动作上', () => {
+    // 源文件 :155-156 声明「这条互斥由测试钉住」，但此前没有任何测试钉它。遍历全部六类，
+    // 而不是抽查——互斥是个全集性质，抽一对过了不代表没有第七类同时满足两边。
+    const notices = [
+      classifyContinuityFailure('unavailable', 'provider-resume-unsupported'),
+      classifyContinuityFailure('unavailable', 'native-handle-unavailable'),
+      classifyContinuityFailure('unavailable', 'provider-unavailable'),
+      classifyContinuityFailure('unavailable', 'unknown-session'),
+      classifyContinuityFailure('unavailable', undefined),
+      classifyContinuityFailure('conflict', undefined, 'session-run-changed'),
+      classifyContinuityFailure('conflict', undefined, 'lifecycle-busy'),
+      classifyContinuityFailure('conflict', undefined)
+    ]
+    for (const notice of notices) {
+      expect(notice).not.toBeNull()
+      const both = continuityRetryEnabled(notice) && continuityRefreshEnabled(notice)
+      expect(both, `${notice?.title} 同时给了「重试」与「重读」两个按钮`).toBe(false)
+    }
+    // 且这两个判据真的各自有活儿：都恒返回 false 也能满足互斥，那是把界面变成没有按钮。
+    expect(notices.some((notice) => continuityRetryEnabled(notice)), '没有任何一类可重试').toBe(true)
+    expect(notices.some((notice) => continuityRefreshEnabled(notice)), '没有任何一类可重读').toBe(true)
   })
 })
 
