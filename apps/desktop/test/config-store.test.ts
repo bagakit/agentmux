@@ -417,6 +417,42 @@ describe('ConfigStore workspace identity', () => {
     expect(await readFile(path, 'utf8'), '容器不可读时启动通过了——磁盘上的项目已被覆盖').toBe(original)
   })
 
+  it('a primitive where the workspaces array belongs is evidence too, not "no projects"', async () => {
+    // 上面那条用的是 map 容器（`{...}`），于是 `evidenceOfWorkspaces` 里 `typeof value === 'object'`
+    // 那一支就够了——**基元那一支从来没被执行过**。实测把它的 `return 1` 改成 `return 0`，
+    // 其余 41 条全绿：`workspaces` 是个字符串或数字时（截断的写、被别的工具改坏、手工编辑失手），
+    // 应用会带着零个项目正常启动，然后第一次 save 把用户那份完好的文件覆盖掉。
+    //
+    // 判据的关键是「拿不准」而不是「读得出几个」：基元里数不出条数，但它**被什么东西写进去过**。
+    // 在「拒绝启动」和「覆盖文件」之间，只有前者是可恢复的。
+    const { store, path } = await storeFixture()
+    const original = JSON.stringify({
+      ...baseConfig,
+      version: DEFAULT_CONFIG.version - 1,
+      workspaces: 'corrupt'
+    })
+    await writeFile(path, original)
+
+    await expect(store.get()).rejects.toThrow(/project/)
+    expect(await readFile(path, 'utf8'), '基元容器被当成「本来就没项目」放过去了——文件已被覆盖').toBe(original)
+  })
+
+  it('an empty workspaces array really is "no projects" — the guard must not refuse a first launch', async () => {
+    // 反向边界，防止上面那条被「一律拒绝」满足。空数组是**可读**的，它明确说了「没有项目」，
+    // 与「读不出来」是两件事；分不开就等于新用户第一次启动直接卡死。
+    const { store, path } = await storeFixture()
+    await writeFile(path, JSON.stringify({
+      ...baseConfig,
+      version: DEFAULT_CONFIG.version - 1,
+      workspaces: []
+    }))
+
+    const loaded = await store.get()
+
+    // scratch 那条是回填出来的，不是用户写的；列全集顺带钉住它没被这条路径连带丢掉。
+    expect(loaded.workspaces.map((entry) => entry.id)).toEqual([SCRATCH_WORKSPACE_ID])
+  })
+
   it('one damaged container does not collapse the others', async () => {
     // 三个容器共用一次 parse 时，坏一个就三个一起没。这条钉住它们各自独立：`executors` 写坏
     // 不该让项目列表读不出来。判据取 `found`（它必须仍然看见那两个项目）而不是最终 workspaces，
