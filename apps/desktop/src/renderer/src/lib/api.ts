@@ -13,6 +13,7 @@ import type {
   SessionSnapshot,
   WorkspaceBranchRecord
 } from '../../../shared/contracts'
+import { CONFIG_VERSION } from '../../../shared/contracts'
 import type { AgentCatalogEntry, AgentMuxControlRequest, AgentMuxControlResult } from '@agentmux/core'
 import {
   CLAUDE_LAUNCH_OPTIONS,
@@ -44,7 +45,7 @@ const mockStructuredCapabilities = {
 const mockCodexLaunchOptions: AgentCatalogEntry['launchOptions'] = describeLaunchOptions(CODEX_LAUNCH_OPTIONS)
 const mockClaudeLaunchOptions: AgentCatalogEntry['launchOptions'] = describeLaunchOptions(CLAUDE_LAUNCH_OPTIONS)
 let mockConfig: AppConfig = {
-  version: 7,
+  version: CONFIG_VERSION,
   hosts: [
     { id: 'local', kind: 'local', label: 'This Mac' },
     {
