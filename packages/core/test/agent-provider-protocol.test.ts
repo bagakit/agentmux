@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
 import {
   AGENT_HOOK_LIFECYCLE_DIALECT,
+  COPILOT_HOOK_DIALECT,
   CURSOR_HOOK_DIALECT,
   GEMINI_HOOK_DIALECT,
   GROK_HOOK_DIALECT,
@@ -52,8 +53,9 @@ describe('Core Provider protocol', () => {
         expect(['none', 'observe', 'respond']).toContain(catalog.capabilities.permission)
         // 5. resume：有无 + 定位器种类。
         expect(['none', 'provider-native']).toContain(catalog.resumeStrategy.kind)
-        // 6. prompt delivery：首个 Prompt 如何随启动送达。
-        expect(['positional-argv', 'hermes-query', 'flag-prompt-interactive']).toContain(catalog.promptDelivery)
+        // 6. prompt delivery：首个 Prompt 如何随启动送达，或明说**送不到**（`post-launch-only`）。
+        expect(['positional-argv', 'hermes-query', 'flag-prompt-interactive', 'post-launch-only'])
+          .toContain(catalog.promptDelivery)
         // 7. reply-correlation：能不能关联回 turn，凭什么关联。
         expect(['none', 'native-turn-id', 'acp-turn-id']).toContain(catalog.capabilities.replyCorrelation)
       }
@@ -203,7 +205,7 @@ describe('Core Provider protocol', () => {
       // 合并面必须恰好等于各块的并集，既不丢（漏接线）也不多（有人偷偷往全局表塞条目）。
       const blocks = [
         PASCAL_CASE_HOOK_DIALECT, HERMES_HOOK_DIALECT, PI_HOOK_DIALECT,
-        GROK_HOOK_DIALECT, GEMINI_HOOK_DIALECT, CURSOR_HOOK_DIALECT
+        GROK_HOOK_DIALECT, GEMINI_HOOK_DIALECT, CURSOR_HOOK_DIALECT, COPILOT_HOOK_DIALECT
       ]
       const union: Record<string, AgentHookLifecycleEvent> = {}
       for (const block of blocks) Object.assign(union, block)
