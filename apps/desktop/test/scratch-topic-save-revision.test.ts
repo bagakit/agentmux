@@ -84,15 +84,27 @@ async function waitFor(predicate: () => boolean): Promise<void> {
  * 旁观者那格取一个**非零且不相邻**的数：写成常量、把整张表换成 `{}`、或者 bump 到错的键，
  * 都会让它变成 undefined 或 1，与 41 一眼可分。
  */
-function seedScratchTopicDocument(path: string = TOPIC_DOCUMENT_PATH): {
+/**
+ * 摆一个打开着的 Scratch Topic 文档，并给失效计数摆上两格。
+ *
+ * 旁观者那格取一个**非零且不相邻**的数：写成常量、把整张表换成 `{}`、或者 bump 到错的键，
+ * 都会让它变成 undefined 或 1，与 41 一眼可分。
+ *
+ * `workspaceId` 做成入参是为了第三条对角 fixture：判据是三元合取，而 workspace 那一元原先
+ * 无法表达为假（这个 fixture 硬写了 scratch），于是那一元没人守。
+ */
+function seedScratchTopicDocument(
+  path: string = TOPIC_DOCUMENT_PATH,
+  workspaceId: string = SCRATCH_WORKSPACE_ID
+): {
   tab: WorkbenchTab
   key: string
 } {
   const workspace: WorkspaceRecord = {
-    id: SCRATCH_WORKSPACE_ID,
-    name: 'Scratch',
+    id: workspaceId,
+    name: workspaceId === SCRATCH_WORKSPACE_ID ? 'Scratch' : 'Ordinary project',
     hostId: 'local',
-    path: '/scratch',
+    path: workspaceId === SCRATCH_WORKSPACE_ID ? '/scratch' : '/projects/ordinary',
     kind: 'folder'
   }
   const config: AppConfig = {
@@ -127,7 +139,9 @@ function seedScratchTopicDocument(path: string = TOPIC_DOCUMENT_PATH): {
       bystander: createWorkspaceLayout('other-pane')
     },
     workspaceFileRevisions: {
-      [SCRATCH_WORKSPACE_ID]: TARGET_REVISION,
+      // 键跟着 workspace 走，不硬写 scratch：非 scratch 的 fixture 里目标格若缺席，
+      // 「没有 bump」会退化成「读到 undefined」，与「bump 到 1」都不是 41，判据分不开。
+      [workspace.id]: TARGET_REVISION,
       bystander: BYSTANDER_REVISION
     }
   })
@@ -202,16 +216,18 @@ describe('保存 Scratch Topic 文档让文件树失效', () => {
   })
 
   // -------------------------------------------------------------------------
-  // 上面那条反向 fixture（`notes/plain.md`）与正向 fixture（`topic--…/topic.md`）落在 2×2 的
-  // **对角两角**：一个两条收窄都为真，一个两条都为假。判据是 `A && B`，于是单独删掉任意一条，
-  // 没有任何 fixture 的结论会改变——实测各自 29 条全绿：
+  // 上面那条反向 fixture（`notes/plain.md`）与正向 fixture（`topic--…/topic.md`）落在
+  // **两个极端角**：一个三条收窄都为真，一个都为假。判据是 `A && B && C`，于是单独删掉任意一条，
+  // 没有任何 fixture 的结论会改变——实测各自全绿：
   //
   //   删掉 `fileName === 'topic.md'`      → Topic 目录里的任何文件（协作者身份文件、草稿、笔记）
   //                                        一按 Cmd+S 就让整棵树重扫，正是上面那条注释声称要防的事
   //   删掉 directory 那条                  → scratch 里任何位置的 `topic.md` 都当成 Topic 正文
+  //   删掉 `isScratchWorkspaceId` 那条      → 任何项目里的 Topic 形状路径都让那个项目整棵树重扫
   //
-  // 「两个 fixture 都在角上」是这一族的通用形状：`&&` 的每个条件都需要一条**只有它为假**的
-  // fixture，否则条件数与判据数不匹配，多出来的那条就是死代码。补两条斜线。
+  // 「两个 fixture 都在角上」是这一族的通用形状：`&&` 的**每个**条件都需要一条只有它为假的
+  // fixture，否则条件数与判据数不匹配，多出来的那条就是死代码。这里是三元，所以要三条斜线；
+  // 原先只补了前两条，第三元在 50 条全绿下存活。
   // -------------------------------------------------------------------------
 
   it('Topic 目录里的非正文文件不 bump——文件名那条收窄独立成立', async () => {
@@ -237,6 +253,26 @@ describe('保存 Scratch Topic 文档让文件树失效', () => {
     expect(
       revisions()[SCRATCH_WORKSPACE_ID],
       '同名但不在 Topic 目录里的文件也 bump 了——目录那条收窄没人守'
+    ).toBe(TARGET_REVISION)
+  })
+
+  it('普通项目里的 Topic 形状路径不 bump——workspace 那条收窄独立成立', async () => {
+    // 第三条对角。上面两条都在 scratch 里跑，于是 `isScratchWorkspaceId` 那一元**从来没有为假**：
+    // 实测把它整条换成 `true &&`，那两条加上正向那条共 50 条全绿。三元合取只守了两元，
+    // 第三元是死代码。
+    //
+    // 症状方向与漏 bump 相反：任何普通项目里只要有个 `topic--<日期>--<后缀>/topic.md` 形状的
+    // 路径（这个命名在真实项目里完全可能出现），用户每按一次 Cmd+S 就让那个项目的整棵文件树
+    // 重扫一遍。Topic 是 Scratch 专属概念，别的项目里同名目录不是 Topic。
+    const ordinary = 'ordinary-project'
+    const { tab } = seedScratchTopicDocument(TOPIC_DOCUMENT_PATH, ordinary)
+    await saveOnce(tab, 'after')
+
+    expect(fileApi.writes, '前提自检：这次写真的发生了').toHaveLength(1)
+    expect(fileApi.writes[0]!.workspaceId, '前提自检：写的是那个普通项目').toBe(ordinary)
+    expect(
+      revisions()[ordinary],
+      '普通项目里的 Topic 形状路径也 bump 了——workspace 那条收窄没人守'
     ).toBe(TARGET_REVISION)
   })
 })
