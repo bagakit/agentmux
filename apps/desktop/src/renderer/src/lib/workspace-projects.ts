@@ -13,6 +13,15 @@ export function workspaceProjectId(workspace: WorkspaceRecord): string {
   return JSON.stringify([workspace.hostId, workspace.repoPath ?? workspace.path])
 }
 
+/** Remove every registered Workspace that makes up one Project Rail view. */
+export function removeProjectWorkspaces(
+  workspaces: readonly WorkspaceRecord[],
+  project: Pick<WorkspaceProject, 'id' | 'workspaces'>
+): WorkspaceRecord[] {
+  const removedIds = new Set(project.workspaces.map((workspace) => workspace.id))
+  return workspaces.filter((workspace) => !removedIds.has(workspace.id))
+}
+
 function basename(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path
 }

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
-import { basename, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 
 /** A pasted screenshot is large but bounded; anything past this is a mistake, not a screenshot. */
 const MAX_PASTED_IMAGE_BYTES = 16 * 1024 * 1024
@@ -190,6 +190,30 @@ export async function registerIpc(args: {
     }
     config = await args.configStore.save({ ...config, workspaces: [...config.workspaces, item] })
     return item
+  })
+  handle('workspaces:rebindLocalFolder', async (workspaceId: string) => {
+    const current = workspace(config, workspaceId)
+    if (current.hostId !== 'local' || current.kind !== 'folder') {
+      throw new Error('Only local folder Workspaces can be rebound')
+    }
+    const selection = await dialog.showOpenDialog(args.window, {
+      properties: ['openDirectory'],
+      defaultPath: dirname(current.path)
+    })
+    const path = selection.filePaths[0]
+    if (selection.canceled || !path) return null
+    // Keep the Workspace id and user-facing name stable. Sessions, layouts and
+    // Provider identities key off that id; only the filesystem locator changes.
+    const updated: WorkspaceRecord = { ...current, path }
+    config = await saveRuntimeConfig({
+      runtime: args.runtime,
+      configWriter: args.configStore,
+      next: {
+        ...config,
+        workspaces: config.workspaces.map((item) => item.id === workspaceId ? updated : item)
+      }
+    })
+    return config.workspaces.find((item) => item.id === workspaceId) ?? updated
   })
   handle('workspaces:add', async (input: CreateWorkspaceInput) => {
     args.runtime.executionHost(input.hostId)

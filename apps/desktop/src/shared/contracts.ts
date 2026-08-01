@@ -716,6 +716,8 @@ export type AgentMuxDesktopApi = {
   }
   workspaces: {
     chooseLocalFolder(): Promise<WorkspaceRecord | null>
+    /** Pick a replacement directory while preserving the existing Workspace identity. */
+    rebindLocalFolder(workspaceId: string): Promise<WorkspaceRecord | null>
     add(input: CreateWorkspaceInput): Promise<WorkspaceRecord>
     listBranches(workspaceId: string): Promise<WorkspaceBranchesSnapshot>
     openBranch(workspaceId: string, branch: string): Promise<WorkspaceSelectionResult>
