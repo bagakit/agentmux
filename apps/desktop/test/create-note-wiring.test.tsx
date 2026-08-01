@@ -15,8 +15,8 @@ import type { AppConfig, SessionSnapshot } from '../src/shared/contracts.js'
 import { DESKTOP_ACTIONS, DESKTOP_ACTION_ATTRIBUTE } from '../src/shared/desktop-actions.js'
 import { api } from '../src/renderer/src/lib/api.js'
 import { NewTabSurface } from '../src/renderer/src/components/NewTabSurface.js'
-import { createWorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.js'
-import { createWorkbenchTab, documentKey, initialWorkbenchRegionId } from '../src/renderer/src/lib/workbench-tabs.js'
+import { createWorkspaceLayout, findGroupForTab, moveTabToNewGroup } from '../src/renderer/src/lib/workbench-layout.js'
+import { createWorkbenchTab, documentKey, fileTabId, initialWorkbenchRegionId } from '../src/renderer/src/lib/workbench-tabs.js'
 import { noteStemForDate, NOTE_FILE_EXTENSION } from '../src/renderer/src/lib/note-names.js'
 import { useAppStore, warmTerminalKey } from '../src/renderer/src/store.js'
 
@@ -232,7 +232,102 @@ describe('createNote 接线', () => {
     }
   })
 
-  // 第二条笔记：`before + 1` 的 fixture 永远从 0 起步，所以把这个自增写成常量 `1`
+  // -------------------------------------------------------------------------
+  // launcher 绑着 A，而活动 Workspace 是 B。
+  //
+  // 缺陷原形：五个启动动作各自手抄一遍「落在哪个 Workspace」，其中四个写
+  // `launcherTab?.workspaceId ?? activeWorkspaceId`，而 createNote **只读** activeWorkspaceId。
+  // 组件侧决定卡片标题的那一份（NewTabSurface :83）与前四个一致。于是 launcher 挂在绑定 A 的
+  // Tab 上、用户切了侧栏（Tab 不动，B 成为活动）之后：标题写「Start in A」，点 Launch / Terminal /
+  // Browser 都落 A，点 Note **建到 B**。零报错，界面一切正常。
+  //
+  // 上一条测的是「一次动作内两次解析漂移」；这一条测的是「不同动作之间解析不一致」——
+  // 完全不同的形状：这里 activeWorkspaceId 全程不变，没有任何 await 期间的切换。
+  // -------------------------------------------------------------------------
+  it('launcher 绑着 A 而活动 Workspace 是 B：笔记建在 A，与其余四个启动动作一致', async () => {
+    const tabId = 'launcher-tab'
+    const regionId = initialWorkbenchRegionId(tabId)
+    const launcher = createWorkbenchTab(tabId, { regionId, kind: 'launcher', workspaceId: 'workspace' })
+    useAppStore.setState({
+      config: {
+        ...config,
+        workspaces: [
+          ...config.workspaces,
+          { id: 'other', name: 'Other', hostId: 'local', path: '/other', kind: 'folder' }
+        ]
+      },
+      // 活动 Workspace 是 B，而 launcher 那张 Tab 绑的是 A。这是「切了一下侧栏」的状态，
+      // 不需要任何异步窗口——缺陷在同步路径上就已经成立。
+      activeWorkspaceId: 'other',
+      tabs: { [launcher.id]: launcher },
+      layouts: {
+        workspace: createWorkspaceLayout('pane', [launcher.id]),
+        other: createWorkspaceLayout('other-pane')
+      },
+      documents: {},
+      workspaceFileRevisions: {},
+      error: null
+    })
+    const created: Array<string | undefined> = []
+    vi.spyOn(api.files, 'create').mockImplementation(async (workspaceId) => { created.push(workspaceId) })
+    const openedWorkspaces: Array<string | undefined> = []
+    useAppStore.setState({
+      openFile: (async (_path: string, _group?: string, _loc?: unknown, workspaceId?: string) => {
+        openedWorkspaces.push(workspaceId)
+      }) as never
+    })
+
+    await useAppStore.getState().createNote('pane', { tabId, regionId })
+
+    // 承重：建与打开都必须落在 launcher 绑定的那个 Workspace 上。落到 'other' 就是这个缺陷——
+    // 笔记出现在另一个项目里，而名字只是当天日期，那边有同名文件的概率还很高。
+    expect(created).toEqual(['workspace'])
+    expect(openedWorkspaces).toEqual(['workspace'])
+    // 前提自检：活动 Workspace 确实是**另一个**。若两者相同，上面两条对错误实现也成立。
+    expect(useAppStore.getState().activeWorkspaceId).toBe('other')
+    // 失效计数也必须记在 A 上：记到 B 会让 A 的文件树看不到新笔记（要等别的写入面碰巧 bump）。
+    expect(useAppStore.getState().workspaceFileRevisions.workspace).toBe(1)
+    expect(useAppStore.getState().workspaceFileRevisions.other).toBeUndefined()
+  })
+
+  // 请求这条笔记的分组才是它该出现的地方。此前 createNote 给 openFile 传的是 undefined，于是
+  // openFile 退到 `layout.activeGroupId`——从一个**非活动**分组（分屏的另一半、或浮层里的 launcher）
+  // 建笔记，Tab 会挂到别的分组上：用户点了「Note」，自己眼前这一半什么都没变。
+  it('笔记 Tab 落在请求它的那个分组，而不是活动分组', async () => {
+    const tabId = 'launcher-tab'
+    const regionId = initialWorkbenchRegionId(tabId)
+    const launcher = createWorkbenchTab(tabId, { regionId, kind: 'launcher', workspaceId: 'workspace' })
+    // 两个分组，活动的是 other-pane；launcher 在 pane 里。
+    const split = moveTabToNewGroup(
+      createWorkspaceLayout('pane', [launcher.id, 'placeholder']),
+      'placeholder',
+      'pane',
+      'pane',
+      'right',
+      'other-pane'
+    )
+    useAppStore.setState({
+      config,
+      activeWorkspaceId: 'workspace',
+      tabs: { [launcher.id]: launcher },
+      layouts: { workspace: split },
+      documents: {},
+      workspaceFileRevisions: {},
+      error: null
+    })
+    // 前提自检：活动分组确实**不是** launcher 所在的那个，否则下面判不出这个缺陷。
+    expect(useAppStore.getState().layouts.workspace!.activeGroupId).toBe('other-pane')
+    vi.spyOn(api.files, 'create').mockResolvedValue(undefined)
+
+    // 这里刻意不替换 openFile：判据要落在它真正把 Tab 挂到哪个分组上。
+    const name = await useAppStore.getState().createNote('pane', { tabId, regionId })
+
+    const layout = useAppStore.getState().layouts.workspace!
+    const noteTabId = findGroupForTab(layout, fileTabId('workspace', name))?.id
+    expect(noteTabId).toBe('pane')
+  })
+
+
   // 与正确实现在第一条笔记上完全无法区分。真实症状出在**第二**条——计数不前进，
   // 文件树的失效键不变，新笔记要等到别的写入面碰巧 bump 才会出现在树里。
   it('连着建两条笔记，失效计数每次都前进（不是恒等于 1）', async () => {
@@ -327,3 +422,83 @@ describe('初始页上的笔记入口', () => {
     assertStoreStateInvisibleToStaticMarkup()
   })
 })
+
+// ---------------------------------------------------------------------------
+// 「这个 launcher 面向哪个 Workspace」必须只有一处实现。
+//
+// 上面那两条钉的是 createNote **今天**落对了。这一条钉的是第七个启动动作不能再手抄一遍——
+// 原缺陷正是这么来的：五个动作各写一遍，四个一致、第五个漏掉了 launcher 那一侧。
+// 行为测试对「新加的第七个动作」天然失明（它还不存在），所以这一层判源码是刻意的。
+// ---------------------------------------------------------------------------
+describe('launcher Workspace 判定只有一处', () => {
+  const sources = ['store.ts', 'components/NewTabSurface.tsx'] as const
+  const readSource = (relative: string): string =>
+    readFileSync(new URL(`../src/renderer/src/${relative}`, import.meta.url), 'utf8')
+
+  it('没有任何地方重新手抄 `?? activeWorkspaceId` 这条规则', () => {
+    // 判据是**这条规则的每一种拼法**，不是某个符号名——原缺陷的写法里根本没有符号，
+    // 就是一句裸表达式。三种能表达它的写法：读 Tab 上的字段、读组件 selector 的取值、
+    // 以及 store 里那个 launcherTab 变量。
+    const spellings = [
+      /\?\?\s*(?:state\.|get\(\)\.|current\.)?activeWorkspaceId/g,
+      /launcherTab\?\.workspaceId/g,
+      /tabWorkspaceId\s*\?\?/g
+    ]
+    // 唯一合法的出现位置是 resolveLauncherWorkspaceId 的**实参**（`launcherTabWorkspaceId:
+    // launcherTab?.workspaceId`），那种写法带着字段名。
+    //
+    // openFile 的 `requestedWorkspaceId ?? activeWorkspaceId` 是**另一条**规则：它消费调用方
+    // 上游已经解析好的那一个，不重新推导 launcher 归属。它必须是例外，但例外不能只是白名单
+    // 一行文本——那样第七个动作把变量命名成 requestedWorkspaceId 就绕过了。所以例外自带前提：
+    // 那个名字必须真的是 openFile 声明里的**形参**（下一条测试钉住这一点）。
+    const allowed = (line: string): boolean =>
+      line.includes('launcherTabWorkspaceId')
+      || line.includes('activeWorkspaceId:')
+      || line.includes('requestedWorkspaceId ??')
+    for (const relative of sources) {
+      const source = readSource(relative)
+      for (const pattern of spellings) {
+        for (const hit of source.match(pattern) ?? []) {
+          const line = source.split('\n').find((candidate) => candidate.includes(hit))!
+          expect(
+            allowed(line),
+            `${relative} 里这一行自己判了一次 launcher Workspace，应该走 resolveLauncherWorkspaceId：\n${line.trim()}`
+          ).toBe(true)
+        }
+      }
+    }
+  })
+
+  it('前提自检：上一条那个例外指的确实是 openFile 的显式 workspace 形参', () => {
+    // 没有这一条，`requestedWorkspaceId ??` 就是一句可以被任何人借用的免检咒语。
+    const source = readSource('store.ts')
+    // 那个名字只在 openFile 的实现里出现，且是它的第四个形参。
+    expect(source).toMatch(/async openFile\(path, tabGroupId, location, requestedWorkspaceId\)/)
+    expect(source.match(/requestedWorkspaceId/g) ?? []).toHaveLength(2)
+  })
+
+
+  it('前提自检：这条规则的两个消费面都真的 import 了那个唯一实现', () => {
+    // 没有这一条，上面那条在一个**根本不关心 Workspace** 的文件上也恒绿（0 处手抄）。
+    // 判 import 关系而不是「函数名出现过」：裸标识符能绕过 toContain（记忆
+    // guard-criterion-must-be-import-relation）。
+    for (const relative of sources) {
+      expect(readSource(relative)).toMatch(
+        /import \{[^}]*resolveLauncherWorkspaceId[^}]*\} from '(?:\.\/lib|\.\.\/lib)\/launcher-workspace'/
+      )
+    }
+  })
+
+  it('两个必填字段：漏掉 launcher 那一侧是编译错误，不是一个看起来合理的结果', () => {
+    // 原缺陷的形状是「launcher 那一侧整个没写」。若把它做成可选参数，第七个动作可以什么都不传、
+    // 拿到 activeWorkspaceId，于是同一个 bug 原地重来一次而 tsc 全程沉默。
+    // 判源码是因为「这个字段是不是可选的」是一个类型性质，运行期看不见。
+    const helper = readFileSync(
+      new URL('../src/renderer/src/lib/launcher-workspace.ts', import.meta.url),
+      'utf8'
+    )
+    expect(helper).toMatch(/launcherTabWorkspaceId: string \| undefined/)
+    expect(helper).not.toMatch(/launcherTabWorkspaceId\?:/)
+  })
+})
+
