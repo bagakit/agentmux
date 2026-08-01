@@ -559,9 +559,18 @@ function continuityFailureDetail(
   result: Extract<SessionRecoveryResult, { kind: 'unavailable' | 'conflict' }>
 ): string {
   if (result.kind === 'conflict') {
-    return result.currentRun
-      ? `This Agent Session now belongs to Run ${result.currentRun.runId}; the stale Run was not resumed.`
-      : 'Another lifecycle operation owns this Agent Session; no new Run was started.'
+    // 按 Core 给的**类别**分，不按 currentRun 在不在场猜。这两件事本来就不是同一个判据：
+    // run 已被换掉才有 currentRun，而「另一个操作占着」也可能带着它。此前这里按 currentRun 猜，
+    // 于是一条 session-run-changed 只要 currentRun 缺失就被说成「另一个操作占着」——
+    // 又一处替 Core 猜类别的地方。
+    switch (result.reason) {
+      case 'session-run-changed':
+        return result.currentRun
+          ? `This Agent Session now belongs to Run ${result.currentRun.runId}; the stale Run was not resumed.`
+          : 'This Agent Session already moved to a newer Run; the stale Run was not resumed.'
+      case 'lifecycle-busy':
+        return 'Another lifecycle operation owns this Agent Session; no new Run was started.'
+    }
   }
   switch (result.reason) {
     case 'unknown-session':
@@ -572,6 +581,32 @@ function continuityFailureDetail(
       return 'This Provider does not support native session resume.'
     case 'provider-unavailable':
       return 'The required Provider executable or resume capability is unavailable on this Host.'
+  }
+}
+
+/**
+ * 一次恢复失败投在 Session 状态上的**全部** continuity 字段，一处产出。
+ *
+ * 为什么必须共用而不是两个出口各写一遍：这些字段有两个写入点（启动时的候选投影
+ * `recoveryCandidateSession`，和用户点「恢复」走的 `recoverSession`），而它们要写的是同一组字段。
+ * 各写一遍的代价实测过——`continuityConflict` 曾只加在前一处，后一处照旧折叠，于是**用户主动点恢复
+ * 的那条路**仍旧把 session-run-changed 说成「等一下」。两处该联动的写入分居两地必然 drift，
+ * 所以收成一个函数：一处守住，两条路都守住。
+ */
+function continuityStatusFields(
+  recovery: Extract<SessionRecoveryResult, { kind: 'unavailable' | 'conflict' }>
+): Pick<
+  SessionSnapshot['status'],
+  'continuity' | 'continuityReason' | 'continuityConflict' | 'detail'
+> {
+  return {
+    continuity: recovery.kind,
+    // Core 给的原因原样带过来，不折进「失败了」这一个位。三类各要求用户做不同的事，只有 Core 知道是哪一类。
+    ...(recovery.kind === 'unavailable' ? { continuityReason: recovery.reason } : {}),
+    // conflict 自己还有两类，而它们要求的动作**相反**（重读 vs 等）。丢掉这一项，
+    // 就等于对其中一半的用户说「等一个已经被换掉、永远不会回来的 Run」。
+    ...(recovery.kind === 'conflict' ? { continuityConflict: recovery.reason } : {}),
+    detail: continuityFailureDetail(recovery)
   }
 }
 
@@ -605,11 +640,8 @@ export function recoveryCandidateSession(
       state: 'error',
       source: 'run-process',
       observedAt: Date.now(),
-      continuity: recovery.kind,
-      // Carry Core's reason through instead of flattening it into the failure bit. Which of the
-      // three cases this is decides what the user should do next, and only Core knows it.
-      ...(recovery.kind === 'unavailable' ? { continuityReason: recovery.reason } : {}),
-      detail: continuityFailureDetail(recovery)
+      // 两条路共用同一处产出，见 continuityStatusFields 的说明：这些字段各写一遍必然 drift。
+      ...continuityStatusFields(recovery)
     },
     latestOutputBytes: 0,
     control: {
@@ -3617,9 +3649,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
                   status: {
                     ...session.status,
                     state: 'error' as const,
-                    continuity: recovery.kind,
-                    ...(recovery.kind === 'unavailable' ? { continuityReason: recovery.reason } : {}),
-                    detail: continuityFailureDetail(recovery)
+                    // 与 recoveryCandidateSession 同一处产出。这条路是**用户自己点「恢复」**走的，
+                    // 各写一遍时它正是被漏掉的那一处。
+                    ...continuityStatusFields(recovery)
                   }
                 }
               : session
