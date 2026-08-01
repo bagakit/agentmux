@@ -1,4 +1,4 @@
-import { BUILT_IN_AGENT_PROVIDER_IDS } from '@agentmux/core'
+import { BUILT_IN_AGENT_PROVIDER_IDS } from '@agentmux/core/provider-id'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'

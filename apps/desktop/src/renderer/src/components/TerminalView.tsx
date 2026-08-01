@@ -273,11 +273,26 @@ export function TerminalView({
     })
     const fit = new FitAddon()
     const search = new SearchAddon()
-    const webLinks = new WebLinksAddon((event, uri) => {
+    /**
+     * 一个 http 链接被点开时该发生什么。**两条 provider 共用这一个出口。**
+     *
+     * 终端里的 http 链接有两个来源，xterm 用两条互不相干的 provider 处理它们：
+     *  - 裸文本 URL（终端只是吐了字符串）→ `WebLinksAddon`，activate 由我们传入；
+     *  - OSC 8 超链接（终端用转义序列声明"这段文字是个链接"，Claude Code 就这么输出）→
+     *    xterm 内建的 `OscLinkProvider`，它的 activate 取自**构造选项 `linkHandler`**，
+     *    没设就落到自己的 `defaultActivate`：一个原生 `confirm("…could potentially be dangerous")`
+     *    加 `window.open`（见 @xterm/xterm OscLinkProvider.ts）。
+     *
+     * 这一族缺陷极难自查：裸 URL 那条路一直好的，所以"点链接出选择器"在开发中天天验证通过，
+     * 而 OSC 8 那条路从未接线，用户看到的是浏览器厂商的告警框，界面上没有任何我们的痕迹。
+     * 判据要按**出口个数**而不是"点击这个动作有没有被处理"——同一个概念有两个入口时，
+     * 少接一个不会让另一个变红。
+     */
+    const activateHttpLink = (event: MouseEvent, uri: string): void => {
       const url = parseTerminalHttpLink(uri)
       if (!url) return
-      // The addon activates on any mouse-up over a URL, so a drag that selects text across a link
-      // would otherwise raise the open menu instead of selecting. Only a gesture that stayed put and
+      // Both providers activate on a mouse-up over the link, so a drag that selects text across one
+      // would otherwise raise the picker instead of selecting. Only a gesture that stayed put and
       // left no selection is a click on the link.
       const origin = linkPressRef.current
       linkPressRef.current = null
@@ -287,7 +302,7 @@ export function TerminalView({
         hasSelection: terminal.hasSelection()
       })) return
       // Cmd (macOS) / Ctrl (elsewhere) + click opens the system browser immediately, skipping the
-      // destination menu. A plain click keeps the menu.
+      // destination picker. A plain click keeps the picker.
       if (terminalLinkModifierOpensSystemBrowser(event, isMac)) {
         setLinkPreview(null)
         void openHttpLink(linkOriginRef.current, url, 'system').catch(reportError)
@@ -303,20 +318,29 @@ export function TerminalView({
       linkRequestRef.current = request
       setLinkRequest(request)
       setLinkPreview(null)
-    }, {
-      hover: (event, text) => {
-        const url = parseTerminalHttpLink(text)
-        if (!url) return
-        const anchor = previewAnchorAt(event.clientX, event.clientY)
-        setLinkPreview({
-          kind: 'http',
-          url,
-          left: anchor.left,
-          top: anchor.top,
-          placement: anchor.placement,
-          fastPath: terminalLinkModifierOpensSystemBrowser(event, isMac)
-        })
-      },
+    }
+    const hoverHttpLink = (event: MouseEvent, text: string): void => {
+      const url = parseTerminalHttpLink(text)
+      if (!url) return
+      const anchor = previewAnchorAt(event.clientX, event.clientY)
+      setLinkPreview({
+        kind: 'http',
+        url,
+        left: anchor.left,
+        top: anchor.top,
+        placement: anchor.placement,
+        fastPath: terminalLinkModifierOpensSystemBrowser(event, isMac)
+      })
+    }
+    // OSC 8 链接的出口。`allowNonHttpProtocols` 保持默认（假）：xterm 会在 provideLinks 里就把
+    // 非 http(s) 的 URI 丢掉，于是这个 handler 只会收到我们的选择器能处理的东西。
+    terminal.options.linkHandler = {
+      activate: (event, text) => activateHttpLink(event, text),
+      hover: (event, text) => hoverHttpLink(event, text),
+      leave: () => setLinkPreview(null)
+    }
+    const webLinks = new WebLinksAddon(activateHttpLink, {
+      hover: hoverHttpLink,
       leave: () => setLinkPreview(null)
     })
     // Shared anchor math for both link previews (http URLs and file paths), so the file-path preview

@@ -1,12 +1,17 @@
 import { createReadStream } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { readFile, readdir, stat } from 'node:fs/promises'
+import { readFile, readdir, realpath, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, relative, resolve } from 'node:path'
-import { spawn } from 'node:child_process'
-import { canonicalInstallPath, readPackageIdentity } from './package-identity.mjs'
+import { execFileSync, spawn } from 'node:child_process'
+import {
+  canonicalInstallPath,
+  knownApplicationPaths,
+  readPackageIdentity
+} from './package-identity.mjs'
 
 const desktopRoot = resolve(import.meta.dirname, '..')
+const repositoryRoot = resolve(desktopRoot, '../..')
 const appPath = join(desktopRoot, 'release', 'mac', 'AgentMux.app')
 const desktopManifest = JSON.parse(await readFile(join(desktopRoot, 'package.json'), 'utf8'))
 const dmgPath = join(
@@ -60,6 +65,47 @@ async function codesignStatus(path) {
   })
 }
 
+async function runningAgentMuxProcesses() {
+  const result = await new Promise((resolvePromise) => {
+    const child = spawn('ps', ['-axo', 'pid=,command='], { stdio: ['ignore', 'pipe', 'ignore'] })
+    let stdout = ''
+    child.stdout.setEncoding('utf8')
+    child.stdout.on('data', (chunk) => { stdout += chunk })
+    child.once('error', () => resolvePromise(''))
+    child.once('exit', () => resolvePromise(stdout))
+  })
+  return String(result).split('\n').flatMap((line) => {
+    const match = /^\s*(\d+)\s+(.+)$/.exec(line)
+    if (!match || !match[2].includes('AgentMux.app/Contents/')) return []
+    return [{ pid: Number(match[1]), command: match[2] }]
+  })
+}
+
+function checkoutIdentity() {
+  const runGit = (args) => execFileSync('git', args, {
+    cwd: repositoryRoot,
+    encoding: 'utf8'
+  }).trim()
+  const status = runGit(['status', '--porcelain=v1', '--untracked-files=all'])
+  return {
+    sourceCommit: runGit(['rev-parse', 'HEAD']),
+    sourceTree: runGit(['write-tree']),
+    sourceStatus: status
+  }
+}
+
+async function inspectKnownCopy(entry) {
+  const exists = await stat(entry.path).then(() => true, () => false)
+  if (!exists) return { ...entry, exists: false, identity: null }
+  const [realPath, identity] = await Promise.all([
+    realpath(entry.path).catch(() => null),
+    readPackageIdentity(entry.path).catch((error) => ({
+      error: error instanceof Error ? error.message : String(error)
+    }))
+  ])
+  return { ...entry, exists: true, realPath, identity }
+}
+
 const productionDependencies = ['@dnd-kit', '@monaco-editor', '@radix-ui', '@xterm', 'lucide-react', 'monaco-editor', 'react', 'react-dom', 'react-resizable-panels', 'zustand']
 const packagedNodeModules = join(appResources, 'node_modules')
 const shippedUiDependencyTrees = []
@@ -92,6 +138,7 @@ const nativeArtifacts = [{
 }]
 
 const packageIdentity = await readPackageIdentity(appPath)
+const sourceIdentity = checkoutIdentity()
 const installedIdentity = await stat(installedAppPath)
   .then(() => readPackageIdentity(installedAppPath))
   .catch(() => null)
@@ -104,6 +151,31 @@ const [candidateMainHash, candidateDmgHash, candidateSignature, installedMainHas
   installedIdentity ? sha256(installedMainExecutablePath) : Promise.resolve(null),
   installedIdentity ? codesignStatus(installedAppPath) : Promise.resolve(null)
 ])
+
+const knownCopies = await Promise.all(knownApplicationPaths({
+  homeDirectory: homedir(),
+  repositoryRoot
+}).map(inspectKnownCopy))
+const identityFields = ['schema', 'sourceCommit', 'sourceTree', 'appVersion', 'platform', 'arch']
+const sameIdentity = (left, right) => (
+  left && right && identityFields.every((field) => left[field] === right[field])
+)
+for (const copy of knownCopies) {
+  copy.identityMatch = copy.identity && sameIdentity(copy.identity, packageIdentity)
+  copy.stale = copy.exists && copy.identityMatch !== true
+}
+const runningProcesses = await runningAgentMuxProcesses()
+const canonicalIdentity = knownCopies.find((entry) => entry.id === 'canonical-user' && entry.exists)?.identity
+const runningPathMismatches = runningProcesses.map((processInfo) => {
+  const matchingCopy = knownCopies.find((entry) => (
+    entry.exists && entry.realPath && processInfo.command.startsWith(`${entry.realPath}/Contents/`)
+  ))
+  return {
+    ...processInfo,
+    copyId: matchingCopy?.id ?? null,
+    canonical: matchingCopy?.id === 'canonical-user'
+  }
+})
 
 const report = {
   app: {
@@ -122,6 +194,30 @@ const report = {
     identity: installedIdentity,
     mainExecutableSha256: installedMainHash,
     signature: installedSignature
+  },
+  knownCopies,
+  runningProcesses: runningPathMismatches,
+  launchSource: {
+    sourceIdentity,
+    candidateMatchesCheckout: sameIdentity(packageIdentity, {
+      schema: packageIdentity.schema,
+      ...sourceIdentity,
+      appVersion: desktopManifest.version,
+      platform: process.platform,
+      arch: process.arch
+    }),
+    canonicalIdentity,
+    canonicalMatchesCandidate: sameIdentity(canonicalIdentity, packageIdentity),
+    canonicalMatchesCheckout: sameIdentity(canonicalIdentity, {
+      schema: packageIdentity.schema,
+      ...sourceIdentity,
+      appVersion: desktopManifest.version,
+      platform: process.platform,
+      arch: process.arch
+    }),
+    staleCopies: knownCopies.filter((entry) => entry.stale).map(({ id, path }) => ({ id, path })),
+    runningCanonical: runningPathMismatches.every((entry) => entry.canonical),
+    mismatchCount: runningPathMismatches.filter((entry) => !entry.canonical).length
   },
   frameworks: await Promise.all((await directories(frameworkRoot))
     .filter((name) => name.endsWith('.framework'))
