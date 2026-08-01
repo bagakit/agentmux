@@ -89,11 +89,14 @@ export function createKimiProvider(defineAgentProvider: ProviderFactory): AgentP
       //     并在交互循环内部才应用（ui/shell/__init__.py:497），任何命令行旗标都到不了它。）
       //
       // 于是首个 prompt 只能在进程起来之后当一条普通 turn 提交（`submitAgentPrompt`，那条路对本
-      // Provider 是通的：single-phase 不需要 composer readiness 纪元）。
+      // Provider 是通的：single-phase 不需要 composer readiness 纪元）。这不是"以后再接"——
+      // client 的两条生命周期路径都经 `splitLaunchPromptByDelivery` 把组装好的启动文本整份划给
+      // 补送，再由 `deliverPostLaunchPrompt` 在进程起来之后真的键入。
       //
       // **绝不能**声明 positional-argv 再在 buildArgs 里把 prompt 丢掉：那样用户的原话只会落进
       // timeline、永不进入进程，而界面上一切正常——最难发现的一类丢失。声明成 post-launch-only 后，
-      // 带 prompt 启动会被 buildLaunch 当场拒绝（AGENT_LAUNCH_PROMPT_UNSUPPORTED）。
+      // 带 prompt 启动会被 buildLaunch 当场拒绝（AGENT_LAUNCH_PROMPT_UNSUPPORTED）；正常路径够不到
+      // 那次拒绝（分流已经把启动侧清空），它守的是"谁哪天绕过分流直接塞 prompt"。
       promptDelivery: 'post-launch-only',
       // `unmanaged` 而非 `explicit-managed`：hook 是真的、Core 也认得，但它的配置面是
       // `~/.kimi/config.toml` 的 `[[hooks]]` 数组——**TOML**，而本仓四种 merge 策略

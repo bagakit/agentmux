@@ -106,6 +106,28 @@ function executable(commandOverride: string | undefined, fallback: string): stri
   return command
 }
 
+/**
+ * 把一份已组装好的启动文本按 `promptDelivery` 分成「随启动送」与「起来之后送」两半。
+ *
+ * 为什么必须是一个共用的纯函数，而不是在两条生命周期路径上各写一遍条件：
+ *   1. `buildLaunch`/`buildResumeLaunch` 会**拒绝**给 `post-launch-only` 的 Provider 带任何启动
+ *      prompt，所以调用方必须先分流。两处各判一次，就迟早有一处判反——那正是「两条路对同一个
+ *      『送得到吗』给不同答案」的经典形状。
+ *   2. 分流必须**同时**给出 deferred 那一半。只做「不交给 buildLaunch」而不返回要补送的文本，
+ *      等于把静默丢失从 argv 挪到了调用点：用户的原话仍旧只落进时间轴、永不进入进程。
+ *
+ * 分完之后两半必定恰有一半非空（composed 为空时两半皆空），调用方对 deferred 只有一个正确
+ * 处置：起来之后当一条普通 turn 键入。
+ */
+export function splitLaunchPromptByDelivery(
+  catalog: AgentCatalogEntry,
+  composed: string
+): { atLaunch: string; deferred: string } {
+  return catalog.promptDelivery === 'post-launch-only'
+    ? { atLaunch: '', deferred: composed }
+    : { atLaunch: composed, deferred: '' }
+}
+
 export function defineAgentProvider(definition: AgentProviderDefinition): AgentProvider {
   const { catalog: catalogSeed } = definition
   if (definition.terminalHandshake && (!definition.terminalHandshake.query || !definition.terminalHandshake.response)) {
