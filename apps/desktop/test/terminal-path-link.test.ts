@@ -1,4 +1,4 @@
-import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
+import { fixtureCivil as _hygiene_fixtureCivil, fixtureClock as _hygiene_fixtureClock, fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { describe, expect, it } from 'vitest'
 import {
   detectTerminalPathLinks,
@@ -145,6 +145,53 @@ describe('detectTerminalPathLinks — deliberate rejections', () => {
     expect(detectTerminalPathLinks(_hygiene_fixturePath("Users/dev/proj/src/x.ts"), '')).toEqual([])
     // Relative detection still works with no root.
     expect(detectTerminalPathLinks('src/x.ts', '')).toHaveLength(1)
+  })
+})
+
+/**
+ * A `:n` suffix is the ONLY signal that promotes a slash-less core, and clocks wear it too. These
+ * are the lines a timestamped transcript produces on every row, so a hole here underlines the whole
+ * time gutter — it is the common case, not an edge one.
+ */
+describe('detectTerminalPathLinks — 时刻不是文件', () => {
+  it('rejects a wall-clock reading that looks like name:line:col', () => {
+    // Regression: `prior clock` used to parse as { path: '17', line: 4, column: 3 } — the ruler and
+    // every turn's time gutter render exactly this shape.
+    expect(detectTerminalPathLinks(_hygiene_fixtureClock(17, 4, 3), ROOT)).toEqual([])
+    expect(detectTerminalPathLinks(_hygiene_fixtureClock(9, 3), ROOT)).toEqual([])
+    expect(detectTerminalPathLinks(_hygiene_fixtureClock(0, 0, 0), ROOT)).toEqual([])
+  })
+
+  it('rejects clocks embedded in prose without eating the sentence', () => {
+    expect(detectTerminalPathLinks(("started " + _hygiene_fixtureClock(14, 3, 7) + " and ended " + _hygiene_fixtureClock(17, 4, 3)), ROOT)).toEqual([])
+  })
+
+  it('rejects other all-digit tokens a :n suffix would promote', () => {
+    // Same root cause, different shapes: a version, a date, a bare count.
+    for (const notAPath of ['1.2.3:4', (_hygiene_fixtureCivil(9, 1) + ":5"), '42:7', '1.0:1:1']) {
+      expect(detectTerminalPathLinks(notAPath, ROOT)).toEqual([])
+    }
+  })
+
+  it('still links a real path standing next to a clock on the same line', () => {
+    // The clock must be dropped WITHOUT swallowing the path that follows it: proving the rejected
+    // match still advances the scanner past its own span.
+    const link = onlyLink((_hygiene_fixtureClock(17, 4, 3) + "  error in src/foo.ts:12:3"))
+    expect(link.path).toBe('src/foo.ts')
+    expect(link.line).toBe(12)
+    expect(link.column).toBe(3)
+  })
+
+  it('keeps letter-bearing cores linkable — the suffix branch is narrowed, not closed', () => {
+    expect(onlyLink('README:10').path).toBe('README')
+    expect(onlyLink('README.md:3:1').path).toBe('README.md')
+    expect(onlyLink('a:1').path).toBe('a')
+  })
+
+  it('exempts a directory-bearing core from the letter rule', () => {
+    // A `/` is already the strong signal; an all-digit path names a real place.
+    expect(onlyLink('logs/2024:5').path).toBe('logs/2024')
+    expect(onlyLink('1/2/3').path).toBe('1/2/3')
   })
 })
 
