@@ -125,7 +125,7 @@ const configSchema = z
     }
   })
 
-const DEFAULT_CONFIG: AppConfig = {
+export const DEFAULT_CONFIG: AppConfig = {
   version: 7,
   hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
   executors: {
@@ -144,7 +144,15 @@ const DEFAULT_CONFIG: AppConfig = {
     },
     gemini: { label: 'Gemini', providerId: 'gemini', command: 'gemini', args: [], env: {}, injectAgentMuxGuide: true },
     antigravity: { label: 'Antigravity', providerId: 'antigravity', command: 'agy', args: [], env: {}, injectAgentMuxGuide: true },
-    cursor: { label: 'Cursor', providerId: 'cursor', command: 'cursor-agent', args: [], env: {}, injectAgentMuxGuide: true }
+    cursor: { label: 'Cursor', providerId: 'cursor', command: 'cursor-agent', args: [], env: {}, injectAgentMuxGuide: true },
+    // kimi / droid / copilot：Core 已把它们列为一等 built-in Provider（types.ts 的 BuiltInAgentProviderId、
+    // agent-provider.ts 的 BUILT_IN_AGENT_PROVIDERS），但此前的默认表漏了它们，于是新建 Tab 界面（经
+    // config.executors → configuredExecutors）根本不显示这三家。command/label 逐个取自各自 catalog 的
+    // executable/label（SSOT，见 providers/{kimi,droid,copilot}.ts），三家都不需要特殊 args——它们的
+    // buildArgs 只原样透传 args（不像 grok 那样默认注入 --permission-mode）。
+    kimi: { label: 'Kimi', providerId: 'kimi', command: 'kimi', args: [], env: {}, injectAgentMuxGuide: true },
+    droid: { label: 'Droid', providerId: 'droid', command: 'droid', args: [], env: {}, injectAgentMuxGuide: true },
+    copilot: { label: 'Copilot', providerId: 'copilot', command: 'copilot', args: [], env: {}, injectAgentMuxGuide: true }
   },
   workspaces: [],
   appearance: { terminalTheme: 'graphite' },
