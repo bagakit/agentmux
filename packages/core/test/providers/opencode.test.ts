@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { AgentProviderRegistry, resolveManagedHookPlan } from '../../src/agent-provider.js'
 import { OPENCODE_HOOK_EVENTS, OPENCODE_HOOKS, createOpenCodeManagedHookPlan } from '../../src/providers/opencode.js'
@@ -262,5 +263,102 @@ describe('OpenCode provider', () => {
       expect(opencode.catalog.capabilities.usage).toBeUndefined()
       expect(opencode.catalog.capabilities.replyCorrelation).toBe('none')
     })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 「换了新 token 就必须重装」这条接线的守护。
+//
+// opencode 是唯一把凭证**写成文件里的字面量**的 Provider（见上面那族断言）。于是它比另外
+// 十二家多一条不变量：**每一个铸出新 token 的地方，都必须紧跟一次重装**。少一次，磁盘上那份
+// 插件就拿着一枚刚被作废的 token，而 ingress 对认不出的 token 一律 403——插件"装着"，每条
+// 事件都被静默拒收，Agent 永远不 done、完成通知永不触发，且没有任何报错。
+//
+// 这正是 resume 曾经的样子：它 `createBinding` 换了新 token（`hookToken:` 那行把新的存进去），
+// 却从不调 `ensureManagedHooks`。launch 那条路做对了，所以缺陷只在"停掉再续跑"时显形。
+//
+// 判据必须是「铸新 token 的站点数 == 装 hook 的站点数」，不能是「有没有出现过 ensureManagedHooks」：
+// 后者在只有 launch 装、resume 不装时照旧通过。同时**不能**把恢复那个站点算进来——
+// `restoreHookBindings` 传的是 session 里存着的旧 `hookToken`（第四个实参），复用原凭证，
+// 磁盘那份仍然对得上，重装反而是多余的写盘。所以这里按"有没有第四个实参"区分两类站点。
+//
+// 剥掉注释再断言：本仓踩过「标识符只活在注释里，删掉真代码测试依然绿」的假绿。
+// ---------------------------------------------------------------------------
+const clientSource = readFileSync(new URL('../../src/client.ts', import.meta.url), 'utf8')
+  .replace(/\/\*[\s\S]*?\*\//gu, '')
+  .split('\n')
+  .map((line) => line.replace(/\/\/.*$/u, ''))
+  .join('\n')
+
+describe('每个铸出新 hook token 的站点都紧跟一次 managed hook 重装', () => {
+  it('剥注释后仍看得见被测代码——否则下面几条在对空字符串取胜', () => {
+    expect(clientSource).toContain('private async ensureManagedHooks(')
+    expect(clientSource).toContain('this.hookServer.createBinding(')
+    expect(clientSource.length).toBeGreaterThan(10_000)
+  })
+
+  /**
+   * 把每个 `createBinding(` 调用切出来，按"有没有传第四个实参（复用已存 token）"分成两类。
+   * 恢复站点复用旧 token，属于"不铸新"那一类。
+   */
+  function bindingSites(): { minted: number; reused: number } {
+    let minted = 0
+    let reused = 0
+    for (const match of clientSource.matchAll(/this\.hookServer\.createBinding\(/gu)) {
+      const open = match.index + match[0].length - 1
+      let depth = 0
+      let end = open
+      for (let cursor = open; cursor < clientSource.length; cursor += 1) {
+        if (clientSource[cursor] === '(') depth += 1
+        else if (clientSource[cursor] === ')') {
+          depth -= 1
+          if (depth === 0) { end = cursor; break }
+        }
+      }
+      const args = clientSource.slice(open + 1, end).split(',').filter((part) => part.trim())
+      if (args.length >= 4) reused += 1
+      else minted += 1
+    }
+    return { minted, reused }
+  }
+
+  it('铸新 token 的站点有两个（launch 与 resume），复用旧 token 的有一个（恢复）', () => {
+    // 这条钉住分类本身。若哪天新增一条生命周期路径，它会先在这里红——那正是该去想
+    // 「这条路铸新 token 吗、装不装」的时刻，而不是等到用户报「续跑后就不动了」。
+    expect(bindingSites()).toEqual({ minted: 2, reused: 1 })
+  })
+
+  it('铸新 token 的站点数与装 hook 的站点数相等', () => {
+    // 承重的一条。resume 漏装时：minted=2 而安装站点=2（launch + repair），看似相等，
+    // 所以还必须逐站点验"紧跟"——见下一条。这条只挡"整条路被删掉"。
+    const installs = clientSource.match(/await this\.ensureManagedHooks\(/gu) ?? []
+    expect(installs.length).toBeGreaterThanOrEqual(bindingSites().minted)
+  })
+
+  it('launch 与 resume 各自在铸完 token 之后、起进程之前就装好', () => {
+    // 逐站点验"紧跟"：这是唯一能认出「resume 漏装」的判据。安装必须落在
+    // createBinding 与 kernel.start 之间——早于起进程，插件才在 Agent 加载它时就是新的。
+    for (const entry of ['async createAgent(', 'private async resumeAgentRun(']) {
+      const from = clientSource.indexOf(entry)
+      expect(from, `${entry} 必须在场`).toBeGreaterThan(-1)
+      const minted = clientSource.indexOf('this.hookServer.createBinding(', from)
+      const started = clientSource.indexOf('await this.kernel.start(', minted)
+      expect(started, `${entry} 里必须有 kernel.start`).toBeGreaterThan(minted)
+      const between = clientSource.slice(minted, started)
+      expect(between, `${entry}：新 token 铸出后必须在起进程之前重装 managed hook`)
+        .toContain('await this.ensureManagedHooks(')
+    }
+  })
+
+  it('两条路都把自己那枚 endpoint 传进去——不传等于让 opencode 如实拒绝生成计划', () => {
+    // opencode 的 resolver 在没有 endpoint 时返回 null（见 providers/index.ts 的注释：写一份
+    // 带死 token 的插件比不写更坏）。所以"调了但没传 endpoint"与"没调"对 opencode 后果相同，
+    // 必须一并钉住，否则修复可以退化成一次无效调用而这一族照旧全绿。
+    for (const entry of ['async createAgent(', 'private async resumeAgentRun(']) {
+      const from = clientSource.indexOf(entry)
+      const call = clientSource.indexOf('await this.ensureManagedHooks(', from)
+      const close = clientSource.indexOf(')', clientSource.indexOf('hookBinding.endpoint', call))
+      expect(close, `${entry}：ensureManagedHooks 必须收到 hookBinding.endpoint`).toBeGreaterThan(call)
+    }
   })
 })
