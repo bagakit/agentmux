@@ -82,7 +82,12 @@ export const PI_HOOKS: AgentNativeHookSpecification = {
     // 都不成立——留一个只有 session_id 的 handle 会让 resume 在事后才发现自己没有可用的定位符。
     // 这一条与扩展侧「文件真存在才上报 session_file」是同一个约束的两端，缺一不可，见下面那段。
     requireTranscriptPath: true
-  }
+  },
+  // Pi 的 hook 面是一份 AgentMux 生成的扩展文件，跑在 pi 进程里**自己直接 POST**
+  // （见下面 `piExtensionSource` 的 `post()`：body 里 `eventName` 是生成时写死的实参）。
+  // `agent-hook-command` 那个子进程整个不在这条链路上，所以既谈不上 `--event` 旗标，也谈不上
+  // 「从负载里解析出事件名」——事件名是结构性在场的，不是解析出来的。
+  eventNameSource: { kind: 'generated-code' }
 }
 
 /**
