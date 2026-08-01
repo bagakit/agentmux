@@ -32,18 +32,27 @@ describe('note names', () => {
     expect(noteStemForDate(new Date(2026, 10, 25))).toBe('note-2026-11-25')
   })
 
-  it('用本地日历日，不用 UTC——晚上记的笔记不该写成明天', () => {
-    // 判据不能硬写时区。取本地一天的两头：正偏移时区里 00:30 的 UTC 日期是前一天，负偏移时区里
-    // 23:30 的 UTC 日期是后一天——所以无论本机在哪个时区，这两个里**至少有一个**的 UTC 日期与
-    // 本地日期不同，那一个就是真正的判别器；另一个恒真但绝不会判错。
-    // 若实现改用 getUTCDate/toISOString，其中一条必红。
-    const early = new Date(2026, 8, 3, 0, 30)
-    const late = new Date(2026, 8, 3, 23, 30)
-    expect(noteStemForDate(early)).toBe('note-2026-09-03')
-    expect(noteStemForDate(late)).toBe('note-2026-09-03')
-    // 自检：这一对里确实存在一个本地与 UTC 分岔的时刻，否则上面两条都是恒真的。
-    expect(early.getUTCDate() !== early.getDate() || late.getUTCDate() !== late.getDate()).toBe(true)
-  })
+  // 「用本地日历日」这条性质在 TZ=UTC 下**根本不可观测**——偏移为 0 时本地与 UTC 逐字段相等，
+  // getDate 与 getUTCDate 的实现完全无法区分。原先这条判据靠本机环境时区恰好非零来提供判别器，
+  // 于是在 CI 最常见的 TZ=UTC 上，两条行为断言退化成恒真、而自检直接变红（正确代码打红）。
+  // 所以时区由本条自己钉住，两个方向各钉一次：正偏移把 00:30 推到前一天，负偏移把 23:30 推到后一天。
+  // 这样判别器无条件在场，与跑测试的机器在哪无关。
+  for (const [zone, hour] of [['Asia/Tokyo', 0], ['America/Los_Angeles', 23]] as const) {
+    it(`用本地日历日，不用 UTC——晚上记的笔记不该写成明天（${zone}）`, () => {
+      const original = process.env.TZ
+      process.env.TZ = zone
+      try {
+        const moment = new Date(2026, 8, 3, hour, 30)
+        // 前提自检：这个时刻的 UTC 日期确实与本地日期分岔，否则下面那条是恒真的。
+        // 若实现改用 getUTCDate/toISOString，分岔就会在名字里显出来。
+        expect(moment.getUTCDate()).not.toBe(moment.getDate())
+        expect(noteStemForDate(moment)).toBe('note-2026-09-03')
+      } finally {
+        if (original === undefined) delete process.env.TZ
+        else process.env.TZ = original
+      }
+    })
+  }
 
   it('全是 .md——编辑器按扩展名决定语法', () => {
     for (const name of noteNameCandidates(day, 5)) {
