@@ -2,6 +2,7 @@ import type {
   AgentTimelineItem,
   AgentTimelineItemKind,
   AgentTimelineMutation,
+  AgentHookLifecycleEvent,
   AgentProviderId,
   AgentNativeSessionHandle,
   AgentSemanticState,
@@ -13,6 +14,7 @@ import {
   normalizeNativeSessionId,
   normalizeNativeTranscriptPath
 } from './agent-native-locator.js'
+import { canonicalHookLifecycleEvent, resolveHookEventName } from './agent-hook-event.js'
 import { hookToolOutcome } from './hook-tool-outcome.js'
 import { HOOK_PAYLOAD_USAGE_KEY, parseTurnUsage } from './agent-usage-transcript.js'
 
@@ -289,6 +291,7 @@ function buildTimeline(
   specification: AgentNativeHookSpecification,
   envelope: NativeHookEnvelope,
   eventName: string,
+  lifecycleEvent: AgentHookLifecycleEvent | undefined,
   payload: Record<string, unknown>,
   observedAt: number
 ): AgentTimelineMutation[] {
@@ -321,17 +324,21 @@ function buildTimeline(
     // 关联 update 去更新 Pre 从未按 tool 落过的那条 item，必抛 UNKNOWN_AGENT_TIMELINE_ITEM。让 Pre/Post
     // 对同一工具得到同一个 kind，等待类一律留在 append-only 的 permission 通路。
     const kind: AgentTimelineItemKind = toolAwaitsUser(specification, toolName) ? 'permission' : 'tool_call'
-    const isPost = eventName.startsWith('Post')
+    // 「这是一次工具调用的事后吗」由 canonical 生命周期事件回答，不再由事件名的形状猜。
+    // 此前这里是 `eventName.startsWith('Post')`：它只对 PascalCase 的 Provider 成立，把 Antigravity 的
+    // `PostInvocation` 误当成工具结果，同时对 Hermes 的 `post_tool_call`、Pi 的 `tool_execution_end`
+    // 完全失明——那两家虽都声明了 `timeline: 'complete-events'`，失败的命令却和成功的长得一模一样。
+    // 认不出生命周期（`undefined`）时按事前处理：没有 canonical 依据就不宣称「已经有结果了」。
+    const isToolResult = lifecycleEvent === 'tool-use-end'
     const toolCallId = stringField(payload, ...TOOL_CALL_ID_KEYS)
-    // 结果只有事后才知道，所以只在事后事件上采集——`PreToolUse` 那一行谈不上成败，给它盖任何
-    // 结论都是编造。事件名以 `Post` 开头的才带结果，其余照旧只有入参。
-    const outcome = isPost ? hookToolOutcome(payload) : undefined
+    // 结果只有事后才知道，所以只在事后事件上采集——事前那一行谈不上成败，给它盖任何结论都是编造。
+    const outcome = isToolResult ? hookToolOutcome(payload) : undefined
     if (toolCallId && kind === 'tool_call') {
       // Provider 给了关联 id：把一次调用的入参与结果收敛到**同一条 item**。
       // id 从 receiptId（Pre/Post 各不相同）改绑 toolCallId（同一次调用两端一致），于是
       // 时间轴上一次调用就是一条，而不是两条。receiptId 方案在这里被彻底取代——不是两套并存。
       const itemId = `${envelope.runId}:tool:${toolCallId}`
-      if (isPost) {
+      if (isToolResult) {
         // 事后：翻成终态并挂上结果。走 `upsert` 而不是 `update`——正常情况命中 Pre 落的那条替换掉，
         // 但 Pre 可能压根没落库：它的两次 fetch 都失败、或在 Pre/Post 之间被 200 条上限逐出（子代理
         // 场景尤甚）。`update` 命中不到目标会抛 UNKNOWN_AGENT_TIMELINE_ITEM，冒泡出 client 的 timeline
@@ -381,7 +388,12 @@ export function normalizeNativeHook(
   envelope: NativeHookEnvelope
 ): NormalizedHookEvent {
   const payload = envelope.payload ?? {}
-  const eventName = envelope.eventName ?? stringField(payload, 'hook_event_name', 'hookEventName') ?? 'unknown'
+  // 事件名可能在信封上，也可能藏在负载的三个拼法之一里——读取顺序由 agent-hook-event.ts 唯一持有，
+  // 与 hook 子进程共用同一份，故不会再出现「一边认得出、另一边读成 null」。读不出时如实记为 'unknown'。
+  const eventName = resolveHookEventName(envelope.eventName, payload) ?? 'unknown'
+  // 归一化到 Core canonical 生命周期事件。认不出就是 `undefined`——语义状态照旧只由 Provider 的
+  // `rules` 给出，绝不因为归一化失败而伪造 working/done。
+  const lifecycleEvent = canonicalHookLifecycleEvent(eventName)
   // 先按 rules 定出这条事件本身的语义，再经子代理在途记账压制：主 Agent 报收尾时若子代理还活着，
   // rules 给出的 `done` 会被压回 `working`，直到最后一个子代理落地才兑现。
   const semanticState = applySubagentTracking(
@@ -396,6 +408,7 @@ export function normalizeNativeHook(
     state: semanticState === 'unknown' ? 'running' : semanticState,
     source: 'native-hook',
     observedAt,
+    // 诊断带的是**原始**事件名：一条 Core 没认出来的事件，唯一有用的线索就是 Provider 到底叫它什么。
     detail: eventName
   }
   const handle = nativeHandle(envelope.providerId, specification, payload)
@@ -409,9 +422,10 @@ export function normalizeNativeHook(
     },
     providerId: envelope.providerId,
     eventName,
+    ...(lifecycleEvent ? { lifecycleEvent } : {}),
     semanticState,
     status,
-    timeline: buildTimeline(specification, envelope, eventName, payload, observedAt),
+    timeline: buildTimeline(specification, envelope, eventName, lifecycleEvent, payload, observedAt),
     ...(handle ? { nativeHandle: handle } : {}),
     ...(turnUsage ? { turnUsage } : {})
   }
