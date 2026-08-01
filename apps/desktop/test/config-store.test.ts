@@ -383,6 +383,168 @@ describe('ConfigStore workspace identity', () => {
     ])
   })
 
+  // -------------------------------------------------------------------------
+  // 上面那几条守的都是「容器读得出来，里面某些条目坏了」。这一族守的是**容器本身**读不出来，
+  // 而那是同一个事故换了一扇门：三个容器原本共用一次 outer parse 并声明了形状
+  // （`z.array(...)` / `z.record(...)`），`.optional()` 只放过「键缺席」，于是任一容器写成
+  // 错的类型都会让**整次** parse 失败 —— 三个容器一起坍缩成空，`found` 从已经坍缩的量派生
+  // 因此读成 0，全量守卫失明，配置被判定为「本来就没有项目」并落盘。
+  //
+  // 实测（修复前，端到端跑 get()）：磁盘上两个完好的项目，`hosts` 写成 map，结果不抛不告警，
+  // 文件被改写成只剩系统自建的 scratch 一条。`executors` 写成数组也能连带清空项目列表。
+  //
+  // 判据落在「谁被报告」上而不只是「抛了」：三类容器各有自己该说的话，混一条通用消息就等于
+  // 把用户指向错的那个字节（见下面 stranded 与容器两条的分工）。
+  // -------------------------------------------------------------------------
+
+  it('refuses to launch when the workspaces container itself is unreadable, not just its records', async () => {
+    // 这条与「每一条记录都不可读」是不同的失败：那条里 `workspaces` 还是数组，能数出条数；
+    // 这里连容器都不是数组，**没有任何东西能数里面有几个项目**。所以判据不是条数对不对，
+    // 而是「有没有把它当成『本来就没有项目』放过去」——放过去就会落盘覆盖。
+    const { store, path } = await storeFixture()
+    const original = JSON.stringify({
+      ...baseConfig,
+      version: DEFAULT_CONFIG.version - 1,
+      // 未来形状：按 id 建键的 map。合法的 JSON，完好的项目数据，当前 schema 读不出。
+      workspaces: {
+        'ws-1': workspace({ id: 'ws-1', path: '/projects/one' }),
+        'ws-2': workspace({ id: 'ws-2', path: '/projects/two' })
+      }
+    })
+    await writeFile(path, original)
+
+    await expect(store.get()).rejects.toThrow(/project/)
+    expect(await readFile(path, 'utf8'), '容器不可读时启动通过了——磁盘上的项目已被覆盖').toBe(original)
+  })
+
+  it('one damaged container does not collapse the others', async () => {
+    // 三个容器共用一次 parse 时，坏一个就三个一起没。这条钉住它们各自独立：`executors` 写坏
+    // 不该让项目列表读不出来。判据取 `found`（它必须仍然看见那两个项目）而不是最终 workspaces，
+    // 因为下面那条 executors 守卫会先抛——两条守的是不同的事。
+    const carried = authoredConfigCarryOver({
+      ...baseConfig,
+      version: DEFAULT_CONFIG.version - 1,
+      hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
+      workspaces: [
+        workspace({ id: 'ws-1', path: '/projects/one' }),
+        workspace({ id: 'ws-2', path: '/projects/two' })
+      ],
+      // 未来形状：executors 从 record 变成数组。
+      executors: []
+    })
+
+    expect(carried.found, 'executors 写坏把 workspaces 一起坍缩了').toBe(2)
+    expect(carried.workspaces.map((entry) => entry.id)).toEqual(['ws-1', 'ws-2'])
+    expect(carried.executorsUnreadable, '坏掉的 executors 容器没被报告').toBe(true)
+  })
+
+  it('refuses to launch when the hosts container is unreadable, and says so as a host problem', async () => {
+    // 这条与 stranded 那条的分工是判据的核心：**一条** host 记录坏了，stranded 能点名是哪台、
+    // 哪几个项目；**整个容器**坏了则一个 id 都拿不到，报「某台 host」只会指向错的字节。
+    // 而 local 回填让这类丢失在结果里无处可见：挂在 local 上的项目照旧 resolvable，
+    // `hosts` 也非空（默认那条被放回来了），所以没有这道守卫就完全沉默。
+    const { store, path } = await storeFixture()
+    const original = JSON.stringify({
+      ...baseConfig,
+      version: DEFAULT_CONFIG.version - 1,
+      hosts: {
+        local: { id: 'local', kind: 'local', label: '我改过的名字' },
+        box: { id: 'box', kind: 'ssh', label: 'Box', hostname: 'b.test', port: 22 }
+      },
+      // 刻意全部挂在 local 上：这样没有任何项目会 stranded，唯一的丢失就是那些 host 定义。
+      workspaces: [workspace({ id: 'ws-local', path: '/projects/one' })]
+    })
+    await writeFile(path, original)
+
+    await expect(store.get()).rejects.toThrow(/host list/)
+    expect(await readFile(path, 'utf8')).toBe(original)
+  })
+
+  it('refuses to launch when the Executor table itself is unreadable, not just its entries', async () => {
+    // 上面那条 `one damaged container does not collapse the others` 只判了 carry-over 层那个
+    // `executorsUnreadable` 布尔为 true——**没人判它真的会拒绝启动**。实测把这道守卫整段删掉，
+    // 其余 39 条全绿：那个布尔可以被算得对而后被完全忽略，用户自建的 Executor 静默落盘丢掉。
+    //
+    // 这类丢失比项目丢失更难看出来：内置默认表铺在底下，结果长得像一张健康的 Executor 表，
+    // 只是用户自己那几条不见了。
+    const { store, path } = await storeFixture()
+    const original = JSON.stringify({
+      ...baseConfig,
+      version: DEFAULT_CONFIG.version - 1,
+      // 未来形状：从 record 变成数组。合法 JSON，当前 schema 读不出容器。
+      executors: [{ id: 'mine', label: 'Mine', providerId: 'claude' }]
+    })
+    await writeFile(path, original)
+
+    await expect(store.get()).rejects.toThrow(/Executor table/)
+    expect(await readFile(path, 'utf8'), 'Executor 容器不可读时启动通过了——用户自建的已被覆盖').toBe(
+      original
+    )
+  })
+
+  it('a damaged hosts container is reported as the container even when it also strands every project', async () => {
+    // 上一条刻意把项目全放在 local 上，于是只有一个守卫能成立——**顺序**因此无人守。这一格
+    // 补的是两条同时成立：容器写成 map，项目挂在远端 host 上，于是 `hosts` 解析成空、local
+    // 被回填、那些项目全部 stranded。
+    //
+    // 正确的消息是容器那条。stranded 的说法是「修好或删掉那条 host 记录」，可这里那条 box
+    // 记录本身完全没问题——改它一个字节也救不回来，真正坏的是外面那层形状。指错字节比不说更糟。
+    // （实测把容器守卫移到 stranded 之后，其余 39 条全绿：那条论证顺序的注释此前完全没有守卫。）
+    const { store, path } = await storeFixture()
+    const original = JSON.stringify({
+      ...baseConfig,
+      version: DEFAULT_CONFIG.version - 1,
+      hosts: {
+        local: { id: 'local', kind: 'local', label: 'This Mac' },
+        box: { id: 'box', kind: 'ssh', label: 'Box', hostname: 'b.test', port: 22 }
+      },
+      workspaces: [workspace({ id: 'ws-remote', hostId: 'box', path: '/projects/one' })]
+    })
+    await writeFile(path, original)
+
+    await expect(store.get()).rejects.toThrow(/host list/)
+    // 承重：不许退化成点名 box——那条 host 记录是好的，用户照着修会白费功夫。
+    await expect(store.get()).rejects.not.toThrow(/box \(ws-remote\)/)
+    expect(await readFile(path, 'utf8')).toBe(original)
+  })
+
+  it('keeps the two host loss classes apart: one damaged record is still reported by host and project', async () => {
+    // 反向：容器守卫不许把「某条记录坏了」抢过去。这条与上面 #273 那条的区别在于它**没有**
+    // 本机幸存项目——`carried.workspaces` 已按 host 过滤，所以「全部项目都在坏 host 上」时
+    // 全量守卫与 stranded 守卫会同时成立，而只有后者的消息是可操作的（改一个 host 字节）。
+    // 顺序判错就会让用户去删他们完好的项目记录。
+    const { store, path } = await storeFixture()
+    const original = JSON.stringify({
+      ...baseConfig,
+      version: DEFAULT_CONFIG.version - 1,
+      hosts: [{ id: 'box', kind: 'ssh', label: 'Box', hostname: 'b.test', port: 'twenty-two' }],
+      workspaces: [workspace({ id: 'ws-only', hostId: 'box', path: '/projects/one' })]
+    })
+    await writeFile(path, original)
+
+    // 承重：点名 host 与项目，而不是那条「没有一条记录能被接受」的通用消息。
+    await expect(store.get()).rejects.toThrow(/box \(ws-only\)/)
+    await expect(store.get()).rejects.not.toThrow(/none of the current/)
+    expect(await readFile(path, 'utf8')).toBe(original)
+  })
+
+  it('an absent or empty container is not damage', async () => {
+    // 三条容器守卫的边界。缺席与空都表示「用户没建过」，那不含糊，也不该拒绝启动——
+    // 判成损坏会让每一份新装配置都起不来。这条同时覆盖三者，因为它们共用同一条判据。
+    const { store, path } = await storeFixture()
+    await writeFile(path, JSON.stringify({
+      version: DEFAULT_CONFIG.version - 1,
+      hosts: [],
+      workspaces: [],
+      executors: {}
+    }))
+
+    const loaded = await store.get()
+
+    expect(loaded.workspaces.map((entry) => entry.id)).toEqual([SCRATCH_WORKSPACE_ID])
+    expect(loaded.hosts.some((host) => host.id === 'local'), 'local 回填没发生').toBe(true)
+  })
+
   it('treats a config that genuinely had no projects as no projects, not as an error', async () => {
     // 上一条的边界：真的一个项目都没有（新装、或用户删空了）不能被当成损坏。判据是原始条数，
     // 不是解析后的条数——否则 `workspaces: []` 会让每个空配置启动失败。
