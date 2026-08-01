@@ -66,6 +66,19 @@ const EXIT_CODE_KEYS = ['exit_code', 'exitCode', 'code'] as const
  */
 const FAILURE_ONLY_KEYS = ['error_message', 'errorMessage', 'failure_type', 'failureType'] as const
 
+/**
+ * 失败正文的所在，顺序即优先级。
+ *
+ * 失败事件的负载**普遍没有输出键**，正文只在某个错误字段里，而各家放的位置不同：Claude 的
+ * `PostToolUseFailure` 是 `{tool_name, tool_input, tool_use_id, error, is_interrupt?}`——正文在
+ * `error`；Cursor 的 `postToolUseFailure` 放 `error_message`（并另有 `failure_type`）。
+ *
+ * 少了这族回退，失败会被正确判红但**正文丢失**：用户看得见「炸了」，看不见炸在哪。这与判定失败是
+ * 两个独立的事实，所以两族键分开列——`failure_type: 'tool_error'` 能证明失败却不是正文，
+ * `error: 'exit status 1'` 两者都是。
+ */
+const FAILURE_TEXT_KEYS = ['error', 'error_message', 'errorMessage', 'error_details', 'errorDetails'] as const
+
 /** 结果对象里，正文通常挂在这些键下。 */
 const NESTED_TEXT_KEYS = ['stdout', 'output', 'content', 'text', 'stderr', 'message', 'error'] as const
 
@@ -142,6 +155,15 @@ function readFailure(source: Record<string, unknown>): boolean {
   return false
 }
 
+/** 按 `FAILURE_TEXT_KEYS` 找失败正文。找不到就是缺席——不拿 `failure_type` 那类标签充当正文。 */
+function readFailureText(payload: Record<string, unknown>): string | undefined {
+  for (const key of FAILURE_TEXT_KEYS) {
+    const text = readText(payload[key])
+    if (text) return text
+  }
+  return undefined
+}
+
 /**
  * 从一条 hook 负载里读出工具结果。
  *
@@ -159,9 +181,9 @@ export function hookToolOutcome(payload: Record<string, unknown>): HookToolOutco
       break
     }
   }
-  // 失败事件可能压根没有输出键，正文只在 `error_message` 里（Cursor 的 postToolUseFailure 就是
-  // 这样）。退回去读它，否则用户只看得见一个红标记而看不见任何原因。
-  const text = readText(raw) ?? readText(payload.error_message ?? payload.errorMessage)
+  // 失败事件普遍没有输出键，正文只在某个错误字段里（Claude 的 `error`、Cursor 的 `error_message`）。
+  // 退回去按 FAILURE_TEXT_KEYS 找，否则用户只看得见一个红标记而看不见任何原因。
+  const text = readText(raw) ?? readFailureText(payload)
   // 失败标志既可能在负载顶层（`exit_code`），也可能在结果对象内部（`is_error`）——两处都读。
   const failed = readFailure(payload) || (isRecord(raw) ? readFailure(raw) : false)
   return {
