@@ -134,6 +134,28 @@ export const GROK_HOOK_DIALECT: AgentHookLifecycleDialect = {
 }
 
 /**
+ * Gemini 的 PascalCase 方言。
+ *
+ * 事件名是 Gemini 自己的一套（`BeforeTool`，不是 Claude 的 `PreToolUse`），但**负载键**是 Claude
+ * 同族的 snake_case——这正是 `gemini hooks migrate --from-claude` 成立的原因，也是最容易搞混的地方：
+ * 同族的是负载，不是事件名，所以不能照抄 Claude 的事件清单。
+ *
+ * `AfterAgent` 映射 turn-end 而非 session-end：它带 `prompt`/`prompt_response`/`stop_hook_active`，
+ * 是**一轮**的收尾。Gemini 另有 `SessionEnd` 管会话终结，那不是轮次事实，故不进表。
+ *
+ * `BeforeModel`/`AfterModel`/`BeforeToolSelection`/`PreCompress`/`Notification` 刻意不映射：
+ * Core 今天没有判断需要它们，且 `AfterModel` 尤其不能进 `tool-use-end`——它是一次模型往返的收尾，
+ * 不是一次工具调用的结果（与 Antigravity 的 `PostInvocation` 同理）。
+ */
+export const GEMINI_HOOK_DIALECT: AgentHookLifecycleDialect = {
+  SessionStart: 'session-start',
+  BeforeAgent: 'user-prompt-submit',
+  BeforeTool: 'tool-use-start',
+  AfterTool: 'tool-use-end',
+  AfterAgent: 'turn-end'
+}
+
+/**
  * Core 认识的全部方言，按 Provider 组合。
  *
  * 每个 Provider 一块声明、这里一行 spread：新接一个 Provider 只在本文件追加自己那块，不必去动
@@ -148,7 +170,8 @@ const HOOK_LIFECYCLE_DIALECTS: readonly AgentHookLifecycleDialect[] = [
   PASCAL_CASE_HOOK_DIALECT,
   HERMES_HOOK_DIALECT,
   PI_HOOK_DIALECT,
-  GROK_HOOK_DIALECT
+  GROK_HOOK_DIALECT,
+  GEMINI_HOOK_DIALECT
 ]
 
 /** 合并后的查表面。重复键必须映射到同一个 canonical 事件，否则是真冲突——见下方构造时的断言。 */
