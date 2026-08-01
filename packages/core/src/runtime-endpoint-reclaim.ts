@@ -1,7 +1,7 @@
 import { lstat, readdir, rm, stat } from 'node:fs/promises'
 import { createConnection } from 'node:net'
-import { basename, dirname, join } from 'node:path'
-import { defaultAgentMuxRuntimeDirectory } from './runtime-paths.js'
+import { basename, dirname, join, relative } from 'node:path'
+import { defaultAgentMuxRuntimeDirectory, defaultCtxmuxSocketPath } from './runtime-paths.js'
 
 // 每次 artifact 升级都会派生一个新的 endpoint 目录（runtime-paths.ts 按 pinned manifest SHA 派生），
 // 旧的那个连同它的 state.sqlite3 永久留在盘上——实测一个旧目录 110.2MB，且里面的 Run 全部已终止。
@@ -70,9 +70,39 @@ export function orphanEndpointDirectoryNames(
  *
  * 真正的脆弱点在于：这条正确性依赖「启动/重启会动到直接子项」这个**附带**性质。若哪天 socket 挪进
  * 子目录（`<dir>/run/ctxmux.sock`），或重启改成复用 inode 而不 unlink，这道闸会**静默**失去对重启
- * 窗口的保护。socket 路径是直接子项这一点由 runtime-paths.ts 决定，改那里时必须回头看这里。
+ * 窗口的保护。前一种已经有检测器：socket 位置从 runtime-paths 那一份派生器现取（见
+ * {@link endpointSocketRelativePath}），而「它是不是直接子项」由 {@link socketIsDirectChildOfEndpoint}
+ * 明说出来并被测试质询——挪走它会红，不再依赖谁记得回头看这里。后一种（复用 inode 不 unlink）仍是
+ * 只能靠上游行为保证的前提，没有本地检测器。
  */
 const RECLAIM_MIN_QUIET_MS = 10 * 60_000
+
+/**
+ * socket 在一个 endpoint 目录里的**相对**位置，从 runtime-paths 那一份派生器现取。
+ *
+ * 不写死 `'ctxmux.sock'`：上面那段推理的正确性依赖「socket 是目录的**直接子项**」——只有直接子项的
+ * 创建与 unlink 会更新顶层 mtime，时间闸正是靠这个在重启窗口里保持新鲜。派生器与这里各写一份字面量，
+ * 哪天 socket 挪进子目录（`<dir>/run/ctxmux.sock`），存活闸会去探一个不存在的路径、恒判「没人监听」，
+ * 而时间闸同时失去新鲜度——两道闸一起静默失效。所以位置只有一处真值，且它是不是直接子项由
+ * {@link socketIsDirectChildOfEndpoint} 明说出来，让测试能质询它而不是靠注释担保。
+ *
+ * 惰性求值而非模块级常量：`defaultAgentMuxRuntimeDirectory()` 在 `AGENTMUX_RUNTIME_DIRECTORY` 是相对
+ * 路径时会抛，放在模块顶层会把那个错误变成**import 期**失败，连带打死整个模块的所有导出。
+ */
+function endpointSocketRelativePath(): string {
+  return relative(defaultAgentMuxRuntimeDirectory(), defaultCtxmuxSocketPath())
+}
+
+/**
+ * socket 是否仍是 endpoint 目录的直接子项——上面那两道闸互补的**前提**，写成可断言的谓词。
+ *
+ * 为真时：创建/unlink socket 会动到顶层 mtime，重启窗口里时间闸讲真话。为假时（socket 被挪进子目录）
+ * 那条保护会静默消失，所以这不是一句注释里的假设，而是一个有人守的事实。
+ */
+export function socketIsDirectChildOfEndpoint(): boolean {
+  const path = endpointSocketRelativePath()
+  return path.length > 0 && !path.includes('/') && !path.startsWith('..')
+}
 
 /** 一个 endpoint 目录当前占了多少字节，以及它是不是当前这一个。 */
 export interface EndpointDirectoryUsage {
@@ -186,7 +216,7 @@ export async function reclaimOrphanEndpointDirectories(
         skippedLive.push(path)
         continue
       }
-      if (await socketHasListener(join(path, 'ctxmux.sock'))) {
+      if (await socketHasListener(join(path, endpointSocketRelativePath()))) {
         skippedLive.push(path)
         continue
       }
