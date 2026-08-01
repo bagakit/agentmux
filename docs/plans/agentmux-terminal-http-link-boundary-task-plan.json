@@ -1,0 +1,47 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/agentmux-terminal-http-link-boundary-plan.md"
+  },
+  "source_refs": [
+    "docs/reviews/agentmux-terminal-http-link-boundary-plan.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "apps/desktop/src/renderer/src/components/TerminalView.tsx",
+    "node_modules/@xterm/addon-web-links"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "收紧裸 URL 的 CJK 边界并守住可观察链接文本",
+      "objective": "让终端 WebLinksAddon 只匹配裸 ASCII HTTP(S) URL，不把相邻中文正文或中文标点纳入链接范围。",
+      "outcome": "终端下划线、悬停和目的地菜单只作用于 URL 自身，OSC 8 的既有目的地出口保持不变。",
+      "acceptance": [
+        "裸 URL 匹配在中间和末尾排除 CJK 文字与 CJK 标点，中文紧贴 URL 时匹配文本在 URL 末尾停止。",
+        "ASCII 路径、查询、片段和百分号编码内容保持完整；普通 ASCII 结尾标点继续遵循 xterm 的严格 URL 规则。",
+        "WebLinksAddon 与 OSC 8 仍共用 activateHttpLink，不能通过拆出第二个链接出口来规避边界测试。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/terminal-http-link-boundary.test.ts test/terminal-link-provider-coverage.test.ts test/terminal-open-destination.test.ts",
+          "proves": "可观察的裸 URL 文本边界与两类 HTTP provider 的共同目的地出口。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "TerminalView 与新的纯链接规则在 Desktop 边界完整编译。"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/renderer/src/lib/terminal-http-link.ts",
+        "apps/desktop/src/renderer/src/components/TerminalView.tsx",
+        "apps/desktop/test/terminal-http-link-boundary.test.ts",
+        "apps/desktop/test/terminal-link-provider-coverage.test.ts"
+      ],
+      "supersedes": []
+    }
+  ]
+}

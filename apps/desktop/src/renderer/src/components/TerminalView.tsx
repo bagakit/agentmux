@@ -17,6 +17,7 @@ import {
   terminalLinkPreviewAnchor
 } from '../lib/terminal-link-gesture'
 import { detectTerminalPathLinks } from '../lib/terminal-path-link'
+import { TERMINAL_HTTP_URL_REGEX } from '../lib/terminal-http-link'
 import { terminalOptions, terminalTheme, activateTerminalUnicodeWidth, UNICODE_WIDTH_VERSION } from '../lib/terminal-theme'
 import {
   isShiftEnterNewline,
@@ -341,7 +342,8 @@ export function TerminalView({
     }
     const webLinks = new WebLinksAddon(activateHttpLink, {
       hover: hoverHttpLink,
-      leave: () => setLinkPreview(null)
+      leave: () => setLinkPreview(null),
+      urlRegex: TERMINAL_HTTP_URL_REGEX
     })
     // Shared anchor math for both link previews (http URLs and file paths), so the file-path preview
     // never covers its link either. Cell height is derived from the grid (no private xterm API).
