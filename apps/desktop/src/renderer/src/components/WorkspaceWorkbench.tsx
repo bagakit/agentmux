@@ -42,7 +42,7 @@ import { WorkbenchTabContextMenu } from './WorkbenchTabContextMenu'
 import { WorkbenchTabStrip } from './WorkbenchTabStrip'
 import { resolvePaneColumnEdgeZone } from '../lib/tab-drop-zone'
 import { SplitRatioCommitter } from '../lib/split-ratio-commit'
-import { moveSessionViewTargets, tabIdsForCloseScope } from '../lib/workbench-tab-actions'
+import { moveSessionViewMenu, tabIdsForCloseScope } from '../lib/workbench-tab-actions'
 import { SurfaceSwitch, TopRowLeadingChrome } from './TopRowChrome'
 import type {
   SplitDirection,
@@ -184,9 +184,15 @@ function SortableWorkbenchTab({
   })
   const copyableAgentSessionId = copyableAgentSessionIdForTab(tab)
   // Only a Session projection can be moved, and only the Region actually carrying it. A file or
-  // launcher View has no Session identity to relocate, so it offers no destinations at all.
-  const movableSessionRegionId =
-    surface.kind === 'agent' || surface.kind === 'terminal' ? surface.regionId : null
+  // launcher View has no Session identity to relocate, so it offers no destinations at all. The
+  // destinations and the click action come from ONE decision in the lib — see moveSessionViewMenu
+  // for the two mutations that survived when the component judged this twice on its own.
+  const moveSessionView = moveSessionViewMenu({
+    surface,
+    workspaces: config?.workspaces ?? [],
+    currentWorkspaceId: workspaceId,
+    move: moveSessionViewToWorkspace
+  })
   const dirty =
     surface.kind === 'file'
       ? Boolean(dirtyDocuments[documentKey(surface.workspaceId, surface.path)])
@@ -321,12 +327,8 @@ function SortableWorkbenchTab({
           group.id,
           direction
         )}
-        moveSessionViewTargets={movableSessionRegionId
-          ? moveSessionViewTargets(config?.workspaces ?? [], workspaceId)
-          : []}
-        onMoveSessionView={(targetWorkspaceId) => {
-          if (movableSessionRegionId) moveSessionViewToWorkspace(movableSessionRegionId, targetWorkspaceId)
-        }}
+        moveSessionViewTargets={moveSessionView.targets}
+        onMoveSessionView={moveSessionView.onSelect}
       >
         <button
           ref={setNodeRef}

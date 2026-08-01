@@ -22,6 +22,7 @@ import {
   moveSessionViewToWorkspace,
   type MoveSessionViewInput
 } from '../src/renderer/src/lib/move-session-view.js'
+import { moveSessionViewMenu } from '../src/renderer/src/lib/workbench-tab-actions.js'
 import { sessionTabTooltip } from '../src/renderer/src/lib/session-metadata.js'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts.js'
 import { useAppStore } from '../src/renderer/src/store.js'
@@ -357,10 +358,75 @@ describe('useAppStore.moveSessionViewToWorkspace', () => {
   })
 
   // The explicit entry point. Without a call site the reducer, the menu model and the store action are
-  // all unreachable — the user has no way to ask for the move, which is the whole Feature. This asserts
-  // the component actually consumes both, so deleting the wiring goes red rather than quietly shipping
-  // a feature nobody can trigger.
-  it('offers the move through the Tab context menu, wired to the store action', () => {
+  // all unreachable — the user has no way to ask for the move, which is the whole Feature.
+  //
+  // 此前这里是三条 toContain 文本断言，而文本看不见判定的极性，也看不见两处判定有没有各自跑偏。
+  // 实测（组件当时自己判两次）：把清单与动作的三元分支调换——点了目的地什么也不发生，而不可移动
+  // 的一格反而列出目的地——tsc 沉默、17 条全绿；把判据收成只认 `agent`（终端一格悄悄不能移动）
+  // 同样 tsc 沉默、17 条全绿。所以判定收进了 lib 的 moveSessionViewMenu，下面真跑它。
+  it('可移动的一格：列出目的地，点下去把这一格的 Region 送进 store 动作', () => {
+    const moved: Array<[string, string]> = []
+    const menu = moveSessionViewMenu({
+      surface: {
+        regionId: 'region-a',
+        kind: 'agent',
+        phase: 'attached',
+        workspaceId: 'workspace-a',
+        sessionId: 'agent-1'
+      },
+      workspaces: twoWorkspaceConfig.workspaces,
+      currentWorkspaceId: 'workspace-a',
+      move: (regionId, targetWorkspaceId) => moved.push([regionId, targetWorkspaceId])
+    })
+
+    // 目的地是别的 workspace，不含自己（移到自己是 no-op）。
+    expect(menu.targets.map((target) => target.workspaceId)).toEqual(['workspace-b'])
+
+    menu.onSelect('workspace-b')
+    // 送的是被点那一格自己的 Region——极性反了、或者 regionId 丢了，这里都拿不到这一对。
+    expect(moved).toEqual([['region-a', 'workspace-b']])
+  })
+
+  it('终端一格同样可移动——它也承载 Session', () => {
+    const moved: Array<[string, string]> = []
+    const menu = moveSessionViewMenu({
+      surface: {
+        regionId: 'region-t',
+        kind: 'terminal',
+        phase: 'attached',
+        workspaceId: 'workspace-a',
+        sessionId: 'term-9'
+      },
+      workspaces: twoWorkspaceConfig.workspaces,
+      currentWorkspaceId: 'workspace-a',
+      move: (regionId, targetWorkspaceId) => moved.push([regionId, targetWorkspaceId])
+    })
+    expect(menu.targets).toHaveLength(1)
+    menu.onSelect('workspace-b')
+    expect(moved).toEqual([['region-t', 'workspace-b']])
+  })
+
+  it('没有 Session 身份的一格：不列目的地，点也不动——两件事出自同一次判定', () => {
+    const moved: Array<[string, string]> = []
+    for (const surface of [
+      { regionId: 'region-f', kind: 'file' as const, workspaceId: 'workspace-a', path: '/repo/a.ts' },
+      { regionId: 'region-l', kind: 'launcher' as const, workspaceId: 'workspace-a' }
+    ]) {
+      const menu = moveSessionViewMenu({
+        surface,
+        workspaces: twoWorkspaceConfig.workspaces,
+        currentWorkspaceId: 'workspace-a',
+        move: (regionId, targetWorkspaceId) => moved.push([regionId, targetWorkspaceId])
+      })
+      // 菜单那一节整段不出现。
+      expect(menu.targets, `${surface.kind} 一格列出了目的地`).toEqual([])
+      // 而且就算被调用也不许动——这一条是"清单空但动作还在"那种半边失效的守卫。
+      menu.onSelect('workspace-b')
+    }
+    expect(moved).toEqual([])
+  })
+
+  it('组件把这两件事都交给那一次判定，不自己再判一次', () => {
     const source = readFileSync(
       new URL('../src/renderer/src/components/WorkspaceWorkbench.tsx', import.meta.url),
       'utf8'
@@ -369,12 +435,17 @@ describe('useAppStore.moveSessionViewToWorkspace', () => {
       new URL('../src/renderer/src/components/WorkbenchTabContextMenu.tsx', import.meta.url),
       'utf8'
     )
+    const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
 
-    // The destinations come from the pure model, never re-derived in the component.
-    expect(source).toContain('moveSessionViewTargets(')
-    // Selecting a destination calls the store action with the projection's own Region.
-    expect(source).toContain('moveSessionViewToWorkspace(')
-    // The menu renders the destinations it is given rather than inventing its own list.
+    // 清单与动作都直接来自那一次判定的返回值，中间没有第二个条件表达式可以取反。
+    expect(code).toContain('moveSessionViewTargets={moveSessionView.targets}')
+    expect(code).toContain('onMoveSessionView={moveSessionView.onSelect}')
+    // 组件不许再自己按 surface.kind 判一次可移动性——那正是当初两处判定跑偏的入口。
+    expect(
+      code,
+      '组件又自己算了一遍目的地清单，于是它可以与 onSelect 的判定不一致'
+    ).not.toMatch(/moveSessionViewTargets\(/)
+    // 菜单渲染它收到的清单，不自己发明。
     expect(menu).toContain('moveSessionViewTargets')
   })
 })
