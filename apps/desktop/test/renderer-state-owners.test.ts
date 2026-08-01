@@ -10,7 +10,7 @@ import {
   type FileWorkbenchState,
   reconcileWorkbenchFileProjection
 } from '../src/renderer/src/lib/file-workbench-state.js'
-import { reduceRuntimeEvent } from '../src/renderer/src/lib/session-state.js'
+import { reduceAgentMembershipSnapshot, reduceRuntimeEvent } from '../src/renderer/src/lib/session-state.js'
 import { createWorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.js'
 import {
   addWorkbenchRegion,
@@ -773,5 +773,94 @@ describe('Renderer resource state owners', () => {
     })
     expect(renamed.documentIssues[neighborKey]).toBe(state.documentIssues[neighborKey])
     expect(renamed.documents[neighborKey]).toBe(state.documents[neighborKey])
+  })
+})
+
+/**
+ * 运行时的成员对齐。用户报的是「切换走再切换回来, 有些 Region 会消失」——切换本身不删任何 Region
+ * （selectWorkspace 只写 activeWorkspaceId，两个保活协调器只读 store），真正的删除发生在后台：一次
+ * 成员重整趁用户在别的 Workspace 时异步跑完，切回来才被发现。
+ *
+ * 启动那条出口早有空快照守卫并配了测试（`store-persistence.test.ts` 的
+ * 「keeps persisted Agent Regions when an initial snapshot is empty...」），运行时这条出口此前既没有
+ * 守卫也没有测试——被守的那侧有测试，没守的那侧连测试都没有。
+ */
+describe('运行时成员快照不拿一份空回答退役 Agent', () => {
+  /** 一个带 agent 面的 attached tab，加上它在 layout 里的位置。 */
+  function seedAttachedAgent() {
+    const tabId = `session:${session.id}`
+    return {
+      tabId,
+      state: {
+        sessions: [session],
+        timelines: {},
+        pendingAgentLaunches: {},
+        tabs: { [tabId]: sessionTab(tabId, 'attached') },
+        layouts: { 'workspace-1': createWorkspaceLayout('pane', [tabId]) },
+        viewModes: {}
+      }
+    }
+  }
+
+  const EMPTY = { sessions: [], timelines: {}, recoveryCandidates: [] }
+
+  it('一份空快照不删仍在跑的 Agent Region', () => {
+    // 空快照分不清「真的没有 session」与「Core 没就绪 / 根目录接错」。此前它被当作权威，于是一个
+    // status 仍是 running 的 agent 连 tab 带 layout 一起被摘掉——用户离开时留下的格子，回来就没了。
+    const { tabId, state } = seedAttachedAgent()
+    const next = reduceAgentMembershipSnapshot(state, EMPTY, new Set())
+
+    expect(next.sessions.map((item) => item.id)).toEqual([session.id])
+    expect(next.tabs[tabId]).toBeDefined()
+    expect(next.layouts['workspace-1']?.groups[0]?.tabOrder).toEqual([tabId])
+    // 整个 state 原样返回：不可逆的删除面前 fail open，等下一份快照来纠正。
+    expect(next).toBe(state)
+  })
+
+  it('本地没有 Agent 时空快照原样返回，不凭空造出状态', () => {
+    // 守卫的判据只是「这一份快照说不出话」，不再多问一句"本地还记着 agent 吗"：空快照里没有 canonical
+    // agent 可合并，那个条件不会改变任何结果。这条守的是空快照下的返回值本身干净——既不删也不加。
+    const state = {
+      sessions: [],
+      timelines: {},
+      pendingAgentLaunches: {},
+      tabs: {},
+      layouts: {},
+      viewModes: {}
+    }
+    expect(reduceAgentMembershipSnapshot(state, EMPTY, new Set())).toBe(state)
+  })
+
+  it('说得出别的 session 的快照仍有资格退役一个 Agent', () => {
+    // 反向：守卫只挡整份为空的那一种回答。一份带着别的 session 的快照是可信的成员事实，此时"不在
+    // 快照里"就是"已经不在了"——这正是这个函数存在的理由，不能被守卫一起挡掉。
+    const { tabId, state } = seedAttachedAgent()
+    const other: SessionSnapshot = { ...session, id: 'session-2', control: { ...session.control, agentSessionId: 'session-2' } }
+    // 快照带 session 就必须带它的 timeline——这是 reducer 自己的不变量，它会对缺项抛错。
+    const snapshot = {
+      sessions: [other],
+      timelines: { 'session-2': { agentSessionId: 'session-2', revision: 1, items: [] } },
+      recoveryCandidates: []
+    }
+    const next = reduceAgentMembershipSnapshot(state, snapshot, new Set())
+
+    expect(next.sessions.map((item) => item.id)).toEqual(['session-2'])
+    expect(next.tabs[tabId]).toBeUndefined()
+    expect(next.layouts['workspace-1']?.groups[0]?.tabOrder).toEqual([])
+  })
+
+  it('只带恢复候选、没有 session 的快照也算说得出话', () => {
+    // 恢复候选是「这个 agent 还在，只是要重连」。一份列着候选的快照不是"空"，它有资格谈成员——
+    // 守卫因此把候选数也计入，与启动那侧的判据逐字对齐（两处都要求 sessions 与候选同时为空）。
+    const { tabId, state } = seedAttachedAgent()
+    const snapshot = {
+      sessions: [],
+      timelines: {},
+      recoveryCandidates: [{ ...session, id: 'session-3', control: { ...session.control, agentSessionId: 'session-3' } }]
+    }
+    const next = reduceAgentMembershipSnapshot(state, snapshot, new Set())
+
+    expect(next.tabs[tabId]).toBeUndefined()
+    expect(next.sessions).toEqual([])
   })
 })
