@@ -1232,6 +1232,46 @@ describe('DEFAULT_CONFIG built-in Provider coverage', () => {
     expect(DEFAULT_CONFIG.version).toBeGreaterThan(LEGACY_NINE_PROVIDER_VERSION)
   })
 
+  // 上面那条只守「越过 9 家时代」这一个历史门槛。它今天恒真（当前是 v9 > 7），所以**再加一家
+  // Provider 而忘了 bump**，它照旧全绿——这正是 #304 那个静默漏点，而 v7→v8 的事故说明它会重演。
+  //
+  // 前提已实测坐实：同版本加载走的是纯 `configSchema.parse`（config-store.ts:694），没有任何
+  // executor 回填（`get()` 里只有 scratch 与 notification 两个 additive helper）。造一份「当前版本、
+  // 但少一家内置 executor」的配置读进来，那家就是不在，落盘后也仍然不在，全程无任何告知。于是
+  // 「加了 Provider 却没 bump」对存量用户等于这家 Provider 不存在，而且他们无从知道。
+  //
+  // 判据不能是「记住 executor 有几家」——那又是一个手抄的数字，且加一家减一家会互相抵消。这条把
+  // **当前 key 集合**与**当前版本号**绑成一对写死的锚点：动了表就必须回来动这行，而动这行的人会
+  // 读到下面那句话，于是「要不要 bump」被强制成一次显式判断，而不是一次遗漏。
+  //
+  // 为什么锚点是写死的字面量而不是从 DEFAULT_CONFIG 现取：现取会跟着被测对象一起漂（加一家时两侧
+  // 同步变大、恒真），那是本文件 `LEGACY_NINE_PROVIDER_VERSION` 上方那段注释已经踩过并写下的同一个陷阱。
+  it('内置 executor 的 key 集合与 CONFIG_VERSION 绑成一对锚点——改了表就必须回来判断要不要 bump', () => {
+    // 这两个值必须一起改。如果你新增/删除了内置 executor：
+    //   - 存量用户要看到这次变化 ⇒ bump CONFIG_VERSION（代价见「bump 会把改过的内置 Executor
+    //     还原成出厂值」那条：用户改过的内置 Executor 会被还原；自建的与偏好不受影响）；
+    //   - 确定不需要送到存量用户手上（例如只是重命名一个内部 id）⇒ 不 bump，但要在这里写明为什么。
+    // 两种情况都要把下面的清单与版本号同步到当前值。
+    const ANCHORED_EXECUTOR_IDS = [
+      'antigravity', 'claude', 'codex', 'copilot', 'cursor', 'droid',
+      'gemini', 'grok', 'hermes', 'kimi', 'opencode', 'pi', 'traex'
+    ]
+    const ANCHORED_AT_VERSION = 9
+
+    expect(
+      Object.keys(DEFAULT_CONFIG.executors).sort(),
+      `内置 executor 的清单变了，但这条锚点还停在 v${ANCHORED_AT_VERSION}。` +
+        '先决定这次变化要不要送到存量用户手上：要，就 bump CONFIG_VERSION（同版本加载不回填，' +
+        '不 bump 等于这家 Provider 对他们不存在）；不要，就在这条测试里写明理由。' +
+        '然后把清单与 ANCHORED_AT_VERSION 一起同步到当前值。'
+    ).toEqual(ANCHORED_EXECUTOR_IDS)
+    expect(
+      DEFAULT_CONFIG.version,
+      `CONFIG_VERSION 变了而这条锚点没跟上：把 ANCHORED_AT_VERSION 同步到 ${DEFAULT_CONFIG.version}。` +
+        '这条与上面的清单是一对——只同步一半，下一次改表时它就守不住了。'
+    ).toBe(ANCHORED_AT_VERSION)
+  })
+
   it('keeps the version literal, the default and the reset threshold in one source', async () => {
     // 这个数字有五处消费者（contracts 的 AppConfig.version 类型、schema 的 z.literal、
     // DEFAULT_CONFIG.version、get() 的重置阈值、renderer 那份预览 mock），此前各写一份，必须联动。
