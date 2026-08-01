@@ -44,30 +44,74 @@ describe('设置搜索', () => {
   it('组件里那句取值只是转发，没有第二份过滤逻辑', () => {
     // 上面两条守「函数算得对不对」，这条守「组件有没有真的用它」。抽成函数只解决一半：壳里
     // 完全可以留一份自己的过滤（或者干脆不过滤）而那两条照旧全绿。
-    //
-    // 判据是壳里那一句**恰好只有转发**：`visibleSettingsSections` 被调用，且组件里不再出现
-    // 第二处 `SECTIONS.filter`。前者失守会让搜索走别的逻辑，后者失守会让两份逻辑并存后漂移。
     const source = readFileSync(
       fileURLToPath(new URL('../src/renderer/src/components/SettingsPanel.tsx', import.meta.url)),
       'utf8'
     )
     const forwarding = source.match(/useMemo\(\(\) => visibleSettingsSections\(query\), \[query\]\)/gu)
     expect(forwarding?.length, '组件不再把搜索过滤转发给 visibleSettingsSections').toBe(1)
-    // 定义体里那一处 `SECTIONS.filter` 是唯一合法的一处。
+    // 侧栏导航的分组列表也必须来自纯函数。壳里原先留着一句 `visibleSections.filter(…group…)`，
+    // 而那一句才是侧栏真正渲染用的列表——它现在归 settingsNavGroups 算。
+    const navForwarding = source.match(/useMemo\(\(\) => settingsNavGroups\(query\), \[query\]\)/gu)
+    expect(navForwarding?.length, '侧栏分组不再来自 settingsNavGroups——壳里又自己算了一遍').toBe(1)
+  })
+
+  it('壳里一句过滤都没有', () => {
+    // 这条替换了原先「数 `\bSECTIONS\.filter` 出现几次」的判据。那个判据被实测绕过：把壳里
+    // `:122` 那句改成 `[...SECTIONS].filter(…)`（中间隔了个 `]`，正则失配），侧栏从此**永不
+    // 随搜索词过滤**——用户打什么词侧栏都是全量——而 4 条测试全绿。记忆
+    // counting-a-symbol-misses-other-spellings：数符号名守不住别的拼法；给它补 `\b`
+    // 只是把「照抄同一个标识符」这一种拼法认了出来，别的拼法照旧能绕。
     //
-    // `\b` 是这条断言的承重部分，不是装饰：没有它，`visibleSections.filter`（`:122` 那句按 group
-    // 分组，完全无害）会被算作第二处，于是这条断言从写下的那一刻就是红的——而我当时把那次红
-    // 归因成同事的在途变异，靠「恰好 1 条红」这个前提盖了过去。数字面量不加词法边界会**多算**，
-    // 与「数一个符号名守不住别的拼法」是同一族的两面。
-    expect(source.match(/\bSECTIONS\.filter/gu)?.length, '出现了第二份过滤逻辑，两份必然漂移').toBe(1)
+    // 所以不再去猜拼法，改成消除分岔本身：分组也搬进 `settingsNavGroups`，于是壳里**一句
+    // 过滤都不该剩**。判据是 AST 上「SettingsPanel 函数体里没有任何 `.filter(` 调用」——
+    // 与怎么拼无关（`[...X].filter`、`Object.values(X).filter`、`y.filter` 都会被认出）。
+    const source = readFileSync(
+      fileURLToPath(new URL('../src/renderer/src/components/SettingsPanel.tsx', import.meta.url)),
+      'utf8'
+    )
+    const ast = ts.createSourceFile('SettingsPanel.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+    let shell: ts.FunctionDeclaration | undefined
+    ast.forEachChild((node) => {
+      if (ts.isFunctionDeclaration(node) && node.name?.text === 'SettingsPanel') shell = node
+    })
+    expect(shell, '找不到 SettingsPanel 这个函数声明——判据的范围落空，这条什么都不检查').toBeDefined()
+
+    // 前提自检：判据认得出 `.filter(` 这个形状本身。若这段遍历写错，主断言会在「一处都没找到」
+    // 上静默通过——正是它要取代的那种失明。
+    const filterCallsIn = (node: ts.Node): number[] => {
+      const lines: number[] = []
+      const walk = (current: ts.Node): void => {
+        if (
+          ts.isCallExpression(current) &&
+          ts.isPropertyAccessExpression(current.expression) &&
+          current.expression.name.text === 'filter'
+        ) {
+          lines.push(ast.getLineAndCharacterOfPosition(current.getStart(ast)).line + 1)
+        }
+        ts.forEachChild(current, walk)
+      }
+      walk(node)
+      return lines
+    }
+    // 自检的靶子取模块顶层：`visibleSettingsSections` 与 `settingsNavGroups` 各有一处合法的
+    // `.filter(`，判据必须数得出来。数成 0 就说明遍历坏了。
+    expect(filterCallsIn(ast).length, '整份文件一处 `.filter(` 都没找到——判据失效，主断言恒绿')
+      .toBeGreaterThanOrEqual(2)
+
+    expect(filterCallsIn(shell!), [
+      '`SettingsPanel` 这层壳里出现了 `.filter(` 调用。',
+      '按搜索词过滤、按分组切分都归纯函数（visibleSettingsSections / settingsNavGroups）；',
+      '壳里留一份自己的过滤，就总有一种拼法能把它换成不读 query 的版本，而上面几条照旧全绿——',
+      '`[...SECTIONS].filter(…)` 就是实测绕过原判据的那一种，侧栏从此永不过滤。'
+    ].join('\n')).toEqual([])
   })
 
   it('组件里没有第二处按搜索词过滤 section 的地方', () => {
-    // 上一条用 `\bSECTIONS\.filter` 计数，加了 `\b` 之后它只认得出「照抄同一个标识符」这一种
-    // 写法：把第二份过滤写成 `visibleSections.filter((s) => …includes(query))` 就绕过去了，而那
-    // 正是它要防的东西（记忆 counting-a-symbol-misses-other-spellings：数符号名守不住别的拼法）。
-    //
-    // 所以判据换成「壳里谁在读 `query`」——这是搜索过滤绕不开的输入。
+    // 上一条守「壳里没有 `.filter(`」。但第二份过滤不一定写成 `.filter`——一个 for 循环里
+    // `includes(query)` 同样是过滤，且不含 `.filter(`。所以这条从另一侧判：**壳里谁在读 `query`**。
+    // 那是搜索过滤绕不开的输入，与用什么语法过滤无关。两条互补，缺一侧就有一族拼法无人守
+    //（记忆 counting-a-symbol-misses-other-spellings）。
     //
     // 范围必须用语言自己的作用域规则圈，不能整份文件一起数：`visibleSettingsSections(query)` 的
     // **形参**也叫 `query`，混进来就把「纯函数的入参」和「组件的 state」算成一类（实测整份文件
@@ -104,10 +148,10 @@ describe('设置搜索', () => {
       .toBeGreaterThan(0)
     expect(readsOfQuery.length, [
       `\`query\` 在壳里的读取点变成了 ${readsOfQuery.length} 处（行号：${readsOfQuery.join(', ')}）。`,
-      '合法的 5 处是：那一句 `visibleSettingsSections(query)` 转发占 2（实参 + 依赖数组），',
-      '搜索框的 `value={query}` 与清空按钮的条件各 1，空结果提示里回显那一句 1。',
+      '合法的 7 处是：`visibleSettingsSections(query)` 与 `settingsNavGroups(query)` 两句转发各占 2',
+      '（实参 + 依赖数组），搜索框的 `value={query}` 与清空按钮的条件各 1，空结果提示里回显那一句 1。',
       '多出来的读取点通常意味着壳里又判了一次「哪些 section 匹配搜索词」——那就是第二份过滤逻辑。',
       '如果这次新增是别的正当用途，把这个数字连同理由一起更新。'
-    ].join('\n')).toBe(5)
+    ].join('\n')).toBe(7)
   })
 })
