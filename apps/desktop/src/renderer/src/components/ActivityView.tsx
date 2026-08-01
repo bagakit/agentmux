@@ -868,7 +868,6 @@ export function ActivityView({
               key={key}
               className="activity-log__segment"
               ref={registerSegment(key)}
-              data-selected={from === selectedIndex ? '' : undefined}
             >
               {entry.kind === 'run' ? (
                 <Run items={entry.items} origin={origin} />

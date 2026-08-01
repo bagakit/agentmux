@@ -114,7 +114,6 @@ export function OpenDestinationBar({
             type="button"
             className="icon-button open-destination-bar__button"
             data-destination={item.destination}
-            data-needs-region={needsRegion ? '' : undefined}
             data-disabled-reason={disabled ? NEEDS_PANE_REASON : undefined}
             disabled={disabled}
             tabIndex={index === firstEnabled ? 0 : -1}
