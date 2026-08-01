@@ -1027,7 +1027,13 @@ await assert.rejects(
     operationId: 'packed-no-stop-too-early',
     prompt: 'must-not-reach-pty-before-composer'
   }),
-  (error) => error?.code === 'AGENT_PROMPT_NOT_READY'
+  (error) => (
+    error?.code === 'AGENT_PROMPT_NOT_READY' &&
+    /runId=\S+/.test(error?.detail ?? '') &&
+    error?.detail?.includes('readinessSource=initial-composer') &&
+    error?.detail?.includes('reason=observation-pending') &&
+    !error?.detail?.includes('must-not-reach-pty-before-composer')
+  )
 )
 assert.equal((await noStopClient.sessionTimeline(noStop.agentSessionId)).items.some((item) => (
   item.kind === 'user_message' && item.content === 'must-not-reach-pty-before-composer'
@@ -1065,7 +1071,12 @@ await assert.rejects(
     operationId: 'packed-no-stop-second-prompt',
     prompt: 'must-not-reuse-initial-readiness'
   }),
-  (error) => error?.code === 'AGENT_PROMPT_READINESS_CONSUMED'
+  (error) => (
+    error?.code === 'AGENT_PROMPT_READINESS_CONSUMED' &&
+    /runId=\S+/.test(error?.detail ?? '') &&
+    error?.detail?.includes('consumedBySubmissionId=packed-no-stop-turn-zero') &&
+    !error?.detail?.includes('must-not-reuse-initial-readiness')
+  )
 )
 await noStopReconnected.stopAgent(noStop.agentSessionId, noStop.run)
 await noStopReconnected.dispose()
@@ -1508,6 +1519,10 @@ const concurrentResults = await Promise.allSettled([
 assert.equal(concurrentResults.filter((result) => result.status === 'fulfilled').length, 1)
 const concurrentFailure = concurrentResults.find((result) => result.status === 'rejected')
 assert.equal(concurrentFailure?.reason?.code, 'AGENT_PROMPT_READINESS_CONFLICT')
+assert.match(
+  concurrentFailure?.reason?.detail ?? '',
+  /expectedRunId=\S+ reason=session-cas-rejected/
+)
 const concurrentReplay = await concurrentOwner.reattachAgent(concurrent.agentSessionId, 0)
 const concurrentOutput = concurrentReplay.attachment.replay.map((event) => event.data).join('')
 assert.equal(

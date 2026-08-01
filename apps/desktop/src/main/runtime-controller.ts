@@ -39,6 +39,7 @@ import {
 import { createExecutionHost } from './host-factory.js'
 import { ScratchTopics, type PreparedScratchAgentTopic } from './scratch-topics.js'
 import { ProcessResourceSampler } from './process-resource-sampler.js'
+import { humanizePromptDeliveryError } from './prompt-readiness-diagnostics.js'
 import {
   SCRATCH_WORKSPACE_ID,
   scratchTopicIdFromWorkspacePath,
@@ -248,29 +249,6 @@ async function disposePrepared(hosts: readonly PreparedRuntimeHost[]): Promise<v
   ]))
   const errors = results.flatMap((result) => result.status === 'rejected' ? [result.reason] : [])
   if (errors.length > 0) throw new AggregateError(errors, 'Failed to dispose prepared Runtime hosts.')
-}
-
-// A render-then-submit Provider (codex) applies a prompt only against a ready composer epoch, which exists
-// between turns — never mid-generation. Steering while it is working is fail-closed by design (a sealed Core
-// contract), and Core signals that with the readiness-family codes below. Those codes carry an internal
-// message ("ready composer epoch…") and, worse, the code itself is stripped as the error crosses Electron's
-// ipcRenderer.invoke — so the renderer would otherwise surface raw transport jargon. Rewrite them here, where
-// the code is still intact, into one honest sentence the user can act on. The code is preserved so main-process
-// logs keep it; only the human-facing message changes. This does not weaken the gate — Core still refuses.
-const PROMPT_NOT_READY_CODES: ReadonlySet<string> = new Set([
-  'AGENT_PROMPT_NOT_READY',
-  'AGENT_PROMPT_READINESS_CONSUMED',
-  'AGENT_PROMPT_READINESS_CONFLICT',
-  'AGENT_PROMPT_SUBMISSION_BUSY'
-])
-
-function humanizePromptDeliveryError(error: unknown): unknown {
-  if (!(error instanceof AgentMuxError) || !PROMPT_NOT_READY_CODES.has(error.code)) return error
-  return new AgentMuxError(
-    'The agent is still working on its current turn and cannot take a new message yet. Wait for it to finish, then send again.',
-    error.code,
-    error.detail
-  )
 }
 
 export class RuntimeController {

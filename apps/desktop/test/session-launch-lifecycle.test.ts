@@ -1410,14 +1410,18 @@ describe('Session and Launcher lifecycle ownership', () => {
     useAppStore.setState({ sessions: [session], error: null })
     vi.spyOn(api.sessions, 'submitPrompt').mockRejectedValue(new Error(
       "Error invoking remote method 'sessions:submitPrompt': AgentMuxError: " +
-      'The agent is still working on its current turn and cannot take a new message yet. ' +
-      'Wait for it to finish, then send again.'
+      'The prompt was not sent because this Run has no consumable composer readiness yet. ' +
+      'The Agent Run is still running; wait for the Stop/screen readiness observation to finish, then send again. ' +
+      'If it stays not ready, check the Provider readiness marker or Hook ingress. ' +
+      'Diagnostic: runId=run-1 readinessId=readiness-1 readinessSource=native-stop readyThroughByte=pending reason=observation-pending'
     ))
 
     await expect(useAppStore.getState().send(session.id, 'steer mid-turn')).rejects.toThrow()
     expect(useAppStore.getState().error).toBe(
-      'The agent is still working on its current turn and cannot take a new message yet. ' +
-      'Wait for it to finish, then send again.'
+      'The prompt was not sent because this Run has no consumable composer readiness yet. ' +
+      'The Agent Run is still running; wait for the Stop/screen readiness observation to finish, then send again. ' +
+      'If it stays not ready, check the Provider readiness marker or Hook ingress. ' +
+      'Diagnostic: runId=run-1 readinessId=readiness-1 readinessSource=native-stop readyThroughByte=pending reason=observation-pending'
     )
   })
 })

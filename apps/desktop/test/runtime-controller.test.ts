@@ -196,10 +196,12 @@ const runtimeFixture = vi.hoisted(() => {
 vi.mock('@agentmux/core', () => {
   class AgentMuxError extends Error {
     readonly code: string
-    constructor(message: string, code: string) {
+    readonly detail?: string
+    constructor(message: string, code: string, detail?: string) {
       super(message)
       this.name = 'AgentMuxError'
       this.code = code
+      this.detail = detail
     }
   }
   return {
@@ -678,12 +680,39 @@ describe('RuntimeController configuration transaction', () => {
     }))
   })
 
-  it('rewrites a fail-closed readiness rejection into an honest, actionable message', async () => {
-    // Steering a render-then-submit Agent (codex) mid-turn is fail-closed by design: Core throws
-    // AGENT_PROMPT_NOT_READY because no ready composer epoch exists while it is working. That code is a
-    // sealed contract — but its raw message ("ready composer epoch…") is internal jargon, and Electron
-    // strips the code as the error crosses ipcRenderer.invoke. submitPrompt must translate it here, where
-    // the code is still intact, into a sentence the user can act on, while preserving the code for logs.
+  it.each([
+    {
+      code: 'AGENT_PROMPT_NOT_READY',
+      coreMessage: 'Agent prompt requires a ready composer epoch for this exact Run.',
+      detail: 'runId=run-1 readinessId=readiness-1 readinessSource=native-stop readyThroughByte=pending reason=observation-pending',
+      expected: /no consumable composer readiness.*still running.*send again/i
+    },
+    {
+      code: 'AGENT_PROMPT_READINESS_CONSUMED',
+      coreMessage: 'The current composer readiness epoch was already consumed by another prompt.',
+      detail: 'runId=run-1 readinessId=readiness-1 consumedBySubmissionId=submission-1 readyThroughByte=42',
+      expected: /readiness epoch was already consumed.*still running.*next readiness epoch/i
+    },
+    {
+      code: 'AGENT_PROMPT_SUBMISSION_BUSY',
+      coreMessage: 'Another Agent prompt operation is incomplete for this Run.',
+      detail: 'runId=run-1 activeSubmissionId=submission-1 payloadAcknowledged=true submitAcknowledged=false',
+      expected: /another submission.*still completing.*keep this draft/i
+    },
+    {
+      code: 'AGENT_PROMPT_READINESS_CONFLICT',
+      coreMessage: 'Prompt readiness changed or was consumed by another Client.',
+      detail: 'expectedRunId=run-1 canonicalRunId=run-2 reason=session-cas-rejected-after-refresh',
+      expected: /readiness changed.*refresh the canonical Session.*current Run/i
+    }
+  ] as const)('classifies $code into an actionable message and preserves diagnostics', async ({
+    code,
+    coreMessage,
+    detail,
+    expected
+  }) => {
+    // Core remains fail-closed. Main classifies only the stable code, while carrying the non-sensitive
+    // Run/epoch/submission facts through the Error detail for logs and the IPC-visible message.
     const controller = await configuredController()
     const client = runtimeFixture.FakeClient.instances[0]!
     const running = agentStatusFixture()
@@ -691,12 +720,7 @@ describe('RuntimeController configuration transaction', () => {
       ...running,
       run: { ...running.run, state: 'running' as const }
     })
-    client.submitAgentPrompt.mockRejectedValue(
-      new AgentMuxError(
-        'Agent prompt requires a ready composer epoch for this exact Run.',
-        'AGENT_PROMPT_NOT_READY'
-      )
-    )
+    client.submitAgentPrompt.mockRejectedValue(new AgentMuxError(coreMessage, code, detail))
     const control = {
       kind: 'agent' as const,
       hostId: 'local',
@@ -710,12 +734,12 @@ describe('RuntimeController configuration transaction', () => {
     )
     expect(rejection).toBeInstanceOf(AgentMuxError)
     const error = rejection as AgentMuxError
-    // The code survives for main-process logs and any programmatic branch.
-    expect(error.code).toBe('AGENT_PROMPT_NOT_READY')
-    // The message no longer leaks the internal "composer epoch" wording; it tells the user what to do.
-    expect(error.message).not.toMatch(/composer epoch/i)
-    expect(error.message).toMatch(/still working/i)
-    expect(error.message).toMatch(/send again/i)
+    expect(error.code).toBe(code)
+    expect(error.detail).toBe(detail)
+    expect(error.message).toMatch(expected)
+    expect(error.message).toContain(`Diagnostic: ${detail}`)
+    // User content is never copied into Core detail or the classified message.
+    expect(error.message).not.toContain('steer mid-turn')
   })
 
   it('forwards a typed interaction response with the exact Session Run fence', async () => {
