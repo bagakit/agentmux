@@ -45,7 +45,9 @@ describe('built-in agent providers', () => {
       {
         id: 'pi', executable: 'pi', expectedProcess: 'pi',
         promptDelivery: 'positional-argv', readySignal: 'foreground-process',
-        hook: 'native', permission: 'observe', resume: 'provider-native', acp: 'none',
+        // permission 是 'none' 而不是别家那个 'observe'：Pi 没有任何可订阅的授权/等待事件
+        // （上游 `extensions/types.ts` 里没有 permission 族；`ui_prompt_*` 只在扩展自己弹窗时发）。
+        hook: 'native', permission: 'none', resume: 'provider-native', acp: 'none',
         replyCorrelation: 'none'
       },
       {
@@ -120,9 +122,23 @@ describe('built-in agent providers', () => {
     for (const id of ['codex', 'claude', 'antigravity', 'hermes', 'grok', 'gemini', 'cursor'] as const) {
       expect(catalog.get(id)).toEqual({ kind: 'native', installation: 'explicit-managed' })
     }
-    // Native hooks AgentMux understands but cannot install yet (pi TS extension has no surface AgentMux
-    // writes): it must NOT claim explicit-managed, so the launch-time trigger honestly skips it.
-    expect(catalog.get('pi')).toEqual({ kind: 'native', installation: 'unmanaged' })
+    // pi 也在这一档：它的扩展面是 in-process JS，AgentMux 往 `<agent-dir>/extensions/agentmux.js`
+    // 写一份自己独占的扩展（见 createPiManagedHookPlan）。此前它记 unmanaged，理由写的是"pi TS
+    // extension has no surface AgentMux writes"——那句话是在没有第一方证据时下的判断，已被上游源码
+    // 推翻：装载合同（目录、default 函数导出、可订阅事件名）逐条可读。
+    expect(catalog.get('pi')).toEqual({ kind: 'native', installation: 'explicit-managed' })
+    // Native hooks AgentMux understands but genuinely cannot install: kimi 的配置面是
+    // `~/.kimi/config.toml`——本仓四种 merge 策略没有一种能编辑 TOML，而那是用户自己的主配置
+    // （model/credentials/theme 都在里面），整份覆盖会是数据损坏而非安装。它必须**不**声明
+    // explicit-managed，好让启动时的安装触发如实跳过它。
+    expect(catalog.get('kimi')).toEqual({ kind: 'native', installation: 'unmanaged' })
+    // 挡板：unmanaged 这一档必须真的还有人。上面那条只断言 kimi 是 unmanaged——若哪天它也被实现成
+    // managed，这一档就空了，而"explicit-managed 与 unmanaged 是两回事"这个区分本身也就没被守住。
+    // 那时该做的是找一个新的 unmanaged 样本或删掉这条区分，不是让断言静默退化成恒真。
+    const unmanaged = providers.catalog().filter(
+      (provider) => provider.hookStrategy.kind === 'native' && provider.hookStrategy.installation === 'unmanaged'
+    )
+    expect(unmanaged.length).toBeGreaterThan(0)
     // Providers with no hooks at all stay `none`, never a fake native.
     expect(catalog.get('traex')).toEqual({ kind: 'none' })
   })
@@ -657,9 +673,14 @@ describe('built-in agent providers', () => {
       '/tmp/scratch-hermes/config.yaml',
       '/tmp/scratch-hermes/shell-hooks-allowlist.json'
     ])
-    // pi (TypeScript extension) declares native hooks but has no plan builder, so it resolves to null and
-    // is not auto-installed. Non-hook providers likewise.
-    expect(resolveManagedHookPlan('pi', '/tmp/work')).toBeNull()
+    // pi 现在有 plan builder：它装一份自己独占的 in-process JS 扩展。用 env 把 agent dir 指到临时目录，
+    // 免得这条断言依赖跑测试那台机器的 home。
+    const piPlan = resolveManagedHookPlan('pi', '/tmp/work', { PI_CODING_AGENT_DIR: '/tmp/scratch-pi' })
+    expect(piPlan?.providerId).toBe('pi')
+    expect(piPlan?.mutations.map((mutation) => mutation.path)).toEqual(['/tmp/scratch-pi/extensions/agentmux.js'])
+    // kimi 声明 native hook 但没有 plan builder（TOML 配置面，见 providers/kimi.ts 那段），于是解析成
+    // null、不被自动安装。非 hook 的 Provider 同理。
+    expect(resolveManagedHookPlan('kimi', '/tmp/work')).toBeNull()
     expect(resolveManagedHookPlan('traex', '/tmp/work')).toBeNull()
   })
 
