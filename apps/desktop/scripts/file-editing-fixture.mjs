@@ -13,10 +13,15 @@ import { join } from 'node:path'
 //
 //   - workspace id：与 src/main/index.ts:182-183 的字面量必须一致。改错了不会静默——index.ts:184
 //     查不到就抛 'requires its primary and alternate mounted workspaces'，报告不落盘、两个门禁全红。
-//   - version: 7：与 src/main/config-store.ts 的 z.literal(7) 必须一致。schema 升到 8 而这里忘了改，
-//     ConfigStore 会走 isOlderVersion 分支删掉配置、回落到空 workspaces，同样在 index.ts:184 炸掉。
+//   - version：与 src/shared/contracts.ts 的 CONFIG_VERSION 必须一致。这条**曾经真的漏过**：
+//     CONFIG_VERSION 从 7 升到 8 时这里没跟上，ConfigStore 走 isOlderVersion 分支删掉配置、回落到
+//     空 workspaces，两个门禁都变红——而 `pnpm check`（test:fast + test:native）跑不到这两个门禁，
+//     所以 2058 条测试全绿掩盖了它。这条现在由 test/config-fixture-version.test.ts 守：它扫描每个
+//     往 agentmux.config.json 写配置的脚本，把字面量与 CONFIG_VERSION 对比，在 pnpm check 里就红。
+//     那道门比这两个门禁快几个数量级，所以别只靠"跑一次打包"来发现漂移。
 //
-// 两处都是响亮失败、不是假绿，但报错都指不到这里——改 schema 或改 id 时记得回来同步。
+// workspace id 那条仍然只有"响亮失败"兜底，报错指不到这里——改 index.ts 的 id 时记得回来同步。
+// version 那条现在有测试守，不必再靠跑门禁发现。
 export const FILE_EDITING_PRIMARY_WORKSPACE_ID = 'workspace-file-editing-e2e'
 export const FILE_EDITING_ALTERNATE_WORKSPACE_ID = 'workspace-file-editing-alternate-e2e'
 
@@ -49,7 +54,7 @@ export async function materializeFileEditingFixture({ userData, workspace, alter
     writeFile(join(workspace, 'targets', 'cancel', 'child.txt'), 'cancel child'),
     writeFile(join(alternateWorkspace, 'alternate.txt'), 'alternate workspace'),
     writeFile(join(userData, 'agentmux.config.json'), `${JSON.stringify({
-      version: 7,
+      version: 8,
       hosts: [{ id: 'local', kind: 'local', label: 'Mounted Desktop E2E' }],
       executors: {},
       workspaces: [{

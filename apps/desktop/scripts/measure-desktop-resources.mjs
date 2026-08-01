@@ -214,7 +214,7 @@ async function main() {
       writeFile(join(path, 'resource-probe.ts'), 'export const value = 1\n'.repeat(20_000))
     )))
     await writeFile(join(userData, 'agentmux.config.json'), `${JSON.stringify({
-      version: 7,
+      version: 8,
       hosts: [{ id: 'local', kind: 'local', label: 'Resource Probe' }],
       executors: {
         codex: { label: 'Codex', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: true },
