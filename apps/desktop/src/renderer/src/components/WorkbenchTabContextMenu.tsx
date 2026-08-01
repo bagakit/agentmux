@@ -1,15 +1,12 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import {
-  ArrowDown,
-  ArrowLeft,
-  ArrowRight,
-  ArrowUp,
   Columns2,
   Copy,
   CornerDownRight,
   Crosshair,
   ExternalLink,
   FolderSymlink,
+  LayoutGrid,
   Pencil,
   Send,
   ListX,
@@ -18,17 +15,20 @@ import {
   X
 } from 'lucide-react'
 import type { ReactNode } from 'react'
-import { WORKBENCH_TAB_SPLIT_ACTIONS, type MoveSessionViewTarget } from '../lib/workbench-tab-actions'
+import {
+  WORKBENCH_TAB_SPLIT_ACTIONS,
+  workbenchRegionPresetMenu,
+  type MoveSessionViewTarget,
+  type WorkbenchRegionPresetAction
+} from '../lib/workbench-tab-actions'
+import type { WorkbenchRegionLayoutPreset } from '../lib/workbench-view-layout'
 import type { SplitDirection } from '../lib/workbench-layout'
 import { formatMessagingAddress, formatSessionAddress, formatViewAddress } from '../lib/agent-address'
 import { formatPathsForCopy } from '../lib/clipboard-copy'
-
-const SPLIT_ICONS = {
-  left: ArrowLeft,
-  right: ArrowRight,
-  up: ArrowUp,
-  down: ArrowDown
-} satisfies Record<SplitDirection, typeof ArrowRight>
+import {
+  workbenchRegionPresetIcon,
+  workbenchSplitDirectionIcon
+} from './workbench-split-menu-icons'
 
 type WorkbenchTabCopyAction = {
   label:
@@ -202,6 +202,8 @@ export function WorkbenchTabContextMenu({
   onCloseLeft,
   onCloseRight,
   onMoveToNewGroup,
+  regionCount,
+  onArrange,
   moveSessionViewTargets,
   onMoveSessionView
 }: {
@@ -225,6 +227,13 @@ export function WorkbenchTabContextMenu({
   onCloseLeft(): void
   onCloseRight(): void
   onMoveToNewGroup(direction: SplitDirection): void
+  /**
+   * 这张 Tab 现在有几格。预设只增不减，故它决定「重排」那一节列不列得出来——判定只住在
+   * `workbenchRegionPresetMenu`（见那份注释）。注意必须是**被右键点中的这张** Tab 的格数，
+   * 不是当前活动 Tab 的：在非活动 Tab 上右键时，用活动 Tab 的格数会按错的容量过滤预设。
+   */
+  regionCount: number
+  onArrange(preset: WorkbenchRegionLayoutPreset): void
   // 目的地来自纯模型。承载不了 Session 的 View、或没有别的 workspace 时为空——
   // 搬过去是 no-op，故以缺席表达而非禁用的假按钮。
   moveSessionViewTargets: ReadonlyArray<MoveSessionViewTarget>
@@ -236,6 +245,7 @@ export function WorkbenchTabContextMenu({
     ...(fileActions ? { file: fileActions } : {}),
     writeClipboardText
   })
+  const presetMenu = workbenchRegionPresetMenu({ regionCount, arrange: onArrange })
   return (
     <ContextMenu.Root {...(onOpenChange ? { onOpenChange } : {})}>
       <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
@@ -281,7 +291,7 @@ export function WorkbenchTabContextMenu({
             <ContextMenu.Portal>
               <ContextMenu.SubContent className="tab-context-menu" collisionPadding={8} sideOffset={4}>
                 {WORKBENCH_TAB_SPLIT_ACTIONS.map((action) => {
-                  const Icon = SPLIT_ICONS[action.direction]
+                  const Icon = workbenchSplitDirectionIcon(action.direction)
                   return (
                     <ContextMenu.Item
                       key={action.direction}
@@ -296,6 +306,37 @@ export function WorkbenchTabContextMenu({
               </ContextMenu.SubContent>
             </ContextMenu.Portal>
           </ContextMenu.Sub>
+          {/*
+            重排这张 Tab 的分格。整节以缺席表达「摆不成」：预设只增不减，一张已经 5 分屏的 Tab
+            摆不成 2×2（`workbenchRegionPresetMenu` 判的，判定只此一处），于是格数超过全部预设时
+            连子菜单触发器都不出现——不画一个点开只有空清单的入口。
+          */}
+          {presetMenu.presets.length > 0 ? (
+            <ContextMenu.Sub>
+              <ContextMenu.SubTrigger className="tab-context-menu__item">
+                <LayoutGrid size={14} />
+                <span>Rearrange Splits</span>
+                <span className="tab-context-menu__chevron">›</span>
+              </ContextMenu.SubTrigger>
+              <ContextMenu.Portal>
+                <ContextMenu.SubContent className="tab-context-menu" collisionPadding={8} sideOffset={4}>
+                  {presetMenu.presets.map((action: WorkbenchRegionPresetAction) => {
+                    const Icon = workbenchRegionPresetIcon(action.preset)
+                    return (
+                      <ContextMenu.Item
+                        key={action.preset}
+                        className="tab-context-menu__item"
+                        onSelect={() => presetMenu.onSelect(action.preset)}
+                      >
+                        <Icon size={14} />
+                        <span>{action.label}</span>
+                      </ContextMenu.Item>
+                    )
+                  })}
+                </ContextMenu.SubContent>
+              </ContextMenu.Portal>
+            </ContextMenu.Sub>
+          ) : null}
           {moveSessionViewTargets.length > 0 ? (
             <ContextMenu.Sub>
               <ContextMenu.SubTrigger className="tab-context-menu__item">
