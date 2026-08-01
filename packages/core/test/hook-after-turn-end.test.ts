@@ -256,9 +256,14 @@ describe('tool events arriving after the turn already ended', () => {
     // user-prompt-submit / turn-start（这件事本身由 agent-provider-protocol.test.ts 的缺口清单钉着，
     // 两条成对）。所以对 Pi 而言正确行为是**不抑制**——两害相权，宁可漏掉一次「压制迟到残响」，
     // 也不能让健康的 Agent 从此再也点不亮。
+    //
+    // 收尾事件逐字是 `agent_settled` 而**不是** `agent_end`：后者看着像收尾，可它之后 Pi 还有三条
+    // 独立的续跑路径（可重试错误 / 自动压缩 / handler 排进队的消息，见 providers/pi.ts 的逐行引证），
+    // 所以 Pi 的扩展根本不订阅它、canonical 表里也没有它。这条曾用 `agent_end` 驱，于是它守的是一个
+    // 生产里永不发生的事件——闸门在 Pi 上到底会不会永久 latch，那时其实没人验。
     const { client, feed, statuses, storedStatus } = await harness('pi')
     try {
-      await feed('agent_end', 'receipt-pi-turn-end')
+      await feed('agent_settled', 'receipt-pi-turn-end')
       expect(statuses().at(-1), 'Pi 的收尾照旧落 done').toMatchObject({ state: 'done' })
 
       // Pi 无从重开，所以这条工具事件必须放行。若接线把前提写死成「都能重开」，它会被压住，
