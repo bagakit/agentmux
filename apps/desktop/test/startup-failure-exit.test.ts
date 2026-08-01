@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 
-import { reportStartupFailureAndExit, type StartupFailureExitIo } from '../src/main/startup-failure-exit.js'
+import { reportStartupFailureAndExit, startupFailureExitIo, type StartupFailureExitIo } from '../src/main/startup-failure-exit.js'
 import { startupFailureNotice } from '../src/main/startup-failure-notice.js'
 
 // ---------------------------------------------------------------------------
@@ -199,13 +199,34 @@ describe('index.ts 的壳只是一句转发', () => {
 
   it('五个依赖都接在真的东西上，不是接了一个恒等 stub', () => {
     // 每一条都是「送不到」的一种：路径手抄、对话框没接、清理没接、诊断没接、不退出。
+    // `dialog` / `app` 以简写属性传整个对象（见 startup-failure-exit.ts 里那段 receiver 说明），
+    // 而这个文件里叫这两个名字的绑定只有顶部那两个 electron import，所以简写就等于接到了真东西。
     expect(shell, '配置路径没取自 ConfigStore 自己').toMatch(/configPath:\s*configStore\.filePath/)
-    expect(shell, '对话框没接到 electron 的 dialog').toMatch(/dialog\.showErrorBox\(/)
-    expect(shell, '清理没接到 disposeOwners').toMatch(/disposeOwners\b/)
-    expect(shell, '诊断没写到 stderr').toMatch(/process\.stderr\.write\(/)
-    expect(shell, '退出没接到 app.exit').toMatch(/app\.exit\(/)
+    expect(shell, '对话框没接到 electron 的 dialog').toMatch(/^\s+dialog,$/m)
+    expect(shell, '清理没接到 disposeOwners').toMatch(/^\s+disposeOwners,$/m)
+    expect(shell, '诊断没写到 stderr').toMatch(/stderr:\s*process\.stderr\b/)
+    expect(shell, '退出没接到 electron 的 app').toMatch(/^\s+app$/m)
     // 路径不许在这里现取：`app.getPath` 会与 ConfigStore 自己的解析漂移。
     expect(shell).not.toMatch(/getPath\(/)
+  })
+
+  it('壳里全是裸引用——没有实参位置，写错实参的变异无处落脚', () => {
+    // 这一条治的是上面那族的盲点：`toMatch(/app\.exit\(/)` 对 `app.exit(code)` 与 `app.exit(0)`
+    // 一视同仁。实测把壳里的 `exit` 写成 `() => app.exit(0)`，33 条全绿且 tsc 干净
+    //（`noUnusedParameters` 没开），而症状是启动失败退 0——打包冒烟脚本把崩溃读成成功。
+    // 同形的还有 `showErrorBox(body, title)` 参数对调、`disposeOwners: () => Promise.resolve()`。
+    //
+    // 判据是**结构**而不是那几个名字：壳里一个箭头都不许有。适配挪进 `startupFailureExitIo`
+    // 之后那里的实参由下面那族真跑一遍钉住，于是这两层各自变异只红各自那层。
+    const arrowsInShell = shell.match(/=>/g) ?? []
+    expect(
+      arrowsInShell.length,
+      `壳里出现了 ${arrowsInShell.length} 个箭头（只允许最外层那一个）：实参又变成无人守的了`
+    ).toBe(1)
+    // 组装必须走那个可测的函数，而不是在这里拼一个对象字面量。
+    expect(shell, '没有走 startupFailureExitIo：适配又回到了壳里').toMatch(
+      /startupFailureExitIo\(/
+    )
   })
 
   it('两个失败入口都还走这个壳', () => {
@@ -218,5 +239,161 @@ describe('index.ts 的壳只是一句转发', () => {
     // 壳被压成一句之后，`startupFailureNotice` 只应该由 lib 调用。index.ts 里再出现它，
     // 就意味着有第二处取值层，而两处必然漂移。
     expect(source).not.toMatch(/startupFailureNotice\(/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 第 3 族：组装层。壳里那三个箭头函数的**实参**此前无人守——文本判据看不见实参，
+// 所以这三件事各自都能静默写错：
+//
+//   exit: () => app.exit(0)                    → 启动失败退 0，冒烟脚本读成成功（最重）
+//   showErrorBox: (t, b) => box(b, t)          → 对话框标题正文对调（外观降级）
+//   writeDiagnostic: (l) => stderr.write(l)     → 少了换行，多行诊断粘成一行
+//
+// 适配挪进 `startupFailureExitIo` 之后，这三件事在这里各有一条断言，且这一族与接线层
+// 各自变异只红各自那层：改坏这里的转发只红本族，把适配搬回壳里只红接线层那条箭头计数。
+// ---------------------------------------------------------------------------
+
+describe('宿主 API 组装成 io', () => {
+  /**
+   * 记录裸 API 收到了什么。每一格都是壳里此前那个实参能写错的地方。
+   *
+   * `dialog` 与 `app` 是**对象**，且它们的方法记录自己的 `this`：electron 里这两个是 gin 原生绑定，
+   * 把方法摘下来（`exit: app.exit`）之后 receiver 就没了，真机上调用直接抛 Illegal invocation，
+   * 而普通对象上摘下来照样能调——所以「有没有丢 receiver」必须由 `this` 自己来说，否则这个盲点
+   * 在测试里完全不可观测。
+   */
+  function recordingHost(): {
+    host: Parameters<typeof startupFailureExitIo>[0]
+    boxes: Array<{ title: string; body: string }>
+    writes: string[]
+    exitCodes: number[]
+    disposals: number
+    receivers: unknown[]
+  } {
+    const boxes: Array<{ title: string; body: string }> = []
+    const writes: string[] = []
+    const exitCodes: number[] = []
+    const receivers: unknown[] = []
+    let disposals = 0
+    const dialog = {
+      showErrorBox(this: unknown, title: string, body: string) {
+        receivers.push(this)
+        boxes.push({ title, body })
+      }
+    }
+    const app = {
+      exit(this: unknown, code: number) {
+        receivers.push(this)
+        exitCodes.push(code)
+      }
+    }
+    const host = {
+      configPath: CONFIG_PATH,
+      dialog,
+      async disposeOwners() {
+        disposals += 1
+      },
+      stderr: {
+        write(chunk: string) {
+          writes.push(chunk)
+          return true
+        }
+      },
+      app
+    }
+    return {
+      host,
+      boxes,
+      writes,
+      exitCodes,
+      receivers,
+      get disposals() {
+        return disposals
+      }
+    }
+  }
+
+  it('退出码原样转发，不是常量——这是壳里最重的那个实参', () => {
+    // 症状：启动失败退 0，shell / launchd / 打包冒烟脚本都把这次崩溃读成成功。
+    // 判据用两个**不同**的码：只试一个的话，`() => host.app.exit(1)` 这种写死也会绿。
+    const recorder = recordingHost()
+    const io = startupFailureExitIo(recorder.host)
+
+    io.exit(1)
+    io.exit(3)
+
+    expect(recorder.exitCodes, '退出码没有原样转发——写死的常量会让崩溃冒充成功').toEqual([1, 3])
+  })
+
+  it('两个 electron 方法都用它自己的宿主对象当 receiver 调用', () => {
+    // 这一条治的是「把方法从宿主上摘下来」那个盲点：`exit: host.app.exit` 在 tsc 与所有普通对象
+    // fixture 下都完全正常，而 electron 的 `app` / `dialog` 是 gin 原生绑定，摘下来之后 receiver
+    // 就没了，真机上调用抛 Illegal invocation。这条路径抛在这里的结局最坏：启动失败既不弹框
+    // 也不退出，留下一个挂着的进程——正是这一族全部断言想防的那个终局。
+    const recorder = recordingHost()
+    const io = startupFailureExitIo(recorder.host)
+
+    io.showErrorBox('标题', '正文')
+    io.exit(1)
+
+    expect(recorder.receivers, 'receiver 不是宿主对象——方法被从 app/dialog 上摘了下来').toEqual([
+      recorder.host.dialog,
+      recorder.host.app
+    ])
+  })
+
+  it('对话框的标题与正文不对调', () => {
+    const recorder = recordingHost()
+    const io = startupFailureExitIo(recorder.host)
+
+    io.showErrorBox('标题在前', '正文在后')
+
+    expect(recorder.boxes, '标题与正文对调了——用户看到长正文当标题').toEqual([
+      { title: '标题在前', body: '正文在后' }
+    ])
+  })
+
+  it('诊断行末尾补换行——由这一层补，壳里不补', () => {
+    // 少了换行的症状：连续几行诊断在终端里粘成一行，读不出边界。
+    const recorder = recordingHost()
+    const io = startupFailureExitIo(recorder.host)
+
+    io.writeDiagnostic('第一行')
+    io.writeDiagnostic('第二行')
+
+    expect(recorder.writes, '诊断没补换行，多行会粘成一行').toEqual(['第一行\n', '第二行\n'])
+  })
+
+  it('清理接到真的 disposeOwners，不是一个 no-op', () => {
+    // 症状：失败路径不清理，留下 daemon / session store 句柄。
+    const recorder = recordingHost()
+    const io = startupFailureExitIo(recorder.host)
+
+    return io.disposeOwners().then(() => {
+      expect(recorder.disposals, '清理没被调用——失败路径泄漏运行时句柄').toBe(1)
+    })
+  })
+
+  it('配置路径原样带过来，不在这一层重算', () => {
+    const io = startupFailureExitIo(recordingHost().host)
+    expect(io.configPath).toBe(CONFIG_PATH)
+  })
+
+  it('组装出来的 io 真能驱动整条序列——组装与序列接得上', () => {
+    // 接缝判据：上面五条各自只看一格，都绿也不能证明这份 io 喂给 `reportStartupFailureAndExit`
+    // 之后那五件事真的发生了（记忆 every-segment-guarded-chain-still-fails）。所以把组装出来的
+    // 整份 io 原样喂给下游跑一遍，而不是在这里另造一个 io。
+    const recorder = recordingHost()
+
+    return reportStartupFailureAndExit(new Error('起不来'), startupFailureExitIo(recorder.host)).then(
+      () => {
+        expect(recorder.exitCodes, '退出码不是 1').toEqual([1])
+        expect(recorder.boxes, '没弹对话框').toHaveLength(1)
+        expect(recorder.boxes[0]!.body, '对话框正文里没有配置文件路径').toContain(CONFIG_PATH)
+        expect(recorder.writes.join(''), '诊断里没有那条错误').toContain('起不来')
+        expect(recorder.disposals, '没清理').toBe(1)
+      }
+    )
   })
 })

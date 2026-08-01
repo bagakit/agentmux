@@ -13,7 +13,7 @@ import { hydrateProcessPathFromLoginShell } from './login-shell-path.js'
 import { RuntimeController } from './runtime-controller.js'
 import { ScratchTopics } from './scratch-topics.js'
 import { runDesktopResourceProbe } from './resource-probe.js'
-import { reportStartupFailureAndExit } from './startup-failure-exit.js'
+import { reportStartupFailureAndExit, startupFailureExitIo } from './startup-failure-exit.js'
 import { runDesktopFileEditingProbe, WorkspaceFileEditingProbeControl } from './file-editing-probe.js'
 import { WorkspaceFiles } from './workspace-files.js'
 import { registerWindowResizeEvents } from './window-resize-events.js'
@@ -103,17 +103,24 @@ function startPrimaryInstance(): void {
    * 闭包内它对测试不可达，而不可达的代价是实测过的：在这个函数体第一行插一句早退，整条通知路径
    * 变 no-op 而那一族 11 条全绿（记忆 grep-guard-cannot-see-early-return）。
    *
-   * 这里刻意**只有一句表达式**、没有任何语句：没有语句可插，那个变异就无处落脚。所有依赖在这
-   * 一句里接到真的 electron / ConfigStore 上，由 `startup-failure-exit.test.ts` 的接线层守卫逐个钉住。
+   * 这里刻意**只有一句表达式**、且每个依赖都是**宿主对象本身**：没有语句可插，那个早退变异无处
+   * 落脚；没有实参位置，实参写错的变异也无处落脚。适配（参数顺序、退出码转发、诊断补换行）全在
+   * `startupFailureExitIo` 里，由测试真跑一遍钉住——此前它写在这里，于是壳里那三个箭头函数的实参
+   * 无人守：实测 `exit: () => app.exit(0)` 让 33 条全绿且 tsc 干净，而症状是启动失败退 0，
+   * 打包冒烟脚本把崩溃读成成功。
+   *
+   * 传 `app` / `dialog` 整个对象而不是 `app.exit` / `dialog.showErrorBox`：那两个是 gin 原生绑定，
+   * 摘下来 receiver 就没了，调用时会抛 Illegal invocation——而这条路径抛在这里的结局是既不弹框
+   * 也不退出。上面 `registerCrashCapture({ app, process, ... })` 是同一个规矩。
    */
   const exitAfterFailure = (error: unknown): Promise<void> =>
-    reportStartupFailureAndExit(error, {
+    reportStartupFailureAndExit(error, startupFailureExitIo({
       configPath: configStore.filePath,
-      showErrorBox: (title, body) => dialog.showErrorBox(title, body),
+      dialog,
       disposeOwners,
-      writeDiagnostic: (line) => process.stderr.write(`${line}\n`),
-      exit: (code) => app.exit(code)
-    })
+      stderr: process.stderr,
+      app
+    }))
 
   async function buildWindow(appReadyAtMs: number = Date.now()): Promise<void> {
     const windowCreationStartedAtMs = Date.now()
