@@ -13,7 +13,7 @@ import { hydrateProcessPathFromLoginShell } from './login-shell-path.js'
 import { RuntimeController } from './runtime-controller.js'
 import { ScratchTopics } from './scratch-topics.js'
 import { runDesktopResourceProbe } from './resource-probe.js'
-import { startupFailureNotice } from './startup-failure-notice.js'
+import { reportStartupFailureAndExit } from './startup-failure-exit.js'
 import { runDesktopFileEditingProbe, WorkspaceFileEditingProbeControl } from './file-editing-probe.js'
 import { WorkspaceFiles } from './workspace-files.js'
 import { registerWindowResizeEvents } from './window-resize-events.js'
@@ -98,30 +98,22 @@ function startPrimaryInstance(): void {
     return ownerDisposal
   }
 
-  async function exitAfterFailure(error: unknown): Promise<void> {
-    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
-    // 从 Finder 双击启动的用户不会读 stderr——没有这个对话框，他看到的是 Dock 图标弹一下就消失，
-    // 没有任何说明。而本仓刻意做了一族「拒绝启动而不覆盖用户配置」的守卫（config-store 里那四道），
-    // 它们换来的唯一好处就是这段话：你的东西还在，在这个文件里。用户看不到，那些守卫等于没设。
-    //
-    // 放在 dispose 之前：清理本身可能挂住或抛错，而这条消息是用户唯一的信息来源。showErrorBox
-    // 不需要 app ready，也不需要有窗口。
-    const notice = startupFailureNotice(error, { configPath: configStore.filePath })
-    try {
-      dialog.showErrorBox(notice.title, notice.body)
-    } catch (dialogError) {
-      // 无头/测试环境里弹不出对话框是正常的，不能因此吞掉真正的失败退出。
-      process.stderr.write(
-        `${dialogError instanceof Error ? dialogError.message : String(dialogError)}\n`
-      )
-    }
-    try {
-      await disposeOwners()
-    } catch (cleanupError) {
-      process.stderr.write(`${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}\n`)
-    }
-    app.exit(1)
-  }
+  /**
+   * 启动失败的收尾：告知用户 → 清理 → 退出。序列本身在 `startup-failure-exit.ts` 里，因为在这个
+   * 闭包内它对测试不可达，而不可达的代价是实测过的：在这个函数体第一行插一句早退，整条通知路径
+   * 变 no-op 而那一族 11 条全绿（记忆 grep-guard-cannot-see-early-return）。
+   *
+   * 这里刻意**只有一句表达式**、没有任何语句：没有语句可插，那个变异就无处落脚。所有依赖在这
+   * 一句里接到真的 electron / ConfigStore 上，由 `startup-failure-exit.test.ts` 的接线层守卫逐个钉住。
+   */
+  const exitAfterFailure = (error: unknown): Promise<void> =>
+    reportStartupFailureAndExit(error, {
+      configPath: configStore.filePath,
+      showErrorBox: (title, body) => dialog.showErrorBox(title, body),
+      disposeOwners,
+      writeDiagnostic: (line) => process.stderr.write(`${line}\n`),
+      exit: (code) => app.exit(code)
+    })
 
   async function buildWindow(appReadyAtMs: number = Date.now()): Promise<void> {
     const windowCreationStartedAtMs = Date.now()
