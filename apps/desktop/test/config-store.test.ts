@@ -500,6 +500,59 @@ describe('ConfigStore workspace identity', () => {
     expect(carried.executorsUnreadable, '坏掉的 executors 容器没被报告').toBe(true)
   })
 
+  // 为什么这条与上面两条 bump 测试不重复（我一开始以为它是重复探测器，靠对照实验否掉了）：
+  // 那两条的 fixture 只改 `label` 与 `command`，其余字段与出厂值逐字相同——按前提自检的道理，
+  // 相同的那几个字段守不住任何东西。实测：往 `:492` 插一个貌似合理的「部分保留」（内置 id 仍走
+  // 默认表，但把用户的 `args`/`env` 带过来），那两条**全绿**，只有这一条红。差别就在这条的
+  // fixture 五个字段全部偏离出厂值，于是 `args`/`env`/`injectAgentMuxGuide` 那一片才有人守。
+  it('bump 会把改过的内置 Executor 还原成出厂值——这是已知代价，钉住它不许静默变动', async () => {
+    // 这条**不主张**当前行为是对的（处置在 #305 待拍板），它主张这个代价必须是写明的、有人守的。
+    // 现状：carry 前那道 `!(id in DEFAULT_CONFIG.executors)`（config-store.ts:492）把所有内置 id
+    // 排除在外，:514 再让 DEFAULT_CONFIG 打底，于是用户改过的内置 Executor 五个字段全部回到出厂值。
+    // 实测这在 bump 前后完全静默——没有任何一条断言涉及它，所以「保住」与「还原」两侧的任何改动
+    // 都不会红。
+    //
+    // 为什么不顺手改成「与出厂值不同就 carry」：那条判据已证伪。默认表的形状历史上真变过两次
+    // （先加 label，再加 injectAgentMuxGuide），所以「这条记录不等于当前默认」同样成立于
+    // 「我们自己改了出厂值」，那时 carry 会把陈旧的旧默认值搬回来，让用户永远拿不到新出厂值——
+    // 正是 #103/#264 那族缺陷的反向。唯一无歧义的判据是「与**写盘那一刻**的出厂值比」，而那个值
+    // 今天不在盘上：信息不存在，不是判据不够聪明（同 #182 那族）。
+    //
+    // 断言写成与 DEFAULT_CONFIG 现取的整条相等，而不是手抄 `command: 'codex'`：手抄的期望值会在
+    // 下次改出厂值时把这条打红，而那次红读起来像回归，其实只是出厂值变了。
+    const edited = {
+      label: '我改过的名字',
+      providerId: 'codex' as const,
+      command: '/opt/custom/codex',
+      args: ['--flag'],
+      env: { MY_VAR: '1' },
+      injectAgentMuxGuide: false
+    }
+    // 前提自检：这条改动必须真的与出厂值不同，否则下面「被还原」的断言恒真、什么都没守。
+    expect(edited, '前提自检：fixture 与出厂值相同则这条守不住任何东西')
+      .not.toEqual(DEFAULT_CONFIG.executors.codex)
+
+    const carried = authoredConfigCarryOver({
+      ...baseConfig,
+      version: DEFAULT_CONFIG.version - 1,
+      hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
+      workspaces: [workspace({ id: 'ws-1' })],
+      executors: {
+        codex: edited,
+        // 同一份输入里放一条自建的：它必须原样保住。两条并置才说明「还原」只落在内置 id 上，
+        // 而不是 carry 整个坏掉了——只钉前者时，一个「什么都不 carry」的实现也能过。
+        mine: { label: 'Mine', providerId: 'claude', command: 'claude', args: [], env: {}, injectAgentMuxGuide: true }
+      }
+    })
+
+    expect(carried.executors.codex, '改过的内置 Executor 没有被还原成出厂值——行为变了，去 #305 看是哪一侧')
+      .toEqual(DEFAULT_CONFIG.executors.codex)
+    expect(carried.executors.mine, '自建 Executor 必须原样保住（#264 修的那条）')
+      .toEqual({ label: 'Mine', providerId: 'claude', command: 'claude', args: [], env: {}, injectAgentMuxGuide: true })
+    // 且这次还原**不算**「容器不可读」：那个信号是给「每一条自建的都没了」用的，不该被这条借走。
+    expect(carried.executorsUnreadable, '内置 Executor 被还原不是容器损坏').toBe(false)
+  })
+
   it('refuses to launch when the hosts container is unreadable, and says so as a host problem', async () => {
     // 这条与 stranded 那条的分工是判据的核心：**一条** host 记录坏了，stranded 能点名是哪台、
     // 哪几个项目；**整个容器**坏了则一个 id 都拿不到，报「某台 host」只会指向错的字节。
