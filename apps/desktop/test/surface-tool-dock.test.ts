@@ -1,4 +1,6 @@
 import { readFileSync } from 'node:fs'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 
 vi.hoisted(() => {
@@ -14,7 +16,7 @@ import {
   getRenderedSidebarWidthCssValue
 } from '../src/renderer/src/hooks/useSidebarResize.js'
 import { allStyles } from './helpers/styles.js'
-import { SELECTOR_PRESENCE_MAX } from '../src/renderer/src/components/SelectorList.js'
+import { SELECTOR_PRESENCE_MAX, SelectorPresence } from '../src/renderer/src/components/SelectorList.js'
 import {
   TOOL_DOCK_COLLAPSED_RAIL_MIN_WIDTH,
   TOOL_DOCK_MAX_WIDTH,
@@ -275,11 +277,39 @@ describe('shared surface tool dock resize', () => {
   it('caps the avatar cluster on both bars with one shared number', () => {
     // 叠压省宽度但不是无限的。Topic 侧此前无上限（直接 map 全量），一个 8 人的 Topic 会把
     // 标题挤没；共享后两侧取同一个上限，超出折成 +N 且全名进 tooltip。
-    expect(SELECTOR_PRESENCE_MAX).toBeGreaterThan(0)
-    expect(selectorListSource).toContain('agents.slice(0, max)')
-    expect(selectorListSource).toContain('const hidden = agents.length - visible.length')
-    // 折起来的不能就此消失：簇整体的 tooltip 仍报全部名字。
-    expect(selectorListSource).toContain('const roster = agents')
+    //
+    // 这条**真渲染**而不是扫源码文本。此前它只断言 `SELECTOR_PRESENCE_MAX > 0` 加三条 toContain：
+    // 实测把常量从 4 改成 999，`999 > 0` 仍真、三个字符串原样在，29 条全绿——而 8 人 Topic
+    // 会全量铺开挤没标题，正是上面这段注释说要防的那个退化。下界断言比 bug 粗，抓不住它。
+    //
+    // 判据取"超出就得折"这个行为，不给常量钉一个手抄的上界数字（那只是换一处手抄）。名单长度
+    // 取注释里说的那个「8 人的 Topic」——它是**需求**，不是实现常量的副本。绝不能写成
+    // `SELECTOR_PRESENCE_MAX + 3`：那样常量改成 999 时名单跟着长到 1002，slots 仍等于常量，断言恒真。
+    //
+    // 四颗变异各自独占红（其余 28 条全绿）：999 → 不折；1 → 折成一枚；组件内改 `max = 3` 而导出
+    // 仍是 6 → 常量变摆设；`roster = agents` 改成 `visible` → 折起来的人名从 tooltip 里消失。
+    const agents = Array.from({ length: 8 }, (_, index) => ({
+      key: `agent-${index}`,
+      label: `Agent ${index}`,
+      providerId: 'codex' as const,
+      state: 'running' as const,
+      attention: null
+    }))
+    const markup = renderToStaticMarkup(createElement(SelectorPresence, { agents }))
+
+    const slots = markup.split('selector-presence__slot').length - 1
+    expect(slots, '8 个 Agent 全铺开了——正是注释里说会把标题挤没的那个退化').toBeLessThan(agents.length)
+    // 但折完仍要读作"一摞"，不能只剩一枚加个数字——那时 +N 承载了全部信息，叠压本身失去意义。
+    expect(slots, '折得只剩一枚，叠压没有意义了').toBeGreaterThan(1)
+    // 折起来的枚数要对得上：画 3 枚却说 +9 是另一种坏法。
+    expect(markup, '折起来的枚数与 +N 对不上').toContain(`+${agents.length - slots}`)
+    // 而导出的那个常量必须**就是**真实上限，不是个摆设：CSS 与另一侧面板都拿它当共享的数，
+    // 组件里若另写一个字面量（`slice(0, 4)` 而导出说 6），两处就又漂了。
+    expect(slots, '导出的 SELECTOR_PRESENCE_MAX 不是组件真正用的上限').toBe(SELECTOR_PRESENCE_MAX)
+    // 折起来的不能就此消失：簇整体的 tooltip 仍报全部名字，包括没画出来的那几个。
+    for (const agent of agents) {
+      expect(markup, `${agent.label} 被折起来后从名单里消失了`).toContain(agent.label)
+    }
   })
 
   it('clamps the persisted panel width to the density budget', () => {
