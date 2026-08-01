@@ -289,6 +289,22 @@ export function removeSessionProjection(
   }
 }
 
+/**
+ * 用一份 canonical 快照对齐 agent 成员：快照里没有的 agent 就是已经不在了，摘掉它的面。
+ *
+ * **一份空快照不能当作「一个 agent 都没有」。**它同样可能是 Core 尚未就绪、连接刚建立、或根目录
+ * 接错时的回答——而此刻本地还记着好几个正在跑的 agent。把这一份回答当权威，就会把用户离开时留下的
+ * 格子在他不看着的时候删掉：切走再切回来，几个 agent 格没了，同 tab 的终端和文件却还在。
+ *
+ * 启动那条路已经有这道守卫（见 store 里 `retainUnknownSessionViews` 那段，它的注释写着这正是
+ * 「重启抹掉布局」的历史成因）。**同一个判断此前只装在一侧出口**：运行时的成员对齐没有等价保护，
+ * 也没有测试。删除是不可逆的，而多留一格只是等下一份快照来纠正——所以这里 fail open：一份 session
+ * 与恢复候选双双为空的快照不作为退役依据，原样返回。
+ *
+ * 注意判据是**整份快照为空**，不是「这个 agent 不在快照里」。后者正是这个函数存在的理由：一份说得
+ * 出别的 session 的快照有资格说某个 agent 不在了。恢复候选也算说得出话——一个候选就是「这个 agent
+ * 还在，只是要重连」，这与启动那侧的判据逐字对齐。
+ */
 export function reduceAgentMembershipSnapshot(
   state: SessionProjectionState,
   snapshot: RuntimeSnapshot,
@@ -300,6 +316,9 @@ export function reduceAgentMembershipSnapshot(
     session.kind === 'agent' && !pendingIds.has(session.id)
   ))
   const canonicalIds = new Set(canonicalAgents.map((session) => session.id))
+  // 空快照不作为退役依据——见上面的函数注释。判据只需要"这一份说不出话"：一份空快照里没有 canonical
+  // agent 可合并，所以再检查一遍"本地是否还记着 agent"不会改变任何结果，那个条件是多余的。
+  if (snapshot.sessions.length === 0 && snapshot.recoveryCandidates.length === 0) return state
   let projected = state
   for (const session of state.sessions) {
     if (session.kind === 'agent' && !removalProtectedIds.has(session.id) && !canonicalIds.has(session.id)) {
