@@ -24,6 +24,21 @@ export type AgentMuxAgentContinuityUnavailableReason =
   | 'provider-resume-unsupported'
   | 'provider-unavailable'
 
+/**
+ * 恢复被「占着」的两类。**它们要求用户做的事相反**，所以必须是两个取值而不是一个 conflict 位。
+ *
+ * - `session-run-changed`：这条 Agent Session **还活着，但已经在一个更新的 Run 上**（别处已经
+ *   resume 过它）。于是「等一下」是错建议——被替换掉的 Run 等多久都不会回来；正确的动作是重读
+ *   这条 session 的当前快照（按稳定的 agentSessionId 取，不按 run 取）。
+ * - `lifecycle-busy`：另一个生命周期操作**此刻**正持有它，这是短暂的。这一类「等」才对。
+ *
+ * 抽成一个命名类型而不是继续内联：desktop 侧要按它分流出两套文案与两个动作，而内联的字面量
+ * 会让两边各写一遍取值域——那是必然 drift 的两处常量。
+ */
+export type AgentMuxAgentContinuityConflictReason =
+  | 'session-run-changed'
+  | 'lifecycle-busy'
+
 export type AgentMuxAgentContinuityRunEvidence =
   | { kind: 'run-running'; observedAt: number }
   | { kind: 'run-ended'; state: 'exited' | 'interrupted'; observedAt: number }
@@ -67,7 +82,7 @@ export type AgentMuxAgentContinuityResult =
       agentSessionId: string
       previousRun: AgentMuxRunRef
       currentRun?: AgentMuxRunRef
-      reason: 'session-run-changed' | 'lifecycle-busy'
+      reason: AgentMuxAgentContinuityConflictReason
       evidence: { kind: 'agent-session-store' } | { kind: 'hook-ingress-owner' }
     }
 

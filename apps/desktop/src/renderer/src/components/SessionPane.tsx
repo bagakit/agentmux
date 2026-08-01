@@ -17,7 +17,11 @@ import { OpenDestinationPopover, type OpenDestinationRequest } from './OpenDesti
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { TerminalView } from './TerminalView'
 import { agentSessionServiceOutcome, classifyServiceNotice, serviceNoticeToRender } from '../lib/service-window-notice'
-import { classifyContinuityFailure, continuityRetryEnabled } from '../lib/continuity-failure-notice'
+import {
+  classifyContinuityFailure,
+  continuityRefreshEnabled,
+  continuityRetryEnabled
+} from '../lib/continuity-failure-notice'
 
 const NO_TIMELINE_ITEMS: never[] = []
 
@@ -154,7 +158,12 @@ export function SessionPane({
   const interruptionReason = session?.interruptionReason
   const continuity = session?.status.continuity
   // Which of Core's reasons this is decides the title, the body and whether retry can work.
-  const continuityNotice = classifyContinuityFailure(continuity, session?.status.continuityReason)
+  // The conflict class comes along too: its two values ask for opposite actions.
+  const continuityNotice = classifyContinuityFailure(
+    continuity,
+    session?.status.continuityReason,
+    session?.status.continuityConflict
+  )
 
   async function recover(): Promise<void> {
     if (recovering) return
@@ -253,23 +262,34 @@ export function SessionPane({
                       </button>
                     )
                   ) : continuityNotice ? (
-                    // Three distinct reasons, three distinct things to do. A retry that cannot
+                    // Four distinct reasons, four distinct things to do. A retry that cannot
                     // succeed is worse than a disabled button: it promises something untrue.
+                    // `refresh` deliberately calls refresh(), NOT recover(): this Agent is already
+                    // alive on a newer Run, so resuming again would be a second claim on it — the
+                    // view only needs to catch up, which refresh does by stable agentSessionId.
                     <button
                       type="button"
                       className="small-button"
-                      disabled={!continuityRetryEnabled(continuityNotice) || recovering}
+                      disabled={
+                        !(continuityRetryEnabled(continuityNotice) || continuityRefreshEnabled(continuityNotice)) ||
+                        recovering ||
+                        refreshing
+                      }
                       title={continuityNotice.reason}
                       onClick={
-                        continuityRetryEnabled(continuityNotice)
-                          ? () => void recover()
-                          : undefined
+                        continuityRefreshEnabled(continuityNotice)
+                          ? () => void refresh()
+                          : continuityRetryEnabled(continuityNotice)
+                            ? () => void recover()
+                            : undefined
                       }
                     >
                       <RotateCcw size={12} /> {
                         recovering && continuityRetryEnabled(continuityNotice)
                           ? 'Resuming…'
-                          : continuityNotice.actionLabel
+                          : refreshing && continuityRefreshEnabled(continuityNotice)
+                            ? 'Re-reading…'
+                            : continuityNotice.actionLabel
                       }
                     </button>
                   ) : (
