@@ -158,9 +158,24 @@ grok 的 `Stop` 因此只会以「报告」身份触发一次。这个前提由�
    AgentMux 的 `readySignal: foreground-process` 是拿 `expectedProcess` 去比对**操作系统进程名**的，
    所以按"可执行文件名即进程名"这个形状去推，会得到一个永远等不到就绪的 Provider——而且不会报错，
    只会一直显示在启动中。这是本仓第十一个内置 Provider 里**唯一**一个两者不相等的条目。
-2. **首个 prompt 不能进 argv。** `-p/--prompt` 在 shell UI 里的语义是"跑完这一条就退出"
-   （`ui/shell/__init__.py` 的 `run single command and exit`），而 AgentMux 要的是一个活着的交互 PTY。
-   所以 prompt 改由 PTY 键入。
+2. **首个 prompt 送不到，只能起来之后再提交。** 这条被复核推翻过一次，值得记全：`-p/--prompt`
+   （含别名 `-c/--command`）在 shell UI 里走 `Shell.run(command=...)`，而那条路是
+   `# run single command and exit`，跑完就返回——不是一个活着的交互 PTY。**且没有** Gemini
+   `--prompt-interactive` 那样"带 prompt 启动且保持交互"的旗标：把 `cli/__init__.py` 的整份选项
+   清单读完，prompt 只有上面那一个入口。`prefill_text` 看着像第三条路，其实不是——它只由 `Reload`
+   异常传入，并且在交互循环**内部**才应用，任何命令行旗标都到不了它。
+
+   所以 Kimi 的 `promptDelivery` 是 `post-launch-only`，而**不是** `positional-argv`。
+   最初的实现声明成 positional-argv 再在 `buildArgs` 里把 prompt 丢掉，并在注释里说"改在 PTY 里
+   键入"——那条 PTY 键入路径在启动期根本不存在（`planPromptInput` 只被 `submitAgentPrompt` 调用，
+   initial-composer 兜底要求 `terminalHandshake`+`terminalPromptRender`，只有 codex 声明）。
+   净效果是用户的原话只落进 timeline、永不进入进程，而界面上一切正常。现在两个出口
+   （`buildLaunch` / `buildResumeLaunch`）都会当场拒绝并报 `AGENT_LAUNCH_PROMPT_UNSUPPORTED`。
+   空 prompt 照常启动：Kimi 空手起来完全可用，起来之后提交 prompt 走默认 single-phase 那条通路
+   （不需要 composer readiness 纪元）。
+
+   **教训**：「声明一个能力，再在实现里悄悄不做」比「如实声明做不到」坏得多——后者是一次响亮的
+   失败，前者是一次静默的数据丢失。而当时那条注释还替这个丢失作了担保，让读者以为有条替代路径。
 3. **hook 是真的，但配置面是 TOML，故记 `unmanaged` 而非 `explicit-managed`。**
    `[[hooks]]` 写在 `~/.kimi/config.toml`，而那是用户主配置（model / credentials / theme 都在里面）。
    本仓四种 merge 策略（`json-owned-key` / `json-managed-events` / `yaml-managed-events` /
@@ -170,6 +185,25 @@ grok 的 `Stop` 因此只会以「报告」身份触发一次。这个前提由�
 另外两条"不声明"：`usage` 不声明（`Stop`/`StopFailure` 负载里没有任何 token 字段，也不报 transcript
 路径）；`acpStrategy: none`（`kimi acp` 子命令与 `agent-client-protocol` 依赖都真实存在，但 AgentMux
 侧的 ACP 适配没接——**能力存在 ≠ 我们接上了**，如实记未接）。
+
+#### 一条无法在本仓弥补的固有限制：中断与步数上限不发任何收尾事件
+
+`Stop` + `StopFailure` 看着像覆盖了全部收尾，其实没有。两条路一个 hook 都不发：
+
+- **用户中断（Ctrl-C / Esc）**：`run()` 的 `except asyncio.CancelledError`（`soul/kimisoul.py:791`）
+  重新抛出，而 `Stop` 的 trigger（`:742`）在它**之后**，于是被跳过。`StopFailure` 在 `_agent_loop`
+  的 `except Exception` 里，而 `CancelledError` 自 py3.8 起是 `BaseException`——抓不到。
+- **`MaxStepsReached`**：raise 点在那个 `except Exception` 的 `try` **之上**（`:788` 接住后重抛），
+  同样绕过 `StopFailure`。
+
+关键在于中断后 **Kimi 进程仍然活着**（停在 composer 上，SIGINT 只取消当前 turn），所以连"进程退出"
+这个兜底事实都没有。后果：用户中断或撞上步数上限后，这个 Agent 会一直显示运行中，再没有任何事件
+能把它救回来。
+
+与 grok 那次的区别必须认清：grok 是**发了**另一个事件（`StopCancelled`）而我们没接，补上映射即可；
+Kimi 是真的什么都不发——`config.py:5-19` 的 13 个事件里没有任何 cancel 类。所以正确的做法是如实
+记录这个限制，**不是**发明一个收尾事件去填。若将来要给 Kimi 暴露"中断当前 turn"的操作，这条会从
+限制升级为必须先解决的阻塞项。
 
 事件名（PascalCase）与负载键（`hook_event_name` / `session_id`）与 Claude 一族逐字同形，已被既有方言
 表覆盖，故**没有**往 `agent-hook-event.ts` 加任何条目。
