@@ -68,8 +68,14 @@ describe('Kimi provider', () => {
       }).args).toEqual([])
     })
 
-    it('prompt 改由 PTY 键入，且多行走 bracketed paste', () => {
+    it('prompt 改由 PTY 键入，走的是默认的 single-phase 形态', () => {
+      // **不是** bracketed paste：Kimi 没有声明 planPromptInput，于是继承 agent-provider.ts:196-198
+      // 的默认实现——原样加一个回车。全仓只有 codex 声明了 render-then-submit 的 bracketed paste
+      // 形态，claude / cursor / grok / gemini 与 Kimi 一样走这条默认路。
       expect(kimi.planPromptInput('hello')).toEqual({ kind: 'single-phase', data: 'hello\r' })
+      // 多行如实记：换行原样进 PTY，没有 paste 包裹。这是这条默认路的既有行为而非 Kimi 独有，
+      // 钉在这里是为了让"以后谁给 Kimi 声明了 paste 形态"这件事必须显式改掉这条断言。
+      expect(kimi.planPromptInput('a\nb')).toEqual({ kind: 'single-phase', data: 'a\nb\r' })
     })
   })
 
