@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
 import {
   AGENT_HOOK_LIFECYCLE_DIALECT,
+  GROK_HOOK_DIALECT,
   HERMES_HOOK_DIALECT,
   HOOK_EVENT_NAME_PAYLOAD_KEYS,
   PASCAL_CASE_HOOK_DIALECT,
@@ -198,7 +199,7 @@ describe('Core Provider protocol', () => {
     it('方言按 Provider 分块声明，合并面等于各块之并——新 Provider 只动自己那块', () => {
       // 这是为并行开发做的结构约束：加一个 Provider 不该改任何已有 Provider 的映射。
       // 合并面必须恰好等于各块的并集，既不丢（漏接线）也不多（有人偷偷往全局表塞条目）。
-      const blocks = [PASCAL_CASE_HOOK_DIALECT, HERMES_HOOK_DIALECT, PI_HOOK_DIALECT]
+      const blocks = [PASCAL_CASE_HOOK_DIALECT, HERMES_HOOK_DIALECT, PI_HOOK_DIALECT, GROK_HOOK_DIALECT]
       const union: Record<string, AgentHookLifecycleEvent> = {}
       for (const block of blocks) Object.assign(union, block)
       expect(AGENT_HOOK_LIFECYCLE_DIALECT).toEqual(union)
@@ -214,12 +215,19 @@ describe('Core Provider protocol', () => {
     it('不做大小写折叠：只有真被观察到的拼法在表里，折过来的拼法一律认不出', () => {
       // 归一化（把 PreToolUse 正则折成 pre_tool_use）会顺带接受从没被任何 Provider 观察到的串，
       // 于是表里的键不再等于「有证据的事实」。这条守住「能力未核实就不声明」那条北极星。
+      //
+      // `PreToolUse` 与 `pre_tool_use` **两个拼法都在表里**，但那不是折叠的结果：前者是
+      // Claude 一族的真实 wire 值，后者是 grok 的真实 wire 值，各有各的证据、各在自己那块声明。
       expect(canonicalHookLifecycleEvent('PreToolUse')).toBe('tool-use-start')
-      // grok 的 wire 值确实是 snake_case，但它属于 grok 自己那块方言（T-003 接入）；
-      // 在它被真正接线之前，绝不能因为「长得像 PreToolUse 折叠后的样子」就被认出来。
-      expect(canonicalHookLifecycleEvent('pre_tool_use')).toBeUndefined()
+      expect(canonicalHookLifecycleEvent('pre_tool_use')).toBe('tool-use-start')
+      // 而这两个谁也没观察到过——折叠一旦引入，它们就会跟着被认出来。
       expect(canonicalHookLifecycleEvent('pretooluse')).toBeUndefined()
       expect(canonicalHookLifecycleEvent('PRE_TOOL_USE')).toBeUndefined()
+      // 最尖的一例：`StopCancelled` 是 grok **配置侧**的真实字符串（见 GROK_HOOK_EVENTS），
+      // 但它永远不会出现在 wire 上——grok 报的是 `stop_cancelled`。折叠会把这个配置名也认成
+      // 生命周期事件，于是「装进配置的名字」和「投递上来的名字」这两个面就被搅成了一个。
+      expect(canonicalHookLifecycleEvent('stop_cancelled')).toBe('turn-end')
+      expect(canonicalHookLifecycleEvent('StopCancelled')).toBeUndefined()
       // 同族反向：Hermes 的真实拼法在表里，它的 PascalCase 幻影不在。
       expect(canonicalHookLifecycleEvent('post_tool_call')).toBe('tool-use-end')
       expect(canonicalHookLifecycleEvent('PostToolCall')).toBeUndefined()

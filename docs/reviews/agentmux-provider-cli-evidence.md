@@ -51,6 +51,27 @@
 阻断性（可 deny/block）：`UserPromptSubmit`、`PreToolUse`、`Stop`、`SubagentStop`。
 其余为 observe-only。
 
+### 收尾事件的三分与「取代」语义（10-hooks.md:96-98, 310, 314-316, 326）
+
+这是 grok 最容易接错、且错了不会报错只会永久卡住的一处，逐字引证：
+
+- `StopCancelled`：**"Runs instead of `Stop` when a turn ends without completing"**——用户中断
+  （Ctrl+C / Esc / 客户端 stop）、拒绝授权、`--max-turns` 上限、no-progress 兜底。
+- `StopFailure`：API 错误时同样**取代** `Stop`。
+- `Stop` 自己的表述里就写明："An agent turn ends on a genuine completion
+  (an interrupt fires `StopCancelled` instead)"。
+
+结论：一个 turn **至多报三者之一**（"A turn reports at most one of the three"）。因此把 done
+只绑在 `Stop` 上，用户按下中断后不会有任何后续事件把状态救回来——Agent 永久停在 working。
+三条必须同时映射为收尾。
+
+另有一条只对**装了阻断式 `Stop` gate** 的宿主成立的陷阱（:328）：`Stop` 作为 gate 被 block 时
+会在每一轮续跑时重复触发，而被动观察者分不清「续跑那次」与「最终那次」，于是"a UI gated on
+`Stop` alone shows a false idle"。AgentMux 不受此影响，因为它声明 `permission: 'observe'`
+且 hook 子进程从不往 stdout 写 decision、也从不 exit 2（见 `packages/core/bin/agentmux-hook.js`），
+grok 的 `Stop` 因此只会以「报告」身份触发一次。这个前提由测试钉住——一旦哪天 hook 子进程开始
+应答 decision，false-idle 就会出现，而那时才发现就太晚了。
+
 ### 公共负载字段（10-hooks.md:237-255）
 
 每个事件都带：`hookEventName`、`sessionId`、`cwd`、`workspaceRoot`、`timestamp`、

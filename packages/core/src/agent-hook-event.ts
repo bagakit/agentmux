@@ -106,15 +106,49 @@ export const PI_HOOK_DIALECT: AgentHookLifecycleDialect = {
 }
 
 /**
+ * grok 的 snake_case wire 方言。
+ *
+ * 注意 grok 的两个面拼法不同：写进 hooks 配置的是 PascalCase（`PreToolUse`），而它在 stdin 负载的
+ * `hookEventName` 里报的是 snake_case（`pre_tool_use`）。这里只管**投递侧**——配置侧的清单在
+ * grok 自己的 Provider 模块里。
+ *
+ * `stop_cancelled` 是这份方言里最要紧的一条：grok 在中断、拒绝授权、max-turns、无进展时触发
+ * `StopCancelled` **取代** `Stop`，也就是说这几种收尾根本不会有 `stop`。少映射它，用户按下中断后
+ * Agent 会永远停在 working，且没有任何后续事件能把它救回来。
+ *
+ * `permission_denied`/`notification`/`pre_compact`/`post_compact` 刻意不映射：Core 今天没有判断
+ * 需要它们，且 grok 的 `notification` 是一族按 message 分辨的 UI 提示，映射成生命周期等于替
+ * Provider 猜语义。
+ */
+export const GROK_HOOK_DIALECT: AgentHookLifecycleDialect = {
+  session_start: 'session-start',
+  user_prompt_submit: 'user-prompt-submit',
+  pre_tool_use: 'tool-use-start',
+  post_tool_use: 'tool-use-end',
+  post_tool_use_failure: 'tool-use-end',
+  subagent_start: 'subagent-start',
+  subagent_stop: 'subagent-stop',
+  stop: 'turn-end',
+  stop_failure: 'turn-end',
+  stop_cancelled: 'turn-end'
+}
+
+/**
  * Core 认识的全部方言，按 Provider 组合。
  *
- * 组合点在这里、声明在各 Provider 自己的常量里：加一个 Provider 是加一行 import + 一行 spread，
- * 不必去动任何已有 Provider 的映射。
+ * 每个 Provider 一块声明、这里一行 spread：新接一个 Provider 只在本文件追加自己那块，不必去动
+ * 任何已有 Provider 的映射（并行分支因此改的是互不相邻的区域）。
+ *
+ * 为什么方言留在这个叶子模块、而不是搬进各自的 `providers/*.ts`：本模块是**零运行时依赖**的叶子，
+ * 每次 hook 事件都新起一次的子进程靠它拿表（见文件头）。让它反向 import 任何 Provider 模块，就会
+ * 把 node:os、registry、normalizer 整条图拖进 Agent 每次工具调用的关键路径——那正是本模块存在的
+ * 理由所要避免的。方言是纯数据，放这里没有代价；Provider 侧只保留它自己的 rules 与 installer 清单。
  */
 const HOOK_LIFECYCLE_DIALECTS: readonly AgentHookLifecycleDialect[] = [
   PASCAL_CASE_HOOK_DIALECT,
   HERMES_HOOK_DIALECT,
-  PI_HOOK_DIALECT
+  PI_HOOK_DIALECT,
+  GROK_HOOK_DIALECT
 ]
 
 /** 合并后的查表面。重复键必须映射到同一个 canonical 事件，否则是真冲突——见下方构造时的断言。 */
