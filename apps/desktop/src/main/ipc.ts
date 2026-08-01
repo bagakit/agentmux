@@ -75,6 +75,7 @@ import { saveRuntimeConfig } from './runtime-config-transaction.js'
 import { WorkspaceFiles } from './workspace-files.js'
 import { WorktreeService } from './worktree-service.js'
 import { runFanOutRequest } from './fanout-request.js'
+import { rebindLocalFolder } from './workspace-rebind.js'
 import { GitService } from './git-service.js'
 import { GhService } from './gh-service.js'
 
@@ -190,29 +191,18 @@ export async function registerIpc(args: {
     config = await args.configStore.save({ ...config, workspaces: [...config.workspaces, item] })
     return item
   })
+  // 重绑一个本地文件夹 Workspace。编排在 `workspace-rebind` 里，所以测试够得着：这个 handler
+  // 只剩一个转发表达式，没有可以插早退的语句位置。文本守卫看不见这里的早退——插一句
+  // `return null`，重绑对用户永久失效而 2 条断言全绿（见 rebindLocalFolder 的注释）。
   handle('workspaces:rebindLocalFolder', async (workspaceId: string) => {
-    const current = workspace(config, workspaceId)
-    if (current.hostId !== 'local' || current.kind !== 'folder') {
-      throw new Error('Only local folder Workspaces can be rebound')
-    }
-    const selection = await dialog.showOpenDialog(args.window, {
-      properties: ['openDirectory'],
-      defaultPath: dirname(current.path)
+    const result = await rebindLocalFolder(workspaceId, config, {
+      chooseDirectory: async (defaultPath) =>
+        await dialog.showOpenDialog(args.window, { properties: ['openDirectory'], defaultPath }),
+      save: async (next) =>
+        await saveRuntimeConfig({ runtime: args.runtime, configWriter: args.configStore, next })
     })
-    const path = selection.filePaths[0]
-    if (selection.canceled || !path) return null
-    // Keep the Workspace id and user-facing name stable. Sessions, layouts and
-    // Provider identities key off that id; only the filesystem locator changes.
-    const updated: WorkspaceRecord = { ...current, path }
-    config = await saveRuntimeConfig({
-      runtime: args.runtime,
-      configWriter: args.configStore,
-      next: {
-        ...config,
-        workspaces: config.workspaces.map((item) => item.id === workspaceId ? updated : item)
-      }
-    })
-    return config.workspaces.find((item) => item.id === workspaceId) ?? updated
+    config = result.config
+    return result.workspace
   })
   handle('workspaces:add', async (input: CreateWorkspaceInput) => {
     args.runtime.executionHost(input.hostId)
