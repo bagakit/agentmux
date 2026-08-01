@@ -59,7 +59,8 @@ import {
 } from './lib/control'
 import {
   activateTab as activateLayoutTab,
-  addTab,
+  addTabOrThrow,
+  addTabPlacement,
   createWorkspaceLayout,
   findGroup,
   findGroupForTab,
@@ -2343,16 +2344,23 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       : createWorkbenchTab(tabId, surface)
     const sessionTopicId = scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath)
     const tab = sessionTopicId ? { ...createdTab, topicId: sessionTopicId } : createdTab
+    // Tab 已在某个分组里就只需激活；新建时必须真的挂上。挂不上（`preferredTabGroupId` 指向一个
+    // 已不存在的分组）原先静默回落成原 layout：Tab 记录进了 state.tabs 而不在任何 tabOrder 里。
+    // 这里刻意不「退回 activeGroupId」——请求的分组不在场时换一个窗口安放，正是 #307 那个
+    // 「浮层里开到背后主界面」的形态。selectSession 是同步 void 动作，抛出只会变成事件处理里的
+    // 未捕获异常，所以走 reportError 把失败摆到界面上。
+    const nextLayout = existingTabGroupId
+      ? activateLayoutTab(layout, targetTabGroupId, tabId)
+      : addTabPlacement(layout, targetTabGroupId, tabId)
+    if (!nextLayout) {
+      get().reportError(new Error('The Tab Group is no longer available'))
+      return
+    }
     set((state) => ({
       activeWorkspaceId: workspace.id,
       mainSurface: 'workbench',
       tabs: { ...state.tabs, [tab.id]: tab },
-      layouts: {
-        ...state.layouts,
-        [workspace.id]: existingTabGroupId
-          ? activateLayoutTab(layout, targetTabGroupId, tabId)
-          : addTab(layout, targetTabGroupId, tabId)
-      }
+      layouts: { ...state.layouts, [workspace.id]: nextLayout }
     }))
     if (existing) get().focusRegion(workspace.id, tabId, regionId)
   },
@@ -2364,10 +2372,17 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const targetTabGroupId = tabGroupId ?? layout.activeGroupId
     const topicId = inheritedTopicIdForNewTab(workspaceId, layout, state.tabs, targetTabGroupId)
     const tab = newLauncherTab(workspaceId, topicId)
+    // 同 selectSession：挂不上就报错并放弃，不留一条永不显示的孤儿 Tab。这是同步 void 动作
+    // （唯一调用方是 Tab Bar 上的「+」），所以不抛。
+    const nextLayout = addTabPlacement(layout, targetTabGroupId, tab.id)
+    if (!nextLayout) {
+      get().reportError(new Error('The Tab Group is no longer available'))
+      return
+    }
     set((state) => ({
       mainSurface: 'workbench',
       tabs: { ...state.tabs, [tab.id]: tab },
-      layouts: { ...state.layouts, [workspaceId]: addTab(layout, targetTabGroupId, tab.id) }
+      layouts: { ...state.layouts, [workspaceId]: nextLayout }
     }))
   },
   closeTab(workspaceId, tabGroupId, tabId, options) {
@@ -2952,25 +2967,31 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const targetTab = canOwnTopic ? activeTab : newLauncherTab(workspace.id)
     const topicId = targetTab.topicId ?? targetTab.id
     const snapshot = await api.scratch.ensureTopic(workspace.id, topicId)
+    let placementFailed = false
     set((current) => {
       const currentLayout = current.layouts[workspace.id]
       if (!currentLayout) return current
       const nextTab = { ...targetTab, topicId }
       const alreadyOpen = Boolean(current.tabs[targetTab.id])
+      // 已在场只需激活；新建必须真的挂上，挂不上就整笔放弃（见 addTabPlacement）。
+      // 不在 set 回调里抛：抛在 reducer 中间会让「有没有写进去」变得难读，故先记标记后抛。
+      const nextLayout = alreadyOpen
+        ? activateLayoutTab(currentLayout, layout.activeGroupId, nextTab.id)
+        : addTabPlacement(currentLayout, layout.activeGroupId, nextTab.id)
+      if (!nextLayout) {
+        placementFailed = true
+        return current
+      }
       return {
         tabs: { ...current.tabs, [nextTab.id]: nextTab },
-        layouts: {
-          ...current.layouts,
-          [workspace.id]: alreadyOpen
-            ? activateLayoutTab(currentLayout, layout.activeGroupId, nextTab.id)
-            : addTab(currentLayout, layout.activeGroupId, nextTab.id)
-        },
+        layouts: { ...current.layouts, [workspace.id]: nextLayout },
         workspaceFileRevisions: bumpWorkspaceFileRevision(
           current.workspaceFileRevisions,
           workspace.id
         )
       }
     })
+    if (placementFailed) throw new Error('The Tab Group is no longer available')
     return snapshot
   },
   setScratchTopicOrder(order) {
@@ -2984,6 +3005,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     const snapshot = await api.scratch.readTopic(workspace.id, topicId)
     if (!snapshot) throw new Error('Scratch Topic no longer exists')
+    let placementFailed = false
     set((current) => {
       const layout = current.layouts[workspace.id]
       if (!layout) return current
@@ -3004,14 +3026,17 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         }
       }
       const tab = { ...newLauncherTab(workspace.id), topicId }
+      const nextLayout = addTabPlacement(layout, layout.activeGroupId, tab.id)
+      if (!nextLayout) {
+        placementFailed = true
+        return current
+      }
       return {
         tabs: { ...current.tabs, [tab.id]: tab },
-        layouts: {
-          ...current.layouts,
-          [workspace.id]: addTab(layout, layout.activeGroupId, tab.id)
-        }
+        layouts: { ...current.layouts, [workspace.id]: nextLayout }
       }
     })
+    if (placementFailed) throw new Error('The Tab Group is no longer available')
   },
   async renameScratchTopic(topicId, title) {
     const state = get()
@@ -3260,11 +3285,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     const replacedTab = replaceWorkbenchRegion(targetTab, regionId, pendingSurface)
     const pendingTab = scratchTopicId ? { ...replacedTab, topicId: scratchTopicId } : replacedTab
+    // 没有 launcher 归属时这条 Tab 是新建的，必须真的挂进某个分组。挂不上就抛：原先用 addTab
+    // 的静默回落，Tab 记录进了 state.tabs 而不在任何 tabOrder 里——永不显示、永不可关，且用户
+    // 点了「启动」看不到任何反馈（实测抛出的是 null，多出一条孤儿记录）。
+    const nextLayout = launcher ? layout : addTabOrThrow(layout, tabGroupId, tabId)
     set((current) => ({
       tabs: { ...current.tabs, [tabId]: pendingTab },
       layouts: {
         ...current.layouts,
-        [workspace.id]: launcher ? layout : addTab(layout, tabGroupId, tabId)
+        [workspace.id]: nextLayout
       },
       pendingAgentLaunches: {
         ...current.pendingAgentLaunches,
@@ -3439,11 +3468,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       sessionId
     }
     const pendingTab = replaceWorkbenchRegion(targetTab, regionId, pendingSurface)
+    // 与 launchAgent 同一条判定：新建 Tab 必须真的挂进某个分组，挂不上就抛。
+    const nextLayout = launcher ? layout : addTabOrThrow(layout, tabGroupId, tabId)
     set((current) => ({
       tabs: { ...current.tabs, [tabId]: pendingTab },
       layouts: {
         ...current.layouts,
-        [workspace.id]: launcher ? layout : addTab(layout, tabGroupId, tabId)
+        [workspace.id]: nextLayout
       }
     }))
     try {
@@ -3586,6 +3617,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     let bound = false
     let sessionOwnedByClose = false
+    let placementFailed = false
     set((current) => {
       if (!workbenchViewCloseAllowsSession(current.closingWorkbenchViews, session.id)) {
         sessionOwnedByClose = true
@@ -3614,10 +3646,18 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       const layout = current.layouts[workspace.id]
       if (!layout) return current
+      // 挂不上就不 bound：下面的 `!bound` 路径会把已从槽里取出的 PTY 停掉，不泄漏进程。
+      // 但要与「Tab 正在关闭」那种静默放弃分开——落点不在场是用户点了按钮却什么都没发生，
+      // 必须响亮（原先用 addTab 的静默回落会留下一条永不显示的孤儿 Tab）。
+      const nextLayout = addTabPlacement(layout, tabGroupId, tabId)
+      if (!nextLayout) {
+        placementFailed = true
+        return current
+      }
       bound = true
       return {
         tabs: nextTabs,
-        layouts: { ...current.layouts, [workspace.id]: addTab(layout, tabGroupId, tabId) },
+        layouts: { ...current.layouts, [workspace.id]: nextLayout },
         sessions: nextSessions,
         unclaimedTerminalSessionIds: nextUnclaimedIds
       }
@@ -3632,6 +3672,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           )
         }))
       }
+      if (placementFailed) throw new Error('The Tab Group is no longer available')
       return
     }
     void get().refreshSession(session.id)
@@ -3659,9 +3700,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const pendingLauncher = targetTab.regions[regionId]
     if (pendingLauncher?.kind !== 'launcher') throw new Error('Launcher Region is no longer available')
     if (!launcher) {
+      // 挂不上就抛，绝不留孤儿 Tab（见 addTabPlacement 的说明）。这里排在 api.browser.create
+      // 之前：落点不在场时连 BrowserView 都不该建，省掉一次紧接着的销毁。
+      const nextLayout = addTabOrThrow(layout, tabGroupId, tabId)
       set((current) => ({
         tabs: { ...current.tabs, [tabId]: targetTab },
-        layouts: { ...current.layouts, [workspaceId]: addTab(layout, tabGroupId, tabId) }
+        layouts: { ...current.layouts, [workspaceId]: nextLayout }
       }))
     }
     try {
@@ -3744,8 +3788,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         )
         const createdTab = createWorkbenchTab(tabId, pendingLauncher)
         const tab = topicId ? { ...createdTab, topicId } : createdTab
-        const nextLayout = addTab(layout, origin.tabGroupId, tabId)
-        if (nextLayout === layout) {
+        // 落点判定收在 addTabPlacement 里（同一族缺陷的唯一判据）。原先这里写的是
+        // `nextLayout === layout` 的身份比较——对这条路径恰好等价，但那个判据认不出
+        // 「Tab 已在别处、activateTab 返回同一对象」，换到别的调用点就会把正常路径判成失败。
+        const nextLayout = addTabPlacement(layout, origin.tabGroupId, tabId)
+        if (!nextLayout) {
           placementError = new Error('Link destination Tab could not be created')
           return current
         }
