@@ -18,7 +18,7 @@ import {
 } from '@agentmux/core'
 // 进程事实的投影走那个 node-free 子路径，与 renderer 侧的实时路径**同一个**实现。走子路径而不是包根，
 // 是为了让两侧 import 的是同一个模块——包根那条链拖 node:crypto，renderer 引不动。
-import { projectRunProcessStatus } from '@agentmux/core/run-status'
+import { projectRunProcessStatus, runExitFacts } from '@agentmux/core/run-status'
 import type { WebContents } from 'electron'
 import type {
   ExecutorDetection,
@@ -160,15 +160,15 @@ function projectSession(
   // 「进程事实 → 界面那一行状态」只有一个答案，走 Core 的共享投影。这里只负责把快照的字段形状取出来。
   // 曾经这段是本地手写的：于是它带 `signal SIGSEGV` 的 detail 而实时路径（session-state 收
   // process-state 事件那处）整段没有，同一个崩掉的 Agent 在场时看不到信号、reload 之后反而看到了。
+  //
+  // 三条退出事实走 runExitFacts 而不是在这里逐条 spread：那三行此前在两条路径上各抄一份，于是漏抄
+  // 一行没有任何东西会红——`exitSignal` 和 `exitReason` 各自独立地漏过一次。本地只保留快照形状独有的
+  // 部分（source 在这条路上恒为 'run-process'，因为快照本身就是进程台账）。
   const processStatus = projectRunProcessStatus({
     state: run.state,
     source: 'run-process',
     observedAt,
-    ...(run.exitCode === undefined ? {} : { exitCode: run.exitCode }),
-    ...(run.exitSignal === undefined ? {} : { exitSignal: run.exitSignal }),
-    // 退出原因随 snapshot 一起过来，与 live 的 process-state 事件同源同值。少了这一行，reload 之后
-    // 「你关的还是它崩的」就退化成裸 signal 号——同一个已退出的 Agent，在场时说得清，重开窗口就说不清了。
-    ...(run.exitReason === undefined ? {} : { exitReason: run.exitReason })
+    ...runExitFacts(run)
   })
   if (subject.kind === 'agent') {
     const status = run.state === 'running' && subject.agentSession.semanticStatus
