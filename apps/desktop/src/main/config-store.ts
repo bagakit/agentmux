@@ -572,6 +572,16 @@ export class ConfigStore {
 
   constructor(private readonly path = join(app.getPath('userData'), 'agentmux.config.json')) {}
 
+  /**
+   * 这份配置在盘上的位置，用来在启动失败的对话框里告诉用户去哪里看。
+   *
+   * 只读、只用于展示。四道拒绝启动的守卫（见 `retiredConfigReplacement`）的全部意义是「你的东西
+   * 还在这个文件里，去修一个字节」，而用户拿不到路径就无法行动——那些守卫也就白设了。
+   */
+  get filePath(): string {
+    return this.path
+  }
+
   async get(): Promise<AppConfig> {
     await mkdir(SCRATCH_BACKING_PATH, { recursive: true })
     let loaded: AppConfig
