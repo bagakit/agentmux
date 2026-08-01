@@ -757,6 +757,7 @@ function PaneGroup({
   const activateTab = useAppStore((state) => state.activateTab)
   const openLauncher = useAppStore((state) => state.openLauncher)
   const splitRegion = useAppStore((state) => state.splitRegion)
+  const arrangeTabRegions = useAppStore((state) => state.arrangeTabRegions)
   const setTabMenuOpen = useAppStore((state) => state.setTabMenuOpen)
   const setViewMode = useAppStore((state) => state.setViewMode)
   const viewModes = useAppStore((state) => state.viewModes)
@@ -856,10 +857,14 @@ function PaneGroup({
           <PaneSplitMenu
             onOpenChange={setTabMenuOpen}
             disabled={!activeTab || !activeSurface}
+            regionCount={activeTab ? Object.keys(activeTab.regions).length : 0}
             onSplit={(direction) => {
               if (activeTab && activeSurface) {
                 splitRegion(workspaceId, activeTab.id, activeSurface.regionId, direction)
               }
+            }}
+            onArrange={(preset) => {
+              if (activeTab) arrangeTabRegions(workspaceId, activeTab.id, preset)
             }}
           />
           <button
