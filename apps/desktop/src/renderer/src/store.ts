@@ -3308,8 +3308,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         throw reconcileError
       }
       if (!result) {
-        set((current) => reduceSessionLaunchFailed(current, regionId, 'agent', sessionId))
-        return
+        // 这个 Session 在启动过程中就没了（在途事件溢出后重取快照，它已经不在快照里）。
+        // 抛出去而不是就地 `set(...) + return`：下面那个 catch 已经是这个方法唯一的失败出口，
+        // 它会翻回 launcher、reportError、再抛给调用方。就地静默回滚的话，用户看到的是初始页
+        // 自己闪回来而没有任何一个字解释，与「我刚才是不是没点上」完全同形；批量扇出的调用方
+        // 也会把这次当成成功继续往下走。同一个条件在 Control 那条路上判的是 CONTROL_OWNER_LOST
+        // （见 runControlRequest 里 `if (!canonical)`），两条路对同一个事实必须判得一样。
+        throw Object.assign(new Error('Agent Session ended during launch.'), {
+          code: 'CONTROL_OWNER_LOST'
+        })
       }
       const session = result.session
       const launchOwner = findWorkbenchRegion(get().tabs, regionId)
