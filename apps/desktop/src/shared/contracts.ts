@@ -104,8 +104,27 @@ export type BrowserConfig = {
   toolbar: BrowserToolbarConfig
 }
 
+/**
+ * 当前配置形状的版本号，唯一真源。
+ *
+ * 本仓对配置演进的答案是**版本号 +1 然后重置**，不是往读取路径上叠回填（见测试
+ * `resets retired config to current default without migration or fallback`）。凡改动配置形状到
+ * 「旧文件读出来在语义上已经不对」的程度，就把这个数字 +1：低于它的磁盘配置被删掉重置成当前默认，
+ * 等于它的正常校验，高于它的严格拒绝并保留文件（不猜未来形状）。
+ *
+ * 落在 contracts 而不是 config-store，是因为这个数字有**五**处消费者：本文件的 `AppConfig.version`
+ * 类型、config-store 的 zod 字面量、`DEFAULT_CONFIG.version`、`get()` 里的重置阈值、以及 renderer
+ * 那份浏览器预览用的 mock config。它们必须联动，而分居各处的联动常量必然 drift。
+ *
+ * 值得记下的是**谁在守它**：漏改这里的类型时，2058 条测试全绿（vitest 只转译不查类型），只有
+ * `tsc --noEmit` 报错；而 tsc 是逐个挖的——修好类型才暴露出 api.ts 那处，一共两轮。所以这条的守卫是
+ * 类型检查而不是测试，落在 `pnpm check` 的第一步（`pnpm typecheck` → 各包 `tsc --noEmit`）。只跑
+ * `pnpm test` 验不出这一族漂移。
+ */
+export const CONFIG_VERSION = 8
+
 export type AppConfig = {
-  version: 7
+  version: typeof CONFIG_VERSION
   hosts: HostConfig[]
   executors: Record<AgentExecutorId, AgentExecutorConfig>
   workspaces: WorkspaceRecord[]

@@ -4,7 +4,7 @@ import { app } from 'electron'
 import { z } from 'zod'
 import { BUILT_IN_AGENT_PROVIDERS, durableWriteFile } from '@agentmux/core'
 import type { AppConfig, WorkspaceRecord } from '../shared/contracts.js'
-import { SCRATCH_WORKSPACE_ID, SCRATCH_WORKSPACE_NAME } from '../shared/contracts.js'
+import { CONFIG_VERSION, SCRATCH_WORKSPACE_ID, SCRATCH_WORKSPACE_NAME } from '../shared/contracts.js'
 import { DEFAULT_NOTIFICATION_MODE_ID, NOTIFICATION_TIERS } from '../shared/notification-presentation.js'
 
 const hostSchema = z.discriminatedUnion('kind', [
@@ -50,9 +50,10 @@ const workspaceSchema = z
 
 const notificationModeIds = NOTIFICATION_TIERS.map((tier) => tier.id) as [string, ...string[]]
 
+
 const configSchema = z
   .object({
-    version: z.literal(7),
+    version: z.literal(CONFIG_VERSION),
     hosts: z.array(hostSchema),
     executors: z.record(executorIdSchema, executorSchema),
     workspaces: z.array(workspaceSchema),
@@ -126,7 +127,7 @@ const configSchema = z
   })
 
 export const DEFAULT_CONFIG: AppConfig = {
-  version: 7,
+  version: CONFIG_VERSION,
   hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
   executors: {
     codex: { label: 'Codex', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: true },
@@ -149,7 +150,19 @@ export const DEFAULT_CONFIG: AppConfig = {
     // agent-provider.ts 的 BUILT_IN_AGENT_PROVIDERS），但此前的默认表漏了它们，于是新建 Tab 界面（经
     // config.executors → configuredExecutors）根本不显示这三家。command/label 逐个取自各自 catalog 的
     // executable/label（SSOT，见 providers/{kimi,droid,copilot}.ts），三家都不需要特殊 args——它们的
-    // buildArgs 只原样透传 args（不像 grok 那样默认注入 --permission-mode）。
+    // buildArgs 只原样透传 args（grok 那两个参数写在下面的默认 args 里，同样是透传，不是 buildArgs 注入）。
+    //
+    // 补这三家**必须连带 version 从 7 到 8**，否则修复只对全新安装生效：v7 的磁盘配置会走下面的
+    // `configSchema.parse` 原样返回，而 `executors` 是无数量约束的 record，于是「只有 9 家」完全合法、
+    // 一路通过校验，界面上照旧缺这三家。08-24 到 09-01 之间跑过 v7 构建的用户就落在这个窗口里。
+    //
+    // 不用「遍历内置 Provider，缺谁补谁」的回填，有两个不可调和的理由：
+    //   1. 那是 fallback——一段长期驻留在 `get()` 里、专门伺候一类历史磁盘状态的代码。本仓对配置演进的
+    //      既定答案是版本号 +1 然后重置（见测试 `resets retired config to current default without
+    //      migration or fallback`），不是往读取路径上叠补丁。
+    //   2. 它分不清两种缺席。「配置写在这三家存在之前」与「用户自己删掉了 kimi」在磁盘上长得一模一样，
+    //      磁盘里没有任何信息能区分，于是回填会把用户删掉的项每次启动塞回来。这不是判据不够聪明，是
+    //      信息不存在。
     kimi: { label: 'Kimi', providerId: 'kimi', command: 'kimi', args: [], env: {}, injectAgentMuxGuide: true },
     droid: { label: 'Droid', providerId: 'droid', command: 'droid', args: [], env: {}, injectAgentMuxGuide: true },
     copilot: { label: 'Copilot', providerId: 'copilot', command: 'copilot', args: [], env: {}, injectAgentMuxGuide: true }
@@ -241,7 +254,7 @@ export class ConfigStore {
         typeof (rawJson as { version: unknown }).version === 'number' &&
         Number.isInteger((rawJson as { version: number }).version) &&
         (rawJson as { version: number }).version > 0 &&
-        (rawJson as { version: number }).version < 7
+        (rawJson as { version: number }).version < CONFIG_VERSION
       if (isOlderVersion) {
         await rm(this.path, { force: true })
         loaded = structuredClone(DEFAULT_CONFIG)
