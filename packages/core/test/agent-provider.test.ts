@@ -51,7 +51,7 @@ describe('built-in agent providers', () => {
       {
         id: 'grok', executable: 'grok', expectedProcess: 'grok',
         promptDelivery: 'positional-argv', readySignal: 'foreground-process',
-        hook: 'none', permission: 'none', resume: 'none', acp: 'none',
+        hook: 'native', permission: 'observe', resume: 'provider-native', acp: 'none',
         replyCorrelation: 'none'
       },
       {
@@ -86,14 +86,16 @@ describe('built-in agent providers', () => {
     const catalog = new Map(providers.catalog().map((provider) => [provider.id, provider.hookStrategy]))
     // AgentMux writes and owns these providers' hook config. Hermes joins them: AgentMux merges its
     // shell hooks into ~/.hermes/config.yaml plus the consent allowlist (see createHermesManagedHookPlan).
-    for (const id of ['codex', 'claude', 'antigravity', 'hermes'] as const) {
+    // grok joins them too: its own file under ~/.grok/hooks/ (that directory is always-trusted, so the
+    // install needs no folder-trust grant) — see createGrokManagedHookPlan.
+    for (const id of ['codex', 'claude', 'antigravity', 'hermes', 'grok'] as const) {
       expect(catalog.get(id)).toEqual({ kind: 'native', installation: 'explicit-managed' })
     }
     // Native hooks AgentMux understands but cannot install yet (pi TS extension has no surface AgentMux
     // writes): it must NOT claim explicit-managed, so the launch-time trigger honestly skips it.
     expect(catalog.get('pi')).toEqual({ kind: 'native', installation: 'unmanaged' })
     // Providers with no hooks at all stay `none`, never a fake native.
-    for (const id of ['traex', 'grok', 'gemini', 'cursor'] as const) {
+    for (const id of ['traex', 'gemini', 'cursor'] as const) {
       expect(catalog.get(id)).toEqual({ kind: 'none' })
     }
   })
@@ -179,7 +181,9 @@ describe('built-in agent providers', () => {
     })).toEqual({ command: 'cursor-agent', args: ['--force', 'review this'], env: {} })
   })
 
-  it.each(['grok', 'gemini', 'cursor'] as const)('exposes %s as not supporting provider-native resume', (id) => {
+  // grok left this group in T-003: `grok --resume <SESSION_ID_OR_TITLE>` is real (verified against
+  // `grok --help` on this host), and its resume argv is asserted in test/providers/grok.test.ts.
+  it.each(['gemini', 'cursor'] as const)('exposes %s as not supporting provider-native resume', (id) => {
     expect(() => providers.get(id).buildResumeLaunch({
       workspacePath: '/tmp/work',
       nativeHandle: { kind: 'provider', providerId: id, sessionId: 'native-x' },
