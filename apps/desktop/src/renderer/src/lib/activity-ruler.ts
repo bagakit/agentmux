@@ -77,12 +77,16 @@ function clampIndex(index: number, count: number): number {
   return clamp(Number.isFinite(i) ? i : 0, 0, count - 1)
 }
 
-/** Offset from the first event. Tabular numerals keep the gutter from shifting as it ticks. */
+/**
+ * Offset from the first event. Tabular numerals keep the gutter from shifting as it ticks.
+ *
+ * 整个读数都交给 {@link formatDuration}——一个符号加一段时长，没有第二套分档。原先这里自己重写了
+ * 毫秒档与秒档（只有分钟以上才转交），那两行与 formatDuration 完全同义，于是「一个格式化器」这条
+ * 只在文档里成立：把 formatDuration 的分档修好之后，时间沟里仍旧印着 `+60.0s`。同一条规则住在两处
+ * 就一定会走岔，这一次走岔的是最显眼的那一处——机器行每一行都在读它。
+ */
 export function formatOffset(createdAt: number, origin: number): string {
-  const ms = Math.max(0, createdAt - origin)
-  if (ms < 1_000) return `+${ms}ms`
-  if (ms < 60_000) return `+${(ms / 1_000).toFixed(1)}s`
-  return `+${formatDuration(ms)}`
+  return `+${formatDuration(Math.max(0, createdAt - origin))}`
 }
 
 /**
@@ -94,12 +98,17 @@ export function formatOffset(createdAt: number, origin: number): string {
  *
  * 只在**非零的最高位**起显示单位，低位补零：`3h04m03s` / `4m03s` / `3.2s` / `840ms`。补零是为了
  * 等宽下不跳位（gutter 里每行都在同一列），而省掉高位的零是为了短跑不必读 `0h00m03s`。
+ *
+ * 分档必须按**将要显示的那个值**来判，不是按另一个精度的同一时长。秒档显示到 0.1s，所以先把时长
+ * 归到十分之一秒，再用这个粒度决定进不进分钟档：否则 `59_950ms` 会以整数秒 59 留在秒档，却被
+ * 四舍五入印成 `60.0s`——一个这套记法里不存在的读数。
  */
 export function formatDuration(ms: number): string {
   const total = Math.max(0, Math.floor(ms))
   if (total < 1_000) return `${total}ms`
-  const seconds = Math.floor(total / 1_000)
-  if (seconds < 60) return `${(total / 1_000).toFixed(1)}s`
+  const tenths = Math.round(total / 100)
+  if (tenths < 600) return `${(tenths / 10).toFixed(1)}s`
+  const seconds = Math.round(total / 1_000)
   const hours = Math.floor(seconds / 3_600)
   const minutes = Math.floor((seconds % 3_600) / 60)
   const rest = seconds % 60

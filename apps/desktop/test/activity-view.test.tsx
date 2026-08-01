@@ -596,11 +596,16 @@ describe('ActivityView', () => {
         activity('b', { createdAt: at(17, 4, 3), updatedAt: at(17, 4, 3) })
       ])
       const head = markup.slice(markup.indexOf('activity-ruler__span'), markup.indexOf('activity-ruler__note'))
-      // 两个真实时刻。它们回答的是「从什么时间点到什么时间点」，偏移量答不了。
-      expect(head).toContain('14:00:00')
-      expect(head).toContain('17:04:03')
+      // 两个真实时刻。它们回答的是「从什么时间点到什么时间点」，偏移量答不了。断言的是**可见文本
+      // 节点**而不是这一段切片：同元素的 title 里也复制了这三个值，落在切片上的 toContain 分不出
+      // "可见读数渲染了"与"只剩一个 title"。
+      expect(head).toContain('>14:00:00<')
+      expect(head).toContain('>17:04:03<')
       // 以及耗时，带小时位。
-      expect(head).toContain('3h04m03s')
+      expect(head).toContain('>3h04m03s<')
+      // 三件各自摆在自己那一格里，而不是挤成一串文本。
+      expect(head).toContain('activity-ruler__span-range')
+      expect(head).toContain('activity-ruler__span-elapsed')
       // 反向：分钟封顶那个实现给的是 `184m03s`，它不许出现在界面上任何位置（含 title）。
       expect(markup).not.toContain('184m03s')
     })
@@ -641,23 +646,65 @@ describe('ActivityView', () => {
         }),
         activity('t1', {
           kind: 'tool_call', source: 'native-hook', title: 'Edit', toolName: 'Edit', toolInput: 'a.ts',
-          createdAt: at(14, 0, 1), updatedAt: at(14, 0, 1)
+          createdAt: at(14, 0, 1), updatedAt: at(14, 0, 2)
         }),
         activity('t2', {
           kind: 'tool_call', source: 'native-hook', title: 'Edit', toolName: 'Edit', toolInput: 'b.ts',
-          createdAt: at(14, 2, 6), updatedAt: at(14, 2, 6)
+          createdAt: at(14, 2, 5), updatedAt: at(14, 2, 6)
         })
       ])
       const fold = markup.slice(markup.indexOf('log-fold'))
       expect(fold).toContain('2 steps')
-      // 首末两条相隔 2m05s：这个数就摆在 "N steps" 旁边，展开与否都在同一位置回答"这一段值不值得展开"。
+      // 从首条开始到末条完成共 2m05s：这个数就摆在 "N steps" 旁边，展开与否都在同一位置回答
+      // "这一段值不值得展开"。
       expect(fold).toContain('log-fold__elapsed')
       expect(fold).toContain('2m05s')
     })
 
+    it('跨度算到末步跑完，不是算到末步开始', () => {
+      // 回归：跨度曾取首末两条的 createdAt 之差，于是末步自己跑了多久整段漏掉。一段执行的末步往往
+      // 是最贵的那一步——下面这段的末步跑了 5 分钟，而两步的**开始**只隔 1 秒。旧实现会宣称这段
+      // 只有 1.0s，把它藏着的五分钟构建说成一瞬间。
+      const markup = render('complete-events', [
+        activity('u', {
+          kind: 'user_message', source: 'user', content: '跑', createdAt: at(14, 0, 0), updatedAt: at(14, 0, 0)
+        }),
+        activity('t1', {
+          kind: 'tool_call', source: 'native-hook', title: 'Edit', toolName: 'Edit', toolInput: 'a.ts',
+          createdAt: at(14, 0, 0), updatedAt: at(14, 0, 1)
+        }),
+        activity('t2', {
+          kind: 'tool_call', source: 'native-hook', title: 'Bash', toolName: 'Bash', toolInput: 'pnpm build',
+          createdAt: at(14, 0, 1), updatedAt: at(14, 5, 0)
+        })
+      ])
+      const fold = markup.slice(markup.indexOf('log-fold'))
+      expect(fold).toContain('5m00s')
+      expect(fold).not.toContain('1.0s')
+    })
+
+    it('并发的几步里取最后完成的那个，不是数组里最后那条', () => {
+      // 完成顺序不必跟着开始顺序：并发跑的两步，先开始的可能后结束。取 max 而不是末条的 updatedAt。
+      const markup = render('complete-events', [
+        activity('u', {
+          kind: 'user_message', source: 'user', content: '跑', createdAt: at(14, 0, 0), updatedAt: at(14, 0, 0)
+        }),
+        activity('t1', {
+          kind: 'tool_call', source: 'native-hook', title: 'Bash', toolName: 'Bash', toolInput: 'pnpm test',
+          createdAt: at(14, 0, 0), updatedAt: at(14, 3, 0)
+        }),
+        activity('t2', {
+          kind: 'tool_call', source: 'native-hook', title: 'Edit', toolName: 'Edit', toolInput: 'b.ts',
+          createdAt: at(14, 0, 1), updatedAt: at(14, 0, 2)
+        })
+      ])
+      const fold = markup.slice(markup.indexOf('log-fold'))
+      expect(fold).toContain('3m00s')
+    })
+
     it('同一时刻的一段不硬报 0s', () => {
-      // 折叠头的跨度取这一段首尾两条的间隔。同刻的一段没有时间可报，此时不渲染那一件——
-      // 与序数轴同一条诚实规则，不给一个读起来像"瞬间完成"的 `0s`。
+      // 折叠头的跨度从首条开始算到末步跑完。整段都落在同一时刻——每一步都是瞬时完成——那就没有时间
+      // 可报，此时不渲染那一件：与序数轴同一条诚实规则，不给一个读起来像"瞬间完成"的 `0s`。
       const markup = render('complete-events', [
         activity('u', {
           kind: 'user_message', source: 'user', content: '跑', createdAt: at(14, 0, 0), updatedAt: at(14, 0, 0)

@@ -553,12 +553,17 @@ function Run({ items, origin }: { items: AgentTimelineItem[]; origin: number }) 
   const [open, setOpen] = useState(false)
   const rows = useMemo(() => timelineRows(items), [items])
   const failed = items.some((item) => item.status === 'failed')
-  // 折起来的一段机器执行正是最需要"这段花了多久"的地方——它是被藏起来的那部分时间。跨度取这一段
-  // 首尾两条的间隔；同一时刻的一段（或只有一条）跨度为零，此时不渲染那一件，不硬报一个 `0s`——
-  // 与序数轴同一条诚实规则。
-  const elapsed = items.length > 1
-    ? items[items.length - 1]!.createdAt - items[0]!.createdAt
-    : 0
+  // 折起来的一段机器执行正是最需要"这段花了多久"的地方——它是被藏起来的那部分时间。
+  //
+  // 起点是第一条的 createdAt（PreToolUse，那一步**开始**），终点必须是最后完成的那个 updatedAt
+  // （PostToolUse，那一步**结束**）——不是最后一条的 createdAt。一段执行的末步往往是最贵的那一步
+  // （build、跑测试、大文件操作），用"末步开始"当终点会系统性地把它整段跑的时间漏掉：一个藏着五分钟
+  // 构建的折叠头会宣称自己只有 1 秒。取 max 而不是末条的 updatedAt，是因为并发的几步完成顺序不必
+  // 跟着开始顺序。存储侧保证 updatedAt >= createdAt（session-timeline 建条时就拦），所以差非负。
+  //
+  // 同一时刻的一段（或只有一条且瞬时完成）跨度为零，此时不渲染那一件，不硬报一个 `0s`——与序数轴
+  // 同一条诚实规则。
+  const elapsed = Math.max(...items.map((item) => item.updatedAt)) - items[0]!.createdAt
 
   return (
     <Fragment>
