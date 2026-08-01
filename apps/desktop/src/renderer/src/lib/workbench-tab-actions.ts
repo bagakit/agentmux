@@ -1,5 +1,9 @@
 import type { SplitDirection } from './workbench-layout'
 import type { WorkbenchSurface } from './workbench-tabs'
+import {
+  workbenchRegionPresetSize,
+  type WorkbenchRegionLayoutPreset
+} from './workbench-view-layout'
 
 export type TabCloseScope = 'others' | 'left' | 'right'
 
@@ -61,6 +65,48 @@ export const WORKBENCH_TAB_SPLIT_ACTIONS: ReadonlyArray<{
   { direction: 'up', label: 'Split Up' },
   { direction: 'down', label: 'Split Down' }
 ]
+
+export type WorkbenchRegionPresetAction = {
+  preset: WorkbenchRegionLayoutPreset
+  label: string
+}
+
+const WORKBENCH_REGION_PRESET_LABELS: ReadonlyArray<WorkbenchRegionPresetAction> = [
+  { preset: 'columns-3', label: '3 Columns' },
+  { preset: 'grid-4', label: '2 × 2 Grid' },
+  { preset: 'grid-6', label: '2 × 3 Grid' },
+  { preset: 'grid-9', label: '3 × 3 Grid' }
+]
+
+/**
+ * 「这个 Tab 能摆成哪些预设，以及点下去做什么」——一次判定，同时决定菜单列哪几项和点了发什么。
+ *
+ * 预设的格数**只增不减**：`arrangeWorkbenchControlTab` 对格数已经超过预设的 Tab 抛
+ * `LAYOUT_CAPACITY_EXCEEDED`（丢格子就是丢用户正在看的东西，拒绝是对的）。于是一个已经 5 分屏的
+ * Tab 摆不成 `grid-4`。这件事必须**只判一次**：如果菜单照单全列、由动作那侧去撞拒绝，用户点了
+ * 只会收到一条内部错误串——而菜单本来就知道那一项不可能成功。
+ *
+ * 收成一个出口的理由与 `moveSessionViewMenu` 相同（也与 #325 本身相同）：容量判定留在组件里，
+ * 就会有第二个消费者（键盘、命令面板）各抄一份，两份必漂移，而漂移的症状是「菜单里灰着的项
+ * 从命令面板点得动」或反过来。这里 `onSelect` 已经把 tab 身份闭包进去，壳里连一个 `if` 都不剩。
+ *
+ * 注意这里判的是**能不能提供**，不是「补几个格」——后者仍然只住在 arrangeWorkbenchControlTab 里，
+ * 这个函数连 addedRegionIds 都碰不到。
+ */
+export function workbenchRegionPresetMenu(input: {
+  regionCount: number
+  arrange: (preset: WorkbenchRegionLayoutPreset) => void
+}): {
+  presets: WorkbenchRegionPresetAction[]
+  onSelect: (preset: WorkbenchRegionLayoutPreset) => void
+} {
+  return {
+    presets: WORKBENCH_REGION_PRESET_LABELS.filter(
+      (action) => workbenchRegionPresetSize(action.preset) >= input.regionCount
+    ),
+    onSelect: input.arrange
+  }
+}
 
 export function tabIdsForCloseScope(
   tabOrder: readonly string[],

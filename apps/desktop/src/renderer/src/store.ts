@@ -76,7 +76,7 @@ import {
 import {
   setWorkbenchRegionSplitRatio,
   workbenchRegionBounds,
-  workbenchRegionPresetSize
+  type WorkbenchRegionLayoutPreset
 } from './lib/workbench-view-layout'
 import {
   projectPersistedWorkbench,
@@ -373,6 +373,9 @@ type AppState = {
     regionId: string,
     direction: SplitDirection
   ): void
+  // 把一个 Tab 的格子摆成预设布局。与控制协议的 `arrange` 是同一个引擎（arrangeWorkbenchControlTab），
+  // 「要补几个格」由它自己从 preset 推导，这里不重算——见那个函数的注释。
+  arrangeTabRegions(workspaceId: string, tabId: string, preset: WorkbenchRegionLayoutPreset): void
   closeRegion(workspaceId: string, tabId: string, regionId: string): Promise<void>
   // 键盘关 Tab 的入口：只投意图，真正的关闭（含确认）由活动 Tab 组件消费。见 closeTabRequest 状态注释。
   requestCloseTab(workspaceId: string, tabGroupId: string, tabId: string): void
@@ -2045,11 +2048,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (request.operation === 'arrange') {
       const state = get()
       const tab = resolveWorkbenchControlTab(input(), request.target, request.caller)
-      const current = workbenchRegionBounds(tab.layout.root).length
-      const additions = request.mode.kind === 'preset'
-        ? Array.from({ length: Math.max(0, workbenchRegionPresetSize(request.mode.preset) - current) }, newRegionId)
-        : []
-      const arranged = arrangeWorkbenchControlTab(tab, request.mode, additions)
+      // 「预设要补几个 Region」由 arrangeWorkbenchControlTab 自己从 preset 推导——这里只交铸 id 的
+      // 手段。那段推导曾住在这里，而 GUI 菜单（arrangeTabRegions，本文件下方）是它的第二个调用方：
+      // 留在这里就必须被抄一份，两份必漂移。
+      const arranged = arrangeWorkbenchControlTab(tab, request.mode, newRegionId)
       set({ tabs: { ...state.tabs, [tab.id]: arranged } })
       return { operation: request.operation, tab: inspectWorkbenchControlTab(input(), arranged) }
     }
@@ -2620,6 +2622,25 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const nextTab = addWorkbenchRegion(tab, regionId, direction, launcher)
     if (nextTab === tab) return
     set((state) => ({ tabs: { ...state.tabs, [tabId]: nextTab } }))
+  },
+  arrangeTabRegions(workspaceId, tabId, preset) {
+    const current = get()
+    if (!workbenchViewCloseAllowsView(current.closingWorkbenchViews, tabId)) return
+    const tab = current.tabs[tabId]
+    if (!tab || tab.workspaceId !== workspaceId) return
+    // 与控制协议的 `arrange` 分支共用同一个引擎，且**不重算**「要补几个格」——那次推导住在
+    // arrangeWorkbenchControlTab 里，这里连数都数不着。两侧各算一遍必漂移，症状是同一个预设
+    // 从菜单点没反应、从命令行却好用（见那个函数的注释）。
+    let arranged: WorkbenchTab
+    try {
+      arranged = arrangeWorkbenchControlTab(tab, { kind: 'preset', preset }, newRegionId)
+    } catch (error) {
+      // 引擎的拒绝是有话要说的（格数超了、id 撞了），不能咽掉——菜单里点了没反应就是最难查的那种。
+      get().reportError(error)
+      return
+    }
+    if (arranged === tab) return
+    set((state) => ({ tabs: { ...state.tabs, [tabId]: arranged } }))
   },
   async closeRegion(workspaceId, tabId, regionId) {
     const current = get()

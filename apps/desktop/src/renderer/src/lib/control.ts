@@ -286,17 +286,35 @@ export function planControlOpen(
   return { workspaceId: anchor.workspaceId, tabId: tab.id, regionId, kind: 'tab', launcher, tabs, layouts }
 }
 
+/**
+ * 把一个 Tab 的 Region 摆成预设布局（或均分 / 把当前格挪到第一位）。
+ *
+ * `mintRegionId` 而不是 `addedRegionIds`：预设要补几个 Region 是从 `preset` 和当前格数**推导**出来的，
+ * 不是调用方的自由参数。此前它是个入参，于是那次推导住在调用方——只有控制协议一个调用方时看不出问题，
+ * 但接第二个调用方（GUI 菜单）时那段推导就必须被抄一份，而两份必漂移：抄错的那侧算出的数量与这里
+ * `required - current` 的校验不符，用户点了预设只会收到 'Preset Launcher count is invalid.'，
+ * 而正确的一侧照旧工作——症状是"同一个预设从菜单点没反应、从命令行却好用"。
+ *
+ * 收进来之后，"补几个"这件事只有这里一处，调用方连数都数不着，也就没有可漂移的余地。
+ */
 export function arrangeWorkbenchControlTab(
   tab: WorkbenchTab,
   mode: AgentMuxArrangeMode,
-  addedRegionIds: readonly string[]
+  mintRegionId: () => string
 ): WorkbenchTab {
   if (mode.kind === 'balance') return { ...tab, layout: balanceWorkbenchRegionLayout(tab.layout) }
   if (mode.kind === 'active-first') return { ...tab, layout: placeActiveWorkbenchRegionFirst(tab.layout) }
   const required = workbenchRegionPresetSize(mode.preset)
-  const current = workbenchRegionBounds(tab.layout.root).length
-  if (current > required) throw error('LAYOUT_CAPACITY_EXCEEDED', 'Tab contains more Regions than the requested preset.')
-  if (addedRegionIds.length !== required - current) throw error('INVALID_CONTROL_REQUEST', 'Preset Launcher count is invalid.')
+  const present = workbenchRegionBounds(tab.layout.root)
+  if (present.length > required) throw error('LAYOUT_CAPACITY_EXCEEDED', 'Tab contains more Regions than the requested preset.')
+  const addedRegionIds = Array.from({ length: required - present.length }, mintRegionId)
+  // 铸出来的 id 必须互不相同，也不能撞上已在场的。applyWorkbenchRegionLayoutPreset 撞名时会原样
+  // 返回旧 layout（它自己那道 Set 检查），那样一来 regions 多了几格、layout 却没变——多出来的格子
+  // 不在树上，永远画不出来也永远回收不掉。与其静默留下这种半成品，不如在这里响亮地拒绝。
+  const ids = [...present.map((region) => region.regionId), ...addedRegionIds]
+  if (new Set(ids).size !== ids.length) {
+    throw error('CONTROL_FAILED', 'Preset Region ids collided; the layout was left untouched.')
+  }
   const regions = { ...tab.regions }
   for (const regionId of addedRegionIds) {
     regions[regionId] = { regionId, kind: 'launcher', workspaceId: tab.workspaceId }
