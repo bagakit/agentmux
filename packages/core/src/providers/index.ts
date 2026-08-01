@@ -4,6 +4,7 @@ import type { AgentProviderId } from '../types.js'
 import { createAntigravityManagedHookPlan, createAntigravityProvider } from './antigravity.js'
 import { createClaudeManagedHookPlan, createClaudeProvider } from './claude.js'
 import { createCodexManagedHookPlan, createCodexProvider } from './codex.js'
+import { createCopilotManagedHookPlan, createCopilotProvider } from './copilot.js'
 import { createCursorManagedHookPlan, createCursorProvider } from './cursor.js'
 import { createDroidManagedHookPlan, createDroidProvider } from './droid.js'
 import { createGeminiManagedHookPlan, createGeminiProvider } from './gemini.js'
@@ -32,7 +33,8 @@ export function createBuiltInAgentProviders(defineAgentProvider: ProviderFactory
     createAntigravityProvider(defineAgentProvider),
     createCursorProvider(defineAgentProvider),
     createKimiProvider(defineAgentProvider),
-    createDroidProvider(defineAgentProvider)
+    createDroidProvider(defineAgentProvider),
+    createCopilotProvider(defineAgentProvider)
   ]
 }
 
@@ -51,13 +53,17 @@ export const MANAGED_HOOK_PLAN_RESOLVERS: Partial<Record<AgentProviderId, Manage
   // （`~/.cursor/projects/<slug>/.workspace-trusted`），hooks 配置本身仍在 user 层。
   cursor: (workspacePath, env) => createCursorManagedHookPlan(workspacePath, env),
   // droid 装到 `<FACTORY_HOME_OVERRIDE ?? HOME>/.factory/hooks.json`，与 workspace 无关。
-  droid: (_workspacePath, env) => createDroidManagedHookPlan(env)
+  droid: (_workspacePath, env) => createDroidManagedHookPlan(env),
+  // copilot 装到 `<COPILOT_HOME ?? ~/.copilot>/hooks/agentmux.json`——它自己独占的一份文件
+  // （那个目录下任意文件名都会被加载），与 workspace 无关。绝不碰用户的 `config.json`。
+  copilot: (_workspacePath, env) => createCopilotManagedHookPlan(env)
 }
 
 export {
   createAntigravityManagedHookPlan,
   createClaudeManagedHookPlan,
   createCodexManagedHookPlan,
+  createCopilotManagedHookPlan,
   createCursorManagedHookPlan,
   createDroidManagedHookPlan,
   createGeminiManagedHookPlan,
@@ -67,6 +73,7 @@ export {
 export { createAntigravityProvider } from './antigravity.js'
 export { createClaudeProvider } from './claude.js'
 export { createCodexProvider } from './codex.js'
+export { createCopilotProvider } from './copilot.js'
 export { createCursorProvider } from './cursor.js'
 export { createDroidProvider } from './droid.js'
 export { createGeminiProvider } from './gemini.js'
