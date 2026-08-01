@@ -84,6 +84,7 @@ import {
 } from './lib/workbench-persistence'
 import { reduceBrowserEvent } from './lib/browser-state'
 import {
+  bumpWorkspaceFileRevision,
   reduceDocumentAttached,
   reduceDocumentContent,
   reduceDocumentLoadFailed,
@@ -1126,10 +1127,10 @@ async function enqueueFileSave(
         return isScratchTopicDocument(surface)
           ? {
               ...next,
-              workspaceFileRevisions: {
-                ...current.workspaceFileRevisions,
-                [surface.workspaceId]: (current.workspaceFileRevisions[surface.workspaceId] ?? 0) + 1
-              }
+              workspaceFileRevisions: bumpWorkspaceFileRevision(
+                current.workspaceFileRevisions,
+                surface.workspaceId
+              )
             }
           : next
       })
@@ -2934,10 +2935,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             ? activateLayoutTab(currentLayout, layout.activeGroupId, nextTab.id)
             : addTab(currentLayout, layout.activeGroupId, nextTab.id)
         },
-        workspaceFileRevisions: {
-          ...current.workspaceFileRevisions,
-          [workspace.id]: (current.workspaceFileRevisions[workspace.id] ?? 0) + 1
-        }
+        workspaceFileRevisions: bumpWorkspaceFileRevision(
+          current.workspaceFileRevisions,
+          workspace.id
+        )
       }
     })
     return snapshot
@@ -2991,10 +2992,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     try {
       const snapshot = await api.scratch.renameTitle(workspace.id, topicId, title)
       set((current) => ({
-        workspaceFileRevisions: {
-          ...current.workspaceFileRevisions,
-          [workspace.id]: (current.workspaceFileRevisions[workspace.id] ?? 0) + 1
-        }
+        workspaceFileRevisions: bumpWorkspaceFileRevision(
+          current.workspaceFileRevisions,
+          workspace.id
+        )
       }))
       return snapshot
     } catch (error) {
@@ -3024,10 +3025,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     )
     // 让文件树看到新文件。createScratchTopic 等写入面用的是同一个计数器，不另起一套失效机制。
     set((current) => ({
-      workspaceFileRevisions: {
-        ...current.workspaceFileRevisions,
-        [workspaceId]: (current.workspaceFileRevisions[workspaceId] ?? 0) + 1
-      }
+      workspaceFileRevisions: bumpWorkspaceFileRevision(current.workspaceFileRevisions, workspaceId)
     }))
     // 显式把开头解析出来的 workspaceId 传下去。create walk 是异步的（远端可达 15s），这期间侧栏
     // 的 selectWorkspace 完全可点；若让 openFile 自己重读活动 Workspace，笔记建在 A 而打开的是
@@ -3315,10 +3313,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         return scratchTopicId
           ? {
               ...reduced.state,
-              workspaceFileRevisions: {
-                ...current.workspaceFileRevisions,
-                [workspace.id]: (current.workspaceFileRevisions[workspace.id] ?? 0) + 1
-              }
+              workspaceFileRevisions: bumpWorkspaceFileRevision(
+                current.workspaceFileRevisions,
+                workspace.id
+              )
             }
           : reduced.state
       })
