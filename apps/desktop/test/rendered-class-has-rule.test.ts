@@ -115,6 +115,53 @@ function renderedClasses(): Rendered[] {
   return out
 }
 
+/**
+ * 一个**在场标志**：`data-x={cond ? '' : undefined}` —— 取值只有"空串"与"不在场"两种。
+ *
+ * 这个记号和 BEM 一样是**按定义**成立的，所以同样不需要手工例外清单：一个只在空串与不在场之间
+ * 切换的属性对 JS 携带零信息（`el.dataset.x` 拿到的是 `''` 或 `undefined`，两者都不是数据），
+ * 它存在的唯一理由就是被 `[data-x]` 选中。反过来，带真实取值的
+ * `data-status={item.status}` / `data-tree-path={path}` 这些既可能是样式钩子、也可能是 JS 或
+ * 测试的抓手，不在本判据范围内。
+ *
+ * 判定必须**逐元素**成对，不能只问"这个属性名在样式表里出现过吗"：那正是事故那条的形状——
+ * 删掉 `.log-fold[data-open] .log-fold__chevron` 之后，`[data-open]` 因为
+ * `.log-row__chevron[data-open]` 还在而依然"出现过"，于是按属性名判的检查全绿，而折叠箭头永久
+ * 不转。所以这里取「同一个 JSX 元素上的 class」×「该元素的在场标志」，去样式表里找
+ * `.那个class[data-那个标志]`（同一段选择器内，不跨越逗号与空格）。
+ */
+type PresenceFlag = { attribute: string; classes: string[]; file: string }
+
+const PRESENCE_FLAG = /data-([a-z][a-z0-9-]*)\s*=\s*\{[^{}]*\?\s*''\s*:\s*undefined\s*\}/g
+
+function presenceFlags(): PresenceFlag[] {
+  const out: PresenceFlag[] = []
+  for (const file of tsxFiles(COMPONENTS_DIR)) {
+    const source = readFileSync(file, 'utf8')
+      .replace(STYLES_ONLY_IN_COMMENT, '')
+      .replace(/(^|[^:])\/\/[^\n]*/g, '$1')
+    const relative = file.slice(COMPONENTS_DIR.length + 1)
+    for (const match of source.matchAll(PRESENCE_FLAG)) {
+      // 同一个 JSX 元素的 class：从这个属性往前回溯到最近的 `<`，那一段就是该元素的属性表。
+      const openTag = source.lastIndexOf('<', match.index!)
+      const attributes = source.slice(openTag, match.index!)
+      const classes = new Set<string>()
+      for (const literal of attributes.matchAll(/className\s*=\s*(?:"([^"]*)"|'([^']*)'|\{[^{}]*`([^`]*)`)/g)) {
+        addTokens(literal[1] ?? literal[2] ?? literal[3]!, classes)
+      }
+      out.push({ attribute: match[1]!, classes: [...classes], file: relative })
+    }
+  }
+  return out
+}
+
+/** 样式表里是否有一段选择器同时选中这个 class 与这个在场标志。 */
+function hasPairedRule(css: string, className: string, attribute: string): boolean {
+  return new RegExp(
+    `\\.${className}\\[data-${attribute}(?:[\\]=]|$)|\\[data-${attribute}[^\\]]*\\]\\.${className}(?![\\w-])`
+  ).test(css)
+}
+
 describe('渲染出来的 class 必须有规则', () => {
   const defined = definedClasses()
   const rendered = renderedClasses()
@@ -147,7 +194,7 @@ describe('渲染出来的 class 必须有规则', () => {
     // 一份「允许无规则」的白名单——它们本就不带样式意图，只是恰好用了 BEM 记号来命名。
     // 每一条都在 PR 的 triage 里有独立结论；这里内联留一行是为了让新增的违规能一眼从这 8 条里跳出来。
     const KNOWN_UNSTYLED_MARKERS = new Set([
-      'activity-log__segment', // 滚动锚点 + data-selected 标记，行为由 ref/JS 用，从无规则
+      'activity-log__segment', // 滚动锚点，位置由 ref/IntersectionObserver 用，从无规则
       'agent-catalog__group--unavailable', // 仅语义分组名，样式全在基类 .agent-catalog__group 上
       'agent-status-bar__label', // 纯文本 span，视觉继承自 .agent-status-bar，从无独立规则
       'board--matrix', // 布局全在基类 .board 上，matrix 变体从无独立规则
@@ -163,5 +210,50 @@ describe('渲染出来的 class 必须有规则', () => {
 
     // 主断言：任何**新出现**的「渲染了却没规则」的 BEM class 都会让这里变红，并直接点名。
     expect(surprises).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 上面那族只判**选择器名在不在**。它看不见规则体：删掉
+// `.log-fold[data-open] .log-fold__chevron { transform: rotate(90deg); }`（:162 那条 transition
+// 保留），折叠箭头永久不转，而上面 3 条 + stylesheet-organisation 8 条**全绿**（实测）。
+//
+// 最刺的是：这条测试自己的事故叙事（本文件开头）讲的就是"折叠箭头悄悄不转了"——那正是一次
+// 声明体层面的丢失，恰恰是名字存在性检查看不见的形态。守卫写的是它自己那次事故防不住的形状。
+//
+// 这里补上按元素成对的判定。它不试图解析所有声明体（那需要一份"哪些声明承重"的手工清单，而
+// 手工清单只是熵），而是抓住**在场标志**这一类按定义必须成对的东西。
+// ---------------------------------------------------------------------------
+
+describe('在场标志必须有选中它的规则', () => {
+  const css = allStyles().replace(STYLES_ONLY_IN_COMMENT, '')
+  const flags = presenceFlags()
+
+  it('扫描确实扫到了东西——空集上的扫描是这个仓库经典的假绿', () => {
+    expect(flags.length).toBeGreaterThan(5)
+    // 每一处都认出了它所在元素的 class，否则下面的配对判定会因为"没有 class 可配"而恒绿。
+    expect(flags.every((flag) => flag.classes.length > 0)).toBe(true)
+  })
+
+  it('自证判据认得出成对与不成对：按元素判，不按属性名判', () => {
+    // 成对的样本：事故那一对。
+    expect(hasPairedRule(css, 'log-fold', 'open')).toBe(true)
+    // 不成对的样本，且**属性名在样式表里确实存在**（`.log-row__chevron[data-open]` 就在
+    // activity.css:198）。一个按属性名判的检查会在这里错误地返回 true——那正是事故的形状。
+    expect(css).toContain('[data-open]')
+    expect(hasPairedRule(css, 'activity-log__segment', 'open')).toBe(false)
+    // 类名前缀不算：`.log-fold[data-open]` 不能让 `log-fol` 蒙混过关。
+    expect(hasPairedRule(css, 'log-fol', 'open')).toBe(false)
+  })
+
+  it('每个在场标志都在样式表里被它自己那个元素的选择器选中', () => {
+    const offenders = flags
+      .filter((flag) => !flag.classes.some((className) => hasPairedRule(css, className, flag.attribute)))
+      .map((flag) => `data-${flag.attribute} on .${flag.classes.join('.')}  <- ${flag.file}`)
+      .sort()
+
+    // 无例外清单：一个只有空串与不在场两种取值的属性，没有第二种存在理由。渲染了它却没有
+    // `[data-x]` 规则，要么是规则在重构里丢了（那就是回归），要么这个属性本就是多余的（那就该删）。
+    expect(offenders).toEqual([])
   })
 })
