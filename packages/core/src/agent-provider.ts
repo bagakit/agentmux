@@ -80,6 +80,26 @@ export type AgentProviderDefinition = {
   posture?: PostureControlDeclaration
 }
 
+/**
+ * 恢复被拒时附在错误上的细节：一小组机器可读的生命周期事实。
+ *
+ * 为什么必须有：`INVALID_NATIVE_SESSION_HANDLE` 这一个码此前同时承载**两种完全不同的失败**——
+ * 「这个 handle 属于别的 Provider」与「这个 Provider 要 transcript 路径但 hook 没报」。两者该做的事
+ * 相反（前者刷新会话，后者等 hook 或换 Provider），可界面只能笼统说一句恢复不了。细节把「卡在哪、
+ * 涉及哪个 Provider/handle、下一步该做什么」分开说清。
+ *
+ * 刻意只放 Provider id、locator 种类、缺了哪个字段这类事实：**绝不放 sessionId、transcript 路径
+ * 或 prompt 正文**——它们是用户输入或可定位到用户工作内容的串，而这个 detail 会跨客户端边界。
+ */
+function resumeRefusalDetail(
+  fields: Readonly<Record<string, string | number | boolean | undefined>>
+): string {
+  return Object.entries(fields)
+    .filter(([, value]) => value !== undefined)
+    .map(([key, value]) => `${key}=${String(value)}`)
+    .join(' ')
+}
+
 function executable(commandOverride: string | undefined, fallback: string): string {
   const command = commandOverride?.trim() || fallback
   if (!command) throw new AgentMuxError('Agent command cannot be empty.', 'INVALID_AGENT_COMMAND')
@@ -132,11 +152,32 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     },
     buildResumeLaunch(context) {
       if (!definition.buildResumeArgs || catalog.resumeStrategy.kind === 'none') {
-        throw new AgentMuxError(`${catalog.label} does not support provider-native resume.`, 'AGENT_RESUME_UNSUPPORTED')
+        throw new AgentMuxError(
+          `${catalog.label} does not support provider-native resume.`,
+          'AGENT_RESUME_UNSUPPORTED',
+          resumeRefusalDetail({
+            providerId: catalog.id,
+            resumeStrategy: catalog.resumeStrategy.kind,
+            // 声明与实现分开报：只缺实现是 Provider 模块的 bug，声明为 none 则是这个 CLI 本来就不支持。
+            declaresResume: catalog.capabilities.providerResume,
+            hasResumeBuilder: Boolean(definition.buildResumeArgs),
+            reason: catalog.resumeStrategy.kind === 'none' ? 'provider-has-no-native-resume' : 'resume-builder-missing'
+          })
+        )
       }
       const handle = context.nativeHandle
       if (handle.kind !== 'provider' || handle.providerId !== catalog.id) {
-        throw new AgentMuxError('Native session handle does not belong to this provider.', 'INVALID_NATIVE_SESSION_HANDLE')
+        throw new AgentMuxError(
+          'Native session handle does not belong to this provider.',
+          'INVALID_NATIVE_SESSION_HANDLE',
+          resumeRefusalDetail({
+            expectedProviderId: catalog.id,
+            handleKind: handle.kind,
+            // handle 上的 providerId 是 Provider 标识而非用户内容，可以安全带出去；sessionId 不带。
+            handleProviderId: handle.kind === 'provider' ? handle.providerId : undefined,
+            reason: handle.kind === 'provider' ? 'handle-provider-mismatch' : 'handle-not-provider-native'
+          })
+        )
       }
       return {
         command: executable(context.commandOverride, catalog.executable),
