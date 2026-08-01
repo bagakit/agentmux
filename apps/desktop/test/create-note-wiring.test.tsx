@@ -81,12 +81,16 @@ function assertStoreStateInvisibleToStaticMarkup(): void {
   useAppStore.setState({
     warmTerminal: {
       key: warmTerminalKey('local', '/repo'),
+      // 归属必须真的落在这个挂载点上（`{ tabGroupId: 'pane' }` 没有 regionId，故 warmLauncherId
+      // 算出 `group:pane`）。若这里给个不匹配的归属，下面那条 `not.toContain` 会因为「槽不归它」
+      // 而通过，于是这条测试就不再证明 harness 的盲点了——它会为了错的理由恒绿。
+      ownerLauncherId: 'group:pane',
       ready: Promise.resolve(null),
       session: warmShellSession()
     } as never
   })
   const markup = renderToStaticMarkup(createElement(NewTabSurface, { tabGroupId: 'pane' }))
-  // store 里三个条件齐全，热终端那条分支却渲染不出来——这正是 harness 的盲点。
+  // store 里几个条件齐全（含归属），热终端那条分支却渲染不出来——这正是 harness 的盲点。
   expect(useAppStore.getState().activeWorkspaceId).toBe('workspace')
   expect(markup).not.toContain('launch-terminal__head')
 }
