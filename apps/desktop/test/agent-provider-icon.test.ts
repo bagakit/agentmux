@@ -2,73 +2,41 @@ import { BUILT_IN_AGENT_PROVIDER_IDS } from '@agentmux/core'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import {
-  AGENT_PROVIDERS_WITH_BRAND_MARK,
-  AGENT_PROVIDERS_WITHOUT_BRAND_MARK,
-  AgentProviderIcon,
-  agentProviderLabel
-} from '../src/renderer/src/components/AgentProviderIcon.js'
+import { AgentProviderIcon, agentProviderLabel } from '../src/renderer/src/components/AgentProviderIcon.js'
 
 describe('AgentProviderIcon', () => {
-  it('每个内置 Provider 都恰好落进"有标记"或"没标记"之一', () => {
-    // 这条守的是**分区**：覆盖无遗漏（每个内置 id 都被判到）、两族无交集。
+  it('每个内置 Provider 都画出自己的品牌标记，无一落到 Bot 兜底', () => {
+    // 这是"图标映射的守卫"：直接遍历 Core 的运行时 SSOT（BUILT_IN_AGENT_PROVIDER_IDS），
+    // 对每个 id 渲染一次并断言它画出了真图形——而不是遍历组件自己导出的某份手抄清单。
     //
-    // 它不与下面两条重复：那两条各自只遍历自己那份清单，对"某个 id 两边都不在"都是瞎的。
-    // 而"某个 id 两边都不在"正是本文件历史上真出过的那个 bug（9 个内置 Provider 手抄成 5 个）。
-    // 所以在派生成立的当下它确实近乎恒真，但它是防"派生被改回手抄"的那道回归闸——留着。
+    // 为什么遍历 SSOT 而不是本地清单：本文件历史上真出过两次同形状的 bug——组件的图标清单
+    // 手抄成 5 个（Core 已有 9 个）、又手抄成 9 个（Core 已有 12 个），多出来的那些 Provider
+    // 一条断言都没红。只要"该有图标的清单"来自组件本地，它就能悄悄比 Core 短一截。把遍历源
+    // 钉死在 Core 的 id 全集上，这种漂移就无处可藏：Core 每长出一个 Provider，这里立刻多遍历
+    // 一次，忘了给它接图标 → 落到 Bot 兜底 → `lucide-bot` 出现 → **当场红**。
     //
-    // 实测纪录（review 复核，纠正此前的一处夸大）：把派生换回手抄清单**但保持完整**（9+3=12），
-    // 这条**不红**。所以它捕捉的是"漏了一个 id"，不是"退化了派生"这个动作本身。写变异时别把
-    // 两处改动捆在一起，否则分不清是哪条断言在承重。
+    // 怎么验证它真会红（本轮实测）：把 AgentProviderIcon 的 switch 里任意一个 case 删掉（比如
+    // 删 `case 'droid'`），那个 id 就落进 `default` 的 `<Bot/>`，markup 里出现 `lucide-bot`，
+    // 这条对该 id 独占红：`droid 落到了 Bot 兜底`。恢复后复绿。
     //
-    // 它独有的触发面另测过：手抄清单停在 9，同时给 Core 的 id 全集加一个新 provider——这条
-    // **独占红**（`expected […10] to deeply equal […11]`），其余五条全绿。那正是本文件历史上
-    // 真出过的形状：SSOT 长大而手抄的那份不动。注意 desktop 是经 dist 解析 @agentmux/core 的，
-    // 所以要复现得改 resolved 的那份 dist，光改 packages/core/src 这个测试看不见（也实测过）。
-    const withMark = [...AGENT_PROVIDERS_WITH_BRAND_MARK]
-    const withoutMark = [...AGENT_PROVIDERS_WITHOUT_BRAND_MARK]
-    expect([...withMark, ...withoutMark].sort()).toEqual([...BUILT_IN_AGENT_PROVIDER_IDS].sort())
-    expect(withMark.filter((id) => withoutMark.includes(id))).toEqual([])
-    // 手抄的那一侧只有豁免清单，所以直接钉它：每个豁免都得是真的内置 id，且不许重复。
-    // （非内置 id 已被 readonly BuiltInAgentProviderId[] 在编译期挡住，这里守的是重复。）
-    expect(new Set(withoutMark).size, '豁免清单里有重复').toBe(withoutMark.length)
-  })
-
-  it('renders a real offline identity mark for every Agent that claims one', () => {
-    // 清单从组件导出，**不**在这里手抄：此前这里硬编码了 5 个 id，而组件当时已有 9 个内置
-    // Provider——多出来的 4 个一条断言都没红。所谓"every built-in Agent"曾经只是句话。
-    //
-    // 不再断言一个手抄的下界（曾是 `>= 9`，即 12-3 算出来的数）：那正是本次要消灭的"手抄数字"
-    // 形状，且 Provider 合法减少时它会假红。非空由上面那条分区断言覆盖。
-    expect(AGENT_PROVIDERS_WITH_BRAND_MARK.length).toBeGreaterThan(0)
-    for (const providerId of AGENT_PROVIDERS_WITH_BRAND_MARK) {
+    // 注意 desktop 是经 dist 解析 @agentmux/core 的，所以这份 SSOT 是 packages/core/dist 里
+    // 那一份——要复现"Core 长大而图标没跟上"得让 dist 的 id 全集变长（新增 Provider 会重建
+    // dist），光改 packages/core/src 这个测试看不见。
+    expect(BUILT_IN_AGENT_PROVIDER_IDS.length).toBeGreaterThan(0)
+    for (const providerId of BUILT_IN_AGENT_PROVIDER_IDS) {
       const markup = renderToStaticMarkup(createElement(AgentProviderIcon, { providerId, size: 16 }))
       expect(markup).toContain(`data-agent-provider="${providerId}"`)
-      expect(markup).toContain('data-agent-provider-known="true"')
-      // 有品牌标记就必须是真图形（内联 svg 或图片资源），不能退化成 Bot 兜底。
+      // 内置 id 必须被认得——label 表里有它。
+      expect(markup, `${providerId} 该被认得为内置 Provider`).toContain('data-agent-provider-known="true"')
+      // 必须是真图形（内联 svg 或图片资源），不能退化成 Bot 兜底。
       expect(markup, `${providerId} 应画出品牌标记而非兜底图形`).toMatch(/<svg|<img/)
       expect(markup).not.toContain('<text')
       // lucide 的 Bot 兜底带这个类名，出现即说明这个 id 根本没接上自己的标记。
       expect(markup, `${providerId} 落到了 Bot 兜底`).not.toContain('lucide-bot')
+      // 内置 Provider 也必须在 label 表里有条目（label 缺失时 agentProviderLabel 原样返回 id，
+      // 于是 label 会等于 id——钉住它不等于 id，堵住"忘了给新 Provider 加 label"这条缝）。
+      expect(agentProviderLabel(providerId), `${providerId} 缺少 label 条目`).not.toBe(providerId)
     }
-  })
-
-  it('认得名字但没有品牌图形的 Provider：label 认得，标记保持中性', () => {
-    // Kimi 是第一个这样的条目：仓库里没有它的图标资源，就不画一个近似的冒充它。
-    // 「认得这个 Provider」与「有它的品牌标记」是两件事，这条钉住两者可以分开。
-    //
-    // 遍历整份豁免清单而不是只看 kimi：这份清单能让上面那条"必须有品牌标记"闭嘴，所以每个进来的
-    // id 都要在这里付出代价——必须**真的**落到 Bot 兜底。谁把一个有图标的 id 塞进豁免（比如为了
-    // 让别处的断言过），这里立刻红。
-    for (const providerId of AGENT_PROVIDERS_WITHOUT_BRAND_MARK) {
-      const markup = renderToStaticMarkup(createElement(AgentProviderIcon, { providerId, size: 16 }))
-      // "认得"由 known 这个属性直接表达，不用"label 不等于 id"去代理——那个代理对未来某个
-      // 品牌名恰好是小写 id 的 Provider（label 就想写成 'xai'）会假红，而那不是缺陷。
-      expect(markup, `${providerId} 该被认得——没图形不等于不认得`).toContain('data-agent-provider-known="true"')
-      expect(markup).toContain(`data-agent-provider="${providerId}"`)
-      expect(markup, `${providerId} 声明没有品牌图形，就必须真的走 Bot 兜底`).toContain('lucide-bot')
-    }
-    expect(agentProviderLabel('kimi')).toBe('Kimi')
   })
 
   it('keeps custom Provider identity neutral instead of impersonating a built-in Agent', () => {
