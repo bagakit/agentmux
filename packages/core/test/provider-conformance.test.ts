@@ -44,12 +44,16 @@ describe('built-in Provider conformance', () => {
   })
 
   it('keeps capability declarations consistent with hook strategy and managed installation', () => {
+    const endpoint = { url: 'http://127.0.0.1:59999/v1/events', token: 'conformance-token' }
     for (const provider of providers) {
       const { capabilities, hookStrategy } = provider.catalog
+      // endpoint 一律给足：需要它的 Provider（写投递代码进文件的那类）才产得出 plan，不需要的
+      // 会忽略它。缺席行为由下面单独一条守——两侧都要钉，只钉一侧会让「永远不装」也能过。
       const managedPlan = resolveManagedHookPlan(
         provider.id,
         '/tmp/agentmux-provider-conformance',
-        { HERMES_HOME: '/tmp/agentmux-provider-conformance/hermes' }
+        { HERMES_HOME: '/tmp/agentmux-provider-conformance/hermes' },
+        endpoint
       )
 
       expect(capabilities.hookEvents).toBe(hookStrategy.kind === 'native')
@@ -62,6 +66,34 @@ describe('built-in Provider conformance', () => {
         expect(managedPlan?.mutations.length).toBeGreaterThan(0)
       } else {
         expect(managedPlan).toBeNull()
+      }
+    }
+  })
+
+  /**
+   * endpoint 缺席时（修复路径没有 Binding）每个 explicit-managed Provider 必须二选一，且必须是**同一个**
+   * 选择的两侧都成立：要么照常产出一份不含 endpoint 的 plan（写命令的九家——命令在运行时自己读环境变量），
+   * 要么如实弃权返回 null（写投递代码的那类——内联死 token 比不装更坏）。
+   *
+   * 为什么单独守：上面那条给足 endpoint，所以一个「无论如何都返回 null」的 resolver 会在那里假绿。
+   * 这里反过来钉住缺席一侧，两条合起来才说明这个维度被真正实现了，而不是被忽略。
+   */
+  it('endpoint 缺席时，explicit-managed 的每一家要么照常产出 plan、要么如实弃权', () => {
+    for (const provider of providers) {
+      const { hookStrategy } = provider.catalog
+      if (hookStrategy.kind !== 'native' || hookStrategy.installation !== 'explicit-managed') continue
+      const withoutEndpoint = resolveManagedHookPlan(
+        provider.id,
+        '/tmp/agentmux-provider-conformance',
+        { HERMES_HOME: '/tmp/agentmux-provider-conformance/hermes' }
+      )
+      if (withoutEndpoint === null) continue
+      // 产出了就必须是完整可装的——不允许「产出一份空 plan」这种中间态。
+      expect(withoutEndpoint.providerId).toBe(provider.id)
+      expect(withoutEndpoint.mutations.length).toBeGreaterThan(0)
+      // 且绝不能把一个 endpoint 占位符写进内容里：那正是弃权要避免的死 token。
+      for (const mutation of withoutEndpoint.mutations) {
+        expect(mutation.content).not.toContain('undefined')
       }
     }
   })

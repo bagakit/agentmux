@@ -92,6 +92,12 @@ describe('built-in agent providers', () => {
         promptDelivery: 'positional-argv', readySignal: 'foreground-process',
         hook: 'native', permission: 'observe', resume: 'provider-native', acp: 'none',
         replyCorrelation: 'none'
+      },
+      {
+        id: 'opencode', executable: 'opencode', expectedProcess: 'opencode',
+        promptDelivery: 'positional-argv', readySignal: 'foreground-process',
+        hook: 'native', permission: 'observe', resume: 'provider-native', acp: 'none',
+        replyCorrelation: 'none'
       }
     ])
   })
