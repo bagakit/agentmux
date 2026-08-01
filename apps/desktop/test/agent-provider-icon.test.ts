@@ -11,23 +11,36 @@ import {
 
 describe('AgentProviderIcon', () => {
   it('每个内置 Provider 都恰好落进"有标记"或"没标记"之一', () => {
-    // 这条守的是**分区**，不是两份清单各自的长度：有标记的那份现在从 Core 的全集派生（减去豁免），
-    // 于是新增一家 Provider 时它默认落进"应当有标记"、下一条断言会因为没画图形而红。
+    // 这条守的是**分区**：覆盖无遗漏（每个内置 id 都被判到）、两族无交集。
     //
-    // 单独钉住分区，是因为豁免清单是个消音器——往里加一个 id 就能让"必须画出品牌标记"对它闭嘴。
-    // 覆盖必须无遗漏（每个内置 id 都被判到），两族必须无交集（一个 id 不能同时既有又没有）。
+    // 它不与下面两条重复：那两条各自只遍历自己那份清单，对"某个 id 两边都不在"都是瞎的。
+    // 而"某个 id 两边都不在"正是本文件历史上真出过的那个 bug（9 个内置 Provider 手抄成 5 个）。
+    // 所以在派生成立的当下它确实近乎恒真，但它是防"派生被改回手抄"的那道回归闸——留着。
+    //
+    // 实测纪录（review 复核，纠正此前的一处夸大）：把派生换回手抄清单**但保持完整**（9+3=12），
+    // 这条**不红**。所以它捕捉的是"漏了一个 id"，不是"退化了派生"这个动作本身。写变异时别把
+    // 两处改动捆在一起，否则分不清是哪条断言在承重。
+    //
+    // 它独有的触发面另测过：手抄清单停在 9，同时给 Core 的 id 全集加一个新 provider——这条
+    // **独占红**（`expected […10] to deeply equal […11]`），其余五条全绿。那正是本文件历史上
+    // 真出过的形状：SSOT 长大而手抄的那份不动。注意 desktop 是经 dist 解析 @agentmux/core 的，
+    // 所以要复现得改 resolved 的那份 dist，光改 packages/core/src 这个测试看不见（也实测过）。
     const withMark = [...AGENT_PROVIDERS_WITH_BRAND_MARK]
     const withoutMark = [...AGENT_PROVIDERS_WITHOUT_BRAND_MARK]
     expect([...withMark, ...withoutMark].sort()).toEqual([...BUILT_IN_AGENT_PROVIDER_IDS].sort())
     expect(withMark.filter((id) => withoutMark.includes(id))).toEqual([])
-    // 豁免是少数派。若有一天多数 Provider 都没有图形，那说明这套资源该重做，而不是继续加豁免。
-    expect(withoutMark.length).toBeLessThan(withMark.length)
+    // 手抄的那一侧只有豁免清单，所以直接钉它：每个豁免都得是真的内置 id，且不许重复。
+    // （非内置 id 已被 readonly BuiltInAgentProviderId[] 在编译期挡住，这里守的是重复。）
+    expect(new Set(withoutMark).size, '豁免清单里有重复').toBe(withoutMark.length)
   })
 
   it('renders a real offline identity mark for every Agent that claims one', () => {
     // 清单从组件导出，**不**在这里手抄：此前这里硬编码了 5 个 id，而组件当时已有 9 个内置
     // Provider——多出来的 4 个一条断言都没红。所谓"every built-in Agent"曾经只是句话。
-    expect(AGENT_PROVIDERS_WITH_BRAND_MARK.length).toBeGreaterThanOrEqual(9)
+    //
+    // 不再断言一个手抄的下界（曾是 `>= 9`，即 12-3 算出来的数）：那正是本次要消灭的"手抄数字"
+    // 形状，且 Provider 合法减少时它会假红。非空由上面那条分区断言覆盖。
+    expect(AGENT_PROVIDERS_WITH_BRAND_MARK.length).toBeGreaterThan(0)
     for (const providerId of AGENT_PROVIDERS_WITH_BRAND_MARK) {
       const markup = renderToStaticMarkup(createElement(AgentProviderIcon, { providerId, size: 16 }))
       expect(markup).toContain(`data-agent-provider="${providerId}"`)
@@ -49,9 +62,10 @@ describe('AgentProviderIcon', () => {
     // 让别处的断言过），这里立刻红。
     for (const providerId of AGENT_PROVIDERS_WITHOUT_BRAND_MARK) {
       const markup = renderToStaticMarkup(createElement(AgentProviderIcon, { providerId, size: 16 }))
-      expect(agentProviderLabel(providerId), `${providerId} 该有 label——没图形不等于不认得`).not.toBe(providerId)
+      // "认得"由 known 这个属性直接表达，不用"label 不等于 id"去代理——那个代理对未来某个
+      // 品牌名恰好是小写 id 的 Provider（label 就想写成 'xai'）会假红，而那不是缺陷。
+      expect(markup, `${providerId} 该被认得——没图形不等于不认得`).toContain('data-agent-provider-known="true"')
       expect(markup).toContain(`data-agent-provider="${providerId}"`)
-      expect(markup).toContain('data-agent-provider-known="true"')
       expect(markup, `${providerId} 声明没有品牌图形，就必须真的走 Bot 兜底`).toContain('lucide-bot')
     }
     expect(agentProviderLabel('kimi')).toBe('Kimi')
