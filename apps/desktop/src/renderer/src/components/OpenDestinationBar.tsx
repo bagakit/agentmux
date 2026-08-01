@@ -1,10 +1,10 @@
 import { useEffect, useRef } from 'react'
 import {
   ExternalLink,
-  PanelBottomOpen,
-  PanelLeftOpen,
-  PanelRightOpen,
-  PanelTopOpen,
+  PanelBottomClose,
+  PanelLeftClose,
+  PanelRightClose,
+  PanelTopClose,
   SquarePlus
 } from 'lucide-react'
 import {
@@ -24,13 +24,22 @@ export type OpenDestinationRequest = Readonly<{
 // destination enum — it is NOT a second answer to "which destinations exist". That truth stays in
 // OPEN_DESTINATIONS (lib/open-destination.ts); the row below derives its order and membership from it,
 // so adding a destination there surfaces a type error here until it is given an icon and a label.
+//
+// Why the `Panel*Close` family and not `Panel*Open`, whose names read like what this row does: lucide's
+// `Open`/`Close` suffix describes **which way a panel is about to swing**, not which side the pane lands
+// on. `PanelLeftOpen` draws the divider on the left (correct) with the chevron pointing **right** — the
+// gesture of pushing a collapsed left sidebar open. Borrow it to mean "the new pane appears on the left"
+// and the arrow says the opposite; all four were wrong the same way, which is exactly why this read as
+// "the directions are reversed" rather than as one odd icon. `Panel*Close` keeps the same divider and
+// flips the chevron to point at the side the split lands on. The chevron geometry is asserted in
+// open-destination-bar.test.tsx, so a future icon swap has to keep pointing the right way.
 const DESTINATION_META = {
   system: { icon: ExternalLink, label: 'Open in system browser' },
   tab: { icon: SquarePlus, label: 'Open in a new tab' },
-  left: { icon: PanelLeftOpen, label: 'Open in a split on the left' },
-  right: { icon: PanelRightOpen, label: 'Open in a split on the right' },
-  up: { icon: PanelTopOpen, label: 'Open in a split above' },
-  down: { icon: PanelBottomOpen, label: 'Open in a split below' }
+  left: { icon: PanelLeftClose, label: 'Open in a split on the left' },
+  right: { icon: PanelRightClose, label: 'Open in a split on the right' },
+  up: { icon: PanelTopClose, label: 'Open in a split above' },
+  down: { icon: PanelBottomClose, label: 'Open in a split below' }
 } satisfies Record<OpenDestination, { icon: typeof ExternalLink; label: string }>
 
 // Icons stand in for words in the one-row form, so every button still needs a spoken name (aria-label)

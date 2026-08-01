@@ -72,6 +72,71 @@ describe('OpenDestinationBar', () => {
     })
   })
 
+  it('points every directional chevron at the side its split lands on', () => {
+    // The defect this pins was shipped and reported as "the directions are exactly reversed".
+    //
+    // Behaviour was never wrong: the button emits the destination it draws (pinned above), and the
+    // engine puts the new pane on the named side (workbench-view-layout.ts). Only the ICONS lied.
+    // lucide's Panel*Open family draws the divider on the right side but aims its chevron the other
+    // way, because its subject is "which way a collapsed panel swings open", not "which side the new
+    // pane appears on". All four were borrowed for the latter, so all four arrows pointed backwards —
+    // which is why it read as a systematic reversal instead of one odd glyph.
+    //
+    // Asserting the icon NAMES would only pin today's pick: the next swap to a differently-named
+    // family could point backwards again and stay green. So this walks the rendered <path> geometry
+    // and asserts the chevron's tip sits on the side the destination names. Every lucide chevron is
+    // `m<x> <y> …` with three points — the middle one is the tip; the outer two are the tails.
+    const AXIS = {
+      left: { axis: 'x', tipBeyondTails: false },
+      right: { axis: 'x', tipBeyondTails: true },
+      up: { axis: 'y', tipBeyondTails: false },
+      down: { axis: 'y', tipBeyondTails: true }
+    } as const
+
+    for (const [destination, expectation] of Object.entries(AXIS)) {
+      const item = OPEN_DESTINATION_BAR_ITEMS.find((candidate) => candidate.destination === destination)
+      expect(item, `${destination} vanished from the row`).toBeDefined()
+      const Icon = item!.icon
+      const markup = renderToStaticMarkup(<Icon />)
+      const paths = [...markup.matchAll(/\sd="([^"]+)"/g)].map((match) => match[1]!)
+      // Premise self-check: the chevron is the relative path (lowercase `m`); the divider is the
+      // absolute one (`M`). Without this, a glyph that lost its chevron would make the loop below
+      // vacuous instead of red.
+      const chevron = paths.find((d) => d.startsWith('m'))
+      expect(chevron, `${destination}'s icon has no relative-path chevron to read a direction from`)
+        .toBeDefined()
+
+      // Numbers, in order. lucide minifies its paths, so separators are inconsistent: `m16 15-3-3 3-3`
+      // packs two negative deltas with no separator at all (the leading `-` does the separating).
+      // Match numbers rather than pairs — pairing on a separator misses those and silently reads a
+      // 3-point chevron as 2 points.
+      const numbers = [...chevron!.matchAll(/-?\d+(?:\.\d+)?/g)].map((match) => Number(match[0]))
+      // A chevron is three points; anything else means the glyph shape changed and the reading below
+      // would be guesswork.
+      expect(numbers, `${destination}'s chevron is not the expected 3-point shape`).toHaveLength(6)
+      const points = [0, 2, 4].map((index) => ({ x: numbers[index]!, y: numbers[index + 1]! }))
+      // lucide relative paths give the first point absolutely, then deltas. Accumulate to absolutes.
+      const absolute = points.reduce<{ x: number; y: number }[]>((acc, point, index) => {
+        const previous = acc[index - 1]
+        acc.push(previous ? { x: previous.x + point.x, y: previous.y + point.y } : point)
+        return acc
+      }, [])
+      const read = (point: { x: number; y: number }): number =>
+        expectation.axis === 'x' ? point.x : point.y
+      const tip = read(absolute[1]!)
+      const tails = [read(absolute[0]!), read(absolute[2]!)]
+      // Tails sit on the same side of the tip (that is what makes it a chevron rather than a zigzag),
+      // so comparing the tip against either one is enough — assert against both to be explicit.
+      for (const tail of tails) {
+        expect(
+          expectation.tipBeyondTails ? tip > tail : tip < tail,
+          `the "${destination}" icon's chevron points the wrong way: tip at ${expectation.axis}=${tip}, ` +
+            `tail at ${expectation.axis}=${tail}. A user reads this as the split going the other way.`
+        ).toBe(true)
+      }
+    }
+  })
+
   it('disables only the directional choices when there is no precise pane, and says why', () => {
     // Mutation guard (a): drop the disabling and the directional buttons stop reporting disabled.
     const buttons = renderBarButtons(false)
