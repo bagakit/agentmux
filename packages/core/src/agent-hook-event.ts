@@ -133,18 +133,29 @@ export const HERMES_HOOK_DIALECT: AgentHookLifecycleDialect = {
  * Pi 的 snake_case 方言。
  *
  * `message_end` 刻意不映射：Pi 自己把它声明成 `working` 而非 `done`，映射成 turn 收尾会与 Provider
- * 的声明相矛盾——那正是「替 Provider 猜语义」。Pi 的收尾是 `agent_end`/`agent_settled`。
+ * 的声明相矛盾——那正是「替 Provider 猜语义」。
+ *
+ * **`agent_settled` 是唯一的收尾，`agent_end` 不是**，且后者刻意不在这张表上。这一条来自上游源码：
+ * `agent_end` 之后 Pi 还有三条各自独立的续跑路径（可重试错误 / 自动压缩 / handler 自己排进队的消息，
+ * 见 providers/pi.ts 那段逐行引证），`agent_settled` 才是那个 while 循环跑完后在 finally 里发的唯一
+ * 一次。把 `agent_end` 记成 `turn-end` 在两条轴上都错：turn-phase 闸门会在每次重试前先判一次「本轮
+ * 收尾」，而 USAGE_FINALIZATION_EVENTS 会在 transcript 还没落定时就去读用量。
+ *
+ * 它曾经在这张表上（与「两个名字都判 done」的旧规则成对）。删掉而不是留着：Pi 的扩展根本不订阅
+ * `agent_end`，留一行永不命中的映射不是无害的冗余，而是一句关于「Pi 什么时候算干完」的谎，
+ * 下一个人会据此以为闸门在 Pi 上按 `agent_end` 开合。
  *
  * **Pi 今天没有重开事件，这是已知缺口而不是遗漏。** turn-phase 闸门要求「能收尾的方言也要能重开」
- * （hook-turn-phase.ts），Pi 满足不了：候选只有 `before_agent_start`/`agent_start`（现记成
- * `session-start`）与 `message_end`，而本机没有 Pi 的第一方源码，无法证明其中任何一个是**每 turn**
- * 触发而不是每会话一次。按本仓「未核实就不声明」的规矩，这里不编一个映射去让不变量变绿——那会把
- * 「闸门在 Pi 上开着」这件没被证明的事写成断言。
+ * （hook-turn-phase.ts），Pi 满足不了，而理由**不是**没有第一方证据——恰恰相反，证据齐了才看清缺口的
+ * 真形状：`before_agent_start`/`agent_start` 每轮都发，但它们在上游是「这个 agent run 起来了」而不是
+ * 「用户交了新输入」或「新一轮开工」；把它们记成 `turn-start` 会让闸门在一次 run 内的**每次续跑**
+ * （retry / compaction / queued，见上）都误判成新一轮，那正是这道闸门要挡的残响窗口自己被打开。
+ * 按本仓「未核实就不声明」的规矩，这里不编一个映射去让不变量变绿。
  *
  * 缺口的实际后果被 hookEventUpdatesSemanticStatus 的保守出口兜住了：它对没有重开事件的方言不 latch
  * （见本文件末尾的 `eventNamesCanReopenTurn`，以及 client.ts 摄入侧把它算出来喂进闸门的那一句），
  * 代价是 Pi 拿不到「收尾后压制迟到工具事件」这一层保护。
- * 要收掉这个缺口，需要的是 Pi 的第一方事件时序证据，而不是这张表上多一行。
+ * 要收掉这个缺口，需要的是一个语义上真的等于「新一轮开工」的 Pi 事件，而不是这张表上多一行。
  * 证据缺口记在 docs/reviews/agentmux-provider-cli-evidence.md 的 Pi 一节。
  */
 export const PI_HOOK_DIALECT: AgentHookLifecycleDialect = {
@@ -153,7 +164,6 @@ export const PI_HOOK_DIALECT: AgentHookLifecycleDialect = {
   tool_call: 'tool-use-start',
   tool_execution_start: 'tool-use-start',
   tool_execution_end: 'tool-use-end',
-  agent_end: 'turn-end',
   agent_settled: 'turn-end'
 }
 

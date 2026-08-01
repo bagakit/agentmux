@@ -27,6 +27,8 @@ import { GEMINI_HOOK_EVENTS } from '../src/providers/gemini.js'
 import { GROK_HOOK_EVENTS } from '../src/providers/grok.js'
 import { HERMES_HOOK_EVENTS } from '../src/providers/hermes.js'
 import { KIMI_HOOK_EVENTS } from '../src/providers/kimi.js'
+import { OPENCODE_HOOK_EVENTS } from '../src/providers/opencode.js'
+import { PI_HOOK_EVENTS } from '../src/providers/pi.js'
 import { USAGE_FINALIZATION_EVENTS } from '../src/agent-hook-command.js'
 import type { AgentHookLifecycleEvent, AgentCatalogEntry } from '../src/types.js'
 
@@ -168,8 +170,11 @@ describe('Core Provider protocol', () => {
       // Pi 的方言。
       expect(canonicalHookLifecycleEvent('tool_execution_start')).toBe('tool-use-start')
       expect(canonicalHookLifecycleEvent('tool_execution_end')).toBe('tool-use-end')
-      expect(canonicalHookLifecycleEvent('agent_end')).toBe('turn-end')
       expect(canonicalHookLifecycleEvent('agent_settled')).toBe('turn-end')
+      // `agent_end` **刻意不在表上**：Pi 在它之后还有 retry/compaction/queued 三条续跑路径，
+      // 认它作收尾会在每次续跑前先报一次假完成（依据见 providers/pi.ts）。这一条与下面那条
+      // 「不按前缀猜」同族——都是在钉「看起来像收尾的名字不等于收尾」。
+      expect(canonicalHookLifecycleEvent('agent_end')).toBeUndefined()
       // PascalCase 的方言照旧成立。
       expect(canonicalHookLifecycleEvent('PreToolUse')).toBe('tool-use-start')
       expect(canonicalHookLifecycleEvent('PostToolUse')).toBe('tool-use-end')
@@ -185,12 +190,14 @@ describe('Core Provider protocol', () => {
 
     it('turn 收尾集合由映射表派生，覆盖每一家的收尾方言而不是只有 PascalCase 两条', () => {
       // USAGE_FINALIZATION_EVENTS 此前硬编码 ['Stop','StopFailure']：Hermes 与 Pi 的收尾读不到用量。
-      for (const raw of ['Stop', 'StopFailure', 'post_llm_call', 'on_session_end', 'agent_end', 'agent_settled']) {
+      for (const raw of ['Stop', 'StopFailure', 'post_llm_call', 'on_session_end', 'agent_settled']) {
         expect(USAGE_FINALIZATION_EVENTS.has(raw)).toBe(true)
         expect(canonicalHookLifecycleEvent(raw)).toBe('turn-end')
       }
       // 非收尾事件绝不在集合里——否则 mid-turn 事件会去读 transcript、还会误清上一 turn 的用量。
-      for (const raw of ['PreToolUse', 'PostToolUse', 'pre_tool_call', 'post_tool_call', 'SessionStart']) {
+      // `agent_end` 在这一侧：它在 Pi 里之后还有三条续跑路径，此刻 transcript 尚未落定，
+      // 拿它去读用量既读不全、又会把上一 turn 的数抹掉（依据见 providers/pi.ts）。
+      for (const raw of ['PreToolUse', 'PostToolUse', 'pre_tool_call', 'post_tool_call', 'SessionStart', 'agent_end']) {
         expect(USAGE_FINALIZATION_EVENTS.has(raw)).toBe(false)
       }
       // 集合与映射表是同一份真相的两种形状，不许 drift。
@@ -279,7 +286,10 @@ describe('Core Provider protocol', () => {
       // 真正的漏配（一个面能重开、另一个面认不出）仍然照抓。
       //
       // 只对 explicit-managed 强制：那批是 AgentMux 亲手写配置的，安装清单是我们自己的声明，能核对。
-      // unmanaged（pi）与无 hook（traex）的安装面不由本仓决定，拿不到可核对的清单。
+      // 无 hook 的（traex）没有安装面。**这里不再有「unmanaged 拿不到清单」那一档**：pi 曾经是
+      // unmanaged，现在它与 opencode 一样由 AgentMux 写一份生成的扩展/插件文件，安装清单同样是我们
+      // 自己声明的（`PI_HOOK_EVENTS`/`OPENCODE_HOOK_EVENTS` 就是生成代码里 `on()` 的那批名字），
+      // 所以照样要核对。这条表漏一家的后果由紧跟的 toBeDefined 顶着——那正是本轮合并时它报出来的。
       const INSTALLED_HOOK_EVENTS: Readonly<Record<string, readonly string[]>> = {
         antigravity: ANTIGRAVITY_HOOK_EVENTS,
         claude: CLAUDE_HOOK_EVENTS,
@@ -290,7 +300,9 @@ describe('Core Provider protocol', () => {
         gemini: GEMINI_HOOK_EVENTS,
         grok: GROK_HOOK_EVENTS,
         hermes: HERMES_HOOK_EVENTS,
-        kimi: KIMI_HOOK_EVENTS
+        kimi: KIMI_HOOK_EVENTS,
+        opencode: OPENCODE_HOOK_EVENTS,
+        pi: PI_HOOK_EVENTS
       }
 
       let compared = 0

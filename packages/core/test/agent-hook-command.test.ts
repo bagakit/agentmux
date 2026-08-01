@@ -227,10 +227,10 @@ describe('agent hook command usage relay', () => {
 
   /**
    * 收尾事件集合是从 canonical 映射表派生的，所以 snake_case 的收尾方言也能抽到用量。
-   * 此前硬编码 `['Stop','StopFailure']`：Hermes 的 `on_session_end` 与 Pi 的 `agent_end` 永远读不到。
+   * 此前硬编码 `['Stop','StopFailure']`：Hermes 的 `on_session_end` 与 Pi 的 `agent_settled` 永远读不到。
    */
   it('extracts usage on a snake_case turn-end dialect, not only on PascalCase Stop', async () => {
-    for (const eventName of ['on_session_end', 'agent_end']) {
+    for (const eventName of ['on_session_end', 'agent_settled']) {
       const dir = await mkdtemp(join(tmpdir(), 'agentmux-hookcmd-'))
       try {
         const transcriptPath = join(dir, 'transcript.jsonl')
