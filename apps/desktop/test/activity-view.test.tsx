@@ -577,4 +577,103 @@ describe('ActivityView', () => {
     expect(markup).toContain('log-turn')
     expect(markup).not.toContain('log-row log-row--lifecycle')
   })
+
+  /**
+   * 用户：「关于 Active View，User 发的消息要单独显示，而且时间只显示分钟太不友好了, 应该显示从
+   * 什么时间点到什么时间点, 消耗的时分秒」。
+   *
+   * 纯函数那一侧在 activity-ruler-mapping.test.ts 里验收；这一组守的是**接线**——三个格式化器写对
+   * 了却没人在 View 里调用，两边的测试都会绿。
+   */
+  describe('时刻与耗时接到界面上', () => {
+    // 用本地时间构造，于是断言与跑测试的时区无关。
+    const at = (h: number, m: number, s: number): number => new Date(2026, 0, 2, h, m, s).getTime()
+
+    it('标尺头上给出起、止、耗时三件，而不是一个偏移量', () => {
+      // 一次跑了 3 小时的 Session：这正是用户报的那个形状。
+      const markup = render('complete-events', [
+        activity('a', { createdAt: at(14, 0, 0), updatedAt: at(14, 0, 0) }),
+        activity('b', { createdAt: at(17, 4, 3), updatedAt: at(17, 4, 3) })
+      ])
+      const head = markup.slice(markup.indexOf('activity-ruler__span'), markup.indexOf('activity-ruler__note'))
+      // 两个真实时刻。它们回答的是「从什么时间点到什么时间点」，偏移量答不了。
+      expect(head).toContain('14:00:00')
+      expect(head).toContain('17:04:03')
+      // 以及耗时，带小时位。
+      expect(head).toContain('3h04m03s')
+      // 反向：分钟封顶那个实现给的是 `184m03s`，它不许出现在界面上任何位置（含 title）。
+      expect(markup).not.toContain('184m03s')
+    })
+
+    it('序数轴上不渲染跨度——那条轴上没有流逝的时间可报', () => {
+      const markup = render('complete-events', [
+        activity('a', { createdAt: at(14, 0, 0), updatedAt: at(14, 0, 0) }),
+        activity('b', { createdAt: at(14, 0, 0), updatedAt: at(14, 0, 0) })
+      ])
+      expect(markup).toContain('data-axis="ordinal"')
+      // 整个 span 那一件都不在——不是"渲染了一个 0s"，是根本不渲染。
+      expect(markup).not.toContain('activity-ruler__span')
+      expect(markup).not.toContain('elapsed')
+    })
+
+    it('一句话的时间是它说话的时刻，偏移量降进 title', () => {
+      const markup = render('complete-events', [
+        activity('ask', {
+          kind: 'user_message', source: 'user', title: 'Prompt',
+          content: '开始吧', createdAt: at(14, 0, 0), updatedAt: at(14, 0, 0)
+        }),
+        activity('reply', {
+          kind: 'assistant_message', source: 'native-hook',
+          content: '好', createdAt: at(17, 4, 3), updatedAt: at(17, 4, 3)
+        })
+      ])
+      const log = markup.slice(markup.indexOf('activity-log'))
+      // 可见的那一列是时刻：「什么时候说的」才是一句话关心的问题。
+      expect(log).toContain('>17:04:03</span>')
+      // 而距开始多久没有丢，它退进 title——两个事实都答得出而只占一列宽。
+      expect(log).toContain('title="17:04:03 · +3h04m03s from start"')
+    })
+
+    it('折起来的一段机器执行报出它藏掉的那段时间', () => {
+      const markup = render('complete-events', [
+        activity('u', {
+          kind: 'user_message', source: 'user', content: '跑', createdAt: at(14, 0, 0), updatedAt: at(14, 0, 0)
+        }),
+        activity('t1', {
+          kind: 'tool_call', source: 'native-hook', title: 'Edit', toolName: 'Edit', toolInput: 'a.ts',
+          createdAt: at(14, 0, 1), updatedAt: at(14, 0, 1)
+        }),
+        activity('t2', {
+          kind: 'tool_call', source: 'native-hook', title: 'Edit', toolName: 'Edit', toolInput: 'b.ts',
+          createdAt: at(14, 2, 6), updatedAt: at(14, 2, 6)
+        })
+      ])
+      const fold = markup.slice(markup.indexOf('log-fold'))
+      expect(fold).toContain('2 steps')
+      // 首末两条相隔 2m05s：这个数就摆在 "N steps" 旁边，展开与否都在同一位置回答"这一段值不值得展开"。
+      expect(fold).toContain('log-fold__elapsed')
+      expect(fold).toContain('2m05s')
+    })
+
+    it('同一时刻的一段不硬报 0s', () => {
+      // 折叠头的跨度取这一段首尾两条的间隔。同刻的一段没有时间可报，此时不渲染那一件——
+      // 与序数轴同一条诚实规则，不给一个读起来像"瞬间完成"的 `0s`。
+      const markup = render('complete-events', [
+        activity('u', {
+          kind: 'user_message', source: 'user', content: '跑', createdAt: at(14, 0, 0), updatedAt: at(14, 0, 0)
+        }),
+        activity('t1', {
+          kind: 'tool_call', source: 'native-hook', title: 'Edit', toolName: 'Edit', toolInput: 'a.ts',
+          createdAt: at(14, 0, 1), updatedAt: at(14, 0, 1)
+        }),
+        activity('t2', {
+          kind: 'tool_call', source: 'native-hook', title: 'Edit', toolName: 'Edit', toolInput: 'b.ts',
+          createdAt: at(14, 0, 1), updatedAt: at(14, 0, 1)
+        })
+      ])
+      const fold = markup.slice(markup.indexOf('log-fold'))
+      expect(fold).toContain('2 steps')
+      expect(fold).not.toContain('log-fold__elapsed')
+    })
+  })
 })

@@ -82,8 +82,62 @@ export function formatOffset(createdAt: number, origin: number): string {
   const ms = Math.max(0, createdAt - origin)
   if (ms < 1_000) return `+${ms}ms`
   if (ms < 60_000) return `+${(ms / 1_000).toFixed(1)}s`
-  const minutes = Math.floor(ms / 60_000)
-  return `+${minutes}m${String(Math.floor((ms % 60_000) / 1_000)).padStart(2, '0')}s`
+  return `+${formatDuration(ms)}`
+}
+
+/**
+ * 一段时长，按时分秒读出来。
+ *
+ * 用户：「时间只显示分钟太不友好了, 应该显示从什么时间点到什么时间点, 消耗的时分秒」。这条是那个
+ * 「消耗的时分秒」——原先的实现在分钟处封顶，一次跑了三小时的 Session 会显示成 `184m03s`，读者
+ * 得自己去除以 60。小时位不是可选的修饰：Agent 跑一下午是这个产品的常态。
+ *
+ * 只在**非零的最高位**起显示单位，低位补零：`3h04m03s` / `4m03s` / `3.2s` / `840ms`。补零是为了
+ * 等宽下不跳位（gutter 里每行都在同一列），而省掉高位的零是为了短跑不必读 `0h00m03s`。
+ */
+export function formatDuration(ms: number): string {
+  const total = Math.max(0, Math.floor(ms))
+  if (total < 1_000) return `${total}ms`
+  const seconds = Math.floor(total / 1_000)
+  if (seconds < 60) return `${(total / 1_000).toFixed(1)}s`
+  const hours = Math.floor(seconds / 3_600)
+  const minutes = Math.floor((seconds % 3_600) / 60)
+  const rest = seconds % 60
+  const pad = (value: number): string => String(value).padStart(2, '0')
+  if (hours > 0) return `${hours}h${pad(minutes)}m${pad(rest)}s`
+  return `${minutes}m${pad(rest)}s`
+}
+
+/**
+ * 一个时刻的挂钟读数，`HH:MM:SS`，本地时区。
+ *
+ * 用户要的「从什么时间点到什么时间点」需要真正的时刻，而偏移量答不了这个问题——`+4m03s` 说不出
+ * 那是下午两点还是凌晨三点。
+ *
+ * 固定 24 小时补零而不走 `toLocaleTimeString`：这个读数落在等宽的时间沟里，一列上下必须对齐，而
+ * locale 格式的宽度会变（`2:03:07 PM` 比 `14:03:07` 长且长度随小时变化）。日志读数取可预测的
+ * 对齐，这也是各类日志查看器的通行做法。
+ */
+export function formatClock(at: number): string {
+  const date = new Date(at)
+  const pad = (value: number): string => String(value).padStart(2, '0')
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+}
+
+/**
+ * 整段活动的时间跨度：起、止、以及耗时。
+ *
+ * 这是用户那句话的完整答案，三个事实一次给全。ordinal 轴（所有事件同一时刻，或只有一条）**不给
+ * 跨度**：那条轴上的间距表达的是顺序而不是流逝的时间，硬报一个 `0s` 耗时就是把 ruler 特意做成
+ * 类型上不可表达的那种不诚实又请了回来。
+ */
+export function describeSpan(scale: RulerScale): { from: string; to: string; elapsed: string } | null {
+  if (scale.axis === 'ordinal') return null
+  return {
+    from: formatClock(scale.origin),
+    to: formatClock(scale.origin + scale.span),
+    elapsed: formatDuration(scale.span)
+  }
 }
 
 /**
@@ -228,7 +282,10 @@ export function stepRulerSelection(
 export function describeRulerAxis(scale: RulerScale): string {
   const events = `${scale.count} event${scale.count === 1 ? '' : 's'}`
   if (scale.axis === 'temporal') {
-    return `Activity timeline, ${events} over ${formatOffset(scale.origin + scale.span, scale.origin).slice(1)}`
+    // 走 formatDuration 而不是 `formatOffset(...).slice(1)`：后者是"格式化成 `+4m03s` 再把加号切
+    // 掉"，一旦偏移量的前缀变了（比如某天带上符号位）这里就会啃掉一位数字。要的本来就是一段时长，
+    // 直接问那个函数。读屏用户同样拿到时分秒——小时位在这里也不是可选的。
+    return `Activity timeline, ${events} over ${formatDuration(scale.span)}`
   }
   return `Activity timeline, ${events} in order`
 }
