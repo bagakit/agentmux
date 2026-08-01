@@ -44,6 +44,24 @@ export type FileRenameProjectionCollision = {
   path: string
 }
 
+/**
+ * Bump a Workspace's file-tree invalidation counter.
+ *
+ * The tree keys its cache on this number, so **every** seam that writes a file into a Workspace has
+ * to advance it or the new file simply is not in the tree until some unrelated write happens to bump
+ * it. That failure is silent — the file is on disk and the tree is confidently stale — which is why
+ * this is a function rather than the increment written out at each call site: a sixth writer that
+ * forgets it should be a missing call, not a missing line nobody notices.
+ *
+ * It returns just the one slice so a caller can spread it into whatever else that action reduces.
+ */
+export function bumpWorkspaceFileRevision(
+  revisions: Record<string, number>,
+  workspaceId: string
+): Record<string, number> {
+  return { ...revisions, [workspaceId]: (revisions[workspaceId] ?? 0) + 1 }
+}
+
 function withoutIssue(
   issues: FileWorkbenchState['documentIssues'],
   key: string
