@@ -2,6 +2,8 @@ import * as ContextMenu from '@radix-ui/react-context-menu'
 import { Copy, Crosshair, Send } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { formatMessagingAddress, formatRegionAddress, formatSessionAddress } from '../lib/agent-address'
+import type { WorkbenchSplitMenuEntry } from '../lib/workbench-tab-actions'
+import { workbenchSplitMenuIcon, workbenchSplitMenuKey } from './workbench-split-menu-icons'
 
 /**
  * 一格的右键菜单。
@@ -31,6 +33,13 @@ type RegionCopyAction = {
 export type RegionMenuEntry =
   | { kind: 'action'; action: RegionCopyAction }
   | { kind: 'separator' }
+  /**
+   * 分屏与重排那一节的一条。它与地址项一起住在**同一份** `entries` 里，而不是 JSX 里再加一个
+   * `{splitMenu && splitMenu.length > 0 ? (` 分支——那种写法实测能被 `false ?` 整段抹掉而全绿
+   * （本菜单的注释就是为这件事写的，我第一版偏偏又犯了一次）。清单一旦只有一个出口，JSX 里就没有
+   * 第二个条件可写，「这一节在不在」变成数据，断言得着。
+   */
+  | { kind: 'split'; entry: WorkbenchSplitMenuEntry }
 
 export type RegionCopyModel = {
   regionAddress: RegionCopyAction
@@ -48,11 +57,13 @@ export type RegionCopyModel = {
 export function createRegionCopyModel({
   regionId,
   agentSessionId,
-  writeClipboardText
+  writeClipboardText,
+  splitMenu
 }: {
   regionId: string
   agentSessionId: string | null
   writeClipboardText(text: string): Promise<void>
+  splitMenu?: readonly WorkbenchSplitMenuEntry[]
 }): RegionCopyModel {
   const copy = async (text: string, label: RegionCopyAction['label']): Promise<void> => {
     try {
@@ -83,7 +94,7 @@ export function createRegionCopyModel({
         }
       : {})
   }
-  return { ...actions, entries: regionMenuEntries(actions) }
+  return { ...actions, entries: regionMenuEntries(actions, splitMenu ?? []) }
 }
 
 /**
@@ -100,14 +111,28 @@ export function createRegionCopyModel({
  * `formatMessagingAddress({ agentSessionId, regionId })` 在带 regionId 时就是
  * `formatRegionAddress(regionId)`（agent-address.ts），两者逐字节相同——那不是存活的洞，
  * 是一次 no-op。别为它编断言。
+ *
+ * 分屏那一节排在地址项之后：来这个菜单最常见的意图是「把这一格的东西交出去 / 拿到它的地址」，
+ * 分屏是对这一格**布局**的操作，属次要一组。它与地址项之间的分隔线同样只在两侧都真有东西时出现，
+ * 且**整节的在场也由这里决定**——不是渲染层再加一个条件（那正是本菜单当初的事故形状）。
  */
-function regionMenuEntries(model: Omit<RegionCopyModel, 'entries'>): readonly RegionMenuEntry[] {
+function regionMenuEntries(
+  model: Omit<RegionCopyModel, 'entries'>,
+  splitMenu: readonly WorkbenchSplitMenuEntry[]
+): readonly RegionMenuEntry[] {
   const addresses: RegionMenuEntry[] = [
     { kind: 'action', action: model.regionAddress },
     ...(model.sessionAddress ? [{ kind: 'action' as const, action: model.sessionAddress }] : [])
   ]
-  if (!model.handoff) return addresses
-  return [{ kind: 'action', action: model.handoff }, { kind: 'separator' }, ...addresses]
+  const head: RegionMenuEntry[] = model.handoff
+    ? [{ kind: 'action', action: model.handoff }, { kind: 'separator' }, ...addresses]
+    : addresses
+  if (splitMenu.length === 0) return head
+  return [
+    ...head,
+    { kind: 'separator' },
+    ...splitMenu.map((entry) => ({ kind: 'split' as const, entry }))
+  ]
 }
 
 /**
@@ -126,14 +151,36 @@ export function RegionContextMenu({
   children,
   regionId,
   agentSessionId,
-  writeClipboardText
+  writeClipboardText,
+  splitMenu
 }: {
   children: ReactNode
   regionId: string
   agentSessionId: string | null
   writeClipboardText(text: string): Promise<void>
+  /**
+   * 分屏与重排那一节。来自 `workbenchSplitMenuEntries`——与 Tab 条上的 Split 下拉、Tab 的右键
+   * 菜单**同一份清单**，不是这里再列一遍（见那个函数的注释）。
+   *
+   * **必填**，尽管这个菜单其余可选项都以缺席表达。这里刻意不给「不在能分屏的上下文里就省略」
+   * 留口子，理由是实测的：写成可选时 `splitMenu={undefined && workbenchSplitMenuEntries({…})}`
+   * 类型合法（表达式类型就是 `undefined`），整节对用户消失而 15 条断言全绿——`?` 在这里唯一
+   * 买到的东西就是把 tsc 关掉，因为全仓只有一个调用点，通用性是想象出来的（记忆
+   * expired-reason-for-not-mapping：「今天没人需要」是会过期的理由，反过来「将来也许有人需要」
+   * 是永不到期的借口）。真出现了不能分屏的上下文，那时显式传 `[]` 并让它自带前提，比现在留一个
+   * 谁都能顺手写成 `undefined` 的口子安全。
+   *
+   * 注意必填只挡住「类型上不给」这一种拼法。`splitMenu={[]}` 同样让整节消失且类型合法，那一层
+   * 由接线守卫按 **AST 表达式** 判（见 workbench-split-menu.test.tsx 的接线层）。
+   */
+  splitMenu: readonly WorkbenchSplitMenuEntry[]
 }) {
-  const model = createRegionCopyModel({ regionId, agentSessionId, writeClipboardText })
+  const model = createRegionCopyModel({
+    regionId,
+    agentSessionId,
+    writeClipboardText,
+    splitMenu
+  })
   return (
     <ContextMenu.Root>
       <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
@@ -146,6 +193,23 @@ export function RegionContextMenu({
                   key={`separator-${index}`}
                   className="tab-context-menu__separator"
                 />
+              )
+            }
+            if (entry.kind === 'split') {
+              const key = workbenchSplitMenuKey(entry.entry, index)
+              if (entry.entry.kind === 'separator') {
+                return <ContextMenu.Separator key={key} className="tab-context-menu__separator" />
+              }
+              const SplitIcon = workbenchSplitMenuIcon(entry.entry)
+              return (
+                <ContextMenu.Item
+                  key={key}
+                  className="tab-context-menu__item"
+                  onSelect={entry.entry.onSelect}
+                >
+                  <SplitIcon size={14} />
+                  <span>{entry.entry.label}</span>
+                </ContextMenu.Item>
               )
             }
             const Icon = REGION_MENU_ICONS[entry.action.label]

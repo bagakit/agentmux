@@ -119,3 +119,54 @@ export function tabIdsForCloseScope(
   if (scope === 'right') return tabOrder.slice(targetIndex + 1)
   return tabOrder.filter((tabId) => tabId !== targetTabId)
 }
+
+/**
+ * 「分屏与重排这一节要画哪几项、什么顺序、哪里断一道线」——四个容器共用的**唯一**那份清单。
+ *
+ * 为什么必须只有一份：这一节现在出现在四个地方——Tab 条上的 Split 下拉、Tab 右键菜单、
+ * 一格的右键菜单、以及点链接时的目的地选择器。前两个此前各自把 `WORKBENCH_TAB_SPLIT_ACTIONS`
+ * map 一遍，并各自维护一份逐字相同的方向→图标映射；再给后两个各加一份，就是本仓
+ * duplicated-rule-defeats-the-fix 那一族的第三、第四份。那族的症状不是报错：改一处（比如给
+ * 预设加一档、或调一次顺序）只会让**没跟上的那几个容器静默保留旧清单**，而每个容器各自的
+ * 测试照旧全绿——因为它们各自断言的是自己那份。
+ *
+ * 分隔线只在两侧都真有东西时才出现：一条贴在顶上或悬在底下的线是噪音（与 RegionContextMenu
+ * 的 `regionMenuEntries` 同一条规矩）。预设那一组会因为格数超限而整组消失
+ * （`workbenchRegionPresetMenu` 判的），所以「有没有分隔线」不能写成常量。
+ *
+ * `onSelect` 已经把该发什么闭包进去，容器里因此连一个 `if` 都不剩，只有一次 map——
+ * 这是本仓能挡住「JSX 里塞 `{false && …}` 让整项永不渲染而 grep 全绿」的唯一形状
+ * （Radix 的 Content 默认关闭且在 Portal 里，renderToStaticMarkup 渲不出它）。
+ */
+export type WorkbenchSplitMenuEntry =
+  | { kind: 'split'; direction: SplitDirection; label: string; onSelect(): void }
+  | { kind: 'preset'; preset: WorkbenchRegionLayoutPreset; label: string; onSelect(): void }
+  | { kind: 'separator' }
+
+export function workbenchSplitMenuEntries(input: {
+  /** 这个 Tab 现在有几格。预设只增不减，故它决定预设那一组列不列得出来。 */
+  regionCount: number
+  split: (direction: SplitDirection) => void
+  arrange: (preset: WorkbenchRegionLayoutPreset) => void
+}): readonly WorkbenchSplitMenuEntry[] {
+  const splits: WorkbenchSplitMenuEntry[] = WORKBENCH_TAB_SPLIT_ACTIONS.map((action) => ({
+    kind: 'split',
+    direction: action.direction,
+    label: action.label,
+    onSelect: () => input.split(action.direction)
+  }))
+  // 容量判定不在这里重做一遍：它只住在 workbenchRegionPresetMenu 里（那份注释说明了为什么）。
+  const presetMenu = workbenchRegionPresetMenu({
+    regionCount: input.regionCount,
+    arrange: input.arrange
+  })
+  const presets: WorkbenchSplitMenuEntry[] = presetMenu.presets.map((action) => ({
+    kind: 'preset',
+    preset: action.preset,
+    label: action.label,
+    onSelect: () => presetMenu.onSelect(action.preset)
+  }))
+  if (presets.length === 0) return splits
+  return [...splits, { kind: 'separator' }, ...presets]
+}
+
