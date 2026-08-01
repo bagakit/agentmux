@@ -147,6 +147,53 @@ describe('detectTerminalPathLinks — deliberate rejections', () => {
   })
 })
 
+/**
+ * A `:n` suffix is the ONLY signal that promotes a slash-less core, and clocks wear it too. These
+ * are the lines a timestamped transcript produces on every row, so a hole here underlines the whole
+ * time gutter — it is the common case, not an edge one.
+ */
+describe('detectTerminalPathLinks — 时刻不是文件', () => {
+  it('rejects a wall-clock reading that looks like name:line:col', () => {
+    // Regression: `17:04:03` used to parse as { path: '17', line: 4, column: 3 } — the ruler and
+    // every turn's time gutter render exactly this shape.
+    expect(detectTerminalPathLinks('17:04:03', ROOT)).toEqual([])
+    expect(detectTerminalPathLinks('09:03', ROOT)).toEqual([])
+    expect(detectTerminalPathLinks('00:00:00', ROOT)).toEqual([])
+  })
+
+  it('rejects clocks embedded in prose without eating the sentence', () => {
+    expect(detectTerminalPathLinks('started 14:03:07 and ended 17:04:03', ROOT)).toEqual([])
+  })
+
+  it('rejects other all-digit tokens a :n suffix would promote', () => {
+    // Same root cause, different shapes: a version, a date, a bare count.
+    for (const notAPath of ['1.2.3:4', '2026-09-01:5', '42:7', '1.0:1:1']) {
+      expect(detectTerminalPathLinks(notAPath, ROOT)).toEqual([])
+    }
+  })
+
+  it('still links a real path standing next to a clock on the same line', () => {
+    // The clock must be dropped WITHOUT swallowing the path that follows it: proving the rejected
+    // match still advances the scanner past its own span.
+    const link = onlyLink('17:04:03  error in src/foo.ts:12:3')
+    expect(link.path).toBe('src/foo.ts')
+    expect(link.line).toBe(12)
+    expect(link.column).toBe(3)
+  })
+
+  it('keeps letter-bearing cores linkable — the suffix branch is narrowed, not closed', () => {
+    expect(onlyLink('README:10').path).toBe('README')
+    expect(onlyLink('README.md:3:1').path).toBe('README.md')
+    expect(onlyLink('a:1').path).toBe('a')
+  })
+
+  it('exempts a directory-bearing core from the letter rule', () => {
+    // A `/` is already the strong signal; an all-digit path names a real place.
+    expect(onlyLink('logs/2024:5').path).toBe('logs/2024')
+    expect(onlyLink('1/2/3').path).toBe('1/2/3')
+  })
+})
+
 describe('resolveWorkspaceRelativePath', () => {
   it('passes a relative path through unchanged', () => {
     expect(resolveWorkspaceRelativePath('src/index.ts', ROOT)).toBe('src/index.ts')

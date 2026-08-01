@@ -5,9 +5,11 @@
  * lazily when the click opens it (and a miss surfaces as a visible error), never here.
  *
  * Detection is deliberately conservative: underlining ordinary prose is worse than missing a path.
- * The crux acceptance rule — a core must contain a `/` or carry a `:line` suffix — drops bare
- * dotted words (`e.g.`, `foo.bar`, `1.2.3`, `README`) while still catching `README.md:3:1` and
- * every real relative/absolute path. See the module test for the full accept/reject corpus.
+ * The crux acceptance rule — a core must contain a `/`, or carry a `:line` suffix AND at least one
+ * letter — drops bare dotted words (`e.g.`, `foo.bar`, `1.2.3`, `README`) and every all-digit token
+ * a `:n` would otherwise promote (`17:04:03` clocks, `1.2.3:4` versions), while still catching
+ * `README.md:3:1` and every real relative/absolute path. See the module test for the full
+ * accept/reject corpus.
  */
 
 /** A detected path link within one line, already resolved to a canonical workspace-relative path. */
@@ -67,6 +69,12 @@ export function detectTerminalPathLinks(text: string, workspaceRoot: string): Te
     // The crux: a real path either has a directory separator or a line-number suffix. This drops
     // every bare dotted word (`e.g.`, `1.2.3`, `README`) without touching real paths.
     if (!core.includes('/') && !hasSuffix) continue
+    // ...but a `:n` suffix only promotes a core that could be a FILENAME, and a core carrying no
+    // letter is a number. `17:04:03` is a clock, `1.2.3:4` a version, `2026-09-01:5` a date — each
+    // satisfies the suffix branch above with a bare numeric core and would underline as a file.
+    // Timestamped log lines make this the common case, not an edge one. A directory-bearing core is
+    // exempt: `logs/2024:5` names a real place, and the `/` is the signal.
+    if (!core.includes('/') && !/[A-Za-z]/.test(core)) continue
     const resolved = resolveWorkspaceRelativePath(core, workspaceRoot)
     if (resolved === null) continue
     const suffix = hasSuffix ? match[0].slice(rawCore.length) : ''
