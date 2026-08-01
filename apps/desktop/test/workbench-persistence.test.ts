@@ -393,6 +393,60 @@ describe('durable Workbench file/browser projection', () => {
     expect(restored.tabs[viewId]).toBeUndefined()
   })
 
+  it('G6b: 一个 Agent 面的 Session 不属于这个 Workspace 时必须剔除——哪怕 Workspace 本身配置得好好的', () => {
+    // 归属判断是一个 `&&`：Workspace 仍被配置 **且** 这个 Session 归它所有。
+    // G4/G5 只守住了"该留的留下"，G6 只守住了"Workspace 没了"这一半；
+    // 「Workspace 在，但 Session 是别人的」这一侧此前无人守——实测把
+    // sessionBelongsToWorkspace 强制 `|| true`，apps/desktop/test 全部 192 文件
+    // 2025 条测试**全绿**。也就是说一个把外来 Session 认作己有的 bug 会静默通过。
+    //
+    // 这不是理论风险：投影里存的是 sessionId 字符串，Runtime 快照按 id 查回来的
+    // Session 带着自己的 hostId/workspacePath。id 复用、Workspace 改路径、
+    // 同一台机上两个 Workspace 指向不同目录，都会让这两者对不上。认错的后果是把
+    // 另一个 Workspace 的 Agent 画进当前 Workbench——比丢一个 Region 更糟，
+    // 因为用户看到的是一个"属于这里"的 Agent，而它的输出来自别处。
+    //
+    // 两个子分支各钉一次，对应 workspaceOwnsSessionPath 的两个 return false：
+    // 路径不属于（同 host、不同目录）与 host 不属于（同路径、不同 host）。
+    for (const foreign of [
+      { ...session('g6b-agent'), workspacePath: '/elsewhere' },
+      { ...session('g6b-agent'), hostId: 'other-host' }
+    ]) {
+      const viewId = 'view:foreign-session'
+      const regionId = initialWorkbenchRegionId(viewId)
+      const tab = createWorkbenchTab(viewId, agentSurface(regionId, 'g6b-agent'))
+      const restored = restorePersistedWorkbench({
+        config,
+        sessions: [foreign],
+        persisted: {
+          tabs: { [tab.id]: tab },
+          layouts: { workspace: createWorkspaceLayout('group', [tab.id]) }
+        },
+        createTabGroupId: () => 'new-group'
+      })
+      // 这是这个 tab 唯一的面，所以剔除该 Region 等于整 tab 收敛掉——
+      // 与 G6 同一条出口（removeWorkbenchRegion → 无面则 tab 消失）。
+      expect(restored.tabs[viewId]).toBeUndefined()
+    }
+
+    // 反面对照写在同一条测试里：把 Session 换成真正属于这个 Workspace 的，
+    // tab 必须活下来。少了这一行，"永远剔除"这个相反的坏实现也能让上面全绿。
+    const viewId = 'view:foreign-session'
+    const regionId = initialWorkbenchRegionId(viewId)
+    const tab = createWorkbenchTab(viewId, agentSurface(regionId, 'g6b-agent'))
+    const kept = restorePersistedWorkbench({
+      config,
+      sessions: [session('g6b-agent')],
+      persisted: {
+        tabs: { [tab.id]: tab },
+        layouts: { workspace: createWorkspaceLayout('group', [tab.id]) }
+      },
+      createTabGroupId: () => 'new-group'
+    })
+    expect(kept.tabs[viewId]).toBeDefined()
+    expect(kept.tabs[viewId]!.regions[regionId]!.kind).toBe('agent')
+  })
+
   it('G7: survives a full JSON round trip — a multi-Region split with a file Region comes back whole', () => {
     // This is the EXACT path that failed for the user: partialize projects the Workbench, zustand writes
     // it to localStorage as JSON, and restore reads it back after restart. Neither project-only (G1) nor
