@@ -2,11 +2,15 @@ import { describe, expect, it } from 'vitest'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
 import {
   AGENT_HOOK_LIFECYCLE_DIALECT,
+  HERMES_HOOK_DIALECT,
   HOOK_EVENT_NAME_PAYLOAD_KEYS,
+  PASCAL_CASE_HOOK_DIALECT,
+  PI_HOOK_DIALECT,
   canonicalHookLifecycleEvent,
   rawEventNamesForLifecycle,
   resolveHookEventName
 } from '../src/agent-hook-event.js'
+import { AgentMuxError } from '../src/errors.js'
 import { USAGE_FINALIZATION_EVENTS } from '../src/agent-hook-command.js'
 import type { AgentHookLifecycleEvent, AgentCatalogEntry } from '../src/types.js'
 
@@ -190,6 +194,36 @@ describe('Core Provider protocol', () => {
         for (const raw of raws) expect(canonicalHookLifecycleEvent(raw)).toBe(canonical)
       }
     })
+
+    it('方言按 Provider 分块声明，合并面等于各块之并——新 Provider 只动自己那块', () => {
+      // 这是为并行开发做的结构约束：加一个 Provider 不该改任何已有 Provider 的映射。
+      // 合并面必须恰好等于各块的并集，既不丢（漏接线）也不多（有人偷偷往全局表塞条目）。
+      const blocks = [PASCAL_CASE_HOOK_DIALECT, HERMES_HOOK_DIALECT, PI_HOOK_DIALECT]
+      const union: Record<string, AgentHookLifecycleEvent> = {}
+      for (const block of blocks) Object.assign(union, block)
+      expect(AGENT_HOOK_LIFECYCLE_DIALECT).toEqual(union)
+
+      // 每块自己都必须只用词汇表里的值，且块之间不许对同一个原始名给出不同的结构语义。
+      for (const block of blocks) {
+        for (const [raw, canonical] of Object.entries(block)) {
+          expect(canonicalHookLifecycleEvent(raw)).toBe(canonical)
+        }
+      }
+    })
+
+    it('不做大小写折叠：只有真被观察到的拼法在表里，折过来的拼法一律认不出', () => {
+      // 归一化（把 PreToolUse 正则折成 pre_tool_use）会顺带接受从没被任何 Provider 观察到的串，
+      // 于是表里的键不再等于「有证据的事实」。这条守住「能力未核实就不声明」那条北极星。
+      expect(canonicalHookLifecycleEvent('PreToolUse')).toBe('tool-use-start')
+      // grok 的 wire 值确实是 snake_case，但它属于 grok 自己那块方言（T-003 接入）；
+      // 在它被真正接线之前，绝不能因为「长得像 PreToolUse 折叠后的样子」就被认出来。
+      expect(canonicalHookLifecycleEvent('pre_tool_use')).toBeUndefined()
+      expect(canonicalHookLifecycleEvent('pretooluse')).toBeUndefined()
+      expect(canonicalHookLifecycleEvent('PRE_TOOL_USE')).toBeUndefined()
+      // 同族反向：Hermes 的真实拼法在表里，它的 PascalCase 幻影不在。
+      expect(canonicalHookLifecycleEvent('post_tool_call')).toBe('tool-use-end')
+      expect(canonicalHookLifecycleEvent('PostToolCall')).toBeUndefined()
+    })
   })
 
   describe('未知事件保持可诊断，绝不伪造语义', () => {
@@ -322,6 +356,88 @@ describe('Core Provider protocol', () => {
       })
       expect(event.nativeHandle).toBeUndefined()
       expect(registry.get('hermes').catalog.resumeStrategy.kind).toBe('none')
+    })
+  })
+
+  describe('恢复被拒时说清卡在哪，且不泄露用户输入', () => {
+    function refusal(run: () => unknown): AgentMuxError {
+      try {
+        run()
+      } catch (error) {
+        expect(error).toBeInstanceOf(AgentMuxError)
+        return error as AgentMuxError
+      }
+      throw new Error('expected the resume to be refused')
+    }
+
+    it('「这个 Provider 不支持 resume」与「handle 属于别的 Provider」是可分辨的两种失败', () => {
+      // 同一个错误码此前承载多种原因，界面只能笼统说一句恢复不了。detail 必须分开说清。
+      const unsupported = refusal(() => registry.get('hermes').buildResumeLaunch({
+        workspacePath: '/tmp/work',
+        nativeHandle: { kind: 'provider', providerId: 'hermes', sessionId: 'h-1' },
+        args: [], env: {}
+      }))
+      expect(unsupported.code).toBe('AGENT_RESUME_UNSUPPORTED')
+      expect(unsupported.detail).toContain('providerId=hermes')
+      expect(unsupported.detail).toContain('reason=provider-has-no-native-resume')
+      // 声明与实现两侧都要报出来，好区分「CLI 本来不支持」与「Provider 模块漏了实现」。
+      expect(unsupported.detail).toContain('declaresResume=false')
+
+      // 支持 resume，但 handle 是别人的：该刷新会话，不是换 Provider。
+      const mismatch = refusal(() => registry.get('claude').buildResumeLaunch({
+        workspacePath: '/tmp/work',
+        nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'c-1' },
+        args: [], env: {}
+      }))
+      expect(mismatch.code).toBe('INVALID_NATIVE_SESSION_HANDLE')
+      expect(mismatch.detail).toContain('expectedProviderId=claude')
+      expect(mismatch.detail).toContain('handleProviderId=codex')
+      expect(mismatch.detail).toContain('reason=handle-provider-mismatch')
+    })
+
+    it('同一个错误码下「handle 不对」与「缺 transcript 路径」也分得开', () => {
+      // Pi 的 resume locator 是 hook 报出的 session_file。Provider 对得上、只是那个字段还没到——
+      // 与上一条的 handle-provider-mismatch 共用错误码，靠 detail 区分该等待还是该刷新。
+      const missing = refusal(() => registry.get('pi').buildResumeLaunch({
+        workspacePath: '/tmp/work',
+        nativeHandle: { kind: 'provider', providerId: 'pi', sessionId: 'pi-1' },
+        args: [], env: {}
+      }))
+      expect(missing.code).toBe('INVALID_NATIVE_SESSION_HANDLE')
+      expect(missing.detail).toContain('missingField=transcriptPath')
+      expect(missing.detail).toContain('reason=hook-has-not-reported-session-file')
+      // 关键：与 handle 归属错误的原因串不同，否则界面又只能笼统说一句。
+      expect(missing.detail).not.toContain('handle-provider-mismatch')
+    })
+
+    it('细节里绝不出现 sessionId、transcript 路径或 prompt 正文——它会跨客户端边界', () => {
+      const secretId = 'SECRET-SESSION-ID-42'
+      const secretPath = '/private/SECRET-TRANSCRIPT.jsonl'
+      const secretPrompt = 'SECRET-PROMPT-do-not-leak'
+
+      const mismatch = refusal(() => registry.get('claude').buildResumeLaunch({
+        workspacePath: '/tmp/work',
+        nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: secretId, transcriptPath: secretPath },
+        prompt: secretPrompt,
+        args: [], env: {}
+      }))
+      for (const surface of [mismatch.detail ?? '', mismatch.message]) {
+        expect(surface).not.toContain(secretId)
+        expect(surface).not.toContain(secretPath)
+        expect(surface).not.toContain(secretPrompt)
+        expect(surface).not.toContain('SECRET')
+      }
+
+      const missing = refusal(() => registry.get('pi').buildResumeLaunch({
+        workspacePath: '/tmp/work',
+        nativeHandle: { kind: 'provider', providerId: 'pi', sessionId: secretId },
+        prompt: secretPrompt,
+        args: [], env: {}
+      }))
+      for (const surface of [missing.detail ?? '', missing.message]) {
+        expect(surface).not.toContain(secretId)
+        expect(surface).not.toContain(secretPrompt)
+      }
     })
   })
 })

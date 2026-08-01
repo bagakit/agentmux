@@ -36,7 +36,16 @@ export function createPiProvider(defineAgentProvider: ProviderFactory): AgentPro
     buildArgs: (prompt, args) => [...args, ...(prompt ? [prompt] : [])],
     hook: PI_HOOKS,
     buildResumeArgs: (_sessionId, transcriptPath, prompt, args) => {
-      if (!transcriptPath) throw new AgentMuxError('Pi resume requires its hook-reported session file.', 'INVALID_NATIVE_SESSION_HANDLE')
+      // 与「handle 属于别的 Provider」共用一个错误码，故必须靠 detail 分辨：这里是 Provider 对得上、
+      // 但它要的 transcript 路径没到（Pi 的 resume locator 是 session_file，不是 session id）。
+      // 该做的事也不同——等 hook 报出 session_file，而不是刷新会话。
+      if (!transcriptPath) {
+        throw new AgentMuxError(
+          'Pi resume requires its hook-reported session file.',
+          'INVALID_NATIVE_SESSION_HANDLE',
+          'providerId=pi resumeLocator=transcript-path missingField=transcriptPath reason=hook-has-not-reported-session-file'
+        )
+      }
       return ['--session', transcriptPath, ...args, ...(prompt ? [prompt] : [])]
     }
   })
