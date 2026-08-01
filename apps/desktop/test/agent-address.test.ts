@@ -464,15 +464,38 @@ describe('入口接线：菜单真的调用了交接出口，并且真的把它�
   // 两个菜单都构造了 handoff，却都没渲染它，于是那条能力对用户根本不存在。所以这里查两件事：
   // 解析走的是交接出口（而不是退回直接复制地址），以及那一项确实被渲染成菜单项。
 
-  it('Region 菜单把那一格交给交接出口，并渲染出这一项', () => {
+  it('Region 菜单把那一格交给交接出口，并渲染出这一项', async () => {
     const source = readFileSync(
       new URL('../src/renderer/src/components/RegionContextMenu.tsx', import.meta.url),
       'utf8'
     )
     expect(source).toContain('formatMessagingAddress({ agentSessionId, regionId })')
-    // 造了不画等于没有。onSelect 被接到某个菜单项上，才谈得上"用户点得到"。
-    expect(source).toContain('model.handoff.onSelect')
-    expect(source).toContain('model.handoff.label')
+
+    // 「造了不画等于没有」这件事现在真跑得到：菜单画的是 model.entries，那份清单是可执行的数据。
+    // 此前这里是两条 toContain('model.handoff.onSelect' / '.label') 的文本断言，而文本看不见
+    // 那一项有没有被画出来——把 JSX 条件改成 `{false && model.handoff ? (`，「Message this Agent」
+    // 与它的分隔符永不渲染，34 条断言全绿（实测）。清单的在场、顺序、可点性由
+    // region-context-menu.test.tsx 定死，这里只钉住"交接那一项在清单里且解析成 Region 地址"。
+    const { createRegionCopyModel } = await import(
+      '../src/renderer/src/components/RegionContextMenu.js'
+    )
+    const copied: string[] = []
+    const entries = createRegionCopyModel({
+      regionId: 'region:pane-2',
+      agentSessionId: 'agent-7',
+      writeClipboardText: async (text: string) => {
+        copied.push(text)
+      }
+    }).entries
+    const handoff = entries.find(
+      (entry) => entry.kind === 'action' && entry.action.label === 'Message this Agent'
+    )
+    expect(handoff, '交接那一项不在菜单画出来的清单里——用户点不到').toBeDefined()
+    if (handoff?.kind !== 'action') throw new Error('unreachable')
+    await handoff.action.onSelect()
+    expect(copied).toEqual([
+      formatMessagingAddress({ agentSessionId: 'agent-7', regionId: 'region:pane-2' })
+    ])
   })
 
   it('Tab 菜单不带那一格，于是落到 Session，并渲染出这一项', () => {
