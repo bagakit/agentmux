@@ -366,7 +366,28 @@ export function removeTab(
         }
       : candidate
   )
-  if (sourceOrder.length > 0 || layout.root.type === 'leaf') return { ...layout, groups }
+  // 收掉这个分组（从 `groups` 里删掉）只在它**真的是分屏树里的一片叶子、且不是最后一片**时才成立。
+  //
+  // 判据此前只写了 `layout.root.type === 'leaf'`。那句话想表达「只剩一个分组，别把它删了」，而它只在
+  // 「每个分组都在 root 树里」这个前提下够用。前提一旦不成立（一个分组只进了 `groups` 而没进 `root`
+  // ——例如把浮层做成一个不在主区分屏树里渲染的真分组），判据就漏掉那一族，而且漏的方向取决于**主区
+  // 恰好有没有分屏**：
+  //
+  //   - 主区未分屏 → 命中 `root.type === 'leaf'` 提前返回 → 那个分组留着。
+  //   - 主区已分屏 → 落到下面：`removeLeaf` 因为它不在树里而不会改动树，但 `groups.filter` 把它
+  //     **删了**。它的 Tab 记录还在 `state.tabs` 里却不再属于任何分组：一个永不显示、永不可关的
+  //     孤儿（正是 {@link addTabPlacement} 那段 JSDoc 描述的形状）。且若它当时是 `activeGroupId`，
+  //     `findSiblingGroupId` 因为它在树里没有兄弟而返回 null，`activeGroupId` 就停在一个已不存在的
+  //     id 上。全程零报错。
+  //
+  // 所以判据补上「它在不在树里」这一问。`leafIds.length === 1` 与旧的 `root.type === 'leaf'` 逐点
+  // 等价（split 恒有两个子节点，故叶子数为 1 ⟺ root 本身就是叶子），换成数叶子只是为了与前一问共用
+  // 同一次 `groupIds`；真正的变化只有 `!leafIds.includes(groupId)` 那一项，对今天每条可达输入都不
+  // 改变结果。三项各由 workbench-layout-off-tree-group.test.ts 单独钉着（逐项撤掉只红对应那条）。
+  const leafIds = groupIds(layout.root)
+  if (sourceOrder.length > 0 || !leafIds.includes(groupId) || leafIds.length === 1) {
+    return { ...layout, groups }
+  }
   const siblingId = findSiblingGroupId(layout.root, groupId)
   return {
     root: removeLeaf(layout.root, groupId) ?? layout.root,
