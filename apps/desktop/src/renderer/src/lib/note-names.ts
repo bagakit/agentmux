@@ -51,7 +51,7 @@ export function noteStemForDate(now: Date): string {
  */
 export function noteNameCandidates(now: Date, attempts = NOTE_NAME_ATTEMPTS): string[] {
   const stem = noteStemForDate(now)
-  return Array.from({ length: Math.max(1, attempts) }, (_unused, index) =>
+  return Array.from({ length: attempts }, (_unused, index) =>
     index === 0 ? `${stem}${NOTE_FILE_EXTENSION}` : `${stem}-${index + 1}${NOTE_FILE_EXTENSION}`
   )
 }
