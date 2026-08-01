@@ -46,7 +46,10 @@ describe('window-owned Workspace Workbench registry', () => {
   it('does not prewarm a hidden launcher for every parked Workspace', () => {
     expect(workbench).toContain('visible={nativeSurfacesVisible}')
     expect(newTab).toContain('visible = true')
-    expect(newTab).toContain('if (workspace && visible) prewarmTerminal(workspace.id)')
+    // prewarm 的极性（只在 visible 时预热，且调用点恰好一处）由 new-tab-prewarm-visible-only.test.ts
+    // 用 AST 数出口守住。此前这里是一条 `toContain('if (workspace && visible) prewarmTerminal(...)')`
+    // 文本断言——实测可绕过：保留那行不动、在它上面加一行 `if (workspace) prewarmTerminal(...)`，
+    // 每个泊车 workspace 都会抢那唯一的热终端槽，而此文件照旧全绿。字面量在场 ≠ 语义正确。
     expect(newTab).toContain('[prewarmTerminal, visible, workspace?.id]')
     expect(newTab).toContain('if (visible) promptRef.current?.focus()')
     expect(newTab).toContain('if (!visible) return')
