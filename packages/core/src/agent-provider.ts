@@ -270,9 +270,10 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
 export function resolveManagedHookPlan(
   providerId: AgentProviderId,
   workspacePath: string,
-  env?: Readonly<Record<string, string>>
+  env?: Readonly<Record<string, string>>,
+  endpoint?: { url: string; token: string }
 ): AgentManagedHookPlan | null {
-  return MANAGED_HOOK_PLAN_RESOLVERS[providerId]?.(workspacePath, env) ?? null
+  return MANAGED_HOOK_PLAN_RESOLVERS[providerId]?.(workspacePath, env, endpoint) ?? null
 }
 
 export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = createBuiltInAgentProviders(defineAgentProvider)

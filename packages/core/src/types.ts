@@ -23,7 +23,8 @@ export const BUILT_IN_AGENT_PROVIDER_IDS = [
   'cursor',
   'kimi',
   'droid',
-  'copilot'
+  'copilot',
+  'opencode'
 ] as const
 export type BuiltInAgentProviderId = (typeof BUILT_IN_AGENT_PROVIDER_IDS)[number]
 export type AgentProviderId = BuiltInAgentProviderId | (string & {})

@@ -54,7 +54,7 @@ export async function materializeFileEditingFixture({ userData, workspace, alter
     writeFile(join(workspace, 'targets', 'cancel', 'child.txt'), 'cancel child'),
     writeFile(join(alternateWorkspace, 'alternate.txt'), 'alternate workspace'),
     writeFile(join(userData, 'agentmux.config.json'), `${JSON.stringify({
-      version: 8,
+      version: 9,
       hosts: [{ id: 'local', kind: 'local', label: 'Mounted Desktop E2E' }],
       executors: {},
       workspaces: [{
