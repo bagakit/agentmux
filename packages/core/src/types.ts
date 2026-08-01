@@ -225,6 +225,13 @@ export type AgentHookLifecycleEvent =
  * 它必须是一个显式取值而不是「声明成 argv 然后在 buildArgs 里悄悄丢掉」——后者会让用户的原话
  * 只落进 timeline、永不进程内，而界面看起来一切正常。声明成这一项后，`buildLaunch` 会在收到
  * 非空启动 prompt 时**当场拒绝**（见 agent-provider.ts），把「送不到」变成一次响亮的失败。
+ *
+ * **给后来声明 `post-launch-only` 的人：这个取值有一处必须一起接的耦合。** 那两个出口拒绝的是
+ * 「非空的启动 prompt」，而生命周期路径交给它们的**不是**用户原话，是
+ * `composeAgentLaunchPrompt` 的产物——运行时引导默认注入，所以那份文本即使用户一个字都没写也
+ * 恒非空（实测 528 字符）。于是「声明这一项」本身并不够：调用方必须先经
+ * `splitLaunchPromptByDelivery`（agent-provider.ts）把它分成随启动送的与补送的两半，再把补送那半
+ * 真的送出去。少了分流 = 这个 Provider 根本起不来；分了流却不补送 = 丢失只是从 argv 挪到了调用点。
  */
 export type AgentPromptDelivery =
   | 'positional-argv'

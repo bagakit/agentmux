@@ -171,11 +171,29 @@ grok 的 `Stop` 因此只会以「报告」身份触发一次。这个前提由�
    initial-composer 兜底要求 `terminalHandshake`+`terminalPromptRender`，只有 codex 声明）。
    净效果是用户的原话只落进 timeline、永不进入进程，而界面上一切正常。现在两个出口
    （`buildLaunch` / `buildResumeLaunch`）都会当场拒绝并报 `AGENT_LAUNCH_PROMPT_UNSUPPORTED`。
-   空 prompt 照常启动：Kimi 空手起来完全可用，起来之后提交 prompt 走默认 single-phase 那条通路
-   （不需要 composer readiness 纪元）。
+
+   **修正一处此前写错的收尾说法。** 这里曾写「空 prompt 照常启动：Kimi 空手起来完全可用」，那句话
+   当时是**假的**，而且它掩盖的是同一轮修复自己制造的回归：运行时引导默认注入，
+   `composeAgentLaunchPrompt(undefined, true)` 实测 528 字符、恒非空，于是"拒绝一切非空启动 prompt"
+   等于拒绝**每一次**默认启动——一个根本起不来的 Provider。当时的用例用手写的 `prompt: ''` 绕过了
+   组装器，所以全绿。（教训见下面第二条。）
+
+   真正的落点是**分流加补送**，收口在一个共用纯函数 `splitLaunchPromptByDelivery`
+   （`agent-provider.ts`）：`post-launch-only` 的 Provider 拿到 `atLaunch: ''`，整份文本落到
+   `deferred`；两条生命周期路径（`createAgent` / `resumeAgentRun`）都必须把 `deferred` 交给
+   `deliverPostLaunchPrompt`，在进程起来之后按一条普通 turn 经 `submitInputPlan` 真的键入
+   （single-phase 不需要 composer readiness 纪元，故这条路对它是通的）。送达失败发 `agent-error`
+   而不抛——进程已经起来了，抛出去会让调用方回滚一个健康的 Run；但也绝不许静默，静默就等于把
+   丢失从 argv 挪到了调用点。
 
    **教训**：「声明一个能力，再在实现里悄悄不做」比「如实声明做不到」坏得多——后者是一次响亮的
    失败，前者是一次静默的数据丢失。而当时那条注释还替这个丢失作了担保，让读者以为有条替代路径。
+
+   **第二条教训（来自上面那次回归）**：给一个「做不到」的取值加拒绝时，必须问「拒绝的判据落在
+   哪个值上」。这里的判据落在**组装之后**的文本上，而组装器几乎总是产出非空结果，于是拒绝的边界
+   从"用户带了 prompt"悄悄变成了"启动"。而验证它的用例用手写的 `prompt: ''` 绕过组装器，正是
+   「绕过真实构造器的 fixture 会让测试对整类回归失明」——现在那条用例改为**先跑真的
+   `composeAgentLaunchPrompt`、断言它非空，再断言分流结果**，删掉分流即红。
 3. **hook 是真的，但配置面是 TOML，故记 `unmanaged` 而非 `explicit-managed`。**
    `[[hooks]]` 写在 `~/.kimi/config.toml`，而那是用户主配置（model / credentials / theme 都在里面）。
    本仓四种 merge 策略（`json-owned-key` / `json-managed-events` / `yaml-managed-events` /
@@ -206,8 +224,16 @@ grok 的 `Stop` 因此只会以「报告」身份触发一次。这个前提由�
 
 与 grok 那次的区别必须认清：grok 是**发了**另一个事件（`StopCancelled`）而我们没接，补上映射即可；
 Kimi 是真的什么都不发——`config.py:5-19` 的 13 个事件里没有任何 cancel 类。所以正确的做法是如实
-记录这个限制并靠既有的通用衰减兜底，**不是**发明一个收尾事件去填。若将来要给 Kimi 暴露"中断当前
-turn"的操作，15 分钟对一次用户主动中断来说太长，那时这条会从限制升级为必须先解决的阻塞项。
+记录这个限制并靠既有的通用衰减兜底，**不是**发明一个收尾事件去填。
+
+而「中断」这个操作**今天就已经暴露给用户了**，不是将来才有的假设：composer 在 Agent 处于运行中时
+就渲染那颗中断当前回合的按钮，它只按「是否在运行中」判，**不按 Provider 判**
+（`AgentComposer.tsx` 的 `primaryAction === 'stop'` 分支），一路到
+`runtime-controller.ts` 的 `interrupt()` → `client.signalAgent(…, 'SIGINT')`。于是一次用户主动中断
+之后，界面会继续显示运行中直到 15 分钟的衰减兜住——**对一次用户自己刚点下的操作来说，这个延迟明显
+过长**（用户知道自己中断了，界面却还在转）。这是本条限制在 Kimi 上真实的用户可见后果，落点是
+Provider 的固有能力缺口而非本仓可修的缺陷；把它写成「若将来要暴露中断」会低估现状，而低估和高估
+一样会误导下一个读者的判断。
 
 事件名（PascalCase）与负载键（`hook_event_name` / `session_id`）与 Claude 一族逐字同形，已被既有方言
 表覆盖，故**没有**往 `agent-hook-event.ts` 加任何条目。
