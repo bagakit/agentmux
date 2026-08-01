@@ -450,7 +450,15 @@ type AppState = {
    * 地址原样不动。用户手改后，"单 Agent 对齐 / 多 Region 家族名"两条自动策略对这张 Tab 永久停手。
    */
   renameTab(tabId: string, name: string | null): void
-  createPath(input: CreateWorkspacePathInput): Promise<void>
+  /**
+   * 在当前 Workspace 里建文件或目录，返回**它实际用的**那个 workspaceId。
+   *
+   * 返回值不是给日志的：调用方建完常要接着打开它，而 openFile 会自己再解析一次活动 Workspace。
+   * 两次解析之间只要有一个 await（本地建文件也有 IPC，远端可达 15s），用户点一下侧栏就漂移，
+   * 症状是**开错文件**而不是报错——名字撞上另一个项目里的同名文件时界面上一切正常。
+   * 所以解析必须只发生一次，然后把结果交给下游，而不是让下游自己再问一遍。
+   */
+  createPath(input: CreateWorkspacePathInput): Promise<string>
   /**
    * 在当前 Workspace 里建一条按日期命名的笔记并打开它，返回真正建出来的文件名。
    *
@@ -3012,6 +3020,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       get().reportError(error)
       throw error
     }
+    return workspaceId
   },
   async createNote() {
     const workspaceId = get().activeWorkspaceId
