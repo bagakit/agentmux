@@ -11,6 +11,7 @@ export type BuiltInAgentProviderId =
   | 'gemini'
   | 'antigravity'
   | 'cursor'
+  | 'kimi'
 export type AgentProviderId = BuiltInAgentProviderId | (string & {})
 
 /**

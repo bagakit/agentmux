@@ -5,9 +5,11 @@ import { createAntigravityManagedHookPlan, createAntigravityProvider } from './a
 import { createClaudeManagedHookPlan, createClaudeProvider } from './claude.js'
 import { createCodexManagedHookPlan, createCodexProvider } from './codex.js'
 import { createCursorManagedHookPlan, createCursorProvider } from './cursor.js'
+import { createDroidManagedHookPlan, createDroidProvider } from './droid.js'
 import { createGeminiManagedHookPlan, createGeminiProvider } from './gemini.js'
 import { createGrokManagedHookPlan, createGrokProvider } from './grok.js'
 import { createHermesManagedHookPlan, createHermesProvider } from './hermes.js'
+import { createKimiProvider } from './kimi.js'
 import { createPiProvider } from './pi.js'
 import { createTraexProvider } from './traex.js'
 
@@ -28,7 +30,9 @@ export function createBuiltInAgentProviders(defineAgentProvider: ProviderFactory
     createGrokProvider(defineAgentProvider),
     createGeminiProvider(defineAgentProvider),
     createAntigravityProvider(defineAgentProvider),
-    createCursorProvider(defineAgentProvider)
+    createCursorProvider(defineAgentProvider),
+    createKimiProvider(defineAgentProvider),
+    createDroidProvider(defineAgentProvider)
   ]
 }
 
@@ -45,7 +49,9 @@ export const MANAGED_HOOK_PLAN_RESOLVERS: Partial<Record<AgentProviderId, Manage
   gemini: (_workspacePath) => createGeminiManagedHookPlan(),
   // cursor 是唯一**必须**拿到 workspacePath 的：它的 trust marker 路径按 workspace 派生
   // （`~/.cursor/projects/<slug>/.workspace-trusted`），hooks 配置本身仍在 user 层。
-  cursor: (workspacePath, env) => createCursorManagedHookPlan(workspacePath, env)
+  cursor: (workspacePath, env) => createCursorManagedHookPlan(workspacePath, env),
+  // droid 装到 `<FACTORY_HOME_OVERRIDE ?? HOME>/.factory/hooks.json`，与 workspace 无关。
+  droid: (_workspacePath, env) => createDroidManagedHookPlan(env)
 }
 
 export {
@@ -53,6 +59,7 @@ export {
   createClaudeManagedHookPlan,
   createCodexManagedHookPlan,
   createCursorManagedHookPlan,
+  createDroidManagedHookPlan,
   createGeminiManagedHookPlan,
   createGrokManagedHookPlan,
   createHermesManagedHookPlan
@@ -61,8 +68,10 @@ export { createAntigravityProvider } from './antigravity.js'
 export { createClaudeProvider } from './claude.js'
 export { createCodexProvider } from './codex.js'
 export { createCursorProvider } from './cursor.js'
+export { createDroidProvider } from './droid.js'
 export { createGeminiProvider } from './gemini.js'
 export { createGrokProvider } from './grok.js'
 export { createHermesProvider } from './hermes.js'
+export { createKimiProvider } from './kimi.js'
 export { createPiProvider } from './pi.js'
 export { createTraexProvider } from './traex.js'
