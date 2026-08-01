@@ -2,25 +2,36 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import {
+  AGENT_PROVIDERS_WITH_BRAND_MARK,
   AgentProviderIcon,
   agentProviderLabel
 } from '../src/renderer/src/components/AgentProviderIcon.js'
 
 describe('AgentProviderIcon', () => {
-  it('renders a real offline identity mark for every built-in Agent', () => {
-    for (const [providerId, element] of [
-      ['codex', 'svg'],
-      ['claude', 'svg'],
-      ['traex', 'img'],
-      ['hermes', 'img'],
-      ['pi', 'svg']
-    ] as const) {
+  it('renders a real offline identity mark for every Agent that claims one', () => {
+    // 清单从组件导出，**不**在这里手抄：此前这里硬编码了 5 个 id，而组件当时已有 9 个内置
+    // Provider——多出来的 4 个一条断言都没红。所谓"every built-in Agent"曾经只是句话。
+    expect(AGENT_PROVIDERS_WITH_BRAND_MARK.length).toBeGreaterThanOrEqual(9)
+    for (const providerId of AGENT_PROVIDERS_WITH_BRAND_MARK) {
       const markup = renderToStaticMarkup(createElement(AgentProviderIcon, { providerId, size: 16 }))
       expect(markup).toContain(`data-agent-provider="${providerId}"`)
       expect(markup).toContain('data-agent-provider-known="true"')
-      expect(markup).toContain(`<${element}`)
+      // 有品牌标记就必须是真图形（内联 svg 或图片资源），不能退化成 Bot 兜底。
+      expect(markup, `${providerId} 应画出品牌标记而非兜底图形`).toMatch(/<svg|<img/)
       expect(markup).not.toContain('<text')
+      // lucide 的 Bot 兜底带这个类名，出现即说明这个 id 根本没接上自己的标记。
+      expect(markup, `${providerId} 落到了 Bot 兜底`).not.toContain('lucide-bot')
     }
+  })
+
+  it('认得名字但没有品牌图形的 Provider：label 认得，标记保持中性', () => {
+    // Kimi 是第一个这样的条目：仓库里没有它的图标资源，就不画一个近似的冒充它。
+    // 「认得这个 Provider」与「有它的品牌标记」是两件事，这条钉住两者可以分开。
+    const markup = renderToStaticMarkup(createElement(AgentProviderIcon, { providerId: 'kimi', size: 16 }))
+    expect(agentProviderLabel('kimi')).toBe('Kimi')
+    expect(markup).toContain('data-agent-provider="kimi"')
+    expect(markup).toContain('data-agent-provider-known="true"')
+    expect(markup).toContain('<svg')
   })
 
   it('keeps custom Provider identity neutral instead of impersonating a built-in Agent', () => {
