@@ -5,6 +5,7 @@ import { DESKTOP_ACTIONS } from '../../../shared/desktop-actions'
 import { executorDetectionKey, useAppStore, warmTerminalKey } from '../store'
 import { configuredExecutors } from '../lib/executors'
 import { EMPTY_LAUNCHER_NAMES, launcherNameBinding } from '../lib/launcher-name-draft'
+import { launcherPromptBinding } from '../lib/launcher-prompt-draft'
 import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
 import { LaunchRefine } from './LaunchOptionControls'
 import { TerminalView } from './TerminalView'
@@ -26,16 +27,20 @@ export function NewTabSurface({
   // 若草稿只活在组件里，启动失败翻回 launcher（reduceSessionLaunchFailed 沿用同一 regionId）就会
   // 重挂一个空的新实例——正是用户报告的"报错退回初始页、之前输入没缓存"。store 是唯一数据源，
   // 复用 Agent Composer 同一套 agentComposerDrafts，不另起第二套草稿机制。
-  const storedDraft = useAppStore((state) => regionId ? (state.agentComposerDrafts[regionId] ?? '') : undefined)
+  const promptDrafts = useAppStore((state) => state.agentComposerDrafts)
   const setAgentComposerDraft = useAppStore((state) => state.setAgentComposerDraft)
   // 空分组占位（无 regionId）没有可跨卸载存活的稳定键，且它启动后由 store 新建带 region 的 Tab、
   // 失败时重挂的是另一个组件，天然无法保草稿；退回本地 state 保持原行为，不引入伪键污染共享表。
   const [localPrompt, setLocalPrompt] = useState('')
-  const prompt = regionId ? storedDraft ?? '' : localPrompt
-  const setPrompt = (value: string): void => {
-    if (regionId) setAgentComposerDraft(regionId, value)
-    else setLocalPrompt(value)
-  }
+  // 读与写的 key 由 launcherPromptBinding 判一次，与名字那两格同一范式。分开算两次会漂移，而
+  // 漂移的症状是 textarea 静默不响应——实测只改写侧那处 key，18 条全绿地存活（读侧则有 1 条红）。
+  const { prompt, set: setPrompt } = launcherPromptBinding({
+    regionId,
+    drafts: promptDrafts,
+    writeShared: setAgentComposerDraft,
+    local: localPrompt,
+    writeLocal: setLocalPrompt
+  })
   const [launchOptionSelection, setLaunchOptionSelection] = useState<LaunchOptionSelection>({})
   // 启动时给名字是可选的。两个都留空是最常见的情况，此时一个字都不写，显示名交还派生链
   // （lib/display-name.ts）。名字只在启动成功后由 store 落地——它自己才握有 sessionId 与 tabId。
