@@ -24,10 +24,16 @@
 「有证据」与「无证据」，无证据的能力保持未声明，或按计划记为 deferred，**绝不允许**为了让测试
 变绿而编造 argv / 事件名 / handle 字段。
 
-**补充（2026-09-01）**：「CLI 不在本机」不等于「无证据」——第一方**源码** checkout 同样可核实，
-且比 `--help` 更完整（能读到事件名常量、payload 字段、resume 的实现分支）。本轮盘查发现
-`opencode` 与 `kimi-cli` 的完整源码在本机，故 T-009/T-016 从「无证据」升为「可核实」；另外
-六个仍不足。逐条见下方《T-009…T-016 的证据面盘查》。
+**补充（2026-09-01）**：「CLI 不在本机」不等于「无证据」——第一方**源码 / 发行物二进制 /
+可加载的原生 runtime** 同样可核实，且比 `--help` 更完整（能读到事件名常量、payload 字段、
+resume 的实现分支）。本轮盘查发现 `opencode` 与 `kimi-cli` 的完整源码在本机，故 T-009/T-016
+从「无证据」升为「可核实」。
+
+**再更正（2026-09-01，晚于上一段）**：上一段末尾曾写「另外六个仍不足」，该结论已被推翻——
+其中 **T-011 Droid、T-015 Copilot 后续也凭第一方证据实现了**（Droid 读发行物二进制里的 zod
+事件枚举，Copilot 加载其原生 runtime 解析器实测），故连同 T-016 Kimi 共**三个已实现**；
+T-009 OpenCode 证据齐全但接入路径卡在一个架构决策上，属**待决策**而非证据不足；真正仍
+**证据不足**的只剩 T-010/T-012/T-013/T-014 四个。逐条见下方《T-009…T-016 的证据面盘查》。
 
 ---
 
@@ -138,15 +144,77 @@ grok 的 `Stop` 因此只会以「报告」身份触发一次。这个前提由�
 
 复验：`ls ~/proj/github | grep -iE 'opencode|kimi'`、`ls ~/.copilot`、`command -v <每个>`
 
-八个 Task 里，**只有两个**能凭第一方源码核实，其余六个的落点必须是 deferred 而非实现。
-分档判据是本 Feature Goal 的证据优先级（真实 CLI 实测 > 多参考互相印证 > 单一参考）：
+> **本节结论已随后续接入更新（2026-09-01）。** 最初这里写「八个 Task 里只有两个能凭第一方源码
+> 核实，其余六个必须落 deferred」——那句话在写下时成立，但**已被后续实现推翻**。Droid（T-011）
+> 与 Copilot（T-015）后来各自找到了第一方证据面（发行物二进制里的 zod 事件枚举 / 可加载的原生
+> runtime 解析器）并完成实现，与 Kimi（T-016）一起共**三个已实现**且已进 `BuiltInAgentProviderId`
+> union（`packages/core/src/types.ts:4-16`）与 registry（`packages/core/src/providers/index.ts:36-37`）。
+> 保留原判断的演进轨迹而不抹掉，是因为「当时只有两个可核实」本身是一条真实记录，它解释了后面
+> 三条为什么各写了一段「落地时才读出来的非显然事实」。
+>
+> 分档判据仍是本 Feature Goal 的证据优先级（真实 CLI 实测 > 第一方源码/二进制/runtime 实测 >
+> 多参考互相印证 > 单一参考）。**当前**落点：
 
-| Task | CLI | 第一方源码 | 能力可核实性 |
-|---|---|---|---|
-| T-009 OpenCode | ❌ | ✅ 本机有完整 checkout | **可核实**（读源码 + 自带文档） |
-| T-016 Kimi | ❌ | ✅ 本机有完整 checkout | **可核实**（读源码 + 自带文档）→ 已实现，见下 |
-| T-015 Copilot | ❌ 不在 PATH | ❌ | **不足**，见下 |
-| T-010 Mimo / T-011 Droid / T-012 Devin / T-013 OMP / T-014 Prime | ❌ | ❌ | **不足**：唯一线索是第三方参考语料 |
+| Task | CLI 在本机 | 第一方证据 | 当前状态 | 依据 |
+|---|---|---|---|---|
+| T-009 OpenCode | ❌ | ✅ 本机有完整 checkout + npm 包类型 | **待决策**（证据齐全，接入路径待用户拍板） | 见下 |
+| T-011 Droid | ❌ 不在 PATH | ✅ 发行物二进制（`@factory/cli-darwin-arm64@0.208.2` 的 `bin/droid`）里的 zod 事件枚举 | **已实现** | `packages/core/src/providers/droid.ts`；commit `d4613b8`、`1c6c17f` |
+| T-015 Copilot | ❌ 不在 PATH | ✅ 加载其原生 runtime（`prebuilds/<platform>/runtime.node`）实测事件与负载 | **已实现** | `packages/core/src/providers/copilot.ts`；commit `e7cb617` |
+| T-016 Kimi | ❌ | ✅ 本机有完整 checkout（`kimi-cli` 1.49.0） | **已实现**，见下 | `packages/core/src/providers/kimi.ts`；commit `c7db679`、`391f6d1`、`d2419fb`、`a733c6f` |
+| T-010 Mimo / T-012 Devin / T-013 OMP / T-014 Prime | ❌ | ❌ | **证据不足**（deferred）：唯一线索是第三方参考语料 | 见《四个只有第三方线索的条目》 |
+
+### OpenCode（T-009）：证据齐全，卡在一个架构决策上——待决策，不是证据不足
+
+**这一条必须与「证据不足」分清。** OpenCode 的能力证据是**齐全**的：本机有完整 checkout，且它的
+两条接入通路都能从第一方 npm 包的类型定义逐字读到。它没实现，不是因为读不到能力，而是因为**接进
+AgentMux 需要在两条形态完全不同的通路里选一条，而这个选择是架构决策，已上抛给用户拍板**。
+
+两条通路（依据来自第一方包类型）：
+
+1. **JS/TS 插件**：`@opencode-ai/plugin`（1.18.25）的 `Hooks` 接口——所有 hook 都是
+   `(input, output) => Promise<void>` 的函数，靠**就地改 `output` 对象**生效，由 CLI **同进程**
+   加载插件模块。它**没有**任何「往配置文件写一条命令、CLI 在事件发生时执行它、用 stdin/stdout
+   交换 JSON」的形态；而 AgentMux 整个 managed-hook 架构恰恰**建立在后者之上**。依据：
+   `@opencode-ai/plugin` 的 `dist/index.d.ts:173` 起的 `Hooks` 接口。
+2. **SSE 长连接**：`@opencode-ai/sdk` 的 `event.subscribe` 是一条 SSE 事件流，事件名如
+   `session.idle` / `session.compacted` / `permission.updated` / `message.part.updated`。它与 hook
+   是**不同的接入类型**——需要 Core 新增「起服务 / 连接生命周期 / 重连 / 与 ctxmux Run 生命周期
+   对齐」一整套机制。依据：`@opencode-ai/sdk` 的 `dist/gen/sdk.gen.d.ts:375` 的 `subscribe`。
+
+**待决策的内容**：选 JS 插件（要把 AgentMux 的 hook 模型扩出一条「同进程回调」形态）还是选 SSE
+（要给 Core 加一条长连接事件通路）。**决策人是用户**——这是产品/架构取舍，不是取证工作能替代的。
+出处：feature-tracker 的 T-009，`status: blocked`，blocked 原因逐字记录了上述两条通路与
+「选 JS 插件还是 SSE 属架构决策，待用户定夺」（`.bagakit/feature-tracker/features/f-23z8fgsw3/tasks.json`
+的 T-009 blocked.reason，非 git 跟踪）。
+
+因此它的正确落点是**待决策（decision-pending）**：证据已备齐、实现被一个明确的、指名到人的决策
+挡住。把它写成「证据不足」会误导下一个读者去补证据——而证据不缺；缺的是一次拍板。
+
+### Droid（T-011）落地时读出来的三处非显然事实
+
+复验：读发行物二进制 `@factory/cli-darwin-arm64@0.208.2` 的 `bin/droid`（本机下载）。
+`command -v droid` 失败——没有运行时证据，下面每条都由二进制里内嵌的 zod schema 支撑，实现里
+（`packages/core/src/providers/droid.ts`）也只声明这些。三处非显然事实各自带守卫，改坏任一条即红：
+
+1. **`hooks.json` 的顶层键就是事件名，不套 `hooks:` 包装层**（zod：`object({ PreToolUse:
+   array(...).optional(), …, hooksDisabled: boolean().optional() })`）。照 Claude 的形状多包一层
+   会让整份配置被 zod 判为无效——不是少响几个事件，是一个都不响。因此合并策略必须是根层那一支
+   `json-root-managed-events`；用 `json-managed-events` 是数据丢失：它去 `hooks` 下找桶找不到，
+   于是既不清扫旧条目、又把根级事件键盖在用户同名桶上，用户手写的 `PreToolUse` 审计 hook 会在
+   下次启动后消失（`renderMergedHookContent` 实测如此，commit `1c6c17f`）。
+2. **hook 负载里没有工具关联 id**：`toolCallId` 走派发函数的第四个内部 context 参数、不进负载；
+   二进制里的 `tool_call_id`/`tool_use_id` 分别属于 LLM 消息格式与 OTEL 属性，不是 hook 负载键。
+   所以一次调用在时间轴上是两行而不是一行——如实声明 `replyCorrelation: none`，不编一个 id 键
+   让关联静默错配。与 Copilot 同一个上游损失。
+3. **只有 `SubagentStop` 没有对应的 `SubagentStart`**（zod 枚举里就这九个），故**不声明**
+   `subagentTracking`——子代理在途记账要求 start/stop 成对，只装 stop 会让计数变成负数并压制主
+   Agent 的收尾（它会一直等一个永远等不到的减一）。与 Hermes 同一判断。
+
+另外：`SessionEnd` 刻意不装（它是**会话**终结而非轮次事实，判「这一轮结束」靠 `Stop`，会话终结
+由 PTY 事实回答——与 Gemini 对它自己的 `SessionEnd` 同一既定判断）；usage 不声明（收尾负载 `Stop`
+里只有 `tool_execution_count`/`elapsed_time`，没有任何 token 字段）；`FACTORY_HOME_OVERRIDE ?? HOME`
+必须尊重，忽略它会写一份该 CLI 永不读的配置。四处变异各自打红（套 hooks 外层杀 3、忽略 HOME 覆盖
+杀 1、装 SessionEnd 杀 2、编造 stop-only 记账杀 3），见 commit `d4613b8` 与 `test/providers/droid.test.ts`。
 
 ### Kimi（T-016）落地时读出来的三处非显然事实
 
@@ -238,7 +306,17 @@ Provider 的固有能力缺口而非本仓可修的缺陷；把它写成「若�
 事件名（PascalCase）与负载键（`hook_event_name` / `session_id`）与 Claude 一族逐字同形，已被既有方言
 表覆盖，故**没有**往 `agent-hook-event.ts` 加任何条目。
 
-### Copilot 的「跑过」不等于「能力可核实」
+### Copilot（T-015）：从「跑过 ≠ 能力可核实」到已实现
+
+> **结论已更新（2026-09-01）。** 此前本节标题是「Copilot 的『跑过』不等于『能力可核实』」，
+> 落点是 deferred。那个判断在**当时给定的证据面（进程日志）下是对的**，下面整段原始论证予以保留；
+> 被推翻的只是「因此不可核实、只能 deferred」这个结论——后来找到了一条更强的证据面（直接加载它
+> 自己的原生 runtime 解析器），据此 Copilot **已实现**（`packages/core/src/providers/copilot.ts`，
+> commit `e7cb617`），并已进 union 与 registry。**此前记录「不足」，实测为「可实现」，依据是那条
+> runtime 证据面，而非日志。** 保留原论证是因为它本身是一条有价值的记录：它精确说明了「日志能证
+> 什么、证不了什么」，也解释了为什么最终没有靠日志、而是靠 runtime 去落地。
+
+**原始论证（基于进程日志，结论已被上面更新）：**
 
 本机确有 `~/.copilot/config.json`（`firstLaunchAt: 2026-07-30`）与 6 份 process 日志，最新到
 2026-09-01，内容形如 `CLI server ready (stdio mode, Rust JSON-RPC engine)`——**证明这个 CLI 在
@@ -251,10 +329,32 @@ handle 字段与 resume 定位器的确切拼法。**「装过」和「能力可
 证不了后者，中间那段不许用推测补——那正是 grok/cursor 两次踩到的坑（配置侧与投递侧拼法不同，
 猜一边就静默失效）。
 
-### 五个只有第三方线索的条目
+**后来怎么补上的（commit `e7cb617`）：** 不再依赖日志，而是把它的原生 runtime
+（`prebuilds/<platform>/runtime.node`）直接加载进 node，真的喂配置、真的让它 spawn 捕获脚本、
+真的读回每个事件的 stdin 负载。这条路证到了日志证不了的东西，且暴露出三处「最自然的猜法」会静默
+失效之处，各由 `test/providers/copilot.test.ts` 逐字钉住：
 
-Mimo / Droid / Devin / OMP / Prime 在本机既无可执行文件、无源码，也无配置或 session 目录
-（`~/.mimo`、`~/.config/mimocode`、`~/.factory`、`~/.config/devin`、`~/.omp` 逐个确认不存在）。
+- 事件名是 `userPromptSubmitted` 不是 `userPromptSubmit`（Claude 一族拼法）——该解析器对不认识的
+  事件名**静默丢弃**，猜错了配置照样加载成功、那个桶永远不响。
+- `matcher` 是**正则**不是 glob：`'*'` 被当无效正则拒掉（整桶失效），`'.*'` 才对。与 droid 恰好
+  相反（droid 的 `'*'` 是合法 glob），两家不能互抄这个字面量。
+- 字段名是 `timeoutSec` 不是 `timeout`，写错会被剥掉然后静默用它自己的默认超时。
+
+如实**不声明**的能力（`copilot.ts:169-186`）：`acpStrategy: none`（`--acp` 真存在但 AgentMux 没有
+adapter 那一端）；`replyCorrelation: none`（`preToolUse`/`postToolUse` 两端拿不到同一个工具 id，
+一次调用在时间轴上是两行——与 droid 同一上游损失）；usage 不声明（收尾负载 `agentStop` 里只有
+`stopReason`/`transcriptPath`，没有任何 token 字段）。
+
+### 四个只有第三方线索的条目
+
+> **更正（2026-09-01）：此前本节标题是「五个只有第三方线索的条目」，Droid 曾在其列。** Droid 后来
+> 找到了第一方证据面（发行物二进制 `@factory/cli-darwin-arm64@0.208.2` 的 `bin/droid` 内嵌 zod
+> 事件枚举）并完成实现（`packages/core/src/providers/droid.ts`，commit `d4613b8`/`1c6c17f`），
+> 故从本列移出。**此前记录 Droid「无源码、单一参考、不足」，实测为「发行物二进制可核实、已实现」，
+> 依据是那份二进制里的 zod 枚举。** 现存四个仍然只有第三方线索。
+
+Mimo / Devin / OMP / Prime 在本机既无可执行文件、无源码，也无配置或 session 目录
+（`~/.mimo`、`~/.config/devin`、`~/.omp` 等逐个确认不存在）。
 它们唯一的线索来自第三方参考语料对启动命令与配置路径的描述——按证据优先级属**单一参考**，
 且是宿主专有产物，不足以支撑能力声明。计划自己的规定就是这个落点：
 
