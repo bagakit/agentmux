@@ -1129,15 +1129,17 @@ export class AgentMuxClient {
           now
         )
       }
-      if (deferredPrompt) {
-        await this.deliverPostLaunchPrompt(
-          provider,
-          readySession,
-          run,
-          lifecycleOperationId,
-          deferredPrompt
-        )
-      }
+      // 无条件调用：空/纯空白由 deliverPostLaunchPrompt 自己挡（它开头就 `if (!text.trim()) return`）。
+      // 这里**不**再包一个 `if (deferredPrompt)`——那个条件严格弱于方法自己那道，改不了任何结果，
+      // 却是一处没人守得住的分支：实测把它改成 `&& false` 或取反，全套测试照旧全绿。
+      // 多余的条件不是保险，是一个白送的变异面。
+      await this.deliverPostLaunchPrompt(
+        provider,
+        readySession,
+        run,
+        lifecycleOperationId,
+        deferredPrompt
+      )
       return cloneSession(readySession)
     } finally {
       if (hookBinding && ![...this.hookBindings.values()].includes(hookBinding)) await hookBinding.close()
@@ -1463,15 +1465,14 @@ export class AgentMuxClient {
           Date.now()
         )
       }
-      if (deferredResumePrompt) {
-        await this.deliverPostLaunchPrompt(
-          provider,
-          readySession,
-          run,
-          lifecycleOperationId,
-          deferredResumePrompt
-        )
-      }
+      // 同 launch 侧：空由方法自己挡，这里不再包一个改不了结果的条件。
+      await this.deliverPostLaunchPrompt(
+        provider,
+        readySession,
+        run,
+        lifecycleOperationId,
+        deferredResumePrompt
+      )
       return cloneSession(readySession)
     } catch (error) {
       operationError = error
@@ -2678,21 +2679,39 @@ export class AgentMuxClient {
   ): Promise<void> {
     if (!text.trim()) return
     try {
-      await this.promptSubmission.submitInputPlan(
-        session,
-        run,
-        `launch-prompt:${lifecycleOperationId}`,
-        text,
-        provider.planPromptInput(text)
-      )
-    } catch (error) {
-      this.publisher.publish({
-        type: 'agent-error',
-        agentSessionId: session.agentSessionId,
-        code: error instanceof AgentMuxError ? error.code : 'AGENT_LAUNCH_PROMPT_UNDELIVERED',
-        message: `${provider.label} started, but its initial prompt could not be delivered. Submit it again.`,
-        evidence: { source: 'user', observedAt: Date.now(), run: { ...session.run } }
+      // 走 serializeAgentInput，与 submitAgentPrompt 同一条队列——**不是**直接 submitInputPlan。
+      // 理由是可复现的竞争：session 在这之前已经 publish 过 `agent-session`，渲染端此刻 composer
+      // 就绪，用户可以在这次 await 返回前自己提交一条。两条 submitInputPlan 并发时 single-phase
+      // 分支会读到同一个 expectedByte（prompt-submission.ts 的游标），daemon 的字节栅栏保证不错位，
+      // 于是不是数据损坏，而是：谁先到无保证（这条本该是第一条 turn），且落后的那条拿到
+      // receipt-mismatch——用户手动那条会把错误抛给调用方。排进同一条 input tail 就没有这个窗口。
+      //
+      // 注意 operation 收到的 session/run 是队列**当下**重取的，不是外面这两个快照：那正是
+      // serializeAgentInput 的用处（它顺带验 run 没被换掉、进程还在跑）。所以这里用 current/live。
+      await this.serializeAgentInput(session, async (current, live) => {
+        await this.promptSubmission.submitInputPlan(
+          current,
+          live,
+          `launch-prompt:${lifecycleOperationId}`,
+          text,
+          provider.planPromptInput(text)
+        )
       })
+    } catch (error) {
+      // publish 本身若抛，异常会穿出这个方法，而调用点在 create/resume 的 try 内、且在内层 rollback
+      // catch 之后——于是 Run 活着、hookBinding 已注册，调用方却收到「启动失败」。这个方法的合同是
+      // **绝不抛**（进程已经起来了），所以兜到底。
+      try {
+        this.publisher.publish({
+          type: 'agent-error',
+          agentSessionId: session.agentSessionId,
+          code: error instanceof AgentMuxError ? error.code : 'AGENT_LAUNCH_PROMPT_UNDELIVERED',
+          message: `${provider.label} started, but its initial prompt could not be delivered. Submit it again.`,
+          evidence: { source: 'user', observedAt: Date.now(), run: { ...session.run } }
+        })
+      } catch {
+        // 连告知都发不出去时也不能把已经起来的 Run 拖成一次失败的启动。
+      }
     }
   }
 
