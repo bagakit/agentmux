@@ -121,7 +121,7 @@ export type BrowserConfig = {
  * 类型检查而不是测试，落在 `pnpm check` 的第一步（`pnpm typecheck` → 各包 `tsc --noEmit`）。只跑
  * `pnpm test` 验不出这一族漂移。
  */
-export const CONFIG_VERSION = 8
+export const CONFIG_VERSION = 9
 
 export type AppConfig = {
   version: typeof CONFIG_VERSION

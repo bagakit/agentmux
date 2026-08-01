@@ -1025,12 +1025,23 @@ export class AgentMuxClient {
         env: input.env ?? {},
         ...(input.commandOverride === undefined ? {} : { commandOverride: input.commandOverride })
       })
-      await this.ensureManagedHooks(provider, input.providerId, input.workspacePath, agentSessionId, input.env ?? {})
+      // Binding 必须先于 Hook 安装：一个把 hook 投递代码**写进文件**的 Provider（opencode 的 JS
+      // 插件）跑在自己进程里，拿不到 AgentMux 注入 PTY 的 `AGENTMUX_HOOK_URL`/`TOKEN`，所以 endpoint
+      // 必须在安装那一刻就内联进被写出去的内容。写命令的那九家不受影响——它们的命令在运行时才从
+      // 自己进程的环境变量读。createBinding 不依赖 hook 安装结果，故这个顺序是安全的。
       await this.requireHookIngressOwner()
       hookBinding = this.hookServer.createBinding(
         agentSessionId,
         input.providerId,
         hookBindingIdentity(lifecycleOperationId)
+      )
+      await this.ensureManagedHooks(
+        provider,
+        input.providerId,
+        input.workspacePath,
+        agentSessionId,
+        input.env ?? {},
+        hookBinding.endpoint
       )
       const run = await this.kernel.start({
         operationKey: lifecycleOperationId,
@@ -1160,18 +1171,25 @@ export class AgentMuxClient {
    *
    * The launch `env` is threaded into plan resolution because a provider's config dir can be env-derived
    * (hermes reads `$HERMES_HOME`): the installer must target the same dir the launched process will read.
+   *
+   * `endpoint` is present only on the launch path, where a Binding already exists. It is what a Provider
+   * that writes its **delivery code** into a file needs (opencode's JS plugin runs inside OpenCode's own
+   * process and never sees the PTY env), so such a Provider must inline the URL and token at install time.
+   * The repair path below has no Binding and passes it absent — a Provider that needs it must then decline
+   * to produce a plan rather than write one carrying a dead token.
    */
   private async ensureManagedHooks(
     provider: AgentProvider,
     providerId: AgentProviderId,
     workspacePath: string,
     agentSessionId: string,
-    env: Readonly<Record<string, string>>
+    env: Readonly<Record<string, string>>,
+    endpoint?: { url: string; token: string }
   ): Promise<void> {
     const hookStrategy = provider.catalog.hookStrategy
     if (hookStrategy.kind !== 'native' || hookStrategy.installation !== 'explicit-managed') return
     try {
-      const plan = resolveManagedHookPlan(providerId, workspacePath, env)
+      const plan = resolveManagedHookPlan(providerId, workspacePath, env, endpoint)
       if (!plan) return
       await this.hookInstaller.ensure(plan)
     } catch (error) {

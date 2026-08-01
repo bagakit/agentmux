@@ -11,14 +11,24 @@ import { createGeminiManagedHookPlan, createGeminiProvider } from './gemini.js'
 import { createGrokManagedHookPlan, createGrokProvider } from './grok.js'
 import { createHermesManagedHookPlan, createHermesProvider } from './hermes.js'
 import { createKimiProvider } from './kimi.js'
+import { createOpenCodeManagedHookPlan, createOpenCodeProvider } from './opencode.js'
 import { createPiProvider } from './pi.js'
 import { createTraexProvider } from './traex.js'
 
 export type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
+/**
+ * `endpoint` 只在启动路径存在（那时 Binding 已建好）。写**命令**的 Provider 用不到它——命令在运行时
+ * 从自己进程的环境变量读 URL/token；写**投递代码**的 Provider（opencode 的 JS 插件跑在 OpenCode 自己
+ * 进程里，看不到 PTY 环境）必须在安装那一刻把它内联进文件。
+ *
+ * 返回 `null` 表示「这次不该装」：修复路径没有 Binding，需要 endpoint 的 Provider 必须在那里如实弃权，
+ * 而不是写一份带死 token 的配置出去。
+ */
 export type ManagedHookPlanResolver = (
   workspacePath: string,
-  env?: Readonly<Record<string, string>>
-) => AgentManagedHookPlan
+  env?: Readonly<Record<string, string>>,
+  endpoint?: { url: string; token: string }
+) => AgentManagedHookPlan | null
 
 /** Composition-only list. Provider-specific definitions live in their own modules. */
 export function createBuiltInAgentProviders(defineAgentProvider: ProviderFactory): readonly AgentProvider[] {
@@ -34,7 +44,8 @@ export function createBuiltInAgentProviders(defineAgentProvider: ProviderFactory
     createCursorProvider(defineAgentProvider),
     createKimiProvider(defineAgentProvider),
     createDroidProvider(defineAgentProvider),
-    createCopilotProvider(defineAgentProvider)
+    createCopilotProvider(defineAgentProvider),
+    createOpenCodeProvider(defineAgentProvider)
   ]
 }
 
@@ -56,7 +67,13 @@ export const MANAGED_HOOK_PLAN_RESOLVERS: Partial<Record<AgentProviderId, Manage
   droid: (_workspacePath, env) => createDroidManagedHookPlan(env),
   // copilot 装到 `<COPILOT_HOME ?? ~/.copilot>/hooks/agentmux.json`——它自己独占的一份文件
   // （那个目录下任意文件名都会被加载），与 workspace 无关。绝不碰用户的 `config.json`。
-  copilot: (_workspacePath, env) => createCopilotManagedHookPlan(env)
+  copilot: (_workspacePath, env) => createCopilotManagedHookPlan(env),
+  // opencode 是唯一**必须**拿到 endpoint 的：它装的是一个 JS 插件文件，插件跑在 OpenCode 自己的进程里，
+  // 拿不到 AgentMux 注入 PTY 的 `AGENTMUX_HOOK_URL`/`TOKEN`，所以 URL 与 token 必须在写盘时内联。
+  // 没有 endpoint（修复路径）时如实返回 null——写一份带死 token 的插件比不写更坏：它会静默地把每个
+  // 事件 POST 到一个已失效的凭证上，看起来装好了，实际一条都收不到。
+  opencode: (_workspacePath, env, endpoint) =>
+    endpoint ? createOpenCodeManagedHookPlan(endpoint.url, endpoint.token, env) : null
 }
 
 export {
@@ -68,7 +85,8 @@ export {
   createDroidManagedHookPlan,
   createGeminiManagedHookPlan,
   createGrokManagedHookPlan,
-  createHermesManagedHookPlan
+  createHermesManagedHookPlan,
+  createOpenCodeManagedHookPlan
 }
 export { createAntigravityProvider } from './antigravity.js'
 export { createClaudeProvider } from './claude.js'
@@ -80,5 +98,6 @@ export { createGeminiProvider } from './gemini.js'
 export { createGrokProvider } from './grok.js'
 export { createHermesProvider } from './hermes.js'
 export { createKimiProvider } from './kimi.js'
+export { createOpenCodeProvider } from './opencode.js'
 export { createPiProvider } from './pi.js'
 export { createTraexProvider } from './traex.js'

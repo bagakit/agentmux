@@ -23,7 +23,8 @@ const BUILT_IN_AGENT_LABELS = {
   // 两件事，这里如实分开：label 认得，标记中性。Droid 与 Copilot 同理。
   kimi: 'Kimi',
   droid: 'Droid',
-  copilot: 'Copilot'
+  copilot: 'Copilot',
+  opencode: 'OpenCode'
 } satisfies Record<BuiltInAgentProviderId, string>
 
 /**
@@ -36,7 +37,7 @@ const BUILT_IN_AGENT_LABELS = {
  * 但这份豁免清单本身就是个消音器：往里加一个 id 就能让"必须画出品牌标记"那条断言对它闭嘴。
  * 所以它单独导出，让测试反过来质询它——每个声称"没有图形"的 id 必须**真的**落到 Bot 兜底。
  */
-export const AGENT_PROVIDERS_WITHOUT_BRAND_MARK: readonly BuiltInAgentProviderId[] = ['kimi', 'droid', 'copilot']
+export const AGENT_PROVIDERS_WITHOUT_BRAND_MARK: readonly BuiltInAgentProviderId[] = ['kimi', 'droid', 'copilot', 'opencode']
 
 /**
  * 有离线品牌标记的 Provider。**不是**内置 Provider 的全集：见上面那条。
