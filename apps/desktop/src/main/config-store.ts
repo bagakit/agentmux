@@ -50,6 +50,20 @@ const workspaceSchema = z
 
 const notificationModeIds = NOTIFICATION_TIERS.map((tier) => tier.id) as [string, ...string[]]
 
+// Named rather than inlined below because the retirement path validates each of these on its own, to
+// carry a still-valid user preference across a version bump. Two definitions of the same shape would
+// drift, and the drift would be silent: the config would parse while the carry-over dropped the field.
+const appearanceSchema = z.object({ terminalTheme: z.enum(['graphite', 'catppuccin-mocha']) }).strict()
+const browserSchema = z.object({
+  toolbar: z.object({
+    selectElement: z.boolean(),
+    screenshot: z.boolean(),
+    devTools: z.boolean(),
+    viewport: z.boolean(),
+    more: z.boolean()
+  }).strict()
+}).strict()
+const notificationsSchema = z.object({ mode: z.enum(notificationModeIds) }).strict()
 
 const configSchema = z
   .object({
@@ -57,20 +71,12 @@ const configSchema = z
     hosts: z.array(hostSchema),
     executors: z.record(executorIdSchema, executorSchema),
     workspaces: z.array(workspaceSchema),
-    appearance: z.object({ terminalTheme: z.enum(['graphite', 'catppuccin-mocha']) }).strict(),
-    browser: z.object({
-      toolbar: z.object({
-        selectElement: z.boolean(),
-        screenshot: z.boolean(),
-        devTools: z.boolean(),
-        viewport: z.boolean(),
-        more: z.boolean()
-      }).strict()
-    }).strict(),
+    appearance: appearanceSchema,
+    browser: browserSchema,
     // Optional: a config written before this field existed is still valid, and `get()` back-fills the
     // explicit default. The mode is validated against the one tier table so an unknown id is rejected
     // rather than silently meaning "off".
-    notifications: z.object({ mode: z.enum(notificationModeIds) }).strict().optional()
+    notifications: notificationsSchema.optional()
   })
   .strict()
   .superRefine((config, context) => {
@@ -237,32 +243,43 @@ function withNotificationDefault(config: AppConfig): { config: AppConfig; added:
 }
 
 /**
- * A retired config's **authored** half: the records the user typed or picked, which no default
- * table can reconstruct. Everything else in the file is derived — `executors` comes from the
- * built-in Provider catalog, `appearance`/`browser`/`notifications` from `DEFAULT_CONFIG` — so a
- * version bump may reset those freely.
+ * A retired config's **carry-forward** half: everything whose presence on disk is unambiguous, which
+ * no default table can reconstruct.
  *
  * This split is the whole point. A version bump used to `rm` the file and load `DEFAULT_CONFIG`,
  * whose `workspaces: []`, so **every project the user had registered was discarded** — twice in
  * production (7→8 and 8→9), because the reset fires on *any* older version, not on one specific
- * bump. Refreshing the derived half never required destroying the authored half; the two just
+ * bump. Refreshing the stale half never required destroying the authored half; the two just
  * happened to share one file and one version gate.
+ *
+ * The dividing line is **not** "authored vs. derived" — that framing cost this function a second
+ * round of the same bug. Every field here is authored: the user picks a theme, toggles a toolbar
+ * button, creates an Executor. The line is whether **a record's absence from the current defaults
+ * is ambiguous**:
+ *
+ *   - **Unambiguous, so carried.** `workspaces` and `hosts` carry a unique id and a unique path.
+ *     A custom Executor id is minted as `<providerId>` or `<providerId>-N` (see the settings pane),
+ *     so an id that is not a current built-in default cannot be a Provider the user deleted — it is
+ *     one they created. Same for the three preference objects: they are single values that are
+ *     always present, never a set whose members can go missing.
+ *   - **Ambiguous, so reset.** An Executor keyed by a *built-in default id* is the one genuinely
+ *     undecidable case, and it is the case the old comment was written about: "this config predates
+ *     the Provider" and "the user deleted this Provider" look identical on disk, so carrying it
+ *     forward would resurrect deletions while resetting it restores a Provider the bump exists to
+ *     add. Resetting the built-in slice is what makes a bump able to do its job (v7 held nine
+ *     Providers; three more had to appear).
  *
  * `hosts` travels with `workspaces` because every workspace names one (`hostId`), and the schema's
  * refinement rejects a workspace whose host is absent: dropping hosts while keeping workspaces
  * would produce a config that cannot be parsed back.
  *
- * The reason the old code gave for *not* back-filling `executors` — that "written before this
- * Provider existed" and "the user deleted this Provider" are indistinguishable on disk, so a
- * back-fill would resurrect deletions — is sound, and it is why executors are still reset here.
- * It does not transfer to workspaces: a workspace carries a unique id and a unique path, so its
- * presence is never ambiguous. Preserving it invents nothing.
- *
  * **Salvage is per record, never per file.** Parsing all workspaces as one object would resurrect
  * the very bug being fixed: the next bump that changes the workspace shape (a new required field,
  * a renamed one) makes the whole array fail, and every project vanishes again — silently, because
  * an empty carry-over is indistinguishable from "the user had no projects". Each record is judged
- * on its own, so one damaged entry costs one project instead of all of them.
+ * on its own, so one damaged entry costs one project instead of all of them. The preference objects
+ * are judged the same way, each against its own sub-schema: a damaged `browser` must not cost the
+ * user their theme.
  *
  * `found` vs. the returned length is the caller's evidence for the case salvage cannot cover: a
  * shape change that invalidates *every* record. There is no way to carry a record forward that the
@@ -272,13 +289,30 @@ function withNotificationDefault(config: AppConfig): { config: AppConfig; added:
 export function authoredConfigCarryOver(raw: unknown): {
   hosts: AppConfig['hosts']
   workspaces: WorkspaceRecord[]
+  executors: AppConfig['executors']
+  appearance: AppConfig['appearance'] | undefined
+  browser: AppConfig['browser'] | undefined
+  notifications: AppConfig['notifications'] | undefined
   found: number
 } {
+  // Every key is `.optional()`, including the `unknown` ones. In zod v4 a bare `z.unknown()` key is
+  // **required** — an absent key fails the whole object — and this outer parse failing is exactly
+  // the all-or-nothing collapse the per-record salvage below exists to prevent: `rawWorkspaces`
+  // would fall back to `[]` and every project would be dropped. Caught by the guard tests when the
+  // preference fields were first added here without `.optional()`.
   const outer = z
-    .object({ hosts: z.array(z.unknown()).optional(), workspaces: z.array(z.unknown()).optional() })
+    .object({
+      hosts: z.array(z.unknown()).optional(),
+      workspaces: z.array(z.unknown()).optional(),
+      executors: z.record(z.string(), z.unknown()).optional(),
+      appearance: z.unknown().optional(),
+      browser: z.unknown().optional(),
+      notifications: z.unknown().optional()
+    })
     .safeParse(raw)
   const rawHosts = outer.success ? outer.data.hosts ?? [] : []
   const rawWorkspaces = outer.success ? outer.data.workspaces ?? [] : []
+  const rawExecutors = outer.success ? outer.data.executors ?? {} : {}
 
   const hosts = rawHosts
     .map((host) => hostSchema.safeParse(host))
@@ -297,6 +331,25 @@ export function authoredConfigCarryOver(raw: unknown): {
     // so it cannot be carried: keeping it would make the whole config unsavable.
     .filter((workspace) => hostIds.has(workspace.hostId))
 
+  // Built-in ids are reset from the catalog; every other id is the user's own creation. Order puts
+  // the defaults first so the carried entries are the ones a reader sees as additions.
+  const carriedExecutors = Object.fromEntries(
+    Object.entries(rawExecutors)
+      .filter(([executorId]) => !(executorId in DEFAULT_CONFIG.executors))
+      .filter(([executorId]) => executorIdSchema.safeParse(executorId).success)
+      .map(([executorId, executor]) => [executorId, executorSchema.safeParse(executor)] as const)
+      // An Executor pointing at a Provider this build no longer ships would fail the schema's
+      // Provider-existence refinement, so it cannot be carried for the same reason as a homeless
+      // workspace: keeping it would make the whole config unsavable.
+      .filter(([, parsed]) => parsed.success && providerIds.has(parsed.data.providerId))
+      .map(([executorId, parsed]) => [executorId, parsed.data!])
+  )
+
+  const carried = <T,>(schema: z.ZodType<T>, value: unknown): T | undefined => {
+    const parsed = schema.safeParse(value)
+    return parsed.success ? parsed.data : undefined
+  }
+
   // The cast crosses one representational gap, not a semantic one: under
   // `exactOptionalPropertyTypes` the contract's optionals are `?: T` while zod infers
   // `?: T | undefined`. Zod omits an absent optional key rather than setting it to `undefined`,
@@ -304,13 +357,23 @@ export function authoredConfigCarryOver(raw: unknown): {
   return {
     hosts: withLocal as AppConfig['hosts'],
     workspaces: workspaces as WorkspaceRecord[],
+    executors: { ...DEFAULT_CONFIG.executors, ...carriedExecutors } as AppConfig['executors'],
+    appearance: carried(appearanceSchema, outer.success ? outer.data.appearance : undefined),
+    browser: carried(browserSchema, outer.success ? outer.data.browser : undefined) as
+      AppConfig['browser'] | undefined,
+    // A second, different gap: `notificationModeIds` is widened to `[string, ...string[]]` where it
+    // is built, so `z.enum` infers `mode: string` rather than the contract's `NotificationModeId`.
+    // The values are the tier ids themselves, so the set is right and only the inferred type is
+    // loose — the same reason `configSchema.parse` needs its cast at the two sites below.
+    notifications: carried(notificationsSchema, outer.success ? outer.data.notifications : undefined) as
+      AppConfig['notifications'] | undefined,
     found: rawWorkspaces.length
   }
 }
 
 /**
- * The config a retired file becomes: current defaults for everything derived, the user's own
- * hosts and workspaces carried across.
+ * The config a retired file becomes: current defaults for the ambiguous half, everything whose
+ * presence was unambiguous carried across.
  *
  * When the file held projects and **not one** could be carried, this throws instead of launching
  * with an empty list. That is the failure mode this whole function exists to prevent, and the
@@ -327,7 +390,17 @@ function retiredConfigReplacement(raw: unknown): AppConfig {
       'schema accepts: the file on disk is unchanged and still holds them.'
     )
   }
-  return { ...structuredClone(DEFAULT_CONFIG), hosts: carried.hosts, workspaces: carried.workspaces }
+  // A preference the current schema rejects falls back to the default rather than failing the
+  // launch: unlike a project, it is one value the user can set again in one click.
+  return {
+    ...structuredClone(DEFAULT_CONFIG),
+    hosts: carried.hosts,
+    workspaces: carried.workspaces,
+    executors: carried.executors,
+    ...(carried.appearance ? { appearance: carried.appearance } : {}),
+    ...(carried.browser ? { browser: carried.browser } : {}),
+    ...(carried.notifications ? { notifications: carried.notifications } : {})
+  }
 }
 
 export class ConfigStore {
@@ -339,8 +412,8 @@ export class ConfigStore {
     await mkdir(SCRATCH_BACKING_PATH, { recursive: true })
     let loaded: AppConfig
     let persist = false
-    // Retirement replaces the executor table wholesale, so the Executor→Provider binding check has
-    // no subject on this write. See `write()` for why enforcing it here cannot work at all.
+    // Retirement resets the built-in Executor slice from the catalog, which is the one class of
+    // rebinding the binding check would flag. See `write()` for why enforcing it here cannot work.
     let retiring = false
     try {
       const rawText = await readFile(this.path, 'utf8')
@@ -387,12 +460,15 @@ export class ConfigStore {
    * `enforceExecutorBinding: false` is for exactly one caller: retiring an older-version file.
    *
    * The binding check reads the previous table off disk to refuse re-pointing a live Executor at
-   * another Provider. A retirement has no such subject — it replaces `executors` wholesale from the
-   * built-in catalog, carrying no user binding forward — and enforcing it there does active harm in
-   * two ways. It reads the retired file through the **current** schema, whose `version` is a literal,
-   * so the read itself throws and no config can ever be retired. And even past that, a user-created
-   * Executor id that a later release adopts as a default (say a hand-made `opencode` pointing at
-   * another Provider) would read as a rebinding and brick the launch over data the bump is discarding.
+   * another Provider. Enforcing it during a retirement does active harm in two ways. It reads the
+   * retired file through the **current** schema, whose `version` is a literal, so the read itself
+   * throws and no config could ever be retired. And the one class of Executor a retirement *does*
+   * rewrite is exactly the class the check would flag: an id that collides with a current built-in
+   * default is reset from the catalog (see `authoredConfigCarryOver` — that collision is the
+   * undecidable case), so a hand-made `opencode` pointing at another Provider would read as a
+   * rebinding and brick the launch over a binding the bump has already decided to discard.
+   *
+   * Custom-id Executors are carried through untouched, so for them there is nothing to rebind.
    */
   private async write(
     value: AppConfig,

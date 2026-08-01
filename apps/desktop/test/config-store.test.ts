@@ -9,7 +9,7 @@ import {
   type AppConfig,
   type WorkspaceRecord
 } from '../src/shared/contracts.js'
-import { DEFAULT_NOTIFICATION_MODE_ID } from '../src/shared/notification-presentation.js'
+import { DEFAULT_NOTIFICATION_MODE_ID, NOTIFICATION_TIERS } from '../src/shared/notification-presentation.js'
 
 vi.mock('electron', () => ({ app: { getPath: () => tmpdir() } }))
 
@@ -108,9 +108,10 @@ describe('ConfigStore workspace identity', () => {
     )
   })
 
-  it('a version bump still resets the derived half it is there to refresh', async () => {
-    // 反向那一半：修复不能变成「什么都不重置」。executors 必须被刷成当前默认表——这正是
-    // bump 存在的理由（v7 的 9 家配置要补齐后加入的几家），也是不做回填的那条论证仍然成立的地方。
+  it('a version bump resets the built-in Executor slice it is there to refresh', async () => {
+    // 反向那一半：修复不能变成「什么都不重置」。内置 id 那一片必须被刷成当前默认表——这正是
+    // bump 存在的理由（v7 的 9 家配置要补齐后加入的几家），也是「内置 id 的在场含糊」那条
+    // 论证唯一成立的地方。
     const { store, path } = await storeFixture()
     await writeFile(path, JSON.stringify({
       ...baseConfig,
@@ -118,17 +119,130 @@ describe('ConfigStore workspace identity', () => {
       workspaces: [workspace({ id: 'ws-keep' })],
       executors: {
         codex: { ...baseConfig.executors.codex!, label: 'Stale Codex', command: 'stale' }
-      },
-      appearance: { terminalTheme: 'catppuccin-mocha' }
+      }
     }))
 
     const loaded = await store.get()
 
-    expect(Object.keys(loaded.executors).sort()).toEqual(Object.keys(DEFAULT_CONFIG.executors).sort())
     expect(loaded.executors.codex).toEqual(DEFAULT_CONFIG.executors.codex)
-    expect(loaded.appearance).toEqual(DEFAULT_CONFIG.appearance)
+    for (const executorId of Object.keys(DEFAULT_CONFIG.executors)) {
+      expect(Object.keys(loaded.executors)).toContain(executorId)
+    }
     // 同一次读取里创作的那半边留着——两半边的处置必须能同时被观察到，否则「全留」也能过。
     expect(loaded.workspaces.map((entry) => entry.id)).toContain('ws-keep')
+  })
+
+  it('a version bump keeps a custom Executor, whose id can never be a Provider the user deleted', async () => {
+    // 这是对抗性 review 认出的第二轮同族缺陷。判据不是「authored vs derived」——自建 executor
+    // 与 workspace 一样 authored——而是「这条记录的在场是否含糊」。设置面板铸的 id 形如
+    // `<providerId>` 或 `<providerId>-N`，所以一个不在当前内置表里的 id 只可能是用户自己造的，
+    // 绝不可能是「他删掉的某个 Provider」。含糊的只有撞上内置 id 的那一类，上一条守着它。
+    const { store, path } = await storeFixture()
+    await writeFile(path, JSON.stringify({
+      ...baseConfig,
+      version: DEFAULT_CONFIG.version - 1,
+      workspaces: [workspace({ id: 'ws-1' })],
+      executors: {
+        // 撞内置 id：改过的字段随 bump 一起回默认（含糊那一类）。
+        codex: { ...baseConfig.executors.codex!, label: 'Stale Codex', command: 'stale' },
+        // 自建 id：必须逐字留下，args/env/label 一个不少。
+        'claude-2': {
+          label: 'Claude Reviewer',
+          providerId: 'claude',
+          command: 'claude',
+          args: ['--permission-mode', 'plan'],
+          env: { REVIEW: '1' },
+          injectAgentMuxGuide: false
+        }
+      }
+    }))
+
+    const loaded = await store.get()
+
+    expect(loaded.executors['claude-2']).toEqual({
+      label: 'Claude Reviewer',
+      providerId: 'claude',
+      command: 'claude',
+      args: ['--permission-mode', 'plan'],
+      env: { REVIEW: '1' },
+      injectAgentMuxGuide: false
+    })
+    // 两类处置必须在同一次读取里同时可观察，否则「全留」或「全清」都能过。
+    expect(loaded.executors.codex).toEqual(DEFAULT_CONFIG.executors.codex)
+  })
+
+  it('a version bump keeps the theme, toolbar and notification mode the user chose', async () => {
+    // 这三项也是 authored，只是带默认值。它们各是一个「总在场」的单值，不是成员会缺席的集合，
+    // 所以在场同样不含糊。此前它们被误归进「derived」，于是每次 bump 静默复位。
+    const { store, path } = await storeFixture()
+    await writeFile(path, JSON.stringify({
+      ...baseConfig,
+      version: DEFAULT_CONFIG.version - 1,
+      workspaces: [workspace({ id: 'ws-1' })],
+      appearance: { terminalTheme: 'catppuccin-mocha' },
+      browser: { toolbar: { selectElement: false, screenshot: true, devTools: false, viewport: true, more: false } },
+      notifications: { mode: NOTIFICATION_TIERS[NOTIFICATION_TIERS.length - 1]!.id }
+    }))
+
+    const loaded = await store.get()
+
+    expect(loaded.appearance).toEqual({ terminalTheme: 'catppuccin-mocha' })
+    expect(loaded.browser.toolbar.selectElement).toBe(false)
+    expect(loaded.browser.toolbar.devTools).toBe(false)
+    expect(loaded.browser.toolbar.screenshot).toBe(true)
+    expect(loaded.notifications?.mode).toBe(NOTIFICATION_TIERS[NOTIFICATION_TIERS.length - 1]!.id)
+    // 反向：这条断言必须能区分「真留下了」与「默认值恰好长这样」。
+    expect(loaded.appearance).not.toEqual(DEFAULT_CONFIG.appearance)
+    expect(loaded.browser).not.toEqual(DEFAULT_CONFIG.browser)
+    expect(loaded.notifications).not.toEqual(DEFAULT_CONFIG.notifications)
+  })
+
+  it('salvages each preference on its own, so a damaged toolbar does not cost the theme', async () => {
+    // 与 workspaces 同一条规矩：逐条判定，不整份判定。整份判定会让下一次「browser 形状变了」
+    // 的 bump 顺手清掉主题。
+    const { store, path } = await storeFixture()
+    await writeFile(path, JSON.stringify({
+      ...baseConfig,
+      version: DEFAULT_CONFIG.version - 1,
+      workspaces: [workspace({ id: 'ws-1' })],
+      appearance: { terminalTheme: 'catppuccin-mocha' },
+      browser: { toolbar: 'not an object' }
+    }))
+
+    const loaded = await store.get()
+
+    expect(loaded.appearance).toEqual({ terminalTheme: 'catppuccin-mocha' })
+    // 坏的那条退回默认——单值偏好按一下就能重设，不值得像项目那样把启动打红。
+    expect(loaded.browser).toEqual(DEFAULT_CONFIG.browser)
+  })
+
+  it('drops a carried Executor whose Provider this build no longer ships, rather than becoming unsavable', async () => {
+    // 与「host 没活下来的 workspace」同一个理由：configSchema 的 superRefine 会拒掉指向未知
+    // Provider 的 Executor，留着它会让整份配置存不回去，于是连项目一起丢。
+    const { store, path } = await storeFixture()
+    await writeFile(path, JSON.stringify({
+      ...baseConfig,
+      version: DEFAULT_CONFIG.version - 1,
+      workspaces: [workspace({ id: 'ws-1' })],
+      executors: {
+        'ghost-2': {
+          label: 'Retired Provider',
+          providerId: 'provider-that-no-longer-exists',
+          command: 'ghost',
+          args: [],
+          env: {},
+          injectAgentMuxGuide: true
+        }
+      }
+    }))
+
+    const loaded = await store.get()
+
+    expect(loaded.executors['ghost-2']).toBeUndefined()
+    // 承重：项目必须还在。这条钉住「丢掉那个 Executor」与「整份存不回去」的区别。
+    expect(loaded.workspaces.map((entry) => entry.id)).toContain('ws-1')
+    expect(JSON.parse(await readFile(path, 'utf8')).workspaces.map((entry: WorkspaceRecord) => entry.id))
+      .toContain('ws-1')
   })
 
   it('salvages workspaces one record at a time, so one damaged entry costs one project', async () => {
