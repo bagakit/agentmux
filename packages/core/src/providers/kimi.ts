@@ -26,6 +26,18 @@ export const KIMI_HOOKS: AgentNativeHookSpecification = {
   rules: [
     // 两种收尾都算 done：正常完成与失败收尾。少任何一条都会卡在 working。Kimi 没有第三种
     // （grok 的 `stop_cancelled` 在这里不存在，别照抄）。
+    //
+    // 但**这两条并没有覆盖全部收尾**——这是 Kimi 的固有限制，不是这里可以补的，也别试着发明一个
+    // 事件名去填：中断（Ctrl-C / Esc）与 `MaxStepsReached` 两条路**一个 hook 都不发**。
+    // `except asyncio.CancelledError`（soul/kimisoul.py:791）与 `except MaxStepsReached`（:788）
+    // 都在 `Stop` 的 trigger（:742）**之前**重新抛出；`StopFailure` 在 `_agent_loop` 的
+    // `except Exception` 里，而 `CancelledError` 自 py3.8 起是 `BaseException`、抓不到，
+    // `MaxStepsReached` 的 raise 点也在那个 try 之上。且中断后 Kimi 进程仍活在 composer 上
+    // （SIGINT 只取消当前 turn），于是连"进程退出"这个兜底事实都没有。
+    // 后果：用户中断或撞上步数上限后，这个 Agent 会一直显示运行中。
+    // 与 grok 的区别要认清——grok 是**发了**另一个事件（`StopCancelled`）而我们没接，
+    // Kimi 是真的什么都不发（config.py:5-19 的 13 个事件里没有任何 cancel 类），
+    // 所以这里正确的做法是如实记录这个限制，而不是编一个收尾事件出来。
     { events: ['Stop', 'StopFailure'], state: 'done' },
     {
       events: [
@@ -62,15 +74,24 @@ export function createKimiProvider(defineAgentProvider: ProviderFactory): AgentP
       // foreground-process 按 expectedProcess 比对，写 `kimi` 会让"就绪"永远等不到——
       // 这正是"从可执行文件名推进程名"这类形状推理的失效点。
       expectedProcess: 'Kimi Code',
-      // 位置参数：**绝不能**声明 flag-prompt-interactive。Kimi 的 `-p/--prompt` 在 shell UI 里是
-      // "跑完这一条就退出"（ui/shell/__init__.py:391-399 的 `# run single command and exit`），
-      // 而 AgentMux 要的是一个活着的交互 PTY。所以首个 prompt 不走 argv（见下面的 buildArgs），
-      // 改在 PTY 里键入——`promptDelivery` 如实记为 positional-argv 的空 argv 形态。
+      // 首个 prompt **送不到**，所以如实声明 post-launch-only 而不是 positional-argv。
       //
-      // 键入走的是默认的 single-phase（原样加回车），**不是** bracketed paste：本 Provider 不声明
-      // planPromptInput，全仓只有 codex 声明了 paste 形态。多行 prompt 因此按换行原样进 PTY——
-      // 这是这条默认路的既有行为，claude / cursor / grok / gemini 同此，不是 Kimi 的特例。
-      promptDelivery: 'positional-argv',
+      // Kimi 的交互 UI 没有「带着一条 prompt 启动、并继续活着」的入口，这一点是两面夹死的：
+      //   1. `-p/--prompt`（与别名 `-c/--command`，cli/__init__.py:217-226）在 shell UI 里走的是
+      //      `Shell.run(command=...)`，而那条路 `# run single command and exit`
+      //      （ui/shell/__init__.py:382-399）跑完就 return——不是一个活着的 PTY。
+      //   2. 没有 Gemini `--prompt-interactive` 那样的旗标。把 cli/__init__.py 的整份选项清单读完，
+      //      prompt 只有上面那一个入口。
+      //   （`prefill_text` 不是第三条路：它只由 `Reload` 异常传入（cli/__init__.py:779），
+      //     并在交互循环内部才应用（ui/shell/__init__.py:497），任何命令行旗标都到不了它。）
+      //
+      // 于是首个 prompt 只能在进程起来之后当一条普通 turn 提交（`submitAgentPrompt`，那条路对本
+      // Provider 是通的：single-phase 不需要 composer readiness 纪元）。
+      //
+      // **绝不能**声明 positional-argv 再在 buildArgs 里把 prompt 丢掉：那样用户的原话只会落进
+      // timeline、永不进入进程，而界面上一切正常——最难发现的一类丢失。声明成 post-launch-only 后，
+      // 带 prompt 启动会被 buildLaunch 当场拒绝（AGENT_LAUNCH_PROMPT_UNSUPPORTED）。
+      promptDelivery: 'post-launch-only',
       // `unmanaged` 而非 `explicit-managed`：hook 是真的、Core 也认得，但它的配置面是
       // `~/.kimi/config.toml` 的 `[[hooks]]` 数组——**TOML**，而本仓四种 merge 策略
       // （json-owned-key / json-managed-events / yaml-managed-events / json-managed-approvals）
@@ -104,7 +125,8 @@ export function createKimiProvider(defineAgentProvider: ProviderFactory): AgentP
         // codex-rollout）都无从下手。按「能力未核实就不声明」留空，UI 据此说"此 Provider 不报用量"。
       }
     }),
-    // 首个 prompt 不进 argv，理由见上面 expectedProcess/promptDelivery 那两段注释。
+    // prompt 一定是空的：非空的启动 prompt 已被 buildLaunch 依 post-launch-only 拒在门外
+    // （理由与出处见上面 promptDelivery 那段），所以这里只需把解析出的旗标原样传下去。
     buildArgs: (_prompt, args) => [...args],
     hook: KIMI_HOOKS,
     buildResumeArgs: (sessionId, _transcriptPath, _prompt, args) => ['--session', sessionId, ...args]
