@@ -30,6 +30,35 @@ export function activeTopicIdFromLayout(
 }
 
 /**
+ * 关掉/移走一张 Tab 后，哪些 Tab 有资格接任活动项。
+ *
+ * 为什么需要它，而不是让显示侧那次投影兜住：`layoutForActiveTopic` 是**只读派生**，服务的是渲染、内存
+ * 预算、冷泊车、快捷键取值这些读取面。真正改 layout 的 reducer（`removeTab` / `moveTab` /
+ * `moveTabToNewGroup`）吃的是未投影的 storedLayout，它们看到的 `recentTabIds` 里混着别的 Topic 的 Tab。
+ * 于是在 Scratch 里关掉当前 Topic 的最后一张 Tab，下一活动项会静默落到另一个 Topic 上——用户没要求
+ * 切 Topic，眼前的东西却全换了。
+ *
+ * 判据与 `layoutForActiveTopic` 里的 `visible` 刻意共用同一条规则（未绑定 Topic 的 Tab 始终合格），
+ * 但**没有**抽成共享常量：那两处问的问题不同（「这张要不要显示」vs「这张能不能接任」），今天答案一致
+ * 是因为规则本身一致，不是因为它们是同一个决定。真正必须只做一次的是「谁来生产这个谓词」——八个
+ * `removeTab` 调用方各自手抄一份 `tabs[id]?.topicId === activeTopicId` 就必然漂移。
+ *
+ * 返回 undefined 表示「没有额外约束」：不在任何 Topic 里时，任何 Tab 都能接任，reducer 走它原本的
+ * 缺省行为。这里不返回一个恒真函数——`undefined` 让调用方连传都不必传，也让「不在 Topic 里」和
+ * 「在 Topic 里但恰好全都合格」在类型上就分得开。
+ */
+export function tabEligibilityForActiveTopic(
+  tabs: Readonly<Record<string, WorkbenchTab>>,
+  activeTopicId: string | null
+): ((tabId: string) => boolean) | undefined {
+  if (!activeTopicId) return undefined
+  return (tabId: string): boolean => {
+    const topicId = tabs[tabId]?.topicId
+    return topicId === undefined || topicId === activeTopicId
+  }
+}
+
+/**
  * 切 Topic 就换那一组 Tab。
  *
  * 切 Branch 之所以天然换掉整条 Tab 条，是因为 `layouts` 按 workspaceId 键控——每个 worktree

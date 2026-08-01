@@ -9,6 +9,12 @@ import {
   type AgentMuxAgentSessionStore,
   type AgentMuxRuntimeProjection
 } from '@agentmux/core'
+// 衰减判据从 core 的 node-free 子路径取，而不是在测试里手抄阈值：阈值刻意不导出（它没有产品
+// 调用方），所以「带回的时刻对不对」只能由 core 自己回答。
+import {
+  msUntilSemanticStatusStale,
+  semanticStatusStale
+} from '@agentmux/core/agent-status'
 import type { WebContents } from 'electron'
 import type { AppConfig, SessionControl, SshHostConfig } from '../src/shared/contracts.js'
 import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics.js'
@@ -1124,6 +1130,68 @@ describe('RuntimeController configuration transaction', () => {
       status: { state: 'waiting', source: 'native-hook', detail: 'PermissionRequest' },
       pendingInteraction: request
     })
+  })
+
+  it('语义状态跨 reload 带回原来的观察时刻，而不是盖成当下——否则衰减永远等不到', async () => {
+    // 为什么要单独钉这一条：`working` 会不会「陈旧到不再算数」完全按 `observedAt` 判
+    // （agent-status-freshness 的阈值 + renderer 的 agent-status-decay）。快照投影是 reload 与重连
+    // 补发唯一的取值来源，它只要把 observedAt 换成 Date.now()，每次 reload 就把计时器重置一次——
+    // 一个 hook 流早已断掉的 Agent 会永远转圈，而这正是衰减本身要解决的那个问题。
+    //
+    // 现有那条 permission 测试用 toMatchObject 且没列 observedAt，所以盖掉它 55 条全绿（实测）。
+    // 这里必须逐值比对那个时刻本身。
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const status = agentStatusFixture()
+    // 一个远早于「现在」的时刻：真实场景里它是 hook 最后一次说话的时间。
+    const lastHeardFrom = 1_000
+    // 进程台账自己的观测时刻必须**与上面那个不同**：投影里 `const observedAt = run.observedAt`
+    // （runtime-controller.ts:159），所以「把语义状态的时刻盖成进程时刻」这个变异，只有在两者
+    // 取值不同时才是可观测的改动。实测两者都填 1000 时，那次变异是恒等替换，42 条照旧全绿——
+    // fixture 自己让被测的缺陷变成了 no-op。
+    const processObservedAt = 900_000
+    client.runtimeProjection.mockResolvedValue({
+      hostId: 'local',
+      subjects: [{
+        subjectId: 'agent:local:agent-1',
+        kind: 'agent',
+        hostId: 'local',
+        workspacePath: '/repo',
+        providerId: 'codex',
+        executorId: 'review',
+        agentSession: {
+          ...status.session,
+          updatedAt: lastHeardFrom,
+          semanticStatus: {
+            state: 'working',
+            source: 'native-hook',
+            observedAt: lastHeardFrom
+          }
+        },
+        // run 仍在跑：只有 running 才会走 semanticStatus 那条分支（非 running 时用进程投影）。
+        run: { ...status.run, state: 'running', observedAt: processObservedAt, exitCode: undefined }
+      }]
+    })
+
+    const snapshot = await controller.snapshot(localConfig)
+    const projected = snapshot.sessions[0]!
+
+    expect(projected.status.state).toBe('working')
+    expect(
+      projected.status.observedAt,
+      '快照必须原样带回语义状态自己的观察时刻；盖成 Date.now() 会让衰减在每次 reload 后重新计时'
+    ).toBe(lastHeardFrom)
+    // 判据不止「等于那个数」，还要「衰减据此真的会降它」——数字对但取值口径变了同样是坏的。
+    // 阈值本身在 core 里刻意不导出（零调用者原则），所以这里让 core 自己回答「还剩多久」，
+    // 再走到那一刻之后去问「陈旧了吗」，全程不手抄任何毫秒数。
+    const remaining = msUntilSemanticStatusStale(projected.status, lastHeardFrom)
+    expect(remaining, '一条刚被观察到的 working 必须还剩正的寿命').toBeGreaterThan(0)
+    expect(
+      semanticStatusStale(projected.status, lastHeardFrom + remaining),
+      '带回的时刻要能让 core 的陈旧判据在到点后认定它该降级'
+    ).toBe(true)
+    // 对照：同一条 status 在它自己那一刻还不算陈旧。少了这条，上面那句在「判据恒为真」时也会绿。
+    expect(semanticStatusStale(projected.status, lastHeardFrom)).toBe(false)
   })
 
   it('projects a stored Agent with a missing Run only as an exact recovery candidate', async () => {

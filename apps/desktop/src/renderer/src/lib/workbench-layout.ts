@@ -40,8 +40,33 @@ function pushRecentTabId(recentTabIds: string[], tabId: string): string[] {
   return [...recentTabIds.filter((id) => id !== tabId), tabId]
 }
 
-function pickNextActiveTab(tabOrder: string[], recentTabIds: string[], closingId: string) {
-  const remainingOrder = tabOrder.filter((id) => id !== closingId)
+/**
+ * 一个 Tab 能不能当「下一个活动项」。
+ *
+ * 为什么这个判据要能被外部指定：这个文件是纯 layout 代数，它认识 group / tabOrder / recent，但**不认识
+ * Tab 的语义**——不知道有 Topic 这回事，也不该知道。而「下一个活动项」在 Scratch 里必须认识 Topic：
+ * Scratch 的所有 Topic 共用同一个 workspace，因此共用同一份 layout，`recentTabIds` 里混着别的 Topic
+ * 的 Tab。关掉当前 Topic 的最后一张 Tab 时 `recent.at(-1)` 就会落到另一个 Topic 上，用户被静默弹走。
+ *
+ * 显示侧本来就按 Topic 投影过（`layoutForActiveTopic` 会过滤 tabOrder 与 recentTabIds），但那是**只读
+ * 派生**，只服务渲染、内存预算、冷泊车、快捷键取值这几个读取面。reducer 吃的是未投影的 storedLayout，
+ * 所以投影完全管不到这里——这正是缺陷能存在的原因。
+ *
+ * 缺省全部可选：不传谓词时行为与从前逐字相同，普通 workspace（一个 workspace 一个 worktree，不存在
+ * Topic 混装）不需要任何额外知识。
+ */
+export type TabEligibility = (tabId: string) => boolean
+
+function pickNextActiveTab(
+  tabOrder: string[],
+  recentTabIds: string[],
+  closingId: string,
+  eligible: TabEligibility = () => true
+) {
+  // eligible 只在这一处收窄，是刻意的：`sanitizeRecentTabIds` 会把 recent 交到 remainingOrder 上，
+  // 所以在 recent 那一侧再判一次 eligible **不可能改变结果**——实测把那一次判断删掉，19 条全绿。
+  // 那不是「守卫缺失」而是多余条件，写上去只会让读者以为两侧各有一道独立的门。
+  const remainingOrder = tabOrder.filter((id) => id !== closingId && eligible(id))
   const recent = sanitizeRecentTabIds(
     recentTabIds.filter((id) => id !== closingId),
     remainingOrder
@@ -278,7 +303,8 @@ export function focusGroup(layout: WorkspaceLayout, groupId: string): WorkspaceL
 export function removeTab(
   layout: WorkspaceLayout,
   groupId: string,
-  tabId: string
+  tabId: string,
+  eligible?: TabEligibility
 ): WorkspaceLayout {
   const group = findGroup(layout, groupId)
   if (!group?.tabOrder.includes(tabId)) return layout
@@ -290,7 +316,7 @@ export function removeTab(
           tabOrder: sourceOrder,
           activeTabId:
             candidate.activeTabId === tabId
-              ? pickNextActiveTab(candidate.tabOrder, candidate.recentTabIds, tabId)
+              ? pickNextActiveTab(candidate.tabOrder, candidate.recentTabIds, tabId, eligible)
               : candidate.activeTabId,
           recentTabIds: sanitizeRecentTabIds(
             candidate.recentTabIds.filter((id) => id !== tabId),
