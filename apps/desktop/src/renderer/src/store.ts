@@ -43,6 +43,7 @@ import { isScratchWorkspaceId } from '../../shared/contracts'
 import { api } from './lib/api'
 import type { BrowserAnnotation } from './lib/browser-annotations'
 import { EMPTY_LAUNCHER_NAMES, type LauncherNameField, type LauncherNames } from './lib/launcher-name-draft'
+import { resolveLauncherWorkspaceId } from './lib/launcher-workspace'
 import type { OpenDestination, OpenHttpLinkOrigin } from './lib/open-destination'
 import { createNoteWithAvailableName } from './lib/note-names'
 import { rendererResourceOwnerCounts } from './lib/resource-owner-counts'
@@ -461,13 +462,23 @@ type AppState = {
    */
   createPath(input: CreateWorkspacePathInput): Promise<string>
   /**
-   * 在当前 Workspace 里建一条按日期命名的笔记并打开它，返回真正建出来的文件名。
+   * 在这个 launcher 的 Workspace 里建一条按日期命名的笔记并打开它，返回真正建出来的文件名。
    *
    * 命名判定在 `lib/note-names.ts`：写入面是 `O_CREAT | O_EXCL`（撞名失败而非截断），所以名字必须
    * 是一个候选序列、由文件系统裁决，不能先列目录再挑（那是 check-then-act，同一 tick 两条笔记会
    * 挑中同一个名字）。
+   *
+   * 签名与 `launchAgent` / `launchTerminal` / `promoteWarmTerminal` / `createBrowser` 同形，且
+   * 「落在哪个 Workspace」走与它们**完全同一条**判定（`resolveLauncherWorkspaceId`）。此前这里只读
+   * `activeWorkspaceId`，于是 launcher 挂在绑定 A 的 Tab 上而活动 Workspace 是 B 时（切侧栏即可），
+   * 界面写着「Start in A」、其余四个动作都落 A，而笔记建到 B——零报错，看起来一切正常。
+   * `tabGroupId` 这里不消费落点（笔记由 openFile 自己挂 Tab），但仍然收下：它是这一族动作的共同
+   * 形状，缺了它调用方就得为「笔记」记一条特例。
    */
-  createNote(): Promise<string>
+  createNote(
+    tabGroupId?: string,
+    launcher?: { tabId: string; regionId: string }
+  ): Promise<string>
   renamePath(path: string, nextPath: string): Promise<void>
   deletePath(path: string): Promise<void>
   updateDocument(tabId: string, content: string, regionId?: string): void
@@ -3096,8 +3107,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }))
     return workspaceId
   },
-  async createNote() {
-    const workspaceId = get().activeWorkspaceId
+  async createNote(tabGroupId, launcher) {
+    const state = get()
+    const launcherTab = launcher ? state.tabs[launcher.tabId] : undefined
+    // 「落在哪个 Workspace」与其余四个启动动作走同一条判定。此前这里只读 activeWorkspaceId，
+    // 于是 launcher 绑在 A 而活动 Workspace 是 B 时笔记建到 B——见 resolveLauncherWorkspaceId 的注释。
+    const workspaceId = resolveLauncherWorkspaceId({
+      launcherTabWorkspaceId: launcherTab?.workspaceId,
+      activeWorkspaceId: state.activeWorkspaceId
+    })
     if (!workspaceId) throw new Error('Select a workspace first')
     const name = await createNoteWithAvailableName(
       new Date(),
@@ -3113,7 +3131,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // 显式把开头解析出来的 workspaceId 传下去。create walk 是异步的（远端可达 15s），这期间侧栏
     // 的 selectWorkspace 完全可点；若让 openFile 自己重读活动 Workspace，笔记建在 A 而打开的是
     // B 里的同名文件——名字只是当天日期，撞名概率很高，而用户看到的一切都正常。
-    await get().openFile(name, undefined, undefined, workspaceId)
+    //
+    // `tabGroupId` 同样必须传下去（而不是让 openFile 退到 `layout.activeGroupId`）：请求这条笔记的
+    // 分组才是它该出现的地方。缺了它，从一个非活动分组（分屏的另一半、或将来浮层里的那个 launcher）
+    // 建笔记，Tab 会挂到别的分组上——用户点了「Note」却看不见任何变化。
+    await get().openFile(name, tabGroupId, undefined, workspaceId)
     return name
   },
   async renamePath(path, nextPath) {
@@ -3276,7 +3298,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (launcher && launcherSurface?.kind !== 'launcher') {
       throw new Error('Launcher Region is no longer available')
     }
-    const workspaceId = launcherTab?.workspaceId ?? state.activeWorkspaceId
+    const workspaceId = resolveLauncherWorkspaceId({
+      launcherTabWorkspaceId: launcherTab?.workspaceId,
+      activeWorkspaceId: state.activeWorkspaceId
+    })
     const workspace = state.config?.workspaces.find((item) => item.id === workspaceId)
     if (!workspace) throw new Error('Select a workspace first')
     const layout = state.layouts[workspace.id]
@@ -3468,7 +3493,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (launcher && launcherSurface?.kind !== 'launcher') {
       throw new Error('Launcher Region is no longer available')
     }
-    const workspaceId = launcherTab?.workspaceId ?? state.activeWorkspaceId
+    const workspaceId = resolveLauncherWorkspaceId({
+      launcherTabWorkspaceId: launcherTab?.workspaceId,
+      activeWorkspaceId: state.activeWorkspaceId
+    })
     const workspace = state.config?.workspaces.find((item) => item.id === workspaceId)
     if (!workspace) throw new Error('Select a workspace first')
     const layout = state.layouts[workspace.id]
@@ -3609,7 +3637,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (launcherTab && !workbenchViewCloseAllowsView(state.closingWorkbenchViews, launcherTab.id)) {
       throw new Error('The View is closing')
     }
-    const workspaceId = launcherTab?.workspaceId ?? state.activeWorkspaceId
+    const workspaceId = resolveLauncherWorkspaceId({
+      launcherTabWorkspaceId: launcherTab?.workspaceId,
+      activeWorkspaceId: state.activeWorkspaceId
+    })
     const workspace = state.config?.workspaces.find((item) => item.id === workspaceId)
     if (!workspace) throw new Error('Select a workspace first')
     const key = warmTerminalKey(workspace.hostId, workspace.path)
@@ -3720,7 +3751,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (launcher && launcherSurface?.kind !== 'launcher') {
       throw new Error('Launcher Region is no longer available')
     }
-    const workspaceId = launcherTab?.workspaceId ?? state.activeWorkspaceId
+    const workspaceId = resolveLauncherWorkspaceId({
+      launcherTabWorkspaceId: launcherTab?.workspaceId,
+      activeWorkspaceId: state.activeWorkspaceId
+    })
     if (!workspaceId) throw new Error('Select a workspace first')
     const layout = state.layouts[workspaceId]
     if (!layout) throw new Error('Workspace layout is unavailable')
