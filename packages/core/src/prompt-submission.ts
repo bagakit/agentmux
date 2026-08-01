@@ -20,6 +20,20 @@ import type {
 
 const TERMINAL_PROMPT_RENDER_TIMEOUT_MS = 10_000
 
+/**
+ * Details attached to readiness refusals are deliberately a small, machine-readable set of
+ * lifecycle facts.  Keep this formatter local to the Core owner: prompt text, digests and PTY
+ * bytes must never be copied into an error that may cross a client boundary.
+ */
+function promptReadinessDetail(
+  fields: Readonly<Record<string, string | number | boolean | undefined>>
+): string {
+  return Object.entries(fields)
+    .filter(([, value]) => value !== undefined)
+    .map(([key, value]) => `${key}=${String(value)}`)
+    .join(' ')
+}
+
 function terminalPromptPhaseOperationIdentity(
   session: AgentMuxAgentSession,
   submissionId: string,
@@ -157,20 +171,47 @@ export class AgentPromptSubmissionCoordinator {
       if (existing && !existing.submit.acknowledged) {
         throw new AgentMuxError(
           'Another Agent prompt operation is incomplete for this Run.',
-          'AGENT_PROMPT_SUBMISSION_BUSY'
+          'AGENT_PROMPT_SUBMISSION_BUSY',
+          promptReadinessDetail({
+            runId: session.run.runId,
+            activeSubmissionId: existing.submissionId,
+            payloadAcknowledged: existing.payload.acknowledged,
+            submitAcknowledged: existing.submit.acknowledged,
+            payloadStartByte: existing.payload.inputByteRange.startByte,
+            payloadEndByte: existing.payload.inputByteRange.endByte,
+            submitStartByte: existing.submit.inputByteRange.startByte,
+            submitEndByte: existing.submit.inputByteRange.endByte
+          })
         )
       }
       const readiness = stored.terminalPromptReadiness
       if (!readiness || readiness.readyThroughByte === undefined) {
         throw new AgentMuxError(
           'Agent prompt requires a ready composer epoch for this exact Run.',
-          'AGENT_PROMPT_NOT_READY'
+          'AGENT_PROMPT_NOT_READY',
+          promptReadinessDetail({
+            runId: session.run.runId,
+            readinessId: readiness?.id ?? 'none',
+            readinessSource: readiness?.source ?? 'none',
+            readinessOutputCursorBytes: readiness?.outputCursorBytes,
+            readyThroughByte: readiness?.readyThroughByte ?? 'pending',
+            latestOutputBytes: run.latestOutputBytes,
+            reason: readiness ? 'observation-pending' : 'epoch-missing'
+          })
         )
       }
       if (readiness.consumedBySubmissionId !== undefined) {
         throw new AgentMuxError(
           'The current composer readiness epoch was already consumed by another prompt.',
-          'AGENT_PROMPT_READINESS_CONSUMED'
+          'AGENT_PROMPT_READINESS_CONSUMED',
+          promptReadinessDetail({
+            runId: session.run.runId,
+            readinessId: readiness.id,
+            readinessSource: readiness.source,
+            readinessOutputCursorBytes: readiness.outputCursorBytes,
+            readyThroughByte: readiness.readyThroughByte,
+            consumedBySubmissionId: readiness.consumedBySubmissionId
+          })
         )
       }
       const outputCursorBytes = Math.max(run.latestOutputBytes, readiness.readyThroughByte)
@@ -231,7 +272,12 @@ export class AgentPromptSubmissionCoordinator {
         if (!sameRun(canonical.run, session.run)) {
           throw new AgentMuxError(
             'Agent Session changed while refreshing prompt readiness.',
-            'STALE_AGENT_SESSION'
+            'STALE_AGENT_SESSION',
+            promptReadinessDetail({
+              expectedRunId: session.run.runId,
+              canonicalRunId: canonical.run.runId,
+              reason: 'run-replaced-during-refresh'
+            })
           )
         }
         try {
@@ -240,7 +286,12 @@ export class AgentPromptSubmissionCoordinator {
           if (refreshError instanceof AgentMuxError && refreshError.code === 'STALE_AGENT_SESSION') {
             throw new AgentMuxError(
               'Prompt readiness changed or was consumed by another Client.',
-              'AGENT_PROMPT_READINESS_CONFLICT'
+              'AGENT_PROMPT_READINESS_CONFLICT',
+              promptReadinessDetail({
+                expectedRunId: session.run.runId,
+                canonicalRunId: canonical.run.runId,
+                reason: 'session-cas-rejected-after-refresh'
+              })
             )
           }
           throw refreshError
@@ -248,7 +299,11 @@ export class AgentPromptSubmissionCoordinator {
       } else if (error instanceof AgentMuxError && error.code === 'STALE_AGENT_SESSION') {
         throw new AgentMuxError(
           'Prompt readiness changed or was consumed by another Client.',
-          'AGENT_PROMPT_READINESS_CONFLICT'
+          'AGENT_PROMPT_READINESS_CONFLICT',
+          promptReadinessDetail({
+            expectedRunId: session.run.runId,
+            reason: 'session-cas-rejected'
+          })
         )
       } else {
         throw error
@@ -546,14 +601,26 @@ export class AgentPromptSubmissionCoordinator {
           if (!currentReadiness || currentReadiness.id !== readiness.id) {
             throw new AgentMuxError(
               'Prompt readiness epoch changed before readiness was persisted.',
-              'AGENT_PROMPT_READINESS_CONFLICT'
+              'AGENT_PROMPT_READINESS_CONFLICT',
+              promptReadinessDetail({
+                expectedRunId: session.run.runId,
+                expectedReadinessId: readiness.id,
+                currentReadinessId: currentReadiness?.id ?? 'none',
+                reason: 'readiness-epoch-replaced'
+              })
             )
           }
           if (currentReadiness.readyThroughByte !== undefined) return current
           if (currentReadiness.consumedBySubmissionId !== undefined) {
             throw new AgentMuxError(
               'Prompt readiness epoch was consumed before readiness was persisted.',
-              'AGENT_PROMPT_READINESS_CONFLICT'
+              'AGENT_PROMPT_READINESS_CONFLICT',
+              promptReadinessDetail({
+                expectedRunId: session.run.runId,
+                readinessId: readiness.id,
+                consumedBySubmissionId: currentReadiness.consumedBySubmissionId,
+                reason: 'readiness-consumed-before-persist'
+              })
             )
           }
           return {
