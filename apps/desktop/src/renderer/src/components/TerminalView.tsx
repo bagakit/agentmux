@@ -8,6 +8,7 @@ import { ChevronDown, ChevronUp, ExternalLink, FileCode, LoaderCircle, Search, X
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { RuntimeEvent, SessionSnapshot, TerminalThemeId } from '../../../shared/contracts'
 import { api } from '../lib/api'
+import { copyTextToClipboard } from '../lib/clipboard-copy'
 import {
   dismissOpenDestinationRequest,
   parseHttpLinkUrl,
@@ -24,11 +25,10 @@ import { detectTerminalPathLinks } from '../lib/terminal-path-link'
 import { TERMINAL_HTTP_URL_REGEX } from '../lib/terminal-http-link'
 import { terminalOptions, terminalTheme, activateTerminalUnicodeWidth, UNICODE_WIDTH_VERSION } from '../lib/terminal-theme'
 import {
-  isShiftEnterNewline,
-  isTerminalAppShortcut,
   shiftEnterInput,
   terminalSelectionForCopy
 } from '../lib/terminal-shortcuts'
+import { matchShortcut } from '../lib/shortcut-registry'
 import {
   initialKittyKeyboardState,
   isKittyKeyboardActive,
@@ -40,6 +40,10 @@ import {
   toggleTerminalSearch,
   type TerminalSearchToggles
 } from '../lib/terminal-search'
+import {
+  TERMINAL_SEARCH_HIGHLIGHT_LIMIT,
+  subscribeTerminalSearchCount
+} from '../lib/terminal-search-count'
 import { finishTerminalReplayRecovery, hydrateTerminalReplay, yieldTerminalWork } from '../lib/terminal-replay'
 import { acquireTerminalResourceOwners } from '../lib/terminal-resource-owners'
 import { LatestTerminalOutputAcknowledger } from '../lib/terminal-output-ack'
@@ -56,6 +60,7 @@ import {
 import { terminalStartupPhase } from '../lib/terminal-startup'
 import {
   TERMINAL_REVEAL_DEADLINE_MS,
+  subscribeTerminalInput,
   terminalAcceptsInput,
   terminalInputSender,
   terminalRevealDecision,
@@ -184,6 +189,9 @@ export function TerminalView({
   const [searchToggles, setSearchToggles] = useState<TerminalSearchToggles>(DEFAULT_TERMINAL_SEARCH_TOGGLES)
   // 「为什么这次没搜」——只在用户需要知道时有值（正则还没打完）。空查询不给理由。
   const [searchNotice, setSearchNotice] = useState<string | undefined>(undefined)
+  // 「第 3 个 / 共 47 个」。与 notice 分开两格：notice 说的是这次**没搜**，计数说的是搜到了什么，
+  // 两者可以同时有话说（上一轮搜到 47 条、这一轮正则还没打完），挤在一格里会互相盖掉。
+  const [searchCount, setSearchCount] = useState<string | undefined>(undefined)
   const [linkRequest, setLinkRequest] = useState<TerminalLinkRequest | null>(null)
   const [linkPreview, setLinkPreview] = useState<
     | { kind: 'http'; url: string; left: number; top: number; placement: 'above' | 'below'; fastPath: boolean }
@@ -271,7 +279,9 @@ export function TerminalView({
       scrollback: 5_000
     })
     const fit = new FitAddon()
-    const search = new SearchAddon()
+    // highlightLimit 显式传入而不是吃 addon 的默认值：计数文案要在命中上限时说「1000+」而不是
+    // 「1000」，那个判据和这个数必须是同一个来源。不传就得靠"库的默认恰好是 1000"这条无人守的假设。
+    const search = new SearchAddon({ highlightLimit: TERMINAL_SEARCH_HIGHLIGHT_LIMIT })
     /**
      * 一个 http 链接被点开时该发生什么。**两条 provider 共用这一个出口。**
      *
@@ -360,6 +370,10 @@ export function TerminalView({
     terminal.open(root)
     terminalRef.current = terminal
     searchAddonRef.current = search
+    // 「第 3 个 / 共 47 个」。订阅在 addon 加载之后立刻建立，而不是等面板打开：addon 在关闭状态下
+    // 也不会发结果事件，等到打开再订阅只是多一处生命周期，且会漏掉打开那一瞬的首次结果。
+    // 投影逻辑（截断下界、位置未知）在 lib 里，这里只剩这一句转发——见 terminal-search-count.ts 的说明。
+    const searchCounter = subscribeTerminalSearchCount(search, setSearchCount)
 
     // 宽度表必须在**任何回放字节写入之前**激活：单元格宽度在字节写入那一刻按当时的
     // Unicode 版本定型，先写进去的 CJK/emoji 会按默认的 v6 宽度串行，之后再切版本也救不回来。
@@ -443,7 +457,10 @@ export function TerminalView({
     }
     const releaseResourceOwners = acquireTerminalResourceOwners({
       addons: webgl ? 4 : 3,
-      listeners: 6
+      // 8 而非 7：onData 与 onBinary 是两个独立的 xterm 订阅（见 subscribeTerminalInput），
+      // 加上 search addon 的 onDidChangeResults（计数订阅）。三者都在 cleanup 里释放。
+      // 少数一个就等于把一条泄漏账瞒下去。
+      listeners: 8
     })
 
     let disposed = false
@@ -572,12 +589,20 @@ export function TerminalView({
     const resize = new ResizeObserver(() => viewport.observeViewport())
     resize.observe(root)
     /**
-     * 输入的唯一出口。三条通路（onData、OSC 回复、Shift+Enter）都送进这里——
+     * 输入的唯一出口。四条通路（onData、onBinary、OSC 回复、Shift+Enter）都送进这里——
      * 少卡一条就等于没卡，用户总会找到那一条。
      *
      * 闸不写在这里：`terminalInputSender` 把「判定 + 送出」一起收在 lib 里，所以这个组件里
      * 没有一个可以写反的 `if`。此前三处各写一个 `if (acceptsInputNow())`，把它们一起取反
      * 76 条断言全绿——文本守卫数得出闸的**个数**，数不出**极性**。
+     *
+     * onData 与 onBinary 是同一件事（用户输入）的两个编码面，共用这同一把闸：xterm 对鼠标上报
+     * 有两个出口——SGR 编码（程序开了 DECSET ?1006）走 onData，是 ASCII；只开旧式协议
+     * （?1000/?1002/?1003 或 ?9 而没开 ?1006）时坐标字节可能 ≥128、是 latin1 语义，xterm 为了
+     * 不被 UTF-8 破坏改走 onBinary。少订阅 onBinary，旧式鼠标 TUI（很多 ncurses 程序、旧配置的
+     * vim/htop）里鼠标就**完全没反应**，而现代 TUI 里鼠标正常——极难归因到这里。编码差异只在
+     * 源头处理（见 subscribeTerminalInput / encodeTerminalBinaryInput）：latin1 字节必须以
+     * Uint8Array 身份透传，否则 SDK 的 UTF-8 编码会把 0x80 拆成 0xC2 0x80、坐标毁掉。
      */
     const sendInput = terminalInputSender({
       accepts: () =>
@@ -590,7 +615,7 @@ export function TerminalView({
         void api.sessions.write(session.control, data)
       }
     })
-    const input = terminal.onData(sendInput)
+    const input = subscribeTerminalInput(terminal, sendInput)
     const selection = terminal.onSelectionChange(() => {
       const text = terminal.getSelection()
       if (text) rememberedSelectionRef.current = text
@@ -602,7 +627,9 @@ export function TerminalView({
       sendInput
     })
     terminal.attachCustomKeyEventHandler((event) => {
-      if (isShiftEnterNewline(event)) {
+      // 终端作用域的键判定统一从注册表匹配（scope 'terminal'），本层只做「命中之后送什么字节/做什么」。
+      const shortcutId = matchShortcut(event, isMac, { scope: 'terminal' })
+      if (shortcutId === 'terminal.newline') {
         // xterm 对 Enter 与 Shift+Enter 送同一个裸 \r（终端线路上没有表达修饰键的位置），
         // 下游 TUI 因此只能把 Shift+Enter 读成提交，用户写不了多行。这里显式送出不同的字节。
         if (event.type === 'keydown') {
@@ -610,15 +637,15 @@ export function TerminalView({
         }
         return false
       }
-      if (isTerminalAppShortcut(event, 'f', isMac)) {
+      if (shortcutId === 'terminal.search') {
         if (event.type === 'keydown') setSearchOpen(true)
         return false
       }
-      if (isTerminalAppShortcut(event, 'c', isMac) && terminal.hasSelection()) {
+      if (shortcutId === 'terminal.copy' && terminal.hasSelection()) {
         if (event.type === 'keydown') {
           const text = terminal.getSelection()
           if (text) rememberedSelectionRef.current = text
-          void api.ui.writeClipboardText(text).catch(reportError)
+          void copyTextToClipboard(text, reportError)
         }
         return false
       }
@@ -627,7 +654,7 @@ export function TerminalView({
       // (Electron's Edit→Paste role → xterm's textarea paste listener) still fires. Handling
       // Cmd/Ctrl+V here as well applied the same clipboard text twice. The native path is the
       // single owner of paste; right-click paste is served by pasteClipboard().
-      if (isTerminalAppShortcut(event, 'k', isMac)) {
+      if (shortcutId === 'terminal.clear') {
         if (event.type === 'keydown') terminal.clear()
         return false
       }
@@ -761,6 +788,7 @@ export function TerminalView({
       webglContextLoss?.dispose()
       webgl?.dispose()
       colorQuerySuppression.dispose()
+      searchCounter.dispose()
       selection.dispose()
       pathLinks.dispose()
       disposeEvents()
@@ -796,7 +824,7 @@ export function TerminalView({
     const text = terminalSelectionForCopy(terminal?.getSelection() ?? '', rememberedSelectionRef.current)
     if (!text) return
     rememberedSelectionRef.current = text
-    void api.ui.writeClipboardText(text).catch(reportError)
+    void copyTextToClipboard(text, reportError)
   }
 
   function pasteClipboard(): void {
@@ -814,6 +842,9 @@ export function TerminalView({
     // 「正则还不完整」——那时用户还没输任何东西，这句话就成了假话。开关本身不重置：
     // 成熟编辑器都记住它们，打开搜索发现上次的条件还在才是符合预期的。
     setSearchNotice(undefined)
+    // 计数同理，而且必须显式清：clearDecorations 只擦掉高亮，addon 不会为"擦干净了"再发一次
+    // 结果事件。不清的话，下次打开面板会先亮着上次的「3 of 47」，而那时输入框里什么都没有。
+    setSearchCount(undefined)
     terminalRef.current?.focus()
   }
 
@@ -978,6 +1009,12 @@ export function TerminalView({
                   if (event.key === 'Escape') closeSearch()
                 }}
               />
+              {/* 「3 of 47」。位置在输入框与上下箭头**之间**：它回答的是"我现在在第几个、一共几个"，
+                  而那两个箭头就是拿它导航的，读起来是一句连贯的话。这里也常驻 live region 而不是
+                  条件插入——理由同下面的 notice。空文案时收起来，搜索条恢复成原来的宽度。 */}
+              <span className="terminal-search__count" role="status" hidden={!searchCount}>
+                {searchCount ?? ''}
+              </span>
               <button type="button" title="Previous match" onClick={() => searchWith(searchQuery, searchToggles, true)}><ChevronUp size={13} /></button>
               <button type="button" title="Next match" onClick={() => searchWith(searchQuery, searchToggles)}><ChevronDown size={13} /></button>
               {/* 三个开关。能力本来就在 addon 里，这里只是把它露出来。翻转后**立刻按新条件重搜**

@@ -56,7 +56,12 @@ describe('built-in Provider conformance', () => {
         endpoint
       )
 
-      expect(capabilities.hookEvents).toBe(hookStrategy.kind === 'native')
+      // `hookStrategy.kind` is the SINGLE source of "does this provider emit native hooks". It used to
+      // be mirrored by a `capabilities.hookEvents` boolean that nothing read (the real consumers —
+      // client.ts, doctor.ts, hook-normalizer.ts — all branch on `hookStrategy.kind`), so the boolean
+      // was pure drift surface and is gone. This asserts the surviving source stays wired to behavior:
+      // a native strategy must produce a managed plan (when explicit-managed) and a `none` strategy must
+      // produce no plan and no hook-derived timeline/permission.
       if (hookStrategy.kind === 'none') {
         expect(managedPlan).toBeNull()
         expect(capabilities.timeline).toBe('unavailable')
@@ -95,6 +100,32 @@ describe('built-in Provider conformance', () => {
       for (const mutation of withoutEndpoint.mutations) {
         expect(mutation.content).not.toContain('undefined')
       }
+    }
+  })
+
+  // AgentCapabilities は "each field describes an axis Core actually branches on". Two booleans used to
+  // live here — `hookEvents` and `acp` — that nothing read: their real twins are `hookStrategy.kind` and
+  // `acpStrategy.kind`, which client.ts/doctor.ts/hook-normalizer.ts branch on. A per-provider boolean
+  // that only ever restates another declared field is drift surface: 12 hand-written copies that a new
+  // provider can silently get wrong. They are deleted.
+  //
+  // This guard bites the mutation "re-add a zero-consumer descriptor field": it freezes the capability
+  // key-set to a written literal (NOT derived from the object under test — that would drift along with
+  // the mutation). Re-introducing `hookEvents`/`acp`, or any other describe-only boolean, adds a key and
+  // turns this red, forcing the author to either wire a real consumer or keep it out.
+  it('AgentCapabilities exposes exactly the axes with a runtime consumer — no re-added mirror fields', () => {
+    // Anchored literal. `terminal` and `replyCorrelation` are intentionally kept even though today only
+    // structural consumers touch them; the point of the freeze is that ADDING a key is a deliberate act
+    // that updates this line, so a silently re-added `hookEvents`/`acp` mirror cannot slip back in.
+    const EXPECTED_CAPABILITY_KEYS = [
+      'permission', 'providerResume', 'replyCorrelation', 'terminal', 'timeline', 'usage'
+    ]
+    for (const provider of providers) {
+      // `usage` is optional, so union it in before comparing: a provider that omits it still must not
+      // introduce any key outside the frozen set.
+      const keys = new Set(Object.keys(provider.catalog.capabilities))
+      keys.add('usage')
+      expect([...keys].sort()).toEqual(EXPECTED_CAPABILITY_KEYS)
     }
   })
 

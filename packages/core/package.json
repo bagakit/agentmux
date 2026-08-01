@@ -47,6 +47,10 @@
     "./provider-id": {
       "types": "./dist/agent-provider-id.d.ts",
       "import": "./dist/agent-provider-id.js"
+    },
+    "./run-status": {
+      "types": "./dist/agent-run-status.d.ts",
+      "import": "./dist/agent-run-status.js"
     }
   },
   "bin": {

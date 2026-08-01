@@ -43,7 +43,6 @@ describe('Gemini provider', () => {
     it('不再是 terminal-only：Hook 与 native resume 都按实现声明', () => {
       const { capabilities, hookStrategy, resumeStrategy } = gemini.catalog
       expect(hookStrategy).toEqual({ kind: 'native', installation: 'explicit-managed' })
-      expect(capabilities.hookEvents).toBe(true)
       expect(capabilities.timeline).toBe('complete-events')
       // findSession 是 UUID 优先，所以 locator 是 session-id 而不是位置性的序号。
       expect(resumeStrategy).toEqual({ kind: 'provider-native', locator: 'session-id' })
@@ -51,7 +50,6 @@ describe('Gemini provider', () => {
       expect(capabilities.permission).toBe('observe')
       // `--acp` 在 CLI 上真实存在，但 AgentMux 侧没接，故如实声明未支持——这条守「宁缺毋滥」。
       expect(gemini.catalog.acpStrategy).toEqual({ kind: 'none' })
-      expect(capabilities.acp).toBe(false)
       // transcript_path 拿得到，但那份 transcript 是整文件 JSON，两个既有 reader 都读不了，
       // 所以 usage 保持未声明。声明了就等于承诺能抽 token。
       expect(capabilities.usage).toBeUndefined()

@@ -10,8 +10,8 @@ export function createTraexProvider(defineAgentProvider: ProviderFactory): Agent
       id: 'traex', label: 'TraeX', executable: 'traex', expectedProcess: 'traex', promptDelivery: 'positional-argv',
       hookStrategy: { kind: 'none' }, resumeStrategy: { kind: 'none' }, acpStrategy: { kind: 'none' },
       capabilities: {
-        terminal: true, hookEvents: false, timeline: 'unavailable', permission: 'none', providerResume: false,
-        acp: false, replyCorrelation: 'none'
+        terminal: true, timeline: 'unavailable', permission: 'none', providerResume: false,
+        replyCorrelation: 'none'
       }
     }),
     buildArgs: (prompt, args) => [...args, ...(prompt ? [prompt] : [])],

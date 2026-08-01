@@ -254,12 +254,12 @@ export function createPiProvider(defineAgentProvider: ProviderFactory): AgentPro
       resumeStrategy: { kind: 'provider-native', locator: 'transcript-path' },
       acpStrategy: { kind: 'none' },
       capabilities: {
-        terminal: true, hookEvents: true, timeline: 'complete-events',
+        terminal: true, timeline: 'complete-events',
         // `none` 而非 observe：Pi 没有任何可订阅的授权/等待事件（`types.ts` 里没有 permission 族；
         // `ui_prompt_*` 只在扩展自己弹窗时发，见 PI_HOOKS 那段）。声明 observe 会是一句
         // 「我们看得见它在等人」的谎。
         permission: 'none',
-        providerResume: true, acp: false,
+        providerResume: true,
         // 工具调用两端确实带同一个 `toolCallId`（`types.ts:889-892`/`:798-803`/`:815-821`），但我们
         // 今天没有把它投递上来（payload 只放 tool_name/tool_input）。按「未接线就不声明」记 none；
         // 要改成有关联，得先在扩展源码里把 toolCallId 投出来，两处一起改。

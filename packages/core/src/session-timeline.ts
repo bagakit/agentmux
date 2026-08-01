@@ -189,6 +189,14 @@ export function applyAgentTimelineMutation(
     // 就地替换。保留最初的 createdAt——这仍是「同一件事」，创建时刻不该被事后投递改写；
     // 语义未变则原样返回，避免推空的 revision。
     const previous = items[index]!
+    // 更旧的观测**不许**改写更新的：否则一条乱序/重投的事件会把已完成的工具结果静默回退成
+    // 在途态（`complete/有 toolOutput` → `streaming/旧输出`，`updatedAt` 甚至倒流），而这一行随后
+    // 被持久化、被 renderer 原样重放——那次调用在界面上「退回未完成」。
+    //
+    // 与 update 路径（下面那处抛 `STALE_AGENT_TIMELINE_ITEM`）判的是同一件事，但**处置不同**：
+    // upsert 的调用方是 hook 事件，抛错会让整条事件回 503（这正是 index<0 那支补落而不抛的理由）。
+    // 所以这里保留原行、原样返回——拒绝这次回退，而不是把回退变成一次失败。
+    if (mutation.item.updatedAt < previous.updatedAt) return items
     const next: AgentTimelineItem = { ...structuredClone(mutation.item), createdAt: previous.createdAt }
     if (sameItemSemantics(previous, next)) return items
     items[index] = next

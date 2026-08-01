@@ -49,6 +49,18 @@ export class ProcessResourceSampler {
   private inFlight: Promise<void> | null = null
   private latest: UsageSnapshot | null = null
   private lastError: string | null = null
+  /**
+   * 「这次采样属于哪一段观察」。
+   *
+   * `ps` 是异步的，所以最后一个订阅者走的时候，可能正有一次采样在飞。它落地时会写
+   * `samples` 与 `latest`——而那两样正是 `stop()` 刚清掉的，于是清空被静默撤销。实测过的
+   * 后果：关闭前那一瞬的 95% 峰值被写回，两秒后重开面板显示 95，而真实当前是 3。CPU 是
+   * 10 秒窗口取峰值，所以只要在窗口内重开就看得见这个不存在的尖峰。
+   *
+   * 用不着取消 `ps`（也取消不了）：只要让每次采样记住自己出发时的这个号，落地时对不上就
+   * 整个丢弃。号在 `stop()` 里递增，所以「已经停了」和「停了又开」都对不上。
+   */
+  private generation = 0
 
   constructor(
     private readonly readTable: ProcessTableReader = readProcessTable,
@@ -94,6 +106,8 @@ export class ProcessResourceSampler {
     // 样本一并丢掉：面板再打开时，旧样本描述的是另一段时间。
     this.samples.clear()
     this.latest = null
+    // 递增之后，任何在途采样落地时都会发现自己属于上一段观察，从而不写回刚清掉的东西。
+    this.generation += 1
   }
 
   /**
@@ -104,17 +118,19 @@ export class ProcessResourceSampler {
    */
   private async sampleOnce(): Promise<void> {
     if (this.inFlight) return this.inFlight
-    this.inFlight = this.runSample().finally(() => { this.inFlight = null })
+    this.inFlight = this.runSample(this.generation).finally(() => { this.inFlight = null })
     return this.inFlight
   }
 
-  private async runSample(): Promise<void> {
+  private async runSample(generation: number): Promise<void> {
     const observedAt = this.now()
     let rows
     try {
       rows = parseProcessTable(await this.readTable())
+      if (generation !== this.generation) return
       this.lastError = null
     } catch (cause) {
+      if (generation !== this.generation) return
       // 采样失败降级为"不可用"，不是 0——0 会被读成真值。上一次的数字保留但标记为过期。
       this.lastError = cause instanceof Error ? cause.message : String(cause)
       this.latest = {

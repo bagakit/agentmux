@@ -1,8 +1,9 @@
 import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentManagedHookInstaller } from '../src/managed-hook-installer.js'
+import { BUILT_IN_AGENT_PROVIDERS, resolveManagedHookPlan } from '../src/agent-provider.js'
 
 const directories: string[] = []
 
@@ -156,5 +157,57 @@ describe('explicit managed Hook installation', () => {
     expect(await installer.ensure(plan)).toBeNull()
     expect(await installer.ensure(plan)).toBeNull()
     expect(await readFile(existingPath, 'utf8')).toBe(afterFirst)
+  })
+
+  // 上面那条 install-and-leave 靠的是「内容 hash 未变 ⇒ 无需重写」。那条判据把一个契约压在了
+  // **计划构造侧**：同一个 workspace 解析出的计划内容必须恒定，绝不能含真实时钟。踩中它的后果有两个，
+  // 都不响亮：每次启动都重写一遍用户的 hooks 配置；以及 preview 与 install 两次渲染结果不一致而撞上
+  // HOOK_TARGET_CHANGED——启动照旧成功（install 失败是 best-effort，只发一条 agent-error），
+  // 用户拿到的是一个没有状态 hook 的 Agent。
+  //
+  // 这条契约今天每一家都成立，但只有 cursor 一家在注释里说过（它专门为此把 trust marker 的时间戳
+  // 从 `new Date()` 换成 workspace 路径 hash 派生的稳定纪元偏移）。其余各家全靠作者自觉，没人守。
+  // 所以这里逐家判——不抽样：判「分布性质」时抽一对可能恰好落在盲点上。
+  //
+  // 判据不是「两次调用相等」（同一毫秒内 `new Date()` 也相等，那样是恒真），而是**把系统时钟拨过去
+  // 一年半再调一次**仍相等。任何 Date.now()/new Date() 的使用都会在这里露出来。
+  it('每个 explicit-managed Provider 的计划内容对同一 workspace 恒定——不含真实时钟', () => {
+    const managed = BUILT_IN_AGENT_PROVIDERS.filter(
+      (provider) =>
+        provider.catalog.hookStrategy.kind === 'native' &&
+        provider.catalog.hookStrategy.installation === 'explicit-managed'
+    )
+    // 挡板：这一族读成空则下面循环一条不跑、整条静默通过。11 家是当前实际家数
+    // （九家写命令 + pi/opencode 两家写投递代码）。
+    expect(managed.length).toBeGreaterThanOrEqual(11)
+
+    const workspacePath = '/tmp/agentmux-plan-stability'
+    // 每次都给 endpoint：写**投递代码**的那一族（opencode 的 JS 插件跑在 OpenCode 自己的进程里，
+    // 读不到 AgentMux 注入 PTY 的环境变量）没有 endpoint 时会如实弃权返回 null——那是刻意设计，
+    // 内联一个死 token 比不装更坏。不给 endpoint 的话它在这里是 null，而本条要守的是**恒定性**，
+    // 不该因为「这一家在缺 endpoint 时弃权」就把它从恒定性判据里漏掉。
+    // endpoint 本身必须逐次相同，否则内容里内联的 url/token 会跟着变，把本条判成不恒定。
+    const endpoint = { url: 'http://127.0.0.1:65535/hook', token: 'stable-token' }
+    try {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2024-01-01T00:00:00.000Z'))
+      const before = Date.now()
+      const first = managed.map((provider) => resolveManagedHookPlan(provider.id, workspacePath, {}, endpoint))
+
+      vi.setSystemTime(new Date('2025-07-04T12:34:56.789Z'))
+      // 挡板：假时钟必须真的动了。若 vitest 某天不再伪造 Date，上面两次取值会相同，
+      // 这条判据就退化成「同一时刻调两次」——恒真。让那种失明响亮变红。
+      expect(Date.now()).toBeGreaterThan(before)
+      const second = managed.map((provider) => resolveManagedHookPlan(provider.id, workspacePath, {}, endpoint))
+
+      for (const [index, provider] of managed.entries()) {
+        // 声明了 explicit-managed 就必须真能解析出计划：解析器表漏一家会在这里露出来，
+        // 而不是被下面的「相等」判据当成 null === null 混过去。
+        expect(first[index], `${provider.id} declares explicit-managed but resolves no plan`).not.toBeNull()
+        expect(second[index], `${provider.id} plan is unstable across a clock change`).toEqual(first[index])
+      }
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

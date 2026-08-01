@@ -21,11 +21,14 @@ const FAR_FUTURE = Date.now() + 365 * 24 * 3600_000
 
 const servers: Server[] = []
 const roots: string[] = []
+// chmod 000 过的目录：删之前必须先还回权限，否则清理自己会失败并把根目录留在盘上。
+const lockedDirectories: string[] = []
 
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve) => {
     server.close(() => resolve())
   })))
+  for (const locked of lockedDirectories.splice(0)) await chmod(locked, 0o700).catch(() => {})
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
 })
 
@@ -225,6 +228,51 @@ describe('reclaimOrphanEndpointDirectories', () => {
     expect(outcome.skippedLive).toEqual([join(root, ORPHAN)])
     expect(await readdir(root)).toContain(ORPHAN)
     expect(await readFile(join(victim, 'precious.txt'), 'utf8')).toBe('do not delete me')
+  })
+
+  // -------------------------------------------------------------------------
+  // 「探不准」这一侧。合同是**判不出活着就当活着，绝不删**，而它此前无人守：把存活闸的两个兜底
+  // （未知 errno、超时）各翻成「死了」，本文件 20 条全绿（实测，review agent 假绿审计 #3）。
+  //
+  // 三态判定本身在 socket-liveness.test.ts 里逐条钉住；这里要证的是**另一半**——那个 `unknown`
+  // 真的走到了「保留」这一侧，而不是在本模块被折进「删」。所以判据落在文件系统上：目录还在。
+  // -------------------------------------------------------------------------
+  it('spares an orphan whose socket cannot be probed at all', async () => {
+    // 用一个探不动的 socket 复现「探不准」：把 endpoint 目录 chmod 000，探测得 EACCES（实测）。
+    // 这不是假想场景——权限异常、SIP/沙箱限制、目录属主被改都会走到这里，而它与「daemon 死了」
+    // 毫无关系。若这一侧被当成死，用户会因为一次权限抖动丢掉整个 state.sqlite3。
+    const root = await makeRoot()
+    await mkdir(join(root, CURRENT), { recursive: true })
+    await mkdir(join(root, ORPHAN, 'state'), { recursive: true })
+    await writeFile(join(root, ORPHAN, 'state', 'state.sqlite3'), 'precious run history')
+    await listenOn(join(root, ORPHAN, 'ctxmux.sock'))
+    await chmod(join(root, ORPHAN), 0o000)
+    lockedDirectories.push(join(root, ORPHAN))
+
+    const outcome = await reclaimOrphanEndpointDirectories(join(root, CURRENT), FAR_FUTURE)
+
+    expect(outcome.reclaimed).toEqual([])
+    expect(outcome.skippedLive).toEqual([join(root, ORPHAN)])
+    // 判据落在盘上：存储必须还在。
+    expect(await readdir(root)).toContain(ORPHAN)
+    await chmod(join(root, ORPHAN), 0o700)
+    expect(await readFile(join(root, ORPHAN, 'state', 'state.sqlite3'), 'utf8'))
+      .toBe('precious run history')
+  })
+
+  it('spares an orphan whose probe path is not a socket at all', async () => {
+    // 另一种探不准：`ctxmux.sock` 那个位置上是个普通文件（实测 errno 是 ENOTSOCK）。
+    // 这意味着我们对那个目录里发生了什么根本没看懂——看不懂的东西不能删。
+    const root = await makeRoot()
+    await mkdir(join(root, CURRENT), { recursive: true })
+    await mkdir(join(root, ORPHAN), { recursive: true })
+    await writeFile(join(root, ORPHAN, 'ctxmux.sock'), 'not a socket')
+
+    const outcome = await reclaimOrphanEndpointDirectories(join(root, CURRENT), FAR_FUTURE)
+
+    expect(outcome.reclaimed).toEqual([])
+    expect(outcome.skippedLive).toEqual([join(root, ORPHAN)])
+    expect(await readdir(root)).toContain(ORPHAN)
   })
 })
 

@@ -1,4 +1,5 @@
 import type {
+  AgentExecutorConfig,
   AgentTimelineSnapshot,
   AgentMuxDesktopApi,
   AgentMuxPreloadApi,
@@ -15,11 +16,8 @@ import type {
 } from '../../../shared/contracts'
 import { CONFIG_VERSION } from '../../../shared/contracts'
 import type { AgentCatalogEntry, AgentMuxControlRequest, AgentMuxControlResult } from '@agentmux/core'
-import {
-  CLAUDE_LAUNCH_OPTIONS,
-  CODEX_LAUNCH_OPTIONS,
-  describeLaunchOptions
-} from '@agentmux/core/launch-option'
+import { BUILT_IN_AGENT_PROVIDER_IDS } from '@agentmux/core/provider-id'
+import { LAUNCH_OPTIONS_BY_PROVIDER_ID, describeLaunchOptions } from '@agentmux/core/launch-option'
 import { createRendererControlApi } from './control-api'
 import {
   SCRATCH_TOPIC_TITLE_MAX_LENGTH,
@@ -29,21 +27,49 @@ import {
 
 const now = Date.now()
 const MOCK_SCREENSHOT_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADElEQVR42mNk+M/wHwAF/gL+3fVbWQAAAABJRU5ErkJggg=='
-const mockStructuredCapabilities = {
-  terminal: true as const,
-  hookEvents: true,
-  timeline: 'complete-events' as const,
-  permission: 'observe' as const,
+// Typed against the core contract, not a free-floating literal: the annotation makes tsc reject any
+// shape that diverges from `AgentCapabilities` — a field the core type dropped (the old `hookEvents` /
+// `acp` mirrors of `hookStrategy.kind` / `acpStrategy.kind`, both deleted as zero-consumer) can no
+// longer linger here, and a re-added one would have to earn a place in the core type first. Same
+// discipline as the launch-option lines below, which annotate against `AgentCatalogEntry['launchOptions']`
+// so the preview projects the core contract rather than hand-copying a shape that can drift out of it.
+const mockStructuredCapabilities: AgentCatalogEntry['capabilities'] = {
+  terminal: true,
+  timeline: 'complete-events',
+  permission: 'observe',
   providerResume: true,
-  acp: false,
-  replyCorrelation: 'none' as const
+  replyCorrelation: 'none'
 }
 // The browser-only preview projects the SAME SSOT launch-option declarations the real core catalog
 // projects — through describeLaunchOptions, exactly as defineAgentProvider does — so the preview can never
 // hand-copy a diverging catalog. Imported from @agentmux/core/launch-option, the node-free module (it pulls
 // only ./errors.js and ./types.js), so no Node built-in reaches the browser bundle.
-const mockCodexLaunchOptions: AgentCatalogEntry['launchOptions'] = describeLaunchOptions(CODEX_LAUNCH_OPTIONS)
-const mockClaudeLaunchOptions: AgentCatalogEntry['launchOptions'] = describeLaunchOptions(CLAUDE_LAUNCH_OPTIONS)
+//
+// The preview projects one Executor and one catalog entry PER built-in Provider id — derived from the same
+// node-free SSOT the identity type is built on (BUILT_IN_AGENT_PROVIDER_IDS), never a hand-copied subset.
+// Core's real catalog() would give richer per-Provider fields but it drags node:path / node:crypto into the
+// browser bundle, so the preview cannot import it; deriving from the id list keeps every Provider visible
+// without pulling Node in.
+//
+// Launch options come from LAUNCH_OPTIONS_BY_PROVIDER_ID, the reverse lookup in that same node-free module,
+// so every Provider that declares options gets its control here. This used to read
+// `id === 'codex' ? … : id === 'claude' ? … : []` under a comment claiming those two were the only
+// declarations exported node-free — which was never true. All eight live in that one module, so six
+// Providers' controls (plus grok's posture selector) were silently missing from the preview while the
+// comment vouched for the gap as honest absence. An id absent from the map declares nothing, which is the
+// real answer for pi/kimi/droid/copilot; core's own catalog is what keeps the map from drifting
+// (agent-provider.test.ts asserts it per Provider, both directions).
+const mockProviderLabel = (id: string): string => id.charAt(0).toUpperCase() + id.slice(1)
+const mockProviderLaunchOptions = (id: string): AgentCatalogEntry['launchOptions'] => {
+  const declarations = LAUNCH_OPTIONS_BY_PROVIDER_ID[id]
+  return declarations ? describeLaunchOptions(declarations) : []
+}
+const mockExecutors: Record<string, AgentExecutorConfig> = Object.fromEntries(
+  BUILT_IN_AGENT_PROVIDER_IDS.map((id) => [
+    id,
+    { label: mockProviderLabel(id), providerId: id, command: id, args: [], env: {}, injectAgentMuxGuide: true }
+  ])
+)
 let mockConfig: AppConfig = {
   version: CONFIG_VERSION,
   hosts: [
@@ -56,13 +82,7 @@ let mockConfig: AppConfig = {
       user: 'river'
     }
   ],
-  executors: {
-    codex: { label: 'Codex', providerId: 'codex', command: 'codex', args: ['--full-auto'], env: {}, injectAgentMuxGuide: true },
-    claude: { label: 'Claude', providerId: 'claude', command: 'claude', args: [], env: {}, injectAgentMuxGuide: true },
-    traex: { label: 'TraeX', providerId: 'traex', command: 'traex', args: [], env: {}, injectAgentMuxGuide: true },
-    hermes: { label: 'Hermes', providerId: 'hermes', command: 'hermes', args: [], env: {}, injectAgentMuxGuide: true },
-    pi: { label: 'Pi', providerId: 'pi', command: 'pi', args: [], env: {}, injectAgentMuxGuide: true }
-  },
+  executors: mockExecutors,
   workspaces: [
     { id: 'workspace-demo', name: 'agentmux', hostId: 'local', path: '/Users/river/agentmux', kind: 'folder' },
     { id: 'workspace-remote', name: 'render-lab', hostId: 'studio', path: '/srv/render-lab', kind: 'worktree', branch: 'feat/materials' }
@@ -549,10 +569,20 @@ const mockApi: AgentMuxDesktopApi = {
     }
   },
   providers: {
-    list: async () => [
-      { id: 'codex', label: 'Codex', executable: 'codex', expectedProcess: 'codex', promptDelivery: 'positional-argv', readySignal: { kind: 'foreground-process', expectedProcess: 'codex' }, hookStrategy: { kind: 'native', installation: 'explicit-managed' }, resumeStrategy: { kind: 'provider-native', locator: 'session-id' }, acpStrategy: { kind: 'none' }, capabilities: mockStructuredCapabilities, launchOptions: mockCodexLaunchOptions },
-      { id: 'claude', label: 'Claude', executable: 'claude', expectedProcess: 'claude', promptDelivery: 'positional-argv', readySignal: { kind: 'foreground-process', expectedProcess: 'claude' }, hookStrategy: { kind: 'native', installation: 'explicit-managed' }, resumeStrategy: { kind: 'provider-native', locator: 'session-id' }, acpStrategy: { kind: 'none' }, capabilities: mockStructuredCapabilities, launchOptions: mockClaudeLaunchOptions }
-    ]
+    list: async () =>
+      BUILT_IN_AGENT_PROVIDER_IDS.map((id) => ({
+        id,
+        label: mockProviderLabel(id),
+        executable: id,
+        expectedProcess: id,
+        promptDelivery: 'positional-argv',
+        readySignal: { kind: 'foreground-process', expectedProcess: id },
+        hookStrategy: { kind: 'native', installation: 'explicit-managed' },
+        resumeStrategy: { kind: 'provider-native', locator: 'session-id' },
+        acpStrategy: { kind: 'none' },
+        capabilities: mockStructuredCapabilities,
+        launchOptions: mockProviderLaunchOptions(id)
+      }))
   },
   executors: {
     detect: async (executorId, hostId) => ({
@@ -656,10 +686,13 @@ const mockApi: AgentMuxDesktopApi = {
       }
     },
     detach: async () => {},
-    write: async (control, data) => {
+    write: async (control, input) => {
       const sessionId = control.kind === 'agent' ? control.agentSessionId : control.runId
       const session = mockSnapshot.sessions.find((item) => item.id === sessionId)
       if (!session) return
+      // 这个 mock 只做文本回显与 timeline 记账。真实通路上 onBinary 会送 latin1 字节，
+      // 但 web 预览里没有旧式鼠标 TUI，这里按字符还原成文本即可，不引第二套字节账。
+      const data = typeof input === 'string' ? input : String.fromCharCode(...input)
       const previous = mockOutput.get(sessionId) ?? ''
       mockOutput.set(sessionId, `${previous}${data}`)
       if (session.kind === 'agent' && data.trim()) {

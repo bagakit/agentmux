@@ -158,7 +158,6 @@ describe('Kimi provider', () => {
       // unmanaged 而非 explicit-managed：配置面是 config.toml（TOML），本仓四种 merge 策略
       // 没有一种能编辑 TOML，且那是用户主配置。声明成 managed 就是「声明装了实际没装」。
       expect(hookStrategy).toEqual({ kind: 'native', installation: 'unmanaged' })
-      expect(capabilities.hookEvents).toBe(true)
       expect(capabilities.timeline).toBe('complete-events')
       expect(resumeStrategy).toEqual({ kind: 'provider-native', locator: 'session-id' })
       expect(capabilities.providerResume).toBe(true)
@@ -166,7 +165,6 @@ describe('Kimi provider', () => {
       expect(capabilities.permission).toBe('observe')
       // ACP 真实存在（`kimi acp` + agent-client-protocol 硬依赖），但 AgentMux 侧未接。
       expect(acpStrategy).toEqual({ kind: 'none' })
-      expect(capabilities.acp).toBe(false)
       expect(capabilities.replyCorrelation).toBe('none')
       // 收尾负载（events.py:73-96）里没有任何 token 字段，也不报 transcript 路径。
       expect(capabilities.usage).toBeUndefined()

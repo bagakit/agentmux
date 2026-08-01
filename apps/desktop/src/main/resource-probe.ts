@@ -454,7 +454,7 @@ function isReadyLauncherOwnerBaseline(owners: ResourceOwners): boolean {
     owners.runtimeSubscriptions === 4 &&
     owners.terminalViews === 1 &&
     (owners.terminalAddons === 3 || owners.terminalAddons === 4) &&
-    owners.terminalListeners === 6 &&
+    owners.terminalListeners === 7 &&
     owners.sessionAttachmentOwners === 1 &&
     owners.sessionAttachmentLeases === 1
   )
@@ -897,7 +897,7 @@ export async function runDesktopResourceProbe(options: {
       browserWebContents: browserOwnerBefore + 1,
       terminalViews: Math.max(0, releaseBaselineOwners.terminalViews - 1),
       terminalAddons: Math.max(0, releaseBaselineOwners.terminalAddons - 3),
-      terminalListeners: Math.max(0, releaseBaselineOwners.terminalListeners - 6),
+      terminalListeners: Math.max(0, releaseBaselineOwners.terminalListeners - 7),
       sessionAttachmentOwners: Math.max(0, releaseBaselineOwners.sessionAttachmentOwners - 1),
       sessionAttachmentLeases: Math.max(0, releaseBaselineOwners.sessionAttachmentLeases - 1)
     }

@@ -185,6 +185,61 @@ describe('Agent Session Timeline', () => {
       expect(applyAgentTimelineMutation(once, toolItem('run-x:tool:toolu_3'))).toEqual(once)
     })
 
+    it('upsert 拒绝更旧的观测：已完成的工具结果不被回退成在途态', () => {
+      // 乱序或重投的事件带着**更旧**的 updatedAt 到达。此前 upsert 完全不判顺序（只有 update 那侧判），
+      // 于是 `complete` + 真实 toolOutput 会被静默换成 `streaming` + 旧输出，`updatedAt` 还倒流——
+      // 这一行随后被持久化、被 renderer 用同一个函数原样重放，那次调用在界面上「退回未完成」。
+      const settled = applyAgentTimelineMutation([], toolItem('run-x:tool:toolu_4', {
+        updatedAt: 30,
+        toolOutput: 'final output'
+      }))
+      const afterStale = applyAgentTimelineMutation(settled, toolItem('run-x:tool:toolu_4', {
+        updatedAt: 20,
+        status: 'streaming',
+        toolOutput: 'stale output'
+      }))
+      // 期望值写死字面量、不从被测输入派生：否则实现变异时样本跟着漂，断言恒真。
+      expect(afterStale[0]).toMatchObject({ status: 'complete', toolOutput: 'final output', updatedAt: 30 })
+      // 整份原样返回（同一个数组内容），不推空 revision——拒绝这次回退，而不是产生一次新版本。
+      expect(afterStale).toEqual(settled)
+    })
+
+    it('upsert 拒绝回退，但**不抛**——抛错会让整条 hook 事件回 503', () => {
+      // 与 update 那侧判的是同一件事（后观测者胜），处置必须不同：upsert 的调用方是 hook 事件，
+      // 而 index<0 那支之所以补落也是同一个理由。这条把「拒绝」与「失败」分开钉住——若有人图省事
+      // 照抄 update 的 `throw STALE_AGENT_TIMELINE_ITEM`，它立刻变红。
+      const settled = applyAgentTimelineMutation([], toolItem('run-x:tool:toolu_5', { updatedAt: 30 }))
+      expect(() => applyAgentTimelineMutation(settled, toolItem('run-x:tool:toolu_5', { updatedAt: 20 })))
+        .not.toThrow()
+    })
+
+    it('同样的时刻（updatedAt 相等）仍然放行——拒绝的只是更旧', () => {
+      // 判据是严格更旧。hook 侧的 updatedAt 是收到时刻的 Date.now()，同毫秒内到达的 Pre/Post 完全
+      // 可能相等；若把判据写成 `<=`，那条 Post 就永远落不下来，工具调用永远停在在途态。
+      const pending = applyAgentTimelineMutation([], {
+        type: 'append',
+        agentSessionId: 'session-1',
+        item: {
+          id: 'run-x:tool:toolu_6',
+          agentSessionId: 'session-1',
+          kind: 'tool_call',
+          status: 'streaming',
+          source: 'native-hook',
+          createdAt: 30,
+          updatedAt: 30,
+          title: 'Bash',
+          toolName: 'Bash',
+          toolInput: 'ls'
+        }
+      })
+      const settled = applyAgentTimelineMutation(pending, toolItem('run-x:tool:toolu_6', {
+        updatedAt: 30,
+        status: 'complete',
+        toolOutput: 'landed'
+      }))
+      expect(settled[0]).toMatchObject({ status: 'complete', toolOutput: 'landed', updatedAt: 30 })
+    })
+
     it('upsert 也受 200 上限约束——补落一条时最旧的被逐出', () => {
       let items = normalizeAgentTimeline('session-1', [])
       for (let index = 0; index < 200; index += 1) {
@@ -266,6 +321,59 @@ describe('Agent Session Timeline', () => {
       )
     expect(combined).toHaveLength(4)
     expect(combined.find((item) => item.content === 'AB')).toMatchObject({ status: 'complete' })
+  })
+
+  it('update 拒绝更旧的观测：抛 STALE_AGENT_TIMELINE_ITEM 且内容不被改写', () => {
+    // 这条守的是 `mutation.updatedAt < previous.updatedAt` 那次抛错，此前全仓无人守（`git grep`
+    // 只命中抛错处本身）。乱序的 ACP activity update 到达时，若不判顺序，已完成的助手正文会回退成
+    // 更早的草稿（`complete` → `streaming`，content 从 'ABC' 退回 'AB'，updatedAt 倒流），而这行
+    // 随后被持久化并在 renderer 重放。
+    //
+    // 与 upsert 那侧处置不同是刻意的：update 的调用方是 ACP 事件流，抛错让它响亮失败；upsert 的
+    // 调用方是 hook 事件，抛错会把整条事件变成 503，所以那边保留原行。两处判同一件事、处置分开。
+    const appended = applyAgentTimelineMutation([], {
+      type: 'append',
+      agentSessionId: 'session-1',
+      item: {
+        id: 'response-9',
+        agentSessionId: 'session-1',
+        kind: 'assistant_message',
+        status: 'streaming',
+        source: 'acp',
+        createdAt: 10,
+        updatedAt: 10,
+        title: 'Assistant response',
+        content: 'A'
+      }
+    })
+    const settled = applyAgentTimelineMutation(appended, {
+      type: 'update',
+      agentSessionId: 'session-1',
+      itemId: 'response-9',
+      updatedAt: 30,
+      status: 'complete',
+      content: 'ABC'
+    })
+    expect(settled[0]).toMatchObject({ status: 'complete', content: 'ABC', updatedAt: 30 })
+
+    let code: string | null = null
+    try {
+      applyAgentTimelineMutation(settled, {
+        type: 'update',
+        agentSessionId: 'session-1',
+        itemId: 'response-9',
+        updatedAt: 20,
+        status: 'streaming',
+        content: 'AB'
+      })
+    } catch (error) {
+      code = (error as { code?: string }).code ?? null
+    }
+    // 钉具体 code 而不只是 toThrow：这一处有三种抛法（未知目标 / 另一个 Session / 陈旧），
+    // 只判「抛了」的话把守卫改成任意一种别的错都不会红。
+    expect(code).toBe('STALE_AGENT_TIMELINE_ITEM')
+    // 抛错之外还要证内容没被动过——纯函数不该在抛错前留下半个改写。
+    expect(settled[0]).toMatchObject({ status: 'complete', content: 'ABC', updatedAt: 30 })
   })
 
   it('assigns continuous Store revisions and does not advance revision for a no-op', async () => {

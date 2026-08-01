@@ -41,7 +41,6 @@ describe('Core Provider protocol', () => {
         const catalog = provider.catalog
         // 1. capability：逐项声明。
         expect(catalog.capabilities.terminal).toBe(true)
-        expect(typeof catalog.capabilities.hookEvents).toBe('boolean')
         // 2. evidence：凭什么算就绪，指名观察者。
         expect(catalog.readySignal).toEqual({
           kind: 'foreground-process',
@@ -72,7 +71,8 @@ describe('Core Provider protocol', () => {
         }
 
         // hook：没有 hook 的 Provider 不许声明 timeline/permission 能力——没有事件通路就没有证据来源。
-        expect(capabilities.hookEvents).toBe(hookStrategy.kind === 'native')
+        // hook 的有无由 `hookStrategy.kind` 单独承载（此前另有一份 `capabilities.hookEvents` 布尔镜像它，
+        // 无人读、已删）。
         if (hookStrategy.kind === 'none') {
           expect(capabilities.timeline).toBe('unavailable')
           expect(capabilities.permission).toBe('none')

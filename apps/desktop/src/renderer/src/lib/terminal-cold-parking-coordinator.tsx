@@ -84,13 +84,21 @@ export function collectTerminalColdParkCandidates(
         phase: surface.phase,
         // Only a currently running Run has an attach/replay contract. Interrupted, exited, errored,
         // or continuity-unavailable Sessions remain rendered so recovery stays visible.
+        //
+        // A continuity failure is covered by `state !== 'error'` and needs no clause of its own —
+        // a `status.continuity === undefined` clause here was measured to be dead code. Both writers
+        // of that field go through one producer (`continuityStatusFields` in store.ts, shared by the
+        // startup candidate projection and the user-pressed recovery path) which hardcodes
+        // `state: 'error'`; and every later status event replaces the whole `status` object
+        // (`session-state.ts`, agent-status and process-state), so the field cannot survive into a
+        // non-error state. Deleting such a clause reddened only a fixture hand-built to hold
+        // `state: 'running'` alongside it — a combination production never produces.
         canRebuild: Boolean(
           session &&
           session.processState === 'running' &&
           session.status.state !== 'error' &&
           session.status.state !== 'exited' &&
-          session.status.state !== 'disconnected' &&
-          session.status.continuity === undefined
+          session.status.state !== 'disconnected'
         ),
         hasPendingInteraction: Boolean(
           session?.kind === 'agent' && session.pendingInteraction

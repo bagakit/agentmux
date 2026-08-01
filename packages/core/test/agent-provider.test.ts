@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { homedir } from 'node:os'
 import { AgentProviderRegistry, createAntigravityManagedHookPlan, createClaudeManagedHookPlan, createCodexManagedHookPlan, createHermesManagedHookPlan, resolveManagedHookPlan } from '../src/agent-provider.js'
+import { LAUNCH_OPTIONS_BY_PROVIDER_ID } from '../src/agent-launch-option.js'
 
 describe('built-in agent providers', () => {
   const providers = new AgentProviderRegistry()
@@ -412,7 +413,7 @@ describe('built-in agent providers', () => {
       providerId: 'claude',
       executable: '/opt/claude',
       installed: true,
-      capabilities: { hookEvents: true, providerResume: true, acp: false }
+      capabilities: { providerResume: true }
     })
     expect(probes).toEqual(['/opt/claude'])
   })
@@ -734,9 +735,9 @@ describe('built-in agent providers', () => {
 
   it('projects launch options only for providers that declare them (absence hides the control)', () => {
     const catalog = new Map(providers.catalog().map((provider) => [provider.id, provider.launchOptions]))
-    // Each option id, per provider, matches the verified flag it declares. cursor and pi declare none —
-    // cursor because its executable exposes no such flag we chose to declare, pi likewise — so the
-    // renderer draws no launch control for them (absence hides, never a disabled affordance).
+    // Each option id, per provider, matches the verified flag it declares. pi declares none — its
+    // executable exposes no such flag we chose to declare — so the renderer draws no launch control
+    // for it (absence hides, never a disabled affordance).
     expect(catalog.get('codex')?.map((option) => option.id)).toEqual(['sandbox', 'approval'])
     // claude declares model + effort ahead of permission-mode; both --model and --effort are enumerated by
     // `claude --help`, so they are honestly declared (declaration order is what resolveLaunchArgv locks).
@@ -749,6 +750,43 @@ describe('built-in agent providers', () => {
     expect(catalog.get('cursor')?.map((option) => option.id)).toEqual(['mode', 'sandbox', 'approvals'])
     // pi is the one built-in that declares nothing, so the control has nothing to render for it.
     expect(catalog.get('pi')).toEqual([])
+  })
+
+  it('LAUNCH_OPTIONS_BY_PROVIDER_ID answers for every Provider exactly what its catalog entry declares', () => {
+    // 这张映射是给拿不到 Provider 本体的调用方用的——Desktop 的浏览器 preview 就是那个调用方，
+    // 它导不了真 catalog（node:path / node:crypto 会进浏览器包），只能按 id 查。
+    //
+    // 它是手写的，所以必然会漂：漏掉一个 Provider 时，preview 会静默隐藏那个 Provider 的启动选项
+    // 控件，而 Provider 侧一切正常，两边各自全绿。这条正是那次事故的形状——preview 曾用
+    // `id === 'codex' ? … : id === 'claude' ? … : []` 回答，把另外六个有声明的 Provider 全藏了。
+    //
+    // 判据是**逐 Provider 与真 catalog 相等**，不是重数一遍 option id（上面那条已经在数了，
+    // 再数一遍只会让两处一起漂）。两族（映射里有 / 映射里无）的并集必须是全部 Provider，
+    // 否则漏掉的那个既不被"相等"守也不被"为空"守。
+    const catalog = new Map(providers.catalog().map((provider) => [provider.id, provider.launchOptions]))
+    const declared: string[] = []
+    const empty: string[] = []
+    for (const [id, options] of catalog) {
+      const mapped = LAUNCH_OPTIONS_BY_PROVIDER_ID[id]
+      if (options.length > 0) {
+        declared.push(id)
+        // 映射给的是 DECLARATION（带 argv），catalog 给的是 DESCRIBE 投影（无 argv），
+        // 所以按 option id 与每个 option 的 choice id 序列比对——这是两半共有的部分。
+        expect(mapped, `${id} declares launch options but the map has none`).toBeDefined()
+        expect(mapped!.map((option) => option.id)).toEqual(options.map((option) => option.id))
+        expect(mapped!.map((option) => option.choices.map((choice) => choice.id)))
+          .toEqual(options.map((option) => option.choices.map((choice) => choice.id)))
+      } else {
+        empty.push(id)
+        // 不声明的 Provider 在映射里必须**缺席**，而不是映射成空数组：那样查不出"忘了加"与
+        // "确实没有"的区别。
+        expect(mapped, `${id} declares no launch options, so the map must not list it`).toBeUndefined()
+      }
+    }
+    // 两族并集就是全集：任何一个 Provider 都落进了上面某一侧，没有谁被跳过。
+    expect([...declared, ...empty].sort()).toEqual([...catalog.keys()].sort())
+    // 且映射里不许有 catalog 之外的 id——一个改了名的 Provider 会在这里露出来。
+    expect(Object.keys(LAUNCH_OPTIONS_BY_PROVIDER_ID).sort()).toEqual(declared.sort())
   })
 
   it('projects the DESCRIBE half without leaking any argv across the catalog', () => {

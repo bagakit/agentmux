@@ -8,7 +8,7 @@ describe('Renderer resource owner counts', () => {
     expect(rendererResourceOwnerCounts({
       documentCount: 3,
       runtimeSubscriptionCount: 2,
-      terminalOwners: { terminalViews: 1, terminalAddons: 4, terminalListeners: 6 },
+      terminalOwners: { terminalViews: 1, terminalAddons: 4, terminalListeners: 7 },
       monacoEditorCount,
       monacoModelCount
     })).toEqual({
@@ -18,7 +18,7 @@ describe('Renderer resource owner counts', () => {
       runtimeSubscriptions: 2,
       terminalViews: 1,
       terminalAddons: 4,
-      terminalListeners: 6
+      terminalListeners: 7
     })
     expect(monacoEditorCount).toHaveBeenCalledOnce()
     expect(monacoModelCount).toHaveBeenCalledOnce()

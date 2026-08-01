@@ -12,9 +12,13 @@ import {
   type AgentMuxClientEvent,
   type AgentMuxInteractionResponse,
   type AgentMuxAgentSessionStore,
+  type AgentMuxRunInputData,
   type AgentMuxRuntimeSubject,
   type ExecutionHost
 } from '@agentmux/core'
+// 进程事实的投影走那个 node-free 子路径，与 renderer 侧的实时路径**同一个**实现。走子路径而不是包根，
+// 是为了让两侧 import 的是同一个模块——包根那条链拖 node:crypto，renderer 引不动。
+import { projectRunProcessStatus } from '@agentmux/core/run-status'
 import type { WebContents } from 'electron'
 import type {
   ExecutorDetection,
@@ -153,17 +157,19 @@ function projectSession(
 ): SessionSnapshot {
   const run = subject.run
   const observedAt = run.observedAt
-  const processStatus = {
-    state: run.state === 'interrupted' ? 'error' as const : run.state,
-    source: 'run-process' as const,
+  // 「进程事实 → 界面那一行状态」只有一个答案，走 Core 的共享投影。这里只负责把快照的字段形状取出来。
+  // 曾经这段是本地手写的：于是它带 `signal SIGSEGV` 的 detail 而实时路径（session-state 收
+  // process-state 事件那处）整段没有，同一个崩掉的 Agent 在场时看不到信号、reload 之后反而看到了。
+  const processStatus = projectRunProcessStatus({
+    state: run.state,
+    source: 'run-process',
     observedAt,
-    ...(run.state === 'interrupted'
-      ? { detail: 'The Run owner interrupted this PTY.' }
-      : run.exitSignal !== undefined
-        ? { detail: `signal ${run.exitSignal}` }
-        : {}),
-    ...(run.exitCode === undefined ? {} : { exitCode: run.exitCode })
-  }
+    ...(run.exitCode === undefined ? {} : { exitCode: run.exitCode }),
+    ...(run.exitSignal === undefined ? {} : { exitSignal: run.exitSignal }),
+    // 退出原因随 snapshot 一起过来，与 live 的 process-state 事件同源同值。少了这一行，reload 之后
+    // 「你关的还是它崩的」就退化成裸 signal 号——同一个已退出的 Agent，在场时说得清，重开窗口就说不清了。
+    ...(run.exitReason === undefined ? {} : { exitReason: run.exitReason })
+  })
   if (subject.kind === 'agent') {
     const status = run.state === 'running' && subject.agentSession.semanticStatus
       ? structuredClone(subject.agentSession.semanticStatus)
@@ -175,11 +181,9 @@ function projectSession(
       executorId: subject.executorId,
       capabilities: capabilities ?? {
         terminal: true,
-        hookEvents: false,
         timeline: 'unavailable',
         permission: 'none',
         providerResume: false,
-        acp: false,
         replyCorrelation: 'none'
       },
       hostId: subject.hostId,
@@ -748,7 +752,7 @@ export class RuntimeController {
     })
   }
 
-  async write(control: SessionControl, data: string): Promise<void> {
+  async write(control: SessionControl, data: AgentMuxRunInputData): Promise<void> {
     const client = await this.connectedClient(control.hostId)
     if (control.kind === 'agent') await client.writeAgent(control.agentSessionId, data)
     else await this.writeTerminalInput(client, control, data)
@@ -1058,7 +1062,7 @@ export class RuntimeController {
   private async writeTerminalInput(
     client: AgentMuxClient,
     control: Extract<SessionControl, { kind: 'terminal' }>,
-    data: string
+    data: AgentMuxRunInputData
   ): Promise<void> {
     const key = terminalInputKey(control.hostId, control.runId)
     const previous = this.terminalInputTails.get(key) ?? Promise.resolve()

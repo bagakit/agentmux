@@ -39,7 +39,10 @@ const CODEX_ROLLOUT =
       type: 'token_count',
       info: {
         total_token_usage: { input_tokens: 999999, output_tokens: 888888, total_tokens: 1888887 },
-        last_token_usage: { input_tokens: 61008, output_tokens: 3381, total_tokens: 64389 }
+        // total 故意不等于 input+output（61008+3381=64389）：codex 自报的 total 还含
+        // reasoning_output_tokens 之类不在 in/out 里的量。三数自洽时「用它报的」与「自己加」
+        // 结果相同，那条取值就无人守——见 agent-usage-transcript.test.ts 同一组 fixture。
+        last_token_usage: { input_tokens: 61008, output_tokens: 3381, total_tokens: 67039 }
       }
     }
   }) + '\n'
@@ -223,8 +226,12 @@ describe('hook 子进程跑在 Core 注入的环境里，用量才真的到得�
     expect(payload.agentmuxUsage).toMatchObject({
       inputTokens: 61008,
       outputTokens: 3381,
-      totalTokens: 64389
+      totalTokens: 67039
     })
+    // 端到端这一侧也钉住「total 是 codex 报的、不是我们加的」：67039 ≠ 61008+3381。
+    // 走 toMatchObject 而不是取属性：payload 是 Record<string, unknown>，`.totalTokens` 在
+    // 类型上是 unknown，直接取会让 tsc 红（本仓已知形状：vitest 全绿掩盖联合类型错）。
+    expect(payload.agentmuxUsage).not.toMatchObject({ totalTokens: 61008 + 3381 })
   })
 
   it('未声明 usage 的 Provider：transcript 就在眼前也一个字都不抽', async () => {

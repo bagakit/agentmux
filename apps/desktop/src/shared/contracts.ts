@@ -15,6 +15,7 @@ import type {
   AgentMuxInteractionResponse,
   AgentMuxRunDataEvent,
   AgentMuxRunExitReason,
+  AgentMuxRunInputData,
   AgentMuxRunRef,
   AgentMuxRunReplayGap,
   AgentMuxRunState,
@@ -831,7 +832,7 @@ export type AgentMuxDesktopApi = {
     timeline(session: AgentSessionControl): Promise<AgentTimelineSnapshot>
     attach(session: SessionControl, afterByte?: number): Promise<SessionAttachResult>
     detach(attachmentId: string): Promise<void>
-    write(session: SessionControl, data: string): Promise<void>
+    write(session: SessionControl, data: AgentMuxRunInputData): Promise<void>
     submitPrompt(session: AgentSessionControl, prompt: string): Promise<void>
     respondInteraction(
       session: AgentSessionControl,

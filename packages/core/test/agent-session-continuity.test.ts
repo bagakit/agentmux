@@ -345,11 +345,9 @@ const CODEX_RESUME_CAPABILITY = {
   installed: true,
   capabilities: {
     terminal: true,
-    hookEvents: true,
     timeline: 'complete-events' as const,
     permission: 'respond' as const,
     providerResume: true,
-    acp: false,
     replyCorrelation: 'none' as const,
     usage: { kind: 'native-transcript' as const, transcriptFormat: 'codex-rollout' as const }
   }

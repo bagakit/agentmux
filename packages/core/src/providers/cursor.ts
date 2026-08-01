@@ -181,13 +181,13 @@ export function createCursorProvider(defineAgentProvider: ProviderFactory): Agen
       resumeStrategy: { kind: 'provider-native', locator: 'session-id' },
       acpStrategy: { kind: 'none' },
       capabilities: {
-        terminal: true, hookEvents: true, timeline: 'complete-events',
+        terminal: true, timeline: 'complete-events',
         // observe 而非 respond：`preToolUse` 与两个 shell/MCP 门确实读 stdout 上的
         // `permission: allow|deny|ask`，但回决定要把这条 fire-and-forget 的 hook 变成阻塞 RPC。
         // 我们回 `{}`——Cursor 的校验器写明 permission 可以是 undefined，且它只在**显式**
         // `continue === false` 时拦提交，所以 `{}` 既合法又不改变它的行为。
         permission: 'observe',
-        providerResume: true, acp: false, replyCorrelation: 'none'
+        providerResume: true, replyCorrelation: 'none'
         // usage 刻意不声明：Cursor 的 `stop` 负载**直接带** `input_tokens`/`output_tokens`/
         // `cache_read_tokens`/`cache_write_tokens`，压根不需要读 transcript——而今天的 usage 通路
         // （AgentUsageCapability）只有 native-transcript 一种形状，声明它等于承诺去解析一个

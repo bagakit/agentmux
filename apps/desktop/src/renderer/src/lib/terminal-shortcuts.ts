@@ -1,18 +1,7 @@
-export type TerminalShortcutEvent = Pick<
-  KeyboardEvent,
-  'altKey' | 'ctrlKey' | 'key' | 'metaKey' | 'shiftKey'
->
-
-export function isTerminalAppShortcut(
-  event: TerminalShortcutEvent,
-  key: string,
-  isMac: boolean
-): boolean {
-  if (event.key.toLowerCase() !== key || event.altKey) return false
-  return isMac
-    ? event.metaKey && !event.ctrlKey
-    : event.ctrlKey && event.shiftKey && !event.metaKey
-}
+// The "what bytes / which text after the key" helpers for the terminal. The chord decisions themselves —
+// is this Cmd+F / Cmd+C / Cmd+K, is this the bare Shift+Enter newline — now live in `shortcut-registry.ts`
+// (terminal scope), so the one platform bottom line is expressed once. What stays here is the part that is
+// NOT a key decision: which selection to copy, and which byte sequence a newline must send.
 
 /**
  * xterm can clear its live selection while a context menu takes focus. Keep the
@@ -39,20 +28,9 @@ export function terminalSelectionForCopy(liveSelection: string, rememberedSelect
  * 没协商过却送 CSI-u 会让那个程序收到一串它不认识的字节，因此协议状态只能探测、不能假定，
  * 见 `terminal-kitty-keyboard.ts`。
  */
-export const SHIFT_ENTER_CSI_U = '\u001b[13;2u'
-export const SHIFT_ENTER_ESC_CR = '\u001b\r'
+export const SHIFT_ENTER_CSI_U = '[13;2u'
+export const SHIFT_ENTER_ESC_CR = '\r'
 
 export function shiftEnterInput(kittyKeyboardActive: boolean): string {
   return kittyKeyboardActive ? SHIFT_ENTER_CSI_U : SHIFT_ENTER_ESC_CR
-}
-
-/**
- * 这个按键事件是不是"要换行的 Shift+Enter"。
- *
- * 只认单独的 Shift：叠加 Ctrl/Alt/Meta 时是另外的和弦，可能有它自己的含义，我们不接管——
- * 接管一个自己没想清楚的组合，等于替下游程序做了它没同意的决定。
- */
-export function isShiftEnterNewline(event: TerminalShortcutEvent): boolean {
-  if (event.key !== 'Enter') return false
-  return event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey
 }

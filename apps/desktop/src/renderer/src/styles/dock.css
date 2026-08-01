@@ -211,6 +211,11 @@
 .change-row__identity strong, .change-row__identity small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .change-row__identity strong { font-size: var(--fs-meta); color: var(--text-2); }
 .change-row__identity small { color: var(--text-3); font-family: "SFMono-Regular", monospace; font-size: var(--fs-micro); line-height: 12px; }
+/* 同一块身份区域现在是个按钮（点开该文件的 diff）。它复用上面那几条布局，但 <button> 自带浏览器
+   默认外观——边框、灰底、居中、继承不到的字体——所以必须逐项抹掉，否则这一行在列表里长得和别的
+   行完全不一样。左对齐要显式写：button 的 text-align 默认 center，而这块是两行左对齐的文本。 */
+.change-row__identity--button { padding:0; border:0; background:none; font:inherit; color:inherit; text-align:left; align-items:flex-start; cursor:pointer; }
+.change-row__identity--button:hover strong { color: var(--text); }
 .change-row__state { display: inline-flex; align-items: center; padding:1px var(--sp-2); border-radius: var(--radius-sm); color: var(--green); background: var(--green-bg); font-size: var(--fs-micro); line-height: 13px; white-space: nowrap; }
 .change-row--untracked .change-row__state { color: var(--amber); background: var(--amber-bg); }
 .change-row__stage, .change-row__staged-mark { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; }

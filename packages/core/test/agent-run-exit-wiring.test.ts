@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
-import type { CtxmuxAdapterExitEvent } from '../src/ctxmux-run-adapter.js'
+import type { CtxmuxAdapterExitEvent, CtxmuxAdapterRun } from '../src/ctxmux-run-adapter.js'
 import type { AgentMuxClientEvent } from '../src/types.js'
 
 // ---------------------------------------------------------------------------
@@ -15,6 +15,23 @@ type ClientInternals = {
   kernel: Record<string, unknown>
   connected: boolean
   acceptKernelEvent(event: CtxmuxAdapterExitEvent): void
+}
+
+function exitedRun(runId: string, code: number, signal: string | null): CtxmuxAdapterRun {
+  return {
+    runId,
+    lifecycleOperationId: null,
+    program: 'bash',
+    args: [],
+    workspacePath: '/repo',
+    pid: null,
+    state: { type: 'exited', code, signal },
+    cols: 80,
+    rows: 24,
+    latestOutputBytes: 0,
+    firstAvailableByte: 0,
+    acceptedInputBytes: 0
+  }
 }
 
 function exited(runId: string, code: number, signal: string | null, observedAt = 5): CtxmuxAdapterExitEvent {
@@ -97,5 +114,54 @@ describe('run exit reason wiring', () => {
     const states = processStates()
     expect(states.at(-2)).toMatchObject({ exitReason: 'user-stopped' })
     expect(states.at(-1)).toMatchObject({ exitReason: 'unknown' })
+  })
+
+  // -------------------------------------------------------------------------
+  // 上面四条守的是 live 事件那条路。但同一个「它为什么没了」有**两条**路到达用户：退出事件是一次性的，
+  // 而 Renderer reload / 冷启动重投影 / refreshSession 只能拿到 snapshot（listRuns / statusAgent /
+  // reattachAgent 投影出的 AgentMuxRun）。exitReason 只挂在事件上的话，它就成了「你在场才看得见」的
+  // 东西：崩掉的 Agent reload 前说「它自己崩了」，reload 后退化成裸 signal 号。
+  //
+  // 分类结果**必须**在退出那一刻存下来、由两条路共用，不能在 snapshot 侧重算：分类要读停止意图，而意图
+  // 在同一处被 delete 掉（读完即弃），事后无从重建；daemon 的 list() 也只报 code/signal，永远不知道那次
+  // 退出是不是我们主动关的。
+  // -------------------------------------------------------------------------
+  it('carries the same reason on the snapshot path — reload must not degrade it', async () => {
+    const { client, internals } = connectedClient()
+    disposeCurrent = () => client.dispose()
+    // 我们主动关掉它，内核随后报出一个**裸 0**——只看 code/signal 的话与干净退出完全无从区分。
+    await client.stopTerminal({ runId: 'run-snap-stopped' })
+    internals.acceptKernelEvent(exited('run-snap-stopped', 0, null))
+    // 之后 Renderer reload：走 listRuns 重投影，此时那条一次性的退出事件早已过去。
+    internals.kernel.list = async () => [exitedRun('run-snap-stopped', 0, null)]
+    const [projected] = await client.listRuns()
+    expect(projected).toMatchObject({ state: 'exited', exitReason: 'user-stopped' })
+  })
+
+  it('keeps crashed distinguishable from clean on the snapshot path too', async () => {
+    const { client, internals } = connectedClient()
+    disposeCurrent = () => client.dispose()
+    internals.acceptKernelEvent(exited('run-snap-crash', 0, 'SIGKILL'))
+    internals.kernel.list = async () => [exitedRun('run-snap-crash', 0, 'SIGKILL')]
+    const [projected] = await client.listRuns()
+    // 只把 exitSignal 抄过去是不够的：那让消费端自己去猜「SIGKILL 算崩吗」，而两边猜法一旦不同，
+    // 用户看到的结论就取决于他有没有 reload。结论本身必须过河。
+    expect(projected).toMatchObject({ state: 'exited', exitReason: 'crashed' })
+  })
+
+  it('does not stamp an exit reason on a run the kernel still reports as running', async () => {
+    // 反向那一侧，而且要落在真竞态上：退出事件已经到了（台账里有 'crashed'），但 kernel.list() 这一刻
+    // 还报它 running——事件与列表是两条独立的通道，谁先到没有保证。此时投影绝不能把退出原因盖在一个
+    // 「还在跑」的 run 上：那会让界面同时说「运行中」和「它崩了」。
+    //
+    // 判据必须构造这个竞态，而不是拿一个从没退出过的 run 试：台账里本来就没它，那样测什么都恒绿
+    // （实测：把取值改成 `?? 'unknown'`，无条件填默认原因，那种写法照旧全绿）。
+    const { client, internals } = connectedClient()
+    disposeCurrent = () => client.dispose()
+    internals.acceptKernelEvent(exited('run-stale-list', 0, 'SIGKILL'))
+    internals.kernel.list = async () => [{ ...exitedRun('run-stale-list', 0, null), pid: 42, state: { type: 'running' as const } }]
+    const [projected] = await client.listRuns()
+    expect(projected).toMatchObject({ state: 'running' })
+    expect(projected?.exitReason).toBeUndefined()
   })
 })

@@ -480,3 +480,32 @@ export const ANTIGRAVITY_LAUNCH_OPTIONS: readonly LaunchOptionDeclaration[] = [
     ]
   }
 ]
+
+/**
+ * Which Provider declares which launch options, by id.
+ *
+ * Every declaration above is already reachable by name, and each `defineAgentProvider` call imports the
+ * one it needs directly — that stays the readable way to write a Provider. What was missing is the
+ * reverse lookup, for a caller that has an id and no way to reach the Provider itself.
+ *
+ * The one such caller is the Desktop browser preview: Core's real `catalog()` pulls node:path and
+ * node:crypto, so the preview cannot import it and instead projects one entry per id from
+ * `BUILT_IN_AGENT_PROVIDER_IDS`. Before this map it answered that question with a hand-written
+ * `id === 'codex' ? … : id === 'claude' ? … : []`, which silently hid the controls of the six other
+ * Providers that do declare options — and a comment claimed those two were the only node-free
+ * declarations, which was never true: all eight live in this module, and it imports only ./errors.js
+ * and ./types.js. Two places deciding the same thing is how that gap opened, so the answer lives here
+ * once. A Provider absent from this map declares nothing, which is the honest answer for the four ids
+ * that genuinely have no options (pi, kimi, droid, copilot).
+ */
+export const LAUNCH_OPTIONS_BY_PROVIDER_ID: Readonly<Record<string, readonly LaunchOptionDeclaration[]>> =
+  Object.freeze({
+    codex: CODEX_LAUNCH_OPTIONS,
+    claude: CLAUDE_LAUNCH_OPTIONS,
+    gemini: GEMINI_LAUNCH_OPTIONS,
+    grok: GROK_LAUNCH_OPTIONS,
+    traex: TRAEX_LAUNCH_OPTIONS,
+    cursor: CURSOR_LAUNCH_OPTIONS,
+    hermes: HERMES_LAUNCH_OPTIONS,
+    antigravity: ANTIGRAVITY_LAUNCH_OPTIONS
+  })
