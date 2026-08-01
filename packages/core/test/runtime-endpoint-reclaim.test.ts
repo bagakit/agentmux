@@ -1,14 +1,16 @@
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises'
 import { createServer, type Server } from 'node:net'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   endpointDirectoryUsage,
   isOwnEndpointDirectoryName,
   orphanEndpointDirectoryNames,
-  reclaimOrphanEndpointDirectories
+  reclaimOrphanEndpointDirectories,
+  socketIsDirectChildOfEndpoint
 } from '../src/runtime-endpoint-reclaim.js'
+import { defaultAgentMuxRuntimeDirectory, defaultCtxmuxSocketPath } from '../src/runtime-paths.js'
 
 const UID = typeof process.getuid === 'function' ? process.getuid() : 0
 const CURRENT = `amx-${UID}-${'a'.repeat(24)}`
@@ -277,5 +279,54 @@ describe('reclamation is wired into the adapter connect path', () => {
     expect(connectEnd).toBeGreaterThan(connectStart)
     const connectBody = source.slice(connectStart, connectEnd)
     expect(connectBody).toContain('reclaimOrphanEndpointDirectories(')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 那两道闸互补的**前提**：socket 是 endpoint 目录的直接子项。
+//
+// 上面的时间闸靠「顶层 mtime 在启动/重启窗口里必然新鲜」成立，而那只在 socket 是直接子项时为真——
+// 往 `state/state.sqlite3` 里写数据不动顶层 mtime，只有直接子项的创建与 unlink 会。此前这条前提
+// 只写在 RECLAIM_MIN_QUIET_MS 的注释里，末尾还留了一句「改 runtime-paths 时必须回头看这里」——
+// 一条常驻规则若只靠人记，就等于没有规则（同源判据见本仓「清理不留检测器等于没清」）。
+//
+// 而且 socket 名此前在两处各写一遍字面量（runtime-paths 的派生器 + reclaim 的存活闸），一旦漂移，
+// 存活闸会去探一个不存在的路径→恒判「没人监听」，时间闸同时失去新鲜度：**两道闸一起静默失效**，
+// 于是一个活着的 daemon 的持久状态会被删掉。现在位置只有一处真值，前提本身也被下面这条质询。
+describe('两道闸互补的前提：socket 是 endpoint 目录的直接子项', () => {
+  it('socketIsDirectChildOfEndpoint 为真，否则时间闸对重启窗口的保护已静默失效', () => {
+    expect(socketIsDirectChildOfEndpoint()).toBe(true)
+  })
+
+  it('派生器现取而非各写一份：runtime 目录一改，socket 路径跟着改且仍是直接子项', () => {
+    // 期望值不手抄 'ctxmux.sock'：从那一份派生器现取，两侧因此不可能漂。
+    const override = process.platform === 'darwin' ? '/private/tmp/amxT-premise' : join(tmpdir(), 'amxT-premise')
+    const previous = process.env.AGENTMUX_RUNTIME_DIRECTORY
+    process.env.AGENTMUX_RUNTIME_DIRECTORY = override
+    try {
+      // 派生器换了根，socket 必须跟着换到新根之下——说明它是现取的，不是模块加载时冻住的常量。
+      expect(defaultCtxmuxSocketPath().startsWith(override)).toBe(true)
+      expect(relative(defaultAgentMuxRuntimeDirectory(), defaultCtxmuxSocketPath())).not.toContain('/')
+      // 而前提在新根下同样成立——挪进子目录才会让它为假。
+      expect(socketIsDirectChildOfEndpoint()).toBe(true)
+    } finally {
+      if (previous === undefined) delete process.env.AGENTMUX_RUNTIME_DIRECTORY
+      else process.env.AGENTMUX_RUNTIME_DIRECTORY = previous
+    }
+  })
+
+  it('存活闸探的就是派生器给的那个位置——否则它会恒判「没人监听」', async () => {
+    // 这条守存活闸与派生器的**同源**：在派生器说的位置起监听，回收必须放过这个目录。
+    // 把闸里的路径改成别的名字（漂移），监听探不到 → 目录被删 → 这条红。
+    const root = await makeRoot()
+    const endpoint = join(root, ORPHAN)
+    await mkdir(endpoint, { recursive: true, mode: 0o700 })
+    const socketPath = join(endpoint, relative(defaultAgentMuxRuntimeDirectory(), defaultCtxmuxSocketPath()))
+    await listenOn(socketPath)
+    // 静默期推满，单独考察存活闸这一道。
+    const outcome = await reclaimOrphanEndpointDirectories(join(root, CURRENT), FAR_FUTURE)
+
+    expect(outcome.reclaimed).toEqual([])
+    expect(outcome.skippedLive).toEqual([endpoint])
   })
 })
