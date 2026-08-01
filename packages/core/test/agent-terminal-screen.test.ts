@@ -160,6 +160,97 @@ describe('AgentTerminalScreenEvidence 帧游标', () => {
     }
   })
 
+  // -------------------------------------------------------------------------
+  // 上面那条把两个守卫**同时**置为假（第一帧完成于 boundary 之前 ⇒ frameObserved 假；
+  // throughByte 恰好等于 boundary ⇒ crossedBoundary 假），于是两个守卫互相掩盖：实测单独
+  // 放宽任何一个（把 `requireOutputAfterBoundary` 的 `>` 改成 `>=`／让 frameObserved 恒真），
+  // 这个文件 10 条全绿。生产里两个开关又恰好总是成对——`prompt-submission.ts` 的
+  // observeReadiness 只在 `initial-composer` 那一支同时给两个 true——所以一个 fixture 很容易
+  // 把两件事当成一件。
+  //
+  // 下面两条各只留一个守卫在场。它们守的不是同一个事实：
+  //   crossedBoundary —— boundary 之后**有没有字节**。这是 waitForRender 唯一的守卫（那条
+  //     调用不要求帧）。放宽成 `>=` 后，一屏全部产生于我们写入之前的旧内容会被当成「prompt
+  //     已渲染」，提交在 Agent 还没回显时就宣告成功。
+  //   frameObserved —— boundary 之后有没有**一个完整的同步更新帧**。放宽后，Agent 正在重画
+  //     composer 的半渲染中间态会被当成「composer 已空」，readiness 落在一个下一帧就会被
+  //     推翻的瞬间上。
+  // -------------------------------------------------------------------------
+
+  it('boundary 之后一个字节都没来就不算就绪——不要求帧时，字节界是唯一的守卫', async () => {
+    const evidence = new AgentTerminalScreenEvidence(80, 24, { start: FRAME_START, end: FRAME_END })
+    try {
+      const firstFrame = `${FRAME_START}\u001b[22;1H› \u001b[22;3H${FRAME_END}`
+      const boundary = encoder.encode(firstFrame).byteLength
+      evidenceChunk(evidence, firstFrame)
+      await settle()
+
+      let ready = false
+      const waiting = evidence.wait({
+        boundaryByte: boundary,
+        requireOutputAfterBoundary: true,
+        // 刻意**不**要 requireFrameAfterBoundary：这正是 waitForRender 那条调用的形状。
+        // 此时 frameObserved 恒真，拦得住的只剩字节界这一个条件。
+        predicate: (screen) => screen.composerText('›') === '',
+        timeoutMessage: 'fixture timeout',
+        terminalMessage: 'fixture exit'
+      }).then((throughByte) => {
+        ready = true
+        return throughByte
+      })
+      await settle()
+      // 起点自检：throughByte 恰好**等于** boundary。否则这条测不到 `>` 与 `>=` 的差别。
+      expect(evidence.throughByte, '起点必须卡在 boundary 上，否则严格 `>` 无人质询').toBe(boundary)
+      expect(ready).toBe(false)
+
+      evidenceChunk(evidence, '\u001b[22;3H')
+      await expect(waiting).resolves.toBeGreaterThan(boundary)
+    } finally {
+      evidence.dispose()
+    }
+  })
+
+  it('boundary 之后只有零散字节、没有完整帧时不算就绪——帧游标是唯一的守卫', async () => {
+    const evidence = new AgentTerminalScreenEvidence(80, 24, { start: FRAME_START, end: FRAME_END })
+    try {
+      const firstFrame = `${FRAME_START}\u001b[22;1H› \u001b[22;3H${FRAME_END}`
+      const boundary = encoder.encode(firstFrame).byteLength
+      evidenceChunk(evidence, firstFrame)
+      await settle()
+      // boundary 之后确实来了字节，但它们只开了一个帧、还没闭合：Agent 正在重画。
+      // 两块之间必须 settle：`accept` 把写入排到 tail 上异步执行，而 `evidenceChunk` 是同步读
+      // `throughByte` 造 startByte 的。不等第一块落地就投第二块，两块都会声称 startByte=0，
+      // 第二块被当成「完全落在已消费游标之前」静默跳过（实测过一次：起点自检当场红）。
+      evidenceChunk(evidence, `${FRAME_START}\u001b[22;3H`)
+      await settle()
+      // 起点自检：字节界那一侧**已经过了**，所以这条里唯一还拦得住的是帧游标。
+      expect(evidence.throughByte, '起点必须已越过 boundary，否则字节界会替帧游标挡住').toBeGreaterThan(boundary)
+      expect(evidence.lastCompleteFrame).toEqual({ startByte: 0, endByte: boundary })
+
+      let ready = false
+      const waiting = evidence.wait({
+        boundaryByte: boundary,
+        requireOutputAfterBoundary: true,
+        requireFrameAfterBoundary: true,
+        predicate: (screen) => screen.composerText('›') === '',
+        timeoutMessage: 'fixture timeout',
+        terminalMessage: 'fixture exit'
+      }).then((throughByte) => {
+        ready = true
+        return throughByte
+      })
+      await settle()
+      expect(ready).toBe(false)
+
+      // 帧闭合，起点落在 boundary 上——这才是 boundary 之后画完的一帧。
+      evidenceChunk(evidence, FRAME_END)
+      await expect(waiting).resolves.toBeGreaterThan(boundary)
+      expect(evidence.lastCompleteFrame?.startByte).toBe(boundary)
+    } finally {
+      evidence.dispose()
+    }
+  })
+
   it('跨块的帧标记按字节精确定位', async () => {
     const evidence = new AgentTerminalScreenEvidence(80, 24, { start: FRAME_START, end: FRAME_END })
     try {
