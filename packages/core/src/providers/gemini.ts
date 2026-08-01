@@ -33,6 +33,8 @@ export const GEMINI_HOOK_EVENTS = [
  * 收尾——因此它才是 done 的来源。`SessionEnd` 属于会话终结，Core 不拿它判轮次。
  */
 export const GEMINI_HOOKS: AgentNativeHookSpecification = {
+  // 事件名随负载到达：负载是 Claude 同族的 snake_case，带 `hook_event_name`（见下方 rules 前的说明）。
+  eventNameSource: { kind: 'payload', payloadKey: 'hook_event_name' },
   rules: [
     { events: ['AfterAgent'], state: 'done' },
     { events: ['SessionStart', 'BeforeAgent', 'BeforeTool', 'AfterTool'], state: 'working' }

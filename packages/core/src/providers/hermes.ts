@@ -42,6 +42,9 @@ export const HERMES_HOOK_EVENTS = [
 ] as const
 
 export const HERMES_HOOKS: AgentNativeHookSpecification = {
+  // 事件名随负载到达：Hermes 的 `_serialize_payload` 每条事件都写 `hook_event_name`（本机第一方源码
+  // 实测：`~/.hermes/.../shell_hooks.py`）。所以它虽不带 `--event`、也不注入 env，仍然安全。
+  eventNameSource: { kind: 'payload', payloadKey: 'hook_event_name' },
   rules: [
     // 授权门：Hermes 正把这次执行按住等一个决定（TUI 按键、或 IM 上的一次点击）。
     // 判 working 会让「等我点一下」和「正在干活」在界面上长得一模一样。

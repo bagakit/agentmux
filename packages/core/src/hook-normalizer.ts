@@ -14,7 +14,11 @@ import {
   normalizeNativeSessionId,
   normalizeNativeTranscriptPath
 } from './agent-native-locator.js'
-import { canonicalHookLifecycleEvent, resolveHookEventName } from './agent-hook-event.js'
+import {
+  canonicalHookLifecycleEvent,
+  resolveHookEventName,
+  type HookEventNamePayloadKey
+} from './agent-hook-event.js'
 import { hookToolOutcome } from './hook-tool-outcome.js'
 import { HOOK_PAYLOAD_USAGE_KEY, parseTurnUsage } from './agent-usage-transcript.js'
 
@@ -51,7 +55,41 @@ export type AgentNativeHookSpecification = {
     transcriptPathKeys?: readonly string[]
     requireTranscriptPath?: boolean
   }
+  /**
+   * **这个 Provider 的事件名从哪来。** 声明原生 hook、且由 AgentMux 写配置（`explicit-managed`）的
+   * Provider **必须**回答，因为 `agent-hook-command` 那个子进程只有几条路能解析出事件名——`--event`
+   * 旗标、或负载里的某个键——全落空时 `eventName` 为 falsy，整条 POST 被
+   * `if (url && token && eventName)` 静默跳过：那家 Provider 的 Agent「装上了但永远不动」（时间线空、
+   * 状态永不变、无法 resume），而所有测试照旧全绿。此前这件事在代码里、文档里、守卫里都没有记录，
+   * 于是「新接一家忘了让事件名有来源」不可能被任何测试发现。copilot 正是这么漏的：既无 `--event`、
+   * 其 camelCase 负载又不带三拼法里的任何键。
+   *
+   * 把来源做成**声明**而非注释，是为了让守卫能机器核对「声明的来源在配置里真的成立」：
+   * - `flag`：安装计划里每条 hook 命令都带 `--event <eventName>`（antigravity/cursor/copilot 这么做，
+   *   因为它们的负载里没有任何事件名键，本机 bundle/runtime 实测）。
+   * - `payload`：Provider 的负载自带事件名，`payloadKey` 指明是三拼法里的哪一个。这是**投递侧**的拼法，
+   *   与**配置侧**可能不同（grok 配置写 PascalCase、负载报 snake_case），所以必须单独声明、单独佐证——
+   *   守卫因此把「装了对的事件名」（配置侧）与「子进程解析得出事件名」（投递侧）分成两条。
+   *
+   * 缺省是**刻意允许**的两种情形，都不是「忘了填」：
+   * - `hookStrategy.kind === 'none'`（traex）：根本没有 hook，谈不上事件名来源。
+   * - `installation === 'unmanaged'` 且来源未经第一方核实（pi）：AgentMux 不写它的配置，无法保证
+   *   `--event`；而它的负载键又查不到第一方证据，按「未核实就不声明」如实留空，绝不编一个键。
+   *   守卫因此只对 `explicit-managed` 强制此声明——那正是 AgentMux 亲手写配置、能静默漏掉事件名的那批。
+   */
+  eventNameSource?: AgentHookEventNameSource
 }
+
+/**
+ * 事件名来源的判别联合。两个分支对应子进程解析事件名的两条**真实在用**的路。
+ *
+ * 刻意不含 `env` 分支：子进程确实也读 `AGENTMUX_HOOK_EVENT`，但今天没有任何 Provider 靠它送事件名
+ * （client.ts 注入 url/token/provider 三样，从不注入事件名）。真到有 Provider 需要时再加，不预支一个
+ * 没有消费者的分支。
+ */
+export type AgentHookEventNameSource =
+  | { kind: 'flag' }
+  | { kind: 'payload'; payloadKey: HookEventNamePayloadKey }
 
 /**
  * 一个 run 一份子代理花名册。

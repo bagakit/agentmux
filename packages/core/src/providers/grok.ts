@@ -37,6 +37,10 @@ export const GROK_HOOK_EVENTS = [
  * 那是零依赖叶子，hook 子进程靠它拿表，不能反向依赖本模块。此处只保留配置侧清单与 rules。
  */
 export const GROK_HOOKS: AgentNativeHookSpecification = {
+  // 事件名随负载到达，键是 camelCase 的 `hookEventName`（**投递侧**拼法）。注意这与配置侧不同：
+  // 配置写 PascalCase `PreToolUse`，负载报 snake_case 值（`pre_tool_use`）藏在 `hookEventName` 里。
+  // 声明的是投递侧那个键——子进程读的就是它（见文件头「两个面」的说明）。
+  eventNameSource: { kind: 'payload', payloadKey: 'hookEventName' },
   rules: [
     // grok 的 ask_user_question 被自动放行，于是它在**等用户回答时**照旧发 pre_tool_use。
     { events: ['pre_tool_use'], toolNames: ['ask_user_question', 'askuserquestion'], state: 'waiting' },
