@@ -4,7 +4,7 @@ import type { AgentProviderId } from '../types.js'
 import { createAntigravityManagedHookPlan, createAntigravityProvider } from './antigravity.js'
 import { createClaudeManagedHookPlan, createClaudeProvider } from './claude.js'
 import { createCodexManagedHookPlan, createCodexProvider } from './codex.js'
-import { createCursorProvider } from './cursor.js'
+import { createCursorManagedHookPlan, createCursorProvider } from './cursor.js'
 import { createGeminiManagedHookPlan, createGeminiProvider } from './gemini.js'
 import { createGrokManagedHookPlan, createGrokProvider } from './grok.js'
 import { createHermesManagedHookPlan, createHermesProvider } from './hermes.js'
@@ -42,13 +42,17 @@ export const MANAGED_HOOK_PLAN_RESOLVERS: Partial<Record<AgentProviderId, Manage
   grok: (_workspacePath) => createGrokManagedHookPlan(),
   // gemini 装到 `~/.gemini/settings.json` 的 hooks 键，同样与 workspace 无关。注意 Antigravity 用的是
   // 同一目录下的 `config/hooks.json`——不同文件，别写串。
-  gemini: (_workspacePath) => createGeminiManagedHookPlan()
+  gemini: (_workspacePath) => createGeminiManagedHookPlan(),
+  // cursor 是唯一**必须**拿到 workspacePath 的：它的 trust marker 路径按 workspace 派生
+  // （`~/.cursor/projects/<slug>/.workspace-trusted`），hooks 配置本身仍在 user 层。
+  cursor: (workspacePath, env) => createCursorManagedHookPlan(workspacePath, env)
 }
 
 export {
   createAntigravityManagedHookPlan,
   createClaudeManagedHookPlan,
   createCodexManagedHookPlan,
+  createCursorManagedHookPlan,
   createGeminiManagedHookPlan,
   createGrokManagedHookPlan,
   createHermesManagedHookPlan
