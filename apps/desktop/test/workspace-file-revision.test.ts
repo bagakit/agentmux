@@ -5,6 +5,7 @@ vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
 })
 
+import { api } from '../src/renderer/src/lib/api.js'
 import { bumpWorkspaceFileRevision } from '../src/renderer/src/lib/file-workbench-state.js'
 import { createWorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.js'
 import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics.js'
@@ -246,6 +247,52 @@ describe('每个写入面真的让目标 Workspace 的计数前进，且只动�
     await useAppStore.getState().renamePath('before.md', 'after.md')
 
     expect(revisions()[SCRATCH_WORKSPACE_ID], '改名不 bump').toBe(afterCreate + 1)
+    expect(revisions().bystander).toBe(BYSTANDER_REVISION)
+  })
+
+  // -------------------------------------------------------------------------
+  // 上面每一条都只判「跑完之后计数对不对」，于是 bump 落在 `await api.files.create` 的**哪一侧**
+  // 完全不可观测：把它挪到 await 之前，上面 46 条全绿（实测）。
+  //
+  // 两侧的差别是真的：文件树、Topics 面板、Board 都在 effect 里读这个计数，读到就去重扫。
+  // 先 bump 则它们在文件还没落盘时扫一遍——扫到的是创建**之前**的目录内容，而此后不再有第二次
+  // bump，于是面板永久停在旧状态，与漏 bump 同形。远端 create 可达 15s，这个窗口不是理论上的。
+  //
+  // 判据必须让「创建还没完成」这个中间状态可观测，所以这里把 create 卡在一个手动 resolve 的
+  // promise 上：卡住期间计数必须**没动**，resolve 之后才 +1。删掉「卡住期间没动」那条断言，
+  // 变异就又隐形了——这一条不能靠「跑完是 +1」蕴含。
+  // -------------------------------------------------------------------------
+  it('建路径：创建真的完成之后才 bump，不是发出请求就 bump', async () => {
+    scratchFixture()
+    let releaseCreate: (() => void) | undefined
+    const created = new Promise<void>((resolve) => { releaseCreate = resolve })
+    const create = vi.spyOn(api.files, 'create').mockReturnValue(created)
+
+    const pending = useAppStore.getState().createPath({ path: 'slow.md', kind: 'file' })
+    // 前提自检：请求真的发出去了、也真的还卡着。若 spy 没生效（比如 api 形状变了），
+    // 下面那条「还没动」会在一个**已经跑完**的世界里成立，整条守卫退化成恒真。
+    expect(create, 'createPath 没有调 api.files.create，这条用例观察不到那个窗口').toHaveBeenCalledTimes(1)
+    expect(
+      revisions()[SCRATCH_WORKSPACE_ID],
+      '文件还没建好就 bump 了——面板会扫到创建前的内容，而之后不再有第二次 bump'
+    ).toBe(TARGET_REVISION)
+
+    releaseCreate!()
+    await pending
+
+    expect(revisions()[SCRATCH_WORKSPACE_ID], '创建完成后没有 bump').toBe(TARGET_REVISION + 1)
+    expect(revisions().bystander).toBe(BYSTANDER_REVISION)
+  })
+
+  it('建路径失败时一次都不 bump——白扫一遍树，且掩盖了真正的失败', async () => {
+    // 与上一条是同一个 await 边界的另一侧。失败路径上 bump 的代价不只是多扫一遍：
+    // 用户看到树自己刷新了一下，会以为创建成功了。
+    scratchFixture()
+    vi.spyOn(api.files, 'create').mockRejectedValue(new Error('EACCES'))
+
+    await expect(useAppStore.getState().createPath({ path: 'denied.md', kind: 'file' })).rejects.toThrow()
+
+    expect(revisions()[SCRATCH_WORKSPACE_ID], '创建失败却 bump 了').toBe(TARGET_REVISION)
     expect(revisions().bystander).toBe(BYSTANDER_REVISION)
   })
 })
