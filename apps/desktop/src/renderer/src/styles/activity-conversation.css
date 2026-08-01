@@ -163,12 +163,35 @@
 /* Inside a code span the mono face and ground already come from `.md-code`. */
 .md-code .md-link--file { font-family: inherit; }
 
-/* User speech gets a quiet ground so the turn has a visible start and end — Surface fill carries the
-   boundary, never a stroke. The assistant reply flows open on the feed as the main narrative.
-   Selected by SPEAKER ROLE, not by kind: `human` is a property of who spoke, and once A2A lands the
-   agent side stays one shape for every agent identity while their avatars and names differ. */
-.log-turn[data-speaker-role='human'] .log-turn__body {
-  padding:var(--sp-4) var(--sp-4);
+/* User speech gets a quiet ground so the turn has a visible start and end; the assistant reply flows
+   open on the feed as the main narrative.
+
+   用户：「User 发的消息要单独显示」。原先只有 body 拿到一层浅底，而 caption 与时刻浮在底色之外——
+   于是一句用户的话在视觉上是"一个标签 + 一块底色"，不是**一件**东西，扫下来跟 Agent 回合只差一点
+   底色深浅。现在整个 turn 成块：底、内缩、以及左侧一道实心色带一起把它围成一条独立的发言。
+
+   仍然按 SPEAKER ROLE 选择而不是按 kind——A2A 落地后 agent 侧不管有多少身份都保持敞开的叙述形状，
+   而"这台机器前面的人说的话"始终是被框起来的那一条。
+
+   那道色带**不是**控件语言里禁掉的那根选中竖条：禁令针对的是密集列表里表达**选中**的贴边装饰
+   （"连成一片噪音"）。这里既不表达选中，也不在密集列表里——它走的是本文件已有的**内容**语汇：
+   `.md-quote` 与 `.log-row__output` 都用 2px 左侧色带说"这一段是引来的/跑出来的"。一句被读回的
+   用户发言正是一段引文，用同一个语汇是对的，也不必新发明一个形状。边界本身仍由填充承担（底色 +
+   内缩 + 圆角），色带只在一侧、不画出框，所以"描边不作主要手段"这条不动。 */
+.log-turn[data-speaker-role='human'] {
+  padding:var(--sp-3) var(--sp-5) var(--sp-3) var(--sp-4);
+  margin:var(--sp-4) var(--sp-5) var(--sp-4) 0;
   border-radius: var(--radius);
+  border-left: 2px solid var(--blue);
   background: var(--surface-1);
 }
+/* 成块之后 body 自己不再需要底：那层底已经在整个 turn 上，再来一层就是浅底叠浅底，边界反而更糊。
+   字色降一档——用户自己的话是"我说过什么"的回看，Agent 的答复才是这个视图的主叙述；降档也让两种
+   回合在同一屏上有了字色层级，而不是只差底色。 */
+.log-turn[data-speaker-role='human'] .log-turn__body {
+  padding:0;
+  color: var(--text-2);
+  background: transparent;
+}
+/* 块内的 spine 洞会露出块的底色而不是 feed 的底色，所以头像的托底跟着走。 */
+.log-turn[data-speaker-role='human'] .log-turn__node { background: var(--surface-1); }

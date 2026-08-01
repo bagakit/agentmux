@@ -20,6 +20,9 @@ import {
   createRulerScale,
   describeReadout,
   describeRulerAxis,
+  describeSpan,
+  formatClock,
+  formatDuration,
   formatOffset,
   rulerBand,
   stepRulerSelection,
@@ -165,6 +168,7 @@ export function Ruler({
   const trackRef = useRef<HTMLDivElement>(null)
   const [readout, setReadout] = useState<Readout | null>(null)
   const axisLabel = describeRulerAxis(scale)
+  const span = describeSpan(scale)
 
   const feedRect = (): DOMRect | null =>
     trackRef.current?.closest('.activity-feed')?.getBoundingClientRect() ?? null
@@ -322,7 +326,15 @@ export function Ruler({
         ))}
         </div>
       </div>
-      <span className="activity-ruler__span">{formatOffset(scale.origin + scale.span, scale.origin)}</span>
+      {/* 用户：「时间只显示分钟太不友好了, 应该显示从什么时间点到什么时间点, 消耗的时分秒」。
+          原先这里只有一个 `+184m03s` 式的偏移量——既没有真正的时刻，小时也被压进分钟位。现在三个
+          事实一次给全：起、止、耗时。ordinal 轴给 null（那条轴上没有流逝的时间），此时不渲染。 */}
+      {span ? (
+        <span className="activity-ruler__span" title={`${span.from} → ${span.to} · ${span.elapsed} elapsed`}>
+          <span className="activity-ruler__span-range">{span.from}<span className="activity-ruler__span-arrow" aria-hidden="true">→</span>{span.to}</span>
+          <span className="activity-ruler__span-elapsed">{span.elapsed}</span>
+        </span>
+      ) : null}
       <span
         className="activity-ruler__note"
         title="Structured Session activity only · never Terminal output or private chain-of-thought"
@@ -345,7 +357,7 @@ export function Ruler({
           ) : readout.body.text.axis === 'temporal' ? (
             <Fragment>
               <span className="activity-ruler__readout-time">
-                {new Date(readout.body.text.at).toLocaleTimeString()}
+                {formatClock(readout.body.text.at)}
               </span>
               <span className="activity-ruler__readout-offset">{readout.body.text.offsetText} from start</span>
             </Fragment>
@@ -515,7 +527,12 @@ function Turn({
         <span className="log-turn__who">{described?.name ?? (speaker.role === 'human' ? 'You' : 'Assistant')}</span>
         {item.status === 'streaming' ? <span className="log-row__chip">Streaming</span> : null}
         {item.status === 'failed' ? <span className="log-row__chip log-row__chip--failed">Failed</span> : null}
-        <span className="log-turn__time">{formatOffset(item.createdAt, origin)}</span>
+        {/* 回合上给**时刻**，机器行仍给偏移量。这两路问的不是同一个问题：一条 tool_call 关心的是
+            "距开始多久"（它属于某一段执行），而一句话关心的是"什么时候说的"。时刻带 title 里的
+            偏移量兜底，两个事实都答得出而只占一列宽。 */}
+        <span className="log-turn__time" title={`${formatClock(item.createdAt)} · ${formatOffset(item.createdAt, origin)} from start`}>
+          {formatClock(item.createdAt)}
+        </span>
       </div>
       {/* Only the TURN register renders markdown. The machine Row (log-row__prose) stays plain text: it
           carries payload, not prose someone reads for meaning. */}
@@ -536,6 +553,12 @@ function Run({ items, origin }: { items: AgentTimelineItem[]; origin: number }) 
   const [open, setOpen] = useState(false)
   const rows = useMemo(() => timelineRows(items), [items])
   const failed = items.some((item) => item.status === 'failed')
+  // 折起来的一段机器执行正是最需要"这段花了多久"的地方——它是被藏起来的那部分时间。跨度取这一段
+  // 首尾两条的间隔；同一时刻的一段（或只有一条）跨度为零，此时不渲染那一件，不硬报一个 `0s`——
+  // 与序数轴同一条诚实规则。
+  const elapsed = items.length > 1
+    ? items[items.length - 1]!.createdAt - items[0]!.createdAt
+    : 0
 
   return (
     <Fragment>
@@ -550,6 +573,7 @@ function Run({ items, origin }: { items: AgentTimelineItem[]; origin: number }) 
         <span className="log-row__time">{formatOffset(items[0]!.createdAt, origin)}</span>
         <span className="log-fold__label">
           {items.length} steps
+          {elapsed > 0 ? <span className="log-fold__elapsed">{formatDuration(elapsed)}</span> : null}
           {rows.length < items.length ? <span className="log-row__count">{rows.length} unique</span> : null}
           {failed ? <span className="log-row__chip log-row__chip--failed">FAILED</span> : null}
         </span>

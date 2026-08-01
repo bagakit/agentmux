@@ -41,7 +41,23 @@
 .activity-ruler__tick--assistant_message { background: var(--green); height: 14px; }
 .activity-ruler__tick--permission { background: var(--amber); }
 .activity-ruler__tick[data-status='failed'] { background: var(--red); }
-.activity-ruler__span { color: var(--text-3); font: 10px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
+/* 跨度读数：起 → 止 · 耗时。等宽 + tabular 让它在滚动中不左右跳动（数字位宽一致），而三个事实
+   排成一行是因为它们回答的是同一个问题的三段——分成两处摆会让读者自己去拼。 */
+.activity-ruler__span {
+  display: inline-flex;
+  align-items: baseline;
+  gap:var(--sp-3);
+  color: var(--text-3);
+  font: 10px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* 起止那一对读数自成一组，与耗时之间靠 gap 分开——两者是不同性质的事实（观测到的时刻 vs 算出来
+   的时长），挨在一起但不混成一串数字。 */
+.activity-ruler__span-range { display: inline-flex; align-items: baseline; }
+.activity-ruler__span-arrow { margin:0 var(--sp-1); opacity: .55; }
+/* 耗时是这一行里唯一"被算出来"的数，给它一档更亮的字色，让扫视先落在它上面。 */
+.activity-ruler__span-elapsed { color: var(--text-2); }
 .activity-ruler__note { display: inline-flex; color: var(--text-3); cursor: help; }
 /* The whole track is one focusable slider (click + keyboard both resolve to an event). Its focus ring
    must be visible like every other interactive control in the surface. */
@@ -146,6 +162,9 @@
 .log-fold__chevron { transition: transform 120ms ease; }
 .log-fold[data-open] .log-fold__chevron { transform: rotate(90deg); }
 .log-fold__label { display: inline-flex; align-items: center; gap:var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); }
+/* 折起来那段花了多久。它是被藏起来的那部分时间，所以这个数就摆在"N steps"旁边——展开与否都在同
+   一个位置回答"这一段值不值得展开"。 */
+.log-fold__elapsed { color: var(--text-2); font: 10px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
 .log-row--user_message .log-row__node { color: var(--blue); }
 .log-row--assistant_message .log-row__node { color: var(--green); }
 .log-row--permission .log-row__node { color: var(--amber); }
