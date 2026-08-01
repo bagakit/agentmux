@@ -25,9 +25,118 @@ import { HOOK_EVENT_NAME_PAYLOAD_KEYS } from '../src/agent-hook-event.js'
  *      负载）在子进程里真的是活的」：把子进程读负载事件名那行改成 null，7 个 payload provider 立刻全红；
  *      copilot 那种「三条来源全落空」的形状则由下面的反证用例直接钉住「静默丢 POST」。它不看源码文本，
  *      只看「POST 到底发没发」。
+ *
+ * **两族投递面，别只模一族。** 上面两条描述的是**命令面**：Provider 装的是一条命令，`agent-hook-command`
+ * 那个子进程从 argv 或负载里解析事件名。还有**代码面**：pi 与 opencode 装的是一份 AgentMux 生成的 JS
+ * （`extensions/agentmux.js` / `plugin/agentmux.js`），代码跑在 Provider 自己的进程里**自己直接 POST**，
+ * 子进程整个不在链路上。对它们，`commandsFromPlan` 连 JSON.parse 都过不去（实测抛 SyntaxError），把信封
+ * 喂给 `runAgentHookCommand` 也只是在测一条它们不走的路。所以代码面有自己的判据：断言生成的源码里**每个**
+ * 注册的事件回调都把事件名送进 POST 体，且那批事件名来自 `rules` 而不是硬编码。
+ *
+ * 两族必须**并集等于 explicit-managed 全集、交集为空**——否则新接一家既不进命令面也不进代码面时，
+ * 它会从两边的 `it.each` 里同时消失、一条断言都不红（本仓「守卫按出口数不按条件数」那族假绿）。
  */
 
 const registry = new AgentProviderRegistry()
+
+const HOOK_URL = 'http://127.0.0.1:65535/hook'
+const HOOK_TOKEN = 'test-token'
+
+/**
+ * 一份生成代码的入口形状。**先判形状、再驱动**，两步分开是刻意的：
+ * 「认不出入口」必须由调用方断言成失败，而不是由驱动器内部抛（内部抛那行在两家都能认出的今天是
+ * 死代码——实测把它换成 `return {}` 无一条转红，等于没人守）。
+ */
+function generatedCodeEntry(module: GeneratedModule): 'pi-extension' | 'opencode-plugin' | 'unknown' {
+  if (typeof module.default === 'function') return 'pi-extension'
+  if (typeof module.server === 'function') return 'opencode-plugin'
+  return 'unknown'
+}
+
+type GeneratedModule = {
+  default?: (host: { on: (event: string, handler: Handler) => void }) => unknown
+  server?: () => Promise<{ event: (arg: { event: { type: string; properties?: unknown } }) => unknown }>
+}
+
+/** 把一份生成代码当模块加载。data: URI 而非落盘，省掉清理与模块缓存。 */
+async function loadGeneratedModule(source: string): Promise<GeneratedModule> {
+  return (await import(
+    `data:text/javascript;base64,${Buffer.from(source, 'utf8').toString('base64')}`
+  )) as GeneratedModule
+}
+
+/**
+ * 真的执行一份生成的 hook 代码，逐个触发它注册的事件，收回「事件名 → POST body 里的 eventName」。
+ *
+ * 两种入口形状都驱动：
+ *   - pi：`export default function (pi)`，用 `pi.on(event, handler)` 注册；
+ *   - opencode：`export async function server()`，返回 `{ event: async ({event}) => ... }` 单一入口。
+ *
+ * fetch 用局部 stub、用完还原，不碰全局，避免与本文件另一组的 `vi.stubGlobal` 互相干扰。
+ */
+async function drivePostsFromGeneratedCode(
+  module: GeneratedModule,
+  declared: readonly string[]
+): Promise<Record<string, unknown>> {
+  const bodies: Array<Record<string, unknown>> = []
+  const fakeFetch = async (_url: unknown, init: { body: string }) => {
+    bodies.push(JSON.parse(init.body) as Record<string, unknown>)
+    return { ok: true } as Response
+  }
+
+  const originalFetch = globalThis.fetch
+  const originalEnv = { url: process.env.AGENTMUX_HOOK_URL, token: process.env.AGENTMUX_HOOK_TOKEN }
+  globalThis.fetch = fakeFetch as unknown as typeof globalThis.fetch
+  // pi 的扩展在运行时现读环境变量（token 不落盘），所以这里必须给上，否则它的 post() 直接 return。
+  process.env.AGENTMUX_HOOK_URL = HOOK_URL
+  process.env.AGENTMUX_HOOK_TOKEN = HOOK_TOKEN
+  try {
+    const posted: Record<string, unknown> = {}
+    const collect = (): void => {
+      for (const body of bodies.splice(0)) {
+        const name = body.eventName
+        // 事件名缺席时**不要**跳过：记成 'undefined' 这个键，让逐事件断言把它报出来。
+        posted[typeof name === 'string' ? name : String(name)] = name
+      }
+    }
+
+    if (typeof module.default === 'function') {
+      const handlers = new Map<string, Handler>()
+      module.default({ on: (event, handler) => handlers.set(event, handler) })
+      for (const event of declared) {
+        const handler = handlers.get(event)
+        // 注册缺失是被守的缺陷之一：不抛，留空让断言报「少了哪个事件」。
+        if (!handler) continue
+        await handler(syntheticEvent(event), syntheticContext())
+        collect()
+      }
+      return posted
+    }
+
+    const hooks = await module.server!()
+    for (const event of declared) {
+      await hooks.event({ event: { type: event, properties: {} } })
+      collect()
+    }
+    return posted
+  } finally {
+    globalThis.fetch = originalFetch
+    process.env.AGENTMUX_HOOK_URL = originalEnv.url
+    process.env.AGENTMUX_HOOK_TOKEN = originalEnv.token
+  }
+}
+
+type Handler = (event: Record<string, unknown>, ctx: Record<string, unknown>) => unknown
+
+/** 一个足够宽的事件对象：生成代码会读 toolName/input 之类的字段，缺了不该让驱动本身炸。 */
+function syntheticEvent(type: string): Record<string, unknown> {
+  return { type, prompt: 'p', toolName: 'bash', input: {}, args: {}, properties: {} }
+}
+
+/** pi 的 handler 第二个参数是 ctx，扩展从它取 session 字段。给一个不含 transcript 的最小实现。 */
+function syntheticContext(): Record<string, unknown> {
+  return { sessionId: 'sess-1', session: { id: 'sess-1' } }
+}
 
 /** 从一份安装计划里，抽出每条 hook 命令字符串（跨各 Provider 的不同文件结构）。 */
 function commandsFromPlan(content: string): string[] {
@@ -55,13 +164,32 @@ describe('每个 explicit-managed 原生 Provider 都声明了事件名来源，
       provider.catalog.hookStrategy.kind === 'native' &&
       provider.catalog.hookStrategy.installation === 'explicit-managed'
   )
+  /** 命令面：装的是一条命令，事件名由 `agent-hook-command` 子进程从 argv 或负载里解析。 */
+  const commandFamily = managed.filter((provider) => provider.hook.eventNameSource?.kind !== 'generated-code')
+  /** 代码面：装的是 AgentMux 生成的 JS，代码自己 POST，子进程不在链路上。 */
+  const codeFamily = managed.filter((provider) => provider.hook.eventNameSource?.kind === 'generated-code')
 
   it('挡板：确实枚举到了一批 explicit-managed Provider（绝不空集取胜）', () => {
     // 若过滤条件写错导致空集，下面的 it.each 一个都不跑、整组静默通过。先钉住数量下界。
     expect(managed.length).toBeGreaterThanOrEqual(8)
   })
 
-  it.each(managed.map((provider) => [provider.id, provider] as const))(
+  it('两族分完刚好是全集，且没有 Provider 同时进两族', () => {
+    // 少了这一条，新接一家 Provider 若两族的判据都不适用（比如换了第三种投递形状），它会从两边的
+    // it.each 里**同时消失**——一条断言都不红，正是本仓「守卫按出口数不按条件数」那族假绿。
+    const ids = (list: typeof managed) => list.map((provider) => provider.id).sort()
+    expect([...ids(commandFamily), ...ids(codeFamily)].sort(), '两族并集必须等于 explicit-managed 全集')
+      .toEqual(ids(managed))
+    expect(
+      ids(commandFamily).filter((id) => ids(codeFamily).includes(id)),
+      '两族必须互斥：同一个 Provider 不能既走子进程解析又走生成代码直送'
+    ).toEqual([])
+    // 两族都必须非空，否则「分流」退化成一族，另一族的判据成了永不执行的死代码。
+    expect(commandFamily.length, '命令面不该为空').toBeGreaterThan(0)
+    expect(codeFamily.length, '代码面不该为空（pi/opencode 在这一族）').toBeGreaterThan(0)
+  })
+
+  it.each(commandFamily.map((provider) => [provider.id, provider] as const))(
     '%s 的 eventNameSource 有声明且与安装计划相符',
     (providerId, provider) => {
       const source = provider.hook.eventNameSource
@@ -80,12 +208,61 @@ describe('每个 explicit-managed 原生 Provider 都声明了事件名来源，
           expect(command, `${providerId} 声明 flag，命令必须带 --event：${command}`)
             .toMatch(/--event\s+\S+/)
         }
-      } else {
+      } else if (source!.kind === 'payload') {
         // 声明 payload ⇒ 键必须是三拼法之一（子进程只认这三个）。写一个子进程不认的键，这条红。
         expect(
           HOOK_EVENT_NAME_PAYLOAD_KEYS as readonly string[],
           `${providerId} 的 payloadKey 必须是子进程认得的三拼法之一`
         ).toContain(source!.payloadKey)
+      } else {
+        // 上面的分流保证 generated-code 不会落到这里；真落到了说明分流写坏了。
+        expect.unreachable(`${providerId} 是 generated-code，不该出现在命令面`)
+      }
+    }
+  )
+
+  it.each(codeFamily.map((provider) => [provider.id, provider] as const))(
+    '%s 装的生成代码里，每个声明的事件都真的带着事件名 POST',
+    async (providerId, provider) => {
+      // 代码面的判据不能是「源码里出现过 eventName 这个词」——那种文本断言对「回调注册了但没接上
+      // post」完全失明（本仓「grep 守卫看不见早退」）。这里**真的执行**生成的代码：把它当模块加载、
+      // stub 掉 fetch、逐个触发它注册的事件，再断言每个事件都发出了一条 body.eventName 等于该事件名
+      // 的 POST。
+      //
+      // 于是这条会在下列每一种真实缺陷上红（没有一种是文本看得见的）：
+      //   - 某个回调忘了调 post ⇒ 那个事件没有 POST；
+      //   - post 的 body 漏了 eventName ⇒ 值是 undefined；
+      //   - 注册 A 却上报 B ⇒ 值对不上；
+      //   - rules 声明了某事件而生成代码根本没注册它 ⇒ 那个事件收不到 POST。
+      const declared = [...new Set(provider.hook.rules.flatMap((rule) => rule.events))].sort()
+      expect(declared.length, `${providerId} 应至少声明一个事件`).toBeGreaterThan(0)
+
+      const plan = resolveManagedHookPlan(
+        providerId,
+        '/repo/app',
+        { AGENTMUX_HOOK_URL: HOOK_URL, AGENTMUX_HOOK_TOKEN: HOOK_TOKEN },
+        { url: HOOK_URL, token: HOOK_TOKEN }
+      )
+      expect(plan, `${providerId} 应有安装计划`).not.toBeNull()
+      expect(plan!.mutations.length, `${providerId} 只写它自己那一份代码文件`).toBe(1)
+
+      const module = await loadGeneratedModule(plan!.mutations[0]!.content)
+      // 入口形状由**调用方**断言，不由驱动器内部抛：驱动器里那种 throw 在两家都认得出的今天是死代码，
+      // 换成静默 `return {}` 一条都不红（实测）。摆到这里它就是一条会红的活断言——改坏 pi 的
+      // `export default` 或 opencode 的 `export function server`，这条立刻指名道姓。
+      expect(
+        generatedCodeEntry(module),
+        `${providerId} 的生成代码必须有可驱动的入口（pi 走 default 导出、opencode 走 server 导出）`
+      ).not.toBe('unknown')
+
+      const posted = await drivePostsFromGeneratedCode(module, declared)
+
+      expect(
+        Object.keys(posted).sort(),
+        `${providerId}: rules 声明的事件必须逐个都触发带事件名的 POST——少了的那些在生成代码里没接上`
+      ).toEqual(declared)
+      for (const event of declared) {
+        expect(posted[event], `${providerId} 的 ${event} 上报的事件名必须是它自己`).toBe(event)
       }
     }
   )
@@ -206,13 +383,20 @@ describe('投递面端到端：按每个 Provider 声明的来源喂信封，POS
     vi.restoreAllMocks()
   })
 
-  const managed = registry.list().filter(
+  // 只驱动**命令面**：代码面的 Provider 自己 POST，`runAgentHookCommand` 整个不在它们的链路上，
+  // 把信封喂给子进程只是在测一条它们不走的路。它们的投递面由上面那条「真的执行生成代码」负责。
+  const subprocessDelivered = registry.list().filter(
     (provider) =>
       provider.catalog.hookStrategy.kind === 'native' &&
-      provider.catalog.hookStrategy.installation === 'explicit-managed'
+      provider.catalog.hookStrategy.installation === 'explicit-managed' &&
+      provider.hook.eventNameSource?.kind !== 'generated-code'
   )
 
-  it.each(managed.map((provider) => [provider.id, provider] as const))(
+  it('挡板：确实枚举到了一批走子进程的 Provider（绝不空集取胜）', () => {
+    expect(subprocessDelivered.length).toBeGreaterThanOrEqual(8)
+  })
+
+  it.each(subprocessDelivered.map((provider) => [provider.id, provider] as const))(
     '%s：按声明的来源送事件名，子进程解析得出并发 POST',
     async (providerId, provider) => {
       const source = provider.hook.eventNameSource!
@@ -232,7 +416,7 @@ describe('投递面端到端：按每个 Provider 声明的来源喂信封，POS
         let payload: Record<string, unknown> = { session_id: 'sess-1' }
         if (source.kind === 'flag') {
           feedArgv(eventName!)
-        } else {
+        } else if (source.kind === 'payload') {
           // payload provider：事件名只从负载来（不给 flag/env）。放进它声明的那个键，断言子进程确实能
           // 从**负载**这条通路解析出事件名并发 POST。这条会在「子进程整个不读负载事件名」这类回归上红
           // （实测：把 resolveHookEventName 那行改成 null，7 个 payload provider 全红），从而钉住
@@ -240,6 +424,9 @@ describe('投递面端到端：按每个 Provider 声明的来源喂信封，POS
           // 刻意不拿它去证「拼法必须逐字对上」——子进程三拼法同权，写哪个都能解析，那不是运行时缺陷；
           // 「payloadKey 必须是三拼法之一」由上面的静态面负责，避免用被测对象自己算出的期望值假绿。
           payload = { ...payload, [source.payloadKey]: eventName }
+        } else {
+          // 上面的过滤保证 generated-code 不进这一组；真进来了说明过滤写坏了，别静默按 payload 处理。
+          expect.unreachable(`${providerId} 是 generated-code，不该走子进程投递面`)
         }
 
         const { bodies } = captureHookPost()

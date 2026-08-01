@@ -78,7 +78,12 @@ export const OPENCODE_HOOKS: AgentNativeHookSpecification = {
   // 声明一个取不到的键等于让 handle 永远缺一半。
   nativeHandle: {
     sessionIdKeys: ['sessionID']
-  }
+  },
+  // OpenCode 的 hook 面是一份 AgentMux 生成的插件文件，跑在 OpenCode 进程里**自己直接 POST**
+  // （见下面 `openCodePluginSource`：body 里 `eventName: event.type` 由生成代码直接给出）。
+  // `agent-hook-command` 那个子进程整个不在这条链路上，所以既谈不上 `--event` 旗标，也谈不上
+  // 「从负载里解析出事件名」——事件名是结构性在场的，不是解析出来的。
+  eventNameSource: { kind: 'generated-code' }
 }
 
 /**
