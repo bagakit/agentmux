@@ -75,3 +75,27 @@
 
 这里只抽取 project-native 最小模式，不复制第二套 Runtime、daemon 或 UI 状态机。
 
+## T-006 收口证据
+
+**零调用者检查**：`packages/core` 的 continuity 面共 7 个导出符号，经 `export *`
+（`packages/core/src/index.ts:30`）出仓。其中 3 个导出类型没有*具名*生产调用方，但它们不是死码：
+打包后的 consumer 经 `ensureAgentContinuity` 与 `.evidence.kind` 在结构上到达它们，删掉任一个
+两侧 typecheck 立刻红。Renderer/Main/Core 三侧 `tsc --noEmit` 均通过。
+
+**独立审计发现的真缺陷（一处）**：归属判断
+`sessionBelongsToWorkspace`（`apps/desktop/src/renderer/src/lib/workbench-persistence.ts:106`）
+是一个 `&&`——Workspace 仍被配置**且**这个 Session 归它所有。此前只有「该留的留下」与
+「Workspace 没了」两侧有人守，**「Workspace 在、但 Session 是别人的」这一侧无人守**：把该
+函数强制 `|| true`，`apps/desktop` 全部 192 文件 2025 条测试全绿。
+
+认错归属比丢一个 Region 更糟——用户看到一个"属于这里"的 Agent，而它的输出来自别处。投影里存的
+是 sessionId 字符串，id 复用、Workspace 改路径、同一台机上两个 Workspace 指向不同目录，都会让
+Session 自带的 `hostId`/`workspacePath` 与 tab 对不上。已补 G6b
+（`apps/desktop/test/workbench-persistence.test.ts`，commit `1d6623e`），与既有 G4 配成正负对；
+变异证据：`|| true` 红、`&& false` 7 红（证明不是单侧守卫）、`workspaceOwnsSessionPath` 的两个
+`return false` 各自失效各 1 红。
+
+**这条的方法论教训**：一个 `&&` 有两侧出口，覆盖了「拒绝」侧不等于覆盖了「接受」侧。守卫要按
+**出口**数，不按条件数。
+
+
