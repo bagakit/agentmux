@@ -15,8 +15,12 @@ const MAX_HOOK_INPUT_BYTES = 128 * 1024
  * 所以用量抽取只挂在收尾事件上，这也是「开销可忽略」的一半。
  *
  * **从 canonical 生命周期表派生**，不再手写字面量。此前这里硬编码 `['Stop','StopFailure']`——只有
- * PascalCase 的两家命中，Hermes 的 `on_session_end`/`post_llm_call` 与 Pi 的 `agent_end`/`agent_settled`
+ * PascalCase 的两家命中，Hermes 的 `on_session_end`/`post_llm_call` 与 Pi 的 `agent_settled`
  * 同样是 turn 收尾却永远读不到用量。派生保证「新增一个 Provider 的收尾事件」只需在映射表里加一行。
+ *
+ * 派生而非手写还挡住反向的错：Pi 的 `agent_end` **看着**像收尾却不是（之后还有 retry/compaction/
+ * queued 三条续跑路径，见 providers/pi.ts），此刻 transcript 尚未落定。手写清单很容易把它算进来，
+ * 而那会读到半个 turn 的数、还会把上一 turn 的用量抹掉。
  *
  * 导出为 SSOT：client.ts 的会话侧要用同一份集合判定「这是收尾事件却没抽到用量」——那种情况必须
  * 清掉上一轮的 turnUsage，绝不让陈旧数字挂在「Last turn」标签下（读 transcript 失败/竞态截断/记录
