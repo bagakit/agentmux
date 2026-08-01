@@ -277,7 +277,10 @@ describe('SessionPane Agent Composer ownership', () => {
     expect(permanent).not.toContain('Resume unavailable')
   })
 
-  it('says a conflict is held by someone else, not lost', () => {
+  // conflict 曾经只有一条文案（"另一个操作占着，先解决冲突"）。它对两类中的一类是错的，所以那条
+  // 断言随实现一起废掉了——两类各自的渲染断言见下面 'SessionPane 把两类 conflict 渲染成两件不同的事'。
+  // 这里只留「Core 一个类别都没给」这一格：它必须如实说分不清，且不许冒用任何一类的措辞。
+  it('says a conflict of unknown class is a claim, without guessing which kind', () => {
     const held = session('agent')
     fixture.state.sessions = [{
       ...held,
@@ -293,8 +296,12 @@ describe('SessionPane Agent Composer ownership', () => {
 
     const markup = render('agent-1', 'agent')
 
-    expect(markup).toContain('another operation')
-    expect(markup).toContain('Resolve conflict first')
+    expect(markup).toContain('Cannot tell what claimed this Agent')
+    expect(markup).toContain('did not report which kind of claim')
+    // 而且不许长得像「另一个操作正在用」那一类：那一类要求「等」，这一格要求「重读」。
+    // 同一句话要求两件相反的事，正是这条轴要消灭的东西。
+    expect(markup).not.toContain('Another operation is using this Agent')
+    expect(markup).not.toContain('Waiting for that operation')
   })
 
   // f-23r8fq5nw / T-012：退出横幅要能说清「是你关的还是它崩的」。三种 exitReason 必须给出彼此不同的
@@ -396,5 +403,99 @@ describe('SessionPane 对话链接的浮窗出口', () => {
 
     renderAgentActivity({ workspaceId: 'workspace-1', tabGroupId: 'group-1' })
     expect(captured.menuCanSplit).toBe(false)
+  })
+})
+
+// conflict 有两类，它们**要求用户做的事相反**：一条 Run 已被换掉（等不回来，该重读），另一条是
+// 某个生命周期操作此刻占着（真的会回来，该等）。判定层的测试守的是判定；这一组守的是**这一格真的
+// 渲染出了那一类的字，并且按钮的可按性跟着那一类走**——判定再对，Pane 把两类渲染成同一句话，
+// 用户还是不知道该干什么，而只测判定的用例全都还是绿的。
+describe('SessionPane 把两类 conflict 渲染成两件不同的事', () => {
+  function conflicted(conflict: 'session-run-changed' | 'lifecycle-busy' | undefined): SessionSnapshot {
+    // 恢复横幅只在进程真的没了的时候出现（processState interrupted + status error），
+    // 这正是 conflict 抵达界面时的形状。
+    return {
+      ...session('agent'),
+      processState: 'interrupted',
+      status: {
+        state: 'error',
+        source: 'run-process',
+        observedAt: 2,
+        continuity: 'conflict',
+        ...(conflict ? { continuityConflict: conflict } : {})
+      }
+    } as SessionSnapshot
+  }
+
+  it('Run 已被换掉时，让用户重读，而不是干等一个回不来的 Run', () => {
+    fixture.state.sessions = [conflicted('session-run-changed')]
+    fixture.state.viewModes = { 'agent-1': 'terminal' }
+
+    const markup = render('agent-1', 'agent')
+
+    expect(markup).toContain('already moved to a newer Run')
+    expect(markup).toContain('Re-read this Agent')
+    // 这一类**按得动**：重读是真能做到的事。禁用它等于把人钉在一个过期视图上。
+    expect(markup).not.toContain('disabled=""')
+    // 而且绝不能再说「等」——那是修好前的错建议。
+    expect(markup).not.toContain('Waiting for that operation')
+  })
+
+  it('另一个操作占着时，说等，并且不给一个按了也没用的按钮', () => {
+    fixture.state.sessions = [conflicted('lifecycle-busy')]
+    fixture.state.viewModes = { 'agent-1': 'terminal' }
+
+    const markup = render('agent-1', 'agent')
+
+    expect(markup).toContain('Another operation is using this Agent')
+    expect(markup).toContain('Waiting for that operation')
+    // 「等」这一类没有能按的动作：按下去不会让那个操作提前结束，所以按钮必须是禁用的。
+    expect(markup).toContain('disabled=""')
+    expect(markup).not.toContain('newer Run')
+  })
+
+  it('两类渲染出的字必须不同——折回同一句话时这条红', () => {
+    // 这是验收判据本身。上面两条各自钉住一类的字面，这条钉住「它们不是同一份字」，
+    // 于是任何把两类合并回一条文案的改动都躲不过去。
+    fixture.state.sessions = [conflicted('session-run-changed')]
+    fixture.state.viewModes = { 'agent-1': 'terminal' }
+    const stale = render('agent-1', 'agent')
+
+    fixture.state.sessions = [conflicted('lifecycle-busy')]
+    const busy = render('agent-1', 'agent')
+
+    expect(stale).not.toBe(busy)
+  })
+
+  it('Core 没给类别时，如实说不知道，并且仍给一条做得到的出路', () => {
+    fixture.state.sessions = [conflicted(undefined)]
+    fixture.state.viewModes = { 'agent-1': 'terminal' }
+
+    const markup = render('agent-1', 'agent')
+
+    expect(markup).toContain('did not report which kind of claim')
+    // 分不清的时候也不许把人钉住：重读永远是安全动作（它不抢占，只重读快照）。
+    expect(markup).toContain('Re-read this Agent')
+  })
+
+  it('「重读」走的是 refresh 而不是再 resume 一次——源码接线断言', () => {
+    // 本仓无 DOM，点不动 onClick，故按仓内既有约定（上面 onProseLinkSelect 那条）落到源码。
+    // 防的是把 refresh 那一类接到 recover()：这条 Agent 已经活在一个更新的 Run 上，再 resume
+    // 就是**第二次抢占**，比不给按钮更糟。这一条与上面「按得动」合起来才完整：那条证明按钮活着，
+    // 这条证明它按下去走的是对的那条通路。
+    const source = readFileSync(
+      new URL('../src/renderer/src/components/SessionPane.tsx', import.meta.url),
+      'utf8'
+    )
+    const button = source.slice(
+      source.indexOf('continuityNotice ? ('),
+      source.indexOf('</button>', source.indexOf('continuityNotice ? ('))
+    )
+
+    // refresh 判据在前、且落在 refresh()；retry 判据落在 recover()。两者不许互换。
+    expect(button).toContain('continuityRefreshEnabled(continuityNotice)\n                          ? () => void refresh()')
+    expect(button).toContain('continuityRetryEnabled(continuityNotice)\n                            ? () => void recover()')
+    // 两个判据都要参与 disabled，否则其中一类的按钮会是死的。
+    expect(button).toContain('continuityRetryEnabled(continuityNotice) || continuityRefreshEnabled(continuityNotice)')
   })
 })

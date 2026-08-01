@@ -1,6 +1,7 @@
 import type {
   AgentCatalogEntry,
   AgentMuxAgentContinuityResult,
+  AgentMuxAgentContinuityConflictReason,
   AgentMuxAgentContinuityUnavailableReason,
   AgentCapabilities,
   AgentDisplayState,
@@ -476,9 +477,27 @@ export type SessionStatus = {
    * is what makes every dead Agent read as one indistinguishable "resume unavailable". The three cases
    * call for different things from the user — a Provider that cannot resume at all is permanent, a
    * missing handle is about this one Session, and a conflict means something else already owns it — so
-   * the reason has to survive the trip to the renderer. Absent for `conflict`, which is its own reason.
+   * the reason has to survive the trip to the renderer. Absent for `conflict`, whose own two classes
+   * ride on `continuityConflict` instead — see there for why they cannot share this field.
    */
   continuityReason?: AgentMuxAgentContinuityUnavailableReason
+  /**
+   * WHICH of Core's two conflict classes this is, carried verbatim.
+   *
+   * A separate field rather than another member of `continuityReason`: that field's union is Core's
+   * *unavailable* reasons, and widening it would let a conflict value flow into the `unavailable`
+   * branch of every existing switch — the compiler would stop objecting exactly where the two
+   * concepts must stay apart.
+   *
+   * Why it must reach the renderer at all: the two classes call for **opposite** actions.
+   * `session-run-changed` means this Agent Session is alive on a NEWER Run (something already resumed
+   * it), so "wait" is a wrong instruction — waiting never brings back a Run that has been replaced;
+   * the surface should re-read the live Session, which `sessions.refresh` does by stable
+   * `agentSessionId`. `lifecycle-busy` means another lifecycle operation holds it right now, which is
+   * transient — there waiting IS the right answer. Folding them lost that difference and told half the
+   * users to wait for something that will never happen.
+   */
+  continuityConflict?: AgentMuxAgentContinuityConflictReason
 }
 
 type SessionSnapshotBase = {

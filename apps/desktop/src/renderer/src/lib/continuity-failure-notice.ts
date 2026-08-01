@@ -21,8 +21,17 @@ import type { SessionSnapshot } from '../../../shared/contracts'
 export type ContinuityRemedy =
   /** 换个时间点也不会变——只能新开一个 Agent。 */
   | { kind: 'start-new' }
-  /** 东西还在，只是被别的操作占着——等它结束。 */
+  /** 东西还在，只是被别的操作**此刻**占着——等它结束。 */
   | { kind: 'wait' }
+  /**
+   * 这条 session 还活着，但我们手里的 Run 已经过期——重读它的当前快照。
+   *
+   * 与 `wait` 分开是这条轴的重点：Run 已经被换掉了，等多久都不会回来，
+   * 而重读（按稳定的 agentSessionId 取，见 runtime-controller 的 refresh）能立刻拿到真的那条。
+   * 与 `retry` 也分开：这里不该再 resume 一次（已经有人 resume 过了，再来一次是第二次抢占），
+   * 该做的只是让界面追上事实。
+   */
+  | { kind: 'refresh' }
   /** 这条 session 的凭据没了，但重试有意义（Provider 可能刚装好 / Host 刚恢复）。 */
   | { kind: 'retry' }
 
@@ -41,22 +50,46 @@ export type ContinuityFailureNotice = {
 /**
  * 把一次恢复失败分类。
  *
- * `reason` 的 switch **没有 default**——与服务窗分类层同一条理由：Core 日后新增一个原因时，
+ * 两个 switch **都没有 default**——与服务窗分类层同一条理由：Core 日后新增一个原因时，
  * 这里少一个分支必须**编译不过**，而不是安静地折进某一类通用文案。把未知原因显示成
  * "Provider 不支持" 会让用户去新开 Agent，而真相可能只是 Host 掉线了。
  */
 export function classifyContinuityFailure(
   continuity: 'unavailable' | 'conflict' | undefined,
-  reason: SessionSnapshot['status']['continuityReason']
+  reason: SessionSnapshot['status']['continuityReason'],
+  conflict?: SessionSnapshot['status']['continuityConflict']
 ): ContinuityFailureNotice | null {
   if (!continuity) return null
 
   if (continuity === 'conflict') {
-    return {
-      title: 'This Agent is owned by another operation',
-      reason: 'Something else claimed this Agent Session, so the stale Run was not resumed.',
-      remedy: { kind: 'wait' },
-      actionLabel: 'Resolve conflict first'
+    // conflict 也没给类别：如实说分不清，别挑一类当默认——两类的动作相反，挑错一半的人被误导。
+    // 标题必须**明显不同于** lifecycle-busy 那条：两者措辞一旦接近，就等于用同一句话要求两件相反的事，
+    // 那正是这一层要消灭的形状。所以这里说"不知道是谁"，那里说"另一个操作正在用"。
+    if (!conflict) {
+      return {
+        title: 'Cannot tell what claimed this Agent',
+        reason: 'Something else claimed this Agent Session, so the stale Run was not resumed. Core did not report which kind of claim it was.',
+        remedy: { kind: 'refresh' },
+        actionLabel: 'Re-read this Agent'
+      }
+    }
+    switch (conflict) {
+      case 'session-run-changed':
+        // 「等」在这里是错建议：这条 session 已经在一个更新的 Run 上，被替换掉的那条等不回来。
+        return {
+          title: 'This Agent already moved to a newer Run',
+          reason: 'Something else resumed this Agent Session, so the Run this view held is stale. The Agent itself is alive — this view just needs to catch up.',
+          remedy: { kind: 'refresh' },
+          actionLabel: 'Re-read this Agent'
+        }
+      case 'lifecycle-busy':
+        // 这一类才是真的「等」：另一个生命周期操作此刻持有它，短暂。
+        return {
+          title: 'Another operation is using this Agent',
+          reason: 'A lifecycle operation holds this Agent Session right now, so no new Run was started. It will be free once that finishes.',
+          remedy: { kind: 'wait' },
+          actionLabel: 'Waiting for that operation'
+        }
     }
   }
 
@@ -107,7 +140,21 @@ export function classifyContinuityFailure(
  *
  * 只有 `retry` 可按——`start-new` 与 `wait` 按了也不会成功，而一个按下去必然失败的按钮比禁用
  * 更糟：它承诺了一件做不到的事。禁用态的 title 由 notice.reason 承载，不是空着。
+ *
+ * `refresh` **不**从这里出：它可按，但按下去要走的是另一条通路（重读快照而不是再 resume 一次），
+ * 所以由 `continuityRefreshEnabled` 单独判。用同一个判据会让 refresh 那一类去调 resume——那正是
+ * 第二次抢占，比不给按钮更糟。
  */
 export function continuityRetryEnabled(notice: ContinuityFailureNotice | null): boolean {
   return notice?.remedy.kind === 'retry'
+}
+
+/**
+ * 这条通知该不该给一个「重读」按钮，而不是「重试恢复」。
+ *
+ * 两个判据必须互斥：一次通知只能落在一个动作上，否则界面同时给两个按钮，用户又回到
+ * 「不知道该按哪个」——那正是这一层要消灭的东西。这条互斥由测试钉住。
+ */
+export function continuityRefreshEnabled(notice: ContinuityFailureNotice | null): boolean {
+  return notice?.remedy.kind === 'refresh'
 }

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
 
 vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
@@ -7,6 +8,7 @@ vi.hoisted(() => {
 import type { AgentSessionRecoveryCandidate } from '../src/shared/contracts.js'
 import {
   classifyContinuityFailure,
+  continuityRefreshEnabled,
   continuityRetryEnabled
 } from '../src/renderer/src/lib/continuity-failure-notice.js'
 import { recoveryCandidateSession } from '../src/renderer/src/store.js'
@@ -47,12 +49,89 @@ describe('continuity failure classes', () => {
     expect(notice?.reason).toContain('intact')
   })
 
-  it('says a conflict is someone else holding it, not a loss', () => {
-    const notice = classifyContinuityFailure('conflict', undefined)
+  it('tells a stale Run to re-read, never to wait for a Run that was already replaced', () => {
+    // 这是这条轴的核心：session-run-changed 说的是「这条 Agent 还活着，但已经在一个更新的 Run 上」。
+    // 「等一下」在这里是**错建议**——被换掉的那条 Run 等多久都不会回来。此前两类折成同一个 'wait'，
+    // 于是一半用户被指着一个永不返回的东西干等。
+    const notice = classifyContinuityFailure('conflict', undefined, 'session-run-changed')
+
+    expect(notice?.remedy).toEqual({ kind: 'refresh' })
+    expect(notice?.title).toContain('newer Run')
+    // 落在 refresh 而不是 retry：再 resume 一次是第二次抢占，不是「让界面追上事实」。
+    expect(continuityRefreshEnabled(notice)).toBe(true)
+    expect(continuityRetryEnabled(notice)).toBe(false)
+    // 而且必须说清 Agent 本身没丢——否则用户会去新开一个，白扔一条活着的 session。
+    expect(notice?.reason).toContain('alive')
+  })
+
+  it('tells a busy lifecycle op to wait, because that one really does come back', () => {
+    const notice = classifyContinuityFailure('conflict', undefined, 'lifecycle-busy')
 
     expect(notice?.remedy).toEqual({ kind: 'wait' })
+    expect(notice?.title).toContain('Another operation')
+    // 「等」这一类没有任何按得动的按钮：按了也不会让那个操作提前结束。
+    expect(continuityRefreshEnabled(notice)).toBe(false)
     expect(continuityRetryEnabled(notice)).toBe(false)
-    expect(notice?.title).toContain('another operation')
+  })
+
+  it('keeps the two conflict classes from collapsing back into one', () => {
+    // 回归锚：这两类**要求用户做的事相反**。任何把它们说成同一句话、或给同一个动作的改动，
+    // 都会让其中一类的建议变成错的——这正是本条轴要消灭的东西。
+    const stale = classifyContinuityFailure('conflict', undefined, 'session-run-changed')
+    const busy = classifyContinuityFailure('conflict', undefined, 'lifecycle-busy')
+
+    expect(stale?.remedy).not.toEqual(busy?.remedy)
+    expect(stale?.title).not.toBe(busy?.title)
+    expect(stale?.reason).not.toBe(busy?.reason)
+    expect(stale?.actionLabel).not.toBe(busy?.actionLabel)
+  })
+
+  it('admits it does not know which kind of claim it was when Core reports none', () => {
+    // conflict 但没给类别：如实说分不清，不挑一类当默认。挑 'wait' 就会对一半的人说错话
+    // （那正是修好前的行为），挑 'refresh' 至少不会把人钉在原地干等。
+    const notice = classifyContinuityFailure('conflict', undefined)
+
+    expect(notice?.remedy).toEqual({ kind: 'refresh' })
+    expect(notice?.reason).toContain('did not report')
+    // 而它绝不能冒充成两个已知类别中的任何一个。
+    expect(notice?.title).not.toBe(
+      classifyContinuityFailure('conflict', undefined, 'session-run-changed')?.title
+    )
+    expect(notice?.title).not.toBe(
+      classifyContinuityFailure('conflict', undefined, 'lifecycle-busy')?.title
+    )
+    // 更严的一条：不许**近似**于 lifecycle-busy 的措辞。这两格要求的动作相反（重读 vs 等），
+    // 而标题一旦读起来像同一句话，用户拿到的就是"同一句话要求两件相反的事"——那正是这一层
+    // 要消灭的形状，且它躲得过上面那种逐字不等的断言（实测：曾是
+    // 'This Agent is owned by another operation' vs 'Another operation is using this Agent'）。
+    const busyTitle = classifyContinuityFailure('conflict', undefined, 'lifecycle-busy')?.title ?? ''
+    const shared = new Set(busyTitle.toLowerCase().match(/[a-z]+/g) ?? [])
+    const overlap = (notice?.title.toLowerCase().match(/[a-z]+/g) ?? []).filter((word) =>
+      shared.has(word) && !['this', 'agent', 'the', 'a', 'is', 'it'].includes(word)
+    )
+    expect(overlap).toEqual([])
+  })
+
+  it('never offers both buttons for one notice', () => {
+    // 互斥是这一层的产出本身：一次通知只能落在一个动作上。同时给「重读」和「重试恢复」，
+    // 用户又回到「不知道该按哪个」——那正是分类要消灭的东西。
+    const every = [
+      classifyContinuityFailure('unavailable', 'provider-resume-unsupported'),
+      classifyContinuityFailure('unavailable', 'native-handle-unavailable'),
+      classifyContinuityFailure('unavailable', 'provider-unavailable'),
+      classifyContinuityFailure('unavailable', 'unknown-session'),
+      classifyContinuityFailure('unavailable', undefined),
+      classifyContinuityFailure('conflict', undefined),
+      classifyContinuityFailure('conflict', undefined, 'session-run-changed'),
+      classifyContinuityFailure('conflict', undefined, 'lifecycle-busy')
+    ]
+
+    for (const notice of every) {
+      expect(continuityRefreshEnabled(notice) && continuityRetryEnabled(notice)).toBe(false)
+    }
+    // 且两个判据都不能退化成恒 false——那样按钮全死，等于回到折叠前。
+    expect(every.filter((notice) => continuityRefreshEnabled(notice)).length).toBeGreaterThan(0)
+    expect(every.filter((notice) => continuityRetryEnabled(notice)).length).toBeGreaterThan(0)
   })
 
   it('admits it does not know when Core reports no reason', () => {
@@ -71,13 +150,15 @@ describe('continuity failure classes', () => {
 
   it('keeps every class distinguishable — no two share a title or an action', () => {
     // This is the acceptance criterion itself: 合成一句「恢复失败」等于没说. If a future edit makes
-    // two classes render the same words, this is the test that notices.
+    // two classes render the same words, this is the test that notices. 两个 conflict 类也在里面：
+    // 它们此前正是被折成同一条，而它们要求用户做的事相反。
     const notices = [
       classifyContinuityFailure('unavailable', 'provider-resume-unsupported'),
       classifyContinuityFailure('unavailable', 'native-handle-unavailable'),
       classifyContinuityFailure('unavailable', 'provider-unavailable'),
       classifyContinuityFailure('unavailable', 'unknown-session'),
-      classifyContinuityFailure('conflict', undefined)
+      classifyContinuityFailure('conflict', undefined, 'session-run-changed'),
+      classifyContinuityFailure('conflict', undefined, 'lifecycle-busy')
     ]
 
     expect(notices.every((notice) => notice !== null)).toBe(true)
@@ -144,15 +225,89 @@ describe('the store actually carries Core’s reason to the surface', () => {
     }
   })
 
-  it('leaves the reason absent for a conflict, which is its own reason', () => {
-    const session = recoveryCandidateSession(candidate(), {
-      kind: 'conflict',
-      agentSessionId: 'agent-1',
-      previousRun: { runId: 'run-1' },
-      currentRun: { runId: 'run-2' }
-    })
+  it('carries which kind of conflict it was, because the two ask for opposite things', () => {
+    // 这条守的是**投影这一段**，不是判定层：Core 的 conflict variant 一直带着 reason，丢失发生在
+    // store 把它投成 SessionSnapshot 的时候。断言落在返回的快照上，所以 store.ts 里少写这一项就变红。
+    for (const reason of ['session-run-changed', 'lifecycle-busy'] as const) {
+      const session = recoveryCandidateSession(candidate(), {
+        kind: 'conflict',
+        agentSessionId: 'agent-1',
+        previousRun: { runId: 'run-1' },
+        currentRun: { runId: 'run-2' },
+        reason
+      })
 
-    expect(session.status.continuity).toBe('conflict')
-    expect(session.status.continuityReason).toBeUndefined()
+      expect(session.status.continuity).toBe('conflict')
+      expect(session.status.continuityConflict).toBe(reason)
+      // conflict 不是 unavailable，两个字段不许互相冒充——否则 conflict 会掉进 unavailable 的分支里。
+      expect(session.status.continuityReason).toBeUndefined()
+    }
+  })
+
+  it('projects the two conflict classes onto DIFFERENT remedies end to end', () => {
+    // 逐层各自绿仍然可能整条链是死的：投影写了字段、判定认得取值，但两者对不上就还是折叠。
+    // 这条把 store → 判定 串起来跑，只有真的端到端分开才绿。
+    const remedy = (reason: 'session-run-changed' | 'lifecycle-busy') => {
+      const session = recoveryCandidateSession(candidate(), {
+        kind: 'conflict',
+        agentSessionId: 'agent-1',
+        previousRun: { runId: 'run-1' },
+        currentRun: { runId: 'run-2' },
+        reason
+      })
+      return classifyContinuityFailure(
+        session.status.continuity,
+        session.status.continuityReason,
+        session.status.continuityConflict
+      )?.remedy
+    }
+
+    expect(remedy('session-run-changed')).toEqual({ kind: 'refresh' })
+    expect(remedy('lifecycle-busy')).toEqual({ kind: 'wait' })
+  })
+
+  it('两个投影出口共用同一处判定——各写一遍时这条红', () => {
+    // 这条守的是**结构**，不是某一次取值。理由是实测的：`continuityConflict` 起初只加在
+    // recoveryCandidateSession 一处，于是**用户自己点「恢复」**走的 recoverSession 照旧折叠，
+    // 而上面所有断言都还是绿的（它们只够得着前一处）。这个洞在变异中存活过一轮。
+    //
+    // 正确的修法不是给第二处再配一条断言，而是让两条路共用一处判定；这条则钉住「共用」本身不被拆回去。
+    // 与「守卫按出口数不按条件数」同一条判据：两处该联动的写入分居两地必然 drift。
+    const source = readFileSync(
+      new URL('../src/renderer/src/store.ts', import.meta.url),
+      'utf8'
+    )
+
+    // 两个出口都必须经那一处产出。
+    expect(source.match(/\.\.\.continuityStatusFields\(recovery\)/g)).toHaveLength(2)
+    // 且这些字段只许在那个函数体里被赋值一次——任何出口自己再写一遍就是把 drift 装回去。
+    expect(source.match(/continuityConflict: recovery\.reason/g)).toHaveLength(1)
+    expect(source.match(/continuityReason: recovery\.reason/g)).toHaveLength(1)
+    expect(source.match(/detail: continuityFailureDetail\(recovery\)/g)).toHaveLength(1)
+  })
+
+  it('detail 也按 Core 给的类别分，不按 currentRun 在不在场猜', () => {
+    // 同一个「替 Core 猜类别」的形状还藏在 detail 里：它此前按 currentRun 是否存在来选措辞，
+    // 于是一条 session-run-changed 只要没带 currentRun，就被说成「另一个操作占着」——
+    // 与横幅标题互相矛盾。判据必须是 reason 本身。
+    const detail = (
+      reason: 'session-run-changed' | 'lifecycle-busy',
+      currentRun?: { runId: string }
+    ) =>
+      recoveryCandidateSession(candidate(), {
+        kind: 'conflict',
+        agentSessionId: 'agent-1',
+        previousRun: { runId: 'run-1' },
+        ...(currentRun ? { currentRun } : {}),
+        reason
+      }).status.detail
+
+    // 带 currentRun 时说得出具体是哪条 Run。
+    expect(detail('session-run-changed', { runId: 'run-2' })).toContain('run-2')
+    // 不带也仍旧是「已经换到更新的 Run」，绝不退化成「另一个操作占着」。
+    expect(detail('session-run-changed')).toContain('newer Run')
+    expect(detail('session-run-changed')).not.toContain('Another lifecycle operation')
+    // 而真正被占着的那一类才这么说。
+    expect(detail('lifecycle-busy')).toContain('Another lifecycle operation')
   })
 })
