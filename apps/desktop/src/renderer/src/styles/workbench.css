@@ -124,9 +124,42 @@
 }
 .workbench-tab--dragging { opacity: .22; }
 .workbench-tab__agent-mark { width: 14px; height: 14px; flex: none; position: relative; display: inline-flex; font-style: normal; }
-.workbench-tab__agent-mark > .status { position: absolute; right: -3px; bottom: -3px; padding:1px; border-radius: 50%; background: var(--surface-0); }
+/*
+ * 标签上的标记簇。
+ *
+ * 为什么是**并排、不重叠、不描边**：重叠 + 圆形裁剪 + 描边环那一套是**圆头像簇**的语言（头像本来就是圆
+ * 的，50% 是它的自然形状，环是为了把压在下面那张脸的轮廓从背景里抠出来）。这里画的是方形线条图标，套上
+ * 去有三处是错的：内联 `<svg>` 的 UA 默认 `overflow: hidden`，`border-radius: 50%` 会**真的裁掉图标内容**
+ * ——`SquareTerminal` 的方框四角、`FileCode2` 的折角被削掉，而第一个标记不进 `* + *` 所以是完整方形，同
+ * 一个终端图标当身份标记时方、当第二标记时圆且缺角；Agent 标记的状态点戳在右下角外沿（下面那条规则的
+ * `right/bottom: -3px`），正落在下一个标记 -6px 的重叠带里，会被盖住或从线条图标的缝里透出一块乱色；环色
+ * 写死 `--surface-0`，但根 tabbar 是 `--surface-1`（见 `.pane-tabbar--root`），于是非 active 标记的环比背景
+ * 更暗，重叠处是一圈深色晕而不是无缝抠除。这些都是排版结果，jsdom 不排版，所以三样都没有测试能抓到。
+ *
+ * 宽度账：三个 12px 标记重叠占 26px、并排占 42px，重叠只买回约 16px ≈ 1.6 个中文字，代价是上面三个缺陷。
+ * 并排还顺带满足 SSOT「描边不作为控件的主要视觉手段」（`docs/design/agentmux-surface-density.md`）。
+ *
+ * 顺序仍是标题那个 Region 的标记在最前（由 `workbenchTabMarks` 保证）——它是这张 Tab 的身份。
+ */
+.workbench-tab__marks { flex: none; display: inline-flex; align-items: center; gap: var(--sp-1); }
+.workbench-tab__marks > * { flex: none; }
+/*
+ * 状态点的底座色必须等于**它身后实际透出的那个背景**，否则点周围是一圈色差晕而不是无缝坐在标签上。
+ *
+ * 为什么要一个变量、不能写死：非 active 的 tab 背景是 `transparent`，透出的是所在 tabbar 的背景——非根
+ * tabbar 是 `--surface-0`，而根 tabbar（单 Pane 时它就是主 tab 条）是 `--surface-1`。写死一个值必然在另一种
+ * tabbar 上错色。默认值给非根那档，根 tabbar 与 active 态各自覆盖。
+ *
+ * 默认值直接写在这里而不是靠 `var(--x, fallback)`：一个只在某些容器里被赋值的属性会让"忘了赋值"变成静默
+ * 退化，而声明了默认值之后每个容器都只需要说自己那一档。
+ */
+.workbench-tab__marks { --tab-mark-seat: var(--surface-0); }
+.pane-tabbar--root .workbench-tab__marks { --tab-mark-seat: var(--surface-1); }
+.workbench-tab--active .workbench-tab__marks {
+  --tab-mark-seat: color-mix(in srgb, var(--text) 6%, var(--surface-1));
+}
+.workbench-tab__agent-mark > .status { position: absolute; right: -3px; bottom: -3px; padding:1px; border-radius: 50%; background: var(--tab-mark-seat); }
 .workbench-tab__agent-mark .status__dot { width: 5px; height: 5px; }
-.workbench-tab--active .workbench-tab__agent-mark > .status { background: color-mix(in srgb, var(--text) 6%, var(--surface-1)); }
 .workbench-tab__dirty { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%; background: var(--amber); }
 .workbench-tab__close {
   width: 16px;

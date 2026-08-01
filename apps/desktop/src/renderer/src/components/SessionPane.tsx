@@ -8,6 +8,7 @@ import {
   type OpenHttpLinkOrigin
 } from '../lib/open-destination'
 import { terminalLinkModifierOpensSystemBrowser } from '../lib/terminal-link-gesture'
+import { CONNECTION_UNRECOVERABLE_DETAIL } from '../lib/session-state'
 import type { ConversationSpeaker } from '../lib/conversation-speaker'
 import type { LinkClickModifiers } from './AgentMarkdown'
 import { AgentSessionComposer } from './AgentSessionComposer'
@@ -201,10 +202,17 @@ export function SessionPane({
   }
 
   const noun = session.kind === 'agent' ? 'Agent' : 'Terminal'
+  // 失联分两类，标题也必须分两类：还在重连 vs 已经放弃。判据取自 detail（连接投影写下的那一对
+  // SSOT 常量），而不是另起一个状态位——状态位就是 `disconnected`，两类共用它。只认一个标题的话，
+  // 抖动预算用尽后的终局会顶着「Reconnecting…」的皮，用户永远不知道该自己动手了。
+  const gaveUpReconnecting =
+    disconnected && session.status.detail === CONNECTION_UNRECOVERABLE_DETAIL
   // A continuity failure names its own class; the generic banner copy only covers the rest.
   const recoveryTitle = continuityNotice
       ? continuityNotice.title
-      : disconnected
+      : gaveUpReconnecting
+        ? `Can’t reach this host`
+        : disconnected
           ? 'Remote terminal disconnected'
           : exited
             ? `${noun} process exited`

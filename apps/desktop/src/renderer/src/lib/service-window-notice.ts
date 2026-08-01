@@ -1,4 +1,5 @@
 import type { SessionSnapshot } from '../../../shared/contracts'
+import { CONNECTION_UNRECOVERABLE_DETAIL } from './session-state'
 
 /**
  * 服务窗（AGENTS.md 原则 11）的判定层：一处失败在阻断用户之前，先分清它是哪一种。
@@ -143,11 +144,27 @@ export function agentSessionServiceOutcome(session: SessionSnapshot | undefined)
 
   if (session.status.state !== 'disconnected') return { completed: true }
 
-  const step: ProcessStep = {
-    label: 'Reconnecting to this Agent',
-    degradedMode: 'The Agent process is still running; only this window’s link to it dropped',
-    restore: 'Resume the session to reattach'
-  }
+  // 失联分两类，这条告示的文案也必须分两类——判据取自 `status.detail`（连接投影写下的那对 SSOT 常量），
+  // 而不是另起一个状态位：状态位就是 `disconnected`，两类共用它。
+  //
+  // 为什么这道分岔非做不可：终端视图的恢复横幅已经分了这两类，但那个横幅**只在终端分支里**。Agent 在
+  // Activity（对话）视图下唯一可见的失联文案就是这条告示——不在这里分，抖动预算用尽后的终局会一直说
+  // 「Reconnecting」，而实际上没有任何东西在重试。用户对这两种局面的正确反应完全相反（等 vs 动手），
+  // 把终局伪装成暂时是这条路上最坏的谎话。
+  // 两条 degradedMode 刻意**不共用**任何进行时的安慰词：「进程还在跑」是「重连中」那条的全部安慰，
+  // 而终局要说的恰恰是另一件事——自动恢复停了。终局这句也刻意不写成否定式（「没有东西在重试」要读者
+  // 先解析一个否定），直接说「已停止」。
+  const step: ProcessStep = session.status.detail === CONNECTION_UNRECOVERABLE_DETAIL
+    ? {
+        label: 'Automatic recovery on this host',
+        degradedMode: 'Automatic recovery has stopped — waiting will not clear this',
+        restore: 'Resume this session to reattach; your Agent may still be alive on that host'
+      }
+    : {
+        label: 'Reconnecting to this Agent',
+        degradedMode: 'The Agent process is still running; only this window’s link to it dropped',
+        restore: 'Resume the session to reattach'
+      }
   if (session.processState === 'running') {
     return { completed: false, step, agentViability: 'alive' }
   }

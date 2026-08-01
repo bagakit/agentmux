@@ -19,9 +19,16 @@ import {
   type AgentProvider
 } from './agent-provider.js'
 import { releaseSubagentRoster } from './hook-normalizer.js'
+import { eventNamesCanReopenTurn } from './agent-hook-event.js'
 import { USAGE_FINALIZATION_EVENTS } from './agent-hook-command.js'
 import { classifyRunExit, type AgentMuxRunExitReason } from './agent-run-exit.js'
+import {
+  hookEventUpdatesSemanticStatus,
+  hookTurnPhaseAfter,
+  type HookTurnPhase
+} from './hook-turn-phase.js'
 import { runBoundedReconnect } from './ctxmux-reconnect.js'
+import { judgeReconnectFlap, shouldClearFlapLedger } from './ctxmux-reconnect-budget.js'
 import { composeAgentLaunchPrompt, composeOutboundMessage } from './agent-outbound-message.js'
 import { hashAgentCapability, issueAgentCapability, resolveCapabilityAuthor } from './agent-capability.js'
 import { planDiscussion } from './agent-discussion.js'
@@ -413,6 +420,14 @@ export class AgentMuxClient {
   private connecting: Promise<void> | null = null
   private connectionEpoch = 0
   private connected = false
+  /**
+   * 跨成功幸存的抖动账（见 ctxmux-reconnect-budget.ts）。刻意**不复用** `connectionEpoch`：
+   * 那个只在调用方主动 `disconnect()` 时自增，半死 daemon 的反复抖动一次都不会碰它。
+   * 也刻意不上 wire：它是本进程对这条连接健康度的观察，不是任何 Session 的持久事实。
+   */
+  private reconnectFlaps = 0
+  /** 连接最近一次变健康的时刻（首次 connect 成功或 restored）。缓刑期满即清 {@link reconnectFlaps}。 */
+  private connectionHealthySince = 0
   private readonly runPids = new Map<string, number | null>()
   private readonly hookBindings = new Map<string, AgentHookBinding>()
   private readonly agentInputCursors = new Map<string, number>()
@@ -441,6 +456,17 @@ export class AgentMuxClient {
   // 一个 runId 只终结一次且此后永不复活，所以这里不逐条删——删了就等于把「已终结」这个事实忘掉，
   // 迟到的 hook 又能复活它。整份随断连清空（连接重建后会重新 list 出真相），与 stopRequestedRuns 同处。
   private readonly endedRuns = new Map<string, AgentMuxRunExitReason | undefined>()
+
+  // 每个 run 的 turn 收尾台账：turn 已收尾之后到达的工具事件不许再改语义状态（判据与理由见
+  // hook-turn-phase.ts，那里记着「为什么不是比 observedAt」）。
+  //
+  // 与 endedRuns 分开而不是并进去：那份记的是**进程**已死（此后一条 hook 都不收），这份记的是**当轮**
+  // 已收尾（事件照收、时间轴照落，只是不再据此推断「它正在干活」）。两个概念压到一份台账上，任何一侧
+  // 的语义改动都会静默改掉另一侧。
+  //
+  // 与 endedRuns 同处清空（断连后重新 list 出真相）。也不逐条删：一个 runId 的收尾状态只由
+  // user-prompt-submit 重新打开，删掉等于把「已收尾」忘掉，迟到的工具事件又能把它点亮。
+  private readonly hookTurnPhases = new Map<string, HookTurnPhase>()
   private readonly screenEvidence: AgentScreenEvidenceStore
   private readonly promptSubmission: AgentPromptSubmissionCoordinator
 
@@ -631,6 +657,10 @@ export class AgentMuxClient {
       await this.recoverPendingInteractionResponses(runs)
       this.assertConnectionEpoch(epoch)
       this.connected = true
+      // 缓刑期的起点。写在这里而不是只写在 `restored` 那侧，是因为首次 connect 也是「连接变健康」——
+      // 少了这一句，`connectionHealthySince` 会停在 0，于是第一次掉线时 `now - 0` 必然超过缓刑期、
+      // 账被无条件清零，跨成功的界永远攒不起来（即：这道界会变成死代码）。
+      this.connectionHealthySince = Date.now()
     } catch (error) {
       this.kernel.disconnect()
       await this.hookServer.stop()
@@ -649,16 +679,42 @@ export class AgentMuxClient {
    * `epoch` 守卫：调用方主动 `disconnect()` 会 `connectionEpoch += 1`，让这条迟到的掉线通知失效——
    * 我们不给一个已被主动关掉、或已被更新一轮连接取代的连接排重连。
    * `reconnecting` 守卫：重连风暴里（重连过程中又断一次）不重复起第二条重连循环。
+   *
+   * ## 抖动预算的检查点就在这里，而不在重连循环里面
+   *
+   * 半死 daemon（接受连接、握手过、随即又关流）会让每一轮重连都「成功」，于是 `runBoundedReconnect`
+   * 那道单轮的界每次都被重置——单轮有界不等于整体有界。挡它的账在 {@link judgeReconnectFlap}。
+   *
+   * 判决必须在**发 lost 之前**取得。把它放进 `reconnectLoop` 里就晚了：那样每一次抖动仍然会先发一条
+   * `lost` 把整屏 Agent 置灰、再白等一整轮（退避 31.5s + daemon ready + 握手）才拿到终局，用户看到的
+   * 抖动一次都没少。放弃时直接发 `unrecoverable`，跳过 `lost` 与整轮重连：这个状态本身就蕴含「连接
+   * 断了」，渲染端对它的处置是保持失联并等用户手动介入（见 session-state 的 connection-state 分支）。
    */
   private handleConnectionLost(epoch: number): void {
     if (epoch !== this.connectionEpoch) return
     if (this.reconnecting) return
-    this.reconnecting = true
+    const now = Date.now()
+    // 连续健康满缓刑期 → 清账。判据是「健康了多久」而非「刚刚 restored」：restored 恰恰是抖动那一刻
+    // 发生的事，拿它清账等于永远清得掉，这道界就成了死代码。
+    if (shouldClearFlapLedger(this.connectionHealthySince, now)) this.reconnectFlaps = 0
+    const verdict = judgeReconnectFlap({ flapCount: this.reconnectFlaps })
+    this.reconnectFlaps = verdict.flapCount
     this.connected = false
+    if (verdict.kind === 'give-up') {
+      // 响亮终局，且**立刻**给出——不再发 lost、不再起重连。用户拿到的是「连不上，请手动处理」，
+      // 而不是第 N 次「重连中…」。恢复入口已经在场（SessionPane 的 Resume / Check again）。
+      this.publisher.publish({
+        type: 'connection-state',
+        state: 'unrecoverable',
+        evidence: { source: 'run-process', observedAt: now }
+      })
+      return
+    }
+    this.reconnecting = true
     this.publisher.publish({
       type: 'connection-state',
       state: 'lost',
-      evidence: { source: 'run-process', observedAt: Date.now() }
+      evidence: { source: 'run-process', observedAt: now }
     })
     void this.reconnectLoop(epoch)
   }
@@ -689,6 +745,9 @@ export class AgentMuxClient {
     this.reconnecting = false
     if (result.kind === 'reconnected') {
       await this.republishLiveRunState()
+      // 这里刻意**不**重置 `connectionHealthySince`：唯一的写入点是 `open()` 成功那一句，重连成功
+      // 走的正是同一条 `open()`，所以那边已经写过了。分两处各写一次的形状必然漂移（其中一条会漏掉
+      // 某条路径），而缓刑期起点算错的后果是这道界静默失效，全绿。要改就改那一处。
       this.publisher.publish({
         type: 'connection-state',
         state: 'restored',
@@ -782,6 +841,7 @@ export class AgentMuxClient {
     this.runPids.clear()
     this.stopRequestedRuns.clear()
     this.endedRuns.clear()
+    this.hookTurnPhases.clear()
     this.agentInputCursors.clear()
     this.agentInputTails.clear()
     this.promptSubmission.cancelAllReadiness()
@@ -3236,9 +3296,45 @@ export class AgentMuxClient {
       session.agentSessionId !== envelope.agentSessionId ||
       session.providerId !== envelope.providerId
     ) return
-    const normalized = this.providers.get(envelope.providerId).normalizeHook(envelope)
+    const provider = this.providers.get(envelope.providerId)
+    const normalized = provider.normalizeHook(envelope)
+    // 读与推进的先后**在今天不承重**，别照着「先读后推」写注释骗下一个人：实测调换这两句，7 条断言全绿。
+    // 原因是结构性的——会推进阶段的事件（turn-end / 重开事件）与会被闸门拦的事件
+    // （tool-use-start / tool-use-end）是两个不相交的集合，所以「拿推进前的值还是推进后的值」对任何一条
+    // 事件都算出同一个答案。hook-turn-phase.test.ts 里钉着这条不相交性；哪天有事件同时进两族，那条会先红，
+    // 而**那时**这里的顺序才开始承重。仍写成先读后推，是因为它读起来就是判据本身要说的话。
+    const turnPhase = this.hookTurnPhases.get(envelope.runId)
+    const nextTurnPhase = hookTurnPhaseAfter(normalized.lifecycleEvent)
+    if (nextTurnPhase) this.hookTurnPhases.set(envelope.runId, nextTurnPhase)
+    // 闸门的前提是「收尾之后要再动工必先开新一轮」。这家 Provider 若声明不出任何重开事件，前提不成立，
+    // 抑制就会从可逆退化成永久——所以把前提可满足性算出来喂进去，而不是让闸门默认它成立。
+    const updatesSemanticStatus = hookEventUpdatesSemanticStatus(
+      turnPhase,
+      normalized.lifecycleEvent,
+      eventNamesCanReopenTurn(provider.hook.rules.flatMap((rule) => rule.events))
+    )
+    // 「这一 turn 结束了」与「取不到输出光标快照」是两件事，不许共用一个失败出口。
+    //
+    // 这次 status() 图的只是 `latestOutputBytes`——一个给 composer 就绪判定用的光标快照。可它在**断线
+    // 期间**直接抛 CTXMUX_DISCONNECTED（adapter 置 client=null 后 requireClient 恒抛），而这一句原先
+    // 裸在这里：错误一路穿出 onEvent、被 hook-server 应答成 503，发事件的 hook 子进程重试一次仍是
+    // 503，只写一行 stderr 就正常退出——**这条 Stop 永久丢失**。
+    //
+    // 窗口不窄，因为重连**只拆内核**：hookServer.stop() 全仓只在 open() 失败与 dispose() 两处调用，
+    // 所以掉线期间 HTTP 口一直开着、一直收 POST、一直 503，窗口是每轮退避的整个时长（可达 31.5s），
+    // 远大于 hook 客户端 2s 的超时。后果是最坏的那一种且已实测：done 从未落盘（抛出发生在任何持久化
+    // 之前），会话停在 working，衰减只把 working 降到 running 降不到 done，完成通知**永不触发**。
+    //
+    // done 本就不依赖它：done 来自 Provider 的 normalizeHook 规则（claude 的 Stop→done），与内核状态
+    // 无关。所以快照降级为 best-effort——只吞断线这一种，别的错误照旧响亮失败（那是真 bug，不是 wire
+    // 抖动）。光标确实丢了，我们不假装它没丢：缺席保持缺席，绝不编一个 0 冒充「输出到此为止」——那会
+    // 让 screenEvidence 从头扫，把上一轮的提示符误认成这一轮的，于是在 Agent 其实没就绪时放行 prompt。
+    // 缺席则让下一次 agentPrompt 收到 `epoch-missing` 的响亮拒绝（prompt-submission.ts:199）。
     const stopRun = normalized.eventName === 'Stop'
-      ? await this.kernel.status(session.run.runId)
+      ? await this.kernel.status(session.run.runId).catch((error: unknown) => {
+          if (error instanceof AgentMuxError && error.code === 'CTXMUX_DISCONNECTED') return null
+          throw error
+        })
       : null
     const receipt = {
       id: envelope.receiptId,
@@ -3267,7 +3363,7 @@ export class AgentMuxClient {
         ...currentBase,
         updatedAt: Math.max(current.updatedAt, normalized.status.observedAt),
         hookReceipt: persistedReceipt,
-        ...(normalized.semanticState === 'unknown'
+        ...(normalized.semanticState === 'unknown' || !updatesSemanticStatus
           ? {}
           : { semanticStatus: structuredClone(normalized.status) }),
         ...(stopRun
@@ -3366,7 +3462,11 @@ export class AgentMuxClient {
     for (const mutation of normalized.timeline) {
       await this.persistAndPublishTimeline(mutation, evidence, signal)
     }
-    this.publisher.publishHook(next, normalized, persistedReceipt)
+    // 语义状态的**两个**写入点必须判得一样（同 endedRuns 那道闸的教训）：只挡落盘、不挡发事件，UI 上
+    // 那个 Agent 照旧被点亮成 working，而磁盘是对的；只挡发事件、不挡落盘，本次 UI 是对的而下次冷启动
+    // 读回磁盘上那条 working 继续撒谎。回执、时间轴、用量都已在上面照常落——挡的只是「所以它正在干活」
+    // 这个推论。
+    if (updatesSemanticStatus) this.publisher.publishHook(next, normalized, persistedReceipt)
     if (normalized.interaction) {
       const request = next.pendingInteraction?.request
       if (!request || request.id !== normalized.interaction.id) {

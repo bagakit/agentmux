@@ -24,12 +24,17 @@
 export type TerminalOscClipboardWrite = { text: string }
 
 /**
- * OSC 52 载荷的体积上限（base64 编码后的字符数）。
+ * 单帧 OSC 52 载荷的体积上限（选区字段 + `;` + base64，即 `ESC ] 52 ;` 之后的全部字符数）。
  *
  * 为什么要有上限：剪贴板写入要过一次 IPC，而 PTY 那侧可以无节制地灌。一个跑飞的进程能用几十兆的
  * 帧把主进程拖住。128KiB 足够覆盖任何人真的想复制的东西（约 96KiB 原文）。
+ *
+ * 为什么量的是**整帧**而不只是 base64 那段：这道门放在切分选区之前，所以一个几十兆的选区字段
+ * （`AAAA…;QQ==`）同样被挡住，而且挡在任何字符串切片之前——只量 body 的话，那种帧要先 indexOf +
+ * slice 一遍几十兆才被选区白名单拒掉。名字曾经叫 `MAX_BODY` 而代码判的是整帧，两者漂了；这里以
+ * 代码为准把名字改对。
  */
-export const TERMINAL_OSC_CLIPBOARD_MAX_BODY = 128 * 1024
+export const TERMINAL_OSC_CLIPBOARD_MAX_PAYLOAD = 128 * 1024
 
 /**
  * 哪些剪贴板选区我们接受。
@@ -46,7 +51,7 @@ const ACCEPTED_SELECTIONS = new Set(['c', 's', ''])
  * 调用方对这四种一视同仁——都是「什么也不做」，没有需要区分的后续动作。
  */
 export function terminalOscClipboardWrite(data: string): TerminalOscClipboardWrite | null {
-  if (data.length > TERMINAL_OSC_CLIPBOARD_MAX_BODY) return null
+  if (data.length > TERMINAL_OSC_CLIPBOARD_MAX_PAYLOAD) return null
   // 选区与载荷之间只按**第一个**分号切：base64 字母表里没有分号，但载荷之后可能还跟着别的东西，
   // 而选区字段本身可以是多个字母（`pc` 这类）。
   const separator = data.indexOf(';')

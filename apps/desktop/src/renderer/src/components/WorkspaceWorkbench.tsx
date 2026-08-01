@@ -17,12 +17,9 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import {
-  FileCode2,
-  Globe2,
   GripVertical,
   MessagesSquare,
   Plus,
-  Sparkles,
   Square,
   SquareTerminal,
   X
@@ -30,15 +27,15 @@ import {
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
 import { BrowserPane } from './BrowserPane'
-import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
+import { agentProviderLabel } from './AgentProviderIcon'
 import { ConfirmationDialog } from './ConfirmationDialog'
 import { NewTabSurface } from './NewTabSurface'
 import { PaneSplitMenu } from './PaneSplitMenu'
 import { RegionContextMenu } from './RegionContextMenu'
 import { activeTopicIdFromLayout, layoutForActiveTopic } from '../lib/scratch-topic-layout'
 import { SessionPane } from './SessionPane'
-import { StatusDot } from './StatusDot'
 import { WorkbenchTabContextMenu } from './WorkbenchTabContextMenu'
+import { WorkbenchTabMarks } from './WorkbenchTabMarks'
 import { WorkbenchTabStrip } from './WorkbenchTabStrip'
 import { resolvePaneColumnEdgeZone } from '../lib/tab-drop-zone'
 import { SplitRatioCommitter } from '../lib/split-ratio-commit'
@@ -66,9 +63,11 @@ import {
   type WorkbenchSurface,
   type WorkbenchTab
 } from '../lib/workbench-tabs'
-import { canStopSessionRun, sessionTabTooltip } from '../lib/session-metadata'
+import { tabMarkAgentFactsFor, tabRegionSummary, workbenchTabMarks } from '../lib/workbench-tab-marks'
+import { canStopSessionRun, sessionTabTooltip, surfaceTabTooltip } from '../lib/session-metadata'
 import { copyableAgentSessionIdForTab } from '../lib/tab-control-handoff'
 import { handleTopicRenameKeyDown } from '../lib/topic-rename'
+import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { api } from '../lib/api'
 import { useAppStore } from '../store'
 import { useTerminalRegionParked } from '../lib/terminal-cold-parking-coordinator'
@@ -86,6 +85,13 @@ const EditorPane = lazy(async () => {
 type DragTabData = { kind: 'tab'; tabId: string; groupId: string }
 type DropData = DragTabData | { kind: 'pane'; groupId: string }
 type SplitTarget = { groupId: string; direction: SplitDirection }
+
+// 「在文件管理器中显示」的平台文案，与文件树右键菜单同一套说法（Finder / File Explorer / File Manager）。
+function fileManagerRevealLabel(): string {
+  if (navigator.userAgent.includes('Mac')) return 'Reveal in Finder'
+  if (navigator.userAgent.includes('Windows')) return 'Reveal in File Explorer'
+  return 'Reveal in File Manager'
+}
 
 function tabSurfaceFallback(tab: WorkbenchTab, sessions: readonly SessionSnapshot[]): string {
   const surface = titleWorkbenchSurface(tab)
@@ -170,10 +176,19 @@ function SortableWorkbenchTab({
   // Agent 的确认。跑完清掉意图。
   const closeTabRequest = useAppStore((state) => state.closeTabRequest)
   const clearCloseTabRequest = useAppStore((state) => state.clearCloseTabRequest)
+  const reportError = useAppStore((state) => state.reportError)
   const surface = titleWorkbenchSurface(tab)
   const session = surface.kind === 'agent' || surface.kind === 'terminal'
     ? sessions.find((item) => item.id === surface.sessionId)
     : null
+  // 标签上画的标记序列：一张 Tab 可以含多个 Region，标签要画出它的种类构成，而不是只画标题那一个。
+  // 「谁是 Agent」的判断在 `tabMarkAgentFactsFor` 里，不在这里——这个文件在 node 里 import 不了（经
+  // api.ts 的一个 vite define），留在这里的任何取值判断都无法被测试执行到。这里只剩一句转发。
+  const agentFactsFor = tabMarkAgentFactsFor(sessions)
+  const marks = workbenchTabMarks(tab, agentFactsFor)
+  // 标记簇在上限处截断且刻意不画 `+N`（标签宽度极紧）。折掉的种类改由 tooltip 兜住，两条 tooltip
+  // 路径都取它——没有 Session 的多 Region Tab 同样需要（见 `surfaceTabTooltip`）。
+  const regionSummary = tabRegionSummary(tab, agentFactsFor)
   // The one place a tab's shown name is decided: the naming SSOT chain, fed the Store's own facts. It is
   // NOT `session.label` — that is only the chain's lowest tier (Provider·Workspace), overridden by a user
   // rename, a single Agent's own name, or the multi-Agent family name.
@@ -183,6 +198,27 @@ function SortableWorkbenchTab({
     agentFactsFor: makeAgentFactsFor(sessions, agentNames, timelines)
   })
   const copyableAgentSessionId = copyableAgentSessionIdForTab(tab)
+  // 文件 Tab 才有路径复制与「在文件管理器中显示」；其余类型缺席，那三项整组不出现。workspaceRoot 用于把
+  // 相对 path 接成绝对路径（走共用的 formatPathsForCopy 出口）；reveal 走 FileExplorer 同一条 api.files.reveal。
+  const fileActions =
+    surface.kind === 'file'
+      ? (() => {
+          const workspace = config?.workspaces.find((candidate) => candidate.id === surface.workspaceId)
+          if (!workspace || workspace.hostId !== 'local') return undefined
+          return {
+            path: surface.path,
+            workspaceRoot: workspace.path,
+            revealLabel: fileManagerRevealLabel(),
+            onReveal: async () => {
+              try {
+                await api.files.reveal(surface.workspaceId, surface.path)
+              } catch (error) {
+                reportError(error)
+              }
+            }
+          }
+        })()
+      : undefined
   // Only a Session projection can be moved, and only the Region actually carrying it. A file or
   // launcher View has no Session identity to relocate, so it offers no destinations at all. The
   // destinations and the click action come from ONE decision in the lib — see moveSessionViewMenu
@@ -259,7 +295,7 @@ function SortableWorkbenchTab({
 
   // 消费键盘关 Tab 意图：只有意图点名的这张 Tab 才响应，跑既有的确认流，然后清掉意图。effect 里读 store
   // 派发出的意图对象；本仓库 renderToStaticMarkup 不跑 effect，所以这条接线的断言在 store 层（意图被投出/
-  // 清除）与判定层（handleWorkbenchShortcut 单格时调 requestCloseTab）各自守，见对应测试。
+  // 清除）与判定层（dispatchWorkbenchCommand 单格时调 requestCloseTab）各自守，见对应测试。
   useEffect(() => {
     if (
       !closeTabRequest ||
@@ -313,7 +349,10 @@ function SortableWorkbenchTab({
         onOpenChange={setTabMenuOpen}
         tabId={tab.id}
         copyableAgentSessionId={copyableAgentSessionId}
-        writeClipboardText={(text) => api.ui.writeClipboardText(text)}
+        {...(fileActions ? { fileActions } : {})}
+        writeClipboardText={async (text) => {
+          await copyTextToClipboard(text, reportError)
+        }}
         onRenameTab={() => beginRename('tab')}
         {...(copyableAgentSessionId ? { onRenameAgent: () => beginRename('agent') } : {})}
         onClose={() => void requestTabsClose([tab.id])}
@@ -339,22 +378,16 @@ function SortableWorkbenchTab({
           }`}
           {...(session ? { [DESKTOP_SESSION_ATTRIBUTE]: session.id } : {})}
           style={{ transform: CSS.Translate.toString(transform), transition }}
-          title={session ? sessionTabTooltip(session, displayName) : displayName}
+          title={
+            session
+              ? sessionTabTooltip(session, displayName, regionSummary)
+              : surfaceTabTooltip(displayName, regionSummary)
+          }
           onClick={() => activateTab(workspaceId, group.id, tab.id)}
           {...attributes}
           {...listeners}
         >
-          {surface.kind === 'agent' || surface.kind === 'terminal' ? (
-            session?.kind === 'agent' ? (
-              <i className="workbench-tab__agent-mark"><AgentProviderIcon providerId={session.providerId} size={13} /><StatusDot status={session.status} /></i>
-            ) : <SquareTerminal size={12} />
-          ) : surface.kind === 'file' ? (
-            <FileCode2 size={12} />
-          ) : surface.kind === 'browser' ? (
-            <Globe2 size={12} />
-          ) : (
-            <Sparkles size={12} />
-          )}
+          <WorkbenchTabMarks marks={marks} />
           {rename ? (
             <input
               autoFocus
@@ -548,6 +581,7 @@ function WorkbenchRegionLeaf({
   const dirtyDocuments = useAppStore((state) => state.dirtyDocuments)
   const closeRegionRequest = useAppStore((state) => state.closeRegionRequest)
   const clearCloseRegionRequest = useAppStore((state) => state.clearCloseRegionRequest)
+  const reportError = useAppStore((state) => state.reportError)
   const [confirmingClose, setConfirmingClose] = useState(false)
   const surface = tab.regions[node.regionId]
   const canClose = Object.keys(tab.regions).length > 1
@@ -564,7 +598,7 @@ function WorkbenchRegionLeaf({
 
   // 消费键盘关格意图：只有意图点名的这张 Tab 的这一格才响应，跑与 X 相同的决定，然后清掉意图。本仓库
   // renderToStaticMarkup 不跑 effect，所以这条接线的断言在 store 层（意图投出/清除）与判定层
-  // （handleWorkbenchShortcut 多格时调 requestCloseRegion）各自守，见对应测试。
+  // （dispatchWorkbenchCommand 多格时调 requestCloseRegion）各自守，见对应测试。
   useEffect(() => {
     if (
       !closeRegionRequest ||
@@ -584,7 +618,9 @@ function WorkbenchRegionLeaf({
       regionId={node.regionId}
       // 只有承载 Agent 的一格才有语义身份可寻址。
       agentSessionId={surface.kind === 'agent' ? surface.sessionId : null}
-      writeClipboardText={(text) => api.ui.writeClipboardText(text)}
+      writeClipboardText={async (text) => {
+        await copyTextToClipboard(text, reportError)
+      }}
     >
     <section
       className={`workbench-region ${tab.layout.activeRegionId === node.regionId ? 'workbench-region--active' : ''}`}

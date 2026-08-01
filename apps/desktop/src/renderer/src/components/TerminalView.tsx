@@ -54,6 +54,7 @@ import {
   type TerminalViewportMemory
 } from '../lib/terminal-viewport-memory'
 import {
+  admitTerminalLiveOutput,
   takeTerminalLiveOutputBatch,
   type TerminalLiveOutputChunk
 } from '../lib/terminal-live-output'
@@ -545,7 +546,11 @@ export function TerminalView({
 
     const scheduleLiveOutputDrain = (output: TerminalLiveOutputChunk): void => {
       if (disposed) return
-      liveOutputQueue.push(output)
+      // 入队必须**经过** admit：直接 push 会让这个队列无界，而 attach 之后再没有第二道闸
+      // （MAX_PENDING_* 那对只管 attach 前的启动缓冲）。积压超上限时从队头丢，省略由 drain 里
+      // 既有的「序列不连续」告示如实说出来。
+      const admitted = admitTerminalLiveOutput(liveOutputQueue, output)
+      liveOutputQueue.splice(0, liveOutputQueue.length, ...admitted.queue)
       if (liveDrain) return
       const drain = drainLiveOutput()
       liveDrain = drain

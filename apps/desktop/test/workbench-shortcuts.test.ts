@@ -8,6 +8,7 @@ import {
   dispatchWorkbenchCommand,
   isEditableChordTarget,
   tabIdForOrdinal,
+  tabIdForStep,
   windowShortcutHandlers,
   workbenchWindowBindingIds,
   type WorkbenchShortcutStore
@@ -26,6 +27,13 @@ describe('commandForWorkbenchId：绑定 id 翻译成命令', () => {
     expect(commandForWorkbenchId('workbench.select-tab.1')).toEqual({ kind: 'select-tab', ordinal: 1 })
     expect(commandForWorkbenchId('workbench.select-tab.8')).toEqual({ kind: 'select-tab', ordinal: 8 })
     expect(commandForWorkbenchId('workbench.select-tab.9')).toEqual({ kind: 'select-tab', ordinal: 'last' })
+  })
+
+  it('previous / next 翻译成方向相反的 step-tab', () => {
+    // 两条 id 对调（previous 给 +1）是这类接线最容易出的错，而它在界面上表现为「两个键都能用，只是
+    // 方向都反了」——不会崩、不会有报错。所以两个方向都锚字面量。
+    expect(commandForWorkbenchId('workbench.previous-tab')).toEqual({ kind: 'step-tab', delta: -1 })
+    expect(commandForWorkbenchId('workbench.next-tab')).toEqual({ kind: 'step-tab', delta: 1 })
   })
 
   it('close / split / focus 各自翻译到对的 kind 与方向', () => {
@@ -79,6 +87,43 @@ describe('tabIdForOrdinal', () => {
   it('越界不回绕，返回 null', () => {
     expect(tabIdForOrdinal(order, 5)).toBeNull()
     expect(tabIdForOrdinal([], 'last')).toBeNull()
+  })
+})
+
+describe('tabIdForStep：相对导航，到头回绕', () => {
+  const order = ['t1', 't2', 't3']
+
+  it('往后一张 / 往前一张', () => {
+    expect(tabIdForStep(order, 't1', 1)).toBe('t2')
+    expect(tabIdForStep(order, 't3', -1)).toBe('t2')
+  })
+
+  it('两端都回绕——这正是它不能与 tabIdForOrdinal 共用一个函数的原因', () => {
+    // `tabIdForOrdinal` 的注释明确说了绝对序号越界**不回绕**（按了不存在的序号当没按）。相对导航反过来：
+    // 「下一张」在最后一张上必须回到第一张，否则末尾那张成了死胡同，用户得改用鼠标才回得去。
+    // 把实现改成钳制（越界返回 null 或停在原地），这两句就红。
+    expect(tabIdForStep(order, 't3', 1)).toBe('t1')
+    expect(tabIdForStep(order, 't1', -1)).toBe('t3')
+  })
+
+  it('只有一张时回绕到自己，而不是 null——「只有一张」和「一张都没有」是两回事', () => {
+    expect(tabIdForStep(['only'], 'only', 1)).toBe('only')
+    expect(tabIdForStep(['only'], 'only', -1)).toBe('only')
+  })
+
+  it('一张都没有时返回 null：这时才该什么都不做', () => {
+    expect(tabIdForStep([], null, 1)).toBeNull()
+    expect(tabIdForStep([], 't1', -1)).toBeNull()
+  })
+
+  it('当前 Tab 不在序里（刚被关掉 / 活动项为 null）时，往后落到首张、往前落到末张', () => {
+    // 这两个落点都必须**显式**取两端。第一版实现让 `indexOf` 的 -1 直接参与取模，往后一张恰好对
+    // （-1+1=0），往前一张却算成 length-2 落到中间那张（三张时是 t2）——一张毫无道理的 Tab。
+    // 若谁改成「找不到就返回 null」，这条同样红，而那会让「刚关掉一张后按下一张」变成什么都不发生。
+    expect(tabIdForStep(order, null, 1)).toBe('t1')
+    expect(tabIdForStep(order, null, -1)).toBe('t3')
+    expect(tabIdForStep(order, 'gone', 1)).toBe('t1')
+    expect(tabIdForStep(order, 'gone', -1)).toBe('t3')
   })
 })
 
@@ -266,6 +311,65 @@ describe('接线：命令转发到 store action', () => {
     const store = spyStore()
     expect(dispatchId('workbench.select-tab.2', store)).toBe(true)
     expect(store.calls).toEqual(['activateTab:ws:g:t2'])
+  })
+
+  it('step-tab 从活动那张往后一张调 activateTab', () => {
+    // 默认 store 的组是 t1/t2/t3，活动在 t2。
+    const store = spyStore()
+    expect(dispatchId('workbench.next-tab', store)).toBe(true)
+    expect(store.calls).toEqual(['activateTab:ws:g:t3'])
+  })
+
+  it('step-tab 在末张按「下一张」回绕到首张，而不是什么都不做', () => {
+    // 这一条守的是**接线**这一侧：纯函数会回绕，但 dispatch 若把 `!tabId` 之外又加了自己的越界判断
+    // （或干脆用 tabIdForOrdinal 算），末张上按下一张就静默失效。
+    const store = spyStore({
+      layouts: {
+        ws: {
+          root: { type: 'leaf', groupId: 'g' },
+          groups: [{ id: 'g', tabOrder: ['t1', 't2', 't3'], activeTabId: 't3', recentTabIds: ['t3'] }],
+          activeGroupId: 'g'
+        }
+      }
+    })
+    expect(dispatchId('workbench.next-tab', store)).toBe(true)
+    expect(store.calls).toEqual(['activateTab:ws:g:t1'])
+  })
+
+  it('step-tab 往前一张的方向真的相反——两条 id 接反不会崩，只会方向全错', () => {
+    const store = spyStore()
+    expect(dispatchId('workbench.previous-tab', store)).toBe(true)
+    expect(store.calls).toEqual(['activateTab:ws:g:t1'])
+  })
+
+  it('step-tab 走的是 Topic 投影后的顺序，与序号切 Tab 同一份序', () => {
+    // 三张 Tab，中间那张属于另一个 Topic：投影后组里只剩 t-a、t-c，活动在 t-a。「下一张」必须落到 t-c
+    // ——若谁改成从未投影的 tabOrder 算，会落到用户根本看不见的 t-b 上（界面表现为按了一下什么都没变）。
+    const layout: WorkspaceLayout = {
+      root: { type: 'leaf', groupId: 'g' },
+      groups: [
+        { id: 'g', tabOrder: ['t-a', 't-b', 't-c'], activeTabId: 't-a', recentTabIds: ['t-a'] }
+      ],
+      activeGroupId: 'g'
+    }
+    const tabWithTopic = (id: string, topicId: string): WorkbenchTab => ({
+      id,
+      workspaceId: 'ws',
+      topicId,
+      titleRegionId: `r-${id}`,
+      layout: { root: { type: 'leaf', regionId: `r-${id}` }, activeRegionId: `r-${id}` },
+      regions: { [`r-${id}`]: { regionId: `r-${id}`, kind: 'launcher', workspaceId: 'ws' } }
+    })
+    const store = spyStore({
+      layouts: { ws: layout },
+      tabs: {
+        't-a': tabWithTopic('t-a', 'topic-1'),
+        't-b': tabWithTopic('t-b', 'topic-2'),
+        't-c': tabWithTopic('t-c', 'topic-1')
+      }
+    })
+    expect(dispatchId('workbench.next-tab', store)).toBe(true)
+    expect(store.calls).toEqual(['activateTab:ws:g:t-c'])
   })
 
   it('close-region 在单 Region Tab 上关整张 Tab（走确认流的意图），不是空关 Region', () => {

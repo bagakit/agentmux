@@ -11,10 +11,22 @@ import {
   PASCAL_CASE_HOOK_DIALECT,
   PI_HOOK_DIALECT,
   canonicalHookLifecycleEvent,
+  eventNamesCanReopenTurn,
   rawEventNamesForLifecycle,
   resolveHookEventName
 } from '../src/agent-hook-event.js'
+import { hookEventUpdatesSemanticStatus } from '../src/hook-turn-phase.js'
 import { AgentMuxError } from '../src/errors.js'
+import { ANTIGRAVITY_HOOK_EVENTS } from '../src/providers/antigravity.js'
+import { CLAUDE_HOOK_EVENTS } from '../src/providers/claude.js'
+import { CODEX_HOOK_EVENTS } from '../src/providers/codex.js'
+import { COPILOT_HOOK_EVENTS } from '../src/providers/copilot.js'
+import { CURSOR_HOOK_EVENTS } from '../src/providers/cursor.js'
+import { DROID_HOOK_EVENTS } from '../src/providers/droid.js'
+import { GEMINI_HOOK_EVENTS } from '../src/providers/gemini.js'
+import { GROK_HOOK_EVENTS } from '../src/providers/grok.js'
+import { HERMES_HOOK_EVENTS } from '../src/providers/hermes.js'
+import { KIMI_HOOK_EVENTS } from '../src/providers/kimi.js'
 import { USAGE_FINALIZATION_EVENTS } from '../src/agent-hook-command.js'
 import type { AgentHookLifecycleEvent, AgentCatalogEntry } from '../src/types.js'
 
@@ -188,7 +200,8 @@ describe('Core Provider protocol', () => {
     it('映射表的每个值都是词汇表成员，反查是它的忠实逆运算', () => {
       const vocabulary: readonly AgentHookLifecycleEvent[] = [
         'session-start', 'user-prompt-submit', 'permission-request',
-        'tool-use-start', 'tool-use-end', 'subagent-start', 'subagent-stop', 'turn-end'
+        'tool-use-start', 'tool-use-end', 'subagent-start', 'subagent-stop',
+        'turn-start', 'turn-end'
       ]
       for (const canonical of Object.values(AGENT_HOOK_LIFECYCLE_DIALECT)) {
         expect(vocabulary).toContain(canonical)
@@ -198,6 +211,118 @@ describe('Core Provider protocol', () => {
         expect(raws.length).toBeGreaterThan(0)
         for (const raw of raws) expect(canonicalHookLifecycleEvent(raw)).toBe(canonical)
       }
+    })
+
+    it('能收尾的 Provider 必须也能重开一个 turn——否则闸门永久 latch', () => {
+      // 事故形状（实测）：Hermes 的 `post_llm_call` 收尾之后，此后每条 `pre_tool_call`/`post_tool_call`
+      // 都被 turn-phase 闸门判「不更新语义状态」，整个 run 余下的 working / 等你态全部被静默吞掉。根因
+      // 不是少一个映射，而是闸门的前提（收尾后要再动工必先开新一轮）在这家 Provider 上不成立。
+      //
+      // 判据取 Provider **自己 rules 里声明的原始事件名**，不是方言表的键。这一点是判据的成败所在：
+      // 方言表可以被塞进一个 Provider 从不触发的键而让不变量假绿（审查实测过这个绕法），而 rules 是
+      // 这家 Provider 真的装了、也真的会据以判状态的那批名字，与 client.ts 喂给闸门的是同一个来源。
+      //
+      // Pi 刻意留红——它登记在下面的缺口清单里，且这条登记与「闸门对无重开能力的 Provider 不 latch」
+      // 那条守卫**成对**存在。给 Pi 编一个重开映射会让这条红变绿，但那是声明一个无第一方证据的能力
+      // （本仓北极星禁止，见 pi-unverified-declaration.test.ts），所以正确做法是保持缺口显式。
+      const KNOWN_NO_REOPENER: readonly string[] = ['pi']
+
+      const finalizers: string[] = []
+      const reopeners: string[] = []
+      for (const provider of providers) {
+        const declared = provider.hook.rules.flatMap((rule) => rule.events)
+        const canFinalize = declared.some((raw) => canonicalHookLifecycleEvent(raw) === 'turn-end')
+        const canReopen = eventNamesCanReopenTurn(declared)
+        if (canFinalize) finalizers.push(provider.id)
+        if (canReopen) reopeners.push(provider.id)
+
+        if (!canFinalize) continue
+        expect(
+          canReopen,
+          `${provider.id} 能收尾却无法重开：闸门会在它第一次收尾后永久吞掉状态。` +
+          '要么给它一个有第一方证据的重开事件，要么把它登记进 KNOWN_NO_REOPENER 并保留成对的守卫。'
+        ).toBe(!KNOWN_NO_REOPENER.includes(provider.id))
+      }
+
+      // 自检三条，缺一条这条不变量就可能在退化的输入上恒真。
+      expect(finalizers.length, '判据失效：没有任何 Provider 能收尾').toBeGreaterThan(0)
+      expect(reopeners.length, '判据失效：没有任何 Provider 能重开').toBeGreaterThan(0)
+      // 缺口清单不许烂掉：登记的名字必须真的是一个在册 Provider，且真的还缺重开能力。
+      for (const id of KNOWN_NO_REOPENER) {
+        const provider = providers.find((candidate) => candidate.id === id)
+        expect(provider, `缺口清单里的 ${id} 不是在册 Provider——清单过期了`).toBeDefined()
+        expect(
+          reopeners,
+          `${id} 已经有重开能力了：把它从 KNOWN_NO_REOPENER 删掉，别留一个假缺口`
+        ).not.toContain(id)
+      }
+    })
+
+    it('无重开能力的 Provider 走不 latch 的兜底——与上面那份缺口清单成对', () => {
+      // 这条是缺口清单的另一半。清单说「Pi 缺重开能力」，这条说「所以闸门对它不 latch」。
+      // 谁删掉兜底，这条先红；谁悄悄给 Pi 编个映射，上一条先红。两条都在才算把缺口守住。
+      expect(hookEventUpdatesSemanticStatus('turn-ended', 'tool-use-start', false)).toBe(true)
+      // 正向对照：有重开能力时照旧抑制，否则把兜底写成「永远不抑制」也全绿。
+      expect(hookEventUpdatesSemanticStatus('turn-ended', 'tool-use-start', true)).toBe(false)
+    })
+
+    it('装了重开事件的 Provider，rules 也必须认得出重开——闸门读的是 rules', () => {
+      // 这一层堵的是「安装清单与 rules 各说一套」：安装清单（`*_HOOK_EVENTS`）决定**投递**什么，
+      // rules 决定 Core 看到它时怎么判，而闸门的重开能力从 rules 算（client.ts 摄入侧就是这么喂的）。
+      // 装了却没进 rules（antigravity 的 `UserPromptSubmit` 实测如此）＝闸门以为这家不能重开，
+      // 白丢一层「收尾后压制迟到工具事件」的保护，而所有测试照旧全绿。
+      //
+      // **判据比的是 canonical 能力，不是原始名逐字相等**，这一点是对的而非图省事：grok 的两个面拼法
+      // 本来就不同——配置侧写 PascalCase（`UserPromptSubmit`），投递侧报 snake_case
+      // （`user_prompt_submit`），rules 匹配的是投递侧。按原始名比会把 grok 判成漏配（实测如此），
+      // 那是判据自己错，不是 grok 有缺陷。比 canonical 则两个面的拼法差异被方言表吸收掉，
+      // 真正的漏配（一个面能重开、另一个面认不出）仍然照抓。
+      //
+      // 只对 explicit-managed 强制：那批是 AgentMux 亲手写配置的，安装清单是我们自己的声明，能核对。
+      // unmanaged（pi）与无 hook（traex）的安装面不由本仓决定，拿不到可核对的清单。
+      const INSTALLED_HOOK_EVENTS: Readonly<Record<string, readonly string[]>> = {
+        antigravity: ANTIGRAVITY_HOOK_EVENTS,
+        claude: CLAUDE_HOOK_EVENTS,
+        codex: CODEX_HOOK_EVENTS,
+        copilot: COPILOT_HOOK_EVENTS,
+        cursor: CURSOR_HOOK_EVENTS,
+        droid: DROID_HOOK_EVENTS,
+        gemini: GEMINI_HOOK_EVENTS,
+        grok: GROK_HOOK_EVENTS,
+        hermes: HERMES_HOOK_EVENTS,
+        kimi: KIMI_HOOK_EVENTS
+      }
+
+      let compared = 0
+      let installedCanReopenCount = 0
+      for (const provider of providers) {
+        if (provider.catalog.hookStrategy.kind !== 'native') continue
+        if (provider.catalog.hookStrategy.installation !== 'explicit-managed') continue
+        const installed = INSTALLED_HOOK_EVENTS[provider.id]
+        expect(
+          installed,
+          `${provider.id} 是 explicit-managed 却没登记安装清单——这张表漏了一家，那家的漏配从此免检`
+        ).toBeDefined()
+        if (!installed) continue
+        compared += 1
+
+        const installedCanReopen = eventNamesCanReopenTurn(installed)
+        const rulesCanReopen = eventNamesCanReopenTurn(provider.hook.rules.flatMap((r) => r.events))
+        if (installedCanReopen) installedCanReopenCount += 1
+        expect(
+          rulesCanReopen,
+          `${provider.id} 的安装清单里有重开事件，rules 却认不出任何一个：闸门按 rules 算重开能力，` +
+          '于是它以为这家不能重开，白丢一层「收尾后压制迟到工具事件」的保护。' +
+          '（若两侧拼法不同，rules 要写投递侧那个拼法。）'
+        ).toBe(installedCanReopen)
+      }
+
+      // 自检两条，缺一条这条就可能在退化的输入上恒真。
+      expect(compared, '判据失效：没有比对过任何 Provider').toBeGreaterThan(5)
+      expect(
+        installedCanReopenCount,
+        '判据失效：没有任何 Provider 的安装清单能重开，于是上面每一条都退化成 false===false'
+      ).toBeGreaterThan(0)
     })
 
     it('方言按 Provider 分块声明，合并面等于各块之并——新 Provider 只动自己那块', () => {

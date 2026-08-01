@@ -187,6 +187,45 @@ describe('GitService.diff (structured, fake executor)', () => {
     expect(diff.old).toEqual({ present: true, binary: true })
   })
 
+  it('flags a NUL-bearing HEAD blob as binary — the old side needs its own scan, not just the new one', async () => {
+    // 与 :160 那条镜像对称：那条把 NUL 放在 worktree/new 侧，于是 old 侧的 NUL 扫描（git-service 的
+    // blobTextToDiffSide）一直没有任何用例走到。删掉那一行时整个文件仍会全绿，而用户打开一个**被修改
+    // 过的已提交二进制文件**（tracked .png 之类）的 diff 时，old 侧的原始字节会被当 text 交给 Monaco，
+    // 渲染成乱码而不是 binary 占位。所以两侧各要一条：这是同一个判断的两个出口。
+    const host = gitHost({ show: () => gitResult([], 'PNG header') })
+    const reader = worktreeReader({ 'logo.png': Buffer.from('now plain text\n') })
+    const { service, config: cfg } = withWorkspace(host, reader)
+
+    const diff = await service.diff('repo', 'logo.png', cfg)
+
+    expect(diff.binary).toBe(true)
+    expect(diff.old).toEqual({ present: true, binary: true })
+    // 绝不把原始字节塞进 text——那正是「渲染成乱码」的形状。
+    expect('text' in diff.old).toBe(false)
+    // 而 new 侧此刻是干净文本，必须仍按文本呈现：证明这条断言咬的是 old 侧，不是整体一刀切。
+    expect(diff.new).toEqual({ present: true, binary: false, text: 'now plain text\n' })
+  })
+
+  it('flags an oversized worktree file as binary — the stat-size ceiling, not the executor output limit', async () => {
+    // reader 的 'oversized' 分支（worktreeReader helper 早就支持）此前没有任何用例构造过，所以
+    // git-service 里那句 `if (read.oversized) return { present: true, binary: true }` 无人守。它不只是
+    // 一个标签：oversized 变体**不带 bytes 字段**，删掉这一行后紧接着的 `read.bytes.includes(0)` 会
+    // 在运行时抛，diff 面板整个开不出来。改成 `binary: false, text: '' }` 则更隐蔽——用户看到一个空
+    // diff，读作「没有改动」。
+    const host = gitHost({ show: () => gitResult([], 'small in HEAD\n') })
+    const reader = worktreeReader({ 'big.bin': 'oversized' })
+    const { service, config: cfg } = withWorkspace(host, reader)
+
+    const diff = await service.diff('repo', 'big.bin', cfg)
+
+    expect(diff.binary).toBe(true)
+    expect(diff.new).toEqual({ present: true, binary: true })
+    expect('text' in diff.new).toBe(false)
+    // 超大 ≠ 不存在：present 必须为真，否则这个文件会被画成「已删除」。
+    expect(diff.new.present).toBe(true)
+    expect(diff.change).toBe('modified')
+  })
+
   it('classifies identical content on both sides as unchanged (the mode-only / no-content-change case)', async () => {
     const host = gitHost({ show: () => gitResult([], 'same\n') })
     const reader = worktreeReader({ 'exec.sh': Buffer.from('same\n') })

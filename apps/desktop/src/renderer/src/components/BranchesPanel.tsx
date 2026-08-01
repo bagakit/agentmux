@@ -19,11 +19,13 @@ import type {
 import { useWorkspaceBranches } from '../hooks/useWorkspaceBranches'
 import { buildFanOutRequest, MAX_FANOUT_LANES } from '../lib/fanout-request'
 import { api } from '../lib/api'
+import { copyTextToClipboard } from '../lib/clipboard-copy'
 import {
   runningAgentPresenceByWorktree,
   worktreePresenceKey
 } from '../lib/branch-agent-presence'
 import { defaultWorktreePath } from '../lib/workspace-projects'
+import { branchHasWorktree, branchOpenIntent, branchWorktreePath } from '../lib/workspace-branches-state'
 import { useAppStore } from '../store'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { SelectorListHeader, SelectorPresence, SelectorRow } from './SelectorList'
@@ -56,15 +58,17 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
     setSelectedBranch(current?.name ?? workspace.branch ?? null)
   }, [snapshot, workspace.branch])
 
+  // 「有没有 worktree」这一个概念只有 branchHasWorktree 一个判定点（见该函数头部注释：此前它在本文件
+  // 里被独立判了七次，其中一处用 !== null 而其余用 truthy，空串会让它们结论相反）。
   const bound = useMemo(
     () => snapshot?.kind === 'git-repository'
-      ? snapshot.branches.filter((branch) => branch.worktreePath)
+      ? snapshot.branches.filter(branchHasWorktree)
       : [],
     [snapshot]
   )
   const unbound = useMemo(
     () => snapshot?.kind === 'git-repository'
-      ? snapshot.branches.filter((branch) => !branch.worktreePath)
+      ? snapshot.branches.filter((branch) => !branchHasWorktree(branch))
       : [],
     [snapshot]
   )
@@ -74,7 +78,7 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
   )
 
   function openCreateDialog(branch: WorkspaceBranchRecord): void {
-    if (snapshot?.kind !== 'git-repository' || branch.worktreePath) return
+    if (snapshot?.kind !== 'git-repository' || branchHasWorktree(branch)) return
     setSelectedBranch(branch.name)
     setCreateBranch(branch)
     setWorktreePath(defaultWorktreePath(snapshot.repoPath, branch.name))
@@ -85,7 +89,8 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
     if (!branch || busyBranch) return
     setSelectedBranch(branch.name)
     setActionError(null)
-    if (!branch.worktreePath) {
+    // 分流本身是 branchOpenIntent 算的，这里只负责执行——它与分组、尾标签、副标题读的是同一个判定。
+    if (branchOpenIntent(branch) === 'create-worktree') {
       openCreateDialog(branch)
       return
     }
@@ -101,7 +106,7 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
 
   async function createWorktree(event: React.FormEvent): Promise<void> {
     event.preventDefault()
-    if (!createBranch || createBranch.worktreePath || !worktreePath.trim() || busyBranch) return
+    if (!createBranch || branchHasWorktree(createBranch) || !worktreePath.trim() || busyBranch) return
     setBusyBranch(createBranch.name)
     setActionError(null)
     try {
@@ -155,25 +160,23 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
 
   async function copyText(text: string): Promise<void> {
     setActionError(null)
-    try {
-      await api.ui.writeClipboardText(text)
-    } catch (cause) {
-      setActionError(message(cause))
-    }
+    await copyTextToClipboard(text, (cause) => setActionError(message(cause)))
   }
 
   function branchRow(branch: WorkspaceBranchRecord) {
     const selectedRow = selectedBranch === branch.name
-    const runningAgents = branch.worktreePath && snapshot?.kind === 'git-repository'
-      ? runningAgentsByWorktree.get(worktreePresenceKey(snapshot.hostId, branch.worktreePath)) ?? []
+    // 一次判断给出标志与取值。分开算两次是这一族缺陷的来源，所以这里也不许再判第二次。
+    const worktree = branchWorktreePath(branch)
+    const runningAgents = worktree !== null && snapshot?.kind === 'git-repository'
+      ? runningAgentsByWorktree.get(worktreePresenceKey(snapshot.hostId, worktree)) ?? []
       : []
     return (
       <BranchContextMenu
         key={branch.name}
-        hasWorktree={branch.worktreePath !== null}
+        hasWorktree={worktree !== null}
         onOpen={() => void openBranch(branch)}
         onCopyBranchName={() => void copyText(branch.name)}
-        onCopyWorktreePath={() => branch.worktreePath && void copyText(branch.worktreePath)}
+        onCopyWorktreePath={() => worktree !== null && void copyText(worktree)}
         onRefresh={() => void refresh()}
       >
         <button
@@ -187,8 +190,8 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
             leading={busyBranch === branch.name ? <LoaderCircle className="spin" size={12} /> : <GitBranch size={12} />}
             title={branch.name}
             titleTooltip={branch.name}
-            subtitle={branch.worktreePath ?? 'No worktree'}
-            subtitleTooltip={branch.worktreePath ?? undefined}
+            subtitle={worktree ?? 'No worktree'}
+            subtitleTooltip={worktree ?? undefined}
             presence={
               <SelectorPresence
                 agents={runningAgents.map((agent) => ({
@@ -203,8 +206,8 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
               />
             }
             trailing={
-              <span className={`branch-row__state ${branch.worktreePath ? '' : 'branch-row__state--unbound'}`}>
-                {branch.isCurrent ? <><Check size={9} /> Current</> : branch.worktreePath ? 'Worktree' : <><Unlink size={9} /> Branch</>}
+              <span className={`branch-row__state ${worktree !== null ? '' : 'branch-row__state--unbound'}`}>
+                {branch.isCurrent ? <><Check size={9} /> Current</> : worktree !== null ? 'Worktree' : <><Unlink size={9} /> Branch</>}
               </span>
             }
           />

@@ -4,6 +4,7 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { hookResponseFor, resolveHookProvider, runAgentHookCommand } from '../src/agent-hook-command.js'
+import { BUILT_IN_AGENT_PROVIDERS } from '../src/agent-provider.js'
 
 describe('agent hook command response contract', () => {
   it('gates Antigravity: PreToolUse defers with "ask", Stop clears, other events emit {}', () => {
@@ -252,6 +253,177 @@ describe('agent hook command usage relay', () => {
         vi.unstubAllGlobals()
         vi.restoreAllMocks()
       }
+    }
+  })
+
+  /**
+   * POST 的闸是 `if (url && token && eventName)`——三个合取项。上面所有测试都断言「POST 发出去了」
+   * （`bodies).toHaveLength(1)`），也就是全都只质询这道闸的**通过侧**；每个 fixture 三项都是真的，
+   * 所以任意删掉一项都不改变它们断言的任何东西（实测：把 `&& eventName` 删掉，21 条全绿）。
+   *
+   * 拦下侧同样承重——尤其 `eventName` 那一项，实现里 :113-115 的注释把它点名为 P0：一个存在但为空的
+   * `AGENTMUX_HOOK_EVENT` 会让事件名变 falsy，于是整段 POST 被跳过、状态与用量双双静默丢失。
+   * 下面三条各让一项为假、另两项为真，于是每一项都成为那个现场里唯一还站着的守卫。
+   */
+  it('三项闸各自都能拦下 POST：缺 url / 缺 token / 事件名读不出来', async () => {
+    const cases = [
+      {
+        name: '缺 url',
+        env: { AGENTMUX_HOOK_TOKEN: 'test-token', AGENTMUX_HOOK_EVENT: 'Stop' } as Record<string, string>
+      },
+      {
+        name: '缺 token',
+        env: { AGENTMUX_HOOK_URL: 'http://127.0.0.1:65535/hook', AGENTMUX_HOOK_EVENT: 'Stop' }
+      },
+      {
+        // url 与 token 都齐，只有事件名读不出来：旗标没给、环境变量是空串（读作「没设」）、
+        // stdin 负载里也没有任何一种事件名拼法。这正是那条 P0 注释描述的现场。
+        name: '事件名读不出来',
+        env: {
+          AGENTMUX_HOOK_URL: 'http://127.0.0.1:65535/hook',
+          AGENTMUX_HOOK_TOKEN: 'test-token',
+          AGENTMUX_HOOK_EVENT: ''
+        }
+      }
+    ]
+    for (const scenario of cases) {
+      for (const [key, value] of Object.entries(scenario.env)) vi.stubEnv(key, value)
+      const { bodies } = captureHookPost()
+      feedStdin(JSON.stringify({ session_id: 'sess-gate' }))
+
+      await runAgentHookCommand()
+
+      expect(bodies, `${scenario.name} 时不该发出任何 POST`).toHaveLength(0)
+      vi.unstubAllEnvs()
+      vi.unstubAllGlobals()
+      vi.restoreAllMocks()
+    }
+  })
+})
+
+/**
+ * 门控决策与 stdin 的顺序。
+ *
+ * 我们自己的 128KiB 上限（MAX_HOOK_INPUT_BYTES）在 stdin 读循环里 `throw`。决策的 stdout 写出原先排在
+ * 读循环**之后**，于是一个超大负载让整个进程带着**空 stdout** 退出——而 Antigravity 把 PreToolUse 上的
+ * 空 stdout 读作 HARD DENY（见 hookResponseFor 头部注释）。后果不是「丢一条状态」，而是**我们的体积
+ * 上限把一个合法的工具调用变成了策略拒绝**：Agent 被自己的监视器挡住。大文件写、大段粘贴的
+ * PreToolUse 负载超 128KiB 是现实场景。
+ *
+ * 实测（HEAD 上，修复前）：provider=antigravity + PreToolUse + 200KiB stdin，捕获到的 stdout 是 `[]`。
+ */
+describe('门控决策先于读 stdin', () => {
+  let restoreStdin: (() => void) | null = null
+
+  /** 塞一段任意大小的 stdin；返回的函数还原原描述符。 */
+  function feedRawStdin(chunk: Buffer): void {
+    const descriptor = Object.getOwnPropertyDescriptor(process, 'stdin')
+    Object.defineProperty(process, 'stdin', { value: Readable.from([chunk]), configurable: true })
+    restoreStdin = () => {
+      if (descriptor) Object.defineProperty(process, 'stdin', descriptor)
+      else delete (process as unknown as { stdin?: unknown }).stdin
+    }
+  }
+
+  function captureStdout(): string[] {
+    const written: string[] = []
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      written.push(String(chunk))
+      return true
+    })
+    return written
+  }
+
+  afterEach(() => {
+    restoreStdin?.()
+    restoreStdin = null
+    vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
+    vi.restoreAllMocks()
+  })
+
+  it('超过体积上限的负载仍然把门控决策写了出去——上限不许把合法工具调用变成拒绝', async () => {
+    vi.stubEnv('AGENTMUX_HOOK_PROVIDER', 'antigravity')
+    // 事件名走 Antigravity 自己的环境变量（等价于 `--event PreToolUse`）：两者都与 stdin 无关，
+    // 这正是「决策可以先算出来」的全部依据。
+    vi.stubEnv('AGENTMUX_ANTIGRAVITY_EVENT', 'PreToolUse')
+    const written = captureStdout()
+    feedRawStdin(Buffer.alloc(200 * 1024, 0x41))
+
+    // 体积上限照旧响亮失败——这一条状态事件确实丢了，我们不假装它没丢。
+    await expect(runAgentHookCommand()).rejects.toThrow(/exceeds the AgentMux limit/)
+
+    // 但决策必须已经送达。把 stdout 写出移回 stdin 读循环之后（原位置），这里会拿到 []，断言红。
+    expect(written, '超大负载下门控决策没写出去——Antigravity 会把空 stdout 读作 HARD DENY')
+      .toEqual(['{"decision":"ask"}\n'])
+  })
+
+  it('正常大小的负载不受影响：决策仍是那一条，且只写一次', async () => {
+    // 反向那一侧。前移若写成「两处都写」，正常路径会出现两条决策——一个门控 CLI 读到两段 JSON。
+    vi.stubEnv('AGENTMUX_HOOK_PROVIDER', 'antigravity')
+    vi.stubEnv('AGENTMUX_ANTIGRAVITY_EVENT', 'PreToolUse')
+    const written = captureStdout()
+    feedRawStdin(Buffer.from(JSON.stringify({ session_id: 'sess-small' }), 'utf8'))
+
+    await runAgentHookCommand()
+
+    expect(written).toEqual(['{"decision":"ask"}\n'])
+  })
+
+  /**
+   * 生产真路：事件名走 `--event` 旗标，而不是环境变量。
+   *
+   * 上面两条用 `AGENTMUX_ANTIGRAVITY_EVENT` 喂事件名，图的是简便——可**生产里那个变量根本不存在**：
+   * `client.ts` 的 agentEnvironment 只注入 url/token/providerId，从不注入任何事件名变量（grep 可证），
+   * 而 antigravity 的 managed plan 给每条 hook 命令追加 `--event <名>`（providers/antigravity.ts:34-38）。
+   * 于是那两条走的是一条只在测试里点亮的路。
+   *
+   * 后果实测：把决策的事件源从 `flagEvent ?? envEvent` 收窄成只认 `envEvent`，本文件与
+   * provider-event-name-source 那套 **36 条全绿**——而生产里 antigravity 的每一次 PreToolUse 都会拿到
+   * `{}`（因为 env 恒空），被读作 HARD DENY。正是本 describe 要消灭的那类灾难，在全绿下复活。
+   *
+   * 所以这一条**刻意不设**任何事件名环境变量：旗标是这里事件名的唯一来源。
+   */
+  it('生产真路：事件名只来自 --event 旗标时，门控决策照样送达', async () => {
+    vi.stubEnv('AGENTMUX_HOOK_PROVIDER', 'antigravity')
+    const originalArgv = process.argv
+    process.argv = [originalArgv[0]!, originalArgv[1]!, '--event', 'PreToolUse']
+    try {
+      const written = captureStdout()
+      feedRawStdin(Buffer.from(JSON.stringify({ session_id: 'sess-flag' }), 'utf8'))
+
+      await runAgentHookCommand()
+
+      expect(written, '旗标是生产里事件名的唯一来源——决策丢了就等于每次工具调用都被拒绝')
+        .toEqual(['{"decision":"ask"}\n'])
+    } finally {
+      process.argv = originalArgv
+    }
+  })
+
+  /**
+   * 前移的前提：**决策的两个输入都与 stdin 无关**。provider 恒来自 env，事件名则必须来自 `--event`
+   * 旗标或 env，绝不能只在负载里。这条前提此前只写在注释里；写成判据，是因为将来某家 gated Provider
+   * 改成 `payload` 取事件名时，前移会静默给出**错的**决策（PreToolUse 的 `ask` 退化成 `{}`），
+   * 而上面两条测试用的是 antigravity、照旧全绿。
+   *
+   * 「谁是 gated」不手抄名字，而是问 `hookResponseFor` 自己：它对哪家返回非 `{}`，那家就是 gated。
+   * 这样第二家 gated Provider 一加进来就自动落入判据，不必有人记得回来改这份清单。
+   */
+  it('每一家门控 Provider 的事件名都不靠 stdin——否则前移会给出错的决策', () => {
+    const gated = BUILT_IN_AGENT_PROVIDERS.filter((provider) =>
+      provider.hook.rules.some((rule) => rule.events.some((event) => hookResponseFor(provider.id, event) !== '{}\n'))
+    )
+    // 自检：判据不能落空。真有 0 家门控时，上面那两条行为断言也没有对象，这里要响亮地说出来。
+    expect(gated.map((provider) => provider.id), '一家门控 Provider 都没识别出来——判据落空了')
+      .not.toHaveLength(0)
+
+    for (const provider of gated) {
+      expect(provider.hook.eventNameSource, `${provider.id} 是门控的，必须声明事件名来源`).toBeDefined()
+      expect(
+        provider.hook.eventNameSource?.kind,
+        `${provider.id} 的事件名来自负载，可是门控决策要在读负载之前写出——这两件事不能同时成立`
+      ).toBe('flag')
     }
   })
 })

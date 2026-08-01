@@ -153,6 +153,30 @@ export const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
   // --- window: workbench actions (suppressed inside non-terminal editable inputs) ---
   ...SELECT_TAB_BINDINGS,
   {
+    // 相对导航：绝对序号答不了「下一张」。九个数字键只在 Tab 少且位置记得住时够用；一旦十几张，
+    // 用户要的动作是"往后翻一张"，而那在数字键上没有对应键。
+    //
+    // 为什么是 `[` / `]` 加 primary：这是浏览器与编辑器上「上一个/下一个」的通行和弦，且这一对
+    // 在本表里没被占用（数字被 select-tab 占、四个方向键被 focus-region 占、字母 p/w/d 已用）。
+    // 走 `symbolChords` 而不是自己写两行：off mac 的底线是 Ctrl+Shift（裸 Ctrl+letter 留给 readline），
+    // 而带 Shift 时键盘送来的是 `{`/`}` 不是 `[`/`]`——那个不匹配正是 `help.shortcuts` 出过的错，
+    // 这个 helper 存在就是为了让它写不出来。
+    id: 'workbench.previous-tab',
+    scope: 'window',
+    keyClass: 'symbol',
+    label: 'Previous tab',
+    gate: 'not-in-editable',
+    ...symbolChords('[', '{')
+  },
+  {
+    id: 'workbench.next-tab',
+    scope: 'window',
+    keyClass: 'symbol',
+    label: 'Next tab',
+    gate: 'not-in-editable',
+    ...symbolChords(']', '}')
+  },
+  {
     id: 'workbench.close-region',
     scope: 'window',
     keyClass: 'letter',

@@ -220,6 +220,13 @@ export type AgentHookLifecycleEvent =
   | 'tool-use-end'
   | 'subagent-start'
   | 'subagent-stop'
+  /**
+   * 一个 turn 开工。与 `user-prompt-submit` 分开是必须的：那一条说的是「用户交了输入」，这一条说的是
+   * 「Agent 开始干这一轮」。有的 Provider 只报后者——Hermes 的 hook 面上根本没有「用户提交了 prompt」
+   * 这种事件（用户在它自己的 TUI 里打字，AgentMux 看不见），能看见的只有它开始跑这一轮。把它记成
+   * `user-prompt-submit` 会在 canonical 表里留一句假话；而两条都缺的后果见 hook-turn-phase.ts。
+   */
+  | 'turn-start'
   /** 一个 turn 收尾：本 turn 的 token 用量已在 transcript 落定。 */
   | 'turn-end'
 
