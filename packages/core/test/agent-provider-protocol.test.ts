@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
 import {
   AGENT_HOOK_LIFECYCLE_DIALECT,
+  CURSOR_HOOK_DIALECT,
   GEMINI_HOOK_DIALECT,
   GROK_HOOK_DIALECT,
   HERMES_HOOK_DIALECT,
@@ -202,7 +203,7 @@ describe('Core Provider protocol', () => {
       // 合并面必须恰好等于各块的并集，既不丢（漏接线）也不多（有人偷偷往全局表塞条目）。
       const blocks = [
         PASCAL_CASE_HOOK_DIALECT, HERMES_HOOK_DIALECT, PI_HOOK_DIALECT,
-        GROK_HOOK_DIALECT, GEMINI_HOOK_DIALECT
+        GROK_HOOK_DIALECT, GEMINI_HOOK_DIALECT, CURSOR_HOOK_DIALECT
       ]
       const union: Record<string, AgentHookLifecycleEvent> = {}
       for (const block of blocks) Object.assign(union, block)

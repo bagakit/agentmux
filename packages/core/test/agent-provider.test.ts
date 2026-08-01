@@ -69,7 +69,7 @@ describe('built-in agent providers', () => {
       {
         id: 'cursor', executable: 'cursor-agent', expectedProcess: 'cursor-agent',
         promptDelivery: 'positional-argv', readySignal: 'foreground-process',
-        hook: 'none', permission: 'none', resume: 'none', acp: 'none',
+        hook: 'native', permission: 'observe', resume: 'provider-native', acp: 'none',
         replyCorrelation: 'none'
       }
     ])
@@ -88,16 +88,16 @@ describe('built-in agent providers', () => {
     // shell hooks into ~/.hermes/config.yaml plus the consent allowlist (see createHermesManagedHookPlan).
     // grok joins them too: its own file under ~/.grok/hooks/ (that directory is always-trusted, so the
     // install needs no folder-trust grant) — see createGrokManagedHookPlan.
-    for (const id of ['codex', 'claude', 'antigravity', 'hermes', 'grok'] as const) {
+    // cursor joins them with TWO mutations: the user-layer ~/.cursor/hooks.json plus the workspace
+    // trust marker — see createCursorManagedHookPlan.
+    for (const id of ['codex', 'claude', 'antigravity', 'hermes', 'grok', 'gemini', 'cursor'] as const) {
       expect(catalog.get(id)).toEqual({ kind: 'native', installation: 'explicit-managed' })
     }
     // Native hooks AgentMux understands but cannot install yet (pi TS extension has no surface AgentMux
     // writes): it must NOT claim explicit-managed, so the launch-time trigger honestly skips it.
     expect(catalog.get('pi')).toEqual({ kind: 'native', installation: 'unmanaged' })
     // Providers with no hooks at all stay `none`, never a fake native.
-    for (const id of ['traex', 'cursor'] as const) {
-      expect(catalog.get(id)).toEqual({ kind: 'none' })
-    }
+    expect(catalog.get('traex')).toEqual({ kind: 'none' })
   })
 
   it.each(['claude', 'traex', 'pi'] as const)('delivers %s prompts as positional argv data', (id) => {
@@ -181,10 +181,15 @@ describe('built-in agent providers', () => {
     })).toEqual({ command: 'cursor-agent', args: ['--force', 'review this'], env: {} })
   })
 
-  // grok 与 gemini 都已离开这一组：grok 的 `--resume <SESSION_ID_OR_TITLE>` 来自本机 `--help`；
-  // gemini 的 `--resume <uuid>` 来自读实现（findSession 是 UUID 优先，help 文本少说了）。
-  // 两者的 resume argv 分别在 test/providers/{grok,gemini}.test.ts 里断言。
-  it.each(['cursor'] as const)('exposes %s as not supporting provider-native resume', (id) => {
+  // grok、gemini、cursor 都已离开这一组：grok 的 `--resume <SESSION_ID_OR_TITLE>` 来自本机 `--help`；
+  // gemini 的 `--resume <uuid>` 来自读实现（findSession 是 UUID 优先，help 文本少说了）；cursor 的
+  // `--resume [chatId]` 同样来自读 bundle（`else fe=o.resume` 直传 chat id）。三者的 resume argv 分别在
+  // test/providers/{grok,gemini,cursor}.test.ts 里断言。
+  //
+  // 这一组必须留着**真的没有** native resume 的 Provider，否则它会退化成一个不守任何东西的空壳。
+  // traex 与 hermes 就是：两者的 `--help` 里都没有任何恢复旗标（hermes 的 resumeStrategy 因此是 none）。
+  it.each(['traex', 'hermes'] as const)('exposes %s as not supporting provider-native resume', (id) => {
+    expect(providers.get(id).catalog.capabilities.providerResume).toBe(false)
     expect(() => providers.get(id).buildResumeLaunch({
       workspacePath: '/tmp/work',
       nativeHandle: { kind: 'provider', providerId: id, sessionId: 'native-x' },

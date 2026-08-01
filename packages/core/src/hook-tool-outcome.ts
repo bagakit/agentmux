@@ -36,10 +36,12 @@ const TRUNCATION_MARKER = '\n[output truncated]'
 /**
  * 各家 Provider 放结果的字段名。
  *
- * Claude 的 `PostToolUse` 给 `tool_response`；其余是同族命名变体。顺序即优先级，取第一个能读出
- * 内容的。
+ * Claude 的 `PostToolUse` 给 `tool_response`；Cursor 给 `tool_output`；其余是同族命名变体。
+ * 顺序即优先级，取第一个能读出内容的。
  */
-const OUTPUT_KEYS = ['tool_response', 'toolResponse', 'tool_result', 'toolResult', 'output'] as const
+const OUTPUT_KEYS = [
+  'tool_response', 'toolResponse', 'tool_result', 'toolResult', 'tool_output', 'toolOutput', 'output'
+] as const
 
 /**
  * 负载里可能承载"失败"这件事的字段。
@@ -49,6 +51,20 @@ const OUTPUT_KEYS = ['tool_response', 'toolResponse', 'tool_result', 'toolResult
 const ERROR_FLAG_KEYS = ['is_error', 'isError', 'error'] as const
 const STATUS_KEYS = ['status', 'result'] as const
 const EXIT_CODE_KEYS = ['exit_code', 'exitCode', 'code'] as const
+
+/**
+ * 只在**失败事件**上出现、其存在本身即失败的字段。
+ *
+ * Cursor 的 `postToolUseFailure` 是这条存在的理由：它带 `error_message`/`failure_type`/`is_interrupt`，
+ * 却**既没有** `is_error`、**也没有** `tool_output`——上面三族判据一条都命中不了，于是一次失败的工具
+ * 调用会被收敛成 `complete`，和成功的长得一模一样。那正是本文件开头描述的、也是 Provider parity
+ * 验收明令禁止的缺陷。
+ *
+ * 与 `ERROR_FLAG_KEYS` 里的 `error` 分开列而不是并进去，是因为语义不同：`error` 那族是「这个字段
+ * 说了成败」，读到空串/false 时不算失败；这族是「这个字段只在失败时才存在」，所以只要它**带着内容
+ * 出现**就是失败。空串仍不算——一个空的 `error_message` 证明不了任何事。
+ */
+const FAILURE_ONLY_KEYS = ['error_message', 'errorMessage', 'failure_type', 'failureType'] as const
 
 /** 结果对象里，正文通常挂在这些键下。 */
 const NESTED_TEXT_KEYS = ['stdout', 'output', 'content', 'text', 'stderr', 'message', 'error'] as const
@@ -104,6 +120,10 @@ function readText(value: unknown): string | undefined {
 
 /** 负载或结果对象是否明确表示这一步失败了。 */
 function readFailure(source: Record<string, unknown>): boolean {
+  for (const key of FAILURE_ONLY_KEYS) {
+    const value = source[key]
+    if (typeof value === 'string' && value.trim()) return true
+  }
   for (const key of ERROR_FLAG_KEYS) {
     const value = source[key]
     if (value === true) return true
@@ -139,7 +159,9 @@ export function hookToolOutcome(payload: Record<string, unknown>): HookToolOutco
       break
     }
   }
-  const text = readText(raw)
+  // 失败事件可能压根没有输出键，正文只在 `error_message` 里（Cursor 的 postToolUseFailure 就是
+  // 这样）。退回去读它，否则用户只看得见一个红标记而看不见任何原因。
+  const text = readText(raw) ?? readText(payload.error_message ?? payload.errorMessage)
   // 失败标志既可能在负载顶层（`exit_code`），也可能在结果对象内部（`is_error`）——两处都读。
   const failed = readFailure(payload) || (isRecord(raw) ? readFailure(raw) : false)
   return {

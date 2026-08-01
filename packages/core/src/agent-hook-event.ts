@@ -156,6 +156,37 @@ export const GEMINI_HOOK_DIALECT: AgentHookLifecycleDialect = {
 }
 
 /**
+ * Cursor 的 camelCase 方言。
+ *
+ * 拼法自成一族：既不是 Claude 的 PascalCase，也不是 Hermes 的 snake_case。**只有事件名是 camelCase**，
+ * 负载键反倒是 Claude 同族的 snake_case（`tool_name`/`tool_input`/`tool_output`/`tool_use_id`），
+ * 与 Gemini 的错位方式相同、错位的方向相反。
+ *
+ * `beforeSubmitPrompt` 是 Cursor 的 user-prompt-submit（负载带 `prompt`）。`postToolUseFailure`
+ * 与 `postToolUse` 同为一次工具调用的事后：两者都带 `tool_use_id`，前者携 `error_message`/
+ * `failure_type`/`is_interrupt` 而**不带** `tool_output`——所以它必须映射成 tool-use-end，否则
+ * 那次调用会永远停在 streaming 徽标上。
+ *
+ * `beforeShellExecution`/`beforeMCPExecution` 刻意不映射：它们是**授权门**（stdout 上回
+ * `permission: allow|deny|ask`），不是一次工具调用的事前——同一条命令会先过门、再走
+ * `preToolUse`，把门也算成 tool-use-start 会让一次执行在时间轴上落两条。
+ * `afterAgentResponse` 也不映射：它带的是助手正文（`text`）与本轮 token，是**一段回复**的收尾
+ * 而非**一轮**的收尾（Cursor 一轮里可以有多段回复），turn 收尾由 `stop` 独占。
+ *
+ * `sessionStart`/`sessionEnd`/`preCompact`/`subagentStart`/`subagentStop`/`afterAgentThought`/
+ * `workspaceOpen` 等 Cursor 其余事件不进这份表也不安装：Core 今天没有判断需要它们（子代理记账
+ * 需要 Cursor 侧的 id 键佐证，本机 bundle 里 `subagentStart` 带 `subagent_id`，但 AgentMux
+ * 尚未观察过一次真实子代理会话，故按「未核实就不声明」留空）。
+ */
+export const CURSOR_HOOK_DIALECT: AgentHookLifecycleDialect = {
+  beforeSubmitPrompt: 'user-prompt-submit',
+  preToolUse: 'tool-use-start',
+  postToolUse: 'tool-use-end',
+  postToolUseFailure: 'tool-use-end',
+  stop: 'turn-end'
+}
+
+/**
  * Core 认识的全部方言，按 Provider 组合。
  *
  * 每个 Provider 一块声明、这里一行 spread：新接一个 Provider 只在本文件追加自己那块，不必去动
@@ -171,7 +202,8 @@ const HOOK_LIFECYCLE_DIALECTS: readonly AgentHookLifecycleDialect[] = [
   HERMES_HOOK_DIALECT,
   PI_HOOK_DIALECT,
   GROK_HOOK_DIALECT,
-  GEMINI_HOOK_DIALECT
+  GEMINI_HOOK_DIALECT,
+  CURSOR_HOOK_DIALECT
 ]
 
 /** 合并后的查表面。重复键必须映射到同一个 canonical 事件，否则是真冲突——见下方构造时的断言。 */
