@@ -299,25 +299,105 @@ export function authoredConfigCarryOver(raw: unknown): {
   notifications: AppConfig['notifications'] | undefined
   found: number
   strandedByDamagedHost: Array<{ hostId: string; workspaceIds: string[] }>
+  /**
+   * Whether the `hosts` **container** was unreadable — not whether individual entries were.
+   *
+   * The distinction is the whole point, and getting it wrong made two different existing guards fire
+   * on each other's cases. A single damaged host entry is already reported precisely by
+   * `strandedByDamagedHost`, which can name the host and its projects. A damaged *container* names
+   * nothing: every id vanishes at once, and the local fallback then hides it, because projects on
+   * `local` still resolve and this result's `hosts` is non-empty thanks to the restored default. So
+   * the container case needs its own signal, and the per-entry case must not raise it.
+   */
+  hostsUnreadable: boolean
+  /**
+   * Whether the `executors` container itself was unreadable — not whether individual entries were.
+   *
+   * A single Executor dropped because its Provider is gone is deliberate per-record salvage (see the
+   * Provider-existence filter below), so counting entries would conflate the two. But a container
+   * written as an array or a primitive costs the user *every* Executor they built, and the result
+   * still looks healthy because the built-in defaults are spread in underneath.
+   */
+  executorsUnreadable: boolean
 } {
-  // Every key is `.optional()`, including the `unknown` ones. In zod v4 a bare `z.unknown()` key is
-  // **required** — an absent key fails the whole object — and this outer parse failing is exactly
-  // the all-or-nothing collapse the per-record salvage below exists to prevent: `rawWorkspaces`
-  // would fall back to `[]` and every project would be dropped. Caught by the guard tests when the
-  // preference fields were first added here without `.optional()`.
+  // Every key is `z.unknown().optional()`, including the three containers. In zod v4 a bare
+  // `z.unknown()` key is **required** — an absent key fails the whole object — and this outer parse
+  // failing is exactly the all-or-nothing collapse the per-record salvage below exists to prevent:
+  // `rawWorkspaces` would fall back to `[]` and every project would be dropped. Caught by the guard
+  // tests when the preference fields were first added here without `.optional()`.
+  //
+  // The containers are `unknown` rather than `z.array(...)` / `z.record(...)` for the same reason,
+  // one step further in: `.optional()` only excuses an **absent** key. Declaring the shape here made
+  // a key of the *wrong type* fail the whole outer parse, which collapsed all three containers at
+  // once — a `hosts` written as a map, or an `executors` written as an array, silently emptied
+  // `workspaces`. Each container is now narrowed on its own below, so one damaged container cannot
+  // take the others with it.
   const outer = z
     .object({
-      hosts: z.array(z.unknown()).optional(),
-      workspaces: z.array(z.unknown()).optional(),
-      executors: z.record(z.string(), z.unknown()).optional(),
+      hosts: z.unknown().optional(),
+      workspaces: z.unknown().optional(),
+      executors: z.unknown().optional(),
       appearance: z.unknown().optional(),
       browser: z.unknown().optional(),
       notifications: z.unknown().optional()
     })
     .safeParse(raw)
-  const rawHosts = outer.success ? outer.data.hosts ?? [] : []
-  const rawWorkspaces = outer.success ? outer.data.workspaces ?? [] : []
-  const rawExecutors = outer.success ? outer.data.executors ?? {} : {}
+  const rawHosts = outer.success && Array.isArray(outer.data.hosts) ? outer.data.hosts : []
+  const rawWorkspaces =
+    outer.success && Array.isArray(outer.data.workspaces) ? outer.data.workspaces : []
+  const rawExecutors =
+    outer.success &&
+    typeof outer.data.executors === 'object' &&
+    outer.data.executors !== null &&
+    !Array.isArray(outer.data.executors)
+      ? (outer.data.executors as Record<string, unknown>)
+      : {}
+
+  // The container was written, and it is not a record. Absent or `null` is not damage — it means the
+  // user added none — so those pass; an array or a primitive is a shape nothing can read entries out
+  // of, and every custom Executor in it is gone.
+  const executorsUnreadable =
+    outer.success &&
+    outer.data.executors !== undefined &&
+    outer.data.executors !== null &&
+    (Array.isArray(outer.data.executors) || typeof outer.data.executors !== 'object')
+
+  // Counted off the raw value, never off `rawWorkspaces`. Deriving it from the narrowed array made
+  // the loud all-loss guard read `found: 0` in precisely the case it exists for: a `workspaces` the
+  // current shape cannot read at all still *holds* the user's projects, and reporting zero let the
+  // launch proceed and overwrite them. Measured before the fix: two intact projects on disk, no
+  // throw, no warning, and the file rewritten with only the built-in scratch entry left.
+  //
+  // `evidenceOfWorkspaces` is not a count of projects — nothing can count records inside a shape it
+  // cannot read. It answers the only question the guard needs: **did this file hold projects?** For
+  // a readable array that is its length; for an unreadable non-empty container it is 1, which is
+  // enough to make the guard fire and refuse the launch.
+  const evidenceOfWorkspaces = ((): number => {
+    if (!outer.success) return 0
+    const value = outer.data.workspaces
+    if (Array.isArray(value)) return value.length
+    if (value === undefined || value === null) return 0
+    if (typeof value === 'object') return Object.keys(value).length > 0 ? 1 : 0
+    // A primitive where an array belongs: unreadable, but it was written by something. Treat it as
+    // evidence rather than as "no projects" — the honest answer is "we cannot tell", and between
+    // refusing to launch and overwriting the file, only one of those is recoverable.
+    return 1
+  })()
+
+  // The `hosts` container was written, and it is not an array. Absent or `null` is not damage — the
+  // local back-fill covers a file that authored no hosts — so those pass. Anything else is a shape
+  // nothing can read entries out of, and every host in it is gone at once.
+  //
+  // Deliberately about the container only, never about entries. A single unreadable host entry is
+  // already reported precisely by `strandedByDamagedHost`, and an earlier attempt that counted
+  // surviving entries instead fired on that case (naming the wrong culprit) and on a config whose one
+  // host was a damaged local record (which the back-fill repairs correctly). Both were measured
+  // against the existing guard tests.
+  const hostsUnreadable =
+    outer.success &&
+    outer.data.hosts !== undefined &&
+    outer.data.hosts !== null &&
+    !Array.isArray(outer.data.hosts)
 
   const hosts = rawHosts
     .map((host) => hostSchema.safeParse(host))
@@ -390,7 +470,9 @@ export function authoredConfigCarryOver(raw: unknown): {
     // loose — the same reason `configSchema.parse` needs its cast at the two sites below.
     notifications: carried(notificationsSchema, outer.success ? outer.data.notifications : undefined) as
       AppConfig['notifications'] | undefined,
-    found: rawWorkspaces.length,
+    found: evidenceOfWorkspaces,
+    hostsUnreadable,
+    executorsUnreadable,
     strandedByDamagedHost: [...strandedByHost].map(([hostId, workspaceIds]) => ({ hostId, workspaceIds }))
   }
 }
@@ -419,12 +501,27 @@ export function authoredConfigCarryOver(raw: unknown): {
  */
 function retiredConfigReplacement(raw: unknown): AppConfig {
   const carried = authoredConfigCarryOver(raw)
-  if (carried.found > 0 && carried.workspaces.length === 0) {
+  // Hosts first, because an unreadable `hosts` container is the *cause* of the stranding the next
+  // guard would otherwise report: every host id vanishes at once, so every project on a remote host
+  // reads as stranded and the message would blame each host individually for one damaged container.
+  // The criterion is about the container alone — a single damaged entry belongs to the next guard,
+  // which can name it — and the local back-fill is what makes this class need its own signal: it
+  // keeps projects on `local` resolvable and puts a default local entry back, so nothing else in the
+  // result looks wrong.
+  if (carried.hostsUnreadable) {
     throw new Error(
-      `Refusing to retire a config holding ${carried.found} project(s) that none of the current ` +
-      'schema accepts: the file on disk is unchanged and still holds them.'
+      'Refusing to retire a config whose host list the current schema cannot read: the file on disk ' +
+      'is unchanged and still holds it. Every remote host you configured would be replaced by the ' +
+      'default local entry.'
     )
   }
+  // Stranding is checked before total project loss. Both guards refuse the launch, so ordering does
+  // not change whether the projects survive — it changes what the user is told to do, and only one
+  // of the two messages is actionable. `carried.workspaces` is already host-filtered, so when every
+  // project sits on one damaged host both conditions hold at once: reporting "no record the schema
+  // accepts" there would name the wrong culprit and point the user at their intact project records,
+  // when the repair is one byte in one `hosts` entry. Naming the specific loss class beats naming
+  // the general one whenever both are true.
   if (carried.strandedByDamagedHost.length > 0) {
     const detail = carried.strandedByDamagedHost
       .map(({ hostId, workspaceIds }) => `${hostId} (${workspaceIds.join(', ')})`)
@@ -437,6 +534,24 @@ function retiredConfigReplacement(raw: unknown): AppConfig {
       `Refusing to retire a config that would drop ${stranded} intact project(s) whose host record ` +
       `the current schema cannot read: ${detail}. The file on disk is unchanged and still holds ` +
       'them; fix or remove that host entry to keep the projects.'
+    )
+  }
+  if (carried.found > 0 && carried.workspaces.length === 0) {
+    throw new Error(
+      `Refusing to retire a config holding ${carried.found} project(s) that none of the current ` +
+      'schema accepts: the file on disk is unchanged and still holds them.'
+    )
+  }
+  // Executors are the third container, and the same argument applies: a custom Executor id is one
+  // the user minted, so its presence is unambiguous. Only the *container* being unreadable throws —
+  // an individual entry dropped for a retired Provider is deliberate salvage, and is what the
+  // per-record filter above does. The built-in defaults spread in underneath are what make this
+  // silent: the result looks like a healthy Executor table with the user's own entries missing.
+  if (carried.executorsUnreadable) {
+    throw new Error(
+      'Refusing to retire a config whose Executor table the current schema cannot read: the file on ' +
+      'disk is unchanged and still holds it. Every Executor you created would be replaced by the ' +
+      'built-in defaults.'
     )
   }
   // A preference the current schema rejects falls back to the default rather than failing the
