@@ -17,7 +17,8 @@ import type {
   WorkspaceRecord
 } from '../../../shared/contracts'
 import { useWorkspaceBranches } from '../hooks/useWorkspaceBranches'
-import { buildFanOutRequest, MAX_FANOUT_LANES } from '../lib/fanout-request'
+import { MAX_FANOUT_LANES } from '../../../shared/fanout-limits'
+import { buildFanOutRequest } from '../lib/fanout-request'
 import { api } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import {
