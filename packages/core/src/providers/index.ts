@@ -12,7 +12,7 @@ import { createGrokManagedHookPlan, createGrokProvider } from './grok.js'
 import { createHermesManagedHookPlan, createHermesProvider } from './hermes.js'
 import { createKimiProvider } from './kimi.js'
 import { createOpenCodeManagedHookPlan, createOpenCodeProvider } from './opencode.js'
-import { createPiProvider } from './pi.js'
+import { createPiManagedHookPlan, createPiProvider } from './pi.js'
 import { createTraexProvider } from './traex.js'
 
 export type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
@@ -73,7 +73,11 @@ export const MANAGED_HOOK_PLAN_RESOLVERS: Partial<Record<AgentProviderId, Manage
   // 没有 endpoint（修复路径）时如实返回 null——写一份带死 token 的插件比不写更坏：它会静默地把每个
   // 事件 POST 到一个已失效的凭证上，看起来装好了，实际一条都收不到。
   opencode: (_workspacePath, env, endpoint) =>
-    endpoint ? createOpenCodeManagedHookPlan(endpoint.url, endpoint.token, env) : null
+    endpoint ? createOpenCodeManagedHookPlan(endpoint.url, endpoint.token, env) : null,
+  // pi 装的也是一份 JS 文件（Pi 的扩展面就是 in-process JS，没有「写一条命令」那条通路），但与 opencode
+  // 相反**不需要 endpoint**：Pi 是 AgentMux 通过 PTY 起的进程，扩展在它里面能直接读到我们注入的
+  // `AGENTMUX_HOOK_URL`/`TOKEN`。所以内容在运行时取值，token 一个字节都不落盘，修复路径也照常可装。
+  pi: (_workspacePath, env) => createPiManagedHookPlan(env)
 }
 
 export {
@@ -86,7 +90,8 @@ export {
   createGeminiManagedHookPlan,
   createGrokManagedHookPlan,
   createHermesManagedHookPlan,
-  createOpenCodeManagedHookPlan
+  createOpenCodeManagedHookPlan,
+  createPiManagedHookPlan
 }
 export { createAntigravityProvider } from './antigravity.js'
 export { createClaudeProvider } from './claude.js'
