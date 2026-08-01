@@ -5,6 +5,13 @@ vi.hoisted(() => {
 })
 
 import { createJSONStorage } from 'zustand/middleware'
+import { createWorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.js'
+import {
+  createWorkbenchTab,
+  fileTabId,
+  initialWorkbenchRegionId
+} from '../src/renderer/src/lib/workbench-tabs.js'
+import { projectPersistedWorkbench } from '../src/renderer/src/lib/workbench-persistence.js'
 import { useAppStore } from '../src/renderer/src/store.js'
 
 // ---------------------------------------------------------------------------
@@ -42,8 +49,39 @@ afterEach(() => {
 /**
  * 用户设过的一整套东西，逐项都取**非默认**值——否则「带过来了」与「重置成默认」无法区分。
  * 数值刻意不取整数默认附近的值，布尔逐项与默认相反。
+ *
+ * 这份 fixture 必须覆盖 `partialize` 写出去的**每一个**键，而不只是好写的那几个。原先它只有
+ * 下面第二组（7 项表面偏好），于是 `restoredWorkbench` 这个整族的主角从来没进过记录：实测让
+ * migrate 剥掉它（`const { restoredWorkbench, ...rest } = persisted; return rest`），那 7 条
+ * 断言一条不红——而症状恰好就是这一族存在的理由（#59/#79「重启后 tab 和分屏没了」）。
+ * 同形的还有另外 4 个键，共 5 个在 42 条全绿下不可见。
+ *
+ * 键的清单由 `partialize` 在运行期派生（见下面那条覆盖率自检），不手抄：手抄的清单会在下一个
+ * 人往 `partialize` 里加字段时静默落后，而那正是这次的失败方式。
  */
+const PERSISTED_TAB_ID = fileTabId('workspace-alpha', 'notes/kept.md')
+
+/** 一个真实形状的 file tab + 布局。file 面是唯一必须活过重启的持久面（见 workbench-persistence.ts:49）。 */
+const PERSISTED_WORKBENCH = projectPersistedWorkbench({
+  tabs: {
+    [PERSISTED_TAB_ID]: createWorkbenchTab(PERSISTED_TAB_ID, {
+      regionId: initialWorkbenchRegionId(PERSISTED_TAB_ID),
+      kind: 'file',
+      workspaceId: 'workspace-alpha',
+      path: 'notes/kept.md'
+    })
+  },
+  layouts: { 'workspace-alpha': createWorkspaceLayout('group-alpha', [PERSISTED_TAB_ID]) }
+})
+
 const PERSISTED_PREFERENCES = {
+  // 第一组：Workbench 拓扑与启动期取值。这五项是这次补上的——它们此前一个都不在记录里。
+  restoredWorkbench: PERSISTED_WORKBENCH,
+  unclaimedTerminalSessionIds: ['orphan-terminal-1', 'orphan-terminal-2'],
+  activeWorkspaceId: 'workspace-alpha',
+  mainSurface: 'board',
+  workspaceTool: 'agents',
+  // 第二组：表面偏好。
   toolDockWidth: 421,
   editorWordWrap: true,
   projectRailOpen: false,
@@ -87,6 +125,23 @@ async function rehydrateFromPreviousVersion(state: Record<string, unknown>): Pro
 }
 
 describe('Workbench 持久化记录跨一次版本升级', () => {
+  it('前提自检：fixture 覆盖了 partialize 写出去的每一个键', () => {
+    // 这一条是这族的**覆盖率**判据，位置在最前面：它红了说明有人往 `partialize` 加了字段
+    // 而没有给它非默认值，于是那个字段的丢失从这一刻起对整族不可见。
+    //
+    // 清单从 `partialize` 运行期派生而不手抄：手抄的那一份会静默落后，正是这次的失败方式
+    //（原 fixture 只有 7 项表面偏好，5 个键从来没进过记录）。
+    const partialize = useAppStore.persist.getOptions().partialize as
+      | ((state: unknown) => Record<string, unknown>)
+      | undefined
+    expect(typeof partialize, 'partialize 取不到了，本条自检失去意义').toBe('function')
+    const persistedKeys = Object.keys(partialize!(useAppStore.getState())).sort()
+    expect(
+      Object.keys(PERSISTED_PREFERENCES).sort(),
+      'fixture 与 partialize 的键不一致——差集里的字段丢失时整族不会红'
+    ).toEqual(persistedKeys)
+  })
+
   it('前提自检：注入的 storage 真的被读到了（否则整族恒真）', async () => {
     // 不经过这一条，「偏好还在」可能只是因为 rehydrate 什么都没做而内存里本来就有值。
     // 这里刻意摆一个与默认不同的值，且**不**经过 migrate 之外的任何路径。
@@ -118,6 +173,83 @@ describe('Workbench 持久化记录跨一次版本升级', () => {
     expect(state.collapsedProjectGroups, '折叠状态丢了').toEqual(
       PERSISTED_PREFERENCES.collapsedProjectGroups
     )
+  })
+
+  // -------------------------------------------------------------------------
+  // 下面五条是这一族原先整体缺失的那半边。上面那条只判表面偏好，于是记录里根本没有
+  // `restoredWorkbench`——实测让 migrate 把它剥掉（`const { restoredWorkbench, ...rest } =
+  // persisted; return rest`），上面 7 条断言一条不红，而用户看到的正是这一族要防的那个症状：
+  // 重启后 Tab 与分屏全没了（#59/#79）。同形的还有另外四个键。
+  //
+  // 分成五条而不是一条 toMatchObject：少带任意一项时，判据必须指出**是哪一项**没过来，
+  // 否则失败信息会退化成「记录不对」，而这五项各自对应完全不同的用户症状。
+  // -------------------------------------------------------------------------
+
+  it('Tab 与分屏拓扑活着过来——这一族原先根本没在记录里放过它', async () => {
+    // 症状：重启后编辑器区域空白，用户开的文件与分屏全部消失。这是 #59/#79 用户原报的那个 bug。
+    await rehydrateFromPreviousVersion({ ...PERSISTED_PREFERENCES })
+
+    const restored = useAppStore.getState().restoredWorkbench
+    expect(restored, '整份 Workbench 拓扑没过来——重启后 Tab 和分屏全没了').not.toBeNull()
+    expect(
+      Object.keys(restored!.tabs),
+      '持久化的 file Tab 不在了'
+    ).toEqual([PERSISTED_TAB_ID])
+    expect(
+      restored!.layouts['workspace-alpha']?.groups[0]?.tabOrder,
+      '布局里那个 Tab 的位置丢了——Tab 在但分屏塌了'
+    ).toEqual([PERSISTED_TAB_ID])
+  })
+
+  it('未认领的终端 session id 活着过来', async () => {
+    // 症状：这些 id 是「上次退出时没能清理掉的 PTY」的台账。丢了它们，那些进程变成孤儿，
+    // 既不会被复用也不会被清理。
+    await rehydrateFromPreviousVersion({ ...PERSISTED_PREFERENCES })
+
+    expect(
+      useAppStore.getState().unclaimedTerminalSessionIds,
+      '未认领终端台账丢了——上次遗留的 PTY 变成永久孤儿'
+    ).toEqual(PERSISTED_PREFERENCES.unclaimedTerminalSessionIds)
+  })
+
+  it('上次停留的 Workspace 活着过来', async () => {
+    // 症状：重启后落到别的项目（或没有项目）上，而不是用户上次在看的那个。
+    await rehydrateFromPreviousVersion({ ...PERSISTED_PREFERENCES })
+
+    expect(
+      useAppStore.getState().activeWorkspaceId,
+      '上次停留的项目丢了——重启后落到别处'
+    ).toBe(PERSISTED_PREFERENCES.activeWorkspaceId)
+  })
+
+  it('主视图与工具槽位活着过来', async () => {
+    // 两项都是 enum，取值刻意都不是默认（默认是 'workbench' / 'files-branches'）：
+    // 取默认值时「带过来了」与「重置了」无法区分。
+    await rehydrateFromPreviousVersion({ ...PERSISTED_PREFERENCES })
+
+    const state = useAppStore.getState()
+    expect(state.mainSurface, '主视图被重置回 workbench').toBe(PERSISTED_PREFERENCES.mainSurface)
+    expect(state.workspaceTool, '工具槽位被重置回 files-branches').toBe(
+      PERSISTED_PREFERENCES.workspaceTool
+    )
+  })
+
+  it('前提自检：这五项的 fixture 值都与默认不同', () => {
+    // 上面四条若哪天 fixture 漂到默认值上，它们会在实现被改坏时照旧全绿。
+    // 判据落在**初始 state**（即默认）上，与 fixture 逐项对比。
+    const defaults = initialState as unknown as Record<string, unknown>
+    for (const key of [
+      'restoredWorkbench',
+      'unclaimedTerminalSessionIds',
+      'activeWorkspaceId',
+      'mainSurface',
+      'workspaceTool'
+    ] as const) {
+      expect(
+        JSON.stringify(PERSISTED_PREFERENCES[key]),
+        `${key} 的 fixture 值等于默认值——那一条断言已经恒真`
+      ).not.toBe(JSON.stringify(defaults[key]))
+    }
   })
 
   it('升级不是"读到了旧记录就报错"——那句 zustand 的抱怨不许出现', async () => {
