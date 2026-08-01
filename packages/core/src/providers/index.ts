@@ -6,7 +6,7 @@ import { createClaudeManagedHookPlan, createClaudeProvider } from './claude.js'
 import { createCodexManagedHookPlan, createCodexProvider } from './codex.js'
 import { createCursorProvider } from './cursor.js'
 import { createGeminiProvider } from './gemini.js'
-import { createGrokProvider } from './grok.js'
+import { createGrokManagedHookPlan, createGrokProvider } from './grok.js'
 import { createHermesManagedHookPlan, createHermesProvider } from './hermes.js'
 import { createPiProvider } from './pi.js'
 import { createTraexProvider } from './traex.js'
@@ -37,13 +37,16 @@ export const MANAGED_HOOK_PLAN_RESOLVERS: Partial<Record<AgentProviderId, Manage
   codex: (workspacePath) => createCodexManagedHookPlan(workspacePath),
   claude: (workspacePath) => createClaudeManagedHookPlan(workspacePath),
   antigravity: (_workspacePath) => createAntigravityManagedHookPlan(),
-  hermes: (_workspacePath, env) => createHermesManagedHookPlan(env)
+  hermes: (_workspacePath, env) => createHermesManagedHookPlan(env),
+  // grok 只装到用户 home 下 `~/.grok/hooks/`（grok 文档标注 always-trusted），与 workspace 无关。
+  grok: (_workspacePath) => createGrokManagedHookPlan()
 }
 
 export {
   createAntigravityManagedHookPlan,
   createClaudeManagedHookPlan,
   createCodexManagedHookPlan,
+  createGrokManagedHookPlan,
   createHermesManagedHookPlan
 }
 export { createAntigravityProvider } from './antigravity.js'
