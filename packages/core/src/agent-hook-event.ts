@@ -80,7 +80,19 @@ export const PASCAL_CASE_HOOK_DIALECT: AgentHookLifecycleDialect = {
  *   `tool-use-end`——它是一次调用的外层收尾，不是一次工具调用的结果。
  */
 
-/** Hermes 的 snake_case 方言。`pre_llm_call` 刻意不映射，理由同上。 */
+/**
+ * Hermes 的 snake_case 方言。`pre_llm_call` 刻意不映射，理由同上。
+ *
+ * `pre_approval_request`/`post_approval_response` 也不映射：它们是**授权门的两端**（Hermes 明说是
+ * observers only，返回值被忽略），不是一次工具调用的事前/事后——同一条危险命令会先过授权门、
+ * 再走 `pre_tool_call`，把门也算成 tool-use-start 会让一次执行在时间轴上落两条。这与 Cursor 的
+ * `beforeShellExecution` 是同一个判断。语义状态由 Hermes 自己的 rules 给出（门是 `waiting`）。
+ *
+ * `subagent_stop` 这个名字由 grok 的方言块贡献（同名同结构，合并表允许重复），所以它**有** canonical
+ * 值。Hermes 这边不加自己的条目也不需要：canonical 层只答「这是结构上的哪一步」，与哪家有记账无关。
+ * 真正的分界在记账层——Hermes 的 `subagent_start` 未被证据佐证 id 键，故它不声明 `subagentTracking`
+ * （见 providers/hermes.ts）。
+ */
 export const HERMES_HOOK_DIALECT: AgentHookLifecycleDialect = {
   on_session_start: 'session-start',
   pre_tool_call: 'tool-use-start',
