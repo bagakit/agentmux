@@ -10,6 +10,7 @@ import {
 import {
   OPEN_DESTINATIONS,
   openDestinationNeedsRegion,
+  parseHttpLinkUrl,
   type OpenDestination
 } from '../src/renderer/src/lib/open-destination.js'
 
@@ -171,5 +172,24 @@ describe('OpenDestinationPopover', () => {
       />
     )
     expect(markup).toBe('')
+  })
+})
+
+describe('parseHttpLinkUrl', () => {
+  // The one scheme gate both link surfaces share. It is what keeps the Terminal and the conversation
+  // from drifting into treating a scheme differently, so its acceptance/refusal set is pinned here.
+  it('normalises an http(s) URL and refuses every other scheme', () => {
+    expect(parseHttpLinkUrl('https://example.com/docs')).toBe('https://example.com/docs')
+    // A bare host+port normalises with the trailing slash the URL parser adds — the SAME normalisation
+    // the openable surfaces then act on, so callers compare against a canonical form, not the raw text.
+    expect(parseHttpLinkUrl('http://localhost:3000')).toBe('http://localhost:3000/')
+    // The refused set: opaque, file, and script schemes an agent can emit. Each returns null so no
+    // surface can turn it into something a click opens.
+    expect(parseHttpLinkUrl('mailto:alice@example.com')).toBeNull()
+    expect(parseHttpLinkUrl('file:///etc/passwd')).toBeNull()
+    expect(parseHttpLinkUrl('javascript:alert(1)')).toBeNull()
+    expect(parseHttpLinkUrl('vscode://file/etc/hosts')).toBeNull()
+    // Not a URL at all: never throws, just declines.
+    expect(parseHttpLinkUrl('not a URL')).toBeNull()
   })
 })

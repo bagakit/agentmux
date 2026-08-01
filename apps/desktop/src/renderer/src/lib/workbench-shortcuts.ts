@@ -204,11 +204,17 @@ export type WorkbenchShortcutStore = {
   layouts: Readonly<Record<string, WorkspaceLayout>>
   tabs: Readonly<Record<string, WorkbenchTab>>
   activateTab(workspaceId: string, tabGroupId: string, tabId: string): void
+  // 保留在类型里但键盘层不再直接调它：真正的关格在组件消费 requestCloseRegion 后才发生。留着是因为接线
+  // 测试要能断言「键盘路没有裸调 closeRegion」——删掉它 vitest 只转译不查类型，回退到裸调时运行期照样
+  // 静默丢改动而不报错，那条守卫就抓不住了。
   closeRegion(workspaceId: string, tabId: string, regionId: string): void | Promise<void>
   // 关整张 Tab（含未保存/在跑 Agent 的确认）走的是这条「意图」而不是 store.closeTab：那份确认只活在
   // 组件里（requestTabsClose→ConfirmationDialog），裸调 store.closeTab 会静默弃掉未存改动、停掉在跑的
   // Agent——鼠标点 X 都不会那样。所以键盘关 Tab 只投一个意图，交给活动 Tab 组件用它既有的确认流处理。
   requestCloseTab(workspaceId: string, tabGroupId: string, tabId: string): void
+  // 关某一格 Region 同理：那格的未保存确认（dirty→对话框）只活在承载它的组件里，与鼠标点这一格的 X 是
+  // 同一个决定出口。键盘裸调 closeRegion 会静默弃掉未存改动，所以多格时也只投意图、由那一格消费。
+  requestCloseRegion(workspaceId: string, tabId: string, regionId: string): void
   splitRegion(workspaceId: string, tabId: string, regionId: string, direction: SplitDirection): void
   focusRegion(workspaceId: string, tabId: string, regionId: string): void
 }
@@ -267,7 +273,10 @@ export function handleWorkbenchShortcut(
       store.requestCloseTab(workspaceId, group.id, tabId)
       return true
     }
-    void store.closeRegion(workspaceId, tabId, activeRegionId)
+    // 多格：关的是活动那一格。同样只投意图、不裸调 closeRegion——那一格若有未保存的编辑器改动，裸调会
+    // 静默弃掉，而鼠标点这一格的 X 会先弹「未保存确认」。同一个「关这一格」的概念必须只有一个决定出口，
+    // 于是键盘也走意图，由承载该格的组件跑与 X 相同的 dirty→确认→closeRegion。
+    store.requestCloseRegion(workspaceId, tabId, activeRegionId)
     return true
   }
   if (command.kind === 'split') {

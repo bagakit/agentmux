@@ -102,4 +102,25 @@ describe('Tab Region store actions', () => {
     useAppStore.getState().clearCloseTabRequest(second!.nonce)
     expect(useAppStore.getState().closeTabRequest).toBeNull()
   })
+
+  it('requestCloseRegion 只投意图不真关，clearCloseRegionRequest 只清自己那一条', () => {
+    // 键盘关某一格的落点也是「投意图 → 承载该格的组件消费」——那格的未保存确认（dirty→对话框）只活在组件里，
+    // 与鼠标点这一格的 X 同一条路。这里守 store 侧的两半：意图带齐落点、每投一次 nonce 递增（连按能各触发
+    // 一次），以及清除只认自己的 nonce——被更晚一次按键覆盖后不该把新意图也抹掉。
+    useAppStore.getState().requestCloseRegion('workspace', 'view-one', 'region-a')
+    const first = useAppStore.getState().closeRegionRequest
+    expect(first).toMatchObject({ workspaceId: 'workspace', tabId: 'view-one', regionId: 'region-a' })
+
+    useAppStore.getState().requestCloseRegion('workspace', 'view-one', 'region-a')
+    const second = useAppStore.getState().closeRegionRequest
+    expect(second?.nonce).toBe((first?.nonce ?? 0) + 1)
+
+    // 用过时的 nonce 清：被更晚的意图覆盖了，不该清掉。
+    useAppStore.getState().clearCloseRegionRequest(first!.nonce)
+    expect(useAppStore.getState().closeRegionRequest).toBe(second)
+
+    // 用当前 nonce 清：意图归零。
+    useAppStore.getState().clearCloseRegionRequest(second!.nonce)
+    expect(useAppStore.getState().closeRegionRequest).toBeNull()
+  })
 })

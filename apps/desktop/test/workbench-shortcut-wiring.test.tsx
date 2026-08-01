@@ -130,6 +130,7 @@ type Spies = {
   activateTab: ReturnType<typeof vi.fn>
   closeRegion: ReturnType<typeof vi.fn>
   requestCloseTab: ReturnType<typeof vi.fn>
+  requestCloseRegion: ReturnType<typeof vi.fn>
   splitRegion: ReturnType<typeof vi.fn>
   focusRegion: ReturnType<typeof vi.fn>
 }
@@ -140,6 +141,7 @@ function store(overrides: Partial<WorkbenchShortcutStore> = {}): WorkbenchShortc
     activateTab: vi.fn(),
     closeRegion: vi.fn(),
     requestCloseTab: vi.fn(),
+    requestCloseRegion: vi.fn(),
     splitRegion: vi.fn(),
     focusRegion: vi.fn()
   }
@@ -169,10 +171,14 @@ describe('handleWorkbenchShortcut 把命令转发到 store action', () => {
     expect(s.focusRegion).not.toHaveBeenCalled()
   })
 
-  it('关闭当前 Region：Cmd+W 调 closeRegion(活动 Tab 的活动格)', () => {
+  it('关闭当前 Region：Cmd+W 在多格 Tab 上投 requestCloseRegion(活动格)，绝不裸调 closeRegion', () => {
+    // 活动 Tab t2 有两格、活动在 r2b。裸调 closeRegion 没有脏检查、会静默弃掉那一格未保存的编辑器改动；
+    // 鼠标点这一格的 X 会先弹「未保存确认」。同一个「关这一格」只能有一个决定出口，所以键盘也投意图。
+    // 把实现改回 `void store.closeRegion(...)`（只接了一侧出口），这里立刻红。
     const s = store()
     expect(handleWorkbenchShortcut(event({ key: 'w', metaKey: true }), true, s)).toBe(true)
-    expect(s.closeRegion).toHaveBeenCalledWith('ws', 't2', 'r2b')
+    expect(s.requestCloseRegion).toHaveBeenCalledWith('ws', 't2', 'r2b')
+    expect(s.closeRegion).not.toHaveBeenCalled()
   })
 
   it('关整张 Tab：Cmd+W 在单 Region Tab 上调 requestCloseTab（交给组件确认流），不空调 closeRegion', () => {

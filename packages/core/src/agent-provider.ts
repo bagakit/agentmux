@@ -45,6 +45,13 @@ export type AgentProvider = {
   readonly label: string
   readonly executable: string
   readonly catalog: AgentCatalogEntry
+  /**
+   * 这个 Provider 的原生 hook 声明（rules / subagentTracking / nativeHandle / eventNameSource）。
+   *
+   * 暴露它是为了让跨 Provider 的守卫能从**注册表**（「有哪些 Provider」的 SSOT）枚举每家的 hook 合同，
+   * 而不必在测试里手抄一份「12 个 HOOKS 常量」的 import 清单——那种清单会在新接一家时静默漏掉它。
+   */
+  readonly hook: AgentNativeHookSpecification
   readonly terminalHandshake?: AgentTerminalHandshake
   readonly terminalPromptRender?: AgentTerminalPromptRenderMatcher
   probeCapabilities(probe: AgentExecutableProbe, commandOverride?: string): Promise<AgentCapabilitySnapshot>
@@ -154,6 +161,7 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     label: catalog.label,
     executable: catalog.executable,
     catalog,
+    hook: definition.hook,
     ...(definition.terminalHandshake ? { terminalHandshake: { ...definition.terminalHandshake } } : {}),
     ...(definition.terminalPromptRender ? { terminalPromptRender: { ...definition.terminalPromptRender } } : {}),
     async probeCapabilities(probe, commandOverride) {

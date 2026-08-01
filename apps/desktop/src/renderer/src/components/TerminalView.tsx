@@ -8,7 +8,11 @@ import { ChevronDown, ChevronUp, ExternalLink, FileCode, LoaderCircle, Search, X
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { RuntimeEvent, SessionSnapshot, TerminalThemeId } from '../../../shared/contracts'
 import { api } from '../lib/api'
-import { dismissOpenDestinationRequest, type OpenHttpLinkOrigin } from '../lib/open-destination'
+import {
+  dismissOpenDestinationRequest,
+  parseHttpLinkUrl,
+  type OpenHttpLinkOrigin
+} from '../lib/open-destination'
 import { useAppStore } from '../store'
 import { installTerminalColorQueryReplyHandlers } from '../lib/terminal-capability-replies'
 import {
@@ -90,15 +94,9 @@ const SEARCH_TOGGLES: ReadonlyArray<{
 
 type TerminalLinkRequest = OpenDestinationRequest & { terminalGeneration: number }
 
-export function parseTerminalHttpLink(rawUrl: string): string | null {
-  try {
-    const url = new URL(rawUrl)
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
-    return url.toString()
-  } catch {
-    return null
-  }
-}
+// 终端与对话正文都要判「哪些 scheme 点了能打开」，那必须是同一个判据，而不是各抄一份。判据本体
+// 住在 lib/open-destination.ts——对话渲染器不能在模块加载期拖进 xterm，所以共用出口只能放在那边。
+// 这里不再包一层同义的别名：同一个概念留两个名字，日后就会有人只改其中一处。
 
 export function dismissTerminalLinkRequest<T extends OpenDestinationRequest>(
   current: T | null,
@@ -290,7 +288,7 @@ export function TerminalView({
      * 少接一个不会让另一个变红。
      */
     const activateHttpLink = (event: MouseEvent, uri: string): void => {
-      const url = parseTerminalHttpLink(uri)
+      const url = parseHttpLinkUrl(uri)
       if (!url) return
       // Both providers activate on a mouse-up over the link, so a drag that selects text across one
       // would otherwise raise the picker instead of selecting. Only a gesture that stayed put and
@@ -321,7 +319,7 @@ export function TerminalView({
       setLinkPreview(null)
     }
     const hoverHttpLink = (event: MouseEvent, text: string): void => {
-      const url = parseTerminalHttpLink(text)
+      const url = parseHttpLinkUrl(text)
       if (!url) return
       const anchor = previewAnchorAt(event.clientX, event.clientY)
       setLinkPreview({
