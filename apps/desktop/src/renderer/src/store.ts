@@ -409,10 +409,18 @@ type AppState = {
   ): void
   detectExecutors(hostId: string): Promise<void>
   checkHost(host: HostConfig): Promise<void>
+  /**
+   * 打开一个文件面。
+   *
+   * `workspaceId` 缺省时按活动 Workspace 解析——绝大多数调用方是用户当场点的，那正是他想要的。
+   * 但**异步**调用方（先建文件再打开、先读 diff 再切模式）必须显式传自己开头解析出来的那一个：
+   * 不传就等于在同一条路上解析两次，中间用户切了侧栏就漂移，而症状不是报错而是静默开错文件。
+   */
   openFile(
     path: string,
     tabGroupId?: string,
-    location?: { line: number; column?: number }
+    location?: { line: number; column?: number },
+    workspaceId?: string
   ): Promise<void>
   /**
    * 给一个已在板上、但还没有文档的文件面装上它的文档。
@@ -2657,7 +2665,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   async openFileDiff(path) {
     const workspaceId = get().activeWorkspaceId
     if (!workspaceId) return
-    await get().openFile(path)
+    // 同 createNote：把开头解析出来的那一个显式传下去。下面 regionId 是按这个 workspaceId 派生的，
+    // 若 openFile 自己重读活动 Workspace，两者就会指向不同的 Workspace——文件在 A 打开、diff 模式
+    // 却切到了 B 的 Region（或谁的都不是）。
+    await get().openFile(path, undefined, undefined, workspaceId)
     // openFile places the file at its canonical Region, so the id is derived by the same rule rather
     // than read back — a wrong regionId here would flip a different Region into diff mode (or none).
     const regionId = initialWorkbenchRegionId(fileTabId(workspaceId, path))
@@ -2794,8 +2805,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }))
     }
   },
-  async openFile(path, tabGroupId, location) {
-    const workspaceId = get().activeWorkspaceId
+  async openFile(path, tabGroupId, location, requestedWorkspaceId) {
+    // 显式 workspace 优先于活动 workspace。异步动作（建文件、切 diff）必须能把**自己开头那次**
+    // 解析结果传进来：否则调用方解析一次、这里再解析一次，两次之间用户切了侧栏就漂移，
+    // 而漂移的症状不是报错而是**开错文件**——名字撞上另一个项目里的同名文件时界面上一切正常。
+    const workspaceId = requestedWorkspaceId ?? get().activeWorkspaceId
     const layout = workspaceId ? get().layouts[workspaceId] : undefined
     if (!workspaceId || !layout) return
     const key = documentKey(workspaceId, path)
@@ -3001,9 +3015,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   async createNote() {
     const workspaceId = get().activeWorkspaceId
     if (!workspaceId) throw new Error('Select a workspace first')
-    // 落点是「当前 Workspace」而不是另选一个：`openFile` 自己读 activeWorkspaceId，若这里为 create
-    // 单独解析一个 Workspace，两次解析就会漂移，而漂移的症状是「文件建出来了但打不开」——建在 A、
-    // 去 B 里找。所以整条路只解析一次，create 与 open 共用同一个 workspaceId。
     const name = await createNoteWithAvailableName(
       new Date(),
       // 刻意不走 createPath：那条路每次失败都 reportError，而撞名重试是这里的**正常**流程，
@@ -3018,7 +3029,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         [workspaceId]: (current.workspaceFileRevisions[workspaceId] ?? 0) + 1
       }
     }))
-    await get().openFile(name)
+    // 显式把开头解析出来的 workspaceId 传下去。create walk 是异步的（远端可达 15s），这期间侧栏
+    // 的 selectWorkspace 完全可点；若让 openFile 自己重读活动 Workspace，笔记建在 A 而打开的是
+    // B 里的同名文件——名字只是当天日期，撞名概率很高，而用户看到的一切都正常。
+    await get().openFile(name, undefined, undefined, workspaceId)
     return name
   },
   async renamePath(path, nextPath) {
