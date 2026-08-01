@@ -49,6 +49,7 @@ const api: AgentMuxPreloadApi = {
   },
   workspaces: {
     chooseLocalFolder: () => ipcRenderer.invoke('workspaces:chooseLocalFolder'),
+    rebindLocalFolder: (workspaceId: string) => ipcRenderer.invoke('workspaces:rebindLocalFolder', workspaceId),
     add: (input: CreateWorkspaceInput) => ipcRenderer.invoke('workspaces:add', input),
     listBranches: (workspaceId: string) => ipcRenderer.invoke('workspaces:listBranches', workspaceId),
     openBranch: (workspaceId: string, branch: string) =>

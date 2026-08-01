@@ -1,11 +1,12 @@
 import { ChevronDown, ChevronRight, Pin, Plus, RadioTower } from 'lucide-react'
-import { useMemo, type CSSProperties } from 'react'
+import { useMemo, useState, type CSSProperties } from 'react'
 import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
 import { api } from '../lib/api'
 import {
   projectGroupKey,
   projectRailNavigation,
   projectRailTree,
+  removeProjectWorkspaces,
   railGroupAddress,
   workspaceProjectId,
   type ProjectRailGroup,
@@ -17,6 +18,8 @@ import { useAppStore } from '../store'
 import type { SettingsSectionId } from './SettingsPanel'
 import { BrandIcon } from './BrandIcon'
 import { ProjectRailToolbar } from './ProjectRailToolbar'
+import { ProjectRailContextMenu } from './ProjectRailContextMenu'
+import { ConfirmationDialog } from './ConfirmationDialog'
 import { SidebarToggleChrome } from './TopRowChrome'
 
 export function WorkspaceSidebar({
@@ -33,6 +36,9 @@ export function WorkspaceSidebar({
   const setConfig = useAppStore((state) => state.setConfig)
   const collapsedProjectGroups = useAppStore((state) => state.collapsedProjectGroups)
   const toggleProjectGroup = useAppStore((state) => state.toggleProjectGroup)
+  const reportError = useAppStore((state) => state.reportError)
+  const [removeRequest, setRemoveRequest] = useState<ReturnType<typeof projectRailNavigation>['projects'][number] | null>(null)
+  const [removing, setRemoving] = useState(false)
   const navigation = useMemo(
     () => projectRailNavigation(config?.workspaces ?? []),
     [config?.workspaces]
@@ -54,6 +60,27 @@ export function WorkspaceSidebar({
     if (!workspace || !config) return
     setConfig({ ...config, workspaces: [...config.workspaces, workspace] })
     await selectWorkspace(workspace.id)
+  }
+
+  async function confirmRemoveProject(): Promise<void> {
+    if (!removeRequest || !config || removing) return
+    setRemoving(true)
+    try {
+      const saved = await api.config.save({
+        ...config,
+        workspaces: removeProjectWorkspaces(config.workspaces, removeRequest)
+      })
+      setConfig(saved)
+      if (activeProjectId === removeRequest.id) {
+        const fallback = saved.workspaces.find((workspace) => workspace.id === scratch?.id) ?? saved.workspaces[0]
+        if (fallback) await selectWorkspace(fallback.id)
+      }
+      setRemoveRequest(null)
+    } catch (error) {
+      reportError(error)
+    } finally {
+      setRemoving(false)
+    }
   }
 
   function projectRow({ project, depth }: ProjectRailNode) {
@@ -85,9 +112,8 @@ export function WorkspaceSidebar({
     const preferred = active
       ? activeWorkspaceId
       : project.preferredWorkspaceId
-    return (
+    const row = (
       <button
-        key={project.id}
         className={`project-rail-row ${active ? 'project-rail-row--active' : ''}`}
         title={rowStateLabel ? `${project.repoPath} · ${rowStateLabel}` : project.repoPath}
         aria-label={rowStateLabel ? `${project.name} · ${rowStateLabel}` : project.name}
@@ -132,6 +158,11 @@ export function WorkspaceSidebar({
           </span>
         ) : null}
       </button>
+    )
+    return (
+      <ProjectRailContextMenu key={project.id} onRemove={() => setRemoveRequest(project)}>
+        {row}
+      </ProjectRailContextMenu>
     )
   }
 
@@ -197,7 +228,12 @@ export function WorkspaceSidebar({
                   onToggle={() => toggleProjectGroup(key)}
                 />
               ) : null}
-              {collapsed ? null : group.nodes.map((node) => projectRow(node))}
+              {collapsed ? null : group.nodes.map((node) => projectRow({
+                ...node,
+                // A grouped Project gets one visual level for the group itself;
+                // path-derived nesting remains additive below that level.
+                depth: node.depth + (group.groupPath ? 1 : 0)
+              }))}
             </div>
           )
         })}
@@ -206,6 +242,22 @@ export function WorkspaceSidebar({
         ) : null}
       </nav>
       <ProjectRailToolbar onOpenSettings={onOpenSettings} />
+      <ConfirmationDialog
+        open={removeRequest !== null}
+        title="Remove project view?"
+        description={
+          removeRequest
+            ? `This removes ${removeRequest.name} from the Project Rail only. Its files, layouts, Sessions and running Agents stay untouched.`
+            : ''
+        }
+        {...(removeRequest ? { subject: removeRequest.repoPath } : {})}
+        confirmLabel="Remove view"
+        busy={removing}
+        onCancel={() => {
+          if (!removing) setRemoveRequest(null)
+        }}
+        onConfirm={() => void confirmRemoveProject()}
+      />
     </aside>
   )
 }

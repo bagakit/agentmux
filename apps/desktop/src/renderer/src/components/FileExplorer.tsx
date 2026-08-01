@@ -30,6 +30,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type SetSt
 import { isScratchWorkspaceId } from '../../../shared/contracts'
 import { scratchTopicIdFromDirectoryName } from '../../../shared/scratch-topics'
 import { api } from '../lib/api'
+import { applyWorkspacePathRebind } from '../lib/workspace-path-recovery'
 import { getFileTypeIcon } from '../lib/file-type-icons'
 import { documentKey } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
@@ -311,6 +312,7 @@ export function FileExplorer({
   const deletePath = useAppStore((state) => state.deletePath)
   const launchTerminal = useAppStore((state) => state.launchTerminal)
   const reportError = useAppStore((state) => state.reportError)
+  const setConfig = useAppStore((state) => state.setConfig)
   const activePaneId = useAppStore((state) => (
     state.activeWorkspaceId ? state.layouts[state.activeWorkspaceId]?.activeGroupId : undefined
   ))
@@ -327,6 +329,7 @@ export function FileExplorer({
   const [editValue, setEditValue] = useState('')
   const [deleteRequest, setDeleteRequest] = useState<TreeNode | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [relinking, setRelinking] = useState(false)
   const [activeDrag, setActiveDrag] = useState<FileExplorerDragData | null>(null)
   const [scrollTarget, setScrollTarget] = useState<{
     path: string
@@ -609,6 +612,29 @@ export function FileExplorer({
     await launchTerminal(activePaneId, undefined, joinWorkspacePath(workspace.path, node.path))
   }
 
+  async function rebindWorkspacePath(): Promise<void> {
+    if (
+      !workspaceId ||
+      !workspace ||
+      workspace.hostId !== 'local' ||
+      workspace.kind !== 'folder' ||
+      relinking
+    ) return
+    setRelinking(true)
+    try {
+      const updated = await api.workspaces.rebindLocalFolder(workspaceId)
+      if (!updated) return
+      const current = useAppStore.getState().config
+      if (!current) return
+      setConfig(applyWorkspacePathRebind(current, updated))
+      await tree.refreshTree()
+    } catch (error) {
+      reportError(error)
+    } finally {
+      setRelinking(false)
+    }
+  }
+
   async function revealLocalPath(node: TreeNode): Promise<void> {
     if (!workspaceId || workspace?.hostId !== 'local') return
     try {
@@ -869,7 +895,19 @@ export function FileExplorer({
             </Fragment>
           ))}
           {tree.rootError ? (
-            <div className="tree-empty tree-empty--error"><strong>Could not read workspace</strong><span>{tree.rootError}</span><button className="small-button" onClick={() => void tree.refreshTree()}>Retry</button></div>
+            <div className="tree-empty tree-empty--error">
+              <strong>Could not read workspace</strong>
+              <span>{tree.rootError}</span>
+              <div className="tree-empty__actions">
+                <button className="small-button" onClick={() => void tree.refreshTree()}>Retry</button>
+                {workspace?.hostId === 'local' && workspace.kind === 'folder' ? (
+                  <button className="small-button" disabled={relinking} onClick={() => void rebindWorkspacePath()}>
+                    {relinking ? <LoaderCircle className="spin" size={12} /> : <FolderOpen size={12} />}
+                    {relinking ? 'Choosing…' : 'Choose new folder'}
+                  </button>
+                ) : null}
+              </div>
+            </div>
           ) : !tree.rootCache?.loading && visibleRows.length === 0 ? (
             <div className="tree-empty"><strong>{query ? 'No loaded files match' : 'Workspace is empty'}</strong><span>{query ? 'Expand more folders or change the search.' : 'Create a file or folder to begin.'}</span></div>
           ) : null}
