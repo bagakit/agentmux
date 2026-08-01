@@ -54,24 +54,63 @@ describe('Kimi provider', () => {
     })
   })
 
-  describe('首个 prompt 不进 argv——进了会让会话跑完一条就退出', () => {
-    it('launch 的 argv 里没有 prompt，只有解析出的旗标', () => {
-      // ui/shell/__init__.py:391-399：shell UI 拿到 command 就 "run single command and exit"。
-      // 所以 prompt 绝不能进 argv，否则每个 Agent 会话都会在第一条之后消失。
-      // 断言整个 plan 而非 args 片段：命令名写错、env 被污染同样该红。
-      expect(kimi.buildLaunch({
-        workspacePath: '/repo', prompt: 'review this', args: ['--foo'], env: {}
-      })).toEqual({ command: 'kimi', args: ['--foo'], env: {} })
-      // 反面：prompt 非空且 args 为空时 argv 必须仍是空的——这条才真正钉住"prompt 不进 argv"。
-      expect(kimi.buildLaunch({
-        workspacePath: '/repo', prompt: 'review this', args: [], env: {}
-      }).args).toEqual([])
+  describe('首个 prompt 送不到，于是当场拒绝——绝不静静吞掉用户的原话', () => {
+    it('声明为 post-launch-only，而不是「声明 argv 再丢掉」', () => {
+      // 这条轴是"送得到吗"的唯一事实来源。改回 positional-argv 会让下面那条拒绝断言失效，
+      // 于是 prompt 重新被静静丢弃——所以这个取值本身要钉住。
+      expect(kimi.catalog.promptDelivery).toBe('post-launch-only')
     })
 
-    it('prompt 改由 PTY 键入，走的是默认的 single-phase 形态', () => {
-      // **不是** bracketed paste：Kimi 没有声明 planPromptInput，于是继承 agent-provider.ts:196-198
+    it('带 prompt 启动被拒，且说清是哪个 Provider、不泄露原话', () => {
+      // 这是本次修复的核心：此前 buildArgs 把 prompt 丢掉且**测试把丢掉钉成了正确行为**，
+      // 于是用户的原话只落进 timeline、永不进入 Kimi 进程，界面上却一切正常。
+      let error: AgentMuxError | undefined
+      try {
+        kimi.buildLaunch({ workspacePath: '/repo', prompt: 'review this', args: ['--foo'], env: {} })
+      } catch (thrown) { error = thrown as AgentMuxError }
+      expect(error?.code).toBe('AGENT_LAUNCH_PROMPT_UNSUPPORTED')
+      expect(error?.detail).toContain('providerId=kimi')
+      expect(error?.detail).toContain('promptDelivery=post-launch-only')
+      // prompt 是用户内容：只报长度，正文绝不进错误细节。
+      expect(error?.detail).toContain('promptLength=11')
+      expect(error?.detail).not.toContain('review this')
+    })
+
+    it('恢复路径判得一样——两条路给不同答案就是下一个只在一条路上出现的丢失', () => {
+      let error: AgentMuxError | undefined
+      try {
+        kimi.buildResumeLaunch({
+          workspacePath: '/repo',
+          nativeHandle: { kind: 'provider', providerId: 'kimi', sessionId: 'kimi-session-1' },
+          prompt: 'keep going',
+          args: [],
+          env: {}
+        })
+      } catch (thrown) { error = thrown as AgentMuxError }
+      expect(error?.code).toBe('AGENT_LAUNCH_PROMPT_UNSUPPORTED')
+      expect(error?.detail).not.toContain('keep going')
+    })
+
+    it('不带 prompt 启动照常可用：Kimi 空手起来完全能跑', () => {
+      // 拒绝只针对"带 prompt 启动"这一件事。空 prompt 必须照常启动，否则这个 Provider
+      // 就整个不可用了——而 launchPrompt 在注入运行时引导时几乎总是非空，所以这条很重要：
+      // 它钉住"拒绝的边界是 prompt 而不是启动本身"。
+      expect(kimi.buildLaunch({
+        workspacePath: '/repo', prompt: '', args: ['--foo'], env: {}
+      })).toEqual({ command: 'kimi', args: ['--foo'], env: {} })
+      // 只有空白也算空——不该因为一个空格就拒绝启动。
+      expect(kimi.buildLaunch({
+        workspacePath: '/repo', prompt: '   ', args: [], env: {}
+      })).toEqual({ command: 'kimi', args: [], env: {} })
+    })
+
+    it('起来之后提交 prompt 走默认 single-phase，这才是 Kimi 真正的送达路径', () => {
+      // **不是** bracketed paste：Kimi 没有声明 planPromptInput，于是继承 agent-provider.ts
       // 的默认实现——原样加一个回车。全仓只有 codex 声明了 render-then-submit 的 bracketed paste
       // 形态，claude / cursor / grok / gemini 与 Kimi 一样走这条默认路。
+      //
+      // 这条路对 Kimi 是通的（single-phase 不要求 composer readiness 纪元，
+      // prompt-submission.ts:95-116），所以"启动期送不到"并不等于"这个 Provider 收不到 prompt"。
       expect(kimi.planPromptInput('hello')).toEqual({ kind: 'single-phase', data: 'hello\r' })
       // 多行如实记：换行原样进 PTY，没有 paste 包裹。这是这条默认路的既有行为而非 Kimi 独有，
       // 钉在这里是为了让"以后谁给 Kimi 声明了 paste 形态"这件事必须显式改掉这条断言。
@@ -168,10 +207,10 @@ describe('Kimi provider', () => {
       expect(KIMI_HOOKS.nativeHandle?.requireTranscriptPath).toBeFalsy()
       // 反面：没有 transcript 路径时 resume 仍必须成立（与 pi 相反）。断言整个 plan：
       // 旗标拼错、prompt 混进 argv、多带一个参数都该红。
+      // 不带 prompt——带了会依 post-launch-only 被拒（那条边界另有专门用例守）。
       expect(kimi.buildResumeLaunch({
         workspacePath: '/tmp/agentmux-kimi',
         nativeHandle: { kind: 'provider', providerId: 'kimi', sessionId: 'kimi-session-1' },
-        prompt: 'keep going',
         args: ['--foo'],
         env: {}
       })).toEqual({

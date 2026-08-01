@@ -13,6 +13,7 @@ export type BuiltInAgentProviderId =
   | 'cursor'
   | 'kimi'
   | 'droid'
+  | 'copilot'
 export type AgentProviderId = BuiltInAgentProviderId | (string & {})
 
 /**
@@ -216,7 +217,20 @@ export type AgentHookLifecycleEvent =
   /** 一个 turn 收尾：本 turn 的 token 用量已在 transcript 落定。 */
   | 'turn-end'
 
-export type AgentPromptDelivery = 'positional-argv' | 'hermes-query' | 'flag-prompt-interactive'
+/**
+ * 首个 Prompt 怎么随启动送达。前三项都是「送得到」，`post-launch-only` 是**送不到**：
+ * 这个 CLI 的交互 UI 根本没有「带着一条 prompt 启动并继续活着」的入口，于是首个 prompt 只能
+ * 在进程起来之后按普通 turn 提交（`submitAgentPrompt`）。
+ *
+ * 它必须是一个显式取值而不是「声明成 argv 然后在 buildArgs 里悄悄丢掉」——后者会让用户的原话
+ * 只落进 timeline、永不进程内，而界面看起来一切正常。声明成这一项后，`buildLaunch` 会在收到
+ * 非空启动 prompt 时**当场拒绝**（见 agent-provider.ts），把「送不到」变成一次响亮的失败。
+ */
+export type AgentPromptDelivery =
+  | 'positional-argv'
+  | 'hermes-query'
+  | 'flag-prompt-interactive'
+  | 'post-launch-only'
 
 export type AgentReadySignal = {
   kind: 'foreground-process'
@@ -324,7 +338,8 @@ export type AgentTurnUsage = {
  *    在途安全姿态。二者都是 DESCRIBE 半边：键位（`input`）永不过 IPC，留在 Core 侧解析。
  * 5. **resume**：`resumeStrategy`——原生续跑的有无与**定位器种类**（session-id / transcript-path）。
  * 6. **prompt delivery**：`promptDelivery`——首个 Prompt 如何随启动送达（argv 位置参数 / 专用旗标 /
- *    子命令）；turn 内的送达形状另由 `AgentPromptInputPlan` 表达。
+ *    子命令），或者**送不到**（`post-launch-only`：这个 CLI 没有「带 prompt 启动且不退出」的入口）；
+ *    turn 内的送达形状另由 `AgentPromptInputPlan` 表达。
  * 7. **reply-correlation**：`capabilities.replyCorrelation`——能不能把一次回复关联回它的 turn，
  *    以及凭什么关联（原生 turn id / ACP turn id / 不能）。
  *

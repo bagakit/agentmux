@@ -77,12 +77,18 @@ describe('built-in agent providers', () => {
         // 而 readySignal 是按进程名比对的。别"顺手"把它改回 `kimi` 对齐上面九行——那会让
         // 这个 Provider 永远等不到就绪。理由与出处见 providers/kimi.ts 与 providers/kimi.test.ts。
         id: 'kimi', executable: 'kimi', expectedProcess: 'Kimi Code',
-        promptDelivery: 'positional-argv', readySignal: 'foreground-process',
+        promptDelivery: 'post-launch-only', readySignal: 'foreground-process',
         hook: 'native', permission: 'observe', resume: 'provider-native', acp: 'none',
         replyCorrelation: 'none'
       },
       {
         id: 'droid', executable: 'droid', expectedProcess: 'droid',
+        promptDelivery: 'positional-argv', readySignal: 'foreground-process',
+        hook: 'native', permission: 'observe', resume: 'provider-native', acp: 'none',
+        replyCorrelation: 'none'
+      },
+      {
+        id: 'copilot', executable: 'copilot', expectedProcess: 'copilot',
         promptDelivery: 'positional-argv', readySignal: 'foreground-process',
         hook: 'native', permission: 'observe', resume: 'provider-native', acp: 'none',
         replyCorrelation: 'none'
