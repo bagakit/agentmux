@@ -57,6 +57,27 @@ function verticalBars(rule: Rule): string[] {
   return found
 }
 
+/**
+ * 同一根竖条的另一种拼法。
+ *
+ * 上面那条只看 `box-shadow`，于是禁令在散文里说"选中态一律不用左侧竖条"，在测试里只对
+ * 用阴影画的竖条生效——`.foo--selected { border-left: 2px solid var(--green) }` 会全绿通过。
+ * 两种拼法在屏幕上是同一根线，判据必须同时认得两种写法，否则守的是实现细节而不是那条禁令。
+ *
+ * 只认**有实际宽度**的左缘边框：`border-left: 0` 与 `border-left-color` 单独出现都不画线。
+ * 逻辑属性 `border-inline-start` 一并认，它是同一根线的书写方向无关拼法。
+ */
+const LEFT_EDGE_BORDER =
+  /border-(?:left|inline-start)(?:-width)?:\s*(?!0(?:px)?\s*(?:;|$))([^;]*\b(?:[1-9]\d*(?:\.\d+)?|0?\.\d+)px[^;]*)/g
+
+function leftEdgeBorders(rule: Rule): string[] {
+  const found: string[] = []
+  for (const declaration of rule.body.matchAll(LEFT_EDGE_BORDER)) {
+    found.push(declaration[0]!.trim())
+  }
+  return found
+}
+
 describe('surface selection contract', () => {
   it('finds the selected-state rules by naming convention, not a hand-kept list', () => {
     // 认不出任何选中态的检查会全绿地什么也不说。这个下界同时确认命名约定还在被遵守。
@@ -87,5 +108,35 @@ describe('surface selection contract', () => {
     const dockEdge = rules().find((rule) => rule.selector === '.surface-tool-dock')
     expect(dockEdge).toBeDefined()
     expect(verticalBars(dockEdge!).length).toBeGreaterThan(0)
+  })
+
+  it('still recognises a left-edge border when it sees one', () => {
+    // 与 inset 竖条同一条自证：认不出这个形状的话，下面那条禁令会因为"没找到"而全绿。
+    // 内容语汇里的引用条（`.md-quote` 等）正是合法的同形状样本，用它们证明识别有效。
+    const contentBands = rules().filter(
+      (rule) => !SELECTED_STATE.test(rule.selector) && leftEdgeBorders(rule).length > 0
+    )
+    expect(contentBands.length).toBeGreaterThan(0)
+    // 零宽度与只给颜色都不画线，不该被算成竖条——否则下一个人会为了绕开误报去改真样式。
+    expect(leftEdgeBorders({ selector: 'x', body: 'border-left: 0;' })).toEqual([])
+    expect(leftEdgeBorders({ selector: 'x', body: 'border-left: 0px;' })).toEqual([])
+    expect(leftEdgeBorders({ selector: 'x', body: 'border-left-color: var(--green);' })).toEqual([])
+    // 而这三种拼法都是同一根线。
+    expect(leftEdgeBorders({ selector: 'x', body: 'border-left: 2px solid red;' })).toHaveLength(1)
+    expect(leftEdgeBorders({ selector: 'x', body: 'border-inline-start: 2px solid red;' })).toHaveLength(1)
+    expect(leftEdgeBorders({ selector: 'x', body: 'border-left-width: 3px;' })).toHaveLength(1)
+  })
+
+  it('never spells selection as a left-edge border either', () => {
+    // 一根 `border-left` 与一条 inset 阴影在屏幕上是同一根线。禁令管的是那根线，不是画法：
+    // 只守住阴影那一种拼法，等于把门开在旁边——而"选中不用竖条"这句话本身没有例外。
+    //
+    // 内容语汇里的左侧色带（引文、命令输出、被读回的用户发言）不在此列：它们说的是"这一段是
+    // 引来的/跑出来的"，不表达选中，选择器也不带选中命名。判据与阴影那条一致——**这根线有没有
+    // 出现在一个表达选中的选择器上**。
+    const offenders = selectedStateRules()
+      .flatMap((rule) => leftEdgeBorders(rule).map((border) => `${rule.selector} { ${border} }`))
+
+    expect(offenders).toEqual([])
   })
 })
