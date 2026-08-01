@@ -1,3 +1,4 @@
+import { BUILT_IN_AGENT_PROVIDER_IDS } from '@agentmux/core/provider-id'
 import { Bell, Bot, Boxes, FolderGit2, Palette, Search, Server, Settings2, X } from 'lucide-react'
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import type { AgentExecutorConfig, AppConfig, AppearanceConfig, HostConfig, WorkspaceRecord } from '../../../shared/contracts'
@@ -22,14 +23,41 @@ const GROUPS: { id: SettingsGroupId; title: string }[] = [
   { id: 'preferences', title: 'Preferences' }
 ]
 
+/**
+ * Agents 这一节的搜索词里，Provider 名从 Core 的 id 全集派生，不手抄。
+ *
+ * 手抄那份真的漂过：它停在最早的 9 家，而内置已经是 13 家，于是在设置搜索框里打 `kimi`、
+ * `droid`、`copilot`、`opencode` 一条都搜不出来——Agents 这一节明明就管着它们。id 本身正是
+ * 用户会输入的词（`traex`、`opencode`），所以直接用 id，不必再引一张展示名表。
+ *
+ * 搜索比对走 `.toLowerCase().includes()`，故这里也小写；id 已经全小写，`toLowerCase()` 只是
+ * 让「id 里出现大写」的将来不至于静默搜不到。
+ */
+const AGENT_PROVIDER_KEYWORDS = BUILT_IN_AGENT_PROVIDER_IDS.map((id) => id.toLowerCase()).join(' ')
+
 const SECTIONS = [
   { id: 'workspaces' as const, group: 'setup' as const, title: 'Workspaces', description: 'Project folders and registered worktrees', icon: FolderGit2, keywords: 'project folder repo branch worktree create run on agent' },
   { id: 'hosts' as const, group: 'setup' as const, title: 'Hosts', description: 'Local and SSH machines', icon: Server, keywords: 'ssh remote hostname user port key test connection' },
-  { id: 'agents' as const, group: 'setup' as const, title: 'Agents', description: 'Executors and Providers', icon: Bot, keywords: 'codex claude traex hermes pi grok gemini antigravity cursor executor command args env installed provider' },
+  { id: 'agents' as const, group: 'setup' as const, title: 'Agents', description: 'Executors and Providers', icon: Bot, keywords: `${AGENT_PROVIDER_KEYWORDS} executor command args env installed provider` },
   { id: 'appearance' as const, group: 'preferences' as const, title: 'Appearance', description: 'Interface layers and terminal palette', icon: Palette, keywords: 'theme color palette terminal tui composer input background' },
   { id: 'notifications' as const, group: 'preferences' as const, title: 'Notifications', description: 'Attention alerts and how long they stay', icon: Bell, keywords: 'notification alert attention dwell duration banner needs you done error until dismiss' },
   { id: 'general' as const, group: 'preferences' as const, title: 'General', description: 'Runtime and terminal behavior', icon: Settings2, keywords: 'core runtime terminal tmux ssh' }
 ]
+
+/**
+ * 搜索框过滤出的可见 section。
+ *
+ * 导出是为了让守卫能直接质询它：`query` 是组件内部 state，静态渲染改不到，于是「打 kimi 能不能
+ * 搜出 Agents」这件事在组件外无从观察。抽出来之后，组件里只剩一句转发（见 `visibleSections`），
+ * 那一句自身的在场由「壳里恰好只有转发这一句」这类判据去守，不靠这个函数。
+ */
+export function visibleSettingsSections(query: string): typeof SECTIONS {
+  const normalized = query.trim().toLowerCase()
+  if (!normalized) return SECTIONS
+  return SECTIONS.filter((section) =>
+    `${section.title} ${section.description} ${section.keywords}`.toLowerCase().includes(normalized)
+  )
+}
 
 export function SettingsPanel({ onClose, initialSection = 'workspaces' }: {
   onClose: () => void
@@ -39,10 +67,7 @@ export function SettingsPanel({ onClose, initialSection = 'workspaces' }: {
   const setConfig = useAppStore((state) => state.setConfig)
   const [active, setActive] = useState<SettingsSectionId>(initialSection)
   const [query, setQuery] = useState('')
-  const visibleSections = useMemo(() => {
-    const normalized = query.trim().toLowerCase()
-    return normalized ? SECTIONS.filter((section) => `${section.title} ${section.description} ${section.keywords}`.toLowerCase().includes(normalized)) : SECTIONS
-  }, [query])
+  const visibleSections = useMemo(() => visibleSettingsSections(query), [query])
 
   useEffect(() => {
     if (visibleSections.some((section) => section.id === active)) return
