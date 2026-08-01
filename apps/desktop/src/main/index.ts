@@ -1,6 +1,6 @@
 import { rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { app, BrowserWindow, crashReporter, Menu, shell } from 'electron'
+import { app, BrowserWindow, crashReporter, dialog, Menu, shell } from 'electron'
 import { AgentMuxFileAgentSessionStore } from '@agentmux/core'
 import { applicationMenuTemplate } from './application-menu.js'
 import { isScratchWorkspaceId } from '../shared/contracts.js'
@@ -13,6 +13,7 @@ import { hydrateProcessPathFromLoginShell } from './login-shell-path.js'
 import { RuntimeController } from './runtime-controller.js'
 import { ScratchTopics } from './scratch-topics.js'
 import { runDesktopResourceProbe } from './resource-probe.js'
+import { startupFailureNotice } from './startup-failure-notice.js'
 import { runDesktopFileEditingProbe, WorkspaceFileEditingProbeControl } from './file-editing-probe.js'
 import { WorkspaceFiles } from './workspace-files.js'
 import { registerWindowResizeEvents } from './window-resize-events.js'
@@ -99,6 +100,21 @@ function startPrimaryInstance(): void {
 
   async function exitAfterFailure(error: unknown): Promise<void> {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
+    // 从 Finder 双击启动的用户不会读 stderr——没有这个对话框，他看到的是 Dock 图标弹一下就消失，
+    // 没有任何说明。而本仓刻意做了一族「拒绝启动而不覆盖用户配置」的守卫（config-store 里那四道），
+    // 它们换来的唯一好处就是这段话：你的东西还在，在这个文件里。用户看不到，那些守卫等于没设。
+    //
+    // 放在 dispose 之前：清理本身可能挂住或抛错，而这条消息是用户唯一的信息来源。showErrorBox
+    // 不需要 app ready，也不需要有窗口。
+    const notice = startupFailureNotice(error, { configPath: configStore.filePath })
+    try {
+      dialog.showErrorBox(notice.title, notice.body)
+    } catch (dialogError) {
+      // 无头/测试环境里弹不出对话框是正常的，不能因此吞掉真正的失败退出。
+      process.stderr.write(
+        `${dialogError instanceof Error ? dialogError.message : String(dialogError)}\n`
+      )
+    }
     try {
       await disposeOwners()
     } catch (cleanupError) {
