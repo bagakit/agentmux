@@ -284,7 +284,11 @@ function withNotificationDefault(config: AppConfig): { config: AppConfig; added:
  * `found` vs. the returned length is the caller's evidence for the case salvage cannot cover: a
  * shape change that invalidates *every* record. There is no way to carry a record forward that the
  * current schema would reject — `save()` would refuse the result — so that case must be loud
- * rather than quiet. See `retiredConfigReplacement`.
+ * rather than quiet. `strandedByDamagedHost` is the same evidence for the *partial* case, and it is
+ * reported separately because those workspaces are intact and were dropped for a reason outside
+ * themselves: the difference between "we cannot read this project" and "we can read it fine but its
+ * host record is unreadable" is what tells the user which one byte to fix. Both are read by
+ * `retiredConfigReplacement`.
  */
 export function authoredConfigCarryOver(raw: unknown): {
   hosts: AppConfig['hosts']
@@ -294,6 +298,7 @@ export function authoredConfigCarryOver(raw: unknown): {
   browser: AppConfig['browser'] | undefined
   notifications: AppConfig['notifications'] | undefined
   found: number
+  strandedByDamagedHost: Array<{ hostId: string; workspaceIds: string[] }>
 } {
   // Every key is `.optional()`, including the `unknown` ones. In zod v4 a bare `z.unknown()` key is
   // **required** — an absent key fails the whole object — and this outer parse failing is exactly
@@ -327,9 +332,27 @@ export function authoredConfigCarryOver(raw: unknown): {
   const workspaces = rawWorkspaces
     .map((workspace) => workspaceSchema.safeParse(workspace))
     .flatMap((parsed) => (parsed.success ? [parsed.data] : []))
-    // A workspace whose host did not survive would fail the schema's host-existence refinement,
-    // so it cannot be carried: keeping it would make the whole config unsavable.
-    .filter((workspace) => hostIds.has(workspace.hostId))
+
+  // A workspace whose host did not survive cannot be carried: the schema's host-existence refinement
+  // would reject the result and `save()` would refuse to write it. But dropping it quietly is the
+  // amplification case, and it is different in kind from a damaged workspace record:
+  //
+  //   - A workspace record the schema rejects is *unreadable*. We do not know what it was, so there
+  //     is nothing to carry and the loss is forced by the data. That stays per-record salvage.
+  //   - A workspace stranded by an unresolvable host is **fully intact** — id, name, path all
+  //     readable — and is being dropped for a reason outside itself. One damaged host record costs
+  //     every project on it, so a single bad byte in one `hosts` entry can silently retire a dozen
+  //     projects while the loud all-empty guard stays quiet because one local project survived.
+  //
+  // Reported rather than filtered in silence; `retiredConfigReplacement` is what refuses to launch.
+  const resolvable = workspaces.filter((workspace) => hostIds.has(workspace.hostId))
+  const strandedByHost = new Map<string, string[]>()
+  for (const workspace of workspaces) {
+    if (hostIds.has(workspace.hostId)) continue
+    const already = strandedByHost.get(workspace.hostId)
+    if (already) already.push(workspace.id)
+    else strandedByHost.set(workspace.hostId, [workspace.id])
+  }
 
   // Built-in ids are reset from the catalog; every other id is the user's own creation. Order puts
   // the defaults first so the carried entries are the ones a reader sees as additions.
@@ -356,7 +379,7 @@ export function authoredConfigCarryOver(raw: unknown): {
   // so no value here can actually be `undefined`. Same cast the two `configSchema.parse` sites use.
   return {
     hosts: withLocal as AppConfig['hosts'],
-    workspaces: workspaces as WorkspaceRecord[],
+    workspaces: resolvable as WorkspaceRecord[],
     executors: { ...DEFAULT_CONFIG.executors, ...carriedExecutors } as AppConfig['executors'],
     appearance: carried(appearanceSchema, outer.success ? outer.data.appearance : undefined),
     browser: carried(browserSchema, outer.success ? outer.data.browser : undefined) as
@@ -367,7 +390,8 @@ export function authoredConfigCarryOver(raw: unknown): {
     // loose — the same reason `configSchema.parse` needs its cast at the two sites below.
     notifications: carried(notificationsSchema, outer.success ? outer.data.notifications : undefined) as
       AppConfig['notifications'] | undefined,
-    found: rawWorkspaces.length
+    found: rawWorkspaces.length,
+    strandedByDamagedHost: [...strandedByHost].map(([hostId, workspaceIds]) => ({ hostId, workspaceIds }))
   }
 }
 
@@ -375,12 +399,23 @@ export function authoredConfigCarryOver(raw: unknown): {
  * The config a retired file becomes: current defaults for the ambiguous half, everything whose
  * presence was unambiguous carried across.
  *
- * When the file held projects and **not one** could be carried, this throws instead of launching
- * with an empty list. That is the failure mode this whole function exists to prevent, and the
- * distinction that makes throwing right is what happens to the file: `get()` only writes after
- * this returns, so on a throw the retired file is still on disk, intact, and the projects are
- * recoverable. Launching "successfully" with zero projects is what destroyed them — the next
- * `save()` overwrites the only copy. A loud launch failure is recoverable; a quiet one is not.
+ * Two classes of loss make this throw instead of launching. Both share one criterion — **a project's
+ * absence must never be ambiguous** — and one mechanic: `get()` only writes after this returns, so
+ * on a throw the retired file is still on disk, intact, and the projects are recoverable. Launching
+ * "successfully" with projects missing is what destroys them, because the next `save()` overwrites
+ * the only copy. A loud launch failure is recoverable; a quiet one is not.
+ *
+ *   - **Not one project could be carried.** Every record is unreadable under the current schema.
+ *   - **A host record was unreadable, stranding projects that were themselves intact.** This is the
+ *     partial case, and covering only the total one is what made the guard silent where it mattered
+ *     most: one damaged `hosts` entry drops every project on it, and as long as a single local
+ *     project survives, `workspaces.length` is non-zero and the total-loss check never fires.
+ *     Measured: a `port: "twenty-two"` in one SSH host silently cost 4 of 5 projects plus the host.
+ *
+ * The second class is deliberately not softened into "carry the workspace and drop the host": the
+ * schema's host-existence refinement would reject that config, so `save()` could never write it.
+ * Nothing here can repair a damaged host — only the user can — so the honest move is to say which
+ * host and which projects, and leave the file alone.
  */
 function retiredConfigReplacement(raw: unknown): AppConfig {
   const carried = authoredConfigCarryOver(raw)
@@ -388,6 +423,20 @@ function retiredConfigReplacement(raw: unknown): AppConfig {
     throw new Error(
       `Refusing to retire a config holding ${carried.found} project(s) that none of the current ` +
       'schema accepts: the file on disk is unchanged and still holds them.'
+    )
+  }
+  if (carried.strandedByDamagedHost.length > 0) {
+    const detail = carried.strandedByDamagedHost
+      .map(({ hostId, workspaceIds }) => `${hostId} (${workspaceIds.join(', ')})`)
+      .join('; ')
+    const stranded = carried.strandedByDamagedHost.reduce(
+      (total, entry) => total + entry.workspaceIds.length,
+      0
+    )
+    throw new Error(
+      `Refusing to retire a config that would drop ${stranded} intact project(s) whose host record ` +
+      `the current schema cannot read: ${detail}. The file on disk is unchanged and still holds ` +
+      'them; fix or remove that host entry to keep the projects.'
     )
   }
   // A preference the current schema rejects falls back to the default rather than failing the
