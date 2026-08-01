@@ -1,4 +1,5 @@
 import type { AgentHookLifecycleEvent } from './types.js'
+import { TURN_REOPENING_EVENTS } from './hook-turn-phase.js'
 
 /**
  * Hook 事件名的**规范化层**：一个零依赖的叶子模块，只做两件事——把「事件名藏在哪个字段」和
@@ -91,7 +92,23 @@ export const PASCAL_CASE_HOOK_DIALECT: AgentHookLifecycleDialect = {
  */
 
 /**
- * Hermes 的 snake_case 方言。`pre_llm_call` 刻意不映射，理由同上。
+ * Hermes 的 snake_case 方言。
+ *
+ * `pre_llm_call` → `turn-start`：它是 Hermes 这一轮的**开工**信号，与 `post_llm_call` 的收尾成对
+ * （第一方源码实测：`post_llm_call` 在 turn finalizer 里「每 turn 一次」，`pre_llm_call` 在 turn
+ * context 构建里每 turn 一次；两者都不是每次 API 往返——那是更热的 `pre_api_request`，故刻意不装）。
+ *
+ * 这一条**曾经**按「Core 今天没有任何判断需要它」刻意不映射。那个理由已经过期：turn-phase 闸门
+ * （hook-turn-phase.ts）就是需要它的判断，而 Hermes 的 hook 面上没有任何「用户提交了 prompt」事件
+ * （用户在它自己的 TUI 里打字，AgentMux 看不见），于是闸门永久 latch——第一次收尾之后整个 run 余下的
+ * working/等你态全被静默吞掉。教训是：「今天没有消费者」是个**会过期**的理由，加判断的人必须回头看
+ * 这张表，而不是假设它已经够用。
+ *
+ * 为什么不图省事记成 `user-prompt-submit`：那会在 canonical 表里留一句假话（没有任何用户输入发生过），
+ * 而这张表是「结构上的哪一步」的唯一真相。词汇表因此新增 `turn-start`（见 types.ts）。
+ *
+ * `on_session_start` 保持 `session-start`，**不**当重开用：第一方源码写明它只在全新会话建立时触发
+ * （"not on continuation"），一个 run 里只有一次，拿它重开对第二轮起没有任何作用。
  *
  * `pre_approval_request`/`post_approval_response` 也不映射：它们是**授权门的两端**（Hermes 明说是
  * observers only，返回值被忽略），不是一次工具调用的事前/事后——同一条危险命令会先过授权门、
@@ -105,6 +122,7 @@ export const PASCAL_CASE_HOOK_DIALECT: AgentHookLifecycleDialect = {
  */
 export const HERMES_HOOK_DIALECT: AgentHookLifecycleDialect = {
   on_session_start: 'session-start',
+  pre_llm_call: 'turn-start',
   pre_tool_call: 'tool-use-start',
   post_tool_call: 'tool-use-end',
   post_llm_call: 'turn-end',
@@ -116,6 +134,18 @@ export const HERMES_HOOK_DIALECT: AgentHookLifecycleDialect = {
  *
  * `message_end` 刻意不映射：Pi 自己把它声明成 `working` 而非 `done`，映射成 turn 收尾会与 Provider
  * 的声明相矛盾——那正是「替 Provider 猜语义」。Pi 的收尾是 `agent_end`/`agent_settled`。
+ *
+ * **Pi 今天没有重开事件，这是已知缺口而不是遗漏。** turn-phase 闸门要求「能收尾的方言也要能重开」
+ * （hook-turn-phase.ts），Pi 满足不了：候选只有 `before_agent_start`/`agent_start`（现记成
+ * `session-start`）与 `message_end`，而本机没有 Pi 的第一方源码，无法证明其中任何一个是**每 turn**
+ * 触发而不是每会话一次。按本仓「未核实就不声明」的规矩，这里不编一个映射去让不变量变绿——那会把
+ * 「闸门在 Pi 上开着」这件没被证明的事写成断言。
+ *
+ * 缺口的实际后果被 hookEventUpdatesSemanticStatus 的保守出口兜住了：它对没有重开事件的方言不 latch
+ * （见本文件末尾的 `eventNamesCanReopenTurn`，以及 client.ts 摄入侧把它算出来喂进闸门的那一句），
+ * 代价是 Pi 拿不到「收尾后压制迟到工具事件」这一层保护。
+ * 要收掉这个缺口，需要的是 Pi 的第一方事件时序证据，而不是这张表上多一行。
+ * 证据缺口记在 docs/reviews/agentmux-provider-cli-evidence.md 的 Pi 一节。
  */
 export const PI_HOOK_DIALECT: AgentHookLifecycleDialect = {
   before_agent_start: 'session-start',
@@ -337,4 +367,25 @@ export function rawEventNamesForLifecycle(
   return Object.entries(AGENT_HOOK_LIFECYCLE_DIALECT)
     .filter(([, canonical]) => canonical === lifecycleEvent)
     .map(([raw]) => raw)
+}
+
+/**
+ * 这家 Provider 有没有能力重开一个 turn，也就是 turn-phase 闸门的前提在它身上成不成立。
+ *
+ * 闸门（hook-turn-phase.ts）的整套推理是「收尾之后要再动工，必先开新一轮」。一家能收尾却无法重开的
+ * Provider 让这个前提直接失效，闸门于是从「可逆的抑制」退化成「永久拒绝」。所以前提可满足性要算出来，
+ * 而不是靠谁记得给哪家 Provider 加例外。
+ *
+ * 判据取 Provider **自己声明的原始事件名**（它 rules 里出现的那些）经方言归一后的结果，而不是去猜它
+ * 属于哪份方言表——方言表按原始名查，压根没有「哪家用哪份」的绑定，硬做一份绑定等于新增一处手抄。
+ *
+ * 刻意是**存在性**而不是清单：不问「有没有 pre_llm_call」，只问「有没有任何声明的事件归一到重开事件」。
+ * 换厂商事件名、接新 Provider 都不必改这里；写成清单则每加一家都要回来补，而漏补是静默的。
+ */
+export function eventNamesCanReopenTurn(rawEventNames: Iterable<string>): boolean {
+  for (const raw of rawEventNames) {
+    const canonical = canonicalHookLifecycleEvent(raw)
+    if (canonical && TURN_REOPENING_EVENTS.includes(canonical)) return true
+  }
+  return false
 }

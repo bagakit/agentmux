@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  TERMINAL_OSC_CLIPBOARD_MAX_BODY,
+  TERMINAL_OSC_CLIPBOARD_MAX_PAYLOAD,
   terminalOscClipboardWrite
 } from '../src/shared/terminal-osc-clipboard.js'
 import { installTerminalOscHandlers } from '../src/renderer/src/lib/terminal-capability-replies.js'
@@ -62,12 +62,32 @@ describe('OSC 52 往剪贴板写的载荷解析', () => {
       .toEqual({ text: 'hello' })
   })
 
+  it('体积上限就是 128KiB 整帧，不是别的数——这个值本身有人守', () => {
+    // 直接钉住字面量。若只用 MAX 去构造样本，样本会跟着常量一起漂：实测把上限改成 256KiB，那样的
+    // 测试 15 条全绿（越界样本自己也变大了，照旧越界）。这是「期望值不能由被测对象算出」的形状。
+    expect(TERMINAL_OSC_CLIPBOARD_MAX_PAYLOAD).toBe(131072)
+  })
+
   it('超过体积上限直接拒，不进 base64 解码', () => {
-    const huge = 'A'.repeat(TERMINAL_OSC_CLIPBOARD_MAX_BODY + 1)
+    // 载荷必须是**合法 base64 且长度 %4===0**，否则拒它的是字母表/补齐那两道门，不是体积上限——
+    // 实测用 `'A'.repeat(MAX+1)`（长度 %4===1）时，把整道体积上限删掉 15 条照旧全绿。
+    // 'QUJD' 是 'ABC' 的 base64，重复它得到的仍是合法 base64。长度写死 131072（= 上一条钉住的
+    // 128KiB），不用 MAX 算：用 MAX 算的话上限被改大时样本一起变大，这条会假绿。
+    const huge = 'QUJD'.repeat(32768) // 131072 字符
+    expect(huge.length).toBe(131072)
+    // 上限量的是**整帧**（选区 + `;` + base64），所以 `c;` 这两个字符也算：这个载荷本身恰好等于上限，
+    // 加上前缀就越界。这一条同时钉住"量整帧"这个口径——若改成只量 body，它就不再越界，本条会红。
     expect(terminalOscClipboardWrite(`c;${huge}`)).toBeNull()
-    // 对照：刚好在限内的同形载荷能解开，证明上面那条 null 是体积挣来的，不是别的判据顺手挡掉的。
-    const atLimit = 'QQ=='.repeat(1)
-    expect(terminalOscClipboardWrite(`c;${atLimit}`)).toEqual({ text: 'A' })
+  })
+
+  it('恰好落在上限上的整帧要过——边界是 > 而不是 >=', () => {
+    // 需要一个 `data.length` **恰好等于** 131072 的合法帧。直接拼 base64 凑不出来：整帧 131072 时
+    // body 是 131070，而 131070 % 4 === 2，不可能是合法 base64。解法是利用实现会先剥空白这一点，
+    // 用两个换行把长度补齐：compact 后仍是 131068 个 base64 字符（%4===0）。
+    const frame = `c;${'QUJD'.repeat(32767)}\n\n`
+    expect(frame.length).toBe(131072) // 恰好等于上限
+    // `>` 让它过，`>=` 会拒它。实测把实现改成 `>=` 时本条红，这是这条断言存在的唯一理由。
+    expect(terminalOscClipboardWrite(frame)).toEqual({ text: 'ABC'.repeat(32767) })
   })
 })
 

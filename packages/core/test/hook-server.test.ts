@@ -40,6 +40,36 @@ describe('AgentHookServer', () => {
       receiptId: 'receipt-permission-1',
       eventName: 'PermissionRequest'
     })
+    // payload 单独钉，且用 toEqual 不用上面那个 toMatchObject：整个事件的**正文**都在这里——
+    // tool_name、tool_input、session_id、用量，下游全靠它。而 toMatchObject 看不见一个**缺失**的
+    // 键，所以把那句 `...(payload === undefined ? {} : { payload })` 改成永远不带 payload，
+    // 这个文件 13 条照旧全绿（实测）。正文是承重的，得有人按取值质询它。
+    expect(events[0]!.payload).toEqual({ tool_name: 'Bash', tool_input: { command: 'pnpm test' } })
+  })
+
+  it('不带 payload 的事件不凭空造一个空正文', async () => {
+    // 上面那条钉住"有正文时要带过来"，这条钉住另一侧：缺席是一等公民的事实。把那句改成无条件
+    // `{ payload: event.payload }`，正文就会变成一个 `undefined` 键——下游读 payload 的地方从
+    // "这个事件没有正文"变成"正文是 undefined"，是两件不同的事。
+    const events: NativeHookEnvelope[] = []
+    const server = new AgentHookServer((event) => {
+      events.push(event)
+    }, 0)
+    servers.push(server)
+    await server.start()
+    const binding = server.createBinding('semantic-2', 'claude')
+    const response = await fetch(binding.endpoint.url, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${binding.endpoint.token}`,
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({ receiptId: 'receipt-bare-1', eventName: 'Stop' })
+    })
+    expect(response.status).toBe(204)
+    await binding.bindRun('daemon-2')
+    expect(events).toHaveLength(1)
+    expect(Object.hasOwn(events[0]!, 'payload')).toBe(false)
   })
 
   it('acknowledges a bound hook only after owner persistence completes', async () => {

@@ -35,7 +35,7 @@ describe('nextReconnectStep', () => {
     }
   })
 
-  it('backs off monotonically and caps the delay', () => {
+  it('backs off monotonically', () => {
     const delays: number[] = []
     for (let prior = 0; prior < RECONNECT_MAX_ATTEMPTS; prior += 1) {
       const step = nextReconnectStep(prior)
@@ -44,8 +44,33 @@ describe('nextReconnectStep', () => {
     for (let index = 1; index < delays.length; index += 1) {
       expect(delays[index]!).toBeGreaterThanOrEqual(delays[index - 1]!)
     }
-    // 封顶：不会无限增长，最大不超过 30s。
-    expect(Math.max(...delays)).toBeLessThanOrEqual(30_000)
+  })
+
+  /**
+   * 整条退避梯与整窗时长，两个都写死成字面量。
+   *
+   * 这条替掉的是一条**恒真**断言。原先这里写「封顶：最大不超过 30s」，而实现里确实有个
+   * `Math.min(BASE * 2^n, 30_000)`——但 6 次上限让能排出来的最大一档只有 `500 * 2^5 = 16000`，
+   * `min` 永远挑不中封顶那侧。于是把封顶改成任何 ≥16s 的值、甚至把整个 `Math.min` 删掉，10 条全绿
+   * （两个方向都实测过）。那不是「有条件没人守」，是「这个条件不可能改变结果」——处置是删掉代码，
+   * 不是给它补一条测试。封顶因此已从实现里移除。
+   *
+   * 剩下要守的是这个策略的**产品取值**本身：每一档等多久、以及「连不上多久才放弃」这个总时长。
+   * 期望值全写死字面量，绝不从被测模块算出来——用 `RECONNECT_BASE_DELAY_MS * 2 ** n` 当期望值的话，
+   * 把基数从 500 悄悄改成 5（几乎不退避、狂敲 daemon）或 50000（等半分钟才第一次重连）都不会红。
+   *
+   * 31.5s 这个总窗是 #159 那侧设计的参照物：跨成功幸存的累计时限必须显著大于它，否则一次正常的
+   * 单轮重连就会被误判成「反复抖动、该放弃了」。谁改动这里的任何一个数，都要回头看那个时限。
+   */
+  it('钉住退避梯与整窗时长这两个产品取值（期望值全为字面量）', () => {
+    const delays: number[] = []
+    for (let prior = 0; prior < RECONNECT_MAX_ATTEMPTS; prior += 1) {
+      const step = nextReconnectStep(prior)
+      if (step.kind === 'retry') delays.push(step.delayMs)
+    }
+    expect(delays).toEqual([500, 1_000, 2_000, 4_000, 8_000, 16_000])
+    // 整个重连窗口的总时长：6 档相加。半死 daemon 的累计时限设计要以它为参照。
+    expect(delays.reduce((sum, value) => sum + value, 0)).toBe(31_500)
   })
 })
 

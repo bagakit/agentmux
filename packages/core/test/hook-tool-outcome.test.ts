@@ -71,4 +71,33 @@ describe('hook tool outcome capture', () => {
     expect(hookToolOutcome({ tool_result: 'b' }).output).toBe('b')
     expect(hookToolOutcome({ output: 'c' }).output).toBe('c')
   })
+
+  /**
+   * 两族文本键的**顺序**本身承载判断，而不只是「有没有认得这个名字」。
+   *
+   * 一个结果对象常常同时带正文与旁证：`{stdout, stderr}` 里 stderr 往往只是进度条或告警，
+   * `{output, message}` 里 message 常是一句「Tool completed」。取错那一个的后果不是缺信息，
+   * 而是**显示了错的那段文本**——用户看着一行 warning 找不到自己命令的输出，且没有任何迹象说明
+   * 真正的输出还在负载里。
+   *
+   * 之前只有「藏在 stdout 里要取 stdout」这一条：喂的对象只有一个候选键，于是任何重排都不改结果。
+   * 下面每条都同时给两个键、且断言必须落在**优先的那一个**上，重排才会红。
+   */
+  it('结果对象同时带正文与旁证时，取优先的那个键——重排会显示错的那段文本', () => {
+    // stderr 常是进度条或告警；取它等于把 warning 当成命令输出。
+    expect(hookToolOutcome({ tool_response: { stdout: 'RESULT', stderr: 'warn' } }).output).toBe('RESULT')
+    // message 常是一句状态语（'Tool completed'），output 才是这一步真正产出的东西。
+    expect(hookToolOutcome({ tool_response: { output: 'REAL', message: 'noise' } }).output).toBe('REAL')
+    // content 与 text 都是正文候选，但只有一个是这一步的结论。
+    expect(hookToolOutcome({ tool_response: { content: 'C', text: 'T' } }).output).toBe('C')
+  })
+
+  it('失败正文也按顺序取：error 压过 error_message', () => {
+    // 两个都在场时，`error` 是那一步自己说的原因，`error_message` 常是外层包装后的转述。
+    const outcome = hookToolOutcome({ error: 'PRIMARY', error_message: 'secondary' })
+    expect(outcome.output).toBe('PRIMARY')
+    expect(outcome.failed).toBe(true)
+    // 反向那一侧：`error` 缺席时 `error_message` 必须顶上，否则失败只有红点没有原因。
+    expect(hookToolOutcome({ error_message: 'only' }).output).toBe('only')
+  })
 })

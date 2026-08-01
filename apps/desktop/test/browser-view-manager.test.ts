@@ -125,12 +125,18 @@ const fakeElectron = vi.hoisted(() => {
     static nextLoadURLImpl: null | ((contents: FakeWebContents, url: string) => Promise<void>) = null
     readonly webContents = new FakeWebContents()
     readonly partition: string | undefined
+    // 整份 webPreferences 都留着，不只挑 partition 出来。沙箱开关（contextIsolation/sandbox/
+    // nodeIntegration）是这个内嵌浏览器唯一挡住"任意 URL 的页面拿到 Node 能力"的东西，而这个 fake
+    // 此前只读 partition、把另外三个字段直接丢掉——于是把三个开关**各自**翻反，24 条测试照旧全绿。
+    // 丢掉的字段等于没人守的字段，所以这里存整份，让下面那条断言够得着。
+    readonly webPreferences: Record<string, unknown> | undefined
     visible = true
     bounds = { x: 0, y: 0, width: 0, height: 0 }
 
-    constructor(options?: { webPreferences?: { partition?: string } }) {
+    constructor(options?: { webPreferences?: Record<string, unknown> }) {
       FakeWebContentsView.instances.push(this)
-      this.partition = options?.webPreferences?.partition
+      this.webPreferences = options?.webPreferences
+      this.partition = options?.webPreferences?.partition as string | undefined
       const nextLoadURLImpl = FakeWebContentsView.nextLoadURLImpl
       FakeWebContentsView.nextLoadURLImpl = null
       if (nextLoadURLImpl) {
@@ -216,6 +222,15 @@ describe('BrowserViewManager', () => {
     expect(manager.usesProfile('default')).toBe(true)
     expect(manager.usesProfile('work')).toBe(false)
     expect(view.partition).toBe('persist:browser-default')
+    // 沙箱三开关。这个内嵌浏览器会 loadURL 用户/Agent 递来的任意 URL，所以「渲染进程拿不到 Node」是
+    // 它唯一的隔离边界：`nodeIntegration` 一旦为真、或 `contextIsolation`/`sandbox` 任一为假，一个恶意
+    // 页面就能越出渲染进程。此前这三个值只写在生产代码里、无人断言——把任意一个翻反，这个文件 24 条
+    // 照旧全绿。钉死取值（不是「有这个键」）才是检测器。
+    expect(view.webPreferences).toMatchObject({
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false
+    })
     expect(view.visible).toBe(false)
     expect(view.webContents.zoomFactor).toBe(DEFAULT_BROWSER_ZOOM_FACTOR)
     expect(view.webContents.disableDeviceEmulation).toHaveBeenCalled()
@@ -434,6 +449,14 @@ describe('BrowserViewManager', () => {
     expect(original.visible).toBe(true)
     expect(candidate.visible).toBe(false)
     expect(candidate.partition).toBe('persist:browser-work')
+    // 换 profile 造出的那个候选 view 也走同一道门。今天两处都调 `createView`，所以这条断言在同一个实现
+    // 上和上面那条一起红；留它是因为它守的是**另一件事**：换 profile 若哪天自己 new 一个 WebContentsView
+    // （比如为了带别的 partition 而绕过 createView），create 那条断言看不见，而用户浏览的正是这个候选。
+    expect(candidate.webPreferences).toMatchObject({
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false
+    })
 
     manager.setBounds('browser-profile', { x: 10.4, y: 20.6, width: 800.2, height: 500.8 })
     manager.setBounds('browser-profile', null)

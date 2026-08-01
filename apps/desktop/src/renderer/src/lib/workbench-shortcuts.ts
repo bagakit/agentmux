@@ -20,6 +20,8 @@ import { SHORTCUT_BINDINGS } from './shortcut-registry'
 export type WorkbenchShortcutCommand =
   /** 按序号切 Tab；`ordinal` 是 1 基绝对序号，`'last'` 恒指最后一张。 */
   | { kind: 'select-tab'; ordinal: number | 'last' }
+  /** 相对切 Tab：往前/往后一张，到头回绕。 */
+  | { kind: 'step-tab'; delta: 1 | -1 }
   /** 关闭当前焦点 Region。 */
   | { kind: 'close-region' }
   /** 沿 `direction` 分出一格。 */
@@ -55,6 +57,8 @@ export function commandForWorkbenchId(id: string): WorkbenchShortcutCommand | nu
     // 1..8 是绝对序号；9 恒指最后一张（浏览器/终端惯例：第 9 个键跳末尾，而不是要求正好九张）。
     return { kind: 'select-tab', ordinal: digit === '9' ? 'last' : Number(digit) }
   }
+  if (id === 'workbench.previous-tab') return { kind: 'step-tab', delta: -1 }
+  if (id === 'workbench.next-tab') return { kind: 'step-tab', delta: 1 }
   if (id === 'workbench.close-region') return { kind: 'close-region' }
   if (id === 'workbench.split.right') return { kind: 'split', direction: 'right' }
   if (id === 'workbench.split.down') return { kind: 'split', direction: 'down' }
@@ -75,6 +79,33 @@ export function tabIdForOrdinal(
 ): string | null {
   if (ordinal === 'last') return tabOrder.at(-1) ?? null
   return tabOrder[ordinal - 1] ?? null
+}
+
+/**
+ * 从当前那张往前/往后一张，**到头回绕**。
+ *
+ * 为什么这里回绕、而上面 `tabIdForOrdinal` 明确不回绕：两者问的是不同的问题。绝对序号说的是
+ * 「去第 5 张」，没有第 5 张时回绕会跳到一个用户根本没指的位置；相对导航说的是「往后翻一张」，
+ * 而"最后一张的下一张是第一张"正是所有 Tab 界面的通行行为——不回绕会让末尾那张变成死胡同，
+ * 用户得改用鼠标或数字键才回得去。共用一个函数会强迫这两条规则之一让步。
+ *
+ * 当前 Tab 不在 `tabOrder` 里（刚被关掉、或活动项为 null）时，落点按方向取两端：往后一张给第一张，
+ * 往前一张给最后一张。**不能靠让 `indexOf` 的 -1 直接参与取模**——那样往前一张会算成 `length - 2`，
+ * 落到一张毫无道理的中间 Tab 上（三张时落第二张）。这里两端都是显式取的。
+ *
+ * 只有一张 Tab 时回绕到自己，于是这次按键什么也不改变——比返回 null 好，因为"只有一张"和
+ * "一张都没有"是两回事，后者才该什么都不做。
+ */
+export function tabIdForStep(
+  tabOrder: readonly string[],
+  activeTabId: string | null,
+  delta: 1 | -1
+): string | null {
+  if (tabOrder.length === 0) return null
+  const current = activeTabId === null ? -1 : tabOrder.indexOf(activeTabId)
+  if (current < 0) return delta === 1 ? tabOrder[0]! : tabOrder[tabOrder.length - 1]!
+  // 先加 length 再取模：JS 的 % 对负数给负数，0 - 1 得 -1 而不是 length - 1，直接取模会索引出 undefined。
+  return tabOrder[(current + delta + tabOrder.length) % tabOrder.length] ?? null
 }
 
 /**
@@ -193,6 +224,16 @@ export function dispatchWorkbenchCommand(
 
   if (command.kind === 'select-tab') {
     const tabId = tabIdForOrdinal(group.tabOrder, command.ordinal)
+    if (!tabId) return false
+    store.activateTab(workspaceId, group.id, tabId)
+    return true
+  }
+
+  if (command.kind === 'step-tab') {
+    // 与 select-tab 同一层：只要活动组，不需要活动 Tab 或 Region（下面那些命令才要）。落点从**投影后**的
+    // tabOrder 算，与序号切 Tab 同一份序——于是「往后一张」跳到的正是用户眼里挨着的下一张，而不是被
+    // Topic 过滤掉的某张。
+    const tabId = tabIdForStep(group.tabOrder, group.activeTabId, command.delta)
     if (!tabId) return false
     store.activateTab(workspaceId, group.id, tabId)
     return true

@@ -120,6 +120,17 @@ export async function runAgentHookCommand(): Promise<void> {
       process.env.HOOK_EVENT_NAME
     ) ?? null
 
+  // 门控决策必须先于**读 stdin** 写出，而不只是先于 POST。此前它在 stdin 读完之后（见下方原位置）：
+  // 一个超过 MAX_HOOK_INPUT_BYTES 的负载会在读循环里 throw，于是 stdout 一个字节都没写——而
+  // Antigravity 把空 stdout 读作 HARD DENY（见 hookResponseFor 头部注释），我们自己的体积上限就把
+  // 一个合法的工具调用变成了策略拒绝。大文件写、大粘贴的 PreToolUse 负载超 128KiB 是现实场景。
+  //
+  // 前移不改变任何一次输出，因为决策的两个输入都与 stdin 无关：provider 来自 env（resolveHookProvider），
+  // 事件名对唯一门控的那家恒来自 `--event` 旗标。这个前提是**判据**而不是注释里的担保——见
+  // test/agent-hook-command.test.ts 的 describe「门控决策先于读 stdin」，其中一条从 provider 注册表
+  // 算出哪些 Provider 是门控的（问 hookResponseFor 自己），再要求每一家的 eventNameSource 都是 flag。
+  process.stdout.write(hookResponseFor(resolveHookProvider(), flagEvent ?? envEvent))
+
   const chunks: Buffer[] = []
   let bytes = 0
   for await (const value of process.stdin) {
@@ -150,10 +161,6 @@ export async function runAgentHookCommand(): Promise<void> {
   const stdinEvent = resolveHookEventName(undefined, payload) ?? null
 
   const eventName = flagEvent ?? envEvent ?? stdinEvent
-
-  // Answer the invoking CLI with the provider-correct decision BEFORE the status relay, so a gate
-  // (Antigravity PreToolUse) never waits behind the network post's timeout.
-  process.stdout.write(hookResponseFor(resolveHookProvider(), eventName))
 
   const url = process.env.AGENTMUX_HOOK_URL
   const token = process.env.AGENTMUX_HOOK_TOKEN
