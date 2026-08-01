@@ -91,13 +91,14 @@ describe('store 只经由这个函数改失效计数', () => {
     )
   })
 
-  it('五个写入面都还在调它', () => {
+  it('八个写入面都还在调它', () => {
     // 数调用次数是刻意的：上面那条 not.toMatch 只证明「没有手抄」，
     // 把某个面的 bump 整行删掉同样能满足它——那正是漏 bump 的原样子。
-    // 五个面 = 保存 scratch 文档 / 建 topic / 改 topic 标题 / 建笔记 / 启动 scratch agent。
-    // 这条守不住「新增第六个面却忘了 bump」（没有任何文本判据能守住那个），
-    // 但守得住「已有的五个被悄悄拆掉一个」。
-    expect(store.split('bumpWorkspaceFileRevision(').length - 1).toBe(5)
+    // 八个面 = 保存 scratch 文档 / 建 topic / 改 topic 标题 / 建笔记 / 启动 scratch agent
+    //        + 建路径 / 改名 / 删路径（后三个是 FileExplorer 的写入面）。
+    // 这条守不住「新增第九个面却忘了 bump」（没有任何文本判据能守住那个），
+    // 但守得住「已有的八个被悄悄拆掉一个」。
+    expect(store.split('bumpWorkspaceFileRevision(').length - 1).toBe(8)
   })
 })
 
@@ -188,6 +189,63 @@ describe('每个写入面真的让目标 Workspace 的计数前进，且只动�
     scratchFixture()
     await useAppStore.getState().createNote()
     expect(revisions()[SCRATCH_WORKSPACE_ID]).toBe(TARGET_REVISION + 1)
+    expect(revisions().bystander).toBe(BYSTANDER_REVISION)
+  })
+
+  // -------------------------------------------------------------------------
+  // 文件树自己刷新，不代表别的读者也刷新了。
+  //
+  // `createPath` / `renamePath` / `deletePath` 三个 action 原先都不 bump，理由是一条**没写下来**
+  // 的不变量：FileExplorer 是它们唯一的调用方，而它在 `commitEdit` / `confirmDelete` / 移动之后
+  // 各自直接 `tree.refreshDir(parent)`。这条推理对文件树成立，对别的读者不成立——
+  // `SurfaceToolDock` 的 Topics 面板与 Board 的 `useScratchTopics` 都**只**认这个计数器
+  // （各自 effect 的依赖就是 `[fileRevision, workspace.id]`），文件树刷新它们看不见。
+  //
+  // 用户可见症状：在 Scratch 里右键一个 Topic 文件夹 → 删除（或选中按 ⌫）。树里那行消失了，
+  // 而 Topics 面板与 Board 上那个 Topic 一直在，直到某个无关写入面碰巧 bump 一次。而删文件夹
+  // **就是**删 Topic 的唯一途径：没有 `scratch.deleteTopic` API，dock 也没有删除按钮，且删除
+  // 入口对 Topic 目录刻意未设门槛（rename/move 都过 `canRenameFileExplorerNode`，删除不过）。
+  //
+  // 修法是让三个 action 都 bump，而不是给那条不变量补一段注释。理由是记忆
+  // `expired-reason-for-not-mapping`：「今天只有 FileExplorer 调它」是会过期的理由，而下一个
+  // 调用方（`git.discard` 已在 main 侧接好、renderer 侧还没有入口）不会回头读这段推理。
+  // 让前提消失比给前提写文档稳。多 bump 一次的代价是文件树多扫一遍，与静默显示鬼影不对等。
+  // -------------------------------------------------------------------------
+
+  it('删路径：目标 +1，旁观者不动——Topics 面板与 Board 只认这个计数器', async () => {
+    scratchFixture()
+    await useAppStore.getState().createPath({ path: 'doomed', kind: 'directory' })
+    const afterCreate = revisions()[SCRATCH_WORKSPACE_ID]!
+
+    await useAppStore.getState().deletePath('doomed')
+
+    expect(
+      revisions()[SCRATCH_WORKSPACE_ID],
+      '删除不 bump——Topics 面板与 Board 会一直显示已经删掉的 Topic'
+    ).toBe(afterCreate + 1)
+    expect(revisions().bystander).toBe(BYSTANDER_REVISION)
+  })
+
+  it('建路径：目标 +1，旁观者不动', async () => {
+    // `createNote` 那条走的是它自己那行 `api.files.create`（刻意绕开 createPath，见其注释），
+    // 所以它绿不能证明这一条。FileExplorer 的「新建文件/文件夹」走的才是这里。
+    scratchFixture()
+    await useAppStore.getState().createPath({ path: 'fresh.md', kind: 'file' })
+    expect(revisions()[SCRATCH_WORKSPACE_ID], '新建不 bump').toBe(TARGET_REVISION + 1)
+    expect(revisions().bystander).toBe(BYSTANDER_REVISION)
+  })
+
+  it('改名：目标 +1，旁观者不动——Topic 正文被移走就不再是 Topic 了', async () => {
+    // `canRenameFileExplorerNode` 只挡顶层的 Topic **目录**；目录**里面**的文件（含 `topic.md`）
+    // 照旧可改名/可移动。把 `topic.md` 移走就破坏了 Topic 身份（`isScratchTopicDocument` 要求
+    // 文件名恰好是它），而面板不会重扫。
+    scratchFixture()
+    await useAppStore.getState().createPath({ path: 'before.md', kind: 'file' })
+    const afterCreate = revisions()[SCRATCH_WORKSPACE_ID]!
+
+    await useAppStore.getState().renamePath('before.md', 'after.md')
+
+    expect(revisions()[SCRATCH_WORKSPACE_ID], '改名不 bump').toBe(afterCreate + 1)
     expect(revisions().bystander).toBe(BYSTANDER_REVISION)
   })
 })
