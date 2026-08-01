@@ -4,6 +4,7 @@ import {
   HOOK_PAYLOAD_USAGE_KEY,
   readTurnUsageFromTranscript
 } from './agent-usage-transcript.js'
+import { rawEventNamesForLifecycle, resolveHookEventName } from './agent-hook-event.js'
 import type { AgentUsageCapability } from './types.js'
 
 const MAX_HOOK_INPUT_BYTES = 128 * 1024
@@ -13,11 +14,17 @@ const MAX_HOOK_INPUT_BYTES = 128 * 1024
  * 在别的事件（工具前后、prompt 提交）上读 transcript 既读不到本 turn 终值，也白白多一次 IO，
  * 所以用量抽取只挂在收尾事件上，这也是「开销可忽略」的一半。
  *
+ * **从 canonical 生命周期表派生**，不再手写字面量。此前这里硬编码 `['Stop','StopFailure']`——只有
+ * PascalCase 的两家命中，Hermes 的 `on_session_end`/`post_llm_call` 与 Pi 的 `agent_end`/`agent_settled`
+ * 同样是 turn 收尾却永远读不到用量。派生保证「新增一个 Provider 的收尾事件」只需在映射表里加一行。
+ *
  * 导出为 SSOT：client.ts 的会话侧要用同一份集合判定「这是收尾事件却没抽到用量」——那种情况必须
  * 清掉上一轮的 turnUsage，绝不让陈旧数字挂在「Last turn」标签下（读 transcript 失败/竞态截断/记录
  * 落在 256KiB 窗口外都会命中这条）。两侧共用一个集合，才不会一处新增收尾事件、另一处忘了跟。
  */
-export const USAGE_FINALIZATION_EVENTS = new Set(['Stop', 'StopFailure'])
+export const USAGE_FINALIZATION_EVENTS: ReadonlySet<string> = new Set(
+  rawEventNamesForLifecycle('turn-end')
+)
 
 /**
  * 从 hook 环境读出这个 Provider 声明的 usage transcript 格式。
@@ -44,10 +51,19 @@ function parseEventFromArgv(): string | null {
   const args = process.argv.slice(2)
   for (let i = 0; i < args.length; i += 1) {
     if (args[i] === '--event' && i + 1 < args.length) {
-      return args[i + 1] ?? null
+      return firstNonEmpty(args[i + 1]) ?? null
     }
   }
   return null
+}
+
+/** 取第一个真有内容的值——空串与纯空白读作「没给」。 */
+function firstNonEmpty(...values: Array<string | undefined>): string | undefined {
+  for (const value of values) {
+    const trimmed = value?.trim()
+    if (trimmed) return trimmed
+  }
+  return undefined
 }
 
 /**
@@ -94,11 +110,15 @@ export function hookResponseFor(provider: string | null, eventName: string | nul
 
 export async function runAgentHookCommand(): Promise<void> {
   const flagEvent = parseEventFromArgv()
+  // 空串/纯空白的环境变量读作「没设」，不是「事件名是空串」。`??` 只挡 null/undefined，于是一个
+  // 存在但为空的 AGENTMUX_HOOK_EVENT 会顶掉后面所有来源、把事件名定成空串——`eventName` falsy
+  // 会让整段 POST 被跳过（见下方 `if (url && token && eventName)`），状态与用量双双静默丢失。
   const envEvent =
-    process.env.AGENTMUX_ANTIGRAVITY_EVENT ??
-    process.env.AGENTMUX_HOOK_EVENT ??
-    process.env.HOOK_EVENT_NAME ??
-    null
+    firstNonEmpty(
+      process.env.AGENTMUX_ANTIGRAVITY_EVENT,
+      process.env.AGENTMUX_HOOK_EVENT,
+      process.env.HOOK_EVENT_NAME
+    ) ?? null
 
   const chunks: Buffer[] = []
   let bytes = 0
@@ -124,12 +144,10 @@ export async function runAgentHookCommand(): Promise<void> {
     }
   }
 
-  const stdinEvent =
-    typeof payload.hook_event_name === 'string'
-      ? payload.hook_event_name
-      : typeof payload.eventName === 'string'
-        ? payload.eventName
-        : null
+  // 负载里的事件名按 Core 的同一份键顺序读取（`hook_event_name` / `hookEventName` / `eventName`）。
+  // 此前这里只认前者与 `eventName`，漏掉 `hookEventName`——normalizer 认得出的事件，这个子进程却
+  // 读成 null，于是既不抽用量、POST 也被整条跳过。现在两侧共用 agent-hook-event.ts 那一份。
+  const stdinEvent = resolveHookEventName(undefined, payload) ?? null
 
   const eventName = flagEvent ?? envEvent ?? stdinEvent
 

@@ -225,6 +225,92 @@ describe('native hook normalization', () => {
       const items = applyAgentTimelineMutation([], event.timeline[0]!)
       expect(items[0]).toMatchObject({ toolOutput: 'boom', status: 'failed' })
     })
+
+    /**
+     * snake_case 的 Provider 也必须分得出成败——这是「事件名归一化」真正兑现的地方。
+     *
+     * 此前判据是 `eventName.startsWith('Post')`，只对 PascalCase 成立。Hermes 的 `post_tool_call`
+     * 与 Pi 的 `tool_execution_end` 都读不出结果：两家都声明了 `timeline: 'complete-events'`，
+     * 可一条失败的命令和一条成功的命令在时间轴上长得**一模一样**。归一化把判据换成 canonical
+     * 的 `tool-use-end`，这几条就是它兑现的证据——把映射表里那两行删掉，这里立刻发红。
+     */
+    it('Hermes 的 post_tool_call 带得出结果与失败态，不再因命名法被判成事前', () => {
+      const hermes = (payload: Record<string, unknown>, eventName: string) =>
+        providers.get('hermes').normalizeHook({
+          receiptId: `receipt-hermes-${eventName}`,
+          agentSessionId: 'semantic-hermes',
+          runId: 'run-hermes',
+          providerId: 'hermes',
+          eventName,
+          payload
+        })
+
+      const failed = hermes({
+        tool_name: 'shell',
+        tool_input: { command: 'exit 1' },
+        tool_response: { is_error: true, stderr: 'boom' }
+      }, 'post_tool_call')
+      const succeeded = hermes({
+        tool_name: 'shell',
+        tool_input: { command: 'exit 0' },
+        tool_response: 'ok'
+      }, 'post_tool_call')
+
+      expect(failed.lifecycleEvent).toBe('tool-use-end')
+      const failedItem = item(failed as ReturnType<typeof post>)
+      const okItem = item(succeeded as ReturnType<typeof post>)
+      expect(failedItem.status).toBe('failed')
+      expect(okItem.status).toBe('complete')
+      expect(failedItem.status).not.toBe(okItem.status)
+      expect(okItem.toolOutput).toBe('ok')
+
+      // 事前那条照旧不采结果：归一化没有把「所有 snake_case 都当事后」。
+      const before = hermes({
+        tool_name: 'shell',
+        tool_input: { command: 'ls' },
+        tool_response: { is_error: true }
+      }, 'pre_tool_call')
+      expect(before.lifecycleEvent).toBe('tool-use-start')
+      expect(item(before as ReturnType<typeof post>).toolOutput).toBeUndefined()
+    })
+
+    it('Pi 的 tool_execution_end 同样带得出结果——判据是生命周期而非名字形状', () => {
+      const pi = (payload: Record<string, unknown>, eventName: string) =>
+        providers.get('pi').normalizeHook({
+          receiptId: `receipt-pi-${eventName}`,
+          agentSessionId: 'semantic-pi',
+          runId: 'run-pi-tool',
+          providerId: 'pi',
+          eventName,
+          payload
+        })
+
+      const failed = pi({
+        tool_name: 'bash',
+        tool_input: { command: 'exit 2' },
+        tool_response: { is_error: true, stderr: 'nope' }
+      }, 'tool_execution_end')
+      expect(failed.lifecycleEvent).toBe('tool-use-end')
+      expect(item(failed as ReturnType<typeof post>).status).toBe('failed')
+
+      const started = pi({ tool_name: 'bash', tool_input: { command: 'ls' } }, 'tool_execution_start')
+      expect(started.lifecycleEvent).toBe('tool-use-start')
+    })
+
+    it('Antigravity 的 PostInvocation 不是工具结果，尽管它以 Post 开头', () => {
+      // 形状推理在这里答错：PostInvocation 是一次调用的外层收尾，不是一次工具调用的结果。
+      const event = providers.get('antigravity').normalizeHook({
+        receiptId: 'receipt-agy-postinv',
+        agentSessionId: 'semantic-agy',
+        runId: 'run-agy-postinv',
+        providerId: 'antigravity',
+        eventName: 'PostInvocation',
+        payload: { tool_name: 'browser', tool_input: { url: 'x' }, tool_response: { is_error: true } }
+      })
+      expect(event.lifecycleEvent).toBeUndefined()
+      // 没有 canonical 依据就不宣称「已经有结果了」——结果字段不被采信。
+      expect(item(event as ReturnType<typeof post>).toolOutput).toBeUndefined()
+    })
   })
 
   /**

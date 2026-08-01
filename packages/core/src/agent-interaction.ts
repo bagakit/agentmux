@@ -1,4 +1,5 @@
 import { AgentMuxError } from './errors.js'
+import { resolveHookEventName } from './agent-hook-event.js'
 import type {
   AgentMuxInteractionInputPlan,
   AgentMuxInteractionRequest,
@@ -261,9 +262,10 @@ export function normalizeTerminalInteraction(
   protocol: AgentTerminalInteractionDetection
 ): AgentMuxInteractionRequest | undefined {
   const payload = envelope.payload ?? {}
-  const eventName = envelope.eventName
-    ?? boundedText(payload.hook_event_name)
-    ?? boundedText(payload.hookEventName)
+  // 事件名按 Core 的同一份键顺序读取。此前这里只认 `hook_event_name`/`hookEventName`，漏掉裸
+  // `eventName`——一个只在负载里给 `eventName` 的 Provider，它的 permission/question 提问永远
+  // 检测不到。三个读取点（这里、normalizer、hook 子进程）现在共用 agent-hook-event.ts 那一份。
+  const eventName = resolveHookEventName(envelope.eventName, payload)
   const toolName = boundedText(payload.tool_name) ?? boundedText(payload.toolName)
   if (
     eventName &&
