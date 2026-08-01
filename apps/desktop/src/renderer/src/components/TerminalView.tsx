@@ -31,7 +31,7 @@ import {
 } from '../lib/terminal-kitty-keyboard'
 import {
   DEFAULT_TERMINAL_SEARCH_TOGGLES,
-  runTerminalSearch,
+  searchTerminalFromSurface,
   toggleTerminalSearch,
   type TerminalSearchToggles
 } from '../lib/terminal-search'
@@ -801,14 +801,23 @@ export function TerminalView({
   // 而这个自由在测试里够不着——把某一条路径的 toggles 换成默认值，30 条断言一条都不会红
   // （第一轮 review 实测如此）。参数没有默认值，漏传就编译不过，于是"传错开关"这种事
   // 从运行期缺陷降级成编译期错误。
+  //
+  // 函数体只剩转发。此前它自己取 addon、调 runTerminalSearch、接 notice——那三步长在组件里，
+  // 只有源码文本断言够得着，而文本断言看不见"这一行有没有被执行到"：在这里插一句早退，
+  // 搜索四条通路对用户全部失效而 40 条断言全绿（实测）。现在那三步在
+  // lib/terminal-search.ts 的 searchTerminalFromSurface 里，跑得到、断言得着。
   function searchWith(
     query: string,
     toggles: TerminalSearchToggles,
     previous = false
   ): void {
-    const addon = searchAddonRef.current
-    if (!addon) return
-    setSearchNotice(runTerminalSearch(addon, query, toggles, previous ? 'previous' : 'next').notice)
+    searchTerminalFromSurface({
+      addon: searchAddonRef.current,
+      query,
+      toggles,
+      direction: previous ? 'previous' : 'next',
+      showNotice: setSearchNotice
+    })
   }
 
   const startupPhase = terminalStartupPhase({

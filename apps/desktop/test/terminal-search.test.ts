@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import {
   DEFAULT_TERMINAL_SEARCH_TOGGLES,
   runTerminalSearch,
+  searchTerminalFromSurface,
   toggleTerminalSearch,
   type TerminalSearchToggles
 } from '../src/renderer/src/lib/terminal-search.js'
@@ -292,8 +293,25 @@ describe('搜索面板把三个开关露出来', () => {
       expect(args).toMatch(/\b(searchToggles|next)\b/)
       expect(args).not.toContain('DEFAULT_TERMINAL_SEARCH_TOGGLES')
     }
-    // 那个会读 state 的便捷包装不能回来。
-    expect(code).not.toContain('function searchTerminal')
+    // 那个会读 state 的便捷包装不能回来（精确到函数声明的形状：`searchTerminalFromSurface`
+    // 是 lib 里那个显式收参的转发出口，不是这个陷阱，别把它一起误伤）。
+    expect(code).not.toMatch(/function searchTerminal\s*\(/)
+
+    // 而 searchWith 的函数体必须**只有转发这一句**，别的什么都不许有。
+    //
+    // 这条比"含有 searchTerminalFromSurface"严得多，因为它守的是那个真正的盲点：本仓跑不到
+    // 组件的渲染体，所以"这层壳有没有被执行到"没有任何断言够得着——在 searchWith 第一行插
+    // 一句 `if (query !== undefined) return`，搜索四条通路（打字、Enter、上一个/下一个、
+    // 点开关）对用户全部失效，而 40 条断言全绿。搬进 lib 只让**内容**可测，壳自身照旧。
+    //
+    // 能守的是让这层壳退化成"没有地方可插"：函数体恰好是一个转发语句，多一行就红。
+    // 判据不是行数（换行会假红），是「去掉注释后，整个函数体就是那一次调用」。
+    const body = code.slice(code.indexOf('function searchWith'))
+    const searchWithBody = body.slice(body.indexOf('{', body.indexOf('): void')) + 1, body.indexOf('\n  }'))
+    expect(
+      searchWithBody.trim(),
+      'searchWith 里出现了转发以外的语句——那一层跑不到，插进去的东西没有任何断言够得着'
+    ).toMatch(/^searchTerminalFromSurface\(\{[\s\S]*\}\)$/)
   })
 
   it('提示的 live region 常驻，只换里面的文字', () => {
@@ -305,11 +323,70 @@ describe('搜索面板把三个开关露出来', () => {
   })
 
   it('提示由 runTerminalSearch 的结果驱动，不由组件自己判', () => {
-    // 断言 notice 真的被**接到 state 上**。只断言出现过 `setSearchNotice(` 是不够的：
-    // closeSearch 里也有一个，于是把搜索这条路径的 notice 整个丢掉仍然是绿的（实测会存活）。
-    expect(view).toMatch(
-      /setSearchNotice\(\s*runTerminalSearch\(addon, query, toggles[^)]*\)[^)]*\.notice\s*\)/
-    )
+    // 从 UI 发起那一步现在是 searchTerminalFromSurface，跑得到，所以判据落在**行为**上而不是
+    // 那行代码长什么样。此前这里是一条 toMatch 文本断言，而文本看不见"这一行有没有被执行到"：
+    // 在 searchWith 第一行插一句早退，搜索四条通路（打字、Enter、上一个/下一个、点开关）
+    // 对用户全部失效，40 条断言全绿（实测）。
+    const addon = fakeAddon()
+    const notices: Array<string | undefined> = []
+
+    // 正则打到一半：不发起搜索，但要如实说明这次没搜。
+    searchTerminalFromSurface({
+      addon,
+      query: '[warn',
+      toggles: { ...ALL_ON, regex: true },
+      direction: 'next',
+      showNotice: (notice) => notices.push(notice)
+    })
+    expect(addon.findNext).not.toHaveBeenCalled()
+    expect(notices).toEqual(['Incomplete regular expression'])
+
+    // 打完了：真发起，且把上一轮的提示清掉——留着它用户会以为这次也没搜。
+    searchTerminalFromSurface({
+      addon,
+      query: '[warn]',
+      toggles: { ...ALL_ON, regex: true },
+      direction: 'next',
+      showNotice: (notice) => notices.push(notice)
+    })
+    expect(addon.findNext).toHaveBeenCalledTimes(1)
+    expect(notices).toEqual(['Incomplete regular expression', undefined])
+  })
+
+  it('方向与开关原样转发，不在这一层被改写', () => {
+    // 这一层只是转发，所以它唯一会坏的方式就是转发错：把 previous 丢了（上一个变下一个）、
+    // 或把开关换成默认值（用户点了却什么也不变）。两者都在这里定死。
+    const addon = fakeAddon()
+    searchTerminalFromSurface({
+      addon,
+      query: 'needle',
+      toggles: ALL_ON,
+      direction: 'previous',
+      showNotice: () => {}
+    })
+
+    expect(addon.findNext).not.toHaveBeenCalled()
+    expect(addon.findPrevious).toHaveBeenCalledTimes(1)
+    expect(optionsSentTo(addon, true)).toMatchObject({
+      caseSensitive: true,
+      regex: true,
+      wholeWord: true
+    })
+  })
+
+  it('addon 还没挂上时一步都不发生，也不留下提示', () => {
+    // 面板刚开、addon 未就绪时按了快捷键——那不是缺陷，但此刻既不许搜，也不许写一句
+    // 针对上一轮的提示上去。`showNotice` 一次都不许被调，否则会把界面的提示清成空
+    // （或写成别的），而实际上什么都没发生。
+    const showNotice = vi.fn()
+    searchTerminalFromSurface({
+      addon: null,
+      query: 'needle',
+      toggles: ALL_ON,
+      direction: 'next',
+      showNotice
+    })
+    expect(showNotice).not.toHaveBeenCalled()
   })
 
   it('关掉面板时清掉提示', () => {

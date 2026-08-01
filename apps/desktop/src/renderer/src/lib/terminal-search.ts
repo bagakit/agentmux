@@ -121,3 +121,31 @@ export function toggleTerminalSearch(
 ): TerminalSearchToggles {
   return { ...toggles, [key]: !toggles[key] }
 }
+
+/**
+ * 从 UI 那一侧发起一次搜索：取 addon、跑一步、把提示接回界面。
+ *
+ * `runTerminalSearch` 测得很足，但组件里那层薄壳此前无人守：它长在 TerminalView 内部，
+ * 只能靠源码文本断言够得着。文本断言看得见"这一行写着 setSearchNotice(runTerminalSearch(...))"，
+ * **看不见这行有没有被执行到**——在函数第一行插一句早退，搜索的四条通路（打字、Enter、
+ * 上一个/下一个、点开关）对用户全部失效，而 40 条相关断言全绿（实测）。
+ *
+ * 所以这层也收进来，让它真跑得到。addon 取 null 时不是缺陷（面板还没挂上就按了快捷键），
+ * 但那时一步都不许发生，也不许留下上一轮的提示。
+ *
+ * 但**搬进来只解决一半**：内容变可测了，"组件那层壳有没有被执行到"照旧没人守——实测过，
+ * 搬完之后在 `searchWith` 第一行再插一次早退，仍然 37 条全绿。补上的那一半在测试侧：
+ * 断言那层壳的函数体**恰好只有转发这一句**，插进任何一行都红。
+ */
+export function searchTerminalFromSurface(input: {
+  addon: Pick<SearchAddon, 'findNext' | 'findPrevious' | 'clearDecorations'> | null
+  query: string
+  toggles: TerminalSearchToggles
+  direction: 'next' | 'previous'
+  showNotice: (notice: string | undefined) => void
+}): void {
+  if (!input.addon) return
+  input.showNotice(
+    runTerminalSearch(input.addon, input.query, input.toggles, input.direction).notice
+  )
+}
