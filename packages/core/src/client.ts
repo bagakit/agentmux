@@ -1638,6 +1638,23 @@ export class AgentMuxClient {
         current.providerId,
         hookBindingIdentity(lifecycleOperationId)
       )
+      // resume 换新 Run 就换新凭证（见下面 `hookToken` 那行），所以把**投递代码写进文件**的
+      // Provider 必须在这里重装：opencode 的插件里 URL 与 token 是写盘时内联的字面量，磁盘上
+      // 那份仍拿着刚被 delete 掉的旧 token，而 ingress 对认不出的 token 一律 403
+      // （hook-server.ts 的 `if (!binding) respond(403)`）。少了这一次重装，resume 之后
+      // OpenCode 的每条状态事件都被静默拒收：Agent 永远不 done、完成通知永不触发，且没有
+      // 任何报错——插件"装着"，只是每条都 403。
+      //
+      // 对写命令的那九家是幂等 no-op（内容不含 token，`ensure` 见 hash 相同便不碰盘），
+      // 对 pi 也是（它运行时从自己进程的环境变量取值，token 一个字节都不落盘）。
+      await this.ensureManagedHooks(
+        provider,
+        current.providerId,
+        current.workspacePath,
+        current.agentSessionId,
+        input.env ?? {},
+        hookBinding.endpoint
+      )
       const run = await this.kernel.start({
         operationKey: lifecycleOperationId,
         program: plan.command,
