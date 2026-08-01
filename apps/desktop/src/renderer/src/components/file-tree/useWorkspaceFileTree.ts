@@ -38,7 +38,6 @@ export function flattenFileTree(
 
 export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<string>) {
   const [dirCache, setDirCache] = useState<Record<string, DirCache>>({})
-  const [rootError, setRootError] = useState<string | null>(null)
   const cacheRef = useRef(dirCache)
   const loadTrackerRef = useRef(createFileExplorerDirLoadTracker())
   const staleDirsRef = useRef(new Set<string>())
@@ -59,8 +58,9 @@ export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<
       setDirCache((previous) => ({
         ...previous,
         // Force refresh retains the old children so the tree does not collapse
-        // while Local or SSH is answering.
-        [path]: { children: previous[path]?.children ?? [], loading: true }
+        // while Local or SSH is answering.  The previous error is dropped here on
+        // purpose: a read that is in flight is not a read that has failed.
+        [path]: { children: previous[path]?.children ?? [], loading: true, error: null }
       }))
       try {
         const entries = await api.files.readDirectory(workspaceId, path)
@@ -71,15 +71,20 @@ export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<
           depth: pathDepth(path) + 1
         }))
         staleDirsRef.current.delete(path)
-        if (!path) setRootError(null)
-        setDirCache((previous) => ({ ...previous, [path]: { children, loading: false } }))
+        setDirCache((previous) => ({
+          ...previous,
+          [path]: { children, loading: false, error: null }
+        }))
         return true
       } catch (error) {
         if (!loadTrackerRef.current.isCurrent(token)) return false
-        if (!path) setRootError(error instanceof Error ? error.message : String(error))
+        const reason = error instanceof Error ? error.message : String(error)
         setDirCache((previous) => ({
           ...previous,
-          [path]: { children: previous[path]?.children ?? [], loading: false }
+          // 子目录的失败此前在这里被完全丢弃（只有根目录进一个独立的 rootError state），于是读失败
+          // 与真的空目录在 cache 里逐字同形，树上都画成一个展开的空文件夹。原因记进 cache，让
+          // presentExpandedDir 能把两者分开；根目录的错误也从这一处派生，不再有第二个写者。
+          [path]: { children: previous[path]?.children ?? [], loading: false, error: reason }
         }))
         return !options?.failOnError
       }
@@ -98,7 +103,6 @@ export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<
     // previous Workspace's loaded/loading entries.
     cacheRef.current = {}
     setDirCache({})
-    setRootError(null)
     void loadDir('', { force: true })
   }, [loadDir, loadScope])
 
@@ -140,7 +144,8 @@ export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<
   return {
     dirCache,
     rootCache: dirCache[''],
-    rootError,
+    // 根目录的错误从 cache 派生，而不是另存一份 state：它与子目录的错误是同一件事，两个写者必漂移。
+    rootError: dirCache['']?.error ?? null,
     loadDir,
     refreshDir,
     refreshTree,

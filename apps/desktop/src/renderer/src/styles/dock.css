@@ -294,6 +294,9 @@
 }
 .tree-row__disclosure { width: 14px; height: 22px; display: inline-flex; align-items: center; justify-content: center; padding:0; color: var(--text-3); }
 .tree-row__icon { display: inline-flex; align-items: center; justify-content: center; color: var(--green-text); }
+/* 读失败的目录：与真的空目录必须一眼分得开。颜色与 .tree-empty--error 同源。 */
+.tree-row--load-failed .tree-row__icon { color: var(--red-text); }
+.tree-row--load-failed .tree-row__label { color: var(--red-text); }
 .tree-row__label { min-width: 0; padding:0 var(--sp-1); overflow: hidden; font-size: var(--fs-micro); text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: default; }
 .tree-row__badge { padding:1px var(--sp-2); border-radius: var(--radius-sm); color: var(--blue); background: var(--surface-2); font-size: var(--fs-micro); text-transform: uppercase; }
 .tree-row__dirty { width: 6px; height: 6px; flex: none; margin-left:auto; border-radius: 50%; background: var(--amber); box-shadow: 0 0 0 2px var(--amber-wash); }
