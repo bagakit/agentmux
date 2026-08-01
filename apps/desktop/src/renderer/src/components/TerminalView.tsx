@@ -52,6 +52,7 @@ import { terminalStartupPhase } from '../lib/terminal-startup'
 import {
   TERMINAL_REVEAL_DEADLINE_MS,
   terminalAcceptsInput,
+  terminalInputSender,
   terminalRevealDecision,
   terminalRevealServiceOutcome
 } from '../lib/terminal-reveal'
@@ -547,20 +548,25 @@ export function TerminalView({
     const resize = new ResizeObserver(() => viewport.observeViewport())
     resize.observe(root)
     /**
-     * 输入是否可以送出。三条输入通路（onData、OSC 回复、Shift+Enter）共用这一处判定——
-     * 少卡一条就等于没卡，用户总会找到那一条。判定本身在 lib/terminal-reveal.ts 被断言。
+     * 输入的唯一出口。三条通路（onData、OSC 回复、Shift+Enter）都送进这里——
+     * 少卡一条就等于没卡，用户总会找到那一条。
+     *
+     * 闸不写在这里：`terminalInputSender` 把「判定 + 送出」一起收在 lib 里，所以这个组件里
+     * 没有一个可以写反的 `if`。此前三处各写一个 `if (acceptsInputNow())`，把它们一起取反
+     * 76 条断言全绿——文本守卫数得出闸的**个数**，数不出**极性**。
      */
-    const acceptsInputNow = (): boolean =>
-      terminalAcceptsInput({
-        canControlRun: canControlRunRef.current,
-        acceptsInput: acceptsInputRef.current,
-        liveReady: readyForLiveOutput
-      })
-    const input = terminal.onData((data) => {
-      if (acceptsInputNow()) {
+    const sendInput = terminalInputSender({
+      accepts: () =>
+        terminalAcceptsInput({
+          canControlRun: canControlRunRef.current,
+          acceptsInput: acceptsInputRef.current,
+          liveReady: readyForLiveOutput
+        }),
+      write: (data) => {
         void api.sessions.write(session.control, data)
       }
     })
+    const input = terminal.onData(sendInput)
     const selection = terminal.onSelectionChange(() => {
       const text = terminal.getSelection()
       if (text) rememberedSelectionRef.current = text
@@ -569,21 +575,14 @@ export function TerminalView({
     const colorQuerySuppression = installTerminalColorQueryReplyHandlers(terminal, {
       isReplaying: () => !readyForLiveOutput,
       respondFromRenderer: session.kind === 'terminal',
-      sendInput: (data) => {
-        if (acceptsInputNow()) {
-          void api.sessions.write(session.control, data)
-        }
-      }
+      sendInput
     })
     terminal.attachCustomKeyEventHandler((event) => {
       if (isShiftEnterNewline(event)) {
         // xterm 对 Enter 与 Shift+Enter 送同一个裸 \r（终端线路上没有表达修饰键的位置），
         // 下游 TUI 因此只能把 Shift+Enter 读成提交，用户写不了多行。这里显式送出不同的字节。
-        if (event.type === 'keydown' && acceptsInputNow()) {
-          void api.sessions.write(
-            session.control,
-            shiftEnterInput(isKittyKeyboardActive(kittyKeyboard))
-          )
+        if (event.type === 'keydown') {
+          sendInput(shiftEnterInput(isKittyKeyboardActive(kittyKeyboard)))
         }
         return false
       }

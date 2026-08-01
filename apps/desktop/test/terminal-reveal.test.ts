@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import {
   TERMINAL_REVEAL_DEADLINE_MS,
   terminalAcceptsInput,
+  terminalInputSender,
   terminalRevealDecision,
   terminalRevealServiceOutcome
 } from '../src/renderer/src/lib/terminal-reveal.js'
@@ -175,26 +176,77 @@ describe('揭示了不等于输入通了', () => {
     )
     expect(blocked).toEqual([false, false, false])
   })
+
+  it('闸的极性真的跑得到：不收输入时一个字节都不许送出', () => {
+    // 判定是纯函数不等于**用法**被守住。此前三条通路各写一个 `if (acceptsInputNow())` 在
+    // attach effect 里，而本仓跑不了 effect，只有源码文本守卫够得着——它数得出闸的个数，
+    // 数不出极性：三处一起改成 `if (!...)`，76 条相关断言全绿（实测）。而那是「每次击键都丢，
+    // 且不该送的时候反而送」，用户侧等于键盘彻底哑掉。
+    //
+    // 所以送出这一步收进了 terminalInputSender：极性于是落在这里，跑得到、断言得着。
+    const sent: string[] = []
+    const open = terminalInputSender({ accepts: () => true, write: (data) => sent.push(data) })
+    const shut = terminalInputSender({ accepts: () => false, write: (data) => sent.push(data) })
+
+    open('a')
+    shut('b')
+    expect(sent).toEqual(['a'])
+  })
+
+  it('每次送出都重新问一遍，不缓存开闸那一刻的答案', () => {
+    // 闸的三个输入都是 ref/state，会在 attachment 生命周期里翻转。若 sender 在构造时把
+    // accepts() 的结果存下来，交接完成前建立的那个 sender 会永远拒收——终端从此哑到重挂载。
+    let accepts = false
+    const sent: string[] = []
+    const send = terminalInputSender({ accepts: () => accepts, write: (data) => sent.push(data) })
+
+    send('before')
+    accepts = true
+    send('after')
+    accepts = false
+    send('closed-again')
+    expect(sent).toEqual(['after'])
+  })
 })
 
 /**
- * 三条输入通路共用同一处判定。
+ * 三条输入通路共用同一个出口。
  *
- * 只能用源码断言守住——它们长在 attach effect 里，本仓跑不了 effect。少卡一条就等于没卡：
- * 用户总会找到那一条，而"有两条卡住了"在体验上与"一条都没卡"没有区别。
+ * 这一族只能用源码断言守住——它们长在 attach effect 里，本仓跑不了 effect。但守的东西换了：
+ * 不再数"每处 write 前面有没有闸"（数得出个数、数不出极性，三处一起取反曾 76 条全绿），
+ * 而是守"组件里根本没有第二个 write，也没有可以写反的 if"——闸与送出一起收在
+ * terminalInputSender 里，极性由上面那两条真跑的断言守。
  */
-describe('输入卡口三条通路一致', () => {
+describe('输入只有一个出口', () => {
   const terminalView = readFileSync(
     new URL('../src/renderer/src/components/TerminalView.tsx', import.meta.url),
     'utf8'
   )
 
-  it('每一处 api.sessions.write 都在同一个判定之后', () => {
-    // 输入通路的数量会随功能增长，所以断言的是"每一处都过了闸"，不是"恰好有三处"。
+  it('整个组件只有一处 api.sessions.write，就在那个 sender 里', () => {
+    // 一处以上就意味着有一条通路绕过了 sender——而绕过的那条不会被任何断言够得着。
     const writes = [...terminalView.matchAll(/api\.sessions\.write\(/g)]
-    expect(writes.length).toBeGreaterThanOrEqual(3)
-    const gates = [...terminalView.matchAll(/acceptsInputNow\(\)/g)]
-    expect(gates.length).toBeGreaterThanOrEqual(writes.length)
+    expect(writes.length, '出现了第二个写入点，它绕过了带闸的 sender').toBe(1)
+    const sender = terminalView.slice(
+      terminalView.indexOf('const sendInput = terminalInputSender({')
+    )
+    expect(
+      sender.slice(0, sender.indexOf('\n    })')),
+      '唯一那处 write 不在 sender 里'
+    ).toContain('api.sessions.write(')
+  })
+
+  it('组件里不再自己写闸——没有 if 可以取反', () => {
+    // 判定与送出一起在 lib 里，组件只提供三个取值。任何一处 `if (accepts...)` 回到组件里，
+    // 就等于把"极性没人守"这个洞装回去。
+    const code = terminalView.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+    expect(code).not.toMatch(/if\s*\(!?\s*acceptsInputNow\(\)/)
+    expect(code).toContain('terminalInputSender({')
+    // 三条通路都送进那一个出口，各自钉住自己的形状（宽松的 `/sendInput/` 会被任意一处满足，
+    // 于是"某条通路没接上"照旧全绿）。
+    expect(code, 'onData 没接到 sender').toContain('terminal.onData(sendInput)')
+    expect(code, 'Shift+Enter 没接到 sender').toMatch(/sendInput\(shiftEnterInput\(/)
+    expect(code, 'OSC 回复没接到 sender').toMatch(/sendInput\s*\n\s*\}\)/)
   })
 
   it('判定走共享纯函数，不在组件里各写一遍布尔表达式', () => {
