@@ -13,6 +13,10 @@ const candidates = readFileSync(
   new URL('../src/renderer/src/lib/surface-memory-budget-candidates.ts', import.meta.url),
   'utf8'
 )
+const navigation = readFileSync(
+  new URL('../src/renderer/src/lib/surface-navigation-visibility.ts', import.meta.url),
+  'utf8'
+)
 const app = readFileSync(new URL('../src/renderer/src/App.tsx', import.meta.url), 'utf8')
 const workbench = readFileSync(
   new URL('../src/renderer/src/components/WorkspaceWorkbench.tsx', import.meta.url),
@@ -35,7 +39,10 @@ describe('Browser/Monaco surface budget wiring', () => {
   it('scans non-empty policy and production sources', () => {
     expect(policy.length).toBeGreaterThan(5_000)
     expect(coordinator.length).toBeGreaterThan(7_000)
-    expect(candidates.length).toBeGreaterThan(4_000)
+    // 在屏判定被抽到 surface-navigation-visibility 之后，这个数按**两个文件之和**判：那次抽取把
+    // 约 1.4KB 从候选收集器搬到了兄弟文件里，字节并没有消失。只把地板调低会让这道自检对
+    // 「候选收集器被整段掏空、逻辑没搬到任何地方」重新失明——它守的本来就是「扫到的不是空文件」。
+    expect(candidates.length + navigation.length).toBeGreaterThan(4_000)
     expect(workbench.length).toBeGreaterThan(10_000)
   })
 
