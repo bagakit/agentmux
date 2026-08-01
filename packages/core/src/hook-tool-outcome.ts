@@ -36,11 +36,17 @@ const TRUNCATION_MARKER = '\n[output truncated]'
 /**
  * 各家 Provider 放结果的字段名。
  *
- * Claude 的 `PostToolUse` 给 `tool_response`；Cursor 给 `tool_output`；其余是同族命名变体。
- * 顺序即优先级，取第一个能读出内容的。
+ * Claude 的 `PostToolUse` 给 `tool_response`；Cursor 给 `tool_output`；Hermes 的 `post_tool_call`
+ * 给 `result`（本机 `agent/shell_hooks.py` 逐字："result – tool return value (serialised string)"）；
+ * 其余是同族命名变体。顺序即优先级，取第一个能读出内容的。
+ *
+ * `result` 此前在 `STATUS_KEYS` 里被当作**成败标签**——那没有任何 Provider 证据支持，也没有测试守着，
+ * 而 Hermes 的证据说它是正文。留在成败族里的后果是 Hermes 每次成功调用的输出都被丢掉（读不出
+ * `'12 passed'`），且这个字符串永远匹配不上 `error|failed|failure` 那三个值，白占一个判据位。
  */
 const OUTPUT_KEYS = [
-  'tool_response', 'toolResponse', 'tool_result', 'toolResult', 'tool_output', 'toolOutput', 'output'
+  'tool_response', 'toolResponse', 'tool_result', 'toolResult', 'tool_output', 'toolOutput',
+  'result', 'output'
 ] as const
 
 /**
@@ -49,7 +55,7 @@ const OUTPUT_KEYS = [
  * 三种形态都见过：布尔的 `is_error`、字符串的 `status: 'error'`、以及非零 `exit_code`。
  */
 const ERROR_FLAG_KEYS = ['is_error', 'isError', 'error'] as const
-const STATUS_KEYS = ['status', 'result'] as const
+const STATUS_KEYS = ['status'] as const
 const EXIT_CODE_KEYS = ['exit_code', 'exitCode', 'code'] as const
 
 /**
@@ -87,10 +93,13 @@ const NESTED_TEXT_KEYS = ['stdout', 'output', 'content', 'text', 'stderr', 'mess
  *
  * `{is_error: true}` 整体序列化出来是 `{"is_error":true}`——那是**标志**，不是这一步的输出。
  * 把它当正文显示，用户看到的是一段机器噪音，而真正的信息（失败）已经由状态承载了。
+ *
+ * `result` 不在这里：它是 Hermes 的正文键（见 `OUTPUT_KEYS`）。留在这份集合里会让一个只有
+ * `{result: '12 passed'}` 的结果对象被判成「纯标志」而整体丢弃。
  */
 const FLAG_ONLY_KEYS: ReadonlySet<string> = new Set([
   ...['is_error', 'isError'],
-  ...['status', 'result'],
+  ...['status'],
   ...['exit_code', 'exitCode', 'code']
 ])
 
@@ -146,7 +155,12 @@ function readFailure(source: Record<string, unknown>): boolean {
     const value = source[key]
     if (typeof value !== 'string') continue
     const normalized = value.trim().toLowerCase()
-    if (normalized === 'error' || normalized === 'failed' || normalized === 'failure') return true
+    // `blocked` 同样是「这一步没跑成」：Hermes 的 pre_tool_call 拦下一次调用时发的
+    // `post_tool_call` 带 `status: 'blocked'` + `error_type: 'plugin_block'` + `error_message`
+    // （本机 model_tools.py 实测）。判 complete 会把「被规则挡住」画成「跑成了」。
+    if (normalized === 'error' || normalized === 'failed' || normalized === 'failure' || normalized === 'blocked') {
+      return true
+    }
   }
   for (const key of EXIT_CODE_KEYS) {
     const value = source[key]
