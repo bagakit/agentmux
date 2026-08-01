@@ -63,6 +63,30 @@ export function terminalAcceptsInput(input: {
 }
 
 /**
+ * 过闸才送出。
+ *
+ * 判定是纯函数不等于**用法**被守住：三条通路此前各自写 `if (acceptsInputNow()) write(...)`，
+ * 而它们长在 attach effect 里，本仓跑不了 effect，所以只有源码文本守卫够得着。文本守卫数得出
+ * "每处 write 前面都有个 acceptsInputNow()"，数不出**极性**——三处 `if (x)` 一起改成 `if (!x)`，
+ * 76 条相关断言全绿（实测），而那是「每次击键都丢，且不该送的时候反而送」。
+ *
+ * 所以把"判定 + 送出"一起收进这里：调用方拿到的是一个已经带闸的 `send`，组件里不再有
+ * `if` 可写反。极性于是落在跑得到的地方——这个 `if` 取反、整个函数变 no-op、或把 `accepts()`
+ * 的结果缓存到构造时（那会让交接完成前建的 sender 永久哑掉），三颗变异各自都红。
+ *
+ * `accepts` 是回调而不是布尔值，正是为了挡住第三颗：闸的三个输入都是 ref/state，会在
+ * attachment 生命周期里翻转，所以每次送出都要重新问。
+ */
+export function terminalInputSender(input: {
+  accepts: () => boolean
+  write: (data: string) => void
+}): (data: string) => void {
+  return (data) => {
+    if (input.accepts()) input.write(data)
+  }
+}
+
+/**
  * 强制揭示时把这一步映成服务窗认得的结局。
  *
  * 判据是**这个 Run 还能干活吗**，不是"我们的揭示步骤过了吗"：进程在跑就是第 2 类（放行 + 提醒），
