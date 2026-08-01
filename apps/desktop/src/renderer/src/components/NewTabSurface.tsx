@@ -6,6 +6,7 @@ import { executorDetectionKey, useAppStore, warmTerminalKey } from '../store'
 import { configuredExecutors } from '../lib/executors'
 import { EMPTY_LAUNCHER_NAMES, launcherNameBinding } from '../lib/launcher-name-draft'
 import { launcherPromptBinding } from '../lib/launcher-prompt-draft'
+import { resolveLauncherWorkspaceId } from '../lib/launcher-workspace'
 import { warmLauncherId, warmTerminalPreview } from '../lib/warm-terminal-preview'
 import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
 import { LaunchRefine } from './LaunchOptionControls'
@@ -80,7 +81,12 @@ export function NewTabSurface({
   const terminalThemeId = useAppStore((state) => state.config?.appearance.terminalTheme)
   const createBrowser = useAppStore((state) => state.createBrowser)
   const createNote = useAppStore((state) => state.createNote)
-  const workspace = config?.workspaces.find((item) => item.id === (tabWorkspaceId ?? activeWorkspaceId))
+  // 卡片上写「Start in ⟨谁⟩」的那个 Workspace，与五个启动动作真正落进去的那个，必须是**同一次**
+  // 判定（resolveLauncherWorkspaceId）。分开算的症状不是报错：标题写着 A、点下去建到 B。
+  const workspace = config?.workspaces.find((item) => item.id === resolveLauncherWorkspaceId({
+    launcherTabWorkspaceId: tabWorkspaceId,
+    activeWorkspaceId
+  }))
   const hostLabel = workspace ? (config?.hosts.find((host) => host.id === workspace.hostId)?.label ?? workspace.hostId) : 'No host'
   const hostCheck = useAppStore((state) => workspace ? state.hostChecks[workspace.hostId] : undefined)
   // Only show a warm shell created for this exact host and working directory.
@@ -90,6 +96,10 @@ export function NewTabSurface({
   // 空分组占位没有 region，而那恰是新建 workspace 的第一眼，用可缺席的字段当归属键会把最主要那条
   // 路径永久降级成冷卡片。
   const launcherId = warmLauncherId({ tabGroupId, regionId })
+  // 「这次启动来自哪个 launcher Region」——五个动作共用的同一个实参，只在这里算一次。
+  // 手抄五遍时任何一处写成 `regionId ? …`（漏掉 tabId）都会让那一个动作静默丢掉 launcher 上下文，
+  // 于是它按活动 Workspace 解析——正是 createNote 已经犯过的那个缺陷的另一种入口。
+  const launcherRef = tabId && regionId ? { tabId, regionId } : undefined
   // 「这个槽在我眼里是什么样」只判一次，落点在 warmTerminalPreview。要显示哪个 session、要不要显示
   // 「正在预热」、槽在不在，分开算必然漂移，症状是转圈提示归 A 而终端画面归 B 这种自相矛盾的画面。
   const { session: warmSession, pending: warmPending, slotHeld: warmSlotHeld } = warmTerminalPreview({
@@ -317,7 +327,7 @@ export function NewTabSurface({
             executorId,
             prompt,
             tabGroupId,
-            tabId && regionId ? { tabId, regionId } : undefined,
+            launcherRef,
             launchOptionSelection,
             // trim 后为空即不传：空白不该变成一个 "launch" 档的名字，也绝不阻塞启动。
             { agentName: names.agentName.trim() || undefined, tabName: names.tabName.trim() || undefined }
@@ -356,7 +366,7 @@ export function NewTabSurface({
                   disabled={busy !== null}
                   onClick={() => void run('terminal', () => promoteWarmTerminal(
                     tabGroupId,
-                    tabId && regionId ? { tabId, regionId } : undefined
+                    launcherRef
                   ))}
                 >
                   {busy === 'terminal' ? <LoaderCircle className="spin" size={12} /> : <ArrowUpRight size={12} />}
@@ -386,7 +396,7 @@ export function NewTabSurface({
                 disabled={!workspace || busy !== null}
                 onClick={() => void run('terminal', () => promoteWarmTerminal(
                   tabGroupId,
-                  tabId && regionId ? { tabId, regionId } : undefined
+                  launcherRef
                 ))}
               >
                 <span className="agent-pick__icon">{warmPending ? <LoaderCircle className="spin" size={16} /> : <SquareTerminal size={16} />}</span>
@@ -403,7 +413,7 @@ export function NewTabSurface({
               disabled={!workspace || busy !== null}
               onClick={() => void run('browser', () => createBrowser(
                 tabGroupId,
-                tabId && regionId ? { tabId, regionId } : undefined
+                launcherRef
               ))}
             >
               <span className="agent-pick__icon"><Globe2 size={16} /></span>
@@ -417,7 +427,10 @@ export function NewTabSurface({
               aria-label="Create note"
               data-agentmux-action={DESKTOP_ACTIONS.createNote}
               disabled={!workspace || busy !== null}
-              onClick={() => void run('note', () => createNote())}
+              onClick={() => void run('note', () => createNote(
+                tabGroupId,
+                launcherRef
+              ))}
             >
               <span className="agent-pick__icon"><NotebookPen size={16} /></span>
               <span className="agent-pick__copy"><strong>Note</strong><small>Date-stamped markdown in this workspace</small></span>
