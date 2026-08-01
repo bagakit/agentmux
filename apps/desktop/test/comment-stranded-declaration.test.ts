@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
+import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 
 /**
@@ -19,6 +20,16 @@ import { describe, expect, it } from 'vitest'
  * 本仓的注释大量用散文提及这些词（实测 10 处，例如 runtime-endpoint-reclaim.ts 里的
  * 「放在模块顶层会把那个错误变成 import 期失败」）。散文里这些词总有前后文包裹，被困住的声明
  * 则独占一行、从行首开始。这个区别正是可判的那一条。
+ *
+ * **「注释从哪里开始、到哪里结束」这件事交给 TypeScript 自己的 scanner，不自己按行猜。**
+ * 这个检测器的第一版用逐行状态机判块边界，有四个盲点，**四个都用真注入证过会静默放过**：
+ *   1. 声明与 `/**` 同行（`/** export const X = {`）——开头那行整行被 continue 掉，从没被检测。
+ *   2. 块从行中开启（`const x = 1 /* …`）——只在 trim 后以 `/*` 打头时才进块状态。
+ *   3. `*&#47;` 出现在模板字符串或散文里——见到就关块，后面真的搁浅声明不再被跟踪。
+ *   4. `@example` 之后到块尾整段豁免（见下面 {@link exemptAsExample} 那段）。
+ * 前三个是同一个病：**词法边界不能靠行首形状推断**。`ts.createScanner` 是本仓已有依赖
+ * （typescript 5.9.3）里成熟的词法器，它认得模板字符串、认得行中开块，也就一次性消掉这三个面。
+ * 自己扩状态机等于重写一个词法器，而那正是「先翻项目里已有的依赖能做什么」要避免的。
  */
 
 /**
@@ -30,21 +41,34 @@ import { describe, expect, it } from 'vitest'
 const STRANDED_DECLARATION =
   /^(?:export\s+(?:const|let|var|function|class|interface|type|enum|default|abstract|async)\b|export\s*\{|export\s*\*|import\s+[\w{*'"]|import\s*\()/
 
+/** JSDoc 的块标签：一行去掉前导 `*` 之后以 `@名字` 打头。 */
+const BLOCK_TAG = /^@[a-z]/i
+
 /**
- * `@example` 之后的注释行豁免。
+ * 这一行是不是"某个 `@example` 里的示例代码"，因而不算搁浅。
  *
- * 在 doc 注释里放用法示例是本仓既有的合法惯例（`ConversationSpeakerAvatar.tsx:50` 就有一处，
- * 里面是 JSX 调用）。今天那处示例不含声明语句，所以这个豁免眼下不放过任何东西——**这正是要
- * 现在就写进去的原因**：等到有人在 `@example` 里写一行 `export const config = …` 演示用法时，
- * 守卫会把一条正当的示例判成残留，而那时改守卫的人手边没有这段推理。禁令要挡的是还没写出来的
- * 那一行，豁免也一样。
+ * 在 doc 注释里放用法示例是本仓既有的合法惯例（`ConversationSpeakerAvatar.tsx:50` 就有一处）。
+ * 但豁免的**范围**是这条判据最容易悄悄放宽的地方，所以两条边界都写死：
+ *
+ * - **纵向**：`@example` 的作用域到**下一个块标签**为止，这是 JSDoc/TSDoc 自己的规则（一个块标签
+ *   的内容延伸到下一个块标签或注释结束），不是我另立的约定。第一版是"见过 @example 就一路豁免到
+ *   块尾"，于是 `@example` 之后隔着 `@param` 再写的残留也隐形——那正是这个检测器自己那条测试
+ *   声称要防的「整块豁免」，而它当时只放了 `@example` **之前**的样本，从没验过之后的。
+ * - **横向**：只有带前导 `*` 的行才可能是示例。JSDoc 块里每一行都带那个星号；一行从**第 0 列**
+ *   开始就已经脱离了 doc 结构本身——那恰是 copilot.ts 那次事故的形状（粘进来的 `export const`
+ *   顶在行首）。所以哪怕它落在 `@example` 作用域里，也一律要报。
  *
  * 抽成函数而不是内联进扫描，是为了让下面那条测试有一个**可以直接质询的对象**：测试里若自己
  * 再写一遍同样的条件，放宽豁免时两边会一起放宽，测试跟着变松（同 reference-name-containment
  * 里那条豁免的实测结论）。
  */
-function isExampleBlock(seenExampleTag: boolean): boolean {
-  return seenExampleTag
+export function exemptAsExample(input: {
+  /** 当前是否落在某个 `@example` 的作用域里（到下一个块标签为止）。 */
+  inExampleScope: boolean
+  /** 这一行去掉缩进后是否以 JSDoc 的 `*` 打头。 */
+  hasDocPrefix: boolean
+}): boolean {
+  return input.inExampleScope && input.hasDocPrefix
 }
 
 /** 一处被困住的声明。 */
@@ -55,40 +79,59 @@ export interface StrandedDeclaration {
 }
 
 /**
- * 扫一份源码文本，报出所有被困在块注释里的声明。
+ * 源码里每一段多行块注释，连同它起始处的行号。
  *
- * 只跟**块**注释（`/* … *&#47;`）。行注释 `//` 后面写声明是常见的临时注掉代码，那是作者的显式
- * 意图，不是粘贴事故；块注释里出现一条声明才是「本该在注释外面」的信号。
+ * 用 `ts.createScanner` 而不是按行找 `/*`：词法边界只有词法器判得准（模板字符串里的 `/*`、
+ * 行中开启的块、散文里的 `*&#47;`）。行注释 `//` 不在此列——`//` 后面写声明是常见的临时注掉代码，
+ * 那是作者的显式意图，不是粘贴事故。
  */
+function multiLineComments(text: string): { startLine: number; body: string }[] {
+  const scanner = ts.createScanner(ts.ScriptTarget.Latest, false, ts.LanguageVariant.JSX, text)
+  const out: { startLine: number; body: string }[] = []
+  let kind = scanner.scan()
+  while (kind !== ts.SyntaxKind.EndOfFileToken) {
+    if (kind === ts.SyntaxKind.MultiLineCommentTrivia) {
+      const start = scanner.getTokenStart()
+      const body = text.slice(start, scanner.getTokenEnd())
+      // 单行 `/* … *\/` 装不下一条跨行声明，也不是这个错的形状。
+      if (body.includes('\n')) {
+        out.push({ startLine: text.slice(0, start).split('\n').length, body })
+      }
+    }
+    kind = scanner.scan()
+  }
+  return out
+}
+
+/** 一份源码里有多少段多行块注释。给"词法器真的在真实文件里找到了注释"那条自证用。 */
+function countMultiLineComments(text: string): number {
+  return multiLineComments(text).length
+}
+
+/** 扫一份源码文本，报出所有被困在块注释里的声明。 */
 export function strandedDeclarationsIn(path: string, text: string): StrandedDeclaration[] {
   const found: StrandedDeclaration[] = []
-  let inBlock = false
-  let seenExampleTag = false
-  let lineNumber = 0
-  for (const raw of text.split('\n')) {
-    lineNumber += 1
-    const trimmed = raw.trim()
-    if (!inBlock) {
-      // 单行 `/* … *\/` 不进入块状态：它装不下一条跨行声明，也不是这个错的形状。
-      if (trimmed.startsWith('/*') && !trimmed.includes('*/')) {
-        inBlock = true
-        seenExampleTag = false
+  for (const { startLine, body } of multiLineComments(text)) {
+    let inExampleScope = false
+    const lines = body.split('\n')
+    for (let index = 0; index < lines.length; index += 1) {
+      const raw = lines[index]!
+      const trimmed = raw.trim()
+      // 注释的头尾两行本身携带 `/*` 与 `*\/` 记号。头一行的**记号之后**仍可能藏着声明
+      //（`/** export const X = {` 正是盲点 1），所以剥掉记号继续判，而不是整行跳过。
+      const stripped =
+        index === 0 ? trimmed.replace(/^\/\*+/, '').trim() : trimmed.replace(/\*\/\s*$/, '').trim()
+      const hasDocPrefix = stripped.startsWith('*')
+      const content = hasDocPrefix ? stripped.slice(1).trim() : stripped
+      if (BLOCK_TAG.test(content)) {
+        // 块标签切换作用域：`@example` 开启，任何别的块标签结束它（JSDoc 自己的规则）。
+        inExampleScope = content.startsWith('@example')
+        continue
       }
-      continue
-    }
-    if (trimmed.includes('*/')) {
-      inBlock = false
-      seenExampleTag = false
-      continue
-    }
-    const body = trimmed.startsWith('*') ? trimmed.slice(1).trim() : trimmed
-    if (body.startsWith('@example')) {
-      seenExampleTag = true
-      continue
-    }
-    if (isExampleBlock(seenExampleTag)) continue
-    if (STRANDED_DECLARATION.test(body)) {
-      found.push({ path, line: lineNumber, text: trimmed })
+      if (exemptAsExample({ inExampleScope, hasDocPrefix })) continue
+      if (STRANDED_DECLARATION.test(content)) {
+        found.push({ path, line: startLine + index, text: trimmed })
+      }
     }
   }
   return found
@@ -180,6 +223,11 @@ describe('块注释里没有困住任何真声明', () => {
     expect(strandedDeclarationsIn('s.ts', '// export const a = 1\n')).toEqual([])
     // 单行 `/* … */` 装不下这个错，也不该进入块状态而把后面的真声明吞成"注释内"。
     expect(strandedDeclarationsIn('s.ts', '/* 一句说明 */\nexport const a = 1\n')).toEqual([])
+    // 一整条声明被一段**单行**块注释包住，与 `//` 注掉同类：作者的显式意图，不是粘贴事故。
+    // 这一条是实测补的——摘掉 multiLineComments 里那个"含换行"过滤，6 条照旧全绿（真实树里
+    // 一处这种形状都没有，所以那颗变异只在这个样本上现形）。判据里每个收窄都要有人守，否则
+    // 它是一条随时可以被"顺手放宽"的免检口。
+    expect(strandedDeclarationsIn('s.ts', '/* export const a = 1 */\n')).toEqual([])
   })
 
   it('扫描真的读到了整棵树，而不是一份空清单', () => {
@@ -195,13 +243,27 @@ describe('块注释里没有困住任何真声明', () => {
     expect(paths.has('apps/desktop/src/main/config-store.ts')).toBe(true)
     // .tsx 也在内——renderer 的组件几乎全是 .tsx，漏掉它等于漏掉半个 desktop。
     expect([...paths].some((path) => path.endsWith('.tsx'))).toBe(true)
+
+    // 读到文件还不够：**词法器必须真的在这些文件里找到块注释**。scanner 建错（语言变体、
+    // ScriptTarget）或 trivia 判断写错时，每份源码都会分解出零段注释，于是下面那条禁令在
+    // "一段都没检查"的情况下变绿——这正是本仓反复踩到的空集假绿形态。
+    // 阈值取自实测（2026-09-01：568 份跟踪源码里 223 份含多行块注释，其中 .tsx 32 份），留出
+    // 增删余量；它守的是"数量级不为零"，不是某个精确数字。
+    const commentCounts = scanned.map(({ text }) => countMultiLineComments(text))
+    const withComments = commentCounts.filter((count) => count > 0).length
+    expect(withComments, '词法器在整棵树里一段块注释都没找到').toBeGreaterThan(150)
+    // .tsx 单独再钉一次：JSX 语言变体建错时它会在泛型/JSX 处走偏。
+    expect(
+      scanned.filter(({ path, text }) => path.endsWith('.tsx') && countMultiLineComments(text) > 0)
+        .length,
+      '.tsx 里一段块注释都没找到——语言变体可能建错了'
+    ).toBeGreaterThan(20)
   })
 
-  it('豁免是"@example 之后"，不是"整个注释块"', () => {
-    // 最危险的放宽方式是把豁免从"@example 之后的行"扩成"含有 @example 的整个块"——那样
+  it('豁免的两条边界：@example 到下一个块标签为止，且只覆盖带 * 的行', () => {
+    // 最危险的放宽方式是把豁免从"@example 的作用域"扩成"含有 @example 的整个块"——那样
     // 一处示例就会让同一个 doc 注释里其余位置的残留全部隐形。而"再跑一遍同样的条件"抓不住这次
     // 放宽：那样写出来的检查会跟着豁免一起放宽，两边一起变松（先例的实测结论）。
-    // 所以判据换成：**同一个块里，@example 之前的残留必须仍然被抓到。**
     const mixed = [
       '/**',
       ' * 说明。',
@@ -210,12 +272,35 @@ describe('块注释里没有困住任何真声明', () => {
       ' * export const sample = 1',  // 示例里的声明 → 豁免
       ' */'
     ].join('\n')
-    const found = strandedDeclarationsIn('s.ts', mixed)
-    expect(found.map((f) => f.line)).toEqual([3])
+    expect(strandedDeclarationsIn('s.ts', mixed).map((f) => f.line)).toEqual([3])
 
-    // 豁免函数本身可被直接质询：见过 @example 才豁免，没见过不豁免。
-    expect(isExampleBlock(true)).toBe(true)
-    expect(isExampleBlock(false)).toBe(false)
+    // **纵向边界**：@example 的作用域到下一个块标签为止。第一版是"见过就一路豁免到块尾"，于是
+    // 隔着一个 @param 之后的残留照旧隐形（实测：那一版这里返回 []）。这一面此前无人守——那条
+    // 测试只放了 @example **之前**的样本。
+    const afterNextTag = [
+      '/**',
+      ' * @example',
+      ' * export const sample = 1',
+      ' * @param options 说明',
+      ' * export const stranded = {',   // 已出了 @example 作用域 → 必须抓到
+      ' */'
+    ].join('\n')
+    expect(strandedDeclarationsIn('s.ts', afterNextTag).map((f) => f.line)).toEqual([5])
+
+    // **横向边界**：从第 0 列开始的行已经脱离 doc 结构，正是 copilot.ts 那次事故的形状；哪怕它
+    // 落在 @example 作用域里也要报。否则"在示例里粘错东西"成了一个免检口。
+    const noPrefixInsideExample = [
+      '/**',
+      ' * @example',
+      'export const stranded = {',
+      ' */'
+    ].join('\n')
+    expect(strandedDeclarationsIn('s.ts', noPrefixInsideExample).map((f) => f.line)).toEqual([3])
+
+    // 豁免函数本身可被直接质询：两个条件都成立才豁免，缺一不可。
+    expect(exemptAsExample({ inExampleScope: true, hasDocPrefix: true })).toBe(true)
+    expect(exemptAsExample({ inExampleScope: false, hasDocPrefix: true })).toBe(false)
+    expect(exemptAsExample({ inExampleScope: true, hasDocPrefix: false })).toBe(false)
 
     // 而块一结束，豁免就失效——下一个注释块里的残留照样要红。
     const nextBlock = [
@@ -230,6 +315,38 @@ describe('块注释里没有困住任何真声明', () => {
       ' */'
     ].join('\n')
     expect(strandedDeclarationsIn('s.ts', nextBlock).map((f) => f.line)).toEqual([8])
+  })
+
+  it('词法边界由 scanner 判——三种"按行猜"会放过的形状都要抓到', () => {
+    // 这三条都用真注入证过第一版（逐行状态机）会静默放过。它们是同一个病的三个面：
+    // 注释从哪儿开始、到哪儿结束，不能靠行首形状推断。
+    //
+    // 1. 声明与 `/**` 同行：那一行整行被当作"开头"跳过，记号之后的声明从没被检测。
+    expect(
+      strandedDeclarationsIn('s.ts', '/** export const X = {\n * 说明\n */').map((f) => f.line),
+      '开头行的记号之后仍要判'
+    ).toEqual([1])
+
+    // 2. 块从行中开启：`/*` 不在行首，于是压根没进块状态。
+    expect(
+      strandedDeclarationsIn('s.ts', 'const x = 1 /* 开头\nexport const X = {\n */').map((f) => f.line),
+      '行中开启的块也是块'
+    ).toEqual([2])
+
+    // 3. `*/` 出现在散文里：见到就关块，其后真的搁浅声明不再被跟踪。scanner 知道注释在哪结束。
+    expect(
+      strandedDeclarationsIn(
+        's.ts',
+        '/**\n * 文中提到 *\\/ 这个记号\nexport const X = {\n */'
+      ).map((f) => f.line),
+      '散文里的记号不结束注释'
+    ).toEqual([3])
+
+    // 反面：模板字符串里的 `/*` 不是注释，其后的真声明当然不算搁浅。按行猜会把整个尾部吞进
+    // "注释内"，从而既漏报又误报。
+    expect(strandedDeclarationsIn('s.ts', 'const s = `\n/*\n`\nexport const X = 1')).toEqual([])
+    // .tsx 的泛型/JSX 也要能扫过去而不炸——扫描器按 JSX 变体建。
+    expect(strandedDeclarationsIn('s.tsx', 'const a = <div>x</div>\n/**\n * 说明\n */')).toEqual([])
   })
 
   it('没有任何跟踪的 TypeScript 文件把声明困在块注释里', () => {
