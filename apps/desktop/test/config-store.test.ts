@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { BUILT_IN_AGENT_PROVIDERS } from '@agentmux/core'
 import {
   SCRATCH_WORKSPACE_ID,
   SCRATCH_WORKSPACE_NAME,
@@ -12,7 +13,7 @@ import { DEFAULT_NOTIFICATION_MODE_ID } from '../src/shared/notification-present
 
 vi.mock('electron', () => ({ app: { getPath: () => tmpdir() } }))
 
-import { ConfigStore } from '../src/main/config-store.js'
+import { ConfigStore, DEFAULT_CONFIG } from '../src/main/config-store.js'
 import type { RuntimeController, RuntimePreparation } from '../src/main/runtime-controller.js'
 import { saveRuntimeConfig } from '../src/main/runtime-config-transaction.js'
 
@@ -381,5 +382,38 @@ describe('ConfigStore workspace identity', () => {
         workspace({ id: 'workspace-2', hostId: 'remote', path: '/shared/project' })
       ]
     })).resolves.toMatchObject({ workspaces: [{ hostId: 'local' }, { hostId: 'remote' }] })
+  })
+})
+
+describe('DEFAULT_CONFIG built-in Provider coverage', () => {
+  // 期望值永远从 Core 现取，绝不在测试里手抄一份 id 清单——手抄的清单会和它要守的东西一起漂。
+  // 这道门守的正是本次修复的缺陷：Core 新增/改名一个 built-in Provider 而默认表没跟上时，新建 Tab
+  // 界面（config.executors → configuredExecutors）会静默漏掉那家，此前 kimi/droid/copilot 就这样缺席。
+  it('ships one default Executor for every built-in Provider Core declares', () => {
+    const builtInIds = new Set(BUILT_IN_AGENT_PROVIDERS.map((provider) => provider.id))
+    const coveredProviderIds = new Set(
+      Object.values(DEFAULT_CONFIG.executors).map((executor) => executor.providerId)
+    )
+    // 覆盖：每个 Core built-in id 都必须有一条默认 Executor 指向它。删掉任意一家会让这里变红。
+    const missing = [...builtInIds].filter((id) => !coveredProviderIds.has(id))
+    expect(missing).toEqual([])
+    // 反向：默认表里绝不出现 Core 不认识的 providerId（否则 schema 的 superRefine 会在运行时拒绝整份
+    // 默认配置）。把某家的 providerId 改成 Core 不认识的值会让这里变红。
+    const unknown = [...coveredProviderIds].filter((id) => !builtInIds.has(id))
+    expect(unknown).toEqual([])
+  })
+
+  it("binds every default Executor's command and label to its Provider catalog", () => {
+    // command/label 是 Core catalog 的 executable/label（SSOT）。变异任意一家的 command 或 label
+    // 会让对应断言变红——默认表不得从 catalog 漂走。
+    const catalogById = new Map(
+      BUILT_IN_AGENT_PROVIDERS.map((provider) => [provider.id, provider.catalog])
+    )
+    for (const executor of Object.values(DEFAULT_CONFIG.executors)) {
+      const catalogEntry = catalogById.get(executor.providerId)
+      expect(catalogEntry).toBeDefined()
+      expect(executor.command).toBe(catalogEntry!.executable)
+      expect(executor.label).toBe(catalogEntry!.label)
+    }
   })
 })
