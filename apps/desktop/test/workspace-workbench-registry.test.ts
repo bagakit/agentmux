@@ -50,7 +50,10 @@ describe('window-owned Workspace Workbench registry', () => {
     // 用 AST 数出口守住。此前这里是一条 `toContain('if (workspace && visible) prewarmTerminal(...)')`
     // 文本断言——实测可绕过：保留那行不动、在它上面加一行 `if (workspace) prewarmTerminal(...)`，
     // 每个泊车 workspace 都会抢那唯一的热终端槽，而此文件照旧全绿。字面量在场 ≠ 语义正确。
-    expect(newTab).toContain('[prewarmTerminal, visible, workspace?.id]')
+    //
+    // 依赖数组的内容同样不在这里抄：抄整个字面量会让每次合法增删依赖都打红这一条（实测 #308 就
+    // 撞上了），而它并不比 AST 判据更强。warm-terminal-ownership.test.ts 的接线层守「visible 与
+    // warmSlotHeld 在依赖里、带归属的 warmSession/warmPending 不在」，那才是承重的性质。
     expect(newTab).toContain('if (visible) promptRef.current?.focus()')
     expect(newTab).toContain('if (!visible) return')
     expect(newTab).toContain('visible={visible}')

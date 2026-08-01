@@ -6,6 +6,7 @@ import { executorDetectionKey, useAppStore, warmTerminalKey } from '../store'
 import { configuredExecutors } from '../lib/executors'
 import { EMPTY_LAUNCHER_NAMES, launcherNameBinding } from '../lib/launcher-name-draft'
 import { launcherPromptBinding } from '../lib/launcher-prompt-draft'
+import { warmLauncherId, warmTerminalPreview } from '../lib/warm-terminal-preview'
 import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
 import { LaunchRefine } from './LaunchOptionControls'
 import { TerminalView } from './TerminalView'
@@ -85,8 +86,17 @@ export function NewTabSurface({
   // Only show a warm shell created for this exact host and working directory.
   // It remains outside the ordinary Session list until the user claims it.
   const warmKey = workspace ? warmTerminalKey(workspace.hostId, workspace.path) : null
-  const warmSession = warmTerminal && warmTerminal.key === warmKey ? warmTerminal.session : null
-  const warmPending = Boolean(warmTerminal && warmTerminal.key === warmKey && !warmTerminal.session)
+  // 这个 launcher 挂载点的归属身份。取值规则在 warmLauncherId 里判一次——**不能**直接用 regionId：
+  // 空分组占位没有 region，而那恰是新建 workspace 的第一眼，用可缺席的字段当归属键会把最主要那条
+  // 路径永久降级成冷卡片。
+  const launcherId = warmLauncherId({ tabGroupId, regionId })
+  // 「这个槽在我眼里是什么样」只判一次，落点在 warmTerminalPreview。要显示哪个 session、要不要显示
+  // 「正在预热」、槽在不在，分开算必然漂移，症状是转圈提示归 A 而终端画面归 B 这种自相矛盾的画面。
+  const { session: warmSession, pending: warmPending, slotHeld: warmSlotHeld } = warmTerminalPreview({
+    warmTerminal,
+    warmKey,
+    launcherId
+  })
   const executors = useMemo(
     () => configuredExecutors(config).map((executor) => ({
       ...executor,
@@ -120,10 +130,18 @@ export function NewTabSurface({
   }, [visible])
 
   useEffect(() => {
-    // The create page owns the prewarm trigger. Promoting the shell does not create
-    // another hidden terminal; a future create page will warm its own shell on mount.
-    if (workspace && visible) prewarmTerminal(workspace.id)
-  }, [prewarmTerminal, visible, workspace?.id])
+    // The create page owns the prewarm trigger.
+    //
+    // 依赖里带上 `warmSlotHeld`（而不是只有 workspace 与 visible）：promote 会把槽清空，若只依赖后
+    // 两者，仍然在场的同胞 launcher 此后永远看不到热 shell——它的 Terminal 卡片静默退化成冷路径，
+    // 本次会话再不恢复。槽空了就重新预热一个。
+    //
+    // 依赖必须是**与归属无关**的「槽在不在」，不能是带归属的 session/pending：归属会在同胞之间转移，
+    // 若依赖跟着归属翻动，失去归属的那个立刻重新预热去夺回来，对方随即再夺回——两个同时在场的
+    // launcher 之间无限 ping-pong。prewarmTerminal 对同 key 是幂等的（只转移归属，不重开 PTY），
+    // 所以这条 effect 多跑几次不会攒出多余进程。
+    if (workspace && visible) prewarmTerminal(workspace.id, launcherId)
+  }, [prewarmTerminal, visible, workspace?.id, launcherId, warmSlotHeld])
 
   useEffect(() => {
     if (!workspace || executors.every((executor) => executor.detection)) return
