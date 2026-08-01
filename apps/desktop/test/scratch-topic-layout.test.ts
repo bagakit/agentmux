@@ -1,10 +1,16 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { createWorkspaceLayout, addTab } from '../src/renderer/src/lib/workbench-layout.js'
+import {
+  createWorkspaceLayout,
+  addTab,
+  removeTab,
+  activateTab
+} from '../src/renderer/src/lib/workbench-layout.js'
 import { createWorkbenchTab, type WorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
 import {
   activeTopicIdFromLayout,
-  layoutForActiveTopic
+  layoutForActiveTopic,
+  tabEligibilityForActiveTopic
 } from '../src/renderer/src/lib/scratch-topic-layout.js'
 
 const workspaceWorkbenchSource = readFileSync(
@@ -107,6 +113,104 @@ describe('切 Topic 就换那一组 Tab', () => {
     expect(paneGroup).toContain('layout: WorkspaceLayout')
     expect(paneGroup).not.toContain('state.layouts[workspaceId]')
     expect(workspaceWorkbenchSource).toContain('layout={layout}')
+  })
+})
+
+// 上面那组守的是**显示**：知道当前 Topic 之后只把它的 Tab 画出来。
+// 下面这组守的是**改动**：关掉/移走一张 Tab 之后谁接任活动项。
+//
+// 为什么显示侧的投影兜不住这件事：`layoutForActiveTopic` 是只读派生，服务渲染、内存预算、冷泊车、
+// 快捷键取值这几个读取面。真正改 layout 的 reducer 吃的是未投影的 storedLayout，它看到的
+// `recentTabIds` 里混着别的 Topic 的 Tab。于是关掉当前 Topic 的最后一张 Tab 时，下一活动项会落到
+// 另一个 Topic 上——用户没要求切 Topic，眼前的东西却全换了。
+
+describe('关掉一张 Tab 之后不许跳到别的 Topic', () => {
+  it('候选谓词放行当前 Topic 与未绑定的 Tab，挡住别的 Topic', () => {
+    const eligible = tabEligibilityForActiveTopic(tabs, 'topic-a')
+    // 判据逐个列出而不是抽一两个：三类 Tab（本 Topic / 未绑定 / 别的 Topic）各有独立答案，
+    // 只抽其中一对的话，把「未绑定」误判成不合格这种错会活下来。
+    expect(eligible?.('a-1')).toBe(true)
+    expect(eligible?.('a-2')).toBe(true)
+    expect(eligible?.('loose')).toBe(true)
+    expect(eligible?.('b-1')).toBe(false)
+  })
+
+  it('不在任何 Topic 里时返回 undefined，而不是一个恒真函数', () => {
+    // 恒真函数也能跑对，但它让「没有约束」和「有约束且恰好全放行」在类型上无法区分，
+    // 调用方也就必须无条件传参。undefined 让 reducer 走它自己的缺省，语义更诚实。
+    expect(tabEligibilityForActiveTopic(tabs, null)).toBeUndefined()
+  })
+
+  it('removeTab 认这个谓词：最近一张属于别的 Topic 时不选它', () => {
+    // 这就是那个真缺陷的形状。a-2 是活动项，但 recent 里 b-1 更近（用户先看 b-1 再回 a-2）。
+    // 关掉 a-2 时，不带谓词会选中 b-1——那是 topic-b 的 Tab。
+    let layout = createWorkspaceLayout('group', ['a-1'])
+    for (const id of ['a-2', 'b-1']) layout = addTab(layout, 'group', id)
+    layout = activateTab(layout, 'group', 'b-1')
+    layout = activateTab(layout, 'group', 'a-2')
+    expect(layout.groups[0]!.recentTabIds).toEqual(['a-1', 'b-1', 'a-2'])
+
+    // 不带谓词：最近的合格者是 b-1，跨了 Topic。这一条钉住「缺陷确实存在」，
+    // 否则下面那条可能只是因为 fixture 恰好没有跨 Topic 的候选而绿。
+    expect(removeTab(layout, 'group', 'a-2').groups[0]!.activeTabId).toBe('b-1')
+
+    // 带谓词：b-1 被挡掉，落回同 Topic 的 a-1。
+    const eligible = tabEligibilityForActiveTopic(tabs, 'topic-a')
+    expect(removeTab(layout, 'group', 'a-2', eligible).groups[0]!.activeTabId).toBe('a-1')
+  })
+
+  it('本 Topic 一个候选都不剩时给 null，不退回别的 Topic 的 Tab', () => {
+    // 「挡住别的 Topic」必须挡到底。若在无候选时悄悄放宽，症状就退化成原来那个——
+    // 只是变得更难复现（要恰好关掉最后一张）。
+    let layout = createWorkspaceLayout('group', ['a-1'])
+    layout = addTab(layout, 'group', 'b-1')
+    layout = activateTab(layout, 'group', 'a-1')
+    const eligible = tabEligibilityForActiveTopic(tabs, 'topic-a')
+    expect(removeTab(layout, 'group', 'a-1', eligible).groups[0]!.activeTabId).toBeNull()
+    // 对照：不带谓词时它会选 b-1，所以上面的 null 是谓词挣来的，不是 layout 本来就空。
+    expect(removeTab(layout, 'group', 'a-1').groups[0]!.activeTabId).toBe('b-1')
+  })
+
+  it('关 Tab 的生产路径真的把谓词传下去了——helper 写好了没人调等于没修', () => {
+    // 为什么要质询源码：上面几条测的是 removeTab「如果收到谓词」会怎么做，而缺陷是「没人给它」。
+    // 只测纯函数的话，把 workbench-view-close.ts 里那个参数删掉，前面每一条照旧全绿。
+    const closeSource = readFileSync(
+      new URL('../src/renderer/src/lib/workbench-view-close.ts', import.meta.url),
+      'utf8'
+    )
+    // 挡板：读错文件时下面的断言会因为「不含手抄」而恒真，所以先确认它真是那个调用方。
+    expect(closeSource, 'workbench-view-close.ts 不再调 removeTab，这条守卫钉错了文件')
+      .toContain('removeTab(')
+    expect(closeSource, '关 Tab 时必须限定候选在当前 Topic 内').toContain('tabEligibilityForActiveTopic(')
+
+    // 判据按**语义分区**而不是按出现次数：这个文件里有三类 removeTab 相关的文本，只有一类承重。
+    // - `closeTabWithinActiveTopic` 是那个唯一出处，它当然要调 removeTab。
+    // - `planWorkbenchViewClose` 里那处只用来算 `closesView`（这张移除后还开着吗），结果被丢掉，
+    //   谓词影响不了那个判断，裸调是对的。
+    // - `applyWorkbenchViewCloseTopology` 产出用户真正看到的 layout —— 它的两条出口都必须走那个
+    //   出处，自己不许再碰 removeTab。
+    //
+    // 计数上限那种写法在这里是错的形状：它把 import 行、把只读探测都算进来，数字一变就要改测试，
+    // 而真正的漂移（某条改动出口悄悄绕过收口）反而可能仍在上限之内。
+    const applyAt = closeSource.indexOf('export function applyWorkbenchViewCloseTopology(')
+    expect(applyAt, 'applyWorkbenchViewCloseTopology 不在了，这条守卫钉错了函数').toBeGreaterThan(-1)
+    const applySection = closeSource.slice(applyAt)
+    // 右界必须给：只取左界会让文件尾巴顶上来，本节的结论被邻节的文本掩盖而恒绿。
+    const nextDecl = applySection.indexOf('\nfunction ')
+    const applyBody = nextDecl === -1 ? applySection : applySection.slice(0, nextDecl)
+    expect(
+      applyBody.includes('removeTab('),
+      '产出用户可见 layout 的那个函数里不许自己调 removeTab；两条出口必须共用 closeTabWithinActiveTopic，' +
+        '否则只给一处补谓词，另一处会静默保留旧行为且全绿'
+    ).toBe(false)
+    // 而它必须真的调了那个收口 —— 否则「没有裸调」也可能是因为它压根不改 layout 了。
+    const viaHelper = applyBody.match(/closeTab\(\)/g) ?? []
+    expect(viaHelper.length, '两条改动出口都应通过 closeTab() 收口').toBeGreaterThanOrEqual(2)
+    // 收口自己要认谓词。它和上面那条合起来才完整：一个证「都走这里」，一个证「这里做对了」。
+    expect(
+      closeSource.slice(closeSource.indexOf('function closeTabWithinActiveTopic('), applyAt),
+      '唯一出处必须限定候选在当前 Topic 内'
+    ).toContain('tabEligibilityForActiveTopic(')
   })
 })
 

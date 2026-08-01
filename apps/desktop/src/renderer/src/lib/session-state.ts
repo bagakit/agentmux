@@ -9,7 +9,7 @@ import type { AgentMuxAgentSession, AgentMuxEvidence, AgentMuxRunRef } from '@ag
 import { applyAgentTimelineMutation } from '@agentmux/core/timeline'
 // 进程事实的投影走 node-free 子路径，与主进程侧 import 的是同一个模块（包根那条链拖 node:crypto，
 // renderer 引不动）。
-import { projectRunProcessStatus } from '@agentmux/core/run-status'
+import { projectRunProcessStatus, runExitFacts } from '@agentmux/core/run-status'
 import type { WorkspaceLayout } from './workbench-layout'
 import {
   findWorkbenchRegion,
@@ -469,16 +469,18 @@ export function projectRuntimeEvent(
     // 「进程事实 → 界面那一行状态」走 Core 的共享投影，与主进程快照路径（runtime-controller 的
     // projectSession）是**同一个**实现。这里只负责把事件的字段形状取出来喂给它。
     //
-    // 曾经这段是本地手写的，于是它比快照路径少一整条事实：内核报的终止信号在这里根本没被读过
-    // （`exitSignal` 在本文件零命中）。后果是同一个被 SIGSEGV 打死的 Agent，崩溃**当下**只显示一个
-    // 没有下文的 error，关掉窗口重开反而看到了 `signal SIGSEGV`——最需要那条信息的时刻恰好没有。
+    // 曾经这段是本地手写的，于是它比快照路径少一整条事实：内核报的终止信号在这里根本没被读过。后果是
+    // 同一个被 SIGSEGV 打死的 Agent，崩溃**当下**只显示一个没有下文的 error，关掉窗口重开反而看到了
+    // `signal SIGSEGV`——最需要那条信息的时刻恰好没有。
+    //
+    // 三条退出事实走 runExitFacts 而不是在这里逐条 spread：正因为那三行曾经是两处各抄一份，漏一行
+    // 没有任何东西会红（字段可选、投影不要求在场），exitSignal 和 exitReason 才各自独立地漏过一次。
+    // 本地只保留事件形状独有的部分——source 和 observedAt 在这条路上要从 evidence 里取。
     const processStatus = projectRunProcessStatus({
       state: core.state,
       source: core.evidence.source,
       observedAt: core.evidence.observedAt,
-      ...(core.exitCode === undefined ? {} : { exitCode: core.exitCode }),
-      ...(core.exitSignal === undefined ? {} : { exitSignal: core.exitSignal }),
-      ...(core.exitReason === undefined ? {} : { exitReason: core.exitReason })
+      ...runExitFacts(core)
     })
     return { state: {
       ...state,

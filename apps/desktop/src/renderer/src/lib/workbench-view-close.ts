@@ -1,4 +1,5 @@
 import type { SessionControl, SessionSnapshot } from '../../../shared/contracts'
+import { activeTopicIdFromLayout, tabEligibilityForActiveTopic } from './scratch-topic-layout'
 import { removeTab, type WorkspaceLayout } from './workbench-layout'
 import {
   removeWorkbenchRegion,
@@ -196,6 +197,32 @@ export function reconcileWorkbenchViewClose(input: {
   return { tab, changedWhileClosing, failures }
 }
 
+/**
+ * 关掉 `plan.tabId` 这一步的**唯一**出处。
+ *
+ * 为什么独立成一个函数而不是在 `applyWorkbenchViewCloseTopology` 里内联：那个函数有两条会改 layout
+ * 的出口（`closesView` 为假的早返回、以及删掉 tab 之后的正常返回），它们本就是同一个决定。此前两处
+ * 各写一份 `removeTab(...)`，于是给一处补东西另一处会静默保留旧行为，且没有任何测试会红。
+ *
+ * 它顺手承载了那件容易漏的事：下一活动项必须限定在当前 Topic 内。Scratch 的所有 Topic 共用一份
+ * layout，`recentTabIds` 里混着别的 Topic 的 Tab，不限定就会把用户静默弹到另一个 Topic。
+ *
+ * `activeTopicIdFromLayout` 必须在**移除之前**问：移除之后活动 Tab 已经换人，那时再问会得到刚被选中
+ * 的那张的 Topic，判据就自我循环了。
+ */
+function closeTabWithinActiveTopic(
+  layout: WorkspaceLayout,
+  tabs: Readonly<Record<string, WorkbenchTab>>,
+  plan: WorkbenchViewClosePlan
+): WorkspaceLayout {
+  return removeTab(
+    layout,
+    plan.tabGroupId,
+    plan.tabId,
+    tabEligibilityForActiveTopic(tabs, activeTopicIdFromLayout(layout, tabs))
+  )
+}
+
 export function applyWorkbenchViewCloseTopology(
   state: WorkbenchViewTopology,
   plan: WorkbenchViewClosePlan,
@@ -203,13 +230,11 @@ export function applyWorkbenchViewCloseTopology(
 ): WorkbenchViewTopology {
   const layout = state.layouts[plan.workspaceId]
   if (!layout) return state
+  const closeTab = (): WorkspaceLayout => closeTabWithinActiveTopic(layout, state.tabs, plan)
   if (!plan.closesView) {
     return {
       tabs: state.tabs,
-      layouts: {
-        ...state.layouts,
-        [plan.workspaceId]: removeTab(layout, plan.tabGroupId, plan.tabId)
-      }
+      layouts: { ...state.layouts, [plan.workspaceId]: closeTab() }
     }
   }
   if (tab) {
@@ -222,10 +247,7 @@ export function applyWorkbenchViewCloseTopology(
   delete tabs[plan.tabId]
   return {
     tabs,
-    layouts: {
-      ...state.layouts,
-      [plan.workspaceId]: removeTab(layout, plan.tabGroupId, plan.tabId)
-    }
+    layouts: { ...state.layouts, [plan.workspaceId]: closeTab() }
   }
 }
 

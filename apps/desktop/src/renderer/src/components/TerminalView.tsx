@@ -15,7 +15,7 @@ import {
   type OpenHttpLinkOrigin
 } from '../lib/open-destination'
 import { useAppStore } from '../store'
-import { installTerminalColorQueryReplyHandlers } from '../lib/terminal-capability-replies'
+import { installTerminalOscHandlers } from '../lib/terminal-capability-replies'
 import {
   isTerminalLinkClick,
   terminalLinkModifierOpensSystemBrowser,
@@ -621,10 +621,15 @@ export function TerminalView({
       if (text) rememberedSelectionRef.current = text
       setHasSelection(text.length > 0)
     })
-    const colorQuerySuppression = installTerminalColorQueryReplyHandlers(terminal, {
+    const oscHandlers = installTerminalOscHandlers(terminal, {
       isReplaying: () => !readyForLiveOutput,
       respondFromRenderer: session.kind === 'terminal',
-      sendInput
+      sendInput,
+      // PTY 里的 TUI（nvim / fzf / lazygit）用 OSC 52 往剪贴板写。走的是和 Cmd+C 同一个出口，
+      // 所以失败同样响亮报错，不会静默丢。
+      writeClipboard: (text) => {
+        void copyTextToClipboard(text, reportError)
+      }
     })
     terminal.attachCustomKeyEventHandler((event) => {
       // 终端作用域的键判定统一从注册表匹配（scope 'terminal'），本层只做「命中之后送什么字节/做什么」。
@@ -787,7 +792,7 @@ export function TerminalView({
       renderReady?.dispose()
       webglContextLoss?.dispose()
       webgl?.dispose()
-      colorQuerySuppression.dispose()
+      oscHandlers.dispose()
       searchCounter.dispose()
       selection.dispose()
       pathLinks.dispose()

@@ -36,7 +36,13 @@ import type { AgentDisplayState, AgentMuxEvidenceSource, AgentMuxRunState } from
  * 刻意**不**复用 `AgentStatus`：那是「语义状态」的形状（Agent 自己声明的 working/waiting/done 等），
  * 它没有 `exitReason`。而进程投影必须带 exitReason——桌面侧的 `SessionStatus` 正是 `AgentStatus`
  * 加上 exitReason/continuity 等几条的超集，两条路径投出来的都要落进它。所以这里声明进程投影自己的
- * 返回形状，恰好是那个超集里进程事实能填的那几条：多写一条编译不过，少写一条那条事实到不了界面。
+ * 返回形状，恰好是那个超集里进程事实能填的那几条。
+ *
+ * 少写一条，那条事实就到不了界面（`exitSignal` 与 `exitReason` 各自实测漏过一次，全绿存活）。多写一条
+ * 则**没有编译器挡**：两个调用方都是把返回值存进变量再传下去，不是内联字面量，所以 TS 的
+ * excess-property check 根本不触发，`exactOptionalPropertyTypes` 管的也只是「可选属性别显式赋
+ * undefined」而不是「别多一个键」。守这件事的是 `agent-run-status.test.ts` 里那条按键集比对的断言——
+ * 判据必须是逐键相等，写成 `toMatchObject` 就抓不到多出来的那个。
  */
 export type RunProcessStatus = {
   state: AgentDisplayState
@@ -79,6 +85,35 @@ export const RUN_INTERRUPTED_DETAIL = 'The Run owner interrupted this PTY.'
  */
 export function runDisplayState(state: AgentMuxRunState): AgentDisplayState {
   return state === 'interrupted' ? 'error' : state
+}
+
+/**
+ * 一次退出观察里「内核和 Client 报了什么」的那三条事实，从任何带着它们的形状里取出来。
+ *
+ * 为什么要有这个函数：`projectRunProcessStatus` 的两个调用方（主进程的快照路径、renderer 的实时路径）
+ * 此前各自手抄了同一段三行 `...(x === undefined ? {} : { x })`。那不是风格问题——**漏抄一行没有任何
+ * 东西会红**：字段可选、`RunProcessObservation` 不要求在场，于是少喂一条事实只表现为「那条事实到不了
+ * 界面」。这正是实测发生过的事故：`exitSignal` 在实时路径漏了一行，同一个被 SIGSEGV 打死的 Agent，
+ * 崩溃当下看不到信号，reload 之后反而看到了；`exitReason` 后来独立地又漏了一次，形状一模一样。
+ *
+ * 所以判据不是「两处凑巧抄得一样」，而是**只有一个地方决定取哪几条**。两个调用方各自只保留自己形状
+ * 独有的部分（快照的 source 是写死的 'run-process'，实时路径要从 evidence 里取），退出事实一律走这里。
+ *
+ * 入参刻意收成「带这三条可选字段的任意对象」而不是某个具名类型：两侧的载体本就是两个不同的类型
+ * （台账里的 run vs 线上的 process-state 事件），它们只在这三条上同名同义。
+ */
+export function runExitFacts(source: {
+  exitCode?: number
+  exitSignal?: string
+  exitReason?: AgentMuxRunExitReason
+}): { exitCode?: number; exitSignal?: string; exitReason?: AgentMuxRunExitReason } {
+  return {
+    // 三条都是「带就带上、缺就缺席」。不用 `?? 0` / `?? ''` 兜底：0 是合法退出码，空串不是信号名，
+    // 兜底会把「没报」伪造成「报了一个中性值」。
+    ...(source.exitCode === undefined ? {} : { exitCode: source.exitCode }),
+    ...(source.exitSignal === undefined ? {} : { exitSignal: source.exitSignal }),
+    ...(source.exitReason === undefined ? {} : { exitReason: source.exitReason })
+  }
 }
 
 /**
