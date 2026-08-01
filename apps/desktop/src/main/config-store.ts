@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm } from 'node:fs/promises'
+import { mkdir, readFile } from 'node:fs/promises'
 import { dirname, join, normalize as normalizeLocalPath, posix } from 'node:path'
 import { app } from 'electron'
 import { z } from 'zod'
@@ -236,6 +236,100 @@ function withNotificationDefault(config: AppConfig): { config: AppConfig; added:
   }
 }
 
+/**
+ * A retired config's **authored** half: the records the user typed or picked, which no default
+ * table can reconstruct. Everything else in the file is derived — `executors` comes from the
+ * built-in Provider catalog, `appearance`/`browser`/`notifications` from `DEFAULT_CONFIG` — so a
+ * version bump may reset those freely.
+ *
+ * This split is the whole point. A version bump used to `rm` the file and load `DEFAULT_CONFIG`,
+ * whose `workspaces: []`, so **every project the user had registered was discarded** — twice in
+ * production (7→8 and 8→9), because the reset fires on *any* older version, not on one specific
+ * bump. Refreshing the derived half never required destroying the authored half; the two just
+ * happened to share one file and one version gate.
+ *
+ * `hosts` travels with `workspaces` because every workspace names one (`hostId`), and the schema's
+ * refinement rejects a workspace whose host is absent: dropping hosts while keeping workspaces
+ * would produce a config that cannot be parsed back.
+ *
+ * The reason the old code gave for *not* back-filling `executors` — that "written before this
+ * Provider existed" and "the user deleted this Provider" are indistinguishable on disk, so a
+ * back-fill would resurrect deletions — is sound, and it is why executors are still reset here.
+ * It does not transfer to workspaces: a workspace carries a unique id and a unique path, so its
+ * presence is never ambiguous. Preserving it invents nothing.
+ *
+ * **Salvage is per record, never per file.** Parsing all workspaces as one object would resurrect
+ * the very bug being fixed: the next bump that changes the workspace shape (a new required field,
+ * a renamed one) makes the whole array fail, and every project vanishes again — silently, because
+ * an empty carry-over is indistinguishable from "the user had no projects". Each record is judged
+ * on its own, so one damaged entry costs one project instead of all of them.
+ *
+ * `found` vs. the returned length is the caller's evidence for the case salvage cannot cover: a
+ * shape change that invalidates *every* record. There is no way to carry a record forward that the
+ * current schema would reject — `save()` would refuse the result — so that case must be loud
+ * rather than quiet. See `retiredConfigReplacement`.
+ */
+export function authoredConfigCarryOver(raw: unknown): {
+  hosts: AppConfig['hosts']
+  workspaces: WorkspaceRecord[]
+  found: number
+} {
+  const outer = z
+    .object({ hosts: z.array(z.unknown()).optional(), workspaces: z.array(z.unknown()).optional() })
+    .safeParse(raw)
+  const rawHosts = outer.success ? outer.data.hosts ?? [] : []
+  const rawWorkspaces = outer.success ? outer.data.workspaces ?? [] : []
+
+  const hosts = rawHosts
+    .map((host) => hostSchema.safeParse(host))
+    .flatMap((parsed) => (parsed.success ? [parsed.data] : []))
+  // The local host is not authored content — it is always present in the defaults — so a config
+  // whose local entry is damaged still gets one, and its workspaces stay resolvable.
+  const withLocal = hosts.some((host) => host.id === 'local')
+    ? hosts
+    : [...DEFAULT_CONFIG.hosts.filter((host) => host.id === 'local'), ...hosts]
+  const hostIds = new Set(withLocal.map((host) => host.id))
+
+  const workspaces = rawWorkspaces
+    .map((workspace) => workspaceSchema.safeParse(workspace))
+    .flatMap((parsed) => (parsed.success ? [parsed.data] : []))
+    // A workspace whose host did not survive would fail the schema's host-existence refinement,
+    // so it cannot be carried: keeping it would make the whole config unsavable.
+    .filter((workspace) => hostIds.has(workspace.hostId))
+
+  // The cast crosses one representational gap, not a semantic one: under
+  // `exactOptionalPropertyTypes` the contract's optionals are `?: T` while zod infers
+  // `?: T | undefined`. Zod omits an absent optional key rather than setting it to `undefined`,
+  // so no value here can actually be `undefined`. Same cast the two `configSchema.parse` sites use.
+  return {
+    hosts: withLocal as AppConfig['hosts'],
+    workspaces: workspaces as WorkspaceRecord[],
+    found: rawWorkspaces.length
+  }
+}
+
+/**
+ * The config a retired file becomes: current defaults for everything derived, the user's own
+ * hosts and workspaces carried across.
+ *
+ * When the file held projects and **not one** could be carried, this throws instead of launching
+ * with an empty list. That is the failure mode this whole function exists to prevent, and the
+ * distinction that makes throwing right is what happens to the file: `get()` only writes after
+ * this returns, so on a throw the retired file is still on disk, intact, and the projects are
+ * recoverable. Launching "successfully" with zero projects is what destroyed them — the next
+ * `save()` overwrites the only copy. A loud launch failure is recoverable; a quiet one is not.
+ */
+function retiredConfigReplacement(raw: unknown): AppConfig {
+  const carried = authoredConfigCarryOver(raw)
+  if (carried.found > 0 && carried.workspaces.length === 0) {
+    throw new Error(
+      `Refusing to retire a config holding ${carried.found} project(s) that none of the current ` +
+      'schema accepts: the file on disk is unchanged and still holds them.'
+    )
+  }
+  return { ...structuredClone(DEFAULT_CONFIG), hosts: carried.hosts, workspaces: carried.workspaces }
+}
+
 export class ConfigStore {
   private saveTail: Promise<void> = Promise.resolve()
 
@@ -245,6 +339,9 @@ export class ConfigStore {
     await mkdir(SCRATCH_BACKING_PATH, { recursive: true })
     let loaded: AppConfig
     let persist = false
+    // Retirement replaces the executor table wholesale, so the Executor→Provider binding check has
+    // no subject on this write. See `write()` for why enforcing it here cannot work at all.
+    let retiring = false
     try {
       const rawText = await readFile(this.path, 'utf8')
       const rawJson = JSON.parse(rawText)
@@ -257,9 +354,13 @@ export class ConfigStore {
         (rawJson as { version: number }).version > 0 &&
         (rawJson as { version: number }).version < CONFIG_VERSION
       if (isOlderVersion) {
-        await rm(this.path, { force: true })
-        loaded = structuredClone(DEFAULT_CONFIG)
+        // No `rm`: the authored half is read out of `rawJson` right here, and the write below
+        // overwrites this same path. Deleting first only widened the window in which the file was
+        // gone and the projects were not yet rewritten — and it is what let the old code get away
+        // with re-reading the file it had just deleted.
+        loaded = retiredConfigReplacement(rawJson)
         persist = true
+        retiring = true
       } else {
         loaded = configSchema.parse(rawJson) as AppConfig
       }
@@ -272,27 +373,49 @@ export class ConfigStore {
     if (scratch.added) persist = true
     const notifications = withNotificationDefault(scratch.config)
     if (notifications.added) persist = true
-    if (persist) return await this.save(notifications.config)
+    if (persist) {
+      return await this.write(notifications.config, { enforceExecutorBinding: !retiring })
+    }
     return notifications.config
   }
 
   async save(value: AppConfig): Promise<AppConfig> {
+    return await this.write(value, { enforceExecutorBinding: true })
+  }
+
+  /**
+   * `enforceExecutorBinding: false` is for exactly one caller: retiring an older-version file.
+   *
+   * The binding check reads the previous table off disk to refuse re-pointing a live Executor at
+   * another Provider. A retirement has no such subject — it replaces `executors` wholesale from the
+   * built-in catalog, carrying no user binding forward — and enforcing it there does active harm in
+   * two ways. It reads the retired file through the **current** schema, whose `version` is a literal,
+   * so the read itself throws and no config can ever be retired. And even past that, a user-created
+   * Executor id that a later release adopts as a default (say a hand-made `opencode` pointing at
+   * another Provider) would read as a rebinding and brick the launch over data the bump is discarding.
+   */
+  private async write(
+    value: AppConfig,
+    { enforceExecutorBinding }: { enforceExecutorBinding: boolean }
+  ): Promise<AppConfig> {
     const config = configSchema.parse(value) as AppConfig
     let saved!: AppConfig
     const operation = this.saveTail.catch(() => {}).then(async () => {
-      let current: AppConfig | null = null
-      try {
-        current = configSchema.parse(JSON.parse(await readFile(this.path, 'utf8'))) as AppConfig
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-      }
-      for (const [executorId, executor] of Object.entries(current?.executors ?? {})) {
-        const next = config.executors[executorId]
-        if (next && next.providerId !== executor.providerId) {
-          throw new Error(
-            `Agent Executor ${executorId} is already bound to Provider ${executor.providerId}. ` +
-            'Create a new Executor to choose another Provider.'
-          )
+      if (enforceExecutorBinding) {
+        let current: AppConfig | null = null
+        try {
+          current = configSchema.parse(JSON.parse(await readFile(this.path, 'utf8'))) as AppConfig
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        }
+        for (const [executorId, executor] of Object.entries(current?.executors ?? {})) {
+          const next = config.executors[executorId]
+          if (next && next.providerId !== executor.providerId) {
+            throw new Error(
+              `Agent Executor ${executorId} is already bound to Provider ${executor.providerId}. ` +
+              'Create a new Executor to choose another Provider.'
+            )
+          }
         }
       }
       await mkdir(dirname(this.path), { recursive: true })

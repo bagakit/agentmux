@@ -64,28 +64,147 @@ async function storeFixture(): Promise<{ store: ConfigStore; path: string }> {
 }
 
 describe('ConfigStore workspace identity', () => {
-  it('resets retired config to current default without migration or fallback', async () => {
+  // ── 版本升级不得销毁用户创作数据 ────────────────────────────────────────────────
+  //
+  // 这一族守的是一个已经发生过两次的事故：version 7→8、8→9 各清空了一次用户的项目列表。
+  // 重置分支当时 `rm` 掉配置再加载 `DEFAULT_CONFIG`（其 `workspaces: []`），而重置对**任何**
+  // 低于当前版本的配置都触发，所以它不是某一次 bump 的失误，是每次 bump 都会重演。
+  //
+  // 此前这里只有一条 `resets retired config to current default without migration or fallback`，
+  // 它把「清空」断言成正确行为，且 fixture 是 `workspaces: []`——对丢失完全失明。那条已被下面
+  // 几条取代：重置**派生**半边（executors/appearance/browser）仍是既定答案，重置**创作**半边不是。
+
+  it('a version bump preserves every workspace the user registered', async () => {
+    // 承重的一条。三个真实形状的项目 + 一个自定义 host，配置版本低一版。
+    const { store, path } = await storeFixture()
+    const registered: WorkspaceRecord[] = [
+      workspace({ id: 'ws-a', name: 'Pageville', path: '/projects/pageville' }),
+      workspace({ id: 'ws-b', name: 'Survivors', path: '/projects/survivors' }),
+      workspace({ id: 'ws-c', name: 'Build box checkout', hostId: 'remote', path: '/srv/checkout' })
+    ]
+    await writeFile(path, JSON.stringify({
+      ...baseConfig,
+      version: DEFAULT_CONFIG.version - 1,
+      workspaces: registered
+    }))
+
+    const loaded = await store.get()
+
+    // 逐条按 id 比对，不是比数量：数量相等也可能是被换成了别的记录。
+    for (const expected of registered) {
+      expect(
+        loaded.workspaces.find((candidate) => candidate.id === expected.id),
+        `项目 ${expected.name} 在版本升级后消失了`
+      ).toEqual(expected)
+    }
+    // 自定义 host 必须一起活下来——schema 的 superRefine 要求每个 workspace 的 host 在场，
+    // 只留 workspace 不留 host 会产出一份存不回去的配置。
+    expect(loaded.hosts.find((host) => host.id === 'remote')).toBeDefined()
+    // 而且落盘了，不是只在内存里——否则下次启动再丢一次。
+    const persisted = JSON.parse(await readFile(path, 'utf8')) as AppConfig
+    expect(persisted.version).toBe(DEFAULT_CONFIG.version)
+    expect(persisted.workspaces.map((entry) => entry.id)).toEqual(
+      expect.arrayContaining(registered.map((entry) => entry.id))
+    )
+  })
+
+  it('a version bump still resets the derived half it is there to refresh', async () => {
+    // 反向那一半：修复不能变成「什么都不重置」。executors 必须被刷成当前默认表——这正是
+    // bump 存在的理由（v7 的 9 家配置要补齐后加入的几家），也是不做回填的那条论证仍然成立的地方。
+    const { store, path } = await storeFixture()
+    await writeFile(path, JSON.stringify({
+      ...baseConfig,
+      version: DEFAULT_CONFIG.version - 1,
+      workspaces: [workspace({ id: 'ws-keep' })],
+      executors: {
+        codex: { ...baseConfig.executors.codex!, label: 'Stale Codex', command: 'stale' }
+      },
+      appearance: { terminalTheme: 'catppuccin-mocha' }
+    }))
+
+    const loaded = await store.get()
+
+    expect(Object.keys(loaded.executors).sort()).toEqual(Object.keys(DEFAULT_CONFIG.executors).sort())
+    expect(loaded.executors.codex).toEqual(DEFAULT_CONFIG.executors.codex)
+    expect(loaded.appearance).toEqual(DEFAULT_CONFIG.appearance)
+    // 同一次读取里创作的那半边留着——两半边的处置必须能同时被观察到，否则「全留」也能过。
+    expect(loaded.workspaces.map((entry) => entry.id)).toContain('ws-keep')
+  })
+
+  it('salvages workspaces one record at a time, so one damaged entry costs one project', async () => {
+    // 全有或全无的解析会让下一次「workspace 形状变了」的 bump 再清空一次全部项目——同一个 bug
+    // 换个版本号重演。逐条判定的判据：一条坏记录在场时，其余的必须一条不少。
+    const { store, path } = await storeFixture()
+    await writeFile(path, JSON.stringify({
+      ...baseConfig,
+      version: DEFAULT_CONFIG.version - 1,
+      workspaces: [
+        workspace({ id: 'ws-ok-1', path: '/projects/one' }),
+        // 未来形状：多一个当前 schema 不认识的字段（`.strict()` 会拒掉整条）。
+        { ...workspace({ id: 'ws-future', path: '/projects/future' }), tags: ['x'] },
+        workspace({ id: 'ws-ok-2', path: '/projects/two' })
+      ]
+    }))
+
+    const loaded = await store.get()
+
+    const ids = loaded.workspaces.map((entry) => entry.id)
+    expect(ids, '坏记录旁边的好记录被一起丢掉了——salvage 不是逐条的').toContain('ws-ok-1')
+    expect(ids).toContain('ws-ok-2')
+    expect(ids, '当前 schema 拒绝的记录不能被留下，否则整份配置存不回去').not.toContain('ws-future')
+  })
+
+  it('refuses to launch rather than silently retire a config whose every project is unreadable', async () => {
+    // salvage 覆盖不到的情形：形状变化让**每一条**都失效。此时「成功启动、列表为空」是不可逆的——
+    // 下一次 save() 覆盖掉唯一的副本。响亮失败则可逆：磁盘上那份原封不动。
+    const { store, path } = await storeFixture()
+    const original = JSON.stringify({
+      ...baseConfig,
+      version: DEFAULT_CONFIG.version - 1,
+      workspaces: [
+        { ...workspace({ id: 'ws-1', path: '/projects/one' }), shape: 'future' },
+        { ...workspace({ id: 'ws-2', path: '/projects/two' }), shape: 'future' }
+      ]
+    })
+    await writeFile(path, original)
+
+    await expect(store.get()).rejects.toThrow(/2 project/)
+    // 关键：文件必须还在，且还是原来那份。这是「响亮失败可恢复」的全部依据。
+    expect(await readFile(path, 'utf8')).toBe(original)
+  })
+
+  it('treats a config that genuinely had no projects as no projects, not as an error', async () => {
+    // 上一条的边界：真的一个项目都没有（新装、或用户删空了）不能被当成损坏。判据是原始条数，
+    // 不是解析后的条数——否则 `workspaces: []` 会让每个空配置启动失败。
+    const { store, path } = await storeFixture()
+    await writeFile(path, JSON.stringify({ ...baseConfig, version: DEFAULT_CONFIG.version - 1, workspaces: [] }))
+
+    const loaded = await store.get()
+
+    // 只剩 get() 自己补的 scratch 那条。
+    expect(loaded.workspaces.map((entry) => entry.id)).toEqual([SCRATCH_WORKSPACE_ID])
+  })
+
+  it('back-fills the local host when a retired config damaged it, keeping workspaces resolvable', async () => {
+    // local host 不是创作内容（默认表里永远有一份），所以它损坏时不该拖走依赖它的项目。
+    // 这条替代了旧那条只验「带 daemon 的退役 host 形状能通过」的用例，并把结论收紧到项目存活。
     const { store, path } = await storeFixture()
     await writeFile(path, JSON.stringify({
       ...baseConfig,
       version: DEFAULT_CONFIG.version - 1,
       hosts: [{
-        id: 'remote',
-        kind: 'ssh',
-        label: 'Old host',
-        hostname: 'old.example.test',
-        daemon: {
-          buildIdentity: 'old',
-          remoteNodePath: 'node',
-          remoteAgentMuxdPath: '/old/agentmuxd.js',
-          remoteSocketPath: '/old/agentmuxd.sock'
-        }
-      }]
+        id: 'local',
+        kind: 'local',
+        label: 'This Mac',
+        daemon: { buildIdentity: 'old', remoteNodePath: 'node' }
+      }],
+      workspaces: [workspace({ id: 'ws-local', hostId: 'local', path: '/projects/one' })]
     }))
 
     const loaded = await store.get()
-    expect(loaded.version).toBe(DEFAULT_CONFIG.version)
-    expect(JSON.parse(await readFile(path, 'utf8'))).toMatchObject({ version: DEFAULT_CONFIG.version })
+
+    expect(loaded.hosts.filter((host) => host.id === 'local')).toHaveLength(1)
+    expect(loaded.workspaces.map((entry) => entry.id)).toContain('ws-local')
   })
 
   it('rejects future-version config strictly and retains the file', async () => {
