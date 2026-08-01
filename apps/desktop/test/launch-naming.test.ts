@@ -189,7 +189,7 @@ describe('启动时命名：两个可选输入，落地在 store', () => {
     expect(newTabSurfaceSource).toContain('aria-label="Agent name"')
     expect(newTabSurfaceSource).toContain('aria-label="Tab name"')
     expect(newTabSurfaceSource).toContain(
-      '{ agentName: agentName.trim() || undefined, tabName: tabName.trim() || undefined }'
+      "{ agentName: names.agentName.trim() || undefined, tabName: names.tabName.trim() || undefined }"
     )
     // 留空不得阻塞启动：Launch 按钮的 disabled 条件里不许出现名字。
     // 按钮上点名，不按 "disabled={!workspace" 这个前缀点名——那个前缀在这份源码里命中六处，
@@ -206,5 +206,94 @@ describe('启动时命名：两个可选输入，落地在 store', () => {
     expect(disabledClause).toContain('disabled={')
     expect(disabledClause).not.toContain('agentName')
     expect(disabledClause).not.toContain('tabName')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 两格名字为什么不能留在组件的 useState 里。
+//
+// 上面那 4 条真跑 store，但都以显式 names 参数入口，绕过了"用户填的那两格怎么活到 launchAgent
+// 被调用的那一刻"。而这段接线原先只有 Test 5 的 readFileSync + toContain 守着——文本断言不执行
+// 代码：实测把两个 input 的 `onChange` 删掉，两格输入框永久不可写（agentName/tabName 恒为空串，
+// 载荷恒 `{undefined, undefined}`，用户填什么都没用），launch-naming 5 条 + 涉及 NewTabSurface 的
+// 全部 23 条**全绿**，`tsc --noEmit` 也干净。
+//
+// 顺着这个洞查下去发现的是一个真缺陷，不只是守卫问题：名字当时存在组件 useState 里，而启动的
+// 一瞬间这个 region 就被换成 pending agent surface、组件随即卸载；启动失败翻回 launcher
+// （reduceSessionLaunchFailed 沿用同一 regionId）重挂的是一个 useState('') 的新实例——用户填的
+// 两个名字丢了。这正是 prompt 那格当初被搬进 store 要修的那份用户报告（见
+// launcher-draft-survival.test.ts：「报错退回初始页, 之前输入过的东西没缓存」），名字这两格
+// 当时没跟上同一修法。
+//
+// 修法让两件事同时成立：名字与 prompt 同一机制按 regionId 存 store（失败留、成功清），于是
+// 这条接线有了一个能被测试执行的接缝——下面这些用例跑的就是它。
+// ---------------------------------------------------------------------------
+describe('启动时填的名字跨卸载存活', () => {
+  it('启动失败后两格名字原地留着，供用户直接重试', async () => {
+    const launcher = launcherFixture()
+    const regionId = launcher.layout.activeRegionId
+    // 组件按 regionId 写这两格；这里直接落到 store，模拟用户已经填完。
+    useAppStore.getState().setLauncherNameDraft(regionId, 'agentName', '调查员')
+    useAppStore.getState().setLauncherNameDraft(regionId, 'tabName', '登录排查')
+    vi.spyOn(api.sessions, 'launchAgent').mockRejectedValue(
+      new Error('Timed out waiting for the Provider terminal capability query.')
+    )
+
+    await expect(
+      useAppStore.getState().launchAgent(
+        'codex',
+        'do the thing',
+        'pane',
+        { tabId: launcher.id, regionId },
+        undefined,
+        { agentName: '调查员', tabName: '登录排查' }
+      )
+    ).rejects.toThrow('Timed out')
+
+    // region 翻回 launcher（沿用同一 regionId），两格名字原封不动留在同一个键上。
+    expect(useAppStore.getState().tabs[launcher.id]?.regions[regionId]).toMatchObject({
+      kind: 'launcher'
+    })
+    expect(useAppStore.getState().launcherNameDrafts[regionId]).toEqual({
+      agentName: '调查员',
+      tabName: '登录排查'
+    })
+  })
+
+  it('启动成功后清掉，否则会串到下一个新标签页', async () => {
+    const launcher = launcherFixture()
+    const regionId = launcher.layout.activeRegionId
+    useAppStore.getState().setLauncherNameDraft(regionId, 'agentName', '调查员')
+    mockLaunch()
+
+    await useAppStore.getState().launchAgent(
+      'codex',
+      'do the thing',
+      'pane',
+      { tabId: launcher.id, regionId },
+      undefined,
+      { agentName: '调查员', tabName: undefined }
+    )
+
+    // 名字已经落到 agentNames（按 session id），这份按 regionId 的草稿至此失去归属。
+    expect(useAppStore.getState().launcherNameDrafts[regionId]).toBeUndefined()
+  })
+
+  it('两格互不覆盖——写一格不清掉另一格', () => {
+    // 一格一个 setter 很容易写成整对替换，那样先填 Agent 名再填 Tab 名就会把前一格抹掉。
+    const regionId = 'region:launcher'
+    useAppStore.getState().setLauncherNameDraft(regionId, 'agentName', '调查员')
+    useAppStore.getState().setLauncherNameDraft(regionId, 'tabName', '登录排查')
+    expect(useAppStore.getState().launcherNameDrafts[regionId]).toEqual({
+      agentName: '调查员',
+      tabName: '登录排查'
+    })
+  })
+
+  it('按 regionId 归属：另一个 launcher 的两格互不串味', () => {
+    useAppStore.getState().setLauncherNameDraft('region:a', 'agentName', '甲')
+    useAppStore.getState().setLauncherNameDraft('region:b', 'agentName', '乙')
+    expect(useAppStore.getState().launcherNameDrafts['region:a']?.agentName).toBe('甲')
+    expect(useAppStore.getState().launcherNameDrafts['region:b']?.agentName).toBe('乙')
   })
 })

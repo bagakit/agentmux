@@ -4,6 +4,7 @@ import type { LaunchOptionSelection } from '@agentmux/core'
 import { DESKTOP_ACTIONS } from '../../../shared/desktop-actions'
 import { executorDetectionKey, useAppStore, warmTerminalKey } from '../store'
 import { configuredExecutors } from '../lib/executors'
+import { EMPTY_LAUNCHER_NAMES, launcherNameBinding } from '../lib/launcher-name-draft'
 import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
 import { LaunchRefine } from './LaunchOptionControls'
 import { TerminalView } from './TerminalView'
@@ -38,8 +39,23 @@ export function NewTabSurface({
   const [launchOptionSelection, setLaunchOptionSelection] = useState<LaunchOptionSelection>({})
   // 启动时给名字是可选的。两个都留空是最常见的情况，此时一个字都不写，显示名交还派生链
   // （lib/display-name.ts）。名字只在启动成功后由 store 落地——它自己才握有 sessionId 与 tabId。
-  const [agentName, setAgentName] = useState('')
-  const [tabName, setTabName] = useState('')
+  //
+  // 与 prompt 同一机制、同一理由存进 store：启动的一瞬间本组件就被换成 pending agent surface 而卸载，
+  // 若名字只活在组件里，启动失败翻回 launcher 就会重挂一个空的新实例，用户填的名字丢掉——prompt
+  // 当初正是为这个搬进 store 的，名字这两格当时没跟上。
+  const storedNames = useAppStore((state) => state.launcherNameDrafts)
+  const setLauncherNameDraft = useAppStore((state) => state.setLauncherNameDraft)
+  // 空分组占位（无 regionId）没有可跨卸载存活的稳定键，与 prompt 那格同一处理：退回本地 state。
+  const [localNames, setLocalNames] = useState(EMPTY_LAUNCHER_NAMES)
+  // 读与写的 key 由 launcherNameBinding 判一次。分开算两次就会漂移，而漂移的症状是输入框静默不
+  // 响应（写 A 键读 B 键，用户敲什么都看不见，且不报错）——实测把写回那处 key 换掉，14 条全绿。
+  const { names, set: setName } = launcherNameBinding({
+    regionId,
+    drafts: storedNames,
+    writeShared: setLauncherNameDraft,
+    local: localNames,
+    writeLocal: (field, value) => setLocalNames((current) => ({ ...current, [field]: value }))
+  })
   const [optionsExpanded, setOptionsExpanded] = useState(false)
   const [busy, setBusy] = useState<'agent' | 'terminal' | 'browser' | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -231,16 +247,16 @@ export function NewTabSurface({
       <div className="launch-names">
         <input
           className="launch-names__input"
-          value={agentName}
-          onChange={(event) => setAgentName(event.target.value)}
+          value={names.agentName}
+          onChange={(event) => setName('agentName', event.target.value)}
           placeholder="Agent name (optional)"
           aria-label="Agent name"
           disabled={busy !== null}
         />
         <input
           className="launch-names__input"
-          value={tabName}
-          onChange={(event) => setTabName(event.target.value)}
+          value={names.tabName}
+          onChange={(event) => setName('tabName', event.target.value)}
           placeholder="Tab name (optional)"
           aria-label="Tab name"
           disabled={busy !== null}
@@ -280,7 +296,7 @@ export function NewTabSurface({
             tabId && regionId ? { tabId, regionId } : undefined,
             launchOptionSelection,
             // trim 后为空即不传：空白不该变成一个 "launch" 档的名字，也绝不阻塞启动。
-            { agentName: agentName.trim() || undefined, tabName: tabName.trim() || undefined }
+            { agentName: names.agentName.trim() || undefined, tabName: names.tabName.trim() || undefined }
           ))}
         >
           {busy === 'agent' ? <LoaderCircle className="spin" size={14} /> : <Play size={14} />} {busy === 'agent' ? 'Launching…' : 'Launch agent'}

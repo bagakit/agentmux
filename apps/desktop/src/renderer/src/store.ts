@@ -41,6 +41,7 @@ import {
 import { isScratchWorkspaceId } from '../../shared/contracts'
 import { api } from './lib/api'
 import type { BrowserAnnotation } from './lib/browser-annotations'
+import { EMPTY_LAUNCHER_NAMES, type LauncherNameField, type LauncherNames } from './lib/launcher-name-draft'
 import type { OpenDestination, OpenHttpLinkOrigin } from './lib/open-destination'
 import { rendererResourceOwnerCounts } from './lib/resource-owner-counts'
 import { terminalResourceOwnerCounts } from './lib/terminal-resource-owners'
@@ -237,6 +238,17 @@ type AppState = {
   browserAnnotationsByBrowserId: Record<string, BrowserAnnotation[]>
   agentComposerDrafts: Record<string, string>
   /**
+   * 启动对话框里填的两个可选名字，按 launcher 的 regionId 存——与 {@link agentComposerDrafts} 同一
+   * 归属、同一生命周期。这里不是"手改名"那一档：手改名按 session id 存在 {@link agentNames}，而这两个
+   * 名字在启动成功之前还没有 session 可挂。
+   *
+   * 为什么不能留在组件的 useState 里：启动的一瞬间本 region 就被换成 pending agent surface，
+   * NewTabSurface 随即卸载；启动失败翻回 launcher（reduceSessionLaunchFailed 沿用同一 regionId）
+   * 重挂的是一个 useState('') 的新实例，用户填的名字就没了——正是 prompt 当初被搬进 store 要修的
+   * 那份用户报告（"报错退回初始页、之前输入没缓存"），名字这两格当时没跟上同一修法。
+   */
+  launcherNameDrafts: Record<string, LauncherNames>
+  /**
    * 用户手改的 Agent 显示名，按 Agent Session id 存。这是《显示名与身份》优先级链最高的那一档——
    * 名字只用于显示，绝不进入 id/寻址：这里的 key 是既有的 session id（寻址身份），value 只是一个
    * 展示字符串，改它不动任何地址。Tab 手改名不在这里——它是 WorkbenchTab.name，与 Tab 同生命周期。
@@ -415,6 +427,11 @@ type AppState = {
   deleteBrowserAnnotation(browserId: string, annotationId: string): void
   clearBrowserAnnotations(browserId: string): void
   setAgentComposerDraft(sessionId: string, text: string): void
+  /**
+   * 写启动对话框的一格名字。`field` 只有 'agentName' | 'tabName' 两种，两格共用一条 action：
+   * 一格一个 setter 会让"启动成功要清掉这个 region 的名字草稿"变成两处要记得改的地方。
+   */
+  setLauncherNameDraft(regionId: string, field: LauncherNameField, value: string): void
   appendAgentComposerDraft(sessionId: string, text: string): void
   clearAgentComposerDraftIfUnchanged(sessionId: string, expectedText: string): void
   send(sessionId: string, text: string): Promise<void>
@@ -1340,6 +1357,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   hostChecks: {},
   browserAnnotationsByBrowserId: {},
   agentComposerDrafts: {},
+  launcherNameDrafts: {},
   agentNames: {},
   mainSurface: 'workbench',
   projectRailOpen: true,
@@ -3072,6 +3090,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // 失败路径（下方 catch → reduceSessionLaunchFailed）绝不清：region 会翻回 launcher 且沿用同一个
       // regionId，草稿留在原地供用户直接重试。这正是用户报告"报错退回初始页、之前输入没缓存"要修的行为。
       get().clearAgentComposerDraftIfUnchanged(regionId, prompt)
+      // 名字草稿与 prompt 草稿同一时机、同一理由清掉：这个 region 已经从 launcher 变成 agent，
+      // 那两格输入失去归属，留着会串到下一个新标签页。失败路径不清（region 翻回 launcher 且沿用
+      // 同一 regionId），用户填的名字原地留着供直接重试。
+      set((current) => {
+        if (current.launcherNameDrafts[regionId] === undefined) return current
+        const { [regionId]: _consumed, ...rest } = current.launcherNameDrafts
+        return { launcherNameDrafts: rest }
+      })
       // 名字与草稿同一时机落地：Agent 已经挂上，两个 id 才真正指向一个存在的东西。失败路径不写，
       // 否则会留下一个指向已消失 session 的孤儿名字。留空即不写，显示名交还派生链。
       if (names?.agentName) get().renameAgent(sessionId, names.agentName)
@@ -3549,6 +3575,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     set((state) => ({
       agentComposerDrafts: { ...state.agentComposerDrafts, [sessionId]: text }
     }))
+  },
+  setLauncherNameDraft(regionId, field, value) {
+    set((state) => {
+      const current = state.launcherNameDrafts[regionId] ?? EMPTY_LAUNCHER_NAMES
+      return {
+        launcherNameDrafts: { ...state.launcherNameDrafts, [regionId]: { ...current, [field]: value } }
+      }
+    })
   },
   appendAgentComposerDraft(sessionId, text) {
     if (!text.trim()) return
