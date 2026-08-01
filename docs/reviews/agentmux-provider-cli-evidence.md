@@ -24,6 +24,11 @@
 「有证据」与「无证据」，无证据的能力保持未声明，或按计划记为 deferred，**绝不允许**为了让测试
 变绿而编造 argv / 事件名 / handle 字段。
 
+**补充（2026-09-01）**：「CLI 不在本机」不等于「无证据」——第一方**源码** checkout 同样可核实，
+且比 `--help` 更完整（能读到事件名常量、payload 字段、resume 的实现分支）。本轮盘查发现
+`opencode` 与 `kimi-cli` 的完整源码在本机，故 T-009/T-016 从「无证据」升为「可核实」；另外
+六个仍不足。逐条见下方《T-009…T-016 的证据面盘查》。
+
 ---
 
 ## Grok（T-003）
@@ -126,6 +131,51 @@ grok 的 `Stop` 因此只会以「报告」身份触发一次。这个前提由�
 - 其他实测：`--acp`（ACP 模式真实存在）、`-i/--prompt-interactive`（现有 promptDelivery 正确）、
   `--approval-mode default|auto_edit|yolo|plan`、`-y/--yolo`、`--skip-trust`、`--session-id <UUID>`
   （**给新会话指定** UUID，不是恢复）、`--session-file <JSON>`、`--list-sessions`、`--delete-session`。
+
+---
+
+## T-009…T-016 的证据面盘查（2026-09-01）
+
+复验：`ls ~/proj/github | grep -iE 'opencode|kimi'`、`ls ~/.copilot`、`command -v <每个>`
+
+八个 Task 里，**只有两个**能凭第一方源码核实，其余六个的落点必须是 deferred 而非实现。
+分档判据是本 Feature Goal 的证据优先级（真实 CLI 实测 > 多参考互相印证 > 单一参考）：
+
+| Task | CLI | 第一方源码 | 能力可核实性 |
+|---|---|---|---|
+| T-009 OpenCode | ❌ | ✅ 本机有完整 checkout | **可核实**（读源码 + 自带文档） |
+| T-016 Kimi | ❌ | ✅ 本机有完整 checkout | **可核实**（读源码 + 自带文档） |
+| T-015 Copilot | ❌ 不在 PATH | ❌ | **不足**，见下 |
+| T-010 Mimo / T-011 Droid / T-012 Devin / T-013 OMP / T-014 Prime | ❌ | ❌ | **不足**：唯一线索是第三方参考语料 |
+
+### Copilot 的「跑过」不等于「能力可核实」
+
+本机确有 `~/.copilot/config.json`（`firstLaunchAt: 2026-07-30`）与 6 份 process 日志，最新到
+2026-09-01，内容形如 `CLI server ready (stdio mode, Rust JSON-RPC engine)`——**证明这个 CLI 在
+本机真的跑过**，比另外五个强。但把日志全文抓一遍事件名，只捞到一个 `prepared`（`[INFO]
+Preparing runtime for graceful shutdown` 里的普通英文词），**没有任何生命周期事件名、resume
+旗标或 hook 配置**。
+
+所以它证明的是「存在 stdio JSON-RPC 服务模式」这一个事实，而 Provider 声明需要的是事件名、
+handle 字段与 resume 定位器的确切拼法。**「装过」和「能力可核实」是两件事**，日志证得了前者、
+证不了后者，中间那段不许用推测补——那正是 grok/cursor 两次踩到的坑（配置侧与投递侧拼法不同，
+猜一边就静默失效）。
+
+### 五个只有第三方线索的条目
+
+Mimo / Droid / Devin / OMP / Prime 在本机既无可执行文件、无源码，也无配置或 session 目录
+（`~/.mimo`、`~/.config/mimocode`、`~/.factory`、`~/.config/devin`、`~/.omp` 逐个确认不存在）。
+它们唯一的线索来自第三方参考语料对启动命令与配置路径的描述——按证据优先级属**单一参考**，
+且是宿主专有产物，不足以支撑能力声明。计划自己的规定就是这个落点：
+
+- `agentmux-provider-parity-plan.md:14`「能力未核实就保持未声明」
+- `agentmux-provider-parity-plan.md:18`「launch-only 或宿主专属 wrapper 不盲目复制，必须记录为
+  明确的 deferred/non-goal」
+- `agentmux-provider-parity-plan.md:35`「'对照语料里有但暂不纳入'的条目只允许作为审计策略记录，
+  不能伪装成已实现 Provider」
+
+（顺带更正一处措辞：计划里用的词是 `deferred` 与 `non-goal`，**没有** `not-comparable` 这个
+分类——T-017 的 acceptance 提到三分类时按前两个加 implemented 理解。）
 
 ---
 
