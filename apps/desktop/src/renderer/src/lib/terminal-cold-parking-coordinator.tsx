@@ -8,7 +8,7 @@ import {
   selectColdParkedTerminalRegions,
   type TerminalColdParkCandidate
 } from './terminal-cold-parking-policy'
-import type { WorkbenchSurface, WorkbenchTab } from './workbench-tabs'
+import type { WorkbenchTab } from './workbench-tabs'
 
 type Layouts = Readonly<Record<string, WorkspaceLayout>>
 type Tabs = Readonly<Record<string, WorkbenchTab>>
