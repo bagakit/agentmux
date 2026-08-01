@@ -20,7 +20,8 @@ import {
 } from './agent-provider.js'
 import { releaseSubagentRoster } from './hook-normalizer.js'
 import { USAGE_FINALIZATION_EVENTS } from './agent-hook-command.js'
-import { classifyRunExit } from './agent-run-exit.js'
+import { classifyRunExit, type AgentMuxRunExitReason } from './agent-run-exit.js'
+import { runBoundedReconnect } from './ctxmux-reconnect.js'
 import { composeAgentLaunchPrompt, composeOutboundMessage } from './agent-outbound-message.js'
 import { hashAgentCapability, issueAgentCapability, resolveCapabilityAuthor } from './agent-capability.js'
 import { planDiscussion } from './agent-discussion.js'
@@ -93,6 +94,7 @@ import type {
   AgentMuxRunAttachment,
   AgentMuxRunDataEvent,
   AgentMuxRunInputAck,
+  AgentMuxRunInputData,
   AgentMuxRunInputOperation,
   AgentMuxRunOutputAck,
   AgentMuxRunRef,
@@ -342,7 +344,15 @@ export function terminalEnvironment(
   }
 }
 
-function projectRun(
+/**
+ * 把内核观察到的一条 run 投影成对外的 `AgentMuxRun`。纯函数：退出原因由调用方给。
+ *
+ * 唯一的调用方是 `AgentMuxClient.projectRun`，它从 `endedRuns` 台账取那个原因。之所以拆成「纯函数 +
+ * 一处取值」而不是让 11 个调用点各带一个 `exitReason` 实参：那样每处都要手抄一次「从台账取值」，漏抄
+ * 一处，那条路上的退出原因就静默退化成缺席，而 tsc 对可选字段缺席一言不发——正是本条缺陷的形状。
+ */
+function projectRunWith(
+  exitReason: AgentMuxRunExitReason | undefined,
   run: CtxmuxAdapterRun,
   agentSession?: AgentMuxAgentSession
 ): AgentMuxRun {
@@ -364,7 +374,9 @@ function projectRun(
     ...(run.state.type === 'exited'
       ? {
           exitCode: run.state.code,
-          ...(run.state.signal === null ? {} : { exitSignal: run.state.signal })
+          ...(run.state.signal === null ? {} : { exitSignal: run.state.signal }),
+          // 退出原因只在 exited 时在场：分类本身只对 exited 有定义（interrupted 不参与）。
+          ...(exitReason === undefined ? {} : { exitReason })
         }
       : run.state.type === 'interrupted'
         ? { interruptionReason: run.state.reason }
@@ -396,6 +408,8 @@ export class AgentMuxClient {
   private readonly hookInstaller: AgentManagedHookInstaller
   private unsubscribeKernel: (() => void) | null = null
   private unsubscribeKernelErrors: (() => void) | null = null
+  private unsubscribeConnectionLost: (() => void) | null = null
+  private reconnecting = false
   private connecting: Promise<void> | null = null
   private connectionEpoch = 0
   private connected = false
@@ -408,8 +422,43 @@ export class AgentMuxClient {
   // stop 路径写入意图，acceptKernelEvent 在退出事件里读它、合成 exitReason。一个 runId 只会退出一次，
   // 分类后即删，不留驻。裸集合足矣——意图是布尔（在场即「我们关的」），不需要携带别的。
   private readonly stopRequestedRuns = new Set<string>()
+  // 「这个 runId 的进程已经终结」这条**观察结果**的台账，与上面那条**意图**台账分居两处、语义不同：
+  // 意图是我们想不想关，这条是内核报没报它已经没了。「这个 run 再不会有 hook 事件」的权威终点有**两条**
+  // 到达路径，故写入点也是两处，各对应一条路径：
+  // - 实时事件流：acceptKernelEvent 收到 exited 或 interrupted。它见过停止意图，知道得最多。
+  // - daemon 的 list() 快照：backfillEndedRuns。事件流在掉线期间根本不存在（且整份台账随断连清空），
+  //   离线期发生的终结只有这一条路能知道。它只补空缺、绝不覆盖实时那处的答案——理由见该方法的注释。
+  //
+  // 值是那一刻分类出的退出原因（非 exited 的终结不参与分类，记 undefined）。之所以要**存**它而不是
+  // 事后重算：分类要读停止意图，而意图在同一处被 delete 掉了（一个 runId 只退出一次，读完即弃），
+  // 事后无从重建；而 daemon 的 list() 只报 code/signal，永远不知道那次退出是不是我们主动关的。
+  // 于是 live 事件路径与 snapshot 重投影路径共用这一份记录，两条路对「退出为什么」给出同一个答案。
+  //
+  // 为什么不复用 runPids 判活：那是 pid 缓存，有十三个写入点（list/attach/replay/resume/…），把生命
+  // 周期语义压到它身上，任何一处缓存维护的改动都会静默改变「算不算已终结」。也不逐条 hook 去问
+  // kernel.status：PreToolUse/PostToolUse 是高频路径，每条加一次 daemon 往返换不到任何新事实。
+  //
+  // 一个 runId 只终结一次且此后永不复活，所以这里不逐条删——删了就等于把「已终结」这个事实忘掉，
+  // 迟到的 hook 又能复活它。整份随断连清空（连接重建后会重新 list 出真相），与 stopRequestedRuns 同处。
+  private readonly endedRuns = new Map<string, AgentMuxRunExitReason | undefined>()
   private readonly screenEvidence: AgentScreenEvidenceStore
   private readonly promptSubmission: AgentPromptSubmissionCoordinator
+
+  /**
+   * 投影一条 run，退出原因**只从这一处**取。
+   *
+   * 十一个调用点都走这里，而「从 `endedRuns` 台账取值」这句话只写一遍。反过来做——让每个调用点自带
+   * 一个 `exitReason` 实参——就等于把同一次取值手抄十一遍：漏抄一处，那条路上的退出原因静默退化成
+   * 缺席，而 `exitReason` 是可选字段，tsc 对缺席一言不发（本仓已知形状：多处手抄的常量只有 tsc 守，
+   * 而这里连 tsc 都守不住）。
+   *
+   * `has` 与取值分开判：台账里 `undefined` 是**有记录但当时不可分类**（interrupted 那种终结），与
+   * 「压根没这条记录」不是一回事。都投影成字段缺席，但前者是已知的答案，后者是还没退出——把两者
+   * 混成一次 `get() ?? fallback` 就再也分不开。
+   */
+  private projectRun(run: CtxmuxAdapterRun, agentSession?: AgentMuxAgentSession): AgentMuxRun {
+    return projectRunWith(this.endedRuns.get(run.runId), run, agentSession)
+  }
 
   constructor(options: AgentMuxClientOptions = {}) {
     this.providers = new AgentProviderRegistry(options.providers)
@@ -425,6 +474,11 @@ export class AgentMuxClient {
       {
         onEvent: async (agentSessionId, event, evidence) => {
           const session = this.registry.get(agentSessionId)
+          // 与 acceptHookEvent 同一条判据、同一份台账：进程已终结的 run 不许再写语义状态、也不许再发状态
+          // 事件。ACP 是喂状态的**第二条**入口，两条路对「进程已死还能不能被点亮」必须判得一样——只修
+          // 一条会留下同形的第二个缺陷。今天没有 Provider 声明 acpStrategy: adapter，所以这条路上还看不
+          // 到那个 bug；接上第一个 ACP Provider 的那天它就会原样复现，届时这里已经站着人了。
+          if (this.endedRuns.has(session.run.runId)) return
           const observed = {
             ...evidence,
             run: { ...session.run }
@@ -500,10 +554,14 @@ export class AgentMuxClient {
       await this.recoverStaleLifecycles()
       await this.registry.load('local')
       const runs = await this.kernel.list()
+      // 这次 list() 是「App 没在跑的时候谁退出了」的唯一到达路径——冷启动时事件流压根还没订阅（下面几行
+      // 才装）。不补台账的话，那些 run 迟到的 hook 会被收下，Agent 永久转圈（见 backfillEndedRuns）。
+      this.backfillEndedRuns(runs)
       for (const run of runs) this.runPids.set(run.runId, run.pid)
       this.synchronizeAgentRuns(runs)
       this.unsubscribeKernel?.()
       this.unsubscribeKernelErrors?.()
+      this.unsubscribeConnectionLost?.()
       this.unsubscribeKernel = this.kernel.onEvent((event) => this.acceptKernelEvent(event))
       this.unsubscribeKernelErrors = this.kernel.onError((error, runId) => {
         const agentSession = runId ? this.registry.findByRun(runRef(runId)) : undefined
@@ -519,6 +577,10 @@ export class AgentMuxClient {
           }
         })
       })
+      // 掉线检测的接线：kernel 探到实时连接断了（wire 传输失败，或 daemon 关流却没交代 run 下场），
+      // 就在这里驱动整套「置 disconnected → 有界重连 → 恢复真相」。这不是某个 run 的语义错误，故与
+      // onError 分居两处。
+      this.unsubscribeConnectionLost = this.kernel.onConnectionLost(() => this.handleConnectionLost(epoch))
       // Hook config files outlive an App bundle. Re-ensure the managed entries from the current
       // executable before restoring bindings so a moved/replaced install cannot leave old
       // `/Applications/AgentMux.app` commands behind. This is deliberately best-effort and
@@ -576,17 +638,150 @@ export class AgentMuxClient {
     }
   }
 
+  /**
+   * 掉线的落点：kernel 报实时连接断了时被调用。做三件事，缺一不可（原则 11：断线绝不静默）：
+   *
+   * 1. `connected = false`——`requireConnected` 从此如实拦下控制操作，不再把请求投进一个死掉的 kernel。
+   * 2. 发 `connection-state: lost`——渲染端据此把本 Host 所有 Agent 置 `disconnected`，让那一整套故障 UX
+   *    真正有触发源（这是本任务的核心价值：用户必须看得见）。
+   * 3. 起一次有界重连。
+   *
+   * `epoch` 守卫：调用方主动 `disconnect()` 会 `connectionEpoch += 1`，让这条迟到的掉线通知失效——
+   * 我们不给一个已被主动关掉、或已被更新一轮连接取代的连接排重连。
+   * `reconnecting` 守卫：重连风暴里（重连过程中又断一次）不重复起第二条重连循环。
+   */
+  private handleConnectionLost(epoch: number): void {
+    if (epoch !== this.connectionEpoch) return
+    if (this.reconnecting) return
+    this.reconnecting = true
+    this.connected = false
+    this.publisher.publish({
+      type: 'connection-state',
+      state: 'lost',
+      evidence: { source: 'run-process', observedAt: Date.now() }
+    })
+    void this.reconnectLoop(epoch)
+  }
+
+  /**
+   * 有界重连循环。界由纯函数 {@link runBoundedReconnect}/`nextReconnectStep` 给出（指数退避、封顶、
+   * 有限次数），本方法只把「尝试一次连接」与「等待」接给它，并处理两种终局：
+   *
+   * - 连上了：重新订阅（open 内部已 re-subscribe kernel 事件），并**把各 run 的当前状态重新发出去**
+   *   —— 重连不等于状态就对了，掉线期间 run 可能已退出/变化，必须按 daemon 的 list() 真相校正
+   *   （见 republishLiveRunState）。再发 `connection-state: restored`。
+   * - 用尽仍失败：发 `connection-state: unrecoverable`——响亮终局，不静默地永远转圈。
+   */
+  private async reconnectLoop(epoch: number): Promise<void> {
+    const result = await runBoundedReconnect({
+      attempt: async () => {
+        if (epoch !== this.connectionEpoch) {
+          throw new AgentMuxError('Reconnect superseded by a newer connection.', 'CTXMUX_DISCONNECTED')
+        }
+        await this.open(epoch)
+      },
+      sleep: (ms) => this.reconnectSleep(ms)
+    })
+    if (epoch !== this.connectionEpoch) {
+      this.reconnecting = false
+      return
+    }
+    this.reconnecting = false
+    if (result.kind === 'reconnected') {
+      await this.republishLiveRunState()
+      this.publisher.publish({
+        type: 'connection-state',
+        state: 'restored',
+        evidence: { source: 'run-process', observedAt: Date.now() }
+      })
+    } else {
+      this.publisher.publish({
+        type: 'connection-state',
+        state: 'unrecoverable',
+        evidence: { source: 'run-process', observedAt: Date.now() }
+      })
+    }
+  }
+
+  // 重连退避的等待。抽成一个可被测试覆盖的方法，让重连的「界」端到端可断言而不必等真实的秒级退避。
+  protected reconnectSleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms))
+  }
+
+  /**
+   * 重连成功后，按 daemon 的权威 list() 把每个 run 的当前状态重新发出去。
+   *
+   * 为什么必须做：渲染端在掉线时把 Agent 置成了 `disconnected`。重连本身不改那个状态——它只证明我们
+   * 又能跟 daemon 说话了。真相要从 daemon 重新取：掉线期间某个 run 可能已经退出，那它此刻该收到一条
+   * `exited`（经 acceptKernelEvent 合成 exitReason），而不是继续挂在 `disconnected`；还活着的 run 则
+   * 收到一条 `running` 的 process-state，把 `disconnected` 洗回真相。少了这一步，重连后一屏 Agent 会
+   * 永远停在「已断开」——重连等于没连。
+   */
+  private async republishLiveRunState(): Promise<void> {
+    const runs = await this.kernel.list()
+    this.backfillEndedRuns(runs)
+    for (const run of runs) {
+      this.runPids.set(run.runId, run.pid)
+      const agentSession = this.registry.findByRun(runRef(run.runId))
+      this.publisher.publishRunState(
+        this.projectRun(run, agentSession),
+        agentSession?.agentSessionId
+      )
+    }
+  }
+
+  /**
+   * 把 daemon 快照里已经终结的 run 补进终结台账。
+   *
+   * 为什么必须有这一处：实时事件流不是「run 终结了」的唯一到达路径，而是**在场时**的那一条。两个窗口里
+   * 它压根不存在——掉线期间（事件流断了）、以及 App 没在跑的时候（冷启动）。在这两个窗口里退出的 run，
+   * 台账里没有它，于是 acceptHookEvent 那道「已终结不收 hook」的闸门放行它迟到的 hook，Agent 被点亮成
+   * `working` 且**永久转圈**：exited 之后再不会有 process-state 来拨正它，而 working 的时钟衰减只降到
+   * running，降不到 exited。两个窗口都实测复现过（一次掉线重连、一次冷启动 open）。
+   *
+   * 只补空缺、**绝不覆盖**已有记录：wire 断（handleConnectionLost）不清台账，所以重连后这份 list() 会
+   * 把掉线**之前**就已实时收到过退出事件的 run 再报一遍。那些 run 的原因是带着停止意图算出来的，是更好
+   * 的答案；覆盖它等于把 `user-stopped` 降级成 `unknown`。反向的次序不会发生：`open()` 先 list()、后订阅
+   * 事件，被 list() 报成已退出的 run 此后不会再产出退出事件。
+   *
+   * 记下的原因不许假装知道：daemon 只报 code/signal，永远不知道那次退出是不是我们主动关的。所以走与实时
+   * 路径**同一个** classifyRunExit、喂同一份停止意图台账（意图一次性，读完即删）——冷启动时那份意图天然
+   * 是空的，于是裸 0 如实归为 `unknown` 而不是冒充「干净完成」。非 exited 的终结记 `undefined`，与实时
+   * 路径一致：台账里的 `undefined` 表示「有记录但当时不可分类」。
+   */
+  private backfillEndedRuns(runs: readonly CtxmuxAdapterRun[]): void {
+    for (const run of runs) {
+      if (run.state.type === 'running') continue
+      if (this.endedRuns.has(run.runId)) continue
+      const stopRequested = this.stopRequestedRuns.delete(run.runId)
+      this.endedRuns.set(
+        run.runId,
+        run.state.type === 'exited'
+          ? classifyRunExit({
+              stopRequested,
+              exitCode: run.state.code,
+              ...(run.state.signal === null ? {} : { exitSignal: run.state.signal })
+            })
+          : undefined
+      )
+    }
+  }
+
   disconnect(): void {
     this.connectionEpoch += 1
     this.connected = false
     this.connecting = null
+    this.reconnecting = false
     this.unsubscribeKernel?.()
     this.unsubscribeKernel = null
     this.unsubscribeKernelErrors?.()
     this.unsubscribeKernelErrors = null
+    this.unsubscribeConnectionLost?.()
+    this.unsubscribeConnectionLost = null
     this.kernel.disconnect()
     this.runPids.clear()
     this.stopRequestedRuns.clear()
+    this.endedRuns.clear()
     this.agentInputCursors.clear()
     this.agentInputTails.clear()
     this.promptSubmission.cancelAllReadiness()
@@ -694,7 +889,7 @@ export class AgentMuxClient {
       this.runPids.set(run.runId, run.pid)
       const ref = runRef(run.runId)
       if (this.registry.isRetiredRun(ref)) return []
-      return [projectRun(run, this.registry.findByRun(ref))]
+      return [this.projectRun(run, this.registry.findByRun(ref))]
     })
   }
 
@@ -712,7 +907,7 @@ export class AgentMuxClient {
     const run = await this.requireCurrentAgentRun(session)
     return {
       session: cloneSession(session),
-      run: projectRun(run, session),
+      run: this.projectRun(run, session),
       capabilities: { ...this.providers.get(session.providerId).catalog.capabilities }
     }
   }
@@ -729,7 +924,7 @@ export class AgentMuxClient {
       ...(input.rows === undefined ? {} : { rows: input.rows })
     })
     this.runPids.set(run.runId, run.pid)
-    const projected = projectRun(run)
+    const projected = this.projectRun(run)
     this.publisher.publishRunState(projected)
     return projected
   }
@@ -742,7 +937,7 @@ export class AgentMuxClient {
       throw new AgentMuxError('Requested Run belongs to an Agent Session.', 'RUN_KIND_MISMATCH')
     }
     this.runPids.set(runId, attached.run.pid)
-    const run = projectRun(attached.run)
+    const run = this.projectRun(attached.run)
     this.publisher.publishRunState(run)
     return { run, replay: attached.replay, gap: attached.gap }
   }
@@ -758,7 +953,7 @@ export class AgentMuxClient {
     }
     this.runPids.set(ref.runId, replay.run.pid)
     return {
-      run: projectRun(replay.run, this.registry.findByRun(ref)),
+      run: this.projectRun(replay.run, this.registry.findByRun(ref)),
       replay: replay.replay,
       gap: replay.gap
     }
@@ -1130,7 +1325,7 @@ export class AgentMuxClient {
       this.hookBindings.set(run.runId, hookBinding)
       this.runPids.set(run.runId, run.pid)
       this.publisher.publish({ type: 'agent-session', session: cloneSession(readySession) })
-      this.publisher.publishRunState(projectRun(run, readySession), agentSessionId)
+      this.publisher.publishRunState(this.projectRun(run, readySession), agentSessionId)
       if (input.prompt?.trim()) {
         await this.recordPromptAfterSideEffect(
           readySession,
@@ -1255,11 +1450,11 @@ export class AgentMuxClient {
     if (attached.run.acceptedInputBytes !== null) {
       this.agentInputCursors.set(agentSessionId, attached.run.acceptedInputBytes)
     }
-    this.publisher.publishRunState(projectRun(attached.run, session), agentSessionId)
+    this.publisher.publishRunState(this.projectRun(attached.run, session), agentSessionId)
     return {
       session: cloneSession(session),
       attachment: {
-        run: projectRun(attached.run, session),
+        run: this.projectRun(attached.run, session),
         replay: attached.replay,
         gap: attached.gap
       }
@@ -1473,7 +1668,7 @@ export class AgentMuxClient {
       this.runPids.delete(current.run.runId)
       this.runPids.set(run.runId, run.pid)
       this.publisher.publish({ type: 'agent-session', session: cloneSession(readySession) })
-      this.publisher.publishRunState(projectRun(run, readySession), readySession.agentSessionId)
+      this.publisher.publishRunState(this.projectRun(run, readySession), readySession.agentSessionId)
       if (prompt) {
         await this.recordPromptAfterSideEffect(
           readySession,
@@ -1544,7 +1739,7 @@ export class AgentMuxClient {
       try {
         const observed = await this.kernel.status(current.run.runId)
         this.assertAgentRun(current, observed)
-        run = projectRun(observed, current)
+        run = this.projectRun(observed, current)
       } catch (error) {
         if (!(error instanceof AgentMuxError) || error.code !== 'CTXMUX_run_not_found') throw error
       }
@@ -1672,7 +1867,7 @@ export class AgentMuxClient {
     })
   }
 
-  async writeAgent(agentSessionId: string, data: string): Promise<AgentMuxRunInputAck> {
+  async writeAgent(agentSessionId: string, data: AgentMuxRunInputData): Promise<AgentMuxRunInputAck> {
     this.requireConnected()
     return await this.writeAgentInput(this.requireAgentSession(agentSessionId), data)
   }
@@ -2953,7 +3148,7 @@ export class AgentMuxClient {
 
   private async writeAgentInput(
     requestedSession: AgentMuxAgentSession,
-    data: string
+    data: AgentMuxRunInputData
   ): Promise<AgentMuxRunInputAck> {
     return await this.serializeAgentInput(requestedSession, async (session, run) => {
       if (session.pendingInteraction) {
@@ -3024,6 +3219,17 @@ export class AgentMuxClient {
 
   private async acceptHookEvent(envelope: NativeHookEnvelope, signal: AbortSignal): Promise<void> {
     signal.throwIfAborted()
+    // 进程已经终结的 run 不再收它的 hook。这一条挡的是**两个**写入点：下面既发 agent-status 事件、又把
+    // semanticStatus 落盘。只挡其一都不够——留在磁盘上的 working 会在下次冷启动被读回来继续撒谎。
+    //
+    // 为什么退出之后还会有 hook：hook 是 Agent 自己的进程在 exec 一条命令，它与内核的退出事件是两条
+    // 独立的到达路径，谁先到不定；而自然退出不解绑 registry（解绑只发生在 stop/retire），所以下面那条
+    // 会话绑定检查照旧命中。一条被收下的迟到 hook 会让 Agent 永久转圈：exited 之后再不会有 process-state
+    // 来拨正它，而 working 的时钟衰减只降到 running，降不到 exited。
+    //
+    // 这不会误伤「打断当轮」：那条路径根本不产生 process-state、run 仍是 running，此时的 hook 是正常
+    // 刷新，照收。
+    if (this.endedRuns.has(envelope.runId)) return
     const session = this.registry.findByRun(runRef(envelope.runId))
     if (
       !session ||
@@ -3257,6 +3463,10 @@ export class AgentMuxClient {
           ...(event.state.signal === null ? {} : { exitSignal: event.state.signal })
         })
       : undefined
+    // 这个 run 的进程终结了 —— 连同刚分类出的原因一起记下来。这一条记录承两件事：此后它的 hook 一律
+    // 拒收（见 acceptHookEvent），以及 snapshot 重投影时还能说出「它为什么没了」。必须记在分类**之后**：
+    // 意图已经在上一行被读走并删掉，事后再没有第二次机会算出这个答案。
+    this.endedRuns.set(event.runId, exitReason)
     this.publisher.publish({
       type: 'process-state',
       ...(agentSession ? { agentSessionId: agentSession.agentSessionId } : {}),

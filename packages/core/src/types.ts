@@ -115,6 +115,13 @@ export type AgentMuxRun = AgentMuxRunRef & {
   acceptedInputBytes: number
   exitCode?: number
   exitSignal?: string
+  /**
+   * 一次 `exited` 退出「为什么会这样」的诚实分类，与 `process-state` 事件上的同名字段同源、同值：
+   * 两者都由 Client 在退出那一刻合成后记在台账里，投影时取出来。之所以要落在 run 上而不只在事件上：
+   * 事件是一次性的，而 reload 后 renderer 只能拿到 snapshot——只挂在事件上的话，退出原因就成了
+   * 「你在场才看得见」的东西，重开窗口就退化成裸 signal 号。
+   */
+  exitReason?: AgentMuxRunExitReason
   interruptionReason?: string
 }
 
@@ -144,11 +151,19 @@ export type AgentMuxRunAttachment = {
   gap: AgentMuxRunReplayGap | null
 }
 
+/**
+ * Run 输入的字节载荷。string 由 ctxmux 侧按 **UTF-8** 编码上线；Uint8Array 则原样透传、逐字节
+ * 不动。两条终端事件源要的正是这个区别：键盘/SGR 鼠标上报是合法文本走 string；而只开了旧式鼠标
+ * 协议（?1000/?1002/?1003 而没开 ?1006）时，坐标字节可能 ≥128、是 latin1 语义，一旦经 UTF-8
+ * 编码 0x80 会被拆成 0xC2 0x80、坐标就毁了——这种必须以 Uint8Array 上线。
+ */
+export type AgentMuxRunInputData = string | Uint8Array
+
 export type AgentMuxRunInputOperation = {
   ownerInstanceId: string
   operationId: string
   expectedByte: number
-  data: string
+  data: AgentMuxRunInputData
 }
 
 export type AgentMuxRunInputAck = AgentMuxRunRef & {
@@ -275,11 +290,9 @@ export type AgentAcpStrategy =
 
 export type AgentCapabilities = {
   terminal: true
-  hookEvents: boolean
   timeline: 'unavailable' | 'complete-events' | 'streaming'
   permission: 'none' | 'observe' | 'respond'
   providerResume: boolean
-  acp: boolean
   replyCorrelation: 'none' | 'native-turn-id' | 'acp-turn-id'
   /**
    * 这个 Provider 是否报**真实**的原生 token 用量，以及它从哪条通道到达。
@@ -748,6 +761,20 @@ export type AgentMuxClientEvent =
       agentSessionId?: string
       code: string
       message: string
+      evidence: AgentMuxEvidence
+    }
+  | {
+      /**
+       * 我们与本 Host 的 daemon 之间那条**唯一实时连接**的状态变化。不针对某个 run/session：单 daemon
+       * 语义下连接是共享的，断了就是这台 Host 上所有 Agent 一起失联。渲染端据此把该 Host 的每个 Agent
+       * Session 置为 `disconnected`（`lost`）、或让它们回到进程真相（`restored`）。
+       *
+       * - `lost`：实时通道断了（socket 错误，或 daemon 关流却没交代 run 下场）。开始有界重连。
+       * - `restored`：重连成功、已重新订阅并补发各 run 的当前状态。
+       * - `unrecoverable`：有界重试用尽仍连不上。**响亮的终局**，不是静默——用户需要手动介入。
+       */
+      type: 'connection-state'
+      state: 'lost' | 'restored' | 'unrecoverable'
       evidence: AgentMuxEvidence
     }
 

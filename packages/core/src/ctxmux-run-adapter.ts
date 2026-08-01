@@ -25,6 +25,8 @@ import {
   type RuntimeIdentity
 } from '@ctxmux/sdk'
 import { AgentMuxError } from './errors.js'
+import { classifyStreamEnd } from './ctxmux-stream-end.js'
+import type { AgentMuxRunInputData } from './types.js'
 import {
   reclaimOrphanEndpointDirectories,
   type EndpointReclaimOutcome
@@ -160,7 +162,9 @@ export type CtxmuxAdapterInputOperation = {
   ownerInstanceId: string
   operationId: string
   expectedByte: number
-  data: string
+  // string 走 UTF-8、Uint8Array 逐字节透传：旧式鼠标上报的 latin1 坐标字节只能走后者，
+  // 否则 SDK 的 bytes() 会把 ≥128 的字节 UTF-8 编码成两字节、坐标就错了。
+  data: AgentMuxRunInputData
 }
 
 type LiveAttachment = {
@@ -576,6 +580,7 @@ export class CtxmuxRunAdapter {
   private readonly attachments = new Map<string, LiveAttachment>()
   private eventListener: ((event: CtxmuxAdapterEvent) => void) | null = null
   private errorListener: ((error: AgentMuxError, runId?: string) => void) | null = null
+  private connectionLostListener: (() => void) | null = null
 
   onEvent(listener: (event: CtxmuxAdapterEvent) => void): () => void {
     this.eventListener = listener
@@ -589,6 +594,35 @@ export class CtxmuxRunAdapter {
     return () => {
       if (this.errorListener === listener) this.errorListener = null
     }
+  }
+
+  /**
+   * 通知「与 daemon 的实时连接断了」。单 daemon 语义下，任何一个 attachment 的传输失败、或 daemon
+   * 优雅关流却没交代 run 下场，都意味着我们与 daemon 的实时通道没了——这是唯一的连接，不是某个 run
+   * 的局部错误。listener 由 client 装，用来置 `connected=false`、发 disconnected、排重连。
+   *
+   * 与 {@link onError}（一个 run 的语义错误）分居两处：连接断了要驱动整套重连，一个 run 出错不该。
+   */
+  onConnectionLost(listener: () => void): () => void {
+    this.connectionLostListener = listener
+    return () => {
+      if (this.connectionLostListener === listener) this.connectionLostListener = null
+    }
+  }
+
+  /**
+   * 把实时连接标记为丢失：拆掉所有 attachment、把 client/runtime 置空（于是 {@link isConnected} 如实
+   * 报 false、后续控制操作经 requireClient 响亮失败、connect() 会重建），再通知 listener。
+   *
+   * 幂等：client 已为 null（已断或已主动 disconnect）时直接返回，避免重连风暴里重复通知。
+   */
+  private markConnectionLost(): void {
+    if (this.client === null) return
+    for (const { attachment } of this.attachments.values()) attachment.close()
+    this.attachments.clear()
+    this.client = null
+    this.runtime = null
+    this.connectionLostListener?.()
   }
 
   async connect(): Promise<void> {
@@ -1004,15 +1038,28 @@ export class CtxmuxRunAdapter {
     attachment: Attachment,
     decoder: TextDecoder
   ): Promise<void> {
+    let threw = false
+    let sawTerminalEvent = false
     try {
       for await (const event of attachment.events()) {
         if (this.attachments.get(runId)?.token !== token) return
+        if (event.type === 'exited' || event.type === 'interrupted') sawTerminalEvent = true
         this.emitRunEvent(runId, decoder, event)
       }
     } catch (error) {
+      threw = true
       this.errorListener?.(translateCtxmuxError(error), runId)
     } finally {
-      if (this.attachments.get(runId)?.token === token) this.attachments.delete(runId)
+      const stillOwned = this.attachments.get(runId)?.token === token
+      if (stillOwned) this.attachments.delete(runId)
+      // 这条流怎么结束的，决定了要不要对账。分类是纯函数（ctxmux-stream-end），三种结局：
+      // - detached：我们自己换/删了 attachment，什么都不做。
+      // - run-exited：发过终结事件、干净结束，退出已如实发出，无需再做。
+      // - connection-lost：抛错（wire 断），或 daemon 优雅关流却没交代 run 下场（历史缺陷：旧 pump
+      //   在这一支只删 attachment、不发任何东西，run 永远停在最后状态）。两者都判连接丢失，交给
+      //   markConnectionLost 驱动整套重连去问 daemon 真相，而不是在此刻瞎猜这个 run 死没死。
+      const end = classifyStreamEnd({ threw, sawTerminalEvent, stillOwned })
+      if (end === 'connection-lost') this.markConnectionLost()
     }
   }
 

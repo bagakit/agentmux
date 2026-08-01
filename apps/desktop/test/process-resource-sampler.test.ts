@@ -7,7 +7,8 @@ import {
   pruneSamples,
   rollUpSubtrees,
   type ProcessRow,
-  type UsageSample
+  type UsageSample,
+  type UsageSnapshot
 } from '../src/shared/process-usage.js'
 import { ProcessResourceSampler } from '../src/main/process-resource-sampler.js'
 
@@ -39,6 +40,41 @@ describe('parseProcessTable', () => {
     // ps 在进程正好退出时可能吐出残行；为一行坏数据丢掉整次采样，比少算一个进程糟得多。
     const rows = parseProcessTable('  PID  PPID    RSS  %CPU\n  1  0  100  0.1\ngarbage line\n  2  1\n  3  1  200  0.2')
     expect(rows.map((row) => row.pid)).toEqual([1, 3])
+  })
+
+  // 上面那些坏行（`garbage line` 一段、`2 1` 两段）全被 `parts.length < 4` 挡掉，永远走不到
+  // 数值有限性那道判断。真正危险的残行是"四段齐全、pid/ppid 合法、但 rss/cpu 非数"——`ps` 在
+  // 进程正好退出时就会吐这种。它一旦漏进来，会以 NaN 混进子树累加，一路灌到面板显示 NaN。
+  // 因此下面两条各盯 `||` 的一侧，且断言落在整条链的终点（rollUp→aggregate）而不只是"被跳过"，
+  // 这样即便有人日后把 skip 那行挪走，NaN 也逃不过对汇总数字的检查。
+  it('rss 非数的残行不把 NaN 灌进内存汇总（|| 左侧：rssKib）', () => {
+    // 100 是根，101 是它的子进程但 rss 是 `x`（四段、pid/ppid 合法、rss 非数）。
+    const rows = parseProcessTable('  PID  PPID    RSS  %CPU\n  100     1  10000   5.0\n  101   100      x   2.0')
+    const subtree = rollUpSubtrees(rows, [{ key: 'run-a', pid: 100 }]).get('run-a')
+    // 好行必须还在——守卫退化成"整批都丢"也不许算过。
+    expect(subtree).not.toBeNull()
+    expect(subtree?.processCount).toBe(1)
+    // 走到面板的那一步：坏行漏进来则 10000 + NaN = NaN，这里钉死为好行独有的 10000。
+    const panel = aggregateUsage(
+      [{ observedAt: 0, rssKib: subtree!.rssKib, cpuPercent: subtree!.cpuPercent }],
+      0
+    )
+    expect(panel.rssKib).toBe(10000)
+  })
+
+  it('cpu 非数的残行不把 NaN 灌进 CPU 汇总（|| 右侧：cpuPercent）', () => {
+    // 102 是 100 的子进程但 cpu 是 `z`（四段、pid/ppid 合法、rss 合法、只有 cpu 非数）——
+    // 单盯 rss 那侧的守卫会放它过去。
+    const rows = parseProcessTable('  PID  PPID    RSS  %CPU\n  100     1  10000   5.0\n  102   100   3000   z')
+    const subtree = rollUpSubtrees(rows, [{ key: 'run-a', pid: 100 }]).get('run-a')
+    expect(subtree).not.toBeNull()
+    expect(subtree?.processCount).toBe(1)
+    // 坏行漏进来则 5 + NaN = NaN；峰值聚合 Math.max(NaN) 也是 NaN，一路到面板。钉死为 5。
+    const panel = aggregateUsage(
+      [{ observedAt: 0, rssKib: subtree!.rssKib, cpuPercent: subtree!.cpuPercent }],
+      0
+    )
+    expect(panel.cpuPercent).toBe(5)
   })
 
   it('空输入得到空表，而不是抛错', () => {
@@ -351,6 +387,96 @@ describe('ProcessResourceSampler', () => {
       await vi.advanceTimersByTimeAsync(0)
       // 显示的必须是重开后新采到的 3%，而不是关闭前留下的 90% 峰值。
       expect(latest()?.runs[0]?.cpuPercent).toBe(3)
+      reopened()
+      sampler.dispose()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // 上面那条测不到下面这个洞：它的 `ps` 立刻返回，采样在关闭之前就已经落地了。真正会出错的
+  // 是**关闭时还有一次采样在飞**——`stop()` 清掉 `samples` 与 `latest`，而那次采样醒来后照写，
+  // 于是清空被静默撤销。两条各盯 `runSample` 的一个写回出口（成功一侧、降级一侧）；只守一侧
+  // 的话另一侧照旧把上一段观察的事实递给重开的面板。
+  const tableWithCpu = (cpu: string) => `  PID  PPID    RSS  %CPU\n  100     1  10000  ${cpu}`
+
+  it('关闭时在途的采样落地后不许写回——否则重开的面板会显示一个不存在的尖峰', async () => {
+    vi.useFakeTimers()
+    try {
+      let release: (value: string) => void = () => {}
+      const { sampler, watch, seen, latest, advance } = harness({
+        table: () => new Promise<string>((resolve) => { release = resolve })
+      })
+      sampler.trackRun('run-a', 100)
+
+      // 面板打开，第一次采样落地：安静基线 5%。
+      const stop = watch()
+      await vi.advanceTimersByTimeAsync(0)
+      release(tableWithCpu('5.0'))
+      await vi.advanceTimersByTimeAsync(0)
+      expect(latest()?.runs[0]?.cpuPercent).toBe(5)
+
+      // 下一个周期起了第二次采样，它还在飞的时候用户关掉了面板。
+      advance(USAGE_SAMPLE_INTERVAL_MS)
+      await vi.advanceTimersByTimeAsync(USAGE_SAMPLE_INTERVAL_MS)
+      stop()
+
+      // 两秒后重开。那次采样仍在飞，而 `inFlight` 去重让重开不会另起一次，所以它正是重开后
+      // 第一个落地的结果——这个顺序不是构造出来的巧合，是这段代码固有的。
+      advance(2_000)
+      const reopened = watch()
+      const beforeStaleLands = seen.length
+      release(tableWithCpu('95.0'))
+      await vi.advanceTimersByTimeAsync(0)
+
+      // 事实一：属于上一段观察的结果一次都不许递给重开的面板。
+      expect(seen.slice(beforeStaleLands)).toEqual([])
+
+      // 事实二：它也不许留在样本里。CPU 是 10 秒窗口取峰值，关掉两秒又打开时那个 95 还在窗口
+      // 内，留下来就会被当成"此刻最凶的时候"显示出来——一个从未发生过的尖峰。
+      advance(USAGE_SAMPLE_INTERVAL_MS)
+      await vi.advanceTimersByTimeAsync(USAGE_SAMPLE_INTERVAL_MS)
+      release(tableWithCpu('3.0'))
+      await vi.advanceTimersByTimeAsync(0)
+      expect(latest()?.runs[0]?.cpuPercent).toBe(3)
+
+      reopened()
+      sampler.dispose()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('关闭时在途的采样失败落地后不许把重开的面板画成不可用', async () => {
+    vi.useFakeTimers()
+    try {
+      let release: (value: string) => void = () => {}
+      let fail: (error: Error) => void = () => {}
+      const { sampler, watch, seen, advance } = harness({
+        table: () => new Promise<string>((resolve, reject) => { release = resolve; fail = reject })
+      })
+      sampler.trackRun('run-a', 100)
+      const stop = watch()
+      await vi.advanceTimersByTimeAsync(0)
+      release(tableWithCpu('5.0'))
+      await vi.advanceTimersByTimeAsync(0)
+
+      // 同样是第二次采样在飞的时候关掉，再重开。
+      advance(USAGE_SAMPLE_INTERVAL_MS)
+      await vi.advanceTimersByTimeAsync(USAGE_SAMPLE_INTERVAL_MS)
+      stop()
+      advance(2_000)
+      const reopened = watch()
+      const beforeStaleLands = seen.length
+
+      // 这次它是超时失败。`ps` 的超时是 5 秒，比"关掉再打开"长得多，所以先关后失败是常态而非边角。
+      fail(new Error('ps timed out'))
+      await vi.advanceTimersByTimeAsync(0)
+
+      // 上一段观察里的失败不是这一段的事实。少了这道判断，重开的面板会立刻挂出一条与当前观察
+      // 无关的"资源数据不可用"，而当前这段其实什么都还没采。
+      expect(seen.slice(beforeStaleLands)).toEqual([])
+
       reopened()
       sampler.dispose()
     } finally {

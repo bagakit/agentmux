@@ -7,6 +7,9 @@ import type {
 } from '../../../shared/contracts'
 import type { AgentMuxAgentSession, AgentMuxEvidence, AgentMuxRunRef } from '@agentmux/core'
 import { applyAgentTimelineMutation } from '@agentmux/core/timeline'
+// 进程事实的投影走 node-free 子路径，与主进程侧 import 的是同一个模块（包根那条链拖 node:crypto，
+// renderer 引不动）。
+import { projectRunProcessStatus } from '@agentmux/core/run-status'
 import type { WorkspaceLayout } from './workbench-layout'
 import {
   findWorkbenchRegion,
@@ -426,6 +429,28 @@ export function projectRuntimeEvent(
 ): RuntimeEventReduction {
   const core = event.event
   if (core.type === 'terminal-output') return { state }
+  if (core.type === 'connection-state') {
+    // 单 daemon 语义：这台 Host 的实时连接是所有 Agent 共享的，断了就是全体失联。这里正是那 8 处
+    // `disconnected` UX 唯一的触发源——没有它，掉线时用户只会看到一屏冻住的 Agent，毫无交代。
+    // 只在 `lost` 落 `disconnected`；`restored` 后由 republishLiveRunState 补发的 process-state/
+    // agent-status 事件把每个 run 拉回真相，`unrecoverable` 保持失联（响亮终局，等用户手动介入）。
+    if (core.state !== 'lost') return { state }
+    return { state: {
+      ...state,
+      sessions: state.sessions.map((item) => item.kind === 'agent' &&
+        item.hostId === event.hostId
+        ? {
+            ...item,
+            updatedAt: Math.max(item.updatedAt, core.evidence.observedAt),
+            status: {
+              state: 'disconnected',
+              source: core.evidence.source,
+              observedAt: core.evidence.observedAt
+            }
+          }
+        : item)
+    } }
+  }
   const pendingAgentSessionId = eventAgentSessionId(core)
   const existingEventSession = pendingAgentSessionId
     ? state.sessions.find((session) => session.id === pendingAgentSessionId)
@@ -441,7 +466,20 @@ export function projectRuntimeEvent(
     return { state, sessionMembershipGap: true }
   }
   if (core.type === 'process-state') {
-    const displayState = core.state === 'interrupted' ? 'error' : core.state
+    // 「进程事实 → 界面那一行状态」走 Core 的共享投影，与主进程快照路径（runtime-controller 的
+    // projectSession）是**同一个**实现。这里只负责把事件的字段形状取出来喂给它。
+    //
+    // 曾经这段是本地手写的，于是它比快照路径少一整条事实：内核报的终止信号在这里根本没被读过
+    // （`exitSignal` 在本文件零命中）。后果是同一个被 SIGSEGV 打死的 Agent，崩溃**当下**只显示一个
+    // 没有下文的 error，关掉窗口重开反而看到了 `signal SIGSEGV`——最需要那条信息的时刻恰好没有。
+    const processStatus = projectRunProcessStatus({
+      state: core.state,
+      source: core.evidence.source,
+      observedAt: core.evidence.observedAt,
+      ...(core.exitCode === undefined ? {} : { exitCode: core.exitCode }),
+      ...(core.exitSignal === undefined ? {} : { exitSignal: core.exitSignal }),
+      ...(core.exitReason === undefined ? {} : { exitReason: core.exitReason })
+    })
     return { state: {
       ...state,
       sessions: state.sessions.map((item) =>
@@ -461,19 +499,7 @@ export function projectRuntimeEvent(
                   core.state === 'running' &&
                   (item.status.source === 'native-hook' || item.status.source === 'acp')
                     ? {}
-                    : {
-                        status: {
-                          state: displayState,
-                          source: core.evidence.source,
-                          observedAt: core.evidence.observedAt,
-                          ...(core.state === 'interrupted'
-                            ? { detail: 'The Run owner interrupted this PTY.' }
-                            : {}),
-                          ...(core.exitCode === undefined ? {} : { exitCode: core.exitCode }),
-                          // 退出原因随退出事件到达就贴到 status 上，让「Exited」横幅能说清是你关的还是它崩的。
-                          ...(core.exitReason === undefined ? {} : { exitReason: core.exitReason })
-                        }
-                      }
+                    : { status: processStatus }
                 )
               }
             })()

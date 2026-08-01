@@ -106,6 +106,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .small-button:hover:not(:disabled) { background: var(--surface-2); box-shadow: var(--hl-strong); }
 .small-button--warning { color: var(--amber-text); background: var(--amber-bg); box-shadow: inset 0 0 0 1px var(--amber-line), var(--hl); }
 .small-button--warning:hover:not(:disabled) { color: var(--amber-text-hover); background: var(--amber-bg-hover); box-shadow: inset 0 0 0 1px var(--amber-line), var(--hl-strong); }
+/* 选中/开启态（换行开关、diff 开关这类 toggle）。不能只换到 --surface-2：那正是 .small-button 的
+   hover 底色，静止时和未选中的按钮看着一样，鼠标一悬停两态又完全重合——等于没有选中态。所以走
+   强调色，与 --warning 那对 amber 完全对称：淡底 + 一圈同色内描边点出「这个开着」。 */
+.small-button--active, .small-button--active:hover:not(:disabled) { color: var(--green-text); background: var(--green-bg); box-shadow: inset 0 0 0 1px var(--green-line), var(--hl); }
 .small-button:disabled { opacity: .45; cursor: default; }
 .primary-button { padding:var(--sp-4) var(--sp-5); border: 0; color: var(--bg); background: linear-gradient(180deg, var(--green), var(--green-2)); font-size: var(--fs-meta); font-weight: 620; box-shadow: var(--elev-1), var(--hl-strong); }
 .primary-button:hover:not(:disabled) { background: linear-gradient(180deg, var(--green-text), var(--green)); }

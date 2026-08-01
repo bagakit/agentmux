@@ -81,8 +81,8 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
       resumeStrategy: { kind: 'provider-native', locator: 'session-id' },
       acpStrategy: { kind: 'none' },
       capabilities: {
-        terminal: true, hookEvents: true, timeline: 'complete-events', permission: 'respond',
-        providerResume: true, acp: false, replyCorrelation: 'none',
+        terminal: true, timeline: 'complete-events', permission: 'respond',
+        providerResume: true, replyCorrelation: 'none',
         usage: { kind: 'native-transcript', transcriptFormat: 'codex-rollout' }
       }
     }),

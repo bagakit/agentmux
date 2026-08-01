@@ -1,7 +1,7 @@
 import { lstat, readdir, rm, stat } from 'node:fs/promises'
-import { createConnection } from 'node:net'
 import { basename, dirname, join, relative } from 'node:path'
 import { defaultAgentMuxRuntimeDirectory, defaultCtxmuxSocketPath } from './runtime-paths.js'
+import { probeSocketLiveness } from './socket-liveness.js'
 
 // 每次 artifact 升级都会派生一个新的 endpoint 目录（runtime-paths.ts 按 pinned manifest SHA 派生），
 // 旧的那个连同它的 state.sqlite3 永久留在盘上——实测一个旧目录 110.2MB，且里面的 Run 全部已终止。
@@ -119,26 +119,19 @@ export interface EndpointReclaimOutcome {
 }
 
 /**
- * 这个 socket 路径后面有没有活着的监听者。
+ * 这个 socket 路径后面有没有活着的监听者——**「探不准」一律算活着。**
  *
- * 判据与 control-host 的 `socketIsActive` 同源：连得上就是活的；`ENOENT`（socket 文件都没了）与
- * `ECONNREFUSED`（文件还在但没人监听，即 daemon 已死留下的残骸）都算不活。其余错误（权限等）一律
- * 当作「说不准」→ 按活的处理，宁可漏收也不误删。超时同理。
+ * 判据本体在 {@link probeSocketLiveness}（与 control-host 共用同一份三态判定，不再各抄一份 errno
+ * 清单）。这里只做本模块那一半取舍：`alive` 与 `unknown` 都返回 true。
+ *
+ * 为什么 `unknown` 必须归到「活着」这一侧：本函数的返回值直接决定一个含 `state.sqlite3` 的目录
+ * 会不会被 `rm -rf`（约 110MB 的 Run 与回放历史，不可逆）。探不准的真实来路有三条，都与「死了」
+ * 无关——权限不足（`EACCES`）、路径上不是 socket（`ENOTSOCK`）、以及一个忙或慢的 daemon 没在
+ * 250ms 预算内应答。把任何一条读成「死了→删」，用户就会因为一次瞬时抖动丢掉全部持久状态。
+ * 所以这一侧的合同是：**判不出活着就当活着，宁可漏收，绝不误删。**
  */
 async function socketHasListener(path: string): Promise<boolean> {
-  return await new Promise<boolean>((resolve) => {
-    const socket = createConnection(path)
-    const settle = (alive: boolean): void => {
-      clearTimeout(timeout)
-      socket.destroy()
-      resolve(alive)
-    }
-    const timeout = setTimeout(() => settle(true), 250)
-    socket.once('connect', () => settle(true))
-    socket.once('error', (error: NodeJS.ErrnoException) => {
-      settle(error.code !== 'ENOENT' && error.code !== 'ECONNREFUSED')
-    })
-  })
+  return (await probeSocketLiveness(path)) !== 'dead'
 }
 
 async function directoryBytes(path: string): Promise<number> {

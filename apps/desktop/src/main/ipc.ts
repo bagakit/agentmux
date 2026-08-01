@@ -22,7 +22,8 @@ import {
   AgentMuxControlServer,
   type AgentExecutorId,
   type AgentMuxControlRequest,
-  type AgentMuxControlResult
+  type AgentMuxControlResult,
+  type AgentMuxRunInputData
 } from '@agentmux/core'
 import type {
   AgentLaunchInput,
@@ -440,7 +441,7 @@ export async function registerIpc(args: {
   ipcMain.handle('sessions:detach', async (event, attachmentId: string) => {
     await args.runtime.detachSession(event.sender.id, attachmentId)
   })
-  handle('sessions:write', async (session: SessionControl, data: string) => {
+  handle('sessions:write', async (session: SessionControl, data: AgentMuxRunInputData) => {
     await args.runtime.write(session, data)
   })
   handle('sessions:submitPrompt', async (session: AgentSessionControl, prompt: string) => {

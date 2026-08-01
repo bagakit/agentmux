@@ -108,12 +108,12 @@ export function createGrokProvider(defineAgentProvider: ProviderFactory): AgentP
       resumeStrategy: { kind: 'provider-native', locator: 'session-id' },
       acpStrategy: { kind: 'none' },
       capabilities: {
-        terminal: true, hookEvents: true, timeline: 'complete-events',
+        terminal: true, timeline: 'complete-events',
         // observe 而非 respond：grok 的 PreToolUse 能在 stdout 上回 deny/ask，但那要求这个
         // fire-and-forget 的 hook 变成一条阻塞 RPC、把 stdout 按住等用户点击。那条通路今天不存在，
         // 所以只观察，不应答——AgentMux 靠 PTY 注入按键回答它自己的授权提示。
         permission: 'observe',
-        providerResume: true, acp: false, replyCorrelation: 'none'
+        providerResume: true, replyCorrelation: 'none'
       }
     }),
     buildArgs: (prompt, args) => prompt ? [...args, '--', prompt] : [...args],

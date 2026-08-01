@@ -186,12 +186,12 @@ export function createCopilotProvider(defineAgentProvider: ProviderFactory): Age
       // 接不上的能力比不声明更坏：它会让上层以为可以走 ACP。按「未核实就不声明」如实留 none。
       acpStrategy: { kind: 'none' },
       capabilities: {
-        terminal: true, hookEvents: true, timeline: 'complete-events',
+        terminal: true, timeline: 'complete-events',
         // observe 而非 respond：`preToolUse`/`permissionRequest` 确实能回决定（stdout 上的
         // `hookSpecificOutput`，或退出码 2），但那要求这条 fire-and-forget 的 hook 变成一条阻塞
         // RPC、把执行按住等用户点击。那条通路今天不存在。AgentMux 靠 PTY 注入按键回答授权提示。
         permission: 'observe',
-        providerResume: true, acp: false,
+        providerResume: true,
         // **没有工具关联 id**：实测 `preToolUse`/`postToolUse` 的负载都只有 `toolName`/`toolArgs`
         // （`postToolUse` 另带 `toolResult`），一次调用的两端拿不到同一个 id。它的 SDK 类型里只有
         // `PreMcpToolCallHookInput` 有 `toolCallId`，那是 MCP 那条路、且只有事前一侧。

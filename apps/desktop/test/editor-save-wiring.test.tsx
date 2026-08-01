@@ -7,21 +7,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 // 手法：让 Monaco 的替身在渲染时真的回调 onMount，并交出一个记录 addCommand 的假编辑器，
 // 于是 EditorPane 里那行注册代码是真的跑过；删掉它，这里会红。
 
+// store 替身的键集来自 test/helpers/editor-pane-store，不在这里手抄：EditorPane 新读一个 slice 时，
+// 手抄的字面量会缺键，而缺键只在**渲染期**炸（`Record<string, unknown>` 这类宽类型让 tsc 全程沉默）。
+// 那份 helper 带一条双向比对的检测器（editor-pane-store-fixture.test.ts），键集漏了会在那里点名，
+// 而不是在这里变成一堆「Cannot read properties of undefined」。
+//
+// 为什么不在 vi.hoisted 里取：hoisted 回调提到所有 import 之前执行，那时 helper 还没被加载，
+// 而 ESM 下没有 require 可用。vi.mock 的工厂相反是**懒**执行的（模块被解析时才跑），所以键集在
+// 那里填。hoisted 里只留这个空壳，好让下面的 mock 工厂和用例共享同一个引用。
 const fixture = vi.hoisted(() => ({
-  state: {
-    documents: {} as Record<string, unknown>,
-    dirtyDocuments: {} as Record<string, boolean>,
-    documentIssues: {} as Record<string, { kind: string } | undefined>,
-    savingDocuments: {} as Record<string, boolean>,
-    documentRevealTargets: {} as Record<string, unknown>,
-    config: { workspaces: [] as unknown[] },
-    updateDocument: vi.fn(),
-    saveDocument: vi.fn(),
-    reloadDocument: vi.fn(),
-    overwriteDocument: vi.fn(),
-    clearDocumentRevealTarget: vi.fn(),
-    reportError: vi.fn()
-  }
+  state: {} as Record<string, unknown> & { saveDocument: ReturnType<typeof vi.fn> }
 }))
 
 // 记录 Monaco 侧收到的注册：键位与回调本体都要留下，后者是我们真正要按的那个"键"。
@@ -30,30 +25,42 @@ const monacoSpy = vi.hoisted(() => ({
 }))
 
 vi.mock('../src/renderer/src/monaco.js', () => ({}))
-vi.mock('@monaco-editor/react', () => ({
-  default: ({ onMount }: { onMount?: (editor: unknown, monaco: unknown) => void }) => {
-    const editor = {
-      addCommand: (keybinding: number, handler: () => void) => {
-        monacoSpy.commands.push({ keybinding, handler })
-      },
-      onDidDispose: vi.fn(() => ({ dispose: vi.fn() })),
-      revealLineInCenter: vi.fn(),
-      setPosition: vi.fn(),
-      focus: vi.fn()
+vi.mock('@monaco-editor/react', async () => {
+  // Monaco 的常量取自共享 helper（真值，附来源）而不是在这里手抄——两个测试文件各抄一份就是漂移。
+  const { monacoKeybindingConstants } = await import('./helpers/editor-pane-store.js')
+  return {
+    default: ({ onMount }: { onMount?: (editor: unknown, monaco: unknown) => void }) => {
+      const editor = {
+        addCommand: (keybinding: number, handler: () => void) => {
+          monacoSpy.commands.push({ keybinding, handler })
+        },
+        // EditorPane also registers copy actions on mount; stub the surface they touch so this
+        // save-focused test still mounts. (Their own behaviour is covered by editor-copy-wiring.)
+        addAction: vi.fn(),
+        createContextKey: vi.fn(() => ({ set: vi.fn() })),
+        onDidChangeCursorSelection: vi.fn(() => ({ dispose: vi.fn() })),
+        onDidDispose: vi.fn(() => ({ dispose: vi.fn() })),
+        revealLineInCenter: vi.fn(),
+        setPosition: vi.fn(),
+        focus: vi.fn()
+      }
+      onMount?.(editor, monacoKeybindingConstants())
+      return null
     }
-    // 真实 Monaco 的位掩码常量：CtrlCmd=2048、KeyS=49。用真值而不是占位符，
-    // 这样"注册的是不是 Cmd/Ctrl+S"这件事本身也能被断言。
-    onMount?.(editor, { KeyMod: { CtrlCmd: 2048 }, KeyCode: { KeyS: 49 } })
-    return null
   }
-}))
+})
 
-vi.mock('../src/renderer/src/store.js', () => ({
-  useAppStore: Object.assign(
-    (selector: (state: typeof fixture.state) => unknown) => selector(fixture.state),
-    { getState: () => fixture.state }
-  )
-}))
+vi.mock('../src/renderer/src/store.js', async () => {
+  // 懒执行：到这里 helper 已经可以 import 了。键集与动作 spy 都由它给。
+  const { editorPaneStoreState } = await import('./helpers/editor-pane-store.js')
+  Object.assign(fixture.state, editorPaneStoreState())
+  return {
+    useAppStore: Object.assign(
+      (selector: (state: typeof fixture.state) => unknown) => selector(fixture.state),
+      { getState: () => fixture.state }
+    )
+  }
+})
 
 vi.mock('../src/renderer/src/lib/api.js', () => ({
   api: { files: { reveal: vi.fn(async () => {}) } }

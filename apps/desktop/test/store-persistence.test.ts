@@ -188,7 +188,10 @@ describe('Renderer persistence boundary', () => {
       collapsedProjectGroups: 'all' as never,
       toolsOpen: 1 as never,
       workspaceTool: 'old-tool' as never,
-      toolDockWidth: Number.POSITIVE_INFINITY
+      toolDockWidth: Number.POSITIVE_INFINITY,
+      // 换行开关和 projectRailOpen/toolsOpen 走同一条 restoredBoolean 校验，所以同样喂坏值：
+      // 只把它加进下面的期望值（不喂坏值）等于只守「它在场」，而它自己那条取值校验无人守。
+      editorWordWrap: 'on' as never
     })).toEqual({
       activeWorkspaceId: 'workspace-a',
       mainSurface: 'workbench',
@@ -196,7 +199,8 @@ describe('Renderer persistence boundary', () => {
       collapsedProjectGroups: {},
       toolsOpen: true,
       workspaceTool: 'files-branches',
-      toolDockWidth: 440
+      toolDockWidth: 440,
+      editorWordWrap: false
     })
   })
 
@@ -438,11 +442,9 @@ describe('Renderer persistence boundary', () => {
       executorId: 'codex',
       capabilities: {
         terminal: true,
-        hookEvents: true,
         timeline: 'streaming',
         permission: 'observe',
         providerResume: true,
-        acp: false,
         replyCorrelation: 'none'
       },
       label: 'Codex · recovery outage',
@@ -533,11 +535,9 @@ describe('Renderer persistence boundary', () => {
       executorId: 'codex',
       capabilities: {
         terminal: true,
-        hookEvents: true,
         timeline: 'streaming',
         permission: 'observe',
         providerResume: true,
-        acp: false,
         replyCorrelation: 'none'
       },
       label: 'Codex · retired',

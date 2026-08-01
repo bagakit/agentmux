@@ -27,6 +27,7 @@ import {
 } from './control.js'
 import { AgentMuxError } from './errors.js'
 import { defaultAgentMuxControlSocketPath } from './runtime-paths.js'
+import { probeSocketLiveness } from './socket-liveness.js'
 
 const MAX_MESSAGE_BYTES = 256 * 1024
 const MAX_ID_BYTES = 512
@@ -433,13 +434,21 @@ function longOperation(operation: AgentMuxControlRequest['operation']): boolean 
   return operation.startsWith('open.') || operation === 'send' || operation === 'resume' || operation === 'stop'
 }
 
+/**
+ * 这条 Control socket 上是不是已经有活着的 owner。
+ *
+ * 三态判定与 endpoint 回收共用同一份实现（{@link probeSocketLiveness}）——原先两处各手抄一遍
+ * errno 清单，而「哪些错误算死」漂移一次的代价在两侧都不可逆。
+ *
+ * 本侧对 `unknown` 的取舍是**抛 `CONTROL_UNAVAILABLE`**，不是返回 false：探不准（权限、超时、
+ * 路径上不是 socket）之后若按「没人占用」继续，下一步就会 unlink 掉那条 socket 并自己 listen 上去，
+ * 而它可能正被一个活着的 owner 持有——两个进程同时认为自己拥有同一条 socket。所以判不准就明说
+ * 判不准，把决定交给调用方，而不是替它猜一个方向。
+ */
 async function socketIsActive(path: string): Promise<boolean> {
-  return await new Promise<boolean>((resolve, reject) => {
-    const socket = createConnection(path)
-    const timeout = setTimeout(() => { socket.destroy(); reject(new AgentMuxError('Control endpoint probe timed out.', 'CONTROL_UNAVAILABLE')) }, 250)
-    socket.once('connect', () => { clearTimeout(timeout); socket.destroy(); resolve(true) })
-    socket.once('error', (error: NodeJS.ErrnoException) => { clearTimeout(timeout); socket.destroy(); if (error.code === 'ENOENT' || error.code === 'ECONNREFUSED') resolve(false); else reject(error) })
-  })
+  const liveness = await probeSocketLiveness(path)
+  if (liveness === 'unknown') throw new AgentMuxError('Control endpoint probe was inconclusive.', 'CONTROL_UNAVAILABLE')
+  return liveness === 'alive'
 }
 
 export class AgentMuxControlServer {

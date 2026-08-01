@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
 import {
   SHIFT_ENTER_CSI_U,
   SHIFT_ENTER_ESC_CR,
-  isShiftEnterNewline,
-  isTerminalAppShortcut,
   shiftEnterInput,
   terminalSelectionForCopy
 } from '../src/renderer/src/lib/terminal-shortcuts.js'
@@ -12,6 +11,7 @@ import {
   isKittyKeyboardActive,
   readKittyKeyboardOutput
 } from '../src/renderer/src/lib/terminal-kitty-keyboard.js'
+import { SHORTCUT_BINDINGS } from '../src/renderer/src/lib/shortcut-registry.js'
 
 const ESC = '\u001b'
 
@@ -26,22 +26,40 @@ function key(overrides: Partial<KeyboardEvent> = {}): KeyboardEvent {
   } as KeyboardEvent
 }
 
-describe('Terminal app shortcuts', () => {
-  it('uses Command on macOS without stealing Ctrl chords from the Agent TUI', () => {
-    expect(isTerminalAppShortcut(key({ metaKey: true }), 'f', true)).toBe(true)
-    expect(isTerminalAppShortcut(key({ ctrlKey: true }), 'f', true)).toBe(false)
-  })
-
-  it('requires Ctrl+Shift elsewhere so readline and Agent Ctrl chords remain native', () => {
-    expect(isTerminalAppShortcut(key({ ctrlKey: true, shiftKey: true }), 'f', false)).toBe(true)
-    expect(isTerminalAppShortcut(key({ ctrlKey: true }), 'f', false)).toBe(false)
-    expect(isTerminalAppShortcut(key({ ctrlKey: true, shiftKey: true, altKey: true }), 'f', false)).toBe(false)
-  })
-
+describe('Terminal copy-selection source', () => {
   it('keeps the last non-empty selection when a context-menu focus transition clears xterm selection', () => {
     expect(terminalSelectionForCopy('live text', 'remembered text')).toBe('live text')
     expect(terminalSelectionForCopy('', 'remembered text')).toBe('remembered text')
     expect(terminalSelectionForCopy('', '')).toBe('')
+  })
+})
+
+// TerminalView 的终端作用域接线。终端键判定发生在 xterm 的 attachCustomKeyEventHandler 回调里——本仓库
+// renderToStaticMarkup 不跑 effect、更不会触发 xterm 的键回调，所以「命中的 id 有没有被接到对应动作」
+// 够不着运行期断言。这里做补法：把 TerminalView 里出现的终端 id 与注册表 terminal scope 的 SSOT 对齐。
+// 把某条 `shortcutId === 'terminal.newline'` 打成 typo（M14）会让那个 id 从 TerminalView 里消失，这条红。
+describe('TerminalView 接住注册表里每一条 terminal scope 绑定', () => {
+  const terminalView = readFileSync(
+    new URL('../src/renderer/src/components/TerminalView.tsx', import.meta.url),
+    'utf8'
+  )
+  // 剥注释，免得注释里写的 id 假装成接线。
+  const code = terminalView.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+
+  it('每条 terminal 绑定 id 都在 TerminalView 的判定分支里被引用（typo/漏接即红）', () => {
+    const terminalIds = SHORTCUT_BINDINGS.filter((b) => b.scope === 'terminal').map((b) => b.id)
+    // 自证扫到了东西：注册表里确实有 terminal 绑定。
+    expect(terminalIds.length).toBeGreaterThan(0)
+    for (const id of terminalIds) {
+      // 锚在带比较运算符的形状 `=== 'id'`，而不是裸出现——注册表 import 的字符串不会满足这个形状。
+      expect(code, `TerminalView 没接 terminal 绑定 ${id}`).toContain(`=== '${id}'`)
+    }
+  })
+
+  it('判定来自注册表的 matchShortcut(scope terminal)，不是各自手写修饰键判断', () => {
+    // 收敛证据：TerminalView 不再自己判 metaKey/ctrlKey/shiftKey，改为向注册表要 id。回退到手写判定
+    // （比如 isTerminalAppShortcut 那套）这条会红。
+    expect(code).toMatch(/matchShortcut\(event, isMac, \{ scope: 'terminal' \}\)/)
   })
 })
 
@@ -60,16 +78,6 @@ describe('Shift+Enter 换行', () => {
   it('协商过 kitty 协议时送 CSI-u 编码', () => {
     expect(shiftEnterInput(true)).toBe(`${ESC}[13;2u`)
     expect(SHIFT_ENTER_CSI_U).not.toBe(SHIFT_ENTER_ESC_CR)
-  })
-
-  it('只接管单独的 Shift+Enter，其余修饰组合留给下游', () => {
-    expect(isShiftEnterNewline(key({ key: 'Enter', shiftKey: true }))).toBe(true)
-    // 不带 Shift 的 Enter 必须继续走原路——修好换行不能弄坏提交。
-    expect(isShiftEnterNewline(key({ key: 'Enter' }))).toBe(false)
-    for (const modifier of ['ctrlKey', 'altKey', 'metaKey'] as const) {
-      expect(isShiftEnterNewline(key({ key: 'Enter', shiftKey: true, [modifier]: true }))).toBe(false)
-    }
-    expect(isShiftEnterNewline(key({ key: 'a', shiftKey: true }))).toBe(false)
   })
 })
 
