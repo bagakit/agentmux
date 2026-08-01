@@ -293,6 +293,72 @@ describe('Browser Profile Chromium import sources', () => {
     }
   })
 
+  it('拒绝浏览器自己都不会接受的 cookie——四条规则各自都有触发侧', async () => {
+    // 这簇拒绝规则（browser-profile-import-source.ts 的 `__Host-`/`__Secure-`/SameSite=None/
+    // partitioned 四条）此前**一条触发侧都没有**：整份 fixture 里唯一 sameSite=None 的
+    // `__Secure-chip` 恰好 secure=1，落在通过侧并被精确断言；唯一那条 invalid-cookie 来自
+    // 名字含空格（不可打印），跟这簇无关。实测证过后果：把 `(sameSite === 'None' && !secure)`
+    // 改成 `(false)`，11 条断言全绿——一个浏览器自己都会拒绝的不安全 cookie 会被静默导入。
+    //
+    // 按**出口**数而不是按条件数补：`||` 串起来的是四个独立出口，其中 `__Host-` 那条自己又是
+    // 三个子条件的 `&&`（域 cookie / path 非根 / 非安全），所以它要三个 fixture 而不是一个。
+    // 实测过必要性：六个出口逐个禁用，六次各自红；若 `__Host-` 只补一个 fixture，另两个子条件
+    // 的变异会存活。
+    //
+    // 每条都配一个「同形但合法」的对照，否则分不清是这条规则把它拒了、还是别的原因（过期、
+    // 不可打印、不可移植）——只数 skipped 总量的断言会把两者混成一个数。
+    const { source } = await detectedChromeSource([
+      // __Host- 的三个子条件，各一条
+      { hostKey: '.host.test', name: '__Host-domain-scoped', value: 'a', secure: 1 },
+      { hostKey: 'host.test', name: '__Host-subpath', value: 'b', secure: 1, path: '/sub' },
+      { hostKey: 'host.test', name: '__Host-insecure', value: 'c' },
+      // __Secure- 必须 secure
+      { hostKey: '.secure.test', name: '__Secure-insecure', value: 'd' },
+      // SameSite=None 必须 secure（sameSite: 1 是 Chromium 的 None）
+      { hostKey: '.samesite.test', name: 'none-insecure', value: 'e', sameSite: 1 },
+      // 合法对照：与上面四条同形，只是把那一处违规改对，必须被导入
+      { hostKey: 'host.test', name: '__Host-ok', value: 'f', secure: 1 },
+      { hostKey: '.secure.test', name: '__Secure-ok', value: 'g', secure: 1 },
+      { hostKey: '.samesite.test', name: 'none-ok', value: 'h', secure: 1, sameSite: 1 }
+    ])
+
+    const plan = planBrowserProfileImport(source, { now: 1_700_000_000 * 1000 })
+
+    // 断言按名字而不是按数量：数量对得上也可能是"拒错了人、又漏放了另一个"凑出来的。
+    expect(plan.cookies.map((cookie) => cookie.name).sort()).toEqual([
+      '__Host-ok', '__Secure-ok', 'none-ok'
+    ])
+    expect(plan.skippedByReason['invalid-cookie']).toBe(5)
+    expect(plan.totalCookies).toBe(8)
+    expect(plan.totalCookies).toBe(plan.importedCookies + plan.skippedCookies)
+  })
+
+  it('拒绝 partitioned 但不安全的 cookie（CHIPS 要求 Secure）', async () => {
+    // 单独一条，因为分区列要 includePartitionColumns。与上面同一簇的第四个出口。
+    const { source } = await detectedChromeSource([
+      {
+        hostKey: '.chips.test',
+        name: 'partitioned-insecure',
+        value: 'a',
+        topFrameSiteKey: 'https://top.example',
+        hasCrossSiteAncestor: 1
+      },
+      {
+        hostKey: '.chips.test',
+        name: 'partitioned-ok',
+        value: 'b',
+        secure: 1,
+        topFrameSiteKey: 'https://top.example',
+        hasCrossSiteAncestor: 1
+      }
+    ], { includePartitionColumns: true })
+
+    const plan = planBrowserProfileImport(source, { now: 1_700_000_000 * 1000 })
+
+    expect(plan.cookies.map((cookie) => cookie.name)).toEqual(['partitioned-ok'])
+    expect(plan.skippedByReason['invalid-cookie']).toBe(1)
+  })
+
   it('uses PSL registrable families for private suffixes and keeps IP families exact', async () => {
     const { source } = await detectedChromeSource([
       {
