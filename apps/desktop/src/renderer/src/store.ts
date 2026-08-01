@@ -500,7 +500,11 @@ type AppState = {
     workspacePath?: string
   ): Promise<void>
   // Idempotent for one host + cwd. Failures stay local to the create page.
-  prewarmTerminal(workspaceId: string): void
+  //
+  // `ownerLauncherId` 是**哪个 launcher 挂载点在请求**。槽只有一个而 launcher 每个挂载点一个（分屏、
+  // 每个 group 的空占位），归属必须由槽记着、不能由各个 launcher 各自推断，否则它们会同时挂
+  // TerminalView 到同一个 PTY 上并对着它轮流 resize。同 key 再请求会把归属**转移**过来（不重开 PTY）。
+  prewarmTerminal(workspaceId: string, ownerLauncherId: string): void
   // Claims the exact warm shell or uses the ordinary Terminal launch path if none exists.
   promoteWarmTerminal(
     tabGroupId: string,
@@ -1247,6 +1251,23 @@ function startSessionMembershipResync(
 type WarmTerminal = {
   // Prevents a shell from being reused for the wrong host or working directory.
   key: string
+  /**
+   * 哪个 launcher 挂载点拥有这个槽——只有它渲染 live preview。
+   *
+   * 槽是**全局单个**（一台机器上不该为没人认领的 shell 攒 N 个 PTY），而 launcher 是**每个挂载点
+   * 一个**：分屏能在同一个 Tab 里开出好几个，空分组占位又能在每个 group 里各有一个，它们的 warmKey
+   * 完全一样（同 host 同 cwd）。没有 owner 这个字段时，每个 launcher 都认为
+   * `warmTerminal.key === warmKey` 成立，于是**都**挂一个 TerminalView 到同一个 run 上。attach 那侧
+   * 不会抛（同一个 identity 走 readRunReplay），所以没有任何报错——但两个 view 各有自己的 FitAddon
+   * 与 ResizeObserver，尺寸不同就对着同一个 PTY 轮流 resize，网格来回跳、两边的 xterm 都在错误的
+   * 行列上重排。
+   *
+   * 所以「谁拥有」必须是槽自己的一部分，而不是各个 launcher 各自推断。取值来自组件侧的
+   * `warmLauncherId({ tabGroupId, regionId })`（见 `lib/warm-terminal-preview.ts`）：每个挂载点都有、
+   * 同胞之间互不相同、且跨重渲染稳定。**不可直接用 regionId**——空分组占位没有 region，而那恰是新建
+   * workspace 的第一眼，可缺席的字段当不了归属键；那个函数缺 region 时退到所属 group 并各自加前缀。
+   */
+  ownerLauncherId: string
   ready: Promise<SessionSnapshot | null>
   session: SessionSnapshot | null
 }
@@ -3518,12 +3539,25 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       throw error
     }
   },
-  prewarmTerminal(workspaceId) {
+  prewarmTerminal(workspaceId, ownerLauncherId) {
     const workspace = get().config?.workspaces.find((item) => item.id === workspaceId)
     if (!workspace) return
     const key = warmTerminalKey(workspace.hostId, workspace.path)
     const existing = get().warmTerminal
-    if (existing?.key === key) return
+    if (existing?.key === key) {
+      // 同 host 同 cwd 的 shell 可以复用，不必再起一个——但**归属要转过来**。分屏里两个 launcher
+      // 的 key 完全一样，若这里直接 return，槽的 owner 就永远停在第一个挂载的那个 launcher 上，而
+      // 后挂载的那个（用户刚点出来、正在看的那个）只能显示冷卡片。转移归属让「最后一个请求预热的
+      // launcher 拥有预览」，同时仍然只有一个 PTY、仍然只有一个 view 挂在上面。
+      if (existing.ownerLauncherId !== ownerLauncherId) {
+        set((state) => (
+          state.warmTerminal === existing
+            ? { warmTerminal: { ...existing, ownerLauncherId } }
+            : {}
+        ))
+      }
+      return
+    }
     if (existing) {
       // A different host/cwd cannot reuse this shell. Keep its durable id recorded
       // until Core confirms the stop.
@@ -3561,7 +3595,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         )
       }))
     })
-    set({ warmTerminal: { key, ready, session: null } })
+    set({ warmTerminal: { key, ownerLauncherId, ready, session: null } })
   },
   async promoteWarmTerminal(tabGroupId, launcher) {
     const state = get()
