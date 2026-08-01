@@ -11,6 +11,7 @@ vi.mock('../src/renderer/src/store.js', () => ({
 }))
 
 import { surfaceNavigationVisibility } from '../src/renderer/src/lib/surface-navigation-visibility.js'
+import { activeTopicIdFromLayout } from '../src/renderer/src/lib/scratch-topic-layout.js'
 import { collectSurfaceMemoryCandidates } from '../src/renderer/src/lib/surface-memory-budget-candidates.js'
 import { collectTerminalColdParkCandidates } from '../src/renderer/src/lib/terminal-cold-parking-coordinator.js'
 import { createWorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.js'
@@ -120,6 +121,104 @@ describe('surfaceNavigationVisibility 的取值', () => {
       tabVisible: false
     })
   })
+
+  it('分屏时另一组的活动项被投影重定向到当前 Topic，那张要算在屏上', () => {
+    // 为什么必须是**两个分组**：上面那条只有一个分组，而单分组下投影与否对
+    // `group?.activeTabId === tab.id` 得到相同答案（隐藏的 Tab 要么被投影滤掉、group 变
+    // undefined，要么留在原组里但活动项不是它，两条路都是 false）。于是「整段砍掉
+    // `layoutForActiveTopic`」这个变异在单分组 fixture 下**完全不可观测**——实测该变异让
+    // 这个文件里其余 7 条全绿。
+    //
+    // 真正让投影可观测的形状是：某个分组**存着**的活动项属于另一个 Topic，而该组里同时有一张
+    // 属于当前 Topic 的 Tab。投影会把活动项重定向到后者（layoutForActiveTopic 的 `stays`
+    // 判据不是"它还看得见"而是"它属于这个 Topic"），所以那张 Tab 真的画在屏上；不投影则活动项
+    // 仍是另一个 Topic 那张，这张就被误判成隐藏而进回收候选。
+    const leftShown = { ...terminalTab('left-a', SCRATCH_WORKSPACE_ID), topicId: 'view:topic-a' }
+    const rightStored = { ...terminalTab('right-b', SCRATCH_WORKSPACE_ID), topicId: 'view:topic-b' }
+    const rightProjected = { ...terminalTab('right-a', SCRATCH_WORKSPACE_ID), topicId: 'view:topic-a' }
+    const tabs = {
+      [leftShown.id]: leftShown,
+      [rightStored.id]: rightStored,
+      [rightProjected.id]: rightProjected
+    }
+    // createWorkspaceLayout 只造单分组，这里必须手写：分屏本身就是这条用例的主角。
+    const layout = {
+      root: {
+        type: 'split' as const,
+        direction: 'horizontal' as const,
+        first: { type: 'leaf' as const, groupId: 'left' },
+        second: { type: 'leaf' as const, groupId: 'right' },
+        ratio: 0.5
+      },
+      groups: [
+        {
+          id: 'left',
+          tabOrder: [leftShown.id],
+          activeTabId: leftShown.id,
+          recentTabIds: [leftShown.id]
+        },
+        {
+          // 存着的活动项属于 topic-B，同组里还有一张 topic-A 的。
+          id: 'right',
+          tabOrder: [rightStored.id, rightProjected.id],
+          activeTabId: rightStored.id,
+          recentTabIds: [rightStored.id]
+        }
+      ],
+      activeGroupId: 'left'
+    }
+    const input = { activeWorkspaceId: SCRATCH_WORKSPACE_ID, workbenchVisible: true }
+
+    // 前提自检：当前 Topic 必须真的解析成 topic-A，否则投影根本不会启动，下面三条断言在
+    // 「投影是死代码」的世界里也成立。activeTopicIdFromLayout 按分组顺序取第一个带 topicId 的
+    // 活动项，所以它取的是 left 组的 leftShown。
+    expect(
+      activeTopicIdFromLayout(layout, tabs),
+      '当前 Topic 没解析成 topic-A，这批输入观察不到投影'
+    ).toBe('view:topic-a')
+
+    expect(surfaceNavigationVisibility(leftShown, layout, tabs, input)).toEqual({
+      navigationContextActive: true,
+      tabVisible: true
+    })
+    // 主角：存着的活动项是别的 Topic，投影把 right 组的活动项改成这一张，所以它在屏上。
+    expect(
+      surfaceNavigationVisibility(rightProjected, layout, tabs, input),
+      'Topic 投影没有把另一组的活动项重定向到当前 Topic——在屏的 Tab 被判成隐藏，会被回收'
+    ).toEqual({ navigationContextActive: true, tabVisible: true })
+    // 对照：它是 right 组存着的活动项，但属于另一个 Topic，投影后不再是活动项。
+    expect(surfaceNavigationVisibility(rightStored, layout, tabs, input)).toEqual({
+      navigationContextActive: false,
+      tabVisible: false
+    })
+  })
+
+  it('未绑定 Topic 的 Scratch Tab 在任何 Topic 下都算上下文活着', () => {
+    // `tab.topicId === undefined` 那条析取项此前零覆盖：删掉它，这个文件其余 7 条全绿（实测）。
+    // 生产里这种 Tab 确实存在——store / control / file-workbench-state 三处都是「有才带
+    // topicId、没有就不带」。删掉那条后它在任何 Topic 活动时都被判成「上下文不活」，于是 TTL
+    // 永远被挡：终端永不冷泊、Monaco 永不 release，是个泄漏而不是报错。
+    const anchored = { ...terminalTab('anchored', SCRATCH_WORKSPACE_ID), topicId: 'view:topic-a' }
+    const unbound = terminalTab('unbound', SCRATCH_WORKSPACE_ID)
+    const tabs = { [anchored.id]: anchored, [unbound.id]: unbound }
+    const layout = createWorkspaceLayout('group', [anchored.id, unbound.id])
+    const input = { activeWorkspaceId: SCRATCH_WORKSPACE_ID, workbenchVisible: true }
+
+    // 前提自检之一：这张 Tab 真的没带 topicId。createWorkbenchTab 将来若开始补默认值，
+    // 这条用例会变成在测另一件事。
+    expect(unbound.topicId, '这张 Tab 带了 topicId，这条用例观察不到未绑定的那条析取项').toBeUndefined()
+    // 前提自检之二：必须真的有一个 Topic 在活动，否则 `activeTopicId === null` 那条析取项先
+    // 短路，被测的那条永远不参与判定。
+    expect(
+      activeTopicIdFromLayout(layout, tabs),
+      '没有 Topic 在活动，activeTopicId === null 会先短路'
+    ).toBe('view:topic-a')
+
+    expect(
+      surfaceNavigationVisibility(unbound, layout, tabs, input),
+      '未绑定 Topic 的 Tab 被判成上下文已离开——它的面永远等不到 TTL，是泄漏'
+    ).toEqual({ navigationContextActive: true, tabVisible: false })
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -221,7 +320,26 @@ describe('两个回收器共用同一处判定', () => {
     // 语句留在原地不动）——这条恒绿，只有下面那条数拼法的补充判据红。而 import 语句是死的，
     // 「import 了却不调」正是原缺陷的一种。所以问题要问成「有没有走那个唯一实现」：产出这两个字段
     // 的文件是可枚举的，它们有一个共同标记，就是产出本身。
-    const produces = /(^|[^.\w])navigationContextActive\s*[,:](?!\s*boolean)/
+    //
+    // `[,:}]` 里的 `}` 是补的：原判据只认 `,` 和 `:`，于是**末位 shorthand**（`{ visible,
+    // navigationContextActive }`、`{ ...rest, navigationContextActive }`）后面跟的是空格加 `}`，
+    // 整个文件探测不到 → 不进 producers → 下面那个循环根本不对它跑。实测这条路能让一个「装了
+    // import、却自己内联判一遍」的新消费者对三条接线守卫全隐形——正是本判据要防的缺陷本身。
+    const produces = /(^|[^.\w])navigationContextActive\s*[,:}](?!\s*boolean)/
+    // 判据自检：这三种产出写法都必须被认出来。少了任何一种，绕过的方式就是换成那种写法，而这个
+    // 自检会比「等到有人真那么写」先红。反例那条钉住 `boolean` 排除项仍然生效（类型声明不是产出）。
+    for (const [shape, source] of [
+      ['显式取值', 'return { navigationContextActive: x, tabVisible: y }'],
+      ['中间 shorthand', 'return { navigationContextActive, tabVisible }'],
+      ['末位 shorthand', 'return { visible, navigationContextActive }'],
+      ['展开后末位', 'return { ...rest, navigationContextActive }']
+    ] as const) {
+      expect(produces.test(source), `产出探测认不出「${shape}」这种写法，换成它就能绕过`).toBe(true)
+    }
+    expect(
+      produces.test('type X = { navigationContextActive: boolean }'),
+      '产出探测把类型声明也算成产出，那不是产出'
+    ).toBe(false)
     const producers = sourceFiles().filter((relative) => produces.test(read(relative)))
 
     // 前提自检：扫描必须真的抓到实现自己 + 两个协调器。抓到 0 个（写错扫描根、正则失配）时下面的
@@ -261,9 +379,29 @@ describe('两个回收器共用同一处判定', () => {
     // 只是补充。它数的是拼法，因此对「换个写法再手抄一遍」失明；留着是因为它能抓到
     // 「走了那处实现、又在旁边顺手多判一次」——那种情况上一条恰好一次的断言会红，但如果多判的那次
     // 写在别的文件里（没有产出这两个字段，因此不在 producers 里），只有这一条看得见。
+    //
+    // 两个方向都要判：原判据只认 `workbenchVisible && … activeWorkspaceId ===`，于是把合取写成
+    // 反序（`activeWorkspaceId === x && workbenchVisible`）就整条失配。实测一个反序手抄且不产出
+    // `navigationContextActive` 的文件对**全部**判据隐形——上一条按产出枚举抓不到它，这一条按顺序
+    // 抓不到它。合取的顺序不改变语义，判据不该挂在顺序上。
+    const rewriteShapes = [
+      /workbenchVisible\s*&&[\s\S]{0,80}activeWorkspaceId\s*===/,
+      /activeWorkspaceId\s*===[\s\S]{0,80}&&\s*[\s\S]{0,20}workbenchVisible/
+    ]
+    // 判据自检：两种顺序都必须被认出来。少一个方向，绕过方式就是换成那个方向。
+    for (const [order, source] of [
+      ['可见在左', 'const v = input.workbenchVisible && input.activeWorkspaceId === tab.workspaceId'],
+      ['可见在右', 'const v = input.activeWorkspaceId === tab.workspaceId && input.workbenchVisible']
+    ] as const) {
+      expect(
+        rewriteShapes.some((shape) => shape.test(source)),
+        `重推导探测认不出「${order}」这种顺序，换成它就能绕过`
+      ).toBe(true)
+    }
     const rewrites = sourceFiles().filter((relative) => {
       if (relative === IMPLEMENTATION) return false
-      return /workbenchVisible\s*&&[\s\S]{0,80}activeWorkspaceId\s*===/.test(read(relative))
+      const source = read(relative)
+      return rewriteShapes.some((shape) => shape.test(source))
     })
     expect(
       rewrites,
