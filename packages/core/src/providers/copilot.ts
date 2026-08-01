@@ -51,7 +51,6 @@ export const COPILOT_HOOK_EVENTS = [
 
 /**
  * Copilot 的 hook 合同。
-export const COPILOT_HOOKS: AgentNativeHookSpecification = {
  *
  * **负载键两侧都是 camelCase**（`toolName`/`toolArgs`/`toolResult`/`transcriptPath`/`agentId`），
  * 与 Cursor 恰好相反——Cursor 的事件名是 camelCase 而负载键是 snake_case。"事件名像"推不出
