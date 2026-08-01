@@ -200,4 +200,43 @@ describe('保存 Scratch Topic 文档让文件树失效', () => {
     expect(fileApi.writes).toHaveLength(0 + 1)
     expect(revisions()[SCRATCH_WORKSPACE_ID]).toBe(TARGET_REVISION)
   })
+
+  // -------------------------------------------------------------------------
+  // 上面那条反向 fixture（`notes/plain.md`）与正向 fixture（`topic--…/topic.md`）落在 2×2 的
+  // **对角两角**：一个两条收窄都为真，一个两条都为假。判据是 `A && B`，于是单独删掉任意一条，
+  // 没有任何 fixture 的结论会改变——实测各自 29 条全绿：
+  //
+  //   删掉 `fileName === 'topic.md'`      → Topic 目录里的任何文件（协作者身份文件、草稿、笔记）
+  //                                        一按 Cmd+S 就让整棵树重扫，正是上面那条注释声称要防的事
+  //   删掉 directory 那条                  → scratch 里任何位置的 `topic.md` 都当成 Topic 正文
+  //
+  // 「两个 fixture 都在角上」是这一族的通用形状：`&&` 的每个条件都需要一条**只有它为假**的
+  // fixture，否则条件数与判据数不匹配，多出来的那条就是死代码。补两条斜线。
+  // -------------------------------------------------------------------------
+
+  it('Topic 目录里的非正文文件不 bump——文件名那条收窄独立成立', async () => {
+    // 目录条件为真、文件名条件为假。Topic 目录里躺着协作者身份文件与草稿，它们由文件树自己的
+    // 观察者管；这里跟着 bump 一次，就是每存一次草稿都让整棵树重扫。
+    const { tab } = seedScratchTopicDocument(`${scratchTopicDirectoryName(TOPIC_ID)}/notes.md`)
+    await saveOnce(tab, 'after')
+
+    expect(fileApi.writes, '前提自检：这次写真的发生了').toHaveLength(1)
+    expect(
+      revisions()[SCRATCH_WORKSPACE_ID],
+      'Topic 目录里的非正文文件也 bump 了——文件名那条收窄没人守'
+    ).toBe(TARGET_REVISION)
+  })
+
+  it('Topic 目录之外的 topic.md 不 bump——目录那条收窄独立成立', async () => {
+    // 文件名条件为真、目录条件为假。用户在 scratch 根下手写一个 `topic.md`（或任何不合 Topic
+    // 目录命名的文件夹里放一个），它不是 Topic 正文，没有新建协作者文件，也就没有重扫的理由。
+    const { tab } = seedScratchTopicDocument('inbox/topic.md')
+    await saveOnce(tab, 'after')
+
+    expect(fileApi.writes, '前提自检：这次写真的发生了').toHaveLength(1)
+    expect(
+      revisions()[SCRATCH_WORKSPACE_ID],
+      '同名但不在 Topic 目录里的文件也 bump 了——目录那条收窄没人守'
+    ).toBe(TARGET_REVISION)
+  })
 })
