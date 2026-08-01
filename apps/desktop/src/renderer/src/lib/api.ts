@@ -16,7 +16,7 @@ import type {
 } from '../../../shared/contracts'
 import { CONFIG_VERSION } from '../../../shared/contracts'
 import type { AgentCatalogEntry, AgentMuxControlRequest, AgentMuxControlResult } from '@agentmux/core'
-import { BUILT_IN_AGENT_PROVIDER_IDS } from '@agentmux/core/provider-id'
+import { BUILT_IN_AGENT_PROVIDER_IDS, builtInAgentProviderLabel } from '@agentmux/core/provider-id'
 import { LAUNCH_OPTIONS_BY_PROVIDER_ID, describeLaunchOptions } from '@agentmux/core/launch-option'
 import { createRendererControlApi } from './control-api'
 import {
@@ -51,6 +51,13 @@ const mockStructuredCapabilities: AgentCatalogEntry['capabilities'] = {
 // browser bundle, so the preview cannot import it; deriving from the id list keeps every Provider visible
 // without pulling Node in.
 //
+// Labels come from builtInAgentProviderLabel in that same node-free module, which provider-conformance.test.ts
+// pins per-id against each catalog's own label. This line used to be
+// `id.charAt(0).toUpperCase() + id.slice(1)` — an algorithm, and it got 2 of 13 wrong: `traex → Traex`
+// (真值 TraeX) and `opencode → Opencode` (真值 OpenCode). Nothing caught it because the only label guard
+// asserted `agentProviderLabel(id) !== id`, which `Traex` also satisfies — the criterion was one notch
+// coarser than the defect, so the 11 that happened to match were enough to keep it green.
+//
 // Launch options come from LAUNCH_OPTIONS_BY_PROVIDER_ID, the reverse lookup in that same node-free module,
 // so every Provider that declares options gets its control here. This used to read
 // `id === 'codex' ? … : id === 'claude' ? … : []` under a comment claiming those two were the only
@@ -59,7 +66,6 @@ const mockStructuredCapabilities: AgentCatalogEntry['capabilities'] = {
 // comment vouched for the gap as honest absence. An id absent from the map declares nothing, which is the
 // real answer for pi/kimi/droid/copilot; core's own catalog is what keeps the map from drifting
 // (agent-provider.test.ts asserts it per Provider, both directions).
-const mockProviderLabel = (id: string): string => id.charAt(0).toUpperCase() + id.slice(1)
 const mockProviderLaunchOptions = (id: string): AgentCatalogEntry['launchOptions'] => {
   const declarations = LAUNCH_OPTIONS_BY_PROVIDER_ID[id]
   return declarations ? describeLaunchOptions(declarations) : []
@@ -67,7 +73,7 @@ const mockProviderLaunchOptions = (id: string): AgentCatalogEntry['launchOptions
 const mockExecutors: Record<string, AgentExecutorConfig> = Object.fromEntries(
   BUILT_IN_AGENT_PROVIDER_IDS.map((id) => [
     id,
-    { label: mockProviderLabel(id), providerId: id, command: id, args: [], env: {}, injectAgentMuxGuide: true }
+    { label: builtInAgentProviderLabel(id), providerId: id, command: id, args: [], env: {}, injectAgentMuxGuide: true }
   ])
 )
 let mockConfig: AppConfig = {
@@ -572,7 +578,7 @@ const mockApi: AgentMuxDesktopApi = {
     list: async () =>
       BUILT_IN_AGENT_PROVIDER_IDS.map((id) => ({
         id,
-        label: mockProviderLabel(id),
+        label: builtInAgentProviderLabel(id),
         executable: id,
         expectedProcess: id,
         promptDelivery: 'positional-argv',

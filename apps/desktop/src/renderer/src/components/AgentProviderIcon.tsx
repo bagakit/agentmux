@@ -1,4 +1,9 @@
-import { type AgentProviderId, type BuiltInAgentProviderId } from '@agentmux/core/provider-id'
+import {
+  BUILT_IN_AGENT_PROVIDER_IDS,
+  builtInAgentProviderLabel,
+  type AgentProviderId,
+  type BuiltInAgentProviderId
+} from '@agentmux/core/provider-id'
 import { Bot } from 'lucide-react'
 import type { ReactNode } from 'react'
 import hermesIconUrl from '../assets/agent-icons/hermes.png'
@@ -8,27 +13,15 @@ import geminiIconUrl from '../assets/agent-icons/gemini.png'
 import antigravityIconUrl from '../assets/agent-icons/antigravity.png'
 import cursorIconUrl from '../assets/agent-icons/cursor.png'
 
-const BUILT_IN_AGENT_LABELS = {
-  codex: 'Codex',
-  claude: 'Claude',
-  traex: 'TraeX',
-  hermes: 'Hermes',
-  pi: 'Pi',
-  grok: 'Grok',
-  gemini: 'Gemini',
-  antigravity: 'Antigravity',
-  cursor: 'Cursor',
-  kimi: 'Kimi',
-  droid: 'Droid',
-  copilot: 'Copilot',
-  opencode: 'OpenCode'
-} satisfies Record<BuiltInAgentProviderId, string>
-
-export function agentProviderLabel(providerId: AgentProviderId): string {
-  return Object.prototype.hasOwnProperty.call(BUILT_IN_AGENT_LABELS, providerId)
-    ? BUILT_IN_AGENT_LABELS[providerId as BuiltInAgentProviderId]
-    : providerId
-}
+/**
+ * 展示名。取值层在 Core 的 node-free `agent-provider-id.ts`（那张表由
+ * `provider-conformance.test.ts` 逐 id 双向钉在各 catalog 的 label 上）。
+ *
+ * 这里刻意只保留这个名字、不保留一份表：此前 Desktop、主进程默认表与 Web 预览各有一份取值，
+ * 前两份靠手抄恰好一致，预览那份是算的且对 `traex` / `opencode` 两家算错。而当时的守卫只断言
+ * `agentProviderLabel(id) !== id`——判据比缺陷粗一档，`Traex` 也满足它。
+ */
+export const agentProviderLabel = builtInAgentProviderLabel
 
 function CodexIcon({ size }: { size: number }) {
   // Geometry is the OpenAI mark for Codex.
@@ -137,7 +130,9 @@ export function AgentProviderIcon({ providerId, size = 14 }: { providerId?: Agen
       className="agent-provider-icon"
       data-agent-provider={providerId}
       data-agent-provider-known={
-        providerId !== undefined && Object.prototype.hasOwnProperty.call(BUILT_IN_AGENT_LABELS, providerId)
+        // 判的是「这个 id 是不是一等内置 Provider」，所以取 id 全集而不是标签表——用标签表只是
+        // 恰好等价（那两张表由 core 的 conformance 守卫钉成同一批 key），而语义上问的是身份。
+        providerId !== undefined && (BUILT_IN_AGENT_PROVIDER_IDS as readonly string[]).includes(providerId)
       }
       style={{ width: size, height: size }}
       aria-hidden="true"
