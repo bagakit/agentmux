@@ -120,6 +120,60 @@ function isFunctionBoundary(node: ts.Node): boolean {
 }
 
 /**
+ * 包着这个调用的最内层函数体（就是 effect 的那个箭头函数体）。
+ *
+ * 用来划定「在这次调用之前」的搜索范围。找不到（调用在顶层）时返回 undefined。
+ */
+function enclosingFunctionBody(call: ts.CallExpression): ts.Block | undefined {
+  let current: ts.Node | undefined = call.parent
+  while (current) {
+    if (isFunctionBoundary(current)) {
+      const body = (current as ts.FunctionLikeDeclaration).body
+      return body && ts.isBlock(body) ? body : undefined
+    }
+    current = current.parent
+  }
+  return undefined
+}
+
+/**
+ * 在这次调用**之前**，同一个 effect 体里提前离开的出口语句（`return` / `throw`）。
+ *
+ * 这一条补的是上面两条判据共同的盲点，而它是实测出来的，不是想出来的：在 effect 第一行插一句
+ * `if (launcherId) return`（`launcherId` 来自 warmLauncherId，恒是 `group:…` 或 `region:…` 这样的
+ * 非空串，所以这是一次**无条件**早退），整条 effect 变成 no-op —— 泊车与可见的 launcher 都不再预热，
+ * 而这个文件 8 条判据全绿、`tsc --noEmit` 也 exit 0。
+ *
+ * 两条旧判据对它天然失明：调用点仍然恰好一处，它仍然落在 `workspace && visible` 的 then 分支里。
+ * 「调用存在且包在正确的 if 里」与「这次调用可达」是两件事——本仓记过这一族（grep 守卫看不见早退、
+ * 抽进 lib 只解决一半）。
+ *
+ * 也不能指望 tsc 兜住：裸 `return` 那种写法恰好会让 `workspace` 丢掉收窄而报 TS18048，但那是**偶然**
+ * ——换成上面这个保留收窄的形状，tsc 全程沉默。把「tsc 会拦」当作不写判据的理由，正是这个洞的来路。
+ *
+ * 判据故意收得很紧：这条 effect 的正确形状是「体内只有那一个 if」，任何提前离开都必然让预热在某些
+ * 情况下不发生，而这条 effect 的语义是「可见就该有热 shell」。所以这里不区分「合法的早退」与
+ * 「变异的早退」——一个都不许有。真要加守卫条件，写进那个 `if` 的合取项里（`visible` 仍是必要条件，
+ * 极性那条判据照旧守着），而不是在它上面另开一个出口。
+ */
+function earlyExitsBefore(call: ts.CallExpression): ts.Node[] {
+  const body = enclosingFunctionBody(call)
+  if (!body) return []
+  const exits: ts.Node[] = []
+  const visit = (node: ts.Node): void => {
+    // 嵌套函数（回调、cleanup 里的 setTimeout 等）里的 return 属于**那个**函数，不是这条 effect 的
+    // 出口，跳过整棵子树。cleanup 那个 `return () => …` 本身在调用之后，不会落进这里。
+    if (node !== body && isFunctionBoundary(node)) return
+    if ((ts.isReturnStatement(node) || ts.isThrowStatement(node)) && node.end <= call.getStart()) {
+      exits.push(node)
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(body)
+  return exits
+}
+
+/**
  * 这个调用是否被「以 `visible` 为必要条件」的分支守住。
  *
  * 从调用向上找 `if`，直到撞上函数边界（撞上就说明这个调用所在的函数里没有任何守护，返回 false）。
@@ -158,6 +212,13 @@ describe('创建页只在可见时预热终端（否则每个泊车 workspace �
     expect(callGuardedByVisible(call!)).toBe(true)
   })
 
+  it('那一处调用之前，effect 体里没有任何提前离开的出口（否则整条 effect 是 no-op）', () => {
+    const [call] = prewarmCalls(parse(SOURCE))
+    expect(call, '找不到 prewarmTerminal 调用——第一条会先红').toBeDefined()
+    const exits = earlyExitsBefore(call!).map((node) => node.getText().trim())
+    expect(exits, `调用之前有提前离开的出口：${exits.join(' / ')}`).toEqual([])
+  })
+
   // ---- 下面是「守卫的守卫」：证明上面两条判据对每种变异各自独立变红，且不是恒真的。 ----
   //
   // 这些自检**不**改真文件读来的 SOURCE，而是变异一段硬编码的干净 fixture。理由：真文件被人
@@ -178,6 +239,53 @@ describe('创建页只在可见时预热终端（否则每个泊车 workspace �
     const calls = prewarmCalls(parse(CLEAN))
     expect(calls).toHaveLength(1)
     expect(callGuardedByVisible(calls[0]!)).toBe(true)
+    expect(earlyExitsBefore(calls[0]!)).toEqual([])
+  })
+
+  it('自检 M5：在 effect 第一行插一句无条件早退，出口判据翻红（另两条纹丝不动）', () => {
+    // 这就是那个实测出来的洞的精确形状。用 `if (launcherId) return` 而不是裸 `return`：
+    // launcherId 恒是非空串（warmLauncherId 返回 `group:…` 或 `region:…`），所以语义上等价于
+    // 无条件早退，但**保留了 workspace 的收窄**——裸 return 会让 workspace.id 报 TS18048，
+    // 于是给人一种「tsc 会拦住这种事」的错觉。真实的坏形状不报错。
+    const mutated = CLEAN.replace(
+      '    if (workspace && visible) prewarmTerminal(workspace.id)',
+      '    if (launcherId) return\n    if (workspace && visible) prewarmTerminal(workspace.id)'
+    )
+    expect(mutated, '注入必须真的改动了 fixture').not.toBe(CLEAN)
+    const calls = prewarmCalls(parse(mutated))
+    // 前提自检：另两条判据对这次变异**完全失明**——这正是为什么需要第三条。
+    expect(calls).toHaveLength(1)
+    expect(callGuardedByVisible(calls[0]!)).toBe(true)
+    // 只有出口那条认得出来。
+    expect(earlyExitsBefore(calls[0]!)).toHaveLength(1)
+  })
+
+  it('自检 M6：throw 也算出口（把早退写成抛异常同样让预热不发生）', () => {
+    const mutated = CLEAN.replace(
+      '    if (workspace && visible) prewarmTerminal(workspace.id)',
+      '    if (launcherId) throw new Error("nope")\n    if (workspace && visible) prewarmTerminal(workspace.id)'
+    )
+    expect(mutated).not.toBe(CLEAN)
+    expect(earlyExitsBefore(prewarmCalls(parse(mutated))[0]!)).toHaveLength(1)
+  })
+
+  it('出口分析器本身可被直接质询：调用之后的 return 与嵌套函数里的 return 都不算', () => {
+    const exitsBefore = (body: string): number => {
+      const src = `const C = () => { useEffect(() => {\n${body}\n}, []) }`
+      const [call] = prewarmCalls(parse(src))
+      return earlyExitsBefore(call!).length
+    }
+    // cleanup 那个 `return () => …` 排在调用**之后**，不是这次调用的出口——否则每个带 cleanup 的
+    // effect 都会被误判，这条判据就得靠例外清单活着。
+    expect(exitsBefore('  prewarmTerminal(x)\n  return () => stop()')).toBe(0)
+    // 嵌套回调里的 return 属于那个回调，不影响外层能不能走到调用。
+    expect(exitsBefore('  const f = () => { return 1 }\n  prewarmTerminal(x)')).toBe(0)
+    // 真正的早退：调用之前、同一个 effect 体内。
+    expect(exitsBefore('  if (a) return\n  prewarmTerminal(x)')).toBe(1)
+    expect(exitsBefore('  return\n  prewarmTerminal(x)')).toBe(1)
+    expect(exitsBefore('  if (a) throw new Error("x")\n  prewarmTerminal(x)')).toBe(1)
+    // 两个出口都数出来，报错信息里能看到全部（而不是只报第一个让人以为只有一处）。
+    expect(exitsBefore('  if (a) return\n  if (b) return\n  prewarmTerminal(x)')).toBe(2)
   })
 
   it('自检 M1：把守护改成 !visible，极性判据翻红（计数不变）', () => {
