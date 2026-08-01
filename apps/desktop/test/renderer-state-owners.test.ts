@@ -786,6 +786,29 @@ describe('Renderer resource state owners', () => {
  * 守卫也没有测试——被守的那侧有测试，没守的那侧连测试都没有。
  */
 describe('运行时成员快照不拿一份空回答退役 Agent', () => {
+  /**
+   * 一个**真正形状**的恢复候选。
+   *
+   * 不要拿 `{ ...session }` 当候选用：`SessionSnapshot` 的身份字段是 `id`，而
+   * `AgentSessionRecoveryCandidate` 的是 `agentSessionId`（contracts.ts:537）。把 session 摊进候选
+   * 位置，得到的对象 `agentSessionId` 是 undefined——它能通过"候选数不为零"这类只看长度的判断，却在
+   * 任何按 id 比对的地方都对不上。用这种假候选写出来的测试会看起来覆盖了候选路径，实际一次也没有。
+   */
+  function recoveryCandidate(agentSessionId: string) {
+    return {
+      agentSessionId,
+      hostId: session.hostId,
+      workspacePath: session.workspacePath,
+      providerId: 'codex' as const,
+      executorId: 'codex' as const,
+      capabilities: session.kind === 'agent' ? session.capabilities : undefined!,
+      label: session.label,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+      run: { runId: 'run-1' }
+    }
+  }
+
   /** 一个带 agent 面的 attached tab，加上它在 layout 里的位置。 */
   function seedAttachedAgent() {
     const tabId = `session:${session.id}`
@@ -852,15 +875,77 @@ describe('运行时成员快照不拿一份空回答退役 Agent', () => {
   it('只带恢复候选、没有 session 的快照也算说得出话', () => {
     // 恢复候选是「这个 agent 还在，只是要重连」。一份列着候选的快照不是"空"，它有资格谈成员——
     // 守卫因此把候选数也计入，与启动那侧的判据逐字对齐（两处都要求 sessions 与候选同时为空）。
+    //
+    // 注意这里的候选是**另一个 id**（session-3）：本地的 session-1 既不在 sessions 里、也不是候选，
+    // 是真的没了，所以删除正确。「候选点名的就是本地这个 agent」是完全不同的一侧，见下一条——
+    // 那一侧此前无人守，而它才是承重的。
     const { tabId, state } = seedAttachedAgent()
     const snapshot = {
       sessions: [],
       timelines: {},
-      recoveryCandidates: [{ ...session, id: 'session-3', control: { ...session.control, agentSessionId: 'session-3' } }]
+      recoveryCandidates: [recoveryCandidate('session-3')]
     }
     const next = reduceAgentMembershipSnapshot(state, snapshot, new Set())
 
     expect(next.tabs[tabId]).toBeUndefined()
     expect(next.sessions).toEqual([])
+  })
+
+  it('被点名为恢复候选的那个 Agent 自己不许被成员对齐删掉', () => {
+    // 这是用户报的「有些 Region 会消失」在运行时那条路上的真身。
+    //
+    // 一个 run 退出后 Core 不再把它当投影主体，于是它从 snapshot.sessions 里消失、只留在
+    // recoveryCandidates 里——也就是说 Core 正在说「这个 agent 可以恢复」。此前 canonicalIds 只
+    // 从 sessions 建，候选只参与「整份快照是否为空」，于是任何一次无关的成员 resync（例如另一个
+    // 窗口新起了一个 agent 触发 membership gap）都会把这个**恰恰可恢复**的 agent 连 tab 带 layout
+    // 摘掉，而 partialize 随后把删剩的投影落盘——不可逆，且不给任何理由。
+    //
+    // 启动那侧对同一个候选是「保留 + 恢复」（store.ts 的 recoveryFailures/retired 分支），两侧
+    // 必须对同一个 Core 概念给出同一个语义。删掉 recoverableIds 那行，这条变红。
+    const { tabId, state } = seedAttachedAgent()
+    const snapshot = {
+      sessions: [],
+      timelines: {},
+      recoveryCandidates: [recoveryCandidate(session.id)]
+    }
+    const next = reduceAgentMembershipSnapshot(state, snapshot, new Set())
+
+    expect(next.tabs[tabId]).toBeDefined()
+    expect(next.sessions.map((item) => item.id)).toEqual([session.id])
+    expect(next.layouts['workspace-1']?.groups[0]?.tabOrder).toEqual([tabId])
+  })
+
+  it('候选保护不是"有候选就谁都不删"——同一份快照里的其他陌生 Agent 照删', () => {
+    // 上一条的保护必须精确到被点名的那个 id。若写成「快照里有候选就整体 fail open」，一个真的
+    // 已经消失的 agent 会永远赖在界面上，而这个函数存在的理由正是收掉它。两条一起钉，才不是
+    // 把一个静默删除的 bug 换成一个永不清理的 bug。
+    const { tabId, state } = seedAttachedAgent()
+    const strangerTabId = 'session:session-9'
+    // 注意不能用 sessionTab()：它把 sessionId 写死成 session.id，那样"陌生 tab"其实指着 session-1，
+    // 断言就变成了自相矛盾。这里显式造一个真的指向 session-9 的面。
+    const seeded = {
+      ...state,
+      sessions: [...state.sessions, { ...session, id: 'session-9', control: { ...session.control, agentSessionId: 'session-9' } }],
+      tabs: {
+        ...state.tabs,
+        [strangerTabId]: createWorkbenchTab(strangerTabId, {
+          regionId: initialWorkbenchRegionId(strangerTabId),
+          kind: 'agent',
+          phase: 'attached',
+          workspaceId: 'workspace-1',
+          sessionId: 'session-9'
+        })
+      }
+    }
+    const snapshot = {
+      sessions: [],
+      timelines: {},
+      recoveryCandidates: [recoveryCandidate(session.id)]
+    }
+    const next = reduceAgentMembershipSnapshot(seeded, snapshot, new Set())
+
+    expect(next.tabs[tabId]).toBeDefined()
+    expect(next.tabs[strangerTabId]).toBeUndefined()
+    expect(next.sessions.map((item) => item.id)).toEqual([session.id])
   })
 })

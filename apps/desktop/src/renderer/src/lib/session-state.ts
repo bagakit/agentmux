@@ -304,6 +304,13 @@ export function removeSessionProjection(
  * 注意判据是**整份快照为空**，不是「这个 agent 不在快照里」。后者正是这个函数存在的理由：一份说得
  * 出别的 session 的快照有资格说某个 agent 不在了。恢复候选也算说得出话——一个候选就是「这个 agent
  * 还在，只是要重连」，这与启动那侧的判据逐字对齐。
+ *
+ * 而正因为一个候选的含义是「还在，只是要重连」，**被点名为候选的那个 agent 自己必须免于删除**。
+ * 一个 run 退出后 Core 不再把它当投影主体（`listRuns` 只列活着的 run），于是它从 `sessions` 里消失、
+ * 只出现在 `recoveryCandidates` 里。若只拿 `sessions` 建 canonical 集合，这个**恰恰可以恢复**的
+ * agent 会在下一次成员对齐里被连 tab 带 layout 摘掉，而 partialize 随后把删剩的投影落盘——不可逆，
+ * 且没有任何理由显示。那正是这个 Feature 要消灭的失败本身（用户原话：「有些 Region 会消失」）。
+ * 启动那侧对同一个候选是「保留 + 恢复」，两侧必须对同一个 Core 概念给出同一个语义。
  */
 export function reduceAgentMembershipSnapshot(
   state: SessionProjectionState,
@@ -311,7 +318,9 @@ export function reduceAgentMembershipSnapshot(
   protectedAgentSessionIds: ReadonlySet<string>
 ): SessionProjectionState {
   const pendingIds = new Set(Object.keys(state.pendingAgentLaunches))
-  const removalProtectedIds = new Set([...pendingIds, ...protectedAgentSessionIds])
+  // 被 Core 点名为恢复候选的 agent 免于删除：候选的含义就是「还在，只是要重连」。见函数注释。
+  const recoverableIds = new Set(snapshot.recoveryCandidates.map((candidate) => candidate.agentSessionId))
+  const removalProtectedIds = new Set([...pendingIds, ...protectedAgentSessionIds, ...recoverableIds])
   const canonicalAgents = snapshot.sessions.filter((session): session is Extract<SessionSnapshot, { kind: 'agent' }> => (
     session.kind === 'agent' && !pendingIds.has(session.id)
   ))
