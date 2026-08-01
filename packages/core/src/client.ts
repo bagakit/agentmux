@@ -15,6 +15,7 @@ import {
 import {
   AgentProviderRegistry,
   resolveManagedHookPlan,
+  splitLaunchPromptByDelivery,
   type AgentProvider
 } from './agent-provider.js'
 import { releaseSubagentRoster } from './hook-normalizer.js'
@@ -1005,10 +1006,14 @@ export class AgentMuxClient {
       if (!capability.installed) {
         throw new AgentMuxError(`${provider.label} is not installed on this host.`, 'AGENT_NOT_FOUND')
       }
-      const launchPrompt = composeAgentLaunchPrompt(
-        input.prompt,
-        input.injectAgentMuxGuide,
-        input.agentMuxNote
+      // `post-launch-only` 的 Provider 在启动期收不到任何 prompt（它的交互 UI 没有那个入口，
+      // 见对应 Provider 模块的出处），所以**不给它组装启动 prompt**——交了只会被 buildLaunch
+      // 拒绝，而运行时引导默认开、`composeAgentLaunchPrompt` 因此几乎总是非空，那等于这个
+      // Provider 根本起不来。分流由 splitLaunchPromptByDelivery 唯一决定，两条生命周期路径共用；
+      // 它同时交出 deferred 的那一半，下面必须真的送出去（见 deliverPostLaunchPrompt）。
+      const { atLaunch: launchPrompt, deferred: deferredPrompt } = splitLaunchPromptByDelivery(
+        provider.catalog,
+        composeAgentLaunchPrompt(input.prompt, input.injectAgentMuxGuide, input.agentMuxNote)
       )
       // Sealed launch options resolve to their argv core-side (fails closed on an un-declared choice) and
       // join the caller's args ahead of the prompt, exactly as buildArgs orders every other flag.
@@ -1122,6 +1127,15 @@ export class AgentMuxClient {
           'Initial prompt',
           input.prompt.trim(),
           now
+        )
+      }
+      if (deferredPrompt) {
+        await this.deliverPostLaunchPrompt(
+          provider,
+          readySession,
+          run,
+          lifecycleOperationId,
+          deferredPrompt
         )
       }
       return cloneSession(readySession)
@@ -1329,10 +1343,14 @@ export class AgentMuxClient {
       // (codex places them after the positional prompt, claude before) and the positional prompt is a
       // distinct token, so intermixing the option flags stays CLI-valid.
       const resumeLaunchOptionArgv = provider.resolveLaunchArgv(current.launchOptions ?? {})
+      // 与 launch 同一条判据、同一个函数：`post-launch-only` 的 Provider 续跑时也收不到启动期
+      // prompt，于是不把它交给 buildResumeLaunch（交了只会被拒），改在下面进程起来之后键入。
+      const { atLaunch: launchTimePrompt, deferred: deferredResumePrompt } =
+        splitLaunchPromptByDelivery(provider.catalog, prompt ?? '')
       const plan = provider.buildResumeLaunch({
         workspacePath: current.workspacePath,
         nativeHandle: current.nativeHandle,
-        ...(prompt ? { prompt } : {}),
+        ...(launchTimePrompt ? { prompt: launchTimePrompt } : {}),
         args: [...(input.args ?? []), ...resumeLaunchOptionArgv],
         env: input.env ?? {},
         ...(input.commandOverride === undefined ? {} : { commandOverride: input.commandOverride })
@@ -1443,6 +1461,15 @@ export class AgentMuxClient {
           'Resume prompt',
           prompt,
           Date.now()
+        )
+      }
+      if (deferredResumePrompt) {
+        await this.deliverPostLaunchPrompt(
+          provider,
+          readySession,
+          run,
+          lifecycleOperationId,
+          deferredResumePrompt
         )
       }
       return cloneSession(readySession)
@@ -2626,6 +2653,45 @@ export class AgentMuxClient {
         code: error instanceof AgentMuxError ? error.code : 'AGENT_TIMELINE_PERSIST_FAILED',
         message: error instanceof Error ? error.message : String(error),
         evidence
+      })
+    }
+  }
+
+  /**
+   * `post-launch-only` 的 Provider：启动期送不到的那份文本，在进程起来之后按一条普通 turn 键入。
+   *
+   * 为什么必须存在：这类 CLI 的交互 UI 没有「带着一条 prompt 启动并继续活着」的入口（出处见对应
+   * Provider 模块），于是 `buildLaunch`/`buildResumeLaunch` 会当场拒绝任何启动期 prompt。若只到
+   * 「不交给 buildLaunch」就收手，用户的原话就只落进时间轴、永不进入进程——正是 `promptDelivery`
+   * 这条轴要消灭的那类静默丢失，只是换了个地方发生。所以两条生命周期路径都必须走到这里。
+   *
+   * 失败要说出来而不是吞掉：进程已经起来了，抛出去会让调用方以为整次启动失败（并触发它的回滚），
+   * 但沉默会让界面看起来一切正常而那条 prompt 从未送达。于是发 `agent-error`——Run 保留，用户被
+   * 告知这一条没送到，可以自己再发一次。
+   */
+  private async deliverPostLaunchPrompt(
+    provider: AgentProvider,
+    session: AgentMuxAgentSession,
+    run: CtxmuxAdapterRun,
+    lifecycleOperationId: string,
+    text: string
+  ): Promise<void> {
+    if (!text.trim()) return
+    try {
+      await this.promptSubmission.submitInputPlan(
+        session,
+        run,
+        `launch-prompt:${lifecycleOperationId}`,
+        text,
+        provider.planPromptInput(text)
+      )
+    } catch (error) {
+      this.publisher.publish({
+        type: 'agent-error',
+        agentSessionId: session.agentSessionId,
+        code: error instanceof AgentMuxError ? error.code : 'AGENT_LAUNCH_PROMPT_UNDELIVERED',
+        message: `${provider.label} started, but its initial prompt could not be delivered. Submit it again.`,
+        evidence: { source: 'user', observedAt: Date.now(), run: { ...session.run } }
       })
     }
   }

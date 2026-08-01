@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { AgentProviderRegistry, resolveManagedHookPlan } from '../../src/agent-provider.js'
+import { readFileSync } from 'node:fs'
+import {
+  AgentProviderRegistry,
+  resolveManagedHookPlan,
+  splitLaunchPromptByDelivery
+} from '../../src/agent-provider.js'
+import { composeAgentLaunchPrompt } from '../../src/agent-outbound-message.js'
 import { KIMI_HOOK_EVENTS, KIMI_HOOKS } from '../../src/providers/kimi.js'
 import { canonicalHookLifecycleEvent } from '../../src/agent-hook-event.js'
 import { AgentMuxError } from '../../src/errors.js'
@@ -102,6 +108,34 @@ describe('Kimi provider', () => {
       expect(kimi.buildLaunch({
         workspacePath: '/repo', prompt: '   ', args: [], env: {}
       })).toEqual({ command: 'kimi', args: [], env: {} })
+    })
+
+    it('默认配置（运行时引导开着）真的能起来——组装出的启动 prompt 不许交给它', () => {
+      // 这条守的是本轮**我自己制造过的**回归：起初的分流写成「按 composed prompt 判，非空就拒」，
+      // 而 injectAgentMuxGuide 默认为真、composeAgentLaunchPrompt 因此几乎总是非空（实测 528 字符），
+      // 于是每一次默认启动都抛 AGENT_LAUNCH_PROMPT_UNSUPPORTED——把一次静默丢失换成了一个根本
+      // 起不来的 Provider。而当时的用例用手写的 `prompt: ''` 绕过了组装器，所以全绿。
+      //
+      // 所以这里必须走**真的组装器**：先确认它非空（否则下面在对空串取胜），再确认分流把它整份
+      // 划给 deferred、启动侧拿到空串，且这个空串真的能起来。
+      const composed = composeAgentLaunchPrompt('review this', true)
+      expect(composed.length).toBeGreaterThan(100)
+      const split = splitLaunchPromptByDelivery(kimi.catalog, composed)
+      expect(split.atLaunch).toBe('')
+      // 补送的那一半必须是**整份**原文，一个字节都不许丢——包括用户原话和运行时引导。
+      expect(split.deferred).toBe(composed)
+      expect(split.deferred).toContain('review this')
+      expect(kimi.buildLaunch({
+        workspacePath: '/repo', prompt: split.atLaunch, args: ['--foo'], env: {}
+      })).toEqual({ command: 'kimi', args: ['--foo'], env: {} })
+    })
+
+    it('送得到的 Provider 分流后整份随启动走，没有要补送的', () => {
+      // 反面锚点。没有它，把 splitLaunchPromptByDelivery 写成「永远划给 deferred」会全绿，
+      // 而那会让另外十个 Provider 的启动 prompt 全部退化成起来之后再键入。
+      const composed = composeAgentLaunchPrompt('review this', true)
+      expect(splitLaunchPromptByDelivery(providers.get('claude').catalog, composed))
+        .toEqual({ atLaunch: composed, deferred: '' })
     })
 
     it('起来之后提交 prompt 走默认 single-phase，这才是 Kimi 真正的送达路径', () => {
@@ -270,5 +304,70 @@ describe('Kimi provider', () => {
       // 反面，防止上一条被"永远返回 working"的实现骗过。
       expect(hookIn(`run-no-subagent-${mainStop}`)(mainStop).semanticState).toBe('done')
     })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 两条生命周期路径的接线守护。
+//
+// 上面的纯函数断言证明分流本身正确，但**不**证明 client 真的照它走：本仓没有能构造完整
+// AgentMuxClient 的测试装置（kernel/daemon 都是真的），所以这一组读源码断言形状。剥掉注释再断言——
+// 本仓踩过「标识符只出现在注释里，删掉真代码测试依然绿」的假绿。
+//
+// 承重的是「补送真的发生」这一半：只做分流而不补送，等于把静默丢失从 argv 挪到调用点，
+// 用户的原话仍旧只落进时间轴、永不进入进程。那正是这整条轴要消灭的东西。
+// ---------------------------------------------------------------------------
+const clientCode = readFileSync(new URL('../../src/client.ts', import.meta.url), 'utf8')
+  .replace(/\/\*[\s\S]*?\*\//gu, '')
+  .split('\n')
+  .map((line) => line.replace(/\/\/.*$/u, ''))
+  .join('\n')
+
+describe('post-launch-only 的补送在 launch 与 resume 两条路上都真的发生', () => {
+  it('剥注释后仍能看到被测代码——否则下面的断言在对空字符串取胜', () => {
+    expect(clientCode).toContain('private async deliverPostLaunchPrompt(')
+    expect(clientCode.length).toBeGreaterThan(10_000)
+  })
+
+  it('两条路都经同一个分流函数，没有任何就地重判 promptDelivery 的残留', () => {
+    // 两处各判一次迟早有一处判反——那正是「两条路对同一个『送得到吗』给不同答案」的形状。
+    expect(clientCode.match(/splitLaunchPromptByDelivery\(/gu) ?? []).toHaveLength(2)
+    expect(clientCode).not.toContain("promptDelivery !== 'post-launch-only'")
+    expect(clientCode).not.toContain("promptDelivery === 'post-launch-only'")
+  })
+
+  it('两条路都把 deferred 那一半交给补送——只分流不补送就是把丢失挪了个地方', () => {
+    expect(clientCode.match(/this\.deliverPostLaunchPrompt\(/gu) ?? []).toHaveLength(2)
+    for (const [from, to] of [
+      ['async createAgent(', 'private async ensureManagedHooks('],
+      ['private async resumeAgentRun(', 'private async performAgentContinuity(']
+    ] as const) {
+      const start = clientCode.indexOf(from)
+      const end = clientCode.indexOf(to, start)
+      expect(end).toBeGreaterThan(start)
+      const body = clientCode.slice(start, end)
+      expect(body).toContain('splitLaunchPromptByDelivery(')
+      // 分流出的 deferred 必须真的被送出去，而不是只被算出来然后扔掉。
+      const deferredName = body.includes('deferred: deferredResumePrompt')
+        ? 'deferredResumePrompt'
+        : 'deferredPrompt'
+      expect(body).toContain(`deferred: ${deferredName}`)
+      expect(body).toContain(`this.deliverPostLaunchPrompt(`)
+      expect(body.slice(body.indexOf('this.deliverPostLaunchPrompt(')))
+        .toContain(deferredName)
+    }
+  })
+
+  it('补送失败要说出来而不是吞掉，也不许把已经起来的 Run 抛崩', () => {
+    const start = clientCode.indexOf('private async deliverPostLaunchPrompt(')
+    const body = clientCode.slice(start, clientCode.indexOf('\n  private async ', start + 10))
+    // 真的调用送达通路——只 publish 一条"已送达"而不 submit 是这条轴上最坏的假象。
+    expect(body).toContain('this.promptSubmission.submitInputPlan(')
+    expect(body).toContain('provider.planPromptInput(text)')
+    // 失败必须发出去：静默失败会让界面看起来一切正常而 prompt 从未送达。
+    expect(body).toContain('this.publisher.publish(')
+    expect(body).toContain("type: 'agent-error'")
+    // 且不许改成 throw：进程已经起来了，抛出去会让调用方以为整次启动失败并回滚一个健康的 Run。
+    expect(body).not.toContain('throw')
   })
 })

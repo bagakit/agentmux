@@ -202,6 +202,30 @@ describe('built-in agent providers', () => {
     })).toEqual({ command: 'cursor-agent', args: ['--force', 'review this'], env: {} })
   })
 
+  it('只有空白的 prompt 一律当没有 prompt，不许变成一个 argv 令牌', () => {
+    // 承重点是 buildLaunch 里那一次 `context.prompt.trim()`。把它去掉后每个 Provider 的
+    // buildArgs 都只按 `prompt ?` 判真假，于是 '   ' 会作为**一个真实参数**递给 CLI：
+    // claude 一族多出一个空白位置参数（被当成一条"内容是空格"的用户请求），
+    // grok 会多出一个 `--` 分隔符，gemini 会多出 `--prompt-interactive '   '`。
+    // 这三种形态各错各的，所以按 Provider 分组断言，而不是笼统说一句"参数没变"。
+    for (const id of ['claude', 'traex', 'pi', 'cursor'] as const) {
+      expect(providers.get(id).buildLaunch({
+        workspacePath: '/tmp/work', prompt: ' \t\n ', args: ['--model', 'demo'], env: {}
+      }).args).toEqual(['--model', 'demo'])
+    }
+    expect(providers.get('grok').buildLaunch({
+      workspacePath: '/tmp/work', prompt: '   ', args: ['--model', 'demo'], env: {}
+    }).args).toEqual(['--model', 'demo'])
+    expect(providers.get('gemini').buildLaunch({
+      workspacePath: '/tmp/work', prompt: '   ', args: ['--yolo'], env: {}
+    }).args).toEqual(['--yolo'])
+    // 反面锚点：真有内容时前后空白**不许**被吃掉之外的东西影响——trim 只用于判空与去边界空白，
+    // 内部的换行与引号逐字节保留（上面 positional-argv 那组已钉住内部字节）。
+    expect(providers.get('claude').buildLaunch({
+      workspacePath: '/tmp/work', prompt: '  fix it  ', args: [], env: {}
+    }).args).toEqual(['fix it'])
+  })
+
   // grok、gemini、cursor 都已离开这一组：grok 的 `--resume <SESSION_ID_OR_TITLE>` 来自本机 `--help`；
   // gemini 的 `--resume <uuid>` 来自读实现（findSession 是 UUID 优先，help 文本少说了）；cursor 的
   // `--resume [chatId]` 同样来自读 bundle（`else fe=o.resume` 直传 chat id）。三者的 resume argv 分别在
