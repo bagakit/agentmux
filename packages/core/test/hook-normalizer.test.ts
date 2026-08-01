@@ -35,7 +35,14 @@ describe('native hook normalization', () => {
     })
   })
 
-  it('maps Pi ask_user_question to blocked', () => {
+  it('Pi 没有等待用户的工具——ask_user_question 判 working，不是 blocked', () => {
+    // 这条以前断言 blocked。那条规则押的工具在 Pi 里**根本不存在**：内置工具就是
+    // bash/edit/find/grep/ls/powershell/read/write 八个（上游 `core/tools/` 目录），仓库里
+    // `AskUserQuestion` 的出现全在一张 **Claude Code** 的工具名映射表里
+    // （`packages/ai/src/api/anthropic-messages.ts:89`），与 Pi 自己的工具集无关。
+    //
+    // 旧测试自己构造了一个 Pi 永远不会发的负载，所以它证明的是"规则能匹配"，不是"Pi 会发"——
+    // 一条恒真的自证。规则删掉后这里改成守反向：即使收到这样一个负载，也按普通工具调用判 working。
     const event = providers.get('pi').normalizeHook({
       receiptId: 'receipt-2',
       agentSessionId: 'semantic-2',
@@ -48,7 +55,8 @@ describe('native hook normalization', () => {
         session_file: '/tmp/pi-session.jsonl'
       }
     })
-    expect(event.semanticState).toBe('blocked')
+    expect(event.semanticState).toBe('working')
+    // handle 的两个字段仍照常抽出来——删规则不该影响 native handle 这条正交的路。
     expect(event.nativeHandle).toMatchObject({ transcriptPath: '/tmp/pi-session.jsonl' })
   })
 
