@@ -6,6 +6,7 @@ import {
   projectGroupKey,
   projectRailNavigation,
   projectRailTree,
+  PROJECT_RAIL_MAX_DEPTH,
   removeProjectWorkspaces,
   railGroupAddress,
   workspaceProjectId,
@@ -232,7 +233,10 @@ export function WorkspaceSidebar({
                 ...node,
                 // A grouped Project gets one visual level for the group itself;
                 // path-derived nesting remains additive below that level.
-                depth: node.depth + (group.groupPath ? 1 : 0)
+                depth: Math.min(
+                  node.depth + (group.groupPath ? 1 : 0),
+                  PROJECT_RAIL_MAX_DEPTH
+                )
               }))}
             </div>
           )
