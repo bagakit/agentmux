@@ -518,6 +518,156 @@ describe('ConfigStore workspace identity', () => {
     )
   })
 
+  // ── 逐条全损：executors 与 hosts 两条轴 ──────────────────────────────────────
+  //
+  // 上面三条容器守卫（hosts 容器 / Executor 容器 / workspaces 全损）与 stranded 那条之间还留着
+  // 一条缝：**容器完好，逐条 salvage 把每一条都丢掉**。
+  //
+  // 这不是假想的未来。三个 schema 都是 `.strict()`，所以给 Executor 或 host 加**任何**字段，
+  // 存量记录当场解析失败——正是 `carriedExecutors` / `hosts` 那两处 `.filter(parsed.success)`
+  // 静默扔掉的东西。workspaces 那条轴有 `found` 做证据、有响亮守卫；另两条轴只有「容器类型错」
+  // 守卫，逐条全损完全沉默。
+  //
+  // `config-store.ts:547` 那条注释把这条缝论证成了已决之事——「个别条目因 Provider 下架被丢是
+  // 刻意抢救」——可它为之背书的那个 filter 是 `parsed.success && providerIds.has(...)`：**两个
+  // 原因合在一条 filter 里**，注释只覆盖其中一个。Provider 下架是含糊的（这个 build 真的不认识
+  // 它了，留着会让整份配置存不下去），shape 被改坏不是（记录完好，只是新 schema 多要一个字段）。
+  //
+  // 判据取「原本可辨识的记录数 vs 实际带过来的数」，而不是「存活条目数」。`:391-395` 记着一次
+  // 被回退的尝试：数存活条目会在两个场景误报——单条 host 坏掉（stranded 已能点名）、local 记录
+  // 坏掉（回填正确修好）。所以下面四条正向/反向成对，把那两个场景都做成反向边界。
+  // ---------------------------------------------------------------------------
+
+  it('refuses to launch when every custom Executor is dropped one by one, not just when the table is unreadable', async () => {
+    // 容器完好（是 record），条目也确实是 object，只是多了一个当前 schema 不认的键——这就是
+    // 「下次给 Executor 加字段」在今天的等价形状。`.strict()` 让它逐条解析失败，被静默扔掉，
+    // 而内置默认表铺在底下，结果长得像一张健康的 Executor 表。
+    const { store, path } = await storeFixture()
+    const original = JSON.stringify({
+      ...baseConfig,
+      version: DEFAULT_CONFIG.version - 1,
+      executors: {
+        ...baseConfig.executors,
+        'my-codex': {
+          label: 'My Codex', providerId: 'codex', command: 'codex', args: [], env: {},
+          injectAgentMuxGuide: true, retriesOnRateLimit: 3
+        },
+        'my-claude': {
+          label: 'My Claude', providerId: 'claude', command: 'claude', args: [], env: {},
+          injectAgentMuxGuide: true, retriesOnRateLimit: 1
+        }
+      }
+    })
+    await writeFile(path, original)
+
+    await expect(store.get()).rejects.toThrow(/2 Executor/)
+    expect(
+      await readFile(path, 'utf8'),
+      '自建 Executor 被逐条丢光却照旧启动了——文件已被覆盖，用户的 Executor 无处可寻'
+    ).toBe(original)
+  })
+
+  it('an Executor whose Provider this build retired is silent salvage — it must not refuse the launch', async () => {
+    // 反向边界，也是上面那条守卫**唯一**允许的沉默。这条记录本身完全合法，丢它的理由在它之外：
+    // 这个 build 不认识那个 Provider 了，留着会让 schema 的 Provider-存在性 refinement 拒绝整份
+    // 配置，`save()` 永远写不出去。含糊 vs 不含糊，是这两条测试分开的那条线。
+    //
+    // Provider id 现算：手抄一个「已下架」的名字会在某天真的被加进去，那天这条测试会静默变成
+    // 「合法 Provider 也不抛」，与它要证的事相反。
+    const retiredProviderId = `retired-${BUILT_IN_AGENT_PROVIDERS.map((p) => p.id).join('-')}`
+    const { store, path } = await storeFixture()
+    await writeFile(path, JSON.stringify({
+      ...baseConfig,
+      version: DEFAULT_CONFIG.version - 1,
+      workspaces: [workspace({ id: 'ws-1' })],
+      executors: {
+        ...baseConfig.executors,
+        'my-old': {
+          label: 'Old', providerId: retiredProviderId, command: 'old', args: [], env: {},
+          injectAgentMuxGuide: true
+        }
+      }
+    }))
+
+    const loaded = await store.get()
+
+    expect(Object.keys(loaded.executors)).not.toContain('my-old')
+    expect(loaded.workspaces.map((entry) => entry.id)).toContain('ws-1')
+  })
+
+  it('refuses to launch when every authored host is dropped one by one, and the local back-fill hides it', async () => {
+    // hosts 那条轴的同一形状。这里刻意让**没有任何项目**挂在远端 host 上：于是 stranded 恒空，
+    // 容器是数组所以 hostsUnreadable 为假，local 被回填所以 `hosts` 非空——三道现有守卫全部沉默，
+    // 而用户配的那两台机器已经不在了。
+    const { store, path } = await storeFixture()
+    const original = JSON.stringify({
+      ...baseConfig,
+      version: DEFAULT_CONFIG.version - 1,
+      hosts: [
+        { id: 'local', kind: 'local', label: 'This Mac' },
+        { id: 'box', kind: 'ssh', label: 'Box', hostname: 'b.test', jumpHost: 'gw.test' },
+        { id: 'gpu', kind: 'ssh', label: 'GPU', hostname: 'g.test', jumpHost: 'gw.test' }
+      ],
+      workspaces: [workspace({ id: 'ws-local', hostId: 'local' })]
+    })
+    await writeFile(path, original)
+
+    await expect(store.get()).rejects.toThrow(/2 host/)
+    expect(
+      await readFile(path, 'utf8'),
+      '用户配的 host 被逐条丢光却照旧启动了——文件已被覆盖'
+    ).toBe(original)
+  })
+
+  it('a damaged local host record stays silent salvage — the back-fill repairs it, so it is not a loss', async () => {
+    // 反向边界之一：`:391-395` 记着的第一个误报场景。local 不是创作内容（默认表里永远有一份），
+    // 它坏掉时回填**正确修好**，什么都没丢，因此不能算进证据。旁边那条 `back-fills the local
+    // host…` 只判了项目存活；这条判的是「不抛」——把新守卫写成数所有 host 记录就会打红这里。
+    const { store, path } = await storeFixture()
+    await writeFile(path, JSON.stringify({
+      ...baseConfig,
+      version: DEFAULT_CONFIG.version - 1,
+      hosts: [{ id: 'local', kind: 'local', label: 'This Mac', theme: 'dark' }],
+      workspaces: [workspace({ id: 'ws-local', hostId: 'local' })]
+    }))
+
+    const loaded = await store.get()
+
+    expect(loaded.hosts.filter((host) => host.id === 'local')).toHaveLength(1)
+    expect(loaded.workspaces.map((entry) => entry.id)).toContain('ws-local')
+  })
+
+  it('one damaged host among several is left to the stranded guard, which can name it', async () => {
+    // 反向边界之二：`:391-395` 记着的第二个误报场景。一条坏、一条好时，stranded 那条守卫能点名
+    // 是哪台、哪几个项目；新守卫在这里再抛一次只会把消息从「可操作」降级成「泛泛」。判据是
+    // **消息内容**而不是「不抛」——这里 stranded 必须抛，抛的得是它那条。
+    const { store, path } = await storeFixture()
+    await writeFile(path, JSON.stringify({
+      ...baseConfig,
+      version: DEFAULT_CONFIG.version - 1,
+      hosts: [
+        { id: 'local', kind: 'local', label: 'This Mac' },
+        { id: 'good', kind: 'ssh', label: 'Good', hostname: 'g.test' },
+        { id: 'bad', kind: 'ssh', label: 'Bad', hostname: 'b.test', port: 'twenty-two' }
+      ],
+      workspaces: [workspace({ id: 'ws-bad', hostId: 'bad' })]
+    }))
+
+    await expect(store.get()).rejects.toThrow(/bad \(ws-bad\)/)
+    await expect(store.get()).rejects.not.toThrow(/host record\(s\) that none/)
+  })
+
+  it('exposes the path it actually reads, so a startup failure can point the user at the right file', async () => {
+    // `filePath` 的唯一消费者是启动失败对话框（`index.ts`），而那条路径没有任何测试执行它——
+    // 现有守卫是 `startup-failure-notice.test.ts:130` 的 `toMatch(/configStore\.filePath/)`，
+    // 它守的是「index.ts 里写着这个取值」，不是「getter 真的返回盘上那份路径」。实测把 getter
+    // 改成返回 `'/tmp/MUTANT-….json'`，54 条全绿：对话框会把用户指向一个不存在的文件，比不给
+    // 路径更糟。一行行为断言就够。
+    const { store, path } = await storeFixture()
+
+    expect(store.filePath).toBe(path)
+  })
+
   it('a damaged hosts container is reported as the container even when it also strands every project', async () => {
     // 上一条刻意把项目全放在 local 上，于是只有一个守卫能成立——**顺序**因此无人守。这一格
     // 补的是两条同时成立：容器写成 map，项目挂在远端 host 上，于是 `hosts` 解析成空、local
