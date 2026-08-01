@@ -16,6 +16,7 @@
     "package:mac:install": "node scripts/package-macos.mjs --install",
     "probe:file-editing": "node scripts/probe-file-editing.mjs",
     "report:package": "node scripts/report-desktop-package.mjs",
+    "audit:features": "node scripts/audit-feature-history.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "measure:desktop": "pnpm build && node scripts/measure-desktop-resources.mjs"
   },

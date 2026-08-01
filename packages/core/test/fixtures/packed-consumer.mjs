@@ -78,14 +78,61 @@ assert.throws(
   (error) => error?.code === 'INVALID_AGENT_TIMELINE'
 )
 
-async function waitFor(description, predicate, timeoutMs = 8_000) {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() <= deadline) {
+/**
+ * 等某个条件成立。
+ *
+ * **没有挂钟预算。** 全部 54 处调用都是"等一件会到的事"，没有一处用超时表达"这件事不该发生"
+ * （若要那样断言，写法是等对立事件成立，而不是等一个预算烧完）。上界由外层持有：跑这个脚本的
+ * 那条 it 声明了 95 秒。
+ *
+ * 原先是 8 秒。它在机器被压满时先于外层触发，把"慢"报成"没发生"——这就是 test:native 那个负载相关
+ * flake 的真正位点。实测 2026-09-01：负载 ~120 时同机解一个 84KB tarball 花了 3 分 42 秒挂钟、
+ * 只用 0.01 秒 CPU（纯调度饥饿）；负载 ~15 时这条 8 秒预算 3 次里红 2 次。
+ *
+ * 两个预算守同一件事时，短的那个只贡献假阴性。
+ *
+ * `description` 保留，且**改成真卡住时唯一能读到的线索**：外层期限到了只会杀掉整个脚本，不会说它
+ * 停在 54 个等待里的哪一个。所以每隔一段就把当前在等什么打到 stderr——诊断价值正是原先那条错误
+ * 消息提供的东西，不该跟着预算一起删掉。
+ */
+async function waitFor(description, predicate) {
+  const started = Date.now()
+  let announced = 0
+  for (;;) {
     const result = await predicate()
     if (result) return result
+    const waited = Date.now() - started
+    if (waited >= (announced + 1) * 10_000) {
+      announced = Math.floor(waited / 10_000)
+      process.stderr.write(`[packed-consumer] still waiting for ${description} (${Math.round(waited / 1000)}s)\n`)
+    }
     await new Promise((resolve) => setTimeout(resolve, 20))
   }
-  throw new Error(`Timed out waiting for ${description}.`)
+}
+
+/**
+ * Reattach 一个 Agent，并把它 replay 出来的字节合进这个 client 的事件数组。
+ *
+ * **必须合流，不能只等 `terminal-output` 事件。** `attach` 把 attach **之前**的输出放进
+ * `snapshot.replay`，只把之后的喂给推流；于是同一段字节要么是 replay 要么是事件，绝不两者都是。
+ * 而 Agent 的握手（`ensureTerminalHandshake`）自己 attach 一次、在 `finally` 里 detach——attach 是
+ * 排他的（第二次会 `ATTACHMENT_EXISTS`），所以它必须放手。那次 detach 与这里 reattach 之间就有一段
+ * **没有任何监听者**的窗口，落在窗口里的输出此后只能以 replay 形式出现。
+ *
+ * 实测（2026-09-01）：在 `handshake race controlled composer pending` 之前插 3 秒延迟，让假 CLI 有
+ * 充足时间在窗口里写完 `codex-controlled-ready-pending`，那条等待就从 1/3 概率永等变成 100% 永等。
+ * 这不是负载 flake——负载只决定谁先跑完那一步，判据本身漏了半条流。
+ *
+ * 产品侧两个消费者都做了合流：Desktop 把 `replay` 交给 renderer 与实时事件拼接，CLI 走
+ * `OrderedSessionOutputFollow`。只有这个 fixture 少了这一步，于是它测出的"输出"比任何真实消费者
+ * 看到的都少。合流放在 `await` 之后同步 push，因此排在推流的实时事件之前——正是字节的真实次序。
+ */
+async function reattachAgentWithReplay(client, agentSessionId, events, afterByte = 0) {
+  const { attachment } = await client.reattachAgent(agentSessionId, afterByte)
+  for (const event of attachment.replay) {
+    events.push({ type: 'terminal-output', run: { runId: event.runId }, data: event.data })
+  }
+  return attachment
 }
 
 function output(events, runId) {
@@ -266,8 +313,19 @@ await waitFor('complete stubborn process-tree stop', async () => (
 ))
 unsubscribe()
 
+/**
+ * 跑一次打包出来的 `agentmux` CLI。
+ *
+ * **没有挂钟预算。** 原先是 `timeout: 15_000`，20 处调用共用。实测（2026-09-01）健康情况下全部 20 次
+ * 里最慢的是 `resume` 的 **191ms**；而负载 ~20 时它撞满 15 秒被 SIGTERM 杀掉——**79 倍**。
+ * 这不是"界定一个慢操作"，是调度饥饿下杀死一个健康进程，与这个 fixture 里其余被删掉的预算同一个判断：
+ * 两个预算守同一件事时，短的那个只贡献假阴性。上界由外层持有（跑这个脚本的那条 it 声明了 95 秒）。
+ *
+ * 这一族假阴性尤其难认，因为 `execFile` 超时的报错**从不说它超时了**：实测 message 只有
+ * `Command failed: <argv>`，靠 `killed: true` / `signal: 'SIGTERM'` / `code: null` 才认得出。
+ * 于是它长得就像"CLI 自己失败了"，而 stdout/stderr 都是空的。
+ */
 const cli = async (args, env = {}) => await execFileAsync(agentmuxCli, args, {
-  timeout: 15_000,
   maxBuffer: 4 * 1024 * 1024,
   env: { ...process.env, ...env }
 })
@@ -785,13 +843,13 @@ assert.deepEqual(
   [continuityResumed.run.runId]
 )
 await disconnectedContinuity.dispose()
-const continuityAttachment = await continuityClient.reattachAgent(codex.agentSessionId, 0)
+// 监听要装在 reattach **之前**：两者之间抵达的实时事件没有别处可收。
 const continuityEvents = []
 continuityClient.onEvent((event) => continuityEvents.push(event))
+await reattachAgentWithReplay(continuityClient, codex.agentSessionId, continuityEvents)
 await waitFor('promptless native continuity', () => (
-  `${continuityAttachment.attachment.replay.map((event) => event.data).join('')}` +
-  output(continuityEvents, continuityResumed.run.runId)
-).includes('codex-ready:'))
+  output(continuityEvents, continuityResumed.run.runId).includes('codex-ready:')
+))
 await waitFor('promptless continuity readiness', () => (
   continuityClient.agentSession(codex.agentSessionId).terminalPromptReadiness?.source === 'native-stop' &&
   continuityClient.agentSession(codex.agentSessionId).terminalPromptReadiness?.readyThroughByte !== undefined
@@ -882,11 +940,9 @@ assert.equal(resumed.terminalHandshake?.acknowledged, true)
 assert.equal(codexThird.agentSessions().length, 1)
 const codexThirdEvents = []
 codexThird.onEvent((event) => codexThirdEvents.push(event))
-const resumedAttachment = await codexThird.reattachAgent(resumed.agentSessionId, 0)
-const resumedReplay = resumedAttachment.attachment.replay.map((event) => event.data).join('')
+await reattachAgentWithReplay(codexThird, resumed.agentSessionId, codexThirdEvents)
 await waitFor('native resume argv prompt', () => (
-  `${resumedReplay}${output(codexThirdEvents, resumed.run.runId)}`
-    .includes(`codex-ready:${resumePrompt}`)
+  output(codexThirdEvents, resumed.run.runId).includes(`codex-ready:${resumePrompt}`)
 ))
 await waitFor('resumed Codex Hook receipt', () => (
   codexThird.agentSession(resumed.agentSessionId).hookReceipt?.run.runId === resumed.run.runId
@@ -985,7 +1041,7 @@ const literalPromptAgent = await literalPromptClient.createAgent({
   workspacePath: process.cwd(),
   commandOverride: fakeCodex
 })
-await literalPromptClient.reattachAgent(literalPromptAgent.agentSessionId, 0)
+await reattachAgentWithReplay(literalPromptClient, literalPromptAgent.agentSessionId, literalPromptEvents)
 await waitFor('literal prompt Agent ready epoch', () => (
   literalPromptClient.agentSession(literalPromptAgent.agentSessionId)
     .terminalPromptReadiness?.source === 'native-stop' &&
@@ -1013,7 +1069,7 @@ const noStop = await noStopClient.createAgent({
   commandOverride: fakeCodex,
   env: { AGENTMUX_FAKE_READY_MODE: 'no-stop' }
 })
-await noStopClient.reattachAgent(noStop.agentSessionId, 0)
+await reattachAgentWithReplay(noStopClient, noStop.agentSessionId, noStopEvents)
 const pendingInitialReadiness = noStopClient.agentSession(noStop.agentSessionId)
   .terminalPromptReadiness
 assert.equal(pendingInitialReadiness?.source, 'initial-composer')
@@ -1113,7 +1169,7 @@ assert.deepEqual(
   handshakeRaceOwner.agentSession(handshakeRace.agentSessionId).terminalHandshake
 )
 assert.equal((await handshakeRaceOwner.statusAgent(handshakeRace.agentSessionId)).run.acceptedInputBytes, 5)
-await handshakeRaceOwner.reattachAgent(handshakeRace.agentSessionId, 0)
+await reattachAgentWithReplay(handshakeRaceOwner, handshakeRace.agentSessionId, handshakeRaceEvents)
 await waitFor('handshake race controlled composer pending', () => (
   output(handshakeRaceEvents, handshakeRace.run.runId).includes('codex-controlled-ready-pending')
 ))
@@ -1138,7 +1194,7 @@ const initialAssistant = await initialAssistantClient.createAgent({
   commandOverride: fakeCodex,
   env: { AGENTMUX_FAKE_READY_MODE: 'no-stop-assistant' }
 })
-await initialAssistantClient.reattachAgent(initialAssistant.agentSessionId, 0)
+await reattachAgentWithReplay(initialAssistantClient, initialAssistant.agentSessionId, initialAssistantEvents)
 await waitFor('assistant marker without initial composer', () => (
   output(initialAssistantEvents, initialAssistant.run.runId)
     .includes('codex-assistant-marker-without-composer')
@@ -1177,7 +1233,7 @@ const preHandshakeComposer = await preHandshakeComposerClient.createAgent({
   commandOverride: fakeCodex,
   env: { AGENTMUX_FAKE_READY_MODE: 'pre-handshake-composer' }
 })
-await preHandshakeComposerClient.reattachAgent(preHandshakeComposer.agentSessionId, 0)
+await reattachAgentWithReplay(preHandshakeComposerClient, preHandshakeComposer.agentSessionId, preHandshakeComposerEvents)
 await waitFor('ordinary output after pre-handshake composer', () => (
   output(preHandshakeComposerEvents, preHandshakeComposer.run.runId)
     .includes('codex-post-handshake-status-only')
@@ -1219,7 +1275,7 @@ const promptedNoStop = await promptedNoStopClient.createAgent({
   commandOverride: fakeCodex,
   env: { AGENTMUX_FAKE_READY_MODE: 'no-stop' }
 })
-await promptedNoStopClient.reattachAgent(promptedNoStop.agentSessionId, 0)
+await reattachAgentWithReplay(promptedNoStopClient, promptedNoStop.agentSessionId, promptedNoStopEvents)
 await waitFor('prompted Run waiting before composer', () => (
   output(promptedNoStopEvents, promptedNoStop.run.runId)
     .includes('codex-controlled-ready-pending')
@@ -1260,7 +1316,7 @@ const argsPrompt = await argsPromptClient.createAgent({
   commandOverride: fakeCodex,
   env: { AGENTMUX_FAKE_READY_MODE: 'no-stop' }
 })
-await argsPromptClient.reattachAgent(argsPrompt.agentSessionId, 0)
+await reattachAgentWithReplay(argsPromptClient, argsPrompt.agentSessionId, argsPromptEvents)
 await waitFor('args-prompt Run waiting before composer', () => (
   output(argsPromptEvents, argsPrompt.run.runId).includes('codex-controlled-ready-pending')
 ))

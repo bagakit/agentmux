@@ -17,7 +17,7 @@
 | `hermes` | ✅ | T-007 |
 | `cursor-agent` | ✅ | T-008 |
 | `codex` / `agy` / `traex` | ✅ | 已接入 |
-| `pi` | ❌ MISSING | T-005 |
+| `pi` | ❌ 命令不在本机，但 canonical 源码在（`~/proj/github/pi` @0.84.4），三条声明已确证，见《Pi（T-005）》 | T-005 |
 | `opencode` `mimo` `droid` `devin` `omp` `prime` `copilot` `kimi` | ❌ MISSING | T-009…T-016 |
 
 **影响**：T-005 与 T-009…T-016 的能力无法在本机用真实 CLI 核实。这些 Task 必须显式区分
@@ -366,6 +366,73 @@ Mimo / Devin / OMP / Prime 在本机既无可执行文件、无源码，也无�
 
 （顺带更正一处措辞：计划里用的词是 `deferred` 与 `non-goal`，**没有** `not-comparable` 这个
 分类——T-017 的 acceptance 提到三分类时按前两个加 implemented 理解。）
+
+---
+
+## Pi（T-005）：三条声明已对 canonical 源码确证——此前那份「矛盾」量错了产品
+
+**本节 2026-09-01 曾记录三处矛盾（事件名查无实据、无 `--session`、无文件 hook 面），
+那三条量的是 `~/proj/priv/zfaustk/prime-agent`——另一个产品。对着真正的 pi 复验，三条全部不成立。
+下面先讲怎么区分这两份 checkout，因为它们极易混，混一次就会得出上面那种反向结论。**
+
+### 先分清两个产品：npm 包名相同，靠 `piConfig` 区分
+
+两份 checkout 的 `packages/coding-agent/package.json` 里，`name` 都是 `@earendil-works/pi-coding-agent`，
+`bin` 都是 `{"pi": "dist/bundle/cli.js"}`——**这两个字段区分不了它们**。能区分的是上游自己的身份字段
+`piConfig`，`src/core/config.ts:498-504` 就是那份 SSOT：
+
+```ts
+APP_NAME        = pkg.piConfig?.name      || "pi"
+CONFIG_DIR_NAME = pkg.piConfig?.configDir || ".pi"
+ENV_AGENT_DIR   = `${APP_NAME.toUpperCase()}_CODING_AGENT_DIR`
+```
+
+| | `~/proj/github/pi` | `~/proj/priv/zfaustk/prime-agent` |
+|---|---|---|
+| version | **0.84.4** | 0.7.2 |
+| `piConfig` | `{"configDir": ".pi"}`（无 `name`） | `{"name": "prime-agent", "configDir": ".prime/agent"}` |
+| 派生 `APP_NAME` | `pi` | `prime-agent` |
+| 派生环境变量 | `PI_CODING_AGENT_DIR` | `PRIME_AGENT_CODING_AGENT_DIR` |
+| 结论 | **这是 pi（T-005）** | **这是 Prime（T-014）** |
+
+那个 fork 自己把话说死了（`packages/coding-agent/README.md:16`，逐字）：它保留 `pi` 的包名与 bin 只是
+"for internal compatibility"，"release packaging rewrites the application package and command to
+`prime-agent`"，并明令 "Do not use the inherited npm package as the Prime Agent install path."
+——名字是继承来的壳，产品身份是 prime-agent。上一轮之所以在同名上踩空，就是只看了 `name`/`bin`。
+
+### 三条逐一复验（源码 `~/proj/github/pi`，0.84.4）
+
+| # | `providers/pi.ts` 声明 | canonical 源码实测 | 结论 |
+|---|---|---|---|
+| 1 | resume 发 `--session <transcriptPath>` | `src/cli/args.ts:123` 逐字有 `arg === "--session"`；`:287` 的 help 写着 `--session <path\|id>  Use specific session file or partial UUID` | **成立**。0.7.2 的 fork 里没有这个标志，是版本差 |
+| 2 | 事件集的 7 个名字 | `src/core/extensions/types.ts:1282-1298` 的 `on()` 重载逐条列着 `before_agent_start`/`agent_start`/`tool_call`/`tool_execution_start`/`tool_execution_end`/`message_end`/`agent_settled`；`agent_settled` 在 src 下 **10 处命中**（含 `:742` 事件类型、`:1285` 重载、`agent-session.ts:633` 派发） | **全部成立**。最后那个名字是 0.80.4 才加的新事件，所以在 0.7.2 的 fork 里查不到，与 pi 无关 |
+| 3 | 用文件 hook 面投递 | `src/core/extensions/loader.ts:712-717` 扫 `extensions/*.ts`、`*.js` 与 `*/index.*`，`:779` 起遍历标准位置；`:577` 用 jiti 加载 default 导出 | **成立**。这是文件面，AgentMux 写一个扩展文件进去即可 |
+
+于是 T-005 从「声明了未核实的能力」变成「声明与 canonical 源码一致」，`providers/pi.ts` 按这份证据
+实现为 `hookStrategy: {kind:'native', installation:'explicit-managed'}`，托管扩展写到
+`<agent-dir>/extensions/agentmux.js`。
+
+### 两个手抄落点
+
+`agent_settled` 在代码里**手抄了两处**，将来只改一处必然漂移，所以两个落点都记在这里：
+
+- `packages/core/src/providers/pi.ts`——`PI_HOOKS.rules` 里 `state: 'done'` 那条的 events
+- `packages/core/src/agent-hook-event.ts`——语义表把它映射到 `turn-end`
+
+这一对「文档记着已核实 / 代码照旧声明」的状态由
+`packages/core/test/pi-verified-against-canonical-source.test.ts` 守住：判据是**双向蕴含**——代码里
+有它 ⟺ 本节记着它已对 canonical 源码核实，任一侧单独消失都红。它替换了此前那条
+`pi-unverified-declaration.test.ts`：那条的**机制**是对的（双向蕴含，它自己就抓出过一次假绿），
+错的是它守的**前提**。守卫会忠实地把一个错误结论钉死——所以推翻结论时要改前提，不是删守卫。
+
+### 留档：这次踩空的形状
+
+「同名不同源」不是 pi 独有的坑。可复用的判据是：**产品身份要取上游自己声明身份的那个字段，
+不要取包名或命令名**——包名可以是继承来的，命令名可以在发布时被改写。本例里那个字段是
+`piConfig`，别的项目可能是别的字段，但「找到它、并把它记进证据里」这一步不能省。
+
+（对照：T-009 OpenCode 是「证据齐全、接入路径待拍板」；T-010/T-012 是「证据不足」；
+T-013 OMP 与 T-014 Prime 各有自己的安装路径问题——别把它们和 pi 混成一类。）
 
 ---
 

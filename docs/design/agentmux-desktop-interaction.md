@@ -26,11 +26,29 @@
 - **安装面只保留一个活动副本**。安装动作完成后，旧的 AgentMux App 不得继续被
   LaunchServices 选中；清理旧副本时保留到系统 Trash 以便恢复，不删除用户的
   Application Support、Session、Run 或其他运行数据。
+- **发布入口只有一条**。开发启动、`pnpm build` 生成的 `apps/desktop/out`、DMG
+  挂载目录和任意临时/旧 `.app` 都不是可安装事实；只有同一次 clean build 产生的
+  `release/mac/AgentMux.app` 才能进入安装动作。安装完成后，重启必须从
+  `~/Applications/AgentMux.app` 这条 canonical path 发起，并能把运行进程的真实
+  executable path 与 bundle 内 `package-identity.json` 对上；无法对上时应报告
+  “启动了其他副本”，而不是把它解释成代码回滚。
+- **旧副本要显式可见**。打包/安装报告必须列出 canonical App、`/Applications`、开发
+  缓存 App 以及当前运行实例中发现的同名副本和身份。检测只负责告警，不得把用户的
+  Session、Run、Application Support 或工作区数据当作旧包一起删除；清理 App 本身也
+  必须是可恢复的 Trash 移动或经用户确认的动作。
+- **功能来源也要能追溯**。发布审计对关键用户能力记录“设计约束 → 生产实现 → 测试
+  调用者”三段证据；删除一个实现文件时，审计必须能指出替代实现和仍在生产路径上的
+  调用者，或明确标记为待人工复核。单元测试仍不足以证明功能没有被并发 Agent 从产品
+  路径上扫掉。
 - **打包失败不能阻断已安装的健康版本**。构建、签名或验证失败时，保留现有安装，
   明确报告失败阶段与候选来源；只有验证通过的候选才允许替换活动副本。
 - **这是一条发布边界，不新增运行时事实**。安装路径、候选身份和报告属于打包工具的
   事实；Desktop Runtime 仍只有 Core/ctxmux 的既有 Owner，不在应用内复制一份
   Session、Run 或布局状态。
+- **Renderer 只能消费 Core 的 node-free 子路径**。需要运行时常量（例如 Provider id
+  集合）时，必须从明确的 node-free export 读取；不能从 Core 根桶把 Node-only 的
+  进程、文件系统或网络实现拖进浏览器 bundle。打包 Gate 将 Renderer 构建失败视为
+  候选不可发布，而不是用 externalize 或缓存产物掩盖它。
 
 ## 产品对象
 
@@ -268,7 +286,13 @@ Desktop 刷新或重新 Attach 时优先投影这份 Agent 语义；新的 Run `
 - **切回终端不得把用户的视口从顶部滚回到底部**。用户离开时若正在看最新输出，回切应继续停在最新输出并跟随后续输出；用户主动向上翻阅时，回切应恢复上次的滚动位置，不得强制跳到最新或展示一段从顶部滚下来的回放。首次建立、真正重建或没有可恢复的视口记忆时，默认直接显示最新输出；视口记忆属于该 TerminalView 的展示状态，不进入 ctxmux、Run 或 Session 真相。
 - **RuntimeEvent 的边界不是终端的视觉帧**。TUI 输出可能被底层拆成很小的连续事件；TerminalView 必须在有界窗口内合并连续 live bytes 再交给 xterm，让一个 TUI 更新尽量一次绘制，同时在批次之间让出事件循环。不得为了追求响应而把每个字节逐事件写入、让用户看到逐字蹦出的假动画；也不得取消有界让出，令大段输出重新饿死切换、输入和关闭。
 - **多个 Agent 的 terminal capability 探测互不阻塞**。每个 Run 的探测超时只允许把该 Session 标成 `unknown/degraded` 并继续提供 prompt；不能按 Session 串行等待十秒，导致后面的健康 Agent 一起等候或重复看到 capability failure。探测可以并发，但每个探测的 attach、超时、退出和降级事件必须绑定精确 Run，不能扩大到共享连接或其他 Session。
-- Terminal 链接只在手势确实是**点击**时才响应：指针位移超过阈值或留下选区，都判定为选择文本而非点击链接——拖选跨过链接不得触发打开。悬停显示目标与打开方式，锚定位置永不遮挡它所描述的那一行链接。链接分两类，共用同一套手势守卫与悬停预览：http(s) URL 由 web-links 拥有，Cmd（非 macOS 为 Ctrl）+ 点击直接在系统浏览器打开，普通点击走目标选择菜单；文件路径由一个独立 link provider 拥有，普通点击在编辑器 Region 打开该文件。
+- Terminal 链接只在手势确实是**点击**时才响应：指针位移超过阈值或留下选区，都判定为选择文本而非点击链接——拖选跨过链接不得触发打开。悬停显示目标与打开方式，锚定位置永不遮挡它所描述的那一行链接。
+- **一个 http 链接在终端里有两种表示，它们由两条互不相干的 provider 处理，必须都接到同一个出口。** 用户原话：「哦 所以和我们接入的是两类不同的链接是吗?」「那这个在我们的需求文档里重点说明, 需要有多类链接接入吧」。两条路是：**裸文本 URL**（终端只是打印了字符，靠我们的正则识别）由 `WebLinksAddon` 拥有，activate 由我们传入；**OSC 8 超链接**（终端用转义序列声明"这段文字是个链接"，Claude Code 就这么输出）由 xterm **内建的** `OscLinkProvider` 拥有，它的 activate 取自构造选项 `terminal.options.linkHandler`——**不设这个选项，它就落到 xterm 自己的 `defaultActivate`：一个原生 `confirm("…could potentially be dangerous")` 加 `window.open`**。加上文件路径那条自有 provider，终端一共三条 provider、两个 http 入口。
+  - **这一族缺陷的判据是「出口个数」，不是「这个动作有没有被处理」。** 实测教训（2026-09-01）：OSC 8 那条从功能落地起就没接过线，而裸 URL 那条一直是好的——于是"点链接出选择器"在开发中每次手验都通过，用户看到的却是浏览器厂商的告警框，**界面上没有任何我们的字符串**，因此源码 grep 与包内 grep 都搜不到异常。13 个并行 agent 全部漏掉它，因为他们各自追的都是那条已知的路。同一个概念有两个入口时，只接一个**不会让另一个变红**。
+  - **这条要求的前身正是本文件此前的一句错误分类。** 旧文写的是「链接分两类：http(s) URL 由 web-links 拥有；文件路径由独立 provider 拥有」——分类轴选在了"URL 还是文件路径"上，于是"同一个 URL 有两种终端表示"这件事在需求层面根本不存在，实现漏掉它是被文档授权的。**枚举"某物有几类"时，先问这个轴是不是唯一的轴。**
+  - 两条 http 路共用**同一个** activate 函数（不是两份各自实现）：手势守卫、Cmd（非 macOS 为 Ctrl）+点击直连系统浏览器的快路、悬停预览、目标选择器全部同源。两份手抄必然在"什么算点击""快路按哪个键"上无声漂移，而漂移的症状只是"这个链接点了没反应"，没人会报。
+  - 文件路径由一个独立 link provider 拥有，普通点击在编辑器 Region 打开该文件。
+  - **推而广之：凡是依赖同时提供「插件式注册」与「构造选项/全局默认」两条配置面的能力，都要显式确认两条都归我们。** 依赖的默认行为跑在依赖的代码里，它的输出不含我们的任何标识，对我们这一侧的任何文本检查都是隐形的。
 - Terminal 文件路径识别是**纯语法、保守**的：检测在 xterm 渲染/悬停热路径上运行，只做字符串工作——读 xterm 已持有的那一行 buffer 文本并用纯函数匹配，热路径上没有磁盘或 IPC，更不做存在性探测。规则的关键判据是「core 含 `/` 或带 `:line` 后缀」，据此丢弃裸词（`e.g.`、`1.2.3`、`README`）却仍捕获 `README.md:3:1` 与真实相对/绝对路径；绝对路径仅当落在活动 Workspace 根内才识别，`~/`、逃出根的相对路径不识别。识别出的路径归一为 Workspace 相对路径，交给与 Explorer 同一个 `openFile` seam 打开；带 `:line[:col]` 时通过一次性 reveal target 落到该行。误报或不存在的路径在点击打开时经 reportError 明确失败，绝不静默——「点击开不出来」而非污染状态。相对路径按 Workspace 根解析（非终端 live cwd）。
 - **Activity 里 Markdown 引用到的项目内文件同样可点开，走的必须是同一个 seam**。用户原话：「在对话中的 Markdown 解析中，如果有些引用的是项目内的文件，点击时要支持打开（就像在文件系统中点击的一样），同时在文件导航中也要指向并打开该文件」。这句话有两半，第二半是关键：**"在文件导航中指向并打开"不是要新写的第二个功能，而是复用既有 `openFile` 的自然结果**——`openFile` 会更新该 Workspace 的 last active file，Explorer 据此自动展开祖先、选中并滚动到该行（与 Terminal 点击路径、Explorer 自身打开文件完全同一条通路）。反过来说：任何"就地开个 Tab"的手写实现都会**静默丢掉用户明确要的第二半**，而且丢得没有任何报错。这就是此处只许复用、不许另起一条的全部理由。
   - **归一化与根内约束复用 Terminal 那份纯函数**，不写第二套路径解析。判据、拒绝规则（裸词、`~/`、逃出 Workspace 根的相对路径、根外绝对路径）与 `:line[:col]` 的一次性 reveal 全部同源；两处若各有一份，会在"什么算路径"上无声漂移，而漂移时误判只表现为"这个链接点不动"，没人会报。
@@ -369,6 +393,7 @@ Desktop 刷新或重新 Attach 时优先投影这份 Agent 语义；新的 Run `
 ### Git 源码控制与 PR
 
 - **本地**：看到当前分支的改动（`status --porcelain=v1 -z`——`-z` 使 NUL 分隔、关掉 git 的 C-quoting，因此带空格、引号、换行或 CJK 字节的路径逐字到达，解析器永远不必解码），stage 单个文件、commit、结构化 diff、unstage、discard。**diff 读 blob 而非解析 unified-diff 文本**：旧侧取 `HEAD:<path>`、新侧读工作区文件，二进制由 NUL 扫描判定而非塞进文本字段；**读不到就是失败，不回落到 HEAD**——"读不到"正是渲染新增/删除文件的依据，被静默吞成空 diff 就再也分不清。
+- **共享工作树的事故按案例回看**：并发 Agent 可以共享工作树，也可以共享 `git add`；别人的改动被一并带入提交本身不是失败，最终目标是所有 Agent 停止时 main 正确且协作吞吐最高。add 之后检查 `git diff --cached` 是为了知道本次提交的真实边界、识别半成品并及时协调，不是为了按作者拒绝内容。发现进行中的改动时不要用 `stash`、`reset --hard`、无明确范围的 `checkout` 或 `clean` 清场；自己的完整改动仍应尽快形成小提交。已发生的形状与证据集中在 [`docs/casestudy/`](../casestudy/)，这里记录约束，案例记录现象、根因和排查证据。
 - **远程**：push（默认 `origin HEAD` 并 `--set-upstream`，`--force-with-lease` 永不裸 `--force`）、pull（可 pin ff-only/merge/rebase；未 pin 时对分叉自动回退为显式 merge，因为主机可能没有 reconcile 策略）、fetch `--prune`。**ahead/behind 对有效上游计算**：先解析 `@{push}` 再 `@{upstream}`，因此覆盖"分支 track `origin/main` 却 push 到 `origin/<branch>`"与"上游是本地分支"两种情形，不是只看配置上游。
 - **PR**：`gh pr create`，正文写临时文件经 `--body-file` 传。**认证完全委托 `gh auth`**——只探测 `gh auth status`，AgentMux 不读取、不持久化任何 token（`gh` 自己继承 `GH_TOKEN`/`GITHUB_TOKEN`），与"什么都不出机器"的隐私线一致，零新增鉴权存储面。`gh` 缺失与未认证是两种可区分的结果，各自给出可操作文案，不混成一个泛化错误。
 - 四条**不可退让**的约束，任何后续改动都不得削弱：

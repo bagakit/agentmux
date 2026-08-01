@@ -67,9 +67,19 @@ or rewrite workspace `node_modules` while packaging.
 
 `package:mac:install` runs the same Gate before atomically replacing the single
 canonical user install at `~/Applications/AgentMux.app` with the verified
-candidate. Its output includes the candidate source identity and installed
-path. It does not publish or push anything, and it never deletes Application
-Support or Runtime data.
+candidate. A previous canonical App is moved to `~/.Trash` with a unique name
+before the cutover and restored if the final rename fails; it is never silently
+deleted. Its output includes the candidate source identity, installed path and
+the recoverable Trash path. It does not publish or push anything, and it never
+deletes Application Support or Runtime data.
+
+`pnpm --filter @agentmux/desktop report:package` also enumerates the finite set
+of known same-name bundles (the canonical user install, `/Applications`, the
+release candidate and the development Electron cache) and the currently running
+`AgentMux.app` executable paths. A mismatch is a launch-path diagnostic, not a
+source rollback claim. `pnpm --filter @agentmux/desktop audit:features` checks
+the design-contract anchors for a live implementation, a production caller and
+test evidence, and lists deletions seen through Git refs and reflogs.
 
 ## Signing and release truth
 

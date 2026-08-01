@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 export const PACKAGE_IDENTITY_FILENAME = 'package-identity.json'
@@ -26,6 +27,30 @@ export function packageIdentityPath(appPath) {
 
 export function canonicalInstallPath(homeDirectory) {
   return join(homeDirectory, 'Applications', 'AgentMux.app')
+}
+
+/**
+ * Every path at which macOS or the local development tooling can expose an
+ * AgentMux bundle.  This is deliberately a finite list: a random `.app` is
+ * not a supported installation source, but these known copies are the ones
+ * that can make LaunchServices appear to have "lost" a feature.
+ */
+export function knownApplicationPaths({
+  homeDirectory = homedir(),
+  repositoryRoot = null,
+  systemApplicationsRoot = '/Applications'
+} = {}) {
+  const paths = [
+    { id: 'canonical-user', path: canonicalInstallPath(homeDirectory) },
+    { id: 'system-applications', path: join(systemApplicationsRoot, 'AgentMux.app') }
+  ]
+  if (repositoryRoot) {
+    paths.push(
+      { id: 'release-candidate', path: join(repositoryRoot, 'apps', 'desktop', 'release', 'mac', 'AgentMux.app') },
+      { id: 'development-cache', path: join(repositoryRoot, 'apps', 'desktop', 'node_modules', '.cache', 'agentmux-electron', 'AgentMux.app') }
+    )
+  }
+  return paths
 }
 
 export async function readPackageIdentity(appPath) {

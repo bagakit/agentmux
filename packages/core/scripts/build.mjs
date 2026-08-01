@@ -60,19 +60,26 @@ try {
     await verify(join(artifactRoot, binary.path), binary, 0o755)
   }
 
+  // 这四步都是**本机、对固定输入的确定性变换**，所以没有挂钟预算。挂钟预算适合"对端可能永不
+  // 回答"的调用；本机 CPU 密集步骤在机器被压满时只是变慢，而按挂钟砍掉它，等于把"慢"变成"坏"。
+  //
+  // 实测（2026-09-01，负载 ~120，14 核）：解一个 **84KB** 的 tarball 花了 **3 分 42 秒挂钟、
+  // 0.01 秒 CPU**——纯调度饥饿，于是被 30 秒的 timeout 用 SIGTERM 砍掉。更糟的是 execFile 的
+  // 超时错误**从不说自己是超时**：它报 `Command failed: tar -xzf …`，stderr 空，code=null、
+  // signal=SIGTERM。这条误导性错误让同一个 flake 被登记成"handshake 超时"，追了错的位点。
+  //
+  // 挂钟上限的正当理由是"卡死要看得见"，但这里由外层持有：跑构建的 pnpm / vitest / CI 各有自己的
+  // 期限，而一个真卡住的构建本来就表现为迟迟不结束——比一条指错位置的错误好得多。
   await execFileAsync('tar', ['-xzf', archivePath, '-C', buildRoot], {
     cwd: packageRoot,
-    timeout: 30_000,
     maxBuffer: 4 * 1024 * 1024
   })
   await execFileAsync('node', [join(packageRoot, 'scripts/clean-build.mjs')], {
     cwd: packageRoot,
-    timeout: 30_000,
     maxBuffer: 4 * 1024 * 1024
   })
   await execFileAsync('pnpm', ['exec', 'tsc', '-p', 'tsconfig.build.json'], {
     cwd: packageRoot,
-    timeout: 60_000,
     maxBuffer: 4 * 1024 * 1024
   })
   const bundledAdapter = join(buildRoot, 'ctxmux-run-adapter.js')
@@ -89,7 +96,6 @@ try {
     `--outfile=${bundledAdapter}`
   ], {
     cwd: workspaceRoot,
-    timeout: 60_000,
     maxBuffer: 4 * 1024 * 1024
   })
   await rename(bundledAdapter, join(packageRoot, 'dist/ctxmux-run-adapter.js'))

@@ -43,6 +43,10 @@
     "./agent-status": {
       "types": "./dist/agent-status-freshness.d.ts",
       "import": "./dist/agent-status-freshness.js"
+    },
+    "./provider-id": {
+      "types": "./dist/agent-provider-id.d.ts",
+      "import": "./dist/agent-provider-id.js"
     }
   },
   "bin": {
