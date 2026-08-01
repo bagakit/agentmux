@@ -209,6 +209,38 @@ describe('activity ruler mapping', () => {
       expect(formatDuration(1_500.9)).toBe('1.5s')
     })
 
+    it('分档按将要显示的那个值判，不印出这套记法里不存在的读数', () => {
+      // 回归：分档曾用 floor(整数秒) 而显示用 toFixed(1) 四舍五入，两个基准打架——`59_950ms` 以
+      // 整数秒 59 留在秒档，却被印成 `60.0s`。上面那张边界表恰好从 59_900 跳到 60_000，跨过了整个
+      // 出错窗口。这里守的正是那个窗口的两端。
+      expect(formatDuration(59_949)).toBe('59.9s')
+      expect(formatDuration(59_950)).toBe('1m00s')
+      expect(formatDuration(59_999)).toBe('1m00s')
+      // 同一个基准打架在分/时交界处的镜像：`59m60s` 也是不存在的读数。
+      expect(formatDuration(3_599_999)).toBe('1h00m00s')
+      // 一条更强的性质：任何毫秒值都不该印出满 60 的秒位或分位。
+      for (let ms = 59_000; ms <= 61_000; ms += 37) {
+        expect(formatDuration(ms)).not.toMatch(/60\.0s|m60s|h60m/)
+      }
+      for (let ms = 3_598_000; ms <= 3_602_000; ms += 37) {
+        expect(formatDuration(ms)).not.toMatch(/60\.0s|m60s|h60m/)
+      }
+    })
+
+    it('偏移量整段交给同一个格式化器，不自带第二套分档', () => {
+      // 回归：formatOffset 曾自己重写毫秒档与秒档，只把分钟以上转交出去。那两行与 formatDuration
+      // 同义，于是「一个格式化器四处共用」只在文档里成立——把 formatDuration 的分档修好之后，时间沟
+      // 里仍旧印着 `+60.0s`。机器行每一行都在读这个函数，是最显眼的那处走岔。
+      //
+      // 断言的是**两者恒等**而不是几个具体读数：只要偏移量还是「一个符号 + 一段时长」，任何一侧新增
+      // 分档都自动被守住，不必回来补例子。
+      for (const ms of [0, 1, 999, 1_000, 1_500, 59_900, 59_949, 59_950, 59_999, 60_000, 3_599_999, 11_043_000]) {
+        expect(formatOffset(ms, 0)).toBe(`+${formatDuration(ms)}`)
+      }
+      // 负偏移（乱序事件）夹到 0，两侧一致。
+      expect(formatOffset(0, 5_000)).toBe('+0ms')
+    })
+
     it('时刻是固定宽度的 24 小时读数，不随 locale 变宽', () => {
       // 用本地时间构造，于是断言与跑测试的时区无关——两侧都在同一个时区里说话。
       const morning = new Date(2026, 0, 2, 9, 3, 7).getTime()
