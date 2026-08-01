@@ -24,6 +24,7 @@ import {
   RefreshCw,
   Search,
   Trash2,
+  TriangleAlert,
   X
 } from 'lucide-react'
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from 'react'
@@ -45,6 +46,7 @@ import {
 } from '../lib/workspace-paths'
 import { copyTextToClipboard, formatPathsForCopy } from '../lib/clipboard-copy'
 import { createFileExplorerRowProjection } from './file-tree/file-explorer-row-projection'
+import { presentExpandedDir } from './file-tree/file-explorer-stale-dir-cache'
 import {
   createSingleFileExplorerSelection,
   createEmptyFileExplorerViewState,
@@ -107,6 +109,7 @@ function FileTreeRow({
   node,
   rowIndex,
   expanded,
+  loadFailure,
   selected,
   dirty,
   editing,
@@ -137,6 +140,8 @@ function FileTreeRow({
   node: TreeNode
   rowIndex: number
   expanded: boolean
+  /** 展开的目录读失败时的原因；读成功、真的空目录、以及文件行都是 null。 */
+  loadFailure: string | null
   selected: boolean
   dirty: boolean
   editing: boolean
@@ -216,10 +221,11 @@ function FileTreeRow({
         ref={setRowRef}
         {...attributes}
         {...listeners}
-        className={`tree-row ${selected ? 'tree-row--selected' : ''} ${isDragging ? 'tree-row--dragging' : ''} ${isOver ? 'tree-row--drop-over' : ''}`}
+        className={`tree-row ${selected ? 'tree-row--selected' : ''} ${isDragging ? 'tree-row--dragging' : ''} ${isOver ? 'tree-row--drop-over' : ''} ${loadFailure ? 'tree-row--load-failed' : ''}`}
         style={{ '--tree-depth': node.depth } as React.CSSProperties}
         data-tree-path={node.path}
         data-tree-index={rowIndex}
+        data-load-failed={loadFailure ? 'true' : 'false'}
         data-move-drop-disabled={dropDisabled ? 'true' : 'false'}
         role="treeitem"
         tabIndex={selected ? 0 : -1}
@@ -240,10 +246,17 @@ function FileTreeRow({
         >
           {node.isDirectory ? expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} /> : null}
         </button>
-        <span className="tree-row__icon">
-          {node.isDirectory
-            ? expanded ? <FolderOpen size={14} /> : <Folder size={14} />
-            : <FileIcon size={13} />}
+        <span
+          className="tree-row__icon"
+          // 读失败的目录此前与真的空目录逐像素相同（都是展开的空文件夹）。图标换成告警，并把原因
+          // 放进 title——否则用户会以为那个目录真的什么都没有。
+          title={loadFailure ?? undefined}
+        >
+          {loadFailure
+            ? <TriangleAlert size={14} aria-label={`Could not read ${node.name}`} />
+            : node.isDirectory
+              ? expanded ? <FolderOpen size={14} /> : <Folder size={14} />
+              : <FileIcon size={13} />}
         </span>
         {editing ? (
           <input
@@ -835,6 +848,14 @@ export function FileExplorer({
             node={node}
             rowIndex={rowIndex}
             expanded={expanded.has(node.path)}
+            // 判据来自 presentExpandedDir 那一处纯函数，不在这里重新读一遍 error：只有它知道
+            // 「刷新失败但留着旧内容」也算失败，而按 children 是否为空判会把那种情况画成正常。
+            loadFailure={
+              node.isDirectory && expanded.has(node.path) &&
+              presentExpandedDir(tree.dirCache[node.path]) === 'failed'
+                ? tree.dirCache[node.path]?.error ?? null
+                : null
+            }
             selected={selection.selectedPaths.has(node.path) || activePath === node.path}
             dirty={Boolean(workspaceId && dirtyDocuments[documentKey(workspaceId, node.path)])}
             editing={inlineEdit?.kind === 'rename' && inlineEdit.node.path === node.path}
