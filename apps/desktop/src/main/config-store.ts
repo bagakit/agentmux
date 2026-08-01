@@ -399,7 +399,7 @@ export function authoredConfigCarryOver(raw: unknown): {
     const value = outer.data.workspaces
     if (Array.isArray(value)) return value.length
     if (value === undefined || value === null) return 0
-    if (typeof value === 'object') return Object.keys(value).length > 0 ? 1 : 1
+    if (typeof value === 'object') return Object.keys(value).length > 0 ? 1 : 0
     // A primitive where an array belongs: unreadable, but it was written by something. Treat it as
     // evidence rather than as "no projects" — the honest answer is "we cannot tell", and between
     // refusing to launch and overwriting the file, only one of those is recoverable.
