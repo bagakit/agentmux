@@ -74,8 +74,7 @@ import { ScratchTopics } from './scratch-topics.js'
 import { saveRuntimeConfig } from './runtime-config-transaction.js'
 import { WorkspaceFiles } from './workspace-files.js'
 import { WorktreeService } from './worktree-service.js'
-import { planFanOut } from './fanout-plan.js'
-import { runFanOut } from './fanout-run.js'
+import { runFanOutRequest } from './fanout-request.js'
 import { GitService } from './git-service.js'
 import { GhService } from './gh-service.js'
 
@@ -238,35 +237,18 @@ export async function registerIpc(args: {
     config = selection.config
     return selection
   })
-  // One fan-out. The plan comes from planFanOut and nowhere else: branch names and worktree paths have
-  // exactly one source, so a re-run of the same request is reproducible and no second naming scheme can
-  // drift into existence. A rejected plan is returned verbatim rather than swallowed, and a single-lane
-  // request is handed back as such — one lane is not a bake-off, so it belongs on the ordinary launch
-  // path instead of paying for orchestration to compare a result with nothing.
-  handle('workspaces:runFanOut', async (input: RunFanOutInput): Promise<RunFanOutResult> => {
-    const workspace = config.workspaces.find((item) => item.id === input.workspaceId)
-    if (!workspace) throw new Error('Fan-out needs an existing workspace')
-    const branches = await worktrees.list(input.workspaceId, config)
-    if (branches.kind !== 'git-repository') {
-      return { kind: 'rejected', reason: 'A fan-out needs a git repository.' }
-    }
-    const plan = planFanOut({
-      count: input.count,
-      baseName: input.baseName,
-      worktreeRoot: join(workspace.path, '.worktrees'),
-      executorIds: input.executorIds,
-      existingBranches: branches.branches.map((branch) => branch.name),
-      existingWorktreePaths: branches.branches.flatMap((branch) =>
-        branch.worktreePath ? [branch.worktreePath] : []
-      )
-    })
-    if (plan.kind !== 'fanout') return plan
-    const result = await runFanOut({
-      workspaceId: input.workspaceId,
-      prompt: input.prompt,
-      lanes: plan.lanes,
-      config,
-      ports: {
+  // One fan-out. The orchestration lives in `fanout-request` so it is reachable from a test: this
+  // handler is one forwarding expression with no statement position to disable. Text guards on this
+  // file could not see an early return here — the whole fan-out returned `rejected` forever while
+  // five assertions stayed green (see runFanOutRequest's comment for the measurement).
+  handle('workspaces:runFanOut', async (input: RunFanOutInput): Promise<RunFanOutResult> =>
+    await runFanOutRequest(input, {
+      config: () => config,
+      listBranches: async (workspaceId, current) => await worktrees.list(workspaceId, current),
+      commitConfig: (next) => {
+        config = next
+      },
+      lanes: (source) => ({
         createWorktree: async (createInput, current) => {
           const selection = await worktrees.createForBranch(createInput, current)
           return { config: selection.config, workspace: selection.workspace }
@@ -274,7 +256,9 @@ export async function registerIpc(args: {
         launchAgent: async (launchInput, current) => {
           const launched = await args.runtime.launchAgent({
             executorId: launchInput.executorId,
-            hostId: workspace.hostId,
+            // 源仓库的 host——lane 的 worktree 就在同一台机器上。`source` 由 runFanOutRequest
+            // 解析并交下来，这里不再自己查一遍：同一个概念查两次就会有两套失败文案。
+            hostId: source.hostId,
             workspacePath: launchInput.workspacePath,
             prompt: launchInput.prompt,
             agentSessionId: randomUUID(),
@@ -283,11 +267,9 @@ export async function registerIpc(args: {
           return { sessionId: launched.session.id }
         },
         removeWorktree: async (removeInput, current) => await worktrees.removeWorktree(removeInput, current)
-      }
+      })
     })
-    config = result.config
-    return { kind: 'fanout', lanes: result.lanes }
-  })
+  )
   // Closing a bake-off: keep the chosen lane, tear the rest down through the same teardown primitive.
   // The dirty-tree protection is not bypassed here — a lane holding uncommitted work comes back as
   // `retained` and stays on disk, because "it lost" is not a reason to discard someone's work.
