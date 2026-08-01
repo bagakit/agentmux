@@ -1,11 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { SessionSnapshot } from '../../../shared/contracts'
-import { isScratchWorkspaceId } from '../../../shared/contracts'
 import { useAppStore } from '../store'
-import {
-  activeTopicIdFromLayout,
-  layoutForActiveTopic
-} from './scratch-topic-layout'
+import { surfaceNavigationVisibility } from './surface-navigation-visibility'
 import type { WorkspaceLayout } from './workbench-layout'
 import {
   nextTerminalColdParkDelayMs,
@@ -47,29 +43,11 @@ export function collectTerminalColdParkCandidates(
   for (const tab of Object.values(input.tabs)) {
     const layout = input.layouts[tab.workspaceId]
     if (!layout) continue
-    const activeTopicId = isScratchWorkspaceId(tab.workspaceId)
-      ? activeTopicIdFromLayout(layout, input.tabs)
-      : null
-    const workspaceActive = Boolean(
-      input.workbenchVisible && input.activeWorkspaceId === tab.workspaceId
-    )
-    // Scratch Topics share one Workspace layout.  Treat a Topic switch like a Project switch: the
-    // hidden projection remains warm, otherwise the 30s parking timer would detach its TerminalView
-    // and a later Topic return could surface a replay gap that navigation itself did not cause.
-    const navigationContextActive = workspaceActive && (
-      !isScratchWorkspaceId(tab.workspaceId) ||
-      activeTopicId === null ||
-      tab.topicId === undefined ||
-      tab.topicId === activeTopicId
-    )
-    const projected = activeTopicId
-      ? layoutForActiveTopic(layout, input.tabs, activeTopicId)
-      : layout
-    const group = projected.groups.find((candidate) => candidate.tabOrder.includes(tab.id))
-    const tabVisible = Boolean(
-      input.workbenchVisible &&
-      input.activeWorkspaceId === tab.workspaceId &&
-      group?.activeTabId === tab.id
+    const { navigationContextActive, tabVisible } = surfaceNavigationVisibility(
+      tab,
+      layout,
+      input.tabs,
+      input
     )
 
     for (const surface of Object.values(tab.regions)) {

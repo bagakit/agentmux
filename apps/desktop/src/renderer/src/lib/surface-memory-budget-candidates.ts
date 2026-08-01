@@ -1,6 +1,5 @@
 import type { SessionSnapshot } from '../../../shared/contracts'
-import { isScratchWorkspaceId } from '../../../shared/contracts'
-import { activeTopicIdFromLayout, layoutForActiveTopic } from './scratch-topic-layout'
+import { surfaceNavigationVisibility } from './surface-navigation-visibility'
 import type { WorkspaceLayout } from './workbench-layout'
 import { documentKey, type WorkbenchSurface, type WorkbenchTab } from './workbench-tabs'
 import type { SurfaceMemoryCandidate } from './surface-memory-budget'
@@ -18,38 +17,6 @@ export type SurfaceMemoryCollectionInput = {
   savingDocuments: Readonly<Record<string, boolean>>
   activeWorkspaceId: string | null
   workbenchVisible: boolean
-}
-
-function navigationAndVisibility(
-  tab: WorkbenchTab,
-  layout: WorkspaceLayout,
-  tabs: Tabs,
-  input: Pick<SurfaceMemoryCollectionInput, 'activeWorkspaceId' | 'workbenchVisible'>
-): { navigationContextActive: boolean; tabVisible: boolean } {
-  const activeTopicId = isScratchWorkspaceId(tab.workspaceId)
-    ? activeTopicIdFromLayout(layout, tabs)
-    : null
-  const workspaceActive = Boolean(
-    input.workbenchVisible && input.activeWorkspaceId === tab.workspaceId
-  )
-  const navigationContextActive = workspaceActive && (
-    !isScratchWorkspaceId(tab.workspaceId) ||
-    activeTopicId === null ||
-    tab.topicId === undefined ||
-    tab.topicId === activeTopicId
-  )
-  const projected = activeTopicId
-    ? layoutForActiveTopic(layout, tabs, activeTopicId)
-    : layout
-  const group = projected.groups.find((candidate) => candidate.tabOrder.includes(tab.id))
-  return {
-    navigationContextActive,
-    tabVisible: Boolean(
-      input.workbenchVisible &&
-      input.activeWorkspaceId === tab.workspaceId &&
-      group?.activeTabId === tab.id
-    )
-  }
 }
 
 function candidateForSurface(
@@ -109,7 +76,7 @@ export function collectSurfaceMemoryCandidates(
   for (const tab of Object.values(input.tabs)) {
     const layout = input.layouts[tab.workspaceId]
     if (!layout) continue
-    const navigation = navigationAndVisibility(tab, layout, input.tabs, input)
+    const navigation = surfaceNavigationVisibility(tab, layout, input.tabs, input)
     for (const surface of Object.values(tab.regions)) {
       const candidate = candidateForSurface(tab, surface, input, sessionsById, navigation)
       if (candidate) candidates.push(candidate)
