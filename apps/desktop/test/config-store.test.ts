@@ -23,8 +23,10 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(async (path) => await rm(path, { recursive: true, force: true })))
 })
 
+// 版本号从 DEFAULT_CONFIG 现取。手抄一个字面量会在下次 bump 时让整份 fixture 被 schema 拒绝，
+// 而那次失败读起来像"存储坏了"而不是"fixture 没跟上"——实测这一版 bump 就打红了 8 条。
 const baseConfig: AppConfig = {
-  version: 7,
+  version: DEFAULT_CONFIG.version,
   hosts: [
     { id: 'local', kind: 'local', label: 'This Mac' },
     {
@@ -66,7 +68,7 @@ describe('ConfigStore workspace identity', () => {
     const { store, path } = await storeFixture()
     await writeFile(path, JSON.stringify({
       ...baseConfig,
-      version: 4,
+      version: DEFAULT_CONFIG.version - 1,
       hosts: [{
         id: 'remote',
         kind: 'ssh',
@@ -82,38 +84,38 @@ describe('ConfigStore workspace identity', () => {
     }))
 
     const loaded = await store.get()
-    expect(loaded.version).toBe(7)
-    expect(JSON.parse(await readFile(path, 'utf8'))).toMatchObject({ version: 7 })
+    expect(loaded.version).toBe(DEFAULT_CONFIG.version)
+    expect(JSON.parse(await readFile(path, 'utf8'))).toMatchObject({ version: DEFAULT_CONFIG.version })
   })
 
   it('rejects future-version config strictly and retains the file', async () => {
     const { store, path } = await storeFixture()
     await writeFile(path, JSON.stringify({
       ...baseConfig,
-      version: 8
+      version: DEFAULT_CONFIG.version + 1
     }))
 
     await expect(store.get()).rejects.toThrow()
     const content = JSON.parse(await readFile(path, 'utf8'))
-    expect(content.version).toBe(8)
+    expect(content.version).toBe(DEFAULT_CONFIG.version + 1)
   })
 
   it('rejects malformed-version config strictly and retains the file', async () => {
     const { store, path } = await storeFixture()
     await writeFile(path, JSON.stringify({
       ...baseConfig,
-      version: '7'
+      version: String(DEFAULT_CONFIG.version)
     }))
 
     await expect(store.get()).rejects.toThrow()
     const content = JSON.parse(await readFile(path, 'utf8'))
-    expect(content.version).toBe('7')
+    expect(content.version).toBe(String(DEFAULT_CONFIG.version))
   })
 
   it('rejects corrupted current-version config strictly', async () => {
     const { store, path } = await storeFixture()
     await writeFile(path, JSON.stringify({
-      version: 7,
+      version: DEFAULT_CONFIG.version,
       invalidField: true
     }))
 
@@ -224,7 +226,7 @@ describe('ConfigStore workspace identity', () => {
 
   it('rejects obsolete v6 config instead of adding a compatibility path', async () => {
     const { store } = await storeFixture()
-    await expect(store.save({ ...baseConfig, version: 6 } as never)).rejects.toThrow()
+    await expect(store.save({ ...baseConfig, version: DEFAULT_CONFIG.version - 2 } as never)).rejects.toThrow()
   })
 
   it('persists the AgentMux guide setting per Executor', async () => {
@@ -415,5 +417,90 @@ describe('DEFAULT_CONFIG built-in Provider coverage', () => {
       expect(executor.command).toBe(catalogEntry!.executable)
       expect(executor.label).toBe(catalogEntry!.label)
     }
+  })
+
+  // 上面两条只看**静态默认表**。它们对「磁盘上已有一份缺几家的旧配置」完全失明——那份配置走
+  // `get()` 的 parse 分支原样返回，而 `executors` 是无数量约束的 record，于是「只有 9 家」合法通过，
+  // 界面上照旧缺席。实测过这个假绿：补默认表而不动 version 时，这两条全绿而存量用户一家都没多。
+  // 所以覆盖必须延伸到**加载路径**：默认表齐全只是必要条件，读出来齐全才是用户看到的东西。
+  //
+  // 锚点是**历史事实的字面量 7**，不是 `DEFAULT_CONFIG.version - 1`。用后者造样本会让期望值跟着
+  // 被测对象一起漂：把 version 退回 7（正是那个缺陷世界）时，样本自动变成 6，照样被重置，测试
+  // 照旧全绿——实测确认过这次假绿。缺陷的形状是「v7 的盘上配置 + 只有 9 家」，7 是那个已经发生过的
+  // 事实，必须写死；它与当前版本的关系由下面第二条测试单独去守。
+  const LEGACY_NINE_PROVIDER_VERSION = 7
+
+  it('a v7 config holding only the original nine Providers must load with every Provider present', async () => {
+    const { store, path } = await storeFixture()
+    // 逐字复刻那份存量配置：v7、9 家、其余形状合法。三家后加入的 Provider 一个都没有。
+    const ninePreExisting = [
+      'codex', 'claude', 'traex', 'hermes', 'pi', 'grok', 'gemini', 'antigravity', 'cursor'
+    ]
+    const laterAdditions = BUILT_IN_AGENT_PROVIDERS
+      .map((provider) => provider.id)
+      .filter((id) => !ninePreExisting.includes(id))
+    // 前提挡板：这条测试只在"确实有后加入的 Provider"时才有意义；若哪天九家就是全部，它必须显式变红
+    // 而不是悄悄退化成一条恒真断言。
+    expect(laterAdditions.length, 'v7 之后没有任何新 Provider，这条测试已无对象可守').toBeGreaterThan(0)
+
+    const staleExecutors = Object.fromEntries(
+      Object.entries(DEFAULT_CONFIG.executors).filter(([id]) => ninePreExisting.includes(id))
+    )
+    expect(Object.keys(staleExecutors)).toHaveLength(ninePreExisting.length)
+    await writeFile(path, JSON.stringify({
+      ...DEFAULT_CONFIG,
+      version: LEGACY_NINE_PROVIDER_VERSION,
+      executors: staleExecutors
+    }))
+
+    const loaded = await store.get()
+
+    // 读出来必须覆盖 Core 声明的每一个 built-in Provider——包括那份磁盘配置里缺的三家。
+    const loadedProviderIds = new Set(
+      Object.values(loaded.executors).map((executor) => executor.providerId)
+    )
+    const missing = BUILT_IN_AGENT_PROVIDERS
+      .map((provider) => provider.id)
+      .filter((id) => !loadedProviderIds.has(id))
+    expect(missing, '读出的配置缺 Provider：修复只到了默认表，没到存量用户手上').toEqual([])
+    // 而且落盘了，不是只在内存里补齐——否则下次启动又缺。
+    const persisted = JSON.parse(await readFile(path, 'utf8')) as AppConfig
+    expect(new Set(Object.values(persisted.executors).map((executor) => executor.providerId)))
+      .toEqual(loadedProviderIds)
+  })
+
+  it('the current version must be past the nine-Provider era, or that reset never triggers', async () => {
+    // 上一条钉的是「v7 + 9 家要被重置」。它成立的前提是当前版本**高于** 7——否则那份 v7 样本就是
+    // 「当前版本」，走 parse 原样返回，缺的三家永远补不上。这条把那个前提单独写出来，于是「补了默认表
+    // 却忘了 bump version」会在这里显式变红，而不是让上一条悄悄失去意义。
+    expect(DEFAULT_CONFIG.version).toBeGreaterThan(LEGACY_NINE_PROVIDER_VERSION)
+  })
+
+  it('keeps the version literal, the default and the reset threshold in one source', async () => {
+    // 这个数字有五处消费者（contracts 的 AppConfig.version 类型、schema 的 z.literal、
+    // DEFAULT_CONFIG.version、get() 的重置阈值、renderer 那份预览 mock），此前各写一份，必须联动。
+    // 漏改任一处的后果各不相同且都很安静：漏改 schema → 默认配置被自己的校验拒绝；漏改阈值 → 旧配置
+    // 带着过时形状一路通过 parse，正是本次要修的那个缺陷；漏改类型 → **2058 条测试全绿**，因为
+    // vitest 只转译不查类型，只有 tsc --noEmit 会报，而且它是逐个挖的（修好一处才暴露下一处）。
+    // 所以现在唯一真源在 contracts，而守这条的是 tsc，不是这个文件。
+    //
+    // 这条按**行为**质询同源性中测试能覆盖的那一半：低一版必须被重置，等于当前版本必须原样通过。
+    const { store: resetStore, path: resetPath } = await storeFixture()
+    await writeFile(resetPath, JSON.stringify({ ...baseConfig, version: DEFAULT_CONFIG.version - 1 }))
+    expect((await resetStore.get()).version).toBe(DEFAULT_CONFIG.version)
+
+    // 等于当前版本：不重置，用户自己的内容留着（这里用一个非默认 label 当指纹）。
+    const { store: keepStore, path: keepPath } = await storeFixture()
+    await writeFile(keepPath, JSON.stringify({
+      ...baseConfig,
+      executors: {
+        ...baseConfig.executors,
+        claude: { ...baseConfig.executors.claude!, label: 'My Claude' }
+      }
+    }))
+    const kept = await keepStore.get()
+    expect(kept.version).toBe(DEFAULT_CONFIG.version)
+    expect(kept.executors.claude!.label, '当前版本的配置不该被重置，用户改的 label 必须留着')
+      .toBe('My Claude')
   })
 })
