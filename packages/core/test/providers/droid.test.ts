@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { AgentProviderRegistry, resolveManagedHookPlan } from '../../src/agent-provider.js'
 import { DROID_HOOK_EVENTS, DROID_HOOKS, createDroidManagedHookPlan } from '../../src/providers/droid.js'
 import { canonicalHookLifecycleEvent } from '../../src/agent-hook-event.js'
+import { renderMergedHookContent } from '../../src/hook-config-merge.js'
 import { USAGE_FINALIZATION_EVENTS } from '../../src/agent-hook-command.js'
 import type { AgentSemanticState } from '../../src/types.js'
 
@@ -89,6 +90,27 @@ describe('Droid provider', () => {
         .map(([eventName]) => eventName)
         .sort()
       expect(withMatcher).toEqual(['PostToolUse', 'PreToolUse'])
+    })
+
+    it('合并策略是根层那一支——用 hooks 包装那支会抹掉用户自己的桶', () => {
+      // 这条守的是一次真实的数据丢失，不是命名洁癖：`json-managed-events` 去 `hooks` 下找桶，
+      // 在这份根层结构的文件里一个都找不到，于是既不清扫、又把我们的根级事件键直接盖在用户同名的
+      // 桶上，最后追加一个这个 CLI 不认的 `hooks: {}`。
+      //
+      // **先验行为、再验策略名**：反过来写的话，策略名那条会先抛，后面几条行为断言就成了死代码——
+      // 换错策略时它们一条都跑不到，于是"这份配置具体怎么坏"根本没人守。
+      const plan = resolveManagedHookPlan('droid', '/repo/app')
+      const mutation = plan!.mutations[0]!
+      const existing = JSON.stringify({
+        PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: '/home/me/audit.sh' }] }],
+        hooksDisabled: false
+      })
+      const merged = JSON.parse(renderMergedHookContent(existing, mutation.content, mutation.merge!))
+      expect(merged.PreToolUse[0].hooks[0].command).toBe('/home/me/audit.sh')
+      expect(merged.hooksDisabled).toBe(false)
+      expect(merged).not.toHaveProperty('hooks')
+      expect(merged.Stop[0].hooks[0].command).toContain('agentmux-hook.js')
+      expect(mutation.merge).toEqual({ kind: 'json-root-managed-events', marker: 'agentmux-hook.js' })
     })
 
     it('FACTORY_HOME_OVERRIDE 被尊重——忽略它会写出一份该 CLI 永远不读的配置', () => {

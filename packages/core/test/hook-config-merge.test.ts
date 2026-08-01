@@ -3,6 +3,7 @@ import { renderMergedHookContent } from '../src/hook-config-merge.js'
 
 const OWNED_KEY = { kind: 'json-owned-key', key: 'agentmux-status' } as const
 const MANAGED = { kind: 'json-managed-events', marker: 'agentmux-hook.js' } as const
+const ROOT_MANAGED = { kind: 'json-root-managed-events', marker: 'agentmux-hook.js' } as const
 const YAML_MANAGED = { kind: 'yaml-managed-events', marker: 'agentmux-hook.js' } as const
 const APPROVALS = { kind: 'json-managed-approvals', marker: 'agentmux-hook.js' } as const
 
@@ -96,8 +97,64 @@ describe('hook config merge — json-managed-events (codex .codex/hooks.json)', 
   })
 })
 
-describe('hook config merge — yaml-managed-events (hermes ~/.hermes/config.yaml)', () => {
+describe('hook config merge — json-root-managed-events (droid ~/.factory/hooks.json)', () => {
+  // droid's schema puts event names at the ROOT: no `hooks` wrapper to descend into.
   const owned = JSON.stringify({
+    PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: '/abs/agentmux-hook.js', timeout: 10 }] }],
+    Stop: [{ hooks: [{ type: 'command', command: '/abs/agentmux-hook.js', timeout: 10 }] }]
+  })
+
+  it('keeps the user own root bucket instead of overwriting it, and writes no hooks wrapper', () => {
+    // This is the exact loss the wrapper strategy caused: it found no `hooks` object, so it swept
+    // nothing, pasted our root keys over the user's same-named bucket, and appended `hooks: {}`.
+    const current = JSON.stringify({
+      PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: '/home/me/audit.sh' }] }],
+      hooksDisabled: false
+    })
+    const result = JSON.parse(renderMergedHookContent(current, owned, ROOT_MANAGED))
+    expect(result.PreToolUse).toHaveLength(2)
+    expect(result.PreToolUse[0].hooks[0].command).toBe('/home/me/audit.sh')
+    expect(result.PreToolUse[1].hooks[0].command).toBe('/abs/agentmux-hook.js')
+    // A `hooks` key here is not a cosmetic extra: the CLI does not know it, and its presence is the
+    // fingerprint of the wrong strategy being wired up.
+    expect(result).not.toHaveProperty('hooks')
+  })
+
+  it('carries the CLI own non-bucket switches through verbatim', () => {
+    // `hooksDisabled` / `showHookOutput` are settings, not buckets. Treating them as buckets would
+    // sweep them out and silently flip the user's switches back to default.
+    const current = JSON.stringify({ hooksDisabled: true, showHookOutput: false })
+    const result = JSON.parse(renderMergedHookContent(current, owned, ROOT_MANAGED))
+    expect(result.hooksDisabled).toBe(true)
+    expect(result.showHookOutput).toBe(false)
+  })
+
+  it('preserves a foreign root bucket we never target', () => {
+    const current = JSON.stringify({
+      Notification: [{ hooks: [{ type: 'command', command: '/home/me/notify.sh' }] }]
+    })
+    const result = JSON.parse(renderMergedHookContent(current, owned, ROOT_MANAGED))
+    expect(result.Notification).toEqual([{ hooks: [{ type: 'command', command: '/home/me/notify.sh' }] }])
+  })
+
+  it('sweeps our stale entry by marker rather than duplicating, and drops a bucket left empty', () => {
+    const current = JSON.stringify({
+      PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: '/old/agentmux-hook.js' }] }],
+      LegacyEvent: [{ hooks: [{ type: 'command', command: '/old/agentmux-hook.js' }] }]
+    })
+    const result = JSON.parse(renderMergedHookContent(current, owned, ROOT_MANAGED))
+    expect(result.PreToolUse).toHaveLength(1)
+    expect(result.PreToolUse[0].hooks[0].command).toBe('/abs/agentmux-hook.js')
+    expect(result.LegacyEvent).toBeUndefined()
+  })
+
+  it('is idempotent across repeated installs', () => {
+    const first = renderMergedHookContent(null, owned, ROOT_MANAGED)
+    expect(renderMergedHookContent(first, owned, ROOT_MANAGED)).toBe(first)
+  })
+})
+
+describe('hook config merge — yaml-managed-events (hermes ~/.hermes/config.yaml)', () => {  const owned = JSON.stringify({
     hooks: {
       pre_tool_call: [{ command: '/usr/bin/env … agentmux-hook.js', timeout: 10 }],
       on_session_end: [{ command: '/usr/bin/env … agentmux-hook.js', timeout: 10 }]
