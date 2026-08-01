@@ -10,7 +10,7 @@ import {
   type FileWorkbenchState,
   reconcileWorkbenchFileProjection
 } from '../src/renderer/src/lib/file-workbench-state.js'
-import { reduceAgentMembershipSnapshot, reduceRuntimeEvent } from '../src/renderer/src/lib/session-state.js'
+import { reduceAgentMembershipSnapshot, reduceRuntimeEvent, reduceTerminalMembershipSnapshot } from '../src/renderer/src/lib/session-state.js'
 import { createWorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.js'
 import {
   addWorkbenchRegion,
@@ -947,5 +947,109 @@ describe('运行时成员快照不拿一份空回答退役 Agent', () => {
     expect(next.tabs[tabId]).toBeDefined()
     expect(next.tabs[strangerTabId]).toBeUndefined()
     expect(next.sessions.map((item) => item.id)).toEqual([session.id])
+  })
+})
+
+describe('运行时成员快照收敛 Terminal projection', () => {
+  const terminal: SessionSnapshot = {
+    id: 'terminal-1',
+    kind: 'terminal',
+    providerId: null,
+    hostId: 'local',
+    workspacePath: '/repo',
+    label: 'Terminal · Project',
+    createdAt: 1,
+    updatedAt: 2,
+    processState: 'running',
+    status: { state: 'running', source: 'run-process', observedAt: 2 },
+    latestOutputBytes: 0,
+    control: {
+      kind: 'terminal',
+      hostId: 'local',
+      runId: 'terminal-1',
+      run: { runId: 'terminal-1' }
+    }
+  }
+
+  function terminalTab() {
+    return createWorkbenchTab('terminal-view', {
+      regionId: initialWorkbenchRegionId('terminal-view'),
+      kind: 'terminal',
+      phase: 'attached',
+      workspaceId: 'workspace-1',
+      sessionId: terminal.id
+    })
+  }
+
+  const empty = { sessions: [], timelines: {}, recoveryCandidates: [] }
+
+  it('keeps Agent and Terminal projections when the snapshot is empty', () => {
+    const state = {
+      sessions: [session, terminal],
+      timelines: {},
+      pendingAgentLaunches: {},
+      tabs: { 'terminal-view': terminalTab() },
+      layouts: { 'workspace-1': createWorkspaceLayout('pane', ['terminal-view']) },
+      viewModes: {}
+    }
+    expect(reduceTerminalMembershipSnapshot(state, empty)).toBe(state)
+  })
+
+  it('removes a missing Terminal Region without manufacturing or deleting unrelated views', () => {
+    let tab = createWorkbenchTab('agent-terminal-view', {
+      regionId: initialWorkbenchRegionId('agent-terminal-view'),
+      kind: 'agent',
+      phase: 'attached',
+      workspaceId: 'workspace-1',
+      sessionId: session.id
+    })
+    tab = addWorkbenchRegion(tab, tab.layout.activeRegionId, 'right', {
+      regionId: 'terminal-region',
+      kind: 'terminal',
+      phase: 'attached',
+      workspaceId: 'workspace-1',
+      sessionId: terminal.id
+    })
+    const state = {
+      sessions: [session, terminal],
+      timelines: {},
+      pendingAgentLaunches: {},
+      tabs: { [tab.id]: tab },
+      layouts: { 'workspace-1': createWorkspaceLayout('pane', [tab.id]) },
+      viewModes: {}
+    }
+    const other = { ...session, id: 'other-agent', control: { ...session.control, agentSessionId: 'other-agent' } }
+    const next = reduceTerminalMembershipSnapshot({ ...state, sessions: [...state.sessions, other] }, {
+      sessions: [other],
+      timelines: { 'other-agent': { agentSessionId: 'other-agent', revision: 1, items: [] } },
+      recoveryCandidates: []
+    })
+
+    expect(next.sessions.map((item) => item.id)).toEqual([session.id, 'other-agent'])
+    expect(next.tabs[tab.id]).toBeDefined()
+    expect(workbenchSurfaces(next.tabs[tab.id]!)).toEqual([
+      expect.objectContaining({ kind: 'agent', sessionId: session.id })
+    ])
+  })
+
+  it('updates an existing Terminal from the canonical snapshot and never adds an unrepresented one', () => {
+    const state = {
+      sessions: [terminal],
+      timelines: {},
+      pendingAgentLaunches: {},
+      tabs: { 'terminal-view': terminalTab() },
+      layouts: { 'workspace-1': createWorkspaceLayout('pane', ['terminal-view']) },
+      viewModes: {}
+    }
+    const canonical = { ...terminal, label: 'Terminal · Renamed', updatedAt: 9 }
+    const unseen: SessionSnapshot = { ...terminal, id: 'terminal-unseen', control: { ...terminal.control, runId: 'terminal-unseen', run: { runId: 'terminal-unseen' } } }
+    const next = reduceTerminalMembershipSnapshot(state, {
+      sessions: [canonical, unseen],
+      timelines: {},
+      recoveryCandidates: []
+    })
+
+    expect(next.sessions).toEqual([canonical])
+    expect(next.tabs['terminal-view']).toBe(state.tabs['terminal-view'])
   })
 })

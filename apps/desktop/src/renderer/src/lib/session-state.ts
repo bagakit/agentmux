@@ -258,7 +258,14 @@ export function removeSessionProjection(
   state: SessionProjectionState,
   sessionId: string
 ): SessionProjectionState {
-  if (!state.sessions.some((session) => session.id === sessionId)) return state
+  // A startup snapshot can leave a saved Region projected before its Session has ever been
+  // published into Renderer state. Cleanup must still remove that orphan Region; otherwise the
+  // title survives as an empty Tab forever even though the Session list is already canonical.
+  const hasProjectedSession = state.sessions.some((session) => session.id === sessionId)
+  const hasProjectedView = Object.values(state.tabs).some((tab) => workbenchSurfaces(tab).some((surface) => (
+    (surface.kind === 'agent' || surface.kind === 'terminal') && surface.sessionId === sessionId
+  )))
+  if (!hasProjectedSession && !hasProjectedView) return state
   const removedTabIds: string[] = []
   const tabs = { ...state.tabs }
   for (const tab of Object.values(state.tabs)) {
@@ -352,6 +359,43 @@ export function reduceAgentMembershipSnapshot(
     if (!current || incoming.revision >= current.revision) timelines[session.id] = incoming
   }
   return { ...projected, sessions, timelines }
+}
+
+/**
+ * Reconcile Terminal projections against an authoritative Runtime snapshot.
+ *
+ * Terminal Sessions have no semantic continuity record: once Core gives us a non-empty
+ * snapshot that does not contain a terminal run, the old PTY is gone and its saved Region
+ * must not remain as a title-only shell. An empty snapshot is deliberately fail-open — it
+ * can still mean that Runtime is connecting or rooted at the wrong state directory.
+ * Unlike Agent membership, this reducer never creates Tabs for unrepresented terminal runs;
+ * it only updates or removes terminal Sessions that are already projected in the Workbench.
+ */
+export function reduceTerminalMembershipSnapshot(
+  state: SessionProjectionState,
+  snapshot: RuntimeSnapshot
+): SessionProjectionState {
+  if (snapshot.sessions.length === 0 && snapshot.recoveryCandidates.length === 0) return state
+
+  const canonicalTerminals = snapshot.sessions.filter((session): session is Extract<SessionSnapshot, { kind: 'terminal' }> => (
+    session.kind === 'terminal'
+  ))
+  const canonicalIds = new Set(canonicalTerminals.map((session) => session.id))
+  const projectedTerminalIds = new Set([
+    ...state.sessions.flatMap((session) => session.kind === 'terminal' ? [session.id] : []),
+    ...Object.values(state.tabs).flatMap((tab) => workbenchSurfaces(tab).flatMap((surface) => (
+      surface.kind === 'terminal' ? [surface.sessionId] : []
+    )))
+  ])
+  let projected = state
+  for (const sessionId of projectedTerminalIds) {
+    if (!canonicalIds.has(sessionId)) projected = removeSessionProjection(projected, sessionId)
+  }
+
+  const canonicalById = new Map(canonicalTerminals.map((session) => [session.id, session]))
+  const sessions = projected.sessions.map((session) => canonicalById.get(session.id) ?? session)
+  if (sessions.every((session, index) => session === projected.sessions[index])) return projected
+  return { ...projected, sessions }
 }
 
 export function reduceSessionLaunchFailed(

@@ -349,6 +349,55 @@ describe('Renderer persistence boundary', () => {
     dispose()
   })
 
+  it('reconciles an unknown Terminal Region when the first post-startup snapshot becomes authoritative', async () => {
+    const staleTerminalId = 'terminal-stale-after-restart'
+    const tab = createWorkbenchTab('terminal-stale-view', {
+      regionId: initialWorkbenchRegionId('terminal-stale-view'),
+      kind: 'terminal',
+      phase: 'attached',
+      workspaceId: 'workspace-a',
+      sessionId: staleTerminalId
+    })
+    useAppStore.setState({
+      loading: true,
+      restoredWorkbench: {
+        tabs: { [tab.id]: tab },
+        layouts: { 'workspace-a': createWorkspaceLayout('pane', [tab.id]) }
+      }
+    })
+    vi.spyOn(useAppStore.persist, 'hasHydrated').mockReturnValue(true)
+    vi.spyOn(api.config, 'get').mockResolvedValue(config)
+    vi.spyOn(api.providers, 'list').mockResolvedValue([])
+    const currentTerminal = {
+      id: 'terminal-current-after-restart',
+      kind: 'terminal' as const,
+      providerId: null,
+      hostId: 'local',
+      workspacePath: '/repo/a',
+      label: 'Terminal · A',
+      createdAt: 2,
+      updatedAt: 2,
+      processState: 'running' as const,
+      status: { state: 'running' as const, source: 'run-process' as const, observedAt: 2 },
+      latestOutputBytes: 0,
+      control: {
+        kind: 'terminal' as const,
+        hostId: 'local',
+        runId: 'terminal-current-after-restart',
+        run: { runId: 'terminal-current-after-restart' }
+      }
+    }
+    const snapshot = vi.spyOn(api.sessions, 'snapshot')
+      .mockRejectedValueOnce(new Error('Runtime snapshot timed out'))
+      .mockResolvedValue({ sessions: [currentTerminal], timelines: {}, recoveryCandidates: [] })
+
+    const dispose = await useAppStore.getState().initialize()
+    await waitFor(() => useAppStore.getState().tabs[tab.id] === undefined)
+    expect(snapshot).toHaveBeenCalledTimes(2)
+    expect(useAppStore.getState().layouts['workspace-a']?.groups[0]?.tabOrder).toEqual([])
+    dispose()
+  })
+
   it('keeps existing Sessions usable when the Provider catalog lookup fails', async () => {
     useAppStore.setState({ loading: true, restoredWorkbench: null })
     vi.spyOn(useAppStore.persist, 'hasHydrated').mockReturnValue(true)

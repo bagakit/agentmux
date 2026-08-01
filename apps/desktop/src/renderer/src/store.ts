@@ -103,6 +103,7 @@ import {
   projectRuntimeEvent,
   removeSessionProjection,
   reduceAgentMembershipSnapshot,
+  reduceTerminalMembershipSnapshot,
   reduceAgentSessionLaunchAttached,
   reduceDetachedAgentLaunch,
   reduceSessionLaunchAttached,
@@ -968,13 +969,16 @@ function enqueueSessionMembershipEvent(
   entry.overflowed = true
 }
 
-function startSessionMembershipResync(event: RuntimeEvent): void {
+function startSessionMembershipResync(
+  event?: RuntimeEvent,
+  options: { reportFailure?: boolean } = {}
+): void {
   if (sessionMembershipResync) {
-    enqueueSessionMembershipEvent(sessionMembershipResync, event)
+    if (event) enqueueSessionMembershipEvent(sessionMembershipResync, event)
     return
   }
   const entry: SessionMembershipResync = {
-    events: [{ event, pendingLaunchAgentSessionId: null }],
+    events: event ? [{ event, pendingLaunchAgentSessionId: null }] : [],
     overflowed: false
   }
   sessionMembershipResync = entry
@@ -996,6 +1000,7 @@ function startSessionMembershipResync(event: RuntimeEvent): void {
             pending.pendingLaunchAgentSessionId ? [pending.pendingLaunchAgentSessionId] : []
           )))
           let projected = reduceAgentMembershipSnapshot(state, snapshot, protectedAgentSessionIds)
+          projected = reduceTerminalMembershipSnapshot(projected, snapshot)
           for (const pending of events) {
             if (
               pending.pendingLaunchAgentSessionId &&
@@ -1014,7 +1019,10 @@ function startSessionMembershipResync(event: RuntimeEvent): void {
         if (!membershipGap) return
       }
     } catch (error) {
-      useAppStore.getState().reportError(error)
+      // A best-effort retry launched after an initial startup outage must not replace the richer
+      // service-window warning that already explains the failed step. Event-driven resyncs still
+      // surface their failure through the ordinary Store error channel.
+      if (options.reportFailure !== false) useAppStore.getState().reportError(error)
     } finally {
       if (sessionMembershipResync === entry) sessionMembershipResync = null
     }
@@ -1549,6 +1557,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       booting = false
       for (const event of pendingSessionEvents) get().applyEvent(event)
       for (const event of pendingBrowserEvents) get().applyBrowserEvent(event)
+      // A rejected initial snapshot used the saved Workbench as a temporary projection. Retry one
+      // canonical membership read after the shell is visible so stale Terminal Regions get a real
+      // cleanup boundary even when Runtime emits no event for a PTY that disappeared with the app.
+      // Agent recovery candidates remain protected by the same reducer used for event-driven resync.
+      if (!snapshotVerified) startSessionMembershipResync(undefined, { reportFailure: false })
       return () => {
         disposeRuntimeSubscriptions()
       }
