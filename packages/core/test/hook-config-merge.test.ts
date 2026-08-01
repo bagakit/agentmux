@@ -1,9 +1,10 @@
-import { fixtureClock as upstreamFixtureClock, fixtureDay as upstreamFixtureDay, fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixtureClock, fixtureDay, fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { renderMergedHookContent } from '../src/hook-config-merge.js'
 
 const OWNED_KEY = { kind: 'json-owned-key', key: 'agentmux-status' } as const
 const MANAGED = { kind: 'json-managed-events', marker: 'agentmux-hook.js' } as const
+const ROOT_MANAGED = { kind: 'json-root-managed-events', marker: 'agentmux-hook.js' } as const
 const YAML_MANAGED = { kind: 'yaml-managed-events', marker: 'agentmux-hook.js' } as const
 const APPROVALS = { kind: 'json-managed-approvals', marker: 'agentmux-hook.js' } as const
 
@@ -18,11 +19,11 @@ describe('hook config merge — json-owned-key (antigravity shared ~/.gemini)', 
 
   it('preserves every foreign sibling key the real Gemini CLI owns', () => {
     const current = JSON.stringify({
-      'user-hooks': { Stop: [{ command: upstreamFixturePath("usr/bin/notify") }] },
+      'user-hooks': { Stop: [{ command: fixturePath("usr/bin/notify") }] },
       settings: { theme: 'dark' }
     })
     const result = JSON.parse(renderMergedHookContent(current, owned, OWNED_KEY))
-    expect(result['user-hooks']).toEqual({ Stop: [{ command: upstreamFixturePath("usr/bin/notify") }] })
+    expect(result['user-hooks']).toEqual({ Stop: [{ command: fixturePath("usr/bin/notify") }] })
     expect(result.settings).toEqual({ theme: 'dark' })
     expect(result['agentmux-status']).toBeDefined()
   })
@@ -42,27 +43,27 @@ describe('hook config merge — json-managed-events (codex .codex/hooks.json)', 
   const owned = JSON.stringify({
     description: 'AgentMux Codex lifecycle bridge.',
     hooks: {
-      SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: upstreamFixturePath("abs/agentmux-hook.js") }] }],
-      Stop: [{ hooks: [{ type: 'command', command: upstreamFixturePath("abs/agentmux-hook.js") }] }]
+      SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: fixturePath("abs/agentmux-hook.js") }] }],
+      Stop: [{ hooks: [{ type: 'command', command: fixturePath("abs/agentmux-hook.js") }] }]
     }
   })
 
   it('keeps foreign event buckets and foreign entries inside shared buckets', () => {
     const current = JSON.stringify({
       hooks: {
-        PreCommit: [{ hooks: [{ type: 'command', command: upstreamFixturePath("repo/lint.sh") }] }],
-        Stop: [{ hooks: [{ type: 'command', command: upstreamFixturePath("repo/notify.sh") }] }]
+        PreCommit: [{ hooks: [{ type: 'command', command: fixturePath("repo/lint.sh") }] }],
+        Stop: [{ hooks: [{ type: 'command', command: fixturePath("repo/notify.sh") }] }]
       }
     })
     const result = JSON.parse(renderMergedHookContent(current, owned, MANAGED))
     // Foreign-only bucket survives untouched.
-    expect(result.hooks.PreCommit).toEqual([{ hooks: [{ type: 'command', command: upstreamFixturePath("repo/lint.sh") }] }])
+    expect(result.hooks.PreCommit).toEqual([{ hooks: [{ type: 'command', command: fixturePath("repo/lint.sh") }] }])
     // Shared Stop bucket keeps the foreign entry first, then our entry appended.
     expect(result.hooks.Stop).toHaveLength(2)
-    expect(result.hooks.Stop[0].hooks[0].command).toBe(upstreamFixturePath("repo/notify.sh"))
-    expect(result.hooks.Stop[1].hooks[0].command).toBe(upstreamFixturePath("abs/agentmux-hook.js"))
+    expect(result.hooks.Stop[0].hooks[0].command).toBe(fixturePath("repo/notify.sh"))
+    expect(result.hooks.Stop[1].hooks[0].command).toBe(fixturePath("abs/agentmux-hook.js"))
     // Our SessionStart bucket is added.
-    expect(result.hooks.SessionStart[0].hooks[0].command).toBe(upstreamFixturePath("abs/agentmux-hook.js"))
+    expect(result.hooks.SessionStart[0].hooks[0].command).toBe(fixturePath("abs/agentmux-hook.js"))
     // We own the description label.
     expect(result.description).toBe('AgentMux Codex lifecycle bridge.')
   })
@@ -71,20 +72,20 @@ describe('hook config merge — json-managed-events (codex .codex/hooks.json)', 
     // A previous install wrote our command under a different absolute execPath.
     const current = JSON.stringify({
       hooks: {
-        SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: upstreamFixturePath("old/path/agentmux-hook.js") }] }],
-        Stop: [{ hooks: [{ type: 'command', command: upstreamFixturePath("old/path/agentmux-hook.js") }] }]
+        SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: fixturePath("old/path/agentmux-hook.js") }] }],
+        Stop: [{ hooks: [{ type: 'command', command: fixturePath("old/path/agentmux-hook.js") }] }]
       }
     })
     const result = JSON.parse(renderMergedHookContent(current, owned, MANAGED))
     expect(result.hooks.SessionStart).toHaveLength(1)
-    expect(result.hooks.SessionStart[0].hooks[0].command).toBe(upstreamFixturePath("abs/agentmux-hook.js"))
+    expect(result.hooks.SessionStart[0].hooks[0].command).toBe(fixturePath("abs/agentmux-hook.js"))
     expect(result.hooks.Stop).toHaveLength(1)
   })
 
   it('drops a bucket that becomes foreign-empty after the sweep', () => {
     // The user only ever had our stale entry in a bucket we no longer target.
     const current = JSON.stringify({
-      hooks: { LegacyEvent: [{ hooks: [{ type: 'command', command: upstreamFixturePath("old/agentmux-hook.js") }] }] }
+      hooks: { LegacyEvent: [{ hooks: [{ type: 'command', command: fixturePath("old/agentmux-hook.js") }] }] }
     })
     const result = JSON.parse(renderMergedHookContent(current, owned, MANAGED))
     expect(result.hooks.LegacyEvent).toBeUndefined()
@@ -97,8 +98,64 @@ describe('hook config merge — json-managed-events (codex .codex/hooks.json)', 
   })
 })
 
-describe('hook config merge — yaml-managed-events (hermes ~/.hermes/config.yaml)', () => {
+describe('hook config merge — json-root-managed-events (droid ~/.factory/hooks.json)', () => {
+  // droid's schema puts event names at the ROOT: no `hooks` wrapper to descend into.
   const owned = JSON.stringify({
+    PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: fixturePath("abs/agentmux-hook.js"), timeout: 10 }] }],
+    Stop: [{ hooks: [{ type: 'command', command: fixturePath("abs/agentmux-hook.js"), timeout: 10 }] }]
+  })
+
+  it('keeps the user own root bucket instead of overwriting it, and writes no hooks wrapper', () => {
+    // This is the exact loss the wrapper strategy caused: it found no `hooks` object, so it swept
+    // nothing, pasted our root keys over the user's same-named bucket, and appended `hooks: {}`.
+    const current = JSON.stringify({
+      PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: fixturePath("home/me/audit.sh") }] }],
+      hooksDisabled: false
+    })
+    const result = JSON.parse(renderMergedHookContent(current, owned, ROOT_MANAGED))
+    expect(result.PreToolUse).toHaveLength(2)
+    expect(result.PreToolUse[0].hooks[0].command).toBe(fixturePath("home/me/audit.sh"))
+    expect(result.PreToolUse[1].hooks[0].command).toBe(fixturePath("abs/agentmux-hook.js"))
+    // A `hooks` key here is not a cosmetic extra: the CLI does not know it, and its presence is the
+    // fingerprint of the wrong strategy being wired up.
+    expect(result).not.toHaveProperty('hooks')
+  })
+
+  it('carries the CLI own non-bucket switches through verbatim', () => {
+    // `hooksDisabled` / `showHookOutput` are settings, not buckets. Treating them as buckets would
+    // sweep them out and silently flip the user's switches back to default.
+    const current = JSON.stringify({ hooksDisabled: true, showHookOutput: false })
+    const result = JSON.parse(renderMergedHookContent(current, owned, ROOT_MANAGED))
+    expect(result.hooksDisabled).toBe(true)
+    expect(result.showHookOutput).toBe(false)
+  })
+
+  it('preserves a foreign root bucket we never target', () => {
+    const current = JSON.stringify({
+      Notification: [{ hooks: [{ type: 'command', command: fixturePath("home/me/notify.sh") }] }]
+    })
+    const result = JSON.parse(renderMergedHookContent(current, owned, ROOT_MANAGED))
+    expect(result.Notification).toEqual([{ hooks: [{ type: 'command', command: fixturePath("home/me/notify.sh") }] }])
+  })
+
+  it('sweeps our stale entry by marker rather than duplicating, and drops a bucket left empty', () => {
+    const current = JSON.stringify({
+      PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: fixturePath("old/agentmux-hook.js") }] }],
+      LegacyEvent: [{ hooks: [{ type: 'command', command: fixturePath("old/agentmux-hook.js") }] }]
+    })
+    const result = JSON.parse(renderMergedHookContent(current, owned, ROOT_MANAGED))
+    expect(result.PreToolUse).toHaveLength(1)
+    expect(result.PreToolUse[0].hooks[0].command).toBe(fixturePath("abs/agentmux-hook.js"))
+    expect(result.LegacyEvent).toBeUndefined()
+  })
+
+  it('is idempotent across repeated installs', () => {
+    const first = renderMergedHookContent(null, owned, ROOT_MANAGED)
+    expect(renderMergedHookContent(first, owned, ROOT_MANAGED)).toBe(first)
+  })
+})
+
+describe('hook config merge — yaml-managed-events (hermes ~/.hermes/config.yaml)', () => {  const owned = JSON.stringify({
     hooks: {
       pre_tool_call: [{ command: '/usr/bin/env … agentmux-hook.js', timeout: 10 }],
       on_session_end: [{ command: '/usr/bin/env … agentmux-hook.js', timeout: 10 }]
@@ -112,7 +169,7 @@ describe('hook config merge — yaml-managed-events (hermes ~/.hermes/config.yam
     'api_key: sk-secret-do-not-lose  # personal token',
     'hooks:',
     '  pre_tool_call:',
-    ("    - command: " + (upstreamFixturePath("home/me/audit.sh")) + "  # user audit hook"),
+    ("    - command: " + (fixturePath("home/me/audit.sh")) + "  # user audit hook"),
     '      timeout: 5',
     ''
   ].join('\n')
@@ -128,7 +185,7 @@ describe('hook config merge — yaml-managed-events (hermes ~/.hermes/config.yam
     expect(result).toContain('# user audit hook')
     // The foreign hook stays first in its shared bucket; ours is appended after it.
     const preToolBlock = result.slice(result.indexOf('pre_tool_call:'))
-    expect(preToolBlock.indexOf(upstreamFixturePath("home/me/audit.sh"))).toBeLessThan(preToolBlock.indexOf('agentmux-hook.js'))
+    expect(preToolBlock.indexOf(fixturePath("home/me/audit.sh"))).toBeLessThan(preToolBlock.indexOf('agentmux-hook.js'))
     // Our new bucket is added.
     expect(result).toContain('on_session_end:')
   })
@@ -139,14 +196,14 @@ describe('hook config merge — yaml-managed-events (hermes ~/.hermes/config.yam
       'model: claude-opus-5',
       'hooks:',
       '  pre_tool_call:',
-      ("    - command: " + (upstreamFixturePath("old/path/agentmux-hook.js"))),
+      ("    - command: " + (fixturePath("old/path/agentmux-hook.js"))),
       '      timeout: 10',
       ''
     ].join('\n')
     const first = renderMergedHookContent(stale, owned, YAML_MANAGED)
     // Exactly one agentmux entry remains under pre_tool_call (the fresh one), not two.
     expect(first.match(/agentmux-hook\.js/g)?.length).toBe(2) // pre_tool_call + on_session_end, one each
-    expect(first).not.toContain(upstreamFixturePath("old/path/agentmux-hook.js"))
+    expect(first).not.toContain(fixturePath("old/path/agentmux-hook.js"))
     // Rendering again over our own output changes nothing — required for the installer's unchanged-hash guard.
     expect(renderMergedHookContent(first, owned, YAML_MANAGED)).toBe(first)
   })
@@ -155,16 +212,16 @@ describe('hook config merge — yaml-managed-events (hermes ~/.hermes/config.yam
     const current = [
       'hooks:',
       '  legacy_event:', // only ever held our stale entry
-      ("    - command: " + (upstreamFixturePath("old/agentmux-hook.js"))),
+      ("    - command: " + (fixturePath("old/agentmux-hook.js"))),
       '  post_tool_call:', // foreign-only bucket, untouched
-      ("    - command: " + (upstreamFixturePath("home/me/keep.sh"))),
+      ("    - command: " + (fixturePath("home/me/keep.sh"))),
       ''
     ].join('\n')
     const ownedElsewhere = JSON.stringify({ hooks: { on_session_end: [{ command: 'x/agentmux-hook.js' }] } })
     const result = renderMergedHookContent(current, ownedElsewhere, YAML_MANAGED)
     expect(result).not.toContain('legacy_event')
     expect(result).toContain('post_tool_call:')
-    expect(result).toContain(upstreamFixturePath("home/me/keep.sh"))
+    expect(result).toContain(fixturePath("home/me/keep.sh"))
   })
 
   it('seeds hooks: into a config that has none, and treats a blank/absent file as empty', () => {
@@ -194,12 +251,12 @@ describe('hook config merge — json-managed-approvals (hermes shell-hooks-allow
   it('appends our approvals while preserving every foreign approval verbatim (timestamps and all)', () => {
     const current = JSON.stringify({
       approvals: [
-        { event: 'pre_llm_call', command: upstreamFixturePath("home/me/audit.sh"), approved_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(0, 0, 0) + "Z" }
+        { event: 'pre_llm_call', command: fixturePath("home/me/audit.sh"), approved_at: fixtureDay(1) + "T" + fixtureClock(0, 0, 0) + "Z" }
       ]
     })
     const result = JSON.parse(renderMergedHookContent(current, owned, APPROVALS))
     // Foreign approval kept first, with its timestamp intact.
-    expect(result.approvals[0]).toEqual({ event: 'pre_llm_call', command: upstreamFixturePath("home/me/audit.sh"), approved_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(0, 0, 0) + "Z" })
+    expect(result.approvals[0]).toEqual({ event: 'pre_llm_call', command: fixturePath("home/me/audit.sh"), approved_at: fixtureDay(1) + "T" + fixtureClock(0, 0, 0) + "Z" })
     // Our two approvals appended, carrying only {event, command}.
     expect(result.approvals).toHaveLength(3)
     expect(result.approvals[1]).toEqual({ event: 'pre_tool_call', command: '/usr/bin/env … agentmux-hook.js' })
@@ -207,12 +264,12 @@ describe('hook config merge — json-managed-approvals (hermes shell-hooks-allow
 
   it('sweeps stale AgentMux approvals by marker instead of duplicating, and is idempotent', () => {
     const current = JSON.stringify({
-      approvals: [{ event: 'pre_tool_call', command: upstreamFixturePath("old/path/agentmux-hook.js"), approved_at: 'stale' }]
+      approvals: [{ event: 'pre_tool_call', command: fixturePath("old/path/agentmux-hook.js"), approved_at: 'stale' }]
     })
     const first = renderMergedHookContent(current, owned, APPROVALS)
     const parsed = JSON.parse(first)
     expect(parsed.approvals).toHaveLength(2) // stale one dropped, our two added
-    expect(first).not.toContain(upstreamFixturePath("old/path/agentmux-hook.js"))
+    expect(first).not.toContain(fixturePath("old/path/agentmux-hook.js"))
     expect(renderMergedHookContent(first, owned, APPROVALS)).toBe(first)
   })
 

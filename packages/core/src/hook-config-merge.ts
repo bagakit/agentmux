@@ -15,6 +15,7 @@ import { AgentMuxError } from './errors.js'
 export type AgentHookMergeStrategy =
   | AgentHookOwnedKeyMerge
   | AgentHookManagedEventsMerge
+  | AgentHookRootManagedEventsMerge
   | AgentHookYamlManagedEventsMerge
   | AgentHookManagedApprovalsMerge
 
@@ -38,6 +39,27 @@ export type AgentHookOwnedKeyMerge = {
  */
 export type AgentHookManagedEventsMerge = {
   kind: 'json-managed-events'
+  marker: string
+}
+
+/**
+ * The same ownership rule as `json-managed-events`, for a file whose **event buckets are at the
+ * root** — there is no `hooks` wrapper to descend into.
+ *
+ * droid's `~/.factory/hooks.json` is that shape: its schema is
+ * `object({ PreToolUse: array(...).optional(), …, hooksDisabled: boolean().optional() })`, so an
+ * event name *is* a top-level key. Merging such a file with `json-managed-events` is not a
+ * near-miss — it is data loss with a silent symptom: the wrapper-based merge finds no `hooks`
+ * object, so it sweeps nothing, copies every root key of ours over the user's own bucket of the
+ * same name, and then writes an empty `hooks: {}` the CLI does not recognise. The user's
+ * hand-written `PreToolUse` audit hook disappears on the next launch.
+ *
+ * The keys AgentMux owns are exactly the event names its own content declares; every other root
+ * key (`hooksDisabled`, `showHookOutput`, a foreign event bucket) is preserved, and within a
+ * shared bucket foreign entries stay ahead of ours — same guarantees as the wrapper variant.
+ */
+export type AgentHookRootManagedEventsMerge = {
+  kind: 'json-root-managed-events'
   marker: string
 }
 
@@ -133,6 +155,28 @@ function applyOwnedKey(current: string | null, owned: JsonObject, key: string): 
   return SERIALIZE({ ...parseCurrentObject(current), [key]: owned[key] })
 }
 
+/**
+ * Sweep AgentMux entries out of every current bucket, then append the fresh ones after whatever
+ * foreign entries share a bucket. Shared by both managed-events strategies — they differ only in
+ * *where* the buckets live (under `hooks`, or at the root), never in who owns what inside one.
+ */
+function mergeEventBuckets(current: JsonObject, owned: JsonObject, marker: string): JsonObject {
+  const next: JsonObject = {}
+  // Sweep our marker out of every existing bucket first so relaunches never accumulate duplicates
+  // and a bucket we no longer own stops firing our command; foreign-only buckets are preserved.
+  for (const [event, definitions] of Object.entries(current)) {
+    const foreign = sweepManagedDefinitions(definitions, marker)
+    if (foreign.length > 0) next[event] = foreign
+  }
+  // Inject the fresh managed entries after any foreign entries that share the bucket.
+  for (const [event, ourDefinitions] of Object.entries(owned)) {
+    const foreign = next[event]
+    const preserved = Array.isArray(foreign) ? foreign : []
+    next[event] = [...preserved, ...(Array.isArray(ourDefinitions) ? ourDefinitions : [])]
+  }
+  return next
+}
+
 function applyManagedEvents(current: string | null, owned: JsonObject, marker: string): string {
   const result = parseCurrentObject(current)
   // AgentMux owns non-`hooks` labels it declares (e.g. `description`); foreign top-level keys survive.
@@ -145,21 +189,27 @@ function applyManagedEvents(current: string | null, owned: JsonObject, marker: s
   const ownedHooks = typeof owned.hooks === 'object' && owned.hooks !== null && !Array.isArray(owned.hooks)
     ? (owned.hooks as JsonObject)
     : {}
-  const nextHooks: JsonObject = {}
-  // Sweep our marker out of every existing bucket first so relaunches never accumulate duplicates
-  // and a bucket we no longer own stops firing our command; foreign-only buckets are preserved.
-  for (const [event, definitions] of Object.entries(currentHooks)) {
-    const foreign = sweepManagedDefinitions(definitions, marker)
-    if (foreign.length > 0) nextHooks[event] = foreign
-  }
-  // Inject the fresh managed entries after any foreign entries that share the bucket.
-  for (const [event, ourDefinitions] of Object.entries(ownedHooks)) {
-    const foreign = nextHooks[event]
-    const preserved = Array.isArray(foreign) ? foreign : []
-    nextHooks[event] = [...preserved, ...(Array.isArray(ourDefinitions) ? ourDefinitions : [])]
-  }
-  result.hooks = nextHooks
+  result.hooks = mergeEventBuckets(currentHooks, ownedHooks, marker)
   return SERIALIZE(result)
+}
+
+/**
+ * The root-bucket variant: the event names are top-level keys, so the merge operates on the file's
+ * own root rather than descending into `hooks`.
+ *
+ * Root keys that are **not** arrays are settings, not buckets (droid's `hooksDisabled` /
+ * `showHookOutput`), so they are carried through verbatim — sweeping them as buckets would delete
+ * the user's own switches. Everything else follows the shared per-bucket ownership rule.
+ */
+function applyRootManagedEvents(current: string | null, owned: JsonObject, marker: string): string {
+  const parsed = parseCurrentObject(current)
+  const settings: JsonObject = {}
+  const buckets: JsonObject = {}
+  for (const [key, value] of Object.entries(parsed)) {
+    if (Array.isArray(value)) buckets[key] = value
+    else settings[key] = value
+  }
+  return SERIALIZE({ ...settings, ...mergeEventBuckets(buckets, owned, marker) })
 }
 
 /** True when a YAML hook definition node carries an AgentMux-managed command. */
@@ -262,6 +312,8 @@ export function renderMergedHookContent(
       return applyOwnedKey(current, owned, strategy.key)
     case 'json-managed-events':
       return applyManagedEvents(current, owned, strategy.marker)
+    case 'json-root-managed-events':
+      return applyRootManagedEvents(current, owned, strategy.marker)
     case 'yaml-managed-events':
       return applyYamlManagedEvents(current, owned, strategy.marker)
     case 'json-managed-approvals':

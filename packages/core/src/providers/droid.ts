@@ -73,6 +73,11 @@ export const DROID_HOOKS: AgentNativeHookSpecification = {
  * （zod：`object({ PreToolUse: array(...).optional(), …, hooksDisabled: boolean().optional() })`）。
  * 每个事件的值是一个数组，元素形如 `{matcher?, commandRegex?, hooks: [{type:'command', command, timeout?}]}`。
  * 照 Claude 的形状多包一层 `hooks` 会让整份配置被 zod 判为无效——不是少响几个事件，是一个都不响。
+ *
+ * 因此合并策略也必须是**根层**那一支（`json-root-managed-events`）。用 `json-managed-events`
+ * 不是"差一点"而是数据丢失：那支去 `hooks` 下找桶，在这份文件里一个都找不到，于是既不清扫、又把
+ * 我们的根级事件键直接盖在用户同名的桶上，最后再写一个这个 CLI 不认的 `hooks: {}`。用户手写的
+ * `PreToolUse` 审计 hook 会在下一次启动时消失。这不是推理——`renderMergedHookContent` 实测如此。
  */
 export function createDroidManagedHookPlan(env?: Readonly<Record<string, string>>): AgentManagedHookPlan {
   const override = env?.FACTORY_HOME_OVERRIDE?.trim()
@@ -89,7 +94,7 @@ export function createDroidManagedHookPlan(env?: Readonly<Record<string, string>
       path: join(home, '.factory', 'hooks.json'),
       content: `${JSON.stringify(events, null, 2)}\n`,
       mode: 0o600,
-      merge: { kind: 'json-managed-events', marker: 'agentmux-hook.js' }
+      merge: { kind: 'json-root-managed-events', marker: 'agentmux-hook.js' }
     }]
   }
 }
