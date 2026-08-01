@@ -144,9 +144,35 @@ grok 的 `Stop` 因此只会以「报告」身份触发一次。这个前提由�
 | Task | CLI | 第一方源码 | 能力可核实性 |
 |---|---|---|---|
 | T-009 OpenCode | ❌ | ✅ 本机有完整 checkout | **可核实**（读源码 + 自带文档） |
-| T-016 Kimi | ❌ | ✅ 本机有完整 checkout | **可核实**（读源码 + 自带文档） |
+| T-016 Kimi | ❌ | ✅ 本机有完整 checkout | **可核实**（读源码 + 自带文档）→ 已实现，见下 |
 | T-015 Copilot | ❌ 不在 PATH | ❌ | **不足**，见下 |
 | T-010 Mimo / T-011 Droid / T-012 Devin / T-013 OMP / T-014 Prime | ❌ | ❌ | **不足**：唯一线索是第三方参考语料 |
+
+### Kimi（T-016）落地时读出来的三处非显然事实
+
+复验：读 `~/proj/github/kimi-cli`（`1.49.0`）。`command -v kimi` 失败——**没有**任何运行时证据，
+下面每条都只由源码支撑，实现里也只声明这些。
+
+1. **`expectedProcess` 必须是 `Kimi Code`，不是 `kimi`。** CLI 启动时调
+   `init_process_name("Kimi Code")`（`cli/__init__.py`），底层走 `setproctitle`（硬依赖）。
+   AgentMux 的 `readySignal: foreground-process` 是拿 `expectedProcess` 去比对**操作系统进程名**的，
+   所以按"可执行文件名即进程名"这个形状去推，会得到一个永远等不到就绪的 Provider——而且不会报错，
+   只会一直显示在启动中。这是本仓第十一个内置 Provider 里**唯一**一个两者不相等的条目。
+2. **首个 prompt 不能进 argv。** `-p/--prompt` 在 shell UI 里的语义是"跑完这一条就退出"
+   （`ui/shell/__init__.py` 的 `run single command and exit`），而 AgentMux 要的是一个活着的交互 PTY。
+   所以 prompt 改由 PTY 键入。
+3. **hook 是真的，但配置面是 TOML，故记 `unmanaged` 而非 `explicit-managed`。**
+   `[[hooks]]` 写在 `~/.kimi/config.toml`，而那是用户主配置（model / credentials / theme 都在里面）。
+   本仓四种 merge 策略（`json-owned-key` / `json-managed-events` / `yaml-managed-events` /
+   `json-managed-approvals`）没有一种能编辑 TOML，Core 也没有 TOML 解析器。整份覆盖是数据损坏而不是
+   安装；声明成 managed 就等于"说装了其实没装"。
+
+另外两条"不声明"：`usage` 不声明（`Stop`/`StopFailure` 负载里没有任何 token 字段，也不报 transcript
+路径）；`acpStrategy: none`（`kimi acp` 子命令与 `agent-client-protocol` 依赖都真实存在，但 AgentMux
+侧的 ACP 适配没接——**能力存在 ≠ 我们接上了**，如实记未接）。
+
+事件名（PascalCase）与负载键（`hook_event_name` / `session_id`）与 Claude 一族逐字同形，已被既有方言
+表覆盖，故**没有**往 `agent-hook-event.ts` 加任何条目。
 
 ### Copilot 的「跑过」不等于「能力可核实」
 
