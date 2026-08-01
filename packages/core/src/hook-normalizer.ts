@@ -383,11 +383,37 @@ function buildTimeline(
   return timeline
 }
 
+/**
+ * 把嵌在信封里的事件专属字段摊平到负载顶层。
+ *
+ * Hermes 的 shell-hook wire 协议是**两层**的：顶层只有 `hook_event_name`/`tool_name`/`tool_input`/
+ * `session_id`/`cwd` 五个固定键，其余每一个事件专属 kwarg 都被塞进 `extra` 子对象（本机
+ * `agent/shell_hooks.py` 的 `_serialize_payload`：`extras = {k: v for k, v in kwargs.items()
+ * if k not in _TOP_LEVEL_PAYLOAD_KEYS}`）。也就是说 `post_tool_call` 的 `status`、`result`、
+ * `error_message`、`tool_call_id` **全在 `extra` 里**。
+ *
+ * 不解包的后果实测有三条，且三条同时发生：工具失败被画成成功（`status: 'error'` 读不到）、工具输出
+ * 全丢（`result` 读不到）、以及 `pre_tool_call` 与 `post_tool_call` 在时间轴上并排两行而不是收敛成
+ * 一条（`tool_call_id` 读不到，id 退化成按 receipt 序号编）。
+ *
+ * 在这里解包一次、而不是给每个读取点加一串 `extra.x` 变体：`extra` 是**信封结构**而非某个字段的别名，
+ * 下游那十几处读取（tool 名、入参、结果、成败、id、native handle、用量）没有一处需要知道这件事。
+ * 顶层同名键优先——顶层是 Hermes 自己声明的固定位，`extra` 只补它没说的那些。
+ */
+const NESTED_PAYLOAD_KEY = 'extra'
+
+function flattenNestedPayload(payload: Record<string, unknown>): Record<string, unknown> {
+  const nested = payload[NESTED_PAYLOAD_KEY]
+  if (typeof nested !== 'object' || nested === null || Array.isArray(nested)) return payload
+  // 顶层键后写，故顶层胜出。`extra` 本身留着：它对诊断有用，且下游没有任何读取点认这个名字。
+  return { ...(nested as Record<string, unknown>), ...payload }
+}
+
 export function normalizeNativeHook(
   specification: AgentNativeHookSpecification,
   envelope: NativeHookEnvelope
 ): NormalizedHookEvent {
-  const payload = envelope.payload ?? {}
+  const payload = flattenNestedPayload(envelope.payload ?? {})
   // 事件名可能在信封上，也可能藏在负载的三个拼法之一里——读取顺序由 agent-hook-event.ts 唯一持有，
   // 与 hook 子进程共用同一份，故不会再出现「一边认得出、另一边读成 null」。读不出时如实记为 'unknown'。
   const eventName = resolveHookEventName(envelope.eventName, payload) ?? 'unknown'
