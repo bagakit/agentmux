@@ -1,4 +1,5 @@
 import type { AppConfig } from '../../../shared/contracts'
+import { MAX_FANOUT_LANES } from '../../../shared/fanout-limits'
 
 /**
  * Turning what the user typed into a fan-out request — or saying why it is not one yet.
@@ -14,11 +15,6 @@ export type FanOutRequestDraft =
   | { kind: 'fanout'; count: number; baseName: string; prompt: string; executorIds: string[] }
   | { kind: 'single'; prompt: string; executorId: string }
   | { kind: 'invalid'; reason: string }
-
-/** Beyond this a bake-off stops being reviewable by a person, and N agents on one machine stop being a
- *  fair comparison. The same ceiling main enforces — stated here so the surface can refuse early with a
- *  readable reason instead of round-tripping to be rejected. */
-export const MAX_FANOUT_LANES = 8
 
 /**
  * Derive the branch-name stem from the prompt. The stem is what identifies the group afterwards, so it

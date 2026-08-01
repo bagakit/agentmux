@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { MAX_FANOUT, planFanOut, laneDirectoryName } from '../src/main/fanout-plan.js'
+import { planFanOut, laneDirectoryName } from '../src/main/fanout-plan.js'
+import { MAX_FANOUT_LANES } from '../src/shared/fanout-limits.js'
 
 function request(overrides: Partial<Parameters<typeof planFanOut>[0]> = {}) {
   return {
@@ -64,11 +65,11 @@ describe('fan-out plan', () => {
 
   it('never lets two lanes of one plan claim the same name', () => {
     // The lanes claimed within this call must also be taken into account, not just pre-existing ones.
-    const plan = planFanOut(request({ count: MAX_FANOUT }))
+    const plan = planFanOut(request({ count: MAX_FANOUT_LANES }))
     if (plan.kind !== 'fanout') throw new Error('expected fanout')
 
-    expect(new Set(plan.lanes.map((lane) => lane.branch)).size).toBe(MAX_FANOUT)
-    expect(new Set(plan.lanes.map((lane) => lane.path)).size).toBe(MAX_FANOUT)
+    expect(new Set(plan.lanes.map((lane) => lane.branch)).size).toBe(MAX_FANOUT_LANES)
+    expect(new Set(plan.lanes.map((lane) => lane.path)).size).toBe(MAX_FANOUT_LANES)
   })
 
   it('calls one lane what it is — an ordinary single launch, not a fan-out', () => {
@@ -79,9 +80,9 @@ describe('fan-out plan', () => {
 
   it('refuses past the ceiling rather than silently trimming', () => {
     // Handing someone 8 lanes when they asked for 40 is worse than telling them the limit.
-    const plan = planFanOut(request({ count: MAX_FANOUT + 1 }))
+    const plan = planFanOut(request({ count: MAX_FANOUT_LANES + 1 }))
     expect(plan.kind).toBe('rejected')
-    if (plan.kind === 'rejected') expect(plan.reason).toContain(String(MAX_FANOUT))
+    if (plan.kind === 'rejected') expect(plan.reason).toContain(String(MAX_FANOUT_LANES))
   })
 
   it('refuses a request it cannot name or staff', () => {
