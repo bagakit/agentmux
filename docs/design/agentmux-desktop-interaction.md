@@ -341,7 +341,8 @@ Desktop 刷新或重新 Attach 时优先投影这份 Agent 语义；新的 Run `
 - **活跃/待机计数按 Provider 分类展示**。「活跃」不是状态栏自己的定义——它就是 Board 的 working 列（`sessionBoardColumn`），其余一律算待机。同一个 `running` 的 Agent 绝不能 Board 判它在跑、状态栏判它待机；照抄一份 switch 正是这种分歧的来源，所以计数调用那一个函数而不是复述它。这与关注度汇总（`summarizeAgentAttention`：谁在等我）是刻意并存的两套口径，回答的是不同问题。零 Agent 的 Provider 不占位；全闲的 Provider 压低但仍在场——消失会让"这个 Provider 总共几个"失去出处。守护：`agent-status-bar.test.tsx`。
 - **资源指标只在展开时采样**。折叠态不得触发任何进程扫描——一个常驻的全主机 `ps` 轮询会让空闲窗口持续耗电。展开后按固定周期采样，关闭即停。并发调用共享同一次进行中的采样（in-flight 去重），一次轮询风暴只产生一次子进程。
 - **一次全主机扫描，按 pid 子树归并**。为每个 Agent 单独起一个采样进程，开销随 Agent 数线性增长；正确做法是一次扫描后按 run 的 pid 归并出各自子树，共享祖先按注册顺序只归第一个，避免重复计数。
-- **只声明证据支持的口径**。输出字节速率就叫字节速率，不除以一个系数冒充 token/s——终端字节含 ANSI 转义与 TUI 重绘，与真实 token 数不成比例，一个无法验证的数字比没有这个数字更糟。真实 tokens/s 需要 Provider 原生 usage 回执，在 catalog 声明该能力并接入之前不展示。
+- **只声明证据支持的口径**。输出字节速率就叫字节速率，不除以一个系数冒充 token/s——终端字节含 ANSI 转义与 TUI 重绘，与真实 token 数不成比例，一个无法验证的数字比没有这个数字更糟。
+- **token 用量报累计量，永不报速率**。分子（token 数）必须由 Provider 自己报出：声明 `usage` 能力的 Provider 在 turn 收尾时由 hook 进程读一次自家 transcript 尾部，把这一 turn 的真实 token 数随既有回执带回（`AgentUsageCapability` / `AgentTurnUsage`，守护：`agent-usage-transcript.test.ts`、`agent-usage-capability.test.ts`；catalog 声明到 hook 环境那次注入由 `agent-usage-env-injection.test.ts` 守，断了它整条链会静默失效而其余全绿）。**而分母没有诚实的取法**：`tokens/s` 的分母（turn 墙钟时长）含用户思考、审批等待、工具执行、网络往返，是我们自己拼的、不可验证的数——真实分子除以编出来的分母，仍是编出来的数。所以接入之后也**不给任何速率**，只报「最近一个 turn」的累计量并在 UI 上明说是哪一段。这条口径的落点是**名册行**而不是状态栏：用量是每个 Agent 各自的事实，跨 Session 加总它没有意义（见上文"状态栏不重复有作用域的指标"）。三态各自不同且一态都不许塌成 0——报了用量、声明了但还没有一 turn（显示"不知道"）、根本不报用量（明说不报），守护：`agent-usage-display.test.ts`、`agent-roster.test.ts`。
 
 ### 显示名与身份
 
