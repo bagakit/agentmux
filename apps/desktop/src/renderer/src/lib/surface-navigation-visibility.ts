@@ -38,8 +38,17 @@ export function surfaceNavigationVisibility(
   const workspaceActive = Boolean(
     input.workbenchVisible && input.activeWorkspaceId === tab.workspaceId
   )
+  // 三条析取项，每条各自对应一种「没有 Topic 把它切走」：
+  //   - 现在不在任何 Topic 里（停在普通 launcher 页上），于是下面那次投影不发生；
+  //   - 这张 Tab 不属于任何 Topic，任何 Topic 活动时它都不该被藏；
+  //   - 它就属于当前这个 Topic。
+  //
+  // 这里**不再**判「不是 Scratch workspace」：上面那个三元已经让非 Scratch 的 `activeTopicId`
+  // 恒为 null，于是第一条析取项已经把整个非 Scratch 分支覆盖掉了。多写一条恒被蕴含的条件，
+  // 读的人会以为它承重、改的人会去为它编一条测不到东西的用例（本仓
+  // surviving-mutation-may-be-dead-condition 那一族）。删掉它的检测器是本模块测试里那条用普通
+  // workspace 断言 `navigationContextActive: true` 的用例——真要不覆盖，那条先红。
   const navigationContextActive = workspaceActive && (
-    !isScratchWorkspaceId(tab.workspaceId) ||
     activeTopicId === null ||
     tab.topicId === undefined ||
     tab.topicId === activeTopicId

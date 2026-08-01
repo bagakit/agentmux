@@ -219,6 +219,43 @@ describe('surfaceNavigationVisibility 的取值', () => {
       '未绑定 Topic 的 Tab 被判成上下文已离开——它的面永远等不到 TTL，是泄漏'
     ).toEqual({ navigationContextActive: true, tabVisible: false })
   })
+
+  it('Scratch 里停在未绑 Topic 的一张 Tab 上时，绑了 Topic 的隐藏 Tab 仍算上下文活着', () => {
+    // `activeTopicId === null` 那条析取项此前零覆盖：删掉它，这个文件其余 8 条**加上**三个消费者
+    // 侧的 terminal-cold-parking / surface-memory-budget / scratch-topic-layout 共 24 条全绿（实测）。
+    //
+    // 为什么 true 才是对的：activeTopicId 为 null 时下面那次投影不发生（`projected = layout`），
+    // 于是这些绑了 Topic 的 Tab **就在同一份未投影的 layout 里**，只是被别的 Tab 盖住——而
+    // navigationContextActive 的定义恰恰是「即使被别的 Tab 盖住也算上下文活着」（见实现的文件头）。
+    // 没有任何 Topic 在活动，就没有「切走了」这件事发生过。
+    //
+    // 症状与旁边那条（未绑定 Topic 的 Tab）同形，只是方向相反：在 Scratch 里只要此刻停在一张普通
+    // launcher 页上，所有隐藏的、绑了 Topic 的终端 / 编辑器会被判成「导航上下文已离开」，于是
+    // TTL 永远被挡——xterm / Monaco / BrowserView 永不冷泊、永不 release。是泄漏，不是报错。
+    const launcher = fileTab('launcher', SCRATCH_WORKSPACE_ID)
+    const bound = { ...terminalTab('bound', SCRATCH_WORKSPACE_ID), topicId: 'view:topic-a' }
+    const tabs = { [launcher.id]: launcher, [bound.id]: bound }
+    // launcher 在前，所以它是分组的活动项——activeTopicIdFromLayout 只看每个分组的活动项。
+    const layout = createWorkspaceLayout('group', [launcher.id, bound.id])
+    const input = { activeWorkspaceId: SCRATCH_WORKSPACE_ID, workbenchVisible: true }
+
+    // 前提自检之一：当前必须真的不在任何 Topic 里，否则被测的那条析取项为假，这条用例在测别的项。
+    expect(
+      activeTopicIdFromLayout(layout, tabs),
+      '有 Topic 在活动，activeTopicId === null 那条析取项为假，这条用例观察不到它'
+    ).toBeNull()
+    // 前提自检之二：被测的 Tab 必须**带着** topicId，否则 `tab.topicId === undefined` 那条先为真，
+    // 上一条用例已经守的那项会把这一条掩盖掉——两条用例就变成在测同一件事。
+    expect(
+      bound.topicId,
+      '被测 Tab 没带 topicId，tab.topicId === undefined 会先短路，这条与上一条重复'
+    ).toBe('view:topic-a')
+
+    expect(
+      surfaceNavigationVisibility(bound, layout, tabs, input),
+      '停在未绑 Topic 的页上时，绑了 Topic 的隐藏面被判成上下文已离开——它们永不冷泊，是泄漏'
+    ).toEqual({ navigationContextActive: true, tabVisible: false })
+  })
 })
 
 // ---------------------------------------------------------------------------
