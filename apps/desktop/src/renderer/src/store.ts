@@ -2899,6 +2899,28 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
     } catch (error) {
       get().reportError(error)
+    } finally {
+      // 「跳到第 N 行」是一次性的，而它的存放位置**会被复用**：key 是 `ws\0path`，确定性的。
+      // 上面那次写入排在所有失败出口之前（必须如此——已开着的文件重点一次链接也要重新跳），
+      // 而这个方法有四个失败出口（目录分支、读失败、lifetime 作废、layout 没了），任何一个
+      // 走掉都会把 target 留在盘上。症状不是报错：用户之后从文件树打开同一个文件、没要求
+      // 任何行号，EditorPane 挂载时把这条陈旧 target 消费掉，光标自己跳到上次那条失败链接
+      // 里的行。
+      //
+      // 判据只有一处，而不是在四个出口各清一次：**没有文档落地在这个 key 上，target 就不该
+      // 留着**。逐出口补清理必然漂移，而且新增第五个出口时没人会想起来
+      //（记忆 two-write-sites-need-one-projection / guard-count-exits-not-conditions）。
+      //
+      // 「有文档就不动」这一条同时罩住了并发：两次点同一个文件（`foo.ts:42` 然后 `foo.ts:99`，
+      // 第二次 join 第一次的在途请求）时，只要有一次成功，`documents[key]` 就在场，两个
+      // finally 谁都不撤——后写的那个 target 赢。此处刻意**不**比 target 的同一性：
+      // 实测加上 `!== location` 这层判断对任何时序都改变不了结果（两次都失败时撤掉是对的；
+      // 有一次成功时上面那句已经挡住了），它是多余条件，而多余条件会让下一个人以为有场景
+      // 依赖它（记忆 surviving-mutation-may-be-dead-condition）。
+      //
+      // 撤的动作走 `clearDocumentRevealTarget`——EditorPane 消费完之后调的也是它。就地再写一份
+      // delete 会让「怎么撤一个 target」有两处取值层，必然漂移。
+      if (location && !get().documents[key]) get().clearDocumentRevealTarget(key)
     }
   },
   async attachPersistedFileDocument(workspaceId, path) {
