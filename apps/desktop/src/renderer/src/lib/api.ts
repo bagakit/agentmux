@@ -277,6 +277,7 @@ const mockApi: AgentMuxDesktopApi = {
     : { ok: true, detail: 'CtxMux 0.1.0 · protocol 14' } },
   workspaces: {
     chooseLocalFolder: async () => null,
+    rebindLocalFolder: async () => null,
     add: async (input) => {
       const item = {
         id: crypto.randomUUID(),

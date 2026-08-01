@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts.js'
 import { workingAgentCount } from '../src/renderer/src/lib/project-board.js'
+import { projectWorkspaces, removeProjectWorkspaces } from '../src/renderer/src/lib/workspace-projects.js'
 
 vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
@@ -276,6 +277,20 @@ describe('Project Rail selection and running signals', () => {
     expect(scratch).toContain('brand-icon')
     expect(scratch).not.toContain('lucide-sparkles')
   })
+
+  it('removes a whole Project view without touching Scratch or unrelated registrations', () => {
+    const workspaces = [
+      ...config.workspaces,
+      { id: 'project-a-wt', name: 'feature', hostId: 'local', path: '/alpha/.worktrees/feature', repoPath: '/alpha', kind: 'worktree' as const, branch: 'feature' }
+    ]
+    const projects = projectWorkspaces(workspaces)
+    const alpha = projects.find((project) => project.name === 'Alpha')!
+    expect(removeProjectWorkspaces(workspaces, alpha).map((workspace) => workspace.id)).toEqual([
+      '__scratch__',
+      'project-b',
+      'project-c'
+    ])
+  })
 })
 
 describe('Project Rail style contract', () => {
@@ -357,9 +372,9 @@ describe('Project Rail 的分组与嵌套', () => {
     // 密度合同要求项目行**一行只占一行**，缩进不能把它撑成两行。
     useWorkspaces([['outer', '/w/outer'], ['inner', '/w/outer/inner'], ['other', '/w/other']])
     const markup = renderRail()
-    expect(depthOf(exactRow(markup, 'outer'))).toBe(0)
-    expect(depthOf(exactRow(markup, 'inner'))).toBe(1)
-    expect(depthOf(exactRow(markup, 'other'))).toBe(0)
+    expect(depthOf(exactRow(markup, 'outer'))).toBe(1)
+    expect(depthOf(exactRow(markup, 'inner'))).toBe(2)
+    expect(depthOf(exactRow(markup, 'other'))).toBe(1)
     // 注入的自定义属性必须在样式表里有默认值，否则未注入的行整条 padding 失效。
     expect(chrome).toContain('--rail-depth: 0')
     expect(chrome).toContain('var(--rail-depth)')
@@ -369,8 +384,8 @@ describe('Project Rail 的分组与嵌套', () => {
     // `…/agentmux-preview` 以 `…/agentmux` 开头但不在它里面。裸 startsWith 会把它错判成子节点。
     useWorkspaces([['agentmux', '/proj/agentmux'], ['agentmux-preview', '/proj/agentmux-preview']])
     const markup = renderRail()
-    expect(depthOf(exactRow(markup, 'agentmux'))).toBe(0)
-    expect(depthOf(exactRow(markup, 'agentmux-preview'))).toBe(0)
+    expect(depthOf(exactRow(markup, 'agentmux'))).toBe(1)
+    expect(depthOf(exactRow(markup, 'agentmux-preview'))).toBe(1)
   })
 
   it('renders the group header as a disclosure control, not as a selectable project row', () => {
