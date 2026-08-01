@@ -319,6 +319,7 @@ function spyStore(overrides: Partial<WorkbenchShortcutStore> = {}): WorkbenchSho
     activateTab: (w, g, t) => calls.push(`activateTab:${w}:${g}:${t}`),
     closeRegion: (w, t, r) => { calls.push(`closeRegion:${w}:${t}:${r}`) },
     requestCloseTab: (w, g, t) => calls.push(`requestCloseTab:${w}:${g}:${t}`),
+    requestCloseRegion: (w, t, r) => calls.push(`requestCloseRegion:${w}:${t}:${r}`),
     splitRegion: (w, t, r, d) => calls.push(`splitRegion:${w}:${t}:${r}:${d}`),
     focusRegion: (w, t, r) => calls.push(`focusRegion:${w}:${t}:${r}`),
     ...overrides
@@ -343,8 +344,11 @@ describe('接线：handleWorkbenchShortcut 把每条键接到 store', () => {
     expect(store.calls).toEqual(['requestCloseTab:ws:g:t2'])
   })
 
-  it('Cmd+W 在多 Region Tab 上只关活动格，不关整张 Tab', () => {
-    // 分屏后的 Tab（t2 分成左右两格，活动在右格 r2R）：Cmd+W 关的是那一格，不是整张 Tab。
+  it('Cmd+W 在多 Region Tab 上投「关这一格」的意图，不裸调 closeRegion（脏检查要留在组件确认流里）', () => {
+    // 分屏后的 Tab（t2 分成左右两格，活动在右格 r2R）：Cmd+W 关的是那一格，不是整张 Tab。但不能裸调
+    // closeRegion——那条路没有脏检查，会静默弃掉那一格未保存的编辑器改动，而鼠标点这一格的 X 会先弹
+    // 「未保存确认」。同一个「关这一格」的概念只能有一个决定出口，于是键盘也投意图、交给组件跑与 X 相同的
+    // dirty→确认→closeRegion。把这行改回 `void store.closeRegion(...)`（只接了一侧出口），这条断言就红。
     const splitTab: WorkbenchTab = {
       id: 't2',
       workspaceId: 'ws',
@@ -367,7 +371,8 @@ describe('接线：handleWorkbenchShortcut 把每条键接到 store', () => {
     const store = spyStore({ tabs: { t2: splitTab } })
     const handled = handleWorkbenchShortcut(event({ key: 'w', metaKey: true }), true, store)
     expect(handled).toBe(true)
-    expect(store.calls).toEqual(['closeRegion:ws:t2:r2R'])
+    // 只投意图，且绝不出现裸 closeRegion（回退到裸调时这里立刻红）。
+    expect(store.calls).toEqual(['requestCloseRegion:ws:t2:r2R'])
   })
 
   it('Cmd+D 调 splitRegion，方向原样带过去', () => {

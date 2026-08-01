@@ -71,6 +71,8 @@ export const COPILOT_HOOK_EVENTS = [
  * 「等我点一下」和「正在干活」在界面上长得一模一样（与 Cursor 的两个授权门同一判断）。
  */
 export const COPILOT_HOOKS: AgentNativeHookSpecification = {
+  // 事件名靠 `--event` 旗标送达（负载不带任何事件名键，见 createCopilotManagedHookPlan 的说明）。
+  eventNameSource: { kind: 'flag' },
   rules: [
     // 授权门：Copilot 正等一个决定。
     { events: ['permissionRequest'], state: 'waiting' },
@@ -137,12 +139,28 @@ function copilotHome(env?: Readonly<Record<string, string>>): string {
  *
  * `timeoutSec`（不是 `timeout`）：这个 CLI 的字段名带单位后缀，写 `timeout` 会被剥掉，然后整条 hook
  * 用它自己的默认超时——不是报错，是静默换了行为。
+ *
+ * **每条命令都带 `--event <eventName>`**：这是本 task 修的真缺陷。Copilot 的负载键两侧都是 camelCase
+ * （`toolName`/`toolArgs`/`toolResult`），**不含** `hook_event_name`/`hookEventName`/`eventName` 三拼法里
+ * 的任何一个（本机 runtime 实测的负载形状，见 `test/providers/copilot.test.ts` 的 fixture）。于是它既不像
+ * claude 那样靠负载自带事件名，也此前没有 `--event`——`agentmux-hook.js` 子进程三条来源全落空，
+ * `eventName` 解析成 null，整条 POST 被 `if (url && token && eventName)` 静默跳过：Copilot 的 Agent
+ * 「装上了但永远不动」（时间线空、状态永不变、无法 resume），而所有测试照旧全绿。
+ *
+ * 修法与 cursor/antigravity 同构：把事件名从配置侧用 `--event` 显式传给子进程。负载既然不带事件名，
+ * 这是唯一可行的来源（不能编一个负载里不存在的键）。**一处未能在本机闭环的经验事实**：Copilot 的 CLI
+ * bundle 不在本机（只有 `config.json` 与日志，无 prebuilds/runtime），所以没法把「命令串尾部追加
+ * `--event` 后仍被原样执行」这一步再跑一遍捕获。但它落在 antigravity 已经验证过的**同一个**
+ * `{type:'command', command}` 形状上——antigravity 正是往这个形状的 command 尾部追加 `--event`（见
+ * antigravity.ts），而 payload 通道对 Copilot 是明确关死的，故这是仅有且方向正确的修法。
  */
 export function createCopilotManagedHookPlan(env?: Readonly<Record<string, string>>): AgentManagedHookPlan {
   const command = managedHookCommand('copilot')
   const hooks = Object.fromEntries(COPILOT_HOOK_EVENTS.map((eventName) => [eventName, [{
     ...(eventName === 'preToolUse' || eventName === 'postToolUse' ? { matcher: '.*' } : {}),
-    hooks: [{ type: 'command', command, timeoutSec: 10 }]
+    // 事件名靠 `--event` 传：Copilot 的负载里没有任何事件名键（见文件头的实测记录），少了它每条事件
+    // 到子进程都解析不出事件名、整条 POST 被静默丢弃。与 antigravity/cursor 同一修法。
+    hooks: [{ type: 'command', command: `${command} --event ${eventName}`, timeoutSec: 10 }]
   }]]))
   return {
     providerId: 'copilot',

@@ -11,6 +11,7 @@ import {
   splitMarkdownFileReferences,
   type MarkdownFileReference
 } from '../lib/markdown-file-reference'
+import { parseHttpLinkUrl } from '../lib/open-destination'
 
 // Rendering an agent's answer as prose.
 //
@@ -159,19 +160,31 @@ function Inline({ nodes, context }: { nodes: InlineNode[]; context: InlineContex
             </button>
           )
         }
+        // Only an http(s) URL becomes an actionable link. GFM autolinking turns a bare email in agent
+        // prose into a `mailto:` node, and an agent can also write `file:`/`vscode:`/`javascript:`
+        // explicitly — none of those is something this surface can open, so making them clickable only
+        // yields a button that always errors on click. The Terminal already declines to make a non-http
+        // URI actionable at all (`parseHttpLinkUrl`); the conversation must judge the same way through
+        // the same exit, so the two surfaces cannot drift into treating one scheme differently. A
+        // rejected href renders as its own text, exactly as the plain-text path would have shown it.
+        const httpHref = parseHttpLinkUrl(node.href)
+        if (!httpHref) {
+          return <Fragment key={key}><Inline nodes={node.children} context={context} /></Fragment>
+        }
         return (
           // A button, not an anchor: an <a href> inside untrusted output is a navigation escape hatch out
-          // of the renderer. Main owns the decision and normalises the URL, so a hostile scheme is
-          // refused there rather than trusted here. The click hands the URL and its modifier/pointer
-          // state up to the host, which raises the same destination menu the Terminal does (or, with
-          // Cmd/Ctrl held, opens the system browser directly through the one shared judgement).
+          // of the renderer. The click hands the URL and its modifier/pointer state up to the host, which
+          // raises the same destination menu the Terminal does (or, with Cmd/Ctrl held, opens the system
+          // browser directly through the one shared judgement). The scheme is already narrowed to http(s)
+          // above, and the Store and Main each refuse a non-http(s) URL again downstream — so nothing
+          // here is the sole guard, and no anchor can navigate away from the renderer.
           <button
             key={key}
             type="button"
             className="md-link"
-            title={node.href}
+            title={httpHref}
             onClick={(event) =>
-              context.openHttpLink(node.href, {
+              context.openHttpLink(httpHref, {
                 metaKey: event.metaKey,
                 ctrlKey: event.ctrlKey,
                 clientX: event.clientX,

@@ -505,66 +505,15 @@ function WorkbenchRegionNode({
   nativeSurfacesVisible: boolean
   interactiveResize: boolean
 }) {
-  const focusRegion = useAppStore((state) => state.focusRegion)
-  const closeRegion = useAppStore((state) => state.closeRegion)
-  const dirtyDocuments = useAppStore((state) => state.dirtyDocuments)
-  const [confirmingClose, setConfirmingClose] = useState(false)
   if (node.type === 'leaf') {
-    const surface = tab.regions[node.regionId]
-    if (!surface) return null
-    const canClose = Object.keys(tab.regions).length > 1
-    const dirty = surface.kind === 'file' && Boolean(
-      dirtyDocuments[documentKey(surface.workspaceId, surface.path)]
-    )
     return (
-      <RegionContextMenu
-        regionId={node.regionId}
-        // 只有承载 Agent 的一格才有语义身份可寻址。
-        agentSessionId={surface.kind === 'agent' ? surface.sessionId : null}
-        writeClipboardText={(text) => api.ui.writeClipboardText(text)}
-      >
-      <section
-        className={`workbench-region ${tab.layout.activeRegionId === node.regionId ? 'workbench-region--active' : ''}`}
-        data-workbench-region-id={node.regionId}
-        onPointerDown={() => focusRegion(tab.workspaceId, tab.id, node.regionId)}
-      >
-        <SurfaceContent
-          surface={surface}
-          tabId={tab.id}
-          groupId={groupId}
-          nativeSurfacesVisible={nativeSurfacesVisible}
-          interactiveResize={interactiveResize}
-        />
-        {canClose ? (
-          <button
-            type="button"
-            className="workbench-region__close"
-            title="Close split"
-            aria-label="Close split"
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={(event) => {
-              event.stopPropagation()
-              if (dirty) setConfirmingClose(true)
-              else void closeRegion(tab.workspaceId, tab.id, node.regionId)
-            }}
-          >
-            <X size={12} />
-          </button>
-        ) : null}
-        <ConfirmationDialog
-          open={confirmingClose}
-          title="Discard unsaved changes?"
-          description="Closing this split will discard changes that have not been saved."
-          subject={surface.kind === 'file' ? surface.path : 'Split'}
-          confirmLabel="Discard & Close"
-          onCancel={() => setConfirmingClose(false)}
-          onConfirm={() => {
-            setConfirmingClose(false)
-            void closeRegion(tab.workspaceId, tab.id, node.regionId)
-          }}
-        />
-      </section>
-      </RegionContextMenu>
+      <WorkbenchRegionLeaf
+        node={node}
+        tab={tab}
+        groupId={groupId}
+        nativeSurfacesVisible={nativeSurfacesVisible}
+        interactiveResize={interactiveResize}
+      />
     )
   }
   return (
@@ -576,6 +525,108 @@ function WorkbenchRegionNode({
       nativeSurfacesVisible={nativeSurfacesVisible}
       interactiveResize={interactiveResize}
     />
+  )
+}
+
+// 一格（leaf）单独成组件：消费键盘关格意图的 effect、以及「关这一格要不要确认」的决定，都得跑在组件顶层
+// hook 里——它们够不着 node.type 分支之后。拆出来后这些 hook 无条件执行，套路同 WorkbenchRegionBranch。
+function WorkbenchRegionLeaf({
+  node,
+  tab,
+  groupId,
+  nativeSurfacesVisible,
+  interactiveResize
+}: {
+  node: Extract<WorkbenchRegionLayoutNode, { type: 'leaf' }>
+  tab: WorkbenchTab
+  groupId: string
+  nativeSurfacesVisible: boolean
+  interactiveResize: boolean
+}) {
+  const focusRegion = useAppStore((state) => state.focusRegion)
+  const closeRegion = useAppStore((state) => state.closeRegion)
+  const dirtyDocuments = useAppStore((state) => state.dirtyDocuments)
+  const closeRegionRequest = useAppStore((state) => state.closeRegionRequest)
+  const clearCloseRegionRequest = useAppStore((state) => state.clearCloseRegionRequest)
+  const [confirmingClose, setConfirmingClose] = useState(false)
+  const surface = tab.regions[node.regionId]
+  const canClose = Object.keys(tab.regions).length > 1
+  const dirty = surface?.kind === 'file' && Boolean(
+    dirtyDocuments[documentKey(surface.workspaceId, surface.path)]
+  )
+
+  // 关这一格的唯一决定出口：脏就先弹「未保存确认」，否则直接关。鼠标点 X 与键盘 Cmd+W（经 requestCloseRegion
+  // 意图落到这里）都走它——「关这一格要不要确认」只此一处判定，键盘不会再像从前那样绕开脏检查静默丢改动。
+  function requestRegionClose(): void {
+    if (dirty) setConfirmingClose(true)
+    else void closeRegion(tab.workspaceId, tab.id, node.regionId)
+  }
+
+  // 消费键盘关格意图：只有意图点名的这张 Tab 的这一格才响应，跑与 X 相同的决定，然后清掉意图。本仓库
+  // renderToStaticMarkup 不跑 effect，所以这条接线的断言在 store 层（意图投出/清除）与判定层
+  // （handleWorkbenchShortcut 多格时调 requestCloseRegion）各自守，见对应测试。
+  useEffect(() => {
+    if (
+      !closeRegionRequest ||
+      closeRegionRequest.tabId !== tab.id ||
+      closeRegionRequest.workspaceId !== tab.workspaceId ||
+      closeRegionRequest.regionId !== node.regionId
+    ) return
+    clearCloseRegionRequest(closeRegionRequest.nonce)
+    requestRegionClose()
+    // requestRegionClose 每次渲染新建，不进依赖；只由意图对象驱动。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [closeRegionRequest, tab.id, tab.workspaceId, node.regionId, clearCloseRegionRequest])
+
+  if (!surface) return null
+  return (
+    <RegionContextMenu
+      regionId={node.regionId}
+      // 只有承载 Agent 的一格才有语义身份可寻址。
+      agentSessionId={surface.kind === 'agent' ? surface.sessionId : null}
+      writeClipboardText={(text) => api.ui.writeClipboardText(text)}
+    >
+    <section
+      className={`workbench-region ${tab.layout.activeRegionId === node.regionId ? 'workbench-region--active' : ''}`}
+      data-workbench-region-id={node.regionId}
+      onPointerDown={() => focusRegion(tab.workspaceId, tab.id, node.regionId)}
+    >
+      <SurfaceContent
+        surface={surface}
+        tabId={tab.id}
+        groupId={groupId}
+        nativeSurfacesVisible={nativeSurfacesVisible}
+        interactiveResize={interactiveResize}
+      />
+      {canClose ? (
+        <button
+          type="button"
+          className="workbench-region__close"
+          title="Close split"
+          aria-label="Close split"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation()
+            requestRegionClose()
+          }}
+        >
+          <X size={12} />
+        </button>
+      ) : null}
+      <ConfirmationDialog
+        open={confirmingClose}
+        title="Discard unsaved changes?"
+        description="Closing this split will discard changes that have not been saved."
+        subject={surface.kind === 'file' ? surface.path : 'Split'}
+        confirmLabel="Discard & Close"
+        onCancel={() => setConfirmingClose(false)}
+        onConfirm={() => {
+          setConfirmingClose(false)
+          void closeRegion(tab.workspaceId, tab.id, node.regionId)
+        }}
+      />
+    </section>
+    </RegionContextMenu>
   )
 }
 

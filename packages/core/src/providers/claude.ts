@@ -39,6 +39,9 @@ export const CLAUDE_HOOK_EVENTS = [
 ] as const
 
 export const CLAUDE_HOOKS: AgentNativeHookSpecification = {
+  // 事件名随负载到达：Claude 一族的 stdin 负载带 `hook_event_name`（这也是 claude/codex 的配置都不带
+  // `--event` 却照样能用的原因——事件名不在配置侧、在投递侧）。
+  eventNameSource: { kind: 'payload', payloadKey: 'hook_event_name' },
   rules: [
     { events: ['PermissionRequest'], state: 'waiting' },
     { events: ['PreToolUse'], toolNames: ['askuserquestion'], state: 'waiting' },

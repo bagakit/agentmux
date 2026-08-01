@@ -156,7 +156,11 @@ describe('markdown file references', () => {
       }))
 
       expect(markup).toContain('title="src/parse.ts"')
-      expect(markup).toContain('title="https://example.com"')
+      // The http link is put through the shared scheme gate (`parseHttpLinkUrl`), the same one the
+      // Terminal uses — so the button carries and opens that gate's NORMALISED form, which is what the
+      // Store would open anyway. `new URL('https://example.com')` canonicalises the bare host with a
+      // trailing slash, so that is the title, not the raw text.
+      expect(markup).toContain('title="https://example.com/"')
       // The external one keeps the plain link class; only the file one carries the file modifier.
       expect((markup.match(/md-link--file/gu) ?? []).length).toBe(1)
     })

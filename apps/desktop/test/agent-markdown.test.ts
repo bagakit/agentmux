@@ -307,6 +307,53 @@ describe('agent markdown parser', () => {
     expect(() => onClick(CLICK)).not.toThrow()
   })
 
+  // A non-http(s) scheme must never become an actionable link in agent prose. The Terminal already
+  // refuses to make such a URI clickable (`parseHttpLinkUrl`); the conversation has to make the SAME
+  // call, or the two surfaces treat one scheme differently. Behavioural, not textual: it renders the
+  // real component and checks the DERIVED tree, so deleting the scheme gate — which puts the erroring
+  // button back — turns these red. Every case below is one an agent actually produces: an explicit
+  // hostile/opaque scheme, and a bare email that GFM autolinking silently rewrites to `mailto:`.
+  it.each([
+    ['[mail](mailto:alice@example.com)', 'mail'],
+    ['[x](javascript:alert(1))', 'x'],
+    ['[f](file:///etc/passwd)', 'f'],
+    ['[v](vscode://file/etc/hosts)', 'v'],
+    // GFM autolinks a bare email inside markdown into a mailto: link node — the same dead button, but
+    // reached without the agent writing any link syntax at all.
+    ['# Support\n\nEmail alice@example.com for help.', 'alice@example.com']
+  ])('never makes a non-http(s) scheme clickable: %s', (content, visibleText) => {
+    const openHttpLink = vi.fn()
+    const tree = renderTree(createElement(AgentMarkdown, { content, openHttpLink }) as ReactElement)
+
+    // No md-link button at all: a mailto:/file:/javascript:/vscode: href is not something this surface
+    // can open, so a button here would only ever error on click. If the gate is removed the button
+    // comes back and this fails.
+    expect(findByClass(tree, 'md-link')).toBeNull()
+    // The words still reach the reader — the rejected link degrades to its own text, not to nothing.
+    expect(renderToStaticMarkup(createElement(AgentMarkdown, { content, openHttpLink })))
+      .toContain(visibleText)
+    // And with no actionable button there is no path to the open seam.
+    expect(openHttpLink).not.toHaveBeenCalled()
+  })
+
+  it('still makes an http(s) link — including a GFM-autolinked bare URL — clickable', () => {
+    // The other side of the same gate: narrowing to http(s) must not also kill the links that ARE
+    // openable. A plain URL an agent typed autolinks to http:// and stays a working button.
+    const openHttpLink = vi.fn()
+    const button = findByClass(
+      renderTree(createElement(AgentMarkdown, {
+        content: '# Docs\n\nvisit www.example.com now',
+        openHttpLink
+      }) as ReactElement),
+      'md-link'
+    )
+    expect(button, 'expected the autolinked http URL to remain an md-link button').not.toBeNull()
+    ;(button!.props.onClick as (event: LinkClickModifiers) => void)(CLICK)
+    // GFM normalises the bare host to an http URL, and that normalised URL is what reaches the seam.
+    expect(openHttpLink).toHaveBeenCalledTimes(1)
+    expect(openHttpLink).toHaveBeenCalledWith('http://www.example.com/', CLICK)
+  })
+
   it('leaves plain prose exactly as written', () => {
     // Running a parser over text that was never markdown risks reshaping someone's sentence.
     const content = 'I changed the retry logic in the uploader. It now backs off.'

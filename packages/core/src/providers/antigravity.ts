@@ -13,6 +13,8 @@ export const ANTIGRAVITY_HOOK_EVENTS = [
 ] as const
 
 export const ANTIGRAVITY_HOOKS: AgentNativeHookSpecification = {
+  // 事件名靠 `--event` 旗标送达（见下方 createAntigravityManagedHookPlan 往 command 尾部追加 --event）。
+  eventNameSource: { kind: 'flag' },
   rules: [
     { events: ['PreToolUse'], toolNames: ['ask_question', 'ask_permission', 'request_user_input', 'askuserquestion'], state: 'waiting' },
     { events: ['Stop'], state: 'done' },

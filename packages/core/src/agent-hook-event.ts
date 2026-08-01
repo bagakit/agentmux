@@ -27,6 +27,16 @@ import type { AgentHookLifecycleEvent } from './types.js'
 export const HOOK_EVENT_NAME_PAYLOAD_KEYS = ['hook_event_name', 'hookEventName', 'eventName'] as const
 
 /**
+ * 一个 Provider 的负载里真正带事件名的那个键，取值只能是上面三拼法之一。
+ *
+ * 收成一个类型是为了让「事件名来源声明」在编译期就受这份 SSOT 约束：某 Provider 声明它靠
+ * `hookEventName` 送事件名，而这个键哪天从上面的清单里被删，那个 Provider 文件就编不过——投递侧
+ * 读不到、配置侧却还声称在用，正是本仓「两个拼法面」教训里那种「装了不认」。编译期挡一层，
+ * 运行时的守卫再钉一层（vitest 只转译不查类型，单靠类型会漏）。
+ */
+export type HookEventNamePayloadKey = (typeof HOOK_EVENT_NAME_PAYLOAD_KEYS)[number]
+
+/**
  * 一个 Provider 的方言声明：它把自己的原始事件名映射到 Core canonical 生命周期事件。
  *
  * **按 Provider 分块而不是一张全局表**，是为了让「新接一个 Provider」只动它自己的模块。全局表会让

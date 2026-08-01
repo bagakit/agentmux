@@ -52,6 +52,9 @@ export const CURSOR_HOOK_EVENTS = [
  * 不靠 hook 上报——所以这里如实不声明，避免把一个恢复不了的 handle 存成「可恢复」。
  */
 export const CURSOR_HOOKS: AgentNativeHookSpecification = {
+  // 事件名靠 `--event` 旗标送达：Cursor 的负载里没有 `hook_event_name`（本机 bundle 实测，见
+  // createCursorManagedHookPlan）。少了它每条事件到 Core 都是 'unknown'。
+  eventNameSource: { kind: 'flag' },
   rules: [
     // 授权门：Cursor 正等一个决定。
     { events: ['beforeShellExecution', 'beforeMCPExecution'], state: 'waiting' },

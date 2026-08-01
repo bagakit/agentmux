@@ -230,6 +230,11 @@ type AppState = {
   // WorkspaceWorkbench），所以窗口监听只投一个意图，活动 Tab 组件读到它就跑自己既有的 requestTabsClose
   // （与鼠标点 X 同一条路），跑完清掉。同 documentRevealTargets 的 consume-and-clear 套路。
   closeTabRequest: { workspaceId: string; tabGroupId: string; tabId: string; nonce: number } | null
+  // 键盘请求关某一格 Region 的「意图」——理由同 closeTabRequest：那格的未保存确认（dirty→确认对话框）
+  // 只活在承载它的 WorkbenchRegionNode 里，与鼠标点这一格的 X 是同一个决定出口。键盘层够不着那份状态，
+  // 于是窗口监听只投意图，命中的那一格读到就跑自己既有的确认流，跑完清掉。裸调 closeRegion 会静默弃掉
+  // 未存改动——鼠标点 X 不会那样。
+  closeRegionRequest: { workspaceId: string; tabId: string; regionId: string; nonce: number } | null
   workspaceFileRevisions: Record<string, number>
   fileExplorerStates: Record<string, FileExplorerViewState | undefined>
   viewModes: Record<string, ViewMode>
@@ -329,6 +334,9 @@ type AppState = {
   // 键盘关 Tab 的入口：只投意图，真正的关闭（含确认）由活动 Tab 组件消费。见 closeTabRequest 状态注释。
   requestCloseTab(workspaceId: string, tabGroupId: string, tabId: string): void
   clearCloseTabRequest(nonce: number): void
+  // 键盘关某一格的入口：只投意图，含未保存确认的真正关闭由承载该格的组件消费。见 closeRegionRequest 注释。
+  requestCloseRegion(workspaceId: string, tabId: string, regionId: string): void
+  clearCloseRegionRequest(nonce: number): void
   updateRegionSplitRatio(workspaceId: string, tabId: string, nodePath: string, ratio: number): void
   updateSplitRatio(workspaceId: string, nodePath: string, ratio: number): void
   setViewMode(sessionId: string, mode: ViewMode): void
@@ -1350,6 +1358,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   layouts: {},
   closingWorkbenchViews: {},
   closeTabRequest: null,
+  closeRegionRequest: null,
   workspaceFileRevisions: {},
   fileExplorerStates: {},
   viewModes: {},
@@ -2437,6 +2446,22 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   clearCloseTabRequest(nonce) {
     // 只清掉自己消费的那一条：若清的瞬间已被更晚一次按键覆盖成新 nonce，别把新意图也抹掉。
     set((state) => (state.closeTabRequest?.nonce === nonce ? { closeTabRequest: null } : state))
+  },
+  requestCloseRegion(workspaceId, tabId, regionId) {
+    // 只投意图，不在这里关：真正的关闭（含未保存确认）在承载该格的组件里，与鼠标点这一格的 X 同一条路。
+    // nonce 让「连按两次 Cmd+W 关同一格」也能各触发一次——同一 regionId 重复投递不会因对象相等被 selector 忽略。
+    set((state) => ({
+      closeRegionRequest: {
+        workspaceId,
+        tabId,
+        regionId,
+        nonce: (state.closeRegionRequest?.nonce ?? 0) + 1
+      }
+    }))
+  },
+  clearCloseRegionRequest(nonce) {
+    // 只清掉自己消费的那一条：若清的瞬间已被更晚一次按键覆盖成新 nonce，别把新意图也抹掉。
+    set((state) => (state.closeRegionRequest?.nonce === nonce ? { closeRegionRequest: null } : state))
   },
   updateRegionSplitRatio(workspaceId, tabId, nodePath, ratio) {
     const tab = get().tabs[tabId]

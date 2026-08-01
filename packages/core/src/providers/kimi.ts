@@ -23,6 +23,13 @@ export const KIMI_HOOK_EVENTS = [
 ] as const
 
 export const KIMI_HOOKS: AgentNativeHookSpecification = {
+  // 事件名随负载到达：Kimi 每条事件都写 `hook_event_name`（本机第一方源码实测：`hooks/events.py`）。
+  // 所以它虽不带 `--event`、也不注入 env，子进程仍解析得出事件名。
+  //
+  // 注意这条声明目前**无人守**：本文件的两面判据（声明↔安装计划、投递端到端）都只枚举
+  // explicit-managed，而 Kimi 是 unmanaged——AgentMux 不写它的配置，没有安装计划可比对。这个边界
+  // 在 test/provider-event-name-source.test.ts 里被显式钉住（清单里恰好只有 kimi），改了会红。
+  eventNameSource: { kind: 'payload', payloadKey: 'hook_event_name' },
   rules: [
     // 两种收尾都算 done：正常完成与失败收尾。少任何一条都会卡在 working。Kimi 没有第三种
     // （grok 的 `stop_cancelled` 在这里不存在，别照抄）。

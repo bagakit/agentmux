@@ -22,6 +22,8 @@ export const CODEX_HOOK_EVENTS = [
 ] as const
 
 export const CODEX_HOOKS: AgentNativeHookSpecification = {
+  // 事件名随负载到达：与 Claude 同族，stdin 负载带 `hook_event_name`。
+  eventNameSource: { kind: 'payload', payloadKey: 'hook_event_name' },
   rules: [
     { events: ['PermissionRequest'], state: 'waiting' },
     { events: ['PreToolUse'], toolNames: ['request_user_input', 'askuserquestion'], state: 'waiting' },
