@@ -249,6 +249,47 @@ export function addTab(layout: WorkspaceLayout, groupId: string, tabId: string):
   }
 }
 
+/**
+ * 与 {@link addTab} 同一件事，但挂不上时明确交回 `null`。
+ *
+ * `addTab` 挂不上时原样返回 layout——作为纯 reducer 这是正当的，但调用方若把 Tab 记录写进
+ * `state.tabs` 再把这个返回值写回 `state.layouts`，那条 Tab 就进了 tabs 而**不在任何分组的
+ * `tabOrder` 里**：一个永不显示、永不可关的孤儿，且全程零报错。实测（`launchAgent` /
+ * `createBrowser`，无 launcher 归属、`tabGroupId` 指向一个已不存在的分组）：抛出的是 `null`
+ * 而 `state.tabs` 多出一条孤儿记录，用户点了「启动」什么都没发生，整套测试零红。
+ *
+ * 判据取**后置条件**而不是 `next === layout` 的身份比较：后者认不出「Tab 已在别处、
+ * `activateTab` 恰好返回同一个对象」这种正常情形，也会随 reducer 内部实现漂移。「调用之后这条
+ * Tab 必须属于某个分组」才是这里唯一在乎的不变量，与怎么实现无关。
+ *
+ * 这个函数是那条判定在整个 store 里的**唯一**落点，{@link addTabOrThrow} 只是它的薄壳。
+ * 谁用哪个取决于挂不上时能做什么，而不是取决于喜好：
+ *   - 能直接抛的 async 动作用 `addTabOrThrow`；
+ *   - 抛之前还要收尾的（`promoteWarmTerminal` 已把 PTY 从全局单槽里取出，必须先停掉），
+ *     以及不能抛的同步 `void` 动作（`selectSession` / `openLauncher` 走 `reportError`，
+ *     抛出只会变成 onClick 里的未捕获异常），用这个取值形式。
+ * 无论哪条，「有没有挂上」只在这里判一次，调用点不各自再写一遍。
+ */
+export function addTabPlacement(
+  layout: WorkspaceLayout,
+  groupId: string,
+  tabId: string
+): WorkspaceLayout | null {
+  const next = addTab(layout, groupId, tabId)
+  return findGroupForTab(next, tabId) ? next : null
+}
+
+/** 挂不上即抛。落点不在场时调用方多半除了放弃没别的可做，这条壳省掉一次手写的 null 检查。 */
+export function addTabOrThrow(
+  layout: WorkspaceLayout,
+  groupId: string,
+  tabId: string
+): WorkspaceLayout {
+  const next = addTabPlacement(layout, groupId, tabId)
+  if (!next) throw new Error('The Tab Group is no longer available')
+  return next
+}
+
 export function insertTabAfter(
   layout: WorkspaceLayout,
   anchorTabId: string,
