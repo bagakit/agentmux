@@ -26,6 +26,10 @@ const fixture = vi.hoisted(() => {
       // 组件按 regionId 读草稿；喂进这段文本，断言它出现在渲染结果里。
       agentComposerDrafts: { [regionId]: 'remembered across remount' },
       setAgentComposerDraft: vi.fn(),
+      // 两格名字与 prompt 同一机制（按 regionId 存 store，见 launcher-name-draft.ts）；这份 mock
+      // 是手搭的最小 state，所以它也要在场，否则组件读整张表时拿到 undefined。
+      launcherNameDrafts: {},
+      setLauncherNameDraft: vi.fn(),
       tabs: { 'launcher-tab': { workspaceId: 'workspace' } },
       hostChecks: {},
       executorDetections: {},
