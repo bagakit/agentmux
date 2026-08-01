@@ -372,6 +372,30 @@ export function Ruler({
   )
 }
 
+/**
+ * 一行的状态记号：Streaming / Failed 徽标与来源标签。
+ *
+ * 抽成一处而不是在可展开与不可展开两支各写一遍——那两份此前逐字相同，于是能各自漂移，而**只有
+ * 可展开那支被守住**：现有断言喂的是两条连续 tool_call，被折叠成 Run，`log-row__chip--failed`
+ * 由 Run 折叠头的徽标满足、`data-status="failed"` 由 ruler 的刻度满足；另一条失败用例带
+ * `toolInput` 故走可展开分支。不可展开那支（既无入参又无输出的失败步骤）两个记号各自单独删掉，
+ * 38 条全绿——而那一支**没有可展开面板**，徽标与 data-status 是它唯一的失败线索，去掉后失败步骤
+ * 与成功步骤逐像素相同。
+ *
+ * `data-status` 收不进这里（是两支上两个不同元素的属性），只能靠断言守。而那条断言的判据必须切到
+ * **行自己那一段**里：ruler 的刻度（:322）带同一个属性，对整份文档 `toContain` 会被刻度满足——
+ * 我第一版就是这么写的，把行上的 `data-status` 改成常量仍然 40 条全绿。见测试里的 `logRowMarkup`。
+ */
+function RowMeta({ item, showSource }: { item: AgentTimelineItem; showSource: boolean }) {
+  return (
+    <>
+      {item.status === 'streaming' ? <span className="log-row__chip">Streaming</span> : null}
+      {item.status === 'failed' ? <span className="log-row__chip log-row__chip--failed">Failed</span> : null}
+      <span className="log-row__source" data-persistent={showSource ? '' : undefined}>{item.source}</span>
+    </>
+  )
+}
+
 function Row({
   item,
   origin,
@@ -422,9 +446,7 @@ function Row({
             {count > 1 ? <span className="log-row__count">×{count}</span> : null}
           </span>
           <span className="log-row__meta">
-            {item.status === 'streaming' ? <span className="log-row__chip">Streaming</span> : null}
-            {item.status === 'failed' ? <span className="log-row__chip log-row__chip--failed">Failed</span> : null}
-            <span className="log-row__source" data-persistent={showSource ? '' : undefined}>{item.source}</span>
+            <RowMeta item={item} showSource={showSource} />
             <ChevronRight size={12} className="log-row__chevron" data-open={open ? '' : undefined} />
           </span>
         </button>
@@ -437,9 +459,7 @@ function Row({
             {count > 1 ? <span className="log-row__count">×{count}</span> : null}
           </span>
           <span className="log-row__meta">
-            {item.status === 'streaming' ? <span className="log-row__chip">Streaming</span> : null}
-            {item.status === 'failed' ? <span className="log-row__chip log-row__chip--failed">Failed</span> : null}
-            <span className="log-row__source" data-persistent={showSource ? '' : undefined}>{item.source}</span>
+            <RowMeta item={item} showSource={showSource} />
           </span>
         </div>
       )}

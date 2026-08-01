@@ -16,6 +16,7 @@ import type {
   BrowserEvent,
   CreateWorkspacePathInput,
   FileDocument,
+  GitFileDiff,
   HostConfig,
   HostCheckResult,
   ExecutorDetection,
@@ -124,6 +125,7 @@ import {
   addWorkbenchRegion,
   createWorkbenchTab,
   documentKey,
+  fileTabId,
   findWorkbenchRegion,
   focusWorkbenchTabRegion,
   inheritedTopicIdForNewTab,
@@ -182,6 +184,19 @@ import {
 } from './lib/persisted-ui-writer'
 
 type ViewMode = SessionViewMode
+
+/**
+ * A file Region's diff payload, as loaded from the existing `git.diff` bridge. `loading` gates the
+ * spinner; `diff` is the structured single-file diff (HEAD vs worktree) once it lands; `error` is
+ * git's own message when the load failed (not a git repo, path escaped the worktree, etc.). The
+ * three are not mutually exclusive on purpose: a reload keeps the previous `diff` visible while
+ * `loading` is true, and a failed reload keeps the last good `diff` beside the `error`.
+ */
+export type EditorRegionDiffState = {
+  loading: boolean
+  diff: GitFileDiff | null
+  error: string | null
+}
 export type MainSurface = 'workbench' | 'board'
 export type AsyncCheckState = 'idle' | 'checking' | 'ready' | 'missing' | 'error'
 export type ExecutorDetectionState = {
@@ -273,6 +288,30 @@ type AppState = {
   tabMenuOpen: boolean
   workspaceTool: WorkspaceTool
   toolDockWidth: number
+  /**
+   * 编辑器换行开关。**全局一个位**，不是按文件——它是一种查看偏好（像主题），不是文档的属性；
+   * 用户打开一个长行文件想换行，通常下一个长行文件也想换行。持久化（进 partialize 白名单），
+   * 与 toolsOpen 等表面偏好同一档：重开要还在。默认关（off），与 Monaco 默认一致，长行仍可横向滚。
+   */
+  editorWordWrap: boolean
+  /**
+   * 每个文件 Region 当前是「编辑」还是「diff」显示模式，按 regionId 存。
+   *
+   * 关键决策：diff 不是新的 surface kind，而是既有 file Region 的一个**显示模式**。理由——一个 diff
+   * 没有独立于其文件的身份（同一个 workspace+path），而新增 surface kind 要改 Core 里已发货的 Control
+   * 协议（AgentMuxRegion 枚举了每一种 kind）外加渲染层约七处 union 落点，为零新增身份付跨包代价。
+   * 所以 diff 是这张 file Region 的一个瞬态 UI 位，与 viewModes（session 的终端/对话切换）同构。
+   *
+   * 不持久化：diff 依赖 git HEAD，是一个瞬时视图；重开该回到编辑态而不是复活一个可能已过期的 diff。
+   * 缺省即 'edit'。生命周期随 Region：Region 关掉时由 reconcile/close 出口一并清掉，不留孤儿。
+   */
+  editorRegionModes: Record<string, 'edit' | 'diff'>
+  /**
+   * 每个文件 Region 已加载的 diff 负载（含加载中/失败态），按 regionId 存。由 `loadRegionDiff` 从既有
+   * `window.agentmux.git.diff`（HEAD blob vs 工作区）取——不新开任何 git shell-out。与 editorRegionModes
+   * 同生命周期、同不持久化。
+   */
+  editorRegionDiffs: Record<string, EditorRegionDiffState | undefined>
   loading: boolean
   error: string | null
   initialize(): Promise<() => void>
@@ -340,6 +379,22 @@ type AppState = {
   updateRegionSplitRatio(workspaceId: string, tabId: string, nodePath: string, ratio: number): void
   updateSplitRatio(workspaceId: string, nodePath: string, ratio: number): void
   setViewMode(sessionId: string, mode: ViewMode): void
+  /** 翻转编辑器换行的全局位。 */
+  toggleEditorWordWrap(): void
+  /**
+   * 把一个文件 Region 切到 diff 模式并（若还没有）加载它的 diff；再次调用（mode 'edit'）切回编辑。
+   * diff 两侧走既有 git.diff 桥，不新开 shell-out。regionId 承载模式，workspaceId+path 定位文件。
+   */
+  setEditorRegionMode(regionId: string, workspaceId: string, path: string, mode: 'edit' | 'diff'): Promise<void>
+  /** 重新拉取一个已在 diff 模式的 Region 的 diff（用户点「刷新」，或改动落盘后想看最新差异）。 */
+  reloadRegionDiff(regionId: string, workspaceId: string, path: string): Promise<void>
+  /**
+   * 从 Changes 面板点一个文件：打开它（走既有 openFile），并把它的 canonical Region 切到 diff 模式。
+   * 是「minimal end-to-end」那条路——点变更 → 看该文件的 diff。regionId 由 openFile 的落点唯一决定
+   * （`initialWorkbenchRegionId(fileTabId(...))`），所以这里在 openFile 之后据同一规则算出它、再 setEditorRegionMode，
+   * 而不是让调用方各自推导 regionId（推错就切错 Region 的模式）。
+   */
+  openFileDiff(path: string): Promise<void>
   setMainSurface(surface: MainSurface): void
   toggleProjectRail(): void
   toggleProjectGroup(key: string): void
@@ -779,6 +834,82 @@ function advanceDocumentLifetime(key: string): number {
   return lifetime
 }
 
+// Monotonic per-Region request id so a slow diff cannot overwrite a newer one (the same request-id
+// discipline useGitStatus uses). Keyed by regionId — a Region shows exactly one file at a time.
+const regionDiffRequestIds = new Map<string, number>()
+
+/**
+ * Load a file Region's diff from the EXISTING git bridge — HEAD blob (old) vs worktree file (new).
+ *
+ * There is no new shell-out here: `window.agentmux.git.diff` is the same Desktop-main capability the
+ * Changes panel already reaches, and it returns a structured {@link GitFileDiff} (both sides read as
+ * blobs, never parsed from unified-diff text). This wrapper only owns the loading/error presentation
+ * and the stale-result guard. The two sides' directionality is fixed downstream in `diffEditorSides`.
+ */
+async function loadRegionDiff(regionId: string, workspaceId: string, path: string): Promise<void> {
+  const requestId = (regionDiffRequestIds.get(regionId) ?? 0) + 1
+  regionDiffRequestIds.set(regionId, requestId)
+  useAppStore.setState((state) => ({
+    editorRegionDiffs: {
+      ...state.editorRegionDiffs,
+      // Keep the previous diff visible during a reload; only flip loading and clear the last error.
+      [regionId]: { loading: true, diff: state.editorRegionDiffs[regionId]?.diff ?? null, error: null }
+    }
+  }))
+  const bridge = window.agentmux?.git
+  if (!bridge) {
+    if (regionDiffRequestIds.get(regionId) !== requestId) return
+    useAppStore.setState((state) => ({
+      editorRegionDiffs: {
+        ...state.editorRegionDiffs,
+        [regionId]: { loading: false, diff: null, error: 'Git is unavailable in this build.' }
+      }
+    }))
+    return
+  }
+  try {
+    const diff = await bridge.diff(workspaceId, path)
+    if (regionDiffRequestIds.get(regionId) !== requestId) return
+    useAppStore.setState((state) => ({
+      editorRegionDiffs: { ...state.editorRegionDiffs, [regionId]: { loading: false, diff, error: null } }
+    }))
+  } catch (error) {
+    if (regionDiffRequestIds.get(regionId) !== requestId) return
+    useAppStore.setState((state) => ({
+      editorRegionDiffs: {
+        ...state.editorRegionDiffs,
+        // A failed reload keeps the last good diff beside the error rather than blanking the pane.
+        [regionId]: { loading: false, diff: state.editorRegionDiffs[regionId]?.diff ?? null, error: message(error) }
+      }
+    }))
+  }
+}
+
+/**
+ * Drop editor-region mode/diff state for Regions no longer on the board. The two maps are keyed by
+ * regionId, and a file Region's id is deterministic (`region:file:ws:path`), so a closed-then-reopened
+ * file would otherwise resurrect its stale `diff` mode and its old diff payload — the opposite of the
+ * decision that diff is transient and reopening returns to edit. Called after every close/reconcile that
+ * changes the live tab set; a no-op when nothing was pruned so it never forces a spurious render.
+ */
+function pruneEditorRegionState(tabs: Readonly<Record<string, WorkbenchTab>>): void {
+  const live = new Set(
+    Object.values(tabs).flatMap((tab) => workbenchSurfaces(tab).map((surface) => surface.regionId))
+  )
+  useAppStore.setState((state) => {
+    const modes = Object.fromEntries(
+      Object.entries(state.editorRegionModes).filter(([regionId]) => live.has(regionId))
+    )
+    const diffs = Object.fromEntries(
+      Object.entries(state.editorRegionDiffs).filter(([regionId]) => live.has(regionId))
+    )
+    const modesChanged = Object.keys(modes).length !== Object.keys(state.editorRegionModes).length
+    const diffsChanged = Object.keys(diffs).length !== Object.keys(state.editorRegionDiffs).length
+    if (!modesChanged && !diffsChanged) return state
+    return { editorRegionModes: modes, editorRegionDiffs: diffs }
+  })
+}
+
 async function refreshFileDocument(
   workspaceId: string,
   path: string,
@@ -1174,6 +1305,7 @@ type PersistedAppState = {
   toolsOpen?: boolean
   workspaceTool?: WorkspaceTool
   toolDockWidth?: number
+  editorWordWrap?: boolean
 }
 
 export type RestoredUiState = Pick<
@@ -1185,6 +1317,7 @@ export type RestoredUiState = Pick<
   | 'toolsOpen'
   | 'workspaceTool'
   | 'toolDockWidth'
+  | 'editorWordWrap'
 >
 
 /**
@@ -1220,6 +1353,7 @@ export function restorePersistedUiState(
     | 'toolsOpen'
     | 'workspaceTool'
     | 'toolDockWidth'
+    | 'editorWordWrap'
   >
 ): RestoredUiState {
   return {
@@ -1233,7 +1367,8 @@ export function restorePersistedUiState(
       typeof persisted.toolDockWidth === 'number'
         ? persisted.toolDockWidth
         : TOOL_DOCK_DEFAULT_WIDTH
-    )
+    ),
+    editorWordWrap: restoredBoolean(persisted.editorWordWrap, false)
   }
 }
 
@@ -1362,6 +1497,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   workspaceFileRevisions: {},
   fileExplorerStates: {},
   viewModes: {},
+  editorWordWrap: false,
+  editorRegionModes: {},
+  editorRegionDiffs: {},
   executorDetections: {},
   hostChecks: {},
   browserAnnotationsByBrowserId: {},
@@ -2228,6 +2366,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         current,
         applyWorkbenchViewCloseTopology(current, plan, null)
       ))
+      pruneEditorRegionState(get().tabs)
       return Promise.resolve(true)
     }
     if (plan.resources.length === 0) {
@@ -2242,6 +2381,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         current,
         applyWorkbenchViewCloseTopology(current, plan, reconciliation.tab)
       ))
+      pruneEditorRegionState(get().tabs)
       return disposeClosedFileOwners(previousTabs, get().tabs).then(
         () => true,
         (error) => {
@@ -2293,6 +2433,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           applyWorkbenchViewCloseTopology(current, plan, reconciliation.tab)
         ))
         await disposeClosedFileOwners(previousTabs, get().tabs)
+        pruneEditorRegionState(get().tabs)
         if (reconciliation.failures.length > 0) {
           get().reportError(workbenchViewCloseFailure(reconciliation.failures))
         } else if (reconciliation.changedWhileClosing) {
@@ -2433,6 +2574,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         ? reconcileWorkbenchFileProjection(state, { tabs, layouts: state.layouts })
         : { tabs }
     })
+    pruneEditorRegionState(get().tabs)
     if (surface.kind === 'file') await disposeClosedFileOwners(previousTabs, get().tabs)
   },
   requestCloseTab(workspaceId, tabGroupId, tabId) {
@@ -2488,6 +2630,29 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   setViewMode(sessionId, mode) {
     set((state) => ({ viewModes: { ...state.viewModes, [sessionId]: mode } }))
+  },
+  toggleEditorWordWrap() {
+    set((state) => ({ editorWordWrap: !state.editorWordWrap }))
+  },
+  async setEditorRegionMode(regionId, workspaceId, path, mode) {
+    set((state) => ({ editorRegionModes: { ...state.editorRegionModes, [regionId]: mode } }))
+    // Only entering diff triggers a load, and only when this Region has no diff yet — switching back
+    // and forth must not refetch. An explicit refresh goes through reloadRegionDiff.
+    if (mode === 'diff' && !get().editorRegionDiffs[regionId]) {
+      await loadRegionDiff(regionId, workspaceId, path)
+    }
+  },
+  async reloadRegionDiff(regionId, workspaceId, path) {
+    await loadRegionDiff(regionId, workspaceId, path)
+  },
+  async openFileDiff(path) {
+    const workspaceId = get().activeWorkspaceId
+    if (!workspaceId) return
+    await get().openFile(path)
+    // openFile places the file at its canonical Region, so the id is derived by the same rule rather
+    // than read back — a wrong regionId here would flip a different Region into diff mode (or none).
+    const regionId = initialWorkbenchRegionId(fileTabId(workspaceId, path))
+    await get().setEditorRegionMode(regionId, workspaceId, path, 'diff')
   },
   renameAgent(sessionId, name) {
     const trimmed = name?.trim() ?? ''
@@ -3872,6 +4037,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     collapsedProjectGroups: state.collapsedProjectGroups,
     toolsOpen: state.toolsOpen,
     workspaceTool: state.workspaceTool,
-    toolDockWidth: state.toolDockWidth
+    toolDockWidth: state.toolDockWidth,
+    // 换行开关是一种查看偏好（像主题），重开要还在——与上面这些表面偏好同一档。
+    editorWordWrap: state.editorWordWrap
   })
 }))

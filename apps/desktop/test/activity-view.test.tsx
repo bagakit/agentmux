@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { AgentTimelineItem } from '../src/shared/contracts.js'
 import { ActivityView } from '../src/renderer/src/components/ActivityView.js'
+import { allStyles } from './helpers/styles.js'
 
 function activity(
   id: string,
@@ -26,6 +27,34 @@ function render(
   items: AgentTimelineItem[] = []
 ): string {
   return renderToStaticMarkup(createElement(ActivityView, { capability, items }))
+}
+
+/**
+ * 只取那一行本身的标记。
+ *
+ * 为什么必须切出来：`data-status` 不止画在行上，ruler 的刻度（ActivityView.tsx:322）也带同一个属性，
+ * 而刻度是另一条独立守住的东西。于是对整份文档 `toContain('data-status="failed"')` **由刻度满足**，
+ * 根本没有质询到行——把行上的 `data-status` 改成常量 `"complete"`，那样的断言实测仍然全绿。判据必须
+ * 落在行的那一段里。
+ *
+ * 行里不嵌另一行，故行起点之后第一个 `</div>`／`</button>` 就是它自己的收尾（子元素只有 span 与 svg）。
+ */
+function logRowMarkup(markup: string): string {
+  const marker = markup.indexOf('class="log-row ')
+  expect(marker, '没渲染出行——判据落空了，下面的断言会变成恒真').toBeGreaterThanOrEqual(0)
+  expect(
+    markup.indexOf('class="log-row ', marker + 1),
+    '渲染出了多行，切出来的是哪一行不确定——请只喂一条 item'
+  ).toBe(-1)
+  const start = markup.lastIndexOf('<', marker)
+  const ends = [markup.indexOf('</div>', marker), markup.indexOf('</button>', marker)]
+    .filter((index) => index >= 0)
+  expect(ends.length, '行没有收尾标签，切法的前提不成立').toBeGreaterThan(0)
+  const row = markup.slice(start, Math.min(...ends))
+  // 自检：切出来的这段必须**真的**把 ruler 甩掉了，否则它与整份文档等价，上面那段解释就落空了。
+  expect(row, '切出来的一段里还有 ruler——它会替行满足 data-status 断言').not.toContain('activity-ruler')
+  expect(row, '切出来的一段里没有行的标记区，说明切早了').toContain('log-row__meta')
+  return row
 }
 
 /**
@@ -508,6 +537,53 @@ describe('ActivityView', () => {
     expect(markup).toContain('data-status="complete"')
   })
 
+  /**
+   * 上面那条喂的两步既有入参又有输出，都走**可展开**分支。这一条守的是另一支：既无入参又无输出的
+   * 失败步骤——它**没有可展开面板**，于是 `data-status` 与 Failed 徽标是它唯一的失败线索。
+   *
+   * 这个形状真实可达：失败事件普遍不带 output key，而错误文本提取也落空时（如 `{is_error:true}`
+   * 且前序事件的 `tool_input` 已丢），`hookToolOutcome` 给出 `{failed:true}`，既无 output 也无
+   * toolInput；被拒的 permission 行同形。
+   *
+   * 实测（在 `*MutantProbe*` 副本上，每次只改一处）：把不可展开那支的徽标条件换成 `false`、或把它的
+   * `data-status` 写成常量 `"complete"`，本文件 38 条**全绿**。原因是既有的失败断言喂的是两条连续
+   * tool_call，被折成 Run：`log-row__chip--failed` 由 Run 折叠头的徽标满足，`data-status="failed"`
+   * 由 ruler 刻度满足；而带 `toolInput` 的那条失败用例走的是可展开分支（那一支确实被守住）。
+   * 徽标一侧已随 RowMeta 收成一处，`data-status` 是两个元素上的两个属性、收不成一处，故这条必须在。
+   * 而它的判据必须切到行那一段里（`logRowMarkup`）：整份文档的 `data-status="failed"` 会被 ruler
+   * 刻度满足——本条第一版就是那么写的，M1（行上的 `data-status` 改成常量）实测 40 条**全绿**存活。
+   */
+  it('既无入参也无输出的失败步骤，仍然一眼看得出失败', () => {
+    const markup = render('complete-events', [
+      activity('naked-failure', {
+        kind: 'tool_call', title: 'Bash', toolName: 'Bash', status: 'failed', createdAt: 1
+      })
+    ])
+
+    // 先证判据落在**不可展开**那一支上：这一行没有展开入口，否则下面守的就是另一支了。
+    expect(markup, '这一步竟然可展开——判据落到了另一个分支上，下面的断言证不了目标那支').not.toContain('data-expandable')
+    // 断言落在行自己那一段里：整份文档的 data-status 会被 ruler 刻度满足（见 logRowMarkup 头部注释）。
+    const row = logRowMarkup(markup)
+    expect(row, '不可展开的失败步骤没有 Failed 徽标：它与成功步骤逐像素相同').toContain('log-row__chip--failed')
+    expect(row, '不可展开的失败步骤没有失败状态属性：红点与配色全部退化').toContain('data-status="failed"')
+  })
+
+  it('同形的成功步骤不许被标成失败——否则「都一样」只是换了个方向', () => {
+    // 反向那一侧。少了它，把两个记号写成无条件渲染也会让上一条通过，而那时人人都是失败。
+    const markup = render('complete-events', [
+      activity('naked-success', {
+        kind: 'tool_call', title: 'Bash', toolName: 'Bash', createdAt: 1
+      })
+    ])
+
+    expect(markup).not.toContain('data-expandable')
+    const row = logRowMarkup(markup)
+    expect(row, '成功步骤挂上了 Failed 徽标').not.toContain('log-row__chip--failed')
+    expect(row, '成功步骤被标成失败状态').not.toContain('data-status="failed"')
+    // 正向取值也要钉：只判「不是 failed」的话，把属性整个删掉也能过，而那时 CSS 一个钩子都没有。
+    expect(row, '成功步骤连状态属性都没有：配色与红点的唯一钩子不在了').toContain('data-status="complete"')
+  })
+
   it('只有结果没有入参的一步仍然可展开——否则唯一有用的信息被挡在外面', () => {
     // `expandable` 曾经只看 payload。一条没有入参却有输出（或失败）的步骤会退化成不可点的死行。
     const markup = render('complete-events', [
@@ -551,6 +627,62 @@ describe('ActivityView', () => {
     expect(markup).toContain('Read')
     expect(markup).not.toContain('log-row__output')
     expect(markup).not.toContain('log-row__chip--failed')
+  })
+
+  /**
+   * 全成功的一段折叠**不许**挂 FAILED。
+   *
+   * 这条是 :523 那条的反向配对，缺了它整个徽标判据只守了一侧：把 `failed` 改成恒真（实测
+   * `const failed = true || items.some(...)`）时 47 条全绿，而界面上**每一段**多步折叠都会挂上红色
+   * FAILED。这个徽标是折叠态下 SSR 直接可见的那件东西——用户不展开就靠它一眼判断这段有没有出事，
+   * 恒真等于把这个判断彻底废掉，且比漏报更坏：它会把注意力引到没有问题的地方。
+   */
+  it('全成功的折叠段不挂 FAILED——徽标的另一侧', () => {
+    const markup = render('complete-events', [
+      activity('ok1', {
+        kind: 'tool_call', title: 'Read', toolName: 'Read',
+        toolInput: '{"file_path":"/a.ts"}', status: 'complete', createdAt: 1, updatedAt: 1
+      }),
+      activity('ok2', {
+        kind: 'tool_call', title: 'Read', toolName: 'Read',
+        toolInput: '{"file_path":"/b.ts"}', status: 'complete', createdAt: 2, updatedAt: 2
+      })
+    ])
+
+    const fold = markup.slice(markup.indexOf('log-fold'))
+    // 先证这确实是一段折叠（否则下面的 not 是在一段不存在的标记上恒真）。
+    expect(fold).toContain('2 steps')
+    expect(fold).not.toContain('log-row__chip--failed')
+    expect(fold).not.toContain('FAILED')
+  })
+
+  /**
+   * 机器行携带的正文（prose）必须真的渲染出来。
+   *
+   * 这条补的是 tracker #180 同族里**折叠态就可见**的那半：`{prose ? <p className="log-row__prose">…}`
+   * 改成 `{false && prose ? …}` 时 47 条全绿，而那行文字在界面上凭空消失。#180 说的
+   * `log-row__output` 藏在 `open` 之后属已知的 effect 盲区（renderToStaticMarkup 不跑 effect），
+   * prose 不是——它无条件渲染，本来就够得着，所以没人守它纯属真空。
+   *
+   * fixture 必须落到机器 `Row` 而不是 `Turn`：`source:'native-hook'` 且 kind 不是 assistant_message，
+   * 于是 `speakerOf` 返回 null（判据同源，见 conversation-speaker），走 24px 紧凑行那一路。
+   */
+  it('机器行的正文真的渲染出来，不是只存在于数据里', () => {
+    const markup = render('complete-events', [
+      activity('note', {
+        kind: 'lifecycle',
+        source: 'native-hook',
+        title: 'Session resumed',
+        content: '接回了上次的会话'
+      })
+    ])
+
+    // 走的是机器行那一路——不是 turn register。
+    expect(markup).toContain('log-row--lifecycle')
+    expect(markup).not.toContain('log-turn')
+    // 正文本体在场：类名与那段字各钉一次，只钉类名的话把 <p> 留着而内容换掉不会红。
+    expect(markup).toContain('log-row__prose')
+    expect(markup).toContain('接回了上次的会话')
   })
 
   it('说话人由 source 认定，渲染层不按 kind 反推身份', () => {
@@ -722,5 +854,102 @@ describe('ActivityView', () => {
       expect(fold).toContain('2 steps')
       expect(fold).not.toContain('log-fold__elapsed')
     })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 失败的**回合**在界面上与成功的不一样。
+//
+// 机器行那一路早就守住了（:492 那条，两条 tool_call 一成一败）。回合这一路两侧都真空：把
+// `data-status={item.status}` 整段从 Turn 上删掉、或把 Failed 徽标改成 `false && …`，desktop
+// 全量都全绿（各自实测 92 / 83 条，含 activity-view + wiring + 轴 + session-pane 四个文件）。
+// 后果是「Agent 这一轮出错了」在对话里与成功**完全相同**：头像节点不变红、无徽标、正文照常渲染，
+// 于是一次失败的回合读起来就是一次正常回答。
+//
+// 为什么现有断言碰不到：:256 那条 `toContain('Failed')` 命中的是同一批 items 里那条 acp
+// **tool_call**（机器行），不是回合；把回合的徽标删掉，那条照旧被机器行满足。这正是本仓记过的
+// 「抽查的那一对可能正是盲点」——判据必须落在**只有回合会渲染**的那段标记里。
+//
+// 可达性先证再写：`session-timeline.ts:263` 的 ACP append 把 `kind` 与 `status` 各自原样透传
+// （`:274` 的 update 更是只改 status 不碰 kind），所以 `assistant_message` × `failed` 是合同允许
+// 的组合；实测渲染确实产出 `class="log-turn" … data-status="failed"`。不是死代码。
+// ---------------------------------------------------------------------------
+
+/** 失败的 Agent 回合：进程给了话，但这一轮的结局是失败。 */
+const failedTurn = activity('reply-failed', {
+  kind: 'assistant_message',
+  source: 'native-hook',
+  status: 'failed',
+  content: 'I could not finish.',
+  createdAt: 1,
+  updatedAt: 1
+})
+
+/** 同一形状、只有结局不同的成功回合——反向那一侧。 */
+const okTurn = activity('reply-ok', {
+  kind: 'assistant_message',
+  source: 'native-hook',
+  content: 'Done.',
+  createdAt: 2,
+  updatedAt: 2
+})
+
+/** 只取回合那一段标记：机器行的徽标不许替回合作担保（见本块头部注释）。 */
+function turnMarkup(markup: string): string {
+  const start = markup.indexOf('class="log-turn"')
+  expect(start, '没渲染出回合——判据落空了，下面的断言会变成恒真').toBeGreaterThanOrEqual(0)
+  return markup.slice(start)
+}
+
+describe('失败的对话回合与成功的不一样', () => {
+  it('失败的回合带 data-status 与 Failed 徽标，成功的两样都没有', () => {
+    // 一次渲染里同时放一成一败：这样「两边长得一样」的退化写法（无论是恒不标还是恒标）都会红。
+    const markup = render('complete-events', [failedTurn, okTurn])
+    const turns = turnMarkup(markup)
+
+    // 失败那一侧。`data-status` 是 CSS 把头像节点变红的唯一钩子（见下一条），徽标是不依赖颜色的
+    // 那一半——色盲用户与深色主题下颜色对比不足时，徽标是唯一还在说话的东西，所以两件都要。
+    expect(turns).toContain('data-status="failed"')
+    expect(turns).toContain('log-row__chip--failed')
+    expect(turns).toContain('Failed')
+
+    // 反向那一侧：成功的回合不许也被标成失败，否则「区分」退化成「全都报错」。
+    expect(turns).toContain('data-status="complete"')
+    expect(turns.match(/log-row__chip--failed/g)).toHaveLength(1)
+  })
+
+  it('失败的回合不靠正文自己说——正文可能压根没提失败', () => {
+    // 判据不能是「文案里有没有出现 error 字样」：一轮失败的回合完全可能只留下一句普通的话，
+    // 甚至什么都没留下（content 缺席）。状态是**结构**上的事实，不是正文的措辞。
+    const markup = render('complete-events', [
+      activity('quiet-fail', {
+        kind: 'assistant_message',
+        source: 'native-hook',
+        status: 'failed',
+        content: 'Sure, let me look at that.',
+        createdAt: 1,
+        updatedAt: 1
+      })
+    ])
+    const turns = turnMarkup(markup)
+    expect(turns).toContain('data-status="failed"')
+    expect(turns).toContain('Failed')
+  })
+
+  it('把 Failed 徽标从回合上删掉时，机器行那条断言不许替它作担保', () => {
+    // 自检：证明本族的判据真的落在回合上。这一次渲染里**只有回合**，没有任何 tool_call——
+    // 于是 :256 那条靠机器行满足的 `toContain('Failed')` 在这里无从借力。
+    const markup = render('complete-events', [failedTurn])
+    expect(markup).not.toContain('log-row log-row--')
+    expect(markup).toContain('Failed')
+  })
+
+  it('样式表里真有那条把失败回合画红的规则，不只是选择器名在场', () => {
+    // 本仓栽过「CSS 守卫只查选择器名存在：删掉承重声明体全绿」。`data-status` 带真实取值，
+    // 不在 rendered-class-has-rule 的「在场标志」判据范围内（那条只管 '' / undefined 二态的属性），
+    // 所以这一格没有别人守。这里连声明体一起钉：规则在、且真的改了颜色。
+    const rule = allStyles().match(/\.log-turn\[data-status='failed'\][^{]*\{([^}]*)\}/)
+    expect(rule, '失败回合的着色规则不在样式表里——头像节点不会变红').not.toBeNull()
+    expect(rule![1]).toMatch(/color\s*:/)
   })
 })

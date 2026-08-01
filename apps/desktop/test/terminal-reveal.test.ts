@@ -252,7 +252,17 @@ describe('输入只有一个出口', () => {
     expect(code, 'onData/onBinary 没经 subscribeTerminalInput 接到 sender')
       .toContain('subscribeTerminalInput(terminal, sendInput)')
     expect(code, 'Shift+Enter 没接到 sender').toMatch(/sendInput\(shiftEnterInput\(/)
-    expect(code, 'OSC 回复没接到 sender').toMatch(/sendInput\s*\n\s*\}\)/)
+    // OSC 那一路：按**它自己那个选项对象**里有没有 sendInput 判，不按它在对象里排第几。
+    // 此前这里写的是 `/sendInput\s*\n\s*\}\)/`——只有当 sendInput 恰好是最后一个属性时才匹配。
+    // 后来那个入口多了一个 `writeClipboard`（OSC 52 往剪贴板写），sendInput 不再靠着 `})`，
+    // 断言就红了，而"OSC 回复接到了 sender"这件事一点没变。位置不是判据，在不在场才是。
+    const oscAt = code.indexOf('installTerminalOscHandlers(terminal, {')
+    expect(oscAt, 'OSC 入口整段不见了——安装点改名或被删，下面那句会因空串而恒绿').toBeGreaterThan(-1)
+    const oscOptions = code.slice(oscAt)
+    expect(
+      oscOptions.slice(0, oscOptions.indexOf('\n    })')),
+      'OSC 回复没接到 sender'
+    ).toMatch(/\bsendInput\b/)
   })
 
   it('判定走共享纯函数，不在组件里各写一遍布尔表达式', () => {

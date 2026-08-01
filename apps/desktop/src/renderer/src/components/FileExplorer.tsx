@@ -43,6 +43,7 @@ import {
   getRevealAncestorPaths,
   joinWorkspacePath
 } from '../lib/workspace-paths'
+import { copyTextToClipboard, formatPathsForCopy } from '../lib/clipboard-copy'
 import { createFileExplorerRowProjection } from './file-tree/file-explorer-row-projection'
 import {
   createSingleFileExplorerSelection,
@@ -66,6 +67,8 @@ import {
   planFileExplorerMove,
   runFileExplorerMove,
   workspacePathParent,
+  FILE_EXPLORER_DELETE_KEY,
+  FILE_EXPLORER_RENAME_KEY,
   type FileExplorerMoveTarget
 } from '../lib/file-explorer-move'
 
@@ -595,16 +598,10 @@ export function FileExplorer({
 
   async function copyContextPaths(node: TreeNode, kind: 'absolute' | 'relative'): Promise<void> {
     if (!workspace) return
-    const paths = pathsForContext(node)
-    const text = (kind === 'absolute'
-      ? paths.map((path) => joinWorkspacePath(workspace.path, path))
-      : paths
-    ).join('\n')
-    try {
-      await api.ui.writeClipboardText(text)
-    } catch (error) {
-      reportError(error)
-    }
+    await copyTextToClipboard(
+      formatPathsForCopy(pathsForContext(node), kind, workspace.path),
+      reportError
+    )
   }
 
   async function openDirectoryInTerminal(node: TreeNode): Promise<void> {
@@ -759,10 +756,10 @@ export function FileExplorer({
     } else if ((event.key === 'Enter' || event.key === ' ') && actionNode) {
       event.preventDefault()
       actionNode.isDirectory ? toggle(actionNode) : void openFile(actionNode.path)
-    } else if (event.key === 'F2' && actionNode) {
+    } else if (FILE_EXPLORER_RENAME_KEY.matches(event) && actionNode) {
       event.preventDefault()
       if (workspaceId && canRenameFileExplorerNode(workspaceId, actionNode)) beginRename(actionNode)
-    } else if ((event.key === 'Delete' || event.key === 'Backspace') && actionNode) {
+    } else if (FILE_EXPLORER_DELETE_KEY.matches(event) && actionNode) {
       event.preventDefault()
       setDeleteRequest(actionNode)
     }

@@ -530,11 +530,62 @@ describe('WorktreeService', () => {
     expect(save).not.toHaveBeenCalled()
   }, 20000)
 
+  /**
+   * argv 硬化的四个 `--` 里此前只有一个被守住（createForBranch 的 adopt 分支，:256 那条断言）。
+   * 另外三个——create 的 `-b` 分支、remove 的两个分支——删掉 `--` 后本文件全绿。
+   *
+   * 这一条用**真 git** 守 create 的两个分支：让 git 自己当检测器，而不是回述我们已经相信的 argv。
+   * 破口形状是「路径以短横线开头」，这是可达的：`input.path` 全程无校验，而默认路径由分支名派生
+   * （defaultWorktreePath 会把非法字符换成 `-`），用户也可以自己填任何一行字。少了 `--`，git 把它
+   * 当选项解析，退 129 报 `unknown switch`——于是「创建 worktree」对这个分支永久失败。
+   */
+  it('worktree add 的两个分支都用 -- 终止选项，短横线开头的路径不会被当成开关', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-worktree-dash-test-'))
+    temporaryRoots.push(root)
+    const repoPath = join(root, 'repo')
+    await mkdir(repoPath)
+    const executionHost = new LocalExecutionHost()
+    const git = async (...args: string[]) => {
+      const result = await executionHost.run('git', ['-C', repoPath, ...args])
+      expect(result.exitCode, `fixture git ${args.join(' ')}: ${result.stderr}`).toBe(0)
+      return result
+    }
+    await git('init', '-b', 'main')
+    await writeFile(join(repoPath, 'README.md'), '# fixture\n')
+    await git('add', 'README.md')
+    await git('-c', 'user.name=AgentMux Test', '-c', 'user.email=agentmux@example.invalid', 'commit', '-m', 'fixture')
+    await git('branch', 'feature/adopt')
+
+    const service = new WorktreeService(() => executionHost, { save: async (value: AppConfig) => value })
+    const baseConfig: AppConfig = {
+      ...config,
+      workspaces: [{ id: 'repo', name: 'repo', hostId: 'local', path: repoPath, kind: 'folder' }]
+    }
+
+    // 相对路径才让短横线落在 argv 元素的**第一个字符**上（绝对路径以 `/` 开头，git 不会误读）。
+    // `worktree add` 的相对路径基准是 `-C` 给的仓库，实测如此，所以下面按 repoPath 拼盘上位置。
+    const adopted = await service.createForBranch({
+      workspaceId: 'repo',
+      branch: 'feature/adopt',
+      path: '-dash-adopt'
+    }, baseConfig)
+    expect(adopted.workspace.path).toBe('-dash-adopt')
+    expect((await stat(join(repoPath, '-dash-adopt'))).isDirectory(), '认领已有分支时 -- 丢了：git 把路径当开关').toBe(true)
+
+    const created = await service.createForBranch({
+      workspaceId: 'repo',
+      branch: 'feature/fresh',
+      path: '-dash-create',
+      createBranch: true
+    }, baseConfig)
+    expect(created.workspace.branch).toBe('feature/fresh')
+    expect((await stat(join(repoPath, '-dash-create'))).isDirectory(), '新建分支时 -- 丢了：git 把路径当开关').toBe(true)
+  }, 20000)
+
   // A real repository with one registered worktree lane, shared by the removal cases below. These
   // assertions are about git's actual refusal and prune behaviour, so they run against real git rather
   // than a mock that could only echo back what we already believe.
-  const buildLocalWorktreeFixture = async () => {
-    const root = await mkdtemp(join(tmpdir(), 'agentmux-worktree-removal-test-'))
+  const buildLocalWorktreeFixture = async () => {    const root = await mkdtemp(join(tmpdir(), 'agentmux-worktree-removal-test-'))
     temporaryRoots.push(root)
     const repoPath = join(root, 'repo')
     const worktreePath = join(root, 'worktrees', 'lane')
@@ -565,6 +616,7 @@ describe('WorktreeService', () => {
     const { repoPath, worktreePath, executionHost, config: fixtureConfig } = await buildLocalWorktreeFixture()
     const save = vi.fn(async (value: AppConfig) => value)
     const service = new WorktreeService(() => executionHost, { save })
+    const runSpy = vi.spyOn(executionHost, 'run')
 
     const removal = await service.removeWorktree({ workspaceId: 'lane' }, fixtureConfig)
 
@@ -577,6 +629,14 @@ describe('WorktreeService', () => {
     // The saved config is the authoritative record set, and the removed lane must not survive in it.
     expect(save).toHaveBeenCalledOnce()
     expect(removal.config.workspaces.some((item) => item.id === 'lane')).toBe(false)
+    // `--` 终止选项解析，所以一条以短横线开头的 worktree 路径不会被 git 读成开关。这里只能钉 argv：
+    // 不像 create（相对路径按 `-C` 的仓库解析），移除前那次 `-C workspace.path` 的 status 探针会把
+    // 相对路径按进程 cwd 解析，用真短横线路径就测不成同一件事了。孪生的 create 侧由真 git 守。
+    expect(runSpy).toHaveBeenCalledWith(
+      'git',
+      ['-C', repoPath, 'worktree', 'remove', '--', worktreePath],
+      expect.anything()
+    )
   }, 20000)
 
   it('refuses to remove a worktree with an uncommitted modification, leaving it fully intact', async () => {
@@ -612,11 +672,12 @@ describe('WorktreeService', () => {
   }, 20000)
 
   it('removes a dirty worktree when changes are explicitly discarded', async () => {
-    const { worktreePath, executionHost, config: fixtureConfig } = await buildLocalWorktreeFixture()
+    const { repoPath, worktreePath, executionHost, config: fixtureConfig } = await buildLocalWorktreeFixture()
     await writeFile(join(worktreePath, 'README.md'), '# fixture\nabandoned edit\n')
     await writeFile(join(worktreePath, 'AGENT_NOTES.md'), 'abandoned\n')
     const save = vi.fn(async (value: AppConfig) => value)
     const service = new WorktreeService(() => executionHost, { save })
+    const runSpy = vi.spyOn(executionHost, 'run')
 
     // discardChanges is the opt-in that says what it is: the caller has chosen to throw this lane away.
     const removal = await service.removeWorktree({ workspaceId: 'lane', discardChanges: true }, fixtureConfig)
@@ -625,6 +686,13 @@ describe('WorktreeService', () => {
     await expect(stat(worktreePath)).rejects.toMatchObject({ code: 'ENOENT' })
     expect(save).toHaveBeenCalledOnce()
     expect(removal.config.workspaces.some((item) => item.id === 'lane')).toBe(false)
+    // 这是第四个 `--`，与上面那条是**两个分支**：`--force` 那一支自己也要终止选项解析。少了它，
+    // 一条短横线开头的路径会被 git 读成开关，于是「丢弃改动并移除」这条路对该分支永久失败。
+    expect(runSpy).toHaveBeenCalledWith(
+      'git',
+      ['-C', repoPath, 'worktree', 'remove', '--force', '--', worktreePath],
+      expect.anything()
+    )
   }, 20000)
 
   it('rejects removal of a workspace that is not a worktree', async () => {

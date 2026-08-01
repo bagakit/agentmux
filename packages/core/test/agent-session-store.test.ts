@@ -188,6 +188,165 @@ describe('semantic session persistence boundary', () => {
     })).toThrow('Terminal capability state is newer')
   })
 
+  /**
+   * 「观测事实不能比它所属的 Session 更新」这条规矩，本文件此前只对 `terminalCapability` 一条做过
+   * （上面那句 `observedAt: 201`）。同一条规矩在 `normalizeStoredAgentSession` 里对三个字段各写了一遍，
+   * 另外两个——`semanticStatus` 与 `terminalPromptDelivery`——一条测试都没有：把它们的 `if` 整段删掉，
+   * 这个文件照旧全绿（实测）。
+   *
+   * 它承重是因为这三条都是 `updatedAt` 的**下游**：状态投影拿 `updatedAt` 当"这份快照有多新"的判据，
+   * 而 `observedAt > updatedAt` 的记录意味着"我看到的事实比我这份快照还新"——那要么是写入路径漏了
+   * 一次 `updatedAt` 递增（于是这条事实会被后续任何一次 CAS 静默覆盖掉），要么是两个进程在抢同一个
+   * Session。两种都得在加载时响亮失败，而不是把一份自相矛盾的快照放进内存。
+   *
+   * 三个字段合在一条测试里，是因为它们守的是**同一条规矩的三个落点**：谁将来给 Session 加第四个带
+   * `observedAt` 的观测字段而忘了这条界，这里的形状会告诉他该补什么。
+   */
+  it('三个观测字段都不许比所属 Session 更新（同一条规矩的三个落点）', () => {
+    const base = storedSession()
+    // 每个都先给一份"恰好同龄"的合法值（observedAt === updatedAt === 200）：边界本身是允许的，
+    // 只有严格更新才该抛。这一半同时挡住把 `>` 写成 `>=` 的取反变异。
+    const semanticStatus = {
+      state: 'working' as const,
+      source: 'native-hook' as const,
+      observedAt: base.updatedAt
+    }
+    const promptDelivery = {
+      state: 'unverified' as const,
+      mode: 'degraded' as const,
+      reason: 'prompt-render-timeout' as const,
+      submissionId: base.terminalPromptSubmission.submissionId,
+      run: { runId: base.run.runId },
+      observedAt: base.updatedAt
+    }
+    const capability = {
+      state: 'unknown' as const,
+      mode: 'degraded' as const,
+      reason: 'handshake-timeout' as const,
+      run: { runId: base.run.runId },
+      observedAt: base.updatedAt
+    }
+    const sameAge = normalizeStoredAgentSession({
+      ...base,
+      semanticStatus,
+      terminalPromptDelivery: promptDelivery,
+      terminalCapability: capability
+    })
+    expect(sameAge.semanticStatus).toEqual(semanticStatus)
+    expect(sameAge.terminalPromptDelivery).toEqual(promptDelivery)
+    expect(sameAge.terminalCapability).toEqual(capability)
+
+    // 然后每次只让**一个**字段越界，另两个保持同龄——于是每一句里唯一还站着的守卫就是被测那一条。
+    expect(() => normalizeStoredAgentSession({
+      ...base,
+      semanticStatus: { ...semanticStatus, observedAt: base.updatedAt + 1 },
+      terminalPromptDelivery: promptDelivery,
+      terminalCapability: capability
+    })).toThrow('Semantic status is newer')
+    expect(() => normalizeStoredAgentSession({
+      ...base,
+      semanticStatus,
+      terminalPromptDelivery: { ...promptDelivery, observedAt: base.updatedAt + 1 },
+      terminalCapability: capability
+    })).toThrow('Terminal prompt delivery state is newer')
+    expect(() => normalizeStoredAgentSession({
+      ...base,
+      semanticStatus,
+      terminalPromptDelivery: promptDelivery,
+      terminalCapability: { ...capability, observedAt: base.updatedAt + 1 }
+    })).toThrow('Terminal capability state is newer')
+  })
+
+  /**
+   * 一次 prompt 提交必须**原子地**消费掉它所依据的那个 readiness epoch。
+   *
+   * 这条规矩在 `normalizeStoredAgentSession` 里落成三道界、共 10 个析取项，而此前**一条测试都没有**：
+   * 三道界的错误消息在整个 test/ 目录里零命中，任何一道整段删掉都不会有测试变红。
+   *
+   * 为什么承重：readiness epoch 是「终端已经把 prompt 渲染到第 N 个字节、可以安全提交了」这个事实，
+   * submission 是「我依据那个事实提交了」。两者对不上，就是提交所依据的前提已经不成立——具体后果是
+   * prompt 被写进一个还没准备好的终端（字节错位、命令被截断成半句），或者同一个 epoch 被两次提交
+   * 各自认领（同一句话发两遍）。这些在加载时必须响亮失败，而不是把一份自相矛盾的快照放进内存、
+   * 让它在某次真实提交时才炸。
+   *
+   * 每一句都只让**一个**析取项为真、其余全部为假，所以每一句里唯一还站着的守卫就是被测那一项。
+   * 期望消息按三道界分开断言，避免一道界的失败被算作另一道的证据。
+   */
+  it('提交必须原子消费 readiness epoch（三道界的 10 个析取项各自承重）', () => {
+    const base = storedSession()
+    const submission = base.terminalPromptSubmission
+    const readiness = base.terminalPromptReadiness
+    // 基线：fixture 自带的一对本来就是一致的，先证它确实通过——否则下面每一句都可能是被别的
+    // 原因抛出来的，而不是被我想测的那一项。
+    expect(normalizeStoredAgentSession(base).terminalPromptSubmission).toEqual(submission)
+
+    // 界一：submission 自己的 readiness 边界（三项）。这道界只看 submission 内部是否自洽，所以
+    // 前两句把 readiness 整个撤掉——留着它会先被 `terminalPromptReadiness()` 自己那道「readyThrough
+    // 不得早于光标」的界拦住，于是断言读到的是上游的消息，被测的这一项反而没被质询到。
+    // readyThroughByte 落在 readiness 光标之前 = 「我提交所依据的准备点比准备本身还早」。
+    expect(() => normalizeStoredAgentSession({
+      ...base,
+      terminalPromptSubmission: { ...submission, readyThroughByte: 7 },
+      terminalPromptReadiness: undefined
+    })).toThrow('does not preserve its readiness boundary')
+    // initial-composer 这一档要求严格前进：等于光标意味着「一个字节都没渲染出来就提交」。
+    // native-stop 那档允许相等（Stop 事件本身就是准备点），所以极性写反会让这条红。
+    expect(() => normalizeStoredAgentSession({
+      ...base,
+      terminalPromptSubmission: {
+        ...submission,
+        readinessSource: 'initial-composer' as const,
+        readinessId: 'composer-epoch-1',
+        readyThroughByte: submission.readinessOutputCursorBytes
+      },
+      terminalPromptReadiness: undefined
+    })).toThrow('does not preserve its readiness boundary')
+    // 输出光标退到准备点之前 = 快照声称「已读到的字节」比「已准备好的字节」还少。
+    expect(() => normalizeStoredAgentSession({
+      ...base,
+      terminalPromptSubmission: { ...submission, outputCursorBytes: submission.readyThroughByte - 1 }
+    })).toThrow('does not preserve its readiness boundary')
+
+    // 界二：被认领的 epoch 必须指得出认领者（三项）。
+    // 完全没有 submission：epoch 说自己被认领了，认领者却不存在。
+    expect(() => normalizeStoredAgentSession({
+      ...base,
+      terminalPromptSubmission: undefined
+    })).toThrow('does not identify its prompt submission')
+    // 认领的 submissionId 指向另一次提交。
+    expect(() => normalizeStoredAgentSession({
+      ...base,
+      terminalPromptReadiness: { ...readiness, consumedBySubmissionId: 'another-submission' }
+    })).toThrow('does not identify its prompt submission')
+    // submission 说自己依据的是另一个 epoch——于是这个 epoch 的认领者查无此人。
+    expect(() => normalizeStoredAgentSession({
+      ...base,
+      terminalPromptSubmission: { ...submission, readinessId: 'another-epoch' }
+    })).toThrow('does not identify its prompt submission')
+
+    // 界三：同一个 epoch 的四个取值必须在两侧逐字一致（四项）。
+    // 这四句都保持 readinessId 相同（否则会掉进界二），只让一个取值发散。
+    expect(() => normalizeStoredAgentSession({
+      ...base,
+      terminalPromptReadiness: { ...readiness, source: 'initial-composer' as const }
+    })).toThrow('did not atomically consume its readiness epoch')
+    expect(() => normalizeStoredAgentSession({
+      ...base,
+      terminalPromptReadiness: { ...readiness, outputCursorBytes: readiness.outputCursorBytes - 1 }
+    })).toThrow('did not atomically consume its readiness epoch')
+    expect(() => normalizeStoredAgentSession({
+      ...base,
+      terminalPromptReadiness: { ...readiness, readyThroughByte: readiness.readyThroughByte + 1 },
+      // 同步抬高 submission 侧的输出光标，免得先撞上界一的 outputCursorBytes < readyThroughByte。
+      terminalPromptSubmission: { ...submission, outputCursorBytes: readiness.readyThroughByte + 1 }
+    })).toThrow('did not atomically consume its readiness epoch')
+    // epoch 没有认领者，却已经被一次 submission 引用——「消费」这一步丢了，于是它还能被再消费一次。
+    expect(() => normalizeStoredAgentSession({
+      ...base,
+      terminalPromptReadiness: { ...readiness, consumedBySubmissionId: undefined }
+    })).toThrow('did not atomically consume its readiness epoch')
+  })
+
   it('round-trips the launch-option posture and fails closed on a malformed selection', async () => {
     // The posture the create fixed must survive persistence so resume can re-resolve the same argv.
     const normalized = normalizeStoredAgentSession({

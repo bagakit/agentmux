@@ -29,7 +29,9 @@ import {
   fileExplorerMoveTargets,
   isFileExplorerMenuKey,
   planFileExplorerMove,
-  runFileExplorerMove
+  runFileExplorerMove,
+  FILE_EXPLORER_DELETE_KEY,
+  FILE_EXPLORER_RENAME_KEY
 } from '../src/renderer/src/lib/file-explorer-move.js'
 
 function node(path: string, depth: number, isDirectory = false): TreeNode {
@@ -140,6 +142,55 @@ describe('file explorer move interaction', () => {
     expect(isFileExplorerMenuKey({ key: 'ContextMenu', shiftKey: false, altKey: false, ctrlKey: false, metaKey: false })).toBe(true)
     expect(isFileExplorerMenuKey({ key: 'F10', shiftKey: true, altKey: false, ctrlKey: false, metaKey: false })).toBe(true)
     expect(isFileExplorerMenuKey({ key: 'F10', shiftKey: false, altKey: false, ctrlKey: false, metaKey: false })).toBe(false)
+  })
+})
+
+/**
+ * 菜单标的键必须就是 handler 认的键。
+ *
+ * 这条守的是一次真事故：右键菜单把 Rename 标成 Enter（mac 上 ↩）、把 Delete 标成 ⌘⌫，而 handler 认的
+ * 是 F2 和**裸** Delete/Backspace。于是标出来的键按了没反应，真键一处都没告诉用户。这两个键不在
+ * SHORTCUT_BINDINGS 注册表里，所以 cheat-sheet 的投影抓不到它们——没有任何东西会因为标错而红。
+ *
+ * 判据刻意不是「label 等于某个字面量」：那种断言只是把同一份手抄再抄一遍，两边一起改就一起绿。这里
+ * 断言的是 label 与 matches 的**一致性**——标出来的那个键，喂给 matches 必须为真；而被明确排除的键
+ * （mac 的 Enter、带 Cmd 的 Backspace）必须为假。
+ */
+describe('文件树行内动作键：标签与判据同源', () => {
+  const bare = { shiftKey: false, altKey: false, ctrlKey: false, metaKey: false }
+
+  it('重命名标 F2 且两个平台一致——mac 的 Enter 绝不重命名', () => {
+    expect(FILE_EXPLORER_RENAME_KEY.label(true)).toBe('F2')
+    expect(FILE_EXPLORER_RENAME_KEY.label(false)).toBe('F2')
+    // 标出来的键真的被认。
+    expect(FILE_EXPLORER_RENAME_KEY.matches({ key: 'F2', ...bare })).toBe(true)
+    // 那次事故标错的两个键必须为假：Enter 在树里是「打开/展开」，抢它会吃掉最常用的操作。
+    expect(FILE_EXPLORER_RENAME_KEY.matches({ key: 'Enter', ...bare })).toBe(false)
+    expect(FILE_EXPLORER_RENAME_KEY.matches({ key: 'F2', ...bare, metaKey: true })).toBe(false)
+  })
+
+  it('删除标单键——标 ⌘⌫ 会让人以为需要按住 Cmd 才会删', () => {
+    expect(FILE_EXPLORER_DELETE_KEY.label(true)).toBe('⌫')
+    expect(FILE_EXPLORER_DELETE_KEY.label(false)).toBe('Del')
+    expect(FILE_EXPLORER_DELETE_KEY.matches({ key: 'Delete', ...bare })).toBe(true)
+    expect(FILE_EXPLORER_DELETE_KEY.matches({ key: 'Backspace', ...bare })).toBe(true)
+    // 带修饰键的不认。标签若写成 ⌘⌫ 就与这条矛盾——用户按 Cmd+⌫ 什么也不会发生。
+    expect(FILE_EXPLORER_DELETE_KEY.matches({ key: 'Backspace', ...bare, metaKey: true })).toBe(false)
+  })
+
+  it('标签里出现的键，喂回 matches 必须为真（这条抓的是任何一侧单独漂移）', () => {
+    // 把 label 与 matches 绑在一起判：改了标签而没改判据（或反之）就红。mac 侧的 ⌫ 与 Backspace 是
+    // 同一个物理键的两种写法，所以标签到键名要过一次显式映射——映射表本身也在这条断言的范围内。
+    const keyForLabel: Record<string, string> = { F2: 'F2', '⌫': 'Backspace', Del: 'Delete' }
+    for (const action of [FILE_EXPLORER_RENAME_KEY, FILE_EXPLORER_DELETE_KEY]) {
+      for (const isMac of [true, false]) {
+        const label = action.label(isMac)
+        const key = keyForLabel[label]
+        // 标签必须是我们认得的写法——出现一个映射表里没有的新标签时这条会红，而不是被静默跳过。
+        expect(key, `未知标签 ${label}：新增标签必须同时更新映射与判据`).toBeDefined()
+        expect(action.matches({ key: key!, ...bare })).toBe(true)
+      }
+    }
   })
 })
 

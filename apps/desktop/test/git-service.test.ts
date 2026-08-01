@@ -104,6 +104,40 @@ describe('GitService (contract, fake executor)', () => {
     })
   })
 
+  /**
+   * 非零退出**不等于**「不是仓库」。判据必须读 git 说了什么，而不只是它退了几。
+   *
+   * 为什么必须单独钉：上一条「plain folder」测试把**所有** git 调用都 mock 成那条
+   * `not a git repository` fatal，于是「读 stderr」与「只读 exitCode」两种写法在那个 fixture 下算出
+   * 同一个答案——它无法区分二者。实测把 :611 的谓词化简成 `if (result.exitCode !== 0) return null`
+   * （正是那处注释自己警告的 careless refactor），这个文件 8 条全绿。
+   *
+   * 后果覆盖整个 Source Control 面板：`resolveRepoPath` 喂给 status/stage/commit/diff 四个方法
+   * （:335 :358 :375 :590）。谓词化简后，只要 git 因**任何**原因非零退出（权限不足、dubious
+   * ownership、仓库损坏、git 二进制缺失、index.lock 冲突），面板都答「未关联 Git 仓库」：用户在一个
+   * 明明是仓库的目录里失去暂存、提交、看 diff 的全部入口，而**真因被吞掉**，界面上没有任何线索。
+   *
+   * 孪生谓词在 worktree-service.ts:303 有同一份判断，那一份被守住了
+   * （worktree-service.test.ts「keeps unrelated Git discovery failures fail-closed」，等价变异实测
+   * 5 failed | 23 passed）。这一条是把那个样板补到这一侧。
+   */
+  it.each([
+    'fatal: detected dubious ownership in repository at /srv/repo\n',
+    'fatal: cannot change to /srv/repo: Permission denied\n',
+    'error: object file .git/objects/ab/cdef is empty\n',
+    'fatal: Unable to create /srv/repo/.git/index.lock: File exists.\n'
+  ])('把非零退出的真错误如实抛出，绝不压平成「不是仓库」: %s', async (stderr) => {
+    const host = gitHost()
+    vi.mocked(host.run).mockImplementation(async (_command, args) => gitResult(args, '', stderr, 128))
+    const { service, config: cfg } = withWorkspace(host)
+
+    // 断言落在 status 上——它是唯一把 null 变成一个**用户可见状态**的入口，所以「压平」在这里可观测。
+    await expect(
+      service.status('repo', cfg),
+      '一个真正的 git 失败被压平成「不是仓库」，用户看不到真因也失去全部 git 入口'
+    ).rejects.toThrow(stderr.trim())
+  })
+
   it('stages a file through -- and a :(literal) pathspec so a name is never read as a flag', async () => {
     const host = gitHost()
     const { service, config: cfg } = withWorkspace(host)

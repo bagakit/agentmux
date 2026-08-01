@@ -49,6 +49,8 @@ describe('binding id set', () => {
       'workbench.focus-region.left',
       'workbench.focus-region.right',
       'workbench.focus-region.up',
+      'workbench.next-tab',
+      'workbench.previous-tab',
       'workbench.select-tab.1',
       'workbench.select-tab.2',
       'workbench.select-tab.3',
@@ -197,6 +199,23 @@ describe('non-mac never claims a bare Ctrl+letter', () => {
         `${binding.id} must fire off mac`
       ).toBe(binding.id)
     }
+  })
+
+  it('relative tab nav rides the real bracket keys, and the two directions are not swapped', () => {
+    // 独立于上面那条通用符号规则：它用**声明自己的 key** 造事件，所以「把 `{` 写成 `(`」照旧绿——
+    // 造出来的事件跟着错一起错。这里的字面量取自真实 US 布局：`[`/`]` 加 Cmd（mac），
+    // 而 Ctrl+Shift+`[` 送到的是 `{`、Shift+`]` 是 `}`。
+    expect(matchShortcut(event({ key: '[', metaKey: true }), true, { scope: 'window' }))
+      .toBe('workbench.previous-tab')
+    expect(matchShortcut(event({ key: ']', metaKey: true }), true, { scope: 'window' }))
+      .toBe('workbench.next-tab')
+    expect(matchShortcut(event({ key: '{', ctrlKey: true, shiftKey: true }), false, { scope: 'window' }))
+      .toBe('workbench.previous-tab')
+    expect(matchShortcut(event({ key: '}', ctrlKey: true, shiftKey: true }), false, { scope: 'window' }))
+      .toBe('workbench.next-tab')
+    // 与 help 相反，这两条是 gated 的：在 composer 里打字时按 Cmd+] 不该翻 Tab。
+    expect(matchShortcut(event({ key: ']', metaKey: true }), true, { scope: 'window', editableTarget: true }))
+      .toBeNull()
   })
 
   it('help is reachable: a real US-layout Ctrl+Shift+/ (which delivers "?") summons the cheat-sheet', () => {

@@ -1,9 +1,14 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
   agentSessionServiceOutcome,
   classifyServiceNotice,
   serviceNoticeToRender
 } from '../src/renderer/src/lib/service-window-notice.js'
+import {
+  CONNECTION_LOST_DETAIL,
+  CONNECTION_UNRECOVERABLE_DETAIL
+} from '../src/renderer/src/lib/session-state.js'
 import type { SessionSnapshot } from '../src/shared/contracts.js'
 
 /**
@@ -20,6 +25,7 @@ function agentSession(overrides: {
   state?: SessionSnapshot['status']['state']
   processState?: SessionSnapshot['processState']
   kind?: 'agent' | 'terminal'
+  detail?: string
   terminalCapability?: Extract<SessionSnapshot, { kind: 'agent' }>['terminalCapability']
 }): SessionSnapshot {
   return {
@@ -35,7 +41,12 @@ function agentSession(overrides: {
     executorId: 'claude-code',
     capabilities: {},
     ...(overrides.terminalCapability ? { terminalCapability: overrides.terminalCapability } : {}),
-    status: { state: overrides.state ?? 'working', source: 'run-process', observedAt: 0 },
+    status: {
+      state: overrides.state ?? 'working',
+      source: 'run-process',
+      observedAt: 0,
+      ...(overrides.detail ? { detail: overrides.detail } : {})
+    },
     latestOutputBytes: 0,
     control: { kind: 'agent', hostId: 'local', agentSessionId: 's', run: { runId: 'r', hostId: 'local' } }
   } as unknown as SessionSnapshot
@@ -154,5 +165,119 @@ describe('把一个 Agent Session 映成步骤结局：看进程，不看我们�
     const outcome = agentSessionServiceOutcome(indeterminate)
     expect(outcome).toMatchObject({ completed: false, agentViability: 'unknown' })
     expect(classifyServiceNotice(outcome).kind).toBe('indeterminate')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 失联的两类：还在重连 vs 已经放弃。
+//
+// 缺陷形状：恢复横幅（terminal 视图）早就分了这两类，但**只在终端分支里**——Agent 在 Activity
+// （对话）视图下唯一可见的失联文案就是这条服务窗，而它此前完全不读 `status.detail`。于是抖动预算
+// 用尽后的终局在对话视图下一直说「Reconnecting to this Agent」+「Resume the session to reattach」，
+// 用户以为等一会儿就好，实际上没有任何东西在重试。
+//
+// 判据取自 `status.detail` 那对 SSOT 常量（连接投影唯一的写入点），不是另起一个状态位：状态位就是
+// `disconnected`，两类共用它。
+// ---------------------------------------------------------------------------
+
+/** 抖动预算用尽、自动重连已放弃，但进程还在跑。 */
+const gaveUpButAlive = agentSession({
+  state: 'disconnected',
+  processState: 'running',
+  detail: CONNECTION_UNRECOVERABLE_DETAIL
+})
+/** 还在重连（detail 写的是另一条常量）。 */
+const retryingAndAlive = agentSession({
+  state: 'disconnected',
+  processState: 'running',
+  detail: CONNECTION_LOST_DETAIL
+})
+
+describe('失联的两类文案（Activity 视图下唯一的失联出口）', () => {
+  it('放弃重连后不再说「Reconnecting」——终局不许顶着暂时的皮', () => {
+    // 这是本条的样板。把判据从 detail 上摘掉（两类共用同一份文案）时它变红。
+    const rendered = serviceNoticeToRender(
+      classifyServiceNotice(agentSessionServiceOutcome(gaveUpButAlive))
+    )!
+    expect(rendered.notice.step).not.toContain('Reconnecting')
+    // 且必须说清「等不会好」——否则用户读不出该自己动手。
+    expect(rendered.notice.mode.toLowerCase()).toContain('waiting')
+  })
+
+  it('还在重连时照旧说「Reconnecting」——不许把暂时说成终局', () => {
+    // 反向那一侧。若实现宽到「disconnected 一律说已放弃」，上面那条仍绿而一次正常抖动会被
+    // 说成判死，用户白白手动重开。
+    const rendered = serviceNoticeToRender(
+      classifyServiceNotice(agentSessionServiceOutcome(retryingAndAlive))
+    )!
+    expect(rendered.notice.step).toContain('Reconnecting')
+    expect(rendered.notice.mode).toContain('still running')
+  })
+
+  it('终局不许带上「重连中」那句话的安慰词——措辞近似就等于没分类', () => {
+    // 本仓栽过「not.toBe 逐字不等仍可能同一句话要求两件相反的事」。但「实词无交集」是错的判据：
+    // 两句话**本来就在说同一个东西**（link），共用主语名词是应该的。真正不许共用的是让人读出
+    // 「等着就好」的那几个进行时——它们正是「还在重连」那条的全部安慰。
+    const REASSURANCES = ['still running', 'reconnecting', 'retrying']
+    const gaveUp = serviceNoticeToRender(
+      classifyServiceNotice(agentSessionServiceOutcome(gaveUpButAlive))
+    )!
+    const retrying = serviceNoticeToRender(
+      classifyServiceNotice(agentSessionServiceOutcome(retryingAndAlive))
+    )!
+    const gaveUpText = `${gaveUp.notice.step} ${gaveUp.notice.mode}`.toLowerCase()
+    const retryingText = `${retrying.notice.step} ${retrying.notice.mode}`.toLowerCase()
+
+    // 自检：这张清单不是为了让断言通过而挑的词——它必须真的是「还在重连」那条在用的措辞。
+    // 若哪天那条改了词，这里先红，提醒把清单跟上，而不是让下面的检查变成恒真。
+    expect(
+      REASSURANCES.filter((phrase) => retryingText.includes(phrase)),
+      '判据失效了：清单里没有一个词是「还在重连」那条真在用的'
+    ).not.toEqual([])
+
+    expect(REASSURANCES.filter((phrase) => gaveUpText.includes(phrase))).toEqual([])
+    // 且两句话不能逐字相同（上面那条挡不住「两边都不带安慰词」的退化写法）。
+    expect(gaveUp.notice.mode).not.toBe(retrying.notice.mode)
+  })
+
+  it('放弃之后仍是第 2 类（放行 + 提醒），不是阻断', () => {
+    // 放弃的是**我们的连接**，不是 Agent：进程还在跑，所以照旧不阻断。若这里退化成 agent-broken，
+    // 服务窗会整条消失（agent-broken 不渲染），而 Activity 视图没有横幅接手 —— 用户回到彻底静默。
+    const classification = classifyServiceNotice(agentSessionServiceOutcome(gaveUpButAlive))
+    expect(classification.kind).toBe('process-degraded')
+    expect(serviceNoticeToRender(classification)).not.toBeNull()
+  })
+
+  it('放弃且进程也退了仍是第 1 类——detail 不许盖过进程事实', () => {
+    // 判据的优先级：Agent 还能不能干活（进程）永远压过「我们的连接怎么了」（detail）。
+    const outcome = agentSessionServiceOutcome(
+      agentSession({
+        state: 'disconnected',
+        processState: 'exited',
+        detail: CONNECTION_UNRECOVERABLE_DETAIL
+      })
+    )
+    expect(classifyServiceNotice(outcome).kind).toBe('agent-broken')
+  })
+
+  it('detail 缺席时按「还在重连」讲——缺席不等于放弃', () => {
+    // 老快照、非连接来源的 disconnected 都可能没有 detail。把缺席读成放弃，会让一次普通断连
+    // 直接劝用户动手。
+    const rendered = serviceNoticeToRender(
+      classifyServiceNotice(agentSessionServiceOutcome(aliveButDisconnected))
+    )!
+    expect(rendered.notice.step).toContain('Reconnecting')
+  })
+
+  it('判据引用 SSOT 常量而不是手抄那句话', () => {
+    // 手抄的那份必然漂移：连接投影改一个字，这条判定就静默退回「一律说重连」。所以钉 import 关系。
+    const source = readFileSync(
+      new URL('../src/renderer/src/lib/service-window-notice.ts', import.meta.url),
+      'utf8'
+    )
+    expect(source).toContain('CONNECTION_UNRECOVERABLE_DETAIL')
+    expect(source).toContain("from './session-state'")
+    // 自检：别让上面两条被一句注释满足。判据必须真的参与比较。
+    expect(source).toContain('=== CONNECTION_UNRECOVERABLE_DETAIL')
   })
 })

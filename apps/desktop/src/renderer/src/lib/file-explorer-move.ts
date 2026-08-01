@@ -85,6 +85,41 @@ export function isFileExplorerMenuKey(event: {
   )
 }
 
+/**
+ * 文件树自己那两个行内动作键——重命名与删除。
+ *
+ * 它们不在 SHORTCUT_BINDINGS 注册表里（那张表管的是窗口级和编辑器级的和弦），所以 cheat-sheet 的投影
+ * 抓不到它们。历史后果：右键菜单把 Rename 标成 Enter、把 Delete 标成 ⌘⌫，而 handler 认的是 F2 和**裸**
+ * Delete/Backspace——标出来的键按了没反应，真键一处都没告诉用户。
+ *
+ * 所以判据与展示必须出自同一处：`matches` 是 handler 唯一的判断，`label` 是菜单唯一的取值来源。两者
+ * 分开手抄的形状必然再漂一次，而漂了没人会红。
+ */
+export type FileExplorerActionKey = {
+  /** 这个键在当前平台上怎么写给用户看（菜单的 kbd 直接用它）。 */
+  label: (isMac: boolean) => string
+  /** handler 的唯一判据。修饰键要求写在这里，而不是散在组件里。 */
+  matches: (event: { key: string; shiftKey: boolean; altKey: boolean; ctrlKey: boolean; metaKey: boolean }) => boolean
+}
+
+/** 重命名：F2，不带修饰键。macOS 上同样是 F2——它不是 mac 的 Enter，那个键在树里是「打开/展开」。 */
+export const FILE_EXPLORER_RENAME_KEY: FileExplorerActionKey = {
+  label: () => 'F2',
+  matches: (event) =>
+    event.key === 'F2' && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey
+}
+
+/**
+ * 删除：裸 Delete 或 Backspace，**不要**修饰键。mac 上标 ⌘⌫ 是错的——那是 Finder 的约定，本树按
+ * 单独一个 ⌫ 就会请求删除，所以标签必须如实写单键，否则用户会以为需要按住 Cmd 才安全。
+ */
+export const FILE_EXPLORER_DELETE_KEY: FileExplorerActionKey = {
+  label: (isMac) => (isMac ? '⌫' : 'Del'),
+  matches: (event) =>
+    (event.key === 'Delete' || event.key === 'Backspace') &&
+    !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey
+}
+
 function hasUnknownFinalLocation(error: unknown): boolean {
   return typeof error === 'object' && error !== null &&
     'finalLocation' in error && error.finalLocation === 'unknown'

@@ -247,4 +247,28 @@ describe('DiffBlock 渲染', () => {
 
     expect(markup).toContain('truncated')
   })
+
+  /**
+   * 没截断就**不许**说截断了。
+   *
+   * 上面那条只守了「该出现时出现」；把提示改成无条件渲染（`{true ? …}`）时 15 条全绿，而任何一次
+   * 完整的短 diff 都会显示 "Diff truncated at 200 lines."——用户以为自己漏看了行，去别处找不存在的
+   * 剩余内容。一条判据的两侧必须各有一条测试，这是本仓反复出现的「只守一侧」形状。
+   */
+  it('没截断就不说截断——提示的另一侧', () => {
+    const markup = renderToStaticMarkup(createElement(DiffBlock, {
+      diff: {
+        lines: [
+          { kind: 'removed' as const, text: 'const a = 1' },
+          { kind: 'added' as const, text: 'const a = 2' }
+        ],
+        truncated: false
+      }
+    }))
+
+    // 先证 diff 本体真的渲染了，否则下面的 not 是在空输出上恒真。
+    expect(markup).toContain('log-diff__line--added')
+    expect(markup).not.toContain('log-diff__truncated')
+    expect(markup).not.toContain('truncated')
+  })
 })

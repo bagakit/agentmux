@@ -80,6 +80,10 @@ vi.mock('../src/renderer/src/components/AgentInteractionCard.js', () => ({
 }))
 
 import { SessionPane } from '../src/renderer/src/components/SessionPane.js'
+import {
+  CONNECTION_LOST_DETAIL,
+  CONNECTION_UNRECOVERABLE_DETAIL
+} from '../src/renderer/src/lib/session-state.js'
 
 function session(kind: 'agent' | 'terminal'): SessionSnapshot {
   const common = {
@@ -101,11 +105,9 @@ function session(kind: 'agent' | 'terminal'): SessionSnapshot {
         executorId: 'codex',
         capabilities: {
           terminal: true,
-          hookEvents: true,
           timeline: 'complete-events',
           permission: 'observe',
           providerResume: true,
-          acp: false,
           replyCorrelation: 'none'
         },
         control: { kind: 'agent', hostId: 'local', agentSessionId: 'agent-1', run: { runId: 'run-1' } }
@@ -497,5 +499,60 @@ describe('SessionPane 把两类 conflict 渲染成两件不同的事', () => {
     expect(button).toContain('continuityRetryEnabled(continuityNotice)\n                            ? () => void recover()')
     // 两个判据都要参与 disabled，否则其中一类的按钮会是死的。
     expect(button).toContain('continuityRetryEnabled(continuityNotice) || continuityRefreshEnabled(continuityNotice)')
+  })
+})
+
+/**
+ * 失联的两类必须在标题上分家：还在重连 vs 已经放弃。
+ *
+ * 这不是文案洁癖。抖动预算用尽后 Core 发 `unrecoverable`，渲染端把 Agent 置成 `disconnected`
+ * ——与短暂 `lost` 同一个状态位。只认状态位的话，终局会顶着「Remote terminal disconnected /
+ * Reconnecting…」的皮：用户以为等一会儿就好，而实际上没有任何东西还在重试。区分它们的判据是
+ * `status.detail`（连接投影写下的那一对 SSOT 常量）。
+ *
+ * 这个横幅在 SSR 下就渲染（不依赖任何 useState 展开），所以能真断言渲染结果而不是源码文本。
+ */
+describe('SessionPane 失联横幅区分「重连中」与「已放弃」', () => {
+  afterEach(() => { fixture.state.sessions = [] })
+
+  function disconnectedAgent(detail: string): SessionSnapshot {
+    const base = session('agent')
+    return {
+      ...base,
+      status: { state: 'disconnected', source: 'run-process', observedAt: 9, detail }
+    }
+  }
+
+  it('重连中：标题说断开、正文说进程还在跑', () => {
+    fixture.state.sessions = [disconnectedAgent(CONNECTION_LOST_DETAIL)]
+    const markup = render('agent-1', 'agent')
+
+    expect(markup).toContain('Remote terminal disconnected')
+    expect(markup).not.toContain('Can’t reach this host')
+    // 正文必须真的把那条 detail 交出去，否则用户拿不到「进程还在跑」这个关键事实。
+    expect(markup).toContain('only this window')
+  })
+
+  it('已放弃：标题改口说连不上，且正文指向手动恢复', () => {
+    // 把 SessionPane 里那个 gaveUpReconnecting 判据删掉（或让它恒 false），本条红——那正是
+    // 「终局伪装成暂时」的形状。
+    fixture.state.sessions = [disconnectedAgent(CONNECTION_UNRECOVERABLE_DETAIL)]
+    const markup = render('agent-1', 'agent')
+
+    expect(markup).toContain('Can’t reach this host')
+    // 且绝不能同时挂着「重连中」那套说法。
+    expect(markup).not.toContain('Remote terminal disconnected')
+    expect(markup).toContain('Resume')
+  })
+
+  it('两类渲染出的标题确实不同——判据不是恒真也不是恒假', () => {
+    // 单独一条各自断言时，把判据写成恒 true 或恒 false 都只会打红其中一条；这条把两次渲染放在
+    // 一起比，任何「两类都走同一分支」的写法都会红。
+    fixture.state.sessions = [disconnectedAgent(CONNECTION_LOST_DETAIL)]
+    const reconnecting = render('agent-1', 'agent')
+    fixture.state.sessions = [disconnectedAgent(CONNECTION_UNRECOVERABLE_DETAIL)]
+    const gaveUp = render('agent-1', 'agent')
+
+    expect(reconnecting).not.toBe(gaveUp)
   })
 })

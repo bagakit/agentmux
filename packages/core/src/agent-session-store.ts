@@ -437,9 +437,18 @@ function hookReceipt(value: unknown): AgentHookReceipt {
   const outputCursorBytes = source.outputCursorBytes === undefined
     ? undefined
     : timestamp(source.outputCursorBytes, 'hookReceipt.outputCursorBytes')
-  if ((eventName === 'Stop') !== (outputCursorBytes !== undefined)) {
+  // 承重的是**一个方向**：有光标 ⟹ 必须是 Stop。它防的是伪造——任何非 Stop 回执都不许携带一个
+  // 「权威输出光标」，否则 composer 就绪判定会以一个 mid-turn 的字节位置为边界，把上一轮的提示符
+  // 认成这一轮的。
+  //
+  // 反方向（Stop ⟹ 必须有光标）**不承重，且会被 wire 抖动打破**：取光标要向内核问一次 run 状态，
+  // 而断线期间那次调用抛 CTXMUX_DISCONNECTED。原先这里写成双条件，逼得 client 要么带着光标一起
+  // 失败（则整条 Stop 丢失、Agent 永久卡 working），要么编一个假光标。两条都比「Stop 落盘、光标缺席」
+  // 坏。所以这里只守伪造那一侧：缺席就是缺席，下游 readiness 也一并缺席，下一次发 prompt 收到
+  // `epoch-missing` 的响亮拒绝，而不是一次静默走错边界的发送。
+  if (outputCursorBytes !== undefined && eventName !== 'Stop') {
     throw new AgentMuxError(
-      'Only native Stop receipts must carry an authoritative output cursor.',
+      'Only native Stop receipts may carry an authoritative output cursor.',
       'INVALID_AGENT_SESSION_STORE'
     )
   }
@@ -1013,10 +1022,13 @@ export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgent
     )
   }
   const readiness = session.terminalPromptReadiness
+  // 被认领过的 readiness epoch 必须指得出认领它的那次 submission。
+  // 注意这里**没有** `readiness.readyThroughByte === undefined` 那一项：`terminalPromptReadiness()`
+  // 的归一化已经先拦下「有 consumedBySubmissionId 却没有 readyThroughByte」这个组合，所以那一项在
+  // 这里永远为假、不可能改变结果。它曾经在场，是一条不可达的条件（把它删掉不会让任何测试变红）。
   if (
     readiness?.consumedBySubmissionId !== undefined &&
     (
-      readiness.readyThroughByte === undefined ||
       !submission ||
       submission.submissionId !== readiness.consumedBySubmissionId ||
       submission.readinessId !== readiness.id

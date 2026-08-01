@@ -150,10 +150,33 @@ function sessionAttachmentHostId(key: string): string {
   return value[0]
 }
 
+/**
+ * 从一个 client 的 Provider registry 取能力声明——快照里每一处 `capabilities` 的唯一来源。
+ *
+ * 为什么是这个具名函数、而不是让每个调用方自己写那句 `client.providers.get(id).catalog.capabilities`：
+ * 那句查询此前在三个地方各抄一份（两个 `projectSession` 调用点，加 `recoveryCandidates` 自己那一处）。
+ * 手抄的查询会漂移（一处改成读别的字段、一处忘了改），而"能力声明从 Provider 自己的 catalog 来"是
+ * **一条规则**，只该有一个取值点。registry 的 `get` 对未知 id 抛 `UNKNOWN_PROVIDER`，所以取不到能力时
+ * 是响亮失败，不会退化成一份"什么都不支持"的假声明。
+ */
+function providerCapabilitiesFrom(
+  client: AgentMuxClient
+): (providerId: AgentProviderId) => AgentCapabilities {
+  return (providerId) => client.providers.get(providerId).catalog.capabilities
+}
+
 function projectSession(
   subject: AgentMuxRuntimeSubject,
   config: AppConfig,
-  capabilities?: AgentCapabilities
+  // 「这个 Provider 声明了什么能力」的取值口。收成一个 resolver 而不是一个可选的 `capabilities` 值：
+  // 可选值那种写法要求每个调用方自己写 `kind === 'agent' ? 查一下 : undefined`，于是同一句查询在两个
+  // 调用点各抄一份，而 terminal 分支传的 undefined 又逼这里留一份手写的兜底 capabilities 字面量。
+  // 那份字面量对 agent 恒不可达（两个调用点都传真 catalog），却是全仓第三份手抄的 `AgentCapabilities`
+  // ——实测把它四个取值全改，runtime-controller 那 42 条与整套 desktop 测试都全绿。
+  //
+  // 换成 resolver 之后：agent 分支必须调它才拿得到能力（拿不到就是 UNKNOWN_PROVIDER 响亮地抛，不是
+  // 静默退化成一份"什么都不支持"的假声明），terminal 分支根本不调，于是兜底字面量没有存在的理由。
+  capabilitiesFor: (providerId: AgentProviderId) => AgentCapabilities
 ): SessionSnapshot {
   const run = subject.run
   const observedAt = run.observedAt
@@ -179,13 +202,7 @@ function projectSession(
       kind: 'agent',
       providerId: subject.providerId,
       executorId: subject.executorId,
-      capabilities: capabilities ?? {
-        terminal: true,
-        timeline: 'unavailable',
-        permission: 'none',
-        providerResume: false,
-        replyCorrelation: 'none'
-      },
+      capabilities: capabilitiesFor(subject.providerId),
       hostId: subject.hostId,
       workspacePath: subject.workspacePath,
       label: agentFallbackLabel(config, subject),
@@ -487,15 +504,12 @@ export class RuntimeController {
       }
     }
     const sessions = projections.flatMap(({ client, projection }) => projection.subjects.map((subject) => (
-      projectSession(
-        subject,
-        config,
-        subject.kind === 'agent'
-          ? client.providers.get(subject.providerId).catalog.capabilities
-          : undefined
-      )
+      projectSession(subject, config, providerCapabilitiesFrom(client))
     )))
     const recoveryCandidates = projections.flatMap(({ client, projection }) => {
+      // 与 sessions 同一个取值口。这条出口此前自己抄了一遍那句 registry 查询——两个都在投影
+      // `capabilities`、都该按 Session 自己的 providerId 取，却是两份各自可漂移的表达式。
+      const capabilitiesFor = providerCapabilitiesFrom(client)
       const projected = new Set(projection.subjects.flatMap((subject) => (
         subject.kind === 'agent' ? [subject.agentSession.agentSessionId] : []
       )))
@@ -507,7 +521,7 @@ export class RuntimeController {
           workspacePath: session.workspacePath,
           providerId: session.providerId,
           executorId: session.executorId,
-          capabilities: client.providers.get(session.providerId).catalog.capabilities,
+          capabilities: capabilitiesFor(session.providerId),
           ...(session.terminalCapability
             ? { terminalCapability: structuredClone(session.terminalCapability) }
             : {}),
@@ -1107,13 +1121,7 @@ export class RuntimeController {
         : candidate.run.runId === subjectId
     ))
     if (!subject) throw new Error(`Runtime subject is not available: ${subjectId}`)
-    return projectSession(
-      subject,
-      config,
-      subject.kind === 'agent'
-        ? client.providers.get(subject.providerId).catalog.capabilities
-        : undefined
-    )
+    return projectSession(subject, config, providerCapabilitiesFrom(client))
   }
 
   private async serializeSessionAttachment<T>(key: string, operation: () => Promise<T>): Promise<T> {

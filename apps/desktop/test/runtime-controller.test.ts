@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   AgentMuxError,
+  type AgentCapabilities,
   type AgentMuxAgentContinuityResult,
   type AgentMuxAgentSessionStore,
   type AgentMuxRuntimeProjection
@@ -158,19 +159,43 @@ const runtimeFixture = vi.hoisted(() => {
       revision: 0,
       items: []
     }))
+    // 每个 Provider 给一份**互不相同**的能力声明，且必须按传进来的 id 取。
+    //
+    // 为什么不能像原先那样 `get: vi.fn(() => 同一个对象)`：那样的 fixture 让"按这个 Session 自己的
+    // providerId 去查"与"返回一个常量"在断言下完全等价——实测把生产侧的取值口整个换成一份写死的
+    // "什么都不支持"，42 条照旧全绿。能力声明是要往界面上决定"这个 Agent 有没有时间轴/能不能恢复"的，
+    // 取错 Provider 的那一份就是把别家的能力安到这家头上，而这一族此前无人守。
+    // 只有让不同 id 的取值真的不同，投影里那个 id 才有人质询。
+    //
+    // 每个值都必须是 `AgentCapabilities` 联合里的**合法成员**：desktop 的 tsconfig include 只有
+    // `src/**`，test/ 不在其中，vitest 又只转译不查类型——所以这里写一个不存在的枚举值（曾经写过
+    // `timeline:'incremental-events'`）没有任何东西会拦，而这份 fixture 的隐含前提正是"它长得像一份
+    // 真 Provider 声明"。区分两家靠的是**选不同的合法成员**，不是编新成员。
+    static readonly PROVIDER_CAPABILITIES: Record<string, AgentCapabilities> = {
+      codex: {
+        terminal: true,
+        timeline: 'complete-events',
+        permission: 'observe',
+        providerResume: true,
+        replyCorrelation: 'none'
+      },
+      claude: {
+        terminal: true,
+        timeline: 'streaming',
+        permission: 'respond',
+        providerResume: false,
+        replyCorrelation: 'native-turn-id'
+      }
+    }
     readonly providers = {
       catalog: vi.fn(() => []),
-      get: vi.fn(() => ({
-        catalog: {
-          capabilities: {
-            terminal: true as const,
-            timeline: 'complete-events' as const,
-            permission: 'observe' as const,
-            providerResume: true,
-            replyCorrelation: 'none' as const
-          }
-        }
-      }))
+      get: vi.fn((providerId: string) => {
+        const capabilities = FakeClient.PROVIDER_CAPABILITIES[providerId]
+        // 未知 id 响亮地抛，与真 registry 的 UNKNOWN_PROVIDER 同一个姿态：取不到能力绝不能静默
+        // 退化成一份假声明，那正是被删掉的那个兜底字面量犯的错。
+        if (!capabilities) throw new Error(`UNKNOWN_PROVIDER: ${providerId}`)
+        return { catalog: { capabilities } }
+      })
     }
     readonly runtimeProjection = vi.fn(async (): Promise<AgentMuxRuntimeProjection> => ({ hostId: 'fixture', subjects: [] }))
     readonly runtimeIdentity = vi.fn(() => ({
@@ -1192,6 +1217,86 @@ describe('RuntimeController configuration transaction', () => {
     ).toBe(true)
     // 对照：同一条 status 在它自己那一刻还不算陈旧。少了这条，上面那句在「判据恒为真」时也会绿。
     expect(semanticStatusStale(projected.status, lastHeardFrom)).toBe(false)
+  })
+
+  it('每个 Session 的能力声明按它自己的 providerId 取，两家不同的 Provider 不共用一份', async () => {
+    // 这条守的是「能力声明从哪来」这条规则本身，而不是某几个取值。
+    //
+    // 为什么必须让两家 Provider 同场、且声明互不相同：能力投影此前完全无人守——把取值口整个换成一份
+    // 写死的"什么都不支持"字面量，42 条全绿。原因是 fixture 的 `providers.get` 忽略入参恒返回同一个
+    // 对象，于是"按这个 Session 的 providerId 查"与"返回常量"在断言下无从区分。两家同场之后，常量化、
+    // 取错 id（比如两处都拿第一个 subject 的 providerId）、读错字段都会红。
+    //
+    // 为什么这件事值得守：`timeline` 决定界面给不给这个 Agent 画时间轴，`providerResume` 决定"恢复"
+    // 按钮是不是死的。安错一家的声明，用户看到的是一个对着能恢复的 Agent 不给恢复、或对着没有时间轴的
+    // Provider 画一个永远空的时间轴的界面——两者都不会报错，只是静默地不对。
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const codex = agentStatusFixture()
+    const claude = agentStatusFixture()
+    claude.session = { ...claude.session, agentSessionId: 'agent-2', providerId: 'claude' }
+    claude.run = { ...claude.run, runId: 'run-2', agentSessionId: 'agent-2', providerId: 'claude' }
+
+    client.runtimeProjection.mockResolvedValue({
+      hostId: 'local',
+      subjects: [{
+        subjectId: 'agent:local:agent-1',
+        kind: 'agent',
+        hostId: 'local',
+        workspacePath: '/repo',
+        providerId: 'codex',
+        executorId: codex.session.executorId,
+        agentSession: codex.session,
+        run: { ...codex.run, state: 'running' as const, exitCode: undefined }
+      }, {
+        subjectId: 'agent:local:agent-2',
+        kind: 'agent',
+        hostId: 'local',
+        workspacePath: '/repo',
+        providerId: 'claude',
+        executorId: claude.session.executorId,
+        agentSession: claude.session,
+        run: { ...claude.run, state: 'running' as const, exitCode: undefined }
+      }]
+    })
+
+    const snapshot = await controller.snapshot(localConfig)
+    const byId = new Map(snapshot.sessions.map((session) => [session.id, session]))
+
+    // 逐条对上 registry 里那一家自己的声明。期望值从 fixture 的那张表取，不在这里手抄——手抄一份就又是
+    // 一处可漂移的副本，而且期望值若由被测取值口算出来，它会跟着变异一起漂、断言恒真。
+    expect(byId.get('agent-1')?.capabilities)
+      .toEqual(runtimeFixture.FakeClient.PROVIDER_CAPABILITIES.codex)
+    expect(byId.get('agent-2')?.capabilities)
+      .toEqual(runtimeFixture.FakeClient.PROVIDER_CAPABILITIES.claude)
+    // 显式钉死"两家不一样"。少了这条，把两个 Session 的能力都取成同一家（或都取成一份常量）时上面
+    // 两句里至少有一句仍可能绿——而"所有 Agent 共用一份能力"正是这个缺陷的实际形状。
+    expect(byId.get('agent-1')?.capabilities)
+      .not.toEqual(byId.get('agent-2')?.capabilities)
+    // registry 必须真的被按各自的 id 问过：取值口若被换成常量，这两句会红而不必依赖取值恰好不同。
+    expect(client.providers.get).toHaveBeenCalledWith('codex')
+    expect(client.providers.get).toHaveBeenCalledWith('claude')
+  })
+
+  it('恢复候选的能力声明与在场 Session 走同一个取值口，不是自己抄一遍 registry 查询', async () => {
+    // 分开钉这条出口：`recoveryCandidates` 曾自己抄了一遍那句 registry 查询，两处都在投影
+    // `capabilities` 却是两份可独立漂移的表达式。恢复候选正是"进程没了但会话还在"的那一批，
+    // `providerResume` 取错就直接决定用户能不能把它救回来。
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const stored = { ...client.agentSession(), providerId: 'claude' as const }
+    client.agentSessions.mockReturnValue([stored])
+    client.runtimeProjection.mockResolvedValue({ hostId: 'local', subjects: [] })
+
+    const snapshot = await controller.snapshot(localConfig)
+
+    expect(snapshot.recoveryCandidates[0]?.capabilities)
+      .toEqual(runtimeFixture.FakeClient.PROVIDER_CAPABILITIES.claude)
+    // 对照：不能是默认那家（fixture 里 codex 与 claude 的声明刻意不同），否则"按 Session 自己的
+    // providerId 取"与"取了个别的"无从区分。
+    expect(snapshot.recoveryCandidates[0]?.capabilities)
+      .not.toEqual(runtimeFixture.FakeClient.PROVIDER_CAPABILITIES.codex)
+    expect(client.providers.get).toHaveBeenCalledWith('claude')
   })
 
   it('projects a stored Agent with a missing Run only as an exact recovery candidate', async () => {

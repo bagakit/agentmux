@@ -12,7 +12,11 @@ import {
   Trash2
 } from 'lucide-react'
 import type { ReactNode } from 'react'
-import type { FileExplorerMoveTarget } from '../../lib/file-explorer-move'
+import {
+  FILE_EXPLORER_DELETE_KEY,
+  FILE_EXPLORER_RENAME_KEY,
+  type FileExplorerMoveTarget
+} from '../../lib/file-explorer-move'
 
 function stopRightButtonSelection(event: React.PointerEvent): void {
   if (event.button !== 2) return
@@ -110,7 +114,7 @@ export function FileTreeContextMenu({
           <ContextMenu.Separator className="tab-context-menu__separator" />
           {canRename ? (
             <ContextMenu.Item className="tab-context-menu__item" onSelect={onRename}>
-              <Pencil size={14} /><span>Rename</span><kbd>{isMac ? '↩' : 'Enter'}</kbd>
+              <Pencil size={14} /><span>Rename</span><kbd>{FILE_EXPLORER_RENAME_KEY.label(isMac)}</kbd>
             </ContextMenu.Item>
           ) : null}
           <ContextMenu.Sub>
@@ -132,7 +136,7 @@ export function FileTreeContextMenu({
             </ContextMenu.Portal>
           </ContextMenu.Sub>
           <ContextMenu.Item className="tab-context-menu__item file-context-menu__danger" onSelect={onDelete}>
-            <Trash2 size={14} /><span>Delete</span><kbd>{isMac ? '⌘⌫' : 'Del'}</kbd>
+            <Trash2 size={14} /><span>Delete</span><kbd>{FILE_EXPLORER_DELETE_KEY.label(isMac)}</kbd>
           </ContextMenu.Item>
         </ContextMenu.Content>
       </ContextMenu.Portal>
