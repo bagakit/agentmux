@@ -4066,6 +4066,37 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   name: 'agentmux-workbench-v1',
   version: 1,
   storage: createJSONStorage(() => persistentWorkbenchStorage.storage),
+  /**
+   * 版本前进时把上一版的记录原样带过来，一个字段都不重置。
+   *
+   * 没有这个函数时，zustand 遇到版本不等只会 `console.error` 然后把这份记录当成**不存在**：
+   * 实测 zustand 5.0.14 的 hydrate 分支 `return [false, undefined]`，
+   * `merge(undefined, get())` 把整份状态换成内存默认值，`hasHydrated()` 照旧变 true，
+   * 而 `onRehydrateStorage` 的 error 参数是 `undefined`。三件坏事同时发生：
+   *   - 用户的 Tab / 布局 / 侧栏宽度 / 换行开关 / 自己起的 Agent 名字全部消失；
+   *   - 上面那道写闸（`persistWritesEnabled`）因为 hydration「成功」了而照旧打开；
+   *   - 于是下一次写入覆盖掉唯一的副本。
+   * 换句话说 bump 一下版本号就是一次静默数据销毁，而两个检测点（:4073 的 error 分支、
+   * `ensurePersistHydrated` 里那条 `!hasHydrated()` 合成检查）都看不见它。
+   *
+   * 为什么可以整份带过来、不需要挑：判据是**这条记录的缺席是否含糊**（与主进程侧
+   * `authoredConfigCarryOver` 同一条判据）。这里持久化的每一项都是「在场就是用户的选择，
+   * 不在场就是没设过」，没有任何一项存在「配置写在这个字段出现之前」与「用户主动关掉了它」
+   * 分不清的情况——那种含糊只发生在**按内置 id 建键**的集合上，主进程侧的内置 Executor 表是
+   * 本仓唯一那个例子。所以这里没有该重置的半边。
+   *
+   * 这不是兼容层：它不认识任何具体的旧版本号，没有 `if (from === 1)` 分支，也不会随版本增长。
+   * 形状变了由下游各自的逐条校验（`projectPersistedWorkbench`、`orderTopics`、
+   * `restorePersistedUiState` 里那些 enum 与 Workspace 存在性校验）把认不出的条目丢掉——
+   * 那些校验本来就在。这里只负责不要整份丢。
+   *
+   * 那次 cast 断言的**不是**「这份记录合法」——它不合法也照样交出去。断言的是「版本前进这条路
+   * 对记录的信任程度与版本相等那条路**完全相同**」：版本相等时 zustand 直接把反序列化出来的
+   * `state` 交给 merge，同样不校验任何字段。两条路都把校验留给真正的取值点
+   * （`projectPersistedWorkbench`、`orderTopics`、`restorePersistedUiState`）。所以这个函数
+   * 一旦开始挑字段或修形状，它就变成了兼容层；它的正确实现只能是恒等。
+   */
+  migrate: (persisted) => persisted as PersistedAppState,
   // Startup owns the hydration boundary explicitly. `initialize()` must not ask Core for recovery
   // candidates until the persisted Workbench and UI projection have been merged.
   skipHydration: true,
