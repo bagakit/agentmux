@@ -56,8 +56,8 @@ function agent(
     providerId: 'codex',
     executorId: 'codex',
     capabilities: {
-      terminal: true, hookEvents: true, timeline: 'streaming', permission: 'observe',
-      providerResume: true, acp: false, replyCorrelation: 'none'
+      terminal: true, timeline: 'streaming', permission: 'observe',
+      providerResume: true, replyCorrelation: 'none'
     },
     hostId: 'local',
     workspacePath: scratchWorkspace.path,
@@ -85,7 +85,10 @@ function scratchTopicTab(tabId: string, topicId?: string): WorkbenchTab {
   return topicId ? { ...tab, topicId } : tab
 }
 
-function mountScratch(tabs: WorkbenchTab[]): void {
+function mountScratch(
+  tabs: WorkbenchTab[],
+  workspaceFileRevisions: Record<string, number> = {}
+): void {
   useAppStore.setState({
     config,
     sessions: [],
@@ -95,7 +98,7 @@ function mountScratch(tabs: WorkbenchTab[]): void {
     tabs: Object.fromEntries(tabs.map((tab) => [tab.id, tab])),
     layouts: { [scratchWorkspace.id]: createWorkspaceLayout('group', tabs.map((tab) => tab.id)) },
     closingWorkbenchViews: {},
-    workspaceFileRevisions: {},
+    workspaceFileRevisions,
     pendingAgentLaunches: {},
     error: null
   })
@@ -181,6 +184,112 @@ describe('T-001 explicit Topic on Agent launch', () => {
       tabId: corrupt.id, regionId: corrupt.layout.activeRegionId
     })).rejects.toThrow(/invalid Topic/i)
     expect(launchAgent).not.toHaveBeenCalled()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 在 Topic 里起 Agent 会在盘上建协作者文件，所以文件树的失效计数必须前进。
+//
+// 为什么单独一族：`workspace-file-revision.test.ts` 那边只执行了三个写入面（建 Topic / 改标题 /
+// 建笔记），这个第四面从来没被跑到过——实测把它的实参换成 `{}`（清掉别人的计数）、换成错的
+// workspace id、或者把整段条件改成永假，那 8 条断言全绿。「同一个纯函数被单测过」不等于
+// 「这个调用点被执行过、且喂的是对的东西」。
+//
+// 判据落在这里而不是新开文件：起 Agent 的整条流程（launch → canonicalize → attach）在上面已经
+// 跑通，另起一份 mock 只会得到第二套会漂移的前提。
+//
+// 症状：在 Topic 里起了 agent，它的协作者文件已经落盘，而文件树不显示——直到别的写入面碰巧
+// bump 一次。
+// ---------------------------------------------------------------------------
+describe('在 Topic 里起 Agent 让文件树失效', () => {
+  const BYSTANDER_REVISION = 41
+  const TARGET_REVISION = 7
+
+  /** 摆好一个绑定 Topic 的 View，并把两格计数都摆上非零初值。 */
+  function mountBoundTopic(): WorkbenchTab {
+    const bound = scratchTopicTab('launcher:one', 'view:shared')
+    mountScratch([bound], {
+      [SCRATCH_WORKSPACE_ID]: TARGET_REVISION,
+      bystander: BYSTANDER_REVISION
+    })
+    vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async (input) =>
+      launch(agent(input.agentSessionId!, { workspacePath: topicWorkspacePath('view:shared') }))
+    )
+    return bound
+  }
+
+  function revisions(): Record<string, number> {
+    return useAppStore.getState().workspaceFileRevisions
+  }
+
+  it('前提自检：这次启动真的走到了 attach——不是被前面某道守卫拦掉', async () => {
+    // 启动被拦掉时「计数没动」与「漏 bump」完全同形，所以先钉住 Session 真的挂上了。
+    const bound = mountBoundTopic()
+
+    await useAppStore.getState().launchAgent('codex', 'first', 'group', {
+      tabId: bound.id, regionId: bound.layout.activeRegionId
+    })
+
+    expect(useAppStore.getState().sessions).toHaveLength(1)
+    expect(revisions().bystander, 'fixture 没把旁观者那格摆上，判据会从零开始').toBe(BYSTANDER_REVISION)
+  })
+
+  it('目标 Workspace +1，旁观者分毫不动', async () => {
+    const bound = mountBoundTopic()
+
+    await useAppStore.getState().launchAgent('codex', 'first', 'group', {
+      tabId: bound.id, regionId: bound.layout.activeRegionId
+    })
+
+    expect(
+      revisions()[SCRATCH_WORKSPACE_ID],
+      '起 Agent 没有让文件树失效——新建的协作者文件在树里看不见'
+    ).toBe(TARGET_REVISION + 1)
+    expect(revisions().bystander, '别的 Workspace 的计数被动了').toBe(BYSTANDER_REVISION)
+  })
+
+  it('连起两个就前进两格——不是「设成某个常量」', async () => {
+    // 单看一次调用，`+ 1` 与「写成 8」无法区分。
+    // 用两个 View：启动成功后 Region 从 launcher 变成 agent，同一个 Region 起不了第二个。
+    const bound = scratchTopicTab('launcher:one', 'view:shared')
+    const alsoBound = scratchTopicTab('launcher:two', 'view:shared')
+    mountScratch([bound, alsoBound], {
+      [SCRATCH_WORKSPACE_ID]: TARGET_REVISION,
+      bystander: BYSTANDER_REVISION
+    })
+    vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async (input) =>
+      launch(agent(input.agentSessionId!, { workspacePath: topicWorkspacePath('view:shared') }))
+    )
+
+    await useAppStore.getState().launchAgent('codex', 'first', 'group', {
+      tabId: bound.id, regionId: bound.layout.activeRegionId
+    })
+    await useAppStore.getState().launchAgent('codex', 'second', 'group', {
+      tabId: alsoBound.id, regionId: alsoBound.layout.activeRegionId
+    })
+
+    expect(useAppStore.getState().sessions).toHaveLength(2)
+    expect(revisions()[SCRATCH_WORKSPACE_ID]).toBe(TARGET_REVISION + 2)
+  })
+
+  it('起一个不在 Topic 里的 Agent 不 bump——这条 bump 是 Topic 专属的', async () => {
+    // 反向边界。判据故意落在**同一个 Workspace**：若实现改成「只要在 scratch 里就 bump」，
+    // 上面那条正向断言照旧绿，只有这条会红。没有 Topic 就没有新建协作者文件，也就没有
+    // 需要让文件树重扫的理由。
+    const unbound = scratchTopicTab('launcher:unbound')
+    mountScratch([unbound], {
+      [SCRATCH_WORKSPACE_ID]: TARGET_REVISION,
+      bystander: BYSTANDER_REVISION
+    })
+    vi.spyOn(api.sessions, 'launchAgent')
+      .mockImplementation(async (input) => launch(agent(input.agentSessionId!)))
+
+    await useAppStore.getState().launchAgent('codex', 'solo', 'group', {
+      tabId: unbound.id, regionId: unbound.layout.activeRegionId
+    })
+
+    expect(useAppStore.getState().sessions).toHaveLength(1)
+    expect(revisions()[SCRATCH_WORKSPACE_ID]).toBe(TARGET_REVISION)
   })
 })
 
