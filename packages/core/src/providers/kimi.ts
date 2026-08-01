@@ -64,8 +64,12 @@ export function createKimiProvider(defineAgentProvider: ProviderFactory): AgentP
       expectedProcess: 'Kimi Code',
       // 位置参数：**绝不能**声明 flag-prompt-interactive。Kimi 的 `-p/--prompt` 在 shell UI 里是
       // "跑完这一条就退出"（ui/shell/__init__.py:391-399 的 `# run single command and exit`），
-      // 而 AgentMux 要的是一个活着的交互 PTY。所以首个 prompt 不走 argv，改由 planPromptInput
-      // 在 PTY 里键入——`promptDelivery` 如实记为 positional-argv 的空 argv 形态。
+      // 而 AgentMux 要的是一个活着的交互 PTY。所以首个 prompt 不走 argv（见下面的 buildArgs），
+      // 改在 PTY 里键入——`promptDelivery` 如实记为 positional-argv 的空 argv 形态。
+      //
+      // 键入走的是默认的 single-phase（原样加回车），**不是** bracketed paste：本 Provider 不声明
+      // planPromptInput，全仓只有 codex 声明了 paste 形态。多行 prompt 因此按换行原样进 PTY——
+      // 这是这条默认路的既有行为，claude / cursor / grok / gemini 同此，不是 Kimi 的特例。
       promptDelivery: 'positional-argv',
       // `unmanaged` 而非 `explicit-managed`：hook 是真的、Core 也认得，但它的配置面是
       // `~/.kimi/config.toml` 的 `[[hooks]]` 数组——**TOML**，而本仓四种 merge 策略
