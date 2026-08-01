@@ -821,17 +821,115 @@ async function verifyDmg(dmgPath, temporaryRoot, source) {
   await verifyLaunchServices(installedApp, verificationRoot)
 }
 
+/**
+ * 让已装路径上正在跑的实例退出，并回报它是否存在过。
+ *
+ * 先 `osascript … quit` 走 Cmd+Q 那条路：桌面端在退出时 flush 布局状态（见 registerUnloadFlush），
+ * 直接 SIGKILL 会丢掉用户当前的 Tab/Region 布局。请求退出后等进程真的消失，超时才升级到信号——
+ * `signalProcessIds` 自己会做 SIGTERM→SIGKILL 的升级。
+ *
+ * `osascript` 失败**不是**错误：app 没在跑、没注册到 LaunchServices、AppleScript 被策略拦，都会让它
+ * 非零退出，而这些情况下"让它退出"这个目标本来就已经达成或无从达成。判据是**进程还在不在**，不是
+ * 那条命令的退出码。
+ */
+async function quitInstalledApplication(appPath) {
+  const running = await processIdsForApplication(appPath)
+  if (running.length === 0) return { wasRunning: false, pids: [] }
+  await run('osascript', ['-e', `quit app id "${BUNDLE_ID}"`], { capture: true, timeoutMs: 15_000 })
+    .catch(() => undefined)
+  let remaining = await waitForProcessExit(() => processIdsForApplication(appPath), 20_000)
+  if (remaining.length > 0) {
+    const errors = signalProcessIds(remaining, 'SIGTERM')
+    remaining = await waitForProcessExit(() => processIdsForApplication(appPath), 10_000)
+    if (remaining.length > 0) {
+      signalProcessIds(remaining, 'SIGKILL')
+      remaining = await waitForProcessExit(() => processIdsForApplication(appPath), 10_000)
+    }
+    assert(
+      remaining.length === 0,
+      `The installed application would not exit (pids ${remaining.join(', ')}); a surviving instance keeps serving the previous bundle.${
+        errors.length > 0 ? ` Signal errors: ${errors.map((error) => error.message).join('; ')}` : ''
+      }`
+    )
+  }
+  return { wasRunning: true, pids: running }
+}
+
+/**
+ * 装完必须交付**一个跑着新包的进程**，不是只换掉磁盘上的目录。
+ *
+ * 为什么这一步是承重的：安装用 `rename` 原子换目录，旧的整份被 `mv` 进 `~/.Trash`。已运行的进程按
+ * **inode** 持有它打开的文件，目录改名不影响那些 inode——于是旧实例会从垃圾桶里**静默继续跑**，
+ * 零报错零提示。此时磁盘上每一项身份校验（package-identity、bundle 内容）都通过，而用户面前那个
+ * 窗口跑的仍是旧代码。2026-09-01 实测：主进程 18:35 启动、安装 21:54，用户按新包的预期去点链接，
+ * 看到的是三小时前那份的行为，三层磁盘验证一条都没能发现。
+ *
+ * 所以这里在 rename 之后重新拉起，并把新进程的 pid 打印出来当凭据：安装那步随后会断言"跑在已装
+ * 路径上的每一个进程都在这份 pid 名单里"，也就是没有任何一个更早的实例活下来。热更新是我们自己的
+ * 设计前提，重装就该走完这条路，不留"要不要重启"这种由调用方决定的开关。
+ */
+async function relaunchInstalledApplication(appPath) {
+  await run('open', ['-a', appPath], { capture: true, timeoutMs: 60_000 })
+  const deadline = Date.now() + 60_000
+  let pids = []
+  while (Date.now() < deadline) {
+    pids = await processIdsForApplication(appPath)
+    if (pids.length > 0) break
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 100))
+  }
+  assert(
+    pids.length > 0,
+    'The freshly installed application did not start; nothing is serving the new bundle for verification.'
+  )
+  return pids
+}
+
 async function installApplication(appPath) {
   const destination = canonicalInstallPath(homedir())
   const applicationsRoot = dirname(destination)
+  const trashRoot = join(homedir(), '.Trash')
   const next = join(applicationsRoot, `.${PRODUCT_NAME}.install-${process.pid}.app`)
   await mkdir(applicationsRoot, { recursive: true })
   await rm(next, { recursive: true, force: true })
   await run('ditto', [appPath, next], { capture: true })
   await run('codesign', ['--verify', '--deep', '--strict', next], { capture: true })
-  await rm(destination, { recursive: true, force: true })
-  await rename(next, destination)
+  // 换目录之前先请旧实例退出。放在 ditto/codesign 之后，是为了让候选包先被证明可用——候选不合格时
+  // 不该白关掉用户正在用的窗口。
+  const previouslyInstalled = await pathExists(destination)
+  const quitOutcome = previouslyInstalled
+    ? await quitInstalledApplication(destination)
+    : { wasRunning: false, pids: [] }
+  let previousInstall
+  if (previouslyInstalled) {
+    await mkdir(trashRoot, { recursive: true })
+    const trashName = `${PRODUCT_NAME}-${new Date().toISOString().replaceAll(':', '-')}-${process.pid}.app`
+    previousInstall = join(trashRoot, trashName)
+    await rename(destination, previousInstall)
+  }
+  try {
+    await rename(next, destination)
+  } catch (error) {
+    // The old installation must remain the active one if the final cutover fails. Restore it
+    // from Trash before surfacing the failure; user data is never part of this rollback.
+    if (previousInstall && await pathExists(previousInstall)) {
+      await rename(previousInstall, destination).catch((restoreError) => {
+        throw new AggregateError([error, restoreError], 'Could not install candidate or restore the previous application')
+      })
+    }
+    throw error
+  }
   process.stdout.write(`installed_app=${destination}\n`)
+  if (previousInstall) process.stdout.write(`previous_install_trashed=${previousInstall}\n`)
+  process.stdout.write(`quit_previous_instance=${quitOutcome.wasRunning ? quitOutcome.pids.join(',') : 'not_running'}\n`)
+  const relaunched = await relaunchInstalledApplication(destination)
+  process.stdout.write(`relaunched_pids=${relaunched.join(',')}\n`)
+  // 交付判据：装完之后，跑在已装路径上的每一个进程都必须是**这次**拉起的。留下任何一个更早的
+  // 进程，就意味着"用户点的那个窗口"可能仍在服务上一份包——那正是这段代码存在的原因。
+  const survivors = (await processIdsForApplication(destination)).filter((pid) => !relaunched.includes(pid))
+  assert(
+    survivors.length === 0,
+    `Processes from a previous installation are still running (pids ${survivors.join(', ')}); they keep serving the previous bundle even though the directory was replaced.`
+  )
 }
 
 async function main() {
@@ -842,6 +940,9 @@ async function main() {
     initialSource.status === '',
     `macOS packaging requires a clean source tree, found:\n${initialSource.status}`
   )
+  // Keep the release gate coupled to the same source checkout: a package cannot be called
+  // "latest" when a design anchor has no production caller or test evidence.
+  await run('pnpm', ['--filter', '@agentmux/desktop', 'audit:features'], { cwd: repositoryRoot })
   // The Renderer imports Core's public subpaths (for example `@agentmux/core/agent-status`).
   // Build Core first so a clean checkout never asks Vite to resolve a dist file that has not
   // been emitted yet; the packaged runtime still copies the exact Core output from this build.

@@ -89,6 +89,19 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(async (root) => await rm(root, { recursive: true, force: true })))
 })
 
+/**
+ * 等打包出来的 ctxmuxd 起来接受 ping。
+ *
+ * **没有挂钟预算。** 三条真正的终止条件都在环内：spawn 失败、进程自己退出、ping 成功。这三条覆盖了
+ * 所有失败模式，剩下的"还没起来"只是慢。上界由外层持有——这条 it 自己声明了 95 秒。
+ *
+ * 原先环上另有一个 5 秒 deadline。它在机器被压满时会**先于**外层触发，把"慢"报成"起不来"：实测
+ * 2026-09-01 负载 ~120 时，同一份构建里解一个 84KB tarball 花了 3 分 42 秒挂钟而只用 0.01 秒 CPU，
+ * 纯调度饥饿。两个预算守同一件事时，短的那个只贡献假阴性。
+ *
+ * ping 自身保留 `timeout`：那是**对端可能永不回答**的调用（socket 在但守护进程卡住），而这一层的
+ * 循环会重试，所以砍掉一次慢 ping 不丢信息。这正是挂钟预算该用的地方，与上面那个删掉的不同。
+ */
 async function waitForDaemonReady(
   path: string,
   cliPath: string,
@@ -96,8 +109,7 @@ async function waitForDaemonReady(
   stderr: () => string,
   spawnError: () => Error | null
 ): Promise<void> {
-  const deadline = Date.now() + 5_000
-  while (Date.now() <= deadline) {
+  for (;;) {
     if (spawnError()) throw spawnError()
     if (daemon.exitCode !== null || daemon.signalCode !== null) {
       throw new Error(`Packed ctxmuxd exited before readiness: ${stderr()}`)
@@ -113,7 +125,6 @@ async function waitForDaemonReady(
     } catch {}
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 20))
   }
-  throw new Error(`Packed ctxmuxd did not become ready: ${stderr()}`)
 }
 
 type DaemonProcess = {
@@ -407,6 +418,12 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
       // `pnpm build && vitest run`，但那个顺序过去由 prepack 兜底，现在不再有。下面的 freshness 断言
       // 把它钉住——dist 缺失或比 src 旧时立刻明确报错，而不是静默打出一个陈旧的包。
       await expectDistBuiltFromCurrentSource()
+      // 下面这些 `execFileAsync` 都没有挂钟预算，判据同 `waitForDaemonReady` 那段（见 :92 起）：
+      // npm 的 pack/install、tsc、以及本测试自己起的那几个 worker fixture，都是**本机对固定输入的
+      // 确定性步骤**——它们一定会答，被压满时只是慢。期限由外层 `it(…, 95_000)` 持有；再插一个更短的
+      // 预算只贡献假阴性，而且 `execFile` 的超时错误从不说自己是超时，会把「慢」伪装成「坏」。
+      // 保留 `timeout` 的是另一类：`ps`、以及经 socket 找/停守护进程那几处——socket 在而进程卡住时，
+      // 对端可能永不回答。
       const packed = await execFileAsync('npm', [
         'pack',
         '--ignore-scripts',
@@ -415,7 +432,6 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         '--json'
       ], {
         cwd: resolve(repositoryRoot, 'packages/core'),
-        timeout: 60_000,
         maxBuffer: 8 * 1024 * 1024
       })
       // npm pack --json 给的是数组（一次可打多个包），pnpm 给的是单个对象。
@@ -435,7 +451,6 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         packDirectory
       ], {
         cwd: repositoryRoot,
-        timeout: 60_000,
         maxBuffer: 8 * 1024 * 1024
       })
       const headlessArchive = join(packDirectory, packedHeadless.stdout.trim().split(/\r?\n/u).at(-1)!)
@@ -459,7 +474,6 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         packedArchive
       ], {
         cwd: consumerDirectory,
-        timeout: 60_000,
         maxBuffer: 8 * 1024 * 1024
       })
       await Promise.all([
@@ -543,7 +557,6 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
           '--project', join(consumerDirectory, 'tsconfig.json')
         ], {
           cwd: consumerDirectory,
-          timeout: 15_000,
           maxBuffer: 2 * 1024 * 1024
         })
       } catch (error) {
@@ -581,9 +594,22 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
       let stopResponseLossProxy: StopResponseLossProxy | null = null
       let cleanupSentinelPid: number | null = null
       try {
-        const result = await execFileAsync(process.execPath, ['packed-consumer.mjs'], {
+        // 这里**没有**挂钟预算。期限由外层那个 `it(…, 95_000)` 持有，两个预算守同一件事时，短的
+        // 那个只贡献假阴性：它一到点就 SIGTERM 掉整个消费者进程，而进程本来只是在被压满的机器上
+        // 变慢。实测（2026-09-01，负载 ~55）：`[packed-consumer] still waiting for handshake race
+        // controlled composer pending` 一路数到 50s，然后在 63.55s 整个测试失败——不是里面哪个
+        // 等待放弃了，是这条 60 秒把它砍了。
+        //
+        // 更糟的是 `execFile` 的超时错误**从不说自己是超时**：它只报
+        // `Command failed: … packed-consumer.mjs`，`code: null`、`killed: true`、`signal: SIGTERM`，
+        // 消息里绝口不提。于是「消费者被外层砍掉」和「消费者自己崩了」长成同一个样子，这个 flake
+        // 因此被登记成 handshake 超时并追错了位点。留下来的诊断行现在会点名卡住的那次等待。
+        // 消费者的 stderr 边到边转发到本进程，**不能**只靠 execFile 把它攒在 buffer 里：vitest 在
+        // 外层 95 秒掐掉这条 it 时，那个 buffer 连同 reject 一起被丢掉，于是最需要诊断的那条路径
+        // （整体卡死）反而一行都不留。实测 2026-09-01 有三次 `Test timed out in 95000ms` 就是这样，
+        // 明明 packed-consumer 一直在写 `still waiting for …`，日志里却什么都没有。
+        const consumer = execFile(process.execPath, ['packed-consumer.mjs'], {
           cwd: consumerDirectory,
-          timeout: 60_000,
           maxBuffer: 8 * 1024 * 1024,
           env: {
             ...runtimeEnvironment,
@@ -596,6 +622,17 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
             AGENTMUX_INTERACTION_CRASH_FIXTURE: join(consumerDirectory, 'interaction-response-crash-worker.mjs'),
             AGENTMUX_CLI_PATH: join(consumerDirectory, 'node_modules', '.bin', 'agentmux')
           }
+        })
+        consumer.stderr?.pipe(process.stderr)
+        const result = await new Promise<{ stdout: string }>((settle, fail) => {
+          let stdout = ''
+          consumer.stdout?.setEncoding('utf8')
+          consumer.stdout?.on('data', (chunk: string) => { stdout += chunk })
+          consumer.once('error', fail)
+          consumer.once('close', (code, signal) => {
+            if (code === 0) return settle({ stdout })
+            fail(new Error(`packed-consumer.mjs exited with code=${code} signal=${signal}`))
+          })
         })
         const consumerReceipt = JSON.parse(result.stdout.trim()) as { cleanupSentinelPid: number }
         expect(consumerReceipt).toMatchObject({
@@ -710,7 +747,6 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
           ['ctxmux-stop-recovery-worker.mjs'],
           {
             cwd: consumerDirectory,
-            timeout: 15_000,
             maxBuffer: 2 * 1024 * 1024,
             env: runtimeEnvironment
           }
@@ -747,7 +783,6 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         await writeFile(ownerReceiptPath, `${JSON.stringify(relocatedReceipt)}\n`)
         const relocated = await execFileAsync(process.execPath, ['ctxmux-owner-relocation.mjs'], {
           cwd: consumerDirectory,
-          timeout: 15_000,
           maxBuffer: 2 * 1024 * 1024,
           env: runtimeEnvironment
         })
@@ -780,7 +815,6 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         })}\n`)
         const artifactMismatch = await execFileAsync(process.execPath, ['ctxmux-owner-fence.mjs'], {
           cwd: consumerDirectory,
-          timeout: 15_000,
           maxBuffer: 2 * 1024 * 1024,
           env: runtimeEnvironment
         })
@@ -794,7 +828,6 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
           ['ctxmux-owner-receipt-failure.mjs'],
           {
             cwd: consumerDirectory,
-            timeout: 15_000,
             maxBuffer: 2 * 1024 * 1024,
             env: runtimeEnvironment
           }
@@ -846,7 +879,6 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         liveRuntimeFence = null
         const fenced = await execFileAsync(process.execPath, ['ctxmux-owner-fence.mjs'], {
           cwd: consumerDirectory,
-          timeout: 15_000,
           maxBuffer: 4 * 1024 * 1024,
           env: runtimeEnvironment
         })

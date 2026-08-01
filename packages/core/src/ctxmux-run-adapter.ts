@@ -396,8 +396,17 @@ async function verifyArtifacts(): Promise<VerifiedArtifacts> {
   ])
   const daemonPath = join(root, daemon.path)
   try {
+    // 没有挂钟预算。这是本机进程打印一行版本号，唯一的失败模式是"它不是我们钉的那个二进制"——
+    // 而那由下面的字符串比对判定。加一个挂钟上限只会引入第二种"失败"：机器被压满时它变慢，
+    // 于是一个**完好**的二进制被判成不满足版本合同，也就是把调度饥饿报成产物损坏。
+    //
+    // 实测（2026-09-01，负载 ~120，14 核）：同一台机器上解一个 84KB tarball 用了 3 分 42 秒挂钟、
+    // 0.01 秒 CPU。5 秒预算在这种负载下必然先触发。而 execFile 超时的报错**从不说自己是超时**
+    // （`Command failed: …`，stderr 空，signal=SIGTERM），于是这里会包出一条断言产物损坏的错误，
+    // 把用户和排查者一起指向错误的方向——这比慢得多严重：慢只是慢，错误的诊断会让人去换二进制。
+    //
+    // 真正的卡死由调用方的生命周期负责（守护进程起不来会在 handshake 处显形），不由这一行兜。
     const version = await execFileAsync(daemonPath, ['--version'], {
-      timeout: 5_000,
       maxBuffer: 64 * 1024
     })
     if (version.stdout.trim() !== `ctxmuxd ${CTXMUX_VERSION} (protocol ${PROTOCOL_VERSION})`) {

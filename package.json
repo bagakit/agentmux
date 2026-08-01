@@ -9,6 +9,8 @@
     "build": "pnpm -r build",
     "package:mac": "pnpm --filter @agentmux/desktop package:mac",
     "package:mac:install": "pnpm --filter @agentmux/desktop package:mac:install",
+    "package:mac:report": "pnpm --filter @agentmux/desktop report:package",
+    "audit:features": "pnpm --filter @agentmux/desktop audit:features",
     "typecheck": "pnpm --filter @agentmux/core build && pnpm -r typecheck",
     "test:workspace-files": "pnpm --filter @agentmux/core build && pnpm --filter @agentmux/desktop build:workspace-move-helper && vitest run apps/desktop/test/workspace-files.test.ts",
     "test:fast": "pnpm --filter @agentmux/core build && pnpm --filter @agentmux/desktop build:workspace-move-helper && vitest run --exclude packages/core/test/package-consumer.integration.test.ts --exclude packages/core/test/reliability-stress.integration.test.ts --exclude packages/core/test/security-fuzz.test.ts --exclude apps/desktop/test/workspace-files-fuzz.test.ts",

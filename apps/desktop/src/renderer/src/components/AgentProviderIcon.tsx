@@ -1,4 +1,4 @@
-import { type AgentProviderId, type BuiltInAgentProviderId } from '@agentmux/core'
+import { type AgentProviderId, type BuiltInAgentProviderId } from '@agentmux/core/provider-id'
 import { Bot } from 'lucide-react'
 import type { ReactNode } from 'react'
 import hermesIconUrl from '../assets/agent-icons/hermes.png'

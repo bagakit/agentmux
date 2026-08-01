@@ -6,6 +6,7 @@ import {
   assertPackageIdentity,
   canonicalInstallPath,
   createPackageIdentity,
+  knownApplicationPaths,
   packageIdentityPath,
   readPackageIdentity
 } from '../scripts/package-identity.mjs'
@@ -48,5 +49,17 @@ describe('package identity', () => {
 
   it('uses one canonical user installation path', () => {
     expect(canonicalInstallPath('/Users/alice')).toBe('/Users/alice/Applications/AgentMux.app')
+  })
+
+  it('enumerates only the supported bundle locations for launch diagnostics', () => {
+    expect(knownApplicationPaths({
+      homeDirectory: '/Users/alice',
+      repositoryRoot: '/work/agentmux'
+    })).toEqual([
+      { id: 'canonical-user', path: '/Users/alice/Applications/AgentMux.app' },
+      { id: 'system-applications', path: '/Applications/AgentMux.app' },
+      { id: 'release-candidate', path: '/work/agentmux/apps/desktop/release/mac/AgentMux.app' },
+      { id: 'development-cache', path: '/work/agentmux/apps/desktop/node_modules/.cache/agentmux-electron/AgentMux.app' }
+    ])
   })
 })
