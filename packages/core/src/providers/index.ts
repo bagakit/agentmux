@@ -5,7 +5,7 @@ import { createAntigravityManagedHookPlan, createAntigravityProvider } from './a
 import { createClaudeManagedHookPlan, createClaudeProvider } from './claude.js'
 import { createCodexManagedHookPlan, createCodexProvider } from './codex.js'
 import { createCursorProvider } from './cursor.js'
-import { createGeminiProvider } from './gemini.js'
+import { createGeminiManagedHookPlan, createGeminiProvider } from './gemini.js'
 import { createGrokManagedHookPlan, createGrokProvider } from './grok.js'
 import { createHermesManagedHookPlan, createHermesProvider } from './hermes.js'
 import { createPiProvider } from './pi.js'
@@ -39,13 +39,17 @@ export const MANAGED_HOOK_PLAN_RESOLVERS: Partial<Record<AgentProviderId, Manage
   antigravity: (_workspacePath) => createAntigravityManagedHookPlan(),
   hermes: (_workspacePath, env) => createHermesManagedHookPlan(env),
   // grok 只装到用户 home 下 `~/.grok/hooks/`（grok 文档标注 always-trusted），与 workspace 无关。
-  grok: (_workspacePath) => createGrokManagedHookPlan()
+  grok: (_workspacePath) => createGrokManagedHookPlan(),
+  // gemini 装到 `~/.gemini/settings.json` 的 hooks 键，同样与 workspace 无关。注意 Antigravity 用的是
+  // 同一目录下的 `config/hooks.json`——不同文件，别写串。
+  gemini: (_workspacePath) => createGeminiManagedHookPlan()
 }
 
 export {
   createAntigravityManagedHookPlan,
   createClaudeManagedHookPlan,
   createCodexManagedHookPlan,
+  createGeminiManagedHookPlan,
   createGrokManagedHookPlan,
   createHermesManagedHookPlan
 }

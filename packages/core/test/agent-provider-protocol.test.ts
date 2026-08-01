@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
 import {
   AGENT_HOOK_LIFECYCLE_DIALECT,
+  GEMINI_HOOK_DIALECT,
   GROK_HOOK_DIALECT,
   HERMES_HOOK_DIALECT,
   HOOK_EVENT_NAME_PAYLOAD_KEYS,
@@ -199,7 +200,10 @@ describe('Core Provider protocol', () => {
     it('方言按 Provider 分块声明，合并面等于各块之并——新 Provider 只动自己那块', () => {
       // 这是为并行开发做的结构约束：加一个 Provider 不该改任何已有 Provider 的映射。
       // 合并面必须恰好等于各块的并集，既不丢（漏接线）也不多（有人偷偷往全局表塞条目）。
-      const blocks = [PASCAL_CASE_HOOK_DIALECT, HERMES_HOOK_DIALECT, PI_HOOK_DIALECT, GROK_HOOK_DIALECT]
+      const blocks = [
+        PASCAL_CASE_HOOK_DIALECT, HERMES_HOOK_DIALECT, PI_HOOK_DIALECT,
+        GROK_HOOK_DIALECT, GEMINI_HOOK_DIALECT
+      ]
       const union: Record<string, AgentHookLifecycleEvent> = {}
       for (const block of blocks) Object.assign(union, block)
       expect(AGENT_HOOK_LIFECYCLE_DIALECT).toEqual(union)
