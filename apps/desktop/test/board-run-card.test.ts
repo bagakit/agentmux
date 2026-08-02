@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import ts from 'typescript'
 import { AGENT_DISPLAY_STATES } from '../src/renderer/src/lib/attention-vocabulary'
-import { attentionAccentFor } from '../src/renderer/src/lib/attention-event'
+import { URGENT_ATTENTION_CATEGORIES, attentionAccentFor } from '../src/renderer/src/lib/attention-event'
 import { boardRunCardAttributes } from '../src/renderer/src/lib/board-run-card'
 import { allStyleRules } from './helpers/styles.js'
 
@@ -92,6 +92,39 @@ describe('卡框的颜色来自状态色表', () => {
       }
     }
     expect(stateKeyed, '卡框不许以状态为键——那是第二份状态色表').toEqual([])
+  })
+
+  it('每个会带框的 category 都有一条卡框规则选中它——少认一个是静默无框', () => {
+    // 判据是**逐 category 的可达性**，不是「有没有以 data-attention 为键的规则」。上面那条用
+    // `filter(...).length > 0`：一条能命中 `needs-you` 的规则就让长度非零，`error` 缺席对它完全不可见。
+    // 实测过——把选择器里 `, .board-run-card[data-attention='error']` 那一半删掉，本文件与邻近两个
+    // 文件 51 条全绿，而一个崩掉的 run 从此没有色框，与正常 run 逐像素相同。
+    //
+    // 这个形状在头像那一面已经做对了（topic-agent-status.test.ts 遍历 URGENT_ATTENTION_CATEGORIES 逐个
+    // 查可达性，那是 #397 的产物）。Board 建了同一条投影链，却没把那道穷举门一起搬过来。
+    //
+    // 清单从 URGENT_ATTENTION_CATEGORIES 派生而不是手抄那两个名字：手抄的话，Core 加一个会上色的
+    // category 时这条门会安静地把它放行——那正是它要防的静默漏点（#421）。
+    expect(URGENT_ATTENTION_CATEGORIES.length, '会上色的 category 是空的——判据会变成恒真').toBeGreaterThan(0)
+    const selects = (category: string): boolean => {
+      for (const match of styles.matchAll(/([^{}]+)\{([^{}]*)\}/gu)) {
+        // 逐条拆开选择器列表：色表那侧的教训同样适用，`[^,{]*` 一类的正则只认得列表里最后那一项。
+        const members = match[1]!.split(',').map((member) => member.trim())
+        if (
+          members.some((member) =>
+            new RegExp(`\\.board-run-card\\b[^\\s]*\\[data-attention=['"]${category}['"]\\]`, 'u').test(member)
+          )
+        ) {
+          return true
+        }
+      }
+      return false
+    }
+    for (const category of URGENT_ATTENTION_CATEGORIES) {
+      expect(selects(category), `data-attention='${category}' 的卡没有任何规则选中它，会变成无框`).toBe(true)
+    }
+    // 自检：判据认得出缺席。一个不存在的取值必须落空，否则上面几条恒真。
+    expect(selects('nonexistent')).toBe(false)
   })
 
   it('每个会带框的状态都有一条赋 --status-ink 的规则接得住', () => {
