@@ -16,6 +16,7 @@
 
 import type { AgentMuxRegionNeighbor } from '@agentmux/core/control'
 import type { WorkbenchRegionBounds } from './workbench-view-layout'
+import { orientationOf, regionInDirection } from './split-direction'
 
 /** 用户说的那四个方向。与 `open` 的 direction 同名同义，不另起一套词。 */
 export type AddressDirection = 'left' | 'right' | 'up' | 'down'
@@ -33,81 +34,18 @@ export type DirectionalNeighborInput = {
 }
 
 /**
- * 归一化几何的比较容差。
- *
- * bounds 由 ratio 连乘得出，`0.5 + 0.25 + 0.25` 这类拆分会留下浮点尾数；不留容差的话，两格明明
- * 上下边对齐却会被判成不重叠，于是"右边"答成没有。取 1e-6 是因为分屏比例的有效精度远粗于此，
- * 这个量级只吃掉浮点误差，不会把真正相邻但错开的两格误判成对齐。
- */
-const EPSILON = 1e-6
-
-/** 该方向是沿横轴还是纵轴。 */
-function isHorizontal(direction: AddressDirection): boolean {
-  return direction === 'left' || direction === 'right'
-}
-
-/**
- * 候选是否在 origin 的该方向上。
- *
- * 两个条件缺一不可：**沿该轴确实在那一侧**，且**在另一根轴上与 origin 有重叠**。只判前者会把
- * 右上角那一格也算成"右边"，而用户说"右边"指的是视线平移过去撞上的那一格，不是任何 x 更大的
- * 格子。重叠判断用严格不等（配合容差），仅仅边缘相接不算重叠——那是对角关系。
- */
-function liesToward(
-  direction: AddressDirection,
-  origin: WorkbenchRegionBounds,
-  candidate: WorkbenchRegionBounds
-): boolean {
-  if (isHorizontal(direction)) {
-    const beyond = direction === 'right'
-      ? candidate.x >= origin.x + origin.width - EPSILON
-      : candidate.x + candidate.width <= origin.x + EPSILON
-    if (!beyond) return false
-    return candidate.y < origin.y + origin.height - EPSILON
-      && origin.y < candidate.y + candidate.height - EPSILON
-  }
-  const beyond = direction === 'down'
-    ? candidate.y >= origin.y + origin.height - EPSILON
-    : candidate.y + candidate.height <= origin.y + EPSILON
-  if (!beyond) return false
-  return candidate.x < origin.x + origin.width - EPSILON
-    && origin.x < candidate.x + candidate.width - EPSILON
-}
-
-/** 沿该方向离 origin 多远——用来在多个候选里挑最近的那一格。 */
-function distanceToward(
-  direction: AddressDirection,
-  origin: WorkbenchRegionBounds,
-  candidate: WorkbenchRegionBounds
-): number {
-  if (direction === 'right') return candidate.x - (origin.x + origin.width)
-  if (direction === 'left') return origin.x - (candidate.x + candidate.width)
-  if (direction === 'down') return candidate.y - (origin.y + origin.height)
-  return origin.y - (candidate.y + candidate.height)
-}
-
-/**
  * 同一 View 内该方向上最近的兄弟 Region。
  *
- * 多个候选时取沿该方向最近的；仍并列时取另一根轴上更靠前的那个，让答案对同一份布局稳定——
- * 不稳定的答案会让 Agent 两次问同一个问题得到不同的格子。
+ * 几何判定本身（重叠约束、最近、并列取稳定）全部委托给 `split-direction` 的 `regionInDirection`——
+ * 那是「某方向上是哪一格」的唯一真相，键盘焦点移动（`workbench-shortcuts.adjacentRegionId`）走的是
+ * 同一个函数，于是 Agent 侧 `inspect` 报出的邻居与用户按方向键聚焦到的格子恒等。本函数只把寻址侧的
+ * 输入形状（`DirectionalNeighborInput.regions`）转交过去。
  */
 export function regionNeighbor(
   input: DirectionalNeighborInput,
   direction: AddressDirection
 ): string | null {
-  const origin = input.regions.find((region) => region.regionId === input.regionId)?.bounds
-  if (!origin) return null
-  const candidates = input.regions
-    .filter((region) => region.regionId !== input.regionId && liesToward(direction, origin, region.bounds))
-    .sort((left, right) => {
-      const delta = distanceToward(direction, origin, left.bounds) - distanceToward(direction, origin, right.bounds)
-      if (Math.abs(delta) > EPSILON) return delta
-      return isHorizontal(direction)
-        ? left.bounds.y - right.bounds.y
-        : left.bounds.x - right.bounds.x
-    })
-  return candidates[0]?.regionId ?? null
+  return regionInDirection(input.regions, input.regionId, direction)
 }
 
 /**
@@ -121,7 +59,8 @@ export function tabNeighbor(
   input: DirectionalNeighborInput,
   direction: AddressDirection
 ): string | null {
-  if (!isHorizontal(direction)) return null
+  // up/down 沿纵轴，对一维水平 Tab 条不成立。轴的派生取自 `split-direction` 的 SSOT，不另抄一份。
+  if (orientationOf(direction) !== 'horizontal') return null
   const index = input.tabOrder.indexOf(input.tabId)
   if (index < 0) return null
   return input.tabOrder[direction === 'right' ? index + 1 : index - 1] ?? null
