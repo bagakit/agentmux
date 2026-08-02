@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import type { AppConfig } from '../src/shared/contracts.js'
 import { CONFIG_VERSION } from '../src/shared/contracts.js'
 import { createWorkspaceLayout, groupIds } from '../src/renderer/src/lib/workbench-layout.js'
-import { MIN_SPLIT_RATIO } from '../src/renderer/src/lib/split-tree.js'
+import { MIN_SPLIT_RATIO, EVEN_SPLIT_RATIO, clampSplitRatio } from '../src/renderer/src/lib/split-tree.js'
 import {
   regionIds,
   splitWorkbenchRegion
@@ -253,6 +253,19 @@ describe('结构干净但取值陈旧的持久化记录必须被无条件归一�
     }
   }
 
+  /** 结构完全一致，但根节点**根本没有** ratio 这个键——比越界更早的一代磁盘记录。 */
+  function tabWithAbsentRatio(): WorkbenchTab {
+    const base = createWorkbenchTab('view', file('r0', '/repo/a.ts'))
+    const split = splitWorkbenchRegion(base.layout, 'r0', 'right', 'r1')
+    const root = { ...(split.root as Record<string, unknown>) }
+    delete root.ratio
+    return {
+      ...base,
+      layout: { ...split, root: root as never },
+      regions: { r0: file('r0', '/repo/a.ts'), r1: file('r1', '/repo/b.ts') }
+    }
+  }
+
   /** 结构完全一致，但 activeRegionId / titleRegionId 都指向树里根本没有的格。 */
   function tabWithStalePointer(): WorkbenchTab {
     const base = createWorkbenchTab('view', file('r0', '/repo/a.ts'))
@@ -304,6 +317,53 @@ describe('结构干净但取值陈旧的持久化记录必须被无条件归一�
     const projected = projectPersistedWorkbench(persisted(tabWithStaleRatio())).tabs.view
     expect(projected).toBeDefined()
     expect(rootRatio(projected!.layout.root)).toBe(MIN_SPLIT_RATIO)
+  })
+
+  /**
+   * #552：ratio **完全缺席**（不是越界）时，归一化必须给出均分，而不是把缺席算成一个坏数。
+   *
+   * 这是我自己 #533 的回归，也是「无条件归一化」这个正确决定的一个未想到的输入：裸的
+   * `Math.max(min, Math.min(max, undefined))` 是 `NaN`，而 `NaN` 会沿写入路径一路传播——
+   * `clampSplitTreeRatios` 的身份早退比 `ratio === root.ratio`，`NaN === undefined` 为假，
+   * 于是它**主动重建**一棵带 NaN 的树并交给 `partialize` 落盘。渲染侧那道 `?? 0.5`
+   * （workbench-layout.ts:20-22 写明是给缺 ratio 的历史数据留的防线）接不住 NaN，因为
+   * `??` 只认 null/undefined。所以缺省值必须由**边界**给出，不能留给下游兜。
+   *
+   * 判据落在「恰好是均分」而不是「是个有限数」：后者对 `return MIN_SPLIT_RATIO` 这类
+   * 把两个面板画成 15/85 的实现也会通过，而那同样是一次可见的布局损坏。
+   */
+  describe('#552 ratio 完全缺席时归一化成均分（不是 NaN，也不是夹到下界）', () => {
+    // 前提自检：fixture 真的没有这个键。少了这条，删掉 delete 之后下面两条会拿一个
+    // 合法的 0.5 去比 EVEN_SPLIT_RATIO，恒真。
+    it('前提：fixture 的根节点确实没有 ratio 键', () => {
+      const root = tabWithAbsentRatio().layout.root as Record<string, unknown>
+      expect(root.type).toBe('split')
+      expect('ratio' in root, 'fixture 带着 ratio——本族要测的缺席形状不在场').toBe(false)
+    })
+
+    it('启动恢复：缺席的 ratio 变成均分', () => {
+      const restored = restore(tabWithAbsentRatio()).tabs.view
+      expect(restored).toBeDefined()
+      expect(rootRatio(restored!.layout.root)).toBe(EVEN_SPLIT_RATIO)
+    })
+
+    it('partialize 写入：落盘的那份也是均分（NaN 会被 JSON 写成 null，此后永久跑偏）', () => {
+      const projected = projectPersistedWorkbench(persisted(tabWithAbsentRatio())).tabs.view
+      expect(projected).toBeDefined()
+      const ratio = rootRatio(projected!.layout.root)
+      expect(ratio).toBe(EVEN_SPLIT_RATIO)
+      // 显式钉住「它经得起一次序列化往返」：NaN 在这一步会变成 null，而 null 是个
+      // 类型上不合法、且下游只能靠兜底救回的值。判 Number.isFinite 不够——见本族标题。
+      expect(JSON.parse(JSON.stringify({ ratio })).ratio).toBe(EVEN_SPLIT_RATIO)
+    })
+
+    it('缺席与越界走同一个出口，但答案不同（缺席→均分，越界→夹到界上）', () => {
+      expect(clampSplitRatio(undefined as unknown as number)).toBe(EVEN_SPLIT_RATIO)
+      expect(clampSplitRatio(Number.NaN)).toBe(EVEN_SPLIT_RATIO)
+      expect(clampSplitRatio(STALE_RATIO)).toBe(MIN_SPLIT_RATIO)
+      // 这一对不许相等，否则「缺席」与「越界」两类被折成一个答案，上面那条就分不出它们。
+      expect(EVEN_SPLIT_RATIO).not.toBe(MIN_SPLIT_RATIO)
+    })
   })
 
   it('启动恢复：陈旧的焦点与标题格落回树上（否则界面拿它取 regions 得到 undefined）', () => {
