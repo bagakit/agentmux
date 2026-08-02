@@ -1,5 +1,6 @@
 import { AgentMuxError } from './errors.js'
 import type { AgentExecutorId, AgentProviderId } from './types.js'
+import type { WorkbenchLayoutPreset } from './workbench-layout-preset.js'
 
 export const AGENTMUX_CONTROL_SCHEMA_VERSION = 5 as const
 
@@ -102,7 +103,7 @@ export type AgentMuxOpenAgentContent =
   | { kind: 'new-agent'; executorId: AgentExecutorId; prompt?: string }
   | { kind: 'agent-session'; agentSessionId: string }
 export type AgentMuxArrangeMode =
-  | { kind: 'preset'; preset: 'columns-3' | 'grid-4' | 'grid-6' | 'grid-9' }
+  | { kind: 'preset'; preset: WorkbenchLayoutPreset }
   | { kind: 'balance' }
   | { kind: 'active-first' }
 

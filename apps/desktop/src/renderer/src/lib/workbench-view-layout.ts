@@ -1,5 +1,6 @@
 import type { SplitDirection } from './workbench-layout'
 import { type SplitTreeNode, findSiblingLeafId, setSplitRatioAtPath } from './split-tree'
+import type { WorkbenchLayoutPreset } from '@agentmux/core/workbench-layout-preset'
 
 // tab 内 region 分屏树 = 叶子挂 regionId 的通用分屏树（见 split-tree.ts）。ratio 必填，与 tab-group
 // 树统一：每个 split 都由 splitWorkbenchRegion/gridLayout/balanceNode 现算一个比例，不存在缺省的情形。
@@ -17,7 +18,11 @@ export type WorkbenchRegionBounds = {
   height: number
 }
 
-export type WorkbenchRegionLayoutPreset = 'columns-3' | 'grid-4' | 'grid-6' | 'grid-9'
+// 布局预设名。渲染器不自己写这份字面量 union，而是复用 Core 那份 node-free SSOT
+//（@agentmux/core/workbench-layout-preset）——控制协议的 `AgentMuxArrangeMode.preset` 用的是同一个类型，
+// 于是「GUI 认得的预设」与「控制协议认得的预设」在编译期就是同一个集合，任一侧加/删一档都会在两边同时
+// 生效，不存在两份手抄漂移的余地。
+export type WorkbenchRegionLayoutPreset = WorkbenchLayoutPreset
 
 export function createWorkbenchViewLayout(regionId: string): WorkbenchViewLayout {
   return { root: { type: 'leaf', regionId }, activeRegionId: regionId }

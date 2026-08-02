@@ -51,6 +51,10 @@
     "./run-status": {
       "types": "./dist/agent-run-status.d.ts",
       "import": "./dist/agent-run-status.js"
+    },
+    "./workbench-layout-preset": {
+      "types": "./dist/workbench-layout-preset.d.ts",
+      "import": "./dist/workbench-layout-preset.js"
     }
   },
   "bin": {
