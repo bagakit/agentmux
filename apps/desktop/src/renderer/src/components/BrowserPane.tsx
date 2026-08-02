@@ -39,7 +39,7 @@ import {
 } from './browser-screenshot/ScreenshotEditor'
 import {
   LatestBrowserBoundsSynchronizer,
-  focusRingInsetOf,
+  focusRingYieldOf,
   nativeBoundsClearOfFocusRing,
   rendererCssBoundsToWindowDip
 } from '../lib/browser-bounds-sync'
@@ -67,12 +67,20 @@ export function browserCaptureMatchesIdentity(
 export function BrowserPane({
   tab,
   visible,
-  released = false
+  released = false,
+  yieldToFocusRing = false
 }: {
   tab: BrowserWorkbenchSurface
   visible: boolean
   /** Main-owned WebContentsView is released for a long-hidden, rebuildable Region. */
   released?: boolean
+  /**
+   * 这一格是当前聚焦的那一格，所以原生视图要按焦点环宽内缩让位。由上游的 `regionFocusExpression`
+   * 与挂在 Region 上的类名**同一次**算出（见 lib/region-focus.ts）——别在这里自己判焦点：环宽那个
+   * 自定义属性声明在 `:root`，任何 Region 都继承得到，所以「有没有 Region 祖先」根本不是焦点判据，
+   * 那样每一格都内缩，未聚焦的 browser 区会镶一圈无环的深边。
+   */
+  yieldToFocusRing?: boolean
 }) {
   const applyBrowserEvent = useAppStore((state) => state.applyBrowserEvent)
   const reportError = useAppStore((state) => state.reportError)
@@ -213,7 +221,11 @@ export function BrowserPane({
         }
         const rect = stage.getBoundingClientRect()
         // 让开 Region 的焦点框：原生视图是窗口级层，画在页面之上，焦点框盖不过它（详见
-        // nativeBoundsClearOfFocusRing 的注释）。没有 Region 祖先（独立窗口等）时按原样铺满。
+        // nativeBoundsClearOfFocusRing 的注释）。让位量走 focusRingYieldOf——**只有聚焦的那一格**
+        // 取环宽，其余格取 0。不能像从前那样只问「有没有 .workbench-region 祖先」：环宽声明在 :root，
+        // 每个 Region 都继承得到，那等于无条件内缩，未聚焦的 browser 区镶一圈无环的深边（#350）。
+        // 求交本身与焦点无关（让位量 0 时就是「把 stage 夹进 Region」），没有 Region 祖先
+        // （独立窗口等）时按原样铺满。
         const stageBounds = { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
         const region = stage.closest('.workbench-region')
         let bounds = stageBounds
@@ -222,7 +234,7 @@ export function BrowserPane({
           bounds = nativeBoundsClearOfFocusRing(
             stageBounds,
             { x: regionRect.x, y: regionRect.y, width: regionRect.width, height: regionRect.height },
-            focusRingInsetOf(region)
+            focusRingYieldOf(region, yieldToFocusRing)
           )
         }
         synchronizer.observe(rendererCssBoundsToWindowDip(bounds, api.ui.getZoomFactor()))
@@ -239,7 +251,7 @@ export function BrowserPane({
       window.removeEventListener('resize', update)
       void api.browser.setBounds(tab.browserId, null).catch(() => {})
     }
-  }, [elementSelection, menuOpen, released, restoring, screenshot, toolsOpen, reportError, tab.browserId, tab.error, tab.url, visible])
+  }, [elementSelection, menuOpen, released, restoring, screenshot, toolsOpen, reportError, tab.browserId, tab.error, tab.url, visible, yieldToFocusRing])
 
   async function run(action: () => Promise<BrowserSnapshot>): Promise<void> {
     if (busy) return

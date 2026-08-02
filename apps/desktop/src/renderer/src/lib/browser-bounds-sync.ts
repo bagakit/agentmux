@@ -62,6 +62,23 @@ export function focusRingInsetOf(element: Element): number {
   return width
 }
 
+/**
+ * 这一格实际要让出多少：**只有聚焦的那一格**才有环要让，其余格是 0。
+ *
+ * 为什么这一步必须存在，而不是让调用方直接 `focused ? focusRingInsetOf(el) : 0`：`focusRingInsetOf`
+ * 读的那个自定义属性声明在 `:root`（tokens.css），于是**任何** Region 元素都继承得到一个正数。所以
+ * 「这个元素身上读得出环宽吗」不是「这一格聚焦吗」的代理——原来 BrowserPane 只问「有没有
+ * `.workbench-region` 祖先」，等于无条件内缩：未聚焦的 browser 区也被推进来 2px，露出底下
+ * `.browser-stage` 的 `--surface-0`（#111419）。网页多为浅色时那就是一圈看得见的深边，而它没有对应的
+ * 绿环——用户看到的是「没聚焦的那格镶了一圈黑边」（#350）。
+ *
+ * 聚焦与否由 `regionFocusExpression` 一次算出（类名与这个让位量共用那一次比较），这里只消费它的结论。
+ */
+export function focusRingYieldOf(element: Element, focused: boolean): number {
+  if (!focused) return 0
+  return focusRingInsetOf(element)
+}
+
 function normalizeBounds(bounds: BrowserBounds | null): BrowserBounds | null {
   if (!bounds) return null
   const values = [bounds.x, bounds.y, bounds.width, bounds.height]
