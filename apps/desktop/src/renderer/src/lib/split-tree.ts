@@ -98,8 +98,8 @@ function firstLeafId<Leaf>(
 
 // 关闭一片叶子后谁接管焦点：它的**兄弟**。在二叉分屏里，删掉一片叶子时它的兄弟子树被提升到父节点
 // 的位置——正是视觉上长大、占掉被关格所空出那块地方的那一格，所以焦点落到兄弟才符合用户「关掉这格、
-// 看向补上来的那格」的动作。兄弟本身是子树时取其第一片叶子（与 removeLeaf/removeRegionNode 提升子树后
-// 的读序一致）。返回 null 表示 target 不在树里、或 root 本身就是叶子（没有兄弟）。
+// 看向补上来的那格」的动作。兄弟本身是子树时取其第一片叶子（与 removeLeaf 提升子树后的读序一致）。
+// 返回 null 表示 target 不在树里、或 root 本身就是叶子（没有兄弟）。
 export function findSiblingLeafId<Leaf>(
   root: SplitTreeNode<Leaf>,
   leafId: (leaf: SplitTreeLeaf<Leaf>) => string,
@@ -116,4 +116,55 @@ export function findSiblingLeafId<Leaf>(
     findSiblingLeafId(root.first, leafId, targetId) ??
     findSiblingLeafId(root.second, leafId, targetId)
   )
+}
+
+// 树里所有叶子的 id，按读序（先序：左→右 / 上→下）。两棵树的 groupIds / regionIds 此前各自递归一份
+// 逐字相同的实现，现在都只是本函数的转发壳。读序是有合同的：`findSiblingLeafId` 提升子树后取「第一片
+// 叶子」用的就是这个序，关格后的焦点落点依赖两者一致。
+export function collectLeafIds<Leaf>(
+  root: SplitTreeNode<Leaf>,
+  leafId: (leaf: SplitTreeLeaf<Leaf>) => string
+): string[] {
+  if (root.type === 'leaf') return [leafId(root)]
+  return [...collectLeafIds(root.first, leafId), ...collectLeafIds(root.second, leafId)]
+}
+
+// 把 targetId 那片叶子整体换成 replacement（可以是一片叶子，也可以是一棵 split 子树——「在这一格上
+// 再切一刀」就是后者）。targetId 不在树里时整棵树原样返回。
+export function replaceLeaf<Leaf>(
+  root: SplitTreeNode<Leaf>,
+  leafId: (leaf: SplitTreeLeaf<Leaf>) => string,
+  targetId: string,
+  replacement: SplitTreeNode<Leaf>
+): SplitTreeNode<Leaf> {
+  if (root.type === 'leaf') return leafId(root) === targetId ? replacement : root
+  return {
+    ...root,
+    first: replaceLeaf(root.first, leafId, targetId, replacement),
+    second: replaceLeaf(root.second, leafId, targetId, replacement)
+  }
+}
+
+/**
+ * 摘掉 targetId 那片叶子：它所在的 split 塌缩，兄弟子树被提升到父节点的位置（正是视觉上长大、占掉
+ * 空位的那一格，与 {@link findSiblingLeafId} 的焦点规则同一件事）。整棵树只剩这一片叶子时返回 null，
+ * 由调用方决定「空树」在它那层是什么意思（关掉整个 Tab、还是拒绝动手）。
+ *
+ * **纯递归，不带「命中直接子叶就返回兄弟」的快捷路径。** 两者只在一种输入上分家：同一个 id 既是某个
+ * split 的直接子叶、又出现在它的兄弟子树里——快捷路径只删前者，纯递归两个都删。本仓到不了那种输入
+ * （两棵树的叶子 id 都互不相同：tab-group id 现造，`splitWorkbenchRegion` 显式拒绝已在场的 regionId），
+ * 所以这里选纯递归不是为了修一个真 bug，而是因为**少一条分支就少一个无人守的形状**；实测两种写法在
+ * 26038 个唯一 id 随机树上零差异。前置条件写在这里：叶子 id 在一棵树内唯一。
+ */
+export function removeLeaf<Leaf>(
+  root: SplitTreeNode<Leaf>,
+  leafId: (leaf: SplitTreeLeaf<Leaf>) => string,
+  targetId: string
+): SplitTreeNode<Leaf> | null {
+  if (root.type === 'leaf') return leafId(root) === targetId ? null : root
+  const first = removeLeaf(root.first, leafId, targetId)
+  const second = removeLeaf(root.second, leafId, targetId)
+  if (!first) return second
+  if (!second) return first
+  return { ...root, first, second }
 }

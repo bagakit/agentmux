@@ -2,8 +2,12 @@ import type { SplitDirection } from './workbench-layout'
 import { orientationOf, placementOf } from './split-direction'
 import {
   type SplitTreeNode,
+  type SplitTreeLeaf,
   clampSplitRatio,
+  collectLeafIds,
   findSiblingLeafId,
+  removeLeaf,
+  replaceLeaf,
   setSplitRatioAtPath
 } from './split-tree'
 import type { WorkbenchLayoutPreset } from '@agentmux/core/workbench-layout-preset'
@@ -34,10 +38,16 @@ export function createWorkbenchViewLayout(regionId: string): WorkbenchViewLayout
   return { root: { type: 'leaf', regionId }, activeRegionId: regionId }
 }
 
+// region 树的叶子取值器：把「叶子的 id 是 regionId」交给 split-tree 的泛型函数（collectLeafIds /
+// replaceLeaf / removeLeaf / findSiblingLeafId）。整个文件只此一份，各调用点不各自写一遍箭头函数。
+const regionLeafId = (leaf: SplitTreeLeaf<{ regionId: string }>): string => leaf.regionId
+
+// region 树的所有 regionId，按读序。函数体恰好只有一句：转发到 split-tree 的 collectLeafIds，叶子
+// 取值器用本文件的 regionLeafId。此前它自己递归一份（与 workbench-layout 的 groupIds 逐字相同），
+// 现收归 SSOT——这层薄壳保留是因为它是本文件的公开面（workbench-persistence、workbench-shortcuts、
+// workbench-tabs、WorkspaceWorkbench 等多个 importer 从这里取），但除了转发之外不做任何事。
 export function regionIds(root: WorkbenchRegionLayoutNode): string[] {
-  return root.type === 'leaf'
-    ? [root.regionId]
-    : [...regionIds(root.first), ...regionIds(root.second)]
+  return collectLeafIds(root, regionLeafId)
 }
 
 /**
@@ -248,19 +258,6 @@ export function workbenchRegionBounds(
   return regions
 }
 
-function replaceRegion(
-  root: WorkbenchRegionLayoutNode,
-  targetRegionId: string,
-  replacement: WorkbenchRegionLayoutNode
-): WorkbenchRegionLayoutNode {
-  if (root.type === 'leaf') return root.regionId === targetRegionId ? replacement : root
-  return {
-    ...root,
-    first: replaceRegion(root.first, targetRegionId, replacement),
-    second: replaceRegion(root.second, targetRegionId, replacement)
-  }
-}
-
 export function splitWorkbenchRegion(
   layout: WorkbenchViewLayout,
   targetRegionId: string,
@@ -273,7 +270,7 @@ export function splitWorkbenchRegion(
   const added: WorkbenchRegionLayoutNode = { type: 'leaf', regionId: newRegionId }
   const newFirst = placementOf(direction) === 'first'
   return {
-    root: replaceRegion(layout.root, targetRegionId, {
+    root: replaceLeaf(layout.root, regionLeafId, targetRegionId, {
       type: 'split',
       direction: orientationOf(direction),
       first: newFirst ? added : target,
@@ -282,18 +279,6 @@ export function splitWorkbenchRegion(
     }),
     activeRegionId: newRegionId
   }
-}
-
-function removeRegionNode(
-  root: WorkbenchRegionLayoutNode,
-  targetRegionId: string
-): WorkbenchRegionLayoutNode | null {
-  if (root.type === 'leaf') return root.regionId === targetRegionId ? null : root
-  const first = removeRegionNode(root.first, targetRegionId)
-  const second = removeRegionNode(root.second, targetRegionId)
-  if (!first) return second
-  if (!second) return first
-  return { ...root, first, second }
 }
 
 export function closeWorkbenchRegion(
@@ -307,8 +292,8 @@ export function closeWorkbenchRegion(
   // findSiblingGroupId（兄弟）不一致：同一个「关掉当前格」的动作，两条路把焦点送去不同地方。收敛到
   // 兄弟。sibling 为 null（理论上到不了：已过 length>1 且 regionId 在树里）时回退到读序末尾，保持
   // activeRegionId 始终指向一个仍在场的格。
-  const sibling = findSiblingLeafId(layout.root, (leaf) => leaf.regionId, regionId)
-  const root = removeRegionNode(layout.root, regionId)
+  const sibling = findSiblingLeafId(layout.root, regionLeafId, regionId)
+  const root = removeLeaf(layout.root, regionLeafId, regionId)
   if (!root) return layout
   const remainingRegionIds = regionIds(root)
   return {

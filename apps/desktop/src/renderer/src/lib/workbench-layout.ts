@@ -4,7 +4,11 @@
 
 import {
   type SplitTreeNode,
+  type SplitTreeLeaf,
+  collectLeafIds,
   findSiblingLeafId,
+  removeLeaf,
+  replaceLeaf,
   setSplitRatioAtPath
 } from './split-tree'
 // 方向的两半含义（哪根轴、哪一侧）只从这里取。本文件定义 SplitDirection，而 split-direction.ts 只
@@ -30,6 +34,11 @@ export type WorkspaceLayout = {
   groups: TabGroup[]
   activeGroupId: string
 }
+
+// tab-group 树的叶子取值器：把「叶子的 id 是 groupId」这一件通用分屏树代数不认识的事，交给 split-tree
+// 的泛型函数（collectLeafIds / replaceLeaf / removeLeaf / findSiblingLeafId）。整个文件只此一份，
+// 各调用点不各自写一遍箭头函数。
+const groupLeafId = (leaf: SplitTreeLeaf<{ groupId: string }>): string => leaf.groupId
 
 function dedupeTabOrder(tabOrder: string[]): string[] {
   return [...new Set(tabOrder)]
@@ -95,19 +104,6 @@ function buildSplitNode(
   }
 }
 
-function replaceLeaf(
-  root: TabGroupLayoutNode,
-  targetGroupId: string,
-  replacement: TabGroupLayoutNode
-): TabGroupLayoutNode {
-  if (root.type === 'leaf') return root.groupId === targetGroupId ? replacement : root
-  return {
-    ...root,
-    first: replaceLeaf(root.first, targetGroupId, replacement),
-    second: replaceLeaf(root.second, targetGroupId, replacement)
-  }
-}
-
 // 关闭一个分组后由谁接管焦点：它在分屏树里的兄弟（子树时取其第一片叶子）。逐点等价于此前手写的
 // findSiblingGroupId + findFirstLeaf，现改为复用 split-tree 的通用兄弟查找，只把「叶子的 id」这一件
 // 树代数不认识的事作为取值器传进去。
@@ -115,21 +111,7 @@ export function findSiblingGroupId(
   root: TabGroupLayoutNode,
   targetGroupId: string
 ): string | null {
-  return findSiblingLeafId(root, (leaf) => leaf.groupId, targetGroupId)
-}
-
-function removeLeaf(
-  root: TabGroupLayoutNode,
-  targetGroupId: string
-): TabGroupLayoutNode | null {
-  if (root.type === 'leaf') return root.groupId === targetGroupId ? null : root
-  if (root.first.type === 'leaf' && root.first.groupId === targetGroupId) return root.second
-  if (root.second.type === 'leaf' && root.second.groupId === targetGroupId) return root.first
-  const first = removeLeaf(root.first, targetGroupId)
-  const second = removeLeaf(root.second, targetGroupId)
-  if (!first) return second
-  if (!second) return first
-  return { ...root, first, second }
+  return findSiblingLeafId(root, groupLeafId, targetGroupId)
 }
 
 function getDirectLayoutSiblingOnSplitSide(
@@ -189,8 +171,12 @@ export function createWorkspaceLayout(groupId: string, tabs: string[] = []): Wor
   }
 }
 
+// tab-group 树的所有 groupId，按读序。函数体恰好只有一句：转发到 split-tree 的 collectLeafIds，
+// 叶子取值器用本文件的 groupLeafId。此前它自己递归一份（与 workbench-view-layout 的 regionIds 逐字
+// 相同），现收归 SSOT——这层薄壳保留是因为它是本文件的公开面（WorkspaceWorkbench、workbench-persistence
+// 等多个 importer 从这里取），但除了转发之外不做任何事。
 export function groupIds(root: TabGroupLayoutNode): string[] {
-  return root.type === 'leaf' ? [root.groupId] : [...groupIds(root.first), ...groupIds(root.second)]
+  return collectLeafIds(root, groupLeafId)
 }
 
 export function findGroup(layout: WorkspaceLayout, groupId: string): TabGroup | null {
@@ -363,7 +349,7 @@ export function removeTab(
   }
   const siblingId = findSiblingGroupId(layout.root, groupId)
   return {
-    root: removeLeaf(layout.root, groupId) ?? layout.root,
+    root: removeLeaf(layout.root, groupLeafId, groupId) ?? layout.root,
     groups: groups.filter((candidate) => candidate.id !== groupId),
     activeGroupId: siblingId ?? layout.activeGroupId
   }
@@ -420,7 +406,7 @@ export function moveTab(
   })
   let root = layout.root
   if (sourceOrder.length === 0) {
-    root = removeLeaf(root, sourceGroupId) ?? root
+    root = removeLeaf(root, groupLeafId, sourceGroupId) ?? root
     groups = groups.filter((group) => group.id !== sourceGroupId)
   }
   return { root, groups, activeGroupId: targetGroupId }
@@ -475,9 +461,9 @@ export function moveTabToNewGroup(
         }
       : group
   )
-  let root = replaceLeaf(layout.root, targetGroupId, replacement)
+  let root = replaceLeaf(layout.root, groupLeafId, targetGroupId, replacement)
   if (sourceOrder.length === 0) {
-    root = removeLeaf(root, sourceGroupId) ?? root
+    root = removeLeaf(root, groupLeafId, sourceGroupId) ?? root
     groups = groups.filter((group) => group.id !== sourceGroupId)
   }
   return { root, groups, activeGroupId: newGroupId }
