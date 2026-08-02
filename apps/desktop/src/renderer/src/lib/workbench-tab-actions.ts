@@ -1,5 +1,6 @@
 import type { SplitDirection } from './workbench-layout'
 import type { WorkbenchSurface } from './workbench-tabs'
+import { isSessionSurface } from './workbench-surface-kinds'
 import {
   workbenchRegionPresetSize,
   type WorkbenchRegionLayoutPreset
@@ -46,7 +47,7 @@ export function moveSessionViewMenu(input: {
   currentWorkspaceId: string
   move: (regionId: string, targetWorkspaceId: string) => void
 }): { targets: MoveSessionViewTarget[]; onSelect: (targetWorkspaceId: string) => void } {
-  if (input.surface.kind !== 'agent' && input.surface.kind !== 'terminal') {
+  if (!isSessionSurface(input.surface)) {
     return { targets: [], onSelect: () => {} }
   }
   const regionId = input.surface.regionId

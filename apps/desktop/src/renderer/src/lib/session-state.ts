@@ -23,6 +23,7 @@ import {
   type WorkbenchSurface,
   type WorkbenchTab
 } from './workbench-tabs'
+import { isSessionSurface } from './workbench-surface-kinds'
 
 export type SessionViewMode = 'terminal' | 'activity'
 
@@ -111,7 +112,7 @@ export function reduceSessionLaunchAttached(
       ? {
           ...projected.tabs,
           [tab.id]: updateWorkbenchRegion(tab, regionId, (surface) => (
-            surface.kind === 'agent' || surface.kind === 'terminal'
+            isSessionSurface(surface)
               ? { ...surface, phase: 'attached' }
               : surface
           ))
@@ -268,14 +269,14 @@ export function removeSessionProjection(
   // title survives as an empty Tab forever even though the Session list is already canonical.
   const hasProjectedSession = state.sessions.some((session) => session.id === sessionId)
   const hasProjectedView = Object.values(state.tabs).some((tab) => workbenchSurfaces(tab).some((surface) => (
-    (surface.kind === 'agent' || surface.kind === 'terminal') && surface.sessionId === sessionId
+    isSessionSurface(surface) && surface.sessionId === sessionId
   )))
   if (!hasProjectedSession && !hasProjectedView) return state
   const removedTabIds: string[] = []
   const tabs = { ...state.tabs }
   for (const tab of Object.values(state.tabs)) {
     const removedRegionIds = workbenchSurfaces(tab).flatMap((surface) => (
-      (surface.kind === 'agent' || surface.kind === 'terminal') && surface.sessionId === sessionId
+      isSessionSurface(surface) && surface.sessionId === sessionId
         ? [surface.regionId]
         : []
     ))

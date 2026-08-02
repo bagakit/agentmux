@@ -1,5 +1,6 @@
 import type { WorkbenchTab } from './workbench-tabs'
 import { workbenchSurfaces } from './workbench-tabs'
+import { isSessionSurface } from './workbench-surface-kinds'
 import type { AttentionVisibility } from './attention-event'
 
 // Which Sessions the user can actually see right now.
@@ -33,7 +34,7 @@ export function visibleSessionIds(input: {
     if (!tab) continue
     // Every Region of an active tab is on screen simultaneously — a split shows both sides.
     for (const surface of workbenchSurfaces(tab)) {
-      if (surface.kind === 'agent' || surface.kind === 'terminal') visible.add(surface.sessionId)
+      if (isSessionSurface(surface)) visible.add(surface.sessionId)
     }
   }
   return visible

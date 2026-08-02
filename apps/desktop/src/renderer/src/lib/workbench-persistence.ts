@@ -11,10 +11,12 @@ import {
   removeWorkbenchRegion,
   workbenchSurfaces,
   type AgentWorkbenchSurface,
+  type FileWorkbenchSurface,
   type TerminalWorkbenchSurface,
   type WorkbenchSurface,
   type WorkbenchTab
 } from './workbench-tabs'
+import { assertUnreachableSurface, isSessionSurface } from './workbench-surface-kinds'
 import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
 
 export type PersistedWorkbench = {
@@ -35,29 +37,64 @@ export function persistedAgentSessionIds(
 type SessionWorkbenchSurface = AgentWorkbenchSurface | TerminalWorkbenchSurface
 
 function sessionSurface(surface: WorkbenchSurface): surface is SessionWorkbenchSurface {
-  return (
-    (surface.kind === 'agent' || surface.kind === 'terminal') &&
-    surface.phase === 'attached'
-  )
+  // `isSessionSurface` is the SSOT for "agent-or-terminal"; the phase gate stays here because only an
+  // ATTACHED view carries a stable identity worth persisting/restoring. Keeping the kind half in one
+  // place means a future session-bearing kind is enrolled once (in `isSessionSurface`) rather than
+  // being silently excluded by this copy.
+  return isSessionSurface(surface) && surface.phase === 'attached'
+}
+
+/**
+ * Does a NON-attached-session surface survive the persistence round-trip? This is the one decision
+ * that used to be a silent fall-through: a kind absent from the keep-list was dropped, so a new
+ * surface kind would be lost across restart with nothing going red. The switch is exhaustive via
+ * `assertUnreachableSurface`, so a 6th kind cannot compile until someone decides — here, in one place
+ * — whether it survives. A `Record<kind, boolean>` would not fit: `file` and `launcher` are not
+ * constant, they depend on `fileSurvives`/`hasTopic`, and the launching-session leak below needs a
+ * real case, not a table cell.
+ *
+ * Note the `agent`/`terminal` case: `sessionSurface` is a kind-based predicate whose body also gates
+ * on phase, so a LAUNCHING agent/terminal fails it and reaches this classifier even though the caller
+ * has narrowed the static type to file|launcher|browser. Taking the full `WorkbenchSurface` here (not
+ * the narrowed remainder) makes that runtime leak an explicit, handled case instead of an
+ * `assertUnreachableSurface` throw — a launching view has no run to keep, so it is dropped, exactly as
+ * before this was made exhaustive.
+ */
+function persistedSurfaceSurvives(
+  surface: WorkbenchSurface,
+  ctx: { hasTopic: boolean; fileSurvives: (surface: FileWorkbenchSurface) => boolean }
+): boolean {
+  switch (surface.kind) {
+    case 'agent':
+    case 'terminal':
+      return false
+    case 'launcher':
+      return ctx.hasTopic
+    case 'file':
+      return ctx.fileSurvives(surface)
+    case 'browser':
+      // browser 面内嵌整个活体 BrowserSnapshot（url/title/navigationId… 全是 required 运行时快照），
+      // 浏览历史与文件路径是两类敏感度；且冷启动没有一条能把持久 browser 结构复活成可用空白页的生命周期
+      // （BrowserPane 的 restore 只在 released 态触发，冷启动可见 browser 是 released=false，restore/
+      // create 都不发），硬存结构标识只会 ship 一个死面板。故 browser 面整面剥离。
+      return false
+    default:
+      return assertUnreachableSurface(surface)
+  }
 }
 
 function sessionOnlyTab(tab: WorkbenchTab): WorkbenchTab | null {
   let next: WorkbenchTab | null = tab
   for (const surface of workbenchSurfaces(tab)) {
     if (sessionSurface(surface)) continue
-    if (tab.topicId && surface.kind === 'launcher') continue
     // 文件面必须活过重启——它就是用户报的「重启后 tab 和分屏没了」的一半：一个纯 file tab 曾被整面剥成
     // 0 面（整 tab 消失），agent+file 分屏曾塌成单面。file 面本身只有 {regionId,kind,workspaceId,path}，
     // 没有运行时内容可剥，且 tab id 本就是 `file:${workspaceId}:${path}`——存 file 面与存路径是同一件事，
-    // 分不开。path 原样保留（相对存相对、绝对存绝对，不 normalize/重写）。
-    //
-    // 为什么 file 留而 browser 的 url/title 不留：browser 面内嵌整个活体 BrowserSnapshot（url/title/
-    // navigationId… 全是 required 运行时快照），浏览历史与文件路径是两类敏感度；且冷启动没有一条能把
-    // 持久 browser 结构复活成可用空白页的生命周期（BrowserPane 的 restore 只在 released 态触发，冷启动
-    // 可见 browser 是 released=false，restore/create 都不发），硬存结构标识只会 ship 一个死面板。故
-    // browser 面仍整面剥离（沿用旧行为）。谁若日后以「过时的直接删」为由把下面这行 file 也一并剥掉，
-    // 就会原样重犯这个 bug——这个机制不是冗余，删它=回归。
-    if (surface.kind === 'file') continue
+    // 分不开。path 原样保留（相对存相对、绝对存绝对，不 normalize/重写）。谁若日后以「过时的直接删」为由
+    // 把下面这条 file→存 一并删掉，就会原样重犯这个 bug——这个机制不是冗余，删它=回归。
+    if (persistedSurfaceSurvives(surface, { hasTopic: Boolean(tab.topicId), fileSurvives: () => true })) {
+      continue
+    }
     next = next ? removeWorkbenchRegion(next, surface.regionId) : null
   }
   return next
@@ -123,7 +160,6 @@ function restoreTab(
   let next: WorkbenchTab | null = tab
   for (const surface of workbenchSurfaces(tab)) {
     if (!sessionSurface(surface)) {
-      if (tab.topicId && surface.kind === 'launcher') continue
       // 一个文件面在其 workspace 仍被配置时生还，原样保留（含 path）。文件是否还在磁盘上不在这里判：
       // 本函数是纯 presentation 投影，无磁盘/无 IPC——stat 会把同步启动恢复变成异步，且新增一个与 Core/
       // 主进程并存的文件存在性真相源（违反 SSOT）。
@@ -137,9 +173,13 @@ function restoreTab(
       //
       // 关键：这里绝不能退回旧的 `return null`——那会把整 tab 连同存活的 agent 面一起毙掉（正是用户报的
       // 「分屏没了」）。越界面只删该 Region，让 removeWorkbenchRegion 走与 session 面完全同一条收敛出口。
+      // survive 判据经 `persistedSurfaceSurvives`（同一张 SSOT 表），file 面额外要求其 workspace 仍在配置里。
       if (
-        surface.kind === 'file' &&
-        config.workspaces.some((workspace) => workspace.id === surface.workspaceId)
+        persistedSurfaceSurvives(surface, {
+          hasTopic: Boolean(tab.topicId),
+          fileSurvives: (file) =>
+            config.workspaces.some((workspace) => workspace.id === file.workspaceId)
+        })
       ) continue
       next = next ? removeWorkbenchRegion(next, surface.regionId) : null
       continue
