@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { posix } from 'node:path'
 import type { ExecutionHost } from '@agentmux/core'
-import { gitFailureError, GIT_NONINTERACTIVE_ENV, isNotAGitRepositoryStderr } from './git-service.js'
+import { gitFailureError, GIT_NONINTERACTIVE_ENV, isNotAGitRepositoryStderr, isNotAWorkingTreeStderr } from './git-service.js'
 import type {
   AppConfig,
   CreateWorktreeForBranchInput,
@@ -244,7 +244,15 @@ export class WorktreeService {
     }
     const host = this.hostFor(workspace.hostId)
 
-    if (!input.discardChanges) {
+    // The dirty check needs a directory to inspect. When the record outlives the directory — which is
+    // exactly what `record-not-withdrawn` leaves behind — `status --porcelain` cannot run at all: git
+    // exits 128 with "cannot change to", which `assertGit` turns into a `git-failed`. That is the first
+    // of two places a half-finished removal used to die on retry.
+    //
+    // So the probe is skipped when there is provably no directory. This does not weaken the protection —
+    // its subject is uncommitted work, and an absent directory holds none.
+    const directoryPresent = await this.pathPresent(host, workspace.path)
+    if (!input.discardChanges && directoryPresent) {
       // `status --porcelain` is empty exactly when there is nothing to lose: no modifications, no staged
       // changes, no untracked files. Anything at all means stop and say so.
       const status = await host.run(
@@ -268,7 +276,28 @@ export class WorktreeService {
         : ['-C', workspace.repoPath, 'worktree', 'remove', '--', workspace.path],
       GIT_MUTATION_OPTIONS
     )
-    this.assertGit(removal, 'Git worktree removal failed')
+    // The second place a retry used to die, and the one that actually made `record-not-withdrawn`
+    // permanent. Our own successful `worktree remove` deregisters the entry, so on the next attempt git
+    // has nothing left to remove and says so — verified against real git, one fresh repository per case:
+    // a retry after a completed removal exits 128 with "is not a working tree", for plain and `--force`
+    // alike. Reading that as a failure meant the record could never be withdrawn, no matter how many
+    // times the user tried.
+    //
+    // Both halves of this condition are required, because that one sentence covers two situations git
+    // does not distinguish (see `isNotAWorkingTreeStderr`): the entry we already removed, and a path
+    // that was never a worktree. The directory is what separates them, and it was already measured
+    // above — a caller who hands us a live directory git does not know still gets a loud failure, which
+    // is right, because nothing has been removed and the path is wrong.
+    //
+    // Deliberately NOT keyed on the exit code or on "any failure with a missing directory": a locked
+    // worktree prints a different sentence ("cannot remove a locked working tree") and an unreachable
+    // repository prints another ("cannot change to"), both of which are real failures with real
+    // remedies. Each was probed; each must still be raised, and a locked worktree whose directory is
+    // gone — the one case where a coarser rule would silently deregister something a person locked on
+    // purpose — is the reason this reads the sentence rather than the situation.
+    const alreadyGone =
+      removal.exitCode !== 0 && !directoryPresent && isNotAWorkingTreeStderr(removal.stderr)
+    if (!alreadyGone) this.assertGit(removal, 'Git worktree removal failed')
 
     // Deliberately NO `git worktree prune` here. It looked like hygiene, but it is both redundant and
     // dangerous: `worktree remove` already deletes the admin entry, so the path is immediately
@@ -281,10 +310,14 @@ export class WorktreeService {
     // real directory with nothing pointing at it.
     //
     // Past this line the directory is GONE, so a failure here is not the same event as a failure above it.
-    // The record still names a path that no longer exists, and removing again cannot fix it: the status
-    // probe runs inside the vanished directory and fails, so every retry now reports a git failure. That
-    // is why this is its own classification instead of being folded into the caller's catch — a consumer
-    // told "retained" without it will offer to discard work that is already deleted.
+    // The record still names a path that no longer exists, which is why this is its own classification
+    // rather than being folded into the caller's catch — a consumer told "retained" without it will offer
+    // to discard work that is already deleted.
+    //
+    // Retrying does reach this line again: both places that used to turn a retry into a `git-failed` are
+    // now gated on the directory being provably absent, so the second attempt skips straight to the save
+    // that failed. That is deliberate — this classification names a record that still needs withdrawing,
+    // so it has to be reachable a second time or it is a dead end wearing a recoverable name.
     let nextConfig: AppConfig
     try {
       nextConfig = await this.configWriter.save({
@@ -377,17 +410,34 @@ export class WorktreeService {
     let directory = posix.normalize(path)
     while (true) {
       const metadataPath = posix.join(directory, '.git')
-      const result = await host.run(
-        'test',
-        ['-e', metadataPath, '-o', '-L', metadataPath],
-        METADATA_PROBE_OPTIONS
-      )
-      if (result.exitCode === 0) return true
-      if (result.exitCode !== 1) this.assertGit(result, 'Could not inspect Git repository metadata')
+      if (await this.pathPresent(host, metadataPath)) return true
       const parent = posix.dirname(directory)
       if (parent === directory) return false
       directory = parent
     }
+  }
+
+  /**
+   * Whether something exists at `path` on that host — a symlink counts, even a broken one.
+   *
+   * `-e` alone answers "no" for a dangling symlink, and a dangling symlink is still something a caller
+   * must not treat as absent. Two callers ask this question (git-metadata discovery, and the dirty probe's
+   * precondition) and they must answer it identically: a probe that disagrees with discovery about whether
+   * a path is there would make removal's behavior depend on which one ran.
+   *
+   * Exit 1 is the shell's honest "no". Anything else is a broken host rather than an answer, and is raised
+   * — reading a failure to ask as "absent" would silently skip the dirty protection.
+   */
+  private async pathPresent(host: ExecutionHost, path: string): Promise<boolean> {
+    const result = await host.run(
+      'test',
+      ['-e', path, '-o', '-L', path],
+      METADATA_PROBE_OPTIONS
+    )
+    if (result.exitCode === 0) return true
+    if (result.exitCode === 1) return false
+    this.assertGit(result, 'Could not inspect the path')
+    return false
   }
 
   private assertRepository(snapshot: WorkspaceBranchesSnapshot): asserts snapshot is GitBranchesSnapshot {
