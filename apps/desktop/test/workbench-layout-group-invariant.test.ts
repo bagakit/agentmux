@@ -147,6 +147,74 @@ describe('三个重排分屏树的 reducer 各自在出口调到了那道闸（�
     ).toThrow(/orphan/)
   })
 
+  /**
+   * 上面三条都喂「入场就带一片孤儿叶」的输入，于是断言的**操作数**不可观测：`assertGroupInvariant(next)`
+   * 与 `assertGroupInvariant(layout)` 都会抛，因为那片孤儿叶在输入里、也在输出里。实测把三处全改成
+   * 判 `layout` → 15 条全绿（#576）。而守卫存在的意义恰是抓「reducer **自己算出来的** 输出坏了」。
+   *
+   * 补法不是「造一个干净输入让输出违约」——那不可达：三个 reducer 对合法输入恒产出合法输出（要让输出坏
+   * 必须先把实现改坏，那时判哪个操作数都红，仍分不开）。可达的是**反过来**：输入违约、而 reducer 正当地
+   * 把它清掉，于是输出干净。这一对世界就分开了：
+   *   - 判 `next`（正确）→ 输出干净 → 不抛 → 本条绿；
+   *   - 判 `layout`（把操作数换成输入）→ 输入违约 → 抛 → 本条红。
+   *
+   * 载体是 off-tree group：`floating` 只在 `groups` 里、不在树里（record-without-leaf，复发过两次的那种）。
+   * 把它名下唯一那张 Tab 移进 g1，`moveTab` 走「源被搬空」出口，`removeLeaf` 因它不在树里而不动树、
+   * `groups.filter` 把那条鬼影记录摘掉——正好把两侧拉回相等。这同时是一条有价值的行为断言：从鬼影分组
+   * 里搬走最后一张 Tab 应当**回收**那条记录，而不是在出口炸掉。
+   */
+  it('输入违约、reducer 把它清干净时不抛（判据落在输出上，换成判输入即红）', () => {
+    const seeded = withOffTreeGroupRecord(createWorkspaceLayout('g1', ['tab:a']), 'floating', 'tab:f')
+
+    // 前提自检 1：输入**真的**违约，且只违约「记录多、树里没有」这一个方向。否则本条退化成一条
+    // 普通的「合法输入不抛」，与上面那条重复，且对操作数不再敏感。
+    expect(groupIds(seeded.root)).toEqual(['g1'])
+    expect(seeded.groups.map((group) => group.id)).toEqual(['g1', 'floating'])
+    expect(() => assertGroupInvariant(seeded)).toThrow(/group records with no tree leaf: \[floating\]/)
+
+    // 判据本体：出口断言看的是算出来的 next，故这次调用必须走完、不抛。
+    const moved = moveTab(seeded, 'tab:f', 'floating', 'g1', 1)
+
+    // 前提自检 2：真的走了「源被搬空」那条**带断言**的出口（而不是别的早退），证据是鬼影记录被回收了。
+    expect(moved.groups.map((group) => group.id)).toEqual(['g1'])
+    expect(findGroupForTab(moved, 'tab:f')?.id).toBe('g1')
+    // 前提自检 3：输出确实干净——否则「不抛」是因为断言没被调到，而不是因为它判的是干净的输出。
+    expect(() => assertGroupInvariant(moved)).not.toThrow()
+  })
+
+  /**
+   * 同一个反向判据用在 `moveTabToNewGroup` 上：它的出口也自己算 `next`，操作数同样此前不可观测。
+   *
+   * 载体与上一条相同（off-tree `floating`），路径不同：把 `floating` 名下唯一那张 Tab 拆成一个新分组 `g2`
+   * ——`replaceLeaf` 把目标格 g1 换成含 g2 的 split（树里新增一片有记录的叶），源被搬空于是
+   * `removeLeaf` + `groups.filter` 把 `floating` 摘掉。`removeLeaf` 对不在树里的 groupId 是 no-op
+   * （split-tree.ts:185-196），所以树只多了 g2；`groups` 少了鬼影、多了 g2。两侧回到相等。
+   *
+   * 第三个 reducer `removeTab` **不在这条判据的射程内**，这是机制事实不是遗漏：它的两个违约方向都构造在
+   * 被收的那个 groupId 上，而 `sourceOrder.length > 0 || !leafIds.includes(groupId) || leafIds.length === 1`
+   * 这道三项闸会在断言之前提前返回（实测：off-tree 记录 + 收别的真分组 → 鬼影留存于输出，判 next 也抛；
+   * 树里孤儿叶 + 收那个孤儿 id → `findGroup` 得 null，第一行就原样返回）。故 `removeTab` 出口的操作数
+   * （workbench-layout.ts:422）今天仍不可观测——#576 应据此收窄，不许当成三处都盯住了。
+   */
+  it('moveTabToNewGroup 同样把违约输入清干净：判据落在输出上，换成判输入即红', () => {
+    const seeded = withOffTreeGroupRecord(createWorkspaceLayout('g1', ['tab:a']), 'floating', 'tab:f')
+
+    // 前提自检 1：输入真的违约，且只违约「记录多、树里没有」这一个方向。
+    expect(groupIds(seeded.root)).toEqual(['g1'])
+    expect(() => assertGroupInvariant(seeded)).toThrow(/group records with no tree leaf: \[floating\]/)
+
+    // 判据本体：出口断言看的是算出来的 next，故这次调用必须走完、不抛。
+    const split = moveTabToNewGroup(seeded, 'tab:f', 'floating', 'g1', 'right', 'g2')
+
+    // 前提自检 2：真的走了「replaceLeaf 加新叶 + 源被搬空摘掉」这条**带断言**的出口。证据有两条：
+    // 树里多了 g2（replaceLeaf 生效），且鬼影记录被回收（filter 生效）。
+    expect(groupIds(split.root).sort()).toEqual(['g1', 'g2'])
+    expect(split.groups.map((group) => group.id).sort()).toEqual(['g1', 'g2'])
+    expect(findGroupForTab(split, 'tab:f')?.id).toBe('g2')
+    // 前提自检 3：输出确实干净——否则「不抛」是因为断言没被调到。
+    expect(() => assertGroupInvariant(split)).not.toThrow()
+  })
+
   it('一致输入走正常路径不抛：创建→分裂→跨组移动→收组全程都合法', () => {
     // 反面担保：断言不能过度敏感，否则每次正常布局改动都会崩。这条把三个 reducer 串起来跑一遍，
     // 每步的 storedLayout 都必须通过断言。
