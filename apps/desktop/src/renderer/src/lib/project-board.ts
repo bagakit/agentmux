@@ -76,6 +76,19 @@ function workspaceForBranch(
   )
 }
 
+/**
+ * Which of the Board's four columns a Session belongs in.
+ *
+ * This is a COARSER question than "does this Agent need you" ({@link isNeedsYouState}), and the two must
+ * not be built out of each other. The Board has four columns for nine states, so its needs-you column is
+ * the catch-all for everything stalled — `disconnected` and `error` land here because a kanban with no
+ * cell for them would drop those runs off the board entirely, which is worse than filing them under a
+ * heading that is slightly too broad. The attention vocabulary keeps them out of needs-you for the
+ * opposite reason: amber has to mean one thing.
+ *
+ * That difference is deliberate, and {@link BOARD_COLUMN_DESCRIPTIONS} is where it stops being a lie —
+ * the column's own copy has to name what is actually in it, not just the two states someone remembered.
+ */
 export function sessionBoardColumn(
   session: Pick<SessionSnapshot, 'status'>
 ): Exclude<ProjectBoardColumn, 'inbox'> {
@@ -93,6 +106,22 @@ export function sessionBoardColumn(
     case 'exited':
       return 'done'
   }
+}
+
+/**
+ * What each column's subtitle says.
+ *
+ * Lives beside the mapping above rather than in the components, because it is a claim ABOUT that mapping
+ * and drifts the moment the two are apart. It already had: two components each carried
+ * `'needs-you': 'Waiting or blocked'` while the column had held `disconnected` and `error` for some time,
+ * so the Board told users a stalled or crashed run was "waiting" — and the same words appeared in the
+ * Agents dock, so both surfaces were confidently wrong in the same way.
+ */
+export const BOARD_COLUMN_DESCRIPTIONS: Record<ProjectBoardColumn, string> = {
+  inbox: 'Start a discussion',
+  working: 'Running now',
+  'needs-you': 'Waiting, blocked, disconnected, or failed',
+  done: 'Completed runs'
 }
 
 /**

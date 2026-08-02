@@ -1,6 +1,7 @@
 import * as Dialog from '@radix-ui/react-dialog'
 import { CornerDownLeft, FileCode2, Globe2, Search, Sparkles, SquareTerminal } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { attentionAccentFor } from '../lib/attention-event'
 import {
   buildQuickSwitchIndex,
   rankQuickSwitchItems,
@@ -121,7 +122,7 @@ export function QuickSwitcher({ open, onClose }: { open: boolean; onClose: () =>
                   role="option"
                   aria-selected={index === activeIndex}
                   data-active={index === activeIndex}
-                  data-attention={item.state === 'waiting' || item.state === 'blocked' ? 'needs-you' : item.state === 'error' ? 'error' : undefined}
+                  data-attention={item.state === null ? undefined : attentionAccentFor(item.state) ?? undefined}
                   className="quick-switch__row"
                   onMouseMove={() => setActiveIndex(index)}
                   onClick={() => activate(item)}

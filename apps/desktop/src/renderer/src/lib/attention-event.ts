@@ -1,5 +1,6 @@
 import type { AgentDisplayState } from '@agentmux/core'
 import type { SessionSnapshot } from '../../../shared/contracts'
+import { isNeedsYouState } from './attention-vocabulary'
 
 // Which state change is worth interrupting a person over.
 //
@@ -31,12 +32,6 @@ export type AttentionVisibility = {
   // Whether this Session's Region is currently on screen in that window. A Session in a collapsed
   // pane or a background tab group is NOT visible even when the window is focused.
   sessionVisible: boolean
-}
-
-// The states that mean "an Agent needs you". Kept identical to the shared rollup vocabulary
-// (agent-attention.ts) so a dot and a notification can never disagree about the same Session.
-function isNeedsYou(state: AgentDisplayState): boolean {
-  return state === 'waiting' || state === 'blocked'
 }
 
 // `done` is the only state that means the Agent finished its turn. `exited` is the process leaving,
@@ -88,15 +83,41 @@ export function attentionEventFor(input: {
 /**
  * The attention category a state belongs to, or null when the state is not worth interrupting over.
  *
- * `disconnected` is absent on purpose: a dropped link is not a request for attention. It has its own
- * neutral treatment in the shared status vocabulary precisely so amber can mean "needs you" and
- * nothing else — raising a notification for it would undo that distinction.
+ * The needs-you half comes from {@link isNeedsYouState} — the one table every attention surface reads —
+ * rather than being spelled out again here. `disconnected` is false there on purpose: a dropped link is
+ * not a request for attention. It has its own neutral treatment in the shared status vocabulary
+ * precisely so amber can mean "needs you" and nothing else — raising a notification for it would undo
+ * that distinction.
  */
 export function categoryFor(state: AgentDisplayState): AttentionCategory | null {
-  if (isNeedsYou(state)) return 'needs-you'
+  if (isNeedsYouState(state)) return 'needs-you'
   if (isFinished(state)) return 'done'
   if (state === 'error') return 'error'
   return null
+}
+
+/**
+ * The `data-attention` value a state earns, or null for no accent at all.
+ *
+ * Not every attention category gets colour. `done` is worth a notification but not an accent: amber and
+ * red are for "you are the blocker" and "this broke", and a finished run competing for the same ink is
+ * how a scan stops telling you anything (see the rule in overlays.css). So this is `categoryFor` minus
+ * `done` — expressed by naming the two that DO earn ink, because the interesting question at every call
+ * site is "is this urgent", and answering it by listing exclusions inverts on the next category added.
+ *
+ * Both the row accent and the collapsed roster badge read this, so the ink and the count are one
+ * decision. They were two independent `needs-you || error` copies before.
+ */
+export const URGENT_ATTENTION_CATEGORIES = ['needs-you', 'error'] as const
+
+export function isUrgentAttention(category: AttentionCategory | null): boolean {
+  return category !== null && (URGENT_ATTENTION_CATEGORIES as readonly string[]).includes(category)
+}
+
+/** The accent for one state: its urgent category, or null when it should carry none. */
+export function attentionAccentFor(state: AgentDisplayState): AttentionCategory | null {
+  const category = categoryFor(state)
+  return isUrgentAttention(category) ? category : null
 }
 
 /**

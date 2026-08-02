@@ -1,5 +1,6 @@
 import type { AgentProviderId } from '@agentmux/core'
 import type { AppConfig, SessionSnapshot } from '../../../shared/contracts'
+import { isNeedsYouState } from './attention-vocabulary'
 import {
   activeWorkbenchSurface,
   titleWorkbenchSurface,
@@ -40,20 +41,15 @@ export type QuickSwitchItem = {
 }
 
 // Attention weight: needs-you rows lift highest, then errors, then working, then everything idle.
-// waiting/blocked share the top rung because they are the one "an agent needs you" class the rest of
-// the app already treats as one (see agent-attention.ts).
+// Which states are needs-you is NOT decided here — `isNeedsYouState` is the one table, so this ordering
+// cannot drift from the notification decision or the status bar's counts the way a local `case
+// 'waiting': case 'blocked':` ladder silently would.
 function attentionRank(state: QuickSwitchItem['state']): number {
-  switch (state) {
-    case 'waiting':
-    case 'blocked':
-      return 0
-    case 'error':
-      return 1
-    case 'working':
-      return 2
-    default:
-      return 3
-  }
+  if (state === null) return 3
+  if (isNeedsYouState(state)) return 0
+  if (state === 'error') return 1
+  if (state === 'working') return 2
+  return 3
 }
 
 // A conservative subsequence fuzzy match: every query char must appear in order in the haystack.
