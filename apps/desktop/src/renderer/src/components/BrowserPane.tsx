@@ -89,6 +89,13 @@ export function BrowserPane({
   const toolbar = useAppStore((state) => state.config?.browser.toolbar)
   const toolsOpen = useAppStore((state) => state.toolsOpen)
   const stageRef = useRef<HTMLDivElement>(null)
+  // 焦点结论用 ref 承接，边界同步那条 effect 从 ref 读它而不订阅它（#545）：直接把 prop 放进那条
+  // effect 的依赖数组会让它在每次焦点切换时拆了重建，中间闪一帧（见那条 effect 的注释）。ref 保证
+  // 边界计算里读到的永远是当前焦点值（不会 stale），而焦点翻转由下方那条独立 effect 触发一次重算。
+  const yieldToFocusRingRef = useRef(yieldToFocusRing)
+  // 边界同步那条 effect 每次挂载时把它的重算入口挂上来；焦点那条 effect 借它在不拆 synchronizer 的
+  // 前提下重算。effect 未挂载（stage 还没有）时是 null，焦点 effect 的 `?.()` 便安全地什么都不做。
+  const recomputeBoundsRef = useRef<(() => void) | null>(null)
   const screenshotToken = useRef(0)
   const selectionToken = useRef(0)
   const browserIdentity = useRef<BrowserIdentity>({ id: tab.browserId, navigationId: tab.navigationId })
@@ -227,6 +234,10 @@ export function BrowserPane({
         // 每个 Region 都继承得到，那等于无条件内缩，未聚焦的 browser 区镶一圈无环的深边（#350）。
         // 求交本身与焦点无关（让位量 0 时就是「把 stage 夹进 Region」），没有 Region 祖先
         // （独立窗口等）时按原样铺满。
+        //
+        // 焦点结论从 ref 读，不直接读 yieldToFocusRing prop（#545）：见下方 yieldToFocusRingRef 的
+        // 注释。读 ref 不是 stale closure——ref 永远是当前值；直接读 prop 才会 stale，那正是把它
+        // 放进依赖数组的理由，而放进依赖数组会让整条 effect 在焦点变化时拆了重建（闪烁）。
         const stageBounds = { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
         const region = regionAncestorOf(stage)
         let bounds = stageBounds
@@ -235,24 +246,39 @@ export function BrowserPane({
           bounds = nativeBoundsClearOfFocusRing(
             stageBounds,
             { x: regionRect.x, y: regionRect.y, width: regionRect.width, height: regionRect.height },
-            focusRingYieldOf(region, yieldToFocusRing)
+            focusRingYieldOf(region, yieldToFocusRingRef.current)
           )
         }
         synchronizer.observe(rendererCssBoundsToWindowDip(bounds, api.ui.getZoomFactor()))
       })
     }
+    // 把重算入口交给焦点那条 effect，让它能在**不拆掉这个 synchronizer** 的前提下重算边界。
+    recomputeBoundsRef.current = update
     const observer = new ResizeObserver(update)
     observer.observe(stage)
     window.addEventListener('resize', update)
     update()
     return () => {
+      recomputeBoundsRef.current = null
       cancelAnimationFrame(frame)
       synchronizer.dispose()
       observer.disconnect()
       window.removeEventListener('resize', update)
       void api.browser.setBounds(tab.browserId, null).catch(() => {})
     }
-  }, [elementSelection, menuOpen, released, restoring, screenshot, toolsOpen, reportError, tab.browserId, tab.error, tab.url, visible, yieldToFocusRing])
+    // yieldToFocusRing **故意不在**这里（#545）：它在焦点切换时变化，若列进来，整条 effect 会拆了
+    // 重建——cleanup 那句 `setBounds(null)` 先把原生视图藏起来，重建那次 rAF 下一帧才重新显示，中间
+    // 空一帧就是那道闪烁。它改由 ref 读、由下面那条独立 effect 触发重算。其余被 update 读到的值都在。
+  }, [elementSelection, menuOpen, released, restoring, screenshot, toolsOpen, reportError, tab.browserId, tab.error, tab.url, visible])
+
+  // 焦点环内缩是一件与「边界同步的生命周期」正交的事，所以它有自己的依赖数组（#545）。焦点结论翻转时
+  // 只重算一次边界——复用上面那个还活着的 synchronizer（recomputeBoundsRef），不拆不建，因此没有那道
+  // 藏一帧再显示的闪烁。焦点变化不改变任何尺寸，ResizeObserver 不会触发，所以必须由这条 effect 显式重算，
+  // 否则焦点到达 browser 区时不内缩（#341 回归）、离开时不退回（#350 回归）。
+  useLayoutEffect(() => {
+    yieldToFocusRingRef.current = yieldToFocusRing
+    recomputeBoundsRef.current?.()
+  }, [yieldToFocusRing])
 
   async function run(action: () => Promise<BrowserSnapshot>): Promise<void> {
     if (busy) return
