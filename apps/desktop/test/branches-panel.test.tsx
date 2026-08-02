@@ -9,6 +9,7 @@ vi.hoisted(() => {
 })
 
 import type {
+  GitAheadBehind,
   WorkspaceBranchRecord,
   WorkspaceBranchesSnapshot,
   WorkspaceRecord
@@ -16,6 +17,7 @@ import type {
 
 const fixture = vi.hoisted(() => ({
   snapshot: null as WorkspaceBranchesSnapshot | null,
+  aheadBehind: null as GitAheadBehind | null,
   state: {
     activateWorkspaceSelection: vi.fn(),
     runFanOut: vi.fn(),
@@ -35,6 +37,18 @@ vi.mock('../src/renderer/src/hooks/useWorkspaceBranches.js', () => ({
   })
 }))
 
+// 同上：ahead/behind 也是 effect 取数。**不替换它，`facts` 就恒为 null，整个同步徽标是死代码而
+// 这个文件照旧全绿**——这正是它需要被守的形状（实测：新增徽标后 6 条断言一条没动）。
+vi.mock('../src/renderer/src/hooks/useGitAheadBehind.js', () => ({
+  useGitAheadBehind: () => ({
+    workspaceId: 'ws-1',
+    facts: fixture.aheadBehind,
+    loading: false,
+    error: null,
+    refresh: vi.fn()
+  })
+}))
+
 vi.mock('../src/renderer/src/store.js', () => ({
   useAppStore: Object.assign(
     (selector: (state: typeof fixture.state) => unknown) => selector(fixture.state),
@@ -43,6 +57,7 @@ vi.mock('../src/renderer/src/store.js', () => ({
 }))
 
 import { BranchesPanel } from '../src/renderer/src/components/BranchesPanel.js'
+import { gitSyncBadge } from '../src/renderer/src/lib/git-sync-badge.js'
 
 const workspace: WorkspaceRecord = {
   id: 'ws-1',
@@ -67,6 +82,21 @@ function render(branches: WorkspaceBranchRecord[]): string {
 }
 
 /**
+ * 取出一行的尾部标签区那一段。同步徽标与三岔状态标签都画在这里，按行切片才能问「**这一行**上
+ * 有没有徽标」——只在整页 markup 上判，"徽标只画在当前分支那行"这条就无法被否证。
+ */
+function trailingOf(markup: string, branchName: string): string {
+  const anchor = `>${branchName}<`
+  const at = markup.indexOf(anchor)
+  expect(at, `没渲染出分支「${branchName}」——判据落空了，下面的断言会变成恒真`).toBeGreaterThanOrEqual(0)
+  const rest = markup.slice(at)
+  // 右界必须是**下一行的开头**而不是文档末尾：切到末尾会让下一行的徽标顶上来，于是
+  // 「这一行没有徽标」永远判不出（本仓 section-slice-without-right-bound 那一族）。
+  const next = rest.slice(anchor.length).indexOf('<button type="button" class="branch-row')
+  return next < 0 ? rest : rest.slice(0, anchor.length + next)
+}
+
+/**
  * 取出一个分组的那一段标记。两个分组用同一套 `branch-row` 类名，所以「分支出现在页面上」证不了
  * 「它出现在**对的**分组里」——必须按分组切片，否则对调谓词后断言照旧通过。
  */
@@ -81,6 +111,7 @@ function group(markup: string, label: 'Worktrees' | 'Without worktree'): string 
 
 afterEach(() => {
   fixture.snapshot = null
+  fixture.aheadBehind = null
   fixture.state.activateWorkspaceSelection.mockReset()
   fixture.state.runFanOut.mockReset()
 })
@@ -212,5 +243,124 @@ describe('Branches 面板', () => {
       "from '../lib/workspace-branches-state'"
     )
     expect(source).toContain('branchWorktreePath(branch)')
+  })
+})
+
+/**
+ * 当前分支的 ↑↓ 同步计数徽标。
+ *
+ * 为什么单独一族：`useGitAheadBehind` 靠 effect 取数，而 `renderToStaticMarkup` 不跑 effect。**不
+ * 替换那个 hook，`facts` 就恒为 null，整个徽标分支一行都执行不到**——实测接上徽标后本文件原有 6 条
+ * 断言一条没动，那段代码在全绿下是死的。所以这一族的第一件事是让 facts 成为可控输入。
+ *
+ * 判据落在三处各自能坏的地方：
+ *   1. `kind` 有没有真的到 class 上（三种可见状态必须互不相同，写死成某一种就红）；
+ *   2. 徽标只画在 `isCurrent` 那一行（ahead/behind 是 HEAD 相对自己 upstream 的事实，画到别的分支
+ *      行上是谎——那些分支各有各的 upstream）；
+ *   3. 两种「没有数字可报」的状态（no-upstream / synced）一个盒子都不画。
+ *
+ * 已知且刻意的缺口，记在这里免得下一个人以为它坏了：`no-upstream` 与 `synced` 都不渲染，于是
+ * `gitSyncBadge` 为它们准备的两句不同的 `title` **在这个面板上到不了 DOM**——用户读不出「还没有
+ * upstream」和「已同步」的区别。这不是「区别落在 title 上」，那种说法会给一个不可达的东西背书。
+ * 要露出前者需要一个新的视觉记号（不是空盒子），属产品决定，已单独记录。
+ */
+describe('Branches 面板的同步计数徽标', () => {
+  const UPSTREAM = 'refs/remotes/origin/main'
+
+  function currentAnd(other: string): WorkspaceBranchRecord[] {
+    return [
+      branch('main', { worktreePath: '/repo', workspaceId: 'ws-1', isCurrent: true }),
+      branch(other, { worktreePath: '/wt/a', workspaceId: 'ws-2' })
+    ]
+  }
+
+  it('三种有数字的状态各画自己的 kind 与文本', () => {
+    // 三种各判一次，且每次都断言**另外两种不在场**：把 class 里的 `${sync.kind}` 换成任一字面量，
+    // 或者让 label 与 kind 来自两次独立判定，都会在这里红。
+    const cases = [
+      { facts: { upstream: UPSTREAM, ahead: 2, behind: 0 }, kind: 'ahead', label: '↑2' },
+      { facts: { upstream: UPSTREAM, ahead: 0, behind: 3 }, kind: 'behind', label: '↓3' },
+      { facts: { upstream: UPSTREAM, ahead: 2, behind: 3 }, kind: 'diverged', label: '↑2 ↓3' }
+    ] as const
+
+    for (const probe of cases) {
+      fixture.aheadBehind = probe.facts
+      const row = trailingOf(render(currentAnd('feature/a')), 'main')
+      expect(row, `${probe.kind} 没画出自己的 kind`).toContain(`data-sync-kind="${probe.kind}"`)
+      expect(row, `${probe.kind} 没画出自己的 class`).toContain(`branch-row__sync--${probe.kind}`)
+      expect(row, `${probe.kind} 的文本没上去`).toContain(probe.label)
+      for (const other of cases) {
+        if (other.kind === probe.kind) continue
+        expect(row, `${probe.kind} 的行上出现了 ${other.kind}`).not.toContain(
+          `data-sync-kind="${other.kind}"`
+        )
+      }
+    }
+  })
+
+  it('徽标只出现在当前分支那一行', () => {
+    fixture.aheadBehind = { upstream: UPSTREAM, ahead: 2, behind: 0 }
+    const markup = render(currentAnd('feature/a'))
+
+    expect(trailingOf(markup, 'main'), '当前分支这行没有徽标').toContain('data-sync-kind=')
+    expect(
+      trailingOf(markup, 'feature/a'),
+      '非当前分支画上了 HEAD 的计数——那条分支有它自己的 upstream，这个数字说不了它的事'
+    ).not.toContain('data-sync-kind=')
+    // 整页只许有一个。删掉 `branch.isCurrent &&` 后每一行都会画，这条按数量红——上面那条按行
+    // 切片也会红，两条各守一侧。
+    expect(markup.match(/data-sync-kind=/g) ?? [], '整页出现了不止一个同步徽标').toHaveLength(1)
+  })
+
+  it('没有数字可报的两种状态一个盒子都不画', () => {
+    // no-upstream：upstream 缺席，两个 0 是占位不是测量结果。
+    fixture.aheadBehind = { upstream: null, ahead: 0, behind: 0 }
+    expect(render(currentAnd('feature/a')), 'no-upstream 画出了一个空徽标').not.toContain(
+      'data-sync-kind='
+    )
+    // synced：有 upstream 且两侧都是 0。与上一种同样不画，但**不是同一个理由**。
+    fixture.aheadBehind = { upstream: UPSTREAM, ahead: 0, behind: 0 }
+    expect(render(currentAnd('feature/a')), 'synced 画出了一个空徽标').not.toContain('data-sync-kind=')
+    // 自检：同一条渲染路径在有数字时**确实**画得出来。少了这条，上面两句在锚点改名后会恒绿。
+    fixture.aheadBehind = { upstream: UPSTREAM, ahead: 1, behind: 0 }
+    expect(
+      render(currentAnd('feature/a')),
+      '连有数字的状态都画不出来——上面两条 not.toContain 是恒真的'
+    ).toContain('data-sync-kind=')
+  })
+
+  it('还没问出结果时不画，也不炸', () => {
+    // `facts === null` 是「还没问」（或桥不在场），与「问了得到 0/0」是两件事。少了组件里那道
+    // null 门，`gitSyncBadge(null)` 会当场抛。
+    fixture.aheadBehind = null
+    const markup = render(currentAnd('feature/a'))
+    expect(markup).toContain('>main<')
+    expect(markup, 'facts 还是 null 时就画出了徽标').not.toContain('data-sync-kind=')
+  })
+
+  /**
+   * 每一种**会渲染出徽标**的 kind 都必须在 dock.css 里有自己的一条规则。
+   *
+   * 清单不手抄：从 `gitSyncBadge` 自己身上取——喂给它覆盖四个正负组合的事实，把 label 非空的那些
+   * kind 收集起来。手抄一份清单就会在加第六种状态时静默漏掉 CSS，而那种漏法的症状是徽标以继承色
+   * 出现，测试与 tsc 都不会红。
+   */
+  it('每种可见 kind 在 dock.css 里都有配色', () => {
+    const probes: GitAheadBehind[] = [
+      { upstream: null, ahead: 0, behind: 0 },
+      { upstream: UPSTREAM, ahead: 0, behind: 0 },
+      { upstream: UPSTREAM, ahead: 4, behind: 0 },
+      { upstream: UPSTREAM, ahead: 0, behind: 4 },
+      { upstream: UPSTREAM, ahead: 4, behind: 4 }
+    ]
+    const visible = [...new Set(probes.map(gitSyncBadge).filter((b) => b.label !== '').map((b) => b.kind))]
+    expect(visible.length, '一种会渲染的 kind 都收集不到——判据落空了').toBeGreaterThan(0)
+
+    const css = readFileSync(new URL('../src/renderer/src/styles/dock.css', import.meta.url), 'utf8')
+    for (const kind of visible) {
+      expect(css, `可见状态 ${kind} 没有配色规则，徽标会以继承色出现`).toContain(
+        `.branch-row__sync--${kind} {`
+      )
+    }
   })
 })
