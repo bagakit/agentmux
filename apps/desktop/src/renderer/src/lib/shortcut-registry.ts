@@ -140,11 +140,20 @@ function digitChords(digit: string): Pick<ShortcutBinding, 'mac' | 'other'> {
   }
 }
 
-/** An arrow chord: Cmd/Ctrl + Alt both platforms — no readline conflict on either. */
-function arrowChords(arrow: string): Pick<ShortcutBinding, 'mac' | 'other'> {
+/**
+ * An arrow chord: Cmd/Ctrl + Alt both platforms — no readline conflict on either.
+ *
+ * `shift` is a *meaning* carried by the chord, not a platform workaround, which is why it is one argument
+ * applied to BOTH platforms rather than a per-platform field. The letter class adds Shift off mac only to
+ * stay out of readline's way, so its two platforms differ; an arrow that differed across platforms would be
+ * that same workaround leaking into a class that does not need it. Passing `shift` here keeps the two
+ * spellings distinguishable: same on both platforms = a discriminator (Shift+arrow means "take the pane
+ * with you"), different across platforms = the readline workaround, which the registry guard rejects.
+ */
+function arrowChords(arrow: string, shift = false): Pick<ShortcutBinding, 'mac' | 'other'> {
   return {
-    mac: { key: arrow, primary: true, shift: false, alt: true },
-    other: { key: arrow, primary: true, shift: false, alt: true }
+    mac: { key: arrow, primary: true, shift, alt: true },
+    other: { key: arrow, primary: true, shift, alt: true }
   }
 }
 
@@ -274,6 +283,44 @@ export const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     label: 'Focus region down',
     gate: 'not-in-editable',
     ...arrowChords('arrowdown')
+  },
+  // Swap rides the focus chord plus Shift, on both platforms — the same "same gesture, one modifier deeper"
+  // relation editors use for select-vs-move. The pairing is not decoration: swap is *travel with the pane*,
+  // so its direction resolves through the identical geometry focus uses (`regionInDirection`), and a user who
+  // knows how to walk left already knows how to carry a pane left. Shift here is a direction-independent
+  // discriminator applied to both platforms, unlike the letter class where Shift off mac is a readline
+  // workaround — see arrowChords.
+  {
+    id: 'workbench.swap-region.left',
+    scope: 'window',
+    keyClass: 'arrow',
+    label: 'Swap region with the one on the left',
+    gate: 'not-in-editable',
+    ...arrowChords('arrowleft', true)
+  },
+  {
+    id: 'workbench.swap-region.right',
+    scope: 'window',
+    keyClass: 'arrow',
+    label: 'Swap region with the one on the right',
+    gate: 'not-in-editable',
+    ...arrowChords('arrowright', true)
+  },
+  {
+    id: 'workbench.swap-region.up',
+    scope: 'window',
+    keyClass: 'arrow',
+    label: 'Swap region with the one above',
+    gate: 'not-in-editable',
+    ...arrowChords('arrowup', true)
+  },
+  {
+    id: 'workbench.swap-region.down',
+    scope: 'window',
+    keyClass: 'arrow',
+    label: 'Swap region with the one below',
+    gate: 'not-in-editable',
+    ...arrowChords('arrowdown', true)
   },
   // --- terminal: only live while a terminal owns focus ---
   {

@@ -46,6 +46,33 @@ describe('commandForWorkbenchId：绑定 id 翻译成命令', () => {
     expect(commandForWorkbenchId('workbench.focus-region.down')).toEqual({ kind: 'focus-region', direction: 'down' })
   })
 
+  it('swap-region 四个方向翻译到 swap-region kind，方向不串到 focus 那族', () => {
+    // 两族由同一条正则翻译，所以最容易出的错不是「某个方向漏了」而是「kind 取错那个捕获组」——那样
+    // Shift+方向键会去移焦点（看起来只是 Shift 没生效），或方向键会去换位（一按就把布局搅乱）。
+    expect(commandForWorkbenchId('workbench.swap-region.left')).toEqual({ kind: 'swap-region', direction: 'left' })
+    expect(commandForWorkbenchId('workbench.swap-region.right')).toEqual({ kind: 'swap-region', direction: 'right' })
+    expect(commandForWorkbenchId('workbench.swap-region.up')).toEqual({ kind: 'swap-region', direction: 'up' })
+    expect(commandForWorkbenchId('workbench.swap-region.down')).toEqual({ kind: 'swap-region', direction: 'down' })
+  })
+
+  it('注册表里每条方向绑定都翻译得出命令，且方向与 id 里那个词逐字相同', () => {
+    // 那四个方向词在 `DIRECTION_COMMAND_ID` 里是运行期的一份手抄——`SplitDirection` 只是类型，全仓没有
+    // 对应的运行期数组，所以 tsc 挡不住正则与类型分岔。这条守的正是分岔的可观测后果：正则里少一个词，
+    // 那条注册表绑定就翻译成 null，按下去静默什么都不发生（handler 覆盖率测试只问 handler 在不在，
+    // 不问它翻译不翻译得出）；把某个词拼错成另一个方向，就是「按左键往右走」。
+    //
+    // 判据不比对某张表，而是把 id 自己的后缀当期望值：kind 与 direction 都必须是 id 里的那两个词。
+    const directional = SHORTCUT_BINDINGS
+      .map((b) => b.id)
+      .filter((id) => id.startsWith('workbench.focus-region.') || id.startsWith('workbench.swap-region.'))
+    // 挡板：读成空则下面一条不跑、整条静默通过。
+    expect(directional.length, '注册表必须有方向绑定，否则这条守卫是空转').toBe(8)
+    for (const id of directional) {
+      const [, family, direction] = id.split('.') as [string, string, string]
+      expect(commandForWorkbenchId(id), `${id} 必须翻译得出命令`).toEqual({ kind: family, direction })
+    }
+  })
+
   it('非 workbench 动作（quick-switch）与未知 id 返回 null', () => {
     expect(commandForWorkbenchId('quick-switch.toggle')).toBeNull()
     expect(commandForWorkbenchId('terminal.search')).toBeNull()
@@ -296,6 +323,7 @@ function spyStore(overrides: Partial<WorkbenchShortcutStore> = {}): WorkbenchSho
     requestCloseRegion: (w, t, r) => calls.push(`requestCloseRegion:${w}:${t}:${r}`),
     splitRegion: (w, t, r, d) => calls.push(`splitRegion:${w}:${t}:${r}:${d}`),
     focusRegion: (w, t, r) => calls.push(`focusRegion:${w}:${t}:${r}`),
+    swapRegions: (w, t, a, b) => calls.push(`swapRegions:${w}:${t}:${a}:${b}`),
     ...overrides
   }
 }
@@ -304,6 +332,34 @@ function spyStore(overrides: Partial<WorkbenchShortcutStore> = {}): WorkbenchSho
 function dispatchId(id: string, store: WorkbenchShortcutStore): boolean {
   const command = commandForWorkbenchId(id)
   return command ? dispatchWorkbenchCommand(command, store) : false
+}
+
+/**
+ * 默认 store 里那张活动 Tab（t2）左右分成两格，活动格由 `activeRegionId` 指定。
+ *
+ * 移焦点与换位共用同一份布局，是为了让「两者在同一方向上解出同一个邻格」这条断言有意义：各自造一份看起来
+ * 一样的 fixture，就有可能一边写成左右分屏、另一边写成上下分屏，而两条测试各自都绿。
+ */
+function sideBySideTab(activeRegionId: 'r2L' | 'r2R'): WorkbenchTab {
+  return {
+    id: 't2',
+    workspaceId: 'ws',
+    titleRegionId: 'r2L',
+    layout: {
+      root: {
+        type: 'split',
+        direction: 'horizontal',
+        first: { type: 'leaf', regionId: 'r2L' },
+        second: { type: 'leaf', regionId: 'r2R' },
+        ratio: 0.5
+      },
+      activeRegionId
+    },
+    regions: {
+      r2L: { regionId: 'r2L', kind: 'launcher', workspaceId: 'ws' },
+      r2R: { regionId: 'r2R', kind: 'launcher', workspaceId: 'ws' }
+    }
+  }
 }
 
 describe('接线：命令转发到 store action', () => {
@@ -417,26 +473,7 @@ describe('接线：命令转发到 store action', () => {
 
   it('focus-region.right 调 focusRegion，落到几何相邻格', () => {
     // 活动 Tab t2 分成左右两格，活动在左格 r2L，向右应聚焦 r2R。
-    const splitTab: WorkbenchTab = {
-      id: 't2',
-      workspaceId: 'ws',
-      titleRegionId: 'r2L',
-      layout: {
-        root: {
-          type: 'split',
-          direction: 'horizontal',
-          first: { type: 'leaf', regionId: 'r2L' },
-          second: { type: 'leaf', regionId: 'r2R' },
-          ratio: 0.5
-        },
-        activeRegionId: 'r2L'
-      },
-      regions: {
-        r2L: { regionId: 'r2L', kind: 'launcher', workspaceId: 'ws' },
-        r2R: { regionId: 'r2R', kind: 'launcher', workspaceId: 'ws' }
-      }
-    }
-    const store = spyStore({ tabs: { t2: splitTab } })
+    const store = spyStore({ tabs: { t2: sideBySideTab('r2L') } })
     expect(dispatchId('workbench.focus-region.right', store)).toBe(true)
     expect(store.calls).toEqual(['focusRegion:ws:t2:r2R'])
   })
@@ -457,6 +494,46 @@ describe('接线：命令转发到 store action', () => {
     // 默认 store 的 t2 是单格 r2，向右无邻居。
     const store = spyStore()
     expect(dispatchId('workbench.focus-region.right', store)).toBe(false)
+    expect(store.calls).toEqual([])
+  })
+
+  it('swap-region.right 调 swapRegions(活动格, 那个方向的邻格)，且不顺手改焦点', () => {
+    const store = spyStore({ tabs: { t2: sideBySideTab('r2L') } })
+    expect(dispatchId('workbench.swap-region.right', store)).toBe(true)
+    // 两个端点的**顺序**也是判据：第一个必须是活动格。两端反了今天恰好无害（换位是对称的），但这一层
+    // 的合同是「把我和那边换」，而合法性守卫（swapWorkbenchRegions 拒绝与自己换）读的是这两个位置。
+    // 恰好只有一条调用：焦点必须留在原格，否则连按两下方向键的出发点就变了，同一手势第二次做别的事。
+    expect(store.calls).toEqual(['swapRegions:ws:t2:r2L:r2R'])
+  })
+
+  it('swap-region 与 focus-region 在同一份布局上解出同一个邻格', () => {
+    // 承重的收拢点：两者共用同一次 adjacentRegionId。若哪天换位自己算一套几何，界面上就是「方向键走到
+    // A、Shift+方向键把内容换给 B」——两个手势对同一个方向给出不同答案，而各自单独看都说得通。
+    // 判据不是「都等于 r2R」这个字面量，而是**两条路解出的第二个端点逐字相同**：换掉几何实现时两边一起
+    // 变、这条仍绿；只改一边就红。
+    const tabs = { t2: sideBySideTab('r2L') }
+    const focusStore = spyStore({ tabs })
+    expect(dispatchId('workbench.focus-region.right', focusStore)).toBe(true)
+    const swapStore = spyStore({ tabs })
+    expect(dispatchId('workbench.swap-region.right', swapStore)).toBe(true)
+    const focused = focusStore.calls[0]!.split(':').at(-1)
+    const swapTarget = swapStore.calls[0]!.split(':').at(-1)
+    expect(swapTarget, '换位的落点必须与移焦点的落点是同一格').toBe(focused)
+    // 挡板：两边都读成 undefined 时上面恒真。
+    expect(focused).toBeTruthy()
+  })
+
+  it('单格 Tab 换位没有邻居：不调 swapRegions、不吞键（放行给别处）', () => {
+    // 与移焦点同一条边界：到边不吃这个键。若换位在这里改成「和自己换」，store 层虽然会拒绝，但这个键就被
+    // 吞掉了——用户按 Shift+→ 到了最右一格之后，浏览器/终端里那个键从此静默失效。
+    const store = spyStore()
+    expect(dispatchId('workbench.swap-region.right', store)).toBe(false)
+    expect(store.calls).toEqual([])
+  })
+
+  it('非 Workbench 主面时换位也不接管', () => {
+    const store = spyStore({ mainSurface: 'board', tabs: { t2: sideBySideTab('r2L') } })
+    expect(dispatchId('workbench.swap-region.right', store)).toBe(false)
     expect(store.calls).toEqual([])
   })
 
