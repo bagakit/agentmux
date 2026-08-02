@@ -4,6 +4,7 @@ import {
   SHIFT_ENTER_CSI_U,
   SHIFT_ENTER_ESC_CR,
   shiftEnterInput,
+  terminalKeyEventHandler,
   terminalSelectionForCopy,
   terminalShortcutHandlers
 } from '../src/renderer/src/lib/terminal-shortcuts.js'
@@ -136,6 +137,126 @@ describe('terminal 绑定的动作', () => {
     // 收敛证据：TerminalView 不再自己判 metaKey/ctrlKey/shiftKey，改为向注册表要 id。回退到手写判定
     // （比如 isTerminalAppShortcut 那套）这条会红。
     expect(code).toMatch(/matchShortcut\(event, isMac, \{ scope: 'terminal' \}\)/)
+  })
+})
+
+/**
+ * 整个键回调的行为（#366）。
+ *
+ * 上面那族钉的是「命中之后做什么」，而**吞不吞这个键**是另一件事，并且是四个变异全存活的那一族：
+ * review 实测把 `terminalKeyEventHandler` 里这四处各改一处，98 条（其中一处 676 条）全绿——
+ *
+ * 1. `:125` 的 `!deps.hasSelection()` 改成 `false`：**没选区的 Ctrl+C 不再发 SIGINT**，被当成
+ *    「复制空串」吞掉。用户中断不了跑飞的程序，这是四条里最重的一条。
+ * 2. `:131` 的 `return false` 改成 `true`：动作照跑，但键同时漏给 xterm——Cmd+F 开了搜索条又
+ *    往终端里写了个 `f`。
+ * 3. `:130` 的 `event.type === 'keydown'` 判断删掉：keyup 也跑一次，每个终端键的动作做两遍。
+ * 4. `:122` 之前插一句 `return true`：整个回调变 no-op，所有终端键失效。
+ *
+ * 为什么此前无人守：这个回调只有 xterm 在真实键盘事件里会调，而 `renderToStaticMarkup` 不跑
+ * effect、更不会造键盘事件。`shortcut-scope-wiring` 那条 AST 守卫判的是「壳把它当实参传进去了」，
+ * 对闭包体完全失明（记忆 guard-must-check-reachability-not-presence）。工厂那族只拿到
+ * `Record<id, handler>`，看不到谁去查这张表、查完吞不吞。
+ *
+ * 所以判据必须是：喂一个事件进去，问**返回值**（吞了没有）和**外界被碰了几次**（动作跑了几遍）。
+ */
+describe('终端键回调的吞键判定', () => {
+  /**
+   * 一次调用碰了外界几次——判据是这个，不是某个具体 spy。
+   *
+   * 三条出口（交还 / 吞掉不做事 / 吞掉并做事）各自碰的东西不一样：`terminal.search` 碰
+   * `setSearchOpen`，`terminal.copy` 碰剪贴板，`terminal.newline` 碰 `sendInput`。钉住某一个 spy
+   * 只能守住那一条，另外两条的「动作跑了两遍」照旧存活（记忆
+   * fixture-discarding-callback-hides-empty-body：判据要按「碰了外界几次」计数）。
+   */
+  function harness(options: { shortcutId: string | null; hasSelection?: boolean; selection?: string } ) {
+    let touches = 0
+    const bump = () => {
+      touches += 1
+    }
+    const handler = terminalKeyEventHandler({
+      matchTerminalShortcut: () => options.shortcutId,
+      hasSelection: () => options.hasSelection ?? false,
+      sendInput: bump,
+      kittyKeyboardActive: () => false,
+      setSearchOpen: bump,
+      readSelection: () => options.selection ?? '',
+      rememberSelection: bump,
+      writeClipboard: bump,
+      clear: bump
+    })
+    return {
+      handler,
+      /** 调用前归零：不然上一次的计数会掩盖这一次「一下都没碰」。 */
+      touchesOf(event: KeyboardEvent): { swallowed: boolean; touches: number } {
+        touches = 0
+        const result = handler(event)
+        return { swallowed: result === false, touches }
+      }
+    }
+  }
+
+  const keydown = (overrides: Partial<KeyboardEvent> = {}) =>
+    key({ type: 'keydown', ...overrides } as Partial<KeyboardEvent>)
+  const keyup = (overrides: Partial<KeyboardEvent> = {}) =>
+    key({ type: 'keyup', ...overrides } as Partial<KeyboardEvent>)
+
+  it('不是终端绑定的键原样交还，且一下都不碰外界', () => {
+    const { touchesOf } = harness({ shortcutId: null })
+    const outcome = touchesOf(keydown())
+    expect(outcome.swallowed, '不认识的键被吞掉了——普通打字会消失').toBe(false)
+    expect(outcome.touches, '不认识的键触发了动作').toBe(0)
+  })
+
+  it('命中的键被吞掉，且动作只跑一次', () => {
+    const { touchesOf } = harness({ shortcutId: 'terminal.search' })
+    const outcome = touchesOf(keydown())
+    // 吞掉：不吞的话 Cmd+F 会既开搜索条又往终端写一个 f。
+    expect(outcome.swallowed, '命中的终端键没被吞——它会同时漏给 xterm').toBe(true)
+    expect(outcome.touches, '一次 keydown 让动作跑了别的次数').toBe(1)
+  })
+
+  /**
+   * 这一条是四个变异里最重的那个：**没选区时 Ctrl+C 必须交还给终端**。
+   *
+   * mac 上 Cmd+C 与 Ctrl+C 是两个键，但在注册表的 terminal scope 里 `terminal.copy` 在非 mac 上
+   * 就是 Ctrl+C，而 Ctrl+C 在终端里的含义是 SIGINT。有选区时用户想复制，没选区时用户想中断——
+   * 把「没选区」这一支也吞掉，等于让用户中断不了正在跑的程序，而且现场没有任何报错。
+   */
+  it('没选区的 terminal.copy 交还给终端——Ctrl+C 要能发 SIGINT', () => {
+    const { touchesOf } = harness({ shortcutId: 'terminal.copy', hasSelection: false })
+    const outcome = touchesOf(keydown({ key: 'c', ctrlKey: true }))
+    expect(outcome.swallowed, '没选区时 Ctrl+C 被吞成「复制空串」——用户中断不了跑飞的程序').toBe(false)
+    // 连剪贴板都不该碰：吞不吞与做不做是两件事，把空串写进剪贴板会抹掉用户上一次复制的内容。
+    expect(outcome.touches, '没选区时仍去动了剪贴板／选区记忆').toBe(0)
+  })
+
+  it('有选区的 terminal.copy 才认领', () => {
+    // 与上一条成对：只有两侧都钉住，`hasSelection()` 这个判据本身才是被守的。单钉一侧时把条件
+    // 改成常量仍有一半绿（记忆 guard-count-exits-not-conditions：「接受」那一侧常常无人守）。
+    const { touchesOf } = harness({ shortcutId: 'terminal.copy', hasSelection: true, selection: 'x' })
+    const outcome = touchesOf(keydown({ key: 'c', ctrlKey: true }))
+    expect(outcome.swallowed, '有选区时 Cmd/Ctrl+C 没被吞——复制之外还会给终端送一个 c').toBe(true)
+    expect(outcome.touches, '有选区时没去复制').toBeGreaterThan(0)
+  })
+
+  it('keyup 也吞掉，但动作不再跑第二遍', () => {
+    // 两件事一条断言里说不清，所以分开问：
+    // - 仍要吞（否则 keyup 漏给终端）；
+    // - 但不能再碰外界（否则每个终端键的动作做两遍：清屏清两次、搜索条开两次）。
+    const { touchesOf } = harness({ shortcutId: 'terminal.clear' })
+    const outcome = touchesOf(keyup())
+    expect(outcome.swallowed, 'keyup 没被吞——它会漏给终端').toBe(true)
+    expect(outcome.touches, 'keyup 也执行了动作——每个终端键会做两遍').toBe(0)
+  })
+
+  it('注册表里有 id 但 handler map 里没有的键，交还而不是吞掉', () => {
+    // paste 走的正是这条路：它在注册表里（这样 cheat-sheet 能展示），但刻意不在 handler map 里，
+    // 因为原生 Edit→Paste 是它的唯一所有者。这里若改成「吞掉」，粘贴会彻底失效——比贴两次更糟。
+    const { touchesOf } = harness({ shortcutId: 'terminal.definitely-not-a-handler' })
+    const outcome = touchesOf(keydown())
+    expect(outcome.swallowed, '没有对应动作的绑定被吞掉了——那个键会彻底失效').toBe(false)
+    expect(outcome.touches).toBe(0)
   })
 })
 
