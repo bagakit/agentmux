@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
+// createRegionCopyModel 与 RegionContextMenu 同住一个模块，而该组件为 #544 复用了 store 的
+// setTabMenuOpen（原生视图让位的唯一 SSOT），于是 import 它会连带加载 store → api.ts，后者在模块加载期
+// 就读构建期全局 __AGENTMUX_WEB_PREVIEW__。node 测试环境里这个全局不存在，须先 stub（与 agent-address /
+// tab-control-handoff 这两个同样 import 本模块的测试同一处理）。
+vi.hoisted(() => {
+  vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
+})
 import { createRegionCopyModel } from '../src/renderer/src/components/RegionContextMenu.js'
 import {
   formatMessagingAddress,

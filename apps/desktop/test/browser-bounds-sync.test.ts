@@ -260,11 +260,27 @@ describe('原生视图给焦点框让位（#341）', () => {
     ).toMatch(/^focusRingYieldOf\(/)
     // 极性那个入参必须是**上游传下来的焦点结论**，不是这里自己判的。写成字面量 true 就是无条件
     // 让位（#350 原样）；写成 false 则焦点框三边重新被遮（#341 回归）。两者在类型上都合法。
+    //
+    // #545：焦点结论现在**从 ref 读**（`yieldToFocusRingRef.current`）而不是直接读 prop。理由是那条
+    // 闪烁——把 prop 直接放进边界同步 effect 的依赖数组，焦点一变整条 effect 就拆了重建，cleanup 的
+    // `setBounds(null)` 先藏后显，中间空一帧。读 ref 让边界计算永远拿到当前焦点值（不 stale），而
+    // effect 不必订阅 prop。所以这里既接受直接读 prop、也接受读那个专门跟踪 prop 的 ref；把它写死成
+    // true / false（绕过 props）仍然被下面的正则挡住。而“ref 是否真跟着 prop 走”由下一条断言钉住——
+    // 只认 ref 而不校验它的赋值来源，等于给一个可能永远是初值的 ref 背书。
     expect(
       yieldArgument,
       `focusRingYieldOf 的第二个实参写死了：\`${yieldArgument}\`。焦点结论必须由 props 传进来` +
         '（regionFocusExpression 一次算出，与挂在 Region 上的类名共用那次比较）'
-    ).toMatch(/focusRingYieldOf\([^,]+,\s*yieldToFocusRing\s*\)/)
+    ).toMatch(/focusRingYieldOf\([^,]+,\s*(yieldToFocusRing|yieldToFocusRingRef\.current)\s*\)/)
+    // 若极性走的是 ref，那个 ref 必须在某处被赋成 prop 的当前值——否则它可能永远停在初值，
+    // 焦点变化对它不可见（#341/#350 同时回归），而上面那条正则照旧命中。
+    if (yieldArgument.includes('yieldToFocusRingRef.current')) {
+      expect(
+        /\byieldToFocusRingRef\.current\s*=\s*yieldToFocusRing\b/.test(source),
+        '极性从 yieldToFocusRingRef.current 读，但没有任何一处把它赋成 yieldToFocusRing——' +
+          'ref 会停在初值，焦点变化对边界计算不可见（#341/#350 回归），而上面那条正则仍绿'
+      ).toBe(true)
+    }
   })
 
   /**
@@ -449,61 +465,143 @@ describe('原生视图给焦点框让位（#341）', () => {
   })
 
   /**
-   * 让位量那个 prop 必须在**依赖数组**里（#352 的 S2）。
+   * 焦点变化必须重跑边界计算，但**不能**靠把让位量塞进边界同步 effect 的依赖数组来做到（#545）。
    *
-   * 这条与「prop 传进去了吗」正交，各自能独立坏掉。把 `yieldToFocusRing` 从
-   * `useLayoutEffect` 的依赖数组里删掉：tsc exit 0、23 条全绿，而焦点变化**不会重跑那个 effect**——
-   * 本仓根本没有 eslint 配置（无 .eslintrc*、无 eslint.config.*、package.json 里也没有），所以
-   * `react-hooks/exhaustive-deps` 一次都没跑过，漏一个依赖是完全静默的。
+   * 历史：这条曾要求 `yieldToFocusRing` 出现在那条 useLayoutEffect 的依赖数组里，为的是让焦点变化
+   * 触发重算（#352 的 S2）——那时它确实修好了 #341/#350。但那个做法本身就是 #545 那道闪烁：让位量
+   * 在焦点切换时变化，effect 因此在每次切换时**拆了重建**，cleanup 那句 `setBounds(null)` 先把原生
+   * 视图藏起来，重建那次 rAF 下一帧才重新显示，中间空一帧。修法是把两件正交的事拆成两条 effect：
+   *   - 边界同步 effect（拥有 synchronizer / ResizeObserver / resize 监听）**不订阅** yieldToFocusRing，
+   *     焦点值改从 ref 读，所以焦点切换不再拆它。
+   *   - 一条**独立**的 effect 以 `[yieldToFocusRing]` 为依赖，翻转时更新 ref 并触发一次重算
+   *     （复用还活着的 synchronizer，不拆不建）。
    *
-   * 为什么单靠 ResizeObserver 兜不住：焦点在两格之间移动**不改变任何元素的尺寸**，所以那个
-   * observer 不会触发；只有依赖变化才会重跑。后果是焦点落到 browser 那格时不内缩（#341 回归），
-   * 离开时不退回（#350 回归）——两个已修的缺陷同时复活。
+   * 所以这条判据反过来钉两件事，缺一不可：
+   *   1) 边界同步 effect 的依赖数组里**没有** yieldToFocusRing（有 = 闪烁回归，#545）。
+   *   2) 存在另一条以 yieldToFocusRing 为依赖的 effect（无 = 焦点变化不重算，#341/#350 回归）——
+   *      单靠 ResizeObserver 兜不住，因为焦点在两格间移动不改变任何尺寸，observer 不触发。
    *
-   * 判据按 AST 取那个 effect 的依赖数组，并要求它同时包含让位量与它上游那两个身份字段：
-   * 自检是「这个数组抽到了且非空」，防止抽取器写错时整条退化成恒真。
+   * 只钉 (1) 会放过「谁都不重算」（#341/#350 回归）；只钉 (2) 会放过「让位量又混回同步 effect」
+   * （闪烁回归）。两条一起，才把「既要焦点跟随、又不要闪烁」这件事的两面都守住。
    */
-  it('让位量在那个 effect 的依赖数组里——否则焦点变化不会重跑它', () => {
+  it('焦点让位量不在边界同步 effect 的依赖里，而由一条独立 effect 驱动重算（#545 不闪 & #341/#350 跟随）', () => {
     const source = readFileSync(
       new URL('../src/renderer/src/components/BrowserPane.tsx', import.meta.url),
       'utf8'
     )
     const ast = ts.createSourceFile('BrowserPane.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
 
-    // 找那个**调了 observe 的** useLayoutEffect——按名字找 useLayoutEffect 不够：将来多一个
-    // layout effect 时会抽到两个，判据落点就不确定了。以「函数体里出现 synchronizer」定位。
-    const dependencyLists: string[][] = []
+    // 收集每一条 useLayoutEffect 的依赖数组文本；同时记住哪条是**边界同步那条**（体内出现 synchronizer）。
+    const effects: { deps: string[]; ownsSynchronizer: boolean }[] = []
     const walk = (node: ts.Node): void => {
-      if (
-        ts.isCallExpression(node) &&
-        node.expression.getText(ast) === 'useLayoutEffect' &&
-        /\bsynchronizer\b/.test(node.arguments[0]?.getText(ast) ?? '')
-      ) {
+      if (ts.isCallExpression(node) && node.expression.getText(ast) === 'useLayoutEffect') {
+        const body = node.arguments[0]?.getText(ast) ?? ''
         const deps = node.arguments[1]
-        if (deps && ts.isArrayLiteralExpression(deps)) {
-          dependencyLists.push(deps.elements.map((element) => element.getText(ast)))
-        } else {
-          // 依赖数组整个不见了（每次渲染都重跑）也要被看见，而不是被抽取器无声跳过。
-          dependencyLists.push([`<不是数组字面量: ${deps?.getText(ast) ?? '缺失'}>`])
-        }
+        const list = deps && ts.isArrayLiteralExpression(deps)
+          ? deps.elements.map((element) => element.getText(ast))
+          // 依赖数组不见了（每次渲染都重跑）也要被看见，而不是被抽取器无声跳过。
+          : [`<不是数组字面量: ${deps?.getText(ast) ?? '缺失'}>`]
+        effects.push({ deps: list, ownsSynchronizer: /\bsynchronizer\b/.test(body) })
       }
       ts.forEachChild(node, walk)
     }
     walk(ast)
 
-    // 自检：恰好抽到一个。零个说明那个 effect 没了或改了形状（判据失去落点）；多个说明几何
-    // 同步被拆成了几处，得有人重新想清楚哪一处该带这个依赖。
+    // 自检：边界同步 effect 恰好一条。零个说明它没了或改了形状（判据失去落点）；多个说明几何同步
+    // 被拆成了几处，得有人重新想清楚哪条拥有 synchronizer。
+    const synchronizerEffects = effects.filter((effect) => effect.ownsSynchronizer)
     expect(
-      dependencyLists.length,
-      `调 synchronizer 的 useLayoutEffect 抽到 ${dependencyLists.length} 个，应恰好 1 个`
+      synchronizerEffects.length,
+      `拥有 synchronizer 的 useLayoutEffect 抽到 ${synchronizerEffects.length} 条，应恰好 1 条`
     ).toBe(1)
-    const deps = dependencyLists[0]!
-    expect(deps.length, '依赖数组是空的——effect 只在挂载时跑一次，几何永不跟随').toBeGreaterThan(0)
+    const boundsDeps = synchronizerEffects[0]!.deps
+    expect(boundsDeps.length, '边界同步 effect 的依赖数组是空的——它只在挂载时跑一次，几何永不跟随').toBeGreaterThan(0)
+
+    // (1) 让位量**不在**边界同步 effect 的依赖里：在，则焦点切换会拆它重建，藏一帧再显示（#545 闪烁）。
     expect(
-      deps,
-      '让位量不在依赖数组里：焦点变化不改变任何尺寸，所以 ResizeObserver 不触发，' +
-        '只有依赖变化才会重跑。焦点到达 browser 区时不内缩（#341 回归），离开时不退回（#350 回归）'
-    ).toContain('yieldToFocusRing')
+      boundsDeps,
+      '让位量又回到了边界同步 effect 的依赖数组里：焦点切换会拆掉并重建这条 effect，' +
+        'cleanup 的 setBounds(null) 先藏后显，中间空一帧就是那道闪烁（#545 回归）'
+    ).not.toContain('yieldToFocusRing')
+
+    // (2) 存在一条**独立**的 effect 以让位量为依赖：它负责在焦点翻转时触发重算。没有它，焦点变化
+    // 不改变任何尺寸、ResizeObserver 不触发，于是永不重算——焦点到达 browser 区不内缩（#341 回归）、
+    // 离开不退回（#350 回归）。它不能就是边界同步那条（那条不订阅让位量），所以要求 ownsSynchronizer=false。
+    const focusEffects = effects.filter(
+      (effect) => !effect.ownsSynchronizer && effect.deps.includes('yieldToFocusRing')
+    )
+    expect(
+      focusEffects.length,
+      '没有任何一条独立 effect 以 yieldToFocusRing 为依赖：焦点变化不改变尺寸，ResizeObserver 不触发，' +
+        '于是边界永不随焦点重算——焦点到达 browser 区不内缩（#341 回归），离开不退回（#350 回归）'
+    ).toBeGreaterThanOrEqual(1)
+  })
+
+  /**
+   * 那条焦点 effect 真的**做了重算**，不是一个空壳（#545 的补线）。
+   *
+   * 上一条只钉「有一条以 yieldToFocusRing 为依赖的 effect」；一个体内什么都不干、或只更新了 ref
+   * 却不触发重算的 effect 也能骗过它——那样焦点变化时 ref 是新的、但没人拿它去 setBounds，
+   * 界面依旧不跟随（#341/#350 回归）。本仓 desktop 无 DOM 环境、renderToStaticMarkup 不跑 effect，
+   * 所以按 AST 判「那条 effect 体里既把 ref 更新成当前 prop、又调了重算入口」。
+   */
+  it('焦点 effect 既更新 ref 又触发一次重算（不是空壳）', () => {
+    const source = readFileSync(
+      new URL('../src/renderer/src/components/BrowserPane.tsx', import.meta.url),
+      'utf8'
+    )
+    const ast = ts.createSourceFile('BrowserPane.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+
+    const bodies: string[] = []
+    const walk = (node: ts.Node): void => {
+      if (ts.isCallExpression(node) && node.expression.getText(ast) === 'useLayoutEffect') {
+        const body = node.arguments[0]?.getText(ast) ?? ''
+        const deps = node.arguments[1]
+        const list = deps && ts.isArrayLiteralExpression(deps)
+          ? deps.elements.map((element) => element.getText(ast))
+          : []
+        // 焦点那条：依赖含让位量、且不拥有 synchronizer（那条不订阅让位量）。
+        if (list.includes('yieldToFocusRing') && !/\bsynchronizer\b/.test(body)) bodies.push(body)
+      }
+      ts.forEachChild(node, walk)
+    }
+    walk(ast)
+
+    expect(bodies.length, '找不到那条焦点 effect（判据失去落点）——上一条应已先红').toBe(1)
+    const body = bodies[0]!
+    // 把 ref 更新成**当前** prop：否则边界计算读到的焦点值永远停在初值（#341/#350 回归）。
+    expect(
+      /yieldToFocusRingRef\.current\s*=\s*yieldToFocusRing\b/.test(body),
+      '焦点 effect 没有把 yieldToFocusRingRef.current 更新成当前 yieldToFocusRing——' +
+        'ref 停在初值，焦点变化对边界计算不可见（#341/#350 回归）'
+    ).toBe(true)
+    // 触发一次重算：更新了 ref 却不重算，等于焦点变了但没人拿新值去 setBounds。
+    expect(
+      /recomputeBoundsRef\.current\??\.\(\)/.test(body),
+      '焦点 effect 更新了 ref 却没触发重算——焦点变化时界面不跟随（#341/#350 回归）'
+    ).toBe(true)
+
+    // 重算入口是一根**两头**的线，上面只钉住了读的那头。写的那头（边界同步 effect 把 update
+    // 挂上来）缺席时，ref 永远是 null，`?.()` 于是是一句永久的 no-op——焦点变化照旧不重算
+    // （#341/#350 回归），而上面两条断言、以及那条「有一条独立 effect」的断言，全都照旧命中。
+    // 实测：删掉 `recomputeBoundsRef.current = update` 这一行，本文件 20 条 + 让位那 10 条全绿。
+    // 所以这里判「拥有 synchronizer 的那条 effect 里，把重算入口赋成了一个函数」。判在同一条
+    // 测试里而不是新开一条：读与写是同一根线的两端，分开判会让人以为它们是两件可以各自成立的事。
+    const synchronizerBodies: string[] = []
+    const walkForProducer = (node: ts.Node): void => {
+      if (ts.isCallExpression(node) && node.expression.getText(ast) === 'useLayoutEffect') {
+        const effectBody = node.arguments[0]?.getText(ast) ?? ''
+        if (/\bsynchronizer\b/.test(effectBody)) synchronizerBodies.push(effectBody)
+      }
+      ts.forEachChild(node, walkForProducer)
+    }
+    walkForProducer(ast)
+    expect(synchronizerBodies.length, '找不到边界同步那条 effect（判据失去落点）').toBe(1)
+    expect(
+      /recomputeBoundsRef\.current\s*=\s*(?!null\b)\w/.test(synchronizerBodies[0]!),
+      '边界同步 effect 没有把重算入口挂上来（只赋 null 不算）——recomputeBoundsRef 永远是 null，' +
+        '焦点 effect 那句 `?.()` 是永久 no-op，焦点变化不重算（#341/#350 回归）而所有断言照旧全绿'
+    ).toBe(true)
   })
 
   /**
