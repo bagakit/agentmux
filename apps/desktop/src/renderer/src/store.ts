@@ -72,7 +72,6 @@ import {
   findGroup,
   findGroupForTab,
   focusGroup,
-  moveTab as moveLayoutTab,
   removeTab as removeLayoutTab,
   setSplitRatio,
   moveTabToNewGroup as moveLayoutTabToNewGroup,
@@ -173,6 +172,7 @@ import {
   type WorkbenchViewCloseReceipt,
   type WorkbenchViewCloseResource
 } from './lib/workbench-view-close'
+import { moveTabWithinActiveTopic } from './lib/scratch-topic-layout'
 import { isPathWithinSubtree, remapPathWithinSubtree } from './lib/workspace-paths'
 import {
   createEmptyFileExplorerViewState,
@@ -2597,7 +2597,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
     })()
   },
-  moveTab(workspaceId, tabId, sourcePaneId, targetPaneId, targetIndex) {
+  moveTab(workspaceId, tabId, sourcePaneId, targetPaneId, visibleTargetIndex) {
     const current = get()
     if (!workbenchViewCloseAllowsView(current.closingWorkbenchViews, tabId)) return
     const layout = current.layouts[workspaceId]
@@ -2605,7 +2605,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     set((state) => ({
       layouts: {
         ...state.layouts,
-        [workspaceId]: moveLayoutTab(layout, tabId, sourcePaneId, targetPaneId, targetIndex)
+        // 落点下标来自渲染层看到的（已按 Topic 投影的）顺序，必须先翻回存储坐标再交给
+        // reducer；直接透传就是 #556 的主缺陷。翻译只有一处，见 moveTabWithinActiveTopic。
+        [workspaceId]: moveTabWithinActiveTopic(layout, current.tabs, {
+          tabId,
+          sourceGroupId: sourcePaneId,
+          targetGroupId: targetPaneId,
+          visibleTargetIndex
+        })
       }
     }))
   },
