@@ -2,8 +2,7 @@ import { useEffect } from 'react'
 import { resolveNotificationModeId } from '../../../shared/notification-presentation'
 import { api } from '../lib/api'
 import { createAttentionNotifier } from '../lib/attention-notifier'
-import { visibleSessionIds } from '../lib/session-visibility'
-import { visibleTabGroupsForState } from '../lib/visible-tab-groups'
+import { visibleSessionIdsForState } from '../lib/session-visibility'
 import { useAppStore } from '../store'
 
 // Wires the attention decision to the OS.
@@ -44,15 +43,13 @@ export function useAgentAttentionNotifications(): void {
         .reconcile({
           sessions: state.sessions,
           windowFocused,
-          visibleSessionIds: visibleSessionIds({
-            tabs: state.tabs,
-            // ONLY the rendered workspace's groups. The window mounts one WorkspaceWorkbench at a time
-            // (App.tsx), while `layouts` accumulates a layout for every workspace ever visited — so
-            // collecting them all marked background-workspace Agents as "on screen" and silently
-            // suppressed exactly the completions this feature exists to announce. And on the Board no
-            // Session Region is mounted at all, so nothing is visible there.
-            tabGroups: visibleTabGroupsForState(state)
-          }),
+          // The on-screen answer comes from ONE authority (surface-navigation-visibility, via
+          // session-visibility), the same one the terminal cold-parking and memory-budget recyclers
+          // read. It applies the active workspace, the workbench/board switch, AND the Scratch Topic
+          // projection — so an Agent finishing behind another Topic is correctly seen as off screen and
+          // its completion is announced, instead of being suppressed as "on screen" by a raw read of
+          // `layouts[ws].groups` that never Topic-rewrites the stored active tab.
+          visibleSessionIds: visibleSessionIdsForState(state),
           // The chosen dwell tier, defaulting when unset. `off` makes reconcile raise nothing while
           // still advancing its baseline.
           mode: resolveNotificationModeId(state.config),
