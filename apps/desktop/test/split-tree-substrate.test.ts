@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   MIN_SPLIT_RATIO,
+  MIN_SPLIT_PERCENT,
   clampSplitRatio,
   findSiblingLeafId,
   setSplitRatioAtPath,
@@ -27,10 +28,13 @@ describe('split-tree substrate（两棵分屏树的 SSOT）', () => {
       expect(clampSplitRatio(0.85)).toBe(0.85)
     })
 
-    it('MIN_SPLIT_RATIO 就是渲染层 Panel 的 minSize（0.15 ⟺ minSize={15}）', () => {
-      // 这个数是产品决策「一个面板最窄能到多窄」。它必须与 WorkspaceWorkbench.tsx 的 minSize={15}
-      // 同值，否则模型能存到视图弹不回的比例。钉死 0.15。
+    it('MIN_SPLIT_PERCENT 由 MIN_SPLIT_RATIO 派生（渲染层 minSize 直接消费它，不再手抄字面量）', () => {
+      // 渲染层的 <Panel minSize={…}> 现在写 minSize={MIN_SPLIT_PERCENT}（WorkspaceWorkbench.tsx 四处），
+      // 不再手抄裸字面量 15。两侧同源，改 MIN_SPLIT_RATIO 时 minSize 由构造随之移动——编译期保证同值，
+      // 这条漂移无需再单独守。此处只钉派生关系本身（百分制 = 比例 × 100），锚点写死历史值 0.15/15。
       expect(MIN_SPLIT_RATIO).toBe(0.15)
+      expect(MIN_SPLIT_PERCENT).toBe(15)
+      expect(MIN_SPLIT_PERCENT).toBe(MIN_SPLIT_RATIO * 100)
     })
   })
 

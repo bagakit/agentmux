@@ -57,6 +57,7 @@ import type {
 } from '../lib/workbench-layout'
 import { regionIds } from '../lib/workbench-view-layout'
 import type { WorkbenchRegionLayoutNode } from '../lib/workbench-view-layout'
+import { MIN_SPLIT_PERCENT } from '../lib/split-tree'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import type { AgentTimelineSnapshot } from '@agentmux/core'
 import {
@@ -794,7 +795,7 @@ function WorkbenchRegionBranch({
       className="workbench-region-split"
       onLayout={(sizes) => committer.observeLayout(sizes)}
     >
-      <Panel defaultSize={node.ratio * 100} minSize={15}>
+      <Panel defaultSize={node.ratio * 100} minSize={MIN_SPLIT_PERCENT}>
         <WorkbenchRegionNode
           node={node.first}
           nodePath={nodePath ? `${nodePath}.first` : 'first'}
@@ -811,7 +812,7 @@ function WorkbenchRegionBranch({
           setDragging(active)
         }}
       />
-      <Panel defaultSize={(1 - node.ratio) * 100} minSize={15}>
+      <Panel defaultSize={(1 - node.ratio) * 100} minSize={MIN_SPLIT_PERCENT}>
         <WorkbenchRegionNode
           node={node.second}
           nodePath={nodePath ? `${nodePath}.second` : 'second'}
@@ -1127,7 +1128,7 @@ function SplitBranch({
       className="pane-split"
       onLayout={(sizes) => committer.observeLayout(sizes)}
     >
-      <Panel defaultSize={(node.ratio ?? 0.5) * 100} minSize={15}>
+      <Panel defaultSize={(node.ratio ?? 0.5) * 100} minSize={MIN_SPLIT_PERCENT}>
         <SplitNode
           node={node.first}
           nodePath={nodePath ? `${nodePath}.first` : 'first'}
@@ -1146,7 +1147,7 @@ function SplitBranch({
           setDragging(active)
         }}
       />
-      <Panel defaultSize={(1 - (node.ratio ?? 0.5)) * 100} minSize={15}>
+      <Panel defaultSize={(1 - (node.ratio ?? 0.5)) * 100} minSize={MIN_SPLIT_PERCENT}>
         <SplitNode
           node={node.second}
           nodePath={nodePath ? `${nodePath}.second` : 'second'}
