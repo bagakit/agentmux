@@ -394,30 +394,119 @@ describe('Region 焦点必须看得出来（#339）', () => {
 
     // 取 Region 那个 <section> 的 className 表达式，判它引用了判定的结果。写死类名、或漏掉
     // 焦点那一段（每格都不亮）都在这里红。
+    //
+    // 按**身份**找那个元素（`data-workbench-region-id` 只有它带），不按 className 的内容找。
+    // 这一步换过一次判据，原因值得留着：原来是「className 文本里出现 workbench-region」，而
+    // 那个基类名收进 REGION_CLASS 常量之后，真正的 Region 立刻对抽取器隐形——同时
+    // `workbench-region__close` / `workbench-region-split` 这些**兄弟**类名仍然命中，于是
+    // `length > 0` 那条自检照旧通过，把「抽到的不是主角」放行了（fixture-wrong-shape-blinds-the-test
+    // 的同族：错形状的样本让判据失明，而自检恰好被旁证满足）。按身份取则只有一个候选，
+    // 数量断言 `toBe(1)` 同时守住「找到了」与「找到的就是它」。
     const ast = ts.createSourceFile('WorkspaceWorkbench.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+    const REGION_ID_ATTRIBUTE = 'data-workbench-region-id'
     const classNames: string[] = []
     const walk = (node: ts.Node): void => {
-      if (
-        ts.isJsxAttribute(node) &&
-        node.name.getText(ast) === 'className' &&
-        node.initializer &&
-        /\bworkbench-region\b/.test(node.initializer.getText(ast))
-      ) {
-        classNames.push(node.initializer.getText(ast))
+      if (ts.isJsxAttribute(node) && node.name.getText(ast) === REGION_ID_ATTRIBUTE) {
+        // 属性 → JsxAttributes → 开标签。同一个标签上的 className 就是我们要判的那个。
+        const tag = node.parent.parent
+        if (ts.isJsxOpeningElement(tag) || ts.isJsxSelfClosingElement(tag)) {
+          for (const property of tag.attributes.properties) {
+            if (ts.isJsxAttribute(property) && property.name.getText(ast) === 'className') {
+              classNames.push(property.initializer?.getText(ast) ?? '<无值>')
+            }
+          }
+        }
       }
       ts.forEachChild(node, walk)
     }
     walk(ast)
-    // 自检：抽取器真的找到了那个属性，否则下面按内容判的那条跑零次、恒绿。
+    // 自检兼身份断言：带那个 data 属性的元素恰好一个，且它带 className。抽不到（组件重构）
+    // 与抽到多个（身份不再唯一）都让下面的判据失去落点，所以这里钉死 1。
     expect(
       classNames.length,
-      'Region 的 className 一个都没抽到——下面那条守卫是死代码（组件重构过？）'
-    ).toBeGreaterThan(0)
+      `带 ${REGION_ID_ATTRIBUTE} 且有 className 的元素有 ${classNames.length} 个，应恰好 1 个——` +
+        '下面那条守卫失去落点（组件重构过？）'
+    ).toBe(1)
     expect(
       classNames.some((expression) => /\bfocus\.className\b/.test(expression)),
       `Region 的 className 里没有那次判定的结果（抽到的是 ${classNames.join(' | ')}）——` +
         '焦点类名写死了，每一格长得一样'
     ).toBe(true)
+    // 基类名也必须取自常量。它是 BrowserPane 反查 Region 祖先时用的同一个字符串（见
+    // regionAncestorOf）：手抄回字面量，两侧就重新失去编译期联系，改名时一侧静默读不到。
+    expect(
+      classNames.some((expression) => /\bREGION_CLASS\b/.test(expression)),
+      `Region 的 className 没有引用 REGION_CLASS（抽到的是 ${classNames.join(' | ')}）——` +
+        '基类名被手抄回字面量，与 BrowserPane 反查用的那个字符串重新分居两处'
+    ).toBe(true)
+  })
+
+  /**
+   * **喂进那次判定的是哪两个 id**（#352 的 S1）。
+   *
+   * 上面那条守「组件用了这次判定的结果」，这条守「判定拿到的是对的输入」。两者能各自独立坏掉，
+   * 而后者坏掉时前者一条都不红：把第一实参从 `tab.layout.activeRegionId` 换成 `tab.id`，两个
+   * 都是 `string`，tsc 全程沉默，`focus.className` 照旧出现在 className 里——而 `===` 比的是
+   * 两个**互不相交的 id 空间**，`focused` 恒为 false，于是没有任何一格再画得出焦点环。那正是
+   * #339 那次事故的原样，实测这个变异在 23 条全绿 + tsc exit 0 下存活。
+   *
+   * 判据落在两个实参的**末位属性名**上，而不是整条路径：钉死 `tab.layout.activeRegionId` 会让
+   * 任何合理重构（换个中间层名字）误红，而末位属性名恰好是「取的是哪个概念」这句话——`id`、
+   * `titleRegionId`、`activeTabId` 全都不等于 `activeRegionId`，全都会红。
+   */
+  it('那次判定的两个实参分别是活动区 id 与本格 id，不是别的 id', () => {
+    const source = readFileSync(WORKBENCH_TSX, 'utf8')
+    const ast = ts.createSourceFile('WorkspaceWorkbench.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+    const calls: string[][] = []
+    const walk = (node: ts.Node): void => {
+      if (ts.isCallExpression(node) && node.expression.getText(ast) === 'regionFocusExpression') {
+        calls.push(node.arguments.map((argument) => argument.getText(ast)))
+      }
+      ts.forEachChild(node, walk)
+    }
+    walk(ast)
+    // 自检：调用点恰好一个。零个说明接线整段没了（上面那条会先红）；多个说明焦点判定又被分成
+    // 了几次算——那正是 region-focus.ts 存在的理由被推翻，得有人重新想清楚。
+    expect(calls.length, 'regionFocusExpression 的调用点不是恰好 1 个，焦点判定又分岔了').toBe(1)
+    const [activeArgument, regionArgument] = calls[0]!
+    expect(calls[0]!.length, 'regionFocusExpression 的实参个数变了，下面两条判据需要跟上').toBe(2)
+    expect(
+      activeArgument,
+      `第一实参是 \`${activeArgument}\`，末位属性名不是 activeRegionId——` +
+        '喂进去的是另一个 id 空间的值，`===` 恒不成立，没有任何一格画得出焦点环（#339 原样）'
+    ).toMatch(/\.activeRegionId$/)
+    expect(
+      regionArgument,
+      `第二实参是 \`${regionArgument}\`，末位属性名不是 regionId——比的不是"这一格"`
+    ).toMatch(/\.regionId$/)
+    // 两个实参必须是不同的表达式：同一个喂两遍（`node.regionId, node.regionId`）让 `===` 恒成立，
+    // 于是**每一格**都亮着焦点环——同样分不出焦点，而上面两条各自都通过。
+    expect(
+      activeArgument,
+      '两个实参是同一个表达式——`===` 恒成立，每一格都亮焦点环'
+    ).not.toBe(regionArgument)
+  })
+
+  /**
+   * 那两个 id 真的**来自互不相交的空间**（上面那条的行为侧配套）。
+   *
+   * 上面按 AST 判「取的是哪个字段」，这条按行为判「喂错了会怎样」：拿一个 Tab id 当活动区 id 喂
+   * 进去，必须什么都不亮。少了这条，AST 那侧一旦被重构绕过（比如中间塞一个同名 getter），
+   * 就没有任何东西还在陈述这件事的后果。
+   */
+  it('喂进另一个 id 空间的值时什么都不亮（不是碰巧相等就亮）', () => {
+    const regionId = 'region-1'
+    const tabId = 'tab-1'
+    expect(
+      regionFocusExpression(tabId, regionId).className,
+      '拿 Tab id 当活动区 id 喂进去竟然亮了——两个 id 空间被混用而无人发现'
+    ).toBe('')
+    expect(regionFocusExpression(tabId, regionId).nativeViewYieldsToRing).toBe(false)
+    // 判别器在场：同一个 regionId 喂对了必须亮，否则上面那条在"永远不亮"的实现下也恒真。
+    expect(
+      regionFocusExpression(regionId, regionId).className,
+      '判别器缺席：喂对了也不亮，上面那条断言无从分辨'
+    ).toBe(REGION_FOCUS_CLASS)
   })
 
   it('焦点类名有承重声明，不是一条空规则', () => {

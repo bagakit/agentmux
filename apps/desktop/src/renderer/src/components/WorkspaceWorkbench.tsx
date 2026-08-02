@@ -32,7 +32,7 @@ import { ConfirmationDialog } from './ConfirmationDialog'
 import { NewTabSurface } from './NewTabSurface'
 import { PaneSplitMenu } from './PaneSplitMenu'
 import { RegionContextMenu } from './RegionContextMenu'
-import { regionFocusExpression, type RegionFocusExpression } from '../lib/region-focus'
+import { REGION_CLASS, regionFocusExpression, type RegionFocusExpression } from '../lib/region-focus'
 import { activeTopicIdFromLayout, layoutForActiveTopic } from '../lib/scratch-topic-layout'
 import { SessionPane } from './SessionPane'
 import { WorkbenchTabContextMenu } from './WorkbenchTabContextMenu'
@@ -648,7 +648,7 @@ function WorkbenchRegionLeaf({
       })}
     >
     <section
-      className={`workbench-region ${focus.className}`}
+      className={`${REGION_CLASS} ${focus.className}`}
       data-workbench-region-id={node.regionId}
       onPointerDown={() => focusRegion(tab.workspaceId, tab.id, node.regionId)}
     >
