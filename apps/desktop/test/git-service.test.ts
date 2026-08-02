@@ -298,4 +298,31 @@ describe('GitService (real git, temporary repository)', () => {
       expect(predicate(`${real}fatal: the remote end hung up unexpectedly\n`)).toBe(false)
     }
   })
+
+  // The accepted side of NOT_A_WORKING_TREE, and specifically a path containing a single quote.
+  //
+  // Why this needs its own case: git echoes the caller's path back INSIDE single quotes, so the
+  // pattern's wildcard sits fenced between two quote literals. A wildcard in that position gets no
+  // incidental coverage — narrowing `.+` to `[^']+` left the whole suite green, even though a single
+  // quote is legal in directory names and such a user would permanently hit the original defect
+  // (their removal of an already-gone worktree reads as an unclassified failure). The sibling
+  // predicate's wildcard is at the tail, where greedy matching eats the trailing neighbour noise the
+  // test above feeds it and trips `$` — so "the anchor mutations are caught" proves nothing here.
+  //
+  // Real git again, not a literal: the quoting and the exact wording are git's to decide.
+  it('classifies an already-gone worktree whose path contains a quote — the fenced wildcard', async () => {
+    const root = await makeRepo()
+    const host = new LocalExecutionHost()
+    const quoted = join(root, "bob's-laptop", 'wt')
+
+    const removal = await host.run('git', ['-C', root, 'worktree', 'remove', '--', quoted],
+      { timeoutMs: 20_000 })
+
+    // Self-check: the quote really did survive into git's message, so this case exercises the
+    // wildcard rather than passing on a path git happened to rewrite.
+    expect(removal.exitCode).not.toBe(0)
+    expect(removal.stderr, "git did not echo the quote back — this case no longer probes the wildcard")
+      .toContain("bob's-laptop")
+    expect(isNotAWorkingTreeStderr(removal.stderr)).toBe(true)
+  })
 })
