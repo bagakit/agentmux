@@ -167,7 +167,7 @@ export function addressingRecovery(error: {
   }
   if (error.code === 'MESSAGE_TARGET_NOT_AGENT') {
     // 这里**故意不给命令**。想给的那条是 `agentmux inspect --region=<regionId>`——这个码只在
-    // Region 分支抛（store.ts:1624 的 `region.kind !== 'agent'`，全仓仅此一处），所以丢掉的是
+    // Region 分支抛（store.ts 里 `region.kind !== 'agent'` 那一处，全仓仅此一处），所以丢掉的是
     // regionId 而不是 tabId。但抛出点只带 code 与 message 过来，恢复层拿不到它。凑一条跑不了的
     // 命令比不给更糟：它看起来像出路，粘贴过去却只会撞 INVALID_CLI_ARGUMENT，把人引向第二次失败。
     return `这一格不是 Agent（是终端、浏览器或文件）。
@@ -187,19 +187,37 @@ ${LIST_SESSIONS}`
 ${LIST_SESSIONS}`
   }
   if (error.code === 'AMBIGUOUS_REGION_TARGET' || error.code === 'AMBIGUOUS_TAB_TARGET') {
-    // 这**不是**"粘来的地址匹配到多个"。两个码都只从 `self` 分支抛（control.ts:134 在
-    // `target.kind === 'self'` 之内；:163 在 `target.kind === 'tab'` 提前 return 之后），
-    // 意思是"发起方自己同时显示在多处"。显式 id 那条路走不到这里：region id 是
-    // `region:${crypto.randomUUID()}`（store.ts:960），全局唯一，跨 Tab 撞号不成立。
+    // 这**不是**"粘来的地址匹配到多个"，意思是"发起方自己同时显示在多处"。但两个码的抛出面
+    // **不对称**，别把它们当同一件事：
+    //   - `AMBIGUOUS_TAB_TARGET` 只有一处，在 `resolveWorkbenchControlTab` 里，`target.kind === 'tab'`
+    //     提前 return 之后——所以它确实只从 self 来。
+    //   - `AMBIGUOUS_REGION_TARGET` 有**两处**：`resolveWorkbenchControlRegion` 的 self 分支之内，
+    //     以及**显式 id 那条路**（"Region target is ambiguous."，在 `REGION_NOT_OPEN` 之后）。
+    // 曾经这段注释写的是"两个码都只从 self 分支抛"，并据此说显式 id 走不到这里。前半句对 TAB 成立、
+    // 对 REGION 是假的：那一处真实存在且**已被现有测试执行过**——view-focus.test.ts 的
+    // "resolves Launcher destinations through the open-only unique Region owner" 喂两张各持
+    // 'duplicate-launcher' 的开着的 Tab，拿到的就是这个码。
+    //
+    // 它今天不可达靠的是**另一个**前提：没有任何生产路径能让一个 regionId 同时留在两张开着的 Tab 的
+    // `regions` 表里。两种铸造拼法（`region:${crypto.randomUUID()}` 与 `initialWorkbenchRegionId` 的
+    // `region:${tabId}`，而 tabId 自己也带 uuid）都全局唯一；唯一刻意复用 id 的 `promoteRegionToTab`
+    // 由 `removeWorkbenchRegion` 从源 Tab 上 `delete` 掉那一格，源只剩一格时它整条不做（返回
+    // unchanged）。这个前提被 promote 那条守卫钉着——见 agent-address.test.ts 里"唯一刻意复用
+    // regionId 的路径"那条，它按"跨 Tab 持有计数恰好为 1"判，与那处 `matches.length !== 1` 同形。
     //
     // 所以下一步不是"再挑一个候选"，而是**别再用 self**：self 依赖"我在哪"，而发起方此刻
     // 在多处，这个前提本身就塌了。改用与"在哪"无关的 Session 身份。
+    //
+    // 若哪天真有路径造出跨 Tab 的重号，下面这句就会对那条路径说谎（用户粘的是显式 id，不是 self）。
+    // 那时该做的是把 REGION 的两处分成两个码，而不是把这段文案改得两边都含糊。
     return `相对寻址（self）失败：发起方自己同时显示在多个位置，"我这一格"指向不唯一。
 改用与位置无关的 Session 身份，先列出活着的 Agent：
 ${LIST_SESSIONS}`
   }
   if (error.code === 'CALLER_NOT_OPEN') {
-    // 同样是 `self` 失败，只是方向相反：上面是"在多处"，这里是"一处都不在"（control.ts:133/162）。
+    // 同样是 `self` 失败，只是方向相反：上面是"在多处"，这里是"一处都不在"。这个码两处抛出点
+    // （Region 解析与 Tab 解析各一处）都在 self 分支之内，不像 AMBIGUOUS_REGION_TARGET 那样另有
+    // 一条显式 id 的路——所以对它，"只从 self 来"是真的。
     // 两者前提相同——self 要求发起方恰好显示在一处——所以下一步也相同：换成绝对身份。
     return `相对寻址（self）失败：发起方自己没有显示在任何一格里，"我这一格"无从算起。
 改用与位置无关的 Session 身份，先列出活着的 Agent：
