@@ -963,9 +963,14 @@ export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control'> & {
    * GitHub CLI capability probing. Like `git`, a Desktop-main capability with no web-preview mock —
    * the renderer reaches it through `window.agentmux.gh`. Only *probes* `gh auth status`; it never
    * reads or persists a token, so it adds no credential-storage surface.
+   *
+   * There is deliberately no `authStatus` leaf here. `GhService.authStatus` still exists and runs — but
+   * only *inside* main, as the first step of `prReadiness` — because the auth answer must be read
+   * together with the branch facts, not on its own (see {@link PrReadiness}). Exposing it separately
+   * re-opened the drift that type explicitly closes: a renderer could read auth, then read the branch,
+   * and act on a pair that was never simultaneously true. Ask `prReadiness`; `auth` is one of its fields.
    */
   gh: {
-    authStatus(workspaceId: string): Promise<GhAuthProbe>
     prReadiness(workspaceId: string): Promise<PrReadiness>
     createPullRequest(workspaceId: string, input: CreatePullRequestInput): Promise<CreatePullRequestResult>
   }
