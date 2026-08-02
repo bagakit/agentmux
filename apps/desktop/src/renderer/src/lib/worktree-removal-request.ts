@@ -95,3 +95,40 @@ export function nextAfterWorktreeRemoval(
   if (request.stage.kind === 'blocked') return { kind: 'failed', reason: outcome.reason }
   return { kind: 'ask', request: { ...request, stage: { kind: 'blocked', reason: outcome.reason } } }
 }
+
+/** 三种走向各自在屏幕上留下什么。三个字段一起看才是「用户接下来看到的那一屏」。 */
+export type WorktreeRemovalEffect = {
+  /** 对话框接下来显示哪个请求。`null` 是关掉它。 */
+  removal: WorktreeRemovalRequest | null
+  /** 要给用户读的失败原话。`null` 是没有错误可报——不是「有错误但不说」。 */
+  error: string | null
+  /** 要不要重扫分支列表。 */
+  rescan: boolean
+}
+
+/**
+ * 由走向算出那一屏。
+ *
+ * 为什么这三个字段必须在**纯函数**里算，而不是留在面板的 if/else 里：`renderToStaticMarkup` 不跑
+ * effect，也点不了对话框的确认键，所以面板里那段分派**没有任何东西执行它**。实测过的后果是
+ * `setActionError(next.reason)` 换成 `setActionError(null)` 时 21 条断言与 tsc 全绿——而那个变异的
+ * 症状是：用户已经授权了丢弃、git 还是拒绝，对话框却静静关掉，什么也不说，用户以为删成功了。
+ *
+ * 三种走向 × 三个字段 = 九件事，逐条都能各自漂移，所以这不是把 `nextAfterWorktreeRemoval` 换个说法
+ * 抄一遍。要点在于三条里**只有一条**重扫（`ask` 什么都没删，重扫会把用户正在读的那句 git 理由
+ * 刷掉；`failed` 也什么都没删），也**只有一条**报错。
+ */
+export function worktreeRemovalEffect(next: WorktreeRemovalNext): WorktreeRemovalEffect {
+  if (next.kind === 'done') {
+    // 记录已经撤了，那一行的归属跟着变（从 Worktrees 组挪回 Without worktree），所以必须重扫。
+    // 不重扫会留一个指向已删目录的行，点它会报一句难懂的话。
+    return { removal: null, error: null, rescan: true }
+  }
+  if (next.kind === 'ask') {
+    // 保护生效了，不是错误：不进错误条，而是把同一个请求推进到下一档让用户读 git 的理由。
+    return { removal: next.request, error: null, rescan: false }
+  }
+  // git 的原话必须落到用户读得到的地方。用户已经授权丢弃、git 还是不干，此时唯一有用的下一步全在
+  // 这句话里（权限？路径被占用？）。压成 null 就是上面说的那个变异。
+  return { removal: null, error: next.reason, rescan: false }
+}
