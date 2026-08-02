@@ -1,7 +1,9 @@
 import { readFileSync } from 'node:fs'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import ts from 'typescript'
 import { describe, expect, it, vi } from 'vitest'
+import { fileManagerName } from '../src/renderer/src/lib/host-platform.js'
 
 vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
@@ -51,6 +53,116 @@ const selectorListSource = readFileSync(
   'utf8'
 )
 const stylesSource = allStyles()
+
+// --- AST helpers for the reveal-wording guard ---------------------------------
+// 取值再质询，不做「禁止拼法在场」的字符串扫描（[[forbidden-shape-guard-misfires]]）。
+
+/** 系统文件管理器名字集，从 lib 的 SSOT 派生：三态各自的名字，加上各名字里独占的词。 */
+function deriveOsFileManagerNames(): string[] {
+  const fullNames = (['mac', 'windows', 'other'] as const).map((platform) => fileManagerName(platform))
+  const wordCounts = new Map<string, number>()
+  for (const name of fullNames) {
+    for (const word of name.split(/\s+/)) wordCounts.set(word, (wordCounts.get(word) ?? 0) + 1)
+  }
+  // 共享词（如 "File" 同属 File Explorer / File Manager）不进禁词集——否则会误伤 "File changed on
+  // disk" 这类正当文案。只有各名字独占的词（Finder / Explorer / Manager）与完整短语才是安全的判据。
+  const distinctWords = [...wordCounts].filter(([, count]) => count === 1).map(([word]) => word)
+  return [...new Set([...fullNames, ...distinctWords])]
+}
+
+/** 一段文本里命中的系统文件管理器名字（整词比对，不管引号形态）。 */
+function osNamesInText(text: string, names: string[]): string[] {
+  const escape = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return names.filter((name) => new RegExp(`\\b${escape(name)}\\b`).test(text))
+}
+
+function parseTsx(name: string, text: string): ts.SourceFile {
+  return ts.createSourceFile(name, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+}
+
+function jsxAttribute(opening: ts.JsxOpeningLikeElement, attributeName: string): ts.JsxAttribute | undefined {
+  for (const property of opening.attributes.properties) {
+    if (ts.isJsxAttribute(property) && property.name.getText(opening.getSourceFile()) === attributeName) {
+      return property
+    }
+  }
+  return undefined
+}
+
+/** JSX 属性的静态字符串取值（字符串字面量或无插值的模板串）；不是静态字符串时返回 null。 */
+function staticJsxAttributeString(element: ts.JsxElement, attributeName: string): string | null {
+  const attribute = jsxAttribute(element.openingElement, attributeName)
+  if (!attribute?.initializer) return null
+  let expression: ts.Node = attribute.initializer
+  if (ts.isJsxExpression(expression)) {
+    if (!expression.expression) return null
+    expression = expression.expression
+  }
+  if (ts.isStringLiteralLike(expression)) return expression.text
+  if (ts.isTemplateExpression(expression)) {
+    // 模板串里插值处（如 `${topic.title}`）用空串拼接——判据只关心它写死的那些字里有没有 OS 名字。
+    return expression.head.text + expression.templateSpans.map((span) => span.literal.text).join('')
+  }
+  if (ts.isNoSubstitutionTemplateLiteral(expression)) return expression.text
+  return null
+}
+
+function findJsxElementByClassName(source: ts.SourceFile, className: string): ts.JsxElement | undefined {
+  let found: ts.JsxElement | undefined
+  const visit = (node: ts.Node): void => {
+    if (ts.isJsxElement(node)) {
+      const classAttribute = jsxAttribute(node.openingElement, 'className')
+      if (
+        classAttribute?.initializer &&
+        ts.isStringLiteral(classAttribute.initializer) &&
+        classAttribute.initializer.text.split(/\s+/).includes(className)
+      ) {
+        found = node
+      }
+    }
+    ts.forEachChild(node, visit)
+  }
+  ts.forEachChild(source, visit)
+  return found
+}
+
+function findContextMenuItemBySelectHandler(source: ts.SourceFile, handler: string): ts.JsxElement | undefined {
+  let found: ts.JsxElement | undefined
+  const visit = (node: ts.Node): void => {
+    if (ts.isJsxElement(node) && node.openingElement.tagName.getText(source).endsWith('Item')) {
+      const onSelect = jsxAttribute(node.openingElement, 'onSelect')
+      if (onSelect && jsxSubtreeUsesIdentifier(node.openingElement, handler)) found = node
+    }
+    ts.forEachChild(node, visit)
+  }
+  ts.forEachChild(source, visit)
+  return found
+}
+
+function jsxTextChildren(element: ts.JsxElement): string[] {
+  const out: string[] = []
+  const visit = (node: ts.Node): void => {
+    if (ts.isJsxText(node)) {
+      const trimmed = node.text.trim()
+      if (trimmed) out.push(trimmed)
+    }
+    ts.forEachChild(node, visit)
+  }
+  ts.forEachChild(element, visit)
+  return out
+}
+
+function jsxSubtreeUsesIdentifier(node: ts.Node, identifier: string): boolean {
+  let uses = false
+  const visit = (inner: ts.Node): void => {
+    if (ts.isIdentifier(inner) && inner.text === identifier) uses = true
+    ts.forEachChild(inner, visit)
+  }
+  visit(node)
+  return uses
+}
+// -----------------------------------------------------------------------------
+
 
 const workspace: WorkspaceRecord = {
   id: 'workspace',
@@ -159,29 +271,75 @@ describe('shared surface tool dock resize', () => {
     // "Files + Branches"），而 "Explorer" 恰好是 Windows 系统文件管理器的名字——一个内部导航
     // 动作于是看起来像在承诺打开操作系统的窗口。反向的错法同样要挡：把这里改成
     // `revealInFileManagerLabel()` 会在 mac 上显示 "Reveal in Finder"，而它根本不开 Finder。
-    const dock = surfaceToolDockSource
-    const menu = readFileSync(
+    //
+    // 此前的判据是「禁止三种拼法的字符串不在场」——`'"Reveal in Explorer"'`、`'>Reveal in Explorer<'`、
+    // ``'in Explorer`'``。两个 review agent 实测它对真泄漏失明：HEAD 里的 `aria-label={'Reveal in
+    // Explorer'}` 是**单引号**、包在 JSX 表达式容器里，三种拼法一个都不匹配，20/20 全绿。把 aria-label
+    // 换成 ``Reveal ${topic.title} in Finder`` 同样存活。这是本仓的 [[forbidden-shape-guard-misfires]]：
+    // 禁止形状既能被换个拼法绕过，又会误伤讲道理的注释（这两个文件的注释本来就写着那些名字）。
+    //
+    // 改成**取值再质询**：用 TS parser 找到那个 reveal 控件，取它真正呈现给用户的两处文案
+    // （`title` 与 `aria-label`），把每一处按整词比对系统文件管理器的名字集——不管它用单引号、双引号
+    // 还是模板串。名字集从 lib 的 SSOT（`fileManagerName`）派生，不手抄，这样 lib 改了名字这里跟着变。
+    const OS_FILE_MANAGER_NAMES = deriveOsFileManagerNames()
+    // `File Manager` 与 `File Explorer` 共享 "File"，"File" 于是不能单独进禁词集（"File changed on
+    // disk" 这类正当文案会误伤）；只有各名字独占的词（Explorer / Finder / Manager）与完整短语才算。
+    expect(OS_FILE_MANAGER_NAMES, '派生的禁词集丢了那些独占短词').toEqual(
+      expect.arrayContaining(['Finder', 'Explorer', 'Manager', 'File Explorer', 'File Manager'])
+    )
+    expect(OS_FILE_MANAGER_NAMES, '"File" 被单独禁了，会误伤 "File changed on disk" 这类正当文案')
+      .not.toContain('File')
+
+    // SurfaceToolDock 上的图标按钮：className 里含 workspace-topic-reveal。
+    const dockButton = findJsxElementByClassName(
+      parseTsx('SurfaceToolDock.tsx', surfaceToolDockSource),
+      'workspace-topic-reveal'
+    )
+    expect(dockButton, 'SurfaceToolDock 里找不到 reveal 图标按钮——判据落空，下面几条会恒真').not.toBeUndefined()
+    const dockTitle = staticJsxAttributeString(dockButton!, 'title')
+    const dockAria = staticJsxAttributeString(dockButton!, 'aria-label')
+    // 正面钉住两处取值：`title` 原本就有正断言，`aria-label` 从前是个没人钉的空槽——下一个泄漏正是
+    // 往那种空槽里去。两处都要**恰好点名**那个内部面板（"Files"），且都不带任何操作系统的名字。
+    expect(dockTitle, 'reveal 按钮的 title 不再指向自家 Files 面板').toContain('Files')
+    expect(dockAria, 'reveal 按钮的 aria-label 不再指向自家 Files 面板（这个槽从前没人钉，是泄漏最爱去的地方）')
+      .toContain('Files')
+    expect(osNamesInText(dockTitle ?? '', OS_FILE_MANAGER_NAMES), `reveal 按钮 title 借用了系统文件管理器的说法`).toEqual([])
+    expect(osNamesInText(dockAria ?? '', OS_FILE_MANAGER_NAMES), `reveal 按钮 aria-label 借用了系统文件管理器的说法`).toEqual([])
+    // 反向的错法：改走 lib 的三态文案（`revealInFileManagerLabel()`）会说 "Reveal in Finder"，
+    // 而这个按钮根本不开 Finder。它是个函数调用不是字符串字面量，上面的整词比对看不见它，单独守。
+    expect(jsxSubtreeUsesIdentifier(dockButton!, 'revealInFileManagerLabel'),
+      'reveal 按钮借用了 lib/host-platform 的三态文案，但它不开系统文件管理器').toBe(false)
+
+    // TopicContextMenu 上的同一个动作：onSelect 走 onReveal 的那个 ContextMenu.Item。
+    const menuSource = readFileSync(
       new URL('../src/renderer/src/components/TopicContextMenu.tsx', import.meta.url),
       'utf8'
     )
-    // 注释里要能讲清「为什么不走那条 lib」，所以判据必须落在**代码**上而不是整份文本：这两个文件
-    // 的注释本来就写着 `lib/host-platform`，按整份文本查会误伤讲道理的注释——那是本仓的
-    // [[forbidden-shape-guard-misfires]]：禁止形状既漏又误伤。先剥掉注释再判。
-    const codeOf = (source: string): string =>
-      source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
-    for (const [name, source] of [['SurfaceToolDock', dock], ['TopicContextMenu', menu]] as const) {
-      const code = codeOf(source)
-      for (const forbidden of ['"Reveal in Explorer"', '>Reveal in Explorer<', 'in Explorer`']) {
-        expect(code, `${name} 还在用系统文件管理器的说法：${forbidden}`).not.toContain(forbidden)
-      }
-      expect(code, `${name} 借用了 lib/host-platform 的三态文案，但它不开系统文件管理器`)
-        .not.toContain('revealInFileManagerLabel')
-      // 前提自检：两处都真的有这句文案，且剥注释没把代码一起剥掉。少了说明按钮/菜单项没了，
-      // 那时上面几条恒真。
-      expect(code, `${name} 里找不到这条定位文案——判据落空`).toContain('Reveal in Files')
+    const menuItem = findContextMenuItemBySelectHandler(
+      parseTsx('TopicContextMenu.tsx', menuSource),
+      'onReveal'
+    )
+    expect(menuItem, 'TopicContextMenu 里找不到 onReveal 菜单项——判据落空').not.toBeUndefined()
+    const menuTexts = jsxTextChildren(menuItem!)
+    expect(menuTexts.join(' '), 'reveal 菜单项不再指向自家 Files 面板').toContain('Files')
+    expect(osNamesInText(menuTexts.join(' '), OS_FILE_MANAGER_NAMES),
+      'reveal 菜单项借用了系统文件管理器的说法').toEqual([])
+    expect(jsxSubtreeUsesIdentifier(menuItem!, 'revealInFileManagerLabel'),
+      'reveal 菜单项借用了 lib/host-platform 的三态文案，但它不开系统文件管理器').toBe(false)
+
+    // 自检：整词比对本身要真能报出这三种拼法的违规，否则上面的 toEqual([]) 是因为谓词永远为空才绿。
+    // 用合成源码质询，不往产品代码里种违规（[[forbidden-shape-guard-misfires]] 的做法）。
+    for (const spelling of ['"Reveal in Explorer"', "'Reveal in Explorer'", '`Reveal ${x} in Finder`']) {
+      const probe = findJsxElementByClassName(
+        parseTsx('probe.tsx', `const e = <button className="workspace-topic-reveal" aria-label={${spelling}}></button>`),
+        'workspace-topic-reveal'
+      )!
+      const probeAria = staticJsxAttributeString(probe, 'aria-label') ?? ''
+      expect(osNamesInText(probeAria, OS_FILE_MANAGER_NAMES).length, `谓词认不出这个拼法：${spelling}`).toBeGreaterThan(0)
     }
-    // 剥注释这一步自己也要有人守：如果它把代码剥没了，上面的 not.toContain 全部恒真。
-    expect(codeOf('/* a */ const x = 1 // b').trim(), '剥注释把代码也剥掉了').toBe('const x = 1')
+    // 反向自检：干净的自家文案不许被误报，否则这道门会逼人把合法代码改坏。
+    expect(osNamesInText('Reveal in Files', OS_FILE_MANAGER_NAMES), '谓词误报了自家 Files 文案').toEqual([])
+    expect(osNamesInText('File changed on disk', OS_FILE_MANAGER_NAMES), '谓词把 "File" 当禁词误报了').toEqual([])
   })
 
   it('keeps exactly one always-visible action on a Topic row', () => {
