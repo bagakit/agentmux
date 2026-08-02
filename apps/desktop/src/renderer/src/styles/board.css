@@ -1,0 +1,250 @@
+/**
+ * Board：Branch/Topic × 状态矩阵、扇出条、Board 工具清单、Discussion 画布。
+ *
+ * 从 surfaces.css 拆出来的（它已到 400 行上限）。这一族的共同点不是"整屏"，而是**同一张矩阵**：
+ * 行是 Branch 或 Topic，列是状态，格子里是 run 卡。扇出条与 Discussion 画布都挂在这张矩阵上。
+ *
+ * 按表面分文件（见 docs/design/agentmux-surface-density.md「样式表的组织」）。
+ * 层叠顺序即 index.css 里的 @import 顺序，不靠特异性打架决定胜负——本文件紧跟 surfaces.css，
+ * 与拆分之前这些规则所在的位置逐字相同。
+ */
+
+.board { width: 100%; height: 100%; min-width: 0; min-height: 0; display: flex; flex-direction: column; padding:var(--sp-6) var(--sp-6) var(--sp-6); overflow: hidden; background: radial-gradient(circle at 74% 0%, var(--overlay-line), transparent 36%), var(--surface-0); }
+.board--empty { align-items: center; justify-content: center; }
+/* The bake-off strip: which branches are racing on one prompt. Surface fill and a hairline carry it,
+   no stroke; it reuses the shared status dots so a lane here reads exactly like a Tab dot. */
+.fanout-strip { flex: none; display: flex; flex-direction: column; gap:var(--sp-3); margin-bottom:var(--sp-5); }
+.fanout-group {
+  display: flex;
+  align-items: center;
+  gap:var(--sp-4);
+  padding:var(--sp-3) var(--sp-4);
+  border-radius: var(--radius);
+  background: var(--surface-1);
+  box-shadow: var(--hl);
+}
+.fanout-group__identity { min-width: 0; display: flex; align-items: center; gap:var(--sp-3); color: var(--text-2); }
+.fanout-group__identity > svg { flex: 0 0 auto; color: var(--text-3); }
+.fanout-group__identity strong { font-size: var(--fs-meta); font-weight: 620; letter-spacing: -.01em; }
+.fanout-group__identity small { color: var(--text-3); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
+.fanout-group__lanes { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap:var(--sp-2); }
+.fanout-lane {
+  display: inline-flex;
+  align-items: center;
+  gap:var(--sp-2);
+  padding:var(--sp-1) var(--sp-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  background: var(--surface-2);
+  font-size: var(--fs-micro);
+  cursor: pointer;
+}
+.fanout-lane:hover { color: var(--text); background: var(--surface-3); }
+/* A lane whose Agent never launched: still part of the set, but nothing to open. */
+.fanout-lane--idle { color: var(--text-3); background: transparent; box-shadow: inset 0 0 0 1px var(--wash-2); cursor: default; }
+.fanout-lane__branch { overflow: hidden; max-width: 160px; text-overflow: ellipsis; white-space: nowrap; }
+/* The lane and its keep control travel together, so the control cannot drift onto another lane. */
+.fanout-lane-slot { display: inline-flex; align-items: center; gap:var(--sp-1); }
+/* Resolving the bake-off tears down the other lanes, so it stays quiet until the pointer is on it —
+   loud enough to find, never loud enough to hit by accident while reading the comparison. */
+.fanout-lane__keep {
+  padding:var(--sp-1) var(--sp-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-3);
+  background: transparent;
+  font-size: var(--fs-micro);
+  cursor: pointer;
+}
+.fanout-lane__keep:hover { color: var(--text); background: var(--surface-3); }
+.fanout-group__jump {
+  margin-left:auto;
+  flex: 0 0 auto;
+  padding:var(--sp-2) var(--sp-4);
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--surface-0);
+  background: var(--amber);
+  font-size: var(--fs-micro);
+  font-weight: 620;
+  cursor: pointer;
+}
+.board__header { display: flex; flex: none; align-items: flex-end; justify-content: space-between; gap:var(--sp-6); margin-bottom:var(--sp-5); }
+.board__header h1 { margin:var(--sp-2) 0 var(--sp-1); font-size: var(--fs-display); letter-spacing: -.03em; }
+.board__header p { margin:0; color: var(--text-3); font-size: var(--fs-meta); }
+.board__context-hint { color: var(--text-3); font-size: var(--fs-meta); white-space: nowrap; }
+.board-state { width: min(440px, calc(100% - 32px)); display: flex; flex-direction: column; align-items: center; gap:var(--sp-4); padding: var(--sp-8); border: 1px solid var(--line); border-radius: var(--radius-lg); color: var(--text-3); background: var(--surface-1); text-align: center; }
+.board-state > svg { color: var(--green); }
+.board-state strong { color: var(--text); font-size: var(--fs-title); }
+.board-state span { font-size: var(--fs-meta); line-height: 1.5; }
+.board-state--error > svg { color: var(--red); }
+.board-toolbar { display: grid; flex: none; align-items: end; gap:var(--sp-4); margin-bottom:var(--sp-4); padding:var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); }
+.board-toolbar--matrix { grid-template-columns: minmax(220px, 1fr) 138px 138px auto auto auto; }
+.board-toolbar > label:not(.board-search) { display: grid; gap:var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); }
+.board-toolbar select { height: 30px; padding:0 var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-0); font-size: var(--fs-meta); }
+.board-search { height: 30px; position: relative; display: flex; align-items: center; }
+.board-search > svg { position: absolute; left: 8px; color: var(--text-3); }
+.board-search input { width: 100%; height: 30px; padding:0 28px; border: 1px solid var(--line); border-radius: var(--radius-sm); outline: none; color: var(--text); background: var(--surface-0); font-size: var(--fs-meta); }
+.board-search input:focus { border-color: var(--focus-line); box-shadow: var(--focus-ring); }
+.board-search button { position: absolute; right: 5px; display: flex; padding:var(--sp-1); border: 0; color: var(--text-3); background: transparent; cursor: pointer; }
+.board-host-scope, .board-filter-count { align-self: center; color: var(--text-3); font-size: var(--fs-meta); white-space: nowrap; }
+.board-host-scope { display: inline-flex; align-items: center; gap:var(--sp-2); }
+.board-no-results { min-height: 280px; display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap:var(--sp-3); border: 1px dashed var(--line); border-radius: var(--radius-lg); color: var(--text-3); font-size: var(--fs-meta); text-align: center; }
+.board-no-results strong { color: var(--text-2); font-size: var(--fs-body); }
+.board-inline-warning { display: flex; flex: none; align-items: center; gap:var(--sp-3); margin:calc(-1 * var(--sp-1)) 0 var(--sp-4); padding:var(--sp-3) var(--sp-4); border-radius: var(--radius-sm); color: var(--amber-text); background: var(--amber-bg); font-size: var(--fs-meta); }
+.board-matrix-scroll { min-width: 0; min-height: 0; flex: 1; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--bg); scrollbar-gutter: stable; }
+.board-matrix { min-width: 1250px; display: grid; grid-template-columns: 230px repeat(4, minmax(240px, 1fr)); align-content: start; }
+.board-matrix__head, .board-matrix__row { display: contents; }
+.board-matrix__corner, .board-column-head { min-height: 48px; position: sticky; z-index: 3; top: 0; display: flex; align-items: center; border-bottom: 1px solid var(--line); background: var(--overlay-surface); backdrop-filter: blur(12px); }
+.board-matrix__corner { z-index: 5; left: 0; gap:var(--sp-3); padding:0 var(--sp-5); color: var(--text-2); font-size: var(--fs-meta); font-weight: 650; letter-spacing: .02em; }
+.board-column-head { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap:var(--sp-1) var(--sp-4); padding:var(--sp-3) var(--sp-4); border-left: 1px solid var(--line-soft); }
+.board-column-head > span { min-width: 0; display: flex; align-items: center; gap:var(--sp-2); }
+.board-column-head > span > svg { color: var(--green-2); }
+.board-column-head strong { font-size: var(--fs-meta); }
+.board-column-head small { grid-column: 1; overflow: hidden; color: var(--text-3); font-size: var(--fs-micro); text-overflow: ellipsis; white-space: nowrap; }
+.board-column-head em { grid-column: 2; grid-row: 1 / 3; align-self: center; min-width: 21px; padding:var(--sp-1) var(--sp-3); border-radius: var(--radius); color: var(--text-3); background: var(--surface-3); font-size: var(--fs-micro); font-style: normal; text-align: center; }
+.board-column-head--needs-you > span > svg { color: var(--amber); }
+.board-column-head--done > span > svg { color: var(--blue); }
+.board-branch-head { min-width: 0; min-height: 150px; position: sticky; z-index: 2; left: 0; display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; grid-template-rows: auto auto; align-content: center; align-items: center; gap:var(--sp-3) var(--sp-4); padding:var(--sp-5) var(--sp-4); border-bottom: 1px solid var(--line-soft); background: linear-gradient(90deg, var(--surface-0) 84%, var(--scrim-3)); box-shadow: 8px 0 18px var(--scrim-1); }
+.board-branch-head__glyph { grid-row: 1 / 3; width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); color: var(--green); background: var(--surface-1); }
+.board-branch-head__identity { min-width: 0; display: flex; flex-direction: column; gap:var(--sp-2); }
+.board-branch-head__identity strong, .board-branch-head__identity small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.board-branch-head__identity strong { font-size: var(--fs-meta); }
+.board-branch-head__identity small { color: var(--text-3); font: 10px "SFMono-Regular", monospace; }
+.board-branch-head__meta { min-width: 0; display: flex; align-items: center; gap:var(--sp-2); }
+.board-branch-head__meta em { padding:var(--sp-1) var(--sp-2); border-radius: var(--radius); color: var(--green); background: var(--green-bg); font-size: var(--fs-micro); font-style: normal; }
+.board-branch-head__meta small { color: var(--text-3); font-size: var(--fs-micro); }
+.board-branch-head > .icon-button { grid-column: 3; grid-row: 1 / 3; }
+.board-cell { min-width: 0; min-height: 150px; display: flex; flex-direction: column; gap:var(--sp-3); padding:var(--sp-4); border-bottom: 1px solid var(--line-soft); border-left: 1px solid var(--line-soft); background: var(--surface-0); }
+.board-cell--inbox { background: linear-gradient(150deg, var(--surface-0), var(--surface-0) 64%); }
+.board-cell--needs-you { background: linear-gradient(150deg, var(--surface-0), var(--surface-0) 62%); }
+.board-discussion-card { min-height: 78px; display: grid; grid-template-columns: 30px minmax(0, 1fr); align-content: center; gap:var(--sp-1) var(--sp-4); padding:var(--sp-4); border: 1px dashed var(--green-line); border-radius: var(--radius); color: var(--text-2); background: var(--surface-0); text-align: left; cursor: pointer; }
+.board-discussion-card:hover { border-style: solid; border-color: var(--green-line); color: var(--text); background: var(--surface-1); }
+.board-discussion-card > span { grid-row: 1 / 3; width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); color: var(--green); background: var(--green-bg); }
+.board-discussion-card strong { font-size: var(--fs-meta); }
+.board-discussion-card small { overflow: hidden; color: var(--text-3); font-size: var(--fs-micro); text-overflow: ellipsis; white-space: nowrap; }
+.board-discussion-card--unbound { border-color: var(--line); color: var(--text-3); background: var(--surface-1); }
+.board-discussion-card--unbound > span { color: var(--text-3); background: var(--surface-3); }
+.board-run-card { min-width: 0; display: grid; grid-template-columns: 12px minmax(0, 1fr) auto 12px; align-items: center; gap:var(--sp-2) var(--sp-3); padding:var(--sp-4); border: 1px solid var(--surface-3); border-radius: var(--radius); color: var(--text-2); background: var(--surface-0); box-shadow: var(--elev-2), var(--hl); text-align: left; cursor: pointer; }
+.board-run-card:hover { border-color: var(--green-line); color: var(--text); background: var(--surface-1); }
+/* 需要你 / 出错的卡带一圈色框，颜色来自状态语汇不自己挑。
+   卡根上带着 `status--<state>`（只带赋值那一个类，不带 `.status` 本体——`.status` 的
+   inline-flex / capitalize 会掀翻这里的 grid 版式并把措辞大写化），于是 `--status-ink` 从
+   chrome.css 那条唯一的状态色表继承下来。`color-mix` 的配方与 tokens.css 里
+   `--amber-bg` / `--amber-line` 逐字相同，只是基色换成继承来的那一个——不能改写成
+   `--amber-bg` 那样的按色相 token：状态有九个而带浅色对的色相只有三个，`done` 落在 `--blue`、
+   `disconnected` 落在 `--text-3`，两者都没有对应的 bg/line。派生自 `--status-ink` 才对全部状态成立。
+   `data-attention` 决定的是**画不画**，取值走 attentionAccentFor（头像与快速切换器问的同一个问题），
+   所以恰好两个值。此前这里以 `board-run-card--<state>` 为键写死 `var(--amber-line)`/`var(--amber-bg)`
+   并且把 `disconnected` 与 `error` 一起卷进琥珀——两处都与语汇冲突：色表判 `error` 是红，而
+   `disconnected` 按 attention-event 写明的合同压根不该上色（「掉线不是一次请求，正是为了让琥珀
+   只表示等你」）。于是一条掉线的链路被画成了「你是瓶颈」，一个崩掉的 agent 被画成了「在等你」。 */
+.board-run-card[data-attention='needs-you'], .board-run-card[data-attention='error'] {
+  border-color: color-mix(in srgb, var(--status-ink) 40%, var(--surface-1));
+  background: color-mix(in srgb, var(--status-ink) 13%, var(--surface-0));
+}
+.board-run-card__status { display: inline-flex; }
+.board-run-card__identity { min-width: 0; display: flex; flex-direction: column; gap:var(--sp-1); }
+.board-run-card__identity strong { overflow: hidden; font-size: var(--fs-meta); text-overflow: ellipsis; white-space: nowrap; }
+.board-run-card__identity small { display: inline-flex; align-items: center; gap:var(--sp-1); color: var(--text-3); font-size: var(--fs-micro); text-transform: capitalize; }
+.board-run-card__meta { display: flex; flex-direction: column; align-items: flex-end; gap:var(--sp-1); }
+.board-run-card__meta em { color: var(--text-2); font-size: var(--fs-micro); font-style: normal; text-transform: capitalize; }
+.board-run-card__meta time { color: var(--text-3); font-size: var(--fs-micro); white-space: nowrap; }
+.board-run-card__detail { grid-column: 2 / 4; overflow: hidden; color: var(--text-3); font-size: var(--fs-micro); text-overflow: ellipsis; white-space: nowrap; }
+.board-run-card > svg { color: var(--green-2); }
+.board-cell__empty { min-height: 76px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap:var(--sp-1); color: var(--neutral-1); font-size: var(--fs-body); }
+.board-cell__empty small { color: var(--neutral-2); font-size: var(--fs-micro); }
+.board-tool-context { display: flex; align-items: center; justify-content: space-between; gap:var(--sp-4); margin:var(--sp-5) 0 var(--sp-4); padding:var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); color: var(--text-3); background: var(--surface-0); font-size: var(--fs-micro); }
+.board-tool-context > span { min-width: 0; display: inline-flex; align-items: center; gap:var(--sp-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.board-tool-context em { font-style: normal; white-space: nowrap; }
+.board-tool-legend { display: grid; overflow: hidden; border: 1px solid var(--line-soft); border-radius: var(--radius); }
+.board-tool-legend > div { min-height: 43px; display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap:var(--sp-3); padding:var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--line-soft); }
+.board-tool-legend > div:last-child { border-bottom: 0; }
+.board-tool-legend > div > svg { color: var(--green-2); }
+.board-tool-legend > div:nth-child(3) > svg { color: var(--amber); }
+.board-tool-legend > div:nth-child(4) > svg { color: var(--blue); }
+.board-tool-legend span { min-width: 0; display: flex; flex-direction: column; gap:var(--sp-1); }
+.board-tool-legend strong { font-size: var(--fs-micro); }
+.board-tool-legend small { overflow: hidden; color: var(--text-3); font-size: var(--fs-micro); text-overflow: ellipsis; white-space: nowrap; }
+.board-tool-legend em { min-width: 20px; padding:var(--sp-1) var(--sp-2); border-radius: var(--radius); color: var(--text-3); background: var(--surface-3); font-size: var(--fs-micro); font-style: normal; text-align: center; }
+
+/* Board 工具的工作清单。图例（上面那组）现在只在空态出现，这里是常态：行 + 可展开的行内 Agent。 */
+.board-tool-list { display: flex; flex-direction: column; gap:var(--sp-2); min-width: 0; }
+.board-tool-row { min-width: 0; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-0); overflow: hidden; }
+.board-tool-row__head {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  align-items: center;
+  gap:var(--sp-3);
+  padding:var(--sp-3) var(--sp-4);
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-micro);
+  text-align: left;
+  cursor: pointer;
+}
+.board-tool-row__head:hover { background: var(--surface-2); }
+.board-tool-row__head strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.board-tool-row__head em { min-width: 18px; padding:var(--sp-1) var(--sp-2); border-radius: var(--radius); color: var(--text-3); background: var(--surface-3); font-size: var(--fs-micro); font-style: normal; text-align: center; }
+.board-tool-row__agents { display: flex; flex-direction: column; border-top: 1px solid var(--line-soft); }
+.board-tool-row__empty { padding:var(--sp-3) var(--sp-4); color: var(--text-3); font-size: var(--fs-micro); }
+.board-tool-agent {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap:var(--sp-2);
+  padding:var(--sp-2) var(--sp-4);
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: var(--fs-micro);
+  text-align: left;
+  cursor: pointer;
+}
+.board-tool-agent:hover { background: var(--surface-2); color: var(--text-2); }
+.board-tool-agent > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.board-tool-more { padding:var(--sp-3); border: 1px dashed var(--line-soft); border-radius: var(--radius-sm); background: transparent; color: var(--text-3); font: inherit; font-size: var(--fs-micro); cursor: pointer; }
+.board-tool-more:hover { border-style: solid; color: var(--text-2); }
+.discussion-canvas__overlay { position: fixed; z-index: 60; inset: 0; background: var(--scrim-3); backdrop-filter: blur(8px); }
+.discussion-canvas { width: min(760px, calc(100vw - 36px)); max-height: min(780px, calc(100vh - 40px)); position: fixed; z-index: 61; top: 50%; left: 50%; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden; transform: translate(-50%, -50%); border: 1px solid var(--green-line); border-radius: var(--radius-lg); outline: none; color: var(--text); background: radial-gradient(circle at 18% 0%, var(--overlay-line), transparent 32%), var(--surface-0); box-shadow: 0 34px 100px var(--scrim-3); }
+.discussion-canvas__header { display: grid; grid-template-columns: 38px minmax(0, 1fr) 28px; align-items: start; gap:var(--sp-4); padding:var(--sp-6) var(--sp-6); border-bottom: 1px solid var(--line); }
+.discussion-canvas__mark { width: 38px; height: 38px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--green-line); border-radius: var(--radius-lg); color: var(--green); background: var(--surface-1); }
+.discussion-canvas__header h2 { margin:var(--sp-2) 0 var(--sp-1); font-size: var(--fs-display); letter-spacing: -.03em; }
+.discussion-canvas__header p { margin:0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.45; }
+.discussion-canvas__body { min-height: 0; display: grid; align-content: start; gap:var(--sp-5); padding:var(--sp-6) var(--sp-6) var(--sp-6); overflow: auto; }
+.discussion-context { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; gap:var(--sp-4); padding:var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); }
+.discussion-context > span { width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); color: var(--green); background: var(--surface-1); }
+.discussion-context > div { min-width: 0; display: flex; flex-direction: column; gap:var(--sp-1); }
+.discussion-context strong { font-size: var(--fs-meta); }
+.discussion-context small { overflow: hidden; color: var(--text-3); font: 10px "SFMono-Regular", monospace; text-overflow: ellipsis; white-space: nowrap; }
+.discussion-context em { display: inline-flex; align-items: center; gap:var(--sp-1); color: var(--text-3); font-size: var(--fs-micro); font-style: normal; }
+.discussion-section { display: grid; gap:var(--sp-4); }
+.discussion-section > header { display: flex; align-items: center; justify-content: space-between; gap:var(--sp-4); }
+.discussion-section > header > div { display: flex; flex-direction: column; gap:var(--sp-1); }
+.discussion-section > header span, .discussion-prompt > span { color: var(--text-2); font-size: var(--fs-meta); font-weight: 650; }
+.discussion-section > header small, .discussion-prompt > small { color: var(--text-3); font-size: var(--fs-micro); }
+.discussion-provider-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); gap:var(--sp-3); }
+.discussion-provider-grid > button { min-width: 0; display: grid; grid-template-columns: 26px minmax(0, 1fr); gap:var(--sp-1) var(--sp-3); align-items: center; padding:var(--sp-4); border: 0; border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-1); text-align: left; cursor: pointer; transition: background 120ms ease, color 120ms ease, box-shadow 120ms ease; }
+.discussion-provider-grid > button:hover { color: var(--text); background: var(--surface-2); }
+.discussion-provider-grid > button.selected { color: var(--text); background: var(--surface-2); box-shadow: var(--hl); }
+.discussion-provider-grid > button > span { grid-row: 1 / 3; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); color: var(--text-3); background: var(--surface-3); font-size: var(--fs-meta); font-weight: 700; transition: background 120ms ease, color 120ms ease; }
+.discussion-provider-grid > button.selected > span { color: var(--bg); background: var(--green); box-shadow: var(--hl-strong); }
+.discussion-provider-grid strong { overflow: hidden; font-size: var(--fs-micro); text-overflow: ellipsis; white-space: nowrap; }
+.discussion-provider-grid small { color: var(--green-2); font-size: var(--fs-micro); }
+.discussion-provider-unavailable { margin:0; color: var(--text-3); font-size: var(--fs-micro); }
+.discussion-prompt { display: grid; gap:var(--sp-3); }
+.discussion-prompt textarea { width: 100%; min-height: 132px; padding:var(--sp-5) var(--sp-5); resize: vertical; border: 1px solid var(--line); border-radius: var(--radius); outline: none; color: var(--text); background: var(--bg); font: 12px/1.55 "SFMono-Regular", monospace; }
+.discussion-prompt textarea:focus { border-color: var(--focus-line); box-shadow: var(--focus-ring); }
+.discussion-unavailable { min-height: 110px; display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap:var(--sp-4); padding:var(--sp-5); border: 1px dashed var(--amber-line); border-radius: var(--radius); color: var(--text-3); background: var(--bg); }
+.discussion-unavailable > svg { color: var(--amber); }
+.discussion-unavailable strong { color: var(--text-2); font-size: var(--fs-meta); }
+.discussion-unavailable p { margin:var(--sp-1) 0 0; font-size: var(--fs-micro); }
+.discussion-canvas__error { padding:var(--sp-4) var(--sp-4); border-radius: var(--radius-sm); color: var(--red-text); background: var(--red-bg); font-size: var(--fs-meta); }
+.discussion-canvas__footer { display: flex; align-items: center; justify-content: flex-end; gap:var(--sp-4); padding:var(--sp-5) var(--sp-6); border-top: 1px solid var(--line); background: var(--surface-0); }
+.discussion-canvas__footer > span { margin-right:auto; display: inline-flex; align-items: center; gap:var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }

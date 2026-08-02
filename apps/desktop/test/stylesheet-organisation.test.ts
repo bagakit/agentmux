@@ -22,6 +22,7 @@ describe('样式表的组织', () => {
       'workbench.css',
       'terminal.css',
       'surfaces.css',
+      'board.css',
       'browser.css',
       'agent.css',
       'activity.css',
