@@ -1,5 +1,5 @@
 import type { SessionSnapshot } from '../../../shared/contracts'
-import { categoryFor, type AttentionCategory } from './attention-event'
+import { attentionSortRank, categoryFor, type AttentionCategory } from './attention-event'
 
 // Attention that survives collapsing.
 //
@@ -13,7 +13,12 @@ import { categoryFor, type AttentionCategory } from './attention-event'
 
 // Highest attention wins, in the same order the rest of the app ranks it: needs-you above error above
 // working. A row shows one signal, so it must be the most urgent one under it.
-const RANK: Record<AttentionCategory, number> = { 'needs-you': 0, error: 1, done: 3 }
+//
+// The order comes from `attentionSortRank`, not from a local table. It used to be a second literal here
+// that happened to agree with the shared one — and `tsc` cannot see two object literals disagree, so a
+// change to either would have left the rail ranking rows differently from the roster and the switcher
+// with nothing going red. `AttentionCategory` is a subset of the sort classes that table already covers,
+// so there is nothing to translate; the whole reason to copy it was gone.
 
 export type RowAttention = {
   // The single signal this row should carry, or null to stay neutral.
@@ -45,7 +50,7 @@ export function rowAttention(sessions: readonly SessionSnapshot[]): RowAttention
     // Completion is real attention for a notification but not for a persistent row mark.
     if (!category || category === 'done') continue
     counts.set(category, (counts.get(category) ?? 0) + 1)
-    if (!winner || RANK[category] < RANK[winner]) winner = category
+    if (!winner || attentionSortRank(category) < attentionSortRank(winner)) winner = category
   }
 
   if (!winner) return { ...NEUTRAL, agents }
