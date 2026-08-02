@@ -39,7 +39,10 @@ export type WorkspaceLayout = {
 // tab-group 树的叶子取值器：把「叶子的 id 是 groupId」这一件通用分屏树代数不认识的事，交给 split-tree
 // 的泛型函数（collectLeafIds / replaceLeaf / removeLeaf / findSiblingLeafId）。整个文件只此一份，
 // 各调用点不各自写一遍箭头函数。
-const groupLeafId = (leaf: SplitTreeLeaf<{ groupId: string }>): string => leaf.groupId
+// 导出的理由：Topic 投影（scratch-topic-layout.ts）也要在这棵树上摘叶子——把外来 Topic 投影到空的
+// 那些格从树里去掉。它若自己写一份同样的箭头函数，就是这个取值器的第二处手抄，而这正是本注释开头
+// 说要避免的事。取值器只有一份，谁在这棵树上作业都从这里取。
+export const groupLeafId = (leaf: SplitTreeLeaf<{ groupId: string }>): string => leaf.groupId
 
 function dedupeTabOrder(tabOrder: string[]): string[] {
   return [...new Set(tabOrder)]
