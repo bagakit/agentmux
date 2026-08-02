@@ -47,17 +47,25 @@ import { describe, expect, it } from 'vitest'
 // read from the union, so a tenth state moves this criterion automatically.
 //
 // WHAT THIS SEES: `state === 'waiting'` / `!==` (either operand order), a `case 'waiting':` label on a
-// state-typed switch, and a literal in any position the checker gives a state-typed contextual type —
-// which covers a `Record<AgentDisplayState, …>` key, an argument to a state-typed parameter, and an
-// element of a state-typed array.
+// state-typed switch, a literal in any position the checker gives a state-typed contextual type (an
+// argument to a state-typed parameter, an element of a state-typed array), and both halves of a table
+// KEYED by state — writing `{ waiting: true, blocked: true }` under a `Record<AgentDisplayState, …>`
+// annotation, and reading one back as `table['waiting']`. That last pair is here because it is the
+// structure `NEEDS_YOU_BY_STATE` itself is, so a second one is the SSOT's own table copied. An earlier
+// version of this file claimed to cover it and did not: the walk only offered STRING LITERALS to the
+// classifier, and a verdict table is written with identifier keys, so `waiting:` never arrived. Measured
+// then — a `Partial<Record<AgentDisplayState, true>>` table read by index passed clean — and measured
+// again now as the mutation witness below.
 //
 // WHAT THIS DOES NOT SEE, stated so the next reader does not over-trust it: a state value widened to
-// `string` before comparison (the checker no longer calls the position state-typed), literals assembled
-// at runtime, and — for tier A — a copy in a file that imports NOTHING from the SSOT while also naming
-// only one needs-you state. That last hole is the price of deriving tier A's scope from the import graph
-// instead of a path list, and it is the better trade: a path list decays silently on every new file,
-// whereas this hole shrinks every time a surface enrolls in the SSOT. Tier B covers the full copy in
-// such a file regardless.
+// `string` before comparison (the checker no longer calls the position state-typed), a membership array
+// (`['waiting','blocked'].includes(state)` — the tuple's elements type as their own singletons, so the
+// 2+-member test declines), literals assembled at runtime, and — for tier A — a copy in a file that
+// imports nothing from the SSOT *through a named import* while also naming only one needs-you state. That
+// last one includes a namespace import (`import * as v from './attention-vocabulary'`), which does not
+// enroll the file. It is the price of deriving tier A's scope from the import graph instead of a path
+// list, and it is the better trade: a path list decays silently on every new file, whereas this hole
+// shrinks every time a surface enrolls in the SSOT. Tier B covers the full copy in such a file regardless.
 //
 // Four self-checks keep it from going vacuously green (the local precedent: a scan whose root is wrong
 // reports success over nothing). (1) the union anchor resolves to exactly the nine members and the
@@ -167,22 +175,47 @@ function readStateVocabulary(program: ts.Program, checker: ts.TypeChecker): Stat
 }
 
 /**
+ * A node that spells a state's name: `'waiting'` or the bare `waiting` of an object key.
+ *
+ * Both spellings must be candidates, and the reason is measured rather than defensive: a verdict table is
+ * ordinarily written with identifier keys (`{ waiting: true, blocked: true }`), so a gate accepting only
+ * string literals never even offers that key to the position classifier. Restricting identifiers to
+ * property-name position is what keeps every ordinary variable called `error` or `done` out of the scan.
+ */
+type StateNameNode = ts.StringLiteralLike | ts.Identifier
+
+function stateNameOf(node: ts.Node, states: ReadonlySet<string>): StateNameNode | null {
+  if (ts.isStringLiteralLike(node)) return states.has(node.text) ? node : null
+  if (!ts.isIdentifier(node) || !states.has(node.text)) return null
+  // Only as the NAME of a property, never as a value read. `waiting` in `{ waiting: true }` names a state;
+  // `waiting` in `if (waiting)` is somebody's boolean.
+  const parent = node.parent
+  const isPropertyName =
+    (ts.isPropertyAssignment(parent) || ts.isPropertySignature(parent) || ts.isShorthandPropertyAssignment(parent)) &&
+    parent.name === node
+  return isPropertyName ? node : null
+}
+
+/**
  * Is this literal in a position the checker types as `AgentDisplayState`?
  *
  * Three routes, and each is needed for a shape present in the tree today:
- *   - contextual/declared type is a multi-member union of state members only — a `Record<…>` key, a
- *     state-typed argument, a state-typed array element. Requiring 2+ members is what keeps a literal
- *     whose own type is just itself (`'blocked'` in an unrelated string union of one) out.
+ *   - contextual/declared type is a multi-member union of state members only — a state-typed argument or a
+ *     state-typed array element. Requiring 2+ members is what keeps a literal whose own type is just
+ *     itself (`'blocked'` in an unrelated string union of one) out.
  *   - the OTHER operand of `===`/`!==` is state-typed. `null`/`undefined` are allowed alongside, because
  *     `session?.status.state === 'waiting'` types the left side as `AgentDisplayState | undefined` and
  *     that is the ordinary spelling, not an evasion.
  *   - a `case` label on a switch whose expression is state-typed.
  *
+ * Plus the two halves of a table KEYED by state, which is the structure `NEEDS_YOU_BY_STATE` itself is —
+ * see `stateKeyedRecord` below for why writing and reading are asked differently.
+ *
  * This is the single thing standing between the guard and the `'blocked'` homonyms; it is why no
  * exemption list appears anywhere in this file.
  */
 function isStateTypedPosition(
-  literal: ts.StringLiteralLike,
+  literal: StateNameNode,
   checker: ts.TypeChecker,
   states: ReadonlySet<string>
 ): boolean {
@@ -202,6 +235,33 @@ function isStateTypedPosition(
       return false
     }
     return sawState
+  }
+
+  // A table KEYED by state. Symmetric with `allStateMembers`: there every member of a union must be a
+  // state, here every property name must be. Two or more, for the same reason — a one-key object is not
+  // a table over the union.
+  const stateKeyedRecord = (type: ts.Type): boolean => {
+    const names = checker.getPropertiesOfType(type).map((property) => property.name)
+    return names.length >= 2 && names.every((name) => states.has(name))
+  }
+
+  // WRITING a verdict table: `{ waiting: true, blocked: true }` annotated as
+  // `Partial<Record<AgentDisplayState, true>>`, read back by index, is a second copy of the SSOT's own
+  // table — the exact structure `NEEDS_YOU_BY_STATE` is. Read from the CONTEXTUAL type, i.e. from an
+  // annotation, not from the literal's inferred type: an unannotated `{ error, working }` in some
+  // unrelated hook infers a type whose property names happen to all be states, and flagging that would
+  // be inventing a homonym problem in the one place this guard had avoided one. The annotation is also
+  // what makes the evasion reachable at all — without it, indexing the object by an
+  // `AgentDisplayState` does not compile, so there is nothing to hide behind.
+  if (ts.isPropertyAssignment(literal.parent) && literal.parent.name === literal) {
+    const contextual = checker.getContextualType(literal.parent.parent)
+    return contextual !== undefined && stateKeyedRecord(contextual)
+  }
+
+  // READING one: `table['waiting']`. Here the object's own declared type answers it, no annotation on
+  // this expression needed.
+  if (ts.isElementAccessExpression(literal.parent) && literal.parent.argumentExpression === literal) {
+    if (stateKeyedRecord(checker.getTypeAtLocation(literal.parent.expression))) return true
   }
 
   for (const type of [checker.getContextualType(literal), checker.getTypeAtLocation(literal)]) {
@@ -237,9 +297,41 @@ type DecidingScope = {
   enrolled: boolean
 }
 
-function scopeName(node: ts.SignatureDeclaration | null, source: ts.SourceFile): string {
+/**
+ * Can this node hold a needs-you decision of its own?
+ *
+ * Every shape with a body that can compute a verdict, plus the two accessor shapes. NOT a mere block or
+ * an `if` — those are inside a decision, not a separate one, and treating them as separate would let a
+ * copy split across two statements evade tier B by never gathering both literals in one bucket.
+ *
+ * The list is deliberately broader than "functions". The narrower version keyed only
+ * FunctionDeclaration / FunctionExpression / ArrowFunction / MethodDeclaration, and everything else fell
+ * into one shared per-file bucket — see the note at the call site for the merge that let through.
+ */
+function isDecidingScope(node: ts.Node): boolean {
+  return (
+    ts.isFunctionDeclaration(node) ||
+    ts.isFunctionExpression(node) ||
+    ts.isArrowFunction(node) ||
+    ts.isMethodDeclaration(node) ||
+    ts.isGetAccessorDeclaration(node) ||
+    ts.isSetAccessorDeclaration(node) ||
+    ts.isConstructorDeclaration(node) ||
+    ts.isClassStaticBlockDeclaration(node)
+  )
+}
+
+function scopeName(node: ts.Node | null, source: ts.SourceFile): string {
   if (!node) return '<module scope>'
-  if ((ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node)) && node.name) return node.name.getText()
+  if (
+    (ts.isFunctionDeclaration(node) ||
+      ts.isMethodDeclaration(node) ||
+      ts.isGetAccessorDeclaration(node) ||
+      ts.isSetAccessorDeclaration(node)) &&
+    node.name
+  ) {
+    return node.name.getText()
+  }
   const parent = node.parent
   if (ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name)) return parent.name.text
   const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1
@@ -301,29 +393,29 @@ function collectDecidingScopes(
     const relative = path.relative(options.rootDir, source.fileName)
     const enrolled = importsFromVocabulary(source, checker, options.vocabularyFile)
 
-    const visit = (node: ts.Node, enclosing: ts.SignatureDeclaration | null): void => {
-      const isFunction =
-        ts.isFunctionDeclaration(node) ||
-        ts.isFunctionExpression(node) ||
-        ts.isArrowFunction(node) ||
-        ts.isMethodDeclaration(node)
-      const current = isFunction ? (node as ts.SignatureDeclaration) : enclosing
+    const visit = (node: ts.Node, enclosing: ts.Node | null): void => {
+      const current = isDecidingScope(node) ? node : enclosing
 
-      if (
-        ts.isStringLiteralLike(node) &&
-        vocabulary.states.has(node.text) &&
-        isStateTypedPosition(node, checker, vocabulary.states)
-      ) {
-        // Keyed by the enclosing function NODE, not by its name: two anonymous callbacks in one file
+      const named = stateNameOf(node, vocabulary.states)
+      if (named && isStateTypedPosition(named, checker, vocabulary.states)) {
+        // Keyed by the enclosing scope NODE, not by its name: two anonymous callbacks in one file
         // share a printed name but are separate decisions, and merging them would let one scope's
         // literals satisfy the other's criterion.
+        //
+        // The same reasoning is why `isDecidingScope` must accept every shape that can hold a decision,
+        // not just the four function shapes. A getter body or a top-level statement used to fall through
+        // to a per-FILE bucket, and that bucket MERGES: a `waiting || blocked` copy in a getter, in a file
+        // whose module scope also names all nine states somewhere (a state-typed array, say), reached
+        // `literals.size === 9` and tier B's non-exhaustive half went false — clearing the copy. Measured
+        // on a synthetic file before this widened; the merge is now confined to nodes that cannot hold a
+        // decision at all.
         const key = current ?? source
         let scope = byFunction.get(key)
         if (!scope) {
           scope = { file: relative, fn: scopeName(current, source), literals: new Set(), enrolled }
           byFunction.set(key, scope)
         }
-        scope.literals.add(node.text)
+        scope.literals.add(named.text)
       }
 
       ts.forEachChild(node, (child) => visit(child, current))
@@ -552,6 +644,105 @@ describe('who decides needs-you is confined to the attention vocabulary SSOT', (
     const single = scopes.find((scope) => scope.fn === 'isDone')
     expect(single, 'the classifier must see the single-state test').toBeDefined()
     expect([...single!.literals]).toEqual(['done'])
+  })
+
+  it('self-check 5: tier B flags a verdict TABLE, both writing it and reading it back', () => {
+    // The evasion an earlier version of this file claimed to cover and did not. A verdict table is the
+    // structure the SSOT itself is, so a second one is the copy in its most literal form — and it is
+    // written with IDENTIFIER keys, which never reached the position classifier when the walk offered it
+    // only string literals. Both halves are here because they fail independently: writing the table and
+    // reading one back are separate routes, and a fixture with only one would leave the other unwitnessed.
+    //
+    // `{ [K in AgentDisplayState]?: true }` rather than `Partial<Record<…>>`: `noLib` means the lib types
+    // do not exist, and the mapped type is the same structure without them. Same reason the fixtures here
+    // avoid arrays — see the note in self-check 3.
+    const name = '/synthetic-needs-you/table.ts'
+    const source = [
+      "type AgentDisplayState = 'waiting' | 'blocked' | 'working' | 'done'",
+      // WRITING it: annotated, so the keys are in a state-typed position. The annotation is also what
+      // makes this reachable at all — without it, indexing by an AgentDisplayState does not compile.
+      'const NEEDS_YOU: { [K in AgentDisplayState]?: true } = { waiting: true, blocked: true }',
+      // READING one back by name.
+      'function readsByIndex(state: AgentDisplayState): boolean {',
+      "  return state === 'working' ? false : NEEDS_YOU['waiting'] === true || NEEDS_YOU['blocked'] === true",
+      '}',
+      // MUST NOT be flagged: an exhaustive table names every state, which is the outcome this guard wants.
+      "const LABEL: { [K in AgentDisplayState]: string } = { waiting: 'W', blocked: 'B', working: 'K', done: 'D' }"
+    ].join('\n')
+    const { program: syntheticProg, checker: syntheticChecker } = syntheticProgram(name, source)
+    const syntheticVocabulary = {
+      states: readStateVocabulary(syntheticProg, syntheticChecker).states,
+      needsYou: new Set(['waiting', 'blocked'])
+    }
+    const { scopes } = collectDecidingScopes(syntheticProg, syntheticChecker, syntheticVocabulary, {
+      rootDir: '/synthetic-needs-you',
+      vocabularyFile: '/synthetic-needs-you/nowhere.ts',
+      isScanned: () => true
+    })
+
+    // Exact set, for the reason given in self-check 3. Two findings, one per route: the module-scope write
+    // (`NEEDS_YOU` and `LABEL` both live there, so the bucket holds all four states — see the note below
+    // for why that still flags) and the by-name read inside `readsByIndex`.
+    //
+    // `readsByIndex` names `working` as well, so its set is {blocked, waiting, working} — three of four,
+    // still short of exhaustive, still flagged. That is deliberate: a scope that mentions a third state
+    // incidentally has not become a total mapping.
+    const flagged = tierBViolations(scopes, syntheticVocabulary)
+    expect(flagged, 'both halves of a state-keyed table must be visible').toEqual([
+      'table.ts::readsByIndex names {blocked, waiting, working}'
+    ])
+
+    // The write half, asserted directly rather than through the finding list: module scope holds every
+    // state here (two from `NEEDS_YOU`, four from `LABEL`), so it is cleared as exhaustive — which means
+    // the finding list above cannot witness it. Without this assertion, deleting the property-name route
+    // would leave that list unchanged and this self-check would pass over a blind classifier.
+    const moduleScope = scopes.find((scope) => scope.fn === '<module scope>')
+    expect(moduleScope, 'the classifier must see identifier keys at all').toBeDefined()
+    expect(
+      [...moduleScope!.literals].sort(),
+      'written table keys must be counted; an unannotated object elsewhere is not this shape'
+    ).toEqual(['blocked', 'done', 'waiting', 'working'])
+  })
+
+  it('self-check 6: a copy in a getter is its own scope, not merged into the file', () => {
+    // The merge that cleared a full copy. Scope attribution used to recognize four function shapes; a
+    // getter body fell through to a per-FILE bucket, and that bucket merges with everything else at module
+    // scope. Measured: with an exhaustive table in the same file, the getter's `waiting || blocked` copy
+    // reached `literals.size === 4` and tier B's non-exhaustive half went false — cleared.
+    const name = '/synthetic-needs-you/accessor.ts'
+    const source = [
+      "type AgentDisplayState = 'waiting' | 'blocked' | 'working' | 'done'",
+      'class Lane {',
+      "  state: AgentDisplayState = 'working'",
+      // The copy, in a scope the narrower version did not recognize.
+      "  get needsYou(): boolean { return this.state === 'waiting' || this.state === 'blocked' }",
+      '}',
+      // The same-file exhaustive naming that did the hiding. On its own it is legitimate and must stay
+      // cleared; what must not happen is it absorbing the getter's literals.
+      "const LABEL: { [K in AgentDisplayState]: string } = { waiting: 'W', blocked: 'B', working: 'K', done: 'D' }"
+    ].join('\n')
+    const { program: syntheticProg, checker: syntheticChecker } = syntheticProgram(name, source)
+    const syntheticVocabulary = {
+      states: readStateVocabulary(syntheticProg, syntheticChecker).states,
+      needsYou: new Set(['waiting', 'blocked'])
+    }
+    const { scopes } = collectDecidingScopes(syntheticProg, syntheticChecker, syntheticVocabulary, {
+      rootDir: '/synthetic-needs-you',
+      vocabularyFile: '/synthetic-needs-you/nowhere.ts',
+      isScanned: () => true
+    })
+
+    expect(
+      tierBViolations(scopes, syntheticVocabulary),
+      'the getter is a decision of its own and must not be absorbed by the file'
+    ).toEqual(['accessor.ts::needsYou names {blocked, waiting}'])
+
+    // And the hiding mechanism must have been PRESENT, not absent: the exhaustive naming has to be in the
+    // same file and seen, or this fixture proves nothing about merging. Without this, a fixture whose
+    // `LABEL` went unread would flag the getter for a reason unrelated to the merge.
+    const moduleScope = scopes.find((scope) => scope.fn === '<module scope>')
+    expect(moduleScope, 'the same-file exhaustive naming must be present to be hidden behind').toBeDefined()
+    expect([...moduleScope!.literals].sort()).toEqual(['blocked', 'done', 'waiting', 'working'])
   })
 
   it('tier A: no file that imports the needs-you SSOT also names a needs-you state itself', () => {
