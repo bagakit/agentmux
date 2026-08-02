@@ -17,7 +17,7 @@ import {
   getNextSidebarResizeWidth,
   getRenderedSidebarWidthCssValue
 } from '../src/renderer/src/hooks/useSidebarResize.js'
-import { allStyles } from './helpers/styles.js'
+import { allStyleRules, allStyles } from './helpers/styles.js'
 import { SELECTOR_PRESENCE_MAX, SelectorPresence } from '../src/renderer/src/components/SelectorList.js'
 import {
   TOOL_DOCK_COLLAPSED_RAIL_MIN_WIDTH,
@@ -124,6 +124,87 @@ function findJsxElementByClassName(source: ts.SourceFile, className: string): ts
   }
   ts.forEachChild(source, visit)
   return found
+}
+
+// --- 行布局的判据 ---------------------------------------------------------------
+// 这一族此前钉的是**机制**（`.workspace-topic-entry` 那条三列网格的字面形状），而机制恰好
+// 不成立：`leading` 可空，网格按轨道摆放，只来两段时尾部的头像簇被自动摆进 identity 那条
+// 轨道，直接压在摘要文字上（#467，实测 overlap=70px）。两条测试的**标题**说的才是要守的
+// 性质，它们的正文却在为那份错机制背书——所以判据换成"哪一层定义排布、缺席的那段会不会
+// 占位"，而不是任何一条 CSS 字面量。
+
+/**
+ * 一条规则的声明体；注释已剥除（一条规则的理由注释会满足判"在不在场"的正则）。
+ *
+ * 选择器必须**整条相等**，不能只是子串命中。实测过的坑：删掉 selector.css 里那条
+ * `.selector-row__leading`，`/\.selector-row__leading\s*\{/` 仍被 source-control.css 的
+ * `.branch-row .selector-row__leading` 满足——兄弟规则替被删的规则作了保。
+ */
+function ruleBody(selector: string): string {
+  for (const [, selectors, body] of allStyleRules().matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    if (selectors!.split(',').some((one) => one.trim() === selector)) return body!
+  }
+  return ''
+}
+
+/** 一条规则里某个属性的取值（`display`、`flex` 等）；不在场时空串。 */
+function declaration(selector: string, property: string): string {
+  return ruleBody(selector).match(new RegExp(`(?:^|;)\\s*${property}\\s*:\\s*([^;]+)`))?.[1]?.trim() ?? ''
+}
+
+/**
+ * `SelectorRow` 直接渲染出的那几个 className（顶层壳 + 它的直接子级）。
+ *
+ * 判"行的排布归共享层"要拿真实的段名去问，而不是抄一份清单——抄的那份会与组件漂移，
+ * 而漂移的方向恰好是让守卫看不见新增的那一段。
+ */
+function selectorRowSegments(): { shell: string; children: string[] } {
+  const source = parseTsx('SelectorList.tsx', selectorListSource)
+  let shell: ts.JsxElement | undefined
+  const visit = (node: ts.Node): void => {
+    if (
+      !shell &&
+      ts.isFunctionDeclaration(node) &&
+      node.name?.text === 'SelectorRow' &&
+      node.body
+    ) {
+      const findShell = (inner: ts.Node): void => {
+        if (!shell && ts.isJsxElement(inner)) shell = inner
+        if (!shell) ts.forEachChild(inner, findShell)
+      }
+      ts.forEachChild(node.body, findShell)
+    }
+    ts.forEachChild(node, visit)
+  }
+  ts.forEachChild(source, visit)
+  if (!shell) throw new Error('SelectorList.tsx 里找不到 SelectorRow 返回的 JSX 元素——这个读取器要跟着改')
+  const shellClass = staticJsxAttributeString(shell, 'className')
+  if (!shellClass) {
+    // 裸 fragment（`<>…</>`）不是 JsxElement，走不到这里；顶层壳没有静态 className 同样
+    // 意味着"行"在 DOM 里没有自己的元素，那么 selector.css 里那条 `.selector-row` 规则
+    // 就是死代码——#467 的第一版修法差点这样发货。
+    throw new Error('SelectorRow 的顶层壳没有静态 className：行在 DOM 里没有自己的元素')
+  }
+  const children: string[] = []
+  for (const child of shell.children) {
+    if (!ts.isJsxElement(child)) continue
+    const name = staticJsxAttributeString(child, 'className')
+    if (name) children.push(name)
+  }
+  // 条件渲染的段（`{leading ? <span …/> : null}`）藏在 JsxExpression 里，上面那轮取不到。
+  // 它们恰恰是本缺陷的主角——可空的那一段——所以必须一起收进来。
+  const collectConditional = (node: ts.Node): void => {
+    if (ts.isJsxElement(node)) {
+      const name = staticJsxAttributeString(node, 'className')
+      if (name && !children.includes(name)) children.push(name)
+      return
+    }
+    ts.forEachChild(node, collectConditional)
+  }
+  for (const child of shell.children) {
+    if (ts.isJsxExpression(child) && child.expression) collectConditional(child.expression)
+  }
+  return { shell: shellClass, children }
 }
 
 function findContextMenuItemBySelectHandler(source: ts.SourceFile, handler: string): ts.JsxElement | undefined {
@@ -356,34 +437,49 @@ describe('shared surface tool dock resize', () => {
 
   it('drops the decorative icon from the head of every Topic row', () => {
     // 一列全同的图标不是信息，是宽度开销（密度合同《控件语言》）。行首只在真的有话说时占位——
-    // 打开中的 spinner——所以网格用 auto 列，而不是留一个常驻的图标槽。
+    // 打开中的 spinner——所以那一段是**条件渲染**的，不是一个常驻的图标槽。
     const topicRow = surfaceToolDockSource.slice(
       surfaceToolDockSource.indexOf('className="workspace-topic-entry"'),
       surfaceToolDockSource.indexOf('</button>', surfaceToolDockSource.indexOf('className="workspace-topic-entry"'))
     )
     expect(topicRow).not.toContain('<NotebookText')
     expect(topicRow).toContain('<LoaderCircle')
-    // 断言的是**意图**而不是那一整条 CSS 字面量：钉死字符串的写法下一次微调格子就假红，
-    // 而它想守的其实只有两件事——行首是可伸缩的 auto 列（不是固定图标槽），以及 identity
-    // 那列显式吃满剩余宽度。后者不是风格选择：隐式 auto 列按内容定尺，尾部的头像簇于是
-    // 贴内容盒右缘而不是行右缘，各行摘要一长一短，右缘就参差成好几档。
-    const entry = stylesSource.match(/\.workspace-topic-entry\s*\{([^}]*)\}/)?.[1] ?? ''
-    expect(entry.length).toBeGreaterThan(0)
-    const columns = entry.match(/grid-template-columns:\s*([^;]+)/)?.[1]?.trim() ?? ''
-    expect(columns).not.toBe('')
-    expect(columns.startsWith('auto')).toBe(true)
-    expect(columns).toContain('minmax(0, 1fr)')
+    // 「不占位」必须由布局模型兑现，不能只由 JSX 里的 `? :` 兑现：网格按轨道摆放，一条恒在的
+    // 轨道会替缺席的那段留出位子与 gap，标题的左缘于是随 spinner 在不在而跳动。flex 下缺席的
+    // 孩子既不占轨道也不产生 gap——这正是这条测试真正要守的性质。
+    expect(declaration('.workspace-topic-entry', 'display')).toBe('flex')
+    expect(ruleBody('.workspace-topic-entry')).not.toContain('grid-template-columns')
   })
 
   it('anchors the Agent cluster to the row edge, not to the end of the summary text', () => {
-    // 用户："右边的 icon 没有对齐"。真因不是间距而是网格：头像簇必须是行网格里**独立的一列**，
-    // 这样它对齐的是行；只要它还长在 identity 内部，`margin-left:auto` 顶到的就是内容盒右缘。
-    const entry = stylesSource.match(/\.workspace-topic-entry\s*\{([^}]*)\}/)?.[1] ?? ''
-    const columns = entry.match(/grid-template-columns:\s*([^;]+)/)?.[1]?.trim() ?? ''
-    // 三列：行首 auto ＋ identity 1fr ＋ 尾列 auto。两列意味着尾列又被塞回了 identity 里。
-    expect(columns.split(/\s+(?![^(]*\))/).length).toBe(3)
-    const meta = stylesSource.match(/\.selector-row__meta\s*\{([^}]*)\}/)?.[1] ?? ''
-    expect(meta).toContain('justify-content: flex-end')
+    // 用户："右边的 icon 没有对齐"，以及 #467："agent icon 和文字叠起来了"。两次都指向同一处：
+    // 头像簇与 identity 的关系。此前这条判据钉的是"容器自写的三列网格"，而那份机制**不成立**：
+    // `leading` 可空，只来两段时簇被自动摆进 identity 那条轨道，直接压在摘要文字上（Electron
+    // 实测 overlap=70px，236–420 全宽区间同病）。所以判据换成两件真正承重的事——
+    //
+    // 一、行的排布只有一处定义，且那一处在共享层。容器各写一份轨道表就是缺陷的温床：两个容器
+    //    当时各有一份，Branch 侧靠"恰好总是三个孩子"躲过，不是靠布局正确。
+    const segments = selectorRowSegments()
+    expect(segments.shell).toBe('selector-row')
+    // 壳自己的排布归 selector.css：容器只该管内外边距、背景与状态色。
+    expect(declaration('.selector-row', 'display')).toBe('flex')
+    for (const container of ['.workspace-topic-entry', '.branch-row']) {
+      expect(ruleBody(container), `${container} 不得自写行内轨道表`).not.toContain('grid-template-columns')
+    }
+    // 二、identity 吃掉剩余宽度、尾部按内容定宽。这一对才让簇的右缘对齐行而不是对齐文字末端：
+    //    identity 可伸缩，于是它先让出尾部所需的宽度，剩下的全归自己；尾部不伸不缩。
+    expect(declaration('.selector-row__identity', 'flex')).toBe('1 1 auto')
+    expect(declaration('.selector-row__identity', 'min-width')).toBe('0')
+    expect(declaration('.selector-row__meta', 'flex')).toBe('0 0 auto')
+    expect(declaration('.selector-row__meta', 'justify-content')).toBe('flex-end')
+    // 每一段都要有人接住——漏一条规则，那段就退回 inline 默认值，min-width:0 也就不在场了。
+    for (const name of segments.children) {
+      expect(ruleBody(`.${name}`), `${name} 在 selector.css 里没有对应规则`).not.toBe('')
+    }
+    // 自检：判据必须真的落在"可空的那一段"上。leading 若哪天变成常驻的，这条断言会红，
+    // 提醒重新判断上面那套理由还成不成立（#467 的成因就是它可空）。
+    expect(segments.children).toContain('selector-row__leading')
+    expect(surfaceToolDockSource).toMatch(/leading=\{pending === topic\.id \?/)
   })
 
   it('stacks the avatars instead of tiling them, with the rightmost on top', () => {

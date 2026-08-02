@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { allStyles } from './helpers/styles.js'
+import ts from 'typescript'
+import { allStyleRules, allStyles } from './helpers/styles.js'
 
 // 一个组件渲染的 class，样式表里却没有对应规则——这条测试守的就是这个洞。
 //
@@ -257,3 +258,161 @@ describe('在场标志必须有选中它的规则', () => {
     expect(offenders).toEqual([])
   })
 })
+
+// ---------------------------------------------------------------------------
+// 上面两族判「这个 class 有没有规则」「这条规则有没有选中它」。第三族再深一层：规则在场、
+// 也选中了它，但**少一条承重声明**。Portal 浮层的 z-index 就是这一格。
+//
+// 为什么是 z-index 而不是别的声明：Radix 的 Portal 把内容挂到 `document.body` 下，那个容器
+// 自己没有 z-index，于是这一层完全由浮层自己那条规则决定——不写就是 `auto`，只按文档顺序排，
+// 输给任何定位过的邻居。#468 的实测形状：`.agent-roster` 与 `.resource-usage` 都没写 z-index，
+// z-index 36 的 `.terminal-service-window` 整块盖在面板上。而"点开的面板被别的东西盖住"这件事
+// 没有任何行为测试看得见——本仓没有布局引擎，Portal 在 renderToStaticMarkup 下根本不渲染。
+//
+// 顺便记一个当时差点得出反向结论的判据错误：第一版探针用 `elementFromPoint` 判遮挡，它报告
+// "一切正常"。真因是终端链接预览带 `pointer-events: none`（terminal.css:35），命中测试会跳过它。
+// 换成截图取色（`capturePage().toBitmap()`）才看见真相。判遮挡要看画出来的像素，不看命中测试。
+// ---------------------------------------------------------------------------
+
+/** 一条 Portal 浮层：它自己的 class 们、来自哪个文件、Radix 的哪套原语。 */
+type PortalLayer = { classes: string[]; file: string; primitive: string }
+
+/**
+ * 每个 `*.Portal` 里最外层带静态 className 的元素——那一层就是浏览器眼里的浮层根。
+ *
+ * 判据按**结构**取（"Portal 下最外那层"），不按 `*.Content` 这个标签名取：标签名是 Radix 的
+ * 命名，换一版库或换一套原语（Dialog 还有 `*.Overlay`）就漏。取到第一层带 className 的就停，
+ * 不往里钻——里面的元素在浮层根建立的层里，各自的 z-index 与遮挡无关。
+ */
+function portalLayers(): PortalLayer[] {
+  const out: PortalLayer[] = []
+  for (const file of tsxFiles(COMPONENTS_DIR)) {
+    const source = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+    const relative = file.slice(COMPONENTS_DIR.length + 1)
+    const visit = (node: ts.Node): void => {
+      if (ts.isJsxElement(node) && node.openingElement.tagName.getText(source).endsWith('.Portal')) {
+        const primitive = node.openingElement.tagName.getText(source).split('.')[0]!
+        const descend = (inner: ts.Node): void => {
+          if (ts.isJsxElement(inner) || ts.isJsxSelfClosingElement(inner)) {
+            const opening = ts.isJsxElement(inner) ? inner.openingElement : inner
+            const attribute = opening.attributes.properties.find(
+              (property) => ts.isJsxAttribute(property) && property.name.getText(source) === 'className'
+            ) as ts.JsxAttribute | undefined
+            if (attribute) {
+              const initializer = attribute.initializer
+              out.push({
+                classes:
+                  initializer && ts.isStringLiteral(initializer)
+                    ? initializer.text.split(/\s+/).filter(Boolean)
+                    : [],
+                file: relative,
+                primitive
+              })
+              return // 到浮层根就停
+            }
+          }
+          ts.forEachChild(inner, descend)
+        }
+        ts.forEachChild(node, descend)
+      }
+      ts.forEachChild(node, visit)
+    }
+    ts.forEachChild(source, visit)
+  }
+  return out
+}
+
+/**
+ * 这些 class 合起来最终生效的 z-index；一条都没写时 null。
+ *
+ * 三处都是实测过的坑：
+ *  1. 选择器必须**整条相等**。`/\.agent-roster\s*\{/` 这种子串正则会被
+ *     `.branch-row .selector-row__leading` 那样的**兄弟规则**满足——删掉 selector.css 里那条
+ *     `.selector-row__leading`，正则仍命中 source-control.css 的后代选择器，兄弟规则替被删的
+ *     规则作了保（本轮实测存活的变异 M5）。所以只认裸类选择器 `.foo`，`.a .foo` / `.a.foo` 都不算：
+ *     后者要多一个祖先或另一个类同时在场才生效，兑现不了"这一层无条件有 z-index"。
+ *  2. 取**最后**一条而不是第一条：同特异度的裸类规则按层叠顺序后来者胜，而 allStyleRules() 就是
+ *     按 index.css 的 @import 顺序拼的。注意这一条**今天没有断言守着**——全表只有
+ *     `.board-matrix__corner` 一个类被两条裸规则各写了一次 z-index，而它不是 Portal 浮层，所以
+ *     "取第一条"与"取最后一条"对本判据的每个输入都同值（实测：改成 first-wins 仍 10 条全绿）。
+ *     不为它编一个更聪明的测试：循环里直接覆写本就是最短写法，改成 first-wins 反而要**多加**
+ *     一个条件，所以这里不存在"没人守的多余分支"，只是这条正确语义暂时不可观测。
+ *  3. 走 allStyleRules()（已剥注释）。一条规则解释自己为何存在的注释里往往逐字写着声明，
+ *     按原文判"在不在场"会被自己的注释满足（见 helpers/styles.ts 的 stripCssComments）。
+ */
+function resolvedZIndex(classes: string[]): number | null {
+  let resolved: number | null = null
+  for (const [, selectors, body] of allStyleRules().matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const selectsBareClass = selectors!.split(',').some((one) => {
+      const bare = one.trim().match(/^\.([\w-]+)$/)
+      return bare !== null && classes.includes(bare[1]!)
+    })
+    if (!selectsBareClass) continue
+    const declared = body!.match(/(?:^|;)\s*z-index\s*:\s*([^;]+)/)?.[1]?.trim()
+    if (declared !== undefined) resolved = Number(declared)
+  }
+  return resolved
+}
+
+describe('Portal 浮层必须自己声明层级', () => {
+  const layers = portalLayers()
+  // 菜单档的锚点。取 `.tab-context-menu` 而不是写死一个数字：它是被六个菜单复用的那条基类，
+  // 是这一档事实上的 SSOT。数字写死在测试里就是把同一个常量抄到第三个地方。
+  const MENU_FLOOR_ANCHOR = 'tab-context-menu'
+
+  it('扫描确实扫到了东西——空集上的扫描是这个仓库经典的假绿', () => {
+    expect(layers.length).toBeGreaterThan(10)
+    // 每一层都认出了它自己的 class，否则下面的判定会因为"没有 class 可查"而恒绿。
+    expect(layers.every((layer) => layer.classes.length > 0)).toBe(true)
+    // 两套原语都在扫描范围内：菜单（DropdownMenu/ContextMenu）与对话（Dialog）各自的层级规矩不同，
+    // 少扫一套就等于那一套完全无人守。
+    const primitives = new Set(layers.map((layer) => layer.primitive))
+    expect([...primitives].some((one) => one.endsWith('Menu'))).toBe(true)
+    expect(primitives.has('Dialog')).toBe(true)
+  })
+
+  it('自证判据认得出「写了」与「没写」，且不接受后代选择器代劳', () => {
+    // 写了的样本：本轮 #468 修的那两个，加上菜单基类。
+    expect(resolvedZIndex(['agent-roster'])).not.toBeNull()
+    expect(resolvedZIndex(['resource-usage'])).not.toBeNull()
+    expect(resolvedZIndex([MENU_FLOOR_ANCHOR])).not.toBeNull()
+    // 没写的样本，且它**有一条自己的裸类规则**——一个只查"选择器名在不在"的检查会在这里
+    // 错误地放行。`.branch-context-menu` 只补菜单基类之外的细节，层级由基类给。
+    expect(allStyleRules()).toContain('.branch-context-menu')
+    expect(resolvedZIndex(['branch-context-menu'])).toBeNull()
+    // 后代/复合选择器不算：`.workspace-topic-item.dragging` 里有 z-index，但单独一个
+    // `dragging` 在场兑现不了任何层级。
+    expect(allStyleRules()).toMatch(/\.dragging[^{,]*\{[^}]*z-index/)
+    expect(resolvedZIndex(['dragging'])).toBeNull()
+    // 多个 class 里只要有一个写了就算这一层写了——菜单们正是靠基类拿到层级的。
+    expect(resolvedZIndex(['branch-context-menu', MENU_FLOOR_ANCHOR])).toBe(
+      resolvedZIndex([MENU_FLOOR_ANCHOR])
+    )
+  })
+
+  it('每个 Portal 浮层都有自己的 z-index——不写就是 auto，输给任何定位过的邻居', () => {
+    const offenders = layers
+      .filter((layer) => resolvedZIndex(layer.classes) === null)
+      .map((layer) => `.${layer.classes.join('.')}  <- ${layer.file} (${layer.primitive})`)
+      .sort()
+    // 无例外清单：Portal 挂到 body 下就没有祖先能替它决定层级，所以"这一层不需要 z-index"
+    // 不存在成立的情形。#468 正是这条断言当时会报出的那两行。
+    expect([...new Set(offenders)]).toEqual([])
+  })
+
+  it('菜单档不低于菜单基类——菜单是"点开就该压住一切"的那一档', () => {
+    // 只对菜单立地板，不对 Dialog 立：Dialog 有自己的遮罩+内容阶梯（讨论画布 60/61 就刻意排在
+    // 设置页 90 之下，它开在 Board 里而非全窗之上），把它们一起量会把一个刻意的取舍报成缺陷。
+    // 菜单不同：它由一次点击唤出、瞬时、盖住底下任何东西才是对的，所以同一档共用一个地板。
+    const floor = resolvedZIndex([MENU_FLOOR_ANCHOR])
+    expect(floor, `${MENU_FLOOR_ANCHOR} 不再声明 z-index 了，这一档的锚点没了`).not.toBeNull()
+    const tooLow = layers
+      .filter((layer) => layer.primitive.endsWith('Menu'))
+      .map((layer) => ({ layer, z: resolvedZIndex(layer.classes) }))
+      .filter(({ z }) => z !== null && z < floor!)
+      .map(({ layer, z }) => `.${layer.classes.join('.')} z-index:${z} < ${floor}  <- ${layer.file}`)
+      .sort()
+    expect([...new Set(tooLow)]).toEqual([])
+  })
+})
+

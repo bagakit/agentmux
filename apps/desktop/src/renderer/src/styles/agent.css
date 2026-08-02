@@ -61,6 +61,12 @@
 .agent-roster {
   min-width: 268px;
   max-width: 420px;
+  /* 菜单层。Radix 的 Portal 把内容挂到 `document.body` 下，那个容器自己没有 z-index，所以
+     这一层只由**本条规则**决定；不写就是 `auto`，只按文档顺序排，输给任何定位过的邻居。
+     实测（截图取色，非 elementFromPoint——终端链接预览带 `pointer-events:none`，命中测试会
+     跳过它而看起来一切正常）：无 z-index 时 z-index 36 的终端服务窗整块盖在面板上（#468）。
+     与 `.tab-context-menu` 同为 120：它们是同一档「点开就该压住一切」的浮层。 */
+  z-index: 120;
   max-height: 340px;
   padding:var(--sp-2);
   display: flex;
@@ -321,6 +327,8 @@
 .resource-usage {
   min-width: 236px;
   max-width: 340px;
+  /* 菜单层，与 `.agent-roster`、`.tab-context-menu` 同为 120——理由见 `.agent-roster`。 */
+  z-index: 120;
   max-height: 320px;
   padding:var(--sp-2);
   display: flex;

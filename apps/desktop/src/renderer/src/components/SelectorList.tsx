@@ -101,9 +101,10 @@ export function SelectorListHeader({
 /**
  * 一行：状态槽（可空）+ identity + 尾部 Agent 簇 + 尾部附注。
  *
- * 三列网格，identity 那列显式 `minmax(0, 1fr)`。这不是风格选择：隐式 auto 列按**内容**定尺，
- * 于是尾列的 `margin-left:auto` 靠的是内容盒右缘而不是行右缘——各行摘要一长一短，头像右缘就
- * 参差成好几档。显式 1fr 让 identity 吃掉所有剩余宽度，尾列因此永远贴着行的右缘。
+ * 三段包在**自己的** `.selector-row` 里，行的排布因此只有一处定义（selector.css）。
+ * 早先这里返回的是裸 fragment，由每个容器各写一份三列网格接住——而 `leading` 可空，
+ * 只来两段时头像簇被摆进 identity 那一列，直接压在摘要文字上。容器只该管自己的
+ * 内外边距与背景，不该重新推导行的内部结构。
  */
 export function SelectorRow({
   leading,
@@ -123,7 +124,7 @@ export function SelectorRow({
   trailing?: ReactNode
 }) {
   return (
-    <>
+    <span className="selector-row">
       {leading ? <span className="selector-row__leading">{leading}</span> : null}
       <span className="selector-row__identity">
         <strong title={titleTooltip}>{title}</strong>
@@ -133,6 +134,6 @@ export function SelectorRow({
         {presence}
         {trailing}
       </span>
-    </>
+    </span>
   )
 }
