@@ -489,4 +489,47 @@ describe('monacoKeybindingFor', () => {
       expect(tokenBits + keyBits!, `${b.id}: cheat-sheet advertises ${advertised.join('+')} but Monaco obeys a different chord`).toBe(obeyed)
     }
   })
+
+  it('a GATED window binding never collides with a terminal chord — the gate does not shield xterm', () => {
+    // The un-gated guard above is only half the rule. Gated window bindings look shielded, and in Monaco
+    // and the launcher textarea they are: `isEditableChordTarget` sees a `<textarea>` and steps aside. But
+    // it returns **false** for a target inside `.xterm` (workbench-shortcuts.ts:44-46, deliberately — the
+    // gate exists so Cmd+D doesn't split the pane while you rename a tab, and a terminal is not that kind
+    // of input). So over a focused terminal every window binding fires, gate or no gate, and a gated window
+    // chord that a `terminal` binding also declares makes that terminal binding unreachable.
+    //
+    // This class was unguarded, and it hid behind shortcut-registry.ts's own comment, which asserted the
+    // opposite ("a focused terminal claims the chord first; nothing else sees it") — corrected in the same
+    // commit as this test. Nothing violates it today: mac terminal chords are Cmd+F/C/K and the gated
+    // window set has no letter overlap. That is exactly when the guard is cheap — it costs nothing now and
+    // reds the day someone adds a gated `workbench.find` on Cmd+F.
+    //
+    // Scoped to `terminal` and not "every inner scope" on purpose: the gate genuinely DOES shield editor
+    // and launcher, so asserting them here would forbid a legal chord reuse (`editor.save` on Cmd+S over a
+    // gated window binding is fine — Monaco's textarea trips the gate).
+    const gatedWindow = SHORTCUT_BINDINGS.filter(
+      (b) => b.scope === 'window' && b.gate === 'not-in-editable'
+    )
+    // Self-checks: either list going empty makes the loop below vacuously green. `terminal` must also still
+    // be a scope at all — read from INNER_SCOPES so this is tied to the registry's own derived list.
+    expect(gatedWindow.length, 'no gated window bindings found — the filter or the gate name changed').toBeGreaterThan(0)
+    expect(INNER_SCOPES, 'terminal is no longer a scope; this guard now checks nothing').toContain('terminal')
+    const terminal = SHORTCUT_BINDINGS.filter((b) => b.scope === 'terminal')
+    expect(terminal.length, 'no terminal bindings found — the filter or the registry changed shape').toBeGreaterThan(0)
+
+    for (const isMac of [true, false]) {
+      const chordKey = (b: ShortcutBinding): string => {
+        const c = chordForPlatform(b, isMac)
+        return `${c.key}|${c.primary}|${c.shift}|${c.alt}`
+      }
+      const claimed = new Map(gatedWindow.map((b) => [chordKey(b), b.id]))
+      for (const binding of terminal) {
+        const key = chordKey(binding)
+        expect(
+          claimed.has(key),
+          `${binding.id} is unreachable on ${isMac ? 'mac' : 'other'}: the gated window binding ${claimed.get(key)} claims the same chord, and the not-in-editable gate does not step aside inside a terminal`
+        ).toBe(false)
+      }
+    }
+  })
 })
