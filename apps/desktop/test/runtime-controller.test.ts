@@ -1762,6 +1762,78 @@ describe('RuntimeController configuration transaction', () => {
     detachRenderer()
   })
 
+  /**
+   * resize 有两条臂，而在此之前只有 terminal 那条被执行过。
+   *
+   * `resizeSessionAttachment` 按 `owner.control.kind` 分岔：agent 走
+   * `resizeAgent(agentSessionId, run, cols, rows)`，terminal 走 `resizeTerminal(run, cols, rows)`。
+   * 本文件里四个 `resizeSessionAttachment` 调用点全部喂 `kind:'terminal'`；`resizeAgent` 这个
+   * fixture 早就定义好了，却从未出现在任何断言里。实测过：把 agent 那条臂的两个实参对调成
+   * `(…, rows, cols)`，本文件 47 条全绿。
+   *
+   * 这条臂恰好是本应用最主要的用法——每一个 codex / claude-code agent 终端的每一次 resize。
+   * 转置之后 PTY 按错几何重绘：换行位置全错、diff 视图花屏、状态栏跑到不该在的列。
+   *
+   * 判据必须同时否掉 terminal 那条：`resizeAgent` 内部会转发给 `resizeTerminal`，所以只断言
+   * 「resizeTerminal 收到了 cols/rows」在两条臂上都成立，分不出走的是哪一条。
+   */
+  it('resize 一个 Agent 附着时走 agent 那条臂，且 cols/rows 不许对调', async () => {
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const renderer = webContentsFixture()
+    const detachRenderer = controller.attach(renderer)
+    const status = agentStatusFixture()
+    const control: SessionControl = {
+      kind: 'agent',
+      hostId: 'local',
+      agentSessionId: 'agent-1',
+      run: { runId: 'run-1' }
+    }
+    client.reattachAgent.mockResolvedValueOnce({
+      session: status.session,
+      attachment: {
+        run: { ...status.run, state: 'running' as const },
+        replay: [],
+        gap: null
+      }
+    })
+    client.runtimeProjection.mockResolvedValue({
+      hostId: 'local',
+      subjects: [{
+        subjectId: 'agent:local:agent-1',
+        kind: 'agent',
+        hostId: 'local',
+        workspacePath: '/repo',
+        providerId: status.session.providerId,
+        executorId: status.session.executorId,
+        agentSession: status.session,
+        run: { ...status.run, state: 'running' as const }
+      }]
+    })
+
+    const attachment = await controller.attachSession(renderer.id, control, 0, {
+      ...localConfig,
+      executors: {
+        review: {
+          label: 'Review Codex',
+          providerId: 'codex',
+          command: 'codex',
+          args: [],
+          env: {},
+          injectAgentMuxGuide: true
+        }
+      }
+    })
+    await controller.resizeSessionAttachment(renderer.id, attachment.attachmentId, 120, 40)
+
+    // 顺序写死：Core 的签名是 (agentSessionId, expectedRun, cols, rows)，对调即转置 PTY。
+    expect(client.resizeAgent).toHaveBeenCalledOnce()
+    expect(client.resizeAgent).toHaveBeenCalledWith('agent-1', control.run, 120, 40)
+    // 分岔的另一半：agent 路上不许直接走 terminal 那条臂（resizeAgent 自己会去转发）。
+    expect(client.resizeTerminal).not.toHaveBeenCalled()
+    detachRenderer()
+  })
+
   it('rolls back an in-flight attach when its Renderer generation disappears', async () => {
     const controller = await configuredController()
     const client = runtimeFixture.FakeClient.instances[0]!
