@@ -419,13 +419,40 @@ describe('面板接线', () => {
 
     // 壳里不许出现按分类分岔的条件。`effect.rescan` 那个 if 是**转发布尔**不是判分类，所以判据
     // 落在「读了 next.kind / outcome.status 吗」上，而不是「有没有 if」。
-    const text = body!.getText()
-    for (const shape of ['.kind ===', '.kind !==', '.status ===', '.status !==']) {
-      expect(
-        text.includes(shape),
-        `面板里出现了 \`${shape}\`：分类被判了第二次，而这一处没有任何测试执行它`
-      ).toBe(false)
-    }
+    //
+    // 判据按 AST 取属性名，不按算符字面量。此前这里是 `.kind ===` / `.status !==` 之类的字面量黑名单，
+    // 实测被 Yoda 式写法整条绕过：`setActionError('failed' === nextAfterWorktreeRemoval(...).kind ? null
+    // : effect.error)` 四个禁用串一个都不出现，26 条全绿——而它恰好重新引入了本守卫存在的理由 #399
+    // （真 failed 时对话框静默关闭、什么也不说）。`.kind==`（无空格）、`switch (next.kind)`、
+    // `({done,ask,failed})[next.kind]` 同样绕得过去。算符有无穷多种拼法，属性名只有一个。
+    const classifierFields = new Set(['kind', 'status'])
+    const offenders: string[] = []
+    walk(body!, (node) => {
+      if (!ts.isPropertyAccessExpression(node)) return
+      if (!classifierFields.has(node.name.text)) return
+      offenders.push(node.getText())
+    })
+    expect(
+      offenders,
+      '面板里读了分类字段：分类被判了第二次，而这一处没有任何测试执行它'
+    ).toEqual([])
+  })
+
+  it('自证：上一条的判据真的会对分类分岔报红（否则它是恒真的）', () => {
+    // 守卫按属性名判，所以「它到底认不认得出违规」必须自己证一次——用一段合成源码喂同一个判据。
+    // 这里刻意用 Yoda 式，即上一版字面量黑名单漏掉的那种写法：它必须被这个判据抓住。
+    const offending = `
+      const effect = worktreeRemovalEffect(nextAfterWorktreeRemoval(removal, outcome))
+      setActionError('failed' === nextAfterWorktreeRemoval(removal, outcome).kind ? null : effect.error)
+    `
+    const synthetic = ts.createSourceFile('probe.tsx', offending, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+    const seen: string[] = []
+    walk(synthetic, (node) => {
+      if (!ts.isPropertyAccessExpression(node)) return
+      if (node.name.text !== 'kind' && node.name.text !== 'status') return
+      seen.push(node.getText())
+    })
+    expect(seen.length, '判据连合成的违规源码都抓不到，说明它是恒真的').toBeGreaterThan(0)
   })
 
   it('没有 worktree 的分支不显示这一项（用缺席表达，不画禁用按钮）', () => {
