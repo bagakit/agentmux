@@ -267,6 +267,90 @@ function callsTo(source: ts.SourceFile, name: string): ts.CallExpression[] {
   return out
 }
 
+type ForwardingTail = {
+  /** 那次决定绑到的名字。`null` = 没找到，判据落空。 */
+  binding: string | null
+  /** 绑定之后、同一个块里的语句里，不是「纯转发」的那些。 */
+  offenders: string[]
+  /** 绑定之后一共有几条语句。0 说明三句转发都不在了。 */
+  tailLength: number
+}
+
+/**
+ * 「壳只转发那次决定」这条不变量的判据，**整条**抽出来——包括找语句块那一步。
+ *
+ * 判据的形状是**白名单**：绑定之后的每条语句必须恰好是三种转发写法之一
+ * （`f(b.x)` / `if (b.x) g()` / `if (b.x) await g()`）。除此之外一律记成违规。
+ *
+ * 为什么不是黑名单：此前这里禁的是「读 kind / status」，两版都被实测绕过——
+ *   - 第一版禁算符字面量（`.kind ===` 之类），Yoda 式 `'failed' === x.kind` 整条绕过；
+ *   - 第二版禁属性名（AST 上 `kind`/`status`），`const { kind } = next` 解构、`next['kind']`
+ *     下标、把判断挪进块外的 helper、以及 `effect.rescan ? effect.error : null`
+ *     ——最后这个连分类字段都不读，却因为 `rescan` 只在 `done` 时为真，
+ *     恰好在真 `failed` 时算出 `null`，即 #399 那个「对话框静静关掉什么也不说」。
+ *     而它藏在上一版注释亲手写下的「`rescan` 是转发布尔不是判分类」这句豁免里。
+ *
+ * 禁止清单要枚举拼法，所以永远漏；允许清单只有三条，多出来的任何东西都是违规。
+ * 这也是源码那句「这里刻意一个 if 都没有…剩下的三句无条件赋值」真正在说的话。
+ *
+ * 只看**绑定之后**的语句，是因为绑定之前读分类是合法的：`discardChanges` 取的就是
+ * 输入那一档的 `stage.kind`，早退检查读 `snapshot?.kind` 也没问题。上一版连这些一起禁，
+ * 会对正确的改动报红——那种守卫下一个人会直接删掉。
+ */
+function forwardingTail(source: ts.SourceFile): ForwardingTail {
+  const calls = callsTo(source, 'worktreeRemovalEffect')
+  if (calls.length !== 1) return { binding: null, offenders: [], tailLength: 0 }
+
+  let declaration: ts.VariableStatement | null = null
+  walk(source, (node) => {
+    if (!ts.isVariableStatement(node)) return
+    let holds = false
+    walk(node, (child) => {
+      if (child === calls[0]) holds = true
+    })
+    if (holds) declaration = node
+  })
+  if (declaration === null) return { binding: null, offenders: [], tailLength: 0 }
+
+  const statement: ts.VariableStatement = declaration
+  const name = statement.declarationList.declarations[0]?.name
+  const binding = name !== undefined && ts.isIdentifier(name) ? name.text : null
+  if (binding === null) return { binding: null, offenders: [], tailLength: 0 }
+
+  const block = statement.parent
+  if (!ts.isBlock(block)) return { binding: null, offenders: [], tailLength: 0 }
+  const tail = block.statements.slice(block.statements.indexOf(statement) + 1)
+
+  /** 恰好是 `<binding>.<字段>`。解构后的裸名字、下标写法、三元、helper 调用都不算。 */
+  const readsDecision = (expression: ts.Expression): boolean =>
+    ts.isPropertyAccessExpression(expression) &&
+    ts.isIdentifier(expression.expression) &&
+    expression.expression.text === binding
+
+  /** 无参调用（可带 await），即 `await refresh()`。带参数就得说清参数是什么，故不许。 */
+  const isBareCall = (node: ts.Statement): boolean => {
+    if (!ts.isExpressionStatement(node)) return false
+    let expression = node.expression
+    if (ts.isAwaitExpression(expression)) expression = expression.expression
+    return ts.isCallExpression(expression) && expression.arguments.length === 0
+  }
+
+  const offenders: string[] = []
+  for (const node of tail) {
+    // `f(b.x)`：单参，且那个参数就是从那次决定取的一格。
+    if (ts.isExpressionStatement(node) && ts.isCallExpression(node.expression)) {
+      const args = node.expression.arguments
+      if (args.length === 1 && readsDecision(args[0]!)) continue
+    }
+    // `if (b.x) g()`：条件就是那一格本身，没有 else，分支里是无参调用。
+    if (ts.isIfStatement(node) && readsDecision(node.expression) && node.elseStatement === undefined) {
+      if (isBareCall(node.thenStatement)) continue
+    }
+    offenders.push(node.getText())
+  }
+  return { binding, offenders, tailLength: tail.length }
+}
+
 /** 某棵子树里出现的所有 `<object>.<property>` 拼法，用来问「这里读的是哪一个字段」。 */
 function memberReads(node: ts.Node): Set<string> {
   const out = new Set<string>()
@@ -378,81 +462,88 @@ describe('面板接线', () => {
    *   两处对同一件事各判一次，而其中一处永远没人执行。
    */
   it('面板只转发那次决定，不自己再判一次分类', () => {
-    const source = parse(PANEL)
-    const calls = callsTo(source, 'worktreeRemovalEffect')
-    expect(calls.length, '面板里没有 worktreeRemovalEffect 调用——判据落空了').toBe(1)
-
-    // 找到包住那次调用的函数体，只在**它**里面判形状：整份文件里当然还有别的 if。
-    let body: ts.Node | null = null
-    walk(source, (node) => {
-      if (!ts.isFunctionDeclaration(node) && !ts.isArrowFunction(node) && !ts.isMethodDeclaration(node)) return
-      if (node.body === undefined) return
-      let holds = false
-      walk(node.body, (child) => {
-        if (child === calls[0]) holds = true
-      })
-      // 取**最内层**那个：外层的组件函数也包着它，但那里 if 遍地都是。
-      if (holds && (body === null || node.body.getStart() > body.getStart())) body = node.body
-    })
-    expect(body, '找不到包住那次调用的函数体').not.toBeNull()
-
-    // 结果绑到一个名字上。
-    let binding: string | null = null
-    walk(body!, (node) => {
-      if (!ts.isVariableDeclaration(node) || node.initializer === undefined) return
-      let found = false
-      walk(node.initializer, (child) => {
-        if (child === calls[0]) found = true
-      })
-      if (found && ts.isIdentifier(node.name)) binding = node.name.text
-    })
-    expect(binding, '那次决定的结果没绑到名字上，无法证明三个字段取的是同一份').not.toBeNull()
+    const tail = forwardingTail(parse(PANEL))
+    expect(tail.binding, '那次决定的结果没绑到名字上，无法证明三个字段取的是同一份').not.toBeNull()
 
     // 三个字段都从那个名字取。少读一个就是那一格被面板自己另算了（或干脆丢了）。
-    const reads = memberReads(body!)
+    const reads = memberReads(parse(PANEL))
     for (const field of ['removal', 'error', 'rescan']) {
       expect(
-        reads.has(`${binding}.${field}`),
+        reads.has(`${tail.binding}.${field}`),
         `没有从那次决定取 ${field}：这一格要么被丢了，要么被面板自己另算了一份`
       ).toBe(true)
     }
 
-    // 壳里不许出现按分类分岔的条件。`effect.rescan` 那个 if 是**转发布尔**不是判分类，所以判据
-    // 落在「读了 next.kind / outcome.status 吗」上，而不是「有没有 if」。
-    //
-    // 判据按 AST 取属性名，不按算符字面量。此前这里是 `.kind ===` / `.status !==` 之类的字面量黑名单，
-    // 实测被 Yoda 式写法整条绕过：`setActionError('failed' === nextAfterWorktreeRemoval(...).kind ? null
-    // : effect.error)` 四个禁用串一个都不出现，26 条全绿——而它恰好重新引入了本守卫存在的理由 #399
-    // （真 failed 时对话框静默关闭、什么也不说）。`.kind==`（无空格）、`switch (next.kind)`、
-    // `({done,ask,failed})[next.kind]` 同样绕得过去。算符有无穷多种拼法，属性名只有一个。
-    const classifierFields = new Set(['kind', 'status'])
-    const offenders: string[] = []
-    walk(body!, (node) => {
-      if (!ts.isPropertyAccessExpression(node)) return
-      if (!classifierFields.has(node.name.text)) return
-      offenders.push(node.getText())
-    })
+    // 绑定之后只许有那三句转发。任何别的语句——三元、解构、下标、helper 调用、
+    // 或者用 `rescan` 冒充分类——都会落到这里。判据是允许清单，不是禁止清单。
     expect(
-      offenders,
-      '面板里读了分类字段：分类被判了第二次，而这一处没有任何测试执行它'
+      tail.offenders,
+      '绑定之后出现了不是纯转发的语句：分类被判了第二次，而这一处没有任何测试执行它'
     ).toEqual([])
+    expect(tail.tailLength, '绑定之后一条语句都没有，三句转发不在了').toBe(3)
   })
 
-  it('自证：上一条的判据真的会对分类分岔报红（否则它是恒真的）', () => {
-    // 守卫按属性名判，所以「它到底认不认得出违规」必须自己证一次——用一段合成源码喂同一个判据。
-    // 这里刻意用 Yoda 式，即上一版字面量黑名单漏掉的那种写法：它必须被这个判据抓住。
-    const offending = `
+  it('自证：上一条的判据对四种绕法都报红（否则它只是换了个漏法）', () => {
+    // 判据必须自己证一次认得出违规，而且要走**同一条** `forwardingTail`——包括找语句块那一步。
+    // 只证「叶子谓词能在合成串里找到东西」是不够的：找块那一步一旦回归，真断言会因为
+    // 拿到空清单而恒真变绿，而只验叶子的自证察觉不到。
+    //
+    // 这四种写法都重新引入 #399（真 failed 时对话框静默关闭、什么也不说），
+    // 且前三种是历史上真的绕过过某一版判据的形状，第四种连分类字段都不读。
+    const bypasses = {
+      'Yoda 式算符（绕过字面量黑名单那版）':
+        `setActionError('failed' === nextAfterWorktreeRemoval(removal, outcome).kind ? null : effect.error)`,
+      '解构分类字段（绕过属性名黑名单那版）':
+        `const { kind } = next\n      setActionError(kind === 'failed' ? null : effect.error)`,
+      '下标取分类字段（同上）':
+        `setActionError(next['kind'] === 'failed' ? null : effect.error)`,
+      // rescan 只在 done 时为真，所以真 failed 时这句算出 null——即 #399，且不读任何分类字段。
+      '拿 rescan 当分类用（上一版注释亲手豁免的那个字段）':
+        `setActionError(effect.rescan ? effect.error : null)`
+    }
+    for (const [label, injected] of Object.entries(bypasses)) {
+      const probe = ts.createSourceFile(
+        'probe.tsx',
+        `async function confirmRemoval() {
       const effect = worktreeRemovalEffect(nextAfterWorktreeRemoval(removal, outcome))
-      setActionError('failed' === nextAfterWorktreeRemoval(removal, outcome).kind ? null : effect.error)
-    `
-    const synthetic = ts.createSourceFile('probe.tsx', offending, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
-    const seen: string[] = []
-    walk(synthetic, (node) => {
-      if (!ts.isPropertyAccessExpression(node)) return
-      if (node.name.text !== 'kind' && node.name.text !== 'status') return
-      seen.push(node.getText())
-    })
-    expect(seen.length, '判据连合成的违规源码都抓不到，说明它是恒真的').toBeGreaterThan(0)
+      setRemoval(effect.removal)
+      ${injected}
+      if (effect.rescan) await refresh()
+    }`,
+        ts.ScriptTarget.Latest,
+        true,
+        ts.ScriptKind.TSX
+      )
+      const tail = forwardingTail(probe)
+      expect(tail.binding, `${label}：自证的探针本身没被判据认出来，探针写坏了`).toBe('effect')
+      expect(
+        tail.offenders.length,
+        `判据放过了「${label}」——它是恒真的，或者只是换了个漏法`
+      ).toBeGreaterThan(0)
+    }
+  })
+
+  it('自证：判据不对绑定之前读分类字段报红（那是合法的）', () => {
+    // 上一版把「读 kind / status」整条禁掉，于是三种正确的改动也报红：
+    // 输入档的 `removal.stage.kind`、早退用的 `snapshot?.kind`、以及埋点里的 `outcome.status`。
+    // 一个会对正确代码报红的守卫，下一个人会直接删掉——所以这一条钉住它不这么做。
+    const legitimate = ts.createSourceFile(
+      'probe.tsx',
+      `async function confirmRemoval() {
+      if (snapshot?.kind !== 'git-repository') return
+      const outcome = await removeWorktree({ discardChanges: removal.stage.kind === 'blocked' })
+      const effect = worktreeRemovalEffect(nextAfterWorktreeRemoval(removal, outcome))
+      setRemoval(effect.removal)
+      setActionError(effect.error)
+      if (effect.rescan) await refresh()
+    }`,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TSX
+    )
+    const tail = forwardingTail(legitimate)
+    expect(tail.binding, '自证的探针本身没被判据认出来').toBe('effect')
+    expect(tail.offenders, '判据对绑定之前合法地读分类字段报红了：它过宽，会误伤正确的改动').toEqual([])
   })
 
   it('没有 worktree 的分支不显示这一项（用缺席表达，不画禁用按钮）', () => {
