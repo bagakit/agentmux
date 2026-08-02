@@ -731,10 +731,16 @@ describe('WorktreeService', () => {
     const save = vi.fn(async (value: AppConfig) => value)
     const service = new WorktreeService(() => executionHost, { save })
     // 记录指向一个 git 不认识的路径：`worktree remove` 会失败，而失败发生在 save 之前。
+    //
+    // 这个目录必须**真的建出来**。此前这里用的是一个从未创建的子路径，与上面那句「目录还在」自相矛盾，
+    // 而当时的实现对「路径在不在」完全不取值，所以矛盾无从暴露。现在它是承重的：路径不在场时，
+    // 「git 不认识这个路径」的正确处置是撤掉那条幽灵记录（见下一条测试），不是永久报错。
+    const orphanPath = join(worktreePath, 'not-a-worktree')
+    await mkdir(orphanPath, { recursive: true })
     const broken: AppConfig = {
       ...fixtureConfig,
       workspaces: fixtureConfig.workspaces.map((item) =>
-        item.id === 'lane' ? { ...item, path: join(worktreePath, 'not-a-worktree') } : item
+        item.id === 'lane' ? { ...item, path: orphanPath } : item
       )
     }
 
@@ -749,7 +755,110 @@ describe('WorktreeService', () => {
     expect(error).not.toBeInstanceOf(WorktreeRetainedError)
     expect(classifyRetention(error).retention).toBe('git-failed')
     // 什么都没删：目录还在，记录也还在。
+    expect((await stat(orphanPath)).isDirectory()).toBe(true)
+    expect(save).not.toHaveBeenCalled()
+  }, 20000)
+
+  it('路径不在场且 git 也不认识它：撤掉那条幽灵记录，而不是永久报错', async () => {
+    // 这是上一条的**同句不同境**。git 对这两种情形打印的是同一句话（实测：`fatal: '<path>' is not a
+    // working tree`），分界线只在磁盘上——上一条那个目录真的在，所以路径大概是写错了，报错是对的；
+    // 这一条路径不在，记录说的那个签出哪儿都不存在，那条记录就是幽灵。
+    //
+    // 撤掉它是安全的，因为没有东西可丢：目录不存在，git 也不持有这个登记。而**不**撤掉它就是 #492
+    // 的死胡同换个入口重现——界面上留一行永远删不掉的 worktree。所以这不是「顺便宽容一点」，
+    // 而是同一个状态必须有同一个出路，无论它是怎么变成这样的。
+    const { worktreePath, executionHost, config: fixtureConfig } = await buildLocalWorktreeFixture()
+    const save = vi.fn(async (value: AppConfig) => value)
+    const service = new WorktreeService(() => executionHost, { save })
+    const phantomPath = join(worktreePath, 'never-existed')
+    // 自检：这个路径真的不在场，否则这条测试测的是上一条那个情形。
+    await expect(stat(phantomPath)).rejects.toMatchObject({ code: 'ENOENT' })
+    const phantom: AppConfig = {
+      ...fixtureConfig,
+      workspaces: fixtureConfig.workspaces.map((item) =>
+        item.id === 'lane' ? { ...item, path: phantomPath } : item
+      )
+    }
+
+    const removal = await service.removeWorktree({ workspaceId: 'lane' }, phantom)
+
+    expect(removal.removedPath).toBe(phantomPath)
+    expect(removal.config.workspaces.some((item) => item.id === 'lane')).toBe(false)
+  }, 20000)
+
+  it('记录没撤下之后重试能真的撤下来：那一档不是死路', async () => {
+    // 这一族此前是永久的，而挡路的是我们自己，不是 git。两处各拦一次：先是脏树探针在已消失的目录里
+    // 跑 `status --porcelain`（git 退 128），去掉那道之后是 `worktree remove` 自己——我们上一次成功的
+    // 移除已经把登记撤了，所以 git 说「这不是一个工作树」并退 128。两次都被读成失败，于是用户界面上
+    // 留着一个 worktree 行，点多少次都删不掉。
+    //
+    // 用真 git 而不是替身：判据的关键一半是「git 对着自己已经撤掉的登记会怎么回话」，那是 git 的事实。
+    // 替身说什么都证明不了——这条测试最早就是照着一个猜错的前提写的（猜它退 0），真 git 才纠正了它。
+    const { worktreePath, executionHost, config: fixtureConfig } = await buildLocalWorktreeFixture()
+    let failNext = true
+    const save = vi.fn(async (value: AppConfig) => {
+      if (failNext) throw new Error('config volume went read-only')
+      return value
+    })
+    const service = new WorktreeService(() => executionHost, { save })
+
+    const first = await service
+      .removeWorktree({ workspaceId: 'lane' }, fixtureConfig)
+      .then(() => null)
+      .catch((thrown: unknown) => thrown)
+    // 自检：先确认真的走到了那一档，否则下面整段会因为「压根不是这个场景」而恒真。
+    expect(first).toBeInstanceOf(WorktreeRetainedError)
+    expect((first as WorktreeRetainedError).retention).toBe('record-not-withdrawn')
+    await expect(stat(worktreePath)).rejects.toMatchObject({ code: 'ENOENT' })
+
+    // 卷恢复可写，用户再点一次删除。这一次必须真的成功。
+    failNext = false
+    const second = await service.removeWorktree({ workspaceId: 'lane' }, fixtureConfig)
+
+    expect(second.removedPath).toBe(worktreePath)
+    // 记录真的撤下来了。只断言「没抛」是不够的：不撤记录而静静返回，那一行照旧留在界面上。
+    expect(second.config.workspaces.some((item) => item.id === 'lane')).toBe(false)
+  }, 20000)
+
+  it('目录还在时脏树保护照旧拦住：跳过探针只针对「路径不存在」', async () => {
+    // 与上一条成对，且是它的反向自证。上面那条买的是「路径不在场就别探」，而这条钉住豁免的边界：
+    // 目录在场时探针必须照跑照拦。只钉上面那条时，把 `directoryPresent` 改成恒 `false` 也全绿——
+    // 而那颗变异的后果是脏树保护对每一次删除都失效，用户的未提交产出被静默删掉。
+    const { worktreePath, executionHost, config: fixtureConfig } = await buildLocalWorktreeFixture()
+    await writeFile(join(worktreePath, 'AGENT_NOTES.md'), 'work in progress\n')
+    const save = vi.fn(async (value: AppConfig) => value)
+    const service = new WorktreeService(() => executionHost, { save })
+
+    await expect(service.removeWorktree({ workspaceId: 'lane' }, fixtureConfig)).rejects.toThrow(
+      'Worktree has uncommitted changes'
+    )
     expect((await stat(worktreePath)).isDirectory()).toBe(true)
+    expect(save).not.toHaveBeenCalled()
+  }, 20000)
+
+  it('目录不在了但 git 拒绝的理由是别的（锁）：仍然如实失败，绝不当成已经删掉', async () => {
+    // 「已经删掉了」这一档必须按 git 打印的**那一句**判，不能按情形判。锁住的 worktree 是分界线：
+    // 有人刻意锁了它，而目录恰好不在（卷没挂上、被手工移走），此时 git 退的也是 128。若判据宽成
+    // 「失败 + 目录不在 = 已经删掉」，我们就会把一个别人明确锁住的登记静默撤掉，而 git 从来没同意过。
+    //
+    // 真 git 实测过：锁住时 `worktree remove` 说的是「cannot remove a locked working tree」，
+    // 与「is not a working tree」是两句不同的话，所以按句子判的实现在这里必须响亮地失败。
+    const { repoPath, worktreePath, executionHost, config: fixtureConfig } =
+      await buildLocalWorktreeFixture()
+    const lock = await executionHost.run('git', ['-C', repoPath, 'worktree', 'lock', '--', worktreePath])
+    expect(lock.exitCode).toBe(0)
+    await rm(worktreePath, { recursive: true, force: true })
+    const save = vi.fn(async (value: AppConfig) => value)
+    const service = new WorktreeService(() => executionHost, { save })
+
+    const failure = await service
+      .removeWorktree({ workspaceId: 'lane' }, fixtureConfig)
+      .then(() => null, (error: unknown) => error as Error)
+
+    expect(failure, '锁住的 worktree 被当成「已经删掉了」，记录被静默撤下').not.toBeNull()
+    // 自检：确认失败的正是那句锁的话，而不是碰巧因为别的原因失败——否则这条测试证不到分界线。
+    expect(failure?.message).toContain('locked')
+    // 记录必须留着：git 没撤登记，我们也不能撤。
     expect(save).not.toHaveBeenCalled()
   }, 20000)
 

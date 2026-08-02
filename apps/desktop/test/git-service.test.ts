@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { LocalExecutionHost, type ExecutionHost } from '@agentmux/core'
 import type { AppConfig } from '../src/shared/contracts.js'
-import { GitService } from '../src/main/git-service.js'
+import { GitService, isNotAGitRepositoryStderr, isNotAWorkingTreeStderr } from '../src/main/git-service.js'
 
 const config: AppConfig = {
   version: 7,
@@ -255,5 +255,47 @@ describe('GitService (real git, temporary repository)', () => {
     const after = await service.status('repo', cfg)
     if (after.kind !== 'git-repository') throw new Error('expected a git repository')
     expect(after.changes.find((change) => change.path === fileName)).toBeUndefined()
+  })
+
+  // Both stderr predicates say in their own docs that the anchoring is the load-bearing part: an
+  // unanchored match would also accept a stderr that merely *mentions* the phrase beside a real error,
+  // and the callers then flatten a genuine failure into a benign classification. Nothing asserted that
+  // until now — dropping the `^`/`$` from either pattern left the whole suite green.
+  //
+  // The sentences come from running real git rather than from string literals here, because a literal
+  // would be a second hand-written copy of the very claim under test: it would keep passing after git
+  // changed its wording, and it could be "fixed" by editing the copy instead of the pattern.
+  it('the two stderr predicates accept only git\'s own whole sentence, never a mention inside a longer error', async () => {
+    const root = await makeRepo()
+    const host = new LocalExecutionHost()
+    const plainDirectory = await mkdtemp(join(tmpdir(), 'agentmux-git-notrepo-'))
+    temporaryRoots.push(plainDirectory)
+
+    const notARepository = await host.run('git', ['-C', plainDirectory, 'status', '--porcelain'],
+      { timeoutMs: 20_000 })
+    const notAWorkingTree = await host.run(
+      'git', ['-C', root, 'worktree', 'remove', '--', join(root, 'never-a-worktree')],
+      { timeoutMs: 20_000 })
+
+    // Self-check: git really did produce each situation, so the assertions below are not vacuous.
+    expect(notARepository.exitCode).not.toBe(0)
+    expect(notAWorkingTree.exitCode).not.toBe(0)
+    expect(isNotAGitRepositoryStderr(notARepository.stderr)).toBe(true)
+    expect(isNotAWorkingTreeStderr(notAWorkingTree.stderr)).toBe(true)
+
+    // Each predicate answers only its own question — the sentences are not interchangeable.
+    expect(isNotAWorkingTreeStderr(notARepository.stderr)).toBe(false)
+    expect(isNotAGitRepositoryStderr(notAWorkingTree.stderr)).toBe(false)
+
+    // The anchoring, stated as behaviour: git's real sentence buried in a wider stderr is a real error
+    // that happens to mention the phrase, and must not be classified as the benign case. Both a leading
+    // and a trailing neighbour, because `^` and `$` are separate mutations.
+    for (const [predicate, real] of [
+      [isNotAGitRepositoryStderr, notARepository.stderr],
+      [isNotAWorkingTreeStderr, notAWorkingTree.stderr]
+    ] as const) {
+      expect(predicate(`error: could not lock config file .git/config\n${real}`)).toBe(false)
+      expect(predicate(`${real}fatal: the remote end hung up unexpectedly\n`)).toBe(false)
+    }
   })
 })

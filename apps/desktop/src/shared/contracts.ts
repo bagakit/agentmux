@@ -310,9 +310,18 @@ export type WorktreeRetention =
   | 'git-failed'
   /**
    * Git removed the worktree and the record could not be withdrawn. **The directory is gone** and the
-   * record still points at it. This is the one retention where "still on disk" is false, and it is not
-   * recoverable by removing again: the record's path no longer exists, so the next attempt fails at the
-   * status probe. Saying "it still holds changes" here sends the user to look for work that is deleted.
+   * record still points at it. This is the one retention where "still on disk" is false, so saying "it
+   * still holds changes" here sends the user to look for work that is deleted.
+   *
+   * Removing again IS the way out, and it is the caller's next step rather than a dead end — but only
+   * because the service now recognizes the state. Verified against real git (2.50.1, one fresh
+   * repository per case): a retry after a completed removal exits **128** with `fatal: '<path>' is not
+   * a working tree`, for plain and `--force` alike, because our own successful removal already
+   * deregistered the entry. Git is telling us its half is done; there was never anything left for it
+   * to do. What made this permanent was reading that as a failure — two of ours in a row, first the
+   * dirty-tree probe running inside the vanished directory (128) and then the removal itself. The
+   * service now skips the probe when the path provably does not exist, and treats that one sentence
+   * from git as "already gone" when the directory is likewise gone, so the retry reaches the record.
    */
   | 'record-not-withdrawn'
 

@@ -146,6 +146,25 @@ function parseBranchHeader(header: string): string | null {
 // non-zero exit has a specific, benign meaning; every other non-zero exit is a real error to surface.
 const NOT_A_GIT_REPOSITORY = /^fatal: not a git repository \(or any of the parent directories\): .+\n?$/
 
+// The fatal git prints when the path it was asked to remove is not one of its registered worktrees.
+// Anchored for the same reason as the sentence above: an unanchored match would also accept a stderr
+// that merely mentions the phrase beside a real error.
+//
+// This one sentence covers two very different situations, and git gives no way to tell them apart from
+// the message alone (verified against real git 2.50.1, one fresh repository per case):
+//
+//   - the entry was already deregistered — which is what our own successful `worktree remove` leaves
+//     behind, so a retry after a half-finished removal lands here;
+//   - the path was never a worktree at all — a caller passing a directory git does not know.
+//
+// The discriminator is not in the message, it is on disk: the first case has no directory left, the
+// second is a path someone still has. So the caller must consult presence before reading this as
+// "already gone" — this predicate deliberately answers only the narrower question of which sentence
+// git printed. A locked worktree ("cannot remove a locked working tree") and an unreachable repository
+// ("cannot change to") print different sentences and are therefore excluded here, which is the point:
+// each of those is a real failure with a real remedy, and neither means the worktree is gone.
+const NOT_A_WORKING_TREE = /^fatal: '.+' is not a working tree\n?$/
+
 /**
  * Is this stderr git's own "there is no repository here" sentence, and nothing else?
  *
@@ -163,6 +182,21 @@ const NOT_A_GIT_REPOSITORY = /^fatal: not a git repository \(or any of the paren
  */
 export function isNotAGitRepositoryStderr(stderr: string): boolean {
   return NOT_A_GIT_REPOSITORY.test(stderr)
+}
+
+/**
+ * Is this stderr git's "that path is not one of my worktrees" sentence, and nothing else?
+ *
+ * A predicate rather than the pattern, for the same reason as its sibling above: the anchoring is the
+ * load-bearing part and a caller holding the RegExp could re-litigate it.
+ *
+ * **This answers half a question.** It says which sentence git printed, not what the caller should do.
+ * Two situations produce this exact sentence and only the filesystem separates them — an entry we
+ * already removed, versus a path that was never a worktree — so a caller that treats this alone as
+ * "already gone" would also swallow a genuinely wrong path. The presence check belongs to the caller.
+ */
+export function isNotAWorkingTreeStderr(stderr: string): boolean {
+  return NOT_A_WORKING_TREE.test(stderr)
 }
 
 // Non-interactive, non-localized environment for every git invocation.
