@@ -1,9 +1,49 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import { Copy, Crosshair, Replace, Send, SquareArrowOutUpRight } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { formatMessagingAddress, formatRegionAddress, formatSessionAddress } from '../lib/agent-address'
 import type { RegionSwapMenuEntry, WorkbenchSplitMenuEntry } from '../lib/workbench-tab-actions'
+import { useAppStore } from '../store'
 import { workbenchSplitMenuIcon, workbenchSplitMenuKey } from './workbench-split-menu-icons'
+
+/**
+ * 菜单开着时让承载 Region 的原生视图（browser / terminal 的 WebContentsView）让位，关掉时复原。
+ *
+ * 为什么需要（#544）：browser 那格的内容是**窗口级的原生视图**，合成在所有 renderer 像素之上。
+ * DOM 里画出来的右键菜单会被它整块盖住——看不见、也点不到。让位机制不是这里新发明的：全仓每一个
+ * 会盖住原生视图的浮层（Tab 右键菜单、Tab 条上的 Split 下拉、PaneSplitMenu）都走**同一个 SSOT**——
+ * store 的 `setTabMenuOpen`。它把 `nativeSurfacesVisible` 压成 false，一路传到 BrowserPane 的
+ * `visible`，那条 useLayoutEffect 于是 `observe(null)` → `setBounds(null)` → `view.setVisible(false)`。
+ * RegionContextMenu 是唯一一个从来没接上这个开关的菜单，这正是 #544 的根因——所以这里**复用**它，
+ * 不新造第二套让位机制。
+ *
+ * 复原（菜单关 → 原生视图回来）必须走遍**每一条**关闭路径，否则那一格永久空白（tabMenuOpen 卡在
+ * true，所有原生视图再不显示）。Radix 的 `onOpenChange` 在 Escape / 点击外部 / 失焦 / 选中项 时都会
+ * 以 false 触发，那几条覆盖了。唯独**菜单还开着时这一格被关掉**（关格按钮 / closeRegion）这条例外：
+ * 组件直接卸载，`onOpenChange(false)` 不会触发。于是复原做成两条腿——`onOpenChange` 无条件转发开关，
+ * 卸载时若还欠着一次复原（菜单开着没正常关）就补上；`release` 只在真欠时动手，不去踩别的菜单的开关。
+ *
+ * 抽成工厂而不是把逻辑内联在组件里，是为了让「让了几次位、复原了几次、各带什么参数」这件事
+ * 脱离 DOM 环境也能被断言（本仓 desktop 测试跑在 node、无 jsdom，renderToStaticMarkup 不跑 effect、
+ * 也发不出 Radix 的 onOpenChange）。
+ */
+export function createRegionMenuYield(setTabMenuOpen: (open: boolean) => void): {
+  onOpenChange(open: boolean): void
+  release(): void
+} {
+  let owedRestore = false
+  return {
+    onOpenChange(open) {
+      owedRestore = open
+      setTabMenuOpen(open)
+    },
+    release() {
+      if (!owedRestore) return
+      owedRestore = false
+      setTabMenuOpen(false)
+    }
+  }
+}
 
 /**
  * 一格的右键菜单。
@@ -230,8 +270,16 @@ export function RegionContextMenu({
     swapMenu,
     promote
   })
+  // 复用全仓唯一的原生视图让位开关（见文件顶部 createRegionMenuYield 的注释，#544）。工厂在渲染间
+  // 保持稳定（存进 ref），这样它内部记着的「欠不欠复原」跨渲染不丢；卸载 effect 兜住「菜单开着这一格
+  // 就被关掉」那条 onOpenChange 不会触发的路径。
+  const setTabMenuOpen = useAppStore((state) => state.setTabMenuOpen)
+  const yieldRef = useRef<ReturnType<typeof createRegionMenuYield> | null>(null)
+  if (!yieldRef.current) yieldRef.current = createRegionMenuYield(setTabMenuOpen)
+  const menuYield = yieldRef.current
+  useEffect(() => () => menuYield.release(), [menuYield])
   return (
-    <ContextMenu.Root>
+    <ContextMenu.Root onOpenChange={menuYield.onOpenChange}>
       <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
       <ContextMenu.Portal>
         <ContextMenu.Content className="tab-context-menu" collisionPadding={8}>
