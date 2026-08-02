@@ -16,6 +16,12 @@ import {
   formatSessionAddress,
   formatViewAddress
 } from '../src/renderer/src/lib/agent-address.js'
+import { promoteRegionToTab } from '../src/renderer/src/lib/promote-region-to-tab.js'
+import {
+  addWorkbenchRegion,
+  createWorkbenchTab
+} from '../src/renderer/src/lib/workbench-tabs.js'
+import { createWorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.js'
 
 // 复制出去的是一个寻址方式，不是一个 id。判据只有一条：接收方仅凭这段文本，
 // 能不能不问人、不查文档就完成寻址。因此每条断言都在问"这段文本自足吗"，
@@ -213,7 +219,7 @@ describe('寻址失败自带下一步命令，而不只是候选清单', () => {
 
   it('拿不到 id 的分支老实不给命令，而不是凑一条跑不了的', () => {
     // MESSAGE_TARGET_NOT_AGENT 想给的是 `inspect --region=<regionId>`——这个码只在 Region 分支
-    // 抛（store.ts:1624，全仓仅此一处），但 regionId 在抛出点就丢了。
+    // 抛（store.ts 里 `region.kind !== 'agent'` 那一处，全仓仅此一处），但 regionId 在抛出点就丢了。
     // 此时凑一条命令形状的文字比不给更糟：看着像出路，粘过去撞第二次失败。
     const notAgent = addressingRecovery({ code: 'MESSAGE_TARGET_NOT_AGENT' })
     expect(notAgent).not.toMatch(/^agentmux (?:inspect|send)\s*$/mu)
@@ -314,10 +320,17 @@ describe('寻址失败自带下一步命令，而不只是候选清单', () => {
   })
 
   it('三个 self 码说的是"相对寻址塌了"，不是"粘来的地址有歧义"', () => {
-    // 这条钉的是语义，不是形状。AMBIGUOUS_* / CALLER_NOT_OPEN 只从 `self` 分支抛：
-    // control.ts:133-134 在 `target.kind === 'self'` 之内，:162-163 在 `target.kind === 'tab'`
-    // 提前 return 之后。显式 id 走不到——region id 是 `region:${crypto.randomUUID()}`
-    // （store.ts:960），全局唯一，跨 Tab 撞号不成立。
+    // 这条钉的是语义，不是形状。三个码今天都表示"我在哪"这个前提塌了。
+    //
+    // 但抛出面**不对称**，别照抄"三个码都只从 self 抛"这句话（本文件曾经就这么写，而它是错的）：
+    // `CALLER_NOT_OPEN` 与 `AMBIGUOUS_TAB_TARGET` 的抛出点确实都在 self 分支之内，而
+    // `AMBIGUOUS_REGION_TARGET` 在 `resolveWorkbenchControlRegion` 里**另有一处**，在显式 id
+    // 那条路上（"Region target is ambiguous."）——view-focus.test.ts 的 "resolves Launcher
+    // destinations through the open-only unique Region owner" 就用两张各持同一 regionId 的开着的
+    // Tab 抛出了它，所以那不是死代码。
+    //
+    // 让那一处今天不可达的是**下一条测试**钉住的前提（regionId 不会同时留在两张开着的 Tab 里），
+    // 不是"它不存在"。所以那条守卫是本条文案成立的前提，两条要一起读。
     //
     // 本轮初版把它们写成"这个地址匹配到不止一个目标"，那是**把粘贴地址的失败张冠李戴**：
     // 用户照着改地址不会有任何效果，因为问题出在"我在哪"这个前提上。两个 agent 独立
@@ -333,6 +346,51 @@ describe('寻址失败自带下一步命令，而不只是候选清单', () => {
       expect(recovery).toContain(LIST_SESSIONS_COMMAND)
       expect(recovery).not.toContain('--to-region=')
     }
+  })
+
+  it('唯一刻意复用 regionId 的路径：促升后源 Tab 不再持有它（上一条文案的前提）', () => {
+    // 上一条恢复文案说 `AMBIGUOUS_REGION_TARGET` 表示"发起方同时显示在多处"，即断定它**不会**
+    // 从显式 id 那条路抛出。而那条路真实存在（view-focus.test.ts 的
+    // "resolves Launcher destinations through the open-only unique Region owner" 就用两张各持
+    // 'duplicate-launcher' 的开着的 Tab 抛出了它）。所以文案成立靠的不是"分支不存在"，而是
+    // **没有生产路径能造出跨 Tab 的重号**。这条把那个前提钉在唯一刻意复用 id 的路径上。
+    //
+    // 铸造侧本身不需要守卫：两种拼法（`region:${crypto.randomUUID()}` 与
+    // `initialWorkbenchRegionId` 的 `region:${tabId}`，tabId 自己带 uuid）都各自唯一。危险的是
+    // `promoteRegionToTab`——它是全仓**唯一**故意把一个已存在的 regionId 搬到另一张 Tab 上的
+    // reducer（内容按 regionId 键控，重铸会让 browser/编辑器缓存找不回内容）。它不制造重号的
+    // 全部理由就是：搬走的同时源 Tab 上那一格被 delete 掉。少了这一步，两张开着的 Tab 会同时
+    // 持有同一个 regionId，显式 id 那条路当场可达，而上一条文案会对它说谎。
+    const source = addWorkbenchRegion(
+      createWorkbenchTab('view:source', { regionId: 'region:kept', kind: 'launcher', workspaceId: 'workspace' }),
+      'region:kept',
+      'right',
+      { regionId: 'region:promoted', kind: 'launcher', workspaceId: 'workspace' }
+    )
+    // 前提自检：源 Tab 真的有两格（单格时促升是 no-op，那就测不到搬运）。
+    expect(Object.keys(source.regions).sort()).toEqual(['region:kept', 'region:promoted'])
+
+    const result = promoteRegionToTab({
+      tabs: { 'view:source': source },
+      layouts: { workspace: createWorkspaceLayout('group', ['view:source']) },
+      workspaceId: 'workspace',
+      tabId: 'view:source',
+      regionId: 'region:promoted',
+      mint: { tabId: 'view:promoted' }
+    })
+    expect(result.kind).toBe('promoted')
+    if (result.kind !== 'promoted') throw new Error('unreachable')
+
+    // 判据不是"新 Tab 拿到了它"（那是 promote 自己的不变量，promote-region-to-tab.test.ts 管），
+    // 而是**跨 Tab 的持有者名单恰好是那一张**：把每张 Tab 的 regions 键摊平，同一个 id 不许出现两次。
+    // 这个形状与 control.ts 显式 id 那条路的 `matches.length !== 1` 逐字对应——它数的正是
+    // "有多少张开着的 Tab 持有这个 regionId"。名单相等同时排掉了"promote 把它整个丢了"
+    // （那时名单是空的，也不等于 ['view:promoted']），所以不需要再补一条计数断言——补了是死代码。
+    const holders = Object.values(result.tabs).filter((tab) => 'region:promoted' in tab.regions)
+    expect(holders.map((tab) => tab.id)).toEqual(['view:promoted'])
+
+    // 源 Tab 只剩没被搬走的那一格。
+    expect(Object.keys(result.tabs['view:source']!.regions)).toEqual(['region:kept'])
   })
 
   it('不是寻址失败的码返回 null，而不是一句放之四海的"再试一次"', () => {
