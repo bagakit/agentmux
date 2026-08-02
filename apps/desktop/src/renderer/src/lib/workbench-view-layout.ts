@@ -1,5 +1,10 @@
 import type { SplitDirection } from './workbench-layout'
-import { type SplitTreeNode, findSiblingLeafId, setSplitRatioAtPath } from './split-tree'
+import {
+  type SplitTreeNode,
+  clampSplitRatio,
+  findSiblingLeafId,
+  setSplitRatioAtPath
+} from './split-tree'
 import type { WorkbenchLayoutPreset } from '@agentmux/core/workbench-layout-preset'
 
 // tab 内 region 分屏树 = 叶子挂 regionId 的通用分屏树（见 split-tree.ts）。ratio 必填，与 tab-group
@@ -34,18 +39,23 @@ export function regionIds(root: WorkbenchRegionLayoutNode): string[] {
     : [...regionIds(root.first), ...regionIds(root.second)]
 }
 
-function lineLayout(
-  ids: readonly string[],
-  direction: 'horizontal' | 'vertical'
-): WorkbenchRegionLayoutNode {
+/**
+ * 一行 N 格，横向铺开。递归结构里每层的 `ratio` 是 1/剩余格数，于是自然等分。
+ *
+ * 刻意只做横向：唯一调用方 `gridLayout` 只需要横排的行，纵向由它自己的 `combineRows` 叠。此前这里
+ * 有个 `direction` 形参，而全仓两个调用点传的都是 `'horizontal'`——一个永远只取一个值的形参会让人
+ * 以为纵向排列也走这条路，而真正的纵向在 `combineRows` 里（本仓 expired-reason-for-not-mapping：
+ * 没有消费者的灵活性是会骗人的声明）。
+ */
+function rowLayout(ids: readonly string[]): WorkbenchRegionLayoutNode {
   const [first, ...rest] = ids
   if (!first) throw new Error('A Workbench Region layout cannot be empty.')
   if (rest.length === 0) return { type: 'leaf', regionId: first }
   return {
     type: 'split',
-    direction,
+    direction: 'horizontal',
     first: { type: 'leaf', regionId: first },
-    second: lineLayout(rest, direction),
+    second: rowLayout(rest),
     ratio: 1 / ids.length
   }
 }
@@ -53,7 +63,7 @@ function lineLayout(
 function gridLayout(ids: readonly string[], columns: number): WorkbenchRegionLayoutNode {
   const rows: WorkbenchRegionLayoutNode[] = []
   for (let offset = 0; offset < ids.length; offset += columns) {
-    rows.push(lineLayout(ids.slice(offset, offset + columns), 'horizontal'))
+    rows.push(rowLayout(ids.slice(offset, offset + columns)))
   }
   if (rows.length === 1) return rows[0]!
   const combineRows = (remaining: readonly WorkbenchRegionLayoutNode[]): WorkbenchRegionLayoutNode => {
@@ -80,6 +90,26 @@ export function workbenchRegionPresetSize(preset: WorkbenchRegionLayoutPreset): 
   }
 }
 
+/**
+ * 每档预设铺几列。带返回类型的穷举 switch，不是 `preset === 'grid-4' ? 2 : 3`——三元里的 `: 3`
+ * 是个默认桶：新增一档只要不叫 `grid-4` 就静默拿到 3 列，`columns-5` 会被画成 3+2 的两行网格，
+ * 而这一档的名字明说它是一行五列。没有编译错、没有红，只有用户点下去发现画错。穷举 switch 把
+ * 「这一档铺几列」变成一次必须显式作答的决定。
+ *
+ * `columns-3` 也走这条路而不是另开一条「一行排完」的分支：它的格数恰好等于列数，
+ * `gridLayout` 只会排出一行、直接返回那一行，与专门的一行实现逐字段相等。留着那条分支等于留一个
+ * 任何测试都分辨不出的死条件（本仓 surviving-mutation-may-be-dead-condition：先判它可不可能改变
+ * 结果，是就删代码）。
+ */
+function presetColumns(preset: WorkbenchRegionLayoutPreset): number {
+  switch (preset) {
+    case 'columns-3': return 3
+    case 'grid-4': return 2
+    case 'grid-6': return 3
+    case 'grid-9': return 3
+  }
+}
+
 export function applyWorkbenchRegionLayoutPreset(
   layout: WorkbenchViewLayout,
   preset: WorkbenchRegionLayoutPreset,
@@ -91,9 +121,7 @@ export function applyWorkbenchRegionLayoutPreset(
   const ids = [...current, ...addedRegionIds]
   if (new Set(ids).size !== ids.length) return layout
   return {
-    root: preset === 'columns-3'
-      ? lineLayout(ids, 'horizontal')
-      : gridLayout(ids, preset === 'grid-4' ? 2 : 3),
+    root: gridLayout(ids, presetColumns(preset)),
     activeRegionId: layout.activeRegionId
   }
 }
@@ -102,6 +130,26 @@ function leafCount(root: WorkbenchRegionLayoutNode): number {
   return root.type === 'leaf' ? 1 : leafCount(root.first) + leafCount(root.second)
 }
 
+/**
+ * 按叶子数配比：一个 split 的两侧各拿到与自身格数成正比的空间。
+ *
+ * 算出来的比例要过 `clampSplitRatio`（split-tree.ts 那份 SSOT）。这不是防御性的多余一层——
+ * `addWorkbenchRegion` 每次追加都挂在同一个锚点上，于是 N 格会长成一条梳子（见 workbench-tabs.ts
+ * 的注释），最外层那个 split 的两侧是 N-1 : 1，配比 (N-1)/N。N=7 时它是 0.857，已经越过
+ * `1 - MIN_SPLIT_RATIO` = 0.85；N 越大越界的层数越多。视图会把越界的比例夹回去再画，所以症状不是
+ * 画错，而是**存进去的值与画出来的值不一致**：拖一次分隔条的提交器观察到被夹过的布局，又把修正值写
+ * 回 store，于是有一帧跳动加一次多余的写入。夹在源头，模型里就不存在越界的比例。
+ *
+ * 要说清楚的是**这一层夹的是 split 的比例，不是格子的宽度**。N≥7 的梳子里「每格恰好 1/N 宽」在数学上
+ * 就做不到——那要求最外层 split 的比例是 (N-1)/N > 0.85，本身就越界。所以 #470 那句「每格均分」在
+ * N≥7 时会弯，弯的原因是梳子这个形状，不是这次的夹取；换成平衡二叉的骨架才是它的解法，不在本函数
+ * 职责内。
+ *
+ * `rowLayout` / `gridLayout` 刻意不夹：它们的 1/N 里 N 是每行的列数或行数，受 `presetColumns`
+ * 约束在 3 以内，取值下限 1/3 天然在界内。这个前提由 `workbench-view-layout.test.ts` 里那条遍历
+ * `WORKBENCH_LAYOUT_PRESETS` 的用例守着——加一档新预设就自动多一份覆盖，若它的几何算出越界比例，
+ * 那条会红。宁可让前提被数据质询，也不要写一段永远不可能触发的夹取。
+ */
 function balanceNode(root: WorkbenchRegionLayoutNode): WorkbenchRegionLayoutNode {
   if (root.type === 'leaf') return root
   const first = balanceNode(root.first)
@@ -110,7 +158,7 @@ function balanceNode(root: WorkbenchRegionLayoutNode): WorkbenchRegionLayoutNode
     ...root,
     first,
     second,
-    ratio: leafCount(first) / (leafCount(first) + leafCount(second))
+    ratio: clampSplitRatio(leafCount(first) / (leafCount(first) + leafCount(second)))
   }
 }
 
