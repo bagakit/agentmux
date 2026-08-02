@@ -114,43 +114,98 @@ describe('菜单的键位来自它声明的来源', () => {
   })
 })
 
+/**
+ * 每一行菜单项的标签 → 它应当宣传的那个 action。**在测试里手写**，与 {@link REGISTRY_ROWS} 同一条理由。
+ *
+ * 键位为 null 的两行是刻意的：Select all / Scroll to bottom 没有键位。把它们一起列出来是为了让判据
+ * **穷举**——每个菜单项都必须在这张表里有一条，于是「给某一行加了键位而这里没跟上」也会红，而不是被
+ * 「只看有 kbd 的那几行」悄悄漏过去。
+ */
+const MENU_ROWS: Record<string, TerminalMenuAction | null> = {
+  Copy: 'copy',
+  Paste: 'paste',
+  'Select all': null,
+  Find: 'search',
+  'Scroll to bottom': null,
+  'Clear terminal': 'clear'
+}
+
 describe('组件把这些值渲染出去', () => {
   const source = readFileSync(COMPONENT, 'utf8')
   const file = ts.createSourceFile(COMPONENT, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
 
-  /** 组件里每一个 `<kbd>` 元素的**唯一子表达式**的源码文本。非表达式子节点记成 null。 */
-  function kbdChildExpressions(): (string | null)[] {
-    const found: (string | null)[] = []
+  /** 一行菜单项：它的可见标签，以及它那个 `<kbd>` 的唯一子表达式（没有 kbd 则为 undefined）。 */
+  type MenuRow = { label: string | null; chord: string | null | undefined }
+
+  /** 一个 JSX 元素的唯一子表达式的源码文本。子节点不止一个、或不是表达式时为 null。 */
+  function soleChildExpression(element: ts.JsxElement): string | null {
+    const children = element.children.filter(
+      (child) => !(ts.isJsxText(child) && child.containsOnlyTriviaWhiteSpaces)
+    )
+    const only = children.length === 1 ? children[0] : undefined
+    return only !== undefined && ts.isJsxExpression(only) && only.expression !== undefined
+      ? only.expression.getText(file)
+      : null
+  }
+
+  /**
+   * 组件里每一个 `ContextMenu.Item`，抽成 (标签, 键位表达式) 这一**对**。
+   *
+   * 为什么要成对而不是各扫一遍：只把全部 `<kbd>` 抽成一个集合，判据就退化成「读的是 chords 上的某个
+   * 属性」，**永远不问哪一行读哪个属性**。实测（review agent 复现，我自己也复现过）：把 Paste 那行改成
+   * `{chords.copy}` —— 非 mac 上 Paste 又变回 `Ctrl+Shift+V`，正是 #367 本体 —— 6 条全绿。真实事故形状
+   * 就是这个：复制一行菜单项、忘了改属性名。所以判据必须逐元素成对
+   * （记忆 name-existence-check-is-blind-to-rule-bodies）。
+   */
+  function menuRows(): MenuRow[] {
+    const rows: MenuRow[] = []
     const visit = (node: ts.Node): void => {
-      if (ts.isJsxElement(node) && node.openingElement.tagName.getText(file) === 'kbd') {
-        const children = node.children.filter(
-          (child) => !(ts.isJsxText(child) && child.containsOnlyTriviaWhiteSpaces)
-        )
-        const only = children.length === 1 ? children[0] : undefined
-        found.push(
-          only !== undefined && ts.isJsxExpression(only) && only.expression !== undefined
-            ? only.expression.getText(file)
-            : null
-        )
+      if (ts.isJsxElement(node) && node.openingElement.tagName.getText(file) === 'ContextMenu.Item') {
+        let label: string | null = null
+        let chord: string | null | undefined
+        const scan = (child: ts.Node): void => {
+          if (ts.isJsxElement(child)) {
+            const tag = child.openingElement.tagName.getText(file)
+            if (tag === 'span') {
+              const text = child.children.find((grand) => ts.isJsxText(grand))
+              label = text !== undefined ? text.getText(file).trim() : null
+            } else if (tag === 'kbd') {
+              chord = soleChildExpression(child)
+            }
+          }
+          ts.forEachChild(child, scan)
+        }
+        ts.forEachChild(node, scan)
+        rows.push({ label, chord })
       }
       ts.forEachChild(node, visit)
     }
     ts.forEachChild(file, visit)
-    return found
+    return rows
   }
 
-  it('每个 kbd 的内容都是 terminalMenuChords 结果上的取值', () => {
-    const expressions = kbdChildExpressions()
+  it('每一行读的都是它自己那个 action 的键位', () => {
+    const rows = menuRows()
     // 在场自检：遍历坏掉（改 tag 名判据、走错文件）时整条断言会静默恒真
-    // （记忆 false-green-gate-patterns「扫描根写错静默变绿」）。菜单有四行带键位。
-    expect(expressions.length, '一个 <kbd> 都没扫到——AST 遍历坏了，下面那条已经恒真').toBe(4)
-    // 判据是取值关系：内容必须是那次调用结果上的属性读取。手写字符串、模板拼接、`isMac ? … : …`
-    // 都不满足，而它不依赖任何「禁止的拼法」清单——换个写法绕不过去。
-    for (const expression of expressions) {
+    // （记忆 false-green-gate-patterns「扫描根写错静默变绿」）。
+    expect(rows.length, '一个菜单项都没扫到——AST 遍历坏了，下面那些断言已经恒真').toBe(
+      Object.keys(MENU_ROWS).length
+    )
+    // 标签集合必须恰好是那张表——多一行少一行都红，于是新加的行不会绕过下面的逐行判据。
+    expect(rows.map((row) => row.label).sort()).toEqual(Object.keys(MENU_ROWS).sort())
+    for (const row of rows) {
+      const action = MENU_ROWS[row.label ?? '']
+      if (action === null) {
+        // 没有键位的那两行：给它们加 kbd 时必须回来更新这张表，否则那一格无人守。
+        expect(row.chord, `${row.label} 本来没有键位，现在有了——判据表没跟上`).toBeUndefined()
+        continue
+      }
+      // 判据是**这一行**读的是**对应**那个属性。手写字符串、模板拼接、`isMac ? … : …`、以及
+      // 「读了 chords 上另一个键」都不满足；它不依赖任何「禁止的拼法」清单，换个写法绕不过去。
       expect(
-        expression,
-        `有一个 <kbd> 的内容不是从 terminalMenuChords() 的结果里取的：${expression ?? '(非表达式)'}`
-      ).toMatch(/^chords\.[a-z]+$/u)
+        row.chord,
+        `${row.label} 那行宣传的不是 chords.${action}，而是 ${row.chord ?? '(没有 kbd)'}`
+      ).toBe(`chords.${action}`)
     }
   })
 
