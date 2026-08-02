@@ -37,6 +37,7 @@ import {
   type WorkbenchSurface,
   type WorkbenchTab
 } from './workbench-tabs'
+import { assertUnreachableSurface } from './workbench-surface-kinds'
 
 export type WorkbenchControlState = {
   sessions: readonly SessionSnapshot[]
@@ -80,10 +81,26 @@ function projectSurface(
     const session = sessions.get(surface.sessionId)
     if (session?.kind === 'terminal') return { ...base, kind: 'terminal', runId: session.control.run.runId }
   }
-  if (surface.kind === 'browser') return { ...base, kind: 'browser', browserId: surface.browserId }
-  if (surface.kind === 'file') return { ...base, kind: 'file', path: surface.path }
-  if (surface.kind === 'launcher') return { ...base, kind: 'launcher' }
-  throw error('CONTROL_OWNER_LOST', 'Region content is changing and has no stable Control projection.')
+  // Attached sessions with a live snapshot returned above. Everything that reaches here is classified
+  // once, exhaustively: the pure presentation kinds each get a projection, while a launching-phase or
+  // session-lost agent/terminal has no stable Control projection and keeps its existing loud failure.
+  // The `assertNever` default is why this is safe against a new kind: an `if`-chain ending in a bare
+  // `throw` would silently route a 6th kind into CONTROL_OWNER_LOST at runtime; here it fails to
+  // compile until the new kind is explicitly placed. Not a `Record`: the arms build different shapes
+  // and two of them (agent/terminal) must throw, not return a value.
+  switch (surface.kind) {
+    case 'browser':
+      return { ...base, kind: 'browser', browserId: surface.browserId }
+    case 'file':
+      return { ...base, kind: 'file', path: surface.path }
+    case 'launcher':
+      return { ...base, kind: 'launcher' }
+    case 'agent':
+    case 'terminal':
+      throw error('CONTROL_OWNER_LOST', 'Region content is changing and has no stable Control projection.')
+    default:
+      return assertUnreachableSurface(surface)
+  }
 }
 
 function projectTabRegions(

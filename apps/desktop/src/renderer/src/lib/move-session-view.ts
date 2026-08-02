@@ -10,6 +10,7 @@ import {
   type TerminalWorkbenchSurface,
   type WorkbenchTab
 } from './workbench-tabs'
+import { isSessionSurface } from './workbench-surface-kinds'
 
 // Moving a Session to another worktree moves only its DISPLAY IDENTITY — the Region that projects it
 // into a View. The Agent's cwd is `session.workspacePath` (Core, the working directory of an already
@@ -52,7 +53,7 @@ export type MoveSessionViewResult =
     }
 
 function sessionSurfaceOf(surface: WorkbenchTab['regions'][string]): SessionSurface | null {
-  return surface.kind === 'agent' || surface.kind === 'terminal' ? surface : null
+  return isSessionSurface(surface) ? surface : null
 }
 
 function findSessionViewInWorkspace(

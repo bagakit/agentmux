@@ -8,6 +8,7 @@ import {
   type WorkbenchSurface,
   type WorkbenchTab
 } from './workbench-tabs'
+import { assertUnreachableSurface, isSessionSurface } from './workbench-surface-kinds'
 
 export type WorkbenchViewCloseResource =
   | {
@@ -99,7 +100,7 @@ export function planWorkbenchViewClose(input: {
     candidate.id === input.tabId || input.closingViewIds?.has(candidate.id)
       ? []
       : workbenchSurfaces(candidate).flatMap((surface) => (
-          (surface.kind === 'agent' || surface.kind === 'terminal') && surface.phase === 'attached'
+          isSessionSurface(surface) && surface.phase === 'attached'
             ? [surface.sessionId]
             : []
         ))
@@ -111,7 +112,7 @@ export function planWorkbenchViewClose(input: {
       resources.set(key, { key, kind: 'browser', browserId: surface.browserId })
       return { owner: surfaceOwner(surface, sessions), resourceKey: key }
     }
-    if (surface.kind !== 'agent' && surface.kind !== 'terminal') {
+    if (!isSessionSurface(surface)) {
       return { owner: surfaceOwner(surface, sessions), resourceKey: null }
     }
     if (surface.phase !== 'attached' || attachedOutsideView.has(surface.sessionId)) {
@@ -289,7 +290,7 @@ export function hasAttachedSessionOutsideClosingViews(input: {
 }): boolean {
   return Object.values(input.tabs).some((tab) => (
     input.plans[tab.id] === undefined && workbenchSurfaces(tab).some((surface) => (
-      (surface.kind === 'agent' || surface.kind === 'terminal') &&
+      isSessionSurface(surface) &&
       surface.phase === 'attached' &&
       surface.sessionId === input.sessionId
     ))
@@ -309,22 +310,30 @@ function surfaceOwner(
   sessions: ReadonlyMap<string, SessionSnapshot>,
   includeRun = false
 ): WorkbenchViewCloseSurfaceOwner {
-  if (surface.kind === 'agent' || surface.kind === 'terminal') {
-    return {
-      regionId: surface.regionId,
-      kind: surface.kind,
-      phase: surface.phase,
-      sessionId: surface.sessionId,
-      runId: includeRun ? (sessions.get(surface.sessionId)?.control.run.runId ?? null) : null
-    }
+  // Every kind projects to exactly one owner descriptor, classified once. The old tail was a bare
+  // `return { regionId, kind }` fall-through that any unhandled kind silently took — so a new kind
+  // would get a launcher-shaped owner (no session teardown, no browser release) with nothing going
+  // red. `assertUnreachableSurface` at the default forces a new kind to be placed here before it can
+  // compile. Not a `Record`: agent/terminal/browser/file each carry different owner fields.
+  switch (surface.kind) {
+    case 'agent':
+    case 'terminal':
+      return {
+        regionId: surface.regionId,
+        kind: surface.kind,
+        phase: surface.phase,
+        sessionId: surface.sessionId,
+        runId: includeRun ? (sessions.get(surface.sessionId)?.control.run.runId ?? null) : null
+      }
+    case 'browser':
+      return { regionId: surface.regionId, kind: surface.kind, browserId: surface.browserId }
+    case 'file':
+      return { regionId: surface.regionId, kind: surface.kind, path: surface.path }
+    case 'launcher':
+      return { regionId: surface.regionId, kind: surface.kind }
+    default:
+      return assertUnreachableSurface(surface)
   }
-  if (surface.kind === 'browser') {
-    return { regionId: surface.regionId, kind: surface.kind, browserId: surface.browserId }
-  }
-  if (surface.kind === 'file') {
-    return { regionId: surface.regionId, kind: surface.kind, path: surface.path }
-  }
-  return { regionId: surface.regionId, kind: surface.kind }
 }
 
 function sameSurfaceOwner(
@@ -333,16 +342,26 @@ function sameSurfaceOwner(
   sessions: ReadonlyMap<string, SessionSnapshot>
 ): boolean {
   if (!left || left.kind !== right.kind || left.regionId !== right.regionId) return false
-  if (left.kind === 'agent' || left.kind === 'terminal') {
-    return (
-      (right.kind === 'agent' || right.kind === 'terminal') &&
-      left.phase === right.phase &&
-      left.sessionId === right.sessionId &&
-      (right.runId === null ||
-        (sessions.get(left.sessionId)?.control.run.runId ?? null) === right.runId)
-    )
+  // Identity comparison per kind, exhaustive. The old tail `return left.kind === 'launcher' && …` was
+  // the catch-all a new kind would silently take, reporting "different owner" for two identical new
+  // surfaces. `assertUnreachableSurface` forces the new kind to declare how it compares.
+  switch (left.kind) {
+    case 'agent':
+    case 'terminal':
+      return (
+        (right.kind === 'agent' || right.kind === 'terminal') &&
+        left.phase === right.phase &&
+        left.sessionId === right.sessionId &&
+        (right.runId === null ||
+          (sessions.get(left.sessionId)?.control.run.runId ?? null) === right.runId)
+      )
+    case 'browser':
+      return right.kind === 'browser' && left.browserId === right.browserId
+    case 'file':
+      return right.kind === 'file' && left.path === right.path
+    case 'launcher':
+      return right.kind === 'launcher'
+    default:
+      return assertUnreachableSurface(left)
   }
-  if (left.kind === 'browser' && right.kind === 'browser') return left.browserId === right.browserId
-  if (left.kind === 'file' && right.kind === 'file') return left.path === right.path
-  return left.kind === 'launcher' && right.kind === 'launcher'
 }

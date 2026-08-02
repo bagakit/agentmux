@@ -5,6 +5,7 @@ import {
   type WorkbenchSurface,
   type WorkbenchTab
 } from './workbench-tabs'
+import { assertUnreachableSurface, isSessionSurface } from './workbench-surface-kinds'
 
 /**
  * 一张 Tab 在标签上该画哪几个标记。
@@ -62,7 +63,7 @@ export function tabMarkAgentFactsFor(
 ): (surface: WorkbenchSurface) => TabMarkAgentFacts | null {
   const sessionById = new Map(sessions.map((session) => [session.id, session]))
   return (surface) => {
-    if (surface.kind !== 'agent' && surface.kind !== 'terminal') return null
+    if (!isSessionSurface(surface)) return null
     const session = sessionById.get(surface.sessionId)
     if (session?.kind !== 'agent') return null
     return { providerId: session.providerId, status: session.status }
@@ -162,6 +163,11 @@ function surfaceMark(
       return { kind: 'launcher', regionId: surface.regionId }
     case 'browser':
       return { kind: 'browser', regionId: surface.regionId }
+    default:
+      // noImplicitReturns 未开：少一支时 tsc 只把返回类型放宽含 undefined，标签上就静默漏画一种 Region
+      // 的标记。这一句让新增 surface kind 在这里编译不过——与本文件 markLabel 的 never 守卫同一个理由，
+      // 但走共用的 assertUnreachableSurface，不各自手写一份。
+      return assertUnreachableSurface(surface)
   }
 }
 

@@ -8,6 +8,7 @@ import {
   workspaceForSession,
   type WorkbenchTab
 } from './workbench-tabs'
+import { assertUnreachableSurface, isSessionSurface } from './workbench-surface-kinds'
 
 // The quick switcher's data core. It fuses the window's open tabs and agent sessions into one ranked
 // list a single keystroke can search, and — the AgentMux twist — floats sessions that need you above
@@ -150,7 +151,7 @@ export function buildQuickSwitchIndex(input: {
   // crash, and the switcher must survive being opened during startup.
   for (const tab of Object.values(tabs ?? {})) {
     const surface = titleWorkbenchSurface(tab)
-    if (surface.kind === 'agent' || surface.kind === 'terminal') continue
+    if (isSessionSurface(surface)) continue
     const tabGroupId = tabGroupOf(tab.workspaceId, tab.id)
     if (!tabGroupId) continue
     const workspace = config?.workspaces.find((candidate) => candidate.id === tab.workspaceId)
@@ -173,12 +174,25 @@ export function buildQuickSwitchIndex(input: {
 // (file basename, launcher = New Tab, browser title/url) so a row reads exactly like its tab.
 export function quickSwitchTabTitle(tab: WorkbenchTab): string {
   const surface = titleWorkbenchSurface(tab)
-  if (surface.kind === 'file') return surface.path.split('/').at(-1) ?? surface.path
-  if (surface.kind === 'launcher') return 'New Tab'
-  if (surface.kind === 'browser') {
-    if (surface.title && surface.title !== 'about:blank') return surface.title
-    return surface.url === 'about:blank' ? 'New Tab' : surface.url
+  // One title per kind, classified exhaustively. The agent/terminal arm deliberately re-reads the
+  // ACTIVE surface (a session title tab borrows the file basename beside it, else its own id) — that
+  // is a real, distinct branch, not a forgotten fall-through, so it stays an explicit case. Before
+  // this, agent/terminal fell off the end of an `if`-chain into that fallback, and so would any new
+  // kind — silently. `assertUnreachableSurface` at the default makes a 6th kind name its own title.
+  switch (surface.kind) {
+    case 'file':
+      return surface.path.split('/').at(-1) ?? surface.path
+    case 'launcher':
+      return 'New Tab'
+    case 'browser':
+      if (surface.title && surface.title !== 'about:blank') return surface.title
+      return surface.url === 'about:blank' ? 'New Tab' : surface.url
+    case 'agent':
+    case 'terminal': {
+      const active = activeWorkbenchSurface(tab)
+      return active.kind === 'file' ? (active.path.split('/').at(-1) ?? active.path) : tab.id
+    }
+    default:
+      return assertUnreachableSurface(surface)
   }
-  const active = activeWorkbenchSurface(tab)
-  return active.kind === 'file' ? (active.path.split('/').at(-1) ?? active.path) : tab.id
 }
