@@ -89,18 +89,20 @@
 .workspace-topic-item.current { background: var(--green-bg); }
 .workspace-topic-item.current .selector-row__identity strong { color: var(--text); }
 /* 行首没有常驻图标槽——一列全同的图标不携带信息。打开中的 spinner 是唯一会出现在这里的
-   东西，用 auto 列让它出现时才占位，不出现时标题从最左缘开始。identity 那列必须**显式**写成
-   minmax(0, 1fr)：隐式 auto 列按内容定尺，尾部的头像簇于是贴的是内容盒右缘而不是行右缘，
-   各行摘要一长一短，右缘就参差成好几档（用户："右边的 icon 没有对齐"）。 */
-.workspace-topic-entry { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap:var(--sp-3); padding:var(--sp-3) var(--sp-2) var(--sp-3) var(--sp-4); border: 0; color: var(--text-3); background: transparent; text-align: left; }
+   东西，它出现时才占位，不出现时标题从最左缘开始。行内三段的排布（含"头像簇右缘对齐行、
+   与摘要多长无关"）归共享层 `.selector-row`（selector.css）；这里只管本面板的内外边距、
+   背景与状态色。此前这里自写一份 `auto minmax(0,1fr) auto` 三列网格，而 leading 可空——
+   只来两段时簇被摆进摘要那一列，压在文字上（#467）。 */
+.workspace-topic-entry { min-width: 0; display: flex; align-items: center; padding:var(--sp-3) var(--sp-2) var(--sp-3) var(--sp-4); border: 0; color: var(--text-3); background: transparent; text-align: left; }
 .workspace-topic-item:hover:not(.current) { background: var(--surface-3); }
 .workspace-topic-item.current:hover { background: var(--green-bg-hover); }
-.workspace-topic-entry > span { min-width: 0; display: grid; gap:var(--sp-1); }
 .workspace-topic-rename-form { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; gap:var(--sp-3); padding:var(--sp-3) var(--sp-2) var(--sp-3) var(--sp-4); }
 .workspace-topic-rename-form input { min-width: 0; height: 25px; padding:0 var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text); background: var(--bg); font: inherit; font-size: var(--fs-meta); outline: 0; }
 .workspace-topic-rename-form input:focus { border-color: var(--focus-line); box-shadow: var(--focus-ring); }
 /* Topic 行的 identity 排版走共享的 .selector-row__identity；这里只留本面板的两点差异：
-   摘要用 micro 字号，且整行不换行。 */
+   摘要用 micro 字号，且标题与摘要之间留一格——此前这一格是那条已删的 `> span { gap }`
+   顺带给的，与共享层写明的 `gap:0` 相矛盾，删掉它就得把这个意图明写出来。 */
+.workspace-topic-entry .selector-row__identity { gap:var(--sp-1); }
 .workspace-topic-entry .selector-row__identity small { font-size: var(--fs-micro); }
 /* Topic 头像默认只表达身份；只有 live work 才用共享状态色产生外描边/发光。 */
 .agent-avatar {

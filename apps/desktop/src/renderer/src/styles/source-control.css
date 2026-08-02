@@ -20,12 +20,15 @@
 .branches-scroll { min-height: 0; flex: 1; padding:var(--sp-1) var(--sp-2) var(--sp-2); overflow: auto; }
 .branch-group { display: grid; gap:1px; margin-bottom:var(--sp-2); }
 .branch-group > span { padding:var(--sp-1) var(--sp-2) var(--sp-1); color: var(--text-3); font-size: var(--fs-micro); font-weight: 650; letter-spacing: .07em; text-transform: uppercase; }
-.branch-row { width: 100%; min-width: 0; display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; gap:var(--sp-2); min-height: 30px; padding:var(--sp-1) var(--sp-2); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; text-align: left; cursor: pointer; transition: background 120ms ease, color 120ms ease; }
+.branch-row { width: 100%; min-width: 0; display: flex; align-items: center; min-height: 30px; padding:var(--sp-1) var(--sp-2); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; text-align: left; cursor: pointer; transition: background 120ms ease, color 120ms ease; }
 .branch-row:hover { color: var(--text-2); background: var(--surface-2); }
 .branch-row--selected, .branch-row--selected:hover { color: var(--text); background: var(--surface-2); box-shadow: var(--hl); }
-/* 行网格与 identity/尾列排版走共享层（selector.css）。这里只留 Branch 侧真正不同的两点：
-   行首那枚 GitBranch 图标着绿，以及 worktree 路径用等宽体——它是路径不是标题。 */
-.branch-row .selector-row__leading { color: var(--green-2); }
+/* 行内三段的排布走共享层（selector.css 的 `.selector-row`）。这里只留 Branch 侧真正不同的：
+   段间距比 Topic 紧一档、行首那枚 GitBranch 图标定宽着绿，以及 worktree 路径用等宽体——
+   它是路径不是标题。此前这里自写一份三列网格，与 Topic 侧各一份；那条 16px 首列现在是
+   leading 自己的基准宽度，行不再无条件替它留位（#467：轨道在不在与那段在不在是两件事）。 */
+.branch-row .selector-row { gap:var(--sp-2); }
+.branch-row .selector-row__leading { flex: 0 0 16px; color: var(--green-2); }
 .branch-row--selected .selector-row__leading { color: var(--green); }
 .branch-row .selector-row__identity strong { color: inherit; }
 .branch-row .selector-row__identity small { font-family: "SFMono-Regular", monospace; line-height: 12px; }
