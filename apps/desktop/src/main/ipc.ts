@@ -112,7 +112,10 @@ export async function registerIpc(args: {
   const files = args.workspaceFiles ?? new WorkspaceFiles((id) => args.runtime.executionHost(id))
   const worktrees = new WorktreeService((id) => args.runtime.executionHost(id), args.configStore)
   const git = new GitService((id) => args.runtime.executionHost(id))
-  const gh = new GhService((id) => args.runtime.executionHost(id))
+  // `git` is handed in rather than let GhService build its own: the PR readiness read asks git and gh
+  // about the same repository in one breath, and two separately-constructed services could resolve a
+  // workspace's host differently.
+  const gh = new GhService((id) => args.runtime.executionHost(id), git)
   const browserProfiles = new BrowserProfileManager()
   await browserProfiles.initialize()
   const browsers = new BrowserViewManager(args.window, browserProfiles)
@@ -295,6 +298,7 @@ export async function registerIpc(args: {
   handle('git:fetch', async (workspaceId: string, options?: GitRemoteOptions) => await git.fetch(workspaceId, config, options))
   handle('git:aheadBehind', async (workspaceId: string) => await git.aheadBehind(workspaceId, config))
   handle('gh:authStatus', async (workspaceId: string) => await gh.authStatus(workspaceId, config))
+  handle('gh:prReadiness', async (workspaceId: string) => await gh.prReadiness(workspaceId, config))
   handle('gh:createPullRequest', async (workspaceId: string, input: CreatePullRequestInput) =>
     await gh.createPullRequest(workspaceId, input, config))
   handle('files:readDirectory', async (workspaceId: string, path: string) =>
