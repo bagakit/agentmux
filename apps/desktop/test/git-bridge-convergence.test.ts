@@ -58,12 +58,29 @@ function sourceFiles(dir: string): string[] {
 }
 
 /**
+ * 一个解构元素取的是哪个属性名。
+ *
+ * `{ agentmux }` 只有 `name`；`{ agentmux: bridge }` 的属性名在 `propertyName` 上而 `name` 是新变量名。
+ * 取值必须先看 `propertyName`，否则重命名解构会被漏掉。计算属性名（`{ [k]: v }`）取不到静态名字，
+ * 返回 null——那种写法今天不在场，且它躲不过下面的「桥类型只从 git-bridge 导出」那道门。
+ */
+function destructuredKey(node: ts.BindingElement): string | null {
+  const key = node.propertyName ?? node.name
+  return ts.isIdentifier(key) || ts.isStringLiteralLike(key) ? key.text : null
+}
+
+/**
  * 一个文件里所有**读 `agentmux` 属性**的位置。
  *
  * 刻意不判「根对象是不是 `window`」：`globalThis.agentmux`、`self.agentmux`、
  * `(window as any).agentmux`、`window['agentmux']` 都是同一件事的别的拼法，只钉住 `window.` 那一种
  * 等于给绕过留门（记忆 counting-a-symbol-misses-other-spellings）。所以判据是属性名本身，
- * 点号访问与下标访问两种都收。
+ * **三种取属性的写法都收**：点号访问、下标访问、以及解构。
+ *
+ * 解构那一条是后补的：`const { agentmux } = window` 既不是 PropertyAccess 也不是 ElementAccess，
+ * 实测（review agent 复现）用它重新手抄一份桥取值，整族守卫 6 条全绿。这正是那条记忆本身的形状——
+ * 数一个符号的某几种拼法，就漏掉别的拼法。判据取 `propertyName ?? name`，于是重命名解构
+ * （`const { agentmux: bridge } = window`）也算在内。
  */
 function agentmuxReads(file: string): Read[] {
   const text = readFileSync(file, 'utf8')
@@ -75,7 +92,8 @@ function agentmuxReads(file: string): Read[] {
       (ts.isElementAccessExpression(node) &&
         node.argumentExpression !== undefined &&
         ts.isStringLiteralLike(node.argumentExpression) &&
-        node.argumentExpression.text === 'agentmux')
+        node.argumentExpression.text === 'agentmux') ||
+      (ts.isBindingElement(node) && destructuredKey(node) === 'agentmux')
     if (hit) {
       found.push({
         file: relative(RENDERER, file),
