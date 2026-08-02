@@ -5,10 +5,11 @@ import {
   createWorkspaceLayout,
   findGroupForTab,
   groupIds,
+  groupLeafId,
   removeTab,
   type WorkspaceLayout
 } from './workbench-layout'
-import { clampSplitTreeRatios } from './split-tree'
+import { clampSplitTreeRatios, removeLeaf } from './split-tree'
 import {
   removeWorkbenchRegion,
   workbenchSurfaces,
@@ -102,7 +103,63 @@ function normalizePersistedLayout(layout: WorkspaceLayout): WorkspaceLayout {
 }
 
 /**
- * 把一张**持久化读回来的** Tab 的两种 Region 表示强行拉回一致，绝不抛出。
+ * 把一个**持久化读回来的** workspace 布局的「tab-group 树 ↔ `groups` 数组」拉回一致，绝不抛出。
+ *
+ * 这是 {@link reconcilePersistedTab} 在工作区这一层的对偶，两者存在的理由逐字相同：
+ * `assertGroupInvariant`（workbench-layout.ts）是无条件 throw 的生产断言，而 `removeTab` 在
+ * **两个持久化入口**上都会被调用（`keepTabsInLayout`，见其两个调用点）。localStorage 里的内容是
+ * 用户数据，那道断言是本轮才装上的，所以磁盘上完全可能已经躺着一个漂移的布局。
+ *
+ * 实测过的爆法（探针；不是推理）——树 `[main | main-2]`、`groups` 多一条 off-tree 的 `floating`：
+ *   - `projectPersistedWorkbench`（zustand `partialize`，**每次写入都跑**）：`keepTabsInLayout` 把
+ *     `main-2` 的最后一张 Tab 摘掉 → `removeTab` 走收组出口 → 尾部断言看到 `floating` 记录没有对应
+ *     叶子，抛。抛在 `set()` 里，于是**任意一次用户操作变成崩溃，且此后再也写不进去**。
+ *   - 同一形状经 `restorePersistedWorkbench`（启动恢复）同样抛 → 整个 Workbench 落回空白。
+ * 注意漂移**不必**是持久化数据自己带来的：`removeTab` 那条 within-record 出口**刻意容忍**入场时
+ * 就在的 off-tree group（见 workbench-layout.ts:407-411），所以一个今天合法的运行时状态存下来，
+ * 下一次写入就可能在另一个分组上触发收组、连带炸掉。这是本修复要堵的那条缝。
+ *
+ * 取「树 ∩ 记录」，与 region 侧同一条理由：两个方向的多余项在界面上**都不可达**（记录多出来的是
+ * 画不到也关不掉的死分组，树上多出来的叶子 `findGroup` 取不到、画成一只永远空的破格），所以
+ * 「只留两侧都认的」是唯一在用户可见效果上无损的答案。
+ *
+ * **交集为空时不动手**，与 `normalizePersistedLayout` 的同款判断一致：那意味着这个工作区没有一个
+ * 可画的分组，而**编一棵树出来比留着可识别的坏数据更坏**。这一条不像 region 侧那样能整张丢弃——
+ * 工作区布局不是可丢弃的单元，下游 `restorePersistedWorkbench` 对缺失布局有 `createWorkspaceLayout`
+ * 兜底，而对一个**半真半假**的布局没有。留着原样让它继续被识别成漂移。
+ *
+ * 不产 repair 记录：与 region 侧那半不同，这里摘掉的东西对用户不构成可感知的损失——死分组本来就
+ * 画不出来，孤儿叶本来就是空格。告知用户「修好了一个你从来看不见的东西」只是噪音。
+ */
+function reconcilePersistedLayout(layout: WorkspaceLayout): WorkspaceLayout {
+  const tree = groupIds(layout.root)
+  const treeSet = new Set(tree)
+  const recordSet = new Set(layout.groups.map((group) => group.id))
+  const orphanLeafIds = tree.filter((id) => !recordSet.has(id))
+  const ghostRecordIds = layout.groups.filter((group) => !treeSet.has(group.id)).map((g) => g.id)
+  if (orphanLeafIds.length === 0 && ghostRecordIds.length === 0) return layout
+
+  const kept = tree.filter((id) => recordSet.has(id))
+  // 一个可画的分组都不剩：不编树，原样交出去（见 JSDoc 末段）。
+  if (kept.length === 0) return layout
+
+  // 逐个摘掉孤儿叶。`kept` 非空保证 `removeLeaf` 每次都还留得下至少一片叶子，故它恒不返回 null；
+  // `?? root` 是给类型的，不是给一条可达路径的。
+  let root = layout.root
+  for (const orphanId of orphanLeafIds) root = removeLeaf(root, groupLeafId, orphanId) ?? root
+  const groups = layout.groups.filter((group) => !ghostRecordIds.includes(group.id))
+  // `activeGroupId` 原样带走，**刻意不在这里重座**：那件事恰好只有一个正确答案，而它已经有主了。
+  // 两个调用点都是 `normalizePersistedLayout(keepTabsInLayout(...))`（:362 与 :487），那一处按
+  // 「树 ∩ groups」重座，而本函数刚把两侧拉成同一个集合，所以它算出的答案与这里能算的逐点相同；
+  // 中间夹的 `removeTab` 也不会让它失效——收组出口自己就重写 `activeGroupId`
+  // （workbench-layout.ts:418），且它绝不摘掉最后一片叶，故那次重座恒有得选。
+  // 这里再算一遍只会得到第二个「碰巧一致」的判定点：实测把这一行改成原样带走，15 条全绿——
+  // 那不是缺测试，是这个决定在此处不可观测（见 removeTab 出口那条断言只判集合、不判指针）。
+  return { root, groups, activeGroupId: layout.activeGroupId }
+}
+
+/**
+ * 一张**持久化读回来的** Tab 的两种 Region 表示强行拉回一致，绝不抛出。
  *
  * 为什么这一步必须存在：`assertRegionInvariant`（workbench-tabs.ts）是无条件 throw 的生产断言，
  * 而 `removeWorkbenchRegion` 在两个持久化入口上都会被调用（`sessionOnlyTab` 与 `restoreTab`）。
@@ -263,12 +320,18 @@ function sessionOnlyTab(tab: WorkbenchTab): WorkbenchTab | null {
   return next
 }
 
+/**
+ * 从一个持久化布局里摘掉不再在场的 Tab。
+ *
+ * `reconcilePersistedLayout` 必须排在 `removeTab` **之前**（两个调用点都是）：`removeTab` 尾部那条
+ * 无条件断言对一个已漂移的布局会抛，而抢救本身不调任何带断言的 reducer。反序等于让断言先炸。
+ */
 function keepTabsInLayout(
   layout: WorkspaceLayout,
   tabIds: ReadonlySet<string>
 ): WorkspaceLayout {
-  let next = layout
-  for (const group of layout.groups) {
+  let next = reconcilePersistedLayout(layout)
+  for (const group of next.groups) {
     for (const tabId of group.tabOrder) {
       if (!tabIds.has(tabId)) next = removeTab(next, group.id, tabId)
     }
