@@ -14,13 +14,27 @@
 export type ShortcutEvent = Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'shiftKey' | 'altKey'>
 
 /**
- * Where a binding is evaluated, which also settles the non-intersection the four libs enforced by hand:
+ * Where a binding is evaluated:
  * - `window`  — App's window-level capture listener (quick switcher, workbench actions).
- * - `terminal`— xterm's custom key handler; only live while a terminal owns focus, so these never collide
- *   with `window` bindings (a focused terminal claims the chord first; nothing else sees it).
+ * - `terminal`— xterm's custom key handler, live while a terminal owns focus.
  * - `editor`  — Monaco's own keybinding table while the editor owns focus.
  * - `launcher`— the start page's own keydown handler, live only while that surface has focus.
  * A binding belongs to exactly one scope; that is the model, not one flat if over every key.
+ *
+ * **A scope is where a binding is evaluated, NOT a claim that it is alone there.** `window` is co-active
+ * with every inner scope: App's listener runs at `capture: true` and only `preventDefault()`s — it never
+ * stops propagation — so a window binding is offered the key BEFORE the focused xterm or Monaco, whichever
+ * surface has focus. What partially shields the inner surfaces is the `not-in-editable` gate, and it does
+ * NOT cover the terminal: `isEditableChordTarget` returns false when the target is inside `.xterm`
+ * (deliberately — the gate exists so Cmd+D doesn't split the pane while you rename a tab, and a terminal
+ * is not that kind of input). So over a focused terminal, EVERY window binding fires, gated or not.
+ * The two consequences, both guarded in shortcut-registry.test.ts:
+ * - an un-gated window chord claimed by any inner binding makes that inner binding unreachable;
+ * - a **gated** window chord claimed by a `terminal` binding does the same, because the gate steps aside
+ *   in Monaco and the launcher textarea but not in xterm.
+ * This comment used to assert the opposite ("a focused terminal claims the chord first; nothing else sees
+ * it"). That was false, and it is why the second class above shipped unguarded for as long as it did — the
+ * SSOT documented an isolation the router does not implement.
  *
  * Why `launcher` is its own scope and not an un-gated `window` binding: the launcher's submit chord must
  * fire **while the prompt textarea has focus** — that is the only place the user types it — so it cannot
