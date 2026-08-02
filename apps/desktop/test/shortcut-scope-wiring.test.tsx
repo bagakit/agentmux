@@ -6,6 +6,7 @@ import ts from 'typescript'
 import { SHORTCUT_BINDINGS, SHORTCUT_SCOPES, bindingById, monacoKeybindingFor } from '../src/renderer/src/lib/shortcut-registry.js'
 import { windowShortcutHandlers, type WorkbenchShortcutStore } from '../src/renderer/src/lib/workbench-shortcuts.js'
 import { launcherKeydownLaunches } from '../src/renderer/src/lib/launcher-submit.js'
+import { terminalShortcutHandlers } from '../src/renderer/src/lib/terminal-shortcuts.js'
 import { monacoKeybindingConstants } from './helpers/editor-pane-store.js'
 
 // 跨 scope 的接线元守卫：**每个** scope 的壳都必须真的把匹配出的 id 变成动作。
@@ -151,22 +152,18 @@ function stubStore(): WorkbenchShortcutStore {
   } as unknown as WorkbenchShortcutStore
 }
 
-/** 读壳的源码并剥掉注释——注释里写的 id 不算接线。 */
-function shellCode(relative: string): string {
-  const text = readFileSync(new URL(`../src/renderer/src/${relative}`, import.meta.url), 'utf8')
-  return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
-}
-
 /**
  * 每个 scope 一条质询：给定这个 scope 的全部绑定 id，证明壳真的会把它们变成动作。
  *
  * 质询方式按「这个壳能被问到什么程度」选，而不是按一个声明出来的 kind 分类。三种深度，
  * 从强到弱，新 scope 应尽量往上靠：
- * 1. **直接调那个决策函数**（launcher）——最强，判的就是运行期行为本身。
+ * 1. **直接调那个决策函数 / handler 工厂**（launcher、terminal）——最强，判的就是运行期行为本身。
+ *    壳被抽成「注入依赖 → 返回 Record<id, handler>」之后就能到这一层。
  * 2. **挂载后调它注册的 handler**（editor）——次之，注册在场与「按下去有后果」都可证，
  *    但「后果对不对」（存的是这个文件吗、翻的是这个开关吗）由三个逐 id 的 wiring 测试各自钉。
- * 3. **读源码断言比较在场**（window 的 handler map 除外，terminal 只能到这一层）——最弱，
- *    「比较在场」不等于「后果发生」：terminal 的分支体清空后这一层照旧全绿，那是 #360 的靶子。
+ * 3. **读源码断言比较在场**——最弱，「比较在场」不等于「后果发生」。terminal 曾停在这一层，
+ *    分支体清空后照旧全绿（#360 的靶子）；抽出工厂后已升到第 1 层，这一层现在没人用。
+ *    真要退到这一层，必须另配一条接线层守卫（见本文件末尾那条）说明壳有没有被执行到。
  */
 const SCOPE_INTERROGATIONS = new Map<string, (ids: readonly string[]) => void>([
   [
@@ -185,13 +182,34 @@ const SCOPE_INTERROGATIONS = new Map<string, (ids: readonly string[]) => void>([
   [
     'terminal',
     (ids) => {
-      // TerminalView 的 attachCustomKeyEventHandler 在 effect 里，renderToStaticMarkup 不跑 effect
-      // 也发不出键，所以只能读源码。判据锚在带比较运算符的形状上：注册表 import 进来的裸字符串
-      // 不满足它。**这一层的已知上限**：分支体清空后照旧全绿（#360 实测），补法是把壳抽成
-      // terminalShortcutHandlers 工厂，那时这条就该换成 window 那样的直接质询。
-      const code = shellCode('components/TerminalView.tsx')
+      // 壳查一张 `Record<id, () => void>`（`terminalShortcutHandlers`），所以直接向那份 map 要
+      // handler 并**调用**它，断言它真的碰了注入进去的依赖。
+      //
+      // 此前这条走的是「源码里有 `=== 'id'`」的文本判据，而那一层认不出分支体被掏空：把
+      // `if (id === 'terminal.search') { setSearchOpen(true) }` 的体清掉，56 条终端搜索测试
+      // 与整族快捷键测试全绿，那个键对用户彻底失效。抽成工厂（#360）之后运行期够得着了，
+      // 文本判据与配套的 AST 代偿守卫都一起删掉了。
+      const touched: string[] = []
+      const handlers = terminalShortcutHandlers({
+        sendInput: () => touched.push('sendInput'),
+        kittyKeyboardActive: () => false,
+        setSearchOpen: () => touched.push('setSearchOpen'),
+        readSelection: () => 'selected text',
+        rememberSelection: () => touched.push('rememberSelection'),
+        writeClipboard: () => touched.push('writeClipboard'),
+        clear: () => touched.push('clear')
+      })
       for (const id of ids) {
-        expect(code.includes(`=== '${id}'`), `TerminalView.tsx 没有对 terminal 绑定 ${id} 做 id 比较`).toBe(true)
+        const handler = handlers[id]
+        expect(handler, `terminal 绑定 ${id} 在 handler map 里没有 handler——那个键按下去什么都不会发生`).toBeTypeOf(
+          'function'
+        )
+        touched.length = 0
+        handler!()
+        expect(
+          touched,
+          `terminal 绑定 ${id} 有 handler 但调用它一个依赖都没碰——handler 体是空的，键是死的`
+        ).not.toEqual([])
       }
     }
   ],
@@ -303,80 +321,70 @@ describe('每个 scope 的壳都真的把匹配出的 id 变成动作', () => {
     })
   }
 
-  it('TerminalView 里那些 id 比较的左边是 matchShortcut 的返回值，不是别处的字符串', () => {
-    // 上面 terminal 那条走的是文本判据（`=== 'id'` 在场），它认不出「比较的左边不是匹配出的 id」
-    // 这种形状——把 `shortcutId === 'terminal.search'` 换成 `event.key === 'terminal.search'`，
-    // 文本照旧命中而分支永不成立。判据因此落在 AST 上：壳里必须存在一次
-    // `matchShortcut(…, { scope: 'terminal' })` 调用，且它的返回值被赋给某个名字，
-    // 而那些比较的左边正是这个名字（或直接就是那次调用）。
+  it('TerminalView 把整个键回调交给 terminalKeyEventHandler，自己不留判定语句——接线层', () => {
+    // 上面 terminal 那条质询的是**工厂**：每条绑定都有 handler、调用它有后果。它不问壳有没有
+    // 被执行到。本仓「抽进 lib 只解决一半」：内容变可测了，而那层壳照旧无人守——实测在
+    // `matchShortcut` 之后插一句 `return true`（整个回调变 no-op，每个终端键全失效），
+    // 工厂那族与「判取值关系」的守卫双双全绿。判 import / 判下标取值都看不见一句早退。
     //
-    // 只对 terminal 做：这是唯一还靠读源码的 scope。launcher 此前也走这条，现在改成直接调
-    // launcherKeydownLaunches，那更强，不需要这层代偿。#360 把 terminal 也抽成工厂之后，
-    // 这条连同上面那条文本判据都该一起删掉。
+    // 所以判据不是「工厂被用了」，而是**壳里没有语句可插**：`attachCustomKeyEventHandler` 的
+    // 实参必须就是 `terminalKeyEventHandler(...)` 这一次调用本身，不是一个内联的箭头函数、
+    // 也不是别处的变量。判定与吞键的每一行都在 lib 里，于是每一行都在测试射程内。
     const relative = 'components/TerminalView.tsx'
     const text = readFileSync(new URL(`../src/renderer/src/${relative}`, import.meta.url), 'utf8')
     const source = ts.createSourceFile(relative, text, ts.ScriptTarget.Latest, true)
 
-    const isScopedMatch = (node: ts.Node): boolean => {
-      if (!ts.isCallExpression(node)) return false
-      const callee = node.expression
-      if (!ts.isIdentifier(callee) || callee.text !== 'matchShortcut') return false
-      // 实参里必须写着字面量 'terminal'。取字面量而不是变量：scope 由调用点直接决定。
-      return node.arguments.some(
-        (arg) =>
-          ts.isObjectLiteralExpression(arg) &&
-          arg.properties.some(
-            (prop) =>
-              ts.isPropertyAssignment(prop) &&
-              prop.name.getText() === 'scope' &&
-              ts.isStringLiteral(prop.initializer) &&
-              prop.initializer.text === 'terminal'
-          )
-      )
-    }
-
-    /** 那次调用的返回值被存进了哪些名字（以及是否直接内联比较）。 */
-    const carriers = new Set<string>()
-    let inlineCompared = false
-    /** 左边是载体、右边是字面量的那些比较，右边的取值。 */
-    const compared = new Set<string>()
-
-    const isIdComparison = (node: ts.Node): node is ts.BinaryExpression =>
-      ts.isBinaryExpression(node) &&
-      (node.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken ||
-        node.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsEqualsToken)
+    /** 从 terminal-shortcuts 模块具名 import 进来的名字。 */
+    const imported = new Set<string>()
+    /** `attachCustomKeyEventHandler(x)` 的每个实参 `x` 的源码文本与「是不是那次调用」。 */
+    const attachArgs: Array<{ text: string; isFactoryCall: boolean }> = []
 
     const walk = (node: ts.Node): void => {
-      if (ts.isVariableDeclaration(node) && node.initializer && isScopedMatch(node.initializer)) {
-        carriers.add(node.name.getText())
+      if (
+        ts.isImportDeclaration(node) &&
+        ts.isStringLiteral(node.moduleSpecifier) &&
+        node.moduleSpecifier.text.includes('terminal-shortcuts') &&
+        node.importClause?.namedBindings &&
+        ts.isNamedImports(node.importClause.namedBindings)
+      ) {
+        for (const element of node.importClause.namedBindings.elements) {
+          imported.add(element.name.text)
+        }
       }
-      if (isIdComparison(node) && isScopedMatch(node.left)) inlineCompared = true
+      if (
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        node.expression.name.text === 'attachCustomKeyEventHandler'
+      ) {
+        const arg = node.arguments[0]
+        attachArgs.push({
+          text: arg ? arg.getText().slice(0, 60) : '(无实参)',
+          isFactoryCall: Boolean(
+            arg &&
+              ts.isCallExpression(arg) &&
+              ts.isIdentifier(arg.expression) &&
+              arg.expression.text === 'terminalKeyEventHandler'
+          )
+        })
+      }
       ts.forEachChild(node, walk)
     }
     walk(source)
 
     expect(
-      carriers.size > 0 || inlineCompared,
-      `${relative} 里没有 matchShortcut(scope: 'terminal') 的返回值被比较——那些 id 比较判的是别的东西`
+      imported.has('terminalKeyEventHandler'),
+      `${relative} 没有从 terminal-shortcuts import terminalKeyEventHandler——键回调又搬回组件里了`
     ).toBe(true)
-
-    // 第二遍：载体集合此时已完整，逐个收集比较的右值。
-    const collect = (node: ts.Node): void => {
-      if (isIdComparison(node) && ts.isStringLiteral(node.right)) {
-        const leftName = ts.isIdentifier(node.left) ? node.left.text : null
-        if ((leftName && carriers.has(leftName)) || isScopedMatch(node.left)) compared.add(node.right.text)
-      }
-      ts.forEachChild(node, collect)
-    }
-    collect(source)
-
-    const terminalIds = SHORTCUT_BINDINGS.filter((b) => b.scope === 'terminal').map((b) => b.id)
-    expect(terminalIds.length, 'terminal 一条绑定都没有——这条会退化成恒真').toBeGreaterThan(0)
-    for (const id of terminalIds) {
-      expect(
-        compared.has(id),
-        `${relative} 里 ${id} 的比较左边不是 matchShortcut(scope: 'terminal') 的结果`
-      ).toBe(true)
-    }
+    // 自检：真的找到了那次注册调用。找不到时下面的 every 对空数组恒真，这条防的就是那种假绿。
+    expect(
+      attachArgs.length,
+      `${relative} 里没有 attachCustomKeyEventHandler 调用——扫描锚点失效或注册被删了`
+    ).toBeGreaterThan(0)
+    const inlined = attachArgs.filter((a) => !a.isFactoryCall)
+    expect(
+      inlined.map((a) => a.text),
+      `${relative} 的 attachCustomKeyEventHandler 实参不是 terminalKeyEventHandler(...) 那次调用——` +
+        '组件里又有了自己的判定语句，那些行运行期够不着'
+    ).toEqual([])
   })
 })

@@ -4,7 +4,8 @@ import {
   SHIFT_ENTER_CSI_U,
   SHIFT_ENTER_ESC_CR,
   shiftEnterInput,
-  terminalSelectionForCopy
+  terminalSelectionForCopy,
+  terminalShortcutHandlers
 } from '../src/renderer/src/lib/terminal-shortcuts.js'
 import {
   initialKittyKeyboardState,
@@ -34,26 +35,101 @@ describe('Terminal copy-selection source', () => {
   })
 })
 
-// TerminalView 的终端作用域接线。终端键判定发生在 xterm 的 attachCustomKeyEventHandler 回调里——本仓库
-// renderToStaticMarkup 不跑 effect、更不会触发 xterm 的键回调，所以「命中的 id 有没有被接到对应动作」
-// 够不着运行期断言。这里做补法：把 TerminalView 里出现的终端 id 与注册表 terminal scope 的 SSOT 对齐。
-// 把某条 `shortcutId === 'terminal.newline'` 打成 typo（M14）会让那个 id 从 TerminalView 里消失，这条红。
-describe('TerminalView 接住注册表里每一条 terminal scope 绑定', () => {
+// TerminalView 的终端作用域接线。键判定发生在 xterm 的 attachCustomKeyEventHandler 回调里，
+// renderToStaticMarkup 不跑 effect、更不会触发 xterm 的键回调——所以这一族曾经只能读源码断言
+// `=== 'terminal.search'` 在场，而那一层认不出分支体被掏空：把 `{ setSearchOpen(true) }` 的体清掉，
+// 56 条终端搜索测试与整族快捷键测试全绿，那个键对用户彻底失效。
+//
+// 现在动作抽成了 {@link terminalShortcutHandlers}（注入依赖 → `Record<id, handler>`），运行期够得着：
+// 下面逐条钉**后果**（送什么字节、开哪个开关、写什么进剪贴板）。「壳有没有真的去查那份 map」
+// 由 shortcut-scope-wiring.test.tsx 里的接线层守卫按 AST 判 import 关系与下标取值。
+describe('terminal 绑定的动作', () => {
   const terminalView = readFileSync(
     new URL('../src/renderer/src/components/TerminalView.tsx', import.meta.url),
     'utf8'
   )
-  // 剥注释，免得注释里写的 id 假装成接线。
+  // 剥注释，免得注释里写的东西假装成接线。
   const code = terminalView.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
 
-  it('每条 terminal 绑定 id 都在 TerminalView 的判定分支里被引用（typo/漏接即红）', () => {
-    const terminalIds = SHORTCUT_BINDINGS.filter((b) => b.scope === 'terminal').map((b) => b.id)
-    // 自证扫到了东西：注册表里确实有 terminal 绑定。
-    expect(terminalIds.length).toBeGreaterThan(0)
-    for (const id of terminalIds) {
-      // 锚在带比较运算符的形状 `=== 'id'`，而不是裸出现——注册表 import 的字符串不会满足这个形状。
-      expect(code, `TerminalView 没接 terminal 绑定 ${id}`).toContain(`=== '${id}'`)
+  /** 记下每个依赖被碰了什么，作为「后果」的观测面。 */
+  function spyDeps(selection = 'picked text', kitty = false) {
+    const calls = {
+      sentInput: [] as string[],
+      searchOpen: [] as boolean[],
+      remembered: [] as string[],
+      clipboard: [] as string[],
+      cleared: 0
     }
+    const handlers = terminalShortcutHandlers({
+      sendInput: (data) => calls.sentInput.push(data),
+      kittyKeyboardActive: () => kitty,
+      setSearchOpen: (open) => calls.searchOpen.push(open),
+      readSelection: () => selection,
+      rememberSelection: (text) => calls.remembered.push(text),
+      writeClipboard: (text) => calls.clipboard.push(text),
+      clear: () => {
+        calls.cleared += 1
+      }
+    })
+    return { calls, handlers }
+  }
+
+  it('注册表 terminal scope 的 id 集与 handler map 的键**双向**一致', () => {
+    // 两个方向都要判。少一条 → 那个键按下去什么都不会发生（漏接 / typo）。多一条 → map 里有个
+    // 谁也匹配不出来的 id，那是死代码，通常意味着注册表那侧改了名字而这侧没跟上。
+    const registryIds = SHORTCUT_BINDINGS.filter((b) => b.scope === 'terminal')
+      .map((b) => b.id)
+      .sort()
+    // 自证扫到了东西：注册表里确实有 terminal 绑定，否则下面两条对空集恒真。
+    expect(registryIds.length).toBeGreaterThan(0)
+    const handlerIds = Object.keys(spyDeps().handlers).sort()
+    expect(handlerIds, 'terminal 绑定与 handler map 的 id 集不一致').toEqual(registryIds)
+  })
+
+  it('terminal.newline 送出与 Enter 不同的字节（两种编码各一次）', () => {
+    const off = spyDeps('', false)
+    off.handlers['terminal.newline']!()
+    expect(off.calls.sentInput).toEqual([SHIFT_ENTER_ESC_CR])
+    expect(off.calls.sentInput[0]).not.toBe('\r')
+
+    const on = spyDeps('', true)
+    on.handlers['terminal.newline']!()
+    expect(on.calls.sentInput).toEqual([SHIFT_ENTER_CSI_U])
+  })
+
+  it('terminal.search 打开搜索条，而不是关掉它', () => {
+    const { calls, handlers } = spyDeps()
+    handlers['terminal.search']!()
+    // 极性也是判据：`setSearchOpen(false)` 会让 Cmd+F 变成「关掉搜索」。
+    expect(calls.searchOpen).toEqual([true])
+  })
+
+  it('terminal.copy 把当前选区记下来并写进剪贴板', () => {
+    const { calls, handlers } = spyDeps('picked text')
+    handlers['terminal.copy']!()
+    expect(calls.clipboard).toEqual(['picked text'])
+    // 记住这次选区，右键 Copy 在焦点转移后仍可用（见 terminalSelectionForCopy）。
+    expect(calls.remembered).toEqual(['picked text'])
+  })
+
+  it('terminal.copy 在没选区时不去覆盖记住的那份', () => {
+    // 空选区若也写进 rememberedSelection，就把上一次的可用来源抹掉了。
+    const { calls, handlers } = spyDeps('')
+    handlers['terminal.copy']!()
+    expect(calls.remembered).toEqual([])
+  })
+
+  it('terminal.clear 清屏', () => {
+    const { calls, handlers } = spyDeps()
+    handlers['terminal.clear']!()
+    expect(calls.cleared).toBe(1)
+  })
+
+  it('paste 刻意不在 handler map 里——原生 Edit→Paste 是它的唯一所有者', () => {
+    // xterm 的 attachCustomKeyEventHandler 返回 false 不会 preventDefault，所以原生路径照旧触发。
+    // 在这里也处理一次会让同一份剪贴板文本被贴两次。这条断言让「顺手补上 paste」立刻红，
+    // 并把理由摆在失败信息里。
+    expect(Object.keys(spyDeps().handlers)).not.toContain('terminal.paste')
   })
 
   it('判定来自注册表的 matchShortcut(scope terminal)，不是各自手写修饰键判断', () => {
