@@ -5,6 +5,7 @@ import {
   type SplitTreeLeaf,
   clampSplitRatio,
   collectLeafIds,
+  EVEN_SPLIT_RATIO,
   findSiblingLeafId,
   removeLeaf,
   replaceLeaf,
@@ -275,7 +276,7 @@ export function splitWorkbenchRegion(
       direction: orientationOf(direction),
       first: newFirst ? added : target,
       second: newFirst ? target : added,
-      ratio: 0.5
+      ratio: EVEN_SPLIT_RATIO
     }),
     activeRegionId: newRegionId
   }

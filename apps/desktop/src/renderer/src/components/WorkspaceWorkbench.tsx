@@ -57,7 +57,7 @@ import type {
 } from '../lib/workbench-layout'
 import { regionIds } from '../lib/workbench-view-layout'
 import type { WorkbenchRegionLayoutNode } from '../lib/workbench-view-layout'
-import { MIN_SPLIT_PERCENT } from '../lib/split-tree'
+import { clampSplitRatio, MIN_SPLIT_PERCENT } from '../lib/split-tree'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import type { AgentTimelineSnapshot } from '@agentmux/core'
 import {
@@ -1113,22 +1113,23 @@ function SplitBranch({
   const terminalResizeSuspended = interactiveResize || dragging
   const commitRef = useRef((ratio: number) => updateSplitRatio(workspaceId, nodePath, ratio))
   commitRef.current = (ratio) => updateSplitRatio(workspaceId, nodePath, ratio)
+  // 缺失 / 非有限 / 越界的比例只在这里判一次。`?? 0.5` 曾在本组件手抄四份，而它防的是「可能缺 ratio
+  // 的历史持久化数据」——#552 坐实了那道防线接不住 NaN（`??` 只认 null/undefined），而 NaN 恰恰是
+  // 上游归一化把缺失值算出来的东西。改成走 clampSplitRatio 后三种坏取值同一个出口，见它的注释。
+  const ratio = clampSplitRatio(node.ratio as number)
   const committerRef = useRef<SplitRatioCommitter | null>(null)
   if (committerRef.current === null) {
-    committerRef.current = new SplitRatioCommitter(
-      node.ratio ?? 0.5,
-      (ratio) => commitRef.current(ratio)
-    )
+    committerRef.current = new SplitRatioCommitter(ratio, (value) => commitRef.current(value))
   }
   const committer = committerRef.current
-  committer.synchronizePersistedRatio(node.ratio ?? 0.5)
+  committer.synchronizePersistedRatio(ratio)
   return (
     <PanelGroup
       direction={node.direction}
       className="pane-split"
       onLayout={(sizes) => committer.observeLayout(sizes)}
     >
-      <Panel defaultSize={(node.ratio ?? 0.5) * 100} minSize={MIN_SPLIT_PERCENT}>
+      <Panel defaultSize={ratio * 100} minSize={MIN_SPLIT_PERCENT}>
         <SplitNode
           node={node.first}
           nodePath={nodePath ? `${nodePath}.first` : 'first'}
@@ -1147,7 +1148,7 @@ function SplitBranch({
           setDragging(active)
         }}
       />
-      <Panel defaultSize={(1 - (node.ratio ?? 0.5)) * 100} minSize={MIN_SPLIT_PERCENT}>
+      <Panel defaultSize={(1 - ratio) * 100} minSize={MIN_SPLIT_PERCENT}>
         <SplitNode
           node={node.second}
           nodePath={nodePath ? `${nodePath}.second` : 'second'}
