@@ -1,14 +1,9 @@
 import type { SplitDirection } from './workbench-layout'
+import { type SplitTreeNode, findSiblingLeafId, setSplitRatioAtPath } from './split-tree'
 
-export type WorkbenchRegionLayoutNode =
-  | { type: 'leaf'; regionId: string }
-  | {
-      type: 'split'
-      direction: 'horizontal' | 'vertical'
-      first: WorkbenchRegionLayoutNode
-      second: WorkbenchRegionLayoutNode
-      ratio: number
-    }
+// tab 内 region 分屏树 = 叶子挂 regionId 的通用分屏树（见 split-tree.ts）。ratio 必填，与 tab-group
+// 树统一：每个 split 都由 splitWorkbenchRegion/gridLayout/balanceNode 现算一个比例，不存在缺省的情形。
+export type WorkbenchRegionLayoutNode = SplitTreeNode<{ regionId: string }>
 
 export type WorkbenchViewLayout = {
   root: WorkbenchRegionLayoutNode
@@ -253,13 +248,19 @@ export function closeWorkbenchRegion(
 ): WorkbenchViewLayout {
   const currentRegionIds = regionIds(layout.root)
   if (currentRegionIds.length <= 1 || !currentRegionIds.includes(regionId)) return layout
+  // 关闭活动格前先认下它的兄弟——那正是删掉这一片后被提升、长大占掉空位的那一格，焦点该落在它上面。
+  // 此前这里取 remainingRegionIds.at(-1)（读序里的最后一格），与 tab-group 树关闭分组时用的
+  // findSiblingGroupId（兄弟）不一致：同一个「关掉当前格」的动作，两条路把焦点送去不同地方。收敛到
+  // 兄弟。sibling 为 null（理论上到不了：已过 length>1 且 regionId 在树里）时回退到读序末尾，保持
+  // activeRegionId 始终指向一个仍在场的格。
+  const sibling = findSiblingLeafId(layout.root, (leaf) => leaf.regionId, regionId)
   const root = removeRegionNode(layout.root, regionId)
   if (!root) return layout
   const remainingRegionIds = regionIds(root)
   return {
     root,
     activeRegionId: layout.activeRegionId === regionId
-      ? remainingRegionIds.at(-1)!
+      ? sibling ?? remainingRegionIds.at(-1)!
       : layout.activeRegionId
   }
 }
@@ -273,27 +274,10 @@ export function focusWorkbenchRegion(
     : layout
 }
 
-function updateSplitRatio(
-  root: WorkbenchRegionLayoutNode,
-  path: string[],
-  ratio: number
-): WorkbenchRegionLayoutNode {
-  if (path.length === 0) return root.type === 'split' ? { ...root, ratio } : root
-  if (root.type !== 'split') return root
-  const [segment, ...rest] = path
-  if (segment === 'first') return { ...root, first: updateSplitRatio(root.first, rest, ratio) }
-  if (segment === 'second') return { ...root, second: updateSplitRatio(root.second, rest, ratio) }
-  return root
-}
-
 export function setWorkbenchRegionSplitRatio(
   layout: WorkbenchViewLayout,
   nodePath: string,
   ratio: number
 ): WorkbenchViewLayout {
-  const nextRatio = Math.max(0.1, Math.min(0.9, ratio))
-  return {
-    ...layout,
-    root: updateSplitRatio(layout.root, nodePath ? nodePath.split('.') : [], nextRatio)
-  }
+  return { ...layout, root: setSplitRatioAtPath(layout.root, nodePath, ratio) }
 }
