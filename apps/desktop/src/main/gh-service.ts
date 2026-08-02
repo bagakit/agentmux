@@ -12,7 +12,7 @@ import type {
   PrReadiness,
   WorkspaceRecord
 } from '../shared/contracts.js'
-import { scrubGitCredentials, type GitService } from './git-service.js'
+import { gitFailureMessage, scrubGitCredentials, type GitService } from './git-service.js'
 
 /**
  * The base branch proposed when `origin/HEAD` cannot answer. Deliberately a single constant rather than
@@ -187,7 +187,7 @@ export class GhService {
         return {
           kind: 'failed',
           // gh echoes the remote in its errors, so scrub before this text can reach a UI or a log.
-          message: scrubGitCredentials(result.stderr.trim() || result.stdout.trim() || 'gh pr create failed.')
+          message: gitFailureMessage(result, 'gh pr create failed.')
         }
       }
       return { kind: 'created', url: scrubGitCredentials(result.stdout.trim()) }
