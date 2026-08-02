@@ -35,8 +35,23 @@ import { monacoKeybindingConstants } from './helpers/editor-pane-store.js'
 const fixture = vi.hoisted(() => ({ state: {} as Record<string, unknown> }))
 
 const monacoSpy = vi.hoisted(() => ({
-  /** 挂载时真的注册进 Monaco 的每个和弦。editor scope 的判据全落在这份记录上。 */
-  commands: [] as number[]
+  /**
+   * 挂载时真的注册进 Monaco 的每个和弦，**连同它注册的那个 handler**。
+   *
+   * 早先这里只记和弦号，把 handler 丢掉。那让 editor 那条质询退化成「注册在场」：注册一个
+   * handler 体是空的命令，键按下去什么都不发生，而整族 120 条全绿——实测过一次（加第四条
+   * editor 绑定 + 空 handler 体 + 同步冻结 id 集，全绿存活）。所以 handler 必须留下来被调用。
+   */
+  commands: [] as Array<{ keybinding: number; handler: () => void }>,
+  /**
+   * handler 在运行期真的碰过多少次外界。空 handler 恒为 0，这就是判据。
+   *
+   * 为什么按「碰了几次」而不是断言某个具体的 store spy：三条 editor 绑定的出口互不相同
+   * （save 读 getState 再调 saveDocument、换行开关读 getState 再 toggle、命令面板走
+   * editor.getAction().run()），硬钉某一个 spy 只能覆盖其中一条，加第四条绑定又会退化成
+   * 「新绑定无人守」——那正是这条要防的形状。计数对三条都成立，且对未来的第四条默认成立。
+   */
+  touches: 0
 }))
 
 vi.mock('../src/renderer/src/monaco.js', () => ({}))
@@ -45,12 +60,15 @@ vi.mock('@monaco-editor/react', async () => {
   return {
     default: ({ onMount }: { onMount?: (editor: unknown, monaco: unknown) => void }) => {
       const editor = {
-        addCommand: (keybinding: number) => {
-          monacoSpy.commands.push(keybinding)
+        addCommand: (keybinding: number, handler: () => void) => {
+          monacoSpy.commands.push({ keybinding, handler })
         },
         // 面板 action 必须在场，否则实现在注册阶段之后的回调里抛——那与本条要判的事无关。
-        getAction: (id: string) =>
-          id === 'editor.action.quickCommand' ? { run: () => Promise.resolve() } : null,
+        // 取用本身计入 touches：命令面板那条绑定的**唯一**可观测出口就是这次取用。
+        getAction: (id: string) => {
+          monacoSpy.touches += 1
+          return id === 'editor.action.quickCommand' ? { run: () => Promise.resolve() } : null
+        },
         addAction: vi.fn(),
         createContextKey: vi.fn(() => ({ set: vi.fn() })),
         onDidChangeCursorSelection: vi.fn(() => ({ dispose: vi.fn() })),
@@ -72,7 +90,14 @@ vi.mock('../src/renderer/src/store.js', async () => {
   return {
     useAppStore: Object.assign(
       (selector: (state: typeof fixture.state) => unknown) => selector(fixture.state),
-      { getState: () => fixture.state }
+      {
+        // getState 也计入 touches。它在挂载期同样会被调用，所以计数只有在**调用 handler 之前
+        // 归零**的窗口里才有意义——见 handlerTouchesStore。
+        getState: () => {
+          monacoSpy.touches += 1
+          return fixture.state
+        }
+      }
     )
   }
 })
@@ -87,8 +112,8 @@ const WORKSPACE = 'workspace'
 const PATH = 'src/app.ts'
 const KEY = `${WORKSPACE}\0${PATH}`
 
-/** 把 EditorPane 挂一次，返回它注册进 Monaco 的和弦集合。 */
-function chordsRegisteredOnMount(): Set<number> {
+/** 把 EditorPane 挂一次，返回它注册进 Monaco 的每个命令（和弦 + handler）。 */
+function commandsRegisteredOnMount(): Array<{ keybinding: number; handler: () => void }> {
   monacoSpy.commands = []
   fixture.state.documents = { [KEY]: { path: PATH, content: 'hello', revision: 'r1' } }
   renderToStaticMarkup(
@@ -97,7 +122,19 @@ function chordsRegisteredOnMount(): Set<number> {
       surface: { regionId: 'region', kind: 'file' as const, workspaceId: WORKSPACE, path: PATH }
     })
   )
-  return new Set(monacoSpy.commands)
+  return monacoSpy.commands
+}
+
+/**
+ * 调一次那个 handler，回答「它有没有碰过外界」。
+ *
+ * 计数在调用前归零，所以挂载期的读取不算进来——判据落在**这次按键**上。
+ * 用它而不是断言某个具体 store 动作：见 monacoSpy.touches 的说明。
+ */
+function handlerTouchesStore(handler: () => void): boolean {
+  monacoSpy.touches = 0
+  handler()
+  return monacoSpy.touches > 0
 }
 
 /** 极简 store 替身：只要 windowShortcutHandlers 能构造出 map，本条不关心转发落到哪。 */
@@ -126,7 +163,8 @@ function shellCode(relative: string): string {
  * 质询方式按「这个壳能被问到什么程度」选，而不是按一个声明出来的 kind 分类。三种深度，
  * 从强到弱，新 scope 应尽量往上靠：
  * 1. **直接调那个决策函数**（launcher）——最强，判的就是运行期行为本身。
- * 2. **挂载后看它注册了什么**（editor）——次之，注册在场可证，handler 体是否为空还够不着（#362）。
+ * 2. **挂载后调它注册的 handler**（editor）——次之，注册在场与「按下去有后果」都可证，
+ *    但「后果对不对」（存的是这个文件吗、翻的是这个开关吗）由三个逐 id 的 wiring 测试各自钉。
  * 3. **读源码断言比较在场**（window 的 handler map 除外，terminal 只能到这一层）——最弱，
  *    「比较在场」不等于「后果发生」：terminal 的分支体清空后这一层照旧全绿，那是 #360 的靶子。
  */
@@ -160,17 +198,26 @@ const SCOPE_INTERROGATIONS = new Map<string, (ids: readonly string[]) => void>([
   [
     'editor',
     (ids) => {
-      // 把 SHIPPING 的绑定整份跑过一次真挂载，问「这个和弦注册进去了吗」。这是 editor scope
-      // 此前完全缺失的那一层——三个既有测试各钉一个 id，加第四条不会红。
-      const registered = chordsRegisteredOnMount()
-      expect(registered.size, 'EditorPane 挂载时一个命令都没注册——替身或挂载路径变了').toBeGreaterThan(0)
+      // 把 SHIPPING 的绑定整份跑过一次真挂载，问两件事：这个和弦注册进去了吗，**按下去有后果吗**。
+      // 这是 editor scope 此前完全缺失的那一层——三个既有测试各钉一个 id，加第四条不会红。
+      //
+      // 「有后果吗」是后补的一层，理由是实测：只判「注册在场」时，注册一个 handler 体为空的
+      // 第四条绑定（并同步冻结 id 集）在全族 120 条下存活——键按下去什么都不发生，无人守。
+      const commands = commandsRegisteredOnMount()
+      expect(commands.length, 'EditorPane 挂载时一个命令都没注册——替身或挂载路径变了').toBeGreaterThan(0)
+      const byChord = new Map(commands.map((c) => [c.keybinding, c.handler]))
       for (const id of ids) {
         const binding = bindingById(id)
         expect(binding, `${id} 不在注册表里`).not.toBeNull()
         const chord = monacoKeybindingFor(binding!, monacoKeybindingConstants())
+        const handler = byChord.get(chord)
         expect(
-          registered.has(chord),
+          handler,
           `EditorPane 挂载时没有为 editor 绑定 ${id} 注册命令——那个键按下去什么都不会发生`
+        ).toBeTypeOf('function')
+        expect(
+          handlerTouchesStore(handler!),
+          `editor 绑定 ${id} 注册了但按下去不碰 store 也不碰 editor——handler 体是空的，键是死的`
         ).toBe(true)
       }
     }
