@@ -35,9 +35,32 @@ function ghHost(run: (command: string, args: readonly string[], options?: unknow
   }
 }
 
-function withWorkspace(host: ExecutionHost): { service: GhService; config: AppConfig } {
+/**
+ * The git half of GhService's readiness read. Defaults answer "a clean repo on `feature`, one commit
+ * ahead of its upstream" so a readiness test only has to state the fact it is actually about.
+ *
+ * The type is derived from the constructor rather than written out: a widened dependency must break
+ * here, not be silently satisfied by a stub that happens to still typecheck.
+ */
+type GhServiceGit = ConstructorParameters<typeof GhService>[1]
+
+function gitStub(overrides: Partial<GhServiceGit> = {}): GhServiceGit {
   return {
-    service: new GhService(() => host),
+    status: vi.fn(async () => ({
+      kind: 'git-repository' as const,
+      hostId: 'remote',
+      repoPath: '/srv/repo',
+      branch: 'feature',
+      changes: []
+    })),
+    aheadBehind: vi.fn(async () => ({ upstream: 'origin/feature', ahead: 1, behind: 0 })),
+    ...overrides
+  }
+}
+
+function withWorkspace(host: ExecutionHost, git: GhServiceGit = gitStub()): { service: GhService; config: AppConfig } {
+  return {
+    service: new GhService(() => host, git),
     config: {
       ...config,
       workspaces: [{ id: 'repo', name: 'repo', hostId: 'remote', path: '/srv/repo', kind: 'folder' }]
@@ -160,13 +183,16 @@ describe('GhService.createPullRequest (contract, fake executor)', () => {
   })
 
   // Backend preflight is the final authority: the base must be verified to EXIST on the remote.
-  it('refuses when the base does not exist on the remote', async () => {
+  it('refuses when the base does not exist on the remote, and says so', async () => {
     const host = prHost({ lsRemoteExit: 2 })
     const { service, config: cfg } = withWorkspace(host)
 
     const result = await service.createPullRequest('repo', { title: 'T', body: 'B', base: 'ghost' }, cfg)
 
     expect(result.kind).toBe('refused')
+    // The remote ANSWERED, so naming the branch as absent is a true statement the user can act on.
+    expect(result.kind === 'refused' && result.reason).toContain('ghost')
+    expect(result.kind === 'refused' && result.reason).toMatch(/does not exist/u)
     // Nothing was created, so gh must never have run.
     expect((host.run as ReturnType<typeof vi.fn>).mock.calls.some(([command]) => command === 'gh')).toBe(false)
   })
@@ -179,15 +205,65 @@ describe('GhService.createPullRequest (contract, fake executor)', () => {
     const result = await service.createPullRequest('repo', { title: 'T', body: 'B', base: 'main' }, cfg)
 
     expect(result.kind).toBe('refused')
+    // Both branches refuse, so `kind` alone cannot tell them apart — and folding them together would
+    // tell the user their branch does not exist when what actually happened is that we never asked.
+    // That is a false claim about their remote, so the wording is the thing under test here.
+    expect(result.kind === 'refused' && result.reason).not.toMatch(/does not exist/u)
+    expect(result.kind === 'refused' && result.reason).toMatch(/[Cc]ould not verify/u)
     expect((host.run as ReturnType<typeof vi.fn>).mock.calls.some(([command]) => command === 'gh')).toBe(false)
   })
 
-  it('refuses an unverifiable preflight exit code the same way', async () => {
+  it('treats any other preflight exit as unverified, not as absence', async () => {
+    // `ls-remote --exit-code` documents 0 and 2. Exit 128 is git failing for its own reasons (no
+    // network, no permission) — reading it as "the branch is missing" would invent a fact about the
+    // remote, so this pins the wording, not just the refusal.
     const host = prHost({ lsRemoteExit: 128 })
     const { service, config: cfg } = withWorkspace(host)
 
-    expect((await service.createPullRequest('repo', { title: 'T', body: 'B', base: 'main' }, cfg)).kind)
-      .toBe('refused')
+    const result = await service.createPullRequest('repo', { title: 'T', body: 'B', base: 'main' }, cfg)
+
+    expect(result.kind).toBe('refused')
+    expect(result.kind === 'refused' && result.reason).not.toMatch(/does not exist/u)
+    expect(result.kind === 'refused' && result.reason).toMatch(/[Cc]ould not verify/u)
+  })
+
+
+  it('verifies the same ref it then hands to gh, even when the caller passes a remote-tracking name', async () => {
+    // The bug this pins: the preflight stripped `origin/` while argv did not, so `origin/main` was
+    // confirmed to exist as `main` and then given to gh as `origin/main`. Both sides are asserted
+    // against each other rather than against a literal, because the defect is the DISAGREEMENT — a test
+    // that only checked one side would stay green while the other drifted.
+    const host = prHost({})
+    const { service, config: cfg } = withWorkspace(host)
+
+    await service.createPullRequest('repo', { title: 'T', body: 'B', base: 'origin/main' }, cfg)
+
+    const calls = (host.run as ReturnType<typeof vi.fn>).mock.calls
+    const lsRemote = calls.map(([, args]) => args as string[]).find((args) => args.includes('ls-remote'))!
+    const ghArgs = calls.filter(([command]) => command === 'gh').map(([, args]) => args as string[])[0]!
+    const verified = lsRemote.at(-1)!.replace('refs/heads/', '')
+    const used = ghArgs[ghArgs.indexOf('--base') + 1]
+    expect(used).toBe(verified)
+    // And pin which one they agreed ON: agreeing on `origin/main` would mean gh is asked to open the PR
+    // against a ref that does not name a branch on the remote.
+    expect(used).toBe('main')
+  })
+
+  it('removes the prefix only where it is a prefix — `origin/` inside a branch name is part of the name', async () => {
+    // The anchor in the normalizer is load-bearing, and this is the only input that can show it: every
+    // other case in this file has `origin/` at position 0, where anchored and unanchored agree. A branch
+    // legitimately named `feature/origin/rework` must keep all three segments — an unanchored replace
+    // eats the middle one and silently targets a branch nobody named.
+    const host = prHost({})
+    const { service, config: cfg } = withWorkspace(host)
+
+    await service.createPullRequest('repo', { title: 'T', body: 'B', base: 'feature/origin/rework' }, cfg)
+
+    const calls = (host.run as ReturnType<typeof vi.fn>).mock.calls
+    const lsRemote = calls.map(([, args]) => args as string[]).find((args) => args.includes('ls-remote'))!
+    const ghArgs = calls.filter(([command]) => command === 'gh').map(([, args]) => args as string[])[0]!
+    expect(lsRemote.at(-1)).toBe('refs/heads/feature/origin/rework')
+    expect(ghArgs[ghArgs.indexOf('--base') + 1]).toBe('feature/origin/rework')
   })
 
   it('scrubs a credential out of a gh failure before it can reach the UI or a log', async () => {
@@ -233,5 +309,170 @@ describe('GhService.createPullRequest (contract, fake executor)', () => {
 
     expect((await service.createPullRequest('repo', { title: '   ', body: 'B', base: 'main' }, cfg)).kind)
       .toBe('refused')
+  })
+})
+
+describe('GhService.prReadiness (contract, fake executor)', () => {
+  /**
+   * A host that answers each of readiness's three shell questions independently, so a test can make one
+   * of them fail without disturbing the others. Defaults: gh is logged in, `origin/HEAD` says `main`,
+   * and `main` exists on the remote.
+   */
+  function readinessHost(options: {
+    ghExit?: number
+    symbolicRef?: RunResult | 'throws'
+    lsRemote?: RunResult | 'throws'
+  } = {}): ExecutionHost {
+    return ghHost(async (command, args) => {
+      if (command === 'gh') return { stdout: '', stderr: '', exitCode: options.ghExit ?? 0 }
+      if (args.includes('symbolic-ref')) {
+        if (options.symbolicRef === 'throws') throw new Error('git exploded')
+        return options.symbolicRef ?? { stdout: 'origin/main\n', stderr: '', exitCode: 0 }
+      }
+      if (args.includes('ls-remote')) {
+        if (options.lsRemote === 'throws') throw new Error('network down')
+        return options.lsRemote ?? { stdout: 'sha\trefs/heads/main\n', stderr: '', exitCode: 0 }
+      }
+      throw new Error(`unexpected git invocation: ${args.join(' ')}`)
+    })
+  }
+
+  it('answers every field the eligibility ladder reads, from one call', async () => {
+    const { service, config: cfg } = withWorkspace(readinessHost())
+
+    const readiness = await service.prReadiness('repo', cfg)
+
+    // Pinned field-by-field rather than shape-only: each of these is a rung on the ladder, and a rung
+    // that silently arrives as `undefined` reads as "condition met" at the far end.
+    expect(readiness.auth).toEqual({ kind: 'authenticated' })
+    expect(readiness.branch).toBe('feature')
+    expect(readiness.baseRef).toBe('main')
+    expect(readiness.baseSource).toBe('remote-head')
+    expect(readiness.baseExistsOnRemote).toBe(true)
+    expect(readiness.upstream).toBe('origin/feature')
+    expect(readiness.ahead).toBe(1)
+    expect(readiness.behind).toBe(0)
+    expect(readiness.hasUncommittedChanges).toBe(false)
+    expect(readiness.checkedAt).toBeGreaterThan(0)
+  })
+
+  it('strips exactly one leading `origin/` — a branch genuinely named `origin/thing` keeps both segments', async () => {
+    // `git symbolic-ref --short refs/remotes/origin/HEAD` prints `origin/<branch>`. Stripping greedily
+    // (or with a global replace) would turn `origin/origin/vendor` into `vendor` and target the wrong base.
+    const host = readinessHost({ symbolicRef: { stdout: 'origin/origin/vendor\n', stderr: '', exitCode: 0 } })
+    const { service, config: cfg } = withWorkspace(host)
+
+    const readiness = await service.prReadiness('repo', cfg)
+
+    expect(readiness.baseRef).toBe('origin/vendor')
+    expect(readiness.baseSource).toBe('remote-head')
+  })
+
+  it('labels the base as a fallback when `origin/HEAD` is absent — the common case, not an edge', async () => {
+    // This very repository has no `refs/remotes/origin/HEAD`: `git clone` writes it, a repo created
+    // locally and pushed never gets one. So the label is what lets the UI show a guess AS a guess.
+    const host = readinessHost({ symbolicRef: { stdout: '', stderr: 'fatal: ref is not a symbolic ref', exitCode: 128 } })
+    const { service, config: cfg } = withWorkspace(host)
+
+    const readiness = await service.prReadiness('repo', cfg)
+
+    expect(readiness.baseSource).toBe('fallback')
+    expect(readiness.baseRef).toBe('main')
+  })
+
+  it('labels the base as a fallback when git cannot be run at all', async () => {
+    const { service, config: cfg } = withWorkspace(readinessHost({ symbolicRef: 'throws' }))
+
+    expect((await service.prReadiness('repo', cfg)).baseSource).toBe('fallback')
+  })
+
+  it('reports the base as absent when the remote says it is missing', async () => {
+    // `ls-remote --exit-code` exits 2 for "no such ref". That is an ANSWER, and the answer is no.
+    const host = readinessHost({ lsRemote: { stdout: '', stderr: '', exitCode: 2 } })
+    const { service, config: cfg } = withWorkspace(host)
+
+    expect((await service.prReadiness('repo', cfg)).baseExistsOnRemote).toBe(false)
+  })
+
+  it('reports the base as absent when the remote could not be reached — not knowing must block, not invite', async () => {
+    // The opposite polarity would let the user click through to a create that then fails deeper in,
+    // after `gh` has already been asked to write.
+    const { service, config: cfg } = withWorkspace(readinessHost({ lsRemote: 'throws' }))
+
+    expect((await service.prReadiness('repo', cfg)).baseExistsOnRemote).toBe(false)
+  })
+
+  it('carries a not-authenticated gh through as-is rather than throwing', async () => {
+    // The ladder wants the three-state answer so it can name the fix (`gh auth login`). A throw here
+    // would collapse "logged out" into the same nothing as "git is broken".
+    const { service, config: cfg } = withWorkspace(readinessHost({ ghExit: 1 }))
+
+    expect((await service.prReadiness('repo', cfg)).auth).toEqual({ kind: 'not-authenticated' })
+  })
+
+  it('reads a detached HEAD as no branch, and a dirty tree as dirty', async () => {
+    const git = gitStub({
+      status: vi.fn(async () => ({
+        kind: 'git-repository' as const,
+        hostId: 'remote',
+        repoPath: '/srv/repo',
+        branch: null,
+        changes: [
+          { path: 'a.ts', origPath: null, index: ' ', worktree: 'M', staged: false, unstaged: true, untracked: false }
+        ]
+      }))
+    })
+    const { service, config: cfg } = withWorkspace(readinessHost(), git)
+
+    const readiness = await service.prReadiness('repo', cfg)
+
+    expect(readiness.branch).toBeNull()
+    expect(readiness.hasUncommittedChanges).toBe(true)
+  })
+
+  it('reads a non-git workspace as no branch and clean, without inventing a branch name', async () => {
+    const git = gitStub({
+      status: vi.fn(async () => ({
+        kind: 'not-a-git-repository' as const,
+        hostId: 'remote',
+        workspacePath: '/srv/repo'
+      }))
+    })
+    const { service, config: cfg } = withWorkspace(readinessHost(), git)
+
+    const readiness = await service.prReadiness('repo', cfg)
+
+    expect(readiness.branch).toBeNull()
+    expect(readiness.hasUncommittedChanges).toBe(false)
+  })
+
+  it('asks the remote about the base it actually resolved, not a hardcoded name', async () => {
+    // Two independently-computed refs would drift: the hint could confirm `main` exists while the PR
+    // would target something else. So the ls-remote must carry the resolved base verbatim.
+    const host = readinessHost({ symbolicRef: { stdout: 'origin/trunk\n', stderr: '', exitCode: 0 } })
+    const { service, config: cfg } = withWorkspace(host)
+
+    await service.prReadiness('repo', cfg)
+
+    const lsRemote = (host.run as ReturnType<typeof vi.fn>).mock.calls
+      .map(([, args]) => args as string[])
+      .find((args) => args.includes('ls-remote'))!
+    expect(lsRemote).toContain('refs/heads/trunk')
+  })
+
+  it('probes both git questions inside the repository, with the same bounded run options as the gh probe', async () => {
+    // An unbounded git call in the main process would let a wedged remote hang the readiness read, and
+    // the whole point of `-C <repo>` is that the answer is about THIS workspace.
+    const host = readinessHost()
+    const { service, config: cfg } = withWorkspace(host)
+
+    await service.prReadiness('repo', cfg)
+
+    const gitCalls = (host.run as ReturnType<typeof vi.fn>).mock.calls.filter(([command]) => command === 'git')
+    expect(gitCalls).toHaveLength(2)
+    for (const [, args, options] of gitCalls) {
+      expect((args as string[]).slice(0, 2)).toEqual(['-C', '/srv/repo'])
+      expect(options).toEqual(GH_RUN_OPTIONS)
+    }
   })
 })

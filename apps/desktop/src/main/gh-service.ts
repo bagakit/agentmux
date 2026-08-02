@@ -8,9 +8,19 @@ import type {
   CreatePullRequestInput,
   CreatePullRequestResult,
   GhAuthProbe,
+  PrBaseSource,
+  PrReadiness,
   WorkspaceRecord
 } from '../shared/contracts.js'
-import { scrubGitCredentials } from './git-service.js'
+import { scrubGitCredentials, type GitService } from './git-service.js'
+
+/**
+ * The base branch proposed when `origin/HEAD` cannot answer. Deliberately a single constant rather than
+ * a list of candidates to try: probing for `main`, then `master`, then `develop` would make the guess
+ * look like a finding. One labelled guess the user can see and override is honest; a search that lands
+ * on something is a guess wearing evidence's clothes.
+ */
+const PR_FALLBACK_BASE = 'main'
 
 /**
  * Non-interactive environment for every `gh` invocation. This runs in the unattended Desktop main
@@ -69,6 +79,22 @@ function isMissingBinaryError(error: unknown): boolean {
 }
 
 /**
+ * `origin/main` → `main`: the plain branch name, with a remote-tracking prefix removed.
+ *
+ * There is exactly one of these because normalizing twice is how the ref you *verified* stops being the
+ * ref you *use*. That is not hypothetical — it was the shape of a real bug here: the `ls-remote`
+ * preflight stripped the prefix while the `gh pr create` argv did not, so a base of `origin/main` was
+ * confirmed to exist as `main` and then handed to gh as `origin/main`.
+ *
+ * Only the leading `origin/` goes, and only once: a branch legitimately named `origin/thing` under a
+ * differently-named remote must not lose a segment. The anchor is what makes that true, so it is not
+ * decoration — `/origin\//` would eat the middle of `feature/origin/rework`.
+ */
+function plainBranchName(ref: string): string {
+  return ref.replace(/^origin\//u, '')
+}
+
+/**
  * GitHub CLI capability probing, beside `GitService` in Desktop main and, like it, never spawning a
  * process itself — everything runs through the injected `ExecutionHost.run('gh', argv)` seam so the
  * whole class is driven by a fake executor in tests.
@@ -78,7 +104,14 @@ function isMissingBinaryError(error: unknown): boolean {
  * wholly to `gh auth`: this probes `gh auth status` and reads the outcome, it never handles a token.
  */
 export class GhService {
-  constructor(private readonly hostFor: (id: string) => ExecutionHost) {}
+  /**
+   * `git` is injected rather than instantiated here so both services resolve a workspace's host through
+   * the same seam and a test drives one fake executor, not two that could disagree about the repo.
+   */
+  constructor(
+    private readonly hostFor: (id: string) => ExecutionHost,
+    private readonly git: Pick<GitService, 'status' | 'aheadBehind'>
+  ) {}
 
   /**
    * Probe `gh auth status` for a workspace's host. The three outcomes come from two different signals,
@@ -125,28 +158,19 @@ export class GhService {
   ): Promise<CreatePullRequestResult> {
     const workspace = this.workspace(config, workspaceId)
     const host = this.hostFor(workspace.hostId)
-    const base = assertSafeGhRef(input.base, 'base branch')
+    // Normalized ONCE, here, so the ref verified below is the same ref handed to gh further down.
+    const base = plainBranchName(assertSafeGhRef(input.base, 'base branch'))
     const head = input.head === undefined ? undefined : assertSafeGhRef(input.head, 'head branch')
     const title = input.title.trim()
     if (!title) return { kind: 'refused', reason: 'A pull request needs a title.' }
 
-    // Preflight: the base must exist on the remote. `ls-remote --exit-code` answers with its exit code,
-    // but only an exit of 0 or 2 is an ANSWER — anything else (no network, no permission, gh/git
-    // missing) means we do not know, and not knowing is a refusal.
-    let probe
-    try {
-      probe = await host.run(
-        'git',
-        ['-C', workspace.path, 'ls-remote', '--exit-code', '--heads', 'origin', `refs/heads/${base.replace(/^origin\//u, '')}`],
-        GH_RUN_OPTIONS
-      )
-    } catch {
-      return { kind: 'refused', reason: 'Could not verify the base branch on the remote, so the pull request was not created.' }
-    }
-    if (probe.exitCode === 2) {
+    // Preflight: the base must exist on the remote. Only `present` may proceed — `unknown` means we
+    // could not check, and "I could not check" is not "it is fine".
+    const presence = await this.remoteBranchPresence(host, workspace.path, base)
+    if (presence === 'absent') {
       return { kind: 'refused', reason: `The base branch ${base} does not exist on the remote.` }
     }
-    if (probe.exitCode !== 0) {
+    if (presence === 'unknown') {
       return { kind: 'refused', reason: 'Could not verify the base branch on the remote, so the pull request was not created.' }
     }
 
@@ -174,6 +198,111 @@ export class GhService {
       // The body is the user's prose; never leave it lying in the temp directory.
       await rm(bodyFile, { force: true }).catch(() => {})
     }
+  }
+
+  /**
+   * Gather, in one call, everything the renderer's eligibility ladder needs.
+   *
+   * Why this lives here rather than being assembled by the renderer from three bridge calls: two of
+   * these facts have no renderer-side source at all (there is no `ls-remote` on the git bridge, and no
+   * notion of a default branch in the contract), and the remaining six would be read across three
+   * separate awaits — a set that can describe a state that never existed, because the branch can move
+   * while the auth probe is in flight. This repo has already shipped that bug twice under a different
+   * name; gathering the facts together is what makes them consistent by construction.
+   *
+   * Every step degrades toward *refusing*, never toward a false green: an unreadable branch is `null`
+   * (the ladder reports `no-branch`), a base that cannot be verified is `false` — the same value as a
+   * base that is genuinely missing, because both must block a click — and a `gh` that cannot be probed
+   * still returns its own three-state answer. The one thing this must not do is report readiness it did
+   * not establish. The write path keeps the distinction the user needs to hear it worded differently;
+   * see {@link GhService.remoteBranchPresence}.
+   */
+  async prReadiness(workspaceId: string, config: AppConfig): Promise<PrReadiness> {
+    const workspace = this.workspace(config, workspaceId)
+    const host = this.hostFor(workspace.hostId)
+    // The auth probe is the only step that can throw for a reason worth surfacing (a timeout is not
+    // absence — see authStatus). Everything else below answers with a value.
+    const auth = await this.authStatus(workspaceId, config)
+    const status = await this.git.status(workspaceId, config)
+    const branch = status.kind === 'git-repository' ? status.branch : null
+    const hasUncommittedChanges = status.kind === 'git-repository' && status.changes.length > 0
+    const aheadBehind = await this.git.aheadBehind(workspaceId, config)
+    const base = await this.resolveBaseRef(host, workspace.path)
+    const baseExistsOnRemote = (await this.remoteBranchPresence(host, workspace.path, base.ref)) === 'present'
+    return {
+      auth,
+      branch,
+      baseRef: base.ref,
+      baseSource: base.source,
+      baseExistsOnRemote,
+      upstream: aheadBehind.upstream,
+      ahead: aheadBehind.ahead,
+      behind: aheadBehind.behind,
+      hasUncommittedChanges,
+      checkedAt: Date.now()
+    }
+  }
+
+  /**
+   * The base branch a PR would target, and whether that answer is authoritative.
+   *
+   * `origin/HEAD` is the remote's own declared default and the only real answer. It is **routinely
+   * absent**: `git clone` writes it, but a repo created locally and pushed never gets one — this very
+   * repository has no `refs/remotes/origin/HEAD` (`git symbolic-ref` on it exits fatal). So the absent
+   * case is the common case, not an edge, and the fallback must be *labelled* rather than passed off as
+   * knowledge: the UI shows the guess and lets the user change it, because a PR opened against the wrong
+   * base cannot be undone by clicking again.
+   */
+  private async resolveBaseRef(
+    host: ExecutionHost,
+    repoPath: string
+  ): Promise<{ ref: string; source: PrBaseSource }> {
+    let result
+    try {
+      result = await host.run(
+        'git',
+        ['-C', repoPath, 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD'],
+        GH_RUN_OPTIONS
+      )
+    } catch {
+      return { ref: PR_FALLBACK_BASE, source: 'fallback' }
+    }
+    // `git symbolic-ref --short refs/remotes/origin/HEAD` prints `origin/<branch>`; the shared
+    // normalizer turns that into the plain name.
+    const ref = result.exitCode === 0 ? plainBranchName(result.stdout.trim()) : ''
+    return ref ? { ref, source: 'remote-head' } : { ref: PR_FALLBACK_BASE, source: 'fallback' }
+  }
+
+  /**
+   * Ask `origin` whether it has this branch. **Three** answers, not two: `ls-remote --exit-code` exits
+   * 0 for present and 2 for absent, and those are the only two ANSWERS — any other exit, or a rejection,
+   * means no network / no permission / git missing, which is `unknown`.
+   *
+   * The split matters because the two callers act on `unknown` differently and both are right:
+   * {@link GhService.createPullRequest} refuses with a *different sentence* than "does not exist", so
+   * the user is not told a falsehood about their remote, while {@link GhService.prReadiness} folds it
+   * into "not verified" so the ladder blocks rather than inviting a click that would then be refused
+   * deeper in. Collapsing the three states here would force one of them to lie.
+   */
+  private async remoteBranchPresence(
+    host: ExecutionHost,
+    repoPath: string,
+    branch: string
+  ): Promise<'present' | 'absent' | 'unknown'> {
+    let probe
+    try {
+      probe = await host.run(
+        'git',
+        // The caller already normalized; asking again here would reintroduce the second decision this
+        // helper exists to eliminate.
+        ['-C', repoPath, 'ls-remote', '--exit-code', '--heads', 'origin', `refs/heads/${branch}`],
+        GH_RUN_OPTIONS
+      )
+    } catch {
+      return 'unknown'
+    }
+    if (probe.exitCode === 0) return 'present'
+    return probe.exitCode === 2 ? 'absent' : 'unknown'
   }
 
   private workspace(config: AppConfig, id: string): WorkspaceRecord {

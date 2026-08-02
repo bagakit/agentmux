@@ -77,6 +77,7 @@ const api: AgentMuxPreloadApi = {
   },
   gh: {
     authStatus: (workspaceId: string) => ipcRenderer.invoke('gh:authStatus', workspaceId),
+    prReadiness: (workspaceId: string) => ipcRenderer.invoke('gh:prReadiness', workspaceId),
     createPullRequest: (workspaceId: string, input: CreatePullRequestInput) =>
       ipcRenderer.invoke('gh:createPullRequest', workspaceId, input)
   },
