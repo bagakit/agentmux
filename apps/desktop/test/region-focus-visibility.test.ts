@@ -104,6 +104,188 @@ function activeRegionConditional(): { whenActive: string; whenNot: string } | nu
   return found
 }
 
+/** 某个焦点类名的伪元素覆盖层规则。三条断言共用一处，免得各写一遍正则再各自漂。 */
+function focusOverlayRules(className: string): Rule[] {
+  const overlay = new RegExp(`\\.${className}\\b[^,]*::(?:after|before)`)
+  return rules().filter((rule) => rule.selector.split(',').some((part) => overlay.test(part.trim())))
+}
+
+const SIDES = ['top', 'right', 'bottom', 'left'] as const
+type Side = typeof SIDES[number]
+const BORDER_STYLES = new Set([
+  'none', 'hidden', 'solid', 'dashed', 'dotted', 'double', 'groove', 'ridge', 'inset', 'outset'
+])
+
+/** 样式里每个自定义属性的全部声明（明暗两套主题会各声明一次，所以是列表不是单值）。 */
+function tokenDefinitions(): Map<string, string[]> {
+  const out = new Map<string, string[]>()
+  for (const match of styles.matchAll(/(--[\w-]+)\s*:\s*([^;{}]+)/g)) {
+    const list = out.get(match[1]!) ?? []
+    list.push(match[2]!.trim())
+    out.set(match[1]!, list)
+  }
+  return out
+}
+const TOKENS = tokenDefinitions()
+
+/**
+ * 把 `var(--x)` 展开成它声明过的取值们。
+ *
+ * 必须展开才判得动：`transparent` 可以藏在一个 token 后面，而「边色是不是 var(...)」这种表层判据
+ * 对它完全失明。展不开（该 token 没声明）时原样返回，由 {@link focusRingFaults} 报成另一条故障——
+ * 那正是 injected-css-property-declare-default 那一族。
+ *
+ * `tokens` 是入参而不是直接读模块级的那张表：自检要能构造「透明藏在 token 后」这种样本，而它需要
+ * 一个真样式表里不存在的 token。写成入参之后，自检喂什么就判什么，不必往产品样式里塞探针。
+ */
+function resolvedValues(value: string, tokens: Map<string, string[]>, depth = 0): string[] {
+  const match = /var\(\s*(--[\w-]+)\s*\)/.exec(value)
+  if (!match || depth > 4) return [value.trim()]
+  const definitions = tokens.get(match[1]!)
+  if (!definitions?.length) return [value.trim()]
+  const head = value.slice(0, match.index)
+  const tail = value.slice(match.index + match[0].length)
+  return definitions.flatMap((definition) => resolvedValues(head + definition + tail, tokens, depth + 1))
+}
+
+/** 按空白切分，但不切进 `var(...)` 里面。 */
+function splitTopLevel(value: string): string[] {
+  const parts: string[] = []
+  let depth = 0
+  let current = ''
+  for (const char of value) {
+    if (char === '(') depth += 1
+    if (char === ')') depth -= 1
+    if (depth === 0 && /\s/.test(char)) {
+      if (current) parts.push(current)
+      current = ''
+      continue
+    }
+    current += char
+  }
+  if (current) parts.push(current)
+  return parts
+}
+
+function looksLikeLength(text: string): boolean {
+  const value = text.trim().toLowerCase()
+  return /^-?(?:\d*\.)?\d+(?:px|em|rem|pt|%|vh|vw)?$/.test(value) || ['thin', 'medium', 'thick'].includes(value)
+}
+function isWidthPart(part: string, tokens: Map<string, string[]>): boolean {
+  return resolvedValues(part, tokens).every(looksLikeLength)
+}
+function isZeroWidth(part: string, tokens: Map<string, string[]>): boolean {
+  return resolvedValues(part, tokens).some((value) => /^-?0(?:\.0+)?(?:px|em|rem|pt|%)?$/.test(value.trim()))
+}
+function isInvisibleColor(part: string, tokens: Map<string, string[]>): boolean {
+  return resolvedValues(part, tokens).some((raw) => {
+    const value = raw.trim().toLowerCase()
+    return (
+      value === '' ||
+      value === 'transparent' ||
+      value === 'none' ||
+      /^rgba?\([^)]*[,/]\s*0(?:\.0+)?\s*\)$/.test(value) ||
+      /^#[0-9a-f]{6}00$/.test(value) ||
+      /^#[0-9a-f]{3}0$/.test(value)
+    )
+  })
+}
+
+/** CSS 的 1–4 值盒展开（`inset: a b` → 上下 a、左右 b）。 */
+function expandBox(parts: string[]): Record<Side, string> {
+  const [a, b, c, d] = parts
+  if (parts.length === 1) return { top: a!, right: a!, bottom: a!, left: a! }
+  if (parts.length === 2) return { top: a!, right: b!, bottom: a!, left: b! }
+  if (parts.length === 3) return { top: a!, right: b!, bottom: c!, left: b! }
+  return { top: a!, right: b!, bottom: c!, left: d! }
+}
+
+type Edge = { width: string | null; style: string | null; color: string | null }
+/** 故障种类。自检按这个标签断言「捕到的是哪一条理由」，而不是只看「非空」。 */
+type FaultKind = 'no-box' | 'unpinned' | 'style' | 'width' | 'color' | 'undeclared-token'
+type Fault = { kind: FaultKind; why: string }
+
+/**
+ * 这组覆盖层规则「在一格有内容的 Region 里画不出四条可见边」的全部理由。
+ *
+ * 空数组 = 画得出。判据分四层，每层都有实测存活的变异做靶子（见调用处）：
+ *   1. 有盒：`::after` 缺 `content` 时根本不生成盒
+ *   2. 四边被钉住：绝对定位的伪元素在没被钉住的方向按内容收缩，空 content 会坍成角上一个小点
+ *   3. 四条边各有非 none 的 style、非 0 的宽、非透明的色
+ *   4. 用到的 token 都真的有声明（否则取值退化成空，与「写了个透明色」是不同的病、要分开报）
+ */
+function focusRingFaults(overlays: Rule[], tokens: Map<string, string[]> = TOKENS): Fault[] {
+  const faults: Fault[] = []
+  const fail = (kind: FaultKind, why: string): void => void faults.push({ kind, why })
+  const edges: Record<Side, Edge> = {
+    top: { width: null, style: null, color: null },
+    right: { width: null, style: null, color: null },
+    bottom: { width: null, style: null, color: null },
+    left: { width: null, style: null, color: null }
+  }
+  const pinned = new Set<Side>()
+  const used = new Set<string>()
+  let box: string | null = null
+
+  for (const rule of overlays) {
+    for (const [property, raw] of declarations(rule)) {
+      const value = raw.trim()
+      for (const match of value.matchAll(/var\(\s*(--[\w-]+)\s*\)/g)) used.add(match[1]!)
+
+      if (property === 'content') box = value
+      if (property === 'inset') for (const side of SIDES) pinned.add(side)
+      if (property === 'inset-block') { pinned.add('top'); pinned.add('bottom') }
+      if (property === 'inset-inline') { pinned.add('left'); pinned.add('right') }
+      if ((SIDES as readonly string[]).includes(property)) pinned.add(property as Side)
+
+      const side = /^border-(top|right|bottom|left)$/.exec(property)?.[1] as Side | undefined
+      if (property === 'border' || side) {
+        const parts = splitTopLevel(value)
+        const style = parts.find((part) => BORDER_STYLES.has(part.toLowerCase())) ?? null
+        const rest = parts.filter((part) => !BORDER_STYLES.has(part.toLowerCase()))
+        const edge: Edge = {
+          style,
+          width: rest.find((part) => isWidthPart(part, tokens)) ?? null,
+          color: rest.find((part) => !isWidthPart(part, tokens)) ?? null
+        }
+        for (const target of side ? [side] : SIDES) edges[target] = { ...edge }
+      }
+      for (const axis of ['width', 'style', 'color'] as const) {
+        if (property === `border-${axis}`) {
+          const expanded = expandBox(splitTopLevel(value))
+          for (const target of SIDES) edges[target][axis] = expanded[target]
+        }
+        const perSide = new RegExp(`^border-(top|right|bottom|left)-${axis}$`).exec(property)?.[1]
+        if (perSide) edges[perSide as Side][axis] = value
+      }
+    }
+  }
+
+  if (box === null) fail('no-box', '没有 content 声明：::after 根本不生成盒，一个像素都不画')
+  else if (box.toLowerCase() === 'none') fail('no-box', 'content: none，::after 不生成盒')
+  const missing = SIDES.filter((side) => !pinned.has(side))
+  if (missing.length > 0) {
+    fail(
+      'unpinned',
+      `只钉住了 ${SIDES.length - missing.length}/4 个方向（缺 ${missing.join('/')}）：绝对定位的伪元素` +
+        '在没被钉住的方向按内容收缩，content 是空串时会坍成角上一个只有边框那么大的小点'
+    )
+  }
+  for (const side of SIDES) {
+    const edge = edges[side]
+    if (edge.style === null) fail('style', `${side} 边没有 border-style，缺省是 none：这条边不画`)
+    else if (['none', 'hidden'].includes(edge.style.toLowerCase())) fail('style', `${side} 边的 border-style 是 ${edge.style}`)
+    if (edge.width === null) fail('width', `${side} 边没有边宽`)
+    else if (isZeroWidth(edge.width, tokens)) fail('width', `${side} 边的边宽是 ${edge.width}（0 宽等于不画）`)
+    if (edge.color === null) fail('color', `${side} 边没有边色`)
+    else if (isInvisibleColor(edge.color, tokens)) fail('color', `${side} 边的边色 ${edge.color} 是透明/无色，画了也看不见`)
+  }
+  for (const token of used) {
+    if (!tokens.get(token)?.length) fail('undeclared-token', `用到 ${token} 但样式里没有它的声明，取值会退化成空`)
+  }
+  return faults
+}
+
 describe('Region 焦点必须看得出来（#339）', () => {
   it('自检：能按类名精确取到规则，且不把前缀相同的邻居算进来', () => {
     // 认不出任何规则的读取器会让下面的断言因为"没找到"而全绿。这条同时钉住词法边界：
@@ -204,11 +386,7 @@ describe('Region 焦点必须看得出来（#339）', () => {
     // 记忆 duplicated-rule-defeats-the-fix 的形状：同一件事有两个写入点时，改一处的人以为改完了。
     const MIN_OVERLAY_Z = 37 // Region 内最高的常驻面是 terminal.css:141 的 36
     for (const className of ['workbench-region--active', 'pane-group--focused']) {
-      const overlays = rules().filter((rule) =>
-        rule.selector
-          .split(',')
-          .some((part) => new RegExp(`\\.${className}\\b[^,]*::(?:after|before)`).test(part.trim()))
-      )
+      const overlays = focusOverlayRules(className)
       expect(
         overlays.length,
         `.${className} 的焦点态没有伪元素覆盖层规则。inset 阴影画在自身背景层、outline 画在定位后代` +
@@ -266,6 +444,89 @@ describe('Region 焦点必须看得出来（#339）', () => {
         accepted.get('pointer-events') === 'none',
       '判据认不出正确的定位覆盖层写法——那它挡的不是坏形状而是所有形状'
     ).toBe(true)
+  })
+
+  /**
+   * 排到内容之上、还得**真的画出四条看得见的边**。
+   *
+   * 上面那条只判了「排得上去」（position / z-index / pointer-events），于是这四种改法各自都让屏幕上
+   * 一个像素都没有、或只剩一条孤线，而它 18/18 全绿——我在本轮逐条实测过，四条全部存活：
+   *   - 删掉 `inset: 0`：绝对定位的伪元素在没被钉住的方向按内容收缩，`content: ''` 是空的，于是整圈
+   *     框坍成左上角一个只有边框那么大的小点。
+   *   - `border` 改成 `border-top`：**正是 #339 用户报的那个现场**——一条孤零零的上边线，另外三边没有。
+   *   - `var(--green-2)` 改成 `transparent`：三个属性照旧齐全、边宽照旧从 SSOT 取，画出来是透明的。
+   *   - 删掉 `content: ''`：`::after` 不生成盒，什么都不画。
+   *
+   * 所以判据不能停在「有没有 border 族声明」。它要能回答的是**「这条差别在一格有内容的 Region 里
+   * 画得出来吗」**（记忆 inset-shadow-is-occluded-by-children 的同一个问法）：有盒、四边被钉住、
+   * 四条边各有非 none 的 style、非 0 的宽、非透明的色。取值里的 `var()` 必须展开到底再判——
+   * `transparent` 可以藏在一个 token 后面，而「边色是不是 var(...)」这种表层判据对它完全失明。
+   */
+  it('焦点环真的画得出四条看得见的边（不是坍成一点、一条孤线或透明）', () => {
+    for (const className of ['workbench-region--active', 'pane-group--focused']) {
+      const overlays = focusOverlayRules(className)
+      expect(
+        overlays.length,
+        `.${className} 取不到覆盖层规则——下面的判据会跑在空规则上，把「什么都没画」读成没有故障`
+      ).toBeGreaterThan(0)
+      expect(
+        focusRingFaults(overlays).map((fault) => fault.why),
+        `.${className} 的焦点环在有内容的格子里画不出四条可见的边`
+      ).toEqual([])
+    }
+
+    // 自检：判据认得出每一种改法，**且报的是那一条理由**。只断言「非空」不够——一份样本可以因为
+    // 另一条毛病而红，于是那条本该被验的判据其实从没跑对过（记忆 cover-key-cannot-be-in-two-families）。
+    // 前四条是我在本轮对 workbench.css 逐条实测、旧判据下全部存活的真变异。
+    const base = "content: ''; position: absolute; z-index: 37; inset: 0; pointer-events: none;"
+    // token 表按需注入：透明色要藏在一个 token 后面才验得到展开器，而那个 token 不该塞进产品样式。
+    const probeTokens = new Map(TOKENS)
+    probeTokens.set('--probe-clear', ['transparent'])
+    const survivors: { kind: FaultKind; why: string; body: string }[] = [
+      { kind: 'unpinned', why: '删掉 inset:0（伪元素坍成角上一个点）', body: "content: ''; border: 2px solid var(--green-2);" },
+      { kind: 'style', why: 'border 改成 border-top（#339 的孤零上边线）', body: `${base} border-top: 2px solid var(--green-2);` },
+      { kind: 'color', why: '边色换成 transparent（画了看不见）', body: `${base} border: 2px solid transparent;` },
+      { kind: 'no-box', why: '删掉 content（::after 不生成盒）', body: `${base.replace("content: '';", '')} border: 2px solid var(--green-2);` },
+      { kind: 'color', why: '边色换成藏在 token 后的透明色', body: `${base} border: 2px solid var(--probe-clear);` },
+      { kind: 'undeclared-token', why: '边色取一个没声明的 token（取值退化成空）', body: `${base} border: 2px solid var(--probe-undeclared);` },
+      { kind: 'width', why: '边宽归零', body: `${base} border: 0 solid var(--green-2);` },
+      { kind: 'style', why: 'border-style 是 none（宽与色都在场也不画）', body: `${base} border: 2px none var(--green-2);` },
+      { kind: 'unpinned', why: '只钉两个方向（另外两边按内容收缩）', body: "content: ''; position: absolute; top: 0; left: 0; border: 2px solid var(--green-2);" }
+    ]
+    for (const { kind, why, body } of survivors) {
+      const faults = focusRingFaults([{ selector: '.probe::after', body }], probeTokens)
+      expect(
+        faults.map((fault) => fault.kind),
+        `判据认不出「${why}」应当报 ${kind}——实际报的是：${faults.map((f) => f.why).join(' / ') || '（没有故障）'}`
+      ).toContain(kind)
+    }
+    // 反向：本仓现在的写法必须过，否则这一族退化成恒红，谁碰都红于是被整条删掉。
+    expect(
+      focusRingFaults([
+        { selector: '.probe::after', body: `${base} border: var(--region-focus-ring-width) solid var(--green-2);` }
+      ]).map((fault) => fault.why),
+      '判据把本仓现在的正确写法也判成故障——它挡的不是坏形状而是所有形状'
+    ).toEqual([])
+    // 逐边写四条也必须过：判据守的是「四条边都画得出」，不是「必须用简写」。
+    expect(
+      focusRingFaults([
+        {
+          selector: '.probe::after',
+          body:
+            `${base} border-style: solid; border-width: var(--region-focus-ring-width);` +
+            ' border-top-color: var(--green-2); border-right-color: var(--green-2);' +
+            ' border-bottom-color: var(--green-2); border-left-color: var(--green-2);'
+        }
+      ]).map((fault) => fault.why),
+      '逐边/逐属性写法被误判成故障'
+    ).toEqual([])
+
+    // token 展开器自身的在场自检：展不开就等于判据对藏在 token 后的透明色失明（上面那条靠它）。
+    expect(resolvedValues('var(--green-2)', TOKENS), '--green-2 展不开，边色判据只在字面量上有效').not.toContain(
+      'var(--green-2)'
+    )
+    expect(resolvedValues('var(--green-2)', TOKENS).every((value) => !isInvisibleColor(value, TOKENS))).toBe(true)
+    expect(isInvisibleColor('var(--probe-clear)', probeTokens), '展开器认不出藏在 token 后的 transparent').toBe(true)
   })
 
   /**
