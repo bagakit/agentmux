@@ -170,7 +170,12 @@ export async function registerIpc(args: {
   })
   // The renderer is sandboxed and cannot open a native dialog, so choosing files to reference is a
   // main-process capability. It returns paths only — reading the file is the Agent's own job.
-  handle('ui:chooseFiles', async (_event, input: { defaultPath?: string } | undefined) => {
+  //
+  // 注意这里**没有** event 形参：上面那个 `handle` 包装已经把它剥掉了。此前这里写成
+  // `(_event, input)`，于是 input 恒为 undefined——`defaultPath` 永远送不到，选择器每次都开在
+  // 上一次的位置而不是这个 workspace。tsc 沉默是因为 TArgs 是**从 listener 反推**的：多写一个
+  // 形参只会让它推出「这个频道传两个值」，而不是报错。判据在 ipc-parity.test.ts 里。
+  handle('ui:chooseFiles', async (input: { defaultPath?: string } | undefined) => {
     const selection = await dialog.showOpenDialog(args.window, {
       properties: ['openFile', 'multiSelections'],
       ...(input?.defaultPath ? { defaultPath: input.defaultPath } : {})
