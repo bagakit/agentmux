@@ -92,6 +92,42 @@ describe('切 Topic 就换那一组 Tab', () => {
     expect(shown.groups[0]!.activeTabId).toBe('loose')
   })
 
+  // 活动项的取值是**两个**独立机制，而上面两条只守住其中一个的一半：「活动 Tab 被过滤掉时改为
+  // 该组第一个可见的 Tab」里，过滤后第一张恰好就是本 Topic 的那张；「该 Topic 一个 Tab 都没有时」
+  // 里根本没有本 Topic 的 Tab 可选。于是三个候选答案（原活动项 / 第一张本 Topic 的 / 第一张可见的）
+  // 在既有 fixture 里两两重合，任一机制被拆掉都全绿——实测：把 `stays` 改成恒假、或把
+  // `find(本 Topic)` 换成 `tabOrder[0]`，三个相关 suite 51 条一条不红。
+  // 下面两条各自钉一个机制，各自带前提自检让候选真正分开。
+
+  it('活动 Tab 属于本 Topic 时留在原位，不被换成第一张', () => {
+    // 用户症状：这条不成立就等于「一个 Topic 里除了第一张，哪张 Tab 都点不进去」——
+    // 每次渲染都把活动项拽回 tabOrder 的第一张。
+    const layout = fullLayout()
+    const onSecond = {
+      ...layout,
+      groups: layout.groups.map((group) => ({ ...group, activeTabId: 'a-2' }))
+    }
+    const shown = layoutForActiveTopic(onSecond, tabs, 'topic-a')
+    // 前提自检：a-2 不能是过滤后的第一张，否则「留在原位」与「换成第一张」给出同一个答案。
+    expect(shown.groups[0]!.tabOrder[0], 'a-2 必须不是首张，这条才有判别力').not.toBe('a-2')
+    expect(shown.groups[0]!.activeTabId).toBe('a-2')
+  })
+
+  it('必须换活动项时，选本 Topic 的第一张而不是可见列表的第一张', () => {
+    // 未绑定 Topic 的 Tab 始终可见（见上面那条规则），所以它可以排在本 Topic 的 Tab 前面。
+    // 落到它身上就等于切过去却什么也没发生——你看到的仍是刚才那张外来 Tab。
+    let layout = createWorkspaceLayout('group', ['loose'])
+    for (const id of ['b-1', 'a-1']) layout = addTab(layout, 'group', id)
+    const onForeign = {
+      ...layout,
+      groups: layout.groups.map((group) => ({ ...group, activeTabId: 'a-1' }))
+    }
+    const shown = layoutForActiveTopic(onForeign, tabs, 'topic-b')
+    // 前提自检：可见首张是那张未绑定的，与「本 Topic 的第一张」不是同一个答案。
+    expect(shown.groups[0]!.tabOrder).toEqual(['loose', 'b-1'])
+    expect(shown.groups[0]!.activeTabId).toBe('b-1')
+  })
+
   it('是纯函数：不改动传入的 layout', () => {
     const original = fullLayout()
     const before = JSON.stringify(original)

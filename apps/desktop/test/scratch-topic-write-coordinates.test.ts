@@ -107,6 +107,28 @@ describe('#556 缺陷 A：投影坐标必须翻译回存储坐标', () => {
     expect(orderOf(moved)).toEqual(['b-1', 'b-2', 'a-2', 'a-3', 'a-1'])
   })
 
+  it('往后拖也对：`moveTab` 先摘再插，落点之后的下标全会左移一格', () => {
+    // 上面几条全是往前拖。往后拖是另一条算术：`moveTab` 先把被拖那张从 tabOrder 里滤掉，
+    // 才做 splice，所以源位置**之后**的每个存储下标都比翻译时看到的少一。锚点翻译天然免疫
+    // 这件事（它翻译的是「谁」而不是「第几个」），而这条守的正是「不许有人替 moveTab 再补一次
+    // 这个偏移」：在 anchorIndex 上加一句 `sourceIndex < anchorIndex ? anchorIndex - 1 : anchorIndex`
+    // 看起来像在补偿滤除，实测只有本条会红（其余 16 条全绿），落点会差一格。
+    // 反过来说明白一点：把整个翻译换成数字加减（`visibleTargetIndex + 隐藏张数`）**不**由本条抓到——
+    // 实测红的是上面那条往前拖的用例。这个 fixture 在往后拖的方向上两种算法恰好同解，所以别把
+    // 本条当成「数字加减法的靶子」；它的靶子是那次多余的方向性补偿。
+    const layout = oneGroup(STORED, 'a-1')
+    const moved = moveTabWithinActiveTopic(layout, TABS, {
+      tabId: 'a-1',
+      sourceGroupId: 'g',
+      targetGroupId: 'g',
+      visibleTargetIndex: 2 // a-1 从可见 0 号位拖到 a-3 头上
+    })
+    // 语义与往前拖一致：被拖那张落在锚点原来的位置上。
+    expect(shownOrderOf(moved)).toEqual(['a-2', 'a-3', 'a-1'])
+    // 存储视角：b-1/b-2 的相对次序一个字节没动，只有 a-1 换了位置。
+    expect(orderOf(moved)).toEqual(['b-1', 'b-2', 'a-2', 'a-3', 'a-1'])
+  })
+
   it('没有 Topic 时翻译是恒等的：与直接调 reducer 逐点一致', () => {
     // 这一条守的是「修复没有把非 Topic 场景一起改掉」。全部 Tab 都不绑 Topic，
     // 投影是恒等映射，翻译必须什么也不做。
@@ -186,11 +208,15 @@ describe('#556 缺陷 B：投影到空的格不许留在分屏树里', () => {
     expect(groupIds(shown.root)).toContain(shown.activeGroupId)
   })
 
-  it('当前 Topic 一张 Tab 都没开时保留原树（不返回空布局）', () => {
+  it('当前 Topic 一张 Tab 都没开时树里仍留恰好一片叶子（不返回空布局）', () => {
     const { layout } = twoGroups()
-    // topic-c 没有任何 Tab：两格都投影到空。这一层表达不了「没有布局」，原样交给上层。
+    // topic-c 没有任何 Tab：两格都投影到空。这一层表达不了「没有布局」，所以最后一次摘除被撤销。
+    // 判据是「恰好一片」而不是「至少一片」：`> 0` 对「原样保留两片」也成立，而那不是实现做的事，
+    // 也就守不住 `?? root` 只兜住最后一步这件事。留下的是循环走到最后时还剩的那片。
     const shown = layoutForActiveTopic(layout, TABS, 'topic-c')
-    expect(groupIds(shown.root).length).toBeGreaterThan(0)
+    expect(groupIds(shown.root)).toHaveLength(1)
+    // 前提自检：原树真的有两片，否则「摘到只剩一片」与「什么都没摘」不可区分。
+    expect(groupIds(layout.root)).toHaveLength(2)
   })
 })
 
