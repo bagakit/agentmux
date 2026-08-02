@@ -1,5 +1,6 @@
 import { insertTabAfter, type WorkspaceLayout } from './workbench-layout'
 import {
+  assertRegionInvariant,
   createWorkbenchTab,
   removeWorkbenchRegion,
   type WorkbenchTab
@@ -94,6 +95,11 @@ export function promoteRegionToTab(input: PromoteRegionToTabInput): PromoteRegio
   // `tabs` while leaving it out of every group: an orphan that never renders and can never be closed (the
   // shape addTabPlacement's JSDoc describes). Refuse rather than strand it.
   if (nextLayout === layout) return { kind: 'unchanged' }
+
+  // 促升原子地改两张 Tab：源 Tab 少一格、新 Tab 恰一格。对两张各断言一次不变量——这正是把
+  // assertRegionInvariant 做成「只读一张 Tab」的原因（见其注释）：能被同时改多张 Tab 的 reducer 逐张复用。
+  assertRegionInvariant(detachedTab)
+  assertRegionInvariant(newTab)
 
   return {
     kind: 'promoted',

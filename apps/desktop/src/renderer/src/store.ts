@@ -84,6 +84,7 @@ import {
   type WorkbenchRegionLayoutPreset
 } from './lib/workbench-view-layout'
 import {
+  describePersistedTabRepairs,
   projectPersistedWorkbench,
   persistedAgentSessionIds,
   restorePersistedWorkbench,
@@ -1812,10 +1813,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         createTabGroupId: newTabGroupId,
         preserveUnknownSessionViews: retainUnknownSessionViews
       })
+      // 抢救过的持久化 Tab 必须响亮：静默修好等于用户下次发现某一格不见了却无从查证。
+      const repairNotice = describePersistedTabRepairs(workbench.repairs)
       const startupError = [
         ...(persistWarning
           ? [`Saved workspace state could not be restored: ${message(persistWarning)}`]
           : []),
+        ...(repairNotice ? [repairNotice] : []),
         ...startupWarnings
       ].join(' ')
       set({
