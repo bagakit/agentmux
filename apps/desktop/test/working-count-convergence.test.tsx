@@ -72,9 +72,15 @@ import { AgentStatusBar } from '../src/renderer/src/components/AgentStatusBar.js
 /**
  * 全部九个显示态，硬写一份。
  *
- * 刻意不从 `AGENT_DISPLAY_STATES` 派生：期望值若由被测对象算出，就会跟着变异一起漂而恒真
+ * 刻意不从被测的投影派生：期望值若由被测对象算出，就会跟着变异一起漂而恒真
  * （memory: expected-value-must-not-derive-from-mutation-target）。自检 1 再把这份手抄与运行期
  * 真相对上，所以漂移会红在那里，而不是让下面每条断言在一个错的参照上比对。
+ *
+ * 外部锚点是 `AgentDisplayState` 这个 union 本身（core/src/types.ts），由自检 1 逐成员比对。
+ * 这里刻意不 import 一个运行期常量数组——**没有那个东西**：core 只导出类型，全仓
+ * `AGENT_DISPLAY_STATES` 零命中。此前打算写的那条 `toEqual([...AGENT_DISPLAY_STATES])` 会引一个
+ * 不存在的名字。而 union 是编译期的，所以锚点只能靠 parse 那个类型别名取到，见
+ * `displayStateUnionMembers`。
  */
 const ALL_DISPLAY_STATES: readonly AgentDisplayState[] = [
   'starting', 'running', 'working', 'waiting', 'blocked', 'disconnected', 'done', 'exited', 'error'
@@ -151,6 +157,13 @@ describe('窗口里每个「有几个在干活」的计数都用同一个判据'
       'Board 的 working 列成员变了——先确认这是刻意的产品变化，再改本文件的常量'
     ).toEqual([...STATES_THAT_MEAN_WORKING])
     expect(ALL_DISPLAY_STATES.length, '九个显示态少了').toBe(9)
+    // 外部锚点：那九个就是 core 的 union 的**全部**成员，不多不少。上面两条只问"这九个都归了类"
+    // ——core 加第十个态时它们只是少跑一圈，静默通过。裸字面量 9 同理：它由本文件自己的数组算出，
+    // 是同一份手抄的自证。比对不看顺序：union 的书写顺序不是产品事实。
+    expect(
+      [...ALL_DISPLAY_STATES].sort(),
+      'core 的 AgentDisplayState 变了——先确认新态该归哪一列，再改本文件的常量'
+    ).toEqual(displayStateUnionMembers().sort())
   })
 
   it('自检 2：渲染真的取到了那一段文本（否则下面读到 null，断言在读不到的东西上比对）', () => {
@@ -259,6 +272,39 @@ const here = dirname(fileURLToPath(import.meta.url))
 const rendererRoot = join(here, '..', 'src', 'renderer', 'src')
 const boardPath = join(rendererRoot, 'lib', 'project-board.ts')
 const attentionPath = join(rendererRoot, 'lib', 'agent-attention.ts')
+const coreTypesPath = join(here, '..', '..', '..', 'packages', 'core', 'src', 'types.ts')
+
+/**
+ * `AgentDisplayState` 这个 union 的成员，从 core 的源码里读出来。
+ *
+ * 为什么要 parse 而不是 import：core **只导出类型**，全仓没有任何 `AGENT_DISPLAY_STATES` 之类的运行期
+ * 数组（实测 0 命中）。union 是编译期的，所以想让本文件手抄的九个态有一个**外部**锚点，只能取那个
+ * 类型别名本身。此前打算写的 `toEqual([...AGENT_DISPLAY_STATES].sort())` 会引一个不存在的名字。
+ *
+ * 这条锚点回答的问题与自检 1 前半段不同：前半段问「这九个态 `sessionBoardColumn` 都归了类吗」，
+ * 那是**投影侧**的完整性；这里问「这九个就是全部吗」，是**类型侧**的完整性。少了后者，core 加第十个
+ * 态时上面每条逐态循环都只是少跑一圈——静默，而不是红。
+ */
+function displayStateUnionMembers(): string[] {
+  const source = ts.createSourceFile(
+    coreTypesPath,
+    readFileSync(coreTypesPath, 'utf8'),
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS
+  )
+  let members: string[] | null = null
+  source.forEachChild((node) => {
+    if (!ts.isTypeAliasDeclaration(node) || node.name.text !== 'AgentDisplayState') return
+    if (!ts.isUnionTypeNode(node.type)) return
+    members = node.type.types.flatMap((member) =>
+      ts.isLiteralTypeNode(member) && ts.isStringLiteral(member.literal) ? [member.literal.text] : []
+    )
+  })
+  // 拿不到就抛，不返回空数组：空数组会让下面的比对退化成"两个空集相等"而恒真。
+  if (!members) throw new Error(`${coreTypesPath} 里找不到 AgentDisplayState 的字面量 union——锚点断了`)
+  return members
+}
 
 /**
  * HEAD 上每一处「`.state` 与 `'working'` 直接相比」的位置，以及它为什么不是「有几个在干活」。
@@ -341,6 +387,128 @@ function parse(file: string): ts.SourceFile {
   )
 }
 
+/**
+ * 一个文件里所有「拿 `sessionBoardColumn(...)` 的返回值与 `'working'` 相比」的位置——正向判据。
+ *
+ * 上面两个检测器都是"不许出现"，只能证明**没有**第二份判据；它们证不出**有**那一次委派。
+ * 这个负责后者，而且返回行号（不是布尔）：`agent-attention.ts` 有**两处**这样的调用
+ * （整窗 rollup 与逐 Provider 汇总），所以"在场"这个问法本身就不够——把其中一处换掉，
+ * 另一处仍让"在场"成立。这是变异 3 实测出来的洞：`readFileSync(...).toContain(...)`
+ * 在只改一处时全绿（memory: two-write-sites-need-one-projection、
+ * counting-a-symbol-misses-other-spellings）。
+ *
+ * 判 AST 而不是文本，理由与上面同：换行、改形参名、加空格都不该逼人改测试，而注释里的同形字符
+ * 串不该冒充一次真委派。
+ */
+function boardColumnDelegationLines(sourceFile: ts.SourceFile): number[] {
+  const lines: number[] = []
+  const callsBoardColumn = (node: ts.Expression): boolean =>
+    ts.isCallExpression(node) &&
+    ts.isIdentifier(node.expression) &&
+    node.expression.text === 'sessionBoardColumn'
+  const isWorkingLiteral = (node: ts.Expression): boolean =>
+    (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) && node.text === 'working'
+
+  const walk = (node: ts.Node): void => {
+    if (
+      ts.isBinaryExpression(node) &&
+      (node.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken ||
+        node.operatorToken.kind === ts.SyntaxKind.EqualsEqualsToken) &&
+      ((callsBoardColumn(node.left) && isWorkingLiteral(node.right)) ||
+        (callsBoardColumn(node.right) && isWorkingLiteral(node.left)))
+    ) {
+      lines.push(sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1)
+    }
+    node.forEachChild(walk)
+  }
+  sourceFile.forEachChild(walk)
+  return lines
+}
+
+/**
+ * 每个消费者各自委派几次。取值抄自一次真扫描，不是估的。
+ *
+ * 钉次数而不只是钉"有没有"：把 `agent-attention.ts` 的两处之一换成内联 switch，"有没有"仍成立。
+ * 这张表与 `WORKING_LITERAL_SITES` 是一对：那张问"谁自己判了"，这张问"谁委派了、委派了几次"。
+ * 两张表都会因同一次改动而红，方向相反——那正是要的，一次改动应当在两侧都留下痕迹。
+ */
+const BOARD_COLUMN_DELEGATIONS: Readonly<Record<string, number>> = {
+  // 整窗 rollup（`:59`）与逐 Provider 汇总（`:97`）各一次。
+  '/lib/agent-attention.ts': 2,
+  // `workingAgentCount`。裁决点本身那个 switch 不算委派，它就是被委派的那一方。
+  '/lib/project-board.ts': 1,
+  // `groupProgress`。
+  '/lib/fanout-group.ts': 1
+}
+
+/**
+ * 一个文件里所有**出现字符串 `'working'` 的取值位**的行号（同一行出现两次就记两次）。
+ *
+ * 与上面那个检测器的关系是分工，不是重叠：那个问"有没有拿 `.state` 比 `'working'`"，只认二元比较，
+ * 于是 switch/`.includes`/中间变量/解构四种拼法全看不见（各自在自检里钉住了）。这个只问"这个词在
+ * 取值位出现了吗"，对拼法完全免疫，代价是无辜命中多——所以它配的是一张逐文件带理由的表，而不是
+ * 一句"不许出现"。
+ *
+ * 走 AST 而不是文本：注释与文档里的 `'working'` 不该逼人更新豁免表（自检里有反向断言）。
+ * `NoSubstitutionTemplateLiteral` 一并认，否则改成反引号就绕过。
+ */
+function workingLiteralLines(sourceFile: ts.SourceFile): number[] {
+  const lines: number[] = []
+  const walk = (node: ts.Node): void => {
+    if (
+      (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) &&
+      node.text === 'working'
+    ) {
+      lines.push(sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1)
+    }
+    node.forEachChild(walk)
+  }
+  sourceFile.forEachChild(walk)
+  return lines
+}
+
+/**
+ * 全仓每一处写着 `'working'` 的取值位，按文件记，各带一句「你回答哪个问题」。
+ *
+ * `count` 是那个文件里的出现次数，一起钉住：只比文件集合的话，在已列出的文件里再抄一份判据会静默
+ * 通过，而那恰好是最可能发生的一种（memory: equivalence-cannot-catch-a-fresh-copy）。
+ *
+ * 这张表比 `NON_COUNT_STATE_COMPARISONS` 宽得多，因为它的检测器与拼法无关：那张表只收"拿 state 比
+ * working"的位置，这张表收一切出现。两张表刻意不合并——它们的谓词不同，合并就得取交集或并集，
+ * 两者都会让某一侧的判据失去特异性。
+ */
+const WORKING_LITERAL_SITES: Readonly<Record<string, { count: number; why: string }>> = {
+  // ---- 唯一的裁决点，以及它的三个调用方 ----
+  '/lib/project-board.ts': {
+    count: 4,
+    why: '裁决点本身：列名常量、switch 的 case 与返回值、workingAgentCount 读它的返回值'
+  },
+  '/lib/agent-attention.ts': { count: 2, why: '整窗 rollup 与逐 Provider 汇总，两处都读裁决点的返回值' },
+  '/lib/fanout-group.ts': { count: 1, why: 'groupProgress 读裁决点的返回值（曾是严格判据，见文件内注释）' },
+
+  // ---- 与"有几个在干活"无关的问题 ----
+  '/lib/composer-submit-mode.ts': {
+    count: 1,
+    why: '主按钮 Stop/Send：问"有在途回合吗"。idle-running 没有可打断的回合，故严格判 working 是对的'
+  },
+  '/lib/attention-event.ts': { count: 1, why: 'AttentionSortClass union 的成员名，是排序类而非状态' },
+  '/lib/surface-tool-dock.ts': { count: 1, why: 'dock 分组 id 的字面量，与状态同名但是另一个命名空间' },
+  '/lib/quick-switch.ts': {
+    count: 2,
+    why: 'attentionRank 的 switch：把状态映射到排序类，case 与 attentionSortRank 的实参各一次'
+  },
+  '/lib/api.ts': { count: 1, why: 'browser preview 的 mock 数据，不是生产状态写入路径' },
+
+  // ---- 单行/单 lane 的状态点：不是计数，但各有已记录的分岔 ----
+  '/lib/agent-roster.ts': { count: 2, why: '行排序 rank，喂给 attentionSortRank（另见 #572）' },
+  '/components/AgentRoster.tsx': { count: 3, why: '单行状态点（另见 #500：该函数在 DOM 层从未被执行）' },
+  '/components/FanOutStrip.tsx': { count: 3, why: '单 lane 状态点（另见 #572）' },
+  '/components/AgentStatusBar.tsx': {
+    count: 4,
+    why: 'StatusCount 的状态词与 label：读 rollup 算好的数，自己不判'
+  }
+}
+
 describe('「有几个在干活」的裁决只有一处', () => {
   const files = tsFilesUnder(rendererRoot)
 
@@ -374,6 +542,35 @@ describe('「有几个在干活」的裁决只有一处', () => {
     ).toEqual([1, 2, 3])
   })
 
+  it('自检：这个检测器看不见的四种拼法，逐个钉住（它的视野是它自称的那么窄）', () => {
+    // 上一条只列了它**认得**的三种和它**该放过**的三种。它真正看不见的那些，此前只写在
+    // 提交 message 的「后续」段里——那正是本仓反复吃过的形状（memory:
+    // comment-promises-more-than-assertion）：一条读起来像已查证的散文，没人回头核对。
+    //
+    // 所以把盲点做成断言，落在失败现场。其中第四种（switch/case）**必须**看不见：
+    // `project-board.ts:95` 那个 switch 正是**正确**的裁决点，下面 `toEqual([])` 那条断言的前提
+    // 就是它对本检测器不命中。把这个检测器加宽到认 case，会当场对正确代码打红。
+    // 换句话说：这四个盲点不是待修的缺口，而是这个检测器的定义域——补位的是下面
+    // `workingLiteralLines`（问"有没有第二份判据"，与拼法无关）与 `boardColumnDelegationLines`
+    // （问"那次委派还在不在"，正向）两个检测器。
+    const bypass = (line: string): number[] =>
+      stateEqualsWorkingSites(
+        ts.createSourceFile('bypass.ts', line, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+      )
+
+    // 1. 先落到中间变量：比较的左侧不再是 `.state` 成员表达式。
+    expect(bypass("const s = session.status.state\nconst hit = s === 'working'")).toEqual([])
+    // 2. 解构出来：同上，且连 `.state` 这个词都不在比较那一行。
+    expect(bypass("const { state } = session.status\nconst hit = state === 'working'")).toEqual([])
+    // 3. 换成集合成员判定：根本不是二元比较。
+    expect(bypass("const hit = ['working'].includes(session.status.state)")).toEqual([])
+    // 4. 写成 switch：`case` 不是二元表达式。这一条的"看不见"是承重的，见上面说明。
+    expect(
+      bypass("switch (session.status.state) { case 'working': return 1 }"),
+      '若这条开始命中，project-board.ts 的正确 switch 会被判成违规——先读上面的说明'
+    ).toEqual([])
+  })
+
   it('两个计数投影自己都不判「在跑吗」，只调那一个开关', () => {
     // #582 的位点。`agent-attention.ts` 曾在这里写 `state === 'working'`。
     // project-board.ts 里那个 switch 用 case 而非 ===，故对本检测器天然不命中；它就是唯一裁决点。
@@ -384,7 +581,20 @@ describe('「有几个在干活」的裁决只有一处', () => {
       ).toEqual([])
     }
     // 正向：收敛后的取值真的经过那个开关，而不是换成了别的恒等写法。
-    expect(readFileSync(attentionPath, 'utf8')).toContain("sessionBoardColumn(session) === 'working'")
+    // 逐文件钉次数，不是问"在场吗"：`agent-attention.ts` 有两处委派，只换掉其中一处时
+    // 「在场」照旧成立（变异 3 实测：`toContain` 在那种改法下全绿）。
+    const delegations = Object.fromEntries(
+      Object.keys(BOARD_COLUMN_DELEGATIONS).map((rel) => [
+        rel,
+        boardColumnDelegationLines(parse(join(rendererRoot, rel.slice(1)))).length
+      ])
+    )
+    expect(
+      delegations,
+      '有消费者不再委派给 sessionBoardColumn 了（或多委派了一次）。若它改成自己判，' +
+        '那就是 #419/#582 的第三次复发；若是真的新增/删除了一个计数面，连同 ' +
+        'BOARD_COLUMN_DELEGATIONS 一起更新。'
+    ).toEqual({ ...BOARD_COLUMN_DELEGATIONS })
   })
 
   it('全仓「拿 state 比 working」的位置没有新增（每一处都得说清自己回答哪个问题）', () => {
@@ -408,5 +618,62 @@ describe('「有几个在干活」的裁决只有一处', () => {
       '这些位置已经不再自己判了——把它们从 NON_COUNT_STATE_COMPARISONS 删掉，' +
         '否则这张表会慢慢变成一份谁都不敢动的陈旧豁免清单。'
     ).toEqual([])
+  })
+
+  // -------------------------------------------------------------------------
+  // 补位检测器：与拼法无关。
+  //
+  // 上面那个检测器只认「`.state` 与 `'working'` 的二元比较」，它的四个盲点已在自检里逐条钉住，
+  // 其中 switch/case 那个是**承重**的（`project-board.ts` 的正确裁决点就写成 switch）。所以加宽它
+  // 是错的，补位只能换一个判据。
+  //
+  // 这个判据是：全仓每一处**出现字面量 `'working'` 的取值位**都必须在表里带一句"你是谁"。它对拼法
+  // 完全免疫——switch 的 case、`.includes` 的数组元素、类型 union 的成员、把它当 CSS 词用的，一个
+  // 都躲不掉。代价是它认得的位置多得多（12 个文件），而绝大多数是无辜的；所以表里记的是**文件**与
+  // 出现次数，新增一处就要在这里说清自己回答哪个问题。
+  //
+  // 这不是「禁止形状不在场」那种门（memory: forbidden-shape-guard-misfires）：它不禁任何写法，只
+  // 要求每处出现都被质询过一次。次数一起钉住，否则在已列出的文件里再抄一份会静默通过——那恰好是
+  // 最可能发生的一种（memory: equivalence-cannot-catch-a-fresh-copy）。
+  // -------------------------------------------------------------------------
+  it('自检：这个检测器对拼法免疫（switch/includes/中间变量都认得）', () => {
+    const count = (source: string): number =>
+      workingLiteralLines(
+        ts.createSourceFile('p.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+      ).length
+    // 上一个检测器的四个盲点，这里逐个必须命中——这就是"补位"这两个字的内容。
+    expect(count("const s = session.status.state\nconst hit = s === 'working'"), '中间变量').toBe(1)
+    expect(count("const { state } = session.status\nif (state === 'working') f()"), '解构').toBe(1)
+    expect(count("const hit = ['working'].includes(state)"), '集合成员').toBe(1)
+    expect(count("switch (state) { case 'working': return 1 }"), 'switch/case').toBe(1)
+    // 反向：不含这个字面量的文件必须是 0，否则它对一切都命中，表里的次数就不是证据。
+    expect(count("const hit = state === 'waiting'"), '不该对别的字面量命中').toBe(0)
+    // 注释里的词不算：判的是取值位，不是文本。否则每次改注释都要动这张表。
+    expect(count("// 这里讲的是 'working' 列\nconst n = 1"), '注释不算取值位').toBe(0)
+  })
+
+  it('每一处写着 working 的取值位都被质询过（次数一起钉住）', () => {
+    const found = new Map<string, number>()
+    for (const file of files) {
+      const hits = workingLiteralLines(parse(file)).length
+      if (hits) found.set(file.replace(rendererRoot, ''), hits)
+    }
+    const known = new Map(Object.entries(WORKING_LITERAL_SITES).map(([path, site]) => [path, site.count]))
+
+    expect(
+      [...found.keys()].filter((path) => !known.has(path)).sort(),
+      '这些文件新写了 `working` 字面量。若它数的是"有几个在干活"，改成调 sessionBoardColumn；' +
+        '否则把它连同"你回答哪个问题"加进 WORKING_LITERAL_SITES。'
+    ).toEqual([])
+    expect(
+      [...known.keys()].filter((path) => !found.has(path)).sort(),
+      '这些文件已经不写 `working` 了——从 WORKING_LITERAL_SITES 删掉，别留陈旧豁免。'
+    ).toEqual([])
+    // 次数：已列出的文件里再抄一份，上面两条都不会红。
+    expect(
+      Object.fromEntries([...found].sort()),
+      '某个文件里 `working` 的出现次数变了。多出来的那一处是不是又抄了一份判据？' +
+        '确认它回答的是别的问题之后，更新 WORKING_LITERAL_SITES 里的 count。'
+    ).toEqual(Object.fromEntries([...known].sort()))
   })
 })
