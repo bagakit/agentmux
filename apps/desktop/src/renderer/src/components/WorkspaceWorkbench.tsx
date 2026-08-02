@@ -72,9 +72,10 @@ import {
   type WorkbenchSurface,
   type WorkbenchTab
 } from '../lib/workbench-tabs'
+import { assertUnreachableSurface, isSessionSurface } from '../lib/workbench-surface-kinds'
 import { tabMarkAgentFactsFor, tabRegionSummary, workbenchTabMarks } from '../lib/workbench-tab-marks'
 import { canStopSessionRun, sessionTabTooltip, surfaceTabTooltip } from '../lib/session-metadata'
-import { copyableAgentSessionIdForTab } from '../lib/tab-control-handoff'
+import { addressableAgentSessionId, copyableAgentSessionIdForTab } from '../lib/tab-control-handoff'
 import { handleTopicRenameKeyDown } from '../lib/topic-rename'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { api } from '../lib/api'
@@ -97,17 +98,25 @@ type SplitTarget = { groupId: string; direction: SplitDirection }
 
 function tabSurfaceFallback(tab: WorkbenchTab, sessions: readonly SessionSnapshot[]): string {
   const surface = titleWorkbenchSurface(tab)
-  if (surface.kind === 'file') return surface.path.split('/').at(-1) ?? surface.path
-  if (surface.kind === 'launcher') return 'New Tab'
-  if (surface.kind === 'browser') {
-    return surface.title && surface.title !== 'about:blank'
-      ? surface.title
-      : surface.url === 'about:blank' ? 'New Tab' : surface.url
+  switch (surface.kind) {
+    case 'file':
+      return surface.path.split('/').at(-1) ?? surface.path
+    case 'launcher':
+      return 'New Tab'
+    case 'browser':
+      return surface.title && surface.title !== 'about:blank'
+        ? surface.title
+        : surface.url === 'about:blank' ? 'New Tab' : surface.url
+    case 'agent':
+    case 'terminal': {
+      // Agent/terminal title surface: the Provider·Workspace fact is the session's own label (built once
+      // in Main), used verbatim as the chain's lowest tier — the renderer never re-derives that string.
+      const session = sessions.find((item) => item.id === surface.sessionId)
+      return session?.label ?? surface.sessionId
+    }
+    default:
+      return assertUnreachableSurface(surface)
   }
-  // Agent/terminal title surface: the Provider·Workspace fact is the session's own label (built once in
-  // Main), used verbatim as the chain's lowest tier — the renderer never re-derives that string.
-  const session = sessions.find((item) => item.id === surface.sessionId)
-  return session?.label ?? surface.sessionId
 }
 
 /**
@@ -118,15 +127,23 @@ function tabSurfaceFallback(tab: WorkbenchTab, sessions: readonly SessionSnapsho
  * 即可。同名多格的区分（编号）由 `regionSwapMenuEntries` 统一做，不在这里。
  */
 function regionSurfaceLabel(surface: WorkbenchSurface, sessions: readonly SessionSnapshot[]): string {
-  if (surface.kind === 'file') return surface.path.split('/').at(-1) ?? surface.path
-  if (surface.kind === 'launcher') return 'New Tab'
-  if (surface.kind === 'browser') {
-    if (surface.title && surface.title !== 'about:blank') return surface.title
-    return surface.url === 'about:blank' ? 'New Tab' : surface.url
+  switch (surface.kind) {
+    case 'file':
+      return surface.path.split('/').at(-1) ?? surface.path
+    case 'launcher':
+      return 'New Tab'
+    case 'browser':
+      if (surface.title && surface.title !== 'about:blank') return surface.title
+      return surface.url === 'about:blank' ? 'New Tab' : surface.url
+    case 'terminal':
+      return 'Terminal'
+    case 'agent': {
+      const session = sessions.find((item) => item.id === surface.sessionId)
+      return session?.label ?? surface.sessionId
+    }
+    default:
+      return assertUnreachableSurface(surface)
   }
-  if (surface.kind === 'terminal') return 'Terminal'
-  const session = sessions.find((item) => item.id === surface.sessionId)
-  return session?.label ?? surface.sessionId
 }
 
 /**
@@ -200,7 +217,7 @@ function SortableWorkbenchTab({
   const clearCloseTabRequest = useAppStore((state) => state.clearCloseTabRequest)
   const reportError = useAppStore((state) => state.reportError)
   const surface = titleWorkbenchSurface(tab)
-  const session = surface.kind === 'agent' || surface.kind === 'terminal'
+  const session = isSessionSurface(surface)
     ? sessions.find((item) => item.id === surface.sessionId)
     : null
   // 标签上画的标记序列：一张 Tab 可以含多个 Region，标签要画出它的种类构成，而不是只画标题那一个。
@@ -508,7 +525,7 @@ function SurfaceContent({
   const parked = useTerminalRegionParked(surface.regionId)
   const monacoReleased = useMonacoSurfaceReleased(surface.regionId)
   const browserReleased = useBrowserSurfaceReleased(surface.regionId)
-  if (surface.kind === 'agent' || surface.kind === 'terminal') {
+  if (isSessionSurface(surface)) {
     return (
       <SessionPane
         sessionId={surface.sessionId}
@@ -543,14 +560,20 @@ function SurfaceContent({
       />
     )
   }
-  return (
-    <NewTabSurface
-      tabGroupId={groupId}
-      tabId={tabId}
-      regionId={surface.regionId}
-      visible={nativeSurfacesVisible}
-    />
-  )
+  // Launcher, named rather than reached by falling through. A bare `return <NewTabSurface/>` tail would
+  // render a sixth kind as an empty start page — the pane looks fine and does the wrong thing, with no
+  // compile error. Naming the case lets `assertUnreachableSurface` refuse to type-check that day.
+  if (surface.kind === 'launcher') {
+    return (
+      <NewTabSurface
+        tabGroupId={groupId}
+        tabId={tabId}
+        regionId={surface.regionId}
+        visible={nativeSurfacesVisible}
+      />
+    )
+  }
+  return assertUnreachableSurface(surface)
 }
 
 function WorkbenchRegionNode({
@@ -657,8 +680,9 @@ function WorkbenchRegionLeaf({
   return (
     <RegionContextMenu
       regionId={node.regionId}
-      // 只有承载 Agent 的一格才有语义身份可寻址。
-      agentSessionId={surface.kind === 'agent' ? surface.sessionId : null}
+      // 只有承载 Agent 的一格才有语义身份可寻址。这个判定跟 Tab 级的唯一 Agent 判定同源
+      // （tab-control-handoff 的 addressableAgentSessionId），所以第六种载 Agent 的 kind 只在那里声明一次。
+      agentSessionId={addressableAgentSessionId(surface)}
       writeClipboardText={async (text) => {
         await copyTextToClipboard(text, reportError)
       }}

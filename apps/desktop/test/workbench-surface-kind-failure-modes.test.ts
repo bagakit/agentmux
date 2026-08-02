@@ -4,8 +4,10 @@ import { selectSurfaceMemoryReleases } from '../src/renderer/src/lib/surface-mem
 import { projectPersistedWorkbench } from '../src/renderer/src/lib/workbench-persistence'
 import {
   WORKBENCH_SURFACE_KINDS,
-  isSessionSurface
+  isSessionSurface,
+  surfaceCloseObligations
 } from '../src/renderer/src/lib/workbench-surface-kinds'
+import { addressableAgentSessionId } from '../src/renderer/src/lib/tab-control-handoff'
 import {
   addWorkbenchRegion,
   createWorkbenchTab,
@@ -90,6 +92,86 @@ describe('the SSOT predicate itself: no kind may get a silent verdict', () => {
     // "not a session" for a future session-bearing kind, and every one of the five consumers would
     // then tear down / hide / skip it without a word.
     expect(() => isSessionSurface(forgottenKindSurface('r'))).toThrow(
+      /Unhandled workbench surface kind/
+    )
+  })
+})
+
+describe('close obligations: what a Region releases must be decided per kind, not fall through', () => {
+  // `surfaceCloseObligations` replaced two independent single-kind questions at `closeRegion`'s call
+  // site (`kind === 'browser'` → destroy the Main-side view, `kind === 'file'` → reconcile the shared
+  // document projection). Measured before these assertions existed: flipping `file`'s
+  // `releasesDocument` to false kept the whole desktop suite green — `closeRegion`'s two tests both
+  // close an agent Region, so neither obligation is ever true in them. A wrong answer here is a
+  // resource that is never released: an orphaned BrowserView, or a document owner that outlives its
+  // last pane.
+
+  it('every kind in the union gets an explicit obligation — none falls through', () => {
+    // Per-kind, driven off WORKBENCH_SURFACE_KINDS so a 6th kind arrives here automatically. The
+    // browser arm carries the surface's own id rather than a boolean, so the table pins the id too:
+    // returning a null id for a browser would leave the native view alive with nothing pointing at it.
+    const obligations = new Map<string, { browserViewId: string | null; releasesDocument: boolean }>()
+    for (const kind of WORKBENCH_SURFACE_KINDS) {
+      obligations.set(
+        kind,
+        surfaceCloseObligations({
+          kind,
+          regionId: 'r',
+          workspaceId: 'ws',
+          browserId: 'br-1'
+        } as never)
+      )
+    }
+    expect(Object.fromEntries(obligations)).toEqual({
+      agent: { browserViewId: null, releasesDocument: false },
+      terminal: { browserViewId: null, releasesDocument: false },
+      file: { browserViewId: null, releasesDocument: true },
+      launcher: { browserViewId: null, releasesDocument: false },
+      browser: { browserViewId: 'br-1', releasesDocument: false }
+    })
+  })
+
+  it('a kind outside the union is loud here, not quietly obligation-free', () => {
+    // The silent-leak shape: a catch-all arm answers "nothing to release" for a future kind that owns
+    // an OS-level resource, and `closeRegion` drops the pane while the resource stays alive.
+    expect(() => surfaceCloseObligations(forgottenKindSurface('r'))).toThrow(
+      /Unhandled workbench surface kind/
+    )
+  })
+})
+
+describe('Agent addressability: which Region can be named as an Agent', () => {
+  // Deliberately NOT `isSessionSurface`: a Terminal has a `sessionId` but is not an Agent, and the
+  // addresses this feeds (`agentmux send --to-session=…`) only resolve for an Agent. So the two
+  // questions differ, and the terminal row below is what states that difference.
+
+  it('only the Agent kind yields an address; every other kind explicitly yields none', () => {
+    const verdicts = new Map<string, string | null>()
+    for (const kind of WORKBENCH_SURFACE_KINDS) {
+      verdicts.set(
+        kind,
+        addressableAgentSessionId({
+          kind,
+          regionId: 'r',
+          workspaceId: 'ws',
+          sessionId: 'session-1'
+        } as never)
+      )
+    }
+    expect(Object.fromEntries(verdicts)).toEqual({
+      agent: 'session-1',
+      // A Session, but not an Agent — this is the row that separates this decision from isSessionSurface.
+      terminal: null,
+      file: null,
+      launcher: null,
+      browser: null
+    })
+  })
+
+  it('a kind outside the union is loud here, not quietly unaddressable', () => {
+    // Silently answering null would make the Region's copy-address entries vanish for a future
+    // Agent-bearing kind, with no compile error and nothing to see at runtime.
+    expect(() => addressableAgentSessionId(forgottenKindSurface('r'))).toThrow(
       /Unhandled workbench surface kind/
     )
   })
