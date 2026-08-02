@@ -1,4 +1,7 @@
 import { readFileSync, readdirSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 import {
   regionInDirection,
@@ -280,5 +283,156 @@ describe('几何 SSOT 的 import 关系与消费者不自算几何', () => {
     expect(hasBoundsArithmetic(ssotSource)).toBe(true)
     // 再证它不会把「没有几何算术」的文本误报（一句纯字符串不该命中）。
     expect(hasBoundsArithmetic('const label = "left"')).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 方向两半真相的**独占性**守卫：`orientationOf`（哪根轴）与 `placementOf`（哪一侧）是渲染层里
+// 唯一能把一个 `SplitDirection` 拆成含义的地方。上面那组守的是「消费者从这里 import」，这一组守的是
+// 「除这里以外没有第二份手抄」——两件事不同：import 在场不妨碍同一个文件里另写一份 `direction === 'right'`。
+//
+// 判据必须是**被比较那一侧的类型**，不是拼法。理由是拼法判据同时会漏又会误伤：
+//   - 漏：`switch (direction)`、`['left','right'].includes(direction)`、`d !== 'up'` 都绕开
+//     任何一条 `not.toContain("=== 'left'")`；
+//   - 误伤：`workbench-tab-actions.ts` 的 `scope === 'left'` 逐字同形，但 `scope` 是 `TabCloseScope`
+//     （`'others' | 'left' | 'right'`，「关左边的 tab」的关闭范围），跟方向毫无关系。拼法判据只能靠
+//     豁免清单放行它，而豁免清单本身就是盲区（本仓 forbidden-list-guard-always-leaks）。
+//
+// 用类型检查器问「这个操作数的类型是不是恰好那四个方向字面量」，`scope === 'left'` 自动落在判据之外，
+// 不需要任何豁免条目。先例是 `workbench-surface-kind-exhaustiveness.test.ts`：那里同样要把
+// `surface.kind` 与逐字同形的 `session.kind` 分开，用的也是 checker 而不是正则。
+//
+// 建 program 的代价实测约 2s（与上述先例同量级），换来的是这条守卫不会因为换个拼法而失效。
+// ---------------------------------------------------------------------------
+const RENDERER_DIR = fileURLToPath(new URL('../src/renderer/src/', import.meta.url))
+const DESKTOP_DIR = fileURLToPath(new URL('../', import.meta.url))
+const DIRECTION_MEMBERS = ['left', 'right', 'up', 'down'] as const
+
+/** 方向的两半真相所在——只有这个文件可以把 direction 拆成轴与侧。 */
+const DIRECTION_SSOT = 'lib/split-direction.ts'
+
+function rendererSourceFiles(dir: string): string[] {
+  const out: string[] = []
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name)
+    if (entry.isDirectory()) out.push(...rendererSourceFiles(full))
+    else if (/\.tsx?$/.test(entry.name) && !entry.name.endsWith('.d.ts')) out.push(full)
+  }
+  return out
+}
+
+type DirectionComparison = { file: string; line: number; text: string }
+
+/**
+ * 渲染层里所有「拿一个方向类型的值与某个方向字面量比较」的位置。
+ *
+ * 覆盖两种写法：等值比较（`===`/`!==`/`==`/`!=`，字面量在左或在右都算）与 `switch` 的 case 子句。
+ * 每一处都要求非字面量那一侧的类型**每个成员都是那四个方向字面量之一**——这既排除了 `TabCloseScope`
+ * 这类同形但不同义的 union，也排除了 `string`（宽到什么都能比，不构成对方向的拆解）。
+ */
+function findDirectionComparisons(): { hits: DirectionComparison[]; scannedFiles: number; members: string[] } {
+  const roots = rendererSourceFiles(RENDERER_DIR)
+  const configFile = ts.readConfigFile(path.join(DESKTOP_DIR, 'tsconfig.json'), ts.sys.readFile)
+  const parsed = ts.parseJsonConfigFileContent(configFile.config, ts.sys, DESKTOP_DIR)
+  const program = ts.createProgram(roots, parsed.options)
+  const checker = program.getTypeChecker()
+
+  // 锚点从 SplitDirection 的声明处取，不在测试里重列那四个词——否则这里就成了第 N 份手抄。
+  const declaration = program.getSourceFile(path.join(RENDERER_DIR, 'lib/workbench-layout.ts'))
+  let unionType: ts.Type | undefined
+  ts.forEachChild(declaration!, (node) => {
+    if (ts.isTypeAliasDeclaration(node) && node.name.text === 'SplitDirection') {
+      unionType = checker.getTypeAtLocation(node.name)
+    }
+  })
+  const members = (unionType?.isUnion() ? unionType.types : [])
+    .map((part) => (part.isStringLiteral() ? part.value : ''))
+    .filter(Boolean)
+    .sort()
+
+  const isDirectionTyped = (node: ts.Node): boolean => {
+    const type = checker.getTypeAtLocation(node)
+    const parts = type.isUnion() ? type.types : [type]
+    if (parts.length === 0) return false
+    return parts.every((part) => part.isStringLiteral() && members.includes(part.value))
+  }
+
+  const scanned = program
+    .getSourceFiles()
+    .filter((file) => !file.isDeclarationFile && file.fileName.startsWith(RENDERER_DIR))
+  const hits: DirectionComparison[] = []
+  const EQUALITY = new Set<ts.SyntaxKind>([
+    ts.SyntaxKind.EqualsEqualsEqualsToken,
+    ts.SyntaxKind.ExclamationEqualsEqualsToken,
+    ts.SyntaxKind.EqualsEqualsToken,
+    ts.SyntaxKind.ExclamationEqualsToken
+  ])
+  for (const file of scanned) {
+    const record = (node: ts.Node): void => {
+      const { line } = file.getLineAndCharacterOfPosition(node.getStart())
+      hits.push({
+        file: path.relative(RENDERER_DIR, file.fileName),
+        line: line + 1,
+        text: node.getText().slice(0, 80)
+      })
+    }
+    const visit = (node: ts.Node): void => {
+      if (ts.isBinaryExpression(node) && EQUALITY.has(node.operatorToken.kind)) {
+        for (const [literal, other] of [
+          [node.right, node.left],
+          [node.left, node.right]
+        ] as const) {
+          if (ts.isStringLiteral(literal) && members.includes(literal.text) && isDirectionTyped(other)) {
+            record(node)
+            break
+          }
+        }
+      }
+      if (ts.isCaseClause(node) && ts.isStringLiteral(node.expression) && members.includes(node.expression.text)) {
+        const owner = node.parent?.parent
+        if (owner && ts.isSwitchStatement(owner) && isDirectionTyped(owner.expression)) record(node)
+      }
+      ts.forEachChild(node, visit)
+    }
+    visit(file)
+  }
+  return { hits, scannedFiles: scanned.length, members }
+}
+
+describe('方向的两半含义只在 split-direction 里拆一次', () => {
+  const { hits, scannedFiles, members } = findDirectionComparisons()
+
+  it('自证：锚点解析出的确实是那四个方向（解析失败时判据会恒真）', () => {
+    // 若 SplitDirection 解析不到（文件改名、alias 变 interface），members 为空，isDirectionTyped 恒假，
+    // 下面那条「没有第二处」会毫无意义地全绿。先把锚点本身钉住。
+    expect(members).toEqual([...DIRECTION_MEMBERS].sort())
+  })
+
+  it('自证：扫描确实覆盖到渲染层的一批文件（扫空目录时判据会恒真）', () => {
+    expect(scannedFiles).toBeGreaterThan(50)
+  })
+
+  it('自证：判据在 SSOT 自己身上认得出方向拆解（判据不是恒假）', () => {
+    // `orientationOf` 与 `placementOf` 各含两处方向比较，`edgeGap` 的 switch 含四条 case。
+    // 这条同时证明「类型判据能认出方向操作数」——它若退化成恒假，上面那条独占性检查会恒绿。
+    const inSsot = hits.filter((hit) => hit.file === DIRECTION_SSOT)
+    expect(inSsot.length).toBeGreaterThanOrEqual(6)
+  })
+
+  it('除 SSOT 外，渲染层没有第二处把方向拆成轴或侧', () => {
+    // 任何消费者要知道「哪根轴」或「哪一侧」，只能调 orientationOf / placementOf。此前这条被违反过
+    // 五次（region 树建树、tab-group 树建树、邻居查找、寻址侧轴判、寻址侧侧判），五处今天都对纯属它们
+    // 同期写成；改一处而别处不跟上，同一个「向左」会在两棵树上给出相反的落点，而两边各自的测试全绿。
+    const offenders = hits.filter((hit) => hit.file !== DIRECTION_SSOT)
+    expect(offenders).toEqual([])
+  })
+
+  it('自证：类型判据不会把同形但不同义的 union 算成方向（豁免清单会有的误伤）', () => {
+    // `workbench-tab-actions.ts` 的 `scope === 'left'` 与方向逐字同形，但 scope 是 TabCloseScope
+    // （关闭范围，`'others' | 'left' | 'right'`）。拼法判据必须给它一条豁免；类型判据天然排除。
+    // 这条把那个前提钉住：那处比较真的还在（否则这条自证就成了对不存在代码的空话），且没被算成 offender。
+    const tabActions = readFileSync(path.join(RENDERER_DIR, 'lib/workbench-tab-actions.ts'), 'utf8')
+    expect(tabActions).toContain("scope === 'left'")
+    expect(hits.some((hit) => hit.file === 'lib/workbench-tab-actions.ts')).toBe(false)
   })
 })
