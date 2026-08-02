@@ -30,6 +30,7 @@ import type {
   HostConfig,
   MoveWorkspacePathInput,
   NotificationModeId,
+  RemoveWorktreeInput,
   RuntimeEvent,
   SessionControl,
   TerminalLaunchInput,
@@ -56,6 +57,8 @@ const api: AgentMuxPreloadApi = {
       ipcRenderer.invoke('workspaces:openBranch', workspaceId, branch),
     createWorktreeForBranch: (input: CreateWorktreeForBranchInput) =>
       ipcRenderer.invoke('workspaces:createWorktreeForBranch', input),
+    removeWorktree: (input: RemoveWorktreeInput) =>
+      ipcRenderer.invoke('workspaces:removeWorktree', input),
     runFanOut: (input: RunFanOutInput) => ipcRenderer.invoke('workspaces:runFanOut', input),
     keepOneOfFanOut: (input: KeepOneOfFanOutInput) =>
       ipcRenderer.invoke('workspaces:keepOneOfFanOut', input)
