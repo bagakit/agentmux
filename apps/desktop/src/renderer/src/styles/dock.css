@@ -105,6 +105,8 @@
 /* Topic 头像默认只表达身份；只有 live work 才用共享状态色产生外描边/发光。 */
 .agent-avatar {
   width: 18px; height: 18px; padding: 0; gap: 0;
+  /* 相对定位：等你/出错那枚角标（下面的 ::after）靠它定位。 */
+  position: relative;
   display: inline-flex; align-items: center; justify-content: center;
   border: 0; border-radius: var(--radius-sm);
   background: var(--surface-2); color: var(--text-2); cursor: pointer;
@@ -115,6 +117,40 @@
   outline: 1px solid var(--status-ink); outline-offset: 1px;
   box-shadow: 0 0 7px var(--status-ink); filter: none; opacity: 1;
 }
+/* 等你 / 出错的头像必须与闲置的看得出区别。
+   这一格是 Topic 行里**唯一**的状态载体——行里只有标题、摘要和这摞头像，没有全尺寸的
+   `.status__dot` 可以替它带那枚 `?`（状态语汇段那条规则挂在 `.status__dot` 上，这里没有那个元素）。
+   于是"其他状态保持灰度"这条密度合同（《状态到颜色只说一次》）遇上了它自己没预料的情形：灰度掉的
+   不只是装饰，是"有人在等你"这唯一一次提示。所以这里给 needs-you / error 补上，且仍然只读
+   `--status-ink`，不自己挑颜色——琥珀与红从哪来仍是状态语汇段说的。
+   取值域按 `attentionAccentFor` 恰好两个值（needs-you / error），逐个列出而不写裸
+   `[data-attention]`：写裸的等于承诺给任何将来的 category 上色，而下一个 category 的正确答案很可能
+   是"不上色"（`done` 就是），那时这里会悄悄替它做了错的决定。 */
+.agent-avatar[data-attention='needs-you'], .agent-avatar[data-attention='error'] {
+  filter: none; opacity: 1;
+  outline: 1px solid var(--status-ink); outline-offset: 1px;
+}
+/* 颜色之外还要一个形状——一摞 18px 的方块里，只靠描边色分辨琥珀与红，在快速一扫和色盲下都不成立。
+   角标而不是描边加粗：加粗只会让两枚相邻头像的边挤在一起，读作"这两个是一组"。
+   落右上角是被几何逼定的：左缘被邻座压掉 6px（叠压是右压左），右下角归 provider 归并计数
+   （`.selector-presence__slot small`）。 */
+.agent-avatar[data-attention='needs-you']::after,
+.agent-avatar[data-attention='error']::after {
+  content: '?';
+  position: absolute; top: -3px; right: -3px;
+  width: 8px; height: 8px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  color: var(--surface-0); background: var(--status-ink);
+  box-shadow: 0 0 0 1.5px var(--surface-1);
+  /* 7px 与状态点里那枚 `?` 同尺寸（chrome.css 的 `.status--waiting .status__dot::after`），不是
+     另挑一个数：同一枚字形在两处各挑一个尺寸，就是同一个决定做了两遍。尺度合同为这两处各具名一次
+     例外，理由同一条——它是图形符号而非可读文本，不受"不低于 10px"约束。 */
+  font-size: 7px; font-weight: 800; line-height: 1;
+}
+/* `!` 而不是 `?`：与项目栏角标同一对字形（chrome.css 那组 `[data-attention]` 规则），
+   因为它们答的是同一个问题——两处若各挑一套字形，同一件事在两个面板上读起来就是两件事。 */
+.agent-avatar[data-attention='error']::after { content: '!'; }
 /* 悬停抬升由共享层在叠压容器上负责（selector.css）——叠压之后必须有东西能让被压住的那枚
    完整露出来，所以抬升与放大是同一个动作的两半，不在这里各写一半。 */
 .agent-avatar.status--working:hover, .agent-avatar.status--running:hover { box-shadow: var(--elev-1), 0 0 7px var(--status-ink); }
