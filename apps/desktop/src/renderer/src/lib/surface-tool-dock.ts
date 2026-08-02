@@ -183,6 +183,13 @@ export function getRenderedToolDockWidth(width: number, projectRailOpen: boolean
  *
  * 没有 live Session 的协作者如实报 `disconnected`——它在磁盘上留了记录，但此刻没在跑，
  * 假装它在运行会让整行的状态失去意义。
+ *
+ * #473：这里报 `disconnected` 是对的，不该改。那个磁盘记录（`.agents/` 里的 identity）被设计成
+ * durable 短记忆而非 Run-state（见 scratch-topics.ts `identityContent`），所以「关掉 Agent 后它还在行上」
+ * 是特性不是 bug——**退掉的是「该删那个文件、行只读 live Session」这条方案**。真正的缺陷在显示层：
+ * `disconnected` 此前与「live 但 done/exited」的头像逐像素同款，把「曾在」画成了「跑完了还在」。
+ * 修法是给 `disconnected` 头像一圈虚线描边（dock.css），让「不在场」与「在场」看得出区别，而不是
+ * 动这里的取值或删用户数据。
  */
 export function topicAgentPresentation(agent: TopicAgent): {
   state: AgentDisplayState

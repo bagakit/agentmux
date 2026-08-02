@@ -119,6 +119,17 @@
   outline: 1px solid var(--status-ink); outline-offset: 1px;
   box-shadow: 0 0 7px var(--status-ink); filter: none; opacity: 1;
 }
+/* #473：一个协作者在磁盘上留了 identity（`.agents/` 里的「短记忆」，identityContent 明说它是
+   durable memory 而非 Run-state），但此刻没有 live Session——它「曾经在这」，不是「现在在跑」。
+   投影层已如实报 `disconnected`（surface-tool-dock.ts），可这里的头像此前对 disconnected 没有任何
+   规则，于是它与一个「live 但已 done/exited」的头像逐像素同款（都只是灰度收敛、无描边无角标）：
+   「曾在」和「跑完了还在」被画成同一件事。缺陷不在「该删那个文件」（它是被设计为 durable 的，删了
+   就丢了协作历史），而在「显示把 durable memory 当成了 live presence」——所以这里补一圈虚线描边，
+   读作「占位/不在场」，与 running 的实线描边（在场且活跃）、done/exited 的无描边（在场但结束）都分得开。
+   仍只读 `--status-ink`（disconnected 的 ink 是 `--text-3`，chrome.css 状态语汇段），不自己挑色。 */
+.agent-avatar.status--disconnected {
+  outline: 1px dashed var(--status-ink); outline-offset: 1px;
+}
 /* 等你 / 出错的头像必须与闲置的看得出区别。
    这一格是 Topic 行里**唯一**的状态载体——行里只有标题、摘要和这摞头像，没有全尺寸的
    `.status__dot` 可以替它带那枚 `?`（状态语汇段那条规则挂在 `.status__dot` 上，这里没有那个元素）。
