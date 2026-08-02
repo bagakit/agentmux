@@ -1,3 +1,4 @@
+import { agentMuxControlTimeoutMs } from '@agentmux/core/control'
 import type {
   AgentMuxControlError,
   AgentMuxControlErrorCode,
@@ -8,9 +9,6 @@ import type {
   DesktopControlCancellation,
   DesktopControlResponse
 } from '../shared/contracts.js'
-
-const REQUEST_TIMEOUT_MS = 2_000
-const LONG_REQUEST_TIMEOUT_MS = 60_000
 
 type PendingControl = {
   resolve(value: AgentMuxControlResult): void
@@ -51,14 +49,16 @@ export class DesktopControlIpcBridge {
       throw bridgeError('CONTROL_REQUEST_CONFLICT', 'Desktop Control request ID is already pending.')
     }
     return await new Promise((resolve, reject) => {
+      // 预算与判据都取 core 的那一处（agentMuxControlTimeoutMs）：这条 IPC 路与 CLI→daemon 的 socket
+      // 路是同一个请求的两条到达方式，等待方不同而预算必须相同。此前两侧各手抄 2_000/60_000，且
+      // 「哪些操作算慢」在这里被内联展开成四项析取——加一个慢操作时只改 core 的人会得到一个全绿的
+      // 仓库，而这条路静默给它 2 秒。
       const timeout = setTimeout(() => {
         this.cancel(
           request.requestId,
           bridgeError('CONTROL_TIMEOUT', 'Desktop Control request timed out.')
         )
-      }, request.operation.startsWith('open.') || request.operation === 'send' || request.operation === 'resume' || request.operation === 'stop'
-        ? LONG_REQUEST_TIMEOUT_MS
-        : REQUEST_TIMEOUT_MS)
+      }, agentMuxControlTimeoutMs(request.operation))
       this.pending.set(request.requestId, { resolve, reject, timeout })
       try {
         this.transport.sendRequest(request)
