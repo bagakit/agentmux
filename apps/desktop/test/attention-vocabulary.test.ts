@@ -299,11 +299,43 @@ function codeStringLiterals(source: string, label: string): string[] {
   return found
 }
 
-// Everything a `<tag data-attention={...}>` is given, in one file. The criterion is applied to each
-// extracted expression rather than to the file's text as a whole: "the good call appears somewhere"
-// stays true when a second, hand-written site is added beside it.
+// Every expression a `data-attention` is COMPUTED from, in one file, via TypeScript's own parser.
+//
+// Two spellings reach the DOM and they look nothing alike: `data-attention={expr}` on the element, and
+// `{...(cond ? { 'data-attention': expr } : {})}` spread in to omit the attribute entirely when there
+// is nothing to say. A regex written for the first is silently blind to the second — measured, not
+// assumed: the pattern this replaced matched 1 of the 2 forms, so half the call sites (the Project Rail
+// row and group header, the Topic avatar) were exempt from every criterion in this file while the
+// self-check "we extracted something" stayed green off the other half. Hence a real parser: the shapes
+// are a property of the syntax, and enumerating spellings is how the next one gets missed.
+//
+// Literal values (`data-attention="working"`) are deliberately NOT returned. They are a different
+// concept wearing the same attribute name — they label which class a segment is ABOUT and stay put when
+// its count is zero — so folding them in here would force an exemption list, and an exemption list is
+// where a dead attribute hides.
 function attentionAttributeExpressions(source: string): string[] {
-  return [...source.matchAll(/data-attention=\{([^}]*(?:\{[^}]*\}[^}]*)*)\}/g)].map((m) => m[1]!)
+  const file = ts.createSourceFile('x.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const found: string[] = []
+  const visit = (node: ts.Node): void => {
+    // <tag data-attention={expr}>
+    if (
+      ts.isJsxAttribute(node) &&
+      node.name.getText() === 'data-attention' &&
+      node.initializer &&
+      ts.isJsxExpression(node.initializer) &&
+      node.initializer.expression
+    ) {
+      found.push(node.initializer.expression.getText())
+    }
+    // { 'data-attention': expr } inside a spread
+    if (ts.isPropertyAssignment(node)) {
+      const key = ts.isStringLiteralLike(node.name) ? node.name.text : null
+      if (key === 'data-attention') found.push(node.initializer.getText())
+    }
+    ts.forEachChild(node, visit)
+  }
+  ts.forEachChild(file, visit)
+  return found
 }
 
 // The `description:` value of each entry in a named `const X: Record<...> = { ... }` table.
@@ -340,6 +372,96 @@ describe('each attention call site is wired to the shared vocabulary', () => {
     }
     // And the name has to resolve to the shared module, not to something local with the same spelling.
     expect(source).toMatch(/import \{ attentionAccentFor \} from '\.\.\/lib\/attention-event'/)
+  })
+
+  it('every dynamic data-attention has a stylesheet rule that could match it', () => {
+    // The gap this closes: an emitter can hand the DOM an attribute no stylesheet ever reads. Nothing
+    // errors, nothing looks unfinished in the source, and the state it was supposed to announce is
+    // simply invisible. Four surfaces were in that position at once. Three of them turned out to be
+    // redundant (their own `.status--<state>` dot already carried the signal, so the attribute was
+    // deleted rather than given a rule), and one — the Topic avatar — was a real invisible state.
+    //
+    // So the criterion is REACHABILITY, not presence: for each component that emits a *computed*
+    // data-attention, some rule somewhere must select that component's class together with
+    // [data-attention]. A guard that only checked "the selector name appears in some file" would pass
+    // on a stylesheet that mentions the class for unrelated reasons — that exact blind spot let the
+    // fan-out lane's dead attribute live (see the CSS-guard note in the styles tests).
+    const styles = ['chrome.css', 'overlays.css', 'surfaces.css', 'agent.css', 'dock.css', 'selector.css']
+      .map((name) => read(`../src/renderer/src/styles/${name}`))
+      .join('\n')
+
+    // A computed emission is `data-attention={...}`; a hardcoded one is `data-attention="working"`.
+    // Only the computed ones make a claim about the CURRENT state, so only they need ink. The literal
+    // spelling is a different concept wearing the same attribute name (it labels which class a segment
+    // is ABOUT, and stays put when the count is zero) and is tracked separately; counting it here would
+    // force an exemption list, and exemption lists are where the dead attribute hid.
+    const emitters = new Map<string, string>([
+      ['QuickSwitcher.tsx', 'quick-switch__row'],
+      ['WorkspaceSidebar.tsx', 'project-rail-row']
+    ])
+
+    for (const [component, className] of emitters) {
+      const source = read(`../src/renderer/src/components/${component}`)
+      const computed = attentionAttributeExpressions(source)
+      // Self-check per component: zero extractions would make this iteration prove nothing, and the
+      // outer loop would still report success for a file that had quietly stopped emitting.
+      expect(computed.length, `${component} should still emit a computed data-attention`)
+        .toBeGreaterThan(0)
+      // The rule has to name this component's class AND the attribute in one selector. Matching them
+      // independently would accept a stylesheet that styles the class for layout and reads
+      // [data-attention] on some unrelated element.
+      const reachable = new RegExp(`\\.${className}[^,{]*\\[data-attention`, 'u').test(styles)
+      expect(reachable, `${component} emits data-attention but no rule selects .${className}[data-attention]`)
+        .toBe(true)
+    }
+  })
+
+  it('a computed data-attention on a class no rule selects is caught', () => {
+    // The assertion above would go quietly green if the regex stopped matching anything, so pin both
+    // directions on synthetic input. This is the shape that actually shipped: the class is styled, the
+    // attribute is styled elsewhere, and the pair is styled nowhere.
+    const styled = '.lane[data-attention="error"] { color: red; }'
+    const decoy = '.lane { color: grey; }\n.other-thing[data-attention] { color: red; }'
+    const pair = /\.lane[^,{]*\[data-attention/u
+    expect(pair.test(styled)).toBe(true)
+    expect(pair.test(decoy)).toBe(false)
+  })
+
+  it('the two surfaces whose dot already carries attention do not also emit the attribute', () => {
+    // The fan-out lane and the roster row each render `.status--<state>` from a mapping that sends
+    // needs-you to `waiting` and error to `error` — the shared vocabulary's amber and red, with amber
+    // additionally carrying a `?` pip. Adding a second mark on the same element would be the same fact
+    // twice, which is what the Project Rail's one-signal-per-row rule exists to prevent. This pins the
+    // deletion so a future edit re-adding the attribute has to confront the reason it went away.
+    for (const [component, mapper] of [
+      ['FanOutStrip.tsx', 'laneState'],
+      ['AgentRoster.tsx', 'stateFor']
+    ] as const) {
+      const source = read(`../src/renderer/src/components/${component}`)
+      expect(
+        attentionAttributeExpressions(source),
+        `${component}'s dot already carries attention; a second mark would double it`
+      ).toEqual([])
+      // And the dot must still be derived from attention — otherwise the signal is gone entirely
+      // rather than expressed once, which is the failure this deletion must not become. Two halves,
+      // both required: the mapper turns needs-you into the vocabulary's `waiting`, and the rendered
+      // class is interpolated from that mapper's result rather than from a state read straight off the
+      // session (which would drop needs-you back into invisibility while this mapper sat unused).
+      expect(source).toMatch(new RegExp(`function ${mapper}[\\s\\S]*?'needs-you'[\\s\\S]*?'waiting'`, 'u'))
+      expect(source).toMatch(new RegExp(`const state = ${mapper}\\(`, 'u'))
+      expect(source).toContain('`status status--${state}`')
+    }
+  })
+
+  it('the extractor sees both spellings, and ignores literals', () => {
+    // The regex this replaced saw only the first of these. Pinning all three shapes on synthetic input
+    // makes the blind spot falsifiable here rather than in a component six months from now.
+    const direct = 'const a = <b data-attention={accentFor(s)} />'
+    const spread = "const a = <b {...(x ? { 'data-attention': x.category } : {})} />"
+    const literal = 'const a = <b data-attention="working" />'
+    expect(attentionAttributeExpressions(direct)).toEqual(['accentFor(s)'])
+    expect(attentionAttributeExpressions(spread)).toEqual(['x.category'])
+    expect(attentionAttributeExpressions(literal)).toEqual([])
   })
 
   it('the Board columns take their words from the mapping module', () => {
