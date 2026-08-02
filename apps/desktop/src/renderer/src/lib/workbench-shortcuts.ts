@@ -12,6 +12,7 @@ import type { SplitDirection, WorkspaceLayout } from './workbench-layout'
 import type { WorkbenchTab } from './workbench-tabs'
 import { activeTopicIdFromLayout, layoutForActiveTopic } from './scratch-topic-layout'
 import { SHORTCUT_BINDINGS } from './shortcut-registry'
+import { regionInDirection } from './split-direction'
 
 /**
  * 一次按键解析出的命令——已经定到「哪个动作、往哪个方向、第几张」，但**落点（哪个 Workspace/Tab/
@@ -114,61 +115,21 @@ export function tabIdForStep(
  * 用归一化几何（`workbenchRegionBounds`）而不是遍历分屏树：树的父子关系不等于屏幕上的上下左右，
  * 一个嵌套分屏里「右边那一格」可能在树上隔着好几层。几何是用户眼里方向的唯一真相。
  *
- * 选法：先筛出在该方向确实更靠外的候选（左/右比较 x、上/下比较 y），再取其中最贴近当前格的那个——
- * 主轴距离最小、主轴相同再取另一轴中心最近。`workbenchRegionBounds` 永远是单位面的完整平铺，所以
- * 「同一行/列里紧挨着的那格」必然存在且另一轴中心最近，斜对角格因中心偏得更远自然落选，不需要另设
- * 重叠判定去挡它。没有相邻格（已在边缘、或没分屏）时返回 `null`。
+ * 「某方向上是哪一格」的判定本身委托给 `split-direction` 的 `regionInDirection`——那是这个问题在整个
+ * 渲染层的唯一落点，Agent 侧寻址（`directional-addressing.regionNeighbor` → `inspect` 报给 Agent 的
+ * neighbors）走的是同一个函数。这一点是刻意收拢的：此前键盘这一侧另有一套数学（不设重叠判定、按「x 更大
+ * + 中心最近」选），于是对同一份布局、同一个方向，键盘聚焦到的格子可能与 `inspect` 告诉 Agent 的邻居
+ * **不是同一格**——将来「把我和右边那格互换」就会换到 Agent 认知之外的一格。收成一处后两侧恒等；那套
+ * 旧「中心最近」数学为何不对、连完整平铺也挡不住斜错开格，见 `split-direction` 的 `regionInDirection` 注释。
+ *
+ * 单格（没分屏）或出发点不在布局里时返回 `null`。
  */
 export function adjacentRegionId(
   layout: WorkbenchViewLayout,
   direction: SplitDirection
 ): string | null {
-  const bounds = workbenchRegionBounds(layout.root)
-  const active = bounds.find((entry) => entry.regionId === layout.activeRegionId)
-  if (!active || regionIds(layout.root).length <= 1) return null
-  const a = active.bounds
-  const aCenterX = a.x + a.width / 2
-  const aCenterY = a.y + a.height / 2
-
-  const horizontal = direction === 'left' || direction === 'right'
-  const candidates = bounds.filter((entry) => {
-    if (entry.regionId === active.regionId) return false
-    const b = entry.bounds
-    if (horizontal) {
-      return direction === 'right' ? b.x >= a.x + a.width - 1e-9 : b.x + b.width <= a.x + 1e-9
-    }
-    return direction === 'down' ? b.y >= a.y + a.height - 1e-9 : b.y + b.height <= a.y + 1e-9
-  })
-  if (candidates.length === 0) return null
-
-  // 最贴近的一格：按主轴距离取最小，主轴相同再按另一轴中心距离取最小，落点稳定。另一轴中心距离正是
-  // 「同一行/列」的连续量化——紧邻格中心对齐（距离≈0），斜对角格中心偏开，于是前者胜出。
-  return candidates.reduce((best, entry) => {
-    const distance = mainAxisDistance(entry.bounds, a, direction)
-    const bestDistance = mainAxisDistance(best.bounds, a, direction)
-    if (distance < bestDistance - 1e-9) return entry
-    if (distance > bestDistance + 1e-9) return best
-    const cross = horizontal
-      ? Math.abs(entry.bounds.y + entry.bounds.height / 2 - aCenterY)
-      : Math.abs(entry.bounds.x + entry.bounds.width / 2 - aCenterX)
-    const bestCross = horizontal
-      ? Math.abs(best.bounds.y + best.bounds.height / 2 - aCenterY)
-      : Math.abs(best.bounds.x + best.bounds.width / 2 - aCenterX)
-    return cross < bestCross ? entry : best
-  }).regionId
-}
-
-function mainAxisDistance(
-  candidate: { x: number; y: number; width: number; height: number },
-  active: { x: number; y: number; width: number; height: number },
-  direction: SplitDirection
-): number {
-  switch (direction) {
-    case 'right': return candidate.x - (active.x + active.width)
-    case 'left': return active.x - (candidate.x + candidate.width)
-    case 'down': return candidate.y - (active.y + active.height)
-    case 'up': return active.y - (candidate.y + candidate.height)
-  }
+  if (regionIds(layout.root).length <= 1) return null
+  return regionInDirection(workbenchRegionBounds(layout.root), layout.activeRegionId, direction)
 }
 
 /** 落点解析 + 转发所需的最小 store 切片。App 直接把 store 快照传进来（它是这个类型的超集）。 */
