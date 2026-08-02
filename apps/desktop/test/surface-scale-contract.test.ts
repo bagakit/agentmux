@@ -24,13 +24,24 @@ const FONT_SCALE = new Set([10, 11, 12, 13, 14, 20])
 const SPACE_SCALE = new Set([2, 4, 6, 8, 12, 16, 24])
 
 /**
- * 字号例外：只有一条，且它不是文字。
+ * 字号例外：都不是文字，且尺寸只有一个。
  *
- * 状态点内嵌的 `?` 字形随点尺寸缩放，是图形符号而非可读文本，故不受"不低于 10px"约束。
- * 合同为它具名，因为一个不具名的 7px 与一个具名的 7px 在样式表里长得一模一样。
+ * 那枚 `?` / `!` 字形随它所在的圆缩放，是图形符号而非可读文本，故不受"不低于 10px"约束。
+ * 合同为每一处具名，因为一个不具名的 7px 与一个具名的 7px 在样式表里长得一模一样。
+ *
+ * 两处载体：状态点内嵌那枚（7px 见方的点），和 Topic 头像右上角那枚角标（8px 见方的圆）。
+ * 它们答的是同一个问题，所以尺寸也必须是同一个——见下面 `GLYPH_PX` 那条断言。第一次加进来的
+ * 头像角标写的是 6px，理由注释里只解释了它落在哪个角、为什么不用加粗描边，一个字都没说它为什么
+ * 比状态点里那枚小 1px：那不是一个决定，是一个没人问过的数。
  */
+const GLYPH_PX = 7
+
 const FONT_SIZE_EXCEPTIONS = new Map<string, number>([
-  ['.status--waiting .status__dot::after, .status--blocked .status__dot::after', 7]
+  ['.status--waiting .status__dot::after, .status--blocked .status__dot::after', GLYPH_PX],
+  [
+    ".agent-avatar[data-attention='needs-you']::after, .agent-avatar[data-attention='error']::after",
+    GLYPH_PX
+  ]
 ])
 
 /**
@@ -219,6 +230,27 @@ describe('surface scale contract', () => {
     }
     for (const selector of LAYOUT_GEOMETRY.keys()) {
       expect(selectors).toContain(selector)
+    }
+  })
+
+  it('lets that one glyph have exactly one size, however many places carry it', () => {
+    // 字号例外表现在有两条，而多一条例外就是多一个可以各挑一个数的地方。这枚 `?` / `!` 在状态点里
+    // 和头像角标上答的是同一个问题（"有人在等你" / "这坏了"），所以它的尺寸是**一个**决定：
+    // 两处各写一个数，就是同一件事在两个面板上读起来略有不同，而没有任何人会注意到差在哪。
+    //
+    // 判据是恒等而不是"都在例外表里"：后者对 6px 和 7px 一视同仁——它就是这条断言之前的样子，
+    // 而 6px 正是那时加进来的。
+    expect([...FONT_SIZE_EXCEPTIONS.values()]).toEqual(
+      [...FONT_SIZE_EXCEPTIONS.keys()].map(() => GLYPH_PX)
+    )
+    // 自检：例外表真的有多于一处载体，否则上面那条恒等是在一个单元素集合上成立的空话。
+    expect(FONT_SIZE_EXCEPTIONS.size).toBeGreaterThan(1)
+    // 而每一处都必须真的在画那枚字形——一条不带 `content` 的例外是在拿这条豁免做别的事。
+    const bodies = new Map(rules().map((rule) => [rule.selector, rule.body]))
+    for (const selector of FONT_SIZE_EXCEPTIONS.keys()) {
+      expect(bodies.get(selector), `${selector} 不画字形，却用了"这不是文字"的豁免`).toMatch(
+        /content:\s*['"][^'"]+['"]/u
+      )
     }
   })
 

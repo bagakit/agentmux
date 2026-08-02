@@ -1,8 +1,16 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import type { AgentDisplayState } from '@agentmux/core'
 import { topicAgentPresentation } from '../src/renderer/src/lib/surface-tool-dock.js'
+import {
+  URGENT_ATTENTION_CATEGORIES,
+  attentionAccentFor,
+  type AttentionCategory
+} from '../src/renderer/src/lib/attention-event.js'
+import { AGENT_DISPLAY_STATES } from '../src/renderer/src/lib/attention-vocabulary.js'
 import type { AgentSessionSnapshot } from '../src/shared/contracts.js'
-import { allStyles } from './helpers/styles.js'
+// `allStyles` 只给那条自检用（证明剥注释真的剥掉了东西）；所有判「规则在不在场」的断言走 `allStyleRules`。
+import { allStyleRules, allStyles } from './helpers/styles.js'
 
 // Topic 行要回答的是"这个 Topic 里的 Agent 现在怎么样了"，而不是把每个 Agent 的全名平铺出来。
 // 状态语汇必须复用窗口里那一套（status status--<state>），不发明第三套。
@@ -19,6 +27,30 @@ function agent(state: AgentSessionSnapshot['status']['state']): AgentSessionSnap
     latestOutputBytes: 0,
     control: { kind: 'agent', hostId: 'local', agentSessionId: 's', run: { runId: 'r' } }
   }
+}
+
+/**
+ * 一条规则体里"自己挑的状态色"。
+ *
+ * 判据不是"有没有读 token"——加一条读 `--status-ink` 的规则，同族里另一条照旧可以自己挑色，而
+ * 「至少有一条读了」的断言仍然绿（实测：角标背景换成 `#ffb020`，描边那条替它顶住，45 条全绿）。
+ * 所以按**出现即红**判：状态语汇里那四个色相 token 与任何颜色字面量都不许出现在消费方规则里。
+ *
+ * `--surface-*` / `--overlay-*` 这类不在名单里：它们是这个形状自己的底与环（角标要在深底上有个
+ * 1.5px 的分离环），与"这是什么状态"无关。名单只列**状态色相**，因为第二份状态色表恰恰是靠
+ * 直接引用色相而不是引用状态来铸成的。
+ */
+const STATE_HUE_TOKENS = ['--green', '--amber', '--red', '--blue', '--neutral-3', '--text-3']
+
+function colourLiterals(body: string): string[] {
+  const found: string[] = []
+  for (const token of STATE_HUE_TOKENS) {
+    if (new RegExp(`var\\(\\s*${token}\\b`, 'u').test(body)) found.push(token)
+  }
+  // 颜色字面量：绕过 token 层直接写死更隐蔽，而 `--status-ink` 那条链一旦被绕过就再没人对齐。
+  found.push(...[...body.matchAll(/#[0-9a-f]{3,8}\b/giu)].map((match) => match[0]))
+  found.push(...[...body.matchAll(/\b(?:rgba?|hsla?|color-mix)\s*\(/giu)].map((match) => match[0]))
+  return found
 }
 
 describe('Topic 行显示每个 Agent 的运行状态', () => {
@@ -80,20 +112,46 @@ describe('Topic 行的视觉收敛', () => {
  * 漂移，且漂移时它自己不会响。
  */
 describe('状态到颜色的映射只有一处定义', () => {
-  const styles = allStyles()
+  const styles = allStyleRules()
 
-  /** 每条给 `--status-ink` 赋值的规则，连同它覆盖的状态。 */
-  function inkDefinitions(): Array<{ selector: string; states: string[] }> {
-    const out: Array<{ selector: string; states: string[] }> = []
+  it('读的是剥掉注释的规则，且剥完仍是一整张表（防两个方向的空过）', () => {
+    // 判「某条规则在不在场」一律走剥注释的那一份，因为**规则的理由注释里常常逐字写着那条选择器**：
+    // #409 那道可达性判据就被 dock.css 的注释顶住过——头像类名整个改掉、界面上再无规则接，24 条
+    // 照旧全绿。但剥注释本身有反方向的坑：一个把全文吃空的剥法会让下面每条 `not.toContain` 恒真。
+    // 所以两侧各钉一次：注释里的散文必须消失，规则必须还在。
+    expect(styles.length).toBeGreaterThan(10_000)
+    expect(styles).toContain('.status--waiting')
+    // dock.css 那段理由注释里的字（它逐字引用了 `.status__dot` 与 `data-attention`）不许留下。
+    expect(styles).not.toContain('这一格是 Topic 行里')
+    expect(allStyles()).toContain('这一格是 Topic 行里')
+  })
+
+  /** 每条给 `--status-ink` 赋值的规则，连同它覆盖的状态和赋的那个值。 */
+  function inkDefinitions(): Array<{ selector: string; states: string[]; value: string }> {
+    const out: Array<{ selector: string; states: string[]; value: string }> = []
     for (const [, selector, body] of styles.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-      if (!/--status-ink\s*:/.test(body)) continue
+      const assignment = /--status-ink\s*:\s*([^;}]+)/.exec(body!)
+      if (!assignment) continue
       const states = [...selector.matchAll(/\.status--([a-z-]+)/g)].map((match) => match[1]!)
-      out.push({ selector: selector.trim().replace(/\s+/g, ' '), states })
+      out.push({
+        selector: selector.trim().replace(/\s+/g, ' '),
+        states,
+        value: assignment[1]!.trim()
+      })
     }
     return out
   }
 
-  it('九个状态各自恰好被赋色一次', () => {
+  /** 每个被赋色的状态 → 赋的那个值。 */
+  function inkByState(): Map<string, string> {
+    const out = new Map<string, string>()
+    for (const { states, value } of inkDefinitions()) {
+      for (const state of states) out.set(state, value)
+    }
+    return out
+  }
+
+  it('每个状态各自恰好被赋色一次，且清单以 Core 的状态联合为锚', () => {
     const seen = new Map<string, string[]>()
     for (const { selector, states } of inkDefinitions()) {
       for (const state of states) seen.set(state, [...(seen.get(state) ?? []), selector])
@@ -102,9 +160,52 @@ describe('状态到颜色的映射只有一处定义', () => {
     expect(seen.size).toBeGreaterThan(0)
     const duplicated = [...seen].filter(([, selectors]) => selectors.length > 1)
     expect(duplicated.map(([state, selectors]) => `${state} 被赋色 ${selectors.length} 次`)).toEqual([])
-    expect([...seen.keys()].sort()).toEqual([
-      'blocked', 'disconnected', 'done', 'error', 'exited', 'running', 'waiting', 'working'
-    ])
+    // 锚是 Core 的 `AgentDisplayState` 联合（经 AGENT_DISPLAY_STATES 派生），不是手抄的八个名字。
+    // 手抄那份此前写着「九个状态」却只列了八个——`starting` 从来没有色规则，而那条断言逐字通过，
+    // 因为它比对的是它自己抄的那一份。Core 加一个状态时，手抄清单会安静地把新状态放行。
+    //
+    // `starting` 刻意不上色：它是"进程刚起、还没有任何语义事实"，`.status` 本体的中性色就是它该有的
+    // 样子；给它一个色相等于宣称一件还不知道的事。这个豁免必须自带前提自检——它哪天真的被赋色了，
+    // 是这条断言先红，而不是清单默默扩容。
+    const UNPAINTED: readonly AgentDisplayState[] = ['starting']
+    for (const state of UNPAINTED) {
+      expect(seen.has(state), `${state} 现在有色规则了——豁免的前提已经变了，重新判它该不该上色`).toBe(false)
+    }
+    expect([...seen.keys()].sort()).toEqual(
+      [...AGENT_DISPLAY_STATES].filter((state) => !UNPAINTED.includes(state)).sort()
+    )
+  })
+
+  it('四个色相各自归属哪些状态——红/蓝那两侧此前完全无人守', () => {
+    // 这条补的是一个实测存活过的洞：把 `.status--error, .status--exited` 的 `--status-ink` 从
+    // `var(--red)` 改成 `var(--amber)`，全仓 2980 条无一变红。于是一个崩掉的 Agent 在**每一个**读色表
+    // 的表面（状态点、头像、Board 卡框、快切）都被画成琥珀，与 waiting 逐像素同色——而
+    // attention-vocabulary.ts 的表把 error 单独列为一类，理由写得很直白：「琥珀说『你被等着』，
+    // 红说『这坏了』；折在一起就丢掉了颜色唯一的用处」。
+    //
+    // 不对称是这个洞的形状：琥珀那一侧被 status-needs-you-glyph.test.tsx 钉死了，红与蓝那两侧一条
+    // 断言都没有。而上面那条「各恰好被赋色一次」只数**次数**，不看赋的是**哪个色相**，所以任意两个
+    // 色相互换都在它眼皮下存活。
+    //
+    // 判据按色相分组写，且要求分组是**全集**（下面那条等式）：只写「error 必须是红」的话，把 done
+    // 从蓝改成红仍然全绿。
+    const ink = inkByState()
+    const HUE_OWNERS: Record<string, readonly AgentDisplayState[]> = {
+      'var(--green)': ['working', 'running'],
+      'var(--amber)': ['waiting', 'blocked'],
+      'var(--red)': ['error', 'exited'],
+      'var(--blue)': ['done'],
+      'var(--text-3)': ['disconnected']
+    }
+    // 自检：色表真的被读到了，否则下面每条 `.get()` 都是 undefined 对 undefined。
+    expect(ink.size).toBeGreaterThan(4)
+    for (const [hue, states] of Object.entries(HUE_OWNERS)) {
+      for (const state of states) {
+        expect(ink.get(state), `.status--${state} 的 --status-ink 必须是 ${hue}`).toBe(hue)
+      }
+    }
+    // 分组必须是全集：漏掉一个色相时，那个色相下的状态可以随意改而上面的循环不问。
+    expect([...Object.values(HUE_OWNERS)].flat().sort()).toEqual([...ink.keys()].sort())
   })
 
   it('消费方读 --status-ink，而不是自己挑颜色', () => {
@@ -127,6 +228,106 @@ describe('状态到颜色的映射只有一处定义', () => {
   })
 })
 
+/**
+ * #409：头像那枚 `data-attention` 必须画得出来。
+ *
+ * 两层分开守，因为它们各自的失效方式不一样，而且互相看不见：
+ *
+ *   投影层 —— `topicAgentPresentation` 算出的取值域，必须与样式表画得出的取值域一致。原来它调
+ *   `categoryFor`，于是 `done` 会被送进 DOM 而没有任何规则接：不响、不报错，只是让两个取值域悄悄
+ *   分岔。分岔本身就是下一个不可见状态的入口。
+ *
+ *   CSS 层 —— 那两个真会到达 DOM 的取值，必须各有一条规则读 `--status-ink` 并带一枚字形。
+ *
+ * 状态清单来自 `AGENT_DISPLAY_STATES`（它自己派生于那张 Record），不在这里手抄九个名字——手抄的
+ * 清单会在"新加了一个状态"的那一刻恰好落后，而那正是唯一需要它的时刻。
+ */
+describe('#409 头像的注意力取值必须画得出来', () => {
+  const styles = allStyleRules()
+
+  /** 每个状态经投影层算出的 attention。走真的 Session 形状，不直接调下游那个函数。 */
+  function projected(state: AgentDisplayState): AttentionCategory | null {
+    return topicAgentPresentation({ sessionId: 's', providerId: 'codex', live: agent(state) }).attention
+  }
+
+  it('投影层的取值域恰好是那两个会上色的 category，done 到不了 DOM', () => {
+    // 自检：状态清单是空的话下面整个循环都空过。
+    expect(AGENT_DISPLAY_STATES.length).toBeGreaterThan(0)
+    const emitted = new Set(AGENT_DISPLAY_STATES.map(projected).filter((value) => value !== null))
+    // 恰好等于「值得抢琥珀/红的那些」——不是它的子集：少一个就是某个状态又不可见了，多一个就是
+    // 送出了没人接的取值。`done` 不在里面正是这条断言最贵的一半（它是 categoryFor 与
+    // attentionAccentFor 唯一的差集），所以再单独钉一次它自己那两个状态。
+    expect([...emitted].sort()).toEqual([...URGENT_ATTENTION_CATEGORIES].sort())
+    expect(projected('done')).toBeNull()
+    expect(projected('exited')).toBeNull()
+    // 而"等你"与"出错"必须真的算出来——上面那条等式在两侧同时坍缩成空集时也成立。
+    expect(projected('waiting')).toBe('needs-you')
+    expect(projected('blocked')).toBe('needs-you')
+    expect(projected('error')).toBe('error')
+  })
+
+  it('投影层不自己判，与共享取值器逐状态一致', () => {
+    // 上面守的是取值域，这条守的是"谁说的"。取值域对而映射错（比如把 error 也说成 needs-you）
+    // 在上面那条等式下照样绿。
+    for (const state of AGENT_DISPLAY_STATES) {
+      expect(projected(state), state).toBe(attentionAccentFor(state))
+    }
+  })
+
+  it('每个会到达 DOM 的取值都有一条读 --status-ink 的头像规则，并带一枚字形', () => {
+    // 判据是**可达性**，不是"选择器名字在场"：#397 那次事故的形状正是"类被样式了、属性在别处被
+    // 样式了、这一对没人样式"。所以要求同一条选择器里既点名 `.agent-avatar` 又点名这个取值。
+    for (const category of URGENT_ATTENTION_CATEGORIES) {
+      const rules = [...styles.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+        .map(([, selector, body]) => ({ selector: selector.trim().replace(/\s+/g, ' '), body: body! }))
+        .filter(({ selector }) =>
+          new RegExp(`\\.agent-avatar[^,{]*\\[data-attention=['"]${category}['"]\\]`, 'u').test(selector)
+        )
+      expect(rules.length, `${category} 到达头像却没有任何规则选中它`).toBeGreaterThan(0)
+      // 颜色仍然只能来自状态语汇段那一处。自己挑一个 `--amber` 就是第二份状态色表（#420 那族）。
+      const ink = rules.filter(({ body }) => body.includes('var(--status-ink)'))
+      expect(ink.length, `${category} 的头像规则必须读 --status-ink，不许自己挑色`).toBeGreaterThan(0)
+      // 上面那条只问"有没有一条读了 token"，而这一族有两条规则各画一处（描边与角标）。实测过：
+      // 把角标背景从 `var(--status-ink)` 换成 `#ffb020`，描边那条照旧满足上面那条断言，45 条全绿——
+      // 角标就此成了第二份状态色表，而 #420 正是这个形状。所以按**全族**判：这些规则里一处颜色
+      // 字面量都不许有，颜色只能来自 token。
+      for (const { selector, body } of rules) {
+        expect(
+          colourLiterals(body),
+          `${selector} 自己挑了颜色，状态色只能来自 --status-ink`
+        ).toEqual([])
+      }
+      // 颜色之外还要一个形状：一摞 18px 方块里只靠描边色分辨琥珀与红，快速一扫和色盲下都不成立。
+      const glyph = rules.filter(({ body }) => /content:\s*'[^']+'/u.test(body))
+      expect(glyph.length, `${category} 只有颜色没有字形，色盲与快速扫视下读不出来`).toBeGreaterThan(0)
+    }
+  })
+
+  it('提取器真的会对"这一对没人样式"报红（防恒绿）', () => {    // 上面那条断言一旦正则失配就会静默全绿，所以在合成输入上把两个方向都钉住。
+    const pair = /\.agent-avatar[^,{]*\[data-attention=['"]needs-you['"]\]/u
+    expect(pair.test(".agent-avatar[data-attention='needs-you'] { outline: 1px solid var(--status-ink); }"))
+      .toBe(true)
+    // 这就是 #397 的形状：类被样式了，属性在别的元素上被样式了，这一对没人样式。
+    expect(pair.test(".agent-avatar { filter: grayscale(1); }\n.lane[data-attention='needs-you'] { color: red; }"))
+      .toBe(false)
+  })
+
+  it('头像那枚角标与项目栏用同一对字形——同一个问题不许有两套读法', () => {
+    // 两处答的是同一个问题（"有人在等你"/"这坏了"）。各挑一套字形，同一件事在两个面板上就读成
+    // 两件事。字形从项目栏那组规则里取，不在这里手抄一对字面量。
+    const glyphFor = (surface: RegExp): string[] =>
+      [...styles.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+        .filter(([, selector]) => surface.test(selector))
+        .flatMap(([, , body]) => [...body!.matchAll(/content:\s*'([^']+)'/gu)].map((match) => match[1]!))
+    const rail = glyphFor(/\.project-rail-row\[data-attention/u)
+    const avatar = glyphFor(/\.agent-avatar\[data-attention/u)
+    // 自检：任一侧扫成空集都会让下面的包含关系恒真。
+    expect(rail.length).toBeGreaterThan(0)
+    expect(avatar.length).toBeGreaterThan(0)
+    for (const glyph of avatar) expect(rail, `头像用了项目栏没有的字形 ${glyph}`).toContain(glyph)
+  })
+})
+
 describe('Agent 头像：身份看图标，点击到人', () => {
   const avatar = readFileSync(
     new URL('../src/renderer/src/components/AgentAvatar.tsx', import.meta.url),
@@ -144,7 +345,7 @@ describe('Agent 头像：身份看图标，点击到人', () => {
     new URL('../src/renderer/src/components/BranchesPanel.tsx', import.meta.url),
     'utf8'
   )
-  const styles = allStyles()
+  const styles = allStyleRules()
 
   it('身份由 Provider 图标给出，不是一排看不出谁是谁的抽象点', () => {
     expect(avatar).toContain('<AgentProviderIcon providerId={providerId}')
