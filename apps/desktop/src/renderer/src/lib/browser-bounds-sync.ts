@@ -13,6 +13,55 @@ export function rendererCssBoundsToWindowDip(
   }
 }
 
+/**
+ * 原生 Browser 视图必须让开 Region 的焦点框。
+ *
+ * 焦点框（`.workbench-region--active::after` 那层覆盖层）画在 Renderer 的合成树里，而 Browser 那格的
+ * 内容是一个**窗口级的原生视图**——它不在页面的层叠上下文里，画在整张页面之上，`z-index` / `outline` /
+ * 覆盖层一概盖不过它。所以「把焦点框画在内容之上」这条路对这一格根本不存在：browser-stage 满宽到底，
+ * 原生视图铺满它，于是焦点框的左、右、下三边被物理遮掉，只剩顶边那 2px 露在 38px 工具条那一行里。
+ * 用户在分屏里点到 browser 那格，看到的是一条孤零零的上边线。
+ *
+ * 修法只能是几何让位：把原生视图的矩形与「Region 矩形按环内边界内缩后」的矩形求交。求交而不是直接
+ * 对 stage 四边内缩——stage 的上沿本来就在 Region 下方 38px 处（工具条那一行），对它内缩会在工具条与
+ * 网页之间凿出一条 2px 的空隙；求交则让上沿保持不动，只有真正贴着 Region 边的三边被推进来。
+ *
+ * `ringInset` 取自 CSS 的**计算值**而不是在这里手抄一个 2：这个数的 SSOT 是 tokens.css 的
+ * `--region-focus-ring-width`。而且必须取那个自定义属性、**不能**取 `outline-offset` 或 `border-width`
+ * 这类由当前绘制机制决定的属性——焦点框的画法已经换过两次（inset 阴影 → outline → 定位覆盖层，
+ * 每次都是因为前一种被定位不透明子元素盖住），而每次换法都会让「按绘制属性取值」的这一侧静默读到 0、
+ * 原生视图回到满铺，同时两侧测试各自全绿。取值方式必须与绘制方式解耦。
+ */
+export function nativeBoundsClearOfFocusRing(
+  stage: BrowserBounds,
+  region: BrowserBounds,
+  ringInset: number
+): BrowserBounds {
+  const inset = Math.max(0, ringInset)
+  const left = Math.max(stage.x, region.x + inset)
+  const top = Math.max(stage.y, region.y + inset)
+  const right = Math.min(stage.x + stage.width, region.x + region.width - inset)
+  const bottom = Math.min(stage.y + stage.height, region.y + region.height - inset)
+  return { x: left, y: top, width: right - left, height: bottom - top }
+}
+
+/** 焦点框宽度那个自定义属性的名字。改名时这里与 tokens.css 必须一起改，故有守卫钉住。 */
+export const FOCUS_RING_WIDTH_PROPERTY = '--region-focus-ring-width'
+
+/**
+ * 焦点框占据 Region 内容边缘多宽，取自那个元素身上 CSS 的计算值。
+ *
+ * 读自定义属性而不是任何绘制属性，理由见 {@link nativeBoundsClearOfFocusRing}。读不出数
+ * （非浏览器环境、或该属性没声明）时返回 0：宁可退回「原生视图铺满、焦点框被遮」这个旧行为，
+ * 也不要凭猜一个数把网页往里推。
+ */
+export function focusRingInsetOf(element: Element): number {
+  const declared = getComputedStyle(element).getPropertyValue(FOCUS_RING_WIDTH_PROPERTY)
+  const width = Number.parseFloat(declared)
+  if (!Number.isFinite(width) || width <= 0) return 0
+  return width
+}
+
 function normalizeBounds(bounds: BrowserBounds | null): BrowserBounds | null {
   if (!bounds) return null
   const values = [bounds.x, bounds.y, bounds.width, bounds.height]

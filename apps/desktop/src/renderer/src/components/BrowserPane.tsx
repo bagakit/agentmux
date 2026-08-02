@@ -25,6 +25,7 @@ import {
   type BrowserViewport
 } from '../../../shared/contracts'
 import { api } from '../lib/api'
+import { copyTextToClipboard } from '../lib/clipboard-copy'
 import {
   browserAnnotationMarkers,
   formatBrowserElementContext,
@@ -38,6 +39,8 @@ import {
 } from './browser-screenshot/ScreenshotEditor'
 import {
   LatestBrowserBoundsSynchronizer,
+  focusRingInsetOf,
+  nativeBoundsClearOfFocusRing,
   rendererCssBoundsToWindowDip
 } from '../lib/browser-bounds-sync'
 import type { BrowserWorkbenchSurface } from '../lib/workbench-tabs'
@@ -209,10 +212,20 @@ export function BrowserPane({
           return
         }
         const rect = stage.getBoundingClientRect()
-        synchronizer.observe(rendererCssBoundsToWindowDip(
-          { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
-          api.ui.getZoomFactor()
-        ))
+        // 让开 Region 的焦点框：原生视图是窗口级层，画在页面之上，焦点框盖不过它（详见
+        // nativeBoundsClearOfFocusRing 的注释）。没有 Region 祖先（独立窗口等）时按原样铺满。
+        const stageBounds = { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+        const region = stage.closest('.workbench-region')
+        let bounds = stageBounds
+        if (region) {
+          const regionRect = region.getBoundingClientRect()
+          bounds = nativeBoundsClearOfFocusRing(
+            stageBounds,
+            { x: regionRect.x, y: regionRect.y, width: regionRect.width, height: regionRect.height },
+            focusRingInsetOf(region)
+          )
+        }
+        synchronizer.observe(rendererCssBoundsToWindowDip(bounds, api.ui.getZoomFactor()))
       })
     }
     const observer = new ResizeObserver(update)
@@ -301,11 +314,9 @@ export function BrowserPane({
 
   async function copyElementContext(): Promise<void> {
     if (!elementSelection) return
-    try {
-      await api.ui.writeClipboardText(formatBrowserElementContext(elementSelection))
+    // 成功才收起选区：复制失败要把选区留着让用户重试，而不是既没进剪贴板又丢了选中目标。
+    if (await copyTextToClipboard(formatBrowserElementContext(elementSelection), reportError)) {
       cancelElementSelection()
-    } catch (error) {
-      reportError(error)
     }
   }
 
