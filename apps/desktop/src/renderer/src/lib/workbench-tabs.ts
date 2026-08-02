@@ -12,11 +12,13 @@ import {
   type WorkspaceLayout
 } from './workbench-layout'
 import {
+  balanceWorkbenchRegionLayout,
   closeWorkbenchRegion,
   createWorkbenchViewLayout,
   focusWorkbenchRegion,
   regionIds,
   splitWorkbenchRegion,
+  swapWorkbenchRegions,
   type WorkbenchViewLayout
 } from './workbench-view-layout'
 import type { SplitDirection } from './workbench-layout'
@@ -206,8 +208,21 @@ export function addWorkbenchRegion(
   surface: WorkbenchSurface
 ): WorkbenchTab {
   if (surface.workspaceId !== tab.workspaceId || tab.regions[surface.regionId]) return tab
-  const layout = splitWorkbenchRegion(tab.layout, targetRegionId, direction, surface.regionId)
-  if (layout === tab.layout) return tab
+  const split = splitWorkbenchRegion(tab.layout, targetRegionId, direction, surface.regionId)
+  if (split === tab.layout) return tab
+  // #470「在某个方向打开任意多个并自动布局」：三个追加入口（GUI 分屏、控制协议 open.split、
+  // 点链接 openHttpLink）都汇到这里，且都把同一个 origin 格当锚点连开。splitWorkbenchRegion 每次
+  // 只用局部 0.5，于是在同一锚点上开第 N 个会把它切成 0.5^N ——第 6 个时首格只剩 ~1.5% 的窄缝。
+  // 追加即按后代叶子数重算全部 ratio（balanceWorkbenchRegionLayout），N 格就各占 1/N。这一步只动
+  // ratio、不重排 id、不改骨架，故活动格与新格身份原样保留；纯 splitWorkbenchRegion 保留局部 0.5
+  // （嵌套分屏的几何测试靠它），均分只发生在这条「内容追加」漏斗上。
+  //
+  // 有意的取舍：balanceWorkbenchRegionLayout 重算的是**整棵树**，包括这次追加没碰到的兄弟子树。
+  // 所以用户此前拖过的分隔比例（setWorkbenchRegionSplitRatio 写进同一批 ratio）会在下次「任意处」
+  // 追加时一并被重置回等分。这是为了兑现 #470 承诺的全局 1/N——把均分限制在被追加的那个 split 子树、
+  // 保留别处的手调比例，就给不出全局等分。今天定的是「追加即全局均分」，手调让位于此；若日后要保留
+  // 手调，改的是这里的均分范围，而不是 balanceWorkbenchRegionLayout 本身。
+  const layout = balanceWorkbenchRegionLayout(split)
   return {
     ...tab,
     layout,
@@ -231,6 +246,20 @@ export function removeWorkbenchRegion(tab: WorkbenchTab, regionId: string): Work
 
 export function focusWorkbenchTabRegion(tab: WorkbenchTab, regionId: string): WorkbenchTab {
   const layout = focusWorkbenchRegion(tab.layout, regionId)
+  return layout === tab.layout ? tab : { ...tab, layout }
+}
+
+/**
+ * 把这张 Tab 里两格的位置互换（#471）。只动 `layout`（换的是 id 在骨架上的位置），`regions` 表
+ * 一字不动——两格的内容都还在，只是在树里换了位置。挂不上时（同一格、任一端点不在场）
+ * `swapWorkbenchRegions` 原样返回旧 layout，这里据此交回原 tab，保持 `===` 稳定。
+ */
+export function swapWorkbenchTabRegions(
+  tab: WorkbenchTab,
+  regionIdA: string,
+  regionIdB: string
+): WorkbenchTab {
+  const layout = swapWorkbenchRegions(tab.layout, regionIdA, regionIdB)
   return layout === tab.layout ? tab : { ...tab, layout }
 }
 

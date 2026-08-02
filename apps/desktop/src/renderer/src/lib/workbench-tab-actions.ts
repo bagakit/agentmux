@@ -120,6 +120,57 @@ export function tabIdsForCloseScope(
   return tabOrder.filter((tabId) => tabId !== targetTabId)
 }
 
+/** 一格能和之交换位置的一个目标：换到哪一格、菜单上画什么字、点了做什么。 */
+export type RegionSwapMenuEntry = {
+  targetRegionId: string
+  label: string
+  onSelect(): void
+}
+
+/**
+ * 「这一格能和谁换位置，点了换哪个」——一次判定，同时决定菜单列哪几项和点了发什么（#471）。
+ *
+ * 与 `workbenchSplitMenuEntries` / `moveSessionViewMenu` 同一个形状与同一个理由：清单与动作出自
+ * 同一个返回值，`onSelect` 已把「源格 + 目标格」这一对闭包进去，渲染层因此只 map、无条件可写。
+ * 自己不在清单里——和自己换是 no-op（`swapWorkbenchRegions` 也会把它当 no-op），画出来只是噪音。
+ *
+ * `regions` 是这张 Tab 的每一格「id + 显示名」，由组件按既有的表面派生（文件名 / 会话 label /
+ * 浏览器标题）**按视觉顺序**算好传进来；本模块不认表面种类，只负责「排除自己、拼动词、把源与目标
+ * 配对」这一件事。换位的合法性（两个端点都要在场）由 `swapWorkbenchRegions` 自己守，这里不重判——
+ * 那会是第二份判据。
+ *
+ * 同名多格要编号，否则菜单里两条一模一样的项（两个终端都是「Swap with Terminal」、两个同名文件、
+ * 两个 New Tab）根本无从区分——而分辨「和哪一格换」正是这份 label 唯一的用处。编号按出现次序
+ * （即调用方给的视觉顺序）算，且**覆盖全体、含自己**：这样不管右键点中哪一格，某一格的编号都稳定
+ * （右键中间那个终端时，目标仍是「Terminal 1」「Terminal 3」而非被重新数成 1、2）。标签唯一时保持
+ * 裸名，不无谓地加「1」。
+ */
+export function regionSwapMenuEntries(input: {
+  regionId: string
+  regions: ReadonlyArray<{ regionId: string; label: string }>
+  swap: (regionIdA: string, regionIdB: string) => void
+}): readonly RegionSwapMenuEntry[] {
+  const labelTotals = new Map<string, number>()
+  for (const region of input.regions) {
+    labelTotals.set(region.label, (labelTotals.get(region.label) ?? 0) + 1)
+  }
+  const seen = new Map<string, number>()
+  return input.regions
+    .map((region) => {
+      const ordinal = (seen.get(region.label) ?? 0) + 1
+      seen.set(region.label, ordinal)
+      const display =
+        (labelTotals.get(region.label) ?? 0) > 1 ? `${region.label} ${ordinal}` : region.label
+      return { regionId: region.regionId, display }
+    })
+    .filter((region) => region.regionId !== input.regionId)
+    .map((region) => ({
+      targetRegionId: region.regionId,
+      label: `Swap with ${region.display}`,
+      onSelect: () => input.swap(input.regionId, region.regionId)
+    }))
+}
+
 /**
  * 「分屏与重排这一节要画哪几项、什么顺序、哪里断一道线」——四个容器共用的**唯一**那份清单。
  *

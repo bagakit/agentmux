@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   WORKBENCH_TAB_SPLIT_ACTIONS,
   moveSessionViewTargets,
+  regionSwapMenuEntries,
   tabIdsForCloseScope,
   workbenchRegionPresetMenu
 } from '../src/renderer/src/lib/workbench-tab-actions'
@@ -394,5 +395,85 @@ describe('分屏菜单的那一段没有可取反的在场判断', () => {
       [...'{a.map(x => x)}{b.map(y => y)}'.matchAll(/\.map\(/g)].length,
       '「只 map 一次」判据数不出第二份清单'
     ).toBe(2)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #471「右键 region 在已有布局中和其他 region 交换位置」的菜单模型。
+//
+// 换位是纯布局代数（swapWorkbenchRegions），但「能和谁换、点了换哪个」这份清单必须是数据，
+// 理由与 workbenchSplitMenuEntries / moveSessionViewMenu 完全相同：RegionContextMenu 的 Content
+// 只 map 一份 entries、不写任何内联条件（Radix Content 在 Portal 里且默认关闭，renderToStaticMarkup
+// 渲不出，"真挂载点一下"这条路在本仓走不通）。所以在场、顺序、点了发什么都降成这份清单。
+// ---------------------------------------------------------------------------
+describe('regionSwapMenuEntries：能和哪些 region 换位', () => {
+  it('列出除自己外的每一格，点下去换的就是那一格', () => {
+    const swap = vi.fn<(a: string, b: string) => void>()
+    const entries = regionSwapMenuEntries({
+      regionId: 'r1',
+      regions: [
+        { regionId: 'r0', label: 'Agent · repo' },
+        { regionId: 'r1', label: 'Terminal' },
+        { regionId: 'r2', label: 'example.com' }
+      ],
+      swap
+    })
+    // 自己不在清单里——和自己换是 no-op，画出来只是噪音。
+    expect(entries.map((entry) => entry.targetRegionId)).toEqual(['r0', 'r2'])
+    expect(entries.map((entry) => entry.label)).toEqual([
+      'Swap with Agent · repo',
+      'Swap with example.com'
+    ])
+    for (const entry of entries) {
+      swap.mockClear()
+      entry.onSelect()
+      // 源格闭包在 onSelect 里（'r1'），目标是这一项自己的 regionId——两者不能错位。
+      expect(swap, `${entry.label} 换错了目标`).toHaveBeenCalledWith('r1', entry.targetRegionId)
+    }
+  })
+
+  it('只有一格时清单为空——没有可换的对象，整节以缺席表达', () => {
+    expect(
+      regionSwapMenuEntries({
+        regionId: 'r0',
+        regions: [{ regionId: 'r0', label: 'Only' }],
+        swap: () => {}
+      })
+    ).toEqual([])
+  })
+
+  it('同名多格编号，否则「和哪一格换」无从分辨；唯一的保持裸名', () => {
+    const entries = regionSwapMenuEntries({
+      // 右键中间那个终端。编号覆盖全体（含自己），故目标仍是 1 和 3，不被重新数成 1、2。
+      regionId: 't2',
+      regions: [
+        { regionId: 't1', label: 'Terminal' },
+        { regionId: 't2', label: 'Terminal' },
+        { regionId: 't3', label: 'Terminal' },
+        { regionId: 'f1', label: 'index.ts' }
+      ],
+      swap: () => {}
+    })
+    expect(entries.map((entry) => entry.label)).toEqual([
+      'Swap with Terminal 1',
+      'Swap with Terminal 3',
+      // index.ts 只有一个，保持裸名——不无谓地加「1」。
+      'Swap with index.ts'
+    ])
+    // 编号是显示层的事，targetRegionId 仍是真 id。
+    expect(entries.map((entry) => entry.targetRegionId)).toEqual(['t1', 't3', 'f1'])
+  })
+
+  it('被点的格不在 regions 里也不炸，只是无自身可排除——列出全部其它格', () => {
+    // 防御式：右键与投影之间若有一瞬 regionId 尚未进 regions，仍给出其它格而非抛错。
+    const entries = regionSwapMenuEntries({
+      regionId: 'stale',
+      regions: [
+        { regionId: 'r0', label: 'A' },
+        { regionId: 'r1', label: 'B' }
+      ],
+      swap: () => {}
+    })
+    expect(entries.map((entry) => entry.targetRegionId)).toEqual(['r0', 'r1'])
   })
 })

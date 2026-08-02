@@ -11,6 +11,7 @@ import {
   type AgentWorkbenchSurface,
   type WorkbenchTab
 } from '../src/renderer/src/lib/workbench-tabs.js'
+import { regionIds, workbenchRegionBounds } from '../src/renderer/src/lib/workbench-view-layout.js'
 
 /**
  * Tab 名的默认策略、手改后不被覆盖、以及"改名不动三级地址"。
@@ -177,5 +178,68 @@ describe('firstPromptFromTimeline', () => {
   it('没有对话时返回 null——那不是错误', () => {
     expect(firstPromptFromTimeline(undefined)).toBeNull()
     expect(firstPromptFromTimeline(snapshot([item('lifecycle', 'started')]))).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #470「在某个方向打开任意多个并自动布局」。
+//
+// 引擎早就能在一个方向上排任意多格（splitWorkbenchRegion 无深度上限），真正的缺陷不在「能不能加」
+// 而在**加完什么样**：每次 split 都用 ratio 0.5，而三个入口（GUI 分屏、控制协议 open.split、点链接
+// openHttpLink）都把**同一个 origin 格**当锚点连开。于是在同一个锚点上开第 N 个，锚点被切成 0.5^N
+// ——开到第 6 个时首格只剩 ~1.5% 宽，用户看到的是一条无法使用的窄缝，而不是「N 格都还看得见」。
+//
+// addWorkbenchRegion 是这三个入口共用的**唯一**追加漏斗，所以「追加即自动均分」落在它这里：
+// 追加后每一格的尺寸只由它在树里的后代叶子数决定（balanceWorkbenchRegionLayout 干的），N 格就各占
+// 1/N，而不是几何衰减的窄缝。纯 splitWorkbenchRegion 不动（它保留局部 0.5，嵌套分屏的几何测试靠它）。
+// ---------------------------------------------------------------------------
+describe('addWorkbenchRegion：在一个方向追加任意多格，自动均分', () => {
+  const launcher = (regionId: string) =>
+    ({ regionId, kind: 'launcher' as const, workspaceId: 'workspace' })
+
+  it('在同一个 origin 上连开 6 个，每一格都是可用的 1/N 宽，不是 0.5^N 的窄缝', () => {
+    let tab = createWorkbenchTab('tab', launcher('r0'))
+    for (let i = 1; i <= 5; i++) {
+      tab = addWorkbenchRegion(tab, 'r0', 'right', launcher(`r${i}`))
+    }
+    const bounds = workbenchRegionBounds(tab.layout.root)
+    expect(bounds).toHaveLength(6)
+    // 六格横排：每格 1/6。若没有均分，锚点 r0 会缩到 0.5^5 ≈ 0.031，这一条会红。
+    for (const { bounds: b } of bounds) {
+      expect(b.width, '有一格被挤成了窄缝——追加没有自动均分').toBeCloseTo(1 / 6)
+    }
+  })
+
+  it('保留追加内容的顺序与身份：第 N 格就是最后追加的那个', () => {
+    let tab = createWorkbenchTab('tab', launcher('r0'))
+    for (let i = 1; i <= 3; i++) {
+      tab = addWorkbenchRegion(tab, 'r0', 'right', launcher(`r${i}`))
+    }
+    // 均分只重算 ratio，不重排 id。这一格集合与活动格（追加的最后一个）必须原样保留。
+    expect(new Set(regionIds(tab.layout.root))).toEqual(new Set(['r0', 'r1', 'r2', 'r3']))
+    expect(tab.layout.activeRegionId).toBe('r3')
+    expect(Object.keys(tab.regions).sort()).toEqual(['r0', 'r1', 'r2', 'r3'])
+  })
+
+  it('追加两格恰好各半（均分与旧的 0.5 在 N=2 时一致，不制造回归）', () => {
+    const tab = addWorkbenchRegion(
+      createWorkbenchTab('tab', launcher('r0')),
+      'r0',
+      'right',
+      launcher('r1')
+    )
+    const [a, b] = workbenchRegionBounds(tab.layout.root)
+    expect(a!.bounds.width).toBeCloseTo(0.5)
+    expect(b!.bounds.width).toBeCloseTo(0.5)
+  })
+
+  it('挂不上时（重名 / 跨 workspace）原样返回，不悄悄改别的东西', () => {
+    const base = createWorkbenchTab('tab', launcher('r0'))
+    // 重名：新格 id 已在场。
+    expect(addWorkbenchRegion(base, 'r0', 'right', launcher('r0'))).toBe(base)
+    // 跨 workspace：surface 属于别的 workspace。
+    expect(
+      addWorkbenchRegion(base, 'r0', 'right', { regionId: 'r1', kind: 'launcher', workspaceId: 'other' })
+    ).toBe(base)
   })
 })
