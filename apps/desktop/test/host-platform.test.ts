@@ -35,13 +35,15 @@ const HERE = path.dirname(fileURLToPath(import.meta.url))
 const RENDERER = path.resolve(HERE, '../src/renderer/src')
 const LIB_FILE = path.join(RENDERER, 'lib/host-platform.ts')
 
-/** 渲染层的每个 .ts/.tsx。 */
+/** 渲染层的每个 TypeScript 源文件（.ts/.tsx/.mts/.cts）。 */
 function rendererSources(dir = RENDERER): string[] {
   const out: string[] = []
   for (const entry of readdirSync(dir)) {
     const full = path.join(dir, entry)
     if (statSync(full).isDirectory()) out.push(...rendererSources(full))
-    else if (/\.tsx?$/.test(full)) out.push(full)
+    // `/\.tsx?$/` 会静默跳过 `.mts/.cts`。今天 `src/renderer/src` 下这类文件为零（实测），所以这是
+    // 潜在而非现行的洞——但白名单式的收窄对每一种没想到的扩展名 fail open，加宽掉。
+    else if (/\.[mc]?tsx?$/.test(full)) out.push(full)
   }
   return out
 }
@@ -103,19 +105,61 @@ const HOST_PLATFORM_FUNCTIONS = [
   'revealInFileManagerLabel'
 ] as const
 
-function hostPlatformCallsIn(source: ts.SourceFile): { name: string; line: number; args: number }[] {
-  const calls: { name: string; line: number; args: number }[] = []
+/**
+ * lib 里那几个函数在这个文件里的每一次调用，连实参个数一起报。
+ *
+ * **不按 `isIdentifier(node.expression)` 判**——那样只认最朴素的 `revealInFileManagerLabel(...)`，
+ * review agent 实测有三种写法从它眼皮底下溜过去（平台被硬钉成 mac 却全绿）：
+ *   - `(revealInFileManagerLabel)('mac')`——被括号包住的 callee 是 `ParenthesizedExpression`
+ *   - `const rl = revealInFileManagerLabel; rl('mac')`——别名
+ *   - `lib.revealInFileManagerLabel('mac')`——成员调用
+ * 所以这里先剥括号、再顺着别名回溯到原名、成员调用取其属性名，把 callee 归一到一个函数名再判。
+ */
+function calleeName(expression: ts.Expression, aliases: Map<string, string>): string | undefined {
+  let node: ts.Expression = expression
+  while (ts.isParenthesizedExpression(node)) node = node.expression
+  if (ts.isIdentifier(node)) return aliases.get(node.text) ?? node.text
+  if (ts.isPropertyAccessExpression(node)) return node.name.text
+  return undefined
+}
+
+/** 收集 `const x = <host-platform 函数>` 这类别名，让 callee 能回溯到原名。 */
+function hostPlatformAliases(source: ts.SourceFile): Map<string, string> {
+  const aliases = new Map<string, string>()
   const visit = (node: ts.Node): void => {
     if (
-      ts.isCallExpression(node) &&
-      ts.isIdentifier(node.expression) &&
-      HOST_PLATFORM_FUNCTIONS.includes(node.expression.text as never)
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.initializer
     ) {
-      calls.push({
-        name: node.expression.text,
-        line: source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1,
-        args: node.arguments.length
-      })
+      let init: ts.Expression = node.initializer
+      while (ts.isParenthesizedExpression(init)) init = init.expression
+      const target = ts.isIdentifier(init)
+        ? init.text
+        : ts.isPropertyAccessExpression(init)
+          ? init.name.text
+          : undefined
+      if (target && HOST_PLATFORM_FUNCTIONS.includes(target as never)) aliases.set(node.name.text, target)
+    }
+    ts.forEachChild(node, visit)
+  }
+  ts.forEachChild(source, visit)
+  return aliases
+}
+
+function hostPlatformCallsIn(source: ts.SourceFile): { name: string; line: number; args: number }[] {
+  const calls: { name: string; line: number; args: number }[] = []
+  const aliases = hostPlatformAliases(source)
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node)) {
+      const name = calleeName(node.expression, aliases)
+      if (name && HOST_PLATFORM_FUNCTIONS.includes(name as never)) {
+        calls.push({
+          name,
+          line: source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1,
+          args: node.arguments.length
+        })
+      }
     }
     ts.forEachChild(node, visit)
   }
@@ -135,6 +179,31 @@ function literalsIn(source: ts.SourceFile): string[] {
   }
   ts.forEachChild(source, visit)
   return out
+}
+
+/**
+ * 随平台变化的「系统文件管理器」名字集，从 lib 的 SSOT（`fileManagerName`）派生，不手抄。
+ *
+ * lib 没有导出一张名字表，只导出 `fileManagerName(platform)`——那就是 SSOT 的取值口。所以这里把三态
+ * 各自的名字取出来（Finder / File Explorer / File Manager），再补上各名字里**独占**的词（Explorer /
+ * Finder / Manager）。独占的词才安全：共享词 "File" 同属 File Explorer 与 File Manager，单独禁它会误伤
+ * "File changed on disk" 这类正当文案。lib 改名时这个集合自动跟上，不会 drift。
+ */
+function bannedFileManagerNames(): string[] {
+  const fullNames = (['mac', 'windows', 'other'] as const).map((platform) => fileManagerName(platform))
+  const wordCounts = new Map<string, number>()
+  for (const name of fullNames) {
+    for (const word of name.split(/\s+/)) wordCounts.set(word, (wordCounts.get(word) ?? 0) + 1)
+  }
+  const distinctWords = [...wordCounts].filter(([, count]) => count === 1).map(([word]) => word)
+  return [...new Set([...fullNames, ...distinctWords])]
+}
+
+/** 一段文本里**整词**命中的那些名字——`includes` 会把 "Explorer" 当 "File Explorer" 的子串，整词不会，
+ * 也不会误伤把禁词当子串包住的合法标识符。 */
+function matchedNamesIn(text: string, names: string[]): string[] {
+  const escape = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return names.filter((name) => new RegExp(`\\b${escape(name)}\\b`).test(text))
 }
 
 describe('host-platform：渲染层唯一的平台判定与随平台变化的文案', () => {
@@ -207,10 +276,23 @@ describe('host-platform：渲染层唯一的平台判定与随平台变化的文
     }
   })
 
-  it('三个文件管理器名字只许在 lib 里当字面量出现', () => {
+  it('三个文件管理器名字（含短写 Explorer）只许在 lib 里当字面量出现', () => {
     // 上一条守「谁在算平台」，这一条守「谁在写那三个词」。两条都要：一个文件可以完全不碰 navigator，
     // 只把 `isMac ? 'Reveal in Finder' : …` 里的 isMac 从别处拿来，照旧手抄了文案。
-    const names = ['Finder', 'File Explorer', 'File Manager'] as const
+    //
+    // 此前禁词是手抄的 `['Finder', 'File Explorer', 'File Manager']`，用 `text.includes(name)` 比对。
+    // review agent 实测它有两个洞：(1) 短写 "Explorer"（Windows 文件管理器的日常叫法）不是这三个的
+    // 任何子串，把 EditorPane 改成 `{'Reveal in Explorer'}` 后 6/6 全绿、tsc 沉默；(2) 手抄的清单会与
+    // lib 的 SSOT 漂移（[[duplicated-rule-defeats-the-fix]]）。改成：禁词集从 `fileManagerName()`
+    // 派生（三态各自的名字 ＋ 各名字里独占的词），并按**整词**比对——`includes` 会把 "Explorer" 当
+    // "File Explorer" 的子串重复命中，整词则各算各的，也不会误伤把禁词当子串包住的合法标识符。
+    const names = bannedFileManagerNames()
+    // 自检一：短写 "Explorer"（以及 "Finder" / "Manager"）确实进了禁词集——正是从前漏掉的那个洞。
+    expect(names, '禁词集丢了短写形态（Explorer/Finder/Manager）').toEqual(
+      expect.arrayContaining(['Finder', 'Explorer', 'Manager', 'File Explorer', 'File Manager'])
+    )
+    // 自检二：共享词 "File" 不能单独进禁词集——否则 "File changed on disk" 这类正当文案会被误伤。
+    expect(names, '"File" 被单独禁了，会误伤正当文案').not.toContain('File')
     const offenders: string[] = []
     let scanned = 0
     for (const file of rendererSources()) {
@@ -218,10 +300,10 @@ describe('host-platform：渲染层唯一的平台判定与随平台变化的文
       scanned += 1
       const relative = path.relative(RENDERER, file)
       for (const text of literalsIn(parse(file))) {
-        // 判「这句话里含某个文件管理器的名字」而不是「整句恰好等于某个名字」：真实的手抄是
+        // 判「这句话里整词出现某个文件管理器的名字」而不是「整句恰好等于某个名字」：真实的手抄是
         // 'Reveal in Finder' 这种带前缀的整句，逐字相等的判据抓不到它。
-        for (const name of names) {
-          if (text.includes(name)) offenders.push(`${relative}: ${JSON.stringify(text)}`)
+        for (const name of matchedNamesIn(text, names)) {
+          offenders.push(`${relative}: ${JSON.stringify(text)} (${name})`)
         }
       }
     }
@@ -230,10 +312,11 @@ describe('host-platform：渲染层唯一的平台判定与随平台变化的文
       offenders,
       '文件管理器的名字是随平台变化的文案，改成调 revealInFileManagerLabel() / fileManagerName()'
     ).toEqual([])
-    // 自检：三个名字确实以字面量形式住在 lib 里，所以上面那条不是因为谓词永远为假才绿的。
-    const inLib = literalsIn(parse(LIB_FILE))
+    // 自检：每个禁词都以整词形式住在 lib 的字面量里，所以上面那条不是因为谓词永远为假才绿的。
+    // 用整词比对而不是数组成员判等——短写 "Explorer" 是 "File Explorer" 里的一个词，不是独立字面量。
+    const inLibText = literalsIn(parse(LIB_FILE)).join('\n')
     for (const name of names) {
-      expect(inLib, `lib 里找不到 ${name}——SSOT 的字面量不在这`).toContain(name)
+      expect(matchedNamesIn(inLibText, [name]), `lib 里找不到 ${name}——SSOT 的字面量不在这`).toEqual([name])
     }
   })
 
@@ -303,5 +386,22 @@ describe('host-platform：渲染层唯一的平台判定与随平台变化的文
       hostPlatformCallsIn(parseText("const x = revealInFileManagerLabel('mac')")).map((c) => c.args),
       '谓词数不出实参——这道门恒绿'
     ).toEqual([1])
+    // 而且认得出 review agent 实测能溜过去的三种绕过写法：括号包住的 callee、别名、成员调用。
+    // 每一种都硬把平台钉成 'mac'，从前的 `isIdentifier(node.expression)` 对它们全盲。
+    for (const shape of [
+      "const x = (revealInFileManagerLabel)('mac')",
+      "const rl = revealInFileManagerLabel; const y = rl('mac')",
+      "const z = lib.revealInFileManagerLabel('mac')"
+    ]) {
+      expect(
+        hostPlatformCallsIn(parseText(shape)).map((c) => c.args),
+        `谓词认不出这个绕过写法：${shape}`
+      ).toEqual([1])
+    }
+    // 正交边界：朴素的零实参调用不许被误报成违规。
+    expect(
+      hostPlatformCallsIn(parseText('const x = revealInFileManagerLabel()')).filter((c) => c.args > 0),
+      '谓词把零实参调用误报成带实参了'
+    ).toEqual([])
   })
 })

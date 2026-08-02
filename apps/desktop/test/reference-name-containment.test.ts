@@ -196,13 +196,41 @@ describe('参考项目名不出现在跟踪文件里', () => {
     // 没有这条，任何让文件遍历返回空的错误（跳过判断写反、扫描根指错、读取全失败）都会让
     // 下面的禁令靠"什么也没扫到"变绿。实测：把二进制跳过改成无条件 continue，禁令照常全绿。
     const scanned = trackedTextFiles()
-    expect(scanned.length).toBeGreaterThan(400)
+    // 判**覆盖率**而不是一个绝对地板。曾经写成 `expect(scanned.length).toBeGreaterThan(400)`，
+    // review agent 实测它挡不住「按类别缩小覆盖面」：往 `trackedTextFiles` 的循环里插一句
+    // `if (path.endsWith('.tsx')) continue` 会跳掉全部 106 个 .tsx，而剩下的 ~742 个（光 .ts 一族
+    // 就有 592 个）仍然 > 400，6/6 全绿——此后任何 .tsx 里的参考项目名都不再被 down-stream 的禁令
+    // （它消费 `trackedTextFiles()`）扫到。一个地板阈值天然对「砍掉一整类」失明。
+    //
+    // 修法照搬同文件里 NUL 那条自检的判据（它正是被同一个坑烧过后升级来的）：拿 `git ls-files -z`
+    // 的原始跟踪总数当基准，要求扫描面与它只差极少数几个（今天跳过的只有 12 个已知二进制）。
+    // 任何把跳过面扩成一整类的改动都会把差距顶破这个上限而变红。
+    const tracked = execFileSync('git', ['ls-files', '-z'], {
+      cwd: new URL('../../../', import.meta.url),
+      maxBuffer: 64 * 1024 * 1024
+    })
+      .toString('utf8')
+      .split('\0')
+      .filter((path) => path.length > 0).length
+    // 自检：扫描根指错时，是这条先红，而不是「零违规」静默通过。
+    expect(tracked, '一个跟踪文件都没列到——扫描根不对').toBeGreaterThan(800)
+    // 覆盖率：跳过的必须是少数几个已知二进制，而不是一整类。差距上限 20（今天跳 12：8 png、
+    // 1 icns、1 tgz、2 mach-o）。砍掉 .tsx（106 个）会把差距撑到 100+，这条立刻红。
+    expect(
+      scanned.length,
+      `扫描面与跟踪总数差太远（扫到 ${scanned.length} / 跟踪 ${tracked}）——有一整类文件被跳过了`
+    ).toBeGreaterThan(tracked - 20)
     const paths = new Set(scanned.map(({ path }) => path))
     expect(paths.has(LICENSE_ATTRIBUTION_FILE)).toBe(true)
     expect(paths.has('package.json')).toBe(true)
     // 曾经泄漏的那两份文档必须在扫描范围内——它们是这条守卫存在的原因。
     expect(paths.has('docs/design/agentmux-desktop-interaction.md')).toBe(true)
     expect(paths.has('docs/reviews/agentmux-provider-parity-plan.md')).toBe(true)
+    // .tsx 一族必须在扫描面内——它是上面那个「按类别跳过」变异的靶子，逐类钉一个代表。
+    expect(
+      [...paths].some((path) => path.endsWith('.tsx')),
+      '一个 .tsx 都没扫到——按类别跳过的变异正是往这里去的'
+    ).toBe(true)
     // 而二进制确实被跳过了——否则 16MB 里的 vendored 二进制会拖慢每一次扫描。
     expect(paths.has('packages/core/vendor/ctxmux/darwin-arm64/bin/ctxmuxd')).toBe(false)
     // 但「含 NUL 就跳过」这条捷径**不许**扩到该是文本的文件上。这个 .ts 里有一个真的 NUL
