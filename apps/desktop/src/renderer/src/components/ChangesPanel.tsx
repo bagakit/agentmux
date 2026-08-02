@@ -11,6 +11,8 @@ import {
 import { useMemo, useState } from 'react'
 import type { GitFileChange, WorkspaceRecord } from '../../../shared/contracts'
 import { useGitStatus } from '../hooks/useGitStatus'
+import { gitBridge } from '../lib/git-bridge'
+import { useAppStore } from '../store'
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -41,6 +43,7 @@ function changeLabel(change: GitFileChange): string {
  */
 export function ChangesPanel({ workspace }: { workspace: WorkspaceRecord }) {
   const { status, loading, error: loadError, refresh } = useGitStatus(workspace.id)
+  const openFileDiff = useAppStore((state) => state.openFileDiff)
   const [busyPath, setBusyPath] = useState<string | null>(null)
   const [committing, setCommitting] = useState(false)
   const [commitMessage, setCommitMessage] = useState('')
@@ -58,10 +61,17 @@ export function ChangesPanel({ workspace }: { workspace: WorkspaceRecord }) {
 
   async function stageFile(change: GitFileChange): Promise<void> {
     if (busyPath) return
+    // 桥从 gitBridge 取。此前这里是 `window.agentmux!.git`——非空断言，桥缺席时点 Stage 抛裸
+    // TypeError，而同一屏上 useGitStatus 对**同一个桥**好好地报了「不可用」。同一个前提判出两种结论。
+    const lookup = gitBridge()
+    if (!lookup.available) {
+      setActionError(lookup.reason)
+      return
+    }
     setBusyPath(change.path)
     setActionError(null)
     try {
-      await window.agentmux!.git.stage(workspace.id, change.path)
+      await lookup.bridge.stage(workspace.id, change.path)
       await refresh()
     } catch (cause) {
       setActionError(message(cause))
@@ -73,10 +83,15 @@ export function ChangesPanel({ workspace }: { workspace: WorkspaceRecord }) {
   async function commit(event: React.FormEvent): Promise<void> {
     event.preventDefault()
     if (committing || !commitMessage.trim() || staged.length === 0) return
+    const lookup = gitBridge()
+    if (!lookup.available) {
+      setActionError(lookup.reason)
+      return
+    }
     setCommitting(true)
     setActionError(null)
     try {
-      await window.agentmux!.git.commit(workspace.id, commitMessage.trim())
+      await lookup.bridge.commit(workspace.id, commitMessage.trim())
       setCommitMessage('')
       await refresh()
     } catch (cause) {
@@ -94,10 +109,15 @@ export function ChangesPanel({ workspace }: { workspace: WorkspaceRecord }) {
         <span className="change-row__icon" title={changeLabel(change)}>
           {change.untracked ? <FilePlus2 size={12} /> : <FileDiff size={12} />}
         </span>
-        <span className="change-row__identity">
-          <strong title={change.path}>{name}</strong>
-          {dir ? <small title={change.path}>{dir}</small> : null}
-        </span>
+        <button
+          type="button"
+          className="change-row__identity change-row__identity--button"
+          title={`Open diff for ${change.path}`}
+          onClick={() => void openFileDiff(change.path)}
+        >
+          <strong>{name}</strong>
+          {dir ? <small>{dir}</small> : null}
+        </button>
         <span className="change-row__state">{changeLabel(change)}</span>
         {canStage ? (
           <button

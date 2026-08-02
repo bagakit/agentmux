@@ -115,8 +115,13 @@ describe('create-PR flow consumes the pieces it was built on', () => {
     expect(store).toContain('PR_BLOCKER_MESSAGES[')
   })
 
-  it('reaches gh through the preload bridge, not the shared web-preview mock', () => {
+  it('reaches gh through the converged preload lookup, not the shared web-preview mock', () => {
     // The mock has no gh; routing through it would fabricate a pull request that never happened.
-    expect(store).toContain('window.agentmux?.gh')
+    //
+    // 判据从 `window.agentmux?.gh` 改成 `ghBridge()`：#364 把「桥在不在」这一个判断收敛进了
+    // `lib/git-bridge`，所以这里手抄那个取值形状**已经是被禁止的写法**。桥缺席时的说法也归那一层。
+    // 「除了那一层没人再摸 window」由 `git-bridge-convergence.test.ts` 整体钉住；这一条只钉这条
+    // 具体路径确实走了它，而不是绕过去自己判一次。
+    expect(store).toContain('ghBridge()')
   })
 })

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { GitStatusResult } from '../../../shared/contracts'
+import { gitBridge } from '../lib/git-bridge'
 
 export type GitStatusRequestState = {
   workspaceId: string
@@ -31,9 +32,9 @@ export function useGitStatus(workspaceId: string | null): GitStatusRequestState 
       setState(null)
       return false
     }
-    const bridge = window.agentmux?.git
-    if (!bridge) {
-      setState({ workspaceId, status: null, loading: false, error: 'Git is unavailable in this build.' })
+    const lookup = gitBridge()
+    if (!lookup.available) {
+      setState({ workspaceId, status: null, loading: false, error: lookup.reason })
       return false
     }
     const id = ++requestId.current
@@ -44,7 +45,7 @@ export function useGitStatus(workspaceId: string | null): GitStatusRequestState 
       error: null
     }))
     try {
-      const next = await bridge.status(workspaceId)
+      const next = await lookup.bridge.status(workspaceId)
       if (requestId.current !== id) return false
       setState({ workspaceId, status: next, loading: false, error: null })
       return true

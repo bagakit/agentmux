@@ -41,6 +41,7 @@ import {
 } from '../../shared/scratch-topics'
 import { isScratchWorkspaceId } from '../../shared/contracts'
 import { api } from './lib/api'
+import { gitBridge, ghBridge } from './lib/git-bridge'
 import type { BrowserAnnotation } from './lib/browser-annotations'
 import { EMPTY_LAUNCHER_NAMES, type LauncherNameField, type LauncherNames } from './lib/launcher-name-draft'
 import { resolveLauncherWorkspaceId } from './lib/launcher-workspace'
@@ -901,19 +902,19 @@ async function loadRegionDiff(regionId: string, workspaceId: string, path: strin
       [regionId]: { loading: true, diff: state.editorRegionDiffs[regionId]?.diff ?? null, error: null }
     }
   }))
-  const bridge = window.agentmux?.git
-  if (!bridge) {
+  const lookup = gitBridge()
+  if (!lookup.available) {
     if (regionDiffRequestIds.get(regionId) !== requestId) return
     useAppStore.setState((state) => ({
       editorRegionDiffs: {
         ...state.editorRegionDiffs,
-        [regionId]: { loading: false, diff: null, error: 'Git is unavailable in this build.' }
+        [regionId]: { loading: false, diff: null, error: lookup.reason }
       }
     }))
     return
   }
   try {
-    const diff = await bridge.diff(workspaceId, path)
+    const diff = await lookup.bridge.diff(workspaceId, path)
     if (regionDiffRequestIds.get(regionId) !== requestId) return
     useAppStore.setState((state) => ({
       editorRegionDiffs: { ...state.editorRegionDiffs, [regionId]: { loading: false, diff, error: null } }
@@ -1908,17 +1909,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           return { kind: 'refused', reason }
         }
       }
-      // gh is a Desktop-main capability reached through the preload bridge, not the shared mock `api`
-      // (the web preview has no gh and no processes). Absent bridge is a refusal, never a pretend PR.
-      const bridge = window.agentmux?.gh
-      if (!bridge) {
-        const reason = 'Opening a pull request needs the desktop app.'
-        get().reportError(new Error(reason))
-        return { kind: 'refused', reason }
+      // gh 桥从 ghBridge 取（与 git 同一层，但缺席理由是它自己那一句）。桥缺席是拒绝，绝不假装开了 PR。
+      const lookup = ghBridge()
+      if (!lookup.available) {
+        get().reportError(new Error(lookup.reason))
+        return { kind: 'refused', reason: lookup.reason }
       }
       // Main re-checks the base against the remote and is the final authority; an unavailable check
       // is a refusal there, not a pass.
-      const result = await bridge.createPullRequest(input.workspaceId, {
+      const result = await lookup.bridge.createPullRequest(input.workspaceId, {
         title: input.title,
         body: input.body,
         base: token.baseRef,
