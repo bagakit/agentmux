@@ -3,7 +3,8 @@ import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 import type { AppConfig } from '../src/shared/contracts.js'
 import { CONFIG_VERSION } from '../src/shared/contracts.js'
-import { createWorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.js'
+import { createWorkspaceLayout, groupIds } from '../src/renderer/src/lib/workbench-layout.js'
+import { MIN_SPLIT_RATIO } from '../src/renderer/src/lib/split-tree.js'
 import {
   regionIds,
   splitWorkbenchRegion
@@ -38,6 +39,16 @@ import {
  *   - 断言仍然是无条件的（对一张漂移的 Tab 直接调它必须抛）。
  * 后者防的是「把断言改成 no-op / dev-only」这种让前半截也一起转绿的修法。
  */
+
+/**
+ * 越界比例的锚点。写死历史字面量而不从 `MIN_SPLIT_RATIO` 派生：派生出的样本会跟着被测常量一起漂移，
+ * 于是「它越界」在任何下界取值下都恒真，判据消失（本仓 expected-value-must-not-derive-from-mutation-target）。
+ *
+ * 0.12 与 0.1 分别是「今天越界」与「当年的下界」：region 树曾用 0.1，所以 0.12 是一条**当年合法**的
+ * 磁盘记录，不是凭空构造的坏数据。这两个数一起说明了这条缺陷为什么可达（见 split-tree.ts 的说明）。
+ */
+const STALE_RATIO = 0.12
+const LEGACY_MIN_SPLIT_RATIO = 0.1
 
 const config: AppConfig = {
   version: CONFIG_VERSION,
@@ -217,8 +228,151 @@ describe('漂移的持久化 Tab 不得让无条件断言炸在持久化路径�
 })
 
 /**
- * 接线层。上面那族全在 lib 里跑，所以「措辞算出来了」和「用户看得见」是两件事——本仓
- * extracting-to-lib-only-fixes-half：搬进 lib 只让内容可测，壳有没有把它接上照旧无人守。
+ * 取值归一化（#530/#531）。与上面那族的分工是**结构 vs 取值**，两者的报告纪律相反：
+ * 结构抢救丢过东西，所以留一条用户可见的 repair；取值归一化对用户不构成损失（一个越界的比例、
+ * 一个指向空处的焦点），说出来只是噪音，所以必须**静默**。
+ *
+ * 为什么这一族的 fixture 必须**结构干净**：这两件事此前都搭在结构抢救的车上，而
+ * `reconcilePersistedTab` 开头就有一处早退（两侧无差异时原样返回）。于是结构干净的记录整批跳过归一化。
+ * 上面那族的 fixture 全都同时结构漂移，所以它们只走抢救分支，对本族这条路径完全失明——这正是
+ * 「焦点重座」明明已有实现却仍能带着陈旧 id 交到界面的原因（本仓 guard-must-check-reachability-not-presence）。
+ *
+ * 覆盖面是**两棵树 × 两件事**（split-tree.ts 说明了它们是同一棵树，只有叶子载荷不同）：
+ * region 树的 ratio 与指针、tab-group 树的 ratio 与指针；且 region 侧的两个入口（启动恢复与
+ * partialize 写入）各钉一次——两个入口各自调一遍归一化，只接一个就漏一半。
+ */
+describe('结构干净但取值陈旧的持久化记录必须被无条件归一化（#530/#531）', () => {
+  /** 结构完全一致（树与表都是 r0|r1），只有根 ratio 是旧下界时代（0.1）写下的 0.12。 */
+  function tabWithStaleRatio(): WorkbenchTab {
+    const base = createWorkbenchTab('view', file('r0', '/repo/a.ts'))
+    const split = splitWorkbenchRegion(base.layout, 'r0', 'right', 'r1')
+    return {
+      ...base,
+      layout: { ...split, root: { ...(split.root as never), ratio: STALE_RATIO } as never },
+      regions: { r0: file('r0', '/repo/a.ts'), r1: file('r1', '/repo/b.ts') }
+    }
+  }
+
+  /** 结构完全一致，但 activeRegionId / titleRegionId 都指向树里根本没有的格。 */
+  function tabWithStalePointer(): WorkbenchTab {
+    const base = createWorkbenchTab('view', file('r0', '/repo/a.ts'))
+    const split = splitWorkbenchRegion(base.layout, 'r0', 'right', 'r1')
+    return {
+      ...base,
+      titleRegionId: 'gone',
+      layout: { ...split, activeRegionId: 'gone' },
+      regions: { r0: file('r0', '/repo/a.ts'), r1: file('r1', '/repo/b.ts') }
+    }
+  }
+
+  function rootRatio(root: unknown): number {
+    const node = root as { type: string; ratio?: number }
+    // 判据的前提：拿到的必须真是个 split。叶子没有 ratio，读出 undefined 会让下面的比较恒假地"通过"。
+    expect(node.type, '这棵树的根不是 split——比例判据没有落点').toBe('split')
+    return node.ratio!
+  }
+
+  // 前提自检：0.12 必须真的越界，否则每条「被夹回界内」都退化成恒真。锚点写死历史字面量而不从
+  // MIN_SPLIT_RATIO 派生——派生会让样本跟着被测常量一起漂移（本仓 expected-value-must-not-derive-from-mutation-target）。
+  it('前提：0.12 在今天的界外，且它正是旧下界 0.1 时代的合法值', () => {
+    expect(STALE_RATIO).toBeLessThan(MIN_SPLIT_RATIO)
+    expect(STALE_RATIO).toBeGreaterThan(LEGACY_MIN_SPLIT_RATIO)
+    // 若哪天下界被调回 0.1，上面两条仍成立而这条会红——它钉的是「今天的界是 0.15」这个前提本身。
+    expect(MIN_SPLIT_RATIO).toBe(0.15)
+  })
+
+  // 前提自检：这些 fixture 必须结构干净。若哪天它们变成漂移的，就会绕道走抢救分支，
+  // 而本族测的那条早退后面的路径重新变得无人守——且四条断言照旧全绿。
+  it.each([
+    ['ratio 越界', tabWithStaleRatio],
+    ['指针指向不存在的格', tabWithStalePointer]
+  ])('前提：fixture「%s」结构是干净的（不走抢救分支）', (_label, make) => {
+    expect(
+      () => assertRegionInvariant(make()),
+      'fixture 结构漂移了——它会走抢救分支，本族守的那条路径重新无人守'
+    ).not.toThrow()
+    expect(restore(make()).repairs, '结构干净却报出了抢救记录').toEqual([])
+  })
+
+  it('启动恢复：越界的 ratio 被夹回今天的界', () => {
+    const restored = restore(tabWithStaleRatio()).tabs.view
+    expect(restored).toBeDefined()
+    expect(rootRatio(restored!.layout.root)).toBe(MIN_SPLIT_RATIO)
+  })
+
+  it('partialize 写入：同一件事在写入侧也要做（两个入口各调一次，只接一个就漏一半）', () => {
+    const projected = projectPersistedWorkbench(persisted(tabWithStaleRatio())).tabs.view
+    expect(projected).toBeDefined()
+    expect(rootRatio(projected!.layout.root)).toBe(MIN_SPLIT_RATIO)
+  })
+
+  it('启动恢复：陈旧的焦点与标题格落回树上（否则界面拿它取 regions 得到 undefined）', () => {
+    const restored = restore(tabWithStalePointer()).tabs.view
+    expect(restored).toBeDefined()
+    const live = regionIds(restored!.layout.root)
+    expect(live).toEqual(['r0', 'r1'])
+    // 判据落在「取得到东西」上，而不是某个具体 id：兜底取读序首格是实现选择，不是合同。
+    expect(live).toContain(restored!.layout.activeRegionId)
+    expect(restored!.regions[restored!.layout.activeRegionId]).toBeDefined()
+    expect(live).toContain(restored!.titleRegionId)
+    expect(restored!.regions[restored!.titleRegionId]).toBeDefined()
+  })
+
+  it('归一化是静默的：修了取值不留 repair（那会把无损的修正报成数据丢失）', () => {
+    for (const make of [tabWithStaleRatio, tabWithStalePointer]) {
+      const workbench = restore(make())
+      expect(workbench.repairs).toEqual([])
+      expect(describePersistedTabRepairs(workbench.repairs)).toBeNull()
+    }
+  })
+
+  it('tab-group 树：同一对毛病（它与 region 树是同一棵分屏树，只有叶子载荷不同）', () => {
+    const base = createWorkspaceLayout('group-1')
+    const stale: typeof base = {
+      ...base,
+      root: {
+        type: 'split',
+        direction: 'horizontal',
+        first: { type: 'leaf', groupId: 'group-1' },
+        second: { type: 'leaf', groupId: 'group-2' },
+        ratio: STALE_RATIO
+      },
+      groups: [...base.groups, { id: 'group-2', activeTabId: null, tabOrder: [], recentTabIds: [] }],
+      activeGroupId: 'gone'
+    }
+    const restored = restorePersistedWorkbench({
+      config,
+      sessions: [],
+      persisted: { tabs: {}, layouts: { workspace: stale } },
+      createTabGroupId: () => 'group-1'
+    }).layouts.workspace
+    expect(restored).toBeDefined()
+    expect(rootRatio(restored!.root)).toBe(MIN_SPLIT_RATIO)
+    // 这一半的在场判据是**两侧都认**：只在树里的 id 交出去，下游 groups.find 得到 undefined；
+    // 只在表里的交出去，Tab 会被挂到一个画不出来的分组上。所以两个集合都要质询。
+    expect(groupIds(restored!.root)).toContain(restored!.activeGroupId)
+    expect(restored!.groups.map((group) => group.id)).toContain(restored!.activeGroupId)
+  })
+
+  it('干净的记录原样返回同一个引用（省一次分配；这不是不变量，见 clampSplitTreeRatios 的说明）', () => {
+    // 没有这条，把归一化写成「无论如何重建一遍」也会让上面全部转绿。
+    // 但它守的是那个优化，不是正确性：本仓今天没有消费者按引用比较这棵树，所以若将来有正当理由
+    // 放弃引用稳定，该改的是这条断言与那两段注释，而不是绕着它写。
+    const clean = createWorkbenchTab('view', file('r0', '/repo/a.ts'))
+    const split = splitWorkbenchRegion(clean.layout, 'r0', 'right', 'r1')
+    const tab: WorkbenchTab = {
+      ...clean,
+      layout: split,
+      regions: { r0: file('r0', '/repo/a.ts'), r1: file('r1', '/repo/b.ts') }
+    }
+    // 前提：这棵树的比例本就在界内，否则「原样返回」是错的期望而非优化。
+    expect(rootRatio(tab.layout.root)).toBeGreaterThanOrEqual(MIN_SPLIT_RATIO)
+    expect(projectPersistedWorkbench(persisted(tab)).tabs.view!.layout.root).toBe(tab.layout.root)
+  })
+})
+
+/**
+ * 接线层。前面那些族全在 lib 里跑，所以「措辞算出来了」和「用户看得见」是两件事——本仓
  * `store.ts` 完全可以算出那句话然后丢掉（原缺陷正是「静默修好」），而上面 11 条一条都不会红。
  *
  * 判据落在 AST 上而不是文本上：文本 `toContain('describePersistedTabRepairs')` 被注释、被死变量、

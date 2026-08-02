@@ -4,9 +4,11 @@ import {
   addTab,
   createWorkspaceLayout,
   findGroupForTab,
+  groupIds,
   removeTab,
   type WorkspaceLayout
 } from './workbench-layout'
+import { clampSplitTreeRatios } from './split-tree'
 import {
   removeWorkbenchRegion,
   workbenchSurfaces,
@@ -36,6 +38,67 @@ export type PersistedTabRepair = {
   droppedOrphanLeafIds: string[]
   /** 两侧毫无交集 → 这张 Tab 整体不可救，只能丢弃。 */
   discardedTab: boolean
+}
+
+/**
+ * 一张**持久化读回来的** Tab 的无条件归一化：树里每个 `ratio` 夹回今天的界，焦点与标题格落回树上。
+ *
+ * 与下面的 {@link reconcilePersistedTab} 分工明确：那一个修的是「树 ↔ regions 表」这条**结构**不变量，
+ * 只在真的漂移时动手并产出一条用户可见的抢救记录；本函数修的是**取值**——不产 repair、不告知用户，
+ * 因为它修的东西对用户不构成损失（一个越界的比例、一个指向空处的焦点），说出来只是噪音。
+ *
+ * 为什么必须无条件：这两件事此前都搭在结构抢救的车上，而结构抢救开头就有一处早退
+ * （`ghosts.length === 0 && orphans.length === 0`）。于是一张**结构完全干净**的持久化 Tab
+ * 整批跳过归一化——实测四条路径全中（region 树与 tab-group 树各有 ratio 与指针两件）。两类失败面：
+ *   - `ratio`：盘上的比例是**旧版本的代码**写的，那时 region 树的下界是 0.1（见 split-tree.ts :23-28
+ *     记的那次收敛）。0.12 当年合法、今天越界，模型存 12% 而视图只画到 15%，拖一次分隔条就有一帧
+ *     跳动加一次多余写入。
+ *   - 指针：`activeRegionId` 指向一个树里没有的格时，界面拿它去 `regions` 表里取会得到 undefined。
+ *     这条重座逻辑本就存在，只是站在早退后面——所以它对「结构干净但焦点陈旧」这一形状从不执行。
+ *
+ * 引用稳定（干净的 Tab 原样返回同一个对象）只是省一次分配：本函数也跑在 zustand 的 `partialize` 上，
+ * 即每一次写入，而绝大多数写入的记录本就干净。**它不是一个可依赖的合同**——今天没有任何消费者
+ * 按引用比较这张 Tab（`partialize` 的产物直接序列化进 localStorage），所以别让后来人以为「引用变了」
+ * 本身就是回归。见 `clampSplitTreeRatios` 的同一段说明。
+ */
+function normalizePersistedTab(tab: WorkbenchTab): WorkbenchTab {
+  const root = clampSplitTreeRatios(tab.layout.root)
+  const live = regionIds(root)
+  // 兜底取读序首格。`live[0]!` 的依据不是上游抢救过，而是**树的形状本身**：`SplitTreeNode` 的基例
+  // 就是叶子，`regionIds` 对任何合法节点都至少产出一个 id（见 workbench-view-layout.ts:37-41），
+  // 所以这里恒有得选。写清这条是因为「上游保证了交集非空」听起来也像个理由，但那说的是另一个集合
+  // （树 ∩ regions 表），而这一行取的是树自己的 id。
+  const activeRegionId = live.includes(tab.layout.activeRegionId) ? tab.layout.activeRegionId : live[0]!
+  const titleRegionId = live.includes(tab.titleRegionId) ? tab.titleRegionId : activeRegionId
+  if (
+    root === tab.layout.root &&
+    activeRegionId === tab.layout.activeRegionId &&
+    titleRegionId === tab.titleRegionId
+  ) return tab
+  return { ...tab, layout: { ...tab.layout, root, activeRegionId }, titleRegionId }
+}
+
+/**
+ * 一个工作区的 tab-group 布局的同一件事：树里每个 `ratio` 夹回今天的界，`activeGroupId` 落回在场的分组。
+ *
+ * 两棵树是同一个分屏树（见 split-tree.ts），所以这两条毛病也是同一对。分开写而不是泛型化整个函数：
+ * 两边的「指针」字段名与在场判据不同——region 的焦点判据是「在树里」，而 tab-group 的消费者读的是
+ * `groups` 表（`layout.groups.find(...)` 那一族），所以判据必须是**两侧都认**：一个只在树里、不在
+ * `groups` 表里的 id 交出去，下游取分组会得到 undefined；只在表里、不在树里的交出去，`addTabPlacement`
+ * 会把 Tab 挂到一个画不出来的分组上（workbench-layout.ts:350-352 描述的孤儿形状）。
+ * 共享的那一半（ratio 的夹取）走的是同一个 `clampSplitTreeRatios`，没有第二份实现。
+ *
+ * 交集为空时保持原值不动：那是「树 ↔ groups 表」漂移，不是本函数的职责，而**编一个不存在的 id
+ * 交出去比留着陈旧值更坏**——后者至少还能被识别成陈旧。
+ */
+function normalizePersistedLayout(layout: WorkspaceLayout): WorkspaceLayout {
+  const root = clampSplitTreeRatios(layout.root)
+  const seated = groupIds(root).filter((id) => layout.groups.some((group) => group.id === id))
+  const activeGroupId = seated.includes(layout.activeGroupId)
+    ? layout.activeGroupId
+    : seated[0] ?? layout.activeGroupId
+  if (root === layout.root && activeGroupId === layout.activeGroupId) return layout
+  return { ...layout, root, activeGroupId }
 }
 
 /**
@@ -229,7 +292,7 @@ export function projectPersistedWorkbench(input: PersistedWorkbench): PersistedW
       // 先抢救再投影：`sessionOnlyTab` 会调 `removeWorkbenchRegion`，而它尾部那条无条件断言
       // 对一张已漂移的 Tab 会抛——这里是 zustand 的 `partialize`，抛出即让**每一次写入**变成崩溃。
       const reconciled = reconcilePersistedTab(tab).tab
-      const projected = reconciled ? sessionOnlyTab(reconciled) : null
+      const projected = reconciled ? sessionOnlyTab(normalizePersistedTab(reconciled)) : null
       return projected ? [[projected.id, projected]] : []
     })
   )
@@ -237,7 +300,7 @@ export function projectPersistedWorkbench(input: PersistedWorkbench): PersistedW
   const layouts = Object.fromEntries(
     Object.entries(input.layouts).map(([workspaceId, layout]) => [
       workspaceId,
-      keepTabsInLayout(layout, tabIds)
+      normalizePersistedLayout(keepTabsInLayout(layout, tabIds))
     ])
   )
   return { tabs, layouts }
@@ -347,7 +410,8 @@ export function restorePersistedWorkbench(input: {
             input.preserveUnknownSessionViews === true
           )
         : null
-      return restored ? [[restored.id, restored]] : []
+      const normalized = restored ? normalizePersistedTab(restored) : null
+      return normalized ? [[normalized.id, normalized]] : []
     })
   )
   const layouts: Record<string, WorkspaceLayout> = {}
@@ -357,9 +421,15 @@ export function restorePersistedWorkbench(input: {
         .filter((tab) => tab.workspaceId === workspace.id)
         .map((tab) => tab.id)
     )
-    let layout = input.persisted.layouts[workspace.id]
-      ? keepTabsInLayout(input.persisted.layouts[workspace.id]!, workspaceTabIds)
-      : createWorkspaceLayout(input.createTabGroupId())
+    // 归一化排在补挂之前，不是之后：下面的 `addTabWithoutStealingFocus` 把无处安放的 Tab 挂到
+    // `layout.activeGroupId` 上，而磁盘上的这个指针可能指着一个已经不在 `groups` 表里的分组。若先补挂
+    // 再归一化，那些 Tab 已经进了一个画不出来的分组（`workbench-layout.ts:350-352` 记的孤儿形状），之后
+    // 再把指针重座也救不回它们。先把指针落到一个真在场的分组上，补挂才有正确的落点。
+    let layout = normalizePersistedLayout(
+      input.persisted.layouts[workspace.id]
+        ? keepTabsInLayout(input.persisted.layouts[workspace.id]!, workspaceTabIds)
+        : createWorkspaceLayout(input.createTabGroupId())
+    )
     for (const tabId of workspaceTabIds) {
       if (!findGroupForTab(layout, tabId)) {
         layout = addTabWithoutStealingFocus(layout, layout.activeGroupId, tabId)
