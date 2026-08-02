@@ -20,13 +20,19 @@ export type SplitTreeNode<Leaf> =
 // 不保证被解成这个交集，会让泛型函数里的叶子入参类型对不上。
 export type SplitTreeLeaf<Leaf> = { type: 'leaf' } & Leaf
 
-// 分屏比例的下限＝渲染层 Panel 的 minSize（WorkspaceWorkbench.tsx 里所有 <Panel> 都是 minSize={15}）。
+// 分屏比例的下限＝渲染层 Panel 的 minSize（见下面的 MIN_SPLIT_PERCENT，渲染层从它派生而非手抄）。
 // 两者必须是同一个数：拖动落点被 react-resizable-panels 夹在 [minSize, 100-minSize] 内，若写回 store
 // 的比例允许比它更极端，面板会在下一次渲染把自己弹回边界、视觉上跳一下。此前 region 树用 0.1、
 // tab-group 树用 0.15，前者就落在「模型允许、视图不允许」的缝里。取 0.15 让「模型能存的最窄」与
 // 「视图能显示的最窄」重合。上界对称派生（1 - 0.15 = 0.85），不再单列第二个常量。
 // 改这个数就是产品决策——一个面板最窄能到多窄——所以整仓只此一处。
 export const MIN_SPLIT_RATIO = 0.15
+
+// 同一个下限的百分比表达，给渲染层的 <Panel minSize={…}> 直接消费（react-resizable-panels 的
+// minSize 以 0–100 计）。渲染侧曾把裸字面量 15 手抄四遍、只靠注释宣称「必须＝MIN_SPLIT_RATIO」——
+// 把 MIN_SPLIT_RATIO 调到 0.2 时那四处纹丝不动，模型夹到 [0.2,0.8] 而视图仍让人拖到 15%，正是
+// :23-27 说已经闭合的那道缝。改成从这里派生后，动一个数两侧一起动，编译期保证同值，无需测试守。
+export const MIN_SPLIT_PERCENT = MIN_SPLIT_RATIO * 100
 
 export function clampSplitRatio(ratio: number): number {
   return Math.max(MIN_SPLIT_RATIO, Math.min(1 - MIN_SPLIT_RATIO, ratio))
