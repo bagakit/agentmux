@@ -74,6 +74,7 @@ import {
 import { CSS } from '@dnd-kit/utilities'
 import { orderTopics, reorderTopics } from '../lib/topic-order'
 import { openTopicRegionMosaics } from '../lib/scratch-topic-layout'
+import { browserOpenError } from '../lib/browser-open-feedback'
 import type { RegionGeometry } from '../lib/split-direction'
 import { handleTopicRenameKeyDown } from '../lib/topic-rename'
 import { TopicContextMenu } from './TopicContextMenu'
@@ -952,7 +953,12 @@ export function SurfaceToolDock({
   ))
 
   async function openBrowser(): Promise<void> {
-    if (!activePaneId || startingBrowser) return
+    if (startingBrowser) return
+    const focusError = browserOpenError(activePaneId)
+    if (focusError || !activePaneId) {
+      setError(focusError ?? browserOpenError(undefined)!)
+      return
+    }
     setStartingBrowser(true)
     setError(null)
     try {
