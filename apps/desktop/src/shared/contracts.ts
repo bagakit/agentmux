@@ -273,24 +273,53 @@ export type RemoveWorktreeInput = {
 }
 
 /**
- * Mirrors the batch teardown's two states rather than inventing a third vocabulary: `removed` means git
- * confirmed and the record is withdrawn, `retained` means the directory and its record are both still
- * there, with git's reason carried through unedited so the user can review before discarding explicitly.
+ * How far a removal got before it stopped. Three genuinely different states of the world, and the reason
+ * this is a field rather than something each consumer infers from the message text.
+ *
+ * `retained` used to carry only a `reason` string, and every consumer then guessed the cause from its own
+ * context. All three guessed differently and one could not be right: the batch banner asserted "they
+ * still hold changes" for every retained lane, the removal dialog offered "Discard uncommitted work?"
+ * whatever git had actually said, and the fan-out's launch-failure cleanup assumed a failed removal meant
+ * the directory survived. That last assumption is false in exactly one case — the one below that says so.
+ */
+export type WorktreeRetention =
+  /**
+   * The dirty-tree protection refused. The directory and its record are both intact, git's own words say
+   * what is uncommitted, and discarding it explicitly is a real next step the user can take.
+   */
+  | 'uncommitted-changes'
+  /**
+   * Git failed, or a precondition did. The directory and its record are both intact and nothing was
+   * discarded. There is nothing to discard here, so offering to is a lie — the reason is the whole answer.
+   */
+  | 'git-failed'
+  /**
+   * Git removed the worktree and the record could not be withdrawn. **The directory is gone** and the
+   * record still points at it. This is the one retention where "still on disk" is false, and it is not
+   * recoverable by removing again: the record's path no longer exists, so the next attempt fails at the
+   * status probe. Saying "it still holds changes" here sends the user to look for work that is deleted.
+   */
+  | 'record-not-withdrawn'
+
+/**
+ * Mirrors the batch teardown's states rather than inventing a second vocabulary: `removed` means git
+ * confirmed and the record is withdrawn, `retained` means the removal did not complete, with `retention`
+ * saying how far it got and git's reason carried through unedited.
  *
  * A refusal is deliberately NOT a thrown error across this boundary. `retained` is an ordinary answer the
  * surface has to render — the whole point of the protection is that "there is work here" reaches the user.
  */
 export type RemoveWorktreeOutcome =
   | { status: 'removed'; removedPath: string; config: AppConfig }
-  | { status: 'retained'; reason: string }
+  | { status: 'retained'; retention: WorktreeRetention; reason: string }
 
 /**
- * `retained` means still on disk and still registered: the dirty-tree protection refused it, or git
- * failed. `reason` is git's own words so the user knows what to review before discarding it explicitly.
+ * One loser's fate in a keep-the-winner teardown. `retention` is required rather than optional so that a
+ * new construction site cannot compile without deciding which of the three states it is reporting.
  */
 export type FanOutTeardownResult =
   | { status: 'removed'; workspaceId: string; removedPath: string }
-  | { status: 'retained'; workspaceId: string; reason: string }
+  | { status: 'retained'; workspaceId: string; retention: WorktreeRetention; reason: string }
 
 export type KeepOneOfFanOutOutcome = {
   keptWorkspaceId: string
