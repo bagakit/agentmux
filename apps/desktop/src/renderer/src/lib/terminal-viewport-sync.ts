@@ -64,6 +64,22 @@ export class TerminalViewportSynchronizer {
   private readonly suspendReasons = new Set<'interactive-resize' | 'hidden'>()
   private observedWhileSuspended = false
   private awaitingFirstLiveFit = false
+  /**
+   * 重放字节写进解析器的那一刻，xterm 的 grid 是多少。`null` = 这一格没有重放过任何字节。
+   *
+   * 这是「按错的宽度排好的那一屏要不要重画」唯一说得准的锚点。别的问法都不成立：
+   *
+   * - 「第一次 live fit 这一次挪了 grid 吗」——非 live 的 fit 也会挪（`fitAndSynchronize` 里的
+   *   `fit()` 不看 `this.live`，只有 `requestResize` 被挡）。调用方排在 attach 之前的那一帧完全
+   *   可能在重放之后、第一次 live fit 之前把 grid 挪到终值，于是两端相等、判据答否，乱码留在屏上。
+   * - 「这个 synchronizer 建好之后挪过吗」——xterm 一律以 80×24 构造，第一次 fit 必然挪，所以这个
+   *   问法在每一格上恒真，等于无条件重绘，不再是判据。
+   *
+   * 锚在重放那一刻，两种情形就都判对了：pre-fit 排在重放**之前**时它记的已是终值，相等⇒不重绘
+   * （那一屏本来就按对的宽度排的，连全新终端那对多余的 resize 也一并省掉）；排在重放**之后**时它
+   * 记的是旧宽度，不等⇒重绘。
+   */
+  private gridWhenReplayLanded: TerminalGridSize | null = null
 
   constructor(private readonly options: TerminalViewportSynchronizerOptions) {}
 
@@ -134,6 +150,22 @@ export class TerminalViewportSynchronizer {
   }
 
   /**
+   * 重放字节已经写进解析器了——记下此刻的 grid。
+   *
+   * 调用方在写完 replay、起活之前调一次。不调的后果是明确的：`gridWhenReplayLanded` 保持
+   * `null`，起活时不会补重绘。对**没有**重放的一格（全新终端）这正是对的；对有重放的一格，
+   * 漏调就等于把这套补救关掉，所以调用点与写 replay 的那段代码必须挨着。
+   *
+   * 幂等：只认第一次。一格终端只有一次「重放的那一屏」，后续的实时输出是另一回事。
+   */
+  markReplayLanded(): void {
+    if (this.disposed || this.gridWhenReplayLanded) return
+    const size = this.options.readGrid()
+    if (!isUsableGrid(size)) return
+    this.gridWhenReplayLanded = { cols: size.cols, rows: size.rows }
+  }
+
+  /**
    * 起活并把这一格的几何交给 PTY。
    *
    * 这里额外承担一件事：**如果第一次 live fit 真的挪动了 grid，就补一次重绘。**
@@ -152,7 +184,7 @@ export class TerminalViewportSynchronizer {
    * 用户放大缩小一下就好，是因为 zoom 真的改变了 CSS 像素与 cell 尺寸，于是既 fit 又发出
    * 了一次真的尺寸变化。
    *
-   * 所以判据只能是「这次 fit 挪了 grid」而不是「PTY 尺寸变了没有」——后者渲染层根本不知道
+   * 所以判据只能是「grid 挪过」而不是「PTY 尺寸变了没有」——后者渲染层根本不知道
    * （我们不持有 PTY 改动前的尺寸，`resize` 的返回值只说送到没送到）。重绘走与 gap 路径同一个
    * `requestContentRedraw`：那一招本来就是「即使尺寸没变也强制 TUI 重画」，此前只接在 gap 一条路上。
    *
@@ -161,9 +193,13 @@ export class TerminalViewportSynchronizer {
    * 判据若写在这里，就会在「还没 fit」的那一刻读到「没挪」，把真正会挪的那次漏掉。这里只负责
    * 举旗，由第一次真的送到 PTY 的 live fit 摘旗。
    *
-   * 代价说清楚：全新起的终端（不是重启恢复）第一次 fit 同样从 80×24 挪到真尺寸，于是也会多做一对
-   * resize。那一对在这里是多余的（新 PTY 的第一次 TIOCSWINSZ 本身就是真变化，SIGWINCH 会发出去），
-   * 但渲染层分不出这两种情形，而漏掉重启那一路的代价是用户看见乱码。所以取宽的那一侧。
+   * 而「排错了宽度」按 `gridWhenReplayLanded` 判——重放字节落地那一刻的 grid 与摘旗时的 grid 比，
+   * 不是「这一次 fit 挪没挪」：非 live 的 fit 也会挪 grid，它若排在 replay 字节之后，就会在第一次
+   * live fit 之前把两端弄成相等。见那个字段自己的说明。
+   *
+   * 这样全新起的终端（不是重启恢复）不付代价：它没有重放，锚点是 `null`，直接不重绘。第一次 fit
+   * 同样从 80×24 挪到真尺寸，但新 PTY 的第一次 TIOCSWINSZ 本身就是真变化，SIGWINCH 会发出去，
+   * 屏上也没有按错宽度排好的内容需要救。
    */
   async startLiveSynchronization(): Promise<void> {
     if (this.disposed || this.live) return
@@ -286,10 +322,13 @@ export class TerminalViewportSynchronizer {
 
     if (!this.awaitingFirstLiveFit) return
     this.awaitingFirstLiveFit = false
-    // 挪了 grid ⇒ 刚重放的那一屏是按错的宽度排的，而 alt screen 不会自行重排；同尺寸的
-    // TIOCSWINSZ 也不产生 SIGWINCH，所以 TUI 永远收不到重画的理由。详见
-    // startLiveSynchronization 的说明。`current` 是 fit 之前读到的那一格。
-    if (gridKey(size) === gridKey(current)) return
+    // 重放那一屏是按当时的 grid 排的；现在的 grid 与它不同 ⇒ 那一屏排错了宽度。而 alt screen
+    // 不会自行重排，同尺寸的 TIOCSWINSZ 也不产生 SIGWINCH，所以 TUI 永远收不到重画的理由。
+    // 详见 startLiveSynchronization 与 `gridWhenReplayLanded` 的说明。
+    //
+    // 没重放过就没有排错的那一屏（`null`）——全新起的终端走这一路，不重绘。
+    const atReplay = this.gridWhenReplayLanded
+    if (!atReplay || gridKey(size) === gridKey(atReplay)) return
     try {
       await this.requestContentRedraw()
     } catch {

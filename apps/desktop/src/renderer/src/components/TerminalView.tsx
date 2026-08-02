@@ -722,6 +722,10 @@ export function TerminalView({
             kittyKeyboard = readKittyKeyboardOutput(kittyKeyboard, data)
           }
         ) ?? cursor
+        // 重放的那一屏是按**此刻**的 grid 排的。记下来，起活时才判得出它有没有排错宽度：
+        // 后面第一次 live fit 若把 grid 挪到别处，那一屏就是按错的宽度排的，而 alt screen
+        // 不会自行重排（详见 viewport-sync 的 `gridWhenReplayLanded`）。
+        viewport.markReplayLanded()
         // Initial attaches and true rebuilds have no previous viewport to restore. Explicitly pin
         // their first visible frame to the latest output instead of relying on xterm's parser
         // default, which can be the top of a freshly-created normal buffer.

@@ -152,6 +152,11 @@ describe('TerminalViewportSynchronizer', () => {
       measureViewport: () => ({ width: 1200, height: 800 })
     })
 
+    // 重放就发生在这个 80×24 上——本用例标题里那"刚重放的那一屏"，以前是隐含前提，
+    // 现在由 markReplayLanded() 明说。判据锚在这一刻的 grid（见 viewport-sync 的
+    // `gridWhenReplayLanded`），因为「这一次 fit 挪没挪」会被抢先跑的非 live fit 抹平。
+    sync.markReplayLanded()
+
     await sync.startLiveSynchronization()
 
     // 先是最终几何，然后是那一对「差一行再回来」的强制重绘——与 gap 路径同一招。
