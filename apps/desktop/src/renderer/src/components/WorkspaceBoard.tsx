@@ -25,6 +25,7 @@ import { useScratchTopics } from '../hooks/useScratchTopics'
 import { useBoardRows } from '../hooks/useBoardRows'
 import { api } from '../lib/api'
 import {
+  BOARD_COLUMN_DESCRIPTIONS,
   PROJECT_BOARD_COLUMNS,
   filterBoardRows,
   type BoardRow,
@@ -38,15 +39,17 @@ import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
 import { FanOutStrip } from './FanOutStrip'
 import { StatusDot } from './StatusDot'
 
+// 列的**措辞**取自 BOARD_COLUMN_DESCRIPTIONS——它跟归类映射放在一起，因为它是关于那个映射的断言。
+// 这里手抄过一份，于是 needs-you 长期写着 "Waiting or blocked"，而那一列其实还收着 disconnected 与 error。
 const COLUMN_META: Record<ProjectBoardColumn, {
   label: string
   description: string
   icon: LucideIcon
 }> = {
-  inbox: { label: 'Inbox', description: 'Start a discussion', icon: Inbox },
-  working: { label: 'Working', description: 'Running now', icon: Activity },
-  'needs-you': { label: 'Needs You', description: 'Waiting or blocked', icon: BellRing },
-  done: { label: 'Done', description: 'Completed runs', icon: CheckCircle2 }
+  inbox: { label: 'Inbox', description: BOARD_COLUMN_DESCRIPTIONS.inbox, icon: Inbox },
+  working: { label: 'Working', description: BOARD_COLUMN_DESCRIPTIONS.working, icon: Activity },
+  'needs-you': { label: 'Needs You', description: BOARD_COLUMN_DESCRIPTIONS['needs-you'], icon: BellRing },
+  done: { label: 'Done', description: BOARD_COLUMN_DESCRIPTIONS.done, icon: CheckCircle2 }
 }
 
 /**

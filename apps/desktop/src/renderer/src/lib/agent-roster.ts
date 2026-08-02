@@ -1,6 +1,6 @@
 import type { AgentCatalogEntry, LaunchOptionSelection, RiskTier } from '@agentmux/core'
 import type { SessionSnapshot } from '../../../shared/contracts'
-import { categoryFor, type AttentionCategory } from './attention-event'
+import { categoryFor, isUrgentAttention, type AttentionCategory } from './attention-event'
 import { agentUsageDisplay, type AgentUsageDisplay } from './agent-usage'
 
 // An enumerable, window-wide roster of Agents.
@@ -132,11 +132,12 @@ export function buildAgentRoster(input: {
 /**
  * The count for the collapsed badge.
  *
- * Deliberately the same needs-you + error total the attention bar shows, so the badge and the bar are
- * one aggregate seen at two sizes rather than two numbers a user has to reconcile.
+ * Reads {@link isUrgentAttention} — the same pair of categories that earn a row accent — so the badge,
+ * the bar, and the ink are one aggregate seen at three sizes rather than three numbers a user has to
+ * reconcile. It was a hand-written `needs-you || error` here before.
  */
 export function rosterBadgeCount(rows: readonly RosterRow[]): number {
-  return rows.filter((row) => row.attention === 'needs-you' || row.attention === 'error').length
+  return rows.filter((row) => isUrgentAttention(row.attention)).length
 }
 
 /**
