@@ -5,6 +5,7 @@ import {
   FOCUS_RING_WIDTH_PROPERTY,
   LatestBrowserBoundsSynchronizer,
   focusRingInsetOf,
+  focusRingYieldOf,
   nativeBoundsClearOfFocusRing,
   rendererCssBoundsToWindowDip
 } from '../src/renderer/src/lib/browser-bounds-sync.js'
@@ -144,6 +145,37 @@ describe('原生视图给焦点框让位（#341）', () => {
   })
 
   /**
+   * 让位量的**极性**：只有聚焦的那一格让，其余格不让（#350）。
+   *
+   * 这条是行为层，与下面那条接线层分开。原来的缺陷不在算得对不对，而在这个判定根本不存在：
+   * BrowserPane 只问「有没有 `.workbench-region` 祖先」，而环宽那个自定义属性声明在 `:root`
+   * （tokens.css），任何 Region 都继承得到一个正数——于是每一格都内缩 2px。未聚焦的 browser 区
+   * 被推进来，露出底下 `.browser-stage` 的 `--surface-0`（#111419）：网页多为浅色时那是一条
+   * 看得见的深边，而它没有对应的绿环。用户看到的是"没聚焦的那格镶了一圈黑边"。
+   *
+   * 两侧都要钉住：只钉「聚焦时要让」，写死成 `return focusRingInsetOf(element)` 就通过（正是缺陷
+   * 原样）；只钉「未聚焦时是 0」，写死成 `return 0` 也通过（焦点框三边重新被物理遮掉，#341 回归）。
+   */
+  it('让位量只在聚焦那一格取环宽，未聚焦取 0', () => {
+    const ringOf = (declared: string): Element =>
+      withComputedStyle({
+        getPropertyValue: (property: string) =>
+          property === FOCUS_RING_WIDTH_PROPERTY ? declared : ''
+      })
+
+    // 聚焦：取得到环宽，且**取的就是那个属性的值**（不是某个手抄的常量——写死 2 恰好等于今天的
+    // token，故这里用 5 让"手抄 2"当场红）。
+    expect(focusRingYieldOf(ringOf('5px'), true), '聚焦的那一格没有让位，焦点框三边会被原生视图遮掉').toBe(5)
+    // 未聚焦：即便这个元素身上读得出环宽（:root 继承，永远读得出），也必须是 0。
+    expect(
+      focusRingYieldOf(ringOf('5px'), false),
+      '未聚焦的那一格也让位了——browser 区镶一圈无环的深边（#350 原样）'
+    ).toBe(0)
+    // 自检：这个判别器在场。如果 fixture 恰好读不出环宽，上面两条会都是 0 而"未聚焦"那条恒真。
+    expect(focusRingInsetOf(ringOf('5px')), '判别器缺席：fixture 读不出环宽，上面那对断言无从分辨').toBe(5)
+  })
+
+  /**
    * 上面几条守的是**算得对**，这条守的是**有人在算**。
    *
    * 两层分开，因为它们各自能独立坏掉：把 `nativeBoundsClearOfFocusRing` 改错，上面的断言红；
@@ -203,9 +235,57 @@ describe('原生视图给焦点框让位（#341）', () => {
         '原生视图铺满整格，Region 焦点框的左/右/下三边被物理遮掉（#341 的原样）'
     ).toBe(true)
     // 而且环宽必须是**取来的**而不是手抄的字面量：那条链断了的症状与没让位一样隐蔽。
+    // 判据落在 `nativeBoundsClearOfFocusRing` 的第三个实参上——「文件里出现过这个名字」不够：
+    // 算完丢掉、第三个实参仍写 `focusRingInsetOf(region)`（无条件让位，#350 原样）在文本上合法。
+    const yieldCall = /nativeBoundsClearOfFocusRing\(([\s\S]*?)\n\s*\)/.exec(source)?.[1] ?? ''
+    const yieldArgument = yieldCall.split('\n').at(-1)?.trim().replace(/,$/, '') ?? ''
     expect(
-      /focusRingInsetOf\(/.test(source),
-      'BrowserPane 没有调 focusRingInsetOf——环宽变成手抄的数，改 CSS 时原生视图不会跟着改'
-    ).toBe(true)
+      yieldArgument,
+      `让位量那个实参是 \`${yieldArgument}\`，不是 focusRingYieldOf(...)——` +
+        '让位量要么变成手抄的数（改 CSS 时原生视图不跟着改），要么绕过"只有聚焦那格才让"这条极性判定'
+    ).toMatch(/^focusRingYieldOf\(/)
+    // 极性那个入参必须是**上游传下来的焦点结论**，不是这里自己判的。写成字面量 true 就是无条件
+    // 让位（#350 原样）；写成 false 则焦点框三边重新被遮（#341 回归）。两者在类型上都合法。
+    expect(
+      yieldArgument,
+      `focusRingYieldOf 的第二个实参写死了：\`${yieldArgument}\`。焦点结论必须由 props 传进来` +
+        '（regionFocusExpression 一次算出，与挂在 Region 上的类名共用那次比较）'
+    ).toMatch(/focusRingYieldOf\([^,]+,\s*yieldToFocusRing\s*\)/)
+  })
+
+  /**
+   * 那个 prop 真的被**传进去**了，不只是声明在那里（#350 的第二段接线）。
+   *
+   * `yieldToFocusRing` 有默认值 `false`，所以调用点整段漏掉它在类型上完全合法、tsc 全程沉默，而
+   * 原生视图从此永不让位——焦点框的左/右/下三边重新被物理遮掉（#341 原样）。记忆
+   * optional-prop-only-buys-silence 的同族：可选属性买到的只是关掉 tsc。
+   *
+   * 判据按 AST 落在「那个属性的值就是那次判定的字段」上，而不是「文件里出现过这个名字」：
+   * `yieldToFocusRing={false}` 与 `yieldToFocusRing={undefined && ...}` 都带着这个名字。
+   */
+  it('WorkspaceWorkbench 真的把焦点结论传给 BrowserPane', () => {
+    const path = new URL('../src/renderer/src/components/WorkspaceWorkbench.tsx', import.meta.url)
+    const source = readFileSync(path, 'utf8')
+    const ast = ts.createSourceFile('WorkspaceWorkbench.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+
+    const values: string[] = []
+    const walk = (node: ts.Node): void => {
+      if (ts.isJsxAttribute(node) && node.name.getText(ast) === 'yieldToFocusRing') {
+        values.push(node.initializer?.getText(ast) ?? '<无值>')
+      }
+      ts.forEachChild(node, walk)
+    }
+    walk(ast)
+
+    expect(
+      values.length,
+      'BrowserPane 那处根本没传 yieldToFocusRing——它有默认值 false，所以 tsc 沉默而原生视图永不让位' +
+        '（焦点框三边重新被遮，#341 回归）'
+    ).toBe(1)
+    // 值必须是那次判定的字段。写死成 false（永不让位）或 true（无条件让位，#350 原样）都在这里红。
+    expect(
+      values[0],
+      `传进去的是 \`${values[0]}\`，不是那次焦点判定的结果——焦点结论必须与 Region 的类名同源`
+    ).toMatch(/^\{focus\.nativeViewYieldsToRing\}$/)
   })
 })
