@@ -317,9 +317,21 @@ function toLiteralPathspec(path: string): string {
  * (`does not exist in`), or it is on disk but untracked (`exists on disk, but not in`). Both mean the
  * old side is absent — which is exactly how an added file is drawn.
  *
- * The quoted spans are `[^']*`, not `.+`: a fenced wildcard would let `.+` run across the closing
- * quote and swallow whatever follows, so a longer line that merely CONTAINS one of these phrases would
- * match. Anchoring each span to "up to the next quote" keeps the shape pinned to the real message.
+ * The REF span is the literal `HEAD`, not a wildcard, and that is what stops a longer line from
+ * matching: `readHeadBlob` only ever asks for `HEAD:<path>`, git echoes the rev it was given verbatim
+ * (measured, including under a detached HEAD), so the message must end in `'HEAD'` and nothing may
+ * follow it. A line like `… but not in 'HEAD:sub' at 'refs/heads/x'` fails on the ref, not on a fence.
+ *
+ * The PATH span stays `.+`. Fencing it as `[^']*` looks tighter and is a real defect: git does NOT
+ * escape a single quote inside the path it echoes, so a legitimately-added file named `bob's.txt`
+ * prints `fatal: path 'bob's.txt' exists on disk, but not in 'HEAD'` — measured byte-for-byte against
+ * real git. A fenced span stops at the embedded quote, the match fails, and the whole diff throws
+ * instead of drawing the file as added. Fencing the path buys nothing here (the ref literal already
+ * pins the tail) and costs every path containing a quote.
+ *
+ * One deliberate limit: a path containing a NEWLINE splits this into two lines, so the one-line
+ * requirement below rejects it and the failure surfaces as an error. That is the safe direction — the
+ * alternative is a pattern that spans newlines, which would let a genuine multi-line stderr match.
  *
  * The "nothing else on stderr" requirement in {@link isPathAbsentInHead} is the second half of the
  * decision and the load-bearing one. Absence is not provable from the fatal alone: git prints the SAME
@@ -340,7 +352,7 @@ function toLiteralPathspec(path: string): string {
  * HEAD:<path>` instead, which never resembled absence. Measured — and the reason the guard's real-git
  * case makes the *tree* unreadable (git-service.test.ts).
  */
-const PATH_ABSENT_IN_HEAD = /^fatal: path '[^']*' (?:does not exist in|exists on disk, but not in) '[^']*'$/m
+const PATH_ABSENT_IN_HEAD = /^fatal: path .+ (?:does not exist in|exists on disk, but not in) 'HEAD'$/m
 
 function isPathAbsentInHead(stderr: string): boolean {
   const lines = stderr.split('\n').filter((line) => line.trim() !== '')
