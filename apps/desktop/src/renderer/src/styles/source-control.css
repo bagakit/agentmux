@@ -105,3 +105,19 @@
 .commit-box__message:focus { border-color: var(--focus-line); box-shadow: var(--focus-ring); }
 .commit-box__message:disabled { opacity: .55; }
 .commit-box__submit { justify-content: center; padding:var(--sp-3) var(--sp-4); }
+/* 开 PR 的三个面。都贴在 commit-box 上方、面板底部，因为它们都是「读完之后」出现的东西。 */
+.pr-created { display: flex; align-items: center; justify-content: space-between; gap:var(--sp-3); }
+/* 阻塞清单借用 red 那一族，但**不**复用 .branches-inline-error：那是一句话的横幅，这是个列表，
+   两者的内边距与行距不同。同一个类要同时排一句话和一个 <ul> 就得在 CSS 里再判一次内容形状。 */
+.pr-blockers { margin:0; padding:var(--sp-4); border-top: 1px solid var(--red-line); color: var(--red-text); background: var(--red-bg); font-size: var(--fs-micro); line-height: 1.45; }
+.pr-blockers strong { display: block; margin-bottom:var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); }
+.pr-blockers ul { margin:0 0 var(--sp-3); padding-left:var(--sp-5); display: flex; flex-direction: column; gap:var(--sp-2); }
+.pr-form { flex: 0 0 auto; display: flex; flex-direction: column; gap:var(--sp-3); padding:var(--sp-4); border-top: 1px solid var(--line-soft); }
+.pr-form__header { display: flex; align-items: center; justify-content: space-between; gap:var(--sp-3); color: var(--text-2); font-family: "SFMono-Regular", monospace; font-size: var(--fs-micro); }
+/* base 是猜出来的时候的提示。用 amber 而不是 red：这不是错误，是一个需要看一眼的默认值。 */
+.pr-form__hint { margin:0; padding:var(--sp-2) var(--sp-3); border-radius: var(--radius-sm); color: var(--amber); background: var(--amber-bg); font-size: var(--fs-micro); line-height: 1.4; }
+.pr-form__title, .pr-form__body { width: 100%; padding:var(--sp-3) var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius-sm); outline: 0; color: var(--text); background: var(--bg); font-family: inherit; font-size: var(--fs-meta); line-height: 1.45; }
+.pr-form__body { resize: none; }
+.pr-form__title:focus, .pr-form__body:focus { border-color: var(--focus-line); box-shadow: var(--focus-ring); }
+.pr-form__title:disabled, .pr-form__body:disabled { opacity: .55; }
+.pr-form__submit { justify-content: center; padding:var(--sp-3) var(--sp-4); }
