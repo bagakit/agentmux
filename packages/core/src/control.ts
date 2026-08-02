@@ -235,14 +235,39 @@ export const AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS = 2_000
 export const AGENTMUX_CONTROL_LONG_REQUEST_TIMEOUT_MS = 60_000
 
 /**
- * 这个操作要不要走长预算。
+ * 每个操作的等待预算档位——逐个写死，不许按前缀或形状推断。
  *
- * 慢的是「要等外面」的那些：`open.*` 等一个进程起来并交出 Region，`send` 等 composer 就绪并把 prompt
- * 打进去，`resume` 等 Provider 重建会话，`stop` 等进程真的收尾。其余（inspect/focus/arrange/list）
- * 只读或只动本地状态，2 秒之内不返回就是真的出事了。
+ * 为什么是一张穷尽表而不是一个谓词：谓词只能表达「符合这个形状的算慢」，而**新加的操作不符合任何形状
+ * 时会静默落进快的那档**。此前的写法是 `startsWith('open.') || === 'send' || === 'resume' || === 'stop'`，
+ * 于是 `interrupt` 加进联合类型时没有任何东西提醒过要给它定档——它只是不匹配，就拿到了 2 秒。
+ * （`interrupt` 拿短预算其实是对的：它只是往 daemon 发一次信号，不像 `stop` 要等 attachRecoverableStop
+ * 真的收尾。但那应该是有人**判过**的结果，不是漏判的结果。）
+ *
+ * 写成 `Record<Operation, ...>` 之后，联合里加一个成员而这里不加一行，tsc 直接报缺键：定档从
+ * 「你得记得改」变成「不改就编译不过」。
+ *
+ * 分档判据：`long` 是要等本进程之外的东西——`open.*` 等一个进程起来并交出 Region，`send` 等 composer
+ * 就绪并把 prompt 打进去，`resume` 等 Provider 重建会话，`stop` 等进程真的收尾。`short` 是只读、只动
+ * 本地状态、或只发一次不等结果的信号，2 秒之内不返回就是真的出事了。
  */
+const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'short'> = {
+  'inspect.tab': 'short',
+  'inspect.region': 'short',
+  'open.agent': 'long',
+  'open.terminal': 'long',
+  'open.browser': 'long',
+  send: 'long',
+  focus: 'short',
+  arrange: 'short',
+  'list.agents': 'short',
+  interrupt: 'short',
+  resume: 'long',
+  stop: 'long'
+}
+
+/** 这个操作要不要走长预算。取值来自 {@link OPERATION_BUDGET}，那张表是唯一的分档出处。 */
 export function isLongAgentMuxControlOperation(operation: AgentMuxControlRequest['operation']): boolean {
-  return operation.startsWith('open.') || operation === 'send' || operation === 'resume' || operation === 'stop'
+  return OPERATION_BUDGET[operation] === 'long'
 }
 
 /** 给定操作应当等待的毫秒数——两条路的唯一取值出口。 */

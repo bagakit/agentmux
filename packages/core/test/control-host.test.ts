@@ -486,6 +486,45 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
     for (const operation of ['inspect.tab', 'inspect.region', 'focus', 'arrange', 'list.agents'] as const) {
       expect(isLongAgentMuxControlOperation(operation), `${operation} 只读或只动本地状态，不该占长预算`).toBe(false)
     }
+    // interrupt 拿短预算是**判过**的：它只往 daemon 发一次信号（ctxmux-run-adapter.ts 的
+    // `interrupt()` 就一个 await），不像 stop 要等 attachRecoverableStop 真的收尾。
+    expect(isLongAgentMuxControlOperation('interrupt'), 'interrupt 只发一次信号，不该占长预算').toBe(false)
+  })
+
+  it('每个操作都被显式定过档——新加一个不许靠「不匹配」落进快的那档', () => {
+    // 此前的分档是个谓词（`startsWith('open.') || === 'send' || …`）。谓词只能表达「符合这形状的算慢」，
+    // 而**新操作不符合任何形状时会静默落进快档**：`interrupt` 加进联合类型时就没有任何东西提醒过
+    // 要给它定档，它只是不匹配。这条钉住联合里每个成员在源码里都被逐字提到过，于是加成员时
+    // Record 缺键让 tsc 报错，而不是等到用户看见一个 2 秒就超时的慢操作。
+    const controlSource = readFileSync(new URL('../src/control.ts', import.meta.url), 'utf8')
+    const table = /const OPERATION_BUDGET[\s\S]*?\n\}/.exec(controlSource)?.[0]
+    expect(table, 'control.ts 里找不到 OPERATION_BUDGET 那张表——分档又变回按形状推断了').toBeTruthy()
+
+    // 遍历源取 control-host 自己那份运行期清单（解析请求时校验用的 OPERATIONS），从源码里抽出来而不是
+    // 在这里手抄一份：手抄的那份只在「正好是缺陷所在」时才与真清单分岔，选错源会得出自信的反向结论
+    // （derivation-source-must-be-the-consumed-one）。顺带把「两份清单发散」也钉住了。
+    const runtimeList = /const OPERATIONS = \[([\s\S]*?)\] as const/.exec(hostSource)?.[1]
+    expect(runtimeList, 'control-host 里找不到 OPERATIONS 那份运行期清单').toBeTruthy()
+    const operations = [...runtimeList!.matchAll(/'([^']+)'/g)].map((match) => match[1]!)
+    // 自检：真抽到了成员，否则下面的循环跑零次、恒绿。
+    expect(operations.length, 'OPERATIONS 抽取器一个成员都没抽到，下面那个循环是死代码').toBeGreaterThanOrEqual(12)
+
+    for (const operation of operations) {
+      expect(
+        new RegExp(`(^|[^\\w.'"])'?${operation.replace('.', '\\.')}'?\\s*:`, 'm').test(table!),
+        `OPERATION_BUDGET 里没有 \`${operation}\` 这一行——它会靠「不匹配」拿到某一档，而不是被判过`
+      ).toBe(true)
+    }
+    // 自检：判据认得出缺行，否则上面那个循环恒真。
+    const missing = "const OPERATION_BUDGET = {\n  'inspect.tab': 'short',\n  stop: 'long'\n}"
+    expect(
+      /(^|[^\w.'"])'?send'?\s*:/m.test(missing),
+      '判据认不出「表里没有 send 这一行」，那个循环是死代码'
+    ).toBe(false)
+    // 自检：两档都真的在表里出现过——整张表写成同一档时，取值那条断言才是唯一防线，
+    // 这里先保证表本身没退化成单档。
+    expect(table).toContain("'long'")
+    expect(table).toContain("'short'")
   })
 
   it('control-host 从 control.ts 取预算，不再自己算一遍', () => {
@@ -502,28 +541,38 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
       '判据认不出正常的导入写法'
     ).toBe(true)
 
-    // 导入了还必须真被用上：只导入不调用等于没接（本仓 noUnusedLocals 未开，tsc 不会拦）。
-    expect(
-      hostSource.includes('agentMuxControlTimeoutMs(request.operation)'),
-      '导入了却没在 setTimeout 的延时位置调用它'
-    ).toBe(true)
-
     // 「哪些操作算慢」也不许在这里重写一遍（本文件曾有个 longOperation() 就是那份副本）。
     // 判据不是「某个禁止形状不在场」——那种判法拦不住换个拼法，也会误伤本文件大量按操作解析请求的
-    // `source.operation === 'send'` 派发。这里改成直接质询**每一处 setTimeout 的延时位取的是什么**：
-    // 逐个抽出来，只允许是 core 那两个导出之一。谁想自己算一遍，那个表达式就会出现在这张名单上。
+    // `source.operation === 'send'` 派发。这里逐个抽出每一处 setTimeout 的延时位，**分站点**质询。
+    //
+    // 为什么必须分站点：此前这里是一张两个名字的白名单，对所有站点一视同仁，于是
+    // `AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS` 在**每一处**都合法。把 :480 与 :508 那两处按操作重排的
+    // 延时换成那个短常量，长操作全部退化成 2 秒（`amux open.agent` 起一个 Agent 必然超时），
+    // 而这一族 14/14 全绿——我实测过两次，都存活。短常量只在读到请求之前那一处才是对的。
     const delays = [...hostSource.matchAll(/\.setTimeout\(\s*([A-Za-z_$][\w$.]*(?:\([^()]*\))?)/g)]
       .map((match) => match[1]!)
-    const ALLOWED = new Set([
-      // 还没读到请求时只能按短预算等第一条消息（下面读出来再按操作重排）。
-      'AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS',
-      'agentMuxControlTimeoutMs(request.operation)'
-    ])
-    for (const delay of delays) {
-      expect(ALLOWED.has(delay), `setTimeout 的延时位写着 \`${delay}\`，不是从 control.ts 那一处取的`).toBe(true)
-    }
-    // 自检：抽取器真的找到了那些调用点，否则上面那个循环跑零次、恒绿。
-    expect(delays.length, 'setTimeout 延时位抽取器一个都没找到，上面那条守卫是死代码').toBeGreaterThanOrEqual(3)
+    const PER_OPERATION = 'agentMuxControlTimeoutMs(request.operation)'
+    const PRE_PARSE = 'AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS'
+
+    // 恰好一处可以用短常量：还没读到请求，不知道是哪个操作，只能按短预算等第一条消息。
+    expect(
+      delays.filter((delay) => delay === PRE_PARSE),
+      `用短常量当延时的 setTimeout 应当恰好一处（读到请求之前那一处）；实际：${delays.join(' | ')}`
+    ).toHaveLength(1)
+    // 其余每一处都必须按操作取值。少一处就有一条路把长操作按 2 秒等。
+    const perOperation = delays.filter((delay) => delay === PER_OPERATION)
+    expect(
+      perOperation.length,
+      `按操作取预算的 setTimeout 少于两处（读到请求后重排、以及客户端侧发起）；实际：${delays.join(' | ')}`
+    ).toBeGreaterThanOrEqual(2)
+    // 且没有第三种写法——谁想自己算一遍，那个表达式会落在这里。
+    expect(
+      delays.filter((delay) => delay !== PRE_PARSE && delay !== PER_OPERATION),
+      '有 setTimeout 的延时位既不是那一处短常量、也不是按操作取值'
+    ).toEqual([])
+
+    // 自检：抽取器真的找到了那些调用点，否则上面几条按数量判的会恒真。
+    expect(delays.length, 'setTimeout 延时位抽取器一个都没找到，上面那几条守卫是死代码').toBeGreaterThanOrEqual(3)
     // 自检：抽取器认得出「自己算一遍」的那种拼法。
     const historical = `socket.setTimeout(longOperation(request.operation) ? LONG : SHORT, () => socket.destroy())`
     const probed = [...historical.matchAll(/\.setTimeout\(\s*([A-Za-z_$][\w$.]*(?:\([^()]*\))?)/g)].map((m) => m[1]!)
