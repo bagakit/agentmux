@@ -5,8 +5,10 @@ import { join } from 'node:path'
 import { LocalExecutionHost, type ExecutionHost } from '@agentmux/core'
 import type { AppConfig } from '../src/shared/contracts.js'
 import {
+  classifyRetention,
   parseGitBranches,
   parseGitWorktreePorcelain,
+  WorktreeRetainedError,
   WorktreeService
 } from '../src/main/worktree-service.js'
 
@@ -692,6 +694,63 @@ describe('WorktreeService', () => {
     expect((await stat(worktreePath)).isDirectory()).toBe(true)
     expect(save).not.toHaveBeenCalled()
     expect(fixtureConfig.workspaces.some((item) => item.id === 'lane')).toBe(true)
+  }, 20000)
+
+  it('区分「git 拒了」与「git 删掉了、记录没撤下」：后者目录已经不在，没有东西可丢弃', async () => {
+    // 这两档此前都只叫 `retained`，于是三个消费者各自靠上下文猜原因，而其中一个猜法结构上不可能对：
+    // `save` 排在 git 之后，它失败时目录**已经被删了**，而记录还指着那个路径。把这一档当脏树处理，
+    // 就会给用户弹一个「Discard uncommitted work?」，按下去是去删一个不存在的目录。
+    //
+    // 用真 git 而不是 mock：判据的关键一半是「目录真的不在了」，那是 git 的事实，不是替身的说法。
+    const { worktreePath, executionHost, config: fixtureConfig } = await buildLocalWorktreeFixture()
+    const save = vi.fn(async () => {
+      throw new Error('config volume went read-only')
+    })
+    const service = new WorktreeService(() => executionHost, { save })
+
+    const error = await service
+      .removeWorktree({ workspaceId: 'lane' }, fixtureConfig)
+      .then(() => null)
+      .catch((thrown: unknown) => thrown)
+
+    // 分类在失败现场定，而不是留给 catch 去猜：catch 看到的只有一个 Error，而两档的区别是
+    // 「目录还在不在」——那件事只有这里知道。
+    expect(error).toBeInstanceOf(WorktreeRetainedError)
+    expect((error as WorktreeRetainedError).retention).toBe('record-not-withdrawn')
+    // 原话要带出来，用户唯一有用的下一步在里面（只读卷？权限？）。
+    expect((error as WorktreeRetainedError).message).toContain('config volume went read-only')
+    // 判据的另一半：git 真的删掉了。所以这一档说「还留着」是假话。
+    await expect(stat(worktreePath)).rejects.toMatchObject({ code: 'ENOENT' })
+    // 而脏树那一档 git 根本没跑到，两档在同一个维度上取值相反——这就是它们必须分开的理由。
+    expect(classifyRetention(error).retention).not.toBe('uncommitted-changes')
+  }, 20000)
+
+  it('git 自己失败时归到 git-failed：没有东西被删掉，也没有东西可丢弃', async () => {
+    // 与上一条成对。这一档的事实是「目录还在、记录还在」，唯一有用的话是 git 的原话。
+    const { worktreePath, executionHost, config: fixtureConfig } = await buildLocalWorktreeFixture()
+    const save = vi.fn(async (value: AppConfig) => value)
+    const service = new WorktreeService(() => executionHost, { save })
+    // 记录指向一个 git 不认识的路径：`worktree remove` 会失败，而失败发生在 save 之前。
+    const broken: AppConfig = {
+      ...fixtureConfig,
+      workspaces: fixtureConfig.workspaces.map((item) =>
+        item.id === 'lane' ? { ...item, path: join(worktreePath, 'not-a-worktree') } : item
+      )
+    }
+
+    const error = await service
+      .removeWorktree({ workspaceId: 'lane', discardChanges: true }, broken)
+      .then(() => null)
+      .catch((thrown: unknown) => thrown)
+
+    expect(error).not.toBeNull()
+    // 服务层不给它挂分类：git 失败是**默认**那一档，由共用的分类器兜。三个消费者各写一份 fallback
+    // 就是它们当初判得不一样的形状。
+    expect(error).not.toBeInstanceOf(WorktreeRetainedError)
+    expect(classifyRetention(error).retention).toBe('git-failed')
+    // 什么都没删：目录还在，记录也还在。
+    expect((await stat(worktreePath)).isDirectory()).toBe(true)
+    expect(save).not.toHaveBeenCalled()
   }, 20000)
 
   it('removes a dirty worktree when changes are explicitly discarded', async () => {

@@ -76,7 +76,7 @@ import { RuntimeController } from './runtime-controller.js'
 import { ScratchTopics } from './scratch-topics.js'
 import { saveRuntimeConfig } from './runtime-config-transaction.js'
 import { WorkspaceFiles } from './workspace-files.js'
-import { WorktreeService } from './worktree-service.js'
+import { classifyRetention, WorktreeService } from './worktree-service.js'
 import { runFanOutRequest } from './fanout-request.js'
 import { rebindLocalFolder } from './workspace-rebind.js'
 import { GitService } from './git-service.js'
@@ -268,7 +268,10 @@ export async function registerIpc(args: {
       config = removal.config
       return { status: 'removed', removedPath: removal.removedPath, config: removal.config }
     } catch (error) {
-      return { status: 'retained', reason: error instanceof Error ? error.message : String(error) }
+      // `classifyRetention` rather than a local re-derivation: the renderer decides what to offer from
+      // `retention` (discard is only a real next step for `uncommitted-changes`), and computing that
+      // classification twice is how the two removal paths came to disagree about the same failure.
+      return { status: 'retained', ...classifyRetention(error) }
     }
   })
   // One fan-out. The orchestration lives in `fanout-request` so it is reachable from a test: this

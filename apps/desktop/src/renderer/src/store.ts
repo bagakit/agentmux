@@ -52,6 +52,7 @@ import type { OpenDestination, OpenHttpLinkOrigin } from './lib/open-destination
 import { createNoteWithAvailableName } from './lib/note-names'
 import { rendererResourceOwnerCounts } from './lib/resource-owner-counts'
 import { terminalResourceOwnerCounts } from './lib/terminal-resource-owners'
+import { retainedLaneNotices } from './lib/worktree-removal-request'
 import {
   arrangeWorkbenchControlTab,
   inspectWorkbenchControlRegion,
@@ -1963,14 +1964,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // 落到胜者身上。落到胜者而不是通用兜底，是因为「留下这一个」这句话本身就说明了该看哪儿。
       set((state) => adoptedConfig(state.activeWorkspaceId, next, input.keepWorkspaceId))
       // A lane refused because it still holds uncommitted work is reported, never silently dropped —
-      // losing a bake-off is not a reason to discard someone's work.
-      const retained = result.outcomes.filter((outcome) => outcome.status === 'retained')
-      if (retained.length > 0) {
-        get().reportError(new Error(
-          `${retained.length} worktree(s) kept because they still hold changes: ${retained
-            .map((outcome) => outcome.reason)
-            .join('; ')}`
-        ))
+      // losing a bake-off is not a reason to discard someone's work. 分档措辞在
+      // `retainedLaneNotices` 里，因为「哪一档说哪句话」是判断：这里曾经把三档折成一句硬编码的
+      // 「because they still hold changes」，对 git 失败与「已删但记录没撤下」两档都是假话。
+      for (const notice of retainedLaneNotices(result.outcomes)) {
+        get().reportError(new Error(notice.message))
       }
       return result
     } catch (error) {

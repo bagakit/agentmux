@@ -5,21 +5,50 @@ import { gitFailureError, GIT_NONINTERACTIVE_ENV, isNotAGitRepositoryStderr } fr
 import type {
   AppConfig,
   CreateWorktreeForBranchInput,
+  FanOutTeardownResult,
   WorkspaceBranchesSnapshot,
   WorkspaceRecord,
-  WorkspaceSelectionResult
+  WorkspaceSelectionResult,
+  WorktreeRetention
 } from '../shared/contracts.js'
 
 type ConfigWriter = {
   save(value: AppConfig): Promise<AppConfig>
 }
 
-/** One loser's fate in a keep-the-winner teardown. */
-export type FanOutTeardownOutcome =
-  | { status: 'removed'; workspaceId: string; removedPath: string }
-  // Still on disk and still registered: a dirty worktree the protection refused, or a git failure. The
-  // `reason` is git's own words, so the user knows what to review before discarding it explicitly.
-  | { status: 'retained'; workspaceId: string; reason: string }
+/**
+ * A removal that stopped, carrying which of the three world-states it stopped in.
+ *
+ * Why the classification is thrown rather than inferred by the catch: only the code that was standing at
+ * the failure knows whether git had already deleted the directory. A `catch` sees one `Error` and cannot
+ * tell "git refused" from "git succeeded and then the record write failed" — those differ by whether the
+ * directory still exists, and guessing wrong tells the user to go review work that is already gone. The
+ * previous shape had exactly one catch assigning one hardcoded meaning to all of them.
+ */
+export class WorktreeRetainedError extends Error {
+  constructor(readonly retention: WorktreeRetention, message: string) {
+    super(message)
+    this.name = 'WorktreeRetainedError'
+  }
+}
+
+/**
+ * Classify a caught teardown failure.
+ *
+ * Anything that is not an explicit {@link WorktreeRetainedError} is `git-failed`: an unforeseen throw
+ * leaves the directory in place (the record write is the only step that runs after git, and it raises the
+ * explicit error), so `git-failed` is the conservative answer — it promises the user nothing was
+ * discarded and offers no discard button, which is safe to say about an unknown failure.
+ */
+export function classifyRetention(error: unknown): { retention: WorktreeRetention; reason: string } {
+  if (error instanceof WorktreeRetainedError) {
+    return { retention: error.retention, reason: error.message }
+  }
+  return { retention: 'git-failed', reason: error instanceof Error ? error.message : String(error) }
+}
+
+/** One loser's fate in a keep-the-winner teardown. Shares the renderer's vocabulary, never a second one. */
+export type FanOutTeardownOutcome = FanOutTeardownResult
 
 export type KeepOneOfFanOutResult = {
   config: AppConfig
@@ -225,7 +254,8 @@ export class WorktreeService {
       )
       this.assertGit(status, 'Could not inspect the worktree for uncommitted changes')
       if (status.stdout.trim() !== '') {
-        throw new Error(
+        throw new WorktreeRetainedError(
+          'uncommitted-changes',
           `Worktree has uncommitted changes: ${workspace.name}. Review them, or remove it explicitly discarding the changes.`
         )
       }
@@ -249,10 +279,26 @@ export class WorktreeService {
 
     // Withdrawn only after git confirmed: a record removed ahead of a failed removal would strand a
     // real directory with nothing pointing at it.
-    const nextConfig = await this.configWriter.save({
-      ...config,
-      workspaces: config.workspaces.filter((item) => item.id !== workspace.id)
-    })
+    //
+    // Past this line the directory is GONE, so a failure here is not the same event as a failure above it.
+    // The record still names a path that no longer exists, and removing again cannot fix it: the status
+    // probe runs inside the vanished directory and fails, so every retry now reports a git failure. That
+    // is why this is its own classification instead of being folded into the caller's catch — a consumer
+    // told "retained" without it will offer to discard work that is already deleted.
+    let nextConfig: AppConfig
+    try {
+      nextConfig = await this.configWriter.save({
+        ...config,
+        workspaces: config.workspaces.filter((item) => item.id !== workspace.id)
+      })
+    } catch (error) {
+      throw new WorktreeRetainedError(
+        'record-not-withdrawn',
+        `Removed the worktree at ${workspace.path}, but could not update the workspace list: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      )
+    }
     return { config: nextConfig, removedPath: workspace.path }
   }
 
@@ -267,10 +313,11 @@ export class WorktreeService {
    * lane a person did not pick is the one outcome this must never produce.
    *
    * One loser that cannot be cleaned up never strands the others that can — the clean lanes are removed
-   * and the retained ones are reported, mirroring how a fan-out's launch failures never stop its
-   * successes. Whether to throw a retained lane away is a per-lane, explicit choice made through
-   * `removeWorktree({ discardChanges: true })`; this batch has no blanket "discard every dirty loser"
-   * switch, because that is exactly the data-loss lever the protection exists to remove.
+   * and the retained ones are reported with which of the three retention states they are in, mirroring how
+   * a fan-out's launch failures never stop its successes. Whether to throw a retained lane away is a
+   * per-lane, explicit choice made through `removeWorktree({ discardChanges: true })`; this batch has no
+   * blanket "discard every dirty loser" switch, because that is exactly the data-loss lever the protection
+   * exists to remove.
    */
   async keepOneOfFanOut(
     input: { keepWorkspaceId: string; removeWorkspaceIds: readonly string[] },
@@ -291,14 +338,13 @@ export class WorktreeService {
         current = removal.config
         outcomes.push({ status: 'removed', workspaceId, removedPath: removal.removedPath })
       } catch (error) {
-        // Retained means still on disk: `removeWorktree` withdraws the record only after git confirms, so
-        // a refusal (a dirty worktree) or a git failure both leave the directory intact. Record why and
-        // move on — the point of a bake-off is not undone by one lane that would lose work if forced.
-        outcomes.push({
-          status: 'retained',
-          workspaceId,
-          reason: error instanceof Error ? error.message : String(error)
-        })
+        // `retained` says the removal did not complete; `retention` says how far it got, because only the
+        // failing step knows. Two of the three leave the lane's directory intact (the protection refused,
+        // or git failed) and are safe to describe as "still there to review". The third — git removed it
+        // and the record write failed — does not, so it must not be reported as if it did: this used to
+        // be one hardcoded sentence for all of them, and the batch banner told the user the lane still
+        // held changes while its directory was already gone.
+        outcomes.push({ status: 'retained', workspaceId, ...classifyRetention(error) })
       }
     }
     return { config: current, keptWorkspaceId: kept.id, outcomes }

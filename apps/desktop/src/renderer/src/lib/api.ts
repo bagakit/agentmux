@@ -373,8 +373,12 @@ const mockApi: AgentMuxDesktopApi = {
     },
     // 预览环境没有 git，无法真的移除 worktree。`retained` 正是「还在盘上」的那个答案，所以说实话
     // 就够了，不需要第三种词汇：假装 removed 会让界面把一条还在的记录从列表里划掉。
+    //
+    // `git-failed` 而不是 `uncommitted-changes`：这里没有脏树，是根本没有 git。那一档会把用户带到
+    // 「要不要丢弃未提交的产出？」对话框，而这里没有任何产出可丢——多点一次只会再失败一次。
     removeWorktree: async () => ({
       status: 'retained',
+      retention: 'git-failed',
       reason: 'Removing a worktree needs the desktop app.'
     }),
     // The web preview has no git and no processes, so a fan-out cannot be simulated honestly. Refusing

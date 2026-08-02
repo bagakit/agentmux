@@ -4,9 +4,11 @@ import { describe, expect, it } from 'vitest'
 import {
   nextAfterWorktreeRemoval,
   worktreeRemovalEffect,
+  retainedLaneNotices,
   worktreeRemovalPrompt,
   type WorktreeRemovalRequest
 } from '../src/renderer/src/lib/worktree-removal-request.js'
+import type { WorktreeRetention } from '../src/shared/contracts.js'
 
 /**
  * 单条 worktree 移除（#335）。后端的 `removeWorktree` 早就在场，但此前只被批量收尾调用，界面上
@@ -31,6 +33,31 @@ const MENU = new URL('../src/renderer/src/components/BranchContextMenu.tsx', imp
 /** git 的原话在测试里用一个不可能与我们自己措辞撞车的哨兵，这样「原样带出」和「实词无交集」能分开判。 */
 const REASON = 'ZZREASONZZ'
 
+/**
+ * 「已经问过 git、被拒了」那一档，写在一处。
+ *
+ * `retention` 是必填的，且默认给脏树那一档：只有它才有第二个问题可问（见
+ * `nextAfterWorktreeRemoval`）。此前这些 fixture 只带一个 `reason`，于是三种保留原因在这一族测试里
+ * 完全同形——而当时的实现也确实把它们同等对待，把 git 失败和「已删但记录没撤下」都弹成
+ * 「Discard uncommitted work?」。fixture 的形状曾经就是那个缺陷的形状。
+ */
+function blockedStage(reason = REASON) {
+  return { kind: 'blocked', retention: 'uncommitted-changes', reason } as const
+}
+
+/**
+ * 三档保留的全集，写在测试自己这边。
+ *
+ * 刻意手抄而不是从实现导出一张表：从被测对象派生期望值，映射改窄时期望值跟着漂移，判据恒真
+ * （本仓栽过的坑）。加第四档时这里会红——那正是要它红的时候，因为「新那档归哪边」是一次判断。
+ */
+const RETENTIONS = ['uncommitted-changes', 'git-failed', 'record-not-withdrawn'] as const
+
+/** 一次「被留下」的结果。`retention` 必填，因为下一步完全由它决定。 */
+function retained(retention: WorktreeRetention, reason = REASON) {
+  return { status: 'retained', retention, reason } as const
+}
+
 function request(overrides: Partial<WorktreeRemovalRequest> = {}): WorktreeRemovalRequest {
   return {
     workspaceId: 'ws-7',
@@ -50,7 +77,7 @@ function request(overrides: Partial<WorktreeRemovalRequest> = {}): WorktreeRemov
  */
 const STOP_WORDS = new Set([
   'a', 'an', 'and', 'at', 'be', 'is', 'it', 'its', 'itself', 'of', 'on', 'or',
-  'that', 'the', 'this', 'to', 'with', 'you', 'your'
+  'that', 'the', 'this', 'to', 'was', 'were', 'with', 'you', 'your'
 ])
 
 function contentWords(text: string): Set<string> {
@@ -66,7 +93,7 @@ function contentWords(text: string): Set<string> {
 describe('worktree 移除的两次确认', () => {
   it('两段正文的实词无交集：第二次问的是另一件事，不是同一句话再来一遍', () => {
     const confirm = worktreeRemovalPrompt(request())
-    const blocked = worktreeRemovalPrompt(request({ stage: { kind: 'blocked', reason: REASON } }))
+    const blocked = worktreeRemovalPrompt(request({ stage: blockedStage() }))
 
     // 分支名与 git 原话都是**外来数据**，不是我们撰写的措辞，比较前剔掉；留着它们会让判据取决于
     // 分支叫什么，而那不是这条守卫想说的事。
@@ -99,7 +126,7 @@ describe('worktree 移除的两次确认', () => {
   })
 
   it('被拒时把 git 的原话原样带出，不压平成我们自己的说法', () => {
-    const blocked = worktreeRemovalPrompt(request({ stage: { kind: 'blocked', reason: REASON } }))
+    const blocked = worktreeRemovalPrompt(request({ stage: blockedStage() }))
     // 用户需要的正是 git 那句话里的细节：哪个文件、暂存了还是未跟踪。换成「有未提交的改动」会把
     // 「先去看看」这条唯一有用的下一步抹掉。
     expect(blocked.description).toContain(REASON)
@@ -107,7 +134,7 @@ describe('worktree 移除的两次确认', () => {
 
   it('只有已经看过 git 理由的那一档才带 discardChanges，且措辞恰好点名它', () => {
     const confirm = worktreeRemovalPrompt(request())
-    const blocked = worktreeRemovalPrompt(request({ stage: { kind: 'blocked', reason: REASON } }))
+    const blocked = worktreeRemovalPrompt(request({ stage: blockedStage() }))
 
     expect(confirm.discardChanges, '第一次确认就带丢弃 = 脏树保护形同不存在').toBe(false)
     expect(blocked.discardChanges).toBe(true)
@@ -125,7 +152,7 @@ describe('worktree 移除的两次确认', () => {
     const path = '/tmp/repo-lane-3'
     expect(worktreeRemovalPrompt(request()).subject).toBe(path)
     expect(
-      worktreeRemovalPrompt(request({ stage: { kind: 'blocked', reason: REASON } })).subject
+      worktreeRemovalPrompt(request({ stage: blockedStage() })).subject
     ).toBe(path)
   })
 })
@@ -134,7 +161,7 @@ describe('一次移除尝试之后往哪走', () => {
   it('git 确认删掉了就是结束，与当前在哪一档无关', () => {
     for (const stage of [
       { kind: 'confirm' } as const,
-      { kind: 'blocked', reason: REASON } as const
+      blockedStage()
     ]) {
       expect(
         nextAfterWorktreeRemoval(request({ stage }), {
@@ -147,10 +174,10 @@ describe('一次移除尝试之后往哪走', () => {
   })
 
   it('第一次被拒不是错误，而是带着 git 的理由重问', () => {
-    const next = nextAfterWorktreeRemoval(request(), { status: 'retained', reason: REASON })
+    const next = nextAfterWorktreeRemoval(request(), retained('uncommitted-changes'))
     expect(next.kind).toBe('ask')
     if (next.kind !== 'ask') return
-    expect(next.request.stage).toEqual({ kind: 'blocked', reason: REASON })
+    expect(next.request.stage).toEqual(blockedStage())
     // 重问的必须还是**同一个** worktree。把身份丢在这一步上，第二次点确认就会删到别的东西。
     expect(next.request.workspaceId).toBe('ws-7')
     expect(next.request.path).toBe('/tmp/repo-lane-3')
@@ -158,13 +185,175 @@ describe('一次移除尝试之后往哪走', () => {
   })
 
   it('已经选了丢弃还被拒，就是真失败——不能再问一次', () => {
-    const next = nextAfterWorktreeRemoval(request({ stage: { kind: 'blocked', reason: 'first' } }), {
-      status: 'retained',
-      reason: 'second'
+    const next = nextAfterWorktreeRemoval(request({ stage: blockedStage('first') }), {
+      ...retained('uncommitted-changes', 'second')
     })
     // 此时拒绝的原因一定不是脏树（用户已经授权丢弃了），而是权限/占用之类的真失败。继续 ask 会让
     // 用户在同一个对话框里无限点「Discard and Remove」，屏幕上什么也不变。
     expect(next).toEqual({ kind: 'failed', reason: 'second' })
+  })
+
+  /**
+   * 只有脏树那一档能问出第二个问题。
+   *
+   * 三档保留此前在这一族里完全同形（fixture 只带一个 `reason`），而实现也确实把它们同等对待：
+   * git 挂了、以及「已删但记录没撤下」，都会被推进到 `blocked` 阶段弹一个「Discard uncommitted
+   * work?」。前者按下去只是再失败一次；**后者按下去更糟**——目录已经不在了，那次点击是去删一个不
+   * 存在的路径，然后把「记录撤不下来」误报成一次 git 失败。
+   *
+   * 判据分成两条，因为它们能各自漂移：一条钉「哪些进 ask」，一条钉「哪些不进」。只写前者时把
+   * `!== 'uncommitted-changes'` 那道闸删掉仍然全绿。
+   */
+  it('非脏树的保留不再问第二个问题，直接如实收场', () => {
+    for (const retention of ['git-failed', 'record-not-withdrawn'] as const) {
+      const next = nextAfterWorktreeRemoval(request(), retained(retention))
+      expect(
+        next,
+        `${retention} 被推进到了「丢弃未提交产出？」那一屏，而这一档根本没有那个问题可问`
+      ).toEqual({ kind: 'failed', reason: REASON })
+    }
+  })
+
+  it('三档保留恰好一档能进 ask：加第四档时它必须自己回答归哪边', () => {
+    // 上一条逐档抄一遍就够松——把脏树那档也改成 failed，上面两条照旧全绿，而那时脏树保护就再也
+    // 问不出「要丢弃吗」了。这条钉的是那个形状本身。
+    const asked = RETENTIONS.filter(
+      (retention) => nextAfterWorktreeRemoval(request(), retained(retention)).kind === 'ask'
+    )
+    expect(asked, '能问出第二个问题的不是恰好「脏树」这一档').toEqual(['uncommitted-changes'])
+  })
+
+  it('推进到 blocked 时把分类一起带过去，第二屏不再自己猜一遍', () => {
+    // 分类是服务层在失败现场定的。第二屏若自己按 `reason` 的措辞猜，git 换句话就静默失效。
+    const next = nextAfterWorktreeRemoval(request(), retained('uncommitted-changes'))
+    expect(next.kind).toBe('ask')
+    if (next.kind !== 'ask') return
+    expect(next.request.stage.kind).toBe('blocked')
+    if (next.request.stage.kind !== 'blocked') return
+    expect(next.request.stage.retention).toBe('uncommitted-changes')
+  })
+
+  it('丢弃对话框对非脏树响亮拒绝，而不是悄悄换套文案', () => {
+    // 如果哪天路由回归了，问题在路由上。此时弹一个「丢弃产出？」的框比抛出来危险得多：
+    // `record-not-withdrawn` 那档目录已经不在，按下去等于去删一个不存在的路径。
+    for (const retention of ['git-failed', 'record-not-withdrawn'] as const) {
+      expect(
+        () => worktreeRemovalPrompt(request({ stage: { kind: 'blocked', retention, reason: REASON } })),
+        `${retention} 悄悄拿到了一屏丢弃确认`
+      ).toThrow(/only valid for uncommitted work/)
+    }
+    // 自检：脏树那一档必须仍然拿得到那一屏，否则上面两条是靠「谁来都抛」通过的。
+    expect(() => worktreeRemovalPrompt(request({ stage: blockedStage() }))).not.toThrow()
+  })
+})
+
+/**
+ * 批量收尾之后那条横幅说的话。
+ *
+ * store 那一版把三档折成一句硬编码的「kept because they still hold changes」，对另外两档都是假话：
+ * git 挂掉那档没有改动可言，而记录没撤下那档**目录已经被删了**，让用户去「review before discarding」
+ * 是把他送去找一份不存在的产出。
+ *
+ * 判据分成三层，因为它们各自能漂移：措辞逐档点名（不是「三句都不一样」）、实词无交集（近似措辞会
+ * 吃掉分类）、以及映射表的键必须是全集（加第四档时不许静默落到某一句上）。
+ */
+describe('批量收尾的分档告知', () => {
+  const laneOf = (retention: WorktreeRetention, workspaceId: string, reason = REASON) => ({
+    status: 'retained' as const,
+    workspaceId,
+    retention,
+    reason
+  })
+
+  it('三档同时出现时各说自己那句话，不共用一条横幅', () => {
+    const notices = retainedLaneNotices([
+      { status: 'removed', workspaceId: 'ws-gone', removedPath: '/tmp/gone' },
+      laneOf('git-failed', 'ws-b'),
+      laneOf('uncommitted-changes', 'ws-a'),
+      laneOf('record-not-withdrawn', 'ws-c')
+    ])
+
+    // 顺序写死在实现里（由「用户可以处理」到「需要有人来看一眼」），而不是跟着到达次序——「先说
+    // 哪句」也是判断。这里的 fixture 刻意按乱序喂进去，所以这条断言同时钉住了那个决定。
+    expect(notices.map((notice) => notice.retention)).toEqual([
+      'uncommitted-changes',
+      'git-failed',
+      'record-not-withdrawn'
+    ])
+    expect(notices.map((notice) => notice.workspaceIds)).toEqual([['ws-a'], ['ws-b'], ['ws-c']])
+    // `removed` 的 lane 不该出现在任何一条里：它没有任何事情要用户做。
+    expect(notices.some((notice) => notice.workspaceIds.includes('ws-gone'))).toBe(false)
+  })
+
+  it('每一档的措辞恰好点名自己那一档收着的东西', () => {
+    // 两个方向各一条。只守「每档都被点名」时，把映射改窄（比如三档共用脏树那句）仍然全绿——而那
+    // 正是 store 里的原状。
+    const message = (retention: WorktreeRetention) =>
+      retainedLaneNotices([laneOf(retention, 'ws-1')])[0]!.message
+
+    expect(message('uncommitted-changes')).toMatch(/uncommitted/i)
+    // 这一档唯一不许说「kept」「remain」：两个词都在暗示目录还在，而它已经被删了。用户读到「kept」
+    // 会去那个目录找产出。
+    const gone = message('record-not-withdrawn')
+    expect(gone).toMatch(/deleted/i)
+    expect(gone.toLowerCase(), '「已删」那一档说了 kept/remain：用户会去找一个不存在的目录').not.toMatch(
+      /\bkept\b|\bremain/
+    )
+    // git 失败那档：目录还在，但没有「未提交的改动」这回事。
+    const gitFailed = message('git-failed')
+    expect(gitFailed).toMatch(/Git/)
+    expect(
+      gitFailed.toLowerCase(),
+      'git 失败被说成有未提交的改动：用户会去 review 一份根本不存在的产出'
+    ).not.toContain('uncommitted')
+  })
+
+  it('三句话两两之间实词无交集：不是同一句话换个说法', () => {
+    // `not.toBe` 在「kept because they hold work」对「kept because Git said no」上照旧通过，而那两句
+    // 读起来是同一件事。判据落在实词集合上。
+    const authored = (retention: WorktreeRetention) => {
+      const words = contentWords(retainedLaneNotices([laneOf(retention, 'ws-1')])[0]!.message)
+      // 计数、外来数据、以及每句都必然出现的领域词剔掉——留着它们会让交集恒不为空，判据变成恒假。
+      for (const foreign of [...contentWords(REASON), ...contentWords('1 worktree s')]) {
+        words.delete(foreign)
+      }
+      return words
+    }
+
+    for (const [left, right] of [
+      ['uncommitted-changes', 'git-failed'],
+      ['uncommitted-changes', 'record-not-withdrawn'],
+      ['git-failed', 'record-not-withdrawn']
+    ] as const) {
+      const leftWords = authored(left)
+      const rightWords = authored(right)
+      // 自检：过滤后两侧都得剩下实词，否则交集为空是因为没东西可比。
+      expect(leftWords.size, `${left} 过滤后没剩下实词——判据恒真`).toBeGreaterThanOrEqual(2)
+      expect(rightWords.size, `${right} 过滤后没剩下实词——判据恒真`).toBeGreaterThanOrEqual(2)
+      expect(
+        [...leftWords].filter((word) => rightWords.has(word)),
+        `${left} 与 ${right} 共用实词：用户分不出这两档要他做的事不一样`
+      ).toEqual([])
+    }
+  })
+
+  it('git 的原话原样带出，不压平成我们自己的说法', () => {
+    // 用户唯一有用的下一步全在那句话里（哪个文件、什么权限、只读卷）。
+    const notices = retainedLaneNotices([
+      laneOf('git-failed', 'ws-1', 'ZZFIRSTZZ'),
+      laneOf('git-failed', 'ws-2', 'ZZSECONDZZ')
+    ])
+    expect(notices).toHaveLength(1)
+    expect(notices[0]!.workspaceIds).toEqual(['ws-1', 'ws-2'])
+    // 两条都要带上：只带第一条时第二个 lane 的失败原因静默消失。
+    expect(notices[0]!.message).toContain('ZZFIRSTZZ')
+    expect(notices[0]!.message).toContain('ZZSECONDZZ')
+  })
+
+  it('没有保留的 lane 就不发横幅', () => {
+    expect(
+      retainedLaneNotices([{ status: 'removed', workspaceId: 'ws-1', removedPath: '/tmp/x' }])
+    ).toEqual([])
   })
 })
 
@@ -200,7 +389,7 @@ describe('三种走向落到屏幕上是什么样', () => {
   })
 
   it('重问：对话框换成下一档的请求，不报错，且**不**重扫', () => {
-    const asked = request({ stage: { kind: 'blocked', reason: REASON } })
+    const asked = request({ stage: blockedStage() })
     const effect = effectOf({ kind: 'ask', request: asked })
     // 对话框接下来显示的必须是那个推进过的请求本身——换成原请求，用户就永远读不到 git 的理由。
     expect(effect.removal).toBe(asked)
@@ -226,7 +415,7 @@ describe('三种走向落到屏幕上是什么样', () => {
     // 「我算重扫的那一条吗」，而不是默默跟着某一档。
     const all = [
       effectOf({ kind: 'done' }),
-      effectOf({ kind: 'ask', request: request({ stage: { kind: 'blocked', reason: REASON } }) }),
+      effectOf({ kind: 'ask', request: request({ stage: blockedStage() }) }),
       effectOf({ kind: 'failed', reason: REASON })
     ]
     expect(all.filter((effect) => effect.rescan).length, '重扫的走向不是恰好一条').toBe(1)
