@@ -485,9 +485,12 @@ export function TerminalView({
       readGrid: () => ({ cols: terminal.cols, rows: terminal.rows }),
       resize: async ({ cols, rows }) => {
         // 进程已死时不向 PTY 发 resize（effect 不再随 processState 重挂，
-        // ResizeObserver 仍可能在 exit 后触发）。
-        if (!canControlRunRef.current || attachmentId === null) return
+        // ResizeObserver 仍可能在 exit 后触发）。返回 false 而不是静默 resolve：
+        // 这次几何没到 PTY，synchronizer 不许把它记成 PTY 的当前尺寸，否则恢复运行后
+        // 同一几何被相同-key 短路吞掉，网格永久停在退出前（见 viewport-sync 的 resize 合同）。
+        if (!canControlRunRef.current || attachmentId === null) return false
         await api.sessions.resize(attachmentId, cols, rows)
+        return true
       },
       requestFrame: (callback) => requestAnimationFrame(callback),
       cancelFrame: (frameId) => cancelAnimationFrame(frameId),
