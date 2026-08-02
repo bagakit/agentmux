@@ -16,6 +16,7 @@ import { diagnoseAgentMux } from './doctor.js'
 import { AgentMuxError } from './errors.js'
 import { connectLocalAgentMux } from './runtime-client.js'
 import { OrderedSessionOutputFollow } from './session-output-follow.js'
+import { isWorkbenchLayoutPreset } from './workbench-layout-preset.js'
 
 const VERSION = '0.1.0'
 const CLI_REQUEST_ID = randomUUID()
@@ -238,14 +239,14 @@ async function arrangeCommand(args: readonly string[]): Promise<number> {
   ]
   if (selections.length !== 1) throw cliError('arrange requires exactly one of --preset, --balance, --active-first.')
   const preset = flags.values.get('--preset')
-  if (preset && !['columns-3', 'grid-4', 'grid-6', 'grid-9'].includes(preset)) throw cliError('Arrange preset is invalid.')
+  if (preset !== undefined && !isWorkbenchLayoutPreset(preset)) throw cliError('Arrange preset is invalid.')
   const owner = callerForSelf(tab)
   const receipt = await requestAgentMuxControl({
     ...requestBase(),
     operation: 'arrange',
     target: tab === 'self' ? { kind: 'self' } : { kind: 'tab', tabId: explicitSelectorId(tab, 'Tab id') },
-    mode: preset
-      ? { kind: 'preset', preset: preset as 'columns-3' | 'grid-4' | 'grid-6' | 'grid-9' }
+    mode: preset !== undefined
+      ? { kind: 'preset', preset }
       : flags.booleans.has('--balance') ? { kind: 'balance' } : { kind: 'active-first' },
     ...(owner ? { caller: owner } : {})
   })
