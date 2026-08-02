@@ -32,7 +32,12 @@ import { ConfirmationDialog } from './ConfirmationDialog'
 import { NewTabSurface } from './NewTabSurface'
 import { PaneSplitMenu } from './PaneSplitMenu'
 import { RegionContextMenu } from './RegionContextMenu'
-import { REGION_CLASS, regionFocusExpression, type RegionFocusExpression } from '../lib/region-focus'
+import {
+  REGION_CLASS,
+  paneGroupFocusClass,
+  regionFocusExpression,
+  type RegionFocusExpression
+} from '../lib/region-focus'
 import { activeTopicIdFromLayout, layoutForActiveTopic } from '../lib/scratch-topic-layout'
 import { SessionPane } from './SessionPane'
 import { WorkbenchTabContextMenu } from './WorkbenchTabContextMenu'
@@ -42,6 +47,7 @@ import { resolvePaneColumnEdgeZone } from '../lib/tab-drop-zone'
 import { SplitRatioCommitter } from '../lib/split-ratio-commit'
 import { moveSessionViewMenu, tabIdsForCloseScope, workbenchSplitMenuEntries } from '../lib/workbench-tab-actions'
 import { SurfaceSwitch, TopRowLeadingChrome } from './TopRowChrome'
+import { groupIds } from '../lib/workbench-layout'
 import type {
   SplitDirection,
   TabGroup,
@@ -600,7 +606,8 @@ function WorkbenchRegionLeaf({
   // 焦点是**一次**判定，两个消费者：CSS 类名（画环）与原生视图的让位量（browser 那格要按环宽内缩，
   // 否则窗口级层把环的三边物理盖掉）。见 region-focus.ts——分开各算一次时未聚焦的 browser 区
   // 也内缩，露出底下深色成了一圈无环的黑边。
-  const focus = regionFocusExpression(tab.layout.activeRegionId, node.regionId)
+  // 候选数一起喂进去：只有一格时环不表达任何选择，画出来就是整个界面镶一圈绿边。
+  const focus = regionFocusExpression(tab.layout.activeRegionId, node.regionId, regionCount)
   const canClose = regionCount > 1
   const dirty = surface?.kind === 'file' && Boolean(
     dirtyDocuments[documentKey(surface.workspaceId, surface.path)]
@@ -800,6 +807,17 @@ function PaneGroup({
     tabsById[id] ? [tabsById[id]] : []
   ))
   const activeTab = tabs.find((tab) => tab.id === group.activeTabId) ?? null
+  // Pane 组的焦点环同样只在「有得选」时才有内容：不分屏时唯一那组铺满整个工作区且恒等于
+  // activeGroupId，画出来就是整个界面镶一圈绿边（用户原话：「整个界面也有」）。
+  //
+  // 候选数取分屏树里的叶子数，不取 `layout.groups.length`：那张表里可以躺着**不在树里**的分组
+  // （#312 的浮层形态），而它们不经这里渲染、屏幕上不是候选。数错了这个数就等于按一个看不见的
+  // 东西决定看得见的环。
+  const paneGroupFocus = paneGroupFocusClass(
+    layout.activeGroupId,
+    group.id,
+    groupIds(layout.root).length
+  )
   const activeSurface = activeTab ? activeWorkbenchSurface(activeTab) : null
   const activeRuntimeSession =
     activeSurface?.kind === 'agent' || activeSurface?.kind === 'terminal'
@@ -826,7 +844,7 @@ function PaneGroup({
   return (
     <section
       ref={setNodeRef}
-      className={`pane-group ${isRootLeaf ? 'pane-group--root' : ''} ${layout?.activeGroupId === group.id ? 'pane-group--focused' : ''} ${
+      className={`pane-group ${isRootLeaf ? 'pane-group--root' : ''} ${paneGroupFocus} ${
         isOver ? 'pane-group--drop-over' : ''
       }`}
       data-pane-group-id={group.id}
