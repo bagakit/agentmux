@@ -35,6 +35,46 @@ export function scrubGitCredentials(text: string): string {
 }
 
 /**
+ * The message a failed shell-out becomes: git's own words, with any credential scrubbed.
+ *
+ * Every caller wants the same three-step fallback (stderr, then stdout, then a written-out fallback),
+ * and every caller's text can reach a UI or a log. Keeping the chain here means the scrub cannot be
+ * forgotten by whoever adds the fourth caller — the alternative, three hand-written copies each
+ * remembering to wrap themselves, is the exact shape that produced the leak described on
+ * `gitFailureError`.
+ */
+export function gitFailureMessage(
+  result: { stdout: string; stderr: string },
+  fallback: string
+): string {
+  return scrubGitCredentials(result.stderr.trim() || result.stdout.trim() || fallback)
+}
+
+/**
+ * The single way a failed `git` invocation becomes an `Error`.
+ *
+ * Why this is one function and not a method on each service: the two services that shell out to git
+ * had byte-identical private `assertGit` bodies **except** that only one of them ran the message
+ * through `scrubGitCredentials`. Same concept, two implementations, and the divergence was exactly
+ * on the safety half — the worktree side threw raw stderr, and that string is carried verbatim into
+ * `retained.reason`, then into the removal dialog's description and the logs. A remote written
+ * `https://$TOKEN@host/o/r` puts the token in stderr on any failure that echoes the URL, so the leak
+ * needed no unusual configuration, only a failure.
+ *
+ * Adding a third hand-written copy with the scrub bolted on would have left the same shape in place,
+ * so the message construction itself is the thing that got centralized: there is now nowhere to put
+ * a git failure into an Error that does not scrub. The guard on this is an import relation
+ * (who is allowed to build a git-failure message), not a search for the word "scrub" — a name check
+ * cannot tell a real call from a fresh inline copy.
+ */
+export function gitFailureError(
+  result: { exitCode: number; stdout: string; stderr: string },
+  fallback: string
+): Error {
+  return new Error(gitFailureMessage(result, fallback))
+}
+
+/**
  * Parse `git status --porcelain=v1 -z --branch --untracked-files=all` output.
  *
  * `-z` is the whole point: entries are separated by NUL, which disables git's C-quoting, so a path
@@ -106,6 +146,25 @@ function parseBranchHeader(header: string): string | null {
 // non-zero exit has a specific, benign meaning; every other non-zero exit is a real error to surface.
 const NOT_A_GIT_REPOSITORY = /^fatal: not a git repository \(or any of the parent directories\): .+\n?$/
 
+/**
+ * Is this stderr git's own "there is no repository here" sentence, and nothing else?
+ *
+ * Exported because two services ask this same question and each used to carry its own byte-identical
+ * copy of the pattern. The anchors and the `$` are the load-bearing part: an unanchored match would
+ * also accept a stderr that merely *mentions* the phrase alongside a real error, and the two callers
+ * then answer "not a repository" for a failure that is actually something else — the shape where a
+ * genuine error gets flattened into a benign classification.
+ *
+ * A predicate rather than the pattern itself, so the anchoring cannot be re-litigated at a call site
+ * (a caller holding the RegExp could `.test` a substring, or add `.source` to a wider pattern).
+ * The two callers legitimately do different things with the answer — one returns null immediately,
+ * the other also checks ancestry for a metadata file — so what is shared is the question, not the
+ * response.
+ */
+export function isNotAGitRepositoryStderr(stderr: string): boolean {
+  return NOT_A_GIT_REPOSITORY.test(stderr)
+}
+
 // Non-interactive, non-localized environment for every git invocation.
 // - LC_ALL/LANG=C: porcelain output is parsed by structure and known phrases, so a translated git
 //   would break the parser. The locale lock keeps the bytes predictable.
@@ -114,7 +173,15 @@ const NOT_A_GIT_REPOSITORY = /^fatal: not a git repository \(or any of the paren
 // - GIT_SSH_COMMAND BatchMode: the same no-hang guarantee for any transport that reaches ssh. Local
 //   status/stage/commit never touch ssh; the baseline is set here so remote verbs added later inherit
 //   it instead of each rediscovering the hang.
-const GIT_NONINTERACTIVE_ENV = {
+//
+// Exported because the no-hang guarantee is a property of *every* git invocation in the main process,
+// not of this file. The worktree service used to carry its own two-key `{LC_ALL, LANG}` copy on two of
+// its five calls: the locale half was duplicated, the anti-hang half was simply absent, and its
+// mutating verbs (`worktree add`/`remove`) — the ones that can block longest — had no env at all. What
+// is shared is the environment, not the clock: timeouts legitimately differ per verb (a network fetch
+// is not a `rev-parse`), so each site still chooses its own `timeoutMs`/`maxOutputBytes` and spreads
+// this in.
+export const GIT_NONINTERACTIVE_ENV = {
   LC_ALL: 'C',
   LANG: 'C',
   GIT_TERMINAL_PROMPT: '0',
@@ -608,7 +675,7 @@ export class GitService {
    */
   private async resolveRepoPath(host: ExecutionHost, path: string): Promise<string | null> {
     const result = await host.run('git', ['-C', path, 'rev-parse', '--show-toplevel'], GIT_RUN_OPTIONS)
-    if (result.exitCode !== 0 && NOT_A_GIT_REPOSITORY.test(result.stderr)) return null
+    if (result.exitCode !== 0 && isNotAGitRepositoryStderr(result.stderr)) return null
     this.assertGit(result, 'Workspace is not a Git repository')
     const repoPath = result.stdout.trim()
     if (!repoPath) throw new Error('Git returned an empty repository path')
@@ -619,8 +686,6 @@ export class GitService {
     result: { exitCode: number; stdout: string; stderr: string },
     fallback: string
   ): void {
-    if (result.exitCode !== 0) {
-      throw new Error(scrubGitCredentials(result.stderr.trim() || result.stdout.trim() || fallback))
-    }
+    if (result.exitCode !== 0) throw gitFailureError(result, fallback)
   }
 }

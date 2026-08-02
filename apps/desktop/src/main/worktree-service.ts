@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { posix } from 'node:path'
 import type { ExecutionHost } from '@agentmux/core'
+import { gitFailureError, GIT_NONINTERACTIVE_ENV, isNotAGitRepositoryStderr } from './git-service.js'
 import type {
   AppConfig,
   CreateWorktreeForBranchInput,
@@ -29,12 +30,31 @@ export type KeepOneOfFanOutResult = {
 type GitWorktree = { path: string; branch: string | null }
 type GitBranchesSnapshot = Extract<WorkspaceBranchesSnapshot, { kind: 'git-repository' }>
 
-const NOT_A_GIT_REPOSITORY = /^fatal: not a git repository \(or any of the parent directories\): .+\n?$/
+// Every git invocation in this service shares the main process's non-interactive environment (see
+// `GIT_NONINTERACTIVE_ENV`): an unattended `worktree add` against a repository whose remote wants a
+// password must fail fast, not sit forever on a credential prompt no one can answer. Only the clocks
+// and output ceilings differ, by verb.
+//
+// Discovery: `rev-parse`/`status --porcelain` answer with a path or a short list.
 const GIT_DISCOVERY_OPTIONS = {
-  env: { LC_ALL: 'C', LANG: 'C' },
+  env: GIT_NONINTERACTIVE_ENV,
   timeoutMs: 20_000,
   maxOutputBytes: 256 * 1024
 } as const
+// Enumeration: a repository with thousands of branches or worktrees legitimately produces far more.
+const GIT_ENUMERATION_OPTIONS = {
+  env: GIT_NONINTERACTIVE_ENV,
+  timeoutMs: 20_000,
+  maxOutputBytes: 2 * 1024 * 1024
+} as const
+// Mutation: `worktree add` checks out a tree and `worktree remove` deletes one, both of which touch the
+// filesystem proportionally to the repository's size, so they get the longer clock.
+const GIT_MUTATION_OPTIONS = {
+  env: GIT_NONINTERACTIVE_ENV,
+  timeoutMs: 60_000,
+  maxOutputBytes: 2 * 1024 * 1024
+} as const
+// Not a git invocation: this runs `test -e`, so it deliberately carries no git environment.
 const METADATA_PROBE_OPTIONS = { timeoutMs: 20_000, maxOutputBytes: 256 * 1024 } as const
 
 export function parseGitWorktreePorcelain(output: string): GitWorktree[] {
@@ -71,14 +91,10 @@ export class WorktreeService {
       return { kind: 'not-a-git-repository', hostId: workspace.hostId, workspacePath: workspace.path }
     }
     const [branchesResult, worktreesResult] = await Promise.all([
-      host.run('git', ['-C', repoPath, 'for-each-ref', '--format=%(refname:short)', 'refs/heads'], {
-        timeoutMs: 20_000,
-        maxOutputBytes: 2 * 1024 * 1024
-      }),
-      host.run('git', ['-C', repoPath, 'worktree', 'list', '--porcelain', '-z'], {
-        timeoutMs: 20_000,
-        maxOutputBytes: 2 * 1024 * 1024
-      })
+      host.run('git', ['-C', repoPath, 'for-each-ref', '--format=%(refname:short)', 'refs/heads'],
+        GIT_ENUMERATION_OPTIONS),
+      host.run('git', ['-C', repoPath, 'worktree', 'list', '--porcelain', '-z'],
+        GIT_ENUMERATION_OPTIONS)
     ])
     this.assertGit(branchesResult, 'Could not list Git branches')
     this.assertGit(worktreesResult, 'Could not list Git worktrees')
@@ -162,7 +178,7 @@ export class WorktreeService {
         // so the check above is the readable error rather than the only guard.
         ? ['-C', snapshot.repoPath, 'worktree', 'add', '-b', branchName, '--', path, 'HEAD']
         : ['-C', snapshot.repoPath, 'worktree', 'add', '--', path, branchName],
-      { timeoutMs: 60_000, maxOutputBytes: 2 * 1024 * 1024 }
+      GIT_MUTATION_OPTIONS
     )
     // Registration only happens after git succeeded, so a failed create never leaves a workspace record
     // pointing at a directory that does not exist.
@@ -220,7 +236,7 @@ export class WorktreeService {
       input.discardChanges
         ? ['-C', workspace.repoPath, 'worktree', 'remove', '--force', '--', workspace.path]
         : ['-C', workspace.repoPath, 'worktree', 'remove', '--', workspace.path],
-      { timeoutMs: 60_000, maxOutputBytes: 2 * 1024 * 1024 }
+      GIT_MUTATION_OPTIONS
     )
     this.assertGit(removal, 'Git worktree removal failed')
 
@@ -302,7 +318,7 @@ export class WorktreeService {
     )
     if (
       result.exitCode !== 0 &&
-      NOT_A_GIT_REPOSITORY.test(result.stderr) &&
+      isNotAGitRepositoryStderr(result.stderr) &&
       !await this.hasGitMetadataInAncestry(host, path)
     ) return null
     this.assertGit(result, 'Workspace is not a Git repository')
@@ -336,9 +352,10 @@ export class WorktreeService {
     result: { exitCode: number; stdout: string; stderr: string },
     fallback: string
   ): void {
-    if (result.exitCode !== 0) {
-      throw new Error(result.stderr.trim() || result.stdout.trim() || fallback)
-    }
+    // Shared with the branches service on purpose: this message reaches the user (it becomes
+    // `retained.reason`, then the removal dialog's description) and it is built from git's stderr,
+    // which can contain the remote URL's userinfo. See `gitFailureError`.
+    if (result.exitCode !== 0) throw gitFailureError(result, fallback)
   }
 
   private async register(config: AppConfig, workspace: WorkspaceRecord): Promise<WorkspaceSelectionResult> {

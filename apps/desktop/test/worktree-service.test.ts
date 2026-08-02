@@ -19,6 +19,26 @@ const config: AppConfig = {
   browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
 }
 
+/**
+ * The non-interactive environment every git invocation in this service must carry, written out as a
+ * literal rather than imported from `git-service.js`.
+ *
+ * Importing the constant would make this expectation move with the thing it is checking: strip a key
+ * from the shared bundle and both sides change together, so the assertion stays green. Spelled out
+ * here, it is an outside anchor — and it is checking a real property, not a formality. Two of the
+ * assertions below used to pin the shapes this service actually had: `rev-parse` carried a private
+ * two-key `{LC_ALL, LANG}` copy (the locale half duplicated, the anti-hang half absent), and
+ * `worktree add` carried *no env at all*. An unattended `worktree add` against a repository whose
+ * remote wants a password would sit forever on a prompt no one can answer, and that missing env was
+ * written into this file as a requirement.
+ */
+const NONINTERACTIVE_ENV = {
+  LC_ALL: 'C',
+  LANG: 'C',
+  GIT_TERMINAL_PROMPT: '0',
+  GIT_SSH_COMMAND: 'ssh -o BatchMode=yes'
+}
+
 const temporaryRoots: string[] = []
 
 afterEach(async () => {
@@ -116,7 +136,7 @@ describe('WorktreeService', () => {
       'git',
       ['-C', '/srv/plain-folder', 'rev-parse', '--show-toplevel'],
       {
-        env: { LC_ALL: 'C', LANG: 'C' },
+        env: NONINTERACTIVE_ENV,
         timeoutMs: 20_000,
         maxOutputBytes: 256 * 1024
       }
@@ -254,7 +274,10 @@ describe('WorktreeService', () => {
     expect(executionHost.run).toHaveBeenCalledWith(
       'git',
       ['-C', '/srv/repo', 'worktree', 'add', '--', '/srv/worktrees/free', 'feature/free'],
-      { timeoutMs: 60_000, maxOutputBytes: 2 * 1024 * 1024 }
+      // `worktree add` used to carry no env at all. It checks out a tree, so it runs whatever smudge
+      // filters and hooks the repository configures — an LFS smudge reaches the remote and can prompt
+      // for credentials — and it holds the index lock while it does. Blocking here is the worst case.
+      { env: NONINTERACTIVE_ENV, timeoutMs: 60_000, maxOutputBytes: 2 * 1024 * 1024 }
     )
     expect(selection.workspace).toMatchObject({ path: '/srv/worktrees/free', branch: 'feature/free' })
     expect(save).toHaveBeenCalledOnce()
