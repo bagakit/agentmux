@@ -39,15 +39,25 @@
 .selector-list__actions { flex: 0 0 auto; display: flex; align-items: center; gap:1px; }
 .selector-list__actions .icon-button { width: 24px; height: 24px; }
 
-.selector-row__leading { display: inline-flex; align-items: center; justify-content: center; }
-.selector-row__identity { min-width: 0; display: flex; flex-direction: column; gap:0; }
+/* 行的布局归这一层，两个容器（Topic / Branch）不各写一份自己的轨道表。
+   为什么是 flex 而不是三列网格：`leading` 是**可选**的（Topic 行只在打开中才给 spinner），
+   而网格按轨道摆放——只来两个孩子时尾部的头像簇被自动摆进 identity 那条轨道，直接压在
+   摘要文字上。实测 `auto minmax(0,1fr) auto` 在无 spinner 的 Topic 行算出 `116px 0px 0px`，
+   簇左缘越过摘要右缘 64px（用户："agent icon 和文字叠起来了"）。Branch 行同病，只是它
+   总给 leading，靠"恰好三个孩子"躲过——不是靠布局正确，所以窄到 260px 仍然叠 26px。
+   flex 下缺席的孩子既不占位也不产生 gap：尾部按内容定宽、identity 吃掉剩余宽度，
+   于是簇的右缘对齐的是行、与本行摘要多长无关——这正是 `__meta` 那条注释承诺的性质。 */
+.selector-row { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap:var(--sp-3); }
+.selector-row__leading { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; }
+.selector-row__identity { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap:0; }
 .selector-row__identity strong,
 .selector-row__identity small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .selector-row__identity strong { color: var(--text); font-size: var(--fs-meta); }
 .selector-row__identity small { color: var(--text-3); font-size: var(--fs-micro); }
-/* 尾列贴住行的右缘。它是网格里的独立一列，不是 identity 里的浮动块——所以它对齐的是行，
-   与本行摘要有多长无关。 */
-.selector-row__meta { min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap:var(--sp-2); }
+/* 尾部贴住行的右缘。它是行里独立的一段，不是 identity 里的浮动块——所以它对齐的是行，
+   与本行摘要有多长无关。这条性质由 `.selector-row` 那层的 flex 兑现（见上），不靠容器
+   各自的轨道表：此前两个容器各写一份三列网格，而本行只有两段时簇会被摆进文字那一列。 */
+.selector-row__meta { flex: 0 0 auto; min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap:var(--sp-2); }
 
 /* 一摞头像，像会议里的参与者列。 */
 .selector-presence { flex: 0 0 auto; display: flex; align-items: center; }

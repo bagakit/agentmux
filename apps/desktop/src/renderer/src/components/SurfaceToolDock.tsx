@@ -571,7 +571,10 @@ function WorkspaceTopicsPanel({
                       subtitle={topic.summary || topic.directoryPath}
                       /* 每个 Agent 一枚头像：身份看图标、状态看边框，一枚方块答完两件事。
                          这里不给 `N agents` 计数——头像逐个在场，计数是把同一事实说第二遍。
-                         簇是网格里的尾列，因此右缘对齐的是行，与本行摘要多长无关。 */
+                         簇是行里独立的一段（`.selector-row__meta`），右缘对齐的是行，与本行摘要
+                         多长无关——这条性质由共享层的 flex 兑现，不靠本容器的轨道表。此前这里
+                         写的是"网格里的尾列"，而 `leading` 可空：只来两段时簇被摆进摘要那一列，
+                         直接压在文字上（#467）。 */
                       presence={
                         <SelectorPresence
                           agents={topic.agents.map((agent) => {
