@@ -105,14 +105,17 @@ describe('workbenchRegionPresetMenu', () => {
   it('点下去发的就是那一项的 preset，不是别的一项', () => {
     // 与 moveSessionViewMenu 同一道理：清单与动作出自同一个返回值。把 onSelect 接到
     // 一个固定 preset 上（菜单画 4 项、点哪项都摆同一个布局）能过前面每一条，只有这里能抓到。
+    //
+    // 发出去的是引擎那个三档 union 里的 preset 档，不是裸档名：#486 之前 store 的签名只收裸
+    // preset，于是均分／当前格优先根本表达不出来。这里连 `kind` 一起钉住，那个签名一收窄就红。
     const spy = vi.fn()
     const menu = workbenchRegionPresetMenu({ regionCount: 1, arrange: spy })
     for (const item of menu.presets) menu.onSelect(item.preset)
-    expect(spy.mock.calls.map(([preset]) => preset)).toEqual([
-      'columns-3',
-      'grid-4',
-      'grid-6',
-      'grid-9'
+    expect(spy.mock.calls.map(([mode]) => mode)).toEqual([
+      { kind: 'preset', preset: 'columns-3' },
+      { kind: 'preset', preset: 'grid-4' },
+      { kind: 'preset', preset: 'grid-6' },
+      { kind: 'preset', preset: 'grid-9' }
     ])
   })
 })
