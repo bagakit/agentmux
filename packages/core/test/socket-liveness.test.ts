@@ -5,7 +5,6 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   SOCKET_LIVENESS_PROBE_MS,
-  SOCKET_PROBE_ABORT_CODE,
   probeSocketLiveness,
   socketLivenessFromErrorCode
 } from '../src/socket-liveness.js'
@@ -79,7 +78,9 @@ describe('socketLivenessFromErrorCode', () => {
   it('预算用完（超时）也是「探不准」', () => {
     // 这是爆炸半径最大的那条出口。超时走的正是这条清单——预算由 AbortSignal.timeout 落成一次
     // ABORT_ERR，所以「超时算不算死」和其余未知 errno 是同一个判定，而不是另一条自成一路的分支。
-    expect(socketLivenessFromErrorCode(SOCKET_PROBE_ABORT_CODE)).toBe('unknown')
+    // 这里钉的是 Node 那个 abort errno 字面量分类为 unknown；端到端「超时确实走到这条」由下面
+    // probeSocketLiveness 那个 describe 里 `AbortSignal.abort()` 对着活服务器的用例（:140 附近）守。
+    expect(socketLivenessFromErrorCode('ABORT_ERR')).toBe('unknown')
   })
 })
 

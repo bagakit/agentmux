@@ -26,7 +26,6 @@ import { DROID_HOOK_EVENTS } from '../src/providers/droid.js'
 import { GEMINI_HOOK_EVENTS } from '../src/providers/gemini.js'
 import { GROK_HOOK_EVENTS } from '../src/providers/grok.js'
 import { HERMES_HOOK_EVENTS } from '../src/providers/hermes.js'
-import { KIMI_HOOK_EVENTS } from '../src/providers/kimi.js'
 import { OPENCODE_HOOK_EVENTS } from '../src/providers/opencode.js'
 import { PI_HOOK_EVENTS } from '../src/providers/pi.js'
 import { USAGE_FINALIZATION_EVENTS } from '../src/agent-hook-command.js'
@@ -366,7 +365,6 @@ describe('Core Provider protocol', () => {
         gemini: GEMINI_HOOK_EVENTS,
         grok: GROK_HOOK_EVENTS,
         hermes: HERMES_HOOK_EVENTS,
-        kimi: KIMI_HOOK_EVENTS,
         opencode: OPENCODE_HOOK_EVENTS,
         pi: PI_HOOK_EVENTS
       }

@@ -6,8 +6,7 @@ import {
   splitLaunchPromptByDelivery
 } from '../../src/agent-provider.js'
 import { composeAgentLaunchPrompt } from '../../src/agent-outbound-message.js'
-import { KIMI_HOOK_EVENTS, KIMI_HOOKS } from '../../src/providers/kimi.js'
-import { canonicalHookLifecycleEvent } from '../../src/agent-hook-event.js'
+import { KIMI_HOOKS } from '../../src/providers/kimi.js'
 import { AgentMuxError } from '../../src/errors.js'
 import type { AgentSemanticState } from '../../src/types.js'
 
@@ -174,24 +173,6 @@ describe('Kimi provider', () => {
       // 这条是上面 unmanaged 声明的**行为**面：只断言字段相等，改成 explicit-managed 后
       // 字段断言会红，但「到底会不会去装」没人守。
       expect(resolveManagedHookPlan('kimi', '/tmp/agentmux-kimi', {})).toBeNull()
-    })
-  })
-
-  describe('事件名与 Claude 一族逐字同形，故复用既有方言', () => {
-    it('九个声明的事件名都能被 canonical 层认出来', () => {
-      // 若哪天有人把 KIMI_HOOK_EVENTS 写成 snake_case（照抄 grok 的拼法），这条会红。
-      const canonical = KIMI_HOOK_EVENTS.map((name) => [name, canonicalHookLifecycleEvent(name)])
-      expect(canonical).toEqual([
-        ['SessionStart', 'session-start'],
-        ['UserPromptSubmit', 'user-prompt-submit'],
-        ['PreToolUse', 'tool-use-start'],
-        ['PostToolUse', 'tool-use-end'],
-        ['PostToolUseFailure', 'tool-use-end'],
-        ['SubagentStart', 'subagent-start'],
-        ['SubagentStop', 'subagent-stop'],
-        ['Stop', 'turn-end'],
-        ['StopFailure', 'turn-end']
-      ])
     })
   })
 
