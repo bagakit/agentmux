@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
+import ts from 'typescript'
 import {
   TERMINAL_REVEAL_DEADLINE_MS,
   encodeTerminalBinaryInput,
@@ -251,7 +252,49 @@ describe('输入只有一个出口', () => {
     // 的断言守，源码文本只钉"确实经那个共享出口接上了"。
     expect(code, 'onData/onBinary 没经 subscribeTerminalInput 接到 sender')
       .toContain('subscribeTerminalInput(terminal, sendInput)')
-    expect(code, 'Shift+Enter 没接到 sender').toMatch(/sendInput\(shiftEnterInput\(/)
+    // 键那一路（Shift+Enter 换行）：判据是 `terminalKeyEventHandler({ … })` 那个选项对象里的
+    // `sendInput` **取的就是那个带闸的 sender 标识符本身**。
+    //
+    // 两次都判错过，记在这里：
+    //  - 原判据 `/sendInput\(shiftEnterInput\(/` 把字节编码的调用形状当接线证据。#360 把编码搬进
+    //    lib 之后那个形状不再出现，断言红了，而"键的字节经唯一带闸出口"一点没变——位置和调用
+    //    形状都不是判据。
+    //  - 改成"选项对象里有 sendInput 这个词"仍然不够：`sendInput: (data) => {}` 里也有那个词，
+    //    键路一个字节都送不出而 34 条全绿（实测存活）。取值手抄比调用手抄更隐蔽。
+    // 所以按 AST 判：属性值必须是标识符 `sendInput`（简写 `sendInput,` 或 `sendInput: sendInput`），
+    // 任何箭头函数、别的名字、别处的 write 都不算。送什么字节由 terminal-shortcuts.test.ts 真跑钉。
+    const source = ts.createSourceFile('TerminalView.tsx', terminalView, ts.ScriptTarget.Latest, true)
+    /** `terminalKeyEventHandler({...})` 里 sendInput 属性的值形状。 */
+    const keySendInputValues: string[] = []
+    let keyHandlerCalls = 0
+    const walk = (node: ts.Node): void => {
+      if (
+        ts.isCallExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === 'terminalKeyEventHandler'
+      ) {
+        keyHandlerCalls += 1
+        const options = node.arguments[0]
+        if (options && ts.isObjectLiteralExpression(options)) {
+          for (const property of options.properties) {
+            if (property.name?.getText() !== 'sendInput') continue
+            if (ts.isShorthandPropertyAssignment(property)) keySendInputValues.push('sendInput')
+            else if (ts.isPropertyAssignment(property)) keySendInputValues.push(property.initializer.getText())
+          }
+        }
+      }
+      ts.forEachChild(node, walk)
+    }
+    walk(source)
+    // 自检：真的找到了那次调用。找不到时下面按空数组判会恒绿。
+    expect(
+      keyHandlerCalls,
+      '组件里没有 terminalKeyEventHandler 调用——键判定被搬回组件里了，或者工厂改名'
+    ).toBeGreaterThan(0)
+    expect(
+      keySendInputValues,
+      'terminalKeyEventHandler 的 sendInput 取的不是那个带闸的 sender 标识符——键路的字节绕过了唯一出口'
+    ).toEqual(Array.from({ length: keyHandlerCalls }, () => 'sendInput'))
     // OSC 那一路：按**它自己那个选项对象**里有没有 sendInput 判，不按它在对象里排第几。
     // 此前这里写的是 `/sendInput\s*\n\s*\}\)/`——只有当 sendInput 恰好是最后一个属性时才匹配。
     // 后来那个入口多了一个 `writeClipboard`（OSC 52 往剪贴板写），sendInput 不再靠着 `})`，
