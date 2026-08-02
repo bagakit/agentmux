@@ -32,6 +32,7 @@ import {
   type BranchBindingFilter,
   type ProjectBoardColumn
 } from '../lib/project-board'
+import { boardRunCardAttributes } from '../lib/board-run-card'
 import { projectWorkspaces } from '../lib/workspace-projects'
 import { useAppStore } from '../store'
 import { BoardDiscussionCanvas } from './BoardDiscussionCanvas'
@@ -102,7 +103,7 @@ function RunCard({ session, onOpen }: { session: SessionSnapshot; onOpen: () => 
   return (
     <button
       type="button"
-      className={`board-run-card board-run-card--${session.status.state}`}
+      {...boardRunCardAttributes(session.status.state)}
       onClick={onOpen}
       aria-label={`Open ${session.label}`}
     >
