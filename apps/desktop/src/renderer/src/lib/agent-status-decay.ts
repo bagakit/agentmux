@@ -5,6 +5,7 @@ import { useEffect } from 'react'
 // 同 api.ts 用 '@agentmux/core/launch-option' 的理由。
 import {
   DECAYED_SEMANTIC_STATE,
+  agentDisplayState,
   msUntilSemanticStatusStale,
   semanticStatusStale
 } from '@agentmux/core/agent-status'
@@ -26,12 +27,14 @@ import { useAppStore } from '../store'
 /**
  * 陈旧的 `working` 归一到的显示态。
  *
- * core 的衰减落点是语义态 `unknown`（我们确实**不知道**它现在怎么样），renderer 一律把 `unknown` 归一
- * 为 `running`——进程还在、但此刻没有「在干活」的声明。这与 session-state 里 agent-status 的归一口径
- * （`unknown → running`）一致，不另起一套。
+ * core 的衰减落点是语义态 `unknown`（我们确实**不知道**它现在怎么样），归一为显示态走
+ * `agentDisplayState`——与 hook 落地、Core 事件进 store 那两条路**同一个函数**，不是同一个口径
+ * 各写一遍。此前这里写的是 `=== 'unknown' ? 'running' :` 手抄，注释声称"与 session-state 一致"，
+ * 而一致靠人读注释维持：tsc 只守住"你没漏掉 unknown"，守不住"你映射到了哪"
+ * （`unknown → 'done'` 类型合法且谎称干完了）。
  */
 const DECAYED_DISPLAY_STATE: SessionSnapshot['status']['state'] =
-  DECAYED_SEMANTIC_STATE === 'unknown' ? 'running' : DECAYED_SEMANTIC_STATE
+  agentDisplayState(DECAYED_SEMANTIC_STATE)
 
 /**
  * 把所有已经陈旧的 `working` Agent 降为中性态。
