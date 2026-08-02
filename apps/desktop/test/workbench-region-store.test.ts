@@ -248,3 +248,62 @@ describe('arrangeTabRegions', () => {
     expect(useAppStore.getState().tabs[tabId]).toBe(before)
   })
 })
+
+// ---------------------------------------------------------------------------
+// #471 换位的 GUI 入口。
+//
+// 布局代数（swapWorkbenchRegions）在 workbench-view-layout.test.ts 里钉着；这里钉的是 store 动作
+// 真的把它接上了：换对了两格、内容跟着 id 走、挂不上时（不匹配 / 与自己换 / 端点不在场）稳定不动。
+// ---------------------------------------------------------------------------
+describe('swapRegions', () => {
+  function twoRegionFixture(): { tabId: string; rootRegionId: string; addedRegionId: string } {
+    const tabId = 'view-swap'
+    const rootRegionId = initialWorkbenchRegionId(tabId)
+    useAppStore.setState({
+      tabs: {
+        [tabId]: createWorkbenchTab(tabId, {
+          regionId: rootRegionId,
+          kind: 'launcher',
+          workspaceId: 'workspace'
+        })
+      },
+      layouts: { workspace: createWorkspaceLayout('group-one', [tabId]) }
+    })
+    useAppStore.getState().splitRegion('workspace', tabId, rootRegionId, 'right')
+    const tab = useAppStore.getState().tabs[tabId]!
+    const addedRegionId = regionIds(tab.layout.root).find((id) => id !== rootRegionId)!
+    return { tabId, rootRegionId, addedRegionId }
+  }
+
+  it('把两格在既有布局里对调：顺序翻转，内容（regions 表）一字不动', () => {
+    const { tabId, rootRegionId, addedRegionId } = twoRegionFixture()
+    const before = useAppStore.getState().tabs[tabId]!
+    expect(regionIds(before.layout.root)).toEqual([rootRegionId, addedRegionId])
+
+    useAppStore.getState().swapRegions('workspace', tabId, rootRegionId, addedRegionId)
+
+    const after = useAppStore.getState().tabs[tabId]!
+    // 位置互换：读序反了过来。
+    expect(regionIds(after.layout.root)).toEqual([addedRegionId, rootRegionId])
+    // 内容没动：两格的 surface 都还在，键集合与换前逐一相等。
+    expect(new Set(Object.keys(after.regions))).toEqual(new Set([rootRegionId, addedRegionId]))
+    expect(after.regions[rootRegionId]).toBe(before.regions[rootRegionId])
+    expect(after.regions[addedRegionId]).toBe(before.regions[addedRegionId])
+  })
+
+  it('与自己换、或端点不在场时稳定不动（同一对象，避免无谓重渲染）', () => {
+    const { tabId, rootRegionId } = twoRegionFixture()
+    const before = useAppStore.getState().tabs[tabId]!
+    useAppStore.getState().swapRegions('workspace', tabId, rootRegionId, rootRegionId)
+    expect(useAppStore.getState().tabs[tabId], '与自己换却改了布局').toBe(before)
+    useAppStore.getState().swapRegions('workspace', tabId, rootRegionId, 'ghost')
+    expect(useAppStore.getState().tabs[tabId], '端点不在场却改了布局').toBe(before)
+  })
+
+  it('workspace 不匹配时什么都不做——不能跨项目换别人 Tab 的格', () => {
+    const { tabId, rootRegionId, addedRegionId } = twoRegionFixture()
+    const before = useAppStore.getState().tabs[tabId]!
+    useAppStore.getState().swapRegions('other-workspace', tabId, rootRegionId, addedRegionId)
+    expect(useAppStore.getState().tabs[tabId]).toBe(before)
+  })
+})

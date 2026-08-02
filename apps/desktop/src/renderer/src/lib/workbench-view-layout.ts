@@ -138,6 +138,36 @@ export function placeActiveWorkbenchRegionFirst(layout: WorkbenchViewLayout): Wo
   return { ...layout, root: replaceLeafOrder(layout.root, ordered.values()) }
 }
 
+/**
+ * 在既有布局里把两格的位置互换（#471）：树的骨架与每个 `ratio` 一字不动，只是两个 regionId 各自
+ * 占到对方原来的叶子上——内容跟着 id 走，用户看到两格的东西对调了位置，而分屏的比例、方向、层级
+ * 都保持原样。这是 `placeActiveWorkbenchRegionFirst` 那套「id 在固定骨架上重排」的一个两元置换特例，
+ * 复用同一个 `replaceLeafOrder`。
+ *
+ * 守卫落在**集合**上，不落在长度上——这是刻意的，且与 `placeActiveWorkbenchRegionFirst` 的长度检查
+ * 不同：那个调用方传的序列在 id 缺席时会短一截（filter 删不掉不存在的 id），长度检查够用；而这里传的
+ * 是两位置置换，长度天然与 current 相等，长度检查对它完全失效。若不校验成员，一个不在场的 id 会被
+ * `replaceLeafOrder` 里 `ids.next().value as string` 原样写进某个叶子（迭代器耗尽时它断言 undefined 是
+ * string），凭空造出一格、把真在场的一格换没。所以要求两个端点都在场：两个都在时，置换后的集合必然
+ * 与原集合逐一相等，写不进任何新 id。
+ *
+ * 同一个 id 与自己换、或任一端点不在场，都原样返回（`===` 稳定，避免无谓的重渲染）。
+ */
+export function swapWorkbenchRegions(
+  layout: WorkbenchViewLayout,
+  regionIdA: string,
+  regionIdB: string
+): WorkbenchViewLayout {
+  if (regionIdA === regionIdB) return layout
+  const current = regionIds(layout.root)
+  const present = new Set(current)
+  if (!present.has(regionIdA) || !present.has(regionIdB)) return layout
+  const swapped = current.map((id) =>
+    id === regionIdA ? regionIdB : id === regionIdB ? regionIdA : id
+  )
+  return { ...layout, root: replaceLeafOrder(layout.root, swapped.values()) }
+}
+
 export function workbenchRegionBounds(
   root: WorkbenchRegionLayoutNode
 ): Array<{ regionId: string; bounds: WorkbenchRegionBounds }> {

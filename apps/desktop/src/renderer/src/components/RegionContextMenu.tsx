@@ -1,8 +1,8 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
-import { Copy, Crosshair, Send } from 'lucide-react'
+import { Copy, Crosshair, Replace, Send } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { formatMessagingAddress, formatRegionAddress, formatSessionAddress } from '../lib/agent-address'
-import type { WorkbenchSplitMenuEntry } from '../lib/workbench-tab-actions'
+import type { RegionSwapMenuEntry, WorkbenchSplitMenuEntry } from '../lib/workbench-tab-actions'
 import { workbenchSplitMenuIcon, workbenchSplitMenuKey } from './workbench-split-menu-icons'
 
 /**
@@ -40,6 +40,12 @@ export type RegionMenuEntry =
    * 第二个条件可写，「这一节在不在」变成数据，断言得着。
    */
   | { kind: 'split'; entry: WorkbenchSplitMenuEntry }
+  /**
+   * 换位那一节的一条（#471）：把这一格与另一格在既有布局里对调位置。与分屏项同住这份 `entries`，
+   * 理由完全相同——若写成 JSX 里的 `{swapMenu.length ? (` 分支，`false &&` 能把整节抹掉而全绿。
+   * 它排在最末（换位是对布局的操作，比"交出这一格 / 拿地址"次要），且整节的在场由数据决定。
+   */
+  | { kind: 'swap'; entry: RegionSwapMenuEntry }
 
 export type RegionCopyModel = {
   regionAddress: RegionCopyAction
@@ -58,12 +64,14 @@ export function createRegionCopyModel({
   regionId,
   agentSessionId,
   writeClipboardText,
-  splitMenu
+  splitMenu,
+  swapMenu
 }: {
   regionId: string
   agentSessionId: string | null
   writeClipboardText(text: string): Promise<void>
   splitMenu?: readonly WorkbenchSplitMenuEntry[]
+  swapMenu?: readonly RegionSwapMenuEntry[]
 }): RegionCopyModel {
   const copy = async (text: string, label: RegionCopyAction['label']): Promise<void> => {
     try {
@@ -94,7 +102,7 @@ export function createRegionCopyModel({
         }
       : {})
   }
-  return { ...actions, entries: regionMenuEntries(actions, splitMenu ?? []) }
+  return { ...actions, entries: regionMenuEntries(actions, splitMenu ?? [], swapMenu ?? []) }
 }
 
 /**
@@ -118,7 +126,8 @@ export function createRegionCopyModel({
  */
 function regionMenuEntries(
   model: Omit<RegionCopyModel, 'entries'>,
-  splitMenu: readonly WorkbenchSplitMenuEntry[]
+  splitMenu: readonly WorkbenchSplitMenuEntry[],
+  swapMenu: readonly RegionSwapMenuEntry[]
 ): readonly RegionMenuEntry[] {
   const addresses: RegionMenuEntry[] = [
     { kind: 'action', action: model.regionAddress },
@@ -127,11 +136,14 @@ function regionMenuEntries(
   const head: RegionMenuEntry[] = model.handoff
     ? [{ kind: 'action', action: model.handoff }, { kind: 'separator' }, ...addresses]
     : addresses
-  if (splitMenu.length === 0) return head
+  const withSplit: RegionMenuEntry[] = splitMenu.length === 0
+    ? head
+    : [...head, { kind: 'separator' }, ...splitMenu.map((entry) => ({ kind: 'split' as const, entry }))]
+  if (swapMenu.length === 0) return withSplit
   return [
-    ...head,
+    ...withSplit,
     { kind: 'separator' },
-    ...splitMenu.map((entry) => ({ kind: 'split' as const, entry }))
+    ...swapMenu.map((entry) => ({ kind: 'swap' as const, entry }))
   ]
 }
 
@@ -152,7 +164,8 @@ export function RegionContextMenu({
   regionId,
   agentSessionId,
   writeClipboardText,
-  splitMenu
+  splitMenu,
+  swapMenu
 }: {
   children: ReactNode
   regionId: string
@@ -174,12 +187,19 @@ export function RegionContextMenu({
    * 由接线守卫按 **AST 表达式** 判（见 workbench-split-menu.test.tsx 的接线层）。
    */
   splitMenu: readonly WorkbenchSplitMenuEntry[]
+  /**
+   * 换位那一节（#471）。来自 `regionSwapMenuEntries`——列出这张 Tab 里除本格外的每一格作为换位目标。
+   * 与 `splitMenu` 同样**必填**（同一个理由：可选只买到把 tsc 关掉，全仓只有一个调用点）。只有一格
+   * 时它自然为 `[]`，那时整节以缺席表达而非画一组禁用的假按钮。
+   */
+  swapMenu: readonly RegionSwapMenuEntry[]
 }) {
   const model = createRegionCopyModel({
     regionId,
     agentSessionId,
     writeClipboardText,
-    splitMenu
+    splitMenu,
+    swapMenu
   })
   return (
     <ContextMenu.Root>
@@ -208,6 +228,18 @@ export function RegionContextMenu({
                   onSelect={entry.entry.onSelect}
                 >
                   <SplitIcon size={14} />
+                  <span>{entry.entry.label}</span>
+                </ContextMenu.Item>
+              )
+            }
+            if (entry.kind === 'swap') {
+              return (
+                <ContextMenu.Item
+                  key={`swap-${entry.entry.targetRegionId}`}
+                  className="tab-context-menu__item"
+                  onSelect={entry.entry.onSelect}
+                >
+                  <Replace size={14} />
                   <span>{entry.entry.label}</span>
                 </ContextMenu.Item>
               )
