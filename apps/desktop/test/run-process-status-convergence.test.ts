@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { RuntimeEvent, SessionSnapshot } from '../src/shared/contracts.js'
+import { runInterruptionFact } from '../src/shared/contracts.js'
 import { reduceRuntimeEvent } from '../src/renderer/src/lib/session-state.js'
 
 /**
@@ -140,6 +141,15 @@ describe('实时路径的进程状态投影', () => {
     expect(sessionAfterProcessEvent({ state: 'interrupted' })).not.toHaveProperty('interruptionReason')
   })
 
+  it('中断但理由是空串时也不落——空串不是「没说」的合法写法，daemon_restart 的判定会读到假值', () => {
+    // 上面那条喂的是 `undefined`（整个字段缺席）。把判据从真值收窄成 `interruptionReason !== undefined`
+    // 就能放行 `''`：字段在场、值是空串。那正是 runInterruptionFact 的注释点名要挡的东西——空串会把
+    // 「没说原因」伪装成「原因是空的」，也会让 SessionPane 的 `=== 'daemon_restart'` 判定读到一个假值。
+    // 只喂 `undefined` 的断言对这条盲，因为 `!== undefined` 恰好把 `undefined` 挡住、把 `''` 放行。
+    expect(sessionAfterProcessEvent({ state: 'interrupted', interruptionReason: '' }))
+      .not.toHaveProperty('interruptionReason')
+  })
+
   it('非中断状态不许带中断理由——那条事实只对「PTY 没了」有定义', () => {
     // 第三侧：条件里 `state === 'interrupted'` 那一半。少了这条，把判据放宽成「只看理由在不在」
     // 会让一个正常退出的 run 带上一条中断理由，而 SessionPane 会据此去自动重开终端。
@@ -167,5 +177,35 @@ describe('实时路径的进程状态投影', () => {
       evidence: { source: 'run-process', observedAt: 9, run: session.control.run }
     }))
     expect(next.sessions[0]).not.toHaveProperty('interruptionReason')
+  })
+})
+
+describe('runInterruptionFact 的取值判据本身', () => {
+  // 上面那族测的是「实时路径真的调了这个函数」。这一族直接质询函数本身，把它注释点名的两个条件
+  // 的三侧各钉一次——两处消费者（主进程快照 runtime-controller.ts、实时路径 session-state.ts）都从
+  // 这一个函数取这条事实，所以这里守住的是它们共同的取值口径。
+
+  it('中断且带了理由时原样取出', () => {
+    expect(runInterruptionFact({ state: 'interrupted', interruptionReason: 'daemon_restart' }))
+      .toEqual({ interruptionReason: 'daemon_restart' })
+  })
+
+  it('理由是空串时判据必须落成 {}，绝不落一个空的理由', () => {
+    // 注释逐字写着：理由缺席时不能落成空串——空串会把「没说原因」伪装成「原因是空的」，也会让
+    // daemon_restart 的判定读到假值。把真值判据放宽成 `interruptionReason !== undefined` 就会放行
+    // 这一条（字段在场、值是空串），于是返回 `{ interruptionReason: '' }`。toEqual({}) 认得出这个多写，
+    // 而单看「非中断态不带理由」/「缺席不伪造 undefined」两条对它都是盲的。
+    expect(runInterruptionFact({ state: 'interrupted', interruptionReason: '' })).toEqual({})
+  })
+
+  it('理由整个缺席时也落成 {}', () => {
+    expect(runInterruptionFact({ state: 'interrupted' })).toEqual({})
+  })
+
+  it('非中断态即使带着理由也不取——这条事实只对「PTY 没了」有定义', () => {
+    // `interrupted` 之外的另两个 run state 各钉一次：正常退出与运行中都不该把中断理由带出去，
+    // 否则 SessionPane 会据此去自动重开一个其实没被 daemon 打死的终端。
+    expect(runInterruptionFact({ state: 'exited', interruptionReason: 'daemon_restart' })).toEqual({})
+    expect(runInterruptionFact({ state: 'running', interruptionReason: 'daemon_restart' })).toEqual({})
   })
 })
