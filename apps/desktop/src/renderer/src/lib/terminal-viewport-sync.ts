@@ -63,6 +63,7 @@ export class TerminalViewportSynchronizer {
   private lastFittedPixels: TerminalViewportPixels | null = null
   private readonly suspendReasons = new Set<'interactive-resize' | 'hidden'>()
   private observedWhileSuspended = false
+  private awaitingFirstLiveFit = false
 
   constructor(private readonly options: TerminalViewportSynchronizerOptions) {}
 
@@ -132,14 +133,48 @@ export class TerminalViewportSynchronizer {
     })
   }
 
+  /**
+   * 起活并把这一格的几何交给 PTY。
+   *
+   * 这里额外承担一件事：**如果第一次 live fit 真的挪动了 grid，就补一次重绘。**
+   *
+   * 为什么：xterm 以 80×24 构造，而 replay 的字节在第一次 fit 之前就写进了解析器
+   * （调用方的顺序是「写 replay → 揭示 → 收尾同步」，而收尾里这个方法才是第一次确定性的
+   * fit）。所以一次「grid 变了」正好等价于「刚刚重放的那一屏是按错的宽度排的」。
+   *
+   * 而按错的宽度不会自己恢复：xterm 只对**有 scrollback 的正常缓冲区**重排
+   * （`_isReflowEnabled` 要求 `_hasScrollback`，见 @xterm/xterm 5.5.0 的 resize 路径），
+   * alt screen（Codex 的 diff 视图、vim、htop、lazygit 这类全屏 TUI）只做逐行补齐/截断。
+   * 字节是对的、几何是错的——这就是用户说的「重启后经常乱码」。
+   *
+   * 也不能指望 resize 顺手救回来：重启后 daemon 保留的 PTY 尺寸与窗口布局恢复出的尺寸
+   * 通常**相同**，同尺寸的 TIOCSWINSZ 不产生 SIGWINCH，TUI 因此永远收不到重画的理由。
+   * 用户放大缩小一下就好，是因为 zoom 真的改变了 CSS 像素与 cell 尺寸，于是既 fit 又发出
+   * 了一次真的尺寸变化。
+   *
+   * 所以判据只能是「这次 fit 挪了 grid」而不是「PTY 尺寸变了没有」——后者渲染层根本不知道
+   * （我们不持有 PTY 改动前的尺寸，`resize` 的返回值只说送到没送到）。重绘走与 gap 路径同一个
+   * `requestContentRedraw`：那一招本来就是「即使尺寸没变也强制 TUI 重画」，此前只接在 gap 一条路上。
+   *
+   * 判据实现在 `fitAndSynchronize` 里而不是这里：第一次 fit 可能什么都没做就退出（xterm 还没量出
+   * cell 尺寸时 `proposeGrid()` 返回 null），真正的 fit 要等下面 `observeViewport()` 排的那一帧。
+   * 判据若写在这里，就会在「还没 fit」的那一刻读到「没挪」，把真正会挪的那次漏掉。这里只负责
+   * 举旗，由第一次真的送到 PTY 的 live fit 摘旗。
+   *
+   * 代价说清楚：全新起的终端（不是重启恢复）第一次 fit 同样从 80×24 挪到真尺寸，于是也会多做一对
+   * resize。那一对在这里是多余的（新 PTY 的第一次 TIOCSWINSZ 本身就是真变化，SIGWINCH 会发出去），
+   * 但渲染层分不出这两种情形，而漏掉重启那一路的代价是用户看见乱码。所以取宽的那一侧。
+   */
   async startLiveSynchronization(): Promise<void> {
     if (this.disposed || this.live) return
     this.live = true
     this.lastRequestedGrid = null
+    this.awaitingFirstLiveFit = true
     try {
       await this.fitAndSynchronize()
     } catch (error) {
       this.live = false
+      this.awaitingFirstLiveFit = false
       throw error
     } finally {
       // Font metrics and pane layout may settle after the attach continuation.
@@ -186,6 +221,7 @@ export class TerminalViewportSynchronizer {
     this.previousProposedGrid = null
     this.pendingResize = null
     this.observedWhileSuspended = false
+    this.awaitingFirstLiveFit = false
   }
 
   private async continueStableFit(): Promise<void> {
@@ -243,9 +279,24 @@ export class TerminalViewportSynchronizer {
 
     const size = this.options.readGrid()
     if (!isUsableGrid(size)) return
+    // 非 live 的 fit 不摘旗：旗子等的是「第一次真的把几何送到 PTY 的 fit」。
     if (!this.live) return
 
     await this.requestResize(size)
+
+    if (!this.awaitingFirstLiveFit) return
+    this.awaitingFirstLiveFit = false
+    // 挪了 grid ⇒ 刚重放的那一屏是按错的宽度排的，而 alt screen 不会自行重排；同尺寸的
+    // TIOCSWINSZ 也不产生 SIGWINCH，所以 TUI 永远收不到重画的理由。详见
+    // startLiveSynchronization 的说明。`current` 是 fit 之前读到的那一格。
+    if (gridKey(size) === gridKey(current)) return
+    try {
+      await this.requestContentRedraw()
+    } catch {
+      // 重绘失败不许连坐 live 同步——几何已经送到 PTY 了，缺的只是让 TUI 重画一次。
+      // 而且这个失败不是静默的：排空队列在抛之前已经走过 `onResizeError`，
+      // `requestContentRedraw` 自己的 catch 也已经把几何重新交回稳定尺寸的所有者。
+    }
   }
 
   private async requestResize(size: TerminalGridSize): Promise<void> {
