@@ -29,6 +29,8 @@ export type WorkbenchShortcutCommand =
   | { kind: 'split'; direction: SplitDirection }
   /** 把焦点移到 `direction` 方向上相邻的那一格 Region。 */
   | { kind: 'focus-region'; direction: SplitDirection }
+  /** 把当前焦点格与 `direction` 方向上相邻的那一格互换位置。 */
+  | { kind: 'swap-region'; direction: SplitDirection }
 
 /**
  * 这个和弦是否落在「非终端的可编辑控件」里——Agent composer 的文本框、Tab 内联重命名框这类原生输入。
@@ -48,6 +50,21 @@ export function isEditableChordTarget(target: {
 }
 
 /**
+ * 方向命令的两族——`focus-region.<dir>` 与 `swap-region.<dir>`——由同一条正则翻译。
+ *
+ * 刻意不写成八行 `if (id === …)`：这两族的方向集合必须**恒等**。它们答的是同一个问题的两半（「走到左边那格」
+ * 与「把这一格搬到左边」），方向由同一个 `regionInDirection` 解析；一族多认一个方向、或某族漏一个，界面上
+ * 就是「能走过去但换不过去」这种没人能从代码里看出来的不对称。写成一条正则后，方向清单只有一份，加一个方向
+ * 两族同时得到，漏不掉。
+ *
+ * 方向名在这里是运行期的一份手抄——`SplitDirection` 只是类型，全仓没有对应的运行期数组，所以 tsc 挡不住这
+ * 四个词与类型分岔。补法不是再抄一份，而是让 `commandForWorkbenchId` 的产出反过来被类型收窄（下面 `as`
+ * 之前先过 `DIRECTION_COMMANDS`），并由测试断言「注册表里每一条 `workbench.(focus|swap)-region.*` 都翻译得
+ * 出命令，且翻译出的方向与 id 里那个词逐字相同」。
+ */
+const DIRECTION_COMMAND_ID = /^workbench\.(focus-region|swap-region)\.(left|right|up|down)$/
+
+/**
  * 把一个 workbench 绑定 id 翻译成命令。id 由注册表匹配得出（`matchShortcut` scope `window`），这里只做
  * 「id → 命令」这一步纯翻译，不认识的 id（比如 quick-switch.toggle 这类非 workbench 动作）返回 null。
  */
@@ -63,10 +80,15 @@ export function commandForWorkbenchId(id: string): WorkbenchShortcutCommand | nu
   if (id === 'workbench.close-region') return { kind: 'close-region' }
   if (id === 'workbench.split.right') return { kind: 'split', direction: 'right' }
   if (id === 'workbench.split.down') return { kind: 'split', direction: 'down' }
-  if (id === 'workbench.focus-region.left') return { kind: 'focus-region', direction: 'left' }
-  if (id === 'workbench.focus-region.right') return { kind: 'focus-region', direction: 'right' }
-  if (id === 'workbench.focus-region.up') return { kind: 'focus-region', direction: 'up' }
-  if (id === 'workbench.focus-region.down') return { kind: 'focus-region', direction: 'down' }
+  const directional = id.match(DIRECTION_COMMAND_ID)
+  if (directional) {
+    // 两个捕获组正是命令的两个字段，所以 kind 与 direction 都从 id 本身取，不经任何映射表——映射表会是
+    // 「id 说 left、表说 right」这类漂移的容身处，而这里连表都没有。
+    return {
+      kind: directional[1] as 'focus-region' | 'swap-region',
+      direction: directional[2] as SplitDirection
+    }
+  }
   return null
 }
 
@@ -152,6 +174,9 @@ export type WorkbenchShortcutStore = {
   requestCloseRegion(workspaceId: string, tabId: string, regionId: string): void
   splitRegion(workspaceId: string, tabId: string, regionId: string, direction: SplitDirection): void
   focusRegion(workspaceId: string, tabId: string, regionId: string): void
+  // 换位：同一张 Tab 里两格对调位置。合法性（两端点在场、不与自己换）由 swapWorkbenchRegions 自己守，
+  // 键盘层只负责把「方向」解析成那个端点——且必须用与 focusRegion 同一个 adjacentRegionId，见下面 dispatch。
+  swapRegions(workspaceId: string, tabId: string, regionIdA: string, regionIdB: string): void
 }
 
 /**
@@ -224,8 +249,16 @@ export function dispatchWorkbenchCommand(
     store.splitRegion(workspaceId, tabId, activeRegionId, command.direction)
     return true
   }
+  // focus 与 swap 共用这一次邻格解析，这是刻意的：两者都在回答「这个方向上是哪一格」，各算一次就会漂移成
+  // 「按方向键走到 A、按 Shift+方向键把内容换给 B」。到边（该方向没有邻格）时两者都不吃这个键，原样放行。
   const neighbourRegionId = adjacentRegionId(tab.layout, command.direction)
   if (!neighbourRegionId) return false
+  if (command.kind === 'swap-region') {
+    // 换位后焦点仍在同一格（内容跟着 id 走，焦点指针不动），于是连按四下方向键就是把这一格一路搬过去——
+    // 若这里顺手改焦点，第二下按键的出发点就变了，同一个手势的第二次会做出完全不同的事。
+    store.swapRegions(workspaceId, tabId, activeRegionId, neighbourRegionId)
+    return true
+  }
   store.focusRegion(workspaceId, tabId, neighbourRegionId)
   return true
 }
