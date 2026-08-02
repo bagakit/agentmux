@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
+import ts from 'typescript'
 import { createRegionCopyModel } from '../src/renderer/src/components/RegionContextMenu.js'
 import {
   formatMessagingAddress,
@@ -86,6 +87,71 @@ describe('Region 右键菜单：点哪格就是哪格', () => {
       writeClipboardText
     })
     await expect(model.regionAddress.onSelect()).resolves.toBeUndefined()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #471「右键 region 在已有布局中和其他 region 交换位置」的菜单接入。
+//
+// 与分屏那一节同一个约束：换位项必须住进**同一份** entries 里（不是 JSX 再加一个
+// `{swapMenu.length ? (` 分支——那种写法能被 `false &&` 整段抹掉而全绿）。所以这里断言换位项
+// 作为 entries 的一类出现、点得动、且只在真有别的格可换时才出现。
+// ---------------------------------------------------------------------------
+describe('换位一节住在 entries 里：给了目标就有，没有就整节不出现', () => {
+  const swapMenu = [
+    { targetRegionId: 'region:pane-1', label: 'Swap with Agent', onSelect: () => {} },
+    { targetRegionId: 'region:pane-9', label: 'Swap with example.com', onSelect: () => {} }
+  ]
+
+  it('有可换的格时，换位项逐条出现在 entries 里', () => {
+    const entries = createRegionCopyModel({
+      regionId: 'region:pane-2',
+      agentSessionId: null,
+      writeClipboardText: vi.fn(async () => {}),
+      swapMenu
+    }).entries
+    const swaps = entries.filter((entry) => entry.kind === 'swap')
+    expect(swaps).toHaveLength(swapMenu.length)
+    expect(swaps.map((entry) => (entry.kind === 'swap' ? entry.entry : null))).toEqual(swapMenu)
+    // 排在末尾一组，前面隔一道分隔线（不画悬在别处的孤线）。
+    const firstSwapAt = entries.findIndex((entry) => entry.kind === 'swap')
+    expect(firstSwapAt).toBeGreaterThan(0)
+    expect(entries[firstSwapAt - 1]?.kind, '换位一节前面缺一道分隔线').toBe('separator')
+  })
+
+  it('没有可换的格（只有一格）时整节连同分隔线都不出现', () => {
+    const entries = createRegionCopyModel({
+      regionId: 'region:pane-2',
+      agentSessionId: null,
+      writeClipboardText: vi.fn(async () => {}),
+      swapMenu: []
+    }).entries
+    expect(entries.some((entry) => entry.kind === 'swap')).toBe(false)
+    // 不给 swapMenu 时同样不出现。
+    const withoutSwap = createRegionCopyModel({
+      regionId: 'region:pane-2',
+      agentSessionId: null,
+      writeClipboardText: vi.fn(async () => {})
+    }).entries
+    expect(withoutSwap.some((entry) => entry.kind === 'swap')).toBe(false)
+  })
+
+  it('点一条换位，发出的就是那一条的 onSelect', () => {
+    const first = vi.fn()
+    const second = vi.fn()
+    const entries = createRegionCopyModel({
+      regionId: 'region:pane-2',
+      agentSessionId: null,
+      writeClipboardText: vi.fn(async () => {}),
+      swapMenu: [
+        { targetRegionId: 'region:pane-1', label: 'Swap with Agent', onSelect: first },
+        { targetRegionId: 'region:pane-9', label: 'Swap with example.com', onSelect: second }
+      ]
+    }).entries
+    const swaps = entries.filter((entry) => entry.kind === 'swap')
+    for (const entry of swaps) if (entry.kind === 'swap') entry.entry.onSelect()
+    expect(first).toHaveBeenCalledTimes(1)
+    expect(second).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -205,5 +271,56 @@ describe('JSX 里没有可以取反的在场判断', () => {
     for (const field of ['model.handoff', 'model.sessionAddress']) {
       expect(content, `${field} 又被渲染层直接读了`).not.toContain(field)
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #471 换位真的被接上了。
+//
+// 与 workbench-split-menu.test.tsx 的 splitMenu 接线守卫同一个道理：清单函数（regionSwapMenuEntries）
+// 与菜单模型（createRegionCopyModel）算得对、菜单渲染只 map 一份 entries——这些上面都钉了，但**调用点
+// 有没有把清单接上、接的是不是右键点中的那一格**是另一回事。属性值换成 `swapMenu={[]}` 或
+// `swapMenu={undefined && regionSwapMenuEntries({…})}`，整节对用户消失而其余全绿。所以判据落在
+// **值表达式的种类**上（AST），不落在字符串在不在。
+// ---------------------------------------------------------------------------
+describe('WorkspaceWorkbench 把换位清单接到了右键点中的那一格', () => {
+  const WORKBENCH = '../src/renderer/src/components/WorkspaceWorkbench.tsx'
+  const source = readFileSync(new URL(WORKBENCH, import.meta.url), 'utf8')
+
+  function attributeExpression(element: string, attribute: string): { kind: ts.SyntaxKind; text: string } | null {
+    const file = ts.createSourceFile('WorkspaceWorkbench.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+    let found: { kind: ts.SyntaxKind; text: string } | null = null
+    const walk = (node: ts.Node): void => {
+      const opening = ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node) ? node : null
+      if (opening && ts.isIdentifier(opening.tagName) && opening.tagName.text === element) {
+        for (const property of opening.attributes.properties) {
+          if (!ts.isJsxAttribute(property) || property.name.getText(file) !== attribute) continue
+          const initializer = property.initializer
+          const expression =
+            initializer && ts.isJsxExpression(initializer) && initializer.expression
+              ? initializer.expression
+              : (initializer ?? property)
+          found = { kind: expression.kind, text: expression.getText(file) }
+        }
+      }
+      ts.forEachChild(node, walk)
+    }
+    walk(file)
+    return found
+  }
+
+  it('swapMenu 的值就是那次 regionSwapMenuEntries 调用本身，不是被 && / 三元 / 数组包起来的形状', () => {
+    const attribute = attributeExpression('RegionContextMenu', 'swapMenu')
+    expect(attribute, 'WorkspaceWorkbench 里的 <RegionContextMenu> 没有 swapMenu 属性——换位整节对用户不存在')
+      .not.toBeNull()
+    expect(
+      ts.SyntaxKind[attribute!.kind],
+      `swapMenu 的值不是一次调用而是 ${ts.SyntaxKind[attribute!.kind]}：\n${attribute!.text}`
+    ).toBe('CallExpression')
+    expect(attribute!.text.startsWith('regionSwapMenuEntries('), 'swapMenu 调的不是换位清单').toBe(true)
+    // 换位必须落在**右键点中的那一格**（node.regionId），并真的路由到 store.swapRegions——
+    // 不是一个什么都不做的回调，也不是用活动格推断出来的另一格。
+    expect(attribute!.text, 'swapMenu 没有把右键点中的 regionId 作为换位源').toContain('node.regionId')
+    expect(attribute!.text, 'swapMenu 的动作没有接到 swapRegions').toContain('swapRegions(')
   })
 })

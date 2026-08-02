@@ -45,7 +45,7 @@ import { WorkbenchTabMarks } from './WorkbenchTabMarks'
 import { WorkbenchTabStrip } from './WorkbenchTabStrip'
 import { resolvePaneColumnEdgeZone } from '../lib/tab-drop-zone'
 import { SplitRatioCommitter } from '../lib/split-ratio-commit'
-import { moveSessionViewMenu, tabIdsForCloseScope, workbenchSplitMenuEntries } from '../lib/workbench-tab-actions'
+import { moveSessionViewMenu, regionSwapMenuEntries, tabIdsForCloseScope, workbenchSplitMenuEntries } from '../lib/workbench-tab-actions'
 import { revealInFileManagerLabel } from '../lib/host-platform'
 import { SurfaceSwitch, TopRowLeadingChrome } from './TopRowChrome'
 import { groupIds } from '../lib/workbench-layout'
@@ -55,6 +55,7 @@ import type {
   TabGroupLayoutNode,
   WorkspaceLayout
 } from '../lib/workbench-layout'
+import { regionIds } from '../lib/workbench-view-layout'
 import type { WorkbenchRegionLayoutNode } from '../lib/workbench-view-layout'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import type { AgentTimelineSnapshot } from '@agentmux/core'
@@ -105,6 +106,25 @@ function tabSurfaceFallback(tab: WorkbenchTab, sessions: readonly SessionSnapsho
   }
   // Agent/terminal title surface: the Provider·Workspace fact is the session's own label (built once in
   // Main), used verbatim as the chain's lowest tier — the renderer never re-derives that string.
+  const session = sessions.find((item) => item.id === surface.sessionId)
+  return session?.label ?? surface.sessionId
+}
+
+/**
+ * 一格在换位菜单里显示的名字（#471）。按表面种类给一个人能认出的短名——文件名（basename）/ 会话
+ * label（Agent 与终端都用 `session.label`，即 Provider·Workspace 那条兜底层，不是解析后的显示名；
+ * 终端另有常量 "Terminal"）/ 浏览器标题，无标题时退回完整 URL / "New Tab"。这只是给用户指认「和哪一格
+ * 换」用的标签，不进任何寻址 key，所以不必是 SSOT 显示名链的产物；与 `tabSurfaceFallback` 取名口径一致
+ * 即可。同名多格的区分（编号）由 `regionSwapMenuEntries` 统一做，不在这里。
+ */
+function regionSurfaceLabel(surface: WorkbenchSurface, sessions: readonly SessionSnapshot[]): string {
+  if (surface.kind === 'file') return surface.path.split('/').at(-1) ?? surface.path
+  if (surface.kind === 'launcher') return 'New Tab'
+  if (surface.kind === 'browser') {
+    if (surface.title && surface.title !== 'about:blank') return surface.title
+    return surface.url === 'about:blank' ? 'New Tab' : surface.url
+  }
+  if (surface.kind === 'terminal') return 'Terminal'
   const session = sessions.find((item) => item.id === surface.sessionId)
   return session?.label ?? surface.sessionId
 }
@@ -590,6 +610,8 @@ function WorkbenchRegionLeaf({
   const closeRegion = useAppStore((state) => state.closeRegion)
   const splitRegion = useAppStore((state) => state.splitRegion)
   const arrangeTabRegions = useAppStore((state) => state.arrangeTabRegions)
+  const swapRegions = useAppStore((state) => state.swapRegions)
+  const sessions = useAppStore((state) => state.sessions)
   const dirtyDocuments = useAppStore((state) => state.dirtyDocuments)
   const closeRegionRequest = useAppStore((state) => state.closeRegionRequest)
   const clearCloseRegionRequest = useAppStore((state) => state.clearCloseRegionRequest)
@@ -646,6 +668,18 @@ function WorkbenchRegionLeaf({
         regionCount,
         split: (direction) => splitRegion(tab.workspaceId, tab.id, node.regionId, direction),
         arrange: (preset) => arrangeTabRegions(tab.workspaceId, tab.id, preset)
+      })}
+      // 换位同样落在**右键点中的这一格**：swapMenu 列出这张 Tab 里除本格外的每一格，点了把两格
+      // 在既有布局里对调（见 regionSwapMenuEntries 与 store.swapRegions）。只有一格时它自然为空，
+      // 整节以缺席表达。regions 按 regionIds（布局叶子的左→右 / 上→下 视觉顺序）喂进去，而非
+      // Object.values 的插入顺序——这样同名多格的编号（Terminal 1 / 2…）与用户眼里的位置对得上。
+      swapMenu={regionSwapMenuEntries({
+        regionId: node.regionId,
+        regions: regionIds(tab.layout.root).flatMap((regionId) => {
+          const region = tab.regions[regionId]
+          return region ? [{ regionId, label: regionSurfaceLabel(region, sessions) }] : []
+        }),
+        swap: (a, b) => swapRegions(tab.workspaceId, tab.id, a, b)
       })}
     >
     <section

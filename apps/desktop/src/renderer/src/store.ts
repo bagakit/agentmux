@@ -143,6 +143,7 @@ import {
   renameWorkbenchTab,
   replaceWorkbenchRegion,
   sessionTabId,
+  swapWorkbenchTabRegions,
   tabStillOpen,
   titleWorkbenchSurface,
   topicIdForSession,
@@ -391,6 +392,9 @@ type AppState = {
   // 把一个 Tab 的格子摆成预设布局。与控制协议的 `arrange` 是同一个引擎（arrangeWorkbenchControlTab），
   // 「要补几个格」由它自己从 preset 推导，这里不重算——见那个函数的注释。
   arrangeTabRegions(workspaceId: string, tabId: string, preset: WorkbenchRegionLayoutPreset): void
+  // 把一个 Tab 里两格的位置互换（#471）：右键某一格选「和另一格换位」。纯布局代数
+  // （swapWorkbenchRegions），只换 id 在骨架上的位置，内容与所有 ratio 一字不动。
+  swapRegions(workspaceId: string, tabId: string, regionIdA: string, regionIdB: string): void
   closeRegion(workspaceId: string, tabId: string, regionId: string): Promise<void>
   // 键盘关 Tab 的入口：只投意图，真正的关闭（含确认）由活动 Tab 组件消费。见 closeTabRequest 状态注释。
   requestCloseTab(workspaceId: string, tabGroupId: string, tabId: string): void
@@ -2670,6 +2674,17 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     if (arranged === tab) return
     set((state) => ({ tabs: { ...state.tabs, [tabId]: arranged } }))
+  },
+  swapRegions(workspaceId, tabId, regionIdA, regionIdB) {
+    const current = get()
+    if (!workbenchViewCloseAllowsView(current.closingWorkbenchViews, tabId)) return
+    const tab = current.tabs[tabId]
+    if (!tab || tab.workspaceId !== workspaceId) return
+    // 换位的合法性（两个端点都在场、不与自己换）由 swapWorkbenchTabRegions → swapWorkbenchRegions
+    // 自己守；挂不上时原样返回，这里据 `===` 判定不写回，避免无谓的重渲染。
+    const nextTab = swapWorkbenchTabRegions(tab, regionIdA, regionIdB)
+    if (nextTab === tab) return
+    set((state) => ({ tabs: { ...state.tabs, [tabId]: nextTab } }))
   },
   async closeRegion(workspaceId, tabId, regionId) {
     const current = get()

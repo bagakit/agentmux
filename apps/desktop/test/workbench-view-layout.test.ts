@@ -7,6 +7,7 @@ import {
   placeActiveWorkbenchRegionFirst,
   regionIds,
   splitWorkbenchRegion,
+  swapWorkbenchRegions,
   workbenchRegionBounds
 } from '../src/renderer/src/lib/workbench-view-layout'
 
@@ -129,5 +130,60 @@ describe('Workbench Tab View layout', () => {
     expect(workbenchRegionBounds(arranged.root).map(({ bounds }) => bounds)).toEqual(
       workbenchRegionBounds(layout.root).map(({ bounds }) => bounds)
     )
+  })
+
+  // #471 swap: 交换两格在树里的位置（内容跟着 id 走），骨架与所有 ratio 一字不动。
+  describe('swapWorkbenchRegions：两格在既有布局里互换位置', () => {
+    const threeRegions = () =>
+      splitWorkbenchRegion(
+        splitWorkbenchRegion(createWorkbenchViewLayout('one'), 'one', 'right', 'two'),
+        'two',
+        'down',
+        'three'
+      )
+
+    it('只对调两个 id 占的位置，骨架与每个 ratio 完全不变', () => {
+      const layout = threeRegions()
+      // one 在左半整列、two 在右上、three 在右下（见上一条几何断言）。换 one 与 three：
+      // 内容互换位置，但每一格的**边界**必须与「原来占那个位置的格」一模一样——换的是 id 不是尺寸。
+      const swapped = swapWorkbenchRegions(layout, 'one', 'three')
+      expect(regionIds(swapped.root)).toEqual(['three', 'two', 'one'])
+      const before = new Map(workbenchRegionBounds(layout.root).map(({ regionId, bounds }) => [regionId, bounds]))
+      const after = workbenchRegionBounds(swapped.root)
+      // three 现在占 one 原来的位置，one 现在占 three 原来的位置，two 原地不动。
+      expect(after.find(({ regionId }) => regionId === 'three')!.bounds).toEqual(before.get('one'))
+      expect(after.find(({ regionId }) => regionId === 'one')!.bounds).toEqual(before.get('three'))
+      expect(after.find(({ regionId }) => regionId === 'two')!.bounds).toEqual(before.get('two'))
+    })
+
+    it('两个方向的参数顺序等价——swap(a,b) 与 swap(b,a) 结果相同', () => {
+      const layout = threeRegions()
+      expect(swapWorkbenchRegions(layout, 'one', 'three')).toEqual(
+        swapWorkbenchRegions(layout, 'three', 'one')
+      )
+    })
+
+    it('活动格跟着它的内容走：换的是活动格时 activeRegionId 不变', () => {
+      // 活动在 three。把 three 换到别处，聚焦的仍然是 three 那份内容（现在在新位置）。
+      const layout = { ...threeRegions(), activeRegionId: 'three' }
+      const swapped = swapWorkbenchRegions(layout, 'three', 'one')
+      expect(swapped.activeRegionId).toBe('three')
+    })
+
+    it('同一个 id 与自己换是 no-op（原样返回，避免无谓的重渲染）', () => {
+      const layout = threeRegions()
+      expect(swapWorkbenchRegions(layout, 'two', 'two')).toBe(layout)
+    })
+
+    it('任一 id 不在布局里就原样返回——不凭空造格、不把别的格换没', () => {
+      const layout = threeRegions()
+      expect(swapWorkbenchRegions(layout, 'one', 'ghost')).toBe(layout)
+      expect(swapWorkbenchRegions(layout, 'ghost', 'one')).toBe(layout)
+      expect(swapWorkbenchRegions(layout, 'ghostA', 'ghostB')).toBe(layout)
+      // 不在场的 id 绝不能被写进树：换完后 region 集合必须与换前逐一相等。
+      expect(new Set(regionIds(swapWorkbenchRegions(layout, 'one', 'ghost').root))).toEqual(
+        new Set(regionIds(layout.root))
+      )
+    })
   })
 })
