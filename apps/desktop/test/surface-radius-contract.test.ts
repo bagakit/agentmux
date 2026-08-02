@@ -43,7 +43,6 @@ const COMPACT_CONTROLS = [
 // Class 2 — micro marks and decoration: hairlines, ruler ticks, icon corners, selection marks.
 const MICRO_MARKS = [
   '.workspace-tools-resize-handle::after',
-  '.open-destination-menu__item > svg:last-child',
   '.agent-provider-icon > img',
   '.activity-ruler__rail',
   '.activity-ruler__tick',

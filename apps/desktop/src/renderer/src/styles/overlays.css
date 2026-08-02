@@ -118,13 +118,27 @@
 .shortcuts-help__chord { flex: none; display: inline-flex; align-items: center; gap:var(--sp-1); }
 .shortcuts-help__chord kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; padding:0 var(--sp-2); border-radius: var(--radius-sm); background: var(--surface-3); color: var(--text-2); font-family: var(--font-mono); font-size: var(--fs-micro); }
 
-/* One-row destination picker: a slim floating card that grows from the pointer. The URL rides on top
-   so the choice never loses sight of what it opens; the icon row underneath is the actual selector;
-   the hint spells out disabled directions for everyone, including keyboard users who cannot land on a
-   disabled button. Surface fill + top highlight carry the layer — no border as the primary means. */
+/* Destination picker: a slim floating card that grows from the pointer. The URL rides on top so the
+   choice never loses sight of what it opens; the icon cluster underneath is the actual selector; the
+   hint spells out disabled directions for everyone, including keyboard users who cannot land on a
+   disabled button. Surface fill + top highlight carry the layer — no border as the primary means.
+
+   The cluster is a 3×3 grid holding a cross: the four directions occupy the arms, so `left` is drawn on
+   the left instead of being decoded from a chevron, `tab` takes the centre ("here"), and `system` sits
+   in a corner off the cross because it is the one choice that leaves the app. Each button's cell comes
+   from --destination-column / --destination-row, injected per button from the same coordinate table the
+   arrow keys navigate (components/OpenDestinationBar.tsx) — one truth for pixels and keyboard both.
+
+   Both properties are *declared* with a default in the rule rather than carried as a var() fallback:
+   a fallback keeps the property out of the sheet's definitions, so the dangling-variable guard
+   (test/surface-scale-contract.test.ts) cannot tell a typo'd name from a deliberate injection point.
+   Precedent: --tree-depth in dock.css. The centre cell is the default because a button that somehow
+   arrives without a coordinate should land somewhere visible, not collapse onto the first cell and
+   hide behind another button. */
 .open-destination-bar {
   z-index: 40;
-  width: min(272px, calc(100vw - 20px));
+  width: max-content;
+  max-width: calc(100vw - 20px);
   display: flex;
   flex-direction: column;
   gap:var(--sp-2);
@@ -146,18 +160,35 @@
 }
 .open-destination-bar__url > svg { flex: 0 0 auto; color: var(--green); }
 .open-destination-bar__url > span {
+  /* Caps the whole card: the cross is only ~92px wide, so an unbounded URL would stretch the card far
+     past its selector and undo the compactness the cluster buys. */
+  max-width: 232px;
   min-width: 0;
   overflow: hidden;
   font: 10px/1.4 var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.open-destination-bar__row { display: flex; gap:var(--sp-1); }
-.open-destination-bar__button { flex: 1 1 auto; color: var(--text-3); }
+.open-destination-bar__cluster {
+  display: grid;
+  grid-template-columns: repeat(3, 28px);
+  grid-template-rows: repeat(3, 28px);
+  gap:var(--sp-1);
+  justify-content: center;
+}
+.open-destination-bar__button {
+  --destination-column: 2;
+  --destination-row: 2;
+  grid-column: var(--destination-column);
+  grid-row: var(--destination-row);
+  color: var(--text-3);
+}
 .open-destination-bar__button:hover:not(:disabled) { color: var(--green-text); }
 .open-destination-bar__button:disabled { color: var(--neutral-2); cursor: default; }
 .open-destination-bar__hint {
   margin:0;
+  /* Matches the URL cap so the hint wraps instead of widening the card past its selector. */
+  max-width: 232px;
   padding:0 var(--sp-3);
   color: var(--amber-text);
   font-size: var(--fs-micro);
