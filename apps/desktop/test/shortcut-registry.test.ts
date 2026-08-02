@@ -64,6 +64,10 @@ describe('binding id set', () => {
       'workbench.select-tab.9',
       'workbench.split.down',
       'workbench.split.right',
+      'workbench.swap-region.down',
+      'workbench.swap-region.left',
+      'workbench.swap-region.right',
+      'workbench.swap-region.up',
       // launcher scope: the start page's own handler. Its whole point is firing INSIDE the prompt textarea,
       // which is why it cannot be an un-gated window binding — see ShortcutScope's comment.
       'launcher.submit'
@@ -177,11 +181,28 @@ describe('non-mac never claims a bare Ctrl+letter', () => {
       expect(binding.other.shift, `${binding.id} digit must NOT require Shift off mac`).toBe(false)
       expect(binding.other.primary, `${binding.id} digit rides bare Ctrl off mac`).toBe(true)
     }
+    // The arrow half is stated as the PROPERTY it defends, not as `other.shift === false`.
+    //
+    // What this guard is for (see the comment above): the letter class adds Shift **off mac only**, to stay
+    // out of readline's way. That workaround must not leak into a class that has no readline conflict. The
+    // observable signature of the leak is not "an arrow carries Shift" — it is "an arrow carries Shift on
+    // one platform and not the other". Shift itself is a legitimate discriminator here and already is one
+    // elsewhere in this registry (`workbench.split.right` vs `.down` ride Shift to mean a direction), and
+    // `workbench.swap-region.*` uses it the same way: one modifier deeper on the very same gesture means
+    // "take the pane with you". Written as `other.shift === false`, this test forbade that spelling
+    // outright — a criterion strictly broader than the property, which would have to be deleted (losing the
+    // readline guard) to add a Shift+arrow binding. Stated as equality across platforms it still reddens the
+    // mutation it was written for: give `arrowChords` the letter rule's `other: {shift: true}` and the two
+    // platforms diverge for every arrow binding at once.
     const arrows = SHORTCUT_BINDINGS.filter((b) => b.keyClass === 'arrow')
     expect(arrows.length).toBeGreaterThan(0)
     for (const binding of arrows) {
-      expect(binding.other.shift, `${binding.id} arrow must NOT require Shift off mac`).toBe(false)
+      expect(
+        binding.mac.shift,
+        `${binding.id}: an arrow's Shift must mean the same thing on both platforms — differing across platforms IS the letter class's readline workaround, which arrows do not need`
+      ).toBe(binding.other.shift)
       expect(binding.other.alt, `${binding.id} arrow requires Alt`).toBe(true)
+      expect(binding.mac.alt, `${binding.id} arrow requires Alt on mac too`).toBe(true)
     }
   })
 
@@ -283,6 +304,50 @@ describe('exact chord matching per binding', () => {
     expect(matchShortcut(event({ key: 'arrowdown', ctrlKey: true, altKey: true }), false, { scope: 'window' })).toBe('workbench.focus-region.down')
     // no Alt → not a focus move
     expect(matchShortcut(event({ key: 'arrowleft', metaKey: true }), true, { scope: 'window' })).toBeNull()
+  })
+
+  it('swap region: the SAME arrow chord one modifier deeper — Shift means "take the pane with you"', () => {
+    // The gesture relation is the point: Cmd+Alt+← walks left, Cmd+Alt+Shift+← carries the pane left. If a
+    // swap binding lost its Shift it would collide with its own focus twin (the within-scope collision guard
+    // would catch that); if a focus binding gained Shift, these two assertions would swap answers.
+    expect(matchShortcut(event({ key: 'arrowleft', metaKey: true, altKey: true, shiftKey: true }), true, { scope: 'window' })).toBe('workbench.swap-region.left')
+    expect(matchShortcut(event({ key: 'arrowdown', ctrlKey: true, altKey: true, shiftKey: true }), false, { scope: 'window' })).toBe('workbench.swap-region.down')
+    // Shift is the only difference, and it is matched exactly: the un-shifted event must still be focus.
+    expect(matchShortcut(event({ key: 'arrowleft', metaKey: true, altKey: true }), true, { scope: 'window' })).toBe('workbench.focus-region.left')
+    // Still needs Alt — Cmd+Shift+arrow is text selection territory and must not be ours.
+    expect(matchShortcut(event({ key: 'arrowleft', metaKey: true, shiftKey: true }), true, { scope: 'window' })).toBeNull()
+  })
+
+  it('every arrow direction exists in BOTH directional families, and each id resolves on both platforms', () => {
+    // The asymmetry this stops: `workbench.focus-region.*` and `workbench.swap-region.*` answer two halves of
+    // one question ("which pane is that way" / "swap with the pane that way"), resolved by the same
+    // `regionInDirection`. A direction present in one family and missing from the other reads to the user as
+    // "I can walk there but I can't move the pane there", which nothing else in the suite would notice.
+    // Derived from the registry, so the check is over what actually shipped rather than a hand-kept list.
+    const directionsOf = (family: string): string[] =>
+      SHORTCUT_BINDINGS.map((b) => b.id)
+        .filter((id) => id.startsWith(`workbench.${family}.`))
+        .map((id) => id.slice(`workbench.${family}.`.length))
+        .sort()
+    // Anchored to the literal four so an empty family (or both families losing the same direction together)
+    // cannot make the equality below vacuously true.
+    expect(directionsOf('focus-region')).toEqual(['down', 'left', 'right', 'up'])
+    expect(directionsOf('swap-region')).toEqual(directionsOf('focus-region'))
+
+    // And each of the eight really fires — a declared id whose chord nothing can produce is a dead key.
+    for (const family of ['focus-region', 'swap-region']) {
+      const shiftKey = family === 'swap-region'
+      for (const direction of ['left', 'right', 'up', 'down']) {
+        const id = `workbench.${family}.${direction}`
+        for (const isMac of [true, false]) {
+          const modifier = isMac ? { metaKey: true } : { ctrlKey: true }
+          expect(
+            matchShortcut(event({ key: `arrow${direction}`, altKey: true, shiftKey, ...modifier }), isMac, { scope: 'window' }),
+            `${id} must fire on ${isMac ? 'mac' : 'other'}`
+          ).toBe(id)
+        }
+      }
+    }
   })
 
   it('terminal search/copy/clear: Cmd+F/C/K mac, Ctrl+Shift+F/C/K other, only in terminal scope', () => {
