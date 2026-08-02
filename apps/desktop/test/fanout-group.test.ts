@@ -198,6 +198,45 @@ describe('fan-out group projection', () => {
     expect(markup).toContain('1 done')
   })
 
+  // 崩掉的 lane 与等你回复的 lane 必须分得开——上一条只喂 waiting/done，于是 laneState 里
+  // `error → 'error'` 那半支在整个仓里没有任何断言（结构守卫的正则只钉了 needs-you 那半条）。
+  // 实测过：把它改成 `return 'waiting'`，六个 fanout suite 共 63 条全绿。用户看到的是一条跑挂的
+  // 分支画成琥珀 + `?` pip，与真正在等他回复的 lane 逐像素同色——点进去才发现是崩的。这正是
+  // attention-vocabulary.ts 反复写明的红线：琥珀说「你被等着」，红说「这坏了」，折在一起就把
+  // 颜色唯一的用处丢掉了。
+  //
+  // 判据落在**每条 lane 自己的 markup 片段**上，而不是整份 markup 含不含某个 class：整份含
+  // `status--error` 的断言在两条 lane 里只要有一条是红的就满足，分不出红的是哪一条。
+  it('把崩掉的 lane 与等你回复的 lane 画成两种颜色，逐 lane 各判一次', () => {
+    const markup = renderToStaticMarkup(createElement(FanOutStrip, {
+      workspaces: [worktree('bake-1'), worktree('bake-2'), worktree('bake-3')],
+      sessions: [agent('bake-1', 'error'), agent('bake-2', 'waiting'), agent('bake-3', 'working')],
+      onSelectSession: vi.fn()
+    }))
+
+    // 每条 lane 的 chip 是一个带 aria-label 的 button，标签里带分支名与它的 attention。
+    const chipFor = (branch: string): string => {
+      const start = markup.indexOf(`aria-label="${branch} · `)
+      expect(start, `渲染里找不到 ${branch} 这条 lane：fixture 没进到被测分支`).toBeGreaterThan(-1)
+      // 右界取本 chip 的收尾，否则切片一路吃到文档末尾，邻居的 class 会顶上来充当本条的证据。
+      const end = markup.indexOf('</button>', start)
+      expect(end, `${branch} 的 chip 没有收尾`).toBeGreaterThan(start)
+      return markup.slice(start, end)
+    }
+
+    const failed = chipFor('bake-1')
+    expect(failed, '崩掉的 lane 必须是红的').toContain('status status--error')
+    expect(failed, '崩掉的 lane 不许同时是琥珀——那就是把「坏了」说成「等你」').not.toContain('status--waiting')
+
+    const needsYou = chipFor('bake-2')
+    expect(needsYou, '等你回复的 lane 必须是琥珀').toContain('status status--waiting')
+    expect(needsYou, '等你回复的 lane 不许是红的').not.toContain('status--error')
+
+    // 第三条钉住 working 仍是第三种颜色：否则「两种颜色」可以靠把 working 也折进来满足。
+    const busy = chipFor('bake-3')
+    expect(busy, '在跑的 lane 是第三种状态').toContain('status status--working')
+  })
+
   it('occupies no space when there is nothing to compare', () => {
     expect(renderToStaticMarkup(createElement(FanOutStrip, {
       workspaces: [worktree('main')],
