@@ -1,6 +1,13 @@
-import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import ts from 'typescript'
+import {
+  earlyExitsBefore,
+  findCallsToIdentifier,
+  isDescendant,
+  isFunctionBoundary,
+  parseTsx,
+  readAndParse
+} from './helpers/effect-reachability.js'
 
 /**
  * 初始页只有在**可见**时才可以预热终端。
@@ -27,17 +34,23 @@ import ts from 'typescript'
  * （无条件），结果每个泊车 workspace 都会预热，而该文件 6 条全绿、`tsc --noEmit` 也干净。这是本仓
  * 反复记录的同族洞——「数符号名守不住别的拼法」「grep 守卫看不见早退」：字面量在场 ≠ 语义正确。
  *
- * 所以这条守卫的判据改成**数出口 + 判极性**，而且用 AST 而不是文本（先例：
- * terminal-link-provider-coverage.test.ts 用 `ts.createSourceFile` 数 activate 出口个数）：
+ * 所以这条守卫的判据由三块组成：
  *
  *   1. 整个文件里 `prewarmTerminal(` 的**调用点恰好只有一处**。
  *   2. 那一处调用落在一个以 `visible` 为**必要条件**的 `if` 的 then 分支里
  *      （把守护条件按 `&&` 摊平后，其中一个合取项是裸标识符 `visible`）。
+ *   3. 那一处调用**可达**：它之前、同一条 effect 体内没有任何提前离开的出口。
  *
- * 为什么这两条能同时抓住两种变异：
+ * 第 1、3 两块（找调用、数出口、可达性）现在共用 test/helpers/effect-reachability.ts —— 那份判据在本仓
+ * 多处 effect 上重复出现，抽成一处避免每个守卫各写一份、各漏一角。本文件只在其上再叠加**本 effect 专属**
+ * 的第 2 块：`visible` 极性。
+ *
+ * 为什么这三块合起来能抓住每种变异：
  *   - 取反 `!visible`：`!visible` 是 PrefixUnary 不是裸 `visible` 合取项 → 第 2 条红。
  *   - 另加一个无条件调用：调用点变两处 → 第 1 条红。
- * 单独任一条都只抓一种；两条一起才两种都抓。
+ *   - 在 effect 第一行插 `if (launcherId) return`（launcherId 恒非空 → 无条件早退）：调用点仍一处、
+ *     仍在 `visible` 分支里，前两条完全失明 → 只有第 3 条（可达性）红。
+ * 单独任一条都只抓一种；三条一起才都抓得住。
  *
  * 为什么天然免疫「把代码移进注释」这种恒真陷阱：判据读的是 AST 的**调用节点**，注释掉的代码在
  * 语法树里根本不产生 CallExpression。注释掉那行 → 调用点变 0 处 → 第 1 条红。判据不依赖「文件里
@@ -48,33 +61,9 @@ const SOURCE_PATH = new URL(
   '../src/renderer/src/components/NewTabSurface.tsx',
   import.meta.url
 ).pathname
-const SOURCE = readFileSync(SOURCE_PATH, 'utf8')
 
-function parse(source: string): ts.SourceFile {
-  return ts.createSourceFile('NewTabSurface.tsx', source, ts.ScriptTarget.ESNext, true, ts.ScriptKind.TSX)
-}
-
-/**
- * 文件里所有 `prewarmTerminal(...)` 的调用表达式。
- *
- * 只认「标识符 `prewarmTerminal` 直接被调用」这一形状。line 72 的
- * `const prewarmTerminal = useAppStore((state) => state.prewarmTerminal)` 里，`prewarmTerminal`
- * 一处是声明名、一处是属性访问名，都不是「被调用的标识符」，所以不会命中。
- */
 function prewarmCalls(sourceFile: ts.SourceFile): ts.CallExpression[] {
-  const calls: ts.CallExpression[] = []
-  const visit = (node: ts.Node): void => {
-    if (
-      ts.isCallExpression(node) &&
-      ts.isIdentifier(node.expression) &&
-      node.expression.text === 'prewarmTerminal'
-    ) {
-      calls.push(node)
-    }
-    ts.forEachChild(node, visit)
-  }
-  visit(sourceFile)
-  return calls
+  return findCallsToIdentifier(sourceFile, 'prewarmTerminal')
 }
 
 /** 剥掉外层括号。`(visible)`、`((a && b))` 都还原成里面那个真表达式。 */
@@ -97,80 +86,6 @@ function conjuncts(expr: ts.Expression): ts.Expression[] {
 function isBareIdentifier(expr: ts.Expression, name: string): boolean {
   const node = unwrap(expr)
   return ts.isIdentifier(node) && node.text === name
-}
-
-/** `node` 是否在 `container` 的子树内（含自身）。依赖 createSourceFile 建了 parent 指针。 */
-function isDescendant(node: ts.Node, container: ts.Node): boolean {
-  let current: ts.Node | undefined = node
-  while (current) {
-    if (current === container) return true
-    current = current.parent
-  }
-  return false
-}
-
-/** 函数边界：守护条件必须与调用**在同一个函数体内**，不能借用外层函数里的 `if (visible)`。 */
-function isFunctionBoundary(node: ts.Node): boolean {
-  return (
-    ts.isArrowFunction(node) ||
-    ts.isFunctionExpression(node) ||
-    ts.isFunctionDeclaration(node) ||
-    ts.isMethodDeclaration(node)
-  )
-}
-
-/**
- * 包着这个调用的最内层函数体（就是 effect 的那个箭头函数体）。
- *
- * 用来划定「在这次调用之前」的搜索范围。找不到（调用在顶层）时返回 undefined。
- */
-function enclosingFunctionBody(call: ts.CallExpression): ts.Block | undefined {
-  let current: ts.Node | undefined = call.parent
-  while (current) {
-    if (isFunctionBoundary(current)) {
-      const body = (current as ts.FunctionLikeDeclaration).body
-      return body && ts.isBlock(body) ? body : undefined
-    }
-    current = current.parent
-  }
-  return undefined
-}
-
-/**
- * 在这次调用**之前**，同一个 effect 体里提前离开的出口语句（`return` / `throw`）。
- *
- * 这一条补的是上面两条判据共同的盲点，而它是实测出来的，不是想出来的：在 effect 第一行插一句
- * `if (launcherId) return`（`launcherId` 来自 warmLauncherId，恒是 `group:…` 或 `region:…` 这样的
- * 非空串，所以这是一次**无条件**早退），整条 effect 变成 no-op —— 泊车与可见的 launcher 都不再预热，
- * 而这个文件 8 条判据全绿、`tsc --noEmit` 也 exit 0。
- *
- * 两条旧判据对它天然失明：调用点仍然恰好一处，它仍然落在 `workspace && visible` 的 then 分支里。
- * 「调用存在且包在正确的 if 里」与「这次调用可达」是两件事——本仓记过这一族（grep 守卫看不见早退、
- * 抽进 lib 只解决一半）。
- *
- * 也不能指望 tsc 兜住：裸 `return` 那种写法恰好会让 `workspace` 丢掉收窄而报 TS18048，但那是**偶然**
- * ——换成上面这个保留收窄的形状，tsc 全程沉默。把「tsc 会拦」当作不写判据的理由，正是这个洞的来路。
- *
- * 判据故意收得很紧：这条 effect 的正确形状是「体内只有那一个 if」，任何提前离开都必然让预热在某些
- * 情况下不发生，而这条 effect 的语义是「可见就该有热 shell」。所以这里不区分「合法的早退」与
- * 「变异的早退」——一个都不许有。真要加守卫条件，写进那个 `if` 的合取项里（`visible` 仍是必要条件，
- * 极性那条判据照旧守着），而不是在它上面另开一个出口。
- */
-function earlyExitsBefore(call: ts.CallExpression): ts.Node[] {
-  const body = enclosingFunctionBody(call)
-  if (!body) return []
-  const exits: ts.Node[] = []
-  const visit = (node: ts.Node): void => {
-    // 嵌套函数（回调、cleanup 里的 setTimeout 等）里的 return 属于**那个**函数，不是这条 effect 的
-    // 出口，跳过整棵子树。cleanup 那个 `return () => …` 本身在调用之后，不会落进这里。
-    if (node !== body && isFunctionBoundary(node)) return
-    if ((ts.isReturnStatement(node) || ts.isThrowStatement(node)) && node.end <= call.getStart()) {
-      exits.push(node)
-    }
-    ts.forEachChild(node, visit)
-  }
-  visit(body)
-  return exits
 }
 
 /**
@@ -200,28 +115,33 @@ function callGuardedByVisible(call: ts.CallExpression): boolean {
 }
 
 describe('创建页只在可见时预热终端（否则每个泊车 workspace 都会抢那唯一的热终端槽）', () => {
+  const parse = (source: string): ts.SourceFile => parseTsx('NewTabSurface.tsx', source)
+
   it('整个文件里 prewarmTerminal 的调用点恰好只有一处', () => {
     // 数出口，不数字面量。多一处（无条件预热）或少一处（删空 effect）都在这里红。
-    const calls = prewarmCalls(parse(SOURCE))
+    const { sourceFile } = readAndParse(SOURCE_PATH)
+    const calls = prewarmCalls(sourceFile)
     expect(calls, `实测调用点：${calls.length} 处，应为 1 处`).toHaveLength(1)
   })
 
   it('那一处调用以 `visible` 为必要条件（落在 if (… && visible) 的 then 分支里）', () => {
-    const [call] = prewarmCalls(parse(SOURCE))
+    const { sourceFile } = readAndParse(SOURCE_PATH)
+    const [call] = prewarmCalls(sourceFile)
     expect(call, '找不到 prewarmTerminal 调用——上一条会先红').toBeDefined()
     expect(callGuardedByVisible(call!)).toBe(true)
   })
 
   it('那一处调用之前，effect 体里没有任何提前离开的出口（否则整条 effect 是 no-op）', () => {
-    const [call] = prewarmCalls(parse(SOURCE))
+    const { sourceFile } = readAndParse(SOURCE_PATH)
+    const [call] = prewarmCalls(sourceFile)
     expect(call, '找不到 prewarmTerminal 调用——第一条会先红').toBeDefined()
     const exits = earlyExitsBefore(call!).map((node) => node.getText().trim())
     expect(exits, `调用之前有提前离开的出口：${exits.join(' / ')}`).toEqual([])
   })
 
-  // ---- 下面是「守卫的守卫」：证明上面两条判据对每种变异各自独立变红，且不是恒真的。 ----
+  // ---- 下面是「守卫的守卫」：证明上面判据对每种变异各自独立变红，且不是恒真的。 ----
   //
-  // 这些自检**不**改真文件读来的 SOURCE，而是变异一段硬编码的干净 fixture。理由：真文件被人
+  // 这些自检**不**改真文件读来的源码，而是变异一段硬编码的干净 fixture。理由：真文件被人
   // 施加变异做验收时（本任务要求逐个施加 M1–M4），若自检也 `SOURCE.replace()`，那个 replace 会
   // 因为「要替换的原串已经不在了」而 no-op，于是自检自己红成一片噪音，盖过「哪条**真判据**红了」
   // 这个才是要看的信号。fixture 与真 effect 同形，所以它照样证明分析器认得每种形状。
@@ -235,14 +155,14 @@ describe('创建页只在可见时预热终端（否则每个泊车 workspace �
     '}'
   ].join('\n')
 
-  it('干净 fixture 上两条判据都成立（否则自检自身恒假）', () => {
+  it('干净 fixture 上判据都成立（否则自检自身恒假）', () => {
     const calls = prewarmCalls(parse(CLEAN))
     expect(calls).toHaveLength(1)
     expect(callGuardedByVisible(calls[0]!)).toBe(true)
     expect(earlyExitsBefore(calls[0]!)).toEqual([])
   })
 
-  it('自检 M5：在 effect 第一行插一句无条件早退，出口判据翻红（另两条纹丝不动）', () => {
+  it('自检 M5：在 effect 第一行插一句无条件早退，可达性判据翻红（另两条纹丝不动）', () => {
     // 这就是那个实测出来的洞的精确形状。用 `if (launcherId) return` 而不是裸 `return`：
     // launcherId 恒是非空串（warmLauncherId 返回 `group:…` 或 `region:…`），所以语义上等价于
     // 无条件早退，但**保留了 workspace 的收窄**——裸 return 会让 workspace.id 报 TS18048，
@@ -256,7 +176,7 @@ describe('创建页只在可见时预热终端（否则每个泊车 workspace �
     // 前提自检：另两条判据对这次变异**完全失明**——这正是为什么需要第三条。
     expect(calls).toHaveLength(1)
     expect(callGuardedByVisible(calls[0]!)).toBe(true)
-    // 只有出口那条认得出来。
+    // 只有可达性那条认得出来。
     expect(earlyExitsBefore(calls[0]!)).toHaveLength(1)
   })
 
@@ -269,7 +189,7 @@ describe('创建页只在可见时预热终端（否则每个泊车 workspace �
     expect(earlyExitsBefore(prewarmCalls(parse(mutated))[0]!)).toHaveLength(1)
   })
 
-  it('出口分析器本身可被直接质询：调用之后的 return 与嵌套函数里的 return 都不算', () => {
+  it('可达性分析器本身可被直接质询：调用之后的 return 与嵌套函数里的 return 都不算', () => {
     const exitsBefore = (body: string): number => {
       const src = `const C = () => { useEffect(() => {\n${body}\n}, []) }`
       const [call] = prewarmCalls(parse(src))
