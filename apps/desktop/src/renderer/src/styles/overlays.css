@@ -86,6 +86,38 @@
 .quick-switch__footer kbd { display: inline-flex; align-items: center; padding:1px var(--sp-2); border-radius: var(--radius-sm); background: var(--surface-3); color: var(--text-2); font-family: var(--font-mono); font-size: var(--fs-micro); }
 .dialog-error { margin-bottom:var(--sp-4); padding:var(--sp-4); border: 1px solid var(--red-line); border-radius: var(--radius-sm); color: var(--red-text); background: var(--red-bg); font-size: var(--fs-meta); }
 
+/* Keyboard shortcuts cheat-sheet — the window's one discoverability surface (the stripped Electron menu
+   is not a discovery channel). A plain conditional overlay, not a Radix Dialog, so it renders under the
+   repo's renderToStaticMarkup tests. Same graphite elevation language as the quick switcher: surface fill
+   + top highlight + shadow carry the layer, no stroke as the primary means. */
+.shortcuts-help__overlay { position: fixed; z-index: 120; inset: 0; display: flex; align-items: flex-start; justify-content: center; padding:12vh var(--sp-6) var(--sp-6); background: var(--scrim-3); backdrop-filter: blur(2px); }
+.shortcuts-help {
+  width: min(640px, 100%);
+  max-height: 76vh;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-lg);
+  outline: none;
+  color: var(--text);
+  background: var(--surface-2);
+  box-shadow: var(--elev-3), var(--hl-strong);
+  overflow: hidden;
+}
+.shortcuts-help__head { display: flex; align-items: flex-start; gap:var(--sp-4); padding:var(--sp-5) var(--sp-6); box-shadow: inset 0 -1px var(--line-soft); }
+.shortcuts-help__mark { flex: none; width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius); color: var(--text-2); background: var(--surface-3); }
+.shortcuts-help__head > div { flex: 1; min-width: 0; }
+.shortcuts-help__head h2 { margin:0; font-size: var(--fs-title); letter-spacing: -.015em; }
+.shortcuts-help__head p { margin:var(--sp-1) 0 0; color: var(--text-3); font-size: var(--fs-micro); }
+.shortcuts-help__head .icon-button { flex: none; }
+.shortcuts-help__groups { flex: 1; min-height: 0; overflow-y: auto; padding:var(--sp-5) var(--sp-6); display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap:var(--sp-6) var(--sp-7); }
+.shortcuts-help__group h3 { margin:0 0 var(--sp-3); color: var(--text-3); font-size: var(--fs-micro); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.shortcuts-help__group ul { margin:0; padding:0; list-style: none; display: flex; flex-direction: column; gap:1px; }
+.shortcuts-help__group li { display: flex; align-items: center; justify-content: space-between; gap:var(--sp-4); padding:var(--sp-2) var(--sp-3); border-radius: var(--radius-sm); }
+.shortcuts-help__group li:hover { background: var(--surface-3); }
+.shortcuts-help__label { min-width: 0; overflow: hidden; color: var(--text); font-size: var(--fs-body); text-overflow: ellipsis; white-space: nowrap; }
+.shortcuts-help__chord { flex: none; display: inline-flex; align-items: center; gap:var(--sp-1); }
+.shortcuts-help__chord kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; padding:0 var(--sp-2); border-radius: var(--radius-sm); background: var(--surface-3); color: var(--text-2); font-family: var(--font-mono); font-size: var(--fs-micro); }
+
 /* One-row destination picker: a slim floating card that grows from the pointer. The URL rides on top
    so the choice never loses sight of what it opens; the icon row underneath is the actual selector;
    the hint spells out disabled directions for everyone, including keyboard users who cannot land on a

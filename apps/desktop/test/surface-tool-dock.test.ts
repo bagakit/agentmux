@@ -143,15 +143,45 @@ describe('shared surface tool dock resize', () => {
     expect(scratch.fileTreeDefaultSize).toBeLessThan(project.fileTreeDefaultSize)
   })
 
-  it('reveals a Topic directory inside the built-in Explorer instead of Finder', () => {
+  it('把 Topic 目录定位到自家文件面板，而不是打开系统文件管理器', () => {
     expect(surfaceToolDockSource).toContain('onRevealDirectory(topic.directoryPath)')
-    // 图标要表达「聚焦定位」而不是「打开文件夹」——它把 Explorer 定位到这个目录，
-    // 不是在 Finder 里开一个窗口。
-    expect(surfaceToolDockSource).toContain('title="Reveal in Explorer"')
+    // 图标要表达「聚焦定位」而不是「打开文件夹」——它把自家那棵树滚到这个目录，
+    // 不是在系统文件管理器里开一个窗口。
+    expect(surfaceToolDockSource).toContain('title="Reveal in Files"')
     expect(surfaceToolDockSource).toContain('<Crosshair size={13} />')
     expect(surfaceToolDockSource).not.toContain('api.files.reveal(workspace.id, topic.directoryPath)')
     expect(fileExplorerSource).toContain('next.add(revealRequest.path)')
     expect(fileExplorerSource).toContain('setSelection(createSingleFileExplorerSelection(revealRequest.path))')
+  })
+
+  it('这条内部定位不许借用系统文件管理器的说法（那是三态文案，会在别的平台上说错话）', () => {
+    // 原文案是 "Reveal in Explorer"：产品里没有任何界面把那个面板叫 "Explorer"（它叫
+    // "Files + Branches"），而 "Explorer" 恰好是 Windows 系统文件管理器的名字——一个内部导航
+    // 动作于是看起来像在承诺打开操作系统的窗口。反向的错法同样要挡：把这里改成
+    // `revealInFileManagerLabel()` 会在 mac 上显示 "Reveal in Finder"，而它根本不开 Finder。
+    const dock = surfaceToolDockSource
+    const menu = readFileSync(
+      new URL('../src/renderer/src/components/TopicContextMenu.tsx', import.meta.url),
+      'utf8'
+    )
+    // 注释里要能讲清「为什么不走那条 lib」，所以判据必须落在**代码**上而不是整份文本：这两个文件
+    // 的注释本来就写着 `lib/host-platform`，按整份文本查会误伤讲道理的注释——那是本仓的
+    // [[forbidden-shape-guard-misfires]]：禁止形状既漏又误伤。先剥掉注释再判。
+    const codeOf = (source: string): string =>
+      source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+    for (const [name, source] of [['SurfaceToolDock', dock], ['TopicContextMenu', menu]] as const) {
+      const code = codeOf(source)
+      for (const forbidden of ['"Reveal in Explorer"', '>Reveal in Explorer<', 'in Explorer`']) {
+        expect(code, `${name} 还在用系统文件管理器的说法：${forbidden}`).not.toContain(forbidden)
+      }
+      expect(code, `${name} 借用了 lib/host-platform 的三态文案，但它不开系统文件管理器`)
+        .not.toContain('revealInFileManagerLabel')
+      // 前提自检：两处都真的有这句文案，且剥注释没把代码一起剥掉。少了说明按钮/菜单项没了，
+      // 那时上面几条恒真。
+      expect(code, `${name} 里找不到这条定位文案——判据落空`).toContain('Reveal in Files')
+    }
+    // 剥注释这一步自己也要有人守：如果它把代码剥没了，上面的 not.toContain 全部恒真。
+    expect(codeOf('/* a */ const x = 1 // b').trim(), '剥注释把代码也剥掉了').toBe('const x = 1')
   })
 
   it('keeps exactly one always-visible action on a Topic row', () => {

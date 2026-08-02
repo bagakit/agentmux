@@ -31,11 +31,9 @@ function agent(branch: string, state: AgentDisplayState, observedAt = 1): Sessio
     executorId: 'codex',
     capabilities: {
       terminal: true,
-      hookEvents: true,
       timeline: 'complete-events',
       permission: 'observe',
       providerResume: true,
-      acp: false,
       replyCorrelation: 'none'
     },
     hostId: 'local',

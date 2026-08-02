@@ -1,0 +1,307 @@
+import { readdirSync, statSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import path from 'node:path'
+import { describe, expect, it } from 'vitest'
+import ts from 'typescript'
+import {
+  fileManagerName,
+  hostPlatform,
+  isMacPlatform,
+  revealInFileManagerLabel,
+  type HostPlatform
+} from '../src/renderer/src/lib/host-platform.js'
+
+/**
+ * 平台判定与随平台变化的文案，渲染层只许有一处。
+ *
+ * 建这道门之前的实测：`navigator.userAgent.includes('Mac')` 在渲染层手抄 11 处，Windows 的判定另抄
+ * 两份；而同一个「在系统文件管理器里显示」动作有三种说法——两处三态（Finder / File Explorer /
+ * File Manager）、一处无条件写 "Reveal in Finder"。最后那处在 Windows 与 Linux 上直接说错话，而
+ * **没有任何东西会红**：它是一句 JSX 里的字面量。
+ *
+ * 两处三态今天恰好一致，其中一处的注释还自称「与文件树右键菜单同一套说法」——手抄且知道自己在手抄。
+ * 本仓的教训是同一条规则抄两份时，改对一份就以为改完了（[[duplicated-rule-defeats-the-fix]]）：
+ * 等价性断言对今天的两份副本恒真，抓不到「新抄一份」，所以这里的判据是**结构**的——渲染层除 lib
+ * 之外不得读平台，文案字面量不得在 lib 之外出现。
+ *
+ * 判据都走 TS parser 而不是正则：注释里出现 `navigator.userAgent` 或字符串里出现 "Reveal in" 都不该
+ * 算违规，而按行猜注释边界在本仓被证过是一族盲点（[[lexical-boundaries-need-a-real-lexer]]）。
+ *
+ * 每条结构断言都自带在场自检：扫描根写错、glob 落空、或谓词永远为假时，是自检先红，而不是「一个
+ * 违规都没找到」静默通过（[[false-green-gate-patterns]]）。
+ */
+
+const HERE = path.dirname(fileURLToPath(import.meta.url))
+const RENDERER = path.resolve(HERE, '../src/renderer/src')
+const LIB_FILE = path.join(RENDERER, 'lib/host-platform.ts')
+
+/** 渲染层的每个 .ts/.tsx。 */
+function rendererSources(dir = RENDERER): string[] {
+  const out: string[] = []
+  for (const entry of readdirSync(dir)) {
+    const full = path.join(dir, entry)
+    if (statSync(full).isDirectory()) out.push(...rendererSources(full))
+    else if (/\.tsx?$/.test(full)) out.push(full)
+  }
+  return out
+}
+
+function parse(file: string): ts.SourceFile {
+  return ts.createSourceFile(file, ts.sys.readFile(file) ?? '', ts.ScriptTarget.Latest, true, /\.tsx$/.test(file) ? ts.ScriptKind.TSX : ts.ScriptKind.TS)
+}
+
+/** 现场合成一份源码来质询谓词本身。自检用：不必往产品代码里种违规。 */
+function parseText(text: string): ts.SourceFile {
+  return ts.createSourceFile('synthetic.tsx', text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+}
+
+/** 平台取值的属性名。`navigator.platform` 已废弃但仍可用，两个都要守。 */
+const PLATFORM_PROPERTIES = ['userAgent', 'platform'] as const
+
+/**
+ * 这个文件里读平台的位置。行号用于报错。
+ *
+ * **判据是属性名，不是接收者。** 原先写的是 `isIdentifier(node.expression) && text === 'navigator'`，
+ * 于是 `window.navigator.userAgent` 完全隐身——它的接收者是一个 `PropertyAccessExpression` 而不是
+ * `Identifier`。review agent 实测过这条：把 lib 之外的一处改成 `window.navigator.userAgent.includes('Mac')`
+ * 后本文件 5 条全绿、`tsc` 也退 0（`noUnusedLocals` 没开，于是那个变成死引用的 import 也不报）。
+ * 按接收者判是在猜写法：`window.` / `globalThis.` / 先存进局部变量再读，每一种都要另写一个分支。
+ * 按属性名判则一次覆盖全部接收者（[[forbidden-shape-guard-misfires]]：谓词手抄比取值手抄更隐蔽）。
+ *
+ * 元素访问（`navigator['userAgent']`）另走一支——那是另一种词法形状，同一个语义。
+ *
+ * 代价是可能误伤一个合法的领域字段（某个 record 真有个 `.platform`）。今天渲染层零命中（含未入库
+ * 文件），且这个方向的误伤是**响亮**的：它会红，然后由人决定加一条显式豁免；反方向的漏报是静默的
+ * ——在 Windows 上说错话，一条断言都不红。所以宁可宽。
+ */
+function platformReadsIn(source: ts.SourceFile): number[] {
+  const hits: number[] = []
+  const at = (node: ts.Node): number =>
+    source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1
+  const visit = (node: ts.Node): void => {
+    if (ts.isPropertyAccessExpression(node) && PLATFORM_PROPERTIES.includes(node.name.text as never)) {
+      hits.push(at(node))
+    } else if (
+      ts.isElementAccessExpression(node) &&
+      node.argumentExpression &&
+      ts.isStringLiteralLike(node.argumentExpression) &&
+      PLATFORM_PROPERTIES.includes(node.argumentExpression.text as never)
+    ) {
+      hits.push(at(node))
+    }
+    ts.forEachChild(node, visit)
+  }
+  ts.forEachChild(source, visit)
+  return hits
+}
+
+/** lib 里那几个函数在这个文件里的每一次调用，连实参个数一起报。 */
+const HOST_PLATFORM_FUNCTIONS = [
+  'hostPlatform',
+  'isMacPlatform',
+  'fileManagerName',
+  'revealInFileManagerLabel'
+] as const
+
+function hostPlatformCallsIn(source: ts.SourceFile): { name: string; line: number; args: number }[] {
+  const calls: { name: string; line: number; args: number }[] = []
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      HOST_PLATFORM_FUNCTIONS.includes(node.expression.text as never)
+    ) {
+      calls.push({
+        name: node.expression.text,
+        line: source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1,
+        args: node.arguments.length
+      })
+    }
+    ts.forEachChild(node, visit)
+  }
+  ts.forEachChild(source, visit)
+  return calls
+}
+
+/** 这个文件里出现的字符串/模板字面量文本——注释与标识符不算。 */
+function literalsIn(source: ts.SourceFile): string[] {
+  const out: string[] = []
+  const visit = (node: ts.Node): void => {
+    if (ts.isStringLiteralLike(node)) out.push(node.text)
+    else if (ts.isTemplateExpression(node)) {
+      out.push(node.head.text, ...node.templateSpans.map((span) => span.literal.text))
+    }
+    ts.forEachChild(node, visit)
+  }
+  ts.forEachChild(source, visit)
+  return out
+}
+
+describe('host-platform：渲染层唯一的平台判定与随平台变化的文案', () => {
+  it('三态各自给出自己的文件管理器名字，且互不相同', () => {
+    // 三个名字必须互不相同，否则「按平台说对话」这件事本身没发生。逐个钉死字面量：它们是**用户看到
+    // 的词**，不是内部标识符，改动要显式。
+    expect(fileManagerName('mac')).toBe('Finder')
+    expect(fileManagerName('windows')).toBe('File Explorer')
+    expect(fileManagerName('other')).toBe('File Manager')
+    const all: HostPlatform[] = ['mac', 'windows', 'other']
+    expect(new Set(all.map((platform) => fileManagerName(platform))).size).toBe(3)
+    // 完整措辞由名字派生，不另手抄一遍——把 `Reveal in ` 与名字拆开后才能这样断言。
+    for (const platform of all) {
+      expect(revealInFileManagerLabel(platform)).toBe(`Reveal in ${fileManagerName(platform)}`)
+    }
+  })
+
+  it('平台判定认得三族，且 isMac 由它派生而不是第二条判定', () => {
+    const macUa = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
+    const winUa = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    const linuxUa = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36'
+    expect(hostPlatform(macUa)).toBe('mac')
+    expect(hostPlatform(winUa)).toBe('windows')
+    expect(hostPlatform(linuxUa)).toBe('other')
+    // Linux 不是「出错了」：它要拿到 other 那档的中性名字，而不是 Finder 或 Explorer。
+    expect(revealInFileManagerLabel(hostPlatform(linuxUa))).toBe('Reveal in File Manager')
+    // isMac 与三态必须一致——写成独立的 includes('Mac') 就会在这里分岔。
+    for (const ua of [macUa, winUa, linuxUa]) {
+      expect(isMacPlatform(ua)).toBe(hostPlatform(ua) === 'mac')
+    }
+  })
+
+  it('渲染层除 lib/host-platform.ts 外，任何文件都不得自己读 navigator 的平台', () => {
+    // 这一条是「新抄一份」的检测器。等价性断言办不到：一份对今天正确的副本与 lib 行为完全相同，
+    // 行为判据恒绿（[[equivalence-cannot-catch-a-fresh-copy]]），只有结构判据能抓。
+    const offenders: string[] = []
+    let scanned = 0
+    for (const file of rendererSources()) {
+      if (file === LIB_FILE) continue
+      scanned += 1
+      for (const line of platformReadsIn(parse(file))) {
+        offenders.push(`${path.relative(RENDERER, file)}:${line}`)
+      }
+    }
+    // 自检：扫描根写错或递归坏掉时，是这一条先红，而不是「零违规」静默通过。
+    expect(scanned, '渲染层一个文件都没扫到——扫描根不对').toBeGreaterThan(200)
+    expect(offenders, '改成从 lib/host-platform 取值：hostPlatform() / isMacPlatform()').toEqual([])
+    // 反向自检：谓词本身要真能报出违规。lib 自己就是那个正例——它必须读得到 navigator。
+    expect(platformReadsIn(parse(LIB_FILE)).length, 'lib 自己不读 navigator——谓词或 lib 有一个坏了').toBeGreaterThan(0)
+    // 但「lib 被认出来」不足以证明谓词没被收窄：lib 用的正是最朴素的 `navigator.userAgent`，
+    // 任何按接收者收窄的改法在它身上照旧命中。所以自检必须**自己带上那些绕过形状**——每一种
+    // 接收者、以及元素访问，都要被认出来。review agent 实测存活的那次变异就是第二行这个形状。
+    for (const shape of [
+      'const a = navigator.userAgent',
+      'const b = window.navigator.userAgent.includes("Mac")',
+      'const c = globalThis.navigator.platform',
+      'const d = navigator["userAgent"]',
+      'const e = nav.platform'
+    ]) {
+      expect(platformReadsIn(parseText(shape)).length, `谓词认不出这个形状：${shape}`).toBeGreaterThan(0)
+    }
+    // 正交边界：同名的**声明**与字符串不是取值，不许误报，否则这道门会逼人把合法代码改坏。
+    for (const benign of [
+      'type T = { userAgent: string }',
+      'const s = "navigator.userAgent"',
+      '// navigator.userAgent',
+      'function f(userAgent: string) { return userAgent }'
+    ]) {
+      expect(platformReadsIn(parseText(benign)), `谓词误报了：${benign}`).toEqual([])
+    }
+  })
+
+  it('三个文件管理器名字只许在 lib 里当字面量出现', () => {
+    // 上一条守「谁在算平台」，这一条守「谁在写那三个词」。两条都要：一个文件可以完全不碰 navigator，
+    // 只把 `isMac ? 'Reveal in Finder' : …` 里的 isMac 从别处拿来，照旧手抄了文案。
+    const names = ['Finder', 'File Explorer', 'File Manager'] as const
+    const offenders: string[] = []
+    let scanned = 0
+    for (const file of rendererSources()) {
+      if (file === LIB_FILE) continue
+      scanned += 1
+      const relative = path.relative(RENDERER, file)
+      for (const text of literalsIn(parse(file))) {
+        // 判「这句话里含某个文件管理器的名字」而不是「整句恰好等于某个名字」：真实的手抄是
+        // 'Reveal in Finder' 这种带前缀的整句，逐字相等的判据抓不到它。
+        for (const name of names) {
+          if (text.includes(name)) offenders.push(`${relative}: ${JSON.stringify(text)}`)
+        }
+      }
+    }
+    expect(scanned).toBeGreaterThan(200)
+    expect(
+      offenders,
+      '文件管理器的名字是随平台变化的文案，改成调 revealInFileManagerLabel() / fileManagerName()'
+    ).toEqual([])
+    // 自检：三个名字确实以字面量形式住在 lib 里，所以上面那条不是因为谓词永远为假才绿的。
+    const inLib = literalsIn(parse(LIB_FILE))
+    for (const name of names) {
+      expect(inLib, `lib 里找不到 ${name}——SSOT 的字面量不在这`).toContain(name)
+    }
+  })
+
+  it('每个需要平台的渲染层文件，都是 import 进来的——不是巧合地不碰 navigator', () => {
+    // 只守「不许读 navigator」会漏掉另一半：一个文件可以既不读 navigator 也不 import lib，然后
+    // 把 isMac 硬写成 true。所以这里正面数一遍消费者：谁 import 了 lib。
+    //
+    // 判据是 import 路径而不是标识符出现次数——`not.toContain('isMacPlatform(')` 这种写法在本仓被
+    // 裸标识符绕过过（[[guard-criterion-must-be-import-relation]]）。
+    const consumers: string[] = []
+    for (const file of rendererSources()) {
+      if (file === LIB_FILE) continue
+      const source = parse(file)
+      const visit = (node: ts.Node): void => {
+        if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
+          if (/(^|\/)host-platform(\.js)?$/.test(node.moduleSpecifier.text)) {
+            consumers.push(path.relative(RENDERER, file))
+          }
+        }
+        ts.forEachChild(node, visit)
+      }
+      ts.forEachChild(source, visit)
+    }
+    // 平台在这个应用里被真正需要（快捷键修饰键、reveal 文案、文件树多选修饰键至少三族），所以消费者
+    // 不可能是零个。这条断言把「全部改读 lib」的成果钉住：有人把某处改回内联时，它自己那条会红，
+    // 而这条保证不会所有人一起悄悄退回去、只剩一个空 lib。
+    expect(consumers.length, 'lib 一个消费者都没有——不是零手抄，是没人接').toBeGreaterThan(5)
+    // reveal 这条文案的每个入口都必须在其中。硬写清单是有意的：它们是「用户能点到系统文件管理器」的
+    // 全部入口，少一个就是那个入口在非 mac 上说错话，而删掉这份清单等于把这条门变成恒真。
+    for (const entry of [
+      'components/EditorPane.tsx',
+      'components/WorkspaceWorkbench.tsx',
+      'components/file-tree/FileTreeContextMenu.tsx'
+    ]) {
+      expect(consumers, `${entry} 要从 lib 取 reveal 文案`).toContain(entry)
+    }
+  })
+
+  it('调用点必须让平台由 lib 自己探测——写死实参等于又判了一次平台', () => {
+    // 上一条只证「import 声明在场」。它证不到**调用**：`revealInFileManagerLabel('mac')` 完全满足
+    // import 关系，而那正是第三次手抄平台判定——在 Windows 上无条件说 "Reveal in Finder"。
+    // review agent 实测过这条变异：改 WorkspaceWorkbench.tsx:213 之后 desktop 全套 2921 条通过，
+    // 两条失败与它无关。所以这里判**实参个数**：渲染层的调用一律零实参，平台由缺省参数从 lib 取。
+    //
+    // 为什么零实参是对的规矩而不是过严：三个函数的缺省值都是 `hostPlatform()`，那是唯一一处探测。
+    // 显式传参只有两种来源——要么手上已有一个 platform（那它自己是从哪来的？只能是又判了一次），
+    // 要么是写死的字面量（那就是 bug 本身）。测试文件不受这条约束：它必须能喂三态。
+    const offenders: string[] = []
+    let seen = 0
+    for (const file of rendererSources()) {
+      if (file === LIB_FILE) continue
+      for (const call of hostPlatformCallsIn(parse(file))) {
+        seen += 1
+        if (call.args > 0) {
+          offenders.push(`${path.relative(RENDERER, file)}:${call.line} ${call.name}(${call.args} 个实参)`)
+        }
+      }
+    }
+    // 前提自检：一个调用都没数到就说明谓词或遍历坏了，主断言会静默通过。今天有 10+ 处调用。
+    expect(seen, '一个 host-platform 调用都没找到——判据失效，主断言恒绿').toBeGreaterThan(8)
+    expect(
+      offenders,
+      '去掉实参：平台由 lib 的缺省参数探测。手上已有 platform 说明别处又判了一次，写死字面量就是那个 bug'
+    ).toEqual([])
+    // 反向自检：谓词认得出带实参的调用。否则上面那条是因为永远数不到实参才绿的。
+    expect(
+      hostPlatformCallsIn(parseText("const x = revealInFileManagerLabel('mac')")).map((c) => c.args),
+      '谓词数不出实参——这道门恒绿'
+    ).toEqual([1])
+  })
+})

@@ -11,11 +11,9 @@ function agent(id: string, state: AgentDisplayState): SessionSnapshot {
     executorId: 'codex',
     capabilities: {
       terminal: true,
-      hookEvents: true,
       timeline: 'complete-events',
       permission: 'observe',
       providerResume: true,
-      acp: false,
       replyCorrelation: 'none'
     },
     hostId: 'local',

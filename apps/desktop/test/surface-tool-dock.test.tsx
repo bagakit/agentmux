@@ -47,8 +47,8 @@ function agentSession(id: string, state: SessionSnapshot['status']['state'] = 'w
     providerId: 'codex',
     executorId: 'codex',
     capabilities: {
-      terminal: true, hookEvents: true, timeline: 'streaming', permission: 'respond',
-      providerResume: true, acp: false, replyCorrelation: 'none'
+      terminal: true, timeline: 'streaming', permission: 'respond',
+      providerResume: true, replyCorrelation: 'none'
     },
     hostId: 'local',
     workspacePath: '/repo',

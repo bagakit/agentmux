@@ -1,6 +1,12 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+
+// WorkbenchTabContextMenu 现在经 clipboard-copy 引到 api，api 在模块加载时就要判断跑在哪个宿主里。
+// 不先立起这个全局，动态 import 那个组件时就会撞 requireDesktopApi 的 window.agentmux。
+vi.hoisted(() => {
+  vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
+})
 import { AGENTMUX_CONTROL_ERROR_CODES } from '@agentmux/core/control'
 import type { DesktopControlResponse } from '../src/shared/contracts.js'
 import {
@@ -498,14 +504,36 @@ describe('入口接线：菜单真的调用了交接出口，并且真的把它�
     ])
   })
 
-  it('Tab 菜单不带那一格，于是落到 Session，并渲染出这一项', () => {
+  it('Tab 菜单不带那一格，于是落到 Session，并渲染出这一项', async () => {
     const source = readFileSync(
       new URL('../src/renderer/src/components/WorkbenchTabContextMenu.tsx', import.meta.url),
       'utf8'
     )
     expect(source).toContain('formatMessagingAddress({ agentSessionId })')
-    expect(source).toContain('copyModel.handoff.onSelect')
-    expect(source).toContain('copyModel.handoff.label')
+
+    // 与 Region 侧同一条路：菜单画的是 model.entries，那份清单是可执行的数据，故"造了不画"跑得到。
+    // 此前这里是两条 toContain('copyModel.handoff.onSelect' / '.label') 的文本断言，而文本看不见
+    // 那一项有没有被画出来——把 JSX 条件改成 `{false && copyModel.handoff ? (` 就能在全绿之下把它抹掉。
+    const { createWorkbenchTabCopyModel } = await import(
+      '../src/renderer/src/components/WorkbenchTabContextMenu.js'
+    )
+    const copied: string[] = []
+    const entries = createWorkbenchTabCopyModel({
+      tabId: 'view:x',
+      agentSessionId: 'agent-7',
+      writeClipboardText: async (text: string) => {
+        copied.push(text)
+      }
+    }).entries
+    const handoff = entries.find(
+      (entry) => entry.kind === 'action' && entry.action.label === 'Message this Agent'
+    )
+    expect(handoff, '交接那一项不在菜单画出来的清单里——用户点不到').toBeDefined()
+    if (handoff?.kind !== 'action') throw new Error('unreachable')
+    await handoff.action.onSelect()
+    // Tab 菜单没有"哪一格"，于是解析成跨 View 稳定的 Session 地址。
+    expect(copied).toEqual([formatMessagingAddress({ agentSessionId: 'agent-7' })])
+    expect(copied[0]).toBe(formatSessionAddress('agent-7'))
   })
 
   it('两个菜单的 model 类型都声明了 handoff——否则它连类型上都不存在', () => {

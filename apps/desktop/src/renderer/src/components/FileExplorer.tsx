@@ -62,6 +62,7 @@ import {
 } from './file-tree/useWorkspaceFileTree'
 import { observeRejectedFileExplorerDirectoryLoads } from './file-tree/file-explorer-report-probe'
 import { FileTreeContextMenu } from './file-tree/FileTreeContextMenu'
+import { isMacPlatform } from '../lib/host-platform'
 import {
   fileExplorerDropDirectory,
   fileExplorerMoveTargets,
@@ -361,7 +362,7 @@ export function FileExplorer({
   const selection = explorerState.selection
   const selectedPath = selection.activePath
   const tree = useWorkspaceFileTree(workspaceId ?? 'missing-workspace', expanded)
-  const isMac = useMemo(() => navigator.userAgent.includes('Mac'), [])
+  const isMac = useMemo(() => isMacPlatform(), [])
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
   const hoverExpandRef = useRef<{ path: string; timer: number } | null>(null)
 

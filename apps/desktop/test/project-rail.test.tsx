@@ -84,11 +84,9 @@ function session(
     executorId: 'codex',
     capabilities: {
       terminal: true,
-      hookEvents: true,
       timeline: 'streaming',
       permission: 'observe',
       providerResume: true,
-      acp: false,
       replyCorrelation: 'none'
     },
     hostId: 'local',

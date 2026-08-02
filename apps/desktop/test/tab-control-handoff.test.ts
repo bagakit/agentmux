@@ -1,4 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
+
+// WorkbenchTabContextMenu 现在经 clipboard-copy 引到 api，api 在模块加载时判断宿主。先立起这个全局，
+// 否则下面对组件模块的静态 import 会撞 requireDesktopApi 的 window.agentmux。
+vi.hoisted(() => {
+  vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
+})
+
 import { createWorkbenchTabCopyModel } from '../src/renderer/src/components/WorkbenchTabContextMenu.js'
 import { createRegionCopyModel } from '../src/renderer/src/components/RegionContextMenu.js'
 import {

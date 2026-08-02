@@ -16,11 +16,9 @@ function agent(id: string, label: string, state: SessionSnapshot['status']['stat
     executorId: 'codex',
     capabilities: {
       terminal: true,
-      hookEvents: true,
       timeline: 'streaming',
       permission: 'respond',
       providerResume: true,
-      acp: false,
       replyCorrelation: 'native-turn-id'
     },
     hostId: 'local',

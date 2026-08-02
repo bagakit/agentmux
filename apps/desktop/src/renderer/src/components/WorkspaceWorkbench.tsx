@@ -46,6 +46,7 @@ import { WorkbenchTabStrip } from './WorkbenchTabStrip'
 import { resolvePaneColumnEdgeZone } from '../lib/tab-drop-zone'
 import { SplitRatioCommitter } from '../lib/split-ratio-commit'
 import { moveSessionViewMenu, tabIdsForCloseScope, workbenchSplitMenuEntries } from '../lib/workbench-tab-actions'
+import { revealInFileManagerLabel } from '../lib/host-platform'
 import { SurfaceSwitch, TopRowLeadingChrome } from './TopRowChrome'
 import { groupIds } from '../lib/workbench-layout'
 import type {
@@ -92,13 +93,6 @@ const EditorPane = lazy(async () => {
 type DragTabData = { kind: 'tab'; tabId: string; groupId: string }
 type DropData = DragTabData | { kind: 'pane'; groupId: string }
 type SplitTarget = { groupId: string; direction: SplitDirection }
-
-// 「在文件管理器中显示」的平台文案，与文件树右键菜单同一套说法（Finder / File Explorer / File Manager）。
-function fileManagerRevealLabel(): string {
-  if (navigator.userAgent.includes('Mac')) return 'Reveal in Finder'
-  if (navigator.userAgent.includes('Windows')) return 'Reveal in File Explorer'
-  return 'Reveal in File Manager'
-}
 
 function tabSurfaceFallback(tab: WorkbenchTab, sessions: readonly SessionSnapshot[]): string {
   const surface = titleWorkbenchSurface(tab)
@@ -216,7 +210,7 @@ function SortableWorkbenchTab({
           return {
             path: surface.path,
             workspaceRoot: workspace.path,
-            revealLabel: fileManagerRevealLabel(),
+            revealLabel: revealInFileManagerLabel(),
             onReveal: async () => {
               try {
                 await api.files.reveal(surface.workspaceId, surface.path)

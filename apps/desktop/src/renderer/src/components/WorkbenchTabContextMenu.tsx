@@ -30,17 +30,32 @@ import {
   workbenchSplitDirectionIcon
 } from './workbench-split-menu-icons'
 
+/**
+ * 每个动作一个稳定 id：作 React key，也是将来配图标 / 记遥测该用的键。
+ *
+ * 为什么不拿 `label` 当键：这个菜单里有一项（reveal）的显示文案**跟平台走**（Finder /
+ * File Explorer / File Manager），于是「稳定的键」与「画出来的字」是两件事。曾经把两者压在
+ * 一个 `label` 联合里、再用一个可选的 `displayLabel` 覆盖显示——那个形状有两个毛病：
+ *
+ * 1. 联合里那个中性值 `'Reveal in File Manager'` **逐字等于** Linux 上真正要显示的文案，
+ *    于是「忘了传 displayLabel」在 mac 上看起来完全正常（掉回中性值），只在 Windows 上说错话。
+ *    一个可选字段 + 一个恰好合法的兜底 = 静默降级。
+ * 2. 组件里因此躺着一份平台文案的字面量，而平台文案的 SSOT 在 `lib/host-platform.ts`。
+ *
+ * 现在 `label` **就是**要画出来的字、必填，id 单独一列。谁也不再兼任对方。
+ */
+type WorkbenchTabActionId =
+  | 'copy-view-address'
+  | 'copy-session-address'
+  | 'message-agent'
+  | 'copy-path'
+  | 'copy-relative-path'
+  | 'reveal'
+
 type WorkbenchTabCopyAction = {
-  label:
-    | 'Copy View Address'
-    | 'Copy Session Address'
-    | 'Message this Agent'
-    | 'Copy Path'
-    | 'Copy Relative Path'
-    | 'Reveal in File Manager'
-  // 显示文案。缺省即用 `label`；只有 reveal 需要跟平台走（Finder / File Explorer / File Manager），
-  // 由组件把算好的文案作为 displayLabel 传进来。label 仍是稳定的联合值，作 key 与图标索引之用。
-  displayLabel?: string
+  id: WorkbenchTabActionId
+  /** 画出来的字。reveal 那项由组件按平台算好传进来，其余都是固定文案。 */
+  label: string
   icon: typeof Send
   onSelect(): Promise<void>
 }
@@ -105,7 +120,7 @@ export function createWorkbenchTabCopyModel({
   file?: WorkbenchTabFileActions
   writeClipboardText(text: string): Promise<void>
 }): WorkbenchTabCopyModel {
-  const copy = async (text: string, label: WorkbenchTabCopyAction['label']): Promise<void> => {
+  const copy = async (text: string, label: string): Promise<void> => {
     try {
       await writeClipboardText(text)
     } catch (error) {
@@ -114,6 +129,7 @@ export function createWorkbenchTabCopyModel({
   }
   const actions: Omit<WorkbenchTabCopyModel, 'entries'> = {
     viewAddress: {
+      id: 'copy-view-address',
       label: 'Copy View Address',
       icon: Crosshair,
       onSelect: async () => copy(formatViewAddress(tabId), 'Copy View Address')
@@ -123,13 +139,15 @@ export function createWorkbenchTabCopyModel({
           // 同一个交接意图，从 Tab 菜单进来时没有"哪一格"这个信息，于是解析成 Session 地址：
           // 它在 View 被关掉、移动、分屏之后依然指向同一个 Agent。
           handoff: {
-            label: 'Message this Agent' as const,
+            id: 'message-agent' as const,
+            label: 'Message this Agent',
             icon: Send,
             onSelect: async () =>
               copy(formatMessagingAddress({ agentSessionId }), 'Message this Agent')
           },
           sessionAddress: {
-            label: 'Copy Session Address' as const,
+            id: 'copy-session-address' as const,
+            label: 'Copy Session Address',
             icon: Copy,
             onSelect: async () => copy(formatSessionAddress(agentSessionId), 'Copy Session Address')
           }
@@ -138,22 +156,25 @@ export function createWorkbenchTabCopyModel({
     ...(file
       ? {
           copyPath: {
-            label: 'Copy Path' as const,
+            id: 'copy-path' as const,
+            label: 'Copy Path',
             icon: Copy,
             onSelect: async () =>
               copy(formatPathsForCopy([file.path], 'absolute', file.workspaceRoot), 'Copy Path')
           },
           copyRelativePath: {
-            label: 'Copy Relative Path' as const,
+            id: 'copy-relative-path' as const,
+            label: 'Copy Relative Path',
             icon: CornerDownRight,
             onSelect: async () =>
               copy(formatPathsForCopy([file.path], 'relative', file.workspaceRoot), 'Copy Relative Path')
           },
           reveal: {
-            // 平台文案由组件给（Finder/File Explorer/File Manager），label 联合用中性的那个，
-            // displayLabel 承载真正显示的文案——渲染层不必特判任何字段。
-            label: 'Reveal in File Manager' as const,
-            displayLabel: file.revealLabel,
+            // 这一项的文案跟平台走，由组件从 `lib/host-platform` 取好传进来（本模块不认平台）。
+            // 它是 label 唯一一处非字面量的地方——`id` 承担稳定键的职责，所以这里不需要兜底值，
+            // 也就没有「忘了传就掉回一个恰好合法的中性值」这条静默降级路。
+            id: 'reveal' as const,
+            label: file.revealLabel,
             icon: ExternalLink,
             onSelect: async () => file.onReveal()
           }
@@ -166,9 +187,6 @@ export function createWorkbenchTabCopyModel({
 /**
  * 由在场的动作派生出显示顺序。交接排第一（那是用户来这个菜单的主要意图），随后是各级地址；
  * 文件 Tab 的路径复制与「显示」跟在地址之后。这份派生是唯一决定「谁在场、什么顺序」的地方。
- *
- * reveal 的 label 是中性联合值，但显示文案要跟平台走，所以组件渲染时用它自己算出的
- * `revealLabel` 覆盖这一项的显示——见组件里的注释。
  */
 function workbenchTabMenuEntries(
   model: Omit<WorkbenchTabCopyModel, 'entries'>
@@ -272,12 +290,12 @@ export function WorkbenchTabContextMenu({
             const Icon = entry.action.icon
             return (
               <ContextMenu.Item
-                key={entry.action.label}
+                key={entry.action.id}
                 className="tab-context-menu__item"
                 onSelect={entry.action.onSelect}
               >
                 <Icon size={14} />
-                <span>{entry.action.displayLabel ?? entry.action.label}</span>
+                <span>{entry.action.label}</span>
               </ContextMenu.Item>
             )
           })}

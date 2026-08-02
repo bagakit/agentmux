@@ -21,11 +21,9 @@ function agent(
     executorId: 'codex',
     capabilities: {
       terminal: true,
-      hookEvents: true,
       timeline: 'complete-events',
       permission: 'observe',
       providerResume: true,
-      acp: false,
       replyCorrelation: 'none'
     },
     hostId: 'local',
@@ -251,8 +249,8 @@ describe('未确认 Thread 是名册的一列', () => {
     return {
       id, kind: 'agent', providerId: 'codex', executorId: 'codex',
       capabilities: {
-        terminal: true, hookEvents: true, timeline: 'streaming', permission: 'observe',
-        providerResume: true, acp: false, replyCorrelation: 'none'
+        terminal: true, timeline: 'streaming', permission: 'observe',
+        providerResume: true, replyCorrelation: 'none'
       },
       hostId: 'local', workspacePath: '/repo', label: id, createdAt: 1, updatedAt: 1,
       processState: 'running', status: { state: 'working', source: 'run-process', observedAt: 1 },
@@ -290,11 +288,9 @@ describe('名册真的把 usage 投影接上了，而不是每行都写死"不�
     return agent(id, {
       capabilities: {
         terminal: true,
-        hookEvents: true,
         timeline: 'complete-events',
         permission: 'observe',
         providerResume: true,
-        acp: false,
         replyCorrelation: 'none',
         // 报用量的 Provider（claude/codex）在 catalog 里声明这一项；判定只依据它，不按 Provider 名硬编码。
         usage: { kind: 'native-transcript', transcriptFormat: 'codex-rollout' }

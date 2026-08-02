@@ -89,6 +89,48 @@ function bannedTokenCount(text: string): number {
   return count
 }
 
+/**
+ * 「按扩展名，这本该是一个文本文件」——用**排除已知的二进制**来判，不是列举已知的文本。
+ *
+ * 极性是这里唯一重要的设计决定。曾经写成「文本扩展名白名单」（.ts/.tsx/.md/…），实测被绕过：
+ * `.mts` 不在名单里，于是往一个跟踪的 `.mts` 里塞一个参考项目名加一个 NUL，**两道扫描同时
+ * 沉默**（泄漏扫描按「含 NUL 且不是文本」跳过，NUL 禁令按「不是文本」不查）。名单还漏了
+ * `.cts`/`.jsx`/`.c` 与三个无扩展名文件。
+ *
+ * 白名单对一道禁令来说是错的方向：**它对每一个没想到的扩展名 fail open**。而仓库里会不断出现
+ * 新的文本扩展名（今天 2 个 `.mts`、2 个 `.c`），加一种就白开一个口子，且没有任何提示。
+ * 反过来，漏了一种二进制只会让扫描多读几个文件（慢一点，不会漏），下面那条禁令会立刻点名它，
+ * 于是「补进这个集合」是一次显式决定。
+ */
+const BINARY_EXTENSIONS = ['.png', '.icns', '.tgz']
+
+/**
+ * 无扩展名、但确实是二进制的跟踪文件。按路径逐条列，不按目录放过。
+ *
+ * 只有 vendored 的两个 mach-o 可执行文件。注意 `packages/core/bin/agentmux` 也没有扩展名，
+ * 但它是 text/plain 的 shell 包装，**必须**被扫描——所以这里不能写成「凡 bin/ 下放过」。
+ */
+const BINARY_PATHS = new Set([
+  'packages/core/vendor/ctxmux/darwin-arm64/bin/ctxmux',
+  'packages/core/vendor/ctxmux/darwin-arm64/bin/ctxmuxd'
+])
+
+function isKnownBinary(path: string): boolean {
+  return BINARY_EXTENSIONS.some((extension) => path.endsWith(extension)) || BINARY_PATHS.has(path)
+}
+
+/**
+ * 允许含 NUL 的文本文件——**每一条都必须是「NUL 就是被测主题」**。
+ *
+ * `test/git-diff.test.ts` 里的 `'PNG\0\x01header'` 是 git diff 二进制检测的输入：HEAD 侧的
+ * blob 含 NUL 时必须被判成二进制、不能当文本喂给 Monaco。把 NUL 从那个 fixture 里拿掉，
+ * 被测的判定就没有样本了。
+ *
+ * 豁免精确到路径，不是类别。**绝不能**写成"凡 test/ 放过"——上一例（哨兵值用 NUL）本身就是
+ * 一个测试文件，那样写等于把这道禁令关掉。
+ */
+const NUL_ALLOWED_FILES = new Set(['apps/desktop/test/git-diff.test.ts'])
+
 function trackedTextFiles(): { path: string; text: string }[] {
   const listing = execFileSync('git', ['ls-files', '-z'], {
     cwd: new URL('../../../', import.meta.url),
@@ -103,7 +145,11 @@ function trackedTextFiles(): { path: string; text: string }[] {
     } catch {
       continue // 跟踪但工作区里不存在（未 checkout）——没有内容可泄漏。
     }
-    if (raw.includes(0)) continue // 二进制：vendored 的 ctxmux 与图标，占了 16MB 里的大头。
+    // 含 NUL 就跳过——但只对**本来就不是文本**的文件成立（vendored 的 ctxmux 与图标，占了
+    // 16MB 里的大头）。一个按扩展名该是文本的文件含 NUL 时不跳过，照样扫：否则「往一个 .ts
+    // 里塞个 NUL」就是一条把名字藏进仓库的路（实测发生过一次）。下面还有一条禁令让这种文件
+    // 直接变红，但扫描本身也不该依赖那条禁令先跑。
+    if (raw.includes(0) && isKnownBinary(path)) continue
     out.push({ path, text: raw.toString('utf8') })
   }
   return out
@@ -159,6 +205,78 @@ describe('参考项目名不出现在跟踪文件里', () => {
     expect(paths.has('docs/reviews/agentmux-provider-parity-plan.md')).toBe(true)
     // 而二进制确实被跳过了——否则 16MB 里的 vendored 二进制会拖慢每一次扫描。
     expect(paths.has('packages/core/vendor/ctxmux/darwin-arm64/bin/ctxmuxd')).toBe(false)
+    // 但「含 NUL 就跳过」这条捷径**不许**扩到该是文本的文件上。这个 .ts 里有一个真的 NUL
+    // （二进制检测的 fixture），它必须仍在扫描面内：把跳过判断放宽回 `raw.includes(0)`，
+    // 是这一条先红。没有它，那条捷径就又成了一个「往 .ts 里塞个 NUL 就免检」的口子。
+    expect(paths.has('apps/desktop/test/git-diff.test.ts')).toBe(true)
+  })
+
+  it('该是文本的跟踪文件里不许有 NUL——否则它被上面那条跳过判断静默豁免', () => {
+    // `trackedTextFiles` 用 `raw.includes(0)` 跳过二进制（vendored 的 ctxmux 与图标）。这条跳过是
+    // 必要的，但它同时是一个静默的豁免口：任何**该是文本**的文件只要含一个 NUL，就再也不被扫描，
+    // 于是可以在里面藏一个参考项目名而这道禁令一句话都不说。
+    //
+    // 这不是假想。实测坐实过一例：`test/workbench-tab-file-actions.test.ts` 用 `'\0never\0'` 当
+    // 「绝不可能出现在剪贴板里」的哨兵（意图正确），两个 NUL 让 git 把整个文件判成 binary
+    // （`file -I` 报 application/octet-stream），`git grep` 对它完全失明，而这里也一直跳过它。
+    // 修法是换成同样不可能出现、但可读的哨兵；这条断言防它以任何形式回来。
+    //
+    // 判据按「排除已知二进制」而不是按「git 说它是不是 binary」：后者正是被绕过的那一层。
+    // 也不按「文本扩展名白名单」——那个极性实测被 `.mts` 绕过（见 isKnownBinary 的注释）。
+    //
+    // 少数文件里 NUL 就是被测主题（见 NUL_ALLOWED_FILES），它们按路径豁免——但注意
+    // `trackedTextFiles` 那边**不**给它们豁免：它们照样被扫名字，豁免只免这一条禁令。
+    const listing = execFileSync('git', ['ls-files', '-z'], {
+      cwd: new URL('../../../', import.meta.url),
+      maxBuffer: 64 * 1024 * 1024
+    })
+    const offenders: string[] = []
+    const skipped: string[] = []
+    let tracked = 0
+    let checked = 0
+    let allowedSeen = 0
+    for (const path of listing.toString('utf8').split('\0')) {
+      if (!path) continue
+      tracked += 1
+      if (isKnownBinary(path)) {
+        skipped.push(path)
+        continue
+      }
+      let raw: Buffer
+      try {
+        raw = readFileSync(new URL(`../../../${path}`, import.meta.url))
+      } catch {
+        continue
+      }
+      checked += 1
+      if (!raw.includes(0)) continue
+      if (NUL_ALLOWED_FILES.has(path)) {
+        allowedSeen += 1
+        continue
+      }
+      offenders.push(path)
+    }
+    // 自检一：扫描根指错时，是这条先红，而不是「零违规」静默通过。
+    expect(tracked, '一个跟踪文件都没列到——扫描根不对').toBeGreaterThan(800)
+    // 自检二：**跳过的必须是少数**。这是从一次实测教训里来的判据：曾经写成
+    // `expect(checked).toBeGreaterThan(400)`，而 `.ts` 一族自己就有 586 个文件，于是把清单缩到
+    // 只剩 `.ts` 仍然 checked=586 > 400，自检照旧通过，而 `.tsx`/`.md`/`.json`/`.css`/… 全部
+    // 重新变成可藏 NUL 的地方。一个「地板」阈值挡不住「按类别缩小覆盖面」这种放宽。
+    //
+    // 改成按覆盖率判：跳过的文件必须能被逐条数清（今天 12 个：8 张 png、1 个 icns、1 个 tgz、
+    // 2 个 mach-o）。任何把跳过面扩成一整类的改动都会顶破这个上限。
+    expect(
+      skipped.length,
+      `跳过的文件太多了（${skipped.length} 个）——跳过面被扩成了类别判断：${skipped.slice(0, 20).join(', ')}`
+    ).toBeLessThan(20)
+    expect(checked, '查到的文件数与跟踪总数差太远').toBeGreaterThan(tracked - 20)
+    // 豁免清单里的每一条都必须真的还含 NUL。否则一条过期的豁免会静默留在这里，将来某个文件
+    // 挪到那个路径上就白拿一张免检票。
+    expect(allowedSeen, '豁免清单里有条目已经不含 NUL 了——删掉它').toBe(NUL_ALLOWED_FILES.size)
+    expect(
+      offenders,
+      '这些文件含 NUL，于是被参考项目名扫描静默跳过；改用可读的哨兵值'
+    ).toEqual([])
   })
 
   it('除了许可证强制的署名，没有任何跟踪文件提到参考项目', () => {
