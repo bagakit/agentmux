@@ -73,12 +73,19 @@ export type WorkbenchRegionPresetAction = {
   label: string
 }
 
-const WORKBENCH_REGION_PRESET_LABELS: ReadonlyArray<WorkbenchRegionPresetAction> = [
+/**
+ * 每一档预设的菜单措辞与顺序。
+ *
+ * 写成 `as const satisfies` 而不是加类型标注（`: ReadonlyArray<WorkbenchRegionPresetAction>`），是为了让
+ * 下面那道 exactness 证明能真正发红：标注会把 `preset` 拓宽成整个 union，于是「这张表少列一档」在类型层
+ * 彻底不可观测。`satisfies` 既留住字面量、又照旧校验每一项都是合法的预设名。
+ */
+const WORKBENCH_REGION_PRESET_LABELS = [
   { preset: 'columns-3', label: '3 Columns' },
   { preset: 'grid-4', label: '2 × 2 Grid' },
   { preset: 'grid-6', label: '2 × 3 Grid' },
   { preset: 'grid-9', label: '3 × 3 Grid' }
-]
+] as const satisfies ReadonlyArray<WorkbenchRegionPresetAction>
 
 /**
  * 「不依赖格数的重排」这两档：均分、把当前格挪到第一位。
@@ -92,16 +99,40 @@ const WORKBENCH_REGION_PRESET_LABELS: ReadonlyArray<WorkbenchRegionPresetAction>
  * 缺的只是 GUI 表达不出后两档（#486）——不是缺一个菜单项，是 store 那个 action 的签名只收 preset，
  * 把它们挡在了外面。
  */
-const WORKBENCH_REGION_REARRANGE_LABELS: ReadonlyArray<{
-  mode: WorkbenchRegionRearrangeMode
-  label: string
-}> = [
+const WORKBENCH_REGION_REARRANGE_LABELS = [
   { mode: { kind: 'balance' }, label: 'Even Split' },
   { mode: { kind: 'active-first' }, label: 'Focused First' }
-]
+] as const satisfies ReadonlyArray<{ mode: WorkbenchRegionRearrangeMode; label: string }>
 
 /** 不依赖格数的那两档重排。刻意是 `AgentMuxArrangeMode` 的子集，不是另一个平行的枚举。 */
 export type WorkbenchRegionRearrangeMode = Exclude<AgentMuxArrangeMode, { kind: 'preset' }>
+
+/**
+ * 两张措辞表各自「不多不少，恰好覆盖它那个 union」的双向证明。
+ *
+ * 为什么需要它：#486 的教训不是「少了两个菜单项」，而是**引擎支持的档位在 GUI 里静默不可达**——而那
+ * 一次是签名挡住的，这一次会是措辞表挡住的。今天给核心的预设 union 加第五档，`presetColumns`（穷举
+ * switch，TS2366）与 `PRESET_ICONS`（`satisfies Record`）都会响亮地报错，唯独上面这两张表不会：它们
+ * 只是数组，少列一项完全合法。症状与 #486 逐字相同——CLI 能摆，菜单里没有，而每个容器自己的测试照旧
+ * 全绿。同理，给 `AgentMuxArrangeMode` 加第三档重排，`REARRANGE_ICONS` 会报错而措辞表不会。
+ *
+ * 两个方向都要写：`表 ⊆ union` 抓「表里写了个不存在的档」（`satisfies` 也抓这一半），`union ⊆ 表`
+ * 抓真正危险的那一半——「union 长了而表没跟上」。任一半是 `never` 都不能赋给 `true` 的槽位，于是漂移
+ * 是一处点名了是哪个方向失败的编译错误。形状与 `packages/core/src/workbench-layout-preset.ts` 里
+ * `_presetTupleIsExactlyTheUnion` 相同，理由也相同——包括那里写明的「union 不可从表派生」：若从表派生，
+ * 两个方向都退化成自反的 `true`，证明成为永不失败的死代码。这两个 union 都在别处独立写着
+ *（预设在 core 的 `WorkbenchLayoutPreset`，重排在 `AgentMuxArrangeMode`），所以证明是活的。
+ */
+type PresetLabelEntry = (typeof WORKBENCH_REGION_PRESET_LABELS)[number]['preset']
+type RearrangeLabelEntry = (typeof WORKBENCH_REGION_REARRANGE_LABELS)[number]['mode']['kind']
+const _labelTablesAreExactlyTheirUnions: [
+  PresetLabelEntry extends WorkbenchRegionLayoutPreset ? true : never,
+  WorkbenchRegionLayoutPreset extends PresetLabelEntry ? true : never,
+  RearrangeLabelEntry extends WorkbenchRegionRearrangeMode['kind'] ? true : never,
+  WorkbenchRegionRearrangeMode['kind'] extends RearrangeLabelEntry ? true : never
+] = [true, true, true, true]
+void _labelTablesAreExactlyTheirUnions
+
 
 /**
  * 「这个 Tab 能摆成哪些预设，以及点下去做什么」——一次判定，同时决定菜单列哪几项和点了发什么。
