@@ -30,12 +30,15 @@ function parse(source: string, name: string): ts.SourceFile {
 }
 
 /** 一条注册：频道名、listener 的形参个数、走的是哪条注册路径。 */
-type Registration = { channel: string; params: number; via: 'helper' | 'raw' }
+type Registration = { channel: string; params: number; via: 'helper' | 'event' }
+
+/** ipc.ts 里两条注册路径的包装名。`via` 与预算表都从这里派生，别在三处各写一遍。 */
+const WRAPPERS = { handle: 'helper', handleWithEvent: 'event' } as const
 
 /**
  * 从 main 侧取出每一条注册。
  *
- * 判据落在 AST 上而不是正则：`handle('x', ...)` 与 `ipcMain.handle('x', ...)` 在文本上互为子串，
+ * 判据落在 AST 上而不是正则：`handle('x', ...)` 与 `handleWithEvent('x', ...)` 在文本上互为子串，
  * 用正则区分两者要靠前缀空白之类的偶然特征，而那正是「换个写法就绕过」的形状。
  */
 function registrations(source = IPC_SOURCE, fileName = 'ipc.ts'): Registration[] {
@@ -44,14 +47,9 @@ function registrations(source = IPC_SOURCE, fileName = 'ipc.ts'): Registration[]
   const walk = (node: ts.Node): void => {
     if (ts.isCallExpression(node) && node.arguments.length >= 2) {
       const [first, second] = node.arguments
-      const via: Registration['via'] | null =
-        ts.isIdentifier(node.expression) && node.expression.text === 'handle'
-          ? 'helper'
-          : ts.isPropertyAccessExpression(node.expression) &&
-              node.expression.name.text === 'handle' &&
-              node.expression.expression.getText(ast) === 'ipcMain'
-            ? 'raw'
-            : null
+      const via = ts.isIdentifier(node.expression)
+        ? (WRAPPERS[node.expression.text as keyof typeof WRAPPERS] ?? null)
+        : null
       if (via && first && second && ts.isStringLiteralLike(first)) {
         // listener 可能是箭头函数或 function 表达式；两者都有 parameters。
         const params = ts.isArrowFunction(second) || ts.isFunctionExpression(second)
@@ -63,6 +61,53 @@ function registrations(source = IPC_SOURCE, fileName = 'ipc.ts'): Registration[]
     ts.forEachChild(node, walk)
   }
   ts.forEachChild(ast, walk)
+  return out
+}
+
+/**
+ * 每一处裸 `ipcMain.handle`，连同「它所在的那个包装是否把同一个频道记进了拆卸清单」。
+ *
+ * 这是 #438 的判据。此前 19 个频道各自写裸的 `ipcMain.handle`，前面手工配一句
+ * `channels.push('同一个字面量')`——同一个名字两个写入点。漏掉那一句不会少一个频道：handler 注册了
+ * 但 `dispose` 时不 `removeHandler`，下一个窗口跑 `registerIpc` 时 Electron 抛
+ * "Attempted to register a second handler for 'X'"。而上面那个 `registrations` 提取器是按注册调用
+ * 来数的，对「少了一句 push」完全隐身（实测：删掉 `browser:selectElement` 那句 push，本文件与
+ * preload-consumption 10 条全绿，tsc 也 exit 0）。
+ *
+ * 所以判据不是「频道清单齐不齐」，而是**每一处裸注册都必须身处一个同时做了 `channels.push` 的包装里**，
+ * 且 push 的就是它注册的那个东西（同一个标识符）。满足这条时，两个写入点在构造上合并成一个。
+ */
+function rawRegistrationSites(source = IPC_SOURCE, fileName = 'ipc.ts'): Array<{
+  where: string
+  channelArg: string
+  enrolled: boolean
+}> {
+  const ast = parse(source, fileName)
+  const out: Array<{ where: string; channelArg: string; enrolled: boolean }> = []
+  // 外层先找包装声明，再在它体内找裸注册——「同一个包装」这个范围由 AST 的嵌套关系给出，
+  // 不靠行号猜边界（按行猜作用域是一族盲点）。
+  const walk = (node: ts.Node, enclosing: ts.VariableDeclaration | null): void => {
+    const scope = ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) ? node : enclosing
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      node.expression.name.text === 'handle' &&
+      node.expression.expression.getText(ast) === 'ipcMain' &&
+      node.arguments.length >= 1
+    ) {
+      const channelArg = node.arguments[0]!.getText(ast)
+      const holder = scope && ts.isIdentifier(scope.name) ? scope.name.text : '<顶层>'
+      // 同一个包装体内，必须有一句 `channels.push(<同一个实参>)`。
+      const body = scope?.initializer?.getText(ast) ?? ''
+      const enrolled = new RegExp(
+        `channels\\.push\\(\\s*${channelArg.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}\\s*\\)`,
+        'u'
+      ).test(body)
+      out.push({ where: `${holder} → ipcMain.handle(${channelArg})`, channelArg, enrolled })
+    }
+    ts.forEachChild(node, (child) => walk(child, scope))
+  }
+  ts.forEachChild(ast, (child) => walk(child, null))
   return out
 }
 
@@ -90,9 +135,9 @@ function invocations(source = PRELOAD_SOURCE, fileName = 'preload.ts'): Array<{ 
 
 /** 越界的注册：listener 形参多于它那条路径实际会传的个数。 */
 function overruns(ipcSource: string): Array<{ channel: string; detail: string }> {
-  // `handle` 包装剥掉 event 再转发（ipc.ts 里那个 helper），所以走它的 listener 拿到的就是
-  // preload 传的那几个值；裸 `ipcMain.handle` 不剥，第一个形参是 event，故多一位。
-  const budget = { helper: 0, raw: 1 } as const
+  // `handle` 包装剥掉 event 再转发，所以走它的 listener 拿到的就是 preload 传的那几个值；
+  // `handleWithEvent` 把 event 放在第一位再转发余下的，故多一位。
+  const budget = { helper: 0, event: 1 } as const
   const sent = new Map(invocations().map((i) => [i.channel, i.args]))
   return registrations(ipcSource)
     .map((r) => ({ ...r, allowed: (sent.get(r.channel) ?? 0) + budget[r.via] }))
@@ -112,7 +157,8 @@ describe('IPC 两侧的对齐（跨进程那条缝没有类型检查）', () => 
     expect(regs.length, 'main 侧一条注册都没取到——提取器与 ipc.ts 的写法脱节了').toBeGreaterThan(50)
     expect(invokes.length, 'preload 侧一条 invoke 都没取到').toBeGreaterThan(50)
     // 两条注册路径都必须还在场：只剩一条时下面那条「按路径判形参」的规则会退化成只守一半。
-    expect(new Set(regs.map((r) => r.via))).toEqual(new Set(['helper', 'raw']))
+    // 清单从 WRAPPERS 派生而不是手抄两个名字——加第三条包装时，是这里先红。
+    expect(new Set(regs.map((r) => r.via))).toEqual(new Set(Object.values(WRAPPERS)))
     // 每条注册的 listener 都必须是函数字面量，否则 params 是 -1，形参判据对它失明。
     expect(regs.filter((r) => r.params < 0).map((r) => r.channel)).toEqual([])
   })
@@ -186,5 +232,43 @@ describe('IPC 两侧的对齐（跨进程那条缝没有类型检查）', () => 
     expect(body).toMatch(/listener\(\s*\.\.\.\w+\s*\)/)
     // 且它要把频道记进拆卸清单：注册了不撤销会让第二个窗口注册时抛。
     expect(body).toContain('channels.push(channel)')
+  })
+
+  it('每一处裸 ipcMain.handle 都身处一个同时登记拆卸的包装里（#438）', () => {
+    // 守的是「注册」与「登记到拆卸清单」不许是两个写入点。同一个频道名分两处写，漏掉 push 那一句
+    // 的后果不是少个频道：handler 注册了但 dispose 时不 removeHandler，下一个窗口跑 registerIpc 时
+    // Electron 抛 "Attempted to register a second handler for 'X'"。
+    //
+    // 判据不是「频道清单齐不齐」——上面那条集合相等的规则是按注册调用数的，对「少了一句 push」
+    // 完全隐身（实测：删掉 `browser:selectElement` 那句 push，本文件与 preload-consumption
+    // 10 条全绿，tsc 也 exit 0）。判据是**每一处裸注册都必须在一个 push 了同一个实参的包装体内**。
+    const sites = rawRegistrationSites()
+    // 自检：真的找到了裸注册点。一处都没找到时下面那条恒真——而裸 ipcMain.handle 必然存在，
+    // 因为两条包装路径自己就是靠它实现的。
+    expect(sites.length, '一处裸 ipcMain.handle 都没找到——提取器与 ipc.ts 脱节了').toBeGreaterThan(1)
+    expect(
+      sites.filter((s) => !s.enrolled).map((s) => s.where),
+      '这处裸注册所在的包装没有 channels.push(同一个频道)——它注册的 handler 永不撤销，下个窗口会抛'
+    ).toEqual([])
+  })
+
+  it('自检：把一句 channels.push 拿掉，上面那条会红', () => {
+    // 这条守的是守卫自己。#438 的整个价值在于「对少掉那一句敏感」，所以必须证明它真的敏感——
+    // 一条恒不报的规则和没有规则一样。锚点落在 handleWithEvent 的包装体上：那是本轮把 19 个
+    // 手抄写入点合并进去的地方，也是下一个人最可能在重构中弄丢的一句。
+    const mutated = IPC_SOURCE.replace(
+      /(const handleWithEvent[\s\S]*?)\n\s*channels\.push\(channel\)/u,
+      '$1'
+    )
+    expect(mutated, '锚点没匹配上，自检没有真的构造出「漏登记」形状').not.toBe(IPC_SOURCE)
+    const before = new Set(rawRegistrationSites().filter((s) => !s.enrolled).map((s) => s.where))
+    const introduced = rawRegistrationSites(mutated)
+      .filter((s) => !s.enrolled)
+      .map((s) => s.where)
+      .filter((where) => !before.has(where))
+    // 断言落在**差集**上而不是全集：后者把这条自检的成败绑在 ipc.ts 当下恰好干净上，于是真出现
+    // 一个漏登记时两条一起红，而这一条红得毫无信息（它只想说「我认得出少了一句」）。
+    expect(introduced).toHaveLength(1)
+    expect(introduced[0]).toContain('handleWithEvent')
   })
 })
