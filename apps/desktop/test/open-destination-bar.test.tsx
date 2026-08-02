@@ -5,7 +5,8 @@ import { describe, expect, it } from 'vitest'
 import {
   OPEN_DESTINATION_BAR_ITEMS,
   OpenDestinationBar,
-  OpenDestinationPopover
+  OpenDestinationPopover,
+  nextFocusedDestination
 } from '../src/renderer/src/components/OpenDestinationBar.js'
 import {
   OPEN_DESTINATIONS,
@@ -177,6 +178,83 @@ describe('OpenDestinationBar', () => {
     expect(firstTabbable).toBe('system')
     // Exactly one button is in the tab order at a time (roving tabindex).
     expect(disabledMarkup.match(/tabindex="0"/g) ?? []).toHaveLength(1)
+  })
+})
+
+describe('OpenDestinationBar cluster geometry', () => {
+  // The redesign's claim is that position replaces decoding: `left` is drawn on the left. These pin that
+  // claim as RELATIONS between coordinates rather than literal cells, so retuning the cluster stays free
+  // while a swap — the failure this exists to catch — reddens. `tab` is the centre the arms are read
+  // against, which is why it is the reference point rather than a fourth hardcoded number.
+  const meta = (destination: OpenDestination) => {
+    const item = OPEN_DESTINATION_BAR_ITEMS.find((entry) => entry.destination === destination)
+    if (!item) throw new Error(`no bar item for ${destination}`)
+    return item
+  }
+
+  it('places each direction on the side it names, around the centre', () => {
+    const centre = meta('tab')
+    // Anchor: the directions are read against the centre, so the centre must actually be interior —
+    // otherwise "beyond the centre" could be satisfied by everything sitting in one line.
+    expect(centre.column).toBeGreaterThan(meta('left').column)
+    expect(centre.column).toBeLessThan(meta('right').column)
+    expect(centre.row).toBeGreaterThan(meta('up').row)
+    expect(centre.row).toBeLessThan(meta('down').row)
+    // left/right must differ only across the horizontal axis, up/down only across the vertical one: a
+    // cross, not a diagonal scatter. Without this, `left` could drift up a row and still pass above.
+    expect(meta('left').row).toBe(centre.row)
+    expect(meta('right').row).toBe(centre.row)
+    expect(meta('up').column).toBe(centre.column)
+    expect(meta('down').column).toBe(centre.column)
+  })
+
+  it('gives every destination its own cell, so no button hides behind another', () => {
+    const cells = OPEN_DESTINATION_BAR_ITEMS.map((item) => `${item.column},${item.row}`)
+    expect(new Set(cells).size).toBe(OPEN_DESTINATIONS.length)
+  })
+
+  it('hands each button its own cell as a custom property, or the grid places nothing', () => {
+    // The wiring axis: the coordinate table can be perfect while the element receives none of it, which
+    // renders as every button stacked in one cell. Assert the VALUES travel, matched per destination.
+    const markup = renderToStaticMarkup(<OpenDestinationBar canSplit onSelect={() => {}} />)
+    for (const item of OPEN_DESTINATION_BAR_ITEMS) {
+      const button = new RegExp(`<button[^>]*data-destination="${item.destination}"[^>]*>`).exec(markup)?.[0]
+      expect(button).toBeDefined()
+      expect(button).toContain(`--destination-column:${item.column}`)
+      expect(button).toContain(`--destination-row:${item.row}`)
+    }
+  })
+
+  it('moves focus to the neighbour on screen, not the next entry in the enum', () => {
+    const all = () => true
+    // From the centre each arrow reaches the arm it points at.
+    expect(nextFocusedDestination('tab', 'ArrowLeft', all)).toBe('left')
+    expect(nextFocusedDestination('tab', 'ArrowRight', all)).toBe('right')
+    expect(nextFocusedDestination('tab', 'ArrowUp', all)).toBe('up')
+    expect(nextFocusedDestination('tab', 'ArrowDown', all)).toBe('down')
+    // The load-bearing case: `right` follows `left` in the enum, but on screen `tab` sits between them.
+    // A flat next/previous walk over DOM order would answer 'right' here.
+    expect(nextFocusedDestination('left', 'ArrowRight', all)).toBe('tab')
+    // And the scan reaches past an empty cell: nothing occupies (2,1)'s left neighbour column for
+    // `system` at (1,1) going right except `up`, which a strict adjacency check would miss.
+    expect(nextFocusedDestination('system', 'ArrowRight', all)).toBe('up')
+  })
+
+  it('stops at the edge instead of wrapping to the far side', () => {
+    // In a spatial arrangement, wrapping reads as the cursor teleporting across the cluster.
+    expect(nextFocusedDestination('left', 'ArrowLeft', () => true)).toBeNull()
+    expect(nextFocusedDestination('up', 'ArrowUp', () => true)).toBeNull()
+  })
+
+  it('skips a disabled destination rather than stranding focus on it', () => {
+    // With no precise pane, only system and tab are live: an arrow must never land on a dead button.
+    const live = (destination: OpenDestination) => !openDestinationNeedsRegion(destination)
+    expect(nextFocusedDestination('tab', 'ArrowLeft', live)).toBeNull()
+    expect(nextFocusedDestination('tab', 'ArrowUp', live)).toBeNull()
+    // Anchor: the same steps DO find those buttons when they are live, so the nulls above are the
+    // disabling at work and not a broken step.
+    expect(nextFocusedDestination('tab', 'ArrowLeft', () => true)).toBe('left')
+    expect(nextFocusedDestination('tab', 'ArrowUp', () => true)).toBe('up')
   })
 })
 
