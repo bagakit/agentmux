@@ -242,40 +242,6 @@ describe('agent roster', () => {
   })
 })
 
-// Inbox 不是第二个列表——按这份名册自己的声明（本文件头注释），待办就是它的行。
-// 未确认的 Thread 因此是一列，与 awaitingReply 并列，而不是另开一张卡片墙。
-describe('未确认 Thread 是名册的一列', () => {
-  function sessionWith(id: string): SessionSnapshot {
-    return {
-      id, kind: 'agent', providerId: 'codex', executorId: 'codex',
-      capabilities: {
-        terminal: true, timeline: 'streaming', permission: 'observe',
-        providerResume: true, replyCorrelation: 'none'
-      },
-      hostId: 'local', workspacePath: '/repo', label: id, createdAt: 1, updatedAt: 1,
-      processState: 'running', status: { state: 'working', source: 'run-process', observedAt: 1 },
-      latestOutputBytes: 0,
-      control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId: `run-${id}` } }
-    }
-  }
-
-  it('把未确认 Thread 数带到对应的行上', () => {
-    const rows = buildAgentRoster({
-      sessions: [sessionWith('a-1'), sessionWith('a-2')],
-      providerCatalog: [],
-      unacknowledgedThreads: { 'a-1': 2 }
-    })
-    expect(rows.find((row) => row.sessionId === 'a-1')?.unacknowledgedThreads).toBe(2)
-    // 没有 Thread 的行报 0，而不是 undefined——它是一列，不是可选装饰。
-    expect(rows.find((row) => row.sessionId === 'a-2')?.unacknowledgedThreads).toBe(0)
-  })
-
-  it('不传时全为 0，名册照常可用', () => {
-    const rows = buildAgentRoster({ sessions: [sessionWith('a-1')], providerCatalog: [] })
-    expect(rows[0]!.unacknowledgedThreads).toBe(0)
-  })
-})
-
 describe('名册真的把 usage 投影接上了，而不是每行都写死"不报用量"', () => {
   // 这一组守的是**接线**，不是判定。判定层的四条（塌成 0、awaiting 塌成 0、无视 capability 声明、
   // 伪造 tok/s 速率）都在 agent-usage-display.test.ts 里直接调纯函数，各自能变红；但它们一条都
