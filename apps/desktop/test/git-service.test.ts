@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { LocalExecutionHost, type ExecutionHost } from '@agentmux/core'
@@ -201,6 +201,91 @@ describe('GitService (contract, fake executor)', () => {
     await expect(service.commit('repo', 'msg', cfg)).rejects.toThrow(/\*\*\*@github\.com/)
     await expect(service.commit('repo', 'msg', cfg)).rejects.not.toThrow(/ghp_secret/)
   })
+
+  /**
+   * "Not in HEAD" versus "could not be read from HEAD" — the two must never collapse.
+   *
+   * `git show HEAD:<path>` exits non-zero for both, and the benign one (the path is not in HEAD) is
+   * how an ADDED file is drawn: no old side. So the predicate deciding between them owns whether a
+   * committed file's entire HEAD side appears in the diff. It had no test at all before this block.
+   *
+   * The trap is that the fatal alone does not separate the two cases. Measured against real git (see
+   * the sibling real-git case below), an unreadable loose object prints `error:` lines AND THEN the
+   * same `exists on disk, but not in 'HEAD'` fatal. A predicate that only tests the fatal reads that
+   * as absence and reports the file as newly added — silently dropping the HEAD side of a file that is
+   * very much committed, with no error anywhere. Hence the two directions below: the benign fatals must
+   * be read as absence, and a fatal arriving with other diagnostics must NOT be.
+   */
+  describe('the HEAD side of a diff: absent and unreadable must not collapse', () => {
+    /** A host whose `git show HEAD:<path>` fails with the given stderr; the worktree side is a plain file. */
+    function diffHost(stderr: string): { service: GitService; config: AppConfig } {
+      const host = gitHost()
+      vi.mocked(host.run).mockImplementation(async (_command, args) => {
+        if (args.includes('rev-parse')) return gitResult(args, '/srv/repo\n')
+        if (args.includes('show')) return gitResult(args, '', stderr, 128)
+        return gitResult(args)
+      })
+      const service = new GitService(
+        () => host,
+        async () => ({ present: true, oversized: false, bytes: Buffer.from('new contents\n') })
+      )
+      return {
+        service,
+        config: {
+          ...config,
+          workspaces: [{ id: 'repo', name: 'repo', hostId: 'remote', path: '/srv/repo', kind: 'folder' }]
+        }
+      }
+    }
+
+    // Both spellings git uses for "the path is not in this commit". `does not exist in` is a path that
+    // was never committed; `exists on disk, but not in` is an untracked file sitting in the worktree.
+    it.each([
+      "fatal: path 'nosuch.txt' does not exist in 'HEAD'\n",
+      "fatal: path 'ondisk.txt' exists on disk, but not in 'HEAD'\n"
+    ])('draws a file that is genuinely not in HEAD as added: %s', async (stderr) => {
+      const { service, config: cfg } = diffHost(stderr)
+
+      const diff = await service.diff('repo', 'ondisk.txt', cfg)
+
+      // The observable is the whole diff shape, not the predicate's boolean: absent old side → added.
+      expect(diff.old).toEqual({ present: false })
+      expect(diff.change).toBe('added')
+    })
+
+    // The defect this block exists for, using git's real transcript (reproduced from the real-git case
+    // below — that case is what keeps this fixture honest). The fatal is byte-identical to the accepted
+    // one above; the `error:` lines are the only thing separating "not in HEAD" from "could not read
+    // HEAD". The oid is a TREE: it is the tree walk that fails this way, not the blob read.
+    it('refuses to read an unreadable tree as absence — it surfaces the real failure', async () => {
+      const { service, config: cfg } = diffHost(
+        'error: unable to open loose object 66321a3e387d80427fbe0a36266bfdf8f2b12156: Permission denied\n' +
+          'error: unable to open loose object 66321a3e387d80427fbe0a36266bfdf8f2b12156: Permission denied\n' +
+          "fatal: path 'tracked.txt' exists on disk, but not in 'HEAD'\n"
+      )
+
+      // Loud, and carrying git's own words — a committed file must never be reported as newly added
+      // just because its blob could not be opened.
+      await expect(service.diff('repo', 'tracked.txt', cfg)).rejects.toThrow(/unable to open loose object/)
+    })
+
+    // The fenced-wildcard shape, the same one fd810e2 fixed in a sibling predicate: with `'.+'` the
+    // wildcard runs past the closing quote and swallows whatever follows, so a longer line that merely
+    // CONTAINS the phrase matches.
+    //
+    // The line has to END in a quote to probe this. My first attempt used a trailing
+    // `(which is not a tree object)` suffix, and it did not discriminate — the `$` anchor rejected it
+    // under BOTH spellings, so widening `[^']*` back to `.+` left the suite green (measured). A wildcard
+    // fenced between two quote literals gets no incidental coverage from anchor cases; it needs a case
+    // where the anchor is satisfied and only the fence can say no.
+    it('does not accept a longer line that merely contains the absence phrase', async () => {
+      const { service, config: cfg } = diffHost(
+        "fatal: path 'a.txt' exists on disk, but not in 'HEAD:sub' at 'refs/heads/x'\n"
+      )
+
+      await expect(service.diff('repo', 'a.txt', cfg)).rejects.toThrow(/refs\/heads\/x/)
+    })
+  })
 })
 
 describe('GitService (real git, temporary repository)', () => {
@@ -324,5 +409,61 @@ describe('GitService (real git, temporary repository)', () => {
     expect(removal.stderr, "git did not echo the quote back — this case no longer probes the wildcard")
       .toContain("bob's-laptop")
     expect(isNotAWorkingTreeStderr(removal.stderr)).toBe(true)
+  })
+
+  /**
+   * The premise behind the fake-host corruption case above, taken from git itself.
+   *
+   * The claim being pinned is narrow and entirely git's behaviour, not ours: when `git show HEAD:<path>`
+   * cannot READ the tree it must walk, it prints its own `error:` diagnostics and then the SAME
+   * `exists on disk, but not in 'HEAD'` fatal it prints for an untracked file. That collision is the
+   * whole reason `isPathAbsentInHead` requires stderr to hold nothing but the fatal.
+   *
+   * It is specifically the TREE (or the commit) that must be unreadable — measured: an unreadable BLOB
+   * says `fatal: bad object HEAD:<path>` instead, which never looked like absence. My first version of
+   * this test made the blob unreadable and failed here, which is the reason it exists: the collision
+   * lives on the path-resolution step, not the content-read step. That distinction is invisible from
+   * the fake-host case alone, and an unreadable tree is the worse of the two — git cannot tell whether
+   * the path is in the commit at all, so "not in HEAD" is the answer it reaches for.
+   *
+   * Deliberately does NOT assert our predicate: the point is what git emits. The consequence of
+   * misreading it is asserted above, where the diff shape is observable.
+   */
+  it('git prints the absence fatal when it merely could not read the tree', async () => {
+    const root = await makeRepo()
+    const host = new LocalExecutionHost()
+    const run = async (args: string[]) => await host.run('git', ['-C', root, ...args], { timeoutMs: 20_000 })
+
+    await writeFile(join(root, 'tracked.txt'), 'committed contents\n')
+    await run(['add', 'tracked.txt'])
+    await run(['commit', '-q', '-m', 'add tracked'])
+
+    // Make the tree unreadable rather than deleting it: a missing object gives a different message,
+    // and "present but unopenable" is the case that collides with the absence fatal.
+    const hashed = await run(['rev-parse', 'HEAD^{tree}'])
+    const oid = hashed.stdout.trim()
+    const loose = join(root, '.git', 'objects', oid.slice(0, 2), oid.slice(2))
+    await chmod(loose, 0o000)
+
+    const shown = await run(['show', '--end-of-options', 'HEAD:tracked.txt'])
+
+    try {
+      // Skip rather than fail where the chmod cannot bite (a root-run CI, or a filesystem that ignores
+      // mode bits): an environment that cannot make an object unreadable has nothing to say here. A
+      // silent pass would be worse — it would look like the collision was verified.
+      if (shown.exitCode === 0) {
+        expect(shown.stdout, 'chmod 000 did not make the object unreadable in this environment').toBe(
+          'committed contents\n'
+        )
+        return
+      }
+      // The collision, stated as two facts about the same stderr: git's own read error is present, AND
+      // the fatal is the byte-identical one an untracked file produces.
+      expect(shown.stderr).toMatch(/error: unable to open loose object/)
+      expect(shown.stderr).toContain("fatal: path 'tracked.txt' exists on disk, but not in 'HEAD'")
+    } finally {
+      // Restore before the afterEach cleanup, which cannot remove an unreadable object.
+      await chmod(loose, 0o444)
+    }
   })
 })

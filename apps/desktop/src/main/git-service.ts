@@ -315,11 +315,37 @@ function toLiteralPathspec(path: string): string {
 /**
  * The two fatals `git show HEAD:<path>` prints when the path is not in HEAD: it was never committed
  * (`does not exist in`), or it is on disk but untracked (`exists on disk, but not in`). Both mean the
- * old side is absent — which is exactly how an added file is drawn. This is anchored to those precise
- * phrases so that any OTHER fatal (an unreadable tree, a corrupt object) is NOT mistaken for absence
- * and swallowed into an empty diff; it must surface as the real error it is.
+ * old side is absent — which is exactly how an added file is drawn.
+ *
+ * The quoted spans are `[^']*`, not `.+`: a fenced wildcard would let `.+` run across the closing
+ * quote and swallow whatever follows, so a longer line that merely CONTAINS one of these phrases would
+ * match. Anchoring each span to "up to the next quote" keeps the shape pinned to the real message.
+ *
+ * The "nothing else on stderr" requirement in {@link isPathAbsentInHead} is the second half of the
+ * decision and the load-bearing one. Absence is not provable from the fatal alone: git prints the SAME
+ * `exists on disk, but not in 'HEAD'` fatal when it could not READ the tree it has to walk to answer
+ * the question — measured against real git, an unreadable tree object yields
+ *
+ *     error: unable to open loose object <tree oid>: Permission denied
+ *     error: unable to open loose object <tree oid>: Permission denied
+ *     fatal: path 'tracked.txt' exists on disk, but not in 'HEAD'
+ *
+ * A predicate that only tests the fatal reads that as "not in HEAD" and draws a committed file as
+ * newly added — the entire HEAD side silently disappears from the diff, which is the corrupt-object
+ * case this comment used to claim was excluded. So absence additionally requires that stderr carry
+ * NOTHING but that one fatal: any other diagnostic line means git was telling us something else as
+ * well, and the failure must surface as the real error it is.
+ *
+ * The collision is on path resolution, not content: an unreadable BLOB says `fatal: bad object
+ * HEAD:<path>` instead, which never resembled absence. Measured — and the reason the guard's real-git
+ * case makes the *tree* unreadable (git-service.test.ts).
  */
-const PATH_ABSENT_IN_HEAD = /^fatal: path '.+' (?:does not exist in|exists on disk, but not in) '[^']+'/m
+const PATH_ABSENT_IN_HEAD = /^fatal: path '[^']*' (?:does not exist in|exists on disk, but not in) '[^']*'$/m
+
+function isPathAbsentInHead(stderr: string): boolean {
+  const lines = stderr.split('\n').filter((line) => line.trim() !== '')
+  return lines.length === 1 && PATH_ABSENT_IN_HEAD.test(lines[0]!)
+}
 
 /** The largest blob or worktree file held as diffable text; anything larger is reported as binary. */
 const MAX_DIFF_BYTES = 2 * 1024 * 1024
@@ -531,7 +557,7 @@ export class GitService {
     if (result.exitCode === 0) return blobTextToDiffSide(result.stdout)
     // The one benign failure: the path is not in HEAD, which is how an added file is drawn. Every other
     // failure is real and must surface rather than be flattened into an empty (or HEAD-fallback) diff.
-    if (PATH_ABSENT_IN_HEAD.test(result.stderr)) return { present: false }
+    if (isPathAbsentInHead(result.stderr)) return { present: false }
     this.assertGit(result, 'Could not read the file from HEAD')
     return { present: false }
   }
