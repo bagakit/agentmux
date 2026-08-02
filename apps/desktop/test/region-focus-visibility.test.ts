@@ -182,4 +182,54 @@ describe('Region 焦点必须看得出来（#339）', () => {
       '焦点态的每一条声明都与默认态取值相同——两格在屏幕上没有任何差别'
     ).not.toEqual([])
   })
+
+  it('焦点表达画在内容之上，不是被子内容遮住的 inset 阴影', () => {
+    // 上面三条全绿也可能一个像素都画不出来——这是实测坐实的真缺陷，不是假想。
+    //
+    // `inset box-shadow` 属元素**自身的背景层**，子元素的背景画在它之上。每个 Region 的直接子元素
+    // 都是满铺不透明的面（`.agent-surface`、`.editor-pane`、`.browser-surface` 三者都
+    // `height: 100%` + `background: var(--surface-0)`），于是那道 inset 环在三种面上完全不可见。
+    // 无头 Chrome 里对位实测：加粗到 4px、换成最亮的 `--green-2`，**依然不可见**；同图换 outline
+    // 或 `::after` 覆盖层立刻可见。所以「1px 太弱、调粗就行」是错的诊断——被调的东西根本没在画。
+    //
+    // 这条与上面那条差别断言的关系，正是 #111 的下一层：那条问「有没有差别」，这条问
+    // 「那个差别在有内容的格子里画得出来吗」。两者都在场才守得住"用户看得见焦点"这件事。
+    //
+    // **两个类名都要判**：这个毛病同时存在于 Region 与 Pane 组两级（`.pane-group--focused`
+    // 的两个 grid 子项也不透明满铺，同样实测不可见）。只钉一处会让另一处静默留在旧形状——
+    // 记忆 duplicated-rule-defeats-the-fix 的形状：同一件事有两个写入点时，改一处的人以为改完了。
+    for (const className of ['workbench-region--active', 'pane-group--focused']) {
+      const active = rulesForClass(className)
+      expect(active.length, `读不到 .${className} 的规则——类名变了或样式入口漏了`).toBeGreaterThan(0)
+      const declared = new Set(active.flatMap((rule) => [...declarations(rule).keys()]))
+
+      // 能画在子内容之上的属性族。outline 不参与布局也不受 overflow 裁剪；覆盖层走 `::after`，
+      // 那种拼法的选择器带伪元素，故单独取。
+      const paintsAboveContent = [...declared].filter(
+        (property) => property === 'outline' || property.startsWith('outline-')
+      )
+      const overlayRules = rules().filter((rule) =>
+        rule.selector
+          .split(',')
+          .some((part) => new RegExp(`\\.${className}\\b[^,]*::(?:after|before)`).test(part.trim()))
+      )
+
+      expect(
+        [...paintsAboveContent, ...overlayRules.map((rule) => rule.selector)],
+        `.${className} 的焦点只由 inset 阴影一类画在自身背景层的属性表达——它的子内容满铺` +
+          '不透明，这一圈一个像素都画不出来（#339 的真因）。改用 outline（负 offset）或 ::after 覆盖层。'
+      ).not.toEqual([])
+    }
+
+    // 自检：判据认得出该拒的那种拼法，否则"没找到违规"与"认不出违规"在结果上同形。
+    // 事故当时的原样声明就是下面这一条，它必须不被算作"画在内容之上"。
+    const historical = declarations({
+      selector: '.workbench-region--active',
+      body: 'box-shadow: inset 0 0 0 1px var(--green-line);'
+    })
+    expect(
+      [...historical.keys()].filter((p) => p === 'outline' || p.startsWith('outline-')),
+      '判据把 inset 阴影错认成画在内容之上的属性——那正是它要挡的形状'
+    ).toEqual([])
+  })
 })
