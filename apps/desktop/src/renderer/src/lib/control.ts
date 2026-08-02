@@ -28,6 +28,7 @@ import {
 } from './workbench-view-layout'
 import {
   addWorkbenchRegion,
+  assertRegionInvariant,
   createWorkbenchTab,
   findWorkbenchRegion,
   removeWorkbenchRegion,
@@ -319,8 +320,16 @@ export function arrangeWorkbenchControlTab(
   mode: AgentMuxArrangeMode,
   mintRegionId: () => string
 ): WorkbenchTab {
-  if (mode.kind === 'balance') return { ...tab, layout: balanceWorkbenchRegionLayout(tab.layout) }
-  if (mode.kind === 'active-first') return { ...tab, layout: placeActiveWorkbenchRegionFirst(tab.layout) }
+  if (mode.kind === 'balance') {
+    const next = { ...tab, layout: balanceWorkbenchRegionLayout(tab.layout) }
+    assertRegionInvariant(next)
+    return next
+  }
+  if (mode.kind === 'active-first') {
+    const next = { ...tab, layout: placeActiveWorkbenchRegionFirst(tab.layout) }
+    assertRegionInvariant(next)
+    return next
+  }
   const required = workbenchRegionPresetSize(mode.preset)
   const present = workbenchRegionBounds(tab.layout.root)
   if (present.length > required) throw error('LAYOUT_CAPACITY_EXCEEDED', 'Tab contains more Regions than the requested preset.')
@@ -336,11 +345,13 @@ export function arrangeWorkbenchControlTab(
   for (const regionId of addedRegionIds) {
     regions[regionId] = { regionId, kind: 'launcher', workspaceId: tab.workspaceId }
   }
-  return {
+  const next = {
     ...tab,
     regions,
     layout: applyWorkbenchRegionLayoutPreset(tab.layout, mode.preset, addedRegionIds)
   }
+  assertRegionInvariant(next)
+  return next
 }
 
 export function rollbackControlOpen(
