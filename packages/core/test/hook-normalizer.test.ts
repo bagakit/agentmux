@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
 import { releaseSubagentRoster } from '../src/hook-normalizer.js'
 import { applyAgentTimelineMutation } from '../src/session-timeline.js'
+import type { AgentTimelineMutation } from '../src/types.js'
 
 afterEach(() => {
   vi.useRealTimers()
@@ -280,6 +281,85 @@ describe('native hook normalization', () => {
       }, 'pre_tool_call')
       expect(before.lifecycleEvent).toBe('tool-use-start')
       expect(item(before as ReturnType<typeof post>).toolOutput).toBeUndefined()
+    })
+
+    /**
+     * Hermes 的 shell-hook wire 是**两层**的，而上面那几条 Hermes 用例把字段预先摊平在顶层，
+     * 于是恰好绕开了 `flattenNestedPayload` 存在的唯一理由。
+     *
+     * 真实形状（本机 `agent/shell_hooks.py` 的 `_serialize_payload`）：顶层只有
+     * `hook_event_name`/`tool_name`/`tool_input`/`session_id`/`cwd` 五个固定键，其余每个事件专属
+     * kwarg 都被塞进 `extra` 子对象——也就是说 `post_tool_call` 的成败、结果正文、关联 id
+     * **全在 `extra` 里**。实测：把 `flattenNestedPayload` 的函数体改成 `return payload`
+     * （不解包），hook-normalizer + agent-provider + provider-conformance 89 条全绿。
+     *
+     * 三条症状同时发生，所以这里三条一起钉：失败被画成成功、输出全丢、Pre/Post 在时间轴上并排
+     * 两行而不是收敛成一条。
+     */
+    it('Hermes 的事件专属字段藏在 extra 子对象里也读得出——这才是它真实的两层形状', () => {
+      // `update` 那一支不带 item，故必须显式收窄：不收窄时 vitest 照旧全绿而 tsc 退 2。
+      const landed = (event: { timeline: readonly AgentTimelineMutation[] }) => {
+        const mutation = event.timeline[0]
+        if (!mutation || (mutation.type !== 'append' && mutation.type !== 'upsert')) {
+          throw new Error('expected an appended or upserted item')
+        }
+        return mutation.item
+      }
+
+      const hermesNested = (eventName: string, extra: Record<string, unknown>) =>
+        providers.get('hermes').normalizeHook({
+          receiptId: `receipt-hermes-nested-${eventName}`,
+          agentSessionId: 'semantic-hermes-nested',
+          runId: 'run-hermes-nested',
+          providerId: 'hermes',
+          eventName,
+          // 顶层只放 Hermes 真的会放在顶层的那几个键。成败/正文/关联 id 一律只在 extra 里——
+          // 任何一个也摊到顶层，这条就退化成上面那几条已有的用例，判不出解包有没有发生。
+          payload: {
+            tool_name: 'shell',
+            tool_input: { command: 'exit 1' },
+            extra
+          }
+        })
+
+      const failed = hermesNested('post_tool_call', {
+        tool_response: { is_error: true, stdout: 'boom' },
+        tool_call_id: 'call_NESTED'
+      })
+      const failedItem = landed(failed)
+
+      // 1. 失败读得出来。不解包时 `is_error` 在 extra 里看不见，这一步会收敛成 complete——
+      //    一条挂了的命令和一条跑成的命令在时间轴上逐字相同。
+      expect(failedItem.status).toBe('failed')
+      // 2. 输出带得出来。不解包时 `tool_response` 也在 extra 里，正文整段丢失。
+      expect(failedItem.toolOutput).toBe('boom')
+      // 3. 关联 id 读得出来，于是 Pre/Post 收敛成同一条。不解包时 id 退化成 receiptId 派生的，
+      //    Post 的 upsert 命不中 Pre 落的那条，时间轴上并排两行。
+      expect(failedItem.id).toBe('run-hermes-nested:tool:call_NESTED')
+
+      // 成功那侧独立承重：只钉失败时，把解包改成「无论如何都判 failed」也能全绿。
+      const succeeded = hermesNested('post_tool_call', {
+        tool_response: 'ok',
+        tool_call_id: 'call_NESTED_OK'
+      })
+      const okItem = landed(succeeded)
+      expect(okItem.status).toBe('complete')
+      expect(okItem.toolOutput).toBe('ok')
+
+      // 顶层优先：`extra` 只补顶层没说的那些，不许反过来盖掉 Hermes 自己声明的固定位。
+      const topLevelWins = providers.get('hermes').normalizeHook({
+        receiptId: 'receipt-hermes-precedence',
+        agentSessionId: 'semantic-hermes-nested',
+        runId: 'run-hermes-nested',
+        providerId: 'hermes',
+        eventName: 'post_tool_call',
+        payload: {
+          tool_name: 'shell',
+          tool_input: { command: 'ls' },
+          extra: { tool_name: 'from-extra', tool_response: 'ok' }
+        }
+      })
+      expect(landed(topLevelWins).toolName).toBe('shell')
     })
 
     it('Pi 的 tool_execution_end 同样带得出结果——判据是生命周期而非名字形状', () => {
