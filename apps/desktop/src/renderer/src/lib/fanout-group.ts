@@ -1,5 +1,5 @@
 import type { SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
-import { categoryFor, type AttentionCategory } from './attention-event'
+import { attentionSortRank, categoryFor, type AttentionCategory } from './attention-event'
 
 // Reading a bake-off.
 //
@@ -105,15 +105,20 @@ export function fanOutGroups(input: {
  * Same ranking the rest of the window uses — needs-you above error — and inside a class the longest
  * wait wins, matching the attention bar's "jump to the earliest" contract so a group and the bar never
  * point at different lanes.
+ *
+ * "Same ranking" is now literally the same table: this called `attentionSortRank` in place of a local
+ * copy that happened to agree with it. Two object literals cannot be checked against each other by
+ * `tsc`, so the agreement was a coincidence maintained by hand — and a change to either would have made
+ * a group's "jump to the lane that needs you" point somewhere the roster and switcher disagree with,
+ * with nothing going red.
  */
 export function groupLaneNeedingYou(group: FanOutGroup): FanOutLane | null {
-  const rank: Record<AttentionCategory, number> = { 'needs-you': 0, error: 1, done: 3 }
   let winner: FanOutLane | null = null
   let winnerRank = Number.POSITIVE_INFINITY
   for (const lane of group.lanes) {
     // `done` is not a request for attention; a finished lane is a result to read, not an interruption.
     if (!lane.attention || lane.attention === 'done') continue
-    const laneRank = rank[lane.attention]
+    const laneRank = attentionSortRank(lane.attention)
     if (laneRank < winnerRank) {
       winner = lane
       winnerRank = laneRank
