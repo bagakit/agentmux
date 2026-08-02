@@ -221,11 +221,9 @@ describe('Session and Launcher lifecycle ownership', () => {
           executorId: 'codex',
           capabilities: {
             terminal: true,
-            hookEvents: true,
             timeline: 'streaming',
             permission: 'observe',
             providerResume: true,
-            acp: false,
             replyCorrelation: 'none'
           },
           label: stale.label,

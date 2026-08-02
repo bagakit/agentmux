@@ -237,11 +237,9 @@ describe('the store actually carries Core’s reason to the surface', () => {
       executorId: 'codex',
       capabilities: {
         terminal: true,
-        hookEvents: true,
         timeline: 'complete-events',
         permission: 'observe',
         providerResume: true,
-        acp: false,
         replyCorrelation: 'none'
       },
       label: 'Codex',

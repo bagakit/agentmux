@@ -67,11 +67,9 @@ function agent(
     executorId: 'codex',
     capabilities: {
       terminal: true,
-      hookEvents: true,
       timeline: 'streaming',
       permission: 'respond',
       providerResume: true,
-      acp: false,
       replyCorrelation: 'native-turn-id'
     },
     hostId: 'local',

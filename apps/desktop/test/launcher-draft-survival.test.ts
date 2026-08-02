@@ -53,8 +53,8 @@ function agentSession(id: string): Extract<SessionSnapshot, { kind: 'agent' }> {
     providerId: 'codex',
     executorId: 'codex',
     capabilities: {
-      terminal: true, hookEvents: true, timeline: 'streaming', permission: 'observe',
-      providerResume: true, acp: false, replyCorrelation: 'none'
+      terminal: true, timeline: 'streaming', permission: 'observe',
+      providerResume: true, replyCorrelation: 'none'
     },
     hostId: 'local',
     workspacePath: '/repo',

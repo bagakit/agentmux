@@ -591,12 +591,14 @@ function WorkspaceTopicsPanel({
                   </button>
                 )}
                 {/* 行上只留最高频的那个动作。改名收进右键菜单——它一天用不了一次，
-                    占一个常驻图标位是在跟标题抢宽度。 */}
+                    占一个常驻图标位是在跟标题抢宽度。
+                    文案与 TopicContextMenu 那项必须同一句（见那里的注释）：这是在自家文件面板里
+                    定位，不是打开系统文件管理器，所以不走 lib/host-platform 的三态文案。 */}
                 <button
                   className="icon-button workspace-topic-reveal"
                   type="button"
-                  aria-label={`Reveal ${topic.title} in Explorer`}
-                  title="Reveal in Explorer"
+                  aria-label={'Reveal in Explorer'}
+                  title="Reveal in Files"
                   disabled={pending !== null}
                   onClick={() => onRevealDirectory(topic.directoryPath)}
                 >

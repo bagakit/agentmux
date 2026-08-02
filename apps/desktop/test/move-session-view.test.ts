@@ -250,11 +250,9 @@ function agentSessionAt(id: string, workspacePath: string): SessionSnapshot {
     executorId: 'codex',
     capabilities: {
       terminal: true,
-      hookEvents: false,
       timeline: 'streaming',
       permission: 'respond',
       providerResume: false,
-      acp: false,
       replyCorrelation: 'none'
     },
     hostId: 'local',

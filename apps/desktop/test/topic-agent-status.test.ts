@@ -11,8 +11,8 @@ function agent(state: AgentSessionSnapshot['status']['state']): AgentSessionSnap
   return {
     id: 's', kind: 'agent', providerId: 'codex', executorId: 'codex',
     capabilities: {
-      terminal: true, hookEvents: true, timeline: 'streaming', permission: 'observe',
-      providerResume: true, acp: false, replyCorrelation: 'none'
+      terminal: true, timeline: 'streaming', permission: 'observe',
+      providerResume: true, replyCorrelation: 'none'
     },
     hostId: 'local', workspacePath: '/scratch', label: 'a', createdAt: 1, updatedAt: 1,
     processState: 'running', status: { state, source: 'run-process', observedAt: 1 },

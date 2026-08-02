@@ -12,6 +12,7 @@ import { warmLauncherId, warmTerminalPreview } from '../lib/warm-terminal-previe
 import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
 import { LaunchRefine } from './LaunchOptionControls'
 import { TerminalView } from './TerminalView'
+import { isMacPlatform } from '../lib/host-platform'
 
 export function NewTabSurface({
   tabGroupId,
@@ -303,7 +304,7 @@ export function NewTabSurface({
         // 壳里没有任何条件：要不要发车整条判定在 launcherKeydownLaunches 里（含那道与按钮共用的闸），
         // 这里只转发。它说不发时也**不** preventDefault——那一下不属于我们，Enter 该照旧换行。
         onKeyDown={(event) => {
-          if (!launcherKeydownLaunches(event, navigator.userAgent.includes('Mac'), readiness)) return
+          if (!launcherKeydownLaunches(event, isMacPlatform(), readiness)) return
           event.preventDefault()
           launchFromLauncher()
         }}
