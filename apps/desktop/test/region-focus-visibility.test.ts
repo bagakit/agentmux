@@ -2,7 +2,13 @@ import { readFileSync } from 'node:fs'
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 import { allStyles } from './helpers/styles.js'
-import { REGION_FOCUS_CLASS, regionFocusExpression } from '../src/renderer/src/lib/region-focus.js'
+import {
+  PANE_GROUP_FOCUS_CLASS,
+  REGION_FOCUS_CLASS,
+  focusRingExpressesChoice,
+  paneGroupFocusClass,
+  regionFocusExpression
+} from '../src/renderer/src/lib/region-focus.js'
 
 /**
  * 「多个 Region 时，当前聚焦在哪一格」必须看得出来（#339，用户原话：「多个 region, 当前聚焦在哪里,
@@ -333,9 +339,9 @@ describe('Region 焦点必须看得出来（#339）', () => {
    * 或让它读另一次比较，这里都红。
    */
   it('类名与原生视图让位量出自同一次判定', () => {
-    const focused = regionFocusExpression('r1', 'r1')
-    const other = regionFocusExpression('r1', 'r2')
-    const none = regionFocusExpression(null, 'r1')
+    const focused = regionFocusExpression('r1', 'r1', 2)
+    const other = regionFocusExpression('r1', 'r2', 2)
+    const none = regionFocusExpression(null, 'r1', 2)
 
     expect(focused.className, '聚焦的那一格没挂上焦点类名').toBe(REGION_FOCUS_CLASS)
     expect(other.className, '未聚焦的那一格也挂上了焦点类名——每格都亮，分不出焦点').toBe('')
@@ -469,7 +475,7 @@ describe('Region 焦点必须看得出来（#339）', () => {
     // 了几次算——那正是 region-focus.ts 存在的理由被推翻，得有人重新想清楚。
     expect(calls.length, 'regionFocusExpression 的调用点不是恰好 1 个，焦点判定又分岔了').toBe(1)
     const [activeArgument, regionArgument] = calls[0]!
-    expect(calls[0]!.length, 'regionFocusExpression 的实参个数变了，下面两条判据需要跟上').toBe(2)
+    expect(calls[0]!.length, 'regionFocusExpression 的实参个数变了，下面几条判据需要跟上').toBe(3)
     expect(
       activeArgument,
       `第一实参是 \`${activeArgument}\`，末位属性名不是 activeRegionId——` +
@@ -498,15 +504,215 @@ describe('Region 焦点必须看得出来（#339）', () => {
     const regionId = 'region-1'
     const tabId = 'tab-1'
     expect(
-      regionFocusExpression(tabId, regionId).className,
+      regionFocusExpression(tabId, regionId, 2).className,
       '拿 Tab id 当活动区 id 喂进去竟然亮了——两个 id 空间被混用而无人发现'
     ).toBe('')
-    expect(regionFocusExpression(tabId, regionId).nativeViewYieldsToRing).toBe(false)
+    expect(regionFocusExpression(tabId, regionId, 2).nativeViewYieldsToRing).toBe(false)
     // 判别器在场：同一个 regionId 喂对了必须亮，否则上面那条在"永远不亮"的实现下也恒真。
     expect(
-      regionFocusExpression(regionId, regionId).className,
+      regionFocusExpression(regionId, regionId, 2).className,
       '判别器缺席：喂对了也不亮，上面那条断言无从分辨'
     ).toBe(REGION_FOCUS_CLASS)
+  })
+
+  /**
+   * 焦点环表达的是「在若干候选里选中了这一个」——**只有一个候选时它没有内容**。
+   *
+   * 用户原话：「现在表示选中的框, 除了活跃的 region 有, 整个界面也有」。现场是两层环各自无条件跟着
+   * 「谁是活动的」画，而两层都有「候选恒为一」的常态形态：不分屏时唯一那个 Pane 组铺满整个工作区且
+   * 恒等于 `activeGroupId`；单格 Tab 里唯一那个 Region 铺满内容区且恒等于 `activeRegionId`。于是
+   * 最常见的形态（单窗口、不分屏、一格）界面外沿一圈绿框、往里 2px 再一圈，两圈都不携带信息。
+   *
+   * 判据分三层，各自能独立坏掉：
+   *   1. 那条规则本身（{@link focusRingExpressesChoice}）：1 个不画、2 个画、0 个保守不画。
+   *   2. 两个判定都真的**过**了那条规则，且**两个返回字段一起**变——只让类名变空而让位量照旧为真，
+   *      就是 #350 那圈「无环的深边」原样（unfocused browser 区内缩 2px 露出底色，却没有绿环）。
+   *   3. 组件真的把候选数喂进去（接线层，见下一条）。
+   */
+  it('只有一个候选时两层焦点环都不画，有两个时才画', () => {
+    // 规则本身。`> 1` 而不是 `!== 1`：数不出候选（0）时保守地不画，而不是把「数坏了」画成一圈环。
+    expect(focusRingExpressesChoice(1), '只有一格时环仍然画——整个界面镶一圈绿边，且不表达任何选择').toBe(false)
+    expect(focusRingExpressesChoice(2), '有两格时环不画了——焦点在哪彻底看不出（#339 原样）').toBe(true)
+    expect(focusRingExpressesChoice(0), '数出 0 个候选时画了环——「数坏了」不该表达成「选中了」').toBe(false)
+
+    // Region 那一层：同一格、同一个活动 id，只有候选数不同。
+    const alone = regionFocusExpression('r1', 'r1', 1)
+    const amongTwo = regionFocusExpression('r1', 'r1', 2)
+    expect(alone.className, '单格 Tab 里那唯一一格仍挂焦点类名——内容区外沿恒亮一圈').toBe('')
+    expect(amongTwo.className, '两格时聚焦那格不挂类名了').toBe(REGION_FOCUS_CLASS)
+    // 让位量必须跟着一起走。只改类名那一侧的后果是 browser 那格仍内缩 2px 却没有环（#350 原样），
+    // 而上面两条断言照旧通过——这正是 regionFocusExpression 返回一对而不是一个类名的理由。
+    expect(
+      alone.nativeViewYieldsToRing,
+      '单格时类名不挂了，但原生视图还在让位——browser 那格镶一圈无环的深边（#350 原样）'
+    ).toBe(false)
+    expect(amongTwo.nativeViewYieldsToRing, '两格时聚焦那格的原生视图不让位，环的三边会被物理盖掉').toBe(true)
+
+    // Pane 组那一层同样。它没有原生视图要让位，故只有类名。
+    expect(
+      paneGroupFocusClass('g1', 'g1', 1),
+      '不分屏时唯一那个 Pane 组仍挂焦点类名——整个界面外沿恒亮一圈（用户报的就是这个）'
+    ).toBe('')
+    expect(paneGroupFocusClass('g1', 'g1', 2), '分屏后活动那组不挂类名了，分不出焦点').toBe(
+      PANE_GROUP_FOCUS_CLASS
+    )
+    // 两层各自还得保住「不是活动的那个不画」这一半：把候选数判据写成析取（`||`）而不是合取，
+    // 上面每一条都通过，而屏幕上**每一格**都亮着环。
+    expect(
+      regionFocusExpression('r1', 'r2', 2).className,
+      '两格时未聚焦那格也亮了——候选数那一问被写成了析取，每格都画环'
+    ).toBe('')
+    expect(paneGroupFocusClass('g1', 'g2', 2), '分屏后未活动那组也亮了').toBe('')
+  })
+
+  /**
+   * 候选数真的从组件**喂**进去（接线层）。
+   *
+   * 与上一条分开的理由同 #350 那次：判定改好了而壳里没接，上一条一条都不红。而且这条判的不是
+   * 「有没有第三个实参」——喂一个字面量 `2` 类型合法、上一条全绿，环就重新变成无条件恒亮
+   * （记忆 optional-prop-only-buys-silence：可选/宽松的形状只买到 tsc 的沉默）。
+   *
+   * 判据落在实参的**形状**上：它必须是一次「数出来」的表达式，而不是常量。两层各判一次——
+   * 只钉一处会让另一层静默留在旧形状（记忆 duplicated-rule-defeats-the-fix）。
+   */
+  it('两层判定的候选数都是数出来的，不是写死的常量', () => {
+    const source = readFileSync(WORKBENCH_TSX, 'utf8')
+    const ast = ts.createSourceFile('WorkspaceWorkbench.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+    // 两层判定各自的「候选数」是第几个实参，以及那个数该从哪个概念数出来。
+    const WIRING: Record<string, { index: number; counts: RegExp; concept: string }> = {
+      // Region 层：Tab 内的格。`regionCount` 是 WorkbenchRegionLeaf 里 Object.keys(tab.regions).length。
+      regionFocusExpression: { index: 2, counts: /^regionCount$|\.length$/, concept: '这张 Tab 里的格数' },
+      // Pane 组层：分屏树里的**叶子**。刻意不是 `layout.groups.length`——那张表里可以躺着不在树里的
+      // 分组（#312 的浮层形态），它们不经这里渲染、屏幕上不是候选。
+      paneGroupFocusClass: { index: 2, counts: /^groupIds\(.*\)\.length$/, concept: '分屏树里的叶子数' }
+    }
+    const calls = new Map<string, string[][]>()
+    const walk = (node: ts.Node): void => {
+      if (ts.isCallExpression(node)) {
+        const name = node.expression.getText(ast)
+        if (WIRING[name] !== undefined) {
+          const list = calls.get(name) ?? []
+          list.push(node.arguments.map((argument) => argument.getText(ast)))
+          calls.set(name, list)
+        }
+      }
+      ts.forEachChild(node, walk)
+    }
+    walk(ast)
+
+    for (const [name, { index, counts, concept }] of Object.entries(WIRING)) {
+      const sites = calls.get(name) ?? []
+      // 在场自检：调用点恰好一个。零个说明接线整段没了；多个说明这一层的判定又被分成几次算。
+      expect(sites.length, `${name} 的调用点是 ${sites.length} 个，应恰好 1 个——判定分岔或接线丢了`).toBe(1)
+      const argument = sites[0]![index]
+      expect(
+        argument,
+        `${name} 没有收到第 ${index + 1} 个实参（${concept}）——候选数这一问在壳里根本没接上，` +
+          '环回到无条件恒亮'
+      ).toBeDefined()
+      // 形状判据：必须是一次数出来的表达式。写死 `2`（恒画）或 `1`（恒不画）在类型上都合法，
+      // 而上一条那些纯函数断言对它完全失明。
+      expect(
+        argument,
+        `${name} 的候选数实参是 \`${argument}\`，不像一次数出来的取值（期望匹配 ${counts}）——` +
+          `写死一个数就让环与「${concept}」彻底脱钩`
+      ).toMatch(counts)
+    }
+  })
+
+  /**
+   * Pane 组那个 `<section>` 真的**用**了那次判定（接线层的另一半）。
+   *
+   * 上一条只判「调用点在、实参是数出来的」。实测那还不够：把 className 里那一段换回内联三元
+   * （`layout.activeGroupId === group.id ? 'pane-group--focused' : ''`），判定照旧被算出来、
+   * 实参照旧数得对，只是**没人用它**——环回到无条件恒亮，而 13 条全绿、tsc 也沉默
+   * （`noUnusedLocals` 没开，所以那个白算的常量不报错）。这正是记忆
+   * extracting-to-lib-only-fixes-half：抽进 lib 只解决内容那一半，「壳里有没有执行到」照旧无人守。
+   *
+   * 判据两条，缺一不可：
+   *   - className 里出现那次判定的结果（按**判定的绑定名**取，重命名不误红）；
+   *   - className 里**不出现**那个焦点类名的字面量——手抄一份就绕过了整条判定
+   *     （Region 那侧同理，两层各判一次；只钉一处会让另一层静默留在旧形状）。
+   */
+  it('两层的容器 className 都真的引用那次判定，而不是自己手抄类名', () => {
+    const source = readFileSync(WORKBENCH_TSX, 'utf8')
+    const ast = ts.createSourceFile('WorkspaceWorkbench.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+
+    /** 一次调用的结果被绑到了哪个名字上（直接内联在 JSX 里时返回那次调用本身的文本）。 */
+    function decisionToken(callee: string): string | null {
+      let found: string | null = null
+      const walk = (node: ts.Node): void => {
+        if (ts.isCallExpression(node) && node.expression.getText(ast) === callee) {
+          const parent: ts.Node = node.parent
+          found =
+            ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name)
+              ? parent.name.text
+              : node.getText(ast)
+        }
+        ts.forEachChild(node, walk)
+      }
+      ts.forEachChild(ast, walk)
+      return found
+    }
+
+    /** 带某个 data 属性的那个元素的 className 表达式（按身份取，不按类名内容取）。 */
+    function classNameOfElementWith(attribute: string): string[] {
+      const out: string[] = []
+      const walk = (node: ts.Node): void => {
+        if (ts.isJsxAttribute(node) && node.name.getText(ast) === attribute) {
+          const tag = node.parent.parent
+          if (ts.isJsxOpeningElement(tag) || ts.isJsxSelfClosingElement(tag)) {
+            for (const property of tag.attributes.properties) {
+              if (ts.isJsxAttribute(property) && property.name.getText(ast) === 'className') {
+                out.push(property.initializer?.getText(ast) ?? '<无值>')
+              }
+            }
+          }
+        }
+        ts.forEachChild(node, walk)
+      }
+      ts.forEachChild(ast, walk)
+      return out
+    }
+
+    const LAYERS = [
+      {
+        what: 'Region',
+        callee: 'regionFocusExpression',
+        attribute: 'data-workbench-region-id',
+        literal: REGION_FOCUS_CLASS
+      },
+      {
+        what: 'Pane 组',
+        callee: 'paneGroupFocusClass',
+        attribute: 'data-pane-group-id',
+        literal: PANE_GROUP_FOCUS_CLASS
+      }
+    ] as const
+
+    for (const { what, callee, attribute, literal } of LAYERS) {
+      const token = decisionToken(callee)
+      expect(token, `${what} 那层找不到 ${callee} 的调用点——判定整段没了`).not.toBeNull()
+      const classNames = classNameOfElementWith(attribute)
+      // 身份自检：带那个 data 属性且有 className 的元素恰好一个。抽不到与抽到多个都让判据失去落点。
+      expect(
+        classNames.length,
+        `带 ${attribute} 且有 className 的元素有 ${classNames.length} 个，应恰好 1 个——` +
+          '组件重构过？下面两条判据失去落点'
+      ).toBe(1)
+      const expression = classNames[0]!
+      expect(
+        expression.includes(token!),
+        `${what} 的 className 里没有出现那次判定的结果 \`${token}\`（抽到的是 ${expression}）——` +
+          '判定算了却没人用，环回到无条件恒亮'
+      ).toBe(true)
+      // 手抄那个类名就绕过了整条判定：算出来的 `''` 与手写的字面量在同一个模板串里并存也合法。
+      expect(
+        expression.includes(`'${literal}'`) || expression.includes(`"${literal}"`),
+        `${what} 的 className 里手抄了 \`${literal}\` 这个字面量（${expression}）——` +
+          '那一段绕过了候选数判定，环恒亮'
+      ).toBe(false)
+    }
   })
 
   it('焦点类名有承重声明，不是一条空规则', () => {
@@ -571,7 +777,7 @@ describe('Region 焦点必须看得出来（#339）', () => {
     // `.workbench-region`，定位不透明，同样实测不可见）。只钉一处会让另一处静默留在旧形状——
     // 记忆 duplicated-rule-defeats-the-fix 的形状：同一件事有两个写入点时，改一处的人以为改完了。
     const MIN_OVERLAY_Z = 37 // Region 内最高的常驻面是 terminal.css:141 的 36
-    for (const className of ['workbench-region--active', 'pane-group--focused']) {
+    for (const className of [REGION_FOCUS_CLASS, PANE_GROUP_FOCUS_CLASS]) {
       const overlays = focusOverlayRules(className)
       expect(
         overlays.length,
@@ -649,7 +855,7 @@ describe('Region 焦点必须看得出来（#339）', () => {
    * `transparent` 可以藏在一个 token 后面，而「边色是不是 var(...)」这种表层判据对它完全失明。
    */
   it('焦点环真的画得出四条看得见的边（不是坍成一点、一条孤线或透明）', () => {
-    for (const className of ['workbench-region--active', 'pane-group--focused']) {
+    for (const className of [REGION_FOCUS_CLASS, PANE_GROUP_FOCUS_CLASS]) {
       const overlays = focusOverlayRules(className)
       expect(
         overlays.length,
@@ -734,7 +940,7 @@ describe('Region 焦点必须看得出来（#339）', () => {
     ).toBe(true)
 
     // 两个焦点态覆盖层都必须**用**它画，而不是各自写死 2px。
-    for (const className of ['workbench-region--active', 'pane-group--focused']) {
+    for (const className of [REGION_FOCUS_CLASS, PANE_GROUP_FOCUS_CLASS]) {
       const overlays = rules().filter((rule) =>
         rule.selector
           .split(',')
