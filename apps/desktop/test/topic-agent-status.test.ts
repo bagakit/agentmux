@@ -375,23 +375,27 @@ describe('#409 头像的注意力取值必须画得出来', () => {
     /** 类名以这个词结束（后面不再接 `-`、`_` 或别的词字符），才算命中这个载体本身。 */
     const carriesState = (selector: string): boolean =>
       CARRIERS.some((carrier) => new RegExp(`\\.${carrier}(?![\\w-])`, 'u').test(selector))
-    const HUE = /var\(\s*--(?:green|amber|red|blue)(?:-text|-bg|-line|-wash)?\s*\)/u
+    /**
+     * 色相取值：四个基色**及其任何派生后缀**。后缀不许枚举——`-text|-bg|-line|-wash` 那份手抄的清单
+     * 已经漏过两族真实拼法（`--green-2` 是 board 卡尾部箭头用的，`--amber-bg-hover` 是选中行 hover
+     * 用的），于是那两条规则对判据完全隐身。tokens.css 里凡以基色开头的自定义属性都从那个基色派生，
+     * 按"基色 + 任意后缀"判才与 token 的构造方式同形。
+     */
+    const HUE = /var\(\s*--(?:green|amber|red|blue)(?:[\w-]*)?\s*\)/u
     /**
      * 具名例外：按**选择器**放行，不放行数值。
      *
-     * `.status--waiting .status__dot` 那两条确实按状态取了键（`.status--waiting` / `.status--blocked`
-     * 在选择器里），所以它们本来就不在禁令内——列在这里只是为了让"为什么它们合法"这句话有个落点。
-     * 真正的例外只有 board 的 hover 那一条，它是 #436：hover 借了 working 的绿，该改成中性提亮，
-     * 改完这一行就该删掉。留着它而不是放宽判据，是因为一个具名的例外会被人读到，一个放宽的正则不会。
+     * 今天是空的——#436 那条（`.board-run-card:hover` 借了 `--green-line`，于是一张 done /
+     * disconnected / error 的卡指上去后卡框说「在跑」）已改成中性 `--line`，豁免随之删掉。留着这张
+     * 空表而不是删掉整个机制，是因为下一条真例外该有个落点，且下面自检三会强制它指向真实存在的选择器：
+     * 一条选择器被重命名后，豁免不会静默变成谁都能钻的洞。
      */
-    const NAMED = new Map<string, string>([
-      ['.board-run-card:hover', '#436：hover 借了 --green-line（working 的色相），待改中性提亮后删除']
-    ])
+    const NAMED = new Map<string, string>()
     /**
      * 判据本体。抽成函数是为了让下面的自检**质询同一段代码**而不是在别处重算一遍——
      * 一个在字面量上另写一遍正则的"自检"，改坏真判据时它照旧绿。
      */
-    const flatteningRules = (sheet: string): string[] => {
+    const flatteningRules = (sheet: string, exceptions: Map<string, string> = NAMED): string[] => {
       const out: string[] = []
       for (const [, rawSelector, body] of sheet.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
         const selector = rawSelector!.trim().replace(/\s+/gu, ' ')
@@ -402,7 +406,7 @@ describe('#409 头像的注意力取值必须画得出来', () => {
         // `[data-attention='<category>']` 是"需不需要你"那一档。禁令针对的是**不带任何键**的规则，
         // 因为只有它才会一视同仁地盖住全部取值。
         if (/\.status--[\w-]+|\[data-attention=/u.test(selector)) continue
-        if (NAMED.has(selector)) continue
+        if (exceptions.has(selector)) continue
         for (const hue of body!.matchAll(new RegExp(HUE.source, 'gu'))) {
           out.push(`${selector} { ${hue[0]} }`)
         }
@@ -423,6 +427,14 @@ describe('#409 头像的注意力取值必须画得出来', () => {
     expect(flatteningRules('.status--waiting .status__dot { box-shadow: 0 0 0 3px var(--amber-wash); }')).toEqual([])
     expect(flatteningRules(".project-rail-row[data-attention='error'] .x { background: var(--red); }")).toEqual([])
     // 自检三：例外清单必须指向真实存在的选择器，否则重命名之后它会静默变成一个谁都能钻的洞。
+    // 清单今天是空的，所以先钉「放行这件事真的按选择器生效」——空表让那个循环空转，光有循环等于没判。
+    expect(flatteningRules('.status__dot { background: var(--green); }')).toHaveLength(1)
+    const withException = new Map(NAMED)
+    withException.set('.status__dot', '自检用')
+    expect(
+      flatteningRules('.status__dot { background: var(--green); }', withException),
+      '具名豁免对判据不起作用——那这张表是装饰'
+    ).toEqual([])
     const selectors = new Set(
       [...styles.matchAll(/([^{}]+)\{/gu)].map(([, selector]) => selector!.trim().replace(/\s+/gu, ' '))
     )

@@ -152,6 +152,40 @@ describe('卡框的颜色来自状态色表', () => {
     // 自检：判据认得出缺席。一个不存在的状态名必须落空，否则上面几条是恒真的。
     expect(assignsInk('nonexistent')).toBe(false)
   })
+
+  it('带框的卡也要有悬停反馈——否则最该被点开的那张对指针没有回应', () => {
+    // 这不是色相问题，所以「不分档的规则不许点名色相」那道门抓不到它：`.board-run-card:hover` 与
+    // `.board-run-card[data-attention='…']` 的特异性同为 0,2,0，后者排在后面，于是 hover 时边与底
+    // 都被静息态赢回来——一张需要你 / 出错的卡指上去毫无变化，而它恰恰是这张板上最该被点开的那张。
+    // 实测过：删掉 hover 那条，本文件与邻近三个文件 45 条全绿。
+    //
+    // 判据是**逐 category 的成对性**：每个会带框的 category，既要有静息规则，也要有一条同键的 hover
+    // 规则。清单从 URGENT_ATTENTION_CATEGORIES 派生而不是手抄，理由与上面那条穷举门相同。
+    const framedRule = (category: string, hover: boolean): boolean => {
+      for (const [, rawSelector] of styles.matchAll(/([^{}]+)\{([^{}]*)\}/gu)) {
+        for (const member of rawSelector!.split(',').map((part) => part.trim())) {
+          if (!new RegExp(`\\.board-run-card\\b[^\\s]*\\[data-attention=['"]${category}['"]\\]`, 'u').test(member)) {
+            continue
+          }
+          // `:hover` 必须落在**卡自己**这个 compound 上，不是落在某个后代元素上：
+          // `.board-run-card[data-attention='error'] .x:hover` 不是这张卡的悬停反馈。
+          if (/\[data-attention=['"][^'"]+['"]\]:hover(?![\w-])/u.test(member) === hover) return true
+        }
+      }
+      return false
+    }
+    expect(URGENT_ATTENTION_CATEGORIES.length, '会上色的 category 是空的——判据会变成恒真').toBeGreaterThan(0)
+    for (const category of URGENT_ATTENTION_CATEGORIES) {
+      expect(framedRule(category, false), `data-attention='${category}' 没有静息色框规则`).toBe(true)
+      expect(
+        framedRule(category, true),
+        `data-attention='${category}' 的卡没有 hover 规则，静息态会盖住通用 hover，指上去毫无反馈`
+      ).toBe(true)
+    }
+    // 自检：判据认得出缺席，也认得出"hover 落在后代元素上不算"。
+    expect(framedRule('nonexistent', false)).toBe(false)
+    expect(framedRule('nonexistent', true)).toBe(false)
+  })
 })
 
 describe('卡片的属性由那个纯函数产出', () => {
