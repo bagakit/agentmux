@@ -323,4 +323,73 @@ describe('WorkspaceWorkbench 把换位清单接到了右键点中的那一格', 
     expect(attribute!.text, 'swapMenu 没有把右键点中的 regionId 作为换位源').toContain('node.regionId')
     expect(attribute!.text, 'swapMenu 的动作没有接到 swapRegions').toContain('swapRegions(')
   })
+
+  it('promote 的值是 `regionCount > 1 ? … : undefined` 的条件门，并把右键点中的 regionId 路由到 promoteRegionToTab', () => {
+    // 与 swapMenu 同一个道理，但多一层：促升只对多格 Tab 有意义，故它必须是一个**条件表达式**
+    // （只剩一格时传 undefined，整节缺席），而不是无条件的调用或空回调。把它换成常量 undefined、
+    // 或去掉 regionCount 门、或路由到活动格而非右键点中的格，都要能被这一条抓住。
+    const attribute = attributeExpression('RegionContextMenu', 'promote')
+    expect(attribute, 'WorkspaceWorkbench 里的 <RegionContextMenu> 没有 promote 属性——「单独变成一个 tab」对用户不存在')
+      .not.toBeNull()
+    expect(
+      ts.SyntaxKind[attribute!.kind],
+      `promote 的值不是条件门而是 ${ts.SyntaxKind[attribute!.kind]}：\n${attribute!.text}`
+    ).toBe('ConditionalExpression')
+    // 门判的是「多于一格」——只剩一格时它已经是一张 Tab，促升无意义。
+    expect(attribute!.text, 'promote 没有按 regionCount 门控').toContain('regionCount > 1')
+    // 促升的是**右键点中的那一格**，并真的路由到 store.promoteRegionToTab——不是活动格、不是空回调。
+    expect(attribute!.text, 'promote 没有接到 promoteRegionToTab').toContain('promoteRegionToTab(')
+    expect(attribute!.text, 'promote 没有把右键点中的 regionId 作为促升目标').toContain('node.regionId')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #487「单独变成一个 tab」的菜单接入。
+//
+// 与分屏 / 换位同一个约束：促升项必须住进**同一份** entries 里（不是 JSX 再加一个条件分支——那种写法
+// 能被 `false &&` 整段抹掉而全绿）。促升只对多格 Tab 有意义，故它的在场由传没传 `promote` 决定：
+// 多格时调用方传回调、这一项出现在末尾；只剩一格时不传、整节连同它前面那道分隔线都不出现。
+// ---------------------------------------------------------------------------
+describe('促升一项住在 entries 里：给了 promote 就有，没有就整节不出现', () => {
+  it('传了 promote 时，末尾恰好一条 promote 项，且它前面隔一道分隔线', () => {
+    const entries = createRegionCopyModel({
+      regionId: 'region:pane-2',
+      agentSessionId: null,
+      writeClipboardText: vi.fn(async () => {}),
+      promote: () => {}
+    }).entries
+    const promotes = entries.filter((entry) => entry.kind === 'promote')
+    expect(promotes, 'promote 项没有恰好出现一次').toHaveLength(1)
+    // 它排在整份清单的最末（促升是对这一格布局归属最彻底的一步）。
+    expect(entries.at(-1)?.kind, 'promote 不在清单末尾').toBe('promote')
+    // 前面隔一道分隔线，且不是悬在别处的孤线——它前一项真有东西。
+    const at = entries.findIndex((entry) => entry.kind === 'promote')
+    expect(at, 'promote 前面缺一道分隔线').toBeGreaterThan(0)
+    expect(entries[at - 1]?.kind).toBe('separator')
+  })
+
+  it('点促升，发出的就是传进来的那个回调（不是空壳）', () => {
+    const promote = vi.fn()
+    const entries = createRegionCopyModel({
+      regionId: 'region:pane-2',
+      agentSessionId: null,
+      writeClipboardText: vi.fn(async () => {}),
+      promote
+    }).entries
+    const entry = entries.find((e) => e.kind === 'promote')
+    expect(entry, 'promote 项不在清单里').toBeTruthy()
+    if (entry?.kind === 'promote') entry.onSelect()
+    expect(promote, 'promote 项点下去没有调用传入的回调').toHaveBeenCalledTimes(1)
+  })
+
+  it('不传 promote 时整节缺席，且不留一道悬空的尾部分隔线', () => {
+    const baseline = createRegionCopyModel({
+      regionId: 'region:pane-2',
+      agentSessionId: null,
+      writeClipboardText: vi.fn(async () => {})
+    }).entries
+    expect(baseline.some((entry) => entry.kind === 'promote'), '没传 promote 却出现了促升项').toBe(false)
+    // 不给一条挂在末尾、什么都不隔的分隔线。
+    expect(baseline.at(-1)?.kind, '不传 promote 却留了一道尾部分隔线').not.toBe('separator')
+  })
 })
