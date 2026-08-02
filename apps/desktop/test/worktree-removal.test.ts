@@ -3,6 +3,7 @@ import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 import {
   nextAfterWorktreeRemoval,
+  worktreeRemovalEffect,
   worktreeRemovalPrompt,
   type WorktreeRemovalRequest
 } from '../src/renderer/src/lib/worktree-removal-request.js'
@@ -167,6 +168,72 @@ describe('一次移除尝试之后往哪走', () => {
   })
 })
 
+/**
+ * 三种走向各自在屏幕上留下什么。
+ *
+ * 这一族此前**完全无人守**，而且不是"覆盖不足"而是结构上守不到：分派原本写在
+ * `BranchesPanel.confirmRemoval` 的 if/else 里，而 desktop 的测试用 `renderToStaticMarkup`——它不跑
+ * effect，更点不了对话框的确认键，所以那段代码没有任何东西执行它。实测把 `setActionError(next.reason)`
+ * 改成 `setActionError(null)`，21 条断言与 tsc 全绿；而那个变异的症状是用户授权了丢弃、git 拒绝、
+ * 对话框静静关掉什么也不说，用户以为删成功了（#399）。
+ *
+ * 所以判据落在纯函数上，且**三个字段各写一条**。只钉 `error` 那一格是不够的：`rescan` 在 `ask` 档
+ * 变成 true 会把用户正在读的那句 git 理由刷掉，`removal` 在 `failed` 档不清空会让对话框留在屏上
+ * 与错误条同时说两件相反的事。
+ */
+/**
+ * 九个格子的实测（每次只改一件事，改完跑这四个 suite，再 cp 还原）：
+ *
+ * - `failed` 的 `error: next.reason` → `null`：**2 条红**（真失败那条 + 「只有一条报错」那条）。
+ *   这正是抽成纯函数之前 21 条 + tsc 全绿存活的那个变异，现在它死了。
+ * - `ask` 的 `rescan: false` → `true`：**2 条红**（重问那条 + 「只有一条重扫」那条）。
+ *
+ * 接线层（面板）另外两个方向：在面板里重新插一个 `next.kind === 'done'` 的分支、以及丢掉
+ * `if (effect.rescan) await refresh()` 这一句转发，各**只红 AST 守卫那 1 条**。这就是分层的意义：
+ * 壳的毛病不该靠九个格子的行为断言去抓，因为没有任何测试会执行那个壳。
+ */
+describe('三种走向落到屏幕上是什么样', () => {
+  const effectOf = (next: Parameters<typeof worktreeRemovalEffect>[0]) => worktreeRemovalEffect(next)
+
+  it('删成功：关对话框、不报错、重扫列表', () => {
+    expect(effectOf({ kind: 'done' })).toEqual({ removal: null, error: null, rescan: true })
+  })
+
+  it('重问：对话框换成下一档的请求，不报错，且**不**重扫', () => {
+    const asked = request({ stage: { kind: 'blocked', reason: REASON } })
+    const effect = effectOf({ kind: 'ask', request: asked })
+    // 对话框接下来显示的必须是那个推进过的请求本身——换成原请求，用户就永远读不到 git 的理由。
+    expect(effect.removal).toBe(asked)
+    // 保护生效不是错误。进错误条会让同一件事在屏幕上说两遍，且措辞是"失败"而非"需要你决定"。
+    expect(effect.error, '把「需要你决定」报成了错误').toBeNull()
+    // 什么都没删，重扫纯属多余——更糟的是它会让面板重渲染，把用户正在读的那句理由刷掉。
+    expect(effect.rescan, '什么都没删却重扫列表，会刷掉用户正在读的 git 理由').toBe(false)
+  })
+
+  it('真失败：关对话框、把 git 原话报出去、不重扫', () => {
+    const effect = effectOf({ kind: 'failed', reason: REASON })
+    expect(
+      effect.error,
+      'git 的失败原话被吞掉了：对话框静静关掉，用户以为删成功了'
+    ).toBe(REASON)
+    expect(effect.removal, '报了错还留着对话框：屏幕上同时说两件相反的事').toBeNull()
+    expect(effect.rescan, '什么都没删却重扫列表').toBe(false)
+  })
+
+  it('只有一条走向重扫，也只有一条走向报错', () => {
+    // 逐格抄一遍上面三条就够松：把 `done` 也改成报错、或把三条都改成重扫，上面三条会红，但
+    // 「恰好一条」这个形状本身没人守。这条钉的是那个形状——加第四种走向时，它必须自己回答
+    // 「我算重扫的那一条吗」，而不是默默跟着某一档。
+    const all = [
+      effectOf({ kind: 'done' }),
+      effectOf({ kind: 'ask', request: request({ stage: { kind: 'blocked', reason: REASON } }) }),
+      effectOf({ kind: 'failed', reason: REASON })
+    ]
+    expect(all.filter((effect) => effect.rescan).length, '重扫的走向不是恰好一条').toBe(1)
+    expect(all.filter((effect) => effect.error !== null).length, '报错的走向不是恰好一条').toBe(1)
+  })
+})
+
 function parse(url: URL): ts.SourceFile {
   const path = url.pathname
   return ts.createSourceFile(
@@ -296,6 +363,69 @@ describe('面板接线', () => {
       reads.has('workspace.id'),
       '从当前打开的 workspace 取 id：右键别的分支会删错对象'
     ).toBe(false)
+  })
+
+  /**
+   * 面板里那段分派**只是转发**：`worktreeRemovalEffect` 的三个字段各自无条件落到一处 setter。
+   *
+   * 为什么要单独钉这一条：上面那族把「三种走向各自该长什么样」搬进了纯函数，于是内容可判了——但
+   * 「这个壳有没有被执行到、有没有偷偷自己再判一次」照旧无人守（本仓 extracting-to-lib-only-fixes-half
+   * 那一族：搬完再在壳里插一个早退，行为测试全绿）。所以这里判的是壳的形状：
+   *
+   * - `worktreeRemovalEffect` 只调一次（多一次就是多一个能漂移的取值点）；
+   * - 那次结果绑到一个名字上，三个字段都从它取；
+   * - 那段函数体里**没有任何 if/三元**读 `next.kind`／`outcome.status`——面板自己再判一次分类，就是
+   *   两处对同一件事各判一次，而其中一处永远没人执行。
+   */
+  it('面板只转发那次决定，不自己再判一次分类', () => {
+    const source = parse(PANEL)
+    const calls = callsTo(source, 'worktreeRemovalEffect')
+    expect(calls.length, '面板里没有 worktreeRemovalEffect 调用——判据落空了').toBe(1)
+
+    // 找到包住那次调用的函数体，只在**它**里面判形状：整份文件里当然还有别的 if。
+    let body: ts.Node | null = null
+    walk(source, (node) => {
+      if (!ts.isFunctionDeclaration(node) && !ts.isArrowFunction(node) && !ts.isMethodDeclaration(node)) return
+      if (node.body === undefined) return
+      let holds = false
+      walk(node.body, (child) => {
+        if (child === calls[0]) holds = true
+      })
+      // 取**最内层**那个：外层的组件函数也包着它，但那里 if 遍地都是。
+      if (holds && (body === null || node.body.getStart() > body.getStart())) body = node.body
+    })
+    expect(body, '找不到包住那次调用的函数体').not.toBeNull()
+
+    // 结果绑到一个名字上。
+    let binding: string | null = null
+    walk(body!, (node) => {
+      if (!ts.isVariableDeclaration(node) || node.initializer === undefined) return
+      let found = false
+      walk(node.initializer, (child) => {
+        if (child === calls[0]) found = true
+      })
+      if (found && ts.isIdentifier(node.name)) binding = node.name.text
+    })
+    expect(binding, '那次决定的结果没绑到名字上，无法证明三个字段取的是同一份').not.toBeNull()
+
+    // 三个字段都从那个名字取。少读一个就是那一格被面板自己另算了（或干脆丢了）。
+    const reads = memberReads(body!)
+    for (const field of ['removal', 'error', 'rescan']) {
+      expect(
+        reads.has(`${binding}.${field}`),
+        `没有从那次决定取 ${field}：这一格要么被丢了，要么被面板自己另算了一份`
+      ).toBe(true)
+    }
+
+    // 壳里不许出现按分类分岔的条件。`effect.rescan` 那个 if 是**转发布尔**不是判分类，所以判据
+    // 落在「读了 next.kind / outcome.status 吗」上，而不是「有没有 if」。
+    const text = body!.getText()
+    for (const shape of ['.kind ===', '.kind !==', '.status ===', '.status !==']) {
+      expect(
+        text.includes(shape),
+        `面板里出现了 \`${shape}\`：分类被判了第二次，而这一处没有任何测试执行它`
+      ).toBe(false)
+    }
   })
 
   it('没有 worktree 的分支不显示这一项（用缺席表达，不画禁用按钮）', () => {

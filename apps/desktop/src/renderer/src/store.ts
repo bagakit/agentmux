@@ -31,6 +31,8 @@ import type {
   RunFanOutResult,
   KeepOneOfFanOutInput,
   KeepOneOfFanOutOutcome,
+  RemoveWorktreeInput,
+  RemoveWorktreeOutcome,
   CreatePullRequestResult
 } from '../../shared/contracts'
 import {
@@ -41,6 +43,7 @@ import {
 } from '../../shared/scratch-topics'
 import { isScratchWorkspaceId } from '../../shared/contracts'
 import { api } from './lib/api'
+import { reseatActiveWorkspaceId, adoptedConfig } from './lib/active-workspace-reseat'
 import { gitBridge, ghBridge } from './lib/git-bridge'
 import type { BrowserAnnotation } from './lib/browser-annotations'
 import { EMPTY_LAUNCHER_NAMES, type LauncherNameField, type LauncherNames } from './lib/launcher-name-draft'
@@ -324,6 +327,16 @@ type AppState = {
   activateWorkspaceSelection(result: WorkspaceSelectionResult): void
   runFanOut(input: RunFanOutInput): Promise<RunFanOutResult>
   keepOneOfFanOut(input: KeepOneOfFanOutInput): Promise<KeepOneOfFanOutOutcome | null>
+  /**
+   * 撤掉一条 worktree 的登记。
+   *
+   * 为什么这条动作必须落在 store 而不是留在面板里：`removed` 带回来的 `config` 是**权威的新配置**，
+   * 而 `activeWorkspaceId` 是指进它的一个引用。面板自己 await 完就把 config 丢掉时，store 仍持有那条
+   * 已经不存在的记录——`App.tsx` 照它找活动 Workspace 会得到 undefined，界面渲染成空白，屏幕上没有
+   * 任何一句话解释刚才发生了什么。批量收尾（`keepOneOfFanOut`）一直是走 store 的，单条却绕过了它，
+   * 那道不对称就是这个缺陷本身。
+   */
+  removeWorktree(input: RemoveWorktreeInput): Promise<RemoveWorktreeOutcome>
   createPullRequest(input: {
     workspaceId: string
     title: string
@@ -1420,7 +1433,7 @@ export function restorePersistedUiState(
   >
 ): RestoredUiState {
   return {
-    activeWorkspaceId: restoredWorkspaceId(config, persisted.activeWorkspaceId),
+    activeWorkspaceId: reseatActiveWorkspaceId(config, persisted.activeWorkspaceId),
     mainSurface: restoredMainSurface(persisted.mainSurface),
     projectRailOpen: restoredBoolean(persisted.projectRailOpen, true),
     collapsedProjectGroups: restoredCollapsedGroups(persisted.collapsedProjectGroups),
@@ -1508,14 +1521,6 @@ async function ensurePersistHydrated(): Promise<unknown | null> {
   }
   await persistHydrationPromise
   return persistHydrationError
-}
-
-function restoredWorkspaceId(config: AppConfig, candidate: unknown): string | null {
-  if (
-    typeof candidate === 'string' &&
-    config.workspaces.some((workspace) => workspace.id === candidate)
-  ) return candidate
-  return config.workspaces[0]?.id ?? null
 }
 
 function restoredMainSurface(candidate: unknown): MainSurface {
@@ -1869,7 +1874,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (result.kind === 'fanout') {
         // Config changed in main (each lane registered a worktree); pull the new truth rather than
         // reconstructing it here.
-        set({ config: await api.config.get() })
+        //
+        // 走 `adoptedConfig` 而不是裸 `set({ config })`，尽管扇出只**添加**记录、今天动不了活动位。
+        // 「这次写入只加不减」是一条会过期的理由：下一个人在同一处加一句 filter 时不会回头读这行
+        // 注释，而漏掉活动位的症状是一屏没有解释的空白欢迎页。统一走同一个出口，代价是一次无操作。
+        const next = await api.config.get()
+        set((state) => adoptedConfig(state.activeWorkspaceId, next))
         // A partial failure is neither swallowed nor promoted to total failure: the lanes that did
         // launch stay launched, and the ones that did not are named through the existing error surface.
         const failed = result.lanes.filter((lane) => lane.status !== 'launched')
@@ -1937,7 +1947,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   async keepOneOfFanOut(input) {
     try {
       const result = await api.workspaces.keepOneOfFanOut(input)
-      set({ config: await api.config.get() })
+      // 输家的记录刚被撤掉，而活动位很可能正指着其中一个——用户就是在看那几条 lane 才按下 Keep 的。
+      const next = await api.config.get()
+      // 胜者写在候选第二位：活动位指着的还在（比如某条 lane 因为脏树被留下）就不动它，被删掉了才
+      // 落到胜者身上。落到胜者而不是通用兜底，是因为「留下这一个」这句话本身就说明了该看哪儿。
+      set((state) => adoptedConfig(state.activeWorkspaceId, next, input.keepWorkspaceId))
       // A lane refused because it still holds uncommitted work is reported, never silently dropped —
       // losing a bake-off is not a reason to discard someone's work.
       const retained = result.outcomes.filter((outcome) => outcome.status === 'retained')
@@ -1953,6 +1967,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       get().reportError(error)
       return null
     }
+  },
+  async removeWorktree(input) {
+    const outcome = await api.workspaces.removeWorktree(input)
+    // `removed` 带回来的 config 就是权威的那一份，不再另外 get() 一次：多一次往返就多一个能与这次
+    // 移除结果不一致的窗口。`retained` 什么都没删，所以什么都不写——它是保护生效了，不是一次变更。
+    if (outcome.status === 'removed') {
+      set((state) => adoptedConfig(state.activeWorkspaceId, outcome.config))
+    }
+    // 抛不抛由调用方决定：单条移除的 `retained` 要在对话框里重问，压成 null 会把 git 的理由吃掉。
+    return outcome
   },
   focusTabGroup(workspaceId, tabGroupId) {
     const layout = get().layouts[workspaceId]
@@ -4241,7 +4265,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   setConfig(config) {
     detectionRequestIds.clear()
     hostCheckRequestIds.clear()
-    set({ config, executorDetections: {}, hostChecks: {} })
+    // 活动位跟着一起算。此前这里只清 host 键的两张缓存却不管 `activeWorkspaceId`，而那正是**唯一**
+    // 会被「配置里少了一条 workspace」打坏的引用：删 host 会连带删掉它上面的全部 workspace（见
+    // HostSettingsPane 的 filter），删项目会删掉一整组，而两处都经过这里。缺了这一行，每个删除现场
+    // 都得自己记得挪活动位，而漏掉的那些就是空白欢迎页。
+    set((state) => ({
+      ...adoptedConfig(state.activeWorkspaceId, config),
+      executorDetections: {},
+      hostChecks: {}
+    }))
   },
   reportError(error) {
     set({ error: message(error) })
