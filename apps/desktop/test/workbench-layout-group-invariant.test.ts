@@ -3,6 +3,7 @@ import {
   addTab,
   assertGroupInvariant,
   createWorkspaceLayout,
+  findGroupForTab,
   groupIds,
   moveTab,
   moveTabToNewGroup,
@@ -12,10 +13,25 @@ import {
   type WorkspaceLayout
 } from '../src/renderer/src/lib/workbench-layout'
 import {
+  projectPersistedWorkbench,
+  restorePersistedWorkbench
+} from '../src/renderer/src/lib/workbench-persistence'
+import type { AppConfig } from '../src/shared/contracts'
+import {
   activeTopicIdFromLayout,
   layoutForActiveTopic
 } from '../src/renderer/src/lib/scratch-topic-layout'
 import { createWorkbenchTab, type WorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
+
+/** 一张能活过持久化投影的 Tab：file 面在其 workspace 仍被配置时生还（见 persistedSurfaceSurvives）。 */
+function fileTab(id: string): WorkbenchTab {
+  return createWorkbenchTab(id, {
+    regionId: `region:${id}`,
+    kind: 'file',
+    workspaceId: 'ws',
+    path: `${id}.ts`
+  })
+}
 
 /**
  * `assertGroupInvariant` 是 region 侧 `assertRegionInvariant`（workbench-region-invariant.test.ts）在
@@ -147,6 +163,112 @@ describe('三个重排分屏树的 reducer 各自在出口调到了那道闸（�
 
     layout = removeTab(layout, 'g1', 'tab:b')
     expect(() => assertGroupInvariant(layout)).not.toThrow()
+  })
+})
+
+describe('持久化边界先把「树 ↔ groups」漂移抢救掉，两个入口都不许让断言炸出来', () => {
+  /**
+   * 与 region 侧 workbench-persisted-region-drift.test.ts 完全同构的一族。
+   *
+   * `assertGroupInvariant` 是无条件 throw 的生产断言，而 `removeTab` 在**两个持久化入口**上都会被
+   * 调用（`keepTabsInLayout` 的两个调用点）。localStorage 里的内容是用户数据，这道断言是本轮才装上
+   * 的，所以盘上完全可能已经躺着一个漂移的布局。爆炸半径两个入口不同：
+   *   - `projectPersistedWorkbench`（zustand `partialize`，**每次写入都跑**）→ 抛在 `set()` 里，
+   *     任意一次用户操作变成崩溃，且此后再也写不进去；
+   *   - `restorePersistedWorkbench`（启动恢复）→ 整个 Workbench 落回空白。
+   *
+   * 漂移**不必**由持久化数据自己带来，这是本族最容易被漏掉的一半：`removeTab` 那条 within-record
+   * 出口**刻意容忍**入场时就在的 off-tree group（workbench-layout.ts:407-411 明写这条容忍）。于是
+   * 一个今天完全合法的运行时状态存下来，下一次写入只要在**另一个**分组上触发收组，就连带炸掉。
+   *
+   * 判据有两半，缺一不可（与 region 侧同一条理由）：
+   *   - 抢救真的发生了（不抛、交出来的布局自己满足不变量、幸存分组的 Tab 没被换掉）；
+   *   - 断言仍然是**无条件**的（直接拿漂移布局调它必须抛，见上面那个 describe）。
+   * 后者防的是「把断言削成 no-op / dev-only」这种让前半截也一起转绿的假修法。
+   */
+
+  /** 两个分组各一张 Tab，外加一条 off-tree 的 `floating` 记录（探针实测的那个形状）。 */
+  function driftedPersistedLayout(): WorkspaceLayout {
+    return withOffTreeGroupRecord(splitTwoGroups(), 'floating', 'tab:f')
+  }
+
+  it('partialize 路径：漂移布局 + 一张 Tab 已不在场，不抛且把死记录摘掉', () => {
+    const layout = driftedPersistedLayout()
+    // 前提自检：这个 fixture 真的漂移了，否则本条退化成「干净输入不抛」而测不到抢救。
+    expect(() => assertGroupInvariant(layout)).toThrow(/floating/)
+
+    // tabs 为空 ⇒ keepTabsInLayout 会摘掉每个分组的每张 Tab，g2 被收组 → 触发 removeTab 的断言出口。
+    const projected = projectPersistedWorkbench({ tabs: {}, layouts: { ws: layout } })
+
+    const next = projected.layouts.ws!
+    expect(() => assertGroupInvariant(next), '抢救后的布局自己仍然违约').not.toThrow()
+    expect(next.groups.map((group) => group.id)).not.toContain('floating')
+  })
+
+  it('启动恢复路径：同一个漂移布局也不许抛，且幸存分组保住它那张 Tab', () => {
+    const layout = driftedPersistedLayout()
+    const config = { workspaces: [{ id: 'ws', name: 'ws', path: '/ws' }] } as unknown as AppConfig
+
+    const restored = restorePersistedWorkbench({
+      config,
+      sessions: [],
+      // tabs 表里留下 tab:a（属于 g1）：它必须活下来，g2/floating 的 Tab 没有记录故被摘。
+      persisted: { tabs: { 'tab:a': fileTab('tab:a') }, layouts: { ws: layout } },
+      createTabGroupId: () => 'fresh'
+    })
+
+    const next = restored.layouts.ws!
+    expect(() => assertGroupInvariant(next), '抢救后的布局自己仍然违约').not.toThrow()
+    expect(next.groups.map((group) => group.id)).not.toContain('floating')
+    // 抢救不是「清空重来」：留存那张 Tab 还在它原来的分组里。
+    expect(findGroupForTab(next, 'tab:a')?.id).toBe('g1')
+  })
+
+  it('抢救必须排在 removeTab 之前——把顺序调过来，上面两条就是断言直接炸出来的样子', () => {
+    // 这一条钉的是**顺序**，而不是「抢救存在」。上面两条只要抢救在场就绿，无论它排在收组前还是后；
+    // 而排在后面时 `removeTab` 先跑、先抛，抢救永远等不到。这里用一次显式的「先收组」证明那个世界
+    // 真的会抛，从而说明前两条的绿是顺序买来的，不是巧合。
+    const layout = driftedPersistedLayout()
+    expect(() => removeTab(layout, 'g2', 'tab:b'), '先收组竟然没抛，那前两条的绿就不是顺序买来的')
+      .toThrow(/group records with no tree leaf: \[floating\]/)
+  })
+
+  it('另一个方向也要摘：树上的孤儿叶必须从树里删掉，不能只清 groups 表', () => {
+    // 上面三条全是 record-without-leaf。抢救的两个方向是**各自独立**的代码：只清 ghost 记录、
+    // 完全不动树，上面每一条照旧全绿（实测：在本条存在**之前**删掉那行 `removeLeaf` 循环，当时
+    // 全部 14 条全过；本条加进来后同一个变异立刻 1 红）。所以这一条是那半边唯一的靶子。
+    //
+    // 孤儿叶对用户的样子不是「不可见」而是「一只画不出内容的破格」：渲染层拿 `orphan` 去 findGroup
+    // 得到 null。留着它还有第二层代价——它让整个布局**永久违约**，于是下一次任何触发收组的写入
+    // 都会在 removeTab 出口抛，即抢救没有真的把布局带回可写状态。
+    const layout = withOrphanTreeLeaf(splitTwoGroups(), 'orphan')
+    // 前提自检：只违约这一个方向（记录不多，树多一片），否则本条会被 ghost 那半边的修复顺带变绿。
+    expect(groupIds(layout.root)).toContain('orphan')
+    expect(layout.groups.map((group) => group.id)).toEqual(['g1', 'g2'])
+    expect(() => assertGroupInvariant(layout)).toThrow(/orphan/)
+
+    const projected = projectPersistedWorkbench({ tabs: {}, layouts: { ws: layout } })
+
+    const next = projected.layouts.ws!
+    expect(() => assertGroupInvariant(next), '抢救后的布局自己仍然违约').not.toThrow()
+    expect(groupIds(next.root), '孤儿叶还在树里').not.toContain('orphan')
+  })
+
+  it('两侧毫无交集时原样交出，不编一棵树出来', () => {
+    // 树只有 g1、记录只有 floating：一个可画的分组都没有。此时**编**一个 id 交出去比留着可识别的
+    // 坏数据更坏（与 normalizePersistedLayout 的同款判断一致），所以原样返回、让它继续被识别成漂移。
+    const layout: WorkspaceLayout = {
+      root: { type: 'leaf', groupId: 'g1' },
+      groups: [{ id: 'floating', tabOrder: ['tab:f'], activeTabId: 'tab:f', recentTabIds: ['tab:f'] }],
+      activeGroupId: 'floating'
+    }
+    // tabs 为空，但 floating 的 tabOrder 非空 → keepTabsInLayout 会对它调 removeTab；那条 within-record
+    // 出口刻意不套断言（它不动树），所以这一路不抛，抢救的「不动手」也不该把它变成抛。
+    const projected = projectPersistedWorkbench({ tabs: {}, layouts: { ws: layout } })
+
+    const next = projected.layouts.ws!
+    expect(groupIds(next.root)).toEqual(['g1'])
+    expect(next.groups.map((group) => group.id)).toEqual(['floating'])
   })
 })
 
