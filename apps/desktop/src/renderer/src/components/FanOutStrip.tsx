@@ -19,6 +19,14 @@ import {
 //
 // Absent when there is nothing to compare: a repo with no fan-out renders no strip at all.
 
+// The lane's attention, expressed in the shared status vocabulary so the dot carries it.
+//
+// This is the lane's ONLY attention mark, deliberately. It used to also emit `data-attention` on the
+// chip itself — an attribute no stylesheet ever read, so it painted nothing while looking like the
+// signal was handled. Deleting it rather than adding a rule for it: `waiting` and `error` already put
+// amber and red into `--status-ink` (the status vocabulary in chrome.css), and amber additionally
+// carries a `?` pip so needs-you survives colour-blindness. A second mark on the same chip would be
+// the same fact twice, which is what the Project Rail's "one signal per row" rule exists to prevent.
 function laneState(lane: FanOutLane): 'working' | 'waiting' | 'error' | null {
   if (lane.attention === 'needs-you') return 'waiting'
   if (lane.attention === 'error') return 'error'
@@ -76,7 +84,6 @@ function LaneChip({
       <button
         className="fanout-lane"
         type="button"
-        {...(lane.attention ? { 'data-attention': lane.attention } : {})}
         aria-label={label}
         title={label}
         onClick={() => onSelect(sessionId)}

@@ -16,6 +16,12 @@ import { copyTextToClipboard } from '../lib/clipboard-copy'
 // Collapsed it costs nothing but the count that was already there. Everything below appears only once
 // the user asks for it.
 
+// The row's attention, in the shared status vocabulary so its dot carries it.
+//
+// One mark per row, and this is it. The row also used to emit `data-attention`, which no stylesheet
+// read — so it painted nothing while looking handled. Deleted rather than given a rule: `waiting` and
+// `error` already resolve `--status-ink` to amber and red, and amber's dot carries a `?` pip, so the
+// signal is on screen and colour-blind-safe without a second competing mark.
 function stateFor(row: RosterRow): 'working' | 'waiting' | 'error' | null {
   if (row.attention === 'needs-you') return 'waiting'
   if (row.attention === 'error') return 'error'
@@ -49,7 +55,6 @@ function RosterRowView({
       <ContextMenu.Trigger asChild>
         <DropdownMenu.Item
           className="agent-roster__row"
-          {...(row.attention ? { 'data-attention': row.attention } : {})}
           // The scope goes into the accessible name, not just a muted line: what an Agent is allowed to do
           // is the point of showing it, and a reader that only hears the name would otherwise miss it.
           aria-label={[
