@@ -18,6 +18,7 @@ import { OpenDestinationPopover, type OpenDestinationRequest } from './OpenDesti
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { TerminalView } from './TerminalView'
 import { agentSessionServiceOutcome, classifyServiceNotice, serviceNoticeToRender } from '../lib/service-window-notice'
+import { isMacPlatform } from '../lib/host-platform'
 import {
   classifyContinuityFailure,
   continuityRefreshEnabled,
@@ -122,7 +123,7 @@ export function SessionPane({
   const canSplit = Boolean(linkOrigin.tabId && linkOrigin.regionId)
   const onProseLinkClick = useCallback(
     (url: string, event: LinkClickModifiers) => {
-      const isMac = navigator.userAgent.includes('Mac')
+      const isMac = isMacPlatform()
       // Cmd (macOS) / Ctrl (elsewhere) + click opens the system browser immediately, skipping the menu —
       // the SAME judgement the Terminal uses, so the two surfaces cannot drift on the modifier.
       if (terminalLinkModifierOpensSystemBrowser(event, isMac)) {

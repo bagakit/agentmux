@@ -11,11 +11,9 @@ function agentSession(
 ): Extract<SessionSnapshot, { kind: 'agent' }> {
   const capabilities: AgentCapabilities = {
     terminal: true,
-    hookEvents: true,
     timeline: 'complete-events',
     permission: 'respond',
     providerResume: true,
-    acp: false,
     replyCorrelation: 'none'
   }
   return {
@@ -62,8 +60,8 @@ describe('agentUsageDisplay', () => {
   it('shows the real last-turn output tokens when the provider reports usage', () => {
     const display = agentUsageDisplay(agentSession({
       capabilities: {
-        terminal: true, hookEvents: true, timeline: 'complete-events', permission: 'respond',
-        providerResume: true, acp: false, replyCorrelation: 'none',
+        terminal: true, timeline: 'complete-events', permission: 'respond',
+        providerResume: true, replyCorrelation: 'none',
         usage: { kind: 'native-transcript', transcriptFormat: 'claude-jsonl' }
       },
       turnUsage: { inputTokens: 2, outputTokens: 5, totalTokens: 7, observedAt: 1234 }
@@ -90,8 +88,8 @@ describe('agentUsageDisplay', () => {
   it('shows an unknown marker — never 0 — before the first turn completes', () => {
     const display = agentUsageDisplay(agentSession({
       capabilities: {
-        terminal: true, hookEvents: true, timeline: 'complete-events', permission: 'respond',
-        providerResume: true, acp: false, replyCorrelation: 'none',
+        terminal: true, timeline: 'complete-events', permission: 'respond',
+        providerResume: true, replyCorrelation: 'none',
         usage: { kind: 'native-transcript', transcriptFormat: 'claude-jsonl' }
       },
       turnUsage: undefined

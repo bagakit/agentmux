@@ -17,6 +17,7 @@ import {
   FILE_EXPLORER_RENAME_KEY,
   type FileExplorerMoveTarget
 } from '../../lib/file-explorer-move'
+import { isMacPlatform, revealInFileManagerLabel } from '../../lib/host-platform'
 
 function stopRightButtonSelection(event: React.PointerEvent): void {
   if (event.button !== 2) return
@@ -63,12 +64,8 @@ export function FileTreeContextMenu({
   onReveal: () => void
   onViewFile: () => void
 }) {
-  const isMac = navigator.userAgent.includes('Mac')
-  const fileManagerLabel = isMac
-    ? 'Reveal in Finder'
-    : navigator.userAgent.includes('Windows')
-      ? 'Reveal in File Explorer'
-      : 'Reveal in File Manager'
+  const isMac = isMacPlatform()
+  const fileManagerLabel = revealInFileManagerLabel()
   return (
     <ContextMenu.Root onOpenChange={onOpenChange}>
       <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>

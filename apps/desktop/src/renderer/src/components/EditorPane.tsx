@@ -5,6 +5,7 @@ import { useEffect, useRef } from 'react'
 import { api } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { diffEditorSides, wordWrapOption } from '../lib/editor-diff'
+import { revealInFileManagerLabel } from '../lib/host-platform'
 import {
   EDITOR_COPY_ACTIONS,
   EDITOR_COPY_MENU_GROUP,
@@ -43,7 +44,7 @@ export function EditorUnavailableState({
       <span>Refresh the explorer and open it again.</span>
       {canReveal ? (
         <button className="small-button" onClick={onReveal}>
-          <FolderOpen size={13} /> Reveal in Finder
+          <FolderOpen size={13} /> {revealInFileManagerLabel()}
         </button>
       ) : null}
     </section>

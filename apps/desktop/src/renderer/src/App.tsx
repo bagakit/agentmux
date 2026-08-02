@@ -26,6 +26,7 @@ import { SurfaceToolDock } from './components/SurfaceToolDock'
 import { WorkspaceWorkbench } from './components/WorkspaceWorkbench'
 import { api } from './lib/api'
 import { useAppStore } from './store'
+import { isMacPlatform } from './lib/host-platform'
 import {
   TerminalParkingProvider,
   useTerminalColdParking
@@ -118,7 +119,7 @@ export function App() {
   // window because the main process installs a menu binding no Cmd+W — a renderer preventDefault cannot
   // cancel a native menu accelerator. See main/application-menu.ts.)
   useEffect(() => {
-    const isMac = navigator.userAgent.includes('Mac')
+    const isMac = isMacPlatform()
     const onKeyDown = (event: KeyboardEvent): void => {
       // 在非终端的可编辑控件里打字/改名时，带 `not-in-editable` 门的绑定（Cmd+D 分屏、Cmd+W 关格）先放行；
       // 全局导航（quick switch）不带门，照常触发。终端焦点仍接管——capture 存在的唯一理由就是抢在聚焦的
@@ -266,7 +267,7 @@ export function App() {
       <ShortcutsCheatSheet
         open={shortcutsHelpOpen}
         onClose={() => setShortcutsHelpOpen(false)}
-        isMac={navigator.userAgent.includes('Mac')}
+        isMac={isMacPlatform()}
       />
       </div>
       </SurfaceMemoryBudgetProvider>

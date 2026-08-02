@@ -38,7 +38,18 @@ export function TopicContextMenu({
           <ContextMenu.Separator className="tab-context-menu__separator" />
           <ContextMenu.Item className="tab-context-menu__item" onSelect={onReveal}>
             <Crosshair size={14} />
-            <span>Reveal in Explorer</span>
+            {/*
+              「在 AgentMux 自己的文件面板里定位」——不是系统文件管理器。`onReveal` 只写
+              `explorerRevealRequest` 状态让那棵树展开滚动到位，全程不碰 `api.files.reveal`。
+              所以这句**不许**走 `lib/host-platform` 的 reveal 文案：那一族是三个操作系统的
+              Finder / File Explorer / File Manager，与这里是两件事。
+
+              原文案是 "Reveal in Explorer"，两个毛病：产品里没有任何界面把那个面板叫
+              "Explorer"（它的名字是 "Files + Branches"，见 SurfaceToolDock 的 TOOL 表），
+              而 "Explorer" 又恰好是 Windows 系统文件管理器的名字——于是一个内部导航动作看起来
+              像在承诺打开操作系统的窗口。改成点名那个面板自己的名字。
+            */}
+            <span>Reveal in Files</span>
           </ContextMenu.Item>
           <ContextMenu.Item className="tab-context-menu__item" onSelect={onCopyPath}>
             <Copy size={14} />

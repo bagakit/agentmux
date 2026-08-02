@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { terminalMenuChords } from '../lib/terminal-menu-chords'
+import { isMacPlatform } from '../lib/host-platform'
 
 export function TerminalContextMenu({
   children,
@@ -29,7 +30,7 @@ export function TerminalContextMenu({
   onSelectAll: () => void
   onScrollToBottom: () => void
 }) {
-  const isMac = navigator.userAgent.includes('Mac')
+  const isMac = isMacPlatform()
   // 键位不在这里算：三个走注册表、paste 走原生 Edit→Paste 的和弦，理由与来源都在 lib 那一层。
   const chords = terminalMenuChords(isMac)
   return (

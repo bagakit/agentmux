@@ -19,7 +19,7 @@ import { useAppStore } from '../store'
 import type { SettingsSectionId } from './SettingsPanel'
 import { BrandIcon } from './BrandIcon'
 import { ProjectRailToolbar } from './ProjectRailToolbar'
-import { ProjectRailContextMenu } from './ProjectRailContextMenu'
+import { WorkspaceRowContextMenu } from './WorkspaceRowContextMenu'
 import { ConfirmationDialog } from './ConfirmationDialog'
 import { SidebarToggleChrome } from './TopRowChrome'
 
@@ -113,6 +113,10 @@ export function WorkspaceSidebar({
     const preferred = active
       ? activeWorkspaceId
       : project.preferredWorkspaceId
+    // 复制分支名只对 git worktree 有意义：一个聚合了多个 worktree 的 folder 项目本身没有单一分支。
+    // 取被这一行选中的那个 workspace 的 branch，没有就不给这一项。
+    const preferredWorkspace = project.workspaces.find((workspace) => workspace.id === preferred)
+    const branch = preferredWorkspace?.branch ?? null
     const row = (
       <button
         className={`project-rail-row ${active ? 'project-rail-row--active' : ''}`}
@@ -161,9 +165,16 @@ export function WorkspaceSidebar({
       </button>
     )
     return (
-      <ProjectRailContextMenu key={project.id} onRemove={() => setRemoveRequest(project)}>
+      <WorkspaceRowContextMenu
+        key={project.id}
+        path={project.repoPath}
+        branch={branch}
+        isLocal={project.hostId === 'local'}
+        workspaceId={preferred ?? project.preferredWorkspaceId}
+        onRemove={() => setRemoveRequest(project)}
+      >
         {row}
-      </ProjectRailContextMenu>
+      </WorkspaceRowContextMenu>
     )
   }
 
@@ -174,7 +185,13 @@ export function WorkspaceSidebar({
       </header>
       {scratch ? (
         <div className="scratch-workspace-slot">
-          <button
+          <WorkspaceRowContextMenu
+            path={scratch.path}
+            branch={scratch.branch ?? null}
+            isLocal={scratch.hostId === 'local'}
+            workspaceId={scratch.id}
+          >
+            <button
             className={`project-rail-row scratch-workspace-row ${activeWorkspaceId === scratch.id ? 'project-rail-row--active' : ''}`}
             aria-current={activeWorkspaceId === scratch.id ? 'page' : undefined}
             aria-label={[
@@ -210,6 +227,7 @@ export function WorkspaceSidebar({
               {scratchWorkingAgentCount > 0 ? <span>{scratchWorkingAgentCount}</span> : null}
             </span>
           </button>
+          </WorkspaceRowContextMenu>
         </div>
       ) : null}
       <div className="sidebar__section-heading">

@@ -61,11 +61,9 @@ function agentSession(overrides: Partial<Extract<SessionSnapshot, { kind: 'agent
     executorId: 'codex',
     capabilities: {
       terminal: true,
-      hookEvents: true,
       timeline: 'complete-events',
       permission: 'observe',
       providerResume: true,
-      acp: false,
       replyCorrelation: 'none'
     },
     hostId: 'local',
@@ -117,11 +115,9 @@ function postureCatalogEntry(): AgentCatalogEntry {
     acpStrategy: { kind: 'none' },
     capabilities: {
       terminal: true,
-      hookEvents: false,
       timeline: 'unavailable',
       permission: 'none',
       providerResume: false,
-      acp: false,
       replyCorrelation: 'none'
     },
     launchOptions: [],

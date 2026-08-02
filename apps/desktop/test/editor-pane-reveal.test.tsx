@@ -1,6 +1,7 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { revealInFileManagerLabel } from '../src/renderer/src/lib/host-platform.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { readFile } from 'node:fs/promises'
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
@@ -119,9 +120,12 @@ describe('EditorUnavailableState', () => {
     const markup = renderToStaticMarkup(
       createElement(EditorUnavailableState, { canReveal: true, onReveal: vi.fn() })
     )
-    // The existing dead-end copy stays; the reveal action is what turns it into an exit.
+    // 判据读 lib 而不是硬写 "Reveal in Finder"：这个按钮的文案随平台走（Finder / File Explorer /
+    // File Manager），硬写一个就等于断言「在本机跑」。下面那两条 not.toContain 更要读 lib——硬写的
+    // 那个串在非 mac 上永远不出现，负向断言会静默变恒真。lib 自己的三个字面量由
+    // host-platform.test.ts 钉住，所以这里读它不构成「期望值由被测对象算出」。
     expect(markup).toContain('File is no longer available')
-    expect(markup).toContain('Reveal in Finder')
+    expect(markup).toContain(revealInFileManagerLabel())
     expect(markup).toContain('<button')
   })
 
@@ -130,7 +134,7 @@ describe('EditorUnavailableState', () => {
       createElement(EditorUnavailableState, { canReveal: false, onReveal: vi.fn() })
     )
     expect(markup).toContain('File is no longer available')
-    expect(markup).not.toContain('Reveal in Finder')
+    expect(markup).not.toContain(revealInFileManagerLabel())
     expect(markup).not.toContain('<button')
   })
 
@@ -185,7 +189,7 @@ describe('EditorPane failure state wiring', () => {
       createElement(EditorPane, { tabId: 'tab', surface: fileSurface('workspace', 'src/gone.ts') })
     )
     expect(markup).toContain('File is no longer available')
-    expect(markup).toContain('Reveal in Finder')
+    expect(markup).toContain(revealInFileManagerLabel())
   })
 
   it('withholds the Reveal action for a remote (non-local) workspace', () => {
@@ -194,7 +198,7 @@ describe('EditorPane failure state wiring', () => {
       createElement(EditorPane, { tabId: 'tab', surface: fileSurface('remote', 'src/gone.ts') })
     )
     expect(markup).toContain('File is no longer available')
-    expect(markup).not.toContain('Reveal in Finder')
+    expect(markup).not.toContain(revealInFileManagerLabel())
   })
 })
 

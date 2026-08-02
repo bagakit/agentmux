@@ -14,7 +14,7 @@ import {
   addTabPlacement,
   createWorkspaceLayout
 } from '../src/renderer/src/lib/workbench-layout.js'
-import { useAppStore } from '../src/renderer/src/store.js'
+import { useAppStore, warmTerminalKey } from '../src/renderer/src/store.js'
 
 // ---------------------------------------------------------------------------
 // 落点不在场时不许留孤儿 Tab（#307）。
@@ -154,7 +154,7 @@ describe('启动落点不在场时响亮失败，不留孤儿 Tab', () => {
     // 泊车的那个 shell 已经起好了。promoteWarmTerminal 会先把它从全局单槽里取出（消费掉），
     // 所以落点不在场时它没有别的归宿——必须停掉，否则那个进程泄漏且用户永远看不到它。
     useAppStore.setState({
-      warmTerminal: { key: ("local\u0000" + _hygiene_fixturePath("repo")), ready: Promise.resolve(session), session },
+      warmTerminal: { key: warmTerminalKey('local', _hygiene_fixturePath("repo")), ready: Promise.resolve(session), session },
       unclaimedTerminalSessionIds: [session.id],
       sessions: [session]
     })

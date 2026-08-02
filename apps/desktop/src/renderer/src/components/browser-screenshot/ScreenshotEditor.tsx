@@ -37,6 +37,7 @@ import {
   type ScreenshotTool
 } from './drawing-model'
 import { SCREENSHOT_TEXT_FONT } from './drawing-renderer'
+import { isMacPlatform } from '../../lib/host-platform'
 
 type EditorSize = { width: number; height: number; dpr: number }
 type PendingText = ScreenshotPoint
@@ -157,7 +158,7 @@ export function ScreenshotEditor({
         return
       }
       if (event.target instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target.tagName)) return
-      const modifier = navigator.userAgent.includes('Mac') ? event.metaKey : event.ctrlKey
+      const modifier = isMacPlatform() ? event.metaKey : event.ctrlKey
       if (modifier && event.key.toLowerCase() === 'z') {
         event.preventDefault()
         if (event.shiftKey) redo()

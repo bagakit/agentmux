@@ -76,6 +76,7 @@ import {
 } from './OpenDestinationBar'
 import { TerminalContextMenu } from './TerminalContextMenu'
 import { TerminalReplayGapNotice } from './TerminalReplayGapNotice'
+import { isMacPlatform } from '../lib/host-platform'
 
 function terminalWrite(terminal: Terminal, data: string): Promise<void> {
   return new Promise((resolve) => terminal.write(data, resolve))
@@ -211,7 +212,7 @@ export function TerminalView({
   )
   const activeWorkspaceRootRef = useRef(activeWorkspaceRoot)
   activeWorkspaceRootRef.current = activeWorkspaceRoot
-  const isMac = navigator.userAgent.includes('Mac')
+  const isMac = isMacPlatform()
 
   function restoreRememberedViewport(terminal: Terminal): void {
     const target = restoreTerminalViewport(
