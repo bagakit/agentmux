@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+  INNER_SCOPES,
   SHORTCUT_BINDINGS,
+  SHORTCUT_SCOPES,
   chordForPlatform,
   chordMatches,
   matchShortcut,
@@ -61,17 +63,30 @@ describe('binding id set', () => {
       'workbench.select-tab.8',
       'workbench.select-tab.9',
       'workbench.split.down',
-      'workbench.split.right'
-    ])
+      'workbench.split.right',
+      // launcher scope: the start page's own handler. Its whole point is firing INSIDE the prompt textarea,
+      // which is why it cannot be an un-gated window binding — see ShortcutScope's comment.
+      'launcher.submit'
+    ].sort())
   })
 
   it('no two bindings in one scope resolve to the same chord on either platform', () => {
-    // A collision within a scope would make one binding unreachable. Check both platforms, both scopes
-    // that route by matching (window, terminal). Editor is matched by Monaco, not matchShortcut.
-    for (const scope of ['window', 'terminal'] as const) {
+    // A collision within a scope would make one binding unreachable. Every scope that routes by MATCHING is
+    // checked — derived by subtracting the one scope that does not (editor, matched by Monaco's own table),
+    // rather than hand-listing `['window', 'terminal']` as this did before. A scope added to the registry
+    // was silently outside this loop: its bindings could collide with each other and nothing said so.
+    const matchedScopes = SHORTCUT_SCOPES.filter((scope) => scope !== 'editor')
+    // Self-check: if the subtraction ever empties (or the union shrinks to just editor) the loop below runs
+    // zero times and passes vacuously.
+    expect(matchedScopes.length, 'no matched scopes — SHORTCUT_SCOPES changed shape').toBeGreaterThan(1)
+    for (const scope of matchedScopes) {
+      const inScope = SHORTCUT_BINDINGS.filter((b) => b.scope === scope)
+      // Every declared scope must actually carry bindings; an empty scope is a declaration with no registry
+      // entry (this repo's "声明了却从不注册的事件" shape) and also makes this scope's iteration vacuous.
+      expect(inScope.length, `scope ${scope} is declared but no binding uses it`).toBeGreaterThan(0)
       for (const isMac of [true, false]) {
         const seen = new Map<string, string>()
-        for (const binding of SHORTCUT_BINDINGS.filter((b) => b.scope === scope)) {
+        for (const binding of inScope) {
           const chord = chordForPlatform(binding, isMac)
           const key = `${chord.key}|${chord.primary}|${chord.shift}|${chord.alt}`
           expect(seen.has(key), `collision in ${scope}/${isMac ? 'mac' : 'other'}: ${binding.id} vs ${seen.get(key)}`).toBe(false)
@@ -96,8 +111,16 @@ describe('binding id set', () => {
     const unGatedWindow = SHORTCUT_BINDINGS.filter((b) => b.scope === 'window' && b.gate !== 'not-in-editable')
     // Self-check: an empty list would make the loop below vacuously green.
     expect(unGatedWindow.length, 'no un-gated window bindings found — the filter or the registry changed shape').toBeGreaterThan(0)
-    const inner = SHORTCUT_BINDINGS.filter((b) => b.scope === 'terminal' || b.scope === 'editor')
-    expect(inner.length, 'no terminal/editor bindings found — the filter or the registry changed shape').toBeGreaterThan(0)
+    // The inner scopes come from the registry's own derived list, NOT a hand-written `terminal || editor`.
+    // That hand-list was the hole: adding a scope left its bindings outside this guard entirely, so a new
+    // inner binding could ship claiming a chord an un-gated window binding already wins — silently
+    // unreachable, which is the exact defect this test was written for.
+    expect(
+      [...INNER_SCOPES].sort(),
+      'INNER_SCOPES must be every scope except window, or this guard has a blind spot again'
+    ).toEqual(SHORTCUT_SCOPES.filter((scope) => scope !== 'window').sort())
+    const inner = SHORTCUT_BINDINGS.filter((b) => INNER_SCOPES.includes(b.scope))
+    expect(inner.length, 'no inner-scope bindings found — the filter or the registry changed shape').toBeGreaterThan(0)
 
     for (const isMac of [true, false]) {
       const chordKey = (b: ShortcutBinding): string => {

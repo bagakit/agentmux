@@ -19,9 +19,32 @@ export type ShortcutEvent = Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 
  * - `terminal`— xterm's custom key handler; only live while a terminal owns focus, so these never collide
  *   with `window` bindings (a focused terminal claims the chord first; nothing else sees it).
  * - `editor`  — Monaco's own keybinding table while the editor owns focus.
+ * - `launcher`— the start page's own keydown handler, live only while that surface has focus.
  * A binding belongs to exactly one scope; that is the model, not one flat if over every key.
+ *
+ * Why `launcher` is its own scope and not an un-gated `window` binding: the launcher's submit chord must
+ * fire **while the prompt textarea has focus** — that is the only place the user types it — so it cannot
+ * carry the `not-in-editable` gate. But an un-gated window binding fires over every surface (App's
+ * listener runs at capture and never stops propagation), which would make Cmd+Enter a global gesture that
+ * shadows any future terminal/editor binding on the same chord. A scope keeps it reachable exactly where
+ * it means something. `INNER_SCOPES` below is what makes the collision guard see it.
  */
-export type ShortcutScope = 'window' | 'terminal' | 'editor'
+export const SHORTCUT_SCOPES = ['window', 'terminal', 'editor', 'launcher'] as const
+export type ShortcutScope = (typeof SHORTCUT_SCOPES)[number]
+
+/**
+ * The scopes that live *inside* a focused surface, as opposed to `window`.
+ *
+ * Derived by subtraction from {@link SHORTCUT_SCOPES}, deliberately not written out again: this is the list
+ * the cross-scope collision guard walks, and it used to be hand-enumerated as `terminal || editor` inside
+ * the test. A scope added to the union was therefore silently *excluded* from that guard — the new inner
+ * binding could ship claiming a chord an un-gated window binding already wins, which is exactly the blind
+ * spot that let `editor.show-commands` collide with `workbench.split.right`. Subtracting one named
+ * exception from the single scope list means a new scope is inside the guard the moment it exists, with
+ * nothing to remember. That is also why the scope union is spelled as an array first: a hand-copied second
+ * list is the failure this whole comment is about.
+ */
+export const INNER_SCOPES: readonly ShortcutScope[] = SHORTCUT_SCOPES.filter((scope) => scope !== 'window')
 
 /**
  * The key's readline classification — this is the *per-binding* form of the platform bottom line, not a
@@ -331,6 +354,25 @@ export const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     label: 'Show editor commands',
     mac: { key: 'f1', primary: false, shift: false, alt: false },
     other: { key: 'f1', primary: false, shift: false, alt: false }
+  },
+  // --- launcher: the start page's own handler, live only while that surface has focus ---
+  {
+    // Cmd/Ctrl+Enter launches from the prompt box. The start page had no keyboard path at all: every one
+    // of its five actions was mouse-only, so the user typed a prompt and then had to reach for the mouse
+    // to send it — while every agent surface downstream accepts the same chord.
+    //
+    // Bare Enter is deliberately NOT this chord: the prompt is a multi-line textarea (rows=4) whose whole
+    // point is describing an outcome across lines, and claiming Enter would make that impossible to type.
+    // The primary modifier is the near-universal "send, don't newline" convention for exactly this shape.
+    //
+    // No `gate`: this must fire *inside* the textarea, which is the only place it is typed. That is also
+    // why it is `launcher` scope rather than an un-gated window binding — see ShortcutScope's comment.
+    id: 'launcher.submit',
+    scope: 'launcher',
+    keyClass: 'named',
+    label: 'Launch agent',
+    mac: { key: 'enter', primary: true, shift: false, alt: false },
+    other: { key: 'enter', primary: true, shift: false, alt: false }
   }
 ]
 

@@ -6,6 +6,7 @@ import { executorDetectionKey, useAppStore, warmTerminalKey } from '../store'
 import { configuredExecutors } from '../lib/executors'
 import { EMPTY_LAUNCHER_NAMES, launcherNameBinding } from '../lib/launcher-name-draft'
 import { launcherPromptBinding } from '../lib/launcher-prompt-draft'
+import { launcherCanLaunch, launcherKeydownLaunches } from '../lib/launcher-submit'
 import { resolveLauncherWorkspaceId } from '../lib/launcher-workspace'
 import { warmLauncherId, warmTerminalPreview } from '../lib/warm-terminal-preview'
 import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
@@ -178,6 +179,27 @@ export function NewTabSurface({
     }
   }
 
+  // 「现在能不能启动」判一次，主按钮的 disabled 与 Cmd/Ctrl+Enter 那条路共用它。手抄两份时两条路会对
+  // 同一概念判得不一样，症状是按钮灰着而键盘照旧发车（或反过来）。
+  const readiness = {
+    hasWorkspace: Boolean(workspace),
+    busy: busy !== null,
+    installedExecutorCount: installedExecutors.length
+  }
+  // 启动这一件事也只写一次：按钮的 onClick 与键盘那条路调的是同一个函数。抄两遍时任何一处漏掉
+  // launchOptionSelection 或那两个名字，就变成「用鼠标点带着精调启动、用键盘发就丢掉精调」。
+  function launchFromLauncher(): void {
+    void run('agent', () => launchAgent(
+      executorId,
+      prompt,
+      tabGroupId,
+      launcherRef,
+      launchOptionSelection,
+      // trim 后为空即不传：空白不该变成一个 "launch" 档的名字，也绝不阻塞启动。
+      { agentName: names.agentName.trim() || undefined, tabName: names.tabName.trim() || undefined }
+    ))
+  }
+
   return (
     <section className="launch-surface">
       <div className="launch-surface__heading">
@@ -274,6 +296,17 @@ export function NewTabSurface({
         ref={promptRef}
         value={prompt}
         onChange={(event) => setPrompt(event.target.value)}
+        // Cmd/Ctrl+Enter 从这里发车。挂在 textarea 上而不是整个 section 上：section 里还嵌着热终端的
+        // 预览（TerminalView），keydown 会从它冒泡上来，挂在外层就会把用户敲进那个终端的 Cmd+Enter
+        // 抢掉。这一格是 prompt 唯一被输入的地方，也正是注册表里 `launcher.submit` 不带 gate 的理由。
+        //
+        // 壳里没有任何条件：要不要发车整条判定在 launcherKeydownLaunches 里（含那道与按钮共用的闸），
+        // 这里只转发。它说不发时也**不** preventDefault——那一下不属于我们，Enter 该照旧换行。
+        onKeyDown={(event) => {
+          if (!launcherKeydownLaunches(event, navigator.userAgent.includes('Mac'), readiness)) return
+          event.preventDefault()
+          launchFromLauncher()
+        }}
         placeholder="Describe the outcome. You can steer the agent after launch."
         rows={4}
       />
@@ -322,16 +355,8 @@ export function NewTabSurface({
         </span>
         <button
           className="primary-button"
-          disabled={!workspace || busy !== null || installedExecutors.length === 0}
-          onClick={() => void run('agent', () => launchAgent(
-            executorId,
-            prompt,
-            tabGroupId,
-            launcherRef,
-            launchOptionSelection,
-            // trim 后为空即不传：空白不该变成一个 "launch" 档的名字，也绝不阻塞启动。
-            { agentName: names.agentName.trim() || undefined, tabName: names.tabName.trim() || undefined }
-          ))}
+          disabled={!launcherCanLaunch(readiness)}
+          onClick={() => launchFromLauncher()}
         >
           {busy === 'agent' ? <LoaderCircle className="spin" size={14} /> : <Play size={14} />} {busy === 'agent' ? 'Launching…' : 'Launch agent'}
         </button>
