@@ -55,6 +55,7 @@ import {
 } from '../lib/terminal-viewport-memory'
 import {
   admitTerminalLiveOutput,
+  composeTerminalLiveOutputWrite,
   takeTerminalLiveOutputBatch,
   type TerminalLiveOutputChunk
 } from '../lib/terminal-live-output'
@@ -528,18 +529,16 @@ export function TerminalView({
       while (!disposed && liveOutputQueue.length > 0) {
         const taken = takeTerminalLiveOutputBatch(liveOutputQueue)
         liveOutputQueue.splice(0, liveOutputQueue.length, ...taken.rest)
-        const parts: string[] = []
-        let nextCursor = cursor
-        for (const output of taken.batch) {
-          if (output.endByte <= nextCursor) continue
-          if (output.startByte !== nextCursor) {
-            parts.push('\r\n\u001b[33m[Output sequence gap; earlier bytes are unavailable]\u001b[0m\r\n')
-          }
-          parts.push(output.data)
-          nextCursor = output.endByte
+        // 重叠三分（整块已有 / 部分已有 / 真的缺了一段）全在 lib 里判，这里只转发：
+        // 「部分已有」曾落到告示分支，于是无缺字节也报缺、且把已显示的内容重写一遍。
+        const composed = composeTerminalLiveOutputWrite(taken.batch, cursor)
+        if (composed.data.length === 0) {
+          // 整批都已在屏上。cursor 仍要跟上（它只增不减），否则同一批会被反复认成新字节。
+          cursor = composed.cursor
+          continue
         }
-        if (parts.length === 0) continue
-        const data = parts.join('')
+        const data = composed.data
+        const nextCursor = composed.cursor
         await terminalWrite(terminal, data)
         kittyKeyboard = readKittyKeyboardOutput(kittyKeyboard, data)
         cursor = nextCursor

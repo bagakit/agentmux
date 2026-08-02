@@ -2,8 +2,10 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
   admitTerminalLiveOutput,
+  composeTerminalLiveOutputWrite,
   takeTerminalLiveOutputBatch,
   TERMINAL_LIVE_OUTPUT_BACKLOG_BYTES,
+  TERMINAL_LIVE_OUTPUT_GAP_NOTICE,
   type TerminalLiveOutputChunk
 } from '../src/renderer/src/lib/terminal-live-output'
 
@@ -113,6 +115,71 @@ describe('live 输出积压的上界', () => {
   })
 })
 
+// ---------------------------------------------------------------------------
+// 重叠三分。
+//
+// 队列里的块与「已经写进 xterm 的字节」（cursor）可以有三种关系，各要不同处理：
+// 整块已有 / **部分**已有 / 真的缺了一段。中间那一支此前不存在，于是落进了「起点对不上就报缺」
+// 的分支：明明一个字节没少，终端上却多出一条 earlier bytes are unavailable，而且 cursor 之前
+// 那截被**重写一遍**（屏幕上出现重复内容）。
+//
+// 这种块在回放交接处必然产生：attach 后 cursor 被设成回放的末字节，随后 attach 前缓冲的 pending
+// 事件才被补送——它们的起点就在那之前。CLI 侧（core 的 session-output-follow）一直是三分的，
+// 两边只有一边对就是不对称。
+// ---------------------------------------------------------------------------
+
+function chunkOf(startByte: number, data: string): TerminalLiveOutputChunk {
+  return { data, startByte, endByte: startByte + Buffer.byteLength(data, 'utf8') }
+}
+
+describe('已写过的字节不重写，没缺的段不报缺', () => {
+  it('部分重叠只写 cursor 之后那截，且不发告示', () => {
+    // 回放写到第 6 字节；补送上来的那块从 0 开始、盖过 6。
+    const composed = composeTerminalLiveOutputWrite([chunkOf(0, 'abcdefGHI')], 6)
+    expect(composed.data, 'cursor 之前的字节被重写了一遍').toBe('GHI')
+    expect(composed.data, '没缺字节却报了缺').not.toContain('sequence gap')
+    expect(composed.cursor).toBe(9)
+  })
+
+  it('整块已有则整块跳过，且 cursor 不倒退', () => {
+    const composed = composeTerminalLiveOutputWrite([chunkOf(0, 'abcdef')], 6)
+    expect(composed.data).toBe('')
+    expect(composed.cursor).toBe(6)
+  })
+
+  it('真缺一段才发告示，且告示只发一条', () => {
+    // 队头起点在 cursor 之后 = 中间那段真的没有了，必须说。
+    const composed = composeTerminalLiveOutputWrite([chunkOf(10, 'xyz'), chunkOf(13, 'w')], 6)
+    expect(composed.data).toBe(`${TERMINAL_LIVE_OUTPUT_GAP_NOTICE}xyzw`)
+    expect(composed.cursor).toBe(14)
+  })
+
+  it('按字节裁剪，不是按字符——非 ASCII 输出上按字符切会错位', () => {
+    // '中' 是 3 字节。cursor 停在 3 时正确结果是 '文'，按 String.slice(3) 会得到空串。
+    const composed = composeTerminalLiveOutputWrite([chunkOf(0, '中文')], 3)
+    expect(composed.data).toBe('文')
+    expect(composed.cursor).toBe(6)
+  })
+
+  it('一批里三种关系混在一起时各按各的处理', () => {
+    const composed = composeTerminalLiveOutputWrite(
+      [chunkOf(0, 'aaa'), chunkOf(3, 'bbCC'), chunkOf(20, 'zz')],
+      5
+    )
+    // 第一块整块已有；第二块部分已有（写 'CC'，不报缺）；第三块真缺一段（报缺）。
+    expect(composed.data).toBe(`CC${TERMINAL_LIVE_OUTPUT_GAP_NOTICE}zz`)
+    expect(composed.cursor).toBe(22)
+  })
+
+  it('措辞与判据同住：告示里的 ESC 是真控制字节，不是被转义吃掉的字面量', () => {
+    // 本仓栽过「源码里落进裸 ESC 字节」与「测试手抄一份措辞」两种坑。这里钉住它真的是控制序列——
+    // 否则终端上会显示出 [33m 这样的可见垃圾，而拼接断言照旧全绿。
+    const esc = String.fromCharCode(27)
+    expect(TERMINAL_LIVE_OUTPUT_GAP_NOTICE).toContain(`${esc}[33m`)
+    expect(TERMINAL_LIVE_OUTPUT_GAP_NOTICE).toContain('Output sequence gap')
+  })
+})
+
 describe('TerminalView 真的经过了这道闸', () => {
   // 本仓有「抽进 lib 只解决一半」的先例：内容变可测了，而那层壳有没有被执行到照旧无人守——
   // 搬完再往壳里插一句早退，测试仍全绿。所以这里钉住组件里那个唯一入队点确实**经过** admit。
@@ -131,5 +198,15 @@ describe('TerminalView 真的经过了这道闸', () => {
   it('从 lib 导入，不是就地又抄了一份判据', () => {
     // 判据要是 import 关系。本仓栽过「not.toContain('name(') 被裸标识符绕过」，所以这里查导入路径。
     expect(source).toContain("from '../lib/terminal-live-output'")
+  })
+
+  it('重叠判定也走 lib，组件里不许再有自己的告示与 cursor 推进', () => {
+    // 抽进 lib 只解决一半：内容变可测了，而那层壳有没有**用**它照旧要有人守。此前这段判定就
+    // 内联在组件里，于是「部分重叠」那一支缺席也没有任何测试执行到。
+    expect(source).toContain('composeTerminalLiveOutputWrite(taken.batch, cursor)')
+    // 措辞只许有一处来源。组件里再出现一次告示字面量，就意味着判定又被抄回来了一份。
+    expect(source, '告示的措辞回到了组件里').not.toContain('Output sequence gap')
+    // 逐块推进 cursor 的循环也不许留在壳里：留着就是第二个判定点。
+    expect(source, '壳里又出现了逐块推进 cursor 的循环').not.toContain('nextCursor = output.endByte')
   })
 })
