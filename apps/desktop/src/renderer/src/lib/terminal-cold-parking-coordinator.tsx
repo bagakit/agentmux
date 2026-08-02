@@ -9,6 +9,7 @@ import {
   type TerminalColdParkCandidate
 } from './terminal-cold-parking-policy'
 import type { WorkbenchTab } from './workbench-tabs'
+import { isSessionSurface } from './workbench-surface-kinds'
 
 type Layouts = Readonly<Record<string, WorkspaceLayout>>
 type Tabs = Readonly<Record<string, WorkbenchTab>>
@@ -51,7 +52,7 @@ export function collectTerminalColdParkCandidates(
     )
 
     for (const surface of Object.values(tab.regions)) {
-      if (surface.kind !== 'agent' && surface.kind !== 'terminal') continue
+      if (!isSessionSurface(surface)) continue
       const session = sessionsById.get(surface.sessionId)
       candidates.push({
         id: surface.regionId,
