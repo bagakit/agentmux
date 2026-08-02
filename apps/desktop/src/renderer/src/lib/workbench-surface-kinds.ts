@@ -84,3 +84,41 @@ export function isSessionSurface(
       return assertUnreachableSurface(surface)
   }
 }
+
+/**
+ * What a Region's surface owns outside the layout tree, and therefore must release when the Region
+ * closes.
+ *
+ * Closing a Region used to ask two separate single-kind questions at the call site (`kind === 'browser'`
+ * → destroy the Main-side view, `kind === 'file'` → reconcile the document projection). Neither is
+ * wrong on its own, but together they are a per-kind obligation list that nothing tied to the union: a
+ * sixth kind holding an OS-level resource would answer "no" to both and leak silently, with no
+ * compile error and nothing to see at runtime. Deciding it here makes that omission a type error.
+ *
+ * The browser id is returned rather than a boolean so the caller needs no narrowing of its own — the
+ * one place that knows a browser surface carries an id is the one place that says so.
+ */
+export type SurfaceCloseObligations = {
+  /** The Main-side BrowserView to destroy, or null when this surface owns none. */
+  browserViewId: string | null
+  /** Whether the shared document projection must be reconciled and its owner disposed. */
+  releasesDocument: boolean
+}
+
+export function surfaceCloseObligations(surface: WorkbenchSurface): SurfaceCloseObligations {
+  switch (surface.kind) {
+    case 'browser':
+      return { browserViewId: surface.browserId, releasesDocument: false }
+    case 'file':
+      return { browserViewId: null, releasesDocument: true }
+    case 'agent':
+    case 'terminal':
+      // A Session outlives its Region: closing one pane does not end the run. Ending it is the separate,
+      // larger teardown in `workbench-view-close`, which is why there is nothing to release here.
+      return { browserViewId: null, releasesDocument: false }
+    case 'launcher':
+      return { browserViewId: null, releasesDocument: false }
+    default:
+      return assertUnreachableSurface(surface)
+  }
+}
