@@ -13,6 +13,7 @@
 @import './workbench.css';
 @import './terminal.css';
 @import './surfaces.css';
+@import './board.css';
 @import './browser.css';
 @import './agent.css';
 @import './activity.css';
