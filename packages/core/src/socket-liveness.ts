@@ -38,9 +38,6 @@ export type SocketLiveness = 'alive' | 'dead' | 'unknown'
  */
 export const SOCKET_LIVENESS_PROBE_MS = 250
 
-/** 预算用完时 Node 给出的 errno。它必须落在「探不准」那一侧——{@link socketLivenessFromErrorCode} 负责。 */
-export const SOCKET_PROBE_ABORT_CODE = 'ABORT_ERR'
-
 /**
  * 一个 errno 意味着「确实没人监听」，还是「说不准」。
  *
