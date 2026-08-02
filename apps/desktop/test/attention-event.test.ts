@@ -97,6 +97,45 @@ describe('attention event decision', () => {
     ).toBe('done')
   })
 
+  it('still notifies when the window lost focus, even though the Session is on screen', () => {
+    // 这是最常见的那一种：你在等这个 Agent，切去浏览器看点别的，它跑完了。Session 还摊在屏幕上
+    // （tab 没换），但你的眼睛不在那儿——正是该出通知的时刻。
+    //
+    // 判据落在 `&&` 的**接受**侧。压制条件是 `windowFocused && sessionVisible`，而此前三个 fixture
+    // 是 {F,F}、{T,T}、{T,F}：把 `windowFocused &&` 整段删掉，三者的结果一个都不变
+    //（实测：删掉那半个合取项，八个文件 94 条全绿）。少的就是这第四种组合 {F,T}，而它恰好是
+    // 「切到别的应用」——删掉之后，这条路上的完成通知永久静默。
+    const screenOnButLookingElsewhere = { windowFocused: false, sessionVisible: true }
+
+    expect(
+      attentionEventFor({
+        session: agent('a', 'done'),
+        previousState: 'working',
+        visibility: screenOnButLookingElsewhere
+      })?.category
+    ).toBe('done')
+
+    // 四种组合各钉一次，把「只有两者同时成立才压制」写成穷举而不是三个例子。少一格就是少一条路。
+    const suppressed = ([true, false] as const).flatMap((windowFocused) =>
+      ([true, false] as const).map((sessionVisible) => ({
+        windowFocused,
+        sessionVisible,
+        quiet:
+          attentionEventFor({
+            session: agent('a', 'done'),
+            previousState: 'working',
+            visibility: { windowFocused, sessionVisible }
+          }) === null
+      }))
+    )
+    expect(suppressed).toEqual([
+      { windowFocused: true, sessionVisible: true, quiet: true },
+      { windowFocused: true, sessionVisible: false, quiet: false },
+      { windowFocused: false, sessionVisible: true, quiet: false },
+      { windowFocused: false, sessionVisible: false, quiet: false }
+    ])
+  })
+
   it('never raises attention for lifecycle noise or a dropped link', () => {
     // disconnected is absent on purpose: it is not a request for attention, and it has its own neutral
     // treatment precisely so amber means needs-you and nothing else. starting/running/exited are
