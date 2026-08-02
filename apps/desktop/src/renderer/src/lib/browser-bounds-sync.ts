@@ -1,4 +1,22 @@
 import type { BrowserBounds } from '../../../shared/contracts'
+import { REGION_CLASS } from './region-focus'
+
+/**
+ * 这个 stage 所在的 Region 容器（没有就是 null，比如独立窗口形态）。
+ *
+ * 为什么这一行值得单独成一个函数：它原来是 BrowserPane 里内联的 `stage.closest('.workbench-region')`，
+ * 那个字符串与 Region 元素实际带的类名分居两个文件、互相无编译期联系。拼错一个字母的后果是
+ * `closest` **恒返回 null** → 下游整个 `if (region)` 分支变成死代码 → 原生视图回到满铺 → 焦点环的
+ * 左/右/下三边被物理遮掉（#341 原样）。而 tsc 沉默、既有守卫全绿：它们读源码文本判「求交算过了吗」，
+ * 看不出那次求交在运行期一次都没执行。
+ *
+ * 收成函数买到两件事：选择器由 {@link REGION_CLASS} 拼出（与挂类名的那一侧同源，拼错它会同时打掉
+ * CSS 规则查找），以及**「问出去的选择器是什么」变成运行期可观测的** —— 测试喂一个记录 `closest`
+ * 实参的元素即可质询，不必再靠读源码猜。
+ */
+export function regionAncestorOf(stage: Element): Element | null {
+  return stage.closest(`.${REGION_CLASS}`)
+}
 
 /** Converts zoomed Renderer CSS geometry into BrowserWindow content-view DIP. */
 export function rendererCssBoundsToWindowDip(
@@ -37,11 +55,15 @@ export function nativeBoundsClearOfFocusRing(
   region: BrowserBounds,
   ringInset: number
 ): BrowserBounds {
-  const inset = Math.max(0, ringInset)
-  const left = Math.max(stage.x, region.x + inset)
-  const top = Math.max(stage.y, region.y + inset)
-  const right = Math.min(stage.x + stage.width, region.x + region.width - inset)
-  const bottom = Math.min(stage.y + stage.height, region.y + region.height - inset)
+  // 这里**不再**做 `Math.max(0, ringInset)`：负数在唯一的入口就被挡住了（`focusRingInsetOf` 的
+  // `width <= 0` 返回 0），所以那道钳位是第二层守同一件事的预算，永远轮不到它生效。本仓
+  // two-budgets-guard-one-thing 的教训是这种叠层只贡献假阴性：读代码的人以为「负数在这里被处理了」，
+  // 于是不会去问上游到底有没有消毒；而它一次都没执行过，也没有任何测试能让它独立变红。
+  // 消毒收在取值那一处，这里如实使用传进来的数。
+  const left = Math.max(stage.x, region.x + ringInset)
+  const top = Math.max(stage.y, region.y + ringInset)
+  const right = Math.min(stage.x + stage.width, region.x + region.width - ringInset)
+  const bottom = Math.min(stage.y + stage.height, region.y + region.height - ringInset)
   return { x: left, y: top, width: right - left, height: bottom - top }
 }
 

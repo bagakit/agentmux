@@ -7,8 +7,10 @@ import {
   focusRingInsetOf,
   focusRingYieldOf,
   nativeBoundsClearOfFocusRing,
+  regionAncestorOf,
   rendererCssBoundsToWindowDip
 } from '../src/renderer/src/lib/browser-bounds-sync.js'
+import { REGION_CLASS } from '../src/renderer/src/lib/region-focus.js'
 
 function deferred() {
   let resolve = () => {}
@@ -117,8 +119,20 @@ describe('原生视图给焦点框让位（#341）', () => {
 
   it('环宽为 0 时原样返回（读不出宽度就退回旧行为，不凭猜推网页）', () => {
     expect(nativeBoundsClearOfFocusRing(STAGE, REGION, 0)).toEqual(STAGE)
-    // 负数当 0：环宽的取值方向由 CSS 决定，这里不替它解释一个负宽度。
-    expect(nativeBoundsClearOfFocusRing(STAGE, REGION, -4)).toEqual(STAGE)
+  })
+
+  it('负环宽在唯一入口就被挡住，不靠下游第二次钳位', () => {
+    // 这条原来断言 `nativeBoundsClearOfFocusRing(STAGE, REGION, -4)` 原样返回——那是在给一层
+    // 永远轮不到的钳位背书（本仓 two-budgets-guard-one-thing：两个预算守同一件事，短的那个只
+    // 贡献假阴性）。负数**只能**从 focusRingInsetOf 进来，而它自己就不产出负数，所以求交那侧
+    // 根本收不到负数。判据因此落在真正承重的那一处：消毒在取值口。
+    const negative = { getPropertyValue: () => '-4px' }
+    expect(
+      focusRingInsetOf(withComputedStyle(negative)),
+      '取值口放行了负环宽——原生视图会被往外推，盖住 Region 之外的像素'
+    ).toBe(0)
+    // 而且那个 0 会一路让求交变成「不让位」，与读不出宽度时同一个保守行为。
+    expect(nativeBoundsClearOfFocusRing(STAGE, REGION, focusRingInsetOf(withComputedStyle(negative)))).toEqual(STAGE)
   })
 
   it('环宽取自那个自定义属性，不是任何绘制属性', () => {
@@ -251,6 +265,245 @@ describe('原生视图给焦点框让位（#341）', () => {
       `focusRingYieldOf 的第二个实参写死了：\`${yieldArgument}\`。焦点结论必须由 props 传进来` +
         '（regionFocusExpression 一次算出，与挂在 Region 上的类名共用那次比较）'
     ).toMatch(/focusRingYieldOf\([^,]+,\s*yieldToFocusRing\s*\)/)
+  })
+
+  /**
+   * 反查 Region 祖先用的那个选择器（#352 的 S3）。
+   *
+   * 这一条守的是**那个分支到底可不可达**。它原来内联在 BrowserPane 里，写成
+   * `stage.closest('.workbench-region')`——那个字符串与 Region 元素实际带的类名分居两个文件、
+   * 互相没有任何编译期联系。把它拼错一个字母（实测 `.workbench-regionX`）的后果是 `closest`
+   * **恒返回 null**，于是整个 `if (region)` 分支变成死代码、原生视图回到满铺、焦点环的左/右/下
+   * 三边被物理遮掉（#341 原样）——而 tsc exit 0，23 条全绿。上面那些接线守卫读源码文本判
+   * 「求交算过了吗」，看不出那次求交在运行期一次都没执行（guard-must-check-reachability-not-presence）。
+   *
+   * 判据钉住**问出去的选择器**，并且期望值不由被测代码算出（expected-value-must-not-derive-from-mutation-target）：
+   * 左边喂进 `closest` 的实参，右边是从 REGION_CLASS 拼出的选择器，而 REGION_CLASS 是挂类名那一侧
+   * 用的同一个常量。所以「这个选择器选得到那个元素」这句话被两侧同源保证。
+   */
+  it('反查 Region 祖先用的选择器就是挂在 Region 上的那个类名', () => {
+    const asked: string[] = []
+    const region = { nodeType: 1 } as unknown as Element
+    const stage = {
+      nodeType: 1,
+      closest: (selector: string): Element | null => {
+        asked.push(selector)
+        // 只有正确的选择器才认得出这个祖先——错一个字母就返回 null，正是那个变异的形状。
+        return selector === `.${REGION_CLASS}` ? region : null
+      }
+    } as unknown as Element
+
+    expect(
+      regionAncestorOf(stage),
+      `问出去的选择器是 ${JSON.stringify(asked)}，选不到 Region 祖先——` +
+        '整个求交分支变成死代码，原生视图铺满整格，焦点环三边被物理遮掉（#341 原样）'
+    ).toBe(region)
+    // 自检：真的问过一次（一次都没问也会让上面在某些实现下"碰巧"通过）。
+    expect(asked.length, 'regionAncestorOf 根本没调 closest').toBe(1)
+    // 判别器在场：这个替身确实会对错的选择器返回 null，否则上面那条断言无从分辨。
+    expect(stage.closest('.something-else'), '判别器缺席：替身对任何选择器都给出祖先').toBeNull()
+  })
+
+  it('没有 Region 祖先时如实返回 null，而不是编一个出来', () => {
+    // 独立窗口/预览等形态：没有 Region 包着，让位量无从谈起，调用方按原样铺满。这条与上面那条
+    // 分开，因为它们各自能坏：上面那条守"认得出祖先"，这条守"认不出时不撒谎"。
+    const stage = { nodeType: 1, closest: () => null } as unknown as Element
+    expect(regionAncestorOf(stage)).toBeNull()
+  })
+
+  /**
+   * 上面那两条守的是 `regionAncestorOf` **自己**的行为。这一条守的是它到底有没有被用上。
+   *
+   * 抽出成函数只解决一半（extracting-to-lib-only-fixes-half）：把 BrowserPane 里的
+   * `regionAncestorOf(stage)` 改回手抄的 `stage.closest('.workbench-regionX')`，上面两条照旧
+   * 全绿——它们直接调那个函数，从不执行调用点。实测这个变异在 29 条里**一条都不红**，正是
+   * 它要防的那个靶子（拼错选择器 → 分支死掉 → 焦点环三边被遮，#341 原样）。
+   *
+   * 判据的落点：**求交那两个调用真正吃进去的那个 Region 值，是不是这次共用反查算出来的**。
+   * 不能写成"禁止 `.closest(` 出现在这个文件里"（forbidden-shape-guard-misfires）：那种禁令
+   * 换个拼法（`stage.closest?.(…)`、先存进变量再调）就绕过，而且会误伤本文件其它合法的同形
+   * 调用——BrowserPane 里的元素选择、上下文菜单都可能正当地用 closest 找别的祖先。
+   * 也不能只判"文件里出现过 regionAncestorOf"：保留 import、算完丢掉、求交仍吃手抄的那个值，
+   * 在文本上完全合法（guard-criterion-must-be-import-relation 的同族）。
+   */
+  it('求交吃进去的 Region 就是共用反查算出来的那个，不是另一处手抄的选择器', () => {
+    const source = readFileSync(
+      new URL('../src/renderer/src/components/BrowserPane.tsx', import.meta.url),
+      'utf8'
+    )
+    const ast = ts.createSourceFile('BrowserPane.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+
+    // 左边：从 `regionAncestorOf(...)` 出发，**传递地**收集所有由它派生出的名字。求交吃的不是
+    // 那个元素本身而是它的矩形（`region` → `regionRect` → 矩形字面量），所以只比对直接载体会
+    // 误报——判据要跟着这条派生链走。
+    //
+    // 派生只沿**求值位**走，这一点是承重的：`found ? stage.closest('.workbench-regionX') : null`
+    // 的值来自那次手抄的 closest，**不来自**条件里的 `found`。按文本判"提到了载体"会把这种
+    // 洗钱形态算成合规（实测存活），所以这里按 AST 递归，条件位一概不算。
+    const valueSourcesOf = (node: ts.Node): Set<string> => {
+      if (ts.isIdentifier(node)) return new Set([node.text])
+      if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isNonNullExpression(node)) {
+        return valueSourcesOf(node.expression)
+      }
+      if (ts.isCallExpression(node)) {
+        // `x.foo()` 的值派生自接收者 x（`region.getBoundingClientRect()` 就是这一支）；
+        // 裸函数调用记成 `名字()` 标记，让 `regionAncestorOf()` 能当种子。
+        if (ts.isPropertyAccessExpression(node.expression)) return valueSourcesOf(node.expression.expression)
+        if (ts.isIdentifier(node.expression)) return new Set([`${node.expression.text}()`])
+        return new Set()
+      }
+      if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
+        return valueSourcesOf(node.expression)
+      }
+      // 两个分支都是求值位；条件不是。
+      if (ts.isConditionalExpression(node)) {
+        return new Set([...valueSourcesOf(node.whenTrue), ...valueSourcesOf(node.whenFalse)])
+      }
+      if (
+        ts.isBinaryExpression(node) &&
+        [ts.SyntaxKind.AmpersandAmpersandToken, ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken]
+          .includes(node.operatorToken.kind)
+      ) {
+        return new Set([...valueSourcesOf(node.left), ...valueSourcesOf(node.right)])
+      }
+      if (ts.isObjectLiteralExpression(node)) {
+        const sources = new Set<string>()
+        for (const property of node.properties) {
+          if (ts.isPropertyAssignment(property)) {
+            for (const source of valueSourcesOf(property.initializer)) sources.add(source)
+          }
+        }
+        return sources
+      }
+      return new Set()
+    }
+
+    const declarations: { name: string; sources: Set<string> }[] = []
+    // 右边：`nativeBoundsClearOfFocusRing` 的第二实参与 `focusRingYieldOf` 的第一实参，
+    // 也就是"当成 Region 用"的那两个取值位。两处都要问，因为它们能各自被换掉。
+    const regionConsumers: { call: string; argument: string; sources: Set<string> }[] = []
+    const walk = (node: ts.Node): void => {
+      if (ts.isVariableDeclaration(node) && node.initializer && ts.isIdentifier(node.name)) {
+        declarations.push({ name: node.name.text, sources: valueSourcesOf(node.initializer) })
+      }
+      if (ts.isCallExpression(node)) {
+        const callee = node.expression.getText(ast)
+        const position = callee === 'nativeBoundsClearOfFocusRing' ? 1 : callee === 'focusRingYieldOf' ? 0 : -1
+        if (position >= 0) {
+          const argument = node.arguments[position]
+          regionConsumers.push({
+            call: callee,
+            argument: argument?.getText(ast) ?? '<缺失>',
+            sources: argument ? valueSourcesOf(argument) : new Set()
+          })
+        }
+      }
+      ts.forEachChild(node, walk)
+    }
+    walk(ast)
+
+    // 自检 1：反查真的被调用并且结果被留住了。零个意味着下面的比对无从进行（而不是"通过"）——
+    // 手抄回 `stage.closest('.workbench-regionX')` 时正是这一条先红。
+    const seeds = declarations.filter((declaration) => declaration.sources.has('regionAncestorOf()'))
+    expect(
+      seeds.map((seed) => seed.name),
+      'BrowserPane 里没有任何变量接住 regionAncestorOf(...) 的结果——' +
+        'Region 祖先要么没查，要么是另一处手抄的选择器查的（拼错即整个求交分支死掉，#341 原样）'
+    ).toHaveLength(1)
+
+    // 传递闭包：一个名字若其**求值来源**里有已知载体，它也是载体。
+    const carriers = new Set(seeds.map((seed) => seed.name))
+    for (let pass = 0; pass < declarations.length; pass += 1) {
+      const before = carriers.size
+      for (const declaration of declarations) {
+        if (carriers.has(declaration.name)) continue
+        if ([...declaration.sources].some((source) => carriers.has(source))) carriers.add(declaration.name)
+      }
+      if (carriers.size === before) break
+    }
+
+    // 自检 2：两个消费位都抽到了。少一个说明求交被改了形状，判据失去落点。
+    expect(
+      regionConsumers.map((consumer) => consumer.call).sort(),
+      `把 Region 当参数吃进去的调用抽到 ${JSON.stringify(regionConsumers.map((c) => c.call))}，应恰好是那两处`
+    ).toEqual(['focusRingYieldOf', 'nativeBoundsClearOfFocusRing'])
+
+    // 自检 3：判别器在场——闭包不是"文件里每个变量"。stage 那条链（`stage` → `rect` →
+    // `stageBounds`）与 Region 无关，必须落在闭包外，否则上面那条比对对任何实参恒真。
+    expect(
+      [...carriers],
+      '载体闭包把 stage 的几何也算了进去——它对任何实参都会成立，这条守卫成了恒真'
+    ).not.toContain('stageBounds')
+
+    // 正题：那两处吃进去的值都必须落在这条派生链上。
+    for (const consumer of regionConsumers) {
+      expect(
+        [...consumer.sources].some((source) => carriers.has(source)),
+        `${consumer.call} 吃进去的 Region 是 \`${consumer.argument}\`（求值来源 ` +
+          `${JSON.stringify([...consumer.sources])}），追不回 regionAncestorOf 的结果（载体链 ` +
+          `${JSON.stringify([...carriers])}）——那条查找被另一处手抄的选择器取代了。拼错一个字母的` +
+          '后果是 closest 恒返回 null、整个求交分支变成死代码、原生视图回到满铺、' +
+          '焦点环左/右/下三边被物理遮掉（#341 原样）'
+      ).toBe(true)
+    }
+  })
+
+  /**
+   * 让位量那个 prop 必须在**依赖数组**里（#352 的 S2）。
+   *
+   * 这条与「prop 传进去了吗」正交，各自能独立坏掉。把 `yieldToFocusRing` 从
+   * `useLayoutEffect` 的依赖数组里删掉：tsc exit 0、23 条全绿，而焦点变化**不会重跑那个 effect**——
+   * 本仓根本没有 eslint 配置（无 .eslintrc*、无 eslint.config.*、package.json 里也没有），所以
+   * `react-hooks/exhaustive-deps` 一次都没跑过，漏一个依赖是完全静默的。
+   *
+   * 为什么单靠 ResizeObserver 兜不住：焦点在两格之间移动**不改变任何元素的尺寸**，所以那个
+   * observer 不会触发；只有依赖变化才会重跑。后果是焦点落到 browser 那格时不内缩（#341 回归），
+   * 离开时不退回（#350 回归）——两个已修的缺陷同时复活。
+   *
+   * 判据按 AST 取那个 effect 的依赖数组，并要求它同时包含让位量与它上游那两个身份字段：
+   * 自检是「这个数组抽到了且非空」，防止抽取器写错时整条退化成恒真。
+   */
+  it('让位量在那个 effect 的依赖数组里——否则焦点变化不会重跑它', () => {
+    const source = readFileSync(
+      new URL('../src/renderer/src/components/BrowserPane.tsx', import.meta.url),
+      'utf8'
+    )
+    const ast = ts.createSourceFile('BrowserPane.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+
+    // 找那个**调了 observe 的** useLayoutEffect——按名字找 useLayoutEffect 不够：将来多一个
+    // layout effect 时会抽到两个，判据落点就不确定了。以「函数体里出现 synchronizer」定位。
+    const dependencyLists: string[][] = []
+    const walk = (node: ts.Node): void => {
+      if (
+        ts.isCallExpression(node) &&
+        node.expression.getText(ast) === 'useLayoutEffect' &&
+        /\bsynchronizer\b/.test(node.arguments[0]?.getText(ast) ?? '')
+      ) {
+        const deps = node.arguments[1]
+        if (deps && ts.isArrayLiteralExpression(deps)) {
+          dependencyLists.push(deps.elements.map((element) => element.getText(ast)))
+        } else {
+          // 依赖数组整个不见了（每次渲染都重跑）也要被看见，而不是被抽取器无声跳过。
+          dependencyLists.push([`<不是数组字面量: ${deps?.getText(ast) ?? '缺失'}>`])
+        }
+      }
+      ts.forEachChild(node, walk)
+    }
+    walk(ast)
+
+    // 自检：恰好抽到一个。零个说明那个 effect 没了或改了形状（判据失去落点）；多个说明几何
+    // 同步被拆成了几处，得有人重新想清楚哪一处该带这个依赖。
+    expect(
+      dependencyLists.length,
+      `调 synchronizer 的 useLayoutEffect 抽到 ${dependencyLists.length} 个，应恰好 1 个`
+    ).toBe(1)
+    const deps = dependencyLists[0]!
+    expect(deps.length, '依赖数组是空的——effect 只在挂载时跑一次，几何永不跟随').toBeGreaterThan(0)
+    expect(
+      deps,
+      '让位量不在依赖数组里：焦点变化不改变任何尺寸，所以 ResizeObserver 不触发，' +
+        '只有依赖变化才会重跑。焦点到达 browser 区时不内缩（#341 回归），离开时不退回（#350 回归）'
+    ).toContain('yieldToFocusRing')
   })
 
   /**
