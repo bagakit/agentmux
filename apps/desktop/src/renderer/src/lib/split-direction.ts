@@ -35,6 +35,25 @@ export function orientationOf(direction: SplitDirection): 'horizontal' | 'vertic
 }
 
 /**
+ * 新来的那一格落在拆分节点的哪一侧：`first` 是轴的前半（左 / 上），`second` 是后半（右 / 下）。
+ *
+ * 这是方向的第二半真相，和 {@link orientationOf} 成对——「向左分屏」既意味着横轴（哪根轴），也意味着
+ * 新格在前（哪一侧），两个答案缺一不可。此前 `orientationOf` 已经收在这里，而这一半散在两个建树函数里
+ * 各写一遍（region 树的 `splitWorkbenchRegion`、tab-group 树的 `moveTabToNewGroup`），且**没有任何一处
+ * 声称自己是 SSOT**。
+ *
+ * 为什么这一半更危险：轴判错会立刻看出来（该左右分的变成上下分），而侧判错只是新格出现在反侧——
+ * 它看起来完全像一个正常的分屏，只是方向反了。本仓刚修过逐字同形的一颗真缺陷（链接目的地那一行四个
+ * 箭头同时反了），症状就是"能用但反着"。两份手抄各自正确纯属它们是同一天写的；改一处而另一处不跟上，
+ * 两棵树会对同一个「向左」给出相反的落点，而两边各自的测试照旧全绿——它们各自断言的是自己那棵树。
+ *
+ * 判据成对：`up` 与 `left` 都是 `first`，靠的是"轴的前半"这一个概念，不是两条巧合。
+ */
+export function placementOf(direction: SplitDirection): 'first' | 'second' {
+  return direction === 'left' || direction === 'up' ? 'first' : 'second'
+}
+
+/**
  * `candidate` 沿 `direction` 越过 `origin` 前沿边的距离（带符号）。
  *
  * 「前沿边」是 origin 朝该方向的那条边（向右看是右边缘 `x + width`，向左看是左边缘 `x`……），

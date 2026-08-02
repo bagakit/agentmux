@@ -1,4 +1,5 @@
 import type { SplitDirection } from './workbench-layout'
+import { orientationOf, placementOf } from './split-direction'
 import {
   type SplitTreeNode,
   clampSplitRatio,
@@ -270,11 +271,11 @@ export function splitWorkbenchRegion(
   if (!currentRegionIds.includes(targetRegionId) || currentRegionIds.includes(newRegionId)) return layout
   const target: WorkbenchRegionLayoutNode = { type: 'leaf', regionId: targetRegionId }
   const added: WorkbenchRegionLayoutNode = { type: 'leaf', regionId: newRegionId }
-  const newFirst = direction === 'left' || direction === 'up'
+  const newFirst = placementOf(direction) === 'first'
   return {
     root: replaceRegion(layout.root, targetRegionId, {
       type: 'split',
-      direction: direction === 'left' || direction === 'right' ? 'horizontal' : 'vertical',
+      direction: orientationOf(direction),
       first: newFirst ? added : target,
       second: newFirst ? target : added,
       ratio: 0.5

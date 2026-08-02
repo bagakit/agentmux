@@ -15,11 +15,19 @@
  */
 
 import type { AgentMuxRegionNeighbor } from '@agentmux/core/control'
+import type { SplitDirection } from './workbench-layout'
 import type { WorkbenchRegionBounds } from './workbench-view-layout'
 import { orientationOf, regionInDirection } from './split-direction'
 
-/** 用户说的那四个方向。与 `open` 的 direction 同名同义，不另起一套词。 */
-export type AddressDirection = 'left' | 'right' | 'up' | 'down'
+/**
+ * 用户说的那四个方向。与 `open` 的 direction 同名同义，不另起一套词。
+ *
+ * 刻意写成 `SplitDirection` 的别名而不是重新列一遍那四个字面量：这句注释此前就承诺了「同名同义」，
+ * 而实现是第二份手抄——同义靠的是两处恰好列了同样四个词，不是靠类型。两份手抄意味着任何一侧加一个
+ * 方向（比如将来的 `previous`/`next` 轴）不会在另一侧引发编译错，而 `orientationOf`/`placementOf`
+ * 这类判定只穷举了一份 union，另一份多出来的成员会静默落进它们的 else 桶。
+ */
+export type AddressDirection = SplitDirection
 
 /** 判定只需要这些事实——不接整个 store，也不接布局树本身。 */
 export type DirectionalNeighborInput = {
