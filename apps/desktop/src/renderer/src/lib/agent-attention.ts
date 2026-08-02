@@ -1,5 +1,6 @@
 import type { AgentProviderId } from '@agentmux/core'
 import type { SessionSnapshot } from '../../../shared/contracts'
+import { isNeedsYouState } from './attention-vocabulary'
 import { sessionBoardColumn } from './project-board'
 
 // A window-wide cross-session rollup of Agent attention. Every other indicator in the window is
@@ -11,7 +12,8 @@ export type AgentAttentionRollup = {
   // Every Agent Session the window is projecting, regardless of whether it currently has a View.
   total: number
   working: number
-  // waiting + blocked: the Agent has surfaced a request or is stuck and cannot proceed without you.
+  // The states {@link isNeedsYouState} names: the Agent has surfaced a request or is stuck and cannot
+  // proceed without you. That table is the definition; this field is one of its readers.
   needsYou: number
   error: number
   // The earliest Session by status.observedAt in each attention class, so a click lands on the one
@@ -45,11 +47,11 @@ export function summarizeAgentAttention(
   return {
     total: agents.length,
     working: agents.filter((session) => session.status.state === 'working').length,
-    needsYou: agents.filter((session) => (
-      session.status.state === 'waiting' || session.status.state === 'blocked'
-    )).length,
+    needsYou: agents.filter((session) => isNeedsYouState(session.status.state)).length,
     error: agents.filter((session) => session.status.state === 'error').length,
-    needsYouSessionId: earliest(sessions, (state) => state === 'waiting' || state === 'blocked'),
+    // Both needs-you readings go through the shared table, so the count and the jump target can never
+    // disagree about which states qualify — they were two hand-written copies of the same `||` before.
+    needsYouSessionId: earliest(sessions, isNeedsYouState),
     errorSessionId: earliest(sessions, (state) => state === 'error')
   }
 }

@@ -31,6 +31,7 @@ import {
   BROWSER_TOOLBAR_ITEM_ORDER,
   type BrowserToolbarItem
 } from '../lib/browser-toolbar'
+import { BOARD_COLUMN_DESCRIPTIONS } from '../lib/project-board'
 import {
   SCRATCH_TOPIC_TITLE_MAX_LENGTH,
   workspaceOwnsSessionPath
@@ -49,6 +50,7 @@ import {
 import { useBoardRows } from '../hooks/useBoardRows'
 import { projectWorkspaces } from '../lib/workspace-projects'
 import { api } from '../lib/api'
+import { copyTextToClipboard } from '../lib/clipboard-copy'
 import {
   browserAnnotationDisplayNumber,
   formatBrowserAnnotationsContext,
@@ -363,6 +365,7 @@ function WorkspaceTopicsPanel({
   // 头像点击走全局那一个 selectSession——跳转到某个 Agent 全窗口只有这一条路径，
   // 在这里另写一段"找到它的 Tab 再激活"就是第二条，两条迟早对不上。
   const selectSession = useAppStore((state) => state.selectSession)
+  const reportError = useAppStore((state) => state.reportError)
   const [topics, setTopics] = useState<ScratchTopicSnapshot[] | null>(null)
   const [pending, setPending] = useState<string | null>(null)
   const [editingTopicId, setEditingTopicId] = useState<string | null>(null)
@@ -528,7 +531,7 @@ function WorkspaceTopicsPanel({
                 topicId={topic.id}
                 isCurrent={isCurrent}
                 key={topic.id}
-                onCopyPath={() => void api.ui.writeClipboardText(topic.directoryPath)}
+                onCopyPath={() => void copyTextToClipboard(topic.directoryPath, reportError)}
                 onRename={() => beginRename(topic)}
                 onReveal={() => onRevealDirectory(topic.directoryPath)}
               >
@@ -611,13 +614,16 @@ function WorkspaceTopicsPanel({
   )
 }
 
+// working / needs-you 的措辞取自 BOARD_COLUMN_DESCRIPTIONS：这两组就是 Board 那两列按 workspace 收窄，
+// 同一个归类却在两个面上说两句话是漂移的入口（needs-you 这句原先手抄成 "Waiting or blocked"，漏掉了
+// 那一列同样收着的 disconnected 与 error）。recent 有自己的话，因为它是 done 列在这里换了个名字。
 const AGENT_GROUP_META: Record<WorkspaceAgentGroupId, {
   label: string
   description: string
   icon: typeof Activity
 }> = {
-  working: { label: 'Working', description: 'Running now', icon: Activity },
-  'needs-you': { label: 'Needs You', description: 'Waiting or blocked', icon: BellRing },
+  working: { label: 'Working', description: BOARD_COLUMN_DESCRIPTIONS.working, icon: Activity },
+  'needs-you': { label: 'Needs You', description: BOARD_COLUMN_DESCRIPTIONS['needs-you'], icon: BellRing },
   recent: { label: 'Recent', description: 'Finished Agents', icon: History }
 }
 
