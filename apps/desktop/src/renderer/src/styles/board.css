@@ -127,7 +127,11 @@
 .board-discussion-card--unbound { border-color: var(--line); color: var(--text-3); background: var(--surface-1); }
 .board-discussion-card--unbound > span { color: var(--text-3); background: var(--surface-3); }
 .board-run-card { min-width: 0; display: grid; grid-template-columns: 12px minmax(0, 1fr) auto 12px; align-items: center; gap:var(--sp-2) var(--sp-3); padding:var(--sp-4); border: 1px solid var(--surface-3); border-radius: var(--radius); color: var(--text-2); background: var(--surface-0); box-shadow: var(--elev-2), var(--hl); text-align: left; cursor: pointer; }
-.board-run-card:hover { border-color: var(--green-line); color: var(--text); background: var(--surface-1); }
+/* hover 只提亮，不上色相：`--green-line` 是 working 的色相（色表把 `--status-ink` 判给 `--green`），
+   借来当悬停反馈的话，指到一张 done / disconnected / error 的卡上，卡框会说「在跑」。中性描边这条
+   与 `.terminal-theme-choice:hover` / `.launch-quick-card:hover` 是同一套写法（设计 SSOT：
+   「颜色表达状态，不兼任布局线」＋「hover 提升 Surface 明度」）。 */
+.board-run-card:hover { border-color: var(--line); color: var(--text); background: var(--surface-1); }
 /* 需要你 / 出错的卡带一圈色框，颜色来自状态语汇不自己挑。
    卡根上带着 `status--<state>`（只带赋值那一个类，不带 `.status` 本体——`.status` 的
    inline-flex / capitalize 会掀翻这里的 grid 版式并把措辞大写化），于是 `--status-ink` 从
@@ -144,6 +148,14 @@
   border-color: color-mix(in srgb, var(--status-ink) 40%, var(--surface-1));
   background: color-mix(in srgb, var(--status-ink) 13%, var(--surface-0));
 }
+/* 带框的卡也要有悬停反馈。上面那条与 `.board-run-card:hover` 特异性同为 0,2,0 且排在后面，于是
+   一张需要你 / 出错的卡指上去时边与底都被它赢回来——整张卡对指针毫无回应，而它恰恰是最需要被点开的
+   那张。抬高一档而不是换色相：配方与静息态逐字同源（都从继承来的 `--status-ink` 派生），提亮幅度
+   沿用 `--green-bg` → `--green-bg-hover` 那一对的走法（底 +7 个百分点）。 */
+.board-run-card[data-attention='needs-you']:hover, .board-run-card[data-attention='error']:hover {
+  border-color: color-mix(in srgb, var(--status-ink) 55%, var(--surface-1));
+  background: color-mix(in srgb, var(--status-ink) 20%, var(--surface-0));
+}
 .board-run-card__status { display: inline-flex; }
 .board-run-card__identity { min-width: 0; display: flex; flex-direction: column; gap:var(--sp-1); }
 .board-run-card__identity strong { overflow: hidden; font-size: var(--fs-meta); text-overflow: ellipsis; white-space: nowrap; }
@@ -152,7 +164,12 @@
 .board-run-card__meta em { color: var(--text-2); font-size: var(--fs-micro); font-style: normal; text-transform: capitalize; }
 .board-run-card__meta time { color: var(--text-3); font-size: var(--fs-micro); white-space: nowrap; }
 .board-run-card__detail { grid-column: 2 / 4; overflow: hidden; color: var(--text-3); font-size: var(--fs-micro); text-overflow: ellipsis; white-space: nowrap; }
-.board-run-card > svg { color: var(--green-2); }
+/* 尾部箭头是"点进去"的 affordance，不是状态。此前无条件 `--green-2`，于是一张 error 卡（红框、红底、
+   红状态点）角上坐着一枚绿箭头，与卡自己说的话打架。这里不走"hover 转品牌绿"那条图标惯例（密度合同
+   《Context Menu》那一行）：卡是状态载体，绿在这张卡上已经是 working 的意思，花在 affordance 上就
+   和卡框借绿是同一个错。跟着卡自己的明度走，比标签低一档——它是次要的那个元素。 */
+.board-run-card > svg { color: var(--text-3); }
+.board-run-card:hover > svg { color: var(--text-2); }
 .board-cell__empty { min-height: 76px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap:var(--sp-1); color: var(--neutral-1); font-size: var(--fs-body); }
 .board-cell__empty small { color: var(--neutral-2); font-size: var(--fs-micro); }
 .board-tool-context { display: flex; align-items: center; justify-content: space-between; gap:var(--sp-4); margin:var(--sp-5) 0 var(--sp-4); padding:var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); color: var(--text-3); background: var(--surface-0); font-size: var(--fs-micro); }
