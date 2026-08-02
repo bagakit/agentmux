@@ -724,6 +724,72 @@ describe('WorktreeService', () => {
     expect((await stat(join(worktreePath, 'README.md'))).isFile()).toBe(true)
   }, 20000)
 
+  /**
+   * 脏树探测失败必须当场停下，不许带着「没查清」继续去删。
+   *
+   * #413 原本的判断是「删掉这句 assertGit 后脏 worktree 会被删」。**那个前提是错的**，实测（真 git）：
+   * 三种脏形状（改过的跟踪文件 / 未跟踪文件 / 只 staged）git 自己都以 128 拒绝 `worktree remove`，
+   * 而不带 discardChanges 的那条路正好不传 `--force`。所以删掉这句不丢工作——git 是第二道闸，这条
+   * 断言因此不去钉「不会被删」（那件事由 git 保证，不由这句 assert 保证），severity 也该从 HIGH 降下来。
+   *
+   * 它真正买到的是**不带着无知往前走**。少了它，探测失败退化成空 stdout，`trim() !== ''` 为假，
+   * 「未提交改动」那条 throw 不发生，于是请求继续走到 `worktree remove`——一棵没查清的树上执行删除，
+   * 成败全看 git 那一侧当天怎么答（实测：手工删掉目录后 remove 退 0 并顺利撤记录，等于跳过了整道
+   * 保护）。而两类原因的补救动作相反：真的脏，去看那些改动或显式丢弃；探测坏了（gitdir 断链、
+   * git 不在 PATH、输出超 maxOutputBytes 而抛），丢弃改动一点忙都帮不上（#400/#401 那一族）。
+   *
+   * 判据是**行为**：探测失败后那条 `worktree remove` 一次都不许发出。删掉 assertGit，它立刻发出。
+   * 顺带钉住措辞不许把探测失败说成脏树——那是把用户推向没用的那个补救。
+   */
+  it('stops at a failed dirty-tree probe instead of removing an unverified worktree', async () => {
+    const { worktreePath, executionHost, config: fixtureConfig } = await buildLocalWorktreeFixture()
+    const save = vi.fn(async (value: AppConfig) => value)
+    const attempted: string[][] = []
+    // 只让脏树探测失败，别的 git 调用照旧走真 git——否则测的是「host 整体坏了」，那是另一件事。
+    const probeFailingHost: ExecutionHost = {
+      id: executionHost.id,
+      kind: executionHost.kind,
+      label: executionHost.label,
+      exposeLoopbackPort: async (port: number) => await executionHost.exposeLoopbackPort(port),
+      dispose: async () => await executionHost.dispose(),
+      run: async (command, args, options) => {
+        attempted.push([...args])
+        if (args.includes('status') && args.includes('--porcelain')) {
+          // 真实形状：探测失败时 stdout 是空的（断链的 gitdir 让 git 退 128 且只写 stderr）。
+          // 空 stdout 正是「被读成干净」的那个入口。
+          return { exitCode: 128, stdout: '', stderr: 'fatal: not a git repository\n' }
+        }
+        return await executionHost.run(command, args, options)
+      }
+    }
+    const service = new WorktreeService(() => probeFailingHost, { save })
+
+    const failure = await service
+      .removeWorktree({ workspaceId: 'lane' }, fixtureConfig)
+      .then(() => null, (error: unknown) => error as Error)
+
+    expect(failure, '探测失败却让移除照样成功了').not.toBeNull()
+    // 自检：探测真的发出去了，否则下面「没发 remove」是因为整条路根本没走到。
+    expect(
+      attempted.some((args) => args.includes('status') && args.includes('--porcelain')),
+      '根本没发脏树探测——这条断言测不到它想测的东西'
+    ).toBe(true)
+    // 判据：一棵没查清的树上不许执行删除。这条就是删掉 assertGit 后会红的那一条。
+    expect(
+      attempted.filter((args) => args.includes('worktree') && args.includes('remove')),
+      '脏树探测失败后仍然发出了 worktree remove——带着「没查清」去删了'
+    ).toEqual([])
+    // 措辞：不许把探测失败说成脏树——补救动作相反，说错就是把用户推向没用的那一个。这个子串取自
+    // 脏树那条 throw，且是它独有的（探测失败那条报的是 git 自己对探测的说法）。
+    expect(
+      failure?.message,
+      '探测失败被说成「有未提交改动」，而丢弃改动治不了探测失败'
+    ).not.toContain('Worktree has uncommitted changes')
+    // 而记录与目录都必须原样留着：没查清就不动。
+    expect(save).not.toHaveBeenCalled()
+    expect((await stat(worktreePath)).isDirectory()).toBe(true)
+  }, 20000)
+
   it('keeps the workspace record when Git removal fails', async () => {
     const root = await mkdtemp(join(tmpdir(), 'agentmux-worktree-removal-failure-test-'))
     temporaryRoots.push(root)
