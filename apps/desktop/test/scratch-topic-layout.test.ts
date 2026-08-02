@@ -8,8 +8,13 @@ import {
 } from '../src/renderer/src/lib/workbench-layout.js'
 import { createWorkbenchTab, type WorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
 import {
+  splitWorkbenchRegion,
+  workbenchRegionBounds
+} from '../src/renderer/src/lib/workbench-view-layout.js'
+import {
   activeTopicIdFromLayout,
   layoutForActiveTopic,
+  openTopicRegionMosaics,
   tabEligibilityForActiveTopic
 } from '../src/renderer/src/lib/scratch-topic-layout.js'
 
@@ -272,5 +277,73 @@ describe('当前 Topic 由活动 Tab 的绑定派生', () => {
     // 这条钉住接线：派生函数本身全绿，也证明不了渲染面真的用了它。改回读 store 字段会红。
     expect(workspaceWorkbenchSource).toContain('activeTopicIdFromLayout(storedLayout, tabs)')
     expect(workspaceWorkbenchSource).not.toContain('state.activeScratchTopicId')
+  })
+})
+
+// 行尾那枚 Region 缩略图的门禁：只在一个 Topic 真的开着一张 Tab 时才画。
+// 「开着」= 那张 Tab 落在某个 group 的 tabOrder 里（findGroupForTab !== null），不是「tab 对象还在
+// tabs 记录里」——一个已从所有 group 移除、却还没从 tabs 里清掉的游离 Tab 不该让缩略图发亮，那正是
+// 裸扫 tabs 会犯的错。缩略图与门禁是同一份投影（openTopicRegionMosaics）的两半。
+
+describe('哪些 Topic 有 Tab 开着（行尾缩略图的门禁）', () => {
+  it('恰好是有 Tab 落在某个 group 里的那些 Topic', () => {
+    // fullLayout 里 a-1/a-2(topic-a)、b-1(topic-b)、loose(无 Topic) 全在 group 中。
+    expect([...openTopicRegionMosaics(fullLayout(), tabs).keys()].sort()).toEqual(['topic-a', 'topic-b'])
+  })
+
+  it('一张存在于 tabs、却不在任何 group 里的 Tab，不让它的 Topic 算作开着', () => {
+    // 这正是裸扫 `Object.values(tabs)` 会答错的那一格：orphan 绑着 topic-orphan、在 tabs 记录里，
+    // 但从未加入任何 group（findGroupForTab === null）。门禁必须挡住它。
+    const withOrphan: Record<string, WorkbenchTab> = {
+      ...tabs,
+      orphan: launcher('orphan', 'topic-orphan')
+    }
+    const open = openTopicRegionMosaics(fullLayout(), withOrphan)
+    expect(open.has('topic-orphan'), '一个不在任何 group 里的 Tab 被算成了开着').toBe(false)
+    // 对照：它确实在 tabs 记录里，所以上面的 false 是门禁挣来的，不是 fixture 里根本没有它。
+    expect(withOrphan.orphan.topicId).toBe('topic-orphan')
+    // 而真正开着的那些照旧在。
+    expect(open.has('topic-a')).toBe(true)
+  })
+
+  it('没有 layout 时谁都不开', () => {
+    expect(openTopicRegionMosaics(undefined, tabs).size).toBe(0)
+  })
+
+  it('缩略图几何取那张 Tab 的 Region 分屏，单区就是一整块', () => {
+    const mosaics = openTopicRegionMosaics(fullLayout(), tabs)
+    const single = mosaics.get('topic-b')
+    expect(single).toBeDefined()
+    // launcher 建的是单 Region 的 Tab：一块占满 0–1。
+    expect(single).toEqual([{ regionId: 'region:b-1', bounds: { x: 0, y: 0, width: 1, height: 1 } }])
+  })
+
+  it('分屏的 Tab 缩略图铺出多块，几何来自 workbenchRegionBounds 而非另发明一套', () => {
+    // 把 topic-b 那张 Tab 竖切成左右两半，缩略图应铺出两块、各占半宽。
+    const split = { ...launcher('b-1', 'topic-b') }
+    split.layout = splitWorkbenchRegion(split.layout, 'region:b-1', 'right', 'region:b-1b')
+    const splitTabs: Record<string, WorkbenchTab> = { ...tabs, 'b-1': split }
+    const bounds = openTopicRegionMosaics(fullLayout(), splitTabs).get('topic-b')
+    expect(bounds).toHaveLength(2)
+    // 与 workbenchRegionBounds 逐字一致——这是它的缩影，不是第二套布局模型。
+    expect(bounds).toEqual(workbenchRegionBounds(split.layout.root))
+    // 左右两半各占半宽，合起来铺满。
+    expect(bounds!.map((region) => region.bounds.width)).toEqual([0.5, 0.5])
+  })
+
+  it('一个 Topic 开着多张 Tab 时取当前活动那张的几何', () => {
+    // topic-a 有 a-1、a-2 两张。让**先**出现在 tabs 迭代序里的 a-1 分屏成两块并成为活动项，
+    // a-2 保持单块且**后**出现。这样「取活动那张」得 a-1 的两块，而「取最后一张（覆盖式）」会得
+    // a-2 的一块——两者答案不同，能把「谁优先」这条判据单独钉出来（否则活动项恰好最后时二者重合）。
+    const a1 = { ...launcher('a-1', 'topic-a') }
+    a1.layout = splitWorkbenchRegion(a1.layout, 'region:a-1', 'down', 'region:a-1b')
+    // 展开保留插入序：a-1 在 a-2 之前。
+    const multiTabs: Record<string, WorkbenchTab> = { ...tabs, 'a-1': a1 }
+    let layout = createWorkspaceLayout('group', ['a-1'])
+    for (const id of ['a-2', 'b-1', 'loose']) layout = addTab(layout, 'group', id)
+    layout = activateTab(layout, 'group', 'a-1')
+    const bounds = openTopicRegionMosaics(layout, multiTabs).get('topic-a')
+    expect(bounds).toHaveLength(2)
+    expect(bounds).toEqual(workbenchRegionBounds(a1.layout.root))
   })
 })

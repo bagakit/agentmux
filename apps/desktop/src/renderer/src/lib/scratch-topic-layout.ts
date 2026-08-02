@@ -1,5 +1,7 @@
-import type { WorkspaceLayout } from './workbench-layout'
+import { findGroupForTab, type WorkspaceLayout } from './workbench-layout'
 import type { WorkbenchTab } from './workbench-tabs'
+import { workbenchRegionBounds } from './workbench-view-layout'
+import type { RegionGeometry } from './split-direction'
 
 /**
  * 当前在看哪个 Topic —— 由活动 Tab 的绑定回答。
@@ -102,4 +104,43 @@ export function layoutForActiveTopic(
       }
     })
   }
+}
+
+/**
+ * 每个「此刻有 Tab 开着」的 Topic，连同它那张 Tab 的 Region 分屏几何。
+ *
+ * 这是上面那条「当前 Topic 是活动 Tab 的投影」学说的再一次应用，从「哪个 Topic 正被看着」放宽到
+ * 「哪些 Topic 有 Tab 开着」。行尾那枚 Region 缩略图只在对应 Topic 真的开着一张 Tab 时才画——它是
+ * 那张 Tab 的 Region 分屏的缩影，Tab 不在就没有可缩的东西。所以「开不开」与「缩什么」是同一个事实
+ * 的两半，用一份投影同时回答，而不是让门禁与几何各扫一遍 tabs 各自漂移（#313 记的失败形状：同一个
+ * 「在不在屏上」的问题长出三个各不相同的消费者）。在面板里派生这一份，`has` 当门禁、`get` 取几何，
+ * 逐行只读它，绝不各自再扫 tabs，也不新增 store 字段。
+ *
+ * 「开着」取的是 `findGroupForTab !== null`（Tab 落在某个 group 的 tabOrder 里），不是「这个 tab 对象
+ * 存在于 `tabs` 记录里」——一个已从所有 group 移除、却还没从 `tabs` 里清掉的游离 Tab 不该让缩略图亮着。
+ * 这与 store 里 `openScratchTopic` 判「某张已开 Tab 还在不在条上」的 `tabGroupForTab` 是同一个判据：
+ * 两处都在问「这张 Tab 现在真的在某个 group 里吗」，答案必须一致。裸扫 `tabs` 会把游离 Tab 也算成开着，
+ * 于是缩略图对一个用户已经关掉的 Topic 继续发亮。
+ *
+ * 一个 Topic 可能开着多张 Tab（各有自己的 Region 分屏）。缩略图取**当前活动**那张的几何——它正是
+ * 用户切进这个 Topic 时会落到的那张（与 `layoutForActiveTopic` 的活动项选择同源）；没有活动那张时
+ * 取文档序里第一张开着的。这只是一枚一眼可辨的提示，不是逐帧镜像，所以这个选择是确定的即可。
+ */
+export function openTopicRegionMosaics(
+  layout: WorkspaceLayout | undefined,
+  tabs: Readonly<Record<string, WorkbenchTab>>
+): ReadonlyMap<string, readonly RegionGeometry[]> {
+  const byTopic = new Map<string, { active: boolean; cells: readonly RegionGeometry[] }>()
+  if (!layout) return new Map()
+  for (const tab of Object.values(tabs)) {
+    if (tab.topicId === undefined) continue
+    const group = findGroupForTab(layout, tab.id)
+    if (group === null) continue
+    const active = group.activeTabId === tab.id
+    const existing = byTopic.get(tab.topicId)
+    // 活动那张优先；否则第一张开着的先占位，后来的不覆盖它。
+    if (existing && !active) continue
+    byTopic.set(tab.topicId, { active, cells: workbenchRegionBounds(tab.layout.root) })
+  }
+  return new Map([...byTopic].map(([topicId, entry]) => [topicId, entry.cells]))
 }

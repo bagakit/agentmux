@@ -93,7 +93,7 @@
    与摘要多长无关"）归共享层 `.selector-row`（selector.css）；这里只管本面板的内外边距、
    背景与状态色。此前这里自写一份 `auto minmax(0,1fr) auto` 三列网格，而 leading 可空——
    只来两段时簇被摆进摘要那一列，压在文字上（#467）。 */
-.workspace-topic-entry { min-width: 0; display: flex; align-items: center; padding:var(--sp-3) var(--sp-2) var(--sp-3) var(--sp-4); border: 0; color: var(--text-3); background: transparent; text-align: left; }
+.workspace-topic-entry { min-width: 0; min-height: 40px; display: flex; align-items: center; padding:var(--sp-3) var(--sp-2) var(--sp-3) var(--sp-4); border: 0; color: var(--text-3); background: transparent; text-align: left; }
 .workspace-topic-item:hover:not(.current) { background: var(--surface-3); }
 .workspace-topic-item.current:hover { background: var(--green-bg-hover); }
 .workspace-topic-rename-form { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; gap:var(--sp-3); padding:var(--sp-3) var(--sp-2) var(--sp-3) var(--sp-4); }
@@ -172,6 +172,24 @@
 /* 拖动中的那一行抬起来一点，让落点看得见；不改变行高，避免列表在拖动时跳动。 */
 .workspace-topic-item.dragging { position: relative; z-index: 1; background: var(--surface-3); box-shadow: var(--hl-strong); }
 .workspace-topic-reveal.icon-button { width: 24px; height: 24px; color: var(--text-3); }
+/* 行尾那枚 Region 分屏缩略图（34×22px）。只在 Topic 开着一张 Tab 时出现，画的是那张 Tab 的
+   Region 分屏缩影。34×22 与 border-radius 都不在尺度合同扫描的属性里（surface-scale-contract 只扫
+   font-size / gap / padding / margin，surface-radius 只管 <6px 的圆角），故无需例外条目。 */
+.topic-region-mosaic {
+  flex: 0 0 auto;
+  position: relative;
+  width: 34px; height: 22px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-0);
+  overflow: hidden;
+}
+.topic-region-mosaic__cell {
+  position: absolute;
+  border: 1px solid var(--surface-0);
+  background: var(--surface-3);
+}
+.workspace-topic-item.current .topic-region-mosaic__cell { background: var(--green-line); }
 .surface-tool-action-surface > .primary-button { margin-bottom:var(--sp-6); }
 .surface-tool-unavailable { width: 100%; min-width: 0; display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap:var(--sp-3); padding:var(--sp-4); border-radius: var(--radius); color: var(--text-3); background: var(--surface-2); }
 .surface-tool-unavailable > span { min-width: 0; display: flex; flex-direction: column; gap:var(--sp-1); }
