@@ -149,6 +149,23 @@ const ATTENTION_SORT_RANK: Record<AttentionSortClass, number> = {
   idle: 3
 }
 
+/**
+ * 每个排序类的名字，取自排序表本身。
+ *
+ * 导出它是因为这些名字已经被手抄了第五份：结构守卫（attention-ordering.test.ts）要认出「谁又自己
+ * 写了一份序表」，就得知道这些名字，而它此前手抄了一行字面量。
+ *
+ * 手抄那份与表分岔时，最坏的后果不是漏判某个副本，而是守卫**掉头指向错误的结论**：新类进了表、
+ * 没进清单，表就不再满足「所有键都是排序类」，于是连 SSOT 自己都不被认成序表——扫描报的是
+ * 「共享的表整个不见了」，而表就在那儿一行没动。一个如实的守卫不该在被正确扩充时说出假话。
+ *
+ * `Record<AttentionSortClass, number>` 的键让 tsc 挡住漏项：加了联合成员却不填表就是编译错，
+ * 所以这份清单不可能比联合少。运行期只用于成员判定（`includes`），与顺序无关。
+ */
+export const ATTENTION_SORT_CLASSES = Object.keys(
+  ATTENTION_SORT_RANK
+) as readonly AttentionSortClass[]
+
 export function attentionSortRank(sortClass: AttentionSortClass): number {
   return ATTENTION_SORT_RANK[sortClass]
 }
