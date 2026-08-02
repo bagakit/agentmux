@@ -6,6 +6,7 @@ import {
   type SplitTreeNode,
   type SplitTreeLeaf,
   collectLeafIds,
+  EVEN_SPLIT_RATIO,
   findSiblingLeafId,
   removeLeaf,
   replaceLeaf,
@@ -100,7 +101,7 @@ function buildSplitNode(
     direction,
     first: position === 'first' ? newLeaf : existingLeaf,
     second: position === 'second' ? newLeaf : existingLeaf,
-    ratio: 0.5
+    ratio: EVEN_SPLIT_RATIO
   }
 }
 

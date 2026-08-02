@@ -34,7 +34,32 @@ export const MIN_SPLIT_RATIO = 0.15
 // :23-27 说已经闭合的那道缝。改成从这里派生后，动一个数两侧一起动，编译期保证同值，无需测试守。
 export const MIN_SPLIT_PERCENT = MIN_SPLIT_RATIO * 100
 
+// 「没人记过这条分隔条在哪」时它在哪：正中间。两棵树的构造器（buildSplitNode / splitWorkbenchRegion）
+// 与渲染层对缺失 ratio 的兜底本来各写一份 0.5，整仓共六处手抄——而这**不是**六个独立的选择，是同一个
+// 产品决定（新开的分屏均分）。收成一处的直接理由见 clampSplitRatio 下面那段：#533 我把归一化装到持久化
+// 边界上时，边界的判断与渲染层的判断分居两处，于是它们对同一个缺失值给出了不同答案。
+export const EVEN_SPLIT_RATIO = 0.5
+
+/**
+ * 把一个比例夹回 [MIN_SPLIT_RATIO, 1-MIN_SPLIT_RATIO]，并且**对非有限输入也有定义**。
+ *
+ * 非有限那一半是 #552 的修复，而它是我自己 #533 的回归。裸的 `Math.max(min, Math.min(max, ratio))`
+ * 对 `undefined` 求值是 `NaN`——不是抛错，不是原样返回，是一个会**沿着写入路径传播**的坏值：
+ *   1. `clampSplitTreeRatios` 的身份早退比的是 `ratio === root.ratio`，而 `NaN === undefined` 为假，
+ *      所以它不但没把树原样放过去，还**主动重建**了一棵带 NaN 的树；
+ *   2. 那棵树走的是 zustand 的 `partialize`，即**落盘**。`JSON.stringify(NaN)` 是 `null`；
+ *   3. 下次读回来 `null`，`null ?? 0.5` 才终于兜到 0.5——但中间那一帧的 `NaN * 100` 让
+ *      `<Panel defaultSize={NaN}>` 拿到 NaN，且 `NaN ?? 0.5` 仍是 NaN（`??` 只认 null/undefined）。
+ * 也就是说：渲染层那道 `?? 0.5` 明明是给「可能缺 ratio 的历史持久化数据」留的防线
+ * （见 workbench-layout.ts:20-22 的原话），而我把归一化装在**它上游的写入边界**上，于是防线永远等不到
+ * 它要防的那个值——等到的是一个 `??` 接不住的 NaN。缺省值必须由**边界**给出，不能留给下游兜。
+ *
+ * 为什么是「给默认值」而不是「原样放过去」：缺失的 ratio 没有歧义。类型上 `ratio` 是必填，
+ * 一条没有它的记录只可能来自更早的代码，而那个年代的意思与今天完全一致——均分。含糊的缺席才需要
+ * 保留原样等下游判断（本仓 authored-vs-derived-is-the-wrong-axis 记的就是这条判据），这一条不含糊。
+ */
 export function clampSplitRatio(ratio: number): number {
+  if (!Number.isFinite(ratio)) return EVEN_SPLIT_RATIO
   return Math.max(MIN_SPLIT_RATIO, Math.min(1 - MIN_SPLIT_RATIO, ratio))
 }
 
