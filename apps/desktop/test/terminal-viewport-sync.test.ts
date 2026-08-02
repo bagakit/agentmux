@@ -121,6 +121,132 @@ describe('TerminalViewportSynchronizer', () => {
     ])
   })
 
+  /**
+   * #585「重启后终端经常乱码，放大缩小一下就好」。
+   *
+   * 重启恢复的顺序是：新建 xterm（构造尺寸 80×24）→ 写入 replay 字节 → 收尾同步里做第一次
+   * 确定性 fit。于是那一屏是按 80 列排好的，而 fit 之后 grid 变成真尺寸。xterm 只对**有
+   * scrollback 的正常缓冲区**重排（`_isReflowEnabled` 要求 `_hasScrollback`，见 @xterm/xterm
+   * 5.5.0），alt screen——Codex 的 diff、vim、htop、lazygit——只逐行补齐/截断，所以那一屏就永久
+   * 花在那里。而 daemon 保留的 PTY 尺寸通常与恢复出的布局尺寸**相同**，同尺寸的 TIOCSWINSZ
+   * 不产生 SIGWINCH，TUI 永远收不到重画的理由。用户放大缩小能治，是因为 zoom 真的改了 CSS
+   * 像素，于是既 fit 又发出一次真的尺寸变化。
+   *
+   * 所以判据是「第一次 live fit 挪了 grid」——这件事只有 synchronizer 知道（调用方手上只有
+   * `gap`，而完整重放的 gap 是 false，此前正是那条路一次重绘都不做）。判据不能是「PTY 尺寸变了
+   * 没有」：渲染层不持有 PTY 改动前的尺寸，`resize` 的返回值只说送到没送到。
+   */
+  it('第一次 live fit 挪了 grid 时补一次重绘：按 80 列排好的 replay 不会自己重排', async () => {
+    const frames = frameHarness()
+    // 新建的 xterm 就是 80×24，容器其实是 120×40——重启恢复的必然形状。
+    let actual = { cols: 80, rows: 24 }
+    const fit = vi.fn(() => { actual = { cols: 120, rows: 40 } })
+    const resize = vi.fn(async (_size: { cols: number; rows: number }) => true)
+    const sync = new TerminalViewportSynchronizer({
+      proposeGrid: () => ({ cols: 120, rows: 40 }),
+      fit,
+      readGrid: () => actual,
+      resize,
+      requestFrame: frames.request,
+      cancelFrame: frames.cancel,
+      measureViewport: () => ({ width: 1200, height: 800 })
+    })
+
+    await sync.startLiveSynchronization()
+
+    // 先是最终几何，然后是那一对「差一行再回来」的强制重绘——与 gap 路径同一招。
+    expect(
+      resize.mock.calls.map(([size]) => size),
+      '第一次 live fit 从 80 列挪到 120 列，说明刚重放的那一屏是按错的宽度排的：必须补一次重绘'
+    ).toEqual([
+      { cols: 120, rows: 40 },
+      { cols: 120, rows: 39 },
+      { cols: 120, rows: 40 }
+    ])
+    expect(fit).toHaveBeenCalledTimes(1)
+
+    // 一次性：此后的每次真 resize 本身就会发出 SIGWINCH，再补重绘等于每次拖动都闪一下。
+    resize.mockClear()
+    expect(frames.runNext()).toBe(true)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(resize.mock.calls.map(([size]) => size), '几何已稳定，不该再有任何 resize').toEqual([])
+  })
+
+  // 成对的另一半。没有它，上面那条可以被「每次 live 起活都无条件重绘」满足——那会让每个正常
+  // 开启的终端都多做一对 resize，也就把「挪了 grid」这个判据整个丢掉。
+  it('第一次 live fit 没挪 grid 时不重绘：那一屏本来就是按对的宽度排的', async () => {
+    const frames = frameHarness()
+    // xterm 已经量到了真尺寸（例如同一实例切回来，或 fit 早于 replay 完成）。
+    const grid = { cols: 120, rows: 40 }
+    const fit = vi.fn()
+    const resize = vi.fn(async (_size: { cols: number; rows: number }) => true)
+    const sync = new TerminalViewportSynchronizer({
+      proposeGrid: () => ({ ...grid }),
+      fit,
+      readGrid: () => ({ ...grid }),
+      resize,
+      requestFrame: frames.request,
+      cancelFrame: frames.cancel,
+      measureViewport: () => ({ width: 1200, height: 800 })
+    })
+
+    await sync.startLiveSynchronization()
+
+    expect(resize.mock.calls.map(([size]) => size)).toEqual([{ cols: 120, rows: 40 }])
+    expect(fit).not.toHaveBeenCalled()
+  })
+
+  /**
+   * 抖动基线由「这次 fit」建立，而不是由「这次 resize」建立。
+   *
+   * 这两件事在 `fitAndSynchronize` 里只差一个 `if (!this.live) return`，而 replay 阶段的 fit
+   * 恰好全部落在非 live 的那一侧——重启恢复时先 fit 再起活。所以如果把基线记账挪到 live 闸之后，
+   * 基线在整个 replay 阶段都是 null，于是紧随其后的第一次 cell-metric 抖动（像素一模一样、
+   * proposal 差一列）会被当成真 resize 去 fit：xterm reflow 一列再弹回，把刚画好的 TUI 画花。
+   * 那正是 wobble gate 存在的理由，也正是 #585 要修的那种花屏。
+   *
+   * 有 review 意见建议把那行挪到 live 闸下面（理由是「非 live 的测量不该 latch 基线」）。实测
+   * 挪过去 21 条全绿——也就是说这个顺序此前完全无人守。这条用例就是那个判据：它必须在挪动后变红。
+   */
+  it('replay 阶段的 fit 也要留下抖动基线，否则起活后第一次 cell-metric 抖动就会把 TUI 画花', async () => {
+    const frames = frameHarness()
+    const pixels = { width: 1200, height: 800 }
+    let proposed = { cols: 120, rows: 40 }
+    let actual = { cols: 80, rows: 24 }
+    const fit = vi.fn(() => { actual = { ...proposed } })
+    const resize = vi.fn(async (_size: { cols: number; rows: number }) => true)
+    const sync = new TerminalViewportSynchronizer({
+      proposeGrid: () => proposed,
+      fit,
+      readGrid: () => actual,
+      resize,
+      requestFrame: frames.request,
+      cancelFrame: frames.cancel,
+      measureViewport: () => ({ ...pixels })
+    })
+
+    // 还没起活（replay 正在写入）：fit 一次把 xterm 对齐到容器，但一个字节都不该发给 PTY。
+    sync.observeViewport()
+    expect(frames.runNext()).toBe(true)
+    await Promise.resolve()
+    expect(fit).toHaveBeenCalledTimes(1)
+    expect(resize).not.toHaveBeenCalled()
+
+    // cell-metric 抖动：像素一模一样，proposal 差一列。基线若没在上面那次 fit 时记下，
+    // 这里就会再 fit 一次。
+    fit.mockClear()
+    proposed = { cols: 121, rows: 40 }
+    sync.observeViewport()
+    expect(frames.runNext()).toBe(true)
+    await Promise.resolve()
+
+    expect(
+      fit,
+      '像素没变却又 fit 了一次：replay 阶段的 fit 没有留下基线，抖动闸在这条路上是空的'
+    ).not.toHaveBeenCalled()
+  })
+
   it('does not redraw a historical Run or race an interactive resize', async () => {
     const frames = frameHarness()
     const resize = vi.fn(async (_size: { cols: number; rows: number }) => true)
