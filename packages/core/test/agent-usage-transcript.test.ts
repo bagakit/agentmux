@@ -86,6 +86,55 @@ describe('native usage extraction from provider transcripts', () => {
     expect(usage?.totalTokens).not.toBe(61008 + 3381)
   })
 
+  // 扫描方向本身无人守。tailLines 从 EOF 往前 push，于是返回的是「新在前」，两个 extractor 都 return
+  // 第一个命中——合起来才等于模块开头写明的那条合同：「取数一律最后一条带用量的记录」。但此前每个
+  // fixture 的尾部都**只有一条**用量记录，于是「取第一条」与「取最后一条」在断言下完全等价。实测过：
+  // 把 tailLines 里的 `tail.push(line)` 改成 `tail.unshift(line)`（收集成旧在前），本文件 10 条全绿。
+  //
+  // 真实的带工具调用的 turn 尾部一定有多条：claude 每条 type:"assistant" 记录写一次 message.usage
+  // （用了工具就有好几条），codex 每次 API 请求写一次 token_count。最后那条才是本 turn 收敛后的累计值。
+  // 方向翻掉之后「上一回合」的 token 徽标与 in/out/total 提示，对每个用了工具的 turn 都显示更早、更小的
+  // 中间值——静默低报，且与正确值在界面上无从分辨。
+  //
+  // 两个数字都写死字面量，不由输入算出（否则期望值会跟着变异一起漂）。两条记录的数字必须互不相同，
+  // 「第一条」与「最后一条」才分得开。
+  it('取的是离 EOF 最近那条用量记录，不是尾部窗口里最早的那条', () => {
+    const claudeAssistant = (input: number, output: number): string => JSON.stringify({
+      type: 'assistant',
+      message: { role: 'assistant', usage: { input_tokens: input, output_tokens: output } }
+    })
+    // 一个用了工具的 turn：先一条中间用量，再一条收敛用量，中间夹着工具结果。
+    const claudeMultiRecord = [
+      JSON.stringify({ type: 'user', message: { role: 'user', content: 'go' } }),
+      claudeAssistant(10, 20),
+      JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result' }] } }),
+      claudeAssistant(100, 200),
+      JSON.stringify({ type: 'last-prompt' })
+    ].join('\n') + '\n'
+    // 前提自检：整段远短于 64 行，所以行数裁剪不参与——发红只可能因为方向错了。
+    expect(claudeMultiRecord.split('\n').length).toBeLessThan(64)
+    expect(extractTurnUsage(CLAUDE, claudeMultiRecord, 7)).toEqual({
+      inputTokens: 100, outputTokens: 200, totalTokens: 300, observedAt: 7
+    })
+
+    const codexTokenCount = (input: number, output: number, total: number): string => JSON.stringify({
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: { last_token_usage: { input_tokens: input, output_tokens: output, total_tokens: total } }
+      }
+    })
+    const codexMultiRecord = [
+      codexTokenCount(11, 22, 33),
+      JSON.stringify({ type: 'event_msg', payload: { type: 'agent_message', message: 'thinking' } }),
+      codexTokenCount(110, 220, 330)
+    ].join('\n') + '\n'
+    expect(codexMultiRecord.split('\n').length).toBeLessThan(64)
+    expect(extractTurnUsage(CODEX, codexMultiRecord, 8)).toEqual({
+      inputTokens: 110, outputTokens: 220, totalTokens: 330, observedAt: 8
+    })
+  })
+
   it('returns null when the transcript has no usage record yet (no fabricated zero)', () => {
     const noUsage = [
       JSON.stringify({ type: 'user', message: { role: 'user', content: 'hi' } }),
