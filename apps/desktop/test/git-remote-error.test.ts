@@ -119,6 +119,12 @@ describe('classifyGitRemoteError (pure)', () => {
     expect(
       classifyGitRemoteError({ stdout: '', stderr: 'fatal: The current branch feature has no upstream branch.' }).kind
     ).toBe('no-upstream')
+    // 第三个 alternation：detached HEAD 上 push 时 git 打的就是这句。实测过：把它从正则里去掉，
+    // 这个文件 28 条全绿。后果不是数据损坏而是分类精度下降——git-remote-outcome 那格本该给
+    // 「先 checkout 一个分支」的可行动提示，退化成直接甩 git 原话。
+    expect(
+      classifyGitRemoteError({ stdout: '', stderr: 'fatal: You are not currently on a branch.' }).kind
+    ).toBe('no-upstream')
   })
 
   it('never lets a non-fatal line that merely mentions "no upstream" masquerade as no-upstream', () => {
@@ -238,6 +244,40 @@ describe('GitService.push (fake executor)', () => {
     await expect(service.push('repo', cfg, { remote: '--upload-pack=sh' })).rejects.toThrow()
     await expect(service.push('repo', cfg, { refspec: '--force' })).rejects.toThrow()
     expect(host.run).not.toHaveBeenCalled()
+  })
+
+  // assertSafeRef 有三道闸：空串、`-` 前缀、以及 git 自己就禁止的那组控制/空白/ref 元字符。上面那条
+  // 只喂 dash 前缀的输入，全部被第二道闸拦下——第三道字符类闸因此**没有任何独占靶子**。实测过：
+  // 把那一整行 `if (/[\0\n\r\t ~^:?*[\\]/.test(value)) throw` 删掉，git-remote-error + git-service +
+  // git-diff 共 65 条全绿。
+  //
+  // 今天是潜伏的：GitPushOptions.remote/refspec 透传到 preload 与 ipc，但还没有面板给用户填自定义
+  // remote/refspec。一旦加上「push 到指定 remote/分支」那个输入框，这道 flag/ref 注入防线的一半就
+  // 静默失效。判据按闸分靶：dash 归上一条，元字符归这条，删任一道都有人红。
+  it('rejects a ref carrying the control/metacharacter bytes git forbids, before any git call', async () => {
+    const host = remoteHost()
+    const { service, config: cfg } = withWorkspace(host)
+
+    // 每一个都不带 dash 前缀，所以只有第三道闸能拦住它们。
+    await expect(service.push('repo', cfg, { remote: 'ori gin' })).rejects.toThrow()
+    await expect(service.push('repo', cfg, { remote: 'a~b' })).rejects.toThrow()
+    await expect(service.push('repo', cfg, { refspec: 'HEAD^' })).rejects.toThrow()
+    await expect(service.push('repo', cfg, { refspec: 'refs/heads/*' })).rejects.toThrow()
+    await expect(service.push('repo', cfg, { refspec: 'HEAD:main:extra' })).rejects.toThrow()
+    await expect(service.fetch('repo', cfg, { remote: 'orig\nin' })).rejects.toThrow()
+    // 拒绝必须发生在拼 argv 之前：抛得晚一点等于那串字节已经进过一次 git。
+    expect(host.run).not.toHaveBeenCalled()
+  })
+
+  // 自检：上面全是拒绝断言，于是「assertSafeRef 变成无条件 throw」也能让它们全过——那会把合法的
+  // 自定义 remote 一起毙掉，而这条测试对此完全失明。所以再钉一次正向：一个干净的 remote 必须过闸
+  // 并真的到达 git。
+  it('lets a clean custom remote through the same gate', async () => {
+    const host = remoteHost()
+    const { service, config: cfg } = withWorkspace(host)
+
+    await expect(service.push('repo', cfg, { remote: 'upstream' })).resolves.toBeDefined()
+    expect(host.run).toHaveBeenCalled()
   })
 })
 
