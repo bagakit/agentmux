@@ -121,6 +121,39 @@ export function attentionAccentFor(state: AgentDisplayState): AttentionCategory 
 }
 
 /**
+ * The one ORDERING the attention surfaces sort by, most urgent first.
+ *
+ * The roster and the quick switcher both rank rows, and both must agree about who sorts above whom.
+ * They were two hand-written tables before this, and they had already drifted: the roster sorted a
+ * finished Agent strictly above an idle one while the switcher tied them. This is the single decision
+ * they now share, so that divergence cannot come back (guarded in attention-ordering.test.ts).
+ *
+ * It is keyed on a coarse sort CLASS rather than on AgentDisplayState on purpose. "Does this state need
+ * a person" is decided once, in {@link isNeedsYouState} (see attention-vocabulary.ts), and each surface
+ * routes through that table and arrives here already classified — so this file never re-spells the
+ * needs-you states, and the ranking stays a separate, single concern from the needs-you predicate.
+ *
+ * `done` and `idle` share a rank deliberately. A finished-but-unlooked-at Agent is NOT more urgent than
+ * an idle one until there is an unread/seen axis to say it has not yet been looked at — and there is
+ * none. #199 is that axis (a separate feature, deliberately not built here); #246 records that ranking
+ * `done` above idle is contrary to every reference product while no such axis exists. So this tie is a
+ * compromise pending #199, not a settled claim that completion outranks idleness.
+ */
+export type AttentionSortClass = AttentionCategory | 'working' | 'idle'
+
+const ATTENTION_SORT_RANK: Record<AttentionSortClass, number> = {
+  'needs-you': 0,
+  error: 1,
+  working: 2,
+  done: 3,
+  idle: 3
+}
+
+export function attentionSortRank(sortClass: AttentionSortClass): number {
+  return ATTENTION_SORT_RANK[sortClass]
+}
+
+/**
  * Fold a batch of Sessions against the previously known states, returning every event worth raising.
  *
  * Callers own the previous-state map because they own the lifetime of the projection; keeping it out

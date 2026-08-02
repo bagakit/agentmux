@@ -1,6 +1,7 @@
 import type { AgentProviderId } from '@agentmux/core'
 import type { AppConfig, SessionSnapshot } from '../../../shared/contracts'
 import { isNeedsYouState } from './attention-vocabulary'
+import { attentionSortRank } from './attention-event'
 import {
   activeWorkbenchSurface,
   titleWorkbenchSurface,
@@ -43,13 +44,17 @@ export type QuickSwitchItem = {
 // Attention weight: needs-you rows lift highest, then errors, then working, then everything idle.
 // Which states are needs-you is NOT decided here — `isNeedsYouState` is the one table, so this ordering
 // cannot drift from the notification decision or the status bar's counts the way a local `case
-// 'waiting': case 'blocked':` ladder silently would.
+// 'waiting': case 'blocked':` ladder silently would. And the ORDER itself is not decided here either:
+// this classifies the state into a sort class and defers to `attentionSortRank`, the one table the
+// roster sorts by too, so the two surfaces cannot disagree about who ranks above whom (they had, before
+// — see attention-ordering.test.ts). A finished (`done`) row and an idle one tie there deliberately,
+// pending #199.
 function attentionRank(state: QuickSwitchItem['state']): number {
-  if (state === null) return 3
-  if (isNeedsYouState(state)) return 0
-  if (state === 'error') return 1
-  if (state === 'working') return 2
-  return 3
+  if (state === null) return attentionSortRank('idle')
+  if (isNeedsYouState(state)) return attentionSortRank('needs-you')
+  if (state === 'error') return attentionSortRank('error')
+  if (state === 'working') return attentionSortRank('working')
+  return attentionSortRank(state === 'done' ? 'done' : 'idle')
 }
 
 // A conservative subsequence fuzzy match: every query char must appear in order in the haystack.
