@@ -73,6 +73,8 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { orderTopics, reorderTopics } from '../lib/topic-order'
+import { openTopicRegionMosaics } from '../lib/scratch-topic-layout'
+import type { RegionGeometry } from '../lib/split-direction'
 import { handleTopicRenameKeyDown } from '../lib/topic-rename'
 import { TopicContextMenu } from './TopicContextMenu'
 import { useAppStore } from '../store'
@@ -357,6 +359,7 @@ function WorkspaceTopicsPanel({
   const layout = useAppStore((state) => state.layouts[workspace.id])
   const activeTabId = layout?.groups.find((group) => group.id === layout.activeGroupId)?.activeTabId
   const topicId = useAppStore((state) => activeTabId ? state.tabs[activeTabId]?.topicId : undefined)
+  const tabs = useAppStore((state) => state.tabs)
   const fileRevision = useAppStore((state) => state.workspaceFileRevisions[workspace.id] ?? 0)
   const sessions = useAppStore((state) => state.sessions)
   const createScratchTopic = useAppStore((state) => state.createScratchTopic)
@@ -390,6 +393,9 @@ function WorkspaceTopicsPanel({
     : null
   const currentTopic = projected?.find((topic) => topic.id === topicId)
   const compact = topics === null || topics.length > 0
+  // 一次派生「哪些 Topic 有 Tab 开着」及其 Region 分屏几何，逐行只读它，不让每行各自扫 tabs
+  // （scratch-topic-layout.ts 的学说：门禁与几何是同一事实的两半，投影一次）。
+  const openMosaics = openTopicRegionMosaics(layout, tabs)
 
   useEffect(() => {
     let active = true
@@ -589,6 +595,14 @@ function WorkspaceTopicsPanel({
                             }
                           })}
                         />
+                      }
+                      /* 行尾那枚 Region 缩略图：只在这个 Topic 真的开着一张 Tab 时出现（门禁来自
+                         openTopicRegionMosaics —— tab.topicId 是唯一绑定真相），画的是那张 Tab 的
+                         Region 分屏缩影。Branch 行不传 trailing 缩略图，保留它自己的头像簇/状态胶囊。 */
+                      trailing={
+                        openMosaics.has(topic.id)
+                          ? <RegionMosaic cells={openMosaics.get(topic.id)!} />
+                          : null
                       }
                     />
                   </button>
@@ -805,6 +819,32 @@ export function BoardToolList({ hostId }: { hostId: string }) {
         </button>
       ) : null}
     </section>
+  )
+}
+
+/**
+ * 一张 Tab 的 Region 分屏缩影：34×22px 的行尾小方块，按真实归一化几何铺出每个 Region。
+ *
+ * 几何来自 `workbenchRegionBounds`（0–1 归一化），这里只把它乘进小方块的百分比坐标——不发明第二套
+ * 布局模型，Tab 里怎么分屏，这枚缩略图就怎么分。它是一枚一眼可辨的提示（"这个 Topic 开着，且长这样"），
+ * 不是可交互的实时镜像，所以不挂点击、不读 Session 状态。
+ */
+export function RegionMosaic({ cells }: { cells: readonly RegionGeometry[] }) {
+  return (
+    <span className="topic-region-mosaic" aria-hidden="true">
+      {cells.map((cell) => (
+        <span
+          key={cell.regionId}
+          className="topic-region-mosaic__cell"
+          style={{
+            left: `${cell.bounds.x * 100}%`,
+            top: `${cell.bounds.y * 100}%`,
+            width: `${cell.bounds.width * 100}%`,
+            height: `${cell.bounds.height * 100}%`
+          }}
+        />
+      ))}
+    </span>
   )
 }
 
