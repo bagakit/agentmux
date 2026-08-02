@@ -1,6 +1,6 @@
 import type { AgentCatalogEntry, LaunchOptionSelection, RiskTier } from '@agentmux/core'
 import type { SessionSnapshot } from '../../../shared/contracts'
-import { categoryFor, isUrgentAttention, type AttentionCategory } from './attention-event'
+import { attentionSortRank, categoryFor, isUrgentAttention, type AttentionCategory } from './attention-event'
 import { agentUsageDisplay, type AgentUsageDisplay } from './agent-usage'
 
 // An enumerable, window-wide roster of Agents.
@@ -54,13 +54,12 @@ export type RosterRow = {
   usage: AgentUsageDisplay
 }
 
-// needs-you first, then error, then working, then everything idle — the same ranking the quick switcher
-// and the attention bar use, so the three never disagree about who is most urgent.
-const ATTENTION_RANK: Record<AttentionCategory, number> = { 'needs-you': 0, error: 1, done: 3 }
-
+// needs-you first, then error, then working, then everything idle — the ONE ordering the quick switcher
+// also sorts by (see attentionSortRank in attention-event.ts), so the two can never disagree about who
+// is most urgent. `done` and idle share a rank there deliberately, pending #199's unread/seen axis.
 function rank(row: RosterRow): number {
-  if (row.attention) return ATTENTION_RANK[row.attention]
-  return row.state === 'working' ? 2 : 4
+  if (row.attention) return attentionSortRank(row.attention)
+  return attentionSortRank(row.state === 'working' ? 'working' : 'idle')
 }
 
 /**
