@@ -46,6 +46,8 @@ import type {
   KeepOneOfFanOutOutcome,
   MoveWorkspacePathInput,
   NotificationModeId,
+  RemoveWorktreeInput,
+  RemoveWorktreeOutcome,
   RunFanOutInput,
   RunFanOutResult,
   SessionControl,
@@ -235,6 +237,21 @@ export async function registerIpc(args: {
     const selection = await worktrees.createForBranch(input, config)
     config = selection.config
     return selection
+  })
+  // 单条删除。与批量收尾（keepOneOfFanOut）共用同一个 teardown primitive，所以脏树保护在这条路上
+  // 一样在场：`removeWorktree` 只在 git 确认后才撤记录。
+  //
+  // 关键取舍：拒绝在这里**不当异常往上抛**，而是作为 `retained` 正常返回。保护的全部意义就是让
+  // 「这里还有活儿」这句话传到用户眼前，而 IPC 上的异常只剩一句被压平的字符串，调用方分不出
+  //「git 挂了」和「有未提交改动，你要不要先看看」。两者要走的下一步完全不同。
+  handle('workspaces:removeWorktree', async (input: RemoveWorktreeInput): Promise<RemoveWorktreeOutcome> => {
+    try {
+      const removal = await worktrees.removeWorktree(input, config)
+      config = removal.config
+      return { status: 'removed', removedPath: removal.removedPath, config: removal.config }
+    } catch (error) {
+      return { status: 'retained', reason: error instanceof Error ? error.message : String(error) }
+    }
   })
   // One fan-out. The orchestration lives in `fanout-request` so it is reachable from a test: this
   // handler is one forwarding expression with no statement position to disable. Text guards on this

@@ -29,10 +29,16 @@ import {
 } from '../lib/branch-agent-presence'
 import { defaultWorktreePath } from '../lib/workspace-projects'
 import { branchHasWorktree, branchOpenIntent, branchWorktreePath } from '../lib/workspace-branches-state'
+import {
+  nextAfterWorktreeRemoval,
+  worktreeRemovalPrompt,
+  type WorktreeRemovalRequest
+} from '../lib/worktree-removal-request'
 import { useAppStore } from '../store'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { SelectorListHeader, SelectorPresence, SelectorRow } from './SelectorList'
 import { BranchContextMenu } from './BranchContextMenu'
+import { ConfirmationDialog } from './ConfirmationDialog'
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -52,6 +58,13 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
   const [fanOutPrompt, setFanOutPrompt] = useState('')
   const [fanOutCount, setFanOutCount] = useState(3)
   const [fanningOut, setFanningOut] = useState(false)
+  const [removal, setRemoval] = useState<WorktreeRemovalRequest | null>(null)
+  const [removing, setRemoving] = useState(false)
+  // 文案与「确认键真正做什么」只算一次，对话框的四个 prop 和 confirmRemoval 发出去的实参都取这一份。
+  // 分开各调一次同一个函数在今天等价，但它把一个决定重新拆成五个取值点——下一个人给某一档加条件时
+  // 只会改到其中一处，那正是本仓「读的 key 与写的 key 必须只判一次」栽过的形状：按钮说要丢弃、
+  // 请求里却没带。
+  const removalPrompt = removal === null ? null : worktreeRemovalPrompt(removal)
   const { snapshot, loading, error: loadError, refresh } = useWorkspaceBranches(workspace.id)
   // ahead/behind 是 **HEAD** 相对它自己 upstream 的事实，不是逐分支的——所以下面只把它画在
   // `isCurrent` 那一行。画到别的行上会是谎：那些分支各有各的 upstream，这一个计数说不了它们的事。
@@ -169,6 +182,36 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
     await copyTextToClipboard(text, (cause) => setActionError(message(cause)))
   }
 
+  async function confirmRemoval(): Promise<void> {
+    if (!removal || !removalPrompt || removing) return
+    setRemoving(true)
+    setActionError(null)
+    try {
+      const outcome = await api.workspaces.removeWorktree({
+        workspaceId: removal.workspaceId,
+        // 取的就是确认键上那句话算出来的同一份，不在这里再判第二次。
+        discardChanges: removalPrompt.discardChanges
+      })
+      const next = nextAfterWorktreeRemoval(removal, outcome)
+      if (next.kind === 'done') {
+        setRemoval(null)
+        // 记录已经撤了，分支列表里那一行的归属跟着变（从 Worktrees 组挪回 Without worktree），
+        // 所以必须重扫。不重扫会留一个指向已删目录的行，点它会报一句难懂的话。
+        await refresh()
+      } else if (next.kind === 'ask') {
+        setRemoval(next.request)
+      } else {
+        setRemoval(null)
+        setActionError(next.reason)
+      }
+    } catch (cause) {
+      setRemoval(null)
+      setActionError(message(cause))
+    } finally {
+      setRemoving(false)
+    }
+  }
+
   function branchRow(branch: WorkspaceBranchRecord) {
     const selectedRow = selectedBranch === branch.name
     // 一次判断给出标志与取值。分开算两次是这一族缺陷的来源，所以这里也不许再判第二次。
@@ -191,6 +234,21 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
         onCopyBranchName={() => void copyText(branch.name)}
         onCopyWorktreePath={() => worktree !== null && void copyText(worktree)}
         onRefresh={() => void refresh()}
+        onRemoveWorktree={() => {
+          // 要删的是**这一行**那个 worktree，所以 workspaceId 取 branch.workspaceId，不取
+          // `workspace.id`（那是当前打开的项目，通常正是别的分支）。两者今天在「点自己那一行」时
+          // 恰好一致，正是这种偶然一致会把一个删错对象的 bug 藏起来。
+          // 缺 workspaceId 说明这个 worktree 还没登记成 Workspace，那就没有可撤的记录可删——
+          // 用缺席表达，不画一个按了会报错的菜单项（该项已按 hasWorktree 挡住，这里是第二道）。
+          if (worktree === null || branch.workspaceId === null) return
+          setActionError(null)
+          setRemoval({
+            workspaceId: branch.workspaceId,
+            branch: branch.name,
+            path: worktree,
+            stage: { kind: 'confirm' }
+          })
+        }}
       >
         <button
           type="button"
@@ -401,6 +459,23 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
+      {/*
+        单条 worktree 移除的确认。两个阶段共用这一个对话框，文案由 worktreeRemovalPrompt 按阶段算，
+        因为「确认键写什么」和「请求带不带 discardChanges」必须是同一次决定——分两处算就会漂移成
+        按钮说要丢弃、请求里却没带。
+      */}
+      <ConfirmationDialog
+        open={removalPrompt !== null}
+        title={removalPrompt?.title ?? ''}
+        description={removalPrompt?.description ?? ''}
+        {...(removalPrompt ? { subject: removalPrompt.subject } : {})}
+        confirmLabel={removalPrompt?.confirmLabel ?? ''}
+        busy={removing}
+        onCancel={() => {
+          if (!removing) setRemoval(null)
+        }}
+        onConfirm={() => void confirmRemoval()}
+      />
     </section>
   )
 }
