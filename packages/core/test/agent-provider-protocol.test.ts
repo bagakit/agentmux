@@ -265,6 +265,72 @@ describe('Core Provider protocol', () => {
       }
     })
 
+    it('rules 说 done 的那些原始名，方言表必须也说 turn-end——两处对同一步各判一次', () => {
+      // 上面那条「能收尾必须能重开」的判据里有 `if (!canFinalize) continue`，而 canFinalize 是**按方言
+      // 归一后**算的。于是一家 Provider 的 rules 里明写着 `state: 'done'`、方言表里却没有对应的
+      // `turn-end` 时，它算出 canFinalize=false，被 continue 整条跳过——不变量对它完全失明，恰恰是
+      // 最该问的那一家（本仓「判别器可能在别的环境缺席」与「守卫按出口数不按条件数」两族的交集）。
+      //
+      // 实测的分岔：13 家里 12 家 divergent=[]，只有 opencode 的 `session.status`/`session.idle`
+      // 两个 done 事件在方言表里认不出（它整份 rules 七个原始名全部归一失败）。这不是缺陷而是**刻意**：
+      // 那七个名字是 dot.case 的上游事件类型，与「一个原始名在每家 Provider 上都表示同一结构步骤」
+      // 这条合并表的前提不冲突，但也没有任何第一方证据说它们该被当成 canonical 生命周期步骤——
+      // 声明未核实的能力是本仓北极星禁止的。代价是可算的、且今天方向安全：
+      //   * turn-phase 闸门永不 latch（`hookTurnPhaseAfter(undefined)` 恒 undefined），
+      //     所以 opencode 拿不到「收尾后压制迟到工具事件」这层保护，但也永不误伤——与 Pi 那条缺口同族；
+      //   * USAGE_FINALIZATION_EVENTS 不含它的收尾名，而 opencode **本来就不声明 usage 能力**
+      //     （无单文件 transcript），所以这一侧无损失；
+      //   * 时间轴的 `isToolResult` 恒 false，而它的 rules 里也确实没有任何工具事前/事后事件。
+      // 语义状态照旧由 rules 直接给出，所以「done 显示不出来」不会发生。
+      //
+      // 判据因此分两半：有映射的那些必须与 rules 一致（漏一个映射即在此报红），而刻意无映射的那家
+      // 必须显式登记并自带前提自检——不许把它默默留在 continue 后面。
+      const KNOWN_UNMAPPED_DONE: readonly string[] = ['opencode']
+
+      let comparedDoneEvents = 0
+      for (const provider of providers) {
+        const doneEvents = provider.hook.rules
+          .filter((rule) => rule.state === 'done')
+          .flatMap((rule) => rule.events)
+        if (doneEvents.length === 0) continue
+        const divergent = doneEvents.filter((raw) => canonicalHookLifecycleEvent(raw) !== 'turn-end')
+        if (KNOWN_UNMAPPED_DONE.includes(provider.id)) {
+          // 登记的那家：要求它**整批**都没映射。半边有半边没有才是真漂移——那说明有人补了一部分，
+          // 于是 canFinalize 变 true 而另一半的收尾静默读不出来。
+          expect(
+            divergent.sort(),
+            `${provider.id} 的 done 事件只有一部分没映射：这是漂移而不是刻意的缺口`
+          ).toEqual([...doneEvents].sort())
+          continue
+        }
+        expect(
+          divergent,
+          `${provider.id} 的 rules 说这些事件是 done，方言表却不认它们是 turn-end。` +
+          '后果不是少一个映射：canFinalize 按方言算，于是「能收尾必须能重开」那条不变量会把它整条跳过。'
+        ).toEqual([])
+        comparedDoneEvents += doneEvents.length
+      }
+
+      // 自检：没有比对过任何有映射的收尾事件时，上面每一条都退化成 [] === []。
+      expect(comparedDoneEvents, '判据失效：没有比对过任何已映射的 done 事件').toBeGreaterThan(10)
+      // 登记清单不许烂掉：名字必须真的是在册 Provider，且它真的还有 done 规则要谈。
+      for (const id of KNOWN_UNMAPPED_DONE) {
+        const provider = providers.find((candidate) => candidate.id === id)
+        expect(provider, `登记清单里的 ${id} 不是在册 Provider——清单过期了`).toBeDefined()
+        const doneEvents = provider?.hook.rules.filter((rule) => rule.state === 'done') ?? []
+        expect(doneEvents.length, `${id} 已经没有 done 规则了：把它从清单里删掉`).toBeGreaterThan(0)
+      }
+      // 缺口的代价前提之一：登记的那家不声明 usage 能力，所以「收尾读不到用量」在它身上不是损失。
+      // 前提一旦不成立（有人给它加了 usage），这里先红，而不是等用户发现用量永远是「—」。
+      for (const id of KNOWN_UNMAPPED_DONE) {
+        const provider = providers.find((candidate) => candidate.id === id)
+        expect(
+          provider?.catalog.capabilities.usage,
+          `${id} 现在声明了 usage 能力，但它的收尾事件不在 USAGE_FINALIZATION_EVENTS 里：用量永远读不到`
+        ).toBeFalsy()
+      }
+    })
+
     it('无重开能力的 Provider 走不 latch 的兜底——与上面那份缺口清单成对', () => {
       // 这条是缺口清单的另一半。清单说「Pi 缺重开能力」，这条说「所以闸门对它不 latch」。
       // 谁删掉兜底，这条先红；谁悄悄给 Pi 编个映射，上一条先红。两条都在才算把缺口守住。
