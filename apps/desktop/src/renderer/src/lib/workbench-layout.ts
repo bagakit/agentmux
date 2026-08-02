@@ -7,6 +7,9 @@ import {
   findSiblingLeafId,
   setSplitRatioAtPath
 } from './split-tree'
+// 方向的两半含义（哪根轴、哪一侧）只从这里取。本文件定义 SplitDirection，而 split-direction.ts 只
+// `import type` 它——类型导入编译后被擦除，故这条反向的值导入不构成运行时循环。
+import { orientationOf, placementOf } from './split-direction'
 
 export type SplitDirection = 'left' | 'right' | 'up' | 'down'
 
@@ -135,23 +138,16 @@ function getDirectLayoutSiblingOnSplitSide(
   splitDirection: SplitDirection
 ): string | null {
   const { first, second, direction } = split
-  if (first.type === 'leaf' && first.groupId === targetGroupId) {
-    if (direction === 'horizontal' && splitDirection === 'right' && second.type === 'leaf') {
-      return second.groupId
-    }
-    if (direction === 'vertical' && splitDirection === 'down' && second.type === 'leaf') {
-      return second.groupId
-    }
-  }
-  if (second.type === 'leaf' && second.groupId === targetGroupId) {
-    if (direction === 'horizontal' && splitDirection === 'left' && first.type === 'leaf') {
-      return first.groupId
-    }
-    if (direction === 'vertical' && splitDirection === 'up' && first.type === 'leaf') {
-      return first.groupId
-    }
-  }
-  return null
+  // 此前这里把方向拆解手抄了四遍（横×right、纵×down、横×left、纵×up），每条都自带一组轴与侧的配对。
+  // 四条今天都对，但那是因为它们同一天写成；任何一条的配对写反，只会让那一个方向在那一根轴上静默答
+  // 「没有邻居」——而另外三个方向照旧正确，最像"能用"的那种坏法。收敛到两半真相各取一次。
+  if (orientationOf(splitDirection) !== direction) return null
+  const towardSecond = placementOf(splitDirection) === 'second'
+  // 朝轴的后半看时，出发点必须是 first、邻居是 second；朝前半看时反之。
+  const origin = towardSecond ? first : second
+  const neighbor = towardSecond ? second : first
+  if (origin.type !== 'leaf' || origin.groupId !== targetGroupId) return null
+  return neighbor.type === 'leaf' ? neighbor.groupId : null
 }
 
 function findLayoutSiblingOnSplitSide(
@@ -456,8 +452,8 @@ export function moveTabToNewGroup(
   const replacement = buildSplitNode(
     targetGroupId,
     newGroupId,
-    direction === 'left' || direction === 'right' ? 'horizontal' : 'vertical',
-    direction === 'left' || direction === 'up' ? 'first' : 'second'
+    orientationOf(direction),
+    placementOf(direction)
   )
   const sourceOrder = sourceGroup.tabOrder.filter((id) => id !== tabId)
   let groups: TabGroup[] = [
