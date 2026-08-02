@@ -240,9 +240,15 @@ describe('GitService (contract, fake executor)', () => {
 
     // Both spellings git uses for "the path is not in this commit". `does not exist in` is a path that
     // was never committed; `exists on disk, but not in` is an untracked file sitting in the worktree.
+    // The last two are the case that a fenced `'[^']*'` path span got WRONG: git does not escape a
+    // single quote inside the path it echoes back — captured byte-for-byte from real git for a file
+    // named `bob's.txt` — so a fenced span stopped at the embedded quote, absence was not recognized,
+    // and a legitimately-added file made the whole diff throw instead of being drawn as added.
     it.each([
       "fatal: path 'nosuch.txt' does not exist in 'HEAD'\n",
-      "fatal: path 'ondisk.txt' exists on disk, but not in 'HEAD'\n"
+      "fatal: path 'ondisk.txt' exists on disk, but not in 'HEAD'\n",
+      "fatal: path 'bob's.txt' exists on disk, but not in 'HEAD'\n",
+      "fatal: path 'no'such.txt' does not exist in 'HEAD'\n"
     ])('draws a file that is genuinely not in HEAD as added: %s', async (stderr) => {
       const { service, config: cfg } = diffHost(stderr)
 
@@ -269,21 +275,30 @@ describe('GitService (contract, fake executor)', () => {
       await expect(service.diff('repo', 'tracked.txt', cfg)).rejects.toThrow(/unable to open loose object/)
     })
 
-    // The fenced-wildcard shape, the same one fd810e2 fixed in a sibling predicate: with `'.+'` the
-    // wildcard runs past the closing quote and swallows whatever follows, so a longer line that merely
-    // CONTAINS the phrase matches.
+    // A longer line that merely CONTAINS the absence phrase must not be read as absence. What rejects
+    // it is the REF literal plus `$`: the message has to end in `'HEAD'`, so `'HEAD:sub' at '…'` fails
+    // on the ref. That is deliberately not a fence around the path span — fencing the path was measured
+    // to break quoted filenames (see the added cases above) while buying nothing this case needs.
     //
-    // The line has to END in a quote to probe this. My first attempt used a trailing
-    // `(which is not a tree object)` suffix, and it did not discriminate — the `$` anchor rejected it
-    // under BOTH spellings, so widening `[^']*` back to `.+` left the suite green (measured). A wildcard
-    // fenced between two quote literals gets no incidental coverage from anchor cases; it needs a case
-    // where the anchor is satisfied and only the fence can say no.
+    // The line has to end in a quote to probe this at all. My first attempt used a trailing
+    // `(which is not a tree object)` suffix and did not discriminate: `$` rejected it under every
+    // spelling, so the wildcard change it was meant to catch left the suite green (measured).
     it('does not accept a longer line that merely contains the absence phrase', async () => {
       const { service, config: cfg } = diffHost(
         "fatal: path 'a.txt' exists on disk, but not in 'HEAD:sub' at 'refs/heads/x'\n"
       )
 
       await expect(service.diff('repo', 'a.txt', cfg)).rejects.toThrow(/refs\/heads\/x/)
+    })
+
+    // The ref literal, probed on its own. `readHeadBlob` only ever asks for `HEAD:<path>`, so a fatal
+    // naming a DIFFERENT ref did not come from the read we made and cannot be evidence about HEAD.
+    // Without this the ref could be widened back to a wildcard and only the case above would notice —
+    // and that case is also satisfied by `$`, so the ref literal would have no witness of its own.
+    it('does not accept an absence fatal about some other ref', async () => {
+      const { service, config: cfg } = diffHost("fatal: path 'a.txt' does not exist in 'main'\n")
+
+      await expect(service.diff('repo', 'a.txt', cfg)).rejects.toThrow(/does not exist in 'main'/)
     })
   })
 })
