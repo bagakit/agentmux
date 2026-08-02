@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
+  CHEAT_SHEET_GROUPS,
   buildCheatSheet,
   formatChord,
   groupIdForBinding,
   type CheatSheetGroupId
 } from '../src/renderer/src/lib/shortcut-cheat-sheet.js'
-import { SHORTCUT_BINDINGS, type Chord } from '../src/renderer/src/lib/shortcut-registry.js'
+import { SHORTCUT_SCOPES, SHORTCUT_BINDINGS, type Chord, type ShortcutBinding } from '../src/renderer/src/lib/shortcut-registry.js'
 
 // The cheat-sheet is pure接线 over the registry — it declares NO binding of its own. These guards must FAIL
 // on the two ways a hand-kept second list drifts (this repo's "声明了却从不注册的事件" lesson): a binding
@@ -52,6 +53,64 @@ describe('grouping is derived from scope + gate, and is total', () => {
     expect(groupOf('workbench.select-tab.1')).toBe('workbench') // window, gated
     expect(groupOf('terminal.search')).toBe('terminal')
     expect(groupOf('editor.save')).toBe('editor')
+    expect(groupOf('launcher.submit')).toBe('launcher')
+  })
+
+  // 守的缺陷：`groupIdForBinding` 曾以 `return binding.gate === 'not-in-editable' ? 'workbench' : 'global'`
+  // 收尾——一个兜底。加 `launcher` scope 时它**静默落进 Global**：那一行会渲染在「Global」标题下，向用户
+  // 宣称这是随处可用的手势，而它其实只在起点页那一格活着。分组不是装饰，它是「这个键在哪里能按」这句话，
+  // 兜底把这句话说反了，而所有既有断言（同集合、平台形状、totality）全都照旧绿——新 scope 确实落在一个
+  // 被渲染的组里，只是落错了。
+  //
+  // 判据不写「不许有兜底」（换个拼法就绕过），而是钉住那句话本身的含义：内层 scope 的组绝不能与任何
+  // window scope 的组相同。scope 清单取自注册表自己的 SHORTCUT_SCOPES，所以新加一个 scope 立刻被质询。
+  it('no inner scope shares a group with a window binding — a group states WHERE the chord is live', () => {
+    const fixture = (scope: ShortcutBinding['scope'], gate?: 'not-in-editable'): ShortcutBinding => ({
+      id: `fixture.${scope}`,
+      scope,
+      keyClass: 'named',
+      label: 'Fixture',
+      mac: { key: 'enter', primary: true, shift: false, alt: false },
+      other: { key: 'enter', primary: true, shift: false, alt: false },
+      ...(gate ? { gate } : {})
+    })
+    // The two shapes a window binding can take — both real (un-gated: quick switch / help; gated: workbench).
+    const windowGroups = new Set([
+      groupIdForBinding(fixture('window')),
+      groupIdForBinding(fixture('window', 'not-in-editable'))
+    ])
+    const innerScopes = SHORTCUT_SCOPES.filter((scope) => scope !== 'window')
+    // Self-check: an empty list makes the loop vacuous.
+    expect(innerScopes.length, 'no inner scopes — SHORTCUT_SCOPES changed shape').toBeGreaterThan(0)
+    for (const scope of innerScopes) {
+      const group = groupIdForBinding(fixture(scope))
+      expect(
+        windowGroups.has(group),
+        `scope ${scope} groups as "${group}", the same group a window binding gets — the sheet would claim it is available everywhere`
+      ).toBe(false)
+    }
+  })
+
+  // 第二个静默漏点，与上面那条正交：分组可以给出一个**正确看起来**的 id，而渲染那张表根本没有这一项。
+  // `buildCheatSheet` 遍历的是 CHEAT_SHEET_GROUPS，所以那些行会从清单里彻底消失。tsc 看不见缺一项。
+  // 用合成 binding 而不是真 binding：这样一个 scope 在还没有任何 binding 时就被质询，不必等到有人加键。
+  it('every declared scope maps to a group the sheet actually renders', () => {
+    const rendered = new Set(CHEAT_SHEET_GROUPS.map((group) => group.id))
+    expect(rendered.size, 'CHEAT_SHEET_GROUPS is empty — nothing would render').toBeGreaterThan(0)
+    for (const scope of SHORTCUT_SCOPES) {
+      for (const gate of [undefined, 'not-in-editable'] as const) {
+        const group = groupIdForBinding({
+          id: `fixture.${scope}`,
+          scope,
+          keyClass: 'named',
+          label: 'Fixture',
+          mac: { key: 'enter', primary: true, shift: false, alt: false },
+          other: { key: 'enter', primary: true, shift: false, alt: false },
+          ...(gate ? { gate } : {})
+        })
+        expect(rendered.has(group), `scope ${scope}${gate ? ` (${gate})` : ''} groups as "${group}", which CHEAT_SHEET_GROUPS never renders`).toBe(true)
+      }
+    }
   })
 
   it('every binding lands in a group that buildCheatSheet actually renders', () => {
