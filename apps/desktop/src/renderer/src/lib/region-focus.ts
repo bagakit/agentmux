@@ -39,11 +39,59 @@ export const REGION_CLASS = 'workbench-region'
 /** 焦点态的类名。CSS 侧 `.workbench-region--active::after` 是它唯一的消费者。 */
 export const REGION_FOCUS_CLASS = `${REGION_CLASS}--active`
 
+/**
+ * Pane 组焦点态的类名。CSS 侧 `.pane-group--focused::after` 是它唯一的消费者。
+ *
+ * 基类名 `pane-group` 刻意**不**收成常量：它没有跨文件的反查消费者（Pane 组的反查走
+ * `[data-pane-group-id]` 这个 data 属性，不走类名），为一个消费者立一个常量只是熵。
+ */
+export const PANE_GROUP_FOCUS_CLASS = 'pane-group--focused'
+
+/**
+ * 焦点环该不该出现——**它表达的是「在若干候选里选中了这一个」，候选只有一个时这句话没有内容。**
+ *
+ * 用户原话：「现在表示选中的框, 除了活跃的 region 有, 整个界面也有」。现场是两层环各自无条件跟着
+ * 「谁是活动的」画，而两层都存在「候选恒为一」的常态形态：
+ *   - 不分屏时（`layout.root` 就是一片叶子）唯一的 Pane 组铺满整个工作区，且恒等于 `activeGroupId`；
+ *   - 单格 Tab 里唯一的 Region 铺满内容区，且恒等于 `activeRegionId`。
+ * 于是最常见的形态（单窗口、不分屏、一格）界面外沿是一圈绿框、往里 2px 再一圈——两圈都不携带任何
+ * 信息，而它们本该是「焦点在这一格」的唯一线索。噪声不只是不好看：一个恒亮的环让真正需要它的时候
+ * （分屏后）也读不出差别。
+ *
+ * 判据是 `> 1` 而不是 `!== 1`：数不出候选（0）时保守地不画，而不是把「数坏了」表达成「画上」。
+ *
+ * 与「这一格关不关得掉」（`canClose`）今天答案一致，但那是两个问题——一个问「还有别处可去吗」，
+ * 一个问「有差别要表达吗」。今天一致是因为规则本身一致，不是因为它们是同一个决定，所以不合并
+ * （同 `scratch-topic-layout.ts` 里 `visible` 与 `tabEligibilityForActiveTopic` 的处理）。
+ */
+export function focusRingExpressesChoice(candidateCount: number): boolean {
+  return candidateCount > 1
+}
+
 export function regionFocusExpression(
   activeRegionId: string | null | undefined,
-  regionId: string
+  regionId: string,
+  regionCount: number
 ): RegionFocusExpression {
-  // 这一个比较就是全部判定。两个返回字段都由它算出，不许任何调用方自己再比一次。
-  const focused = activeRegionId === regionId
+  // 这一个判定就是全部。两个返回字段都由它算出，不许任何调用方自己再判一次——候选数这一问也必须
+  // 落在这里而不是只挂到类名那一侧：只让类名变空而让位量照旧为真，就是 #350 那圈「无环的深边」。
+  const focused = activeRegionId === regionId && focusRingExpressesChoice(regionCount)
   return { className: focused ? REGION_FOCUS_CLASS : '', nativeViewYieldsToRing: focused }
+}
+
+/**
+ * Pane 组那一层的同一句话。
+ *
+ * 与 Region 那层是**两个决定**而不是一个：候选集不同（这一层数的是分屏树里的叶子，那一层数的是
+ * Tab 内的格），活动项也来自不同的字段（`layout.activeGroupId` vs `tab.layout.activeRegionId`）。
+ * 共用的只有「候选只有一个就别画」这条规则，所以共用的是 {@link focusRingExpressesChoice} 而不是
+ * 整个判定。这一层没有原生视图要让位（原生表面活在 Region 里），故只返回类名。
+ */
+export function paneGroupFocusClass(
+  activeGroupId: string | null | undefined,
+  groupId: string,
+  groupCount: number
+): string {
+  const focused = activeGroupId === groupId && focusRingExpressesChoice(groupCount)
+  return focused ? PANE_GROUP_FOCUS_CLASS : ''
 }
