@@ -2,17 +2,18 @@
 // pane-column-split-drop-no-op 逻辑）。
 // AgentMux 只移除了 Browser/Relay/Persistence 等当前不存在的分支。
 
+import {
+  type SplitTreeNode,
+  findSiblingLeafId,
+  setSplitRatioAtPath
+} from './split-tree'
+
 export type SplitDirection = 'left' | 'right' | 'up' | 'down'
 
-export type TabGroupLayoutNode =
-  | { type: 'leaf'; groupId: string }
-  | {
-      type: 'split'
-      direction: 'horizontal' | 'vertical'
-      first: TabGroupLayoutNode
-      second: TabGroupLayoutNode
-      ratio?: number
-    }
+// 工作区 tab-group 分屏树 = 叶子挂 groupId 的通用分屏树（见 split-tree.ts）。ratio 与 region 树统一
+// 为必填：buildSplitNode 恒给 0.5，不存在缺省。（渲染侧 WorkspaceWorkbench.tsx 仍以 `?? 0.5` 兜底，
+// 那是给可能缺 ratio 的历史持久化数据留的防线，与本类型的「新建时恒有」不矛盾。）
+export type TabGroupLayoutNode = SplitTreeNode<{ groupId: string }>
 
 export type TabGroup = {
   id: string
@@ -104,38 +105,14 @@ function replaceLeaf(
   }
 }
 
-function updateSplitRatio(
-  root: TabGroupLayoutNode,
-  path: string[],
-  ratio: number
-): TabGroupLayoutNode {
-  if (path.length === 0) return root.type === 'split' ? { ...root, ratio } : root
-  if (root.type !== 'split') return root
-  const [segment, ...rest] = path
-  if (segment === 'first') return { ...root, first: updateSplitRatio(root.first, rest, ratio) }
-  if (segment === 'second') return { ...root, second: updateSplitRatio(root.second, rest, ratio) }
-  return root
-}
-
-function findFirstLeaf(root: TabGroupLayoutNode): string {
-  return root.type === 'leaf' ? root.groupId : findFirstLeaf(root.first)
-}
-
+// 关闭一个分组后由谁接管焦点：它在分屏树里的兄弟（子树时取其第一片叶子）。逐点等价于此前手写的
+// findSiblingGroupId + findFirstLeaf，现改为复用 split-tree 的通用兄弟查找，只把「叶子的 id」这一件
+// 树代数不认识的事作为取值器传进去。
 export function findSiblingGroupId(
   root: TabGroupLayoutNode,
   targetGroupId: string
 ): string | null {
-  if (root.type === 'leaf') return null
-  if (root.first.type === 'leaf' && root.first.groupId === targetGroupId) {
-    return root.second.type === 'leaf' ? root.second.groupId : findFirstLeaf(root.second)
-  }
-  if (root.second.type === 'leaf' && root.second.groupId === targetGroupId) {
-    return root.first.type === 'leaf' ? root.first.groupId : findFirstLeaf(root.first)
-  }
-  return (
-    findSiblingGroupId(root.first, targetGroupId) ??
-    findSiblingGroupId(root.second, targetGroupId)
-  )
+  return findSiblingLeafId(root, (leaf) => leaf.groupId, targetGroupId)
 }
 
 function removeLeaf(
@@ -515,9 +492,5 @@ export function setSplitRatio(
   nodePath: string,
   ratio: number
 ): WorkspaceLayout {
-  const clamped = Math.max(0.15, Math.min(0.85, ratio))
-  return {
-    ...layout,
-    root: updateSplitRatio(layout.root, nodePath ? nodePath.split('.') : [], clamped)
-  }
+  return { ...layout, root: setSplitRatioAtPath(layout.root, nodePath, ratio) }
 }
