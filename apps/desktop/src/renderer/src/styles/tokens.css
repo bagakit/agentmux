@@ -98,6 +98,14 @@
   /* focus：输入聚焦的统一描边色与光晕，收敛散落的硬编码绿边 */
   --focus-line: #4c6a58;
   --focus-ring: 0 0 0 2px #83dca61a;
+  /* 「哪一格聚焦」那一圈框占据内容边缘多宽（Region 与 Pane 组共用）。
+     必须是 token 而不是各处写 2px：browser 那格的原生 WebContentsView 合成在全部 renderer
+     像素之上，renderer 画什么都盖不住，唯一修法是让 setBounds 按同一个宽度内缩
+     （BrowserPane → nativeBoundsClearOfFocusRing）。那是**另一个进程边界外的消费者**，
+     它读不到 CSS 规则，只能从计算样式取这个属性——于是这个数必须有一个能被 JS 读到的名字。
+     此前它是 `outline-offset: -2px` 的绝对值，取值方式与绘制方式绑死：换绘制机制（outline
+     换覆盖层）就会让取值方静默读到 0、原生视图回到满铺，而两侧测试各自全绿。 */
+  --region-focus-ring-width: 2px;
   --pane-tabbar-height: 31px;
   /* elevation：阴影梯度让表面浮起来 */
   --elev-1: 0 1px 2px #00000045;

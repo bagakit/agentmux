@@ -27,14 +27,20 @@
   position: relative;
   overflow: hidden;
   background: var(--surface-0);
-  outline: 2px solid transparent;
-  outline-offset: -2px;
 }
 /* 活动 Pane 组的一圈框。与 `.workbench-region--active`（本文件下方）**同一个理由和同一个修法**：
- * inset 阴影画在自身背景层，被子元素盖住。这里的两个 grid 子项（`.pane-tabbar` 不透明 `--surface-0`
- * 且带下边框、内容行里的 `.workbench-region` 也不透明满铺）合起来把整圈盖掉——无头 Chrome 里对位
- * 实测：有子元素那格一个像素都没有，空对照格清晰可见。故这条也必须走 outline。 */
-.pane-group--focused { outline-color: var(--green-2); }
+ * 焦点表达必须是**定位覆盖层**，不能是 inset 阴影、也不能是 outline。这里两个 grid 子项里，
+ * `.pane-tabbar` 是静态在流的（outline 画得出），而内容行的 `.workbench-region` 是
+ * `position: relative`（画不出）——用 outline 的话只有 tabbar 那一段亮，是个半圈。
+ * 详见下方 `.workbench-region--active` 的长注释。 */
+.pane-group--focused::after {
+  content: '';
+  position: absolute;
+  z-index: 37;
+  inset: 0;
+  pointer-events: none;
+  border: var(--region-focus-ring-width) solid var(--green-2);
+}
 .pane-group--drop-over { background: var(--bg); }
 .pane-tabbar {
   min-width: 0;
@@ -276,23 +282,31 @@
   position: relative;
   overflow: hidden;
   background: var(--surface-0);
-  outline: 2px solid transparent;
-  outline-offset: -2px;
 }
 /* 焦点＝一圈 2px 绿框，画在内容之上。
  *
- * **必须是 outline 或覆盖层，不能是 inset box-shadow**，这是实测结论而非风格偏好：inset 阴影属元素
- * 自身的背景层，**子元素的背景画在它之上**。每个 Region 的直接子元素都是满铺不透明的面
- * （`.agent-surface` agent.css:11、`.editor-pane` :322、`.browser-surface` browser.css:83，
- * 三者都 `height:100%` + `background: var(--surface-0)`），于是那道 inset 环在三种面上一个像素都
- * 画不出来。#339 的原始判断是「1px 太弱」，无头 Chrome 里对位实测证伪：把它加粗到 4px、换成最亮的
- * `--green-2`，**依然完全不可见**；同一张图里换成 outline 或 `::after` 覆盖层立刻可见。所以
- * 「调粗调亮」这条路是死的——改的是一个根本没在画的东西。唯一看得见的旧证据来自 launcher 那格
- * （`.new-tab-surface` 是居中卡片、不满铺），恰好掩盖了另外三种面上的彻底失效。
+ * **必须是绝对定位的覆盖层**——inset box-shadow 与 outline 都不行，这是两轮实测加规范推导的结论：
  *
- * 用 outline 而不是 `::after`：不需要给子元素排 z-index（覆盖层要压过内容就得动内容的层叠），
- * 且 outline 不参与布局、不受 `overflow: hidden` 裁剪。负 offset 让它长在框内，因此不侵占邻格。
- * 默认态声明 `transparent` 同宽，保证两态的盒模型与几何完全一致，切换时不抖。
+ * 1. inset 阴影属元素**自身的背景层**，子元素的背景画在它之上。#339 的原始判断是「1px 太弱」，
+ *    对位实测证伪：加粗到 4px、换成最亮的 `--green-2`，依然完全不可见——改的是根本没在画的东西。
+ * 2. outline 也不行（这是第一次修复 4b0b82d 走错的路）。CSS 2.1 Appendix E 的绘制顺序里，父元素的
+ *    outline 是第 7 步，而 `z-index: auto` 的**定位后代**是第 8 步——定位后代画在父层 outline 之后是
+ *    规范保证的，不是偶然。Region 内部恰好就有这种后代：`.terminal-view`（terminal.css:9
+ *    `position: relative`）带着满铺不透明的主题背景（TerminalView.tsx:920 内联），于是 terminal 与
+ *    agent 两种区的焦点框一个像素都画不出来——而这是终端优先产品里最常见的两种区。
+ *    Editor 只剩顶部 `.editor-header` 那条带（Monaco 主体也是定位不透明面），Browser 只剩 38px
+ *    工具条。唯一看得见的旧证据来自 launcher（`.new-tab-surface` 是居中卡片、不满铺），恰好掩盖了
+ *    另外三种面的彻底失效——**两次**。
+ *
+ * 所以只能用定位覆盖层，靠 z-index 真正排到内容之上。取 37：压过 Region 内所有常驻面
+ * （最高是 terminal.css:141 的 `.terminal-service-window` 36），但仍在 `position: fixed` 的临时浮层
+ * （`.terminal-link-preview` 40）之下——焦点框是环境信息，不该盖住用户刚唤出的东西。
+ * `pointer-events: none` 让它不吃指针事件：它是告示，不是遮挡。
+ *
+ * 环宽取 `--region-focus-ring-width` 而不是写死 2px：browser 那格的原生 `WebContentsView` 合成在
+ * **全部** renderer 像素之上（这一层连覆盖层也盖不住），唯一修法是让 setBounds 按同一个宽度内缩，
+ * 而那个消费者在进程边界之外、读不到 CSS 规则，只能从计算样式取这个属性。详见
+ * `lib/browser-bounds-sync.ts` 的 `nativeBoundsClearOfFocusRing`。
  *
  * 取 `--green-2`（不是 `--green-line`）：它要压过紧邻的 1px `--line` 分隔线与 resize 手柄，
  * 一条比分隔线还暗的线读作"又一条分隔线"而不是"焦点在这"。
@@ -301,12 +315,15 @@
  * 控件——它们可以用 Surface 填充与明度差表达状态。Region 的**整个内部由第三方渲染器占据**
  * （xterm/Monaco 各自画背景，browser 是原生层），`background` 改了一个像素都看不见，边缘是渲染器
  * 唯一还拥有的表面。这也与 :165 那条选中态禁令不冲突：禁的是**贴在行左缘的单边竖条**，这里是四边
- * 对称的一圈框，没有左缘偏移（surface-selection-contract 的判据正是"纯水平偏移"，对称环不命中）。
- *
- * 仍有一个洞：browser 那格的原生 `WebContentsView` 合成在**全部** renderer 像素之上
- * （BrowserPane.tsx:191 的 setBounds），它盖掉左右下三边；顶部 38px 的 `.browser-toolbar` 是
- * renderer 画的，故那一段可见。彻底修法是把 setBounds 内缩 2px，属独立一件事。 */
-.workbench-region--active { outline-color: var(--green-2); }
+ * 对称的一圈框，没有左缘偏移（surface-selection-contract 的判据正是"纯水平偏移"，对称环不命中）。 */
+.workbench-region--active::after {
+  content: '';
+  position: absolute;
+  z-index: 37;
+  inset: 0;
+  pointer-events: none;
+  border: var(--region-focus-ring-width) solid var(--green-2);
+}
 .workbench-region-resize-handle {
   position: relative;
   z-index: 8;
