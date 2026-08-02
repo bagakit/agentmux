@@ -22,8 +22,22 @@ export type RegionFocusExpression = {
   nativeViewYieldsToRing: boolean
 }
 
+/**
+ * Region 容器自己的类名。**三个消费者读同一个字符串**，所以它只能有一处：
+ *   - 组件挂到那个 `<section>` 上；
+ *   - CSS 按它写默认态与焦点态的规则；
+ *   - BrowserPane 用 `closest()` **反查**这个祖先，据此把原生视图夹进 Region。
+ *
+ * 第三个消费者是这里非要有个常量的理由。它原来手抄成 `stage.closest('.workbench-region')`：那个字符串
+ * 与元素实际带的类名分居两个文件，拼错一个字母的后果是 `closest` 恒返回 null → 整个 `if (region)`
+ * 分支变成死代码 → 原生视图回到满铺 → 焦点环的左/右/下三边被物理遮掉（#341 原样）。而两侧的类型、
+ * tsc、以及所有既有断言全都沉默：查询用的字符串与被查的类名之间没有任何编译期联系。收成一个常量后
+ * 这两侧只有一个真相，拼错它会同时打掉 CSS 规则查找与容器类名。
+ */
+export const REGION_CLASS = 'workbench-region'
+
 /** 焦点态的类名。CSS 侧 `.workbench-region--active::after` 是它唯一的消费者。 */
-export const REGION_FOCUS_CLASS = 'workbench-region--active'
+export const REGION_FOCUS_CLASS = `${REGION_CLASS}--active`
 
 export function regionFocusExpression(
   activeRegionId: string | null | undefined,

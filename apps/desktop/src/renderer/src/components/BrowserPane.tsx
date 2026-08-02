@@ -41,6 +41,7 @@ import {
   LatestBrowserBoundsSynchronizer,
   focusRingYieldOf,
   nativeBoundsClearOfFocusRing,
+  regionAncestorOf,
   rendererCssBoundsToWindowDip
 } from '../lib/browser-bounds-sync'
 import type { BrowserWorkbenchSurface } from '../lib/workbench-tabs'
@@ -227,7 +228,7 @@ export function BrowserPane({
         // 求交本身与焦点无关（让位量 0 时就是「把 stage 夹进 Region」），没有 Region 祖先
         // （独立窗口等）时按原样铺满。
         const stageBounds = { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
-        const region = stage.closest('.workbench-region')
+        const region = regionAncestorOf(stage)
         let bounds = stageBounds
         if (region) {
           const regionRect = region.getBoundingClientRect()
