@@ -154,6 +154,24 @@ export async function registerIpc(args: {
     channels.push(channel)
     ipcMain.handle(channel, (_event, ...values: TArgs) => listener(...values))
   }
+  /**
+   * 同上，但把 `event` 透传给 listener——需要校验发送者、或需要 `sender.id` 的那些频道用它。
+   *
+   * 存在的理由只有一个：注册与「登记到 `channels` 以便拆除」必须是同一次调用。此前这些频道直接写裸的
+   * `ipcMain.handle`，于是每个都要手工在前面配一句 `channels.push('同一个字面量')`——同一个名字两个
+   * 写入点。漏掉那一句的后果不是少个频道：handler 注册了但 `dispose` 时不会 `removeHandler`，下一个
+   * 窗口跑 `registerIpc` 时 Electron 直接抛 "Attempted to register a second handler for 'X'"。
+   * 而 `ipc-parity` 那道门是按 `ipcMain.handle` 的调用来数的，对「少了一句 push」完全隐身
+   * （实测：删掉 `browser:selectElement` 那句 push，ipc-parity + preload-consumption 10 条全绿，
+   * tsc 也 exit 0）。收成一次调用之后，这个漏点在构造上不存在。
+   */
+  const handleWithEvent = <TArgs extends unknown[], TResult>(
+    channel: string,
+    listener: (event: IpcMainInvokeEvent, ...values: TArgs) => Promise<TResult> | TResult
+  ): void => {
+    channels.push(channel)
+    ipcMain.handle(channel, (event, ...values: TArgs) => listener(event, ...values))
+  }
 
   handle('config:get', () => config)
   handle('config:save', async (next: AppConfig) => {
@@ -375,8 +393,7 @@ export async function registerIpc(args: {
     usageSubscriptions.get(webContentsId)?.()
     usageSubscriptions.delete(webContentsId)
   }
-  channels.push('resourceUsage:subscribe')
-  ipcMain.handle('resourceUsage:subscribe', (event) => {
+  handleWithEvent('resourceUsage:subscribe', (event) => {
     const sender = event.sender
     stopUsageSubscription(sender.id)
     const unsubscribe = args.runtime.resourceSampler.subscribe((snapshot) => {
@@ -388,25 +405,21 @@ export async function registerIpc(args: {
     sender.once('destroyed', cleanup)
     sender.once('did-start-navigation', cleanup)
   })
-  channels.push('resourceUsage:unsubscribe')
-  ipcMain.handle('resourceUsage:unsubscribe', (event) => {
+  handleWithEvent('resourceUsage:unsubscribe', (event) => {
     stopUsageSubscription(event.sender.id)
   })
   handle('ui:readClipboardText', () => clipboard.readText())
   handle('ui:writeClipboardText', (text: string) => {
     clipboard.writeText(text)
   })
-  channels.push('ui:writeClipboardImage')
-  ipcMain.handle('ui:writeClipboardImage', (event, image: BrowserPng) => {
+  handleWithEvent('ui:writeClipboardImage', (event, image: BrowserPng) => {
     if (event.sender !== args.window.webContents) throw new Error('Untrusted clipboard image sender')
     clipboard.writeImage(nativeImageFromBrowserPng(image, (png) => nativeImage.createFromBuffer(png)))
   })
-  channels.push('ui:openExternal')
-  ipcMain.handle('ui:openExternal', async (event, rawUrl: string) => {
+  handleWithEvent('ui:openExternal', async (event, rawUrl: string) => {
     await openExternalFromRenderer(event, args.window.webContents, rawUrl)
   })
-  channels.push('ui:savePastedImage')
-  ipcMain.handle('ui:savePastedImage', async (event, input: { bytes: Uint8Array; extension: string }) => {
+  handleWithEvent('ui:savePastedImage', async (event, input: { bytes: Uint8Array; extension: string }) => {
     if (event.sender !== args.window.webContents) throw new Error('Untrusted pasted image sender')
     // A CLI Agent reads images from disk, so a paste becomes a file it can open. The renderer supplies
     // bytes only — never a destination — so it cannot aim this write anywhere.
@@ -420,8 +433,7 @@ export async function registerIpc(args: {
     await writeFile(path, bytes, { mode: 0o600 })
     return path
   })
-  channels.push('ui:notifyAgentAttention')
-  ipcMain.handle('ui:notifyAgentAttention', async (event, input: {
+  handleWithEvent('ui:notifyAgentAttention', async (event, input: {
     sessionId: string
     title: string
     body: string
@@ -435,8 +447,7 @@ export async function registerIpc(args: {
   handle('providers:list', () => args.runtime.providerCatalog())
   handle('executors:detect', async (executorId: AgentExecutorId, hostId: string) => await args.runtime.detect(executorId, hostId, config))
   handle('sessions:snapshot', async () => await args.runtime.snapshot(config))
-  channels.push('sessions:launchAgent')
-  ipcMain.handle('sessions:launchAgent', async (event, input: AgentLaunchInput) => {
+  handleWithEvent('sessions:launchAgent', async (event, input: AgentLaunchInput) => {
     const result = await args.runtime.launchAgent(input, config)
     if (!event.sender.isDestroyed()) return result
     const primary = Object.assign(
@@ -455,15 +466,13 @@ export async function registerIpc(args: {
   })
   handle('sessions:launchTerminal', async (input: TerminalLaunchInput) => await args.runtime.launchTerminal(input, config))
   handle('sessions:timeline', async (session: AgentSessionControl) => await args.runtime.sessionTimeline(session))
-  channels.push('sessions:attach')
-  ipcMain.handle('sessions:attach', async (event, session: SessionControl, afterSequence: number = 0) => {
+  handleWithEvent('sessions:attach', async (event, session: SessionControl, afterSequence: number = 0) => {
     const result = await args.runtime.attachSession(event.sender.id, session, afterSequence, config)
     if (!event.sender.isDestroyed()) return result
     await args.runtime.detachSession(event.sender.id, result.attachmentId)
     throw new Error('The Desktop View disappeared before its Session Attachment was delivered.')
   })
-  channels.push('sessions:detach')
-  ipcMain.handle('sessions:detach', async (event, attachmentId: string) => {
+  handleWithEvent('sessions:detach', async (event, attachmentId: string) => {
     await args.runtime.detachSession(event.sender.id, attachmentId)
   })
   handle('sessions:write', async (session: SessionControl, data: AgentMuxRunInputData) => {
@@ -488,8 +497,7 @@ export async function registerIpc(args: {
     await args.runtime.acknowledge(session, sequence)
   })
   handle('sessions:interrupt', async (session: SessionControl) => await args.runtime.interrupt(session))
-  channels.push('sessions:resize')
-  ipcMain.handle('sessions:resize', async (event, attachmentId: string, cols: number, rows: number) => {
+  handleWithEvent('sessions:resize', async (event, attachmentId: string, cols: number, rows: number) => {
     await args.runtime.resizeSessionAttachment(event.sender.id, attachmentId, cols, rows)
   })
   handle('sessions:refresh', async (session: SessionControl) => await args.runtime.refresh(session, config))
@@ -500,54 +508,45 @@ export async function registerIpc(args: {
   handle('browser:back', async (id: string) => await browsers.back(id))
   handle('browser:forward', async (id: string) => await browsers.forward(id))
   handle('browser:reload', async (id: string) => await browsers.reload(id))
-  channels.push('browser:switchProfile')
-  ipcMain.handle('browser:switchProfile', async (event, id: string, profileId: string) => {
+  handleWithEvent('browser:switchProfile', async (event, id: string, profileId: string) => {
     if (event.sender !== args.window.webContents) throw new Error('Untrusted Browser Profile sender')
     return await browsers.switchProfile(id, profileId)
   })
-  channels.push('browser:listProfiles')
-  ipcMain.handle('browser:listProfiles', (event) => {
+  handleWithEvent('browser:listProfiles', (event) => {
     if (event.sender !== args.window.webContents) throw new Error('Untrusted Browser Profile sender')
     return browserProfiles.listProfiles()
   })
-  channels.push('browser:createProfile')
-  ipcMain.handle('browser:createProfile', async (event, label: string) => {
+  handleWithEvent('browser:createProfile', async (event, label: string) => {
     if (event.sender !== args.window.webContents) throw new Error('Untrusted Browser Profile sender')
     return await browserProfiles.createProfile(label)
   })
-  channels.push('browser:deleteProfile')
-  ipcMain.handle('browser:deleteProfile', async (event, profileId: string) => {
+  handleWithEvent('browser:deleteProfile', async (event, profileId: string) => {
     if (event.sender !== args.window.webContents) throw new Error('Untrusted Browser Profile sender')
     if (browsers.usesProfile(profileId)) {
       throw new Error('Browser Profile is still used by an open Browser')
     }
     await browserProfiles.deleteProfile(profileId)
   })
-  channels.push('browser:detectProfileImportSources')
-  ipcMain.handle('browser:detectProfileImportSources', async (event) => {
+  handleWithEvent('browser:detectProfileImportSources', async (event) => {
     if (event.sender !== args.window.webContents) throw new Error('Untrusted Browser Profile sender')
     return await browserProfiles.detectImportSources()
   })
-  channels.push('browser:importProfile')
-  ipcMain.handle('browser:importProfile', async (event, sourceToken: string, label: string) => {
+  handleWithEvent('browser:importProfile', async (event, sourceToken: string, label: string) => {
     if (event.sender !== args.window.webContents) throw new Error('Untrusted Browser Profile sender')
     return await browserProfiles.importProfile(sourceToken, label)
   })
   handle('browser:openDevTools', (id: string) => browsers.openDevTools(id))
   handle('browser:setViewport', (id: string, viewport: BrowserViewport) => browsers.setViewport(id, viewport))
   handle('browser:captureScreenshot', async (id: string) => await browsers.captureScreenshot(id))
-  channels.push('browser:selectElement')
-  ipcMain.handle('browser:selectElement', async (event, id: string) => {
+  handleWithEvent('browser:selectElement', async (event, id: string) => {
     if (event.sender !== args.window.webContents) throw new Error('Untrusted Browser selection sender')
     return await browsers.selectElement(id)
   })
-  channels.push('browser:cancelElementSelection')
-  ipcMain.handle('browser:cancelElementSelection', async (event, id: string) => {
+  handleWithEvent('browser:cancelElementSelection', async (event, id: string) => {
     if (event.sender !== args.window.webContents) throw new Error('Untrusted Browser selection sender')
     await browsers.cancelElementSelection(id)
   })
-  channels.push('browser:setAnnotationMarkers')
-  ipcMain.handle('browser:setAnnotationMarkers', async (
+  handleWithEvent('browser:setAnnotationMarkers', async (
     event,
     id: string,
     navigationId: string,
