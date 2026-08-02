@@ -30,6 +30,7 @@ import {
 import { AgentMuxError } from './errors.js'
 import { defaultAgentMuxControlSocketPath } from './runtime-paths.js'
 import { probeSocketLiveness } from './socket-liveness.js'
+import { isWorkbenchLayoutPreset } from './workbench-layout-preset.js'
 
 const MAX_MESSAGE_BYTES = 256 * 1024
 const MAX_ID_BYTES = 512
@@ -126,8 +127,9 @@ function destinationUsesSelf(value: AgentMuxOpenDestination): boolean {
 
 function arrangeMode(value: unknown): AgentMuxArrangeMode {
   const source = object(value, 'Arrange mode is invalid.', 'INVALID_CONTROL_REQUEST')
-  if (source.kind === 'preset' && ['columns-3', 'grid-4', 'grid-6', 'grid-9'].includes(String(source.preset))) {
-    return { kind: source.kind, preset: source.preset as Extract<AgentMuxArrangeMode, { kind: 'preset' }>['preset'] }
+  const preset = String(source.preset)
+  if (source.kind === 'preset' && isWorkbenchLayoutPreset(preset)) {
+    return { kind: source.kind, preset }
   }
   if (source.kind === 'balance' || source.kind === 'active-first') return { kind: source.kind }
   throw new AgentMuxError('Arrange mode is invalid.', 'INVALID_CONTROL_REQUEST')
