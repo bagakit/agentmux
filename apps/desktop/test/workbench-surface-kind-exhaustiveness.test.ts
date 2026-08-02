@@ -33,8 +33,34 @@ import { describe, expect, it } from 'vitest'
 // CLEARS an anchored one — if the checker wiring broke, this fails instead of passing empty; (3) the
 // real scan must have found the known enumerators, so a mis-rooted scan (zero functions) is a failure.
 
-const LIB_DIR = fileURLToPath(new URL('../src/renderer/src/lib', import.meta.url))
+// The scan root is the WHOLE renderer, not just `lib/`.
+//
+// It was `lib/` at first, and that was a live hole rather than a conservative start: measured at the
+// commit that introduced this guard, `components/WorkspaceWorkbench.tsx` held two unanchored
+// enumerators and `store.ts` held four inlined `kind === 'agent' || kind === 'terminal'` copies — the
+// exact hand-copied membership test `isSessionSurface` exists to replace, in the teardown and
+// ownership paths. A guard whose root excludes the files most likely to enumerate is not a narrower
+// guard; it is one that reports success about code it never opened.
+const RENDERER_DIR = fileURLToPath(new URL('../src/renderer/src', import.meta.url))
+const LIB_DIR = path.join(RENDERER_DIR, 'lib')
 const DESKTOP_DIR = fileURLToPath(new URL('..', import.meta.url))
+
+/** Every TypeScript source under the renderer, so the program the checker sees is the whole surface. */
+function rendererSources(dir: string): string[] {
+  const found: string[] = []
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name)
+    // `assets` and `styles` hold no TypeScript; skipping them keeps the program from growing for
+    // nothing. This is not an exemption list for code — every directory that CAN enumerate is walked.
+    if (entry.isDirectory()) {
+      if (entry.name === 'assets' || entry.name === 'styles') continue
+      found.push(...rendererSources(full))
+      continue
+    }
+    if (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx')) found.push(full)
+  }
+  return found
+}
 
 // The SSOT symbols an enumerating consumer must route through. `assertUnreachableSurface` is the
 // exhaustive-switch backstop; `isSessionSurface` is the SSOT predicate that replaces every inlined
@@ -184,9 +210,7 @@ function collectSurfaceKindReaders(
 }
 
 function buildDesktopProgram(): { program: ts.Program; checker: ts.TypeChecker } {
-  const roots = readdirSync(LIB_DIR)
-    .filter((entry) => entry.endsWith('.ts') || entry.endsWith('.tsx'))
-    .map((entry) => path.join(LIB_DIR, entry))
+  const roots = rendererSources(RENDERER_DIR)
   const configPath = path.join(DESKTOP_DIR, 'tsconfig.json')
   const configFile = ts.readConfigFile(configPath, ts.sys.readFile)
   const parsed = ts.parseJsonConfigFileContent(configFile.config, ts.sys, DESKTOP_DIR)
@@ -294,15 +318,15 @@ describe('who reads WorkbenchSurface.kind is exhaustiveness-checked', () => {
   })
 
   it('every consumer that branches on 2+ surface kinds routes through the exhaustiveness SSOT', () => {
-    const readers = collectSurfaceKindReaders(program, checker, surfaceType!, LIB_DIR)
+    const readers = collectSurfaceKindReaders(program, checker, surfaceType!, RENDERER_DIR)
 
     // Self-check 3: the scan must have actually found the known enumerators. A mis-rooted program, or a
     // checker that resolved nothing, yields an empty list — which would make the assertion below pass
     // for the wrong reason. Anchor to two enumerators that must exist by name.
     const enumerators = readers.filter((r) => r.literals.size >= 2)
     const enumeratorNames = new Set(enumerators.map((r) => `${r.file}::${r.fn}`))
-    expect(enumeratorNames.has('surface-memory-budget-candidates.ts::candidateForSurface')).toBe(true)
-    expect(enumeratorNames.has('workbench-persistence.ts::persistedSurfaceSurvives')).toBe(true)
+    expect(enumeratorNames.has('lib/surface-memory-budget-candidates.ts::candidateForSurface')).toBe(true)
+    expect(enumeratorNames.has('lib/workbench-persistence.ts::persistedSurfaceSurvives')).toBe(true)
     expect(enumerators.length).toBeGreaterThanOrEqual(6)
 
     // The actual guard: no enumerating consumer may lack an SSOT anchor.

@@ -158,6 +158,7 @@ import {
   type WorkbenchSurface,
   type WorkbenchTab
 } from './lib/workbench-tabs'
+import { isSessionSurface, surfaceCloseObligations } from './lib/workbench-surface-kinds'
 import {
   applyWorkbenchViewCloseTopology,
   hasAttachedSessionOutsideClosingViews,
@@ -667,7 +668,7 @@ function sessionOwnsControl(session: SessionSnapshot, control: SessionControl): 
 
 function hasAttachedSessionView(tabs: Readonly<Record<string, WorkbenchTab>>, sessionId: string): boolean {
   return Object.values(tabs).some((tab) => workbenchSurfaces(tab).some((surface) => (
-    (surface.kind === 'agent' || surface.kind === 'terminal') &&
+    isSessionSurface(surface) &&
     surface.phase === 'attached' &&
     surface.sessionId === sessionId
   )))
@@ -684,7 +685,7 @@ function projectRecoveredSession(
       let nextTab = tab
       for (const surface of workbenchSurfaces(tab)) {
         if (
-          (surface.kind === 'terminal' || surface.kind === 'agent') &&
+          isSessionSurface(surface) &&
           surface.sessionId === previousSessionId
         ) {
           nextTab = replaceWorkbenchRegion(nextTab, surface.regionId, {
@@ -2409,7 +2410,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!session || !workspace) return
     const existing = Object.values(get().tabs).flatMap((tab) => (
       workbenchSurfaces(tab).flatMap((surface) => (
-        (surface.kind === 'agent' || surface.kind === 'terminal') && surface.sessionId === id
+        isSessionSurface(surface) && surface.sessionId === id
           ? [{ tab, surface }]
           : []
       ))
@@ -2633,8 +2634,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!owner) return
     const surface = owner.surface
     // Only a Session projection can be moved; a file/launcher/browser Region has no cwd to protect
-    // and no Session identity to relocate.
-    if (surface.kind !== 'agent' && surface.kind !== 'terminal') return
+    // and no Session identity to relocate. `isSessionSurface` is that membership test's one home, so a
+    // sixth session-bearing kind is declared there rather than being silently excluded here.
+    if (!isSessionSurface(surface)) return
     // A closing source View must not be half-moved out from under its own teardown. Surface the
     // refusal on the existing error banner rather than mutating the layout.
     if (!workbenchViewCloseAllowsView(state.closingWorkbenchViews, owner.tab.id)) {
@@ -2743,9 +2745,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const surface = tab?.regions[regionId]
     if (!tab || tab.workspaceId !== workspaceId || !surface) return
     if (!removeWorkbenchRegion(tab, regionId)) return
-    if (surface.kind === 'browser') {
+    // What this surface owns outside the tree is decided once, exhaustively (workbench-surface-kinds).
+    // Asking `kind === 'browser'` / `kind === 'file'` here instead would let a sixth resource-bearing
+    // kind answer "nothing to release" and leak with no compile error.
+    const obligations = surfaceCloseObligations(surface)
+    if (obligations.browserViewId !== null) {
       try {
-        await api.browser.close(surface.browserId)
+        await api.browser.close(obligations.browserViewId)
       } catch (error) {
         get().reportError(error)
         return
@@ -2758,12 +2764,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const nextTab = removeWorkbenchRegion(liveTab, regionId)
       if (!nextTab) return state
       const tabs = { ...state.tabs, [tabId]: nextTab }
-      return surface.kind === 'file'
+      return obligations.releasesDocument
         ? reconcileWorkbenchFileProjection(state, { tabs, layouts: state.layouts })
         : { tabs }
     })
     pruneEditorRegionState(get().tabs)
-    if (surface.kind === 'file') await disposeClosedFileOwners(previousTabs, get().tabs)
+    if (obligations.releasesDocument) await disposeClosedFileOwners(previousTabs, get().tabs)
   },
   requestCloseTab(workspaceId, tabGroupId, tabId) {
     // 只投意图，不在这里关：真正的关闭要经组件的 requestTabsClose（未保存/在跑 Agent 的确认对话框只活在
