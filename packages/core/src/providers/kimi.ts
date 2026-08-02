@@ -13,15 +13,9 @@ type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
  * 的合法复用（见 agent-hook-event.ts 里"键允许在 Provider 之间重复"那段），不是偷懒：Kimi 的
  * `PreToolUse` 在结构上确实就是一次工具调用的事前。
  *
- * 这份清单是**给手工接线的用户看的**（见下面 hookStrategy 为何是 unmanaged），也是 rules 的取值域。
  * Kimi 另有 `SessionEnd`/`PreCompact`/`PostCompact`/`Notification` 四个（config.py:5-19 共 13 个），
- * Core 今天没有任何判断需要它们，故不列。
+ * Core 今天没有任何判断需要它们，故 `rules` 不列。
  */
-export const KIMI_HOOK_EVENTS = [
-  'SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure',
-  'SubagentStart', 'SubagentStop', 'Stop', 'StopFailure'
-] as const
-
 export const KIMI_HOOKS: AgentNativeHookSpecification = {
   // 事件名随负载到达：Kimi 每条事件都写 `hook_event_name`（本机第一方源码实测：`hooks/events.py`）。
   // 所以它虽不带 `--event`、也不注入 env，子进程仍解析得出事件名。
