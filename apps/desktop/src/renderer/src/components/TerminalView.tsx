@@ -25,7 +25,7 @@ import { detectTerminalPathLinks } from '../lib/terminal-path-link'
 import { TERMINAL_HTTP_URL_REGEX } from '../lib/terminal-http-link'
 import { terminalOptions, terminalTheme, activateTerminalUnicodeWidth, UNICODE_WIDTH_VERSION } from '../lib/terminal-theme'
 import {
-  shiftEnterInput,
+  terminalKeyEventHandler,
   terminalSelectionForCopy
 } from '../lib/terminal-shortcuts'
 import { matchShortcut } from '../lib/shortcut-registry'
@@ -636,40 +636,33 @@ export function TerminalView({
         void copyTextToClipboard(text, reportError)
       }
     })
-    terminal.attachCustomKeyEventHandler((event) => {
-      // 终端作用域的键判定统一从注册表匹配（scope 'terminal'），本层只做「命中之后送什么字节/做什么」。
-      const shortcutId = matchShortcut(event, isMac, { scope: 'terminal' })
-      if (shortcutId === 'terminal.newline') {
-        // xterm 对 Enter 与 Shift+Enter 送同一个裸 \r（终端线路上没有表达修饰键的位置），
-        // 下游 TUI 因此只能把 Shift+Enter 读成提交，用户写不了多行。这里显式送出不同的字节。
-        if (event.type === 'keydown') {
-          sendInput(shiftEnterInput(isKittyKeyboardActive(kittyKeyboard)))
-        }
-        return false
-      }
-      if (shortcutId === 'terminal.search') {
-        if (event.type === 'keydown') setSearchOpen(true)
-        return false
-      }
-      if (shortcutId === 'terminal.copy' && terminal.hasSelection()) {
-        if (event.type === 'keydown') {
-          const text = terminal.getSelection()
-          if (text) rememberedSelectionRef.current = text
+    // 终端作用域的键判定统一从注册表匹配（scope 'terminal'），命中之后做什么由
+    // terminalShortcutHandlers 提供——那一层是纯的，能被直接调用并断言后果。此前这些分支内联在
+    // 这里，运行期够不着：把任一分支的体掏空，整族测试照旧全绿而那个键对用户彻底失效。
+    // 终端键的判定与吞键全在 terminalKeyEventHandler 里，这里刻意只剩一句转发：把逻辑留在组件
+    // 内时它运行期够不着（renderToStaticMarkup 不跑 effect，更不会触发 xterm 的键回调），于是
+    // 「分支体被掏空」「回调开头插一句早退」这两种变异都能在全绿下存活。壳里没有语句可插，
+    // 那两族变异就都落在 terminal-shortcuts.test.ts 的射程里。
+    //
+    // Paste 刻意没有条目：本回调返回 false 不会 preventDefault（xterm 的 _keyDown 在 cancel()
+    // 之前就返回），所以原生 Edit→Paste 路径照旧触发；在这里也处理会让同一份文本贴两次。
+    terminal.attachCustomKeyEventHandler(
+      terminalKeyEventHandler({
+        matchTerminalShortcut: (event) => matchShortcut(event, isMac, { scope: 'terminal' }),
+        hasSelection: () => terminal.hasSelection(),
+        sendInput,
+        kittyKeyboardActive: () => isKittyKeyboardActive(kittyKeyboard),
+        setSearchOpen,
+        readSelection: () => terminal.getSelection(),
+        rememberSelection: (text) => {
+          rememberedSelectionRef.current = text
+        },
+        writeClipboard: (text) => {
           void copyTextToClipboard(text, reportError)
-        }
-        return false
-      }
-      // Paste is intentionally NOT claimed here. Returning false from this handler does not
-      // preventDefault (xterm's _keyDown returns before cancel()), so the native paste path
-      // (Electron's Edit→Paste role → xterm's textarea paste listener) still fires. Handling
-      // Cmd/Ctrl+V here as well applied the same clipboard text twice. The native path is the
-      // single owner of paste; right-click paste is served by pasteClipboard().
-      if (shortcutId === 'terminal.clear') {
-        if (event.type === 'keydown') terminal.clear()
-        return false
-      }
-      return true
-    })
+        },
+        clear: () => terminal.clear()
+      })
+    )
 
     /**
      * 揭示的兜底时限（AGENTS.md 原则 11）。
