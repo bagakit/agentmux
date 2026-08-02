@@ -52,7 +52,7 @@ import type { OpenDestination, OpenHttpLinkOrigin } from './lib/open-destination
 import { createNoteWithAvailableName } from './lib/note-names'
 import { rendererResourceOwnerCounts } from './lib/resource-owner-counts'
 import { terminalResourceOwnerCounts } from './lib/terminal-resource-owners'
-import { retainedLaneNotices } from './lib/worktree-removal-request'
+import { retainedLaneReport, retentionReport } from './lib/worktree-removal-request'
 import {
   arrangeWorkbenchControlTab,
   inspectWorkbenchControlRegion,
@@ -1894,12 +1894,27 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         // A partial failure is neither swallowed nor promoted to total failure: the lanes that did
         // launch stay launched, and the ones that did not are named through the existing error surface.
         const failed = result.lanes.filter((lane) => lane.status !== 'launched')
-        if (failed.length > 0) {
-          get().reportError(new Error(
-            `${failed.length} of ${result.lanes.length} lanes did not start: ${failed
-              .map((lane) => `${lane.branch} (${lane.error})`)
-              .join('; ')}`
-          ))
+        // 一个建了 worktree 但没启动成功的 lane 有第二件事要说：**那个目录现在怎么样了**。此前这条真相
+        // 走到 renderer 就断了——lane 上带着它，而没有任何消费者读，于是清理失败的 lane 与清理干净的
+        // lane 在屏幕上完全一样。措辞与顺序共用 `retentionReport`，不在这里另写一套。
+        //
+        // 两句话拼进**同一次** reportError，而不是各报一次：错误面是一个槽（`reportError` 就是
+        // `set({ error })`），第二次调用会把第一次擦掉。分两次报的后果是保留告知盖掉「哪几条没起来、
+        // 为什么」——用户失去的正是他最需要的那半边。
+        const retention = retentionReport(
+          result.lanes.flatMap((lane) =>
+            lane.status === 'launch-failed' && lane.cleanup
+              ? [{ retention: lane.cleanup.retention, id: lane.branch, reason: lane.cleanup.reason }]
+              : []
+          )
+        )
+        if (failed.length > 0 || retention) {
+          const launchFailures = failed.length > 0
+            ? `${failed.length} of ${result.lanes.length} lanes did not start: ${failed
+                .map((lane) => `${lane.branch} (${lane.error})`)
+                .join('; ')}`
+            : null
+          get().reportError(new Error([launchFailures, retention].filter(Boolean).join(' — ')))
         }
       }
       return result
@@ -1964,12 +1979,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // 落到胜者身上。落到胜者而不是通用兜底，是因为「留下这一个」这句话本身就说明了该看哪儿。
       set((state) => adoptedConfig(state.activeWorkspaceId, next, input.keepWorkspaceId))
       // A lane refused because it still holds uncommitted work is reported, never silently dropped —
-      // losing a bake-off is not a reason to discard someone's work. 分档措辞在
-      // `retainedLaneNotices` 里，因为「哪一档说哪句话」是判断：这里曾经把三档折成一句硬编码的
-      // 「because they still hold changes」，对 git 失败与「已删但记录没撤下」两档都是假话。
-      for (const notice of retainedLaneNotices(result.outcomes)) {
-        get().reportError(new Error(notice.message))
-      }
+      // losing a bake-off is not a reason to discard someone's work. 分档措辞在 `retentionReport`
+      // 里，因为「哪一档说哪句话」是判断：这里曾经把三档折成一句硬编码的「because they still hold
+      // changes」，对 git 失败与「已删但记录没撤下」两档都是假话。
+      //
+      // 折成一句而不是逐条 reportError：错误面是一个槽，逐条报的话三档同时出现时只剩最后一档，而
+      // 被擦掉的第一档（脏树）恰好是唯一有真实下一步可做的那一档。
+      const retention = retainedLaneReport(result.outcomes)
+      if (retention) get().reportError(new Error(retention))
       return result
     } catch (error) {
       get().reportError(error)

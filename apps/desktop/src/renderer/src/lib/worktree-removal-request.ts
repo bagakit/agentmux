@@ -194,29 +194,86 @@ export type RetainedLaneNotice = {
 }
 
 /**
- * 把批量收尾的结果整理成分档告知。
+ * 分档告知的顺序，只有这一份。
  *
- * 顺序固定为「脏树 → git 失败 → 记录未撤下」，即由「用户可以处理」到「需要有人来看一眼」：最后那档是
- * 唯一一个磁盘与记录已经不一致的状态，放在末尾是为了它最后被读到、也最靠近用户的下一步。
- * 顺序写死在这里而不是跟着 outcomes 的到达次序，是因为「先说哪句」也是判断。
+ * 「脏树 → git 失败 → 记录未撤下」，即由「用户可以处理」到「需要有人来看一眼」：最后那档是唯一一个
+ * 磁盘与记录已经不一致的状态，放在末尾是为了它最后被读到、也最靠近用户的下一步。
+ *
+ * 顺序写死而不是跟着 outcomes 的到达次序，是因为「先说哪句」也是判断。写在模块级而不是函数里，是因为
+ * 现在有两个消费者（批量收尾、扇出的启动失败清理），而两处各排一次就会有两种读法。
  */
-export function retainedLaneNotices(
-  outcomes: readonly { status: string; workspaceId: string; retention?: WorktreeRetention; reason?: string }[]
+const RETENTION_ORDER: readonly WorktreeRetention[] = [
+  'uncommitted-changes',
+  'git-failed',
+  'record-not-withdrawn'
+]
+
+/**
+ * 按档分组，给每档配它自己那句话。
+ *
+ * 入参只要「这一条属于哪一档、叫什么、git 说了什么」——批量收尾按 workspaceId 认 lane，扇出按分支名认，
+ * 而措辞和顺序对两者完全一样。让两处各写一遍分组，就是三档措辞当初被折成一句硬编码的那个形状，只是
+ * 换了个地方复发。
+ */
+export function retentionNotices(
+  lanes: readonly { retention: WorktreeRetention; id: string; reason: string }[]
 ): RetainedLaneNotice[] {
-  const order: WorktreeRetention[] = ['uncommitted-changes', 'git-failed', 'record-not-withdrawn']
   const notices: RetainedLaneNotice[] = []
-  for (const retention of order) {
-    const lanes = outcomes.filter(
-      (outcome) => outcome.status === 'retained' && outcome.retention === retention
-    )
-    if (lanes.length === 0) continue
+  for (const retention of RETENTION_ORDER) {
+    const matching = lanes.filter((lane) => lane.retention === retention)
+    if (matching.length === 0) continue
     // git 的原话原样带上。压平成我们自己的说法会丢掉用户真正需要的那部分（是哪个文件、什么权限）。
-    const reasons = lanes.map((lane) => lane.reason ?? '').filter(Boolean).join('; ')
+    const reasons = matching.map((lane) => lane.reason).filter(Boolean).join('; ')
     notices.push({
       retention,
-      workspaceIds: lanes.map((lane) => lane.workspaceId),
-      message: `${RETENTION_HEADLINE[retention](lanes.length)}: ${reasons}`
+      workspaceIds: matching.map((lane) => lane.id),
+      message: `${RETENTION_HEADLINE[retention](matching.length)}: ${reasons}`
     })
   }
   return notices
+}
+
+/** 批量收尾的结果整理成分档告知。认 lane 的方式是 workspaceId，其余全部走 {@link retentionNotices}。 */
+export function retainedLaneNotices(
+  outcomes: readonly { status: string; workspaceId: string; retention?: WorktreeRetention; reason?: string }[]
+): RetainedLaneNotice[] {
+  return retentionNotices(
+    outcomes.flatMap((outcome) =>
+      outcome.status === 'retained' && outcome.retention
+        ? [{ retention: outcome.retention, id: outcome.workspaceId, reason: outcome.reason ?? '' }]
+        : []
+    )
+  )
+}
+
+/**
+ * 分档告知折成能上屏的**一句**，没有可说的就是 `null`。
+ *
+ * 为什么必须折成一句：store 的错误面是一个槽（`reportError` 就是 `set({ error })`），后一次调用
+ * 直接覆盖前一次。于是「循环里逐条 reportError」在屏幕上只剩最后一条——三档同时出现时前两档静默消失，
+ * 而按 {@link RETENTION_ORDER} 排在第一位的脏树恰好是唯一有真实下一步可做的那一档，被擦掉的总是它。
+ * 在扇出那边更糟：保留告知会盖掉「哪几条 lane 没起来、为什么」那句主信息。
+ *
+ * 分组数组作为**数据**是对的（每档要用户做的事不同），能上屏的只有一句，所以折叠——连分隔符——只在
+ * 这里决定一次。两个调用点各写一遍 join 就会有两种读法。
+ *
+ * `null` 而不是空串：空串在 `reportError` 那边会变成一条什么都没写的错误弹出来。
+ */
+function collapse(notices: readonly RetainedLaneNotice[]): string | null {
+  if (notices.length === 0) return null
+  return notices.map((notice) => notice.message).join(' — ')
+}
+
+/** 扇出清理的分档告知，折成一句。认 lane 的方式是分支名。 */
+export function retentionReport(
+  lanes: readonly { retention: WorktreeRetention; id: string; reason: string }[]
+): string | null {
+  return collapse(retentionNotices(lanes))
+}
+
+/** 批量收尾的分档告知，折成一句。认 lane 的方式是 workspaceId。 */
+export function retainedLaneReport(
+  outcomes: readonly { status: string; workspaceId: string; retention?: WorktreeRetention; reason?: string }[]
+): string | null {
+  return collapse(retainedLaneNotices(outcomes))
 }

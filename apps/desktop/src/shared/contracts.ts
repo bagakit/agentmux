@@ -239,10 +239,25 @@ export type RunFanOutInput = {
  * What became of one lane. Mirrors the orchestrator's own three states exactly — a partial failure is
  * neither reported as total failure nor dressed up as success, and a lane that built a worktree but
  * could not launch says whether that directory is still on disk, or it becomes an orphan nobody claims.
+ *
+ * `cleanup` is that answer, and it uses the same vocabulary as every other teardown ({@link
+ * WorktreeRetention}) rather than a second one. It was a `worktreeRetained: boolean` until the three
+ * retention states were separated, and the boolean got one of them backwards: a removal that deleted the
+ * directory and then failed to withdraw the record came back as `retained: true`, i.e. "the directory is
+ * still there" about a directory git had just deleted. A boolean cannot carry that distinction, so it is
+ * not a boolean.
+ *
+ * `null` means the lane's worktree was handed back — nothing is left for anyone to decide about.
  */
 export type FanOutLaneOutcome =
   | { status: 'launched'; branch: string; path: string; sessionId: string }
-  | { status: 'launch-failed'; branch: string; path: string; error: string; worktreeRetained: boolean }
+  | {
+      status: 'launch-failed'
+      branch: string
+      path: string
+      error: string
+      cleanup: { retention: WorktreeRetention; reason: string } | null
+    }
   | { status: 'worktree-failed'; branch: string; path: string; error: string }
 
 /**
