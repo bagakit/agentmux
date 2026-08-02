@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import ts from 'typescript'
 import type { AgentDisplayState } from '@agentmux/core'
 import type { SessionSnapshot } from '../src/shared/contracts.js'
-import { attentionSortRank } from '../src/renderer/src/lib/attention-event.js'
+import { ATTENTION_SORT_CLASSES, attentionSortRank } from '../src/renderer/src/lib/attention-event.js'
 import { buildAgentRoster } from '../src/renderer/src/lib/agent-roster.js'
 import { rankQuickSwitchItems, type QuickSwitchItem } from '../src/renderer/src/lib/quick-switch.js'
 
@@ -159,7 +159,13 @@ describe('the roster and the quick switcher share one attention ordering', () =>
 // helper that returns ordinals from another module would all pass. The two spellings covered are the two
 // that actually occurred (an object literal, and a ternary ladder over class names), and each is pinned
 // on synthetic input below so a change to the extractor cannot quietly stop matching them.
-const SORT_CLASSES: readonly string[] = ['needs-you', 'error', 'working', 'done', 'idle']
+// 排序类的名字取自 SSOT，不再手抄。
+//
+// 手抄那一行不只是「又一份副本」，它会让这道守卫在被正确扩充时说假话：新类进了 ATTENTION_SORT_RANK、
+// 没进这份清单，表就不再满足「所有键都是排序类」，于是连 SSOT 自己都不被认成序表——下面的自检
+// （holders 必须含 SSOT）先红，报的是「共享的表整个不见了」，而表就在那儿一行没动。实测过这一幕：
+// 给联合加一个类，得到的正是 `expected [] to include 'lib/attention-event.ts'`。
+const SORT_CLASSES: readonly string[] = ATTENTION_SORT_CLASSES
 
 // The one file allowed to hold the mapping.
 const ORDERING_SSOT = 'lib/attention-event.ts'
