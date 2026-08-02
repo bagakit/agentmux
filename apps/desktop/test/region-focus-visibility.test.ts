@@ -183,53 +183,154 @@ describe('Region 焦点必须看得出来（#339）', () => {
     ).not.toEqual([])
   })
 
-  it('焦点表达画在内容之上，不是被子内容遮住的 inset 阴影', () => {
-    // 上面三条全绿也可能一个像素都画不出来——这是实测坐实的真缺陷，不是假想。
+  it('焦点表达画在定位不透明内容之上——不是 inset 阴影，也不是 outline', () => {
+    // 上面三条全绿也可能一个像素都画不出来。这条已经**两次**抓到真缺陷，判据也因此换过两次：
     //
-    // `inset box-shadow` 属元素**自身的背景层**，子元素的背景画在它之上。每个 Region 的直接子元素
-    // 都是满铺不透明的面（`.agent-surface`、`.editor-pane`、`.browser-surface` 三者都
-    // `height: 100%` + `background: var(--surface-0)`），于是那道 inset 环在三种面上完全不可见。
-    // 无头 Chrome 里对位实测：加粗到 4px、换成最亮的 `--green-2`，**依然不可见**；同图换 outline
-    // 或 `::after` 覆盖层立刻可见。所以「1px 太弱、调粗就行」是错的诊断——被调的东西根本没在画。
+    // 第一次：`inset box-shadow` 属元素**自身的背景层**，子元素背景画在它之上。当时的判据是
+    // 「必须是 outline 族或 ::after 覆盖层」——它挡住了 inset 阴影，但为下一个坏修复背了书。
     //
-    // 这条与上面那条差别断言的关系，正是 #111 的下一层：那条问「有没有差别」，这条问
-    // 「那个差别在有内容的格子里画得出来吗」。两者都在场才守得住"用户看得见焦点"这件事。
+    // 第二次（本条现在的形状）：**outline 也不行**。CSS 2.1 Appendix E 的绘制顺序里父元素 outline 是
+    // 第 7 步，`z-index: auto` 的**定位后代**是第 8 步——定位后代画在父层 outline 之后是规范保证的。
+    // Region 内恰好有这种后代：`.terminal-view`（terminal.css:9 `position: relative`）带满铺不透明
+    // 背景，于是 terminal 与 agent 两种区（终端优先产品里最常见的两种）焦点框完全不可见，而当时
+    // 5/5 全绿。**判据的对象不是「属性属于哪一族」，而是「这条声明能不能排到定位内容之上」**——
+    // 只有真正参与层叠的定位覆盖层能做到，故只认那一种，且必须逐项检查它排上去的三个条件。
     //
-    // **两个类名都要判**：这个毛病同时存在于 Region 与 Pane 组两级（`.pane-group--focused`
-    // 的两个 grid 子项也不透明满铺，同样实测不可见）。只钉一处会让另一处静默留在旧形状——
+    // 同族的绕过形状（都匹配"选择器带 ::after"这种旧判据、都实测不可见）：无 position 的伪元素是
+    // 零尺寸在流块；有 position 无 z-index 的与内容同序、被后面的定位兄弟盖住。所以三项缺一不可。
+    //
+    // **两个类名都要判**：这个毛病同时存在于 Region 与 Pane 组两级（`.pane-group` 的内容行就是
+    // `.workbench-region`，定位不透明，同样实测不可见）。只钉一处会让另一处静默留在旧形状——
     // 记忆 duplicated-rule-defeats-the-fix 的形状：同一件事有两个写入点时，改一处的人以为改完了。
+    const MIN_OVERLAY_Z = 37 // Region 内最高的常驻面是 terminal.css:141 的 36
     for (const className of ['workbench-region--active', 'pane-group--focused']) {
-      const active = rulesForClass(className)
-      expect(active.length, `读不到 .${className} 的规则——类名变了或样式入口漏了`).toBeGreaterThan(0)
-      const declared = new Set(active.flatMap((rule) => [...declarations(rule).keys()]))
-
-      // 能画在子内容之上的属性族。outline 不参与布局也不受 overflow 裁剪；覆盖层走 `::after`，
-      // 那种拼法的选择器带伪元素，故单独取。
-      const paintsAboveContent = [...declared].filter(
-        (property) => property === 'outline' || property.startsWith('outline-')
-      )
-      const overlayRules = rules().filter((rule) =>
+      const overlays = rules().filter((rule) =>
         rule.selector
           .split(',')
           .some((part) => new RegExp(`\\.${className}\\b[^,]*::(?:after|before)`).test(part.trim()))
       )
-
       expect(
-        [...paintsAboveContent, ...overlayRules.map((rule) => rule.selector)],
-        `.${className} 的焦点只由 inset 阴影一类画在自身背景层的属性表达——它的子内容满铺` +
-          '不透明，这一圈一个像素都画不出来（#339 的真因）。改用 outline（负 offset）或 ::after 覆盖层。'
-      ).not.toEqual([])
+        overlays.length,
+        `.${className} 的焦点态没有伪元素覆盖层规则。inset 阴影画在自身背景层、outline 画在定位后代` +
+          '之下（规范绘制顺序 7 vs 8），Region 里的 `.terminal-view` 正是定位不透明后代——' +
+          '那两种画法在 terminal/agent 区一个像素都出不来（#339 两次的真因）。'
+      ).toBeGreaterThan(0)
+
+      // 覆盖层要真的排到内容之上，三个条件缺一不可，逐项报告缺的是哪一个。
+      const merged = new Map<string, string>()
+      for (const overlay of overlays) {
+        for (const [property, value] of declarations(overlay)) merged.set(property, value)
+      }
+      expect(
+        merged.get('position'),
+        `.${className} 的覆盖层没有 position: absolute——无定位的伪元素是零尺寸在流块，被定位内容盖住`
+      ).toBe('absolute')
+      const z = Number.parseInt(merged.get('z-index') ?? '', 10)
+      expect(
+        z,
+        `.${className} 的覆盖层 z-index 是 ${merged.get('z-index') ?? '（未声明）'}，压不过 Region 里` +
+          `最高的常驻面（terminal-service-window 的 36）——同序或更低会被后面的定位兄弟盖住`
+      ).toBeGreaterThanOrEqual(MIN_OVERLAY_Z)
+      // 画得出来还不够：它不能吃掉指针事件，否则终端整块点不动（焦点框是告示不是遮挡）。
+      expect(
+        merged.get('pointer-events'),
+        `.${className} 的覆盖层没有 pointer-events: none——它铺满整格，会吃掉终端/编辑器的全部点击`
+      ).toBe('none')
     }
 
-    // 自检：判据认得出该拒的那种拼法，否则"没找到违规"与"认不出违规"在结果上同形。
-    // 事故当时的原样声明就是下面这一条，它必须不被算作"画在内容之上"。
-    const historical = declarations({
-      selector: '.workbench-region--active',
-      body: 'box-shadow: inset 0 0 0 1px var(--green-line);'
+    // 自检：判据认得出该拒的每一种拼法，否则"没找到违规"与"认不出违规"在结果上同形。
+    // 三种都曾经是（或差一点成为）本仓的真实形状：前两种是 #339 两轮修复各自的原样声明，
+    // 第三种是审计实测能绕过旧判据且 5/5 全绿的那个。
+    const rejected = [
+      { why: 'inset 阴影（第一次事故的原样）', body: 'box-shadow: inset 0 0 0 1px var(--green-line);' },
+      { why: 'outline（第二次事故的原样）', body: 'outline-color: var(--green-2);' },
+      { why: '无 position 的伪元素（审计实测可绕过旧判据）', body: "content: ''; border: 2px solid var(--green-2);" }
+    ]
+    for (const { why, body } of rejected) {
+      const probed = declarations({ selector: '.probe', body })
+      expect(
+        probed.get('position') === 'absolute' &&
+          Number.parseInt(probed.get('z-index') ?? '', 10) >= MIN_OVERLAY_Z &&
+          probed.get('pointer-events') === 'none',
+        `判据把「${why}」错认成能画在定位内容之上——那正是它要挡的形状`
+      ).toBe(false)
+    }
+    // 反向自检：正确的那种拼法必须被接受，否则这一族退化成"什么都拒"的恒红/死判据。
+    const accepted = declarations({
+      selector: '.probe::after',
+      body: "content: ''; position: absolute; z-index: 37; inset: 0; pointer-events: none; border: 2px solid var(--green-2);"
     })
     expect(
-      [...historical.keys()].filter((p) => p === 'outline' || p.startsWith('outline-')),
-      '判据把 inset 阴影错认成画在内容之上的属性——那正是它要挡的形状'
-    ).toEqual([])
+      accepted.get('position') === 'absolute' &&
+        Number.parseInt(accepted.get('z-index') ?? '', 10) >= MIN_OVERLAY_Z &&
+        accepted.get('pointer-events') === 'none',
+      '判据认不出正确的定位覆盖层写法——那它挡的不是坏形状而是所有形状'
+    ).toBe(true)
+  })
+
+  /**
+   * 环宽是**一处**：CSS 画它，而进程外的原生视图要按同一个宽度让位。
+   *
+   * browser 那格的内容是窗口级的原生 `WebContentsView`，合成在**全部** renderer 像素之上——连上面
+   * 那个覆盖层也盖不住它。唯一修法是让 `setBounds` 内缩同样的宽度（`nativeBoundsClearOfFocusRing`）。
+   * 那个消费者在进程边界之外、读不到 CSS 规则，只能从计算样式取一个自定义属性；于是这个数必须有名字。
+   *
+   * 这条守的是那个名字两侧都在场：tokens.css 声明它、CSS 用它画、TS 那侧按同一个名字取。任一侧改名
+   * 或改成手抄字面量，原生视图就会静默回到满铺（读不出数时按设计返回 0），而两侧行为测试各自全绿。
+   */
+  it('焦点框宽度只有一处：CSS 与原生视图取值方按同一个自定义属性', () => {
+    const PROPERTY = '--region-focus-ring-width'
+    // tokens.css 里声明了它（allStyles 已合并全部样式表）。
+    expect(
+      new RegExp(`${PROPERTY}\\s*:\\s*[0-9]`).test(styles),
+      `${PROPERTY} 没有在样式里声明取值——CSS 侧的环宽会退化成 0（记忆 injected-css-property-declare-default）`
+    ).toBe(true)
+
+    // 两个焦点态覆盖层都必须**用**它画，而不是各自写死 2px。
+    for (const className of ['workbench-region--active', 'pane-group--focused']) {
+      const overlays = rules().filter((rule) =>
+        rule.selector
+          .split(',')
+          .some((part) => new RegExp(`\\.${className}\\b[^,]*::(?:after|before)`).test(part.trim()))
+      )
+      const widths = overlays.flatMap((rule) =>
+        [...declarations(rule)]
+          .filter(([property]) => property === 'border' || property.startsWith('border-'))
+          .map(([, value]) => value)
+      )
+      expect(
+        widths.length,
+        `.${className} 的覆盖层没有任何 border 声明——那圈框没有可见的边`
+      ).toBeGreaterThan(0)
+      for (const value of widths) {
+        expect(
+          value.includes(`var(${PROPERTY}`),
+          `.${className} 的覆盖层边宽写着 \`${value}\`，不是从 ${PROPERTY} 取的——` +
+            'browser 那格的原生视图按那个属性让位，两边分头写就会静默错开'
+        ).toBe(true)
+      }
+    }
+
+    // 原生视图那一侧按同一个名字取值。判 import 关系不够（导入了不用照样过），所以判它把这个属性名
+    // 交给 getPropertyValue——判据落在「取的是哪一个属性」上，这正是上一轮 outline-offset 走错的位置。
+    const boundsSource = readFileSync(
+      new URL('../src/renderer/src/lib/browser-bounds-sync.ts', import.meta.url),
+      'utf8'
+    )
+    const reads = [...boundsSource.matchAll(/getPropertyValue\(\s*([A-Za-z_$][\w$.]*|'[^']*')/g)]
+      .map((match) => match[1]!)
+    expect(
+      reads.length,
+      'getPropertyValue 取值位抽取器一个都没找到——原生视图那侧没有从计算样式读环宽，下面那条是死代码'
+    ).toBe(1)
+    // 允许经由常量转发（本仓就是 FOCUS_RING_WIDTH_PROPERTY），但那个常量必须绑定到同一个属性名。
+    const read = reads[0]!
+    const bound = read.startsWith("'")
+      ? read.slice(1, -1)
+      : new RegExp(`${read}\\s*=\\s*'([^']*)'`).exec(boundsSource)?.[1]
+    expect(
+      bound,
+      `原生视图那侧读的是 \`${read}\`，解析不到它绑定的属性名——取值方与 CSS 侧无法对齐`
+    ).toBe(PROPERTY)
   })
 })
