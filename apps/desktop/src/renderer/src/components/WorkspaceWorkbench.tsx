@@ -611,6 +611,7 @@ function WorkbenchRegionLeaf({
   const splitRegion = useAppStore((state) => state.splitRegion)
   const arrangeTabRegions = useAppStore((state) => state.arrangeTabRegions)
   const swapRegions = useAppStore((state) => state.swapRegions)
+  const promoteRegionToTab = useAppStore((state) => state.promoteRegionToTab)
   const sessions = useAppStore((state) => state.sessions)
   const dirtyDocuments = useAppStore((state) => state.dirtyDocuments)
   const closeRegionRequest = useAppStore((state) => state.closeRegionRequest)
@@ -681,6 +682,14 @@ function WorkbenchRegionLeaf({
         }),
         swap: (a, b) => swapRegions(tab.workspaceId, tab.id, a, b)
       })}
+      // 「单独变成一个 tab」（#487）：把右键点中的这一格从本 Tab 摘出、单独成为一张新 Tab。只在多格时
+      // 提供——只剩一格的 Tab 促升无意义（它已经就是一张 Tab），那时不传，菜单里这一项整段缺席。回调
+      // 已把「哪一格」闭包进去，与分屏 / 换位同样落在右键点中的这一格上，没有推断。
+      promote={
+        regionCount > 1
+          ? () => promoteRegionToTab(tab.workspaceId, tab.id, node.regionId)
+          : undefined
+      }
     >
     <section
       className={`${REGION_CLASS} ${focus.className}`}

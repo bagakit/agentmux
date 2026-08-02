@@ -177,6 +177,7 @@ import {
   type FileExplorerViewState
 } from './lib/file-explorer-selection'
 import { moveSessionViewToWorkspace as reduceMoveSessionView } from './lib/move-session-view'
+import { promoteRegionToTab as reducePromoteRegionToTab } from './lib/promote-region-to-tab'
 import {
   evaluateCreatePrIntent,
   type CreatePrToken,
@@ -396,6 +397,10 @@ type AppState = {
   // 把一个 Tab 里两格的位置互换（#471）：右键某一格选「和另一格换位」。纯布局代数
   // （swapWorkbenchRegions），只换 id 在骨架上的位置，内容与所有 ratio 一字不动。
   swapRegions(workspaceId: string, tabId: string, regionIdA: string, regionIdB: string): void
+  // 把一个 Tab 里某一格单独变成它自己的 Tab（#487，「单独变成一个 tab」）：右键某一格选「Move to New
+  // Tab」。纯布局代数（promoteRegionToTab）——把这一格从源 Tab 的分屏树里摘出来，作为一张新 Tab 的
+  // 唯一一格，落在源 Tab 紧邻其后的位置并激活。只剩一格的 Tab 促升无意义（它已经就是一张 Tab），是 no-op。
+  promoteRegionToTab(workspaceId: string, tabId: string, regionId: string): void
   closeRegion(workspaceId: string, tabId: string, regionId: string): Promise<void>
   // 键盘关 Tab 的入口：只投意图，真正的关闭（含确认）由活动 Tab 组件消费。见 closeTabRequest 状态注释。
   requestCloseTab(workspaceId: string, tabGroupId: string, tabId: string): void
@@ -2700,6 +2705,36 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const nextTab = swapWorkbenchTabRegions(tab, regionIdA, regionIdB)
     if (nextTab === tab) return
     set((state) => ({ tabs: { ...state.tabs, [tabId]: nextTab } }))
+  },
+  promoteRegionToTab(workspaceId, tabId, regionId) {
+    const current = get()
+    if (!workbenchViewCloseAllowsView(current.closingWorkbenchViews, tabId)) return
+    // 合法性（Tab 归属、格在场、只剩一格是 no-op）全由 reducePromoteRegionToTab 自己守；促升不成立时
+    // 交回 'unchanged'，这里据此不写回，避免无谓的重渲染。regionId 原样带去新 Tab（不新铸），故 browser
+    // /editor/terminal 的按 regionId 索引的内容不用回收，不像 closeRegion 要 pruneEditorRegionState。
+    const result = reducePromoteRegionToTab({
+      tabs: current.tabs,
+      layouts: current.layouts,
+      workspaceId,
+      tabId,
+      regionId,
+      mint: { tabId: `view:${crypto.randomUUID()}` }
+    })
+    if (result.kind !== 'promoted') return
+    // One atomic state replacement. The reducer's layout already made the new Tab the active Tab of its
+    // group and focused that group, and the new Tab's sole Region is its active Region by construction —
+    // so there is no second focus/navigation route to run (that would be a place for the two to drift).
+    // What the reducer cannot know is the app-shell framing: bring the promoted Region's workspace and the
+    // workbench surface forward so the new Tab is actually on screen — the user asked for this Region to
+    // become its own Tab, so they want to see it. (mainSurface/activeWorkspaceId are normally already
+    // these values, since the Region was right-clicked in the visible workbench, but setting them makes
+    // "show the new Tab" true regardless of how the action was reached — e.g. a future command palette.)
+    set({
+      activeWorkspaceId: result.target.workspaceId,
+      mainSurface: 'workbench',
+      tabs: result.tabs,
+      layouts: result.layouts
+    })
   },
   async closeRegion(workspaceId, tabId, regionId) {
     const current = get()

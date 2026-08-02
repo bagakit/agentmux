@@ -7,7 +7,8 @@ vi.hoisted(() => {
 import { createWorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.js'
 import {
   createWorkbenchTab,
-  initialWorkbenchRegionId
+  initialWorkbenchRegionId,
+  type WorkbenchTab
 } from '../src/renderer/src/lib/workbench-tabs.js'
 import { regionIds } from '../src/renderer/src/lib/workbench-view-layout.js'
 import { useAppStore } from '../src/renderer/src/store.js'
@@ -305,5 +306,206 @@ describe('swapRegions', () => {
     const before = useAppStore.getState().tabs[tabId]!
     useAppStore.getState().swapRegions('other-workspace', tabId, rootRegionId, addedRegionId)
     expect(useAppStore.getState().tabs[tabId]).toBe(before)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #487「单独变成一个 tab」的 GUI/Store 入口。
+//
+// 布局代数（promoteRegionToTab）在 promote-region-to-tab.test.ts 里钉着；这里钉的是 store 动作真的把它
+// 接上了：促升出一张新 Tab、落在源 Tab 紧邻其后并激活、两侧不变量成立、只剩一格是 no-op、跨项目/关闭中
+// 的 View 都拒。fixture 刻意让源 Tab 不是 tabOrder 的最后一张，逼「活动=最后一张」「追加到队尾」两种错
+// 实现都红。
+// ---------------------------------------------------------------------------
+describe('promoteRegionToTab', () => {
+  // 三张 Tab：leading, source, trailing；source 被分成两格。source 不在队尾，故新 Tab 若落到队尾会红。
+  function threeTabFixture(): {
+    groupId: string
+    sourceTabId: string
+    leadingTabId: string
+    trailingTabId: string
+    rootRegionId: string
+    addedRegionId: string
+  } {
+    const sourceTabId = 'view-source'
+    const leadingTabId = 'view-leading'
+    const trailingTabId = 'view-trailing'
+    const rootRegionId = initialWorkbenchRegionId(sourceTabId)
+    const make = (id: string): WorkbenchTab =>
+      createWorkbenchTab(id, { regionId: initialWorkbenchRegionId(id), kind: 'launcher', workspaceId: 'workspace' })
+    useAppStore.setState({
+      tabs: {
+        [leadingTabId]: make(leadingTabId),
+        [sourceTabId]: createWorkbenchTab(sourceTabId, {
+          regionId: rootRegionId,
+          kind: 'launcher',
+          workspaceId: 'workspace'
+        }),
+        [trailingTabId]: make(trailingTabId)
+      },
+      layouts: { workspace: createWorkspaceLayout('group-one', [leadingTabId, sourceTabId, trailingTabId]) },
+      // 壳的取景刻意从"错的地方"起步：看着 board、且活动项目是别人。这样"促升后新 Tab 真的在屏上"
+      // 才是可观测的性质——若照 store 的默认值（mainSurface 本来就是 'workbench'）起步，那条断言
+      // 无论 store 写不写都恒真，是典型的假绿。
+      mainSurface: 'board',
+      activeWorkspaceId: 'some-other-workspace'
+    })
+    useAppStore.getState().splitRegion('workspace', sourceTabId, rootRegionId, 'right')
+    const source = useAppStore.getState().tabs[sourceTabId]!
+    const addedRegionId = regionIds(source.layout.root).find((id) => id !== rootRegionId)!
+    return { groupId: 'group-one', sourceTabId, leadingTabId, trailingTabId, rootRegionId, addedRegionId }
+  }
+
+  function regionSets(tab: WorkbenchTab): { tree: string[]; map: string[] } {
+    return { tree: [...regionIds(tab.layout.root)].sort(), map: Object.keys(tab.regions).sort() }
+  }
+
+  it('把一格促升成紧邻源 Tab 的新 Tab 并激活；两侧树↔regions 集合各自相等', () => {
+    const { sourceTabId, leadingTabId, trailingTabId, rootRegionId, addedRegionId } = threeTabFixture()
+    const beforeKeys = new Set(Object.keys(useAppStore.getState().tabs))
+    const sourceSurfaceBefore = useAppStore.getState().tabs[sourceTabId]!.regions[addedRegionId]!
+    // 判别器在场自检：下面两条取景断言只有在"起点 ≠ 期望值"时才判得动。这两句让 fixture 一旦
+    // 被改回默认值就当场红，而不是让那两条断言悄悄退化成恒真。
+    expect(useAppStore.getState().mainSurface, 'fixture 没有从 board 起步，取景断言会恒真').toBe('board')
+    expect(
+      useAppStore.getState().activeWorkspaceId,
+      'fixture 没有从别的项目起步，切项目断言会恒真'
+    ).not.toBe('workspace')
+
+    useAppStore.getState().promoteRegionToTab('workspace', sourceTabId, addedRegionId)
+
+    const state = useAppStore.getState()
+    // 凭空多出的那一张就是新 Tab。
+    const newTabId = Object.keys(state.tabs).find((id) => !beforeKeys.has(id))!
+    expect(newTabId, '没有造出新 Tab').toBeTruthy()
+
+    const source = state.tabs[sourceTabId]!
+    const newTab = state.tabs[newTabId]!
+
+    // 源 Tab 剩一格（rootRegion），新 Tab 恰一格（被促升那格），且内容整份搬走。
+    expect(Object.keys(source.regions)).toEqual([rootRegionId])
+    expect(Object.keys(newTab.regions)).toEqual([addedRegionId])
+    expect(newTab.regions[addedRegionId], '内容不是原来那个 surface 对象').toBe(sourceSurfaceBefore)
+
+    // 不变量#1：两侧树↔表逐一相等。
+    expect(regionSets(source).tree, '源 Tab 树↔表不一致').toEqual(regionSets(source).map)
+    expect(regionSets(newTab).tree, '新 Tab 树↔表不一致').toEqual(regionSets(newTab).map)
+
+    // 落位：leading, source, new, trailing——紧邻源 Tab，且不是队尾。
+    const group = state.layouts.workspace!.groups[0]!
+    expect(group.tabOrder).toEqual([leadingTabId, sourceTabId, newTabId, trailingTabId])
+    expect(group.tabOrder.indexOf(newTabId)).toBe(group.tabOrder.indexOf(sourceTabId) + 1)
+    expect(group.tabOrder.at(-1), '新 Tab 落到了队尾（应紧邻源 Tab）').not.toBe(newTabId)
+    // 活动的是新 Tab（不是 source、不是 trailing），且分组被聚焦。
+    expect(group.activeTabId).toBe(newTabId)
+    expect(state.layouts.workspace!.activeGroupId).toBe('group-one')
+
+    // 新 Tab 那一格就是它自己的活动格——没有"促升出来却没有活动格"的中间态。
+    expect(newTab.layout.activeRegionId, '新 Tab 没有活动格').toBe(addedRegionId)
+
+    // 壳的取景：新 Tab 必须真的在屏上。reducer 管不到这两个字段（它只认 tabs/layouts），
+    // fixture 刻意从"看着别的项目、且不在 workbench 上"起步，故这两条只有 store 真写了才绿。
+    expect(state.mainSurface, '促升后没把 workbench 端到前面（新 Tab 在屏后）').toBe('workbench')
+    expect(state.activeWorkspaceId, '促升后没切到新 Tab 所属的项目').toBe('workspace')
+  })
+
+  it('连续促升两格铸出两张不同的新 Tab——mint 不能是定值', () => {
+    const { sourceTabId, rootRegionId, addedRegionId } = threeTabFixture()
+    // 先把源 Tab 分成三格，才有两格可促升（促升到只剩一格就 no-op 了）。
+    useAppStore.getState().splitRegion('workspace', sourceTabId, rootRegionId, 'down')
+    const beforeKeys = new Set(Object.keys(useAppStore.getState().tabs))
+    const thirdRegionId = regionIds(useAppStore.getState().tabs[sourceTabId]!.layout.root).find(
+      (id) => id !== rootRegionId && id !== addedRegionId
+    )!
+
+    useAppStore.getState().promoteRegionToTab('workspace', sourceTabId, addedRegionId)
+    useAppStore.getState().promoteRegionToTab('workspace', sourceTabId, thirdRegionId)
+
+    const state = useAppStore.getState()
+    const minted = Object.keys(state.tabs).filter((id) => !beforeKeys.has(id))
+    // 两张各自独立的新 Tab：mint 若是定值，第二次会覆盖第一次，这里只剩 1 个。
+    expect(minted, '两次促升没有铸出两张不同的 Tab（mint 是定值？）').toHaveLength(2)
+    expect(new Set(minted).size).toBe(2)
+    // 且两张各自拿到自己那一格——不是一张 Tab 被改写两次。
+    expect(minted.map((id) => Object.keys(state.tabs[id]!.regions)).flat().sort()).toEqual(
+      [addedRegionId, thirdRegionId].sort()
+    )
+    // 源 Tab 回到只剩一格，且两侧不变量仍成立。
+    expect(Object.keys(state.tabs[sourceTabId]!.regions)).toEqual([rootRegionId])
+    for (const id of [sourceTabId, ...minted]) {
+      expect(regionSets(state.tabs[id]!).tree, `${id} 树↔表不一致`).toEqual(regionSets(state.tabs[id]!).map)
+    }
+  })
+
+  it('促升把该 workspace 与 workbench 带到前台——用户点了「单独成 Tab」就该立刻看到它', () => {
+    // fixture 刻意让 activeWorkspaceId / mainSurface 处于「错」的状态，逼促升去纠正它们：
+    // 若动作只写 tabs/layouts 而不带前台框架，新 Tab 就造好了却不在屏上，这一条会红。
+    const { sourceTabId, addedRegionId } = threeTabFixture()
+    useAppStore.setState({ activeWorkspaceId: 'somewhere-else', mainSurface: 'board' })
+
+    useAppStore.getState().promoteRegionToTab('workspace', sourceTabId, addedRegionId)
+
+    const state = useAppStore.getState()
+    expect(state.activeWorkspaceId, '促升没把该 workspace 带到前台').toBe('workspace')
+    expect(state.mainSurface, '促升没切到 workbench 面').toBe('workbench')
+    // 新 Tab 自身的活动格就是被促升那格（createWorkbenchViewLayout 造它时即设定）。
+    const newTabId = Object.keys(state.tabs).find((id) => ![sourceTabId, 'view-leading', 'view-trailing'].includes(id))!
+    expect(state.tabs[newTabId]!.layout.activeRegionId, '新 Tab 的活动格不是被促升的那格').toBe(addedRegionId)
+  })
+
+  it('促升只剩一格的 Tab 是 no-op——它已经就是一张 Tab', () => {
+    const tabId = 'view-solo'
+    const rootRegionId = initialWorkbenchRegionId(tabId)
+    useAppStore.setState({
+      tabs: { [tabId]: createWorkbenchTab(tabId, { regionId: rootRegionId, kind: 'launcher', workspaceId: 'workspace' }) },
+      layouts: { workspace: createWorkspaceLayout('group-one', [tabId]) }
+    })
+    const beforeTabs = useAppStore.getState().tabs
+    const beforeCount = Object.keys(beforeTabs).length
+
+    useAppStore.getState().promoteRegionToTab('workspace', tabId, rootRegionId)
+
+    const state = useAppStore.getState()
+    // 没有凭空多出一张 Tab，且那张 Tab 对象原样未动。
+    expect(Object.keys(state.tabs)).toHaveLength(beforeCount)
+    expect(state.tabs[tabId]).toBe(beforeTabs[tabId])
+  })
+
+  it('workspace 不匹配时什么都不做——不能跨项目促升别人 Tab 的格', () => {
+    const { sourceTabId, addedRegionId } = threeTabFixture()
+    const beforeTabs = useAppStore.getState().tabs
+    const beforeKeys = new Set(Object.keys(beforeTabs))
+
+    useAppStore.getState().promoteRegionToTab('other-workspace', sourceTabId, addedRegionId)
+
+    const state = useAppStore.getState()
+    expect(state.tabs[sourceTabId], '跨项目却改了源 Tab').toBe(beforeTabs[sourceTabId])
+    expect(Object.keys(state.tabs).some((id) => !beforeKeys.has(id)), '跨项目却造了新 Tab').toBe(false)
+  })
+
+  it('View 正在关闭时拒绝促升——不能把一格从正在拆除的 View 里半途搬走', () => {
+    const { sourceTabId, addedRegionId } = threeTabFixture()
+    const beforeTabs = useAppStore.getState().tabs
+    const beforeKeys = new Set(Object.keys(beforeTabs))
+    // 给源 Tab 挂一个关闭计划：workbenchViewCloseAllowsView 据此返回 false。
+    useAppStore.setState({
+      closingWorkbenchViews: {
+        [sourceTabId]: {
+          workspaceId: 'workspace',
+          tabGroupId: 'group-one',
+          tabId: sourceTabId,
+          closesView: true,
+          surfaces: [],
+          resources: [],
+          reservedSessionIds: []
+        }
+      }
+    })
+
+    useAppStore.getState().promoteRegionToTab('workspace', sourceTabId, addedRegionId)
+
+    const state = useAppStore.getState()
+    expect(state.tabs[sourceTabId], '关闭中的 View 却被促升改动了源 Tab').toBe(beforeTabs[sourceTabId])
+    expect(Object.keys(state.tabs).some((id) => !beforeKeys.has(id)), '关闭中的 View 却造了新 Tab').toBe(false)
   })
 })
