@@ -46,7 +46,14 @@ export function summarizeAgentAttention(
   const agents = sessions.filter(isAgent)
   return {
     total: agents.length,
-    working: agents.filter((session) => session.status.state === 'working').length,
+    // "在跑"是 `sessionBoardColumn` 的 working 列，不是 `state === 'working'`。这一行曾经写后者，
+    // 于是同一个窗口里四个投影对同一批 Agent 报出两组数——用户实测：Scratch 侧栏 3 running、
+    // Board 的 WORKING 列 3、Provider 汇总 4 active，而这里 0 working。差额全部是 `running`：
+    // 它不是边角状态而是**主稳态**（`api.ts` 启动与 attach 时就写它；`agent-status-freshness` 的
+    // 15 分钟衰减把 `unknown` 映射成它），所以严格判据的稳定结论是"一个都没在跑"。
+    // 这一列的语义是"有几个在干活"，与下面 Provider 那段、`workingAgentCount`、Board 的列
+    // 完全是同一个问题；同一个问题必须共用那一个开关，而不是各自判一次。
+    working: agents.filter((session) => sessionBoardColumn(session) === 'working').length,
     needsYou: agents.filter((session) => isNeedsYouState(session.status.state)).length,
     error: agents.filter((session) => session.status.state === 'error').length,
     // Both needs-you readings go through the shared table, so the count and the jump target can never
@@ -63,8 +70,10 @@ export function summarizeAgentAttention(
 // （`starting`/`running` 都在 working 列），状态栏却因为只认 `state === 'working'` 判它待机。
 // 所以这里调用那个函数，而不是复述它。
 //
-// 上面的 `working`/`needsYou`/`error` 是另一套刻意不同的口径（关注度：谁需要我现在就去看），
-// 两套并存是有意的——本函数回答的是"哪个 Provider 在干活"，不是"谁在等我"。
+// 上面的 `working` 走的是同一个开关。这段注释一度写着"两套刻意不同的口径"——那是错的，而且是
+// 它自己上面三行刚描述过的那个缺陷：`working` 与本函数的 `active` 回答的是同一个问题（谁在干活），
+// 不同的只有分组粒度（整窗 vs 逐 Provider）。`needsYou`/`error` 才是另一套口径（谁在等我），
+// 它们走 `isNeedsYouState`。刻意的差异是"关注度 vs 活动"这条线，不是同一条线上的两种算法。
 export type ProviderActivityCount = {
   providerId: AgentProviderId
   // Board working 列：starting / running / working。
