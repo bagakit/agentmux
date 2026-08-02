@@ -49,8 +49,11 @@ export function summarizeAgentAttention(
     // "在跑"是 `sessionBoardColumn` 的 working 列，不是 `state === 'working'`。这一行曾经写后者，
     // 于是同一个窗口里四个投影对同一批 Agent 报出两组数——用户实测：Scratch 侧栏 3 running、
     // Board 的 WORKING 列 3、Provider 汇总 4 active，而这里 0 working。差额全部是 `running`：
-    // 它不是边角状态而是**主稳态**（`api.ts` 启动与 attach 时就写它；`agent-status-freshness` 的
-    // 15 分钟衰减把 `unknown` 映射成它），所以严格判据的稳定结论是"一个都没在跑"。
+    // 它不是边角状态而是**主稳态**——`agentDisplayState`（core/agent-status-freshness.ts:81）是
+    // `unknown → 'running'` 的唯一映射处，而那个函数自己的注释（:76-79）列出了三条到达它的路：
+    // hook-normalizer（Provider 的 rules 认不出事件）、session-state 的 agent-status 分支（含 ACP）、
+    // 以及 15 分钟静默衰减（`DECAYED_SEMANTIC_STATE` 就是 `unknown`）。所以严格判据的稳定结论
+    // 是"一个都没在跑"。
     // 这一列的语义是"有几个在干活"，与下面 Provider 那段、`workingAgentCount`、Board 的列
     // 完全是同一个问题；同一个问题必须共用那一个开关，而不是各自判一次。
     working: agents.filter((session) => sessionBoardColumn(session) === 'working').length,
