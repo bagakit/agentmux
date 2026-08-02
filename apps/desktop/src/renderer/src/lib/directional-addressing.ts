@@ -17,7 +17,7 @@
 import type { AgentMuxRegionNeighbor } from '@agentmux/core/control'
 import type { SplitDirection } from './workbench-layout'
 import type { WorkbenchRegionBounds } from './workbench-view-layout'
-import { orientationOf, regionInDirection } from './split-direction'
+import { orientationOf, placementOf, regionInDirection } from './split-direction'
 
 /**
  * 用户说的那四个方向。与 `open` 的 direction 同名同义，不另起一套词。
@@ -71,7 +71,11 @@ export function tabNeighbor(
   if (orientationOf(direction) !== 'horizontal') return null
   const index = input.tabOrder.indexOf(input.tabId)
   if (index < 0) return null
-  return input.tabOrder[direction === 'right' ? index + 1 : index - 1] ?? null
+  // 侧的派生同样取自 SSOT。上一行的闸已经把 up/down 挡掉，所以到这里只剩 left/right——此时「是不是
+  // right」问的恰好就是 `placementOf` 的那个问题（在这根轴的前半还是后半），而 Tab 条的序号就是这根轴。
+  // 写成 `direction === 'right'` 会是第五份手抄：它今天与 `placementOf` 一致纯属两处同时正确，一旦分岔，
+  // 「在 Tab 条上往右拖」与「向右分屏」会朝相反方向走，而两边各自的测试照旧全绿。
+  return input.tabOrder[placementOf(direction) === 'second' ? index + 1 : index - 1] ?? null
 }
 
 /**
