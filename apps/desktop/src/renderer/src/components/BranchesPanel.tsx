@@ -31,6 +31,7 @@ import { defaultWorktreePath } from '../lib/workspace-projects'
 import { branchHasWorktree, branchOpenIntent, branchWorktreePath } from '../lib/workspace-branches-state'
 import {
   nextAfterWorktreeRemoval,
+  worktreeRemovalEffect,
   worktreeRemovalPrompt,
   type WorktreeRemovalRequest
 } from '../lib/worktree-removal-request'
@@ -49,6 +50,7 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
   const runFanOut = useAppStore((state) => state.runFanOut)
   const config = useAppStore((state) => state.config)
   const sessions = useAppStore((state) => state.sessions)
+  const removeWorktree = useAppStore((state) => state.removeWorktree)
   const [selectedBranch, setSelectedBranch] = useState(workspace.branch ?? null)
   const [createBranch, setCreateBranch] = useState<WorkspaceBranchRecord | null>(null)
   const [worktreePath, setWorktreePath] = useState('')
@@ -187,23 +189,24 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
     setRemoving(true)
     setActionError(null)
     try {
-      const outcome = await api.workspaces.removeWorktree({
+      // 走 store 而不是直接调 api：`removed` 带回来的是**权威的新配置**，而 store 里的
+      // `activeWorkspaceId` 是指进它的一个引用。面板自己 await 完把 config 丢掉时，store 仍持有那条
+      // 已经不存在的记录——`App.tsx` 照它找活动 Workspace 得到 undefined，于是在别的项目都还在的
+      // 情况下渲染出空白欢迎页，而屏幕上没有一句话解释刚才发生了什么。批量收尾一直是走 store 的，
+      // 单条却绕过了它，那道不对称就是这个缺陷本身。
+      const outcome = await removeWorktree({
         workspaceId: removal.workspaceId,
         // 取的就是确认键上那句话算出来的同一份，不在这里再判第二次。
         discardChanges: removalPrompt.discardChanges
       })
-      const next = nextAfterWorktreeRemoval(removal, outcome)
-      if (next.kind === 'done') {
-        setRemoval(null)
-        // 记录已经撤了，分支列表里那一行的归属跟着变（从 Worktrees 组挪回 Without worktree），
-        // 所以必须重扫。不重扫会留一个指向已删目录的行，点它会报一句难懂的话。
-        await refresh()
-      } else if (next.kind === 'ask') {
-        setRemoval(next.request)
-      } else {
-        setRemoval(null)
-        setActionError(next.reason)
-      }
+      // 三种走向落到屏幕上是什么样，全在 `worktreeRemovalEffect` 里算。这里刻意**一个 if 都没有**：
+      // 分派留在面板里就没有任何东西执行它（renderToStaticMarkup 不跑 effect、也点不了确认键），
+      // 实测过 `setActionError(next.reason)` 改成 null 时 21 条 + tsc 全绿。搬进纯函数之后那九件事
+      // 逐条可判，而这里剩下的三句无条件赋值是「壳有没有接住」——由 AST 守卫钉住它们只是转发。
+      const effect = worktreeRemovalEffect(nextAfterWorktreeRemoval(removal, outcome))
+      setRemoval(effect.removal)
+      setActionError(effect.error)
+      if (effect.rescan) await refresh()
     } catch (cause) {
       setRemoval(null)
       setActionError(message(cause))
