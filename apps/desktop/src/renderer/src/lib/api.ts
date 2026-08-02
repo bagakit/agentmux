@@ -371,6 +371,12 @@ const mockApi: AgentMuxDesktopApi = {
       mockConfig.workspaces.push(workspace)
       return { config: structuredClone(mockConfig), workspace: structuredClone(workspace) }
     },
+    // 预览环境没有 git，无法真的移除 worktree。`retained` 正是「还在盘上」的那个答案，所以说实话
+    // 就够了，不需要第三种词汇：假装 removed 会让界面把一条还在的记录从列表里划掉。
+    removeWorktree: async () => ({
+      status: 'retained',
+      reason: 'Removing a worktree needs the desktop app.'
+    }),
     // The web preview has no git and no processes, so a fan-out cannot be simulated honestly. Refusing
     // is the truthful answer — a fake set of "launched" lanes would be worse than no answer.
     runFanOut: async () => ({ kind: 'rejected', reason: 'Fan-out needs the desktop app.' }),

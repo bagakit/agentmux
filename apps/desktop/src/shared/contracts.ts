@@ -261,6 +261,30 @@ export type KeepOneOfFanOutInput = {
 }
 
 /**
+ * Remove one worktree on its own, outside any bake-off.
+ *
+ * `discardChanges` is the opt-in that says what it is: without it a worktree holding uncommitted work is
+ * refused and git's own words come back as the reason. Losing an agent's output is the one outcome this
+ * must never produce silently, so the caller has to ask for it in a second, separate act.
+ */
+export type RemoveWorktreeInput = {
+  workspaceId: string
+  discardChanges?: boolean
+}
+
+/**
+ * Mirrors the batch teardown's two states rather than inventing a third vocabulary: `removed` means git
+ * confirmed and the record is withdrawn, `retained` means the directory and its record are both still
+ * there, with git's reason carried through unedited so the user can review before discarding explicitly.
+ *
+ * A refusal is deliberately NOT a thrown error across this boundary. `retained` is an ordinary answer the
+ * surface has to render — the whole point of the protection is that "there is work here" reaches the user.
+ */
+export type RemoveWorktreeOutcome =
+  | { status: 'removed'; removedPath: string; config: AppConfig }
+  | { status: 'retained'; reason: string }
+
+/**
  * `retained` means still on disk and still registered: the dirty-tree protection refused it, or git
  * failed. `reason` is git's own words so the user knows what to review before discarding it explicitly.
  */
@@ -800,6 +824,7 @@ export type AgentMuxDesktopApi = {
     listBranches(workspaceId: string): Promise<WorkspaceBranchesSnapshot>
     openBranch(workspaceId: string, branch: string): Promise<WorkspaceSelectionResult>
     createWorktreeForBranch(input: CreateWorktreeForBranchInput): Promise<WorkspaceSelectionResult>
+    removeWorktree(input: RemoveWorktreeInput): Promise<RemoveWorktreeOutcome>
     runFanOut(input: RunFanOutInput): Promise<RunFanOutResult>
     keepOneOfFanOut(input: KeepOneOfFanOutInput): Promise<KeepOneOfFanOutOutcome>
   }
