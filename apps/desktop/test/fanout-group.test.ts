@@ -146,6 +146,27 @@ describe('fan-out group projection', () => {
     })
   })
 
+  it('counts a starting or running lane as working, the same way the rest of the window does', () => {
+    // 上面那条的 fixture 只用了 done/waiting/error/working——四个态里没有一个能区分
+    // 「`sessionBoardColumn` 的 working 列」与「`state === 'working'`」，所以严格判据在那里恒绿。
+    // #582 是同一个形状在状态栏上的实例：`running` 不是边角状态而是主稳态，严格判据会把它算进
+    // `idle`，于是同一批 Agent 在不同投影里报出两组数。这条把差额本身做成 fixture。
+    const groups = fanOutGroups({
+      workspaces: [worktree('w-1'), worktree('w-2'), worktree('w-3'), worktree('w-4')],
+      sessions: [
+        agent('w-1', 'running'),
+        agent('w-2', 'starting'),
+        agent('w-3', 'working'),
+        agent('w-4', 'done')
+      ]
+    })
+
+    // 严格判据下这里是 working:1 / idle:2——running 与 starting 各错一次。
+    expect(groupProgress(groups[0]!)).toEqual({
+      total: 4, done: 1, needsYou: 0, error: 0, working: 3, idle: 0
+    })
+  })
+
   it('keeps group order stable so the view does not reshuffle between renders', () => {
     const groups = fanOutGroups({
       workspaces: [worktree('zeta-1'), worktree('zeta-2'), worktree('alpha-1'), worktree('alpha-2')],

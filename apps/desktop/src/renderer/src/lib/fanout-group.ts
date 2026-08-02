@@ -1,5 +1,6 @@
 import type { SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
 import { attentionSortRank, categoryFor, type AttentionCategory } from './attention-event'
+import { sessionBoardColumn } from './project-board'
 
 // Reading a bake-off.
 //
@@ -136,6 +137,13 @@ export function groupLaneNeedingYou(group: FanOutGroup): FanOutLane | null {
  *
  * `idle` counts lanes with no Agent projected — a worktree left behind by a lane that never launched is
  * still part of the set, and hiding it would make the group look smaller than it is.
+ *
+ * `working` 走 `sessionBoardColumn` 的 working 列，**不是** `state === 'working'`。这一行曾写后者，
+ * 于是 `starting`/`running` 的 lane 被算进 `idle`——那正是 #582 的形状（`running` 是主稳态，见
+ * `agent-attention.ts` 对 `agentDisplayState` 的引用）。这个字段今天还没有渲染消费者
+ * （`FanOutStrip` 只显示 total/done/needsYou/error），所以分岔是潜伏的；用对判据的成本是零，
+ * 而等到有人把它显示出来才发现，代价是同一个 bug 再来一遍。
+ * 作用域的差别（这一组 vs 整窗）只影响分母，不改变"谁算在干活"这个判据。
  */
 export function groupProgress(group: FanOutGroup): {
   total: number
@@ -155,7 +163,7 @@ export function groupProgress(group: FanOutGroup): {
     if (lane.attention === 'done') { done += 1; continue }
     if (lane.attention === 'needs-you') { needsYou += 1; continue }
     if (lane.attention === 'error') { error += 1; continue }
-    if (lane.session.status.state === 'working') { working += 1; continue }
+    if (sessionBoardColumn(lane.session) === 'working') { working += 1; continue }
     idle += 1
   }
   return { total: group.lanes.length, done, needsYou, error, working, idle }

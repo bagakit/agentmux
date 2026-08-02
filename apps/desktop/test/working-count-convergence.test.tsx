@@ -17,9 +17,17 @@ import { describe, expect, it, vi } from 'vitest'
 // `sessionBoardColumn(session) === 'working'`（working 列含 `starting`/`running`/`working`）。
 // 差额全是 `running`。
 //
-// 为什么这个分岔必然显形、而不是理论上的：`running` 不是边角状态而是**主稳态**——`api.ts` 在启动与
-// attach 时就写它，`agent-status-freshness` 的 15 分钟静默衰减把 `unknown` 映射成它
-// （`decayedDisplayState`）。所以严格判据的稳定结论就是"一个都没在跑"，恰好是用户看到的 0。
+// 为什么这个分岔必然显形、而不是理论上的：`running` 不是边角状态而是**主稳态**。它的唯一来源是
+// `agentDisplayState`（core/agent-status-freshness.ts:81）的 `unknown → 'running'`，而那个函数
+// 自己的注释（:76-79）列出三条到达它的路：hook-normalizer（Provider 的 rules 认不出事件）、
+// session-state 的 agent-status 分支（含 ACP）、以及 15 分钟静默衰减
+// （`DECAYED_SEMANTIC_STATE` 就是 `unknown`，:57）。所以严格判据的稳定结论就是"一个都没在跑"，
+// 恰好是用户看到的 0。
+//
+// 本段此前写的是「`api.ts` 在启动与 attach 时就写它」并点名一个不存在的 `decayedDisplayState`。
+// 两处都错：那七个行号指的是 `processState`（`AgentMuxRunState`，与 `status.state` 是**不同的字段**），
+// 而 `api.ts` 是 browser preview 的 mock，根本不是生产的状态写入路径。留这段是因为
+// 「理由指错了地方」比「没有理由」更贵——它读起来像已经查证过。
 //
 // #419 修过这一族，但只收敛了 Provider 那一半（6a021dc「活跃的定义只有一处」），并在
 // agent-attention.ts 留下一段注释把剩下的分岔声明成「两套刻意不同的口径」。**那句话是错的**，而且它
@@ -266,8 +274,10 @@ const NON_COUNT_STATE_COMPARISONS: Readonly<Record<string, string>> = {
   // 各有自己的条目，不在本次收敛范围内——但它们出现在这里，所以不会被静默遗忘。
   '/components/AgentRoster.tsx': '单行状态点（另见 #500：该函数在 DOM 层从未被执行）',
   '/components/FanOutStrip.tsx': '单 lane 状态点（另见 #572）',
-  '/lib/agent-roster.ts': '行排序 rank，喂给 attentionSortRank',
-  '/lib/fanout-group.ts': '单个 fan-out 组内的 lane 分桶，作用域是那一组而非整窗'
+  '/lib/agent-roster.ts': '行排序 rank，喂给 attentionSortRank'
+  // `/lib/fanout-group.ts` 曾在这里，理由写的是「作用域是那一组而非整窗」。那不是理由：作用域只
+  // 影响分母，不改变"谁算在干活"这个判据。它的 `groupProgress().working` 已改成走
+  // `sessionBoardColumn`，所以从这张表里删掉——下面 `gone` 那条断言会盯着这件事。
 }
 
 function tsFilesUnder(root: string): string[] {
