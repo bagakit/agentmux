@@ -1102,6 +1102,106 @@ describe('RuntimeController configuration transaction', () => {
     expect(snapshot.sessions[0]?.status.exitReason).toBeUndefined()
   })
 
+  it('carries why the PTY went away through the snapshot — on the terminal, whose auto-recovery reads it', async () => {
+    // 第四条同族事实的**快照**一半。它与上面三条的区别是落点：`interruptionReason` 挂在 Session 本体
+    // 而不是 `status` 里，所以 :1023/:1049/:1101 那三条断言（全都取 `.status`）对它整条失明。
+    //
+    // 为什么先钉 terminal：SessionPane 的自动恢复 effect 第一句就是
+    // `if (session.kind !== 'terminal') return`，随后才判 `interruptionReason === 'daemon_restart'`。
+    // 也就是说这条事实的唯一行为消费者只看 terminal 那个分支——而 terminal 与 agent 是投影里两个
+    // 各自 return 的对象，各写一次。少写一处不会有任何东西红。
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    client.runtimeProjection.mockResolvedValue({
+      hostId: 'local',
+      subjects: [{
+        subjectId: 'terminal:local:run-1',
+        kind: 'terminal',
+        hostId: 'local',
+        workspacePath: '/repo',
+        run: {
+          runId: 'run-1',
+          kind: 'terminal' as const,
+          providerId: null,
+          executorId: null,
+          agentSessionId: null,
+          workspacePath: '/repo',
+          pid: 42,
+          state: 'interrupted' as const,
+          cols: 80,
+          rows: 24,
+          observedAt: 2,
+          latestOutputBytes: 0,
+          acceptedInputBytes: 0,
+          interruptionReason: 'daemon_restart'
+        }
+      }]
+    })
+
+    const snapshot = await controller.snapshot(localConfig)
+
+    expect(snapshot.sessions[0]).toMatchObject({
+      kind: 'terminal',
+      processState: 'interrupted',
+      interruptionReason: 'daemon_restart'
+    })
+  })
+
+  it('carries why the PTY went away on the agent too — the two projections are written separately', async () => {
+    // 姊妹的姊妹：agent 分支是同一条事实的第二个写入点。上面那条 terminal 断言绿着，也不能替这一处
+    // 担保——那正是 exitSignal / exitReason 各自漏过一次的方式。
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const status = agentStatusFixture()
+    client.runtimeProjection.mockResolvedValue({
+      hostId: 'local',
+      subjects: [{
+        subjectId: 'agent:local:agent-1',
+        kind: 'agent',
+        hostId: 'local',
+        workspacePath: '/repo',
+        providerId: status.session.providerId,
+        executorId: status.session.executorId,
+        agentSession: status.session,
+        run: { ...status.run, state: 'interrupted' as const, interruptionReason: 'daemon_restart' }
+      }]
+    })
+
+    const snapshot = await controller.snapshot(localConfig)
+
+    expect(snapshot.sessions[0]).toMatchObject({
+      kind: 'agent',
+      processState: 'interrupted',
+      interruptionReason: 'daemon_restart'
+    })
+  })
+
+  it('does not put an interruption reason on a Run that simply exited', async () => {
+    // 条件里 `state === 'interrupted'` 那一半。少了这条，把判据放宽成「只看理由在不在」也能让上面两条
+    // 全绿——而那会让一个正常退出的终端带上中断理由，于是 SessionPane 会去自动重开它。
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const status = agentStatusFixture()
+    client.runtimeProjection.mockResolvedValue({
+      hostId: 'local',
+      subjects: [{
+        subjectId: 'agent:local:agent-1',
+        kind: 'agent',
+        hostId: 'local',
+        workspacePath: '/repo',
+        providerId: status.session.providerId,
+        executorId: status.session.executorId,
+        agentSession: status.session,
+        run: { ...status.run, state: 'exited' as const, exitCode: 0, interruptionReason: 'daemon_restart' }
+      }]
+    })
+
+    const snapshot = await controller.snapshot(localConfig)
+
+    expect(snapshot.sessions[0]).toMatchObject({ processState: 'exited' })
+    expect(snapshot.sessions[0]).not.toHaveProperty('interruptionReason')
+  })
+
   it('projects persisted semantic status and typed interaction over a live Run', async () => {
     const controller = await configuredController()
     const client = runtimeFixture.FakeClient.instances[0]!

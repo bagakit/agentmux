@@ -36,6 +36,7 @@ import type {
   SessionSnapshot,
   TerminalLaunchInput
 } from '../shared/contracts.js'
+import { runInterruptionFact } from '../shared/contracts.js'
 import {
   scanTerminalOscColorQueries,
   type TerminalOscColorQueryReplyColors
@@ -218,9 +219,7 @@ function projectSession(
         ? { terminalCapability: structuredClone(subject.agentSession.terminalCapability) }
         : {}),
       processState: run.state,
-      ...(run.state === 'interrupted' && run.interruptionReason
-        ? { interruptionReason: run.interruptionReason }
-        : {}),
+      ...runInterruptionFact(run),
       status,
       ...(subject.agentSession.pendingInteraction
         ? { pendingInteraction: structuredClone(subject.agentSession.pendingInteraction.request) }
@@ -249,9 +248,7 @@ function projectSession(
     createdAt: run.observedAt,
     updatedAt: observedAt,
     processState: run.state,
-    ...(run.state === 'interrupted' && run.interruptionReason
-      ? { interruptionReason: run.interruptionReason }
-      : {}),
+    ...runInterruptionFact(run),
     status: processStatus,
     latestOutputBytes: run.latestOutputBytes,
     control: {

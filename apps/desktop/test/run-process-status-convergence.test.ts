@@ -60,11 +60,11 @@ function initialState() {
   }
 }
 
-/** 投一条 process-state 事件进实时路径，取回那个 Session 投影出来的 status。 */
-function statusAfterProcessEvent(
+/** 投一条 process-state 事件进实时路径，取回那个 Session 整份投影。 */
+function sessionAfterProcessEvent(
   event: Omit<Extract<RuntimeEvent['event'], { type: 'process-state' }>, 'type' | 'agentSessionId' | 'run' | 'evidence' | 'pid'>
     & { observedAt?: number }
-): SessionSnapshot['status'] {
+): SessionSnapshot {
   const { observedAt = 4, ...rest } = event
   const next = reduceRuntimeEvent(initialState(), core({
     type: 'process-state',
@@ -76,7 +76,15 @@ function statusAfterProcessEvent(
   }))
   const projected = next.sessions[0]
   if (!projected) throw new Error('实时路径把 Session 整个丢了')
-  return projected.status
+  return projected
+}
+
+/** 投一条 process-state 事件进实时路径，取回那个 Session 投影出来的 status。 */
+function statusAfterProcessEvent(
+  event: Omit<Extract<RuntimeEvent['event'], { type: 'process-state' }>, 'type' | 'agentSessionId' | 'run' | 'evidence' | 'pid'>
+    & { observedAt?: number }
+): SessionSnapshot['status'] {
+  return sessionAfterProcessEvent(event).status
 }
 
 describe('实时路径的进程状态投影', () => {
@@ -111,5 +119,53 @@ describe('实时路径的进程状态投影', () => {
 
   it('事件没带退出原因时不凭空造一个', () => {
     expect(statusAfterProcessEvent({ state: 'exited', exitCode: 0 })).not.toHaveProperty('exitReason')
+  })
+
+  it('PTY 为什么消失也要在实时路径落到 Session 上——终端的自动恢复靠它', () => {
+    // 第四条同族事实，且它是唯一一条**不落在 status 里**的：`interruptionReason` 挂在 Session 本体。
+    // 上面那个 helper 只取回 status，所以那五条断言对它整条失明——这正是它此前在实时路径漏掉而
+    // 39/39 全绿的原因（实测：把 session-state 里传这条的那一段中性化，五个文件 56 条全绿）。
+    //
+    // 后果不是少显示一行字：SessionPane 靠 `interruptionReason === 'daemon_restart'` 决定要不要
+    // 自动重开一个终端。这条事实丢了，被 daemon 重启打死的终端不会自动恢复，只摊着一个「Check
+    // again」——而 PTY 已经没了，那个按钮永远不可能成功。
+    expect(sessionAfterProcessEvent({
+      state: 'interrupted',
+      interruptionReason: 'daemon_restart'
+    })).toMatchObject({ processState: 'interrupted', interruptionReason: 'daemon_restart' })
+  })
+
+  it('中断但没说原因时不落一个空的理由——空串会被读成一个假理由', () => {
+    // 独立承重：上面那条只证「带了会传」，这条证「没带不会伪造」。两者一起才把那个条件的两侧钉住。
+    expect(sessionAfterProcessEvent({ state: 'interrupted' })).not.toHaveProperty('interruptionReason')
+  })
+
+  it('非中断状态不许带中断理由——那条事实只对「PTY 没了」有定义', () => {
+    // 第三侧：条件里 `state === 'interrupted'` 那一半。少了这条，把判据放宽成「只看理由在不在」
+    // 会让一个正常退出的 run 带上一条中断理由，而 SessionPane 会据此去自动重开终端。
+    expect(sessionAfterProcessEvent({
+      state: 'exited',
+      exitCode: 0,
+      interruptionReason: 'daemon_restart'
+    })).not.toHaveProperty('interruptionReason')
+  })
+
+  it('中断理由不跨事件残留——上一次中断的理由不许贴在这次退出上', () => {
+    // 这一段的实现是先把旧值解构掉再按新事件重算。少了那次解构，一个中断过又被恢复的 Session
+    // 会永久带着旧理由，于是 SessionPane 每次看到它都想再自动重开一次终端。
+    const interrupted = sessionAfterProcessEvent({
+      state: 'interrupted',
+      interruptionReason: 'daemon_restart'
+    })
+    expect(interrupted.interruptionReason).toBe('daemon_restart')
+    const next = reduceRuntimeEvent({ ...initialState(), sessions: [interrupted] }, core({
+      type: 'process-state',
+      agentSessionId: session.id,
+      run: session.control.run,
+      pid: 42,
+      state: 'running',
+      evidence: { source: 'run-process', observedAt: 9, run: session.control.run }
+    }))
+    expect(next.sessions[0]).not.toHaveProperty('interruptionReason')
   })
 })

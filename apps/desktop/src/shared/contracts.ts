@@ -596,6 +596,34 @@ type SessionSnapshotBase = {
   latestOutputBytes: number
 }
 
+/**
+ * 「PTY 为什么消失」那一条事实，从任何带着它的形状里取出来。
+ *
+ * 这是 `runExitFacts`（Core 侧，管 exitCode / exitSignal / exitReason 那三条）的第四条同族事实，
+ * 只是它落在 Session 本体而不是 `status` 里，所以不能塞进那个函数。为什么也要收成一处：这一段
+ * `...(state === 'interrupted' && reason ? { interruptionReason: reason } : {})` 此前在三个地方
+ * 各抄了一份——主进程的 agent 快照、主进程的 terminal 快照、renderer 的实时事件路径。
+ *
+ * 漏抄一处没有任何东西会红（字段可选、投影不要求在场），而后果是具体的：SessionPane 靠
+ * `interruptionReason === 'daemon_restart'` 决定要不要自动重开一个终端。实时路径丢掉这条事实时，
+ * 一个被 daemon 重启打死的终端不会自动恢复，只会摊着一个「Check again」——而按 PTY 已经没了的
+ * 事实，那个按钮永远不可能成功。同一族事故已经发生过两次（`exitSignal`、`exitReason` 各一次，
+ * 都是「崩溃当下看不到、reload 之后反而看到了」）。
+ *
+ * 入参收成「带这两条字段的任意对象」而不是具名类型：三个调用方的载体是三个不同的类型
+ * （台账里的 run、线上的 process-state 事件），它们只在这两条上同名同义。
+ */
+export function runInterruptionFact(source: {
+  state: AgentMuxRunState
+  interruptionReason?: string
+}): { interruptionReason?: string } {
+  // 两个条件都必需：`interrupted` 之外的状态不该带这条（它只对「PTY 没了」有定义），而理由缺席时
+  // 不能落成空串——空串会把「没说原因」伪装成「原因是空的」，也会让 daemon_restart 的判定读到假值。
+  return source.state === 'interrupted' && source.interruptionReason
+    ? { interruptionReason: source.interruptionReason }
+    : {}
+}
+
 export type SessionSnapshot = SessionSnapshotBase & (
   | {
       kind: 'agent'

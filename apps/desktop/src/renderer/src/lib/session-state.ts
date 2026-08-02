@@ -5,6 +5,7 @@ import type {
   RuntimeSnapshot,
   SessionSnapshot
 } from '../../../shared/contracts'
+import { runInterruptionFact } from '../../../shared/contracts'
 import type { AgentMuxAgentSession, AgentMuxEvidence, AgentMuxRunRef } from '@agentmux/core'
 import { applyAgentTimelineMutation } from '@agentmux/core/timeline'
 import { agentDisplayState } from '@agentmux/core/agent-status'
@@ -514,9 +515,7 @@ export function projectRuntimeEvent(
               return {
                 ...current,
                 processState: core.state,
-                ...(core.state === 'interrupted' && core.interruptionReason
-                  ? { interruptionReason: core.interruptionReason }
-                  : {}),
+                ...runInterruptionFact(core),
                 updatedAt: Math.max(item.updatedAt, core.evidence.observedAt),
                 ...(
                   item.kind === 'agent' &&
