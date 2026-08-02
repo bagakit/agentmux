@@ -19,6 +19,7 @@ import {
   resolveHookEventName,
   type HookEventNamePayloadKey
 } from './agent-hook-event.js'
+import { agentDisplayState } from './agent-status-freshness.js'
 import { hookToolOutcome } from './hook-tool-outcome.js'
 import { HOOK_PAYLOAD_USAGE_KEY, parseTurnUsage } from './agent-usage-transcript.js'
 
@@ -478,7 +479,9 @@ export function normalizeNativeHook(
   )
   const observedAt = Date.now()
   const status: AgentStatus = {
-    state: semanticState === 'unknown' ? 'running' : semanticState,
+    // 语义态 → 显示态经 agentDisplayState 一处决定（见 agent-status-freshness.ts 那段注释：
+    // tsc 只守住"你没漏掉 unknown"，守不住"你映射到了哪"）。此前这里是三份手抄之一。
+    state: agentDisplayState(semanticState),
     source: 'native-hook',
     observedAt,
     // 诊断带的是**原始**事件名：一条 Core 没认出来的事件，唯一有用的线索就是 Provider 到底叫它什么。
