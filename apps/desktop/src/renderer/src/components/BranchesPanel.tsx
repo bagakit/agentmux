@@ -17,6 +17,8 @@ import type {
   WorkspaceRecord
 } from '../../../shared/contracts'
 import { useWorkspaceBranches } from '../hooks/useWorkspaceBranches'
+import { useGitAheadBehind } from '../hooks/useGitAheadBehind'
+import { gitSyncBadge } from '../lib/git-sync-badge'
 import { MAX_FANOUT_LANES } from '../../../shared/fanout-limits'
 import { buildFanOutRequest } from '../lib/fanout-request'
 import { api } from '../lib/api'
@@ -51,6 +53,9 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
   const [fanOutCount, setFanOutCount] = useState(3)
   const [fanningOut, setFanningOut] = useState(false)
   const { snapshot, loading, error: loadError, refresh } = useWorkspaceBranches(workspace.id)
+  // ahead/behind 是 **HEAD** 相对它自己 upstream 的事实，不是逐分支的——所以下面只把它画在
+  // `isCurrent` 那一行。画到别的行上会是谎：那些分支各有各的 upstream，这一个计数说不了它们的事。
+  const { facts: syncFacts } = useGitAheadBehind(workspace.id)
 
   useEffect(() => {
     const current = snapshot?.kind === 'git-repository'
@@ -171,6 +176,13 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
     const runningAgents = worktree !== null && snapshot?.kind === 'git-repository'
       ? runningAgentsByWorktree.get(worktreePresenceKey(snapshot.hostId, worktree)) ?? []
       : []
+    // 只有当前分支能带同步计数（见 syncFacts 处注释）。`label` 为空的两种状态（没 upstream / 已同步）
+    // 不画徽标——它们没有数字可报，画一个空盒子只是噪声。
+    // 代价要说清：`gitSyncBadge` 为这两种各准备了一句不同的 `title`，而这里两者都不渲染，于是那两句
+    // 在本面板上**到不了 DOM**——用户读不出「还没有 upstream」和「已同步」的区别。要露出前者需要一个
+    // 新的视觉记号（不是空盒子），属产品决定，已单独记录；别在这里写「区别落在 title 上」，那会给一个
+    // 不可达的东西背书。
+    const sync = branch.isCurrent && syncFacts !== null ? gitSyncBadge(syncFacts) : null
     return (
       <BranchContextMenu
         key={branch.name}
@@ -207,9 +219,20 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
               />
             }
             trailing={
-              <span className={`branch-row__state ${worktree !== null ? '' : 'branch-row__state--unbound'}`}>
-                {branch.isCurrent ? <><Check size={9} /> Current</> : worktree !== null ? 'Worktree' : <><Unlink size={9} /> Branch</>}
-              </span>
+              <>
+                {sync && sync.label ? (
+                  <span
+                    className={`branch-row__sync branch-row__sync--${sync.kind}`}
+                    title={sync.title}
+                    data-sync-kind={sync.kind}
+                  >
+                    {sync.label}
+                  </span>
+                ) : null}
+                <span className={`branch-row__state ${worktree !== null ? '' : 'branch-row__state--unbound'}`}>
+                  {branch.isCurrent ? <><Check size={9} /> Current</> : worktree !== null ? 'Worktree' : <><Unlink size={9} /> Branch</>}
+                </span>
+              </>
             }
           />
         </button>

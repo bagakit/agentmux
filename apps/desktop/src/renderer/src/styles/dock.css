@@ -177,6 +177,16 @@
 .branch-row .selector-row__identity small { font-family: "SFMono-Regular", monospace; line-height: 12px; }
 .branch-row__state { display: inline-flex; align-items: center; gap:var(--sp-1); padding:1px var(--sp-2); border-radius: var(--radius-sm); color: var(--green); background: var(--green-bg); font-size: var(--fs-micro); line-height: 13px; white-space: nowrap; }
 .branch-row__state--unbound { color: var(--amber); background: var(--green-bg); }
+/* 当前分支相对 upstream 的 ↑↓ 计数。三种可见状态各有一色，语义取自 gitSyncBadge 的 kind：
+   ahead＝有东西要推（中性提示，蓝），behind＝落后要拉（琥珀，该动手了），diverged＝两侧都有
+   （红：pull 会产生 merge/rebase，是三者里唯一需要决策的）。
+   no-upstream 与 synced 不画——它们的 label 是空串，见 BranchesPanel 里 `sync.label` 那道门（那里
+   记了这个代价：这两种状态的区别在本面板上对用户不可见）。
+   数字用 tabular-nums：这一列会在多行间纵向对齐，比例数字会让它抖。 */
+.branch-row__sync { display: inline-flex; align-items: center; gap:var(--sp-1); padding:1px var(--sp-2); border-radius: var(--radius-sm); font-size: var(--fs-micro); line-height: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.branch-row__sync--ahead { color: var(--blue); background: color-mix(in srgb, var(--blue) 13%, var(--surface-0)); }
+.branch-row__sync--behind { color: var(--amber-text); background: var(--amber-bg); }
+.branch-row__sync--diverged { color: var(--red-text); background: var(--red-bg); }
 .branches-empty { min-height: 90px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap:var(--sp-2); padding:var(--sp-5); color: var(--text-3); font-size: var(--fs-micro); text-align: center; }
 .branches-empty strong { color: var(--text-2); font-size: var(--fs-meta); }
 .branches-empty--error span { max-width: 230px; line-height: 1.4; }
