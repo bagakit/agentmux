@@ -304,6 +304,59 @@ export function focusGroup(layout: WorkspaceLayout, groupId: string): WorkspaceL
   return findGroup(layout, groupId) ? { ...layout, activeGroupId: groupId } : layout
 }
 
+/**
+ * 一个工作区布局的核心不变量：分组有两种表示，必须逐一相等——
+ *   - 分屏树的叶子 id 集合：`groupIds(layout.root)`；
+ *   - `groups` 数组的 id 集合：`layout.groups.map((g) => g.id)`。
+ *
+ * 这是 region 侧 `assertRegionInvariant`（workbench-tabs.ts）在**工作区这一层**的对偶：那半守的是
+ * 「Region 树 ↔ tab.regions 表」，这半守的是「tab-group 树 ↔ layout.groups 数组」。两个违约方向都是
+ * 「画不出、也回收不掉的孤儿」：
+ *   - 树里多一片叶子（`groups` 数组没有对应记录）：渲染层拿 groupId 去 `findGroup` 得 null，画成一只
+ *     永远空的破格；
+ *   - `groups` 数组多一条记录（树里没有对应叶子）：一个永远画不到、也永远回收不掉的死分组，它名下的
+ *     Tab 全成孤儿（{@link addTabPlacement} 那段 JSDoc 描述的形状）。
+ *
+ * 此前这条只由 `removeTab` / `moveTab` / `moveTabToNewGroup` 三处「两侧一起改」的手工约定维持，零守卫
+ * ——而 region 那半早已是生产断言。历史代价有据：off-tree group 已复发两次（ad00a5e、dfd63eb），#556
+ * 是同一族的三连缺陷。把不变量提升成生产断言，套在每个**重排分屏树**的 reducer 出口：将来只改了一侧的
+ * 路径，会在改动发生的那一处响亮失败，而不是在渲染层留下一个静默孤儿。这也是判定这条性质的**唯一**
+ * 实现（SSOT）。
+ *
+ * 无条件 throw，理由与 `assertRegionInvariant` 逐条相同：
+ *   1. 断言跑在 reducer 算出「下一个 layout」之后、return 之前；抛出即这个 layout 不被返回，store 的
+ *      `set()` 拿不到它，于是这一次操作整个作废、落回上一个一致状态。
+ *   2. 反面更糟且不可恢复：静默放行一个看不见的孤儿分组，用户既看不见也关不掉，只能重启。
+ *   3. 与同层其它 reducer 一致（空树、撞名等都是无条件抛）。
+ *
+ * **两个方向都判，不许削成单向。** 只判「叶子都有记录」会放过 off-tree group（记录多、树里没有）——那正是
+ * 已复发两次的那一种；只判「记录都有叶子」会放过树里的孤儿叶。缺一侧就漏掉一整族缺陷。
+ *
+ * **只断言 STORED layout，绝不断言任何投影。** `layoutForActiveTopic`（scratch-topic-layout.ts:199）
+ * 刻意产出一个 `groups` ⊇ 树叶的**超集**：它把投影到空的分组用 `removeLeaf` 摘出树，却在 `groups` 数组里
+ * 保留它们（那是存储真相，别的 Topic 的 Tab 还在里面，删了切回去就找不回来——见其 :188-197 原话）。那是
+ * 只读派生值，不流回任何 reducer，故本断言碰不到它；谁若把它喂回 reducer 或在它身上断言，会误报——见
+ * scratch-topic-write-coordinates.test.ts 里那条钉住「投影是合法超集」的用例。
+ */
+export function assertGroupInvariant(layout: WorkspaceLayout): void {
+  const tree = groupIds(layout.root)
+  const records = layout.groups.map((group) => group.id)
+  const recordSet = new Set(records)
+  const treeSet = new Set(tree)
+  const leavesWithoutRecord = tree.filter((id) => !recordSet.has(id))
+  const recordsWithoutLeaf = records.filter((id) => !treeSet.has(id))
+  if (leavesWithoutRecord.length > 0 || recordsWithoutLeaf.length > 0) {
+    throw new Error(
+      `Workspace layout group invariant violated: the split tree holds group ids ` +
+        `[${[...tree].sort().join(', ')}] but layout.groups holds [${[...records].sort().join(', ')}]. ` +
+        `Tree leaves with no group record: [${leavesWithoutRecord.sort().join(', ')}]; ` +
+        `group records with no tree leaf: [${recordsWithoutLeaf.sort().join(', ')}]. Every tree leaf ` +
+        `must have exactly one groups entry and vice versa — a mismatch is an invisible, un-closeable ` +
+        `orphan Tab Group.`
+    )
+  }
+}
+
 export function removeTab(
   layout: WorkspaceLayout,
   groupId: string,
@@ -349,14 +402,23 @@ export function removeTab(
   // 改变结果。三项各由 workbench-layout-off-tree-group.test.ts 单独钉着（逐项撤掉只红对应那条）。
   const leafIds = groupIds(layout.root)
   if (sourceOrder.length > 0 || !leafIds.includes(groupId) || leafIds.length === 1) {
+    // 这条出口只改 `groups` 里的 within-record 字段（tabOrder / activeTabId / recentTabIds），树与
+    // 「记录 id 集合」都原样不动，故不可能引入「树 ↔ groups」漂移，不套断言。它还**刻意容忍**一个
+    // 入场时就在的 off-tree group（记录多、树里没有对应叶）：删该分组自己的最后一张 Tab 走这条路，
+    // 分组留着等持久化边界回收（workbench-layout-off-tree-group.test.ts 钉住这条容忍）。在这里断言会把
+    // 那条容忍打断。真正会重排树的下一条出口才套断言。
     return { ...layout, groups }
   }
   const siblingId = findSiblingGroupId(layout.root, groupId)
-  return {
+  const next: WorkspaceLayout = {
     root: removeLeaf(layout.root, groupLeafId, groupId) ?? layout.root,
     groups: groups.filter((candidate) => candidate.id !== groupId),
     activeGroupId: siblingId ?? layout.activeGroupId
   }
+  // 收组同时从树（removeLeaf）与 `groups` 数组（filter）里摘掉同一个 groupId——将来只改一侧就会留下
+  // 画不出、回收不掉的孤儿。在改动发生的这一处响亮失败。
+  assertGroupInvariant(next)
+  return next
 }
 
 export function moveTab(
@@ -413,7 +475,11 @@ export function moveTab(
     root = removeLeaf(root, groupLeafId, sourceGroupId) ?? root
     groups = groups.filter((group) => group.id !== sourceGroupId)
   }
-  return { root, groups, activeGroupId: targetGroupId }
+  const next: WorkspaceLayout = { root, groups, activeGroupId: targetGroupId }
+  // 源分组被搬空时这里同时从树（removeLeaf）与 `groups`（filter）摘掉它——两侧漏一侧就是孤儿。搬空
+  // 之外的跨组移动不动树、也不动记录 id 集合，此处再判一次是纵深防御（与 region 侧 swap 自愿断言同理）。
+  assertGroupInvariant(next)
+  return next
 }
 
 export function moveTabToNewGroup(
@@ -470,7 +536,11 @@ export function moveTabToNewGroup(
     root = removeLeaf(root, groupLeafId, sourceGroupId) ?? root
     groups = groups.filter((group) => group.id !== sourceGroupId)
   }
-  return { root, groups, activeGroupId: newGroupId }
+  const next: WorkspaceLayout = { root, groups, activeGroupId: newGroupId }
+  // 这里既往树里加了一片新叶（replaceLeaf 把目标格换成含 newGroupId 的 split），也把 newGroupId 的记录
+  // 追加进 `groups`；源被搬空时又两侧一起摘。任一侧漏改都会留下孤儿——在改动发生的这一处响亮失败。
+  assertGroupInvariant(next)
+  return next
 }
 
 export function setSplitRatio(
