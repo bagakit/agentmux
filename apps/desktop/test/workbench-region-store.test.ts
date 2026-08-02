@@ -157,7 +157,7 @@ describe('arrangeTabRegions', () => {
   it('对单格 Tab 施加 grid-4：补出 3 个 launcher 格，且 layout 真的是 2×2', () => {
     const { tabId, rootRegionId } = singleRegionFixture()
 
-    useAppStore.getState().arrangeTabRegions('workspace', tabId, 'grid-4')
+    useAppStore.getState().arrangeTabRegions('workspace', tabId, { kind: 'preset', preset: 'grid-4' })
 
     const tab = useAppStore.getState().tabs[tabId]!
     // 「没抛」不是判据：静默 no-op 也不抛。判 regions 表与 layout 树两侧都真的动了。
@@ -185,7 +185,7 @@ describe('arrangeTabRegions', () => {
   it('columns-3 摆成一行三列，不是 2×2——不同预设不能塌成同一个形状', () => {
     const { tabId } = singleRegionFixture()
 
-    useAppStore.getState().arrangeTabRegions('workspace', tabId, 'columns-3')
+    useAppStore.getState().arrangeTabRegions('workspace', tabId, { kind: 'preset', preset: 'columns-3' })
 
     const tab = useAppStore.getState().tabs[tabId]!
     expect(regionIds(tab.layout.root)).toHaveLength(3)
@@ -203,7 +203,7 @@ describe('arrangeTabRegions', () => {
     // 一道响亮的 CONTROL_FAILED；这一条从外面钉住结果：树上就是 9 个互不相同的 id。
     const { tabId } = singleRegionFixture()
 
-    useAppStore.getState().arrangeTabRegions('workspace', tabId, 'grid-9')
+    useAppStore.getState().arrangeTabRegions('workspace', tabId, { kind: 'preset', preset: 'grid-9' })
 
     const tab = useAppStore.getState().tabs[tabId]!
     const ids = regionIds(tab.layout.root)
@@ -222,7 +222,7 @@ describe('arrangeTabRegions', () => {
     const reportError = vi.fn()
     useAppStore.setState({ reportError })
 
-    useAppStore.getState().arrangeTabRegions('workspace', tabId, 'columns-3')
+    useAppStore.getState().arrangeTabRegions('workspace', tabId, { kind: 'preset', preset: 'columns-3' })
     expect(useAppStore.getState().tabs[tabId], 'columns-3 装得下两格，这一条的前提本身就错了')
       .not.toBe(before)
 
@@ -234,7 +234,7 @@ describe('arrangeTabRegions', () => {
     expect(regionIds(four.layout.root), '前提自检：没能凑到 4 格').toHaveLength(4)
 
     reportError.mockClear()
-    useAppStore.getState().arrangeTabRegions('workspace', tabId, 'columns-3')
+    useAppStore.getState().arrangeTabRegions('workspace', tabId, { kind: 'preset', preset: 'columns-3' })
 
     expect(useAppStore.getState().tabs[tabId], '装不下却改了布局——有格子被丢了').toBe(four)
     expect(reportError, '装不下时静默什么也不做：用户点了没反应且无从查').toHaveBeenCalledTimes(1)
@@ -244,7 +244,7 @@ describe('arrangeTabRegions', () => {
     const { tabId } = singleRegionFixture()
     const before = useAppStore.getState().tabs[tabId]!
 
-    useAppStore.getState().arrangeTabRegions('other-workspace', tabId, 'grid-4')
+    useAppStore.getState().arrangeTabRegions('other-workspace', tabId, { kind: 'preset', preset: 'grid-4' })
 
     expect(useAppStore.getState().tabs[tabId]).toBe(before)
   })

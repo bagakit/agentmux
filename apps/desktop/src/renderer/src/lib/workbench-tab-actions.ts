@@ -1,3 +1,4 @@
+import type { AgentMuxArrangeMode } from '@agentmux/core/control'
 import type { SplitDirection } from './workbench-layout'
 import type { WorkbenchSurface } from './workbench-tabs'
 import { isSessionSurface } from './workbench-surface-kinds'
@@ -80,6 +81,29 @@ const WORKBENCH_REGION_PRESET_LABELS: ReadonlyArray<WorkbenchRegionPresetAction>
 ]
 
 /**
+ * 「不依赖格数的重排」这两档：均分、把当前格挪到第一位。
+ *
+ * 与预设那一组分开列，是因为两者的**可用条件不同**，不是因为长得不一样：预设要补格子，所以格数超了
+ * 就整组消失（`workbenchRegionPresetMenu` 判的）；这两档只重排已在场的格子，不增不减，所以只要
+ * 有得排（≥2 格）就永远可用。把它们混进预设那一组，就会跟着预设一起被容量判定误杀——一张 5 分屏的
+ * Tab 恰恰是最需要「均分一下」的那张，而它摆不成任何预设。
+ *
+ * 引擎（`arrangeWorkbenchControlTab`）从一开始就支持这三档，控制协议的 `AgentMuxArrangeMode` 也是。
+ * 缺的只是 GUI 表达不出后两档（#486）——不是缺一个菜单项，是 store 那个 action 的签名只收 preset，
+ * 把它们挡在了外面。
+ */
+const WORKBENCH_REGION_REARRANGE_LABELS: ReadonlyArray<{
+  mode: WorkbenchRegionRearrangeMode
+  label: string
+}> = [
+  { mode: { kind: 'balance' }, label: 'Even Split' },
+  { mode: { kind: 'active-first' }, label: 'Focused First' }
+]
+
+/** 不依赖格数的那两档重排。刻意是 `AgentMuxArrangeMode` 的子集，不是另一个平行的枚举。 */
+export type WorkbenchRegionRearrangeMode = Exclude<AgentMuxArrangeMode, { kind: 'preset' }>
+
+/**
  * 「这个 Tab 能摆成哪些预设，以及点下去做什么」——一次判定，同时决定菜单列哪几项和点了发什么。
  *
  * 预设的格数**只增不减**：`arrangeWorkbenchControlTab` 对格数已经超过预设的 Tab 抛
@@ -96,7 +120,7 @@ const WORKBENCH_REGION_PRESET_LABELS: ReadonlyArray<WorkbenchRegionPresetAction>
  */
 export function workbenchRegionPresetMenu(input: {
   regionCount: number
-  arrange: (preset: WorkbenchRegionLayoutPreset) => void
+  arrange: (mode: AgentMuxArrangeMode) => void
 }): {
   presets: WorkbenchRegionPresetAction[]
   onSelect: (preset: WorkbenchRegionLayoutPreset) => void
@@ -105,7 +129,7 @@ export function workbenchRegionPresetMenu(input: {
     presets: WORKBENCH_REGION_PRESET_LABELS.filter(
       (action) => workbenchRegionPresetSize(action.preset) >= input.regionCount
     ),
-    onSelect: input.arrange
+    onSelect: (preset) => input.arrange({ kind: 'preset', preset })
   }
 }
 
@@ -193,13 +217,61 @@ export function regionSwapMenuEntries(input: {
 export type WorkbenchSplitMenuEntry =
   | { kind: 'split'; direction: SplitDirection; label: string; onSelect(): void }
   | { kind: 'preset'; preset: WorkbenchRegionLayoutPreset; label: string; onSelect(): void }
+  | { kind: 'rearrange'; mode: WorkbenchRegionRearrangeMode; label: string; onSelect(): void }
   | { kind: 'separator' }
+
+/**
+ * 「重排」那一节本身：预设 + 不依赖格数的那两档。刻意与「分屏方向」分开成一个可单独取用的清单，
+ * 因为**有一个容器只要这一节**——Tab 的右键菜单里，分屏方向那一组是另一个动作（`onMoveToNewGroup`，
+ * 搬 Tab 开新分组，不是给这张 Tab 分格），于是它的「Rearrange Splits」子菜单只画这一节。
+ *
+ * 抽出来的理由是那个容器此前自己 map 了一遍 `workbenchRegionPresetMenu().presets`、自己调
+ * `workbenchRegionPresetIcon`、自己用 `presets.length > 0` 判整节在不在场——那就是本仓
+ * duplicated-rule-defeats-the-fix 的第二份：给这一节加一档（正是 #486 要做的事）时，没跟上的那个
+ * 容器静默保留旧清单，而它自己的测试照旧全绿。现在两个消费者都 map 同一个返回值，"这一节有没有
+ * 东西" 也只有一个答案（`length > 0`），不存在一个容器认为有、另一个认为没有。
+ */
+export type WorkbenchRegionLayoutMenuEntry = Extract<
+  WorkbenchSplitMenuEntry,
+  { kind: 'preset' | 'rearrange' }
+>
+
+export function workbenchRegionLayoutMenuEntries(input: {
+  /** 这个 Tab 现在有几格。预设只增不减，故它决定预设那一组列不列得出来。 */
+  regionCount: number
+  arrange: (mode: AgentMuxArrangeMode) => void
+}): readonly WorkbenchRegionLayoutMenuEntry[] {
+  // 容量判定不在这里重做一遍：它只住在 workbenchRegionPresetMenu 里（那份注释说明了为什么）。
+  const presetMenu = workbenchRegionPresetMenu({
+    regionCount: input.regionCount,
+    arrange: input.arrange
+  })
+  const presets: WorkbenchRegionLayoutMenuEntry[] = presetMenu.presets.map((action) => ({
+    kind: 'preset',
+    preset: action.preset,
+    label: action.label,
+    onSelect: () => presetMenu.onSelect(action.preset)
+  }))
+  // 均分与「当前格优先」只重排已在场的格子，故它们的在场条件是「有得排」而不是容量：单格的 Tab
+  // 里两者都是 no-op（`balanceNode` 对叶子原样返回，`placeActiveWorkbenchRegionFirst` 首格已是
+  // 活动格时原样返回），画出来只是一个点了什么都不发生的按钮，所以以缺席表达。
+  const rearranges: WorkbenchRegionLayoutMenuEntry[] =
+    input.regionCount > 1
+      ? WORKBENCH_REGION_REARRANGE_LABELS.map((action) => ({
+          kind: 'rearrange',
+          mode: action.mode,
+          label: action.label,
+          onSelect: () => input.arrange(action.mode)
+        }))
+      : []
+  return [...presets, ...rearranges]
+}
 
 export function workbenchSplitMenuEntries(input: {
   /** 这个 Tab 现在有几格。预设只增不减，故它决定预设那一组列不列得出来。 */
   regionCount: number
   split: (direction: SplitDirection) => void
-  arrange: (preset: WorkbenchRegionLayoutPreset) => void
+  arrange: (mode: AgentMuxArrangeMode) => void
 }): readonly WorkbenchSplitMenuEntry[] {
   const splits: WorkbenchSplitMenuEntry[] = WORKBENCH_TAB_SPLIT_ACTIONS.map((action) => ({
     kind: 'split',
@@ -207,18 +279,13 @@ export function workbenchSplitMenuEntries(input: {
     label: action.label,
     onSelect: () => input.split(action.direction)
   }))
-  // 容量判定不在这里重做一遍：它只住在 workbenchRegionPresetMenu 里（那份注释说明了为什么）。
-  const presetMenu = workbenchRegionPresetMenu({
+  const layout = workbenchRegionLayoutMenuEntries({
     regionCount: input.regionCount,
     arrange: input.arrange
   })
-  const presets: WorkbenchSplitMenuEntry[] = presetMenu.presets.map((action) => ({
-    kind: 'preset',
-    preset: action.preset,
-    label: action.label,
-    onSelect: () => presetMenu.onSelect(action.preset)
-  }))
-  if (presets.length === 0) return splits
-  return [...splits, { kind: 'separator' }, ...presets]
+  // 重排那一节可以整节缺席（预设被容量毙掉、且只有一格没得排），故分隔线不能写成常量：
+  // 只在它前后**都真有东西**时才插一条。一条贴在顶上或悬在底下的线是噪音。
+  if (layout.length === 0) return splits
+  return [...splits, { kind: 'separator' }, ...layout]
 }
 

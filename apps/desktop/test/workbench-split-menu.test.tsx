@@ -4,6 +4,7 @@ import ts from 'typescript'
 import { describe, expect, it, vi } from 'vitest'
 import {
   WORKBENCH_TAB_SPLIT_ACTIONS,
+  workbenchRegionLayoutMenuEntries,
   workbenchRegionPresetMenu,
   workbenchSplitMenuEntries
 } from '../src/renderer/src/lib/workbench-tab-actions'
@@ -14,6 +15,7 @@ import {
   workbenchSplitMenuKey
 } from '../src/renderer/src/components/workbench-split-menu-icons'
 import { createRegionCopyModel } from '../src/renderer/src/components/RegionContextMenu'
+import type { AgentMuxArrangeMode } from '@agentmux/core/control'
 import type { SplitDirection } from '../src/renderer/src/lib/workbench-layout'
 import type { WorkbenchRegionLayoutPreset } from '../src/renderer/src/lib/workbench-view-layout'
 
@@ -102,7 +104,7 @@ describe('分屏与重排菜单：一份清单、一份图标、四个容器', (
   })
 
   it('点一档预设，发出的就是那一档', () => {
-    const arrange = vi.fn<(preset: WorkbenchRegionLayoutPreset) => void>()
+    const arrange = vi.fn<(mode: AgentMuxArrangeMode) => void>()
     const entries = workbenchSplitMenuEntries({ regionCount: 1, split: () => {}, arrange })
     const presets = entries.filter((entry) => entry.kind === 'preset')
     expect(presets.length, '预设那一组整组消失了').toBeGreaterThan(0)
@@ -110,8 +112,68 @@ describe('分屏与重排菜单：一份清单、一份图标、四个容器', (
       if (entry.kind !== 'preset') continue
       arrange.mockClear()
       entry.onSelect()
-      expect(arrange, `"${entry.label}" 发错了预设`).toHaveBeenCalledWith(entry.preset)
+      // 发的是引擎自己那个三档 union 里的 preset 档，不是裸的档名——两者形状不同，
+      // store 与引擎都只认前者（#486）。
+      expect(arrange, `"${entry.label}" 发错了预设`).toHaveBeenCalledWith({
+        kind: 'preset',
+        preset: entry.preset
+      })
     }
+  })
+
+  /**
+   * #486：均分与「当前格优先」这两档不依赖格数的重排，必须能从 GUI 发得出去。
+   *
+   * 这两档引擎（`arrangeWorkbenchControlTab`）从一开始就支持，控制协议也一直暴露着，缺的是 GUI
+   * 表达不出来——不是「菜单忘了加一项」，是 `store.arrangeTabRegions` 那个签名此前只收 preset，
+   * 把它们挡在外面。所以判据落在「发出去的取值恰好是引擎认的那个 mode 对象」上：签名一收窄，
+   * 这一族当场红。
+   */
+  it('点均分／当前格优先，发出的就是引擎那一档 mode（不是预设）', () => {
+    const arrange = vi.fn<(mode: AgentMuxArrangeMode) => void>()
+    const entries = workbenchSplitMenuEntries({ regionCount: 2, split: () => {}, arrange })
+    const rearranges = entries.filter((entry) => entry.kind === 'rearrange')
+
+    // 两档都要在场。只判「不为空」会让漏掉一档在全绿下存活。
+    expect(
+      rearranges.map((entry) => (entry.kind === 'rearrange' ? entry.mode.kind : null)),
+      '不依赖格数的两档重排没有全部列出来'
+    ).toEqual(['balance', 'active-first'])
+
+    for (const entry of rearranges) {
+      if (entry.kind !== 'rearrange') continue
+      arrange.mockClear()
+      entry.onSelect()
+      expect(arrange, `"${entry.label}" 发错了 mode`).toHaveBeenCalledWith(entry.mode)
+    }
+
+    // 措辞：两档在菜单上必须说的是不同的事。只判「逐字不等」抓不到「同一句话要求两件相反的
+    // 事」，所以判实词无交集（见 near-identical-copy-defeats-distinct-classes）。
+    const words = rearranges.map((entry) =>
+      new Set((entry.kind === 'rearrange' ? entry.label : '').toLowerCase().split(/\s+/))
+    )
+    expect(
+      [...words[0]!].filter((word) => words[1]!.has(word)),
+      '两档重排的措辞有重叠的实词，用户分不出点哪个'
+    ).toEqual([])
+  })
+
+  it('单格 Tab 里这两档整组缺席——点了什么都不发生的按钮不该画出来', () => {
+    // `balanceNode` 对叶子原样返回、`placeActiveWorkbenchRegionFirst` 首格已是活动格时原样返回，
+    // 于是单格 Tab 里两者都是 no-op。以缺席表达，而不是画一个禁用的假按钮。
+    const single = workbenchSplitMenuEntries({ regionCount: 1, split: () => {}, arrange: () => {} })
+    expect(single.some((entry) => entry.kind === 'rearrange')).toBe(false)
+
+    // 而它们的在场条件是「有得排」，不是容量：一张 99 分屏的 Tab 摆不成任何预设，却恰恰最需要
+    // 「均分一下」。把这两档混进预设那一组就会被容量判定连坐误杀——这一条钉住它们没有。
+    const crowded = workbenchSplitMenuEntries({ regionCount: 99, split: () => {}, arrange: () => {} })
+    expect(crowded.some((entry) => entry.kind === 'preset'), '前提自检：99 格该摆不成任何预设').toBe(
+      false
+    )
+    expect(
+      crowded.filter((entry) => entry.kind === 'rearrange'),
+      '预设摆不成时这两档被连坐毙掉了'
+    ).toHaveLength(2)
   })
 
   it('容量判定只此一处：清单里的预设与 workbenchRegionPresetMenu 逐档相同', () => {
@@ -131,27 +193,33 @@ describe('分屏与重排菜单：一份清单、一份图标、四个容器', (
     }
   })
 
-  it('分隔线与预设那一组同生共死（不画悬在末尾的线）', () => {
-    const withPresets = workbenchSplitMenuEntries({
+  it('分隔线与「重排」那一节同生共死（不画悬在末尾的线）', () => {
+    const withLayout = workbenchSplitMenuEntries({
       regionCount: 1,
       split: () => {},
       arrange: () => {}
     })
-    expect(withPresets.some((entry) => entry.kind === 'preset')).toBe(true)
-    expect(withPresets.filter((entry) => entry.kind === 'separator')).toHaveLength(1)
+    expect(withLayout.some((entry) => entry.kind === 'preset')).toBe(true)
+    expect(withLayout.filter((entry) => entry.kind === 'separator')).toHaveLength(1)
     // 分隔线两侧都得真有东西。
-    const separatorIndex = withPresets.findIndex((entry) => entry.kind === 'separator')
+    const separatorIndex = withLayout.findIndex((entry) => entry.kind === 'separator')
     expect(separatorIndex).toBeGreaterThan(0)
-    expect(separatorIndex).toBeLessThan(withPresets.length - 1)
+    expect(separatorIndex).toBeLessThan(withLayout.length - 1)
 
-    // 格数超过全部预设时，预设整组消失，那条线也不该留下。
-    const noPresets = workbenchSplitMenuEntries({
+    // 整节真的空掉时那条线也不该留下。要两个条件同时成立：格数超过全部预设（预设组消失），
+    // 且只有一格（那两档重排也消失）——而这两件事互相排斥，所以「一条线都不画」这个出口
+    // 今天在产品里到不了。它仍要被钉住：分隔线是按「后面还有没有东西」算的，不是常量。
+    const layoutOnly = workbenchRegionLayoutMenuEntries({ regionCount: 1, arrange: () => {} })
+    expect(layoutOnly.length, '前提自检：单格 Tab 该只剩预设那一组').toBeGreaterThan(0)
+    const splitsOnly = workbenchSplitMenuEntries({
       regionCount: 99,
       split: () => {},
       arrange: () => {}
     })
-    expect(noPresets.some((entry) => entry.kind === 'preset')).toBe(false)
-    expect(noPresets.some((entry) => entry.kind === 'separator')).toBe(false)
+    // 99 格：预设整组消失，但两档重排在场，故线还在——线跟的是整节，不是预设那一组。
+    expect(splitsOnly.some((entry) => entry.kind === 'preset')).toBe(false)
+    expect(splitsOnly.filter((entry) => entry.kind === 'separator')).toHaveLength(1)
+    expect(splitsOnly.at(-1)?.kind, '线后面必须真有东西').toBe('rearrange')
   })
 
   it('每条可点条目都有图标与稳定 key，且分隔线不与任何条目撞 key', () => {
@@ -297,15 +365,23 @@ describe('分屏与重排菜单：一份清单、一份图标、四个容器', (
     expect(withoutSplit.some((entry) => entry.kind === 'separator')).toBe(false)
   })
 
-  it('一格右键菜单里点分屏，发出的就是那一条', () => {
+  it('一格右键菜单里点分屏／重排，发出的就是那一条', () => {
     const split = vi.fn<(direction: SplitDirection) => void>()
-    const arrange = vi.fn<(preset: WorkbenchRegionLayoutPreset) => void>()
+    const arrange = vi.fn<(mode: AgentMuxArrangeMode) => void>()
+    // 两格：这样预设与那两档重排都在场，三种可点条目在这个容器里各走一遍。
     const entries = createRegionCopyModel({
       regionId: 'region-1',
       agentSessionId: null,
       writeClipboardText: async () => {},
-      splitMenu: workbenchSplitMenuEntries({ regionCount: 1, split, arrange })
+      splitMenu: workbenchSplitMenuEntries({ regionCount: 2, split, arrange })
     }).entries
+    // 前提自检：三种可点条目都真的到了这个容器里。缺一种时下面那个循环会静默跳过它。
+    const kinds = new Set(
+      entries.flatMap((entry) => (entry.kind === 'split' ? [entry.entry.kind] : []))
+    )
+    expect(kinds, '三种可点条目没有全部到达这个容器').toEqual(
+      new Set(['split', 'preset', 'rearrange', 'separator'])
+    )
     for (const entry of entries) {
       if (entry.kind !== 'split' || entry.entry.kind === 'separator') continue
       split.mockClear()
@@ -315,9 +391,14 @@ describe('分屏与重排菜单：一份清单、一份图标、四个容器', (
         expect(split, `"${entry.entry.label}" 在这个菜单里发错了方向`).toHaveBeenCalledWith(
           entry.entry.direction
         )
+      } else if (entry.entry.kind === 'preset') {
+        expect(arrange, `"${entry.entry.label}" 在这个菜单里发错了预设`).toHaveBeenCalledWith({
+          kind: 'preset',
+          preset: entry.entry.preset
+        })
       } else {
-        expect(arrange, `"${entry.entry.label}" 在这个菜单里发错了预设`).toHaveBeenCalledWith(
-          entry.entry.preset
+        expect(arrange, `"${entry.entry.label}" 在这个菜单里发错了 mode`).toHaveBeenCalledWith(
+          entry.entry.mode
         )
       }
     }
@@ -325,10 +406,12 @@ describe('分屏与重排菜单：一份清单、一份图标、四个容器', (
 
   it('Tab 右键菜单的重排一节走容量判定，且以缺席表达「摆不成」', () => {
     const source = componentSource('WorkbenchTabContextMenu.tsx')
-    expect(source, 'Tab 菜单没有接容量判定').toContain('workbenchRegionPresetMenu')
+    expect(source, 'Tab 菜单没有接那份共用清单').toContain('workbenchRegionLayoutMenuEntries')
     expect(source, 'Tab 菜单没有重排入口').toContain('Rearrange Splits')
-    // 触发器整段挂在「有没有可选预设」上：不画一个点开只有空清单的入口。
-    expect(source).toContain('presetMenu.presets.length > 0')
+    // 触发器整段挂在「这一节有没有东西」上——不是「有没有可选预设」。两者今天会分岔：99 格时
+    // 预设整组被容量毙掉，而均分／当前格优先仍在场，此时子菜单必须还在（#486）。所以判据跟的是
+    // 整节那一个 `length > 0`，而这也是唯一的那个答案：不存在一个容器认为有、另一个认为没有。
+    expect(source).toContain('layoutEntries.length > 0')
   })
 
   /**

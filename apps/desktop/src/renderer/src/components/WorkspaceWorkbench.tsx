@@ -409,7 +409,7 @@ function SortableWorkbenchTab({
         // 重排的是**这张**被右键点中的 Tab，不是当前活动的那张——非活动 Tab 上右键时，
         // 用活动 Tab 的格数会按错的容量过滤预设（列出摆不成的档，或藏掉摆得成的档）。
         regionCount={Object.keys(tab.regions).length}
-        onArrange={(preset) => arrangeTabRegions(workspaceId, tab.id, preset)}
+        onArrange={(mode) => arrangeTabRegions(workspaceId, tab.id, mode)}
         moveSessionViewTargets={moveSessionView.targets}
         onMoveSessionView={moveSessionView.onSelect}
       >
@@ -969,8 +969,8 @@ function PaneGroup({
                 splitRegion(workspaceId, activeTab.id, activeSurface.regionId, direction)
               }
             }}
-            onArrange={(preset) => {
-              if (activeTab) arrangeTabRegions(workspaceId, activeTab.id, preset)
+            onArrange={(mode) => {
+              if (activeTab) arrangeTabRegions(workspaceId, activeTab.id, mode)
             }}
           />
           <button

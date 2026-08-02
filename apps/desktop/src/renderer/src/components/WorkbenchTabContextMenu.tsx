@@ -15,19 +15,19 @@ import {
   X
 } from 'lucide-react'
 import type { ReactNode } from 'react'
+import type { AgentMuxArrangeMode } from '@agentmux/core/control'
 import {
   WORKBENCH_TAB_SPLIT_ACTIONS,
-  workbenchRegionPresetMenu,
-  type MoveSessionViewTarget,
-  type WorkbenchRegionPresetAction
+  workbenchRegionLayoutMenuEntries,
+  type MoveSessionViewTarget
 } from '../lib/workbench-tab-actions'
-import type { WorkbenchRegionLayoutPreset } from '../lib/workbench-view-layout'
 import type { SplitDirection } from '../lib/workbench-layout'
 import { formatMessagingAddress, formatSessionAddress, formatViewAddress } from '../lib/agent-address'
 import { formatPathsForCopy } from '../lib/clipboard-copy'
 import {
-  workbenchRegionPresetIcon,
-  workbenchSplitDirectionIcon
+  workbenchSplitDirectionIcon,
+  workbenchSplitMenuIcon,
+  workbenchSplitMenuKey
 } from './workbench-split-menu-icons'
 
 /**
@@ -251,7 +251,11 @@ export function WorkbenchTabContextMenu({
    * 不是当前活动 Tab 的：在非活动 Tab 上右键时，用活动 Tab 的格数会按错的容量过滤预设。
    */
   regionCount: number
-  onArrange(preset: WorkbenchRegionLayoutPreset): void
+  /**
+   * 重排。形参是引擎自己那个三档 union（`AgentMuxArrangeMode`），不是裸的 preset——这一节里既有
+   * 预设（补格子）也有均分／当前格优先（只重排已在场的格），两者都从这一个口子出去（#486）。
+   */
+  onArrange(mode: AgentMuxArrangeMode): void
   // 目的地来自纯模型。承载不了 Session 的 View、或没有别的 workspace 时为空——
   // 搬过去是 no-op，故以缺席表达而非禁用的假按钮。
   moveSessionViewTargets: ReadonlyArray<MoveSessionViewTarget>
@@ -263,7 +267,7 @@ export function WorkbenchTabContextMenu({
     ...(fileActions ? { file: fileActions } : {}),
     writeClipboardText
   })
-  const presetMenu = workbenchRegionPresetMenu({ regionCount, arrange: onArrange })
+  const layoutEntries = workbenchRegionLayoutMenuEntries({ regionCount, arrange: onArrange })
   return (
     <ContextMenu.Root {...(onOpenChange ? { onOpenChange } : {})}>
       <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
@@ -325,11 +329,16 @@ export function WorkbenchTabContextMenu({
             </ContextMenu.Portal>
           </ContextMenu.Sub>
           {/*
-            重排这张 Tab 的分格。整节以缺席表达「摆不成」：预设只增不减，一张已经 5 分屏的 Tab
-            摆不成 2×2（`workbenchRegionPresetMenu` 判的，判定只此一处），于是格数超过全部预设时
-            连子菜单触发器都不出现——不画一个点开只有空清单的入口。
+            重排这张 Tab 的分格。清单来自 `workbenchRegionLayoutMenuEntries`——与 Tab 条上的 Split
+            下拉、一格的右键菜单是同一份（那份注释说明了为什么必须只有一份）。此前这里自己 map 了一遍
+            预设、自己调图标、自己判在不在场，于是给这一节加一档（#486 的均分／当前格优先）时这个容器
+            会静默保留旧清单。
+
+            整节以缺席表达「没得排」：预设只增不减，一张已经 5 分屏的 Tab 摆不成 2×2；而均分与
+            「当前格优先」在单格 Tab 里都是 no-op。两者都为空时连子菜单触发器都不出现——不画一个
+            点开只有空清单的入口。判据只有一个 `length > 0`，不存在一个容器认为有、另一个认为没有。
           */}
-          {presetMenu.presets.length > 0 ? (
+          {layoutEntries.length > 0 ? (
             <ContextMenu.Sub>
               <ContextMenu.SubTrigger className="tab-context-menu__item">
                 <LayoutGrid size={14} />
@@ -338,16 +347,16 @@ export function WorkbenchTabContextMenu({
               </ContextMenu.SubTrigger>
               <ContextMenu.Portal>
                 <ContextMenu.SubContent className="tab-context-menu" collisionPadding={8} sideOffset={4}>
-                  {presetMenu.presets.map((action: WorkbenchRegionPresetAction) => {
-                    const Icon = workbenchRegionPresetIcon(action.preset)
+                  {layoutEntries.map((entry, index) => {
+                    const Icon = workbenchSplitMenuIcon(entry)
                     return (
                       <ContextMenu.Item
-                        key={action.preset}
+                        key={workbenchSplitMenuKey(entry, index)}
                         className="tab-context-menu__item"
-                        onSelect={() => presetMenu.onSelect(action.preset)}
+                        onSelect={entry.onSelect}
                       >
                         <Icon size={14} />
-                        <span>{action.label}</span>
+                        <span>{entry.label}</span>
                       </ContextMenu.Item>
                     )
                   })}

@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware'
 import {
   AGENTMUX_CONTROL_ERROR_CODES,
+  type AgentMuxArrangeMode,
   type AgentMuxControlErrorCode,
   type AgentMuxControlRequest,
   type AgentMuxControlResult,
@@ -393,9 +394,17 @@ type AppState = {
     regionId: string,
     direction: SplitDirection
   ): void
-  // 把一个 Tab 的格子摆成预设布局。与控制协议的 `arrange` 是同一个引擎（arrangeWorkbenchControlTab），
-  // 「要补几个格」由它自己从 preset 推导，这里不重算——见那个函数的注释。
-  arrangeTabRegions(workspaceId: string, tabId: string, preset: WorkbenchRegionLayoutPreset): void
+  /**
+   * 重排一个 Tab 的格子。与控制协议的 `arrange` 是同一个引擎（arrangeWorkbenchControlTab），
+   * 「要补几个格」由它自己从 preset 推导，这里不重算——见那个函数的注释。
+   *
+   * 形参是引擎自己那个三档 union（`AgentMuxArrangeMode`），不是裸的 preset。此前它只收 preset，
+   * 于是引擎支持的另两档（`balance` 均分、`active-first` 把当前格挪到第一位）**GUI 根本表达不出来**，
+   * 只有命令行能触达（#486）。那不是「菜单忘了加一项」——是这个签名把它们挡在了外面：想加菜单项
+   * 得先改签名，而不改签名就只能在渲染层另找一条路去调引擎，那就是第二个调用点、第二份推导。
+   * 收成引擎自己的 union 之后，加一档新的重排方式在这条路上不需要改任何签名。
+   */
+  arrangeTabRegions(workspaceId: string, tabId: string, mode: AgentMuxArrangeMode): void
   // 把一个 Tab 里两格的位置互换（#471）：右键某一格选「和另一格换位」。纯布局代数
   // （swapWorkbenchRegions），只换 id 在骨架上的位置，内容与所有 ratio 一字不动。
   swapRegions(workspaceId: string, tabId: string, regionIdA: string, regionIdB: string): void
@@ -2682,17 +2691,18 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (nextTab === tab) return
     set((state) => ({ tabs: { ...state.tabs, [tabId]: nextTab } }))
   },
-  arrangeTabRegions(workspaceId, tabId, preset) {
+  arrangeTabRegions(workspaceId, tabId, mode) {
     const current = get()
     if (!workbenchViewCloseAllowsView(current.closingWorkbenchViews, tabId)) return
     const tab = current.tabs[tabId]
     if (!tab || tab.workspaceId !== workspaceId) return
     // 与控制协议的 `arrange` 分支共用同一个引擎，且**不重算**「要补几个格」——那次推导住在
     // arrangeWorkbenchControlTab 里，这里连数都数不着。两侧各算一遍必漂移，症状是同一个预设
-    // 从菜单点没反应、从命令行却好用（见那个函数的注释）。
+    // 从菜单点没反应、从命令行却好用（见那个函数的注释）。三档重排（预设 / 均分 / 当前格优先）
+    // 也是同一个理由走同一条路：本方法不认 mode 的档，原样转交。
     let arranged: WorkbenchTab
     try {
-      arranged = arrangeWorkbenchControlTab(tab, { kind: 'preset', preset }, newRegionId)
+      arranged = arrangeWorkbenchControlTab(tab, mode, newRegionId)
     } catch (error) {
       // 引擎的拒绝是有话要说的（格数超了、id 撞了），不能咽掉——菜单里点了没反应就是最难查的那种。
       get().reportError(error)

@@ -1,8 +1,8 @@
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { ChevronDown, Columns2 } from 'lucide-react'
+import type { AgentMuxArrangeMode } from '@agentmux/core/control'
 import { workbenchSplitMenuEntries } from '../lib/workbench-tab-actions'
 import type { SplitDirection } from '../lib/workbench-layout'
-import type { WorkbenchRegionLayoutPreset } from '../lib/workbench-view-layout'
 import { workbenchSplitMenuIcon, workbenchSplitMenuKey } from './workbench-split-menu-icons'
 
 /**
@@ -22,7 +22,11 @@ export function PaneSplitMenu({
   regionCount: number
   onOpenChange(open: boolean): void
   onSplit(direction: SplitDirection): void
-  onArrange(preset: WorkbenchRegionLayoutPreset): void
+  /**
+   * 重排。形参是引擎自己那个三档 union，不是裸的 preset——这一节里既有预设（补格子）也有均分／
+   * 当前格优先（只重排），两者都从这一个口子出去（#486）。
+   */
+  onArrange(mode: AgentMuxArrangeMode): void
 }) {
   const entries = workbenchSplitMenuEntries({ regionCount, split: onSplit, arrange: onArrange })
   return (
