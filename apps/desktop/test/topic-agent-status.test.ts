@@ -315,16 +315,120 @@ describe('#409 头像的注意力取值必须画得出来', () => {
   it('头像那枚角标与项目栏用同一对字形——同一个问题不许有两套读法', () => {
     // 两处答的是同一个问题（"有人在等你"/"这坏了"）。各挑一套字形，同一件事在两个面板上就读成
     // 两件事。字形从项目栏那组规则里取，不在这里手抄一对字面量。
-    const glyphFor = (surface: RegExp): string[] =>
-      [...styles.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
-        .filter(([, selector]) => surface.test(selector))
-        .flatMap(([, , body]) => [...body!.matchAll(/content:\s*'([^']+)'/gu)].map((match) => match[1]!))
-    const rail = glyphFor(/\.project-rail-row\[data-attention/u)
-    const avatar = glyphFor(/\.agent-avatar\[data-attention/u)
-    // 自检：任一侧扫成空集都会让下面的包含关系恒真。
-    expect(rail.length).toBeGreaterThan(0)
-    expect(avatar.length).toBeGreaterThan(0)
-    for (const glyph of avatar) expect(rail, `头像用了项目栏没有的字形 ${glyph}`).toContain(glyph)
+    //
+    // 判据是**逐 category 成对**，不是"头像的字形是项目栏字形的子集"。子集对 `?` 与 `!` 一视同仁：
+    // 把头像 error 那条的 `content: '!'` 改成 `'?'`，两个取值都还在项目栏那个集合里，包含关系照旧
+    // 成立——实测存活过，而界面上"这坏了"与"在等你"从此是同一个符号。
+    const glyphByCategory = (surface: string): Map<string, string> => {
+      const out = new Map<string, string>()
+      for (const [, selector, body] of styles.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+        const glyph = /content:\s*'([^']+)'/u.exec(body!)?.[1]
+        if (glyph === undefined) continue
+        // 一条规则可以同时给多个 category 定字形（`[a='x'], [a='y'] { content: '?' }`），所以逐成员拆。
+        for (const member of selector!.split(',')) {
+          if (!member.includes(surface)) continue
+          const category = /\[data-attention=['"]([^'"]+)['"]\]/u.exec(member)?.[1]
+          if (category === undefined) continue
+          // 后面的规则覆盖前面的（`error::after { content: '!' }` 就是这样改写上一条的）。
+          out.set(category, glyph)
+        }
+      }
+      return out
+    }
+    const rail = glyphByCategory('.project-rail-row')
+    const avatar = glyphByCategory('.agent-avatar')
+    // 自检：任一侧扫成空集都会让下面的逐 category 循环空转。
+    expect(rail.size, '项目栏一侧扫不到字形——判据会变成恒真').toBeGreaterThan(1)
+    expect(avatar.size, '头像一侧扫不到字形——判据会变成恒真').toBeGreaterThan(1)
+    // 而两枚字形本身必须不同：都写成 `?` 时下面的逐 category 相等仍然成立，却什么也没区分。
+    expect(new Set(avatar.values()).size, '两个 category 用了同一枚字形，等于没区分').toBe(avatar.size)
+    for (const [category, glyph] of avatar) {
+      expect(rail.get(category), `头像的 ${category} 用 ${glyph}，项目栏用 ${rail.get(category)}`).toBe(glyph)
+    }
+  })
+
+  /**
+   * 载体规则不分档，却点名了一个色相。
+   *
+   * 这是 `.status__dot { background: var(--status-ink) }` 那条被改成 `var(--green)` 的形状：它对
+   * **所有**状态生效，于是整张九状态色表塌成一个颜色。它此前能存活，是因为判据写的是
+   * `consumers.some(sel => sel.includes('.status__dot'))`——兄弟规则
+   * `.status--disconnected .status__dot`（chrome.css，在 box-shadow 里读了同一个 token）替它满足了
+   * "有人在读 ink"，基础规则那条填充改成什么都不影响。头像那一侧更彻底：满足 `.some()` 的是一条
+   * `:hover` 规则，所以静息态的描边色（dock.css 两处 outline）压根没人守。
+   *
+   * 所以判据不问"有没有人读 ink"，而是反过来问"有没有人在不分档的地方写死了色相"——那是这类
+   * 缺陷唯一的共同形状，且不必手抄"哪条规则的哪个属性该读 token"（手抄的清单会在新增载体时恰好
+   * 落后）。
+   *
+   * 分档有两种键，都合法：`.status--<state>` 按状态、`[data-attention='<category>']` 按"需不需要
+   * 你"。裸 `[data-attention]`（不带取值）仍在禁令内——它和没有键一样会盖住全部取值。
+   */
+  it('不分档的载体规则不许点名色相——那会把整张表塌成一个颜色', () => {
+    /**
+     * 载体：那些**按状态上色**的元素。判在场必须按词法边界，不能用 `includes`——
+     * `.project-rail-row__activity`（"有东西在跑"的指示器，绿色是它的本意，显隐由 `[data-running]`
+     * 控制）会被 `.project-rail-row` 前缀吞掉，于是判据对着一条合法规则报红。BEM 的 `__` 子元素
+     * 是另一个东西，不是这个载体的一部分。
+     */
+    const CARRIERS = ['status__dot', 'agent-avatar', 'board-run-card', 'project-rail-row']
+    /** 类名以这个词结束（后面不再接 `-`、`_` 或别的词字符），才算命中这个载体本身。 */
+    const carriesState = (selector: string): boolean =>
+      CARRIERS.some((carrier) => new RegExp(`\\.${carrier}(?![\\w-])`, 'u').test(selector))
+    const HUE = /var\(\s*--(?:green|amber|red|blue)(?:-text|-bg|-line|-wash)?\s*\)/u
+    /**
+     * 具名例外：按**选择器**放行，不放行数值。
+     *
+     * `.status--waiting .status__dot` 那两条确实按状态取了键（`.status--waiting` / `.status--blocked`
+     * 在选择器里），所以它们本来就不在禁令内——列在这里只是为了让"为什么它们合法"这句话有个落点。
+     * 真正的例外只有 board 的 hover 那一条，它是 #436：hover 借了 working 的绿，该改成中性提亮，
+     * 改完这一行就该删掉。留着它而不是放宽判据，是因为一个具名的例外会被人读到，一个放宽的正则不会。
+     */
+    const NAMED = new Map<string, string>([
+      ['.board-run-card:hover', '#436：hover 借了 --green-line（working 的色相），待改中性提亮后删除']
+    ])
+    /**
+     * 判据本体。抽成函数是为了让下面的自检**质询同一段代码**而不是在别处重算一遍——
+     * 一个在字面量上另写一遍正则的"自检"，改坏真判据时它照旧绿。
+     */
+    const flatteningRules = (sheet: string): string[] => {
+      const out: string[] = []
+      for (const [, rawSelector, body] of sheet.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+        const selector = rawSelector!.trim().replace(/\s+/gu, ' ')
+        if (selector.startsWith('@')) continue
+        if (carriesState(selector) === false) continue
+        // 分档取键的规则点名色相是合法的——状态语汇段就是这么给 ink 赋值的，项目栏的角标也是这么按
+        // category 各挑一个色相的。两种键都算分档：`.status--<state>` 是状态那一档，
+        // `[data-attention='<category>']` 是"需不需要你"那一档。禁令针对的是**不带任何键**的规则，
+        // 因为只有它才会一视同仁地盖住全部取值。
+        if (/\.status--[\w-]+|\[data-attention=/u.test(selector)) continue
+        if (NAMED.has(selector)) continue
+        for (const hue of body!.matchAll(new RegExp(HUE.source, 'gu'))) {
+          out.push(`${selector} { ${hue[0]} }`)
+        }
+      }
+      return out
+    }
+    expect(flatteningRules(styles), '这些规则对所有状态生效，却写死了一个色相').toEqual([])
+
+    // 自检一：扫描真的看到了载体规则。一条都没看到时上面的循环空转，返回值恒为空。
+    const seen = [...styles.matchAll(/([^{}]+)\{/gu)]
+      .filter(([, selector]) => carriesState(selector!))
+    expect(seen.length, '扫不到任何载体规则——判据会变成恒真').toBeGreaterThan(4)
+    // 自检二：判据认得出这个缺陷本身——逐字喂那次实测存活的变异，以及裸 `[data-attention]` 那种
+    // "看着像分档其实盖住全部取值"的写法。
+    expect(flatteningRules('.status__dot { background: var(--green); }')).toHaveLength(1)
+    expect(flatteningRules(".agent-avatar[data-attention] { outline: 1px solid var(--red); }")).toHaveLength(1)
+    // 而两种真的分档写法必须放行，否则判据会逼着人把合法的色相赋值也改掉。
+    expect(flatteningRules('.status--waiting .status__dot { box-shadow: 0 0 0 3px var(--amber-wash); }')).toEqual([])
+    expect(flatteningRules(".project-rail-row[data-attention='error'] .x { background: var(--red); }")).toEqual([])
+    // 自检三：例外清单必须指向真实存在的选择器，否则重命名之后它会静默变成一个谁都能钻的洞。
+    const selectors = new Set(
+      [...styles.matchAll(/([^{}]+)\{/gu)].map(([, selector]) => selector!.trim().replace(/\s+/gu, ' '))
+    )
+    for (const selector of NAMED.keys()) {
+      expect(selectors, `例外 ${selector} 已不存在，该删掉这条豁免`).toContain(selector)
+    }
   })
 })
 
