@@ -32,6 +32,7 @@ import { ConfirmationDialog } from './ConfirmationDialog'
 import { NewTabSurface } from './NewTabSurface'
 import { PaneSplitMenu } from './PaneSplitMenu'
 import { RegionContextMenu } from './RegionContextMenu'
+import { regionFocusExpression, type RegionFocusExpression } from '../lib/region-focus'
 import { activeTopicIdFromLayout, layoutForActiveTopic } from '../lib/scratch-topic-layout'
 import { SessionPane } from './SessionPane'
 import { WorkbenchTabContextMenu } from './WorkbenchTabContextMenu'
@@ -473,13 +474,16 @@ function SurfaceContent({
   tabId,
   groupId,
   nativeSurfacesVisible,
-  interactiveResize
+  interactiveResize,
+  focus
 }: {
   surface: WorkbenchSurface
   tabId: string
   groupId: string
   nativeSurfacesVisible: boolean
   interactiveResize: boolean
+  /** 这一格的焦点表达。只有 browser 那格真用得到（原生视图要让位），但由上游一次算好传下来。 */
+  focus: RegionFocusExpression
 }) {
   const parked = useTerminalRegionParked(surface.regionId)
   const monacoReleased = useMonacoSurfaceReleased(surface.regionId)
@@ -515,6 +519,7 @@ function SurfaceContent({
         tab={surface}
         visible={nativeSurfacesVisible}
         released={browserReleased}
+        yieldToFocusRing={focus.nativeViewYieldsToRing}
       />
     )
   }
@@ -592,6 +597,10 @@ function WorkbenchRegionLeaf({
   const [confirmingClose, setConfirmingClose] = useState(false)
   const surface = tab.regions[node.regionId]
   const regionCount = Object.keys(tab.regions).length
+  // 焦点是**一次**判定，两个消费者：CSS 类名（画环）与原生视图的让位量（browser 那格要按环宽内缩，
+  // 否则窗口级层把环的三边物理盖掉）。见 region-focus.ts——分开各算一次时未聚焦的 browser 区
+  // 也内缩，露出底下深色成了一圈无环的黑边。
+  const focus = regionFocusExpression(tab.layout.activeRegionId, node.regionId)
   const canClose = regionCount > 1
   const dirty = surface?.kind === 'file' && Boolean(
     dirtyDocuments[documentKey(surface.workspaceId, surface.path)]
@@ -639,7 +648,7 @@ function WorkbenchRegionLeaf({
       })}
     >
     <section
-      className={`workbench-region ${tab.layout.activeRegionId === node.regionId ? 'workbench-region--active' : ''}`}
+      className={`workbench-region ${focus.className}`}
       data-workbench-region-id={node.regionId}
       onPointerDown={() => focusRegion(tab.workspaceId, tab.id, node.regionId)}
     >
@@ -649,6 +658,7 @@ function WorkbenchRegionLeaf({
         groupId={groupId}
         nativeSurfacesVisible={nativeSurfacesVisible}
         interactiveResize={interactiveResize}
+        focus={focus}
       />
       {canClose ? (
         <button

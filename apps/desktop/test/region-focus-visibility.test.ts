@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 import { allStyles } from './helpers/styles.js'
+import { REGION_FOCUS_CLASS, regionFocusExpression } from '../src/renderer/src/lib/region-focus.js'
 
 /**
  * 「多个 Region 时，当前聚焦在哪一格」必须看得出来（#339，用户原话：「多个 region, 当前聚焦在哪里,
@@ -71,27 +72,35 @@ function rulesForClass(className: string): Rule[] {
 }
 
 /**
- * 组件里 `activeRegionId` 参与计算的那个 className 表达式。
+ * 焦点判定所在的那个模块。类名与「原生视图要不要让位」由它一次算出（#350），所以「按 activeRegionId
+ * 分岔」这件事的判据也跟着落到这里——它原来在 WorkspaceWorkbench 的一个内联三元里。
+ */
+const REGION_FOCUS_TS = new URL('../src/renderer/src/lib/region-focus.ts', import.meta.url)
+
+/**
+ * 焦点判定里那个分岔的两个分支。
  *
  * 按 AST 取而不是 grep：判据要落在「这个三元的两个分支给出**不同**的类名」上。
- * 文本判据看不出 `? 'workbench-region--active' : 'workbench-region--active'`
- * 与 `? '' : ''` 这两种把分岔抹平的写法（前者每格都亮，后者每格都不亮，用户看到的都是
- * "分不出焦点"）。
+ * 文本判据看不出 `? REGION_FOCUS_CLASS : REGION_FOCUS_CLASS` 与 `? '' : ''` 这两种把分岔抹平的
+ * 写法（前者每格都亮，后者每格都不亮，用户看到的都是"分不出焦点"）。
+ *
+ * 条件里认 `focused` 这个名字之外还认 `activeRegionId`：判定收进纯函数后条件是那个入参算出的
+ * 布尔，直接写 `activeRegionId === regionId` 也合法，两种写法都该被取到。
  */
 function activeRegionConditional(): { whenActive: string; whenNot: string } | null {
-  const text = readFileSync(WORKBENCH_TSX, 'utf8')
+  const text = readFileSync(REGION_FOCUS_TS, 'utf8')
   const source = ts.createSourceFile(
-    'WorkspaceWorkbench.tsx',
+    'region-focus.ts',
     text,
     ts.ScriptTarget.Latest,
     true,
-    ts.ScriptKind.TSX
+    ts.ScriptKind.TS
   )
   let found: { whenActive: string; whenNot: string } | null = null
   const walk = (node: ts.Node): void => {
     if (
       ts.isConditionalExpression(node) &&
-      node.condition.getText(source).includes('activeRegionId')
+      /\b(?:focused|activeRegionId)\b/.test(node.condition.getText(source))
     ) {
       found = {
         whenActive: node.whenTrue.getText(source),
@@ -313,24 +322,112 @@ describe('Region 焦点必须看得出来（#339）', () => {
     expect(exact.test('.workbench-region')).toBe(true)
   })
 
-  it('组件按 activeRegionId 分岔，且两个分支给出不同的类名', () => {
+  /**
+   * 两个消费者读的是**同一次**判定（#350）。
+   *
+   * 这条是行为层：类名与「原生视图要不要让位」必须同步取值。分开各算一次的后果实测过——BrowserPane
+   * 那侧问的是「有没有 `.workbench-region` 祖先」，而环宽那个自定义属性声明在 `:root`，任何 Region
+   * 都继承得到，于是未聚焦的 browser 区也内缩 2px，露出底下 `.browser-stage` 的深色成一圈无环的黑边。
+   *
+   * 判据钉住这一对的**联动**而不是各自的取值：把 `nativeViewYieldsToRing` 写成常量 true 或 false，
+   * 或让它读另一次比较，这里都红。
+   */
+  it('类名与原生视图让位量出自同一次判定', () => {
+    const focused = regionFocusExpression('r1', 'r1')
+    const other = regionFocusExpression('r1', 'r2')
+    const none = regionFocusExpression(null, 'r1')
+
+    expect(focused.className, '聚焦的那一格没挂上焦点类名').toBe(REGION_FOCUS_CLASS)
+    expect(other.className, '未聚焦的那一格也挂上了焦点类名——每格都亮，分不出焦点').toBe('')
+    expect(none.className, '没有活动区时仍挂焦点类名').toBe('')
+
+    // 联动：让位量恒等于「类名非空」。写死成任一常量，或按另一次比较取值，这里都红。
+    for (const [label, expression] of [
+      ['聚焦', focused], ['未聚焦', other], ['无活动区', none]
+    ] as const) {
+      expect(
+        expression.nativeViewYieldsToRing,
+        `${label}那一格：让位量与类名不同步——原生视图与焦点环各读一次判定，必漂移`
+      ).toBe(expression.className !== '')
+    }
+    // 自检：上面这批样本真的两种情形都覆盖到了，否则那条恒等式只在一侧被质询过。
+    expect(
+      new Set([focused, other, none].map((expression) => expression.nativeViewYieldsToRing)).size,
+      '样本只覆盖了让位量的一个取值——上面那条联动断言有一半没被执行'
+    ).toBe(2)
+  })
+
+  it('焦点判定按 activeRegionId 分岔，且两个分支给出不同的类名', () => {
     const conditional = activeRegionConditional()
     expect(
       conditional,
-      'WorkspaceWorkbench 里没有任何按 activeRegionId 分岔的三元——每一格长得一样，焦点无从表达'
+      'region-focus.ts 里没有任何按焦点分岔的三元——每一格长得一样，焦点无从表达'
     ).not.toBeNull()
     // 两个分支必须真的不同。写成同一个值（两边都加类、或两边都不加）在类型与文本上都合法，
     // 而屏幕上就是"分不出哪一格是焦点"。
     expect(
       conditional!.whenActive.trim(),
-      '按 activeRegionId 分岔的两个分支给出同一个类名，等于没有分岔'
+      '按焦点分岔的两个分支给出同一个类名，等于没有分岔'
     ).not.toBe(conditional!.whenNot.trim())
     // 焦点那一侧必须真的给出一个类名，不能是空串（空串意味着焦点态没有任何样式挂载点）。
-    expect(conditional!.whenActive, '焦点分支没有给出类名').toMatch(/[a-z]/)
+    expect(conditional!.whenActive, '焦点分支没有给出类名').toMatch(/[a-zA-Z]/)
+  })
+
+  /**
+   * 判定算出来了，但**没人把它挂到那一格上**：这一层单独守（#350 的接线层）。
+   *
+   * 分两层的理由与 browser-bounds-sync 那侧同构（extracting-to-lib-only-fixes-half）：判定收进
+   * `region-focus.ts` 后上面那条断言变得好写了，可「壳里有没有真的用它」照旧无人守——保留 import、
+   * 算完丢掉、className 写死成 `'workbench-region'`，上面每一条都不红，而屏幕上焦点彻底消失。
+   *
+   * 判据是 import 关系加取值位（guard-criterion-must-be-import-relation：`not.toContain('name(')`
+   * 会被裸标识符绕过）：组件必须从那个模块 import 判定函数，且 Region 的 className 里真的带着它的
+   * `className` 字段。
+   */
+  it('组件真的用那次判定给 Region 挂类名，而不是只 import 了它', () => {
+    const source = readFileSync(WORKBENCH_TSX, 'utf8')
+    expect(
+      /import\s*\{[^}]*\bregionFocusExpression\b[^}]*\}\s*from\s*'[^']*\/region-focus'/.test(source),
+      'WorkspaceWorkbench 没有从 lib/region-focus import regionFocusExpression——' +
+        '焦点类名与原生视图让位量各算一次，必漂移（read-key-and-write-key-must-be-one-decision）'
+    ).toBe(true)
+
+    // 取 Region 那个 <section> 的 className 表达式，判它引用了判定的结果。写死类名、或漏掉
+    // 焦点那一段（每格都不亮）都在这里红。
+    const ast = ts.createSourceFile('WorkspaceWorkbench.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+    const classNames: string[] = []
+    const walk = (node: ts.Node): void => {
+      if (
+        ts.isJsxAttribute(node) &&
+        node.name.getText(ast) === 'className' &&
+        node.initializer &&
+        /\bworkbench-region\b/.test(node.initializer.getText(ast))
+      ) {
+        classNames.push(node.initializer.getText(ast))
+      }
+      ts.forEachChild(node, walk)
+    }
+    walk(ast)
+    // 自检：抽取器真的找到了那个属性，否则下面按内容判的那条跑零次、恒绿。
+    expect(
+      classNames.length,
+      'Region 的 className 一个都没抽到——下面那条守卫是死代码（组件重构过？）'
+    ).toBeGreaterThan(0)
+    expect(
+      classNames.some((expression) => /\bfocus\.className\b/.test(expression)),
+      `Region 的 className 里没有那次判定的结果（抽到的是 ${classNames.join(' | ')}）——` +
+        '焦点类名写死了，每一格长得一样'
+    ).toBe(true)
   })
 
   it('焦点类名有承重声明，不是一条空规则', () => {
-    const active = rulesForClass('workbench-region--active')
+    // 判定导出的那个类名与 CSS 画的那个必须是同一个：改一侧的拼写，另一侧沉默，焦点态就没有任何
+    // 样式挂载点。用导出的常量去查规则，两边就只有一个真相（下面几条也一并跟着它走）。
+    expect(
+      REGION_FOCUS_CLASS,
+      'region-focus.ts 导出的焦点类名与 CSS 里画环的那个不一致——类名挂上了但没有任何规则命中'
+    ).toBe('workbench-region--active')
+    const active = rulesForClass(REGION_FOCUS_CLASS)
     const properties = new Set(active.flatMap((rule) => [...declarations(rule).keys()]))
     // #111 的先例：只判选择器在不在场，把 body 清空即可让焦点在屏幕上彻底消失而守卫沉默。
     expect(
