@@ -38,6 +38,35 @@ export function clampSplitRatio(ratio: number): number {
   return Math.max(MIN_SPLIT_RATIO, Math.min(1 - MIN_SPLIT_RATIO, ratio))
 }
 
+/**
+ * 把整棵树的每个 `ratio` 夹回 [MIN_SPLIT_RATIO, 1-MIN_SPLIT_RATIO]，并在**没有一处越界时返回原引用**。
+ *
+ * 为什么需要这一层：`clampSplitRatio` 只夹**新算出来的**那一个值，所有调用点都在「用户此刻拖了分隔条」
+ * 或「刚重算了配比」这类**写入**路径上。而从 localStorage 读回的一棵树的 ratio 谁也没夹过——它们是
+ * **旧版本的代码**写下的，而那时的下界不是今天这个数（region 树曾用 0.1，见 :23-28 记的那次收敛）。
+ * 一条 0.12 的记录在当年合法，今天越界：模型允许 0.12、视图的 `minSize` 只到 15%，于是面板画出来是
+ * 15% 而 store 里存着 12%，拖一次分隔条的提交器观察到被夹过的布局又把修正值写回——一帧跳动加一次多余
+ * 写入，正是 `balanceNode` 那段注释描述的同一种症状，只是这次的越界值来自磁盘而不是算式。
+ *
+ * 引用稳定（没夹到任何一处时返回原引用）买到的是**省掉一次分配**，不是正确性：持久化边界在
+ * 每次写入（zustand 的 `partialize`）上跑这一层，而绝大多数写入的树本就在界内，无条件重建等于
+ * 每次拖动都白造一棵树。要如实说清它**没有**买到什么：本仓今天没有任何消费者按引用比较这棵树
+ *（`partialize` 的产物直接 `JSON.stringify` 进 localStorage，恢复侧的产物进一次全新的 `set()`），
+ * 所以谁也不该把「引用没变」当成一个可依赖的合同——那会让一次正当的重构变成假回归。
+ * 测试里钉住这条身份，钉的是这个优化，不是不变量；断言的措辞要说明这一点。
+ *
+ * 泛型的理由与本文件其余部分相同：两棵树（tab-group 与 region）的 ratio 是同一件事，
+ * 只有叶子载荷不同。归一化只写一份，两边都从这里取。
+ */
+export function clampSplitTreeRatios<Leaf>(root: SplitTreeNode<Leaf>): SplitTreeNode<Leaf> {
+  if (root.type === 'leaf') return root
+  const first = clampSplitTreeRatios(root.first)
+  const second = clampSplitTreeRatios(root.second)
+  const ratio = clampSplitRatio(root.ratio)
+  if (first === root.first && second === root.second && ratio === root.ratio) return root
+  return { ...root, first, second, ratio }
+}
+
 function updateRatioAtSegments<Leaf>(
   root: SplitTreeNode<Leaf>,
   path: string[],
