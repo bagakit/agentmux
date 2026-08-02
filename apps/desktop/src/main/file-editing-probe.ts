@@ -459,6 +459,23 @@ async function pathExists(path: string): Promise<boolean> {
   return await readFile(path).then(() => true, () => false)
 }
 
+// 启动落点不是这个探针的被测对象。应用可以合法地落在任何 workspace 上（今天是 Scratch，
+// 见 active-workspace-reseat.ts 的候选顺序），而 Scratch 的文件树里没有 fixture 的文件。
+// 所以每个要读文件树的阶段都必须先自己把目标项目选中，而不是指望启动恰好落在这里——
+// 否则第一条树断言会在 20 秒后超时，报的是"文件树里没有这个文件"，而真相是"看的是另一个项目"。
+async function selectWorkspaceProject(
+  window: BrowserWindow,
+  description: string,
+  workspacePath: string
+): Promise<void> {
+  await nativeClick(window, description, projectRowSource(workspacePath))
+  await waitFor(`active ${description}`, async () => (
+    await window.webContents.executeJavaScript(
+      `${projectRowSource(workspacePath)}?.classList.contains('project-rail-row--active') === true`
+    ) as boolean
+  ))
+}
+
 async function runExplorerInteractionProbe(options: {
   window: BrowserWindow
   workspacePath: string
@@ -503,12 +520,7 @@ async function runExplorerInteractionProbe(options: {
       `Boolean(${treeRowSource('alternate.txt')})`
     ) as boolean
   ))
-  await nativeClick(window, 'primary Workspace project', projectRowSource(options.workspacePath))
-  await waitFor('active primary Workspace project', async () => (
-    await window.webContents.executeJavaScript(
-      `${projectRowSource(options.workspacePath)}?.classList.contains('project-rail-row--active') === true`
-    ) as boolean
-  ))
+  await selectWorkspaceProject(window, 'primary Workspace project', options.workspacePath)
   await waitFor('revisited active and neighbor rows and expanded collision target and restored children', async () => (
     await window.webContents.executeJavaScript(
       `${treeRowSource('explorer-source/menu.txt')}?.getAttribute('aria-selected') === 'true' && ` +
@@ -792,6 +804,7 @@ export async function runDesktopFileEditingProbe(options: {
   const path = join(options.workspacePath, relativePath)
   const phases: Record<string, unknown> = {}
   try {
+    await selectWorkspaceProject(options.window, 'file editing Workspace project', options.workspacePath)
     await waitFor('revision probe file row', async () => (
       await options.window.webContents.executeJavaScript(
         `Boolean(document.querySelector('[data-tree-path=${JSON.stringify(relativePath)}]'))`
