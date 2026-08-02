@@ -7,6 +7,7 @@ import type {
 } from '../../../shared/contracts'
 import type { AgentMuxAgentSession, AgentMuxEvidence, AgentMuxRunRef } from '@agentmux/core'
 import { applyAgentTimelineMutation } from '@agentmux/core/timeline'
+import { agentDisplayState } from '@agentmux/core/agent-status'
 // 进程事实的投影走 node-free 子路径，与主进程侧 import 的是同一个模块（包根那条链拖 node:crypto，
 // renderer 引不动）。
 import { projectRunProcessStatus, runExitFacts } from '@agentmux/core/run-status'
@@ -540,7 +541,7 @@ export function projectRuntimeEvent(
             ...item,
             updatedAt: Math.max(item.updatedAt, core.evidence.observedAt),
             status: {
-              state: core.state === 'unknown' ? 'running' : core.state,
+              state: agentDisplayState(core.state),
               source: core.evidence.source,
               observedAt: core.evidence.observedAt,
               ...(core.detail === undefined ? {} : { detail: core.detail })

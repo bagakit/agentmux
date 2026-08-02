@@ -1,4 +1,4 @@
-import type { AgentSemanticState, AgentStatus } from './types.js'
+import type { AgentDisplayState, AgentSemanticState, AgentStatus } from './types.js'
 
 /**
  * 语义状态的新鲜度判定：给定最后一次观察时刻与现在，这个状态还算不算数。
@@ -55,6 +55,32 @@ const SEMANTIC_STATUS_STALE_AFTER_MS = 15 * 60_000
  * 而不伪造任何我们没观察到的结论。
  */
 export const DECAYED_SEMANTIC_STATE: AgentSemanticState = 'unknown'
+
+/**
+ * 语义态 → 显示态。**唯一一处**。
+ *
+ * 两个联合只差在两端：语义态独有 `unknown`（我们不知道），显示态独有 `starting` / `running` /
+ * `disconnected` / `exited`（进程层面的事，不是活动声明）。重叠的五个（working/waiting/blocked/
+ * done/error）原样通过——它们是同一件事的同一种说法，改名或改写任何一个都是撒谎。
+ *
+ * 只有 `unknown` 需要决定落点，落 `running`：进程还在，但此刻没有「在干活」的声明。
+ *
+ * **为什么必须是一处而不是三处 `state === 'unknown' ? 'running' : state`：**
+ * 手抄那一行时 tsc 只守住「你没漏掉 unknown」（漏了就是 `AgentSemanticState` 赋给
+ * `AgentDisplayState`，编译不过），守不住**你映射到了哪**——`unknown → 'done'` 类型完全合法，
+ * 而它谎称 Agent 干完了；`unknown → 'error'` 同样合法，谎称它崩了。三处各写一遍，就是三次
+ * 各自可以独立写错的机会，且写错的那一处只在它自己那条路径上撒谎（一条路显示"运行中"、
+ * 另一条显示"已完成"，同一个 Agent），没有任何编译器或测试会因此变红。
+ *
+ * 三处的来路各不相同，这恰恰是它们必须共用一处的理由——同一个 Agent 的同一个状态，
+ * 经不同的路到达界面时必须长得一样：
+ *   - hook-normalizer：原生 hook 事件落地时（Provider 的 rules 认不出事件 → unknown）
+ *   - session-state 的 agent-status 分支：Core 事件进 renderer 状态时（含 ACP 的 status）
+ *   - agent-status-decay：15 分钟静默衰减时（DECAYED_SEMANTIC_STATE 就是 unknown）
+ */
+export function agentDisplayState(semantic: AgentSemanticState): AgentDisplayState {
+  return semantic === 'unknown' ? 'running' : semantic
+}
 
 /**
  * 距离这个状态变陈旧还有多少毫秒；已经陈旧或不可衰减则为 0。
