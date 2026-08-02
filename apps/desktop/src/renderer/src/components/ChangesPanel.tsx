@@ -5,6 +5,7 @@ import {
   FilePlus2,
   FolderGit2,
   GitCommitHorizontal,
+  GitPullRequestArrow,
   LoaderCircle,
   Minus,
   Plus,
@@ -15,9 +16,13 @@ import {
 import { useMemo, useState, type ReactNode } from 'react'
 import type { GitFileChange, WorkspaceRecord } from '../../../shared/contracts'
 import { useGitStatus } from '../hooks/useGitStatus'
+import { usePrReadiness } from '../hooks/usePrReadiness'
+import { api } from '../lib/api'
 import { gitBridge } from '../lib/git-bridge'
 import { describeGitRemote, discardIntent, type GitRemoteVerb } from '../lib/git-remote-outcome'
+import { beginPrLaunch, type PrLaunchPlan } from '../lib/pr-launch'
 import { useAppStore } from '../store'
+import { PrLaunchSurface } from './PrLaunchSurface'
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -56,6 +61,8 @@ function changeLabel(change: GitFileChange): string {
 export function ChangesPanel({ workspace }: { workspace: WorkspaceRecord }) {
   const { status, loading, error: loadError, refresh } = useGitStatus(workspace.id)
   const openFileDiff = useAppStore((state) => state.openFileDiff)
+  const createPullRequest = useAppStore((state) => state.createPullRequest)
+  const prReadiness = usePrReadiness(workspace.id)
   const [busyPath, setBusyPath] = useState<string | null>(null)
   const [busyRemote, setBusyRemote] = useState<GitRemoteVerb | null>(null)
   const [committing, setCommitting] = useState(false)
@@ -67,6 +74,16 @@ export function ChangesPanel({ workspace }: { workspace: WorkspaceRecord }) {
   // 被武装的那一行。discard 对未跟踪文件走 `git clean --force`——从磁盘删除、无 reflog、不可撤销，
   // 而那个按钮就挨在 Stage 旁边。判定本身在 discardIntent 里，这里只存它要的那一个值。
   const [armedDiscard, setArmedDiscard] = useState<string | null>(null)
+  /**
+   * 那一次 readiness 读出来的**完整**计划。存计划而不是存 readiness，是因为标题草稿、按钮能不能按、
+   * 送出去的 token 必须全部出自**同一次**读——分别从 readiness 各算一次就是两处派生，而这里的漂移
+   * 是静默的：阶梯放行的是它看到的那对 branch/base，token 带走的却可能是另一对。
+   */
+  const [prPlan, setPrPlan] = useState<PrLaunchPlan | null>(null)
+  const [prTitle, setPrTitle] = useState('')
+  const [prBody, setPrBody] = useState('')
+  const [prSubmitting, setPrSubmitting] = useState(false)
+  const [prUrl, setPrUrl] = useState<string | null>(null)
 
   const repo = status?.kind === 'git-repository' ? status : null
   const staged = useMemo(
@@ -194,6 +211,72 @@ export function ChangesPanel({ workspace }: { workspace: WorkspaceRecord }) {
     }
   }
 
+  /**
+   * 点「开 PR」。整个决定在 {@link beginPrLaunch} 里，这里只是把它的三个产出各写进一个 state。
+   *
+   * 判定为什么不留在这个函数体里：它闭合在组件 state 上，而本仓没有 DOM，所以没有任何办法点它一下。
+   * 于是「这个 handler 有没有被执行到」在这里根本不可观测——实测在这个函数第一行插一个 `return`，
+   * 按钮变成什么都不做，而 21 条断言全绿（源码里那些调用点照旧在场，语法层判据数得到它们）。
+   * 搬到 lib 之后那个函数可以被真调用，「读没读、算没算、草稿从哪来」就都是断言而不是推断；
+   * 留在这里的这段壳里没有分支也没有早退，唯一能藏东西的地方被消掉了
+   *（记忆 guard-must-check-reachability-not-presence / extracting-to-lib-only-fixes-half）。
+   *
+   * 阻塞也要落成 state 显示出来，不是 return 掉：阶梯的 blocker 是给人看的下一步（「先 push」
+   * 「跑 gh auth login」）。一个什么都不发生的按钮与一个说明原因的按钮，对用户是两件事。
+   */
+  async function openPrForm(): Promise<void> {
+    setActionError(null)
+    setActionNotice(null)
+    setPrUrl(null)
+    // check() 自己把桥缺席与失败写进它的 error 面，这里不再编第二句说法。
+    const opening = await beginPrLaunch({ check: prReadiness.check, workspace, now: Date.now() })
+    setPrPlan(opening.plan)
+    // 草稿只在**打开表单**时铺一次，不在每次渲染时算：否则用户改过的标题会被下一次渲染悄悄改回去。
+    setPrTitle(opening.title)
+    setPrBody(opening.body)
+  }
+
+  function closePrForm(): void {
+    setPrPlan(null)
+    setPrUrl(null)
+    prReadiness.reset()
+  }
+
+  /**
+   * 送出 PR。token 与 eligibility 都取自 {@link prPlan}——那一次读出来的同一份，不在这里重算。
+   *
+   * `current` 也来自计划而不是「现在的 branch/base」：意图守卫要比的是**这次点击瞄准的**那对与
+   * 落地时的那对，两侧都从现在取值等于让它自己跟自己比，那道守卫就成了恒真。
+   */
+  async function submitPr(event: React.FormEvent): Promise<void> {
+    event.preventDefault()
+    if (prSubmitting || !prPlan || prPlan.kind !== 'ready' || !prTitle.trim()) return
+    setPrSubmitting(true)
+    setActionError(null)
+    try {
+      const result = await createPullRequest({
+        workspaceId: workspace.id,
+        title: prTitle.trim(),
+        body: prBody,
+        token: prPlan.token,
+        current: prPlan.current,
+        eligibility: prPlan.eligibility
+      })
+      if (result.kind === 'created') {
+        // 成功才清表单。拒绝或失败时标题和正文留着——一次网络抖动不该吃掉用户写的东西。
+        setPrUrl(result.url)
+        setPrPlan(null)
+        setPrTitle('')
+        setPrBody('')
+        prReadiness.reset()
+      } else {
+        setActionError(result.kind === 'refused' ? result.reason : result.message)
+      }
+    } finally {
+      setPrSubmitting(false)
+    }
+  }
+
   function changeRow(change: GitFileChange, canStage: boolean) {
     const name = change.path.split('/').pop() || change.path
     const dir = change.path.slice(0, change.path.length - name.length)
@@ -302,6 +385,22 @@ export function ChangesPanel({ workspace }: { workspace: WorkspaceRecord }) {
             {remoteButton('fetch', <RotateCcw size={12} />, 'Fetch from remote')}
             {remoteButton('pull', <ArrowDownToLine size={12} />, 'Pull from remote')}
             {remoteButton('push', <ArrowUpFromLine size={12} />, 'Push to remote')}
+            {/*
+              开 PR 挨着 push，因为它就是 push 之后那一步。它不共用 remoteButton：那三个动词的忙态与
+              失败分类是同一族（见 describeGitRemote），而这一个的结果是一个表单，不是一次回执。
+            */}
+            <button
+              type="button"
+              className="icon-button changes-remote__action"
+              aria-label="Open a pull request"
+              title="Open a pull request"
+              disabled={prReadiness.loading || prSubmitting}
+              onClick={() => void openPrForm()}
+            >
+              {prReadiness.loading
+                ? <LoaderCircle className="spin" size={12} />
+                : <GitPullRequestArrow size={12} />}
+            </button>
           </div>
         </div>
       ) : null}
@@ -329,6 +428,34 @@ export function ChangesPanel({ workspace }: { workspace: WorkspaceRecord }) {
       */}
       {actionNotice ? <div className="branches-inline-notice" role="status">{actionNotice}</div> : null}
       {actionError ? <div className="branches-inline-error" role="alert">{actionError}</div> : null}
+      {/*
+        readiness 自己的失败面。与 actionError 分开：那是「动作失败了」，这是「连能不能开都没问出来」，
+        下一步不同（重试一次读 vs 看 gh 说了什么）。
+      */}
+      {prReadiness.error ? <div className="branches-inline-error" role="alert">{prReadiness.error}</div> : null}
+      {/*
+        读完之后的那一整片（阻塞清单 / 表单 / 回执）抽成了一个**无 hook** 的组件。它不做任何决定——
+        哪个分支、哪个 base、阶梯放没放行、送出去什么，全在 prPlan 里定完了。抽出去的第二个理由更要紧：
+        本仓没有 DOM 测试环境，renderToStaticMarkup 只渲染初始 state，所以这些分支留在这里就只能靠源码
+        文本断言守——而这一族在本仓已经反复放过真缺陷。作为纯函数它可以被逐个 plan 形状调用。
+      */}
+      <PrLaunchSurface
+        plan={prPlan}
+        createdUrl={prUrl}
+        title={prTitle}
+        body={prBody}
+        submitting={prSubmitting}
+        onTitleChange={setPrTitle}
+        onBodyChange={setPrBody}
+        onDismiss={closePrForm}
+        onSubmit={(event) => void submitPr(event)}
+        onOpenCreated={(url) => {
+          // 走 `api.ui.openExternal` 而不是裸 <a href>：渲染层没有外部导航权，裸链接在这个宿主里要么
+          // 什么都不发生要么把整个应用导航走。不走 store 的 openHttpLink——那个的 destination 族是给
+          // 终端链接用的（开进 Tab/Region 需要 tabId+regionId 出处，这个面板没有也不该有）。
+          void api.ui.openExternal(url).catch((cause) => setActionError(message(cause)))
+        }}
+      />
       {repo ? (
         <form className="commit-box" onSubmit={(event) => void commit(event)}>
           <textarea
