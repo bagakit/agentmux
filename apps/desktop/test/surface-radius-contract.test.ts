@@ -87,6 +87,22 @@ describe('surface radius contract', () => {
     expect(undeclared).toEqual([])
   })
 
+  it('keeps no exception for a rule that no longer has a sub-token radius', () => {
+    // The reverse direction, and the reason this test exists: the check above only asks whether every
+    // sub-token radius is excused. It says nothing about an excuse whose rule is gone. Delete a rule and
+    // its line here lingers as a standing permission for a selector nobody can see any more — which is
+    // exactly how `.open-destination-menu__item > svg:last-child` outlived the entire
+    // `.open-destination-menu*` block it belonged to, invisibly, until someone read the list by hand.
+    //
+    // Asserted as set equality rather than "the selector appears somewhere in the sheet": a selector can
+    // easily still exist while its sub-token radius has been retuned up to a token, and that is the
+    // common case — a stale permission, not a missing selector. Equality also means the list cannot grow
+    // a speculative entry ahead of the rule it excuses.
+    const excused = new Set(subTokenRadii().map((rule) => rule.selector))
+    const stale = [...DECLARED_EXCEPTIONS].filter((selector) => !excused.has(selector)).sort()
+    expect(stale).toEqual([])
+  })
+
   it('keeps the three tokens defined, since the exceptions are relative to them', () => {
     for (const token of ['--radius-sm', '--radius', '--radius-lg']) {
       expect(styles).toContain(`${token}:`)
