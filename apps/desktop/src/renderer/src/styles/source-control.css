@@ -1,0 +1,107 @@
+/**
+ * Source Control 面板：Branches 与 Changes 两个视图，以及它们共用的那层壳。
+ *
+ * 从 dock.css 拆出来（那个文件过了 400 行的上限）。拆分线选在「表面」而不是「组件」上：
+ * `.branches-panel` / `.branches-header` / `.branches-repo` / `.branches-scroll` / `.branch-group`
+ * 这几条是两个视图**共用**的壳——BranchesPanel 与 ChangesPanel 都挂在上面，所以它们不能跟
+ * `.change-row` 分家。`.source-control-switch` 是那对切换键，它就是这个表面的边界本身。
+ *
+ * 层叠顺序即 index.css 里的 @import 顺序：紧跟 dock.css，因为这个面板长在 Tool Dock 里，
+ * 要能覆盖 dock 的通用规则。
+ */
+
+.branches-panel { height: 100%; min-height: 0; display: flex; flex-direction: column; background: var(--surface-0); }
+/* 排版走共享的 .selector-list__header；这里只固定它在这一列里的高度。 */
+.branches-header { flex: 0 0 30px; }
+.branches-header button { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; cursor: pointer; }
+.branches-header button:hover:not(:disabled) { color: var(--text); background: var(--surface-3); }
+.branches-repo { min-width: 0; height: 22px; flex: 0 0 22px; display: flex; align-items: center; gap:var(--sp-2); padding:0 var(--sp-4); border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); color: var(--text-3); }
+.branches-repo span { overflow: hidden; font-family: "SFMono-Regular", monospace; font-size: var(--fs-micro); text-overflow: ellipsis; white-space: nowrap; }
+.branches-scroll { min-height: 0; flex: 1; padding:var(--sp-1) var(--sp-2) var(--sp-2); overflow: auto; }
+.branch-group { display: grid; gap:1px; margin-bottom:var(--sp-2); }
+.branch-group > span { padding:var(--sp-1) var(--sp-2) var(--sp-1); color: var(--text-3); font-size: var(--fs-micro); font-weight: 650; letter-spacing: .07em; text-transform: uppercase; }
+.branch-row { width: 100%; min-width: 0; display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; gap:var(--sp-2); min-height: 30px; padding:var(--sp-1) var(--sp-2); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; text-align: left; cursor: pointer; transition: background 120ms ease, color 120ms ease; }
+.branch-row:hover { color: var(--text-2); background: var(--surface-2); }
+.branch-row--selected, .branch-row--selected:hover { color: var(--text); background: var(--surface-2); box-shadow: var(--hl); }
+/* 行网格与 identity/尾列排版走共享层（selector.css）。这里只留 Branch 侧真正不同的两点：
+   行首那枚 GitBranch 图标着绿，以及 worktree 路径用等宽体——它是路径不是标题。 */
+.branch-row .selector-row__leading { color: var(--green-2); }
+.branch-row--selected .selector-row__leading { color: var(--green); }
+.branch-row .selector-row__identity strong { color: inherit; }
+.branch-row .selector-row__identity small { font-family: "SFMono-Regular", monospace; line-height: 12px; }
+.branch-row__state { display: inline-flex; align-items: center; gap:var(--sp-1); padding:1px var(--sp-2); border-radius: var(--radius-sm); color: var(--green); background: var(--green-bg); font-size: var(--fs-micro); line-height: 13px; white-space: nowrap; }
+.branch-row__state--unbound { color: var(--amber); background: var(--green-bg); }
+/* 当前分支相对 upstream 的 ↑↓ 计数。三种可见状态各有一色，语义取自 gitSyncBadge 的 kind：
+   ahead＝有东西要推（中性提示，蓝），behind＝落后要拉（琥珀，该动手了），diverged＝两侧都有
+   （红：pull 会产生 merge/rebase，是三者里唯一需要决策的）。
+   no-upstream 与 synced 不画——它们的 label 是空串，见 BranchesPanel 里 `sync.label` 那道门（那里
+   记了这个代价：这两种状态的区别在本面板上对用户不可见）。
+   数字用 tabular-nums：这一列会在多行间纵向对齐，比例数字会让它抖。 */
+.branch-row__sync { display: inline-flex; align-items: center; gap:var(--sp-1); padding:1px var(--sp-2); border-radius: var(--radius-sm); font-size: var(--fs-micro); line-height: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.branch-row__sync--ahead { color: var(--blue); background: color-mix(in srgb, var(--blue) 13%, var(--surface-0)); }
+.branch-row__sync--behind { color: var(--amber-text); background: var(--amber-bg); }
+.branch-row__sync--diverged { color: var(--red-text); background: var(--red-bg); }
+.branches-empty { min-height: 90px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap:var(--sp-2); padding:var(--sp-5); color: var(--text-3); font-size: var(--fs-micro); text-align: center; }
+.branches-empty strong { color: var(--text-2); font-size: var(--fs-meta); }
+.branches-empty--error span { max-width: 230px; line-height: 1.4; }
+.branch-create-dialog { position: fixed; z-index: 111; top: 50%; left: 50%; width: min(440px, calc(100vw - 32px)); transform: translate(-50%, -50%); border: 1px solid var(--neutral-1); border-radius: var(--radius-lg); outline: none; color: var(--text); background: var(--surface-2); box-shadow: 0 30px 90px var(--scrim-3); }
+.branch-create-dialog form { display: flex; flex-direction: column; }
+.branch-create-dialog header { display: grid; grid-template-columns: 30px minmax(0, 1fr) 24px; align-items: start; gap:var(--sp-4); padding:var(--sp-6) var(--sp-6) var(--sp-5); border-bottom: 1px solid var(--line); }
+.branch-create-dialog header > span { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); color: var(--green); background: var(--green-bg); }
+.branch-create-dialog header > div { min-width: 0; }
+.branch-create-dialog h2 { margin:0; font-size: var(--fs-prose); letter-spacing: -.01em; }
+.branch-create-dialog header p { margin:var(--sp-1) 0 0; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.4; }
+.branch-create-dialog__context { min-width: 0; display: flex; align-items: center; gap:var(--sp-3); margin:var(--sp-5) var(--sp-6) 0; padding:var(--sp-3) var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); color: var(--green-2); background: var(--bg); }
+.branch-create-dialog__context > span { min-width: 0; display: flex; flex-direction: column; }
+.branch-create-dialog__context small { color: var(--text-3); font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: .06em; }
+.branch-create-dialog__context strong { overflow: hidden; color: var(--text-2); font: 10px/1.4 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.branch-create-dialog label { display: grid; gap:var(--sp-2); padding:var(--sp-5) var(--sp-6) 0; color: var(--text-3); font-size: var(--fs-micro); }
+.branch-create-dialog input { width: 100%; padding:var(--sp-3) var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius-sm); outline: 0; color: var(--text); background: var(--bg); font: 11px/1.4 "SFMono-Regular", monospace; }
+.branch-create-dialog input:focus { border-color: var(--focus-line); box-shadow: var(--focus-ring); }
+.branch-create-dialog form > p, .branches-inline-error { margin:0; color: var(--red-text); font-size: var(--fs-micro); line-height: 1.4; }
+.branch-create-dialog form > p { margin:var(--sp-4) var(--sp-6) 0; padding:var(--sp-3) var(--sp-4); border: 1px solid var(--red-line); border-radius: var(--radius-sm); background: var(--red-bg); }
+.branch-create-dialog footer { display: flex; justify-content: flex-end; gap:var(--sp-3); margin-top:var(--sp-6); padding:var(--sp-5) var(--sp-6) var(--sp-5); border-top: 1px solid var(--line); }
+.branch-create-dialog .primary-button { padding:var(--sp-3) var(--sp-4); }
+.branches-inline-error { padding:var(--sp-3) var(--sp-4); border-top: 1px solid var(--red-line); background: var(--red-bg); }
+.source-control-switch { flex: 0 0 auto; display: flex; gap:var(--sp-1); padding:var(--sp-2) var(--sp-3) 0; }
+.source-control-switch button { flex: 1; height: 24px; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font-size: var(--fs-meta); font-weight: 650; letter-spacing: .02em; cursor: pointer; transition: background 120ms ease, color 120ms ease; }
+.source-control-switch button:hover { color: var(--text-2); background: var(--surface-2); }
+.source-control-switch button.selected { color: var(--text); background: var(--surface-2); box-shadow: var(--hl); }
+.change-row { width: 100%; min-width: 0; display: grid; grid-template-columns: 16px minmax(0, 1fr) auto auto; align-items: center; gap:var(--sp-2); min-height: 30px; padding:var(--sp-1) var(--sp-2); border-radius: var(--radius-sm); color: var(--text-3); }
+.change-row:hover { background: var(--surface-2); }
+.change-row__icon { display: inline-flex; align-items: center; justify-content: center; color: var(--green-2); }
+.change-row--untracked .change-row__icon { color: var(--amber); }
+.change-row__identity { min-width: 0; display: flex; flex-direction: column; gap:0; }
+.change-row__identity strong, .change-row__identity small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.change-row__identity strong { font-size: var(--fs-meta); color: var(--text-2); }
+.change-row__identity small { color: var(--text-3); font-family: "SFMono-Regular", monospace; font-size: var(--fs-micro); line-height: 12px; }
+/* 同一块身份区域现在是个按钮（点开该文件的 diff）。它复用上面那几条布局，但 <button> 自带浏览器
+   默认外观——边框、灰底、居中、继承不到的字体——所以必须逐项抹掉，否则这一行在列表里长得和别的
+   行完全不一样。左对齐要显式写：button 的 text-align 默认 center，而这块是两行左对齐的文本。 */
+.change-row__identity--button { padding:0; border:0; background:none; font:inherit; color:inherit; text-align:left; align-items:flex-start; cursor:pointer; }
+.change-row__identity--button:hover strong { color: var(--text); }
+.change-row__state { display: inline-flex; align-items: center; padding:1px var(--sp-2); border-radius: var(--radius-sm); color: var(--green); background: var(--green-bg); font-size: var(--fs-micro); line-height: 13px; white-space: nowrap; }
+.change-row--untracked .change-row__state { color: var(--amber); background: var(--amber-bg); }
+/* 一行的按钮区。两个按钮包在这里而不是各占一个网格列：列数与「一行有几个按钮」不该联动。 */
+.change-row__actions { display: inline-flex; align-items: center; gap:1px; }
+.change-row__stage, .change-row__unstage, .change-row__discard { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-3); }
+/* 未武装时压暗到接近背景：这三个按钮常驻（藏进 hover 会让「有没有入口」取决于指针在哪），
+   但它们不该跟文件名抢注意力。整行 hover 时才亮起来。 */
+.change-row__stage, .change-row__unstage, .change-row__discard { opacity: .5; transition: opacity .12s ease, color .12s ease, background .12s ease; }
+.change-row:hover .change-row__stage, .change-row:hover .change-row__unstage, .change-row:hover .change-row__discard { opacity: 1; }
+.change-row__stage:hover:not(:disabled) { color: var(--green-text); background: var(--green-bg); }
+.change-row__unstage:hover:not(:disabled) { color: var(--text); background: var(--surface-3); }
+.change-row__discard:hover:not(:disabled) { color: var(--red-text); background: var(--red-bg); }
+/* 武装态：这一行的下一次点击会从磁盘删东西（未跟踪文件走 `git clean --force`，无 reflog）。
+   所以武装必须在**不 hover 时**也看得出来——只在 hover 里变色等于把闸的可见性绑在指针位置上。 */
+.change-row__discard--armed { opacity: 1; color: var(--red-text); background: var(--red-bg); box-shadow: inset 0 0 0 1px var(--red-line); }
+.change-row:has(.change-row__discard--armed) { background: var(--red-bg); }
+/* 远端三键跟在分支名后面：它们作用于整个仓库，所以落在仓库那一行而不是任何一个文件行上。 */
+.changes-remote { display: inline-flex; align-items: center; gap:1px; margin-left:auto; }
+.changes-remote__action { width: 20px; height: 20px; }
+.branches-inline-notice { margin:0; padding:var(--sp-3) var(--sp-4); border-top: 1px solid var(--green-line); color: var(--green-text); background: var(--green-bg); font-size: var(--fs-micro); line-height: 1.4; }
+.commit-box { flex: 0 0 auto; display: flex; flex-direction: column; gap:var(--sp-3); padding:var(--sp-4); border-top: 1px solid var(--line-soft); }
+.commit-box__message { width: 100%; padding:var(--sp-3) var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius-sm); outline: 0; color: var(--text); background: var(--bg); font-family: inherit; font-size: var(--fs-meta); line-height: 1.45; resize: none; }
+.commit-box__message:focus { border-color: var(--focus-line); box-shadow: var(--focus-ring); }
+.commit-box__message:disabled { opacity: .55; }
+.commit-box__submit { justify-content: center; padding:var(--sp-3) var(--sp-4); }
