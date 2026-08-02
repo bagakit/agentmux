@@ -1202,6 +1202,35 @@ describe('RuntimeController configuration transaction', () => {
     expect(snapshot.sessions[0]).not.toHaveProperty('interruptionReason')
   })
 
+  it('does not put an EMPTY interruption reason on an interrupted Run either', async () => {
+    // 姊妹于上一条。上一条守的是条件里 `state === 'interrupted'` 那一半（正常退出不带理由）；这一条
+    // 守另一半：即便 state 确实是 interrupted，理由是空串时也不能落。runInterruptionFact 的注释逐字
+    // 写着空串会把「没说原因」伪装成「原因是空的」，并让 SessionPane 的 `=== 'daemon_restart'` 判定读到
+    // 假值。把真值判据放宽成 `interruptionReason !== undefined` 会放行空串——它挡住 undefined、放行 ''，
+    // 所以只喂 undefined 的断言对它整条失明。这里让快照路径也各钉一次（agent 与 terminal 分开投影）。
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const status = agentStatusFixture()
+    client.runtimeProjection.mockResolvedValue({
+      hostId: 'local',
+      subjects: [{
+        subjectId: 'agent:local:agent-1',
+        kind: 'agent',
+        hostId: 'local',
+        workspacePath: '/repo',
+        providerId: status.session.providerId,
+        executorId: status.session.executorId,
+        agentSession: status.session,
+        run: { ...status.run, state: 'interrupted' as const, interruptionReason: '' }
+      }]
+    })
+
+    const snapshot = await controller.snapshot(localConfig)
+
+    expect(snapshot.sessions[0]).toMatchObject({ processState: 'interrupted' })
+    expect(snapshot.sessions[0]).not.toHaveProperty('interruptionReason')
+  })
+
   it('projects persisted semantic status and typed interaction over a live Run', async () => {
     const controller = await configuredController()
     const client = runtimeFixture.FakeClient.instances[0]!
