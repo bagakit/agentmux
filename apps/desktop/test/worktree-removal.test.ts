@@ -5,6 +5,8 @@ import {
   nextAfterWorktreeRemoval,
   worktreeRemovalEffect,
   retainedLaneNotices,
+  retainedLaneReport,
+  retentionReport,
   worktreeRemovalPrompt,
   type WorktreeRemovalRequest
 } from '../src/renderer/src/lib/worktree-removal-request.js'
@@ -354,6 +356,60 @@ describe('批量收尾的分档告知', () => {
     expect(
       retainedLaneNotices([{ status: 'removed', workspaceId: 'ws-1', removedPath: '/tmp/x' }])
     ).toEqual([])
+  })
+
+  /**
+   * 分档告知能上屏的只有**一句**。
+   *
+   * store 的错误面是一个槽（`reportError` 就是 `set({ error })`），后一次调用覆盖前一次。此前两个
+   * 消费者都是 `for (notice of ...) reportError(notice.message)`，于是三档同时出现时屏幕上只剩最后
+   * 一条：按顺序排在第一位的脏树——唯一有真实下一步可做的那一档——被后面两档静默擦掉。
+   *
+   * 所以这一组的判据不是「返回了几条」，而是**每一档的正文都必须留在那一句里**。分组数组作为数据是
+   * 对的（每档要用户做的事不同），能上屏的只有一句，折叠因此是一次判断，要在能被质询的地方。
+   */
+  it('三档折成一句时每一档都还在：一个错误槽装不下三次调用', () => {
+    const collapsed = retainedLaneReport([
+      laneOf('uncommitted-changes', 'ws-a', 'ZZDIRTYZZ'),
+      laneOf('git-failed', 'ws-b', 'ZZGITZZ'),
+      laneOf('record-not-withdrawn', 'ws-c', 'ZZRECORDZZ')
+    ])
+
+    // 自检：先确认这个 fixture 真的产出了三档，否则下面三条会因为「本来就只有一档」而恒真。
+    expect(
+      retainedLaneNotices([
+        laneOf('uncommitted-changes', 'ws-a'),
+        laneOf('git-failed', 'ws-b'),
+        laneOf('record-not-withdrawn', 'ws-c')
+      ])
+    ).toHaveLength(3)
+
+    for (const reason of ['ZZDIRTYZZ', 'ZZGITZZ', 'ZZRECORDZZ']) {
+      expect(collapsed, `${reason} 那一档在折叠后消失了——它在屏幕上被后一档擦掉`).toContain(reason)
+    }
+    // 顺序仍然是那个顺序：脏树在最前，因为它是唯一能让用户马上做点什么的一档。
+    expect(collapsed!.indexOf('ZZDIRTYZZ')).toBeLessThan(collapsed!.indexOf('ZZRECORDZZ'))
+  })
+
+  it('没有保留时折成 null，而不是空串', () => {
+    // 空串在 `reportError` 那边会变成一条什么都没写的错误弹出来——比不报更糟。
+    expect(retainedLaneReport([{ status: 'removed', workspaceId: 'ws-1', removedPath: '/tmp/x' }])).toBe(
+      null
+    )
+  })
+
+  it('扇出侧与批量侧折出同一句话：两处不许各排一次序', () => {
+    // 两个消费者认 lane 的字段不同（workspaceId / 分支名），措辞与顺序必须完全一样。各写一遍 join
+    // 就是三档措辞当初被折成一句硬编码的那个形状，只是换了个地方复发。
+    const fanout = retentionReport([
+      { retention: 'record-not-withdrawn', id: 'lane-c', reason: 'ZZRECORDZZ' },
+      { retention: 'uncommitted-changes', id: 'lane-a', reason: 'ZZDIRTYZZ' }
+    ])
+    const batch = retainedLaneReport([
+      laneOf('record-not-withdrawn', 'lane-c', 'ZZRECORDZZ'),
+      laneOf('uncommitted-changes', 'lane-a', 'ZZDIRTYZZ')
+    ])
+    expect(fanout).toBe(batch)
   })
 })
 

@@ -6,8 +6,21 @@ import type {
   AppConfig,
   RunFanOutInput,
   WorkspaceBranchesSnapshot,
-  WorkspaceRecord
+  WorkspaceRecord,
+  WorktreeRetention
 } from '../src/shared/contracts.js'
+
+/**
+ * 三档保留的全集，手抄在测试这边。
+ *
+ * 不从实现导出一张表：从被测对象派生期望值时，映射改窄期望值会跟着漂移，判据恒真。加第四档时这里会
+ * 红，而那正是要它红的时候——「新那档 lane 该怎么说」是一次判断。
+ */
+const RETENTIONS: readonly WorktreeRetention[] = [
+  'uncommitted-changes',
+  'git-failed',
+  'record-not-withdrawn'
+]
 
 // ---------------------------------------------------------------------------
 // 一次扇出请求，从头跑到尾。
@@ -243,8 +256,14 @@ describe('一次扇出请求真的跑到底', () => {
     if (result.kind !== 'fanout') return
     for (const lane of result.lanes) {
       expect(lane.status).toBe('launch-failed')
-      // 不说清就会变成没人认领的孤儿目录。
-      if (lane.status === 'launch-failed') expect(typeof lane.worktreeRetained).toBe('boolean')
+      // 不说清就会变成没人认领的孤儿目录。`cleanup` 是三档保留之一或 `null`（交回去了），而不是一个
+      // 布尔——布尔答不出「git 删掉了目录、只是记录没撤下」那一档。
+      if (lane.status === 'launch-failed') {
+        expect(
+          lane.cleanup === null || RETENTIONS.includes(lane.cleanup.retention),
+          `cleanup 不是三档保留之一也不是 null：${JSON.stringify(lane.cleanup)}`
+        ).toBe(true)
+      }
     }
   })
 })

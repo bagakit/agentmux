@@ -6,6 +6,7 @@ import {
   strandedLanes,
   type FanOutPorts
 } from '../src/main/fanout-run.js'
+import { WorktreeRetainedError } from '../src/main/worktree-service.js'
 
 const config: AppConfig = {
   version: 7,
@@ -122,9 +123,12 @@ describe('fan-out run', () => {
     expect(result.lanes[0]).toMatchObject({
       status: 'launch-failed',
       branch: 'a',
-      error: 'launch exploded',
-      worktreeRetained: true
+      error: 'launch exploded'
     })
+    // 没有 teardown 端口时归到 `git-failed`：什么都没被尝试、什么都没被丢弃，目录还站着。这一档的
+    // 承诺恰好就是那句话，而它不给「丢弃」按钮——对「根本没试过」是对的。
+    const [first] = result.lanes
+    expect(first?.status === 'launch-failed' ? first.cleanup?.retention : null).toBe('git-failed')
     expect(strandedLanes(result).map((entry) => entry.branch)).toEqual(['a'])
   })
 
@@ -142,7 +146,9 @@ describe('fan-out run', () => {
     })
 
     expect(removeWorktree).toHaveBeenCalledWith({ workspaceId: 'ws-a' }, expect.anything())
-    expect(result.lanes[0]).toMatchObject({ status: 'launch-failed', worktreeRetained: false })
+    // `null` 是「交回去了」——没有任何东西留给人决定。用 null 而不是某一档保留，是因为三档保留说的都是
+    // 「还有东西在」，而这里没有。
+    expect(result.lanes[0]).toMatchObject({ status: 'launch-failed', cleanup: null })
     // Nothing stranded, so nothing for the user to decide about.
     expect(strandedLanes(result)).toEqual([])
   })
@@ -160,9 +166,58 @@ describe('fan-out run', () => {
 
     expect(result.lanes[0]).toMatchObject({
       status: 'launch-failed',
-      error: 'the real problem',
-      worktreeRetained: true
+      error: 'the real problem'
     })
+    // 两句话都要在：启动为什么挂了，以及那个目录现在怎么样。压成一句就会丢掉其中一件。
+    const [first] = result.lanes
+    expect(first?.status === 'launch-failed' ? first.cleanup : null).toEqual({
+      retention: 'git-failed',
+      reason: 'cleanup also failed'
+    })
+  })
+
+  it('清理时 git 已经删掉目录、只是记录没撤下：不算搁浅，也不许说目录还在', async () => {
+    // 这是 `worktreeRetained: boolean` 唯一**答错**的那一档，也是它必须不再是布尔的理由：清理抛出时
+    // 旧代码记 `retained = true`，即「目录还在」——而这一档 git 恰好已经把目录删了。
+    //
+    // 判据分两条，因为它们各自能漂移：分类要如实带出（下游据它选措辞），且这条 lane 不许进搁浅清单
+    // （那份清单的语义是「还有个签出等你决定」，而这里没有签出可决定，指过去就是指向一个不存在的路径）。
+    const io = ports({
+      launchAgent: vi.fn(async () => { throw new Error('launch exploded') }),
+      removeWorktree: vi.fn(async () => {
+        throw new WorktreeRetainedError('record-not-withdrawn', 'removed it, could not update the list')
+      })
+    })
+
+    const result = await runFanOut({
+      workspaceId: 'repo', prompt: 'p', lanes: [lane('a')], config, ports: io
+    })
+
+    const [first] = result.lanes
+    expect(first?.status === 'launch-failed' ? first.cleanup?.retention : null).toBe(
+      'record-not-withdrawn'
+    )
+    expect(
+      strandedLanes(result),
+      '目录已经被删的 lane 被列成「搁浅」：用户会被指去处理一个不存在的签出'
+    ).toEqual([])
+  })
+
+  it('脏树的清理拒绝仍然算搁浅：那个签出真的还在，等人决定', async () => {
+    // 与上一条成对。同样是「清理没成功」，但这一档目录还在，所以它**必须**进搁浅清单——只钉上面
+    // 那条时，把整个 strandedLanes 改成恒空也照旧全绿。
+    const io = ports({
+      launchAgent: vi.fn(async () => { throw new Error('launch exploded') }),
+      removeWorktree: vi.fn(async () => {
+        throw new WorktreeRetainedError('uncommitted-changes', 'Worktree has uncommitted changes: a')
+      })
+    })
+
+    const result = await runFanOut({
+      workspaceId: 'repo', prompt: 'p', lanes: [lane('a')], config, ports: io
+    })
+
+    expect(strandedLanes(result).map((entry) => entry.branch)).toEqual(['a'])
   })
 
   it('distinguishes a lane that created nothing from one that created a worktree', async () => {
