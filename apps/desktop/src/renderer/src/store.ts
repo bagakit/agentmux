@@ -188,6 +188,7 @@ import {
 import { decayStaleAgentStatuses as computeDecayedAgentStatuses } from './lib/agent-status-decay'
 import {
   createDebouncedPersistentStorage,
+  createWriteFencedStorage,
   registerUnloadFlush
 } from './lib/persisted-ui-writer'
 
@@ -1454,8 +1455,6 @@ const nonBrowserWorkbenchStorage: StateStorage = {
   removeItem: () => undefined
 }
 
-let persistWritesEnabled = false
-
 function workbenchStorage(): StateStorage {
   return typeof window === 'undefined' ? nonBrowserWorkbenchStorage : window.localStorage
 }
@@ -1464,13 +1463,20 @@ function workbenchStorage(): StateStorage {
 // copy of the user's layout with an empty default. Reads remain available while hydration runs;
 // writes are opened only after startup has either loaded the record or explicitly finished with a
 // visible warning. This is a narrow write fence, not a second persistence store.
-const guardedWorkbenchStorage: StateStorage = {
+//
+// 闸本身住在 lib 里（`createWriteFencedStorage`）：留在这个模块里时它是一个 `let` 加一行 `if`，
+// 于是「闸关着时写入真的被拦了吗」在测试里不可观测，只能靠扫源码文本判断那个名字还在——实测把
+// 那行 `if` 删掉，五个持久化测试文件 62 条全绿。这里剩下的只有转发，没有可以被掏空的判断。
+const workbenchWriteFence = createWriteFencedStorage({
   getItem: (name) => workbenchStorage().getItem(name),
-  setItem: (name, value) => {
-    if (!persistWritesEnabled) return undefined
-    return workbenchStorage().setItem(name, value)
-  },
+  setItem: (name, value) => workbenchStorage().setItem(name, value),
   removeItem: (name) => workbenchStorage().removeItem(name)
+})
+const guardedWorkbenchStorage: StateStorage = workbenchWriteFence.storage
+
+/** 放行持久化写入。启动路径上的三个开启点都只走这一处。 */
+function openPersistWrites(): void {
+  workbenchWriteFence.openWrites()
 }
 
 // A layout gesture (dock drag, split-ratio, tab reorder) produces many state changes per second.
@@ -1647,7 +1653,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const persistWarning = await ensurePersistHydrated()
       // A successful read can safely accept the normal persistence writes produced by startup. On
       // a failed read, keep the write fence closed until the complete fallback shell is installed.
-      if (!persistWarning) persistWritesEnabled = true
+      if (!persistWarning) openPersistWrites()
       // Config is the boundary that tells us which Workspace a persisted Region belongs to, so a
       // config failure genuinely prevents a safe shell. Session membership and the Provider catalog
       // are narrower runtime observations: either can be temporarily unavailable while the saved
@@ -1818,7 +1824,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // The Runtime and its Agents remain usable; only the optional persisted presentation projection
       // was unavailable. Open the fence after the fallback state is installed so that this warning
       // itself cannot serialize the empty fallback over the user's last good record.
-      persistWritesEnabled = true
+      openPersistWrites()
       booting = false
       for (const event of pendingSessionEvents) get().applyEvent(event)
       for (const event of pendingBrowserEvents) get().applyBrowserEvent(event)
@@ -1836,7 +1842,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       set({ loading: false, error: message(error) })
       // Any state written while the startup path was failing must not leave the fence closed forever;
       // subsequent user edits are the first intentional opportunity to replace the old record.
-      persistWritesEnabled = true
+      openPersistWrites()
       return () => {}
     }
   },
@@ -4290,7 +4296,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
    * `merge(undefined, get())` 把整份状态换成内存默认值，`hasHydrated()` 照旧变 true，
    * 而 `onRehydrateStorage` 的 error 参数是 `undefined`。三件坏事同时发生：
    *   - 用户的 Tab / 布局 / 侧栏宽度 / 换行开关 / 自己起的 Agent 名字全部消失；
-   *   - 上面那道写闸（`persistWritesEnabled`）因为 hydration「成功」了而照旧打开；
+   *   - 上面那道写闸（`workbenchWriteFence`）因为 hydration「成功」了而照旧打开；
    *   - 于是下一次写入覆盖掉唯一的副本。
    * 换句话说 bump 一下版本号就是一次静默数据销毁，而两个检测点（:4073 的 error 分支、
    * `ensurePersistHydrated` 里那条 `!hasHydrated()` 合成检查）都看不见它。
