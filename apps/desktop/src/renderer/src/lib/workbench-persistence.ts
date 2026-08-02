@@ -16,12 +16,112 @@ import {
   type WorkbenchSurface,
   type WorkbenchTab
 } from './workbench-tabs'
+import { closeWorkbenchRegion, regionIds } from './workbench-view-layout'
 import { assertUnreachableSurface, isSessionSurface } from './workbench-surface-kinds'
 import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
 
 export type PersistedWorkbench = {
   tabs: Record<string, WorkbenchTab>
   layouts: Record<string, WorkspaceLayout>
+}
+
+/**
+ * 一张持久化 Tab 上「树 ↔ regions 表」不一致的抢救结果。空数组/false 表示那一类没发生。
+ */
+export type PersistedTabRepair = {
+  tabId: string
+  /** regions 表里有、树里没有的死记录（永远画不到，也永远回收不掉）。 */
+  droppedGhostRegionIds: string[]
+  /** 树里有、regions 表里没有的孤儿叶（画成 null，看不见也关不掉）。 */
+  droppedOrphanLeafIds: string[]
+  /** 两侧毫无交集 → 这张 Tab 整体不可救，只能丢弃。 */
+  discardedTab: boolean
+}
+
+/**
+ * 把一张**持久化读回来的** Tab 的两种 Region 表示强行拉回一致，绝不抛出。
+ *
+ * 为什么这一步必须存在：`assertRegionInvariant`（workbench-tabs.ts）是无条件 throw 的生产断言，
+ * 而 `removeWorkbenchRegion` 在两个持久化入口上都会被调用（`sessionOnlyTab` 与 `restoreTab`）。
+ * localStorage 里的内容是**用户数据**：这道断言是本轮才装上的，此前发货的版本没有任何 reducer 守着
+ * 这条不变量，所以磁盘上完全可能已经躺着一张漂移的 Tab。若不先抢救，那条断言会在
+ *   - `restorePersistedWorkbench`（启动恢复）→ 启动路径抛出，整个 Workbench 落回空白；
+ *   - `projectPersistedWorkbench`（zustand `partialize`，**每次写入都跑**）→ 在 `set()` 里抛出，
+ *     把任意一次用户操作变成崩溃，且此后再也写不进去。
+ * 两条都实测抛过（探针：树 [r1]、表 [r1,r2]，两个入口同一条消息）。**修法必须落在边界上，
+ * 不能把断言削成 dev-only**——削掉它就等于把守卫从唯一真正需要它的环境（生产）里拿走。
+ *
+ * 取交集，不取任何一侧为准：两个方向的多余项在界面上**都不可达**（表里的死记录画不到、树里的孤儿叶
+ * 画成 null），所以「只留两侧都认的」是唯一在用户可见效果上无损的答案。交集为空则这张 Tab 没有一格
+ * 可画，整张丢弃。
+ *
+ * 这不是兼容层：它不认识任何版本号，也不随版本增长；它修的是一条**恒定**的结构不变量，
+ * 而该不变量今后由生产断言在每个变更点就地守住。响亮性由两处提供——启动恢复把抢救结果汇报成可见告警
+ * （见 `restorePersistedWorkbench` 的 `repairs`），以及 reducer 侧那条无条件断言在**改动发生的那一处**
+ * 立刻炸掉。写入路径（partialize）刻意只抢救不抛：在那里抛会把持久化写入本身变成崩溃。
+ */
+function reconcilePersistedTab(
+  tab: WorkbenchTab
+): { tab: WorkbenchTab | null; repair: PersistedTabRepair | null } {
+  const tree = regionIds(tab.layout.root)
+  const treeIds = new Set(tree)
+  const mapIds = new Set(Object.keys(tab.regions))
+  const ghosts = [...mapIds].filter((id) => !treeIds.has(id))
+  const orphans = tree.filter((id) => !mapIds.has(id))
+  if (ghosts.length === 0 && orphans.length === 0) return { tab, repair: null }
+
+  const kept = tree.filter((id) => mapIds.has(id))
+  if (kept.length === 0) {
+    return {
+      tab: null,
+      repair: {
+        tabId: tab.id,
+        droppedGhostRegionIds: ghosts,
+        droppedOrphanLeafIds: orphans,
+        discardedTab: true
+      }
+    }
+  }
+
+  // 逐个摘掉孤儿叶。`closeWorkbenchRegion` 在只剩一叶时拒绝动手，而 kept 非空保证了每次摘除都还有
+  // 至少一片留存叶，故每一步都能落地；它同时负责把落在被摘叶上的焦点交给兄弟。
+  let layout = tab.layout
+  for (const orphanId of orphans) layout = closeWorkbenchRegion(layout, orphanId)
+  const regions = Object.fromEntries(
+    Object.entries(tab.regions).filter(([regionId]) => !ghosts.includes(regionId))
+  )
+  // 焦点与标题格必须落在留存集合上。activeRegionId 由 closeWorkbenchRegion 维护，但持久化数据也可能
+  // 一开始就指向一个树里根本没有的格，所以这里不假设、直接兜到读序首格。
+  const remaining = regionIds(layout.root)
+  const activeRegionId = remaining.includes(layout.activeRegionId)
+    ? layout.activeRegionId
+    : remaining[0]!
+  return {
+    tab: {
+      ...tab,
+      layout: { ...layout, activeRegionId },
+      titleRegionId: remaining.includes(tab.titleRegionId) ? tab.titleRegionId : activeRegionId,
+      regions
+    },
+    repair: {
+      tabId: tab.id,
+      droppedGhostRegionIds: ghosts,
+      droppedOrphanLeafIds: orphans,
+      discardedTab: false
+    }
+  }
+}
+
+/** 抢救结果的用户向措辞。只在真的动过东西时产出一句。 */
+export function describePersistedTabRepairs(repairs: readonly PersistedTabRepair[]): string | null {
+  if (repairs.length === 0) return null
+  const discarded = repairs.filter((repair) => repair.discardedTab).length
+  const trimmed = repairs.length - discarded
+  const parts = [
+    ...(discarded > 0 ? [`${discarded} unusable tab${discarded === 1 ? '' : 's'} discarded`] : []),
+    ...(trimmed > 0 ? [`${trimmed} tab${trimmed === 1 ? '' : 's'} repaired`] : [])
+  ]
+  return `Saved layout contained inconsistent split panes: ${parts.join(', ')}.`
 }
 
 export function persistedAgentSessionIds(
@@ -126,7 +226,10 @@ function addTabWithoutStealingFocus(
 export function projectPersistedWorkbench(input: PersistedWorkbench): PersistedWorkbench {
   const tabs = Object.fromEntries(
     Object.values(input.tabs).flatMap((tab) => {
-      const projected = sessionOnlyTab(tab)
+      // 先抢救再投影：`sessionOnlyTab` 会调 `removeWorkbenchRegion`，而它尾部那条无条件断言
+      // 对一张已漂移的 Tab 会抛——这里是 zustand 的 `partialize`，抛出即让**每一次写入**变成崩溃。
+      const reconciled = reconcilePersistedTab(tab).tab
+      const projected = reconciled ? sessionOnlyTab(reconciled) : null
       return projected ? [[projected.id, projected]] : []
     })
   )
@@ -216,26 +319,34 @@ export function restorePersistedWorkbench(input: {
    * set it only for an explicitly rejected snapshot and let the next canonical snapshot reconcile it.
    */
   preserveUnknownSessionViews?: boolean
-}): PersistedWorkbench {
+}): PersistedWorkbench & { repairs: PersistedTabRepair[] } {
   if (!input.persisted) {
     return {
       tabs: {},
       layouts: Object.fromEntries(input.config.workspaces.map((workspace) => [
         workspace.id,
         createWorkspaceLayout(input.createTabGroupId())
-      ]))
+      ])),
+      repairs: []
     }
   }
 
   const sessions = new Map(input.sessions.map((session) => [session.id, session]))
+  const repairs: PersistedTabRepair[] = []
   const tabs = Object.fromEntries(
     Object.values(input.persisted.tabs).flatMap((tab) => {
-      const restored = restoreTab(
-        input.config,
-        sessions,
-        tab,
-        input.preserveUnknownSessionViews === true
-      )
+      // 抢救先于恢复：`restoreTab` 会调 `removeWorkbenchRegion`，其尾部无条件断言对一张已漂移的
+      // Tab 会抛，而这里在启动路径上——抛出即整个 Workbench 落回空白（正是 #59/#60 那个 bug 的形状）。
+      const { tab: reconciled, repair } = reconcilePersistedTab(tab)
+      if (repair) repairs.push(repair)
+      const restored = reconciled
+        ? restoreTab(
+            input.config,
+            sessions,
+            reconciled,
+            input.preserveUnknownSessionViews === true
+          )
+        : null
       return restored ? [[restored.id, restored]] : []
     })
   )
@@ -256,5 +367,5 @@ export function restorePersistedWorkbench(input: {
     }
     layouts[workspace.id] = layout
   }
-  return { tabs, layouts }
+  return { tabs, layouts, repairs }
 }

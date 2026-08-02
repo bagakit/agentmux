@@ -201,6 +201,49 @@ export function replaceWorkbenchRegion(
   }
 }
 
+/**
+ * 一张 Tab 的核心不变量（#494 gap）：Region 有两种表示，必须逐一相等——
+ *   - 分屏树的叶子 id 集合：`regionIds(tab.layout.root)`；
+ *   - surface 表的 key 集合：`Object.keys(tab.regions)`。
+ *
+ * 违约的两个方向都是「画不出、也回收不掉的孤儿」：树里多一格（regions 表没有对应记录）会在
+ * `WorkspaceWorkbench` 里画成 null（`if (!surface) return null`）——一个看不见、也关不掉的孤儿格；
+ * regions 表里多一格（树里没有对应叶子）则是一条永远画不到、也永远回收不掉的死记录。此前这条只由各个
+ * reducer「两侧一起改」的手工约定维持（add/remove/arrange/swap/promote 六处成对改），零守卫；
+ * `control.ts` 里那道 hand-placed 撞名闸就是这条缺守卫的直接证据——它单独护着预设那一条路。
+ *
+ * 把不变量提升成生产断言，套在每个改动 tab 的 reducer 尾部：将来第 7 条只改了一侧的路径，会在**改动
+ * 发生的那一处**响亮失败，而不是在渲染层留下一个静默孤儿。这也是本模块里判定这条性质的**唯一**实现
+ * （SSOT）——不变量测试不再自带第二份「两侧相等」的拷贝，改为调用它。
+ *
+ * 无条件 throw，不做 dev-only 门。三条理由：
+ *   1. 用户代价可控。断言跑在 reducer 算出「下一个 tab」之后、return 之前；抛出即这个 tab 不被返回，
+ *      store 的 `set(reducerResult)` 拿不到它（reducer 抛了就没有返回值可提交），于是这一次操作
+ *      （分屏 / 关闭 / 预设 / 换位 / 促升）整个作废、落回上一个一致状态。用户丢的是这一次本就会产出
+ *      坏 tab 的操作，而不是整个会话。
+ *   2. 反面更糟且不可恢复。静默放行一个看不见的孤儿格，用户既看不见也关不掉，只能重启——而这恰恰
+ *      只发生在生产（真实用户）里。dev-only 门会把守卫从最需要它的那个环境里剥掉。
+ *   3. 与同层一致。本层其它 reducer（空树、arrange 撞名、control open 失败）都是无条件抛。
+ *
+ * 代价是 O(region 数) 的一次集合比较，跑在本就不频繁的布局改动上，不构成剥成 dev-only 的性能理由。
+ *
+ * 只读一张 Tab、只在违约时抛，所以可被同时改两张 Tab 的 reducer 复用——对每张受影响的 Tab 各调一次
+ * 即可（promoteRegionToTab 已这么用；排队中的「跨两张 Tab 移动 Region」要原子地碰两棵树、两张表，
+ * 也走这条路）。
+ */
+export function assertRegionInvariant(tab: WorkbenchTab): void {
+  const tree = [...regionIds(tab.layout.root)].sort()
+  const map = Object.keys(tab.regions).sort()
+  const agree = tree.length === map.length && tree.every((id, index) => id === map[index])
+  if (!agree) {
+    throw new Error(
+      `Workbench Tab "${tab.id}" region invariant violated: the layout tree holds region ids ` +
+        `[${tree.join(', ')}] but tab.regions holds [${map.join(', ')}]. Every tree leaf must have ` +
+        `exactly one regions entry and vice versa — a mismatch is an invisible, un-closeable orphan Region.`
+    )
+  }
+}
+
 export function addWorkbenchRegion(
   tab: WorkbenchTab,
   targetRegionId: string,
@@ -223,11 +266,13 @@ export function addWorkbenchRegion(
   // 保留别处的手调比例，就给不出全局等分。今天定的是「追加即全局均分」，手调让位于此；若日后要保留
   // 手调，改的是这里的均分范围，而不是 balanceWorkbenchRegionLayout 本身。
   const layout = balanceWorkbenchRegionLayout(split)
-  return {
+  const next: WorkbenchTab = {
     ...tab,
     layout,
     regions: { ...tab.regions, [surface.regionId]: surface }
   }
+  assertRegionInvariant(next)
+  return next
 }
 
 export function removeWorkbenchRegion(tab: WorkbenchTab, regionId: string): WorkbenchTab | null {
@@ -236,12 +281,14 @@ export function removeWorkbenchRegion(tab: WorkbenchTab, regionId: string): Work
   const layout = closeWorkbenchRegion(tab.layout, regionId)
   const regions = { ...tab.regions }
   delete regions[regionId]
-  return {
+  const next: WorkbenchTab = {
     ...tab,
     layout,
     titleRegionId: tab.titleRegionId === regionId ? layout.activeRegionId : tab.titleRegionId,
     regions
   }
+  assertRegionInvariant(next)
+  return next
 }
 
 export function focusWorkbenchTabRegion(tab: WorkbenchTab, regionId: string): WorkbenchTab {
@@ -260,7 +307,12 @@ export function swapWorkbenchTabRegions(
   regionIdB: string
 ): WorkbenchTab {
   const layout = swapWorkbenchRegions(tab.layout, regionIdA, regionIdB)
-  return layout === tab.layout ? tab : { ...tab, layout }
+  if (layout === tab.layout) return tab
+  const next: WorkbenchTab = { ...tab, layout }
+  // 换位是集合下的置换（regions 表一字不动），本该恒满足不变量；这里仍套一次，是为了让每条改动 tab
+  // 的 reducer 都过同一道闸——将来若换位实现被改成会动 id 集合的写法，这道断言就是它的守卫。
+  assertRegionInvariant(next)
+  return next
 }
 
 export function sessionTabId(sessionId: string): string {
