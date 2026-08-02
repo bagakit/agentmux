@@ -1257,11 +1257,13 @@ export function WorkspaceWorkbench({
     const targetGroupId = over.groupId
     const targetGroup = groupById.get(targetGroupId)
     if (!targetGroup) return
-    const targetIndex =
+    // 这个下标是在**用户看到的**（已按 Topic 投影的）tabOrder 上算的。store 的 moveTab 负责把它
+    // 翻译回未投影的存储坐标——两套坐标只要落点前有一张别的 Topic 的 Tab 就分家（#556）。
+    const visibleTargetIndex =
       over.kind === 'tab'
         ? Math.max(0, targetGroup.tabOrder.indexOf(over.tabId))
         : targetGroup.tabOrder.length
-    moveTab(workspaceId, drag.tabId, drag.groupId, targetGroupId, targetIndex)
+    moveTab(workspaceId, drag.tabId, drag.groupId, targetGroupId, visibleTargetIndex)
   }
 
   if (!layout) return null
