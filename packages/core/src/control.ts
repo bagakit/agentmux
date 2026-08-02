@@ -212,3 +212,42 @@ export function resolveAgentMuxRegion(regions: readonly AgentMuxRegion[], target
   if (matches.length !== 1) throw new AgentMuxError('Region target is ambiguous.', 'AMBIGUOUS_REGION_TARGET')
   return structuredClone(matches[0]!)
 }
+
+/**
+ * 一次 Control 请求的等待预算，以及「哪些操作算慢」。**唯一一处。**
+ *
+ * 请求走两条不同的路到达执行方，两条各自有一个等待方：
+ *   - CLI → daemon 的 socket（control-host.ts 的 `socket.setTimeout`）
+ *   - Renderer 拥有屏幕时，main 经 IPC 转给 Renderer（DesktopControlIpcBridge 的 `setTimeout`）
+ * 两条都必须用同一个预算：同一条 `amux open.agent`，若一条等 60 秒另一条等 2 秒，用户看到的就是
+ * 「同一个命令有时能开出来、有时报 CONTROL_TIMEOUT」，而差别只在当时是谁拥有屏幕。
+ *
+ * **为什么连 {@link isLongAgentMuxControlOperation} 也必须在这里而不是各写一遍：**
+ * 此前两侧各手抄一份 `2_000` / `60_000`（control-host.ts 与 control-ipc-bridge.ts），而「哪些操作算慢」
+ * 在 core 侧是个命名函数、在 bridge 侧被内联展开成同样的四项析取。于是**加一个慢操作**时——比如将来的
+ * `open.file` 要等磁盘、或 `arrange` 要等一次布局落地——只改 core 那个函数的人会得到一个全绿的仓库，
+ * 而 bridge 那条路静默给它 2 秒预算。取值手抄会漂移，判据手抄同样会，且后者更难看出来。
+ *
+ * 取值本身（2s / 60s）是否合理是另一个问题（长操作的 60 秒在负载下会杀掉健康的 resume）；这里只保证
+ * 两条路问的是同一个数、用的是同一条判据。
+ */
+export const AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS = 2_000
+export const AGENTMUX_CONTROL_LONG_REQUEST_TIMEOUT_MS = 60_000
+
+/**
+ * 这个操作要不要走长预算。
+ *
+ * 慢的是「要等外面」的那些：`open.*` 等一个进程起来并交出 Region，`send` 等 composer 就绪并把 prompt
+ * 打进去，`resume` 等 Provider 重建会话，`stop` 等进程真的收尾。其余（inspect/focus/arrange/list）
+ * 只读或只动本地状态，2 秒之内不返回就是真的出事了。
+ */
+export function isLongAgentMuxControlOperation(operation: AgentMuxControlRequest['operation']): boolean {
+  return operation.startsWith('open.') || operation === 'send' || operation === 'resume' || operation === 'stop'
+}
+
+/** 给定操作应当等待的毫秒数——两条路的唯一取值出口。 */
+export function agentMuxControlTimeoutMs(operation: AgentMuxControlRequest['operation']): number {
+  return isLongAgentMuxControlOperation(operation)
+    ? AGENTMUX_CONTROL_LONG_REQUEST_TIMEOUT_MS
+    : AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS
+}

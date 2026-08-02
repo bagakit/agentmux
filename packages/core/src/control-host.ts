@@ -3,7 +3,9 @@ import { createConnection, createServer, type Server, type Socket } from 'node:n
 import { dirname } from 'node:path'
 import {
   AGENTMUX_CONTROL_ERROR_CODES,
+  AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS,
   AGENTMUX_CONTROL_SCHEMA_VERSION,
+  agentMuxControlTimeoutMs,
   type AgentMuxAgentRegion,
   type AgentMuxArrangeMode,
   type AgentMuxBrowserRegion,
@@ -33,8 +35,6 @@ const MAX_MESSAGE_BYTES = 256 * 1024
 const MAX_ID_BYTES = 512
 const MAX_TAB_REGIONS = 64
 const MAX_EXECUTORS = 128
-const REQUEST_TIMEOUT_MS = 2_000
-const LONG_REQUEST_TIMEOUT_MS = 60_000
 const OPERATIONS = [
   'inspect.tab', 'inspect.region', 'open.agent', 'open.terminal', 'open.browser',
   'send', 'focus', 'arrange', 'list.agents',
@@ -430,10 +430,6 @@ function requestIdentity(value: unknown): { requestId: string | null; operation:
   return { requestId: typeof source.requestId === 'string' ? source.requestId : null, operation: (OPERATIONS as readonly unknown[]).includes(source.operation) ? source.operation as AgentMuxControlRequest['operation'] : null }
 }
 
-function longOperation(operation: AgentMuxControlRequest['operation']): boolean {
-  return operation.startsWith('open.') || operation === 'send' || operation === 'resume' || operation === 'stop'
-}
-
 /**
  * 这条 Control socket 上是不是已经有活着的 owner。
  *
@@ -474,13 +470,14 @@ export class AgentMuxControlServer {
   }
 
   private async handle(socket: Socket): Promise<void> {
-    socket.setTimeout(REQUEST_TIMEOUT_MS, () => socket.destroy())
+    // 还没读到请求，不知道是哪个操作：先按短预算等第一条消息，读出来之后（下面）再按操作重排。
+    socket.setTimeout(AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS, () => socket.destroy())
     let raw: unknown
     let receipt: AgentMuxControlReceipt
     try {
       raw = await readMessage(socket)
       const request = parseAgentMuxControlRequest(raw)
-      socket.setTimeout(longOperation(request.operation) ? LONG_REQUEST_TIMEOUT_MS : REQUEST_TIMEOUT_MS)
+      socket.setTimeout(agentMuxControlTimeoutMs(request.operation))
       receipt = successReceipt(request, await this.control.execute(request))
     } catch (error) {
       const identity = requestIdentity(raw)
@@ -508,7 +505,7 @@ export async function requestAgentMuxControl(value: AgentMuxControlRequest, path
   const request = parseAgentMuxControlRequest(value)
   const response = await new Promise<unknown>((resolve, reject) => {
     const socket = createConnection(path)
-    socket.setTimeout(longOperation(request.operation) ? LONG_REQUEST_TIMEOUT_MS : REQUEST_TIMEOUT_MS, () => socket.destroy(new AgentMuxError('Control request timed out.', 'CONTROL_TIMEOUT')))
+    socket.setTimeout(agentMuxControlTimeoutMs(request.operation), () => socket.destroy(new AgentMuxError('Control request timed out.', 'CONTROL_TIMEOUT')))
     socket.once('connect', () => socket.write(`${JSON.stringify(request)}\n`))
     socket.once('error', (error: NodeJS.ErrnoException) => {
       if (error instanceof AgentMuxError) reject(error)

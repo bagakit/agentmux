@@ -1,4 +1,5 @@
 import { chmod, mkdtemp, rm, stat } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -9,7 +10,11 @@ import {
   requestAgentMuxControl
 } from '../src/control-host.js'
 import {
+  AGENTMUX_CONTROL_LONG_REQUEST_TIMEOUT_MS,
+  AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS,
   AGENTMUX_CONTROL_SCHEMA_VERSION,
+  agentMuxControlTimeoutMs,
+  isLongAgentMuxControlOperation,
   resolveAgentMuxRegion,
   type AgentMuxAgentRegion,
   type AgentMuxControlResult,
@@ -445,5 +450,83 @@ describe('external Control control', () => {
       text: 'Continue'
     }, path)).rejects.toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR' })
     await new Promise<void>((resolve) => server.close(() => resolve()))
+  })
+})
+
+/**
+ * 等待预算与「哪些操作算慢」都只有一处。
+ *
+ * 同一条 `amux open.agent` 有两条到达执行方的路，各有一个等待方：这里的 CLI→daemon socket，以及
+ * Renderer 拥有屏幕时 main→Renderer 的 IPC 桥（apps/desktop 的 control-ipc-bridge）。此前两侧各手抄
+ * `2_000` / `60_000`，而**「哪些操作算慢」在这边是命名函数 `longOperation`、在桥那边被内联展开成同样
+ * 的四项析取**。后果：加一个慢操作时只改一侧的人会得到一个全绿的仓库，而另一条路静默给它 2 秒——
+ * 用户看到的是「同一个命令有时能开出来、有时报 CONTROL_TIMEOUT」，差别只在当时是谁拥有屏幕。
+ *
+ * 取值与语义归 core（本文件钉），「桥有没有真的从这一处取」归 desktop 那侧的守卫钉。
+ */
+describe('Control 等待预算与慢操作判据只有一处', () => {
+  const hostSource = readFileSync(new URL('../src/control-host.ts', import.meta.url), 'utf8')
+
+  it('长操作等长预算、短操作等短预算', () => {
+    expect(agentMuxControlTimeoutMs('open.agent')).toBe(AGENTMUX_CONTROL_LONG_REQUEST_TIMEOUT_MS)
+    expect(agentMuxControlTimeoutMs('inspect.tab')).toBe(AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS)
+    // 自检：两个预算相等时上面两条恒真，整族退化成装饰。
+    expect(
+      AGENTMUX_CONTROL_LONG_REQUEST_TIMEOUT_MS,
+      '长短预算相等，这一族分辨不出任何东西'
+    ).toBeGreaterThan(AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS)
+  })
+
+  it('慢的是「要等外面」的那些，快的是只读/只动本地状态的', () => {
+    // 判据落在**语义**上而不是抄一份清单：等进程起来、等 composer 就绪、等 Provider 重建会话、
+    // 等进程收尾——这四类要长预算；inspect/focus/arrange/list 两秒内不返回就是真出事了。
+    for (const operation of ['open.agent', 'open.terminal', 'open.browser', 'send', 'resume', 'stop'] as const) {
+      expect(isLongAgentMuxControlOperation(operation), `${operation} 要等外面，必须走长预算`).toBe(true)
+    }
+    for (const operation of ['inspect.tab', 'inspect.region', 'focus', 'arrange', 'list.agents'] as const) {
+      expect(isLongAgentMuxControlOperation(operation), `${operation} 只读或只动本地状态，不该占长预算`).toBe(false)
+    }
+  })
+
+  it('control-host 从 control.ts 取预算，不再自己算一遍', () => {
+    // 判 import 关系而不是「没有 60_000 这个字面量」：换个写法（`60 * 1_000`、`6e4`、一个中间常量）
+    // 就能绕过字面量判据，而「自己算一遍」这件事照旧发生。
+    const IMPORT_SHAPE = /import\s*\{[\s\S]*?\bagentMuxControlTimeoutMs\b[\s\S]*?\}\s*from\s*'\.\/control\.js'/
+    expect(
+      IMPORT_SHAPE.test(hostSource),
+      'control-host 没有从 ./control.js 导入 agentMuxControlTimeoutMs：预算又变成两处各算一遍'
+    ).toBe(true)
+    // 自检：正则认得出它要找的那种形状，否则上面那条是死代码。
+    expect(
+      IMPORT_SHAPE.test("import {\n  agentMuxControlTimeoutMs\n} from './control.js'"),
+      '判据认不出正常的导入写法'
+    ).toBe(true)
+
+    // 导入了还必须真被用上：只导入不调用等于没接（本仓 noUnusedLocals 未开，tsc 不会拦）。
+    expect(
+      hostSource.includes('agentMuxControlTimeoutMs(request.operation)'),
+      '导入了却没在 setTimeout 的延时位置调用它'
+    ).toBe(true)
+
+    // 「哪些操作算慢」也不许在这里重写一遍（本文件曾有个 longOperation() 就是那份副本）。
+    // 判据不是「某个禁止形状不在场」——那种判法拦不住换个拼法，也会误伤本文件大量按操作解析请求的
+    // `source.operation === 'send'` 派发。这里改成直接质询**每一处 setTimeout 的延时位取的是什么**：
+    // 逐个抽出来，只允许是 core 那两个导出之一。谁想自己算一遍，那个表达式就会出现在这张名单上。
+    const delays = [...hostSource.matchAll(/\.setTimeout\(\s*([A-Za-z_$][\w$.]*(?:\([^()]*\))?)/g)]
+      .map((match) => match[1]!)
+    const ALLOWED = new Set([
+      // 还没读到请求时只能按短预算等第一条消息（下面读出来再按操作重排）。
+      'AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS',
+      'agentMuxControlTimeoutMs(request.operation)'
+    ])
+    for (const delay of delays) {
+      expect(ALLOWED.has(delay), `setTimeout 的延时位写着 \`${delay}\`，不是从 control.ts 那一处取的`).toBe(true)
+    }
+    // 自检：抽取器真的找到了那些调用点，否则上面那个循环跑零次、恒绿。
+    expect(delays.length, 'setTimeout 延时位抽取器一个都没找到，上面那条守卫是死代码').toBeGreaterThanOrEqual(3)
+    // 自检：抽取器认得出「自己算一遍」的那种拼法。
+    const historical = `socket.setTimeout(longOperation(request.operation) ? LONG : SHORT, () => socket.destroy())`
+    const probed = [...historical.matchAll(/\.setTimeout\(\s*([A-Za-z_$][\w$.]*(?:\([^()]*\))?)/g)].map((m) => m[1]!)
+    expect(probed, '抽取器认不出内联算一遍的形状，那条守卫是死代码').toEqual(['longOperation(request.operation)'])
   })
 })
