@@ -7,6 +7,8 @@ import {
   type WorkbenchSurface,
   type WorkbenchTab
 } from '../src/renderer/src/lib/workbench-tabs'
+import { promoteRegionToTab } from '../src/renderer/src/lib/promote-region-to-tab'
+import { createWorkspaceLayout } from '../src/renderer/src/lib/workbench-layout'
 
 // #494 gap：分屏树里的 regionId 集合，必须与 tab.regions 这张表的 key 集合逐一相等。此前这条只由
 // addWorkbenchRegion / removeWorkbenchRegion 「两处一起改」的约定维持，没有任何守卫——树里多一格
@@ -52,5 +54,40 @@ describe('tab 布局树 ↔ tab.regions 集合不变量（#494 gap）', () => {
     const closed = removeWorkbenchRegion(tab, 'r1')!
     expectInvariant(closed)
     expect(regionSetsAgree(closed).map).toContain(closed.layout.activeRegionId)
+  })
+
+  // #487 promote：把一格单独变成新 Tab。这条把创建/追加/关闭那套「两侧集合相等」的纪律延伸到促升——
+  // 促升同时改两张 Tab（源 Tab 少一格、新 Tab 恰一格），两侧都必须逐一相等，且跨两张 Tab 总格数守恒
+  // （既不丢也不重复）。
+  it('促升一格后，源 Tab 与新 Tab 两侧集合各自相等，且总格数守恒', () => {
+    let tab = createWorkbenchTab('source', launcher('r0'))
+    tab = addWorkbenchRegion(tab, 'r0', 'right', launcher('r1'))
+    tab = addWorkbenchRegion(tab, 'r0', 'right', launcher('r2'))
+    expectInvariant(tab)
+    const before = regionIds(tab.layout.root).length
+    expect(before).toBe(3)
+
+    const result = promoteRegionToTab({
+      tabs: { source: tab },
+      layouts: { workspace: createWorkspaceLayout('group-one', ['source']) },
+      workspaceId: 'workspace',
+      tabId: 'source',
+      regionId: 'r1',
+      mint: { tabId: 'new-tab' }
+    })
+    expect(result.kind).toBe('promoted')
+    if (result.kind !== 'promoted') throw new Error('unreachable')
+
+    const nextSource = result.tabs.source!
+    const newTab = result.tabs['new-tab']!
+    // 两侧各自逐一相等（不变量#1，在源 Tab 与新 Tab 上分别成立）。
+    expectInvariant(nextSource)
+    expectInvariant(newTab)
+    // 总格数守恒：促升前 3 格 = 源剩下的 + 新 Tab 的。
+    const after = Object.keys(nextSource.regions).length + Object.keys(newTab.regions).length
+    expect(after).toBe(before)
+    // 具体去向：源剩 r0/r2，新 Tab 恰 r1。
+    expect(regionSetsAgree(nextSource).map).toEqual(['r0', 'r2'])
+    expect(regionSetsAgree(newTab).map).toEqual(['r1'])
   })
 })

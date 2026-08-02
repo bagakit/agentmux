@@ -1,5 +1,5 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
-import { Copy, Crosshair, Replace, Send } from 'lucide-react'
+import { Copy, Crosshair, Replace, Send, SquareArrowOutUpRight } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { formatMessagingAddress, formatRegionAddress, formatSessionAddress } from '../lib/agent-address'
 import type { RegionSwapMenuEntry, WorkbenchSplitMenuEntry } from '../lib/workbench-tab-actions'
@@ -46,6 +46,14 @@ export type RegionMenuEntry =
    * 它排在最末（换位是对布局的操作，比"交出这一格 / 拿地址"次要），且整节的在场由数据决定。
    */
   | { kind: 'swap'; entry: RegionSwapMenuEntry }
+  /**
+   * 「把这一格单独变成它自己的 Tab」那一项（#487，「单独变成一个 tab」）。与分屏 / 换位同住这份
+   * `entries`，理由完全相同——写成 JSX 里的条件分支能被 `false &&` 整段抹掉而全绿。它是对这一格
+   * 布局归属最彻底的一步（离开本 Tab），故排在最末。只剩一格的 Tab 促升无意义（它已经就是一张
+   * Tab），那时以缺席表达而非画一个禁用的假项——在场与否由调用方按格数决定、由 `regionMenuEntries`
+   * 落成数据。
+   */
+  | { kind: 'promote'; onSelect(): void }
 
 export type RegionCopyModel = {
   regionAddress: RegionCopyAction
@@ -65,13 +73,19 @@ export function createRegionCopyModel({
   agentSessionId,
   writeClipboardText,
   splitMenu,
-  swapMenu
+  swapMenu,
+  promote
 }: {
   regionId: string
   agentSessionId: string | null
   writeClipboardText(text: string): Promise<void>
   splitMenu?: readonly WorkbenchSplitMenuEntry[]
   swapMenu?: readonly RegionSwapMenuEntry[]
+  /**
+   * 「把这一格单独变成它自己的 Tab」。缺席即这一项不出现——促升只对多格 Tab 有意义，调用方（只剩
+   * 一格时）以不传表达，而不是传一个禁用的假项。传进来的回调已把「哪一格」闭包好，壳里无从写第二个条件。
+   */
+  promote?: (() => void) | undefined
 }): RegionCopyModel {
   const copy = async (text: string, label: RegionCopyAction['label']): Promise<void> => {
     try {
@@ -102,7 +116,7 @@ export function createRegionCopyModel({
         }
       : {})
   }
-  return { ...actions, entries: regionMenuEntries(actions, splitMenu ?? [], swapMenu ?? []) }
+  return { ...actions, entries: regionMenuEntries(actions, splitMenu ?? [], swapMenu ?? [], promote) }
 }
 
 /**
@@ -123,11 +137,16 @@ export function createRegionCopyModel({
  * 分屏那一节排在地址项之后：来这个菜单最常见的意图是「把这一格的东西交出去 / 拿到它的地址」，
  * 分屏是对这一格**布局**的操作，属次要一组。它与地址项之间的分隔线同样只在两侧都真有东西时出现，
  * 且**整节的在场也由这里决定**——不是渲染层再加一个条件（那正是本菜单当初的事故形状）。
+ *
+ * 促升项（#487）排在换位之后、整份清单最末：它是对这一格布局归属最彻底的一步（把这一格带离本
+ * Tab）。它与前面那组之间的分隔线同样只在前面真有东西时才出现，且它在不在场由传没传 `promote`
+ * 决定（多格才传）——落成数据，不留给渲染层第二个条件。
  */
 function regionMenuEntries(
   model: Omit<RegionCopyModel, 'entries'>,
   splitMenu: readonly WorkbenchSplitMenuEntry[],
-  swapMenu: readonly RegionSwapMenuEntry[]
+  swapMenu: readonly RegionSwapMenuEntry[],
+  promote: (() => void) | undefined
 ): readonly RegionMenuEntry[] {
   const addresses: RegionMenuEntry[] = [
     { kind: 'action', action: model.regionAddress },
@@ -139,12 +158,15 @@ function regionMenuEntries(
   const withSplit: RegionMenuEntry[] = splitMenu.length === 0
     ? head
     : [...head, { kind: 'separator' }, ...splitMenu.map((entry) => ({ kind: 'split' as const, entry }))]
-  if (swapMenu.length === 0) return withSplit
-  return [
-    ...withSplit,
-    { kind: 'separator' },
-    ...swapMenu.map((entry) => ({ kind: 'swap' as const, entry }))
-  ]
+  const withSwap: RegionMenuEntry[] = swapMenu.length === 0
+    ? withSplit
+    : [
+        ...withSplit,
+        { kind: 'separator' },
+        ...swapMenu.map((entry) => ({ kind: 'swap' as const, entry }))
+      ]
+  if (!promote) return withSwap
+  return [...withSwap, { kind: 'separator' }, { kind: 'promote', onSelect: promote }]
 }
 
 /**
@@ -165,7 +187,8 @@ export function RegionContextMenu({
   agentSessionId,
   writeClipboardText,
   splitMenu,
-  swapMenu
+  swapMenu,
+  promote
 }: {
   children: ReactNode
   regionId: string
@@ -193,13 +216,19 @@ export function RegionContextMenu({
    * 时它自然为 `[]`，那时整节以缺席表达而非画一组禁用的假按钮。
    */
   swapMenu: readonly RegionSwapMenuEntry[]
+  /**
+   * 「把这一格单独变成它自己的 Tab」的回调（#487）。缺席即这一项不出现——促升只对多格 Tab 有意义，
+   * 只剩一格时调用方不传（它已经就是一张 Tab）。这一项在不在场由传没传决定，落成 `entries` 里的数据。
+   */
+  promote?: (() => void) | undefined
 }) {
   const model = createRegionCopyModel({
     regionId,
     agentSessionId,
     writeClipboardText,
     splitMenu,
-    swapMenu
+    swapMenu,
+    promote
   })
   return (
     <ContextMenu.Root>
@@ -241,6 +270,18 @@ export function RegionContextMenu({
                 >
                   <Replace size={14} />
                   <span>{entry.entry.label}</span>
+                </ContextMenu.Item>
+              )
+            }
+            if (entry.kind === 'promote') {
+              return (
+                <ContextMenu.Item
+                  key="promote"
+                  className="tab-context-menu__item"
+                  onSelect={entry.onSelect}
+                >
+                  <SquareArrowOutUpRight size={14} />
+                  <span>Move to New Tab</span>
                 </ContextMenu.Item>
               )
             }
