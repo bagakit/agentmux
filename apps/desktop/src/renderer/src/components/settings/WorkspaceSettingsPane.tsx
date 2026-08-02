@@ -81,7 +81,7 @@ export function WorkspaceSettingsPane({ config, onClose }: {
   return (
     <div className="settings-pane-stack">
       <section className="workspace-composer">
-        <header><span className="settings-card__icon"><FolderGit2 size={17} /></span><div><h3>Add project</h3><p>Register a project folder on a ready local or SSH host. Create worktrees later from its Branches panel.</p></div></header>
+        <header><div><h3>Add project</h3><p>Register a project folder on a ready local or SSH host. Create worktrees later from its Branches panel.</p></div></header>
         <div className="workspace-composer__fields workspace-composer__fields--project">
           <label className="workspace-composer__wide"><span>Project folder</span><input value={projectPath} onChange={(event) => setProjectPath(event.target.value)} placeholder="/path/to/project" /></label>
           <label><span>Run on</span><select value={readyHosts.some((host) => host.id === hostId) ? hostId : ''} disabled={readyHosts.length === 0} onChange={(event) => setHostId(event.target.value)}><option value="" disabled>{checkingHosts ? 'Checking hosts…' : 'No ready hosts'}</option>{readyHosts.map((host) => <option key={host.id} value={host.id}>{host.label}</option>)}</select><small>{readyHosts.find((host) => host.id === hostId)?.kind === 'ssh' ? <><RadioTower size={11} /> System SSH · Ready</> : readyHosts.some((host) => host.id === hostId) ? 'This Mac · Ready' : 'Open Hosts settings to fix unavailable machines.'}</small></label>

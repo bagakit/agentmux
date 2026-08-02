@@ -133,9 +133,12 @@
 .settings-sidebar nav > p:not(:first-child) { margin-top:var(--sp-6); }
 .settings-sidebar nav > button { width: 100%; display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap:var(--sp-3); padding:var(--sp-4); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; text-align: left; cursor: pointer; }
 .settings-sidebar nav > button:hover { color: var(--text-2); background: var(--surface-2); }
-.settings-sidebar nav > button.selected { color: var(--text); background: var(--surface-1); box-shadow: inset 0 0 0 1px var(--green-line); }
+/* 选中＝干净的 Surface 填充（与 Project Rail active 同语汇：surface-2 + 顶部高光），绿只落在图标上，
+   不画整圈描边——侧栏本身就是 surface-1，往选中态填 surface-1 等于没填，于是此前 hover 反而比选中更"实"。 */
+.settings-sidebar nav > button.selected { color: var(--text); background: var(--surface-2); box-shadow: var(--hl); }
+.settings-sidebar nav > button.selected > svg { color: var(--green); }
 .settings-sidebar nav > button > span { min-width: 0; display: flex; flex-direction: column; gap:var(--sp-1); }
-.settings-sidebar nav > button strong { font-size: var(--fs-micro); }
+.settings-sidebar nav > button strong { font-size: var(--fs-body); }
 .settings-sidebar nav > button small { overflow: hidden; font-size: var(--fs-micro); font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
 .settings-nav-empty { display: block; padding:var(--sp-4) var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
 .settings-sidebar > footer { height: 44px; display: flex; align-items: center; justify-content: space-between; padding:0 var(--sp-6); border-top: 1px solid var(--line-soft); color: var(--text-3); font-size: var(--fs-micro); }
@@ -145,33 +148,63 @@
 .settings-content > header h2 { margin:var(--sp-2) 0 var(--sp-1); font-size: var(--fs-display); letter-spacing: -.03em; }
 .settings-content > header p { margin:0; color: var(--text-3); font-size: var(--fs-micro); }
 .settings-content__scroll { min-height: 0; padding:var(--sp-7) clamp(var(--sp-7), 5vw, 74px) 50px; overflow: auto; }
-.settings-pane-stack { max-width: 900px; display: grid; gap:var(--sp-5); }
-.settings-card, .settings-group, .workspace-composer { border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface-1); box-shadow: var(--elev-1), var(--hl); }
-.settings-card { padding:var(--sp-6); }
-.settings-card--hero { display: grid; grid-template-columns: 38px minmax(0, 1fr); gap:var(--sp-5); }
-.settings-card__icon { width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center; flex: none; border: 1px solid var(--green-line); border-radius: var(--radius); color: var(--green); background: var(--green-bg); }
-.settings-card h3, .workspace-composer h3 { margin:1px 0 var(--sp-2); font-size: var(--fs-meta); }
+.settings-pane-stack { max-width: 900px; display: grid; gap:var(--sp-5); animation: settings-pane-in var(--dur-enter) var(--ease-enter); }
+/* 两层容器语汇（见 docs/design/agentmux-surface-density.md《Settings Pane》）。此前一条规则把
+   可操作合成器、只读说明、执行器分组、工作区列表压成同一个平面（surface-1 + elev-1 + 描边 + radius-lg），
+   于是整屏一样重、读不出主次——这次重做的核心就是把这一个平面拆成"抬起 vs 平铺"两档：
+     · 抬起层（可操作 / 主内容）：surface-1 + elev-2 + 顶部高光，不描边——真正能改东西的面浮起来；
+     · 平铺层（信息 / 次级）：与页面同底 surface-0 + 一条 line-soft 发丝线，无阴影、不成盒——只读说明沉入底面。
+   装饰性 hero 说明卡（原 .settings-card--hero / .settings-card__icon）已退役：绿只留给状态与唯一主操作。 */
+.settings-group, .workspace-composer { border-radius: var(--radius-lg); background: var(--surface-1); box-shadow: var(--elev-2), var(--hl); }
+.settings-card { padding:var(--sp-6) 0 0; border-top: 1px solid var(--line-soft); background: var(--surface-0); }
+.settings-card h3, .workspace-composer h3 { margin:1px 0 var(--sp-2); font-size: var(--fs-title); }
 .settings-card p, .workspace-composer p { margin:0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.55; }
-.settings-row-heading { display: grid; grid-template-columns: 21px minmax(0, 1fr); gap:var(--sp-3); }
-.settings-row-heading > svg { margin-top:1px; color: var(--green); }
+/* 只读事实的脚注排布：术语一档、说明再降一档，整块沉在平铺卡里，不假装成可操作控件。 */
+.settings-footnote { display: grid; gap:var(--sp-4); margin:var(--sp-4) 0 0; }
+.settings-footnote > div { display: grid; gap:var(--sp-1); }
+.settings-footnote dt { color: var(--text-2); font-size: var(--fs-meta); font-weight: 600; }
+.settings-footnote dd { margin:0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.55; }
 .settings-pane-toolbar { min-height: 43px; display: flex; align-items: center; justify-content: space-between; gap:var(--sp-6); }
 .settings-pane-toolbar > div { min-width: 0; display: flex; flex-direction: column; gap:var(--sp-1); }
-.settings-pane-toolbar > div strong { font-size: var(--fs-meta); }
+.settings-pane-toolbar > div strong { font-size: var(--fs-title); }
 .settings-pane-toolbar > div span { color: var(--text-3); font-size: var(--fs-meta); }
 .settings-compact-field { display: flex; align-items: center; gap:var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); }
 .settings-compact-field select { min-width: 160px; padding:var(--sp-3) var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text); background: var(--surface-1); font-size: var(--fs-meta); }
 .settings-group { overflow: hidden; }
-.settings-group > header { height: 35px; display: flex; align-items: center; justify-content: space-between; padding:0 var(--sp-5); border-bottom: 1px solid var(--line-soft); color: var(--text-2); font-size: var(--fs-meta); font-weight: 650; text-transform: uppercase; letter-spacing: .07em; }
+/* 区块头用句首大写的 --text-2，不再大写字距。三层大写标签（侧栏分组标签、eyebrow、区块头）曾在
+   同一视线里叠成一摞；把这层降下来后，原先在两个面里把它掰回句首大写的覆写（appearance / notification）
+   就成了默认，随之删除。 */
+.settings-group > header { height: 35px; display: flex; align-items: center; justify-content: space-between; padding:0 var(--sp-5); border-bottom: 1px solid var(--line-soft); color: var(--text-2); font-size: var(--fs-title); font-weight: 620; }
 .settings-group > header small { min-width: 19px; padding:var(--sp-1) var(--sp-2); border-radius: var(--radius); color: var(--text-3); background: var(--surface-3); font-size: var(--fs-micro); text-align: center; }
 .settings-disclosure-icon { color: var(--text-3); transition: transform .15s; }
 .settings-inline-error { margin:0; color: var(--red-text); font-size: var(--fs-micro); }
 .settings-pane-actions { display: flex; align-items: center; justify-content: flex-end; gap:var(--sp-5); }
 .settings-pane-actions > span { margin-right:auto; color: var(--text-3); font-size: var(--fs-micro); }
-.appearance-theme-group > header { text-transform: none; letter-spacing: normal; }
-.notification-dwell-group > header { text-transform: none; letter-spacing: normal; }
 .notification-dwell { display: grid; gap:var(--sp-4); padding:var(--sp-5); }
 .notification-dwell__slider { width: 100%; accent-color: var(--green); cursor: pointer; }
 .notification-dwell__ticks { display: flex; justify-content: space-between; gap:var(--sp-2); margin:0; padding:0; list-style: none; }
 .notification-dwell__tick { color: var(--text-3); font-size: var(--fs-micro); text-align: center; }
 .notification-dwell__tick[data-selected] { color: var(--text); font-weight: 620; }
 .notification-dwell__description { margin:0; color: var(--text-2); font-size: var(--fs-meta); }
+
+/* 每个 Pane 的引导句：正文档（--fs-prose）、次级色（--text-2），把只读的一句说明抬到可读正文，
+   与其下的说明（--fs-meta / --text-3）拉开一档，读者一眼知道哪句是导语、哪句是脚注。 */
+.settings-lead { margin:0 0 var(--sp-2); color: var(--text-2); font-size: var(--fs-prose); line-height: 1.5; }
+
+/* 通知预览——本屏的"手艺时刻"，对标终端主题预览那格 mini 终端。
+   它不是装饰：把系统通知长什么样如实画出来（状态点 + "Agent — 状态"标题行 + 回看行 + 停留计量条），
+   让用户在拨动停留时长时看到自己在配置什么。所有取色来自 token，绿只落在状态点与停留计量上（＝状态语汇）。 */
+.notification-preview { display: grid; gap:var(--sp-3); padding:var(--sp-5); border-radius: var(--radius-lg); background: var(--surface-2); box-shadow: var(--elev-2), var(--hl); }
+.notification-preview__chrome { display: flex; align-items: center; gap:var(--sp-3); color: var(--text-3); font-size: var(--fs-micro); letter-spacing: .04em; text-transform: uppercase; }
+.notification-preview__chrome b { color: var(--text-2); font-weight: 620; letter-spacing: normal; text-transform: none; }
+.notification-preview__chrome time { margin-left:auto; font-variant-numeric: tabular-nums; }
+.notification-preview__title { display: flex; align-items: center; gap:var(--sp-3); color: var(--text); font-size: var(--fs-body); font-weight: 600; }
+.notification-preview__body { margin:0; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.5; }
+/* 停留计量条＝这格的"合成器条"对位：一条 track，绿色填充按选中的停留档位收放（宽度由组件注入，
+   注入的自定义属性在此声明默认值，见控件语言）。"直到我关掉"档铺满整条并轻微呼吸。 */
+.notification-preview__dwell { --dwell-fill: 100%; height: 4px; overflow: hidden; border-radius: var(--radius-sm); background: var(--surface-0); }
+.notification-preview__dwell > i { display: block; width: var(--dwell-fill); height: 100%; border-radius: var(--radius-sm); background: linear-gradient(90deg, var(--green-2), var(--green)); transition: width var(--dur-enter) var(--ease-enter); }
+.notification-preview__dwell[data-persist='true'] > i { animation: notification-dwell-breath var(--dur-breath) ease-in-out infinite; }
+
+@keyframes settings-pane-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes notification-dwell-breath { 50% { opacity: .62; } }
