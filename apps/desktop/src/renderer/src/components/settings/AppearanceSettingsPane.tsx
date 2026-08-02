@@ -1,4 +1,4 @@
-import { Layers3, Palette, SquareTerminal } from 'lucide-react'
+import { Palette, SquareTerminal } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { AppearanceConfig, TerminalThemeId } from '../../../../shared/contracts'
 import { TERMINAL_THEME_CATALOG } from '../../lib/terminal-theme'
@@ -23,14 +23,8 @@ export function AppearanceSettingsPane({ appearance, onSave }: {
 
   return (
     <div className="settings-pane-stack">
-      <section className="settings-card settings-card--hero">
-        <span className="settings-card__icon"><Layers3 size={18} /></span>
-        <div>
-          <h3>Separate appearance layers</h3>
-          <p>AgentMux chrome stays quiet and consistent. The Terminal owns its palette; PTY and CtxMux transport bytes and never rewrite color.</p>
-        </div>
-      </section>
-      <section className="settings-group appearance-theme-group">
+      <p className="settings-lead">AgentMux chrome stays quiet and consistent; the Terminal owns its palette. PTY and CtxMux transport bytes and never rewrite color.</p>
+      <section className="settings-group">
         <header><span>Terminal palette</span><small>{TERMINAL_THEME_CATALOG.length}</small></header>
         <div className="terminal-theme-grid" role="radiogroup" aria-label="Terminal palette">
           {TERMINAL_THEME_CATALOG.map((definition) => {

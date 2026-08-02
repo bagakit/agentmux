@@ -1,5 +1,4 @@
-import { Bell } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type CSSProperties } from 'react'
 import type { AppConfig, NotificationModeId } from '../../../../shared/contracts'
 import {
   NOTIFICATION_TIERS,
@@ -23,6 +22,19 @@ export function NotificationSettingsPane({ notifications, onSave }: {
   const active = NOTIFICATION_TIERS[index] ?? NOTIFICATION_TIERS[0]!
   const savedMode = resolveNotificationModeId({ notifications })
 
+  // The preview mirrors the terminal-theme swatch: it draws the real thing the control shapes. The
+  // dwell meter fills in proportion to how long the banner stays — off collapses it, "until I dismiss"
+  // fills it and breathes. The longest bounded dwell anchors the scale so the fill reads as a ratio.
+  const longestDwellMs = Math.max(
+    ...NOTIFICATION_TIERS.map((tier) => (tier.mode.kind === 'dwell' ? tier.mode.dwellMs : 0))
+  )
+  const persist = active.mode.kind === 'until-acknowledged'
+  const dwellFill = persist
+    ? '100%'
+    : active.mode.kind === 'dwell'
+      ? `${Math.round((active.mode.dwellMs / longestDwellMs) * 100)}%`
+      : '0%'
+
   async function save(): Promise<void> {
     setSaving(true)
     try {
@@ -34,14 +46,17 @@ export function NotificationSettingsPane({ notifications, onSave }: {
 
   return (
     <div className="settings-pane-stack">
-      <section className="settings-card settings-card--hero">
-        <span className="settings-card__icon"><Bell size={18} /></span>
-        <div>
-          <h3>Attention notifications</h3>
-          <p>When an Agent finishes, needs you, or fails while you are looking elsewhere, AgentMux raises a system notification naming the Agent, its state, and the latest exchange.</p>
+      <p className="settings-lead">When an Agent finishes, needs you, or fails while you are looking elsewhere, AgentMux raises a system notification naming the Agent, its state, and the latest exchange.</p>
+      <figure className="notification-preview" aria-label="Notification preview">
+        <div className="notification-preview__chrome"><b>AgentMux</b><time>now</time></div>
+        <div className="notification-preview__title">
+          <span className="status status--waiting" aria-hidden="true"><span className="status__dot" /></span>
+          Review Codex — Needs you
         </div>
-      </section>
-      <section className="settings-group notification-dwell-group">
+        <p className="notification-preview__body">Review Codex: Ready for your call on the migration plan.</p>
+        <div className="notification-preview__dwell" data-persist={persist ? 'true' : undefined} style={{ '--dwell-fill': dwellFill } as CSSProperties}><i /></div>
+      </figure>
+      <section className="settings-group">
         <header><span>How long it stays</span><small>{active.label}</small></header>
         <div className="notification-dwell">
           <input

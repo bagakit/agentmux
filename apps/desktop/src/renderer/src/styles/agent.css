@@ -307,7 +307,7 @@
 .agent-settings-card > summary { min-height: 48px; display: grid; grid-template-columns: 25px minmax(0, 1fr) auto 16px; align-items: center; gap:var(--sp-4); padding:var(--sp-3) var(--sp-4); list-style: none; cursor: pointer; }
 .agent-settings-card > summary::-webkit-details-marker, .host-edit-disclosure > summary::-webkit-details-marker { display: none; }
 .agent-settings-card > summary > span:nth-child(2) { min-width: 0; display: flex; flex-direction: column; gap:var(--sp-1); }
-.agent-settings-card > summary strong { font-size: var(--fs-micro); }
+.agent-settings-card > summary strong { font-size: var(--fs-body); }
 .agent-settings-card > summary small { overflow: hidden; color: var(--text-3); font-size: var(--fs-micro); font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
 .agent-settings-card[open] .settings-disclosure-icon, .host-edit-disclosure[open] > summary svg { transform: rotate(180deg); }
 .agent-settings-fields { display: grid; grid-template-columns: 1fr 1fr; gap:var(--sp-4); padding:var(--sp-5); border-top: 1px solid var(--line-soft); }

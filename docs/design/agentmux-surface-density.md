@@ -179,6 +179,7 @@
 - **受控表单控件必须有写回口，或显式声明它永不接受输入。** 判据不是自拟清单，而是 React 运行时自己的规则：给了 `value`/`checked` 却既无 `onChange`/`onInput` 也无无条件的 `readOnly`/`disabled`，React 会报 "without an `onChange` handler … read-only"。受控取值与写回口按定义成对（单独一个 `value` 没有任何用途——用户敲不进去），与上一条的在场标志同一形状，故同样**没有例外清单**：`defaultValue`、`readOnly`、`disabled` 本身就是判据的另一半。这条由 `apps/desktop/test/controlled-input-is-writable.test.tsx` 守住，它静态扫每一个组件文件、并把 React 的那句告警接成断言钉住判据。起因：启动对话框那两格名字输入删掉 `onChange` 之后永久不可写（用户填什么都送不出去），涉及该组件的 23 条测试与 `tsc --noEmit` **全绿**（实测）——本仓只有 `renderToStaticMarkup`，不跑 effect、不派发 DOM 事件，这类失效没有行为测试能覆盖。**只有无条件的 `disabled` 才算自洽**：事故现场那两格正带着 `disabled={busy !== null}`（忙时才禁用），把任何 `disabled` 都算过的话这次变异照旧全绿（实测）。
 - Tab 选中态使用轻微背景和底部 2px 横条，不使用顶部高光或整圈描边。
 - Composer 表面同样不使用描边：它靠比所在 Region 高一档的 Surface 填充与顶部高光界定自己，四周 margin 与紧邻其上的审批卡片一致，读作工作面的一部分而非浮在上面的盒子。这也消解了卡片刻意不用描边的那条理由——两处不再争夺同一条边界。去掉常驻描边后 focus 不再能寄生在 `border-color` 上，故由 `--focus-ring` 加一道 inset `--focus-line` 独立承担，可见性不因"更平"而退化，且内阴影不改变盒模型、不引起布局位移。
+- **装饰性强调图标格不是卡片元素**。给一段说明卡挂一个品牌绿的 36px 图标格（原 Settings 的 `.settings-card--hero` / `.settings-card__icon`），是把最抢眼的强调色花在一段不可操作的文字上。强调（品牌绿实心格/描边）只表达**状态**或页面**唯一主操作**；说明性卡片靠字号阶梯与留白分级，不靠一枚彩色图标求存在感。每节导航前缀的**区分性**图标不在此列——它们各不相同，是身份标识而非装饰（见"一列全同的图标"那条的反面）。
 
 ## 身份归属
 
@@ -234,6 +235,7 @@
 | Tool Dock Header | 30–34px；10px 左缩进；24px 图标按钮 | 各工具坞标题共享同一左缘。分屏时上下堆叠的标题必须对齐，近似对齐比不对齐更伤观感 |
 | Agent Attention Bar | 24px 高；横跨整宽；12px 横向 Padding；12px 段间距；11px tabular-nums | 窗口底部唯一的跨会话注意力汇总。`surface-1` 填充 + 顶部高光 + 一条 hairline 顶边界定它，不使用描边。复用共享状态点语汇，计数为零保持中性灰；栏存在时把折叠的 Rail 角标抬高让位，纯 CSS `:has()`，不耦合 JS |
 | Agent Provider Catalog | 142px 最小列宽；44px Card；最多 268px 高 | 容器独立滚动，不扩大 Launcher |
+| Settings Pane | 两层容器，不是一层：**可操作/主内容**卡＝`--surface-1` + `--elev-2` + `--hl` + `--radius-lg`（抬起）；**信息/次级**块＝与页面同底的平铺 `--surface-0` + 一条 `--line-soft` 发丝线，无阴影、不成盒。卡片/区块标题走 `--fs-title`(14)，说明降到 `--fs-meta`/`--text-3` 读作从属；区块头句首大写 `--text-2`，不叠第三层大写字距 | 此前一条规则把合成器、只读说明、执行器分组、工作区列表压成同一个平面，于是整屏一样重、读不出主次——两层的"抬起 vs 平铺"对比**就是**这次重做。**装饰性 hero 说明卡已退役**（见控件语言"装饰性强调图标格"）：绿只留给状态与唯一主操作。侧栏选中＝干净 Surface 填充（`--surface-2` + `--hl`，与 Project Rail active 同语汇），绿落在该项图标或 `aria-current` 上，**不画整圈描边**——侧栏本身是 `--surface-1`，往选中态填 `--surface-1` 等于没填，会让 hover 反而比选中更"实"。每节导航前缀图标各不相同，予以保留。入场用 `--dur-enter`/`--ease-enter` 的淡入上浮，不做长时遮罩揭幕或光标跟随——那类破坏工具身份 |
 | 操作与元数据文字 | 11–13px；微标不低于 10px | 不用 7–9px 冒充密度 |
 | Terminal / Editor | Terminal `12px / 1.0`；Editor `14px / 21px` | 由 xterm/Monaco 原生 DPR 渲染，不使用 CSS transform |
 | Terminal replay recovery | 有界批次；批次间让出事件循环；连续 live bytes 合并成视觉批次；输入/切换控件不被输出队列饿死；切回时按视口记忆停在上次位置或最新输出 | 大量 scrollback 恢复时优先保持界面可操作，避免一次性 parser 工作造成假死、逐字绘制或把回放过程暴露成从顶部滚落 |
