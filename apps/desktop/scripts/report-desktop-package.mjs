@@ -9,6 +9,10 @@ import {
   knownApplicationPaths,
   readPackageIdentity
 } from './package-identity.mjs'
+import {
+  formatPackageReportPreflightError,
+  inspectPackageReportPaths
+} from './package-report-preflight.mjs'
 
 const desktopRoot = resolve(import.meta.dirname, '..')
 const repositoryRoot = resolve(desktopRoot, '../..')
@@ -25,6 +29,18 @@ const contents = join(appPath, 'Contents')
 const frameworkRoot = join(contents, 'Frameworks')
 const appResources = join(contents, 'Resources', 'app')
 const rendererAssets = join(appResources, 'out', 'renderer', 'assets')
+const mainExecutablePath = join(contents, 'MacOS', 'AgentMux')
+
+const preflight = await inspectPackageReportPaths({
+  appPath,
+  rendererAssets,
+  mainExecutablePath,
+  dmgPath
+})
+if (!preflight.ok) {
+  process.stderr.write(`${formatPackageReportPreflightError(preflight.missing)}\n`)
+  process.exit(1)
+}
 
 async function pathSize(path) {
   const entry = await stat(path)
@@ -142,7 +158,6 @@ const sourceIdentity = checkoutIdentity()
 const installedIdentity = await stat(installedAppPath)
   .then(() => readPackageIdentity(installedAppPath))
   .catch(() => null)
-const mainExecutablePath = join(contents, 'MacOS', 'AgentMux')
 const installedMainExecutablePath = join(installedAppPath, 'Contents', 'MacOS', 'AgentMux')
 const [candidateMainHash, candidateDmgHash, candidateSignature, installedMainHash, installedSignature] = await Promise.all([
   sha256(mainExecutablePath),
