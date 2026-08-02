@@ -16,7 +16,7 @@ import type { AttentionVisibility } from './attention-event'
 // THE CONTRACT this file decides, and why it is NOT the same as the rail's:
 //   A Topic-hidden Agent is OFF SCREEN, so its completion SHOULD notify. An OS notification is a
 //   one-shot "this finished while you were looking elsewhere" — announcing an off-screen completion is
-//   the whole point of the feature. That is deliberately the opposite of `row-attention.ts:46`, which
+//   the whole point of the feature. That is deliberately the opposite of `row-attention.ts:51`, which
 //   drops `done` from the PERSISTENT rail ink: a permanent mark for routine completion would drown the
 //   one signal that must stay legible on the rail — "someone is waiting on you". Different surface,
 //   different rule, stated here so the difference is a decision rather than an accident.

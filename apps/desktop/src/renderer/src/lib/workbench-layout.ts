@@ -19,8 +19,9 @@ import { orientationOf, placementOf } from './split-direction'
 export type SplitDirection = 'left' | 'right' | 'up' | 'down'
 
 // 工作区 tab-group 分屏树 = 叶子挂 groupId 的通用分屏树（见 split-tree.ts）。ratio 与 region 树统一
-// 为必填：buildSplitNode 恒给 0.5，不存在缺省。（渲染侧 WorkspaceWorkbench.tsx 仍以 `?? 0.5` 兜底，
-// 那是给可能缺 ratio 的历史持久化数据留的防线，与本类型的「新建时恒有」不矛盾。）
+// 为必填：buildSplitNode 恒给 0.5，不存在缺省。历史持久化数据仍可能缺它，那条防线在
+// `clampSplitRatio`（split-tree.ts）——**不是**渲染层的 `?? 0.5`：#552 坐实 `??` 接不住上游归一化
+// 算出来的 NaN，那道兜底已被撤掉，渲染层现在无条件走 clampSplitRatio。
 export type TabGroupLayoutNode = SplitTreeNode<{ groupId: string }>
 
 export type TabGroup = {
@@ -332,7 +333,7 @@ export function focusGroup(layout: WorkspaceLayout, groupId: string): WorkspaceL
  * **两个方向都判，不许削成单向。** 只判「叶子都有记录」会放过 off-tree group（记录多、树里没有）——那正是
  * 已复发两次的那一种；只判「记录都有叶子」会放过树里的孤儿叶。缺一侧就漏掉一整族缺陷。
  *
- * **只断言 STORED layout，绝不断言任何投影。** `layoutForActiveTopic`（scratch-topic-layout.ts:199）
+ * **只断言 STORED layout，绝不断言任何投影。** `layoutForActiveTopic`（scratch-topic-layout.ts:203）
  * 刻意产出一个 `groups` ⊇ 树叶的**超集**：它把投影到空的分组用 `removeLeaf` 摘出树，却在 `groups` 数组里
  * 保留它们（那是存储真相，别的 Topic 的 Tab 还在里面，删了切回去就找不回来——见其 :188-197 原话）。那是
  * 只读派生值，不流回任何 reducer，故本断言碰不到它；谁若把它喂回 reducer 或在它身上断言，会误报——见
@@ -399,7 +400,8 @@ export function removeTab(
   // 所以判据补上「它在不在树里」这一问。`leafIds.length === 1` 与旧的 `root.type === 'leaf'` 逐点
   // 等价（split 恒有两个子节点，故叶子数为 1 ⟺ root 本身就是叶子），换成数叶子只是为了与前一问共用
   // 同一次 `groupIds`；真正的变化只有 `!leafIds.includes(groupId)` 那一项，对今天每条可达输入都不
-  // 改变结果。三项各由 workbench-layout-off-tree-group.test.ts 单独钉着（逐项撤掉只红对应那条）。
+  // 改变结果。三项各由 workbench-layout-off-tree-group.test.ts 单独钉着（逐项撤掉只红对应那条：实测
+  // 撤 `sourceOrder.length > 0` → 1 红 6 绿，撤 `!leafIds.includes` → 2 红，撤 `length === 1` → 2 红）。
   const leafIds = groupIds(layout.root)
   if (sourceOrder.length > 0 || !leafIds.includes(groupId) || leafIds.length === 1) {
     // 这条出口只改 `groups` 里的 within-record 字段（tabOrder / activeTabId / recentTabIds），树与

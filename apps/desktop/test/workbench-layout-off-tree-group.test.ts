@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  addTab,
   createWorkspaceLayout,
   findGroup,
   groupIds,
@@ -50,6 +51,16 @@ function splitMain(): WorkspaceLayout {
     'right',
     'main-2'
   )
+}
+
+/**
+ * 主区已分屏，且**次级分组里有两张 Tab**。
+ *
+ * 上面的 `splitMain` 每个分组都只有一张 Tab，所以在它身上关 Tab 一定把分组关空——`sourceOrder.length > 0`
+ * 那一项恒为假、永不承重。要让那一项成为唯一决定结果的条件，必须有一个分组关掉一张之后**还剩一张**。
+ */
+function splitMainWithTwoTabsInSecondGroup(): WorkspaceLayout {
+  return addTab(splitMain(), 'main-2', 'file:b.ts')
 }
 
 /**
@@ -115,6 +126,23 @@ describe('removeTab 的收组判据要问「它在不在分屏树里」', () => 
     expect(findGroup(closed, 'main-2'), '空的次级分组没有被收掉').toBeNull()
     expect(closed.root).toEqual({ type: 'leaf', groupId: 'main' })
     expect(closed.activeGroupId).toBe('main')
+  })
+
+  it('在树里的分组还剩 Tab 时不许被收掉（钉判据里的 `sourceOrder.length > 0` 那一项）', () => {
+    // 这一项此前无人守：本文件其余每条都是「关掉某个分组的**最后**一张 Tab」，那时 sourceOrder 恒为空，
+    // 于是判据的第一项恒为假、永不决定结果——把它整项删掉，六条照旧全绿。而它防的是最贵的那一种：
+    // 分组里还有别的 Tab 就把分组收掉，剩下那张 Tab 的记录还在 state.tabs 里却不再属于任何分组，
+    // 成为永不显示、永不可关的孤儿（addTabPlacement 那段 JSDoc 描述的形状）。
+    const layout = splitMainWithTwoTabsInSecondGroup()
+    // 前提自检：main-2 真的有两张 Tab，否则这条用例退化成「关最后一张」而测不到那一项。
+    expect(findGroup(layout, 'main-2')?.tabOrder).toEqual(['file:a.ts', 'file:b.ts'])
+
+    const closed = removeTab(layout, 'main-2', 'file:a.ts')
+
+    expect(findGroup(closed, 'main-2'), '分组里还剩 Tab 却被收掉了').not.toBeNull()
+    expect(findGroup(closed, 'main-2')?.tabOrder).toEqual(['file:b.ts'])
+    // 树也不该动：收组才动树，这次不是收组。
+    expect(groupIds(closed.root).sort()).toEqual(['main', 'main-2'])
   })
 
   it('以上每条的结果里，分屏树的每片叶子都在 groups 里查得到', () => {
