@@ -356,11 +356,11 @@
 .posture-menu__item[data-tier="caution"] .posture-menu__label strong { color: var(--amber); }
 .posture-menu__item[data-tier="danger"] .posture-menu__label strong { color: var(--red); }
 
-.host-card__icon { width: 27px; height: 27px; display: flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); color: var(--green); background: var(--surface-1); }
-.host-settings-card { overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface-1); box-shadow: var(--elev-1), var(--hl); }
+.host-card__icon { width: 27px; height: 27px; display: flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); color: var(--green); background: var(--surface-2); }
+.host-settings-card { overflow: hidden; border-radius: var(--radius-lg); background: var(--surface-1); box-shadow: var(--elev-2), var(--hl); }
 .host-settings-card > header { min-height: 55px; display: grid; grid-template-columns: 32px minmax(0, 1fr) auto auto auto; align-items: center; gap:var(--sp-4); padding:var(--sp-4) var(--sp-5); }
 .host-settings-card > header > div { min-width: 0; display: flex; flex-direction: column; gap:var(--sp-1); }
-.host-settings-card > header strong { font-size: var(--fs-micro); }
+.host-settings-card > header strong { font-size: var(--fs-body); }
 .host-settings-card > header small { overflow: hidden; color: var(--text-3); font-size: var(--fs-micro); text-overflow: ellipsis; white-space: nowrap; }
 .host-edit-disclosure { border-top: 1px solid var(--line-soft); }
 .host-edit-disclosure > summary { display: flex; align-items: center; justify-content: space-between; padding:var(--sp-4) var(--sp-5); color: var(--text-3); font-size: var(--fs-micro); cursor: pointer; }
