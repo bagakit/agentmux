@@ -14,6 +14,7 @@ import type {
   WorkspaceBranchesSnapshot,
   WorkspaceRecord
 } from '../src/shared/contracts.js'
+import { allStyles } from './helpers/styles.js'
 
 const fixture = vi.hoisted(() => ({
   snapshot: null as WorkspaceBranchesSnapshot | null,
@@ -339,13 +340,18 @@ describe('Branches 面板的同步计数徽标', () => {
   })
 
   /**
-   * 每一种**会渲染出徽标**的 kind 都必须在 dock.css 里有自己的一条规则。
+   * 每一种**会渲染出徽标**的 kind 都必须在样式表里有自己的一条规则。
    *
    * 清单不手抄：从 `gitSyncBadge` 自己身上取——喂给它覆盖四个正负组合的事实，把 label 非空的那些
    * kind 收集起来。手抄一份清单就会在加第六种状态时静默漏掉 CSS，而那种漏法的症状是徽标以继承色
    * 出现，测试与 tsc 都不会红。
+   *
+   * 扫的是 `allStyles()`（整张表）而不是某一个文件名。此前这里硬写 dock.css，于是把 Source Control
+   * 那一段拆到 source-control.css 时它当场变红——而拆分并没有让任何一条规则失效。判据本来就该是
+   * 「这条规则在层叠里吗」，不是「它在哪个文件里」：后者让每一次按表面再拆一刀都要来改这条断言，
+   * 且反过来，若那个文件从 @import 里掉出去（规则真的失效了），硬写路径的读法照旧全绿。
    */
-  it('每种可见 kind 在 dock.css 里都有配色', () => {
+  it('每种可见 kind 在样式表里都有配色', () => {
     const probes: GitAheadBehind[] = [
       { upstream: null, ahead: 0, behind: 0 },
       { upstream: UPSTREAM, ahead: 0, behind: 0 },
@@ -356,7 +362,7 @@ describe('Branches 面板的同步计数徽标', () => {
     const visible = [...new Set(probes.map(gitSyncBadge).filter((b) => b.label !== '').map((b) => b.kind))]
     expect(visible.length, '一种会渲染的 kind 都收集不到——判据落空了').toBeGreaterThan(0)
 
-    const css = readFileSync(new URL('../src/renderer/src/styles/dock.css', import.meta.url), 'utf8')
+    const css = allStyles()
     for (const kind of visible) {
       expect(css, `可见状态 ${kind} 没有配色规则，徽标会以继承色出现`).toContain(
         `.branch-row__sync--${kind} {`

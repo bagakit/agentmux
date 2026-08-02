@@ -9,6 +9,7 @@
 @import './chrome.css';
 @import './selector.css';
 @import './dock.css';
+@import './source-control.css';
 @import './workbench.css';
 @import './terminal.css';
 @import './surfaces.css';
