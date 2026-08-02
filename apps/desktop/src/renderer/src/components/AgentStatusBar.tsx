@@ -37,8 +37,8 @@ function StatusCount({
 
 // 一个 Provider 现在几个在跑、几个闲着。整窗的 working/needs-you 汇总回答"谁在等我"，这一段
 // 回答另一个问题——"哪个 Provider 在干活"——所以它按 Provider 分，而不是再报一次总数。
-// 活跃的定义来自 Board 那一个开关（见 summarizeProviderActivity），因此同一个 Session 不会
-// Board 判在跑、状态栏判待机。
+// 活跃的定义来自 Board 那一个开关（见 summarizeProviderActivity），整窗那个 working 计数也走同一个，
+// 因此同一个 Session 不会 Board 判在跑、状态栏判待机。
 function ProviderActivity() {
   const sessions = useAppStore((state) => state.sessions)
   const providers = summarizeProviderActivity(sessions)
