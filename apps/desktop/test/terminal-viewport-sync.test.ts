@@ -28,7 +28,7 @@ describe('TerminalViewportSynchronizer', () => {
   it('waits for measurable xterm cell metrics instead of synchronizing the default 80x24 grid', async () => {
     const frames = frameHarness()
     let measurable = false
-    const resize = vi.fn(async (_size: { cols: number; rows: number }) => {})
+    const resize = vi.fn(async (_size: { cols: number; rows: number }) => true)
     const sync = new TerminalViewportSynchronizer({
       proposeGrid: () => measurable ? { cols: 132, rows: 50 } : null,
       fit: () => {},
@@ -51,7 +51,7 @@ describe('TerminalViewportSynchronizer', () => {
     const frames = frameHarness()
     let proposed = { cols: 80, rows: 24 }
     let actual = { cols: 80, rows: 24 }
-    const resize = vi.fn(async (_size: { cols: number; rows: number }) => {})
+    const resize = vi.fn(async (_size: { cols: number; rows: number }) => true)
     const sync = new TerminalViewportSynchronizer({
       proposeGrid: () => proposed,
       fit: () => { actual = { ...proposed } },
@@ -79,7 +79,7 @@ describe('TerminalViewportSynchronizer', () => {
     const frames = frameHarness()
     let actual = { cols: 80, rows: 24 }
     const fit = vi.fn(() => { actual = { cols: 120, rows: 40 } })
-    const resize = vi.fn(async (_size: { cols: number; rows: number }) => {})
+    const resize = vi.fn(async (_size: { cols: number; rows: number }) => true)
     const sync = new TerminalViewportSynchronizer({
       proposeGrid: () => ({ cols: 120, rows: 40 }),
       fit,
@@ -100,7 +100,7 @@ describe('TerminalViewportSynchronizer', () => {
 
   it('redraws a live TUI after replay loss by restoring the exact settled grid', async () => {
     const frames = frameHarness()
-    const resize = vi.fn(async (_size: { cols: number; rows: number }) => {})
+    const resize = vi.fn(async (_size: { cols: number; rows: number }) => true)
     const sync = new TerminalViewportSynchronizer({
       proposeGrid: () => ({ cols: 120, rows: 40 }),
       fit: () => {},
@@ -123,7 +123,7 @@ describe('TerminalViewportSynchronizer', () => {
 
   it('does not redraw a historical Run or race an interactive resize', async () => {
     const frames = frameHarness()
-    const resize = vi.fn(async (_size: { cols: number; rows: number }) => {})
+    const resize = vi.fn(async (_size: { cols: number; rows: number }) => true)
     const sync = new TerminalViewportSynchronizer({
       proposeGrid: () => ({ cols: 120, rows: 40 }),
       fit: () => {},
@@ -144,7 +144,7 @@ describe('TerminalViewportSynchronizer', () => {
 
   it('does not resize a live PTY while its viewport is not measurable', async () => {
     const frames = frameHarness()
-    const resize = vi.fn(async (_size: { cols: number; rows: number }) => {})
+    const resize = vi.fn(async (_size: { cols: number; rows: number }) => true)
     const sync = new TerminalViewportSynchronizer({
       proposeGrid: () => null,
       fit: () => {},
@@ -164,7 +164,7 @@ describe('TerminalViewportSynchronizer', () => {
     const frames = frameHarness()
     let proposed = { cols: 100, rows: 30 }
     let actual = { ...proposed }
-    const resize = vi.fn(async (_size: { cols: number; rows: number }) => {})
+    const resize = vi.fn(async (_size: { cols: number; rows: number }) => true)
     const sync = new TerminalViewportSynchronizer({
       proposeGrid: () => proposed,
       fit: () => { actual = { ...proposed } },
@@ -195,7 +195,7 @@ describe('TerminalViewportSynchronizer', () => {
       proposeGrid: () => ({ cols: 80, rows: 24 }),
       fit: vi.fn(() => true),
       readGrid: () => ({ cols: 80, rows: 24 }),
-      resize: async () => {},
+      resize: async () => true,
       requestFrame: frames.request,
       cancelFrame: frames.cancel,
       measureViewport: () => ({ width: 800, height: 480 })
@@ -218,7 +218,7 @@ describe('TerminalViewportSynchronizer', () => {
     let proposed = proposals.shift()!
     let actual = { cols: 100, rows: 30 }
     const fit = vi.fn(() => { actual = { ...proposed } })
-    const resize = vi.fn(async (_size: { cols: number; rows: number }) => {})
+    const resize = vi.fn(async (_size: { cols: number; rows: number }) => true)
     const sync = new TerminalViewportSynchronizer({
       proposeGrid: () => {
         proposed = proposals.shift() ?? proposed
@@ -247,8 +247,8 @@ describe('TerminalViewportSynchronizer', () => {
     let releaseFirstResize = () => {}
     const firstResizePending = new Promise<void>((resolve) => { releaseFirstResize = resolve })
     const resize = vi.fn()
-      .mockImplementationOnce(async () => await firstResizePending)
-      .mockResolvedValue(undefined)
+      .mockImplementationOnce(async () => { await firstResizePending; return true })
+      .mockResolvedValue(true)
     const sync = new TerminalViewportSynchronizer({
       proposeGrid: () => proposed,
       fit: () => { actual = { ...proposed } },
@@ -281,7 +281,7 @@ describe('TerminalViewportSynchronizer', () => {
     let actual = { ...proposed }
     let releaseResize!: () => void
     const resizePending = new Promise<void>((resolve) => { releaseResize = resolve })
-    const resize = vi.fn(async () => await resizePending)
+    const resize = vi.fn(async () => { await resizePending; return true })
     const sync = new TerminalViewportSynchronizer({
       proposeGrid: () => proposed,
       fit: () => { actual = { ...proposed } },
@@ -309,7 +309,7 @@ describe('TerminalViewportSynchronizer', () => {
     let proposed = { cols: 100, rows: 30 }
     let actual = { ...proposed }
     const fit = vi.fn(() => { actual = { ...proposed } })
-    const resize = vi.fn(async (_size: { cols: number; rows: number }) => {})
+    const resize = vi.fn(async (_size: { cols: number; rows: number }) => true)
     const sync = new TerminalViewportSynchronizer({
       proposeGrid: () => proposed,
       fit,
@@ -353,7 +353,7 @@ describe('TerminalViewportSynchronizer', () => {
     let proposed = { cols: 120, rows: 40 }
     let actual = { cols: 120, rows: 40 }
     const fit = vi.fn(() => { actual = { ...proposed } })
-    const resize = vi.fn(async (_size: { cols: number; rows: number }) => {})
+    const resize = vi.fn(async (_size: { cols: number; rows: number }) => true)
     const sync = new TerminalViewportSynchronizer({
       proposeGrid: () => proposed,
       fit,
@@ -388,7 +388,7 @@ describe('TerminalViewportSynchronizer', () => {
     let proposed = { cols: 120, rows: 40 }
     let actual = { ...proposed }
     const fit = vi.fn(() => { actual = { ...proposed } })
-    const resize = vi.fn(async (_size: { cols: number; rows: number }) => {})
+    const resize = vi.fn(async (_size: { cols: number; rows: number }) => true)
     const sync = new TerminalViewportSynchronizer({
       proposeGrid: () => proposed,
       fit,
@@ -426,7 +426,7 @@ describe('TerminalViewportSynchronizer', () => {
     let proposed = { cols: 100, rows: 30 }
     let actual = { ...proposed }
     const fit = vi.fn(() => { actual = { ...proposed } })
-    const resize = vi.fn(async (_size: { cols: number; rows: number }) => {})
+    const resize = vi.fn(async (_size: { cols: number; rows: number }) => true)
     const sync = new TerminalViewportSynchronizer({
       proposeGrid: () => proposed,
       fit,
@@ -460,7 +460,7 @@ describe('TerminalViewportSynchronizer', () => {
     let proposed = { cols: 100, rows: 30 }
     let actual = { ...proposed }
     const fit = vi.fn(() => { actual = { ...proposed } })
-    const resize = vi.fn(async (_size: { cols: number; rows: number }) => {})
+    const resize = vi.fn(async (_size: { cols: number; rows: number }) => true)
     const sync = new TerminalViewportSynchronizer({
       proposeGrid: () => proposed,
       fit,
@@ -498,7 +498,7 @@ describe('TerminalViewportSynchronizer', () => {
     let proposed = { cols: 100, rows: 30 }
     let actual = { ...proposed }
     const fit = vi.fn(() => { actual = { ...proposed } })
-    const resize = vi.fn(async (_size: { cols: number; rows: number }) => {})
+    const resize = vi.fn(async (_size: { cols: number; rows: number }) => true)
     const sync = new TerminalViewportSynchronizer({
       proposeGrid: () => proposed,
       fit,
@@ -542,7 +542,7 @@ describe('TerminalViewportSynchronizer', () => {
       proposeGrid: () => proposed,
       fit: () => {},
       readGrid: () => proposed,
-      resize: async () => {},
+      resize: async () => true,
       requestFrame: frames.request,
       cancelFrame: frames.cancel,
       measureViewport: () => ({ width: 1000, height: 600 })
@@ -551,5 +551,63 @@ describe('TerminalViewportSynchronizer', () => {
     await sync.startLiveSynchronization()
     sync.setVisible(false)
     expect(await sync.requestContentRedraw()).toBe(false)
+  })
+
+  // 被调用方的闸挡掉的 resize 不许记成「PTY 已经在这个几何上」。
+  //
+  // 这是 #501 的形状，也是这个返回值存在的唯一理由。TerminalView 的 resize 实现前面有一道闸
+  // （进程死了就不再往 PTY 发），而 attach effect 刻意不依赖那道闸的取值——退出再恢复要保住同一个
+  // xterm 实例。于是「闸关着的时候来了一次 resize」是正常且可达的：ResizeObserver 不认识进程状态。
+  //
+  // 判据落在**闸重新打开之后**：几何没有再变（用户不会为了修好它再拖一次窗口），所以只有当那次被挡掉
+  // 的请求没有留下记账，requestResize 的相同-key 短路才不会把它吞掉。若把 no-op 记成成功，PTY 永远
+  // 停在 100 列而 xterm 已经是 140 列，直到用户恰好拖到另一个尺寸——这正是变异（删掉那行记账回滚）
+  // 时本条唯一变红、而上面 18 条全绿的原因。
+  it('does not record a gated-out resize as the PTY geometry, so a reopened gate still catches up', async () => {
+    const frames = frameHarness()
+    let proposed = { cols: 100, rows: 30 }
+    let actual = { ...proposed }
+    // 调用方自己的闸，形如 TerminalView 的 canControlRunRef：进程活着 true，退出后 false。
+    let ptyAcceptsResize = true
+    const delivered: Array<{ cols: number; rows: number }> = []
+    const sync = new TerminalViewportSynchronizer({
+      proposeGrid: () => proposed,
+      fit: () => { actual = { ...proposed } },
+      readGrid: () => actual,
+      resize: async (size) => {
+        if (!ptyAcceptsResize) return false
+        delivered.push(size)
+        return true
+      },
+      requestFrame: frames.request,
+      cancelFrame: frames.cancel,
+      measureViewport: () => ({ width: proposed.cols * 10, height: proposed.rows * 20 })
+    })
+
+    // 帧调度要跑到静止：synchronizer 会为「稳定几何」连排多帧，只推一帧就断言等于在半路上取值。
+    const settleFrames = async () => {
+      for (let index = 0; index < 20 && frames.count() > 0; index += 1) {
+        frames.runNext()
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      }
+    }
+
+    await sync.startLiveSynchronization()
+    await vi.waitFor(() => expect(delivered).toEqual([{ cols: 100, rows: 30 }]))
+
+    // 进程退出：闸关上，但同一个 xterm 还在，容器尺寸变化照旧被观察到。
+    ptyAcceptsResize = false
+    proposed = { cols: 140, rows: 30 }
+    sync.observeViewport()
+    await settleFrames()
+    expect(delivered, '进程已死时不该向 PTY 发 resize').toEqual([{ cols: 100, rows: 30 }])
+
+    // 恢复：闸重新打开，几何与被挡掉那次完全相同。
+    ptyAcceptsResize = true
+    sync.observeViewport()
+    await settleFrames()
+
+    expect(delivered.at(-1), 'PTY 停在 100 列而 xterm 已是 140 列：被挡掉的 resize 被记成了成功')
+      .toEqual({ cols: 140, rows: 30 })
   })
 })
