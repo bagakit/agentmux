@@ -302,6 +302,143 @@ describe('agent hook command usage relay', () => {
 })
 
 /**
+ * 瞬时失败时的那一次重试。
+ *
+ * 为什么单独一族：上面每个 fetch stub 都在**第一次**调用就返回 `{ok:true}`，于是循环体的第二次迭代
+ * 在任何测试里都不执行。把 `attempt < 2` 改成 `attempt < 1`（退回单次投递、重试彻底消失）时，
+ * 那 21 条照旧全绿——首次 POST 仍发出、`bodies).toHaveLength(1)` 仍满足。只有 `< 0`（一个 POST 都不发）
+ * 才有人发红。也就是说：**重试的存在**有守，**重试本身**无守。
+ *
+ * 这一次重试承重在哪：hook 摄入在 enqueue 抛错时回 503（hook-server.ts:271-273），那是瞬时的；
+ * 而 hook 侧没有任何持久 spool，503 一旦被直接丢掉，这条状态事实就永久没了（Agent 卡在 working
+ * 或 done 信号消失）。在 spool 落地之前，这次重试是唯一的缓冲，而它退化成单次是完全不可见的。
+ */
+describe('POST 失败后真的重投一次', () => {
+  let restoreStdin: (() => void) | null = null
+
+  function feedStdin(json: string): void {
+    const descriptor = Object.getOwnPropertyDescriptor(process, 'stdin')
+    Object.defineProperty(process, 'stdin', {
+      value: Readable.from([Buffer.from(json, 'utf8')]),
+      configurable: true
+    })
+    restoreStdin = () => {
+      if (descriptor) Object.defineProperty(process, 'stdin', descriptor)
+      else delete (process as unknown as { stdin?: unknown }).stdin
+    }
+  }
+
+  /**
+   * 让第 N 次 fetch 按 `behaviours[N]` 行事，之后一律成功。捕获每次 POST 的 body 与 stderr。
+   *
+   * `behaviours` 只描述**失败**：`{ status }` 是收到了响应但不 ok（真 503 的形状），`{ throws }` 是
+   * 连接层抛出或 AbortSignal 超时（fetch reject 的形状）。实现里这两条走不同的分支——前者先
+   * `response = 那个响应` 再 throw，后者压根没赋上——所以两种都要各喂一次。
+   */
+  function captureHookPost(behaviours: ReadonlyArray<{ status?: number; throws?: boolean }>): {
+    bodies: Array<Record<string, unknown>>
+    stderr: string[]
+  } {
+    const bodies: Array<Record<string, unknown>> = []
+    const stderr: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: unknown, init: { body: string }) => {
+        const index = bodies.length
+        bodies.push(JSON.parse(init.body) as Record<string, unknown>)
+        const behaviour = behaviours[index]
+        if (behaviour?.throws) throw new Error('fetch failed')
+        if (behaviour?.status) return { ok: false, status: behaviour.status } as Response
+        return { ok: true } as Response
+      })
+    )
+    vi.spyOn(process.stdout, 'write').mockReturnValue(true)
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk: unknown) => {
+      stderr.push(String(chunk))
+      return true
+    })
+    return { bodies, stderr }
+  }
+
+  function hookEnv(): void {
+    vi.stubEnv('AGENTMUX_HOOK_URL', 'http://127.0.0.1:65535/hook')
+    vi.stubEnv('AGENTMUX_HOOK_TOKEN', 'test-token')
+    vi.stubEnv('AGENTMUX_HOOK_EVENT', 'Stop')
+    // 这一族与 usage 无关：不声明格式，于是不读 transcript，断言只关于投递本身。
+    vi.stubEnv('AGENTMUX_USAGE_TRANSCRIPT_FORMAT', '')
+  }
+
+  afterEach(() => {
+    restoreStdin?.()
+    restoreStdin = null
+    vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
+    vi.restoreAllMocks()
+  })
+
+  it('首次 503 后重投，第二次成功——事件没丢，也不报错', async () => {
+    hookEnv()
+    const { bodies, stderr } = captureHookPost([{ status: 503 }])
+    feedStdin(JSON.stringify({ session_id: 'sess-retry-503' }))
+
+    await runAgentHookCommand()
+
+    // `attempt < 1` 时这里是 1：那条事实被 503 静默吃掉了。
+    expect(bodies, '首次 503 之后必须再投一次；重试消失时这里退回 1').toHaveLength(2)
+    expect(bodies[1]!.eventName, '重投的是同一条事件，不是一条新的').toBe('Stop')
+    // 最终成功了就不该往 stderr 写噪音——放弃与「重试后成功」必须区分开。
+    expect(stderr, '重试成功后仍写 stderr = 每次瞬时 503 都在日志里假报一次丢事件').toEqual([])
+  })
+
+  it('首次连接层抛出（含 2s 超时 abort）后重投——两种失败形状都要触发重试', async () => {
+    // 与上一条走实现里的**另一条**分支：fetch reject 时 response 压根没被赋上。
+    hookEnv()
+    const { bodies, stderr } = captureHookPost([{ throws: true }])
+    feedStdin(JSON.stringify({ session_id: 'sess-retry-throw' }))
+
+    await runAgentHookCommand()
+
+    expect(bodies, 'fetch reject 同样必须重投').toHaveLength(2)
+    expect(stderr).toEqual([])
+  })
+
+  it('两次都失败时放弃，并把最后那个错误响亮写进 stderr（不静默、也不无限重投）', async () => {
+    hookEnv()
+    const { bodies, stderr } = captureHookPost([{ status: 503 }, { status: 500 }])
+    feedStdin(JSON.stringify({ session_id: 'sess-retry-giveup' }))
+
+    await runAgentHookCommand()
+
+    // 上界：Agent 在等这个子进程退出，每次尝试自带 2s 超时，所以尝试次数直接加在每一次工具调用的
+    // 延迟上。摘掉这条上界（比如改成一直重试）会让一个死掉的摄入端把每次工具调用拖到无限。
+    expect(bodies, '放弃之后不许再投；这是 Agent 关键路径上的延迟上界').toHaveLength(2)
+    // 放弃是丢事件，必须留痕，且带上最后一次的真实状态码——`500` 与 `503` 的处置不同。
+    expect(stderr, '放弃时一个字都不写 = 事件静默消失，用户与我们都不知道').toHaveLength(1)
+    expect(stderr[0]).toContain('[AgentMux Hook]')
+    expect(stderr[0], '写出的必须是最后那次的真实错误，不是第一次的、也不是一句泛泛的失败').toContain('500')
+  })
+
+  it('重投沿用同一个 receiptId——重复投递是同一张回执，不是第二条时间轴条目', async () => {
+    // 承重理由：normalizer 用 `${runId}:${receiptId}:${index}` 派生 item id（hook-normalizer.ts:306）。
+    // 若把 `const receiptId = randomUUID()` 挪进重试循环，一次「超时 abort 但服务端其实已经收下」的
+    // 重投就会带着**新** id 再落一条，同一个事实在时间轴上出现两次。这是重试引入的新风险，
+    // 由「id 在两次之间稳定」这条性质来守。
+    hookEnv()
+    const { bodies } = captureHookPost([{ status: 503 }])
+    feedStdin(JSON.stringify({ session_id: 'sess-retry-receipt' }))
+
+    await runAgentHookCommand()
+
+    expect(bodies).toHaveLength(2)
+    const first = bodies[0]!.receiptId
+    // 自检：两边都 undefined 时 toBe 也绿。先证它真是一个非空字符串。
+    expect(typeof first, 'receiptId 不在 POST body 里，下面那条相等断言是恒真的').toBe('string')
+    expect(String(first).length).toBeGreaterThan(0)
+    expect(bodies[1]!.receiptId, '重投换了 receiptId：服务端已收下的那次会变成第二条时间轴条目').toBe(first)
+  })
+})
+
+/**
  * 门控决策与 stdin 的顺序。
  *
  * 我们自己的 128KiB 上限（MAX_HOOK_INPUT_BYTES）在 stdin 读循环里 `throw`。决策的 stdout 写出原先排在
