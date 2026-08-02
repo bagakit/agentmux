@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { WORKBENCH_LAYOUT_PRESETS } from '@agentmux/core/workbench-layout-preset'
+import { MIN_SPLIT_RATIO } from '../src/renderer/src/lib/split-tree'
 import {
   applyWorkbenchRegionLayoutPreset,
   balanceWorkbenchRegionLayout,
@@ -8,8 +10,17 @@ import {
   regionIds,
   splitWorkbenchRegion,
   swapWorkbenchRegions,
-  workbenchRegionBounds
+  workbenchRegionBounds,
+  workbenchRegionPresetSize,
+  type WorkbenchRegionLayoutNode
 } from '../src/renderer/src/lib/workbench-view-layout'
+
+/** 树里每个 split 存着的 ratio，按前序。判「存进模型的值」而不是「画出来的宽度」。 */
+function storedRatios(root: WorkbenchRegionLayoutNode): number[] {
+  return root.type === 'leaf'
+    ? []
+    : [root.ratio, ...storedRatios(root.first), ...storedRatios(root.second)]
+}
 
 describe('Workbench Tab View layout', () => {
   it.each([
@@ -114,6 +125,117 @@ describe('Workbench Tab View layout', () => {
     expect(bounds[2]!.bounds.width).toBeCloseTo(2 / 3)
     expect(bounds[1]!.bounds.height).toBeCloseTo(0.5)
     expect(bounds[2]!.bounds.height).toBeCloseTo(0.5)
+  })
+
+  /**
+   * #521：均分算出来的比例不得越过 `clampSplitRatio` 的界。
+   *
+   * 为什么上面那条 N=3 的用例守不住：`addWorkbenchRegion` 每次追加都挂在同一锚点上，N 格长成一条梳子，
+   * 最外层 split 的两侧是 N-1 : 1。N=3 时配比 2/3 ≈ 0.667 稳稳在 [0.15, 0.85] 里，N=7 才第一次越界
+   *（6/7 ≈ 0.857）。**判别器只在 N≥7 时在场**，所以下面每个规模都自带一条前提断言：若哪天骨架换成
+   * 平衡二叉、这些规模再也算不出越界的原始比例，前提断言会红，明说「这条用例已不再守着任何东西」，
+   * 而不是让它退化成恒真（本仓 property-unobservable-in-default-env 那一族）。
+   */
+  describe('#521 均分的比例不得越过 clampSplitRatio 的界', () => {
+    const UPPER = 1 - MIN_SPLIT_RATIO
+
+    /** 用真入口造 N 格：与 addWorkbenchRegion 一样连着同一个锚点开，长出那条梳子。 */
+    function comb(size: number) {
+      let layout = createWorkbenchViewLayout('r0')
+      for (let index = 1; index < size; index += 1) {
+        layout = splitWorkbenchRegion(layout, 'r0', 'right', `r${index}`)
+      }
+      return layout
+    }
+
+    it.each([7, 8, 9, 12])('N=%i：每个 split 的比例都落在界内', (size) => {
+      const raw = comb(size)
+
+      // 前提自检：这个规模的梳子在夹取之前**真的**算出越界的比例。没有这条，把 balanceNode 改回不夹
+      // 也不会让本条发红——因为判别器可能压根不在场。
+      // 梳子的形状：最外层两侧是 N-1 : 1，往里逐层递减，第 d 层配比 (N-1-d)/(N-d)。
+      const unclamped = Array.from(
+        { length: size - 1 },
+        (_, depth) => (size - 1 - depth) / (size - depth)
+      )
+      expect(
+        unclamped.some((ratio) => ratio > UPPER),
+        `N=${size} 的梳子在夹取前算不出越界比例——本条已不再守着任何东西`
+      ).toBe(true)
+
+      const balanced = balanceWorkbenchRegionLayout(raw)
+      for (const ratio of storedRatios(balanced.root)) {
+        expect(ratio).toBeGreaterThanOrEqual(MIN_SPLIT_RATIO)
+        expect(ratio).toBeLessThanOrEqual(UPPER)
+      }
+    })
+
+    it('N=3 仍然是真正的叶子数配比，不被夹取改写', () => {
+      // 夹取只能收界外的值。这条钉住它没有顺手把界内的正常配比也压平——若把 balanceNode 写成
+      // 「一律 0.5」，上面那族界内断言全会通过，只有这条会红。N=3 的梳子最外层是 2 : 1。
+      const balanced = balanceWorkbenchRegionLayout(comb(3))
+      expect(storedRatios(balanced.root)[0]).toBeCloseTo(2 / 3)
+    })
+  })
+
+  /**
+   * #522：每档预设的几何都要有人断言，加一档新预设不得静默落到某个默认桶。
+   *
+   * 遍历 SSOT 元组而不是手抄档名清单：加一档就自动多一份覆盖。这同时是 `rowLayout`/`gridLayout`
+   * 刻意不夹比例的那个前提的守卫——它们的 1/N 里 N 是每行列数或行数，理应天然在界内。
+   *
+   * 格数取自 `workbenchRegionPresetSize` 而不是再手抄一张表：那张表的取值已经由上面
+   * 「applies the fixed %s reading-order slots」那族写死的字面量钉着，这里再抄一份只会多一处漂移面
+   *（本仓 vitest-green-hides-type-drift-across-files）。本族问的是**几何**，不是格数。
+   */
+  describe('#522 每档预设的几何都被断言，且比例天然在界内', () => {
+    it.each(WORKBENCH_LAYOUT_PRESETS)('%s：比例在界内、每格面积等于 1/N', (preset) => {
+      const size = workbenchRegionPresetSize(preset)
+      const added = Array.from({ length: size - 1 }, (_, index) => `added-${index + 1}`)
+      const layout = applyWorkbenchRegionLayoutPreset(createWorkbenchViewLayout('root'), preset, added)
+
+      const bounds = workbenchRegionBounds(layout.root)
+      expect(bounds, `${preset} 没有产出 ${size} 格`).toHaveLength(size)
+      for (const ratio of storedRatios(layout.root)) {
+        expect(ratio).toBeGreaterThanOrEqual(MIN_SPLIT_RATIO)
+        expect(ratio).toBeLessThanOrEqual(1 - MIN_SPLIT_RATIO)
+      }
+      for (const { bounds: box } of bounds) {
+        expect(box.width * box.height).toBeCloseTo(1 / size)
+      }
+    })
+
+    /**
+     * 关键判据：每档预设铺**几列**。上面那族只问格数与面积，对列数完全失明——`grid-6` 若被排成
+     * 2 列（3 行 × 2 列）而不是 3 列，格数还是 6、每格面积还是 1/6，上面全绿。
+     *
+     * 判据取每档「第一行有几格」，也就是最上面那一横排的格数：按 y 坐标取最小的那一批。这直接对应
+     * `presetColumns` 的返回值，且是用户真正看见的东西。
+     *
+     * 注意 `columns-3` 与 grid 族**不**分开判：它的格数恰好等于列数，`gridLayout` 只排出一行，
+     * 与专门的一行实现逐字段相等（这也是产品侧删掉那条分支的理由）。所以它在这里只是「3 列」的
+     * 一个普通取值，不是另一种几何。
+     */
+    it.each([
+      ['columns-3', 3],
+      ['grid-4', 2],
+      ['grid-6', 3],
+      ['grid-9', 3]
+    ] as const)('%s 铺 %i 列', (preset, columns) => {
+      const size = workbenchRegionPresetSize(preset)
+      const bounds = workbenchRegionBounds(
+        applyWorkbenchRegionLayoutPreset(
+          createWorkbenchViewLayout('root'),
+          preset,
+          Array.from({ length: size - 1 }, (_, index) => `added-${index + 1}`)
+        ).root
+      )
+      const topY = Math.min(...bounds.map(({ bounds: box }) => box.y))
+      const firstRow = bounds.filter(({ bounds: box }) => Math.abs(box.y - topY) < 1e-12)
+      expect(firstRow, `${preset} 的第一行不是 ${columns} 格`).toHaveLength(columns)
+      // 行数随之确定：格数 / 列数。这一条让「把某档的列数改小一半」既在列上红也在行上红。
+      expect(new Set(bounds.map(({ bounds: box }) => box.y.toFixed(6))).size).toBe(size / columns)
+    })
   })
 
   it('moves only the active Region identity to the first reading-order slot', () => {
