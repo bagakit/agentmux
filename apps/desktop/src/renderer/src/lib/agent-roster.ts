@@ -38,10 +38,14 @@ export type RosterRow = {
   observedAt: number
   // True when Core is holding a typed request for this Agent — the rows that make this a work queue
   // rather than a status list.
+  //
+  // 这是「这一行需要我做点什么吗」的**唯一**答案。曾经并列过一个 `unacknowledgedThreads: number`，
+  // 注释写着「与 awaitingReply 并列，因为它们回答的是同一个问题」——而 Core 里根本没有 Thread 实体
+  // （`acknowledged` 只出现在 prompt 提交与字节确认两处，都不是消息线程），唯一调用点也从不传它，
+  // 于是每行恒为 0，界面上那枚 "N msg" 徽标与它的 aria 文案是死代码。它的两条测试自己造入参来证明
+  // 「传进去就带出来」——合成的 fixture 等于自证，恒绿。删掉它而不是给它找个生产者：同一个问题有
+  // 两列，就必然有一天两列答得不一样。见 roster-single-pending-axis.test.ts 的检测器。
   awaitingReply: boolean
-  // 有多少条 Thread 还没被确认。与 awaitingReply 并列，因为它们回答的是同一个问题——
-  // "这一行需要我做点什么吗"——所以它是这份名册的一列，不是另开的第二个收件箱。
-  unacknowledgedThreads: number
   // What this Agent was authorized to do at spawn. Empty when the create declared nothing: absence
   // shows nothing at all, never a placeholder or an inferred default.
   scopes: RosterScope[]
@@ -96,8 +100,6 @@ export function resolveRosterScopes(
 export function buildAgentRoster(input: {
   sessions: readonly SessionSnapshot[]
   providerCatalog: readonly AgentCatalogEntry[]
-  /** 每个 Agent 名下未确认的 Thread 数。缺席读作 0——没有 Thread 不是缺数据。 */
-  unacknowledgedThreads?: Readonly<Record<string, number>>
 }): RosterRow[] {
   // A store that has not hydrated its catalog yet has none: that is an empty scope list, not a crash.
   // The roster must survive being opened during startup.
@@ -114,7 +116,6 @@ export function buildAgentRoster(input: {
       attention: categoryFor(session.status.state),
       observedAt: session.status.observedAt,
       awaitingReply: session.pendingInteraction !== undefined,
-      unacknowledgedThreads: input.unacknowledgedThreads?.[session.id] ?? 0,
       scopes: resolveRosterScopes(session.launchOptions, catalog.get(session.providerId)),
       usage: agentUsageDisplay(session)
     })
