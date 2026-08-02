@@ -10,6 +10,7 @@ vi.hoisted(() => {
 import type { SessionSnapshot } from '../src/shared/contracts.js'
 import type { BoardRow } from '../src/renderer/src/lib/project-board.js'
 import { boardListSegments, BOARD_LIST_VISIBLE_ROWS } from '../src/renderer/src/lib/surface-tool-dock.js'
+import { browserOpenError } from '../src/renderer/src/lib/browser-open-feedback.js'
 
 /**
  * Board 工具的次级面板是**工作清单**，不是说明页。
@@ -94,6 +95,13 @@ describe('boardListSegments', () => {
   it('展开后全列，hidden 归零', () => {
     const rows = Array.from({ length: BOARD_LIST_VISIBLE_ROWS + 3 }, (_, index) => row(`r${index}`))
     expect(boardListSegments(rows, true)).toEqual({ shown: rows, hidden: 0 })
+  })
+})
+
+describe('Browser Tools launch feedback', () => {
+  it('turns an unfocused pane into deterministic visible error text', () => {
+    expect(browserOpenError(undefined)).toBe('Select a workspace and focus a pane before opening a browser.')
+    expect(browserOpenError('focused-pane')).toBeNull()
   })
 })
 

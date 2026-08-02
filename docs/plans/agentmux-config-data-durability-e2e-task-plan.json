@@ -1,0 +1,39 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": "docs/reviews/agentmux-config-data-durability-e2e.md"
+  },
+  "source_refs": [
+    "docs/reviews/agentmux-config-data-durability-e2e.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "apps/desktop/src/main/config-store.ts",
+    "apps/desktop/test/config-store.test.ts"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "保留 authored Host 并拒绝全丢失升级",
+      "objective": "版本升级时保留所有可读 authored Host；若 authored Host 全部无法解析，拒绝启动并保留原配置，不让 local 回填掩盖数据损失。",
+      "outcome": "用户登记的远程/自定义 Host 不会因 schema bump 静默消失，且全丢失时得到确定性拒绝。",
+      "acceptance": [
+        "每个可读 authored Host 在升级后仍存在；local 仅作为默认运行时 Host，不计入 authored 证据。",
+        "所有 authored Host 逐个被 schema 拒绝时，ConfigStore 拒绝启动并保留原文件。",
+        "focused regression 在把 authoredHostsCarried 错写为 local-only 时变红。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/config-store.test.ts",
+          "proves": "Host 升级保留、全丢失拒绝和原配置保留边界。"
+        }
+      ],
+      "source_refs": [
+        "apps/desktop/src/main/config-store.ts",
+        "apps/desktop/test/config-store.test.ts"
+      ],
+      "supersedes": []
+    }
+  ]
+}

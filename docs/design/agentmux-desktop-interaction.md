@@ -36,6 +36,10 @@
   缓存 App 以及当前运行实例中发现的同名副本和身份。检测只负责告警，不得把用户的
   Session、Run、Application Support 或工作区数据当作旧包一起删除；清理 App 本身也
   必须是可恢复的 Trash 移动或经用户确认的动作。
+- **打包报告本身必须可运行且可行动**。`report:package` 只能读取本次真实构建输出；如果
+  候选不存在、构建输出不完整或路径不对，必须用一条简洁诊断说清缺少的路径和下一步命令，
+  不能把 Node 的 `ENOENT` 栈直接当成用户反馈，也不能把报告失败解释成安装副本健康。
+  clean-build/package smoke 必须覆盖这条失败边界。
 - **功能来源也要能追溯**。发布审计对关键用户能力记录“设计约束 → 生产实现 → 测试
   调用者”三段证据；删除一个实现文件时，审计必须能指出替代实现和仍在生产路径上的
   调用者，或明确标记为待人工复核。单元测试仍不足以证明功能没有被并发 Agent 从产品
@@ -107,6 +111,7 @@
 - **Session store 的陈旧锁不能把新 Agent 永久挡在门外**。写入锁带有可验证的 owner；owner 已退出时锁可回收。若锁文件为空、截断或 owner 身份无法验证，也不得把它当成永远存活的 owner：在确认没有对应活进程后应回收并继续写入；仍能确认 owner 存活时必须保留锁。一次锁清理失败只在服务窗/诊断面说明，不能删除 Session、布局或 ctxmux 的私有状态。
 - **Session store 的高频读取不能反过来饿死生命周期写入**。列举/恢复等只读加载不得为了孤立 Timeline 清理而长期占用写锁；清理是可抢救的旁路，遇到短暂争用应让出。新建、恢复和停止等生命周期写入必须在同一份 store 上排队并保留可观测的有限重试；只有重试预算耗尽后才报告 `AGENT_SESSION_STORE_BUSY`，不能把正常的多 Agent 活跃状态误报成永久失败。
 - **启动探测失败不能遮住已保存的工作面**。配置、Session snapshot 或 Provider capability 的单项 Host/runtime 失败时，Renderer 仍必须先提交已恢复的布局与可见 Region，再把失败作为作用域明确的服务窗/状态行呈现；只有布局本身无法读取时才进入无布局错误态。一次暂时不可达的 Host 不得让整个窗口回到空白 loading，也不得覆盖最后一份可恢复布局。若 snapshot 未能确认 Session 身份，原 Region 先保留为“待 Runtime 校验”的投影；下一次权威 snapshot 到达后再按已知缺失或匹配结果收敛，不能用空 snapshot 静默裁剪它。
+- **配置升级不得把用户登记的 Host 静默变没**。版本升级时每个可读的 authored Host 都必须原样保留；本机 `local` 是运行时默认项，不能用它的回填掩盖 authored Host 全部不可读的情况。若所有 authored Host 记录都无法解析，必须保留原文件并给出确定性拒绝，而不是启动一个只剩 `local` 的新配置。该判断必须有 focused regression，且验证命令在打包前可单独运行。
 - **未知 Session 的保留必须有收敛出口**。上述待校验投影只适用于 snapshot 尚未给出权威事实的窗口期；后续权威 snapshot 必须同时对齐 Agent 与 Terminal。被 Core 明确列出的 Agent/恢复候选按语义连续性保留或恢复；没有 semantic resume 的 Terminal 若不再出现在权威 Runtime snapshot 中，必须从其 Region、Tab layout 与下一次持久化投影中一起移除，不能留下只有标题的空壳 Tab。Runtime 仍不可达时可以暂时保留，但要在原 Region 显示中性的等待/不可用状态，并在重连后的第一次权威 snapshot 收敛。
 - **Host 探测必须对 GUI 启动可靠**。登录 shell 探测失败时不得把所有 Provider 静默判为 missing；应合并已有环境并使用非交互登录 shell等可靠路径重试，同时在状态面明确“探测未完成/当前按已有 PATH 运行”。只要 CLI 仍可执行，Host 探测流程不得阻断布局、Session 或用户操作。
 - **Managed Hook 不得绑死已卸载的 App 路径**。Hook 配置里的 AgentMux 命令由当前运行的 App 在启动和恢复已有 Session 时校正；旧安装留下的绝对路径失效时，Hook 只返回 Provider 所需的中性响应并把诊断作为非阻断提醒，不能因为宿主探测/回调失败而阻断 Agent 的正常 Prompt。Hook 配置仍保留用户自己的条目，AgentMux 只更新带自身 marker 的条目；这条修复不通过给 `/Applications` 重新造一个影子 App 来兜底。
@@ -317,6 +322,11 @@ Desktop 刷新或重新 Attach 时优先投影这份 Agent 语义；新的 Run `
 ### Browser 工作面
 
 - Browser 是 AgentMux 内的一等工作面，不是外链跳板：它可导航、可标记、可被 Agent 安全消费，且生命周期与权限事实**只由 Desktop Main 持有**。Renderer 既不拥有 WebContents，也不持有第二份导航或权限状态。
+- **New Browser 必须有可见结果**。在聚焦的 Universal Pane（包括当前不是 launcher 的非启动器
+  Region）点击 `New Browser` 后，必须创建并显示一个 Browser Tab/Region；如果 Main-owned
+  Browser 创建失败，必须在同一工作面给出确定性、可执行的错误。按钮不得在状态、Tab、Region
+  和错误提示都不变化的情况下静默 no-op；renderer regression 要覆盖聚焦非 launcher pane 的
+  Tab/Region/browser 状态变化或错误投影。
 - 页面**元素选择**产出结构化上下文——tagName、role、可访问名、selector、文本、邻近文本、白名单属性与净化后的 HTML——并以文本形式进入 Composer 草稿，与其他附件同一条通路。净化在 Main 侧完成，Renderer 不把原始 DOM 当证据传递。当前**不采集 computed CSS**，截图也**只进剪贴板、不并入 prompt**：这两点是已知边界，不以"看起来完整"的措辞掩盖。
 - 截屏与标记编辑属于 Browser 自己的工具，产物是可验证证据而非装饰：标记后的图像仍是同一次观察的产物，不重建第二份截图生命周期。
 - 链接打开使用统一的**目的地菜单**（当前 Region / 分屏 / 新 Tab），与 Terminal 链接共享同一套目的地语汇，不让浏览器另发明一套打开语义。

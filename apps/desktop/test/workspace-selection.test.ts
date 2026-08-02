@@ -4,7 +4,7 @@ vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
 })
 
-import type { AgentLaunchResult, AppConfig, SessionSnapshot, WorkspaceRecord } from '../src/shared/contracts.js'
+import type { AgentLaunchResult, AppConfig, BrowserSnapshot, SessionSnapshot, WorkspaceRecord } from '../src/shared/contracts.js'
 import { api } from '../src/renderer/src/lib/api.js'
 import { revealFileExplorerPath } from '../src/renderer/src/lib/file-explorer-selection.js'
 import { createWorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.js'
@@ -24,6 +24,68 @@ afterEach(() => {
 })
 
 describe('selected worktree workspace context', () => {
+  it('opens a visible Browser Tab when New Browser targets a focused non-launcher pane', async () => {
+    const workspace: WorkspaceRecord = {
+      id: 'browser-workspace',
+      name: 'repo',
+      hostId: 'local',
+      path: '/repo',
+      kind: 'folder'
+    }
+    const existingTab = createWorkbenchTab('existing-file', {
+      regionId: 'existing-region',
+      kind: 'file',
+      workspaceId: workspace.id,
+      path: 'README.md'
+    })
+    const config: AppConfig = {
+      version: 7,
+      hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
+      executors: {},
+      workspaces: [workspace],
+      appearance: { terminalTheme: 'graphite' },
+      browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true } }
+    }
+    const browser: BrowserSnapshot = {
+      id: 'browser-1',
+      navigationId: 'navigation-1',
+      profileId: 'profile:default',
+      url: 'about:blank',
+      title: '',
+      loading: false,
+      canGoBack: false,
+      canGoForward: false,
+      viewport: 'responsive',
+      error: null
+    }
+    useAppStore.setState({
+      config,
+      sessions: [],
+      activeWorkspaceId: workspace.id,
+      tabs: { [existingTab.id]: existingTab },
+      layouts: { [workspace.id]: createWorkspaceLayout('focused-pane', [existingTab.id]) },
+      mainSurface: 'workbench',
+      error: null
+    })
+    const create = vi.spyOn(api.browser, 'create').mockResolvedValue(browser)
+
+    await useAppStore.getState().createBrowser('focused-pane', undefined)
+
+    const state = useAppStore.getState()
+    const browserTab = Object.values(state.tabs).find((tab) => tab.id !== existingTab.id)
+    expect(browserTab).toBeDefined()
+    expect(state.tabs[existingTab.id]).toEqual(existingTab)
+    expect(browserTab && titleWorkbenchSurface(browserTab)).toMatchObject({
+      kind: 'browser',
+      workspaceId: workspace.id,
+      browserId: expect.any(String),
+      url: 'about:blank'
+    })
+    expect(state.layouts[workspace.id]?.groups[0]?.tabOrder).toEqual([existingTab.id, browserTab?.id])
+    expect(state.layouts[workspace.id]?.groups[0]?.activeTabId).toBe(browserTab?.id)
+    expect(create).toHaveBeenCalledTimes(1)
+  })
+
   it('preserves each Explorer view across a Workspace A to B to A revisit', async () => {
     const workspaceA = 'workspace-a'
     const workspaceB = 'workspace-b'
