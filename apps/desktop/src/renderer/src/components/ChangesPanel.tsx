@@ -22,6 +22,7 @@ import { gitBridge } from '../lib/git-bridge'
 import { describeGitRemote, discardIntent, type GitRemoteVerb } from '../lib/git-remote-outcome'
 import { beginPrLaunch, type PrLaunchPlan } from '../lib/pr-launch'
 import { useAppStore } from '../store'
+import { ComposerTextarea } from './ComposerTextarea'
 import { PrLaunchSurface } from './PrLaunchSurface'
 
 function message(error: unknown): string {
@@ -458,14 +459,14 @@ export function ChangesPanel({ workspace }: { workspace: WorkspaceRecord }) {
       />
       {repo ? (
         <form className="commit-box" onSubmit={(event) => void commit(event)}>
-          <textarea
+          <ComposerTextarea
             className="commit-box__message"
             placeholder={staged.length > 0 ? 'Commit message' : 'Stage a file to commit'}
             value={commitMessage}
             spellCheck={false}
             rows={2}
             disabled={staged.length === 0 || committing}
-            onChange={(event) => setCommitMessage(event.target.value)}
+            onValueChange={setCommitMessage}
           />
           <button
             type="submit"

@@ -1,4 +1,4 @@
-import { useState, type ComponentPropsWithoutRef } from 'react'
+import { useState, type ComponentPropsWithRef } from 'react'
 import {
   composerCompositionHandlers,
   composerRenderValue,
@@ -22,9 +22,13 @@ import {
  * 契约上它仍是受控的：`value` 由调用方给，`onValueChange` 每次用户改动都会被调用（组字中间步也会，
  * 因为 Send 的 canSubmit / Enter 闸读那个取值）。唯一的例外是**组字进行中这一帧渲染出的 DOM 取值**
  * 由这层作主——那正是修复本身。
+ *
+ * 其余一切照旧透传（`{...rest}`），包含 `ref`：NewTabSurface 要 focus 那一格、TerminalView 之外的每个
+ * 调用方也可能要量尺寸。React 19 里函数组件的 `ref` 是普通 prop，所以用 `ComponentPropsWithRef` 而不是
+ * `WithoutRef`——写成后者时 `ref` 会被 tsc 挡下，而那正好是逼人退回裸 `<textarea>` 的那种摩擦。
  */
 export type ComposerTextareaProps = Omit<
-  ComponentPropsWithoutRef<'textarea'>,
+  ComponentPropsWithRef<'textarea'>,
   'value' | 'onChange' | 'onCompositionStart' | 'onCompositionUpdate' | 'onCompositionEnd'
 > & {
   value: string

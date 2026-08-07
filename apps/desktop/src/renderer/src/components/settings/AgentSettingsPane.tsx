@@ -13,6 +13,7 @@ import parseArgsStringToArgv from 'string-argv'
 import type { AgentExecutorConfig, AppConfig } from '../../../../shared/contracts'
 import { executorDetectionKey, useAppStore } from '../../store'
 import { AgentProviderIcon, agentProviderLabel } from '../AgentProviderIcon'
+import { ComposerTextarea } from '../ComposerTextarea'
 
 type ExecutorDraft = {
   label: string
@@ -215,8 +216,8 @@ export function AgentSettingsPane({ config, onSave }: {
                     <label><span>Executor ID</span><input value={id} readOnly /><small>Stable ID used by the AgentMux CLI and existing Sessions.</small></label>
                     <label><span>Command</span><input value={draft.command} onChange={(event) => update(id, { command: event.target.value })} /></label>
                     <label className="agent-guide-toggle"><input type="checkbox" checked={draft.injectAgentMuxGuide} onChange={(event) => update(id, { injectAgentMuxGuide: event.target.checked })} /><span><strong>AgentMux guide</strong><small>Tell this Agent to inspect the current View and use configured executors for tabs and splits.</small></span></label>
-                    <label><span>Arguments <small>space or newline separated</small></span><textarea value={draft.args} onChange={(event) => update(id, { args: event.target.value })} placeholder="--model fable&#10;--effort 'high'" rows={3} /></label>
-                    <label><span>Environment <small>NAME=value</small></span><textarea value={draft.env} onChange={(event) => update(id, { env: event.target.value })} placeholder="API_BASE=https://example.test" rows={3} /></label>
+                    <label><span>Arguments <small>space or newline separated</small></span><ComposerTextarea value={draft.args} onValueChange={(value) => update(id, { args: value })} placeholder="--model fable&#10;--effort 'high'" rows={3} /></label>
+                    <label><span>Environment <small>NAME=value</small></span><ComposerTextarea value={draft.env} onValueChange={(value) => update(id, { env: value })} placeholder="API_BASE=https://example.test" rows={3} /></label>
                     {detection?.detail ? <p className="settings-inline-error">{detection.detail}</p> : null}
                     <button type="button" className="small-button" onClick={() => setDrafts((current) => Object.fromEntries(Object.entries(current).filter(([candidate]) => candidate !== id)))}><Trash2 size={13} /> Delete executor</button>
                   </div>
