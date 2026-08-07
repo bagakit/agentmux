@@ -86,7 +86,17 @@ export function terminalShortcutHandlers(deps: TerminalShortcutDeps): Record<str
     },
     'terminal.copy': () => {
       const text = deps.readSelection()
-      if (text) deps.rememberSelection(text)
+      // 空文本既不记也不写。写 `''` 会**抹掉用户上一次复制的内容**——那是比「这次没复制成」严重
+      // 得多的一种失败，而且完全静默（剪贴板出口只在 IPC 抛错时报，成功写入空串是它的正常路径）。
+      //
+      // 这条分支**真的可达**，因为 xterm 对「有没有选区」有两个判得不一样的答案（读的是 vendored
+      // 的 5.5.0 源码 `browser/services/SelectionService.ts`）：
+      //   - `hasSelection` 是纯**坐标**判定：`start[0] !== end[0] || start[1] !== end[1]`；
+      //   - `selectionText` 走 `translateBufferLineToString(..., trimRight = true)`，把行尾空白裁掉。
+      // 于是「在空白处横拖一段」这个再普通不过的手势就让两者分岔：坐标上确实有区间，裁完是空串。
+      // 用户看到的正是 #610 那句「划词的时候它自己显示一个 Copy，但那个 Copy 又不成功」。
+      if (!text) return
+      deps.rememberSelection(text)
       deps.writeClipboard(text)
     },
     'terminal.clear': () => {
@@ -123,7 +133,20 @@ export function isBareCtrlC(event: {
 export interface TerminalKeyEventDeps extends TerminalShortcutDeps {
   /** 这个事件命中了哪条 terminal 绑定（`null` 表示不是我们的键）。通常是 `matchShortcut` 的柯里化。 */
   matchTerminalShortcut: (event: KeyboardEvent) => string | null
-  /** 终端此刻有没有选区——`terminal.copy` 的认领条件。 */
+  /**
+   * 终端此刻有没有选区——xterm 的**坐标**判定（`terminal.hasSelection()`）。
+   *
+   * 它单独**不足以**作为 copy 的认领条件：坐标有区间而文本裁完是空串这件事在空白处横拖时就会
+   * 发生（机制写在 `terminal.copy` 那个动作里）。
+   *
+   * 而且反过来，它对下面那个判据**不产生影响**——这一点实测过，别把它读成一道真的闸：
+   * `getSelection()` 走的是同一个 `SelectionService`，两个取值器开头是同一句
+   * `if (!start || !end) return`（`hasSelection` 返 false、`selectionText` 返 `''`），所以
+   * 「文本非空」蕴含「坐标有区间」。合起来判只是把权威那一侧说清楚，不是两个独立条件。
+   *
+   * 那为什么还留着它：它的实参在 `TerminalView` 那个组件里，而那个文件此刻由别的 agent 持有
+   * （实测删掉这个端口会让它的 deps 字面量报 TS2353）。收成一处是后续的事，今天不动别人的文件。
+   */
   hasSelection: () => boolean
 }
 
@@ -141,25 +164,34 @@ export interface TerminalKeyEventDeps extends TerminalShortcutDeps {
  */
 export function terminalKeyEventHandler(deps: TerminalKeyEventDeps): (event: KeyboardEvent) => boolean {
   const actions = terminalShortcutHandlers(deps)
+  /**
+   * 这次 copy 有东西可写吗。两处认领共用**同一个**判据，别各写一遍——本仓记过「读的 key 与写的
+   * key 必须只判一次」，而这里分开算的代价正是 #610：一侧说「有选区」、另一侧写了个空串。
+   *
+   * 判决在 `readSelection()` 这一侧，因为它读的就是动作要写进剪贴板的那个取值。左边那个合取项
+   * **改不了结果**（xterm 两个取值器共用同一个空区间早退，见 `hasSelection` 的注释），所以别指望
+   * 有测试能单独钉住它——把它删掉这一族仍然全绿，这是实测过的、已知的。
+   */
+  const hasCopyableText = (): boolean => deps.hasSelection() && deps.readSelection() !== ''
   return (event) => {
-    // 裸 Ctrl+C：有选区就复制，没选区就把键交还终端（那时它是 SIGINT）。
+    // 裸 Ctrl+C：有可复制的文本就复制，否则把键交还终端（那时它是 SIGINT）。
     //
     // 用户明确要回这条体验（「我觉得还是要保留 Ctrl+C 和右键菜单复制的体验」），而它此前在两个平台上
     // 都够不着——见 isBareCtrlC 的注释：注册表里那条 terminal.copy 的两个和弦都不匹配裸 Ctrl+C。
     //
     // 顺序上它排在 matchTerminalShortcut 之前，理由是**不能**让它经过注册表：那条路一旦匹配上就会
     // 把「没选区」也算成 copy 的候选，而 SIGINT 那一侧必须原样交还。放在前面等于说「这个键有它自己的
-    // 认领条件」，与下面 terminal.copy 那道选区闸是同一条规则的两个入口，所以两处都调 hasSelection()。
+    // 认领条件」，与下面 terminal.copy 那道闸是同一条规则的两个入口，所以两处都调 hasCopyableText()。
     if (isBareCtrlC(event)) {
-      if (!deps.hasSelection()) return true
+      if (!hasCopyableText()) return true
       if (event.type === 'keydown') actions['terminal.copy']?.()
       return false
     }
     const shortcutId = deps.matchTerminalShortcut(event)
     if (!shortcutId) return true
-    // Copy 只在真有选区时认领。没选区就把键交还终端——Ctrl+C 在那种情况下是 SIGINT，
+    // Copy 只在真有文本时认领。没文本就把键交还终端——Ctrl+C 在那种情况下是 SIGINT，
     // 吞掉它会让用户中断不了正在跑的程序。
-    if (shortcutId === 'terminal.copy' && !deps.hasSelection()) return true
+    if (shortcutId === 'terminal.copy' && !hasCopyableText()) return true
     const act = actions[shortcutId]
     // 没有对应动作就交还。paste 走的正是这条：见上面工厂注释，原生 Edit→Paste 是它的唯一所有者。
     if (!act) return true
