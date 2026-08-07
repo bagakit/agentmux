@@ -77,10 +77,10 @@ import { AgentStatusBar } from '../src/renderer/src/components/AgentStatusBar.js
  * 真相对上，所以漂移会红在那里，而不是让下面每条断言在一个错的参照上比对。
  *
  * 外部锚点是 `AgentDisplayState` 这个 union 本身（core/src/types.ts），由自检 1 逐成员比对。
- * 这里刻意不 import 一个运行期常量数组——**没有那个东西**：core 只导出类型，全仓
- * `AGENT_DISPLAY_STATES` 零命中。此前打算写的那条 `toEqual([...AGENT_DISPLAY_STATES])` 会引一个
- * 不存在的名字。而 union 是编译期的，所以锚点只能靠 parse 那个类型别名取到，见
- * `displayStateUnionMembers`。
+ * 刻意不改成 import `attention-vocabulary.ts` 的 `AGENT_DISPLAY_STATES`（它**存在**，
+ * 由 `Object.keys(NEEDS_YOU_BY_STATE)` 派生，`attention-vocabulary.test.ts` 已把它与 core union
+ * 对齐）：那是**同一层**（renderer lib）里的另一份派生，本文件要的是**跨包**的外部锚点，而 union
+ * 是编译期的，取它只能靠 parse 类型别名，见 `displayStateUnionMembers`。
  */
 const ALL_DISPLAY_STATES: readonly AgentDisplayState[] = [
   'starting', 'running', 'working', 'waiting', 'blocked', 'disconnected', 'done', 'exited', 'error'
@@ -277,9 +277,11 @@ const coreTypesPath = join(here, '..', '..', '..', 'packages', 'core', 'src', 't
 /**
  * `AgentDisplayState` 这个 union 的成员，从 core 的源码里读出来。
  *
- * 为什么要 parse 而不是 import：core **只导出类型**，全仓没有任何 `AGENT_DISPLAY_STATES` 之类的运行期
- * 数组（实测 0 命中）。union 是编译期的，所以想让本文件手抄的九个态有一个**外部**锚点，只能取那个
- * 类型别名本身。此前打算写的 `toEqual([...AGENT_DISPLAY_STATES].sort())` 会引一个不存在的名字。
+ * 为什么要 parse 而不是 import：union 是编译期的，想让本文件手抄的九个态有一个**跨包**的锚点，
+ * 只能取 core 那个类型别名本身。renderer 侧确实有一个运行期数组
+ * （`attention-vocabulary.ts` 的 `AGENT_DISPLAY_STATES`，由 `NEEDS_YOU_BY_STATE` 的键派生），
+ * 但它与本文件同层，且它自己也要靠 `attention-vocabulary.test.ts` 去与这同一个 core union 对齐——
+ * 拿它当锚点等于把两份派生互相担保，core 加第十个态时两边可以一起沉默。
  *
  * 这条锚点回答的问题与自检 1 前半段不同：前半段问「这九个态 `sessionBoardColumn` 都归了类吗」，
  * 那是**投影侧**的完整性；这里问「这九个就是全部吗」，是**类型侧**的完整性。少了后者，core 加第十个
@@ -301,7 +303,10 @@ function displayStateUnionMembers(): string[] {
       ts.isLiteralTypeNode(member) && ts.isStringLiteral(member.literal) ? [member.literal.text] : []
     )
   })
-  // 拿不到就抛，不返回空数组：空数组会让下面的比对退化成"两个空集相等"而恒真。
+  // 拿不到就抛，不返回空数组。不是因为"空集相等会恒真"——比对的左边是本文件手抄的九个字面量，
+  // 右边空集时那条断言照旧红。抛的价值是**把红的原因说对**：锚点断了（类型别名改名、搬走、不再是
+  // 字面量 union）与"core 真的改了成员"是两件事，前者若沉默地退化成空集，读到的会是那条断言的
+  // "core 的 AgentDisplayState 变了"，于是有人去改本文件的常量迁就一个已经不存在的参照。
   if (!members) throw new Error(`${coreTypesPath} 里找不到 AgentDisplayState 的字面量 union——锚点断了`)
   return members
 }
@@ -431,6 +436,13 @@ function boardColumnDelegationLines(sourceFile: ts.SourceFile): number[] {
  * 钉次数而不只是钉"有没有"：把 `agent-attention.ts` 的两处之一换成内联 switch，"有没有"仍成立。
  * 这张表与 `WORKING_LITERAL_SITES` 是一对：那张问"谁自己判了"，这张问"谁委派了、委派了几次"。
  * 两张表都会因同一次改动而红，方向相反——那正是要的，一次改动应当在两侧都留下痕迹。
+ *
+ * 这张表守的**只是**"那次调用还在源码里"，不是"它还改变结果"：给某处接上 `&& false`，调用位仍在，
+ * 次数也不变，本表照旧绿。买那一侧的是行为层，且三处都真有人跑（各自 `&& false` 实测都红）：
+ * `agent-attention.ts` 两处由本文件下面逐态那几条 + provider rollup 那条盯着，
+ * `fanout-group.ts` 由 `fanout-group.test.ts` 的 `groupProgress` 用例盯着，
+ * `project-board.ts` 的 `workingAgentCount` 就是本文件全篇的被测对象。删掉行为层那些用例时，
+ * 这张表不会替它们报警——它只回答"委派还在不在"。
  */
 const BOARD_COLUMN_DELEGATIONS: Readonly<Record<string, number>> = {
   // 整窗 rollup（`:59`）与逐 Provider 汇总（`:97`）各一次。
