@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
-import { SplitRatioCommitter } from '../src/renderer/src/lib/split-ratio-commit'
+import { SPLIT_RATIO_EPSILON, SplitRatioCommitter } from '../src/renderer/src/lib/split-ratio-commit'
 import { LatestTerminalOutputAcknowledger } from '../src/renderer/src/lib/terminal-output-ack'
 import { terminalStartupPhase } from '../src/renderer/src/lib/terminal-startup'
 
@@ -133,6 +133,74 @@ describe('Terminal interaction latency owners', () => {
     committer.setDragging(false)
 
     expect(commit, '空点一下分隔条把外部改动撤销了').not.toHaveBeenCalled()
+  })
+
+  /**
+   * 死区（`SPLIT_RATIO_EPSILON`）的两侧各是一个产品预算，此前**整个区间都不可观测**：
+   * 上面四条守住的最小差值是 0.1（0.5→0.6/0.7/0.8），所以把它从 0.005 改成 0.09——
+   * 一个会静默吞掉用户所有小于 9% 拖动的取值——十条照旧全绿（实测存活）。改成 0（把闸整个
+   * 拆掉）也一样绿。
+   *
+   * 判据故意**不从常量派生**。`ε/2` 与 `ε×2` 这种派生输入会跟着常量一起漂：0.005 与 0.09
+   * 两个世界都同样通过（已算过）。所以下面两个数是写死的**需求**，夹住的是实现：
+   *
+   * - `MUST_PERSIST_DELTA = 0.01`：1200px 宽的分屏上拖 12px。这是用户**故意**做的微调，
+   *   必须落盘。死区一旦大过它，松手后分隔条弹回原位且没有任何提示。
+   * - `MUST_DISCARD_DELTA = 0.001`：1200px 上 1.2px，小于一个 CSS 像素。
+   *   react-resizable-panels 在起拖/收拖与容器尺寸微变时报这种量级的差值，不该各写一次盘。
+   *
+   * 于是常量的合法区间被这两个预算夹住，今天的 0.005 落在中间。区间的两端点自己落在哪一侧由
+   * 上面那次百分比往返的浮点误差决定（`0.01` 实测仍合法，因为往返后的差值比它大一点点），所以
+   * 自检与两条行为断言必须拿**同一个** `observedDelta` 去比——写死一个端点就会让两者在边界上
+   * 判得不一样。这里不声称端点开闭，只声称「两个预算都被满足」。
+   */
+  describe('死区两侧的产品预算', () => {
+    const MUST_PERSIST_DELTA = 0.01
+    const MUST_DISCARD_DELTA = 0.001
+
+    /**
+     * 生产侧比较的不是我写的 delta，而是它过一趟百分比之后的值：`observeLayout` 收的是
+     * `sizes[0]`（百分比），再 `/100` 还原成比例。`(0.5 + 0.001) * 100 / 100 - 0.5` 是
+     * 0.0010000000000000009——比 0.001 大。所以自检必须拿**这个**值去比，否则它和下面两条
+     * 行为断言会在边界上判得不一样（实测：ε 恰为 0.001 时自检过、行为红）。
+     */
+    function sizesFor(delta: number): [number, number] {
+      return [(0.5 + delta) * 100, (0.5 - delta) * 100]
+    }
+
+    function observedDelta(delta: number): number {
+      return Math.abs(sizesFor(delta)[0] / 100 - 0.5)
+    }
+
+    it('今天的死区取值落在两个预算之间（自检：下面两条不是恒真）', () => {
+      // 没有这条的话，一个荒谬的取值（比如 0.5）会让「必须丢掉」那条恒真、
+      // 只剩一条断言在守——而那一条单独存在时，`ε = +Infinity` 也能过。
+      expect(SPLIT_RATIO_EPSILON, '死区大到会吞掉用户故意做的微调').toBeLessThan(
+        observedDelta(MUST_PERSIST_DELTA)
+      )
+      expect(SPLIT_RATIO_EPSILON, '死区小到连亚像素抖动都要写一次盘').toBeGreaterThanOrEqual(
+        observedDelta(MUST_DISCARD_DELTA)
+      )
+    })
+
+    it('故意拖出来的 1% 必须落盘', () => {
+      const commit = vi.fn()
+      const committer = new SplitRatioCommitter(0.5, commit)
+
+      committer.observeLayout(sizesFor(MUST_PERSIST_DELTA))
+
+      expect(commit, `差 ${MUST_PERSIST_DELTA} 的拖动被死区吞掉了`).toHaveBeenCalledTimes(1)
+      expect(commit).toHaveBeenCalledWith(0.5 + MUST_PERSIST_DELTA)
+    })
+
+    it('亚像素级的抖动不许写盘', () => {
+      const commit = vi.fn()
+      const committer = new SplitRatioCommitter(0.5, commit)
+
+      committer.observeLayout(sizesFor(MUST_DISCARD_DELTA))
+
+      expect(commit, `差 ${MUST_DISCARD_DELTA} 的抖动被当成一次真改动写了盘`).not.toHaveBeenCalled()
+    })
   })
 
   it('keeps a slow Agent visibly starting until the first output arrives', () => {
