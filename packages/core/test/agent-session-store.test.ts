@@ -347,6 +347,34 @@ describe('semantic session persistence boundary', () => {
     })).toThrow('did not atomically consume its readiness epoch')
   })
 
+  /**
+   * client.ts 的 observeReadiness 有两处「只判 readyThroughByte === undefined，不再判
+   * consumedBySubmissionId === undefined」——第二项被当作恒真删掉了。它之所以恒真，全靠这里：
+   * 归一化不允许「epoch 已被某次提交认领（consumedBySubmissionId 在场）却没有 readyThroughByte」
+   * 这个组合存在，于是 readyThroughByte 缺席时 consumedBySubmissionId 必然也缺席。删掉下游那两个冗余
+   * 项之后，整条链的安全性就压在这一条不变量上，故它必须自己有守卫，而不是靠下游的死代码兜着。
+   */
+  it('归一化拦下「已被认领却没有 readyThroughByte」这个不可达组合（client.ts 两处删项的唯一靠山）', () => {
+    const base = storedSession()
+    const readiness = base.terminalPromptReadiness
+    // 先证 fixture 自带的这一份本来就通过——否则下面的抛可能来自别的原因，而不是被我想钉的那一项。
+    expect(normalizeStoredAgentSession(base).terminalPromptReadiness).toEqual(readiness)
+
+    // consumedBySubmissionId 在场、readyThroughByte 缺席：epoch 声称「已被某次提交认领」，却拿不出
+    // 「准备到了哪个字节」这条边界。这一对必须当场被 terminalPromptReadiness() 的边界界拒掉。
+    expect(() => normalizeStoredAgentSession({
+      ...base,
+      terminalPromptReadiness: {
+        source: readiness.source,
+        id: readiness.id,
+        run: readiness.run,
+        outputCursorBytes: readiness.outputCursorBytes,
+        consumedBySubmissionId: readiness.consumedBySubmissionId
+        // 故意不带 readyThroughByte
+      }
+    })).toThrow('does not match its Agent Run boundary')
+  })
+
   it('round-trips the launch-option posture and fails closed on a malformed selection', async () => {
     // The posture the create fixed must survive persistence so resume can re-resolve the same argv.
     const normalized = normalizeStoredAgentSession({
