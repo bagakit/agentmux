@@ -21,7 +21,13 @@ export type SplitDirection = 'left' | 'right' | 'up' | 'down'
 // 工作区 tab-group 分屏树 = 叶子挂 groupId 的通用分屏树（见 split-tree.ts）。ratio 与 region 树统一
 // 为必填：buildSplitNode 恒给 0.5，不存在缺省。历史持久化数据仍可能缺它，那条防线在
 // `clampSplitRatio`（split-tree.ts）——**不是**渲染层的 `?? 0.5`：#552 坐实 `??` 接不住上游归一化
-// 算出来的 NaN，那道兜底已被撤掉，渲染层现在无条件走 clampSplitRatio。
+// 算出来的 NaN，那道兜底已被撤掉。
+//
+// 但两棵树的**兜底位置不一样**，别把这句读成「渲染层一律夹」：只有 tab-group 那一侧的渲染层自己夹
+// 一次（WorkspaceWorkbench.tsx:1119），region 那一侧把 node.ratio 裸着交出去——给 <Panel> 的
+// :798/:815，给分屏提交器的 :788/:791。region 靠的是「每个写入点都夹过」这条上游不变量，详见
+// split-tree.ts 里 clampSplitRatio 的注释。于是新增一个写 region ratio 的地方时必须自己夹——
+// 渲染层不会替你兜。
 export type TabGroupLayoutNode = SplitTreeNode<{ groupId: string }>
 
 export type TabGroup = {
