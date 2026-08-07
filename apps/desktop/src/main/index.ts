@@ -24,7 +24,7 @@ import { registerWindowStatePersistence } from './window-state-persistence.js'
 import { foregroundActionsForSecondInstance, instanceRoleFromLock } from './single-instance.js'
 import { singleFlight } from './single-flight.js'
 import { topFrameNavigationGuard, topFrameOrigin } from './top-frame-navigation.js'
-import { windowOpenDecision, windowSecurityWebPreferences } from './window-security.js'
+import { windowOpenOutcome, windowSecurityWebPreferences } from './window-security.js'
 
 const appIconPath = join(import.meta.dirname, '../../resources/icon.png')
 const packagedUserDataPath = join(app.getPath('appData'), 'dev.agentmux.desktop')
@@ -146,11 +146,11 @@ function startPrimaryInstance(): void {
     // A window persisted while maximized reopens maximized on top of its restored normal bounds, so
     // unmaximize returns to the size the user actually chose rather than the default.
     if (persistedGeometry?.maximized) window.maximize()
-    window.webContents.setWindowOpenHandler(({ url }) => {
-      const decision = windowOpenDecision(url)
-      if (decision.openExternally) void shell.openExternal(url)
-      return { action: decision.action }
-    })
+    // 回调体刻意只有这一句转发：判定与「交给系统浏览器」这个副作用都在 windowOpenOutcome 里，受行为
+    // 测试直接质询。此前这里是三句（取判定 / if 里 openExternal / return action），那个形状实测有两个
+    // 变异能在 17/17 全绿下存活——详见 window-security.ts 里 windowOpenOutcome 的注释。
+    window.webContents.setWindowOpenHandler(({ url }) =>
+      windowOpenOutcome(url, (target) => { void shell.openExternal(target) }))
     // 顶帧的导航闸。preload 把特权桥 `agentmux` 无条件挂到 window（src/preload/index.ts:238），且每次
     // 导航后 preload 会重新执行；应用的 CSP 只是自家 index.html 里的 <meta>，不跟着导航走。所以只要顶帧
     // 被导航到应用之外的文档（Chromium 默认把「往顶帧拖入一个文件」变成一次 file:/// 导航），那个文档就
