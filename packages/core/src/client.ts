@@ -2093,6 +2093,44 @@ export class AgentMuxClient {
     const applied = await this.resizeTerminal(expectedRun, cols, rows)
     // 屏幕几何变了，长命屏幕证据随之失效；下一次观察按新尺寸重建。
     this.screenEvidence.discard(agentSessionId)
+    // 但**作废不等于恢复**（#660，与 #628 同族、触发点不同）：`discard()` 里的 `evidence.dispose()`
+    // 同步 `notify()`，挂在这具证据上的 `wait()` 的 `inspect()` 看到 `disposed` 走 `abort()`，于是在途的
+    // readiness 观察以 AGENT_PROMPT_READINESS_CANCELLED 结束——而 `observeReadiness` 的 `.catch` 对这个码
+    // 是**静默早退**：不发 agent-error、不重挂、连自己那条 `readinessCancels` 表项都不删。
+    //
+    // 没有别的推进者能救它：`observeReadiness` 的其余调用点只有握手重跑（open / 重连）与 Stop hook。
+    // 于是 resize 落在 readiness 窗口里 ⇒ `readyThroughByte` 永远停在 pending ⇒ 此后每条 prompt 被
+    // AGENT_PROMPT_NOT_READY 拒掉，且没有出路。而 desktop 恰恰在 Agent 面板布局时就 resize
+    // （runtime-controller 的 resizeSessionAttachment → resizeAgent），所以这个窗口是常态而非边角。
+    // #628 补的那道 timeout 救不了它：CANCELLED 走的是上面那条静默出口，不是超时出口。
+    //
+    // 五个位置/条件约束，各自都由变异实测钉住（test/client-agent-resize-readiness.test.ts）：一次只改
+    // 一件事，每个变异都只打红对应的那一条测试。
+    //   1. 排在 `discard()` **之后**。挪到前面时旧 entry 还在表里且 `failed === false`，`ensure()` 会复用
+    //      它（观察数不涨），随后 `discard()` 又把它打死——等于没重挂。
+    //   2. 按**这一个** Session 重挂，不用 `cancelAllReadiness()`：那是全 Session 的，resize 一个 Agent
+    //      不该动别人的观察。旧那条闭包由 `observeReadiness` 自己第一行的
+    //      `readinessCancels.get(id)?.()` 收掉（身份相等才删），所以不会泄漏。
+    //   3. 只在**仍然 pending** 时重挂。已就绪时重挂是白付一次从 byte 0 的全量重放：`markReady` 会走
+    //      `readyThroughByte !== undefined` 那条早退，什么也不做。
+    //   4. 只给**发起这次 resize 的那个 Run** 重挂。`sameRun` 这一项不是纵深防御而是可达分支：resize 是
+    //      await 的，resume 会在同一个 agentSessionId 上换 Run，而新 Run 的 readiness 由它自己的握手路径
+    //      负责挂——这里再挂一条，同一个 epoch 上两条观察会互相取消。
+    //
+    // 跨过上面那次 await 之后要重读 Session：Run 可能已经换掉、Session 可能已经退场。这里刻意用
+    // `has()` 而不是 `requireAgentSession()`——resize 本身已经成功了，恢复动作的前提不成立时应当安静跳过，
+    // 而不是把一次成功的 resize 变成 UNKNOWN_AGENT_SESSION。
+    if (this.registry.has(agentSessionId)) {
+      const current = this.registry.get(agentSessionId)
+      const readiness = current.terminalPromptReadiness
+      if (
+        sameRun(current.run, expectedRun) &&
+        readiness &&
+        readiness.readyThroughByte === undefined
+      ) {
+        this.promptSubmission.observeReadiness(current, readiness)
+      }
+    }
     return applied
   }
 
