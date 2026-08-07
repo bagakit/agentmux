@@ -17,6 +17,10 @@ import { allStyleRules, allStyles } from './helpers/styles.js'
 //
 // 更早的 commit 101c3c5 标题写着「split the stylesheet by surface, and prove the split changed
 // nothing」——它并没有证明。这里把那句「什么都没变」变成一条会红的断言。
+//
+// 扫描面是**两半**：`.tsx` 的 className= 属性，以及 `.ts` 里拼 class 的取值函数（见 libClasses）。
+// 第二半是后补的，因为第一半单独存在时，「把 class 名从 JSX 搬进一个 lib 函数」就是一条绕过整道
+// 守卫的合法路径——b2909b7 真的这么搬过一次，此后删掉 agent.css 的基类规则 25 条全绿（实测）。
 
 const STYLES_ONLY_IN_COMMENT = /\/\*[\s\S]*?\*\//g
 const COMPONENTS_DIR = fileURLToPath(new URL('../src/renderer/src', import.meta.url))
@@ -67,6 +71,65 @@ function tsxFiles(dir: string): string[] {
     const path = `${dir}/${entry.name}`
     if (entry.isDirectory()) out.push(...tsxFiles(path))
     else if (entry.name.endsWith('.tsx')) out.push(path)
+  }
+  return out
+}
+
+/** 只取 `.ts`（不含 `.tsx`，那些由 tsxFiles 收）。 */
+function libFiles(dir: string): string[] {
+  const out: string[] = []
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = `${dir}/${entry.name}`
+    if (entry.isDirectory()) out.push(...libFiles(path))
+    else if (entry.name.endsWith('.ts')) out.push(path)
+  }
+  return out
+}
+
+/**
+ * 取值层（`.ts`）里拼出来的 class。
+ *
+ * 为什么必须有这一半：上面那半只扫 `.tsx` 的 `className=`，于是**把 class 名从 JSX 搬进一个
+ * lib 函数，就等于把它搬出了这道守卫的视野**。实测过（b2909b7 之后）：
+ * `permissionTierClassName` 把 `agent-interaction__tier` 从 AgentInteractionCard.tsx 的
+ * className 模板里挪进 agent-interaction-plan.ts 的 `const base = '...'`，此后删掉 agent.css
+ * 里那条基类规则（正是提供中性 `var(--text-3)` 底色、让「未声明风险档」这件事可见的那条），
+ * 三个相关 suite **25 条全绿**。搬走内容的同时也搬走了守卫——记忆 extracting-to-lib-only-fixes-half
+ * 的一个新形态。
+ *
+ * 判据用真 TS parser 取字符串字面量，不用正则：正则要么漏掉模板字面量的静态段，要么把注释里
+ * 提到的 class 名也算进来（本文件上半已经因此要先 strip 注释）。parser 天然只看代码里的字面量，
+ * 注释不是 AST 节点。
+ */
+function libClasses(): Rendered[] {
+  const out: Rendered[] = []
+  for (const file of libFiles(COMPONENTS_DIR)) {
+    const source = ts.createSourceFile(
+      file,
+      readFileSync(file, 'utf8'),
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS
+    )
+    const relative = file.slice(COMPONENTS_DIR.length + 1)
+    const tokens = new Set<string>()
+    const visit = (node: ts.Node): void => {
+      // 三种承载静态文本的字面量：普通串、无插值反引号、以及带插值模板的每一个静态段
+      // （`${base}--${tier}` 这种拼法里，`--` 段本身不是 class token，会被 looksLikeClass 挡掉；
+      // 而 `agent-interaction__tier` 作为 TemplateHead 的文本能被收到）。
+      if (
+        ts.isStringLiteral(node) ||
+        ts.isNoSubstitutionTemplateLiteral(node) ||
+        ts.isTemplateHead(node) ||
+        ts.isTemplateMiddle(node) ||
+        ts.isTemplateTail(node)
+      ) {
+        addTokens(node.text, tokens)
+      }
+      ts.forEachChild(node, visit)
+    }
+    ts.forEachChild(source, visit)
+    for (const token of tokens) out.push({ token, file: relative })
   }
   return out
 }
@@ -165,7 +228,9 @@ function hasPairedRule(css: string, className: string, attribute: string): boole
 
 describe('渲染出来的 class 必须有规则', () => {
   const defined = definedClasses()
-  const rendered = renderedClasses()
+  // 两半合起来才是完整的产出面：`.tsx` 的 className= 与 `.ts` 里拼 class 的取值函数。
+  // 只取前者，就等于「把 class 名搬进 lib」是一条绕过这道守卫的合法路径。
+  const rendered = [...renderedClasses(), ...libClasses()]
   const renderedBem = rendered.filter((entry) => isBemToken(entry.token))
 
   it('扫描确实扫到了东西——空集上的扫描是这个仓库经典的假绿', () => {
@@ -174,6 +239,20 @@ describe('渲染出来的 class 必须有规则', () => {
     expect(rendered.length).toBeGreaterThan(100)
     // BEM class 是这条测试真正判定的对象，单独钉一个现实下界。
     expect(new Set(renderedBem.map((entry) => entry.token)).size).toBeGreaterThan(100)
+  })
+
+  it('取值层（.ts）也在扫描面里——否则把 class 搬进 lib 就能绕过整道守卫', () => {
+    // 这条不是凑数：b2909b7 之前 `agent-interaction__tier` 在 AgentInteractionCard.tsx 的
+    // className 模板里，之后只在 agent-interaction-plan.ts 的字符串字面量里。若扫描面只有 `.tsx`，
+    // 删掉 agent.css 那条基类规则是 25 条全绿（实测）。所以这里钉住 lib 侧真的有产出，
+    // 且**至少有一个 BEM token 只有 lib 侧才看得见**——纯粹「lib 扫到了东西」还不够，
+    // 那可能全是 .tsx 也各自渲染过的重复项，删掉 libClasses() 仍然全绿。
+    const fromTsx = new Set(renderedClasses().filter((e) => isBemToken(e.token)).map((e) => e.token))
+    const onlyInLib = libClasses()
+      .filter((entry) => isBemToken(entry.token) && !fromTsx.has(entry.token))
+      .map((entry) => `${entry.token}  <- ${entry.file}`)
+      .sort()
+    expect(onlyInLib.length, 'lib 侧没有任何独有的 BEM class，这条自检失去了区分力').toBeGreaterThan(0)
   })
 
   it('自证判据成立：log-fold__chevron 此刻是「渲染了且有规则」的样本', () => {
