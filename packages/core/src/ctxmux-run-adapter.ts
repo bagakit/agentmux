@@ -25,6 +25,7 @@ import {
   type RuntimeIdentity
 } from '@ctxmux/sdk'
 import { AgentMuxError } from './errors.js'
+import { classifyReplayGap } from './ctxmux-replay-gap.js'
 import { classifyStreamEnd } from './ctxmux-stream-end.js'
 import type { AgentMuxRunInputData } from './types.js'
 import {
@@ -813,12 +814,11 @@ export class CtxmuxRunAdapter {
       return {
         run: projectRun(attachment.snapshot.run),
         replay,
-        gap: attachment.snapshot.replay.truncated
-          ? {
-              requestedAfterByte: afterByte,
-              firstAvailableByte: attachment.snapshot.replay.first_available_byte
-            }
-          : null
+        gap: classifyReplayGap({
+          truncated: attachment.snapshot.replay.truncated,
+          requestedAfterByte: afterByte,
+          firstAvailableByte: attachment.snapshot.replay.first_available_byte
+        })
       }
     } catch (error) {
       throw translateCtxmuxError(error)
@@ -839,12 +839,11 @@ export class CtxmuxRunAdapter {
         replay: attachment.snapshot.replay.chunks.map((chunk) => (
           decodeChunk(runId, decoder, chunk)
         )),
-        gap: attachment.snapshot.replay.truncated
-          ? {
-              requestedAfterByte: afterByte,
-              firstAvailableByte: attachment.snapshot.replay.first_available_byte
-            }
-          : null
+        gap: classifyReplayGap({
+          truncated: attachment.snapshot.replay.truncated,
+          requestedAfterByte: afterByte,
+          firstAvailableByte: attachment.snapshot.replay.first_available_byte
+        })
       }
     } catch (error) {
       throw translateCtxmuxError(error)
@@ -920,12 +919,11 @@ export class CtxmuxRunAdapter {
       return {
         run: projectRun(snapshot.run),
         replay: snapshot.replay.chunks.map((chunk) => decodeChunk(runId, replayDecoder, chunk)),
-        gap: snapshot.replay.truncated
-          ? {
-              requestedAfterByte: afterByte,
-              firstAvailableByte: snapshot.replay.first_available_byte
-            }
-          : null,
+        gap: classifyReplayGap({
+          truncated: snapshot.replay.truncated,
+          requestedAfterByte: afterByte,
+          firstAvailableByte: snapshot.replay.first_available_byte
+        }),
         close: async () => {
           if (closed) return
           closed = true
