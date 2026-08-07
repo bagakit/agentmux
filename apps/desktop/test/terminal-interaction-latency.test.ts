@@ -1,4 +1,6 @@
 import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import ts from 'typescript'
 import { describe, expect, it, vi } from 'vitest'
 import { SPLIT_RATIO_EPSILON, SplitRatioCommitter } from '../src/renderer/src/lib/split-ratio-commit'
 import { LatestTerminalOutputAcknowledger } from '../src/renderer/src/lib/terminal-output-ack'
@@ -150,9 +152,12 @@ describe('Terminal interaction latency owners', () => {
    *   react-resizable-panels 在起拖/收拖与容器尺寸微变时报这种量级的差值，不该各写一次盘。
    *
    * 于是常量的合法区间被这两个预算夹住，今天的 0.005 落在中间。区间的两端点自己落在哪一侧由
-   * 上面那次百分比往返的浮点误差决定（`0.01` 实测仍合法，因为往返后的差值比它大一点点），所以
-   * 自检与两条行为断言必须拿**同一个** `observedDelta` 去比——写死一个端点就会让两者在边界上
-   * 判得不一样。这里不声称端点开闭，只声称「两个预算都被满足」。
+   * 上面那次百分比往返的浮点误差决定，所以自检与两条行为断言必须拿**同一个** `observedDelta` 去比——
+   * 写死一个端点就会让两者在边界上判得不一样。
+   *
+   * 两条自检的开闭**是承重的，不是随手写的**：`toBeLessThan` 严格、`toBeGreaterThanOrEqual` 含端点，
+   * 正对着生产侧的 `commit ⇔ observed > ε` / `discard ⇔ observed ≤ ε`。所以它们钉下的合法区间是
+   * 半开的 `[observedDelta(0.001), observedDelta(0.01))`——改任一个的开闭都会与生产的 `<=` 脱钩。
    */
   describe('死区两侧的产品预算', () => {
     const MUST_PERSIST_DELTA = 0.01
@@ -200,6 +205,109 @@ describe('Terminal interaction latency owners', () => {
       committer.observeLayout(sizesFor(MUST_DISCARD_DELTA))
 
       expect(commit, `差 ${MUST_DISCARD_DELTA} 的抖动被当成一次真改动写了盘`).not.toHaveBeenCalled()
+    })
+
+    /**
+     * 上面三条把常量的**取值**夹住了，但没有任何一条问「`commitLatest` 到底读的是不是那个导出常量」。
+     * 这个缺口是实测的（3e6d3cc 审计，八个变异逐个跑）：
+     *
+     * - body 里把 `SPLIT_RATIO_EPSILON` 换成字面量 `0.005` → 13 条全绿；
+     * - 换成合法带内的 `0.008` → 13 条全绿；
+     * - **导出常量改成 `0.008`、body 内联 `0.005`** → 13 条全绿。
+     *
+     * 第三种是真危害：那个 docblock 亲口说这个导出值是「两侧都能被用户碰到」的产品预算分界，而它可以
+     * 静默退化成一份不管事的文档——自检读常量、行为读 body，两个世界从此各说各话。反过来，任何**害到
+     * 用户**的取值（比如 body 内联 0.09）仍被上面的行为断言挡住。所以行为侧守的是「取值别害人」，
+     * 这一条守的是「取值只有一处」。
+     *
+     * 判据写成**只许这一种形状**，不是「禁止字面量在场」：禁止清单必漏（本仓 forbidden-list-guard-always-leaks
+     * 记了整整一族——换个拼法就绕过）。这里要求那次比较的右操作数**就是**标识符 `SPLIT_RATIO_EPSILON`，
+     * 于是任何别的写法（字面量、局部副本、另一个常量）都落在允许形状之外。
+     *
+     * 走 TS parser 而不是正则：字面量与注释都会骗文本匹配（本仓 lexical-boundaries-need-a-real-lexer /
+     * equivalence-cannot-catch-a-fresh-copy）。上面那段 docblock 里就正当地写着 `0.005`、`0.008`
+     * 这些数字——一个 `toContain` 形状的守卫会对它自己的解释文字发假红。
+     *
+     * 三条断言里前两条是在场自检：找不到方法体、或方法体里没有那次比较时必须红。否则「方法被改名/被
+     * 删掉」会让后面的判据静默变成对空集求值（本仓 name-existence-check-is-blind-to-rule-bodies）。
+     */
+    describe('死区取值只有一处：commitLatest 必须读那个导出常量', () => {
+      const SOURCE = fileURLToPath(
+        new URL('../src/renderer/src/lib/split-ratio-commit.ts', import.meta.url)
+      )
+
+      /** `commitLatest` 的方法体。取不到就是在场自检失败，不是「没有违规」。 */
+      function commitLatestBody(): ts.Block {
+        const source = ts.createSourceFile(
+          SOURCE,
+          readFileSync(SOURCE, 'utf8'),
+          ts.ScriptTarget.Latest,
+          true
+        )
+        const found: ts.Block[] = []
+        const visit = (node: ts.Node): void => {
+          if (
+            ts.isMethodDeclaration(node) &&
+            ts.isIdentifier(node.name) &&
+            node.name.text === 'commitLatest' &&
+            node.body
+          ) {
+            found.push(node.body)
+          }
+          ts.forEachChild(node, visit)
+        }
+        visit(source)
+        expect(found, 'split-ratio-commit.ts 里找不到唯一的 commitLatest 方法体').toHaveLength(1)
+        return found[0]!
+      }
+
+      /** 方法体里所有二元比较。死区那次比较就在其中。 */
+      function comparisons(body: ts.Block): ts.BinaryExpression[] {
+        const out: ts.BinaryExpression[] = []
+        const visit = (node: ts.Node): void => {
+          if (ts.isBinaryExpression(node)) {
+            const kind = node.operatorToken.kind
+            if (
+              kind === ts.SyntaxKind.LessThanEqualsToken ||
+              kind === ts.SyntaxKind.LessThanToken ||
+              kind === ts.SyntaxKind.GreaterThanEqualsToken ||
+              kind === ts.SyntaxKind.GreaterThanToken
+            ) {
+              out.push(node)
+            }
+          }
+          ts.forEachChild(node, visit)
+        }
+        visit(body)
+        return out
+      }
+
+      it('自检：方法体里确有一次大小比较（否则下面两条对空集求值）', () => {
+        expect(
+          comparisons(commitLatestBody()),
+          'commitLatest 里一次大小比较都没有——下面的判据会静默变成恒真'
+        ).toHaveLength(1)
+      })
+
+      it('那次比较拿来当门限的，就是导出的 SPLIT_RATIO_EPSILON 这个名字', () => {
+        const [comparison] = comparisons(commitLatestBody())
+        // 只认标识符本身。局部副本、另一个同值常量、内联字面量都不算——它们都能与导出值漂移。
+        expect(
+          ts.isIdentifier(comparison!.right) ? comparison!.right.text : `<${ts.SyntaxKind[comparison!.right.kind]}>`,
+          '死区门限不是那个导出常量：自检读常量、这里读别的，两者能静默漂移'
+        ).toBe('SPLIT_RATIO_EPSILON')
+      })
+
+      it('方法体里不出现任何数字字面量：常量之外没有第二个取值来源', () => {
+        const body = commitLatestBody()
+        const literals: string[] = []
+        const visit = (node: ts.Node): void => {
+          if (ts.isNumericLiteral(node)) literals.push(node.text)
+          ts.forEachChild(node, visit)
+        }
+        visit(body)
+        expect(literals, 'commitLatest 里出现了数字字面量——它就是那个会与导出常量漂移的第二份取值').toEqual([])
+      })
     })
   })
 
