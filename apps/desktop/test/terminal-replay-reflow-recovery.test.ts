@@ -51,13 +51,16 @@ function terminalHarness(initial: { cols: number; rows: number }) {
   const frames = frameHarness()
   let proposed = { ...initial }
   let actual = { ...initial }
+  // xterm 还没量出 cell 尺寸（或实例已被拆掉）时读到的那种不成立的 grid。真 xterm 在这一刻
+  // 报 0，而 0 不是一个「排版宽度」。
+  let measurable = true
   const resize = vi.fn(async (_size: { cols: number; rows: number }) => true)
   const sync = new TerminalViewportSynchronizer({
     proposeGrid: () => proposed,
     fit: () => {
       actual = { ...proposed }
     },
-    readGrid: () => actual,
+    readGrid: () => (measurable ? actual : { cols: 0, rows: 0 }),
     resize,
     requestFrame: frames.request,
     cancelFrame: frames.cancel,
@@ -71,7 +74,29 @@ function terminalHarness(initial: { cols: number; rows: number }) {
     setProposed(next: { cols: number; rows: number }) {
       proposed = { ...next }
     },
+    setMeasurable(next: boolean) {
+      measurable = next
+    },
     grid: () => actual
+  }
+}
+
+/**
+ * 把还在飞的 resize 链排空，直到调用次数不再增长。
+ *
+ * 这一步是承重的，不是礼节。`continueStableFit` 是 `void …catch(() => {})` 排出去的**浮动**
+ * promise，起活之后的补重绘那一对 resize 就排在它里面。只 `waitFor` 到「resize 次数变多了」
+ * 会在第一次 resize 刚落地时就返回，补重绘还没排出来——于是「只重绘一次」那条断言看不见第二次
+ * 重绘，对着一个永不清 `awaitingFirstLiveFit` 的实现照旧全绿（实测存活，见那条用例的注释）。
+ *
+ * resize 替身是纯 async、不碰定时器，所以「排空 microtask」就等于排空整条链；按「次数稳住」
+ * 收敛而不是数固定的 tick 数，免得实现里多一层 await 就让这个 helper 静默失效。
+ */
+async function settleResizes(resize: ReturnType<typeof vi.fn>): Promise<void> {
+  let previous = -1
+  for (let round = 0; round < 20 && previous !== resize.mock.calls.length; round += 1) {
+    previous = resize.mock.calls.length
+    for (let tick = 0; tick < 10; tick += 1) await Promise.resolve()
   }
 }
 
@@ -191,7 +216,14 @@ describe('replay 之后的重排补救：判据锚在「重放那一刻的 grid�
     expect(harness.frames.runNext()).toBe(true)
     expect(harness.resize.mock.calls.length, '第一帧只是记下新提案，稳定闸还没放行').toBe(afterStart)
     expect(harness.frames.runNext()).toBe(true)
-    await vi.waitFor(() => expect(harness.resize.mock.calls.length).toBeGreaterThan(afterStart))
+    // 必须排空整条链，不能只等到「次数变多了」：补重绘那一对排在浮动 promise 里，会比第一次
+    // resize 晚落地。只等第一次的话，一个永不清 `awaitingFirstLiveFit` 的实现（每次 live fit
+    // 都补一次重绘）会在断言读到它之前躲开，于是下面的 0 恒真——实测正是这样存活的。
+    await settleResizes(harness.resize)
+    expect(
+      harness.resize.mock.calls.length,
+      '起活后的这次几何变化根本没送到 PTY，下面的 0 会是空的'
+    ).toBeGreaterThan(afterStart)
 
     expect(
       redrawRoundTrips(harness.resize, { cols: 100, rows: 30 }),
@@ -217,5 +249,34 @@ describe('replay 之后的重排补救：判据锚在「重放那一刻的 grid�
       redrawRoundTrips(harness.resize, { cols: 132, rows: 45 }),
       'markReplayLanded 不幂等的话，任何一次后续调用都会把锚点刷成当前 grid，补救永久失效。'
     ).toBe(1)
+  })
+
+  it('grid 还量不出来时不落锚点：0×0 不是「重放那一屏的宽度」', async () => {
+    // 调用点排在写完 replay 之后，而那一刻 xterm 可能还没量出 cell 尺寸（隐藏的容器、字体
+    // 未就绪），`terminal.cols/rows` 报 0。把 0×0 记成锚点的后果是**永久**的：`markReplayLanded`
+    // 只认第一次，于是真正的重放宽度再也记不进去，而 0×0 与任何真 grid 都不相等——补救从
+    // 「按需」退化成「每一格都无条件重绘」，把这个判据存在的理由整个抹掉。
+    //
+    // 判据取「重绘发生了几次」而不是读私有锚点：0×0 被拒时锚点留 null，与全新终端同形（不重绘）；
+    // 若被接受则每次都判不等（重绘一次）。两种世界在这个观察量上分得开。
+    const harness = terminalHarness({ cols: 80, rows: 24 })
+
+    harness.setMeasurable(false)
+    harness.sync.markReplayLanded()
+    harness.setMeasurable(true)
+
+    harness.setProposed({ cols: 132, rows: 45 })
+    harness.sync.observeViewport()
+    expect(harness.frames.runNext()).toBe(true)
+    await harness.sync.startLiveSynchronization()
+    await settleResizes(harness.resize)
+
+    expect(
+      redrawRoundTrips(harness.resize, { cols: 132, rows: 45 }),
+      '0×0 被当成锚点时，它与任何真 grid 都不等 ⇒ 每一格都补一次重绘，' +
+        '而真正的重放宽度因为「只认第一次」再也记不进来。'
+    ).toBe(0)
+    // 不落锚点不等于不同步：几何照样要送到 PTY。
+    expect(harness.resize).toHaveBeenCalledWith({ cols: 132, rows: 45 })
   })
 })
