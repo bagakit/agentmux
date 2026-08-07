@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { enclosingBindingName, findCallsToIdentifier, readAndParse } from './helpers/effect-reachability.js'
 
 // 复制到剪贴板从三处（容错三个档，含一处裸 `void` 静默失败）收敛成一个出口。这组测试守三件事：
 //   1. 路径变体格式化不许搞反、拼接格式不许漂——期望值锚成写死的字面量，绝不由被测函数自己算；
@@ -133,33 +134,90 @@ describe('剪贴板写入只有一个出口', () => {
 // 「抽进 lib 只解决一半」：出口内部正确，不代表每个调用点都把它接上了。上面那条禁了「绕过出口自己
 // 写剪贴板」，这里补另一半——每个壳的复制动作确实转发给了 `copyTextToClipboard`。这些壳是 React
 // 组件里的闭包回调，desktop 没有 jsdom / @testing-library，无法挂载后点一下来执行它们；能咬住的最强
-// 判据是「源码里这个复制路径引用了出口」。它挡不住「call 之后被 if(false) 包起来」这种造作形状——
-// 那一层由上面的 no-bypass 扫描兜底：壳一旦退回直接写剪贴板就红。两条合起来：壳既不能绕过出口，
-// 也不能把转发调用整个删掉。
+// 判据是「源码里这个复制路径引用了出口」。
+//
+// ─── 判据为什么必须按**位置**而不是按**文件**（#618，Reviewer #1 Finding 1）───
+//
+// 这组断言此前是 `expect(source).toContain('copyTextToClipboard(')`——按**文件**问「有没有」。
+// 那等价于「这个壳转发了」的前提是：该文件里这个形状**只出现一次**。实测前提不成立：
+//   · TerminalView.tsx        3 处（`writeClipboard` 依赖 ×2、`copySelection` ×1）
+//   · WorkspaceWorkbench.tsx  2 处（`SortableWorkbenchTab`、`WorkbenchRegionLeaf`）
+// 于是在这两个文件里删掉**任意一处**转发、留下别处，旧判据照旧命中、整套全绿。被掩盖的正是
+// 右键 Copy 那条路：`copySelection` 是右键菜单唯一的复制实现（键盘那条走 terminal-shortcuts 的
+// action，与它不共用代码），它整段消失时用户的右键复制彻底失效，而没有任何测试会红——本仓
+// 「presence-assertion-blind-when-shape-repeats」那一族，先例 #586。
+//
+// 改法：解析 AST，取每处调用的**最近具名绑定**，与声明的位置集合逐一比对（`toEqual`，含次数与顺序）。
+// 少一处、多一处、搬到别的函数里，三种都红。位置名由 `enclosingBindingName` 取，取值是从当前源码
+// 实测出来的，不是照着我的印象写的。
+//
+// 这条判据**不**保证：调用之后被 `if (false)` 包起来这类造作形状（由上面的 no-bypass 扫描兜底——壳一旦
+// 退回直接写剪贴板就红），也不保证壳会被挂载、事件会被派发（desktop 无 DOM 环境，见
+// helpers/effect-reachability.ts 文件头）。它保证的是「这几个具名位置上各有一次对出口的调用」。
 // ---------------------------------------------------------------------------
-describe('五个复制入口 + 两个菜单注入点都转发给出口', () => {
-  const FORWARDERS: readonly [file: string, needle: string][] = [
-    ['components/FileExplorer.tsx', 'copyTextToClipboard('],
-    ['components/BranchesPanel.tsx', 'copyTextToClipboard('],
-    ['components/SurfaceToolDock.tsx', 'copyTextToClipboard('],
-    ['components/TerminalView.tsx', 'copyTextToClipboard('],
-    ['components/BrowserPane.tsx', 'copyTextToClipboard('],
+describe('每个复制入口与菜单注入点都转发给出口', () => {
+  // 每个壳里**哪些具名位置**该有一次转发。取值实测自当前源码；改动接线时这张表要跟着改，
+  // 且改的时候必须说明那个位置为什么消失/新增——这正是它要拦的东西。
+  //
+  // 这张表此前只有 6 个文件，标题写「五个复制入口 + 两个菜单注入点」。下面那条全树自检一上来就
+  // 报出**另外三个**在转发却没人守的文件（AgentRoster / EditorPane / WorkspaceRowContextMenu），
+  // 所以旧标题里那个数在当时就已经不实了。这也是为什么自检要按「全树扫出来的转发者集合」判，
+  // 而不是让人手数：手数的清单会静默落后于代码。
+  const FORWARD_SITES: readonly [file: string, sites: readonly string[]][] = [
+    ['components/FileExplorer.tsx', ['copyContextPaths']],
+    ['components/BranchesPanel.tsx', ['copyText']],
+    ['components/SurfaceToolDock.tsx', ['WorkspaceTopicsPanel']],
+    // 三处各自承重，缺一不可：前两处是注入给键盘/OSC-52 通路的 `writeClipboard` 端口，
+    // 第三处 `copySelection` 是**右键菜单**唯一的复制实现。三者不共用代码。
+    ['components/TerminalView.tsx', ['writeClipboard', 'writeClipboard', 'copySelection']],
+    ['components/BrowserPane.tsx', ['copyElementContext']],
     // 两个菜单注入点：地址菜单的复制经这里注入的 writeClipboardText 落到出口。
-    ['components/WorkspaceWorkbench.tsx', 'copyTextToClipboard(text, reportError)']
+    ['components/WorkspaceWorkbench.tsx', ['SortableWorkbenchTab', 'WorkbenchRegionLeaf']],
+    ['components/AgentRoster.tsx', ['writeClipboardText']],
+    // EditorPane 的复制挂在编辑器命令的 `run` 上（Monaco action 的执行体）。
+    ['components/EditorPane.tsx', ['run']],
+    ['components/WorkspaceRowContextMenu.tsx', ['copyText']]
   ]
 
-  it('每个壳的源码里都出现了对出口的调用', () => {
-    for (const [file, needle] of FORWARDERS) {
-      const source = readFileSync(`${RENDERER_SRC}/${file}`, 'utf8')
-      expect(source, `${file} 没有转发给 copyTextToClipboard`).toContain(needle)
+  it('每个壳的每个具名转发位置上都恰好有一次对出口的调用', () => {
+    for (const [file, sites] of FORWARD_SITES) {
+      const path = `${RENDERER_SRC}/${file}`
+      const { sourceFile } = readAndParse(path)
+      const actual = findCallsToIdentifier(sourceFile, 'copyTextToClipboard').map(enclosingBindingName)
+      expect(
+        actual,
+        `${file} 的转发位置应恰为 [${sites.join(' | ')}]，实测 [${actual.join(' | ')}]。` +
+          '少一处＝某条复制路径被删掉了（按文件判「有没有」看不见这个）；' +
+          '多一处或换了位置＝接线搬家了，要确认新位置是有意的。'
+      ).toEqual([...sites])
     }
   })
 
-  it('自检：needle 不是空串，且文件都读得到', () => {
-    // 防这条自己假绿：needle 若被写空，`toContain('')` 恒真。
-    for (const [file, needle] of FORWARDERS) {
-      expect(needle.length).toBeGreaterThan(0)
-      expect(() => readFileSync(`${RENDERER_SRC}/${file}`, 'utf8')).not.toThrow()
+  it('自检：位置清单非空、名字不是兜底值，且这张表真的覆盖了全部转发点', () => {
+    // 防这条自己假绿的三种方式：
+    //   1. 位置清单被写空 ⇒ `toEqual([])` 在「转发全被删掉」时恒真；
+    //   2. 名字取成了 `(top-level)` 兜底值 ⇒ 说明 enclosingBindingName 没认出这种写法，
+    //      判据退化成「顶层有几次调用」，几乎不区分位置；
+    //   3. 这张表漏掉了某个**确实在转发**的文件 ⇒ 那个文件整段删掉转发不会红。第 3 条用
+    //      全树扫描兜：凡是出现过出口调用的文件，都必须在表里。
+    for (const [file, sites] of FORWARD_SITES) {
+      expect(sites.length, `${file} 的位置清单为空，判据会恒真`).toBeGreaterThan(0)
+      for (const site of sites) expect(site).not.toBe('(top-level)')
     }
+
+    const declared = new Set(FORWARD_SITES.map(([file]) => file))
+    const forwardingFiles: string[] = []
+    for (const path of sourceFiles(RENDERER_SRC)) {
+      const relative = path.slice(RENDERER_SRC.length + 1)
+      if (relative === SOLE_CLIPBOARD_WRITER) continue
+      const { sourceFile } = readAndParse(path)
+      if (findCallsToIdentifier(sourceFile, 'copyTextToClipboard').length > 0) forwardingFiles.push(relative)
+    }
+    expect(forwardingFiles.length, '全树一个转发点都没扫到，说明扫描面坏了').toBeGreaterThan(0)
+    const unlisted = forwardingFiles.filter((file) => !declared.has(file))
+    expect(
+      unlisted,
+      `这些文件转发给了出口但不在 FORWARD_SITES 里，于是它们的转发无人守：\n${unlisted.join('\n')}`
+    ).toEqual([])
   })
 })
