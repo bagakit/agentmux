@@ -1,5 +1,4 @@
 import { AgentMuxError } from './errors.js'
-import type { ExecutionHost } from './execution-host.js'
 import {
   cloneLaunchOptions,
   describeLaunchOptions,
@@ -285,19 +284,6 @@ export function resolveManagedHookPlan(
 }
 
 export const BUILT_IN_AGENT_PROVIDERS: readonly AgentProvider[] = createBuiltInAgentProviders(defineAgentProvider)
-
-export function executionHostProbe(host: ExecutionHost): AgentExecutableProbe {
-  return {
-    async hasExecutable(command) {
-      const result = await host.run(
-        'sh',
-        ['-lc', 'command -v -- "$1" >/dev/null 2>&1', 'agentmux-detect', command],
-        { timeoutMs: 8_000 }
-      )
-      return result.exitCode === 0
-    }
-  }
-}
 
 export class AgentProviderRegistry {
   private readonly providers = new Map<AgentProviderId, AgentProvider>()
