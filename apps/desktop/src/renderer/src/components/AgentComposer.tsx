@@ -1,6 +1,7 @@
 import { AtSign, CornerDownLeft, Paperclip, Square } from 'lucide-react'
 import type { AgentPostureControl } from '@agentmux/core'
 import { PosturePicker } from './PosturePicker'
+import { ComposerTextarea } from './ComposerTextarea'
 
 export type AgentComposerProps = {
   value: string
@@ -40,11 +41,13 @@ export function AgentComposer({
 
   return (
     <div className="composer" data-agent-composer="true">
-      <textarea
+      {/* 受控 + 认识 IME 组字：为什么这一格不能是裸 <textarea>，见 ComposerTextarea 与
+          lib/composer-composition.ts（#609）。 */}
+      <ComposerTextarea
         aria-label="Message Agent"
         disabled={disabled}
         value={value}
-        onChange={(event) => onChange(event.target.value)}
+        onValueChange={onChange}
         onKeyDown={(event) => {
           // No !isWorking guard: a running Agent can be steered. Enter submits whenever the surface allows
           // a submit and there is text; delivery (and codex's mid-turn refusal) is Core's call, not the
