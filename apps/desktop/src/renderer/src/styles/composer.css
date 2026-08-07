@@ -1,0 +1,38 @@
+/**
+ * Composer——Agent 那格底部的输入条。
+ *
+ * 从 agent.css 拆出来的：它是一个**独立表面**（自己的静息几何、自己的焦点表达、自己的一排工具与
+ * 主操作），而 agent.css 那边剩下的是状态栏、花名册、权限卡点这些别的表面。拆分的直接触发点是
+ * stylesheet-organisation.test.ts 那条 400 行上限——它的措辞写明「超出的按表面继续拆，不靠注释
+ * 分节假装分层」，所以这里照它说的做，而不是把解释性注释删短去挤进上限。
+ *
+ * @import 位置紧跟 agent.css（见 index.css）：层叠顺序不变，拆分对最终样式是**零差异**的。
+ */
+/* Flat by contract: no resting stroke — Surface luminance, the tool actions and the focus ring carry
+   hierarchy (surface-density.md), so the Composer reads as part of its Region, not a box floating on it.
+   Margin is uniform 6px top/bottom and 8px sides, the same inset the approval card above it uses, so the
+   whole input stack sits at one consistent gap from the Region edge instead of a ring of whitespace. */
+.composer { margin:var(--sp-3) var(--sp-4); overflow: hidden; border-radius: var(--radius); background: transparent; box-shadow: none; }
+/* Focus stays clearly visible without a resting border: the --focus-ring glow plus a 1px inset line in
+   --focus-line take over the boundary the removed stroke used to draw only while focused. */
+.composer:focus-within { box-shadow: var(--focus-ring), inset 0 0 0 1px var(--focus-line); }
+/* 静息态**恰好一行**。`field-sizing: content` 已经让它按内容长高，`rows={1}` 也已经在场，所以真正
+   决定静息高度的是这条 min-height 的地板——它此前写死 34px，比一行（1lh + 上下 padding ≈ 26px）高出
+   8px，于是空的输入框永远画成两行高，看上去像个多行文本域。地板改成从 `1lh` 派生而不是换一个字面量：
+   字号或行高一动，地板自己跟着动；写死的 px 会在下一次调字号时静默变回「高出一点」。
+   border-box（base.css 的 `*`）让 min-height 含 padding，所以要把 padding 的上下两档加回来。
+   max-height 是**生长上限**，回答的是另一个问题（最多长到多高），刻意仍用 px。 */
+.composer textarea { width: 100%; min-height: calc(1lh + var(--sp-4) + var(--sp-1)); max-height: 132px; field-sizing: content; display: block; resize: none; padding:var(--sp-4) var(--sp-5) var(--sp-1); border: 0; outline: 0; color: var(--text); background: transparent; font-size: var(--fs-meta); line-height: 1.45; }
+.composer textarea::placeholder { color: var(--neutral-2); }
+.composer textarea:disabled { color: var(--text-3); cursor: not-allowed; }
+.composer__toolbar { display: flex; justify-content: space-between; padding:var(--sp-1) var(--sp-2) var(--sp-2); }
+.composer__toolbar > div { min-width: 0; display: flex; gap:var(--sp-1); }
+.composer-tool { max-width: 180px; display: flex; align-items: center; gap:var(--sp-2); padding:var(--sp-2) var(--sp-3); overflow: hidden; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font-size: var(--fs-micro); cursor: pointer; white-space: nowrap; }
+.composer-tool:hover:not(:disabled) { color: var(--text); background: var(--surface-3); }
+.composer-tool--danger:hover:not(:disabled) { color: var(--red); }
+.composer-send { display: flex; align-items: center; gap:var(--sp-2); padding:var(--sp-2) var(--sp-4); border: 0; border-radius: var(--radius-sm); color: var(--bg); background: linear-gradient(180deg, var(--green), var(--green-2)); font-size: var(--fs-micro); font-weight: 620; box-shadow: var(--hl-strong); cursor: pointer; transition: background .12s ease; }
+.composer-send:hover:not(:disabled) { background: linear-gradient(180deg, var(--green-text), var(--green)); }
+.composer-send:active:not(:disabled) { box-shadow: inset 0 1px 3px var(--scrim-1); }
+.composer-send:disabled { opacity: .35; cursor: default; }
+.composer-send--working { color: var(--red-text); background: var(--red-bg); border: 1px solid var(--red-line); box-shadow: none; }
+.composer-send--working:hover:not(:disabled) { color: var(--red-text); background: var(--red-bg); }
