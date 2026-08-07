@@ -83,3 +83,14 @@ export function buildPromptInputPayload(prompt: string): string {
     ? wrapBracketedPasteText(prompt)
     : sanitizeBracketedPasteText(prompt)
 }
+
+/**
+ * 受管 Hook 命令的执行超时（秒）。每个 Provider 的 hook 配置都要给它写超时，值统一为这个常量。
+ *
+ * 之所以集中：这个值曾在八九个 provider 文件里各手抄一份 `10`，其中 copilot 还用的是**另一个字段名**
+ * （`timeoutSec`，见该文件头——这个 CLI 的键带单位后缀）。字段名的分歧是**每个 CLI 的正当差异**，
+ * 保留；漂移的只是那个值——改一处、漏改别处，各 Provider 的 hook 就悄悄用上不同超时，且没有编译错误。
+ * 集中到这里后，`providers/` 下再出现裸的数字 `timeout`/`timeoutSec` 就是新的手抄，由
+ * test/provider-hook-timeout-source.test.ts 那道结构守卫抓（行为等价挡不住新抄一份 `10`）。
+ */
+export const HOOK_COMMAND_TIMEOUT_SECONDS = 10

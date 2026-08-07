@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { AgentProviderRegistry, resolveManagedHookPlan } from '../../src/agent-provider.js'
 import { COPILOT_HOOK_EVENTS, COPILOT_HOOKS, createCopilotManagedHookPlan } from '../../src/providers/copilot.js'
+import { HOOK_COMMAND_TIMEOUT_SECONDS } from '../../src/providers/shared.js'
 import { canonicalHookLifecycleEvent } from '../../src/agent-hook-event.js'
 import { hookToolOutcome } from '../../src/hook-tool-outcome.js'
 import { USAGE_FINALIZATION_EVENTS } from '../../src/agent-hook-command.js'
@@ -84,7 +85,9 @@ describe('Copilot provider', () => {
         const entry = config.hooks[eventName]![0]!
         expect(entry.hooks[0]!.type).toBe('command')
         expect(entry.hooks[0]!.command).toContain('agentmux-hook.js')
-        expect(entry.hooks[0]!.timeoutSec).toBe(10)
+        // 从 SSOT 常量派生，不再手抄 `10`——bump 常量不该把这条无辜打红。值仍流经 provider→JSON→parse，
+        // 故 provider 里写死错值或丢 timeoutSec 照样红。字段名仍断言是 timeoutSec（下一行守它不被抄成 timeout）。
+        expect(entry.hooks[0]!.timeoutSec).toBe(HOOK_COMMAND_TIMEOUT_SECONDS)
         // `timeout` 是别家的拼法，这里出现就说明有人照抄了 droid/grok。
         expect(entry.hooks[0]).not.toHaveProperty('timeout')
       }
