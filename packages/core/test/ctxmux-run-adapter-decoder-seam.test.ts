@@ -24,9 +24,10 @@ import {
 const REPLAY_SEAM_BYTES = Uint8Array.from([0x61, 0x62, 0xe4, 0xb8])
 // 紧接着的第一个 live chunk：'中' 的最后一字节（ad）+ 'cd'。
 const LIVE_SEAM_BYTES = Uint8Array.from([0xad, 0x63, 0x64])
-// 接缝两侧拼起来应当是这个——'中' 完整，无替换字符。
+// 接缝两侧拼起来应当是这个——'中' 完整，无替换字符。整串相等就是判据：替换字符（U+FFFD）出现即不等，
+// 所以**不要**在它旁边再加一句 `not.toContain('�')`。那句先天多余（`toBe` 先抛，它成死代码），
+// 单独留着还更弱——空串与 'ab' 都能过。此前两条用例各带一句，已删。
 const EXPECTED_SEAM_TEXT = 'ab中cd'
-const REPLACEMENT_CHARACTER = '�'
 
 function seamReplayChunk(): OutputChunk {
   return { start_byte: 0, end_byte: REPLAY_SEAM_BYTES.byteLength, data: REPLAY_SEAM_BYTES }
@@ -113,10 +114,9 @@ describe('CtxmuxRunAdapter 接缝处的多字节字符解码（replay↔live 共
     await waitForDataEvent(live)
 
     const text = joinDataText([...observation.replay, ...live])
-    // 若 observeOutput 回到「给 replay 单独建一个 replayDecoder」的历史形状，接缝处会解出替换字符：
-    // 这两句断言一起变红。
+    // 若 observeOutput 回到「给 replay 单独建一个 replayDecoder」的历史形状，接缝处会解出替换字符，
+    // 整串因此不等——这一句就红。
     expect(text).toBe(EXPECTED_SEAM_TEXT)
-    expect(text).not.toContain(REPLACEMENT_CHARACTER)
   })
 
   it('attach：同形——replay 与后续 live 事件共用一个 decoder，接缝字符完整无乱码', async () => {
@@ -130,8 +130,7 @@ describe('CtxmuxRunAdapter 接缝处的多字节字符解码（replay↔live 共
 
     const text = joinDataText([...attachment.replay, ...live])
     // attach() 今天是对的（一个 decoder 传进 pump）。若有人给它的 replay 也单独建一个 decoder，
-    // 这两句断言一起变红——钉住「它是对的」。
+    // 整串就不等——这一句红，钉住「它是对的」。
     expect(text).toBe(EXPECTED_SEAM_TEXT)
-    expect(text).not.toContain(REPLACEMENT_CHARACTER)
   })
 })

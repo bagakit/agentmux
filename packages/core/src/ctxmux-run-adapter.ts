@@ -887,8 +887,13 @@ export class CtxmuxRunAdapter {
       // 流式解码（`{ stream: true }`），一个多字节 UTF-8 字符被切在 replay 的最后一个 chunk 与第一个
       // live chunk 之间时，前半截留在 decoder 的内部状态里、由下一个（live）chunk 补齐。若给 live 与
       // replay 各建一个 decoder，那半个字符会永远补不齐，而 live decoder 从零把续字节当成新字符开头，
-      // 接缝处解出替换字符 / 乱码。attach() 正是先 `.map` replay、再启动 live 循环（`void this.pump`），
-      // 这里照它同形——replay 的字节在时间上早于 live，故必须先决出 replay，再让 live 循环接着喂。
+      // 接缝处解出替换字符 / 乱码。
+      //
+      // 承重的只有「同一个 decoder」这一条，**不含**这个 `.map` 与下面 IIFE 的先后。此处此前写着「故必须
+      // 先决出 replay，再让 live 循环接着喂」，那是错的：把 `.map` 挪到 IIFE 下面实测 2/2 全绿。原因是
+      // `for await` 一定先在迭代器的 `.next()` promise 上挂起、之后才跑循环体，所以 IIFE 之后的同步语句
+      // 照样先执行完。真正的（更弱的）不变量是「replay 的 `.map` 必须是同步的，不许挪到某个 `await` 之后」
+      // ——两种摆法都满足它。因此顺序无人守，不是缺口：没有能杀死它的变异。
       const replay = snapshot.replay.chunks.map((chunk) => decodeChunk(runId, decoder, chunk))
       void (async () => {
         try {
