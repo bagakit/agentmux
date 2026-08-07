@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 import { describe, expect, it, vi } from 'vitest'
 import { SPLIT_RATIO_EPSILON, SplitRatioCommitter } from '../src/renderer/src/lib/split-ratio-commit'
+import { MIN_SPLIT_RATIO } from '../src/renderer/src/lib/split-tree'
 import { LatestTerminalOutputAcknowledger } from '../src/renderer/src/lib/terminal-output-ack'
 import { terminalStartupPhase } from '../src/renderer/src/lib/terminal-startup'
 
@@ -155,9 +156,10 @@ describe('Terminal interaction latency owners', () => {
    * 上面那次百分比往返的浮点误差决定，所以自检与两条行为断言必须拿**同一个** `observedDelta` 去比——
    * 写死一个端点就会让两者在边界上判得不一样。
    *
-   * 两条自检的开闭**是承重的，不是随手写的**：`toBeLessThan` 严格、`toBeGreaterThanOrEqual` 含端点，
-   * 正对着生产侧的 `commit ⇔ observed > ε` / `discard ⇔ observed ≤ ε`。所以它们钉下的合法区间是
-   * 半开的 `[observedDelta(0.001), observedDelta(0.01))`——改任一个的开闭都会与生产的 `<=` 脱钩。
+   * 两条自检的开闭**不是承重的**，别照着以前那句话读：`toBeLessThan` 严格、
+   * `toBeGreaterThanOrEqual` 含端点，两个方向各翻一次实测都是 18 条全绿（0.005 严格落在两个
+   * `observedDelta` 之间，端点从不被触及）。真正无人守的是生产侧 `<=` 里的那个 `=`——而它今天
+   * **不可能**被行为钉住：见下面「端点不可达」那一条，那才是这个缺口的正确处置。
    */
   describe('死区两侧的产品预算', () => {
     const MUST_PERSIST_DELTA = 0.01
@@ -208,6 +210,58 @@ describe('Terminal interaction latency owners', () => {
     })
 
     /**
+     * 生产侧的比较是 `<=`，可那个 `=` 今天**没有任何输入能碰到**，所以它既不能被行为断言钉住，
+     * 也不该被当成「已经守好的规则」。这一条不去假装钉住它，而是钉住它不可达的那个**前提**——
+     * 一旦前提破了，`=` 就从死代码变成活规则，那一刻必须有人先决定「恰好等于算噪声还是算改动」。
+     *
+     * 为什么到不了：两个操作数都是十进制小数（`observeLayout` 收百分比再 `/100`），而 0.005 不是
+     * 二进制有理数，`|latest - persisted|` 落不到它上面。这**不是运气而是取值的性质**，但也**只是
+     * 取值的性质**：换成二进制有理数立刻可达，而这样的取值就在今天的合法区间里——
+     * `1/128 = 0.0078125` 满足上面两个产品预算（0.001 < ε < 0.01），却有上万组精确命中。
+     *
+     * 所以判据是双向的：今天这个取值必须一次都碰不到端点（否则 `=` 已经在偷偷生效而无人裁决），
+     * 而那个反例必须真能碰到（否则这条断言只是在陈述「找不到」，对任何取值都恒真——
+     * 本仓 property-unobservable-in-default-env 记的就是这种自证）。
+     */
+    describe('端点不可达：`<=` 里的 `=` 今天是死规则，这条钉住它为什么死', () => {
+      /** 界内合法比例的枚举步长。1e-4 比渲染层能产生的任何比例都细。 */
+      const RATIO_STEP = 1 / 10_000
+
+      /** 把两个界内合法比例任意配对，数出 `|a - b|` 精确等于 candidate 的组数。 */
+      function exactEndpointHits(candidate: number): number {
+        let hits = 0
+        for (let step = MIN_SPLIT_RATIO / RATIO_STEP; step <= (1 - MIN_SPLIT_RATIO) / RATIO_STEP; step += 1) {
+          const persisted = step * RATIO_STEP
+          for (const latest of [persisted + candidate, persisted - candidate]) {
+            if (latest < MIN_SPLIT_RATIO || latest > 1 - MIN_SPLIT_RATIO) continue
+            if (Math.abs(latest - persisted) === candidate) hits += 1
+          }
+        }
+        return hits
+      }
+
+      it('今天的取值一次都碰不到端点，所以 `=` 不可能被行为观测', () => {
+        expect(
+          exactEndpointHits(SPLIT_RATIO_EPSILON),
+          '端点可达了：`<=` 里的 `=` 不再是死代码，' +
+            '得先决定「差值恰好等于死区」算噪声还是算一次改动，再改这个常量'
+        ).toBe(0)
+      })
+
+      it('自检：换成落在同一个预算区间里的二进制有理数就立刻可达（上面那个 0 不是恒真）', () => {
+        // 1/128 同时满足 MUST_DISCARD_DELTA < ε < MUST_PERSIST_DELTA，所以它是一个**合法**取值，
+        // 不是一个荒谬的反例——正因如此，上面那条 0 才是一句有内容的话。
+        const DYADIC_IN_BUDGET = 1 / 128
+        expect(DYADIC_IN_BUDGET).toBeGreaterThan(observedDelta(MUST_DISCARD_DELTA))
+        expect(DYADIC_IN_BUDGET).toBeLessThan(observedDelta(MUST_PERSIST_DELTA))
+        expect(
+          exactEndpointHits(DYADIC_IN_BUDGET),
+          '连二进制有理数都碰不到端点 ⇒ 这个枚举根本到不了任何端点，上面那条 0 是自证'
+        ).toBeGreaterThan(0)
+      })
+    })
+
+    /**
      * 上面三条把常量的**取值**夹住了，但没有任何一条问「`commitLatest` 到底读的是不是那个导出常量」。
      * 这个缺口是实测的（3e6d3cc 审计，八个变异逐个跑）：
      *
@@ -221,14 +275,22 @@ describe('Terminal interaction latency owners', () => {
      * 这一条守的是「取值只有一处」。
      *
      * 判据写成**只许这一种形状**，不是「禁止字面量在场」：禁止清单必漏（本仓 forbidden-list-guard-always-leaks
-     * 记了整整一族——换个拼法就绕过）。这里要求那次比较的右操作数**就是**标识符 `SPLIT_RATIO_EPSILON`，
+     * 记了整整一族——换个拼法就绕过）。这里要求那次比较的右操作数**解析到**那个 `export const`，
      * 于是任何别的写法（字面量、局部副本、另一个常量）都落在允许形状之外。
+     *
+     * 「解析到」不是「叫这个名字」——这条区别是实测出来的（94f851f 审计 H1）。此前这里只比 AST 标识符的
+     * `.text`，于是在方法体首行插一句 `const SPLIT_RATIO_EPSILON = DECOY_EPSILON`（DECOY 在模块作用域
+     * 取 0.008）就同时骗过两条断言：右操作数的文本还是那个名字，而字面量藏在方法体外——16 条全绿，
+     * 门限却真的漂成了 0.008。这正是这道守卫自己点名要挡的「局部副本」。所以现在用 TS 的 type checker
+     * 把那个标识符解析回它的声明，再要求那份声明是**模块作用域的、带 export 的**那一个：名字可以重复，
+     * 声明位置不会。用 `createProgram` 而不是 `createSourceFile`（多 30ms，换来作用域规则由编译器实现，
+     * 本仓 lexical-boundaries-need-a-real-lexer 记的就是自己猜作用域这一族盲点）。
      *
      * 走 TS parser 而不是正则：字面量与注释都会骗文本匹配（本仓 lexical-boundaries-need-a-real-lexer /
      * equivalence-cannot-catch-a-fresh-copy）。上面那段 docblock 里就正当地写着 `0.005`、`0.008`
      * 这些数字——一个 `toContain` 形状的守卫会对它自己的解释文字发假红。
      *
-     * 三条断言里前两条是在场自检：找不到方法体、或方法体里没有那次比较时必须红。否则「方法被改名/被
+     * 前两条断言是在场自检：找不到方法体、或方法体里没有那次比较时必须红。否则「方法被改名/被
      * 删掉」会让后面的判据静默变成对空集求值（本仓 name-existence-check-is-blind-to-rule-bodies）。
      */
     describe('死区取值只有一处：commitLatest 必须读那个导出常量', () => {
@@ -236,14 +298,19 @@ describe('Terminal interaction latency owners', () => {
         new URL('../src/renderer/src/lib/split-ratio-commit.ts', import.meta.url)
       )
 
+      /**
+       * 带 type checker 的单文件程序。`noLib`/`noResolve` 是刻意的：这道守卫只问「这个标识符解析到
+       * 本文件的哪份声明」，不需要 lib 与 import 图，省掉它们让每次建程序只花 ~30ms。
+       */
+      function programForSource(): { program: ts.Program; source: ts.SourceFile } {
+        const program = ts.createProgram([SOURCE], { noResolve: true, noLib: true })
+        const source = program.getSourceFile(SOURCE)
+        expect(source, `type checker 拿不到 ${SOURCE}`).toBeDefined()
+        return { program, source: source! }
+      }
+
       /** `commitLatest` 的方法体。取不到就是在场自检失败，不是「没有违规」。 */
-      function commitLatestBody(): ts.Block {
-        const source = ts.createSourceFile(
-          SOURCE,
-          readFileSync(SOURCE, 'utf8'),
-          ts.ScriptTarget.Latest,
-          true
-        )
+      function commitLatestBody(source: ts.SourceFile): ts.Block {
         const found: ts.Block[] = []
         const visit = (node: ts.Node): void => {
           if (
@@ -283,23 +350,52 @@ describe('Terminal interaction latency owners', () => {
       }
 
       it('自检：方法体里确有一次大小比较（否则下面两条对空集求值）', () => {
+        const { source } = programForSource()
         expect(
-          comparisons(commitLatestBody()),
+          comparisons(commitLatestBody(source)),
           'commitLatest 里一次大小比较都没有——下面的判据会静默变成恒真'
         ).toHaveLength(1)
       })
 
-      it('那次比较拿来当门限的，就是导出的 SPLIT_RATIO_EPSILON 这个名字', () => {
-        const [comparison] = comparisons(commitLatestBody())
-        // 只认标识符本身。局部副本、另一个同值常量、内联字面量都不算——它们都能与导出值漂移。
+      it('那次比较的门限解析到那个 export const，不只是叫这个名字', () => {
+        const { program, source } = programForSource()
+        const checker = program.getTypeChecker()
+        const [comparison] = comparisons(commitLatestBody(source))
+        const right = comparison!.right
+
+        // 先要求它是个标识符：字面量、成员表达式、函数调用都在允许形状之外。
         expect(
-          ts.isIdentifier(comparison!.right) ? comparison!.right.text : `<${ts.SyntaxKind[comparison!.right.kind]}>`,
-          '死区门限不是那个导出常量：自检读常量、这里读别的，两者能静默漂移'
-        ).toBe('SPLIT_RATIO_EPSILON')
+          ts.isIdentifier(right) ? 'identifier' : `<${ts.SyntaxKind[right.kind]}>`,
+          '死区门限不是一个标识符——字面量与算式都能与导出值漂移'
+        ).toBe('identifier')
+
+        // 再把它解析回声明。同名的局部副本在这一步现形：它的声明不在模块作用域、也没有 export。
+        const declarations = checker.getSymbolAtLocation(right)?.declarations ?? []
+        expect(declarations, '这个标识符解析不到任何声明——守卫看不见它读的是什么').toHaveLength(1)
+        const declaration = declarations[0]!
+        const statement = declaration.parent?.parent
+        expect(
+          {
+            name: ts.isIdentifier(right) ? right.text : '<not-an-identifier>',
+            moduleScope: statement?.parent === source,
+            exported: !!(
+              ts.isVariableDeclaration(declaration) &&
+              statement &&
+              ts.canHaveModifiers(statement) &&
+              ts
+                .getModifiers(statement)
+                ?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)
+            )
+          },
+          '死区门限没有解析到那个模块级 export const：' +
+            '一份同名的局部副本能骗过「名字对不对」这种判据（94f851f 审计 H1 实测 16 条全绿），' +
+            '而它与导出值可以自由漂移'
+        ).toEqual({ name: 'SPLIT_RATIO_EPSILON', moduleScope: true, exported: true })
       })
 
       it('方法体里不出现任何数字字面量：常量之外没有第二个取值来源', () => {
-        const body = commitLatestBody()
+        const { source } = programForSource()
+        const body = commitLatestBody(source)
         const literals: string[] = []
         const visit = (node: ts.Node): void => {
           if (ts.isNumericLiteral(node)) literals.push(node.text)
