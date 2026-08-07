@@ -33,6 +33,7 @@ import {
   type BrowserAnnotation
 } from '../lib/browser-annotations'
 import { composeScreenshot } from './browser-screenshot/compose'
+import { ComposerTextarea } from './ComposerTextarea'
 import {
   ScreenshotEditor,
   type ScreenshotCompleteInput
@@ -546,12 +547,12 @@ export function BrowserPane({
             </dl>
             <label>
               <span>Annotation note</span>
-              <textarea
+              <ComposerTextarea
                 aria-label="Annotation note"
                 value={annotationNote}
                 maxLength={1_000}
                 placeholder="What should the Agent notice about this element?"
-                onChange={(event) => setAnnotationNote(event.target.value)}
+                onValueChange={setAnnotationNote}
               />
             </label>
             <footer>

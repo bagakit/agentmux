@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import ts from 'typescript'
@@ -263,21 +263,88 @@ describe('ComposerTextarea 真的把组字接到了这一层', () => {
 })
 
 // ---------------------------------------------------------------------------
-// 消费层：那一格真的用了这层壳。壳做对了但没人用，前两层全绿而用户的缺陷完好无损。
+// 消费层：**每一个**受控 textarea 都用了这层壳。壳做对了但某一格没用它，前两层全绿而用户的
+// 缺陷在那一格完好无损。
+//
+// ─── 判据为什么必须全树扫，而不是点名一个消费者（#622）───
+//
+// 这一段此前只钉 `AgentComposer` 一个文件。而缺陷从来不是「AgentComposer 忘了处理组字」——
+// ComposerTextarea 的 docstring 自己写明那是**每一个**受控 textarea 的默认状态（本仓实测 8 个，
+// #609 之前 0 个认识组字）。于是点名一个消费者时，另外 7 个（启动器 prompt、PR 描述、讨论主题、
+// commit message、浏览器标注、Agent 设置的 args/env）照旧带着缺陷，而这个文件每一条判据全绿——
+// 本仓「抽进 lib 只解决一半」那一族，在组件层的同一课。
+//
+// 改法：扫整棵 renderer 源码树，禁止 `<textarea>` 出现在壳以外的任何文件里。判据落在 **JSX 标签名**
+// 而不是文本 `'<textarea'`：注释里提到裸 textarea 的地方有好几处（本仓有「注释里描述规则的文字不是
+// 规则本身」那族先例），走 TS parser 就不会误伤它们。
+//
+// 例外恰好一个——壳自己，它内部当然要渲染真的 textarea。例外自带前提自检：壳里必须真的有一个
+// textarea，否则「例外」会在壳被改坏时替它背书。
 // ---------------------------------------------------------------------------
-describe('AgentComposer 用的是认识组字的那层壳', () => {
-  it('Composer 那一格是 ComposerTextarea，而不是裸 textarea', () => {
-    // 这一条是「抽进 lib 只解决一半」在组件层的同一课：把 <ComposerTextarea> 改回 <textarea>，
-    // 上面每一条断言都照旧全绿（它们看的是壳的文件），而用户重新中招。
-    const tags = tagNamesIn(CONSUMER)
-    expect(tags.length, '提取器没在 AgentComposer 里找到任何 JSX 标签').toBeGreaterThan(0)
-    expect(tags).toContain('ComposerTextarea')
-    expect(tags, 'AgentComposer 里出现了裸 textarea：那一格绕开了组字和解层').not.toContain('textarea')
+const RENDERER_SRC = resolve(__dirname, '../src/renderer/src')
+/** 唯一允许出现裸 `<textarea>` 的文件（相对 RENDERER_SRC）。 */
+const SOLE_RAW_TEXTAREA = 'components/ComposerTextarea.tsx'
+
+function sourceFiles(dir: string): string[] {
+  const out: string[] = []
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = `${dir}/${entry.name}`
+    if (entry.isDirectory()) out.push(...sourceFiles(path))
+    else if (/\.tsx?$/u.test(entry.name)) out.push(path)
+  }
+  return out
+}
+
+describe('每个受控 textarea 都走认识组字的那层壳', () => {
+  it('整棵 renderer 源码树里只有壳自己渲染裸 textarea', () => {
+    const offenders: string[] = []
+    for (const file of sourceFiles(RENDERER_SRC)) {
+      const relative = file.slice(RENDERER_SRC.length + 1)
+      if (relative === SOLE_RAW_TEXTAREA) continue
+      if (tagNamesIn(file).includes('textarea')) offenders.push(relative)
+    }
+    // 报出文件名而不是只给个数：漂移点要一眼看得到。
+    expect(
+      offenders,
+      '这些文件写了裸 <textarea>，那一格绕开了组字和解层，中文输入删掉再输入会变成不是用户输入的字' +
+        `（#609）。改成 <ComposerTextarea value onValueChange>：\n${offenders.join('\n')}`
+    ).toEqual([])
   })
 
+  it('自检：扫描面覆盖到了壳与已知消费者，且那条例外真的有前提', () => {
+    // 防这条自己假绿的三种方式：
+    //   1. 扫描根/后缀过滤写错 ⇒ 文件集合为空，offenders 恒为空数组，「没扫到」与「扫过了没问题」
+    //      打印出来一模一样（本仓「扫描根写错静默变绿」那族）；
+    //   2. 提取器认不出 JSX 标签 ⇒ 同上恒真。所以要在**已知有 textarea 的那个文件**上正向验证；
+    //   3. 那条例外变成为坏修复背书 ⇒ 壳里的 textarea 被换掉/删掉时，例外让它照旧免检。
+    const files = sourceFiles(RENDERER_SRC).map((file) => file.slice(RENDERER_SRC.length + 1))
+    expect(files).toContain(SOLE_RAW_TEXTAREA)
+    expect(
+      tagNamesIn(`${RENDERER_SRC}/${SOLE_RAW_TEXTAREA}`),
+      '壳里没有 textarea：那条例外正在为一个已经坏掉的壳背书'
+    ).toContain('textarea')
+
+    // 消费者侧的在场证明：至少要有若干文件在用这层壳。写成 `toBeGreaterThan(0)` 不够——那在
+    // 「只剩 AgentComposer 一个、其余 7 格被改回裸 textarea」时也成立，而上面那条会把它们逮到；
+    // 这里要的是「这层壳真的被广泛用着」，所以地板取自实测值。改动接线时这个数要跟着改，且改的
+    // 时候必须说明为什么某一格不再需要壳。
+    const consumers = files.filter(
+      (file) => file !== SOLE_RAW_TEXTAREA && tagNamesIn(`${RENDERER_SRC}/${file}`).includes('ComposerTextarea')
+    )
+    expect(
+      consumers.length,
+      `用壳的文件只剩 ${consumers.length} 个（${consumers.join(', ')}），少于实测的 7 个：` +
+        '要么某一格被删掉了，要么它绕回了别的写法（若是裸 textarea 则上面那条也会红）'
+    ).toBeGreaterThanOrEqual(7)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 消费层补充：AgentComposer 那一格喂进壳的是什么。标签名在场之外还要钉实参——接成 `value={''}`
+// 或 `onValueChange={() => {}}` 时标签判据全绿，而那一格分别变成永久空、或者永远存不下草稿。
+// ---------------------------------------------------------------------------
+describe('AgentComposer 喂给壳的是受控取值与草稿写回口', () => {
   it('喂给壳的是受控取值与草稿写回口，不是别的东西', () => {
-    // 接成 `value={''}` 或 `onValueChange={() => {}}` 时标签名判据全绿，但那一格分别变成永久空、
-    // 或者永远存不下草稿。所以标签在场之外还要钉这两个实参。
     const attributes = attributesOfTag(CONSUMER, 'ComposerTextarea')
     expect(attributes.size).toBeGreaterThan(0)
     expect(attributes.get('value')).toBe('value')

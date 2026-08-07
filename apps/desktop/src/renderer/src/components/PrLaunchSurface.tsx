@@ -1,6 +1,7 @@
 import { GitPullRequestArrow, LoaderCircle, X } from 'lucide-react'
 import type { FormEvent, ReactElement } from 'react'
 import type { PrLaunchPlan } from '../lib/pr-launch'
+import { ComposerTextarea } from './ComposerTextarea'
 
 export type PrLaunchSurfaceProps = {
   /** The one plan from the one readiness read, or null when nothing has been asked for yet. */
@@ -117,13 +118,13 @@ export function PrLaunchSurface({
             disabled={submitting}
             onChange={(event) => onTitleChange(event.target.value)}
           />
-          <textarea
+          <ComposerTextarea
             className="pr-form__body"
             placeholder="Description (optional)"
             value={body}
             rows={3}
             disabled={submitting}
-            onChange={(event) => onBodyChange(event.target.value)}
+            onValueChange={onBodyChange}
           />
           <button
             type="submit"
