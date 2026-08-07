@@ -41,8 +41,13 @@ export type MouseTrackingMode = Terminal['modes']['mouseTrackingMode']
  * desktop-tsc-does-not-see-tests）。搬到这里之后，`pnpm typecheck` 就是它的执行者。
  *
  * 显式标注 `Record<MouseTrackingMode, boolean>` 是承重的：xterm 增一种模式 → 缺键报错，删/改一种 →
- * 多余键报错，两个方向都逼人回来重新判断它落在哪一侧。**不要**把标注换成 `satisfies`——那只校验取值
- * 合法、不强制键是全集，缺键会静默通过。
+ * 多余键报错，两个方向都逼人回来重新判断它落在哪一侧。
+ *
+ * 这里**不是**「只有标注才行、satisfies 不行」——那句话我先写过，实测是错的：对**对象字面量**而言
+ * `satisfies Record<MouseTrackingMode, boolean>` 缺键报 TS1360、多余键报 TS2353，两个方向都退 2，
+ * 与标注等强。真正会静默的是**数组**形式（`['x10','vt200'] as const satisfies readonly MouseTrackingMode[]`）：
+ * `readonly X[]` 只约束「每个元素合法」，从不要求覆盖全集，所以漏掉一种模式没有任何东西会红。
+ * 选标注只是因为它同时把类型写在了名字旁边，不是因为 satisfies 弱。
  */
 const MOUSE_REPORTING_ACTIVE: Record<MouseTrackingMode, boolean> = {
   none: false,
