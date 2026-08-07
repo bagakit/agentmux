@@ -119,6 +119,42 @@ export function findCallsToMember(sourceFile: ts.SourceFile, property: string): 
   return calls
 }
 
+/**
+ * 包着这个节点的最近**具名**绑定的名字——即「这句调用长在谁身上」。
+ *
+ * 为什么需要它：判「某个壳有没有把动作转发给出口」时，最容易写的判据是「文件里出现过
+ * `sink(` 这个形状」。那条判据在**同一个文件里这个形状只出现一次**时才等价于「那个壳转发了」；
+ * 一旦出现两次以上，删掉其中任意一处、留下另一处，判据照旧命中（本仓记过
+ * 「presence-assertion-blind-when-shape-repeats」，先例 #586）。实测本仓 `copyTextToClipboard(`
+ * 在 TerminalView.tsx 里有 3 处、WorkspaceWorkbench.tsx 里有 2 处，于是这两个文件的转发
+ * 各自都不可观测。收法是把「文件里有没有」换成「**哪几个**具名位置上有」，逐位置比对。
+ *
+ * 认这四种命名来路（都在本仓真实出现过，取值由探针实测）：
+ *   - `function f() {}` / 类方法 `f() {}`     → `f`
+ *   - `const f = () => {}`（含 `function` 表达式）→ `f`（React 组件与 handler 的常见写法）
+ *   - 对象字面量属性 `{ f: () => {} }`         → `f`（注入依赖端口的常见写法，如 `writeClipboard`）
+ *   - JSX 属性上的内联箭头 `onX={() => {}}`    → `jsx:onX`（带前缀，免得与同名 handler 混淆）
+ *
+ * 都不匹配时返回 `'(top-level)'`（模块顶层语句）。这是**词法**判据：它取的是绑定的名字，
+ * 不做符号解析，所以同名的两个局部绑定它区分不了——需要区分时改用带实参的
+ * `pickCallByArgument`，或在调用方额外钉住次数。
+ */
+export function enclosingBindingName(node: ts.Node): string {
+  let current: ts.Node | undefined = node.parent
+  while (current) {
+    if (ts.isFunctionDeclaration(current) && current.name) return current.name.text
+    if (ts.isMethodDeclaration(current) && ts.isIdentifier(current.name)) return current.name.text
+    if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
+      const parent = current.parent
+      if (ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name)) return parent.name.text
+      if (ts.isPropertyAssignment(parent) && ts.isIdentifier(parent.name)) return parent.name.text
+      if (ts.isJsxAttribute(parent) && ts.isIdentifier(parent.name)) return `jsx:${parent.name.text}`
+    }
+    current = current.parent
+  }
+  return '(top-level)'
+}
+
 /** 这四种是「函数边界」：向上找 enclosing body、向上找守护 if 时撞到它们就停。 */
 export function isFunctionBoundary(node: ts.Node): boolean {
   return (
