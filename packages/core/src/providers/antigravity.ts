@@ -4,7 +4,7 @@ import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import { ANTIGRAVITY_LAUNCH_OPTIONS } from '../agent-launch-option.js'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
-import { catalog, managedHookCommand } from './shared.js'
+import { catalog, managedHookCommand, HOOK_COMMAND_TIMEOUT_SECONDS } from './shared.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
 
@@ -42,8 +42,8 @@ export function createAntigravityManagedHookPlan(homeOrWorkspacePath?: string): 
   for (const eventName of ANTIGRAVITY_HOOK_EVENTS) {
     const eventCmd = `${command} --event ${eventName}`
     bundle[eventName] = eventName === 'PreToolUse' || eventName === 'PostToolUse'
-      ? [{ matcher: '*', hooks: [{ type: 'command', command: eventCmd, timeout: 10 }] }]
-      : [{ type: 'command', command: eventCmd, timeout: 10 }]
+      ? [{ matcher: '*', hooks: [{ type: 'command', command: eventCmd, timeout: HOOK_COMMAND_TIMEOUT_SECONDS }] }]
+      : [{ type: 'command', command: eventCmd, timeout: HOOK_COMMAND_TIMEOUT_SECONDS }]
   }
   return {
     providerId: 'antigravity',

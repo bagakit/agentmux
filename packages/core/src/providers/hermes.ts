@@ -4,7 +4,7 @@ import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import { HERMES_LAUNCH_OPTIONS } from '../agent-launch-option.js'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
-import { catalog, hermesHookCommand } from './shared.js'
+import { catalog, hermesHookCommand, HOOK_COMMAND_TIMEOUT_SECONDS } from './shared.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
 
@@ -68,7 +68,7 @@ export function createHermesManagedHookPlan(env?: Readonly<Record<string, string
   const home = hermesHome ? resolve(hermesHome) : join(homedir(), '.hermes')
   const command = hermesHookCommand()
   const hooks = Object.fromEntries(
-    HERMES_HOOK_EVENTS.map((eventName) => [eventName, [{ command, timeout: 10 }]])
+    HERMES_HOOK_EVENTS.map((eventName) => [eventName, [{ command, timeout: HOOK_COMMAND_TIMEOUT_SECONDS }]])
   )
   const approvals = HERMES_HOOK_EVENTS.map((eventName) => ({ event: eventName, command }))
   return {

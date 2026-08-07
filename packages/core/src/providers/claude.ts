@@ -6,7 +6,7 @@ import { CLAUDE_LAUNCH_OPTIONS } from '../agent-launch-option.js'
 import { createNumberedTerminalInteractionProtocol, type TerminalPermissionOption } from '../agent-interaction.js'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
-import { catalog, managedHookCommand } from './shared.js'
+import { catalog, managedHookCommand, HOOK_COMMAND_TIMEOUT_SECONDS } from './shared.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
 
@@ -84,7 +84,7 @@ export function createClaudeManagedHookPlan(workspacePath: string): AgentManaged
     ...(eventName === 'PreToolUse' || eventName === 'PostToolUse' || eventName === 'PostToolUseFailure'
       ? { matcher: '*' }
       : {}),
-    hooks: [{ type: 'command', command, timeout: 10 }]
+    hooks: [{ type: 'command', command, timeout: HOOK_COMMAND_TIMEOUT_SECONDS }]
   }]]))
   return {
     providerId: 'claude',
