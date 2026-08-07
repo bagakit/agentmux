@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path'
 import ts from 'typescript'
 import {
   windowOpenDecision,
+  windowOpenOutcome,
   windowSecurityWebPreferences
 } from '../src/main/window-security.js'
 
@@ -18,10 +19,16 @@ import {
  *
  * 修法（#452）：把取值提成可 import 的纯常量/纯函数（window-security.ts），让测试**直接质询取值**，
  * 而不是再写一条已经失效的文本扫描。本文件分两层：
- * - 行为层：直接 import 纯函数，逐开关断言取值（不是「键在场」），弹窗判据按 url 分类穷举。
+ * - 行为层：直接 import 纯函数，逐开关断言取值（不是「键在场」），弹窗判据按 url 分类穷举，并对
+ *   windowOpenOutcome 断言它那唯一的副作用（交给系统浏览器）恰好落在哪些输入上。
  * - 接线层：走 TS parser（AST），断言 index.ts 真的 import 了这个模块、webPreferences 的值**就是**那次
- *   调用（而非另手抄一份对象字面量）、setWindowOpenHandler 的判定**来自**那个纯函数。文本判据（裸标识符
- *   能绕过、不问喂进去的是不是那个值）在这里被明确拒绝。
+ *   调用（而非另手抄一份对象字面量）、setWindowOpenHandler 的回调体**就是**一次把 url 转发给那个纯函数
+ *   的调用。文本判据（裸标识符能绕过、不问喂进去的是不是那个值）在这里被明确拒绝。
+ *
+ * 接线层的判据在 #665 收紧过一次：原先它问「回调体里调了纯函数吗 / 返回的 action 是属性访问吗」，实测
+ * 可绕——在派生的 return 之前插一句可达的 `return { action: 'allow' as const }`，17/17 全绿。根因是那版
+ * 判据遍历所有 return 并保留最后走到的那个，读到的是死代码。现在的判据要求回调体是**简洁体**（体就是
+ * 那一次调用），于是一句语句也插不进去。
  */
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -94,10 +101,56 @@ describe('windowOpenDecision: classify every url scheme', () => {
   })
 })
 
+describe('windowOpenOutcome: the decision AND its one side effect, in a single call', () => {
+  // 这个函数存在的理由是「让 index.ts 的回调体里没有语句可劫持」（详见 window-security.ts 的注释）。
+  // 它因此承担了两件此前无人守的事，各自单独钉：
+  // 1. openExternally 的**消费侧**——把 `if (decision.openExternally)` 取反或删掉，此前 17/17 全绿。
+  // 2. 返回的 action——此前接线守卫遍历所有 return 并保留最后走到的那个，读的可能是死代码。
+  function record(url: string): { readonly handed: string[]; readonly action: 'allow' | 'deny' } {
+    const handed: string[] = []
+    const outcome = windowOpenOutcome(url, (target) => handed.push(target))
+    return { handed, action: outcome.action }
+  }
+
+  it('https:// — handed to the system browser exactly once, with that exact url', () => {
+    // 判据是「碰了外界几次、拿到的是什么」而不是某个 spy 是否被碰过：把 openExternal(url) 改成
+    // openExternal('') 或调两次，这条都会红。
+    expect(record('https://example.com/x')).toEqual({ handed: ['https://example.com/x'], action: 'deny' })
+  })
+
+  it('http:// — NOT handed out (downgrading the scheme must not reach the system browser)', () => {
+    expect(record('http://example.com/x')).toEqual({ handed: [], action: 'deny' })
+  })
+
+  it('file:// — NOT handed out (a dropped local file must not be opened by the OS on our behalf)', () => {
+    expect(record('file:///tmp/evil.html')).toEqual({ handed: [], action: 'deny' })
+  })
+
+  it('mailto: / javascript: / empty — NOT handed out, never allowed', () => {
+    expect(record('mailto:a@b.c')).toEqual({ handed: [], action: 'deny' })
+    expect(record('javascript:alert(1)')).toEqual({ handed: [], action: 'deny' })
+    expect(record('')).toEqual({ handed: [], action: 'deny' })
+  })
+
+  it('the effect gate is a gate in BOTH directions — exactly the https inputs are handed out', () => {
+    // 成对判据：删掉 `if (decision.openExternally)` 让人人都被交出去，这条红在「不该交」那半边；
+    // 把条件取反，它红在「该交」那半边。单看某一族用例都可能只杀掉一个方向。
+    const handedOut = ['https://a', 'https://b/c?d=e']
+    const heldBack = ['http://a', 'file:///a', 'ws://a', 'about:blank', 'mailto:a@b', '', 'not a url']
+    for (const url of handedOut) expect(record(url).handed).toEqual([url])
+    for (const url of heldBack) expect(record(url).handed).toEqual([])
+  })
+
+  it('action is deny for EVERY input — this function opens no in-app child window either', () => {
+    for (const url of ['https://a', 'http://a', 'file:///a', 'about:blank', '', 'not a url']) {
+      expect(record(url).action).toBe('deny')
+    }
+  })
+})
+
 // ---------------------------------------------------------------------------------------------------
 // 接线层：AST 质询 index.ts 真的用了它，且喂进去的就是那个值
 // ---------------------------------------------------------------------------------------------------
-
 const MODULE_SPECIFIER = './window-security.js'
 
 function sourceFileOf(source: string, label = 'index.ts'): ts.SourceFile {
@@ -185,46 +238,36 @@ function setWindowOpenHandlerCallback(sf: ts.Node): ts.Node | null {
   return callback
 }
 
-/** 某个子树里有没有对具名标识符 name 的直接调用（f(...)）。 */
-function callsIdentifier(root: ts.Node, name: string): boolean {
-  let found = false
-  const visit = (node: ts.Node): void => {
-    if (found) return
-    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === name) {
-      found = true
-      return
-    }
-    ts.forEachChild(node, visit)
+/**
+ * setWindowOpenHandler 回调体的形状：它**就是**一次具名函数调用吗，调的是谁，第一个实参是哪个名字。
+ *
+ * 判据刻意是「体就是这一次调用」而不是「体里有这次调用」。后者是此前那版守卫的形状，实测可绕：在派生的
+ * `return { action: decision.action }` 之前插一句可达的 `return { action: 'allow' as const }`，原句留在
+ * 后面成死代码，而守卫遍历所有 return 并保留最后走到的那个，于是 17/17 全绿。只要回调体是**简洁体**
+ * （没有花括号），就一句话也插不进去——多加任何一条语句都会强制变成块体，这里当场返回 null。
+ *
+ * 也钉住第一个实参是那个解构出来的 `url`：否则 `windowOpenOutcome('https://x', …)` 这种把判定对象换成
+ * 常量的写法，形状与行为层都拦不住（行为层测的是纯函数，压根不知道生产喂了什么）。
+ */
+function forwardedCall(fn: ts.Node): { callee: string; firstArgument: string } | null {
+  if (!ts.isArrowFunction(fn)) return null
+  if (ts.isBlock(fn.body)) return null
+  const body = fn.body
+  if (!ts.isCallExpression(body) || !ts.isIdentifier(body.expression)) return null
+  const arg0 = body.arguments[0]
+  return {
+    callee: body.expression.text,
+    firstArgument: arg0 !== undefined && ts.isIdentifier(arg0) ? arg0.text : '<not an identifier>'
   }
-  visit(root)
-  return found
-}
-
-/** setWindowOpenHandler 回调 return 的对象里 action 的值形状。 */
-function returnedActionKind(fn: ts.Node): 'string-literal' | 'property-access' | 'other' | 'none' {
-  let kind: 'string-literal' | 'property-access' | 'other' | 'none' = 'none'
-  const visit = (node: ts.Node): void => {
-    if (ts.isReturnStatement(node) && node.expression && ts.isObjectLiteralExpression(node.expression)) {
-      const init = propertyInitializer(node.expression, 'action')
-      if (init) {
-        if (ts.isStringLiteralLike(init)) kind = 'string-literal'
-        else if (ts.isPropertyAccessExpression(init)) kind = 'property-access'
-        else kind = 'other'
-      }
-    }
-    ts.forEachChild(node, visit)
-  }
-  visit(fn)
-  return kind
 }
 
 describe('index.ts wiring: it imports and USES the security module (AST, not text scan)', () => {
   const indexSf = sourceFileOf(readFileSync(indexPath, 'utf8'))
 
-  it('imports both the webPreferences factory and the popup decision from window-security', () => {
+  it('imports both the webPreferences factory and the popup outcome from window-security', () => {
     const names = namedImportsFrom(indexSf, MODULE_SPECIFIER)
     expect(names).toContain('windowSecurityWebPreferences')
-    expect(names).toContain('windowOpenDecision')
+    expect(names).toContain('windowOpenOutcome')
   })
 
   it("BrowserWindow's webPreferences value IS the factory call, not a re-authored object literal", () => {
@@ -233,14 +276,15 @@ describe('index.ts wiring: it imports and USES the security module (AST, not tex
     expect(webPreferencesShape(indexSf)).toEqual({ kind: 'call', callee: 'windowSecurityWebPreferences' })
   })
 
-  it('setWindowOpenHandler routes its decision through windowOpenDecision, and returns the derived action', () => {
+  it('the setWindowOpenHandler callback body IS one forward of the incoming url to windowOpenOutcome', () => {
+    // 判据不是「体里调了它」而是「体就是这次调用」：这样回调里没有任何语句可以被劫持，判定与副作用
+    // 全部落在受行为层直接质询的纯函数里。
     const callback = setWindowOpenHandlerCallback(indexSf)
     expect(callback).not.toBeNull()
-    // 判定来自纯函数：回调体里真的调了 windowOpenDecision。
-    expect(callsIdentifier(callback as ts.Node, 'windowOpenDecision')).toBe(true)
-    // 且返回的 action 是从判定取的（属性访问，如 decision.action），不是又硬编码一个字符串字面量——
-    // 后者会让「deny→allow」的翻转脱离受行为层保护的纯函数。
-    expect(returnedActionKind(callback as ts.Node)).toBe('property-access')
+    expect(forwardedCall(callback as ts.Node)).toEqual({
+      callee: 'windowOpenOutcome',
+      firstArgument: 'url'
+    })
   })
 })
 
@@ -253,11 +297,11 @@ describe('index.ts wiring guard: self-check (the guard reds on a planted violati
     expect(namedImportsFrom(noImport, MODULE_SPECIFIER)).toEqual([])
     // 对照：真的 import 了就认得出。
     const withImport = sourceFileOf(
-      "import { windowSecurityWebPreferences, windowOpenDecision } from './window-security.js'"
+      "import { windowSecurityWebPreferences, windowOpenOutcome } from './window-security.js'"
     )
     expect(namedImportsFrom(withImport, MODULE_SPECIFIER)).toEqual([
       'windowSecurityWebPreferences',
-      'windowOpenDecision'
+      'windowOpenOutcome'
     ])
   })
 
@@ -272,23 +316,46 @@ describe('index.ts wiring guard: self-check (the guard reds on a planted violati
     expect(webPreferencesShape(viaCall)).toEqual({ kind: 'call', callee: 'windowSecurityWebPreferences' })
   })
 
-  it('the popup checks catch a hardcoded handler that never calls the decision', () => {
-    const hardcoded = sourceFileOf(
-      "win.webContents.setWindowOpenHandler(({ url }) => { if (url.startsWith('https://')) shell.openExternal(url); return { action: 'deny' } })"
+  it('forwardedCall rejects a block body even when that block DOES call the right function', () => {
+    // 这条是本守卫的承重自检：判据必须是「体就是这次调用」，不是「体里调了它」。下面这个形状调对了
+    // 函数、返回了它的结果，却在前面插了一句可达的 return——正是 #665 实测存活的那个变异的形状。
+    // 判据认它为 null（不合格），因为一旦有块体就有语句可插。
+    const hijacked = sourceFileOf(
+      "win.webContents.setWindowOpenHandler(({ url }) => { if (true) return { action: 'allow' }; return windowOpenOutcome(url, open) })"
     )
-    const cb = setWindowOpenHandlerCallback(hardcoded)
-    expect(cb).not.toBeNull()
-    // 没走纯函数：不调 windowOpenDecision。
-    expect(callsIdentifier(cb as ts.Node, 'windowOpenDecision')).toBe(false)
-    // 且 action 是硬编码字符串字面量，翻转它不会触发行为层。
-    expect(returnedActionKind(cb as ts.Node)).toBe('string-literal')
+    expect(forwardedCall(setWindowOpenHandlerCallback(hijacked) as ts.Node)).toBeNull()
 
-    // 对照：真正接线的形状被认成 property-access 且调了 windowOpenDecision。
-    const wired = sourceFileOf(
-      'win.webContents.setWindowOpenHandler(({ url }) => { const d = windowOpenDecision(url); if (d.openExternally) shell.openExternal(url); return { action: d.action } })'
+    // 连一句不带任何劫持的「先取值再返回」也不合格——只要块体在，就永远有下一次插语句的地方。
+    const blockButClean = sourceFileOf(
+      'win.webContents.setWindowOpenHandler(({ url }) => { return windowOpenOutcome(url, open) })'
     )
-    const wiredCb = setWindowOpenHandlerCallback(wired)
-    expect(callsIdentifier(wiredCb as ts.Node, 'windowOpenDecision')).toBe(true)
-    expect(returnedActionKind(wiredCb as ts.Node)).toBe('property-access')
+    expect(forwardedCall(setWindowOpenHandlerCallback(blockButClean) as ts.Node)).toBeNull()
+  })
+
+  it('forwardedCall catches a hardcoded handler and a hardcoded url — the two ways to bypass the pure function', () => {
+    // 完全不走纯函数：体是对象字面量而非调用。
+    const hardcoded = sourceFileOf(
+      "win.webContents.setWindowOpenHandler(({ url }) => ({ action: 'allow' }))"
+    )
+    expect(forwardedCall(setWindowOpenHandlerCallback(hardcoded) as ts.Node)).toBeNull()
+
+    // 形状合格、调的也是对的函数，但判定对象被换成常量：行为层看不见（它测的是纯函数），
+    // 只有「第一个实参是那个 url」这半条判据能抓。
+    const constantUrl = sourceFileOf(
+      "win.webContents.setWindowOpenHandler(({ url }) => windowOpenOutcome('https://x', open))"
+    )
+    expect(forwardedCall(setWindowOpenHandlerCallback(constantUrl) as ts.Node)).toEqual({
+      callee: 'windowOpenOutcome',
+      firstArgument: '<not an identifier>'
+    })
+
+    // 对照：真正接线的形状被完整认出。
+    const wired = sourceFileOf(
+      'win.webContents.setWindowOpenHandler(({ url }) => windowOpenOutcome(url, (t) => { void shell.openExternal(t) }))'
+    )
+    expect(forwardedCall(setWindowOpenHandlerCallback(wired) as ts.Node)).toEqual({
+      callee: 'windowOpenOutcome',
+      firstArgument: 'url'
+    })
   })
 })

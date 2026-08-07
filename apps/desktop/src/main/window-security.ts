@@ -67,3 +67,32 @@ export function windowOpenDecision(url: string): WindowOpenDecision {
     openExternally: url.startsWith('https://')
   }
 }
+
+/**
+ * 把「判定 + 副作用」合成一次调用，供 index.ts 的 setWindowOpenHandler 单表达式转发。
+ *
+ * 为什么不让 index.ts 自己 `const decision = …; if (decision.openExternally) …; return { action: … }`：
+ * 那个形状**实测可被劫持**。在派生的 `return { action: decision.action }` 之前插一句可达的
+ * `return { action: 'allow' as const }`（原句留在后面成死代码），window-security.test.ts 17/17 全绿、
+ * tsc 也退 0——因为接线守卫遍历所有 return 并保留最后走到的那个，它读到的是那句死代码，于是「action
+ * 来自判定」照旧成立。同一形状里第二个存活变异是把 `if (decision.openExternally)` 取反或整行删掉：
+ * openExternally 的**消费侧**当时根本没人守，于是 https 不再交给系统浏览器，而 file:// 与任意 scheme
+ * 反倒被交出去。
+ *
+ * 两个变异的共同点是「回调体里有语句可改」。所以修法不是写一个更聪明的 AST 检查（那只是把军备竞赛
+ * 往前挪一格），而是让那个回调体里**没有语句**：判定与它唯一的副作用都收在这里，被行为测试直接质询，
+ * index.ts 的回调只剩一个表达式——`windowOpenOutcome(url, (t) => { void shell.openExternal(t) })`。接线
+ * 守卫因此只需要判一件结构上不可绕的事——回调体就是这一次转发。
+ *
+ * `openExternal` 由调用方注入而不是在这里 import electron：本文件必须保持纯（见文件头）。注入的是
+ * `shell.openExternal` 这个方法，且必须由调用方以 `shell.openExternal.bind(shell)` 或箭头包一层的
+ * 方式传入——直接摘方法会丢掉原生 receiver（本仓吃过这个亏），故这里的形参类型只要求一个函数。
+ */
+export function windowOpenOutcome(
+  url: string,
+  openExternal: (target: string) => void
+): { readonly action: 'allow' | 'deny' } {
+  const decision = windowOpenDecision(url)
+  if (decision.openExternally) openExternal(url)
+  return { action: decision.action }
+}
