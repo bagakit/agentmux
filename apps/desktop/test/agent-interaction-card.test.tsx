@@ -176,21 +176,29 @@ describe('AgentInteractionCard', () => {
       onRespond: async () => {}
     }))
 
-    // 三个 allow 都在竖排列里，故有三个点；但只有两个带档位类——第三个是「不知道」。
-    // 数「点」用 `class="agent-interaction__tier`（每个 span 恰好一次），不用 `tier\b`——后者的 \b 在
-    // `tier--safe` 的连字符处也成立，会把修饰类一起数进来（我第一版就是这样得到 5 而非 3）。
     expect(markup).toContain('Allow (external client)')
+    // 判据是**每个点的 class 属性整值**，不是「某个 token 出现几次」。
+    //
+    // 计数在这里守不住：`class="agent-interaction__tier--safe"` 也满足 `/class="agent-interaction__tier/`
+    // 这个前缀匹配（BEM 的 `block__elem--modifier` 恰好是这个形状），于是把组件改成
+    // `option.tier === undefined ? 'agent-interaction__tier' : `agent-interaction__tier--${tier}`` ——
+    // 也就是**声明了档位的点反而丢掉基类**——「三个点」和「两个修饰类」两个计数照旧成立，7 条全绿（实测）。
+    // 而基类才是给出 width/height/border-radius 的那条规则，丢了它那两个点直接不可见。
+    // 同一族的更早一次是 `tier\b` 的 `\b` 在连字符处成立，把修饰类一起数成 5 个点。
+    //
+    // 所以这里把三个点的 class 整值列出来逐字对：多一个点、少一个点、任何一格丢基类或多带一个 token，
+    // 都会让这个数组对不上。顺序按字符串排序，不依赖 DOM 出现次序。
+    const tierClasses = [...markup.matchAll(/class="([^"]*agent-interaction__tier[^"]*)"/gu)]
+      .map((match) => match[1])
+      .sort()
     expect(
-      markup.match(/class="agent-interaction__tier/gu) ?? [],
-      '三个 allow 应各有一个点'
-    ).toHaveLength(3)
-    expect(
-      markup.match(/agent-interaction__tier--/gu) ?? [],
-      '带档位类的点应恰好是声明了 tier 的那两个——多出一个就是有人给未分类的选项猜了档'
-    ).toHaveLength(2)
-    // 点名那两档在场，防止「恰好两个但都是 safe」这种既数得对又画错的形状。
-    expect(markup).toContain('agent-interaction__tier--safe')
-    expect(markup).toContain('agent-interaction__tier--danger')
+      tierClasses,
+      '三个 allow 应各有一个点：两个带自己声明的档位、第三个只有基类（= 不知道）'
+    ).toEqual([
+      'agent-interaction__tier',
+      'agent-interaction__tier agent-interaction__tier--danger',
+      'agent-interaction__tier agent-interaction__tier--safe'
+    ])
   })
 
   it('renders one Core-validated single-select question', () => {
