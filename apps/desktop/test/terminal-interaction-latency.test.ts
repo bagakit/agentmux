@@ -143,8 +143,10 @@ describe('Terminal interaction latency owners', () => {
    *
    * `latestRatio` 那一侧的来源 `observeLayout` 一直挡着非有限值（`ratioFromLayout` 返回 null 就丢弃
    * 整次上报）。基准 `persistedRatio` 那一侧从**构造参数**与 `synchronizePersistedRatio` 两个入口
-   * 裸着进来，谁也没夹过——而 split-ratio-commit.ts 的 docblock 与 split-tree.ts:72-74 都亲口把构造
-   * 参数点成这条不变量的「最薄一处」。3e6d3cc 的审计把它记成缺口（#595）。
+   * 裸着进来，谁也没夹过——而 split-ratio-commit.ts 的 docblock 与 split-tree.ts 里 `clampSplitRatio`
+   * 的注释都亲口把构造参数点成这条不变量的「最薄一处」。3e6d3cc 的审计把它记成缺口（#595）。
+   * （那两处现在都已改口说这一处被补上了；此处引的是**改口前**的说法，也是这一族用例的由来。
+   * 锚点写函数名不写行号：那两个文件都是并发热点，行号在别人提交的那一刻就漂，见 #600。）
    *
    * 坏基准的危害不是「判错方向」而是**死区整个失效**：`Math.abs(x - NaN) <= ε` 恒假，于是
    *   1. 每一次亚像素抖动都被当成一次真改动落盘；
@@ -154,19 +156,23 @@ describe('Terminal interaction latency owners', () => {
    * 可达性：region 那条渲染路径把 `node.ratio` 裸着交给这两个入口（tab-group 那条先过一次
    * `clampSplitRatio`），所以今天两条路径靠的不是同一层保护。
    *
-   * 下面五条按「哪个入口 × 坏成什么样」分开写，实测的四个变异各有**互不相同**的击杀集：
+   * 下面七条按「哪个入口 × 坏成什么样」分开写。六个单点变异（每次只改一处）的击杀集**两两不同**，
+   * 用例按标题引用而不按序号——序号会被后来插进来的用例悄悄改写（本条自己就踩过：#601 往中间插了
+   * 两条，把原来的「第 5 条」变成了第 7 条）：
    *
-   * | 变异 | 击杀 |
+   * | 变异（各只改一处） | 击杀的用例 |
    * |---|---|
-   * | 构造参数不夹（`= persistedRatio`） | 1、2、4 |
-   * | 构造参数只判有限（`isFinite ? x : 0.5`） | 只有 4 |
-   * | 同步入口不夹（`= ratio`） | 只有 3 |
-   * | 同步入口两个赋值分岔（`latestRatio = ratio`） | 3、5 |
+   * | 构造参数不夹（`= persistedRatio`） | NaN×亚像素、NaN×空点、越界只判有限、上界（构造参数） |
+   * | 构造参数只判有限（`isFinite ? x : 0.5`） | 越界只判有限、上界（构造参数） |
+   * | 构造参数只夹下界（`isFinite ? max(0.15, x) : 0.5`） | **只有**上界（构造参数） |
+   * | 同步入口不夹（`= ratio`） | 同步 NaN、上界（同步入口） |
+   * | 同步入口只夹下界（同上形状） | **只有**上界（同步入口） |
+   * | 同步入口两个赋值分岔（`latestRatio = ratio`） | 同步 NaN、同步越界留界外 |
    *
-   * 所以每个变异都有专属的红，而 4 与 5 各自只被一个变异杀掉——它们钉的正是「为什么是
-   * clampSplitRatio 而不是 Number.isFinite」和「为什么两个赋值必须读同一个值」。分开写而不合成
-   * 一条：合成的话先抛的那个 expect 会把后面变成死代码，于是只杀后半的变异会被读成「已守住」
-   * （本仓 two-throws-in-one-it-mask-each-other）。
+   * 所以每个变异都有专属的红，而四条用例各自是某个变异的唯一击杀者——它们钉的正是「为什么是
+   * clampSplitRatio 而不是 Number.isFinite」「为什么下界夹了上界也得夹」和「为什么两个赋值必须读
+   * 同一个值」。分开写而不合成一条：合成的话先抛的那个 expect 会把后面变成死代码，于是只杀后半的
+   * 变异会被读成「已守住」（本仓 two-throws-in-one-it-mask-each-other）。
    */
   describe('死区的基准操作数也要在入口归一化（#595）', () => {
     it('构造参数是 NaN 时，亚像素抖动仍必须被死区丢掉', () => {
@@ -226,10 +232,48 @@ describe('Terminal interaction latency owners', () => {
       ).not.toHaveBeenCalled()
     })
 
+    it('上界那一侧同样要夹回屏上画得出的值（构造参数）', () => {
+      // 上面四条只喂过 0.05（下界外）与 NaN，于是**归一化的上半边整个不可观测**：把两个入口的
+      // `clampSplitRatio(x)` 换成 `Number.isFinite(x) ? Math.max(MIN_SPLIT_RATIO, x) : 0.5`
+      // ——留住 NaN 兜底与下界、只丢掉上界——这一族 23 条照旧全绿（实测存活，#601）。
+      //
+      // 症状与下界那条同形但方向相反：盘上存着 0.98 时 `<Panel minSize>` 让屏上画的是 0.85，
+      // 用户一下都没碰，挂载即写一次盘。
+      //
+      // 上界写成 `1 - MIN_SPLIT_RATIO` 而不是字面量 0.85：那是 clampSplitRatio 自己的定义式，
+      // 而这条用例的被测对象是「委托方有没有走它」，不是「它的上界取值对不对」——后者由
+      // split-tree-substrate.test.ts 用写死的历史字面量单独钉。
+      const commit = vi.fn()
+      const committer = new SplitRatioCommitter(0.98, commit)
+
+      committer.observeLayout([(1 - MIN_SPLIT_RATIO) * 100, MIN_SPLIT_RATIO * 100])
+
+      expect(
+        commit,
+        '越界基准只夹下界不夹上界：用户一下没碰，挂载就写了一次盘'
+      ).not.toHaveBeenCalled()
+    })
+
+    it('上界那一侧同样要夹回屏上画得出的值（同步入口）', () => {
+      // 第二个入口。与上一条分开写而不合成：只修构造参数的变异要能被单独一条红指认出来，
+      // 合成的话先抛的 expect 会把后半变成死代码（本仓 two-throws-in-one-it-mask-each-other）。
+      const commit = vi.fn()
+      const committer = new SplitRatioCommitter(0.5, commit)
+
+      committer.synchronizePersistedRatio(0.98)
+      committer.observeLayout([(1 - MIN_SPLIT_RATIO) * 100, MIN_SPLIT_RATIO * 100])
+
+      expect(
+        commit,
+        '同步入口的上界没夹：用户一下没碰，一次重渲染就写了一次盘'
+      ).not.toHaveBeenCalled()
+    })
+
     it('同步的越界值不许只更新基准而把 latestRatio 留在界外', () => {
-      // 第四个变异：`synchronizePersistedRatio` 里两个赋值必须**用同一个夹过的值**。写成
-      // `this.persistedRatio = clampSplitRatio(ratio)` 配 `this.latestRatio = ratio` 时两侧分岔，
-      // 空点一下就把界外的 0.05 提交进 store——比上一条更坏，因为这次落盘的值本身是非法的。
+      // 「两个赋值分岔」那个变异的靶子：`synchronizePersistedRatio` 里两个赋值必须**用同一个夹过的
+      // 值**。写成 `this.persistedRatio = clampSplitRatio(ratio)` 配 `this.latestRatio = ratio` 时
+      // 两侧分岔，空点一下就把界外的 0.05 提交进 store——比「同步进来的 NaN」那条更坏，因为这次落盘
+      // 的值本身是非法的（不是多写一次，而是写了个越界值）。
       const commit = vi.fn()
       const committer = new SplitRatioCommitter(0.5, commit)
 
