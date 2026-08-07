@@ -53,7 +53,25 @@ export const EVEN_SPLIT_RATIO = 0.5
  * 也就是说：渲染层当时那道 `?? 0.5` 明明是给「可能缺 ratio 的历史持久化数据」留的防线
  * （见 workbench-layout.ts:21-24 的原话），而我把归一化装在**它上游的写入边界**上，于是防线永远等不到
  * 它要防的那个值——等到的是一个 `??` 接不住的 NaN。缺省值必须由**边界**给出，不能留给下游兜。
- * 那道 `??` 已随本修复撤掉：渲染层现在无条件调本函数，三种坏取值走同一个出口。
+ * 那道 `??` 已随本修复撤掉，但**别把「渲染层无条件调本函数」当成今天的真相**：只有 tab-group 那条
+ * 路径这么做（WorkspaceWorkbench.tsx:1119）。region 那条路径把 `node.ratio` **裸着**交出去，
+ * 两个方向各两处：给 `<Panel defaultSize>` 的 :798/:815，以及给分屏提交器的 :788/:791
+ * （构造与 `synchronizePersistedRatio`）。两条路径今天都安全，但靠的不是同一层：
+ *
+ * - **tab-group**：渲染层自己夹一次，所以即使上游漏了也画得对。
+ * - **region**：靠「每个写入点都夹过」这条上游不变量——`setSplitRatioAtPath` 是唯一的按路径写入口
+ *   （见下面它自己的实现，两个 store action 都经它），`balanceNode` 自己夹（#521），
+ *   `rowLayout`/`gridLayout` 的 1/N 里 N ≤ 3 天然在界内，而**持久化读回来的那棵树**由
+ *   `clampSplitTreeRatios` 无条件归一化（workbench-persistence.ts:66/96，两棵树都走）。
+ *
+ * 写清这条差别是因为它决定了「新增一个写 `ratio` 的地方时要不要自己夹」：region 那条路径上，答案是
+ * **要**——渲染层不会替你兜。反过来说，削弱任何一个写入点的夹取就是真回归：把
+ * `setSplitRatioAtPath` 里的 `clampSplitRatio(ratio)` 换成裸 `ratio`，实测三个 suite 各红一条
+ * （split-tree-substrate / workbench-layout / workbench-region-split-guards）。
+ *
+ * 这个不变量的**最薄一处**是分屏提交器的构造参数（上面的 :788）：它既不在渲染层的夹取下，也不在
+ * 「写入点自己夹」这条链上——它读的是树里现成的值。今天安全只因为上游没人能写出坏值；一旦有，
+ * 它的死区比较（`Math.abs(NaN - NaN) <= ε` 为假）会把坏值**提交**出去而不是丢掉。
  *
  * 为什么是「给默认值」而不是「原样放过去」：缺失的 ratio 没有歧义。类型上 `ratio` 是必填，
  * 一条没有它的记录只可能来自更早的代码，而那个年代的意思与今天完全一致——均分。含糊的缺席才需要
