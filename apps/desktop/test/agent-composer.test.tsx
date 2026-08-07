@@ -347,35 +347,72 @@ describe('AgentComposer reusable surface', () => {
   // 此前地板写死 `34px`，比真正的一行（1lh + 上下 padding ≈ 26px）高出 8px，于是空的输入框
   // 永远画成两行高，看上去像个多行文本域——这是 #317 那条用户诉求的一半。
   //
-  // ─── 判据为什么是「绑定关系」，而不是「1lh 在不在场」───
+  // ─── 判据为什么是「加法项的全集」，而不是「这几个记号在不在场」───
   //
-  // `toContain('1lh')` 是最容易写的判据，且**守不住**：它是一句在场断言，而本仓记过这一族
-  // （「presence-assertion-blind-when-shape-repeats」「guard-must-check-reachability-not-presence」）。
-  // 换个字面量回来（`min-height: 34px`）会红，但**换一个别的派生式**（`calc(1lh + 8px)`）照旧
-  // 全绿——而那正是这条规则要防的漂移：地板与 padding 分开手抄，下次有人调 padding 时地板不跟着
-  // 动，两行高会静默回来。
+  // 第一版判据是「`min-height` 的取值**含有** `1lh`、`var(--sp-4)`、`var(--sp-1)` 这三个子串」。
+  // 它比 `toContain('1lh')` 强，但仍然是**在场判据**，而在场判据守不住「恰好一行」这条性质——
+  // 审计实测（#627）出两个真回归在 16 条全绿下存活：
+  //   · `calc(1lh * 2 + var(--sp-4) + var(--sp-1))`——**正是这次要消灭的那个两行高**。三个记号一个
+  //     不少、与 padding 也没脱钩，所以「含有」这个判据对它完全失明；
+  //   · `calc(1lh + var(--sp-4) + var(--sp-1) + 10px)`——一个凭空的 10px 抬高，同样全绿。
+  // 「含有三个子串」与「由这三段相加构成」是两件事：任何加法或乘法的膨胀都满足前者。本仓记过这一族
+  // （「presence-assertion-blind-when-shape-repeats」「guard-must-check-reachability-not-presence」），
+  // 而第一版判据的注释里就引着这两条记忆，却还是写成了三次在场——这本身是「注释承诺的比断言强」。
   //
-  // 所以判据落在**同一条规则内部的取值关系**上：地板必须由 `1lh` 加上 padding 简写里纵向那两档
-  // （top 与 bottom）**逐字**构成。padding 一改，地板的写法必须跟着改，否则这条断言红。
+  // 所以判据改成**加法项的全集相等**：地板必须是一个 `calc(…)`，它的顶层加法项归一化后恰好是
+  // `{1lh, padding-top, padding-bottom}` 这个多重集合——不多一项、不少一项、每一项逐字相等。
+  // 于是 `1lh * 2` 不再等于 `1lh`（项内容不同）、多出的 `10px` 是第四项、少一项也红。顺序不敏感
+  // （相加可交换，换顺序不改几何），减法留在项内故 `1lh - 2px` 逐字不等于 `1lh`。
   // border-box（base.css 的 `*`）让 min-height 含 padding，所以「加回纵向两档」不是巧合，
-  // 而是几何上必须的那一步。
+  // 而是几何上必须的那一步；padding 一改，地板的写法必须跟着改，否则这条断言红。
   //
-  // 判据抽成 `floorDerivationProblems`，是为了让它能跑在**合成规则**上（下面那条自检）：
+  // 判据抽成 `floorDerivationProblems`，是为了让它能跑在**合成规则**上（下面那两条自检）：
   // 断言自己必须被证明「对着事故当时那份取值会红」，否则整组判据只是花架子。本仓记过
   // 「synthesized-fixture-is-self-certification」——所以主判据跑的是真 CSS，合成规则只用来
-  // 证明判据有区分力，两条各管一件事。
+  // 证明判据有区分力，两条各管一件事。两条自检各钉一族存活形态（换字面量／膨胀成两行）。
   //
-  // 这道门**不**保证：它不算级联，也不渲染真浏览器——「1lh 在 Electron 43 上算得对」不在它的
-  // 射程内。它保证的是：地板不会变成一个与 padding 脱钩的值。
+  // 这道门**不**保证：它不渲染真浏览器——「1lh 在 Electron 43 上算得对」不在它的射程内。级联只
+  // 覆盖到「同一个元素上不许有第二条 min-height」（见 `composerTextareaMinHeightRules`），选择器
+  // 匹配是按文本判的，所以 `textarea { min-height }` 这种不提 `.composer` 的祖先/裸元素覆写它看不见。
   // -------------------------------------------------------------------------
 
   /**
-   * 「这条 `.composer textarea` 规则的地板是不是从一行 + 纵向 padding 派生的」——返回问题清单，
-   * 空数组表示通过。写成纯函数是为了让合成规则也能过同一组判据。
+   * `calc(…)` 的顶层加法项，归一化去空白。不是 `calc(…)` 形状时返回 undefined——那意味着地板根本
+   * 不是「几段相加」，与「一行 + 两档 padding」这个几何说法无关。
+   *
+   * 按括号深度切 `+`，所以 `var(--sp-4)` 内部不会被误切。`-`（减法）刻意**不**切：它留在项内，
+   * 于是 `calc(1lh - 2px + …)` 的第一项是 `1lh-2px`，与期望的 `1lh` 逐字不等 → 红。
+   */
+  function additiveTerms(value: string): string[] | undefined {
+    const trimmed = value.trim()
+    if (!trimmed.startsWith('calc(') || !trimmed.endsWith(')')) return undefined
+    const body = trimmed.slice('calc('.length, -1)
+    const terms: string[] = []
+    let depth = 0
+    let current = ''
+    for (const ch of body) {
+      if (ch === '(') depth += 1
+      else if (ch === ')') {
+        depth -= 1
+        // 括号早闭说明这不是单个 calc 的内部（例如 `calc(a) + calc(b)`），判据的切法失效。
+        if (depth < 0) return undefined
+      }
+      if (ch === '+' && depth === 0) {
+        terms.push(current)
+        current = ''
+        continue
+      }
+      current += ch
+    }
+    if (depth !== 0) return undefined
+    return terms.concat(current).map((term) => term.replace(/\s+/g, ''))
+  }
+
+  /**
+   * 「这条 `.composer textarea` 规则的地板是不是恰好由一行 + 纵向 padding 相加构成」——返回问题
+   * 清单，空数组表示通过。写成纯函数是为了让合成规则也能过同一组判据。
    */
   function floorDerivationProblems(rule: string): string[] {
-    const problems: string[] = []
-
     const padding = rule.match(/(?:^|;)\s*padding:\s*([^;]+)/)?.[1]?.trim()
     if (!padding) return ['padding 声明解析不出来：纵向两档无从取，判据无法成立']
     const tokens = padding.split(/\s+/)
@@ -387,18 +424,64 @@ describe('AgentComposer reusable surface', () => {
     const minHeight = rule.match(/(?:^|;)\s*min-height:\s*([^;]+)/)?.[1]?.trim()
     if (!minHeight) return ['min-height 声明解析不出来：静息地板没人设，rows 与内容会各说各话']
 
-    if (!minHeight.includes('1lh')) {
-      problems.push(`地板没有从 \`1lh\` 派生（实测 \`${minHeight}\`）：字号或行高一动它就与一行脱钩`)
+    // 期望是**多重集合**而不是集合：padTop 与 padBottom 相等时两档都得加回来（border-box 含上下
+    // 两侧），去重会让「只加了一次」蒙混过关。
+    const expected = ['1lh', padTop, padBottom].map((term) => term.replace(/\s+/g, '')).sort()
+    const actual = additiveTerms(minHeight)?.sort()
+    const shown = (terms: string[]): string => terms.map((term) => `\`${term}\``).join(' + ')
+    if (!actual || actual.join('|') !== expected.join('|')) {
+      return [
+        `地板的加法项应恰好是 ${shown(expected)}（一行 + padding 的纵向两档），实测 \`${minHeight}\`` +
+          `${actual ? `，切出来的项是 ${shown(actual)}` : '，它连 calc(…) 相加的形状都不是'}。` +
+          'border-box 让 min-height 含 padding，所以两档必须逐字加回来；而多出任何一项（`+ 10px`）或' +
+          '把某一项换成它的倍数（`1lh * 2`）都会把静息高度抬离一行——那正是本次修复要消灭的两行高'
+      ]
     }
-    for (const token of new Set([padTop, padBottom])) {
-      if (!minHeight.includes(token)) {
-        problems.push(
-          `地板没有逐字加回 padding 的纵向档 \`${token}\`（实测 \`${minHeight}\`）。border-box 让 min-height ` +
-            '含 padding，不加回来地板就比一行矮；写成别的值则与 padding 脱钩，下次调 padding 时两行高会静默回来'
-        )
+    return []
+  }
+
+  /**
+   * 全表里所有「选择器同时提到 `.composer` 与 `textarea`、且声明了 `min-height`」的规则。
+   *
+   * 为什么需要它：上面那条判据只看**基础规则内部**的取值关系，于是审计实测出第二个存活形态
+   * （#627 FINDING 2）——在任意样式文件里追加 `.composer textarea:enabled { min-height: 34px }`，
+   * 特异度更高、按级联赢，两行高原样回来，而 16 条照旧全绿。判据因此要补一条：这个元素上的
+   * `min-height` **只能有一处**。
+   *
+   * 它按选择器文本判，不做真正的选择器匹配，所以看不见 `textarea { min-height }` 这类不提
+   * `.composer` 的裸元素/祖先覆写（限制已写进上面的「不保证」）。
+   */
+  function composerTextareaMinHeightRules(css: string): Array<{ selector: string; value: string }> {
+    /** 叶子规则（选择器 + 声明块），按大括号深度正确穿过 `@media` 这类容器块。 */
+    const leafRules = (source: string, out: Array<{ selector: string; body: string }> = []) => {
+      let depth = 0
+      let headStart = 0
+      let bodyStart = -1
+      for (let index = 0; index < source.length; index += 1) {
+        const ch = source[index]
+        if (ch === '{') {
+          if (depth === 0) bodyStart = index
+          depth += 1
+        } else if (ch === '}') {
+          depth -= 1
+          if (depth === 0) {
+            const body = source.slice(bodyStart + 1, index)
+            // body 里还有 `{` 说明这是容器块（`@media` 等）：递归进去，别把它当成一条声明块，
+            // 否则藏在 @media 里的覆写对这道门完全隐身。
+            if (body.includes('{')) leafRules(body, out)
+            else out.push({ selector: source.slice(headStart, bodyStart).replace(/\s+/g, ' ').trim(), body })
+            headStart = index + 1
+          }
+        }
       }
+      return out
     }
-    return problems
+    return leafRules(css)
+      .filter(({ selector }) => selector.includes('.composer') && selector.includes('textarea'))
+      .flatMap(({ selector, body }) => {
+        const value = body.match(/(?:^|;)\s*min-height:\s*([^;]+)/)?.[1]?.trim()
+        return value === undefined ? [] : [{ selector, value }]
+      })
   }
 
   /**
@@ -430,19 +513,68 @@ describe('AgentComposer reusable surface', () => {
     expect(floorDerivationProblems(rule).join('\n')).toBe('')
   })
 
-  it('自检：这组判据对着事故当时那份取值会红', () => {
+  it('自检：这组判据对着每一族已实测存活的取值都会红', () => {
     // 少了这条，上面那条会以最难发现的方式假绿：正则写错、取值取空、问题清单永远为空，
     // 三种都让 `.join('')` 恒等于空串，而「判过了」与「没判到」打印出来一模一样。
     //
-    // 合成规则用的是**事故当时的真实字节**（`min-height: 34px`，padding 不变），所以它证明的
-    // 正是这道门要防的那次回归会被认出来。
-    const problems = floorDerivationProblems(
-      composerTextareaRule('.composer textarea { min-height: 34px; padding:var(--sp-4) var(--sp-5) var(--sp-1); }')
+    // 三个负样本各代表一族**实测存活过**的形态，不是想象出来的：
+    //   · `34px`——事故当时的真实字节（换字面量，与 padding 彻底脱钩）；
+    //   · `calc(1lh * 2 + …)`——审计 #627 实测在旧判据下 16 条全绿，而它正是要消灭的那个两行高；
+    //   · `calc(1lh + … + 10px)`——同一次审计的第二个存活形态，凭空抬高一截。
+    // 后两个的意义在于：它们含齐了全部三个记号，所以任何「在场式」判据都认不出来。
+    const survivors: Array<{ label: string; minHeight: string }> = [
+      { label: '事故当时的字面量', minHeight: '34px' },
+      { label: '两行高（#627 实测存活）', minHeight: 'calc(1lh * 2 + var(--sp-4) + var(--sp-1))' },
+      { label: '凭空抬高（#627 实测存活）', minHeight: 'calc(1lh + var(--sp-4) + var(--sp-1) + 10px)' }
+    ]
+    for (const { label, minHeight } of survivors) {
+      const problems = floorDerivationProblems(
+        composerTextareaRule(`.composer textarea { min-height: ${minHeight}; padding:var(--sp-4) var(--sp-5) var(--sp-1); }`)
+      )
+      expect(problems.length, `${label}（${minHeight}）喂回去，判据一条问题都没报——它守不住这一族`).toBeGreaterThan(0)
+      // 报的必须是「加法项不对」这件事，不是碰巧因为解析失败而红：解析失败会走前面那几条
+      // early return，措辞完全不同，那种红是假红。
+      expect(problems.join('\n'), `${label}：报的不是加法项不符，可能是解析失败的假红`).toContain('加法项')
+    }
+
+    // 反向：正确的那份必须**不**报问题，否则上面三条只是「判据恒红」而不是「判据有区分力」。
+    expect(
+      floorDerivationProblems(
+        composerTextareaRule('.composer textarea { min-height: calc(1lh + var(--sp-4) + var(--sp-1)); padding:var(--sp-4) var(--sp-5) var(--sp-1); }')
+      ),
+      '正确的取值也被判成有问题：判据恒红，上面三条自检因此不证明任何区分力'
+    ).toEqual([])
+  })
+
+  it('这个元素上只有一处 min-height——第二条更特异的规则会按级联赢回两行高', () => {
+    // #627 FINDING 2 实测：追加 `.composer textarea:enabled { min-height: 34px }`（放 composer.css
+    // 或任何后加载的文件都一样）特异度更高、按级联赢，两行高原样回来，而上面那条判据只读基础规则
+    // 的内部取值，16 条全绿。所以「地板派生正确」还不够，得同时是**唯一**的地板。
+    const declarations = composerTextareaMinHeightRules(allStyleRules())
+    expect(
+      declarations.map(({ selector, value }) => `${selector} → min-height: ${value}`),
+      'composer 的 textarea 上有不止一处 min-height：更特异或更靠后的那条按级联赢，' +
+        '地板派生得再对也拦不住它把静息高度抬回两行'
+    ).toHaveLength(1)
+
+    // 自检：这个取值口真的认得出追加进来的那一条，否则上面那条 `toHaveLength(1)` 只是碰巧成立
+    // （选择器过滤写错、容器块没穿透，都会让它恒为 1）。
+    const withOverride = composerTextareaMinHeightRules(
+      `${allStyleRules()}\n.composer textarea:enabled { min-height: 34px; }`
     )
-    expect(problems.length, '把 34px 那份取值喂回去，判据居然一条问题都没报——它守不住任何东西').toBeGreaterThan(0)
-    // 报的必须是「脱钩」这件事，不是碰巧因为解析失败而红：解析失败会走前面那几条 early return，
-    // 报出来的措辞完全不同，那种红是假红。
-    expect(problems.join('\n')).toContain('1lh')
+    expect(
+      withOverride.map(({ value }) => value),
+      '追加一条更特异的 min-height 之后取值口仍只看到一条：它的选择器过滤或分块有问题'
+    ).toEqual([declarations[0]!.value, '34px'])
+
+    // 同一条自检的另一半：藏在 `@media` 里的覆写也必须被看见（叶子规则要穿过容器块）。
+    const inMedia = composerTextareaMinHeightRules(
+      `${allStyleRules()}\n@media (min-width: 100px) { .composer textarea { min-height: 34px; } }`
+    )
+    expect(
+      inMedia.map(({ value }) => value),
+      '@media 里的覆写对取值口隐身：容器块没被穿透，那一整类覆写不受这道门约束'
+    ).toEqual([declarations[0]!.value, '34px'])
   })
 
   it('rows={1} 在场：HTML 的固有高度也是一行', () => {
