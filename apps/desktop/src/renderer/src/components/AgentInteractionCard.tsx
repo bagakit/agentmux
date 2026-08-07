@@ -4,7 +4,7 @@ import type {
   AgentMuxInteractionRequest,
   AgentMuxInteractionResponse
 } from '@agentmux/core'
-import { isAffirmative, permissionPlan, questionPlan } from '../lib/agent-interaction-plan'
+import { isAffirmative, permissionPlan, permissionTierClassName, questionPlan } from '../lib/agent-interaction-plan'
 
 /**
  * Agent 卡点的渲染层——只画，不判。
@@ -62,7 +62,7 @@ export function AgentInteractionCard({
                 onClick={() => void respond(response)}
               >
                 <span
-                  className={`agent-interaction__tier agent-interaction__tier--${option.tier ?? 'safe'}`}
+                  className={permissionTierClassName(option)}
                   aria-hidden="true"
                 />
                 <span className="agent-interaction__grant-text">
