@@ -95,6 +95,30 @@ export function terminalShortcutHandlers(deps: TerminalShortcutDeps): Record<str
   }
 }
 
+/**
+ * 这个事件是不是**裸** Ctrl+C（不带 Cmd / Shift / Alt）。
+ *
+ * 为什么它不走 `shortcut-registry`：那张表里一条绑定在一个平台上只能有一个和弦，而 Ctrl+C 要的是
+ * 「同一个键按有没有选区分成两件事」——有选区复制、没选区送 SIGINT。这不是第二个和弦，是一个
+ * **条件**，塞进注册表就得给 `ShortcutBinding` 加一条 schema（而改键持久化格式正在待拍板，见 #361）。
+ *
+ * 也因此它在两个平台上都是同一个判据：`terminal.copy` 在 mac 上是 Cmd+C、在别处是 Ctrl+Shift+C，
+ * 两条都不会匹配裸 Ctrl+C（`chordMatches` 在 mac 上要求 `metaKey`，在别处要求 `shift`），于是这个键
+ * 今天在两个平台上都直接落到「不是我们的键」那条出口、原样交给终端。**它是缺失的能力，不是回归。**
+ */
+export function isBareCtrlC(event: {
+  key: string
+  ctrlKey?: boolean
+  metaKey?: boolean
+  shiftKey?: boolean
+  altKey?: boolean
+}): boolean {
+  if (event.key.toLowerCase() !== 'c') return false
+  if (!event.ctrlKey) return false
+  // 三个修饰键都必须缺席：带上任何一个就是别的和弦（Ctrl+Shift+C 正是非 mac 的 terminal.copy）。
+  return !event.metaKey && !event.shiftKey && !event.altKey
+}
+
 /** {@link terminalKeyEventHandler} 除动作之外还要的两件事。 */
 export interface TerminalKeyEventDeps extends TerminalShortcutDeps {
   /** 这个事件命中了哪条 terminal 绑定（`null` 表示不是我们的键）。通常是 `matchShortcut` 的柯里化。 */
@@ -118,6 +142,19 @@ export interface TerminalKeyEventDeps extends TerminalShortcutDeps {
 export function terminalKeyEventHandler(deps: TerminalKeyEventDeps): (event: KeyboardEvent) => boolean {
   const actions = terminalShortcutHandlers(deps)
   return (event) => {
+    // 裸 Ctrl+C：有选区就复制，没选区就把键交还终端（那时它是 SIGINT）。
+    //
+    // 用户明确要回这条体验（「我觉得还是要保留 Ctrl+C 和右键菜单复制的体验」），而它此前在两个平台上
+    // 都够不着——见 isBareCtrlC 的注释：注册表里那条 terminal.copy 的两个和弦都不匹配裸 Ctrl+C。
+    //
+    // 顺序上它排在 matchTerminalShortcut 之前，理由是**不能**让它经过注册表：那条路一旦匹配上就会
+    // 把「没选区」也算成 copy 的候选，而 SIGINT 那一侧必须原样交还。放在前面等于说「这个键有它自己的
+    // 认领条件」，与下面 terminal.copy 那道选区闸是同一条规则的两个入口，所以两处都调 hasSelection()。
+    if (isBareCtrlC(event)) {
+      if (!deps.hasSelection()) return true
+      if (event.type === 'keydown') actions['terminal.copy']?.()
+      return false
+    }
     const shortcutId = deps.matchTerminalShortcut(event)
     if (!shortcutId) return true
     // Copy 只在真有选区时认领。没选区就把键交还终端——Ctrl+C 在那种情况下是 SIGINT，

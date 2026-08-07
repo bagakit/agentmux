@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import {
   SHIFT_ENTER_CSI_U,
   SHIFT_ENTER_ESC_CR,
+  isBareCtrlC,
   shiftEnterInput,
   terminalKeyEventHandler,
   terminalSelectionForCopy,
@@ -13,7 +14,7 @@ import {
   isKittyKeyboardActive,
   readKittyKeyboardOutput
 } from '../src/renderer/src/lib/terminal-kitty-keyboard.js'
-import { SHORTCUT_BINDINGS } from '../src/renderer/src/lib/shortcut-registry.js'
+import { SHORTCUT_BINDINGS, matchShortcut } from '../src/renderer/src/lib/shortcut-registry.js'
 
 const ESC = '\u001b'
 
@@ -201,6 +202,22 @@ describe('终端键回调的吞键判定', () => {
   const keyup = (overrides: Partial<KeyboardEvent> = {}) =>
     key({ type: 'keyup', ...overrides } as Partial<KeyboardEvent>)
 
+  /**
+   * 走**注册表**那条路的 copy 事件：mac 的 Cmd+C。
+   *
+   * 为什么不能再用 `{ key: 'c', ctrlKey: true }`：那正是 {@link isBareCtrlC} 认领的形状，而它的分支
+   * 排在 `matchTerminalShortcut` 之前。用它喂下面两条，测的就变成了新分支，注册表那道选区闸
+   * 变成死代码——两条断言照旧全绿（两条路今天的结论恰好一致），但「谁被测了」已经换人。
+   * 这是本仓 fixture-wrong-shape-blinds-the-test 那一族：**判据没变，被测对象换了**。
+   */
+  const REGISTRY_COPY_EVENT = { key: 'c', metaKey: true } as const
+
+  it('自证：注册表那条路的 copy 事件不被裸 Ctrl+C 分支拦下', () => {
+    // 上面那句注释的判据。把 REGISTRY_COPY_EVENT 改回 ctrlKey，这条立刻红——而不是让下面两条
+    // 静默改成测别的分支。
+    expect(isBareCtrlC({ ...key(), ...REGISTRY_COPY_EVENT })).toBe(false)
+  })
+
   it('不是终端绑定的键原样交还，且一下都不碰外界', () => {
     const { touchesOf } = harness({ shortcutId: null })
     const outcome = touchesOf(keydown())
@@ -225,7 +242,7 @@ describe('终端键回调的吞键判定', () => {
    */
   it('没选区的 terminal.copy 交还给终端——Ctrl+C 要能发 SIGINT', () => {
     const { touchesOf } = harness({ shortcutId: 'terminal.copy', hasSelection: false })
-    const outcome = touchesOf(keydown({ key: 'c', ctrlKey: true }))
+    const outcome = touchesOf(keydown(REGISTRY_COPY_EVENT))
     expect(outcome.swallowed, '没选区时 Ctrl+C 被吞成「复制空串」——用户中断不了跑飞的程序').toBe(false)
     // 连剪贴板都不该碰：吞不吞与做不做是两件事，把空串写进剪贴板会抹掉用户上一次复制的内容。
     expect(outcome.touches, '没选区时仍去动了剪贴板／选区记忆').toBe(0)
@@ -235,7 +252,7 @@ describe('终端键回调的吞键判定', () => {
     // 与上一条成对：只有两侧都钉住，`hasSelection()` 这个判据本身才是被守的。单钉一侧时把条件
     // 改成常量仍有一半绿（记忆 guard-count-exits-not-conditions：「接受」那一侧常常无人守）。
     const { touchesOf } = harness({ shortcutId: 'terminal.copy', hasSelection: true, selection: 'x' })
-    const outcome = touchesOf(keydown({ key: 'c', ctrlKey: true }))
+    const outcome = touchesOf(keydown(REGISTRY_COPY_EVENT))
     expect(outcome.swallowed, '有选区时 Cmd/Ctrl+C 没被吞——复制之外还会给终端送一个 c').toBe(true)
     expect(outcome.touches, '有选区时没去复制').toBeGreaterThan(0)
   })
@@ -257,6 +274,120 @@ describe('终端键回调的吞键判定', () => {
     const outcome = touchesOf(keydown())
     expect(outcome.swallowed, '没有对应动作的绑定被吞掉了——那个键会彻底失效').toBe(false)
     expect(outcome.touches).toBe(0)
+  })
+})
+
+/**
+ * 裸 Ctrl+C（#610 的一半）。
+ *
+ * 用户报的是「我没有办法按 Ctrl+C 了」。测出来的真相不是回归而是**从来没有过**：注册表里
+ * `terminal.copy` 的两个和弦（mac 的 Cmd+C、非 mac 的 Ctrl+Shift+C）都不匹配裸 Ctrl+C——
+ * `chordMatches` 在 mac 上要求 `metaKey && !ctrlKey`，在别处要求 `shift`。所以这个键在两个平台上
+ * 都直落「不是我们的键」那条出口。下面第一条把这个前提本身做成断言：**它是这一族存在的理由**，
+ * 而不是一句可以随注册表变化而失效的散文（记忆 expired-reason-for-not-mapping）。
+ *
+ * 规则有两侧，且两侧都是用户要的：有选区复制、没选区把键交还终端（那时它是 SIGINT）。
+ * 只钉「复制」那一侧时，把条件改成常量 true 仍有一半绿（记忆 guard-count-exits-not-conditions）。
+ */
+describe('裸 Ctrl+C：有选区复制，没选区发 SIGINT（#610）', () => {
+  const bareCtrlC = { key: 'c', ctrlKey: true, type: 'keydown' } as Partial<KeyboardEvent>
+
+  /**
+   * 这一族刻意**不**给 `matchTerminalShortcut` 喂真注册表，而是让它恒返回 null。
+   *
+   * 理由是要证的正是「注册表这条路够不着裸 Ctrl+C，所以必须有别的入口」。让它返回 null 等于把
+   * 那个前提摆在替身里；前提有没有变则由下面 `注册表两条和弦都不匹配裸 Ctrl+C` 那条独立钉。
+   * 若在这里接真注册表，两条路就混在一起，分不出是谁认领的。
+   */
+  function harness(hasSelection: boolean) {
+    const written: string[] = []
+    let touches = 0
+    const bump = (): void => {
+      touches += 1
+    }
+    const handler = terminalKeyEventHandler({
+      matchTerminalShortcut: () => null,
+      hasSelection: () => hasSelection,
+      sendInput: bump,
+      kittyKeyboardActive: () => false,
+      setSearchOpen: bump,
+      readSelection: () => (hasSelection ? 'picked text' : ''),
+      rememberSelection: bump,
+      writeClipboard: (text) => {
+        written.push(text)
+        bump()
+      },
+      clear: bump
+    })
+    return {
+      written,
+      run(event: Partial<KeyboardEvent>): { swallowed: boolean; touches: number } {
+        touches = 0
+        const result = handler(event as KeyboardEvent)
+        return { swallowed: result === false, touches }
+      }
+    }
+  }
+
+  it('注册表两条和弦都不匹配裸 Ctrl+C——这一族存在的前提', () => {
+    // 前提做成断言，而不是注释：哪天 terminal.copy 的和弦改了（比如非 mac 侧去掉 shift），
+    // 这条会红，提醒回来决定「新分支还要不要」。此前它在两个平台上都够不着，所以是**缺失的
+    // 能力**，不是回归——这句话的真假由这条负责。
+    const copy = SHORTCUT_BINDINGS.find((binding) => binding.id === 'terminal.copy')
+    expect(copy, '注册表里没有 terminal.copy 了——下面整族的前提已经换了').toBeDefined()
+    for (const [platform, isMac] of [
+      ['mac', true],
+      ['non-mac', false]
+    ] as const) {
+      expect(
+        matchShortcut({ ...key(), ...bareCtrlC } as KeyboardEvent, isMac, { scope: 'terminal' }),
+        `${platform}: 注册表现在自己认领裸 Ctrl+C 了——那 terminalKeyEventHandler 里那条前置分支该撤了`
+      ).toBeNull()
+    }
+  })
+
+  it('有选区时复制，并吞掉这个键', () => {
+    const { run, written } = harness(true)
+    const outcome = run(bareCtrlC)
+    expect(outcome.swallowed, '有选区的 Ctrl+C 没被吞——复制之外还会给终端送一个 ETX').toBe(true)
+    // 判「复制了什么」而不只是「碰了外界」：写空串进剪贴板会抹掉用户上一次复制的内容。
+    expect(written, '有选区的 Ctrl+C 没把选区写进剪贴板').toEqual(['picked text'])
+  })
+
+  it('没选区时原样交还——那一刻 Ctrl+C 是 SIGINT', () => {
+    const { run, written } = harness(false)
+    const outcome = run(bareCtrlC)
+    expect(outcome.swallowed, '没选区的 Ctrl+C 被吞掉了——用户中断不了跑飞的程序').toBe(false)
+    expect(outcome.touches, '没选区时仍去动了剪贴板／选区记忆').toBe(0)
+    expect(written).toEqual([])
+  })
+
+  it('keyup 也吞掉，但不复制第二遍', () => {
+    // 与注册表那条路同一条规则：两个事件都要吞（否则 keyup 漏给终端），但动作只跑一次。
+    const { run, written } = harness(true)
+    const outcome = run({ ...bareCtrlC, type: 'keyup' })
+    expect(outcome.swallowed, 'keyup 没被吞——它会漏给终端').toBe(true)
+    expect(written, 'keyup 也复制了一遍——剪贴板被写两次').toEqual([])
+  })
+
+  it('带任一修饰键就不是它——那些是别的和弦', () => {
+    // 逐个质询而不是抽一个：三个修饰键各自都必须缺席。Ctrl+Shift+C 正是非 mac 的 terminal.copy，
+    // 被这条分支抢走就等于绕过了注册表；Cmd+Ctrl+C / Ctrl+Alt+C 则可能是别人的键。
+    for (const extra of [{ shiftKey: true }, { metaKey: true }, { altKey: true }]) {
+      expect(
+        isBareCtrlC({ ...key(), ...bareCtrlC, ...extra } as KeyboardEvent),
+        `带 ${Object.keys(extra)[0]} 的 Ctrl+C 被当成裸 Ctrl+C——它抢走了别的和弦`
+      ).toBe(false)
+    }
+    // 反向自证：三个都缺席时它必须认。缺了这条，上面整个循环可以靠「恒返回 false」通过。
+    expect(isBareCtrlC({ ...key(), ...bareCtrlC } as KeyboardEvent)).toBe(true)
+  })
+
+  it('不是 c 键、或没按 ctrl，都不是它', () => {
+    expect(isBareCtrlC({ ...key(), key: 'v', ctrlKey: true } as KeyboardEvent)).toBe(false)
+    expect(isBareCtrlC({ ...key(), key: 'c', ctrlKey: false } as KeyboardEvent)).toBe(false)
+    // 大写 C 是同一个键（Shift 那侧已经在上面被排除，这里只问大小写归一化）。
+    expect(isBareCtrlC({ ...key(), key: 'C', ctrlKey: true } as KeyboardEvent)).toBe(true)
   })
 })
 
