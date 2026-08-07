@@ -39,9 +39,17 @@ import {
   defaultCtxmuxStateDirectory
 } from './runtime-paths.js'
 
-const CTXMUX_COMMIT = 'c13ab114f6ddf0cf8eb22c6cc39bb16f7aa0dec7'
+// CTXMUX_COMMIT / CTXMUX_VERSION are exported because they are the SHA-verified originals: this
+// module asserts them against the vendored manifest.json at load time (see verifyArtifacts —
+// manifest.source.commit === CTXMUX_COMMIT and manifest.product.version === CTXMUX_VERSION, guarded
+// by CTXMUX_MANIFEST_SHA256). Consumers that need to report the running runtime's version/commit
+// (client.ts's runtimeDiagnostics and terminalEnvironment) MUST import these rather than retype the
+// literals — a hand-copied '0.1.0' or 40-char SHA in client.ts drifts silently the moment the
+// vendored artifact is bumped, and the doctor/about surface then confidently reports the wrong
+// runtime with no compile error. Binding two consumers to this one validated source is the fix.
+export const CTXMUX_COMMIT = 'c13ab114f6ddf0cf8eb22c6cc39bb16f7aa0dec7'
 const CTXMUX_TREE = 'c43e3992e2e127d4b4e65e447fd23b9037be7f9c'
-const CTXMUX_VERSION = '0.1.0'
+export const CTXMUX_VERSION = '0.1.0'
 const CTXMUX_RUNTIME_BUILD_ID = `ctxmuxd/${CTXMUX_VERSION}`
 const REQUIRED_RUNTIME_CAPABILITIES = {
   [RUNTIME_CAPABILITY_NATIVE_START]: 1,
@@ -183,7 +191,9 @@ function daemonEnvironment(): NodeJS.ProcessEnv {
     TERM: 'xterm-256color',
     COLORTERM: 'truecolor',
     TERM_PROGRAM: 'AgentMux',
-    TERM_PROGRAM_VERSION: '0.1.0',
+    // Same SHA-verified source as everywhere else — CTXMUX_VERSION is asserted against manifest.json
+    // above; a hand-copied '0.1.0' here would drift on the next artifact bump.
+    TERM_PROGRAM_VERSION: CTXMUX_VERSION,
     FORCE_HYPERLINK: '1'
   }
   delete environment.NO_COLOR
