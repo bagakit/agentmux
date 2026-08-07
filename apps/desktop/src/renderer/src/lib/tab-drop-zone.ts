@@ -3,7 +3,15 @@
 
 export type TabDropZone = 'center' | 'left' | 'right' | 'up' | 'down'
 
-export const TAB_GROUP_TAB_STRIP_HEIGHT_PX = 36
+/**
+ * tab 条的高度：落点在这个带子里就不算边缘切分（拖到标签条上是「换 tab 顺序」，不是分屏）。
+ *
+ * 刻意**不导出**：唯一的消费者是同文件的 `resolvePaneColumnEdgeZone`，调用方要覆盖时传
+ * `options.tabStripHeightPx`。这一类「只被自己文件用却导出着」是 lib-export-reachability 那道门
+ * 按定义抓不到的——可达性不动点会（正确地）判它活着，因为它确实有消费者，只是消费者在同一个
+ * 文件里。所以它靠的是这条注释与 review，不是守卫。
+ */
+const TAB_GROUP_TAB_STRIP_HEIGHT_PX = 36
 
 type PaneRect = { left: number; top: number; width: number; height: number }
 
