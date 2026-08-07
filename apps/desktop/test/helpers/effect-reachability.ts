@@ -120,7 +120,7 @@ export function findCallsToMember(sourceFile: ts.SourceFile, property: string): 
 }
 
 /**
- * 包着这个节点的最近**具名**绑定的名字——即「这句调用长在谁身上」。
+ * 包着这个节点的**全部**具名绑定，从外到内用 `' > '` 连接——即「这句调用长在谁身上」的限定路径。
  *
  * 为什么需要它：判「某个壳有没有把动作转发给出口」时，最容易写的判据是「文件里出现过
  * `sink(` 这个形状」。那条判据在**同一个文件里这个形状只出现一次**时才等价于「那个壳转发了」；
@@ -135,24 +135,45 @@ export function findCallsToMember(sourceFile: ts.SourceFile, property: string): 
  *   - 对象字面量属性 `{ f: () => {} }`         → `f`（注入依赖端口的常见写法，如 `writeClipboard`）
  *   - JSX 属性上的内联箭头 `onX={() => {}}`    → `jsx:onX`（带前缀，免得与同名 handler 混淆）
  *
+ * ─── 为什么是**路径**而不是「最近的那一个名字」（#619）───
+ *
+ * 这个函数的第一版只返回最近的一个名字，而且它宣称的第四种来路是**死代码**：内联 JSX 属性箭头的
+ * **直接父节点是 `JsxExpression`**（那对花括号），`JsxAttribute` 在它的祖父位置，所以
+ * `ts.isJsxAttribute(current.parent)` 恒假。实测：renderer 树里这种箭头有 342 个，该分支命中
+ * **0 次**——docstring 亲口承诺了一种它从来认不出的写法（本仓「comment-promises-more-than-assertion」
+ * 那一族，而这次比注释更糟：`d272316` 的 commit message 也照抄了这个假声明）。
+ * 后果是真的：`SurfaceToolDock` 里 `onCopyPath={() => void copyTextToClipboard(...)}` 被记成
+ * 外层组件名 `WorkspaceTopicsPanel`，于是把这次复制搬到同组件的 `onReveal`（它紧挨着，形状一样）
+ * 照旧全绿——而那正是用户点「复制路径」会走的唯一一条路。
+ *
+ * 只穿透 `JsxExpression`、仍然「返回最近一个名字」是不够的：那样 `WorkspaceWorkbench` 的两处
+ * 会双双坍缩成同一个 `jsx:writeClipboardText`（它们今天靠外层组件名 `SortableWorkbenchTab` /
+ * `WorkbenchRegionLeaf` 区分），判据在那个文件反而**变弱**。返回限定路径两边都保住：实测
+ * `SurfaceToolDock` 得到 `WorkspaceTopicsPanel > jsx:onCopyPath`（多了 handler 粒度），
+ * `WorkspaceWorkbench` 得到两条各带外层组件名的不同路径（不坍缩）。
+ *
  * 都不匹配时返回 `'(top-level)'`（模块顶层语句）。这是**词法**判据：它取的是绑定的名字，
- * 不做符号解析，所以同名的两个局部绑定它区分不了——需要区分时改用带实参的
- * `pickCallByArgument`，或在调用方额外钉住次数。
+ * 不做符号解析，所以**同名的两个局部绑定它区分不了**——`TerminalView` 那两个注入端口都叫
+ * `writeClipboard`、都直接长在组件里，路径逐字相同，把复制在这两者之间对调不会红。需要区分时
+ * 改用带实参的 `pickCallByArgument`，或在调用方额外钉住次数。
  */
-export function enclosingBindingName(node: ts.Node): string {
+export function enclosingBindingPath(node: ts.Node): string {
+  const parts: string[] = []
   let current: ts.Node | undefined = node.parent
   while (current) {
-    if (ts.isFunctionDeclaration(current) && current.name) return current.name.text
-    if (ts.isMethodDeclaration(current) && ts.isIdentifier(current.name)) return current.name.text
-    if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
-      const parent = current.parent
-      if (ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name)) return parent.name.text
-      if (ts.isPropertyAssignment(parent) && ts.isIdentifier(parent.name)) return parent.name.text
-      if (ts.isJsxAttribute(parent) && ts.isIdentifier(parent.name)) return `jsx:${parent.name.text}`
+    if (ts.isFunctionDeclaration(current) && current.name) parts.push(current.name.text)
+    else if (ts.isMethodDeclaration(current) && ts.isIdentifier(current.name)) parts.push(current.name.text)
+    else if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
+      // 内联 JSX 属性箭头的直接父节点是 `JsxExpression`（那对花括号），要先穿透它才看得见
+      // `JsxAttribute`。少了这一跳，`jsx:` 那条分支永远不可达——见上面 #619。
+      const parent = ts.isJsxExpression(current.parent) ? current.parent.parent : current.parent
+      if (ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name)) parts.push(parent.name.text)
+      else if (ts.isPropertyAssignment(parent) && ts.isIdentifier(parent.name)) parts.push(parent.name.text)
+      else if (ts.isJsxAttribute(parent) && ts.isIdentifier(parent.name)) parts.push(`jsx:${parent.name.text}`)
     }
     current = current.parent
   }
-  return '(top-level)'
+  return parts.length === 0 ? '(top-level)' : parts.reverse().join(' > ')
 }
 
 /** 这四种是「函数边界」：向上找 enclosing body、向上找守护 if 时撞到它们就停。 */

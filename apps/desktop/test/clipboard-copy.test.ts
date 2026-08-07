@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { enclosingBindingName, findCallsToIdentifier, readAndParse } from './helpers/effect-reachability.js'
+import { enclosingBindingPath, findCallsToIdentifier, readAndParse } from './helpers/effect-reachability.js'
 
 // 复制到剪贴板从三处（容错三个档，含一处裸 `void` 静默失败）收敛成一个出口。这组测试守三件事：
 //   1. 路径变体格式化不许搞反、拼接格式不许漂——期望值锚成写死的字面量，绝不由被测函数自己算；
@@ -147,43 +147,58 @@ describe('剪贴板写入只有一个出口', () => {
 // action，与它不共用代码），它整段消失时用户的右键复制彻底失效，而没有任何测试会红——本仓
 // 「presence-assertion-blind-when-shape-repeats」那一族，先例 #586。
 //
-// 改法：解析 AST，取每处调用的**最近具名绑定**，与声明的位置集合逐一比对（`toEqual`，含次数与顺序）。
-// 少一处、多一处、搬到别的函数里，三种都红。位置名由 `enclosingBindingName` 取，取值是从当前源码
-// 实测出来的，不是照着我的印象写的。
+// 改法：解析 AST，取每处调用的**限定绑定路径**，与声明的位置集合逐一比对（`toEqual`，含次数与顺序）。
+// 少一处、多一处、搬到别的函数里，三种都红。路径由 `enclosingBindingPath` 取，取值是从当前源码
+// 实测出来的，不是照着我的印象写的——而且是与 **HEAD 内容**逐文件比对过的（9 个文件、0 漂移），
+// 不是从脏工作树读的（本仓记过「message 行号取自脏工作树」那一族已 9 次，这张表同样会犯）。
+//
+// ─── 为什么是「路径」而不是「最近那一个名字」（#619）───
+//
+// 取最近一个名字时，`SurfaceToolDock` 里 `onCopyPath={() => void copyTextToClipboard(...)}` 会被记成
+// 外层组件名 `WorkspaceTopicsPanel`——因为那个函数宣称认得 JSX 属性上的内联箭头，而那条分支其实
+// 是**死代码**（内联箭头的直接父节点是 `JsxExpression`，不是 `JsxAttribute`；实测 342 个样本、0 命中）。
+// 后果：把这次复制搬到紧邻的 `onReveal`（形状一样）照旧全绿，而那是用户点「复制路径」的唯一一条路。
+// 详见 helpers/effect-reachability.ts 里 `enclosingBindingPath` 的 docstring。
 //
 // 这条判据**不**保证：调用之后被 `if (false)` 包起来这类造作形状（由上面的 no-bypass 扫描兜底——壳一旦
 // 退回直接写剪贴板就红），也不保证壳会被挂载、事件会被派发（desktop 无 DOM 环境，见
-// helpers/effect-reachability.ts 文件头）。它保证的是「这几个具名位置上各有一次对出口的调用」。
+// helpers/effect-reachability.ts 文件头）。它也**不**区分**同名同层**的两个绑定：TerminalView 那两个
+// 注入端口都叫 `writeClipboard`、都直接长在组件里，路径逐字相同，把复制在这两者之间对调不会红
+// （已知局限，要区分得用 `pickCallByArgument` 按实参判）。它保证的是「这几个具名路径上各有一次对出口的调用」。
 // ---------------------------------------------------------------------------
 describe('每个复制入口与菜单注入点都转发给出口', () => {
-  // 每个壳里**哪些具名位置**该有一次转发。取值实测自当前源码；改动接线时这张表要跟着改，
-  // 且改的时候必须说明那个位置为什么消失/新增——这正是它要拦的东西。
+  // 每个壳里**哪些具名路径**该有一次转发。取值实测自当前源码并与 HEAD 内容核对过；改动接线时这张表
+  // 要跟着改，且改的时候必须说明那个位置为什么消失/新增——这正是它要拦的东西。
   //
   // 这张表此前只有 6 个文件，标题写「五个复制入口 + 两个菜单注入点」。下面那条全树自检一上来就
   // 报出**另外三个**在转发却没人守的文件（AgentRoster / EditorPane / WorkspaceRowContextMenu），
   // 所以旧标题里那个数在当时就已经不实了。这也是为什么自检要按「全树扫出来的转发者集合」判，
   // 而不是让人手数：手数的清单会静默落后于代码。
   const FORWARD_SITES: readonly [file: string, sites: readonly string[]][] = [
-    ['components/FileExplorer.tsx', ['copyContextPaths']],
-    ['components/BranchesPanel.tsx', ['copyText']],
-    ['components/SurfaceToolDock.tsx', ['WorkspaceTopicsPanel']],
+    ['components/FileExplorer.tsx', ['FileExplorer > copyContextPaths']],
+    ['components/BranchesPanel.tsx', ['BranchesPanel > copyText']],
+    // `jsx:onCopyPath` 这一段是 #619 换成限定路径后才拿到的粒度：它与紧邻的 onRename/onReveal
+    // 形状完全一样，只有点名到 handler 才拦得住「复制被搬到另一个菜单项」。
+    ['components/SurfaceToolDock.tsx', ['WorkspaceTopicsPanel > jsx:onCopyPath']],
     // 三处各自承重，缺一不可：前两处是注入给键盘/OSC-52 通路的 `writeClipboard` 端口，
     // 第三处 `copySelection` 是**右键菜单**唯一的复制实现。三者不共用代码。
-    ['components/TerminalView.tsx', ['writeClipboard', 'writeClipboard', 'copySelection']],
-    ['components/BrowserPane.tsx', ['copyElementContext']],
-    // 两个菜单注入点：地址菜单的复制经这里注入的 writeClipboardText 落到出口。
-    ['components/WorkspaceWorkbench.tsx', ['SortableWorkbenchTab', 'WorkbenchRegionLeaf']],
-    ['components/AgentRoster.tsx', ['writeClipboardText']],
+    // 前两条路径逐字相同（同名端口、同一层），故它们之间对调不可观测——见上面「不保证」。
+    ['components/TerminalView.tsx', ['TerminalView > writeClipboard', 'TerminalView > writeClipboard', 'TerminalView > copySelection']],
+    ['components/BrowserPane.tsx', ['BrowserPane > copyElementContext']],
+    // 两个菜单注入点：地址菜单的复制经这里注入的 writeClipboardText 落到出口。两处的属性名同为
+    // `jsx:writeClipboardText`，靠外层组件名区分——这也是判据取整条路径而非最内层名字的另一半理由。
+    ['components/WorkspaceWorkbench.tsx', ['SortableWorkbenchTab > jsx:writeClipboardText', 'WorkbenchRegionLeaf > jsx:writeClipboardText']],
+    ['components/AgentRoster.tsx', ['RosterRowView > writeClipboardText']],
     // EditorPane 的复制挂在编辑器命令的 `run` 上（Monaco action 的执行体）。
-    ['components/EditorPane.tsx', ['run']],
-    ['components/WorkspaceRowContextMenu.tsx', ['copyText']]
+    ['components/EditorPane.tsx', ['EditorPane > registerCopyActions > run']],
+    ['components/WorkspaceRowContextMenu.tsx', ['WorkspaceRowContextMenu > copyText']]
   ]
 
   it('每个壳的每个具名转发位置上都恰好有一次对出口的调用', () => {
     for (const [file, sites] of FORWARD_SITES) {
       const path = `${RENDERER_SRC}/${file}`
       const { sourceFile } = readAndParse(path)
-      const actual = findCallsToIdentifier(sourceFile, 'copyTextToClipboard').map(enclosingBindingName)
+      const actual = findCallsToIdentifier(sourceFile, 'copyTextToClipboard').map(enclosingBindingPath)
       expect(
         actual,
         `${file} 的转发位置应恰为 [${sites.join(' | ')}]，实测 [${actual.join(' | ')}]。` +
@@ -193,17 +208,29 @@ describe('每个复制入口与菜单注入点都转发给出口', () => {
     }
   })
 
-  it('自检：位置清单非空、名字不是兜底值，且这张表真的覆盖了全部转发点', () => {
-    // 防这条自己假绿的三种方式：
+  it('自检：位置清单非空、路径真的带上了限定、且这张表真的覆盖了全部转发点', () => {
+    // 防这条自己假绿的四种方式：
     //   1. 位置清单被写空 ⇒ `toEqual([])` 在「转发全被删掉」时恒真；
-    //   2. 名字取成了 `(top-level)` 兜底值 ⇒ 说明 enclosingBindingName 没认出这种写法，
+    //   2. 路径取成了 `(top-level)` 兜底值 ⇒ 说明 enclosingBindingPath 没认出这种写法，
     //      判据退化成「顶层有几次调用」，几乎不区分位置；
-    //   3. 这张表漏掉了某个**确实在转发**的文件 ⇒ 那个文件整段删掉转发不会红。第 3 条用
-    //      全树扫描兜：凡是出现过出口调用的文件，都必须在表里。
+    //   3. **每条路径都只有一段** ⇒ 那就等于回到了 #619 之前那个「只取最近一个名字」的判据，
+    //      而它对 JSX 属性上的内联箭头是失明的。至少要有一条路径带 `>`（限定生效的在场证明），
+    //      也至少要有一条带 `jsx:`（那条曾经的死分支现在真的可达）——两者缺任何一个，就说明
+    //      这次修复被悄悄退回去了，而上面那条断言只会跟着新取值一起变绿，不会报警。
+    //   4. 这张表漏掉了某个**确实在转发**的文件 ⇒ 那个文件整段删掉转发不会红。用全树扫描兜。
     for (const [file, sites] of FORWARD_SITES) {
       expect(sites.length, `${file} 的位置清单为空，判据会恒真`).toBeGreaterThan(0)
       for (const site of sites) expect(site).not.toBe('(top-level)')
     }
+    const allSites = FORWARD_SITES.flatMap(([, sites]) => sites)
+    expect(
+      allSites.filter((site) => site.includes(' > ')).length,
+      '没有任何一条路径带限定段，判据退化成「只取最近一个名字」（#619 之前的形状）'
+    ).toBeGreaterThan(0)
+    expect(
+      allSites.filter((site) => site.includes('jsx:')).length,
+      'jsx: 段一次都没出现——那条分支又变回死代码了（#619 的靶子）'
+    ).toBeGreaterThan(0)
 
     const declared = new Set(FORWARD_SITES.map(([file]) => file))
     const forwardingFiles: string[] = []
