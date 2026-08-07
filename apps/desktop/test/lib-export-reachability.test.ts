@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { readdirSync } from 'node:fs'
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 import { parseTsx, readAndParse } from './helpers/effect-reachability.js'
@@ -17,8 +19,8 @@ import { parseTsx, readAndParse } from './helpers/effect-reachability.js'
 //
 // ─── 判据为什么是「不动点」，而不是「名字在别的文件里出现过」───
 //
-// 后者是最容易写的判据，且**实测不可用**：在引入这道门的那一刻（`d6c7c37^`，138 个 lib 模块 /
-// 779 个导出）它报出 134 个（17%），绝大多数是误报。原因是导出的**类型**常常只在自己文件里被
+// 后者是最容易写的判据，且**实测不可用**：在引入这道门的那一刻（`d6c7c37^` = `d272316`，136 个
+// lib 模块 / 771 个导出）它报出 132 个（17%），绝大多数是误报。原因是导出的**类型**常常只在自己文件里被
 // 点名，而在调用点是靠**推断**
 // 消费的——例如 `TabDropZone` 只出现在同文件的 `Exclude<TabDropZone, 'center'>` 里，可它是
 // `resolvePaneColumnEdgeZone` 返回类型的一部分，每个调用方都在用它。「名字没在别处出现」因此
@@ -31,18 +33,28 @@ import { parseTsx, readAndParse } from './helpers/effect-reachability.js'
 //        少了「不分导出」这一条，「只被同文件的私有 helper 消费」的导出会被误报成孤儿。
 //        **这一条今天在本仓没有任何真实见证**：实测把闭包收窄成只走导出声明，整棵树的裁决一字不变
 //        （两种写法都是 0 个孤儿），也就是说它保护的形状此刻一个实例都不存在。所以它由下面
-//        「自检 3」用一个**合成模块**钉住——那是本文件里唯一不读真实源码的断言，理由写在那条断言里。
+//        「自检 3」用一个**合成模块**钉住，理由写在那条断言里。
 //   迭代到不动点，剩下的就是**任何地方都没有消费者**的导出。
-// 同一份输入（`d6c7c37^`）下，不动点把 134 收敛到 2。差额 132 个全是靠闭包翻身的：**118 个类型 +
+// 同一份输入（`d272316`）下，不动点把 132 收敛到 2。差额 130 个全是靠闭包翻身的：**116 个类型 +
 // 14 个取值**，全是上面那类「只在自己文件里被点名、在调用点靠推断消费」的误报。
-// 这两组数必须来自**同一棵树**：本注释第一版把 `134→2`（提交前）与 `131 / 13 个取值`（提交后，那次
-// 提交删掉 3 个导出）拼在一句话里，于是 134−2=132 与「131 个」自相矛盾——差额算不平就是这个拼接的
-// 指纹。今天的树是 776 个导出 / 131 naive / 0 孤儿，与上面那组不可混用。
+//
+// 这些规模数**必须测在提交内容上**，不能测脏工作树。本注释前两版都栽在这一点上：第一版把
+// `134→2`（提交前）与 `131 / 13 个取值`（提交后）拼在一句话里，差额算不平；第二版数字自洽了，
+// 但两组数（`779 / 138 / 134` 与「今天的树 776 / 131」）都取自**脏工作树**——多出来的差额全来自
+// 两个从未入库的 lib 文件（`git status` 里的 `??`）被算进了扫描面。内部算术仍自洽，所以「差额算
+// 不平」那种指纹**抓不到这一族**，坏的是 provenance。
+// 测量命令（走 `git archive <ref>` 抽出提交内容，再在那棵树上跑本文件的判据逻辑）实测：
+//   `d272316`（= `d6c7c37^`，这道门引入前）：136 模块 / 771 导出 / 132 naive / 2 孤儿 / 130 翻身（116 类型 + 14 取值）
+//   `d6c7c37`（引入这道门、清掉那 2 个遗孤）：136 模块 / 768 导出 / 129 naive / **0** 孤儿 / 129 翻身（116 类型 + 13 取值）
+// 那 2 个遗孤是 `lib/control.ts listWorkbenchControlRegions` 与 `lib/executors.ts configuredExecutorLabel`。
+// 再往后（`3050ddf`、`f36275a`）这四个数一字未变。要更新这段数字，**重新跑那个 archive 测量**，
+// 别读工作树。
 //
 // ─── 这条判据**只**保证什么，**不**保证什么 ───
 //
-//   保证：新增一个谁也不用的导出会红（本文件自检 2 用一个真实存在但无人消费的形状证过）；
-//        删掉某个导出的最后一个消费者、而导出留在原地，也会红。
+//   保证：新增一个谁也不用的导出会红；删掉某个导出的最后一个消费者、而导出留在原地，也会红。
+//        这句话由「自检 4」（合成目录树）证——真实树上 0 个孤儿，主判据永远是 `toEqual([])`，
+//        它自己**证不了**这一点。别把它记到自检 2 名下：那条只证「闭包不跨文件」。
 //
 //   **不**保证：
 //     - 它按**标识符名**匹配，不做符号解析。同名的两个不同实体它分不开，于是它会**偏向判活**
@@ -119,22 +131,44 @@ function identifiersIn(node: ts.Node): Set<string> {
   return names
 }
 
-const libFiles = sourceFilesUnder(LIB_DIR)
-const consumerFiles = [...sourceFilesUnder(RENDERER_SRC), ...sourceFilesUnder(TEST_DIR)]
-const identifiersByFile = new Map(consumerFiles.map((file) => [file, identifiersIn(readAndParse(file).sourceFile)]))
-
-/** 除 `exclude` 之外，有没有文件提到过这个名字。 */
-function mentionedOutside(name: string, exclude: string): boolean {
-  for (const [file, identifiers] of identifiersByFile) {
-    if (file !== exclude && identifiers.has(name)) return true
+/**
+ * 一个**扫描面**：哪些 lib 文件受判、哪些文件算消费者。
+ *
+ * 做成参数而不是模块级常量，是为了让整条判据（取导出 → 种子 → 不动点 → 汇总成清单）能整体跑在
+ * 一棵**合成目录树**上（见「自检 4」）。真实树上今天 0 个孤儿，于是每条真实文件断言都退化成
+ * `toEqual([])`——一个恒返回 `[]` 的实现同样满足它们，这道门就没有任何见证（本仓记过
+ * 「guard-whose-answer-is-always-empty」那一族：#624 实测把 `unconsumedExportsOf` 首行改成
+ * `return []`，当时本文件那 4 条全绿）。合成面提供那个缺席的非空见证。
+ *
+ * 消费者的标识符索引在这里建**一次**：真实面有 500+ 个文件，每次调用重建会让这个 suite 慢一个
+ * 数量级。
+ */
+function scanSurface(libFiles: string[], consumerFiles: string[]) {
+  const identifiersByFile = new Map(consumerFiles.map((file) => [file, identifiersIn(readAndParse(file).sourceFile)]))
+  /** 除 `exclude` 之外，有没有文件提到过这个名字。 */
+  const mentionedOutside = (name: string, exclude: string): boolean => {
+    for (const [file, identifiers] of identifiersByFile) {
+      if (file !== exclude && identifiers.has(name)) return true
+    }
+    return false
   }
-  return false
+  /** 一个 lib 模块里，没有任何消费者的导出名。 */
+  const unconsumedExports = (file: string): string[] =>
+    unconsumedExportsOf(readAndParse(file).sourceFile, (name) => mentionedOutside(name, file))
+  /** 整个面上的孤儿，形如 `<绝对路径> <名字>`。 */
+  const orphans = (): string[] => libFiles.flatMap((file) => unconsumedExports(file).map((name) => `${file} ${name}`))
+  return { libFiles, consumerFiles, mentionedOutside, unconsumedExports, orphans }
 }
+
+const real = scanSurface(sourceFilesUnder(LIB_DIR), [
+  ...sourceFilesUnder(RENDERER_SRC),
+  ...sourceFilesUnder(TEST_DIR)
+])
 
 /**
  * 不动点本体：给定一份 AST 与「哪些导出算种子」，返回没有任何消费者的导出名。
  *
- * 与 `unconsumedExports` 分开，是为了让判据能跑在**合成模块**上（自检 3）——真实源码里
+ * 与 `scanSurface` 分开，是为了让判据能跑在**合成模块**上（自检 3）——真实源码里
  * 「只被同文件私有 helper 消费的导出」今天一个都没有，不合成就没有任何东西能让闭包的
  * 「不分导出」那一条变得可观测。
  */
@@ -161,16 +195,9 @@ function unconsumedExportsOf(sourceFile: ts.SourceFile, isSeed: (name: string) =
   return [...exported].filter((name) => !alive.has(name))
 }
 
-/** 一个 lib 模块里，没有任何消费者的导出名。 */
-function unconsumedExports(file: string): string[] {
-  return unconsumedExportsOf(readAndParse(file).sourceFile, (name) => mentionedOutside(name, file))
-}
-
 describe('renderer lib 的每个导出都有消费者', () => {
   it('没有任何导出是「生产与测试都不用」的', () => {
-    const orphans = libFiles.flatMap((file) =>
-      unconsumedExports(file).map((name) => `${file.slice(RENDERER_SRC.length + 1)}  ${name}`)
-    )
+    const orphans = real.orphans().map((entry) => entry.replace(`${RENDERER_SRC}/`, ''))
     // 报出 file + 名字而不是只给个数：孤儿要一眼看得到是哪个。
     expect(
       orphans,
@@ -184,11 +211,11 @@ describe('renderer lib 的每个导出都有消费者', () => {
   it('自检：扫描面非空、闭包不是恒真、不存在的名字计零', () => {
     // 少了这条，上面那条会以最难发现的方式假绿：扫描根写错、后缀过滤写错、导出提取返回空，
     // 任何一种都让 orphans 恒为空数组，而「没扫到」与「扫过了没问题」打印出来一模一样。
-    expect(libFiles.length, 'lib 一个文件都没扫到，扫描根坏了').toBeGreaterThan(100)
-    expect(consumerFiles.length, '消费者面一个文件都没扫到').toBeGreaterThan(200)
+    expect(real.libFiles.length, 'lib 一个文件都没扫到，扫描根坏了').toBeGreaterThan(100)
+    expect(real.consumerFiles.length, '消费者面一个文件都没扫到').toBeGreaterThan(200)
 
     // 提取器真的认得出导出：随便挑一个文件都该有导出，且总量得是个大数。
-    const totalExports = libFiles.reduce(
+    const totalExports = real.libFiles.reduce(
       (sum, file) => sum + new Set(readAndParse(file).sourceFile.statements.flatMap(exportedNames)).size,
       0
     )
@@ -196,11 +223,11 @@ describe('renderer lib 的每个导出都有消费者', () => {
 
     // 不存在的名字必须计零。这条钉住 mentionedOutside 不是恒返回 true——恒真会让上面那条
     // 断言变成「永远没有孤儿」，也就是这道门最危险的假绿形态。
-    expect(mentionedOutside('zzzNoSuchExportNameEverAppearsHere', LIB_DIR)).toBe(false)
+    expect(real.mentionedOutside('zzzNoSuchExportNameEverAppearsHere', LIB_DIR)).toBe(false)
 
     // 反向：一个**真的**被外部消费的导出不许被判成孤儿。挑 clipboard-copy 的出口，它有 9 个
     // 组件在调（见 clipboard-copy.test.ts 那张表），是本仓消费面最宽的导出之一。
-    expect(unconsumedExports(`${LIB_DIR}/clipboard-copy.ts`)).not.toContain('copyTextToClipboard')
+    expect(real.unconsumedExports(`${LIB_DIR}/clipboard-copy.ts`)).not.toContain('copyTextToClipboard')
   })
 
   it('自检：闭包只传「同文件」，不会把跨文件的孤儿也判活', () => {
@@ -222,12 +249,12 @@ describe('renderer lib 的每个导出都有消费者', () => {
       [...readAndParse(probeFile).sourceFile.statements.flatMap(exportedNames)],
       `探针 ${PROBE} 必须是导出的，否则 unconsumedExports 永远不会返回它，这条自检恒真`
     ).toContain(PROBE)
-    expect(mentionedOutside(PROBE, probeFile), `探针 ${PROBE} 在别的文件里出现了，它是种子而非闭包救活的`).toBe(false)
-    expect(unconsumedExports(probeFile)).not.toContain(PROBE)
+    expect(real.mentionedOutside(PROBE, probeFile), `探针 ${PROBE} 在别的文件里出现了，它是种子而非闭包救活的`).toBe(false)
+    expect(real.unconsumedExports(probeFile)).not.toContain(PROBE)
   })
 
   it('自检：闭包传递「非导出」声明——今天没有真实见证，所以用合成模块钉住', () => {
-    // 这是本文件里**唯一**不读真实源码的断言，理由必须写清：
+    // 本文件有两条不读真实源码的断言（这条与自检 4），各自的理由必须写清：
     //
     // 闭包刻意「不分那条声明有没有 export」（`declaredNames` 而不是 `exportedNames`），为的是让
     // 「导出只被同文件的**私有** helper 消费」这条边传得过去。而**本仓今天没有任何这种形状**——
@@ -278,5 +305,48 @@ describe('renderer lib 的每个导出都有消费者', () => {
       exportedOnly(synthetic),
       '合成模块没能区分两种闭包，上面那条断言因此恒真——换一个真的依赖私有 helper 的形状'
     ).toEqual(['kept'])
+  })
+
+  it('自检：非空见证——整条判据跑在一棵合成目录树上，孤儿必须被报出来', () => {
+    // 真实树上今天 **0 个孤儿**，于是上面那条主判据是 `toEqual([])`——**一个恒返回 `[]` 的实现同样
+    // 满足它**。#624 实测：把 `unconsumedExportsOf` 首行改成 `return []`，本文件 4 条全绿；整道门
+    // 那一刻退化成一个常量。前三条自检也拦不住——它们判的是扫描面规模、`mentionedOutside` 不恒真、
+    // 以及两个 `not.toContain`（恒空数组天然满足）。「答案在真实输入上恒为空」的守卫就是常量，
+    // 这是本仓记过的一族。
+    //
+    // 这条断言提供那个缺席的**非空**见证：写一棵最小的合成目录树，让 `scanSurface` 整体跑在它上面，
+    // 断言孤儿一字不差地被报出来。落在**目录树**而不是单个 AST 上是刻意的——本仓记过「抽进 lib 只
+    // 解决一半」：内容判据抽出来变可测之后，外面那层壳照旧没人守。这里那层壳是 `orphans()`：遍历
+    // libFiles、逐个调 `unconsumedExports`、把结果拼成 `<file> <name>`。两个 lib 文件**各带一个**
+    // 孤儿，于是「只扫了第一个文件就返回」也会红；断言比对整条格式化后的字符串，于是「只报名字、
+    // 丢了文件」也会红。
+    const dir = mkdtempSync(join(tmpdir(), 'amux-orphan-witness-'))
+    try {
+      const write = (name: string, lines: string[]): string => {
+        const path = join(dir, name)
+        writeFileSync(path, `${lines.join('\n')}\n`, 'utf8')
+        return path
+      }
+      const alpha = write('alpha.ts', ['export const alphaKept = 1', 'export const alphaOrphan = 2'])
+      const beta = write('beta.ts', ['export const betaOrphan = 3'])
+      const consumer = write('consumer.ts', [
+        "import { alphaKept } from './alpha.js'",
+        'export const total = alphaKept + 1'
+      ])
+      // 消费者面**含两个 lib 文件本身**，照着真实面的形状来：`lib/` 就在 renderer/src 底下，所以
+      // 一个 lib 文件引用另一个 lib 文件的导出也算消费者（`mentionedOutside` 只排除定义文件自己）。
+      const synthetic = scanSurface([alpha, beta], [alpha, beta, consumer])
+
+      // 判据是**完整清单**而不是「至少含某个」：被消费的 `alphaKept` 必须不在里面，所以「把所有导出
+      // 都报出来」这种反向坍缩同样会红。不为它另写一条 `not.toContain`——同一个 it 里两条断言判同一个
+      // 返回值时，先抛的那条让后面成死代码（本仓记过 two-throws-in-one-it-mask-each-other），而这里
+      // 无论多报还是少报都先撞上这一条。
+      expect(
+        synthetic.orphans().map((entry) => entry.replace(`${dir}/`, '')).sort(),
+        '合成树上的孤儿没被完整报出来：要么 unconsumedExportsOf 恒空，要么 orphans() 那层壳漏了文件或漏了拼接'
+      ).toEqual(['alpha.ts alphaOrphan', 'beta.ts betaOrphan'])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
