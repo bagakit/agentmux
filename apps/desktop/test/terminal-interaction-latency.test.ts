@@ -139,6 +139,109 @@ describe('Terminal interaction latency owners', () => {
   })
 
   /**
+   * 死区比较有两个操作数，而此前只有一个被守住。
+   *
+   * `latestRatio` 那一侧的来源 `observeLayout` 一直挡着非有限值（`ratioFromLayout` 返回 null 就丢弃
+   * 整次上报）。基准 `persistedRatio` 那一侧从**构造参数**与 `synchronizePersistedRatio` 两个入口
+   * 裸着进来，谁也没夹过——而 split-ratio-commit.ts 的 docblock 与 split-tree.ts:72-74 都亲口把构造
+   * 参数点成这条不变量的「最薄一处」。3e6d3cc 的审计把它记成缺口（#595）。
+   *
+   * 坏基准的危害不是「判错方向」而是**死区整个失效**：`Math.abs(x - NaN) <= ε` 恒假，于是
+   *   1. 每一次亚像素抖动都被当成一次真改动落盘；
+   *   2. 在分隔条上空点一下（只有 onDragging、没有 onLayout）时提交出去的就是 `NaN` 本身——
+   *      `JSON.stringify(NaN)` 是 `null`，正是 #552 那条坏值沿写入路径传播的老路。
+   *
+   * 可达性：region 那条渲染路径把 `node.ratio` 裸着交给这两个入口（tab-group 那条先过一次
+   * `clampSplitRatio`），所以今天两条路径靠的不是同一层保护。
+   *
+   * 下面五条按「哪个入口 × 坏成什么样」分开写，实测的四个变异各有**互不相同**的击杀集：
+   *
+   * | 变异 | 击杀 |
+   * |---|---|
+   * | 构造参数不夹（`= persistedRatio`） | 1、2、4 |
+   * | 构造参数只判有限（`isFinite ? x : 0.5`） | 只有 4 |
+   * | 同步入口不夹（`= ratio`） | 只有 3 |
+   * | 同步入口两个赋值分岔（`latestRatio = ratio`） | 3、5 |
+   *
+   * 所以每个变异都有专属的红，而 4 与 5 各自只被一个变异杀掉——它们钉的正是「为什么是
+   * clampSplitRatio 而不是 Number.isFinite」和「为什么两个赋值必须读同一个值」。分开写而不合成
+   * 一条：合成的话先抛的那个 expect 会把后面变成死代码，于是只杀后半的变异会被读成「已守住」
+   * （本仓 two-throws-in-one-it-mask-each-other）。
+   */
+  describe('死区的基准操作数也要在入口归一化（#595）', () => {
+    it('构造参数是 NaN 时，亚像素抖动仍必须被死区丢掉', () => {
+      const commit = vi.fn()
+      const committer = new SplitRatioCommitter(Number.NaN, commit)
+
+      // 与「亚像素级的抖动不许写盘」同一个量级的上报：0.5 → 0.5001。
+      committer.observeLayout([50.01, 49.99])
+
+      expect(
+        commit,
+        '基准是 NaN 让死区恒假：每一次亚像素抖动都变成一次落盘'
+      ).not.toHaveBeenCalled()
+    })
+
+    it('构造参数是 NaN 时，空点一下分隔条不许把 NaN 提交出去', () => {
+      // 与上一条是**同一个**变异的两种症状，但用户看到的是两件事：那条是多余的写盘，
+      // 这条是一个坏值进了 store（落盘后成 `null`）。所以各占一个 it。
+      const commit = vi.fn()
+      const committer = new SplitRatioCommitter(Number.NaN, commit)
+
+      committer.setDragging(true)
+      committer.setDragging(false)
+
+      expect(commit, 'NaN 被当成一次真改动提交进 store').not.toHaveBeenCalled()
+    })
+
+    it('同步进来的 NaN 同样要在入口归一化，而不是只夹构造参数', () => {
+      // 第二个入口。只修构造参数的话这条红：`synchronizePersistedRatio` 每次渲染都被调一次
+      // （committer 存在 useRef 里跨渲染存活），所以一个坏的 node.ratio 照旧能把基准毒掉。
+      const commit = vi.fn()
+      const committer = new SplitRatioCommitter(0.5, commit)
+
+      committer.synchronizePersistedRatio(Number.NaN)
+      committer.setDragging(true)
+      committer.setDragging(false)
+
+      expect(commit, '同步入口没夹，基准照旧能被毒成 NaN').not.toHaveBeenCalled()
+    })
+
+    it('越界的基准要夹回屏上真画得出的那个值，只判有限还不够', () => {
+      // 这一条钉的是「为什么是 clampSplitRatio 而不是 Number.isFinite」。基准要回答的是
+      // 「相对**用户眼前看到的**位置，他改了吗」，而渲染层的 `<Panel minSize>` 保证屏上那个值一定
+      // 在界内：盘上存着 0.05 时屏上画的是 MIN_SPLIT_RATIO。用户一下都没碰，所以不该有任何写入。
+      //
+      // 只判有限的话：基准停在 0.05，而 onLayout 报的是屏上的 0.15，差 0.1 远大于死区 ⇒ 挂载即写
+      // 一次盘。那次写入的值恰好是对的，所以症状不是坏数据而是**用户没做的操作被记成一次改动**。
+      const commit = vi.fn()
+      const committer = new SplitRatioCommitter(0.05, commit)
+
+      // 渲染层照 minSize 画出来的布局，用户没碰分隔条。
+      committer.observeLayout([MIN_SPLIT_RATIO * 100, (1 - MIN_SPLIT_RATIO) * 100])
+
+      expect(
+        commit,
+        '越界基准只判有限不夹回界内：用户一下没碰，挂载就写了一次盘'
+      ).not.toHaveBeenCalled()
+    })
+
+    it('同步的越界值不许只更新基准而把 latestRatio 留在界外', () => {
+      // 第四个变异：`synchronizePersistedRatio` 里两个赋值必须**用同一个夹过的值**。写成
+      // `this.persistedRatio = clampSplitRatio(ratio)` 配 `this.latestRatio = ratio` 时两侧分岔，
+      // 空点一下就把界外的 0.05 提交进 store——比上一条更坏，因为这次落盘的值本身是非法的。
+      const commit = vi.fn()
+      const committer = new SplitRatioCommitter(0.5, commit)
+
+      committer.synchronizePersistedRatio(0.05)
+      committer.setDragging(true)
+      committer.setDragging(false)
+
+      expect(commit, '两个赋值读了不同的值，界外比例被提交进 store').not.toHaveBeenCalled()
+    })
+  })
+
+  /**
    * 死区（`SPLIT_RATIO_EPSILON`）的两侧各是一个产品预算，此前**整个区间都不可观测**：
    * 上面四条守住的最小差值是 0.1（0.5→0.6/0.7/0.8），所以把它从 0.005 改成 0.09——
    * 一个会静默吞掉用户所有小于 9% 拖动的取值——十条照旧全绿（实测存活）。改成 0（把闸整个
