@@ -1,3 +1,5 @@
+import { clampSplitRatio } from './split-tree'
+
 /**
  * 「和已落盘的比例差这么点就不算一次改动」的死区。
  *
@@ -38,16 +40,37 @@ export class SplitRatioCommitter {
   private dragging = false
   private latestRatio: number
 
+  /**
+   * 两个比例字段都在入口处归一化，理由是它们承担的角色不同、而只有一个此前被守住：
+   *
+   * - `latestRatio` 的另一个来源 `observeLayout` 已经挡住了非有限值（`ratioFromLayout` 返回 null
+   *   就整个丢弃这次上报）——**那是对的**：一次算不出比例的布局上报是坏事件，不是用户偏好，忽略它。
+   * - 而 `persistedRatio` 是死区比较的**基准**，此前从构造参数与 `synchronizePersistedRatio`
+   *   两个入口裸着进来。它坏掉时死区不是判错方向，是**整个失效**：`Math.abs(x - NaN) <= ε` 恒假，
+   *   于是每一次亚像素抖动都被当成一次真改动落盘；而在分隔条上空点一下（只有 onDragging、
+   *   没有 onLayout）时提交出去的就是 NaN 本身——`JSON.stringify(NaN)` 是 `null`，正是 #552 那条
+   *   坏值沿写入路径传播的老路。
+   *
+   * 所以缺省值必须在这里给出，不能留给下游兜（下游是 `commit`，它把值写进 store）。取值交给
+   * `clampSplitRatio`：「一个坏的/缺失的比例是什么意思」整仓只有它一个答案（均分），
+   * 而 split-tree.ts:72-74 亲口把本类的构造参数点成这条不变量的最薄一处。
+   *
+   * 夹回区间（而不只是判有限）也是有意的：基准要回答的是「相对**用户眼前看到的**位置，他改了吗」，
+   * 而渲染层的 `<Panel minSize>` 保证屏上那个值一定在界内。盘上存着 0.05 时屏上画的是 0.15，
+   * 用户没碰＝没有改动意图，此时提交 0.15 是这个类没被要求做的修复——而持久化边界的
+   * `clampSplitTreeRatios` 已经无条件做了它。
+   */
   constructor(
     private persistedRatio: number,
     private readonly commit: (ratio: number) => void
   ) {
-    this.latestRatio = persistedRatio
+    this.persistedRatio = clampSplitRatio(persistedRatio)
+    this.latestRatio = this.persistedRatio
   }
 
   synchronizePersistedRatio(ratio: number): void {
-    this.persistedRatio = ratio
-    if (!this.dragging) this.latestRatio = ratio
+    this.persistedRatio = clampSplitRatio(ratio)
+    if (!this.dragging) this.latestRatio = this.persistedRatio
   }
 
   observeLayout(sizes: number[]): void {
