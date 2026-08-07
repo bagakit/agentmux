@@ -115,17 +115,6 @@ function projectTabRegions(
   })
 }
 
-export function listWorkbenchControlRegions(input: WorkbenchControlState): AgentMuxRegion[] {
-  const sessions = new Map(input.sessions.map((session) => [session.id, session]))
-  const regions: AgentMuxRegion[] = []
-  for (const tab of Object.values(input.tabs)) {
-    const layout = input.layouts[tab.workspaceId]
-    if (!layout || !findGroupForTab(layout, tab.id)) continue
-    regions.push(...projectTabRegions(tab, sessions))
-  }
-  return regions
-}
-
 function selfRegions(input: WorkbenchControlState, caller: AgentMuxControlCaller | undefined): AgentMuxRegion[] {
   if (!caller) throw error('INVALID_CONTROL_REQUEST', 'A self selector requires a managed caller.')
   const sessions = new Map(input.sessions.map((session) => [session.id, session]))
