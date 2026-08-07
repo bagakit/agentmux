@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
+import { allStyleRules } from './helpers/styles.js'
 
 /**
  * 终端右键菜单要能**自己解释**为什么 Copy 变灰（#610）。
@@ -233,5 +234,122 @@ describe('mouseTrackingMode 作为 prop 接在组件签名上', () => {
     }
     ts.forEachChild(file, visit)
     expect(hasParam, 'TerminalContextMenu 的参数里没有 mouseTrackingMode——根因入口 prop 缺席').toBe(true)
+  })
+})
+
+describe('提示的样式落在共享 CSS 规则里，且那条规则真的带着承重声明', () => {
+  // 为什么这一族必须存在：`.tab-context-menu__hint` 的**选择器在场**已经被 rendered-class-has-rule
+  // 那道全局门守着，但那道门只收集选择器名（`definedClasses()` 走 `matchAll(/\.(-?[A-Za-z_][\w-]*)/g)`
+  // 扫整张表），所以一条**空规则体**照样满足它——实测把这条规则清成 `.tab-context-menu__hint {}` 后
+  // 那道门 10 条全绿（同一形状的事故：那道门自己的注释就记着「一条规则的理由注释满足了在场正则」）。
+  // 声明体这一层只能在这里守。
+  //
+  // 判据落在**声明体**上，不落在「文件里出现过这个属性名」上：整条规则整条相等地取出来，再逐属性问
+  // 取值。选择器必须整条相等——子串命中会被兄弟规则（例如某个 `.x .tab-context-menu__hint`）替被删的
+  // 规则作保（这条坑在 surface-tool-dock.test.ts 的 ruleBody 注释里已记过一次）。
+  const HINT = '.tab-context-menu__hint'
+
+  /** 一条规则的声明体（注释已剥除）；选择器整条相等才算命中，不在场时空串。 */
+  function ruleBody(selector: string): string {
+    for (const [, selectors, body] of allStyleRules().matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      if (selectors!.split(',').some((one) => one.trim() === selector)) return body!
+    }
+    return ''
+  }
+
+  /** 规则里某个属性的取值；不在场时空串。 */
+  function declaration(selector: string, property: string): string {
+    return ruleBody(selector).match(new RegExp(`(?:^|;)\\s*${property}\\s*:\\s*([^;]+)`))?.[1]?.trim() ?? ''
+  }
+
+  it('组件不自带内联样式——取值只能来自这条共享规则', () => {
+    // 此前这些取值是 7 条 `style={{...}}` 内联声明（当时不允许改 .css）。内联回来就意味着同一份取值
+    // 有了第二个来源，改主题/改档位时两处必漂移，且下面几条断言会在全绿下变成守着一份没人用的规则。
+    let inlineStyled = 0
+    const visit = (node: ts.Node): void => {
+      if (ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node)) {
+        if (node.tagName.getText(file) === 'ContextMenu.Label') {
+          for (const attribute of node.attributes.properties) {
+            if (ts.isJsxAttribute(attribute) && attribute.name.getText(file) === 'style') inlineStyled += 1
+          }
+        }
+      }
+      ts.forEachChild(node, visit)
+    }
+    ts.forEachChild(file, visit)
+    expect(inlineStyled, '提示的 ContextMenu.Label 又带上了 style={{...}}——取值出现第二个来源').toBe(0)
+  })
+
+  it('提示挂的 className 正是那条规则的选择器', () => {
+    // 接线层：规则再对，className 写错（或被删）也一样看不到。判 Label 的 className 字面量。
+    let className: string | null = null
+    const visit = (node: ts.Node): void => {
+      if (ts.isJsxOpeningElement(node) && node.tagName.getText(file) === 'ContextMenu.Label') {
+        for (const attribute of node.attributes.properties) {
+          if (
+            ts.isJsxAttribute(attribute) &&
+            attribute.name.getText(file) === 'className' &&
+            attribute.initializer !== undefined &&
+            ts.isStringLiteral(attribute.initializer)
+          ) {
+            className = attribute.initializer.text
+          }
+        }
+      }
+      ts.forEachChild(node, visit)
+    }
+    ts.forEachChild(file, visit)
+    expect(className, `提示的 className 不是 ${HINT.slice(1)}——它挂不到那条规则上`).toBe(HINT.slice(1))
+  })
+
+  it('规则体带着四条承重声明：字号、颜色、行距、内边距', () => {
+    // 在场自证：先要求规则体非空，否则下面每条 `declaration(...)` 都在读空串，四条断言会一起变成
+    // 「空 !== 期望」——那当然会红，但红的理由会指向属性而不是「整条规则没了」，诊断被带偏。
+    expect(
+      ruleBody(HINT).trim(),
+      `${HINT} 的规则体是空的——提示会以菜单项的字号/颜色显示，与可点项无从区分`
+    ).not.toBe('')
+    // 逐条问取值，而不是问「属性名出现过吗」：把 `--fs-micro` 改成 `--fs-body`、把 `--text-3` 改成
+    // `--text`，提示就与 `.tab-context-menu__item` 逐像素同形——那正是这条规则存在的理由。
+    expect(declaration(HINT, 'font-size'), '提示字号不是 --fs-micro——与菜单项同号就分不出说明与可点项').toBe('var(--fs-micro)')
+    expect(declaration(HINT, 'color'), '提示颜色不是 --text-3——说明文字不该与可点项同亮').toBe('var(--text-3)')
+    // 整句提示会换到两行，行距必须显式给：菜单项那条给的是 18px 定高，落到多行提示上会撑得很散。
+    expect(declaration(HINT, 'line-height'), '提示没有自己的 line-height——多行时行距会沿用菜单项的定高').not.toBe('')
+    // 与菜单项左右对齐（同为 --sp-4），否则提示会与它解释的那一项错开。
+    expect(declaration(HINT, 'padding'), '提示的横向内边距要与菜单项对齐（--sp-4）').toContain('var(--sp-4)')
+  })
+
+  it('规则给了换行宽度上限，且它比菜单最小宽度大', () => {
+    // max-width 是「提示可以换行、菜单不会被一句长提示撑爆」这件事的唯一承重项。取值必须比容器的
+    // min-width 大，否则上限反而成了收窄，菜单宽度会由提示决定。
+    const hintMax = Number(declaration(HINT, 'max-width').replace('px', ''))
+    const menuMin = Number(declaration('.tab-context-menu', 'min-width').replace('px', ''))
+    expect(Number.isFinite(hintMax), `${HINT} 没有 max-width——一句长提示会把菜单横向撑开`).toBe(true)
+    // 前提自证：容器那条 min-width 必须读得到，否则这条比较在拿 NaN 作参照（恒红或恒绿都有可能）。
+    expect(Number.isFinite(menuMin), '读不到 .tab-context-menu 的 min-width——这条比较没有参照').toBe(true)
+    expect(hintMax, '提示的 max-width 不大于菜单 min-width——上限成了收窄').toBeGreaterThan(menuMin)
+  })
+
+  it('刻意不写的两条声明，其前提仍然成立', () => {
+    // `display` 与 `white-space` 都被**刻意省掉**：Radix 的 Label 渲染成 div（默认 block），而这一块里
+    // 唯一那条 `white-space: nowrap` 落在 `.tab-context-menu__item > span:nth-child(2)`，不是提示的祖先。
+    // 省掉是对的（记忆 surviving-mutation-may-be-dead-condition：改不了结果的声明该删，不该让守卫替
+    // 死代码作保），但「前提成立」这件事会过期——某天给 `.tab-context-menu` 加一条 `white-space: nowrap`
+    // 或 `display: flex`，提示就会静默变成单行/被当成 flex 子项，而上面四条断言全绿（记忆
+    // expired-reason-for-not-mapping：刻意不做的理由要做成可检的入参）。所以在这里钉住那个前提本身。
+    expect(
+      declaration('.tab-context-menu', 'white-space'),
+      '容器加了 white-space——提示不再默认换行，规则里要显式写回 white-space: normal'
+    ).toBe('')
+    expect(
+      declaration('.tab-context-menu', 'display'),
+      '容器改成了 flex/grid——提示会被当成弹性子项，规则里要显式写回 display: block'
+    ).toBe('')
+    // 反向自证：这条判据靠「读得到就非空」区分，所以拿一个**确实在场**的属性验一次读取器还活着，
+    // 否则 declaration() 坏掉时（比如正则失配）上面两条会一起恒绿。
+    expect(
+      declaration('.tab-context-menu', 'min-width'),
+      'declaration() 连容器确实在场的 min-width 都读不到——上面两条 toBe("") 是恒绿的'
+    ).not.toBe('')
   })
 })

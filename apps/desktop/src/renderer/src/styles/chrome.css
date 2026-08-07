@@ -301,6 +301,20 @@
 .tab-context-menu__item kbd { margin-left:auto; color: var(--text-3); font: 10px/1.2 var(--font-mono); }
 .tab-context-menu__chevron { margin-left:auto; color: var(--text-3); font-size: var(--fs-title); }
 .tab-context-menu__separator { height: 1px; margin:var(--sp-2) var(--sp-3); background: var(--wash-2); }
+/* 菜单里的说明文字（不是可选项）。今天唯一的用法是 Copy 变灰时紧贴其下的那句逃生提示，所以
+   刻意不给 min-height、不给 hover/highlighted 态——它不可聚焦、不响应点击，视觉上必须一眼就
+   与 .tab-context-menu__item 区分开。
+   换行是本意（整句提示比一行菜单项长），但**不写 white-space**：默认就是 normal，这一块里唯一
+   那条 nowrap 落在 `.tab-context-menu__item > span:nth-child(2)`，不是提示的任何祖先；同理不写
+   `display: block`——Radix 的 Label 渲染成 div，而容器 `.tab-context-menu` 不是 flex。两条都改不了
+   结果，写上只会让下面那道声明体守卫替死代码作保（记忆 surviving-mutation-may-be-dead-condition）。 */
+.tab-context-menu__hint {
+  max-width: 260px;
+  padding:var(--sp-1) var(--sp-4);
+  color: var(--text-3);
+  font-size: var(--fs-micro);
+  line-height: 1.4;
+}
 .tab-drag-preview {
   width: 170px;
   height: 34px;
