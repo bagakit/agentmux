@@ -19,6 +19,7 @@ import {
 
 const here = dirname(fileURLToPath(import.meta.url))
 const indexPath = join(here, '../src/main/index.ts')
+const rendererMainPath = join(here, '../src/renderer/src/main.tsx')
 
 function stripComments(source: string): string {
   return source
@@ -137,5 +138,47 @@ describe('single-instance guard: index.ts wiring', () => {
     const source = stripComments(await readFile(indexPath, 'utf8'))
     expect(source).toContain("app.on('second-instance'")
     expect(source).toContain('foregroundActionsForSecondInstance(')
+  })
+})
+
+describe('top-frame navigation guard: index.ts wiring', () => {
+  // 判据本身（isAllowedTopFrameNavigation）与处理器体（topFrameNavigationGuard 被拒即 preventDefault）
+  // 在 top-frame-navigation.test.ts 里被直接执行质询。这里只钉「那个处理器确实挂到了主窗口 webContents
+  // 的 will-navigate 与 will-redirect 上」，以及「喂给它的来源是从窗口实际加载处派生的、不是另手抄的」。
+  // 之所以只能扫源码：index.ts 一 import 就跑 Electron app 副作用，无法在测试里 import。
+
+  it('derives the app origin from the same values the window loads content from', async () => {
+    const source = stripComments(await readFile(indexPath, 'utf8'))
+    // 扫描必须真命中，空读不许静默通过。
+    expect(source).toContain('new BrowserWindow(')
+    // 来源从 topFrameOrigin 派生，且两个入参正是加载分支用的同两处：dev 的 ELECTRON_RENDERER_URL 与
+    // prod 的 packagedRendererPath。手抄一个 URL 常量会漂移，本仓被坑过。
+    expect(source).toContain('topFrameOrigin({')
+    expect(source).toContain('rendererDevServerUrl: process.env.ELECTRON_RENDERER_URL')
+    expect(source).toContain('packagedRendererFilePath: packagedRendererPath')
+    // 派生锚点与实际 loadFile 用的必须是同一个常量，二者不能各写各的路径。
+    expect(source).toContain('const packagedRendererPath = join(import.meta.dirname')
+    expect(source).toContain('window.loadFile(packagedRendererPath')
+  })
+
+  it('registers the guard on BOTH will-navigate and will-redirect of the main window webContents', async () => {
+    const source = stripComments(await readFile(indexPath, 'utf8'))
+    // 处理器由工厂产出（与单测执行的是同一份代码），且真的挂到两个事件上。只守 will-navigate 会漏掉
+    // 30x / meta refresh 重定向链的落点，所以两条都要在。
+    expect(source).toContain('const guardTopFrameNavigation = topFrameNavigationGuard(appOrigin)')
+    expect(source).toContain("window.webContents.on('will-navigate', guardTopFrameNavigation)")
+    expect(source).toContain("window.webContents.on('will-redirect', guardTopFrameNavigation)")
+  })
+})
+
+describe('file-drop guard: renderer main.tsx wiring', () => {
+  it('installs the native file-drop guard on the window at startup', async () => {
+    const source = stripComments(await readFile(rendererMainPath, 'utf8'))
+    // 拦截逻辑（dragover/drop 都 preventDefault、可 dispose）在 top-frame-navigation.test.ts 里可观测地
+    // 验过；这里只钉住它在渲染入口真的被安装到 window 上。删掉这句，OS 拖文件进来的默认导航就不再被
+    // 「不发起」这一层挡住（主进程 will-navigate 闸仍是后盾，但纵深少一层）。
+    expect(source.length).toBeGreaterThan(0)
+    expect(source).toContain('installFileDropGuard(window)')
+    expect(source).toContain("from './lib/file-drop-guard'")
   })
 })
