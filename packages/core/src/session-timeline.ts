@@ -21,13 +21,41 @@ export type {
 export const MAX_AGENT_TIMELINE_ITEMS = 200
 const MAX_TIMELINE_MUTATION_BYTES = 128 * 1024
 const UTF8_ENCODER = new TextEncoder()
-const KINDS: readonly AgentTimelineItemKind[] = [
-  'user_message', 'assistant_message', 'tool_call', 'permission', 'lifecycle'
-]
-const STATUSES: readonly AgentTimelineItemStatus[] = ['streaming', 'complete', 'failed']
-const SOURCES: readonly AgentMuxEvidenceSource[] = [
-  'terminal-output', 'run-process', 'native-hook', 'acp', 'user'
-]
+// These three arrays are the sole runtime validation gate in `normalizeItem`. A plain
+// `readonly X[]` literal annotation only enforces ⊆ (every listed string is a union member); it is
+// blind to ⊇ (every union member is listed). Adding a member to a union in types.ts and forgetting
+// to list it here would silently REJECT every legitimate timeline item carrying the new member with
+// INVALID_AGENT_TIMELINE — a fail-closed data drop with NO compile error, and addition is the
+// common direction. Projecting each array off a total `Record<Union, true>` table turns BOTH
+// directions into a compile error at THIS file: a missing key errors (TS2741 — the ⊇ drift this
+// guards, kills the mutation "add a union member, forget the table entry"), and an extra key errors
+// (TS2353 — a stale entry left after a member is removed). Measured in this repo (session-timeline
+// via `npx tsc --noEmit`): the explicit `Record<Union, true>` annotation errors on a missing key AND
+// on an extra key; that is the load-bearing thing here, not any runtime `.includes` check — a
+// hand-written array is behaviourally identical to this projection, so only the compiler catches the
+// drift. Blind spot: it does not check the ORDER of members, only their exact set.
+const KIND_MEMBERS: Record<AgentTimelineItemKind, true> = {
+  user_message: true,
+  assistant_message: true,
+  tool_call: true,
+  permission: true,
+  lifecycle: true
+}
+const KINDS = Object.keys(KIND_MEMBERS) as readonly AgentTimelineItemKind[]
+const STATUS_MEMBERS: Record<AgentTimelineItemStatus, true> = {
+  streaming: true,
+  complete: true,
+  failed: true
+}
+const STATUSES = Object.keys(STATUS_MEMBERS) as readonly AgentTimelineItemStatus[]
+const SOURCE_MEMBERS: Record<AgentMuxEvidenceSource, true> = {
+  'terminal-output': true,
+  'run-process': true,
+  'native-hook': true,
+  acp: true,
+  user: true
+}
+const SOURCES = Object.keys(SOURCE_MEMBERS) as readonly AgentMuxEvidenceSource[]
 
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
