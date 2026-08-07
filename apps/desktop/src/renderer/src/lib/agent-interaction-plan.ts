@@ -15,14 +15,33 @@ import type {
  * exit 0——用户点「允许」，Agent 收到的是取消，界面上毫无差别。同一条思路已经在
  * agent-roster-menu.ts 用过，那里的注释也写明了同一个原因。
  *
- * 只做取值，不做样式：分档（scoped 与否）、图标、主次都留在组件里。这里唯一表达的判断是
- * 「哪些选项是肯定答复」——因为它决定了布局分档，而它必须与「答复本身」同一处算，否则一个说
- * 这是 allow、另一个答的是 reject，两边各自绿。
+ * 布局分档（scoped 与否）、图标、主次仍留在组件里。这里表达两条判断，都是因为「说错了会骗人」而必须
+ * 与取值同住：一是「哪些选项是肯定答复」——它决定布局分档，若与「答复本身」分开算，就会一个说这是
+ * allow、另一个答的是 reject，两边各自绿；二是「这个选项声称的风险档」——见
+ * `permissionTierClassName`，缺席必须能被表达成「不知道」，而那件事一旦交给 JSX 拼字符串，就有机会
+ * 被一个 `??` 变成乐观的谎。除此之外的样式仍不在这里。
  */
 
 /** 肯定答复：用户放行这次工具调用。其余（reject-*）是对工具的否决。 */
 export function isAffirmative(option: AgentMuxPermissionOption): boolean {
   return option.kind.startsWith('allow-')
+}
+
+/**
+ * 风险点的 class 列表——**未声明 tier 时不给档位修饰类**，只留基类。
+ *
+ * `tier` 在 `AgentMuxPermissionOption` 上是可选的，而缺席是真可达的：`acp-adapter.ts` 里
+ * `options: event.options.map((option) => ({ ...option }))` 把外部 ACP 客户端声明的选项整份摊平带过来，
+ * 那些选项完全可以不带 tier。此前组件里写的是 `option.tier ?? 'safe'`，于是**没被分类的选项被画成绿色
+ * 「safe」**——把「我不知道这有多危险」说成「这是安全的」，正好在权限卡点这个最不该乐观的地方。
+ *
+ * 判据落在这里而不是 JSX 里：基类 `.agent-interaction__tier` 自带中性 `var(--text-3)`，所以省掉修饰类
+ * 就是「点还在、槽位还在、但不声称任何档位」。返回 string 而不是 `RiskTier | undefined`，是为了让
+ * 「拼 class」这件事只发生一处——组件那侧曾经就是因为要自己拼，才有机会插进一个 `??`。
+ */
+export function permissionTierClassName(option: AgentMuxPermissionOption): string {
+  const base = 'agent-interaction__tier'
+  return option.tier === undefined ? base : `${base} ${base}--${option.tier}`
 }
 
 export type PermissionChoice = {
