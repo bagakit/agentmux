@@ -1,15 +1,13 @@
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
+import * as hookEventModule from '../src/agent-hook-event.js'
+import type { AgentHookLifecycleDialect } from '../src/agent-hook-event.js'
 import {
   AGENT_HOOK_LIFECYCLE_DIALECT,
-  COPILOT_HOOK_DIALECT,
-  CURSOR_HOOK_DIALECT,
-  GEMINI_HOOK_DIALECT,
-  GROK_HOOK_DIALECT,
-  HERMES_HOOK_DIALECT,
   HOOK_EVENT_NAME_PAYLOAD_KEYS,
-  PASCAL_CASE_HOOK_DIALECT,
-  PI_HOOK_DIALECT,
   canonicalHookLifecycleEvent,
   eventNamesCanReopenTurn,
   rawEventNamesForLifecycle,
@@ -43,6 +41,54 @@ import type { AgentHookLifecycleEvent, AgentCatalogEntry } from '../src/types.js
  *
  * 归一化的**行为**后果（工具结果能否进时间轴）由 hook-normalizer.test.ts 守；这里守的是协议本身。
  */
+
+/**
+ * `agent-hook-event.ts` 里每一个导出的方言块，**从模块导出派生**——不手抄常量名。
+ *
+ * 为什么必须派生：判据的期望值一旦是被守清单的另一份手抄，就抓不到「新添的那一份」。
+ * 手抄版只能发现不对称编辑；一个既没进私有 `HOOK_LIFECYCLE_DIALECTS`、也没进测试清单的
+ * 新方言块（对称遗漏）会让 `toEqual` 恒真（实测 26 条全绿）。
+ *
+ * 按命名约定 `*_HOOK_DIALECT` 取，取值必须是普通对象——`AgentHookLifecycleDialect` 是
+ * `Record<string, AgentHookLifecycleEvent>`，运行期没有品牌可查，所以约定就是判据。
+ * 「这个约定与源文件里的 export 声明逐字相等」由本文件的自检用真源码文本另钉一次，
+ * 那条自检不用 `toBeGreaterThan` 地板而是整份数组相等，故解析退化会红而不是静默变抽样。
+ *
+ * 谓词的目标类型写模块**自己导出的** `AgentHookLifecycleDialect`，不写 `Record<string, unknown>`：
+ * 后者不在命名空间取值的 union 里（那个 union 还含 `HOOK_EVENT_NAME_PAYLOAD_KEYS` 的 readonly
+ * 元组与四个函数类型），于是 TS2677「谓词类型必须可赋给形参类型」当场报错——我第一版就是这么写的，
+ * core 的 tsconfig 含 `test/**` 所以它真的被执行、真的红了。写成模块自己的类型既过编译，也让下游
+ * `Object.entries(dialect)` 拿到 `AgentHookLifecycleEvent` 而不是 `unknown`。
+ *
+ * 盲点（明说）：直接把 object literal 内联进 `HOOK_LIFECYCLE_DIALECTS`、不给它任何 `export const`
+ * 名字的写法，这里看不见——它进了合并面却不在导出面，两条判据都不会红。今天七个块全是命名导出，
+ * 且文件头写明「每个 Provider 一块声明、这里一行 spread」，内联写法违反那条约定；真要堵这个口，
+ * 判据得升级成解析 `HOOK_LIFECYCLE_DIALECTS` 数组的每个元素必须是标识符引用。
+ */
+function declaredDialectExports(): { name: string; dialect: AgentHookLifecycleDialect }[] {
+  return Object.entries(hookEventModule)
+    .filter(
+      (entry): entry is [string, AgentHookLifecycleDialect] =>
+        entry[0].endsWith('_HOOK_DIALECT') &&
+        typeof entry[1] === 'object' &&
+        entry[1] !== null
+    )
+    .map(([name, dialect]) => ({ name, dialect }))
+}
+
+/**
+ * 一个方言块里**没接进合并面**的条目（原始名缺席，或映射到了别的 canonical 事件）。
+ *
+ * 抽成函数是承重的，不是整洁：接线判据与它的反向自证必须走**同一个**谓词，否则自证证的是另一段
+ * 逻辑。我第一版把自证里的过滤条件手抄了一遍，注释却写「走同一个判据函数」——那正是本仓
+ * comment-promises-more-than-assertion 那一族（注释承诺的比断言强）。现在两个调用点共用这里。
+ */
+function unwiredEntries(dialect: AgentHookLifecycleDialect): [string, AgentHookLifecycleEvent][] {
+  return Object.entries(dialect).filter(
+    ([raw, canonical]) => AGENT_HOOK_LIFECYCLE_DIALECT[raw] !== canonical
+  )
+}
+
 describe('Core Provider protocol', () => {
   const registry = new AgentProviderRegistry()
   const providers = registry.list()
@@ -404,10 +450,15 @@ describe('Core Provider protocol', () => {
     it('方言按 Provider 分块声明，合并面等于各块之并——新 Provider 只动自己那块', () => {
       // 这是为并行开发做的结构约束：加一个 Provider 不该改任何已有 Provider 的映射。
       // 合并面必须恰好等于各块的并集，既不丢（漏接线）也不多（有人偷偷往全局表塞条目）。
-      const blocks = [
-        PASCAL_CASE_HOOK_DIALECT, HERMES_HOOK_DIALECT, PI_HOOK_DIALECT,
-        GROK_HOOK_DIALECT, GEMINI_HOOK_DIALECT, CURSOR_HOOK_DIALECT, COPILOT_HOOK_DIALECT
-      ]
+      //
+      // 块清单**从模块导出派生**（见 `declaredDialectExports`），不在这里手抄第二份。
+      // 此前这里写死了七个常量名，于是判据只抓「不对称」编辑：改源文件那份数组而忘了改这里 → 红。
+      // 但**对称遗漏**完全隐身——新写一个 `X_HOOK_DIALECT`，既没进 `HOOK_LIFECYCLE_DIALECTS`
+      // 也没进这里的清单，两边都缺，`toEqual` 照旧成立。实测：注入一个孤儿 `ZULU_HOOK_DIALECT`
+      // 后 26 条全绿（基线也是 26），而那家 Provider 的 hook 事件会全部落到「不认识的生命周期」、
+      // 时间轴永不前进。期望值是被守清单的另一份手抄，就抓不到新添的那一份
+      //（记忆 equivalence-cannot-catch-a-fresh-copy / expected-value-must-not-derive-from-mutation-target）。
+      const blocks = declaredDialectExports().map(({ dialect }) => dialect)
       const union: Record<string, AgentHookLifecycleEvent> = {}
       for (const block of blocks) Object.assign(union, block)
       expect(AGENT_HOOK_LIFECYCLE_DIALECT).toEqual(union)
@@ -418,6 +469,61 @@ describe('Core Provider protocol', () => {
           expect(canonicalHookLifecycleEvent(raw)).toBe(canonical)
         }
       }
+    })
+
+    it('每个导出的方言块都真的接进了合并面——孤儿块（写了没接）必须红', () => {
+      // 上面那条用派生清单算并集，于是「导出了但没接线」这件事在它那里不可观测：孤儿块进了 blocks，
+      // 也就进了 union，两边一起多一份、仍然相等。所以真正的接线判据在这里：**逐块**问
+      // 「你的每一个原始名在合并面里吗、且映射一致吗」。孤儿块的键不在 `AGENT_HOOK_LIFECYCLE_DIALECT`
+      // 里（它由源文件那个私有数组 spread 出来），于是当场红。
+      //
+      // 反方向（进了私有数组却没 export）由 `declaredDialectExports` 的解析面兜住：那个数组只能引用
+      // 本文件的绑定，没导出的绑定拿不到 → 上面那条的 union 会缺它 → toEqual 红。
+      const exported = declaredDialectExports()
+      for (const { name, dialect } of exported) {
+        for (const [raw, canonical] of unwiredEntries(dialect)) {
+          expect.fail(
+            `${name} 声明了 ${raw}→${canonical}，但合并面里没有它（实际是 ${String(AGENT_HOOK_LIFECYCLE_DIALECT[raw])}）——这个块没接进 HOOK_LIFECYCLE_DIALECTS`
+          )
+        }
+      }
+      // 正面钉住这条用例真的看过东西：`exported` 为空时上面的循环一次都不进，判据会恒绿。
+      expect(exported.length, '一个方言块都没解析到——判据退化成恒真').toBeGreaterThan(0)
+    })
+
+    it('自检：解析面确实数到了每一个导出的方言块（少一个就退化成抽样）', () => {
+      // 若 `declaredDialectExports` 的解析退化（正则失配、import 求值拿到 undefined），上面两条会在
+      // 空集或子集上恒绿。这条正面钉住：源文件里以 `export const *_HOOK_DIALECT` 声明的名字集合，
+      // 必须与解析出来的名字集合**逐字相等**——不是「至少 N 个」这种地板。
+      const source = readFileSync(
+        join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'agent-hook-event.ts'),
+        'utf8'
+      )
+      const declaredInSource = [...source.matchAll(/^export const (\w+_HOOK_DIALECT)\b/gmu)]
+        .map((match) => match[1]!)
+        .sort()
+      expect(declaredInSource.length, '源文件里一个 *_HOOK_DIALECT 导出都没扫到——解析面退化了').toBeGreaterThan(0)
+      expect(
+        declaredDialectExports().map(({ name }) => name).sort(),
+        '解析出的方言块与源文件里的 export 声明不一致'
+      ).toEqual(declaredInSource)
+    })
+
+    it('自检：注入一个孤儿方言块，接线判据必红（证明它不是恒真）', () => {
+      // 这是上面「孤儿块必须红」那条的反向自证。不改源文件，只在**内存里**造一个没接线的块，
+      // 喂给上面那条用的同一个 `unwiredEntries`。若那个谓词恒返回空，上面那条就永远抓不到孤儿块，
+      // 而这里会红——这是它唯一的活性证明。
+      const orphan: AgentHookLifecycleDialect = { zulu_session_open: 'session-start' }
+      expect(
+        unwiredEntries(orphan).map(([raw]) => raw),
+        '孤儿块的键竟然被判成已接线——上面那条接线判据是恒真的'
+      ).toEqual(['zulu_session_open'])
+      // 反向：一个真接线过的块必须判成空，否则谓词恒红、上面那条会对健康代码打假红。
+      const wired = declaredDialectExports()[0]!
+      expect(
+        unwiredEntries(wired.dialect),
+        `${wired.name} 是真接线过的块，却被判成未接线——谓词恒红会对健康代码打假红`
+      ).toEqual([])
     })
 
     it('不做大小写折叠：只有真被观察到的拼法在表里，折过来的拼法一律认不出', () => {
