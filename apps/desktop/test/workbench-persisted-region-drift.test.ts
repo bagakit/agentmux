@@ -192,6 +192,10 @@ describe('漂移的持久化 Tab 不得让无条件断言炸在持久化路径�
         tabId: 'view',
         droppedGhostRegionIds: ['r0'],
         droppedOrphanLeafIds: ['r9'],
+        // 这一类是 #571 加的第三种抢救（重复叶）。这张 fixture 里没有重复，所以是空数组——
+        // 逐字写出来而不是换成 toMatchObject：这条断言的判据正是「抢救如实分类」，
+        // 把比较放宽到子集就等于允许它把别的类别悄悄写满。
+        droppedDuplicateLeafIds: [],
         discardedTab: true
       }
     ])
