@@ -25,10 +25,13 @@ export type SplitDirection = 'left' | 'right' | 'up' | 'down'
 // 算出来的 NaN，那道兜底已被撤掉。
 //
 // 但两棵树的**兜底位置不一样**，别把这句读成「渲染层一律夹」：只有 tab-group 那一侧的渲染层自己夹
-// 一次（WorkspaceWorkbench.tsx:1119），region 那一侧把 node.ratio 裸着交出去——给 <Panel> 的
-// :798/:815，给分屏提交器的 :788/:791。region 靠的是「每个写入点都夹过」这条上游不变量，详见
-// split-tree.ts 里 clampSplitRatio 的注释。于是新增一个写 region ratio 的地方时必须自己夹——
-// 渲染层不会替你兜。
+// 一次（`SplitBranch`），region 那一侧（`WorkbenchRegionBranch`）把 node.ratio 裸着交出去——两个
+// <Panel defaultSize>，加上分屏提交器的构造参数与 synchronizePersistedRatio。后两处的**被调方**自己
+// 夹（#595 起 SplitRatioCommitter 在它的两个入口各调一次 clampSplitRatio），所以「裸着交」在那条路上
+// 已经不构成漏点；两个 <Panel> 仍是裸的且无人守。region 整体靠的是「每个写入点都夹过」这条上游不变量，
+// 详见 split-tree.ts 里 clampSplitRatio 的注释——这段话与那边是同一份，判据也在同一处
+// （split-ratio-handoff-guards.test.ts，按 AST 找交接口，两个方向都会红）。于是新增一个写 region
+// ratio 的地方时必须自己夹——渲染层不会替你兜。
 export type TabGroupLayoutNode = SplitTreeNode<{ groupId: string }>
 
 export type TabGroup = {
