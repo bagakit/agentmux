@@ -9,7 +9,7 @@ import {
   removeTab,
   type WorkspaceLayout
 } from './workbench-layout'
-import { clampSplitTreeRatios, removeLeaf } from './split-tree'
+import { clampSplitTreeRatios, dedupeLeafIds, removeLeaf } from './split-tree'
 import {
   removeWorkbenchRegion,
   workbenchSurfaces,
@@ -19,7 +19,7 @@ import {
   type WorkbenchSurface,
   type WorkbenchTab
 } from './workbench-tabs'
-import { closeWorkbenchRegion, regionIds } from './workbench-view-layout'
+import { closeWorkbenchRegion, regionIds, regionLeafId } from './workbench-view-layout'
 import { assertUnreachableSurface, isSessionSurface } from './workbench-surface-kinds'
 import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
 
@@ -37,6 +37,15 @@ export type PersistedTabRepair = {
   droppedGhostRegionIds: string[]
   /** 树里有、regions 表里没有的孤儿叶（画成 null，看不见也关不掉）。 */
   droppedOrphanLeafIds: string[]
+  /**
+   * 同一个 regionId 在树里出现多次时，被摘掉的那些重复片（保留读序首片）。
+   *
+   * 与上面两类分开记，因为**失败面不同**：孤儿/死记录是「两侧对不上」，而重复叶违反的是 removeLeaf
+   * 写明的前置条件「叶子 id 在一棵树内唯一」，且它对两个集合判据（Set 差集）完全隐身——`[r1,r1]` 配
+   * `{r1}` 的 ghosts 与 orphans 都是空，会从早退那条路原样交出去，然后被 `assertRegionInvariant` 的
+   * 排序逐元素判据抓住并抛出。合并成一类会让「修了什么」说不清楚。
+   */
+  droppedDuplicateLeafIds: string[]
   /** 两侧毫无交集 → 这张 Tab 整体不可救，只能丢弃。 */
   discardedTab: boolean
 }
@@ -132,12 +141,35 @@ function normalizePersistedLayout(layout: WorkspaceLayout): WorkspaceLayout {
  * 画不出来，孤儿叶本来就是空格。告知用户「修好了一个你从来看不见的东西」只是噪音。
  */
 function reconcilePersistedLayout(layout: WorkspaceLayout): WorkspaceLayout {
-  const tree = groupIds(layout.root)
+  // 与 region 侧同一条理由（见 reconcilePersistedTab 顶部）：下面两个判据都是 `Set`，对重复完全失明。
+  // 两条重复轴都要在取集合**之前**收掉，否则收紧后的 `assertGroupInvariant`（排序逐元素 + 比长度）
+  // 会在持久化路径上抛，而那正是本函数存在的理由。
+  //
+  //   1. **重复叶**：树里同一个 groupId 两片。
+  //   2. **重复记录**：`layout.groups` 是**数组**（region 侧的 `tab.regions` 是对象，一个 id 只存得下
+  //      一条，所以这条轴那边根本不存在）。`[g1]` 配 `[g1, g1]` 两个方向的 `Set` 差都是空，早退原样
+  //      交出去，而收紧后的判据比长度 → 抛。
+  //
+  // 两条都按「保留第一次出现」：树侧是 `collectLeafIds` 的读序（见 dedupeLeafIds 的说明），记录侧是
+  // 数组顺序——同一个 id 的两条记录可能带着不同的 tabOrder/activeTabId，而「哪条是真的」在数据里没有
+  // 答案，取先出现的那条与树侧同规矩。
+  const root0 = dedupeLeafIds(layout.root, groupLeafId)
+  const groups0 = layout.groups.filter(
+    (group, index) => layout.groups.findIndex((other) => other.id === group.id) === index
+  )
+  const tree = groupIds(root0)
   const treeSet = new Set(tree)
-  const recordSet = new Set(layout.groups.map((group) => group.id))
+  const recordSet = new Set(groups0.map((group) => group.id))
   const orphanLeafIds = tree.filter((id) => !recordSet.has(id))
-  const ghostRecordIds = layout.groups.filter((group) => !treeSet.has(group.id)).map((g) => g.id)
-  if (orphanLeafIds.length === 0 && ghostRecordIds.length === 0) return layout
+  const ghostRecordIds = groups0.filter((group) => !treeSet.has(group.id)).map((g) => g.id)
+  if (
+    root0 === layout.root &&
+    groups0.length === layout.groups.length &&
+    orphanLeafIds.length === 0 &&
+    ghostRecordIds.length === 0
+  ) {
+    return layout
+  }
 
   const kept = tree.filter((id) => recordSet.has(id))
   // 一个可画的分组都不剩：不编树，原样交出去（见 JSDoc 末段）。
@@ -145,9 +177,9 @@ function reconcilePersistedLayout(layout: WorkspaceLayout): WorkspaceLayout {
 
   // 逐个摘掉孤儿叶。`kept` 非空保证 `removeLeaf` 每次都还留得下至少一片叶子，故它恒不返回 null；
   // `?? root` 是给类型的，不是给一条可达路径的。
-  let root = layout.root
+  let root = root0
   for (const orphanId of orphanLeafIds) root = removeLeaf(root, groupLeafId, orphanId) ?? root
-  const groups = layout.groups.filter((group) => !ghostRecordIds.includes(group.id))
+  const groups = groups0.filter((group) => !ghostRecordIds.includes(group.id))
   // `activeGroupId` 原样带走，**刻意不在这里重座**：那件事恰好只有一个正确答案，而它已经有主了。
   // 两个调用点都是 `normalizePersistedLayout(keepTabsInLayout(...))`（:362 与 :487），那一处按
   // 「树 ∩ groups」重座，而本函数刚把两侧拉成同一个集合，所以它算出的答案与这里能算的逐点相同；
@@ -183,12 +215,24 @@ function reconcilePersistedLayout(layout: WorkspaceLayout): WorkspaceLayout {
 function reconcilePersistedTab(
   tab: WorkbenchTab
 ): { tab: WorkbenchTab | null; repair: PersistedTabRepair | null } {
-  const tree = regionIds(tab.layout.root)
+  // 去重必须排在**取集合之前**：下面两个判据都是 `Set`，而 `Set` 对重复完全失明——`[r1, r1]` 配
+  // `{r1}` 的 ghosts 与 orphans 都是空，会从下一行的早退原样交出去，然后被 `assertRegionInvariant`
+  // 的排序逐元素判据抓住并抛出（那条判据同时比长度，所以它认得出重复；group 侧的 Set 差集认不出）。
+  // 实测过：这张 Tab 在 `projectPersistedWorkbench`（partialize）与 `restorePersistedWorkbench`
+  // 两个入口都抛，前者意味着任意一次用户操作变成崩溃且此后再也写不进去。
+  const deduped = dedupeLeafIds(tab.layout.root, regionLeafId)
+  const duplicates = deduped === tab.layout.root
+    ? []
+    : regionIds(tab.layout.root).filter((id, index, all) => all.indexOf(id) !== index)
+  const layoutRoot = deduped
+  const tree = regionIds(layoutRoot)
   const treeIds = new Set(tree)
   const mapIds = new Set(Object.keys(tab.regions))
   const ghosts = [...mapIds].filter((id) => !treeIds.has(id))
   const orphans = tree.filter((id) => !mapIds.has(id))
-  if (ghosts.length === 0 && orphans.length === 0) return { tab, repair: null }
+  if (ghosts.length === 0 && orphans.length === 0 && duplicates.length === 0) {
+    return { tab, repair: null }
+  }
 
   const kept = tree.filter((id) => mapIds.has(id))
   if (kept.length === 0) {
@@ -198,6 +242,7 @@ function reconcilePersistedTab(
         tabId: tab.id,
         droppedGhostRegionIds: ghosts,
         droppedOrphanLeafIds: orphans,
+        droppedDuplicateLeafIds: duplicates,
         discardedTab: true
       }
     }
@@ -205,7 +250,7 @@ function reconcilePersistedTab(
 
   // 逐个摘掉孤儿叶。`closeWorkbenchRegion` 在只剩一叶时拒绝动手，而 kept 非空保证了每次摘除都还有
   // 至少一片留存叶，故每一步都能落地；它同时负责把落在被摘叶上的焦点交给兄弟。
-  let layout = tab.layout
+  let layout = { ...tab.layout, root: layoutRoot }
   for (const orphanId of orphans) layout = closeWorkbenchRegion(layout, orphanId)
   const regions = Object.fromEntries(
     Object.entries(tab.regions).filter(([regionId]) => !ghosts.includes(regionId))
@@ -227,6 +272,7 @@ function reconcilePersistedTab(
       tabId: tab.id,
       droppedGhostRegionIds: ghosts,
       droppedOrphanLeafIds: orphans,
+      droppedDuplicateLeafIds: duplicates,
       discardedTab: false
     }
   }
