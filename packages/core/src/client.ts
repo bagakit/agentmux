@@ -2683,10 +2683,12 @@ export class AgentMuxClient {
           'AGENT_TERMINAL_HANDSHAKE_STATE_INVALID'
         )
       }
-      if (
-        readiness.readyThroughByte === undefined &&
-        readiness.consumedBySubmissionId === undefined
-      ) {
+      // 只判 `readyThroughByte === undefined`：这里**没有** `consumedBySubmissionId === undefined`
+      // 那一项，因为 `terminalPromptReadiness()` 的归一化已经先拦下「有 consumedBySubmissionId 却没有
+      // readyThroughByte」这个组合（抛 'Terminal prompt readiness does not match its Agent Run
+      // boundary.'），所以只要 readyThroughByte 缺席，consumedBySubmissionId 就必然也缺席——那一项
+      // 恒真、不可达，删掉不改变任何行为。
+      if (readiness.readyThroughByte === undefined) {
         this.promptSubmission.observeReadiness(current, readiness)
       }
     }
@@ -3521,11 +3523,14 @@ export class AgentMuxClient {
       this.publisher.publishInteraction(request)
     }
     this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
+    // 同上：只判 `readyThroughByte === undefined`，不再判 `consumedBySubmissionId === undefined`。
+    // `terminalPromptReadiness()` 的归一化拦下「有 consumedBySubmissionId 却没有 readyThroughByte」
+    // 的组合（抛 'Terminal prompt readiness does not match its Agent Run boundary.'），故 readyThroughByte
+    // 缺席时 consumedBySubmissionId 必然缺席——那一项恒真、不可达。
     if (
       normalized.eventName === 'Stop' &&
       next.terminalPromptReadiness &&
-      next.terminalPromptReadiness.readyThroughByte === undefined &&
-      next.terminalPromptReadiness.consumedBySubmissionId === undefined
+      next.terminalPromptReadiness.readyThroughByte === undefined
     ) {
       this.promptSubmission.observeReadiness(next, next.terminalPromptReadiness)
     }
