@@ -29,9 +29,25 @@ export type RegionGeometry = { regionId: string; bounds: WorkbenchRegionBounds }
  */
 export const REGION_GEOMETRY_EPSILON = 1e-6
 
-/** 该方向沿横轴（left/right）还是纵轴（up/down）。方向→轴的派生只在这里算一次。 */
+/**
+ * 该方向沿横轴（left/right）还是纵轴（up/down）。方向→轴的派生只在这里算一次。
+ *
+ * 写成**无 `default` 的穷举 switch**，与下面 `edgeGap` 同形，不是 `... ? 'horizontal' : 'vertical'`
+ * 那种三元。三元的 `: 'vertical'` 是个默认桶：给 union 加第五个方向（比如将来的 `previous`），它会
+ * 静默落进 vertical，没有编译错、没有红测试——正是本仓反复被咬的那一类「带兜底臂的 union 投影」。
+ * 无 default 的 switch 让返回类型不再覆盖新成员的路径，tsc 当场以 TS2366 报红，逼这一档显式作答。
+ * （实测：临时给 SplitDirection 加一个成员，此函数改回三元时 tsc 沉默、改成本 switch 时报
+ * `split-direction.ts: TS2366 Function lacks ending return statement`。）
+ */
 export function orientationOf(direction: SplitDirection): 'horizontal' | 'vertical' {
-  return direction === 'left' || direction === 'right' ? 'horizontal' : 'vertical'
+  switch (direction) {
+    case 'left':
+    case 'right':
+      return 'horizontal'
+    case 'up':
+    case 'down':
+      return 'vertical'
+  }
 }
 
 /**
@@ -48,9 +64,21 @@ export function orientationOf(direction: SplitDirection): 'horizontal' | 'vertic
  * 两棵树会对同一个「向左」给出相反的落点，而两边各自的测试照旧全绿——它们各自断言的是自己那棵树。
  *
  * 判据成对：`up` 与 `left` 都是 `first`，靠的是"轴的前半"这一个概念，不是两条巧合。
+ *
+ * 与 {@link orientationOf} 同理，写成**无 `default` 的穷举 switch** 而非 `... ? 'first' : 'second'`：
+ * 三元的 `: 'second'` 是默认桶，给 union 加一个方向会让新成员静默判成 `second`（新格出现在反侧、
+ * 看起来完全像一次正常分屏），零编译错、零红测试——本仓多次被咬的那类隐性回归。无 default 的 switch
+ * 让 tsc 以 TS2366 挡住新增而未作答的成员。
  */
 export function placementOf(direction: SplitDirection): 'first' | 'second' {
-  return direction === 'left' || direction === 'up' ? 'first' : 'second'
+  switch (direction) {
+    case 'left':
+    case 'up':
+      return 'first'
+    case 'right':
+    case 'down':
+      return 'second'
+  }
 }
 
 /**
