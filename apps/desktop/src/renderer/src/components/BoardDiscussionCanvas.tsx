@@ -19,6 +19,7 @@ import { configuredExecutors } from '../lib/executors'
 import type { BoardRow } from '../lib/project-board'
 import { executorDetectionKey, useAppStore } from '../store'
 import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
+import { ComposerTextarea } from './ComposerTextarea'
 
 export function BoardDiscussionCanvas({
   row,
@@ -194,11 +195,11 @@ export function BoardDiscussionCanvas({
 
                   <label className="discussion-prompt">
                     <span>Discussion topic</span>
-                    <textarea
+                    <ComposerTextarea
                       autoFocus
                       rows={7}
                       value={prompt}
-                      onChange={(event) => setPrompt(event.target.value)}
+                      onValueChange={setPrompt}
                       placeholder={isTopic
                         ? 'What should the Agent investigate, decide, or write down in this Topic?'
                         : 'What should the Agent investigate, decide, or change on this Branch?'}

@@ -10,6 +10,7 @@ import { launcherCanLaunch, launcherKeydownLaunches } from '../lib/launcher-subm
 import { resolveLauncherWorkspaceId } from '../lib/launcher-workspace'
 import { warmLauncherId, warmTerminalPreview } from '../lib/warm-terminal-preview'
 import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
+import { ComposerTextarea } from './ComposerTextarea'
 import { LaunchRefine } from './LaunchOptionControls'
 import { TerminalView } from './TerminalView'
 import { isMacPlatform } from '../lib/host-platform'
@@ -293,10 +294,10 @@ export function NewTabSurface({
         ) : null}
       </div>
 
-      <textarea
+      <ComposerTextarea
         ref={promptRef}
         value={prompt}
-        onChange={(event) => setPrompt(event.target.value)}
+        onValueChange={setPrompt}
         // Cmd/Ctrl+Enter 从这里发车。挂在 textarea 上而不是整个 section 上：section 里还嵌着热终端的
         // 预览（TerminalView），keydown 会从它冒泡上来，挂在外层就会把用户敲进那个终端的 Cmd+Enter
         // 抢掉。这一格是 prompt 唯一被输入的地方，也正是注册表里 `launcher.submit` 不带 gate 的理由。
