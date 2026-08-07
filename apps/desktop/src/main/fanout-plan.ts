@@ -1,5 +1,6 @@
 import { basename, join } from 'node:path'
 import { MAX_FANOUT_LANES } from '../shared/fanout-limits.js'
+import { fanOutSlug } from '../shared/fanout-naming.js'
 
 // Turning "this prompt, five ways" into a concrete plan.
 //
@@ -48,15 +49,11 @@ export type FanOutRequest = {
   existingWorktreePaths: readonly string[]
 }
 
-// Git refs forbid a lot; rather than encode all of refname rules, keep to a conservative alphabet that
-// is unambiguous in a path as well, since the branch name also becomes the directory name.
-function slugify(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/gu, '-')
-    .replace(/^-+|-+$/gu, '')
-    .slice(0, 40)
-}
+// Git refs forbid a lot; the conservative alphabet a branch name is reduced to lives in ONE place —
+// {@link fanOutSlug} — because the surface derives a stem from the prompt with the same function and the
+// authority slugs `baseName` again here. Two copies once drifted (the surface's trimmed a trailing
+// hyphen after truncation, this one did not), so the chain's correctness hung on an unstated fixed
+// point; a single function makes that idempotence instead.
 
 /**
  * Build the plan.
@@ -80,7 +77,7 @@ export function planFanOut(request: FanOutRequest): FanOutPlan {
     return { kind: 'rejected', reason: 'A fan-out needs at least one Agent executor.' }
   }
 
-  const stem = slugify(request.baseName)
+  const stem = fanOutSlug(request.baseName)
   if (stem === '') {
     return { kind: 'rejected', reason: 'A fan-out needs a usable branch name.' }
   }
