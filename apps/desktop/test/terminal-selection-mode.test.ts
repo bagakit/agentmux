@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   isPlainDragSelectionSuppressed,
+  MOUSE_TRACKING_MODES,
   selectionForceGestureHint,
   terminalSelectionSuppressionHint,
   type MouseTrackingMode
@@ -21,23 +22,34 @@ import {
  */
 
 /**
- * 五种模式全列，`satisfies` 保证每个都是合法取值。旁边那个 `Record<MouseTrackingMode, ...>` 才是
- * **完整性**的守卫：xterm 若新增/删改一种模式，那个对象字面量会在 tsc 下缺键/多键报错，逼这张表更新
- * （vitest 只转译不查类型，所以完整性靠单文件 tsc 检查兜，见提交说明）。这两者合起来钉住「这张枚举
- * 就是 xterm 的全集」，避免「抽查的那一对可能正是盲点」。
+ * 被测的模式集合**从被测模块导出的全集派生**，本文件不留手抄清单。
+ *
+ * 此前这里是 `const ACTIVE_MODES = ['x10','vt200','drag','any'] as const satisfies …` 加一个
+ * `Record<MouseTrackingMode, …>` 完整性自检，注释还写着「完整性靠单文件 tsc 检查兜」——那个检查在
+ * 任何门禁里都不存在（`apps/desktop/tsconfig.json` 的 include 只有 `src/**`，vitest 只转译不查类型），
+ * 所以那条自检从来没有被任何工具执行过，是死代码；而手抄清单漏一个字面量则完全静默。
+ * 现在全集由 `MOUSE_TRACKING_MODES` 提供，它在 `src/` 里由带标注的 `Record` 强制穷举，执行者是
+ * `pnpm typecheck`。
+ *
+ * `none` 也不再是手抄的字面量常量：它由「表里判为不压制的那一侧」筛出来。于是下面「相反答案」那条
+ * 判据两侧都随表变化，谁都无法单独漂移。
  */
-const ACTIVE_MODES = ['x10', 'vt200', 'drag', 'any'] as const satisfies readonly MouseTrackingMode[]
-const NONE_MODE = 'none' as const satisfies MouseTrackingMode
+const NONE_MODES = MOUSE_TRACKING_MODES.filter((mode) => !isPlainDragSelectionSuppressed(mode))
+const ACTIVE_MODES = MOUSE_TRACKING_MODES.filter((mode) => isPlainDragSelectionSuppressed(mode))
+const NONE_MODE: MouseTrackingMode = 'none'
 
-// 完整性自检（编译期）：键必须恰好是 MouseTrackingMode 的全集。缺一个→漏测一种模式，多一个→拼错。
-const _MODE_EXHAUSTIVE: Record<MouseTrackingMode, 'active' | 'none'> = {
-  none: 'none',
-  x10: 'active',
-  vt200: 'active',
-  drag: 'active',
-  any: 'active'
-}
-void _MODE_EXHAUSTIVE
+// 上面两个集合是用**被测函数自己**切出来的，所以它们的大小必须另外钉住，否则实现退化成常量时
+// （恒 true / 恒 false）一侧会变成空数组，而「对空数组的每个元素都成立」恒真——那正是判据塌陷的形状。
+// 这两条断言不依赖模式的具体拼法，只依赖「xterm 恰好一种模式不上报鼠标」这个来自源码的事实（NONE=0）。
+describe('模式全集本身：判据的前提自检', () => {
+  it('全集恰好来自类型层，且被分成非空的两侧', () => {
+    expect(MOUSE_TRACKING_MODES.length, '模式全集为空——导出取值坏了，下面所有遍历都会恒真').toBeGreaterThan(1)
+    expect(NONE_MODES, '不压制的那一侧必须恰好是 none 一种（xterm 里 events=0 只有 NONE）').toEqual([NONE_MODE])
+    expect(ACTIVE_MODES.length, '压制的那一侧为空——实现恒 false，下面的遍历会退化成恒真').toBe(
+      MOUSE_TRACKING_MODES.length - 1
+    )
+  })
+})
 
 // 平台判定必须**显式传 userAgent**：node 测试环境里 `navigator.userAgent` 读出 'Node.js/24'，既不含
 // 'Mac' 也不含 'Windows'，于是不传就恒为非 mac——那样 mac 分支永不可观测（记忆

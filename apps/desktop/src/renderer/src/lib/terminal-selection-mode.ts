@@ -32,6 +32,36 @@ import { isMacPlatform } from './host-platform'
 export type MouseTrackingMode = Terminal['modes']['mouseTrackingMode']
 
 /**
+ * 每种模式的 `events` 位掩码是否非零，逐字取自 xterm 源码：NONE=0、X10=1、VT200=19、DRAG=23、ANY=31。
+ *
+ * 这张表活在 `src/` 而不是测试里，**因为只有这里的编译期检查真的会被执行**：`apps/desktop/tsconfig.json`
+ * 的 `include` 只有 `src/**`，而 vitest 只转译不查类型。此前这个完整性自检写在
+ * `test/terminal-selection-mode.test.ts` 里、注释还声称「靠单文件 tsc 检查兜」——那个检查在任何门禁里
+ * 都不存在，于是整条判据是死代码，xterm 增删一种模式不会有任何东西变红（记忆
+ * desktop-tsc-does-not-see-tests）。搬到这里之后，`pnpm typecheck` 就是它的执行者。
+ *
+ * 显式标注 `Record<MouseTrackingMode, boolean>` 是承重的：xterm 增一种模式 → 缺键报错，删/改一种 →
+ * 多余键报错，两个方向都逼人回来重新判断它落在哪一侧。**不要**把标注换成 `satisfies`——那只校验取值
+ * 合法、不强制键是全集，缺键会静默通过。
+ */
+const MOUSE_REPORTING_ACTIVE: Record<MouseTrackingMode, boolean> = {
+  none: false,
+  x10: true,
+  vt200: true,
+  drag: true,
+  any: true
+}
+
+/**
+ * 全部模式，从上面那张表的键派生——**不手抄第二份**。
+ *
+ * 测试遍历这个导出来逐模式质询，于是「测到的模式集合」与「类型层的全集」在编译期被同一个对象绑住：
+ * 漏测一种模式的唯一方式是让 tsc 先报错。此前测试里有一份手抄的 `ACTIVE_MODES = ['x10','vt200','drag','any']`，
+ * 那种形状下漏掉一个字面量是静默的（记忆 sampled-pair-can-be-the-blind-spot）。
+ */
+export const MOUSE_TRACKING_MODES = Object.keys(MOUSE_REPORTING_ACTIVE) as readonly MouseTrackingMode[]
+
+/**
  * xterm 此刻会不会拒绝从一次「平白左拖」里建立选区。
  *
  * 等价于 xterm 的 `areMouseEventsActive`（`events !== 0`）：除 `none`（events=0）之外的四种模式
@@ -41,11 +71,20 @@ export type MouseTrackingMode = Terminal['modes']['mouseTrackingMode']
  * 也上报。但对「平白左拖能不能选中」这个问题，它们今天给出**同一个**答案，因为四者的 `events` 都非零。
  * 若日后要让「只报点击」的模式仍允许拖选，那是一次**行为变更**，应走 follow-up，而不是在这里偷偷分叉。
  *
- * 未知模式（xterm 将来新增、类型层已用索引访问兜住）走保守的一侧：当作压制（返回 true）。方向是刻意的
- * ——误判为压制只会多显示一句提示，而误判为不压制会把这个静默死胡同再放回给用户。
+ * 取值读上面那张表，而不是再写一遍 `mode !== 'none'`：那样分类就有了两份（表里一份、这里一份），
+ * 而 tsc 管不住两份之间的一致性。现在表是唯一的分类真相，改表里任何一个布尔值都会让行为测试变红。
+ *
+ * 这里**没有** `?? true` 之类的兜底，是实测结论而非疏漏：`MOUSE_REPORTING_ACTIVE` 是
+ * `Record<MouseTrackingMode, boolean>`，键是有限 union 而非索引签名，所以取值类型就是 `boolean`、
+ * 永不为 `undefined`（`noUncheckedIndexedAccess` 只作用于索引签名，对声明属性不生效）。我先写过
+ * `?? true` 并给它编了一段「未知模式倒向提示那一侧」的理由，然后实测：把 `?? true` 改成 `?? false`
+ * 是 20 条全绿 + tsc exit 0，整段删掉也是 20 条全绿 + tsc exit 0——那个分支根本不可达，注释是在为
+ * 一段死代码担保（记忆 surviving-mutation-may-be-dead-condition / comment-promises-more-than-assertion）。
+ * xterm 真的新增一种模式时，把守的人是上面那个 `Record` 标注：缺键当场编译报错，而不是在运行期被
+ * 一个悄悄猜错方向的兜底吞掉。
  */
 export function isPlainDragSelectionSuppressed(mode: MouseTrackingMode): boolean {
-  return mode !== 'none'
+  return MOUSE_REPORTING_ACTIVE[mode]
 }
 
 /**
