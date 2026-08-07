@@ -5,7 +5,7 @@ import { CURSOR_LAUNCH_OPTIONS } from '../agent-launch-option.js'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
-import { catalog, managedHookCommand } from './shared.js'
+import { catalog, managedHookCommand, HOOK_COMMAND_TIMEOUT_SECONDS } from './shared.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
 
@@ -129,7 +129,7 @@ export function createCursorManagedHookPlan(
   const hooks = Object.fromEntries(CURSOR_HOOK_EVENTS.map((eventName) => [eventName, [
     // 事件名必须靠 `--event` 传：Cursor 的负载里**没有** `hook_event_name`（本机 bundle 实测——
     // 那个键只出现在它自己的遥测标签里）。少了这个旗标，每条事件到 Core 都是 'unknown'。
-    { command: `${command} --event ${eventName}`, timeout: 10 }
+    { command: `${command} --event ${eventName}`, timeout: HOOK_COMMAND_TIMEOUT_SECONDS }
   ]]))
   return {
     providerId: 'cursor',

@@ -3,7 +3,7 @@ import { join, resolve } from 'node:path'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
-import { catalog, managedHookCommand } from './shared.js'
+import { catalog, managedHookCommand, HOOK_COMMAND_TIMEOUT_SECONDS } from './shared.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
 
@@ -88,7 +88,7 @@ export function createDroidManagedHookPlan(env?: Readonly<Record<string, string>
   const events = Object.fromEntries(DROID_HOOK_EVENTS.map((eventName) => [eventName, [{
     // matcher 测的是工具名，只有两个工具事件有这个语义。其余事件上写 matcher 是噪音。
     ...(eventName === 'PreToolUse' || eventName === 'PostToolUse' ? { matcher: '*' } : {}),
-    hooks: [{ type: 'command', command, timeout: 10 }]
+    hooks: [{ type: 'command', command, timeout: HOOK_COMMAND_TIMEOUT_SECONDS }]
   }]]))
   return {
     providerId: 'droid',

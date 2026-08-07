@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { AgentProviderRegistry, resolveManagedHookPlan } from '../../src/agent-provider.js'
 import { DROID_HOOK_EVENTS, DROID_HOOKS, createDroidManagedHookPlan } from '../../src/providers/droid.js'
+import { HOOK_COMMAND_TIMEOUT_SECONDS } from '../../src/providers/shared.js'
 import { canonicalHookLifecycleEvent } from '../../src/agent-hook-event.js'
 import { renderMergedHookContent } from '../../src/hook-config-merge.js'
 import { USAGE_FINALIZATION_EVENTS } from '../../src/agent-hook-command.js'
@@ -76,7 +77,9 @@ describe('Droid provider', () => {
         const entry = config[eventName]![0]!
         expect(entry.hooks[0]!.type).toBe('command')
         expect(entry.hooks[0]!.command).toContain('agentmux-hook.js')
-        expect(entry.hooks[0]!.timeout).toBe(10)
+        // 从 SSOT 常量派生，不再手抄一份 `10`——bump 常量不该把这条无辜打红（那正是「编码了漂移」的旧写法）。
+        // 值仍流经 provider 代码→JSON→parse→这里，所以 provider 里写死错值或丢掉 timeout 照样红。
+        expect(entry.hooks[0]!.timeout).toBe(HOOK_COMMAND_TIMEOUT_SECONDS)
       }
     })
 

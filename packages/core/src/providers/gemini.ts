@@ -4,7 +4,7 @@ import { GEMINI_LAUNCH_OPTIONS } from '../agent-launch-option.js'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
-import { catalog, managedHookCommand } from './shared.js'
+import { catalog, managedHookCommand, HOOK_COMMAND_TIMEOUT_SECONDS } from './shared.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
 
@@ -63,7 +63,7 @@ export function createGeminiManagedHookPlan(homeOverride?: string): AgentManaged
     // matcher 只在工具类事件上有意义（`matchesContext` 拿它去比 `context.toolName`）。
     // 空串与 `*` 都被读作「匹配全部」，这里显式写 `*` 与 Claude 侧保持一致。
     ...(eventName === 'BeforeTool' || eventName === 'AfterTool' ? { matcher: '*' } : {}),
-    hooks: [{ type: 'command', command, timeout: 10 }]
+    hooks: [{ type: 'command', command, timeout: HOOK_COMMAND_TIMEOUT_SECONDS }]
   }]]))
   return {
     providerId: 'gemini',

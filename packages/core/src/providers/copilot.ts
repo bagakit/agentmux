@@ -3,7 +3,7 @@ import { join, resolve } from 'node:path'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
-import { catalog, managedHookCommand } from './shared.js'
+import { catalog, managedHookCommand, HOOK_COMMAND_TIMEOUT_SECONDS } from './shared.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
 
@@ -160,7 +160,7 @@ export function createCopilotManagedHookPlan(env?: Readonly<Record<string, strin
     ...(eventName === 'preToolUse' || eventName === 'postToolUse' ? { matcher: '.*' } : {}),
     // 事件名靠 `--event` 传：Copilot 的负载里没有任何事件名键（见文件头的实测记录），少了它每条事件
     // 到子进程都解析不出事件名、整条 POST 被静默丢弃。与 antigravity/cursor 同一修法。
-    hooks: [{ type: 'command', command: `${command} --event ${eventName}`, timeoutSec: 10 }]
+    hooks: [{ type: 'command', command: `${command} --event ${eventName}`, timeoutSec: HOOK_COMMAND_TIMEOUT_SECONDS }]
   }]]))
   return {
     providerId: 'copilot',
