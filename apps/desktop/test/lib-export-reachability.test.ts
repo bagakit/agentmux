@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
-import { readAndParse } from './helpers/effect-reachability.js'
+import { parseTsx, readAndParse } from './helpers/effect-reachability.js'
 
 // ---------------------------------------------------------------------------
 // renderer 的 `lib/` 里，每个 `export` 都得有人消费。
@@ -17,8 +17,9 @@ import { readAndParse } from './helpers/effect-reachability.js'
 //
 // ─── 判据为什么是「不动点」，而不是「名字在别的文件里出现过」───
 //
-// 后者是最容易写的判据，且**实测不可用**：它在本仓 138 个 lib 模块 / 779 个导出里报出 134 个
-// （17%），绝大多数是误报。原因是导出的**类型**常常只在自己文件里被点名，而在调用点是靠**推断**
+// 后者是最容易写的判据，且**实测不可用**：在引入这道门的那一刻（`d6c7c37^`，138 个 lib 模块 /
+// 779 个导出）它报出 134 个（17%），绝大多数是误报。原因是导出的**类型**常常只在自己文件里被
+// 点名，而在调用点是靠**推断**
 // 消费的——例如 `TabDropZone` 只出现在同文件的 `Exclude<TabDropZone, 'center'>` 里，可它是
 // `resolvePaneColumnEdgeZone` 返回类型的一部分，每个调用方都在用它。「名字没在别处出现」因此
 // 不等于「没有消费者」。
@@ -27,11 +28,16 @@ import { readAndParse } from './helpers/effect-reachability.js'
 //   种子：在**定义文件之外**被提到过名字的导出；
 //   闭包：同一个文件里，凡是声明了「已活」名字的那条语句，它引用到的导出也算活——
 //        并且**不分那条声明有没有 export**（非导出的本地 helper 也传递可达性）。
-//        少了「不分导出」这一条，本判据会把 `MAX_STEP_SUMMARY_LENGTH`（只被同文件的私有
-//        `clamp()` 消费）误报成孤儿。这是本文件第一版探针真的犯过的错，写在这里免得重犯。
+//        少了「不分导出」这一条，「只被同文件的私有 helper 消费」的导出会被误报成孤儿。
+//        **这一条今天在本仓没有任何真实见证**：实测把闭包收窄成只走导出声明，整棵树的裁决一字不变
+//        （两种写法都是 0 个孤儿），也就是说它保护的形状此刻一个实例都不存在。所以它由下面
+//        「自检 3」用一个**合成模块**钉住——那是本文件里唯一不读真实源码的断言，理由写在那条断言里。
 //   迭代到不动点，剩下的就是**任何地方都没有消费者**的导出。
-// 同一份输入下，不动点把 134 收敛到 2。差额里有 131 个是靠闭包翻身的：**118 个类型 + 13 个取值**，
-// 全是上面那类「只在自己文件里被点名、在调用点靠推断消费」的误报。
+// 同一份输入（`d6c7c37^`）下，不动点把 134 收敛到 2。差额 132 个全是靠闭包翻身的：**118 个类型 +
+// 14 个取值**，全是上面那类「只在自己文件里被点名、在调用点靠推断消费」的误报。
+// 这两组数必须来自**同一棵树**：本注释第一版把 `134→2`（提交前）与 `131 / 13 个取值`（提交后，那次
+// 提交删掉 3 个导出）拼在一句话里，于是 134−2=132 与「131 个」自相矛盾——差额算不平就是这个拼接的
+// 指纹。今天的树是 776 个导出 / 131 naive / 0 孤儿，与上面那组不可混用。
 //
 // ─── 这条判据**只**保证什么，**不**保证什么 ───
 //
@@ -48,7 +54,7 @@ import { readAndParse } from './helpers/effect-reachability.js'
 //       本轮实测 12 个这样的导出，逐个判定记在 tracker #615，不在这里用清单表达：白名单会腐烂，
 //       而本仓已经记过「forbidden-list-guard-always-leaks」。
 //     - 它看不见「该私有」这一类。只被自己文件消费的导出被闭包**正确地**判成活的——它确实有
-//       消费者，只是那个消费者在同一个文件里。上面那 131 个里就混着这一类（本轮把
+//       消费者，只是那个消费者在同一个文件里。上面那 132 个里就混着这一类（本轮把
 //       `tab-drop-zone.ts` 那个 tab 条高度常量降级为私有，靠的是 review 不是这道门）。降级为
 //       私有是另一条规则，需要另一个判据，别指望这里兜。
 //     - 它只看 `lib/`。components/、hooks/、store.ts 的导出不在扫描面内（那些文件里 Props 类型
@@ -125,14 +131,19 @@ function mentionedOutside(name: string, exclude: string): boolean {
   return false
 }
 
-/** 一个 lib 模块里，没有任何消费者的导出名。 */
-function unconsumedExports(file: string): string[] {
-  const { sourceFile } = readAndParse(file)
+/**
+ * 不动点本体：给定一份 AST 与「哪些导出算种子」，返回没有任何消费者的导出名。
+ *
+ * 与 `unconsumedExports` 分开，是为了让判据能跑在**合成模块**上（自检 3）——真实源码里
+ * 「只被同文件私有 helper 消费的导出」今天一个都没有，不合成就没有任何东西能让闭包的
+ * 「不分导出」那一条变得可观测。
+ */
+function unconsumedExportsOf(sourceFile: ts.SourceFile, isSeed: (name: string) => boolean): string[] {
   const statements = [...sourceFile.statements]
   const exported = new Set(statements.flatMap(exportedNames))
   if (exported.size === 0) return []
 
-  const alive = new Set([...exported].filter((name) => mentionedOutside(name, file)))
+  const alive = new Set([...exported].filter(isSeed))
   // 同文件组合的闭包：迭代到不动点。`alive` 里放的是**任何**已活名字（含非导出的本地 helper），
   // 所以「私有 helper 消费了某个导出」这条边传得过去。
   for (let grew = true; grew; ) {
@@ -148,6 +159,11 @@ function unconsumedExports(file: string): string[] {
     }
   }
   return [...exported].filter((name) => !alive.has(name))
+}
+
+/** 一个 lib 模块里，没有任何消费者的导出名。 */
+function unconsumedExports(file: string): string[] {
+  return unconsumedExportsOf(readAndParse(file).sourceFile, (name) => mentionedOutside(name, file))
 }
 
 describe('renderer lib 的每个导出都有消费者', () => {
@@ -208,5 +224,59 @@ describe('renderer lib 的每个导出都有消费者', () => {
     ).toContain(PROBE)
     expect(mentionedOutside(PROBE, probeFile), `探针 ${PROBE} 在别的文件里出现了，它是种子而非闭包救活的`).toBe(false)
     expect(unconsumedExports(probeFile)).not.toContain(PROBE)
+  })
+
+  it('自检：闭包传递「非导出」声明——今天没有真实见证，所以用合成模块钉住', () => {
+    // 这是本文件里**唯一**不读真实源码的断言，理由必须写清：
+    //
+    // 闭包刻意「不分那条声明有没有 export」（`declaredNames` 而不是 `exportedNames`），为的是让
+    // 「导出只被同文件的**私有** helper 消费」这条边传得过去。而**本仓今天没有任何这种形状**——
+    // 实测把闭包收窄成只走导出声明，整棵树的裁决一字不变（两种写法都是 0 个孤儿，差集为空）。
+    // 于是那一条收窄在真实源码上**完全不可观测**：把 `declaredNames` 换成 `exportedNames`
+    // 整套测试照旧全绿。本仓记过这一族（「守卫要判可达性不是在场」「结构守卫对整体 no-op 免疫」）：
+    // 判据必须**被证明会红**，不能假定它守着。
+    //
+    // 合成模块提供那个缺席的见证：`kept` 只被私有的 `helper()` 引用，`helper` 自己被导出的
+    // `entry()` 引用，`entry` 是种子。少了「不分导出」这一跳，`helper` 传不出去，`kept` 会被
+    // 误报成孤儿。合成的代价是它不证明真实源码里有这种形状（今天没有），只证明**判据本身**
+    // 认得它——所以上面那条全树断言才是主判据，这条只守着它的一个能力。
+    const synthetic = parseTsx(
+      'synthetic-closure-witness.ts',
+      [
+        'export const kept = 1',
+        'function helper(): number { return kept }',
+        'export function entry(): number { return helper() }'
+      ].join('\n')
+    )
+    const seeds = new Set(['entry'])
+
+    expect(
+      unconsumedExportsOf(synthetic, (name) => seeds.has(name)),
+      '闭包没能穿过非导出的 helper：`kept` 被误报成孤儿。这正是 declaredNames→exportedNames 那次收窄的后果'
+    ).toEqual([])
+
+    // 反向自检：这个合成模块**真的**依赖那一跳，否则上面那条恒真。只走导出声明时 `kept` 必须掉出来。
+    const exportedOnly = (sourceFile: ts.SourceFile): string[] => {
+      const statements = [...sourceFile.statements]
+      const exported = new Set(statements.flatMap(exportedNames))
+      const alive = new Set([...exported].filter((name) => seeds.has(name)))
+      for (let grew = true; grew; ) {
+        grew = false
+        for (const statement of statements) {
+          if (!exportedNames(statement).some((name) => alive.has(name))) continue
+          for (const identifier of identifiersIn(statement)) {
+            if (!alive.has(identifier)) {
+              alive.add(identifier)
+              grew = true
+            }
+          }
+        }
+      }
+      return [...exported].filter((name) => !alive.has(name))
+    }
+    expect(
+      exportedOnly(synthetic),
+      '合成模块没能区分两种闭包，上面那条断言因此恒真——换一个真的依赖私有 helper 的形状'
+    ).toEqual(['kept'])
   })
 })
