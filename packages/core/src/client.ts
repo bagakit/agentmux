@@ -61,6 +61,8 @@ import { cloneSession, sameRun } from './agent-session-identity.js'
 import { AgentScreenEvidenceStore } from './screen-evidence.js'
 import { AgentPromptSubmissionCoordinator } from './prompt-submission.js'
 import {
+  CTXMUX_COMMIT,
+  CTXMUX_VERSION,
   CtxmuxRunAdapter,
   type CtxmuxAdapterDataEvent,
   type CtxmuxAdapterEvent,
@@ -338,7 +340,10 @@ export function terminalEnvironment(
     TERM: 'xterm-256color',
     COLORTERM: 'truecolor',
     TERM_PROGRAM: 'AgentMux',
-    TERM_PROGRAM_VERSION: '0.1.0',
+    // Bound to the SHA-verified vendored runtime version, not a hand-copied literal — see
+    // CTXMUX_VERSION in ctxmux-run-adapter.ts. Bumping the vendored artifact must not leave this
+    // TERM_PROGRAM_VERSION frozen at a stale string.
+    TERM_PROGRAM_VERSION: CTXMUX_VERSION,
     FORCE_HYPERLINK: '1',
     ...environment,
     PATH: [dirname(AGENTMUX_CLI_PATH), inheritedPath].filter(Boolean).join(delimiter),
@@ -933,9 +938,14 @@ export class AgentMuxClient {
       arch: process.arch,
       supported: process.platform === 'darwin' && process.arch === 'arm64',
       ctxmux: {
-        version: '0.1.0',
+        // version/sourceCommit are the SHA-verified vendored originals (CTXMUX_VERSION /
+        // CTXMUX_COMMIT in ctxmux-run-adapter.ts, asserted against manifest.json at load), NOT
+        // retyped literals. protocolVersion already comes from the live identity object, so it was
+        // never at risk; version and commit were frozen literals that drift when the artifact is
+        // bumped. Importing the constants makes doctor/about report the actual running runtime.
+        version: CTXMUX_VERSION,
         protocolVersion: identity.protocolVersion,
-        sourceCommit: 'c13ab114f6ddf0cf8eb22c6cc39bb16f7aa0dec7',
+        sourceCommit: CTXMUX_COMMIT,
         artifactPlatform: 'darwin-arm64',
         ready: true,
         capabilities: {
