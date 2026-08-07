@@ -72,21 +72,7 @@ export function TerminalContextMenu({
               紧贴 Copy 之下说清「为什么 + 怎么办」，把用户从这个静默死胡同里领出来。ContextMenu.Label
               不可聚焦、不响应点击，纯粹是说明文字。selectionHint 为 null（未压制）时整行不挂。 */}
           {selectionHint ? (
-            <ContextMenu.Label
-              className="tab-context-menu__hint"
-              role="note"
-              // 内联样式而非新 CSS 类：本轮不允许改任何 .css 文件。取值全用已有的全局设计 token，
-              // 它们随主题在级联里解析，所以浅/深色都对；保留 className 供日后抽成正式规则的挂点。
-              style={{
-                display: 'block',
-                padding: 'var(--sp-1) var(--sp-4)',
-                maxWidth: '260px',
-                color: 'var(--text-3)',
-                fontSize: 'var(--fs-micro)',
-                lineHeight: 1.4,
-                whiteSpace: 'normal'
-              }}
-            >
+            <ContextMenu.Label className="tab-context-menu__hint" role="note">
               {selectionHint}
             </ContextMenu.Label>
           ) : null}
