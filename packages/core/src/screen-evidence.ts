@@ -32,6 +32,21 @@ export class AgentScreenEvidenceStore {
 
   private readonly builds = new Map<string, Promise<AgentTerminalScreenEvidence>>()
 
+  /**
+   * 每个 Session 的作废世代。单调递增，只比相等：`build()` 在握手前记下世代，登记前再比一次。
+   *
+   * 为什么不能只靠 `evidence` / `builds` 两张表：作废（`discard` / `discardAll`）只能撤回**已登记**
+   * 的证据，而一次 `build()` 从 `observeOutput` 发出到拿到 Attachment 之间是异步的。掉线正好落在
+   * 这段窗口里时，作废看到的两张表里还没有这个 entry，随后握手返回、`build()` 把一具挂在**已死连线**
+   * 上的证据登记进去——`failed` 是 false（掉线只会走 adapter 那个全局 errorListener，不会经由本次
+   * 观察的 listener 置位它），于是 `ensure()` 的复用闸认为它可用，此后每一次观察都复用这具尸体、
+   * 永远等不到字节。而「半死 daemon」恰恰就是让握手悬在途中的那种故障，所以这不是理论缝隙。
+   *
+   * 不随 `discard` 删除表项：删掉等于把世代重置回 0，会让一次**合法**的在途 build 误判成已作废。
+   * 计数器按 Session 各一个整数，生命周期与会话相同。
+   */
+  private readonly generations = new Map<string, number>()
+
   constructor(private readonly deps: ScreenEvidenceDeps) {}
 
   async wait(
@@ -95,6 +110,7 @@ export class AgentScreenEvidenceStore {
     session: AgentMuxAgentSession
   ): Promise<AgentTerminalScreenEvidence> {
     this.discard(session.agentSessionId)
+    const generation = this.generations.get(session.agentSessionId) ?? 0
     const matcher = this.deps.providers.get(session.providerId).terminalPromptRender
     let evidence: AgentTerminalScreenEvidence | null = null
     const pending: AgentTerminalScreenEvidenceEvent[] = []
@@ -113,6 +129,15 @@ export class AgentScreenEvidenceStore {
         forward({ type: 'exit' })
       }
     })
+    // 握手期间被作废了（掉线 / Run 更换）：这条 Attachment 挂在已经死掉的连线上，登记它就是留一具
+    // `failed === false` 的尸体给 `ensure()` 复用。关掉它并抛，让调用方走与「观察被取消」相同的出口。
+    if ((this.generations.get(session.agentSessionId) ?? 0) !== generation) {
+      await observation.close().catch(() => {})
+      throw new AgentMuxError(
+        'Terminal screen observation was cancelled.',
+        'AGENT_PROMPT_READINESS_CANCELLED'
+      )
+    }
     if (observation.gap) {
       await observation.close().catch(() => {})
       throw new AgentMuxError(
@@ -150,6 +175,9 @@ export class AgentScreenEvidenceStore {
   }
 
   discard(agentSessionId: string): void {
+    // 世代**无条件**递增，且排在早退之前：在途的 build 此刻还没有 entry，只有让它的世代过期才拦得住
+    // 它事后登记（见 `generations` 的说明）。写成「有 entry 才递增」会让那条路径原封不动地留着。
+    this.generations.set(agentSessionId, (this.generations.get(agentSessionId) ?? 0) + 1)
     const entry = this.evidence.get(agentSessionId)
     if (!entry) return
     this.evidence.delete(agentSessionId)
@@ -158,7 +186,12 @@ export class AgentScreenEvidenceStore {
   }
 
   discardAll(): void {
-    for (const agentSessionId of [...this.evidence.keys()]) {
+    // 两张表都要遍历：`evidence` 是已登记的（要关 Attachment、要 dispose），`builds` 是握手在途的
+    // ——它一个 entry 都还没有，作废它的唯一手段就是让世代过期。只扫前者会漏掉整条在途路径。
+    for (const agentSessionId of new Set([
+      ...this.evidence.keys(),
+      ...this.builds.keys()
+    ])) {
       this.discard(agentSessionId)
     }
     this.builds.clear()

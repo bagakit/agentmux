@@ -700,6 +700,32 @@ export class AgentMuxClient {
     const verdict = judgeReconnectFlap({ flapCount: this.reconnectFlaps })
     this.reconnectFlaps = verdict.flapCount
     this.connected = false
+    // 线断了 ⇒ 一切**长命的屏幕观察**当场失效。这不是卫生，是可观测的行为改变，也是 #628 的关键一环：
+    //
+    // 掉线时，`observeOutput` 的排空循环把错误交给 adapter 那个**全局** errorListener，而不是交给某次观察
+    // 自己的 listener。于是屏幕证据永远不会 `fail()`，挂在它上面那次 `wait()` 也就永不 settle。同时
+    // `AgentScreenEvidenceStore.ensure()` 复用旧 entry 的条件是 `runId 相同 && !evidence.failed`——一具
+    // **没被标记 failed 的死证据**恰好满足它。所以重连时握手路径那次重挂（open() → ensureTerminalHandshake
+    // → observeReadiness）会重新挂到同一具尸体上，照旧永等；readiness 卡在 pending，此后每条 prompt 被
+    // AGENT_PROMPT_NOT_READY 拒掉，且没有任何出路。
+    //
+    // 在这里显式作废，两件事同时发生：挂着的 wait 立刻以 AGENT_PROMPT_READINESS_CANCELLED 结束（dispose()
+    // → notify() → inspect() 走 `this.disposed` 那条出口），而下一次 ensure() 因为 entry 已从表里删掉必须
+    // 重建。设计 SSOT 写的就是这条：docs/design/agentmux-desktop-interaction.md「失效（resize、重连、gap）
+    // 时重建」——重连与 resize、gap 同类。
+    //
+    // 放在 give-up 判决**之前**（即两条出口共用）：连接判死时同样要作废，否则用户手动 Resume 时依然会
+    // 撞上那具尸体。
+    //
+    // 这两行各买一件事，谁都不是另一个的简写（都由变异实测分开钉住，见 test/client-connection-lost.test.ts
+    // 的 #628 那一组）：
+    //   `discardAll()`  —— 结束挂着的 wait（dispose → notify → inspect 走 disposed 出口）并强制下一次
+    //                      ensure() 重建。删掉它：那条观察永远挂着，且重挂会复用尸体。
+    //   `cancelAllReadiness()` —— 清 `readinessCancels`。删掉它：`observeReadiness` 的 .catch 撞
+    //                      CANCELLED 会提前 return 而不删表项，于是那条闭包连着它的 AbortController
+    //                      永久留着（每次掉线泄一条）。
+    this.promptSubmission.cancelAllReadiness()
+    this.screenEvidence.discardAll()
     if (verdict.kind === 'give-up') {
       // 响亮终局，且**立刻**给出——不再发 lost、不再起重连。用户拿到的是「连不上，请手动处理」，
       // 而不是第 N 次「重连中…」。恢复入口已经在场（SessionPane 的 Resume / Check again）。

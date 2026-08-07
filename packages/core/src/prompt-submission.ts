@@ -21,6 +21,20 @@ import type {
 const TERMINAL_PROMPT_RENDER_TIMEOUT_MS = 10_000
 
 /**
+ * 等空 composer 的上界。比 {@link TERMINAL_PROMPT_RENDER_TIMEOUT_MS} 宽得多，因为这条等待横跨的是
+ * **Agent 冷启动**：进程刚起、TUI 还在画首帧、模型还没连上，都算在里面。渲染那条等待是「字已经送进去了，
+ * 屏幕该回显了」，量级完全不同，所以两个预算不共用一个常量（记忆 two-budgets-guard-one-thing：短的那个
+ * 只会贡献假阴性）。
+ *
+ * 为什么必须有上界：这条等待此前**根本没有定时器**——`AgentTerminalScreenEvidence.wait()` 只在
+ * `options.timeoutMs !== undefined` 时才 arm 一个 timer，而这里没传。于是任何「屏幕永不再变」的情形
+ * （断线丢流、TUI 卡在别的界面、provider 的 composer 匹配器认不出这一版布局）都让 readiness 永久停在
+ * pending，此后每条 prompt 被 `AGENT_PROMPT_NOT_READY` 拒掉且**没有任何出路**（#628/#238）。超时把
+ * 「永久静默」换成一条响亮的 agent-error，用户至少知道该重开会话。
+ */
+const TERMINAL_COMPOSER_READY_TIMEOUT_MS = 120_000
+
+/**
  * Details attached to readiness refusals are deliberately a small, machine-readable set of
  * lifecycle facts.  Keep this formatter local to the Core owner: prompt text, digests and PTY
  * bytes must never be copied into an error that may cross a client boundary.
@@ -668,6 +682,10 @@ export class AgentPromptSubmissionCoordinator {
       readiness.source === 'initial-composer',
       (screen) => screen.composerText(matcher.activeComposer) === '',
       {
+        // `timeoutMessage` 只有在**同时**传了 `timeoutMs` 时才会被用到：`wait()` 里那个定时器是
+        // `if (options.timeoutMs !== undefined)` 才 arm 的。此前这里只给了措辞、没给预算，于是那句
+        // 文案是死的、这条等待没有任何上界（#628）。两者必须成对出现。
+        timeoutMs: TERMINAL_COMPOSER_READY_TIMEOUT_MS,
         timeoutMessage: 'Timed out waiting for an empty Agent composer.',
         terminalMessage: 'Agent Run exited before its composer became ready.',
         signal: controller.signal,
