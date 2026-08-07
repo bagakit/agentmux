@@ -121,6 +121,20 @@ describe('terminal 绑定的动作', () => {
     expect(calls.remembered).toEqual([])
   })
 
+  it('terminal.copy 在没选区时连剪贴板都不碰——写空串会抹掉用户上一次复制的内容', () => {
+    // 与上一条分开成两个 it，因为它们守的是两个不同的出口：上面那条守「别覆盖记住的那份」，
+    // 这条守「别覆盖用户的剪贴板」。写在同一个 it 里时先失败的那条会让后面成死代码，于是只杀
+    // 剪贴板那一侧的变异读起来像「已经被守住了」（记忆 two-throws-in-one-it-mask-each-other）。
+    //
+    // 这条分支为什么可达：xterm 的 `hasSelection()`（纯坐标）与 `getSelection()`（trimRight 之后
+    // 的文本）对「有没有选区」判得不一样，在空白处横拖就分岔。用户报的 #610 那句「划词的时候它
+    // 自己显示一个 Copy，但那个 Copy 又不成功」正是这一刻，而且它比「没复制成」更糟：剪贴板里
+    // 原来那份被空串换掉了，且全程静默（剪贴板出口只在 IPC 抛错时报，写空串是它的正常路径）。
+    const { calls, handlers } = spyDeps('')
+    handlers['terminal.copy']!()
+    expect(calls.clipboard, '没选区时往剪贴板写了东西——用户上一次复制的内容被抹掉').toEqual([])
+  })
+
   it('terminal.clear 清屏', () => {
     const { calls, handlers } = spyDeps()
     handlers['terminal.clear']!()
@@ -147,12 +161,19 @@ describe('terminal 绑定的动作', () => {
  * 上面那族钉的是「命中之后做什么」，而**吞不吞这个键**是另一件事，并且是四个变异全存活的那一族：
  * review 实测把 `terminalKeyEventHandler` 里这四处各改一处，98 条（其中一处 676 条）全绿——
  *
- * 1. `:125` 的 `!deps.hasSelection()` 改成 `false`：**没选区的 Ctrl+C 不再发 SIGINT**，被当成
- *    「复制空串」吞掉。用户中断不了跑飞的程序，这是四条里最重的一条。
- * 2. `:131` 的 `return false` 改成 `true`：动作照跑，但键同时漏给 xterm——Cmd+F 开了搜索条又
+ * 1. `terminalKeyEventHandler` 里那道 `!hasCopyableText()` 闸改成 `false`：**没文本的 Ctrl+C 不再发
+ *    SIGINT**，被当成「复制空串」吞掉。用户中断不了跑飞的程序，最重的一条。
+ *    注意这道闸有**两个**入口共用同一个谓词——裸 Ctrl+C 那条（`isBareCtrlC` 分支）和注册表命中那条
+ *    （`shortcutId === 'terminal.copy'`）。所以它要两条断言，一条一个入口：只钉一处时把另一处改成
+ *    `false` 仍然全绿。#610 收口时实测过：把注册表那处改成 `false`，红的是本族「没选区的
+ *    terminal.copy 交还给终端」与「坐标说有选区但文本是空的，仍要交还」两条，裸 Ctrl+C 那两条不动。
+ * 2. 命中之后那句 `return false` 改成 `true`：动作照跑，但键同时漏给 xterm——Cmd+F 开了搜索条又
  *    往终端里写了个 `f`。
- * 3. `:130` 的 `event.type === 'keydown'` 判断删掉：keyup 也跑一次，每个终端键的动作做两遍。
- * 4. `:122` 之前插一句 `return true`：整个回调变 no-op，所有终端键失效。
+ * 3. `event.type === 'keydown'` 那个判断删掉：keyup 也跑一次，每个终端键的动作做两遍。
+ * 4. 回调体第一句之前插一句 `return true`：整个回调变 no-op，所有终端键失效。
+ *
+ * 锚点用符号名不用行号：这四个位点此前写成 `:125 / :131 / :130 / :122`，而 85b2208 在它们上面插了
+ * 裸 Ctrl+C 那一段，四个数字当场全部指错——本仓「行号锚点会漂」那一族的第 N 次。
  *
  * 为什么此前无人守：这个回调只有 xterm 在真实键盘事件里会调，而 `renderToStaticMarkup` 不跑
  * effect、更不会造键盘事件。`shortcut-scope-wiring` 那条 AST 守卫判的是「壳把它当实参传进去了」，
@@ -257,6 +278,25 @@ describe('终端键回调的吞键判定', () => {
     expect(outcome.touches, '有选区时没去复制').toBeGreaterThan(0)
   })
 
+  it('坐标说有选区但文本是空的，仍要交还——xterm 两个判据会分岔（#610）', () => {
+    // 第三种输入，且它是用户真正踩到的那一种：`hasSelection` 为真而 `getSelection()` 是空串。
+    // 上面那对（false/true）都让两个判据一致，所以把认领条件写成只看 `hasSelection()` 时它们
+    // 全绿——正是本仓「抽查的那一对可能正是盲点」那一族。
+    //
+    // 为什么这个输入不是构造出来的：xterm 5.5.0 里 `hasSelection` 是纯坐标判定
+    // （`start[0] !== end[0] || start[1] !== end[1]`），而 `selectionText` 走
+    // `translateBufferLineToString(..., trimRight = true)`。在空白处横拖一段就同时满足两者。
+    //
+    // 两条后果都静默，所以两条都断言：键被吞掉 → 裸 Ctrl+C 的 SIGINT 发不出去，跑飞的程序
+    // 中断不了；碰了外界 → 往剪贴板写了空串，抹掉用户上一次复制的内容。
+    const { touchesOf } = harness({ shortcutId: 'terminal.copy', hasSelection: true, selection: '' })
+    const outcome = touchesOf(keydown(REGISTRY_COPY_EVENT))
+    expect(outcome.swallowed, '坐标有区间但文本为空时键被吞掉了——那一刻的 Ctrl+C 是 SIGINT').toBe(
+      false
+    )
+    expect(outcome.touches, '文本为空却动了剪贴板／选区记忆——上一次复制的内容被抹掉').toBe(0)
+  })
+
   it('keyup 也吞掉，但动作不再跑第二遍', () => {
     // 两件事一条断言里说不清，所以分开问：
     // - 仍要吞（否则 keyup 漏给终端）；
@@ -299,7 +339,7 @@ describe('裸 Ctrl+C：有选区复制，没选区发 SIGINT（#610）', () => {
    * 那个前提摆在替身里；前提有没有变则由下面 `注册表两条和弦都不匹配裸 Ctrl+C` 那条独立钉。
    * 若在这里接真注册表，两条路就混在一起，分不出是谁认领的。
    */
-  function harness(hasSelection: boolean) {
+  function harness(hasSelection: boolean, selection = hasSelection ? 'picked text' : '') {
     const written: string[] = []
     let touches = 0
     const bump = (): void => {
@@ -311,7 +351,7 @@ describe('裸 Ctrl+C：有选区复制，没选区发 SIGINT（#610）', () => {
       sendInput: bump,
       kittyKeyboardActive: () => false,
       setSearchOpen: bump,
-      readSelection: () => (hasSelection ? 'picked text' : ''),
+      readSelection: () => selection,
       rememberSelection: bump,
       writeClipboard: (text) => {
         written.push(text)
@@ -360,6 +400,23 @@ describe('裸 Ctrl+C：有选区复制，没选区发 SIGINT（#610）', () => {
     expect(outcome.swallowed, '没选区的 Ctrl+C 被吞掉了——用户中断不了跑飞的程序').toBe(false)
     expect(outcome.touches, '没选区时仍去动了剪贴板／选区记忆').toBe(0)
     expect(written).toEqual([])
+  })
+
+  it('坐标说有选区但文本是空的，也要交还——SIGINT 与剪贴板两条都在这一刻静默失败（#610）', () => {
+    // 用户报的正是这一刻：「划词的时候它自己显示一个 Copy，但那个 Copy 又不成功」。
+    // 上面那对（有/没有）两个判据始终一致，所以只看 `hasSelection()` 的认领条件在它们下面全绿；
+    // 只有这条第三种输入能把两个判据分开（记忆 sampled-pair-can-be-the-blind-spot）。
+    //
+    // 输入不是构造的：xterm 5.5.0 的 `hasSelection` 是纯坐标判定，`selectionText` 走
+    // `translateBufferLineToString(..., trimRight = true)`；在空白处横拖一段就同时满足两者。
+    const { run, written } = harness(true, '')
+    const outcome = run(bareCtrlC)
+    expect(
+      outcome.swallowed,
+      '坐标有区间但文本为空时 Ctrl+C 被吞成「复制空串」——SIGINT 发不出去，且现场无任何报错'
+    ).toBe(false)
+    expect(outcome.touches, '文本为空却动了剪贴板／选区记忆').toBe(0)
+    expect(written, '往剪贴板写了空串——用户上一次复制的内容被静默抹掉').toEqual([])
   })
 
   it('keyup 也吞掉，但不复制第二遍', () => {
