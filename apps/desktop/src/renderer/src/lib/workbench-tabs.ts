@@ -11,6 +11,7 @@ import {
   removeTab,
   type WorkspaceLayout
 } from './workbench-layout'
+import { leafIdsMatchRecords } from './split-tree'
 import {
   balanceWorkbenchRegionLayout,
   closeWorkbenchRegion,
@@ -230,15 +231,19 @@ export function replaceWorkbenchRegion(
  * 只读一张 Tab、只在违约时抛，所以可被同时改两张 Tab 的 reducer 复用——对每张受影响的 Tab 各调一次
  * 即可（promoteRegionToTab 已这么用；排队中的「跨两张 Tab 移动 Region」要原子地碰两棵树、两张表，
  * 也走这条路）。
+ *
+ * 判据本身在 `split-tree.ts` 的 {@link leafIdsMatchRecords}，与工作区那条断言（`assertGroupInvariant`）
+ * 共用一份：两边此前各自手抄一份比较，而且**曾经判得不一样**——那一份用 `Set` 差集，对重复完全失明
+ * （#571）。判据只有一处，两条断言就不可能再分家；本函数留下的只有「取哪两个清单」与错误消息。
  */
 export function assertRegionInvariant(tab: WorkbenchTab): void {
-  const tree = [...regionIds(tab.layout.root)].sort()
-  const map = Object.keys(tab.regions).sort()
-  const agree = tree.length === map.length && tree.every((id, index) => id === map[index])
-  if (!agree) {
+  const tree = regionIds(tab.layout.root)
+  const map = Object.keys(tab.regions)
+  if (!leafIdsMatchRecords(tree, map)) {
     throw new Error(
       `Workbench Tab "${tab.id}" region invariant violated: the layout tree holds region ids ` +
-        `[${tree.join(', ')}] but tab.regions holds [${map.join(', ')}]. Every tree leaf must have ` +
+        `[${[...tree].sort().join(', ')}] but tab.regions holds ` +
+        `[${[...map].sort().join(', ')}]. Every tree leaf must have ` +
         `exactly one regions entry and vice versa — a mismatch is an invisible, un-closeable orphan Region.`
     )
   }

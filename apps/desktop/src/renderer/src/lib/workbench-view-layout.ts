@@ -41,7 +41,9 @@ export function createWorkbenchViewLayout(regionId: string): WorkbenchViewLayout
 
 // region 树的叶子取值器：把「叶子的 id 是 regionId」交给 split-tree 的泛型函数（collectLeafIds /
 // replaceLeaf / removeLeaf / findSiblingLeafId）。整个文件只此一份，各调用点不各自写一遍箭头函数。
-const regionLeafId = (leaf: SplitTreeLeaf<{ regionId: string }>): string => leaf.regionId
+// 导出是给持久化边界用的（`dedupeLeafIds` 要同一个取值器）——与 workbench-layout 的 `groupLeafId`
+// 对称。别在别处重新写一份 `(leaf) => leaf.regionId`：那就是第二份手抄。
+export const regionLeafId = (leaf: SplitTreeLeaf<{ regionId: string }>): string => leaf.regionId
 
 // region 树的所有 regionId，按读序。函数体恰好只有一句：转发到 split-tree 的 collectLeafIds，叶子
 // 取值器用本文件的 regionLeafId。此前它自己递归一份（与 workbench-layout 的 groupIds 逐字相同），

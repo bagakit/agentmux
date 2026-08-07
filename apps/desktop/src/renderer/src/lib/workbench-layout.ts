@@ -8,6 +8,7 @@ import {
   collectLeafIds,
   EVEN_SPLIT_RATIO,
   findSiblingLeafId,
+  leafIdsMatchRecords,
   removeLeaf,
   replaceLeaf,
   setSplitRatioAtPath
@@ -339,6 +340,17 @@ export function focusGroup(layout: WorkspaceLayout, groupId: string): WorkspaceL
  * **两个方向都判，不许削成单向。** 只判「叶子都有记录」会放过 off-tree group（记录多、树里没有）——那正是
  * 已复发两次的那一种；只判「记录都有叶子」会放过树里的孤儿叶。缺一侧就漏掉一整族缺陷。
  *
+ * **判据是排序后逐元素相等 + 长度相等，不是集合差集**（与 `assertRegionInvariant` 同一条，#571 收敛）。
+ * 差集对**重复**完全失明，而这一侧有两条重复轴，都是持久化数据可达的形状：
+ *   - 重复叶：树里同一个 groupId 两片。它违反 `removeLeaf` 写明的前置条件「叶子 id 在一棵树内唯一」
+ *     ——那个函数会把同名的**每一片**都摘掉，于是一次收组会连坐删掉另一格。
+ *   - 重复记录：`groups` 是数组，同一个 id 两条记录类型合法（region 侧的 `regions` 是对象表，一个 id
+ *     只存得下一条，所以那边没有这条轴）。两条记录带着各自的 activeTabId/tabOrder，下游 `findGroup`
+ *     取到的永远是第一条，第二条成了永不可达又永不回收的死记录。
+ * 收紧这条闸的前提是**抢救先得会修这两样**：`reconcilePersistedLayout` 在取集合之前就把两条轴都收掉了
+ * （见那里的注释）。顺序反过来就是把 region 侧那条已经发生过的崩溃路径复制到这一侧——一道比抢救更严的
+ * 闸等于在持久化路径上抛。
+ *
  * **只断言 STORED layout，绝不断言任何投影。** `layoutForActiveTopic`（scratch-topic-layout.ts:203）
  * 刻意产出一个 `groups` ⊇ 树叶的**超集**：它把投影到空的分组用 `removeLeaf` 摘出树，却在 `groups` 数组里
  * 保留它们（那是存储真相，别的 Topic 的 Tab 还在里面，删了切回去就找不回来——见其 :188-197 原话）。那是
@@ -348,11 +360,14 @@ export function focusGroup(layout: WorkspaceLayout, groupId: string): WorkspaceL
 export function assertGroupInvariant(layout: WorkspaceLayout): void {
   const tree = groupIds(layout.root)
   const records = layout.groups.map((group) => group.id)
-  const recordSet = new Set(records)
-  const treeSet = new Set(tree)
-  const leavesWithoutRecord = tree.filter((id) => !recordSet.has(id))
-  const recordsWithoutLeaf = records.filter((id) => !treeSet.has(id))
-  if (leavesWithoutRecord.length > 0 || recordsWithoutLeaf.length > 0) {
+  if (!leafIdsMatchRecords(tree, records)) {
+    // 差在哪里只在要抛的时候才算：判据（多重集相等）是共享的，而这段消息要说本层的名词。
+    // 两个方向都列出来，且各自去重前后都不改结论——重复的那一族两个方向的差都是空，此时消息里
+    // 「Tree leaves with no group record」与反向都会是空清单，前面两行 id 清单才是证据（一侧多一份）。
+    const recordSet = new Set(records)
+    const treeSet = new Set(tree)
+    const leavesWithoutRecord = tree.filter((id) => !recordSet.has(id))
+    const recordsWithoutLeaf = records.filter((id) => !treeSet.has(id))
     throw new Error(
       `Workspace layout group invariant violated: the split tree holds group ids ` +
         `[${[...tree].sort().join(', ')}] but layout.groups holds [${[...records].sort().join(', ')}]. ` +

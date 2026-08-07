@@ -173,6 +173,32 @@ export function collectLeafIds<Leaf>(
   return [...collectLeafIds(root.first, leafId), ...collectLeafIds(root.second, leafId)]
 }
 
+/**
+ * 「一棵树的叶子 id」与「它的记录表的键」是不是**逐一对应**（多重集相等）。
+ *
+ * 两棵树各有一条无条件 throw 的生产断言（`assertRegionInvariant` / `assertGroupInvariant`）判的都是
+ * 这件事，此前各自手抄一份比较，而两份**曾经不一样**：region 侧排序逐元素 + 比长度，group 侧用两个
+ * 方向的 `Set` 差集。差集对**重复**完全失明——`[g1]` 配 `[g1, g1]` 两个方向的差都是空，于是同一种
+ * 违约在一侧抛、在另一侧沉默（#571）。判据收成这一份，两条断言就不可能再分家。
+ *
+ * 为什么是多重集而不是集合：重复本身就是违约。
+ *   - 树里同一个 id 两片违反 {@link removeLeaf} 写明的前置条件（它会摘掉**所有**同名叶，一次收格连坐
+ *     删掉另一格）；
+ *   - 记录侧重复只在 `groups` 这种**数组**表上可能（对象表一个键只存一条），第二条记录永远取不到、
+ *     也永远回收不掉。
+ * 排序后逐元素比较同时认得出「谁多谁少」与「多了一份重复」，比长度是必要的一半：只逐元素比较时，
+ * 短的一侧比完就停，长出来的尾巴无人看见。
+ *
+ * 只回答是/否。差在哪里由调用方自己按需要算——两条断言的错误消息各自要说自己那层的名词
+ *（Region / Tab Group），把消息也收进来只会让这里替它们编词。
+ */
+export function leafIdsMatchRecords(tree: readonly string[], records: readonly string[]): boolean {
+  if (tree.length !== records.length) return false
+  const sortedTree = [...tree].sort()
+  const sortedRecords = [...records].sort()
+  return sortedTree.every((id, index) => id === sortedRecords[index])
+}
+
 // 把 targetId 那片叶子整体换成 replacement（可以是一片叶子，也可以是一棵 split 子树——「在这一格上
 // 再切一刀」就是后者）。targetId 不在树里时整棵树原样返回。
 export function replaceLeaf<Leaf>(
@@ -187,6 +213,57 @@ export function replaceLeaf<Leaf>(
     first: replaceLeaf(root.first, leafId, targetId, replacement),
     second: replaceLeaf(root.second, leafId, targetId, replacement)
   }
+}
+
+/**
+ * 把重复出现的叶子 id 收成一片：同一个 id 在树里出现多次时，**保留读序里第一次出现的那片**，
+ * 其余同名叶按 {@link removeLeaf} 的规则摘掉（所在 split 塌缩、兄弟提升）。没有重复时返回原树
+ * （同一引用），故调用方可以用 `===` 判「动过没动过」。
+ *
+ * 为什么需要它，而 {@link removeLeaf} 不够：removeLeaf 是纯递归，摘的是**所有**同名叶（那条选择
+ * 有它自己的理由，见其说明），所以拿它去重会把整个 id 从树里删干净——这不是去重，是删格。
+ *
+ * 为什么保留「第一次出现」而不是别的：`collectLeafIds` 的读序是有合同的（关格后的焦点落点依赖它），
+ * 而两棵树的**记录表**（`layout.groups` 数组 / `tab.regions` 对象）对一个 id 只存一条，所以「哪一片
+ * 是真的」在数据里根本没有答案。读序首片是唯一不需要额外信息、且与焦点规则同序的选择。
+ *
+ * 谁该调它：**只有持久化边界**。两棵树的 reducer 都产不出重复叶（tab-group id 现造，
+ * `splitWorkbenchRegion` 显式拒绝已在场的 regionId，见 removeLeaf 的前置条件「叶子 id 在一棵树内
+ * 唯一」），但 localStorage 里的东西是用户数据、可以长成任何合法类型的形状。而两条不变量断言
+ * （`assertGroupInvariant` / `assertRegionInvariant`）都是无条件 throw 的生产断言，其中 region 那条
+ * 已经能认出重复叶——实测一张 `[r1, r1]` / `{r1}` 的持久化 Tab 在 partialize 与启动恢复**两个入口
+ * 都抛**，而抛在 partialize 里意味着任意一次用户操作变成崩溃且此后再也写不进去。抢救必须先能修它，
+ * 断言才有资格认它。
+ */
+export function dedupeLeafIds<Leaf>(
+  root: SplitTreeNode<Leaf>,
+  leafId: (leaf: SplitTreeLeaf<Leaf>) => string
+): SplitTreeNode<Leaf> {
+  const seen = new Set<string>()
+  // 一次先序遍历：叶子第一次见到就留下，再见到就返回 null（＝这一片不要了）。split 的两侧都没了就整个
+  // 没了，只剩一侧就把那一侧提升上来——塌缩规则与 {@link removeLeaf} 逐字相同，只是判据从「id 等于
+  // target」换成「这个 id 之前见过」。先序保证「之前见过」的那一片正是 collectLeafIds 读序里的首片。
+  //
+  // 不要试图用 removeLeaf 拼出这件事：它摘的是所有同名叶，所以「先把要留的那片换成哨兵、摘掉其余、
+  // 再换回来」这条路走不通——哨兵 id 只活在一个合成字符串里，而 leafId() 读的是叶子的载荷，于是哨兵
+  // 从来不在树里，removeLeaf 照旧把所有副本删干净（实测 6 例里 5 例错，相邻重复完全不去重、
+  // 非相邻重复则两片都没了）。
+  const walk = (node: SplitTreeNode<Leaf>): SplitTreeNode<Leaf> | null => {
+    if (node.type === 'leaf') {
+      const id = leafId(node)
+      if (seen.has(id)) return null
+      seen.add(id)
+      return node
+    }
+    const first = walk(node.first)
+    const second = walk(node.second)
+    if (!first) return second
+    if (!second) return first
+    return first === node.first && second === node.second ? node : { ...node, first, second }
+  }
+  // 整棵树至少有一片叶子，且首片必然留存（`seen` 起初是空的），所以 walk 在根上恒不返回 null。
+  // 这个 `?? root` 是不可达的兜底，不是一条能举例说明的规则。
+  return walk(root) ?? root
 }
 
 /**
