@@ -6,6 +6,7 @@ import type { CtxmuxAdapterRun } from '../src/ctxmux-run-adapter.js'
 import { AgentMuxError } from '../src/errors.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
 import { AgentPromptSubmissionCoordinator } from '../src/prompt-submission.js'
+import type { AgentScreenEvidenceStore } from '../src/screen-evidence.js'
 import type {
   AgentMuxAgentSession,
   AgentMuxStoredAgentSession
@@ -67,7 +68,14 @@ async function coordinatorFixture(stored = session()) {
       }
     }))
   }
-  const screenEvidence = { wait: vi.fn(async () => 1) }
+  // 形参表**从生产类型派生**，不手抄：下面那条 #628 守卫要从调用记录里读第 5 个实参（options），
+  // 而 `vi.fn(async () => 1)` 会把 calls 的元组类型定成 `[]`，于是 `[4]` 是越界下标——vitest 只转译
+  // 所以照旧全绿，`tsc --noEmit` 退 2（记忆 vitest-green-hides-type-drift-across-files）。用
+  // `Parameters<...>` 而不是照抄一份 options 形状，是为了让「生产的 options 加/删字段」这件事由 tsc
+  // 而不是由我记得改测试来保证。
+  const screenEvidence = {
+    wait: vi.fn(async (..._args: Parameters<AgentScreenEvidenceStore['wait']>) => 1)
+  }
   const publisher = new AgentMuxClientEventPublisher()
   const coordinator = new AgentPromptSubmissionCoordinator({
     kernel: kernel as never,
@@ -428,5 +436,65 @@ describe('prompt readiness observation', () => {
     await vi.waitFor(() => {
       expect(events.some((event) => event.type === 'agent-error' && event.code === 'AGENT_RUN_EXITED')).toBe(true)
     })
+  })
+
+  // 上面那条钉的是「观察失败会响亮报出去」。但它有个前提：观察**得先失败**。#628 的真缺陷正是这个前提
+  // 不成立——这条等待此前根本没有上界，于是「屏幕永不再变」时它既不成功也不失败，永远停在 pending，
+  // 上面那条 catch 一辈子不执行。所以那条测试对本缺陷完全免疫，必须另立判据。
+  //
+  // 判据落在**预算在不在场**，而不是「超时了会怎样」：真等 120s 是不可跑的，而 fake timer 只能证明
+  // 「若 arm 了定时器则会触发」，证不出 arm 这件事本身。`wait()` 里那个定时器是
+  // `if (options.timeoutMs !== undefined)` 才 arm 的（agent-terminal-screen.ts），所以「实参里有没有
+  // 这个键」正是那条定时器可达性的充要条件——这个键就是判据本身，不是它的代理。
+  //
+  // 常量是模块私有（prompt-submission.ts 只 export 那个 class），所以期望值不能 import。这里**刻意
+  // 不写死 120_000**：写死等于把手抄的第二份钉在测试里，改产品预算就要改测试（记忆
+  // expected-value-must-not-derive-from-mutation-target 的另一面——锚点要独立，但独立的锚点不该是
+  // 同一个数字的复制）。改成钉住**关系**：composer 预算必须严格宽于渲染预算。这条关系是设计理由本身
+  // （冷启动 ≫ 回显），而且它同时否掉一种看似无害的修法：把渲染那个常量拿过来复用，两个预算就相等，
+  // 本条立刻红（记忆 two-budgets-guard-one-thing：短的那个只贡献假阴性）。
+  it('等 composer 的那条 wait 必须带上界，且比渲染预算宽——没有它，屏幕不再变就永久 pending', async () => {
+    const stored = unobservedSession()
+    const { coordinator, screenEvidence } = await coordinatorFixture(stored)
+    // 永不 settle 的观察：生产上「断线丢流 / TUI 卡在别的界面 / composer 匹配器认不出这版布局」都是
+    // 这个形状。没有预算时，此后每条 prompt 被 AGENT_PROMPT_NOT_READY 拒掉且没有任何出路。
+    screenEvidence.wait.mockImplementation(() => new Promise<number>(() => {}))
+
+    coordinator.observeReadiness(stored as AgentMuxAgentSession, stored.terminalPromptReadiness!)
+
+    // fixture 的 wait 忽略 options，所以只能从调用记录里取实参（也正因如此，行为侧看不见这个键）。
+    // 不写 `as {...}`：那等于在这里再手抄一份 options 形状，把上面「让 tsc 管字段增删」那句作废。
+    expect(screenEvidence.wait, 'observeReadiness 必须真的发起了屏幕观察').toHaveBeenCalledTimes(1)
+    const readinessOptions = screenEvidence.wait.mock.calls[0]![4]
+    expect(
+      readinessOptions.timeoutMs,
+      '就绪观察没有 timeoutMs：wait() 不会 arm 定时器，屏幕永不再变时这条等待永久 pending（#628）'
+    ).toBeTypeOf('number')
+    // 成对的下半句：措辞与预算必须同时在场。只给措辞时那句文案是死代码——那正是本缺陷发货时的样子。
+    expect(readinessOptions.timeoutMessage, '有预算就必须有措辞，否则超时对用户是一句空话').toBeTruthy()
+
+    // 关系判据：拿渲染预算作独立锚点（它走 submitInputPlan → waitForRender，与就绪观察是两条独立
+    // 路径、两个独立常量）。两者相等即回归。渲染那条路要求 store 里就绪已落盘（claimPromptReadiness
+    // 读的是**存储**里的 readiness，不是入参），所以另起一个 fixture——默认 session() 自带
+    // readyThroughByte。
+    const renderFixture = await coordinatorFixture()
+    const plan = new AgentProviderRegistry().get('codex').planPromptInput('hello')
+    await renderFixture.coordinator.submitInputPlan(
+      renderFixture.registry.get('agent-1') as AgentMuxAgentSession,
+      renderFixture.currentRun,
+      'submission-render-budget',
+      'hello',
+      plan
+    )
+    const renderCall = renderFixture.screenEvidence.wait.mock.calls.at(-1)
+    // 在场自证：没走到渲染确认这条路时，下面的比较会在 undefined 上恒真地过去。
+    expect(renderCall, '没有取到渲染确认那次 wait——关系判据会在缺席的操作数上恒真').toBeDefined()
+    const renderOptions = renderCall![4]
+    expect(renderOptions.timeoutMs, '渲染确认那条等待本来就有预算，它是这里的独立锚点').toBeTypeOf('number')
+    expect(
+      readinessOptions.timeoutMs!,
+      '等空 composer 横跨 Agent 冷启动，必须严格宽于「字已送进去、屏幕该回显了」那条；' +
+      '两者相等通常意味着有人把渲染那个常量拿过来复用了'
+    ).toBeGreaterThan(renderOptions.timeoutMs!)
   })
 })
