@@ -176,28 +176,6 @@
 .agent-status-bar__idle { color: var(--text-3); }
 /* Permanent chrome: no pulse. The count carries the fact; a pulsing dot would fight the terminal. */
 .agent-status-bar .status--working .status__dot { animation: none; }
-/* Flat by contract: no resting stroke — Surface luminance, the tool actions and the focus ring carry
-   hierarchy (surface-density.md), so the Composer reads as part of its Region, not a box floating on it.
-   Margin is uniform 6px top/bottom and 8px sides, the same inset the approval card above it uses, so the
-   whole input stack sits at one consistent gap from the Region edge instead of a ring of whitespace. */
-.composer { margin:var(--sp-3) var(--sp-4); overflow: hidden; border-radius: var(--radius); background: transparent; box-shadow: none; }
-/* Focus stays clearly visible without a resting border: the --focus-ring glow plus a 1px inset line in
-   --focus-line take over the boundary the removed stroke used to draw only while focused. */
-.composer:focus-within { box-shadow: var(--focus-ring), inset 0 0 0 1px var(--focus-line); }
-.composer textarea { width: 100%; min-height: 34px; max-height: 132px; field-sizing: content; display: block; resize: none; padding:var(--sp-4) var(--sp-5) var(--sp-1); border: 0; outline: 0; color: var(--text); background: transparent; font-size: var(--fs-meta); line-height: 1.45; }
-.composer textarea::placeholder { color: var(--neutral-2); }
-.composer textarea:disabled { color: var(--text-3); cursor: not-allowed; }
-.composer__toolbar { display: flex; justify-content: space-between; padding:var(--sp-1) var(--sp-2) var(--sp-2); }
-.composer__toolbar > div { min-width: 0; display: flex; gap:var(--sp-1); }
-.composer-tool { max-width: 180px; display: flex; align-items: center; gap:var(--sp-2); padding:var(--sp-2) var(--sp-3); overflow: hidden; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font-size: var(--fs-micro); cursor: pointer; white-space: nowrap; }
-.composer-tool:hover:not(:disabled) { color: var(--text); background: var(--surface-3); }
-.composer-tool--danger:hover:not(:disabled) { color: var(--red); }
-.composer-send { display: flex; align-items: center; gap:var(--sp-2); padding:var(--sp-2) var(--sp-4); border: 0; border-radius: var(--radius-sm); color: var(--bg); background: linear-gradient(180deg, var(--green), var(--green-2)); font-size: var(--fs-micro); font-weight: 620; box-shadow: var(--hl-strong); cursor: pointer; transition: background .12s ease; }
-.composer-send:hover:not(:disabled) { background: linear-gradient(180deg, var(--green-text), var(--green)); }
-.composer-send:active:not(:disabled) { box-shadow: inset 0 1px 3px var(--scrim-1); }
-.composer-send:disabled { opacity: .35; cursor: default; }
-.composer-send--working { color: var(--red-text); background: var(--red-bg); border: 1px solid var(--red-line); box-shadow: none; }
-.composer-send--working:hover:not(:disabled) { color: var(--red-text); background: var(--red-bg); }
 .agent-input-stack { min-width: 0; background: transparent; }
 /* The request is an interruption, so it earns weight from surface fill + elevation and an amber STATUS
    icon — not from a permanent coloured rail (accent expresses state, not decoration) and not from an
