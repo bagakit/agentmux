@@ -882,6 +882,14 @@ export class CtxmuxRunAdapter {
       const decoder = new TextDecoder()
       let closed = false
       const active = attachment
+      const snapshot = active.snapshot
+      // replay 与 live 必须共用**同一个** decoder，且 replay 先喂：`decodeChunk` 用的是有状态的
+      // 流式解码（`{ stream: true }`），一个多字节 UTF-8 字符被切在 replay 的最后一个 chunk 与第一个
+      // live chunk 之间时，前半截留在 decoder 的内部状态里、由下一个（live）chunk 补齐。若给 live 与
+      // replay 各建一个 decoder，那半个字符会永远补不齐，而 live decoder 从零把续字节当成新字符开头，
+      // 接缝处解出替换字符 / 乱码。attach() 正是先 `.map` replay、再启动 live 循环（`void this.pump`），
+      // 这里照它同形——replay 的字节在时间上早于 live，故必须先决出 replay，再让 live 循环接着喂。
+      const replay = snapshot.replay.chunks.map((chunk) => decodeChunk(runId, decoder, chunk))
       void (async () => {
         try {
           for await (const event of active.events()) {
@@ -914,11 +922,9 @@ export class CtxmuxRunAdapter {
           if (!closed) this.errorListener?.(translateCtxmuxError(error), runId)
         }
       })()
-      const snapshot = active.snapshot
-      const replayDecoder = new TextDecoder()
       return {
         run: projectRun(snapshot.run),
-        replay: snapshot.replay.chunks.map((chunk) => decodeChunk(runId, replayDecoder, chunk)),
+        replay,
         gap: classifyReplayGap({
           truncated: snapshot.replay.truncated,
           requestedAfterByte: afterByte,
