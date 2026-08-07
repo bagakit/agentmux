@@ -23,6 +23,8 @@ import { liveVisibleAreas } from './window-visible-area.js'
 import { registerWindowStatePersistence } from './window-state-persistence.js'
 import { foregroundActionsForSecondInstance, instanceRoleFromLock } from './single-instance.js'
 import { singleFlight } from './single-flight.js'
+import { topFrameNavigationGuard, topFrameOrigin } from './top-frame-navigation.js'
+import { windowOpenDecision, windowSecurityWebPreferences } from './window-security.js'
 
 const appIconPath = join(import.meta.dirname, '../../resources/icon.png')
 const packagedUserDataPath = join(app.getPath('appData'), 'dev.agentmux.desktop')
@@ -139,20 +141,35 @@ function startPrimaryInstance(): void {
       icon: appIconPath,
       titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
       backgroundColor: '#0b0d0f',
-      webPreferences: {
-        preload: join(import.meta.dirname, '../preload/index.cjs'),
-        contextIsolation: true,
-        sandbox: true,
-        nodeIntegration: false
-      }
+      webPreferences: windowSecurityWebPreferences(join(import.meta.dirname, '../preload/index.cjs'))
     })
     // A window persisted while maximized reopens maximized on top of its restored normal bounds, so
     // unmaximize returns to the size the user actually chose rather than the default.
     if (persistedGeometry?.maximized) window.maximize()
     window.webContents.setWindowOpenHandler(({ url }) => {
-      if (url.startsWith('https://')) void shell.openExternal(url)
-      return { action: 'deny' }
+      const decision = windowOpenDecision(url)
+      if (decision.openExternally) void shell.openExternal(url)
+      return { action: decision.action }
     })
+    // 顶帧的导航闸。preload 把特权桥 `agentmux` 无条件挂到 window（src/preload/index.ts:238），且每次
+    // 导航后 preload 会重新执行；应用的 CSP 只是自家 index.html 里的 <meta>，不跟着导航走。所以只要顶帧
+    // 被导航到应用之外的文档（Chromium 默认把「往顶帧拖入一个文件」变成一次 file:/// 导航），那个文档就
+    // 继承了这座桥、且没有 CSP。这道闸把顶帧钉在应用来源上：判据是纯函数（top-frame-navigation.ts），
+    // 这里只负责在被拒时 preventDefault，把导航掐死。
+    //
+    // 「应用来源」从窗口**实际加载内容的同一处**派生，不另手抄 URL：dev 用 ELECTRON_RENDERER_URL，
+    // prod 用下面 loadFile 的同一个 packagedRendererPath（见 :201）。两者二选一，与加载分支同构。
+    const packagedRendererPath = join(import.meta.dirname, '../renderer/index.html')
+    const appOrigin = topFrameOrigin({
+      rendererDevServerUrl: process.env.ELECTRON_RENDERER_URL,
+      packagedRendererFilePath: packagedRendererPath
+    })
+    const guardTopFrameNavigation = topFrameNavigationGuard(appOrigin)
+    // will-redirect 与 will-navigate 用同一判据：一次被服务端 30x 或 meta refresh 重定向到应用外的目标，
+    // 危害与直接导航过去完全一样，只守 will-navigate 会漏掉重定向链的落点。popup/新窗口不在这里——那条
+    // 由上面的 setWindowOpenHandler 一律 deny 覆盖（:153），不重复。
+    window.webContents.on('will-navigate', guardTopFrameNavigation)
+    window.webContents.on('will-redirect', guardTopFrameNavigation)
     const fileEditingProbeControl = new WorkspaceFileEditingProbeControl()
     const workspaceFiles = new WorkspaceFiles(
       (id) => runtime.executionHost(id),
@@ -178,7 +195,7 @@ function startPrimaryInstance(): void {
         : process.env.AGENTMUX_DESKTOP_RESOURCE_REPORT
           ? { 'agentmux-resource-probe': '1' }
           : undefined
-      await window.loadFile(join(import.meta.dirname, '../renderer/index.html'),
+      await window.loadFile(packagedRendererPath,
         probeQuery ? { query: probeQuery } : undefined)
     }
     const rendererLoadedAtMs = Date.now()
