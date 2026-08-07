@@ -140,6 +140,75 @@ describe('菜单把复制失效的根因接到纯模块', () => {
   })
 })
 
+describe('导入的判定函数没有被同名局部声明影子掉', () => {
+  it('组件体内没有任何本地声明重用那批受保护的导入名', () => {
+    // 这一条堵的是**名字解析**层的绕法，上面两条都堵不住它：审计 agent 实测插入
+    //   const terminalSelectionSuppressionHint = (_mode: MouseTrackingMode): string | null => null
+    // 于是 import 声明照旧在场（第二条绿）、调用点文本照旧是那个名字（第一条绿），但真正被调用的是这个
+    // 恒返回 null 的局部函数——提示永久消失而 13 条全绿。判 import 关系换不来名字解析（记忆
+    // guard-criterion-must-be-import-relation 的下一层；#596 是本族第一次：同名局部影子绕过 #594）。
+    //
+    // 判据：**任何**在组件函数体内引入该名字的声明都算影子，不枚举「箭头函数/function/解构」等具体拼法
+    // ——按「这个名字有没有被本地重新绑定」判，而不是按它长什么样判。
+    const PROTECTED = ['terminalSelectionSuppressionHint', 'terminalMenuChords', 'isMacPlatform']
+    // 在场自证：受保护清单必须真的都是本文件的导入名，否则这条判据在扫一批不存在的名字（恒绿）。
+    const importedNames = new Set<string>()
+    const collectImports = (node: ts.Node): void => {
+      if (ts.isImportDeclaration(node) && node.importClause?.namedBindings !== undefined) {
+        const bindings = node.importClause.namedBindings
+        if (ts.isNamedImports(bindings)) {
+          for (const element of bindings.elements) importedNames.add(element.name.text)
+        }
+      }
+      ts.forEachChild(node, collectImports)
+    }
+    ts.forEachChild(file, collectImports)
+    for (const name of PROTECTED) {
+      expect(
+        importedNames.has(name),
+        `受保护清单里的 ${name} 不是本文件的导入名——这条判据在扫不存在的名字，会恒绿`
+      ).toBe(true)
+    }
+
+    // 收集组件函数体内引入的**所有**本地名字：变量声明（含解构展开）、函数声明、参数。
+    let component: ts.FunctionDeclaration | undefined
+    const findComponent = (node: ts.Node): void => {
+      if (ts.isFunctionDeclaration(node) && node.name?.text === 'TerminalContextMenu') {
+        component = node
+      }
+      ts.forEachChild(node, findComponent)
+    }
+    ts.forEachChild(file, findComponent)
+    expect(component, '找不到 TerminalContextMenu 函数声明——判据的扫描对象缺席').not.toBeUndefined()
+
+    const locals: string[] = []
+    const collectBoundNames = (name: ts.BindingName): void => {
+      if (ts.isIdentifier(name)) {
+        locals.push(name.text)
+        return
+      }
+      // 解构/数组模式：逐元素下钻，`const { terminalSelectionSuppressionHint } = x` 也算影子。
+      for (const element of name.elements) {
+        if (ts.isBindingElement(element)) collectBoundNames(element.name)
+      }
+    }
+    const collectLocals = (node: ts.Node): void => {
+      if (ts.isVariableDeclaration(node)) collectBoundNames(node.name)
+      if (ts.isFunctionDeclaration(node) && node.name !== undefined) locals.push(node.name.text)
+      if (ts.isParameter(node)) collectBoundNames(node.name)
+      ts.forEachChild(node, collectLocals)
+    }
+    ts.forEachChild(component!, collectLocals)
+
+    const shadowed = PROTECTED.filter((name) => locals.includes(name))
+    expect(
+      shadowed,
+      `这些导入名被组件体内的本地声明影子掉了：${shadowed.join(', ')}——调用点解析到的不是导入的那个实现，` +
+        '能力会静默消失而其余判据全绿'
+    ).toEqual([])
+  })
+})
+
 describe('mouseTrackingMode 作为 prop 接在组件签名上', () => {
   it('组件参数里声明了 mouseTrackingMode', () => {
     // 前提自证：根因入口 prop 必须真的在参数解构里，否则上面「入参是 mouseTrackingMode」那条读的是
