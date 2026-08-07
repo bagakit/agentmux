@@ -89,14 +89,24 @@ function terminalHarness(initial: { cols: number; rows: number }) {
  * 会在第一次 resize 刚落地时就返回，补重绘还没排出来——于是「只重绘一次」那条断言看不见第二次
  * 重绘，对着一个永不清 `awaitingFirstLiveFit` 的实现照旧全绿（实测存活，见那条用例的注释）。
  *
- * resize 替身是纯 async、不碰定时器，所以「排空 microtask」就等于排空整条链；按「次数稳住」
- * 收敛而不是数固定的 tick 数，免得实现里多一层 await 就让这个 helper 静默失效。
+ * 每一轮既排空 microtask 也让出一次 macrotask。**只泵 microtask 是不够的，而且这不是风格问题**：
+ * 删掉 `terminal-viewport-sync.ts` 里那句摘旗（`awaitingFirstLiveFit = false`，补救从一次性变成
+ * 每次 live fit 都来一遍）时，只泵 microtask 的版本确实把它打红了；但在同一个变异上再往补重绘前面
+ * 插一个 `await new Promise((r) => setTimeout(r, 0))`，同一条断言就 6 条全绿——同一个真缺陷，因为
+ * 实现多了一跳定时器而彻底隐身。让出 macrotask 之后两种形状都红。
+ *
+ * 让出用 `setTimeout(0)`：`setImmediate` 的 check 阶段排在 timers 之前，所以等到一次 timer 回调
+ * 就同时排空了这两类。本文件不用假定时器，代价是每轮多一次真让出——收敛条件是「次数稳住」，
+ * 常见情况两轮就退出，不是 20 轮 × 一次让出。
+ *
+ * 按「次数稳住」收敛而不是数固定的 tick 数，免得实现里多一层 await 就让这个 helper 静默失效。
  */
 async function settleResizes(resize: ReturnType<typeof vi.fn>): Promise<void> {
   let previous = -1
   for (let round = 0; round < 20 && previous !== resize.mock.calls.length; round += 1) {
     previous = resize.mock.calls.length
     for (let tick = 0; tick < 10; tick += 1) await Promise.resolve()
+    await new Promise((resolve) => setTimeout(resolve, 0))
   }
 }
 
@@ -187,6 +197,14 @@ describe('replay 之后的重排补救：判据锚在「重放那一刻的 grid�
     harness.setProposed({ cols: 120, rows: 40 })
     await harness.sync.startLiveSynchronization()
     expect(harness.frames.runNext()).toBe(true)
+    // 这里留着 `vi.waitFor` 而不换成 `settleResizes`，是**测过之后**的决定，不是漏改。
+    // 这一条要证的是「一次都没重绘」，`redrawRoundTrips` 数的是不该出现的那一对；只要等到几何真的
+    // 送到了 PTY，此后再多等也只会等到更多机会去发现那一对，等不出更少。三个变异实测两种写法同红：
+    // 抹掉判据本身（`!atReplay ||` → `atReplay &&`）、同一变异 + 补重绘前插三跳 microtask、
+    // 同一变异 + 插一个 `setTimeout(0)`，都是 `2 failed | 4 passed`，且这一条都在红的那两条里。
+    // 没找到「waitFor 下存活、settleResizes 下毙掉」的变异，所以换过去买不到判据强度。
+    // 下面那两处用 `settleResizes` 是因为它们要证的是**上界**（恰好一次 / 恰好零次，而链子还在飞），
+    // 那种断言会被「排空得不够」直接读成通过——见 settleResizes 自己的说明。
     await vi.waitFor(() => expect(harness.resize).toHaveBeenCalledWith({ cols: 120, rows: 40 }))
 
     expect(
