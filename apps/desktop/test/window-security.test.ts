@@ -89,11 +89,16 @@ describe('windowOpenDecision: classify every url scheme', () => {
     expect(windowOpenDecision('javascript:alert(1)')).toEqual({ action: 'deny', openExternally: false })
   })
 
-  it('empty string — denied, not handed out (never crashes, never allows)', () => {
+  it('empty string — denied, not handed out (the empty string itself neither throws nor allows)', () => {
+    // 「不抛」这半句只说空串这一个输入。**非字符串**（null/undefined/数字/对象/数组）会实测抛
+    // TypeError（`url.startsWith is not a function` 等五种全抛），这里刻意不守也不加防御：
+    // Electron 的 HandlerDetails.url 类型就是 string，形参也是 string，非字符串只能靠 cast 硬塞
+    // 进来。为一个签名与宿主双重排除的输入写运行期兜底属于兼容层，会把「谁该保证它是字符串」这件事
+    // 从类型边界搬到函数体里。若哪天真有非字符串调用点出现，那是那个调用点的缺陷。
     expect(windowOpenDecision('')).toEqual({ action: 'deny', openExternally: false })
   })
 
-  it('action is deny for EVERY input — the app opens no child windows', () => {
+  it('action is deny for EVERY string input — the app opens no child windows', () => {
     // 分类穷举的收束断言：无论什么 scheme，action 恒为 deny。把 deny 翻成 allow 会让这条整批红。
     for (const url of ['https://a', 'http://a', 'file:///a', 'ws://a', 'about:blank', '', 'not a url']) {
       expect(windowOpenDecision(url).action).toBe('deny')
