@@ -6,6 +6,7 @@ import {
   terminalSelectionSuppressionHint,
   type MouseTrackingMode
 } from '../src/renderer/src/lib/terminal-selection-mode.js'
+import { terminalOptions, TERMINAL_THEME_CATALOG } from '../src/renderer/src/lib/terminal-theme.js'
 
 /**
  * AgentMux 排第一的用户可见 bug：终端里右键 Copy 变灰、Ctrl+C 不复制、Cmd+C 也不复制，三者同时失效。
@@ -132,6 +133,67 @@ describe('给 UI 的整合决定：要不要提示 + 提示什么', () => {
       const otherHint = terminalSelectionSuppressionHint(mode, NON_MAC_UA)
       expect(otherHint).toBe(selectionForceGestureHint(NON_MAC_UA))
       expect(otherHint!, `${mode}: 非 mac 提示没说 Shift`).toContain('Shift')
+    }
+  })
+})
+
+// ────────────────────────────────────────────────────────────────────────────
+// 逃生提示与「让它生效的那条 xterm 配置」的跨文件耦合（本轮补的守卫）。
+//
+// 症状与背景：选区被鼠标上报关掉时，mac 提示叫用户「按住 ⌥ Option 再拖」。这句话能不能兑现，
+// 取决于 xterm 的 `shouldForceSelection`——mac 分支是 `e.altKey && rawOptions.macOptionClickForcesSelection`。
+// 也就是说，只有当我们把 `macOptionClickForcesSelection: true` 传给 xterm 时，⌥ 拖才真的建立选区。
+//
+// 缺口在哪：那句提示活在 `terminal-selection-mode.ts`，那条配置活在 `terminal-theme.ts`，两个文件、
+// 一件事，此前只有散文把它们绑在一起。把配置翻成 false（或删掉），mac 提示会照旧教用户按 ⌥ 拖，
+// 而那个手势不再生效——全程无报错。反过来配置开着却不给 mac 提示，等于配了个没人发现的逃生阀。
+// terminal-theme.test.ts 只断言配置字面上 === true，terminal-selection-mode.test.ts 只断言提示里有
+// 'Option'；两个文件各自绿，谁都不会因为「提示宣传的手势和真实生效的配置对不上」而红。
+//
+// 这一族把两侧接到**同一道**判据上：mac 提示提到 ⌥ Option ⇔ 传给 xterm 的配置确实开着。取值读的是
+// `terminalOptions(...)` 真正会交给 xterm 的那个对象（`terminal-theme.ts` 的 SSOT），不是在测试里
+// 手抄一份 true——手抄会跟着配置一起漂移、变成恒真（记忆 expected-value-must-not-derive-from-target）。
+// ────────────────────────────────────────────────────────────────────────────
+describe('mac 逃生手势（⌥ 拖）与 macOptionClickForcesSelection 配置必须同真同假', () => {
+  // 读的是 terminalOptions 真正交给 xterm 的那个对象里的取值，而非字面量常量。任取一个目录里的主题
+  // 都行——这条配置在 TERMINAL_BASE_OPTIONS 里、与主题无关，下面「跨全部主题一致」那条会把这一点钉死。
+  const firstThemeId = TERMINAL_THEME_CATALOG[0]!.id
+  const macForceEnabled = terminalOptions(firstThemeId).macOptionClickForcesSelection === true
+
+  it('前提自证：读到了 terminalOptions 里的 macOptionClickForcesSelection，且它是个布尔值', () => {
+    // 若取值口坏了（改名、terminalOptions 不再展开 BASE_OPTIONS），这里读到 undefined，下面的
+    // 「同真同假」会拿一个恒 false 的左值去比，退化成「提示里不能有 Option」的恒真断言——那正是
+    // 判据塌陷的形状。所以先钉住「这个配置确实被 terminalOptions 暴露成布尔」。
+    expect(
+      typeof terminalOptions(firstThemeId).macOptionClickForcesSelection,
+      'terminalOptions 没把 macOptionClickForcesSelection 暴露成布尔——耦合守卫读的是 undefined，会恒真'
+    ).toBe('boolean')
+  })
+
+  it('mac 提示提到 ⌥ Option，当且仅当那条配置开着', () => {
+    // 双向：把 terminal-theme.ts 的配置翻成 false → 左边变 false、右边仍 true（提示照旧说 ⌥）→ 红；
+    // 把 terminal-selection-mode.ts 的 mac 文案改成不提 Option/⌥（比如错抄成 Shift）→ 右边变 false、
+    // 左边仍 true → 也红。两处任一单独漂移都被这一条抓住。
+    const macHint = selectionForceGestureHint(MAC_UA)
+    const hintAdvertisesOption = macHint.includes('Option') || macHint.includes('⌥')
+    expect(
+      hintAdvertisesOption,
+      macForceEnabled
+        ? 'macOptionClickForcesSelection 开着，但 mac 提示没教用户按 ⌥ Option 拖——逃生阀没人发现'
+        : 'mac 提示在教用户按 ⌥ Option 拖，但 macOptionClickForcesSelection 没开——这个手势不生效，提示是假话'
+    ).toBe(macForceEnabled)
+  })
+
+  it('这条配置与主题无关：每个主题产出的 terminalOptions 都开着它', () => {
+    // 配置在 TERMINAL_BASE_OPTIONS 里，被 terminalOptions 无条件展开进每个主题。若哪天有人把它挪进
+    // 某个主题的分支、或让某个主题覆盖掉它，mac 的 ⌥ 逃生手势就会「在某些主题下静默失效」——这条
+    // 遍历全目录把那种按主题分叉的回归钉住。前提自证：目录非空，否则 for-of 恒真。
+    expect(TERMINAL_THEME_CATALOG.length, '主题目录为空——下面的遍历恒真').toBeGreaterThan(0)
+    for (const { id } of TERMINAL_THEME_CATALOG) {
+      expect(
+        terminalOptions(id).macOptionClickForcesSelection,
+        `主题 ${id} 的 terminalOptions 没开 macOptionClickForcesSelection——mac ⌥ 逃生手势在这个主题下不生效`
+      ).toBe(true)
     }
   })
 })

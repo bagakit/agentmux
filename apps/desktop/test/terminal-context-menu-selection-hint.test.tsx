@@ -353,3 +353,116 @@ describe('提示的样式落在共享 CSS 规则里，且那条规则真的带�
     ).not.toBe('')
   })
 })
+
+// ────────────────────────────────────────────────────────────────────────────
+// 右键 Copy 项自己的接线（本轮补的守卫）。
+//
+// 上面几族守的是「为什么变灰」那句提示。但**变灰这件事本身**——Copy 项 `disabled={!hasSelection}`、
+// 以及点下去 `onSelect={onCopy}`——此前没有任何测试守。用户报的第一个症状恰恰是「右键 Copy 是灰的」
+// 和「点了没反应」，也就是这两处接线。它们全在 Radix 的 Portal 里，`renderToStaticMarkup` 既不展开
+// Portal 也不派发点击，所以和提示那几族同理，只能按 TypeScript AST 判取值关系：
+//   - 有选区才可点：`disabled` 的表达式必须正好是 `!hasSelection`。写成 `disabled={false}`（恒可点，
+//     但 xterm 停选区时点了复制空区间）或 `disabled={hasSelection}`（极性反了，有选区时反而变灰）都要红。
+//   - 点了真的复制：`onSelect` 必须正好是 `onCopy`。接错成 onPaste/onClear，或干脆没接，右键复制静默失效。
+// 每条都带在场自证：先定位到那个 Copy 项本身（靠它的子节点 `<span>Copy</span>` 认，不靠位置），
+// 找不到就红，免得断言在一个不存在的元素上恒真（记忆 false-green-gate-patterns / presence-assertion-blind）。
+// ────────────────────────────────────────────────────────────────────────────
+describe('右键 Copy 项：有选区才可点、点了才复制', () => {
+  /** JSX 属性 name 上挂的表达式文本；没有该属性或它不是表达式容器时返回 null。 */
+  function attrExpression(element: ts.JsxOpeningElement, attrName: string): string | null {
+    for (const attribute of element.attributes.properties) {
+      if (
+        ts.isJsxAttribute(attribute) &&
+        attribute.name.getText(file) === attrName &&
+        attribute.initializer !== undefined &&
+        ts.isJsxExpression(attribute.initializer) &&
+        attribute.initializer.expression !== undefined
+      ) {
+        return attribute.initializer.expression.getText(file)
+      }
+    }
+    return null
+  }
+
+  /**
+   * 找到那个 Copy 菜单项：一个 `ContextMenu.Item`，其子节点里有 `<span>Copy</span>`。
+   * 用内容认而不用「第几个 Item」认——加一项、换顺序都不该让这条判据扫错元素
+   * （记忆 presence-assertion-blind-when-shape-repeats）。返回其 openingElement；找不到为 null。
+   */
+  function findCopyItem(): ts.JsxOpeningElement | null {
+    let found: ts.JsxOpeningElement | null = null
+    const spansCopy = (element: ts.JsxElement): boolean =>
+      element.children.some(
+        (child) =>
+          ts.isJsxElement(child) &&
+          child.openingElement.tagName.getText(file) === 'span' &&
+          child.children.some((grand) => ts.isJsxText(grand) && grand.getText(file).trim() === 'Copy')
+      )
+    const visit = (node: ts.Node): void => {
+      if (
+        ts.isJsxElement(node) &&
+        node.openingElement.tagName.getText(file) === 'ContextMenu.Item' &&
+        spansCopy(node)
+      ) {
+        found = node.openingElement
+      }
+      ts.forEachChild(node, visit)
+    }
+    ts.forEachChild(file, visit)
+    return found
+  }
+
+  it('存在一个内容为 Copy 的 ContextMenu.Item——判据的扫描对象在场', () => {
+    // 在场自证：Copy 项若被改名/拆走，下面两条读的就是 null，会退化成恒真。先把「它在」钉住。
+    expect(
+      findCopyItem(),
+      '找不到内容为 Copy 的 ContextMenu.Item——右键复制入口没了，下面两条接线断言会恒真'
+    ).not.toBeNull()
+  })
+
+  it('Copy 项的 disabled 正好是 !hasSelection——有选区才可点，且极性没反', () => {
+    // 把 disabled 换成 `false`（恒可点：xterm 停选区时点复制空区间）或 `hasSelection`（极性反：有选区
+    // 反而变灰），这条都红。判的是表达式文本，不是「有没有 disabled 属性」——后者对极性反完全失明。
+    const copyItem = findCopyItem()
+    expect(copyItem, 'Copy 项缺席').not.toBeNull()
+    expect(
+      attrExpression(copyItem!, 'disabled'),
+      'Copy 项的 disabled 不是 !hasSelection——要么恒可点（点了复制空区间），要么极性反了（有选区反而变灰）'
+    ).toBe('!hasSelection')
+  })
+
+  it('Copy 项的 onSelect 正好是 onCopy——点了真的走复制', () => {
+    // 接错成 onPaste/onClear，或没接 onSelect，右键复制会静默失效或做成别的事。判 handler 的身份。
+    const copyItem = findCopyItem()
+    expect(copyItem, 'Copy 项缺席').not.toBeNull()
+    expect(
+      attrExpression(copyItem!, 'onSelect'),
+      'Copy 项的 onSelect 不是 onCopy——右键点 Copy 不会复制（接错了 handler 或没接）'
+    ).toBe('onCopy')
+  })
+
+  it('自证：onCopy 与 hasSelection 都是组件签名里的 prop，不是自由变量', () => {
+    // 上面两条钉的是字面文本 'onCopy' / '!hasSelection'。若这两个名字根本不是组件的入参（改了 prop 名
+    // 却忘了改这里），断言会守着一对过时的名字而组件照常工作——这条把「它们确实是当前 prop」钉住。
+    const params = new Set<string>()
+    const visit = (node: ts.Node): void => {
+      if (
+        ts.isFunctionDeclaration(node) &&
+        node.name?.text === 'TerminalContextMenu' &&
+        node.parameters.length > 0 &&
+        ts.isObjectBindingPattern(node.parameters[0]!.name)
+      ) {
+        for (const element of node.parameters[0]!.name.elements) {
+          if (ts.isIdentifier(element.name)) params.add(element.name.text)
+        }
+      }
+      ts.forEachChild(node, visit)
+    }
+    ts.forEachChild(file, visit)
+    expect(params.has('onCopy'), 'onCopy 不是 TerminalContextMenu 的 prop——上一条在守一个过时的名字').toBe(true)
+    expect(
+      params.has('hasSelection'),
+      'hasSelection 不是 TerminalContextMenu 的 prop——disabled 断言在守一个过时的名字'
+    ).toBe(true)
+  })
+})
