@@ -155,7 +155,40 @@ describe('AgentComposer reusable surface', () => {
     expect(onInterrupt).not.toHaveBeenCalled()
   })
 
-  it('does not submit while an IME is confirming a candidate', () => {
+  // 四个来源各自承重。此前这条用例的 fixture 在**合成事件与 nativeEvent 上设同一个值**，于是它分不清
+  // 生产代码读的是哪一侧：把 `event.nativeEvent?.isComposing` 改成 `event.isComposing` 时 17 条全绿
+  // （fixture 形状让测试失明）。改成每个 fixture 只设一个来源——这既钉住读的是哪一侧，也把「收敛到
+  // 四路 SSOT 谓词」变成必须的改动：只标记 keyCode 或只标记顶层 isComposing 的输入法，在两路手抄下
+  // 会把半转换草稿提交上去。
+  const IME_SOURCES: ReadonlyArray<{ name: string; event: Record<string, unknown> }> = [
+    { name: '合成事件 isComposing', event: { isComposing: true, keyCode: 13, nativeEvent: { isComposing: false, keyCode: 13 } } },
+    { name: '合成事件 keyCode=229', event: { isComposing: false, keyCode: 229, nativeEvent: { isComposing: false, keyCode: 13 } } },
+    { name: 'nativeEvent.isComposing', event: { isComposing: false, keyCode: 13, nativeEvent: { isComposing: true, keyCode: 13 } } },
+    { name: 'nativeEvent.keyCode=229', event: { isComposing: false, keyCode: 13, nativeEvent: { isComposing: false, keyCode: 229 } } }
+  ]
+
+  for (const source of IME_SOURCES) {
+    it(`does not submit while an IME is confirming a candidate（只标记${source.name}）`, () => {
+      const onSubmit = vi.fn()
+      const composer = AgentComposer({
+        value: '中文草稿',
+        disabled: false,
+        placeholder: 'Ask the Agent…',
+        onChange: vi.fn(),
+        onSubmit
+      }) as unknown as { props: { children: [{ props: { onKeyDown(e: unknown): void } }] } }
+      const textarea = composer.props.children[0]
+      const preventDefault = vi.fn()
+
+      textarea.props.onKeyDown({ key: 'Enter', shiftKey: false, ...source.event, preventDefault })
+
+      expect(onSubmit, `只标记${source.name} 的组字确认 Enter 被当成提交`).not.toHaveBeenCalled()
+      expect(preventDefault).not.toHaveBeenCalled()
+    })
+  }
+
+  it('四个来源都不满足的裸 Enter 仍然提交（反向锚点，防谓词恒真）', () => {
+    // 没有这条，把判据改成恒「在组字」就能让上面四条全绿——而那样 Enter 永远发不出消息。
     const onSubmit = vi.fn()
     const composer = AgentComposer({
       value: '中文草稿',
@@ -164,30 +197,19 @@ describe('AgentComposer reusable surface', () => {
       onChange: vi.fn(),
       onSubmit
     }) as unknown as { props: { children: [{ props: { onKeyDown(e: unknown): void } }] } }
-    const textarea = composer.props.children[0]
     const preventDefault = vi.fn()
 
-    // macOS/Chromium reports the candidate-confirming Enter with isComposing. Some IMEs use the
-    // legacy keyCode=229 instead, so both signals must remain submit-safe.
-    textarea.props.onKeyDown({
-      key: 'Enter',
-      shiftKey: false,
-      isComposing: true,
-      nativeEvent: { isComposing: true },
-      keyCode: 13,
-      preventDefault
-    })
-    textarea.props.onKeyDown({
+    composer.props.children[0].props.onKeyDown({
       key: 'Enter',
       shiftKey: false,
       isComposing: false,
-      nativeEvent: { isComposing: false },
-      keyCode: 229,
+      keyCode: 13,
+      nativeEvent: { isComposing: false, keyCode: 13 },
       preventDefault
     })
 
-    expect(onSubmit).not.toHaveBeenCalled()
-    expect(preventDefault).not.toHaveBeenCalled()
+    expect(onSubmit).toHaveBeenCalledTimes(1)
+    expect(preventDefault).toHaveBeenCalled()
   })
 
   // -------------------------------------------------------------------------
