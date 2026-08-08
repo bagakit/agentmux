@@ -20,10 +20,12 @@ import {
  * 相等」，而 group 侧此前只有行为测试——没有任何东西问「每个真的会动集合的地方都断言了吗」。
  * 实测（#778 的正控）：在 workbench-layout.ts 里加一个
  *
+ * @example
  *     export function collapseGroupIntoSibling(layout, groupId) {
  *       return { ...layout, root: removeLeaf(layout.root, groupLeafId, groupId) ?? layout.root }
  *     }
  *
+ * @remarks
  * ——摘掉一片叶、不删对应 `groups` 记录、也不断言——六文件 `Tests 83 passed (83)` 全绿。那正是
  * `assertGroupInvariant` 的 JSDoc 说要防的「画不出也关不掉的孤儿 Tab Group」。
  *

@@ -39,7 +39,7 @@ describe('selected worktree workspace context', () => {
       path: 'README.md'
     })
     const config: AppConfig = {
-      version: 7,
+      version: 9,
       hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
       executors: {},
       workspaces: [workspace],
@@ -181,7 +181,7 @@ describe('selected worktree workspace context', () => {
     })
     const oldLayout = createWorkspaceLayout('main-pane', [oldTab.id])
     const initialConfig: AppConfig = {
-      version: 7,
+      version: 9,
       hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
       executors: {},
       workspaces: [main],
@@ -287,7 +287,7 @@ describe('selected worktree workspace context', () => {
     }
     useAppStore.setState({
       config: {
-        version: 7,
+        version: 9,
         hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
         executors: { codex: { label: 'Codex', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: true } },
         workspaces: [workspace],
@@ -329,7 +329,7 @@ function prepareUniversalTab(): { workspace: WorkspaceRecord; tabId: string } {
     kind: 'folder'
   }
   const config: AppConfig = {
-    version: 7,
+    version: 9,
     hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
     executors: { codex: { label: 'Codex', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: true } },
     workspaces: [workspace],
@@ -521,7 +521,7 @@ describe('Scratch Topic workbench binding', () => {
     }
     useAppStore.setState({
       config: {
-        version: 7,
+        version: 9,
         hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
         executors: {
           codex: { label: 'Codex', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: true }
