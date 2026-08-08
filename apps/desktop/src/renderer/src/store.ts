@@ -1922,10 +1922,19 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     } catch (error) {
       booting = false
       disposeRuntimeSubscriptions()
-      set({ loading: false, error: presentError(error) })
-      // Any state written while the startup path was failing must not leave the fence closed forever;
-      // subsequent user edits are the first intentional opportunity to replace the old record.
-      openPersistWrites()
+      const persisted = get().restoredWorkbench
+      // A failure after hydration (for example a malformed Runtime snapshot or a repair assertion)
+      // must not turn the saved Workbench into the in-memory empty default. Keep the durable
+      // topology visible while the service-window error explains which startup step failed.
+      set({
+        ...(persisted ? { tabs: persisted.tabs, layouts: persisted.layouts } : {}),
+        loading: false,
+        error: presentError(error)
+      })
+      // If hydration itself failed, keep the write fence closed: opening it here would let the
+      // default empty state overwrite the only durable copy before the user can repair storage.
+      // Other startup failures have a verified record and may accept intentional later edits.
+      if (!persistHydrationError) openPersistWrites()
       return () => {}
     }
   },
