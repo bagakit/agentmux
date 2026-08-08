@@ -436,3 +436,172 @@ describe('方向的两半含义只在 split-direction 里拆一次', () => {
     expect(hits.some((hit) => hit.file === 'lib/workbench-tab-actions.ts')).toBe(false)
   })
 })
+
+// ---------------------------------------------------------------------------
+// 跨包方向证明的**出处**：两半必须来自两个不同的包，否则证明是恒真的死代码
+//
+// `directional-addressing.ts` 里那道 `_addressDirectionMatchesControlProtocol` 用双向 `extends` 把渲染
+// 层的 `SplitDirection` 与控制协议 `AgentMuxOpenDestination` 的 direction 锁在一起。它的承重前提是
+// **两个操作数分别取自两个包**：一侧解析到本包的类型声明，另一侧解析到 `@agentmux/core` 的控制契约。
+//
+// 前提破掉时证明不会报错，只会静默变成 `X extends X ? true : never` 这个恒真式。实测（本轮变异 D3）：
+// 把 `ControlSplitDirection` 的定义从 `Extract<AgentMuxOpenDestination, { kind: 'split' }>['direction']`
+// 改成 `SplitDirection`，`tsc --noEmit -p tsconfig.json` **exit 0**，`directional-region-ssot` 与
+// `directional-addressing` 两个 suite **43 条全绿**——那道证明当场成了永不失败的装饰，而任一侧加删一个
+// 方向都不再有人报错。同族：[承诺的判据比断言强] 与「期望值不能由被测对象算出」。
+//
+// 所以这里判的不是「证明在场」（那正是 D3 满足的），而是每一半的 `extends` 两侧**定义来自哪个包**。
+//
+// 关键是别把问题问成「这个名字在哪个文件里声明」：两个操作数今天都是本包里的**局部别名**
+// （`ControlSplitDirection` 就写在被测文件里，`SplitDirection` 从 `./workbench-layout` 导入），
+// 按声明位置判会把干净的代码也读成 renderer↔renderer——这个错判据我先写过一遍，干净树上就报了红。
+// 要顺着别名链一路追到定义的**出处**：别名还在本包内就展开它的定义继续追，一旦落到本包之外就按
+// 那个文件归包。于是 `Extract<AgentMuxOpenDestination, …>['direction']` 追到 `@agentmux/core`（无论
+// 它经 node_modules 链还是 packages/core 解析），而 `= SplitDirection` 追到本包，D3 当场红。
+// 换等价写法（把 `AgentMuxOpenDestination['direction']` 直接写进元组之类）照旧通过。
+// ---------------------------------------------------------------------------
+const ADDRESSING_FILE = path.join(RENDERER_DIR, 'lib/directional-addressing.ts')
+const CROSS_PACKAGE_PROOF = '_addressDirectionMatchesControlProtocol'
+
+type OriginPackage = 'renderer' | 'core' | 'unresolved'
+
+/** 这个声明文件属于哪一侧。`lib` 是 TS 自带声明（`Extract` 之类），不参与归包。 */
+function packageOfFile(file: string): OriginPackage | 'lib' {
+  if (/[\\/]node_modules[\\/]typescript[\\/]/.test(file)) return 'lib'
+  if (/[\\/]packages[\\/]core[\\/]|[\\/]@agentmux[\\/]core[\\/]/.test(file)) return 'core'
+  if (file.startsWith(RENDERER_DIR)) return 'renderer'
+  return 'unresolved'
+}
+
+/** 类型位置上真正引用了别的类型的地方——属性名、字面量都不算，否则 `{ kind: 'split' }` 会污染出处。 */
+function typeReferencesIn(node: ts.TypeNode): ts.EntityName[] {
+  const found: ts.EntityName[] = []
+  const walk = (child: ts.Node): void => {
+    if (ts.isTypeReferenceNode(child)) found.push(child.typeName)
+    else if (ts.isTypeQueryNode(child)) found.push(child.exprName)
+    ts.forEachChild(child, walk)
+  }
+  walk(node)
+  return found
+}
+
+function leftmostIdentifier(entity: ts.EntityName): ts.Identifier {
+  let current = entity
+  while (ts.isQualifiedName(current)) current = current.left
+  return current
+}
+
+/**
+ * 这个类型节点的定义**出处**集合。别名仍在本包内就展开继续追（这才是 D3 那次变异的判别点），
+ * 落到包外就按文件归包。解析不出来记 `unresolved`，绝不当成通过。
+ */
+function originsOfTypeNode(checker: ts.TypeChecker, node: ts.TypeNode, seen: Set<ts.Node>): Set<OriginPackage> {
+  const origins = new Set<OriginPackage>()
+  for (const entity of typeReferencesIn(node)) {
+    let symbol = checker.getSymbolAtLocation(leftmostIdentifier(entity))
+    if (symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0) {
+      symbol = checker.getAliasedSymbol(symbol)
+    }
+    const declaration = symbol?.declarations?.[0]
+    if (declaration === undefined) {
+      origins.add('unresolved')
+      continue
+    }
+    const pkg = packageOfFile(declaration.getSourceFile().fileName)
+    if (pkg === 'lib') continue
+    if (pkg !== 'renderer') {
+      origins.add(pkg)
+      continue
+    }
+    if (ts.isTypeAliasDeclaration(declaration) && !seen.has(declaration)) {
+      seen.add(declaration)
+      const nested = originsOfTypeNode(checker, declaration.type, seen)
+      if (nested.size > 0) {
+        for (const value of nested) origins.add(value)
+        continue
+      }
+    }
+    origins.add('renderer')
+  }
+  return origins
+}
+
+/** 出处集合收成一个词。刻意严格：混了两个包也要说出来，而不是挑一个当答案。 */
+function sideLabel(origins: Set<OriginPackage>): string {
+  if (origins.size === 1) return [...origins][0]
+  if (origins.size === 0) return 'none'
+  return `mixed(${[...origins].sort().join(',')})`
+}
+
+type ProofProbe = {
+  readonly found: boolean
+  readonly halves: string[]
+  /** 自证用：本文件里两个真实类型引用各自的出处，证明这个判据不是常量。 */
+  readonly coreWitness: string
+  readonly rendererWitness: string
+}
+
+function crossPackageProofProbe(): ProofProbe {
+  const configFile = ts.readConfigFile(path.join(DESKTOP_DIR, 'tsconfig.json'), ts.sys.readFile)
+  const parsed = ts.parseJsonConfigFileContent(configFile.config, ts.sys, DESKTOP_DIR)
+  const program = ts.createProgram([ADDRESSING_FILE], parsed.options)
+  const checker = program.getTypeChecker()
+  const file = program.getSourceFile(ADDRESSING_FILE)
+  if (file === undefined) return { found: false, halves: [], coreWitness: 'none', rendererWitness: 'none' }
+
+  const halves: string[] = []
+  let found = false
+  const side = (node: ts.TypeNode): string => sideLabel(originsOfTypeNode(checker, node, new Set()))
+
+  ts.forEachChild(file, (node) => {
+    if (!ts.isVariableStatement(node)) return
+    for (const declaration of node.declarationList.declarations) {
+      if (!ts.isIdentifier(declaration.name) || declaration.name.text !== CROSS_PACKAGE_PROOF) continue
+      found = true
+      const annotation = declaration.type
+      if (annotation === undefined || !ts.isTupleTypeNode(annotation)) return
+      for (const element of annotation.elements) {
+        if (!ts.isConditionalTypeNode(element)) continue
+        halves.push(`${side(element.checkType)}->${side(element.extendsType)}`)
+      }
+    }
+  })
+
+  // 见证节点取本文件里两个真实用到的类型：一个来自 core，一个来自本包。它们不是为测试造的探针，
+  // 所以「判据能分开两个包」这件事是在生产代码上证的。
+  const witnessOf = (name: string): string => {
+    let label = 'none'
+    const walk = (child: ts.Node): void => {
+      if (label !== 'none') return
+      if (ts.isTypeReferenceNode(child) && leftmostIdentifier(child.typeName).text === name) label = side(child)
+      else ts.forEachChild(child, walk)
+    }
+    ts.forEachChild(file, walk)
+    return label
+  }
+  return { found, halves, coreWitness: witnessOf('AgentMuxRegionNeighbor'), rendererWitness: witnessOf('WorkbenchRegionBounds') }
+}
+
+describe('方向的跨包证明必须真的跨包（否则它是恒真的死代码）', () => {
+  const probe = crossPackageProofProbe()
+
+  it('自证：那道证明还在，且它的注解是由两半组成的元组（改名或换形状时先在这里红）', () => {
+    // found 为假说明证明被删或改名；长度不为 2 说明它不再是「两个包含方向各一半」的形状。
+    // 缺了这条，下面那条按出处判的断言会对空数组恒绿。
+    expect(probe.found).toBe(true)
+    expect(probe.halves).toHaveLength(2)
+  })
+
+  it('自证：出处判据在本文件的两个真实类型引用上给出不同的包（判据不是常量）', () => {
+    // `AgentMuxRegionNeighbor` 来自 @agentmux/core/control，`WorkbenchRegionBounds` 来自本包的
+    // workbench-view-layout。若判据坏成恒 'core' 或恒 'renderer'（或恒 unresolved），这里先红。
+    expect(probe.coreWitness).toBe('core')
+    expect(probe.rendererWitness).toBe('renderer')
+  })
+
+  it('两半各自的 extends 两侧分居 renderer 与 core，方向相反', () => {
+    // 这就是 D3 被挡住的地方：把 ControlSplitDirection 的定义改成 `= SplitDirection` 后，追出处得到
+    // 的是本包，两半都变成 renderer->renderer，于是这条红——而 tsc 对那次变异是 exit 0 的。
+    expect([...probe.halves].sort()).toEqual(['core->renderer', 'renderer->core'])
+  })
+})
