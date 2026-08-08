@@ -208,6 +208,25 @@ export function isNotAWorkingTreeStderr(stderr: string): boolean {
 //   status/stage/commit never touch ssh; the baseline is set here so remote verbs added later inherit
 //   it instead of each rediscovering the hang.
 //
+// The `undefined` entries UNSET an inherited variable rather than setting one: `runProcess` starts from
+// `{ ...process.env }` and, per its contract, deletes any key whose value is `undefined`. This closes a
+// silent wrong-repository leak (#765): `git -C <dir>` positions git's CWD but does NOT override an
+// exported repo-location variable — measured against real git 2.50.1. So a user who exports any of these
+// in their shell (a common dotfile shape, and anyone who has scripted a bare repo) had every AgentMux
+// git operation — status, stage, commit, discard, diff, worktree add/remove — silently pointed at
+// another repository, succeeding against the wrong tree. Which five, and why exactly these:
+//   - GIT_DIR: git reads refs/objects from there; `-C /project` then reports the OTHER repo's branch
+//     and its files as deletions — SILENT, exit 0, the worst case (measured: branch flips target→decoy).
+//   - GIT_WORK_TREE: relocates the working tree; the other repo's files appear as changes — also silent.
+//   - GIT_INDEX_FILE / GIT_OBJECT_DIRECTORY / GIT_COMMON_DIR: point staging/object lookup elsewhere;
+//     these fail loud (`fatal: bad object HEAD`, `unable to read <oid>`) rather than silently, but a
+//     loud failure against the wrong store is still a failure we caused and must not inherit.
+// Deliberately NOT unset, because each was measured to have NO observable effect on our commands and
+// unsetting a variable git ignores would be a vacuous guard arm: GIT_NAMESPACE, GIT_CEILING_DIRECTORIES,
+// GIT_ALTERNATE_OBJECT_DIRECTORIES (all left the branch and change list identical to baseline). If a
+// future verb makes one of them bite, add it here WITH a test that observes the difference — the list is
+// a decision backed by measurement, not a fixed catalogue.
+//
 // Exported because the no-hang guarantee is a property of *every* git invocation in the main process,
 // not of this file. The worktree service used to carry its own two-key `{LC_ALL, LANG}` copy on two of
 // its five calls: the locale half was duplicated, the anti-hang half was simply absent, and its
@@ -219,7 +238,13 @@ export const GIT_NONINTERACTIVE_ENV = {
   LC_ALL: 'C',
   LANG: 'C',
   GIT_TERMINAL_PROMPT: '0',
-  GIT_SSH_COMMAND: 'ssh -o BatchMode=yes'
+  GIT_SSH_COMMAND: 'ssh -o BatchMode=yes',
+  // Unset (value `undefined` → runProcess deletes the key). See the header comment for why these five.
+  GIT_DIR: undefined,
+  GIT_WORK_TREE: undefined,
+  GIT_INDEX_FILE: undefined,
+  GIT_OBJECT_DIRECTORY: undefined,
+  GIT_COMMON_DIR: undefined
 } as const
 
 const GIT_RUN_OPTIONS = {
@@ -357,6 +382,38 @@ const PATH_ABSENT_IN_HEAD = /^fatal: path .+ (?:does not exist in|exists on disk
 function isPathAbsentInHead(stderr: string): boolean {
   const lines = stderr.split('\n').filter((line) => line.trim() !== '')
   return lines.length === 1 && PATH_ABSENT_IN_HEAD.test(lines[0]!)
+}
+
+/**
+ * The fatal `git show HEAD:<path>` prints in a repository that has no commits yet — a brand-new
+ * project (`git init`, nothing committed). HEAD is *unborn*: it names a branch ref that does not exist,
+ * so there is no tree to read and no path can be "in HEAD". Every file on disk is therefore genuinely
+ * new — exactly the added-file shape {@link isPathAbsentInHead} already draws, and a normal state, not
+ * an error. Before this, that fatal reached `assertGit` and surfaced raw in the diff pane; a fresh
+ * project could not have its files diffed at all.
+ *
+ * This is a DIFFERENT sentence from the path fatals above — git names neither the path nor a tree, only
+ * the rev it could not resolve — so it is its own predicate rather than a widened path pattern. The
+ * message is git's, captured byte-for-byte from real git (git 2.50.1, one fresh `git init` with no
+ * commit): `fatal: invalid object name 'HEAD'.`, exit 128. The trailing `\.` is git's own period.
+ *
+ * The REF span is the literal `HEAD`, not a wildcard: `readHeadBlob` only ever asks for `HEAD:<path>`,
+ * so a fatal naming any other rev (`invalid object name '@'.`, `'HEAD~1'.` — both measured) did not come
+ * from the read we made and is not evidence about HEAD.
+ *
+ * The sole-line requirement is the load-bearing half — the same discipline the sibling carries, and not
+ * decoration. An unborn HEAD is the ONLY state that prints this exact sentence: a HEAD that resolves to
+ * a missing or unreadable commit prints the PATH fatal instead (with `error:` companion lines when the
+ * object is unreadable), and `git rev-parse --verify --quiet HEAD` exits 0 for those but 1 for a
+ * genuinely unborn HEAD (all measured). So this sentence, standing alone, cannot be a corruption in
+ * disguise — but if git ever pairs it with other diagnostics, that extra text means git is telling us
+ * something more, and the failure must surface rather than be flattened into "added".
+ */
+const HEAD_UNBORN = /^fatal: invalid object name 'HEAD'\.$/
+
+function isHeadUnborn(stderr: string): boolean {
+  const lines = stderr.split('\n').filter((line) => line.trim() !== '')
+  return lines.length === 1 && HEAD_UNBORN.test(lines[0]!)
 }
 
 /** The largest blob or worktree file held as diffable text; anything larger is reported as binary. */
@@ -613,9 +670,11 @@ export class GitService {
       throw error
     }
     if (result.exitCode === 0) return blobTextToDiffSide(result.stdout)
-    // The one benign failure: the path is not in HEAD, which is how an added file is drawn. Every other
-    // failure is real and must surface rather than be flattened into an empty (or HEAD-fallback) diff.
-    if (isPathAbsentInHead(result.stderr)) return { present: false }
+    // Two benign failures, both meaning "there is no old side" — an added file. Every other failure is
+    // real and must surface rather than be flattened into an empty (or HEAD-fallback) diff.
+    //   - the path is not in HEAD (committed history exists, this file is not in it); or
+    //   - HEAD is unborn: the repository has no commits yet, so nothing is in HEAD and every file is new.
+    if (isPathAbsentInHead(result.stderr) || isHeadUnborn(result.stderr)) return { present: false }
     this.assertGit(result, 'Could not read the file from HEAD')
     return { present: false }
   }
