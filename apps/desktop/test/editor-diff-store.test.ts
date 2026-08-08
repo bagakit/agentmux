@@ -68,7 +68,7 @@ const WORKSPACE: WorkspaceRecord = {
   kind: 'folder'
 }
 const CONFIG: AppConfig = {
-  version: 7,
+  version: 9,
   hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
   executors: {},
   workspaces: [WORKSPACE],

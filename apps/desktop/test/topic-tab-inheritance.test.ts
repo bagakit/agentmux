@@ -22,7 +22,7 @@ const scratchPath = '/scratch'
 const topicPath = `${scratchPath}/${scratchTopicDirectoryName(topicId)}`
 
 const config: AppConfig = {
-  version: 7,
+  version: 9,
   hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
   executors: {
     codex: { label: 'Codex', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: true }

@@ -10,7 +10,7 @@ const observed = vi.hoisted(() => {
       loading: false,
       error: null,
       config: {
-        version: 7,
+        version: 9,
         hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
         executors: {},
         workspaces: [{ id: 'workspace', name: 'Project', hostId: 'local', path: '/repo', kind: 'folder' }],

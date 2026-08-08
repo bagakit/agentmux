@@ -114,7 +114,7 @@ describe('store 只经由这个函数改失效计数', () => {
 // 参考记忆 extracting-to-lib-only-fixes-half：抽进 lib 只解决一半。
 // ---------------------------------------------------------------------------
 const config: AppConfig = {
-  version: 7,
+  version: 9,
   hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
   executors: {},
   workspaces: [

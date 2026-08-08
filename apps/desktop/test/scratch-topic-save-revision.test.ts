@@ -108,7 +108,7 @@ function seedScratchTopicDocument(
     kind: 'folder'
   }
   const config: AppConfig = {
-    version: 7,
+    version: 9,
     hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
     executors: {},
     workspaces: [workspace, { id: 'bystander', name: 'Other', hostId: 'local', path: '/other', kind: 'folder' }],

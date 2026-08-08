@@ -4,7 +4,7 @@ import type { AppConfig } from '../src/shared/contracts.js'
 import { applyWorkspacePathRebind } from '../src/renderer/src/lib/workspace-path-recovery.js'
 
 const config: AppConfig = {
-  version: 7,
+  version: 9,
   hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
   executors: {},
   workspaces: [
