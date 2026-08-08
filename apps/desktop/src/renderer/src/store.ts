@@ -285,6 +285,7 @@ type AppState = {
   hostChecks: Record<string, HostCheckState>
   browserAnnotationsByBrowserId: Record<string, BrowserAnnotation[]>
   agentComposerDrafts: Record<string, string>
+  agentSteerQueues: Record<string, string[]>
   /**
    * 启动对话框里填的两个可选名字，按 launcher 的 regionId 存——与 {@link agentComposerDrafts} 同一
    * 归属、同一生命周期。这里不是"手改名"那一档：手改名按 session id 存在 {@link agentNames}，而这两个
@@ -598,6 +599,7 @@ type AppState = {
   setLauncherNameDraft(regionId: string, field: LauncherNameField, value: string): void
   appendAgentComposerDraft(sessionId: string, text: string): void
   clearAgentComposerDraftIfUnchanged(sessionId: string, expectedText: string): void
+  enqueueAgentSteer(sessionId: string, text: string): void
   send(sessionId: string, text: string): Promise<void>
   respondInteraction(sessionId: string, response: AgentMuxInteractionResponse): Promise<void>
   setPosture(sessionId: string, modeId: string): Promise<void>
@@ -1643,6 +1645,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   hostChecks: {},
   browserAnnotationsByBrowserId: {},
   agentComposerDrafts: {},
+  agentSteerQueues: {},
   launcherNameDrafts: {},
   agentNames: {},
   mainSurface: 'workbench',
@@ -4254,6 +4257,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return { agentComposerDrafts }
     })
   },
+  enqueueAgentSteer(sessionId, text) {
+    if (!text.trim()) return
+    set((state) => ({ agentSteerQueues: { ...state.agentSteerQueues, [sessionId]: [...(state.agentSteerQueues[sessionId] ?? []), text] } }))
+  },
   async send(sessionId, text) {
     if (!text.trim()) return
     const session = get().sessions.find((item) => item.id === sessionId)
@@ -4270,6 +4277,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!session || session.kind !== 'agent') return
     try {
       await api.sessions.respondInteraction(session.control, response)
+      const queued = get().agentSteerQueues[sessionId] ?? []
+      if (queued.length > 0) {
+        set((state) => { const { [sessionId]: _removed, ...rest } = state.agentSteerQueues; return { agentSteerQueues: rest } })
+        for (const prompt of queued) {
+          try { await api.sessions.submitPrompt(session.control, prompt) }
+          catch (error) { get().reportError(error); set((state) => ({ agentSteerQueues: { ...state.agentSteerQueues, [sessionId]: [prompt, ...(state.agentSteerQueues[sessionId] ?? [])] } })); break }
+        }
+      }
     } catch (error) {
       get().reportError(error)
       throw error
