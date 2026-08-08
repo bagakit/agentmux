@@ -15,7 +15,7 @@ import { CTXMUX_MANIFEST_SHA256 } from '../src/runtime-paths.js'
 const execFileAsync = promisify(execFile)
 const repositoryRoot = resolve(import.meta.dirname, '../../..')
 const packedConsumerFixture = fileURLToPath(new URL('./fixtures/packed-consumer.mjs', import.meta.url))
-const ownerFenceFixture = fileURLToPath(new URL('./fixtures/ctxmux-owner-fence.mjs', import.meta.url))
+const compatibleRuntimeFixture = fileURLToPath(new URL('./fixtures/ctxmux-compatible-runtime.mjs', import.meta.url))
 const controlFixture = fileURLToPath(new URL('./fixtures/ctxmux-terminal-control.mjs', import.meta.url))
 const stubbornFixture = fileURLToPath(new URL('./fixtures/stubborn-process-tree.mjs', import.meta.url))
 const fakeCodexFixture = fileURLToPath(new URL('./fixtures/fake-codex-cli.mjs', import.meta.url))
@@ -23,7 +23,6 @@ const lifecycleCrashFixture = fileURLToPath(new URL('./fixtures/lifecycle-crash-
 const promptCrashFixture = fileURLToPath(new URL('./fixtures/prompt-submit-crash-worker.mjs', import.meta.url))
 const interactionCrashFixture = fileURLToPath(new URL('./fixtures/interaction-response-crash-worker.mjs', import.meta.url))
 const runtimeScopePreloadFixture = fileURLToPath(new URL('./fixtures/runtime-scope-preload.mjs', import.meta.url))
-const ownerReceiptFailureFixture = fileURLToPath(new URL('./fixtures/ctxmux-owner-receipt-failure.mjs', import.meta.url))
 const ownerRelocationFixture = fileURLToPath(new URL('./fixtures/ctxmux-owner-relocation.mjs', import.meta.url))
 const liveRuntimeFenceFixture = fileURLToPath(new URL('./fixtures/ctxmux-live-runtime-fence.mjs', import.meta.url))
 const stopResponseLossFixture = fileURLToPath(new URL('./fixtures/ctxmux-stop-response-loss-worker.mjs', import.meta.url))
@@ -478,7 +477,7 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
       })
       await Promise.all([
         cp(packedConsumerFixture, join(consumerDirectory, 'packed-consumer.mjs')),
-        cp(ownerFenceFixture, join(consumerDirectory, 'ctxmux-owner-fence.mjs')),
+        cp(compatibleRuntimeFixture, join(consumerDirectory, 'ctxmux-compatible-runtime.mjs')),
         cp(controlFixture, join(consumerDirectory, 'ctxmux-terminal-control.mjs')),
         cp(stubbornFixture, join(consumerDirectory, 'stubborn-process-tree.mjs')),
         cp(fakeCodexFixture, join(consumerDirectory, 'bin', 'codex')),
@@ -486,7 +485,6 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         cp(promptCrashFixture, join(consumerDirectory, 'prompt-submit-crash-worker.mjs')),
         cp(interactionCrashFixture, join(consumerDirectory, 'interaction-response-crash-worker.mjs')),
         cp(runtimeScopePreloadFixture, join(consumerDirectory, 'runtime-scope-preload.mjs')),
-        cp(ownerReceiptFailureFixture, join(consumerDirectory, 'ctxmux-owner-receipt-failure.mjs')),
         cp(ownerRelocationFixture, join(consumerDirectory, 'ctxmux-owner-relocation.mjs')),
         cp(liveRuntimeFenceFixture, join(consumerDirectory, 'ctxmux-live-runtime-fence.mjs')),
         cp(stopResponseLossFixture, join(consumerDirectory, 'ctxmux-stop-response-loss-worker.mjs')),
@@ -813,26 +811,36 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
           ...relocatedReceipt,
           daemonSha256: '0'.repeat(64)
         })}\n`)
-        const artifactMismatch = await execFileAsync(process.execPath, ['ctxmux-owner-fence.mjs'], {
+        const artifactMismatch = await execFileAsync(process.execPath, ['ctxmux-compatible-runtime.mjs'], {
           cwd: consumerDirectory,
           maxBuffer: 2 * 1024 * 1024,
           env: runtimeEnvironment
         })
-        expect(artifactMismatch.stdout.trim()).toBe('ctxmux-owner-fence-ok')
+        expect(JSON.parse(artifactMismatch.stdout.trim())).toMatchObject({ instanceId: ownerReceipt.daemonInstanceId, ownership: 'unverified' })
+        expect((await waitForDaemonProcess(daemonPath, runtimeDirectory)).pid).toBe(activeDaemon.pid)
+        await rm(ownerReceiptPath)
+        const missingReceipt = await execFileAsync(process.execPath, ['ctxmux-compatible-runtime.mjs'], {
+          cwd: consumerDirectory, env: runtimeEnvironment
+        })
+        expect(JSON.parse(missingReceipt.stdout.trim())).toMatchObject({ instanceId: ownerReceipt.daemonInstanceId, ownership: 'unverified' })
+        expect((await waitForDaemonProcess(daemonPath, runtimeDirectory)).pid).toBe(activeDaemon.pid)
 
         await stopDaemon(activeDaemon)
         await rm(ownerReceiptPath, { force: true })
         await mkdir(ownerReceiptPath)
         const receiptFailure = await execFileAsync(
           process.execPath,
-          ['ctxmux-owner-receipt-failure.mjs'],
+          ['ctxmux-compatible-runtime.mjs'],
           {
             cwd: consumerDirectory,
             maxBuffer: 2 * 1024 * 1024,
             env: runtimeEnvironment
           }
         )
-        expect(JSON.parse(receiptFailure.stdout.trim())).toMatchObject({ rejected: true })
+        expect(JSON.parse(receiptFailure.stdout.trim())).toMatchObject({ ownership: 'unverified' })
+        // Failure to persist provenance must not kill the new, otherwise healthy daemon.
+        const receiptlessDaemon = await waitForDaemonProcess(daemonPath, runtimeDirectory)
+        await stopDaemon(receiptlessDaemon)
         await waitForNoDaemon(daemonPath, runtimeDirectory)
         expect((await readdir(runtimeDirectory)).some((entry) => entry.startsWith('.owner-'))).toBe(false)
         await rm(ownerReceiptPath, { recursive: true, force: true })
@@ -877,12 +885,13 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         expect(liveRuntimeFenceExitCode).toBe(0)
         expect(liveRuntimeFenceStderr).toBe('')
         liveRuntimeFence = null
-        const fenced = await execFileAsync(process.execPath, ['ctxmux-owner-fence.mjs'], {
+        const fenced = await execFileAsync(process.execPath, ['ctxmux-compatible-runtime.mjs'], {
           cwd: consumerDirectory,
           maxBuffer: 4 * 1024 * 1024,
           env: runtimeEnvironment
         })
-        expect(fenced.stdout.trim()).toBe('ctxmux-owner-fence-ok')
+        expect(JSON.parse(fenced.stdout.trim())).toMatchObject({ ownership: 'unverified' })
+        expect(JSON.parse(fenced.stdout.trim()).instanceId).not.toBe(ownerReceipt.daemonInstanceId)
       } finally {
         if (
           stopResponseLossWorker?.pid &&

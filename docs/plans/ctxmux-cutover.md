@@ -25,7 +25,8 @@ AgentMux vendor 只接受 manifest 声明 `worktree_clean: true` 的同一组 ma
 
 `packages/core/vendor/ctxmux/darwin-arm64` 是唯一 Artifact 输入，内容只有 CtxMux manifest、SDK tarball 与两个 binaries。Core build 先验证 manifest、platform、mode、size 与 SHA-256，再从 tarball 私有 bundle SDK 到 `CtxmuxRunAdapter`。
 
-Local endpoint 不是可选 Backend。Core 不接受外部 socket/state path；Darwin 固定使用长度有界的 `/private/tmp/amx-<uid>-<artifact-id>/`，不受调用进程 `TMPDIR` 长度影响，socket 当前为 57 bytes。Adapter 创建并复核 `0700` runtime/state 目录，启动前复核 manifest 整体 digest、binary bytes/mode 与 `ctxmuxd --version`，然后只从该随包绝对路径启动 daemon。首次启动通过 caller-owned fd 3 接收 `ctxmux.daemon-ready.v1`，只有 inherited receipt 的 daemon instance 与 public `runtimeInfo` 完全相等才写 owner receipt；socket race、PID、sleep 或 filesystem-only receipt 都不能证明所启动的 child。重连时响应 peer 还必须匹配 `0600` owner receipt 中的 full commit/tree/manifest/binary/path/endpoint、daemon instance、runtime lineage 与 runtime build。仅 protocol 相同不足以被声明为该 build。
+Local endpoint 不是可选 Backend。Core 不接受外部 socket/state path；Darwin 固定使用长度有界的 `/private/tmp/amx-<uid>-<artifact-id>/`，不受调用进程 `TMPDIR` 长度影响，socket 当前为 57 bytes。Adapter 创建并复核 `0700` runtime/state 目录，启动前复核 manifest 整体 digest、binary bytes/mode 与 `ctxmuxd --version`，然后只从该随包绝对路径启动 daemon。首次启动通过 caller-owned fd 3 接收 `ctxmux.daemon-ready.v1`，只有 inherited receipt 的 daemon instance 与 public `runtimeInfo` 完全相等才写 owner receipt；socket race、PID、sleep 或 filesystem-only receipt 都不能证明所启动的 child。重连的兼容性由公开 protocol/build/platform/architecture、state_dir lineage 和 required capabilities 决定。owner receipt 的 full commit/tree/manifest/binary/endpoint/instance 用于记录启动来源；缺失或不匹配是未确认来源，不拒绝兼容 Runtime，不清理活跃 daemon。receipt 中的启动路径允许安装位置变化；正常 App 重启与重装不改变 Runtime 身份。
+
 
 Adapter 先用 unfenced diagnostics client 读取一次原始 `runtimeInfo()` 并核对 owner receipt，随后建立
 同时绑定完整 `expectedRuntimeIdentity` 与 required capabilities 的 business client。每次 public dispatch

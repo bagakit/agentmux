@@ -58,8 +58,9 @@ The stable runtime belongs to one verified CtxMux artifact identity, not to the
 absolute directory from which that artifact was launched. Moving the same Core
 build from a checkout into `AgentMux.app` must reuse the existing daemon and its
 Runs. The owner receipt keeps the launch path for diagnostics, while ownership
-continues to fail closed on source commit/tree, manifest or daemon hash, runtime
-endpoint, or daemon instance mismatch.
+is recorded separately from compatibility. Missing or mismatched provenance produces a visible
+notice and never terminates a compatible daemon. Each connected client still fences dispatch
+to the exact Runtime identity it joined.
 
 Dependency materialization reads the pnpm lockfile-resolved workspace tree but
 writes only to a temporary application bundle. It does not run a nested install

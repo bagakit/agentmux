@@ -922,6 +922,7 @@ export class AgentMuxClient {
     const identity = this.kernel.identity()
     return {
       hostId: 'local',
+      ...(this.kernel.runtimeOwnership ? { ownership: this.kernel.runtimeOwnership } : {}),
       buildIdentity: identity.buildIdentity,
       protocolVersion: identity.protocolVersion,
       processId: null,

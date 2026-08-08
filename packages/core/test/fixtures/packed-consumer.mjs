@@ -228,15 +228,19 @@ async function rawControlReceipt(path, message, splitAt) {
   })
 }
 
+process.env.AGENTMUX_TEST_CURRENT_ENV = 'before-daemon'
+process.env.AGENTMUX_TEST_EXPLICIT_ENV = 'inherited'
 let first = await connectLocalAgentMux()
 assert.deepEqual(await first.listRuns(), [])
 const ownerInstanceId = first.runtimeIdentity().instanceId
 const firstEvents = []
 first.onEvent((event) => firstEvents.push(event))
+process.env.AGENTMUX_TEST_CURRENT_ENV = 'after-daemon'
 const run = await first.createTerminal({
   workspacePath: process.cwd(),
   command: process.execPath,
   args: [controlFixture],
+  env: { AGENTMUX_TEST_EXPLICIT_ENV: 'explicit' },
   cols: 80,
   rows: 24
 })
@@ -251,6 +255,9 @@ assert.equal(
   output(firstEvents, run.runId).includes(`agentmux-env:1:true:agentmux ${installedCoreVersion}`),
   true
 )
+assert.equal(output(firstEvents, run.runId).includes('current-env:after-daemon:explicit'), true)
+delete process.env.AGENTMUX_TEST_CURRENT_ENV
+delete process.env.AGENTMUX_TEST_EXPLICIT_ENV
 assert.equal(output(firstEvents, run.runId).includes('prefix:😀:tail'), true)
 assert.equal(output(firstEvents, run.runId).includes('�'), false)
 const beforeReconnect = (await first.listRuns()).find((candidate) => candidate.runId === run.runId)

@@ -140,34 +140,13 @@ exact Run，并让 Resize、Detach 与 Stop 进入同一个 per-Run Attachment �
 不会触达 ctxmux。Agent resize 与 stop 的 Core API 同时要求 `agentSessionId + expectedRun`，旧 View
 不能在 provider-native Resume 后控制同一 Agent Session 的新 Run。
 
-## 3. 环境变量：TERM / COLORTERM / NO_COLOR
+## 3. 本地 Shell 与 Run 环境
 
-终端程序是否输出颜色，取决于它启动时看到的环境。AgentMux 在**两个不同层**设置终端环境，
-二者语义不同，不要混淆：
+Desktop 启动时通过用户 `SHELL` 的交互式登录模式读取全部导出变量，使用 NUL 分隔与随机边界隔离启动 banner，保留空值、换行和等号。由 shell 自己选择配置文件，不手工 source 某个 dotfile。非导出变量、alias、function 不作为环境传递。交互式读取失败后可使用非交互式登录结果，但会持续显示部分读取告示；全部失败则保留继承环境并告知用户。
 
-**(a) daemon 自身环境** — `daemonEnvironment()`，`ctxmux-run-adapter.ts:143`。
-用于 spawn `ctxmuxd` 进程本身（`ctxmux-run-adapter.ts:490` 处 `env: daemonEnvironment()`）：
+Core 的 `localProcessEnvironment()` 为 daemon 启动及每次本地 Run 创建读取当前进程环境。Run 显式 env 覆盖这份基线，避免常驻 daemon 的旧环境覆盖应用重启后新读取的值。`terminalEnvironment()` 与 `agentEnvironment()` 继续拥有终端能力、CLI 路径与 Agent 身份注入；不由 Desktop 复制这些语义。
 
-- `TERM = 'xterm-256color'`、`COLORTERM = 'truecolor'`、`TERM_PROGRAM = 'AgentMux'`、
-  `TERM_PROGRAM_VERSION = '0.1.0'`、`FORCE_HYPERLINK = '1'`（`:145`–`:150`）。
-- **`delete environment.NO_COLOR`**（`:152`）——移除会全局禁用颜色的变量。
-- 若 `FORCE_COLOR === '0'` 或 `CLICOLOR === '0'` 则删除之（`:153`–`:154`），避免显式的
-  "关颜色"信号泄漏进 daemon。
-
-**(b) 每个 Run 的环境** — `terminalEnvironment()`，`client.ts:205`。
-用于每个 shell/terminal Run，以及经 `agentEnvironment()`（`client.ts:1122`）派生的 Agent Run：
-
-- 固定注入 `TERM = 'xterm-256color'`、`COLORTERM = 'truecolor'`、
-  `TERM_PROGRAM = 'AgentMux'`、`TERM_PROGRAM_VERSION = '0.1.0'`、`FORCE_HYPERLINK = '1'`
-  （`client.ts:208`–`:214`），随后展开调用方传入的 `environment`（`:214` 的 `...environment`）。
-- `createTerminal` 用它包裹用户/调用方 env（`client.ts:556`）；`createAgent`/`resumeAgent`
-  通过 `agentEnvironment`（`client.ts:1130` 的 `...terminalEnvironment(environment)`）复用同一基线。
-
-**证据边界（未知）**：`terminalEnvironment()`（层 b）**没有**像 `daemonEnvironment()`
-那样删除 `NO_COLOR`/`FORCE_COLOR=0`/`CLICOLOR=0`。子进程最终看到的环境是否含 `NO_COLOR`，
-取决于 daemon 进程的环境经 CtxMux 传播给 Run 的具体行为——这属于 CtxMux daemon 内部，
-不在本仓库源码内，故标注为**未知**，不臆测。可确证的是：AgentMux 侧对每个 Run 显式声明了
-`TERM=xterm-256color` 与 `COLORTERM=truecolor`，即向终端程序声明支持 256 色与真彩。
+基线声明 `TERM=xterm-256color`、`COLORTERM=truecolor`、`TERM_PROGRAM=AgentMux`，版本来自验证过的 `CTXMUX_VERSION`，开启 hyperlink。沿既有终端策略移除基线的 `NO_COLOR` 与值为 `0` 的 `FORCE_COLOR`/`CLICOLOR`；Run 显式配置仍可覆盖。配置修改对重启应用后创建的新进程生效，不能修改既有进程的环境。
 
 ## 4. 完整 ANSI palette 与 Graphite 工作面
 

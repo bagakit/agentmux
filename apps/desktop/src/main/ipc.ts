@@ -106,6 +106,7 @@ export async function registerIpc(args: {
   runtime: RuntimeController
   workspaceFiles?: WorkspaceFiles
   scratchTopics: ScratchTopics
+  environmentWarning?: string
 }): Promise<() => Promise<void>> {
   let config = await args.configStore.get()
   const initialPalette = terminalPalette(config.appearance.terminalTheme)
@@ -468,7 +469,10 @@ export async function registerIpc(args: {
   })
   handle('providers:list', () => args.runtime.providerCatalog())
   handle('executors:detect', async (executorId: AgentExecutorId, hostId: string) => await args.runtime.detect(executorId, hostId, config))
-  handle('sessions:snapshot', async () => await args.runtime.snapshot(config))
+  handle('sessions:snapshot', async () => ({
+    ...await args.runtime.snapshot(config),
+    ...(args.environmentWarning ? { environmentWarning: args.environmentWarning } : {})
+  }))
   handleWithEvent('sessions:launchAgent', async (event, input: AgentLaunchInput) => {
     const result = await args.runtime.launchAgent(input, config)
     if (!event.sender.isDestroyed()) return result
