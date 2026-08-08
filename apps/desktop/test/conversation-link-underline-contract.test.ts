@@ -62,17 +62,130 @@ function declValue(body: string, prop: string): string | undefined {
   return match ? match[1]!.trim() : undefined
 }
 
-/** Resolve a duration literal or a `var(--token)` reference to milliseconds, reading the token table
- *  from the same concatenated sheet. Returns NaN for anything unrecognised so a bad value fails loudly
- *  rather than passing as 0. */
+/**
+ * The single definition of a custom property, e.g. `--dur-fast`. Asserts there is EXACTLY one:
+ * a regex search over the concatenated sheet silently binds to the FIRST definition, so a second
+ * one (a theme override, a media block) would make every value read here a coin flip on file order.
+ */
+function tokenValue(token: string): string {
+  const definitions = [...allStyles().matchAll(new RegExp(`${token}\\s*:\\s*([^;}]+)`, 'g'))].map((m) =>
+    m[1]!.trim()
+  )
+  expect(
+    definitions.length,
+    `\`${token}\` 在整张表里有 ${definitions.length} 处定义。正则取值只会绑到第一处，` +
+      '于是下面读到的值取决于文件拼接顺序而不是级联——这道判据会静默读错那一份。'
+  ).toBe(1)
+  return definitions[0]!
+}
+
+/**
+ * A colour's alpha in [0,1], or NaN if unrecognised (so an unknown spelling fails loudly instead of
+ * silently reading as opaque).
+ *
+ * WHY THIS EXISTS RATHER THAN `!== 'transparent'` (measured, not theorised): the reveal assertion
+ * below used to string-compare against the literal `transparent`. `rgba(0,0,0,0)`, `#0000`,
+ * `#00000000` and `hsla(0,0%,0%,0)` are all FULLY invisible and all pass that comparison — so the
+ * suite's central promise (the underline appears on hover) shipped with nothing guarding it. Alpha
+ * is the property the promise is actually about, so alpha is what gets read.
+ */
+function alphaOf(raw: string): number {
+  const value = raw.trim()
+  const varRef = value.match(/^var\(\s*(--[\w-]+)\s*\)$/)
+  if (varRef) return alphaOf(tokenValue(varRef[1]!))
+  if (/^transparent$/i.test(value)) return 0
+  // `currentColor` takes the element's own `color`, which the rules here always set to an opaque
+  // token. Treated as opaque; the paired assertion below pins that hover really does set a colour.
+  if (/^currentColor$/i.test(value)) return 1
+  const hex = value.match(/^#([0-9a-f]+)$/i)
+  if (hex) {
+    const digits = hex[1]!
+    if (digits.length === 3 || digits.length === 6) return 1
+    if (digits.length === 4) return Number.parseInt(digits[3]!.repeat(2), 16) / 255
+    if (digits.length === 8) return Number.parseInt(digits.slice(6), 16) / 255
+    return Number.NaN
+  }
+  // rgb()/rgba()/hsl()/hsla(), comma or slash separated. The alpha is the 4th component either way.
+  const fn = value.match(/^(?:rgba?|hsla?)\(([^)]*)\)$/i)
+  if (fn) {
+    const parts = fn[1]!.split(/[,/]/).map((p) => p.trim())
+    if (parts.length <= 3) return 1
+    const alpha = parts[3]!
+    const percent = alpha.match(/^([\d.]+)%$/)
+    return percent ? Number(percent[1]) / 100 : Number(alpha)
+  }
+  // A bare named colour (`red`, `black`, …) is opaque. Anything else is unknown → NaN → loud.
+  return /^[a-z]+$/i.test(value) ? 1 : Number.NaN
+}
+
+/**
+ * Split a `transition` shorthand into its comma-separated segments, ignoring commas nested inside
+ * parentheses — `steps(1, end)` and `cubic-bezier(.4, 0, .2, 1)` each contain one, so a naive
+ * `.split(',')` would cut a timing function in half and make every reading below nonsense.
+ */
+function transitionSegments(transition: string): string[] {
+  const segments: string[] = []
+  let depth = 0
+  let current = ''
+  for (const ch of transition) {
+    if (ch === '(') depth += 1
+    else if (ch === ')') depth -= 1
+    if (ch === ',' && depth === 0) {
+      segments.push(current.trim())
+      current = ''
+    } else current += ch
+  }
+  segments.push(current.trim())
+  return segments.filter((segment) => segment.length > 0)
+}
+
+/**
+ * The one segment of a `transition` shorthand that animates `prop`. Asserts exactly one: reading a
+ * duration or timing function off the whole shorthand would silently pick up a SIBLING property's
+ * values once a second transition is added.
+ */
+function transitionFor(transition: string, prop: string): string {
+  const matches = transitionSegments(transition).filter((segment) =>
+    new RegExp(`(?:^|[\\s,])${prop}(?=$|[\\s,])`).test(segment)
+  )
+  expect(
+    matches.length,
+    `\`transition: ${transition}\` 里过渡 \`${prop}\` 的段落有 ${matches.length} 个（要恰好 1 个）。` +
+      '0 个＝这个属性根本没被过渡，hover 会瞬跳；多个＝下面读到的时长/曲线取决于书写顺序。'
+  ).toBe(1)
+  return matches[0]!
+}
+
+/** Resolve a duration literal or a `var(--token)` reference to milliseconds. NaN if unrecognised. */
 function durationMs(raw: string): number {
   const varRef = raw.match(/var\(\s*(--[\w-]+)\s*\)/)
-  const literal = varRef
-    ? allStyles().match(new RegExp(`${varRef[1]}\\s*:\\s*([\\d.]+)(ms|s)`))
-    : raw.match(/([\d.]+)(ms|s)/)
-  if (!literal) return NaN
+  const literal = (varRef ? tokenValue(varRef[1]!) : raw).match(/([\d.]+)(ms|s)\b/)
+  if (!literal) return Number.NaN
   const value = Number(literal[1])
   return literal[2] === 's' ? value * 1000 : value
+}
+
+/**
+ * The timing function named in one transition segment, lowercased, or undefined if the segment names
+ * none (which means the CSS default, `ease`).
+ *
+ * Needed because a duration alone says nothing about motion: `steps(1, end)` snaps to the end state
+ * with a perfectly valid 120ms duration, which defeats "克制的淡入" while every duration assertion
+ * stays green.
+ *
+ * THE BOUNDARY IS A LOOKAHEAD, NOT `\b` (measured): this function's first version ended the pattern
+ * with `\b`, and `\b` cannot match between a `)` and end-of-string — both are non-word characters.
+ * So `steps(1, end)` and every `cubic-bezier(...)` read as "no timing function declared" and fell
+ * into the permitted default-`ease` branch. The `steps(1, end)` mutation shipped green because of
+ * that bug, not because the assertion was wrong. A guard's own parser is part of the guard.
+ */
+function timingFunctionOf(segment: string): string | undefined {
+  const match = segment
+    .toLowerCase()
+    .match(
+      /(?:^|[\s,])(linear|ease-in-out|ease-in|ease-out|ease|step-start|step-end|cubic-bezier\([^)]*\)|steps\([^)]*\))(?=$|[\s,])/
+    )
+  return match ? match[1] : undefined
 }
 
 describe('conversation link underline contract (#794)', () => {
@@ -130,14 +243,32 @@ describe('conversation link underline contract (#794)', () => {
     // REVEAL SEMANTICS. The line is always laid out (so hover cannot shift the text), but invisible
     // until hover paints its colour. If the rest colour stops being transparent the underline shows
     // always; if hover stops setting a visible colour there is nothing to ease in.
+    //
+    // BOTH SIDES ARE JUDGED BY ALPHA, NOT BY THE WORD `transparent`. This assertion used to read
+    // `expect(hoverColor).not.toBe('transparent')`, and that was measured green while the underline
+    // was fully invisible: `rgba(0,0,0,0)`, `#0000`, `#00000000`, `hsla(0,0%,0%,0)` are all
+    // zero-opacity spellings that pass a string comparison. Alpha is what the promise is about.
     const rest = ruleFor('.md-link--file')
     expect(declValue(rest.body, 'text-decoration')).toBe('underline')
-    expect(declValue(rest.body, 'text-decoration-color')).toBe('transparent')
+    const restColor = declValue(rest.body, 'text-decoration-color')
+    expect(restColor, 'at rest .md-link--file must declare a text-decoration-color').toBeDefined()
+    expect(
+      alphaOf(restColor!),
+      `静息态的 text-decoration-color 是 \`${restColor}\`（alpha=${alphaOf(restColor!)}）。` +
+        '它必须完全透明，否则下划线在不 hover 时也一直显形——那正是这条契约要防的另一侧。'
+    ).toBe(0)
 
     const hover = ruleFor('.md-link--file:hover')
     const hoverColor = declValue(hover.body, 'text-decoration-color')
     expect(hoverColor, ':hover must set text-decoration-color').toBeDefined()
-    expect(hoverColor).not.toBe('transparent')
+    expect(
+      alphaOf(hoverColor!),
+      `hover 态的 text-decoration-color 是 \`${hoverColor}\`，解析出的 alpha 是 ` +
+        `${alphaOf(hoverColor!)}。这道判据读 alpha 而不是跟字面量 \`transparent\` 比串：` +
+        'rgba(0,0,0,0)/#0000/hsla(0,0%,0%,0) 都完全看不见却都能通过串比较（实测全绿），' +
+        '于是本套件的中心承诺「hover 才显形」会在无人守的情况下发货。NaN 表示这是个没被认出的颜色写法，' +
+        '也当成不合格——宁可响亮地红，也不要按「未知即不透明」放过去。'
+    ).toBe(1)
   })
 
   it('eases the reveal on an animatable property, bounded and restrained', () => {
@@ -146,13 +277,61 @@ describe('conversation link underline contract (#794)', () => {
     // shorthand, or hover would snap. Delete the transition and this goes red.
     const transition = declValue(ruleFor('.md-link--file').body, 'transition')
     expect(transition, '.md-link--file must declare a transition').toBeDefined()
-    expect(transition).toContain('text-decoration-color')
 
-    // Bounded and restrained: a real duration, > 0 so it actually eases, and short enough not to steal
-    // attention. The house cap for a hover micro-interaction is --dur-fast (120ms); 200ms is the ceiling
-    // the design SSOT's "克制" allows. A swap to a half-second reveal, or to 0s, fails here.
-    const ms = durationMs(transition!)
-    expect(ms).toBeGreaterThan(0)
+    // Everything below is read off the ONE segment that animates the colour, not off the whole
+    // shorthand: once a second property is transitioned here, a shorthand-wide regex would happily
+    // read the sibling's duration and the sibling's curve. transitionFor() also subsumes the old
+    // `toContain('text-decoration-color')` check — zero matching segments is a loud failure there.
+    const colorTransition = transitionFor(transition!, 'text-decoration-color')
+
+    // Bounded and restrained: a real duration, long enough to be perceptible as a fade, and short
+    // enough not to steal attention. The house value for a hover micro-interaction is --dur-fast
+    // (120ms); 200ms is the ceiling the design SSOT's "克制" allows. A swap to a half-second reveal
+    // fails here, and so does a token swap down to a duration no eye can resolve.
+    //
+    // THE LOWER BOUND IS 40ms, NOT 0. `> 0` admitted `1ms`, which is a snap wearing a transition's
+    // clothes — measured green against exactly the change this test exists to catch.
+    const ms = durationMs(colorTransition)
+    expect(ms, `解析出的过渡时长是 ${ms}ms（段落：\`${colorTransition}\`）`).toBeGreaterThanOrEqual(40)
     expect(ms).toBeLessThanOrEqual(200)
+
+    // A DURATION IS NOT MOTION. `steps(1, end)` snaps to the end state with a perfectly valid 120ms
+    // duration — every duration assertion above stays green while the fade is gone. So the timing
+    // function is read too, and step-like functions are rejected by name.
+    const timing = timingFunctionOf(colorTransition)
+    expect(
+      timing === undefined || !/^steps?\(|^step-(start|end)$/.test(timing),
+      `过渡的 timing function 是 \`${timing}\`。steps()/step-start/step-end 会在时长内瞬跳，` +
+        '「克制的淡入」于是消失，而所有时长断言照旧全绿——所以这里按函数类型判，不只按时长判。' +
+        '（省略 timing function 等于 CSS 默认的 ease，是允许的。）'
+    ).toBe(true)
+  })
+
+  it('自检：本文件的两个 transition 解析器认得出它们各自要拒绝的形状', () => {
+    // 为什么需要这条：上面那条断言的第一版**因为解析器自己的 bug 而假绿**。
+    // `timingFunctionOf` 当时用 `\b` 收尾，而 `\b` 永远匹配不到 `)` 与串尾之间（两个都是非词字符），
+    // 于是 `steps(1, end)` 被读成「没写 timing function」，掉进「省略即默认 ease」那条许可分支——
+    // 真实变异（把 ease 换成 steps(1, end)）在 6 条全绿下存活。判据的解析器是判据的一部分，
+    // 所以这里拿它必须认出的形状直接质询它，而不是等下一次靠变异碰巧发现。
+    expect(timingFunctionOf('text-decoration-color 120ms steps(1, end)')).toBe('steps(1, end)')
+    expect(timingFunctionOf('text-decoration-color 120ms step-end')).toBe('step-end')
+    expect(timingFunctionOf('text-decoration-color 120ms cubic-bezier(.4, 0, .2, 1)')).toBe(
+      'cubic-bezier(.4, 0, .2, 1)'
+    )
+    expect(timingFunctionOf('text-decoration-color 120ms ease')).toBe('ease')
+    expect(timingFunctionOf('text-decoration-color 120ms')).toBeUndefined()
+    // `ease` 不能被 `ease-in-out` 的前缀吃掉，也不能被属性名里的字母碰上。
+    expect(timingFunctionOf('text-decoration-color 120ms ease-in-out')).toBe('ease-in-out')
+
+    // 逗号切分必须认括号：`steps(1, end)` 自带一个逗号，天真的 split(',') 会把它劈成两段，
+    // 于是「恰好一个段落过渡这个属性」这条判据读到的东西完全没有意义。
+    expect(transitionSegments('color 1ms ease, text-decoration-color 120ms steps(1, end)')).toEqual([
+      'color 1ms ease',
+      'text-decoration-color 120ms steps(1, end)'
+    ])
+    // 属性名按整词匹配：`text-decoration` 不该被 `text-decoration-color` 那段答复。
+    expect(transitionFor('text-decoration-color 120ms ease', 'text-decoration-color')).toBe(
+      'text-decoration-color 120ms ease'
+    )
   })
 })
