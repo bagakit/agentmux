@@ -590,3 +590,126 @@ describe('三条联合的成员判定只有一处声明', () => {
     })
   })
 })
+
+// ---------------------------------------------------------------------------
+// readiness-source 投影表的 `Record<union>` 注解不许被放宽——与 `OPERATION_BUDGET` 对称的守卫。
+//
+// `agent-session-store.ts` 里的 `TERMINAL_PROMPT_READINESS_SOURCE_MEMBERS` 是一张
+// `Record<AgentTerminalPromptReadinessSource, true>`，运行时白名单 `TERMINAL_PROMPT_READINESS_SOURCES`
+// 从它 `Object.keys` 投影出来。那条 `Record<Union, true>` **注解**是唯一逼这张表与联合保持 ⊇-完整的东西：
+// 往联合加成员却忘了往表里加，tsc 报 TS2741（`dcaa46d` 要防的正是这种 fail-closed 数据丢失——带新成员的
+// 合法磁盘记录会被 `INVALID_AGENT_SESSION_STORE` 拒掉，且无编译错误，而「加成员」正是常见方向）。
+// **但在此之前没有任何东西守着注解本身**：把它放宽成 `Record<string, true>` 后，`npx tsc --noEmit` 退 0、
+// 四个 suite 75/75 全绿（reviewer 实测），而此时再往联合加成员也照样编译通过（本轮实测 TSC_EXIT=0），
+// ⊇ 漂移重新变沉默。一处编辑就把整道 tsc 守卫解除了。
+//
+// 兄弟表 `control.ts` 的 `OPERATION_BUDGET` 早有这道守卫（`control-host.test.ts`，见 `25dccc3`）。两张表
+// 干同一件事——穷尽 `Record` 投影 + tsc 兜底缺键——所以守卫必须对称，否则其中一张的注解能被悄悄放宽而
+// 另一张不能。这条就是补上那个不对称。
+//
+// **判据走 TS parser 判类型节点，不做文本 substring**（本仓 `readFileSync+toContain` 家族反复被换一种拼法
+// 绕过）：外层必须是裸 `Record`（不是 `Partial`/`Pick`/`Readonly`/限定名），键类型参数必须是一个**具名类型
+// 引用**且名字恰好是 `AgentTerminalPromptReadinessSource`（不是 `string`/`any` 关键字，也不是别的名字）。
+//
+// **看得见 / 看不见什么（务必知道——走 syntax-only 的 `createSourceFile`，没有 type checker）**：
+//   - 判 VIOLATING（都实测过，见自检）：`Record<string, true>`、`Record<any, true>`、
+//     `Partial<Record<Union, true>>`（⊇ 被破坏却「看着像对的」）、`Record<Loose, true>`（`type Loose = string`
+//     的别名间接——键名是 `Loose` 对不上联合名，故照样红）、以及**完全没有注解**。
+//   - fail-open 盲点（须申报）：若**联合定义本身**在 types.ts 被改宽成
+//     `type AgentTerminalPromptReadinessSource = string`，本判据只看到键名字面仍是那个联合名，判 OK。没有
+//     type checker 就分辨不出这一步。`OPERATION_BUDGET` 的文本判据有**完全相同**的盲点（它比对字面
+//     `AgentMuxControlRequest['operation']`），故两张表的守卫在这点上对称；这条盲点由「改联合定义」这个显眼
+//     动作与联合的其它消费者兜底，不在本守卫射程内。
+//   - fail-loud（保守）盲点：若把注解写成 `Record<Alias, true>` 而 `type Alias = AgentTerminalPromptReadinessSource`
+//     （一个指向联合的等价别名），本判据会**误红**。这是「逼人来看」的方向，不是数据丢失方向，可接受。
+// ---------------------------------------------------------------------------
+describe('readiness-source 投影表的 Record<union> 注解不许被放宽（与 OPERATION_BUDGET 对称）', () => {
+  type AnnotationVerdict = { ok: true } | { ok: false; reason: string }
+
+  const TABLE = 'TERMINAL_PROMPT_READINESS_SOURCE_MEMBERS'
+  const UNION = 'AgentTerminalPromptReadinessSource'
+
+  /**
+   * 一个类型节点是不是「键覆盖整条联合的穷尽 `Record`」。判类型节点，不做文本比对。
+   * 判 VIOLATING 的正是所有把 ⊇ 完整性悄悄放宽的写法：`Record<string,…>`、`Record<any,…>`、
+   * `Partial<Record<…>>`、键名对不上联合名的任何间接、以及压根没有注解。
+   */
+  function exhaustiveRecordVerdict(
+    typeNode: ts.TypeNode | undefined,
+    unionName: string
+  ): AnnotationVerdict {
+    if (!typeNode) return { ok: false, reason: '没有类型注解——缺键不再报错，⊇ 回到「你得记得改」' }
+    if (!ts.isTypeReferenceNode(typeNode)) return { ok: false, reason: '注解不是类型引用（Record<…>）' }
+    if (!ts.isIdentifier(typeNode.typeName) || typeNode.typeName.text !== 'Record') {
+      const outer = ts.isIdentifier(typeNode.typeName) ? typeNode.typeName.text : '<限定名>'
+      return { ok: false, reason: `外层不是裸 Record 而是 ${outer}（Partial/Pick/Readonly 会破坏 ⊇）` }
+    }
+    const keyArg = typeNode.typeArguments?.[0]
+    if (!keyArg) return { ok: false, reason: 'Record 没有键类型参数' }
+    if (!ts.isTypeReferenceNode(keyArg) || !ts.isIdentifier(keyArg.typeName)) {
+      return { ok: false, reason: 'Record 的键类型不是具名类型引用（可能是 string/any 等关键字）' }
+    }
+    if (keyArg.typeName.text !== unionName) {
+      return { ok: false, reason: `Record 的键类型是 ${keyArg.typeName.text}，不是穷尽联合 ${unionName}` }
+    }
+    return { ok: true }
+  }
+
+  function parseSource(fileName: string, source: string): ts.SourceFile {
+    return ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+  }
+
+  /** 源码里所有名为 TABLE 的变量声明（走 parser，不用正则）。 */
+  function tableDeclarations(sourceFile: ts.SourceFile): ts.VariableDeclaration[] {
+    const found: ts.VariableDeclaration[] = []
+    const walk = (node: ts.Node): void => {
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === TABLE) {
+        found.push(node)
+      }
+      node.forEachChild(walk)
+    }
+    sourceFile.forEachChild(walk)
+    return found
+  }
+
+  it(`${TABLE} 的注解是穷尽 Record<${UNION}>——放宽它会让 ⊇ 漂移重新变沉默`, () => {
+    const source = readFileSync(new URL('../src/agent-session-store.ts', import.meta.url), 'utf8')
+    const decls = tableDeclarations(parseSource('agent-session-store.ts', source))
+    // 找不到目标（被改名 / 搬走）必须红，不许在空集上恒绿——本仓最常见的一种假绿。
+    expect(
+      decls.length,
+      `agent-session-store.ts 里找不到 ${TABLE} 声明（被改名 / 搬走？）——守卫看不见它的目标就必须红`
+    ).toBe(1)
+    const verdict = exhaustiveRecordVerdict(decls[0]!.type, UNION)
+    expect(
+      verdict.ok,
+      verdict.ok
+        ? ''
+        : `${TABLE} 的注解不是穷尽 Record<${UNION}>：${verdict.reason}。放宽后往联合加成员不再报 TS2741，` +
+            `带新成员的合法磁盘记录会被 fail-closed 丢掉（dcaa46d 要防的正是这个）`
+    ).toBe(true)
+  })
+
+  it('自检：判据认得放宽 / 穷尽 / 间接各种写法（否则上面那条只是在描述今天的字面量）', () => {
+    const verdictOf = (annotation: string): AnnotationVerdict => {
+      const decls = tableDeclarations(parseSource('probe.ts', `const ${TABLE}: ${annotation} = {}`))
+      expect(decls, `自检源码里没解析出 ${TABLE}`).toHaveLength(1)
+      return exhaustiveRecordVerdict(decls[0]!.type, UNION)
+    }
+    // 穷尽 Record<union>：唯一 OK 的形状。
+    expect(verdictOf(`Record<${UNION}, true>`).ok, '判据把正确的穷尽注解误判成违规').toBe(true)
+    // 放宽成 string / any：reviewer 实测能一键解除守卫的两种。
+    expect(verdictOf('Record<string, true>').ok, '判据认不出被放宽成 Record<string> 的注解').toBe(false)
+    expect(verdictOf('Record<any, true>').ok, '判据认不出被放宽成 Record<any> 的注解').toBe(false)
+    // Partial<Record<union>>：⊇ 被破坏但「看着像对的」。
+    expect(verdictOf(`Partial<Record<${UNION}, true>>`).ok, '判据认不出 Partial<Record<…>>（⊇ 被破坏）').toBe(false)
+    // 我没有第一时间想到的形状：经类型别名 `type Loose = string` 的间接。键名是 Loose 不是联合名，故被抓。
+    expect(verdictOf('Record<Loose, true>').ok, '判据放过了经别名间接放宽的注解').toBe(false)
+    // 完全没有注解：缺键彻底不报错。用不带注解的声明喂进去。
+    const noAnnotation = tableDeclarations(parseSource('probe.ts', `const ${TABLE} = {}`))
+    expect(noAnnotation, `自检源码里没解析出无注解的 ${TABLE}`).toHaveLength(1)
+    expect(exhaustiveRecordVerdict(noAnnotation[0]!.type, UNION).ok, '判据把「没有注解」当成了 OK').toBe(false)
+    // 自检：找不到目标时返回空集——上面那条主断言的 `.toBe(1)` 才是真闸，不是恒真。
+    expect(tableDeclarations(parseSource('probe.ts', 'const other = {}')), '判据在无关源码里凭空找出了目标').toHaveLength(0)
+  })
+})
