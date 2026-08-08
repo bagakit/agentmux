@@ -2,8 +2,10 @@ import assert from 'node:assert/strict'
 import { execFile, spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { mkdtemp, rm } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import { createConnection, createServer } from 'node:net'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import {
   AgentMuxControlServer,
@@ -19,6 +21,29 @@ import {
 import { normalizeAgentTimelineMutation } from '@agentmux/core/timeline'
 
 const execFileAsync = promisify(execFile)
+
+// 打进包里的 CLI 版本号唯一真相是**已安装的** @agentmux/core/package.json 的 `version`——不是本仓源码，
+// 而是这个消费者 node_modules 里那一份。这里从已解析的入口向上走到它的 package.json 读出来，作为
+// `agentmux --version` 应当报告的期望值；绝不再写死一份 `0.1.0`。`@agentmux/core` 有 `exports` 且没有
+// 暴露 `./package.json` 子路径，直接 import 会 ERR_PACKAGE_PATH_NOT_EXPORTED，所以从 `.` 入口的真实
+// 位置向上找包根。控制夹具（ctxmux-terminal-control.mjs）真的 exec 了同一个已安装 CLI 的 `--version`，
+// 于是这条把「安装出去的 CLI 报告的版本」钉成「安装出去的包声明的版本」——bump 包版本两边一起动，
+// 把源码改回硬编码就会与声明分叉。
+const installedCoreVersion = (() => {
+  let directory = dirname(fileURLToPath(import.meta.resolve('@agentmux/core')))
+  for (;;) {
+    try {
+      const manifest = JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8'))
+      if (manifest.name === '@agentmux/core') return manifest.version
+    } catch {}
+    const parent = dirname(directory)
+    if (parent === directory) break
+    directory = parent
+  }
+  throw new Error('packed-consumer 无法定位已安装的 @agentmux/core/package.json')
+})()
+assert.equal(typeof installedCoreVersion, 'string')
+assert.ok(installedCoreVersion.length > 0)
 
 const controlFixture = process.env.AGENTMUX_CONTROL_FIXTURE
 const stubbornFixture = process.env.AGENTMUX_STUBBORN_FIXTURE
@@ -223,7 +248,7 @@ assert.equal(
   true
 )
 assert.equal(
-  output(firstEvents, run.runId).includes('agentmux-env:1:true:agentmux 0.1.0'),
+  output(firstEvents, run.runId).includes(`agentmux-env:1:true:agentmux ${installedCoreVersion}`),
   true
 )
 assert.equal(output(firstEvents, run.runId).includes('prefix:😀:tail'), true)
