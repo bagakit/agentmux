@@ -172,18 +172,3 @@ export function buildFileTreeGitStatusIndex(
     get: (path, isDirectory) => (isDirectory ? dirStatus.get(path) : fileStatus.get(path)) ?? null
   }
 }
-
-/**
- * The workspace-root-relative prefix a change path carries because the workspace sits inside its repo.
- *
- * Both inputs are absolute host paths from the same host; porcelain paths are relative to `repoPath`,
- * tree paths relative to `workspacePath`. When the workspace is at (or above) the repo top-level the
- * prefix is empty. Normalised on `/` — the hosts this runs against (local macOS, SSH) both use it.
- */
-export function fileTreeRepoRelativePrefix(repoPath: string, workspacePath: string): string {
-  const repo = repoPath.replace(/\/+$/, '')
-  const workspace = workspacePath.replace(/\/+$/, '')
-  if (workspace === repo) return ''
-  if (workspace.startsWith(`${repo}/`)) return workspace.slice(repo.length + 1)
-  return ''
-}

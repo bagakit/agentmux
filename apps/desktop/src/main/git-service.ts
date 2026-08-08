@@ -485,7 +485,8 @@ export class GitService {
     )
     this.assertGit(result, 'Could not read Git status')
     const { branch, changes } = parseGitStatusPorcelain(result.stdout)
-    return { kind: 'git-repository', hostId: workspace.hostId, repoPath, branch, changes }
+    const repoRelativePrefix = await this.resolveRepoRelativePrefix(host, workspace.path)
+    return { kind: 'git-repository', hostId: workspace.hostId, repoPath, branch, changes, repoRelativePrefix }
   }
 
   async stage(workspaceId: string, path: string, config: AppConfig): Promise<void> {
@@ -752,6 +753,34 @@ export class GitService {
     const repoPath = result.stdout.trim()
     if (!repoPath) throw new Error('Git returned an empty repository path')
     return repoPath
+  }
+
+  /**
+   * How deep the workspace sits inside its repository, as git itself reports it.
+   *
+   * This must NOT be recomputed by comparing `repoPath` against `workspace.path`: the two strings come
+   * from different worlds. `--show-toplevel` canonicalizes (it resolves symlinked ancestors, and on a
+   * case-insensitive filesystem it echoes the on-disk casing), while `workspace.path` is the
+   * uncanonicalized string the user's config stored. Any divergence in an ancestor segment makes a
+   * `startsWith` comparison fail, and a failed comparison is indistinguishable from "the workspace is
+   * not inside the repo" — which yields an empty prefix. macOS makes this the common case, not a
+   * corner one: `/tmp` is itself a symlink to `/private/tmp`.
+   *
+   * An empty prefix is not a safe default here. `buildFileTreeGitStatusIndex` skips its filtering
+   * entirely when the prefix is empty, so repo-relative change paths get consumed verbatim as
+   * workspace-relative keys and a *clean* file inherits another file's marker.
+   *
+   * Deliberately its own invocation rather than a second line of the `--show-toplevel` call: a
+   * directory name may contain a newline, which would make the two-value output ambiguous to split.
+   * The prefix comes back raw (never `core.quotePath`-escaped) and slash-terminated, matching the
+   * byte encoding of the `-z` porcelain paths it will be stripped from.
+   */
+  private async resolveRepoRelativePrefix(host: ExecutionHost, path: string): Promise<string> {
+    const result = await host.run('git', ['-C', path, 'rev-parse', '--show-prefix'], GIT_RUN_OPTIONS)
+    this.assertGit(result, 'Could not locate the workspace inside its repository')
+    // Only the trailing newline git adds is stripped — a leading or interior newline is part of a
+    // legitimate directory name. The trailing `/` goes too, so the value is a bare relative path.
+    return result.stdout.replace(/\n$/u, '').replace(/\/+$/u, '')
   }
 
   private assertGit(

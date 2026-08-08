@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { LocalExecutionHost, type ExecutionHost } from '@agentmux/core'
@@ -46,6 +46,10 @@ function gitHost(handlers: {
     exposeLoopbackPort: vi.fn(async (port: number) => port),
     dispose: vi.fn(async () => {}),
     run: vi.fn(async (_command: string, args: readonly string[], options?: { input?: unknown }) => {
+      // The two `rev-parse` questions are answered separately on purpose. Collapsing them (one canned
+      // answer for anything containing `rev-parse`) would hand the toplevel string back as the
+      // repo-relative prefix and the fixture would silently disagree with real git.
+      if (args.includes('--show-prefix')) return gitResult(args, '\n')
       if (args.includes('rev-parse')) return gitResult(args, '/srv/repo\n')
       if (args.includes('status')) return handlers.status?.() ?? gitResult(args, '## main\0')
       if (args.includes('add')) return handlers.add?.(args) ?? gitResult(args)
@@ -77,6 +81,7 @@ describe('GitService (contract, fake executor)', () => {
       kind: 'git-repository',
       hostId: 'remote',
       repoPath: '/srv/repo',
+      repoRelativePrefix: '',
       branch: 'main',
       changes: [
         { path: 'a.txt', origPath: null, index: ' ', worktree: 'M', staged: false, unstaged: true, untracked: false },
@@ -480,5 +485,53 @@ describe('GitService (real git, temporary repository)', () => {
       // Restore before the afterEach cleanup, which cannot remove an unreadable object.
       await chmod(loose, 0o444)
     }
+  })
+
+  /**
+   * 行为层：workspace 是 repo 子目录时，`status()` 必须给出那段真实的相对前缀。
+   *
+   * 为什么必须用真 git：这个前缀曾经在渲染层用 `repoPath` 与 `workspace.path` 两个字符串做词法比较
+   * 推出来（`workspace.startsWith(repo + '/')` 就切，否则 `''`）。而这两个字符串来自不同的世界——git
+   * 会把祖先里的 symlink 与磁盘大小写规范化，配置里那条路径不会。macOS 上这一点在本用例里免费成立：
+   * `os.tmpdir()` 给的是 `/var/folders/...`，git 的 `--show-toplevel` 给的是 `/private/var/folders/...`，
+   * 于是那次比较必然落空、返回 `''`。而 `''` 不是安全的兜底：投影侧的过滤写成
+   * `if (prefix && !change.path.startsWith(prefix)) continue`，空前缀让它既不过滤也不切，于是 repo-相对
+   * 的路径被原样当成 workspace-相对的键——一个**干净**的文件就此挂上别人的 git 标记。
+   *
+   * 断言分成三步且都要在场：
+   * 1. 自检——那次已失效的词法比较在这个环境里**真的**落空（否则本用例证不到任何东西）；
+   * 2. 前缀正是那段子目录名（不是 `''`，也不是被整条 toplevel 顶替）；
+   * 3. porcelain 路径确实带着这个前缀——即前缀与要被它剥掉的那些路径同属一套坐标系。
+   */
+  it('gives the real repo-relative prefix for a workspace inside its repository, where the old string surgery returned nothing', async () => {
+    const root = await makeRepo()
+    const subdirectory = 'nested-workspace'
+    await mkdir(join(root, subdirectory))
+    await writeFile(join(root, subdirectory, 'inside.txt'), 'hello\n')
+
+    const service = new GitService(() => new LocalExecutionHost())
+    const workspacePath = join(root, subdirectory)
+    const cfg: AppConfig = {
+      ...config,
+      workspaces: [{ id: 'repo', name: 'repo', hostId: 'local', path: workspacePath, kind: 'folder' }]
+    }
+
+    const result = await service.status('repo', cfg)
+    if (result.kind !== 'git-repository') throw new Error('expected a git repository')
+
+    // 1. 自检：git 报的 toplevel 与配置里的路径在这个环境里确实分岔，所以那次词法比较落空、旧实现
+    //    在这里返回的是 `''`。若某个环境不分岔（比如 tmpdir 已经是规范路径），这条会响亮地说清楚，
+    //    而不是让本用例悄悄退化成「顺便也过了」。
+    expect(
+      workspacePath.startsWith(`${result.repoPath}/`),
+      '这个环境里配置路径与 git 的 toplevel 没有分岔——本用例不再能观测到那次落空的比较'
+    ).toBe(false)
+
+    // 2. 前缀是那段子目录，既不是空串（旧实现的答案）也不是整条 toplevel。
+    expect(result.repoRelativePrefix).toBe(subdirectory)
+
+    // 3. 同一套坐标系：porcelain 给的路径带着这个前缀，所以剥掉它才是 workspace-相对的键。
+    const untracked = result.changes.find((change) => change.path.endsWith('inside.txt'))
+    expect(untracked?.path).toBe(`${subdirectory}/inside.txt`)
   })
 })

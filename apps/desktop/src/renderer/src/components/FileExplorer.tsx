@@ -28,7 +28,7 @@ import {
   X
 } from 'lucide-react'
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from 'react'
-import { isScratchWorkspaceId } from '../../../shared/contracts'
+import { isFolderWorkspace, isScratchWorkspaceId } from '../../../shared/contracts'
 import { scratchTopicIdFromDirectoryName } from '../../../shared/scratch-topics'
 import { api } from '../lib/api'
 import { applyWorkspacePathRebind } from '../lib/workspace-path-recovery'
@@ -50,7 +50,6 @@ import {
   FILE_TREE_GIT_STATUS_LABEL,
   FILE_TREE_GIT_STATUS_MARK,
   buildFileTreeGitStatusIndex,
-  fileTreeRepoRelativePrefix,
   type FileTreeGitStatus
 } from '../lib/file-tree-git-status'
 import { useGitStatus } from '../hooks/useGitStatus'
@@ -366,9 +365,13 @@ export function FileExplorer({
   const { status: gitStatus } = useGitStatus(workspaceId ?? null)
   const gitStatusIndex = useMemo(() => {
     if (gitStatus?.kind !== 'git-repository') return buildFileTreeGitStatusIndex([])
-    const prefix = workspace ? fileTreeRepoRelativePrefix(gitStatus.repoPath, workspace.path) : ''
-    return buildFileTreeGitStatusIndex(gitStatus.changes, prefix)
-  }, [gitStatus, workspace])
+    // The prefix comes from main, which asked git for it (`rev-parse --show-prefix`). It is NOT
+    // recomputed from repoPath vs workspace.path: those two strings can disagree in any ancestor
+    // segment (git canonicalizes symlinks and on-disk casing, the config path does not), and the
+    // failed comparison would silently yield '' — the value that makes the projection below stop
+    // filtering and paint one file's status onto a different, clean file.
+    return buildFileTreeGitStatusIndex(gitStatus.changes, gitStatus.repoRelativePrefix)
+  }, [gitStatus])
   const workspaceFileRevision = useAppStore((state) => (
     workspaceId ? (state.workspaceFileRevisions[workspaceId] ?? 0) : 0
   ))
@@ -663,7 +666,7 @@ export function FileExplorer({
       !workspaceId ||
       !workspace ||
       workspace.hostId !== 'local' ||
-      workspace.kind !== 'folder' ||
+      !isFolderWorkspace(workspace) ||
       relinking
     ) return
     setRelinking(true)
@@ -961,7 +964,7 @@ export function FileExplorer({
               <span>{tree.rootError}</span>
               <div className="tree-empty__actions">
                 <button className="small-button" onClick={() => void tree.refreshTree()}>Retry</button>
-                {workspace?.hostId === 'local' && workspace.kind === 'folder' ? (
+                {workspace?.hostId === 'local' && isFolderWorkspace(workspace) ? (
                   <button className="small-button" disabled={relinking} onClick={() => void rebindWorkspacePath()}>
                     {relinking ? <LoaderCircle className="spin" size={12} /> : <FolderOpen size={12} />}
                     {relinking ? 'Choosing…' : 'Choose new folder'}
