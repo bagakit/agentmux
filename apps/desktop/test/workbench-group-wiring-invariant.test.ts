@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import ts from 'typescript'
 import {
+  aliasMapFor,
   callSites,
   exportedLeafAccessors,
+  moduleHintOf,
   parse,
   sitesFailingCriterionA,
   sitesFailingCriterionB,
@@ -88,6 +90,68 @@ describe('每个改动 tab-group 集合的地方都必须过 assertGroupInvarian
     definer: DEFINER,
     mutators: MUTATORS,
     siteAccepts: usesGroupAccessor
+  }
+
+  /** 两棵树的叶子取值器。它们逃逸的机制逐字相同，故转发禁令一并扫。 */
+  const ACCESSORS = new Set([ACCESSOR, 'regionLeafId'])
+
+  type Occurrence = { file: string; name: string; role: string }
+
+  /**
+   * 转发禁令的角色分类器，抽到 describe 作用域，好让下方成对自检**直接质询它**。
+   *
+   * 抽出来的理由是判据强度，不是整洁：`call-argument` 那条通行证必须连 callee 一起判，而「有没有连
+   * callee 一起判」这件事本身需要有人守——否则把它退回只问 `ts.isCallExpression(parent)`，转发禁令
+   * 照旧全绿（本仓 extracting-to-lib-only-fixes-half：抽出去只解决一半，壳里那句有没有被执行到照旧
+   * 无人守；这里配的是**成对**自检，一条钉「洗白要被认出来」，一条钉「合法站点不许误伤」）。
+   */
+  function classifyReferencesIn(file: ts.SourceFile): Array<{ name: string; role: string }> {
+    // 本文件里「从 DEFINER 具名 import 进来的本地名 → 规范名」。取值器的实参通行证要凭它兑换：
+    // callee 必须解析到 DEFINER 的某个导出。用 aliasMapFor（判据 A/B 同一份机器）而不是再手抄
+    // 一份解析逻辑，故换名 import（`removeLeaf as rm`）在三处判得一样。
+    const alias = aliasMapFor(file, moduleHintOf(DEFINER))
+    const calleeIsPrimitive = (call: ts.CallExpression): boolean => {
+      if (!ts.isIdentifier(call.expression)) return false
+      const canonical = alias.get(call.expression.text)
+      return canonical !== undefined && canonical in PRIMITIVE_EFFECT
+    }
+    const found: Array<{ name: string; role: string }> = []
+    const walk = (node: ts.Node): void => {
+      if (ts.isIdentifier(node)) {
+        const isPrimitive = MUTATORS.has(node.text)
+        const isAccessor = ACCESSORS.has(node.text)
+        if (isPrimitive || isAccessor) {
+          const parent = node.parent
+          let role: string
+          if (parent && ts.isImportSpecifier(parent)) role = 'import-specifier'
+          else if (parent && ts.isCallExpression(parent) && parent.expression === node) role = 'direct-call-callee'
+          // 定义处：原语是 `export function removeLeaf(...)`，取值器是 `export const groupLeafId = ...`。
+          // 两种都是它自己的声明名，不是转发。
+          else if (parent && ts.isFunctionDeclaration(parent) && parent.name === node) role = 'own-declaration'
+          else if (parent && ts.isVariableDeclaration(parent) && parent.name === node) role = 'own-declaration'
+          // 取值器作为实参被传进 **split-tree 原语**，是它唯一的用法；原语作为实参传出去不是。
+          //
+          // 这里必须连 callee 一起判。只问「父节点是不是 CallExpression」时，任何一次包裹调用
+          // （`removeLeaf(root, wrap(groupLeafId), id)`，或先 `const acc = wrap(groupLeafId)`）
+          // 都拿到这张通行证：`usesGroupAccessor` 随后看到的第二个实参是那次 wrap 调用而不是取值器
+          // 标识符，于是整个站点从本树的扫描面消失——正是本条禁令要防的那件事。实测（本轮）：加一个
+          // 这样的 reducer（丢叶、不删 groups、不断言）时本文件 9 条全绿；连 callee 一起判之后同一个
+          // 探针报 `ESCAPE:CallExpression`。判据落在 callee 的**解析目标**上（必须解析到 DEFINER 的
+          // 导出），不是 callee 的**文本**——按文本判会被同名影子绕过，那是本仓已经踩过两次的形状
+          // （#596 / #670-#671）。
+          else if (isAccessor && parent && ts.isCallExpression(parent) && calleeIsPrimitive(parent))
+            role = 'call-argument'
+          // 原语与取值器都可能出现在 JSDoc / 行内注释引用里——注释不是标识符节点，走不到这里；
+          // 但类型位置（如 `typeof groupLeafId`）会，故一并放行。
+          else if (parent && ts.isTypeQueryNode(parent)) role = 'type-query'
+          else role = `ESCAPE:${parent ? ts.SyntaxKind[parent.kind] : 'no-parent'}`
+          found.push({ name: node.text, role })
+        }
+      }
+      node.forEachChild(walk)
+    }
+    walk(file)
+    return found
   }
 
   /**
@@ -227,36 +291,10 @@ describe('每个改动 tab-group 集合的地方都必须过 assertGroupInvarian
    * 而这一条是唯一在扫「取值器怎么被引用」的地方。
    */
   it('转发禁令：会动集合的原语与两棵树的叶子取值器都不得被当值转发（否则站点整体逃出扫描面）', () => {
-    const ACCESSORS = new Set([ACCESSOR, 'regionLeafId'])
-    type Occurrence = { file: string; name: string; role: string }
     const occurrences: Occurrence[] = []
     for (const relative of sourceFiles(RENDERER)) {
       const file = parse(RENDERER, relative)
-      const walk = (node: ts.Node): void => {
-        if (ts.isIdentifier(node)) {
-          const isPrimitive = MUTATORS.has(node.text)
-          const isAccessor = ACCESSORS.has(node.text)
-          if (isPrimitive || isAccessor) {
-            const parent = node.parent
-            let role: string
-            if (parent && ts.isImportSpecifier(parent)) role = 'import-specifier'
-            else if (parent && ts.isCallExpression(parent) && parent.expression === node) role = 'direct-call-callee'
-            // 定义处：原语是 `export function removeLeaf(...)`，取值器是 `export const groupLeafId = ...`。
-            // 两种都是它自己的声明名，不是转发。
-            else if (parent && ts.isFunctionDeclaration(parent) && parent.name === node) role = 'own-declaration'
-            else if (parent && ts.isVariableDeclaration(parent) && parent.name === node) role = 'own-declaration'
-            // 取值器作为实参被传进原语，是它唯一的用法；原语作为实参传出去不是。
-            else if (isAccessor && parent && ts.isCallExpression(parent)) role = 'call-argument'
-            // 原语与取值器都可能出现在 JSDoc / 行内注释引用里——注释不是标识符节点，走不到这里；
-            // 但类型位置（如 `typeof groupLeafId`）会，故一并放行。
-            else if (parent && ts.isTypeQueryNode(parent)) role = 'type-query'
-            else role = `ESCAPE:${parent ? ts.SyntaxKind[parent.kind] : 'no-parent'}`
-            occurrences.push({ file: relative, name: node.text, role })
-          }
-        }
-        node.forEachChild(walk)
-      }
-      walk(file)
+      for (const found of classifyReferencesIn(file)) occurrences.push({ file: relative, ...found })
     }
     const ALLOWED = new Set(['import-specifier', 'direct-call-callee', 'call-argument', 'own-declaration', 'type-query'])
     const escapes = occurrences
@@ -287,6 +325,65 @@ describe('每个改动 tab-group 集合的地方都必须过 assertGroupInvarian
     const live = new Set(callSites(CONFIG).map((site) => `${site.file}::${site.fn}`))
     const dead = [...exempt].filter((key) => !live.has(key))
     expect(dead, `EXEMPT 里 ${JSON.stringify(dead)} 已经不再调用任何「会动集合」的原语`).toEqual([])
+  })
+
+  /**
+   * 上一条那张 `call-argument` 通行证的**成对**自检，两条各钉一个方向、各有只杀自己的变异。
+   *
+   * 为什么需要它：转发禁令自己抓不到「通行证发得太宽」。把上面的判据退回只问
+   * `ts.isCallExpression(parent)`（不看 callee），禁令对全部 15 个合法站点照旧全绿——而洗白站点
+   * 也一起放行。真正区分两个世界的只有下面这对：合成一段被 wrap 洗白过的源码，要求分类器**不**把它
+   * 判成 call-argument；再合成一段真正的原语调用，要求它**认下来**。两条都用合成源码而不是扫真文件，
+   * 因为真文件里今天恰好没有洗白写法（那正是禁令在保的性质），拿它当输入判据会恒真
+   * （本仓 property-unobservable-in-default-env）。
+   */
+  it('通行证自检（拒）：取值器被包裹调用洗白时，不得拿到 call-argument 通行证', () => {
+    const laundered = ts.createSourceFile(
+      'zzz-synthetic-launder.ts',
+      [
+        `import { removeLeaf } from './split-tree'`,
+        `import { ${ACCESSOR} } from './workbench-layout'`,
+        `const wrap = <T,>(v: T): T => v`,
+        `export const drop = (root: never, id: string) => removeLeaf(root, wrap(${ACCESSOR}), id)`
+      ].join('\n'),
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS
+    )
+    const accessorRoles = classifyReferencesIn(laundered)
+      .filter((found) => found.name === ACCESSOR)
+      .map((found) => found.role)
+    // 在场自检：这段合成源码里取值器必须真的出现两次（import 一次 + 被洗白那次），否则本条在质询空集。
+    expect(accessorRoles.length, '合成源码没被解析出取值器引用——本条在质询空集，判据失效').toBe(2)
+    expect(
+      accessorRoles.filter((role) => role === 'call-argument'),
+      '被 wrap 洗白的取值器拿到了 call-argument 通行证——说明判据退回了「只问父节点是不是 CallExpression」。' +
+        '这张通行证必须连 callee 一起判（须解析到 DEFINER 的会动集合导出），否则洗白站点整体逃出扫描面。'
+    ).toEqual([])
+  })
+
+  it('通行证自检（认）：取值器直接传进 split-tree 原语时，必须拿到 call-argument 通行证', () => {
+    const legitimate = ts.createSourceFile(
+      'zzz-synthetic-legit.ts',
+      [
+        `import { removeLeaf as rm } from './split-tree'`,
+        `import { ${ACCESSOR} } from './workbench-layout'`,
+        `export const drop = (root: never, id: string) => rm(root, ${ACCESSOR}, id)`
+      ].join('\n'),
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS
+    )
+    // 故意用换名 import（`removeLeaf as rm`）：判据落在解析目标上而不是 callee 文本，这一条同时钉住那件事。
+    const accessorRoles = classifyReferencesIn(legitimate)
+      .filter((found) => found.name === ACCESSOR)
+      .map((found) => found.role)
+    expect(accessorRoles.length, '合成源码没被解析出取值器引用——本条在质询空集，判据失效').toBe(2)
+    expect(
+      accessorRoles,
+      '合法站点（取值器直接传进 split-tree 原语，且原语是换名 import）没拿到 call-argument 通行证——' +
+        '判据收得过窄会对合法代码打假红，或漏掉了别名解析。'
+    ).toContain('call-argument')
   })
 
   it('豁免前提自检 1：reconcilePersistedLayout 被两个持久化入口消费、排在 removeTab 之前、且自己不抛', () => {
