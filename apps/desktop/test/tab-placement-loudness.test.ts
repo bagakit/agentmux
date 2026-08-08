@@ -48,7 +48,7 @@ const workspace: WorkspaceRecord = {
 
 function prepare(): void {
   const config: AppConfig = {
-    version: 7,
+    version: 9,
     hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
     executors: {
       codex: { label: 'Codex', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: true }
@@ -204,7 +204,7 @@ describe('Scratch Topic 的落点', () => {
     const base = createWorkspaceLayout('pane')
     useAppStore.setState({
       config: {
-        version: 7,
+        version: 9,
         hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
         executors: {},
         workspaces: [scratch],

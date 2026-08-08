@@ -187,6 +187,9 @@ function dotSpelledLexemes(sourceFile: ts.SourceFile): number {
     const dot = tokens[index - 2]
     const name = tokens[index - 1]
     const open = tokens[index]
+    // index 跑的是 2..length-1，三个下标都在界内；这道门只有在那条前提被打破时才会落空
+    // （noUncheckedIndexedAccess 要求写出来）。不用 `!`/`as`：那两种写法会把洞焊回去。
+    if (dot === undefined || name === undefined || open === undefined) continue
     const isEnumName =
       name.kind === ts.SyntaxKind.EnumKeyword ||
       (name.kind === ts.SyntaxKind.Identifier && name.getText(sourceFile) === 'enum')
