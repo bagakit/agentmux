@@ -6,7 +6,7 @@ import { CODEX_LAUNCH_OPTIONS } from '../agent-launch-option.js'
 import { createNumberedTerminalInteractionProtocol, type TerminalPermissionOption } from '../agent-interaction.js'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
-import { buildPromptInputPayload, catalog, managedHookCommand, sanitizeBracketedPasteText, HOOK_COMMAND_TIMEOUT_SECONDS } from './shared.js'
+import { buildPromptInputPayload, catalog, managedHookCommand, sanitizeBracketedPasteText, hookCommandTimeout } from './shared.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
 
@@ -59,7 +59,7 @@ export function createCodexManagedHookPlan(workspacePath: string): AgentManagedH
   const command = managedHookCommand('codex')
   const hooks = Object.fromEntries(CODEX_HOOK_EVENTS.map((eventName) => [eventName, [{
     ...(eventName === 'SessionStart' ? { matcher: 'startup|resume|clear|compact' } : {}),
-    hooks: [{ type: 'command', command, timeout: HOOK_COMMAND_TIMEOUT_SECONDS }]
+    hooks: [{ type: 'command', command, ...hookCommandTimeout('codex') }]
   }]]))
   return {
     providerId: 'codex',

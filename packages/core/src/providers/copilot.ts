@@ -3,7 +3,7 @@ import { join, resolve } from 'node:path'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
-import { catalog, managedHookCommand, HOOK_COMMAND_TIMEOUT_SECONDS } from './shared.js'
+import { catalog, managedHookCommand, hookCommandTimeout } from './shared.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
 
@@ -138,7 +138,9 @@ function copilotHome(env?: Readonly<Record<string, string>>): string {
  * 上写它——它测的是工具名，别处写是噪音。
  *
  * `timeoutSec`（不是 `timeout`）：这个 CLI 的字段名带单位后缀，写 `timeout` 会被剥掉，然后整条 hook
- * 用它自己的默认超时——不是报错，是静默换了行为。
+ * 用它自己的默认超时——不是报错，是静默换了行为。这个键拼法不再在这里手写：它是
+ * `HOOK_COMMAND_TIMEOUT_FIELD.copilot` 的 SSOT 值，由 `hookCommandTimeout('copilot')` 连同值一起派生
+ * 进本条（见 shared.ts）。
  *
  * **每条命令都带 `--event <eventName>`**：这是本 task 修的真缺陷。Copilot 的负载键两侧都是 camelCase
  * （`toolName`/`toolArgs`/`toolResult`），**不含** `hook_event_name`/`hookEventName`/`eventName` 三拼法里
@@ -160,7 +162,7 @@ export function createCopilotManagedHookPlan(env?: Readonly<Record<string, strin
     ...(eventName === 'preToolUse' || eventName === 'postToolUse' ? { matcher: '.*' } : {}),
     // 事件名靠 `--event` 传：Copilot 的负载里没有任何事件名键（见文件头的实测记录），少了它每条事件
     // 到子进程都解析不出事件名、整条 POST 被静默丢弃。与 antigravity/cursor 同一修法。
-    hooks: [{ type: 'command', command: `${command} --event ${eventName}`, timeoutSec: HOOK_COMMAND_TIMEOUT_SECONDS }]
+    hooks: [{ type: 'command', command: `${command} --event ${eventName}`, ...hookCommandTimeout('copilot') }]
   }]]))
   return {
     providerId: 'copilot',
