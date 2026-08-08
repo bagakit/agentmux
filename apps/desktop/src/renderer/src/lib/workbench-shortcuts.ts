@@ -26,6 +26,10 @@ export type WorkbenchShortcutCommand =
   | { kind: 'step-tab'; delta: 1 | -1 }
   /** 关闭当前焦点 Region。 */
   | { kind: 'close-region' }
+  /** 关闭整张 Tab，无论是否分屏。 */
+  | { kind: 'close-tab' }
+  /** 在活动组里新开一张初始页（launcher）Tab。落点无参：openLauncher 自己解析活动组。 */
+  | { kind: 'new-tab' }
   /** 沿 `direction` 分出一格。 */
   | { kind: 'split'; direction: SplitDirection }
   /** 把焦点移到 `direction` 方向上相邻的那一格 Region。 */
@@ -76,9 +80,18 @@ export function commandForWorkbenchId(id: string): WorkbenchShortcutCommand | nu
     // 1..8 是绝对序号；9 恒指最后一张（浏览器/终端惯例：第 9 个键跳末尾，而不是要求正好九张）。
     return { kind: 'select-tab', ordinal: digit === '9' ? 'last' : Number(digit) }
   }
-  if (id === 'workbench.previous-tab') return { kind: 'step-tab', delta: -1 }
-  if (id === 'workbench.next-tab') return { kind: 'step-tab', delta: 1 }
+  // 每个方向两个 id 拼法——括号和弦与方向键和弦——合流到同一条命令。这个合流点就是「一个动作两个键」
+  // 的落地处：注册表侧是两条各自独立的绑定（各有自己的和弦、自己的 cheat-sheet 行、自己的碰撞检查），
+  // 到这里收成一个动作。分开写而不是让注册表装两个和弦，是因为 Chord 一条绑定只装得下一个。
+  if (id === 'workbench.previous-tab' || id === 'workbench.previous-tab.arrow') {
+    return { kind: 'step-tab', delta: -1 }
+  }
+  if (id === 'workbench.next-tab' || id === 'workbench.next-tab.arrow') {
+    return { kind: 'step-tab', delta: 1 }
+  }
+  if (id === 'workbench.new-tab') return { kind: 'new-tab' }
   if (id === 'workbench.close-region') return { kind: 'close-region' }
+  if (id === 'workbench.close-tab') return { kind: 'close-tab' }
   if (id === 'workbench.split.right') return { kind: 'split', direction: 'right' }
   if (id === 'workbench.split.down') return { kind: 'split', direction: 'down' }
   const directional = id.match(DIRECTION_COMMAND_ID)
@@ -162,6 +175,11 @@ export type WorkbenchShortcutStore = {
   layouts: Readonly<Record<string, WorkspaceLayout>>
   tabs: Readonly<Record<string, WorkbenchTab>>
   activateTab(workspaceId: string, tabGroupId: string, tabId: string): void
+  // 键盘新建 Tab 走这条：落点交给 openLauncher 自己（它解析活动组、继承 Topic、失败时响亮报错）。
+  // 留在这个类型里而不是让 handler 直接摸真实 store，是因为本层是纯函数缝——接线测试喂进来的是 spyStore，
+  // 只有类型带着它，转发才被 store.calls 观察得到；handler 里裸调 useAppStore.getState() 会绕过注入的
+  // store，整个转发退化成不可观测的假绿（本仓已复发多次的形状）。
+  openLauncher(tabGroupId?: string): void
   // 保留在类型里但键盘层不再直接调它：真正的关格在组件消费 requestCloseRegion 后才发生。留着是因为接线
   // 测试要能断言「键盘路没有裸调 closeRegion」——删掉它 vitest 只转译不查类型，回退到裸调时运行期照样
   // 静默丢改动而不报错，那条守卫就抓不住了。
@@ -231,10 +249,30 @@ export function dispatchWorkbenchCommand(
     return true
   }
 
+  if (command.kind === 'new-tab') {
+    // 与 select-tab / step-tab 同一层：只要活动组，不需要活动 Tab 或 Region——新建 Tab 正是往一个可能
+    // 空的组里放第一张，要求活动 Tab 在场会让「组空时按 ⌘T」什么也不做。落点传投影后的活动组 id，与
+    // 序号切 Tab 同一份派生，于是新 Tab 落在用户眼前那个组，而不是 openLauncher 兜底读到的原始
+    // activeGroupId（Topic 过滤前的那个，可能是别的组）。
+    //
+    // 恒返回 true：到这里活动组已由上面的 `if (!group) return false` 证在场，openLauncher 要么加出一张
+    // Tab、要么走它自己的 reportError 响亮报错，两条都不是静默 no-op，所以这个键确实被吃下。
+    store.openLauncher(group.id)
+    return true
+  }
+
   const tabId = group.activeTabId
   const tab = tabId ? store.tabs[tabId] : undefined
   if (!tabId || !tab) return false
   const activeRegionId = tab.layout.activeRegionId
+
+  if (command.kind === 'close-tab') {
+    // 无论单格还是分屏都关整张 Tab——这正是与 close-region 的区别：close-region 只在单格时才回退到关 Tab，
+    // 分屏时它关的是活动那一格。同样走确认流意图、不裸调 store.closeTab（见 requestCloseTab 注释）：
+    // 裸调会静默弃掉未保存改动、停掉在跑的 Agent，而鼠标点 X 不会那样。
+    store.requestCloseTab(workspaceId, group.id, tabId)
+    return true
+  }
 
   if (command.kind === 'close-region') {
     // 单 Region 的 Tab（launcher/session/file 默认都是单格，分屏是显式操作，所以任意时刻大多数 Tab

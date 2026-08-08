@@ -47,12 +47,16 @@ describe('binding id set', () => {
       'terminal.newline',
       'terminal.search',
       'workbench.close-region',
+      'workbench.close-tab',
       'workbench.focus-region.down',
       'workbench.focus-region.left',
       'workbench.focus-region.right',
       'workbench.focus-region.up',
+      'workbench.new-tab',
       'workbench.next-tab',
+      'workbench.next-tab.arrow',
       'workbench.previous-tab',
+      'workbench.previous-tab.arrow',
       'workbench.select-tab.1',
       'workbench.select-tab.2',
       'workbench.select-tab.3',
@@ -194,6 +198,14 @@ describe('non-mac never claims a bare Ctrl+letter', () => {
     // readline guard) to add a Shift+arrow binding. Stated as equality across platforms it still reddens the
     // mutation it was written for: give `arrowChords` the letter rule's `other: {shift: true}` and the two
     // platforms diverge for every arrow binding at once.
+    //
+    // Alt is now stated the same way, and for the same reason. It used to read `alt === true`, which said
+    // "every arrow carries Alt" — true only incidentally, while every arrow happened to be a focus/swap
+    // binding. The tab-nav arrows (`workbench.{previous,next}-tab.arrow`) ride a bare Cmd/Ctrl+arrow with no
+    // Alt on either platform: legal under the real invariant (identical modifiers across platforms), but
+    // forbidden by that over-broad spelling. Narrowing it loses no coverage — "a focus/swap arrow really
+    // does carry Alt" is defended per-binding by the exact-chord anchors below, which build their events
+    // with `altKey: true` and would go null the moment Alt stopped being required.
     const arrows = SHORTCUT_BINDINGS.filter((b) => b.keyClass === 'arrow')
     expect(arrows.length).toBeGreaterThan(0)
     for (const binding of arrows) {
@@ -201,8 +213,10 @@ describe('non-mac never claims a bare Ctrl+letter', () => {
         binding.mac.shift,
         `${binding.id}: an arrow's Shift must mean the same thing on both platforms — differing across platforms IS the letter class's readline workaround, which arrows do not need`
       ).toBe(binding.other.shift)
-      expect(binding.other.alt, `${binding.id} arrow requires Alt`).toBe(true)
-      expect(binding.mac.alt, `${binding.id} arrow requires Alt on mac too`).toBe(true)
+      expect(
+        binding.mac.alt,
+        `${binding.id}: an arrow's Alt must mean the same thing on both platforms — differing across platforms IS the letter class's readline workaround, which arrows do not need`
+      ).toBe(binding.other.alt)
     }
   })
 
@@ -299,11 +313,49 @@ describe('exact chord matching per binding', () => {
     expect(matchShortcut(event({ key: 'o', ctrlKey: true, shiftKey: true }), false, { scope: 'window' })).toBe('workbench.split.down')
   })
 
+  it('close tab: Cmd+Alt+W mac / Ctrl+Shift+Alt+W other — close-region one modifier deeper', () => {
+    expect(matchShortcut(event({ key: 'w', metaKey: true, altKey: true }), true, { scope: 'window' })).toBe('workbench.close-tab')
+    expect(matchShortcut(event({ key: 'w', ctrlKey: true, shiftKey: true, altKey: true }), false, { scope: 'window' })).toBe('workbench.close-tab')
+    // Alt is matched exactly, so the shallower gesture still means "close the region", not "close the tab".
+    // These two are the pair that has to stay distinct: they differ by one modifier and one of them destroys
+    // strictly more than the other.
+    expect(matchShortcut(event({ key: 'w', metaKey: true }), true, { scope: 'window' })).toBe('workbench.close-region')
+    expect(matchShortcut(event({ key: 'w', ctrlKey: true, shiftKey: true }), false, { scope: 'window' })).toBe('workbench.close-region')
+  })
+
+  it('new tab: Cmd+T mac / Ctrl+Shift+T other; not the readline-reserved bare Ctrl+T', () => {
+    expect(matchShortcut(event({ key: 't', metaKey: true }), true, { scope: 'window' })).toBe('workbench.new-tab')
+    expect(matchShortcut(event({ key: 't', ctrlKey: true, shiftKey: true }), false, { scope: 'window' })).toBe('workbench.new-tab')
+    // bare Ctrl+T off mac is readline's transpose-char
+    expect(matchShortcut(event({ key: 't', ctrlKey: true }), false, { scope: 'window' })).toBeNull()
+  })
+
+  it('tab nav rides bare Cmd/Ctrl+←/→ — Alt is what separates it from moving the focus', () => {
+    // The second spelling of previous/next-tab. Both spellings translate to the same step-tab command
+    // (asserted in workbench-shortcuts.test.ts); here we only pin that the chords resolve.
+    expect(matchShortcut(event({ key: 'arrowleft', metaKey: true }), true, { scope: 'window' })).toBe('workbench.previous-tab.arrow')
+    expect(matchShortcut(event({ key: 'arrowright', metaKey: true }), true, { scope: 'window' })).toBe('workbench.next-tab.arrow')
+    expect(matchShortcut(event({ key: 'arrowleft', ctrlKey: true }), false, { scope: 'window' })).toBe('workbench.previous-tab.arrow')
+    expect(matchShortcut(event({ key: 'arrowright', ctrlKey: true }), false, { scope: 'window' })).toBe('workbench.next-tab.arrow')
+    // Adding Alt switches families — this is the assertion that keeps the two arrow bottom lines apart, and
+    // it is the one the focus-region test used to make by pinning bare Cmd+← to null. It cannot be null any
+    // more (the chord is now claimed), so the same fact is stated as "Alt changes the answer" instead.
+    expect(matchShortcut(event({ key: 'arrowleft', metaKey: true, altKey: true }), true, { scope: 'window' })).toBe('workbench.focus-region.left')
+    // Gated: mid-rename / mid-composer, ⌘← is the text caret's, not ours.
+    expect(matchShortcut(event({ key: 'arrowleft', metaKey: true }), true, { scope: 'window', editableTarget: true })).toBeNull()
+    // Only left/right are claimed. Bare Cmd+↑/↓ belong to nobody here — claiming them would silently take
+    // scroll-to-top/bottom away, and no tab-nav meaning exists for the vertical axis.
+    expect(matchShortcut(event({ key: 'arrowup', metaKey: true }), true, { scope: 'window' })).toBeNull()
+    expect(matchShortcut(event({ key: 'arrowdown', metaKey: true }), true, { scope: 'window' })).toBeNull()
+  })
+
   it('focus region: Cmd/Ctrl+Alt+arrow, both platforms', () => {
     expect(matchShortcut(event({ key: 'arrowleft', metaKey: true, altKey: true }), true, { scope: 'window' })).toBe('workbench.focus-region.left')
     expect(matchShortcut(event({ key: 'arrowdown', ctrlKey: true, altKey: true }), false, { scope: 'window' })).toBe('workbench.focus-region.down')
-    // no Alt → not a focus move
-    expect(matchShortcut(event({ key: 'arrowleft', metaKey: true }), true, { scope: 'window' })).toBeNull()
+    // no Alt → not a focus move. Vertical is the axis to state it on: bare Cmd+↑/↓ is claimed by nobody, so
+    // this stays a clean null. (The horizontal pair now belongs to tab nav — the "Alt changes the answer"
+    // half of that fact lives in the tab-nav test above, which asserts the same discrimination positively.)
+    expect(matchShortcut(event({ key: 'arrowdown', ctrlKey: true }), false, { scope: 'window' })).toBeNull()
   })
 
   it('swap region: the SAME arrow chord one modifier deeper — Shift means "take the pane with you"', () => {

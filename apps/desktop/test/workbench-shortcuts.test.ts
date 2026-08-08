@@ -36,8 +36,24 @@ describe('commandForWorkbenchId：绑定 id 翻译成命令', () => {
     expect(commandForWorkbenchId('workbench.next-tab')).toEqual({ kind: 'step-tab', delta: 1 })
   })
 
+  it('previous / next 的方向键拼法与括号拼法合流到同一条命令', () => {
+    // 「一个动作两个键」的落地判据。两条 .arrow id 各自翻译错（比如方向反了、或返回 null）在现有测试里
+    // 完全不可观测：handler 覆盖那条只问「有没有 handler」不问它做什么。
+    //
+    // 先断相等再断字面量，两者都要：只断相等则两边一起错也绿；只断字面量则「合流」这件事没被表达，
+    // 有人把 .arrow 改成另建一条独立命令也照样绿。
+    expect(commandForWorkbenchId('workbench.previous-tab.arrow'))
+      .toEqual(commandForWorkbenchId('workbench.previous-tab'))
+    expect(commandForWorkbenchId('workbench.next-tab.arrow'))
+      .toEqual(commandForWorkbenchId('workbench.next-tab'))
+    expect(commandForWorkbenchId('workbench.previous-tab.arrow')).toEqual({ kind: 'step-tab', delta: -1 })
+    expect(commandForWorkbenchId('workbench.next-tab.arrow')).toEqual({ kind: 'step-tab', delta: 1 })
+  })
+
   it('close / split / focus 各自翻译到对的 kind 与方向', () => {
     expect(commandForWorkbenchId('workbench.close-region')).toEqual({ kind: 'close-region' })
+    expect(commandForWorkbenchId('workbench.close-tab')).toEqual({ kind: 'close-tab' })
+    expect(commandForWorkbenchId('workbench.new-tab')).toEqual({ kind: 'new-tab' })
     expect(commandForWorkbenchId('workbench.split.right')).toEqual({ kind: 'split', direction: 'right' })
     expect(commandForWorkbenchId('workbench.split.down')).toEqual({ kind: 'split', direction: 'down' })
     expect(commandForWorkbenchId('workbench.focus-region.left')).toEqual({ kind: 'focus-region', direction: 'left' })
@@ -318,6 +334,7 @@ function spyStore(overrides: Partial<WorkbenchShortcutStore> = {}): WorkbenchSho
     layouts: { ws: singleGroupLayout },
     tabs: { t1: tab('t1', 'r1'), t2: tab('t2', 'r2'), t3: tab('t3', 'r3') },
     activateTab: (w, g, t) => calls.push(`activateTab:${w}:${g}:${t}`),
+    openLauncher: (g) => calls.push(`openLauncher:${g ?? ''}`),
     closeRegion: (w, t, r) => { calls.push(`closeRegion:${w}:${t}:${r}`) },
     requestCloseTab: (w, g, t) => calls.push(`requestCloseTab:${w}:${g}:${t}`),
     requestCloseRegion: (w, t, r) => calls.push(`requestCloseRegion:${w}:${t}:${r}`),
@@ -463,6 +480,39 @@ describe('接线：命令转发到 store action', () => {
     const store = spyStore({ tabs: { t2: splitTab } })
     expect(dispatchId('workbench.close-region', store)).toBe(true)
     expect(store.calls).toEqual(['requestCloseRegion:ws:t2:r2R'])
+  })
+
+  it('close-tab 在分屏 Tab 上仍关整张 Tab，这正是它与 close-region 的区别', () => {
+    // fixture 必须是分屏。单格时两条命令都走 requestCloseTab，于是「close-tab 误接成 requestCloseRegion」
+    // 这个变异在单格 fixture 上完全不可观测——两个世界给同一份 calls。分屏才把两者分开。
+    const store = spyStore({ tabs: { t2: sideBySideTab('r2R') } })
+    expect(dispatchId('workbench.close-tab', store)).toBe(true)
+    expect(store.calls).toEqual(['requestCloseTab:ws:g:t2'])
+  })
+
+  it('同一张分屏 Tab 上，close-region 与 close-tab 关的不是同一个东西', () => {
+    // 上面两条各自绿，不等于两者有区别：都写成 requestCloseTab 也能各自绿。这条把「区别」本身钉住——
+    // 同一份 fixture 喂两条命令，产出必须不同。任何把两条实现折成一份的改法都在这里红。
+    const tabs = { t2: sideBySideTab('r2R') }
+    const closeRegionStore = spyStore({ tabs })
+    const closeTabStore = spyStore({ tabs })
+    expect(dispatchId('workbench.close-region', closeRegionStore)).toBe(true)
+    expect(dispatchId('workbench.close-tab', closeTabStore)).toBe(true)
+    expect(closeTabStore.calls).not.toEqual(closeRegionStore.calls)
+  })
+
+  it('new-tab 调 openLauncher，落点是投影后的活动组，并吃下这个键', () => {
+    // 落点传的是投影后的 group.id，不是让 openLauncher 自己兜底读原始 activeGroupId——Topic 过滤后
+    // 两者可以不是同一个组。把 `store.openLauncher(group.id)` 改成 `store.openLauncher()` 这条就红。
+    const store = spyStore()
+    expect(dispatchId('workbench.new-tab', store)).toBe(true)
+    expect(store.calls).toEqual(['openLauncher:g'])
+  })
+
+  it('非 Workbench 主面时 new-tab 不接管：不调 openLauncher，也不吞键', () => {
+    const store = spyStore({ mainSurface: 'board' })
+    expect(dispatchId('workbench.new-tab', store)).toBe(false)
+    expect(store.calls).toEqual([])
   })
 
   it('split.down 调 splitRegion，方向原样带过去', () => {

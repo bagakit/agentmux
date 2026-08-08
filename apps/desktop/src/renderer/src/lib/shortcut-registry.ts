@@ -111,11 +111,20 @@ export interface ShortcutBinding {
 
 // --- Chord builders: the platform bottom line, applied in exactly one place per key class -------------
 
-/** A letter chord: bare Cmd on mac; Ctrl+Shift elsewhere (bare Ctrl+letter belongs to readline). */
-function letterChords(letter: string): Pick<ShortcutBinding, 'mac' | 'other'> {
+/**
+ * A letter chord: bare Cmd on mac; Ctrl+Shift elsewhere (bare Ctrl+letter belongs to readline).
+ *
+ * `alt` is a cross-platform *discriminator* layered identically on both platforms — the same role `shift`
+ * plays in `arrowChords`, and the same "one modifier deeper on the same gesture" relation split/swap use.
+ * It is NOT the per-platform readline workaround, which is why it is one argument applied to both sides.
+ * Keeping it here rather than writing the deeper chord inline means the "bare Cmd on mac / Ctrl+Shift off
+ * mac" bottom line is still stated exactly once: an inline spelling could silently drop the off-mac Shift
+ * and hand a bare Ctrl+letter to readline.
+ */
+function letterChords(letter: string, alt = false): Pick<ShortcutBinding, 'mac' | 'other'> {
   return {
-    mac: { key: letter, primary: true, shift: false, alt: false },
-    other: { key: letter, primary: true, shift: true, alt: false }
+    mac: { key: letter, primary: true, shift: false, alt },
+    other: { key: letter, primary: true, shift: true, alt }
   }
 }
 
@@ -141,20 +150,27 @@ function digitChords(digit: string): Pick<ShortcutBinding, 'mac' | 'other'> {
 }
 
 /**
- * An arrow chord: Cmd/Ctrl + Alt both platforms — no readline conflict on either.
+ * An arrow chord: same modifiers on BOTH platforms — no readline conflict on either.
  *
- * `shift` is a *meaning* carried by the chord, not a platform workaround, which is why it is one argument
- * applied to BOTH platforms rather than a per-platform field. The letter class adds Shift off mac only to
- * stay out of readline's way, so its two platforms differ; an arrow that differed across platforms would be
- * that same workaround leaking into a class that does not need it. Passing `shift` here keeps the two
- * spellings distinguishable: same on both platforms = a discriminator (Shift+arrow means "take the pane
- * with you"), different across platforms = the readline workaround, which the registry guard rejects.
+ * `shift` and `alt` are *meanings* carried by the chord, not platform workarounds, which is why each is one
+ * argument applied to both platforms rather than a per-platform field. The letter class adds Shift off mac
+ * only to stay out of readline's way, so its two platforms differ; an arrow that differed across platforms
+ * would be that same workaround leaking into a class that does not need it. Keeping both here means the
+ * "identical on both platforms" rule is stated exactly once, and the registry guard rejects any divergence.
+ *
+ * `alt` is what separates the two arrow families: Alt+arrow moves the focus between regions, bare arrow
+ * steps between tabs. Both are legal; only a per-platform difference is not.
  */
-function arrowChords(arrow: string, shift = false): Pick<ShortcutBinding, 'mac' | 'other'> {
+function arrowChords(arrow: string, shift = false, alt = true): Pick<ShortcutBinding, 'mac' | 'other'> {
   return {
-    mac: { key: arrow, primary: true, shift, alt: true },
-    other: { key: arrow, primary: true, shift, alt: true }
+    mac: { key: arrow, primary: true, shift, alt },
+    other: { key: arrow, primary: true, shift, alt }
   }
+}
+
+/** Tab nav's arrows: bare Cmd/Ctrl+arrow, no Alt. Named so call sites read as a family, not as two flags. */
+function bareArrowChords(arrow: string): Pick<ShortcutBinding, 'mac' | 'other'> {
+  return arrowChords(arrow, false, false)
 }
 
 const SELECT_TAB_BINDINGS: ShortcutBinding[] = Array.from({ length: 9 }, (_, index) => {
@@ -202,8 +218,11 @@ export const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     // 相对导航：绝对序号答不了「下一张」。九个数字键只在 Tab 少且位置记得住时够用；一旦十几张，
     // 用户要的动作是"往后翻一张"，而那在数字键上没有对应键。
     //
-    // 为什么是 `[` / `]` 加 primary：这是浏览器与编辑器上「上一个/下一个」的通行和弦，且这一对
-    // 在本表里没被占用（数字被 select-tab 占、四个方向键被 focus-region 占、字母 p/w/d 已用）。
+    // 这个动作有**两个拼法**，`[`/`]` 与 ⌘←/→，都指向同一条 step-tab 命令（合流点在
+    // `commandForWorkbenchId`）。注册表的 `Chord` 一条绑定只装得下一个和弦，所以「一个动作两个键」
+    // 只能是两条绑定；这不是重复，是这个模型下唯一的表达方式。
+    //
+    // 为什么是 `[` / `]` 加 primary：这是浏览器与编辑器上「上一个/下一个」的通行和弦。
     // 走 `symbolChords` 而不是自己写两行：off mac 的底线是 Ctrl+Shift（裸 Ctrl+letter 留给 readline），
     // 而带 Shift 时键盘送来的是 `{`/`}` 不是 `[`/`]`——那个不匹配正是 `help.shortcuts` 出过的错，
     // 这个 helper 存在就是为了让它写不出来。
@@ -223,12 +242,54 @@ export const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     ...symbolChords(']', '}')
   },
   {
+    // 方向键拼法：裸 ⌘←/→（两个平台同形，见 bareArrowChords）。方向键在本表里**不是**被 focus-region
+    // 独占的——focus/swap 要 Alt，这里不要，Alt 正是两族的分界。少一个修饰键换来的是：不带 Alt 的
+    // 方向键在切 Tab，带 Alt 的在挪焦点，手势同源而语义分层。
+    id: 'workbench.previous-tab.arrow',
+    scope: 'window',
+    keyClass: 'arrow',
+    label: 'Previous tab',
+    gate: 'not-in-editable',
+    ...bareArrowChords('arrowleft')
+  },
+  {
+    id: 'workbench.next-tab.arrow',
+    scope: 'window',
+    keyClass: 'arrow',
+    label: 'Next tab',
+    gate: 'not-in-editable',
+    ...bareArrowChords('arrowright')
+  },
+  {
+    // 新建 Tab：在活动组里开一张初始页（launcher）。⌘T / Ctrl+Shift+T——浏览器与编辑器的通行和弦，
+    // 走 letterChords 是因为裸 Ctrl+T off mac 是 readline 的 transpose-char。gate 是必须的：在改名框
+    // 或 composer 里按 ⌘T 不该凭空多出一张 Tab。
+    id: 'workbench.new-tab',
+    scope: 'window',
+    keyClass: 'letter',
+    label: 'New tab',
+    gate: 'not-in-editable',
+    ...letterChords('t')
+  },
+  {
     id: 'workbench.close-region',
     scope: 'window',
     keyClass: 'letter',
     label: 'Close region',
     gate: 'not-in-editable',
     ...letterChords('w')
+  },
+  {
+    // 关整张 Tab，分屏时也一样。与 close-region（⌘W）的区别正在这里：那条关的是**活动那一格**，只有
+    // 单格时才回退到关 Tab；这条无论分不分屏都关整张。Alt 是加在 close-region 自己那个和弦上的跨平台
+    // 判别位（⌘⌥W / Ctrl+Shift+Alt+W），与 split/swap 用 Shift 表方向是同一种「同手势深一个修饰键」的
+    // 关系，不是 off mac 那个 readline workaround——所以它是 letterChords 的一个参数，两个平台同时生效。
+    id: 'workbench.close-tab',
+    scope: 'window',
+    keyClass: 'letter',
+    label: 'Close tab',
+    gate: 'not-in-editable',
+    ...letterChords('w', true)
   },
   {
     // Split direction: mac reuses one letter and picks direction with Shift (Cmd+D right, Cmd+Shift+D
