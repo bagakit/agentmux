@@ -199,7 +199,7 @@ describe('Desktop and Renderer Agent exact run continuity integration', () => {
     await mkdir(workspace, { recursive: true, mode: 0o700 })
 
     const config: AppConfig = {
-      version: 7,
+      version: 9,
       hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
       executors: {
         codex: {

@@ -36,7 +36,7 @@ const RETENTIONS: readonly WorktreeRetention[] = [
 // ---------------------------------------------------------------------------
 
 const CONFIG: AppConfig = {
-  version: 7,
+  version: 9,
   hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
   executors: {},
   workspaces: [
