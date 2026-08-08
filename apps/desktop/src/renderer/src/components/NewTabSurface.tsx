@@ -4,6 +4,7 @@ import type { LaunchOptionSelection } from '@agentmux/core'
 import { DESKTOP_ACTIONS } from '../../../shared/desktop-actions'
 import { executorDetectionKey, useAppStore, warmTerminalKey } from '../store'
 import { configuredExecutors } from '../lib/executors'
+import { presentError } from '../lib/error-presentation'
 import { EMPTY_LAUNCHER_NAMES, launcherNameBinding } from '../lib/launcher-name-draft'
 import { launcherPromptBinding } from '../lib/launcher-prompt-draft'
 import { launcherCanLaunch, launcherKeydownLaunches } from '../lib/launcher-submit'
@@ -175,7 +176,7 @@ export function NewTabSurface({
     try {
       await action()
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
+      setError(presentError(cause))
     } finally {
       setBusy(null)
     }

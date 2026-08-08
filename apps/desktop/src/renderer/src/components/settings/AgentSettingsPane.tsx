@@ -12,6 +12,7 @@ import { useEffect, useMemo, useState } from 'react'
 import parseArgsStringToArgv from 'string-argv'
 import type { AgentExecutorConfig, AppConfig } from '../../../../shared/contracts'
 import { executorDetectionKey, useAppStore } from '../../store'
+import { presentError } from '../../lib/error-presentation'
 import { AgentProviderIcon, agentProviderLabel } from '../AgentProviderIcon'
 import { ComposerTextarea } from '../ComposerTextarea'
 
@@ -169,7 +170,7 @@ export function AgentSettingsPane({ config, onSave }: {
       }
       await onSave(executors)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
+      setError(presentError(cause))
     } finally {
       setSaving(false)
     }
