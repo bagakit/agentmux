@@ -9,6 +9,7 @@ import {
 } from '../lib/open-destination'
 import { terminalLinkModifierOpensSystemBrowser } from '../lib/terminal-link-gesture'
 import { CONNECTION_UNRECOVERABLE_DETAIL } from '../lib/session-state'
+import { sessionRecoveryClassName, sessionRecoveryState } from '../lib/session-recovery-banner'
 import type { ConversationSpeaker } from '../lib/conversation-speaker'
 import type { LinkClickModifiers } from './AgentMarkdown'
 import { AgentSessionComposer } from './AgentSessionComposer'
@@ -17,7 +18,7 @@ import { ActivityView } from './ActivityView'
 import { OpenDestinationPopover, type OpenDestinationRequest } from './OpenDestinationBar'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { TerminalView } from './TerminalView'
-import { agentSessionServiceOutcome, classifyServiceNotice, serviceNoticeToRender } from '../lib/service-window-notice'
+import { agentPromptDeliveryServiceOutcome, agentSessionServiceOutcome, classifyServiceNotice, serviceNoticeToRender } from '../lib/service-window-notice'
 import { isMacPlatform } from '../lib/host-platform'
 import {
   classifyContinuityFailure,
@@ -246,7 +247,7 @@ export function SessionPane({
               />
             )}
             {disconnected || missing || exited ? (
-              <div className={`terminal-recovery terminal-recovery--${disconnected ? 'disconnected' : exited ? 'exited' : 'error'}`} role="status" aria-live="polite">
+              <div className={sessionRecoveryClassName(sessionRecoveryState({ disconnected, exited }))} role="status" aria-live="polite">
                 <span className="terminal-recovery__icon">
                   {refreshing || recovering ? <LoaderCircle className="spin" size={16} /> : disconnected ? <ServerOff size={16} /> : <AlertTriangle size={16} />}
                 </span>
@@ -337,6 +338,9 @@ export function SessionPane({
               放行 + 明确告知由这条告示补上；判定全在 lib，组件只渲染结果。 */}
           <ServiceWindowNotice
             notice={serviceNoticeToRender(classifyServiceNotice(agentSessionServiceOutcome(session)))}
+          />
+          <ServiceWindowNotice
+            notice={serviceNoticeToRender(classifyServiceNotice(agentPromptDeliveryServiceOutcome(session)))}
           />
           {session.pendingInteraction ? (
             <AgentInteractionCard
