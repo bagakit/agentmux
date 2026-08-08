@@ -21,17 +21,31 @@ import { GH_UNAVAILABLE, GIT_UNAVAILABLE } from '../src/renderer/src/lib/git-bri
  *
  * 判据：`src/renderer/` 里读 `agentmux` 这个属性的地方，只允许是下面 {@link ALLOWED} 那两个。
  *
- * 为什么这一条就够，不用再逐个调用点判「你的桥是不是从 lookup 来的」：一旦没人再摸 `window`，
- * 拿到桥的唯一出口就是 {@link gitBridge} / {@link ghBridge}，而它们返回的是**带标签的联合**——
- * `lookup.bridge` 在收窄之前根本读不出来，`tsc` 会拦。也就是说「非空断言绕过缺席判断」这条老路，
- * 在这条守卫成立之后由类型系统自己封住了。再加一层遍历调用点的检查只是不可能变红的死代码
- * （记忆 surviving-mutation-may-be-dead-condition：先判它可不可能改变结果，是就别写）。
+ * 这条守卫的全部强制力都压在 `agentmuxReads` 认全「读 `agentmux`」的**每一种拼法**上。这一点此前
+ * 被高估了：早先的注释写着「一旦没人摸 window，拿桥的唯一出口就是 gitBridge()/ghBridge() 返回的带
+ * 标签联合，`tsc` 会拦住非空断言绕过缺席判断这条老路」——这话对**收窄**那一步成立，但它**不**封
+ * 「换个拼法再摸一次 window」。`tsc` 对 `window['agent' + 'mux'].git`、`const { agentmux } = window`
+ * 一样沉默：这些都是合法的属性读取，类型完全正确。review agent 实测正是用拼接下标与解构各重新手抄
+ * 一份桥取值，整族守卫 6 条全绿。所以「tsc 关掉了这个 bypass」是**假的**——关掉它的必须是这条守卫
+ * 自己把读取的每种拼法都认全（记忆 counting-a-symbol-misses-other-spellings）。
  *
- * 判据落在 **AST** 上而不是文本上，这一点是承重的：`useGitStatus.ts:19`、`ChangesPanel.tsx:41`、
- * `store.ts:316/890` 的文档注释里都**正当地**写着 `window.agentmux.git` 这串字（在讲这个桥是什么）。
- * 一个 `readFileSync().toContain()` 形状的守卫会对这四处发假红，而假红久了必被加豁免、豁免再吃掉
+ * 于是 `agentmuxScan` 枚举读 `agentmux` 的所有静态可判写法：点号访问、字符串下标、静态可折叠的拼接
+ * 下标（`['agent' + 'mux']`）、（重命名）解构。而**从全局对象上静态判不出键名**的动态读取
+ * （`window[k]`、`globalThis` 的计算解构键）无法确定读的是不是 agentmux——它们不被静默当成「不是」，
+ * 而是收集成 unclassified 由 `没有归类不了的动态取值` 响亮失败并指名（记忆
+ * forbidden-list-guard-always-leaks：禁止清单总会漏，能反过来就只认一小撮已识别形状、其余显式失败）。
+ * unclassified 只盯**全局对象**（window/globalThis/self）上的动态键：本地对象的 `table[verb]` 这类
+ * 查表与桥无关，若也拖进来就会对满仓合法查表发假红。
+ *
+ * 判据落在 **AST** 上而不是文本上，这一点是承重的：`useGitStatus.ts`、`ChangesPanel.tsx`、
+ * `store.ts` 的文档注释里都**正当地**写着 `window.agentmux.git` 这串字（在讲这个桥是什么）。
+ * 一个 `readFileSync().toContain()` 形状的守卫会对这几处发假红，而假红久了必被加豁免、豁免再吃掉
  * 真缺陷（记忆 lexical-boundaries-need-a-real-lexer：注释边界要用语言自己的词法器判，别按行猜）。
  * 下面 `注释里提到不算读取` 那一条把这个区分本身做成了断言。
+ *
+ * 仍在的盲点（诚实记录）：桥取值经**中间变量**再摸（`const w = window; w.agentmux`）——判据只认
+ * 根对象直接是名字的读取，跨变量要 TypeChecker 做符号解析，本文件是 createSourceFile 词法走查够不到；
+ * 真正的运行期动态键只能标 unclassified 让人回看，判不出它读没读 agentmux（有意为之的保守出口）。
  */
 
 const RENDERER = fileURLToPath(new URL('../src/renderer', import.meta.url))
@@ -58,52 +72,106 @@ function sourceFiles(dir: string): string[] {
 }
 
 /**
- * 一个解构元素取的是哪个属性名。
- *
- * `{ agentmux }` 只有 `name`；`{ agentmux: bridge }` 的属性名在 `propertyName` 上而 `name` 是新变量名。
- * 取值必须先看 `propertyName`，否则重命名解构会被漏掉。计算属性名（`{ [k]: v }`）取不到静态名字，
- * 返回 null——那种写法今天不在场，且它躲不过下面的「桥类型只从 git-bridge 导出」那道门。
- */
-function destructuredKey(node: ts.BindingElement): string | null {
-  const key = node.propertyName ?? node.name
-  return ts.isIdentifier(key) || ts.isStringLiteralLike(key) ? key.text : null
-}
-
-/**
- * 一个文件里所有**读 `agentmux` 属性**的位置。
+ * 一个文件里所有**读 `agentmux` 属性**的位置，外加所有**归类不了的可疑动态读取**。
  *
  * 刻意不判「根对象是不是 `window`」：`globalThis.agentmux`、`self.agentmux`、
  * `(window as any).agentmux`、`window['agentmux']` 都是同一件事的别的拼法，只钉住 `window.` 那一种
  * 等于给绕过留门（记忆 counting-a-symbol-misses-other-spellings）。所以判据是属性名本身，
- * **三种取属性的写法都收**：点号访问、下标访问、以及解构。
+ * **取属性的写法都收**：点号访问、下标访问（字符串字面量键，含静态可折叠的 `+` 拼接）、以及解构。
  *
  * 解构那一条是后补的：`const { agentmux } = window` 既不是 PropertyAccess 也不是 ElementAccess，
- * 实测（review agent 复现）用它重新手抄一份桥取值，整族守卫 6 条全绿。这正是那条记忆本身的形状——
- * 数一个符号的某几种拼法，就漏掉别的拼法。判据取 `propertyName ?? name`，于是重命名解构
- * （`const { agentmux: bridge } = window`）也算在内。
+ * 实测（review agent 复现）用它重新手抄一份桥取值，整族守卫 6 条全绿。判据取 `propertyName ?? name`，
+ * 于是重命名解构（`const { agentmux: bridge } = window`）也算在内。
+ *
+ * 下标里的**拼接**是本轮补的：`window['agent' + 'mux']` 静态折得出 `agentmux`，review agent 实测
+ * 用它绕过，6 条全绿。现在把可静态折叠的字符串 `+` 折出来再比属性名。
+ *
+ * 关键的一半：**折不出静态名字的动态读取要响亮，不能静默放过**（记忆 forbidden-list-guard-always-leaks）。
+ * `window[k]`、`window['agent' + suffix]`、`const { [k]: v } = window` 这类静态解析不出键名的写法，
+ * 单看无法判断它读的是不是 `agentmux`——但它恰恰是隐藏一次桥取值的天然去处。它们被收集成
+ * `unclassified` 一并带出，由 {@link 没有归类不了的动态取值} 那条断言响亮失败并指名。今天 renderer
+ * 里一处这种写法都没有（见那条断言的反向自证）。
  */
-function agentmuxReads(file: string): Read[] {
-  const text = readFileSync(file, 'utf8')
-  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
-  const found: Read[] = []
+type Read = { file: string; line: number }
+
+// 从字符串字面量或字面量 `+` 拼接里折出静态值；折不出（变量、模板插值）返回 null。
+function staticStringKey(node: ts.Expression): string | null {
+  if (ts.isStringLiteralLike(node)) return node.text
+  if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+    const left = staticStringKey(node.left)
+    const right = staticStringKey(node.right)
+    return left !== null && right !== null ? left + right : null
+  }
+  return null
+}
+
+// 剥掉括号 / `as T` / `!` / 类型断言外壳，露出里面那个表达式。
+function unwrap(node: ts.Expression): ts.Expression {
+  let current: ts.Expression = node
+  while (
+    ts.isParenthesizedExpression(current) ||
+    ts.isAsExpression(current) ||
+    ts.isNonNullExpression(current) ||
+    ts.isTypeAssertionExpression(current)
+  ) {
+    current = current.expression
+  }
+  return current
+}
+
+// 根对象像不像「全局作用域」——`window` / `globalThis` / `self`（含 `(window as any)` 这类外壳）。
+// 只有从全局上做**动态键**读取才是「可能藏着一次 agentmux 取值」的可疑形状；一个本地对象上的
+// `FAILURE_COPY[verb]` 与桥毫无关系，不该被这条守卫拖进来。
+function isGlobalLike(node: ts.Expression | undefined): boolean {
+  if (node === undefined) return false
+  const inner = unwrap(node)
+  return ts.isIdentifier(inner) && (inner.text === 'window' || inner.text === 'globalThis' || inner.text === 'self')
+}
+
+function agentmuxScanText(text: string, rel: string): { reads: Read[]; unclassified: string[] } {
+  const source = ts.createSourceFile(rel, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const reads: Read[] = []
+  const unclassified: string[] = []
+  const lineOf = (node: ts.Node): number => source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1
   const visit = (node: ts.Node): void => {
-    const hit =
-      (ts.isPropertyAccessExpression(node) && node.name.text === 'agentmux') ||
-      (ts.isElementAccessExpression(node) &&
-        node.argumentExpression !== undefined &&
-        ts.isStringLiteralLike(node.argumentExpression) &&
-        node.argumentExpression.text === 'agentmux') ||
-      (ts.isBindingElement(node) && destructuredKey(node) === 'agentmux')
-    if (hit) {
-      found.push({
-        file: relative(RENDERER, file),
-        line: source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1
-      })
+    if (ts.isPropertyAccessExpression(node)) {
+      // 点号访问：键是静态标识符，直接比。名字 `agentmux` 足够独特，不必判根对象。
+      if (node.name.text === 'agentmux') reads.push({ file: rel, line: lineOf(node) })
+    } else if (ts.isElementAccessExpression(node)) {
+      // 下标访问：字符串字面量或拼接折出键名（`['agent' + 'mux']`）。
+      const key = staticStringKey(node.argumentExpression)
+      if (key === 'agentmux') reads.push({ file: rel, line: lineOf(node) })
+      // 折不出键名、且根对象是全局：可能正把桥藏在运行期键名里，归为可疑（其余本地对象的动态下标放行）。
+      else if (key === null && !ts.isNumericLiteral(node.argumentExpression) && isGlobalLike(node.expression)) {
+        unclassified.push(`${rel}:${lineOf(node)}  ${node.getText(source)}`)
+      }
+    } else if (ts.isBindingElement(node)) {
+      // 解构：键取 propertyName ?? name。
+      const rawKey = node.propertyName ?? node.name
+      const decl = node.parent.parent
+      const initGlobal =
+        ts.isVariableDeclaration(decl) && decl.initializer !== undefined && isGlobalLike(decl.initializer)
+      if (ts.isIdentifier(rawKey) || ts.isStringLiteralLike(rawKey)) {
+        if (rawKey.text === 'agentmux') reads.push({ file: rel, line: lineOf(node) })
+      } else if (ts.isComputedPropertyName(rawKey)) {
+        const resolved = staticStringKey(rawKey.expression)
+        if (resolved === 'agentmux') reads.push({ file: rel, line: lineOf(node) })
+        // 计算解构键折不出名字、且被解构的是全局：可疑。
+        else if (resolved === null && initGlobal) unclassified.push(`${rel}:${lineOf(node)}  ${node.getText(source)}`)
+      }
     }
     ts.forEachChild(node, visit)
   }
   ts.forEachChild(source, visit)
-  return found
+  return { reads, unclassified }
+}
+
+function agentmuxScan(file: string): { reads: Read[]; unclassified: string[] } {
+  return agentmuxScanText(readFileSync(file, 'utf8'), relative(RENDERER, file))
+}
+
+function agentmuxReads(file: string): Read[] {
+  return agentmuxScan(file).reads
 }
 
 /** 一个文件里所有**字符串字面量**的取值。注释天然不在其中——这正是要的。 */
@@ -121,6 +189,7 @@ function stringLiterals(file: string): string[] {
 
 const FILES = sourceFiles(RENDERER)
 const READS = FILES.flatMap((file) => agentmuxReads(file))
+const UNCLASSIFIED = FILES.flatMap((file) => agentmuxScan(file).unclassified)
 
 describe('preload 桥只有一个取值口', () => {
   it('渲染层没有别的地方再摸 agentmux', () => {
@@ -132,11 +201,42 @@ describe('preload 桥只有一个取值口', () => {
     ).toEqual([])
   })
 
+  // 归类不了的动态取值要响亮，不能静默放过（记忆 forbidden-list-guard-always-leaks）。一个
+  // 全局上的 `window[k]` 或 `const { [k]: v } = globalThis` 静态判不出键名，正是隐藏一次桥取值的
+  // 天然去处（本地对象上的动态下标与桥无关，不在此列）。
+  it('没有归类不了的动态取值', () => {
+    expect(
+      UNCLASSIFIED,
+      'renderer 里出现了从全局对象静态解析不出键名的动态取值（`window[变量]`、globalThis 的计算解构键、' +
+        '拼了变量的下标）。它可能正把 agentmux 桥藏在运行期键名里。请改成静态可判的写法，或从 lib/git-bridge 取。'
+    ).toEqual([])
+  })
+
   // 在场自检：上面那条断言在「一个都没找到」时也会通过。遍历一旦坏掉（改错后缀、走错根目录），
   // 整条守卫就静默变恒真（记忆 false-green-gate-patterns 里「扫描根写错静默变绿」那一条）。
   it('遍历真的看见了源码和取值点', () => {
     expect(FILES.length, 'renderer 下一个源文件都没扫到——扫描根或后缀写错了').toBeGreaterThan(50)
     expect(READS.length, '一处 agentmux 取值都没找到——AST 判据坏了，上面那条已经恒真').toBeGreaterThan(0)
+
+    // 判据自检：四种取属性写法都要被真正的 agentmuxScanText 认出（点号 / 字面量下标 / 拼接下标 /
+    // 解构）——这几条正是 review agent 测得 6 条全绿的 bypass 里那两种（拼接下标、解构）。少了这一步，
+    // 某种拼法悄悄不再匹配也不会有人发现。
+    const recognised = agentmuxScanText(
+      "window.agentmux; window['agentmux']; window['agent' + 'mux']; const { agentmux } = window; const { agentmux: b } = window",
+      'probe.tsx'
+    )
+    expect(recognised.reads, '五种取属性写法没被全部认出——某种拼法漏了').toHaveLength(5)
+    expect(recognised.unclassified, '合法静态取值被误标成 unclassified').toHaveLength(0)
+
+    // 反向：真动态键（从全局取）计为 unclassified，不计为命中。
+    const dynamic = agentmuxScanText("window[k]; const { [k]: v } = window", 'probe.tsx')
+    expect(dynamic.reads, '动态键被误当成 agentmux 命中').toHaveLength(0)
+    expect(dynamic.unclassified, '全局上的动态键没被计成 unclassified').toHaveLength(2)
+
+    // 反向自证：本地对象上的动态下标（`FAILURE_COPY[verb]` 这类）与桥无关，绝不能被拖进 unclassified，
+    // 否则这条门会对满仓合法的查表发假红——那正是本轮第一版踩过的坑。
+    const localIndex = agentmuxScanText('const x = FAILURE_COPY[verb]; const y = table[a][b]', 'probe.tsx')
+    expect(localIndex.unclassified, '本地对象的动态下标被误报成可疑').toHaveLength(0)
   })
 
   it('每条豁免都真的在用', () => {
