@@ -277,7 +277,7 @@
   width: 100%;
   height: 24px;
   display: grid;
-  grid-template-columns: 14px 17px minmax(0, 1fr) auto auto;
+  grid-template-columns: 14px 17px minmax(0, 1fr) auto auto auto;
   align-items: center;
   gap:var(--sp-1);
   padding:0 var(--sp-1) 0 calc(var(--sp-1) + var(--tree-depth) * var(--sp-5));
@@ -302,6 +302,20 @@
 .tree-row__badge { padding:1px var(--sp-2); border-radius: var(--radius-sm); color: var(--blue); background: var(--surface-2); font-size: var(--fs-micro); text-transform: uppercase; }
 .tree-row__dirty { width: 6px; height: 6px; flex: none; margin-left:auto; border-radius: 50%; background: var(--amber); box-shadow: 0 0 0 2px var(--amber-wash); }
 .tree-row__dirty + .tree-row__badge { margin-left:0; }
+/*
+  源码状态标记（挂在 dirty/badge 之前的倒数第二个 auto 列）。**颜色不是唯一信号**（无障碍）：这枚标记
+  既着色又印一个字母（M/A/?/D/R/!），色盲或一瞥之下靠字形仍能区分。tree-row__icon 常驻底色是
+  --green-text，故绿在这棵树里是环境色不能兼表状态；红又被 --load-failed 占用。三个语义因此分别取：
+  修改/重命名=琥珀（与 source-control 面板「未暂存改动」同源）、新增/未跟踪=绿、删除/冲突=红。
+*/
+.tree-row__git { flex: none; min-width: 12px; display: inline-flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: var(--fs-micro); font-weight: 600; }
+.tree-row--git-modified .tree-row__git, .tree-row--git-renamed .tree-row__git { color: var(--amber-text); }
+.tree-row--git-added .tree-row__git, .tree-row--git-untracked .tree-row__git { color: var(--green-text); }
+.tree-row--git-deleted .tree-row__git, .tree-row--git-conflicted .tree-row__git { color: var(--red-text); }
+/* 状态也淡淡染文件名，扫读时整行可辨；仍与字母标记双通道，不是唯一信号。选中态让位给选中色。 */
+.tree-row--git-modified:not(.tree-row--selected) .tree-row__label, .tree-row--git-renamed:not(.tree-row--selected) .tree-row__label { color: var(--amber-text); }
+.tree-row--git-added:not(.tree-row--selected) .tree-row__label, .tree-row--git-untracked:not(.tree-row--selected) .tree-row__label { color: var(--green-text); }
+.tree-row--git-deleted:not(.tree-row--selected) .tree-row__label, .tree-row--git-conflicted:not(.tree-row--selected) .tree-row__label { color: var(--red-text); }
 .tree-row__actions { display: flex; align-items: center; opacity: 0; }
 .tree-row:hover .tree-row__actions, .tree-row--selected .tree-row__actions { opacity: 1; }
 .tree-row__actions button { width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; padding:0; border-radius: 4px; color: var(--text-3); cursor: pointer; }
