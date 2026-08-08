@@ -147,6 +147,16 @@ const EMPTY_INDEX: FileTreeGitStatusIndex = { get: () => null }
  * Files get their own status; every ancestor directory gets the most urgent status among its
  * descendants, so a collapsed folder still signals that something inside it changed (记忆: 目录聚合，
  * 折叠状态下用户看不见). Both sides read the one priority table above — there is no second decision.
+ *
+ * A change's **own** path is recorded under both kinds, because porcelain does not say which kind it
+ * is and the tree does. A dirty submodule arrives as one entry for the gitlink itself (` M sub`, no
+ * trailing slash — git names the link, not a path inside it), while the tree got `sub` from `readdir`
+ * and therefore asks with `isDirectory: true`; filing it only as a file made every dirty submodule
+ * read as clean (#749). The reverse asymmetry is equally unguessable from here: `?? strayrepo/` for an
+ * untracked nested repo has a trailing slash and no descendant entries, so nothing would populate it
+ * as a directory either. Recording the node itself under both kinds is what makes the lookup total —
+ * the alternative, teaching this function to classify paths, would be a second copy of a fact the tree
+ * already holds (记忆 two-resolutions-that-happen-to-agree).
  */
 export function buildFileTreeGitStatusIndex(
   changes: readonly GitFileChange[],
@@ -156,17 +166,21 @@ export function buildFileTreeGitStatusIndex(
   const prefix = repoRelativePrefix ? `${repoRelativePrefix.replace(/\/+$/, '')}/` : ''
   const fileStatus = new Map<string, FileTreeGitStatus>()
   const dirStatus = new Map<string, FileTreeGitStatus>()
+  const record = (map: Map<string, FileTreeGitStatus>, key: string, status: FileTreeGitStatus) => {
+    const existing = map.get(key)
+    map.set(key, existing ? moreUrgent(existing, status) : status)
+  }
   for (const change of changes) {
     if (prefix && !change.path.startsWith(prefix)) continue
-    const path = prefix ? change.path.slice(prefix.length) : change.path
+    const stripped = prefix ? change.path.slice(prefix.length) : change.path
+    // Git marks a directory-shaped entry with a trailing slash (`?? untracked/`, `?? strayrepo/`);
+    // the tree's own paths never carry one, so it is normalised away before either map sees it.
+    const path = stripped.replace(/\/+$/, '')
     if (!path) continue
     const status = fileTreeGitStatusOfChange(change)
-    const existing = fileStatus.get(path)
-    fileStatus.set(path, existing ? moreUrgent(existing, status) : status)
-    for (const dir of ancestorDirectories(path)) {
-      const current = dirStatus.get(dir)
-      dirStatus.set(dir, current ? moreUrgent(current, status) : status)
-    }
+    record(fileStatus, path, status)
+    record(dirStatus, path, status)
+    for (const dir of ancestorDirectories(path)) record(dirStatus, dir, status)
   }
   return {
     get: (path, isDirectory) => (isDirectory ? dirStatus.get(path) : fileStatus.get(path)) ?? null
