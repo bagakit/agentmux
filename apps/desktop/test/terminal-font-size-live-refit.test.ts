@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
+import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import ts from 'typescript'
 import { TerminalViewportSynchronizer } from '../src/renderer/src/lib/terminal-viewport-sync'
 import {
+  enclosingFunctionBody,
   findCallsToIdentifier,
   findCallsToMember,
   parseTsx,
@@ -147,10 +150,93 @@ describe('TerminalView applies the size to an open terminal and refits', () => {
     )
   })
 
-  it('refit 之前先把新字号写到 open terminal 的 options 上', () => {
+  it('挂载首跑那条守护会把 flag 置位（不置位则每次改字号都早退，effect 永久 no-op）', () => {
+    // 上一条只读早退的**条件**，读不到条件成立时那个分支**做了什么**。而这条 effect 的正确性一半
+    // 压在分支体上：`if (!flag.current) { flag.current = true; return }`——那句赋值是「首跑不做事，
+    // 之后每次都做事」这个语义的全部实现。把它删成 `if (!flag.current) return`，条件列表一个字都
+    // 不变（白名单仍匹配），可 flag 永远是 false，于是**每一次**字号变化都走首跑分支早退：改字号
+    // 从此完全没有反应。实测：删掉那行，本文件与另外三个字号 suite 27/27 全绿。
+    //
+    // 判据因此要落在那个 then 分支的**体**上：它必须把守护读的那个 ref 写成 true。按 AST 读
+    // `<同一个 ref>.current = true` 这个赋值，而不是 grep 文件里有没有这串字符——ref 名从条件里
+    // 取出来再回头比对，改名重构不会假红，而写到**别的** ref 上（一种真缺陷）会红。
+    const calls = findCallsToMember(sourceFile, 'synchronizeCellMetrics')
+    const body = enclosingFunctionBody(calls[0]!)
+    expect(body, '字号 effect 的函数体应能被定位到').toBeDefined()
+
+    // 找到守护那句 `if (!X.current) …`，从条件里取出 ref 名 X——这样下面比的是「守护读的那一个」。
+    let guard: ts.IfStatement | undefined
+    let guardedRef: string | undefined
+    for (const statement of body!.statements) {
+      if (!ts.isIfStatement(statement)) continue
+      const condition = statement.expression
+      if (!ts.isPrefixUnaryExpression(condition)) continue
+      if (condition.operator !== ts.SyntaxKind.ExclamationToken) continue
+      const operand = condition.operand
+      if (!ts.isPropertyAccessExpression(operand)) continue
+      if (operand.name.text !== 'current') continue
+      if (!ts.isIdentifier(operand.expression)) continue
+      if (!operand.expression.text.toLowerCase().includes('fontsize')) continue
+      guard = statement
+      guardedRef = operand.expression.text
+      break
+    }
+    expect(guard, '应能定位到 `if (!<fontSize…Ref>.current)` 这句挂载守护').toBeDefined()
+
+    // 在那个 then 分支里找 `<同一个 ref>.current = true`。找不到 ⇒ flag 永不置位 ⇒ 永久 no-op。
+    let assignsGuardedFlag = false
+    const visit = (node: ts.Node): void => {
+      if (
+        ts.isBinaryExpression(node) &&
+        node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        ts.isPropertyAccessExpression(node.left) &&
+        node.left.name.text === 'current' &&
+        ts.isIdentifier(node.left.expression) &&
+        node.left.expression.text === guardedRef &&
+        node.right.kind === ts.SyntaxKind.TrueKeyword
+      ) {
+        assignsGuardedFlag = true
+      }
+      ts.forEachChild(node, visit)
+    }
+    visit(guard!.thenStatement)
+    expect(
+      assignsGuardedFlag,
+      `挂载守护的 then 分支必须把 ${guardedRef}.current 置为 true。缺了这一句，flag 永远是 false，` +
+        '每次字号变化都走首跑分支早退——改字号对已开着的终端完全没有反应，而早退条件本身一个字没变，' +
+        '所以只读条件的那条判据看不见。'
+    ).toBe(true)
+  })
+
+  it('写进 options 的就是 fontSize 这个 prop 本身，不是由它算出来的别的值', () => {
     // 只 refit 而不改 terminal.options.fontSize，xterm 会按旧字号重新 fit，字号根本不变。
     // 两件事必须都在这条 effect 里：设 options + 触发 refit。
-    expect(source).toContain('terminal.options.fontSize = fontSize')
+    //
+    // 但「那行字符串在场」证不到取值对：把右边写成 `fontSize + 1`，`toContain('… = fontSize')`
+    // 仍然命中（它是新串的前缀），于是每个终端都比用户选的大一号而全绿——实测存活。所以判据要按
+    // AST 读那次赋值的**右值**，要求它恰好是标识符 `fontSize`。这样 `fontSize + 1`、`12`、
+    // `clamp(fontSize)` 之类一律红，而重命名 prop 会连同守护一起改，不会假红。
+    let assignedExpression: string | undefined
+    const visit = (node: ts.Node): void => {
+      if (
+        ts.isBinaryExpression(node) &&
+        node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        ts.isPropertyAccessExpression(node.left) &&
+        node.left.name.text === 'fontSize' &&
+        ts.isPropertyAccessExpression(node.left.expression) &&
+        node.left.expression.name.text === 'options'
+      ) {
+        assignedExpression = node.right.getText(sourceFile)
+      }
+      ts.forEachChild(node, visit)
+    }
+    visit(sourceFile)
+    expect(assignedExpression, '应能定位到 `<terminal>.options.fontSize = …` 这次赋值').toBeDefined()
+    expect(
+      assignedExpression,
+      '写进 xterm 的必须是 fontSize 这个 prop 原值。写成由它算出来的别的表达式（如 fontSize + 1），' +
+        '每个终端都会渲染成与用户所选不同的字号，而「那行文本在场」的判据对此完全失明。'
+    ).toBe('fontSize')
   })
 
   it('attach effect 不依赖 fontSize（改字号不能重建 xterm、重放 scrollback）', () => {
@@ -163,5 +249,93 @@ describe('TerminalView applies the size to an open terminal and refits', () => {
       .filter((text) => text.includes('session.control.run.runId'))
     expect(attachDeps, 'attach effect 依赖数组应能被定位到').toHaveLength(1)
     expect(attachDeps[0]).not.toContain('fontSize')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Guard 3 — 每个渲染 <TerminalView> 的地方都必须把用户选的字号传进去。
+//
+// 上面两组守的都是 TerminalView **内部**：effect 可达、置位在场、写进去的取值对。可这条 prop 有
+// 默认值（`fontSize = TERMINAL_FONT_SIZE_DEFAULT`），于是调用方**不传**它是合法 TypeScript——
+// tsc 一声不吭，组件照常渲染，只是永远停在 12。实测：删掉 SessionPane 那一行，四个字号 suite
+// 27/27 全绿；用户改字号，那一格终端纹丝不动。
+//
+// 判据必须**枚举出全部渲染点**再逐个检查，而不是照抄一份文件清单：手抄清单对「新开一个渲染
+// TerminalView 的组件」结构性失明（本仓 #535 记过同一形状）。所以扫整棵 renderer 树找 JSX 标签，
+// 让新增的渲染点自动落进判据里。
+// ---------------------------------------------------------------------------
+describe('每个 TerminalView 渲染点都把字号传进去', () => {
+  const rendererRoot = fileURLToPath(new URL('../src/renderer/src', import.meta.url))
+
+  /** renderer 树下所有 .tsx 的绝对路径（递归；TerminalView 自己的定义文件除外）。 */
+  function allRendererTsx(dir: string): string[] {
+    const found: string[] = []
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) found.push(...allRendererTsx(full))
+      else if (entry.name.endsWith('.tsx') && entry.name !== 'TerminalView.tsx') found.push(full)
+    }
+    return found
+  }
+
+  /** 一个 `<TerminalView …>` 渲染点：文件名 + 它给 fontSize 的表达式（属性缺席时 undefined）。 */
+  interface RenderSite {
+    readonly file: string
+    readonly fontSizeExpression: string | undefined
+    readonly spreadsProps: boolean
+  }
+
+  function terminalViewRenderSites(): RenderSite[] {
+    const sites: RenderSite[] = []
+    for (const file of allRendererTsx(rendererRoot)) {
+      const parsed = parseTsx(path.basename(file), readFileSync(file, 'utf8'))
+      const visit = (node: ts.Node): void => {
+        const opening = ts.isJsxOpeningElement(node)
+          ? node
+          : ts.isJsxSelfClosingElement(node)
+            ? node
+            : undefined
+        if (opening && opening.tagName.getText(parsed) === 'TerminalView') {
+          let fontSizeExpression: string | undefined
+          let spreadsProps = false
+          for (const attribute of opening.attributes.properties) {
+            if (ts.isJsxSpreadAttribute(attribute)) {
+              spreadsProps = true
+              continue
+            }
+            if (!ts.isJsxAttribute(attribute)) continue
+            if (attribute.name.getText(parsed) !== 'fontSize') continue
+            const initializer = attribute.initializer
+            if (initializer && ts.isJsxExpression(initializer) && initializer.expression) {
+              fontSizeExpression = initializer.expression.getText(parsed)
+            }
+          }
+          sites.push({ file: path.basename(file), fontSizeExpression, spreadsProps })
+        }
+        ts.forEachChild(node, visit)
+      }
+      visit(parsed)
+    }
+    return sites
+  }
+
+  it('渲染点被真的枚举到了（自检：判据不是在空集合上恒真）', () => {
+    // 没有这条，扫描面一旦写错（改了目录、后缀、标签名），下面那条就在空数组上 `.every` 恒真，
+    // 而它正是要抓「有渲染点漏传」的那条判据。
+    const sites = terminalViewRenderSites()
+    expect(sites.length, 'renderer 树里应能找到 <TerminalView> 的渲染点').toBeGreaterThan(0)
+  })
+
+  it('没有任何渲染点漏掉 fontSize（漏掉即那一格终端永久钉死在默认值）', () => {
+    // `fontSize?: number` 带默认值，所以漏传是合法 TS——tsc 不会响。漏传的后果不是崩溃而是静默：
+    // 那一格终端永远 12，用户在设置里怎么调都没反应，且与同屏其他终端不一致。
+    const missing = terminalViewRenderSites()
+      .filter((site) => site.fontSizeExpression === undefined && !site.spreadsProps)
+      .map((site) => site.file)
+    expect(
+      missing,
+      `这些文件渲染 <TerminalView> 却没传 fontSize：${missing.join(', ')}。` +
+        'prop 有默认值，因此漏传不会有编译错，只会让那一格终端永久停在 TERMINAL_FONT_SIZE_DEFAULT。'
+    ).toEqual([])
   })
 })
