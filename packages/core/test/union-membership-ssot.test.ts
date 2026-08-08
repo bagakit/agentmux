@@ -98,7 +98,8 @@ const PERMISSION_KIND_ANCHOR: Record<PermissionOptionKind, true> = {
 }
 const DEGRADED_REASON_ANCHOR: Record<PromptDeliveryDegradedReason, true> = {
   'screen-evidence-gap': true,
-  'prompt-render-timeout': true
+  'prompt-render-timeout': true,
+  'screen-evidence-replaced': true
 }
 /** 同一份锚点在 control-host.test.ts 里也有一处（那边用它钉「每个操作都被显式定过档」）。两处都被 tsc 钉住，故不会互相漂移。 */
 const CONTROL_OPERATION_ANCHOR: Record<AgentMuxControlRequest['operation'], true> = {
@@ -312,8 +313,8 @@ describe('三条联合的成员判定只有一处声明', () => {
       }
     })
 
-    it('两种降级原因全部越过 store 的 membership 闸', () => {
-      expect(DEGRADED_REASON_MEMBERS.length, '原因锚点是空的，下面的循环是死代码').toBe(2)
+    it('全部降级原因越过 store 的 membership 闸', () => {
+      expect(DEGRADED_REASON_MEMBERS.length, '原因锚点是空的，下面的循环是死代码').toBeGreaterThan(0)
       for (const reason of DEGRADED_REASON_MEMBERS) {
         expect(
           messageOf(() => normalizeStoredAgentSession(sessionWithDegradedReason(reason))),
@@ -531,7 +532,7 @@ describe('三条联合的成员判定只有一处声明', () => {
       // 同一条链只报一次（否则计数会被链长度放大，上面的 toEqual 变成靠巧合相等）。
       const single = parse(
         'probe.ts',
-        ["function f(r: string) { return r === 'screen-evidence-gap' || r === 'prompt-render-timeout' }"].join('\n')
+        `function f(r: string) { return ${DEGRADED_REASON_MEMBERS.map((reason) => `r === '${reason}'`).join(' || ')} }`
       )
       expect(completeEnumerationSites(single, DEGRADED_REASON_MEMBERS)).toHaveLength(1)
 
