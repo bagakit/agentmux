@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
-import { readFileSync } from 'node:fs'
+import {
+  contentSourceText,
+  gatesAbove,
+  inlineConditions,
+  jsxContentElement,
+  jsxContentElementIn,
+  memberCallsIn
+} from './helpers/jsx-menu-content.js'
 
 // WorkbenchTabContextMenu 经 clipboard-copy 引到 api，api 在模块加载时判断宿主。先立起这个全局。
 vi.hoisted(() => {
@@ -184,24 +191,118 @@ describe('文件 Tab 菜单：路径复制与在文件管理器中显示', () =>
   })
 })
 
+// ---------------------------------------------------------------------------
+// 渲染层：这一组菜单项在不在场，只能由数据决定。
+//
+// 判据形状换过一次，换的理由记在这里。旧判据是
+//
+//     const content = withoutComments.slice(indexOf('<ContextMenu.Content'), indexOf('</ContextMenu.Content>'))
+//     expect(content).toContain('copyModel.entries.map(')
+//
+// 「那行字面量在场」不等于「那次 map 画得出来」：`{false && copyModel.entries.map((entry) => {`
+// 让整组复制 / 地址 / 「在文件管理器中显示」从 Tab 右键菜单上彻底消失，而这个文件 11 条全绿
+// （实测过，不是推演）。同一族的旧账还有 `indexOf` 猜左右界——截错了与没违规在结果上同形。
+//
+// 兄弟文件 workbench-tab-actions.test.ts 守的是另外两个容器，那边的判据是「这段 Content 里
+// **一个内联条件都没有**」。那条不能照搬过来：这个 Content 里有一处**合法**的条件——
+// `{onRenameAgent ? (<ContextMenu.Item …>Rename Agent</ContextMenu.Item>) : null}`，因为
+// 「这张 View 恰好承载唯一一个 Agent」时才给改 Agent 名。照搬会把诚实的代码判红，而一道会打
+// 假红的守卫最终会被删掉，等于没有。
+//
+// 所以判据收窄成**这一次调用**头上没有门：`copyModel.entries.map(…)` 与 Content 之间不许有
+// 任何条件、任何新包的函数壳。想让某一项消失只能改 entries——那份数组跑得到、断言得着，
+// 上面那一族测试就在断言它。
+// ---------------------------------------------------------------------------
 describe('JSX 里没有可以取反的在场判断', () => {
-  const source = readFileSync(
-    new URL('../src/renderer/src/components/WorkbenchTabContextMenu.tsx', import.meta.url),
-    'utf8'
-  )
-  const withoutComments = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
-  const opens = withoutComments.indexOf('<ContextMenu.Content')
-  const closes = withoutComments.indexOf('</ContextMenu.Content>')
-  const content = withoutComments.slice(opens, closes)
+  const CONTENT = { file: 'WorkbenchTabContextMenu.tsx', tag: 'ContextMenu', list: 'copyModel' } as const
+  const jsx = jsxContentElement(CONTENT.file, CONTENT.tag)
+  const content = contentSourceText(jsx)
 
-  it('自检：真的截到了那段 JSX', () => {
-    expect(opens).toBeGreaterThan(-1)
-    expect(closes).toBeGreaterThan(opens)
-    expect(content).toContain('ContextMenu.Item')
+  it('自检：真的取到了那段 JSX，且它确实在画菜单项', () => {
+    expect(content).toContain(`${CONTENT.tag}.Item`)
   })
 
-  it('复制/地址那组画的是 copyModel.entries，不是一串三元表达式', () => {
-    expect(content).toContain('copyModel.entries.map(')
+  it('复制/地址那组画的就是 copyModel.entries，且整段只画这一份', () => {
+    const calls = memberCallsIn(jsx, `${CONTENT.list}.entries`, 'map')
+    expect(calls.length, '找不到 copyModel.entries.map( ——这一组要么换了清单来源，要么自己列了一遍').toBe(1)
+    // 标签取自清单元素，不能是写死的字面量（写死了就等于自绘项，改 entries 不再影响画出来的字）。
+    expect(content, '项标签不是取自清单元素').toMatch(/\{entry[\w.]*\.label\}/)
+  })
+
+  it('那次 map 头上没有门——想让这一组消失只能改 entries，改不了 JSX', () => {
+    const [call] = memberCallsIn(jsx, `${CONTENT.list}.entries`, 'map')
+    expect(call, '前提自检：调用点都没找到，判据挂在空处').toBeDefined()
+    expect(
+      gatesAbove(call!, jsx),
+      '这次 map 被一个渲染层条件挡着——整组复制/地址可以被它取反成永不出现'
+    ).toEqual([])
+  })
+
+  it('那处合法的条件仍然合法：判据不禁止 Content 里有条件，只禁止那次 map 头上有', () => {
+    // 兄弟文件那条「一个条件都没有」的判据搬过来会把这里判红。钉住这个差异本身：
+    // 这个 Content 里**确实**有内联条件（Rename Agent 按可选回调在场与否决定画不画），
+    // 而上一条仍然绿。哪天有人把判据「统一」成禁止一切条件，这条会当场提醒他代价是什么。
+    expect(
+      inlineConditions(jsx).length,
+      '这个 Content 里的合法条件没有了——那上一条判据就该收紧成兄弟文件那种全禁式'
+    ).toBeGreaterThan(0)
+    expect(content, '合法条件不再是 Rename Agent 那处了，重新判一遍这条注释还成不成立').toContain(
+      'onRenameAgent ?'
+    )
+  })
+
+  it('自检：门检测器认得取反用的那几种形状，也不把合法取值误当门', () => {
+    // 没有这条，检测器写坏会让整族静默变恒绿——「没找到门」与「认不出门」在结果上同形。
+    const gatesInProbe = (body: string): string[] => {
+      const probe = jsxContentElementIn(
+        `const X = () => (<ContextMenu.Content>${body}</ContextMenu.Content>)`,
+        'probe.tsx',
+        'ContextMenu'
+      )
+      expect(probe, '探针源码里取不到 Content——自检本身是坏的').not.toBeNull()
+      const [call] = memberCallsIn(probe!, 'm.entries', 'map')
+      expect(call, '探针里找不到那次 map——自检本身是坏的').toBeDefined()
+      return gatesAbove(call!, probe!)
+    }
+    // 该拒：这四种都能在「那行字面量原样在场」的前提下把整组抹掉。
+    // React 把 false/null/undefined 渲染成什么都没有，所以调用落在门的哪一侧都不安全。
+    expect(gatesInProbe('{false && m.entries.map((e) => <I />)}'), '认不出 && 门').not.toEqual([])
+    expect(gatesInProbe('{ok ? m.entries.map((e) => <I />) : null}'), '认不出三元门').not.toEqual([])
+    expect(gatesInProbe('{m.entries.map((e) => <I />) && false}'), '认不出「调用在左、门在右」').not.toEqual([])
+    expect(gatesInProbe('{other ?? m.entries.map((e) => <I />)}'), '认不出 ?? 替换').not.toEqual([])
+    expect(
+      gatesInProbe('{(() => { if (hide) return null; return m.entries.map((e) => <I />) })()}'),
+      '认不出新包的函数壳里那个 if'
+    ).not.toEqual([])
+    // 该放：无条件的那次 map，以及它自己回调里的取值与按数据分支。
+    // 回调是这次调用的实参（在它下面），不是祖先——把回调里的东西当成门会打假红。
+    expect(gatesInProbe('{m.entries.map((e) => <I />)}'), '把无条件的 map 判成有门').toEqual([])
+    expect(
+      gatesInProbe('{m.entries.map((e) => <I>{e.action?.label ?? e.label}</I>)}'),
+      '把回调里的 ?. / ?? 取值误当成门'
+    ).toEqual([])
+    expect(
+      gatesInProbe('{m.entries.map((e) => { if (e.kind === "sep") return null; return <I /> })}'),
+      '把 map 回调里按数据分支的 if 误当成整组的门'
+    ).toEqual([])
+    // 该放：同一段里别处的条件不算这次调用的门（本文件真实形状：Rename Agent 那处）。
+    expect(
+      gatesInProbe('{cb ? <I /> : null}{m.entries.map((e) => <I />)}'),
+      '把兄弟节点上的条件算成了这次调用的门——那会把合法代码判红'
+    ).toEqual([])
+    // receiver 逐字比对：换一份清单不能仍被认成同一次调用。
+    expect(
+      memberCallsIn(
+        jsxContentElementIn(
+          'const X = () => (<ContextMenu.Content>{m.entries.slice(0, 0).map((e) => <I />)}</ContextMenu.Content>)',
+          'probe.tsx',
+          'ContextMenu'
+        )!,
+        'm.entries',
+        'map'
+      ).length,
+      '把 m.entries.slice(0,0).map( 认成了 m.entries.map('
+    ).toBe(0)
   })
 
   it('渲染层碰不到那几个可选字段——没有字段可判，也就没有条件可取反', () => {
