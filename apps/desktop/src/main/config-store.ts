@@ -9,7 +9,8 @@ import {
   SCRATCH_WORKSPACE_ID,
   SCRATCH_WORKSPACE_NAME,
   TERMINAL_THEME_IDS,
-  WORKSPACE_KINDS
+  WORKSPACE_KINDS,
+  clampTerminalFontSize
 } from '../shared/contracts.js'
 import { DEFAULT_NOTIFICATION_MODE_ID, NOTIFICATION_TIERS } from '../shared/notification-presentation.js'
 
@@ -59,7 +60,20 @@ const notificationModeIds = NOTIFICATION_TIERS.map((tier) => tier.id) as [string
 // Named rather than inlined below because the retirement path validates each of these on its own, to
 // carry a still-valid user preference across a version bump. Two definitions of the same shape would
 // drift, and the drift would be silent: the config would parse while the carry-over dropped the field.
-const appearanceSchema = z.object({ terminalTheme: z.enum(TERMINAL_THEME_IDS) }).strict()
+//
+// `terminalFontSize` is optional (absent means the default, so a config predating the field parses
+// unchanged — no version bump) and clamped through the contract's single clamp function. The clamp
+// lives HERE, on the persistence boundary every write and load crosses, so an out-of-range value —
+// a hand-edited `900`, a stale `0` — is corrected to the boundary before it can reach disk or the
+// renderer. `.transform` runs after `z.number()` accepts the value, so a non-number still fails the
+// field (and the preference falls back to default) rather than being coerced.
+const appearanceSchema = z.object({
+  terminalTheme: z.enum(TERMINAL_THEME_IDS),
+  terminalFontSize: z
+    .number()
+    .optional()
+    .transform((value) => (value === undefined ? undefined : clampTerminalFontSize(value)))
+}).strict()
 const browserSchema = z.object({
   toolbar: z.object({
     selectElement: z.boolean(),
@@ -540,11 +554,14 @@ export function authoredConfigCarryOver(raw: unknown): {
   // `exactOptionalPropertyTypes` the contract's optionals are `?: T` while zod infers
   // `?: T | undefined`. Zod omits an absent optional key rather than setting it to `undefined`,
   // so no value here can actually be `undefined`. Same cast the two `configSchema.parse` sites use.
+  // `appearance` joins them because its `terminalFontSize` transform infers `number | undefined`;
+  // an absent key is omitted at runtime (verified), so the cast only closes the inferred-type gap.
   return {
     hosts: withLocal as AppConfig['hosts'],
     workspaces: resolvable as WorkspaceRecord[],
     executors: { ...DEFAULT_CONFIG.executors, ...carriedExecutors } as AppConfig['executors'],
-    appearance: carried(appearanceSchema, outer.success ? outer.data.appearance : undefined),
+    appearance: carried(appearanceSchema, outer.success ? outer.data.appearance : undefined) as
+      AppConfig['appearance'] | undefined,
     browser: carried(browserSchema, outer.success ? outer.data.browser : undefined) as
       AppConfig['browser'] | undefined,
     // A second, different gap: `notificationModeIds` is widened to `[string, ...string[]]` where it

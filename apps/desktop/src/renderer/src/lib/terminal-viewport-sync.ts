@@ -260,6 +260,28 @@ export class TerminalViewportSynchronizer {
     this.awaitingFirstLiveFit = false
   }
 
+  /**
+   * Refit after a **deliberate** cell-metric change (the user changed the terminal font size).
+   *
+   * A font change is the one case the wobble gate in `fitAndSynchronize` gets exactly wrong. That gate
+   * skips a fit when the grid diverges from the proposal while the container's CSS pixels are unchanged,
+   * on the theory that a one-cell divergence at constant pixels is WebGL/DOM cell-metric jitter. A font
+   * change has that same shape — same container, different cell size, so the whole grid moves while the
+   * pixels do not — but it is real, not jitter: the PTY must be told the new column/row count or it
+   * keeps wrapping output to the old grid and the screen tears.
+   *
+   * So the pixel baseline is cleared here (a size change means the last-fitted pixels no longer describe
+   * a settled state) and the normal settled-size path is re-entered through `observeViewport`. The fit,
+   * the stability-frame wait for xterm to re-measure the new glyph, and the PTY resize all stay in the
+   * one owner — this adds no second fit path. Nothing happens before the terminal is live: with no PTY
+   * to resize, the constructor-time options already carry the size.
+   */
+  synchronizeCellMetrics(): void {
+    if (this.disposed) return
+    this.lastFittedPixels = null
+    this.observeViewport()
+  }
+
   private async continueStableFit(): Promise<void> {
     if (this.disposed) return
     if (this.suspended) {
