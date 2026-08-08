@@ -66,8 +66,7 @@ const PRESENTER = 'presentError'
  * left as permanent cover. Counts are the real numbers measured on HEAD at the time of writing.
  */
 const PENDING: Readonly<Record<string, number>> = {
-  'components/BranchesPanel.tsx': 5,
-  'components/SurfaceToolDock.tsx': 6
+  'components/BranchesPanel.tsx': 5
 }
 
 type Sink = { file: string; text: string; kind: 'ok' | 'violation' | 'unknown'; syntaxKind: string }
@@ -260,11 +259,20 @@ for (const sink of sinks) if (sink.kind === 'violation') {
 
 describe('#197 每个 caught error 只能经 presentError 到达错误显示汇', () => {
   it('自证：扫描面真的抓到了渲染层的一批文件与足够多的错误汇（扫空目录时判据会恒真）', () => {
-    // A scan that finds zero sinks and reports green is the most common false-green in this repo. Pin the
-    // sink count so a rename of the setter shape (or a wrong scan root) reds here instead of passing an
-    // empty scan. 74 is the real count measured with the same criterion; it may grow, never collapse.
-    expect(scannedFiles).toBeGreaterThan(50)
-    expect(sinks.length, '错误显示汇数量塌了——setState 汇的形状或扫描根回归了').toBeGreaterThanOrEqual(74)
+    // A scan that finds zero sinks and reports green is the most common false-green in this repo, so both
+    // counts are pinned: a renamed setter shape or a wrong scan root reds HERE instead of passing an empty
+    // scan. Both floors are MEASURED numbers, never round guesses — today the scan reaches 235 renderer
+    // files and finds 71 sinks (probe: raise a floor absurdly high and read the real count off the failure
+    // message).
+    //
+    // The sink floor used to read 74, and that WAS a false red once request owners got consolidated — three
+    // sinks legitimately disappeared. The fix for a stale floor is to RE-MEASURE it, not to relax it toward
+    // zero. `scannedFiles > 0` is satisfied by a scan root that resolved to a single stray file, and a sink
+    // floor of `> 0` is implied by any one sink existing, so either relaxation deletes the discriminator
+    // this self-check exists to be: the collapse it guards would sail through green. Lower a floor
+    // deliberately when consolidation genuinely removes sinks; never to a number nobody measured.
+    expect(scannedFiles, '扫描面塌了——扫描根解析错了或渲染层目录结构变了').toBeGreaterThanOrEqual(200)
+    expect(sinks.length, '错误显示汇数量塌了——setState 汇的形状或扫描根回归了').toBeGreaterThanOrEqual(71)
   })
 
   it('没有 unknown 形状被静默放过（不认识的写法要响亮失败，不能默认通过）', () => {
@@ -306,6 +314,79 @@ describe('#197 每个 caught error 只能经 presentError 到达错误显示汇'
     }
   })
 })
+
+// ---------------------------------------------------------------------------
+// #197 companion guard: the IPC transport de-framer must exist EXACTLY ONCE.
+//
+// The taint guard above pins WHERE a caught error may be turned into user text (only via presentError).
+// It cannot see the OTHER half of the same #197 leak: the *de-framing itself* being copied. The store used
+// to carry its own `IPC_INVOKE_PREFIX` regex and a private `message()` that stripped only part of what the
+// SSOT (error-presentation.ts) stripped — the shorter copy left the reframed `<ErrorName>:` token in place,
+// so a store-surfaced IPC error still reached the user as `TypeError: …`. Same concept, two regexes, drifted
+// on the token that matters — the near-duplicate-drift shape this repo has paid for repeatedly. That store
+// path never flowed through a `set…Error` setState sink, so the taint guard was structurally blind to it,
+// and the behavioral presentError test never saw the store's private copy either. Nothing pinned that the
+// de-framer is singular. This does.
+//
+// ## Why the criterion is a regex-LITERAL AST scan, not a text match
+//
+// A `grep`/`toContain('Error invoking remote method')` over the renderer would (a) match the doc-comments in
+// error-presentation.ts that quote the wrapper in prose — a false positive that makes the count meaningless
+// — and (b) still pass if a drifted copy were spelled with a different variable name, since the name is not
+// what it would key on. So the criterion keys on the LANGUAGE CONSTRUCT that actually de-frames: a
+// RegularExpressionLiteral node whose pattern references Electron's fixed wrapper wording. Comments and
+// string literals that merely mention the wrapper are not RegularExpressionLiteral nodes and are excluded by
+// construction; a renamed-but-real second de-framer is still a regex literal containing the wrapper and is
+// still caught. Electron emits that exact prose (`Error invoking remote method '<channel>': …`), so any
+// honest de-framer for it must contain that literal substring — this is not evadable by a spelling variant
+// the way a symbol name would be.
+// ---------------------------------------------------------------------------
+
+/** Electron's fixed wrapper wording; any regex that de-frames the invoke path must reference it verbatim. */
+const IPC_WRAPPER_MARK = 'Error invoking remote method'
+
+/** The one module allowed to own the de-framing regex. */
+const DEFRAMER_SSOT = 'lib/error-presentation.ts'
+
+function ipcDeframingRegexLiterals(): Array<{ file: string; text: string }> {
+  const found: Array<{ file: string; text: string }> = []
+  for (const file of rendererSourceFiles(RENDERER)) {
+    const source = ts.createSourceFile(
+      file,
+      readFileSync(file, 'utf8'),
+      ts.ScriptTarget.Latest,
+      /* setParentNodes */ true,
+      /\.tsx$/.test(file) ? ts.ScriptKind.TSX : ts.ScriptKind.TS
+    )
+    const visit = (node: ts.Node): void => {
+      if (ts.isRegularExpressionLiteral(node) && node.getText(source).includes(IPC_WRAPPER_MARK)) {
+        found.push({ file: path.relative(RENDERER, file), text: node.getText(source) })
+      }
+      ts.forEachChild(node, visit)
+    }
+    visit(source)
+  }
+  return found
+}
+
+describe('#197 IPC 传输前缀的去框正则在渲染层只能有一处（SSOT）', () => {
+  it('渲染层只有一个「去 invoke 包裹」的正则字面量，且它在 error-presentation.ts', () => {
+    const deframers = ipcDeframingRegexLiterals()
+    // Exactly one, and it is the SSOT. Re-introducing the store's shorter copy (or any other file's) makes
+    // this list length 2 and reds — the drift this guard exists to catch. A comment quoting the wrapper does
+    // NOT count: it is not a RegularExpressionLiteral node, so the count stays 1.
+    expect(
+      deframers.map((d) => d.file),
+      deframers.length === 1
+        ? ''
+        : `期望渲染层恰好有一个去 invoke 传输框的正则字面量（唯一 SSOT 在 ${DEFRAMER_SSOT}），实际找到 ${deframers.length} 个。` +
+            `多于一个即为 #197 的 near-duplicate-drift：两份正则会在「是否吃掉 <ErrorName>: 令牌」这类细节上悄悄分叉。` +
+            `删掉副本，改为 import { presentError } from './lib/error-presentation'：\n` +
+            deframers.map((d) => `  ${d.file}: ${d.text}`).join('\n')
+    ).toEqual([DEFRAMER_SSOT])
+  })
+})
+
 
 describe('#197 守卫的判据自证（反向：合法/违规的合成样本各判对）', () => {
   // Parse a synthetic module with a real program so the checker types the fixtures, then run the SAME

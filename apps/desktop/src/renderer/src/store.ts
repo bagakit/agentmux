@@ -44,6 +44,7 @@ import {
 } from '../../shared/scratch-topics'
 import { isScratchWorkspaceId } from '../../shared/contracts'
 import { api } from './lib/api'
+import { presentError } from './lib/error-presentation'
 import { reseatActiveWorkspaceId, adoptedConfig } from './lib/active-workspace-reseat'
 import { gitBridge, ghBridge } from './lib/git-bridge'
 import type { BrowserAnnotation } from './lib/browser-annotations'
@@ -611,18 +612,6 @@ type AppState = {
   reportError(error: unknown): void
 }
 
-// Electron wraps every rejection that crosses `ipcRenderer.invoke` as
-// `Error invoking remote method '<channel>': <name>: <message>` and drops the original error's `.code`
-// (see the preload bridge). That transport framing is noise to a user — strip it back to the message the
-// main process actually raised, so the banner reads as an explanation rather than an IPC stack detail.
-const IPC_INVOKE_PREFIX = /^Error invoking remote method '[^']*':\s*/u
-const AGENTMUX_ERROR_NAME_PREFIX = /^AgentMuxError:\s*/u
-
-function message(error: unknown): string {
-  const raw = error instanceof Error ? error.message : String(error)
-  return raw.replace(IPC_INVOKE_PREFIX, '').replace(AGENTMUX_ERROR_NAME_PREFIX, '')
-}
-
 function emptyRuntimeSnapshot(): RuntimeSnapshot {
   return {
     sessions: [],
@@ -632,7 +621,7 @@ function emptyRuntimeSnapshot(): RuntimeSnapshot {
 }
 
 function startupWorkflowWarning(step: string, error: unknown, recovery: string): string {
-  return `${step} did not complete: ${message(error)}. ${recovery}`
+  return `${step} did not complete: ${presentError(error)}. ${recovery}`
 }
 
 function controlFailure(
@@ -1001,7 +990,7 @@ async function loadRegionDiff(regionId: string, workspaceId: string, path: strin
       editorRegionDiffs: {
         ...state.editorRegionDiffs,
         // A failed reload keeps the last good diff beside the error rather than blanking the pane.
-        [regionId]: { loading: false, diff: state.editorRegionDiffs[regionId]?.diff ?? null, error: message(error) }
+        [regionId]: { loading: false, diff: state.editorRegionDiffs[regionId]?.diff ?? null, error: presentError(error) }
       }
     }))
   }
@@ -1052,7 +1041,7 @@ async function refreshFileDocument(
         code: typeof error === 'object' && error !== null && 'code' in error
           ? String(error.code)
           : 'WORKSPACE_FILE_READ_FAILED',
-        message: message(error)
+        message: presentError(error)
       }
     }
     if (documentLifetime(key) !== expectedLifetime || fileReadRequestIds.get(key) !== requestId) return
@@ -1208,7 +1197,7 @@ async function enqueueFileSave(
         code: typeof error === 'object' && error !== null && 'code' in error
           ? String(error.code)
           : 'WORKSPACE_FILE_WRITE_FAILED',
-        message: message(error)
+        message: presentError(error)
       }
     }
     if (documentLifetime(currentKey) !== savedLifetime || !useAppStore.getState().documents[currentKey]) return
@@ -1869,7 +1858,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const repairNotice = describePersistedTabRepairs(workbench.repairs)
       const startupError = [
         ...(persistWarning
-          ? [`Saved workspace state could not be restored: ${message(persistWarning)}`]
+          ? [`Saved workspace state could not be restored: ${presentError(persistWarning)}`]
           : []),
         ...(repairNotice ? [repairNotice] : []),
         ...startupWarnings
@@ -1906,7 +1895,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     } catch (error) {
       booting = false
       disposeRuntimeSubscriptions()
-      set({ loading: false, error: message(error) })
+      set({ loading: false, error: presentError(error) })
       // Any state written while the startup path was failing must not leave the fence closed forever;
       // subsequent user edits are the first intentional opportunity to replace the old record.
       openPersistWrites()
@@ -1985,7 +1974,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return result
     } catch (error) {
       get().reportError(error)
-      return { kind: 'rejected', reason: message(error) }
+      return { kind: 'rejected', reason: presentError(error) }
     }
   },
   async createPullRequest(input) {
@@ -2032,7 +2021,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return result
     } catch (error) {
       get().reportError(error)
-      return { kind: 'failed', message: message(error) }
+      return { kind: 'failed', message: presentError(error) }
     }
   },
   async keepOneOfFanOut(input) {
@@ -2296,7 +2285,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           try { await api.sessions.stop(launched.session.control) }
           catch (cleanupError) {
             set((current) => reduceDetachedAgentLaunch(current, launched!).state)
-            throw controlFailure('LAUNCH_CLEANUP_FAILED', `${primary.message} Cleanup failed: ${message(cleanupError)}`, {
+            throw controlFailure('LAUNCH_CLEANUP_FAILED', `${primary.message} Cleanup failed: ${presentError(cleanupError)}`, {
               cause: new AggregateError([primary, cleanupError])
             })
           }
@@ -2368,7 +2357,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           try { await api.sessions.stop(session.control) }
           catch (cleanupError) {
             set((current) => ({ sessions: [...current.sessions.filter((item) => item.id !== session!.id), session!] }))
-            throw controlFailure('LAUNCH_CLEANUP_FAILED', `${primary.message} Cleanup failed: ${message(cleanupError)}`, {
+            throw controlFailure('LAUNCH_CLEANUP_FAILED', `${primary.message} Cleanup failed: ${presentError(cleanupError)}`, {
               cause: new AggregateError([primary, cleanupError])
             })
           }
@@ -2428,7 +2417,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (createdBrowserId) {
         try { await api.browser.close(createdBrowserId) }
         catch (cleanupError) {
-          throw controlFailure('LAUNCH_CLEANUP_FAILED', `${primary.message} Cleanup failed: ${message(cleanupError)}`, {
+          throw controlFailure('LAUNCH_CLEANUP_FAILED', `${primary.message} Cleanup failed: ${presentError(cleanupError)}`, {
             cause: new AggregateError([primary, cleanupError])
           })
         }
@@ -3026,7 +3015,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
               ...state.executorDetections,
               [executorDetectionKey(hostId, executorId)]: {
                 state: 'error',
-                detail: message(error),
+                detail: presentError(error),
                 observedAt: Date.now()
               }
             }
@@ -3060,7 +3049,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       set((state) => ({
         hostChecks: {
           ...state.hostChecks,
-          [host.id]: { state: 'error', detail: message(error), observedAt: Date.now() }
+          [host.id]: { state: 'error', detail: presentError(error), observedAt: Date.now() }
         }
       }))
     }
@@ -3577,7 +3566,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           })
           if (timelineGapSessionId) void get().resyncTimeline(timelineGapSessionId)
           throw Object.assign(
-            new Error(`Agent launch result mismatched its requested Session and cleanup failed: ${message(cleanupError)}`),
+            new Error(`Agent launch result mismatched its requested Session and cleanup failed: ${presentError(cleanupError)}`),
             { code: 'AGENT_LAUNCH_CLEANUP_FAILED', cause: cleanupError }
           )
         }
@@ -3599,7 +3588,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           })
           if (timelineGapSessionId) void get().resyncTimeline(timelineGapSessionId)
           throw Object.assign(
-            new Error(`Agent launch state could not be reconciled and cleanup failed: ${message(cleanupError)}`),
+            new Error(`Agent launch state could not be reconciled and cleanup failed: ${presentError(cleanupError)}`),
             {
               code: 'AGENT_LAUNCH_CLEANUP_FAILED',
               cause: new AggregateError([reconcileError, cleanupError])
@@ -3637,7 +3626,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           })
           if (timelineGapSessionId) void get().resyncTimeline(timelineGapSessionId)
           throw Object.assign(
-            new Error(`Agent launch owner disappeared and cleanup failed: ${message(cleanupError)}`),
+            new Error(`Agent launch owner disappeared and cleanup failed: ${presentError(cleanupError)}`),
             { code: 'AGENT_LAUNCH_CLEANUP_FAILED', cause: cleanupError }
           )
         }
@@ -4012,7 +4001,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         } catch (cleanupError) {
           throw new AggregateError(
             [primary, cleanupError],
-            `${primary.message} Cleanup also failed: ${message(cleanupError)}`
+            `${primary.message} Cleanup also failed: ${presentError(cleanupError)}`
           )
         }
         return
@@ -4441,7 +4430,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }))
   },
   reportError(error) {
-    set({ error: message(error) })
+    set({ error: presentError(error) })
   }
 }), {
   name: 'agentmux-workbench-v1',

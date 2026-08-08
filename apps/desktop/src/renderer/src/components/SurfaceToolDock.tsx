@@ -76,6 +76,7 @@ import { CSS } from '@dnd-kit/utilities'
 import { orderTopics, reorderTopics } from '../lib/topic-order'
 import { openTopicRegionMosaics } from '../lib/scratch-topic-layout'
 import { browserOpenError } from '../lib/browser-open-feedback'
+import { presentError } from '../lib/error-presentation'
 import type { RegionGeometry } from '../lib/split-direction'
 import { handleTopicRenameKeyDown } from '../lib/topic-rename'
 import { TopicContextMenu } from './TopicContextMenu'
@@ -405,7 +406,7 @@ function WorkspaceTopicsPanel({
     void api.scratch.listTopics(workspace.id).then((snapshots) => {
       if (active) setTopics(snapshots)
     }).catch((cause) => {
-      if (active) setError(cause instanceof Error ? cause.message : String(cause))
+      if (active) setError(presentError(cause))
     })
     return () => { active = false }
   }, [fileRevision, workspace.id])
@@ -423,7 +424,7 @@ function WorkspaceTopicsPanel({
         )
       })
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
+      setError(presentError(cause))
     } finally {
       setPending(null)
     }
@@ -436,7 +437,7 @@ function WorkspaceTopicsPanel({
     try {
       await openScratchTopic(nextTopicId)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
+      setError(presentError(cause))
     } finally {
       setPending(null)
     }
@@ -476,7 +477,7 @@ function WorkspaceTopicsPanel({
       setTopics((current) => current?.map((entry) => entry.id === renamed.id ? renamed : entry) ?? null)
       cancelRename()
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
+      setError(presentError(cause))
     } finally {
       setPending(null)
     }
@@ -960,7 +961,7 @@ export function SurfaceToolDock({
     try {
       await createBrowser(activePaneId)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
+      setError(presentError(cause))
     } finally {
       setStartingBrowser(false)
     }
@@ -975,7 +976,7 @@ export function SurfaceToolDock({
     try {
       setConfig(await api.config.save({ ...current, browser: { ...current.browser, toolbar } }))
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
+      setError(presentError(cause))
     } finally {
       setSavingBrowserToolbar(false)
     }
