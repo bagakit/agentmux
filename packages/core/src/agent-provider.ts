@@ -145,6 +145,39 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
   ) {
     throw new AgentMuxError('Agent terminal prompt render matcher cannot be empty.', 'INVALID_AGENT_PROVIDER')
   }
+  // 渲染合同的定义期不变式：`terminalPromptRender`（渲染匹配器）与 `planPromptInput` 产出的
+  // `render-then-submit` 两阶段计划必须**同时在场或同时缺席**。
+  //
+  // 为什么必须在此刻响亮地失败——这两者是同一条 prompt 通路的两半，却分居两处声明，谁也不强制对方在场：
+  //   1. 声明了 render-then-submit 却漏了匹配器：readiness 纪元从不被 arm（arm 的两条路——client.ts
+  //      握手期与 native-stop 期——都 gate 在 `terminalPromptRender` 上，`observeReadiness` 自己第一行
+  //      也是 `if (!matcher) return`），于是发往这个 Provider 的**每一条** prompt 都在 `claimPromptReadiness`
+  //      里被 `AGENT_PROMPT_NOT_READY`（reason=epoch-missing）拒掉。没有编译错、没有红测试：一个新接的
+  //      Provider「装上了但一条 prompt 都发不出去」，而所有其它测试照旧全绿。这正是本 lane 要消灭的
+  //      「半成功」——它此前只在**用户**发第一条 prompt 时才现形。
+  //   2. 声明了匹配器却用单阶段计划：readiness 被 arm 却永不被消费（提交走单阶段、不看 readiness），
+  //      屏幕证据观察白做。
+  // 两个方向都判：两处声明各自都可能先落地、后落地。provider-render-conformance.test.ts 早已守了
+  // 「匹配器 ⟹ render-then-submit」一侧；反向那侧（本 lane 的静默杀手）此前无人守。
+  //
+  // 判据用**探针**而非某个声明字段：`planPromptInput` 的返回是运行时才定的联合，无法在类型层表达
+  // 「它到底产哪一种」，探它是唯一诚实的来源（那条 conformance 测试也这么探）。**盲点（务必知道）**：
+  // 只探两个代表性 prompt（单行 / 多行）。一个「按 prompt 内容切换计划种类」的 Provider 本就不被这套
+  // 机制支持——readiness 在不知道 prompt 内容时就已 arm——故这里假定计划种类对一个 Provider 稳定；
+  // 两个探针里只要有一个与匹配器在场不一致就抛。
+  const producesRenderThenSubmit = (prompt: string): boolean =>
+    (definition.planPromptInput?.(prompt) ?? { kind: 'single-phase' as const }).kind === 'render-then-submit'
+  const hasRenderMatcher = Boolean(definition.terminalPromptRender)
+  for (const probe of ['probe', 'probe\nsecond-line']) {
+    const rendersTwoPhase = producesRenderThenSubmit(probe)
+    if (rendersTwoPhase !== hasRenderMatcher) {
+      throw new AgentMuxError(
+        `${catalogSeed.label} couples its terminal prompt-render matcher and its render-then-submit plan inconsistently; declare both or neither.`,
+        'INVALID_AGENT_PROVIDER',
+        `providerId=${catalogSeed.id} hasRenderMatcher=${hasRenderMatcher} rendersTwoPhase=${rendersTwoPhase}`
+      )
+    }
+  }
   const launchOptionDeclarations = definition.launchOptions ?? []
   validateLaunchOptionDeclarations(catalogSeed.id, launchOptionDeclarations)
   const posture: AgentPostureProtocol | undefined = definition.posture
