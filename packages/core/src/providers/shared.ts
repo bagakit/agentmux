@@ -68,22 +68,21 @@ export function hermesHookCommand(): string {
   return `/usr/bin/env ELECTRON_RUN_AS_NODE=1 AGENTMUX_HOOK_PROVIDER=${shellQuote('hermes')} ${shellQuote(process.execPath)} ${shellQuote(commandPath)}`
 }
 
-export const BRACKETED_PASTE_START = '\u001b[200~'
-export const BRACKETED_PASTE_END = '\u001b[201~'
-
-export function sanitizeBracketedPasteText(text: string): string {
-  return text.replaceAll('\u001b', '\u241b')
-}
-
-export function wrapBracketedPasteText(text: string): string {
-  return `${BRACKETED_PASTE_START}${sanitizeBracketedPasteText(text)}${BRACKETED_PASTE_END}`
-}
-
-export function buildPromptInputPayload(prompt: string): string {
-  return /[\r\n]/.test(prompt)
-    ? wrapBracketedPasteText(prompt)
-    : sanitizeBracketedPasteText(prompt)
-}
+/**
+ * Bracketed-paste 的字节判定住在 `../bracketed-paste.js`——一个不 import 任何 `node:` 内置的叶子模块。
+ *
+ * 本文件第一行就是 `import { existsSync } from 'node:fs'`，渲染进程到不了这里；而终端粘贴路径
+ * （用户按 Cmd+V 或右键 Paste）与这里的 prompt 投递是**同一个概念**：一段文本要进 PTY，ESC 怎么办。判定
+ * 若留在这里，渲染层唯一的出路就是再手抄一份——那正是本仓最常复发的缺陷族。这里保留 re-export 只为不动
+ * 既有消费者（`codex.ts` 直接 import，`agent-provider.ts` 的公共 re-export 块也从这里取）。
+ */
+export {
+  BRACKETED_PASTE_START,
+  BRACKETED_PASTE_END,
+  sanitizeBracketedPasteText,
+  wrapBracketedPasteText,
+  buildPromptInputPayload
+} from '../bracketed-paste.js'
 
 /**
  * 受管 Hook 命令的执行超时（秒）——**值的 SSOT**。每个 Provider 的 hook 配置都要给它写超时。
