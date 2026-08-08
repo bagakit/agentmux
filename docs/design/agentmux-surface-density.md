@@ -370,3 +370,10 @@ styles/
 - running/error 状态使用低高度语义图标和紧凑计数，状态栏内保持低调层级。
 - Activity 菜单减少行高和留白，在有限宽度内优先 provider、活动摘要、idle 时长。
 - Composer 展开/收起按钮属于底部工具行的第一个控件，与其他快捷操作共享基线和间距。
+
+### Activity 工作线聚合与错误告示（2026-09-11）
+- Activity 弹层默认按 Topic / Branch / Worktree 分组；一组只占一条紧凑的 context 行，头像簇重叠排列并固定在右缘，避免逐 Agent 平铺造成纵向噪音。分组行保留 28–32px 高度、8–12px 横向内距和单行摘要；展开明细才进入逐 Agent 视图。
+- 聚合行的视觉顺序固定为“context 名称 → 最近摘要 → 状态 → Provider 头像簇”。头像只承载身份与参与者数量，状态颜色只承载最紧要状态；不重复渲染 `N agents`、`Current` 等可由头像或选中态直接读出的标签。
+- 未分组 Agent 使用独立的“未分组”分区，不伪造 Topic 名称；跨 Host 的同名工作线不得合并。分组标题是分类标签，不做成可选中的 Project 行。
+- transient 错误使用靠近窗口边缘但不覆盖内容的 notice surface（优先顶部或侧边的保留槽），最小 32px 高，带关闭按钮与 `aria-label`；关闭按钮命中区不小于 24px。错误文字允许换行但不得把 Terminal/Activity 内容推离视口，重新查看入口放在状态或诊断面。
+- Service Window Notice 继续使用持久、非模态、无关闭按钮的服务窗语汇；transient notice 与 Service Window 不共享生命周期，避免把必须持续可见的降级事实误关掉。
