@@ -99,6 +99,11 @@ export class AgentPromptSubmissionCoordinator {
     this.readinessCancels.clear()
   }
 
+  /** Cancel one Run's screen observation when its authoritative process lifecycle ends. */
+  cancelReadiness(agentSessionId: string): void {
+    this.readinessCancels.get(agentSessionId)?.()
+  }
+
   async submitInputPlan(
     session: AgentMuxAgentSession,
     run: CtxmuxAdapterRun,

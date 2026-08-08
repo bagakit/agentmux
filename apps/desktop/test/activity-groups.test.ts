@@ -58,7 +58,19 @@ describe('Activity work-line grouping', () => {
     expect(groups.map((group) => ({ label: group.label, host: group.hostId, ids: group.sessions.map((session) => session.id) }))).toEqual([
       { label: 'main', host: 'local', ids: ['local-agent'] },
       { label: 'main', host: 'studio', ids: ['remote-agent'] },
-      { label: 'Unassigned', host: null, ids: ['orphan'] }
+      { label: 'Unassigned', host: 'local', ids: ['orphan'] }
+    ])
+  })
+
+  it('does not merge unbound Sessions from different Hosts into one misleading row', () => {
+    const groups = buildActivityGroups([
+      agent('local-orphan', 'elsewhere'),
+      agent('remote-orphan', 'elsewhere', { hostId: 'studio' })
+    ])
+
+    expect(groups.map((group) => ({ label: group.label, host: group.hostId, ids: group.sessions.map((session) => session.id) }))).toEqual([
+      { label: 'Unassigned', host: 'local', ids: ['local-orphan'] },
+      { label: 'Unassigned', host: 'studio', ids: ['remote-orphan'] }
     ])
   })
 })

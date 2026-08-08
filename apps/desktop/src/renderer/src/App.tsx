@@ -26,6 +26,7 @@ import { BoardRowsProvider } from './hooks/useBoardRows'
 import { WorkspaceBoard } from './components/WorkspaceBoard'
 import { ProjectRail } from './components/ProjectRail'
 import { SurfaceToolDock } from './components/SurfaceToolDock'
+import { TransientErrorNotice } from './components/TransientErrorNotice'
 import { WorkspaceWorkbench } from './components/WorkspaceWorkbench'
 import { api } from './lib/api'
 import { useAppStore } from './store'
@@ -47,6 +48,10 @@ export function App() {
   const initialize = useAppStore((state) => state.initialize)
   const loading = useAppStore((state) => state.loading)
   const error = useAppStore((state) => state.error)
+  const lastError = useAppStore((state) => state.lastError)
+  const errorDismissed = useAppStore((state) => state.errorDismissed)
+  const dismissError = useAppStore((state) => state.dismissError)
+  const reopenError = useAppStore((state) => state.reopenError)
   const config = useAppStore((state) => state.config)
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
   const layouts = useAppStore((state) => state.layouts ?? {})
@@ -268,9 +273,17 @@ export function App() {
             </section>
           </div>
         )}
-        <ShellEnvironmentNotice />
-        <RuntimeOwnershipNotice />
-        {error ? <div className="error-toast"><AlertTriangle size={14} /><span>{error}</span></div> : null}
+        <div className="main-shell__notices">
+          <ShellEnvironmentNotice />
+          <RuntimeOwnershipNotice />
+          <TransientErrorNotice
+            error={error}
+            dismissed={errorDismissed}
+            lastError={lastError}
+            onDismiss={dismissError}
+            onReopen={reopenError}
+          />
+        </div>
       </main>
       <AgentStatusBar />
       <QuickSwitcher open={quickSwitchOpen} onClose={() => setQuickSwitchOpen(false)} />
