@@ -24,8 +24,20 @@ import ts from 'typescript'
  *      而用户看得见的 token 用量静默消失（那个 describe 的注释记着这次实测）。判定层有人守、
  *      接线层无人守，是本仓反复出现的形状。
  *
+ *      B 的判据本轮加固过：第一版把「派生」判成「提到」（`referencesAny`），于是
+ *      `workspacePath: session.id ? '' : ''` 被放行——`session` 在三元条件里出现，两支却是同一个
+ *      常量 `''`，值恒为 `''`，这一列没接上真数据（review agent 实测 `2/2 green`、`16/16 combined`）。
+ *      「提到 source」不是「值随 source 变」：条件里的 source 只有当两支的值**不同**时才真的左右结果。
+ *      现在用 {@link valueDependsOnSource} 判值依赖——三元两支逐字相同即视为源无关常量。
+ *
  * 两条都走 TS parser 而不是正则，且各自带在场自检：谓词永远为假、或扫描落空时，是自检先红，
  * 而不是「一个违规都没找到」静默通过（[[false-green-gate-patterns]]）。
+ *
+ * 仍在的盲点（诚实记录）：值依赖是**语法**层的，不做常量折叠或跨变量数据流——
+ * `const blank = ''; workspacePath: session.id ? blank : blank2` 若 `blank !== blank2` 逐字不同会被
+ * 当成派生（哪怕两个变量运行期相等）；把常量藏进一个提到 session 的 helper 调用
+ * （`f(session)` 而内部丢弃入参）也会被算派生。抓这些要 TypeChecker 的常量求值与过程间分析，本文件是
+ * createSourceFile 词法/语法走查够不到——这是有意接受的边界，不是遗漏。
  */
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -90,7 +102,7 @@ function rowLiteralIn(fn: ts.FunctionDeclaration): ts.ObjectLiteralExpression | 
   return found
 }
 
-/** 子树里是否出现过这些标识符中的任意一个。 */
+/** 子树里是否出现过这些标识符中的任意一个。用于 `touchesInput`：碰了入参**在哪都算**。 */
 function referencesAny(node: ts.Node, names: readonly string[]): boolean {
   let hit = false
   const visit = (child: ts.Node): void => {
@@ -106,16 +118,51 @@ function referencesAny(node: ts.Node, names: readonly string[]): boolean {
 }
 
 /**
+ * 这个表达式的**值**是否会随 `sources` 改变——即它是不是真的从 session/catalog **派生**，而不只是
+ * 顺口**提到**了它们。
+ *
+ * 这是本轮修的核心：第一版用 `referencesAny`（提到即算派生），于是 `session.id ? '' : ''` 被放行——
+ * `session` 出现在三元的**条件**里，但两个分支都是常量 `''`，无论 session 是什么值都恒为 `''`，
+ * 这一列根本没接上真数据。review agent 实测这个 bypass `2/2 green`（记忆
+ * expected-value-must-not-derive-from-mutation-target 的同族：判据比它自称守的事弱）。
+ *
+ * 「提到」与「派生」的区别落在**三元条件**上：条件决定走哪一支，只有当两支的值**不同**时，条件里的
+ * source 才真的能改变结果；两支逐字相同（`? '' : ''`）时条件无关紧要，值是源无关的常量。别处（属性访问、
+ * 调用实参、二元运算元、下标）里出现 source 都是值位，直接算派生。
+ */
+function valueDependsOnSource(node: ts.Node, sources: readonly string[]): boolean {
+  if (ts.isIdentifier(node)) return sources.includes(node.text)
+  if (ts.isConditionalExpression(node)) {
+    if (valueDependsOnSource(node.whenTrue, sources) || valueDependsOnSource(node.whenFalse, sources)) return true
+    // 分支的值都与 source 无关：只有当条件提到 source **且**两支不逐字相同，条件才真的左右结果。
+    return (
+      referencesAny(node.condition, sources) &&
+      node.whenTrue.getText().trim() !== node.whenFalse.getText().trim()
+    )
+  }
+  let dependent = false
+  ts.forEachChild(node, (child) => {
+    if (!dependent && valueDependsOnSource(child, sources)) dependent = true
+  })
+  return dependent
+}
+
+/**
  * 行字面量里**不合格**的属性名。
  *
  * 合格的定义有两条，必须同时满足：
- *   1. 值从 `sources`（循环变量 `session` / 本地 `catalog`）派生。简写属性（`{ sessionId }`）算派生
- *      ——它的值就是那个同名局部变量。
+ *   1. 值真的从 `sources`（循环变量 `session` / 本地 `catalog`）**派生**——不是顺口提到。简写属性
+ *      （`{ sessionId }`）算派生：它的值就是那个同名局部变量。判据是 {@link valueDependsOnSource}
+ *      而非 `referencesAny`：本轮修的正是这条。第一版用「提到即算派生」，于是
+ *      `workspacePath: session.id ? '' : ''` 被放行——`session` 在三元条件里出现，但两支都是常量 `''`，
+ *      值恒为 `''`，这一列没接上真数据（review agent 实测 `2/2 green`、`16/16 combined`）。
+ *      「提到」不等于「派生」：条件里的 source 只有在两支的值不同时才真的能改变结果。
  *   2. 值**不**碰入参对象（`forbidden`，即 `input`）。这一条是写这个文件时被自己的自检逼出来的：
  *      事故的原样是 `unacknowledgedThreads: input.unacknowledgedThreads?.[session.id] ?? 0`，它在下标里
  *      提到了 `session`，于是只判「派生自 session」的谓词对它完全放行——那条判据会漏掉它本来要抓的
  *      那一行（[[mutation-must-change-one-thing]] 的同族：判据比它自称守的事弱）。列的值只能来自这一
  *      行的 session 和 Provider catalog；再从入参侧取一次，就是给「这一列可以按调用点缺席」开的口子。
+ *      `touchesInput` 用 `referencesAny`：碰了入参在哪都算，包括藏在下标里。
  *
  * 展开（`...x`）报为不合格：它把「这一列从哪来」这个问题藏进另一个对象。
  */
@@ -139,7 +186,7 @@ function underivedProperties(
       offenders.push(name)
       continue
     }
-    const derived = referencesAny(property.initializer, sources)
+    const derived = valueDependsOnSource(property.initializer, sources)
     const touchesInput = referencesAny(property.initializer, forbidden)
     if (!derived || touchesInput) offenders.push(name)
   }
@@ -185,24 +232,33 @@ describe('名册只有一条"这一行需要我吗"的轴，且每一列都真�
     expect(names).toContain('awaitingReply')
     expect(names).toContain('usage')
 
-    // 谓词自检：三种写法都必须被抓到——写死的常量、从入参兜底取值（事故原样，注意它下标里
-    // 提到了 `session`，只判「派生自 session」会放行它）、以及展开。
+    // 谓词自检：四种写法都必须被抓到——写死的常量、从入参兜底取值（事故原样，注意它下标里
+    // 提到了 `session`，只判「派生自 session」会放行它）、展开、以及**「提到但不派生」的伪装**
+    // （`session.id ? '' : ''`：条件里提到 session，两支却是同一个常量，值恒为 ''）——最后这种正是
+    // review agent 测得 2/2 green 的 bypass。
     const synthetic = rowLiteralIn(
       functionNamed(
         parseText(
-          `function f(input: I) { return [{ sessionId: session.id, usage: { kind: 'unsupported', text: '', title: '' }, unreadCount: input.unacknowledgedThreads?.[session.id] ?? 0, ...extra }] }`
+          `function f(input: I) { return [{ sessionId: session.id, usage: { kind: 'unsupported', text: '', title: '' }, workspacePath: session.id ? '' : '', unreadCount: input.unacknowledgedThreads?.[session.id] ?? 0, ...extra }] }`
         ),
         'f'
       )!
     )
     expect(underivedProperties(synthetic!, ['session', 'catalog'], ['input'])).toEqual([
       'usage',
+      'workspacePath',
       'unreadCount',
       '...展开'
     ])
-    // 反向：全部从 session/catalog 派生的字面量不许被误报，否则这条门只是恒红。
+    // 反向：全部真的从 session/catalog 派生的字面量不许被误报，否则这条门只是恒红。这里成对钉住
+    // 「三元条件里用 source 决定两个**不同**的真值」是合法派生——修法不能把这种正常写法一并误伤。
     const clean = rowLiteralIn(
-      functionNamed(parseText(`function f() { return [{ sessionId: session.id, scopes: g(catalog) }] }`), 'f')!
+      functionNamed(
+        parseText(
+          `function f() { return [{ sessionId: session.id, scopes: g(catalog), attention: session.busy ? 'a' : 'b' }] }`
+        ),
+        'f'
+      )!
     )
     expect(underivedProperties(clean!, ['session', 'catalog'], ['input'])).toEqual([])
 
