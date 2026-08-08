@@ -794,3 +794,13 @@ describe('TerminalViewportSynchronizer', () => {
       .toEqual({ cols: 140, rows: 30 })
   })
 })
+
+it('a rejected resize is not reported as a successful Redraw request', async () => {
+  const frames = frameHarness()
+  const sync = new TerminalViewportSynchronizer({ proposeGrid: () => ({ cols: 80, rows: 24 }), fit: () => {},
+    readGrid: () => ({ cols: 80, rows: 24 }), resize: async () => false, requestFrame: frames.request,
+    cancelFrame: frames.cancel, measureViewport: () => ({ width: 800, height: 480 }) })
+  await sync.startLiveSynchronization()
+  expect(await sync.requestContentRedraw()).toBe(false)
+  sync.dispose()
+})

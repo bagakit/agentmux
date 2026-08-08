@@ -25,7 +25,10 @@
     "test:nightly": "pnpm test:native && pnpm test:security && pnpm test:fuzz && pnpm test:reliability && pnpm test:resources",
     "benchmark:daemon-cutover": "pnpm --filter @agentmux/core benchmark:daemon-cutover",
     "benchmark:daemon-cutover:smoke": "pnpm --filter @agentmux/core benchmark:daemon-cutover:smoke",
-    "check": "pnpm typecheck && pnpm test && pnpm build"
+    "check": "pnpm typecheck && pnpm test && pnpm build",
+    "update:renderer": "pnpm --filter @agentmux/core build && pnpm --filter @agentmux/desktop build && node apps/desktop/scripts/update-renderer.mjs",
+    "update:renderer:rollback": "node apps/desktop/scripts/update-renderer.mjs --rollback",
+    "update:local": "pnpm --filter @agentmux/core build && pnpm --filter @agentmux/desktop build && node apps/desktop/scripts/update-local.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

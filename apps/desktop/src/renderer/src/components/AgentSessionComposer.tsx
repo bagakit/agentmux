@@ -1,3 +1,4 @@
+import { AgentComposerTools } from './AgentComposerTools'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
 import { api } from '../lib/api'
@@ -59,6 +60,8 @@ export function AgentSessionComposer({
       ? state.providerCatalog.find((entry) => entry.id === session.providerId)?.postureControl
       : undefined
   )
+  const composerOptions = useAppStore((state) => session?.kind === 'agent'
+    ? state.providerCatalog.find((entry) => entry.id === session.providerId)?.composer : undefined)
   const send = useAppStore((state) => state.send)
   const interrupt = useAppStore((state) => state.interrupt)
   const setPosture = useAppStore((state) => state.setPosture)
@@ -118,8 +121,25 @@ export function AgentSessionComposer({
     }
   }
 
+  function insertReference(path: string): void {
+    const current = useAppStore.getState().agentComposerDrafts[sessionId] ?? ''
+    const workspacePath = session?.kind === 'agent' ? session.workspacePath : undefined
+    setAgentComposerDraft(sessionId, appendFileReferences(current, [path], workspacePath))
+  }
+  async function capture(): Promise<void> {
+    const path = await api.ui.captureScreenshot()
+    if (path) insertReference(path)
+  }
+
   return (
     <AgentComposer
+      commands={composerOptions?.commands ?? []}
+      tools={<AgentComposerTools disabled={!submitMode.canType} commands={composerOptions?.commands ?? []}
+        loadSkills={() => api.ui.listAgentSkills(sessionId)} onChooseSkill={(skill) => insertReference(skill.path)}
+        onCommand={(command) => {
+          const current = useAppStore.getState().agentComposerDrafts[sessionId] ?? ''
+          setAgentComposerDraft(sessionId, `${command}${current ? ` ${current}` : ' '}`)
+        }} {...(session?.hostId === 'local' ? { onCapture: capture } : {})} reportError={reportError} />}
       value={text}
       disabled={!submitMode.canType}
       placeholder={submitMode.placeholder}

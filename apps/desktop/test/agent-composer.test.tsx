@@ -39,7 +39,7 @@ describe('AgentComposer reusable surface', () => {
     expect(markup).toContain('data-agent-composer="true"')
     expect(markup).toContain('placeholder="Agent is not running"')
     expect(markup).toMatch(/<textarea[^>]*disabled=""/)
-    expect(markup).toContain('Attach')
+    expect(markup).toContain('Files')
     expect(markup).toContain('Send')
   })
 
@@ -53,7 +53,7 @@ describe('AgentComposer reusable surface', () => {
       onChange: vi.fn(),
       onAttach: vi.fn()
     }))
-    expect(withoutFile).toContain('Attach')
+    expect(withoutFile).toContain('Files')
     expect(withoutFile).not.toContain('lucide-at-sign')
 
     const withFile = renderToStaticMarkup(createElement(AgentComposer, {
@@ -81,7 +81,7 @@ describe('AgentComposer reusable surface', () => {
     }))
 
     expect(markup).not.toContain('not available yet')
-    expect(markup).toMatch(/Attach/u)
+    expect(markup).toMatch(/Files/u)
     // The only disabled control in a live composer with an empty draft is Send.
     expect(markup.match(/disabled=""/gu) ?? []).toHaveLength(1)
   })
@@ -355,7 +355,7 @@ describe('AgentComposer reusable surface', () => {
     const baseRule = styles.match(/\.composer \{([^}]*)\}/)?.[1]
     const focusRule = styles.match(/\.composer:focus-within \{([^}]*)\}/)?.[1]
 
-    expect(baseRule).toContain('background: transparent')
+    expect(baseRule).toContain('background: var(--surface-1)')
     expect(baseRule).toContain('box-shadow: none')
     expect(focusRule).toContain('box-shadow: var(--focus-ring)')
     expect(focusRule).not.toMatch(/#[0-9a-f]+/i)

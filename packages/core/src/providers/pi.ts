@@ -246,6 +246,7 @@ export function createPiManagedHookPlan(env?: Readonly<Record<string, string>>):
 export function createPiProvider(defineAgentProvider: ProviderFactory): AgentProvider {
   return defineAgentProvider({
     catalog: catalog({
+      composer: {"skillRoots": [".pi/agent/skills", ".agents/skills"], "commands": [{"text": "/help", "description": "Available commands"}, {"text": "/model", "description": "Choose model"}, {"text": "/compact", "description": "Compact context"}]},
       id: 'pi', label: 'Pi', executable: 'pi', expectedProcess: 'pi', promptDelivery: 'positional-argv',
       // `explicit-managed` 而非此前的 `unmanaged`：AgentMux 现在真的把状态扩展装进 Pi 的扩展目录。
       // 之前记 unmanaged 是因为没有第一方证据能确定装载合同（目录、导出形状、可用事件名）；这些现在

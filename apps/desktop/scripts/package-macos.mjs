@@ -1,3 +1,5 @@
+import { updateRoute } from '../src/shared/update-policy.ts'
+import { hashTree } from './update-identity.mjs'
 import { spawn } from 'node:child_process'
 import {
   chmod,
@@ -851,20 +853,8 @@ async function quitInstalledApplication(appPath) {
   await run('osascript', ['-e', `quit app id "${BUNDLE_ID}"`], { capture: true, timeoutMs: 15_000 })
     .catch(() => undefined)
   let remaining = await waitForProcessExit(() => processIdsForApplication(appPath), 20_000)
-  if (remaining.length > 0) {
-    const errors = signalProcessIds(remaining, 'SIGTERM')
-    remaining = await waitForProcessExit(() => processIdsForApplication(appPath), 10_000)
-    if (remaining.length > 0) {
-      signalProcessIds(remaining, 'SIGKILL')
-      remaining = await waitForProcessExit(() => processIdsForApplication(appPath), 10_000)
-    }
-    assert(
-      remaining.length === 0,
-      `The installed application would not exit (pids ${remaining.join(', ')}); a surviving instance keeps serving the previous bundle.${
-        errors.length > 0 ? ` Signal errors: ${errors.map((error) => error.message).join('; ')}` : ''
-      }`
-    )
-  }
+  assert(remaining.length === 0,
+    `Application has not exited gracefully (pids ${remaining.join(', ')}). Installation stopped; no processes were force-killed. Finish or save current work before retrying.`)
   return { wasRunning: true, pids: running }
 }
 
@@ -898,6 +888,16 @@ async function relaunchInstalledApplication(appPath) {
 }
 
 async function installApplication(appPath) {
+  const currentPath = canonicalInstallPath(homedir())
+  if (await pathExists(currentPath)) {
+    const runtimeRelative = 'Contents/Resources/app/node_modules/@agentmux/core/vendor/ctxmux'
+    const [currentRuntime, candidateRuntime] = await Promise.all([
+      hashTree(currentPath, [runtimeRelative]), hashTree(appPath, [runtimeRelative])
+    ])
+    assert(updateRoute({ shell: '', ctxmux: currentRuntime }, { shell: '', ctxmux: candidateRuntime }) !== 'runtime-review',
+      'CtxMux runtime differs. Installation requires a separate Run/resume review before restart; no running application was changed.')
+  }
+
   const destination = canonicalInstallPath(homedir())
   const applicationsRoot = dirname(destination)
   const trashRoot = join(homedir(), '.Trash')

@@ -95,7 +95,11 @@ export function App() {
     let dispose = () => {}
     void initialize().then((value) => {
       if (cancelled) value()
-      else dispose = value
+      else {
+        dispose = value
+        const updateToken = new URLSearchParams(window.location.search).get('renderer-update')
+        if (updateToken) void api.ui.rendererUpdateReady(updateToken)
+      }
     })
     return () => {
       cancelled = true

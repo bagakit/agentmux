@@ -12,7 +12,7 @@
    hierarchy (surface-density.md), so the Composer reads as part of its Region, not a box floating on it.
    Margin is uniform 6px top/bottom and 8px sides, the same inset the approval card above it uses, so the
    whole input stack sits at one consistent gap from the Region edge instead of a ring of whitespace. */
-.composer { margin:var(--sp-3) var(--sp-4); overflow: hidden; border-radius: var(--radius); background: transparent; box-shadow: none; }
+.composer { margin:var(--sp-3) var(--sp-4); overflow: hidden; border-radius: var(--radius); background: var(--surface-1); box-shadow: none; }
 /* Focus stays clearly visible without a resting border: the --focus-ring glow plus a 1px inset line in
    --focus-line take over the boundary the removed stroke used to draw only while focused. */
 .composer:focus-within { box-shadow: var(--focus-ring), inset 0 0 0 1px var(--focus-line); }
@@ -34,5 +34,22 @@
 .composer-send:hover:not(:disabled) { background: linear-gradient(180deg, var(--green-text), var(--green)); }
 .composer-send:active:not(:disabled) { box-shadow: inset 0 1px 3px var(--scrim-1); }
 .composer-send:disabled { opacity: .35; cursor: default; }
-.composer-send--working { color: var(--red-text); background: var(--red-bg); border: 1px solid var(--red-line); box-shadow: none; }
+.composer-send--working { color: var(--red-text); background: var(--red-bg); border: 0; box-shadow: none; }
 .composer-send--working:hover:not(:disabled) { color: var(--red-text); background: var(--red-bg); }
+
+.composer__toolbar { flex-wrap: wrap; gap: var(--sp-2); }
+.composer__toolbar > div { flex-wrap: wrap; }
+.composer__disclosure { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-4); color: var(--text-3); font-size: var(--fs-micro); cursor: pointer; list-style: none; }
+.composer__disclosure::-webkit-details-marker { display: none; }
+.composer__disclosure > svg:last-child { margin-left: auto; }
+.composer:not([open]) .composer__disclosure > svg:last-child { transform: rotate(180deg); }
+.composer[open] .composer__disclosure > span, .composer[open] .composer__disclosure > small { display: none; }
+.composer__disclosure:hover { color: var(--text); background: var(--surface-2); }
+.composer-menu { max-height: min(50vh, 360px); max-width: min(90vw, 360px); overflow-y: auto; }
+.composer-menu__hint { padding: var(--sp-3) var(--sp-4); color: var(--text-3); font-size: var(--fs-micro); }
+.composer-menu__item > span { min-width: 0; }
+.composer-menu__item small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: var(--fs-micro); max-width: 32ch; }
+.composer__suggestions { display: grid; padding: var(--sp-2); }
+.composer__suggestions button { display: flex; gap: var(--sp-3); border: 0; border-radius: var(--radius-sm); padding: var(--sp-3); background: transparent; color: var(--text); text-align: left; font-size: var(--fs-meta); cursor: pointer; }
+.composer__suggestions button:hover, .composer__suggestions button:focus { background: var(--surface-3); }
+.composer__suggestions small { color: var(--text-3); }

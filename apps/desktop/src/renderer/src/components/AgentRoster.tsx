@@ -1,5 +1,5 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
-import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import * as DropdownMenu from './HoverDropdownMenu'
 import { ChevronUp, ShieldAlert } from 'lucide-react'
 import { useAppStore } from '../store'
 import { buildAgentRoster, rowRiskTier, type RosterRow } from '../lib/agent-roster'

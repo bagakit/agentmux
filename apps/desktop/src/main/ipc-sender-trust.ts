@@ -30,6 +30,9 @@ import { CONTROL_RESPONSE_CHANNEL } from '../shared/contracts.js'
  */
 export const PRIVILEGED_SENDER_LABELS = {
   'ui:writeClipboardImage': 'clipboard image',
+  'ui:rendererUpdateReady': 'renderer update',
+  'ui:captureScreenshot': 'screenshot',
+  'ui:listAgentSkills': 'Agent skills',
   'ui:savePastedImage': 'pasted image',
   'ui:notifyAgentAttention': 'notification',
   'browser:switchProfile': 'Browser Profile',

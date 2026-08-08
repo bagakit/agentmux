@@ -238,9 +238,9 @@ export class TerminalViewportSynchronizer {
         : null
     if (!temporary) return false
     try {
-      await this.requestResize(temporary)
-      await this.requestResize(size)
-      return true
+      const changed = await this.requestResize(temporary)
+      const restored = await this.requestResize(size)
+      return changed && restored
     } catch (error) {
       // A failed return-to-final resize must re-enter the normal settled-size
       // owner instead of leaving PTY and xterm geometry divergent.
@@ -360,11 +360,11 @@ export class TerminalViewportSynchronizer {
     }
   }
 
-  private async requestResize(size: TerminalGridSize): Promise<void> {
+  private async requestResize(size: TerminalGridSize): Promise<boolean> {
     const key = gridKey(size)
     if (key === this.lastRequestedGrid) {
       await this.resizeDrain
-      return
+      return this.lastRequestedGrid === key
     }
     this.lastRequestedGrid = key
     this.pendingResize = size
@@ -377,6 +377,7 @@ export class TerminalViewportSynchronizer {
       }).catch(() => {})
     }
     await this.resizeDrain
+    return this.lastRequestedGrid === key
   }
 
   private async drainPendingResizes(): Promise<void> {

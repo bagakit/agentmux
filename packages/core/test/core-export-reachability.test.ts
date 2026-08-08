@@ -109,6 +109,11 @@ const DELIBERATE: ReadonlyArray<{
       '（apps/desktop/src/main/host-factory.ts）。多宿主接线尚未走到需要注册表的那一步。'
   },
   {
+    module: 'src/providers/shared.ts',
+    name: 'HOOK_INSTALLATION_BY_PROVIDER',
+    premise: 'Type-level SSOT: ProviderRequiringManagedHookResolver derives the required resolver keys from this table; provider-conformance.test.ts checks every entry against the live provider catalogs. It has no runtime consumer by design.'
+  },
+  {
     module: 'src/providers/pi.ts',
     name: 'PI_HOOK_EVENTS',
     premise:

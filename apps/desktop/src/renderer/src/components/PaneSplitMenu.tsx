@@ -1,4 +1,4 @@
-import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import * as DropdownMenu from './HoverDropdownMenu'
 import { ChevronDown, Columns2 } from 'lucide-react'
 import type { AgentMuxArrangeMode } from '@agentmux/core/control'
 import { workbenchSplitMenuEntries } from '../lib/workbench-tab-actions'

@@ -113,22 +113,15 @@ describe('installing must hand over a process running the new bundle', () => {
   it('waits for the previous instance to actually disappear instead of trusting the quit request', () => {
     const body = functionBody(SOURCE, 'quitInstalledApplication')
     const text = body.getText()
-    // osascript 的退出码不是判据（app 没在跑 / 没注册 LaunchServices / AppleScript 被策略拦都会让它
-    // 非零退出）。判据是**进程还在不在**，所以必须等，且超时后要升级到信号。
-    //
-    // 判据必须落在**承重那一次**等待上，不能只问"这个名字出现过"：这里有三次 waitForProcessExit
-    // （请求退出后那次，以及 SIGTERM/SIGKILL 之后各一次）。实测把第一次换成 `remaining = []`
-    // ——也就是发完退出请求立刻往下走、进程还没死就去 rename，正是这次事故的一半——而"名字出现过"
-    // 这种判据 5 条全绿。所以按顺序关系判：请求退出之后、任何信号升级之前，必须先等一次。
+    // A slow graceful quit must never escalate into destroying healthy Runs.
     const quitRequest = firstCallOffset(body, 'run')
     const firstWait = firstCallOffset(body, 'waitForProcessExit')
     const firstSignal = firstCallOffset(body, 'signalProcessIds')
     expect(Number.isFinite(quitRequest), 'quitInstalledApplication 必须先请求优雅退出').toBe(true)
     expect(Number.isFinite(firstWait), 'quitInstalledApplication 必须等进程真的消失').toBe(true)
     expect(firstWait, '等待必须发生在请求退出之后').toBeGreaterThan(quitRequest)
-    expect(firstWait, '必须先等一次，才允许升级到信号').toBeLessThan(firstSignal)
-    expect(text).toMatch(/signalProcessIds\(remaining, 'SIGTERM'\)/)
-    expect(text).toMatch(/signalProcessIds\(remaining, 'SIGKILL'\)/)
+    expect(Number.isFinite(firstSignal)).toBe(false)
+    expect(text).not.toMatch(/SIGTERM|SIGKILL/)
     // 没退干净就不许继续：留一个活着的旧实例，等于交付了一个跑旧包的窗口。
     expect(text).toMatch(/assert\(\s*\n?\s*remaining\.length === 0/)
   })

@@ -53,6 +53,7 @@ const api: AgentMuxPreloadApi = {
     check: (host: HostConfig) => ipcRenderer.invoke('hosts:check', host)
   },
   workspaces: {
+    appearance: (id: string) => ipcRenderer.invoke('workspaces:appearance', id),
     chooseLocalFolder: () => ipcRenderer.invoke('workspaces:chooseLocalFolder'),
     rebindLocalFolder: (workspaceId: string) => ipcRenderer.invoke('workspaces:rebindLocalFolder', workspaceId),
     add: (input: CreateWorkspaceInput) => ipcRenderer.invoke('workspaces:add', input),
@@ -116,6 +117,9 @@ const api: AgentMuxPreloadApi = {
       ipcRenderer.invoke('scratch:renameTitle', workspaceId, topicId, title)
   },
   ui: {
+    rendererUpdateReady: (token: string) => ipcRenderer.invoke('ui:rendererUpdateReady', token),
+    captureScreenshot: () => ipcRenderer.invoke('ui:captureScreenshot'),
+    listAgentSkills: (sessionId: string) => ipcRenderer.invoke('ui:listAgentSkills', sessionId),
     readClipboardText: () => ipcRenderer.invoke('ui:readClipboardText'),
     writeClipboardText: (text: string) => ipcRenderer.invoke('ui:writeClipboardText', text),
     writeClipboardImage: (image: BrowserPng) => ipcRenderer.invoke('ui:writeClipboardImage', image),

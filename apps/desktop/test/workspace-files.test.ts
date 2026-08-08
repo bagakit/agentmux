@@ -254,7 +254,7 @@ describe('WorkspaceFiles root confinement', () => {
     expect(localWorkerRace.beforeInput).toBeNull()
   })
 
-  it('reads and writes normal local files but rejects a symlink escape', async () => {
+  it('reads explicit linked files but keeps writes confined', async () => {
     const fixture = await mkdtemp(join(tmpdir(), 'agentmux-files-test-'))
     temporaryRoots.push(fixture)
     const root = join(fixture, 'workspace')
@@ -295,8 +295,7 @@ describe('WorkspaceFiles root confinement', () => {
     })).resolves.toEqual({ status: 'written', revision: revision('updated') })
     await expect(readFile(join(root, 'inside.txt'), 'utf8')).resolves.toBe('updated')
     await expect(files.read(workspace, 'escape/secret.txt')).resolves.toMatchObject({
-      status: 'error',
-      message: 'Path escapes the workspace root'
+      status: 'read', document: { content: 'secret', path: 'escape/secret.txt' }
     })
     await expect(files.write(workspace, {
       path: 'escape/secret.txt',
@@ -665,8 +664,8 @@ describe('WorkspaceFiles root confinement', () => {
     const files = new WorkspaceFiles(() => localHost)
 
     await expect(files.readDirectory(workspace, '')).resolves.toEqual([
+      { name: 'escape', path: 'escape', isDirectory: true, isSymlink: true, linkTarget: outside },
       { name: 'src', path: 'src', isDirectory: true, isSymlink: false },
-      { name: 'escape', path: 'escape', isDirectory: false, isSymlink: true },
       { name: 'README.md', path: 'README.md', isDirectory: false, isSymlink: false }
     ])
     await files.create(workspace, { path: 'src/new.ts', kind: 'file' })
@@ -1007,6 +1006,7 @@ describe('WorkspaceFiles root confinement', () => {
 
   it('rejects a remote symlink target resolved outside the workspace before cat or tee', async () => {
     const run = vi.fn<ExecutionHost['run']>(async (command, args) => {
+      if (command === 'sh') return { stdout: 'linked content', stderr: '', exitCode: 0 }
       if (command !== 'realpath') throw new Error(`Unexpected command: ${command}`)
       const path = args.at(-1)
       return {
@@ -1035,16 +1035,14 @@ describe('WorkspaceFiles root confinement', () => {
     await expect(files.localPathForReveal(workspace, 'linked-secret')).rejects.toThrow(
       'Reveal in file manager is available only for local paths'
     )
-    await expect(files.read(workspace, 'linked-secret')).resolves.toMatchObject({
-      status: 'error',
-      message: 'Path escapes the workspace root'
-    })
+    await expect(files.read(workspace, 'linked-secret')).resolves.toMatchObject({ status: 'read' })
     await expect(files.write(workspace, {
       path: 'linked-secret',
       content: 'stolen',
       expectedRevision: revision('secret')
     })).resolves.toMatchObject({ status: 'error' })
-    expect(run.mock.calls.every(([command]) => command === 'realpath')).toBe(true)
+    expect(run.mock.calls.some(([command]) => command === 'sh')).toBe(true)
+    expect(run.mock.calls.some(([command]) => command === 'tee')).toBe(false)
   })
 
   it('uses directory-scoped argv operations for remote file management', async () => {
