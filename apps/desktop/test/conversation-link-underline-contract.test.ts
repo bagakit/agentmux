@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { allStyleRules, allStyles } from './helpers/styles.js'
+import { allStyleRules } from './helpers/styles.js'
 
 // Guards the conversation-body link underline (tracker #794): where it SITS (offset + thickness) and its
 // restrained hover MOTION. Two complaints drove this: the underline sat too close to the glyphs (it cut
@@ -66,9 +66,14 @@ function declValue(body: string, prop: string): string | undefined {
  * The single definition of a custom property, e.g. `--dur-fast`. Asserts there is EXACTLY one:
  * a regex search over the concatenated sheet silently binds to the FIRST definition, so a second
  * one (a theme override, a media block) would make every value read here a coin flip on file order.
+ *
+ * READS THE COMMENT-STRIPPED TABLE (`rules`), not the raw sheet. Measured: an unrelated comment that
+ * merely NAMES a token above the real declaration (e.g. a `--scrim-1` mention in prose) was counted as
+ * a second "definition" and turned this loud one-definition guard into a FALSE RED. Comments are prose,
+ * not declarations — the same #409 lesson the rest of this suite already obeys by reading `rules`.
  */
 function tokenValue(token: string): string {
-  const definitions = [...allStyles().matchAll(new RegExp(`${token}\\s*:\\s*([^;}]+)`, 'g'))].map((m) =>
+  const definitions = [...rules.matchAll(new RegExp(`${token}\\s*:\\s*([^;}]+)`, 'g'))].map((m) =>
     m[1]!.trim()
   )
   expect(
@@ -88,15 +93,27 @@ function tokenValue(token: string): string {
  * `#00000000` and `hsla(0,0%,0%,0)` are all FULLY invisible and all pass that comparison — so the
  * suite's central promise (the underline appears on hover) shipped with nothing guarding it. Alpha
  * is the property the promise is actually about, so alpha is what gets read.
+ *
+ * `currentColor` IS NOT ASSUMED OPAQUE (measured): the hover rule paints the underline with
+ * `text-decoration-color: currentColor`, and `currentColor` == the element's own computed `color`.
+ * A mutation that set `color: transparent` on the same rule made the underline fully invisible while
+ * this suite stayed green, because `currentColor` was hard-coded to alpha 1. So a caller resolving a
+ * `currentColor` MUST pass `resolveCurrentColor`, which returns the effective `color` for that rule;
+ * we then read ITS alpha. If the resolver cannot find one (colour inherited from a DOM ancestor this
+ * static suite cannot see, or no resolver supplied at all) the result is NaN — LOUD — never a silent 1.
  */
-function alphaOf(raw: string): number {
+function alphaOf(raw: string, resolveCurrentColor?: () => string | undefined): number {
   const value = raw.trim()
   const varRef = value.match(/^var\(\s*(--[\w-]+)\s*\)$/)
   if (varRef) return alphaOf(tokenValue(varRef[1]!))
   if (/^transparent$/i.test(value)) return 0
-  // `currentColor` takes the element's own `color`, which the rules here always set to an opaque
-  // token. Treated as opaque; the paired assertion below pins that hover really does set a colour.
-  if (/^currentColor$/i.test(value)) return 1
+  if (/^currentColor$/i.test(value)) {
+    const resolved = resolveCurrentColor?.()
+    // Unresolvable currentColor is NOT opaque-by-default: this repo has a long history of guards that
+    // default to "fine" and go blind, and this is exactly that spot. NaN turns the caller's assertion red.
+    if (resolved === undefined) return Number.NaN
+    return alphaOf(resolved, resolveCurrentColor)
+  }
   const hex = value.match(/^#([0-9a-f]+)$/i)
   if (hex) {
     const digits = hex[1]!
@@ -125,6 +142,38 @@ function alphaOf(raw: string): number {
 }
 
 /**
+ * The colour a `currentColor` resolves to on a given element, or undefined when it cannot be resolved
+ * from the static sheet (which must fail LOUD, never default to opaque).
+ *
+ * `currentColor` == the element's *computed* `color`, and the winning `color` is the one from the MOST
+ * SPECIFIC matching rule that DECLARES it. `chain` lists that element's selectors most-specific-first
+ * (e.g. `['.md-link--file:hover', '.md-link--file', '.md-link']` — the file link carries both classes
+ * and, on hover, the pseudo). We take the first rule that DECLARES a colour — not the first CONCRETE
+ * one: if the most specific declarer says `inherit`, the colour genuinely comes from a DOM ancestor
+ * this static suite cannot see, so we return undefined rather than fall through to a less-specific
+ * concrete colour the cascade has already overridden (that would be a lie). A declared `currentColor`
+ * would be circular, so it too yields undefined.
+ *
+ * BLIND SPOT THAT REMAINS: `chain` is supplied by the caller and its order STANDS IN FOR real CSS
+ * specificity. This does not compute specificity, so a colour applied to the same element through a
+ * different higher-specificity selector (an id, `[attr]`, a descendant combinator) is not consulted;
+ * and it only sees `color` set within this stylesheet, never a JS/inline `style` colour.
+ */
+function effectiveColor(chain: string[]): string | undefined {
+  const parsed = parseRules(rules)
+  for (const selector of chain) {
+    const rule = parsed.find((r) => r.selector === selector)
+    if (!rule) continue
+    const color = declValue(rule.body, 'color')
+    if (color === undefined) continue
+    if (/^inherit$/i.test(color)) return undefined
+    if (/^currentColor$/i.test(color)) return undefined
+    return color
+  }
+  return undefined
+}
+
+/**
  * Split a `transition` shorthand into its comma-separated segments, ignoring commas nested inside
  * parentheses — `steps(1, end)` and `cubic-bezier(.4, 0, .2, 1)` each contain one, so a naive
  * `.split(',')` would cut a timing function in half and make every reading below nonsense.
@@ -146,14 +195,76 @@ function transitionSegments(transition: string): string[] {
 }
 
 /**
+ * The transition value to read for a rule: the `transition` shorthand if it is declared, otherwise a
+ * shorthand SYNTHESISED from the `transition-property` / `-duration` / `-timing-function` longhands.
+ *
+ * WHY THE FALLBACK (measured false-red): the reader below only consulted the shorthand, so rewriting
+ * the SAME transition as its three longhands — semantically identical CSS — turned this suite red for a
+ * change that broke nothing. Author's choice of shorthand vs longhands is not something this contract
+ * should have an opinion about. The longhand lists are comma-zipped back into shorthand segments so the
+ * segment/duration/timing readers work identically either way. Returns undefined only when NEITHER the
+ * shorthand nor a property+duration longhand pair exists — i.e. there is genuinely no transition.
+ */
+function transitionValue(body: string): string | undefined {
+  const shorthand = declValue(body, 'transition')
+  if (shorthand !== undefined) return shorthand
+  const properties = declValue(body, 'transition-property')
+  const durations = declValue(body, 'transition-duration')
+  const timings = declValue(body, 'transition-timing-function')
+  // A transition animates nothing without both a property target and a duration; if neither longhand is
+  // present there is no transition to read, and the caller's `toBeDefined()` fails loudly.
+  if (properties === undefined && durations === undefined) return undefined
+  const propList = transitionSegments(properties ?? 'all')
+  const durList = transitionSegments(durations ?? '0s')
+  const timingList = transitionSegments(timings ?? 'ease')
+  const count = Math.max(propList.length, durList.length, timingList.length, 1)
+  const segments: string[] = []
+  for (let i = 0; i < count; i += 1) {
+    // CSS repeats a shorter longhand list to match the longest; mirror that with modulo so a single
+    // duration/timing applies to every property, exactly as the browser would compute it.
+    const prop = propList[i % propList.length] ?? 'all'
+    const dur = durList[i % durList.length] ?? '0s'
+    const timing = timingList[i % timingList.length] ?? 'ease'
+    segments.push(`${prop} ${dur} ${timing}`)
+  }
+  return segments.join(', ')
+}
+
+/**
+ * The `transition-property` identifier at the head of one shorthand segment, lowercased, or undefined
+ * when the segment names none (property omitted → CSS defaults it to `all`). Time values, bare numbers
+ * and easing functions are skipped so the FIRST real ident is returned; parenthesised groups
+ * (`cubic-bezier(...)`, `steps(...)`, `var(...)`) are blanked first so their commas and inner tokens
+ * cannot masquerade as a property name.
+ */
+function transitionPropertyToken(segment: string): string | undefined {
+  const withoutGroups = segment.replace(/\([^)]*\)/g, ' ')
+  for (const token of withoutGroups.trim().split(/[\s,]+/).filter((t) => t.length > 0)) {
+    if (/^[\d.]/.test(token)) continue // a <time> (120ms, .2s) or bare number (delay/count)
+    if (/^(ease|ease-in|ease-out|ease-in-out|linear|step-start|step-end|steps|cubic-bezier|var)$/i.test(token))
+      continue
+    return token.toLowerCase()
+  }
+  return undefined
+}
+
+/** Whether one shorthand segment animates `prop`: it names `prop`, names `all`, or names no property
+ *  at all (omitted, which the cascade treats as `all`). */
+function segmentCoversProp(segment: string, prop: string): boolean {
+  if (new RegExp(`(?:^|[\\s,])${prop}(?=$|[\\s,])`).test(segment)) return true
+  const token = transitionPropertyToken(segment)
+  return token === undefined || token === 'all'
+}
+
+/**
  * The one segment of a `transition` shorthand that animates `prop`. Asserts exactly one: reading a
  * duration or timing function off the whole shorthand would silently pick up a SIBLING property's
- * values once a second transition is added.
+ * values once a second transition is added. A segment counts if it names `prop`, names `all`, or omits
+ * the property (which the cascade also treats as `all`) — an `all`/omitted rule really does animate
+ * `text-decoration-color`, so pinning only the explicit spelling false-reds a valid `all` transition.
  */
 function transitionFor(transition: string, prop: string): string {
-  const matches = transitionSegments(transition).filter((segment) =>
-    new RegExp(`(?:^|[\\s,])${prop}(?=$|[\\s,])`).test(segment)
-  )
+  const matches = transitionSegments(transition).filter((segment) => segmentCoversProp(segment, prop))
   expect(
     matches.length,
     `\`transition: ${transition}\` 里过渡 \`${prop}\` 的段落有 ${matches.length} 个（要恰好 1 个）。` +
@@ -267,13 +378,21 @@ describe('conversation link underline contract (#794)', () => {
     const hover = ruleFor('.md-link--file:hover')
     const hoverColor = declValue(hover.body, 'text-decoration-color')
     expect(hoverColor, ':hover must set text-decoration-color').toBeDefined()
+    // The hover underline is painted with `currentColor`, so its visibility is hostage to the SAME
+    // rule's `color`. Resolve it: `.md-link--file:hover` sets `color`, so currentColor takes that; if a
+    // future edit makes that colour transparent (measured mutation), alphaOf reads 0 here and this goes
+    // red. The chain is most-specific-first — the hover pseudo, then the two classes it also carries.
+    const resolveHoverColor = () =>
+      effectiveColor(['.md-link--file:hover', '.md-link--file', '.md-link'])
     expect(
-      alphaOf(hoverColor!),
+      alphaOf(hoverColor!, resolveHoverColor),
       `hover 态的 text-decoration-color 是 \`${hoverColor}\`，解析出的 alpha 是 ` +
-        `${alphaOf(hoverColor!)}。这道判据读 alpha 而不是跟字面量 \`transparent\` 比串：` +
+        `${alphaOf(hoverColor!, resolveHoverColor)}。这道判据读 alpha 而不是跟字面量 \`transparent\` 比串：` +
         'rgba(0,0,0,0)/#0000/hsla(0,0%,0%,0) 都完全看不见却都能通过串比较（实测全绿），' +
-        '于是本套件的中心承诺「hover 才显形」会在无人守的情况下发货。NaN 表示这是个没被认出的颜色写法，' +
-        '也当成不合格——宁可响亮地红，也不要按「未知即不透明」放过去。'
+        '于是本套件的中心承诺「hover 才显形」会在无人守的情况下发货。而 `currentColor` 不再被假设为不透明：' +
+        '它取本规则自己的 `color`，一旦那被改成 transparent，下划线就完全隐形——所以这里把 currentColor ' +
+        '解引用到有效 color 再读它的 alpha。NaN 表示颜色写法没被认出、或 color 从看不见的 DOM 祖先继承而来，' +
+        '同样当成不合格——宁可响亮地红，也不要按「未知即不透明」放过去。'
     ).toBe(1)
   })
 
@@ -281,8 +400,12 @@ describe('conversation link underline contract (#794)', () => {
     // MOTION FIX. `text-decoration` itself does not transition across engines; its COLOUR does (the one
     // engine here is Chromium). The transition must therefore animate `text-decoration-color`, not the
     // shorthand, or hover would snap. Delete the transition and this goes red.
-    const transition = declValue(ruleFor('.md-link--file').body, 'transition')
-    expect(transition, '.md-link--file must declare a transition').toBeDefined()
+    //
+    // Read via transitionValue(), which accepts EITHER the `transition` shorthand OR the equivalent
+    // `transition-property`/`-duration`/`-timing-function` longhands — the two are semantically the
+    // same CSS, so a valid rewrite from one to the other must not false-red this contract.
+    const transition = transitionValue(ruleFor('.md-link--file').body)
+    expect(transition, '.md-link--file must declare a transition (shorthand or longhands)').toBeDefined()
 
     // Everything below is read off the ONE segment that animates the colour, not off the whole
     // shorthand: once a second property is transitioned here, a shorthand-wide regex would happily
@@ -339,9 +462,8 @@ describe('conversation link underline contract (#794)', () => {
     }
 
     // 不透明的每一种拼法都必须读成 1——反向那侧同样要认得出，否则「hover 设了可见颜色」这条断言
-    // 会对合法的 CSS 打假红。
+    // 会对合法的 CSS 打假红。（`currentColor` 不在此列：它现在必须靠 resolver 解引用，见下面单独一段。）
     for (const opaque of [
-      'currentColor',
       '#abc',
       '#aabbcc',
       '#aabbccff',
@@ -355,6 +477,28 @@ describe('conversation link underline contract (#794)', () => {
       expect(alphaOf(opaque), `\`${opaque}\` 是不透明的，alphaOf 必须读出 1`).toBe(1)
     }
 
+    // `currentColor` 不再按 fiat 当成不透明——这正是本轮修掉的那个漏点：hover 用
+    // `text-decoration-color: currentColor` 上色，而 currentColor 取本规则自己的 `color`；一旦
+    // 那个 color 被改成 transparent，下划线**完全隐形**，可 alphaOf('currentColor') 却硬编码返回 1，
+    // 于是那次变异在 8 条全绿下发货。现在的契约是：
+    //   1) 没有 resolver 时，currentColor 是**不可解**的 → 必须是 NaN（响亮），绝不静默当 1。
+    //      有人若把实现改回 `return 1` 的旧 fiat，这条会立刻红。
+    expect(
+      alphaOf('currentColor'),
+      'currentColor 没有 resolver 时不可解，必须是 NaN；返回 1 就是本轮修掉的那个 fiat 漏点'
+    ).toBeNaN()
+    //   2) 有 resolver 时，解引用到有效 color 再读它的 alpha——不透明的 color 给 1，透明的给 0。
+    expect(alphaOf('currentColor', () => 'var(--green)'), '解引用到不透明 color → 1').toBe(1)
+    expect(
+      alphaOf('currentColor', () => 'transparent'),
+      '解引用到 transparent color → 0（这就是 color:transparent 变异被读出隐形的那条路径）'
+    ).toBe(0)
+    //   3) resolver 说 color 从看不见的 DOM 祖先继承而来（undefined），同样不可解 → NaN，不许兜成 1。
+    expect(
+      alphaOf('currentColor', () => undefined),
+      'color 从看不见的祖先继承（resolver 返回 undefined）→ NaN，不许默认不透明'
+    ).toBeNaN()
+
     // 中间值必须真的按数值读，而不是被折成 0/1 的两极。
     expect(alphaOf('rgba(0,0,0,0.5)')).toBe(0.5)
     expect(alphaOf('rgb(0 0 0 / 0.5)')).toBe(0.5)
@@ -364,14 +508,20 @@ describe('conversation link underline contract (#794)', () => {
     // 认不出的写法必须是 NaN 而不是 1。「未知即不透明」会让一个笔误的颜色值静默通过 reveal 判据。
     expect(alphaOf('color-mix(in srgb, red, blue)'), '没被认出的写法必须响亮地是 NaN').toBeNaN()
 
-    // var() 必须真的解引用下去。这条见证**自带前提自检**：先钉住这个 token 的字面值确实是个带
-    // alpha 的八位十六进制，否则一旦它被改成不透明，这条断言会静默退化成「1 === 1」，读起来仍
-    // 像在证明解析发生过——那正是本 session 刚修掉的那类虚构见证。
+    // var() 必须真的解引用下去。这条见证**自带前提自检**：先钉住这个 token 确实是半透明的，否则一旦
+    // 它被改成不透明，下面那条 var() 见证会静默退化成「1 === 1」，读起来仍像在证明解析发生过——那正是
+    // 本 session 修掉的那类虚构见证。
+    //
+    // 前提判据守的是**半透明本身**（0 < alpha < 1），不是某一种写法。早先这里钉的是「必须是八位十六进制
+    // `#rrggbbaa`」，那把一个合法的等价改写（比如 `rgba(0, 0, 0, 0.25)`，本仓别处已在用
+    // `hsl(... / 0.18)` 这类）打成假红，尽管它一样半透明、一样能让下面的 var() 见证成立。直接判 alpha
+    // 落在开区间 (0,1)：不透明的替换（alpha=1）仍会红——它让下面退化成恒真——而任何仍半透明的改写都放行。
     const scrim = tokenValue('--scrim-1')
+    const scrimAlpha = alphaOf(scrim)
     expect(
-      /^#[0-9a-f]{8}$/i.test(scrim),
-      `--scrim-1 现在是 \`${scrim}\`，不再是带 alpha 的写法，下面那条 var() 见证于是不再证明解引用发生了。` +
-        '换一个仍然半透明的 token，别让这条断言退化成恒真。'
+      scrimAlpha > 0 && scrimAlpha < 1,
+      `--scrim-1 现在是 \`${scrim}\`（alpha=${scrimAlpha}）。它必须是半透明（0<alpha<1），否则下面那条 ` +
+        'var() 见证不再证明解引用发生了——换一个仍然半透明的 token（任何写法都行），别让它退化成恒真。'
     ).toBe(true)
     const resolved = alphaOf('var(--scrim-1)')
     expect(resolved, 'var() 没有被解引用到 token 的字面值').toBeGreaterThan(0)
@@ -404,5 +554,33 @@ describe('conversation link underline contract (#794)', () => {
     expect(transitionFor('text-decoration-color 120ms ease', 'text-decoration-color')).toBe(
       'text-decoration-color 120ms ease'
     )
+
+    // `all`（以及省略属性名，级联同样当成 all）的段落确实过渡 text-decoration-color——只钉显式拼法会把
+    // 合法的 `all` 过渡打成假红。这两种都必须被 transitionFor 认成「覆盖了这个属性」。
+    expect(transitionFor('all var(--dur-fast) ease', 'text-decoration-color')).toBe(
+      'all var(--dur-fast) ease'
+    )
+    expect(segmentCoversProp('all 120ms ease', 'text-decoration-color')).toBe(true)
+    expect(segmentCoversProp('120ms ease', 'text-decoration-color')).toBe(true) // 省略属性＝all
+    // 但一个**具名的别的属性**不覆盖：否则「恰好一个段落过渡这个属性」这条判据会把 sibling 的时长读进来。
+    expect(segmentCoversProp('color 120ms ease', 'text-decoration-color')).toBe(false)
+    // 括号里的逗号/内部 token 不能冒充属性名。
+    expect(transitionPropertyToken('color 120ms cubic-bezier(.4, 0, .2, 1)')).toBe('color')
+    expect(transitionPropertyToken('120ms steps(1, end)')).toBeUndefined() // 省略属性
+
+    // transitionValue：shorthand 在场就用 shorthand；不在场则从三条 longhand 合成等价 shorthand，
+    // 于是「把 transition 拆成 transition-property/-duration/-timing-function」这个语义等价的改写不再假红。
+    // 缺省 longhand 用 CSS 默认补齐，短列表按 CSS 规则循环补齐到最长。
+    expect(transitionValue('transition: text-decoration-color 120ms ease;')).toBe(
+      'text-decoration-color 120ms ease'
+    )
+    expect(
+      transitionValue(
+        'transition-property: text-decoration-color; transition-duration: 120ms; transition-timing-function: ease;'
+      )
+    ).toBe('text-decoration-color 120ms ease')
+    // 只有 property 没有 duration 也当作有过渡在场（duration 默认 0s，让下游时长判据去响亮地拒绝），
+    // 而两者皆无才是「根本没有过渡」→ undefined，让调用方的 toBeDefined() 响亮地红。
+    expect(transitionValue('color: var(--green);')).toBeUndefined()
   })
 })
