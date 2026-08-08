@@ -174,3 +174,23 @@ export function agentSessionServiceOutcome(session: SessionSnapshot | undefined)
   // interrupted：连接断了，进程既非明确在跑也非明确退出——分不清，如实说，不猜。
   return { completed: false, step, agentViability: 'unknown' }
 }
+
+/** Core owns delivery evidence; this notice survives view switches and snapshot refreshes. */
+export function agentPromptDeliveryServiceOutcome(session: SessionSnapshot | undefined): StepOutcome {
+  if (!session || session.kind !== 'agent' || !session.terminalPromptDelivery) return { completed: true }
+  const steps: Record<NonNullable<typeof session.terminalPromptDelivery>['reason'], string> = {
+    'screen-evidence-gap': 'Reading the terminal output history',
+    'prompt-render-timeout': 'Confirming the prompt on screen',
+    'screen-evidence-replaced': 'Confirming the prompt while the terminal refreshed'
+  }
+  return {
+    completed: false,
+    step: {
+      label: steps[session.terminalPromptDelivery.reason],
+      degradedMode: 'Prompt delivery continued without full screen confirmation',
+      restore: 'Check the Agent’s response; the next fully verified prompt clears this notice'
+    },
+    agentViability: session.processState === 'running' ? 'alive'
+      : session.processState === 'exited' ? 'dead' : 'unknown'
+  }
+}

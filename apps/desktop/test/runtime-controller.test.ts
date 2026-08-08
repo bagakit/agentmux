@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   AgentMuxError,
   type AgentCapabilities,
+  type AgentMuxAgentSession,
   type AgentMuxAgentContinuityResult,
   type AgentMuxAgentSessionStore,
   type AgentMuxRuntimeProjection
@@ -107,7 +108,7 @@ const runtimeFixture = vi.hoisted(() => {
       appliedByteRange: { startByte: 0, endByte: Buffer.byteLength(data) },
       acceptedThroughByte: Buffer.byteLength(data)
     }))
-    readonly createAgent = vi.fn(async () => {
+    readonly createAgent = vi.fn(async (): Promise<AgentMuxAgentSession> => {
       throw new Error('Agent launch fixture stopped after input capture')
     })
     readonly createTerminal = vi.fn(async () => ({
@@ -269,7 +270,7 @@ const store: AgentMuxAgentSessionStore = {
 }
 
 const localConfig: AppConfig = {
-  version: 7,
+  version: 9,
   hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
   executors: {},
   workspaces: [],
@@ -599,6 +600,61 @@ describe('RuntimeController configuration transaction', () => {
       agentSessionId: 'agent-1'
     }, config)).resolves.toMatchObject({
       session: { id: 'agent-1', kind: 'agent' },
+      timeline
+    })
+    expect(client.stopAgent).not.toHaveBeenCalled()
+  })
+
+  it('projects Core delivery degradation with the launch snapshot', async () => {
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const status = agentStatusFixture()
+    const delivery = {
+      state: 'unverified' as const, mode: 'degraded' as const, reason: 'screen-evidence-replaced' as const,
+      submissionId: 'prompt-1', run: { ...status.session.run }, observedAt: 10
+    }
+    Object.assign(status.session, { terminalPromptDelivery: delivery })
+    client.createAgent.mockResolvedValue(status.session)
+    client.runtimeProjection.mockResolvedValue({
+      hostId: 'local',
+      subjects: [{
+        subjectId: 'agent:local:agent-1',
+        kind: 'agent',
+        hostId: 'local',
+        workspacePath: '/repo',
+        providerId: status.session.providerId,
+        executorId: status.session.executorId,
+        agentSession: status.session,
+        run: status.run
+      }]
+    })
+    const timeline = {
+      agentSessionId: status.session.agentSessionId,
+      revision: 1,
+      items: []
+    }
+    client.sessionTimeline.mockResolvedValue(timeline)
+    const config: AppConfig = {
+      ...localConfig,
+      executors: {
+        review: {
+          label: 'Review Codex',
+          providerId: 'codex',
+          command: 'codex',
+          args: [],
+          env: {},
+          injectAgentMuxGuide: true
+        }
+      }
+    }
+
+    await expect(controller.launchAgent({
+      executorId: 'review',
+      hostId: 'local',
+      workspacePath: '/repo',
+      agentSessionId: 'agent-1'
+    }, config)).resolves.toMatchObject({
+      session: { id: 'agent-1', kind: 'agent', terminalPromptDelivery: delivery },
       timeline
     })
     expect(client.stopAgent).not.toHaveBeenCalled()
