@@ -536,44 +536,24 @@ function sideLabel(origins: Set<OriginPackage>): string {
 type ProofProbe = {
   readonly found: boolean
   readonly halves: string[]
-  /**
-   * 每一半的两条臂各是什么。出处判据（`halves`）只问「比的是哪两个包」，**不问这个 conditional 还判不判**：
-   * 把 `? true : never` 改成 `? true : true`，两个操作数照旧跨包，而整道证明当场变成恒真式——实测 tsc
-   * exit 0、31 条全绿，且此时再叠加「渲染层 union 少一个方向」这种真漂移，directional-addressing.ts
-   * 一条错误都不报（诚实树上它在 `_addressDirectionMatchesControlProtocol` 的第 0 槽报 TS2322）。所以
-   * 「两个操作数来自两个包」是承重前提的**必要非充分**部分，判别性是另一半，必须单独有人问。
-   */
-  readonly arms: string[]
   /** 自证用：本文件里两个真实类型引用各自的出处，证明这个判据不是常量。 */
   readonly coreWitness: string
   readonly rendererWitness: string
 }
 
-/**
- * conditional 的一条臂归成三类之一：`true` / `never` / `other`。
- *
- * 只认这三类而不是记下原文，是为了让判据落在「这条臂是不是那个使证明可失败的 `never`」上，而不是落在拼法上。
- */
-function armLabel(node: ts.TypeNode): string {
-  if (node.kind === ts.SyntaxKind.LiteralType) {
-    const literal = (node as ts.LiteralTypeNode).literal
-    if (literal.kind === ts.SyntaxKind.TrueKeyword) return 'true'
-  }
-  if (node.kind === ts.SyntaxKind.NeverKeyword) return 'never'
-  return 'other'
+/** desktop 的真实编译配置。反事实探针必须用它，否则「诚实树上零错误」这个前提说的不是生产的事。 */
+function desktopParsedConfig(): ts.ParsedCommandLine {
+  const configFile = ts.readConfigFile(path.join(DESKTOP_DIR, 'tsconfig.json'), ts.sys.readFile)
+  return ts.parseJsonConfigFileContent(configFile.config, ts.sys, DESKTOP_DIR)
 }
 
 function crossPackageProofProbe(): ProofProbe {
-  const configFile = ts.readConfigFile(path.join(DESKTOP_DIR, 'tsconfig.json'), ts.sys.readFile)
-  const parsed = ts.parseJsonConfigFileContent(configFile.config, ts.sys, DESKTOP_DIR)
-  const program = ts.createProgram([ADDRESSING_FILE], parsed.options)
+  const program = ts.createProgram([ADDRESSING_FILE], desktopParsedConfig().options)
   const checker = program.getTypeChecker()
   const file = program.getSourceFile(ADDRESSING_FILE)
-  if (file === undefined)
-    return { found: false, halves: [], arms: [], coreWitness: 'none', rendererWitness: 'none' }
+  if (file === undefined) return { found: false, halves: [], coreWitness: 'none', rendererWitness: 'none' }
 
   const halves: string[] = []
-  const arms: string[] = []
   let found = false
   const side = (node: ts.TypeNode): string => sideLabel(originsOfTypeNode(checker, node, new Set()))
 
@@ -587,7 +567,6 @@ function crossPackageProofProbe(): ProofProbe {
       for (const element of annotation.elements) {
         if (!ts.isConditionalTypeNode(element)) continue
         halves.push(`${side(element.checkType)}->${side(element.extendsType)}`)
-        arms.push(`${armLabel(element.trueType)}/${armLabel(element.falseType)}`)
       }
     }
   })
@@ -607,10 +586,75 @@ function crossPackageProofProbe(): ProofProbe {
   return {
     found,
     halves,
-    arms,
     coreWitness: witnessOf('AgentMuxRegionNeighbor'),
     rendererWitness: witnessOf('WorkbenchRegionBounds')
   }
+}
+
+// --- 「这道证明今天还可能失败吗」------------------------------------------------
+// 出处判据只问「比的是哪两个包」。它对**操作数侧的恒真式**完全失明：`(C & never) extends S ? true : never`
+// 里两个操作数照旧跨包，而 `never` extends 一切，于是整半永远取 `true`——实测 tsc exit 0、31 条全绿。
+// 读语法读不出这件事（拼法无穷），求值也读不出（恒真式的结果与诚实形状**逐字相同**，都是 `true`；#812
+// 原本建议的「用 checker 求值那两个 conditional」正是因此不成立，已实测证伪）。
+//
+// 唯一能观测的性质是**反事实**：把渲染层的 SplitDirection 换成一个与协议不相容的 union，诚实的证明必须
+// 当场编译失败。做成一对方向相反的漂移，因为两半各自只对一个方向敏感：
+//   收窄（去掉 'down'）→ 渲染层少一个成员，`ControlSplitDirection extends SplitDirection` 不再成立 → 第 0 槽红
+//   放宽（加上 'inward'）→ 渲染层多一个成员，`SplitDirection extends ControlSplitDirection` 不再成立 → 第 1 槽红
+// 于是任一半塌成恒真式，都会让**它自己那个方向**的漂移变得静默，而兄弟半仍在报错。少了任一方向，
+// 对应那一半就没人守（实测：只跑收窄时，第 1 半的四种恒真式全部存活）。
+const LAYOUT_UNION_FILE = path.join(RENDERER_DIR, 'lib/workbench-layout.ts')
+/** 逐字取自 workbench-layout.ts。写死是刻意的：若那行改了拼法，下面的在场自检立刻红，而不是静默失配。 */
+const LAYOUT_UNION_DECLARATION = `export type SplitDirection = ${DIRECTION_MEMBERS.map((m) => `'${m}'`).join(' | ')}`
+
+/**
+ * 在覆盖了某个文件内容的虚拟树上编译 directional-addressing.ts，数落在那道证明的**初始化式**里的语义错误。
+ *
+ * 注意错误报在 `= [true, true]` 的元素上，不是报在注解上：按注解的位置去归槽会全部落空——本判据第一版正是
+ * 那么写的，读出来的是「两个漂移方向都只红第 1 槽」这种假象，据此会得出「两半分不开」的反向结论。
+ */
+function proofDiagnosticSlots(overrides: Record<string, string>): number[] {
+  const options = desktopParsedConfig().options
+  const host = ts.createCompilerHost(options, true)
+  // 只需要覆盖 getSourceFile：本探针的覆盖对象永远是一个**磁盘上存在**的文件（只换内容不换存在性），
+  // 故 fileExists / readFile 走真实实现即可，模块解析照旧成立。曾经额外覆盖过 readFile，实测把它删掉
+  // 35 条全绿——那是死代码，不是少了一道保险。
+  const originalGetSourceFile = host.getSourceFile.bind(host)
+  host.getSourceFile = (name, languageVersion, ...rest) => {
+    const override = overrides[name]
+    return override === undefined
+      ? originalGetSourceFile(name, languageVersion, ...rest)
+      : ts.createSourceFile(name, override, languageVersion, true)
+  }
+
+  const program = ts.createProgram([ADDRESSING_FILE], options, host)
+  const file = program.getSourceFile(ADDRESSING_FILE)
+  if (file === undefined) return [-1]
+
+  let initializer: ts.ArrayLiteralExpression | undefined
+  ts.forEachChild(file, (node) => {
+    if (!ts.isVariableStatement(node)) return
+    for (const declaration of node.declarationList.declarations) {
+      if (!ts.isIdentifier(declaration.name) || declaration.name.text !== CROSS_PACKAGE_PROOF) continue
+      if (declaration.initializer !== undefined && ts.isArrayLiteralExpression(declaration.initializer))
+        initializer = declaration.initializer
+    }
+  })
+  if (initializer === undefined) return [-1]
+
+  const spans = initializer.elements.map((element) => [element.getStart(file), element.getEnd()] as const)
+  const slots: number[] = []
+  for (const diagnostic of program.getSemanticDiagnostics(file)) {
+    if (diagnostic.start === undefined) continue
+    const slot = spans.findIndex(([start, end]) => diagnostic.start! >= start && diagnostic.start! <= end)
+    slots.push(slot)
+  }
+  return slots.sort()
+}
+
+function driftedLayout(replacement: string): Record<string, string> {
+  const source = readFileSync(LAYOUT_UNION_FILE, 'utf8')
+  return { [LAYOUT_UNION_FILE]: source.replace(LAYOUT_UNION_DECLARATION, replacement) }
 }
 
 describe('方向的跨包证明必须真的跨包（否则它是恒真的死代码）', () => {
@@ -636,16 +680,36 @@ describe('方向的跨包证明必须真的跨包（否则它是恒真的死代�
     expect([...probe.halves].sort()).toEqual(['core->renderer', 'renderer->core'])
   })
 
-  it('两半各自还在判别：真臂是 true、假臂是 never（否则跨包的操作数在恒真式里毫无意义）', () => {
-    // 上面那条只问「比的是哪两个包」。它对 `? true : true` 完全失明：操作数照旧跨包，而 `never` 一没，
-    // `X extends Y` 无论真假都给 true，整道证明再也不可能失败。实测那次变异 tsc exit 0、31 条全绿，
-    // 并且叠加「渲染层 union 少一个方向」这种真漂移后 directional-addressing.ts 一条错都不报（诚实树
-    // 上，那次漂移在 `_addressDirectionMatchesControlProtocol` 的槽位上报 TS2322）。两条判据各守一半，
-    // 必须都在：出处守「比的是不是两个包」，本条守「比出来的结果还能不能让编译失败」。
-    //
-    // 本条**不需要**单独的「判据不是常量」自检：`armLabel` 一旦退化成常量，两条臂就同标签，`'x/x'` 对
-    // 不上 `'true/never'`，这条断言自己就红（三种常量各自试过）。出处判据要额外的见证是因为它两半可以
-    // 同时塌成一个看起来合法的标签；这里塌不了。多写一条会是被兄弟断言完全覆盖的死代码。
-    expect(probe.arms).toEqual(['true/never', 'true/never'])
+  it('自证：那行 SplitDirection 声明就是反事实要改的那一行（拼法一变先在这里红）', () => {
+    // 下面两条靠字符串替换制造漂移。替换失配时源码原样通过，两条断言会读到「诚实树」的零错误而恒绿——
+    // 那正是这族判据最常见的假绿形态。所以先证替换目标在场。
+    const source = readFileSync(LAYOUT_UNION_FILE, 'utf8')
+    expect(source).toContain(LAYOUT_UNION_DECLARATION)
+  })
+
+  it('自证：诚实树上那道证明一条语义错误都不报（否则下面的反事实读到的是既存错误）', () => {
+    // 反事实的判据是「漂移时报错」。若诚实树本来就红，那条判据无法区分「证明起作用」与「这里一直是坏的」。
+    expect(proofDiagnosticSlots({})).toEqual([])
+    // 第二条钉的是覆盖机制自身：把同一份内容原样喂回去，结果必须和不覆盖一致。它抓的是「覆盖分支被短路」
+    // 这一类（实测：把 getSourceFile 里的分支判据改成恒走真实文件，本条与下面两条一起红）；它**不**保护
+    // fileExists/readFile——那两个走真实实现是刻意的，见 proofDiagnosticSlots 里的说明。
+    expect(proofDiagnosticSlots(driftedLayout(LAYOUT_UNION_DECLARATION))).toEqual([])
+  })
+
+  it('渲染层 union 少一个方向时，第 0 半必须当场编译失败（否则那一半是恒真的死代码）', () => {
+    // 这一条守的是 `ControlSplitDirection extends SplitDirection` 那半还判不判。把它改成任何一种操作数侧
+    // 恒真式——`(C & never) extends S`、`C extends S | unknown`、`Extract<C, never> extends S`，或者把假臂
+    // 也写成 `true`——两个操作数照旧跨包（出处判据全绿）、tsc 也 exit 0，而这次漂移会变得完全静默。
+    const narrowed = `export type SplitDirection = ${DIRECTION_MEMBERS.slice(0, -1)
+      .map((member) => `'${member}'`)
+      .join(' | ')}`
+    expect(proofDiagnosticSlots(driftedLayout(narrowed))).toEqual([0])
+  })
+
+  it('渲染层 union 多一个方向时，第 1 半必须当场编译失败（两半各自只对一个漂移方向敏感）', () => {
+    // 与上一条成对。收窄只让第 0 半红，放宽只让第 1 半红——所以缺了这一条，第 1 半的恒真式就没人守
+    // （实测：只跑收窄那条时，第 1 半的四种恒真式全部存活）。方向名取一个不在协议里的词即可。
+    const widened = `${LAYOUT_UNION_DECLARATION} | 'inward'`
+    expect(proofDiagnosticSlots(driftedLayout(widened))).toEqual([1])
   })
 })
