@@ -17,24 +17,30 @@ export function useScratchTopics(workspaceId: string | null): {
 } {
   const revision = useAppStore((state) =>
     workspaceId ? state.workspaceFileRevisions[workspaceId] ?? 0 : 0)
-  const [topics, setTopics] = useState<ScratchTopicSnapshot[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [state, setState] = useState<{
+    workspaceId: string
+    topics: ScratchTopicSnapshot[] | null
+    error: string | null
+  } | null>(null)
 
   useEffect(() => {
     if (!workspaceId) {
-      setTopics(null)
-      setError(null)
+      setState(null)
       return
     }
     let active = true
-    setError(null)
+    setState((current) => ({ workspaceId, topics: current?.workspaceId === workspaceId ? current.topics : null, error: null }))
     void api.scratch.listTopics(workspaceId).then((snapshots) => {
-      if (active) setTopics(snapshots)
+      if (active) setState({ workspaceId, topics: snapshots, error: null })
     }).catch((cause) => {
-      if (active) setError(presentError(cause))
+      if (active) setState((current) => ({
+        workspaceId, topics: current?.workspaceId === workspaceId ? current.topics : null, error: presentError(cause)
+      }))
     })
     return () => { active = false }
   }, [revision, workspaceId])
 
-  return { topics, error }
+  return state?.workspaceId === workspaceId && workspaceId !== null
+    ? { topics: state.topics, error: state.error }
+    : { topics: null, error: null }
 }

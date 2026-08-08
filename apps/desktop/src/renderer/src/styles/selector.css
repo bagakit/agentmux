@@ -71,8 +71,8 @@
    放大到 1.18 使它完整露出被压住的那部分，读作"这一枚被拎起来了"。 */
 .selector-presence__slot:hover,
 .selector-presence__slot:focus-within { z-index: 20 !important; }
-.selector-presence__slot:hover .agent-avatar,
-.selector-presence__slot:focus-within .agent-avatar { transform: translateY(-2px) scale(1.18); }
+.selector-presence__slot:hover button.agent-avatar,
+.selector-presence__slot:focus-within button.agent-avatar { transform: translateY(-2px) scale(1.18); }
 /* 同一个 provider 归并了几个 Session 时的角标。 */
 .selector-presence__slot small {
   position: absolute; right: -3px; bottom: -3px;

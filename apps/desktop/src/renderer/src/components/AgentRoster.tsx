@@ -28,7 +28,7 @@ function stateFor(row: RosterRow): 'working' | 'waiting' | 'error' | null {
   return row.state === 'working' ? 'working' : null
 }
 
-function RosterRowView({
+export function RosterRowView({
   row,
   onSelect,
   reportError
