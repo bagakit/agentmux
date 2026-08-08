@@ -76,16 +76,24 @@ describe('FILE_TREE_GIT_STATUS_PRIORITY（目录聚合的唯一优先级表）',
 })
 
 describe('buildFileTreeGitStatusIndex', () => {
-  it('文件拿自己的状态，节点是文件还是目录各查各的表', () => {
+  it('文件拿自己的状态；祖先目录只能按目录查得到（isDirectory 这一维真的被读）', () => {
     const index = buildFileTreeGitStatusIndex([
       change('src/a.ts', { worktree: 'M', unstaged: true })
     ])
     expect(index.get('src/a.ts', false)).toBe('modified')
-    // 文件路径当目录查不命中：目录表只有真实祖先目录（src），文件本身不是任何目录。
-    // 「是文件还是目录」是查询的入参，读错这一维就会把文件当目录查而落空。
-    expect(index.get('src/a.ts', true)).toBeNull()
-    // 而 src 作为祖先目录被标记（下一个用例细验聚合）。
+    // src 作为祖先目录被标记（下一个用例细验聚合）。
     expect(index.get('src', true)).toBe('modified')
+    // 判据落在**祖先**上：聚合出来的目录状态只进目录表，所以拿它当文件查必须落空。
+    // 这是「isDirectory 这一维真的被读」现在唯一的靶子——把 get 改成无视入参的并集查询
+    // （`dirStatus.get(p) ?? fileStatus.get(p)`），只有这一行会红。
+    expect(index.get('src', false), '聚合出来的目录状态不该能按文件查到').toBeNull()
+    // 这里**故意不再**断言 `index.get('src/a.ts', true)` 为 null。原先那条断言与 #749 逻辑上
+    // 不相容，不是实现取舍：脏 gitlink（` M sub`）和普通改动文件（` M src/a.ts`）到达这个
+    // 函数时形状完全一样——一条只写路径的 porcelain 记录，不说类型，也没有后代条目。所以
+    // 任何能让 `sub` 按目录查到的规则，都必然让 `src/a.ts` 也按目录查得到。两者只能留一个，
+    // 而 #749 是用户真看得见的缺陷（脏 submodule 在树里显示为 clean），另一个是树永远不会
+    // 发出的查询（树的每个节点的 kind 都是 readdir 给的，不会拿文件去问目录）。
+    // 详见 file-tree-git-status-gitlink.test.ts 里由真 git 生成的前提自检。
   })
 
   it('目录聚合取后代里最紧迫的那个状态，折叠时仍看得见', () => {
