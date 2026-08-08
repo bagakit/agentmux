@@ -1,5 +1,6 @@
 import { AtSign, CornerDownLeft, Paperclip, Square } from 'lucide-react'
 import type { AgentPostureControl } from '@agentmux/core'
+import { isImeCompositionKeyDown } from '../lib/ime-composition-keyboard-event'
 import { PosturePicker } from './PosturePicker'
 import { ComposerTextarea } from './ComposerTextarea'
 
@@ -52,11 +53,12 @@ export function AgentComposer({
           // No !isWorking guard: a running Agent can be steered. Enter submits whenever the surface allows
           // a submit and there is text; delivery (and codex's mid-turn refusal) is Core's call, not the
           // renderer's. Stop stays a click on the button, so mid-turn Enter never risks an accidental stop.
-          // IME candidate confirmation also arrives as Enter (often with `isComposing` or keyCode 229).
-          // Let the IME commit first; otherwise the composer submits the pre-conversion draft and the
-          // user sees missing/replaced characters in the Agent conversation.
-          const composing = event.nativeEvent?.isComposing || event.keyCode === 229
-          if (event.key === 'Enter' && !event.shiftKey && !composing && canSubmit) {
+          // IME candidate confirmation also arrives as Enter. Let the IME commit first; otherwise the
+          // composer submits the pre-conversion draft and the user sees missing/replaced characters in
+          // the Agent conversation (#609). 判据必须走 SSOT 的四路谓词：此前这里手抄了两路
+          // (`nativeEvent?.isComposing || keyCode === 229`)，漏掉顶层 `isComposing` 与
+          // `nativeEvent.keyCode`。只标记那两路的输入法照旧会把半转换草稿提交上去。
+          if (event.key === 'Enter' && !event.shiftKey && !isImeCompositionKeyDown(event) && canSubmit) {
             event.preventDefault()
             onSubmit?.()
           }
