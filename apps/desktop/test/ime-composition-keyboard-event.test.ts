@@ -26,12 +26,23 @@ import {
  *      按需注入一个可控的假实现，绝不依赖真实定时。
  *   接线层（part c）—— 每个 call site 的 onKeyDown 是内联 JSX 箭头函数或同文件具名函数，既没导出、也无法
  *      在不挂载整棵组件树（store + radix dialog + dnd-kit + canvas）的情况下驱动。所以这里走 TS AST：
- *      **遍历** renderer 下每个 .tsx 发现所有「在 Enter 上动作」的 onKeyDown（不是一张手写清单——那张清单
- *      正是漏掉第五个输入的结构性原因），断言每个都带组字守卫：调谓词、**实参恰好是本 handler 的形参**、
- *      且守卫**可达**（它之前不得有无条件退出）。这比 `toContain('isImeCompositionKeyDown')` 强三层，
- *      正是 M6（删掉那一行）、「实参传 {} as never」、「首行插早退让整段变 no-op」各自会破坏的东西。
- *      它**不**保证 React 会把 handler 接成 DOM 监听器、Chromium 会按这个顺序派发 composition 事件
- *      ——那要真 DOM。
+ *      遍历 renderer 下每个 .tsx，发现 onKeyDown handler，断言每个都带组字守卫：调谓词、**实参恰好是本
+ *      handler 的形参**、且守卫**可达**（它之前不得有无条件退出）。这比 `toContain('isImeCompositionKeyDown')`
+ *      强三层，正是 M6（删掉那一行）、「实参传 {} as never」、「首行插早退让整段变 no-op」各自会破坏的东西。
+ *
+ *      ── 发现的边界（这里只看得见一种「在 Enter 上动作」的写法，别把它读成「所有」）──
+ *      发现只认：`x.key === 'Enter'`（AST，非注释/无关字符串）出现在**块体内联箭头** `onKeyDown={(e) => { … }}`，
+ *      或指向**同文件可解析的具名函数/箭头声明**的 `onKeyDown={foo}` 里。以下五种写法，一个未守的
+ *      commit-on-Enter 输入对发现是**不可见**的（实测复核过）：
+ *        (1) `keyCode === 13` —— comparesEnterKey 只认字符串字面量 'Enter'，不认键码。
+ *        (2) `['Enter'].includes(x.key)` —— 不是 `=== 'Enter'` 的二元比较，看不见。
+ *        (3) 简写体箭头 `onKeyDown={(e) => submit()}`（无 `{}` 块）—— 只认 isBlock(body)，直接跳过。
+ *        (4) useCallback 包起来的 handler —— 初始化器是 CallExpression 不是箭头/函数声明，findNamedFunctionBody 认不出。
+ *        (5) `onKeyDown={identifier}` 而该名字在本文件解析不到（import 进来 / useCallback 结果 / 拼错）——
+ *            过去**静默跳过**；本轮已把它转成一次响亮失败（见下方「无法解析的 onKeyDown={标识符}」断言），
+ *            所以 (5) 不再是无声盲点，但 (1)–(4) 仍然开着。
+ *      也就是说 part c 是一道**已知有洞**的地板，不是完备普查；它**更不**保证 React 会把 handler 接成 DOM
+ *      监听器、Chromium 会按此顺序派发 composition 事件——那要真 DOM。
  */
 
 // ---------------------------------------------------------------------------
@@ -241,11 +252,15 @@ describe('useImeEnterGestureOwnership', () => {
 //       恒真的事件形参），会让整个 handler 变 no-op，而「守卫在场且在 Enter 之前」仍成立、14/14 全绿。
 //       —— 现在拒绝守卫之前任何**无条件退出**本 handler 的语句（guard-must-check-reachability-not-presence）。
 //   (3) 手写文件清单 = 枚举而非测量：明天新增第 N 个 commit-on-Enter 输入，这张表根本看不见它。
-//       —— 现在**遍历** renderer 下每个 .tsx，发现每个「在 Enter 上动作」的 onKeyDown（内联箭头 **和**
-//          具名函数引用都算），要求每个都带守卫；合法地不需要守卫的，进一张逐条具名带理由的例外表。
+//       —— 现在**扫描** renderer 下每个 .tsx，发现「在 Enter 上动作」的 onKeyDown（内联块体箭头 **和**
+//          同文件可解析的具名函数引用都算），要求每个都带守卫；合法地不需要守卫的，进一张逐条具名带理由的例外表。
 //          注意：例外表**不是**靠「逐条具名」获得封闭性的——那句话本文件此前写过，实测是假的。真正挡住
 //          「剥掉某个守卫 + 自己往例外表里加一条」的，只有例外表**条数被钉成字面量**那一条断言
 //          （EXPECTED_EXCEPTION_COUNT，见该表上方注释里那次实测逃生构造）。
+//          且这次「扫描」**不是完备普查**：发现只认块体内联箭头 / 同文件可解析具名函数里的 `x.key === 'Enter'`。
+//          `keyCode === 13`、`['Enter'].includes(...)`、简写体箭头、useCallback 包装 —— 这四种写法的未守输入
+//          对发现仍不可见（顶部 docstring 逐条列了）。第五种 `onKeyDown={无法解析的标识符}` 曾被静默跳过，
+//          本轮已转成响亮失败（见下方对应断言），不再是无声盲点。
 //
 // 守卫有两种合法形状，两者都要求「实参 = 本 handler 形参」且「可达」：
 //   · 独立式：`if (isImeCompositionKeyDown(P)) return`，排在 Enter 分支之前（FileExplorer / QuickSwitcher /
@@ -436,11 +451,15 @@ function anchorFor(file: string, tag: string, fnName: string | null, callees: st
   return `${file}::${tag}:${action}`
 }
 
-type DiscoveredHandler = { file: string; anchor: string; guarded: boolean }
+type DiscoveredHandler = { file: string; anchor: string; tag: string; guarded: boolean }
+/** onKeyDown={标识符}，但那个名字在同文件里解析不到（import 进来 / useCallback 包 / 拼错）。 */
+type UnresolvableHandler = { file: string; name: string }
+type DiscoveryResult = { handlers: DiscoveredHandler[]; unresolvable: UnresolvableHandler[] }
 
 /** 发现 renderer 下每个「在 Enter 上动作」的 onKeyDown handler（内联箭头 + 具名函数引用）。 */
-function discoverCommitOnEnterHandlers(): DiscoveredHandler[] {
-  const found: DiscoveredHandler[] = []
+function discoverCommitOnEnterHandlers(): DiscoveryResult {
+  const handlers: DiscoveredHandler[] = []
+  const unresolvable: UnresolvableHandler[] = []
   for (const path of walkTsxFiles(RENDERER)) {
     const sf = parse(path)
     const file = path.slice(RENDERER.length + 1)
@@ -465,15 +484,22 @@ function discoverCommitOnEnterHandlers(): DiscoveredHandler[] {
             params = named.params
             body = named.body
             fnName = init.text
+          } else {
+            // onKeyDown={foo} 但 foo 不是本文件的具名函数/箭头声明 —— 发现对它的体完全失明。
+            // 曾经这里静默 continue（一个可能未守的 commit-on-Enter 输入就此逃出扫描面）。现在收集起来，
+            // 由下面一条断言**响亮**报出来（GAP 2：把静默跳过转成被抓住的一类）。
+            unresolvable.push({ file, name: init.text })
           }
         }
         if (params && body) {
           const stmts = bodyStatements(body)
           if (stmts.some((s) => comparesEnterKey(s))) {
             const paramName = paramNameOf(params)
-            found.push({
+            const tag = enclosingTag(node)
+            handlers.push({
               file,
-              anchor: anchorFor(file, enclosingTag(node), fnName, collectCallees(body)),
+              anchor: anchorFor(file, tag, fnName, collectCallees(body)),
+              tag,
               guarded: isHandlerGuarded(stmts, paramName)
             })
           }
@@ -483,7 +509,7 @@ function discoverCommitOnEnterHandlers(): DiscoveredHandler[] {
     }
     visit(sf)
   }
-  return found
+  return { handlers, unresolvable }
 }
 
 // 例外表：被发现、但**合法地不需要**组字守卫的 commit-on-Enter handler。每条自带理由。
@@ -504,38 +530,51 @@ function discoverCommitOnEnterHandlers(): DiscoveredHandler[] {
 // requestClose——它是个按 Enter/Space 激活的 span 按钮，不承载文本草稿），**两条是 peer 欠账**
 // （TerminalView 的搜索框、WorkspaceWorkbench 的重命名输入）。所以两个 peer 文件落地、补上守卫之后，
 // 这个数字应当收到 **2**，不是 0 也不是 1。（69d2ed0 的 message 在这里写了「改到 1」，那是错的：
-// 它把 requestClose 也算成了欠账。分类逐条写在下面每条的 reason 里，以 reason 为准。）
+// 它把 requestClose 也算成了欠账。分类由下面每条的 **kind 字段**声明、并被交叉核对，见该表下方的 kind/tag 断言；
+// reason 只是给人看的解释，不再是分类的依据。）
 const EXPECTED_EXCEPTION_COUNT = 4
-const GUARD_EXCEPTIONS: ReadonlyArray<{ anchor: string; reason: string }> = [
+// `kind` 是**机器可判**的分类声明，不从 reason 散文里解析（本仓规则：分类必须是声明字段，绝不 parse 散文）。
+//   · 'fact' —— 事实豁免：这个 handler 落在非文本可编辑元素上（按钮 / 树导航），永远不承载 IME 组字确认。
+//   · 'debt' —— peer 欠账：它落在 input/textarea 这类文本编辑元素上、在 Enter 上提交草稿，文件落地后欠一个组字守卫。
+// 下面一条断言拿**外层元素标签**（scanner 已算出的 enclosingTag）交叉核对 kind：debt 必须坐在文本编辑元素上、
+// fact 必须不坐在文本编辑元素上。于是把一条 debt 谎报成 fact（或反向）会当场翻红——散文继续做人类解释，
+// kind 才是被守住的那句主张。
+const GUARD_EXCEPTIONS: ReadonlyArray<{ anchor: string; kind: 'fact' | 'debt'; reason: string }> = [
   {
     anchor: 'components/FileExplorer.tsx::fn:handleTreeKeyDown',
+    kind: 'fact',
     reason:
-      '按事实豁免（非欠账）：树导航，Enter 打开文件/展开目录；树行不是可编辑文本，永远不承载 IME 组字确认。' +
-      'FileExplorer.tsx 已提交/干净，但这个 handler 本就不该带组字守卫。'
+      '事实豁免：树导航，Enter 打开文件/展开目录；树行不是可编辑文本，永远不承载 IME 组字确认，本就不该带组字守卫。'
   },
   {
     anchor: 'components/TerminalView.tsx::input:searchWith',
+    kind: 'debt',
     reason:
       '欠账：TerminalView.tsx 为 peer 未提交改动持有，本轮不得编辑。搜索框在 Enter 上跑搜索，' +
       '该文件一旦落地就欠一个组字守卫——届时把本条删掉并补上守卫。'
   },
   {
     anchor: 'components/WorkspaceWorkbench.tsx::input:commitRename',
+    kind: 'debt',
     reason:
       '欠账：WorkspaceWorkbench.tsx 为 peer 未提交改动持有，本轮不得编辑。重命名输入在 Enter 上提交草稿，' +
       '文件落地后欠一个组字守卫——届时把本条删掉并补上守卫。'
   },
   {
     anchor: 'components/WorkspaceWorkbench.tsx::span:requestClose',
+    kind: 'fact',
     reason:
-      '按事实豁免（非欠账）：role=button 的 span 按 Enter/Space 激活以关闭 Tab，不承载文本草稿，' +
+      '事实豁免：role=button 的 span 按 Enter/Space 激活以关闭 Tab，不承载文本草稿，' +
       '所以它永远不该带组字守卫——这一条不随 WorkspaceWorkbench.tsx 落地而消失。' +
       '（该文件同时为 peer 持有、本轮只读，但那与本条是不是欠账无关。）'
   }
 ]
 
+// debt 例外必须坐在这些文本编辑元素上、fact 例外必须不坐在上面。standalone/自结束标签的 tagName 都是裸元素名。
+const TEXT_EDIT_TAGS = new Set(['input', 'textarea'])
+
 describe('part c：发现式接线层——每个 commit-on-Enter 的 onKeyDown 都带组字守卫（实参=形参、且可达）', () => {
-  const handlers = discoverCommitOnEnterHandlers()
+  const { handlers, unresolvable } = discoverCommitOnEnterHandlers()
   const exceptionAnchors = new Set(GUARD_EXCEPTIONS.map((e) => e.anchor))
 
   it('自检：扫描确实发现了 commit-on-Enter handler（扫描根写错会静默全绿）', () => {
@@ -586,6 +625,45 @@ describe('part c：发现式接线层——每个 commit-on-Enter 的 onKeyDown 
       ).toBe(false)
       expect(ex.reason.length, `例外必须自带理由：${ex.anchor}`).toBeGreaterThan(0)
     }
+  })
+
+  it('例外的 kind 与外层元素标签自洽：debt 坐在文本编辑元素上、fact 不坐（分类不从散文解析，由此交叉核对）', () => {
+    // GAP 1：此前 reason 上唯一的断言是 length>0，于是把一条 debt 谎报成 fact 能全绿发货。现在 kind 是声明字段，
+    // 拿 scanner 已算出的外层元素标签（enclosingTag）当判别器：承载文本草稿的元素才可能欠一个组字守卫。
+    // 两个方向各钉一次（本仓有「守卫只守一侧出口」的先例）。
+    for (const ex of GUARD_EXCEPTIONS) {
+      const only = handlers.find((h) => h.anchor === ex.anchor)
+      if (!only) throw new Error(`例外锚点未命中，无法核对 kind：${ex.anchor}`)
+      const onTextEdit = TEXT_EDIT_TAGS.has(only.tag)
+      if (ex.kind === 'debt') {
+        expect(
+          onTextEdit,
+          `例外 ${ex.anchor} 标了 kind:'debt'（欠一个组字守卫），但它坐在 <${only.tag}> 上、不是 ` +
+            `input/textarea 这类文本编辑元素——不承载文本草稿的元素不会欠组字守卫，它应当是 'fact'。`
+        ).toBe(true)
+      } else {
+        expect(
+          onTextEdit,
+          `例外 ${ex.anchor} 标了 kind:'fact'（永不该带组字守卫），但它坐在 <${only.tag}> 这个文本编辑元素上——` +
+            `文本编辑元素在 Enter 上会提交草稿，这条其实是 'debt'（peer 文件落地后欠一个组字守卫）。`
+        ).toBe(false)
+      }
+    }
+  })
+
+  it('无法解析的 onKeyDown={标识符} 必须响亮报出（曾经被静默跳过——发现对它的体完全失明）', () => {
+    // GAP 2：onKeyDown={foo} 而 foo 不是本文件具名函数/箭头声明（import 进来 / useCallback 包 / 拼错）时，
+    // 发现逻辑读不到它的体，无从判断它是不是未守的 commit-on-Enter 输入。旧代码在此静默 continue，
+    // 于是这类 handler 整个逃出扫描面。现在把它转成一次**响亮失败**：点名文件 + 标识符，逼下一个作者
+    // 要么把它改成可解析的形状，要么显式扩展发现逻辑去解析它——不再是一个无人察觉的盲点。
+    expect(
+      unresolvable,
+      unresolvable.length === 0
+        ? ''
+        : `发现无法解析的 onKeyDown={标识符}，其 handler 体对扫描不可见：` +
+          unresolvable.map((u) => `${u.file}::${u.name}`).join('、') +
+          '。请把它改成同文件内可解析的具名函数/箭头声明，或扩展 discoverCommitOnEnterHandlers 去解析这种引用。'
+    ).toEqual([])
   })
 
   it('每个已守文件都真 import 了 SSOT 谓词（守卫不能引用未定义名字）', () => {
