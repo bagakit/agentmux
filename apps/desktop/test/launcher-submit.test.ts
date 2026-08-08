@@ -23,6 +23,76 @@ function parse(relative: string): ts.SourceFile {
   return ts.createSourceFile(path, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
 }
 
+/** 一个表达式是不是**裸的** `isMacPlatform()` 调用（零实参）。取反、带参、别的调用都不是。 */
+function isBareMacProbe(node: ts.Node): boolean {
+  return (
+    ts.isCallExpression(node) &&
+    ts.isIdentifier(node.expression) &&
+    node.expression.text === 'isMacPlatform' &&
+    node.arguments.length === 0
+  )
+}
+
+/**
+ * 把 onKeyDown 守卫里那次 `launcherKeydownLaunches(event, <平台>, readiness)` 调用的**第 2 个实参**
+ * 规范化成一个字符串，供 `toBe('isMacPlatform()')` 判定：
+ *
+ *   - `isMacPlatform()` —— 实参是裸的 `isMacPlatform()` 调用，**或**同文件里一个绑定到裸
+ *     `isMacPlatform()` 的 `const`（解析一层，像 relative-age 的 `numericConstants`）。
+ *   - `NOT-…(…)` —— 其它任何形状，`toBe` 会红并把看到的形状念出来。
+ *
+ * ─── 为什么判 AST 形状而不是 grep 文本 ───
+ *
+ * `!isMacPlatform()` 里也含 `isMacPlatform` 这个词——文本判据对它完全失明，而它正是本轮要防的真缺陷：
+ * mac 上把平台判反，Cmd+Enter 那条和弦再也匹配不上，发车键静默失效（本仓 #729 记过同一族）。所以判的是
+ * 「实参这棵子树**就是**一次裸调用」，不是「子树里出现过这个名字」。
+ *
+ * ─── 为什么解析一层同文件 const（刻意不做成 误伤）───
+ *
+ * `const isMac = isMacPlatform()` 再传 `isMac` 是**正确代码**、往往更可读；对正确代码打红的守卫会被下一个
+ * 作者整条删掉（本仓 #731、#735 是这条的 误伤 反面）。所以跟一层绑定，对绑定的初始化式套同一条裸调用判据。
+ *
+ * ─── 已知缺口，逐条写明（不写明的缺口会变成将来的假承诺，#713）───
+ *
+ *   - 只解析**一层** `const` 绑定，且只认由裸 `isMacPlatform()` 初始化的绑定。`const a = isMacPlatform();
+ *     const b = a;` 传 `b`（两层）会被判 NOT- 并红——那是一次 误伤，但今天源码至多绑一层，为一个不存在的
+ *     形状加 N 层解析是过度机械。`const isMac = !isMacPlatform()` 传 `isMac` 也红——那是**对的**，取反被
+ *     经局部洗白之后依然是同一个缺陷。
+ *   - 不证明 `isMacPlatform` 是从 host-platform import 进来的：同文件里一个叫 `isMacPlatform` 的影子函数
+ *     会通过本判据。「这是不是真探针」由上面的行为族与 import 关系管，本条只管「实参形状对不对」。
+ *   - 自检：找不到那次调用时返回 `NO-CALL`，`toBe('isMacPlatform()')` 随之变红而不是空转——改名/删掉
+ *     接线都会这样红（本仓 #393/#645「scan 面写错静默变绿」这一族）。
+ */
+function macArgumentShape(guard: ts.Node, source: ts.SourceFile): string {
+  let call: ts.CallExpression | undefined
+  const findCall = (node: ts.Node): void => {
+    if (call) return
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'launcherKeydownLaunches') {
+      call = node
+      return
+    }
+    ts.forEachChild(node, findCall)
+  }
+  findCall(guard)
+  if (!call) return 'NO-CALL(找不到 launcherKeydownLaunches 调用——接线被改名或删掉了)'
+  const argument = call.arguments[1]
+  if (!argument) return 'MISSING-2ND-ARGUMENT(平台实参根本没传)'
+  if (isBareMacProbe(argument)) return 'isMacPlatform()'
+  if (ts.isIdentifier(argument)) {
+    let bound: ts.Expression | undefined
+    const scan = (node: ts.Node): void => {
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === argument.text && node.initializer) {
+        bound = node.initializer
+      }
+      ts.forEachChild(node, scan)
+    }
+    scan(source)
+    if (bound && isBareMacProbe(bound)) return 'isMacPlatform()'
+    return `NOT-A-PROBE-BINDING(${argument.text} = ${bound ? bound.getText().replace(/\s+/gu, ' ') : '<未在本文件绑定>'})`
+  }
+  return `NOT-A-BARE-PROBE(${ts.SyntaxKind[argument.kind]}: ${argument.getText().replace(/\s+/gu, ' ')})`
+}
+
 function event(overrides: Partial<ShortcutEvent>): ShortcutEvent {
   return { key: 'a', metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, ...overrides }
 }
@@ -132,19 +202,20 @@ describe('NewTabSurface 真的把键盘接到了 prompt 那一格', () => {
     walk(source)
     // 提取器自检：一个都没找到时下面的断言会退化成 `[] toEqual []` 恒真。
     expect(owners.length, 'no onKeyDown attribute found — 提取器写错了或者接线被整段删掉').toBeGreaterThan(0)
-    // 大写开头的标签解析到它自己的根元素；小写的本来就是 DOM 元素。
-    const hosts = owners.map((owner) =>
-      /^[A-Z]/u.test(owner)
-        ? resolveHostElement(resolve(SOURCE_ROOT, relative), owner)
-        : { tag: owner, viaComponent: undefined, forwardsCallerProps: true }
-    )
+    // 今天每个 owner 都是大写开头的组件壳（ComposerTextarea），解析器跟着它走到 DOM 根元素。原本这里
+    // 还有一条 else 分支为「onKeyDown 直接挂在原生 DOM 元素上」兜底（`{ tag: owner, viaComponent:
+    // undefined, forwardsCallerProps: true }`），但组件从不这么写，那条分支今天一次都执行不到——实测
+    // 把它的 `tag: owner` 改成 `'WRONG'`、或把 `forwardsCallerProps` 翻成 false，都在 13 条全绿下存活。
+    // 本仓「变异存活也可能是多余条件」：先判它能不能改变结果，不能就删掉那段代码，而不是给死分支编测试。
+    // 删掉后若将来有人把 onKeyDown 挪到原生 `<textarea>` 上，resolveHostElement 对小写标签本就 fail、
+    // 会**响亮抛错**，逼着作者回来教这个判据那种形状——不静默兜底，也不假装覆盖了它。
+    const hosts = owners.map((owner) => resolveHostElement(resolve(SOURCE_ROOT, relative), owner))
     expect(hosts.map((host) => host.tag), 'onKeyDown 最终落在的元素不是恰好一个 textarea').toEqual([
       'textarea'
     ])
-    // 经过一层组件时，还要证明调用方给的属性真的到得了那个 textarea：壳漏掉 `{...rest}` 时上面那条
-    // 断言照旧全绿（根元素确实是 textarea），而这个 onKeyDown 被静默丢掉，一个键都发不出车。
+    // 还要证明调用方给的属性真的到得了那个 textarea：壳漏掉 `{...rest}` 时上面那条断言照旧全绿
+    // （根元素确实是 textarea），而这个 onKeyDown 被静默丢掉，一个键都发不出车。
     for (const host of hosts) {
-      if (!host.viaComponent) continue
       expect(
         host.forwardsCallerProps,
         `${host.viaComponent} 没有把调用方的其余属性转发到根元素：这个 onKeyDown 会被静默吞掉`
@@ -180,6 +251,17 @@ describe('NewTabSurface 真的把键盘接到了 prompt 那一格', () => {
     expect(guardText).toMatch(/^if \(!launcherKeydownLaunches\(/)
     // 闸必须真的被喂进去：漏掉 readiness 那个实参会让键盘绕过按钮的 disabled。
     expect(guardText, '必须把 readiness 传进去，否则键盘绕过 disabled').toMatch(/readiness/)
+    // 平台实参必须**就是**一次裸 `isMacPlatform()` 调用（或同文件一层 const 绑定到它）。这是本轮补的判据：
+    // 此前这条断言只看 callee 名字与 readiness 在不在，对第 2 个实参零覆盖，于是 `true` / `false` /
+    // `!isMacPlatform()` 三种改法都在 13 条全绿下存活（tsc 也沉默——两侧都是 boolean）。其中 `!isMacPlatform()`
+    // 是真缺陷：mac 上平台判反，Cmd+Enter 和弦匹配不上，发车键静默失效（本仓 #729 同族）。判 AST 形状而非
+    // grep 文本——`!isMacPlatform()` 也含这个词。同文件一层 const 绑定算通过，因为 `const isMac = isMacPlatform()`
+    // 是更可读的正确代码，对它打红会让守卫被删（#731/#735 的 误伤 反面）。缺口见 macArgumentShape 的文档。
+    expect(
+      macArgumentShape(guard!, source),
+      '第 2 个实参必须是裸 isMacPlatform()：true/false/!isMacPlatform() 三种改法此前全在 13 条下存活，' +
+        '取反那种会让 Cmd+Enter 在 mac 上静默失效'
+    ).toBe('isMacPlatform()')
     expect(prevented!.getText()).toBe('event.preventDefault()')
     // 启动走与按钮同一个函数——抄第二份就会漏掉精调/名字里的某一项。
     expect(launched!.getText()).toBe('launchFromLauncher()')
