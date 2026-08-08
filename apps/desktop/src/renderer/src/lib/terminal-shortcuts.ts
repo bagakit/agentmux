@@ -1,3 +1,6 @@
+import { isMacPlatform } from './host-platform'
+import { shouldBypassXtermKeyboardEvent } from './xterm-bypass-policy'
+
 // The "what bytes / which text after the key" helpers for the terminal. The chord decisions themselves —
 // is this Cmd+F / Cmd+C / Cmd+K, is this the bare Shift+Enter newline — now live in `shortcut-registry.ts`
 // (terminal scope), so the one platform bottom line is expressed once. What stays here is the part that is
@@ -173,6 +176,20 @@ export function terminalKeyEventHandler(deps: TerminalKeyEventDeps): (event: Key
    * 有测试能单独钉住它——把它删掉这一族仍然全绿，这是实测过的、已知的。
    */
   const hasCopyableText = (): boolean => deps.hasSelection() && deps.readSelection() !== ''
+  // 平台在渲染进程里从 navigator.userAgent 派生（与 TerminalView 传给 matchShortcut 的那个 isMac
+  // 同源同值）——在本层就地取，好让旁路策略不必再往 deps 里加一个字段、也就不必改由别的 agent 持有
+  // 的 TerminalView。
+  const isMac = isMacPlatform()
+  /**
+   * 这个键该不该让 xterm 提前出让、把它交给原生浏览器管线（Chromium `copy`/`paste`、OS 键位）。
+   *
+   * 为什么需要这一步：某些 CLI 启用 kitty progressive enhancement 后，xterm 的 KittyKeyboard 编码器
+   * 会把带修饰键的和弦——**包括 Cmd/Ctrl+V**——编成 CSI-u 并 `preventDefault()`，那次 preventDefault
+   * 连原生 `paste` 事件一起压掉，于是原生 Edit→Paste 落不到 xterm 的 textarea。对这些和弦返回 false
+   * 让 xterm 在跑编码器**之前**就 bail，原生管线照常触发。逻辑全在 `xterm-bypass-policy.ts`，见其文件头。
+   */
+  const shouldBypass = (event: KeyboardEvent): boolean =>
+    shouldBypassXtermKeyboardEvent(event, { isMac, hasSelection: deps.hasSelection() })
   return (event) => {
     // 裸 Ctrl+C：有可复制的文本就复制，否则把键交还终端（那时它是 SIGINT）。
     //
@@ -183,17 +200,27 @@ export function terminalKeyEventHandler(deps: TerminalKeyEventDeps): (event: Key
     // 把「没选区」也算成 copy 的候选，而 SIGINT 那一侧必须原样交还。放在前面等于说「这个键有它自己的
     // 认领条件」，与下面 terminal.copy 那道闸是同一条规则的两个入口，所以两处都调 hasCopyableText()。
     if (isBareCtrlC(event)) {
+      // 没选区 = SIGINT，必须原样交还终端（返 true）。这条**不**走 shouldBypass：#610 的判据是
+      // 「readSelection() 文本非空」，而旁路策略的 interrupt-C 分支读的是 xterm 的**坐标** hasSelection
+      // ——两者在「空白处横拖」时分岔（坐标有区间、文本裁完为空）。把这条交给 shouldBypass 会用错的
+      // 那个判据把该发的 SIGINT 吞成「复制空串」（实测：一条 #610 用例会红）。bare Ctrl+C 由本分支
+      // 完整拥有，等同于参考项目里排在旁路策略**之前**的 interrupt 处理器——够不到 return !shouldBypass。
       if (!hasCopyableText()) return true
       if (event.type === 'keydown') actions['terminal.copy']?.()
       return false
     }
     const shortcutId = deps.matchTerminalShortcut(event)
-    if (!shortcutId) return true
-    // Copy 只在真有文本时认领。没文本就把键交还终端——Ctrl+C 在那种情况下是 SIGINT，
-    // 吞掉它会让用户中断不了正在跑的程序。
+    // 不是我们的注册表键：这里正是 paste / Shift+Insert 落脚处，也是**唯一**该由旁路策略裁决的出口。
+    // 以前无条件 `return true`（把键交给 xterm），在 kitty 模式下这些剪贴板和弦就被 KittyKeyboard 编码器
+    // preventDefault 掉、原生 paste 随之死掉。改成 `return !shouldBypass`：策略认领剪贴板和弦时返回 false，
+    // xterm 提前 bail，原生管线接手。镜像参考项目回调末尾那句 `return !shouldBypassXtermKeyboardEvent(...)`
+    // ——在参考项目里，被更早的处理器认领的键都已 return，落到这句的正是「我们不认领」的键，与此处等价。
+    if (!shortcutId) return !shouldBypass(event)
+    // Copy 只在真有文本时认领。没文本就交还终端（返 true，与 bare Ctrl+C 同理由，判据同为文本非空，
+    // 不走 shouldBypass）——Ctrl+C 那种情况下是 SIGINT，吞掉会让用户中断不了正在跑的程序。
     if (shortcutId === 'terminal.copy' && !hasCopyableText()) return true
     const act = actions[shortcutId]
-    // 没有对应动作就交还。paste 走的正是这条：见上面工厂注释，原生 Edit→Paste 是它的唯一所有者。
+    // 没有对应动作就交还。（注册表 id 都有动作，这条实际到不了，保留成与其它出口同形。）
     if (!act) return true
     // keydown / keyup 的区分在这里：动作只跑一次，但两个事件都要吞掉，否则 keyup 会漏给终端。
     if (event.type === 'keydown') act()
