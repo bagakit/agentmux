@@ -9,6 +9,14 @@ afterEach(async () => {
 })
 
 describe('AgentHookServer', () => {
+  it('serializes concurrent starts so a losing bind cannot orphan the healthy listener', async () => {
+    const server = new AgentHookServer(() => {}, 0)
+    servers.push(server)
+    const [first, second] = await Promise.all([server.start(), server.start()])
+    expect(first).toEqual(second)
+    expect(server.isRunning()).toBe(true)
+  })
+
   it('accepts authenticated loopback events without interpreting provider semantics', async () => {
     const events: NativeHookEnvelope[] = []
     const server = new AgentHookServer((event) => {

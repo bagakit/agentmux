@@ -109,6 +109,8 @@
 - `Region` 是 View 内的内容 leaf，可展示 Agent、Terminal、File、Browser 或 Launcher。
 - `split-left|right|up|down` 只修改当前 View 的 Region 树；`placement=tab` 只在用户明确要求时创建新 View。
 - Workspace 保存 Tab Group 树，每个 View 保存自己的 Region 树。两个树使用不同 ID、焦点、resize 状态和操作入口。
+- **应用重启必须先恢复持久化的 Tab Group/Region 拓扑，再恢复其中的 Session 投影**。Tab、分组、Region、焦点和 split ratio 是用户工作面的 durable 索引，不能因为 Runtime 首次快照暂时为空、恢复探测超时或恢复流程报错而被写回空布局；健康 Agent 的流程故障只留下可见服务窗告示并保留原 Region。只有 Core 明确报告 Session 已退休，才能移除该 Region。
+- **恢复不能把旧进程的生命周期租约当成仍在运行**。启动新进程时必须回收 owner PID 已退出、租约已过期或属于本次重启的未完成 lifecycle reservation；只有能证明旧 owner 仍活着的租约才报告“运行在其他进程”。判断不清时保留 Session/Region，并明确提示正在等待归属核验，不得静默丢失或伪造新 Session。
 - **关闭当前格、按序号切 Tab、分屏、切换焦点格都必须能纯键盘完成**，不该只有鼠标一条路。窗口级只补这四个高价值动作，**不建 action catalog、不做用户改键**——那是预防性抽象，与"最简实现"相悖。键位跟随成熟终端/编辑器的既有惯例而非自创：关闭当前 Region 用平台的关闭键（mac `Cmd+W`／其他平台 `Ctrl+Shift+W`），按序号切 Tab 用 `Cmd/Ctrl+1..9`（第 9 键恒指最后一张），分屏用 mac `Cmd+D`（右）/`Cmd+Shift+D`（下）、其他平台 `Ctrl+Shift+E`（右）/`Ctrl+Shift+O`（下），切换焦点格用 `Cmd/Ctrl+Alt+方向键`。**平台底线：非 macOS 绝不接管裸 `Ctrl+字母`**——那些是 shell/readline 的地盘（`Ctrl+W` 删词、`Ctrl+D` 是 EOF），接管会让用户在终端里丢掉肌肉记忆；数字与 `Ctrl+Alt+方向` 不落在 readline 键上，可安全使用。新键位不得与终端作用域键（`Cmd+F/C/K`、`Shift+Enter`）冲突，冲突判断按键位比对、不靠猜。判定与落点解析写成纯函数、组件只做注册与 `preventDefault`（本仓库 `renderToStaticMarkup` 不跑 effect，写进组件的分支断言够不着）；只测判定不够，**必须有接线测试**——删掉注册调用要让断言变红。焦点格的"相邻"按屏幕几何（Region 归一化 bounds）判定，不按分屏树的父子深度，与上文「哪个算右边」同一处轴向定义。
 
 ### Session、Run 与 View

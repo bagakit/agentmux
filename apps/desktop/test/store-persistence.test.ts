@@ -355,6 +355,33 @@ describe('Renderer persistence boundary', () => {
     dispose()
   })
 
+  it('keeps the hydrated Workbench visible when startup fails before projection completes', async () => {
+    const tab = createWorkbenchTab('startup-failure-view', {
+      regionId: initialWorkbenchRegionId('startup-failure-view'),
+      kind: 'agent',
+      phase: 'attached',
+      workspaceId: 'workspace-a',
+      sessionId: 'agent-startup-failure'
+    })
+    const layout = createWorkspaceLayout('pane', [tab.id])
+    useAppStore.setState({
+      loading: true,
+      restoredWorkbench: { tabs: { [tab.id]: tab }, layouts: { 'workspace-a': layout } },
+      tabs: {},
+      layouts: {}
+    })
+    vi.spyOn(useAppStore.persist, 'hasHydrated').mockReturnValue(true)
+    vi.spyOn(api.config, 'get').mockRejectedValue(new Error('config temporarily unavailable'))
+
+    const dispose = await useAppStore.getState().initialize()
+    const state = useAppStore.getState()
+    expect(state.loading).toBe(false)
+    expect(state.tabs[tab.id]).toEqual(tab)
+    expect(state.layouts['workspace-a']).toEqual(layout)
+    expect(state.error).toContain('config temporarily unavailable')
+    dispose()
+  })
+
   it('reconciles an unknown Terminal Region when the first post-startup snapshot becomes authoritative', async () => {
     const staleTerminalId = 'terminal-stale-after-restart'
     const tab = createWorkbenchTab('terminal-stale-view', {
