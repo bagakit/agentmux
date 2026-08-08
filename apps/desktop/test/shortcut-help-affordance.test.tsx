@@ -47,31 +47,51 @@ import { assertSingleCallReachable, readAndParse } from './helpers/effect-reacha
 // Every claim below is a real run against this file. The four mutations all SURVIVED the original guard
 // at `Tests 10 passed (10)` with `tsc --noEmit` exit 0 — i.e. neither the tests nor the compiler saw them.
 //
+// Each criterion is named below by the `it()` it lives in — there are no `assertX` helpers for these
+// four, and an earlier version of this header invented four (`assertOperableButton`,
+// `assertHandlerCallIsTheWholeBody`, `assertDerivedFromChord`) that were never written. A header that
+// names a layer which does not exist reads as stronger coverage than the file has.
+//
 //   G1 `disabled` on the button. The affordance renders, the handler is present and reachable, and the
 //      user cannot click it: a completely dead door, which is the ONE thing this whole feature exists to
-//      remove. Closed by `assertOperableButton`, which reads the anchor element's own attributes. Note
-//      the criterion CANNOT be "the markup contains no `disabled`" — the sibling ToolsToggle legitimately
-//      renders `disabled=""` in this same fragment (measured), so a markup-wide check is either vacuous
-//      or a false red. It has to be scoped to the anchored element.
+//      remove. Closed by `it('the help affordance is never disabled')`, which reads the anchor element's
+//      own attributes. Note the criterion CANNOT be "the markup contains no `disabled`" — the sibling
+//      ToolsToggle legitimately renders `disabled=""` in this same fragment (measured), so a markup-wide
+//      check is either vacuous or a false red. It has to be scoped to the anchored element.
 //   G2 `false && openShortcutHelp(...)` as the handler body. `assertSingleCallReachable` declares this
 //      blind spot itself (it only sees `return`/`throw` before the call, not an unreachable call), but
 //      that assertion is the SOLE killer of the emptied-handler mutation — so its blind spot left the
-//      component wiring effectively unguarded. Closed by `assertHandlerCallIsTheWholeBody`, which
-//      requires the handler body to BE that call, with no operator wrapped around it.
+//      component wiring effectively unguarded. Closed by
+//      `it('the click handler body IS that call — nothing wrapped around it')`, which requires the handler
+//      body to BE that call, with no operator wrapped around it, AND pins the platform argument (see G5).
 //   G3 `key: isMac ? '/' : '?'` — hand-copying BOTH platform keys, not one. The old message claimed the
 //      #367 drift class "cannot exist here by construction"; that was too strong, and this file now says
 //      so. The behavioural asserts compare against `chordForPlatform`, so a copy that is correct TODAY
-//      agrees with them. Closed by `assertDerivedFromChord`: the emitted `key` must be an expression that
-//      READS the resolved chord, not a literal that happens to match it.
+//      agrees with them. Closed by `it('the emitted key is derived from the resolved chord, …')`: the
+//      emitted `key` must be an expression that READS the resolved chord, not a literal that matches it.
 //   G4 `<button>` → `<span>`. Loses the implicit button role, keyboard activation, and focusability while
-//      the label and the marker attribute stay put. Closed by the tag assertion inside
-//      `assertOperableButton`.
+//      the label and the marker attribute stay put. Closed by
+//      `it('the help affordance is a real <button>, not a non-interactive element')`.
+//   G5 `openShortcutHelp(!isMacPlatform())` — the argument, which G2 originally did not look at at all.
+//      Measured SURVIVOR at `Tests 14 passed (14)` with tsc exit 0 (both sides are `boolean`, so the
+//      compiler cannot see it). The behaviour family drives the lib with an `isMac` the TEST chooses, so
+//      it structurally cannot observe what the component passes. Closed by the argument asserts inside
+//      G2's `it`.
 //
-// What this file still does NOT see, stated so nobody reads more into it: nothing here proves the button
-// is MOUNTED on a real screen. `SidebarToggleChrome` has three call sites (TopRowChrome's own
-// TopRowLeadingChrome, SurfaceToolDock, WorkspaceSidebar — counted, not assumed), and the reachability
-// claim in the component's comment rests on all three; this file renders the fragment directly and
-// asserts nothing about those three. Deleting any one of them stays green here.
+// ─── What this file still does NOT see, stated so nobody reads more into it ───
+//
+// (a) Nothing here proves the button is MOUNTED on a real screen. `SidebarToggleChrome` has three call
+//     sites (TopRowChrome's own TopRowLeadingChrome, SurfaceToolDock, WorkspaceSidebar — counted, not
+//     assumed), and the reachability claim in the component's comment rests on all three; this file
+//     renders the fragment directly and asserts nothing about those three. Deleting any one of them stays
+//     green here (tracker #726).
+// (b) G1 pins `disabled` and nothing else. `aria-disabled="true"`, `tabIndex={-1}`, and
+//     `style={{pointerEvents:'none'}}` each make the door dead in a way a user feels, and each survives
+//     this file at `Tests 14 passed (14)` (measured). They are NOT covered, and the deliberate reason is
+//     that the alternative — enumerating disabling attributes — is this repo's forbidden-list shape,
+//     which always leaks (there is no finite list: `hidden`, `inert`, `visibility`, a CSS class, …). The
+//     honest fix is a DOM environment where "can a user activate this?" is a question you can ask
+//     directly; until then this is a named gap, not a covered one.
 
 const TOP_ROW_CHROME = fileURLToPath(
   new URL('../src/renderer/src/components/TopRowChrome.tsx', import.meta.url)
@@ -110,6 +130,30 @@ function helpButtonElement(): ts.JsxOpeningLikeElement {
       `（0 个说明锚点被改名或按钮被删，本文件其余结构判据会随之全部变空转）`
   ).toHaveLength(1)
   return found[0]!
+}
+
+/**
+ * The arrow function a `const <name> = () => …` in this file binds, or undefined if `name` has no such
+ * binding. Lets the handler-shape criterion accept `onClick={handleClick}` — a correct, more readable
+ * refactor that an inline-arrow-only criterion false-reds — by following the binding and applying the
+ * same shape check to what it found, rather than forbidding the indirection.
+ */
+function resolveArrowBinding(sourceFile: ts.SourceFile, name: string): ts.ArrowFunction | undefined {
+  let found: ts.ArrowFunction | undefined
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.name.text === name &&
+      node.initializer &&
+      ts.isArrowFunction(node.initializer)
+    ) {
+      found = node.initializer
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(sourceFile)
+  return found
 }
 
 /** A stub dispatch surface: records every dispatched event without a DOM. */
@@ -304,37 +348,21 @@ describe('cheat-sheet chord is derived from the registry, never hand-typed', () 
   // literals that happens to agree with it. A rebind in the registry then follows automatically, which is
   // the actual property "derived, not hand-typed" means.
   //
-  // The criterion is deliberately narrow — "the initializer's subtree contains a read of the local the
-  // chord was resolved into" — because that is what "derives from" means here and it needs no list of
-  // forbidden spellings. What it does NOT see: laundering the chord through an identity function, or a
-  // read of some OTHER property of the chord (`chord.primary` in the `key` slot would pass this and fail
-  // the value asserts above — which is the intended division of labour, not a hole).
+  // The criterion is "the `key` initializer IS a property read off a local that `chordForPlatform`
+  // produced" — an identity criterion, not a containment one. The first shipped version asked only whether
+  // the initializer's subtree CONTAINED a read of the chord local, and that is measurably weaker: the
+  // audit's `key: chord.key === '/' ? '/' : '?'` reads the chord (into the condition) and still hands back
+  // two hand-typed literals, surviving at `Tests 14 passed (14)`. Containment cannot separate "derived
+  // from" from "mentions". This repo's underivedProperties finding (#724) is the same mistake.
+  //
+  // What it does NOT see: laundering the chord through an identity function (`key: id(chord).key`), or a
+  // read of some OTHER chord property (`chord.primary` in the `key` slot passes this and fails the value
+  // asserts above — the intended division of labour, not a hole).
   it('the emitted key is derived from the resolved chord, not a literal that matches it', () => {
     const { sourceFile } = readAndParse(AFFORDANCE_LIB)
     let checked = false
     const visit = (node: ts.Node): void => {
       if (ts.isFunctionDeclaration(node) && node.name?.text === 'shortcutHelpKeydownInit' && node.body) {
-        // The local the platform chord is resolved into — found by its initializer being the
-        // `chordForPlatform(...)` call, so renaming the variable cannot break this.
-        const chordLocals: string[] = []
-        const scan = (inner: ts.Node): void => {
-          if (
-            ts.isVariableDeclaration(inner) &&
-            ts.isIdentifier(inner.name) &&
-            inner.initializer &&
-            inner.initializer.getText().includes('chordForPlatform')
-          ) {
-            chordLocals.push(inner.name.text)
-          }
-          ts.forEachChild(inner, scan)
-        }
-        scan(node.body)
-        expect(
-          chordLocals,
-          'shortcutHelpKeydownInit 里应恰有一个由 chordForPlatform(...) 解析出来的局部（本判据的前提，' +
-            '缺席说明它不再从注册表取平台和弦，而这条断言会随之变空转）'
-        ).toHaveLength(1)
-
         const returned = node.body.statements.find(ts.isReturnStatement)?.expression
         expect(returned && ts.isObjectLiteralExpression(returned), '返回的应是对象字面量').toBe(true)
         const keyProp = (returned as ts.ObjectLiteralExpression).properties.find(
@@ -342,20 +370,53 @@ describe('cheat-sheet chord is derived from the registry, never hand-typed', () 
         )
         expect(keyProp, '返回的 KeyboardEventInit 里应有 key 属性').toBeDefined()
 
-        // Does the `key` initializer READ that local anywhere in its subtree?
-        const local = chordLocals[0]!
-        let readsChord = false
-        const walk = (inner: ts.Node): void => {
-          if (ts.isIdentifier(inner) && inner.text === local) readsChord = true
-          ts.forEachChild(inner, walk)
-        }
-        walk((keyProp as ts.PropertyAssignment).initializer)
+        // Direction matters: start from what `key` actually reads, then prove THAT local is the registry
+        // chord. The reverse direction ("find the chord local, then look for it in `key`") is what shipped,
+        // and it needed a "there is exactly one such local" premise — which false-reds the moment the
+        // function legitimately resolves a second chord (measured: adding an unused `inverseChord` local
+        // reds this `it` while every value assert stays green). Locking identity to the consumed local
+        // needs no count and no exception list.
+        const keyInit = (keyProp as ts.PropertyAssignment).initializer
+        const chordRead =
+          ts.isPropertyAccessExpression(keyInit) && ts.isIdentifier(keyInit.expression)
+            ? keyInit.expression
+            : undefined
         expect(
-          readsChord,
-          `key 的取值必须读到 ${local}（那个从注册表解析出来的和弦），而不是与它今天恰好相等的字面量。` +
-            `实测 \`key: isMac ? '/' : '?'\`（两个平台各抄一份）能通过全部取值断言：它在每个平台都等于` +
-            `chordForPlatform 的 key、过 chordMatches、且两平台仍不相等——于是改键之后按钮静默显示/派发旧键，` +
-            `正是 #367 那一族。实测该变异在旧守卫下 10 条全绿。`
+          chordRead
+            ? `${chordRead.text}.<prop>`
+            : `NOT-A-CHORD-READ(${ts.SyntaxKind[keyInit.kind]}: ${keyInit.getText().replace(/\s+/g, ' ')})`,
+          `key 的取值必须**就是**对某个局部的一次属性读取（今天是 \`chord.key\`），而不是任何「子树里某处` +
+            `读到过和弦」的表达式。两个已实测的绕法：\`key: isMac ? '/' : '?'\`（两个平台各抄一份，交付的` +
+            `10 条守卫下全绿）与 \`key: chord.key === '/' ? '/' : '?'\`（把和弦读进条件、两个分支写死字面量，` +
+            `放宽版判据下 14 条全绿）。两者在每个平台都等于 chordForPlatform 的 key、都过 chordMatches、` +
+            `两平台也都仍不相等——于是改键之后按钮静默派发旧键，正是 #367 那一族。`
+        ).toBe(`${chordRead?.text}.<prop>`)
+
+        // …and that local must be initialized from the registry, not from anything else.
+        const localName = chordRead!.text
+        let initializerText: string | undefined
+        const scan = (inner: ts.Node): void => {
+          if (
+            ts.isVariableDeclaration(inner) &&
+            ts.isIdentifier(inner.name) &&
+            inner.name.text === localName &&
+            inner.initializer
+          ) {
+            initializerText = inner.initializer.getText().replace(/\s+/g, ' ')
+          }
+          ts.forEachChild(inner, scan)
+        }
+        scan(node.body)
+        expect(
+          initializerText,
+          `key 读的那个局部 \`${localName}\` 在 shortcutHelpKeydownInit 里应有初始化式（找不到说明它是参数` +
+            `或来自更外层作用域，本判据无法证明它是注册表解析出来的和弦）`
+        ).toBeDefined()
+        expect(
+          initializerText!.includes('chordForPlatform'),
+          `\`${localName}\` 必须由 chordForPlatform(...) 初始化——那是注册表 SSOT 的取值口。实测它是 ` +
+            `\`${initializerText}\`。若它来自别处（手写字面量对象、另一张表），那么上面「key 就是对它的` +
+            `读取」这条断言依旧成立，而按钮已经不再跟随注册表改键。`
         ).toBe(true)
         checked = true
       }
@@ -410,10 +471,20 @@ describe('the button reuses the existing route — no duplicated open-state', ()
       initializer && ts.isJsxExpression(initializer) && initializer.expression,
       'onClick 的值应是一个表达式（花括号形式）'
     ).toBeTruthy()
-    const handler = (initializer as ts.JsxExpression).expression!
+    const handlerExpression = (initializer as ts.JsxExpression).expression!
+
+    // Three legal shapes, not one. The first shipped version demanded an INLINE arrow, which false-reds the
+    // perfectly correct refactor `const handleClick = () => openShortcutHelp(isMacPlatform())` +
+    // `onClick={handleClick}` (measured: reds this `it` alone). A guard that fails on correct code gets
+    // deleted by the next author, so it must follow the binding instead of forbidding it.
+    const handler = ts.isIdentifier(handlerExpression)
+      ? resolveArrowBinding(readAndParse(TOP_ROW_CHROME).sourceFile, handlerExpression.text)
+      : handlerExpression
     expect(
-      ts.isArrowFunction(handler),
-      `onClick 应是内联箭头函数，实测 ${ts.SyntaxKind[handler.kind]}`
+      handler && ts.isArrowFunction(handler),
+      `onClick 应是箭头函数，或是同文件里绑定到箭头函数的标识符；实测 ` +
+        `${ts.SyntaxKind[handlerExpression.kind]}` +
+        (handler ? `（解析后 ${ts.SyntaxKind[handler.kind]}）` : '（标识符解析不到箭头绑定）')
     ).toBe(true)
 
     // Peel exactly one legal shape: `() => call(...)` or `() => { call(...) }`. No other wrapper allowed.
@@ -443,6 +514,30 @@ describe('the button reuses the existing route — no duplicated open-state', ()
         '这种写法调用在场、之前无任何 return/throw，因此 assertSingleCallReachable 完全看不见它' +
         '（旧守卫下 10 条全绿、tsc 也沉默），而按钮变成一个彻底的死门。'
     ).toBe('openShortcutHelp')
+
+    // …and the platform argument must be the real probe call. Naming the callee is not enough: the
+    // behaviour family drives the lib with an isMac the TEST chooses, so it can never observe what the
+    // component actually passes. Measured survivor at `Tests 14 passed (14)`:
+    // `openShortcutHelp(!isMacPlatform())` — on mac the button then dispatches the non-mac chord
+    // (`?` with the wrong modifier), App's capture listener matches nothing, and the door is silently dead.
+    // This argument had NO criterion of any kind before; `tsc` cannot help because both sides are boolean.
+    const [platformArgument, ...extraArguments] = (expression as ts.CallExpression).arguments
+    expect(
+      extraArguments.map((argument) => argument.getText()),
+      'openShortcutHelp 只该收平台实参这一个（多出来的实参会注入这个文件没有守卫的 target/createEvent 接缝）'
+    ).toEqual([])
+    expect(
+      platformArgument &&
+        ts.isCallExpression(platformArgument) &&
+        ts.isIdentifier(platformArgument.expression)
+        ? platformArgument.expression.text
+        : `NOT-A-PROBE-CALL(${platformArgument ? ts.SyntaxKind[platformArgument.kind] : 'MISSING'}: ` +
+          `${platformArgument?.getText().replace(/\s+/g, ' ') ?? ''})`,
+      '平台实参必须**就是**一次 isMacPlatform() 调用，不是它的取反、也不是字面量。实测 ' +
+        '`openShortcutHelp(!isMacPlatform())` 在 14 条判据下全绿：G2 那时只断言 callee 名字，而行为族' +
+        '用的是测试自选的 isMac，看不见组件真正传了什么。取反之后 mac 上派发的是非 mac 和弦，' +
+        'App 的 capture listener 匹配不到 help.shortcuts，按钮静默失效。'
+    ).toBe('isMacPlatform')
   })
 
   // The affordance must not have grown its own open-state or its own routing: it presses the registry
