@@ -60,7 +60,9 @@ import {
   AGENT_ATTENTION_ACTIVATE_CHANNEL,
   CONTROL_CANCEL_CHANNEL,
   CONTROL_REQUEST_CHANNEL,
-  CONTROL_RESPONSE_CHANNEL
+  CONTROL_RESPONSE_CHANNEL,
+  RESOURCE_USAGE_CHANNEL,
+  WORKSPACE_FILE_INVALIDATED_CHANNEL
 } from '../shared/contracts.js'
 import { terminalPalette } from '../shared/terminal-palettes.js'
 import { createAgentNotifier } from './agent-notifier.js'
@@ -350,7 +352,7 @@ export async function registerIpc(args: {
     await fileObservations.observe(key, async () => (
       await files.observe(workspace(config, workspaceId), path, () => {
         if (args.window.webContents.isDestroyed()) return
-        args.window.webContents.send('agentmux:workspace-file-invalidated', { workspaceId, path })
+        args.window.webContents.send(WORKSPACE_FILE_INVALIDATED_CHANNEL, { workspaceId, path })
       })
     ))
   })
@@ -401,7 +403,7 @@ export async function registerIpc(args: {
     stopUsageSubscription(sender.id)
     const unsubscribe = args.runtime.resourceSampler.subscribe((snapshot) => {
       if (sender.isDestroyed()) return
-      sender.send('agentmux:resource-usage', snapshot)
+      sender.send(RESOURCE_USAGE_CHANNEL, snapshot)
     })
     usageSubscriptions.set(sender.id, unsubscribe)
     const cleanup = (): void => stopUsageSubscription(sender.id)

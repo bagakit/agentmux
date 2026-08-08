@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { WebContentsView, type BrowserWindow } from 'electron'
 import {
+  BROWSER_EVENT_CHANNEL,
   BROWSER_VIEWPORT_PRESETS,
   type BrowserAnnotationMarker,
   type BrowserBounds,
@@ -755,7 +756,7 @@ export class BrowserViewManager {
 
   private send(event: BrowserEvent): void {
     if (!this.window.isDestroyed() && !this.window.webContents.isDestroyed()) {
-      this.window.webContents.send('agentmux:browser-event', event)
+      this.window.webContents.send(BROWSER_EVENT_CHANNEL, event)
     }
   }
 }

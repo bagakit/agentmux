@@ -36,7 +36,7 @@ import type {
   SessionSnapshot,
   TerminalLaunchInput
 } from '../shared/contracts.js'
-import { runInterruptionFact } from '../shared/contracts.js'
+import { runInterruptionFact, SESSION_EVENT_CHANNEL } from '../shared/contracts.js'
 import {
   scanTerminalOscColorQueries,
   type TerminalOscColorQueryReplyColors
@@ -1210,7 +1210,7 @@ export class RuntimeController {
     for (const client of this.clients) {
       if (client.isDestroyed()) continue
       try {
-        client.send('agentmux:session-event', runtimeEvent)
+        client.send(SESSION_EVENT_CHANNEL, runtimeEvent)
       } catch (error) {
         console.error('Failed to publish AgentMux Runtime event', error)
       }

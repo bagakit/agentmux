@@ -2,10 +2,14 @@ import { contextBridge, ipcRenderer, webFrame } from 'electron'
 import type { AgentExecutorId, AgentMuxControlRequest, AgentMuxRunInputData } from '@agentmux/core'
 import {
   AGENT_ATTENTION_ACTIVATE_CHANNEL,
+  BROWSER_EVENT_CHANNEL,
   CONTROL_CANCEL_CHANNEL,
   CONTROL_REQUEST_CHANNEL,
   CONTROL_RESPONSE_CHANNEL,
-  WINDOW_RESIZE_EVENT_CHANNEL
+  RESOURCE_USAGE_CHANNEL,
+  SESSION_EVENT_CHANNEL,
+  WINDOW_RESIZE_EVENT_CHANNEL,
+  WORKSPACE_FILE_INVALIDATED_CHANNEL
 } from '../shared/contracts.js'
 import type {
   AgentLaunchInput,
@@ -92,8 +96,8 @@ const api: AgentMuxPreloadApi = {
     unobserve: (workspaceId: string, path: string) => ipcRenderer.invoke('files:unobserve', workspaceId, path),
     onInvalidated(listener: (event: WorkspaceFileInvalidated) => void) {
       const wrapped = (_event: Electron.IpcRendererEvent, value: WorkspaceFileInvalidated): void => listener(value)
-      ipcRenderer.on('agentmux:workspace-file-invalidated', wrapped)
-      return () => ipcRenderer.off('agentmux:workspace-file-invalidated', wrapped)
+      ipcRenderer.on(WORKSPACE_FILE_INVALIDATED_CHANNEL, wrapped)
+      return () => ipcRenderer.off(WORKSPACE_FILE_INVALIDATED_CHANNEL, wrapped)
     },
     create: (workspaceId: string, input: CreateWorkspacePathInput) =>
       ipcRenderer.invoke('files:create', workspaceId, input),
@@ -186,17 +190,17 @@ const api: AgentMuxPreloadApi = {
     stop: (session: SessionControl) => ipcRenderer.invoke('sessions:stop', session),
     onEvent(listener: (event: RuntimeEvent) => void) {
       const wrapped = (_event: Electron.IpcRendererEvent, value: RuntimeEvent): void => listener(value)
-      ipcRenderer.on('agentmux:session-event', wrapped)
-      return () => ipcRenderer.off('agentmux:session-event', wrapped)
+      ipcRenderer.on(SESSION_EVENT_CHANNEL, wrapped)
+      return () => ipcRenderer.off(SESSION_EVENT_CHANNEL, wrapped)
     }
   },
   resourceUsage: {
     subscribe(listener: (snapshot: UsageSnapshot) => void) {
       const wrapped = (_event: Electron.IpcRendererEvent, value: UsageSnapshot): void => listener(value)
-      ipcRenderer.on('agentmux:resource-usage', wrapped)
+      ipcRenderer.on(RESOURCE_USAGE_CHANNEL, wrapped)
       void ipcRenderer.invoke('resourceUsage:subscribe')
       return () => {
-        ipcRenderer.off('agentmux:resource-usage', wrapped)
+        ipcRenderer.off(RESOURCE_USAGE_CHANNEL, wrapped)
         // 退订必须一路传到主进程：只摘掉监听器会让采样继续跑，而面板已经关了。
         void ipcRenderer.invoke('resourceUsage:unsubscribe')
       }
@@ -229,8 +233,8 @@ const api: AgentMuxPreloadApi = {
     close: (id: string) => ipcRenderer.invoke('browser:close', id),
     onEvent(listener: (event: BrowserEvent) => void) {
       const wrapped = (_event: Electron.IpcRendererEvent, value: BrowserEvent): void => listener(value)
-      ipcRenderer.on('agentmux:browser-event', wrapped)
-      return () => ipcRenderer.off('agentmux:browser-event', wrapped)
+      ipcRenderer.on(BROWSER_EVENT_CHANNEL, wrapped)
+      return () => ipcRenderer.off(BROWSER_EVENT_CHANNEL, wrapped)
     }
   }
 }
