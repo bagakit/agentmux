@@ -45,6 +45,15 @@ import {
   joinWorkspacePath
 } from '../lib/workspace-paths'
 import { copyTextToClipboard, formatPathsForCopy } from '../lib/clipboard-copy'
+import {
+  FILE_TREE_GIT_STATUS_CLASS,
+  FILE_TREE_GIT_STATUS_LABEL,
+  FILE_TREE_GIT_STATUS_MARK,
+  buildFileTreeGitStatusIndex,
+  fileTreeRepoRelativePrefix,
+  type FileTreeGitStatus
+} from '../lib/file-tree-git-status'
+import { useGitStatus } from '../hooks/useGitStatus'
 import { createFileExplorerRowProjection } from './file-tree/file-explorer-row-projection'
 import { presentExpandedDir } from './file-tree/file-explorer-stale-dir-cache'
 import {
@@ -113,6 +122,7 @@ function FileTreeRow({
   loadFailure,
   selected,
   dirty,
+  gitStatus,
   editing,
   editValue,
   onEditValue,
@@ -145,6 +155,8 @@ function FileTreeRow({
   loadFailure: string | null
   selected: boolean
   dirty: boolean
+  /** 该节点的源码状态，来自 git:status 的纯投影；干净或未知时为 null。 */
+  gitStatus: FileTreeGitStatus | null
   editing: boolean
   editValue: string
   onEditValue: (value: string) => void
@@ -222,7 +234,7 @@ function FileTreeRow({
         ref={setRowRef}
         {...attributes}
         {...listeners}
-        className={`tree-row ${selected ? 'tree-row--selected' : ''} ${isDragging ? 'tree-row--dragging' : ''} ${isOver ? 'tree-row--drop-over' : ''} ${loadFailure ? 'tree-row--load-failed' : ''}`}
+        className={`tree-row ${selected ? 'tree-row--selected' : ''} ${isDragging ? 'tree-row--dragging' : ''} ${isOver ? 'tree-row--drop-over' : ''} ${loadFailure ? 'tree-row--load-failed' : ''} ${gitStatus ? FILE_TREE_GIT_STATUS_CLASS[gitStatus] : ''}`}
         style={{ '--tree-depth': node.depth } as React.CSSProperties}
         data-tree-path={node.path}
         data-tree-index={rowIndex}
@@ -282,6 +294,20 @@ function FileTreeRow({
           </button>
         )}
         {dirty ? <i className="tree-row__dirty" aria-label="Unsaved changes" /> : null}
+        {/*
+          源码状态标记。字母（M/A/?/D/R/!）是承重的非色信号，颜色只是强化——见 dock.css 里
+          .tree-row__git 的理由。判定不在这里：状态、class、字母全出自 lib/file-tree-git-status.ts
+          的穷举表，这里只把它渲染成一个带 title/aria-label 的记号。
+        */}
+        {gitStatus ? (
+          <span
+            className="tree-row__git"
+            title={FILE_TREE_GIT_STATUS_LABEL[gitStatus]}
+            aria-label={FILE_TREE_GIT_STATUS_LABEL[gitStatus]}
+          >
+            {FILE_TREE_GIT_STATUS_MARK[gitStatus]}
+          </span>
+        ) : null}
         {node.isSymlink ? <span className="tree-row__badge">link</span> : null}
         {!editing ? (
           <span className="tree-row__actions">
@@ -334,6 +360,15 @@ export function FileExplorer({
     state.activeWorkspaceId ? state.layouts[state.activeWorkspaceId]?.activeGroupId : undefined
   ))
   const dirtyDocuments = useAppStore((state) => state.dirtyDocuments)
+  // Source-control status projected straight onto the tree — no second copy of "what changed" in the
+  // store, it consumes the same git:status the Changes panel does. The mapping from porcelain to a
+  // per-node status is a pure function (lib/file-tree-git-status); this component only asks it.
+  const { status: gitStatus } = useGitStatus(workspaceId ?? null)
+  const gitStatusIndex = useMemo(() => {
+    if (gitStatus?.kind !== 'git-repository') return buildFileTreeGitStatusIndex([])
+    const prefix = workspace ? fileTreeRepoRelativePrefix(gitStatus.repoPath, workspace.path) : ''
+    return buildFileTreeGitStatusIndex(gitStatus.changes, prefix)
+  }, [gitStatus, workspace])
   const workspaceFileRevision = useAppStore((state) => (
     workspaceId ? (state.workspaceFileRevisions[workspaceId] ?? 0) : 0
   ))
@@ -859,6 +894,7 @@ export function FileExplorer({
             }
             selected={selection.selectedPaths.has(node.path) || activePath === node.path}
             dirty={Boolean(workspaceId && dirtyDocuments[documentKey(workspaceId, node.path)])}
+            gitStatus={gitStatusIndex.get(node.path, node.isDirectory)}
             editing={inlineEdit?.kind === 'rename' && inlineEdit.node.path === node.path}
             editValue={editValue}
             onEditValue={setEditValue}
