@@ -24,12 +24,14 @@ import {
  *      由 useMemo 一次性建好。用 renderToStaticMarkup 挂一个探针组件把返回值**捕获**出来即可反复驱动
  *      （SSR 会跑 useRef/useMemo，返回的闭包在渲染后照旧可用）。requestAnimationFrame node 没有，
  *      按需注入一个可控的假实现，绝不依赖真实定时。
- *   接线层（part c）—— 四个 call site 的 onKeyDown 是内联 JSX 箭头函数，既没导出、也无法在不挂载整棵
- *      组件树（store + radix dialog + dnd-kit + canvas）的情况下驱动。所以这里走 TS AST：断言每个
- *      «带 Enter 分支的 onKeyDown» 里，组字守卫（isImeCompositionKeyDown → 裸 return）真的在场、且排在
- *      Enter 分支**之前**。这比 `toContain('isImeCompositionKeyDown')` 强：它校验的是形状（调谓词 + 裸
- *      return）与位置（在 Enter 之前），正是 M6（删掉那一行）会破坏的东西。它**不**保证 React 会把
- *      handler 接成 DOM 监听器、Chromium 会按这个顺序派发 composition 事件——那要真 DOM。
+ *   接线层（part c）—— 每个 call site 的 onKeyDown 是内联 JSX 箭头函数或同文件具名函数，既没导出、也无法
+ *      在不挂载整棵组件树（store + radix dialog + dnd-kit + canvas）的情况下驱动。所以这里走 TS AST：
+ *      **遍历** renderer 下每个 .tsx 发现所有「在 Enter 上动作」的 onKeyDown（不是一张手写清单——那张清单
+ *      正是漏掉第五个输入的结构性原因），断言每个都带组字守卫：调谓词、**实参恰好是本 handler 的形参**、
+ *      且守卫**可达**（它之前不得有无条件退出）。这比 `toContain('isImeCompositionKeyDown')` 强三层，
+ *      正是 M6（删掉那一行）、「实参传 {} as never」、「首行插早退让整段变 no-op」各自会破坏的东西。
+ *      它**不**保证 React 会把 handler 接成 DOM 监听器、Chromium 会按这个顺序派发 composition 事件
+ *      ——那要真 DOM。
  */
 
 // ---------------------------------------------------------------------------
@@ -240,8 +242,10 @@ describe('useImeEnterGestureOwnership', () => {
 //       —— 现在拒绝守卫之前任何**无条件退出**本 handler 的语句（guard-must-check-reachability-not-presence）。
 //   (3) 手写文件清单 = 枚举而非测量：明天新增第 N 个 commit-on-Enter 输入，这张表根本看不见它。
 //       —— 现在**遍历** renderer 下每个 .tsx，发现每个「在 Enter 上动作」的 onKeyDown（内联箭头 **和**
-//          具名函数引用都算），要求每个都带守卫；合法地不需要守卫的，进一张**封闭且逐条具名**的例外表，
-//          且例外表本身被断言为封闭集——一个新的未守 handler 无法悄悄混进例外。
+//          具名函数引用都算），要求每个都带守卫；合法地不需要守卫的，进一张逐条具名带理由的例外表。
+//          注意：例外表**不是**靠「逐条具名」获得封闭性的——那句话本文件此前写过，实测是假的。真正挡住
+//          「剥掉某个守卫 + 自己往例外表里加一条」的，只有例外表**条数被钉成字面量**那一条断言
+//          （EXPECTED_EXCEPTION_COUNT，见该表上方注释里那次实测逃生构造）。
 //
 // 守卫有两种合法形状，两者都要求「实参 = 本 handler 形参」且「可达」：
 //   · 独立式：`if (isImeCompositionKeyDown(P)) return`，排在 Enter 分支之前（FileExplorer / QuickSwitcher /
@@ -495,6 +499,12 @@ function discoverCommitOnEnterHandlers(): DiscoveredHandler[] {
 // 因此判据换成：本表的条数被钉成一个字面量。加一条例外必须同时改那个数字 —— 那是个响亮、必然被 review 看见的
 // 动作，而不是往数组里悄悄塞一项。配合第三条断言（每条例外恰好命中一个**当前未被守卫**的 handler）与本条，
 // 「换掉一条例外」也会红：被换掉的那条锚点不再命中任何未守 handler。
+//
+// 这个数字该收到多少：本表四条里**两条是永久事实豁免**（FileExplorer 的树导航、WorkspaceWorkbench 的
+// requestClose——它是个按 Enter/Space 激活的 span 按钮，不承载文本草稿），**两条是 peer 欠账**
+// （TerminalView 的搜索框、WorkspaceWorkbench 的重命名输入）。所以两个 peer 文件落地、补上守卫之后，
+// 这个数字应当收到 **2**，不是 0 也不是 1。（69d2ed0 的 message 在这里写了「改到 1」，那是错的：
+// 它把 requestClose 也算成了欠账。分类逐条写在下面每条的 reason 里，以 reason 为准。）
 const EXPECTED_EXCEPTION_COUNT = 4
 const GUARD_EXCEPTIONS: ReadonlyArray<{ anchor: string; reason: string }> = [
   {
@@ -518,7 +528,9 @@ const GUARD_EXCEPTIONS: ReadonlyArray<{ anchor: string; reason: string }> = [
   {
     anchor: 'components/WorkspaceWorkbench.tsx::span:requestClose',
     reason:
-      '按钮激活（Enter/Space 关闭 Tab），不是文本草稿；且 WorkspaceWorkbench.tsx 为 peer 持有、本轮只读。'
+      '按事实豁免（非欠账）：role=button 的 span 按 Enter/Space 激活以关闭 Tab，不承载文本草稿，' +
+      '所以它永远不该带组字守卫——这一条不随 WorkspaceWorkbench.tsx 落地而消失。' +
+      '（该文件同时为 peer 持有、本轮只读，但那与本条是不是欠账无关。）'
   }
 ]
 
