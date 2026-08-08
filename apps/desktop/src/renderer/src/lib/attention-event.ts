@@ -105,8 +105,11 @@ export function categoryFor(state: AgentDisplayState): AttentionCategory | null 
  * `done` — expressed by naming the two that DO earn ink, because the interesting question at every call
  * site is "is this urgent", and answering it by listing exclusions inverts on the next category added.
  *
- * Both the row accent and the collapsed roster badge read this, so the ink and the count are one
- * decision. They were two independent `needs-you || error` copies before.
+ * The row accent reads this in production (via {@link attentionAccentFor}), so "which categories earn
+ * ink" is decided in exactly one place. `rosterBadgeCount` also reads it, but that count feeds no
+ * collapsed roster badge — no such badge is built, and nothing in production calls it (see its
+ * docstring). So do not read this as "the badge and the ink are one number": today it is only the ink.
+ * The accent was a hand-written `needs-you || error` copy before this.
  */
 export const URGENT_ATTENTION_CATEGORIES = ['needs-you', 'error'] as const
 
