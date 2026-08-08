@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { ScratchTopicSnapshot } from '../../../shared/contracts'
 import { api } from '../lib/api'
+import { presentError } from '../lib/error-presentation'
 import { useAppStore } from '../store'
 
 /**
@@ -30,7 +31,7 @@ export function useScratchTopics(workspaceId: string | null): {
     void api.scratch.listTopics(workspaceId).then((snapshots) => {
       if (active) setTopics(snapshots)
     }).catch((cause) => {
-      if (active) setError(cause instanceof Error ? cause.message : String(cause))
+      if (active) setError(presentError(cause))
     })
     return () => { active = false }
   }, [revision, workspaceId])

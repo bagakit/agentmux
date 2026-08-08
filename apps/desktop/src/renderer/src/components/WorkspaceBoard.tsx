@@ -24,6 +24,7 @@ import { useWorkspaceBranches } from '../hooks/useWorkspaceBranches'
 import { useScratchTopics } from '../hooks/useScratchTopics'
 import { useBoardRows } from '../hooks/useBoardRows'
 import { api } from '../lib/api'
+import { presentError } from '../lib/error-presentation'
 import {
   BOARD_COLUMN_DESCRIPTIONS,
   PROJECT_BOARD_COLUMNS,
@@ -200,7 +201,7 @@ export function WorkspaceBoard() {
         setWorkspaceTool('files-branches')
       }
     } catch (cause) {
-      setActionError(cause instanceof Error ? cause.message : String(cause))
+      setActionError(presentError(cause))
     }
   }
 

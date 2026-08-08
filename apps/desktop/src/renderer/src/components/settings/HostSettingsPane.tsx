@@ -2,6 +2,7 @@ import { CheckCircle2, ChevronDown, LoaderCircle, Monitor, Plus, RadioTower, Tra
 import { useEffect, useState } from 'react'
 import type { AppConfig, HostConfig, SshHostConfig, WorkspaceRecord } from '../../../../shared/contracts'
 import { useAppStore } from '../../store'
+import { presentError } from '../../lib/error-presentation'
 import { ConfirmationDialog } from '../ConfirmationDialog'
 
 export function HostSettingsPane({ config, onSave }: {
@@ -54,7 +55,7 @@ export function HostSettingsPane({ config, onSave }: {
       await onSave(nextHosts, nextWorkspaces)
       return true
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
+      setError(presentError(cause))
       return false
     } finally {
       setSaving(false)
