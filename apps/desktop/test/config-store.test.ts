@@ -1143,6 +1143,96 @@ describe('ConfigStore workspace identity', () => {
   })
 })
 
+describe('ConfigStore recoverability', () => {
+  // 这一族守的是本 lane 的题眼：一次 config 写入要么可逆，要么响亮拒绝——不许静默。
+  // 两条独立机制：
+  //   1. 覆盖前把旧字节留到 `.prev` 单文件（当前版本下每次 save 都过这条路，退役守卫看不到这里）。
+  //   2. 读不出来的 config 在 get() 抛之前把原始字节抄到 `.corrupt`，这样用户为脱困删掉主文件也不销毁证据。
+
+  async function fileText(path: string): Promise<string | null> {
+    try {
+      return await readFile(path, 'utf8')
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+      throw error
+    }
+  }
+
+  it('keeps the pre-save bytes in a single previous-version sidecar, replaced each write', async () => {
+    // 判据不是「有个 .prev」，而是「.prev 恰好等于**上一次**落盘的那份字节」——不是更旧的，也不是刚写的。
+    // 变异实测：把 `durableWriteFile(this.previousVersionPath, previousText)` 里的 previousText 改成
+    // 新配置的序列化，这条立刻红（第二个断言：.prev 会等于 B 而不是 A）。删掉整行也红（.prev 缺席）。
+    const { store, path } = await storeFixture()
+
+    const savedA = await store.save({ ...baseConfig, workspaces: [workspace({ id: 'ws-a' })] })
+    const bytesAfterA = await readFile(path, 'utf8')
+    // 第一次写之前盘上什么都没有，所以此刻还不该有 .prev（否则就是把自己刚写的当成了旧值）。
+    expect(await fileText(store.previousVersionPath), '第一次写就冒出了 .prev——它把新字节当旧值了')
+      .toBeNull()
+
+    const savedB = await store.save({ ...savedA, workspaces: [workspace({ id: 'ws-b', path: '/projects/b' })] })
+    const bytesAfterB = await readFile(path, 'utf8')
+    // 承重：.prev 现在必须逐字等于 A 落盘的那份，而不是 B。
+    expect(await fileText(store.previousVersionPath), '.prev 不是上一次落盘的字节')
+      .toBe(bytesAfterA)
+    // 反向锚点：确认 A 与 B 的字节确实不同，否则上面那条恒真、什么都没守。
+    expect(bytesAfterA, '前提自检：A 与 B 的落盘字节必须不同').not.toBe(bytesAfterB)
+
+    // 单文件、每次替换：第三次写后 .prev 前进到 B，A 那份不再保留（这是一步撤销，不是历史）。
+    await store.save({ ...savedB, workspaces: [workspace({ id: 'ws-c', path: '/projects/c' })] })
+    expect(await fileText(store.previousVersionPath), '.prev 没有前进到 B——它不是单步撤销就是没在替换')
+      .toBe(bytesAfterB)
+  })
+
+  it('quarantines the exact bytes of a corrupt config before get() throws, surviving deletion of the main file', async () => {
+    // 语法坏掉的 JSON 走 get() 的 catch。判据有两层：quarantine 抄的是**原始字节**（不是重新序列化的），
+    // 且它在主文件被删后依然在——那正是「用户删文件脱困」时唯一剩下的证据。
+    // 变异实测：删掉 get() catch 里的 quarantineUnreadable 调用，第二个断言红（.corrupt 缺席）。
+    const { store, path } = await storeFixture()
+    const corrupt = '{ this is not : json,,, '
+    await writeFile(path, corrupt)
+
+    await expect(store.get()).rejects.toThrow()
+
+    expect(await fileText(store.quarantinePath), 'corrupt 配置没有被抄到隔离区').toBe(corrupt)
+    // 主文件原封不动（响亮失败可恢复的全部依据），且隔离区独立于它存在。
+    expect(await readFile(path, 'utf8')).toBe(corrupt)
+    await rm(path)
+    expect(await fileText(store.quarantinePath), '删掉主文件后隔离区也没了——证据随之销毁').toBe(corrupt)
+  })
+
+  it('quarantines a config the schema refuses to launch on, keeping the original bytes verbatim', async () => {
+    // 不只是语法错：走到「拒绝启动」守卫（如整份 workspaces 不可读）的那几条也必须留证据。
+    // 判据是隔离区逐字等于原始输入，而不是被 carry-over 改写过的东西。
+    const { store, path } = await storeFixture()
+    const original = JSON.stringify({
+      ...baseConfig,
+      version: DEFAULT_CONFIG.version - 1,
+      workspaces: [
+        { ...workspace({ id: 'ws-1', path: '/projects/one' }), shape: 'future' },
+        { ...workspace({ id: 'ws-2', path: '/projects/two' }), shape: 'future' }
+      ]
+    })
+    await writeFile(path, original)
+
+    await expect(store.get()).rejects.toThrow(/project/)
+    expect(await fileText(store.quarantinePath), '拒绝启动的 config 没留下隔离证据').toBe(original)
+    expect(await readFile(path, 'utf8'), '主文件被动了').toBe(original)
+  })
+
+  it('does not quarantine when there is simply no config file yet', async () => {
+    // 反向边界：全新安装（ENOENT）不是损坏，绝不能留下一个假的 .corrupt——否则每次首启都像出过事。
+    // 变异实测：若把 ENOENT 分支也导向 quarantine，这条红。
+    const { store } = await storeFixture()
+
+    const loaded = await store.get()
+
+    expect(loaded.workspaces.map((entry) => entry.id)).toEqual([SCRATCH_WORKSPACE_ID])
+    expect(await fileText(store.quarantinePath), '首次启动不该冒出 .corrupt').toBeNull()
+  })
+})
+
+
 describe('DEFAULT_CONFIG built-in Provider coverage', () => {
   // 期望值永远从 Core 现取，绝不在测试里手抄一份 id 清单——手抄的清单会和它要守的东西一起漂。
   // 这道门守的正是本次修复的缺陷：Core 新增/改名一个 built-in Provider 而默认表没跟上时，新建 Tab
