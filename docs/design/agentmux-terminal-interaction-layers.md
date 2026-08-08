@@ -37,7 +37,7 @@
 | A 选区复制 | 右键 Copy / 裸 Ctrl+C / `terminal.copy` 和弦（⌘C 或 Ctrl+Shift+C） | **选区** | `TerminalView.tsx:copySelection` |
 | B 复制可见输出 | 右键菜单 | **缓冲区视口** | `terminal-buffer-copy.ts:terminalViewportText` |
 | C 复制全部输出 | 右键菜单 | **缓冲区全 scrollback** | `terminal-buffer-copy.ts:terminalScrollbackText` |
-| D OSC 52 | PTY 里的程序主动写 | **PTY 载荷（base64）** | `terminal-osc-clipboard.ts:terminalOscClipboardWrite` |
+| D OSC 52 | PTY 里的程序主动写 | **PTY 载荷（base64）** | `shared/terminal-osc-clipboard.ts:terminalOscClipboardWrite` |
 
 A 是**三个触发共用一个数据源**。这一点是 #638 的全部要害：三条路一起失灵不是三个 bug，是一个。
 
@@ -106,7 +106,7 @@ live 空取 remembered），以及同文件 `terminal.copy 把当前选区记下
 **修法（围栏，已实现）**：只写不读（读形式 `52;c;?` 结构上不可达——该模块只产文本，没有
 `sendInput` 通路）；base64 必须严格解码；空载荷忽略（防止静默清空剪贴板）；整帧 128 KiB 上限；
 选择目标白名单 `{c, s, ''}`；**replay 期不写**——历史 scrollback 里的 OSC 52 不许劫持当下的剪贴板
-（闸是 `isReplaying()`）。落点是 `terminal-osc-clipboard.ts:terminalOscClipboardWrite`。
+（闸是 `isReplaying()`）。落点是 `shared/terminal-osc-clipboard.ts:terminalOscClipboardWrite`。
 
 **守卫**：`terminal-osc-clipboard.test.ts`——`只接系统剪贴板与默认选区，不接 X11 primary`（白名单）、
 `空载荷不算写` / `纯空白载荷同样不算写`（防静默清空）、`坏 base64 给 null`（严格解码）、
@@ -116,8 +116,8 @@ live 空取 remembered），以及同文件 `terminal.copy 把当前选区记下
 
 **仍开着的缺口（#815，修法尚不存在）**：解码出来的文本**没有过 ESC 消毒**就进系统剪贴板。消毒器
 只覆盖「我们送进 PTY 的字节」，不覆盖「PTY 写出来的字节」。这是投毒面：用户把它粘到别处时才发作。
-这条缺口是**明示的**，不是遗漏——`bracketed-paste.ts` 的文件头写明了它，并指向 #815；今天没有守卫，
-因为要守的行为（对写出字节消毒）还没实现。
+这条缺口是**明示的**，不是遗漏——`packages/core/src/bracketed-paste.ts` 的文件头写明了它，并指向
+#815；今天没有守卫，因为要守的行为（对写出字节消毒）还没实现。
 
 ---
 
@@ -139,7 +139,8 @@ live 空取 remembered），以及同文件 `terminal.copy 把当前选区记下
 **机制**：xterm 的 `bracketTextForPaste` 用 `ESC[200~`/`ESC[201~` 把粘贴内容包起来，但**不转义内容
 本身**。载荷里若带 `ESC[201~` 就能提前闭合括号，后面的字节被 shell 当成真实输入执行。
 
-**修法**：`bracketed-paste.ts:sanitizeBracketedPasteText` 把 ESC 换成可见的 ␛（U+241B），不是删除：
+**修法**：`packages/core/src/bracketed-paste.ts:sanitizeBracketedPasteText` 把 ESC 换成可见的
+␛（U+241B），不是删除：
 **判定的是「ESC 这个字节」，不是「`ESC[201~` 这个串」**——收窄到具体串会漏掉伪造起始符、光标
 移动、OSC 等其它构造。消毒是替换而非删除，因为用户要看得见有人往里塞了控制序列。这是全仓唯一
 一份判定，prompt 投递路与终端粘贴路共用它。
