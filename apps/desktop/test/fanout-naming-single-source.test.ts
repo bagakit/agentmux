@@ -82,14 +82,25 @@ describe('the fan-out slug is idempotent — a single function, not a fixed poin
 // 两份实现今天一致、明天分岔。所以再钉一层结构判据。
 //
 // 判据不是「不许出现某个函数名」（换个名字、内联一份就绕过），也不是「文件里出现过某段文本」（注释、
-// docstring 里提到这个正则会误报）。判据用 **TS 自己的解析器** 找**取值位**：一个
-// `X.replace(/…[^a-z0-9]…/, '-')` 调用——把「除小写字母数字外一律折成连字符」这个分支名归一动作
-// 落到语法树上的那一处。这个否定字符类 `[^a-z0-9]` 是分支名 slug 独有的签名：仓库里别处的 slug 用的是
-// `[^A-Za-z0-9._-]`（workspace 路径段）或 `[^A-Za-z0-9_-]`（provider id），大小写字母都在内，与它不同形，
-// 所以不会被误伤。
+// docstring 里提到这个正则会误报）。判据用 **TS 自己的解析器** 找**取值位**：一个把「除小写字母数字外
+// 一律折成连字符」这个分支名归一动作落到语法树上的那一处 `.replace(<regex>, '-')`。
 //
-// 允许出现这个取值位的文件只有 SSOT 一个；src/main、src/renderer、src/shared 下其余任何文件若出现同形
-// 取值就报红并指名——那就是「第二份 slug 实现」回来了。
+// 加固（本轮）：第一版用 `arg0.getText().includes('[^a-z0-9]')` 做**子串**判定，于是同一个字符类的
+// 别的等价拼法全部绕过——`[^0-9a-z]`（换序）、`[^a-z\d]`（`\d` 代 `0-9`）、以及 `new RegExp('[^a-z0-9]')`
+// （不是正则字面量，`arg0.getText()` 拿到的是 `new RegExp(...)` 整段）——review agent 各测 `5/5 green`
+// （记忆 counting-a-symbol-misses-other-spellings：数一种拼法漏掉别的拼法）。现在把字符类**归一成集合**
+// 再比：展开范围、把 `\d` 当 `0-9`、顺序无关，得到 `0-9|a-z` 这个规范形，与分支名 slug 的签名相等才算。
+// 这个否定字符类**恰好是** {a-z, 0-9}，是分支名 slug 独有的签名：仓库别处的 slug 用
+// `[^A-Za-z0-9._-]`（workspace 路径段）或 `[^A-Za-z0-9_-]`（provider id），集合里含大写字母与额外符号，
+// 规范形不同，所以不会被误伤。
+//
+// 另一半是**归类不了的可疑形状要响亮**（记忆 forbidden-list-guard-always-leaks）：一个
+// `.replace(<动态>, '-')`——正则从变量/函数/`new RegExp(变量)` 来，静态解析不出——可能正是第二份 slug
+// 用运行期构造的正则伪装起来。它被标成 unclassified，主扫描一律响亮失败并指名，绝不静默放过。
+// 今天三个扫描根里一处这种写法都没有（每个折成连字符的 `.replace` 第一参都是内联正则字面量），
+// 见 `recognises the reduction` 的反向自证。
+//
+// 允许出现分支名 slug 取值位的文件只有 SSOT 一个；其余任何文件出现同形取值就报红并指名。
 // ---------------------------------------------------------------------------------------------------
 
 // 落点唯一允许的文件（相对各扫描根去比对时用它的 basename 判定）。
@@ -116,28 +127,107 @@ function walk(rootUrl: string): string[] {
 }
 
 /**
+ * 一个否定字符类 `[^...]` 的内容，归一成与写法无关的规范形。
+ *
+ * 展开范围（`a-z`）、把 `\d` 当作 `0-9`、`\w`/`\s` 等其它转义原样留字面，顺序无关。返回排序后用 `|`
+ * 连起来的原子串，如 `[^a-z0-9]` / `[^0-9a-z]` / `[^a-z\d]` 都归一成 `0-9|a-z`。找不到否定字符类返回 null。
+ *
+ * 这是把「子串匹配一种拼法」换成「比较归一后的值」的那一步（本轮的修法一）。
+ */
+function negatedClassCanonical(pattern: string): string | null {
+  const match = /\[\^([^\]]*)\]/u.exec(pattern)
+  if (!match) return null
+  const body = match[1]!
+  const atoms = new Set<string>()
+  for (let i = 0; i < body.length; i += 1) {
+    const ch = body[i]!
+    if (ch === '\\') {
+      const next = body[i + 1]
+      if (next === 'd') atoms.add('0-9')
+      else if (next !== undefined) atoms.add(next) // 其它转义（\w \s \. …）留字面原子，绝不当作 0-9/a-z
+      i += 1
+      continue
+    }
+    // 范围 X-Y：中间是 '-' 且两侧都在
+    if (body[i + 1] === '-' && body[i + 2] !== undefined && body[i + 2] !== ']') {
+      atoms.add(`${ch}-${body[i + 2]}`)
+      i += 2
+      continue
+    }
+    atoms.add(ch)
+  }
+  return [...atoms].sort().join('|')
+}
+
+// 分支名 slug 的签名：否定字符类恰好等于 {a-z, 0-9}。
+const BRANCH_SLUG_CANONICAL = '0-9|a-z'
+
+/**
+ * 从 `.replace(...)` 调用的第一个实参里解析出正则的 **pattern 源码**（不含分隔符与 flag）。
+ *
+ * 认三种可静态解析的形状：正则字面量 `/.../flags`、`new RegExp('...')`（字符串字面量或字面量的 `+`
+ * 拼接）、以及把字符串直接传给 `.replace`（此时是字面量替换，不是正则）。解析不出（变量、`new RegExp(变量)`、
+ * 模板插值、函数返回）时返回 undefined——由调用方标成 unclassified 并响亮，而不是静默当成「不是 slug」。
+ */
+function staticStringOf(node: ts.Expression): string | null {
+  if (ts.isStringLiteralLike(node)) return node.text
+  if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+    const left = staticStringOf(node.left)
+    const right = staticStringOf(node.right)
+    return left !== null && right !== null ? left + right : null
+  }
+  return null
+}
+
+function regexSourceOfReplaceArg(arg: ts.Expression): { source: string } | { unresolved: true } {
+  if (ts.isRegularExpressionLiteral(arg)) {
+    const literal = arg.getText()
+    const m = /^\/(.*)\/[a-z]*$/su.exec(literal)
+    return { source: m ? m[1]! : literal }
+  }
+  if (ts.isNewExpression(arg) && ts.isIdentifier(arg.expression) && arg.expression.text === 'RegExp') {
+    const first = arg.arguments?.[0]
+    if (first) {
+      const literal = staticStringOf(first)
+      if (literal !== null) return { source: literal }
+    }
+    return { unresolved: true } // new RegExp(变量 / 拼了插值的东西)——解析不出，可疑
+  }
+  if (staticStringOf(arg) !== null) return { source: '' } // 字面量字符串替换：不是正则，无否定字符类
+  return { unresolved: true }
+}
+
+/**
  * Every place in one source that reduces text to the branch-name alphabet, via TypeScript's own parser.
  *
- * The value position is a `.replace(<regex>, '-')` call whose regex negates the lowercase-alnum class
- * (`[^a-z0-9]`). Using the parser rather than a text scan keeps prose out — a comment or docstring that
- * quotes the pattern (this file has several) is not a call node and is never reported.
+ * A candidate is a `.replace(<x>, '-')` call. Its first argument is resolved to a regex pattern; the
+ * negated class is canonicalised and compared to the lowercase-alnum signature (`0-9|a-z`) — so
+ * `[^0-9a-z]`, `[^a-z\d]`, and `new RegExp('[^a-z0-9]')` all match, while the repo's uppercase-keeping
+ * slugs do not. A candidate whose regex cannot be resolved statically is returned as `unclassified` so
+ * the whole-repo scan fails loudly on it rather than silently treating it as "not a slug".
  */
-function branchSlugReductions(source: string, label: string): string[] {
+type Reduction = { kind: 'slug'; text: string } | { kind: 'unclassified'; text: string }
+
+function branchSlugReductions(source: string, label: string): Reduction[] {
   const file = ts.createSourceFile(label, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
-  const found: string[] = []
+  const found: Reduction[] = []
 
   const visit = (node: ts.Node): void => {
     if (
       ts.isCallExpression(node) &&
       ts.isPropertyAccessExpression(node.expression) &&
       node.expression.name.text === 'replace' &&
-      node.arguments.length >= 1 &&
-      ts.isRegularExpressionLiteral(node.arguments[0]!) &&
-      // The conservative branch-name alphabet's signature: collapse everything that is NOT a lowercase
-      // alphanumeric. Distinct from the repo's other slugs, which keep uppercase (`[^A-Za-z0-9…]`).
-      node.arguments[0]!.getText().includes('[^a-z0-9]')
+      node.arguments.length >= 2 &&
+      // 只看「折成连字符」这一动作——替换实参恰好是字符串 '-'。别的替换（去尾斜杠成 ''、加前缀）不是它。
+      staticStringOf(node.arguments[1]!) === '-'
     ) {
-      found.push(node.getText())
+      const resolved = regexSourceOfReplaceArg(node.arguments[0]!)
+      if ('unresolved' in resolved) {
+        found.push({ kind: 'unclassified', text: node.getText() })
+      } else {
+        const canonical = negatedClassCanonical(resolved.source)
+        if (canonical === BRANCH_SLUG_CANONICAL) found.push({ kind: 'slug', text: node.getText() })
+      }
     }
     ts.forEachChild(node, visit)
   }
@@ -147,18 +237,38 @@ function branchSlugReductions(source: string, label: string): string[] {
 }
 
 describe('the branch-name slug lives in exactly one file', () => {
-  it('recognises the reduction and does not fire on ordinary .replace calls', () => {
+  it('recognises the reduction across equivalent spellings and does not fire on ordinary .replace calls', () => {
     // 没有这条自检，下面的全仓扫描可以靠「悄悄不再匹配任何东西」而恒绿——那正是让全仓守卫看起来
     // 周全、其实什么都没查的形状。
-    expect(branchSlugReductions("const s = v.toLowerCase().replace(/[^a-z0-9]+/gu, '-')", 'x.ts')).toHaveLength(1)
+    const slugText = (source: string): string[] =>
+      branchSlugReductions(source, 'x.ts').filter((r) => r.kind === 'slug').map((r) => r.text)
+    const unclassified = (source: string): Reduction[] =>
+      branchSlugReductions(source, 'x.ts').filter((r) => r.kind === 'unclassified')
+
+    // 分支名 slug 的等价拼法都要被认出——这几条正是 review agent 测得 5/5 green 的 bypass：
+    expect(slugText("const s = v.toLowerCase().replace(/[^a-z0-9]+/gu, '-')"), '基准拼法没被认出').toHaveLength(1)
+    expect(slugText("const s = v.replace(/[^0-9a-z]+/gu, '-')"), '换序 [^0-9a-z] 绕过了归一').toHaveLength(1)
+    expect(slugText("const s = v.replace(/[^a-z\\d]+/gu, '-')"), '\\d 代 0-9 绕过了归一').toHaveLength(1)
+    expect(slugText("const s = v.replace(new RegExp('[^a-z0-9]', 'gu'), '-')"), 'new RegExp 绕过了归一').toHaveLength(1)
+
     // 近似但不同形的 .replace，必须**不**被认成分支名 slug：
-    // 1) 去尾部斜杠（workspace 路径归一），不是 slug。
-    expect(branchSlugReductions("const s = root.replace(/[\\\\/]+$/u, '')", 'x.ts')).toEqual([])
-    // 2) 保留大写字母的 slug（workspace 路径段 / provider id）——字母表不同，不是分支名 slug。
-    expect(branchSlugReductions("const s = b.replace(/[^A-Za-z0-9._-]+/g, '-')", 'x.ts')).toEqual([])
-    expect(branchSlugReductions("const s = p.replace(/[^A-Za-z0-9_-]/g, '-')", 'x.ts')).toEqual([])
+    // 1) 去尾部斜杠（workspace 路径归一），替换实参是 '' 不是 '-'，也没有否定小写字母数字类。
+    expect(slugText("const s = root.replace(/[\\\\/]+$/u, '')")).toEqual([])
+    // 2) 保留大写字母的 slug（workspace 路径段 / provider id）——集合含大写字母，规范形不同。
+    expect(slugText("const s = b.replace(/[^A-Za-z0-9._-]+/g, '-')")).toEqual([])
+    expect(slugText("const s = p.replace(/[^A-Za-z0-9_-]/g, '-')")).toEqual([])
     // 3) 普通字符串替换，不是 slug。
-    expect(branchSlugReductions("const s = v.replace('a', 'b')", 'x.ts')).toEqual([])
+    expect(slugText("const s = v.replace('a', 'b')")).toEqual([])
+
+    // 归类不了的可疑形状要响亮，不能静默当成「不是 slug」（记忆 forbidden-list-guard-always-leaks）：
+    // 折成连字符、但正则来自运行期构造，静态解析不出——可能正是第二份 slug 用变量正则伪装。
+    expect(unclassified("const rx = buildIt(); const s = v.replace(rx, '-')"), '动态正则的折连字符没被标 unclassified')
+      .toHaveLength(1)
+    expect(unclassified("const s = v.replace(new RegExp(dyn), '-')"), 'new RegExp(变量) 的折连字符没被标 unclassified')
+      .toHaveLength(1)
+    // 反向自证：内联字面量正则不会被误标成 unclassified。
+    expect(unclassified("const s = v.replace(/[^a-z0-9]+/gu, '-')")).toEqual([])
+    expect(unclassified("const s = b.replace(/[^A-Za-z0-9._-]+/g, '-')")).toEqual([])
   })
 
   it('finds the reduction in the SSOT and nowhere else under main/renderer/shared', () => {
@@ -169,8 +279,20 @@ describe('the branch-name slug lives in exactly one file', () => {
     // 前提自检：三个扫描根加起来得有像样的文件数，否则扫描根写错会让主断言静默通过。
     expect(files.length, '几乎没扫到文件——扫描根写错，主断言恒绿').toBeGreaterThan(50)
 
-    const holders = files
-      .map((file) => ({ rel: file.rel, hits: branchSlugReductions(file.source, file.rel) }))
+    const scanned = files.map((file) => ({ rel: file.rel, reductions: branchSlugReductions(file.source, file.rel) }))
+
+    // 先钉「无法归类」这一侧：任何文件里出现折成连字符、但正则静态解析不出的 .replace，都可能是第二份
+    // slug 用运行期正则伪装的。它必须让人回来看，而不是被当成安全（记忆 forbidden-list-guard-always-leaks）。
+    const suspicious = scanned.flatMap(({ rel, reductions }) =>
+      reductions.filter((r) => r.kind === 'unclassified').map((r) => `${rel}: ${r.text}`)
+    )
+    expect(suspicious, [
+      '这些 .replace(…, "-") 的正则不是内联字面量，静态解析不出它折的是什么字符类。它可能正是',
+      '第二份分支名 slug 用运行期构造的正则伪装起来。请改成内联正则字面量，或从 fanOutSlug 取。'
+    ].join('\n')).toEqual([])
+
+    const holders = scanned
+      .map(({ rel, reductions }) => ({ rel, hits: reductions.filter((r) => r.kind === 'slug').map((r) => r.text) }))
       .filter(({ hits }) => hits.length > 0)
 
     // SSOT 必须在其中——否则「别处都没有」可能意味着这个归一整个消失了，而不是恰好一份。
