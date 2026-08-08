@@ -12,6 +12,7 @@ vi.hoisted(() => {
 })
 
 import { SidebarToggleChrome } from '../src/renderer/src/components/TopRowChrome.js'
+import { ProjectRailToolbar } from '../src/renderer/src/components/ProjectRailToolbar.js'
 import {
   openShortcutHelp,
   shortcutHelpKeydownInit,
@@ -95,7 +96,7 @@ import { assertSingleCallReachable, readAndParse } from './helpers/effect-reacha
 //     directly; until then this is a named gap, not a covered one.
 
 const TOP_ROW_CHROME = fileURLToPath(
-  new URL('../src/renderer/src/components/TopRowChrome.tsx', import.meta.url)
+  new URL('../src/renderer/src/components/ProjectRailToolbar.tsx', import.meta.url)
 )
 
 const AFFORDANCE_LIB = fileURLToPath(
@@ -199,7 +200,7 @@ describe('cheat-sheet visible affordance — it renders', () => {
   // appear more than once, and this repo counts per file rather than asking "does it appear". Exactly one
   // button, exactly one accessible label.
   it('SidebarToggleChrome renders exactly one keyboard-shortcuts button with an accessible label', () => {
-    const markup = renderToStaticMarkup(createElement(SidebarToggleChrome))
+    const markup = renderToStaticMarkup(createElement(ProjectRailToolbar, { onOpenSettings: vi.fn() }))
     // The static render anchor (a bare marker attribute, like data-project-rail-toggle beside it).
     expect(markup.split('data-shortcut-help-open').length - 1, 'button rendered ≠ once').toBe(1)
     expect(markup.split('aria-label="Keyboard shortcuts"').length - 1, 'accessible label ≠ once').toBe(1)

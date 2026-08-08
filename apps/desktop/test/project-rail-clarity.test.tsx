@@ -1,0 +1,33 @@
+// @vitest-environment happy-dom
+import { act } from 'react'
+import { createRoot } from 'react-dom/client'
+import { expect, it, vi } from 'vitest'
+import type { SessionSnapshot } from '../src/shared/contracts'
+const state = vi.hoisted(() => ({ selectSession: vi.fn(), providerCatalog: [] }))
+vi.mock('../src/renderer/src/store', () => ({ useAppStore: (select: (value: typeof state) => unknown) => select(state) }))
+import { ProjectActivity } from '../src/renderer/src/components/ProjectActivity'
+
+it('hover explains which Agent needs a reply, selection navigates exactly there, and resolution removes the marker', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  const container = document.createElement('div'); document.body.append(container)
+  const root = createRoot(container)
+  const session: SessionSnapshot = { id: 'a', kind: 'agent', label: 'Reviewer', providerId: 'codex', executorId: 'codex',
+    capabilities: { terminal: true, timeline: 'streaming', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
+    hostId: 'local', workspacePath: '/project', createdAt: 1, updatedAt: 1, processState: 'running', latestOutputBytes: 0,
+    control: { kind: 'agent', hostId: 'local', agentSessionId: 'a', run: { runId: 'run-a' } },
+    status: { state: 'waiting', source: 'run-process', observedAt: 1 },
+    pendingInteraction: { kind: 'question', id: 'q', agentSessionId: 'a', questions: [{ id: 'branch', prompt: 'Which branch should I review?', options: [] }], evidence: { source: 'native-hook', observedAt: 1 } } }
+
+  try {
+    await act(async () => root.render(<ProjectActivity sessions={[session]} />))
+    const button = container.querySelector('button')!
+    expect(button.textContent).toContain('Needs you')
+    await act(async () => button.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse', buttons: 0 })))
+    expect(document.querySelector('[role="menu"]')?.textContent).toContain('Which branch should I review?')
+    await act(async () => (document.querySelector('[role="menuitem"]') as HTMLElement).click())
+    expect(state.selectSession).toHaveBeenCalledExactlyOnceWith('a')
+    const { pendingInteraction: _resolved, ...resolvedSession } = session
+    await act(async () => root.render(<ProjectActivity sessions={[{ ...resolvedSession, status: { ...session.status, state: 'done' } }]} />))
+    expect(container.querySelector('button')).toBeNull()
+  } finally { await act(async () => root.unmount()); container.remove() }
+})

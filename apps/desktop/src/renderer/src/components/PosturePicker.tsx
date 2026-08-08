@@ -1,4 +1,4 @@
-import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import * as DropdownMenu from './HoverDropdownMenu'
 import { Check, ShieldCheck } from 'lucide-react'
 import type { AgentPostureControl } from '@agentmux/core'
 

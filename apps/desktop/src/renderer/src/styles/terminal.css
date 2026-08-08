@@ -302,3 +302,5 @@
 .terminal-font-size-control input[type="number"]:focus-visible { border-color: var(--focus-line); outline: none; }
 .terminal-font-size-control__unit { color: var(--text-3); font-size: var(--fs-micro); }
 .settings-hint { margin:0; padding:0 var(--sp-4) var(--sp-4); color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
+
+.terminal-replay-gap--compact { align-self: flex-start; width: fit-content; }

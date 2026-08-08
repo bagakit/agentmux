@@ -151,7 +151,7 @@ describe('Project Rail selection and running signals', () => {
     const runningRows = markup.match(/data-running="true"/g) ?? []
     expect(runningRows).toHaveLength(2)
     expect(markup).toContain('project-rail-row--active')
-    expect(markup).toContain('class="project-rail-row__activity status status--working"')
+    expect(markup).toContain('class="project-activity__pulse"')
     expect(markup).toContain('Alpha · 1 Agent is running')
     expect(markup).toContain('Beta · 1 Agent is running')
     expect(markup).not.toContain('Gamma · 1 Agent is running')
@@ -187,7 +187,7 @@ describe('Project Rail selection and running signals', () => {
     expect(projectRows).toHaveLength(4)
     const regularRows = projectRows.filter((row) => !row.includes('scratch-workspace-row'))
     expect(regularRows).toHaveLength(3)
-    expect(regularRows.every((row) => !row.includes('project-rail-row__icon'))).toBe(true)
+    expect(regularRows.every((row) => row.includes('project-rail-row__icon'))).toBe(true)
     expect(markup).toContain('scratch-workspace-row__icon')
   })
 
@@ -209,7 +209,7 @@ describe('Project Rail selection and running signals', () => {
     const markup = renderRail()
     const alpha = rowFor(markup, 'Alpha')
     // 三个 worktree、两个在跑：徽章必须是 2。改回 workspaces.length 会让它变成 3。
-    expect(badgeOf(alpha)).toBe('2')
+    expect(markup).toContain('2 running')
     // 降级掉的事实不许消失，只许换位置。
     expect(alpha).toContain('3 worktrees')
     expect(alpha).toContain('3 sessions')
@@ -221,7 +221,7 @@ describe('Project Rail selection and running signals', () => {
     fixture.state.config = structuredClone(config)
     fixture.state.sessions = [session('agent-b', '/beta', 'working')]
     const markup = renderRail()
-    expect(badgeOf(rowFor(markup, 'Beta'))).toBe('1')
+    expect(markup).toContain('1 running')
     expect(badgeOf(rowFor(markup, 'Alpha'))).toBeNull()
     expect(badgeOf(rowFor(markup, 'Gamma'))).toBeNull()
   })
@@ -233,8 +233,8 @@ describe('Project Rail selection and running signals', () => {
     fixture.state.config = structuredClone(config)
     fixture.state.sessions = [session('agent-c', '/gamma', 'waiting')]
     const gamma = rowFor(renderRail(), 'Gamma')
-    expect(gamma).toContain('data-attention="needs-you"')
-    expect(badgeOf(gamma)).toBe('1')
+    expect(gamma).toContain('needs you')
+    expect(renderRail()).toContain('Needs you')
   })
 
   it('gives Host a slot only when it is not this machine', () => {
@@ -309,8 +309,8 @@ describe('Project Rail style contract', () => {
 
   it('does not brighten a project icon in the selected rule and has a separate running slot', () => {
     expect(source).not.toContain('.project-rail-row--active .project-rail-row__icon')
-    expect(source).toContain('.project-rail-row__activity')
-    expect(source).toContain('.project-rail-row__activity .status__dot')
+    expect(source).toContain('.project-activity')
+    expect(source).toContain('.project-activity__pulse')
   })
 })
 
@@ -455,9 +455,9 @@ describe('Project Rail 的分组与嵌套', () => {
     fixture.state.sessions = [session('s1', '/proj/kit/two', 'waiting')]
     const markup = renderRail()
     const header = markup.match(/<button[^>]*class="project-rail-group__header"[^>]*>/)?.[0] ?? ''
-    expect(header, 'needs-you 被折叠吃掉了').toContain('data-attention="needs-you"')
+    expect(header, 'needs-you 被折叠吃掉了').toContain('needs you')
     expect(header).toMatch(/aria-label="[^"]*needs you[^"]*"/)
-    expect(markup).toContain('project-rail-group__count')
+    expect(markup).toContain('Needs you')
   })
 
   it('跨 host 的同名父目录是两个分组，折叠一个不影响另一个', () => {

@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+import { RendererUpdates } from './renderer-updates.js'
 import { rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { app, BrowserWindow, crashReporter, dialog, Menu, shell } from 'electron'
@@ -76,6 +78,7 @@ function startPrimaryInstance(): void {
   const windowGeometryStore = new WindowGeometryStore()
   let disposeIpc: (() => Promise<void>) | null = null
   let ownerDisposal: Promise<void> | null = null
+  let rendererUpdates: RendererUpdates | null = null
   let allowingQuit = false
   // Every window entry point shares this read, including a second launch during startup.
   const environmentReady = hydrateProcessEnvironmentFromLoginShell().then((result) => {
@@ -89,6 +92,7 @@ function startPrimaryInstance(): void {
       ownerDisposal = (async () => {
         const disposeRegisteredIpc = disposeIpc
         disposeIpc = null
+        rendererUpdates?.dispose()
         const failures: unknown[] = []
         try {
           await disposeRegisteredIpc?.()
@@ -167,11 +171,11 @@ function startPrimaryInstance(): void {
     // 「应用来源」从窗口**实际加载内容的同一处**派生，不另手抄 URL：dev 用 ELECTRON_RENDERER_URL，
     // prod 用下面 loadFile 的同一个 packagedRendererPath（见 :201）。两者二选一，与加载分支同构。
     const packagedRendererPath = join(import.meta.dirname, '../renderer/index.html')
-    const appOrigin = topFrameOrigin({
+    let appOrigin = topFrameOrigin({
       rendererDevServerUrl: process.env.ELECTRON_RENDERER_URL,
       packagedRendererFilePath: packagedRendererPath
     })
-    const guardTopFrameNavigation = topFrameNavigationGuard(appOrigin)
+    const guardTopFrameNavigation = topFrameNavigationGuard(() => appOrigin)
     // will-redirect 与 will-navigate 用同一判据：一次被服务端 30x 或 meta refresh 重定向到应用外的目标，
     // 危害与直接导航过去完全一样，只守 will-navigate 会漏掉重定向链的落点。popup/新窗口不在这里——那条
     // 由上面的 setWindowOpenHandler 一律 deny 覆盖（:153），不重复。
@@ -193,17 +197,47 @@ function startPrimaryInstance(): void {
     )
     registerWindowResizeEvents(window)
     registerWindowStatePersistence(window, windowGeometryStore)
+    let updateReady: { token: string; resolve: () => void } | null = null
     await disposeIpc?.()
-    disposeIpc = await registerIpc({ window, configStore, runtime, scratchTopics, workspaceFiles, ...(environmentWarning ? { environmentWarning } : {}) })
+    disposeIpc = await registerIpc({ window, configStore, runtime, scratchTopics, workspaceFiles,
+      onRendererUpdateReady: (token) => { if (updateReady?.token === token) updateReady.resolve() }, ...(environmentWarning ? { environmentWarning } : {}) })
     if (process.env.ELECTRON_RENDERER_URL) await window.loadURL(process.env.ELECTRON_RENDERER_URL)
     else {
+      rendererUpdates?.dispose()
       const probeQuery = process.env.AGENTMUX_DESKTOP_FILE_EDITING_REPORT
         ? { 'agentmux-file-editing-report': '1' }
         : process.env.AGENTMUX_DESKTOP_RESOURCE_REPORT
           ? { 'agentmux-resource-probe': '1' }
           : undefined
-      await window.loadFile(packagedRendererPath,
-        probeQuery ? { query: probeQuery } : undefined)
+      rendererUpdates = new RendererUpdates({
+        directory: join(app.getPath('userData'), 'renderer-updates'),
+        bundled: join(import.meta.dirname, '../renderer'),
+        prepare: async () => {
+          await window.webContents.executeJavaScript('window.agentmuxPrepareRendererUpdate()')
+          window.webContents.session.flushStorageData()
+        },
+        load: async (file) => {
+          const token = randomUUID()
+          let timer: ReturnType<typeof setTimeout> | undefined
+          const ready = new Promise<void>((resolve, reject) => {
+            updateReady = { token, resolve }
+            timer = setTimeout(() => reject(new Error('Updated interface did not become ready')), 20_000)
+          })
+          appOrigin = topFrameOrigin({ rendererDevServerUrl: undefined, packagedRendererFilePath: file })
+          try { await Promise.all([window.loadFile(file, { query: { ...probeQuery, 'renderer-update': token } }), ready]) }
+          finally { clearTimeout(timer); updateReady = null }
+        },
+        report: (error) => {
+          const message = error instanceof Error ? error.message : String(error)
+          process.stderr.write(`Frontend update: ${message}\n`)
+          if (!window.isDestroyed()) void window.webContents.executeJavaScript(
+            `window.dispatchEvent(new CustomEvent('agentmux-renderer-update-error', { detail: ${JSON.stringify(message)} }))`
+          ).catch(() => {})
+        }
+      })
+      await rendererUpdates.initialize()
+      rendererUpdates.start()
+      window.once('closed', () => rendererUpdates?.dispose())
     }
     const rendererLoadedAtMs = Date.now()
     if (process.env.AGENTMUX_DESKTOP_READY_FILE) {
@@ -285,7 +319,7 @@ function startPrimaryInstance(): void {
     // 主键位（原生加速键在按键进渲染进程前就被 AppKit 处理，渲染层 preventDefault 拦不住）。这份模板
     // 不含任何绑 Cmd+W 的 role，同时保留 Edit 菜单——终端粘贴走的是原生 Paste role。菜单是应用级、
     // 全窗口共享的，建窗前设一次即可。
-    Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenuTemplate(process.platform === 'darwin')))
+    Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenuTemplate(process.platform === 'darwin', () => { void rendererUpdates?.rollback().catch((error) => dialog.showErrorBox('Frontend rollback', String(error))) })))
     if (process.platform === 'darwin') app.dock?.setIcon(appIconPath)
     await createWindow(appReadyAtMs)
     app.on('activate', () => {

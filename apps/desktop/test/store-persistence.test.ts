@@ -108,7 +108,7 @@ describe('Renderer persistence boundary', () => {
     expect(persisted).not.toHaveProperty('timelines')
     expect(persisted).not.toHaveProperty('sessions')
     expect(persisted).not.toHaveProperty('pendingAgentLaunches')
-    expect(persisted).not.toHaveProperty('documents')
+    expect(persisted.documents).toEqual({})
   })
 
   it('persists the file path verbatim while stripping browser page content (url/title/nav)', () => {

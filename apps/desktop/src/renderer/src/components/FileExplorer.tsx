@@ -1,3 +1,4 @@
+import { Link2 } from 'lucide-react'
 import {
   DndContext,
   DragOverlay,
@@ -136,6 +137,7 @@ function FileTreeRow({
   onCreate,
   onToggle,
   onOpenTerminal,
+  onOpenAsProject,
   onRename,
   onDelete,
   onReveal,
@@ -170,6 +172,7 @@ function FileTreeRow({
   onCreate: (kind: 'file' | 'directory') => void
   onToggle: () => void
   onOpenTerminal: () => void
+  onOpenAsProject: () => void
   onRename: () => void
   onDelete: () => void
   onReveal: () => void
@@ -224,6 +227,7 @@ function FileTreeRow({
       onCreate={onCreate}
       onCopyPaths={onCopyPaths}
       onOpenTerminal={onOpenTerminal}
+      onOpenAsProject={onOpenAsProject}
       onMove={onMove}
       onViewFile={onViewFile}
       onCollapse={onCollapse}
@@ -235,8 +239,9 @@ function FileTreeRow({
         ref={setRowRef}
         {...attributes}
         {...listeners}
-        className={`tree-row ${selected ? 'tree-row--selected' : ''} ${isDragging ? 'tree-row--dragging' : ''} ${isOver ? 'tree-row--drop-over' : ''} ${loadFailure ? 'tree-row--load-failed' : ''} ${gitStatus ? FILE_TREE_GIT_STATUS_CLASS[gitStatus] : ''}`}
+        className={`tree-row ${node.ignored ? 'tree-row--ignored' : ''} ${selected ? 'tree-row--selected' : ''} ${isDragging ? 'tree-row--dragging' : ''} ${isOver ? 'tree-row--drop-over' : ''} ${loadFailure ? 'tree-row--load-failed' : ''} ${gitStatus ? FILE_TREE_GIT_STATUS_CLASS[gitStatus] : ''}`}
         style={{ '--tree-depth': node.depth } as React.CSSProperties}
+        title={[node.ignored ? 'Ignored by Git' : '', node.isSymlink ? `${node.linkIssue ? 'Unavailable' : node.isDirectory ? 'Directory' : 'File'} link${node.linkTarget ? ` → ${node.linkTarget}` : ''}` : ''].filter(Boolean).join(' · ') || undefined}
         data-tree-path={node.path}
         data-tree-index={rowIndex}
         data-load-failed={loadFailure ? 'true' : 'false'}
@@ -311,7 +316,7 @@ function FileTreeRow({
             {FILE_TREE_GIT_STATUS_MARK[gitStatus]}
           </span>
         ) : null}
-        {node.isSymlink ? <span className="tree-row__badge">link</span> : null}
+        {node.isSymlink ? <Link2 size={11} className="tree-row__link" aria-label={node.linkIssue ? 'Unavailable symbolic link' : node.isDirectory ? 'Directory symbolic link' : 'File symbolic link'} /> : null}
         {!editing ? (
           <span className="tree-row__actions">
             {canRename ? <button type="button" title={`Rename ${node.name}`} onClick={(event) => { event.stopPropagation(); onRename() }}><Pencil size={11} /></button> : null}
@@ -677,6 +682,25 @@ export function FileExplorer({
     await launchTerminal(activePaneId, undefined, joinWorkspacePath(workspace.path, node.path))
   }
 
+  async function openDirectoryAsProject(node: TreeNode): Promise<void> {
+    if (!workspace || !node.isDirectory) return
+    try {
+      const projectPath = joinWorkspacePath(workspace.path, node.path)
+      const current = await api.config.get()
+      const existing = current.workspaces.find((item) => item.hostId === workspace.hostId && item.path === projectPath)
+      if (existing) {
+        setConfig(current)
+        await useAppStore.getState().selectWorkspace(existing.id)
+        return
+      }
+      const created = await api.workspaces.add({ hostId: workspace.hostId, path: projectPath, name: node.name })
+      setConfig(await api.config.get())
+      await useAppStore.getState().selectWorkspace(created.id)
+    } catch (error) {
+      reportError(error)
+    }
+  }
+
   async function rebindWorkspacePath(): Promise<void> {
     if (
       !workspaceId ||
@@ -931,9 +955,10 @@ export function FileExplorer({
               node.isDirectory ? node.path : workspacePathParent(node.path)
             )}
             onCopyPaths={(kind) => void copyContextPaths(node, kind)}
-            onOpenTerminal={() => void openDirectoryInTerminal(node).catch(() => {})}
+      onOpenTerminal={() => void openDirectoryInTerminal(node).catch(() => {})}
+            onOpenAsProject={() => void openDirectoryAsProject(node)}
             onViewFile={() => {
-              if (!node.isDirectory && !node.isSymlink) void openFile(node.path)
+              if (!node.isDirectory && !node.linkIssue) void openFile(node.path)
             }}
             onMove={(directoryPath) => {
               setSelection(createSingleFileExplorerSelection(node.path))
@@ -960,7 +985,7 @@ export function FileExplorer({
               // to a plain replacement click.
               if (mode === 'replace') {
                 if (node.isDirectory) toggle(node)
-                else if (!node.isSymlink) void openFile(node.path)
+                else if (!node.linkIssue) void openFile(node.path)
               }
             }}
             onToggle={() => toggle(node)}

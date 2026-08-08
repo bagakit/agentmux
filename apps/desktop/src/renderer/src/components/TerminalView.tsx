@@ -213,7 +213,6 @@ export function TerminalView({
   const [attachFailed, setAttachFailed] = useState(false)
   const [hasOutput, setHasOutput] = useState(false)
   const [replayGap, setReplayGap] = useState(false)
-  const [redrawing, setRedrawing] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchToggles, setSearchToggles] = useState<TerminalSearchToggles>(DEFAULT_TERMINAL_SEARCH_TOGGLES)
@@ -340,7 +339,6 @@ export function TerminalView({
     setAttachFailed(false)
     setHasOutput(false)
     setReplayGap(false)
-    setRedrawing(false)
     rememberedSelectionRef.current = ''
     const terminal = new Terminal({
       ...terminalOptions(themeId, fontSizeRef.current),
@@ -897,19 +895,11 @@ export function TerminalView({
     }
   }, [session.control.run.runId, session.id, themeId])
 
-  async function redrawCurrentScreen(): Promise<void> {
-    if (!canControlRunRef.current || redrawing) return
+  async function redrawCurrentScreen(): Promise<boolean> {
     const viewport = viewportRef.current
-    if (!viewport) return
-    setRedrawing(true)
-    try {
-      await viewport.requestContentRedraw()
-    } catch (error) {
-      console.warn('[terminal] failed to redraw current screen', error)
-    } finally {
-      setRedrawing(false)
-      terminalRef.current?.focus()
-    }
+    if (!canControlRunRef.current || !viewport) return false
+    try { return await viewport.requestContentRedraw() }
+    finally { terminalRef.current?.focus() }
   }
 
   function copySelection(): void {
@@ -1109,8 +1099,7 @@ export function TerminalView({
           {!hydrating && replayGap ? (
             <TerminalReplayGapNotice
               canRedraw={canControlRun}
-              redrawing={redrawing}
-              onRedraw={() => void redrawCurrentScreen()}
+              onRedraw={redrawCurrentScreen}
             />
           ) : null}
           {searchOpen ? (

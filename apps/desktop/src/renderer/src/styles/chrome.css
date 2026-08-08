@@ -83,6 +83,9 @@
 /* 一组同处一个父目录的 Project。组之间留一点空档，让分组头归属于它下面那几行而不是漂在中间。 */
 .project-rail-group { display: grid; align-content: start; gap:var(--sp-1); }
 .project-rail-group + .project-rail-group { margin-top:var(--sp-2); }
+/* 展开分组的成员共享一条低对比结构线；它只表达归属，不抢选中/运行状态的语义。 */
+.project-rail-group--expanded { position: relative; margin-left: var(--sp-2); padding-left: var(--sp-2); }
+.project-rail-group--expanded::before { content: ''; position: absolute; top: 22px; bottom: var(--sp-2); left: 0; width: 1px; background: var(--line-soft); opacity: .8; pointer-events: none; }
 /* 分组头：一个 disclosure 控件，不是又一行条目（密度合同《Project Rail Group Header》）。
    与项目行的区分**不靠字号或颜色**——它必须比项目名更轻，那条不许动。靠的是角色本身：
    一枚 chevron、大写字距展开的分类学写法、以及不占项目名那条左缘。
@@ -124,58 +127,16 @@
 }
 /* 折叠后的角标与项目行的角标同形，因为它答的是同一个问题（里面有没有人在等你）。它复用
    .project-rail-row__count 的 attention 配色，见下面那组 [data-attention] 规则。 */
-.project-rail-group__count {
-  min-width: 18px; height: 18px; padding:0 var(--sp-2);
-  display: inline-flex; align-items: center; justify-content: center;
-  border-radius: var(--radius-sm);
-  color: var(--text-3); background: var(--surface-3);
-  font-size: var(--fs-micro); font-variant-numeric: tabular-nums;
-}
-/* 缩进量 = 层数 × 一格。`--rail-depth` 由 WorkspaceSidebar 按节点深度内联注入，**这里必须
-   声明默认值**：注入式自定义属性不给默认，未注入的行就会拿到无效值而整条 padding 失效
-   （先例见 dock.css 的 --tree-depth，控件语言《注入的 CSS 属性要声明默认值》）。 */
-.project-rail-row { --rail-depth: 0; width: 100%; min-width: 0; min-height: 28px; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap:var(--sp-3); padding:var(--sp-2) var(--sp-4); padding-left: calc(var(--sp-4) + var(--rail-depth) * var(--sp-4)); border: 0; border-radius: var(--radius); color: var(--text-3); background: transparent; text-align: left; cursor: pointer; transition: background .12s ease, color .12s ease; }
+.project-rail-row { --rail-depth: 0; width: 100%; min-width: 0; min-height: 28px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap:var(--sp-3); padding:var(--sp-2) var(--sp-4); padding-left: calc(var(--sp-4) + var(--rail-depth) * var(--sp-6)); border: 0; border-radius: var(--radius); color: var(--text-3); background: transparent; text-align: left; cursor: pointer; transition: background .12s ease, color .12s ease; }
 .scratch-workspace-row { grid-template-columns: 24px minmax(0, 1fr) auto; }
 .project-rail-row:hover { color: var(--text-2); background: var(--surface-2); }
 .project-rail-row--active, .project-rail-row--active:hover { color: var(--text); background: var(--surface-2); }
-.project-rail-row__icon { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); color: var(--text-3); background: var(--surface-3); transition: background .12s ease, color .12s ease; }
+.project-rail-row__icon { width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; transition: background .12s ease, color .12s ease; }
 /* 一行只占一行：标题与它的元信息同处一行，不为常驻元信息另起次行（密度预算 Project Rail Row）。
    小字跟在标题之后而不是它下面，且只有真的有话说时才在场——本机 host 不占位。 */
 .project-rail-row__identity { min-width: 0; display: flex; align-items: baseline; gap:var(--sp-2); }
 .project-rail-row__identity strong { min-width: 0; overflow: hidden; font-size: var(--fs-meta); font-weight: 620; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
 .project-rail-row__identity small { flex: 0 1 auto; min-width: 0; display: flex; align-items: center; gap:var(--sp-1); overflow: hidden; font-size: var(--fs-micro); color: var(--text-3); text-overflow: ellipsis; white-space: nowrap; }
-.project-rail-row__activity { width: 14px; min-width: 14px; height: 18px; display: inline-flex; align-items: center; justify-content: center; color: var(--green); opacity: 0; }
-.project-rail-row[data-running='true'] .project-rail-row__activity { opacity: 1; }
-.project-rail-row__activity .status__dot { width: 6px; height: 6px; }
-.project-rail-row__count { min-width: 20px; height: 20px; padding:0 var(--sp-3); display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); color: var(--text-3); background: var(--surface-3); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
-.project-rail-row--active .project-rail-row__count { color: var(--text-2); background: var(--surface-3); box-shadow: var(--hl); }
-/* Attention rolled up to a collapsed row. The count badge already occupies the row's right edge, so
-   this recolours THAT rather than adding a competing mark — one signal per row. It reuses the shared
-   status colours so a lit row and a lit dot mean the same thing, and carries a glyph rather than
-   relying on colour alone (same rule as the full-size status dot). `done` never lights a row: a
-   permanently lit rail would drown out the one signal that means someone is waiting on you.
-
-   折叠的**分组头**走同一组规则而不是另抄一份：它答的是同一个问题（里面有没有人在等你），两处若
-   各写一份配色，改一处就会漂。分组折叠会在分组这一层复现"折叠藏掉了等你的 Agent"那个洞，所以
-   分组头的角标必须和项目行的角标读作同一件事。 */
-.project-rail-row[data-attention] .project-rail-row__count::after,
-.project-rail-group__header[data-attention] .project-rail-group__count::after { margin-left:var(--sp-1); font-weight: 700; }
-.project-rail-row[data-attention='needs-you'] .project-rail-row__count,
-.project-rail-group__header[data-attention='needs-you'] .project-rail-group__count {
-  color: var(--surface-0);
-  background: var(--amber);
-  box-shadow: var(--hl);
-}
-.project-rail-row[data-attention='needs-you'] .project-rail-row__count::after,
-.project-rail-group__header[data-attention='needs-you'] .project-rail-group__count::after { content: '?'; }
-.project-rail-row[data-attention='error'] .project-rail-row__count,
-.project-rail-group__header[data-attention='error'] .project-rail-group__count {
-  color: var(--surface-0);
-  background: var(--red);
-  box-shadow: var(--hl);
-}
-.project-rail-row[data-attention='error'] .project-rail-row__count::after,
-.project-rail-group__header[data-attention='error'] .project-rail-group__count::after { content: '!'; }
 /* 项目 icon 自带形状与颜色，不需要再给它一个 Surface 色块托底——那会读作"图标外面还有一个按钮"。
    这也顺带让选中与否不再改变这枚图标的任何东西（T-008 的那条约束）。 */
 .scratch-workspace-row__icon { background: transparent; }
@@ -381,3 +342,20 @@
 .host-edit-grid { display: grid; grid-template-columns: 1.2fr 1.4fr 1fr .6fr; gap:var(--sp-4); padding:var(--sp-1) var(--sp-5) var(--sp-5); }
 .host-edit-grid__wide { grid-column: 1 / -1; }
 .host-settings-card > .field-hint { display: block; padding:0 var(--sp-5) var(--sp-4); color: var(--amber); }
+
+.project-rail-entry { display: flex; align-items: center; min-width: 0; gap: var(--sp-1); }
+.project-rail-entry > .project-rail-row, .project-rail-entry > .project-rail-group__header { flex: 1; min-width: 0; }
+.project-rail-group__header { gap: var(--sp-2); }
+.project-rail-row__icon img { width: 16px; height: 16px; object-fit: contain; }
+.project-activity { flex-shrink: 0; display: inline-flex; align-items: center; gap: var(--sp-2); border: 0; padding: var(--sp-2); border-radius: var(--radius-sm); color: var(--green); background: transparent; font-size: var(--fs-micro); cursor: pointer; }
+.project-activity:hover { background: var(--surface-3); }
+.project-activity[data-category='needs-you'] { color: var(--amber); }
+.project-activity[data-category='error'] { color: var(--red-text); }
+.project-activity__pulse { display: inline-flex; height: 12px; align-items: center; gap: var(--sp-1); }
+.project-activity__pulse i { width: 2px; height: 8px; border-radius: var(--radius-sm); background: currentColor; animation: rail-activity 1.2s ease-in-out infinite alternate; }
+.project-activity__pulse i:nth-child(2) { height: 12px; animation-delay: -.4s; }
+.project-activity__pulse i:nth-child(3) { animation-delay: -.8s; }
+@keyframes rail-activity { to { transform: scaleY(.4); opacity: .5; } }
+@media (prefers-reduced-motion: reduce) { .project-activity__pulse i { animation: none; } }
+.project-activity-menu { max-width: min(90vw, 360px); }
+.project-activity-menu__item small { display: block; white-space: normal; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }

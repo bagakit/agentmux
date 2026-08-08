@@ -392,6 +392,11 @@ export type AgentCatalogEntry = {
    * core-side (see agent-interaction.ts).
    */
   postureControl?: AgentPostureControl
+  /** Native command suggestions and skill roots, owned by the Provider; selection never submits. */
+  composer?: {
+    skillRoots: string[]
+    commands: Array<{ text: string; description: string }>
+  }
 }
 
 export type AgentCapabilitySnapshot = {

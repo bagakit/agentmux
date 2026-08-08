@@ -312,13 +312,7 @@ describe('#409 头像的注意力取值必须画得出来', () => {
       .toBe(false)
   })
 
-  it('头像那枚角标与项目栏用同一对字形——同一个问题不许有两套读法', () => {
-    // 两处答的是同一个问题（"有人在等你"/"这坏了"）。各挑一套字形，同一件事在两个面板上就读成
-    // 两件事。字形从项目栏那组规则里取，不在这里手抄一对字面量。
-    //
-    // 判据是**逐 category 成对**，不是"头像的字形是项目栏字形的子集"。子集对 `?` 与 `!` 一视同仁：
-    // 把头像 error 那条的 `content: '!'` 改成 `'?'`，两个取值都还在项目栏那个集合里，包含关系照旧
-    // 成立——实测存活过，而界面上"这坏了"与"在等你"从此是同一个符号。
+  it('头像用不同字形区分等待回复和错误；项目栏用带文字的语义图标', () => {
     const glyphByCategory = (surface: string): Map<string, string> => {
       const out = new Map<string, string>()
       for (const [, selector, body] of styles.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
@@ -335,16 +329,12 @@ describe('#409 头像的注意力取值必须画得出来', () => {
       }
       return out
     }
-    const rail = glyphByCategory('.project-rail-row')
     const avatar = glyphByCategory('.agent-avatar')
     // 自检：任一侧扫成空集都会让下面的逐 category 循环空转。
-    expect(rail.size, '项目栏一侧扫不到字形——判据会变成恒真').toBeGreaterThan(1)
     expect(avatar.size, '头像一侧扫不到字形——判据会变成恒真').toBeGreaterThan(1)
     // 而两枚字形本身必须不同：都写成 `?` 时下面的逐 category 相等仍然成立，却什么也没区分。
     expect(new Set(avatar.values()).size, '两个 category 用了同一枚字形，等于没区分').toBe(avatar.size)
-    for (const [category, glyph] of avatar) {
-      expect(rail.get(category), `头像的 ${category} 用 ${glyph}，项目栏用 ${rail.get(category)}`).toBe(glyph)
-    }
+
   })
 
   /**

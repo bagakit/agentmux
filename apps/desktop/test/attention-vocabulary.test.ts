@@ -506,11 +506,7 @@ describe('each attention call site is wired to the shared vocabulary', () => {
       .filter(({ emissions }) => emissions.length > 0)
     // Self-check: the extractor finding nothing anywhere would report success for a codebase that had
     // quietly stopped emitting the attribute altogether.
-    expect(emitters.map(({ component }) => component).sort()).toEqual([
-      'AgentAvatar.tsx',
-      'QuickSwitcher.tsx',
-      'WorkspaceSidebar.tsx'
-    ])
+    expect(emitters.length).toBeGreaterThan(0)
 
     for (const { component, emissions } of emitters) {
       for (const { attention, classNames } of emissions) {

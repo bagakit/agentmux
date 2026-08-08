@@ -1,3 +1,4 @@
+import { isImeOwnedKeyboardEvent } from './ime-composition-keyboard-event'
 // The one place every keyboard binding lives — chord, stable id, scope, and the platform bottom line,
 // each expressed exactly once. Before this, the same "which key is which action" decision was scattered
 // across four libs (workbench / terminal / quick-switch / editor-save), each with its own platform split
@@ -613,6 +614,7 @@ export function routeWindowShortcut(
   editableTarget: boolean,
   handlers: Record<string, () => boolean>
 ): boolean {
+  if (isImeOwnedKeyboardEvent(event)) return false
   const id = matchShortcut(event, isMac, { scope: 'window', editableTarget })
   if (!id) return false
   const handler = handlers[id]

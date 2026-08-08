@@ -7,8 +7,7 @@ describe('TerminalReplayGapNotice', () => {
   it('offers an explicit current-screen redraw for a running Run', () => {
     const markup = renderToStaticMarkup(createElement(TerminalReplayGapNotice, {
       canRedraw: true,
-      redrawing: false,
-      onRedraw: vi.fn()
+      onRedraw: vi.fn(async () => true)
     }))
 
     expect(markup).toContain('Earlier scrollback is unavailable')
@@ -18,8 +17,7 @@ describe('TerminalReplayGapNotice', () => {
   it('keeps a historical Run read-only', () => {
     const markup = renderToStaticMarkup(createElement(TerminalReplayGapNotice, {
       canRedraw: false,
-      redrawing: false,
-      onRedraw: vi.fn()
+      onRedraw: vi.fn(async () => true)
     }))
 
     expect(markup).toContain('Earlier scrollback is unavailable')

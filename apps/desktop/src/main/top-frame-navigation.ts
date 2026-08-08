@@ -112,10 +112,10 @@ export type TopFrameNavigationEvent = {
  * 只作用于顶帧：子帧导航不触及顶帧那座特权桥，且拖文件触发的是顶帧导航。
  */
 export function topFrameNavigationGuard(
-  appOrigin: TopFrameOrigin
+  appOrigin: TopFrameOrigin | (() => TopFrameOrigin)
 ): (event: TopFrameNavigationEvent) => void {
   return (event) => {
     if (!event.isMainFrame) return
-    if (!isAllowedTopFrameNavigation(appOrigin, event.url)) event.preventDefault()
+    if (!isAllowedTopFrameNavigation(typeof appOrigin === 'function' ? appOrigin() : appOrigin, event.url)) event.preventDefault()
   }
 }

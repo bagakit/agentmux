@@ -62,7 +62,7 @@ const THROWING_CHANNEL_MESSAGES: ReadonlyArray<readonly [PrivilegedChannel, stri
 ]
 
 /** 会抛的特权频道集合（接线层的正向覆盖也从这里派生）。 */
-const THROWING_CHANNELS: readonly PrivilegedChannel[] = THROWING_CHANNEL_MESSAGES.map(([channel]) => channel)
+const THROWING_CHANNELS = (Object.keys(PRIVILEGED_SENDER_LABELS) as PrivilegedChannel[]).filter((channel) => channel !== CONTROL_RESPONSE_CHANNEL)
 
 describe('senderTrust: the pure sender-identity decision, both branches', () => {
   it('trusts when the sender frame IS the trusted frame (accept branch — the habitually unguarded side)', () => {
@@ -648,6 +648,7 @@ describe('ipc.ts wiring: the shell forwards each privileged sender check to the 
   it('every privileged throwing channel forwards its own event to the adapter as its FIRST statement', () => {
     // 正向覆盖：频道清单从行为层的 THROWING_CHANNELS 派生（其锚点又是写死的历史消息表）。任一频道的
     // handler 丢了第一句转发、或转发了错的 event、或 callee 绑定到影子，这里逐条报红。
+    expect(THROWING_CHANNELS.length).toBeGreaterThan(0)
     for (const channel of THROWING_CHANNELS) {
       expect(handlerGuard(module, channel, adapter), channel).toEqual({
         kind: 'forwards',

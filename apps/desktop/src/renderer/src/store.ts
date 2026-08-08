@@ -1425,6 +1425,9 @@ function newLauncherTab(workspaceId: string, topicId?: string): WorkbenchTab {
 }
 
 type PersistedAppState = {
+  agentComposerDrafts?: Record<string, string>
+  documents?: Record<string, FileDocument>
+  dirtyDocuments?: Record<string, boolean>
   restoredWorkbench: PersistedWorkbench
   unclaimedTerminalSessionIds: string[]
   scratchTopicOrder?: string[]
@@ -1888,6 +1891,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // was unavailable. Open the fence after the fallback state is installed so that this warning
       // itself cannot serialize the empty fallback over the user's last good record.
       openPersistWrites()
+      // Restored dirty buffers keep their base revision and immediately resume observation.
+      // Refresh marks disk conflicts through the existing reducer; it never overwrites a dirty draft.
+      for (const key of Object.keys(get().documents)) {
+        const separator = key.indexOf('\0')
+        if (separator < 0) continue
+        const workspaceId = key.slice(0, separator), path = key.slice(separator + 1)
+        if (!config.workspaces.some((workspace) => workspace.id === workspaceId)) continue
+        void api.files.observe(workspaceId, path).then(() => get().refreshDocument(workspaceId, path)).catch((error) => get().reportError(error))
+      }
       booting = false
       for (const event of pendingSessionEvents) get().applyEvent(event)
       for (const event of pendingBrowserEvents) get().applyBrowserEvent(event)
@@ -2099,6 +2111,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const requireActive = (): void => {
       if (signal?.aborted) throw controlCancellation(signal)
     }
+    const resolveExecutorId = (requested: string): string => {
+      const executors = get().config?.executors ?? {}
+      if (executors[requested]) return requested
+      const matches = Object.entries(executors)
+        .filter(([, executor]) => executor.label.trim().toLocaleLowerCase() === requested.trim().toLocaleLowerCase())
+        .map(([id]) => id)
+      if (matches.length === 1) return matches[0]!
+      if (matches.length > 1) throw controlFailure('INVALID_CONTROL_REQUEST', `Executor name is ambiguous: ${requested}`)
+      return requested
+    }
     const agentSession = (
       target: { kind: 'self' } | { kind: 'agent-session'; agentSessionId: string },
       caller?: { agentSessionId: string }
@@ -2261,7 +2283,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (content.kind !== 'new-agent') {
         throw controlFailure('INVALID_CONTROL_REQUEST', 'Agent open content is invalid.')
       }
-      if (!state.config?.executors[content.executorId]) {
+      const executorId = resolveExecutorId(content.executorId)
+      if (!state.config?.executors[executorId]) {
         throw controlFailure('AGENT_EXECUTOR_NOT_CONFIGURED', 'Agent Executor is not configured.')
       }
       const agentSessionId = crypto.randomUUID()
@@ -2301,7 +2324,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       try {
         launched = await api.sessions.launchAgent({
-          executorId: content.executorId,
+          executorId,
           hostId: workspace.hostId,
           workspacePath: workspace.path,
           ...(scratchTopicId ? { scratchTopicId } : {}),
@@ -4481,6 +4504,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (error) persistHydrationError = error
   },
   partialize: (state) => ({
+    agentComposerDrafts: state.agentComposerDrafts,
+    documents: Object.fromEntries(Object.entries(state.documents).filter(([key]) => state.dirtyDocuments[key])),
+    dirtyDocuments: Object.fromEntries(Object.entries(state.dirtyDocuments).filter(([, dirty]) => dirty)),
     restoredWorkbench: projectPersistedWorkbench({ tabs: state.tabs, layouts: state.layouts }),
     unclaimedTerminalSessionIds: state.unclaimedTerminalSessionIds,
     // 拖出来的顺序是用户意图，重开应该还在。它只是偏好：恢复时对不上磁盘的条目会被 orderTopics 丢掉。
@@ -4503,3 +4529,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     editorWordWrap: state.editorWordWrap
   })
 }))
+
+/** A controlled UI update flushes draft and layout state before unloading. */
+export function prepareRendererUpdate(): void {
+  if (useAppStore.getState().loading) throw new Error('The interface is still loading; retry the update when ready.')
+  if (Object.values(useAppStore.getState().savingDocuments).some(Boolean)) throw new Error('A file save is in progress; retry the update after it completes.')
+  persistentWorkbenchStorage.flush()
+}

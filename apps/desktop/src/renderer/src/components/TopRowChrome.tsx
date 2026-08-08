@@ -1,5 +1,4 @@
 import {
-  Keyboard,
   LayoutDashboard,
   PanelLeft,
   PanelsTopLeft,
@@ -7,8 +6,6 @@ import {
   SquareTerminal
 } from 'lucide-react'
 import { projectWorkspaces } from '../lib/workspace-projects'
-import { openShortcutHelp } from '../lib/shortcut-help-affordance'
-import { isMacPlatform } from '../lib/host-platform'
 import { useAppStore } from '../store'
 
 // 顶行 chrome 的单一实现：Board/欢迎页 topbar 与 workbench 顶行（root tabbar / chromeline）
@@ -48,35 +45,7 @@ export function SidebarToggleChrome() {
     <div className="sidebar-toggle-chrome" role="group" aria-label="Window sidebars">
       <ProjectRailToggle />
       <ToolsToggle />
-      <ShortcutHelpButton />
     </div>
-  )
-}
-
-// The visible door to the cheat-sheet — the fix for the bootstrap deadlock where the app's only
-// shortcut-discovery surface could itself be opened only by a shortcut. It lives in the persistent
-// sidebar-toggle chrome (present in the collapsed rail, the sidebar, and the tool dock) so it is
-// reachable from anywhere, which is the property that matters for discoverability.
-//
-// It renders NO chord text — an icon-button with an accessible label needs none, which also sidesteps
-// the whole class of hand-copied chord strings drifting from the registry (#367): there is no chord
-// string here to drift. The tooltip is the plain label "Keyboard shortcuts", not a chord.
-//
-// It carries no open-state of its own and duplicates none of the routing: `openShortcutHelp` replays
-// the registry's `help.shortcuts` chord into App's existing window listener, the same key the user would
-// press — see shortcut-help-affordance.ts for why this reuse beats threading a prop to App's local state.
-function ShortcutHelpButton() {
-  return (
-    <button
-      className="icon-button sidebar-toggle-button"
-      type="button"
-      aria-label="Keyboard shortcuts"
-      title="Keyboard shortcuts"
-      data-shortcut-help-open
-      onClick={() => openShortcutHelp(isMacPlatform())}
-    >
-      <Keyboard size={15} />
-    </button>
   )
 }
 
