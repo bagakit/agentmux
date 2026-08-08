@@ -898,7 +898,13 @@ export function TerminalView({
   async function redrawCurrentScreen(): Promise<boolean> {
     const viewport = viewportRef.current
     if (!canControlRunRef.current || !viewport) return false
-    try { return await viewport.requestContentRedraw() }
+    try {
+      const redrawn = await viewport.requestContentRedraw()
+      // A successful redraw replaces the stale gap notice with a current screen. The replay
+      // history remains truncated, but the visible terminal is no longer waiting for recovery.
+      if (redrawn) setReplayGap(false)
+      return redrawn
+    }
     finally { terminalRef.current?.focus() }
   }
 
