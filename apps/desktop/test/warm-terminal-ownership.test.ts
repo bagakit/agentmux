@@ -201,7 +201,7 @@ describe('接线层：组件的两个取值来自同一次判定', () => {
     'NewTabSurface.tsx', SOURCE, ts.ScriptTarget.ESNext, true, ts.ScriptKind.TSX
   )
 
-  function callsNamed(name: string): ts.CallExpression[] {
+  function callsNamed(name: string, within: ts.SourceFile = ast): ts.CallExpression[] {
     const found: ts.CallExpression[] = []
     const visit = (node: ts.Node): void => {
       if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === name) {
@@ -209,9 +209,105 @@ describe('接线层：组件的两个取值来自同一次判定', () => {
       }
       ts.forEachChild(node, visit)
     }
-    visit(ast)
+    visit(within)
     return found
   }
+
+  /**
+   * 这个名字在**它的调用点上**解析到的，是不是 `moduleSpecifier` 的那个具名 import。
+   *
+   * 为什么不用文本判据（这道判据此前就是那样，被 review 抓出来）：原写法是
+   * `expect(SOURCE).toMatch(/from '\.\.\/lib\/warm-terminal-preview'/u)`——它只问「这个**路径串**在文件里
+   * 出现过吗」，既不问是谁被 import 了，也不问那个名字有没有被本地声明盖掉。于是在这个文件上它是
+   * **恒真**的：同一行还 import 了 `warmLauncherId`，所以哪怕把 `warmTerminalPreview` 从 import 里摘掉、
+   * 在下面另写一个同名局部函数，路径串照旧在场。实测那次变异（摘掉 import + 本地写一个恒返回
+   * `{session:null,pending:false,slotHeld:false}` 的同名函数）：**15 passed (15)**，与基线逐字相同。
+   * 后果是真的——那个局部替身让整块预热预览恒为空，用户永远只看得到冷卡片，而这个文件里其余
+   * 14 条行为断言全都测的是那个**没人再调用**的纯函数，一条都不会红。
+   *
+   * 为什么判据必须落在**调用点的作用域链**上，而不是「顶层有没有同名声明」：那是我这道修复的第一版，
+   * 它把作用域模型取错了，实测**存活**。带 import 时顶层再写一个同名声明是非法 TS（TS2440），所以
+   * 「顶层影子」这条路只有在**同时摘掉 import** 时才可达——那次正是被 `imported` 那一半抓住的，与影子
+   * 判据无关。真正可达的形状是**内层**影子：import 原样留着，在组件函数体里写一个同名 function。实测
+   * 那次变异（`function warmTerminalPreview(_i: unknown): WarmTerminalPreview { return {session:null,
+   * pending:false,slotHeld:false} }` 插在调用点上方）：**16 passed (16)** 且 `tsc --noEmit` exit=0——
+   * 顶层扫描对它完全失明，而 TS 合法所以编译器也不吭声。（本仓 lexical-boundaries-need-a-real-lexer：
+   * 「范围豁免要用语言自己的作用域规则」。）
+   *
+   * 判据因此是：从每个调用点往外走作用域链，第一个声明这个名字的地方必须是那条 ImportDeclaration。
+   *   · 走 TS parser 而不是正则——正则对 `as` 别名、多行 import、注释里的假路径都会判错。带 `as` 别名时
+   *     按**本地名**算：本地名才是调用点写的那个标识符。
+   *   · 途中任何一层（函数体 / 块 / 参数 / catch）声明了同名，即判 shadowed —— 那是实测存活的那个形状。
+   *
+   * 盲点（亲口申报）：只看词法声明，不做真类型解析。`import * as m` 后 `const warmTerminalPreview =
+   * m.warmTerminalPreview` 会被算成影子（保守，会打红而非放过）；而把 lib 那个文件本身改坏，这条判据
+   * 看不见——那由本文件上面 14 条行为断言守。
+   */
+  function resolvesToImport(
+    name: string,
+    moduleSpecifier: string,
+    within: ts.SourceFile = ast
+  ): { imported: boolean; shadowed: boolean } {
+    let importDeclaration: ts.Node | undefined
+    for (const statement of within.statements) {
+      if (
+        ts.isImportDeclaration(statement) &&
+        ts.isStringLiteral(statement.moduleSpecifier) &&
+        statement.moduleSpecifier.text === moduleSpecifier &&
+        statement.importClause?.namedBindings &&
+        ts.isNamedImports(statement.importClause.namedBindings) &&
+        // 本地名（`x as y` 时是 `y`）才是调用点写的那个标识符。
+        statement.importClause.namedBindings.elements.some((element) => element.name.text === name)
+      ) {
+        importDeclaration = statement
+      }
+    }
+
+    // 「这个节点声明了 name 吗」——按声明种类逐个问，不按语法形状猜。
+    const declares = (node: ts.Node): boolean => {
+      if (ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) return node.name?.text === name
+      if (ts.isEnumDeclaration(node) || ts.isModuleDeclaration(node)) {
+        return ts.isIdentifier(node.name) && node.name.text === name
+      }
+      if (ts.isTypeAliasDeclaration(node) || ts.isInterfaceDeclaration(node)) return node.name.text === name
+      if (ts.isVariableStatement(node)) {
+        return node.declarationList.declarations.some(
+          (declaration) => ts.isIdentifier(declaration.name) && declaration.name.text === name
+        )
+      }
+      if (ts.isParameter(node) || ts.isBindingElement(node)) {
+        return ts.isIdentifier(node.name) && node.name.text === name
+      }
+      return false
+    }
+
+    // 从调用点往外走作用域链，找第一个声明这个名字的地方。
+    let shadowed = false
+    let imported = false
+    for (const call of callsNamed(name, within)) {
+      let resolved: ts.Node | undefined
+      let cursor: ts.Node | undefined = call
+      while (cursor && !resolved) {
+        // 这一层作用域里的直接声明（函数/块的语句、函数的形参）。
+        const candidates: ts.Node[] = []
+        if (ts.isSourceFile(cursor) || ts.isBlock(cursor) || ts.isModuleBlock(cursor)) {
+          candidates.push(...cursor.statements)
+        }
+        if (ts.isFunctionLike(cursor)) candidates.push(...cursor.parameters)
+        for (const candidate of candidates) {
+          if (candidate !== call && declares(candidate)) resolved = candidate
+        }
+        if (!resolved && cursor === within && importDeclaration) resolved = importDeclaration
+        cursor = cursor.parent
+      }
+      if (resolved === importDeclaration && importDeclaration !== undefined) imported = true
+      else shadowed = true
+    }
+    // 零调用点时 `imported` 会是 false——那由「恰好被调用一次」那条断言先红，这里不替它兜。
+    return { imported, shadowed }
+  }
+
+  const PREVIEW_MODULE = '../lib/warm-terminal-preview'
 
   it('warmTerminalPreview 恰好被调用一次', () => {
     // 两处调用意味着两个取值各算了一遍——那正是要消除的双重判定。零处意味着组件绕过了这个函数。
@@ -220,8 +316,64 @@ describe('接线层：组件的两个取值来自同一次判定', () => {
   })
 
   it('从 lib/warm-terminal-preview import，不是本地同名函数', () => {
-    // 判 import 关系而不是标识符在场：组件里另写一个同名局部函数会让上一条照旧通过。
-    expect(SOURCE).toMatch(/from '\.\.\/lib\/warm-terminal-preview'/u)
+    // 判「调用点上这个名字解析到哪」，而不是「那个路径串在文件里出现过」——见 resolvesToImport 的头注。
+    const { imported, shadowed } = resolvesToImport('warmTerminalPreview', PREVIEW_MODULE)
+    expect(imported, `warmTerminalPreview 不是从 ${PREVIEW_MODULE} 具名 import 的`).toBe(true)
+    expect(shadowed, 'warmTerminalPreview 的调用点解析到了一个同名局部声明——上一条数到的调用点打给了影子').toBe(false)
+  })
+
+  it('判据自检：内层同名影子会被认出来', () => {
+    // 反向自证，且**走真函数**（`resolvesToImport` 收 `within` 就是为了这个）：自检里手抄一份扫描逻辑，
+    // 等于让判据给自己背书——本仓 comment-promises-more-than-assertion 那族，我在 #685 亲手犯过一次。
+    //
+    // 这个样本就是实测**存活过**的那次变异的形状：import 原样在场，影子在**函数体内**。第一版判据只扫
+    // 顶层，对它完全失明（16 passed 且 tsc exit=0）。
+    const inner = ts.createSourceFile(
+      'probe-inner.tsx',
+      [
+        `import { warmLauncherId, warmTerminalPreview } from '${PREVIEW_MODULE}'`,
+        'function Surface() {',
+        '  function warmTerminalPreview(_i: unknown) { return { session: null } }',
+        '  return warmTerminalPreview({})',
+        '}'
+      ].join('\n'),
+      ts.ScriptTarget.ESNext, true, ts.ScriptKind.TSX
+    )
+    expect(
+      resolvesToImport('warmTerminalPreview', PREVIEW_MODULE, inner),
+      '内层同名影子没被认出来——主断言对那个实测存活的形状是恒真的'
+    ).toEqual({ imported: false, shadowed: true })
+  })
+
+  it('判据自检：干净样本不误报，且路径串在场不足以过关', () => {
+    // 另一极：判据不能恒红（否则健康代码永远打假红），也不能被「路径串在场」满足。
+    const clean = ts.createSourceFile(
+      'probe-clean.tsx',
+      [
+        `import { warmLauncherId, warmTerminalPreview } from '${PREVIEW_MODULE}'`,
+        'function Surface() { return warmTerminalPreview({}) }'
+      ].join('\n'),
+      ts.ScriptTarget.ESNext, true, ts.ScriptKind.TSX
+    )
+    expect(
+      resolvesToImport('warmTerminalPreview', PREVIEW_MODULE, clean),
+      '干净样本被判成有影子/未 import——健康代码会被打假红'
+    ).toEqual({ imported: true, shadowed: false })
+
+    // 这是原判据（路径子串）恒真的那个形状：路径串在场，但带进来的是**另一个**符号。
+    const otherSymbol = ts.createSourceFile(
+      'probe-other.tsx',
+      [
+        `import { warmLauncherId } from '${PREVIEW_MODULE}'`,
+        'function warmTerminalPreview(_i: unknown) { return { session: null } }',
+        'function Surface() { return warmTerminalPreview({}) }'
+      ].join('\n'),
+      ts.ScriptTarget.ESNext, true, ts.ScriptKind.TSX
+    )
+    expect(
+      resolvesToImport('warmTerminalPreview', PREVIEW_MODULE, otherSymbol),
+      '路径串在场就被判成 import 了——那正是被 review 抓出来的原判据'
+    ).toEqual({ imported: false, shadowed: true })
   })
 
   it('组件里不许再自己拿 warmTerminal 的 key / 归属判一次', () => {
@@ -287,8 +439,12 @@ describe('接线层：组件的两个取值来自同一次判定', () => {
       launcherIdCalls,
       `warmLauncherId 调用点 ${launcherIdCalls.length} 处，应为 1 处——归属键的取值规则只许判一次`
     ).toHaveLength(1)
-    expect(SOURCE, 'warmLauncherId 不是从 lib/warm-terminal-preview import 的')
-      .toMatch(/import \{[^}]*\bwarmLauncherId\b[^}]*\} from '\.\.\/lib\/warm-terminal-preview'/u)
+    // 与上面 warmTerminalPreview 同一族判据：正则 `import \{[^}]*\bwarmLauncherId\b[^}]*\}` 对别名与
+    // 多行 import 都成问题，且它同样不问「调用点解析到谁」——在组件函数体里写一个同名 warmLauncherId
+    // 就能让上面那条「恰好一处调用」打给替身而全绿（那正是 warmTerminalPreview 侧实测存活的形状）。
+    const launcherIdResolution = resolvesToImport('warmLauncherId', PREVIEW_MODULE)
+    expect(launcherIdResolution.imported, `warmLauncherId 不是从 ${PREVIEW_MODULE} 具名 import 的`).toBe(true)
+    expect(launcherIdResolution.shadowed, 'warmLauncherId 的调用点解析到了同名局部声明——那一处调用打给了影子').toBe(false)
   })
 
   it('warmLauncherId 缺 region 时退到 group，且两个命名空间不会撞', () => {
