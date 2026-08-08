@@ -1,4 +1,5 @@
 import type { BrowserBounds } from '../../../shared/contracts'
+import { normalizeBrowserBounds } from '../../../shared/browser-bounds'
 import { REGION_CLASS } from './region-focus'
 
 /**
@@ -101,20 +102,6 @@ export function focusRingYieldOf(element: Element, focused: boolean): number {
   return focusRingInsetOf(element)
 }
 
-function normalizeBounds(bounds: BrowserBounds | null): BrowserBounds | null {
-  if (!bounds) return null
-  const values = [bounds.x, bounds.y, bounds.width, bounds.height]
-  if (values.some((value) => !Number.isFinite(value)) || bounds.width < 1 || bounds.height < 1) {
-    return null
-  }
-  return {
-    x: Math.max(0, Math.round(bounds.x)),
-    y: Math.max(0, Math.round(bounds.y)),
-    width: Math.max(1, Math.round(bounds.width)),
-    height: Math.max(1, Math.round(bounds.height))
-  }
-}
-
 function sameBounds(left: BrowserBounds | null | undefined, right: BrowserBounds | null): boolean {
   if (left === undefined) return false
   if (left === null || right === null) return left === right
@@ -140,7 +127,9 @@ export class LatestBrowserBoundsSynchronizer {
 
   observe(bounds: BrowserBounds | null): void {
     if (this.disposed) return
-    this.pending = normalizeBounds(bounds)
+    // 归一化与 main 侧共用一份判定（shared/browser-bounds.ts）：两层对"这个矩形能不能用"必须给同一个
+    // 答案，只有拿到 null 之后做什么才分头处理——这一侧当作"隐藏"，main 侧抛错。
+    this.pending = normalizeBrowserBounds(bounds)
     void this.drain()
   }
 
