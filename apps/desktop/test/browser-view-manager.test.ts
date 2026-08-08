@@ -208,7 +208,7 @@ describe('BrowserViewManager', () => {
     expect(normalizeBrowserUrl('localhost:4173')).toBe('http://localhost:4173/')
     expect(normalizeBrowserUrl('agent runtime docs')).toBe('https://www.google.com/search?q=agent%20runtime%20docs')
     expect(normalizeBrowserUrl('about:blank')).toBe('about:blank')
-    expect(() => normalizeBrowserUrl('file:///etc/passwd')).toThrow('Unsupported browser URL protocol')
+    expect(normalizeBrowserUrl('file:///etc/passwd')).toBe('file:///etc/passwd')
     expect(() => normalizeBrowserUrl('javascript:alert(1)')).toThrow('Unsupported browser URL protocol')
     expect(() => assertAllowedBrowserUrl('mailto:hello@example.com')).toThrow('Unsupported browser URL protocol')
   })
@@ -630,7 +630,7 @@ describe('BrowserViewManager', () => {
     expect(fixture.children[0]!.webContents.windowOpenHandler).toBeNull()
   })
 
-  it('blocks unsupported page navigation and redirects before commit', async () => {
+  it('allows controlled local files but blocks unsupported page navigation and redirects', async () => {
     const fixture = fakeWindow()
     const manager = browserManager(fixture.window)
     await manager.create('browser-guarded', 'https://example.com')
@@ -651,7 +651,7 @@ describe('BrowserViewManager', () => {
     navigate(blockedNavigation)
     redirect(blockedRedirect)
 
-    expect(blockedNavigation.preventDefault).toHaveBeenCalledOnce()
+    expect(blockedNavigation.preventDefault).not.toHaveBeenCalled()
     expect(blockedRedirect.preventDefault).toHaveBeenCalledOnce()
 
     const allowedNavigation = {
