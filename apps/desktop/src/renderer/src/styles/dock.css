@@ -111,7 +111,7 @@
   position: relative;
   display: inline-flex; align-items: center; justify-content: center;
   border: 0; border-radius: var(--radius-sm);
-  background: var(--surface-2); color: var(--text-2); cursor: pointer;
+  background: var(--surface-2); color: var(--text-2);
   filter: grayscale(1); opacity: .72;
   transition: transform .12s ease, background .12s ease, box-shadow .12s ease, filter .12s ease, opacity .12s ease;
 }
@@ -166,9 +166,10 @@
 .agent-avatar[data-attention='error']::after { content: '!'; }
 /* 悬停抬升由共享层在叠压容器上负责（selector.css）——叠压之后必须有东西能让被压住的那枚
    完整露出来，所以抬升与放大是同一个动作的两半，不在这里各写一半。 */
-.agent-avatar.status--working:hover, .agent-avatar.status--running:hover { box-shadow: var(--elev-1), 0 0 7px var(--status-ink); }
-.agent-avatar:hover { background: var(--surface-3); box-shadow: var(--elev-1); }
-.agent-avatar:active { transform: translateY(0); }
+button.agent-avatar.status--working:hover, button.agent-avatar.status--running:hover { box-shadow: var(--elev-1), 0 0 7px var(--status-ink); }
+button.agent-avatar { cursor: pointer; }
+button.agent-avatar:hover { background: var(--surface-3); box-shadow: var(--elev-1); }
+button.agent-avatar:active { transform: translateY(0); }
 /* 拖动中的那一行抬起来一点，让落点看得见；不改变行高，避免列表在拖动时跳动。 */
 .workspace-topic-item.dragging { position: relative; z-index: 1; background: var(--surface-3); box-shadow: var(--hl-strong); }
 .workspace-topic-reveal.icon-button { width: 24px; height: 24px; color: var(--text-3); }
