@@ -885,6 +885,23 @@ export const WINDOW_RESIZE_EVENT_CHANNEL = 'agentmux:window-resize'
 /** Main -> renderer: the user clicked a notification about this Agent Session. */
 export const AGENT_ATTENTION_ACTIVATE_CHANNEL = 'agentmux:agent-attention-activate'
 
+// The four push channels below used to be hand-written string literals at BOTH ends — the sender in
+// main and the `ipcRenderer.on` in preload each spelled the name out. That is not symmetric with the
+// request/response channels above, and it is a silent failure mode: `webContents.send` and
+// `ipcRenderer.on` both take `channel: string`, so misspelling one side compiles clean, registers a
+// listener nobody ever fires, and the feature simply goes dead with no error anywhere. The
+// invoke/handle surface cannot drift this way because ipc-parity.test.ts compares the two sets — but
+// that extractor only reads `handle(...)`/`invoke(...)` call nodes, so `.send`/`.on` were entirely
+// outside its view. Naming each channel once here makes a rename a compile error at every use site.
+/** Main -> renderer: one runtime/session event from the Agent runtime controller. */
+export const SESSION_EVENT_CHANNEL = 'agentmux:session-event'
+/** Main -> renderer: one embedded-browser lifecycle/navigation event. */
+export const BROWSER_EVENT_CHANNEL = 'agentmux:browser-event'
+/** Main -> renderer: a periodic CPU/RSS sample for the resource panel. */
+export const RESOURCE_USAGE_CHANNEL = 'agentmux:resource-usage'
+/** Main -> renderer: a watched workspace file changed on disk; re-read it. */
+export const WORKSPACE_FILE_INVALIDATED_CHANNEL = 'agentmux:workspace-file-invalidated'
+
 export type WindowResizeEvent = {
   active: boolean
 }
