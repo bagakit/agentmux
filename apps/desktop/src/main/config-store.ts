@@ -3,8 +3,14 @@ import { dirname, join, normalize as normalizeLocalPath, posix } from 'node:path
 import { app } from 'electron'
 import { z } from 'zod'
 import { BUILT_IN_AGENT_PROVIDERS, durableWriteFile } from '@agentmux/core'
-import type { AppConfig, WorkspaceRecord } from '../shared/contracts.js'
-import { CONFIG_VERSION, SCRATCH_WORKSPACE_ID, SCRATCH_WORKSPACE_NAME } from '../shared/contracts.js'
+import type { AppConfig, TerminalThemeId, WorkspaceKind, WorkspaceRecord } from '../shared/contracts.js'
+import {
+  CONFIG_VERSION,
+  SCRATCH_WORKSPACE_ID,
+  SCRATCH_WORKSPACE_NAME,
+  TERMINAL_THEME_IDS,
+  WORKSPACE_KINDS
+} from '../shared/contracts.js'
 import { DEFAULT_NOTIFICATION_MODE_ID, NOTIFICATION_TIERS } from '../shared/notification-presentation.js'
 
 const hostSchema = z.discriminatedUnion('kind', [
@@ -42,7 +48,7 @@ const workspaceSchema = z
     name: z.string().min(1),
     hostId: z.string().min(1),
     path: z.string().min(1),
-    kind: z.enum(['folder', 'worktree']),
+    kind: z.enum(WORKSPACE_KINDS),
     repoPath: z.string().min(1).optional(),
     branch: z.string().min(1).optional()
   })
@@ -53,7 +59,7 @@ const notificationModeIds = NOTIFICATION_TIERS.map((tier) => tier.id) as [string
 // Named rather than inlined below because the retirement path validates each of these on its own, to
 // carry a still-valid user preference across a version bump. Two definitions of the same shape would
 // drift, and the drift would be silent: the config would parse while the carry-over dropped the field.
-const appearanceSchema = z.object({ terminalTheme: z.enum(['graphite', 'catppuccin-mocha']) }).strict()
+const appearanceSchema = z.object({ terminalTheme: z.enum(TERMINAL_THEME_IDS) }).strict()
 const browserSchema = z.object({
   toolbar: z.object({
     selectElement: z.boolean(),
@@ -131,6 +137,32 @@ const configSchema = z
       workspaceLocations.add(location)
     }
   })
+
+/**
+ * The schema's two enum fields must stay exactly their union types — the guard that keeps
+ * `workspaceSchema.kind` and `appearanceSchema.terminalTheme` from being re-spelled as hand-listed
+ * `z.enum([...])` again.
+ *
+ * WHY THIS PROOF, NOT JUST THE `z.enum(TUPLE)` DERIVATION: the schema output is consumed through an
+ * `as AppConfig` cast (`configSchema.parse(...) as AppConfig` at the three parse sites), and that cast
+ * severs any structural check between the parsed value and `AppConfig`. So "the schema happens to infer
+ * the right type" is not enough on its own — nothing downstream would notice if it stopped. This proof
+ * re-establishes the link at the schema itself, in `src/` (compiled by `tsconfig.json`, so it is
+ * load-bearing — a `test/**` assertion here would be dead code: `tsconfig.test.json` has hundreds of
+ * pre-existing errors). Each `z.infer` extracts what the schema actually validates; each conditional is
+ * `true` only when its containment holds and `never` otherwise, and `never` is not assignable to a
+ * `true` slot. Revert either field to a hand-listed `z.enum([...])` that omits a member and the ⊇ half
+ * for that field fails to type-check (verified: TS2322). Adding a member to a union while the schema
+ * derives from the same tuple keeps this green by construction, which is the point — the schema can no
+ * longer fall behind the union.
+ */
+const _schemaEnumsAreExactlyTheirUnions: [
+  z.infer<typeof workspaceSchema>['kind'] extends WorkspaceKind ? true : never,
+  WorkspaceKind extends z.infer<typeof workspaceSchema>['kind'] ? true : never,
+  z.infer<typeof appearanceSchema>['terminalTheme'] extends TerminalThemeId ? true : never,
+  TerminalThemeId extends z.infer<typeof appearanceSchema>['terminalTheme'] ? true : never
+] = [true, true, true, true]
+void _schemaEnumsAreExactlyTheirUnions
 
 export const DEFAULT_CONFIG: AppConfig = {
   version: CONFIG_VERSION,
