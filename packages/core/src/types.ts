@@ -510,6 +510,21 @@ export type AgentTerminalCapabilityState = {
 }
 
 /**
+ * 屏幕验证没走通的两种原因。元组是 SSOT，理由同 {@link RISK_TIERS}：存储层要按这份清单校验磁盘
+ * 数据，手抄一份只强制 ⊆ 而对 ⊇ 失明，加一个原因却忘了往那份手抄里加，会让带新原因的合法记录被
+ * fail-closed 丢掉且无编译错。
+ */
+export const PROMPT_DELIVERY_DEGRADED_REASONS = [
+  'screen-evidence-gap', 'prompt-render-timeout'
+] as const
+export type PromptDeliveryDegradedReason = (typeof PROMPT_DELIVERY_DEGRADED_REASONS)[number]
+
+/** 同 {@link isPermissionOptionKind}：清单与断言收成一处，别让调用方写 `!== 'a' && !== 'b'` 的手抄链。 */
+export function isPromptDeliveryDegradedReason(value: unknown): value is PromptDeliveryDegradedReason {
+  return PROMPT_DELIVERY_DEGRADED_REASONS.includes(value as PromptDeliveryDegradedReason)
+}
+
+/**
  * 服务窗事实（原则 11 第 2 类）：一次 prompt 交付的 payload 受据已确认、Run 仍存活，但屏幕
  * 验证没走通——replay 被截断（`screen-evidence-gap`）或渲染确认超时（`prompt-render-timeout`）。
  * Core 照常发出提交键；这条记录告诉 client 哪一步没走通、现在按什么状态在跑。恢复路径：
@@ -518,7 +533,7 @@ export type AgentTerminalCapabilityState = {
 export type AgentTerminalPromptDeliveryState = {
   state: 'unverified'
   mode: 'degraded'
-  reason: 'screen-evidence-gap' | 'prompt-render-timeout'
+  reason: PromptDeliveryDegradedReason
   submissionId: string
   run: AgentMuxRunRef
   observedAt: number
@@ -555,10 +570,32 @@ export type AgentMuxStoredAgentSession = AgentMuxAgentSession & {
   capabilityHash?: string
 }
 
+/**
+ * 一个权限选项的四种答复方向。元组是 SSOT，{@link AgentMuxPermissionOption} 的 `kind` 从它派生，
+ * 存储层的运行期白名单复用它（见 agent-session-store 的 permission 分支）——与 {@link RISK_TIERS}
+ * 同一套做法，理由也同一个：手抄一份数组只强制 ⊆（列出的每个串都是成员），对 ⊇ 完全失明。往这个
+ * 联合加一个方向而忘了往那份手抄里加，会让**每一条带新方向的合法磁盘记录**被
+ * `INVALID_AGENT_SESSION_STORE` 拒掉——fail-closed 的数据丢失，且没有任何编译错，而"加成员"正是
+ * 常见方向。从元组派生之后，加成员这件事在两侧同时生效，无处可漂。
+ */
+export const PERMISSION_OPTION_KINDS = [
+  'allow-once', 'allow-always', 'reject-once', 'reject-always'
+] as const
+export type PermissionOptionKind = (typeof PERMISSION_OPTION_KINDS)[number]
+
+/**
+ * 磁盘上读到的这个值是不是一个合法的答复方向。做成收窄谓词而不是让调用方 `includes` 完再 `as` 一次：
+ * 那个 cast 是同一件事的第二个声明点，校验用的清单和断言成的类型会各自漂移（存储层此前正是
+ * 「裸数组 + cast」两处并存）。
+ */
+export function isPermissionOptionKind(value: unknown): value is PermissionOptionKind {
+  return PERMISSION_OPTION_KINDS.includes(value as PermissionOptionKind)
+}
+
 export type AgentMuxPermissionOption = {
   id: string
   label: string
-  kind: 'allow-once' | 'allow-always' | 'reject-once' | 'reject-always'
+  kind: PermissionOptionKind
   /** DESCRIBE-half only: prose the renderer draws beneath the label. The keystroke that answers this
    * option never rides here — it stays core-side on the Provider's declaration. */
   description?: string

@@ -277,3 +277,21 @@ export function agentMuxControlTimeoutMs(operation: AgentMuxControlRequest['oper
     ? AGENTMUX_CONTROL_LONG_REQUEST_TIMEOUT_MS
     : AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS
 }
+
+/**
+ * 入站的这个值是不是一个合法操作名——成员判定**派生**自 {@link OPERATION_BUDGET} 的键，不是第二份手抄。
+ *
+ * 为什么问那张表而不是另写一份十二个串的清单：那张表已经被 tsc 强制穷尽（缺键报 TS2741、多键报
+ * TS2353），所以它的键集合恒等于联合本身。控制协议的入站校验（control-host）此前正是另写了一份同样
+ * 的十二串元组，两份之间没有任何编译期联系——而这种手抄只强制 ⊆（列出的每个串都是合法操作），对 ⊇
+ * 完全失明：往联合里加一个操作而忘了往那份手抄里加，daemon 会把**合法的新操作**当成
+ * `INVALID_CONTROL_REQUEST` 拒掉，且 tsc 全程沉默。加操作正是常见方向。
+ *
+ * 做成收窄谓词而不是导出一份键数组让调用方 `includes` 完再 `as` 一次：那个 cast 是同一件事的**第二个
+ * 声明点**，「校验用的清单」和「断言成的类型」会各自漂移（control-host 此前正是「裸元组 + cast」两处
+ * 并存）。三个消费点都只做成员判定，没有一个需要遍历，所以不留那份数组——留下就是一个零生产调用方
+ * 的公共 API，会被 control-export-reachability 判成死代码，那条判据是对的。
+ */
+export function isAgentMuxControlOperation(value: unknown): value is AgentMuxControlRequest['operation'] {
+  return typeof value === 'string' && Object.hasOwn(OPERATION_BUDGET, value)
+}
