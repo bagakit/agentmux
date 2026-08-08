@@ -105,6 +105,18 @@ describe('isAllowedTopFrameNavigation: prod shape (packaged file:// document)', 
     expect(isAllowedTopFrameNavigation(PROD, 'http://localhost:5173/')).toBe(false)
   })
 
+  it('rejects an https:// target whose PATH collides with the packaged document (the protocol clause)', () => {
+    // 这条钉住 prod 分支里那句 `if (target.protocol !== 'file:') return false`。此前它无人守：既有的
+    // https 用例（'https://evil.example/x'）路径是 /x，本来就过不了下面的路径逐字比对，所以把整句改成
+    // `if (false) return false` 仍 28 条全绿——而那个变异是真洞：一个路径与被打包文档**恰好相同**的
+    // https URL 会绕过协议判据、命中路径比对而被放行（实测 true），顶帧就能被导航到攻击者的 https 站点、
+    // 继承那座 preload 特权桥。碰撞路径直接从 PROD fixture 的 filePath 派生（不另手抄一份路径字面量，
+    // 免得两处漂移），拼成同路径的 https URL。
+    // 盲点：只钉了 protocol 这一句；路径比对本身、query/hash 忽略等由本文件别的用例守。
+    const collidingHttps = `https://evil.example${(PROD as { filePath: string }).filePath}`
+    expect(isAllowedTopFrameNavigation(PROD, collidingHttps)).toBe(false)
+  })
+
   it('matches a percent-encoded path back to the packaged document (spaces in the app path)', () => {
     const spaced: TopFrameOrigin = { mode: 'prod', filePath: '/Applications/Agent Mux.app/renderer/index.html' }
     expect(isAllowedTopFrameNavigation(spaced, 'file:///Applications/Agent%20Mux.app/renderer/index.html')).toBe(true)

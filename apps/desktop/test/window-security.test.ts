@@ -8,6 +8,21 @@ import {
   windowOpenOutcome,
   windowSecurityWebPreferences
 } from '../src/main/window-security.js'
+import {
+  declarationOf,
+  importedModuleOf,
+  namedImportsFrom,
+  parseModule,
+  parseModuleFile,
+  type ParsedModule
+} from './helpers/ts-binding.js'
+import {
+  browserWindowSites,
+  NODE_PATH_MODULE,
+  PRELOAD_RELATIVE_PATH,
+  WINDOW_SECURITY_MODULE,
+  type SiteVerdict
+} from './helpers/window-security-ast.js'
 
 /**
  * 主窗口的四个隔离开关（contextIsolation/sandbox/nodeIntegration/preload）+ webSecurity + 弹窗判据。
@@ -33,12 +48,6 @@ import {
 
 const here = dirname(fileURLToPath(import.meta.url))
 const indexPath = join(here, '../src/main/index.ts')
-/**
- * index.ts 该喂给 windowSecurityWebPreferences 的 preload 相对路径。相对于**打包产物**里 index.js 所在的
- * 目录（out/main/），不是相对本仓源码树——所以不能用源码路径推导，只能写字面量，再由下面那条测试拿
- * electron.vite.config.ts 的 entryFileNames 来核对文件名部分。
- */
-const PRELOAD_RELATIVE_PATH = '../preload/index.cjs'
 
 // ---------------------------------------------------------------------------------------------------
 // 行为层：直接质询取值
@@ -162,165 +171,49 @@ describe('windowOpenOutcome: the decision AND its one side effect, in a single c
 // ---------------------------------------------------------------------------------------------------
 // 接线层：AST 质询 index.ts 真的用了它，且喂进去的就是那个值
 // ---------------------------------------------------------------------------------------------------
-const MODULE_SPECIFIER = './window-security.js'
+/**
+ * 这一层的取值判据（`new BrowserWindow` 站点分类、preload 实参怎么算出来的、隔离开关按写法读）由
+ * helpers/window-security-ast.ts **单份**实现，本文件与 window-security-reachability.test.ts 共用它。
+ *
+ * 为什么必须单份：那里最承重的一句是**绑定**判据（这个名字解析到我以为的那次 import 吗）。此前两个文件
+ * 各抄一份，于是删掉那句的变异要改**两处**才能观测到——而真正的风险是下一次收紧只落在其中一个副本上，
+ * 另一个静默留着弱判据。这正是这道守卫本身要防的形状（同一概念两份手抄必漂移）。
+ *
+ * 留在本文件里的是**只有主窗口这条路才有的判据**：setWindowOpenHandler 的整条接线，以及「webPreferences
+ * 必须是那次工厂调用而不是内联对象」这条比 allow-list 更严的策略（隐藏的 import 窗口用内联字面量是被
+ * 允许的，主窗口不允许——所以策略不能共用，只有机制能共用）。
+ */
+const MODULE_SPECIFIER = WINDOW_SECURITY_MODULE
 const ELECTRON_MODULE = 'electron'
+/**
+ * webPreferencesShape 的自检 fixture 共用的 import 前导。收紧后的判据按**绑定**判 callee 与 `join`：
+ * 合成片段若不带这两行 import，callee 的 importedFrom 会读成 null、`join` 会被判成 join-not-from-node-path，
+ * 于是「诚实形状」的正向 fixture 反而对不上（记忆里 #452 的教训：强判据一旦不更新自检 fixture，自检会
+ * 用弱前提放过一个仍然破的守卫）。带上它们，正向 fixture 与真文件走同一套绑定。故意省掉它们的负向
+ * fixture（影子 callee / 影子 join）另写，各自钉住那条新判据认得出违规。
+ */
+const WEBPREFS_IMPORTS =
+  `import { windowSecurityWebPreferences } from '${WINDOW_SECURITY_MODULE}'\n` +
+  `import { join } from '${NODE_PATH_MODULE}'\n`
+
+/** 本文件用的别名：解析一段合成源码（与真文件走同一条 parse 路径，故自检强度就是真文件强度）。 */
+const parse = (source: string, label = '/synthetic/index.ts'): ParsedModule => parseModule(source, label)
 
 /**
- * 一份**解析过**的源码：语法树 + 类型检查器。
+ * 主窗口那一个 BrowserWindow 站点的 webPreferences 形状。取值分类由共享模块给出，这里只把「主窗口只有
+ * 第一个站点」这条约定收成一个更窄的返回：
+ * - {shape:'factory-call'} 一次函数调用（我们要的：windowSecurityWebPreferences(<preload 路径>)）
+ * - {shape:'inline-literal'} 一份内联对象字面量（主窗口就是要禁的：另手抄一份，取值即便正确也是第二个 SSOT）
+ * - 其余 / 缺席
  *
- * 为什么一定要带 checker：接线判据必须按**绑定**（这个名字声明在哪）判，不能按**文本**判。此前这里只有
- * `ts.createSourceFile`（纯语法树、无 binder），于是守卫只能比对标识符的拼写——实测有四种改法在 24/24
- * 全绿下存活，每一种都是真能力（详见下面 windowOpenWiring 的注释）。
- *
- * `noResolve`/`noLib` 让 Program 不去碰磁盘上的 lib.d.ts 与被 import 的模块：本文件的每条判据都只需要
- * **单文件**的绑定信息（这个标识符解析到本文件里的哪个声明？那个声明是不是从某模块 import 进来的？），
- * 而 binder 在单文件下就给得出。同一个构造路径既吃 index.ts 的真实字节，也吃下面自检用的合成片段——
- * 判据只有一份实现，不会出现「真文件走强判据、自检走弱判据」的分岔。
+ * `importedFrom` 按**绑定**判 callee 解析到哪里，不是比拼写。一个函数作用域里的同名影子（返回
+ * contextIsolation:false / sandbox:false / nodeIntegration:true / webSecurity:false）拼写完全一样、真实的
+ * 那份 import 还在文件顶部，于是老判据（只看 callee 的文本 + preload 实参）读出的还是合格的 call——主窗口
+ * 的每个隔离开关被静默关掉而 32 条全绿、tsc 退 0。抓它的正是 `importedFrom`：名字对，绑定指向本地声明。
  */
-interface ParsedModule {
-  readonly sourceFile: ts.SourceFile
-  readonly checker: ts.TypeChecker
-}
-
-function parse(source: string, label = '/synthetic/index.ts'): ParsedModule {
-  const sourceFile = ts.createSourceFile(label, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
-  const host: ts.CompilerHost = {
-    getSourceFile: (name) => (name === label ? sourceFile : undefined),
-    writeFile: () => {},
-    getDefaultLibFileName: () => 'lib.d.ts',
-    useCaseSensitiveFileNames: () => true,
-    getCanonicalFileName: (name) => name,
-    getCurrentDirectory: () => '/',
-    getNewLine: () => '\n',
-    fileExists: (name) => name === label,
-    readFile: (name) => (name === label ? source : undefined)
-  }
-  const program = ts.createProgram(
-    [label],
-    { noResolve: true, noLib: true, target: ts.ScriptTarget.ESNext },
-    host
-  )
-  return { sourceFile, checker: program.getTypeChecker() }
-}
-
-/** 这个标识符解析到的声明。返回 null 表示本文件里根本没有它的声明（绑定判据的「查不到」）。 */
-function declarationOf(module: ParsedModule, node: ts.Node): ts.Declaration | null {
-  return module.checker.getSymbolAtLocation(node)?.declarations?.[0] ?? null
-}
-
-/** 这个声明是不是从某模块具名 import 进来的？是则给出模块 specifier，否则 null（本地声明/查不到）。 */
-function importedModuleOf(declaration: ts.Declaration | null): string | null {
-  if (declaration === null || !ts.isImportSpecifier(declaration)) return null
-  // ImportSpecifier → NamedImports → ImportClause → ImportDeclaration
-  const specifier = declaration.parent.parent.parent.moduleSpecifier
-  return ts.isStringLiteral(specifier) ? specifier.text : null
-}
-
-/** 从某模块 specifier 具名 import 进来的名字集合（import 关系判据，不是文本拼法）。 */
-function namedImportsFrom(module: ParsedModule, moduleSpecifier: string): string[] {
-  const names: string[] = []
-  module.sourceFile.forEachChild((node) => {
-    if (
-      ts.isImportDeclaration(node) &&
-      ts.isStringLiteral(node.moduleSpecifier) &&
-      node.moduleSpecifier.text === moduleSpecifier
-    ) {
-      const bindings = node.importClause?.namedBindings
-      if (bindings && ts.isNamedImports(bindings)) {
-        for (const element of bindings.elements) names.push(element.name.text)
-      }
-    }
-  })
-  return names
-}
-
-function findNewExpression(sf: ts.Node, ctorName: string): ts.NewExpression | null {
-  let found: ts.NewExpression | null = null
-  const visit = (node: ts.Node): void => {
-    if (found) return
-    if (ts.isNewExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === ctorName) {
-      found = node
-      return
-    }
-    ts.forEachChild(node, visit)
-  }
-  visit(sf)
-  return found
-}
-
-function propertyInitializer(obj: ts.ObjectLiteralExpression, name: string): ts.Expression | null {
-  for (const property of obj.properties) {
-    if (ts.isPropertyAssignment(property) && ts.isIdentifier(property.name) && property.name.text === name) {
-      return property.initializer
-    }
-  }
-  return null
-}
-
-/**
- * 喂给 windowSecurityWebPreferences 的那个 preload 路径**是怎么算出来的**。
- *
- * 判据不是「有个实参」而是「它是从本模块自己的目录 join 出来的一个相对路径」：
- * - `join-from-module-dir` + relativePath：我们要的形状。`import.meta.dirname` 把基点钉在打包产物
- *   （out/main/）自己所在的目录上，路径因此不随 cwd、不随启动方式漂移。
- * - 其余取值都不合格——包括「取值恰好正确但基点换成了 process.cwd()」这种。
- *
- * 为什么必须判到这一层：preload 就是那座特权桥的入口，指错等于装了一座不受控的桥（renderer 拿到
- * 完整 ipcRenderer）。实测过没这条判据的后果：把实参改成 '../preload/evil.cjs'，41 条全绿。
- */
-type PreloadArgument =
-  | { kind: 'absent' }
-  | { kind: 'not-a-join' }
-  | { kind: 'not-rooted-at-module-dir' }
-  | { kind: 'not-a-literal-path' }
-  | { kind: 'join-from-module-dir'; relativePath: string }
-
-function isImportMetaDirname(node: ts.Expression): boolean {
-  return (
-    ts.isPropertyAccessExpression(node) &&
-    node.name.text === 'dirname' &&
-    ts.isMetaProperty(node.expression) &&
-    node.expression.keywordToken === ts.SyntaxKind.ImportKeyword
-  )
-}
-
-function preloadArgumentOf(call: ts.CallExpression): PreloadArgument {
-  const argument = call.arguments[0]
-  if (argument === undefined) return { kind: 'absent' }
-  if (!ts.isCallExpression(argument) || !ts.isIdentifier(argument.expression) || argument.expression.text !== 'join') {
-    return { kind: 'not-a-join' }
-  }
-  const base = argument.arguments[0]
-  if (base === undefined || !isImportMetaDirname(base)) return { kind: 'not-rooted-at-module-dir' }
-  const relative = argument.arguments[1]
-  if (relative === undefined || !ts.isStringLiteral(relative)) return { kind: 'not-a-literal-path' }
-  return { kind: 'join-from-module-dir', relativePath: relative.text }
-}
-
-/**
- * new BrowserWindow(...) 第一个实参对象里 webPreferences 的值是什么形状：
- * - {kind:'call',callee,preload} 一次函数调用（我们要的：windowSecurityWebPreferences(<preload 路径>)）
- * - {kind:'object'} 一份内联对象字面量（就是要禁的：另手抄一份，取值即便正确也是第二个 SSOT）
- * - {kind:'other'|'absent'} 其它 / 缺席
- */
-function webPreferencesShape(
-  module: ParsedModule
-):
-  | { kind: 'call'; callee: string; preload: PreloadArgument }
-  | { kind: 'object' }
-  | { kind: 'other' }
-  | { kind: 'absent' } {
-  const nw = findNewExpression(module.sourceFile, 'BrowserWindow')
-  const arg0 = nw?.arguments?.[0]
-  if (arg0 === undefined) return { kind: 'absent' }
-  if (!ts.isObjectLiteralExpression(arg0)) return { kind: 'other' }
-  const init = propertyInitializer(arg0, 'webPreferences')
-  if (!init) return { kind: 'absent' }
-  if (ts.isCallExpression(init) && ts.isIdentifier(init.expression)) {
-    return { kind: 'call', callee: init.expression.text, preload: preloadArgumentOf(init) }
-  }
-  if (ts.isObjectLiteralExpression(init)) return { kind: 'object' }
-  return { kind: 'other' }
+function webPreferencesShape(module: ParsedModule): SiteVerdict {
+  const [first] = browserWindowSites(module)
+  return first ?? { shape: 'no-object-arg' }
 }
 
 /** 找 window.webContents.setWindowOpenHandler(cb) 的回调实参。 */
@@ -501,7 +394,7 @@ const HONEST_WIRING: WindowOpenWiring = {
 }
 
 describe('index.ts wiring: it imports and USES the security module (AST, not text scan)', () => {
-  const indexModule = parse(readFileSync(indexPath, 'utf8'), indexPath)
+  const indexModule = parseModuleFile(indexPath)
 
   it('imports both the webPreferences factory and the popup outcome from window-security', () => {
     const names = namedImportsFrom(indexModule, MODULE_SPECIFIER)
@@ -513,11 +406,16 @@ describe('index.ts wiring: it imports and USES the security module (AST, not tex
     // 这条正是接线层专属判据：即便有人内联一份取值完全正确的对象字面量（行为层全绿），这里也会红，
     // 因为 webPreferences 的值变成了 object 而不是对 windowSecurityWebPreferences 的调用。
     //
-    // 也判到 preload 那个实参：此前只判 callee，实测把实参改成 '../preload/evil.cjs' 后 41 条全绿——
-    // 而 preload 就是那座特权桥的入口，指错等于给 renderer 装了一座不受控的桥。
+    // 也判到 callee 的**绑定**与 preload 那个实参：
+    // - `importedFrom` 抓「函数作用域里另写一个同名影子把四个隔离开关全关掉」——callee 拼写一样、真的
+    //   import 还在顶部，实测 32 条全绿、tsc 退 0；名字对而绑定指向本地声明（null）。
+    // - preload 实参此前只判 callee，实测把它改成 '../preload/evil.cjs' 后 41 条全绿；再往里，把 `join`
+    //   影子成 `const join = (_b, _r) => '/tmp/evil/preload.cjs'`（基点与字面量都保留）也曾 32 条全绿——
+    //   两者都指向那座特权桥的入口，所以判到取值且要求 join 绑定到 node:path。
     expect(webPreferencesShape(indexModule)).toEqual({
-      kind: 'call',
+      shape: 'factory-call',
       callee: 'windowSecurityWebPreferences',
+      importedFrom: MODULE_SPECIFIER,
       preload: { kind: 'join-from-module-dir', relativePath: PRELOAD_RELATIVE_PATH }
     })
   })
@@ -565,28 +463,77 @@ describe('index.ts wiring guard: self-check (the guard reds on a planted violati
     ])
   })
 
-  it('webPreferencesShape reports {kind:object} for an inlined (even correct) literal — the forbidden shape', () => {
+  it("webPreferencesShape reports {shape:'inline-literal'} for an inlined (even correct) literal — the forbidden shape for the MAIN window", () => {
     const inlined = parse(
       'const w = new BrowserWindow({ webPreferences: { preload: p, contextIsolation: true, sandbox: true, nodeIntegration: false } })'
     )
     // 内联对象字面量：取值全对，但形状是 object 而非 call。守卫据此报红。
-    expect(webPreferencesShape(inlined)).toEqual({ kind: 'object' })
-    // 对照：真正的调用形状被认成 call，且 preload 实参的来处被一并读出。
+    expect(webPreferencesShape(inlined)).toEqual({
+      shape: 'inline-literal',
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false
+    })
+    // 对照：真正的调用形状被认成 call，callee 的绑定与 preload 实参的来处一并读出。fixture 带上生产同款
+    // 的两行 import（见 WEBPREFS_IMPORTS 注释），callee 才解析到 window-security、join 才解析到 node:path。
     const viaCall = parse(
-      `const w = new BrowserWindow({ webPreferences: windowSecurityWebPreferences(join(import.meta.dirname, '${PRELOAD_RELATIVE_PATH}')) })`
+      `${WEBPREFS_IMPORTS}const w = new BrowserWindow({ webPreferences: windowSecurityWebPreferences(join(import.meta.dirname, '${PRELOAD_RELATIVE_PATH}')) })`
     )
     expect(webPreferencesShape(viaCall)).toEqual({
-      kind: 'call',
+      shape: 'factory-call',
       callee: 'windowSecurityWebPreferences',
+      importedFrom: MODULE_SPECIFIER,
       preload: { kind: 'join-from-module-dir', relativePath: PRELOAD_RELATIVE_PATH }
     })
+  })
+
+  it('webPreferencesShape catches a function-scoped shadow of the factory even though the callee text is identical', () => {
+    // 事故形状（exploit A）：真的 import 仍在文件顶部，但在建窗的函数作用域里另写一个同名影子，把四个
+    // 隔离开关全关掉（contextIsolation/sandbox → false、nodeIntegration → true、webSecurity → false）。
+    // callee 的拼写一模一样，只有绑定变了——老判据只比 callee 文本 + preload 实参，实测 32 条全绿、tsc
+    // 退 0。抓它的是 importedFrom：名字对，绑定指向本地声明（null）而非那次 import。
+    // 盲点：它只认「callee 绑定是不是那次 import」，不追工厂返回值的取值——那由行为层直接质询纯函数守。
+    const shadowed = parse(
+      "import { windowSecurityWebPreferences as real } from './window-security.js'\n" +
+        "import { join } from 'node:path'\n" +
+        'function buildWindow() {\n' +
+        '  const windowSecurityWebPreferences = (p: string) => ({ preload: p, contextIsolation: false, sandbox: false, nodeIntegration: true, webSecurity: false })\n' +
+        `  return new BrowserWindow({ webPreferences: windowSecurityWebPreferences(join(import.meta.dirname, '${PRELOAD_RELATIVE_PATH}')) })\n` +
+        '}'
+    )
+    expect(webPreferencesShape(shadowed)).toMatchObject({ shape: 'factory-call', callee: 'windowSecurityWebPreferences', importedFrom: null })
+    expect(webPreferencesShape(shadowed)).not.toEqual({
+      shape: 'factory-call',
+      callee: 'windowSecurityWebPreferences',
+      importedFrom: MODULE_SPECIFIER,
+      preload: { kind: 'join-from-module-dir', relativePath: PRELOAD_RELATIVE_PATH }
+    })
+  })
+
+  it('webPreferencesShape catches a function-scoped shadow of join even though the join text is identical', () => {
+    // 事故形状（exploit B）：`join` 的 import 仍在顶部，但函数作用域里 `const join = (_b, _r) =>
+    // '/tmp/evil/preload.cjs'` 影子把 preload 重指到任意路径，import.meta.dirname 基点与字面量相对路径
+    // 都原样保留。老判据只比 argument.expression.text === 'join'，读出的还是合格的 join-from-module-dir，
+    // 实测 32 条全绿、tsc 退 0。抓它的是「join 的绑定必须是 node:path」：名字对，绑定指向本地影子。
+    // 盲点：它只认 join 这一个名字的绑定，不追 import.meta.dirname 之外的其它基点算法（那由 not-rooted 守）。
+    const shadowed = parse(
+      "import { windowSecurityWebPreferences } from './window-security.js'\n" +
+        "import { join } from 'node:path'\n" +
+        'function buildWindow() {\n' +
+        "  const join = (_b: string, _r: string) => '/tmp/evil/preload.cjs'\n" +
+        `  return new BrowserWindow({ webPreferences: windowSecurityWebPreferences(join(import.meta.dirname, '${PRELOAD_RELATIVE_PATH}')) })\n` +
+        '}'
+    )
+    expect(webPreferencesShape(shadowed)).toMatchObject({ shape: 'factory-call', preload: { kind: 'join-not-from-node-path' } })
   })
 
   it('webPreferencesShape catches a repointed preload path and a drifting base directory', () => {
     // 一个 review agent 实测过：把这个实参改成 '../preload/evil.cjs' 时 41 条全绿。preload 就是那座特权桥
     // 的入口，指错等于给 renderer 装了一座不受控的桥（拿到完整 ipcRenderer）——所以这条必须判到取值。
+    // 这些 fixture 都带上 WEBPREFS_IMPORTS：收紧后的判据要求 `join` 绑定到 node:path，不带 import 会先被
+    // 判成 join-not-from-node-path，读不到下面这些「取值/基点」层面的判据。
     const repointed = parse(
-      "const w = new BrowserWindow({ webPreferences: windowSecurityWebPreferences(join(import.meta.dirname, '../preload/evil.cjs')) })"
+      `${WEBPREFS_IMPORTS}const w = new BrowserWindow({ webPreferences: windowSecurityWebPreferences(join(import.meta.dirname, '../preload/evil.cjs')) })`
     )
     expect(webPreferencesShape(repointed)).toMatchObject({
       preload: { kind: 'join-from-module-dir', relativePath: '../preload/evil.cjs' }
@@ -594,7 +541,7 @@ describe('index.ts wiring guard: self-check (the guard reds on a planted violati
     // 基点换成 cwd：取值那一半仍然「正确」，但路径从此随启动方式漂移（双击 vs 终端 vs 打包）。判据落在
     // 基点上，所以这种改法也认得出。
     const cwdBased = parse(
-      `const w = new BrowserWindow({ webPreferences: windowSecurityWebPreferences(join(process.cwd(), '${PRELOAD_RELATIVE_PATH}')) })`
+      `${WEBPREFS_IMPORTS}const w = new BrowserWindow({ webPreferences: windowSecurityWebPreferences(join(process.cwd(), '${PRELOAD_RELATIVE_PATH}')) })`
     )
     expect(webPreferencesShape(cwdBased)).toMatchObject({ preload: { kind: 'not-rooted-at-module-dir' } })
     // 不经 join 直接给一个串，以及整个实参缺席。
@@ -606,7 +553,7 @@ describe('index.ts wiring guard: self-check (the guard reds on a planted violati
     ).toMatchObject({ preload: { kind: 'absent' } })
     // 拼出来的路径（变量、模板串）也不合格：判据要能逐字比对那个相对路径。
     expect(
-      webPreferencesShape(parse('const w = new BrowserWindow({ webPreferences: windowSecurityWebPreferences(join(import.meta.dirname, chosen)) })'))
+      webPreferencesShape(parse(`${WEBPREFS_IMPORTS}const w = new BrowserWindow({ webPreferences: windowSecurityWebPreferences(join(import.meta.dirname, chosen)) })`))
     ).toMatchObject({ preload: { kind: 'not-a-literal-path' } })
   })
 
