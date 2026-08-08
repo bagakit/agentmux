@@ -15,6 +15,10 @@ const DEL = String.fromCharCode(0x7f)
 const C1_HIGH = String.fromCharCode(0x9f)
 const TAB = String.fromCharCode(0x09)
 const LF = String.fromCharCode(0x0a)
+// US (Unit Separator) sits at 0x1f -- the TOP of the C0 range, i.e. the reject-side boundary of the
+// lower gate. It is NOT whitespace, so String#trim() leaves it in place (unlike ESC/TAB/LF, which
+// trim would strip from the edges): a survivor returns the raw string rather than undefined.
+const US = String.fromCharCode(0x1f)
 
 function session(nativeHandle: unknown) {
   return {
@@ -56,6 +60,22 @@ describe('native resume locator contract', () => {
     expect(normalizeNativeTranscriptPath('/tmp/session' + DEL + '.jsonl')).toBeUndefined()
     // Presence self-check: the same locators WITHOUT the DEL byte normalize, so the rejection above
     // is the control byte itself and not the surrounding shape -- otherwise both halves are vacuous.
+    expect(normalizeNativeSessionId('nativesession')).toBe('nativesession')
+    expect(normalizeNativeTranscriptPath('/tmp/session.jsonl')).toBe('/tmp/session.jsonl')
+  })
+
+  it('rejects a US (0x1f) control byte at the top of the C0 range', () => {
+    // Kills: hasUnsafeControlCharacters' lower gate `code <= 0x1f` narrowed to `code <= 0x1e`, which
+    // lets 0x1f (Unit Separator) through -- the reject-side boundary of the C0 gate. The existing
+    // lower-range coverage only uses ESC (0x1b), TAB (0x09) and LF (0x0a), all <= 0x1e, so the
+    // narrowed gate still catches every one of them and the mutation survives the whole file (verified
+    // it survives 7/7). US is not whitespace, so String#trim() does not strip it: a survivor returns
+    // the raw string rather than undefined. A gate has two sides; DEL (0x7f) pins the upper C1 side,
+    // this pins the C0 side. Blind spot: this pins only the 0x1f edge, not the interior of the range.
+    expect(normalizeNativeSessionId('native' + US + 'session')).toBeUndefined()
+    expect(normalizeNativeTranscriptPath('/tmp/session' + US + '.jsonl')).toBeUndefined()
+    // Presence self-check: the same locators without US normalize, so the rejection is the 0x1f byte
+    // itself and not the surrounding shape -- otherwise both assertions are vacuous.
     expect(normalizeNativeSessionId('nativesession')).toBe('nativesession')
     expect(normalizeNativeTranscriptPath('/tmp/session.jsonl')).toBe('/tmp/session.jsonl')
   })
