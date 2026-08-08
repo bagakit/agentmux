@@ -359,6 +359,15 @@ function requireTrustedSenderCallChannels(module: ParsedModule): Array<string | 
  * acceptControl 的**第一句**是不是 senderTrust 门：`if (!senderTrust(CONTROL_RESPONSE_CHANNEL, event.sender,
  * <trusted>).trusted) return`。这个频道的处置是静默返回而非抛，所以判据落在「第一句是这道门」上——删掉
  * 发送者比较（让它认任何 sender）会把第一句变成 requestId 形状检查，这里据此报红。
+ *
+ * **判据要问三件事，不是一件**：门在不在（第一句形状）、比的是**哪两个东西**（arg[1] 与 arg[2]）、
+ * 不可信时**做什么**（then 分支）。曾经只问了第一件半，于是三个把这条频道的安全性彻底废掉的变异全
+ * 26 条绿：`senderTrust(CH, event.sender, event.sender)`（自比恒真，认任何 sender）、
+ * `senderTrust(CH, event.sender, {})`（恒假，合法控制响应被静默丢弃）、以及保住「第一句是门」「then
+ * 里有 return」但在 return 之前先 `accept(response)`。前两个是 arg[2] 无人看，第三个是
+ * `statements.some(isReturnStatement)` 太松。tsc 也兜不住：`senderTrust` 的 `trustedFrame` 是
+ * `unknown`。对照实验：同一个 arg[2] 缺陷种在 adapter 上会被 `adapterShape` 抓住——同缺陷两个站点，
+ * 一个守着一个没守，正是「守卫按出口数不按条件数」那一族。
  */
 type AcceptControlGuard =
   | { kind: 'not-found' }
@@ -369,6 +378,9 @@ type AcceptControlGuard =
       senderTrustImportedFrom: string | null
       channelImportedFrom: string | null
       senderArgIsOwnEventSender: boolean
+      /** arg[2] 是不是某个东西的 `.webContents`（与 adapterShape 同法）。自比 event.sender 时为 false。 */
+      trustedFrameIsWebContents: boolean
+      /** 不可信时**只**返回：then 分支是裸 return，或块里恰好只有一条 return。 */
       returnsWhenUntrusted: boolean
     }
 
@@ -412,9 +424,13 @@ function acceptControlGuard(module: ParsedModule): AcceptControlGuard {
   }
   const channelArg = call.arguments[0]
   const senderArg = call.arguments[1]
-  // then 分支是 return（可能裸 return，也可能包在 block 里）。
+  const trustedFrame = call.arguments[2]
+  // then 分支必须**只**返回。写成 `statements.some(...)` 时，「先 accept(response) 再 return」照旧通过——
+  // 那正是不可信发送者被接受的形状（实测 26 条全绿）。裸 return 或「块里恰好一条 return」才算。
   const then = first.thenStatement
-  const returnsWhenUntrusted = ts.isReturnStatement(then) || (ts.isBlock(then) && then.statements.some(ts.isReturnStatement))
+  const returnsWhenUntrusted =
+    ts.isReturnStatement(then) ||
+    (ts.isBlock(then) && then.statements.length === 1 && ts.isReturnStatement(then.statements[0]))
   return {
     kind: 'sender-gate',
     senderTrustImportedFrom: importedModuleOf(declarationOf(module, call.expression)),
@@ -425,6 +441,12 @@ function acceptControlGuard(module: ParsedModule): AcceptControlGuard {
       ts.isPropertyAccessExpression(senderArg) &&
       senderArg.name.text === 'sender' &&
       argumentOrigin(module, senderArg.expression, arrow) === 'own-parameter',
+    // arg[2] 是被信任的那一帧。不看它，`event.sender` 与 `{}` 都能塞进来——一个认所有 sender，一个拒
+    // 所有 sender。判法与 adapterShape 的 trustedFrameIsWebContents 一致，两个站点同一把尺子。
+    trustedFrameIsWebContents:
+      trustedFrame !== undefined &&
+      ts.isPropertyAccessExpression(trustedFrame) &&
+      trustedFrame.name.text === 'webContents',
     returnsWhenUntrusted
   }
 }
@@ -469,21 +491,26 @@ describe('ipc.ts wiring: the shell forwards each privileged sender check to the 
 
   it('every requireTrustedSender call site names a known privileged throwing channel (reverse allow-list)', () => {
     // 反向：扫出每一处 requireTrustedSender(<channel>) 调用，断言它的频道都在 allow-list 里。自检前提：
-    // 扫描面没脱节（找到 > 0 个），否则这条恒真（scan-surface 打错字会让守卫空转变绿）。
+    // 扫描面没脱节，否则这条恒真（scan-surface 打错字会让守卫空转变绿）。地板取**全集大小**而不是 > 1：
+    // 12 个站点而地板写 > 1 时，提取器截断到 2 个照旧通过，那道地板从来没独立抓住过任何东西（真正抓住
+    // 截断的是下面那条逐频道覆盖断言）。地板与覆盖断言各自都该能独立报红，所以这里钉全等。
     const sites = requireTrustedSenderCallChannels(module)
-    expect(sites.length, '一处 requireTrustedSender 调用都没扫到——提取器与 ipc.ts 脱节了').toBeGreaterThan(1)
+    expect(sites.length, '扫到的 requireTrustedSender 调用数与 allow-list 不等——提取器与 ipc.ts 脱节了').toBe(
+      THROWING_CHANNELS.length
+    )
     const allowed = new Set<string>(THROWING_CHANNELS)
     expect(sites.filter((channel) => channel === null || !allowed.has(channel))).toEqual([])
     // 且每个会抛的特权频道都至少有一处调用（正向覆盖的第二把锁）。
     expect([...allowed].filter((channel) => !sites.includes(channel))).toEqual([])
   })
 
-  it('acceptControl gates on the imported senderTrust as its FIRST statement, returning when untrusted', () => {
+  it('acceptControl gates on the imported senderTrust as its FIRST statement, comparing against the window frame, returning only', () => {
     expect(acceptControlGuard(module)).toEqual({
       kind: 'sender-gate',
       senderTrustImportedFrom: SENDER_TRUST_MODULE,
       channelImportedFrom: CONTRACTS_MODULE,
       senderArgIsOwnEventSender: true,
+      trustedFrameIsWebContents: true,
       returnsWhenUntrusted: true
     })
   })
@@ -636,8 +663,39 @@ describe('ipc.ts wiring guard: self-check (the guard reds on planted violations)
       senderTrustImportedFrom: SENDER_TRUST_MODULE,
       channelImportedFrom: CONTRACTS_MODULE,
       senderArgIsOwnEventSender: true,
+      trustedFrameIsWebContents: true,
       returnsWhenUntrusted: true
     })
+  })
+
+  it('acceptControlGuard catches the trusted frame being the sender itself (self-comparison accepts every sender)', () => {
+    // 变异：arg[2] 换成 event.sender。门还在、第一句还是它、then 还是 return——但比的是自己跟自己，
+    // 于是**任何**发送者都可信。这是审计实测存活的那个探针（26 条全绿）。
+    const module = acceptControlModule(
+      '  if (!senderTrust(CONTROL_RESPONSE_CHANNEL, event.sender, event.sender).trusted) return\n  accept(response)'
+    )
+    expect(acceptControlGuard(module)).toMatchObject({ kind: 'sender-gate', trustedFrameIsWebContents: false })
+  })
+
+  it('acceptControlGuard catches a non-frame trusted argument (rejects every sender: control responses silently dropped)', () => {
+    // 反方向的同一个洞：arg[2] 换成不是任何 .webContents 的东西，门恒假，合法控制响应被静默丢弃。
+    const module = acceptControlModule(
+      '  if (!senderTrust(CONTROL_RESPONSE_CHANNEL, event.sender, {}).trusted) return\n  accept(response)'
+    )
+    expect(acceptControlGuard(module)).toMatchObject({ kind: 'sender-gate', trustedFrameIsWebContents: false })
+  })
+
+  it('acceptControlGuard catches accepting before the return inside the untrusted branch', () => {
+    // 变异：保住「第一句是门」与「then 里有 return」，但 return 之前先把响应收了。`some(isReturnStatement)`
+    // 会放过它——不可信发送者的响应照旧被接受。
+    const module = acceptControlModule(
+      '  if (!senderTrust(CONTROL_RESPONSE_CHANNEL, event.sender, args.window.webContents).trusted) {\n' +
+        '    accept(response)\n' +
+        '    return\n' +
+        '  }\n' +
+        '  accept(response)'
+    )
+    expect(acceptControlGuard(module)).toMatchObject({ kind: 'sender-gate', returnsWhenUntrusted: false })
   })
 
   it('acceptControlGuard catches the sender comparison being dropped (first statement no longer the gate)', () => {
