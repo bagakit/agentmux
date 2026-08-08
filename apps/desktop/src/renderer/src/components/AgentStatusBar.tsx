@@ -3,6 +3,7 @@ import { summarizeAgentAttention, summarizeProviderActivity } from '../lib/agent
 import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
 import { AgentRoster } from './AgentRoster'
 import { ResourceUsagePanel } from './ResourceUsagePanel'
+import { CirclePlay, CircleAlert, CircleHelp } from 'lucide-react'
 
 // The window's only cross-session attention rollup. Every other status indicator is scoped — the
 // tab dot to one Session, Board columns to one Project, the Agents tool total to one open Workspace
@@ -27,7 +28,7 @@ function StatusCount({
   return (
     <>
       <span className={state ? `status status--${state}` : 'status'} aria-hidden="true">
-        <span className="status__dot" />
+        {state === 'working' ? <CirclePlay size={12} /> : state === 'error' ? <CircleAlert size={12} /> : state === 'waiting' ? <CircleHelp size={12} /> : <span className="status__dot" />}
       </span>
       <span className="agent-status-bar__count">{count}</span>
       <span className="agent-status-bar__label">{label}</span>

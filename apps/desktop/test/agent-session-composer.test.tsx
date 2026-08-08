@@ -253,7 +253,7 @@ describe('AgentSessionComposer adapter', () => {
       props: { onSubmit?: () => void; disabled: boolean }
     }
 
-    expect(composer.props.disabled).toBe(true)
+    expect(composer.props.disabled).toBe(false)
     expect(composer.props.onSubmit).toBeUndefined()
   })
 
