@@ -60,5 +60,6 @@ registry、公共 capability 类型和最终文档由单独的集成/合同任�
 
 一条留存的实现线索：若 OMP / Prime Agent 日后拿到第一方证据，可复用
 `packages/core/src/providers/pi.ts` 里 `piFamilyExtensionDir` 的合同——同族共享
-扩展目录形状，配置目录名与 env 变量名是它仅有的两个参数，理由与「绝不跨家兜底」
-的约束逐条写在该函数的 JSDoc 里。
+扩展目录形状，逐家不同的只有 env 变量名与默认配置目录名这两个（第三个参数 `env`
+是环境快照，与是哪一家无关），理由与「绝不跨家兜底」的约束逐条写在该函数的
+JSDoc 里。
