@@ -163,6 +163,24 @@ describe('认不出的形状一律响亮抛错，不许静默给一个像是答�
     expect(() => resolveHostElement(consumer, 'Shell')).toThrow(/Fragment/u)
   })
 
+  // 多个各自返回 JSX 的**顶层**出口时抛错——调用方的属性可能落在其中任意一个，解析器不猜。
+  // 这条钉的是 rootJsxElement 里 `found.length > 1` 那道守卫，它此前一次都没被触发：删掉整段
+  // `if (found.length > 1) { fail(...) }`（其余一字不动），resolveHostElement 会静默返回 `found[0]`，
+  // 而它的 docstring 明写这是一条「响亮抛错」的保证——那三个消费者（launcher-submit / pr-launch /
+  // 本文件）53 条全绿地放过它，正是本仓「comment-promises-more-than-the-assertion」(#342/#713) 那族。
+  // 注意与「跳过嵌套函数」那条正交：删掉那条 skip 会让属性里的箭头函数看起来像第二个出口、从而误触本
+  // 守卫（nested-arrow 用例因此变红），所以那条守卫是可达的；真正没有用例的是**货真价实的多个顶层出口**。
+  it('多个各自返回 JSX 的顶层出口时抛错——解析器不在多个出口之间猜', () => {
+    const consumer = fixture(
+      'multiple-jsx-exits',
+      `export function Shell({ value, ...rest }: { value?: boolean }) {\n` +
+        `  if (value) return <textarea {...rest} />\n` +
+        `  return <input {...rest} />\n` +
+        `}\n`
+    )
+    expect(() => resolveHostElement(consumer, 'Shell')).toThrow(/个各自返回 JSX 的出口/u)
+  })
+
   it('形参里没有 rest 元素时抛错——其余属性被就地丢掉了', () => {
     const consumer = fixture(
       'no-rest-element',
