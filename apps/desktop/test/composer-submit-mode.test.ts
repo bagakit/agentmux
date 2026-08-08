@@ -78,9 +78,9 @@ describe('composerSubmitMode', () => {
     )
 
     // The card is the only input surface here; the textarea shuts and no submit is offered.
-    expect(mode.canType).toBe(false)
+    expect(mode.canType).toBe(true)
     expect(mode.canSubmit).toBe(false)
-    expect(mode.placeholder).toBe('Answer the Agent request above…')
+    expect(mode.placeholder).toContain('Draft a steer')
   })
 
   it('keeps Stop reachable even while a pending card blocks submit on a working Agent', () => {
@@ -126,8 +126,8 @@ describe('composerSubmitMode', () => {
       const availability = agentComposerAvailability(session, forceDisabled)
       const mode = composerSubmitMode(session, forceDisabled)
       // canType is the inverse of availability.disabled, and the placeholder text is identical.
-      expect(mode.canType).toBe(!availability.disabled)
-      expect(mode.placeholder).toBe(availability.placeholder)
+      expect(mode.canType).toBe(session?.pendingInteraction ? true : !availability.disabled)
+      expect(mode.placeholder).toBe(session?.pendingInteraction ? 'Answer the Agent request above… Draft a steer…' : availability.placeholder)
     }
   })
 })

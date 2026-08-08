@@ -12,7 +12,7 @@
    hierarchy (surface-density.md), so the Composer reads as part of its Region, not a box floating on it.
    Margin is uniform 6px top/bottom and 8px sides, the same inset the approval card above it uses, so the
    whole input stack sits at one consistent gap from the Region edge instead of a ring of whitespace. */
-.composer { margin:var(--sp-3) var(--sp-4); overflow: hidden; border-radius: var(--radius); background: var(--surface-1); box-shadow: none; }
+.composer { position: relative; margin:var(--sp-3) var(--sp-4); overflow: hidden; border-radius: var(--radius); background: var(--surface-1); box-shadow: none; }
 /* Focus stays clearly visible without a resting border: the --focus-ring glow plus a 1px inset line in
    --focus-line take over the boundary the removed stroke used to draw only while focused. */
 .composer:focus-within { box-shadow: var(--focus-ring), inset 0 0 0 1px var(--focus-line); }
@@ -43,7 +43,7 @@
 .composer__disclosure::-webkit-details-marker { display: none; }
 .composer__disclosure > svg:last-child { margin-left: auto; }
 .composer:not([open]) .composer__disclosure > svg:last-child { transform: rotate(180deg); }
-.composer[open] .composer__disclosure { position: absolute; margin-top: -2px; }
+.composer[open] .composer__disclosure { position: absolute; left: var(--sp-2); bottom: var(--sp-2); z-index: 1; }
 .composer[open] .composer__disclosure > span, .composer[open] .composer__disclosure > small { display: none; }
 .composer[open] .composer__toolbar { padding-left: 42px; }
 .composer__disclosure:hover { color: var(--text); background: var(--surface-2); }

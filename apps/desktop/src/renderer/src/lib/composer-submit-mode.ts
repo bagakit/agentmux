@@ -47,10 +47,10 @@ export function composerSubmitMode(
   // submits. Only while working is Stop offered; an idle-running Agent's primary action is Send.
   const primaryAction = session.status.state === 'working' ? 'stop' : 'send'
   if (session.pendingInteraction) {
-    // A pending request makes the card the only input surface (a sealed Core contract). The textarea is
-    // shut and canSubmit is false so a steer cannot slip past the card — Core also throws
-    // AGENT_INTERACTION_PENDING, but the surface must not even offer it. Stop stays reachable if working.
-    return { canType: false, canSubmit: false, primaryAction, placeholder: 'Answer the Agent request above…' }
+    // The typed response card owns the interaction, but the Agent is still healthy. Keep the draft
+    // writable so users do not lose a steer typed while the card is pending; delivery remains gated and
+    // the draft is retained for retry/queueing after the response is acknowledged.
+    return { canType: true, canSubmit: false, primaryAction, placeholder: 'Answer the Agent request above… Draft a steer…' }
   }
   return { canType: true, canSubmit: true, primaryAction, placeholder: 'Ask, steer, or paste a command…' }
 }

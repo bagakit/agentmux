@@ -355,6 +355,7 @@ styles/
 - Branch 与 Topic 的 recap 使用同一紧凑摘要表面，放在工作线行的次级信息层，不抢主标题。
 - Projects 栏与主工作区之间保留一条可拖拽的窄分隔带；悬停和拖拽时提高边界对比度并显示 resize cursor，静止时保持低干扰。宽度变化即时反映在项目名称、层级缩进与状态槽的可用空间中，结束拖拽后只持久化一个最终宽度，不增加第二份布局状态。行为约束见 [`agentmux-desktop-interaction.md`](./agentmux-desktop-interaction.md)「顶部与项目栏」。
 - 分组使用轻量目录集合图标和分类标签；项目使用自身图标或仓库图标，普通目录用文件夹。每层缩进配合连接线，避免只靠文字亮度猜层级。
+- running/error 汇总使用紧凑图标微标与短数字；hover activity 面板以小尺寸 Provider 图标、单行最近活动与停止时长构成，避免大块数字方框和空白。
 - 运行状态采用细小节奏条和简短文案，尊重减少动画偏好；待处理采用有语义图标与原因短语，移除“点＋数字方框”和“数字＋叹号方框”。详情在悬停面板中显示 Agent 名称与状态，点击定位。行为见 [Desktop interaction](agentmux-desktop-interaction.md)“Projects 结构与状态可读性”。
 
 ## 本地文件查看与编辑表面
