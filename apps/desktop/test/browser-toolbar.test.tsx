@@ -37,7 +37,7 @@ import { BrowserToolbarPreferences } from '../src/renderer/src/components/Surfac
 import { BrowserAnnotationsPanel } from '../src/renderer/src/components/SurfaceToolDock.js'
 
 const config: AppConfig = {
-  version: 7,
+  version: 9,
   hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
   executors: {},
   workspaces: [],

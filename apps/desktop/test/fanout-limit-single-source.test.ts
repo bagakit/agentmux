@@ -21,7 +21,7 @@ import { buildFanOutRequest } from '../src/renderer/src/lib/fanout-request.js'
 // ---------------------------------------------------------------------------
 
 const config: AppConfig = {
-  version: 7,
+  version: 9,
   hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
   executors: {
     codex: {

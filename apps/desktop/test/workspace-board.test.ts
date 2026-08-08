@@ -31,7 +31,7 @@ describe('T-001 Topic rows are wired into the one Board', () => {
     expect(boardRows).toContain('buildTopicBoardRows(topics, scratch, sessions)')
     expect(boardRows).toContain('buildProjectBranchLanes(snapshot, project.workspaces, sessions)')
     // 消费方吃的是同一个 rows；分叉之后没有第二次按 kind 的判断。
-    expect(board).toContain('const { rows } = useBoardRows()')
+    expect(board).toMatch(/const \{ rows,[^}]+\} = useBoardRows\(\)/)
     expect(board).toContain('filterBoardRows(rows, query, column, binding)')
     // 渲染组件不得再自己构造行——那正是"两份答案"重新长出来的样子。
     expect(board).not.toContain('buildTopicBoardRows(')

@@ -33,7 +33,7 @@ import { useAppStore } from '../src/renderer/src/store.js'
 const initialState = useAppStore.getState()
 
 const config: AppConfig = {
-  version: 7,
+  version: 9,
   hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
   executors: {
     codex: {
