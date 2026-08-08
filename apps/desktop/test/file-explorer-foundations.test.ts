@@ -227,6 +227,55 @@ describe('file explorer selection and mutation reconciliation', () => {
     expect([...range.selectedPaths]).toEqual(['src/a.ts', 'src/nested', 'src/nested/b.ts'])
   })
 
+  // 四个模式里只有 replace 与 range 被断言过（上一条）。toggle 与 additive-range 在整个仓里零断言，
+  // 而它们是活的：FileExplorer.tsx 的行点击把 getFileExplorerSelectionMode(event, isMac) 直接喂给
+  // updateFileExplorerSelection，Cmd 点击（mac）/ Ctrl 点击就走 toggle 这一支。实测过：把 toggle 分支里
+  // 的 add/delete 取反（已选中的再加一遍、未选中的去删），三个相关 suite 49 条全绿。
+  //
+  // 取反之后用户点未选中的行没反应、点已选中的行取消不掉——Cmd/Ctrl 点文件行拼多选彻底失效，而这
+  // 正是「一次拖多个文件进 agent」这类操作的唯一入口。纯函数，判据用单元断言就够，不必挂载。
+  it('Cmd/Ctrl 点击逐个加减选中项，最后一个被去掉后不留悬空的 activePath', () => {
+    const one = updateFileExplorerSelection(createEmptyFileExplorerSelection(), ordered, 'src/a.ts', 'replace')
+
+    // 加：未选中的目标进集合，并成为活动行。
+    const two = updateFileExplorerSelection(one, ordered, 'README.md', 'toggle')
+    expect([...two.selectedPaths]).toEqual(['src/a.ts', 'README.md'])
+    expect(two.activePath).toBe('README.md')
+
+    // 减：已选中的目标出集合。活动行不能停在刚被去掉的那一行，要落到仍选中的行上。
+    const back = updateFileExplorerSelection(two, ordered, 'README.md', 'toggle')
+    expect([...back.selectedPaths]).toEqual(['src/a.ts'])
+    expect(back.activePath).toBe('src/a.ts')
+
+    // 减到空：activePath 必须诚实地变成 null，而不是指着一个已不在选中集里的路径。
+    const none = updateFileExplorerSelection(back, ordered, 'src/a.ts', 'toggle')
+    expect([...none.selectedPaths]).toEqual([])
+    expect(none.activePath).toBeNull()
+    expect(none.anchorPath).toBeNull()
+  })
+
+  // additive-range 与 range 的差别只有一处：起始集合是「保留已选」还是「从空开始」。判据必须让**区间
+  // 之外**已经选中的路径参与，否则两个模式给出同一个结果，断言分不出走的是哪一支。
+  it('Shift+Cmd 拉的区间并进已选中的行，纯 Shift 则从头开始', () => {
+    // 直接构造一个「区间外还选着 src」的起点，不经 toggle——否则本条会跟着上一条的变异一起红，
+    // 就证不出这一支自己有人守了。
+    const base = {
+      ...createSingleFileExplorerSelection('src/nested/b.ts'),
+      selectedPaths: new Set(['src', 'src/nested/b.ts'])
+    }
+
+    const additive = updateFileExplorerSelection(base, ordered, 'README.md', 'additive-range')
+    // 'src' 在区间（b.ts…README.md）之外，加法模式下必须留着。
+    expect([...additive.selectedPaths]).toEqual(['src', 'src/nested/b.ts', 'README.md'])
+    expect(additive.activePath).toBe('README.md')
+    expect(additive.anchorPath).toBe('src/nested/b.ts')
+
+    // 反向对照：同一个起点走纯 range，'src' 必须被丢掉。少了这条，把三元的两侧都写成「保留已选」
+    // 也能让上面全绿。
+    const replaced = updateFileExplorerSelection(base, ordered, 'README.md', 'range')
+    expect([...replaced.selectedPaths]).toEqual(['src/nested/b.ts', 'README.md'])
+  })
+
   it('remaps rename descendants and removes deleted subtrees without losing unrelated selection', () => {
     const selected = {
       ...createSingleFileExplorerSelection('src/nested/b.ts'),
