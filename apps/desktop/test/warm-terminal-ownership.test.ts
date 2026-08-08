@@ -237,17 +237,36 @@ describe('接线层：组件的两个取值来自同一次判定', () => {
    * 判据因此是：从每个调用点往外走作用域链，第一个声明这个名字的地方必须是那条 ImportDeclaration。
    *   · 走 TS parser 而不是正则——正则对 `as` 别名、多行 import、注释里的假路径都会判错。带 `as` 别名时
    *     按**本地名**算：本地名才是调用点写的那个标识符。
-   *   · 途中任何一层（函数体 / 块 / 参数 / catch）声明了同名，即判 shadowed —— 那是实测存活的那个形状。
+   *   · 途中任何一层声明了同名即判 shadowed。「哪些形状算一层声明」是这道判据真正的判据，所以它不写在
+   *     散文里而是列成 `SHADOW_FORMS` 表，逐条由自检质询——散文说覆盖了什么不算覆盖（本仓
+   *     comment-promises-more-than-assertion）。这一版之前的散文就点名了 catch 而实现里没有 catch。
+   *
+   * 为什么「哪些节点是一层作用域」必须逐种列而不能按语法形状猜：TS 引入词法绑定的位置并不都在
+   * `statements` 里，而第一版恰好只看 `statements` + `parameters`，于是下面每一种都是**合法 TS**、
+   * 都能声明同名标识符、都对判据完全隐身（各自的靶子见 `SHADOW_FORMS`）：
+   *   · `catch (name)` —— 绑定挂在 CatchClause 上，不在它的 Block 里；
+   *   · `for (let name = …)` / `for (const name of …)` / `for (const name in …)` —— 循环变量挂在语句上，
+   *     且是 VariableDeclarationList 而不是 VariableStatement，所以连 `declares` 都认不出；三种是三个
+   *     节点类型，各自要有靶子；
+   *   · `case 1: const name = …`（**不带花括号**）与 `default: const name = …` —— CaseClause/DefaultClause
+   *     自己持 statements，它们不是 Block；带花括号那种落在 Block 上，写成带花括号的靶子会让这两条
+   *     分支无人守（实测：删掉 CaseClause 分支时带花括号的靶子照旧全绿）；
+   *   · `function f({ name })` 与 `const { name } = m` —— 绑定名是 BindingPattern 不是 Identifier。
+   *
+   * 「认出来了」不等于「走的是那条分支」，所以 `SHADOW_FORMS` 每条都带 `via`，由 `resolveDetail`
+   * 回报的 `viaKinds` 见证；覆盖自检则从实现正文里抓 kind 串与 `via` 集合**两向相等**，而不是过滤
+   * 一张手抄清单——过滤只能发现「删了分支」，发现不了「加了没人质询的分支」（实测存活过一次）。
    *
    * 盲点（亲口申报）：只看词法声明，不做真类型解析。`import * as m` 后 `const warmTerminalPreview =
    * m.warmTerminalPreview` 会被算成影子（保守，会打红而非放过）；而把 lib 那个文件本身改坏，这条判据
-   * 看不见——那由本文件上面 14 条行为断言守。
+   * 看不见——那由前两个 describe 的 9 条行为断言守（7 条直测 warmTerminalPreview 的取值、2 条测 store
+   * 的归属转移），加上本 describe 里直测 warmLauncherId 取值的那一条。数字取自实跑输出的用例清单。
    */
-  function resolvesToImport(
+  function resolveDetail(
     name: string,
     moduleSpecifier: string,
     within: ts.SourceFile = ast
-  ): { imported: boolean; shadowed: boolean } {
+  ): { imported: boolean; shadowed: boolean; viaKinds: string[] } {
     let importDeclaration: ts.Node | undefined
     for (const statement of within.statements) {
       if (
@@ -264,38 +283,85 @@ describe('接线层：组件的两个取值来自同一次判定', () => {
     }
 
     // 「这个节点声明了 name 吗」——按声明种类逐个问，不按语法形状猜。
+    // 绑定名一律走 `bindsName`：`const { warmTerminalPreview } = m` / `function f({ warmTerminalPreview })`
+    // 的名字挂在 BindingPattern 上而不是 Identifier 上，只判 `ts.isIdentifier(node.name)` 会整族漏掉。
+    const bindsName = (target: ts.BindingName): boolean => {
+      if (ts.isIdentifier(target)) return target.text === name
+      return target.elements.some(
+        (element) => !ts.isOmittedExpression(element) && bindsName(element.name)
+      )
+    }
+
     const declares = (node: ts.Node): boolean => {
       if (ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) return node.name?.text === name
       if (ts.isEnumDeclaration(node) || ts.isModuleDeclaration(node)) {
         return ts.isIdentifier(node.name) && node.name.text === name
       }
       if (ts.isTypeAliasDeclaration(node) || ts.isInterfaceDeclaration(node)) return node.name.text === name
-      if (ts.isVariableStatement(node)) {
-        return node.declarationList.declarations.some(
-          (declaration) => ts.isIdentifier(declaration.name) && declaration.name.text === name
-        )
+      // VariableStatement 走 declarationList；`for (let x = …)` 的 list 不挂在 statement 上，
+      // 所以 list 自己也要能被直接问一次（见 scopeCandidates 里的循环初始化式）。
+      if (ts.isVariableStatement(node)) return declares(node.declarationList)
+      if (ts.isVariableDeclarationList(node)) {
+        return node.declarations.some((declaration) => bindsName(declaration.name))
       }
-      if (ts.isParameter(node) || ts.isBindingElement(node)) {
-        return ts.isIdentifier(node.name) && node.name.text === name
+      if (ts.isVariableDeclaration(node) || ts.isParameter(node) || ts.isBindingElement(node)) {
+        return bindsName(node.name)
       }
       return false
+    }
+
+    /**
+     * `cursor` 这一层作用域里**直接**引入的绑定，连同**是哪一种作用域形状**供出来的。
+     *
+     * 一层作用域不等于「它的 statements」：TS 有几处把绑定挂在语句自身而不是块里，第一版只看
+     * statements + parameters，于是它们全部隐身。
+     *
+     * 每条返回值都带 `kind`，因为「认出来了」不等于「走的是那条分支」：`case 1: { const x = … }`
+     * 的绑定其实落在 Block 里，靶子照旧能过，于是 CaseClause 那条分支删掉也没人红（实测：删掉
+     * CaseClause 只有覆盖自检红，行为靶子全绿）。`SHADOW_FORMS` 因此逐条断言 `viaKinds` 里必须
+     * 出现它声称的那一种，这样每条分支各有一个只杀它自己的靶子。
+     */
+    const scopeCandidates = (cursor: ts.Node): { node: ts.Node; kind: string }[] => {
+      const candidates: { node: ts.Node; kind: string }[] = []
+      const push = (node: ts.Node | undefined, kind: string): void => {
+        if (node) candidates.push({ node, kind })
+      }
+      if (ts.isSourceFile(cursor) || ts.isBlock(cursor) || ts.isModuleBlock(cursor)) {
+        for (const statement of cursor.statements) push(statement, 'Block')
+      }
+      if (ts.isFunctionLike(cursor)) {
+        for (const parameter of cursor.parameters) push(parameter, 'Parameter')
+      }
+      // `catch (e)` 的绑定挂在 CatchClause 上，它的 Block 里没有这条声明。
+      if (ts.isCatchClause(cursor)) push(cursor.variableDeclaration, 'CatchClause')
+      // 循环变量挂在语句上，且 for-in/for-of 的初始化式就是 VariableDeclarationList 本身。
+      if (ts.isForStatement(cursor)) push(cursor.initializer, 'ForStatement')
+      if (ts.isForInStatement(cursor)) push(cursor.initializer, 'ForInStatement')
+      if (ts.isForOfStatement(cursor)) push(cursor.initializer, 'ForOfStatement')
+      // CaseClause / DefaultClause 自己持 statements 且不是 Block——`case 1: const x = …`（不带花括号）
+      // 就在这儿；带花括号那种落在 Block 上，所以靶子必须写不带花括号的形状。
+      if (ts.isCaseClause(cursor)) {
+        for (const statement of cursor.statements) push(statement, 'CaseClause')
+      }
+      if (ts.isDefaultClause(cursor)) {
+        for (const statement of cursor.statements) push(statement, 'DefaultClause')
+      }
+      return candidates
     }
 
     // 从调用点往外走作用域链，找第一个声明这个名字的地方。
     let shadowed = false
     let imported = false
+    const viaKinds = new Set<string>()
     for (const call of callsNamed(name, within)) {
       let resolved: ts.Node | undefined
       let cursor: ts.Node | undefined = call
       while (cursor && !resolved) {
-        // 这一层作用域里的直接声明（函数/块的语句、函数的形参）。
-        const candidates: ts.Node[] = []
-        if (ts.isSourceFile(cursor) || ts.isBlock(cursor) || ts.isModuleBlock(cursor)) {
-          candidates.push(...cursor.statements)
-        }
-        if (ts.isFunctionLike(cursor)) candidates.push(...cursor.parameters)
-        for (const candidate of candidates) {
-          if (candidate !== call && declares(candidate)) resolved = candidate
+        for (const candidate of scopeCandidates(cursor)) {
+          if (candidate.node !== call && declares(candidate.node)) {
+            resolved = candidate.node
+            viaKinds.add(candidate.kind)
+          }
         }
         if (!resolved && cursor === within && importDeclaration) resolved = importDeclaration
         cursor = cursor.parent
@@ -304,10 +370,135 @@ describe('接线层：组件的两个取值来自同一次判定', () => {
       else shadowed = true
     }
     // 零调用点时 `imported` 会是 false——那由「恰好被调用一次」那条断言先红，这里不替它兜。
+    return { imported, shadowed, viaKinds: [...viaKinds].sort() }
+  }
+
+  /** 主判据只关心这两个量；`viaKinds` 是给 `SHADOW_FORMS` 自检用的分支见证。 */
+  const resolvesToImport = (
+    name: string,
+    moduleSpecifier: string,
+    within: ts.SourceFile = ast
+  ): { imported: boolean; shadowed: boolean } => {
+    const { imported, shadowed } = resolveDetail(name, moduleSpecifier, within)
     return { imported, shadowed }
   }
 
   const PREVIEW_MODULE = '../lib/warm-terminal-preview'
+
+  const probe = (...lines: string[]): ts.SourceFile =>
+    ts.createSourceFile(
+      'probe.tsx', lines.join('\n'), ts.ScriptTarget.ESNext, true, ts.ScriptKind.TSX
+    )
+
+  /**
+   * 「哪些形状算一层同名声明」的清单——判据真正的判据。
+   *
+   * 每一条都是**合法 TS**、都让调用点解析到影子而不是 import，而它们在第一版（只看
+   * `statements` + `parameters`）里全部隐身。散文点名过 catch 却没有实现它，所以这里改成逐条
+   * 由自检质询：每个形状一个独立的 it（`it.each`），不合并成一条断言——一个 it 里两个 expect 时
+   * 先失败的那个让后面成死代码，于是「只杀第二半」的变异会被读成已被守住（本仓
+   * two-throws-in-one-it-mask-each-other）。
+   */
+  const SHADOW_FORMS: { form: string; via: string; lines: string[] }[] = [
+    {
+      form: '函数体内的同名 function（实测存活过的那次变异形状）',
+      via: 'Block',
+      lines: [
+        'function Surface() {',
+        '  function warmTerminalPreview(_i: unknown) { return { session: null } }',
+        '  return warmTerminalPreview({})',
+        '}'
+      ]
+    },
+    {
+      form: 'catch 绑定（绑定挂在 CatchClause 上，不在它的 Block 里）',
+      via: 'CatchClause',
+      lines: [
+        'function Surface() {',
+        '  try { return null } catch (warmTerminalPreview) { return warmTerminalPreview({}) }',
+        '}'
+      ]
+    },
+    {
+      form: 'for 的循环变量（挂在语句上，且是 VariableDeclarationList 不是 VariableStatement）',
+      via: 'ForStatement',
+      lines: [
+        'function Surface() {',
+        '  for (let warmTerminalPreview = 0; warmTerminalPreview < 1; warmTerminalPreview++) {',
+        '    return warmTerminalPreview({})',
+        '  }',
+        '  return null',
+        '}'
+      ]
+    },
+    {
+      form: 'for-of 的循环变量（初始化式本身就是 VariableDeclarationList）',
+      via: 'ForOfStatement',
+      lines: [
+        'function Surface(items: unknown[]) {',
+        '  for (const warmTerminalPreview of items) { return warmTerminalPreview({}) }',
+        '  return null',
+        '}'
+      ]
+    },
+    {
+      form: 'for-in 的循环变量（与 for-of 分开列：它是另一种节点，各删一个都要有人红）',
+      via: 'ForInStatement',
+      lines: [
+        'function Surface(m: Record<string, unknown>) {',
+        '  for (const warmTerminalPreview in m) { return warmTerminalPreview({}) }',
+        '  return null',
+        '}'
+      ]
+    },
+    {
+      form: 'case 1 的裸 const（不带花括号——带了就落在 Block 上，那样这条分支无人守）',
+      via: 'CaseClause',
+      lines: [
+        'function Surface(k: number) {',
+        '  switch (k) {',
+        '    case 1:',
+        '      const warmTerminalPreview = (_i: unknown) => ({ session: null })',
+        '      return warmTerminalPreview({})',
+        '    default: return null',
+        '  }',
+        '}'
+      ]
+    },
+    {
+      form: 'default 子句的裸 const（DefaultClause 与 CaseClause 是两种节点，各自要有靶子）',
+      via: 'DefaultClause',
+      lines: [
+        'function Surface(k: number) {',
+        '  switch (k) {',
+        '    case 1: return null',
+        '    default:',
+        '      const warmTerminalPreview = (_i: unknown) => ({ session: null })',
+        '      return warmTerminalPreview({})',
+        '  }',
+        '}'
+      ]
+    },
+    {
+      form: '解构形参（绑定名是 BindingPattern 不是 Identifier）',
+      via: 'Parameter',
+      lines: [
+        'function Surface({ warmTerminalPreview }: { warmTerminalPreview: (i: unknown) => unknown }) {',
+        '  return warmTerminalPreview({})',
+        '}'
+      ]
+    },
+    {
+      form: '对象解构的 const（同上，且要能穿过嵌套/重命名）',
+      via: 'Block',
+      lines: [
+        'function Surface(m: Record<string, (i: unknown) => unknown>) {',
+        '  const { nested: { warmTerminalPreview } } = { nested: m }',
+        '  return warmTerminalPreview({})',
+        '}'
+      ]
+    }
+  ]
 
   it('warmTerminalPreview 恰好被调用一次', () => {
     // 两处调用意味着两个取值各算了一遍——那正是要消除的双重判定。零处意味着组件绕过了这个函数。
@@ -322,53 +513,67 @@ describe('接线层：组件的两个取值来自同一次判定', () => {
     expect(shadowed, 'warmTerminalPreview 的调用点解析到了一个同名局部声明——上一条数到的调用点打给了影子').toBe(false)
   })
 
-  it('判据自检：内层同名影子会被认出来', () => {
-    // 反向自证，且**走真函数**（`resolvesToImport` 收 `within` 就是为了这个）：自检里手抄一份扫描逻辑，
-    // 等于让判据给自己背书——本仓 comment-promises-more-than-assertion 那族，我在 #685 亲手犯过一次。
-    //
-    // 这个样本就是实测**存活过**的那次变异的形状：import 原样在场，影子在**函数体内**。第一版判据只扫
-    // 顶层，对它完全失明（16 passed 且 tsc exit=0）。
-    const inner = ts.createSourceFile(
-      'probe-inner.tsx',
-      [
-        `import { warmLauncherId, warmTerminalPreview } from '${PREVIEW_MODULE}'`,
-        'function Surface() {',
-        '  function warmTerminalPreview(_i: unknown) { return { session: null } }',
-        '  return warmTerminalPreview({})',
-        '}'
-      ].join('\n'),
-      ts.ScriptTarget.ESNext, true, ts.ScriptKind.TSX
+  // 反向自证，且**走真函数**（`resolvesToImport` 收 `within` 就是为了这个）：自检里手抄一份扫描逻辑，
+  // 等于让判据给自己背书——本仓 comment-promises-more-than-assertion 那族，我在 #685 亲手犯过一次。
+  it.each(SHADOW_FORMS)('判据自检：认得出这种同名影子——$form', ({ lines, via }) => {
+    const sample = probe(
+      `import { warmLauncherId, warmTerminalPreview } from '${PREVIEW_MODULE}'`,
+      ...lines
     )
+    const detail = resolveDetail('warmTerminalPreview', PREVIEW_MODULE, sample)
     expect(
-      resolvesToImport('warmTerminalPreview', PREVIEW_MODULE, inner),
-      '内层同名影子没被认出来——主断言对那个实测存活的形状是恒真的'
+      { imported: detail.imported, shadowed: detail.shadowed },
+      '这个形状没被认出来——主断言对它是恒真的，import 照旧在场而调用点打给了影子'
     ).toEqual({ imported: false, shadowed: true })
+    // 并且必须是**它声称的那条分支**供出来的绑定。少了这一条，靶子只证「认出来了」：
+    // `case 1: { const x = … }` 的绑定其实落在 Block 上，于是删掉 CaseClause 分支它照旧全绿
+    // （实测：那次变异只有覆盖自检红）。有了这一条，每条分支都各有一个只杀自己的靶子。
+    expect(
+      detail.viaKinds,
+      `这个靶子没走 ${via} 那条分支（实际是 ${detail.viaKinds.join('/') || '无'}）——它守不住那条分支`
+    ).toContain(via)
   })
 
-  it('判据自检：干净样本不误报，且路径串在场不足以过关', () => {
-    // 另一极：判据不能恒红（否则健康代码永远打假红），也不能被「路径串在场」满足。
-    const clean = ts.createSourceFile(
-      'probe-clean.tsx',
-      [
-        `import { warmLauncherId, warmTerminalPreview } from '${PREVIEW_MODULE}'`,
-        'function Surface() { return warmTerminalPreview({}) }'
-      ].join('\n'),
-      ts.ScriptTarget.ESNext, true, ts.ScriptKind.TSX
+  it('判据自检：SHADOW_FORMS 覆盖了实现里每一种作用域形状', () => {
+    // 在场自检：上面那族 it.each 只能证「表里的形状都被认出来」，不能证「实现新增的分支有人质询」。
+    // 判据方向必须是**从实现派生**而不是过滤一张手抄清单：第一版写成
+    // `shapes.filter((s) => body.includes(s))`，于是只有**删**分支会红，**加**一条没靶子的分支
+    // 照旧全绿（实测：插入 `ts.isConditionalExpression` 分支后 25 条全绿）——而那恰是这条自检
+    // 声称要防的方向。现在把 kind 串从正文里抓出来，与表里 via 的集合两向相等。
+    const guardSource = readFileSync(new URL(import.meta.url).pathname, 'utf8')
+    const scopeBody = guardSource.slice(
+      guardSource.indexOf('const scopeCandidates'),
+      guardSource.indexOf('// 从调用点往外走作用域链')
+    )
+    expect(scopeBody.length, 'scopeCandidates 的正文没切到——这条自检在空串上恒真').toBeGreaterThan(200)
+    // 每次 push 的第二个实参就是那条分支的 kind 串，这是实现自己的清单。
+    const declared = [...new Set([...scopeBody.matchAll(/push\([^,]+,\s*'([A-Za-z]+)'\)/gu)].map((m) => m[1]!))]
+    expect(declared.length, 'kind 串一个都没抓到——正则与 push 的写法脱节，这条自检会恒真').toBeGreaterThan(5)
+    expect(
+      declared.sort(),
+      'scopeCandidates 供出的作用域形状与 SHADOW_FORMS 的 via 对不上——加了分支就要加靶子'
+    ).toEqual([...new Set(SHADOW_FORMS.map((entry) => entry.via))].sort())
+  })
+
+  it('判据自检：干净样本不误报', () => {
+    // 另一极：判据不能恒红，否则健康代码永远打假红。
+    const clean = probe(
+      `import { warmLauncherId, warmTerminalPreview } from '${PREVIEW_MODULE}'`,
+      'function Surface() { return warmTerminalPreview({}) }'
     )
     expect(
       resolvesToImport('warmTerminalPreview', PREVIEW_MODULE, clean),
       '干净样本被判成有影子/未 import——健康代码会被打假红'
     ).toEqual({ imported: true, shadowed: false })
+  })
 
+  it('判据自检：路径串在场不足以过关', () => {
     // 这是原判据（路径子串）恒真的那个形状：路径串在场，但带进来的是**另一个**符号。
-    const otherSymbol = ts.createSourceFile(
-      'probe-other.tsx',
-      [
-        `import { warmLauncherId } from '${PREVIEW_MODULE}'`,
-        'function warmTerminalPreview(_i: unknown) { return { session: null } }',
-        'function Surface() { return warmTerminalPreview({}) }'
-      ].join('\n'),
-      ts.ScriptTarget.ESNext, true, ts.ScriptKind.TSX
+    // 与上一条分开成两个 it：合在一条里时先失败的那个会让后面成死代码。
+    const otherSymbol = probe(
+      `import { warmLauncherId } from '${PREVIEW_MODULE}'`,
+      'function warmTerminalPreview(_i: unknown) { return { session: null } }',
+      'function Surface() { return warmTerminalPreview({}) }'
     )
     expect(
       resolvesToImport('warmTerminalPreview', PREVIEW_MODULE, otherSymbol),
