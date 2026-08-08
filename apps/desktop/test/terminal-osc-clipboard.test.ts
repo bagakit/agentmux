@@ -45,6 +45,21 @@ describe('OSC 52 往剪贴板写的载荷解析', () => {
     expect(terminalOscClipboardWrite('c;')).toBeNull()
   })
 
+  it('纯空白载荷同样不算写——空帧不许静默清空剪贴板（判据三）', () => {
+    // `body === ''` 那道门只挡「分号后什么都没有」的 `c;`。但一个跑飞或重放的进程可以发
+    // `c;<空白>`：body 非空（全是空白字符），却在 decodeBase64Text 里被 replace(/\s+/g,'') 压成
+    // ''。若不在那里再挡一次，atob('') 得到空串，函数会返回 { text: '' }——等于用空串覆盖系统
+    // 剪贴板，用户刚复制的东西不可逆地丢失。
+    // 覆盖整个空白家族而不是单个样本（单样本是本仓库记录过的盲点）：空格、Tab、\n、\r\n、混合。
+    for (const whitespace of ['   ', '\t\t', '\n\n', '\r\n', ' \t\r\n ']) {
+      const result = terminalOscClipboardWrite(`c;${whitespace}`)
+      // 关键区分：安全的结果是「完全不写」（null），不是「写一个空串」（{ text: '' }）。
+      // 后者才是数据丢失，所以两种结局必须分开钉死——只判其一会放过另一种。
+      expect(result, `c;<${JSON.stringify(whitespace)}> 必须完全不写剪贴板`).toBeNull()
+      expect(result, `c;<${JSON.stringify(whitespace)}> 绝不能是写空串`).not.toEqual({ text: '' })
+    }
+  })
+
   it('坏 base64 给 null，而不是把原始字节当文本', () => {
     // 这三种都能骗过一个只判「非空」的实现。
     expect(terminalOscClipboardWrite('c;not base64!!')).toBeNull()
@@ -212,3 +227,55 @@ describe('OSC 52 的接线', () => {
     expect(fake.disposed).toEqual([10, 11, 52])
   })
 })
+
+describe('OSC 10/11 颜色 handler 的接线', () => {
+  it('颜色 SET（不是查询）要 return false，把这一帧让回 xterm 自己上色', () => {
+    // `terminalOscColorQuerySlotsForBody` 只认查询形态（`?` / `?;?`）。当 TUI 发的是货真价实的
+    // 颜色 SET——`ESC]10;#ff0000` 改前景、`ESC]11;#0000ff` 改背景——它返回 null，此时 handler 必须
+    // `return false`，否则 xterm 收不到「这帧没人管」的信号，用户请求的改色被 handler 吞掉。
+    const fake = fakeTerminal()
+    installTerminalOscHandlers(fake.terminal, {
+      isReplaying: () => false,
+      respondFromRenderer: true,
+      sendInput: () => {},
+      writeClipboard: () => {}
+    })
+    // 10 = 前景，11 = 背景；两个 slot 走的是同一段闭包，都要放行。
+    expect(fake.handlers.get(10)!('#ff0000'), 'OSC 10 改色必须让回 xterm').toBe(false)
+    expect(fake.handlers.get(11)!('#0000ff'), 'OSC 11 改色必须让回 xterm').toBe(false)
+    // 对照：真正的查询**会**被消费（return true）。少了这条，上面的 false 可能只是因为 handler
+    // 恒为 false——那样它虽躲过本条，却会把颜色查询也漏给 xterm。
+    expect(fake.handlers.get(10)!('?'), '颜色查询应被消费').toBe(true)
+  })
+
+  it('respondFromRenderer 为 false 时颜色查询不回送——主进程已答过，renderer 再答就是重复回复', () => {
+    // 生产里 respondFromRenderer 取自 session.kind === 'terminal'：agent 会话为 false，因为主进程
+    // 已经替它回答颜色查询。若 renderer 也回答，就往前台进程注入一条**重复**的颜色回复。
+    const off = fakeTerminal()
+    const sendOff = vi.fn()
+    installTerminalOscHandlers(off.terminal, {
+      isReplaying: () => false,
+      respondFromRenderer: false,
+      sendInput: sendOff,
+      writeClipboard: () => {}
+    })
+    // `?` 是货真价实的前景色查询，handler 认得它（slots 非空），所以此处的沉默只可能来自
+    // respondFromRenderer 这道闸——而不是「压根没识别成查询」。
+    expect(off.handlers.get(10)!('?'), '查询仍要被消费').toBe(true)
+    expect(sendOff, 'respondFromRenderer=false 时不许回送').not.toHaveBeenCalled()
+
+    // 对照：同一个查询在 respondFromRenderer=true 下**会**回送。证明上面的沉默是这道闸挣来的，
+    // 不是 theme 缺色让 reply 恒为 null（那样即便去掉这道闸也不会回送，判据形同虚设）。
+    const on = fakeTerminal()
+    const sendOn = vi.fn()
+    installTerminalOscHandlers(on.terminal, {
+      isReplaying: () => false,
+      respondFromRenderer: true,
+      sendInput: sendOn,
+      writeClipboard: () => {}
+    })
+    on.handlers.get(10)!('?')
+    expect(sendOn).toHaveBeenCalledTimes(1)
+  })
+})
+
