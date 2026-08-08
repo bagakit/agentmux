@@ -43,9 +43,52 @@ import { GH_UNAVAILABLE, GIT_UNAVAILABLE } from '../src/renderer/src/lib/git-bri
  * 真缺陷（记忆 lexical-boundaries-need-a-real-lexer：注释边界要用语言自己的词法器判，别按行猜）。
  * 下面 `注释里提到不算读取` 那一条把这个区分本身做成了断言。
  *
- * 仍在的盲点（诚实记录）：桥取值经**中间变量**再摸（`const w = window; w.agentmux`）——判据只认
- * 根对象直接是名字的读取，跨变量要 TypeChecker 做符号解析，本文件是 createSourceFile 词法走查够不到；
- * 真正的运行期动态键只能标 unclassified 让人回看，判不出它读没读 agentmux（有意为之的保守出口）。
+ * ---
+ * 本轮（#723）补的第三、四种拼法，以及一处把自己说错了的盲点记录。
+ *
+ * 【补的盲点】**赋值式解构**与 `Reflect.get`。上面那段说「解构」已经收了，但收的只是**声明式**
+ * 解构（`const { agentmux } = window`，AST 上是 BindingElement）。`({ agentmux } = window)` 是
+ * **赋值**表达式：AST 上根本不是 BindingElement，而是一个 ObjectLiteralExpression 里的
+ * ShorthandPropertyAssignment（重命名式 `({ agentmux: bridge } = window)` 则是 PropertyAssignment）。
+ * 三条分支一条都不匹配，于是它既不算命中也不算可疑，**静默逃掉**。`Reflect.get(window, 'agentmux')`
+ * 同理：它是 CallExpression，不是任何一种属性访问。
+ *
+ * 存活的变异（本轮实测，现在会红）：
+ *   1. 在 `src/renderer/src/components/ChangesPanel.tsx` 里重新手抄一份桥取值，写成
+ *      `let agentmux; ({ agentmux } = window); await agentmux.git.stage(...)`。
+ *      修复前：`preload 桥只有一个取值口` 全绿（reads=0、unclassified=0，探针实测）。
+ *      修复后：`渲染层没有别的地方再摸 agentmux` 报出该行。
+ *   2. 同处写成 `const bridge = Reflect.get(window, 'agentmux')`。修复前同样零命中。
+ *
+ * 判「这是解构赋值而不是普通对象字面量」必须落在**父节点关系**上：`{ agentmux: 1 }` 作为一个普通值
+ * （`const o = { agentmux: 1 }`、`fn({ agentmux: 1 })`）绝不能算读取，否则这条门会对满仓合法的
+ * 对象字面量发假红。所以判据是「这个 ObjectLiteralExpression 是某个 `=` 的左操作数」，
+ * 见 {@link isAssignmentTargetObject}，反向自证见独立那条
+ * `反向自证：普通对象字面量里的 agentmux 键不是一次桥取值`（记忆 forbidden-list-guard-always-leaks 的另一面：允许清单收窄之后，
+ * 必须有人证明它没有把合法形状一起收进来）。
+ *
+ * 【更正一处写错的盲点】此前这里写着「桥取值经**中间变量**再摸（`const w = window; w.agentmux`）」
+ * 是残留盲点。**这是错的**：`agentmuxScan` 的点号分支（下面那句 `node.name.text === 'agentmux'`）
+ * 刻意**不判根对象是什么**，所以 `w.agentmux` 照样命中——探针实测 reads=1。把一个其实守住了的
+ * 形状记成盲点，会让下一个人以为这里有条现成的绕过路可走，也会让人去"修"一个不存在的缺口
+ * （记忆 expired-reason-for-not-mapping：读起来像已决之事的注释，没人会回头验它）。为了让这次更正
+ * 不再退化成另一句无人验的散文，它已经作为 `SPELLINGS` 里的一条**用例**存在（「经中间变量的点号
+ * 访问」）：哪天点号分支真的开始判根对象，那条会红。
+ *
+ * 仍在的盲点（这次逐条验过）：
+ * - **属性名整个来自运行期值**：`Reflect.get(window, key)`、`window[k]`。判不出它读没读
+ *   agentmux，只能标 unclassified 让人回看——保守出口，不是漏。
+ * - **跨函数传递**：把 `window` 当实参传进某个 helper，再在 helper 里摸 `.agentmux`。命中的是
+ *   helper 里那一次（形参名不重要，因为点号分支不判根对象），所以逃不掉；但如果 helper 收的是
+ *   **属性名字符串**再自己拼下标，就落进上一条的 unclassified。
+ * - **本文件不做符号解析**：`createSourceFile` 只有词法/语法层，没有 TypeChecker。上面两条的
+ *   根因都是这个，要真解析得换 `ts.createProgram`（代价是这条守卫会依赖 tsconfig 的 include，
+ *   而 `apps/desktop/tsconfig.json` 恰好**不含** test/，见下）。
+ *
+ * 【关于 tsc 的担保，再说清一次】文件头前面已经写明「tsc 关掉了这个 bypass 是假的」。补一条更硬的
+ * 事实：`apps/desktop/tsconfig.json` 的 `include` 只列了 src 下的 .ts / .tsx 与仓库根的 .ts，
+ * **test/ 整个目录都不在里面**。所以本文件里任何"编译期"判据（类型标注、satisfies、Record 键位）
+ * 都不会被 `pnpm check` 执行到——本文件的强制力 100% 来自下面这些 `it`，一条都不能靠 tsc 兜。
  */
 
 const RENDERER = fileURLToPath(new URL('../src/renderer', import.meta.url))
@@ -92,7 +135,9 @@ function sourceFiles(dir: string): string[] {
  * `unclassified` 一并带出，由 {@link 没有归类不了的动态取值} 那条断言响亮失败并指名。今天 renderer
  * 里一处这种写法都没有（见那条断言的反向自证）。
  */
-type Read = { file: string; line: number }
+// 注：`Read` 的定义在上面（`ALLOWED` 之后）。这里此前重复声明了一次同名类型，是真 TS2300
+// （`Duplicate identifier 'Read'`，两处各报一条）。tsc 没有喊出来只是因为
+// apps/desktop/tsconfig.json 的 include 不含 test/——见文件头最后一段。
 
 // 从字符串字面量或字面量 `+` 拼接里折出静态值；折不出（变量、模板插值）返回 null。
 function staticStringKey(node: ts.Expression): string | null {
@@ -128,6 +173,39 @@ function isGlobalLike(node: ts.Expression | undefined): boolean {
   return ts.isIdentifier(inner) && (inner.text === 'window' || inner.text === 'globalThis' || inner.text === 'self')
 }
 
+/**
+ * 这个对象字面量是不是某个赋值的**左**操作数——即 `({ agentmux } = window)` 这种**赋值式解构**。
+ *
+ * 承重：普通对象字面量（`const o = { agentmux: 1 }`、`fn({ agentmux: 1 })`）**不是**属性读取，
+ * 绝不能算命中，否则这条门会对满仓合法代码发假红。区分二者的唯一可靠依据就是父节点：只有
+ * 出现在 `=` 左边时，`{ agentmux }` 才是「从右边那个对象上把 agentmux 读出来」。
+ */
+function isAssignmentTargetObject(node: ts.ObjectLiteralExpression): boolean {
+  const parent = node.parent
+  return (
+    parent !== undefined &&
+    ts.isBinaryExpression(parent) &&
+    parent.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+    unwrap(parent.left) === node
+  )
+}
+
+/**
+ * `Reflect.get(obj, key)` 里的那个 key 表达式；不是 Reflect.get 调用则返回 null。
+ *
+ * 收它的理由：`Reflect.get(window, 'agentmux')` 是一次不带任何属性访问语法的属性读取，三条
+ * 语法分支全都看不见它（实测 reads=0、unclassified=0，静默逃掉）。
+ */
+function reflectGetKey(node: ts.CallExpression): { key: ts.Expression; target: ts.Expression } | null {
+  const callee = unwrap(node.expression)
+  if (!ts.isPropertyAccessExpression(callee)) return null
+  if (callee.name.text !== 'get') return null
+  const owner = unwrap(callee.expression)
+  if (!ts.isIdentifier(owner) || owner.text !== 'Reflect') return null
+  if (node.arguments.length < 2) return null
+  return { key: node.arguments[1]!, target: node.arguments[0]! }
+}
+
 function agentmuxScanText(text: string, rel: string): { reads: Read[]; unclassified: string[] } {
   const source = ts.createSourceFile(rel, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
   const reads: Read[] = []
@@ -158,6 +236,38 @@ function agentmuxScanText(text: string, rel: string): { reads: Read[]; unclassif
         if (resolved === 'agentmux') reads.push({ file: rel, line: lineOf(node) })
         // 计算解构键折不出名字、且被解构的是全局：可疑。
         else if (resolved === null && initGlobal) unclassified.push(`${rel}:${lineOf(node)}  ${node.getText(source)}`)
+      }
+    } else if (ts.isObjectLiteralExpression(node) && isAssignmentTargetObject(node)) {
+      // 赋值式解构：`({ agentmux } = window)` / `({ agentmux: bridge } = window)`。这里不是
+      // BindingElement（那是声明式解构），而是对象字面量里的 Shorthand/PropertyAssignment。
+      for (const property of node.properties) {
+        const rawKey = ts.isShorthandPropertyAssignment(property)
+          ? property.name
+          : ts.isPropertyAssignment(property)
+            ? property.name
+            : undefined
+        if (rawKey === undefined) continue
+        if (ts.isIdentifier(rawKey) || ts.isStringLiteralLike(rawKey)) {
+          if (rawKey.text === 'agentmux') reads.push({ file: rel, line: lineOf(property) })
+        } else if (ts.isComputedPropertyName(rawKey)) {
+          const resolved = staticStringKey(rawKey.expression)
+          if (resolved === 'agentmux') reads.push({ file: rel, line: lineOf(property) })
+          // 计算键折不出名字、且赋值右边是全局：可疑。
+          else if (resolved === null && isGlobalLike(unwrap((node.parent as ts.BinaryExpression).right))) {
+            unclassified.push(`${rel}:${lineOf(property)}  ${property.getText(source)}`)
+          }
+        }
+      }
+    } else if (ts.isCallExpression(node)) {
+      // `Reflect.get(window, 'agentmux')`：一次没有属性访问语法的属性读取。
+      const reflect = reflectGetKey(node)
+      if (reflect !== null) {
+        const key = staticStringKey(reflect.key)
+        if (key === 'agentmux') reads.push({ file: rel, line: lineOf(node) })
+        // 键折不出名字、且取的是全局：可疑。
+        else if (key === null && isGlobalLike(reflect.target)) {
+          unclassified.push(`${rel}:${lineOf(node)}  ${node.getText(source)}`)
+        }
       }
     }
     ts.forEachChild(node, visit)
@@ -214,29 +324,74 @@ describe('preload 桥只有一个取值口', () => {
 
   // 在场自检：上面那条断言在「一个都没找到」时也会通过。遍历一旦坏掉（改错后缀、走错根目录），
   // 整条守卫就静默变恒真（记忆 false-green-gate-patterns 里「扫描根写错静默变绿」那一条）。
+  // 为什么下面拆成四个 it（#742 同族，本轮实测）：这四组断言原先挤在一个 it 里，正向计数排在最前，
+  // 两条**反向自证**（合法查表 / 普通对象字面量不许被误报）排在后面。于是任何让正向计数失败的变异
+  // 都让反向自证变成死代码——实测「isAssignmentTargetObject 恒 false」与「Reflect.get 分支删掉」两个
+  // 不同变异报出的是**同一个用例名**，那正是互相掩盖的判别信号（记忆
+  // two-throws-in-one-it-mask-each-other）。拆开后正向与反向各自可观测，改一侧不会顺手瞎掉另一侧。
   it('遍历真的看见了源码和取值点', () => {
     expect(FILES.length, 'renderer 下一个源文件都没扫到——扫描根或后缀写错了').toBeGreaterThan(50)
     expect(READS.length, '一处 agentmux 取值都没找到——AST 判据坏了，上面那条已经恒真').toBeGreaterThan(0)
+  })
 
-    // 判据自检：四种取属性写法都要被真正的 agentmuxScanText 认出（点号 / 字面量下标 / 拼接下标 /
-    // 解构）——这几条正是 review agent 测得 6 条全绿的 bypass 里那两种（拼接下标、解构）。少了这一步，
-    // 某种拼法悄悄不再匹配也不会有人发现。
-    const recognised = agentmuxScanText(
-      "window.agentmux; window['agentmux']; window['agent' + 'mux']; const { agentmux } = window; const { agentmux: b } = window",
-      'probe.tsx'
-    )
-    expect(recognised.reads, '五种取属性写法没被全部认出——某种拼法漏了').toHaveLength(5)
-    expect(recognised.unclassified, '合法静态取值被误标成 unclassified').toHaveLength(0)
+  // 为什么每种拼法各占一条用例，而不是把九种拼在一个 fixture 里数 `toHaveLength(9)`（本轮实测）：
+  // 那个计数比缺陷粗。「isAssignmentTargetObject 恒 false」与「Reflect.get 分支删掉」是两个不同的
+  // helper 坏掉，实测却打红**同一对**用例名——因为九种拼法共用一个数，任何一种漏掉都只是「9 变 8」。
+  // 门是红的，但它说不出哪种拼法丢了，而这正是要修的时候唯一想知道的事（记忆
+  // mutation-must-change-one-thing：粗断言会吃掉细断言的信号）。逐条之后，两个变异各打红自己那几行。
+  const SPELLINGS: Array<{ name: string; code: string }> = [
+    { name: '点号访问', code: 'window.agentmux' },
+    { name: '字符串字面量下标', code: "window['agentmux']" },
+    { name: '静态可折叠的拼接下标', code: "window['agent' + 'mux']" },
+    { name: '模板字面量下标', code: 'window[`agentmux`]' },
+    { name: '声明式解构', code: 'const { agentmux } = window' },
+    { name: '声明式解构（重命名）', code: 'const { agentmux: bridge } = window' },
+    { name: '赋值式解构（重命名）', code: 'let x; ({ agentmux: x } = window)' },
+    { name: '赋值式解构（简写）', code: 'let agentmux; ({ agentmux } = window)' },
+    { name: 'Reflect.get', code: "Reflect.get(window, 'agentmux')" },
+    // 根对象换成中间变量：点号分支刻意不判根对象，所以这条也该命中。此前文件头把它记成盲点，是错的。
+    { name: '经中间变量的点号访问', code: 'const w = window; w.agentmux' }
+  ]
 
-    // 反向：真动态键（从全局取）计为 unclassified，不计为命中。
-    const dynamic = agentmuxScanText("window[k]; const { [k]: v } = window", 'probe.tsx')
-    expect(dynamic.reads, '动态键被误当成 agentmux 命中').toHaveLength(0)
-    expect(dynamic.unclassified, '全局上的动态键没被计成 unclassified').toHaveLength(2)
+  it.each(SPELLINGS)('判据自检：$name 被认成一次桥取值', ({ code }) => {
+    const scanned = agentmuxScanText(code, 'probe.tsx')
+    expect(scanned.reads, `这种拼法漏了——它就是一条现成的绕过路：${code}`).toHaveLength(1)
+    expect(scanned.unclassified, `这种拼法被误标成 unclassified：${code}`).toHaveLength(0)
+  })
 
-    // 反向自证：本地对象上的动态下标（`FAILURE_COPY[verb]` 这类）与桥无关，绝不能被拖进 unclassified，
-    // 否则这条门会对满仓合法的查表发假红——那正是本轮第一版踩过的坑。
+  // 反向的一半同样逐条：真动态键必须计成 unclassified 而不是命中。合成一个 fixture 数 4 时，
+  // 少认一种同样只是「4 变 3」，说不出是哪一种。
+  const DYNAMIC_SPELLINGS: Array<{ name: string; code: string }> = [
+    { name: '下标', code: 'window[k]' },
+    { name: '声明式解构的计算键', code: 'const { [k]: v } = window' },
+    { name: '赋值式解构的计算键', code: 'let y; ({ [k]: y } = window)' },
+    { name: 'Reflect.get 的运行期键', code: 'Reflect.get(window, k)' }
+  ]
+
+  it.each(DYNAMIC_SPELLINGS)('判据自检：$name 的运行期键计为 unclassified', ({ code }) => {
+    const scanned = agentmuxScanText(code, 'probe.tsx')
+    expect(scanned.reads, `动态键被误当成 agentmux 命中：${code}`).toHaveLength(0)
+    expect(scanned.unclassified, `这种动态键没被计成 unclassified，于是静默逃掉：${code}`).toHaveLength(1)
+  })
+
+  it('反向自证：本地对象上的动态下标与桥无关，不许被拖进 unclassified', () => {
+    // `FAILURE_COPY[verb]` 这类查表满仓都有，误报久了必被加豁免、豁免再吃掉真缺陷——那正是本轮
+    // 第一版踩过的坑。
     const localIndex = agentmuxScanText('const x = FAILURE_COPY[verb]; const y = table[a][b]', 'probe.tsx')
     expect(localIndex.unclassified, '本地对象的动态下标被误报成可疑').toHaveLength(0)
+  })
+
+  it('反向自证：普通对象字面量里的 agentmux 键不是一次桥取值', () => {
+    // 承重（本轮新增）：收赋值式解构时如果只判「对象字面量里有这个键」，这一族合法代码会全部变成
+    // 假红。所以这条必须和上面那条命中断言成对存在——现在它们各占一个 it，任一侧瞎掉都会被单独报出。
+    const plainLiteral = agentmuxScanText(
+      'const o = { agentmux: 1 }; fn({ agentmux: 2 }); return { agentmux: 3 }',
+      'probe.tsx'
+    )
+    expect(plainLiteral.reads, '普通对象字面量被误当成一次桥取值——这条门会对合法代码发假红').toHaveLength(
+      0
+    )
+    expect(plainLiteral.unclassified, '普通对象字面量被误报成可疑').toHaveLength(0)
   })
 
   it('每条豁免都真的在用', () => {
