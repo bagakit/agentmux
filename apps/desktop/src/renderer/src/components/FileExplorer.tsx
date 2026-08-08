@@ -54,6 +54,7 @@ import {
 } from '../lib/file-tree-git-status'
 import { useGitStatus } from '../hooks/useGitStatus'
 import { createFileExplorerRowProjection } from './file-tree/file-explorer-row-projection'
+import { refreshFileExplorer } from './file-tree/file-explorer-refresh'
 import { presentExpandedDir } from './file-tree/file-explorer-stale-dir-cache'
 import {
   createSingleFileExplorerSelection,
@@ -362,7 +363,7 @@ export function FileExplorer({
   // Source-control status projected straight onto the tree — no second copy of "what changed" in the
   // store, it consumes the same git:status the Changes panel does. The mapping from porcelain to a
   // per-node status is a pure function (lib/file-tree-git-status); this component only asks it.
-  const { status: gitStatus } = useGitStatus(workspaceId ?? null)
+  const { status: gitStatus, refresh: refreshGitStatus } = useGitStatus(workspaceId ?? null)
   const gitStatusIndex = useMemo(() => {
     if (gitStatus?.kind !== 'git-repository') return buildFileTreeGitStatusIndex([])
     // The prefix comes from main, which asked git for it (`rev-parse --show-prefix`). It is NOT
@@ -403,6 +404,16 @@ export function FileExplorer({
   const isMac = useMemo(() => isMacPlatform(), [])
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
   const hoverExpandRef = useRef<{ path: string; timer: number } | null>(null)
+  // 五个触发点（revision 变化、窗口重获焦点、重绑路径、头部按钮、读失败重试）共用的那一个「刷新」。
+  // 见 file-tree/file-explorer-refresh.ts：把结构与 git 状态收成一个动作，是因为它们分开时
+  // 漏掉的那一半完全静默——#750 就是 git 那半边从来没人调。
+  const refreshExplorer = useCallback(
+    async () => await refreshFileExplorer({
+      refreshTree: tree.refreshTree,
+      refreshGitStatus
+    }),
+    [refreshGitStatus, tree.refreshTree]
+  )
 
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get('agentmux-file-editing-report') !== '1') {
@@ -472,8 +483,8 @@ export function FileExplorer({
   useEffect(() => {
     if (observedFileRevisionRef.current === workspaceFileRevision) return
     observedFileRevisionRef.current = workspaceFileRevision
-    void tree.refreshTree()
-  }, [tree.refreshTree, workspaceFileRevision])
+    void refreshExplorer()
+  }, [refreshExplorer, workspaceFileRevision])
 
   // Expand each relative Workspace ancestor without replacing an existing
   // multi-selection, then scroll after async reads project the target row.
@@ -525,11 +536,13 @@ export function FileExplorer({
   // Continuous filesystem watch would need a cross-host owner. Until the mux
   // decision, refresh on application focus through the same Local/SSH IPC
   // instead of introducing a local-only watcher with conflicting semantics.
+  // 重获焦点这条路尤其要连 git 一起刷：用户切到终端里跑了 agent 或 git 命令，回到 AgentMux 时
+  // 期待看到的正是"哪些文件被改了"，而那是 git 那半边的事。
   useEffect(() => {
-    const refreshOnFocus = () => void tree.refreshTree()
+    const refreshOnFocus = () => void refreshExplorer()
     window.addEventListener('focus', refreshOnFocus)
     return () => window.removeEventListener('focus', refreshOnFocus)
-  }, [tree.refreshTree])
+  }, [refreshExplorer])
 
   const rows = useMemo(
     () => flattenFileTree(tree.rootCache?.children ?? [], tree.dirCache, expanded),
@@ -676,7 +689,7 @@ export function FileExplorer({
       const current = useAppStore.getState().config
       if (!current) return
       setConfig(applyWorkspacePathRebind(current, updated))
-      await tree.refreshTree()
+      await refreshExplorer()
     } catch (error) {
       reportError(error)
     } finally {
@@ -851,7 +864,7 @@ export function FileExplorer({
         <div className="explorer-header__actions">
           <button onClick={() => beginCreate('create-file')} title="New file"><FilePlus2 size={13} /></button>
           <button onClick={() => beginCreate('create-directory')} title="New folder"><FolderPlus size={13} /></button>
-          <button onClick={() => void tree.refreshTree()} title="Refresh explorer">
+          <button onClick={() => void refreshExplorer()} title="Refresh explorer">
             {tree.rootCache?.loading ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}
           </button>
         </div>
@@ -963,7 +976,7 @@ export function FileExplorer({
               <strong>Could not read workspace</strong>
               <span>{tree.rootError}</span>
               <div className="tree-empty__actions">
-                <button className="small-button" onClick={() => void tree.refreshTree()}>Retry</button>
+                <button className="small-button" onClick={() => void refreshExplorer()}>Retry</button>
                 {workspace?.hostId === 'local' && isFolderWorkspace(workspace) ? (
                   <button className="small-button" disabled={relinking} onClick={() => void rebindWorkspacePath()}>
                     {relinking ? <LoaderCircle className="spin" size={12} /> : <FolderOpen size={12} />}
