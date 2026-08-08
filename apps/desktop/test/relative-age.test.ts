@@ -1,6 +1,7 @@
-import { readFileSync, readdirSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join, relative, resolve } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 import ts from 'typescript'
 
 import { formatRelativeAge, relativeAgeTier } from '../src/renderer/src/lib/relative-age.js'
@@ -27,6 +28,12 @@ import { formatRelativeAge, relativeAgeTier } from '../src/renderer/src/lib/rela
  *
  *   - 结构层按「除以 60_000」判。换个写法（先除 1000 再除 60、或把 60_000 藏进另一个常量）就绕过。
  *     选它是因为这道阶梯必须做这次换算，而不是因为它不可绕。
+ *   - 自检 3 用**临时目录里的一对 fixture** 证明扫描器真在读盘。它买到的是「这个 helper 的函数体没有
+ *     被掏空成常量」，买不到「它对 renderer 树的判断也正确」——扫描根写错仍然由自检 1 单独承重。
+ *     两条自检守的是不同的东西，不要以为有了一条就能删另一条。
+ *     **已实测的绕法**：`if (root === RENDERER_ROOT) return [...]`（只对真扫描根返回常量）能让 16 条
+ *     全绿。它逃得掉是因为自检 3 走的是另一个根。没有去堵：那不是会手滑写出来的形状，而堵它要么
+ *     再引一层间接、要么把真实根也做成 fixture——两条都让这道门更难读，换来的只是对刻意规避的抵抗。
  *   - `SurfaceToolDock` 此刻由别的 agent 持有未入库改动，不能改，所以它那份副本仍在树上，结构层为
  *     它开了**一条具名例外**。那条例外自带自检：等它被收进 lib、例外变成死条目时，自检会红并要求
  *     删掉例外——例外不会静默留成永久豁免。
@@ -36,6 +43,12 @@ import { formatRelativeAge, relativeAgeTier } from '../src/renderer/src/lib/rela
 
 const RENDERER_ROOT = resolve(__dirname, '../src/renderer/src')
 const AGE_LIB = 'lib/relative-age.ts'
+
+/** 自检 3 建出来的临时扫描根，跑完一律删掉。 */
+const scratchRoots: string[] = []
+afterAll(() => {
+  for (const root of scratchRoots) rmSync(root, { recursive: true, force: true })
+})
 
 /**
  * 结构层的具名例外。
@@ -89,10 +102,10 @@ function numericConstants(source: ts.SourceFile): Map<string, number> {
   return bindings
 }
 
-/** 源码里做了「除以 60_000」这次换算的文件（相对 renderer 根的路径）。 */
-function filesConvertingMsToMinutes(): string[] {
+/** 源码里做了「除以 60_000」这次换算的文件（相对扫描根的路径）。 */
+function filesConvertingMsToMinutes(root: string = RENDERER_ROOT): string[] {
   const hits: string[] = []
-  for (const path of sourceFiles(RENDERER_ROOT)) {
+  for (const path of sourceFiles(root)) {
     const source = parse(path)
     const constants = numericConstants(source)
     /** 除号右边那个操作数是不是 60_000——字面量与同文件常量名两种写法都算。 */
@@ -114,9 +127,29 @@ function filesConvertingMsToMinutes(): string[] {
       ts.forEachChild(node, walk)
     }
     walk(source)
-    if (found) hits.push(relative(RENDERER_ROOT, path))
+    if (found) hits.push(relative(root, path))
   }
   return hits
+}
+
+/**
+ * 这个文件里所有**被引用到**的标识符（`import` 语句里那几个名字不算引用）。
+ *
+ * 为什么需要这一层：只判「import 了 relative-age」买到的是那行 import 在场，不是那个函数被调用。
+ * 实测（本仓 #713 一族）——保留 import、把 `{formatRelativeAge(…)}` 换成 `{String(session.updatedAt)}`，
+ * 整个套件 0 红：一个 import 了 lib 却渲染裸时间戳的 Board 能完整通过。所以接线层必须问「这个名字在
+ * import 之外还出现过吗」。
+ */
+function referencedIdentifiers(source: ts.SourceFile): Set<string> {
+  const referenced = new Set<string>()
+  const walk = (node: ts.Node): void => {
+    // import 子树整棵跳过：里面的名字是"引进来"，不是"用起来"。
+    if (ts.isImportDeclaration(node)) return
+    if (ts.isIdentifier(node)) referenced.add(node.text)
+    ts.forEachChild(node, walk)
+  }
+  ts.forEachChild(source, walk)
+  return referenced
 }
 
 // ---------------------------------------------------------------------------
@@ -206,8 +239,19 @@ describe('WorkspaceBoard 的年龄取自这个 lib', () => {
     ).toBe(true)
   })
 
+  it('它真的调用了 formatRelativeAge，不只是把 import 摆在那里', () => {
+    // 与上一条成对，且是它们里唯一能抓「import 在场但没人用」的那条。实测（审计 6852149 时坐实）：
+    // 保留 import、把 `{formatRelativeAge(…)}` 换成 `{String(session.updatedAt)}`，除这条以外全绿——
+    // 一个渲染裸时间戳的 Board 能通过整个套件。「import 关系」买到的是在场，不是取值。
+    const source = parse(resolve(RENDERER_ROOT, relativePath))
+    expect(
+      referencedIdentifiers(source),
+      'WorkspaceBoard import 了 relative-age 却从不调用 formatRelativeAge：那行 import 是死的'
+    ).toContain('formatRelativeAge')
+  })
+
   it('它自己不做毫秒→分钟那次换算', () => {
-    // 与上一条成对：光 import 不算接上——旁边留着一份自己的阶梯照旧会漂移。
+    // 与上面两条成对：光调用不算收敛——旁边留着一份自己的阶梯照旧会漂移。
     expect(filesConvertingMsToMinutes()).not.toContain(relativePath)
   })
 })
@@ -242,5 +286,27 @@ describe('毫秒→分钟的换算全树只有 lib 一处', () => {
         `例外 ${entry.file} 已经不再自己判档了（理由曾是：${entry.reason}）——请删掉这条例外`
       ).toContain(entry.file)
     }
+  })
+
+  it('自检 3：扫描器真在读盘，不是把期望值写死成常量', () => {
+    // 自检 1/2 守的是「扫描根写错」与「例外过期」，两条都**不能**抓住把函数体掏空的那种改法：
+    // `return ['lib/relative-age.ts', 'components/SurfaceToolDock.tsx']` 能让上面三条全绿，
+    // 而此时盘上真有第三份副本也无人报告（审计 6852149 时实测坐实）。
+    //
+    // 所以这里给它一对临时 fixture：一个真做那次换算、一个不做。扫描器必须只捡出前者。这买到的是
+    // 「这个 helper 的函数体确实在遍历入参那棵树」——买不到「它对 renderer 树也判得对」，那仍由自检 1 承重。
+    const scratch = mkdtempSync(join(tmpdir(), 'relative-age-scan-'))
+    scratchRoots.push(scratch)
+    mkdirSync(join(scratch, 'nested'), { recursive: true })
+    writeFileSync(
+      join(scratch, 'nested', 'divides.ts'),
+      'export const m = (ms: number): number => Math.floor(ms / 60_000)\n'
+    )
+    writeFileSync(join(scratch, 'inert.ts'), 'export const label = "60_000 是个数字，但这里没有除法"\n')
+
+    expect(
+      filesConvertingMsToMinutes(scratch),
+      '扫描器没有从临时目录里捡出那个真做换算的文件：它的函数体没有在读入参那棵树'
+    ).toEqual(['nested/divides.ts'])
   })
 })
