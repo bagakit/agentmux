@@ -88,6 +88,70 @@ function isControlled(props: string): boolean {
 }
 
 /**
+ * 从属性文本里剜出 `onChange` / `onInput` 那一整段处理器表达式（不含最外层花括号）。
+ *
+ * 用平衡计数扫到配对的 `}`，而不是 `/onChange=\{([^}]*)\}/`：处理器体里出现对象字面量
+ * `{ user: e.target.value }` 时，`[^}]*` 会在第一个内层 `}` 就截断，于是判据只读到半截、把真的写回
+ * 口切掉。没有找到就回 null（该控件没有事件处理器）。
+ */
+function eventHandler(props: string): string | null {
+  const match = /(^|\s)(onChange|onInput)\s*=\s*\{/.exec(props)
+  if (!match) return null
+  const start = match.index + match[0].length
+  let index = start
+  let depth = 1
+  let quote: string | null = null
+  while (index < props.length && depth > 0) {
+    const char = props[index]!
+    if (quote) {
+      if (char === quote) quote = null
+    } else if (char === '"' || char === "'" || char === '`') quote = char
+    else if (char === '{') depth += 1
+    else if (char === '}') depth -= 1
+    if (depth === 0) break
+    index += 1
+  }
+  return props.slice(start, index)
+}
+
+/**
+ * 处理器真的把用户敲进来的值**写了回去**，而不是读一眼就丢。
+ *
+ * 洞的形状（#120 的对偶）：把真处理器换成 `onChange={(event) => void event.target.value}`——`onChange`
+ * 在场、`tsc` 干净、事件也确实读了 `event.target.value`，但那个值只是被 `void` 丢掉，输入框永久只读。
+ * 原判据只问「有没有 onChange」，于是这种「读完即弃」的处理器照旧全绿。所以判据改成问结构：事件取值
+ * 必须被当作**实参**（`setX(e.target.value)`、`setX(Number(e.target.value))`）或**右值**
+ * （`{ label: e.target.value }`、`v = e.target.value`）消费掉。只作丢弃式读取——`void e.target.value`、
+ * 箭头直接 `=> e.target.value`、语句 `{ e.target.value }`——一律不算。
+ *
+ * 对称的另一半（守不能误伤合法处理器，否则守会被删掉，比没有守更糟）：
+ *   - 先变换再写（`setX(Number(e.target.value))`）：取值在内层调用的实参位，`(` 在前，算过。
+ *   - 解构参数（`({ target: { value } }) => setX(value)`）：绑定名换成了 `value`，按参数里解构出
+ *     `value`/`checked` 放行——不去追那个裸名被怎么消费，以免把「value」这种常见词误判。
+ *   - 具名回调透传（`onChange={handleChange}` / `{ime.change}`）：写回口在那个函数里，静态读不到，放行。
+ */
+function writesEventValue(body: string): boolean {
+  const trimmed = body.trim()
+  // 具名回调：纯标识符或成员访问链（没有 `(` 调用、没有 `=>` 箭头体），写回口在被引用的函数里。
+  if (/^[\w$]+(?:\.[\w$]+)*$/.test(trimmed)) return true
+  // 参数里解构出了 value/checked：绑定名不再是 `e.target.value`，按解构在场放行。
+  const arrow = /^\(([^)]*)\)\s*=>/.exec(trimmed) ?? /^([\w$]+)\s*=>/.exec(trimmed)
+  if (arrow && /\b(?:value|checked)\b/.test(arrow[1]!)) return true
+  // 事件取值被消费在实参位（前一个非空白字符是 `(` 或 `,`）、对象/赋值的右值位（`:` 或单个 `=`）。
+  // `=>`/`==`/`!=`/`<=`/`>=` 都以 `>`/`=` 之外的组合出现，不算写回——它们正是「读完即弃」那一族。
+  for (const match of body.matchAll(/\b[\w$]+\.target\.(?:value|checked)\b/g)) {
+    const before = body.slice(0, match.index).replace(/\s+$/u, '')
+    const last = before[before.length - 1]
+    if (last === '(' || last === ',' || last === ':') return true
+    if (last === '=') {
+      const prev = before[before.length - 2]
+      if (prev !== '=' && prev !== '!' && prev !== '<' && prev !== '>') return true
+    }
+  }
+  return false
+}
+
+/**
  * 有写回口，或显式声明了**永不**接受输入。两者都让"受控"自洽；缺了才是那个洞。
  *
  * `readOnly` / `disabled` 不是被豁免的例外，而是判据的另一半：它们显式说了这里不收输入。但只有
@@ -97,11 +161,15 @@ function isControlled(props: string): boolean {
  *
  * 展开写 `{...props}`（属性透传）也算过——写回口可能在传进来的那份里，静态读不到；这种控件另有
  * 其归属组件承担同一条判据。
+ *
+ * `onChange`/`onInput` 不再只看在场：必须 `writesEventValue` 证明它真的把值写回去了（见上）。
  */
 function hasWriteBack(props: string): boolean {
-  if (/(^|\s)(onChange|onInput|\.\.\.)/.test(props)) return true
+  if (/(^|\s)\.\.\./.test(props)) return true
   // 无条件只读：裸 `readOnly` / `disabled`，或显式写死 `={true}`。带表达式的一概不算。
-  return /(^|\s)(readOnly|disabled)(\s*=\s*\{\s*true\s*\})?(\s|$|\/)/.test(props)
+  if (/(^|\s)(readOnly|disabled)(\s*=\s*\{\s*true\s*\})?(\s|$|\/)/.test(props)) return true
+  const handler = eventHandler(props)
+  return handler !== null && writesEventValue(handler)
 }
 
 describe('受控表单控件必须有写回口', () => {
@@ -135,6 +203,50 @@ describe('受控表单控件必须有写回口', () => {
     expect(hasWriteBack('value={x} readOnly={locked}')).toBe(false)
     // 非受控（defaultValue）本就不需要写回口，也就不该被这条判据点名。
     expect(isControlled('defaultValue={x}')).toBe(false)
+  })
+
+  // 下面五条钉住 `writesEventValue` / `eventHandler` 本身。没有它们，把 `writesEventValue` 整个改成
+  // `return true` 会让上面那条扫描退回「只问 onChange 在不在场」——而那正是本次要堵的洞，且实测
+  // 5 条全绿（判据被架空却无人报警）。判据自己也要有判据。
+  it('自检：读完即弃的处理器不算写回口', () => {
+    // `void` 丢弃：onChange 在场、tsc 干净、值确实读了，但输入框永久只读。
+    expect(writesEventValue('(event) => void event.target.value')).toBe(false)
+    // 箭头直接把取值当返回值：同样没有任何东西被写回去。
+    expect(writesEventValue('(event) => event.target.value')).toBe(false)
+    // 语句位置的裸读取。
+    expect(writesEventValue('(event) => { event.target.value }')).toBe(false)
+  })
+
+  it('自检：真的把值写回去的处理器不被误判', () => {
+    // 守卫误伤合法代码比没有守卫更糟——它会被删掉。这一侧证明它不会。
+    expect(writesEventValue('(e) => setX(e.target.value)')).toBe(true)
+    // 先变换再写：取值落在内层调用的实参位。
+    expect(writesEventValue('(e) => setX(Number(e.target.value))')).toBe(true)
+    // 对象右值位。
+    expect(writesEventValue('(e) => setForm({ label: e.target.value })')).toBe(true)
+    // 解构参数：绑定名不再是 `e.target.value`。
+    expect(writesEventValue('({ target: { value } }) => setX(value)')).toBe(true)
+    // 具名回调透传：写回口在那个函数里，静态读不到。
+    expect(writesEventValue('handleChange')).toBe(true)
+  })
+
+  it('自检：处理器体里的对象字面量不会把提取截断', () => {
+    // `/onChange=\{([^}]*)\}/` 会在 `{ user: … }` 的第一个内层 `}` 处截断，于是判据只读到半截。
+    // 这里逐字钉住整段被读全了。
+    expect(eventHandler('value={x} onChange={(e) => setUser({ user: e.target.value })}')).toBe(
+      '(e) => setUser({ user: e.target.value })'
+    )
+    // 没有事件处理器时如实回 null，而不是空串（空串会让 writesEventValue 拿到假输入）。
+    expect(eventHandler('value={x} placeholder="p"')).toBe(null)
+  })
+
+  it('自检：整条判据串起来后，读完即弃的受控控件被点名', () => {
+    // 上面两条只测纯函数；这一条走 controls → hasWriteBack 的真实路径，确保接线没断。
+    const discard = controls('<input value={x} onChange={(e) => void e.target.value} />', 'f')[0]!
+    expect(isControlled(discard.props)).toBe(true)
+    expect(hasWriteBack(discard.props)).toBe(false)
+    const writes = controls('<input value={x} onChange={(e) => setX(e.target.value)} />', 'f')[0]!
+    expect(hasWriteBack(writes.props)).toBe(true)
   })
 
   it('没有一个受控控件是写不进去的', () => {
