@@ -49,12 +49,12 @@ describe('login shell exported environment', () => {
         'AGENTMUX_TEST_LOCAL=not-exported',
         ("export PATH='" + _hygiene_fixturePath("opt/test") + " tools:/usr/bin:/bin'")
       ].join('\n'))
-      const env: NodeJS.ProcessEnv = { HOME: directory, ZDOTDIR: directory, SHELL: shell, PATH: ["/usr/bin", "/bin"].join(":") }
+      const env: NodeJS.ProcessEnv = { HOME: directory, ZDOTDIR: directory, SHELL: shell, PATH: '/usr/bin:/bin' }
       const result = await hydrateProcessEnvironmentFromLoginShell({ platform: 'darwin', env })
       expect(result).toEqual({ ok: true, shell, mode: 'interactive-login' })
       expect(loginShellEnvironmentWarning(result)).toBeUndefined()
       const child = await exec(process.execPath, ['-e', 'process.stdout.write(JSON.stringify([process.env.AGENTMUX_TEST_PROFILE, process.env.AGENTMUX_TEST_RC, process.env.AGENTMUX_TEST_EMPTY, process.env.AGENTMUX_TEST_LOCAL, process.env.PATH]))'], { env })
-      expect(JSON.parse(child.stdout)).toEqual(['profile', 'hello=world\nsecond line', '', null, [_hygiene_fixturePath("opt/test tools"), "/usr/bin", "/bin"].join(":")])
+      expect(JSON.parse(child.stdout)).toEqual(['profile', 'hello=world\nsecond line', '', null, (_hygiene_fixturePath("opt/test") + " tools:/usr/bin:/bin")])
       expect(env.SHLVL).toBeUndefined()
       expect(env._).toBeUndefined()
     } finally { await rm(directory, { recursive: true, force: true }) }
@@ -162,6 +162,42 @@ describe('login shell exported environment', () => {
     const elapsedMs = Date.now() - startedAtMs
     expect(result).toEqual({ ok: false, reason: 'probe-failed' })
     expect(elapsedMs, `两条臂各等了一个完整预算（${elapsedMs}ms），预算没有共享`).toBeLessThan(120)
+  })
+
+  /**
+   * 第二条臂的份额必须**从固定的截止时刻**算，而不是每轮重开一个预算。
+   *
+   * 上面那条用墙钟守总量，但墙钟的门只能开得比真值宽（要留执行抖动的余量），于是它漏掉一整类变异：把
+   * `deadlineAtMs` 挪进循环里每轮重算。实测（#882 审计独立复现）——60ms 预算、两条臂都挂死时三个世界的
+   * 墙钟分别是：诚实 60ms、每轮重算 90ms（第一条臂 30 + 第二条臂整份 60）、每臂一份 120ms。`< 120` 放过
+   * 了中间那个，而它对用户的后果是实打实的：窗口要等 1.5 倍预算才出来。
+   *
+   * 本条不量墙钟，改判**交给第二条臂的那个 timeoutMs**，因为那个数把三个世界分得干净且不依赖计时精度：
+   * 截止时刻固定在 `start+60`，第一条臂已经花掉自己那 30ms，所以诚实世界里剩下的份额**在算术上**不可能
+   * 超过 30；每轮重算会给出 60，每臂一份也给 60。地板取 30（预算的一半）而不是精确值——诚实侧只会更小
+   * （臂超时略晚于 30ms 就更小），所以这个门对抖动是单向安全的，不会假红。
+   *
+   * 注意这与「早退的臂让出整份余额」那条（下面一条）不冲突：那条说的是第一条臂**没花掉**份额时余额要整份
+   * 让出去，本条说的是第一条臂**花掉了**份额后不许无中生有。两条一起才把除数和被除数都钉住。
+   */
+  it('derives the second arm share from the fixed deadline, not a fresh budget each iteration', async () => {
+    const handed: Array<{ arm: string; timeoutMs: number }> = []
+    const result = await hydrateProcessEnvironmentFromLoginShell({
+      platform: 'darwin',
+      env: { PATH: '/bin' },
+      timeoutMs: 60,
+      runner: (_shell, args, _env, timeoutMs) => {
+        handed.push({ arm: args[0]!, timeoutMs })
+        return new Promise<string>(() => {})
+      }
+    })
+    expect(result).toEqual({ ok: false, reason: 'probe-failed' })
+    // 自检：两条臂都真的起跑了，否则下面那条断言在读一个不存在的元素。
+    expect(handed.map((call) => call.arm)).toEqual(['-ilc', '-lc'])
+    expect(
+      handed[1]!.timeoutMs,
+      `第二条臂拿到 ${handed[1]!.timeoutMs}ms，超过了整个预算的剩余部分：截止时刻被每轮重算了`
+    ).toBeLessThanOrEqual(30)
   })
 
   /**
