@@ -12,9 +12,10 @@ import { formatRelativeAge, relativeAgeTier } from '../src/renderer/src/lib/rela
  * ─── 这一族的形状 ───
  *
  * 「一个决定写了两遍」在本仓反复出现，而它最危险的形态是**两遍现在都是对的**：`WorkspaceBoard` 的
- * `formatAge` 与 `SurfaceToolDock` 的 `formatAgentAge` 逐字相同地判 1 分钟 / 60 分钟 / 24 小时三道界，
- * 两份都读同一个 `session.updatedAt`。所以今天没有可观测的 bug——任何行为断言都抓不到它。只有把界挪
- * 一下才会分岔，而那时不会红、不会报错、也没有人会想起还有第二份。
+ * `formatAge` 与 `SurfaceToolDock` 的 `formatAgentAge` 曾逐字相同地判 1 分钟 / 60 分钟 / 24 小时三道界，
+ * 两份都读同一个 `session.updatedAt`，且已经漂移过一次——一份带 ` ago` 后缀、另一份不带。两份现已
+ * 收进 `lib/relative-age.ts`（后缀交由调用方按密度选），这道门守的是**不会再抄出第三份**：把界挪一下
+ * 不会红、不会报错、也没有人会想起还有第二份，所以任何行为断言都抓不到「又抄一份」。
  *
  * 所以这里有三层，各自能独立变红：
  *   行为层 —— 每道界的两侧都钉住（阶梯的取值真的来自入参）；
@@ -34,9 +35,10 @@ import { formatRelativeAge, relativeAgeTier } from '../src/renderer/src/lib/rela
  *     **已实测的绕法**：`if (root === RENDERER_ROOT) return [...]`（只对真扫描根返回常量）能让 16 条
  *     全绿。它逃得掉是因为自检 3 走的是另一个根。没有去堵：那不是会手滑写出来的形状，而堵它要么
  *     再引一层间接、要么把真实根也做成 fixture——两条都让这道门更难读，换来的只是对刻意规避的抵抗。
- *   - `SurfaceToolDock` 此刻由别的 agent 持有未入库改动，不能改，所以它那份副本仍在树上，结构层为
- *     它开了**一条具名例外**。那条例外自带自检：等它被收进 lib、例外变成死条目时，自检会红并要求
- *     删掉例外——例外不会静默留成永久豁免。
+ *   - `WorkspaceBoard` 与 `SurfaceToolDock` 两个消费者现都从 lib 取档，没有具名例外。将来若确有一份
+ *     副本一时收不进来（例如文件被别的改动占用），可在 `PENDING_CONVERSION` 里加一条**自带失效判据**
+ *     的具名例外：自检 2 会断言那条例外今天确实还持有一份副本，等副本被收进 lib、例外变成死条目时立即
+ *     打红逼人删掉——例外不会静默留成永久豁免。此刻这张清单是空的，自检 2 因此也不做任何断言。
  *   - 后缀不在这个 lib 的管辖内（看板 `' ago'`、窄面留空），这是密度合同下的正当差异，不是漂移。
  *     判据因此不要求两个面输出同一个字符串，只要求档位来自同一处。
  */
@@ -55,13 +57,10 @@ afterAll(() => {
  *
  * 每条都必须写明**为什么现在不能收**。这不是"允许重复"的清单，是"还没轮到"的清单：`self-check`
  * 会断言每条例外**今天仍然确实持有那份副本**，所以一旦它被收进 lib，这里就变成死条目并打红。
+ *
+ * 现在是空的：两个消费者（`WorkspaceBoard`、`SurfaceToolDock`）都已改从 lib 取档，没有待收的副本。
  */
-const PENDING_CONVERSION: ReadonlyArray<{ file: string; reason: string }> = [
-  {
-    file: 'components/SurfaceToolDock.tsx',
-    reason: '该文件此刻有别的 agent 的未入库改动，本轮不许动；它的 formatAgentAge 待其释放后收进 lib'
-  }
-]
+const PENDING_CONVERSION: ReadonlyArray<{ file: string; reason: string }> = []
 
 function sourceFiles(dir: string): string[] {
   const out: string[] = []
@@ -224,10 +223,14 @@ describe('formatRelativeAge 的后缀由调用方给，且 now 一档永不带',
 // ---------------------------------------------------------------------------
 // 接线层：消费者真的从 lib 取，而不是自己又算一遍。按 import 关系判——数名字会被
 // 同名局部函数骗过（本仓「守卫判据要是 import 关系」记过这一族）。
+//
+// 这里逐个点名今天已知的消费者（看板 + 工具坞）。这不是"接线层负责发现所有消费者"——
+// 发现新抄的一份是结构层的活。逐个点名买到的是：这两个面各自都真的在取 lib 的档，而不是
+// 其中一个偷偷留着自己那份阶梯。
 // ---------------------------------------------------------------------------
-describe('WorkspaceBoard 的年龄取自这个 lib', () => {
-  const relativePath = 'components/WorkspaceBoard.tsx'
+const AGE_CONSUMERS = ['components/WorkspaceBoard.tsx', 'components/SurfaceToolDock.tsx'] as const
 
+describe.each(AGE_CONSUMERS)('%s 的年龄取自这个 lib', (relativePath) => {
   it('它 import 了 relative-age，而不是自己判档', () => {
     const source = parse(resolve(RENDERER_ROOT, relativePath))
     const specifiers = source.statements
@@ -235,18 +238,18 @@ describe('WorkspaceBoard 的年龄取自这个 lib', () => {
       .map((statement) => (ts.isStringLiteral(statement.moduleSpecifier) ? statement.moduleSpecifier.text : ''))
     expect(
       specifiers.some((specifier) => specifier.includes('relative-age')),
-      'WorkspaceBoard 没有 import relative-age：它要么自己抄了一份阶梯，要么这道判据的扫描面写错了'
+      `${relativePath} 没有 import relative-age：它要么自己抄了一份阶梯，要么这道判据的扫描面写错了`
     ).toBe(true)
   })
 
   it('它真的调用了 formatRelativeAge，不只是把 import 摆在那里', () => {
     // 与上一条成对，且是它们里唯一能抓「import 在场但没人用」的那条。实测（审计 6852149 时坐实）：
     // 保留 import、把 `{formatRelativeAge(…)}` 换成 `{String(session.updatedAt)}`，除这条以外全绿——
-    // 一个渲染裸时间戳的 Board 能通过整个套件。「import 关系」买到的是在场，不是取值。
+    // 一个渲染裸时间戳的消费者能通过整个套件。「import 关系」买到的是在场，不是取值。
     const source = parse(resolve(RENDERER_ROOT, relativePath))
     expect(
       referencedIdentifiers(source),
-      'WorkspaceBoard import 了 relative-age 却从不调用 formatRelativeAge：那行 import 是死的'
+      `${relativePath} import 了 relative-age 却从不调用 formatRelativeAge：那行 import 是死的`
     ).toContain('formatRelativeAge')
   })
 
