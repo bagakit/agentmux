@@ -324,7 +324,13 @@ export async function registerIpc(args: {
   handle('git:commit', async (workspaceId: string, message: string) => {
     await git.commit(workspaceId, message, config)
   })
-  handle('git:diff', async (workspaceId: string, path: string) => await git.diff(workspaceId, path, config))
+  // `workspacePath`, not `path`: `diff` is the one git verb whose coordinate is workspace-relative
+  // (see the `git` surface doc in contracts.ts). Its neighbours here take repo-root-relative paths.
+  handle(
+    'git:diff',
+    async (workspaceId: string, workspacePath: string) =>
+      await git.diff(workspaceId, workspacePath, config)
+  )
   handle('git:unstage', async (workspaceId: string, path: string) => {
     await git.unstage(workspaceId, path, config)
   })

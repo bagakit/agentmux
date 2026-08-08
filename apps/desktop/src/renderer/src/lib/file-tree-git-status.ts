@@ -1,4 +1,5 @@
 import type { GitFileChange } from '../../../shared/contracts'
+import { workspaceRelativeGitPath } from './git-path-coordinates'
 
 /**
  * What source control says about one file-tree node. A closed union: the whole point of this task is
@@ -163,7 +164,6 @@ export function buildFileTreeGitStatusIndex(
   repoRelativePrefix = ''
 ): FileTreeGitStatusIndex {
   if (changes.length === 0) return EMPTY_INDEX
-  const prefix = repoRelativePrefix ? `${repoRelativePrefix.replace(/\/+$/, '')}/` : ''
   const fileStatus = new Map<string, FileTreeGitStatus>()
   const dirStatus = new Map<string, FileTreeGitStatus>()
   const record = (map: Map<string, FileTreeGitStatus>, key: string, status: FileTreeGitStatus) => {
@@ -171,12 +171,12 @@ export function buildFileTreeGitStatusIndex(
     map.set(key, existing ? moreUrgent(existing, status) : status)
   }
   for (const change of changes) {
-    if (prefix && !change.path.startsWith(prefix)) continue
-    const stripped = prefix ? change.path.slice(prefix.length) : change.path
-    // Git marks a directory-shaped entry with a trailing slash (`?? untracked/`, `?? strayrepo/`);
-    // the tree's own paths never carry one, so it is normalised away before either map sees it.
-    const path = stripped.replace(/\/+$/, '')
-    if (!path) continue
+    // The conversion — prefix containment, prefix trailing-slash, entry trailing-slash, and the
+    // "names nothing in this tree" answer — belongs to {@link workspaceRelativeGitPath}, not here.
+    // Two sites now need it (this projection and the Changes panel's open-diff), and a second copy of
+    // the arithmetic is the shape that drifts (记忆 duplicated-rule-defeats-the-fix).
+    const path = workspaceRelativeGitPath(change.path, repoRelativePrefix)
+    if (path === null) continue
     const status = fileTreeGitStatusOfChange(change)
     record(fileStatus, path, status)
     record(dirStatus, path, status)

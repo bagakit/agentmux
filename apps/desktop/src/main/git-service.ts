@@ -436,18 +436,32 @@ function classifyDiffChange(oldSide: GitDiffSide, newSide: GitDiffSide): GitFile
 }
 
 /**
- * Resolve a repo-relative path to an absolute one that is provably inside the worktree, or throw.
+ * Resolve a relative path to an absolute one that is provably inside `root`, or throw.
  *
- * This is the guard that stands in front of `git clean`, the one verb that deletes files from disk: a
- * `../` traversal or an absolute path must never let a discard reach outside the repository root. Pure
- * (path arithmetic only, no fs), so the traversal rejection is unit-testable on its own.
+ * Two callers, and they pass DIFFERENT roots on purpose — each fences the path against the directory
+ * that path is actually relative to:
+ *   - `discard` passes the repository root, because its path is repo-root-relative (porcelain's own
+ *     coordinate). This is the guard standing in front of `git clean`, the one verb that deletes files
+ *     from disk: a `../` traversal or an absolute path must never let a discard reach outside the repo.
+ *   - `diff` passes the WORKSPACE directory, because its path is workspace-relative — and the absolute
+ *     path returned here is what the worktree side of the diff actually reads.
+ *
+ * For `diff` the anchor is load-bearing for **where the accepted path lands**, not for what it rejects.
+ * Rejection cannot tell the two anchors apart: `../sibling/x.ts` escapes the workspace *and* the repo
+ * root, so both anchors throw on it (measured). What the wrong anchor buys is worse than a rejection —
+ * `resolve(repoRoot, 'src/a.ts')` names the repo-root file while the HEAD side, resolved by git from the
+ * workspace, names the subfolder's. The two halves of one diff would then be two different files, and it
+ * would look like a plain modification. That mismatch is what the subfolder test kills.
+ *
+ * Hence `root`, not `repoRoot`: the parameter is "whatever this path is relative to". Pure (path
+ * arithmetic only, no fs), so the traversal rejection is unit-testable on its own.
  */
-export function assertInWorktree(repoRoot: string, relativePath: string): string {
+export function assertInWorktree(root: string, relativePath: string): string {
   if (relativePath === '') throw new Error('A file path is required')
   if (relativePath.includes('\0')) throw new Error('Invalid file path')
-  const root = resolve(repoRoot)
-  const absolute = resolve(root, relativePath)
-  if (absolute !== root && !absolute.startsWith(root + sep)) {
+  const base = resolve(root)
+  const absolute = resolve(base, relativePath)
+  if (absolute !== base && !absolute.startsWith(base + sep)) {
     throw new Error(`Path is outside the worktree: ${relativePath}`)
   }
   return absolute
@@ -530,36 +544,67 @@ export class GitService {
    * A structured single-file diff: the HEAD blob (old side) paired with the worktree file (new side),
    * built by reading blobs — never by parsing unified-diff text.
    *
-   * The old side comes from `git show --end-of-options HEAD:<path>`. Two things make this correct:
-   *   - `--end-of-options` guarantees a path beginning with `-` is still read as `HEAD:<path>`, never
-   *     as a flag; the rev is a single argument, so there is no pathspec to escape here.
+   * **`workspacePath` is WORKSPACE-relative**, unlike the `path` taken by `stage` / `unstage` /
+   * `discard`, which is repo-root-relative. The two coordinates differ whenever a workspace is a
+   * subfolder of its repository, and the split is deliberate rather than an accident of history: this
+   * value lives in editor space on both sides of the call. Its callers hold the editor surface's
+   * `path`, the same string as the document key and the tab identity, and `buildFileDiff` echoes it
+   * back into the payload the editor renders. Making it repo-relative would mean the store held two
+   * different strings for one open file (记忆 two-resolutions-that-happen-to-agree). The git panel's
+   * write verbs sit on the other side of that line: they consume porcelain's own output and hand the
+   * same coordinate straight back to a pathspec, so they stay repo-relative.
+   *
+   * The conversion is done by **git itself**, via the `HEAD:./<path>` rev syntax evaluated with `-C`
+   * at the workspace directory: `./` makes git resolve the path against its own idea of the current
+   * prefix. This is the reason not to resolve `rev-parse --show-prefix` here and join by hand — that
+   * would be a second derivation of a fact `status()` already derives, and two derivations of one fact
+   * agree until the day they don't. There is exactly one resolution, and it is git's.
+   *
+   * The old side comes from `git show --end-of-options HEAD:./<path>`. Two things make this correct:
+   *   - `--end-of-options` guarantees a path beginning with `-` is still read as the rev, never as a
+   *     flag; the rev is a single argument, so there is no pathspec to escape here. Measured: the
+   *     `./` prefix does not disturb this — `HEAD:./-weird.ts` reads the file.
    *   - A failure is NOT swallowed into an empty diff. Only git's precise "path … does not exist in
    *     HEAD" / "exists on disk, but not in HEAD" fatal is read as "old side absent" (an added file).
    *     Any other failure — an unreadable tree, a corrupt object — is re-thrown. "Can't read it" is the
    *     signal that renders an added/deleted file, so it must never be a silent fallback to HEAD.
+   *     Note git reports that fatal with the path it RESOLVED (repo-relative), not the `./` form we
+   *     asked with; the predicate's path span is a wildcard, so it matches either way.
    * A blob too large for the executor's byte ceiling is reported as binary rather than raised as an
    * output-limit error. The new side is read straight from disk through the injected reader; a NUL byte
    * on either side (or an oversized side) marks the file binary, and binary sides carry no text.
    */
-  async diff(workspaceId: string, path: string, config: AppConfig): Promise<GitFileDiff> {
-    const repoPath = await this.requireRepoPath(workspaceId, config)
-    // Guard the worktree read first: an escaping path must be rejected before any git or fs work.
-    const absolute = assertInWorktree(repoPath, path)
+  async diff(workspaceId: string, workspacePath: string, config: AppConfig): Promise<GitFileDiff> {
+    const workspace = this.workspace(config, workspaceId)
+    // Assert repo membership for the same reason the other verbs do — a plain folder has no diff — but
+    // discard the root: every path below is resolved against the WORKSPACE, not the repo root.
+    await this.requireRepoPath(workspaceId, config)
+    // Guard the worktree read first: an escaping path must be rejected before any git or fs work. The
+    // fence is the workspace directory because that is what this path is relative to, and the absolute
+    // path it returns is the one the worktree side reads. Anchoring on the repo root would not *accept*
+    // anything extra (`../x` escapes both), it would silently resolve to a DIFFERENT file than the HEAD
+    // side git resolves from the workspace — one diff spanning two files. See `assertInWorktree`.
+    const absolute = assertInWorktree(workspace.path, workspacePath)
     const host = this.host(workspaceId, config)
-    const oldSide = await this.readHeadBlob(host, repoPath, path)
+    const oldSide = await this.readHeadBlob(host, workspace.path, workspacePath)
     const newSide = worktreeReadToDiffSide(await this.readWorktreeFile(absolute))
-    return buildFileDiff(path, oldSide, newSide)
+    return buildFileDiff(workspacePath, oldSide, newSide)
   }
 
-  /** Read the HEAD blob for a path into a diff side, or mark it absent / binary. */
-  private async readHeadBlob(host: ExecutionHost, repoPath: string, path: string): Promise<GitDiffSide> {
+  /**
+   * Read the HEAD blob for a workspace-relative path into a diff side, or mark it absent / binary.
+   *
+   * `cwd` is the WORKSPACE directory and the rev is `HEAD:./<path>`, so git resolves the path against
+   * the workspace's own prefix. See {@link GitService.diff} for why the resolution belongs to git.
+   */
+  private async readHeadBlob(host: ExecutionHost, cwd: string, path: string): Promise<GitDiffSide> {
     let result
     try {
       result = await host.run(
         'git',
         // `--end-of-options` fences the rev so a `-`-prefixed path cannot be read as a flag. The rev is
-        // `HEAD:<path>`, a single argument — there is no pathspec here, hence no `:(literal)`.
-        ['-C', repoPath, 'show', '--end-of-options', `HEAD:${path}`],
+        // `HEAD:./<path>`, a single argument — there is no pathspec here, hence no `:(literal)`.
+        ['-C', cwd, 'show', '--end-of-options', `HEAD:./${path}`],
         GIT_RUN_OPTIONS
       )
     } catch (error) {

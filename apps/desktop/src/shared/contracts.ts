@@ -1172,14 +1172,29 @@ export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control'> & {
    * Local Git source control. Lives on the preload API only, not the shared `AgentMuxDesktopApi`,
    * because it is a Desktop-main capability with no meaningful web-preview mock — the renderer reaches
    * it through `window.agentmux.git`, never through the shared mock `api`.
+   *
+   * **This surface speaks two path coordinate systems, and the parameter names say which.** They differ
+   * whenever a workspace is a subfolder of its repository, and confusing them is silent — both are
+   * well-formed relative paths, so a mix-up reads a same-named file somewhere else in the repo instead
+   * of erroring:
+   *   - `repoPath` — repo-root-relative, porcelain's own coordinate. `status` reports these
+   *     ({@link GitFileChange.path}), and the write verbs hand the same value straight back to a
+   *     pathspec. Everything porcelain names is reachable, including files outside the workspace.
+   *   - `workspacePath` — workspace-relative, the coordinate everything the user points at uses: the
+   *     file tree's nodes, `files.read`, `openFile`, the document key, the editor tab identity.
+   *
+   * `diff` is the one method on the workspace side of that line, because a diff is an *editor* surface:
+   * its path is the open document's path. A caller holding porcelain output must therefore convert
+   * before calling it — `workspaceRelativeGitPath` in the renderer does that, and returns null for the
+   * changes a subfolder workspace cannot show at all.
    */
   git: {
     status(workspaceId: string): Promise<GitStatusResult>
-    stage(workspaceId: string, path: string): Promise<void>
+    stage(workspaceId: string, repoPath: string): Promise<void>
     commit(workspaceId: string, message: string): Promise<void>
-    diff(workspaceId: string, path: string): Promise<GitFileDiff>
-    unstage(workspaceId: string, path: string): Promise<void>
-    discard(workspaceId: string, path: string, untracked: boolean): Promise<void>
+    diff(workspaceId: string, workspacePath: string): Promise<GitFileDiff>
+    unstage(workspaceId: string, repoPath: string): Promise<void>
+    discard(workspaceId: string, repoPath: string, untracked: boolean): Promise<void>
     push(workspaceId: string, options?: GitPushOptions): Promise<GitRemoteResult>
     pull(workspaceId: string, options?: { strategy?: GitPullStrategy }): Promise<GitRemoteResult>
     fetch(workspaceId: string, options?: GitRemoteOptions): Promise<GitRemoteResult>

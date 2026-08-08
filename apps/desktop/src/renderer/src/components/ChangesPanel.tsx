@@ -21,6 +21,7 @@ import { api } from '../lib/api'
 import { presentError } from '../lib/error-presentation'
 import { gitBridge } from '../lib/git-bridge'
 import { describeGitRemote, discardIntent, type GitRemoteVerb } from '../lib/git-remote-outcome'
+import { workspaceRelativeGitPath } from '../lib/git-path-coordinates'
 import { beginPrLaunch, type PrLaunchPlan } from '../lib/pr-launch'
 import { useAppStore } from '../store'
 import { ComposerTextarea } from './ComposerTextarea'
@@ -283,20 +284,41 @@ export function ChangesPanel({ workspace }: { workspace: WorkspaceRecord }) {
     // 「再点一次就删」而那次点击去的是武装分支——用户永远删不掉，而两侧各自都「对」。
     // （记忆 read-key-and-write-key-must-be-one-decision。）
     const armed = discardIntent(armedDiscard, change.path) === 'discard'
+    // 这一行的两个坐标系。`change.path` 是 porcelain 的坐标（仓库根相对），三个写动词就要这一个；
+    // 而打开 diff 走的是编辑器那条路（openFile / 文档键 / 页签身份），要的是 workspace 相对。
+    // 仓库根 == workspace 时两者逐字相同，所以此前混用不报错也不显形——它静默打开仓库里另一处
+    // 的同名文件（#761）。转换只此一次，且 null 是必须处理的答案而不是异常：`status` 是整仓的，
+    // 子目录 workspace 会正常列出自己子树之外的改动，那些行在这个编辑器里根本没有可打开的对象。
+    const documentPath = repo ? workspaceRelativeGitPath(change.path, repo.repoRelativePrefix) : null
     return (
       <div className={`change-row change-row--${change.untracked ? 'untracked' : change.staged ? 'staged' : 'unstaged'}`} key={`${change.staged ? 'S' : 'W'}:${change.path}`}>
         <span className="change-row__icon" title={changeLabel(change)}>
           {change.untracked ? <FilePlus2 size={12} /> : <FileDiff size={12} />}
         </span>
-        <button
-          type="button"
-          className="change-row__identity change-row__identity--button"
-          title={`Open diff for ${change.path}`}
-          onClick={() => void openFileDiff(change.path)}
-        >
-          <strong>{name}</strong>
-          {dir ? <small>{dir}</small> : null}
-        </button>
+        {/*
+          子树外的改动画成不可点的静态行，而不是一个点下去会报错的按钮：可操作的外观本身就是承诺。
+          它仍然**列出来**——那是这个仓库里真实的改动，暂存/提交都照旧对它有效，只有「在这个
+          workspace 的编辑器里打开」这一件事做不到。
+        */}
+        {documentPath === null ? (
+          <span
+            className="change-row__identity"
+            title={`${change.path} is outside this workspace — stage or commit it here, but it cannot be opened in this editor`}
+          >
+            <strong>{name}</strong>
+            {dir ? <small>{dir}</small> : null}
+          </span>
+        ) : (
+          <button
+            type="button"
+            className="change-row__identity change-row__identity--button"
+            title={`Open diff for ${change.path}`}
+            onClick={() => void openFileDiff(documentPath)}
+          >
+            <strong>{name}</strong>
+            {dir ? <small>{dir}</small> : null}
+          </button>
+        )}
         <span className="change-row__state">{changeLabel(change)}</span>
         {/*
           两个按钮包在一个容器里，而不是直接做 `.change-row` 网格的第 4、5 个孩子：那个网格是四列的，

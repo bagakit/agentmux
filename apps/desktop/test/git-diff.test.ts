@@ -7,7 +7,7 @@ import type { AppConfig } from '../src/shared/contracts.js'
 import { GitService, buildFileDiff, assertInWorktree } from '../src/main/git-service.js'
 
 const config: AppConfig = {
-  version: 7,
+  version: 9,
   hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
   executors: {},
   workspaces: [],
@@ -100,9 +100,14 @@ describe('GitService.diff (structured, fake executor)', () => {
       binary: false,
       change: 'modified'
     })
+    // `HEAD:./a.txt`, not `HEAD:a.txt`: the leading `./` makes git resolve the path against the
+    // `-C` directory instead of the repository root, which is what lets one workspace-relative path
+    // reach the right blob when the workspace IS a subfolder of its repo (#761). Here the two
+    // coincide, so this assertion pins the *spelling* — the behavioural difference is covered by the
+    // real-git subfolder tests in git-service.test.ts.
     expect(host.run).toHaveBeenCalledWith(
       'git',
-      ['-C', '/srv/repo', 'show', '--end-of-options', 'HEAD:a.txt'],
+      ['-C', '/srv/repo', 'show', '--end-of-options', 'HEAD:./a.txt'],
       RUN_OPTIONS
     )
     expect(reader).toHaveBeenCalledWith('/srv/repo/a.txt')
@@ -243,9 +248,12 @@ describe('GitService.diff (structured, fake executor)', () => {
 
     await service.diff('repo', '-rf danger.txt', cfg)
 
+    // Still one argv token that git cannot read as a flag — `HEAD:./-rf danger.txt` keeps the dash
+    // buried after the rev and the `./`, so neither `--end-of-options` nor this spelling is load
+    // bearing alone. The `./` additionally anchors the path at the `-C` directory (#761).
     expect(host.run).toHaveBeenCalledWith(
       'git',
-      ['-C', '/srv/repo', 'show', '--end-of-options', 'HEAD:-rf danger.txt'],
+      ['-C', '/srv/repo', 'show', '--end-of-options', 'HEAD:./-rf danger.txt'],
       RUN_OPTIONS
     )
     expect(reader).toHaveBeenCalledWith('/srv/repo/-rf danger.txt')
