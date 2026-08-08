@@ -5,7 +5,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { defaultAgentMuxRuntimeDirectory } from './runtime-paths.js'
 import { durableWriteFile } from './durable-write.js'
 import { normalizeAgentInteractionResponse } from './agent-interaction.js'
-import { RISK_TIERS } from './types.js'
+import { isPermissionOptionKind, isPromptDeliveryDegradedReason, RISK_TIERS } from './types.js'
 import {
   applyAgentTimelineMutation,
   normalizeAgentTimeline,
@@ -536,7 +536,7 @@ function interactionRequest(value: unknown): AgentMuxInteractionRequest {
     }
     const options = source.options.map((value, index) => {
       const option = record(value, `pendingInteraction.request.options[${index}]`)
-      if (!['allow-once', 'allow-always', 'reject-once', 'reject-always'].includes(String(option.kind))) {
+      if (!isPermissionOptionKind(option.kind)) {
         throw new AgentMuxError('Permission option kind is invalid.', 'INVALID_AGENT_SESSION_STORE')
       }
       const description = option.description === undefined
@@ -548,7 +548,7 @@ function interactionRequest(value: unknown): AgentMuxInteractionRequest {
       return {
         id: string(option.id, `pendingInteraction.request.options[${index}].id`),
         label: text(option.label, `pendingInteraction.request.options[${index}].label`),
-        kind: option.kind as 'allow-once' | 'allow-always' | 'reject-once' | 'reject-always',
+        kind: option.kind,
         ...(description ? { description } : {}),
         ...(option.tier === undefined ? {} : { tier: option.tier as RiskTier })
       }
@@ -839,7 +839,7 @@ function terminalPromptDelivery(
   if (
     source.state !== 'unverified' ||
     source.mode !== 'degraded' ||
-    (source.reason !== 'screen-evidence-gap' && source.reason !== 'prompt-render-timeout') ||
+    !isPromptDeliveryDegradedReason(source.reason) ||
     run.runId !== currentRun.runId
   ) {
     throw new AgentMuxError(

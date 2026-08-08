@@ -491,40 +491,44 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
     expect(isLongAgentMuxControlOperation('interrupt'), 'interrupt 只发一次信号，不该占长预算').toBe(false)
   })
 
-  it('每个操作都被显式定过档——新加一个不许靠「不匹配」落进快的那档', () => {
+  it('每个操作都被显式定过档——分档表必须是穷尽 Record，不许退回按形状推断', () => {
     // 此前的分档是个谓词（`startsWith('open.') || === 'send' || …`）。谓词只能表达「符合这形状的算慢」，
     // 而**新操作不符合任何形状时会静默落进快档**：`interrupt` 加进联合类型时就没有任何东西提醒过
-    // 要给它定档，它只是不匹配。这条钉住联合里每个成员在源码里都被逐字提到过，于是加成员时
-    // Record 缺键让 tsc 报错，而不是等到用户看见一个 2 秒就超时的慢操作。
+    // 要给它定档，它只是不匹配。
+    //
+    // 「每个成员都在表里」这件事**由 tsc 买单**：`Record<Operation, …>` 缺键报 TS2741、多键报 TS2353，
+    // 而 packages/core 的 tsconfig 覆盖 src/ 与 test/，所以那是真被执行的约束。于是这条不再遍历一份
+    // 抽出来的清单去数行数（那种数法与 tsc 重复，且抽取器本身要靠自检才不假绿）——它守的是**让 tsc
+    // 有资格管这件事的那个前提**：注解一旦被放宽成 `Record<string, …>` 或 `Partial<Record<…>>`，
+    // 缺键就重新变成沉默的，而所有取值断言照旧全绿。这是纯文本判据唯一买得到、tsc 自己买不到的东西。
+    //
+    // 成员覆盖面在 union-membership-ssot.test.ts：那边有一份被 tsc 钉成联合全集的锚点，并让十二个操作
+    // 逐个走真正的 parseAgentMuxControlRequest。这条只管注解不退化。
     const controlSource = readFileSync(new URL('../src/control.ts', import.meta.url), 'utf8')
-    const table = /const OPERATION_BUDGET[\s\S]*?\n\}/.exec(controlSource)?.[0]
-    expect(table, 'control.ts 里找不到 OPERATION_BUDGET 那张表——分档又变回按形状推断了').toBeTruthy()
-
-    // 遍历源取 control-host 自己那份运行期清单（解析请求时校验用的 OPERATIONS），从源码里抽出来而不是
-    // 在这里手抄一份：手抄的那份只在「正好是缺陷所在」时才与真清单分岔，选错源会得出自信的反向结论
-    // （derivation-source-must-be-the-consumed-one）。顺带把「两份清单发散」也钉住了。
-    const runtimeList = /const OPERATIONS = \[([\s\S]*?)\] as const/.exec(hostSource)?.[1]
-    expect(runtimeList, 'control-host 里找不到 OPERATIONS 那份运行期清单').toBeTruthy()
-    const operations = [...runtimeList!.matchAll(/'([^']+)'/g)].map((match) => match[1]!)
-    // 自检：真抽到了成员，否则下面的循环跑零次、恒绿。
-    expect(operations.length, 'OPERATIONS 抽取器一个成员都没抽到，下面那个循环是死代码').toBeGreaterThanOrEqual(12)
-
-    for (const operation of operations) {
-      expect(
-        new RegExp(`(^|[^\\w.'"])'?${operation.replace('.', '\\.')}'?\\s*:`, 'm').test(table!),
-        `OPERATION_BUDGET 里没有 \`${operation}\` 这一行——它会靠「不匹配」拿到某一档，而不是被判过`
-      ).toBe(true)
-    }
-    // 自检：判据认得出缺行，否则上面那个循环恒真。
-    const missing = "const OPERATION_BUDGET = {\n  'inspect.tab': 'short',\n  stop: 'long'\n}"
+    const annotation = /const OPERATION_BUDGET\s*:\s*([^=]+?)\s*=/.exec(controlSource)?.[1]
+    expect(annotation, 'control.ts 里 OPERATION_BUDGET 没有类型注解——缺键不再报错，分档回到「你得记得改」').toBeTruthy()
     expect(
-      /(^|[^\w.'"])'?send'?\s*:/m.test(missing),
-      '判据认不出「表里没有 send 这一行」，那个循环是死代码'
-    ).toBe(false)
-    // 自检：两档都真的在表里出现过——整张表写成同一档时，取值那条断言才是唯一防线，
+      annotation!.replace(/\s+/g, ' '),
+      'OPERATION_BUDGET 的注解不是穷尽 Record：一旦放宽成 Record<string, …> 或 Partial<Record<…>>，' +
+        '往联合加操作时缺一行不会报错，新操作靠「表里查不到」拿到短预算——正是 interrupt 当年的形状'
+    ).toBe("Record<AgentMuxControlRequest['operation'], 'long' | 'short'>")
+
+    const table = /const OPERATION_BUDGET[\s\S]*?\n\}/.exec(controlSource)?.[0]
+    expect(table, 'control.ts 里找不到 OPERATION_BUDGET 那张表').toBeTruthy()
+    // 自检：两档都真的在表里出现过——整张表写成同一档时，上面那些取值断言才是唯一防线，
     // 这里先保证表本身没退化成单档。
     expect(table).toContain("'long'")
     expect(table).toContain("'short'")
+    // 自检：判据认得出被放宽的注解，否则上面那条 toBe 只是在描述今天的字面量。
+    for (const weakened of [
+      "const OPERATION_BUDGET: Record<string, 'long' | 'short'> = {",
+      "const OPERATION_BUDGET: Partial<Record<AgentMuxControlRequest['operation'], 'long' | 'short'>> = {"
+    ]) {
+      expect(
+        /const OPERATION_BUDGET\s*:\s*([^=]+?)\s*=/.exec(weakened)?.[1]?.replace(/\s+/g, ' '),
+        '判据认不出被放宽的注解'
+      ).not.toBe("Record<AgentMuxControlRequest['operation'], 'long' | 'short'>")
+    }
   })
 
   it('control-host 从 control.ts 取预算，不再自己算一遍', () => {
