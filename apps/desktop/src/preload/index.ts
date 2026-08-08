@@ -72,7 +72,8 @@ const api: AgentMuxPreloadApi = {
     stage: (workspaceId: string, path: string) => ipcRenderer.invoke('git:stage', workspaceId, path),
     commit: (workspaceId: string, message: string) =>
       ipcRenderer.invoke('git:commit', workspaceId, message),
-    diff: (workspaceId: string, path: string) => ipcRenderer.invoke('git:diff', workspaceId, path),
+    diff: (workspaceId: string, workspacePath: string) =>
+      ipcRenderer.invoke('git:diff', workspaceId, workspacePath),
     unstage: (workspaceId: string, path: string) => ipcRenderer.invoke('git:unstage', workspaceId, path),
     discard: (workspaceId: string, path: string, untracked: boolean) =>
       ipcRenderer.invoke('git:discard', workspaceId, path, untracked),

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { LocalExecutionHost, type ExecutionHost } from '@agentmux/core'
@@ -7,7 +7,7 @@ import type { AppConfig } from '../src/shared/contracts.js'
 import { GitService, isNotAGitRepositoryStderr, isNotAWorkingTreeStderr } from '../src/main/git-service.js'
 
 const config: AppConfig = {
-  version: 7,
+  version: 9,
   hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
   executors: {},
   workspaces: [],
@@ -533,5 +533,119 @@ describe('GitService (real git, temporary repository)', () => {
     // 3. 同一套坐标系：porcelain 给的路径带着这个前缀，所以剥掉它才是 workspace-相对的键。
     const untracked = result.changes.find((change) => change.path.endsWith('inside.txt'))
     expect(untracked?.path).toBe(`${subdirectory}/inside.txt`)
+  })
+
+  /**
+   * 行为层（#761）：`diff()` 的路径是 **workspace-相对**的，且这件事只在 workspace 是子目录时可观测。
+   *
+   * 缺陷的原样：`diff()` 把这个形参当成 repo-根-相对来解析（`-C repoPath` + `HEAD:<path>`），而它唯一
+   * 的两个调用方（EditorPane 的重载、store 的 loadRegionDiff）喂进来的是编辑器坐标——`surface.path`，
+   * 也就是文档键与页签身份用的那一个。repo 根 == workspace 时两者逐字相同，所以这个错配在自家仓库里
+   * 完全不显形。子目录 workspace 下它有**两种**形态，都不报错：
+   *
+   *   A. repo 根下恰好有同名文件 → 用户看的是 `app/src/a.ts`，diff 画的是仓库根的 `src/a.ts`。
+   *      静默展示另一个文件的内容，是本条最坏的形态。
+   *   B. repo 根下没有同名文件 → git 报 `does not exist in 'HEAD'`，而那个 fatal 正是「新加的文件」
+   *      的判据，于是 HEAD 那半边整段消失，一个有历史的文件被画成 added。
+   *
+   * 判据必须落在**内容**上，不能只判 `change`：A 的 `change` 也是 `modified`，两个世界在那个字段上
+   * 逐字相同（记忆 presence-assertion-blind-when-shape-repeats）。所以 A 断言 `old.text` 是子目录里
+   * 那份的历史内容、且**不是**诱饵那份；B 断言 old 边在场。
+   *
+   * 用真 git 而不是 fake host：这条走的是 `HEAD:./<path>` 的解析语义——`./` 让 git 自己按 `-C` 的
+   * prefix 解析，是本修法「只有一次解析，而且是 git 的」的全部依据。fake host 只会把 argv 回放给我，
+   * 证不到解析结果；真 git 才能证明这个 rev 语法确实拿到了子目录那份。
+   */
+  it('diff() reads the file inside the workspace subdirectory, not the same-named decoy at the repo root', async () => {
+    const root = await makeRepo()
+    const subdirectory = 'app'
+    const relative = 'src/a.ts'
+    const host = new LocalExecutionHost()
+    const run = async (args: string[]) => {
+      const result = await host.run('git', ['-C', root, ...args], { timeoutMs: 20_000 })
+      if (result.exitCode !== 0) throw new Error(`git ${args.join(' ')}: ${result.stderr}`)
+      return result
+    }
+
+    // 诱饵在 repo 根的同一相对路径上，内容与子目录那份不同。这是形态 A 的靶子：缺陷把
+    // `HEAD:src/a.ts` 解析到这一份。
+    await mkdir(join(root, 'src'), { recursive: true })
+    await writeFile(join(root, 'src', 'a.ts'), 'DECOY: repo-root src/a.ts\n')
+    await mkdir(join(root, subdirectory, 'src'), { recursive: true })
+    await writeFile(join(root, subdirectory, relative), 'committed content\n')
+    await run(['add', '--', 'src/a.ts', `${subdirectory}/${relative}`])
+    await run(['commit', '-q', '-m', 'add both'])
+    // 只改子目录那份，让它的 HEAD 侧与工作区侧不同——否则 change 会是 unchanged，A/B 都观测不到。
+    await writeFile(join(root, subdirectory, relative), 'worktree content\n')
+
+    const service = new GitService(() => new LocalExecutionHost())
+    const cfg: AppConfig = {
+      ...config,
+      workspaces: [
+        { id: 'repo', name: 'repo', hostId: 'local', path: join(root, subdirectory), kind: 'folder' }
+      ]
+    }
+
+    const diff = await service.diff('repo', relative, cfg)
+
+    // 自检：诱饵真的在 HEAD 里，且内容与子目录那份不同——否则形态 A 无从区分，本用例会退化成
+    // 「顺便也过了」（记忆 property-unobservable-in-default-env）。
+    const decoy = await run(['show', '--end-of-options', 'HEAD:src/a.ts'])
+    expect(decoy.stdout, '诱饵不在 HEAD 里或内容相同——本用例不再能区分两套坐标系').toBe(
+      'DECOY: repo-root src/a.ts\n'
+    )
+
+    // 形态 B：HEAD 那半边必须在场。缺陷下 git 报的是 `does not exist in 'HEAD'`（当根下无同名文件），
+    // 而那个 fatal 就是「新加的文件」的判据，于是整边静默消失。
+    expect(diff.old.present, 'HEAD 侧整段消失——有历史的文件被画成新加的').toBe(true)
+    // 形态 A：HEAD 侧内容必须是子目录那份的历史，而不是诱饵。`change` 在两个世界里都是 modified，所以
+    // 判据只能落在内容上。
+    expect(diff.old).toEqual({ present: true, binary: false, text: 'committed content\n' })
+    // 工作区那半边同样钉住：它走的是 `assertInWorktree` 返回的绝对路径，所以这一条也是「围栏锚在
+    // workspace 而不是 repo 根」的唯一判据——实测把锚点改成 repo 根时，红的就是这一行（诱饵内容）。
+    // 拒绝行为区分不出锚点（`../x` 对两个锚点都越界），落点才行。
+    expect(diff.new).toEqual({ present: true, binary: false, text: 'worktree content\n' })
+    expect(diff.change).toBe('modified')
+    // 回声的那个 path 也是 workspace-相对的：它是文档键与页签身份用的同一串，repo-相对会让 store
+    // 对同一个打开的文件持有两串不同的字符串。
+    expect(diff.path).toBe(relative)
+  })
+
+  /**
+   * 同一坐标系合同的另一半：diff 的**两个半边必须从同一个目录解析**。
+   *
+   * 这一条的前提被实测改写过一次，值得写下来：我原来写的是「把围栏锚在 repo 根会放行 `../src/a.ts`」——
+   * 假的。`../src/a.ts` 从 workspace 出发越界，从 repo 根出发也一样越界（`resolve('/r','../src/a.ts')`
+   * = `/src/a.ts`），两个锚点都抛。所以**拒绝行为区分不出锚点**，锚点决定的是「放行的那条路落在哪」：
+   * `resolve(repoRoot, 'src/a.ts')` 是仓库根那份，而 HEAD 侧由 git 从 workspace 解析出的是子目录那份，
+   * 于是一次 diff 横跨两个文件，界面上看起来只是一处普通改动。上面那条子目录用例正是靠 `diff.new` 钉住
+   * 这个错配（实测：把围栏改锚 repo 根，它的 `diff.new` 变成诱饵内容）。
+   *
+   * 这里剩下要单独钉的，是围栏本身还在：越界路径必须在任何 git / fs 动作之前就被拒。缺了它，`../` 会
+   * 一路走到 `readFile`，把 workspace 之外的文件读进编辑器。
+   */
+  it('diff() rejects a path that escapes the workspace before it reads anything', async () => {
+    const root = await makeRepo()
+    const subdirectory = 'app'
+    await mkdir(join(root, subdirectory), { recursive: true })
+    await mkdir(join(root, 'src'), { recursive: true })
+    await writeFile(join(root, 'src', 'a.ts'), 'sibling of the workspace\n')
+
+    const service = new GitService(() => new LocalExecutionHost())
+    const cfg: AppConfig = {
+      ...config,
+      workspaces: [
+        { id: 'repo', name: 'repo', hostId: 'local', path: join(root, subdirectory), kind: 'folder' }
+      ]
+    }
+
+    await expect(service.diff('repo', '../src/a.ts', cfg)).rejects.toThrow(/outside the worktree/)
+
+    // 自检：那个文件**真的存在**且可读，所以拒绝来自围栏，而不是顺便被「文件不存在」挡住了——否则这条
+    // 用例在围栏被删掉后依然会红，对被测性质失明（记忆 property-unobservable-in-default-env）。
+    const sibling = await readFile(join(root, 'src', 'a.ts'), 'utf8')
+    expect(sibling, '兄弟文件不可读——本用例的拒绝可能来自缺文件而不是围栏').toBe(
+      'sibling of the workspace\n'
+    )
   })
 })
