@@ -137,6 +137,88 @@ describe('TerminalView applies the size to an open terminal and refits', () => {
   )
   const sourceFile = parseTsx('TerminalView.tsx', source)
 
+  /** `<x>.fontSize` 或 `<x>['fontSize']`——同一个槽位的两种拼法。 */
+  function namesProperty(node: ts.Node, property: string): boolean {
+    if (ts.isPropertyAccessExpression(node)) return node.name.text === property
+    return (
+      ts.isElementAccessExpression(node) &&
+      ts.isStringLiteralLike(node.argumentExpression) &&
+      node.argumentExpression.text === property
+    )
+  }
+
+  /**
+   * 这份源码里每一次「往一个 fontSize 槽位写值」，按源码顺序给出右值文本。
+   *
+   * 射程刻意比 `<terminal>.options.fontSize = …` 宽。审计实测过三种拼法能在只认那一种形状的
+   * 判据下全绿存活，而三者是同一个用户可见缺陷（终端渲染成与用户所选不同的字号）：
+   *   · `terminal.options['fontSize'] = fontSize + 1` —— 下标写法，左值不是 PropertyAccess；
+   *   · `Object.assign(terminal.options, { fontSize: fontSize + 1 })` —— 根本不是赋值表达式；
+   *   · `const o = terminal.options; o.fontSize = fontSize + 1` —— receiver 不再叫 options。
+   * 前两种是「只认一种语法拼法」这个老毛病（本仓 counting-a-symbol-misses-other-spellings），
+   * 第三种说明「receiver 长什么样」根本不是承重的判据。所以改成按**被写的属性名**收：
+   * 这份文件里叫 fontSize 的写入槽只该有一个，就是交给 xterm 的那个。放宽 receiver 的代价是
+   * 可能收进无关的同名写入——而那本身就该被看见：第二个 fontSize 写入点就是第二份取值，必漂移。
+   */
+  function fontSizeWrites(parsed: ts.SourceFile): string[] {
+    const written: string[] = []
+    const visit = (node: ts.Node): void => {
+      if (
+        ts.isBinaryExpression(node) &&
+        node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        namesProperty(node.left, 'fontSize')
+      ) {
+        written.push(node.right.getText(parsed))
+      }
+      if (
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        node.expression.name.text === 'assign' &&
+        ts.isIdentifier(node.expression.expression) &&
+        node.expression.expression.text === 'Object'
+      ) {
+        // `Object.assign(target, …sources)`：目标不看，源里带 fontSize 键的都是一次写入。
+        for (const argument of node.arguments.slice(1)) {
+          if (!ts.isObjectLiteralExpression(argument)) continue
+          for (const property of argument.properties) {
+            if (
+              ts.isPropertyAssignment(property) &&
+              (ts.isIdentifier(property.name) || ts.isStringLiteralLike(property.name)) &&
+              property.name.text === 'fontSize'
+            ) {
+              written.push(property.initializer.getText(parsed))
+            }
+          }
+        }
+      }
+      ts.forEachChild(node, visit)
+    }
+    visit(parsed)
+    return written
+  }
+
+  /** 这份源码里每一次写 `<refName>.current`（含 `<refName>['current']`）的右值文本。 */
+  function currentWrites(parsed: ts.SourceFile, refName: string): string[] {
+    const written: string[] = []
+    const visit = (node: ts.Node): void => {
+      if (
+        ts.isBinaryExpression(node) &&
+        node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        namesProperty(node.left, 'current')
+      ) {
+        const receiver = ts.isPropertyAccessExpression(node.left)
+          ? node.left.expression
+          : (node.left as ts.ElementAccessExpression).expression
+        if (ts.isIdentifier(receiver) && receiver.text === refName) {
+          written.push(node.right.getText(parsed))
+        }
+      }
+      ts.forEachChild(node, visit)
+    }
+    visit(parsed)
+    return written
+  }
+
   it('字号 effect 调用 synchronizeCellMetrics，且之前只有那两句合法守护', () => {
     const calls = findCallsToMember(sourceFile, 'synchronizeCellMetrics')
     expect(calls, 'synchronizeCellMetrics() 应恰有一处调用').toHaveLength(1)
@@ -220,6 +302,18 @@ describe('TerminalView applies the size to an open terminal and refits', () => {
         'false，每次字号变化都走首跑分支早退——改字号对已开着的终端完全没有反应，而早退条件本身' +
         '一个字没变，所以只读条件的那条判据看不见。'
     ).toBe(true)
+
+    // 置位在场且跑得到还不够：那句置位可以在别处被**撤销**。审计实测在 effect 体里补一句
+    //     fontSizeMountedRef.current = false
+    // （在 then 分支之外，因此上面每一条都不看它），14 条全绿存活。后果是 flag 只真一次：
+    // 下一次字号变化又走首跑分支早退，于是改字号**隔次**失效——比完全没反应更难察觉。
+    // 所以这里钉住写入的全集：这个 ref 只该被写成 true，一次。
+    expect(
+      currentWrites(sourceFile, guardedRef!),
+      `${guardedRef}.current 在这个文件里被写成了 true 以外的值（或写了不止一次）。把它在别处置回 ` +
+        'false，flag 就只真一次：其后每一次字号变化都重新走首跑分支早退，改字号隔次没有反应。' +
+        '上面那条只看 then 分支里那一句，看不见这种「置位被别处撤销」。'
+    ).toEqual(['true'])
   })
 
   it('写进 options 的就是 fontSize 这个 prop 本身，不是由它算出来的别的值', () => {
@@ -237,21 +331,10 @@ describe('TerminalView applies the size to an open terminal and refits', () => {
     // 全绿存活——所有 >20px 的字号都大一号是真缺陷，但 else 那支源码顺序在后、被记下，断言看到的
     // 是对的那个。本仓这一族记过：`sampled-pair-can-be-the-blind-spot`（抽一个当代表，代表恰好是
     // 对的那个）。所以下面既钉每一处的取值，也钉「只该有一处」。
-    const assignedExpressions: string[] = []
-    const visit = (node: ts.Node): void => {
-      if (
-        ts.isBinaryExpression(node) &&
-        node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
-        ts.isPropertyAccessExpression(node.left) &&
-        node.left.name.text === 'fontSize' &&
-        ts.isPropertyAccessExpression(node.left.expression) &&
-        node.left.expression.name.text === 'options'
-      ) {
-        assignedExpressions.push(node.right.getText(sourceFile))
-      }
-      ts.forEachChild(node, visit)
-    }
-    visit(sourceFile)
+    //
+    // 收集器射程见 `fontSizeWrites` 的注释：按被写的属性名收，下标写法、`Object.assign`、
+    // 换个 receiver 都在射程内——三者都被实测过能在只认 `<x>.options.fontSize =` 的判据下存活。
+    const assignedExpressions = fontSizeWrites(sourceFile)
     expect(
       assignedExpressions.length,
       '应能定位到 `<terminal>.options.fontSize = …` 这次赋值'
@@ -262,6 +345,41 @@ describe('TerminalView applies the size to an open terminal and refits', () => {
         '（如 fontSize + 1），对应那一支的终端就会渲染成与用户所选不同的字号；而分成两支写、只有一支' +
         '算错时，「留最后一个写入点」的判据会被对的那支替错的那支背书。'
     ).toEqual(['fontSize'])
+  })
+
+  // ── 两条收集器自检：审计实测过的拼法，收集器必须都看得见 ─────────────────────
+  // 输入是合成源码，被检验的是**收集器本身**；真判据仍跑在 TerminalView.tsx 上，两者不互相背书。
+
+  it('自检：fontSize 写入收集器认得下标、Object.assign、换 receiver 三种拼法', () => {
+    // 三种都被实测过能在只认 `<x>.options.fontSize =` 的判据下全绿存活，而三者是同一个用户可见
+    // 缺陷：终端渲染成与用户所选不同的字号。收集器认不出，判据就在一个残缺的集合上恒真。
+    const writesIn = (body: string): string[] => fontSizeWrites(parseTsx('probe.tsx', body))
+    expect(writesIn("terminal.options['fontSize'] = fontSize + 1"), '认不出下标写法').toEqual([
+      'fontSize + 1'
+    ])
+    expect(
+      writesIn('Object.assign(terminal.options, { fontSize: fontSize + 1 })'),
+      '认不出 Object.assign 写法'
+    ).toEqual(['fontSize + 1'])
+    expect(
+      writesIn('const o = terminal.options; o.fontSize = fontSize + 1'),
+      '认不出换掉 receiver 的写法'
+    ).toEqual(['fontSize + 1'])
+    // 正常那句仍要认出来，且只算一次——否则真判据的 toEqual(['fontSize']) 会因重复计数而假红。
+    expect(writesIn('terminal.options.fontSize = fontSize')).toEqual(['fontSize'])
+    // 该放：读取不是写入。
+    expect(writesIn('const current = terminal.options.fontSize'), '把读当成了写').toEqual([])
+  })
+
+  it('自检：ref 写入收集器认得下标写法，且只收这一个 ref', () => {
+    const writesIn = (body: string): string[] =>
+      currentWrites(parseTsx('probe.tsx', body), 'fontSizeMountedRef')
+    expect(writesIn('fontSizeMountedRef.current = true')).toEqual(['true'])
+    expect(writesIn("fontSizeMountedRef['current'] = false"), '认不出下标写法').toEqual(['false'])
+    // 别的 ref 不算——否则同文件里任何一个 ref 的写入都会打假红。
+    expect(writesIn('otherRef.current = false'), '收了别的 ref 的写入').toEqual([])
+    // 读取不是写入。
+    expect(writesIn('if (!fontSizeMountedRef.current) return'), '把读当成了写').toEqual([])
   })
 
   it('attach effect 不依赖 fontSize（改字号不能重建 xterm、重放 scrollback）', () => {
@@ -358,23 +476,70 @@ describe('每个 TerminalView 渲染点都把字号传进去', () => {
   }
 
   /**
-   * 这个 spread 有没有可能带上 fontSize。
-   *
-   * `{...props}` 里装着什么静态看不出来，只能放行。但 `{...{ session }}` 是**对象字面量**，
-   * 它带什么一目了然——审计实测的绕法正是这一种：把 props 写成字面量 spread，无条件的豁免
-   * 就不再问 fontSize 了，而那个 spread 证明性地不可能携带它。于是字面量按内容判，
-   * 非字面量（含计算键、嵌套 spread）一律当作「可能带」。
+   * 这个对象字面量里，有没有一个键叫 fontSize（或一个看不透的嵌套 spread）。
    */
-  function spreadMayCarryFontSize(attribute: ts.JsxSpreadAttribute): boolean {
-    const expression = attribute.expression
-    if (!ts.isObjectLiteralExpression(expression)) return true
-    return expression.properties.some((property) => {
+  function literalMayCarryFontSize(literal: ts.ObjectLiteralExpression): boolean {
+    return literal.properties.some((property) => {
       if (ts.isSpreadAssignment(property)) return true
       const name = property.name
       if (!name) return true
-      if (ts.isIdentifier(name) || ts.isStringLiteral(name)) return name.text === 'fontSize'
+      if (ts.isIdentifier(name) || ts.isStringLiteralLike(name)) return name.text === 'fontSize'
       return true
     })
+  }
+
+  /**
+   * 这个 spread 有没有可能带上 fontSize。
+   *
+   * `{...props}` 里装着什么静态看不出来，只能放行。但 `{...{ session }}` 是**对象字面量**，
+   * 它带什么一目了然——审计实测的第一种绕法正是这一种：把 props 写成字面量 spread，无条件的豁免
+   * 就不再问 fontSize 了，而那个 spread 证明性地不可能携带它。
+   *
+   * 第二种绕法只多绕一道弯：先 `const viewProps = { session, themeId, … }`（不含 fontSize），
+   * 再 `<TerminalView {...viewProps} />`。它不是字面量表达式，于是「非字面量一律放行」把这个渲染
+   * 点整个豁免掉了——审计实测 14 条全绿，而 SessionPane 的终端从此永久钉在 12px。这不是刁钻写法，
+   * 一次平常的「把 props 提出去」重构就会产生。所以标识符 spread 要**回查它的绑定**：同文件里
+   * 有一个初始化式是对象字面量的 const，就按那个字面量判；查不到（形参、import、函数返回值、
+   * 后续被改写）才回到放行。
+   */
+  function spreadMayCarryFontSize(
+    attribute: ts.JsxSpreadAttribute,
+    parsed: ts.SourceFile
+  ): boolean {
+    const expression = attribute.expression
+    if (ts.isObjectLiteralExpression(expression)) return literalMayCarryFontSize(expression)
+    if (!ts.isIdentifier(expression)) return true
+    const resolved = objectLiteralBoundTo(parsed, expression.text)
+    return resolved ? literalMayCarryFontSize(resolved) : true
+  }
+
+  /**
+   * 同文件里 `const <name> = { … }` 绑定的那个对象字面量。
+   *
+   * 只认 const：`let` 可以在别处被换掉，那时源码里看到的字面量不再是渲染时的取值，按它判会打假红。
+   * 同名声明出现多次（不同作用域）时放弃——分辨不出渲染点看见的是哪一个，宁可放行也不误伤。
+   */
+  function objectLiteralBoundTo(
+    parsed: ts.SourceFile,
+    name: string
+  ): ts.ObjectLiteralExpression | undefined {
+    const found: ts.ObjectLiteralExpression[] = []
+    const visit = (node: ts.Node): void => {
+      if (
+        ts.isVariableDeclaration(node) &&
+        ts.isIdentifier(node.name) &&
+        node.name.text === name &&
+        node.initializer &&
+        ts.isObjectLiteralExpression(node.initializer) &&
+        ts.isVariableDeclarationList(node.parent) &&
+        (node.parent.flags & ts.NodeFlags.Const) !== 0
+      ) {
+        found.push(node.initializer)
+      }
+      ts.forEachChild(node, visit)
+    }
+    visit(parsed)
+    return found.length === 1 ? found[0] : undefined
   }
 
   /** `undefined` / `void 0`：属性在场，取值却等于缺席。 */
@@ -399,7 +564,7 @@ describe('每个 TerminalView 渲染点都把字号传进去', () => {
         let spreadsUnknownProps = false
         for (const attribute of opening.attributes.properties) {
           if (ts.isJsxSpreadAttribute(attribute)) {
-            if (spreadMayCarryFontSize(attribute)) spreadsUnknownProps = true
+            if (spreadMayCarryFontSize(attribute, parsed)) spreadsUnknownProps = true
             continue
           }
           if (!ts.isJsxAttribute(attribute)) continue
@@ -480,6 +645,40 @@ describe('每个 TerminalView 渲染点都把字号传进去', () => {
     const sites = renderSitesIn('Synthetic.tsx', '<TerminalView {...{ session: s }} />')
     expect(sites.length).toBe(1)
     expect(sitesMissingFontSize(sites)).toEqual(['Synthetic.tsx'])
+  })
+
+  it('反向自检：spread 一个同文件 const 对象（不含 fontSize）也不构成豁免', () => {
+    // 审计实测的绕法：把 props 提成一个局部 const 再 spread。它不是字面量表达式，于是
+    // 「非字面量一律放行」把整个渲染点豁免掉——14 条全绿，而那一格终端永久 12px。
+    // 一次平常的重构就长这样，所以标识符 spread 必须回查绑定。
+    const sites = renderSitesIn(
+      'Synthetic.tsx',
+      'const viewProps = { session: s, visible: true }\nexport const X = () => <TerminalView {...viewProps} />\n'
+    )
+    expect(sites.length).toBe(1)
+    expect(sitesMissingFontSize(sites)).toEqual(['Synthetic.tsx'])
+  })
+
+  it('自检：那个 const 里带着 fontSize 时必须放行（回查绑定不是一律判红）', () => {
+    // 对称的另一半：同一条回查路径既要认出「不含 fontSize」，也要认出「含」。
+    // 只测前者的话，把 literalMayCarryFontSize 改成恒 false 仍然全绿。
+    const sites = renderSitesIn(
+      'Synthetic.tsx',
+      'const viewProps = { session: s, fontSize: size }\nexport const X = () => <TerminalView {...viewProps} />\n'
+    )
+    expect(sites.length).toBe(1)
+    expect(sitesMissingFontSize(sites)).toEqual([])
+  })
+
+  it('自检：查不到绑定的标识符 spread 仍然放行（形参、import、被改写的 let）', () => {
+    // 回查不到就回到放行——判红等于对合法写法误伤。`let` 刻意排除：源码里那个字面量不保证是
+    // 渲染时的取值。
+    const sites = renderSitesIn(
+      'Synthetic.tsx',
+      'let viewProps = { session: s }\nexport const X = () => <TerminalView {...viewProps} />\n'
+    )
+    expect(sites.length).toBe(1)
+    expect(sitesMissingFontSize(sites)).toEqual([])
   })
 
   it('自检：看不透的 spread 仍然放行（判据不许对合法写法打假红）', () => {
