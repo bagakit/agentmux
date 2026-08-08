@@ -64,6 +64,8 @@ type InlineContext = {
   openHttpLink: OpenHttpLink
   openWorkspaceFile?: OpenWorkspaceFile
   workspaceRoot: string
+  /** Host home directory, for expanding a leading `~/` in a cited path. See the component prop. */
+  homeDir: string
 }
 
 /** A file reference: same affordance as a link, but it opens in the editor rather than leaving. */
@@ -101,9 +103,9 @@ function TextWithFileReferences({
   text: string
   context: InlineContext
 }) {
-  const { openWorkspaceFile, workspaceRoot } = context
+  const { openWorkspaceFile, workspaceRoot, homeDir } = context
   if (!openWorkspaceFile) return <>{text}</>
-  const segments = splitMarkdownFileReferences(text, workspaceRoot)
+  const segments = splitMarkdownFileReferences(text, workspaceRoot, homeDir)
   if (segments.length === 1 && segments[0]?.kind === 'text') return <>{text}</>
   return (
     <>
@@ -144,7 +146,7 @@ function Inline({ nodes, context }: { nodes: InlineNode[]; context: InlineContex
         // An explicit `[label](path)` pointing inside the Workspace opens the file. Everything else,
         // http(s) included, keeps leaving through the external seam that Main already adjudicates.
         const fileHref = context.openWorkspaceFile
-          ? classifyMarkdownLinkHref(node.href, context.workspaceRoot)
+          ? classifyMarkdownLinkHref(node.href, context.workspaceRoot, context.homeDir)
           : null
         if (fileHref && context.openWorkspaceFile) {
           const openWorkspaceFile = context.openWorkspaceFile
@@ -287,7 +289,8 @@ export function AgentMarkdown({
   className,
   openHttpLink = defaultOpenHttpLink,
   openWorkspaceFile,
-  workspaceRoot = ''
+  workspaceRoot = '',
+  homeDir = ''
 }: {
   content: string
   className?: string
@@ -296,10 +299,14 @@ export function AgentMarkdown({
   openWorkspaceFile?: OpenWorkspaceFile
   /** Active Workspace root, for the within-root test on absolute paths. */
   workspaceRoot?: string
+  /** Host home directory. Absent (the default) means a `~/`-prefixed path stays plain text, exactly
+   *  as an out-of-workspace absolute path does — the host supplies it once it knows the real home. */
+  homeDir?: string
 }) {
   const context: InlineContext = {
     openHttpLink,
     workspaceRoot,
+    homeDir,
     ...(openWorkspaceFile ? { openWorkspaceFile } : {})
   }
   // The plain-text fallback still gets reference detection. A one-line answer naming a file is prose
