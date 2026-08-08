@@ -506,12 +506,12 @@ export type AgentTerminalCapabilityState = {
 }
 
 /**
- * 屏幕验证没走通的两种原因。元组是 SSOT，理由同 {@link RISK_TIERS}：存储层要按这份清单校验磁盘
+ * 屏幕验证没走通的原因。元组是 SSOT，理由同 {@link RISK_TIERS}：存储层要按这份清单校验磁盘
  * 数据，手抄一份只强制 ⊆ 而对 ⊇ 失明，加一个原因却忘了往那份手抄里加，会让带新原因的合法记录被
  * fail-closed 丢掉且无编译错。
  */
 export const PROMPT_DELIVERY_DEGRADED_REASONS = [
-  'screen-evidence-gap', 'prompt-render-timeout'
+  'screen-evidence-gap', 'prompt-render-timeout', 'screen-evidence-replaced'
 ] as const
 export type PromptDeliveryDegradedReason = (typeof PROMPT_DELIVERY_DEGRADED_REASONS)[number]
 

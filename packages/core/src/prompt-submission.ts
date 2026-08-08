@@ -465,12 +465,16 @@ export class AgentPromptSubmissionCoordinator {
 
   /**
    * 渲染验证的降级包装（原则 11 第 2 类）。走到这里时 payload 的 CtxMux 受据已经确认，Run 的
-   * 输入通道是好的；replay 被截断（OUTPUT_GAP）或渲染确认超时只说明**我们的证据链**没走通。
-   * 这两类绝不阻断 `\r`：先向 daemon 要权威 Run 状态确认 Agent 还活着，然后放行提交，同时把
-   * 「本次交付未经完整屏幕确认」持久成服务窗事实并广播——绝不静默。
+   * 输入通道是好的；replay 被截断（OUTPUT_GAP）、渲染确认超时，或观察被**换掉**
+   * （AGENT_PROMPT_READINESS_CANCELLED——resize / 掉线重挂会 discard 屏幕证据，把这条停着的
+   * 等待就地取消）都只说明**我们的证据链**没走通。这三类绝不阻断 `\r`：先向 daemon 要权威 Run
+   * 状态确认 Agent 还活着，然后放行提交，同时把「本次交付未经完整屏幕确认」持久成服务窗事实并
+   * 广播——绝不静默。第三类此前会被原样抛给用户（#663），于是用户看到一条内部错误码，而 payload
+   * 已经躺在 composer 里，占用没解除、重发又会撞 BUSY。
    *
-   * 仍然 fail-closed 的两类：Run 已退出或消失（第 1 类，阻断是诚实的），以及 gap/超时之外的
-   * 任何错误（状态冲突、受据不匹配——那是数据损坏，不是慢证据）。
+   * 仍然 fail-closed 的两类：Run 已退出或消失（第 1 类，阻断是诚实的——那道
+   * `run.state.type !== 'running'` 是承重的，删掉它 exited 与 unknown 两条用例当场红），以及
+   * gap / 超时 / 观察替换之外的任何错误（状态冲突、受据不匹配——那是数据损坏，不是慢证据）。
    */
   private async confirmRenderOrDegrade(
     session: AgentMuxAgentSession,
@@ -483,7 +487,8 @@ export class AgentPromptSubmissionCoordinator {
     } catch (error) {
       if (
         !(error instanceof AgentMuxError) ||
-        (error.code !== 'OUTPUT_GAP' && error.code !== 'AGENT_PROMPT_RENDER_TIMEOUT')
+        (error.code !== 'OUTPUT_GAP' && error.code !== 'AGENT_PROMPT_RENDER_TIMEOUT' &&
+          error.code !== 'AGENT_PROMPT_READINESS_CANCELLED')
       ) {
         throw error
       }
@@ -501,7 +506,9 @@ export class AgentPromptSubmissionCoordinator {
       await this.publishDeliveryDegrade(session, {
         state: 'unverified',
         mode: 'degraded',
-        reason: error.code === 'OUTPUT_GAP' ? 'screen-evidence-gap' : 'prompt-render-timeout',
+        reason: error.code === 'OUTPUT_GAP' ? 'screen-evidence-gap'
+          : error.code === 'AGENT_PROMPT_READINESS_CANCELLED' ? 'screen-evidence-replaced'
+          : 'prompt-render-timeout',
         submissionId,
         run: { ...session.run },
         observedAt: Date.now()
