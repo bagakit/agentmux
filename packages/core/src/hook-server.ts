@@ -97,6 +97,11 @@ type PendingBinding = {
 export class AgentHookServer {
   private server: Server | null = null
   private endpoint: HookServerEndpoint | null = null
+  // `start()` is reached by both cold-start binding restoration and lifecycle operations. Serialize
+  // the bind itself: without this, two callers can race, the loser clears `this.server` after its
+  // EADDRINUSE, and the winner's healthy listener is then permanently reported as an owner in another
+  // process by every later resume attempt.
+  private starting: Promise<HookServerEndpoint> | null = null
   private readonly bindings = new Map<string, PendingBinding>()
   private readonly retiring = new Set<Promise<void>>()
 
@@ -112,6 +117,16 @@ export class AgentHookServer {
 
   async start(): Promise<HookServerEndpoint> {
     if (this.endpoint) return this.endpoint
+    if (this.starting) return await this.starting
+    this.starting = this.bind()
+    try {
+      return await this.starting
+    } finally {
+      this.starting = null
+    }
+  }
+
+  private async bind(): Promise<HookServerEndpoint> {
     const server = createServer((request, response) => void this.handle(request, response))
     this.server = server
     try {
@@ -139,6 +154,7 @@ export class AgentHookServer {
   }
 
   async stop(): Promise<void> {
+    if (this.starting) await this.starting.catch(() => {})
     const server = this.server
     this.server = null
     this.endpoint = null
