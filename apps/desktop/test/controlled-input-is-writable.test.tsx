@@ -129,7 +129,70 @@ function eventHandler(props: string): string | null {
  *   - 解构参数（`({ target: { value } }) => setX(value)`）：绑定名换成了 `value`，按参数里解构出
  *     `value`/`checked` 放行——不去追那个裸名被怎么消费，以免把「value」这种常见词误判。
  *   - 具名回调透传（`onChange={handleChange}` / `{ime.change}`）：写回口在那个函数里，静态读不到，放行。
+ *
+ * 「落在实参位就算写回」这条最初的近似**不够**（#865，审计实测）：`console.log(e.target.value)` 的取值
+ * 同样在实参位，于是 9/9 全绿——而它正是本判据点名要抓的那一族。所以实参位要再问一句**被调的是谁**：
+ * 落进 `PURE_SINKS` 里那些「只读不写」的调用（`console.*` / `void` / `String` / `Number` / …）不算终点，
+ * 要接着问**这次调用的结果**又被谁消费——`setX(Number(e.target.value))` 因此仍然算写回，而
+ * `console.log(Number(e.target.value))` 不算。
  */
+const PURE_SINKS = new Set([
+  'void', 'console.log', 'console.warn', 'console.error', 'console.info', 'console.debug',
+  'alert', 'String', 'Number', 'Boolean', 'parseInt', 'parseFloat', 'JSON.stringify'
+])
+
+/** 从 `index` 往左找包住它的那个未闭合开括号；找不到（已在最外层）回 null。 */
+function openerBefore(body: string, index: number): number | null {
+  let depth = 0
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    const char = body[cursor]!
+    if (char === ')' || char === ']' || char === '}') depth += 1
+    else if (char === '(' || char === '[' || char === '{') {
+      if (depth === 0) return cursor
+      depth -= 1
+    }
+  }
+  return null
+}
+
+/**
+ * 这一处取值最终**被写了出去**，而不是读一眼就丢。
+ *
+ * 逐跳往外问「你这个值给谁了」：给了非纯函数的实参位、对象右值位、赋值右值位就算数；给了纯读取的
+ * sink 就把整个调用当成新的取值再问一轮（跳到被调者名字开头，那里才是这个调用表达式的起点）。
+ */
+function consumedByWrite(body: string, valueStart: number): boolean {
+  let index = valueStart
+  for (let hop = 0; hop < 8; hop += 1) {
+    const before = body.slice(0, index).replace(/\s+$/u, '')
+    const last = before[before.length - 1]
+    if (last === ':') return true
+    if (last === '=') {
+      const prev = before[before.length - 2]
+      // `=>`/`==`/`!=`/`<=`/`>=` 不是赋值，它们正是「读完即弃」那一族。
+      if (prev === '=' || prev === '!' || prev === '<' || prev === '>') return false
+      // `const x = e.target.value` 只有在 `x` 后面真的被用到时才是写回；否则是个死绑定。
+      const declaration = /(?:const|let|var)\s+([\w$]+)\s*$/.exec(before.slice(0, -1))
+      if (declaration) return body.split(new RegExp(`\\b${declaration[1]!}\\b`)).length - 1 > 1
+      return true
+    }
+    if (last !== '(' && last !== ',' && last !== '[') return false
+    const opener = last === '(' || last === '[' ? before.length - 1 : openerBefore(body, index)
+    if (opener === null) return false
+    // 计算键读取 `TABLE[…]`：被消费的是整段下标表达式，跳到基名开头接着问。
+    if (body[opener] === '[') {
+      const base = /([\w$]+(?:\.[\w$]+)*)\s*$/.exec(body.slice(0, opener))
+      index = base ? opener - base[1]!.length : opener
+      continue
+    }
+    const callee = /([\w$]+(?:\.[\w$]+)*)\s*$/.exec(body.slice(0, opener))?.[1]
+    if (!callee) return false
+    if (!PURE_SINKS.has(callee)) return true
+    index = opener - callee.length
+  }
+  return false
+}
+
 function writesEventValue(body: string): boolean {
   const trimmed = body.trim()
   // 具名回调：纯标识符或成员访问链（没有 `(` 调用、没有 `=>` 箭头体），写回口在被引用的函数里。
@@ -137,16 +200,8 @@ function writesEventValue(body: string): boolean {
   // 参数里解构出了 value/checked：绑定名不再是 `e.target.value`，按解构在场放行。
   const arrow = /^\(([^)]*)\)\s*=>/.exec(trimmed) ?? /^([\w$]+)\s*=>/.exec(trimmed)
   if (arrow && /\b(?:value|checked)\b/.test(arrow[1]!)) return true
-  // 事件取值被消费在实参位（前一个非空白字符是 `(` 或 `,`）、对象/赋值的右值位（`:` 或单个 `=`）。
-  // `=>`/`==`/`!=`/`<=`/`>=` 都以 `>`/`=` 之外的组合出现，不算写回——它们正是「读完即弃」那一族。
   for (const match of body.matchAll(/\b[\w$]+\.target\.(?:value|checked)\b/g)) {
-    const before = body.slice(0, match.index).replace(/\s+$/u, '')
-    const last = before[before.length - 1]
-    if (last === '(' || last === ',' || last === ':') return true
-    if (last === '=') {
-      const prev = before[before.length - 2]
-      if (prev !== '=' && prev !== '!' && prev !== '<' && prev !== '>') return true
-    }
+    if (consumedByWrite(body, match.index)) return true
   }
   return false
 }
@@ -205,7 +260,7 @@ describe('受控表单控件必须有写回口', () => {
     expect(isControlled('defaultValue={x}')).toBe(false)
   })
 
-  // 下面五条钉住 `writesEventValue` / `eventHandler` 本身。没有它们，把 `writesEventValue` 整个改成
+  // 下面六条钉住 `writesEventValue` / `eventHandler` 本身。没有它们，把 `writesEventValue` 整个改成
   // `return true` 会让上面那条扫描退回「只问 onChange 在不在场」——而那正是本次要堵的洞，且实测
   // 5 条全绿（判据被架空却无人报警）。判据自己也要有判据。
   it('自检：读完即弃的处理器不算写回口', () => {
@@ -215,6 +270,30 @@ describe('受控表单控件必须有写回口', () => {
     expect(writesEventValue('(event) => event.target.value')).toBe(false)
     // 语句位置的裸读取。
     expect(writesEventValue('(event) => { event.target.value }')).toBe(false)
+  })
+
+  /**
+   * 落在实参位**不等于**被写回去（#865）。
+   *
+   * 上一版判据只问「取值前面那个字符是不是 `(`」，于是 `console.log(e.target.value)` 判成写回——审计
+   * 实测 9/9 全绿，而这正是本文件点名要抓的「读完即弃」那一族。把 `PURE_SINKS` 清空、或把它的
+   * 逐跳外推改回「见到 `(` 就 return true」，下面每一条都会红。
+   */
+  it('自检：把取值喂给只读不写的调用仍然不算写回口', () => {
+    expect(writesEventValue('(e) => console.log(e.target.value)')).toBe(false)
+    expect(writesEventValue('(e) => { console.log(e.target.value) }')).toBe(false)
+    expect(writesEventValue('(e) => alert(e.target.value)')).toBe(false)
+    // 带前缀实参的调用：取值落在 `,` 后面，同样是实参位。
+    expect(writesEventValue('(e) => console.log("typed", e.target.value)')).toBe(false)
+    // 纯转换之后仍然丢弃：`Number(...)` 不是终点，要接着问它的结果给了谁。
+    expect(writesEventValue('(e) => console.log(Number(e.target.value))')).toBe(false)
+    expect(writesEventValue('(e) => String(e.target.value)')).toBe(false)
+    // 声明了却从未使用的绑定：读到了，然后随作用域一起丢掉。
+    expect(writesEventValue('(e) => { const dead = e.target.value }')).toBe(false)
+    // 计算键当下标读表、读出来的那一项又被丢掉。这一条是唯一能观测到那段 `[` 分支的探针：写回侧
+    // （`setMode(TIERS[…]!.id)`）删掉它照旧全绿——跳过 `[` 会把表名 `TIERS` 当成非纯调用而返回 true，
+    // 恰好也是对的答案。只有丢弃侧会因此分岔：不跳到基名开头就问不到外面那个 `console.log`。
+    expect(writesEventValue('(e) => console.log(TIERS[Number(e.target.value)]!.id)')).toBe(false)
   })
 
   it('自检：真的把值写回去的处理器不被误判', () => {
@@ -228,6 +307,25 @@ describe('受控表单控件必须有写回口', () => {
     expect(writesEventValue('({ target: { value } }) => setX(value)')).toBe(true)
     // 具名回调透传：写回口在那个函数里，静态读不到。
     expect(writesEventValue('handleChange')).toBe(true)
+  })
+
+  /**
+   * `PURE_SINKS` 的逐跳外推不能把真的写回口一起吃掉。
+   *
+   * 这一组全部取自本仓真实在用的处理器形状——判据收得过紧会在这里先红，而不是等到有人因为一片假红
+   * 把整条守卫删掉。实测：这套判据对全部 44 个真实 onChange/onInput 处理器零假红。
+   */
+  it('自检：纯转换与计算键包着的写回口仍然算数', () => {
+    // `Number(...)` 落在 setter 实参位（BranchesPanel / ScreenshotEditor / AppearanceSettingsPane）。
+    expect(writesEventValue('(event) => setFanOutCount(Number(event.target.value))')).toBe(true)
+    // 纯转换落在对象右值位（HostSettingsPane）。
+    expect(writesEventValue('(e) => update(h.id, { port: Number(e.target.value) })')).toBe(true)
+    // 计算键：取值当下标读表，读出来的那一项才被写回（NotificationSettingsPane）。
+    expect(writesEventValue('(e) => setMode(TIERS[Number(e.target.value)]!.id)')).toBe(true)
+    // 声明后被再次使用：`const next = …` 不是死绑定（AppearanceSettingsPane 的字号夹取）。
+    expect(writesEventValue('(e) => { const next = Number(e.target.value); setFontSize(next) }')).toBe(true)
+    // 裸赋值。
+    expect(writesEventValue('(e) => { x = e.target.value }')).toBe(true)
   })
 
   it('自检：处理器体里的对象字面量不会把提取截断', () => {
