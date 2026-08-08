@@ -160,6 +160,7 @@ import {
   DEFAULT_BROWSER_ZOOM_FACTOR,
   normalizeBrowserUrl
 } from '../src/main/browser-view-manager.js'
+import { normalizeBrowserBounds } from '../src/shared/browser-bounds.js'
 
 const profiles: BrowserProfileResolver = {
   defaultProfileId: () => 'default',
@@ -210,6 +211,47 @@ describe('BrowserViewManager', () => {
     expect(() => normalizeBrowserUrl('file:///etc/passwd')).toThrow('Unsupported browser URL protocol')
     expect(() => normalizeBrowserUrl('javascript:alert(1)')).toThrow('Unsupported browser URL protocol')
     expect(() => assertAllowedBrowserUrl('mailto:hello@example.com')).toThrow('Unsupported browser URL protocol')
+  })
+
+  /**
+   * 交给原生视图的矩形**逐字节**等于共用判定的答案——这一侧的「壳有没有偷偷再动一手」（#712）。
+   *
+   * 为什么单独一条而不是靠上面那条生命周期用例：它只喂了一个 `{800.2, 500.8}` 的大矩形，于是壳里在
+   * 共用调用之后再补一道地板（真实发生过的绕法是 `const M = Math` 加 `M.max(7, …)`）对它毫无影响，
+   * 三个 suite 67 条全绿而任何窄于地板的 Region 被静默拉宽。normalization 那份的结构层按 `Math.xxx()`
+   * 的**形状**判，别名写法逃得掉，所以那一层顶不住这个。
+   *
+   * 期望值取自 {@link normalizeBrowserBounds}：这一条要判的性质就是「壳交出去的 === 共用判定算出来
+   * 的」，恒等关系才是被断言的东西。共用判定自己的取值正确性由 browser-bounds-normalization 那份用写死
+   * 的字面量钉着，两份合起来才完整。窄矩形在场的自检写在最后一行，防「两边都恒 null」式的假绿。
+   */
+  it('forwards the shared decision byte-for-byte instead of re-clamping in the shell', async () => {
+    const fixture = fakeWindow()
+    const manager = browserManager(fixture.window)
+    await manager.create('browser-forward', 'https://example.com')
+    const view = fixture.children[0]!
+
+    // 每个都挑成「随手补一道地板/取整就会被打破」的形状；前三条是 #712 的靶子本身。
+    const forwarded = [
+      { x: 4, y: 9, width: 3, height: 260 },
+      { x: 4, y: 9, width: 260, height: 2 },
+      { x: 0, y: 0, width: 1, height: 1 },
+      { x: -0.6, y: -5, width: 40, height: 40 },
+      { x: 10.4, y: 20.6, width: 800.2, height: 500.8 }
+    ]
+    for (const bounds of forwarded) {
+      manager.setBounds('browser-forward', { ...bounds })
+      expect(view.bounds, `${JSON.stringify(bounds)} 交给原生视图的不是共用判定的答案`)
+        .toEqual(normalizeBrowserBounds(bounds))
+    }
+
+    // 判据没有落空：清单里真有「窄到会被地板改写」的可用矩形。没有这一条，上面的循环在共用判定被改成
+    // 恒 null 时会变成 setBounds 全走隐藏分支、view.bounds 停在旧值——那时它比较的是两个陈旧值。
+    const narrow = forwarded
+      .map((bounds) => normalizeBrowserBounds(bounds))
+      .filter((value): value is NonNullable<typeof value> => value !== null)
+      .filter((value) => value.width < 7 || value.height < 7)
+    expect(narrow.length, '没有任何窄矩形，这一条抓不到 #712 那种重夹').toBeGreaterThan(0)
   })
 
   it('owns WebContentsView bounds, navigation, and close lifecycle', async () => {
