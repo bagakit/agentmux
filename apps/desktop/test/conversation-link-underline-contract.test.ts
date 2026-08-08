@@ -105,10 +105,16 @@ function alphaOf(raw: string): number {
     if (digits.length === 8) return Number.parseInt(digits.slice(6), 16) / 255
     return Number.NaN
   }
-  // rgb()/rgba()/hsl()/hsla(), comma or slash separated. The alpha is the 4th component either way.
+  // rgb()/rgba()/hsl()/hsla(). Three spellings of the same colour must parse identically:
+  // legacy commas `rgb(0,0,0,0)`, the modern space-separated CSS Color 4 form `rgb(0 0 0 / 0)`, and
+  // the mixed slash form. WHITESPACE IS A SEPARATOR HERE, not decoration — splitting only on `[,/]`
+  // read `rgb(0 0 0 / 0)` as the two parts `0 0 0` and `0`, fell into the `length <= 3` arm and
+  // returned 1, so a FULLY INVISIBLE hover underline shipped green. This repo already writes the
+  // space-separated form elsewhere (conversation-avatar.css uses `hsl(143 61 72)`), so that is not a
+  // hypothetical spelling. The alpha is the 4th component in every one of the three forms.
   const fn = value.match(/^(?:rgba?|hsla?)\(([^)]*)\)$/i)
   if (fn) {
-    const parts = fn[1]!.split(/[,/]/).map((p) => p.trim())
+    const parts = fn[1]!.split(/[\s,/]+/).filter((p) => p.length > 0)
     if (parts.length <= 3) return 1
     const alpha = parts[3]!
     const percent = alpha.match(/^([\d.]+)%$/)
@@ -305,6 +311,71 @@ describe('conversation link underline contract (#794)', () => {
         '「克制的淡入」于是消失，而所有时长断言照旧全绿——所以这里按函数类型判，不只按时长判。' +
         '（省略 timing function 等于 CSS 默认的 ease，是允许的。）'
     ).toBe(true)
+  })
+
+  it('自检：alphaOf 对每一族颜色写法都读出真的 alpha，尤其是空格分隔的现代写法', () => {
+    // 为什么这条断言存在，以及为什么它单独一个 it：上面的 reveal 判据把「hover 才显形」这件事**完全**
+    // 委托给 alphaOf，而 alphaOf 此前是本文件三个解析器里唯一没有任何见证的一个——于是它自己的 bug
+    // 就是那条中心承诺的静默漏点。实测的那个 bug：切分只认 `[,/]`，于是 CSS Color 4 的空格写法
+    // `rgb(0 0 0 / 0)` 被切成 `0 0 0` 与 `0` 两段，落进 `length <= 3` 那条「没写 alpha 即不透明」
+    // 的臂里返回 1。一条**完全看不见**的 hover 下划线于是在 7 条全绿下发货。本仓的 CSS 已经在用
+    // 空格写法（conversation-avatar.css 的 `hsl(143 61 72)`），所以那不是个假想的拼法。
+    //
+    // 判据的解析器是判据的一部分，所以每一族写法在这里被直接质询，而不是等下一次靠变异碰巧发现。
+
+    // 零透明度的每一种拼法都必须读成 0。这几个串全都能通过 `!== 'transparent'` 的串比较（那正是
+    // 这个函数取代的那版判据），所以它们是这道门真正要挡住的输入。
+    for (const invisible of [
+      'transparent',
+      'rgba(0,0,0,0)',
+      'rgb(0 0 0 / 0)',
+      'hsla(0,0%,0%,0)',
+      'hsl(0 0% 0% / 0)',
+      'hsl(0 0% 0% / 0%)',
+      '#0000',
+      '#00000000'
+    ]) {
+      expect(alphaOf(invisible), `\`${invisible}\` 是完全透明的，alphaOf 必须读出 0`).toBe(0)
+    }
+
+    // 不透明的每一种拼法都必须读成 1——反向那侧同样要认得出，否则「hover 设了可见颜色」这条断言
+    // 会对合法的 CSS 打假红。
+    for (const opaque of [
+      'currentColor',
+      '#abc',
+      '#aabbcc',
+      '#aabbccff',
+      'rgb(1,2,3)',
+      'rgb(1 2 3)',
+      'rgb(1 2 3 / 1)',
+      'hsl(120 50% 50%)',
+      'hsl(120 50% 50% / 100%)',
+      'black'
+    ]) {
+      expect(alphaOf(opaque), `\`${opaque}\` 是不透明的，alphaOf 必须读出 1`).toBe(1)
+    }
+
+    // 中间值必须真的按数值读，而不是被折成 0/1 的两极。
+    expect(alphaOf('rgba(0,0,0,0.5)')).toBe(0.5)
+    expect(alphaOf('rgb(0 0 0 / 0.5)')).toBe(0.5)
+    expect(alphaOf('rgb(0 0 0 / 50%)')).toBe(0.5)
+    expect(alphaOf('#00000080')).toBeCloseTo(128 / 255, 5)
+
+    // 认不出的写法必须是 NaN 而不是 1。「未知即不透明」会让一个笔误的颜色值静默通过 reveal 判据。
+    expect(alphaOf('color-mix(in srgb, red, blue)'), '没被认出的写法必须响亮地是 NaN').toBeNaN()
+
+    // var() 必须真的解引用下去。这条见证**自带前提自检**：先钉住这个 token 的字面值确实是个带
+    // alpha 的八位十六进制，否则一旦它被改成不透明，这条断言会静默退化成「1 === 1」，读起来仍
+    // 像在证明解析发生过——那正是本 session 刚修掉的那类虚构见证。
+    const scrim = tokenValue('--scrim-1')
+    expect(
+      /^#[0-9a-f]{8}$/i.test(scrim),
+      `--scrim-1 现在是 \`${scrim}\`，不再是带 alpha 的写法，下面那条 var() 见证于是不再证明解引用发生了。` +
+        '换一个仍然半透明的 token，别让这条断言退化成恒真。'
+    ).toBe(true)
+    const resolved = alphaOf('var(--scrim-1)')
+    expect(resolved, 'var() 没有被解引用到 token 的字面值').toBeGreaterThan(0)
+    expect(resolved).toBeLessThan(1)
   })
 
   it('自检：本文件的两个 transition 解析器认得出它们各自要拒绝的形状', () => {
