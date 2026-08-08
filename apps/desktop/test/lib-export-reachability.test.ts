@@ -60,11 +60,20 @@ import { parseTsx, readAndParse } from './helpers/effect-reachability.js'
 //     - 它按**标识符名**匹配，不做符号解析。同名的两个不同实体它分不开，于是它会**偏向判活**
 //       （另一个文件里有个同名局部变量就足以当种子）。这是刻意的保守方向：误判活只是漏报一个
 //       孤儿，误判死会让人删掉在用的代码。
-//     - 它数的是「有没有消费者」，**不**区分消费者是生产代码还是测试。「只有测试引用」在本仓
-//       有两种完全相反的含义——结构守卫的 SSOT 枚举器（必须留着导出，删了守卫就失明）与
-//       自证式的死函数（测试只是把纯函数的返回值再算一遍）——**这条判据分不开，它不试图分**。
-//       本轮实测 12 个这样的导出，逐个判定记在 tracker #615，不在这里用清单表达：白名单会腐烂，
-//       而本仓已经记过「forbidden-list-guard-always-leaks」。
+//     - 消费面**只含生产代码**（renderer/src），**不含 test/**。「只被测试引用」正是零生产消费者，
+//       是要抓的东西，不是让判据变绿的理由——此前把 test/ 折进消费面，正是这道门放过 `rosterBadgeCount`
+//       的原因。但「只被测试引用」在本仓有两类含义，都进 DELIBERATE 豁免表、都必须带一句**可断言**的
+//       premise：
+//         · 合法 test-only——结构守卫的 SSOT 枚举器、或为可测性抽出的纯 helper。留着导出是对的：删了它，
+//           那道遍历它的测试守卫就失明。
+//         · 未接线的死承诺——描述了一段从未落地、或仍被别处阻塞的接线（本轮 `rosterBadgeCount` 正是这样：
+//           它的 docstring 曾把一个从未建造的折叠徽标写得像已交付的接线）。
+//       两类的 premise 必须**如实**说明是哪一类，死承诺就得写「无生产消费者、接线从未落地」，不许伪装成
+//       已交付。表的封闭性靠**钉死条数**（自检「豁免表条数」）保证，不是计数地板——本仓记过
+//       「count-floor-is-not-closedness」：地板只买到运气，钉死的字面量才逼每次增删都过一次 review。
+//       每条还被逐条质询：指向真实导出、**仍是**生产孤儿（接上生产消费者就删掉这条）、且**确有**测试消费者
+//       （否则它是零消费者的死代码，该删不该豁免）。豁免逐条列在 DELIBERATE，三类形态记忆见
+//       「forbidden-list-guard-always-leaks」——所以豁免的判据是「只允许这张具名表里的」，而不是禁止清单。
 //     - 它看不见「该私有」这一类。只被自己文件消费的导出被闭包**正确地**判成活的——它确实有
 //       消费者，只是那个消费者在同一个文件里。上面那 132 个里就混着这一类（本轮把
 //       `tab-drop-zone.ts` 那个 tab 条高度常量降级为私有，靠的是 review 不是这道门）。降级为
@@ -160,10 +169,168 @@ function scanSurface(libFiles: string[], consumerFiles: string[]) {
   return { libFiles, consumerFiles, mentionedOutside, unconsumedExports, orphans }
 }
 
-const real = scanSurface(sourceFilesUnder(LIB_DIR), [
-  ...sourceFilesUnder(RENDERER_SRC),
-  ...sourceFilesUnder(TEST_DIR)
-])
+// 消费面**只含生产源码**（renderer/src），**故意不含 test/**：只被测试引用的导出正是零生产消费者，
+// 那是要抓的，不是让判据变绿的理由。合法的 test-only 导出（SSOT 枚举器、为可测性抽出的纯 helper）
+// 走下面的 DELIBERATE 豁免表，每条带一句可断言的 premise。
+const real = scanSurface(sourceFilesUnder(LIB_DIR), sourceFilesUnder(RENDERER_SRC))
+
+/**
+ * 刻意保留的、零生产消费者的 lib 导出。
+ *
+ * 每条都必须带一句**可断言**的 `premise`——不是「刻意保留」，而是「为什么它今天该带着这个状态活着」。
+ * 两类合法形态，`kind` 如实标注：
+ *   - `'test-only'`：确有测试消费者且**应当**只被测试消费——结构守卫遍历的 SSOT 枚举器（删了导出，
+ *     那道守卫就失明）、或为可测性从组件里抽出的纯谓词/纯 helper。
+ *   - `'unwired'`：一段从未落地、或仍被别处阻塞的接线的一半。它**没有**生产消费者不是因为该私有，而是
+ *     因为它承诺的东西还没建。premise 必须**如实**这么说，绝不许把死承诺写得像已交付（本轮
+ *     `rosterBadgeCount` 正是这样被放过的）。
+ *
+ * 封闭性靠自检「豁免表条数钉死」保证——**不是**计数地板（本仓记过 count-floor-is-not-closedness：
+ * 地板只买运气，钉死的字面量才逼每次增删过一次 review）。另有自检逐条质询：指向真实导出、仍是生产
+ * 孤儿（接上生产消费者就删这条）、且确有测试消费者（否则它是零消费者死代码，该删不该豁免）。
+ */
+const DELIBERATE: ReadonlyArray<{
+  module: string
+  name: string
+  kind: 'test-only' | 'unwired'
+  premise: string
+}> = [
+  {
+    module: 'lib/agent-roster.ts',
+    name: 'rosterBadgeCount',
+    kind: 'unwired',
+    premise:
+      '无生产消费者：它描述的折叠花名册徽标从未被建造（AgentRoster 折叠态渲染的是 total prop，' +
+      'WorkspaceSidebar 的徽标是行内算的）。是否给窗口加这么一个 dock 徽标是一个待定的产品决策' +
+      '（tracker 记为 deliberate），所以既不接线也不删除——只让这道门如实说出它未接线。'
+  },
+  {
+    module: 'lib/attention-event.ts',
+    name: 'ATTENTION_SORT_CLASSES',
+    kind: 'test-only',
+    premise:
+      '排序类名的 SSOT，从 ATTENTION_SORT_RANK 的键派生。attention-ordering.test.ts 的结构守卫遍历它，' +
+      '认出「谁又自己手抄了一份序表」——删了这个导出，那道守卫就没有权威清单可比，失明。'
+  },
+  {
+    module: 'lib/attention-vocabulary.ts',
+    name: 'AGENT_DISPLAY_STATES',
+    kind: 'test-only',
+    premise:
+      '全部 Agent 显示状态的 SSOT，从 NEEDS_YOU_BY_STATE 的键派生。八个测试用它逐状态驱动用例，' +
+      '不手抄状态清单——手抄正是「新状态恰好在它新增时漏测」的入口。删了它，那些穷举测试就失去全集。'
+  },
+  {
+    module: 'lib/browser-toolbar.ts',
+    name: 'withBrowserToolbarItem',
+    kind: 'test-only',
+    premise:
+      '纯 helper：返回把一个工具栏项设成某可见性后的新 AppConfig。生产侧 SurfaceToolDock 用行内 draft' +
+      '（`{...current, [item]: shown}`）改，只有 browser-toolbar.test.tsx 用它一次性把每项都关掉来搭 fixture。' +
+      '是「为可测性抽出的纯函数」，不是未接线的承诺。'
+  },
+  {
+    module: 'lib/create-pr-intent.ts',
+    name: 'intentAllowsCreate',
+    kind: 'test-only',
+    premise:
+      '纯谓词：verdict 允不允许落地 create。生产侧 store 走 `verdict.kind === \'conflict\'` 早退（它要的是' +
+      'reason 文案，不是布尔），所以只有 create-pr-intent.test.ts 直接调这个谓词。留着它给那道判据用，' +
+      '删了它测试就只能自己手抄「哪些 kind 允许」，与 evaluateCreatePrIntent 漂开。'
+  },
+  {
+    module: 'lib/ime-composition-keyboard-event.ts',
+    name: 'resolveImeModifierGesture',
+    kind: 'unwired',
+    premise:
+      '无生产 call site：它是从参考实现复制过来的第四个导出（修饰键手势的 carry 判定），本仓的接入点' +
+      '（TerminalView 一族）由别的 agent 持有、暂时接不上。ime-composition-keyboard-event.test.ts 只钉住它' +
+      '不是恒定返回，以免它被顺手改坏而无人察觉。是未接线，不是该私有。'
+  },
+  {
+    module: 'lib/ime-composition-keyboard-event.ts',
+    name: 'useImeEnterGestureOwnership',
+    kind: 'unwired',
+    premise:
+      '无生产 call site：两次-keydown 的 Enter carry 手势钩子。生产侧四个输入用的是更薄的' +
+      'isImeCompositionKeyDown，这个更完整的钩子的接入点尚未落地。测试用 SSR 探针把它的闭包捕获出来驱动，' +
+      '守住它的行为直到接线补上。是未接线，不是该私有。'
+  },
+  {
+    module: 'lib/session-state.ts',
+    name: 'reduceRuntimeEvent',
+    kind: 'test-only',
+    premise:
+      '薄包装：`projectRuntimeEvent(...).state`，只丢掉那半 effect 通道。生产侧 store 直接调' +
+      'projectRuntimeEvent（它要 effect），三个 reducer 测试用这个只关心 state 的包装免去每次解包。' +
+      '是「为可测性保留的纯投影」，不是未接线的承诺。'
+  },
+  {
+    module: 'lib/session-visibility.ts',
+    name: 'sessionVisibility',
+    kind: 'test-only',
+    premise:
+      '纯工厂：把 windowFocused + 可见集合合成 `(sessionId) => AttentionVisibility`。生产侧 attention-notifier' +
+      '在 reconcile 里行内构造同一形状（它自己管 previousStates 生命周期），只有 session-visibility.test.ts' +
+      '直接调这个工厂钉住「窗口焦点与在屏与否两轴独立」。是为可测性抽出的纯函数。'
+  },
+  {
+    module: 'lib/shortcut-registry.ts',
+    name: 'INNER_SCOPES',
+    kind: 'test-only',
+    premise:
+      '「window 之外的作用域」SSOT，从 SHORTCUT_SCOPES 减一项派生。shortcut-registry.test.ts 的跨作用域' +
+      '冲突守卫遍历它——此前它在测试里被手抄成 `terminal || editor`，于是新增作用域被静默排除在守卫外。' +
+      '删了这个导出，那道守卫又回到手抄清单的盲点。'
+  },
+  {
+    module: 'lib/terminal-cold-parking-policy.ts',
+    name: 'haveSameTerminalRegionIds',
+    kind: 'test-only',
+    premise:
+      '纯集合相等谓词（两个 region-id 集合是否一致）。生产侧 coordinator 用 ref 增量维护可见集、不做整集' +
+      '比较，只有 terminal-cold-parking-policy.test.ts 直接调它。是为可测性抽出的纯 helper。'
+  },
+  {
+    module: 'lib/terminal-selection-mode.ts',
+    name: 'MOUSE_TRACKING_MODES',
+    kind: 'test-only',
+    premise:
+      '全部鼠标上报模式的 SSOT，从 MOUSE_REPORTING_ACTIVE 的键派生（后者由 xterm 的类型约束覆盖全集）。' +
+      'terminal-selection-mode.test.ts 遍历它逐模式质询；此前测试里手抄的 ACTIVE_MODES 漏一个字面量是静默的。' +
+      '删了这个导出，逐模式测试就失去全集。'
+  },
+  {
+    module: 'lib/workbench-surface-kinds.ts',
+    name: 'WORKBENCH_SURFACE_KINDS',
+    kind: 'test-only',
+    premise:
+      '全部 Workbench surface 种类的 SSOT 元组（两条类型层 exactness 证明钉住它 = 联合）。' +
+      'workbench-surface-kind-failure-modes.test.ts 遍历它逐种类驱动，于是第六种被加进联合时自动进测试。' +
+      '生产侧的分类器（isSessionSurface 等）走 switch 消费联合本身，不遍历这个元组。删了它，那些穷举测试失全集。'
+  },
+  {
+    module: 'lib/xterm-bypass-policy.ts',
+    name: 'shouldSuppressTerminalModifierKeyboardEvent',
+    kind: 'unwired',
+    premise:
+      '无生产 call site：吞掉陈旧 kitty 上报把独立修饰键编成 CSI-u 的那些事件，参考实现在中断处理之前用它。' +
+      '本仓 TerminalView 由别的 agent 持有、接不进这条，接线待那侧可动时补。xterm-bypass-policy.test.ts' +
+      '守住它的行为。是未接线，不是该私有。'
+  }
+]
+
+/**
+ * 这张豁免表**恰好**这么多条。
+ *
+ * 钉死一个字面量，不是设一个「≥N」的地板——本仓记过 count-floor-is-not-closedness：地板只在树里恰好没
+ * 余量时才开火，买到的是运气而非封闭性，还随代码库长大静默失效。加一条豁免必须同时改这个数字，于是每次
+ * 增减都在 review 里显形；下面「每条豁免逐条有效」的自检杀「同数换条」那一侧，两条合起来才封住这张表。
+ */
+const DELIBERATE_COUNT = 14
+
+const exemptionKey = (module: string, name: string): string => `${module}#${name}`
+const EXEMPT = new Set(DELIBERATE.map((entry) => exemptionKey(entry.module, entry.name)))
 
 /**
  * 不动点本体：给定一份 AST 与「哪些导出算种子」，返回没有任何消费者的导出名。
@@ -195,24 +362,40 @@ function unconsumedExportsOf(sourceFile: ts.SourceFile, isSeed: (name: string) =
   return [...exported].filter((name) => !alive.has(name))
 }
 
-describe('renderer lib 的每个导出都有消费者', () => {
-  it('没有任何导出是「生产与测试都不用」的', () => {
+describe('renderer lib 的每个导出都有生产消费者', () => {
+  it('没有任何导出是「生产代码不用」的（只被测试用的必须进 DELIBERATE 豁免表）', () => {
     const orphans = real.orphans().map((entry) => entry.replace(`${RENDERER_SRC}/`, ''))
+    const unexplained = orphans.filter((entry) => {
+      const [file, name] = entry.split(' ')
+      return !EXEMPT.has(exemptionKey(file!, name!))
+    })
     // 报出 file + 名字而不是只给个数：孤儿要一眼看得到是哪个。
     expect(
-      orphans,
-      '这些导出在整棵 renderer 与整个 test/ 里都没有消费者。\n' +
-        '要么它是遗孤（删掉），要么它的接线从未落地（那就把接线补上，别让 export 替不存在的\n' +
-        '消费者作担保——本仓记过 promised-accessor-never-landed）。\n' +
-        `实测：\n${orphans.join('\n')}`
+      unexplained,
+      '这些导出在整棵 renderer**生产**源码里都没有消费者（只被测试引用也算没有）。\n' +
+        '三条出路：接线（给它一个真生产消费者）、删掉它与它的测试、\n' +
+        '或者进 DELIBERATE 豁免表——**但必须写清可断言的 premise**，死承诺就得如实写「未接线」，\n' +
+        '不许伪装成已交付（本仓记过 promised-accessor-never-landed）。\n' +
+        `实测：\n${unexplained.join('\n')}`
     ).toEqual([])
   })
 
-  it('自检：扫描面非空、闭包不是恒真、不存在的名字计零', () => {
+  it('自检：扫描面非空且只含生产代码、闭包不是恒真、不存在的名字计零', () => {
     // 少了这条，上面那条会以最难发现的方式假绿：扫描根写错、后缀过滤写错、导出提取返回空，
     // 任何一种都让 orphans 恒为空数组，而「没扫到」与「扫过了没问题」打印出来一模一样。
     expect(real.libFiles.length, 'lib 一个文件都没扫到，扫描根坏了').toBeGreaterThan(100)
     expect(real.consumerFiles.length, '消费者面一个文件都没扫到').toBeGreaterThan(200)
+
+    // 消费面必须**只含生产代码**：一旦有人把 test/ 折回消费面，「只被测试引用」又会算成有消费者，
+    // 这道门就退回到放过 rosterBadgeCount 的那一版。逐条核对没有任何消费者落在 test/ 树下，
+    // 并且真的含 lib 文件（扫描面确实触到了受判的那批模块，而不是扫了个空目录恒绿）。
+    const testRoot = `${TEST_DIR}`
+    const consumersInTest = real.consumerFiles.filter((file) => file.startsWith(testRoot))
+    expect(consumersInTest, 'test/ 被折进了消费面——「只被测试引用」会被误算成有消费者').toEqual([])
+    expect(
+      real.consumerFiles.some((file) => file.startsWith(`${LIB_DIR}/`)),
+      '消费面里一个 lib 文件都没有——lib 互引也是消费者，缺了它扫描面没真正触到受判模块'
+    ).toBe(true)
 
     // 提取器真的认得出导出：随便挑一个文件都该有导出，且总量得是个大数。
     const totalExports = real.libFiles.reduce(
@@ -225,8 +408,8 @@ describe('renderer lib 的每个导出都有消费者', () => {
     // 断言变成「永远没有孤儿」，也就是这道门最危险的假绿形态。
     expect(real.mentionedOutside('zzzNoSuchExportNameEverAppearsHere', LIB_DIR)).toBe(false)
 
-    // 反向：一个**真的**被外部消费的导出不许被判成孤儿。挑 clipboard-copy 的出口，它有 9 个
-    // 组件在调（见 clipboard-copy.test.ts 那张表），是本仓消费面最宽的导出之一。
+    // 反向：一个**真的**被生产代码消费的导出不许被判成孤儿。挑 clipboard-copy 的出口，它有 9 个
+    // 组件在调（见 clipboard-copy.test.ts 那张表），是本仓生产消费面最宽的导出之一。
     expect(real.unconsumedExports(`${LIB_DIR}/clipboard-copy.ts`)).not.toContain('copyTextToClipboard')
   })
 
@@ -251,6 +434,59 @@ describe('renderer lib 的每个导出都有消费者', () => {
     ).toContain(PROBE)
     expect(real.mentionedOutside(PROBE, probeFile), `探针 ${PROBE} 在别的文件里出现了，它是种子而非闭包救活的`).toBe(false)
     expect(real.unconsumedExports(probeFile)).not.toContain(PROBE)
+  })
+
+  it('自检：豁免表条数被钉死——加一条 / 删一条都必须改这个数字', () => {
+    // 这是这张表**封闭性**的那一半（另一半是下面「每条都仍然名副其实」）。钉死一个字面量而不是设
+    // 「≥N」的地板：本仓记过 count-floor-is-not-closedness——地板只在树里恰好没余量时才开火，买到的是
+    // 运气不是性质，还随代码库长大静默失效。写死这个数，剥掉某个真守卫 + 自己往表里塞一条豁免这种
+    // 「同数换条」以外的偷渡（悄悄多加一条）就当场变红，逼它在 review 里显形。
+    expect(
+      DELIBERATE.length,
+      '豁免表条数变了。加/删豁免必须同步改 DELIBERATE_COUNT——这不是地板而是封闭性判据，' +
+        '别把它改大来让新豁免悄悄过关。'
+    ).toBe(DELIBERATE_COUNT)
+    // 键唯一：同一个 (module, name) 写两条会让 EXEMPT 的 Set 把它去重，条数对不上也就罢了，更坏的是
+    // 一条失效的豁免被另一条同键的掩盖。
+    expect(EXEMPT.size, '豁免表里有重复的 (module, name)').toBe(DELIBERATE.length)
+  })
+
+  it('自检：每条豁免都仍然名副其实——指向真导出、仍是生产孤儿、且确有测试消费者', () => {
+    // 这是封闭性的另一半，杀「同数换条」：把一条真豁免换成一条虚构/失效的豁免，条数不变，只有这里红。
+    // 逐条质询三件事，任何一件不成立，这条豁免就不再守着它声称守的东西：
+    //   1. premise 里的名字仍是那个 lib 文件的真实导出（重命名/删除后表会指向虚构，虚构的豁免永不匹配、
+    //      白占一个名额，本仓记过 promised-accessor-never-landed 那类「注释举的例子早已不存在」）；
+    //   2. 它在**生产**面上仍是孤儿——一旦接上真生产消费者，豁免就该删掉，否则表只增不减变成允许清单
+    //      （forbidden-list-guard-always-leaks 的另一半）；
+    //   3. 它在 test/ 里**确有**消费者——否则它是零消费者的死代码，该删，不该借豁免续命。
+    //      这一步需要一个含 test/ 的消费面，只在这里为自检而建（主判据的消费面刻意不含 test/）。
+    const testConsumers = sourceFilesUnder(TEST_DIR)
+    const identifiersByTestFile = testConsumers.map((file) => identifiersIn(readAndParse(file).sourceFile))
+    const referencedInTests = (name: string): boolean =>
+      identifiersByTestFile.some((identifiers) => identifiers.has(name))
+    const productionOrphans = new Set(real.orphans().map((entry) => entry.replace(`${RENDERER_SRC}/`, '')))
+
+    const stale: string[] = []
+    const noLongerOrphan: string[] = []
+    const notTestConsumed: string[] = []
+    for (const entry of DELIBERATE) {
+      const modulePath = `${RENDERER_SRC}/${entry.module}`
+      const exported = new Set(readAndParse(modulePath).sourceFile.statements.flatMap(exportedNames))
+      if (!exported.has(entry.name)) stale.push(exemptionKey(entry.module, entry.name))
+      if (!productionOrphans.has(`${entry.module} ${entry.name}`)) noLongerOrphan.push(exemptionKey(entry.module, entry.name))
+      if (!referencedInTests(entry.name)) notTestConsumed.push(exemptionKey(entry.module, entry.name))
+      expect(entry.premise.length, `${entry.name} 的豁免 premise 太短，写不出一句能被质询的话`).toBeGreaterThan(40)
+    }
+    expect(stale, '这些豁免指向不存在的导出——重命名或删除之后表没跟上').toEqual([])
+    expect(
+      noLongerOrphan,
+      '这些豁免现在有生产消费者了（或者已删除），不再是孤儿。把它们从 DELIBERATE 里删掉，' +
+        '别让豁免表变成只增不减的允许清单'
+    ).toEqual([])
+    expect(
+      notTestConsumed,
+      '这些豁免在 test/ 里也没有消费者——它们是零消费者的死代码，该删，不该借豁免续命'
+    ).toEqual([])
   })
 
   it('自检：闭包传递「非导出」声明——今天没有真实见证，所以用合成模块钉住', () => {

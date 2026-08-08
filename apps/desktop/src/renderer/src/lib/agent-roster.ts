@@ -134,11 +134,15 @@ export function buildAgentRoster(input: {
 }
 
 /**
- * The count for the collapsed badge.
+ * How many rows are urgent — the count a collapsed-roster badge WOULD show.
  *
- * Reads {@link isUrgentAttention} — the same pair of categories that earn a row accent — so the badge,
- * the bar, and the ink are one aggregate seen at three sizes rather than three numbers a user has to
- * reconcile. It was a hand-written `needs-you || error` here before.
+ * There is NO such badge. Nothing in production calls this: `AgentRoster` renders its collapsed count
+ * from the `total` prop, and `WorkspaceSidebar` computes its own badge inline. This function's only
+ * callers are its tests. It reads {@link isUrgentAttention} so that IF a badge is ever built it grades
+ * urgency the same way the row accent does — but until that product decision lands, this is an unwired
+ * aggregate, not delivered wiring. It is kept (rather than deleted) pending that decision; the
+ * lib-export-reachability guard records it as a deliberate test-only export for exactly this reason.
+ * Do not let this docstring, or the one on {@link isUrgentAttention}, read as if the badge exists.
  */
 export function rosterBadgeCount(rows: readonly RosterRow[]): number {
   return rows.filter((row) => isUrgentAttention(row.attention)).length
