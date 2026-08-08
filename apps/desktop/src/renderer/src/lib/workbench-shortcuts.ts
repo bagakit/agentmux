@@ -41,7 +41,7 @@ export type WorkbenchShortcutCommand =
  * 这个和弦是否落在「非终端的可编辑控件」里——Agent composer 的文本框、Tab 内联重命名框这类原生输入。
  *
  * 窗口级 capture 监听存在的唯一理由，是抢在聚焦的 xterm 文本代理之前拿到键（终端要独占它们）。所以
- * **终端里的输入不放行**（`insideTerminal` 为真时返回 false，让快捷键照常接管）；但普通表单控件里用户是
+ * **终端里的输入也视为编辑作用域**（`insideTerminal` 为真时返回 true，让带 not-in-editable 门的工作台快捷键交给 TUI）；但普通表单控件里用户是
  * 在打字/改名，Cmd+D 不该顺手把这一格分屏、Cmd+W 不该关掉正在打字的那一格。DOM 侧由 App 判定
  * `insideTerminal`（`.xterm` 子树内即为真），这里只做与 DOM 无关的纯判定，测试够得着。
  */
@@ -50,7 +50,7 @@ export function isEditableChordTarget(target: {
   isContentEditable: boolean
   insideTerminal: boolean
 }): boolean {
-  if (target.insideTerminal) return false
+  if (target.insideTerminal) return true
   return target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable
 }
 
@@ -351,4 +351,3 @@ export function workbenchWindowBindingIds(): string[] {
     .filter((binding) => binding.scope === 'window' && commandForWorkbenchId(binding.id) !== null)
     .map((binding) => binding.id)
 }
-

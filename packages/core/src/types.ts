@@ -330,6 +330,8 @@ export type AgentUsageCapability = {
  * 所以只上报累计量，UI 明说这是「最近一个 turn」的用量。
  */
 export type AgentTurnUsage = {
+  /** Native context observation accompanying this sample; never lifetime billing totals. */
+  context?: { usedTokens: number; capacityTokens: number }
   /** 本 turn 生成的 output token 数——状态栏首要显示的量，它最接近"这一步产出了多少"。 */
   outputTokens: number
   /** 本 turn 的 input token 数（含被 Provider 计入的上下文）。 */
