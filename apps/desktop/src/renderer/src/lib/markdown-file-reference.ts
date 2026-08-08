@@ -32,9 +32,10 @@ export type MarkdownInlineSegment =
  */
 export function splitMarkdownFileReferences(
   text: string,
-  workspaceRoot: string
+  workspaceRoot: string,
+  homeDir = ''
 ): MarkdownInlineSegment[] {
-  const references = detectTerminalPathLinks(text, workspaceRoot)
+  const references = detectTerminalPathLinks(text, workspaceRoot, homeDir)
   if (references.length === 0) return [{ kind: 'text', text }]
   const segments: MarkdownInlineSegment[] = []
   let cursor = 0
@@ -63,14 +64,15 @@ export function splitMarkdownFileReferences(
  */
 export function classifyMarkdownLinkHref(
   href: string,
-  workspaceRoot: string
+  workspaceRoot: string,
+  homeDir = ''
 ): MarkdownFileReference | null {
   // A scheme means the target is not a workspace path, whatever its shape. Checked before detection
   // so `file:///etc/passwd` can never be mistaken for a relative path with colons in it.
   if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(href)) return null
   const trimmed = href.trim()
   if (!trimmed) return null
-  const references = detectTerminalPathLinks(trimmed, workspaceRoot)
+  const references = detectTerminalPathLinks(trimmed, workspaceRoot, homeDir)
   // The whole href must be the path. A partial match means the href is something else that merely
   // contains a path-like run (`a b/c`), and opening that would be a guess.
   const [only] = references

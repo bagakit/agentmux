@@ -51,8 +51,15 @@ const TRAILING_PUNCTUATION = /[.,;:)\]]+$/
  * @param workspaceRoot Absolute path of the active workspace, used only for the string-only
  *   within-root test on absolute paths. Empty string means "no active root": absolute paths are
  *   then rejected (never underlined) while relative paths still resolve.
+ * @param homeDir Absolute path of the host home directory, used only to expand a leading `~/` to an
+ *   absolute path before the same within-root test runs. Empty string means "no home known": a `~/`
+ *   path is then rejected (never underlined), exactly as an absolute path is with no root.
  */
-export function detectTerminalPathLinks(text: string, workspaceRoot: string): TerminalPathLink[] {
+export function detectTerminalPathLinks(
+  text: string,
+  workspaceRoot: string,
+  homeDir = ''
+): TerminalPathLink[] {
   const links: TerminalPathLink[] = []
   PATH_TOKEN.lastIndex = 0
   let match: RegExpExecArray | null
@@ -75,7 +82,7 @@ export function detectTerminalPathLinks(text: string, workspaceRoot: string): Te
     // Timestamped log lines make this the common case, not an edge one. A directory-bearing core is
     // exempt: `logs/2024:5` names a real place, and the `/` is the signal.
     if (!core.includes('/') && !/[A-Za-z]/.test(core)) continue
-    const resolved = resolveWorkspaceRelativePath(core, workspaceRoot)
+    const resolved = resolveWorkspaceRelativePath(core, workspaceRoot, homeDir)
     if (resolved === null) continue
     const suffix = hasSuffix ? match[0].slice(rawCore.length) : ''
     links.push({
@@ -93,21 +100,53 @@ export function detectTerminalPathLinks(text: string, workspaceRoot: string): Te
  * Convert a matched core to the canonical workspace-relative path `openFile` expects, or `null` to
  * reject the match entirely (so it is never underlined). All pure string math against a root string
  * the caller already holds — no disk, no IPC.
+ *
+ * `~/` is expanded against `homeDir` FIRST, then the result runs through the very same within-root
+ * test an absolute path gets — because the only thing the open pipeline can open is a path inside the
+ * active Workspace (`files.read` throws "Path escapes the workspace root" for anything else). So
+ * `~/proj/src/x.ts` with home `/home/dev` and root `/home/dev/proj` relativises to `src/x.ts`, while
+ * `~/.claude/plugins/...` — the reported case — expands to an absolute path OUTSIDE the root and is
+ * rejected, exactly as `/etc/passwd` is. Expanding then reusing the absolute branch is what keeps
+ * `~/` from becoming a second, looser notion of "openable" that drifts from the absolute one.
+ *
+ * Three tilde shapes, decided deliberately, not collapsed together:
+ *   - `~/...` → expand against `homeDir`. This is the case agents and tools actually print.
+ *   - `~` alone → never reaches here: `PATH_TOKEN` requires a final path segment, so a bare `~` does
+ *     not match at all. Nothing to decide.
+ *   - `~user/...` → deliberately NOT treated as home, and it never even reaches this function: the
+ *     scanner cannot match it. The prefix group's only tilde alternative is `~\/` (a slash must
+ *     follow `~` immediately), and `~` is absent from the segment class `[\w.@+-]`, so the scan can
+ *     neither begin with `~user` nor start at `user` (the lookbehind excludes a preceding `~`). A
+ *     per-user home is not `homeDir`, so silently mapping `~user/` onto `homeDir` would open the
+ *     wrong person's file — leaving it unmatched is the correct refusal, not an oversight.
+ *
+ * `homeDir` empty means "no home known" (the host has not supplied one): a `~/` path is then rejected
+ * rather than guessed, the same posture absolute paths take when there is no workspace root.
  */
-export function resolveWorkspaceRelativePath(core: string, workspaceRoot: string): string | null {
-  // `~/` has no reliable home in the sandboxed renderer.
-  if (core.startsWith('~/')) return null
-  if (core.startsWith('/')) {
-    // Absolute: keep it only when it lives inside the active workspace, so system paths like
-    // `/usr/lib/...` never render as confident-but-dead links.
+export function resolveWorkspaceRelativePath(
+  core: string,
+  workspaceRoot: string,
+  homeDir = ''
+): string | null {
+  // `~/` is the home directory. Expand it to an absolute path, then let the absolute branch below
+  // apply the identical within-root test. With no home known, reject rather than guess.
+  let candidate = core
+  if (core.startsWith('~/')) {
+    if (!homeDir) return null
+    candidate = `${homeDir.replace(/\/+$/, '')}${core.slice(1)}`
+  }
+  if (candidate.startsWith('/')) {
+    // Absolute (including an expanded `~/`): keep it only when it lives inside the active workspace,
+    // so system paths like `/usr/lib/...` — and a home path outside the workspace — never render as
+    // confident-but-dead links.
     const root = workspaceRoot.replace(/\/+$/, '')
-    if (!root || core === root || !core.startsWith(`${root}/`)) return null
-    const relative = core.slice(root.length + 1)
+    if (!root || candidate === root || !candidate.startsWith(`${root}/`)) return null
+    const relative = candidate.slice(root.length + 1)
     return relative.length > 0 ? relative : null
   }
   // Relative: strip a single leading `./`. A leading `../` escapes the root (relative paths resolve
   // against the workspace root), so reject rather than underline a link main would refuse.
-  const relative = core.startsWith('./') ? core.slice(2) : core
+  const relative = candidate.startsWith('./') ? candidate.slice(2) : candidate
   if (!relative || relative === '..' || relative.startsWith('../')) return null
   return relative
 }
