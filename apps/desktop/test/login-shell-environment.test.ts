@@ -73,6 +73,30 @@ describe('login shell exported environment', () => {
     expect(runner).toHaveBeenCalledTimes(2)
   })
 
+  /**
+   * 只有 `-lc` 那条臂才补回继承来的 PATH，`-ilc` **不补**。
+   *
+   * 这个不对称是有意的：交互式登录臂 source 了 `.zprofile` 和 `.zshrc`，用户的 PATH 已经是完整答案，
+   * 再并上继承的那份等于把 launchd/Electron 塞进来、而用户 shell 里根本没有的条目硬塞回去。非交互臂
+   * 不读 `.zshrc`，可能真的缺东西，所以那一侧才保守地并一次。
+   *
+   * 上面那条 `-lc` 用例只守住了「该并的时候并了」这一半。反过来的一半此前无人守：把 `-lc` 这道门去掉，
+   * 12 条全绿（实测）——连真起 shell 的那条 it.each 都看不见，因为它的 `.zshrc` 导出的 PATH
+   * （`/opt/test tools:/usr/bin:/bin`）恰好是继承那份（`/usr/bin:/bin`）的超集，并不并结果一模一样。
+   * 所以判据必须是一条**只存在于继承侧**的条目：它出现在结果里，就说明交互臂也并了。
+   */
+  it('does not fold inherited PATH entries into the interactive arm result', async () => {
+    const env: NodeJS.ProcessEnv = { PATH: '/bin:/inherited-only', SHELL: '/bin/zsh' }
+    const result = await hydrateProcessEnvironmentFromLoginShell({
+      platform: 'darwin',
+      env,
+      runner: async (_shell, args) => framed(args, { PATH: '/opt/bin', EXPORTED: 'profile' })
+    })
+    // 自检：赢的是交互臂。落到 `-lc` 的话下面那条断言测的是另一条路径，本条就不可观测了。
+    expect(result).toEqual({ ok: true, shell: '/bin/zsh', mode: 'interactive-login' })
+    expect(env.PATH, '继承侧独有的条目出现在结果里：交互臂也做了 PATH 合并').toBe('/opt/bin')
+  })
+
   it('preserves all inherited values on total failure and returns a non-secret warning', async () => {
     const env = { PATH: '/bin', KEEP: 'original' }
     const result = await hydrateProcessEnvironmentFromLoginShell({ platform: 'darwin', env, runner: async () => { throw new Error('secret') } })
@@ -158,6 +182,40 @@ describe('login shell exported environment', () => {
     })
     expect(result).toEqual({ ok: true, shell: '/bin/zsh', mode: 'login' })
     expect(env).toMatchObject({ PATH: '/opt/bin:/bin', EXPORTED: 'profile' })
+  })
+
+  /**
+   * 早退的臂要把没花完的份额**整份**让给下一条，而不是再对半分一次。
+   *
+   * 除数 `arms.length - index` 是「剩下还有几条臂」，不是常数 2。实测（审计独立复现）：把它换成常量
+   * `arms.length`，上面每一条都还是绿的——因为现有用例要么两条臂都挂（各分一半，总量不变），要么第二条
+   * 臂瞬间返回且预算充裕（分多分少都够用）。两个世界只在「第一条臂**很快失败**、第二条臂需要那份余额」
+   * 这一处分岔，本条就是走这一处。
+   *
+   * 判据是**交给第二条臂的那个 timeoutMs**，不是返回值：两种除法下返回值完全一样（都是 -lc 成功），
+   * 只有实参能把它们分开。地板取「远大于半额」而不是精确值——精确值会被这几行的执行耗时打成 flake。
+   */
+  it('hands the whole unspent remainder to the next arm, not another half share', async () => {
+    const handed: Array<{ arm: string; timeoutMs: number }> = []
+    const result = await hydrateProcessEnvironmentFromLoginShell({
+      platform: 'darwin',
+      env: { PATH: '/bin', SHELL: '/bin/zsh' },
+      timeoutMs: 400,
+      runner: (_shell, args, _env, timeoutMs) => {
+        handed.push({ arm: args[0]!, timeoutMs })
+        return args[0] === '-ilc'
+          ? Promise.reject(new Error('interactive arm failed immediately'))
+          : Promise.resolve(framed(args, { EXPORTED: 'profile' }))
+      }
+    })
+    expect(result).toEqual({ ok: true, shell: '/bin/zsh', mode: 'login' })
+    // 自检：两条臂都跑了，否则下面那条断言在读一个不存在的元素。
+    expect(handed.map((call) => call.arm)).toEqual(['-ilc', '-lc'])
+    // 第一条臂几乎没花时间，所以第二条臂应当拿到接近 400 的整份；恒 /2 的话它只会拿到约 200。
+    expect(
+      handed[1]!.timeoutMs,
+      `第二条臂只拿到 ${handed[1]!.timeoutMs}ms：早退臂的余额没有整份让出去，除数被当成了常数`
+    ).toBeGreaterThan(300)
   })
 
   /**
