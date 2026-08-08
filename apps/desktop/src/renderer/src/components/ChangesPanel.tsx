@@ -22,26 +22,11 @@ import { presentError } from '../lib/error-presentation'
 import { gitBridge } from '../lib/git-bridge'
 import { describeGitRemote, discardIntent, type GitRemoteVerb } from '../lib/git-remote-outcome'
 import { workspaceRelativeGitPath } from '../lib/git-path-coordinates'
+import { gitChangeLabel } from '../lib/git-porcelain-status'
 import { beginPrLaunch, type PrLaunchPlan } from '../lib/pr-launch'
 import { useAppStore } from '../store'
 import { ComposerTextarea } from './ComposerTextarea'
 import { PrLaunchSurface } from './PrLaunchSurface'
-
-/** A short, human label for git's two-column status of one file. */
-function changeLabel(change: GitFileChange): string {
-  if (change.untracked) return 'Untracked'
-  const mark = (change.staged ? change.index : change.worktree)
-  switch (mark) {
-    case 'M': return 'Modified'
-    case 'A': return 'Added'
-    case 'D': return 'Deleted'
-    case 'R': return 'Renamed'
-    case 'C': return 'Copied'
-    case 'U': return 'Conflicted'
-    case 'T': return 'Type changed'
-    default: return 'Changed'
-  }
-}
 
 /**
  * Source Control: the current branch's changes, staging one file, and committing.
@@ -290,9 +275,13 @@ export function ChangesPanel({ workspace }: { workspace: WorkspaceRecord }) {
     // 的同名文件（#761）。转换只此一次，且 null 是必须处理的答案而不是异常：`status` 是整仓的，
     // 子目录 workspace 会正常列出自己子树之外的改动，那些行在这个编辑器里根本没有可打开的对象。
     const documentPath = repo ? workspaceRelativeGitPath(change.path, repo.repoRelativePrefix) : null
+    // 一次取值，图标的 title 与状态列共用。此前这里是两次调用同一个本地 `changeLabel`——同一个事实
+    // 算两遍，且那个本地实现只读一列，把 `AA`/`DD`/`AU`/`DU` 四种冲突说成 Added/Deleted（#746）。
+    // 分类现在归 gitChangeLabel（读两列），这一行只负责放到哪儿去。
+    const label = gitChangeLabel(change)
     return (
       <div className={`change-row change-row--${change.untracked ? 'untracked' : change.staged ? 'staged' : 'unstaged'}`} key={`${change.staged ? 'S' : 'W'}:${change.path}`}>
-        <span className="change-row__icon" title={changeLabel(change)}>
+        <span className="change-row__icon" title={label}>
           {change.untracked ? <FilePlus2 size={12} /> : <FileDiff size={12} />}
         </span>
         {/*
@@ -319,7 +308,7 @@ export function ChangesPanel({ workspace }: { workspace: WorkspaceRecord }) {
             {dir ? <small>{dir}</small> : null}
           </button>
         )}
-        <span className="change-row__state">{changeLabel(change)}</span>
+        <span className="change-row__state">{label}</span>
         {/*
           两个按钮包在一个容器里，而不是直接做 `.change-row` 网格的第 4、5 个孩子：那个网格是四列的，
           第 5 个孩子会折到第二行去。列数与「一行有几个按钮」是两件事，容器让它们不必联动。
