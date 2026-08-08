@@ -538,6 +538,8 @@ Desktop 刷新或重新 Attach 时优先投影这份 Agent 语义；新的 Run `
 
 ### 分层更新与回切
 
+本次版本交付的范围索引见 [桌面体验与分层更新交付清单](../delivery/desktop-experience-update-2026-09-10.md)；任务状态与验收证据仍由其引用的 Tracker 持有。
+
 - 参考 deepseek-harness 的组件生命周期：可替换表面必须释放订阅与副作用，状态和进程由稳定所有者持有；不为热更新复制 Runtime。
 - 纯前端且宿主、preload、IPC 与运行时依赖未变时优先热更新，保留会话、布局和未发送草稿，可回切上一候选。涉及宿主但不涉及 ctxmux 底层时安装应用并重启，保留 Run 并重新 attach，必要时依据 Provider native handle resume。需求顺序优先闭合可独立更新的前端体验切片。
 - ctxmux 底层变更须单独判定兼容性，不等于必须杀进程。无法保留 Run 时才考虑恢复会话的重启。若连 Session 都无法保持或 resume，必须在安装前提醒用户停止工作、确认现场不再需要，获得明确确认后执行。未知恢复能力不能当成可恢复。
