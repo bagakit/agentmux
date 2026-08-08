@@ -39,6 +39,15 @@
     {
       "action": "task_plan_set",
       "detail": "revision=3; supersedes_revision=2"
+    },
+    {
+      "action": "feature_goal_set",
+      "detail": "none -> 7a0316a64e641483d825592c79e0258d4bfc4d88e4354e8264f92ce3063da08b"
     }
-  ]
+  ],
+  "goal_contract": {
+    "schema": "bagakit.feature-goal.v1",
+    "ref": ".bagakit/feature-tracker/features/f-2528fmqbw/goal.md",
+    "revision": "7a0316a64e641483d825592c79e0258d4bfc4d88e4354e8264f92ce3063da08b"
+  }
 }
