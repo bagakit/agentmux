@@ -29,9 +29,18 @@ describe('Detector 1: fix/guard same-commit coupling (Layer A structural screen)
     expect(isTestPath('apps/desktop/test/foo.test.tsx')).toBe(true)
     expect(isTestPath('src/foo.spec.ts')).toBe(true)
     expect(isSourcePath('packages/core/src/client.ts')).toBe(true)
+    // .tsx/.jsx MUST count as source. This is an Electron+React repo where .tsx is the DOMINANT
+    // source extension (the whole renderer). If isSourcePath drops the `x?` (return /\.[cm]?[jt]s$/),
+    // a .tsx-only fix with its guard left behind — the exact 3afe619 defect — slips both layers,
+    // because touchesSource goes false and --verify never reverts it. Pin every renderer extension.
+    expect(isSourcePath('apps/desktop/src/renderer/src/components/EditorPane.tsx'), '.tsx 不算 source——渲染层全部漏检').toBe(true)
+    expect(isSourcePath('apps/desktop/src/renderer/src/main.jsx'), '.jsx 不算 source').toBe(true)
+    expect(isSourcePath('apps/desktop/src/main/index.mts'), '.mts 不算 source').toBe(true)
     // A test file is NOT source, and source is NOT test — the two predicates must not overlap,
     // else a commit that touches only a test would count as "touching source" and mislead.
     expect(isSourcePath('packages/core/test/client-connection-lost.test.ts'), 'test 文件被算成 source').toBe(false)
+    // A .tsx TEST file must also not count as source (disjointness holds at the dominant extension too).
+    expect(isSourcePath('apps/desktop/test/surface-tool-dock.test.tsx'), '.tsx test 文件被算成 source').toBe(false)
     expect(isTestPath('packages/core/src/client.ts'), 'source 文件被算成 test').toBe(false)
     // Docs/config are neither.
     expect(isSourcePath('docs/design/x.md')).toBe(false)
@@ -64,6 +73,15 @@ describe('Detector 1: fix/guard same-commit coupling (Layer A structural screen)
     expect(s.touchesTest, 'fixture 意外含 test 文件').toBe(false)
     expect(s.definitelyUncoupled, '源码-only 且无变异数字却没判成 uncoupled').toBe(true)
     expect(s.screenedClean).toBe(false)
+  })
+
+  it('FLAGS a SINGLE-source-file commit too (the common case; not just multi-file)', () => {
+    // Pins against gating definitelyUncoupled on sourceFiles.length >= 2. The most common fix is
+    // ONE source file; if the sound negative only fires for 2+ files, the everyday single-file
+    // guard-left-behind slips through. One file must be enough to flag.
+    const s = structuralCoupling(['packages/core/src/client.ts'], 'fix: 一处改动，没带测试')
+    expect(s.sourceFiles.length, 'fixture 不是单文件——钉不住 >=2 的门').toBe(1)
+    expect(s.definitelyUncoupled, '单个源文件-only 无测试却没判 uncoupled').toBe(true)
   })
 
   it('does NOT scream uncoupled when a test file AND measured mutation numbers ship together', () => {

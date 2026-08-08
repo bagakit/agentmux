@@ -45,6 +45,20 @@ describe('Detector 2: commit-message line anchor provenance', () => {
     expect(banned[0].col).toBe(3)
   })
 
+  it('FLAGS a prose anchor that carries a full PATH (the natural way people write them)', () => {
+    // Pins against "any anchor containing a slash ⇒ diagnostic". A real prose navigation anchor
+    // is almost always written with a path (`apps/desktop/src/store.ts:529`), NOT a bare
+    // basename. If path-with-slash were treated as evidence, the ban would be gutted for exactly
+    // the common form. This prose anchor is NOT followed by `: error` and NOT on an `at ` line,
+    // so it must be banned despite the slash.
+    const message = '见 apps/desktop/src/store.ts:529 那处的 reducer。'
+    const banned = bannedProseAnchors(message)
+    expect(banned.length, '带路径的 prose 锚点没被禁——含斜杠就当证据会掏空禁令').toBe(1)
+    expect(banned[0].path).toBe('apps/desktop/src/store.ts')
+    expect(banned[0].line).toBe(529)
+    expect(banned[0].kind).toBe('prose')
+  })
+
   it('does NOT flag a pasted compiler diagnostic (reproducible evidence is allowed)', () => {
     // The reverse self-cert (memory: package-report-preflight 的「候选其实齐全」那一侧).
     // A real tsc diagnostic carries a line:col but is evidence, not a durable nav claim.
@@ -99,6 +113,19 @@ describe('Detector 2: commit-message line anchor provenance', () => {
     const committed = Array.from({ length: 728 }, (_, i) => `line ${i + 1}`).join('\n') + '\n'
     const anchor = { raw: 'x.ts:529', path: 'x.ts', line: 529, col: null, kind: 'diagnostic', index: 0 }
     expect(anchorResolvesInTree(anchor, committed).ok, '529 <= 728 却判成越界').toBe(true)
+  })
+
+  it('FLAGS an EXACT off-by-one overshoot (line lineCount+1) — the true dirty-tree byte', () => {
+    // Pins against loosening the check to `line > lineCount + 1`. The gap-17 fixture (745 vs 728)
+    // survives a +1 slack; the real off-by-one (a dirty tree grew the file by one line) does not.
+    // committed has exactly 728 addressable lines; line 729 must be flagged.
+    const committed = Array.from({ length: 728 }, (_, i) => `line ${i + 1}`).join('\n') + '\n'
+    const anchor = { raw: 'x.ts:729', path: 'x.ts', line: 729, col: null, kind: 'diagnostic', index: 0 }
+    const res = anchorResolvesInTree(anchor, committed)
+    expect(res.ok, '729 = 728+1 却判成 in-range——off-by-one 脏树数字漏网').toBe(false)
+    // And the exact boundary (line 728) is the last valid line — must stay clean.
+    const edge = { raw: 'x.ts:728', path: 'x.ts', line: 728, col: null, kind: 'diagnostic', index: 0 }
+    expect(anchorResolvesInTree(edge, committed).ok, '最后一行 728 被误判越界').toBe(true)
   })
 
   it('FLAGS an anchor whose path is absent from the commit tree (null content)', () => {
