@@ -58,6 +58,12 @@ export type TopicBoardRow = BoardRowBase & {
  */
 export type BoardRow = ProjectBranchLane | TopicBoardRow
 
+/** Compact work-line recap shared by Topic and Branch rows. */
+export function boardRowRecap(row: BoardRow): string | null {
+  if (row.kind === 'topic') return row.topic.summary || null
+  return row.sessions.find((session) => Boolean(session.status.detail))?.status.detail ?? null
+}
+
 function workspaceForBranch(
   branch: WorkspaceBranchRecord,
   workspaces: readonly WorkspaceRecord[],

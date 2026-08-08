@@ -25,6 +25,7 @@ import { presentError } from '../lib/error-presentation'
 import {
   BOARD_COLUMN_DESCRIPTIONS,
   PROJECT_BOARD_COLUMNS,
+  boardRowRecap,
   filterBoardRows,
   type BoardRow,
   type BranchBindingFilter,
@@ -292,7 +293,7 @@ export function WorkspaceBoard() {
                 <div className="board-matrix__row" role="row" data-board-row={row.id} key={row.id}>
                   <header className="board-branch-head" role="rowheader">
                     <span className="board-branch-head__glyph"><RowIcon size={15} /></span>
-                    <span className="board-branch-head__identity"><strong>{row.name}</strong><small title={row.path ?? undefined}>{row.path ?? meta.emptyPathLabel}</small></span>
+                    <span className="board-branch-head__identity"><strong>{row.name}</strong><small title={row.path ?? undefined}>{row.path ?? meta.emptyPathLabel}</small>{boardRowRecap(row) ? <small className="board-branch-head__recap">{boardRowRecap(row)}</small> : null}</span>
                     <span className="board-branch-head__meta">
                       {row.kind === 'branch' && row.branch.isCurrent ? <em>Current</em> : null}
                       <small>{row.sessions.length} run{row.sessions.length === 1 ? '' : 's'}</small>
