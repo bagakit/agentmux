@@ -4303,6 +4303,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!session || session.kind !== 'agent') return
     get().enqueueAgentSteer(sessionId, text)
     await get().flushAgentSteerQueue(sessionId)
+    // `flushAgentSteerQueue` intentionally retains failed entries for retry. Surface
+    // that outcome to the Composer so it must keep the user's draft instead of
+    // treating a retained queue item as a successful send.
+    if ((get().agentSteerQueues?.[sessionId] ?? []).includes(text)) {
+      throw new Error('Prompt was retained for retry because the Agent did not accept it yet.')
+    }
   },
   async respondInteraction(sessionId, response) {
     const session = get().sessions.find((item) => item.id === sessionId)

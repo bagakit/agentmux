@@ -1,0 +1,192 @@
+{
+  "version": 2,
+  "feat_id": "f-2528fmqbw",
+  "plan_status": "reviewed",
+  "plan_revision": 1,
+  "supersedes_revision": null,
+  "review_ref": "docs/reviews/continuous-progress-2026-09-12.md",
+  "source_refs": [
+    "docs/reviews/continuous-progress-2026-09-12.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": "docs/reviews/continuous-progress-2026-09-12.md",
+      "source_refs": [
+        "docs/reviews/continuous-progress-2026-09-12.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "条件续行投递边界",
+      "objective": "在现有 typed prompt 投递边界增加精确 Session/Run/readiness/tick 去重的条件检查接口。",
+      "outcome": "忙、权限等待、用户输入占用、Run 替换和未知结果不会自动发送；同一就绪信号最多一次。",
+      "acceptance": [
+        "Host 在最终提交边界复核 Agent 身份、running、readiness 和用户输入版本",
+        "重复 tick、并发检查和超时未知结果不双发且保留回执"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core exec vitest run test/continuous-progress-delivery.test.ts",
+          "proves": "条件投递及并发去重行为"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/continuous-progress-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "estimate_hours": 1.5,
+      "heavy": true,
+      "heavy_reason": "跨 Core/Main typed 边界并需要并发屏障验证",
+      "introduced_in_revision": 1,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-002",
+      "depends_on": [
+        "T-001"
+      ],
+      "title": "持久化循环与生命周期",
+      "objective": "提供 create/list/inspect/pause/resume/stop/check typed loop intent 及应用退出恢复后的单次检查。",
+      "outcome": "默认 30 分钟循环持久保存，忙时跳过，暂停/停止语义明确，重启不补发漏周期。",
+      "acceptance": [
+        "同一目标只能有一个活动 loopId，timer 不依赖 Renderer setInterval",
+        "应用恢复只执行一次检查并显示下一次时间，不集中补发"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/continuous-progress-scheduler.test.ts",
+          "proves": "调度生命周期、fake clock 与持久化恢复"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/continuous-progress-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "estimate_hours": 2,
+      "heavy": true,
+      "heavy_reason": "需协调 Main 生命周期、持久化和 typed control schema",
+      "introduced_in_revision": 1,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-003",
+      "depends_on": [
+        "T-002"
+      ],
+      "title": "持续推进观察面板",
+      "objective": "实现紧凑状态行和展开观察面板，呈现活动、判定、回执、倒计时及暂停原因。",
+      "outcome": "用户可在一个面板理解循环与 Agent 执行状态，不需额外终端。",
+      "acceptance": [
+        "折叠态单行显示 Provider、执行状态和下次检查",
+        "展开态显示最近活动来源、决定/回执、错误对象和暂停恢复控件"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/continuous-progress-panel.test.tsx",
+          "proves": "观察界面真实接线和可访问操作"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/continuous-progress-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "estimate_hours": 1.5,
+      "heavy": true,
+      "heavy_reason": "跨现有 Agent 状态与 Control Host 回执表面",
+      "introduced_in_revision": 1,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-004",
+      "depends_on": [
+        "T-001"
+      ],
+      "title": "Tracker 任务来源适配",
+      "objective": "只读适配 Feature Tracker runnable、blocked、closeout 和终态，并支持无 Tracker 的截止/触发上限。",
+      "outcome": "不会把全部 done 未 closeout 误判完成，业务状态不被 scheduler 改写。",
+      "acceptance": [
+        "archived 停止循环，discarded/transferred 终止但不标业务成功",
+        "blocked/no runnable/来源损坏分别显示原因"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/continuous-progress-tracker.test.ts",
+          "proves": "Tracker 状态映射"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/continuous-progress-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "estimate_hours": 1,
+      "introduced_in_revision": 1,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-005",
+      "depends_on": [
+        "T-002",
+        "T-003",
+        "T-004"
+      ],
+      "title": "受授权 Provider 端到端验收",
+      "objective": "用明确授权的测试 Session 验证结束、到期、单次接收、新一轮开始及重启恢复。",
+      "outcome": "Claude 等 Provider 分项报告支持或 unknown，不从单一 Provider 外推。",
+      "acceptance": [
+        "真实回执区分决定发送、Host 接受、Provider 消费/unknown",
+        "超时未知不重发，重启恢复只检查一次"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/continuous-progress-e2e.test.ts",
+          "proves": "受控端到端回执状态机"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/continuous-progress-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "estimate_hours": 1,
+      "introduced_in_revision": 1,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    }
+  ]
+}
