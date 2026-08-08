@@ -360,6 +360,7 @@
 .project-activity-menu { max-width: min(90vw, 300px); padding: var(--sp-1); }
 .project-activity-menu__item small { display: block; white-space: normal; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
 .project-activity-menu__item { gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); }
+.board-branch-head__recap { max-width: 28ch; overflow: hidden; text-overflow: ellipsis; opacity: .8; }
 
 .project-rail-shell { position: relative; min-height: 0; }
 .project-rail-shell > .sidebar { height: 100%; width: 100%; }
