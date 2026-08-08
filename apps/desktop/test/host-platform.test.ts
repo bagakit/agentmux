@@ -147,8 +147,64 @@ function hostPlatformAliases(source: ts.SourceFile): Map<string, string> {
   return aliases
 }
 
-function hostPlatformCallsIn(source: ts.SourceFile): { name: string; line: number; args: number }[] {
-  const calls: { name: string; line: number; args: number }[] = []
+/**
+ * 这次调用的实参是**转发本函数收到的形参**，还是**这里新造的一个平台值**？
+ *
+ * 为什么必须分这两类（#735）：原判据是「实参个数 > 0 即违规」，理由写着「显式传参只有两种来源：
+ * 要么手上已有一个 platform（那它自己又是从哪来的），要么是写死的字面量」。**那句枚举漏了第三种**
+ * ——把自己的可选形参一路透传下去，而那正是 `host-platform.ts` 的每个导出（`hostPlatform(userAgent?)`
+ * / `isMacPlatform(userAgent?)` / `fileManagerName(platform?)` / `revealInFileManagerLabel(platform?)`）
+ * 被设计出来支持的写法，lib 自己的注释也明写「参数一路传下去而不在这里兜默认值，`navigator` 缺席的
+ * 处理就只有一处」。#610 的 `selectionForceGestureHint(userAgent?)` 是本仓第一处合法的带实参调用，
+ * 于是这道门对**正确代码**打红——而本仓 #731 记过：对正确代码打红的守卫会被下一个作者整条删掉。
+ *
+ * 判据落在「这个值是它收到的，还是它造的」。所以只认**解析得到本函数（或任一外层函数）形参**的裸
+ * 标识符；`'mac'`、模板串、`'mac' as string`、`x.slice()` 一律仍是违规。
+ *
+ * **刻意不写成「裸标识符就放过」**：那样 `const p = 'mac'; isMacPlatform(p)` 就溜过去了——平台照旧
+ * 被钉死，只是多绕一个局部。必须解析到形参声明，局部变量不算。
+ *
+ * 而「解析到形参」必须按语言自己的作用域规则走，不能只在外层函数的形参表里找到同名就算数（本仓
+ * #648/#654 两次被同名影子绕过）。同一个函数里 `const` 不能与形参同名（tsc 会红），所以影子只可能
+ * 出现在**嵌套**函数里：`function f(platform?) { const g = () => { const platform = 'mac'; …(platform) } }`。
+ * 因此自下而上走，先遇到声明该名字的局部就判「现造」，先遇到形参才判「透传」——谁先出现谁算。
+ */
+function forwardsAnEnclosingParameter(argument: ts.Expression): boolean {
+  if (!ts.isIdentifier(argument)) return false
+  const name = argument.text
+  for (let scope: ts.Node | undefined = argument.parent; scope; scope = scope.parent) {
+    // 这一层里有没有一个同名局部？有就是影子：这个值是这里造的，不是收到的。
+    const statements = ts.isBlock(scope) || ts.isSourceFile(scope) ? scope.statements : undefined
+    if (
+      statements?.some(
+        (statement) =>
+          ts.isVariableStatement(statement) &&
+          statement.declarationList.declarations.some(
+            (declaration) => ts.isIdentifier(declaration.name) && declaration.name.text === name
+          )
+      )
+    ) {
+      return false
+    }
+    if (
+      ts.isFunctionDeclaration(scope) ||
+      ts.isFunctionExpression(scope) ||
+      ts.isArrowFunction(scope) ||
+      ts.isMethodDeclaration(scope)
+    ) {
+      const declared = scope.parameters.some(
+        (parameter) => ts.isIdentifier(parameter.name) && parameter.name.text === name
+      )
+      if (declared) return true
+    }
+  }
+  return false
+}
+
+function hostPlatformCallsIn(
+  source: ts.SourceFile
+): { name: string; line: number; minted: string[] }[] {
+  const calls: { name: string; line: number; minted: string[] }[] = []
   const aliases = hostPlatformAliases(source)
   const visit = (node: ts.Node): void => {
     if (ts.isCallExpression(node)) {
@@ -157,7 +213,11 @@ function hostPlatformCallsIn(source: ts.SourceFile): { name: string; line: numbe
         calls.push({
           name,
           line: source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1,
-          args: node.arguments.length
+          args: node.arguments.length,
+          // 「这里新造出来的」那些实参。空集 = 要么零实参，要么每个都是透传下来的形参。
+          minted: node.arguments
+            .filter((argument) => !forwardsAnEnclosingParameter(argument))
+            .map((argument) => argument.getText(source))
         })
       }
     }
@@ -355,23 +415,27 @@ describe('host-platform：渲染层唯一的平台判定与随平台变化的文
     }
   })
 
-  it('调用点必须让平台由 lib 自己探测——写死实参等于又判了一次平台', () => {
+  it('调用点必须让平台由 lib 自己探测——新造一个平台实参等于又判了一次平台', () => {
     // 上一条只证「import 声明在场」。它证不到**调用**：`revealInFileManagerLabel('mac')` 完全满足
     // import 关系，而那正是第三次手抄平台判定——在 Windows 上无条件说 "Reveal in Finder"。
-    // review agent 实测过这条变异：改 WorkspaceWorkbench.tsx:213 之后 desktop 全套 2921 条通过，
-    // 两条失败与它无关。所以这里判**实参个数**：渲染层的调用一律零实参，平台由缺省参数从 lib 取。
+    // review agent 实测过这条变异：改 WorkspaceWorkbench.tsx 里那处之后 desktop 全套 2921 条通过，
+    // 两条失败与它无关。所以这里判**实参是从哪来的**。
     //
-    // 为什么零实参是对的规矩而不是过严：三个函数的缺省值都是 `hostPlatform()`，那是唯一一处探测。
-    // 显式传参只有两种来源——要么手上已有一个 platform（那它自己是从哪来的？只能是又判了一次），
-    // 要么是写死的字面量（那就是 bug 本身）。测试文件不受这条约束：它必须能喂三态。
+    // 判据是「这个值是它收到的，还是它造的」，不是「有没有实参」（#735 更正）。旧判据写的是
+    // 「零实参」，理由里枚举了实参的两种来源（已持有的 platform / 写死的字面量）——**漏了第三种**：
+    // 把自己的可选形参透传下去，而那是 lib 每个导出都刻意支持、且注释明写要求的写法。#610 的
+    // `selectionForceGestureHint(userAgent?)` 是第一处合法带实参调用，旧判据对它打红。本仓 #731：
+    // 对正确代码打红的守卫会被下一个作者删掉，所以修的是判据，不是那处生产代码。
     const offenders: string[] = []
     let seen = 0
     for (const file of rendererSources()) {
       if (file === LIB_FILE) continue
       for (const call of hostPlatformCallsIn(parse(file))) {
         seen += 1
-        if (call.args > 0) {
-          offenders.push(`${path.relative(RENDERER, file)}:${call.line} ${call.name}(${call.args} 个实参)`)
+        if (call.minted.length > 0) {
+          offenders.push(
+            `${path.relative(RENDERER, file)}:${call.line} ${call.name}(${call.minted.join(', ')})`
+          )
         }
       }
     }
@@ -379,13 +443,14 @@ describe('host-platform：渲染层唯一的平台判定与随平台变化的文
     expect(seen, '一个 host-platform 调用都没找到——判据失效，主断言恒绿').toBeGreaterThan(8)
     expect(
       offenders,
-      '去掉实参：平台由 lib 的缺省参数探测。手上已有 platform 说明别处又判了一次，写死字面量就是那个 bug'
+      '这些调用现造了一个平台实参。要么去掉（让 lib 的缺省参数探测），要么透传本函数收到的形参；' +
+        '写死字面量就是 #384 那个 bug 本身'
     ).toEqual([])
-    // 反向自检：谓词认得出带实参的调用。否则上面那条是因为永远数不到实参才绿的。
+    // 反向自检：谓词认得出**现造的**实参。否则上面那条是因为永远数不到而绿的。
     expect(
-      hostPlatformCallsIn(parseText("const x = revealInFileManagerLabel('mac')")).map((c) => c.args),
-      '谓词数不出实参——这道门恒绿'
-    ).toEqual([1])
+      hostPlatformCallsIn(parseText("const x = revealInFileManagerLabel('mac')")).map((c) => c.minted),
+      '谓词认不出写死的字面量实参——这道门恒绿'
+    ).toEqual([["'mac'"]])
     // 而且认得出 review agent 实测能溜过去的三种绕过写法：括号包住的 callee、别名、成员调用。
     // 每一种都硬把平台钉成 'mac'，从前的 `isIdentifier(node.expression)` 对它们全盲。
     for (const shape of [
@@ -394,14 +459,42 @@ describe('host-platform：渲染层唯一的平台判定与随平台变化的文
       "const z = lib.revealInFileManagerLabel('mac')"
     ]) {
       expect(
-        hostPlatformCallsIn(parseText(shape)).map((c) => c.args),
+        hostPlatformCallsIn(parseText(shape)).map((c) => c.minted.length),
         `谓词认不出这个绕过写法：${shape}`
       ).toEqual([1])
     }
-    // 正交边界：朴素的零实参调用不许被误报成违规。
+    // 正交边界一：朴素的零实参调用不许被误报成违规。
     expect(
-      hostPlatformCallsIn(parseText('const x = revealInFileManagerLabel()')).filter((c) => c.args > 0),
+      hostPlatformCallsIn(parseText('const x = revealInFileManagerLabel()')).flatMap((c) => c.minted),
       '谓词把零实参调用误报成带实参了'
     ).toEqual([])
+    // 正交边界二（#735 的落点）：透传本函数形参是合法的，不许打红。这一条钉住的正是 #610 那处
+    // 的形状——放宽必须**只**放宽到这里。
+    expect(
+      hostPlatformCallsIn(
+        parseText('function hint(userAgent?: string) { return isMacPlatform(userAgent) }')
+      ).flatMap((c) => c.minted),
+      '透传本函数的形参被误报成「现造平台值」——#610 那处合法调用会被打假红'
+    ).toEqual([])
+    // 而放宽没有换来容忍度：绕一个局部变量把平台钉死，照旧是违规。「裸标识符就放过」会漏掉它。
+    expect(
+      hostPlatformCallsIn(parseText("const p = 'mac'; const x = isMacPlatform(p)")).flatMap(
+        (c) => c.minted
+      ),
+      '局部变量洗一遍就溜过去了——判据必须解析到形参声明，不能只认标识符'
+    ).toEqual(['p'])
+    // 同名影子（本仓 #648/#654 那一族）：外层形参叫 platform，内层嵌套函数自己造一个同名局部。
+    // 「在任一外层形参表里找到同名就放过」会被它整条绕开，故按作用域自下而上判、谁先出现算谁。
+    expect(
+      hostPlatformCallsIn(
+        parseText(
+          'function outer(platform?: string) {' +
+            "  const inner = () => { const platform = 'mac'; return fileManagerName(platform) };" +
+            '  return inner()' +
+            '}'
+        )
+      ).flatMap((c) => c.minted),
+      '同名局部影子被当成形参透传放过了——判据只比对了名字，没走作用域'
+    ).toEqual(['platform'])
   })
 })
