@@ -16,7 +16,7 @@ export function useScratchTopics(workspaceId: string | null): {
   error: string | null
 } {
   const revision = useAppStore((state) =>
-    workspaceId ? state.workspaceFileRevisions[workspaceId] ?? 0 : 0)
+    workspaceId ? state.workspaceFileRevisions?.[workspaceId] ?? 0 : 0)
   const [state, setState] = useState<{
     workspaceId: string
     topics: ScratchTopicSnapshot[] | null

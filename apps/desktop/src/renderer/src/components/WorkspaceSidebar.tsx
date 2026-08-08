@@ -24,6 +24,8 @@ import { ProjectRailToolbar } from './ProjectRailToolbar'
 import { WorkspaceRowContextMenu } from './WorkspaceRowContextMenu'
 import { ConfirmationDialog } from './ConfirmationDialog'
 import { SidebarToggleChrome } from './TopRowChrome'
+import { useScratchTopics } from '../hooks/useScratchTopics'
+import { activityContextsForWorkspaces } from '../lib/activity-groups'
 
 export function WorkspaceSidebar({
   onOpenSettings
@@ -48,6 +50,7 @@ export function WorkspaceSidebar({
   )
   const { scratch, projects } = navigation
   const activeWorkspace = config?.workspaces.find((workspace) => workspace.id === activeWorkspaceId)
+  const { topics: scratchTopics } = useScratchTopics(scratch?.id ?? null)
   const activeProjectId = activeWorkspace && activeWorkspace.id !== scratch?.id
     ? workspaceProjectId(activeWorkspace)
     : null
@@ -152,7 +155,7 @@ export function WorkspaceSidebar({
         workspaceId={preferred ?? project.preferredWorkspaceId}
         onRemove={() => setRemoveRequest(project)}
       >
-        <div className="project-rail-entry">{row}<ProjectActivity sessions={projectSessions} /></div>
+        <div className="project-rail-entry">{row}<ProjectActivity sessions={projectSessions} contexts={activityContextsForWorkspaces(project.workspaces)} /></div>
       </WorkspaceRowContextMenu>
     )
   }
@@ -196,7 +199,10 @@ export function WorkspaceSidebar({
               <Pin size={10} />
 
             </span>
-          </button><ProjectActivity sessions={sessions.filter((session) => workspaceOwnsSessionPath(scratch, session))} /></div>
+          </button><ProjectActivity
+            sessions={sessions.filter((session) => workspaceOwnsSessionPath(scratch, session))}
+            contexts={activityContextsForWorkspaces([scratch], scratchTopics ?? [])}
+          /></div>
           </WorkspaceRowContextMenu>
         </div>
       ) : null}
@@ -333,7 +339,7 @@ function GroupHeader({
         <span className="project-rail-group__address">{railGroupAddress(group.groupPath)}</span>
       ) : null}
     </button>
-    {collapsed ? <ProjectActivity sessions={groupSessions} /> : null}
+    {collapsed ? <ProjectActivity sessions={groupSessions} contexts={activityContextsForWorkspaces(group.nodes.flatMap((node) => node.project.workspaces))} /> : null}
     </div>
   )
 }
