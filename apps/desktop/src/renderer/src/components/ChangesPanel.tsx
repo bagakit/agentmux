@@ -18,16 +18,13 @@ import type { GitFileChange, WorkspaceRecord } from '../../../shared/contracts'
 import { useGitStatus } from '../hooks/useGitStatus'
 import { usePrReadiness } from '../hooks/usePrReadiness'
 import { api } from '../lib/api'
+import { presentError } from '../lib/error-presentation'
 import { gitBridge } from '../lib/git-bridge'
 import { describeGitRemote, discardIntent, type GitRemoteVerb } from '../lib/git-remote-outcome'
 import { beginPrLaunch, type PrLaunchPlan } from '../lib/pr-launch'
 import { useAppStore } from '../store'
 import { ComposerTextarea } from './ComposerTextarea'
 import { PrLaunchSurface } from './PrLaunchSurface'
-
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}
 
 /** A short, human label for git's two-column status of one file. */
 function changeLabel(change: GitFileChange): string {
@@ -119,7 +116,7 @@ export function ChangesPanel({ workspace }: { workspace: WorkspaceRecord }) {
       await lookup.bridge.stage(workspace.id, change.path)
       await refresh()
     } catch (cause) {
-      setActionError(message(cause))
+      setActionError(presentError(cause))
     } finally {
       setBusyPath(null)
     }
@@ -135,7 +132,7 @@ export function ChangesPanel({ workspace }: { workspace: WorkspaceRecord }) {
       await lookup.bridge.unstage(workspace.id, change.path)
       await refresh()
     } catch (cause) {
-      setActionError(message(cause))
+      setActionError(presentError(cause))
     } finally {
       setBusyPath(null)
     }
@@ -161,7 +158,7 @@ export function ChangesPanel({ workspace }: { workspace: WorkspaceRecord }) {
       await lookup.bridge.discard(workspace.id, change.path, change.untracked)
       await refresh()
     } catch (cause) {
-      setActionError(message(cause))
+      setActionError(presentError(cause))
     } finally {
       setBusyPath(null)
     }
@@ -189,7 +186,7 @@ export function ChangesPanel({ workspace }: { workspace: WorkspaceRecord }) {
       else setActionError(outcome.message)
       await refresh()
     } catch (cause) {
-      setActionError(message(cause))
+      setActionError(presentError(cause))
     } finally {
       setBusyRemote(null)
     }
@@ -206,7 +203,7 @@ export function ChangesPanel({ workspace }: { workspace: WorkspaceRecord }) {
       setCommitMessage('')
       await refresh()
     } catch (cause) {
-      setActionError(message(cause))
+      setActionError(presentError(cause))
     } finally {
       setCommitting(false)
     }
@@ -454,7 +451,7 @@ export function ChangesPanel({ workspace }: { workspace: WorkspaceRecord }) {
           // 走 `api.ui.openExternal` 而不是裸 <a href>：渲染层没有外部导航权，裸链接在这个宿主里要么
           // 什么都不发生要么把整个应用导航走。不走 store 的 openHttpLink——那个的 destination 族是给
           // 终端链接用的（开进 Tab/Region 需要 tabId+regionId 出处，这个面板没有也不该有）。
-          void api.ui.openExternal(url).catch((cause) => setActionError(message(cause)))
+          void api.ui.openExternal(url).catch((cause) => setActionError(presentError(cause)))
         }}
       />
       {repo ? (

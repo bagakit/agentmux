@@ -13,6 +13,7 @@ import type {
 } from '../../../shared/contracts'
 import type { BrowserWorkbenchSurface } from '../lib/workbench-tabs'
 import { api } from '../lib/api'
+import { presentError } from '../lib/error-presentation'
 
 export type BrowserProfileSurface = Pick<
   BrowserWorkbenchSurface,
@@ -114,7 +115,7 @@ export function BrowserProfilesPanel({
     void api.browser.listProfiles().then((next) => {
       if (mounted.current) setProfiles(next)
     }).catch((cause) => {
-      if (mounted.current) setError(cause instanceof Error ? cause.message : String(cause))
+      if (mounted.current) setError(presentError(cause))
     })
     return () => {
       mounted.current = false
@@ -133,7 +134,7 @@ export function BrowserProfilesPanel({
       setProfiles((current) => [...(current ?? []), created])
       setCreateLabel('')
     } catch (cause) {
-      if (mounted.current) setError(cause instanceof Error ? cause.message : String(cause))
+      if (mounted.current) setError(presentError(cause))
     } finally {
       if (mounted.current) setBusy(null)
     }
@@ -153,7 +154,7 @@ export function BrowserProfilesPanel({
       setSources(detected)
     } catch (cause) {
       if (mounted.current && importRequest.current === request) {
-        setError(cause instanceof Error ? cause.message : String(cause))
+        setError(presentError(cause))
       }
     } finally {
       if (mounted.current && importRequest.current === request) setBusy(null)
@@ -185,7 +186,7 @@ export function BrowserProfilesPanel({
       setProfiles((current) => [...(current ?? []), imported])
       closeImport()
     } catch (cause) {
-      if (mounted.current) setError(cause instanceof Error ? cause.message : String(cause))
+      if (mounted.current) setError(presentError(cause))
     } finally {
       if (mounted.current) setBusy(null)
     }
@@ -198,7 +199,7 @@ export function BrowserProfilesPanel({
     try {
       await api.browser.switchProfile(browserId, profileId)
     } catch (cause) {
-      if (mounted.current) setError(cause instanceof Error ? cause.message : String(cause))
+      if (mounted.current) setError(presentError(cause))
     } finally {
       if (mounted.current) setBusy(null)
     }
@@ -214,7 +215,7 @@ export function BrowserProfilesPanel({
       setProfiles((current) => current?.filter((profile) => profile.id !== profileId) ?? null)
       setConfirmDeleteId(null)
     } catch (cause) {
-      if (mounted.current) setError(cause instanceof Error ? cause.message : String(cause))
+      if (mounted.current) setError(presentError(cause))
     } finally {
       if (mounted.current) setBusy(null)
     }

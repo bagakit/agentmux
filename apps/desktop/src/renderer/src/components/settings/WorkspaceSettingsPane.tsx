@@ -2,6 +2,7 @@ import { FolderGit2, LoaderCircle, Play, RadioTower } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { AppConfig } from '../../../../shared/contracts'
 import { api } from '../../lib/api'
+import { presentError } from '../../lib/error-presentation'
 import { configuredExecutors } from '../../lib/executors'
 import { executorDetectionKey, useAppStore } from '../../store'
 import { agentProviderLabel } from '../AgentProviderIcon'
@@ -72,7 +73,7 @@ export function WorkspaceSettingsPane({ config, onClose }: {
       }
       onClose()
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
+      setError(presentError(cause))
     } finally {
       setCreating(false)
     }

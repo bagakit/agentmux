@@ -15,6 +15,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { WorkspaceRecord } from '../../../shared/contracts'
 import { describeDeliveryEvidence } from '../lib/delivery-evidence'
 import { api } from '../lib/api'
+import { presentError } from '../lib/error-presentation'
 import { configuredExecutors } from '../lib/executors'
 import type { BoardRow } from '../lib/project-board'
 import { executorDetectionKey, useAppStore } from '../store'
@@ -100,7 +101,7 @@ export function BoardDiscussionCanvas({
       await launchBoardAgent(workspace.id, executorId, prompt.trim())
       onClose()
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
+      setError(presentError(cause))
     } finally {
       setLaunching(false)
     }
