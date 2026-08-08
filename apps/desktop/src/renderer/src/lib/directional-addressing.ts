@@ -12,9 +12,22 @@
  *
  * 判定写成纯函数：本仓库测试用 `renderToStaticMarkup`，effect 不跑，写在组件或 store 回调里的
  * 分支没有断言够得着。
+ *
+ * **本文件已知的盲点（明说，免得下一个人以为方向已经全锁上了）**：文末
+ * `_addressDirectionMatchesControlProtocol` 那道证明只锁**集合成员**——渲染层的 `SplitDirection` 与
+ * 控制协议 `AgentMuxOpenDestination.direction` 逐字相等。它锁不住两类东西：
+ *   1. 把方向 union 又抄成**运行时 `string[]` / 三元**的校验器。Core 侧至今有两处（`control-host.ts`
+ *      的 `openDestination` 用 `['left','right','up','down'].includes(...)`，`agentmux.ts` 的
+ *      `openDestination` 用 `? 'left' : … : 'down'` 的兜底三元）——删/加一个方向它们不报错、无红测试，
+ *      症状是那个方向被静默拒绝或投影错。它们在 `packages/core`，不在本 lane 的可改文件内；方向没有
+ *      运行时元组 SSOT（不像预设的 `WORKBENCH_LAYOUT_PRESETS`）正是根因。真正的修法是在 Core 建一个
+ *      `SPLIT_DIRECTIONS` 元组 + `isSplitDirection` 谓词，让那两处从它派生——留作后续。
+ *   2. `orientationOf`/`placementOf`（split-direction.ts）里**对调两个 case 返回值**这类变异：tsc 对它
+ *      沉默（实测两次变异 tsc 均 exit 0），挡它的是运行时值断言（`workbench-view-layout.test.ts` 的
+ *      逐方向 axis/order 用例、`directional-region-ssot.test.ts`），不是本证明。
  */
 
-import type { AgentMuxRegionNeighbor } from '@agentmux/core/control'
+import type { AgentMuxOpenDestination, AgentMuxRegionNeighbor } from '@agentmux/core/control'
 import type { SplitDirection } from './workbench-layout'
 import type { WorkbenchRegionBounds } from './workbench-view-layout'
 import { orientationOf, placementOf, regionInDirection } from './split-direction'
@@ -22,12 +35,49 @@ import { orientationOf, placementOf, regionInDirection } from './split-direction
 /**
  * 用户说的那四个方向。与 `open` 的 direction 同名同义，不另起一套词。
  *
- * 刻意写成 `SplitDirection` 的别名而不是重新列一遍那四个字面量：这句注释此前就承诺了「同名同义」，
- * 而实现是第二份手抄——同义靠的是两处恰好列了同样四个词，不是靠类型。两份手抄意味着任何一侧加一个
- * 方向（比如将来的 `previous`/`next` 轴）不会在另一侧引发编译错，而 `orientationOf`/`placementOf`
- * 这类判定只穷举了一份 union，另一份多出来的成员会静默落进它们的 else 桶。
+ * 刻意写成 `SplitDirection` 的别名而不是重新列一遍那四个字面量：那样它与渲染层的方向真相（哪根轴、
+ * 哪一侧由 `split-direction` 的 `orientationOf`/`placementOf` 拆）在编译期就是同一个集合。那两个拆解
+ * 函数是**无 `default` 的穷举 switch**：给 `SplitDirection` 加第五个方向而不在每个 case 作答，tsc 当场
+ * 以 TS2366 报红（实测——见本文件末尾 `_addressDirectionMatchesControlProtocol` 上方那段实验记录）。
+ * 于是渲染层内部这一侧不存在「多出来的成员静默落进 else 桶」的隐患。
  */
 export type AddressDirection = SplitDirection
+
+/**
+ * 渲染层的方向集合（`SplitDirection`）与**控制协议**的方向集合必须逐字相等。
+ *
+ * 这是本仓最常复发的缺陷族——「一个 union 被抄成第二份，tsc 看不见它们之间的漂移」——在方向上唯一还
+ * 没上锁的一处。方向被独立手写在**两个包**里：渲染层的 `SplitDirection`（workbench-layout.ts），和
+ * Core 控制协议 `AgentMuxOpenDestination` 里 `split` 分支的 `direction` 字段（control.ts）。两处今天
+ * 恰好都是 `'left' | 'right' | 'up' | 'down'`，但那是两处同时写对，不是类型逼出来的：Agent 用
+ * `open --left-of` 造得出一个方向，`inspect` 用同名方向问「我左边是什么」（`directionalNeighbor` 返回
+ * 的就是控制契约的 `AgentMuxRegionNeighbor`）。任一侧加/删一个方向而另一侧没跟上，Agent 就会造出一个
+ * 查不回来、或查得出却造不成的方向，而两个包各自的测试照旧全绿。
+ *
+ * 下面这道双向 `extends` 证明把两份手抄锁在一起：`ControlSplitDirection ⊆ SplitDirection` 且
+ * `SplitDirection ⊆ ControlSplitDirection`。任一方向的包含关系断裂，对应那一半就从 `true` 塌成
+ * `never`，而 `never` 不能赋给 `true` 的槽位——于是漂移是一处**点名了是哪一半失败**的编译错误，
+ * 落在渲染层这个 `src/` 文件里（真正的 `tsc --noEmit -p tsconfig.json` 门禁看得见的地方）。同
+ * `workbench-layout-preset.ts` 的 `_presetTupleIsExactlyTheUnion`：那边把预设 union 与它的运行时元组
+ * 锁在一起，这边把方向 union 与控制协议锁在一起。`void` 让这道证明不至于被读成死变量。
+ *
+ * 为什么不各写成 `(typeof T)[number]` 从一处派生：方向在这里天生没有运行时元组可派生（`SplitDirection`
+ * 是纯类型，控制协议那份也是），两侧各自独立写出、由本证明绑定，才使得任一侧漂移是一处响亮的编译错误
+ * ——若从同一处派生，两半都退化成 `X extends X` 恒真，证明成了永不失败的死代码。
+ *
+ * **上一段不只是叮嘱，有人钉着**：把 `ControlSplitDirection` 改成 `= SplitDirection`（即让证明从自己
+ * 的另一半派生）实测 `tsc --noEmit` **exit 0** 且相关两个 suite 43 条全绿——这道证明当场变成永不失败的
+ * 装饰。所以判据不能只是「证明在场」。`directional-region-ssot.test.ts` 的
+ * 「方向的跨包证明必须真的跨包」用 checker 顺着别名链追每一半 `extends` 两侧的**定义出处**，要求恰好是
+ * 一半 core→renderer、一半 renderer→core；那次变异现在红。判出处不判拼法，所以把 `Extract<…>` 直接内联
+ * 进元组这类等价改写照旧通过（也实测过）。
+ */
+type ControlSplitDirection = Extract<AgentMuxOpenDestination, { kind: 'split' }>['direction']
+const _addressDirectionMatchesControlProtocol: [
+  ControlSplitDirection extends SplitDirection ? true : never,
+  SplitDirection extends ControlSplitDirection ? true : never
+] = [true, true]
+void _addressDirectionMatchesControlProtocol
 
 /** 判定只需要这些事实——不接整个 store，也不接布局树本身。 */
 export type DirectionalNeighborInput = {
