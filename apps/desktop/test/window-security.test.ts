@@ -467,12 +467,15 @@ describe('index.ts wiring guard: self-check (the guard reds on a planted violati
     const inlined = parse(
       'const w = new BrowserWindow({ webPreferences: { preload: p, contextIsolation: true, sandbox: true, nodeIntegration: false } })'
     )
-    // 内联对象字面量：取值全对，但形状是 object 而非 call。守卫据此报红。
+    // 内联对象字面量：取值全对，但形状是 object 而非 call。守卫据此报红。webSecurity 缺席读成 'missing'，
+    // preload 是裸标识符 `p`（不是 join 调用）故读成 not-a-join——两个新字段都由共享分类器一并读出。
     expect(webPreferencesShape(inlined)).toEqual({
       shape: 'inline-literal',
       contextIsolation: true,
       sandbox: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      webSecurity: 'missing',
+      preload: { kind: 'not-a-join' }
     })
     // 对照：真正的调用形状被认成 call，callee 的绑定与 preload 实参的来处一并读出。fixture 带上生产同款
     // 的两行 import（见 WEBPREFS_IMPORTS 注释），callee 才解析到 window-security、join 才解析到 node:path。
