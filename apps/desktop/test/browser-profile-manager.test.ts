@@ -22,6 +22,11 @@ const electronMocks = vi.hoisted(() => {
 
   class FakeBrowserWindow {
     readonly partition: string
+    // 整份 webPreferences 都留着，不只挑 partition 出来。这个隐藏的导入窗口是**第二个** new BrowserWindow，
+    // 完全落在 window-security 的 AST 接线守卫覆盖面之外（那条只看第一个 BrowserWindow）。此前这个 fake
+    // 只读 partition、把三个隔离开关丢掉——于是把 contextIsolation/sandbox 翻成 false、nodeIntegration 翻成
+    // true，13 条照旧全绿、tsc 退 0。丢掉的字段等于没人守的字段，所以这里存整份，让下面那条断言够得着。
+    readonly webPreferences: Record<string, unknown>
     destroyed = false
     readonly sendCommand = vi.fn(async (method: string) => (
       method === 'Network.setCookie' ? nextSetCookieResult : {}
@@ -39,7 +44,8 @@ const electronMocks = vi.hoisted(() => {
       }
     }
 
-    constructor(options: { webPreferences: { partition: string } }) {
+    constructor(options: { webPreferences: { partition: string } & Record<string, unknown> }) {
+      this.webPreferences = options.webPreferences
       this.partition = options.webPreferences.partition
       windows.push(this)
     }
@@ -319,6 +325,15 @@ describe('BrowserProfileManager', () => {
     expect(store.pending).toEqual([])
     expect(electronMocks.windows).toHaveLength(1)
     expect(electronMocks.windows[0]!.partition).toBe(partition(IMPORT_ID))
+    // 这个隐藏导入窗口是第二个 new BrowserWindow，不在 window-security 接线守卫的覆盖面内（那条只看第一个）。
+    // 它加载 IMPORT_DOCUMENT_URL 并挂 CDP 写 cookie，一旦三个隔离开关被翻反，一个恶意/被劫持的导入文档就能
+    // 拿到 Node 能力。实测把三个全翻成 false/false/true 时 13 条全绿、tsc 退 0——所以这里逐个钉住取值。
+    // 盲点：只钉这三个开关的取值；preload 路径、window-security 那第一个窗口由各自的守卫覆盖。
+    expect(electronMocks.windows[0]!.webPreferences).toMatchObject({
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false
+    })
     expect(electronMocks.windows[0]!.sendCommand).toHaveBeenCalledWith('Network.setCookie', expect.objectContaining({
       partitionKey: { topLevelSite: 'https://example.com', hasCrossSiteAncestor: true }
     }))

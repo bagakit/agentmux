@@ -22,12 +22,22 @@ import ts from 'typescript'
  * - It resolves bindings, not runtime values: it can tell an imported `join` from a shadow `join`, but
  *   it does not evaluate what a function returns. Value-level guarantees must come from a behavioral
  *   test calling the real function.
- * - `findNewExpressions` matches by constructor identifier text only; it does not verify the constructor
- *   itself binds to a given module. A faked `class BrowserWindow` in scope would be enumerated as a site
- *   (that is a different exploit than the four findings here). Conversely, a construction that hides the
- *   name — `const BW = BrowserWindow; new BW(...)`, or `new electron.BrowserWindow(...)` via a namespace
- *   import — is NOT matched and therefore NOT checked. Callers relying on this for an exhaustive scan
- *   must accept that renamed/qualified constructors are a blind spot.
+ * - `findNewExpressions` resolves the constructor callee to a NAME through the shapes a construction can
+ *   legitimately take — a bare identifier, a `const BW = BrowserWindow` alias (transitively), a
+ *   namespace/qualified member (`electron.BrowserWindow`), a string element-access
+ *   (`electron['BrowserWindow']`), and the transparent wrappers (parentheses, and both arms of a
+ *   `cond ? A : B` callee) — and matches that name against the set the caller asks for. It matches by
+ *   the resolved name, NOT by proving the constructor binds to `electron`: a faked `class BrowserWindow`
+ *   in scope, or a namespace member named `BrowserWindow` on some other object, is still enumerated as a
+ *   site (that over-inclusion is safe for an isolation allow-list — an extra site only ever adds a check).
+ *   What it still cannot see (declared so a future construction does not slip past silently): a subclass
+ *   whose `super(...)` is the real construction (`class S extends BrowserWindow { constructor(o){
+ *   super(o) } }`), a computed element-access key that is not a string literal (`electron[key]`), and a
+ *   callee that is itself a call (`new (getCtor())()`). Consequence if one of those ships: that window's
+ *   webPreferences would not be on the scanned allow-list, i.e. it could carry isolation off unseen.
+ *   Catching them needs either type-level constructor identity (a resolving Program, which this
+ *   single-file no-lib checker deliberately is not) or const-folding an arbitrary expression; both are
+ *   disproportionate to the shapes any audited construction here actually uses, which are the ones above.
  */
 export interface ParsedModule {
   readonly sourceFile: ts.SourceFile
@@ -97,19 +107,61 @@ export function namedImportsFrom(module: ParsedModule, moduleSpecifier: string):
 }
 
 /**
- * EVERY `new <ctorName>(...)` under `root`. Returning all sites (not the first) is what lets a caller
- * build an allow-list over the whole scan surface — the fix finding 4 needs, since the second
- * BrowserWindow is precisely the one a first-only extractor never sees.
+ * The NAME the constructor callee of a `new` expression resolves to, folding through the shapes a real
+ * construction takes, or `null` if it resolves to none of them. This is what makes `findNewExpressions`
+ * a binding-aware scan rather than a text match:
+ * - a bare identifier that IS one of the wanted names, OR a `const`-bound alias of one (transitively:
+ *   `const A = BrowserWindow; const B = A; new B()`), via the binder;
+ * - a property access / namespace member whose member name is wanted (`electron.BrowserWindow`);
+ * - a string element-access whose key is wanted (`electron['BrowserWindow']`);
+ * - the transparent wrappers: parentheses, and BOTH arms of a conditional callee `new (c ? A : B)()`.
+ * `depth` bounds the alias/wrapper recursion so a pathological self-referential source cannot loop.
  */
-export function findNewExpressions(root: ts.Node, ctorName: string): ts.NewExpression[] {
+function resolvedConstructorName(module: ParsedModule, expr: ts.Expression, depth = 0): string | null {
+  if (depth > 16) return null
+  if (ts.isParenthesizedExpression(expr)) return resolvedConstructorName(module, expr.expression, depth + 1)
+  if (ts.isConditionalExpression(expr)) {
+    return (
+      resolvedConstructorName(module, expr.whenTrue, depth + 1) ??
+      resolvedConstructorName(module, expr.whenFalse, depth + 1)
+    )
+  }
+  if (ts.isPropertyAccessExpression(expr)) return expr.name.text
+  if (ts.isElementAccessExpression(expr)) {
+    const key = expr.argumentExpression
+    return ts.isStringLiteralLike(key) ? key.text : null
+  }
+  if (ts.isIdentifier(expr)) {
+    const declaration = declarationOf(module, expr)
+    // Follow a local `const alias = <ctor>` binding to what it aliases, so a renamed constructor is
+    // resolved to its real name. A named import (or no visible decl) has no initializer to follow, so
+    // the identifier's own text is the answer — which is correct for the bare imported constructor.
+    if (declaration !== null && ts.isVariableDeclaration(declaration) && declaration.initializer !== undefined) {
+      return resolvedConstructorName(module, declaration.initializer, depth + 1)
+    }
+    return expr.text
+  }
+  return null
+}
+
+/**
+ * EVERY `new <ctor>(...)` under `root` whose callee resolves (via {@link resolvedConstructorName}) to one
+ * of `ctorNames`. Returning all sites (not the first) is what lets a caller build an allow-list over the
+ * whole scan surface — the fix finding 4 needs, since the second/third window is precisely the one a
+ * first-only extractor never sees. Passing several names in one call is what lets the scan cover every
+ * webContents-bearing constructor (BrowserWindow AND WebContentsView), not just windows.
+ */
+export function findNewExpressions(module: ParsedModule, ctorNames: readonly string[]): ts.NewExpression[] {
+  const wanted = new Set(ctorNames)
   const found: ts.NewExpression[] = []
   const visit = (node: ts.Node): void => {
-    if (ts.isNewExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === ctorName) {
-      found.push(node)
+    if (ts.isNewExpression(node)) {
+      const name = resolvedConstructorName(module, node.expression)
+      if (name !== null && wanted.has(name)) found.push(node)
     }
     ts.forEachChild(node, visit)
   }
-  visit(root)
+  visit(module.sourceFile)
   return found
 }
 
