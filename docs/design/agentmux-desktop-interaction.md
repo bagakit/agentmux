@@ -571,6 +571,7 @@ Desktop 刷新或重新 Attach 时优先投影这份 Agent 语义；新的 Run `
 - Projects 栏的 running/error 计数保持可见，但采用紧凑的图标与短标签，避免挤占目录树空间。
 - Activity hover 菜单每行必须提供 provider 图标、最近活动摘要与停止/空闲时长；信息按单行优先、紧凑间距呈现。
 - Composer 的展开/收起入口与底部快捷工具行保持同一布局行，不得覆盖或压住输入文字。
+- Claude 与 Codex 的 Executor 设置提供一个明确的“一键 YOLO”操作；它写入该 Provider 已验证的无人值守启动参数，并立即保存。该操作只影响后续启动或恢复的 Run，不伪装成运行中进程的实时开关。
 - Activity 默认按已有的 Topic / Branch / Worktree 工作线聚合，而不是把每个 Run 平铺成一行。聚合键必须从 Workspace、Host 和 Scratch collaborators 等既有事实派生，不增加 UI 侧注册表或第二份 Runtime 状态。
 - 每个聚合行只回答一件事：这条工作线里有哪些 Agent、最需要处理的状态是什么、最近发生了什么。行内显示 context 名称、Provider 头像簇与数量、最紧要状态与短摘要；点击聚合行定位到该组中最需要处理的 Agent，展开后仍可查看并选择具体 Session。
 - 聚合行的 context 身份必须在悬停面板中明说（`Topic` / `Branch` / `Worktree` / `Unassigned`），不能只放一个裸标题让用户猜它是什么；路径或非本机 Host 作为次级元信息出现。聚合行的主点击直达该组中最需处理的 Agent，折叠/展开是独立的 disclosure 操作，不得让用户先逐个试 Agent 才知道这一行在表达什么。

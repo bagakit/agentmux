@@ -370,6 +370,7 @@ styles/
 - running/error 状态使用低高度语义图标和紧凑计数，状态栏内保持低调层级。
 - Activity 菜单减少行高和留白，在有限宽度内优先 provider、活动摘要、idle 时长。
 - Composer 展开/收起按钮属于底部工具行的第一个控件，与其他快捷操作共享基线和间距。
+- 一键 YOLO 使用单个低噪声的语义按钮，和 Executor 的其他启动设置放在同一层级；当前权限姿态仍以启动参数和 Provider 回执为准。
 
 ### Activity 工作线聚合与错误告示（2026-09-11）
 - Activity 弹层默认按 Topic / Branch / Worktree 分组；一组只占一条紧凑的 context 行，头像簇重叠排列并固定在右缘，避免逐 Agent 平铺造成纵向噪音。分组行保留 28–32px 高度、8–12px 横向内距和单行摘要；展开明细才进入逐 Agent 视图。

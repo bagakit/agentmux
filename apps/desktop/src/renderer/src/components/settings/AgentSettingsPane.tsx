@@ -6,6 +6,7 @@ import {
   Plus,
   RefreshCw,
   Trash2,
+  WandSparkles,
   XCircle
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
@@ -15,6 +16,7 @@ import { executorDetectionKey, useAppStore } from '../../store'
 import { presentError } from '../../lib/error-presentation'
 import { AgentProviderIcon, agentProviderLabel } from '../AgentProviderIcon'
 import { ComposerTextarea } from '../ComposerTextarea'
+import { withYoloArgs } from '../../lib/executors'
 
 type ExecutorDraft = {
   label: string
@@ -130,6 +132,30 @@ export function AgentSettingsPane({ config, onSave }: {
     setDrafts((current) => ({ ...current, [id]: { ...current[id]!, ...patch } }))
   }
 
+  async function enableYolo(id: string, providerId: string): Promise<void> {
+    const args = withYoloArgs(providerId, parseExecutorArgs(drafts[id]?.args ?? ''))
+    if (!args) return
+    const next = Object.fromEntries(Object.entries(drafts).map(([candidate, draft]) => [candidate,
+      candidate === id ? { ...draft, args: args.join(' ') } : draft]))
+    setDrafts(next)
+    await onSave(Object.fromEntries(Object.entries(next).map(([candidate, draft]) => [candidate, {
+      label: draft.label.trim(), providerId: draft.providerId, command: draft.command.trim(),
+      args: parseExecutorArgs(draft.args), env: parseEnv(draft.env), injectAgentMuxGuide: draft.injectAgentMuxGuide
+    }])))
+  }
+
+  async function enableAllYolo(): Promise<void> {
+    const next = Object.fromEntries(Object.entries(drafts).map(([candidate, draft]) => {
+      const args = withYoloArgs(draft.providerId, parseExecutorArgs(draft.args))
+      return [candidate, args ? { ...draft, args: args.join(' ') } : draft]
+    }))
+    setDrafts(next)
+    await onSave(Object.fromEntries(Object.entries(next).map(([candidate, draft]) => [candidate, {
+      label: draft.label.trim(), providerId: draft.providerId, command: draft.command.trim(),
+      args: parseExecutorArgs(draft.args), env: parseEnv(draft.env), injectAgentMuxGuide: draft.injectAgentMuxGuide
+    }])))
+  }
+
   function addExecutor(): void {
     const provider = providerCatalog[0]
     if (!provider) return
@@ -182,6 +208,7 @@ export function AgentSettingsPane({ config, onSave }: {
         <label className="settings-compact-field"><span>Detect on</span><select value={hostId} onChange={(event) => setHostId(event.target.value)}>{config.hosts.map((host) => <option key={host.id} value={host.id}>{host.label}</option>)}</select></label>
         <button className="small-button" disabled={checking} onClick={() => void detectExecutors(hostId)}>{checking ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />} Refresh</button>
         <button className="small-button" disabled={providerCatalog.length === 0} onClick={addExecutor}><Plus size={13} /> Add executor</button>
+        {executors.some(({ draft }) => withYoloArgs(draft.providerId, []) !== null) ? <button className="small-button" disabled={saving} onClick={() => void enableAllYolo()}><WandSparkles size={13} /> Enable YOLO for Claude &amp; Codex</button> : null}
       </div>
       {groups.map((group) => group.items.length > 0 ? (
         <section className="settings-group" key={group.title}>
@@ -220,6 +247,7 @@ export function AgentSettingsPane({ config, onSave }: {
                     <label><span>Arguments <small>space or newline separated</small></span><ComposerTextarea value={draft.args} onValueChange={(value) => update(id, { args: value })} placeholder="--model fable&#10;--effort 'high'" rows={3} /></label>
                     <label><span>Environment <small>NAME=value</small></span><ComposerTextarea value={draft.env} onValueChange={(value) => update(id, { env: value })} placeholder="API_BASE=https://example.test" rows={3} /></label>
                     {detection?.detail ? <p className="settings-inline-error">{detection.detail}</p> : null}
+                    {withYoloArgs(draft.providerId, []) ? <button type="button" className="small-button" disabled={saving} onClick={() => void enableYolo(id, draft.providerId)}><WandSparkles size={13} /> Enable YOLO</button> : null}
                     <button type="button" className="small-button" onClick={() => setDrafts((current) => Object.fromEntries(Object.entries(current).filter(([candidate]) => candidate !== id)))}><Trash2 size={13} /> Delete executor</button>
                   </div>
                 </details>
