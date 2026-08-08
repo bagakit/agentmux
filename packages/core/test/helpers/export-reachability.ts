@@ -108,13 +108,40 @@ export function identifierNames(sourceFile: ts.SourceFile): Set<string> {
 }
 
 /**
+ * 「导出 A 的唯一同模块引用者是**非导出**的 B」这件事的实测见证，即只收导出那版引擎的全部误判。
+ *
+ * 实测（本表落地时）：只沿导出传递会把 7 个模块 / 14 个导出报成死的，而正确判据是 4 个模块 /
+ * 5 个导出——多出来的 9 个导出全在下表，散在 3 个模块里。它是**数据而不是注释**，因为自检 5 会逐条
+ * 质询三件事：A 仍是导出、B 仍是同模块顶层绑定且**不是**导出、B 的声明体真的引用了 A。任何一条
+ * 不成立就红，于是重命名/删除不会像注释那样静默留下一句虚构的举例。
+ */
+export const NON_EXPORTED_INTERMEDIARY_WITNESSES: ReadonlyArray<{
+  module: string
+  export: string
+  intermediary: string
+}> = [
+  // 七个方言常量只被非导出的 HOOK_LIFECYCLE_DIALECTS 表收着。
+  { module: 'src/agent-hook-event.ts', export: 'PASCAL_CASE_HOOK_DIALECT', intermediary: 'HOOK_LIFECYCLE_DIALECTS' },
+  { module: 'src/agent-hook-event.ts', export: 'HERMES_HOOK_DIALECT', intermediary: 'HOOK_LIFECYCLE_DIALECTS' },
+  { module: 'src/agent-hook-event.ts', export: 'PI_HOOK_DIALECT', intermediary: 'HOOK_LIFECYCLE_DIALECTS' },
+  { module: 'src/agent-hook-event.ts', export: 'GROK_HOOK_DIALECT', intermediary: 'HOOK_LIFECYCLE_DIALECTS' },
+  { module: 'src/agent-hook-event.ts', export: 'GEMINI_HOOK_DIALECT', intermediary: 'HOOK_LIFECYCLE_DIALECTS' },
+  { module: 'src/agent-hook-event.ts', export: 'CURSOR_HOOK_DIALECT', intermediary: 'HOOK_LIFECYCLE_DIALECTS' },
+  { module: 'src/agent-hook-event.ts', export: 'COPILOT_HOOK_DIALECT', intermediary: 'HOOK_LIFECYCLE_DIALECTS' },
+  // 截断上限只被非导出的 clamp() 读。
+  { module: 'src/hook-tool-outcome.ts', export: 'MAX_TOOL_OUTPUT_CHARS', intermediary: 'clamp' },
+  // 事件名清单只被非导出的 openCodePluginSource() 插进生成的插件源码里。
+  { module: 'src/providers/opencode.ts', export: 'OPENCODE_HOOK_EVENTS', intermediary: 'openCodePluginSource' }
+]
+
+/**
  * 模块里**所有**顶层绑定的声明节点，导出与否都收（名字 → 声明）。
  *
- * 为什么不能只收导出（这是本引擎第一版的真缺陷，实测让 9 个模块假报死代码）：同模块的组合关系
- * 经常绕一层**非导出**的局部。`agent-hook-event.ts` 的七个 `*_HOOK_DIALECT` 只被非导出的
- * `HOOK_LIFECYCLE_DIALECTS` 表引用；`MAX_TOOL_OUTPUT_CHARS` 只被非导出的 `clamp()` 读；
- * `AGENT_PROMPT_DELIVERY_INTERRUPTED` 只被非导出的 `mapInterruptedPromptDelivery()` 用。
- * 只沿导出传递，这三族全部落到"死"那一侧——判据错，结论也错。
+ * 为什么不能只收导出（这是本引擎第一版的真缺陷）：同模块的组合关系经常绕一层**非导出**的局部，
+ * 只沿导出传递就会把这些导出全判成死的。这三族是那次误判的全部内容，逐条列在
+ * {@link NON_EXPORTED_INTERMEDIARY_WITNESSES}，由 core-export-reachability 的自检 5 逐条质询——
+ * 举例写在注释里没有读者，一条被重命名或删掉的"例子"会静默变成虚构（本条此前第三个例子
+ * `AGENT_PROMPT_DELIVERY_INTERRUPTED` 就是这样：全仓只剩这句注释提到它）。
  */
 export function topLevelBindings(sourceFile: ts.SourceFile): Map<string, ts.Node> {
   const bindings = new Map<string, ts.Node>()

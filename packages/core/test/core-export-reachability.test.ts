@@ -4,9 +4,12 @@ import { dirname, join, relative } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   collect,
+  compositionEdges,
   deadExportsIn,
   identifierIndex,
+  NON_EXPORTED_INTERMEDIARY_WITNESSES,
   parse,
+  topLevelBindings,
   valueExportsOf
 } from './helpers/export-reachability.js'
 
@@ -237,5 +240,51 @@ describe('core src 的每个模块都没有零生产调用方的导出', () => {
       brokenPremise,
       '这些豁免声称"经 barrel 公开"，但 src/index.ts 里已经没有那条 export *——前提没了，豁免也该没了'
     ).toEqual([])
+  })
+
+  it('自检 5：引擎注释举的「非导出中间层」见证今天逐条都还成立', () => {
+    // 为什么这条断言存在：那段注释此前的第三个例子（`AGENT_PROMPT_DELIVERY_INTERRUPTED` 只被非导出的
+    // `mapInterruptedPromptDelivery()` 用）**全仓只存在于那句注释里**——两个名字都早已不在源码中。
+    // 注释里的举例没有读者，所以它从真实变成虚构的那一刻没有任何东西会红；一个读起来很具体的例子
+    // 反而让人以为这条盲点已经被守住了。把见证搬成数据，再由本条逐个质询它声称的那三件事。
+    const offenders: string[] = []
+    for (const witness of NON_EXPORTED_INTERMEDIARY_WITNESSES) {
+      const modulePath = join(coreRoot, witness.module)
+      const sourceFile = parse(modulePath, readFileSync(modulePath, 'utf8'))
+      const exported = new Set(valueExportsOf(sourceFile))
+      const bindings = topLevelBindings(sourceFile)
+      const key = `${witness.module}#${witness.export} ← ${witness.intermediary}`
+      if (!exported.has(witness.export)) {
+        offenders.push(`${key}：被举例的导出已不存在（重命名或删除了）`)
+      }
+      if (!bindings.has(witness.intermediary)) {
+        offenders.push(`${key}：中间层已不是这个模块的顶层绑定`)
+        continue
+      }
+      // 中间层**必须仍是非导出**，否则这条见证不再见证任何东西：只沿导出传递也能走到它。
+      if (exported.has(witness.intermediary)) {
+        offenders.push(`${key}：中间层现在是导出了，这条见证不再证明「必须收非导出绑定」`)
+      }
+      const refs = compositionEdges(sourceFile).get(witness.intermediary) ?? new Set<string>()
+      if (!refs.has(witness.export)) {
+        offenders.push(`${key}：中间层的声明体里已经不引用这个导出了`)
+      }
+    }
+    expect(
+      offenders,
+      'export-reachability.ts 头部注释声称的「非导出中间层」见证已与源码脱节：\n' +
+        `${offenders.join('\n')}\n` +
+        '要么更新 NON_EXPORTED_INTERMEDIARY_WITNESSES，要么删掉过时的那条——' +
+        '别让它退化成一句读起来很具体的虚构举例。'
+    ).toEqual([])
+    expect(NON_EXPORTED_INTERMEDIARY_WITNESSES.length, '见证表空了，上面那个循环整体空转').toBeGreaterThan(0)
+    // 反向自检：三个判据各自都得**认得出**违约形状，否则上面的循环可能恒绿。
+    const probe = parse('probe.ts', 'export const A = 1\nexport const B = [A]\nconst C = [A]\nconst D = 2\n')
+    const probeExports = new Set(valueExportsOf(probe))
+    expect(probeExports.has('B'), '探针的 B 应当被认成导出（否则"中间层是导出"这条判据恒不触发）').toBe(true)
+    expect(probeExports.has('C'), '探针的 C 应当被认成非导出').toBe(false)
+    expect(topLevelBindings(probe).has('C'), '探针的 C 应当在顶层绑定里').toBe(true)
+    expect(compositionEdges(probe).get('C')?.has('A'), '探针里 C 的声明体应当引用 A').toBe(true)
+    expect(compositionEdges(probe).get('D')?.has('A'), '探针里 D 不引用 A，引用判据要认得出这一侧').toBe(false)
   })
 })
