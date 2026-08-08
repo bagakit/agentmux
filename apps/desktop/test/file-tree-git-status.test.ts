@@ -7,7 +7,6 @@ import {
   FILE_TREE_GIT_STATUS_PRIORITY,
   buildFileTreeGitStatusIndex,
   fileTreeGitStatusOfChange,
-  fileTreeRepoRelativePrefix,
   type FileTreeGitStatus
 } from '../src/renderer/src/lib/file-tree-git-status.js'
 
@@ -148,20 +147,20 @@ describe('buildFileTreeGitStatusIndex', () => {
   })
 })
 
-describe('fileTreeRepoRelativePrefix', () => {
-  it('工作区即 repo 顶层时前缀为空', () => {
-    expect(fileTreeRepoRelativePrefix('/repo', '/repo')).toBe('')
-    expect(fileTreeRepoRelativePrefix('/repo/', '/repo')).toBe('')
-  })
-
-  it('工作区是 repo 子目录时前缀是那段相对路径', () => {
-    expect(fileTreeRepoRelativePrefix('/repo', '/repo/app/desktop')).toBe('app/desktop')
-  })
-
-  it('工作区不在 repo 内时前缀为空（不投影）', () => {
-    expect(fileTreeRepoRelativePrefix('/repo', '/elsewhere')).toBe('')
-  })
-})
+/**
+ * 曾经这里有一组 `fileTreeRepoRelativePrefix` 的用例（三条：顶层为空、子目录取相对段、不在 repo 内为空）。
+ * 那个函数已经删掉了：它用 `repoPath` 与 `workspace.path` 两个字符串做词法比较来推前缀，而这两个字符串
+ * 可以在任何一段祖先目录上分岔（git 会把 symlink 与磁盘大小写规范化，配置里的路径不会），比较落空时它
+ * 返回 `''`——恰好是让下面的投影停止过滤、把一个文件的状态画到另一个干净文件上的那个值。前缀现在由 main
+ * 侧问 git 自己（`rev-parse --show-prefix`）并随契约下发，判定只有一处。
+ *
+ * 那三条用例守的事现在分两层守：
+ * - 行为层 `git-service.test.ts` 的真 git 用例（symlink 祖先下 `status()` 必须返回非空前缀）。它顺带也
+ *   守住了 argv：把 `--show-prefix` 换成 `--show-toplevel` 实测打红两条，所以接线层**刻意不**再为
+ *   argv 立一条判据（那会是两个预算守同一件事，短的只贡献假阴性）。
+ * - 接线层 `file-tree-git-prefix-wiring.test.ts`：投影的前缀实参必须**就是**契约字段的读取，且这个自算
+ *   函数不许在 renderer 里重新出现。
+ */
 
 describe('呈现表必须对每个状态穷举且彼此可辨', () => {
   it('class / mark / label 三张表覆盖全部状态且取值互不相同', () => {

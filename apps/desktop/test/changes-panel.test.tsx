@@ -126,6 +126,7 @@ function render(changes: GitFileChange[]): string {
     kind: 'git-repository',
     hostId: 'local',
     repoPath: '/repo',
+    repoRelativePrefix: '',
     branch: 'main',
     changes
   }
