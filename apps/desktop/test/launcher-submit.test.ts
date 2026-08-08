@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import ts from 'typescript'
 import { launcherCanLaunch, launcherKeydownLaunches } from '../src/renderer/src/lib/launcher-submit.js'
 import { SHORTCUT_BINDINGS, type ShortcutEvent } from '../src/renderer/src/lib/shortcut-registry.js'
+import { resolveHostElement } from './helpers/component-host-element.js'
 
 // 起点页原本一个键都按不出来：五个动作全是鼠标。用户敲完 prompt 必须去摸鼠标才能发车，而下游每个
 // agent 面都吃同一个 Cmd+Enter。这一族守的是两层，各自能独立变红：
@@ -109,6 +110,15 @@ describe('NewTabSurface 真的把键盘接到了 prompt 那一格', () => {
   it('onKeyDown 挂在 prompt textarea 上，不在外层容器上', () => {
     // 为什么要钉「挂在哪」：section 里嵌着热终端预览（TerminalView），keydown 会从它冒泡上来。
     // 挂在外层就会把用户敲进那个终端的 Cmd+Enter 抢掉——这一格是 prompt 唯一被输入的地方。
+    //
+    // 判据为什么要**跟着间接走**而不是比对标签名（#736）：#609/#622 把 8 个受控 textarea 收进了
+    // `ComposerTextarea` 那层认识 IME 组字的壳，于是这里的标签名合法地从 `textarea` 变成了
+    // `ComposerTextarea`——旧判据 `toEqual(['textarea'])` 因此对**正确代码**打红，而本仓 #731 记过：
+    // 对正确代码打红的守卫会被下一个作者整条删掉。
+    //
+    // 而「把 ComposerTextarea 也加进允许的名字」是错的修法：那是接受名字。名字一个字不改，根元素
+    // 就能在某次重构里变成 `<div>` 包着的富文本框，而这里的 onKeyDown 从此落在一个 div 上。所以
+    // 解析到那个组件自己的根元素，并要求它是 textarea、且真的接住了调用方给的属性。
     const source = parse(relative)
     const owners: string[] = []
     const walk = (node: ts.Node): void => {
@@ -122,7 +132,24 @@ describe('NewTabSurface 真的把键盘接到了 prompt 那一格', () => {
     walk(source)
     // 提取器自检：一个都没找到时下面的断言会退化成 `[] toEqual []` 恒真。
     expect(owners.length, 'no onKeyDown attribute found — 提取器写错了或者接线被整段删掉').toBeGreaterThan(0)
-    expect(owners).toEqual(['textarea'])
+    // 大写开头的标签解析到它自己的根元素；小写的本来就是 DOM 元素。
+    const hosts = owners.map((owner) =>
+      /^[A-Z]/u.test(owner)
+        ? resolveHostElement(resolve(SOURCE_ROOT, relative), owner)
+        : { tag: owner, viaComponent: undefined, forwardsCallerProps: true }
+    )
+    expect(hosts.map((host) => host.tag), 'onKeyDown 最终落在的元素不是恰好一个 textarea').toEqual([
+      'textarea'
+    ])
+    // 经过一层组件时，还要证明调用方给的属性真的到得了那个 textarea：壳漏掉 `{...rest}` 时上面那条
+    // 断言照旧全绿（根元素确实是 textarea），而这个 onKeyDown 被静默丢掉，一个键都发不出车。
+    for (const host of hosts) {
+      if (!host.viaComponent) continue
+      expect(
+        host.forwardsCallerProps,
+        `${host.viaComponent} 没有把调用方的其余属性转发到根元素：这个 onKeyDown 会被静默吞掉`
+      ).toBe(true)
+    }
   })
 
   it('那个处理器把判定交给 launcherKeydownLaunches，且壳里没有自己的条件', () => {
