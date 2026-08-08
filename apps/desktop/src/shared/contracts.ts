@@ -182,7 +182,39 @@ export function isScratchWorkspaceId(id: string | null | undefined): boolean {
   return id === SCRATCH_WORKSPACE_ID
 }
 
-export type TerminalThemeId = 'graphite' | 'catppuccin-mocha'
+/**
+ * Every `TerminalThemeId`, once, and the single source of truth for it. Iterate this (never a
+ * hand-written list) when a consumer or a validator needs to walk every theme.
+ *
+ * Before this tuple existed, the type was a bare `'graphite' | 'catppuccin-mocha'` union, and the
+ * persistence-layer validator (`appearanceSchema` in `main/config-store.ts`) re-spelled the members as
+ * an independent `z.enum(['graphite', 'catppuccin-mocha'])` with no compiler link back to the union.
+ * Adding a member to the union therefore compiled clean while config load fail-closed rejected any
+ * config carrying the new theme (`.strict()` + enum) — a valid user preference silently dropped, with
+ * tsc silent throughout, and "add a member" is the common direction. Deriving both the union and the
+ * schema from this one tuple removes the second declaration point. The sibling `notifications` field in
+ * the same schema was already derived from `NOTIFICATION_TIERS` this way; `terminalTheme` was the copy.
+ */
+export const TERMINAL_THEME_IDS = ['graphite', 'catppuccin-mocha'] as const
+
+/**
+ * The terminal appearance theme id. DERIVED from `TERMINAL_THEME_IDS` so the direction is forced: a
+ * member added to the tuple widens this type, and `z.enum(TERMINAL_THEME_IDS)` in `config-store.ts`
+ * widens with it (the schema reads the tuple), so the validator can never fall behind the union.
+ */
+export type TerminalThemeId = (typeof TERMINAL_THEME_IDS)[number]
+
+/**
+ * Two-way exactness between `TERMINAL_THEME_IDS` and `TerminalThemeId`, identical in intent to the
+ * `_workspaceKindsAreExactlyTheUnion` proof above. `satisfies readonly TerminalThemeId[]` alone would
+ * prove only ⊆; this proves ⊇ as well (every theme is in the tuple), the direction a member addition
+ * would break. `void` keeps the proof from reading as dead code.
+ */
+const _terminalThemeIdsAreExactlyTheUnion: [
+  (typeof TERMINAL_THEME_IDS)[number] extends TerminalThemeId ? true : never,
+  TerminalThemeId extends (typeof TERMINAL_THEME_IDS)[number] ? true : never
+] = [true, true]
+void _terminalThemeIdsAreExactlyTheUnion
 
 export type AppearanceConfig = {
   terminalTheme: TerminalThemeId
