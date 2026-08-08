@@ -81,6 +81,7 @@ import { saveRuntimeConfig } from './runtime-config-transaction.js'
 import { WorkspaceFiles } from './workspace-files.js'
 import { classifyRetention, WorktreeService } from './worktree-service.js'
 import { runFanOutRequest } from './fanout-request.js'
+import { sessionSnapshotPayload } from './session-snapshot-payload.js'
 import { rebindLocalFolder } from './workspace-rebind.js'
 import { GitService } from './git-service.js'
 import { GhService } from './gh-service.js'
@@ -469,10 +470,9 @@ export async function registerIpc(args: {
   })
   handle('providers:list', () => args.runtime.providerCatalog())
   handle('executors:detect', async (executorId: AgentExecutorId, hostId: string) => await args.runtime.detect(executorId, hostId, config))
-  handle('sessions:snapshot', async () => ({
-    ...await args.runtime.snapshot(config),
-    ...(args.environmentWarning ? { environmentWarning: args.environmentWarning } : {})
-  }))
+  handle('sessions:snapshot', async () => (
+    sessionSnapshotPayload(await args.runtime.snapshot(config), args.environmentWarning)
+  ))
   handleWithEvent('sessions:launchAgent', async (event, input: AgentLaunchInput) => {
     const result = await args.runtime.launchAgent(input, config)
     if (!event.sender.isDestroyed()) return result
