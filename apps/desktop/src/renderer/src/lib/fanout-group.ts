@@ -1,4 +1,5 @@
 import type { SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
+import { isWorktreeWorkspace } from '../../../shared/contracts'
 import { attentionSortRank, categoryFor, type AttentionCategory } from './attention-event'
 import { sessionBoardColumn } from './project-board'
 
@@ -69,7 +70,7 @@ export function fanOutGroups(input: {
 
   const byStem = new Map<string, { ordinal: number; lane: FanOutLane }[]>()
   for (const workspace of input.workspaces ?? []) {
-    if (workspace.kind !== 'worktree' || !workspace.branch) continue
+    if (!isWorktreeWorkspace(workspace) || !workspace.branch) continue
     const parts = laneParts(workspace.branch)
     if (!parts) continue
     const session = sessionByPath.get(workspace.path) ?? null

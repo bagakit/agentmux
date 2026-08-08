@@ -67,14 +67,109 @@ export type HostConfig = LocalHostConfig | SshHostConfig
 
 export type { AgentExecutorConfig, AgentExecutorId, AgentTimelineItem, AgentTimelineSnapshot }
 
+/**
+ * Every `WorkspaceRecord['kind']`, once, and the single source of truth for it. Iterate this (never a
+ * hand-written list) when a test or a consumer needs to walk every kind.
+ *
+ * Before this tuple existed, `kind` was a bare `'folder' | 'worktree'` union compared by hand at ~7
+ * sites (`kind === 'folder'`, `kind !== 'worktree'`, …). Adding a third member was therefore a SILENT
+ * change: every one of those comparisons kept compiling and quietly took the pre-existing branch. That
+ * is sharper here than for a many-armed union — with only two members, a `kind !== 'worktree'` test
+ * literally MEANS "is a folder", so a third kind is silently folded into whichever side the author
+ * happened to write. The tuple + `WorkspaceKind` + `assertUnreachableWorkspaceKind` turn that into a
+ * compile error at the one place each semantic question is decided (see `isFolderWorkspace` /
+ * `isWorktreeWorkspace`).
+ */
+export const WORKSPACE_KINDS = ['folder', 'worktree'] as const
+
+/**
+ * The kind of on-disk backing a Workspace record has. DERIVED from `WORKSPACE_KINDS` so the direction
+ * is forced: a member added to the tuple widens this type (and reds every exhaustive switch below),
+ * whereas a hand-written union could silently disagree with the tuple. See the two-way exactness proof
+ * next to `isScratchWorkspaceId`, which bites if the field is ever re-divorced from the tuple.
+ */
+export type WorkspaceKind = (typeof WORKSPACE_KINDS)[number]
+
+/**
+ * The exhaustiveness backstop for any consumer that switches on `workspace.kind`.
+ *
+ * `tsconfig` here runs `strict` but NOT `noImplicitReturns`, so a `switch (workspace.kind)` that
+ * forgets a case does not fail on its own — tsc just widens the return type to include `undefined` and
+ * stays green. Route every such switch's `default` through this: with all kinds handled `kind` is
+ * `never` here and it compiles; add a member and `kind` is that member (not `never`), the call fails to
+ * type-check, and the omission cannot ship. The throw is only the runtime backstop — the compile error
+ * at the call site is the guard.
+ */
+export function assertUnreachableWorkspaceKind(kind: never): never {
+  throw new Error(`Unhandled workspace kind: ${JSON.stringify(kind)}`)
+}
+
 export type WorkspaceRecord = {
   id: string
   name: string
   hostId: string
   path: string
-  kind: 'folder' | 'worktree'
+  kind: WorkspaceKind
   repoPath?: string
   branch?: string
+}
+
+/**
+ * Two-way exactness between `WORKSPACE_KINDS` and `WorkspaceKind`. Each conditional is `true` only when
+ * its containment holds and `never` otherwise, and `never` is not assignable to a `true` slot — so a
+ * break in either direction is a compile error that names which half failed.
+ *
+ * `satisfies readonly WorkspaceKind[]` alone would prove only ⊆ (the tuple lists nothing that is not a
+ * kind); a short tuple would pass it. This proves ⊇ as well (every kind is in the tuple), which is the
+ * direction a member addition would break. `void` keeps the proof from reading as dead code.
+ */
+const _workspaceKindsAreExactlyTheUnion: [
+  (typeof WORKSPACE_KINDS)[number] extends WorkspaceKind ? true : never,
+  WorkspaceKind extends (typeof WORKSPACE_KINDS)[number] ? true : never
+] = [true, true]
+void _workspaceKindsAreExactlyTheUnion
+
+/**
+ * Whether a Workspace is a plain folder rather than a git worktree. The SSOT for the `kind === 'folder'`
+ * test that the rebind, project-grouping and file-explorer paths used to inline. Centralising it in a
+ * `switch` routed through `assertUnreachableWorkspaceKind` means a third kind cannot compile until
+ * someone decides, HERE, whether it is folder-like — instead of each call site silently answering "yes"
+ * (its `=== 'folder'` stays false) or "no" (its `!== 'folder'` stays true) for the new kind.
+ *
+ * A `switch` (not `kind === 'folder'`) is what makes it exhaustiveness-checked: TypeScript narrows the
+ * `true` branch to a folder surface, which keeps the returned type predicate sound, and the `default`
+ * reds the day a member is added.
+ */
+export function isFolderWorkspace(
+  workspace: WorkspaceRecord
+): workspace is WorkspaceRecord & { kind: 'folder' } {
+  switch (workspace.kind) {
+    case 'folder':
+      return true
+    case 'worktree':
+      return false
+    default:
+      return assertUnreachableWorkspaceKind(workspace.kind)
+  }
+}
+
+/**
+ * Whether a Workspace is a git worktree rather than a plain folder. The SSOT for the `kind === 'worktree'`
+ * / `kind !== 'worktree'` test that fan-out grouping and worktree removal used to inline. Same
+ * exhaustiveness contract as {@link isFolderWorkspace}: a third kind must be classified here before it
+ * compiles, rather than being silently swept into the "not a worktree" side at each call site.
+ */
+export function isWorktreeWorkspace(
+  workspace: WorkspaceRecord
+): workspace is WorkspaceRecord & { kind: 'worktree' } {
+  switch (workspace.kind) {
+    case 'worktree':
+      return true
+    case 'folder':
+      return false
+    default:
+      return assertUnreachableWorkspaceKind(workspace.kind)
+  }
 }
 
 /**

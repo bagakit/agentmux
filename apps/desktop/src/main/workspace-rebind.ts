@@ -1,5 +1,6 @@
 import { dirname } from 'node:path'
 import type { AppConfig, WorkspaceRecord } from '../shared/contracts.js'
+import { isFolderWorkspace } from '../shared/contracts.js'
 
 /**
  * 把一个本地文件夹 Workspace 重新指向另一个目录：问用户选哪个目录，然后只换那一条记录的 path。
@@ -27,7 +28,7 @@ export async function rebindLocalFolder(
 ): Promise<{ config: AppConfig; workspace: WorkspaceRecord | null }> {
   const current = config.workspaces.find((item) => item.id === workspaceId)
   if (!current) throw new Error(`Unknown workspace: ${workspaceId}`)
-  if (current.hostId !== 'local' || current.kind !== 'folder') {
+  if (current.hostId !== 'local' || !isFolderWorkspace(current)) {
     throw new Error('Only local folder Workspaces can be rebound')
   }
   const selection = await ports.chooseDirectory(dirname(current.path))
