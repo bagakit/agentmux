@@ -48,7 +48,30 @@ const TSC_BIN = path.join(path.dirname(require.resolve('typescript')), '..', 'bi
  * 那条自检把口子焊死——排除只对未入库的临时探针生效。
  */
 const PROBE_PREFIX = 'test/__type_tree_probe__'
-const probeRel = `${PROBE_PREFIX}.${process.pid}.test.ts`
+
+/** 某个进程自己那份探针的名字：前缀 + 纯数字 pid。 */
+function ownProbeName(pid: number): string {
+  return `${PROBE_PREFIX}.${pid}.test.ts`
+}
+
+const probeRel = ownProbeName(process.pid)
+
+/**
+ * 「某个进程自己那份探针」的名字形状。用来证明模拟用的名字撞不上任何真探针——撞上就意味着下面那条 it
+ * 的 `rmSync` 会删掉兄弟进程正在用的那一份。前缀里没有正则元字符（同一条判据里钉住了），所以直接拼进
+ * 模式里不需要转义。
+ */
+const OWN_PROBE_NAME_RE = new RegExp(`^${PROBE_PREFIX}\\.\\d+\\.test\\.ts$`)
+
+/**
+ * 模拟「另一个 vitest 进程的探针」用的名字。
+ *
+ * 多一段字母标签，于是它**永远**不是 `ownProbeName` 的形状；又带着自己的 pid，于是两个真并发进程各摆
+ * 各的，谁的 `rmSync` 都碰不到对方那一份。
+ */
+function simulatedForeignProbeName(tag: string): string {
+  return `${PROBE_PREFIX}.${tag}.${process.pid}.test.ts`
+}
 
 /** 是不是（任何进程的）反向自检探针。 */
 function isTypeTreeProbe(relativePath: string): boolean {
@@ -263,20 +286,30 @@ describe('desktop test tree is type-checked, and its errors only ratchet down', 
     // 对称的另一面：别人的探针会被 `git ls-files --others` 列出来，却不在**我们这一轮**的 tsc 产出里
     // （它在我们跑完之后才落盘，或跑之前就被删了），于是 `missing` 非空——同一个竞态的第二种形态。
     //
-    // 用一个**别的 pid** 的探针名落盘来模拟那一刻：它对 git 可见，但 baseRun 里没有它。
-    const foreignRel = `${PROBE_PREFIX}.${process.pid + 1}.test.ts`
+    // 落一个探针名来模拟那一刻：它对 git 可见，但 baseRun 里没有它。名字**不能**用 `pid + 1`——那正是
+    // 兄弟进程最可能的 pid，撞上时下面的 `rmSync` 会删掉对方 `probedRun` 正在用的那一份，把本守卫要
+    // 消灭的跨进程删除又请回来。`simulatedForeignProbeName` 多带一段字母标签，永远不是任何进程自己
+    // 那份探针的形状。
+    const foreignRel = simulatedForeignProbeName('foreign')
     const foreignAbs = path.join(DESKTOP_DIR, foreignRel)
+    // 自检：模拟名撞不上任何真探针的名字，于是下面的 rmSync 只可能删到我们自己刚写的这一份。
+    expect(OWN_PROBE_NAME_RE.test(foreignRel)).toBe(false)
+    expect(OWN_PROBE_NAME_RE.test(probeRel)).toBe(true)
     expect(baseRun.compiledTestFiles.has(foreignRel)).toBe(false)
     writeFileSync(foreignAbs, 'const foreign: number = "型别不符"\nexport default foreign\n')
 
     try {
       // 自检：过滤前 git 确实把它列出来了，否则下面那条恒真。
+      //
+      // 判 `toContain` 而不是 `toEqual([foreignRel])`：并发跑时盘上还有兄弟进程自己那份探针，要求
+      // 「只有这一个」当场把本条打红——那恰恰是 #831 那一族假红，本守卫不该自己再造一个。而且这行是
+      // **自检**，排在两条真判据前面，它一抛后面两条就成死代码。
       const unfiltered = execFileSync(
         'git',
         ['-C', DESKTOP_DIR, 'ls-files', '--cached', '--others', '--exclude-standard', '-z', '--', 'test'],
         { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 }
       )
-      expect(unfiltered.split('\0').filter(isTypeTreeProbe)).toEqual([foreignRel])
+      expect(unfiltered.split('\0').filter(isTypeTreeProbe)).toContain(foreignRel)
 
       // 真判据：`allAuthoredTestFiles()` 必须把它挡在外面，于是 missing 仍为空。
       const authored = allAuthoredTestFiles()
@@ -312,6 +345,27 @@ describe('desktop test tree is type-checked, and its errors only ratchet down', 
     expect(isTypeTreeProbe(probeRel)).toBe(true)
     // 前缀本身不得就是完整文件名：否则「带 pid」这件事在拼接层被绕过也没人发现。
     expect(probeRel).not.toBe(`${PROBE_PREFIX}.test.ts`)
+  })
+
+  it('模拟用的「别人的探针」名永远不可能是某个进程自己那份（挡住跨进程删除）', () => {
+    // 上一条只管「我自己那份带 pid」。真正会删到别人的是**模拟名**：它由本文件凭空造出来，然后被
+    // `rmSync` 删掉。曾经它是 `pid + 1`——而 pid 近似顺序发放，`pid + 1` 恰恰是兄弟进程最可能的号，
+    // 撞上时删的就是对方 `probedRun` 正在用的那一份，对方的「探针确实进了编译」当场变红。
+    //
+    // 判据是形状上的**不相交**，不是「今天恰好没撞上」：任何 pid 的自有探针名都配 `\.\d+\.test\.ts$`，
+    // 而模拟名在 pid 前多一段字母标签，于是两族永不相交——无论对方的 pid 是多少。
+    expect(OWN_PROBE_NAME_RE.test(simulatedForeignProbeName('foreign'))).toBe(false)
+    // 遍历一段 pid 邻域，把「靠运气不撞」和「形状上不可能撞」区分开：包含曾经出事的 pid+1。
+    for (let pid = process.pid - 2; pid <= process.pid + 2; pid += 1) {
+      expect(simulatedForeignProbeName('foreign')).not.toBe(ownProbeName(pid))
+    }
+    // 自检：正向那一侧真的被这个形状认下来，否则上面几条靠「恒不匹配」恒真。
+    expect(OWN_PROBE_NAME_RE.test(ownProbeName(process.pid + 1))).toBe(true)
+    // 模拟名仍属探针族——否则两处枚举的排除盖不住它，本文件自己就会把它报成新报错文件。
+    expect(isTypeTreeProbe(simulatedForeignProbeName('foreign'))).toBe(true)
+    // `OWN_PROBE_NAME_RE` 把前缀原样拼进正则：前缀里一旦出现元字符，这个形状判据就不再是它看起来
+    // 的意思（`.` 变通配、`+`/`*` 改变量词）。这里钉死前缀只由安全字符组成。
+    expect(PROBE_PREFIX).toMatch(/^[A-Za-z0-9_/]+$/)
   })
 })
 
