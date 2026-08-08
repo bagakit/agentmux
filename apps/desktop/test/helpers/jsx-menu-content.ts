@@ -15,16 +15,23 @@ import ts from 'typescript'
  *    嵌套结构或者标签换了写法，截出来的那段就是错的，而「截错了」与「没违规」在结果上同形。
  * 记忆：lexical-boundaries-need-a-real-lexer。
  *
- * 这里出两族判据，它们回答的**不是同一个问题**，调用方别混用：
+ * 这里出的判据回答的**不是同一个问题**，调用方别混用：
  *
  * - `inlineConditions`：这段 JSX 里**有没有任何**内联条件。适用于「这个 Content 本来就不该有
  *   条件」的容器——一旦有，整节就有被取反成永不渲染的余地。它刻意不把 `?.` / `??` 算作条件：
  *   在 map 回调里 `entry.action?.label ?? entry.label` 是合法取值，不是门。
  *
- * - `gatesAbove`：**某一次具体调用**头上有没有门。适用于 Content 里本来就有合法条件的容器
- *   （比如某一项按可选回调在场与否决定画不画）——那种容器用 `inlineConditions` 会把诚实的代码
- *   判红，而一道会打假红的守卫最终会被删掉，等于没有。它反过来**要**把 `??` 算作门：
- *   `{x ?? list.map(…)}` 在 x 非空时就把整组换掉了。
+ * - `gatesAbove` + `callbackErasureGates`：**某一次具体调用**头上、以及它回调**内部**有没有门。
+ *   适用于 Content 里本来就有合法条件的容器（比如某一项按可选回调在场与否决定画不画）——那种容器
+ *   用 `inlineConditions` 会把诚实的代码判红，而一道会打假红的守卫最终会被删掉，等于没有。
+ *
+ *   这两条早先合成一个 `gatesAbove`，用「祖先里出现三元 / `&&` / `||` / `??` / `if` / 函数边界就算门」
+ *   这种**黑名单**来判。一次独立审计证明黑名单必漏（本仓反复踩到的老坑）：`{void list.map(…)}`、
+ *   `{!list.map(…)}`、`{(list.map(…), null)}` 三种把整组抹掉的写法都不在名单上，14 条断言全绿；
+ *   回调**内部**的 `if (true) return null` 更是祖先扫描根本够不着。所以判据翻了个面——
+ *   `gatesAbove` 改成**白名单**：调用到 Content 之间只准出现「把表达式塞进 JSX」的那几层无害包装
+ *   （见 `ALLOWED_ABOVE_MAP_CALL`），别的一律算门，不必再去猜有哪些坏拼法；`callbackErasureGates`
+ *   单独判回调体，把「按数据跳过某些项」（合法）与「无条件 / 按渲染层开关抹掉整组」（门）分开。
  */
 
 const COMPONENTS = new URL('../../src/renderer/src/components/', import.meta.url)
@@ -109,47 +116,135 @@ export function memberCallsIn(
 }
 
 /**
- * 这次调用与 `root` 之间的每一道**门**：跑不跑得到它、跑到了画不画得出来，任一被别的表达式说了算，
- * 就是一道门。返回门的源文本；空数组表示这次调用无条件发生且它的结果就是画出来的东西。
+ * 这次调用与它所在的 `{…}` 之间，允许出现的祖先节点种类。
  *
- * 为什么把「门」判得这么宽（凡是祖先上的条件一律算，不区分调用落在哪一侧）：窄判法有真实的绕法，
- * 因为 React 把 `false` / `null` / `undefined` 渲染成什么都没有。于是
+ * 之所以只有这四种：从 `list.map(…)` 这个调用往上走到 Content，一路上**唯一**无害的东西就是
+ * 「把表达式塞进 JSX」的那几层包装——`{…}` 本身（JsxExpression）、把它裹进另一层元素或 Fragment
+ * （`<Frag>{…}</Frag>` / `<>{…}</>`），以及一对纯分组括号（`{(list.map(…))}`，语义透明）。
+ * 除此之外，凡是能出现在这条链上的节点都能改写渲染结果：
  *
- *     {copyModel.entries.map(…) && false}
- *     {copyModel.entries.map(…) || null}   // 数组是真值，这条其实画得出来
- *     {true || copyModel.entries.map(…)}
- *     {somethingElse ?? copyModel.entries.map(…)}
+ *   - `VoidExpression`      `{void list.map(…)}`            → 求值成 undefined，React 渲染成空
+ *   - `PrefixUnaryExpression` `{!list.map(…)}`              → 数组取反成 false，同样是空
+ *   - `BinaryExpression`    `{false && …}` / `{… && false}` / `{true || …}` / `{x ?? …}` / `{(…, null)}`
+ *   - `ConditionalExpression` `{ok ? … : null}`
+ *   - `CallExpression` / `ArrowFunction` / `Block` / `ReturnStatement`
+ *                            `{(() => { if (x) return null; return list.map(…) })()}`
+ *   - `PropertyAccessExpression` `{list.map(…).filter(…)}` → 在渲染层再筛一遍，能悄悄丢项
  *
- * 里，第一、三、四条都能在「那次 map 照常执行、源码里那行字面量原样在场」的前提下把整组从界面上
- * 抹掉。只按「调用落在 `&&` 的右操作数 / 三元的某个臂里」来判，第一条与第三条会漏。宽判法的代价是
- * 它也拒绝那些今天无害的写法——而那正是这道守卫要的语气：这一项的在场只能由数据决定。
- *
- * `??` 在这里算门，在 `inlineConditions` 里不算：那边问的是「这段里有没有条件」，取值用的 `??`
- * 不是门；这边问的是「这次调用头上有没有东西能替掉它」，而 `x ?? list.map(…)` 恰好能。
- *
- * 函数边界也算门：把整段包进 `{(() => { if (x) return null; return list.map(…) })()}` 同样能让它
- * 消失，而那个 `if` 是语句不是表达式，只盯表达式会漏。
+ * 空数组表示这次调用无条件发生、且它的数组结果**直接**就是画出来的东西。
  */
+const ALLOWED_ABOVE_MAP_CALL = new Set<ts.SyntaxKind>([
+  ts.SyntaxKind.JsxExpression,
+  ts.SyntaxKind.JsxElement,
+  ts.SyntaxKind.JsxFragment,
+  ts.SyntaxKind.ParenthesizedExpression
+])
+
 export function gatesAbove(call: ts.Node, { node: root, source }: JsxContent): string[] {
-  const GATE_OPERATORS = new Set<ts.SyntaxKind>([
-    ts.SyntaxKind.AmpersandAmpersandToken,
-    ts.SyntaxKind.BarBarToken,
-    ts.SyntaxKind.QuestionQuestionToken
-  ])
   const out: string[] = []
   for (let cursor = call.parent; cursor && cursor !== root; cursor = cursor.parent) {
-    if (ts.isConditionalExpression(cursor)) out.push(cursor.getText(source))
-    else if (ts.isBinaryExpression(cursor) && GATE_OPERATORS.has(cursor.operatorToken.kind)) {
-      out.push(cursor.getText(source))
-    } else if (ts.isIfStatement(cursor)) out.push(cursor.getText(source))
-    else if (
-      ts.isArrowFunction(cursor) ||
-      ts.isFunctionExpression(cursor) ||
-      ts.isFunctionDeclaration(cursor)
-    ) {
-      // 调用被包进了一层函数体。map 自己的回调是这次调用的**实参**（在它下面），不是祖先，
-      // 所以这里命中的只会是外面新包的那层壳。
-      out.push(cursor.getText(source))
+    if (!ALLOWED_ABOVE_MAP_CALL.has(cursor.kind)) out.push(cursor.getText(source))
+  }
+  return out
+}
+
+/** `undefined` / `null` / `false` / 裸 `return`——React 把它们都渲染成什么都没有的那几种值。 */
+function erasesToNothing(expr: ts.Expression | undefined): boolean {
+  let node = expr
+  while (node && ts.isParenthesizedExpression(node)) node = node.expression
+  if (!node) return true // 裸 `return;`
+  return (
+    node.kind === ts.SyntaxKind.NullKeyword ||
+    node.kind === ts.SyntaxKind.FalseKeyword ||
+    (ts.isIdentifier(node) && node.text === 'undefined')
+  )
+}
+
+/** 一个（可能解构的）形参声明里绑定到的所有标识符名。 */
+function bindingNames(param: ts.BindingName, into: Set<string>): void {
+  if (ts.isIdentifier(param)) into.add(param.text)
+  else if (ts.isObjectBindingPattern(param) || ts.isArrayBindingPattern(param)) {
+    for (const el of param.elements) if (ts.isBindingElement(el)) bindingNames(el.name, into)
+  }
+}
+
+/** `node` 子树里是否引用了 `names` 中的任一名字。判「这个条件跟不跟着当前项走」用的就是它。 */
+function referencesAny(node: ts.Node, names: ReadonlySet<string>): boolean {
+  let hit = false
+  const walk = (n: ts.Node): void => {
+    if (ts.isIdentifier(n) && names.has(n.text)) hit = true
+    ts.forEachChild(n, walk)
+  }
+  walk(node)
+  return hit
+}
+
+/**
+ * map 回调**内部**那些会把整组抹掉的抹除点。返回它们的源文本；空数组表示回调只会按数据画东西。
+ *
+ * 为什么单开这一条、而不并进 `gatesAbove`：`gatesAbove` 看的是调用**头上**的祖先，而这里的洞在
+ * 调用**底下**——回调是 `map(…)` 的实参，住在调用节点之下，祖先扫描永远够不着它。本仓实测过
+ * `{copyModel.entries.map((entry) => { if (true) return null; … })}`：那次 map 照常执行、`entry.action.id`
+ * 等字面量原样在场，14 条断言全绿，而每一项都渲染成 null——整组复制/地址从菜单上彻底消失。回调
+ * 恰恰是「有人自然会往里加逐项逻辑」的地方，所以这是最真实的一种绕法。
+ *
+ * 判据：只盯**会抹除的**返回（`return null/false/undefined` 或裸 `return`；箭头函数的简写体
+ * `(e) => null` / `(e) => cond ? null : <I/>` 同理）。抹除返回分三档：
+ *   - 无条件抹除（回调里没有任何 `if` 包着它）→ 每一项都成空，整组消失 → 算门。
+ *   - 抹除挂在 `if` 上，但**并非每一层** `if` 的条件都引用了当前项 → 那是渲染层的开关（`if (true)`、
+ *     `if (someOuterFlag)`），不是按数据分支 → 算门。
+ *   - 抹除挂在 `if` 上，且**每一层** `if` 都引用了当前项（`if (entry.kind === 'separator')`）→ 按数据
+ *     跳过某些项，每一项自己决定，合法 → 不算门。
+ *
+ * 只返回 JSX 的返回（`return <Item/>`）从不算门：那是正常渲染，不是抹除。回调里 `entry.visible && …`
+ * 这类**返回出去的 JSX 内部**的条件也不算：它决定的是某一项长什么样，不是「这一项在不在」。
+ *
+ * 已知的残留盲区（诚实标注）：本判据用「条件引用了当前项的绑定」来近似「条件由当前项决定」。于是
+ * `if (entry || true) return null` 会被放过——它引用了 `entry` 却恒真，实为整组门。要抓它得做常量
+ * 折叠 / 数据流分析，超出词法判据的范围，故不在此守。真正要防的那对（`if (entry.kind === …)` 放行、
+ * `if (true)` 拦下）已被干净地分开。
+ *
+ * 嵌套函数（比如某一项 `onSelect={() => { return null }}`）里的 `return` 不算：那不是这一项的渲染
+ * 结果，扫描到它就停，不往里走。
+ */
+export function callbackErasureGates(call: ts.CallExpression, { source }: JsxContent): string[] {
+  const callback = call.arguments.find(
+    (arg): arg is ts.ArrowFunction | ts.FunctionExpression =>
+      ts.isArrowFunction(arg) || ts.isFunctionExpression(arg)
+  )
+  if (!callback) return []
+  const params = new Set<string>()
+  for (const p of callback.parameters) bindingNames(p.name, params)
+  const out: string[] = []
+
+  if (ts.isBlock(callback.body)) {
+    const walk = (node: ts.Node): void => {
+      // 嵌套函数的返回属于那个函数，不是当前项的渲染结果——不下钻。
+      if (
+        node !== callback &&
+        (ts.isArrowFunction(node) || ts.isFunctionExpression(node) || ts.isFunctionDeclaration(node))
+      ) {
+        return
+      }
+      if (ts.isReturnStatement(node) && erasesToNothing(node.expression)) {
+        const guards: ts.Expression[] = []
+        for (let c = node.parent; c && c !== callback; c = c.parent) {
+          if (ts.isIfStatement(c)) guards.push(c.expression)
+        }
+        if (guards.length === 0) out.push(node.getText(source))
+        else if (!guards.every((cond) => referencesAny(cond, params))) out.push(node.getText(source))
+      }
+      ts.forEachChild(node, walk)
+    }
+    walk(callback.body)
+  } else {
+    // 简写体：`(e) => null` 无条件抹除；`(e) => cond ? null : <I/>` 里 cond 不引用当前项则是渲染层门。
+    let body: ts.Expression = callback.body
+    while (ts.isParenthesizedExpression(body)) body = body.expression
+    if (erasesToNothing(body)) out.push(body.getText(source))
+    else if (ts.isConditionalExpression(body)) {
+      const erasesABranch = erasesToNothing(body.whenTrue) || erasesToNothing(body.whenFalse)
+      if (erasesABranch && !referencesAny(body.condition, params)) out.push(body.getText(source))
     }
   }
   return out
