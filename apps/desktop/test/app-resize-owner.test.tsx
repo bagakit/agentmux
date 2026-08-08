@@ -8,6 +8,8 @@ const observed = vi.hoisted(() => {
     state: {
       initialize: async () => () => {},
       loading: false,
+      runtimeOwnershipWarnings: [],
+      environmentWarning: null,
       error: null,
       config: {
         version: 9,

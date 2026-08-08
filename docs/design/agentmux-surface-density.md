@@ -323,3 +323,7 @@ styles/
 - **不引入 CSS-in-JS、Tailwind 或预处理器**。问题是"字面值没有名字"，不是"CSS 不够强"；
   原生 custom property 已经足以给尺度命名，换一套构建期方案只会在解决同一个问题的同时新增一层工具链。
 - 不做设计 token 的运行时主题切换。当前只有一套深色语言，`color-scheme: dark` 是事实而非临时状态。
+
+- Shell 环境读取不完整时，复用服务窗的持续、中性、非模态告示；说明读取范围和恢复动作，不展示环境值、不靠 toast 自动消失。行为归属见 [Desktop interaction](agentmux-desktop-interaction.md) 的本地 shell 环境约束。
+
+- 兼容但归属未确认的 Runtime 使用持续的中性服务窗说明，不使用错误弹窗，不阻挡已有工作面；归属状态不展示路径、PID 或凭据。

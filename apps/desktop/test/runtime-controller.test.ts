@@ -555,6 +555,17 @@ describe('RuntimeController configuration transaction', () => {
     }))
   })
 
+  it('projects unverified daemon provenance without suppressing the Runtime snapshot', async () => {
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    client.runtimeIdentity.mockReturnValue({ ...client.runtimeIdentity(), ownership: 'unverified' } as ReturnType<typeof client.runtimeIdentity>)
+    const snapshot = await controller.snapshot(localConfig)
+    expect(snapshot.runtimeOwnershipWarnings).toEqual(['fixture'])
+    expect(snapshot.sessions).toEqual([])
+    client.runtimeIdentity.mockReturnValue({ ...client.runtimeIdentity(), ownership: 'owned' } as ReturnType<typeof client.runtimeIdentity>)
+    expect((await controller.snapshot(localConfig)).runtimeOwnershipWarnings).toBeUndefined()
+  })
+
   it('returns a Session and its revision baseline from one Agent launch result', async () => {
     const controller = await configuredController()
     const client = runtimeFixture.FakeClient.instances[0]!

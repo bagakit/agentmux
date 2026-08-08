@@ -185,7 +185,7 @@ function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds))
 }
 
-function daemonEnvironment(): NodeJS.ProcessEnv {
+function localProcessEnvironment(): Record<string, string> {
   const environment: NodeJS.ProcessEnv = {
     ...process.env,
     TERM: 'xterm-256color',
@@ -199,7 +199,7 @@ function daemonEnvironment(): NodeJS.ProcessEnv {
   delete environment.NO_COLOR
   if (environment.FORCE_COLOR === '0') delete environment.FORCE_COLOR
   if (environment.CLICOLOR === '0') delete environment.CLICOLOR
-  return environment
+  return Object.fromEntries(Object.entries(environment).filter((entry): entry is [string, string] => entry[1] !== undefined))
 }
 
 function readDaemonReadiness(child: ChildProcess, stream: Readable): Promise<string> {
@@ -588,6 +588,8 @@ export class CtxmuxRunAdapter {
    * 造一个是没必要的熵。
    */
   lastEndpointReclaim: EndpointReclaimOutcome | null = null
+  /** Compatibility is independent of whether this process owns daemon cleanup rights. */
+  runtimeOwnership: 'owned' | 'unverified' | null = null
   private readonly attachments = new Map<string, LiveAttachment>()
   private eventListener: ((event: CtxmuxAdapterEvent) => void) | null = null
   private errorListener: ((error: AgentMuxError, runId?: string) => void) | null = null
@@ -633,6 +635,7 @@ export class CtxmuxRunAdapter {
     this.attachments.clear()
     this.client = null
     this.runtime = null
+    this.runtimeOwnership = null
     this.connectionLostListener?.()
   }
 
@@ -659,14 +662,19 @@ export class CtxmuxRunAdapter {
     try {
       runtime = await diagnosticsClient.runtimeInfo()
       assertRuntimeIdentity(runtime)
-      await verifyOwnerReceipt(artifacts, this.socketPath, this.stateDirectory, runtime)
-    } catch {
-      if (runtime !== null) {
-        throw new AgentMuxError(
-          'An unowned CtxMux peer already occupies the exact AgentMux runtime endpoint.',
-          'CTXMUX_OWNER_IDENTITY_UNPROVEN'
-        )
+      try {
+        await verifyOwnerReceipt(artifacts, this.socketPath, this.stateDirectory, runtime)
+        this.runtimeOwnership = 'owned'
+      } catch (error) {
+        // A compatible daemon may have been started by an earlier App instance. Receipt ownership
+        // controls cleanup authority, never protocol compatibility or access to existing Runs.
+        if (error instanceof AgentMuxError && error.code === 'CTXMUX_OWNER_IDENTITY_UNPROVEN') {
+          this.runtimeOwnership = 'unverified'
+        } else throw error
       }
+    } catch (error) {
+      // A responding but incompatible Runtime is not an invitation to spawn a replacement.
+      if (runtime !== null) throw error
       const child = spawn(artifacts.daemonPath, [
         '--socket',
         this.socketPath,
@@ -677,7 +685,7 @@ export class CtxmuxRunAdapter {
       ], {
         detached: true,
         stdio: ['ignore', 'ignore', 'ignore', 'pipe'],
-        env: daemonEnvironment()
+        env: localProcessEnvironment()
       })
       child.unref()
       try {
@@ -718,12 +726,14 @@ export class CtxmuxRunAdapter {
           }
         }
         if (lastError !== null || runtime === null) throw lastError
-        await writeOwnerReceipt(
-          artifacts,
-          this.socketPath,
-          this.stateDirectory,
-          runtime
-        )
+        try {
+          await writeOwnerReceipt(artifacts, this.socketPath, this.stateDirectory, runtime)
+          this.runtimeOwnership = 'owned'
+        } catch {
+          // The inherited readiness receipt already proved this exact child. A disk failure
+          // recording provenance must not terminate a compatible daemon or its working Runs.
+          this.runtimeOwnership = 'unverified'
+        }
       } catch (error) {
         try {
           await terminateSpawnedDaemon(child)
@@ -753,6 +763,7 @@ export class CtxmuxRunAdapter {
     this.attachments.clear()
     this.client = null
     this.runtime = null
+    this.runtimeOwnership = null
   }
 
   isConnected(): boolean {
@@ -799,7 +810,9 @@ export class CtxmuxRunAdapter {
       const run = await this.requireClient().start(defineRun(input.program, {
         args: input.args,
         cwd: input.cwd,
-        env: input.env ?? {},
+        // The daemon can outlive this application. Every new local Run receives the current
+        // client environment; explicit Run overrides remain authoritative.
+        env: { ...localProcessEnvironment(), ...input.env },
         size: { cols: input.cols ?? 80, rows: input.rows ?? 24 }
       }), createOperationKey(input.operationKey))
       return projectRun(run)

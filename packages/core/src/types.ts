@@ -30,6 +30,8 @@ export type AgentExecutorConfig = {
 export type ExecutionHostKind = 'local' | 'ssh'
 
 export type AgentMuxRuntimeIdentity = {
+  /** Launch provenance, independent of compatibility and stable across App restarts. */
+  ownership?: 'owned' | 'unverified'
   hostId: string
   buildIdentity: string
   protocolVersion: number

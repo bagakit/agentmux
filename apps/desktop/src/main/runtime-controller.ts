@@ -533,7 +533,13 @@ export class RuntimeController {
       })
     })
     const timelineEntries = projections.flatMap(({ timelineEntries: entries }) => entries)
-    return { sessions, timelines: Object.fromEntries(timelineEntries), recoveryCandidates }
+    const runtimeOwnershipWarnings = projections.flatMap(({ client, projection }) => (
+      client.runtimeIdentity().ownership === 'unverified' ? [projection.hostId] : []
+    ))
+    return {
+      sessions, timelines: Object.fromEntries(timelineEntries), recoveryCandidates,
+      ...(runtimeOwnershipWarnings.length > 0 ? { runtimeOwnershipWarnings } : {})
+    }
   }
 
   async launchAgent(request: AgentLaunchInput, config: AppConfig): Promise<AgentLaunchResult> {

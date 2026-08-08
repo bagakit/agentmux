@@ -887,6 +887,10 @@ export type RuntimeEvent = {
 }
 
 export type RuntimeSnapshot = {
+  /** Connected hosts whose daemon launch provenance could not be verified. */
+  runtimeOwnershipWarnings?: string[]
+  /** Non-secret, app-lifetime notice for incomplete local shell environment loading. */
+  environmentWarning?: string
   sessions: SessionSnapshot[]
   timelines: Record<string, AgentTimelineSnapshot>
   recoveryCandidates: AgentSessionRecoveryCandidate[]

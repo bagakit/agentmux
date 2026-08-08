@@ -9,7 +9,7 @@ import { CrashLog } from './crash-log.js'
 import { crashReporterOptions, registerCrashCapture } from './crash-capture-wiring.js'
 import { ConfigStore } from './config-store.js'
 import { registerIpc } from './ipc.js'
-import { hydrateProcessPathFromLoginShell } from './login-shell-path.js'
+import { hydrateProcessEnvironmentFromLoginShell, loginShellEnvironmentWarning } from './login-shell-environment.js'
 import { RuntimeController } from './runtime-controller.js'
 import { ScratchTopics } from './scratch-topics.js'
 import { runDesktopResourceProbe } from './resource-probe.js'
@@ -77,6 +77,12 @@ function startPrimaryInstance(): void {
   let disposeIpc: (() => Promise<void>) | null = null
   let ownerDisposal: Promise<void> | null = null
   let allowingQuit = false
+  // Every window entry point shares this read, including a second launch during startup.
+  const environmentReady = hydrateProcessEnvironmentFromLoginShell().then((result) => {
+    const warning = loginShellEnvironmentWarning(result)
+    if (warning) process.stderr.write(`${warning}\n`)
+    return warning
+  })
 
   function disposeOwners(): Promise<void> {
     if (!ownerDisposal) {
@@ -125,6 +131,7 @@ function startPrimaryInstance(): void {
     }))
 
   async function buildWindow(appReadyAtMs: number = Date.now()): Promise<void> {
+    const environmentWarning = await environmentReady
     const windowCreationStartedAtMs = Date.now()
     // The window reopens where it was last left. Only a first launch (or a corrupt record) falls back
     // to the default size — the fixed 1480×940 literal is no longer the every-launch size. A saved
@@ -187,7 +194,7 @@ function startPrimaryInstance(): void {
     registerWindowResizeEvents(window)
     registerWindowStatePersistence(window, windowGeometryStore)
     await disposeIpc?.()
-    disposeIpc = await registerIpc({ window, configStore, runtime, scratchTopics, workspaceFiles })
+    disposeIpc = await registerIpc({ window, configStore, runtime, scratchTopics, workspaceFiles, ...(environmentWarning ? { environmentWarning } : {}) })
     if (process.env.ELECTRON_RENDERER_URL) await window.loadURL(process.env.ELECTRON_RENDERER_URL)
     else {
       const probeQuery = process.env.AGENTMUX_DESKTOP_FILE_EDITING_REPORT
@@ -279,10 +286,6 @@ function startPrimaryInstance(): void {
     // 不含任何绑 Cmd+W 的 role，同时保留 Edit 菜单——终端粘贴走的是原生 Paste role。菜单是应用级、
     // 全窗口共享的，建窗前设一次即可。
     Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenuTemplate(process.platform === 'darwin')))
-    const pathHydration = await hydrateProcessPathFromLoginShell()
-    if (!pathHydration.ok && pathHydration.reason !== 'unsupported-platform') {
-      process.stderr.write(`Unable to load login shell PATH: ${pathHydration.reason}\n`)
-    }
     if (process.platform === 'darwin') app.dock?.setIcon(appIconPath)
     await createWindow(appReadyAtMs)
     app.on('activate', () => {
