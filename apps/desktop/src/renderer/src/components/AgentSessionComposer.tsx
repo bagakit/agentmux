@@ -6,7 +6,6 @@ import { api } from '../lib/api'
 import { appendFileReferences } from '../lib/composer-file-reference'
 import { composerSubmitMode } from '../lib/composer-submit-mode'
 import { useAppStore } from '../store'
-const queuedSteers = new Map<string, string>()
 import { AgentComposer } from './AgentComposer'
 
 export type AgentComposerAvailability = {
@@ -46,6 +45,7 @@ export function AgentSessionComposer({
   const text = useAppStore((state) => state.agentComposerDrafts[sessionId] ?? '')
   const setAgentComposerDraft = useAppStore((state) => state.setAgentComposerDraft)
   const clearAgentComposerDraftIfUnchanged = useAppStore((state) => state.clearAgentComposerDraftIfUnchanged)
+  const enqueueAgentSteer = useAppStore((state) => state.enqueueAgentSteer)
   const session = useAppStore((state) => state.sessions.find((item) => item.id === sessionId))
   const workspace = useAppStore((state) =>
     state.config?.workspaces.find((item) =>
@@ -159,7 +159,7 @@ export function AgentSessionComposer({
         ...(postureControl ? { onSetPosture: (modeId: string) => void setPosture(sessionId, modeId) } : {}),
         ...(activeFile ? { onReferenceActiveFile: addFileReference } : {})
       } : {})}
-      {...(session?.kind === 'agent' && session.pendingInteraction && text.trim() ? { onQueue: () => { queuedSteers.set(sessionId, text) } } : {})}
+      {...(session?.kind === 'agent' && session.pendingInteraction && text.trim() ? { onQueue: () => enqueueAgentSteer(sessionId, text) } : {})}
     />
   )
 }
