@@ -23,11 +23,49 @@ it('hover explains which Agent needs a reply, selection navigates exactly there,
     const button = container.querySelector('button')!
     expect(button.textContent).toContain('Needs you')
     await act(async () => button.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse', buttons: 0 })))
+    expect(document.querySelector('[role="menu"]')?.textContent).toContain('Unassigned')
+    await act(async () => (document.querySelector('[aria-label^="Show Agents"]') as HTMLElement).click())
     expect(document.querySelector('[role="menu"]')?.textContent).toContain('Which branch should I review?')
     await act(async () => (document.querySelector('[role="menuitem"]') as HTMLElement).click())
     expect(state.selectSession).toHaveBeenCalledExactlyOnceWith('a')
     const { pendingInteraction: _resolved, ...resolvedSession } = session
     await act(async () => root.render(<ProjectActivity sessions={[{ ...resolvedSession, status: { ...session.status, state: 'done' } }]} />))
     expect(container.querySelector('button')).toBeNull()
+  } finally { await act(async () => root.unmount()); container.remove() }
+})
+
+it('renders one explicit work-line row and lets its primary action open the most urgent Agent', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  state.selectSession.mockClear()
+  const container = document.createElement('div'); document.body.append(container)
+  const root = createRoot(container)
+  const waiting: SessionSnapshot = {
+    id: 'waiting', kind: 'agent', label: 'Reviewer', providerId: 'codex', executorId: 'codex',
+    capabilities: { terminal: true, timeline: 'streaming', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
+    hostId: 'local', workspacePath: '/project', createdAt: 1, updatedAt: 4, processState: 'running', latestOutputBytes: 0,
+    control: { kind: 'agent', hostId: 'local', agentSessionId: 'waiting', run: { runId: 'run-waiting' } },
+    status: { state: 'waiting', source: 'native-hook', observedAt: 4 },
+    pendingInteraction: { kind: 'question', id: 'question', agentSessionId: 'waiting', questions: [{ id: 'choice', prompt: 'Choose a release lane', options: [] }], evidence: { source: 'native-hook', observedAt: 4 } }
+  }
+  const working: SessionSnapshot = {
+    ...waiting,
+    id: 'working', label: 'Builder',
+    control: { kind: 'agent', hostId: 'local', agentSessionId: 'working', run: { runId: 'run-working' } },
+    status: { state: 'working', source: 'native-hook', observedAt: 3 },
+    pendingInteraction: undefined
+  }
+  try {
+    await act(async () => root.render(<ProjectActivity
+      sessions={[working, waiting]}
+      contexts={[{ id: 'topic-1', kind: 'topic', label: 'Release prep', hostId: 'local', path: '/project' }]}
+    />))
+    const trigger = container.querySelector('button')!
+    await act(async () => trigger.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse', buttons: 0 })))
+    const menu = document.querySelector('[role="menu"]')!
+    expect(menu.textContent).toContain('Topic · Release prep')
+    expect(menu.querySelectorAll('.project-activity-group')).toHaveLength(1)
+    expect(menu.querySelector('.project-activity-group__details')).toBeNull()
+    await act(async () => (menu.querySelector('.project-activity-group__summary') as HTMLElement).click())
+    expect(state.selectSession).toHaveBeenCalledExactlyOnceWith('waiting')
   } finally { await act(async () => root.unmount()); container.remove() }
 })

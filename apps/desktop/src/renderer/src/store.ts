@@ -344,6 +344,9 @@ type AppState = {
   editorRegionDiffs: Record<string, EditorRegionDiffState | undefined>
   loading: boolean
   error: string | null
+  /** Last transient error remains available after dismissal/navigation for a deliberate reopen. */
+  lastError: string | null
+  errorDismissed: boolean
   initialize(): Promise<() => void>
   selectWorkspace(id: string): Promise<void>
   activateWorkspaceSelection(result: WorkspaceSelectionResult): void
@@ -617,6 +620,8 @@ type AppState = {
   decayStaleAgentStatuses(now: number): void
   setConfig(config: AppConfig): void
   reportError(error: unknown): void
+  dismissError(): void
+  reopenError(): void
 }
 
 function emptyRuntimeSnapshot(): RuntimeSnapshot {
@@ -1660,6 +1665,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   runtimeOwnershipWarnings: [],
   environmentWarning: null,
   error: null,
+  lastError: null,
+  errorDismissed: false,
   async initialize() {
     if (!api.control || typeof api.control.onRequest !== 'function') {
       throw new Error('AgentMux Control API is unavailable')
@@ -1896,7 +1903,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         tabs: workbench.tabs,
         layouts: workbench.layouts,
         loading: false,
-        error: startupError || null
+        error: startupError || null,
+        lastError: startupError || null,
+        errorDismissed: false
       })
       // The Runtime and its Agents remain usable; only the optional persisted presentation projection
       // was unavailable. Open the fence after the fallback state is installed so that this warning
@@ -1932,7 +1941,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       set({
         ...(persisted ? { tabs: persisted.tabs, layouts: persisted.layouts } : {}),
         loading: false,
-        error: presentError(error)
+        error: presentError(error),
+        lastError: presentError(error),
+        errorDismissed: false
       })
       // If hydration itself failed, keep the write fence closed: opening it here would let the
       // default empty state overwrite the only durable copy before the user can repair storage.
@@ -1942,7 +1953,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
   },
   async selectWorkspace(id) {
-    set({ activeWorkspaceId: id, mainSurface: 'workbench', error: null })
+    set({ activeWorkspaceId: id, mainSurface: 'workbench', error: null, errorDismissed: true })
     const state = get()
     if (!state.layouts[id]) {
       set((current) => ({
@@ -1959,6 +1970,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         activeWorkspaceId: workspace.id,
         mainSurface: 'workbench',
         error: null,
+        errorDismissed: true,
         layouts: existingLayout
           ? state.layouts
           : { ...state.layouts, [workspace.id]: createWorkspaceLayout(newTabGroupId()) }
@@ -4495,7 +4507,17 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }))
   },
   reportError(error) {
-    set({ error: presentError(error) })
+    const message = presentError(error)
+    set({ error: message, lastError: message, errorDismissed: false })
+  },
+  dismissError() {
+    if (!get().error) return
+    set({ errorDismissed: true })
+  },
+  reopenError() {
+    const message = get().lastError
+    if (!message) return
+    set({ error: message, errorDismissed: false })
   }
 }), {
   name: 'agentmux-workbench-v1',

@@ -854,7 +854,53 @@ export class AgentMuxClient {
             })
           : undefined
       )
+      const agentSession = this.registry.findByRun(runRef(run.runId))
+      if (agentSession) this.invalidateEndedRunReadiness(agentSession, runRef(run.runId))
     }
+  }
+
+  /**
+   * A terminal process-state event outranks a screen observer that is still pending. Leaving that
+   * epoch in the Session store makes the next prompt report "Run is still running" even though the
+   * only truthful action is resume/restart. Cancellation is synchronous; store cleanup is async and
+   * publishes the canonical Session projection when it lands.
+   */
+  private invalidateEndedRunReadiness(
+    session: AgentMuxStoredAgentSession,
+    endedRun: AgentMuxRunRef
+  ): void {
+    this.promptSubmission.cancelReadiness(session.agentSessionId)
+    void this.registry.update(
+      session.agentSessionId,
+      endedRun,
+      (current) => {
+        if (!sameRun(current.run, endedRun)) return current
+        if (!current.terminalPromptReadiness && !current.terminalPromptSubmission && !current.terminalPromptDelivery) {
+          return current
+        }
+        const next = { ...current }
+        delete next.terminalPromptReadiness
+        delete next.terminalPromptSubmission
+        delete next.terminalPromptDelivery
+        return { ...next, updatedAt: Math.max(next.updatedAt, Date.now()) }
+      }
+    ).then((next) => {
+      this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
+    }).catch((error: unknown) => {
+      // The Session may have been retired/resumed between the process event and this cleanup. That
+      // is already the desired outcome; do not turn the successful terminal event into another error.
+      if (error instanceof AgentMuxError && (
+        error.code === 'STALE_AGENT_SESSION' ||
+        error.code === 'UNKNOWN_AGENT_SESSION'
+      )) return
+      this.publisher.publish({
+        type: 'agent-error',
+        agentSessionId: session.agentSessionId,
+        code: error instanceof AgentMuxError ? error.code : 'AGENT_PROMPT_READINESS_FAILED',
+        message: error instanceof Error ? error.message : String(error),
+        evidence: { source: 'run-process', observedAt: Date.now(), run: { ...endedRun } }
+      })
+    })
   }
 
   disconnect(): void {
@@ -3664,6 +3710,7 @@ export class AgentMuxClient {
     // 拒收（见 acceptHookEvent），以及 snapshot 重投影时还能说出「它为什么没了」。必须记在分类**之后**：
     // 意图已经在上一行被读走并删掉，事后再没有第二次机会算出这个答案。
     this.endedRuns.set(event.runId, exitReason)
+    if (agentSession) this.invalidateEndedRunReadiness(agentSession, runRef(event.runId))
     this.publisher.publish({
       type: 'process-state',
       ...(agentSession ? { agentSessionId: agentSession.agentSessionId } : {}),

@@ -798,7 +798,35 @@ export class RuntimeController {
           prompt
         })
       } catch (error) {
-        throw humanizePromptDeliveryError(error)
+        // A process can exit in the small window after the first status check. Re-read the same
+        // authoritative Run before translating a readiness error so a stopped Agent is never told to
+        // keep waiting for an observation that can no longer arrive.
+        let runState: 'running' | 'ended' | undefined
+        let semanticState: 'waiting' | 'blocked' | 'done' | 'error' | undefined
+        if (error instanceof AgentMuxError && (
+          error.code === 'AGENT_PROMPT_NOT_READY' ||
+          error.code === 'AGENT_PROMPT_READINESS_CONSUMED' ||
+          error.code === 'AGENT_PROMPT_SUBMISSION_BUSY'
+        )) {
+          try {
+            const latest = await client.statusAgent(control.agentSessionId)
+            if (latest.run.runId === control.run.runId) {
+              if (latest.run.state !== 'running') runState = 'ended'
+              else {
+                const candidate = latest.session.semanticStatus?.state
+                if (candidate === 'waiting' || candidate === 'blocked' || candidate === 'done' || candidate === 'error') {
+                  semanticState = candidate
+                }
+              }
+            }
+          } catch {
+            // Keep the original fail-closed error when the follow-up observation is unavailable.
+          }
+        }
+        throw humanizePromptDeliveryError(error, {
+          ...(runState ? { runState } : {}),
+          ...(semanticState ? { semanticState } : {})
+        })
       }
     })
   }

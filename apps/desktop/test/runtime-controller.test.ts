@@ -836,6 +836,57 @@ describe('RuntimeController configuration transaction', () => {
     expect(error.message).not.toContain('steer mid-turn')
   })
 
+  it('re-checks the authoritative Run before telling a stopped Agent to wait', async () => {
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const running = agentStatusFixture()
+    client.statusAgent
+      .mockResolvedValueOnce({ ...running, run: { ...running.run, state: 'running' as const } })
+      .mockResolvedValueOnce({ ...running, run: { ...running.run, state: 'exited' as const } })
+    client.submitAgentPrompt.mockRejectedValue(new AgentMuxError(
+      'Agent prompt requires a ready composer epoch for this exact Run.',
+      'AGENT_PROMPT_NOT_READY',
+      'runId=run-1 readinessId=readiness-1 readyThroughByte=pending reason=observation-pending'
+    ))
+    const control = {
+      kind: 'agent' as const,
+      hostId: 'local',
+      agentSessionId: 'agent-1',
+      run: { runId: 'run-1' }
+    }
+
+    await expect(controller.submitPrompt(control, 'hello')).rejects.toThrow(/Run has ended; resume or restart/i)
+  })
+
+  it('does not call a semantically completed turn a still-running Run when process is alive', async () => {
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const running = agentStatusFixture()
+    client.statusAgent
+      .mockResolvedValueOnce({ ...running, run: { ...running.run, state: 'running' as const } })
+      .mockResolvedValueOnce({
+        ...running,
+        run: { ...running.run, state: 'running' as const },
+        session: {
+          ...running.session,
+          semanticStatus: { state: 'done' as const, source: 'native-hook' as const, observedAt: 8 }
+        }
+      })
+    client.submitAgentPrompt.mockRejectedValue(new AgentMuxError(
+      'Agent prompt requires a ready composer epoch for this exact Run.',
+      'AGENT_PROMPT_NOT_READY',
+      'runId=run-1 readinessId=readiness-1 readyThroughByte=pending reason=observation-pending'
+    ))
+    const control = {
+      kind: 'agent' as const,
+      hostId: 'local',
+      agentSessionId: 'agent-1',
+      run: { runId: 'run-1' }
+    }
+
+    await expect(controller.submitPrompt(control, 'hello')).rejects.toThrow(/Agent turn is complete/i)
+  })
+
   it('forwards a typed interaction response with the exact Session Run fence', async () => {
     const controller = await configuredController()
     const client = runtimeFixture.FakeClient.instances[0]!

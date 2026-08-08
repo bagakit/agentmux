@@ -22,6 +22,14 @@ export type ActivityGroup = {
   sessions: Extract<SessionSnapshot, { kind: 'agent' }>[]
 }
 
+/** A short, explicit noun for the context shown in an Activity row. */
+export const ACTIVITY_CONTEXT_KIND_LABEL: Record<ActivityContextKind, string> = {
+  topic: 'Topic',
+  branch: 'Branch',
+  worktree: 'Worktree',
+  unassigned: 'Unassigned'
+}
+
 function pathTail(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path
 }
@@ -79,9 +87,12 @@ export function buildActivityGroups(
   const grouped = new Map<string, ActivityGroup>()
   for (const session of agents) {
     const context = contextByLocation.get(`${session.hostId}\u0000${session.workspacePath}`)
+    // An unbound Session has no honest path-based identity. It may still be grouped with other
+    // unbound Sessions on the same Host, but never across Hosts: a single "Unassigned" row spanning
+    // two machines would hide where a click will take the user.
     const key = context
       ? `${context.hostId}\u0000${context.kind}\u0000${context.id}`
-      : 'unassigned'
+      : `unassigned\u0000${session.hostId}`
     const current = grouped.get(key)
     if (current) current.sessions.push(session)
     else {
@@ -90,7 +101,7 @@ export function buildActivityGroups(
         id: context?.id ?? null,
         kind: context?.kind ?? 'unassigned',
         label: context?.label ?? 'Unassigned',
-        hostId: context?.hostId ?? null,
+        hostId: context?.hostId ?? session.hostId,
         path: context?.path ?? null,
         sessions: [session]
       })
