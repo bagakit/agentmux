@@ -239,12 +239,13 @@ describe('每个改动 region 集合的函数都必须过那道闸（#515 接线
   }
 
   /**
-   * 判「断言喂对了值 + 断言真的会跑」的两个正交 AST 判据（#687 补洞；#698/#699/#700 修三处坐实的存活变异）。
+   * 判「断言喂对了值 + 断言真的会跑」的两个正交 AST 判据（#687 补洞；#698/#699/#700 修三处、#727/#728 再补两处
+   * 坐实的存活变异）。
    *
    * 背景：这道闸曾经只问「包住这次 changes-helper 调用的函数体里，有没有出现过一次 assertRegionInvariant
    * 调用」。它既不问断言喂进去的是哪个值，也不问那次断言在不在会真正执行的路径上——两个变异（把
    * addWorkbenchRegion 尾部那句 `assertRegionInvariant(next)` 改成 `if (import.meta.env.DEV) …` 或改成断言入参
-   * `tab`）都在全绿下存活。补进 A（喂对值）/ B（真的跑）两条正交判据后仍有三处坐实的存活变异，这一轮全部堵上：
+   * `tab`）都在全绿下存活。补进 A（喂对值）/ B（真的跑）两条正交判据后又有五处坐实的存活变异，逐轮堵上：
    *
    *   F1（判据 A 按名字配对，同名兄弟分支替真正该受守的分支背书）：`flowSetFromCall` 曾返回 `Set<string>`，
    *     `assertSitesIn` 曾按操作数**名字**在整个函数体里配对。control.ts 的 arrangeWorkbenchControlTab 有三个
@@ -269,31 +270,64 @@ describe('每个改动 region 集合的函数都必须过那道闸（#515 接线
    *     named import 解析出「本地名→规范名」的别名表，用规范名查 LAYOUT_EFFECT，于是别名调用点仍留在扫描面、
    *     A/B 照常覆盖它；(2) 把覆盖站点集合按**名字**钉住（下方 REQUIRED_COVERED），并单独一条 it 检测那四个
    *     changes 助手的**别名 import specifier** 并响亮失败——裸计数地板不再承重。
+   *   F4（#727：判据 B 也犯了 F1 在 A 上犯过的错——把「合格断言」绑在**函数**上而不是**站点**上）：B 曾按
+   *     enclosing function 求 `.some(a => a.runsBeforeReturn)`——只问「函数里有没有一次可达断言」。把
+   *     arrangeWorkbenchControlTab 的 preset 那句改成 `if (import.meta.env.DEV) assertRegionInvariant(next)`
+   *     （**只改可达性、操作数不变**），balance/active-first 两个兄弟分支里**无条件**的断言仍替 preset 站点满足
+   *     旧 B——实测 `14 passed (14)` 存活。对照：同一变异打在**单断言**的 addWorkbenchRegion 上，B 立刻红——
+   *     正是「有兄弟可代偿」与「没有」的差别，坐实这是真缺陷而非理论形状。**修法（与 A 同构）**：B 先用 A 那把
+   *     尺（操作数声明节点落在本站点流集）滤出「本站点自己的断言」，再要求其中至少一次可达。兄弟分支操作它
+   *     自己 `next`（不在 preset 流集）的可达断言，不进 preset 的 in-flow 集，再也代偿不了。
+   *   F5（#728：局部值别名让调用点整体逃出扫描面，是 F3 之外的第二个逃逸向量）：`const f = closeWorkbenchRegion;
+   *     const layout = f(...)` 里 `f(...)` 的 callee 文本是 `f`，既不是 changes 助手、`aliasMapFor` 也看不见
+   *     （它只解析 import specifier，不解析局部 const）。于是这个调用点整体从 callSites 消失，A/B 覆盖静默丢掉
+   *     它——实测经局部 const 转发一个未守的 closeWorkbenchRegion 调用后 `14 passed (14)` 存活。**修法走允许
+   *     清单而非禁止清单**（本仓「禁止清单必漏」）：下方「转发禁令」那条 it 扫全 renderer 里每个「文本是具名
+   *     import 进来的 changes 助手本地名」的标识符，只放行两种角色——import specifier 与直接调用 callee——
+   *     其余任何形状（赋给 const、当实参传出、进容器……）带着它的父节点 SyntaxKind 响亮失败，并用 callSites
+   *     交叉核对「直接调用」那一面**恰好相等**。**没有为迁就守卫改生产源码**：这是给测试补一条禁止转发的约束。
    *
-   * 拆成两个**各自独立红**的 it，不能合进一个：本仓 two-throws-in-one-it-mask-each-other 记过，先抛的那条
-   * 断言会把后一条变成死代码。三处修复各有自己的靶子、且只杀自己那一条（交付前逐个跑变异证明）：
-   *   - F1 的靶子是 **接线层-A（喂对值）**：施加 F1 复合变异后只有 A 红（B 仍被 balance/active-first 两个兄弟
-   *     分支里合格的断言满足，故不红——这恰好证明 A 独立承重）。
-   *   - F2 的靶子是 **接线层-B（真的跑）**：在单断言的 removeWorkbenchRegion 里 assert 前插 `return next` 后
-   *     只有 B 红（A 仍绿，操作数没变）。
-   *   - F3 的靶子是 **别名 import 禁令那条 it**：加别名后只有它红（callSites 别名感知，A/B 与名字锚点都仍绿）。
+   * 拆成各自独立红的 it，不能合进一个：本仓 two-throws-in-one-it-mask-each-other 记过，先抛的那条断言会把
+   * 后一条变成死代码。每处修复各有自己的靶子、且**只杀自己那一条**（交付前逐个跑变异证明，见交付 message）：
+   *   - F1-单（只改操作数 `next`→`tab`）：只有 **A** 红。B 不红——`tab` 不在 preset 流集，preset 的 in-flow
+   *     集为空，B 对该站点 vacuously 通过（「值喂错」交给 A 说，不重复报）。这正是 A 独立承重的证据。
+   *   - F2 / F4（只改可达性、操作数不变）：只有 **B** 红。A 不红——操作数仍落在本站点流集里。这是 B 独立承重。
+   *   - F3（别名 import）：只有 **别名禁令** 那条红。A/B 与名字锚点都仍绿（callSites 别名感知，站点没掉出扫描面）。
+   *   - F5（局部 const 转发）：只有 **转发禁令** 那条红。A/B 仍绿（转发调用点本就在 callSites 之外，这正是
+   *     它要堵的泄漏；堵在源头——禁止转发——而不是让 A/B 去追一个它们看不见的调用点）。
+   * A 与 B 因此正交而非蕴含：A 问「本站点有没有 in-flow 断言」，B 问「本站点的 in-flow 断言有没有被全部跳过」；
+   * 操作数坏→A 红、B vacuous 绿，可达性坏→B 红、A 绿。两条各自都有只杀自己的变异。
    *
    * 判据 A（喂对值）：对每个 changes-helper 调用点，求它的**流集**——从「初始化式（可传递地）引用了这次
    *   helper 调用**结果**（按 AST 节点标识）」的那个局部声明起步，闭包进「初始化式引用了已收集声明」的声明。
    *   要求函数体里至少有一次 `assertRegionInvariant(X)`、X 是裸标识符、且 X 词法解析到的**声明节点**落在流集内。
    *   入参不是由 helper 结果派生的局部声明，故解析不到流集里的节点。
-   * 判据 B（真的跑）：那次 `assertRegionInvariant(...)` 必须是某个 Block（或函数体）里的**直接**表达式语句，
-   *   其后（按语句次序）同块里还有一条 return，**且其前**同块里没有任何无条件 return/throw 直接语句。
+   * 判据 B（真的跑）：先用 A 那把尺滤出「本站点的 in-flow 断言」（操作数声明节点落在本站点流集里的那些断言）；
+   *   **若** 存在这样的断言，其中至少一次必须是某个 Block（或函数体）里的**直接**表达式语句、其后（按语句次序）
+   *   同块里还有一条 return、**且其前**同块里没有任何无条件 return/throw 直接语句。若本站点一个 in-flow 断言都
+   *   没有，B 对该站点 vacuously 通过——那是「值没喂对」，由 A 负责报，B 不重复。
    *
    * **自陈盲点（与断言真实强度一致，不夸大）**：
-   *   - A/B 仍把「至少一次合格断言」绑在**函数**上，不绑在「产出被改值的那段具体语句序列」上；一个函数体里
-   *     出现多次断言时各判据只要求**其中一次**合格。F1 修好的是「合格那次必须落在**本站点的流集**（按声明身份）
-   *     里」，于是兄弟分支的同名局部不再代偿；但**同一分支内**若并列多次断言，仍只要其一喂对且可达即算过。
+   *   - A/B 现在都按**声明身份**把合格断言绑到**站点**（F1 修了 A、F4 修了 B），兄弟分支的同名局部不再互相
+   *     代偿。剩下的下限是「**同一站点**的 in-flow 集内若并列多次断言」：A 只要其一喂对、B 只要其一可达即算过，
+   *     不要求逐条都合格。今天每个站点的 in-flow 集都只有一次断言，这个下限不可观测；是有意的下限，前提是
+   *     「一个站点不会既写一次合格断言又写一次故意坏的」——若将来出现需收紧成逐条。
    *   - B 的可达性只看「同一个 Block 内、这条语句前后的直接语句序列」这一层线性次序，不建模更深的控制流
    *     （早退藏在更外层块、或 try/catch 语义）。这是有意的下限，不是完备可达性分析。
-   *   - callSites 的别名解析只覆盖**具名 import 的 `as` 改名**；`import * as ns` 命名空间调用、或经二次
-   *     re-export 换名的调用点仍会掉出扫描面。今天 renderer 里没有这两种写法（下方别名禁令 it 只挡具名别名），
-   *     若将来引入需要另补一条守卫——此处如实点名，不假装已覆盖。
+   *   - 逃逸面：callSites 只认「callee 是标识符、经具名 import 别名解析后是 changes 助手」的调用；下方两条
+   *     禁令各堵一个逃逸向量（别名禁令堵 import `as` 改名，转发禁令堵局部 const 等值转发）。但**都**只覆盖
+   *     「文本是具名 import 进来的本地名」这一层——`import * as ns` 后 `ns.closeWorkbenchRegion(...)` 的成员
+   *     访问、或经二次 re-export 换名的调用点，既逃 callSites 也逃这两条禁令。今天 renderer 里没有这两种写法，
+   *     若将来引入需另补守卫——此处如实点名，不假装已覆盖。
+   *
+   * **两处已知的「过严」（响亮假红，不是静默逃逸；如实记录，本轮不修）**：
+   *   - enclosingFunction 对 class **方法**（MethodDeclaration）返回 null：方法体里的 changes 调用会因为
+   *     `owner` 为 null 而流集空、asserts 空，A 当场把它算成 unguarded 而**无条件红**——哪怕它写得完全正确。
+   *     今天 renderer 里没有任何方法承载的 reducer（全是函数声明或赋给 const 的箭头函数），故不影响；一旦有，
+   *     这是响亮失败要求作者来处理，不是漏。
+   *   - resolveVarDecl 的 isScope 不含 MethodDeclaration / Constructor / 访问器 / namespace 的 ModuleBlock：
+   *     在这些作用域里声明的局部解析不到，`operandDecl` 变 null。null 操作数不落任何站点的流集，只会让 A**更
+   *     严**（该断言守不了任何站点）——是响亮/安全的方向，不是让坏变异漏过的洞。
    */
 
   /** 一个 renderer 源文件里，从 DEFINER 具名 import 出来的「本地名 → 规范名」别名表（无别名则为恒等）。 */
@@ -399,9 +433,9 @@ describe('每个改动 region 集合的函数都必须过那道闸（#515 接线
   /**
    * 一个函数体里每次 assertRegionInvariant(...) 调用的两项事实：
    *   - `operandDecl`：裸标识符实参词法解析到的**声明节点**（不是裸标识符、或解析不到局部声明则 null）——
-   *     喂给判据 A（按身份比对，F1）；`operandName` 仅供诊断消息。
+   *     喂给判据 A/B 的「本站点 in-flow」过滤（按身份比对，F1/F4）；`operandName` 仅供诊断消息。
    *   - `runsBeforeReturn`：这次调用是不是某个 Block 里的直接表达式语句、其后（按语句次序）跟着 return、
-   *     **且其前**同块里没有无条件 return/throw 直接语句（F2）——喂给判据 B。
+   *     **且其前**同块里没有无条件 return/throw 直接语句（F2）——喂给判据 B 的可达性那一半。
    */
   function assertSitesIn(
     ownerBody: ts.Node
@@ -542,17 +576,50 @@ describe('每个改动 region 集合的函数都必须过那道闸（#515 接线
     ).toEqual([])
   })
 
-  it('接线层-B（真的跑）：每个 changes 调用点，其函数里至少有一次 assertRegionInvariant 是块内直接语句、其后有 return', () => {
+  it('接线层-B（真的跑）：每个 changes 调用点，凡有断言了本站点产物的 assertRegionInvariant，其中至少一次必须块内直接、其后有 return（可达）', () => {
     const sites = coveredSites()
     expect(sites.length, '扫不到任何受管的「会动集合」调用点——扫描根或分类表出了问题').toBeGreaterThan(2)
+    // 在场自检：B 的合格判据用「操作数落在本站点流集」把断言绑到站点（否则又退回按函数求 some，兄弟分支
+    // 代偿），故它跟 A 一样依赖 flowSetFromCall。若流集对每个站点都算成空，B 会因「本站点没有 in-flow 断言」
+    // 而对所有站点 vacuously 通过、恒绿——这正是假绿方向，必须由这条自检当场推翻。
+    expect(
+      sites.some((site) => site.flow.length > 0),
+      '所有受管调用点的流集都算成空了——flowSetFromCall 的派生失灵，判据 B 失去意义（会恒绿）'
+    ).toBe(true)
+    // #727：B 从前只按 enclosing function 求 `.some(a => a.runsBeforeReturn)`——问「函数里有没有一次可达断言」，
+    // 不问它断言的是不是**本站点**的产物。control.ts 的 arrangeWorkbenchControlTab 有三个分支、三个同名 `next`，
+    // 只有 preset 分支调 changes 族。把 preset 那句改成 `if (import.meta.env.DEV) assertRegionInvariant(next)`
+    // （只改可达性、操作数不变）后，balance/active-first 两个兄弟分支里**无条件**的断言仍替 preset 站点满足了
+    // 旧 B——实测 `14 passed` 存活。这与 #698 在 A 上修掉的「同名兄弟背书」同构：A 早已按声明身份把合格断言绑到
+    // 站点，B 却还绑在函数上。
+    //
+    // 修法（保持 A/B 正交、各自独立承重）：先用 A 那把尺（操作数声明节点落在本站点流集）滤出「本站点自己的
+    // 断言」inFlow，再要求——**若** inFlow 非空，其中至少一次可达。它与 A 正交而非蕴含 A：
+    //   - A 问「本站点有没有 in-flow 断言」——操作数错（F1）时它红，可达性错时它绿。
+    //   - B 问「本站点的 in-flow 断言有没有被全部跳过」——可达性错（#727 / F2）时它红；操作数错时 inFlow 为空、
+    //     B vacuously 通过（把「值喂错」这件事让给 A 说，不重复报）。
+    // 于是 #727（可达性坏、操作数不变）只红 B、A 仍绿；F1-单（操作数坏、可达性不变）只红 A、B vacuously 绿。
+    // 兄弟分支操作自己 `next`（不在 preset 流集、不进 inFlow）的可达断言，再也代偿不了 preset 站点。
     const unreachable = sites
-      .filter((site) => !site.asserts.some((a) => a.runsBeforeReturn))
-      .map((site) => `${site.file}::${site.fn}() 调了 ${site.helper}`)
+      .filter((site) => {
+        const flow = new Set(site.flow)
+        const inFlow = site.asserts.filter((a) => a.operandDecl !== null && flow.has(a.operandDecl))
+        return inFlow.length > 0 && !inFlow.some((a) => a.runsBeforeReturn)
+      })
+      .map(
+        (site) =>
+          `${site.file}::${site.fn}() 调了 ${site.helper}；流集(声明节点)=${site.flow.length} 个；` +
+          `本站点断言=[${site.asserts
+            .map((a) => `${a.operandName ?? '<非标识符>'}${a.runsBeforeReturn ? '·可达' : '·被跳过'}`)
+            .join(', ')}]`
+      )
     expect(
       unreachable,
-      '这些函数里的 assertRegionInvariant 不是「块内直接语句、其后跟着 return」的形状——它被包进了 if / ' +
-        '短路 / dev-only 门之类的条件里，于是在真正把值交出去的那条路径上根本不会执行。纵深断言一旦可被' +
-        '某个构建或某个分支跳过，就等于没装。修法是让它成为 return 之前的一条无条件语句。'
+      '这些函数里断言了「本函数刚算出、准备交出去的那个值」（该 changes-helper 调用结果派生出的局部，按声明' +
+        '节点身份）的 assertRegionInvariant，没有任何一次是「块内直接语句、其后跟着 return」的可达形状——它们' +
+        '全被包进了 if / 短路 / dev-only 门里，于是在真正把值交出去的那条路径上根本不会执行。纵深断言一旦可被' +
+        '某个构建或某个分支跳过，就等于没装；另一个分支里可达但断言的是别的值的断言，代偿不了本站点。' +
+        '修法是让 `assertRegionInvariant(那个新算出来的 tab)` 成为本站点 return 之前的一条无条件语句。'
     ).toEqual([])
   })
 
@@ -600,6 +667,83 @@ describe('每个改动 region 集合的函数都必须过那道闸（#515 接线
         '其函数静默从 A/B 的覆盖面消失。今天 callSites 已别名感知能顶住，但别名本身没有收益、只会削弱这道闸的' +
         '可读性与其它按名字的守卫，故一律禁止：请用规范名 import。'
     ).toEqual([])
+  })
+
+  /**
+   * #728：局部值别名让调用点整体逃出扫描面。
+   *
+   * `callSites` 只认「callee 是标识符、且其文本（经具名 import 别名解析后）是 changes 助手」的调用。
+   * `const f = closeWorkbenchRegion; const layout = f(tab.layout, regionId)` 这种转发形状里，`f(...)` 的
+   * callee 文本是 `f`——不是任何 changes 助手，`aliasMapFor` 也看不见（它只解析 import specifier，不解析
+   * 局部 const）。于是这个调用点整体从扫描面消失，A/B 覆盖都静默丢掉它。实测：把某个 reducer 改成经
+   * 局部 const 调 changes 助手且不带断言，`14 passed` 存活。
+   *
+   * 修法走**允许清单**（本仓「禁止清单必漏」——`||` / `?:` / `void 0 &&` / Yoda / 解构 / 下标 / 块外
+   * helper 都绕过过；F3 的别名禁令也是一样的道理：与其枚举坏形状，不如只放行已知安全的几种）。
+   * changes 助手是从 DEFINER import 进来的值，引用它的合法形状只有两种：作为 import specifier 的名字，
+   * 或作为一次直接调用的 callee。把它当值传递给别的东西（赋给 const、当实参传出去、放进数组/对象），
+   * 都是让调用点脱离 callee 文本匹配的转发向量——**一律响亮失败并打印它看到的父节点 SyntaxKind**，
+   * 而不是枚举「这几种不许」。今天 renderer 里这样的引用**恰好只有** import specifier 与直接调用两种
+   * （下方自检用 callSites 交叉核对直接调用那一面），所以允许清单不误伤任何合法代码。
+   *
+   * 盲点（如实点名，不假装覆盖）：这条只扫「文本是**具名 import 进来的** changes 助手本地名」的标识符。
+   * `import * as ns` 后 `ns.closeWorkbenchRegion` 的成员访问、或经二次 re-export 换名的引用，都不经具名
+   * import 本地名，故既逃 callSites 也逃这条——与文件头记的 callSites 别名盲点同源，将来引入需另补守卫。
+   */
+  it('转发禁令：changes 助手只可作 import specifier 或直接调用 callee 出现，其余引用形状（如 const 转发）一律响亮失败', () => {
+    const CHANGES = Object.keys(LAYOUT_EFFECT).filter((name) => LAYOUT_EFFECT[name] === 'changes')
+    const ACCEPT_IMPORT = 'import-specifier'
+    const ACCEPT_CALL = 'direct-call-callee'
+    type Occurrence = { file: string; helper: string; role: string }
+    const occurrences: Occurrence[] = []
+    for (const relative of sourceFiles()) {
+      if (relative === DEFINER) continue
+      const file = parse(relative)
+      // 本文件里「本地名 → 规范名」映射到某个 changes 助手的那些本地名。别名已被上一条禁掉，故正常树上
+      // 本地名≡规范名；这里仍按本地名扫，是为了在别名（防御性）与规范名两种写法下都能对上被引用的绑定。
+      const changesLocals = new Map<string, string>()
+      for (const [local, canonical] of aliasMapFor(file)) {
+        if (CHANGES.includes(canonical)) changesLocals.set(local, canonical)
+      }
+      if (changesLocals.size === 0) continue
+      const walk = (node: ts.Node): void => {
+        if (ts.isIdentifier(node) && changesLocals.has(node.text)) {
+          const helper = changesLocals.get(node.text)!
+          const parent = node.parent
+          let role: string
+          if (parent && ts.isImportSpecifier(parent)) role = ACCEPT_IMPORT
+          else if (parent && ts.isCallExpression(parent) && parent.expression === node) role = ACCEPT_CALL
+          else role = `ESCAPE:${parent ? ts.SyntaxKind[parent.kind] : 'no-parent'}`
+          occurrences.push({ file: relative, helper, role })
+        }
+        node.forEachChild(walk)
+      }
+      walk(file)
+    }
+    // 允许清单：只有这两种 role 放行，其余全是逃逸向量。逐条打印它看到的 SyntaxKind，
+    // 这样将来一种没见过的转发写法会带着自己的形状名响亮失败，而不是被某条「不许出现」的规则悄悄漏过。
+    const escapes = occurrences
+      .filter((o) => o.role !== ACCEPT_IMPORT && o.role !== ACCEPT_CALL)
+      .map((o) => `${o.file}: ${o.helper} 以 ${o.role} 形状被引用`)
+    expect(
+      escapes,
+      '这些 changes 助手不是作为 import specifier 或直接调用 callee 出现，而是被当值转发了（赋给 const、' +
+        '当实参传出、放进容器等）。转发会让 callSites 的 callee 文本匹配整体漏掉那个真正的调用点，其函数' +
+        '静默脱离 A/B 覆盖面——正是那个画不出也关不掉的孤儿 region 的温床。请改回直接以规范名调用；若确有' +
+        '不得不转发的正当理由，需连同 callSites 的解析能力一起扩展，而不是在这里开一个不受守的口子。'
+    ).toEqual([])
+    // 在场自检（交叉核对，恰好相等）：本条扫出的「直接调用」那一面，其 file::helper 集合必须与独立的
+    // callSites 扫描器逐一相等。若本条的角色分类器把直接调用误判、或扫描根/别名表整体失灵而扫出空集，
+    // 两个集合就会分岔、当场红——不是「至少一个」这种能被半失灵蒙混的软地板。callSites 自身的非空由
+    // A/B 两条 it 的 >3 / >2 地板另行守，故这里的相等断言不会因 callSites 恒空而假绿。
+    const callRoleSet = new Set(
+      occurrences.filter((o) => o.role === ACCEPT_CALL).map((o) => `${o.file}::${o.helper}`)
+    )
+    const callSiteSet = new Set(callSites().map((site) => `${site.file}::${site.helper}`))
+    expect(
+      [...callRoleSet].sort(),
+      '本条识别出的「直接调用」与 callSites 扫描器不一致——角色分类器或扫描根出了问题，本条失去意义'
+    ).toEqual([...callSiteSet].sort())
   })
 
   it('豁免清单不留死条目：EXEMPT 里的每一条都仍在调用某个「会动集合」的布局函数', () => {
