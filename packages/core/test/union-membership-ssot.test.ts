@@ -46,16 +46,22 @@ import {
 // **本守卫看不见什么**（务必知道）：
 //   1. 一份**不完整**的手抄能逃过 C 层——但那正好是今天就错的行为缺陷，由 A/B 层抓。两层互补，
 //      任一层单独都不够，这是刻意的分工，不是重复。
-//   2. 只认两种枚举形状：数组/Set 字面量、以及同一操作数上的 `=== 'x' || === 'y'` 链。用 switch 的
-//      穷举 case、或把成员串拼出来的写法看不见。（switch 的每个 case 是独立分支，不构成一次
-//      membership 判定；拼串的写法本仓尚未出现，出现时该由这条判据升级来接。）
+//   2. 只认三种枚举形状：数组/Set 字面量、同一操作数上的 `=== 'x' || === 'y'` 链、以及它的 De Morgan
+//      取反形 `!== 'x' && !== 'y'`。用 switch 的穷举 case、或把成员串拼出来的写法看不见。（switch 的每个
+//      case 是独立分支，不构成一次 membership 判定；拼串的写法本仓尚未出现，出现时该由这条判据升级来接。）
+//      **这条曾经只认两种形状，而漏掉的第三种正是本仓真实出现过的那一份**：#711 从
+//      `terminalPromptDelivery` 删掉的手抄就是取反链，把它原样改回去（一行）在四个 suite 75/75 +
+//      tsc exit 0 下**实测存活**。两种极性是同一个判定的两种写法，判据必须对称，否则守的只是拼法的一半。
+//      顺带的一条经验：这里此前把 switch 和拼串列为盲点、却没列出真正在用的取反形，说明"申报盲点"这件事
+//      本身要按**语言里等价的写法**穷举，不能按"我想得到的花招"列举。
 //   3. 只扫 src/。别的包里的手抄不在雷达上——desktop 侧的 permission kind 只作渲染用途，不做
 //      入站校验，那边的判据归那边。
 //   4. 成员集合由**本文件手写**、由 tsc 钉住（见下面三个 Record）。这是刻意的外部锚点：若从被测的
 //      SSOT 自己派生，判据会跟着变异一起漂移而恒真（expected-value-must-not-derive-from-mutation-target）。
 //      packages/core 的 tsconfig 的 include 含 `test/**/*.ts`（apps/desktop 的**不含**，见 #626/#676），
-//      所以这里的编译期约束是真的被执行的，不是死代码——M5 实测报出
-//      `union-membership-ssot.test.ts(75,3): error TS2353`，锚点确实在编译。
+//      所以这里的编译期约束是真的被执行的，不是死代码——M5 实测在 `DEGRADED_REASON_ANCHOR` 那个
+//      Record 上报出 `error TS2353`，锚点确实在编译。（这里刻意不写行号：本条此前写着 `(75,3)`，
+//      而真实位置早已随文件编辑漂走，审计把它当成一处不实。锚点用符号名，不用坐标。）
 //
 // **三层分工是实测出来的，不是推理出来的。** 九个变异，各在它自己那层红（基线
 // `Test Files 4 passed (4) / Tests 75 passed (75)`，四个 suite 是本文件 + control-host + control-export-reachability
@@ -370,28 +376,51 @@ describe('三条联合的成员判定只有一处声明', () => {
     function completeEnumerationSites(
       sourceFile: ts.SourceFile,
       members: readonly string[]
-    ): { declaration: string; shape: 'array' | 'or-chain' }[] {
+    ): { declaration: string; shape: 'array' | 'or-chain' | 'and-chain' }[] {
       const required = new Set(members)
-      const sites: { declaration: string; shape: 'array' | 'or-chain' }[] = []
+      const sites: { declaration: string; shape: 'array' | 'or-chain' | 'and-chain' }[] = []
       const covers = (found: ReadonlySet<string>): boolean =>
         [...required].every((member) => found.has(member))
 
-      /** 一条 `||` 链上，同一个操作数被拿去与哪些字面量比过相等。 */
-      const orChainLiterals = (node: ts.Expression, into: Map<string, Set<string>>): void => {
-        if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.BarBarToken) {
-          orChainLiterals(node.left, into)
-          orChainLiterals(node.right, into)
+      // 逻辑链有两种极性，**同为**一次完整的 membership 判定，De Morgan 互为等价：
+      //   `x === 'a' || x === 'b' || …`   —— 「是成员吗」
+      //   `x !== 'a' && x !== 'b' && …`   —— 「不是成员吗」，即 `!谓词(x)`
+      // 只认前者是本守卫此前坐实的盲点：#711 那次提交从 `terminalPromptDelivery` 删掉的正是后者，
+      // 而把它原样改回去（一行）在四个 suite 75/75 + tsc exit 0 下**实测存活**。两种极性都是"列全成员
+      // 即成为第二个声明点"，判据必须对称，否则守的只是拼法的一半。
+      const CHAINS = [
+        {
+          shape: 'or-chain' as const,
+          chain: ts.SyntaxKind.BarBarToken,
+          equality: [ts.SyntaxKind.EqualsEqualsEqualsToken, ts.SyntaxKind.EqualsEqualsToken]
+        },
+        {
+          shape: 'and-chain' as const,
+          chain: ts.SyntaxKind.AmpersandAmpersandToken,
+          equality: [
+            ts.SyntaxKind.ExclamationEqualsEqualsToken,
+            ts.SyntaxKind.ExclamationEqualsToken
+          ]
+        }
+      ]
+
+      /** 一条同极性链上，同一个操作数被拿去与哪些字面量比过（相等或不等，由 `spec` 决定）。 */
+      const chainLiterals = (
+        node: ts.Expression,
+        spec: (typeof CHAINS)[number],
+        into: Map<string, Set<string>>
+      ): void => {
+        if (ts.isBinaryExpression(node) && node.operatorToken.kind === spec.chain) {
+          chainLiterals(node.left, spec, into)
+          chainLiterals(node.right, spec, into)
           return
         }
         if (ts.isParenthesizedExpression(node)) {
-          orChainLiterals(node.expression, into)
+          chainLiterals(node.expression, spec, into)
           return
         }
         if (!ts.isBinaryExpression(node)) return
-        const equality =
-          node.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken ||
-          node.operatorToken.kind === ts.SyntaxKind.EqualsEqualsToken
-        if (!equality) return
+        if (!spec.equality.includes(node.operatorToken.kind)) return
         for (const [operand, other] of [
           [node.left, node.right],
           [node.right, node.left]
@@ -413,17 +442,20 @@ describe('三条联合的成员判定只有一处声明', () => {
             sites.push({ declaration: enclosingDeclarationName(node), shape: 'array' })
           }
         }
-        if (
-          ts.isBinaryExpression(node) &&
-          node.operatorToken.kind === ts.SyntaxKind.BarBarToken &&
-          // 只从链**顶**开始收，否则同一条链的每个内部节点各报一次。
-          !(ts.isBinaryExpression(node.parent) && node.parent.operatorToken.kind === ts.SyntaxKind.BarBarToken)
-        ) {
+        for (const spec of CHAINS) {
+          if (
+            !ts.isBinaryExpression(node) ||
+            node.operatorToken.kind !== spec.chain ||
+            // 只从链**顶**开始收，否则同一条链的每个内部节点各报一次。
+            (ts.isBinaryExpression(node.parent) && node.parent.operatorToken.kind === spec.chain)
+          ) {
+            continue
+          }
           const byOperand = new Map<string, Set<string>>()
-          orChainLiterals(node, byOperand)
+          chainLiterals(node, spec, byOperand)
           for (const found of byOperand.values()) {
             if (found.size >= 2 && covers(found)) {
-              sites.push({ declaration: enclosingDeclarationName(node), shape: 'or-chain' })
+              sites.push({ declaration: enclosingDeclarationName(node), shape: spec.shape })
             }
           }
         }
@@ -464,25 +496,30 @@ describe('三条联合的成员判定只有一处声明', () => {
       })
     }
 
-    it('自检：判据认得出「完整枚举」的两种形状，也真的放过真子集', () => {
+    it('自检：判据认得出「完整枚举」的三种形状，也真的放过真子集', () => {
       const complete = parse(
         'probe.ts',
         [
           "const asArray = ['allow-once', 'allow-always', 'reject-once', 'reject-always']",
-          "function asChain(kind: string) { return kind === 'allow-once' || kind === 'allow-always' || kind === 'reject-once' || kind === 'reject-always' }"
+          "function asChain(kind: string) { return kind === 'allow-once' || kind === 'allow-always' || kind === 'reject-once' || kind === 'reject-always' }",
+          // De Morgan 形：`!谓词(x)` 的手抄展开。这一份是本守卫真实漏过的形状——#711 那次提交从
+          // `terminalPromptDelivery` 删掉的正是它，而原样改回去在四个 suite 75/75 + tsc exit 0 下存活。
+          "function asNegatedChain(kind: string) { return kind !== 'allow-once' && kind !== 'allow-always' && kind !== 'reject-once' && kind !== 'reject-always' }"
         ].join('\n')
       )
       expect(
         completeEnumerationSites(complete, PERMISSION_KIND_MEMBERS).map((site) => `${site.declaration}:${site.shape}`).sort(),
-        '判据认不出完整的数组或 || 链手抄——上面那几条是死代码'
-      ).toEqual(['asArray:array', 'asChain:or-chain'])
+        '判据认不出完整的数组、|| 链或 && 取反链手抄——上面那几条是死代码'
+      ).toEqual(['asArray:array', 'asChain:or-chain', 'asNegatedChain:and-chain'])
 
       // 真子集必须放过：这三处在 HEAD 上真实存在（acp-adapter 的「算不算拒绝」、control-host 的两处
       // 按操作分组解析）。把它们判成违规，这道门就只能靠人手豁免清单活着，而那种清单会漏。
+      // 取反极性同样要放过真子集，否则「排除这两种」这类合法的分类判定会被误伤。
       const subset = parse(
         'probe.ts',
         [
           "function isRejection(kind: string) { return kind === 'reject-once' || kind === 'reject-always' }",
+          "function notReject(kind: string) { return kind !== 'reject-once' && kind !== 'reject-always' }",
           "const twoOfFour = ['allow-once', 'reject-once']"
         ].join('\n')
       )
