@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { App } from './App'
 import { installUnobservedFailureReporter } from './lib/unobserved-failure'
 import { installFileDropGuard } from './lib/file-drop-guard'
-import { useAppStore } from './store'
+import { prepareRendererUpdate, useAppStore } from './store'
 import './styles/index.css'
 
 // Installed before the first render so a failure during startup is reported too. This is the last
@@ -22,3 +22,8 @@ createRoot(document.getElementById('root')!).render(
     <App />
   </StrictMode>
 )
+
+// Main invokes this bounded checkpoint before a controlled presentation reload. No Run state crosses it.
+Object.assign(window, { agentmuxPrepareRendererUpdate: prepareRendererUpdate })
+
+window.addEventListener('agentmux-renderer-update-error', (event) => useAppStore.getState().reportError((event as CustomEvent).detail))

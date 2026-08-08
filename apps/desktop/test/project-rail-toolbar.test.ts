@@ -14,14 +14,15 @@ describe('Project rail bottom toolbar', () => {
 
     expect(markup).toContain('role="toolbar"')
     expect(markup).toContain('aria-label="Settings"')
+    expect(markup.indexOf('aria-label="Keyboard shortcuts"')).toBeGreaterThan(markup.indexOf('aria-label="Settings"'))
     expect(markup).toContain('data-settings-section="workspaces"')
     // Hosts is no longer a co-equal button; it lives in the Settings sidebar nav.
     expect(markup).not.toContain('aria-label="Hosts"')
     expect(markup).not.toContain('data-settings-section="hosts"')
     expect(markup).not.toContain('Settings &amp; hosts')
-    expect(markup.match(/project-rail-toolbar__button/g)).toHaveLength(1)
+    expect(markup.match(/project-rail-toolbar__button/g)).toHaveLength(2)
     expect(markup).toContain('width="13"')
-    expect(markup.match(/<button/g)).toHaveLength(1)
+    expect(markup.match(/<button/g)).toHaveLength(2)
   })
 
   it('keeps one Settings affordance when the project rail is collapsed', () => {
@@ -32,9 +33,10 @@ describe('Project rail bottom toolbar', () => {
 
     expect(markup).toContain('data-project-rail-corner-toolbar="true"')
     expect(markup).toContain('aria-label="Settings"')
+    expect(markup.indexOf('aria-label="Keyboard shortcuts"')).toBeGreaterThan(markup.indexOf('aria-label="Settings"'))
     expect(markup).toContain('data-settings-section="workspaces"')
     expect(markup).not.toContain('aria-label="Hosts"')
-    expect(markup.match(/project-rail-toolbar__button/g)).toHaveLength(1)
-    expect(markup.match(/<button/g)).toHaveLength(1)
+    expect(markup.match(/project-rail-toolbar__button/g)).toHaveLength(2)
+    expect(markup.match(/<button/g)).toHaveLength(2)
   })
 })

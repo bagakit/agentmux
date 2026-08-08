@@ -339,6 +339,9 @@ export type WorkspaceDirectoryEntry = {
   path: string
   isDirectory: boolean
   isSymlink: boolean
+  ignored?: boolean
+  linkTarget?: string
+  linkIssue?: 'unavailable'
 }
 
 export type CreateWorkspacePathInput = {
@@ -1094,6 +1097,7 @@ export type AgentMuxDesktopApi = {
     check(host: HostConfig): Promise<HostCheckResult>
   }
   workspaces: {
+    appearance(id: string): Promise<{ kind: 'repository' | 'directory'; icon: string | null }>
     chooseLocalFolder(): Promise<WorkspaceRecord | null>
     /** Pick a replacement directory while preserving the existing Workspace identity. */
     rebindLocalFolder(workspaceId: string): Promise<WorkspaceRecord | null>
@@ -1124,6 +1128,9 @@ export type AgentMuxDesktopApi = {
     renameTitle(workspaceId: string, topicId: string, title: string): Promise<ScratchTopicSnapshot>
   }
   ui: {
+    rendererUpdateReady(token: string): Promise<void>
+    captureScreenshot(): Promise<string | null>
+    listAgentSkills(sessionId: string): Promise<import('@agentmux/core').AgentSkill[]>
     readClipboardText(): Promise<string>
     writeClipboardText(text: string): Promise<void>
     writeClipboardImage(image: BrowserPng): Promise<void>

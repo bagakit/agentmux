@@ -1,3 +1,4 @@
+import { isImeOwnedKeyboardEvent } from './ime-composition-keyboard-event'
 import { isMacPlatform } from './host-platform'
 import { shouldBypassXtermKeyboardEvent } from './xterm-bypass-policy'
 
@@ -191,6 +192,9 @@ export function terminalKeyEventHandler(deps: TerminalKeyEventDeps): (event: Key
   const shouldBypass = (event: KeyboardEvent): boolean =>
     shouldBypassXtermKeyboardEvent(event, { isMac, hasSelection: deps.hasSelection() })
   return (event) => {
+    // Composition owns its keys, including the Enter that confirms a candidate.
+    if (isImeOwnedKeyboardEvent(event)) return true
+
     // 裸 Ctrl+C：有可复制的文本就复制，否则把键交还终端（那时它是 SIGINT）。
     //
     // 用户明确要回这条体验（「我觉得还是要保留 Ctrl+C 和右键菜单复制的体验」），而它此前在两个平台上

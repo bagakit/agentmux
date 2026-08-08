@@ -40,6 +40,7 @@ export function FileTreeContextMenu({
   onDelete,
   onOpenChange,
   onOpenTerminal,
+  onOpenAsProject,
   onMove,
   onRename,
   onReveal,
@@ -59,6 +60,7 @@ export function FileTreeContextMenu({
   onDelete: () => void
   onOpenChange: (open: boolean) => void
   onOpenTerminal: () => void
+  onOpenAsProject: () => void
   onMove: (directoryPath: string) => void
   onRename: () => void
   onReveal: () => void
@@ -96,6 +98,11 @@ export function FileTreeContextMenu({
           ) : !isDirectory ? (
             <ContextMenu.Item className="tab-context-menu__item" onSelect={onViewFile}>
               <File size={14} /><span>View File</span>
+            </ContextMenu.Item>
+          ) : null}
+          {isDirectory ? (
+            <ContextMenu.Item className="tab-context-menu__item" onSelect={onOpenAsProject}>
+              <FolderPlus size={14} /><span>Open as Project</span>
             </ContextMenu.Item>
           ) : null}
           {isDirectory && isExpanded ? (

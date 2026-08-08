@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import * as DropdownMenu from './HoverDropdownMenu'
 import { ChevronUp, Cpu } from 'lucide-react'
 import { api } from '../lib/api'
 import { useAppStore } from '../store'

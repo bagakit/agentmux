@@ -1,3 +1,4 @@
+import { gitIgnoredNames } from './workspace-git-ignore.js'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { realpath, stat } from 'node:fs/promises'
@@ -16,7 +17,6 @@ import type {
   WorkspaceRecord
 } from '../shared/contracts.js'
 
-const IGNORED_NAMES = new Set(['.git', 'node_modules', 'dist', 'out', '.worktrees'])
 const LOCAL_WORKER_READY = 'AGENTMUX_WORKSPACE_READY'
 const LOCAL_WORKER_OBSERVING = 'AGENTMUX_WORKSPACE_OBSERVING'
 const LOCAL_WORKER_INVALIDATED = 'AGENTMUX_WORKSPACE_INVALIDATED'
@@ -79,7 +79,8 @@ export function workspaceFileObserverCount(): number {
 const LOCAL_WORKER_SOURCE = String.raw`
 import { createHash, randomBytes } from 'node:crypto'
 import { watch } from 'node:fs'
-import { constants, mkdir, open, readdir, realpath, rename, rm, unlink } from 'node:fs/promises'
+import { constants, mkdir, open, readdir, readlink, realpath, rename, rm, stat, unlink } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
 import { join, sep } from 'node:path'
 
 const request = JSON.parse(process.argv[1] ?? '')
@@ -140,10 +141,35 @@ try {
     try { process.stdout.write(await handle.readFile()) } finally { await handle.close() }
   } else if (request.action === 'list') {
     const entries = await readdir('.', { withFileTypes: true })
-    process.stdout.write(JSON.stringify(entries.map((entry) => ({
-      name: entry.name,
-      isDirectory: entry.isDirectory(),
-      isSymlink: entry.isSymbolicLink()
+    const ignored = new Set()
+    if (entries.length) {
+      try {
+        const result = execFileSync('git', ['check-ignore', '-z', '--stdin'], {
+          input: entries.map((entry) => entry.name).join('\0') + '\0',
+          encoding: 'utf8', timeout: 5000, maxBuffer: 2 * 1024 * 1024,
+          stdio: ['pipe', 'pipe', 'pipe']
+        })
+        for (const name of result.split('\0')) if (name) ignored.add(name)
+      } catch (error) {
+        // 1 = no matches; a non-Git directory has no ignore facts. Listing stays usable.
+        if (error.status === 1 && error.stdout) {
+          for (const name of String(error.stdout).split('\0')) if (name) ignored.add(name)
+        }
+      }
+    }
+    process.stdout.write(JSON.stringify(await Promise.all(entries.map(async (entry) => {
+      const result = {
+        name: entry.name,
+        isDirectory: entry.isDirectory(),
+        isSymlink: entry.isSymbolicLink(),
+        ...(ignored.has(entry.name) ? { ignored: true } : {})
+      }
+      if (result.isSymlink) {
+        result.linkTarget = await readlink(entry.name)
+        try { result.isDirectory = (await stat(entry.name)).isDirectory() }
+        catch { result.linkIssue = 'unavailable' }
+      }
+      return result
     }))))
   } else if (request.action === 'reveal') {
     if (request.name !== null) {
@@ -283,6 +309,24 @@ async function localExistingPathWithin(root: string, requested: string): Promise
   const [realRoot, realTarget] = await Promise.all([realpath(root), realpath(lexicalTarget)])
   assertRealPathWithin(realRoot, realTarget, sep)
   return { root: realRoot, target: realTarget }
+}
+
+// Explorer follows explicit links for reads only. Mutations retain real-root confinement.
+// Resolve each lexical ancestor to detect directory cycles before adding another expandable level.
+async function localReadablePath(root: string, requested: string): Promise<LocalExistingPath> {
+  const lexical = localPathWithin(root, requested)
+  const realRoot = await realpath(root)
+  const seen = new Set([realRoot])
+  let cursor = resolve(root)
+  let target = realRoot
+  for (const part of lexical.slice(cursor.length).split(sep).filter(Boolean)) {
+    cursor = resolve(cursor, part)
+    target = await realpath(cursor)
+    if (seen.has(target)) throw new Error('Directory link cycle: this folder is already an ancestor')
+    seen.add(target)
+  }
+  // The worker pins the already resolved read location. No write operation uses this boundary.
+  return { target, root: target === realRoot || target.startsWith(realRoot + sep) ? realRoot : (await stat(target)).isDirectory() ? target : dirname(target) }
 }
 
 // Reveal must survive a deleted target: the file being gone is the most common reason it "won't
@@ -674,6 +718,20 @@ async function remoteExistingPathWithin(
   return realTarget
 }
 
+async function remoteReadablePath(host: ExecutionHost, root: string, requested: string): Promise<string> {
+  const lexical = remotePathWithin(root, requested)
+  let cursor = root.replace(/\/+$/, '')
+  let target = await remoteRealPath(host, cursor)
+  const seen = new Set([target])
+  for (const part of lexical.slice(cursor.length).split('/').filter(Boolean)) {
+    cursor = posix.join(cursor, part)
+    target = await remoteRealPath(host, cursor)
+    if (seen.has(target)) throw new Error('Directory link cycle: this folder is already an ancestor')
+    seen.add(target)
+  }
+  return target
+}
+
 async function remoteMutablePathWithin(
   host: ExecutionHost,
   root: string,
@@ -780,7 +838,7 @@ export class WorkspaceFiles {
         { code: 'REMOTE_WORKSPACE_FILE_OBSERVATION_UNSUPPORTED' }
       )
     }
-    const resolved = await localExistingPathWithin(workspace.path, requestedPath)
+    const resolved = await localReadablePath(workspace.path, requestedPath)
     if (this.disposed) throw new Error('WorkspaceFiles is disposed')
     const parent = dirname(resolved.target)
     const name = basename(resolved.target)
@@ -877,32 +935,29 @@ export class WorkspaceFiles {
     this.options.onReadDirectoryStart?.(workspace, requestedPath)
     const host = this.hostFor(workspace.hostId)
     if (host.kind === 'local') {
-      const directory = await localExistingPathWithin(workspace.path, requestedPath || '.')
+      const directory = await localReadablePath(workspace.path, requestedPath || '.')
       const entries = JSON.parse((await runLocalWorker(
         directory.target,
         directory.root,
         { action: 'list' }
-      )).toString('utf8')) as Array<{ name: string; isDirectory: boolean; isSymlink: boolean }>
+      )).toString('utf8')) as WorkspaceDirectoryEntry[]
       return sortDirectoryEntries(
         entries.flatMap((entry) => {
-          if (IGNORED_NAMES.has(entry.name)) return []
           return [{
-            name: entry.name,
-            path: relativeEntryPath(requestedPath, entry.name),
-            isDirectory: entry.isDirectory,
-            isSymlink: entry.isSymlink
+            ...entry,
+            path: relativeEntryPath(requestedPath, entry.name)
           }]
         })
       )
     }
 
-    const directory = await remoteExistingPathWithin(host, workspace.path, requestedPath || '.')
+    const directory = await remoteReadablePath(host, workspace.path, requestedPath || '.')
     // Directory-scoped reads keep system-SSH under the same Workspace boundary.
     // Script 是固定源码，目录由 argv 传入；NUL framing 可正确承载空格和换行文件名。
     const script = [
       'for path do',
       'name=${path##*/}',
-      'if [ -L "$path" ]; then kind=l',
+      'if [ -L "$path" ]; then if [ -d "$path" ]; then kind=ld; elif [ -f "$path" ]; then kind=lf; else kind=lb; fi',
       'elif [ -d "$path" ]; then kind=d',
       'elif [ -f "$path" ]; then kind=f',
       'else continue',
@@ -923,14 +978,17 @@ export class WorkspaceFiles {
     for (let index = 0; index + 1 < fields.length; index += 2) {
       const name = fields[index]
       const kind = fields[index + 1]
-      if (!name || !kind || IGNORED_NAMES.has(name)) continue
+      if (!name || !kind) continue
       entries.push({
         name,
         path: relativeEntryPath(requestedPath, name),
-        isDirectory: kind === 'd',
-        isSymlink: kind === 'l'
+        isDirectory: kind === 'd' || kind === 'ld',
+        isSymlink: kind.startsWith('l'),
+        ...(kind === 'lb' ? { linkIssue: 'unavailable' as const } : {})
       })
     }
+    const ignoredNames = await gitIgnoredNames(host, directory, entries.map((entry) => entry.name))
+    for (const entry of entries) if (ignoredNames.has(entry.name)) entry.ignored = true
     return sortDirectoryEntries(entries)
   }
 
@@ -938,7 +996,7 @@ export class WorkspaceFiles {
     try {
       const host = this.hostFor(workspace.hostId)
       if (host.kind === 'local') {
-        const resolved = await localExistingPathWithin(workspace.path, requestedPath)
+        const resolved = await localReadablePath(workspace.path, requestedPath)
         // A directory is not a read failure: the caller reveals it in the file tree. Only Main can
         // tell — path detection in the Renderer is pure-string. `resolved.target` is already the
         // root-confined realpath, so this stat classifies exactly the object the worker would open.
@@ -956,7 +1014,7 @@ export class WorkspaceFiles {
           }
         }
       }
-      const path = await remoteExistingPathWithin(host, workspace.path, requestedPath)
+      const path = await remoteReadablePath(host, workspace.path, requestedPath)
       // Ask once: if the target is a directory, exit 3 so the caller can reveal it; otherwise stream
       // it. Folding the classification into the same round-trip avoids a locale-fragile "Is a
       // directory" stderr parse and keeps directory a first-class answer, not a decoded error.

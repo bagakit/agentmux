@@ -89,7 +89,10 @@ const PERSISTED_PREFERENCES = {
   toolsOpen: true,
   agentNames: { 'sess-1': '我给它起的名字' },
   scratchTopicOrder: ['topic-9', 'topic-3'],
-  collapsedProjectGroups: { [_hygiene_fixturePath("repo/group")]: true }
+  collapsedProjectGroups: { [_hygiene_fixturePath("repo/group")]: true },
+  agentComposerDrafts: { 'sess-1': 'unfinished prompt' },
+  documents: { 'dirty-file': { path: 'a.ts', revision: 'base', content: 'unsaved edit' } },
+  dirtyDocuments: { 'dirty-file': true }
 } as const
 
 /**

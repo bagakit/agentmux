@@ -1,4 +1,6 @@
-import { ChevronDown, ChevronRight, Pin, Plus, RadioTower } from 'lucide-react'
+import { ProjectIcon } from './ProjectIcon'
+import { ProjectActivity } from './ProjectActivity'
+import { ChevronDown, ChevronRight, Folders, Pin, Plus, RadioTower } from 'lucide-react'
 import { useMemo, useState, type CSSProperties } from 'react'
 import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
 import { api } from '../lib/api'
@@ -98,12 +100,6 @@ export function WorkspaceSidebar({
       ? `${runningAgentCount} ${runningAgentCount === 1 ? 'Agent is' : 'Agents are'} running`
       : null
     const rowStateLabel = [runningLabel, attentionLabel].filter(Boolean).join(' · ')
-    // One badge, one number, and it is the number for whatever the row is currently signalling.
-    // Attention outranks running because the CSS recolours THIS badge and hangs the `?`/`!` glyph
-    // on it — hiding it whenever nothing is working would take the needs-you signal down with it,
-    // which is the exact gap the rollup was built to close.
-    const railBadge = attention.category ? attention.count : runningAgentCount || null
-    // Everything the row stopped showing still has to be answerable, so it lands here.
     const countTitle = [
       `${project.workspaces.length} ${project.workspaces.length === 1 ? 'worktree' : 'worktrees'}`,
       `${sessionCount} ${sessionCount === 1 ? 'session' : 'sessions'}`,
@@ -120,13 +116,12 @@ export function WorkspaceSidebar({
     const row = (
       <button
         className={`project-rail-row ${active ? 'project-rail-row--active' : ''}`}
-        title={rowStateLabel ? `${project.repoPath} · ${rowStateLabel}` : project.repoPath}
+        title={`${project.repoPath} · ${countTitle}`}
         aria-label={rowStateLabel ? `${project.name} · ${rowStateLabel}` : project.name}
         data-workspace-id={preferred ?? undefined}
         // 缩进只表达"这个 Project 在上一个 Project 的目录里"。深度走自定义属性而不是内联
         // padding：具体几像素归样式表（密度合同《Project Rail Nesting Indent》），这里只报层数。
         {...(depth > 0 ? { style: { '--rail-depth': depth } as CSSProperties } : {})}
-        {...(attention.category ? { 'data-attention': attention.category } : {})}
         {...(runningAgentCount > 0 ? { 'data-running': 'true' } : {})}
         onClick={() => {
           if (!preferred) return
@@ -136,6 +131,7 @@ export function WorkspaceSidebar({
           })
         }}
       >
+        <ProjectIcon workspaceId={project.preferredWorkspaceId} />
         <span className="project-rail-row__identity">
           <strong>{project.name}</strong>
           {/* Host only earns a slot when it is NOT this machine. `This Mac` on every row is a
@@ -145,23 +141,6 @@ export function WorkspaceSidebar({
             <small><RadioTower size={9} /> {project.hostId}</small>
           ) : null}
         </span>
-        <span
-          className="project-rail-row__activity status status--working"
-          aria-hidden="true"
-          title={runningLabel ?? undefined}
-        >
-          {runningAgentCount > 0 ? <span className="status__dot" /> : null}
-        </span>
-        {/* The badge answers "is anyone working in there right now" — so it counts running
-            Agents, not worktrees. A worktree count is repository structure; it answers a
-            different question and reads as a column of `1`s. It keeps its place in the
-            tooltip, where low-frequency facts belong (身份归属). Zero renders nothing at
-            all: a badge that is always the same number carries no information. */}
-        {railBadge !== null ? (
-          <span className="project-rail-row__count" title={countTitle}>
-            {railBadge}
-          </span>
-        ) : null}
       </button>
     )
     return (
@@ -173,7 +152,7 @@ export function WorkspaceSidebar({
         workspaceId={preferred ?? project.preferredWorkspaceId}
         onRemove={() => setRemoveRequest(project)}
       >
-        {row}
+        <div className="project-rail-entry">{row}<ProjectActivity sessions={projectSessions} /></div>
       </WorkspaceRowContextMenu>
     )
   }
@@ -191,7 +170,7 @@ export function WorkspaceSidebar({
             isLocal={scratch.hostId === 'local'}
             workspaceId={scratch.id}
           >
-            <button
+            <div className="project-rail-entry"><button
             className={`project-rail-row scratch-workspace-row ${activeWorkspaceId === scratch.id ? 'project-rail-row--active' : ''}`}
             aria-current={activeWorkspaceId === scratch.id ? 'page' : undefined}
             aria-label={[
@@ -211,22 +190,13 @@ export function WorkspaceSidebar({
               className="scratch-workspace-row__meta"
               title={`Pinned workspace · ${scratchSessionCount} ${scratchSessionCount === 1 ? 'session' : 'sessions'}`}
             >
-              {scratchWorkingAgentCount > 0 ? (
-                <span
-                  className="project-rail-row__activity status status--working"
-                  aria-hidden="true"
-                  title={`${scratchWorkingAgentCount} ${scratchWorkingAgentCount === 1 ? 'Agent is' : 'Agents are'} running`}
-                >
-                  <span className="status__dot" />
-                </span>
-              ) : null}
               {/* Pin is the one thing that distinguishes this row from every other — it stays.
                   The number beside it follows the same rule as the project rows: it counts running
                   Agents and disappears at zero, rather than showing a session total nobody asked for. */}
               <Pin size={10} />
-              {scratchWorkingAgentCount > 0 ? <span>{scratchWorkingAgentCount}</span> : null}
+
             </span>
-          </button>
+          </button><ProjectActivity sessions={sessions.filter((session) => workspaceOwnsSessionPath(scratch, session))} /></div>
           </WorkspaceRowContextMenu>
         </div>
       ) : null}
@@ -239,7 +209,7 @@ export function WorkspaceSidebar({
           const key = projectGroupKey(group)
           const collapsed = key !== null && collapsedProjectGroups[key] === true
           return (
-            <div className="project-rail-group" key={`${group.hostId}:${group.groupPath ?? group.nodes[0]?.project.id}`}>
+            <div className={`project-rail-group ${group.label && key !== null && !collapsed ? 'project-rail-group--expanded' : ''}`} key={`${group.hostId}:${group.groupPath ?? group.nodes[0]?.project.id}`}>
               {group.label && key !== null ? (
                 <GroupHeader
                   group={group}
@@ -339,8 +309,8 @@ function GroupHeader({
   const topLevel = group.nodes.filter((node) => node.depth === 0).length
   const memberLabel = `${topLevel} ${topLevel === 1 ? 'project' : 'projects'}`
   // 与项目行同一条规则：attention 压过 running，因为 CSS 给同一个角标上色并挂 `?`/`!`。
-  const badge = attention.category ? attention.count : running || null
   return (
+    <div className="project-rail-entry">
     <button
       type="button"
       className="project-rail-group__header"
@@ -351,23 +321,19 @@ function GroupHeader({
       title={[group.groupPath, memberLabel, ...(runningLabel ? [runningLabel] : [])]
         .filter(Boolean)
         .join(' · ')}
-      {...(attention.category ? { 'data-attention': attention.category } : {})}
       onClick={onToggle}
     >
       <span className="project-rail-group__chevron" aria-hidden="true">
         {collapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
       </span>
-      <span className="project-rail-group__label">{group.label}</span>
+      <Folders size={13} aria-label="Automatic path group" /><span className="project-rail-group__label">{group.label}</span>
       {/* 地址只在折起来时出现。展开时下面那几行项目名已经把"这是哪儿"答完了，再挂一条路径
           就是同一个事实占两行——而折起来后它是唯一的线索。 */}
       {collapsed && group.groupPath ? (
         <span className="project-rail-group__address">{railGroupAddress(group.groupPath)}</span>
       ) : null}
-      {/* 角标同样只在折起来时出现：展开时每一行自己带着它的角标，分组头再来一个总数就是把
-          同一批 Agent 数了两遍。 */}
-      {collapsed && badge !== null ? (
-        <span className="project-rail-group__count">{badge}</span>
-      ) : null}
     </button>
+    {collapsed ? <ProjectActivity sessions={groupSessions} /> : null}
+    </div>
   )
 }

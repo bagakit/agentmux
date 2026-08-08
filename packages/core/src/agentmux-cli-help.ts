@@ -257,6 +257,11 @@ Use a directional destination for the same task. Use \`--new-tab-after\` only wh
 user explicitly requests a new Tab. For a non-trivial Tab, inspect its bounds and choose
 the exact Region whose split produces the requested whole-Tab layout.
 
+Before opening a custom Agent, use \`agentmux list agents\` to resolve its configured
+Executor id and availability. For spatial placement, prefer a visible empty Region; when
+none exists, split the adjacent Region that preserves the clearest readable layout, then
+inspect the result. Do not infer space from titles or Tab order.
+
 ## Open a Terminal or Browser
 
 \`\`\`bash

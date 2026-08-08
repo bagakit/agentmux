@@ -1,4 +1,5 @@
-import { AtSign, CornerDownLeft, Paperclip, Square } from 'lucide-react'
+import type { ReactNode } from 'react'
+import { AtSign, ArrowUp, ChevronDown, MessageSquare, Paperclip, Square } from 'lucide-react'
 import type { AgentPostureControl } from '@agentmux/core'
 import { isImeCompositionKeyDown } from '../lib/ime-composition-keyboard-event'
 import { PosturePicker } from './PosturePicker'
@@ -9,6 +10,8 @@ export type AgentComposerProps = {
   disabled: boolean
   placeholder: string
   activeFile?: string
+  tools?: ReactNode
+  commands?: Array<{ text: string; description: string }>
   // Which action the primary button performs. `stop` while a turn is in flight, `send` otherwise. This is
   // a SEPARATE question from whether Enter submits: a working Agent shows Stop yet still takes a steer, so
   // this must not gate the Enter handler — that was the bug where one `isWorking` flag did both jobs.
@@ -28,6 +31,8 @@ export function AgentComposer({
   disabled,
   placeholder,
   activeFile,
+  tools,
+  commands = [],
   primaryAction = 'send',
   postureControl,
   onChange,
@@ -40,8 +45,9 @@ export function AgentComposer({
 }: AgentComposerProps) {
   const canSubmit = !disabled && Boolean(onSubmit) && Boolean(value.trim())
 
+  const suggestions = /^\/[^\s]*$/.test(value) ? commands.filter((command) => command.text.startsWith(value) && command.text !== value) : []
   return (
-    <div className="composer" data-agent-composer="true">
+    <details open className="composer" data-agent-composer="true">
       {/* 受控 + 认识 IME 组字：为什么这一格不能是裸 <textarea>，见 ComposerTextarea 与
           lib/composer-composition.ts（#609）。 */}
       <ComposerTextarea
@@ -58,7 +64,12 @@ export function AgentComposer({
           // the Agent conversation (#609). 判据必须走 SSOT 的四路谓词：此前这里手抄了两路
           // (`nativeEvent?.isComposing || keyCode === 229`)，漏掉顶层 `isComposing` 与
           // `nativeEvent.keyCode`。只标记那两路的输入法照旧会把半转换草稿提交上去。
-          if (event.key === 'Enter' && !event.shiftKey && !isImeCompositionKeyDown(event) && canSubmit) {
+          if (event.key === 'ArrowDown' && suggestions.length && !isImeCompositionKeyDown(event)) {
+            event.preventDefault()
+            event.currentTarget.closest('.composer')?.querySelector<HTMLButtonElement>('.composer__suggestions button')?.focus()
+            return
+          }
+          if (event.key === 'Enter'  && !event.shiftKey && !isImeCompositionKeyDown(event) && canSubmit) {
             event.preventDefault()
             onSubmit?.()
           }
@@ -88,8 +99,9 @@ export function AgentComposer({
             onClick={onAttach}
             title="Reference files for the Agent to read"
           >
-            <Paperclip size={14} /> Attach
+            <Paperclip size={14} /> Files
           </button>
+          {tools}
           {/* A shortcut to the file already open, not a second way to attach — so it appears only
               when there is one, rather than sitting permanently greyed out. */}
           {activeFile && onReferenceActiveFile ? (
@@ -123,7 +135,7 @@ export function AgentComposer({
               aria-label="Interrupt the current turn"
               title="Interrupt the current turn — the session keeps running"
             >
-              <Square size={13} fill="currentColor" aria-hidden="true" />
+              <Square size={11} fill="currentColor" strokeWidth={0} aria-hidden="true" /> Interrupt
             </button>
           ) : (
             <button
@@ -133,11 +145,18 @@ export function AgentComposer({
               onClick={onSubmit}
               aria-label="Send"
             >
-              Send <CornerDownLeft size={13} />
+              Send <ArrowUp size={13} />
             </button>
           )}
         </div>
       </div>
-    </div>
+      {suggestions.length && !disabled ? <div className="composer__suggestions" role="listbox" aria-label="Agent commands">
+        {suggestions.map((command) => <button type="button" role="option" aria-selected="false" key={command.text}
+          onClick={() => onChange(`${command.text} `)}>{command.text}<small>{command.description}</small></button>)}
+      </div> : null}
+      <summary className="composer__disclosure" title="Collapse or expand message tools">
+        <MessageSquare size={12} /><span>Message tools</span>{value ? <small>Draft</small> : null}<ChevronDown size={12} />
+      </summary>
+    </details>
   )
 }

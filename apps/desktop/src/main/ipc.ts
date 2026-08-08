@@ -1,3 +1,6 @@
+import { projectAppearance } from './project-appearance.js'
+import { discoverAgentSkills } from '@agentmux/core'
+import { captureComposerScreenshot } from './composer-screenshot.js'
 import { randomUUID } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
@@ -108,6 +111,7 @@ export async function registerIpc(args: {
   workspaceFiles?: WorkspaceFiles
   scratchTopics: ScratchTopics
   environmentWarning?: string
+  onRendererUpdateReady?: (token: string) => void
 }): Promise<() => Promise<void>> {
   let config = await args.configStore.get()
   const initialPalette = terminalPalette(config.appearance.terminalTheme)
@@ -221,7 +225,11 @@ export async function registerIpc(args: {
     if (selection.canceled || selection.filePaths.length === 0) return null
     return selection.filePaths
   })
-  handle('workspaces:chooseLocalFolder', async () => {
+  handle('workspaces:appearance', async (id: string) => {
+    const item = workspace(config, id)
+    return item.hostId === 'local' ? await projectAppearance(item.repoPath ?? item.path) : { kind: item.repoPath ? 'repository' : 'directory', icon: null }
+  })
+  handle('workspaces:chooseLocalFolder' , async () => {
     const selection = await dialog.showOpenDialog(args.window, { properties: ['openDirectory'] })
     const path = selection.filePaths[0]
     if (selection.canceled || !path) return null
@@ -432,7 +440,11 @@ export async function registerIpc(args: {
   handleWithEvent('resourceUsage:unsubscribe', (event) => {
     stopUsageSubscription(event.sender.id)
   })
-  handle('ui:readClipboardText', () => clipboard.readText())
+  handleWithEvent('ui:rendererUpdateReady', (event, token: string) => {
+    requireTrustedSender('ui:rendererUpdateReady', event)
+    args.onRendererUpdateReady?.(token)
+  })
+  handle('ui:readClipboardText' , () => clipboard.readText())
   handle('ui:writeClipboardText', (text: string) => {
     clipboard.writeText(text)
   })
@@ -442,6 +454,20 @@ export async function registerIpc(args: {
   })
   handleWithEvent('ui:openExternal', async (event, rawUrl: string) => {
     await openExternalFromRenderer(event, args.window.webContents, rawUrl)
+  })
+  handleWithEvent('ui:captureScreenshot', async (event) => {
+    requireTrustedSender('ui:captureScreenshot', event)
+    return await captureComposerScreenshot(app.getPath('home'))
+  })
+  handleWithEvent('ui:listAgentSkills', async (event, sessionId: string) => {
+    requireTrustedSender('ui:listAgentSkills', event)
+    const snapshot = await args.runtime.snapshot(config)
+    const session = snapshot.sessions.find((item) => item.id === sessionId)
+    if (!session || session.kind !== 'agent') throw new Error('Agent session is unavailable')
+    if (session.hostId !== 'local') throw new Error('Skill discovery is available for local Agents.')
+    const catalog = args.runtime.providerCatalog().find((item) => item.id === session.providerId)
+    if (!catalog) throw new Error('Agent Provider is unavailable')
+    return await discoverAgentSkills({ catalog, workspacePath: session.workspacePath, home: app.getPath('home') })
   })
   handleWithEvent('ui:savePastedImage', async (event, input: { bytes: Uint8Array; extension: string }) => {
     requireTrustedSender('ui:savePastedImage', event)

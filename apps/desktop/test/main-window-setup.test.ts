@@ -75,7 +75,7 @@ describe('main window setup wiring', () => {
     expect(source).toContain('Menu.setApplicationMenu(')
     expect(source).toContain('Menu.buildFromTemplate(')
     // 平台位喂进去：mac 与非 mac 的 File/Window 段不同。
-    expect(source).toMatch(/applicationMenuTemplate\(\s*process\.platform === 'darwin'\s*\)/)
+    expect(source).toMatch(/applicationMenuTemplate\(\s*process\.platform === 'darwin'\s*,/)
   })
 })
 
@@ -158,14 +158,14 @@ describe('top-frame navigation guard: index.ts wiring', () => {
     expect(source).toContain('packagedRendererFilePath: packagedRendererPath')
     // 派生锚点与实际 loadFile 用的必须是同一个常量，二者不能各写各的路径。
     expect(source).toContain('const packagedRendererPath = join(import.meta.dirname')
-    expect(source).toContain('window.loadFile(packagedRendererPath')
+    expect(source).toContain('window.loadFile(file')
   })
 
   it('registers the guard on BOTH will-navigate and will-redirect of the main window webContents', async () => {
     const source = stripComments(await readFile(indexPath, 'utf8'))
     // 处理器由工厂产出（与单测执行的是同一份代码），且真的挂到两个事件上。只守 will-navigate 会漏掉
     // 30x / meta refresh 重定向链的落点，所以两条都要在。
-    expect(source).toContain('const guardTopFrameNavigation = topFrameNavigationGuard(appOrigin)')
+    expect(source).toContain('const guardTopFrameNavigation = topFrameNavigationGuard(() => appOrigin)')
     expect(source).toContain("window.webContents.on('will-navigate', guardTopFrameNavigation)")
     expect(source).toContain("window.webContents.on('will-redirect', guardTopFrameNavigation)")
   })

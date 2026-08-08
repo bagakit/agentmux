@@ -303,6 +303,7 @@ const mockApi: AgentMuxDesktopApi = {
     ? { ok: false, detail: 'Remote Runs are not yet supported.' }
     : { ok: true, detail: 'CtxMux 0.1.0 · protocol 14' } },
   workspaces: {
+    appearance: async () => ({ kind: 'directory', icon: null }),
     chooseLocalFolder: async () => null,
     rebindLocalFolder: async () => null,
     add: async (input) => {
@@ -562,6 +563,9 @@ const mockApi: AgentMuxDesktopApi = {
     }
   },
   ui: {
+    rendererUpdateReady: async () => {},
+    captureScreenshot: async () => { throw new Error('Screen selection requires the desktop app.') },
+    listAgentSkills: async () => { throw new Error('Skill discovery requires the desktop app.') },
     readClipboardText: async () => '',
     writeClipboardText: async () => {},
     writeClipboardImage: async () => {},

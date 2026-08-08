@@ -3,6 +3,8 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
+// Canvas rendering is covered by native probes; this test owns the App service-window wiring.
+vi.mock('../src/renderer/src/components/TerminalView.js', () => ({ TerminalView: () => null }))
 import { App } from '../src/renderer/src/App.js'
 import { api } from '../src/renderer/src/lib/api.js'
 import { useAppStore } from '../src/renderer/src/store.js'
