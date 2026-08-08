@@ -37,6 +37,7 @@ import {
   type ScreenshotTool
 } from './drawing-model'
 import { SCREENSHOT_TEXT_FONT } from './drawing-renderer'
+import { isImeCompositionKeyDown } from '../../lib/ime-composition-keyboard-event'
 import { isMacPlatform } from '../../lib/host-platform'
 
 type EditorSize = { width: number; height: number; dpr: number }
@@ -275,7 +276,11 @@ export function ScreenshotEditor({
             onBlur={(event) => commitText(event.currentTarget.value)}
             onKeyDown={(event) => {
               event.stopPropagation()
-              if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+              // 组字确认用的 Enter（CJK 输入法）不能提交标注文本，否则半转换的取值会被落成一条 text
+              // 图形。此前只判 `!event.nativeEvent.isComposing`，那漏掉了另外三个来源（合成事件的
+              // isComposing、两处 keyCode===229），换成完整的四路判据。
+              if (isImeCompositionKeyDown(event)) return
+              if (event.key === 'Enter') {
                 event.preventDefault()
                 commitText(event.currentTarget.value)
               } else if (event.key === 'Escape') {

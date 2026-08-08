@@ -45,6 +45,7 @@ import {
   joinWorkspacePath
 } from '../lib/workspace-paths'
 import { copyTextToClipboard, formatPathsForCopy } from '../lib/clipboard-copy'
+import { isImeCompositionKeyDown } from '../lib/ime-composition-keyboard-event'
 import {
   FILE_TREE_GIT_STATUS_CLASS,
   FILE_TREE_GIT_STATUS_LABEL,
@@ -279,6 +280,8 @@ function FileTreeRow({
             onChange={(event) => onEditValue(event.target.value)}
             onBlur={onCommitEdit}
             onKeyDown={(event) => {
+              // 组字确认用的 Enter（CJK 输入法）不能触发提交，否则会以半转换的取值重命名。
+              if (isImeCompositionKeyDown(event)) return
               if (event.key === 'Enter') onCommitEdit()
               if (event.key === 'Escape') onCancelEdit()
             }}
@@ -851,6 +854,8 @@ export function FileExplorer({
         onChange={(event) => setEditValue(event.target.value)}
         onBlur={() => void commitEdit()}
         onKeyDown={(event) => {
+          // 组字确认用的 Enter（CJK 输入法）不能触发提交，否则会以半转换的取值创建文件/目录。
+          if (isImeCompositionKeyDown(event)) return
           if (event.key === 'Enter') void commitEdit()
           if (event.key === 'Escape') setInlineEdit(null)
         }}
