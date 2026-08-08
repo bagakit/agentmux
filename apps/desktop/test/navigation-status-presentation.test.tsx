@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { vi } from 'vitest'
+vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 import { renderToStaticMarkup } from 'react-dom/server'
 import { AgentStatusBar } from '../src/renderer/src/components/AgentStatusBar'
 import { ProjectActivity } from '../src/renderer/src/components/ProjectActivity'
