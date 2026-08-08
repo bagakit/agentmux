@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import type { ReactElement, ReactNode } from 'react'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -17,6 +18,12 @@ import {
   planPrLaunch,
   type PrLaunchPlan
 } from '../src/renderer/src/lib/pr-launch.js'
+import { resolveHostElement } from './helpers/component-host-element.js'
+
+/** 被测那个面自己的源码路径——`resolveHostElement` 从这里出发跟着 import 走。 */
+const SURFACE_PATH = fileURLToPath(
+  new URL('../src/renderer/src/components/PrLaunchSurface.tsx', import.meta.url)
+)
 
 const workspace: WorkspaceRecord = {
   id: 'ws-1',
@@ -463,9 +470,31 @@ describe('PrLaunchSurface 的显示层', () => {
       const candidate = node as ReactElement<{
         children?: ReactNode
         onChange?: (event: unknown) => void
+        onValueChange?: (value: string) => void
       }>
       if (candidate.type === 'input' || candidate.type === 'textarea') {
         fields.push({ tag: String(candidate.type), onChange: candidate.props.onChange })
+      }
+      // 这一格经过 ComposerTextarea 那层壳（#609/#622 把 8 个受控 textarea 都收进去了），所以
+      // `candidate.type` 是个函数而不是 `'textarea'`。判据**跟着间接走**：解析那个组件自己的根元素，
+      // 要求它是 textarea 且接住了调用方的属性——不是把它的名字加进允许清单（#736、#731）。
+      // 写回口在这一层叫 onValueChange：壳内部把它接到 DOM 的 onChange 上（那条接线由
+      // composer-ime.test.ts 的「壳里那份 ime 就是 composerCompositionHandlers 的结果」钉着，
+      // 本文件引用它，不重抄一份）。
+      if (typeof candidate.type === 'function') {
+        const name = (candidate.type as { name?: string }).name
+        if (name && /^[A-Z]/u.test(name)) {
+          const host = resolveHostElement(SURFACE_PATH, name)
+          expect(
+            host.forwardsCallerProps,
+            `${name} 没有把调用方的其余属性转发到根元素：这一格给的属性会被静默吞掉`
+          ).toBe(true)
+          const write = candidate.props.onValueChange
+          fields.push({
+            tag: host.tag,
+            onChange: write ? (event) => write((event as { target: { value: string } }).target.value) : undefined
+          })
+        }
       }
       if (candidate.props?.children) walk(candidate.props.children)
     }
