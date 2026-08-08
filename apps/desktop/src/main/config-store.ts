@@ -664,6 +664,47 @@ export class ConfigStore {
     return this.path
   }
 
+  /**
+   * The single previous-version sidecar. **Invariant: after any successful `save`, this file holds
+   * exactly the bytes that were live on disk immediately before that save** — nothing older, and never
+   * the just-written value. One file, replaced each write, so it is a one-step undo rather than a
+   * growing history.
+   *
+   * It exists because an ordinary `save` overwrites `filePath` unconditionally, keeping no copy of what
+   * was there — so a silent carry-forward or data-dropping bug (the class that erased the project list
+   * twice in production) leaves nothing to recover from. The retirement guards only fire on a version
+   * bump; this covers every save at the current version, where those guards do not look.
+   */
+  get previousVersionPath(): string {
+    return `${this.path}.prev`
+  }
+
+  /**
+   * Where the bytes of an *unreadable* config are copied before `get()` throws. See
+   * `quarantineUnreadable`: the point is that a user escaping a broken config by deleting the file must
+   * not thereby destroy the only evidence of what they had.
+   */
+  get quarantinePath(): string {
+    return `${this.path}.corrupt`
+  }
+
+  /**
+   * Copy the bytes of a config we could not turn into a usable value to {@link quarantinePath}, so they
+   * survive the user deleting the main file.
+   *
+   * Best-effort in one specific sense only: it must never mask the real reason `get()` is failing. If
+   * the copy itself fails, the original config error and the quarantine error are raised **together**
+   * (an `AggregateError`) rather than one silently replacing the other. The main file is never touched,
+   * so every "retains the file on disk" guarantee the retirement guards make still holds verbatim.
+   *
+   * A single file, overwritten: each failed launch preserves the bytes the user is currently staring at,
+   * which is the informative copy. Not a growing history — the smallest mechanism that survives an `rm`.
+   */
+  private async quarantineUnreadable(rawText: string): Promise<void> {
+    await mkdir(dirname(this.path), { recursive: true })
+    await durableWriteFile(this.quarantinePath, rawText)
+  }
+
   async get(): Promise<AppConfig> {
     await mkdir(SCRATCH_BACKING_PATH, { recursive: true })
     let loaded: AppConfig
@@ -671,8 +712,9 @@ export class ConfigStore {
     // Retirement resets the built-in Executor slice from the catalog, which is the one class of
     // rebinding the binding check would flag. See `write()` for why enforcing it here cannot work.
     let retiring = false
+    let rawText: string | undefined
     try {
-      const rawText = await readFile(this.path, 'utf8')
+      rawText = await readFile(this.path, 'utf8')
       const rawJson = JSON.parse(rawText)
       const isOlderVersion =
         typeof rawJson === 'object' &&
@@ -694,9 +736,29 @@ export class ConfigStore {
         loaded = configSchema.parse(rawJson) as AppConfig
       }
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-      loaded = structuredClone(DEFAULT_CONFIG)
-      persist = true
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        loaded = structuredClone(DEFAULT_CONFIG)
+        persist = true
+      } else {
+        // Every non-ENOENT path lands here with `rawText` already read: a JSON syntax error, a schema
+        // rejection, and the four `retiredConfigReplacement` refuse-to-launch guards alike. All of them
+        // mean the same thing operationally — `get()` throws, the main file is left untouched, and the
+        // user's next move to escape a stuck launch is often to delete it. Copy those exact bytes aside
+        // first so that deletion does not destroy the only evidence. `rawText` is defined whenever the
+        // read succeeded; if the read itself was the failure it is a non-ENOENT read error with nothing
+        // to preserve, so there is nothing to quarantine.
+        if (rawText !== undefined) {
+          try {
+            await this.quarantineUnreadable(rawText)
+          } catch (quarantineError) {
+            throw new AggregateError(
+              [error, quarantineError],
+              'Config is unreadable and copying it aside for recovery also failed.'
+            )
+          }
+        }
+        throw error
+      }
     }
     const scratch = withScratchWorkspace(loaded)
     if (scratch.added) persist = true
@@ -733,14 +795,22 @@ export class ConfigStore {
     const config = configSchema.parse(value) as AppConfig
     let saved!: AppConfig
     const operation = this.saveTail.catch(() => {}).then(async () => {
-      if (enforceExecutorBinding) {
-        let current: AppConfig | null = null
-        try {
-          current = configSchema.parse(JSON.parse(await readFile(this.path, 'utf8'))) as AppConfig
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-        }
-        for (const [executorId, executor] of Object.entries(current?.executors ?? {})) {
+      // The exact bytes currently on disk, read once and used for two things: the binding check below,
+      // and the previous-version sidecar. ENOENT means this is the first write — no prior bytes, so no
+      // sidecar and nothing to bind against.
+      let previousText: string | undefined
+      try {
+        previousText = await readFile(this.path, 'utf8')
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      }
+      if (enforceExecutorBinding && previousText !== undefined) {
+        // Parse the prior bytes for the binding check. A parse/schema failure is rethrown, exactly as
+        // the original ENOENT-only catch did: `get()` refuses to launch on a config the current schema
+        // cannot read, and a direct `save()` over such a file is refused here for the same reason rather
+        // than silently overwriting it. (The bytes are still preserved by the sidecar below.)
+        const current = configSchema.parse(JSON.parse(previousText)) as AppConfig
+        for (const [executorId, executor] of Object.entries(current.executors)) {
           const next = config.executors[executorId]
           if (next && next.providerId !== executor.providerId) {
             throw new Error(
@@ -751,6 +821,11 @@ export class ConfigStore {
         }
       }
       await mkdir(dirname(this.path), { recursive: true })
+      // Preserve the pre-save bytes BEFORE overwriting the main file, so the invariant on
+      // `previousVersionPath` holds and a save that cannot keep its undo copy fails loudly here —
+      // before any data is overwritten — rather than silently becoming irreversible. A failure at this
+      // point leaves the main file untouched, so nothing is lost.
+      if (previousText !== undefined) await durableWriteFile(this.previousVersionPath, previousText)
       await durableWriteFile(this.path, `${JSON.stringify(config, null, 2)}\n`)
       saved = structuredClone(config)
     })
