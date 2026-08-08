@@ -50,6 +50,7 @@ import {
 import { useBoardRows } from '../hooks/useBoardRows'
 import { projectWorkspaces } from '../lib/workspace-projects'
 import { api } from '../lib/api'
+import { formatRelativeAge } from '../lib/relative-age'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import {
   browserAnnotationDisplayNumber,
@@ -647,15 +648,6 @@ const AGENT_GROUP_META: Record<WorkspaceAgentGroupId, {
   recent: { label: 'Recent', description: 'Finished Agents', icon: History }
 }
 
-function formatAgentAge(timestamp: number): string {
-  const minutes = Math.floor(Math.max(0, Date.now() - timestamp) / 60_000)
-  if (minutes < 1) return 'now'
-  if (minutes < 60) return `${minutes}m`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h`
-  return `${Math.floor(hours / 24)}d`
-}
-
 function WorkspaceAgentsTool({
   workspace,
   sessions,
@@ -712,7 +704,7 @@ function WorkspaceAgentsTool({
                       <strong>{session.label}</strong>
                       <small>{agentProviderLabel(session.providerId)} · {session.status.state}</small>
                     </span>
-                    <time title={new Date(session.updatedAt).toLocaleString()}>{formatAgentAge(session.updatedAt)}</time>
+                    <time title={new Date(session.updatedAt).toLocaleString()}>{formatRelativeAge(Date.now() - session.updatedAt)}</time>
                     <ArrowUpRight size={11} />
                   </button>
                 ))}
