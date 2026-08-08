@@ -11,6 +11,7 @@ import {
   rendererCssBoundsToWindowDip
 } from '../src/renderer/src/lib/browser-bounds-sync.js'
 import { REGION_CLASS } from '../src/renderer/src/lib/region-focus.js'
+import { normalizeBrowserBounds } from '../src/shared/browser-bounds.js'
 
 function deferred() {
   let resolve = () => {}
@@ -82,6 +83,54 @@ describe('native Browser bounds synchronization', () => {
     sync.observe({ x: 0, y: 0, width: 0, height: 500 })
     await vi.waitFor(() => expect(apply).toHaveBeenCalledWith(null))
     expect(reportError).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * 交出去的矩形**逐字节**等于共用判定的答案——这一侧的「壳有没有偷偷再动一手」（#712）。
+ *
+ * 为什么单独一族而不是靠上面那几条：上面每一条都自带一个手写的期望矩形，于是只钉住了被它挑到的那
+ * 几个输入。真正发生过的绕法是在壳里**共用调用之后**再夹一次——`const M = Math` 加
+ * `M.max(7, …)`——它对 `{800.1, 500.8}` 这种大矩形毫无影响，所以那几条一条都不红（实测：3 suite
+ * 67 条全绿），而任何窄于 7px 的 Region 被静默拉宽。normalization 那份的结构层按 `Math.xxx()` 的
+ * **形状**判，别名写法也逃得掉；它文件头此前声称「绕过它的写法…要么产出与共用判定不同的取值而被行为
+ * 层抓住」——那句话在这一族存在之前是假的，因为当时没有任何行为断言驱动这个壳。
+ *
+ * 期望值取自 {@link normalizeBrowserBounds} 本身而不是写死的字面量，是刻意的：这一族要判的性质就是
+ * 「壳交出去的 === 共用判定算出来的」，用同一个函数当参照，恒等关系才是被断言的东西。这不违反
+ * 「期望值不能由被测对象算出」——被测对象是**壳**，参照物在另一个模块，而那个模块自己的取值正确性由
+ * browser-bounds-normalization 那份用写死的字面量钉着。两份合起来才完整：这一族只管转发是否忠实。
+ */
+describe('接线层：壳交出去的就是共用判定的答案（#712）', () => {
+  // 每个输入都挑成「随手补一道地板/取整就会被打破」的形状。窄边那两条是 #712 的靶子本身。
+  const FORWARDED = [
+    { why: '窄于常见地板值的宽（7px 之下）', bounds: { x: 4, y: 9, width: 3, height: 260 } },
+    { why: '窄于常见地板值的高', bounds: { x: 4, y: 9, width: 260, height: 2 } },
+    { why: '两边都窄', bounds: { x: 0, y: 0, width: 1, height: 1 } },
+    { why: '负原点（唯一真正承重的那道钳位）', bounds: { x: -0.6, y: -5, width: 40, height: 40 } },
+    { why: '亚像素需要取整', bounds: { x: 10.4, y: 20.6, width: 800.2, height: 500.8 } },
+    { why: '不足 1 物理像素的宽——拒绝成 null', bounds: { x: 0, y: 0, width: 0.9, height: 500 } },
+    { why: '非有限数——拒绝成 null', bounds: { x: 0, y: 0, width: Number.NaN, height: 10 } }
+  ] as const
+
+  it.each(FORWARDED)('$why', async ({ bounds }) => {
+    const apply = vi.fn(async () => {})
+    const sync = new LatestBrowserBoundsSynchronizer(apply, vi.fn())
+
+    sync.observe({ ...bounds })
+    await vi.waitFor(() => expect(apply).toHaveBeenCalledOnce())
+    expect(apply).toHaveBeenCalledWith(normalizeBrowserBounds(bounds))
+  })
+
+  it('判据没有落空——这一族里至少有一个输入的答案是「窄但可用」，否则全是 null 相等', () => {
+    // 没有这一条，上面七条可以在「共用判定被改成恒 null 且壳也恒交 null」时全部通过：两边都是 null，
+    // 恒等成立而产品彻底坏掉。这里要求参照物里真有非 null 的窄矩形，那才是 #712 的靶子形状。
+    const narrow = FORWARDED
+      .map(({ bounds }) => normalizeBrowserBounds(bounds))
+      .filter((value): value is NonNullable<typeof value> => value !== null)
+      .filter((value) => value.width < 7 || value.height < 7)
+    expect(narrow.length, '没有任何「窄到会被地板改写」的可用矩形，这一族抓不到 #712 那种重夹')
+      .toBeGreaterThan(0)
   })
 })
 
