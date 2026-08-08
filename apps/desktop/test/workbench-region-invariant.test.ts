@@ -239,96 +239,174 @@ describe('每个改动 region 集合的函数都必须过那道闸（#515 接线
   }
 
   /**
-   * 判「断言喂对了值 + 断言真的会跑」的两个正交 AST 判据（#687 补洞）。
+   * 判「断言喂对了值 + 断言真的会跑」的两个正交 AST 判据（#687 补洞；#698/#699/#700 修三处坐实的存活变异）。
    *
-   * 背景与实测（本 session 亲手跑出来的数字，逐字记录，别凭记忆改）：此前这道闸只问「包住这次
-   * changes-helper 调用的函数体里，有没有出现过一次 assertRegionInvariant 调用」（旧判据是
-   * `callsNamed(owner.body, 'assertRegionInvariant') > 0`）。它既不问断言喂进去的是哪个值，也不问那次断言
-   * 在不在会真正执行的路径上。于是下面两个变异都在 `10 passed (10)` 下**存活**（均施加在 workbench-tabs.ts
-   * 的 addWorkbenchRegion 尾部那句 `assertRegionInvariant(next)`）：
+   * 背景：这道闸曾经只问「包住这次 changes-helper 调用的函数体里，有没有出现过一次 assertRegionInvariant
+   * 调用」。它既不问断言喂进去的是哪个值，也不问那次断言在不在会真正执行的路径上——两个变异（把
+   * addWorkbenchRegion 尾部那句 `assertRegionInvariant(next)` 改成 `if (import.meta.env.DEV) …` 或改成断言入参
+   * `tab`）都在全绿下存活。补进 A（喂对值）/ B（真的跑）两条正交判据后仍有三处坐实的存活变异，这一轮全部堵上：
    *
-   *   M1（可达性）：`assertRegionInvariant(next)` → `if (import.meta.env.DEV) assertRegionInvariant(next)`
-   *                 不变量在生产构建里根本不跑。旧判据只数「出现过」，看不见它被塞进了 dev-only 门。
-   *                 实测：`10 passed (10)`——SURVIVED。
-   *   M2（喂错操作数）：`assertRegionInvariant(next)` → `assertRegionInvariant(tab)`
-   *                 断言的是**入参** tab（进函数时本就合法），而不是本函数刚算出来、准备交出去的 next。
-   *                 旧判据不看操作数，`tab` 同样满足「出现过一次」。实测：`10 passed (10)`——SURVIVED。
+   *   F1（判据 A 按名字配对，同名兄弟分支替真正该受守的分支背书）：`flowSetFromCall` 曾返回 `Set<string>`，
+   *     `assertSitesIn` 曾按操作数**名字**在整个函数体里配对。control.ts 的 arrangeWorkbenchControlTab 有三个
+   *     分支、三个局部都叫 `next`：只有 preset 分支调 changes 族的 applyWorkbenchRegionLayoutPreset，另两个
+   *     （balance / active-first）调 preserves 族。preset 分支的断言即使被同时改成不可达 + 喂错操作数
+   *     （`if (import.meta.env.DEV) assertRegionInvariant(tab)`），另两个分支里合格的、同名 `next` 的断言也会
+   *     顺手替 preset 站点满足按名字的 A——实测 `12 passed (12)` 存活。**修法**：流集与操作数都按**声明身份**
+   *     （`ts.VariableDeclaration` 节点）比对，操作数标识符先按词法作用域解析到它的声明节点再比节点身份。
+   *     三个 `next` 是三个不同的声明节点、在三个互斥作用域里，于是 preset 站点的 A 只认 preset 分支那次断言，
+   *     兄弟分支的断言再也代偿不了它。**这是合法 TS，守卫必须学会认它，不要求生产源码改名。**
+   *   F2（判据 B 只看「后面有 return」，不看「前面先 return 了没」）：B 曾只判「assert 是块内直接语句 **且它
+   *     后面**同块里有 return」。在同块里 assert **之前**插一句无条件 `return`/`throw`，assert 变死代码，而它
+   *     后面那条（也已死的）return 让旧 B 照旧绿——实测在 removeWorkbenchRegion 里 assert 前插 `return next`
+   *     后 `12 passed (12)` 存活（tsconfig.base.json 未开 allowUnreachableCode，tsc 也只告警不报错）。**修法**：
+   *     runsBeforeReturn 额外要求同块里在 assert **之前**没有无条件 return/throw 直接语句。注意 `if (…) return`
+   *     那种是 IfStatement 不是块的直接 ReturnStatement，不算无条件退出，故 removeWorkbenchRegion 两处条件早退
+   *     不会误伤。
+   *   F3（别名 import 让调用点整体掉出扫描面）：给 helper 起别名（`splitWorkbenchRegion as splitRegionAliased`）
+   *     后 callee 文本不再匹配 LAYOUT_EFFECT，那个函数静默从覆盖面消失，而判据 A 全程无察觉——旧代码里唯一
+   *     抓住它的只是覆盖站点数从 3 掉到 2 触了 `toBeGreaterThan(2)` 这条**巧合地板**；仓库长到 ≥4 个站点时
+   *     别名掉一个仍在地板之上，缺失的 assert 静默泄漏。**修法两层**：(1) callSites 按每个文件从 DEFINER 的
+   *     named import 解析出「本地名→规范名」的别名表，用规范名查 LAYOUT_EFFECT，于是别名调用点仍留在扫描面、
+   *     A/B 照常覆盖它；(2) 把覆盖站点集合按**名字**钉住（下方 REQUIRED_COVERED），并单独一条 it 检测那四个
+   *     changes 助手的**别名 import specifier** 并响亮失败——裸计数地板不再承重。
    *
    * 拆成两个**各自独立红**的 it，不能合进一个：本仓 two-throws-in-one-it-mask-each-other 记过，先抛的那条
-   * 断言会把后一条变成死代码，于是能在从没执行过第二条的情况下声称它守住了。实测（本 session）这两个变异
-   * 命中不同的 it：
-   *   - M1 只让 **接线层-B（真的跑）** 红，接线层-A 仍绿；
-   *   - M2 只让 **接线层-A（喂对值）** 红，接线层-B 仍绿。
-   * 「哪个 it 红」的分离，就是两条判据互不代偿的证据。
+   * 断言会把后一条变成死代码。三处修复各有自己的靶子、且只杀自己那一条（交付前逐个跑变异证明）：
+   *   - F1 的靶子是 **接线层-A（喂对值）**：施加 F1 复合变异后只有 A 红（B 仍被 balance/active-first 两个兄弟
+   *     分支里合格的断言满足，故不红——这恰好证明 A 独立承重）。
+   *   - F2 的靶子是 **接线层-B（真的跑）**：在单断言的 removeWorkbenchRegion 里 assert 前插 `return next` 后
+   *     只有 B 红（A 仍绿，操作数没变）。
+   *   - F3 的靶子是 **别名 import 禁令那条 it**：加别名后只有它红（callSites 别名感知，A/B 与名字锚点都仍绿）。
    *
-   * 判据 A（喂对值）：对每个 changes-helper 调用点，求它的**流集**——从「声明的初始化式（可传递地）
-   *   引用了这次 helper 调用**结果**（按 AST 节点标识，不是按名字）」的那个局部起步，再把「初始化式引用了
-   *   已收集局部名」的局部闭包进来。要求函数体里至少有一次 `assertRegionInvariant(X)`、且 X 是个裸标识符、
-   *   落在流集内。入参不在流集里（它不是由 helper 结果派生的局部），所以 M2 的 `tab` 过不了 A。
-   * 判据 B（真的跑）：那次 `assertRegionInvariant(...)` 必须是某个 Block（或函数体）里的**直接**表达式
-   *   语句，且同一个 Block 里在它之后（按语句数组次序）还有一条 return。M1 把 Block 里的那条语句从「裸调用」
-   *   换成了一个 IfStatement，调用退进 if 的 then 分支，不再是 Block 的直接语句 → B 红。control.ts 那种
-   *   `if (mode.kind === 'balance') { const next = …; assertRegionInvariant(next); return next }` 是对的：
-   *   断言与 return 是同一个 Block 里的两条语句，B 绿。
+   * 判据 A（喂对值）：对每个 changes-helper 调用点，求它的**流集**——从「初始化式（可传递地）引用了这次
+   *   helper 调用**结果**（按 AST 节点标识）」的那个局部声明起步，闭包进「初始化式引用了已收集声明」的声明。
+   *   要求函数体里至少有一次 `assertRegionInvariant(X)`、X 是裸标识符、且 X 词法解析到的**声明节点**落在流集内。
+   *   入参不是由 helper 结果派生的局部声明，故解析不到流集里的节点。
+   * 判据 B（真的跑）：那次 `assertRegionInvariant(...)` 必须是某个 Block（或函数体）里的**直接**表达式语句，
+   *   其后（按语句次序）同块里还有一条 return，**且其前**同块里没有任何无条件 return/throw 直接语句。
    *
-   * **自陈盲点（不夸大判据）**：两条判据都把断言绑在**函数**上，不绑在「产出被改值的那段语句序列」上。
-   *   一个函数体里出现多次 assertRegionInvariant 时，A/B 都只要求**其中一次**合格。所以 arrange 那种同一函数
-   *   三个分支各断言一次的形状，若某个 preserves 分支（balance / active-first，本就不被本闸强制断言）的断言
-   *   被喂错了值，本闸不会红——它数的是「这个 changes-helper 函数至少有一次喂对且会跑的断言」，不是
-   *   「每个出口都对」。那一层由上面两族行为断言与 arrange 自身的收敛测试补。另：只有把 helper 结果绑到
-   *   具名局部再断言的写法能过 A；若某新调用点直接断言一个内联表达式而不落地成局部，它过不了 A，会被逼着
-   *   引入一个具名局部——这是有意为之，也在此点名。
+   * **自陈盲点（与断言真实强度一致，不夸大）**：
+   *   - A/B 仍把「至少一次合格断言」绑在**函数**上，不绑在「产出被改值的那段具体语句序列」上；一个函数体里
+   *     出现多次断言时各判据只要求**其中一次**合格。F1 修好的是「合格那次必须落在**本站点的流集**（按声明身份）
+   *     里」，于是兄弟分支的同名局部不再代偿；但**同一分支内**若并列多次断言，仍只要其一喂对且可达即算过。
+   *   - B 的可达性只看「同一个 Block 内、这条语句前后的直接语句序列」这一层线性次序，不建模更深的控制流
+   *     （早退藏在更外层块、或 try/catch 语义）。这是有意的下限，不是完备可达性分析。
+   *   - callSites 的别名解析只覆盖**具名 import 的 `as` 改名**；`import * as ns` 命名空间调用、或经二次
+   *     re-export 换名的调用点仍会掉出扫描面。今天 renderer 里没有这两种写法（下方别名禁令 it 只挡具名别名），
+   *     若将来引入需要另补一条守卫——此处如实点名，不假装已覆盖。
    */
 
-  /** 判据 A 的「流集」：一个函数体里，把 `anchorCall` 的结果（按节点标识）传递派生出去的全部具名局部。 */
-  function flowSetFromCall(ownerBody: ts.Node, anchorCall: ts.CallExpression): Set<string> {
-    const decls: Array<{ name: string; init: ts.Expression }> = []
-    const collect = (node: ts.Node): void => {
-      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
-        decls.push({ name: node.name.text, init: node.initializer })
+  /** 一个 renderer 源文件里，从 DEFINER 具名 import 出来的「本地名 → 规范名」别名表（无别名则为恒等）。 */
+  function aliasMapFor(file: ts.SourceFile): Map<string, string> {
+    const map = new Map<string, string>()
+    file.forEachChild((node) => {
+      if (
+        ts.isImportDeclaration(node) &&
+        ts.isStringLiteral(node.moduleSpecifier) &&
+        node.moduleSpecifier.text.replace(/^\.\//, '').endsWith('workbench-view-layout') &&
+        node.importClause?.namedBindings &&
+        ts.isNamedImports(node.importClause.namedBindings)
+      ) {
+        for (const spec of node.importClause.namedBindings.elements) {
+          map.set(spec.name.text, (spec.propertyName ?? spec.name).text)
+        }
       }
+    })
+    return map
+  }
+
+  /** 一个标识符引用词法解析到的局部变量声明（按作用域就近，找不到则 null）。用于按**身份**而非名字比对。 */
+  function resolveVarDecl(ref: ts.Identifier): ts.VariableDeclaration | null {
+    const isScope = (n: ts.Node): boolean =>
+      ts.isBlock(n) ||
+      ts.isSourceFile(n) ||
+      ts.isFunctionDeclaration(n) ||
+      ts.isArrowFunction(n) ||
+      ts.isFunctionExpression(n) ||
+      ts.isForStatement(n) ||
+      ts.isForOfStatement(n) ||
+      ts.isForInStatement(n) ||
+      ts.isCaseBlock(n)
+    const nearestScope = (n: ts.Node): ts.Node | null => {
+      for (let c: ts.Node | undefined = n.parent; c; c = c.parent) if (isScope(c)) return c
+      return null
+    }
+    for (let scope: ts.Node | undefined = nearestScope(ref) ?? undefined; scope; scope = nearestScope(scope) ?? undefined) {
+      let hit: ts.VariableDeclaration | null = null
+      const scan = (n: ts.Node): void => {
+        if (
+          ts.isVariableDeclaration(n) &&
+          ts.isIdentifier(n.name) &&
+          n.name.text === ref.text &&
+          nearestScope(n) === scope
+        ) {
+          hit = n
+        }
+        n.forEachChild(scan)
+      }
+      scan(scope)
+      if (hit) return hit
+    }
+    return null
+  }
+
+  const subtreeHas = (root: ts.Node, target: ts.Node): boolean => {
+    let found = false
+    const walk = (node: ts.Node): void => {
+      if (node === target) found = true
+      node.forEachChild(walk)
+    }
+    walk(root)
+    return found
+  }
+
+  /**
+   * 判据 A 的「流集」：一个函数体里，把 `anchorCall` 的结果（按节点标识）传递派生出去的全部局部**声明节点**。
+   * 用声明节点（不是名字）作元素，是 F1 的核心——同名兄弟局部是不同节点，不会互相代偿。
+   */
+  function flowSetFromCall(ownerBody: ts.Node, anchorCall: ts.CallExpression): ts.VariableDeclaration[] {
+    const decls: ts.VariableDeclaration[] = []
+    const collect = (node: ts.Node): void => {
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) decls.push(node)
       node.forEachChild(collect)
     }
     collect(ownerBody)
-    const subtreeHas = (root: ts.Node, target: ts.Node): boolean => {
-      let found = false
-      const walk = (node: ts.Node): void => {
-        if (node === target) found = true
-        node.forEachChild(walk)
-      }
-      walk(root)
-      return found
-    }
-    const flow = new Set<string>()
-    for (const decl of decls) if (subtreeHas(decl.init, anchorCall)) flow.add(decl.name)
+    const flow = new Set<ts.VariableDeclaration>()
+    for (const decl of decls) if (decl.initializer && subtreeHas(decl.initializer, anchorCall)) flow.add(decl)
     let changed = true
     while (changed) {
       changed = false
       for (const decl of decls) {
-        if (flow.has(decl.name)) continue
+        if (flow.has(decl) || !decl.initializer) continue
         let refs = false
         const walk = (node: ts.Node): void => {
-          if (ts.isIdentifier(node) && flow.has(node.text)) refs = true
+          if (ts.isIdentifier(node)) {
+            const target = resolveVarDecl(node)
+            if (target && flow.has(target)) refs = true
+          }
           node.forEachChild(walk)
         }
-        walk(decl.init)
+        walk(decl.initializer)
         if (refs) {
-          flow.add(decl.name)
+          flow.add(decl)
           changed = true
         }
       }
     }
-    return flow
+    return [...flow]
   }
 
   /**
    * 一个函数体里每次 assertRegionInvariant(...) 调用的两项事实：
-   *   - `operand`：裸标识符实参（不是裸标识符则 null）——喂给判据 A；
-   *   - `runsBeforeReturn`：这次调用是不是某个 Block 里的直接表达式语句、且其后（按语句次序）跟着 return——
-   *     喂给判据 B。
+   *   - `operandDecl`：裸标识符实参词法解析到的**声明节点**（不是裸标识符、或解析不到局部声明则 null）——
+   *     喂给判据 A（按身份比对，F1）；`operandName` 仅供诊断消息。
+   *   - `runsBeforeReturn`：这次调用是不是某个 Block 里的直接表达式语句、其后（按语句次序）跟着 return、
+   *     **且其前**同块里没有无条件 return/throw 直接语句（F2）——喂给判据 B。
    */
-  function assertSitesIn(ownerBody: ts.Node): Array<{ operand: string | null; runsBeforeReturn: boolean }> {
-    const out: Array<{ operand: string | null; runsBeforeReturn: boolean }> = []
+  function assertSitesIn(
+    ownerBody: ts.Node
+  ): Array<{ operandDecl: ts.VariableDeclaration | null; operandName: string | null; runsBeforeReturn: boolean }> {
+    const out: Array<{ operandDecl: ts.VariableDeclaration | null; operandName: string | null; runsBeforeReturn: boolean }> = []
     const walk = (node: ts.Node): void => {
       if (
         ts.isCallExpression(node) &&
@@ -336,15 +414,20 @@ describe('每个改动 region 集合的函数都必须过那道闸（#515 接线
         node.expression.text === 'assertRegionInvariant'
       ) {
         const arg = node.arguments[0]
-        const operand = arg && ts.isIdentifier(arg) ? arg.text : null
+        const operandName = arg && ts.isIdentifier(arg) ? arg.text : null
+        const operandDecl = arg && ts.isIdentifier(arg) ? resolveVarDecl(arg) : null
         let runsBeforeReturn = false
         const statement = node.parent
         if (statement && ts.isExpressionStatement(statement) && statement.parent && ts.isBlock(statement.parent)) {
           const statements = statement.parent.statements
           const index = statements.indexOf(statement)
-          runsBeforeReturn = index >= 0 && statements.slice(index + 1).some((stmt) => ts.isReturnStatement(stmt))
+          const precededByExit =
+            index >= 0 &&
+            statements.slice(0, index).some((stmt) => ts.isReturnStatement(stmt) || ts.isThrowStatement(stmt))
+          const followedByReturn = index >= 0 && statements.slice(index + 1).some((stmt) => ts.isReturnStatement(stmt))
+          runsBeforeReturn = index >= 0 && !precededByExit && followedByReturn
         }
-        out.push({ operand, runsBeforeReturn })
+        out.push({ operandDecl, operandName, runsBeforeReturn })
       }
       node.forEachChild(walk)
     }
@@ -356,32 +439,35 @@ describe('每个改动 region 集合的函数都必须过那道闸（#515 接线
     file: string
     fn: string
     helper: string
-    /** 判据 A：本函数里由该 helper 调用结果传递派生出的具名局部。 */
-    flow: string[]
-    /** 判据 A/B：本函数里每次 assertRegionInvariant 的操作数与「块内直接、其后有 return」标志。 */
-    asserts: Array<{ operand: string | null; runsBeforeReturn: boolean }>
+    /** 判据 A：本函数里由该 helper 调用结果传递派生出的局部**声明节点**（按身份，不按名字）。 */
+    flow: ts.VariableDeclaration[]
+    /** 判据 A/B：本函数里每次 assertRegionInvariant 的操作数声明节点、名字与「块内直接、前无退出、后有 return」标志。 */
+    asserts: Array<{ operandDecl: ts.VariableDeclaration | null; operandName: string | null; runsBeforeReturn: boolean }>
   }
 
-  /** 每个「会动集合」的布局调用点，连同包着它的函数、该函数的流集与它体内每次断言的两项事实。 */
+  /**
+   * 每个「会动集合」的布局调用点，连同包着它的函数、该函数的流集与它体内每次断言的三项事实。
+   * callee 名先经本文件的别名表解析回规范名再查 LAYOUT_EFFECT——别名调用点（`helper as alias`）仍留在扫描面（F3）。
+   */
   function callSites(): ChangesHelperSite[] {
     const sites: ChangesHelperSite[] = []
     for (const relative of sourceFiles()) {
       if (relative === DEFINER) continue
       const file = parse(relative)
+      const alias = aliasMapFor(file)
       const walk = (node: ts.Node): void => {
-        if (
-          ts.isCallExpression(node) &&
-          ts.isIdentifier(node.expression) &&
-          LAYOUT_EFFECT[node.expression.text] === 'changes'
-        ) {
-          const owner = enclosingFunction(node, file)
-          sites.push({
-            file: relative,
-            fn: owner?.name ?? '<top-level>',
-            helper: node.expression.text,
-            flow: owner ? [...flowSetFromCall(owner.body, node)] : [],
-            asserts: owner ? assertSitesIn(owner.body) : []
-          })
+        if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
+          const canonical = alias.get(node.expression.text) ?? node.expression.text
+          if (LAYOUT_EFFECT[canonical] === 'changes') {
+            const owner = enclosingFunction(node, file)
+            sites.push({
+              file: relative,
+              fn: owner?.name ?? '<top-level>',
+              helper: canonical,
+              flow: owner ? flowSetFromCall(owner.body, node) : [],
+              asserts: owner ? assertSitesIn(owner.body) : []
+            })
+          }
         }
         node.forEachChild(walk)
       }
@@ -434,14 +520,24 @@ describe('每个改动 region 集合的函数都必须过那道闸（#515 接线
       '所有受管调用点的流集都算成空了——flowSetFromCall 的派生失灵，判据 A 失去意义'
     ).toBe(true)
 
+    // 按**声明节点身份**比对（F1）：断言操作数解析到的声明必须落在本站点流集里。同名兄弟局部是不同节点，
+    // 不会互相代偿——arrange 的 balance/active-first 分支里同名 `next` 的断言，替不了 preset 分支那次。
     const unguarded = sites
-      .filter((site) => !site.asserts.some((a) => a.operand !== null && site.flow.includes(a.operand)))
-      .map((site) => `${site.file}::${site.fn}() 调了 ${site.helper}；流集={${site.flow.join(', ')}}`)
+      .filter((site) => {
+        const flow = new Set(site.flow)
+        return !site.asserts.some((a) => a.operandDecl !== null && flow.has(a.operandDecl))
+      })
+      .map(
+        (site) =>
+          `${site.file}::${site.fn}() 调了 ${site.helper}；流集(声明节点)=${site.flow.length} 个；` +
+          `断言操作数=[${site.asserts.map((a) => a.operandName ?? '<非标识符>').join(', ')}]`
+      )
     expect(
       unguarded,
       '这些函数改了分屏树的 region 集合，但没有任何一次 assertRegionInvariant 断言的是「本函数刚算出来、' +
-        '准备交出去的那个值」（即该 changes-helper 调用结果传递派生出的局部）。断言喂了别的东西（比如入参）' +
-        '等于让它对着一个进函数时就已合法的对象空转，真正被交出去的新值没人校验。' +
+        '准备交出去的那个值」（即该 changes-helper 调用结果传递派生出的局部，按声明节点身份判定）。断言喂了' +
+        '别的东西（比如入参，或另一个同名但属于别的分支的局部）等于让它对着一个进函数时就已合法、或根本不是' +
+        '这条路径产物的对象空转，真正被交出去的新值没人校验。' +
         '修法是在 return 之前 assertRegionInvariant(那个新算出来的 tab)。'
     ).toEqual([])
   })
@@ -457,6 +553,52 @@ describe('每个改动 region 集合的函数都必须过那道闸（#515 接线
       '这些函数里的 assertRegionInvariant 不是「块内直接语句、其后跟着 return」的形状——它被包进了 if / ' +
         '短路 / dev-only 门之类的条件里，于是在真正把值交出去的那条路径上根本不会执行。纵深断言一旦可被' +
         '某个构建或某个分支跳过，就等于没装。修法是让它成为 return 之前的一条无条件语句。'
+    ).toEqual([])
+  })
+
+  // 覆盖面按**名字**钉住（F3）：这三个受管函数必须始终在扫描面里。裸计数地板（A/B 里的 >3 / >2）
+  // 是「至少还有几个站点」，别名掉一个仍可能在地板之上——那正是别名让站点静默泄漏的形状。这里点名要求
+  // 每个都在，别名感知的 callSites 让别名调用点也仍以规范名出现，故起了别名它照样命中、这条不因别名而红；
+  // 真正挡别名的是下一条。这条挡的是「某个受管函数被整体删掉/改名/搬走而无人再断言它」。
+  const REQUIRED_COVERED: ReadonlyArray<{ file: string; fn: string; helper: string }> = [
+    { file: 'lib/workbench-tabs.ts', fn: 'addWorkbenchRegion', helper: 'splitWorkbenchRegion' },
+    { file: 'lib/workbench-tabs.ts', fn: 'removeWorkbenchRegion', helper: 'closeWorkbenchRegion' },
+    { file: 'lib/control.ts', fn: 'arrangeWorkbenchControlTab', helper: 'applyWorkbenchRegionLayoutPreset' }
+  ]
+
+  it('覆盖面按名字钉住：三个受管的 changes 调用点必须都在扫描面里（不靠裸计数地板）', () => {
+    const seen = new Set(callSites().map((site) => `${site.file}::${site.fn}::${site.helper}`))
+    const missing = REQUIRED_COVERED.filter(
+      (want) => !seen.has(`${want.file}::${want.fn}::${want.helper}`)
+    ).map((want) => `${want.file}::${want.fn}() 调 ${want.helper}`)
+    expect(
+      missing,
+      '这些点名必守的「会动集合」调用点从扫描面消失了（被删/改名/搬走/换了 helper）。裸计数地板挡不住' +
+        '「掉一个仍在地板之上」，故这里逐名钉死；若确实合法地移除了某个，请连同 REQUIRED_COVERED 一起更新。'
+    ).toEqual([])
+  })
+
+  it('别名禁令：四个 changes 助手不得以别名 import（否则调用点会掉出扫描面）', () => {
+    const CHANGES = Object.keys(LAYOUT_EFFECT).filter((name) => LAYOUT_EFFECT[name] === 'changes')
+    const aliased: string[] = []
+    for (const relative of sourceFiles()) {
+      if (relative === DEFINER) continue
+      const alias = aliasMapFor(parse(relative))
+      for (const [local, canonical] of alias) {
+        if (local !== canonical && CHANGES.includes(canonical)) aliased.push(`${relative}: ${canonical} as ${local}`)
+      }
+    }
+    // 在场自检：别名检测建立在「本文件确实从 DEFINER 具名 import 了这些助手」之上。至少有一个文件应导入到
+    // 某个 changes 助手（规范名映射到自身也算），否则 aliasMapFor 整体失灵会让本条恒空假绿。
+    const importsAnyChanges = sourceFiles()
+      .filter((relative) => relative !== DEFINER)
+      .some((relative) => [...aliasMapFor(parse(relative)).values()].some((canonical) => CHANGES.includes(canonical)))
+    expect(importsAnyChanges, '没有任何 renderer 文件从 DEFINER import 到 changes 助手——别名表解析失灵，本条失去意义').toBe(true)
+    expect(
+      aliased,
+      '这些 changes 助手被起了 import 别名。别名会让 callSites 若只按 callee 文本匹配就整体漏掉该调用点，' +
+        '其函数静默从 A/B 的覆盖面消失。今天 callSites 已别名感知能顶住，但别名本身没有收益、只会削弱这道闸的' +
+        '可读性与其它按名字的守卫，故一律禁止：请用规范名 import。'
     ).toEqual([])
   })
 
