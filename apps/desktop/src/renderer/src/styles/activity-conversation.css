@@ -135,7 +135,11 @@
   white-space: pre;
 }
 /* A link is a button because an <a href> in untrusted output is a navigation escape hatch; it still has
-   to READ as a link, so it borrows the accent and underline and nothing else. */
+   to READ as a link, so it borrows the accent and underline and nothing else. The underline is
+   baseline-aware (`text-underline-offset`) so it clears the descenders of a mono path/name rather than
+   cutting through them: 2px sat inside the descender zone and read as cramped (tracker #794). The offset
+   lives here once and both link kinds inherit it — the file reference carries `.md-link` too — so the two
+   affordances cannot drift apart on the one value that decides where the line sits. */
 .md-link {
   padding:0;
   border: 0;
@@ -143,22 +147,33 @@
   background: none;
   font: inherit;
   text-decoration: underline;
-  text-underline-offset: 2px;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
   cursor: pointer;
 }
 .md-link:hover { color: var(--green); }
 
 /* A workspace file reference opens IN the app rather than leaving it, so it reads as a path — mono,
    text colour — and earns the link underline only on hover. Underlining every path an agent mentions
-   would stripe a whole paragraph; the target still has to be legible as prose first. */
+   would stripe a whole paragraph; the target still has to be legible as prose first.
+
+   悬停下划线做成克制的淡入，而不是"啪"地出现。下划线始终在盒模型里占位（`text-decoration: underline`），
+   位置因此由上面那条 baseline-aware 的 offset 决定、也不会在 hover 时抖动布局；平时用
+   `text-decoration-color: transparent` 把它藏起来，hover 时只把这一个属性沿 `--dur-fast`(120ms、标准
+   缓动) 渐显。`text-decoration` 这条线本身不可动画，能动画的是它的**颜色**，且本仓唯一的渲染引擎是
+   Electron/Chromium，故动的是 `text-decoration-color`。`prefers-reduced-motion` 下 base.css 的全局
+   规则把 transition-duration 归零：hover 时下划线照旧出现（:hover 那条是状态切换，transition 只是替
+   它加动画），只是不再渐显。 */
 .md-link--file {
   color: inherit;
   font-family: var(--font-mono);
-  text-decoration: none;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  transition: text-decoration-color var(--dur-fast) ease;
 }
 .md-link--file:hover {
   color: var(--green);
-  text-decoration: underline;
+  text-decoration-color: currentColor;
 }
 /* Inside a code span the mono face and ground already come from `.md-code`. */
 .md-code .md-link--file { font-family: inherit; }
