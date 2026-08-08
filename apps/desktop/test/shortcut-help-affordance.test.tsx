@@ -48,9 +48,10 @@ import { assertSingleCallReachable, readAndParse } from './helpers/effect-reacha
 // at `Tests 10 passed (10)` with `tsc --noEmit` exit 0 — i.e. neither the tests nor the compiler saw them.
 //
 // Each criterion is named below by the `it()` it lives in — there are no `assertX` helpers for these
-// four, and an earlier version of this header invented four (`assertOperableButton`,
-// `assertHandlerCallIsTheWholeBody`, `assertDerivedFromChord`) that were never written. A header that
-// names a layer which does not exist reads as stronger coverage than the file has.
+// four, and an earlier version of this header credited them to three helper names that were never
+// written (`assertOperableButton`, `assertHandlerCallIsTheWholeBody`, `assertDerivedFromChord` — G1 and
+// G4 shared the first). A header that names a layer which does not exist reads as stronger coverage than
+// the file has.
 //
 //   G1 `disabled` on the button. The affordance renders, the handler is present and reachable, and the
 //      user cannot click it: a completely dead door, which is the ONE thing this whole feature exists to
