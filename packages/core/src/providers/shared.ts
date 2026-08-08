@@ -3,7 +3,7 @@ import { AgentMuxError } from '../errors.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import { resolveCoreBinPath } from '../runtime-paths.js'
 import type { BuiltInAgentProviderId } from '../agent-provider-id.js'
-import type { AgentCatalogEntry, AgentProviderId } from '../types.js'
+import type { AgentCatalogEntry, AgentHookStrategy, AgentProviderId } from '../types.js'
 
 export type ManagedHookPlanBuilder = (
   workspacePath: string,
@@ -144,3 +144,53 @@ export type ProviderWithHookCommandTimeout = {
 export function hookCommandTimeout(providerId: ProviderWithHookCommandTimeout): Record<string, number> {
   return { [HOOK_COMMAND_TIMEOUT_FIELD[providerId]]: HOOK_COMMAND_TIMEOUT_SECONDS }
 }
+
+/** hook 安装归属的三档取值，直接从 {@link AgentHookStrategy} 派生——类型层某天加一档，这里自动跟着变宽。 */
+type HookInstallationKind =
+  | Extract<AgentHookStrategy, { kind: 'none' }>['kind']
+  | Extract<AgentHookStrategy, { kind: 'native' }>['installation']
+
+/**
+ * 每家内置 Provider 的 hook 安装归属——**分类的 SSOT**，与各 catalog 的 `hookStrategy` 是同一事实的两处投影。
+ *
+ * 为什么必须把这个分类单独物化成一张**字面量**表、而不能从 catalog 在类型层派生：catalog 由工厂函数
+ * （`createCodexProvider(...)` 等）产出，返回类型一律拓宽成 `AgentProvider`，其 `hookStrategy` 是联合类型
+ * {@link AgentHookStrategy}——每家自己写的 `installation: 'explicit-managed'` 这个**字面量**在工厂边界上就被
+ * 擦成了整个联合。于是「谁是 explicit-managed」在类型层从 catalog **取不回来**，编译器在
+ * {@link MANAGED_HOOK_PLAN_RESOLVERS} 那张 resolver 表上什么都强制不了（这正是 `AgentProviderId` 拓宽成
+ * `string` 之外的第二重障碍）。把分类抄成这一张 `satisfies Record<BuiltInAgentProviderId, …>` 的表后，它成为
+ * 类型层能拿在手里的 SSOT：{@link ProviderRequiringManagedHookResolver} 从它派生，resolver 表拿它当键域，
+ * 漏一家 `explicit-managed` 直接编译失败。
+ *
+ * 这张表与各 catalog 是两处投影、天然会漂——由 test/provider-conformance.test.ts 逐 id 双向钉死：表里的
+ * 分类必须等于该 provider catalog 的 `hookStrategy` 实际分类，任一侧改了另一侧没跟上就红。所以引入这份 copy
+ * 没有留下无人守的缝。
+ */
+export const HOOK_INSTALLATION_BY_PROVIDER = {
+  codex: 'explicit-managed',
+  claude: 'explicit-managed',
+  traex: 'none',
+  hermes: 'explicit-managed',
+  pi: 'explicit-managed',
+  grok: 'explicit-managed',
+  gemini: 'explicit-managed',
+  antigravity: 'explicit-managed',
+  cursor: 'explicit-managed',
+  kimi: 'unmanaged',
+  droid: 'explicit-managed',
+  copilot: 'explicit-managed',
+  opencode: 'explicit-managed'
+} as const satisfies Record<BuiltInAgentProviderId, HookInstallationKind>
+
+/**
+ * 声明了 `explicit-managed`、因而**必须**在 {@link MANAGED_HOOK_PLAN_RESOLVERS} 里挂一条 resolver 的那批
+ * Provider（即 {@link HOOK_INSTALLATION_BY_PROVIDER} 里映射为 `'explicit-managed'` 的键）。
+ *
+ * 只有这批被强制。映射为 `'none'`（traex：根本没有 hook）或 `'unmanaged'`（kimi：有原生 hook 但配置面
+ * 不由 AgentMux 安装）的**不**要求 resolver——它们本就不该有一份被 AgentMux 写盘的计划。这与
+ * {@link ProviderWithHookCommandTimeout} 同构：都从一张 `satisfies Record<BuiltInAgentProviderId, …>` 的
+ * 分类表里筛出「该被强制的那批键」。
+ */
+export type ProviderRequiringManagedHookResolver = {
+  [K in BuiltInAgentProviderId]: (typeof HOOK_INSTALLATION_BY_PROVIDER)[K] extends 'explicit-managed' ? K : never
+}[BuiltInAgentProviderId]

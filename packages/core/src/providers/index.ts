@@ -14,6 +14,7 @@ import { createKimiProvider } from './kimi.js'
 import { createOpenCodeManagedHookPlan, createOpenCodeProvider } from './opencode.js'
 import { createPiManagedHookPlan, createPiProvider } from './pi.js'
 import { createTraexProvider } from './traex.js'
+import type { ProviderRequiringManagedHookResolver } from './shared.js'
 
 export type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
 /**
@@ -49,7 +50,23 @@ export function createBuiltInAgentProviders(defineAgentProvider: ProviderFactory
   ]
 }
 
-/** Managed hook installers are composed by Provider id; the registry has no provider-specific branches. */
+/**
+ * Managed hook installers are composed by Provider id; the registry has no provider-specific branches.
+ *
+ * 类型上做两件事，缺一不可：
+ * - **注解** `Partial<Record<AgentProviderId, …>>` 让唯一消费者 `resolveManagedHookPlan` 能用拓宽成 `string`
+ *   的 `providerId` 下标它（用户自建 executor 的 id 不在内置 union 里，仍要能查得到「没有」并回落 `null`）。
+ * - **`satisfies Record<ProviderRequiringManagedHookResolver, …>`** 才是这次的守卫：把键域钉在「声明了
+ *   `explicit-managed` 因而必须有 resolver」的那批 built-in id 上。少写一家（catalog 里声明 `explicit-managed`
+ *   却在这里漏挂 resolver）不再是运行时才暴露的静默缺陷，而是**编译失败**——`tsc` 直接点名缺的那个键。
+ *   反向也被 `satisfies` 挡住：给一家**不需要** resolver 的 provider（如 kimi/traex）挂 resolver 会触发 excess
+ *   property 报错，逼作者先在 `HOOK_INSTALLATION_BY_PROVIDER` 把它改判成 `explicit-managed`——那才是声明
+ *  「这家现在由 AgentMux 写配置」的正当位置。
+ *
+ * 为什么键域不能直接从 catalog 派生：catalog 由工厂函数产出，`hookStrategy` 在工厂边界上被拓宽成整个
+ * `AgentHookStrategy` 联合，`'explicit-managed'` 这个字面量在类型层擦没了。所以 SSOT 是
+ * `HOOK_INSTALLATION_BY_PROVIDER` 那张字面量表，两处投影由 provider-conformance 逐 id 双向钉住不漂。
+ */
 export const MANAGED_HOOK_PLAN_RESOLVERS: Partial<Record<AgentProviderId, ManagedHookPlanResolver>> = {
   codex: (workspacePath) => createCodexManagedHookPlan(workspacePath),
   claude: (workspacePath) => createClaudeManagedHookPlan(workspacePath),
@@ -78,7 +95,7 @@ export const MANAGED_HOOK_PLAN_RESOLVERS: Partial<Record<AgentProviderId, Manage
   // 相反**不需要 endpoint**：Pi 是 AgentMux 通过 PTY 起的进程，扩展在它里面能直接读到我们注入的
   // `AGENTMUX_HOOK_URL`/`TOKEN`。所以内容在运行时取值，token 一个字节都不落盘，修复路径也照常可装。
   pi: (_workspacePath, env) => createPiManagedHookPlan(env)
-}
+} satisfies Record<ProviderRequiringManagedHookResolver, ManagedHookPlanResolver>
 
 export {
   createAntigravityManagedHookPlan,
