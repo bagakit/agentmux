@@ -20,6 +20,7 @@ export type AgentComposerProps = {
   postureControl?: AgentPostureControl
   onChange(value: string): void
   onSubmit?: () => void
+  onQueue?: () => void
   onInterrupt?: () => void
   onReferenceActiveFile?: () => void
   onAttach?: () => void
@@ -39,6 +40,7 @@ export function AgentComposer({
   postureControl,
   onChange,
   onSubmit,
+  onQueue,
   onInterrupt,
   onReferenceActiveFile,
   onAttach,
@@ -69,6 +71,11 @@ export function AgentComposer({
           if (event.key === 'ArrowDown' && suggestions.length && !isImeCompositionKeyDown(event)) {
             event.preventDefault()
             event.currentTarget.closest('.composer')?.querySelector<HTMLButtonElement>('.composer__suggestions button')?.focus()
+            return
+          }
+          if (event.key === 'Enter' && !event.shiftKey && !isImeCompositionKeyDown(event) && !canSubmit && onQueue && value.trim()) {
+            event.preventDefault()
+            onQueue()
             return
           }
           if (event.key === 'Enter'  && !event.shiftKey && !isImeCompositionKeyDown(event) && canSubmit) {

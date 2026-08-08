@@ -6,6 +6,7 @@ import { api } from '../lib/api'
 import { appendFileReferences } from '../lib/composer-file-reference'
 import { composerSubmitMode } from '../lib/composer-submit-mode'
 import { useAppStore } from '../store'
+const queuedSteers = new Map<string, string>()
 import { AgentComposer } from './AgentComposer'
 
 export type AgentComposerAvailability = {
@@ -85,6 +86,7 @@ export function AgentSessionComposer({
     }
   }
 
+
   function addFileReference(): void {
     if (!activeFile || !submitMode.canType) return
     setAgentComposerDraft(sessionId, appendFileReferences(text, [activeFile]))
@@ -157,6 +159,7 @@ export function AgentSessionComposer({
         ...(postureControl ? { onSetPosture: (modeId: string) => void setPosture(sessionId, modeId) } : {}),
         ...(activeFile ? { onReferenceActiveFile: addFileReference } : {})
       } : {})}
+      {...(session?.kind === 'agent' && session.pendingInteraction && text.trim() ? { onQueue: () => { queuedSteers.set(sessionId, text) } } : {})}
     />
   )
 }
