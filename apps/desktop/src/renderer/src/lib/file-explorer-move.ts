@@ -1,3 +1,4 @@
+import { opensContextMenuFromKeyboard } from './context-menu-key'
 import { isPathWithinSubtree } from './workspace-paths'
 
 type FileExplorerMoveNode = {
@@ -80,9 +81,9 @@ export function isFileExplorerMenuKey(event: {
   ctrlKey: boolean
   metaKey: boolean
 }): boolean {
-  return event.key === 'ContextMenu' || (
-    event.key === 'F10' && event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey
-  )
+  // 「开菜单键」是全应用一处的判据（`context-menu-key`）——文件树与 Region 菜单问同一句话。
+  // 这里只是那条规则的一个命名入口（foundations 测试按这个名字钉着），委托过去，不再手抄一份。
+  return opensContextMenuFromKeyboard(event)
 }
 
 /**

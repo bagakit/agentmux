@@ -13,6 +13,7 @@ import type { WorkbenchTab } from './workbench-tabs'
 import { activeTopicIdFromLayout, layoutForActiveTopic } from './scratch-topic-layout'
 import { SHORTCUT_BINDINGS } from './shortcut-registry'
 import { regionInDirection } from './split-direction'
+import type { RegionFocusCause } from './region-focus'
 
 /**
  * 一次按键解析出的命令——已经定到「哪个动作、往哪个方向、第几张」，但**落点（哪个 Workspace/Tab/
@@ -173,7 +174,12 @@ export type WorkbenchShortcutStore = {
   // 同一个决定出口。键盘裸调 closeRegion 会静默弃掉未存改动，所以多格时也只投意图、由那一格消费。
   requestCloseRegion(workspaceId: string, tabId: string, regionId: string): void
   splitRegion(workspaceId: string, tabId: string, regionId: string, direction: SplitDirection): void
-  focusRegion(workspaceId: string, tabId: string, regionId: string): void
+  // 键盘导航搬焦点时**必须**连带把 DOM caret 搬进目标格（cause 'keyboard'）——这是本层存在的头号
+  // 诉求之一：只改 activeRegionId（绿环）而不搬 caret，用户按 Cmd+Alt+方向切过去接着打字，字却全进了
+  // 上一格的 xterm。cause 是必填而不是靠 store 的默认值：默认是最保守的 'pointer'（不夺焦），漏传就
+  // 静默退回那个缺陷本身，且 vitest 只转译不查类型看不出来——必填让「键盘那一路要夺焦」这个决定在
+  // 编译期就钉死。
+  focusRegion(workspaceId: string, tabId: string, regionId: string, cause: RegionFocusCause): void
   // 换位：同一张 Tab 里两格对调位置。合法性（两端点在场、不与自己换）由 swapWorkbenchRegions 自己守，
   // 键盘层只负责把「方向」解析成那个端点——且必须用与 focusRegion 同一个 adjacentRegionId，见下面 dispatch。
   swapRegions(workspaceId: string, tabId: string, regionIdA: string, regionIdB: string): void
@@ -259,7 +265,9 @@ export function dispatchWorkbenchCommand(
     store.swapRegions(workspaceId, tabId, activeRegionId, neighbourRegionId)
     return true
   }
-  store.focusRegion(workspaceId, tabId, neighbourRegionId)
+  // 键盘导航：搬绿环 **并** 搬 DOM caret（cause 'keyboard'）。少了 cause 这一路就退回「绿环移了、
+  // 键入没移」——本层要修的正是它。
+  store.focusRegion(workspaceId, tabId, neighbourRegionId, 'keyboard')
   return true
 }
 

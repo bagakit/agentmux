@@ -39,6 +39,7 @@ import {
   type RegionFocusExpression
 } from '../lib/region-focus'
 import { activeTopicIdFromLayout, layoutForActiveTopic } from '../lib/scratch-topic-layout'
+import { opensContextMenuFromKeyboard } from '../lib/context-menu-key'
 import { SessionPane } from './SessionPane'
 import { WorkbenchTabContextMenu } from './WorkbenchTabContextMenu'
 import { WorkbenchTabMarks } from './WorkbenchTabMarks'
@@ -546,7 +547,7 @@ function SurfaceContent({
   if (surface.kind === 'file') {
     return (
       <Suspense fallback={<section className="pane-state"><strong>Loading editor…</strong></section>}>
-        <EditorPane tabId={tabId} surface={surface} released={monacoReleased} />
+        <EditorPane tabId={tabId} surface={surface} released={monacoReleased} visible={nativeSurfacesVisible} />
       </Suspense>
     )
   }
@@ -678,6 +679,32 @@ function WorkbenchRegionLeaf({
   }, [closeRegionRequest, tab.id, tab.workspaceId, node.regionId, clearCloseRegionRequest])
 
   if (!surface) return null
+
+  // 键盘打开这一格的右键菜单——补的是一个可达性缺口：纯键盘用户够不到右键，而 Radix 的 Trigger 只认
+  // 真正的 `contextmenu` 事件，于是 promote / arrange 预设 / 均分 / move-to-workspace / split-left /
+  // split-up 这些后端齐全的能力对纯键盘用户此前完全不可达。键盘流是「先用 Cmd+Alt+方向把焦点移到某格，
+  // 再按 Shift+F10（或 Menu 键）」，所以这一格只需**可编程聚焦**、不必进 Tab 序——给整页每个分屏都塞
+  // 一个 Tab 停靠点会把 Tab 序撑爆，而 Region 是容器不是控件。故 section 上是 `tabIndex={-1}`：
+  // `element.focus()` 能聚焦、聚焦后能收到 keydown，但 Tab 键不会走到它。
+  //
+  // 命中就在**这一格自己**（event.currentTarget，即 Trigger 的 asChild 子元素）上合成一个 contextmenu
+  // 事件，让 Radix 的 Trigger 按这一格的位置打开**同一个** RegionContextMenu——菜单里每一项一次性都拿到
+  // 键盘路径，不必逐项补和弦（和弦已经很挤）。「这个键该不该开菜单」是纯谓词（opensContextMenuFromKeyboard，
+  // 认 Shift+F10 与 Menu 键两种拼法；mac 上通行的是 Shift+F10）。本仓 renderToStaticMarkup 不跑 effect、
+  // 也发不出 keydown，故这条接线由 AST 守（section 带 tabIndex/onKeyDown、handler 合成 contextmenu），
+  // 判据本身由纯谓词层守。
+  function openRegionMenuFromKeyboard(event: React.KeyboardEvent<HTMLElement>): void {
+    if (!opensContextMenuFromKeyboard(event)) return
+    event.preventDefault()
+    const region = event.currentTarget
+    const rect = region.getBoundingClientRect()
+    region.dispatchEvent(new MouseEvent('contextmenu', {
+      bubbles: true,
+      clientX: rect.left,
+      clientY: rect.top
+    }))
+  }
+
   return (
     <RegionContextMenu
       regionId={node.regionId}
@@ -719,7 +746,10 @@ function WorkbenchRegionLeaf({
     <section
       className={`${REGION_CLASS} ${focus.className}`}
       data-workbench-region-id={node.regionId}
-      onPointerDown={() => focusRegion(tab.workspaceId, tab.id, node.regionId)}
+      // tabIndex={-1}：可编程聚焦但不进 Tab 序（理由见 openRegionMenuFromKeyboard 上方注释）。
+      tabIndex={-1}
+      onKeyDown={openRegionMenuFromKeyboard}
+      onPointerDown={() => focusRegion(tab.workspaceId, tab.id, node.regionId, 'pointer')}
     >
       <SurfaceContent
         surface={surface}
@@ -1116,7 +1146,7 @@ function SplitBranch({
   // 缺失 / 非有限 / 越界的比例只在这里判一次。`?? 0.5` 曾在本组件手抄四份，而它防的是「可能缺 ratio
   // 的历史持久化数据」——#552 坐实了那道防线接不住 NaN（`??` 只认 null/undefined），而 NaN 恰恰是
   // 上游归一化把缺失值算出来的东西。改成走 clampSplitRatio 后三种坏取值同一个出口，见它的注释。
-  const ratio = clampSplitRatio(node.ratio as number)
+  const ratio = clampSplitRatio(node.ratio)
   const committerRef = useRef<SplitRatioCommitter | null>(null)
   if (committerRef.current === null) {
     committerRef.current = new SplitRatioCommitter(ratio, (value) => commitRef.current(value))
