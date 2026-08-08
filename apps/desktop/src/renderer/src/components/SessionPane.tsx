@@ -2,6 +2,7 @@ import { AlertTriangle, LoaderCircle, RefreshCw, RotateCcw, ServerOff } from 'lu
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppStore } from '../store'
 import type { AgentMuxRunExitReason, AgentProviderId } from '@agentmux/core'
+import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
 import {
   dismissOpenDestinationRequest,
   type OpenDestination,
@@ -75,6 +76,9 @@ export function SessionPane({
   const session = useAppStore((state) => state.sessions.find((item) => item.id === sessionId))
   const timeline = useAppStore((state) => state.timelines[sessionId]?.items ?? NO_TIMELINE_ITEMS)
   const terminalThemeId = useAppStore((state) => state.config?.appearance.terminalTheme)
+  const terminalFontSize = useAppStore(
+    (state) => state.config?.appearance.terminalFontSize ?? TERMINAL_FONT_SIZE_DEFAULT
+  )
   const viewMode = useAppStore((state) => state.viewModes[sessionId] ?? 'terminal')
   // 说话人身份 → 「叫什么、画哪个 provider」。这一层是唯一持有 Session 的地方，所以查 store 归这里；
   // ActivityView 与两条轴都保持受控，可以在无 DOM 的测试里直接求值。
@@ -241,6 +245,7 @@ export function SessionPane({
               <TerminalView
                 session={session}
                 themeId={terminalThemeId}
+                fontSize={terminalFontSize}
                 interactiveResize={interactiveResize}
                 visible={visible}
                 linkOrigin={linkOrigin}
