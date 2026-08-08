@@ -45,3 +45,11 @@ Session 列表部分成功、筛选和真实诊断指引，以及维护角色精
 ## 本轮验证
 
 只读运行原型 8 项 decision 单测；核对上述生产代码路径和 Tracker 计划结构。未验收自动续行、跨重启投递或任务最终完成。
+
+## 追加需求：全局 Message Tools 与 Context 语义（2026-09-12）
+
+用户确认初始页与已连接 Agent 的输入能力应对齐：引用文件、截屏、选择 Skill、Provider subcommands/commands 和快捷指令使用同一个可复用 Message Tools 组件。组件接收项目/工作区上下文；初始页只因尚未有 Session 而不能显示 Session 专属 context，工具的收起能力由宿主表面决定。启动失败或未提交时，prompt、已选引用与选项必须保留。
+
+Context 不是一条普通消息，也不是“剩余百分比”孤立数字。它表示当前 Session 的上下文容量消耗：已使用/容量、剩余比例，以及 Provider 报告的压缩或接近压缩阈值状态。若 Provider 没有暴露压缩阈值，只显示“剩余上下文”并明确未知，不臆测何时压缩；hover/详情显示采样时间与来源，不能把 queued 数量混进 Context。
+
+追加任务：T-006 抽取全局 Message Tools 并接入初始页；T-007 重做 Context 语义与可访问详情。两项依赖 T-003（观察/输入表面）但不改变 loop 的权限和投递边界。

@@ -2,8 +2,8 @@
   "version": 2,
   "feat_id": "f-2528fmqbw",
   "plan_status": "reviewed",
-  "plan_revision": 1,
-  "supersedes_revision": null,
+  "plan_revision": 2,
+  "supersedes_revision": 1,
   "review_ref": "docs/reviews/continuous-progress-2026-09-12.md",
   "source_refs": [
     "docs/reviews/continuous-progress-2026-09-12.md",
@@ -29,6 +29,40 @@
       ],
       "superseded_task_ids": [],
       "supersedes_by_task": {}
+    },
+    {
+      "revision": 2,
+      "supersedes_revision": 1,
+      "review_ref": "docs/reviews/continuous-progress-2026-09-12.md",
+      "source_refs": [
+        "docs/reviews/continuous-progress-2026-09-12.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006",
+        "T-007"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {},
+      "dependency_changes": {
+        "added": [
+          {
+            "from": "T-003",
+            "to": "T-006"
+          },
+          {
+            "from": "T-003",
+            "to": "T-007"
+          }
+        ],
+        "removed": []
+      }
     }
   ],
   "tasks": [
@@ -57,7 +91,7 @@
       "heavy": true,
       "heavy_reason": "跨 Core/Main typed 边界并需要并发屏障验证",
       "introduced_in_revision": 1,
-      "status": "todo",
+      "status": "in_progress",
       "gate_result": null,
       "last_gate_commands": [],
       "notes": []
@@ -183,6 +217,68 @@
       "supersedes": [],
       "estimate_hours": 1,
       "introduced_in_revision": 1,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-006",
+      "depends_on": [
+        "T-003"
+      ],
+      "title": "全局 Message Tools 与初始页输入对齐",
+      "objective": "抽取引用文件、截屏、Skills、Provider commands/subcommands 的共享工具组件，注入启动页项目上下文。",
+      "outcome": "初始页与 Session Composer 使用同一套工具能力，启动失败保留 prompt、引用与选项。",
+      "acceptance": [
+        "初始页可选择文件、截图、Skill 和 Provider command，并按项目上下文写入 prompt",
+        "启动失败或未提交时输入与工具选择可恢复；组件可由宿主控制收起"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/global-message-tools.test.tsx test/new-tab-message-tools.test.tsx",
+          "proves": "共享工具组件及初始页接线"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/continuous-progress-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "estimate_hours": 1.5,
+      "heavy": true,
+      "heavy_reason": "跨启动页与 Session Composer 两个宿主重用同一交互组件",
+      "introduced_in_revision": 2,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-007",
+      "depends_on": [
+        "T-003"
+      ],
+      "title": "Context 剩余与压缩语义",
+      "objective": "把 Context 改为清晰的已用/容量/剩余和 Provider 压缩阈值状态，不与 queued 混淆。",
+      "outcome": "用户能理解何时接近压缩；阈值未提供时明确 unknown。",
+      "acceptance": [
+        "紧凑徽标表达剩余上下文，详情表达已用/容量、剩余比例、采样时间与来源",
+        "Provider 未报告压缩阈值时不臆测，并有可访问 tooltip/popover"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/agent-context-usage.test.tsx",
+          "proves": "Context 语义和未知阈值显示"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/continuous-progress-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "estimate_hours": 0.75,
+      "introduced_in_revision": 2,
       "status": "todo",
       "gate_result": null,
       "last_gate_commands": [],
