@@ -1,8 +1,10 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import {
+  ClipboardCopy,
   ClipboardPaste,
   Copy,
   Eraser,
+  ScrollText,
   Search,
   TextSelect,
   UnfoldVertical
@@ -21,6 +23,8 @@ export function TerminalContextMenu({
   mouseTrackingMode,
   onClear,
   onCopy,
+  onCopyScrollback,
+  onCopyViewport,
   onPaste,
   onSearch,
   onSelectAll,
@@ -44,6 +48,10 @@ export function TerminalContextMenu({
   mouseTrackingMode: MouseTrackingMode
   onClear: () => void
   onCopy: () => void
+  /** 复制可视区那一屏。**不经过选区**，故鼠标上报开着时照常可用（见下方菜单项注释）。 */
+  onCopyViewport: () => void
+  /** 复制整个回滚缓冲。同上，不经过选区。 */
+  onCopyScrollback: () => void
   onPaste: () => void
   onSearch: () => void
   onSelectAll: () => void
@@ -76,6 +84,17 @@ export function TerminalContextMenu({
               {selectionHint}
             </ContextMenu.Label>
           ) : null}
+          {/* 两条**不经过选区**的复制路。它们读 `terminal.buffer.active`（xterm 的公开数据 API），
+              与 SelectionService 无关，所以鼠标上报开着、上面那条 Copy 变灰时，这两条照常工作——
+              这才是 #638 的出路：不是把选区修回来，是给一条根本不需要选区的路。
+              永不 disabled：它们的可用性不取决于有没有选区。紧跟提示之后，因为用户正是在读那句
+              「为什么 Copy 是灰的」时需要看见替代动作。 */}
+          <ContextMenu.Item className="tab-context-menu__item" onSelect={onCopyViewport}>
+            <ClipboardCopy size={14} /><span>Copy visible output</span>
+          </ContextMenu.Item>
+          <ContextMenu.Item className="tab-context-menu__item" onSelect={onCopyScrollback}>
+            <ScrollText size={14} /><span>Copy all output</span>
+          </ContextMenu.Item>
           <ContextMenu.Item className="tab-context-menu__item" onSelect={onPaste}>
             <ClipboardPaste size={14} /><span>Paste</span><kbd>{chords.paste}</kbd>
           </ContextMenu.Item>

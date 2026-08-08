@@ -117,12 +117,16 @@ describe('菜单的键位来自它声明的来源', () => {
 /**
  * 每一行菜单项的标签 → 它应当宣传的那个 action。**在测试里手写**，与 {@link REGISTRY_ROWS} 同一条理由。
  *
- * 键位为 null 的两行是刻意的：Select all / Scroll to bottom 没有键位。把它们一起列出来是为了让判据
- * **穷举**——每个菜单项都必须在这张表里有一条，于是「给某一行加了键位而这里没跟上」也会红，而不是被
- * 「只看有 kbd 的那几行」悄悄漏过去。
+ * 键位为 null 的四行是刻意的：Select all / Scroll to bottom 没有键位；两条缓冲区复制路
+ * （Copy visible output / Copy all output，#638 的出路）今天也没有键位——它们是右键菜单专属入口，
+ * 注册表里没有对应的和弦。把它们一起列出来是为了让判据**穷举**——每个菜单项都必须在这张表里有一条，
+ * 于是「给某一行加了键位而这里没跟上」也会红，而不是被「只看有 kbd 的那几行」悄悄漏过去。
+ * 这张表刚刚兑现过这个作用：加那两行复制项时，本文件当场报出 `expected 8 to be 6`。
  */
 const MENU_ROWS: Record<string, TerminalMenuAction | null> = {
   Copy: 'copy',
+  'Copy visible output': null,
+  'Copy all output': null,
   Paste: 'paste',
   'Select all': null,
   Find: 'search',
