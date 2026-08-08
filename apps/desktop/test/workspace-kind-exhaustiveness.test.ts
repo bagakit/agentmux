@@ -200,6 +200,20 @@ function resolveWorkspaceType(
 }
 
 /**
+ * The type of one property of `type`, resolved through the checker.
+ *
+ * `checker.getTypeOfPropertyOfType` is NOT used: it is blind to mapped types — `Pick<T, 'kind'>`
+ * synthesizes a fresh property symbol, and the shorthand returns nothing for it, which would make every
+ * derived judgement here silently vacuous. Going through `getPropertyOfType` and asking for the type at
+ * the property's own declaration resolves the synthesized symbol the same way a real read would.
+ */
+function propertyType(checker: ts.TypeChecker, type: ts.Type, name: string): ts.Type | null {
+  const property = checker.getPropertyOfType(type, name)
+  const declaration = property?.valueDeclaration ?? property?.declarations?.[0]
+  return property && declaration ? checker.getTypeOfSymbolAtLocation(property, declaration) : null
+}
+
+/**
  * The core classifier, reused for both the synthetic self-check and the real scan.
  *
  * Finds every place a WorkspaceRecord's `kind` VALUE is obtained — four origin shapes, see the header —
@@ -225,7 +239,7 @@ function collectKindReaders(
 
   // The kind union comes from the SAME anchor as the record type, so the two can never disagree about
   // what "a kind" is. Deriving it from a separately-named alias would be a second hand-copy.
-  const kindUnion = checker.getTypeOfPropertyOfType(workspaceType, 'kind') ?? null
+  const kindUnion = propertyType(checker, workspaceType, 'kind') ?? null
 
   const readerFor = (fn: ts.SignatureDeclaration, source: ts.SourceFile): KindReader => {
     let reader = byFunction.get(fn)
@@ -500,7 +514,7 @@ describe('who branches on WorkspaceRecord.kind is exhaustiveness-checked', () =>
 
   it('self-check 1: the anchor resolves to exactly folder/worktree and the classifier matches real reads', () => {
     expect(workspaceType, 'WorkspaceRecord must resolve from contracts.ts').not.toBeNull()
-    const kindUnion = checker.getTypeOfPropertyOfType(workspaceType!, 'kind')
+    const kindUnion = propertyType(checker, workspaceType!, 'kind')
     expect(kindUnion, 'the kind union must resolve from the WorkspaceRecord anchor').toBeDefined()
     const members = kindUnion!.isUnion() ? kindUnion!.types : [kindUnion!]
     expect(
