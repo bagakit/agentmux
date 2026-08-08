@@ -113,6 +113,7 @@ function spyStoreSideBySide(): WorkbenchShortcutStore & { caretCauses: string[] 
       }
     },
     activateTab: noop,
+    openLauncher: noop,
     closeRegion: noop,
     requestCloseTab: noop,
     requestCloseRegion: noop,
