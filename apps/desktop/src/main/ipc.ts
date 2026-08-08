@@ -72,6 +72,7 @@ import { nativeImageFromBrowserPng } from './browser-image.js'
 import { ConfigStore } from './config-store.js'
 import { DesktopControlIpcBridge } from './control-ipc-bridge.js'
 import { normalizeExternalUrl } from './external-url.js'
+import { assertSenderTrusted, senderTrust, type PrivilegedChannel } from './ipc-sender-trust.js'
 import { FileObservationRegistry } from './file-observation-registry.js'
 import { runOwnerDisposals } from './owner-disposal.js'
 import { RuntimeController } from './runtime-controller.js'
@@ -142,7 +143,10 @@ export async function registerIpc(args: {
     sendCancellation: (cancellation) => args.window.webContents.send(CONTROL_CANCEL_CHANNEL, cancellation)
   })
   const acceptControl = (event: IpcMainEvent, response: DesktopControlResponse): void => {
-    if (event.sender !== args.window.webContents || !response || typeof response.requestId !== 'string') return
+    // 发送者判据走 senderTrust（被行为测试直接质询）；这个频道的处置是**静默返回**而非抛，所以那半件
+    // 留在这里。requestId 的形状检查不是发送者关切，也留在 shell——不塞进纯判据里。
+    if (!senderTrust(CONTROL_RESPONSE_CHANNEL, event.sender, args.window.webContents).trusted) return
+    if (!response || typeof response.requestId !== 'string') return
     controlBridge.accept(response)
   }
   const executeControl = async (
@@ -174,6 +178,13 @@ export async function registerIpc(args: {
     channels.push(channel)
     ipcMain.handle(channel, (event, ...values: TArgs) => listener(event, ...values))
   }
+  /**
+   * 特权频道的发送者卫兵——不可信就抛。判据（身份比对 + 拒绝措辞）在纯的 `senderTrust` 里，处置（抛）
+   * 在纯的 `assertSenderTrusted` 里，所以这个适配器体就是**一次转发表达式**：既没有可翻极性的比较符，
+   * 也没有可插早退的语句位。每个会抛的特权 handler 第一句都调它。控制响应频道不走这里（它要静默返回）。
+   */
+  const requireTrustedSender = (channel: PrivilegedChannel, event: IpcMainInvokeEvent): void =>
+    assertSenderTrusted(senderTrust(channel, event.sender, args.window.webContents))
 
   handle('config:get', () => config)
   handle('config:save', async (next: AppConfig) => {
@@ -424,14 +435,14 @@ export async function registerIpc(args: {
     clipboard.writeText(text)
   })
   handleWithEvent('ui:writeClipboardImage', (event, image: BrowserPng) => {
-    if (event.sender !== args.window.webContents) throw new Error('Untrusted clipboard image sender')
+    requireTrustedSender('ui:writeClipboardImage', event)
     clipboard.writeImage(nativeImageFromBrowserPng(image, (png) => nativeImage.createFromBuffer(png)))
   })
   handleWithEvent('ui:openExternal', async (event, rawUrl: string) => {
     await openExternalFromRenderer(event, args.window.webContents, rawUrl)
   })
   handleWithEvent('ui:savePastedImage', async (event, input: { bytes: Uint8Array; extension: string }) => {
-    if (event.sender !== args.window.webContents) throw new Error('Untrusted pasted image sender')
+    requireTrustedSender('ui:savePastedImage', event)
     // A CLI Agent reads images from disk, so a paste becomes a file it can open. The renderer supplies
     // bytes only — never a destination — so it cannot aim this write anywhere.
     const bytes = Buffer.from(input.bytes)
@@ -450,7 +461,7 @@ export async function registerIpc(args: {
     body: string
     mode: NotificationModeId
   }) => {
-    if (event.sender !== args.window.webContents) throw new Error('Untrusted notification sender')
+    requireTrustedSender('ui:notifyAgentAttention', event)
     // The renderer decided this deserves attention and which dwell mode to use; main only delivers, and
     // says so honestly when it cannot present in that mode.
     return notifier.notify(input)
@@ -520,41 +531,41 @@ export async function registerIpc(args: {
   handle('browser:forward', async (id: string) => await browsers.forward(id))
   handle('browser:reload', async (id: string) => await browsers.reload(id))
   handleWithEvent('browser:switchProfile', async (event, id: string, profileId: string) => {
-    if (event.sender !== args.window.webContents) throw new Error('Untrusted Browser Profile sender')
+    requireTrustedSender('browser:switchProfile', event)
     return await browsers.switchProfile(id, profileId)
   })
   handleWithEvent('browser:listProfiles', (event) => {
-    if (event.sender !== args.window.webContents) throw new Error('Untrusted Browser Profile sender')
+    requireTrustedSender('browser:listProfiles', event)
     return browserProfiles.listProfiles()
   })
   handleWithEvent('browser:createProfile', async (event, label: string) => {
-    if (event.sender !== args.window.webContents) throw new Error('Untrusted Browser Profile sender')
+    requireTrustedSender('browser:createProfile', event)
     return await browserProfiles.createProfile(label)
   })
   handleWithEvent('browser:deleteProfile', async (event, profileId: string) => {
-    if (event.sender !== args.window.webContents) throw new Error('Untrusted Browser Profile sender')
+    requireTrustedSender('browser:deleteProfile', event)
     if (browsers.usesProfile(profileId)) {
       throw new Error('Browser Profile is still used by an open Browser')
     }
     await browserProfiles.deleteProfile(profileId)
   })
   handleWithEvent('browser:detectProfileImportSources', async (event) => {
-    if (event.sender !== args.window.webContents) throw new Error('Untrusted Browser Profile sender')
+    requireTrustedSender('browser:detectProfileImportSources', event)
     return await browserProfiles.detectImportSources()
   })
   handleWithEvent('browser:importProfile', async (event, sourceToken: string, label: string) => {
-    if (event.sender !== args.window.webContents) throw new Error('Untrusted Browser Profile sender')
+    requireTrustedSender('browser:importProfile', event)
     return await browserProfiles.importProfile(sourceToken, label)
   })
   handle('browser:openDevTools', (id: string) => browsers.openDevTools(id))
   handle('browser:setViewport', (id: string, viewport: BrowserViewport) => browsers.setViewport(id, viewport))
   handle('browser:captureScreenshot', async (id: string) => await browsers.captureScreenshot(id))
   handleWithEvent('browser:selectElement', async (event, id: string) => {
-    if (event.sender !== args.window.webContents) throw new Error('Untrusted Browser selection sender')
+    requireTrustedSender('browser:selectElement', event)
     return await browsers.selectElement(id)
   })
   handleWithEvent('browser:cancelElementSelection', async (event, id: string) => {
-    if (event.sender !== args.window.webContents) throw new Error('Untrusted Browser selection sender')
+    requireTrustedSender('browser:cancelElementSelection', event)
     await browsers.cancelElementSelection(id)
   })
   handleWithEvent('browser:setAnnotationMarkers', async (
@@ -563,7 +574,7 @@ export async function registerIpc(args: {
     navigationId: string,
     markers: BrowserAnnotationMarker[]
   ) => {
-    if (event.sender !== args.window.webContents) throw new Error('Untrusted Browser annotation sender')
+    requireTrustedSender('browser:setAnnotationMarkers', event)
     await browsers.setAnnotationMarkers(id, navigationId, markers)
   })
   handle('browser:setBounds', (id: string, bounds: BrowserBounds | null) => browsers.setBounds(id, bounds))
