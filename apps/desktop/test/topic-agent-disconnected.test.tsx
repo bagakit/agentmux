@@ -24,10 +24,10 @@ describe('#473 关闭的协作者不被画成在跑', () => {
 
   it('disconnected 头像的 class 与 running 分得开（不带 running 那档的在场标志）', () => {
     const closed = renderToStaticMarkup(createElement(AgentAvatar, {
-      attention: null, label: 'a', onOpen: () => {}, providerId: 'claude', state: 'disconnected'
+      label: 'a', onOpen: () => {}, providerId: 'claude', state: 'disconnected'
     }))
     const running = renderToStaticMarkup(createElement(AgentAvatar, {
-      attention: null, label: 'a', onOpen: () => {}, providerId: 'claude', state: 'running'
+      label: 'a', onOpen: () => {}, providerId: 'claude', state: 'running'
     }))
     expect(closed).toContain('status--disconnected')
     expect(running).toContain('status--running')

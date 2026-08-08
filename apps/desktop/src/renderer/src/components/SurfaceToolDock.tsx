@@ -592,7 +592,6 @@ function WorkspaceTopicsPanel({
                               providerId: agent.providerId,
                               label: agent.live?.label ?? agent.sessionId,
                               state: shown.state,
-                              attention: shown.attention,
                               onOpen: () => selectSession(agent.sessionId)
                             }
                           })}
@@ -616,7 +615,7 @@ function WorkspaceTopicsPanel({
                 <button
                   className="icon-button workspace-topic-reveal"
                   type="button"
-                  aria-label={'Reveal in Explorer'}
+                  aria-label={`Reveal ${topic.title} in Files`}
                   title="Reveal in Files"
                   disabled={pending !== null}
                   onClick={() => onRevealDirectory(topic.directoryPath)}
@@ -725,7 +724,7 @@ function WorkspaceAgentsTool({
  * 空态——没有任何行时它才有话说。
  */
 export function BoardToolList({ hostId }: { hostId: string }) {
-  const { rows, kind, loading } = useBoardRows()
+  const { rows, kind, loading, error } = useBoardRows()
   const selectSession = useAppStore((state) => state.selectSession)
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
   const [showAll, setShowAll] = useState(false)
@@ -738,6 +737,10 @@ export function BoardToolList({ hostId }: { hostId: string }) {
       else next.add(id)
       return next
     })
+  }
+
+  if (error && rows.length === 0) {
+    return <div className="surface-tool-error" role="alert">{error}</div>
   }
 
   if (rows.length === 0) {
@@ -754,7 +757,7 @@ export function BoardToolList({ hostId }: { hostId: string }) {
         <div className="board-tool-legend">
           <div><MessageSquarePlus size={13} /><span><strong>Inbox</strong><small>Start a discussion</small></span></div>
           <div><Activity size={13} /><span><strong>Working</strong><small>Running now</small></span></div>
-          <div><BellRing size={13} /><span><strong>Needs You</strong><small>Waiting or blocked</small></span></div>
+          <div><BellRing size={13} /><span><strong>Needs You</strong><small>{BOARD_COLUMN_DESCRIPTIONS['needs-you']}</small></span></div>
           <div><CheckCircle2 size={13} /><span><strong>Done</strong><small>Completed runs</small></span></div>
         </div>
       </section>
@@ -763,6 +766,7 @@ export function BoardToolList({ hostId }: { hostId: string }) {
 
   return (
     <section className="board-tool-list">
+      {error ? <div className="surface-tool-error" role="alert">{error}</div> : null}
       <div className="board-tool-context">
         <span><RadioTower size={12} /> {hostId === 'local' ? 'This Mac' : hostId}</span>
         <em>{rows.length} {kind === 'topic' ? 'topic' : 'branch'}{rows.length === 1 ? '' : 'es'}</em>

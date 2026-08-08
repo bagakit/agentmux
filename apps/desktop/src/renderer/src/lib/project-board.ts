@@ -257,7 +257,9 @@ export function buildTopicBoardRows(
     if (!workspaceOwnsSessionPath(scratch, session)) continue
     const topicId = scratchTopicIdFromWorkspacePath(scratch.path, session.workspacePath)
     if (!topicId) continue
-    byTopic.set(topicId, [...(byTopic.get(topicId) ?? []), session])
+    const group = byTopic.get(topicId)
+    if (group) group.push(session)
+    else byTopic.set(topicId, [session])
   }
   return topics.map((topic) => ({
     ...boardRowProjection({

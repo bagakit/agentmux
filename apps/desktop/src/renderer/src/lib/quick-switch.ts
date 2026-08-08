@@ -50,12 +50,35 @@ export type QuickSwitchItem = {
 // roster sorts by too, so the two surfaces cannot disagree about who ranks above whom (they had, before
 // — see attention-ordering.test.ts). A finished (`done`) row and an idle one tie there deliberately,
 // pending #199.
+//
+// 收尾那段刻意写成**无 default 的 switch**，而不是原先的 `state === 'done' ? 'done' : 'idle'`。原写法
+// 对今天的九个状态行为正确（`done` 归 done、其余归 idle），但它对 Core 未来新增的第十个状态是**沉默
+// 的**：那个状态会悄悄拿到 idle 排名，没有任何人被要求为它做决定。改成穷举后，`isNeedsYouState` 的
+// 类型谓词先把 needs-you 两支从 `state` 的类型里收窄掉，`error` / `working` 两个 case 再各收窄一支，
+// 到 switch 时残差类型恰好是 `done / starting / running / disconnected / exited` 五支——少列一支，返回
+// 类型就含 undefined，`attentionRank` 因 TS2366「缺少结尾 return」编译不过。也就是说：让下一次加状态
+// **响亮地**要求在这里给出排序类，而不是默默当 idle。注意这不改今天的行为——列出的五支全归 idle，
+// 与原 `? 'done' : 'idle'` 对现有状态逐一等价（`done` 单独列出、仍映射到 done 排名，而 done 与 idle
+// 在 `attentionSortRank` 里本就同级，见 attention-event.ts）。
 function attentionRank(state: QuickSwitchItem['state']): number {
   if (state === null) return attentionSortRank('idle')
   if (isNeedsYouState(state)) return attentionSortRank('needs-you')
-  if (state === 'error') return attentionSortRank('error')
-  if (state === 'working') return attentionSortRank('working')
-  return attentionSortRank(state === 'done' ? 'done' : 'idle')
+  switch (state) {
+    case 'error':
+      return attentionSortRank('error')
+    case 'working':
+      return attentionSortRank('working')
+    // `done` 单独列出而非并入下面那组：它在语义上是「完成」，与 idle 只是**目前**在
+    // `attentionSortRank` 里同级（pending #199 的未读/已读轴）；分开写让「done 排哪」始终由那张表回答，
+    // 而不是在这里被拍平成 idle。
+    case 'done':
+      return attentionSortRank('done')
+    case 'starting':
+    case 'running':
+    case 'disconnected':
+    case 'exited':
+      return attentionSortRank('idle')
+  }
 }
 
 // A conservative subsequence fuzzy match: every query char must appear in order in the haystack.

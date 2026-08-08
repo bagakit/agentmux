@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react'
 import { AgentAvatar } from './AgentAvatar'
 import type { AgentDisplayState, AgentProviderId } from '@agentmux/core'
-import type { AttentionCategory } from '../lib/attention-event'
 
 /**
  * 同一族列表行的共享表现层。
@@ -24,8 +23,17 @@ export type SelectorPresenceAgent = {
   providerId: AgentProviderId
   /** tooltip 与可访问名里的人话。 */
   label: string
+  // 头像现在只收 `state` 这一个权威输入，注意力口径由它在内部派生（见 AgentAvatar）——所以这里
+  // 不再带一个可与 state 漂开的 `attention` 字段。曾经它在场，两个调用方就能对同一个 state 各递一个
+  // 不同的 attention（Topic 走 accent、Branch 硬写 null），而组件照单全收：这正是让「waiting 画成
+  // idle」得以静默发生的那个第二真相。
+  //
+  // 删字段买到的**不是**「构造不出来」。实测（三形状探针）：excess-property checking 只对直接写出的
+  // 对象字面量生效，`xs.map((x) => ({ …, attention: null }))` 两种箭头写法都静默通过——而两个调用方
+  // 恰好都是 `.map()`。所以多写一个 attention 键，tsc 从头到尾 exit 0。买到的是「多写的键不再有
+  // 消费者」：组件读不到它，它只是一坨死数据。真正把「不许再写」钉住的是 selector-presence-shape
+  // 的 AST 守卫（按属性名扫每个构造点），不是类型系统。
   state: AgentDisplayState
-  attention: AttentionCategory | null
   /** 同一个 provider 归并了几个 Session；1 时不显示角标。 */
   count?: number
   onOpen?: () => void
@@ -58,9 +66,8 @@ export function SelectorPresence({
         // 所以 z-index 随索引递增；hover 那枚由 CSS 再抬一层盖过所有邻座。
         <span className="selector-presence__slot" key={agent.key} style={{ zIndex: index + 1 }}>
           <AgentAvatar
-            attention={agent.attention}
             label={agent.label}
-            onOpen={agent.onOpen ?? (() => {})}
+            onOpen={agent.onOpen}
             providerId={agent.providerId}
             state={agent.state}
           />
