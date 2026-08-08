@@ -6,6 +6,7 @@ import {
   AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS,
   AGENTMUX_CONTROL_SCHEMA_VERSION,
   agentMuxControlTimeoutMs,
+  isAgentMuxControlOperation,
   type AgentMuxAgentRegion,
   type AgentMuxArrangeMode,
   type AgentMuxBrowserRegion,
@@ -36,11 +37,6 @@ const MAX_MESSAGE_BYTES = 256 * 1024
 const MAX_ID_BYTES = 512
 const MAX_TAB_REGIONS = 64
 const MAX_EXECUTORS = 128
-const OPERATIONS = [
-  'inspect.tab', 'inspect.region', 'open.agent', 'open.terminal', 'open.browser',
-  'send', 'focus', 'arrange', 'list.agents',
-  'interrupt', 'resume', 'stop'
-] as const
 
 function object(value: unknown, message: string, code: string): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new AgentMuxError(message, code)
@@ -139,7 +135,7 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
   const source = object(value, 'Control request is invalid.', 'INVALID_CONTROL_REQUEST')
   if (source.schemaVersion !== AGENTMUX_CONTROL_SCHEMA_VERSION) throw new AgentMuxError('Control request version is invalid.', 'INVALID_CONTROL_REQUEST')
   const requestId = id(source.requestId, 'Control request ID is invalid.', 'INVALID_CONTROL_REQUEST')
-  if (!(OPERATIONS as readonly unknown[]).includes(source.operation)) throw new AgentMuxError('Control operation is invalid.', 'INVALID_CONTROL_REQUEST')
+  if (!isAgentMuxControlOperation(source.operation)) throw new AgentMuxError('Control operation is invalid.', 'INVALID_CONTROL_REQUEST')
   if (source.operation === 'inspect.tab') {
     const target = tabAnchor(source.target)
     const owner = optionalCaller(source.caller)
@@ -398,7 +394,7 @@ export function parseAgentMuxControlReceipt(value: unknown): AgentMuxControlRece
     schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
     requestId: source.requestId === null ? null : id(source.requestId, 'Control error receipt is invalid.', 'CONTROL_PROTOCOL_ERROR'),
     ok: false,
-    operation: source.operation === null ? null : (OPERATIONS as readonly unknown[]).includes(source.operation) ? source.operation as AgentMuxControlRequest['operation'] : (() => { throw new AgentMuxError('Control error receipt is invalid.', 'CONTROL_PROTOCOL_ERROR') })(),
+    operation: source.operation === null ? null : isAgentMuxControlOperation(source.operation) ? source.operation : (() => { throw new AgentMuxError('Control error receipt is invalid.', 'CONTROL_PROTOCOL_ERROR') })(),
     error: parsedError
   }
 }
@@ -429,7 +425,7 @@ async function readMessage(socket: Socket): Promise<unknown> {
 function requestIdentity(value: unknown): { requestId: string | null; operation: AgentMuxControlRequest['operation'] | null } {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return { requestId: null, operation: null }
   const source = value as Record<string, unknown>
-  return { requestId: typeof source.requestId === 'string' ? source.requestId : null, operation: (OPERATIONS as readonly unknown[]).includes(source.operation) ? source.operation as AgentMuxControlRequest['operation'] : null }
+  return { requestId: typeof source.requestId === 'string' ? source.requestId : null, operation: isAgentMuxControlOperation(source.operation) ? source.operation : null }
 }
 
 /**
