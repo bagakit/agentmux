@@ -52,7 +52,11 @@ describe('fileTreeGitStatusOfChange', () => {
       .toBe('renamed')
     expect(fileTreeGitStatusOfChange(change('d', { index: ' ', worktree: 'M', unstaged: true })))
       .toBe('modified')
-    expect(fileTreeGitStatusOfChange(change('e', { index: ' ', worktree: 'U', unstaged: true })))
+    // 冲突用 `AU`（added by us）——git 真会吐的七个 unmerged 码之一。此前这里写的是 ` U`，那不是
+    // 一个 git 会发出的码：porcelain 的 unmerged 只有 DD/AU/UD/UA/DU/AA/UU 七种（由真 git 生成的前提
+    // 见 git-unmerged-classification.test.ts）。合成出来的形状让这条断言只能证明「读 worktree 那列并
+    // 恰好把 U 当冲突」，而 `AU` 同时否掉两种单列读法：只读 index 得 added，只读 worktree 得 default。
+    expect(fileTreeGitStatusOfChange(change('e', { index: 'A', worktree: 'U', staged: true, unstaged: true })))
       .toBe('conflicted')
   })
 
@@ -99,7 +103,7 @@ describe('buildFileTreeGitStatusIndex', () => {
   it('目录聚合取后代里最紧迫的那个状态，折叠时仍看得见', () => {
     const index = buildFileTreeGitStatusIndex([
       change('src/added.ts', { index: 'A', staged: true }),
-      change('src/broken.ts', { index: ' ', worktree: 'U', unstaged: true }),
+      change('src/broken.ts', { index: 'A', worktree: 'A', staged: true, unstaged: true }),
       change('src/edited.ts', { index: ' ', worktree: 'M', unstaged: true })
     ])
     // 目录里同时有 added / conflicted / modified —— 聚合必须显示最紧迫的 conflicted。
