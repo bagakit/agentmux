@@ -1,4 +1,6 @@
 import { readFileSync, readdirSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 /**
  * 样式表现在按表面分成多个文件。契约测试读的是"整张样式表"，而不是某一个文件——
@@ -6,11 +8,18 @@ import { readFileSync, readdirSync } from 'node:fs'
  *
  * 顺序与 index.css 的 @import 一致：层叠顺序即文件顺序，因此拼接结果与浏览器看到的一致，
  * 依赖先后的断言（比如"某条覆写排在被覆写者之后"）在这里仍然成立。
+ *
+ * 路径用 `fileURLToPath` + `join` 拼，**不写** `new URL('…', import.meta.url)`。后者是 Vite 认的
+ * 静态资源形状：它把这个字面量整体改写成打包后的资源 URL，happy-dom 环境下解析出来的是
+ * `http://localhost:3000/…`，node:fs 当场抛「The URL must be of scheme file」。判别器是把 `URL`
+ * 换个名字（`const U = URL; new U(…)`）就恢复成 file: ——证明坏的是那个字面量形状被改写，
+ * 不是运行时的 URL 实现。今天 27 个消费者全跑在默认 node 环境（不走这条改写），所以这个洞一直
+ * 不可观测，直到第一个 happy-dom 测试要读样式表（记忆 property-unobservable-in-default-env）。
  */
-const STYLES_DIR = new URL('../../src/renderer/src/styles/', import.meta.url)
+const STYLES_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'src', 'renderer', 'src', 'styles')
 
 function importOrder(): string[] {
-  const index = readFileSync(new URL('index.css', STYLES_DIR), 'utf8')
+  const index = readFileSync(join(STYLES_DIR, 'index.css'), 'utf8')
   const order = [...index.matchAll(/@import\s+'\.\/([\w-]+\.css)'/g)].map((match) => match[1]!)
   if (order.length === 0) throw new Error('index.css 里没有 @import——样式入口变了，这个读取器要跟着改')
   const present = readdirSync(STYLES_DIR).filter((name) => name.endsWith('.css') && name !== 'index.css')
@@ -40,7 +49,7 @@ export function stripCssComments(css: string): string {
 /** 全部样式文件，按层叠顺序拼成一张表。 */
 export function allStyles(): string {
   return importOrder()
-    .map((name) => readFileSync(new URL(name, STYLES_DIR), 'utf8'))
+    .map((name) => readFileSync(join(STYLES_DIR, name), 'utf8'))
     .join('\n')
 }
 
@@ -53,6 +62,6 @@ export function allStyleRules(): string {
 export function styleFiles(): Array<{ name: string; text: string }> {
   return importOrder().map((name) => ({
     name,
-    text: readFileSync(new URL(name, STYLES_DIR), 'utf8')
+    text: readFileSync(join(STYLES_DIR, name), 'utf8')
   }))
 }
