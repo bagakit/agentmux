@@ -34,6 +34,7 @@ import {
   type ProjectBoardColumn
 } from '../lib/project-board'
 import { boardRunCardAttributes } from '../lib/board-run-card'
+import { formatRelativeAge } from '../lib/relative-age'
 import { projectWorkspaces } from '../lib/workspace-projects'
 import { useAppStore } from '../store'
 import { BoardDiscussionCanvas } from './BoardDiscussionCanvas'
@@ -90,16 +91,6 @@ const ROW_KIND_META: Record<BoardRow['kind'], {
   }
 }
 
-function formatAge(timestamp: number): string {
-  const elapsed = Math.max(0, Date.now() - timestamp)
-  const minutes = Math.floor(elapsed / 60_000)
-  if (minutes < 1) return 'now'
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  return `${Math.floor(hours / 24)}d ago`
-}
-
 function RunCard({ session, onOpen }: { session: SessionSnapshot; onOpen: () => void }) {
   return (
     <button
@@ -115,7 +106,8 @@ function RunCard({ session, onOpen }: { session: SessionSnapshot; onOpen: () => 
       </span>
       <span className="board-run-card__meta">
         <em>{session.status.state}</em>
-        <time>{formatAge(session.updatedAt)}</time>
+        {/* 后缀是这个面自己的密度选择——卡片够宽，`12m ago` 读起来是完整的句子。档位不是。 */}
+        <time>{formatRelativeAge(Date.now() - session.updatedAt, ' ago')}</time>
       </span>
       {session.status.detail ? <span className="board-run-card__detail">{session.status.detail}</span> : null}
       <ArrowUpRight size={12} />
