@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { WebContentsView, type BrowserWindow } from 'electron'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import {
   BROWSER_EVENT_CHANNEL,
   BROWSER_VIEWPORT_PRESETS,
@@ -75,6 +76,10 @@ const BROWSER_MARKER_MAX_COORDINATE = 10_000_000
 export function assertAllowedBrowserUrl(value: string): string {
   if (value === 'about:blank') return value
   const url = new URL(value)
+  if (url.protocol === 'file:') {
+    if (!url.pathname || url.hostname) throw new Error('Unsupported browser file URL')
+    return pathToFileURL(fileURLToPath(url)).toString()
+  }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw new Error(`Unsupported browser URL protocol: ${url.protocol}`)
   }
@@ -84,6 +89,10 @@ export function assertAllowedBrowserUrl(value: string): string {
 export function normalizeBrowserUrl(value: string): string {
   const input = value.trim()
   if (!input || input === 'about:blank') return 'about:blank'
+  if (input.startsWith('/') || input.startsWith('./') || input.startsWith('../') || input.startsWith('file://')) {
+    const fileUrl = input.startsWith('file://') ? input : pathToFileURL(input).toString()
+    return assertAllowedBrowserUrl(fileUrl)
+  }
   if (/\s/.test(input) && !/^[A-Za-z][A-Za-z\d+.-]*:\/\//.test(input)) {
     return `https://www.google.com/search?q=${encodeURIComponent(input)}`
   }
