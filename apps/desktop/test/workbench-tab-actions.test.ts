@@ -1,10 +1,13 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import {
+  callbackErasureGates,
   contentSourceText,
+  gatesAbove,
   inlineConditions,
   jsxContentElement,
-  jsxContentElementIn
+  jsxContentElementIn,
+  memberCallsIn
 } from './helpers/jsx-menu-content.js'
 import {
   WORKBENCH_TAB_SPLIT_ACTIONS,
@@ -221,6 +224,16 @@ describe('补几个 Region 这次推导只有一处', () => {
 // `WORKBENCH_TAB_SPLIT_ACTIONS` 是「Move Tab to New Group」（另一件事：移动 Tab，不是分屏），
 // `presetMenu.presets` 是它自己那个 Rearrange 子菜单——两者各自由
 // workbench-split-menu.test.tsx:326 与本文件上面那族守着。把它塞进来只会让判据松到恒真。
+//
+// **判据又跟着一次审计走了一步**：原先这一节只靠 `inlineConditions`（「这段里一个内联条件都没有」）。
+// 那条只认三元与 `&&`——一次独立审计证明它与兄弟文件的 `gatesAbove` 有同一个操作符盲区：
+// `{void list.map(…)}`、`{!list.map(…)}`、`{(list.map(…), null)}`、`{true || …}`、`{x ?? …}`、
+// 以及回调内部的 `if (true) return null`，全都能让整节消失而 `inlineConditions` 返回空、且「只 map
+// 一次」的文本计数照样是 1。**不能**靠给 `inlineConditions` 补 `||` / `??` 来堵——那会把合法的取值
+// 默认 `entry.action?.label ?? entry.label` 判红（黑名单必漏、且补黑名单会误伤，本仓两头都踩过）。
+// 所以改成加一道**白名单**判据：对这两个容器里那一次具体的 `list.map(…)` 调用，用 `gatesAbove`
+// （调用到 Content 之间只准出现无害的 JSX 包装）与 `callbackErasureGates`（回调不许无条件 / 按渲染层
+// 开关吐空）各判一遍。`inlineConditions` 那条仍然留着——它守的是「别处的兄弟条件」，与这条互补。
 // ---------------------------------------------------------------------------
 describe('分屏菜单的那一段没有可取反的在场判断', () => {
   /**
@@ -293,6 +306,30 @@ describe('分屏菜单的那一段没有可取反的在场判断', () => {
         `${file} 的 Content 里有内联条件——整节可以被它取反成永不渲染`
       ).toEqual([])
     }
+  })
+
+  // `inlineConditions` 只认三元与 &&，堵不住 `{void list.map(…)}` / `{!…}` / `{(…, null)}` / `{|| …}` /
+  // `{?? …}` 这些同样把整节抹掉的写法，也够不着回调**内部**的 `if (true) return null`。给这两个容器里
+  // 那一次具体的 `list.map(…)` 补上白名单判据（与兄弟文件 workbench-tab-file-actions.test.ts 同一族）。
+  // 逐容器一个 it：挤进一个循环里，第一个容器红了第二个就成死代码。
+  it.each(CONTAINERS)('$file：那次 map 头上没有门（白名单判据，堵 void / ! / 逗号 / ?? 等）', ({ file, tag, list }) => {
+    const jsx = jsxContentElement(file, tag)
+    const [call] = memberCallsIn(jsx, list, 'map')
+    expect(call, `${file}：找不到 ${list}.map( ——判据挂在空处`).toBeDefined()
+    expect(
+      gatesAbove(call!, jsx),
+      `${file}：这次 map 被一个渲染层条件/包装挡着——整节可以被它取反成永不出现`
+    ).toEqual([])
+  })
+
+  it.each(CONTAINERS)('$file：那次 map 的回调不会把整节抹掉（堵 if(true) return null 一类）', ({ file, tag, list }) => {
+    const jsx = jsxContentElement(file, tag)
+    const [call] = memberCallsIn(jsx, list, 'map')
+    expect(call, `${file}：找不到 ${list}.map( ——判据挂在空处`).toBeDefined()
+    expect(
+      callbackErasureGates(call!, jsx),
+      `${file}：这次 map 的回调会把整节渲染成空——分屏那一节可以被它抹成永不出现`
+    ).toEqual([])
   })
 
   it('渲染层不自己判「这个预设可不可用」——那个判断只在菜单模型里', () => {
