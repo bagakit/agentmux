@@ -545,6 +545,49 @@ describe('TerminalViewportSynchronizer', () => {
     expect(resize).toHaveBeenLastCalledWith({ cols: 140, rows: 40 })
     expect(fit).toHaveBeenCalled()
   })
+
+  /**
+   * 上一条只动宽度，于是抖动闸的**高度**那一半从来没被执行过：把 `samePixels` 的第二个合取项
+   * 删成 `true`，整套测试仍然全绿。而高度是真会单独变的一维——横向分隔条上下拖、状态条出现或
+   * 消失，宽度一个像素都不动。那一刻若正好撞上 proposeDimensions 差一行，就会被误判成 cell-metric
+   * 抖动而跳过 fit，xterm 与 PTY 停在旧行数上，直到用户恰好再改一次**宽度**。
+   *
+   * 所以这条与上一条是成对的：一条钉宽度那一半，一条钉高度那一半，缺谁谁就能被删成恒真。
+   */
+  it('容器只变高度（宽度不动）时照样 fit 并 resize（抖动闸的高度那一半）', async () => {
+    const frames = frameHarness()
+    const pixels = { width: 1200, height: 800 }
+    let proposed = { cols: 120, rows: 40 }
+    let actual = { ...proposed }
+    const fit = vi.fn(() => { actual = { ...proposed } })
+    const resize = vi.fn(async (_size: { cols: number; rows: number }) => true)
+    const sync = new TerminalViewportSynchronizer({
+      proposeGrid: () => proposed,
+      fit,
+      readGrid: () => actual,
+      resize,
+      requestFrame: frames.request,
+      cancelFrame: frames.cancel,
+      measureViewport: () => ({ ...pixels })
+    })
+
+    // 先做一次 live 同步把像素基线记下来，抖动闸才有比较对象。
+    await sync.startLiveSynchronization()
+    frames.runNext()
+    await vi.waitFor(() => expect(resize).toHaveBeenCalledTimes(1))
+    expect(resize).toHaveBeenLastCalledWith({ cols: 120, rows: 40 })
+
+    // 只改高度：横向分隔条被拖动的形状。宽度逐字不变，所以只有高度那个合取项能把它认成真变化。
+    pixels.height = 840
+    proposed = { cols: 120, rows: 42 }
+    sync.observeViewport()
+    frames.runNext()
+
+    await vi.waitFor(() => expect(resize).toHaveBeenCalledTimes(2))
+    expect(resize).toHaveBeenLastCalledWith({ cols: 120, rows: 42 })
+    expect(fit).toHaveBeenCalled()
+  })
+
   /**
    * 隐藏的终端一律停工。
    *
