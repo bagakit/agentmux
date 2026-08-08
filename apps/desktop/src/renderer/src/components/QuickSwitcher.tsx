@@ -8,6 +8,7 @@ import {
   type QuickSwitchItem
 } from '../lib/quick-switch'
 import { tabGroupForTab } from '../lib/workbench-tabs'
+import { isImeCompositionKeyDown } from '../lib/ime-composition-keyboard-event'
 import { AgentProviderIcon } from './AgentProviderIcon'
 import { StatusDot } from './StatusDot'
 import { useAppStore } from '../store'
@@ -83,6 +84,8 @@ export function QuickSwitcher({ open, onClose }: { open: boolean; onClose: () =>
           className="quick-switch"
           aria-label="Jump to a session or tab"
           onKeyDown={(event) => {
+            // 组字确认用的 Enter（CJK 输入法）不能激活选中项，否则一次组字确认会误跳到某个会话/标签。
+            if (isImeCompositionKeyDown(event)) return
             if (event.key === 'ArrowDown') {
               event.preventDefault()
               setActiveIndex((index) => Math.min(index + 1, results.length - 1))
