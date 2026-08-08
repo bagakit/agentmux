@@ -7,17 +7,13 @@ export {
 } from './agent-provider-id.js'
 import type { AgentProviderId, BuiltInAgentProviderId } from './agent-provider-id.js'
 
-/**
- * The single risk vocabulary the three sealed control surfaces share — launch options, live permission
- * options, and posture modes all rank one choice's danger with these exact three values, and every
- * renderer surfaces them the same way: a restrained dot, never a stroke or fill. One identity in one
- * place — a launch choice, a permission row, and a posture mode that read as equally dangerous carry the
- * same token, so the ranking cannot drift between the three. The tuple is the SSOT: {@link RiskTier}
- * derives from it and a runtime validator (agent-session-store) reuses it to fail-close on foreign data,
- * so the type and the on-disk whitelist cannot fall out of step.
- */
-export const RISK_TIERS = ['safe', 'caution', 'danger'] as const
-export type RiskTier = (typeof RISK_TIERS)[number]
+// The risk vocabulary SSOT lives in its own node-free leaf so the renderer can import the tuple as a
+// runtime value through `@agentmux/core/risk-tier` without dragging Core's process/filesystem runtime
+// into the render process. Imported here for this module's own type-side use AND re-exported (not
+// redeclared) so the barrel and existing consumers keep resolving `RISK_TIERS` / `RiskTier` from
+// `./types.js` unchanged.
+import { RISK_TIERS, type RiskTier } from './risk-tier.js'
+export { RISK_TIERS, type RiskTier }
 
 export type AgentExecutorId = string
 

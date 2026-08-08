@@ -48,6 +48,10 @@
       "types": "./dist/agent-provider-id.d.ts",
       "import": "./dist/agent-provider-id.js"
     },
+    "./risk-tier": {
+      "types": "./dist/risk-tier.d.ts",
+      "import": "./dist/risk-tier.js"
+    },
     "./run-status": {
       "types": "./dist/agent-run-status.d.ts",
       "import": "./dist/agent-run-status.js"
