@@ -431,17 +431,30 @@ async function verifyPackagedRuntime(appPath, verificationRoot, source) {
       env: { PATH: '/usr/bin:/bin' }
     })
   ])
-  assert(cli.stdout.trim() === 'ctxmux 0.1.0 (protocol 14)', 'Packaged ctxmux identity is wrong.')
-  assert(daemon.stdout.trim() === 'ctxmuxd 0.1.0 (protocol 14)', 'Packaged ctxmuxd identity is wrong.')
-  assert(agentmux.stdout.trim() === 'agentmux 0.1.0', 'Packaged AgentMux CLI cannot use the embedded runtime.')
-  const ctxmuxManifest = JSON.parse(await readFile(
-    join(coreRuntime, 'vendor', 'ctxmux', 'darwin-arm64', 'manifest.json'),
-    'utf8'
-  ))
+  // The vendored CtxMux manifest is the single SHA-verified identity source: packages/core/src/
+  // runtime-paths.ts pins its digest as CTXMUX_MANIFEST_SHA256, ctxmux-run-adapter.ts re-verifies
+  // that digest (and manifest.source.commit / manifest.product.version) at load, and the mounted
+  // smoke launch below boots that exact runtime. So derive every ctxmux/ctxmuxd expectation from
+  // the packaged manifest rather than hand-copying '0.1.0' / 'protocol 14' / the 40-char commit —
+  // a hand-copied literal here would silently freeze when the vendored artifact is bumped, and this
+  // gate would then either assert a stale identity or (worse) pass against the wrong one. First tie
+  // the packaged manifest to the pinned source bytes; a byte-identical copy transfers the whole
+  // pinned identity (commit, tree, version, protocol) in one check, strictly stronger than the old
+  // single-field commit literal.
+  const [packagedCtxmuxManifestBytes, sourceCtxmuxManifestBytes] = await Promise.all([
+    readFile(join(coreRuntime, 'vendor', 'ctxmux', 'darwin-arm64', 'manifest.json')),
+    readFile(join(coreRoot, 'vendor', 'ctxmux', 'darwin-arm64', 'manifest.json'))
+  ])
   assert(
-    ctxmuxManifest.source.commit === 'c13ab114f6ddf0cf8eb22c6cc39bb16f7aa0dec7',
-    'Packaged ctxmux manifest commit is wrong.'
+    packagedCtxmuxManifestBytes.equals(sourceCtxmuxManifestBytes),
+    'Packaged ctxmux manifest is not byte-identical to the pinned source artifact.'
   )
+  const ctxmuxManifest = JSON.parse(packagedCtxmuxManifestBytes.toString('utf8'))
+  const ctxmuxVersion = ctxmuxManifest.product.version
+  const ctxmuxProtocol = ctxmuxManifest.product.protocol
+  assert(cli.stdout.trim() === `ctxmux ${ctxmuxVersion} (protocol ${ctxmuxProtocol})`, 'Packaged ctxmux identity is wrong.')
+  assert(daemon.stdout.trim() === `ctxmuxd ${ctxmuxVersion} (protocol ${ctxmuxProtocol})`, 'Packaged ctxmuxd identity is wrong.')
+  assert(agentmux.stdout.trim() === 'agentmux 0.1.0', 'Packaged AgentMux CLI cannot use the embedded runtime.')
 }
 
 async function processIdsForApplication(appPath) {
