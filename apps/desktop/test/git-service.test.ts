@@ -648,4 +648,248 @@ describe('GitService (real git, temporary repository)', () => {
       'sibling of the workspace\n'
     )
   })
+
+  /**
+   * Behaviour (#765, first half): a brand-new project — `git init`, no commit yet — must diff its files,
+   * not surface git's raw fatal.
+   *
+   * The mechanism, traced to the byte: `diff()` reads the old side with `git show HEAD:./<path>`. In a
+   * commit-less repository HEAD is *unborn* (it names a branch ref that does not exist), so git exits 128
+   * with `fatal: invalid object name 'HEAD'.` — a DIFFERENT sentence from the two `path … 'HEAD'` fatals
+   * the sibling block covers, so `isPathAbsentInHead` returns false and, before the fix, `assertGit`
+   * threw the raw fatal into the diff pane. A user could not see a diff of any file in a fresh project.
+   *
+   * The honest answer is not a new error class: an unborn HEAD means nothing is committed, so every file
+   * on disk is genuinely new — the exact added-file shape (`old` absent). That is a normal state, not a
+   * failure. This is why the fix is `isHeadUnborn` feeding the same `present: false` branch as the path
+   * fatals, and why the observable here is the whole diff shape, not a predicate boolean.
+   *
+   * Real git, and specifically a repository with NO commit: the existing suite's `makeRepo` commits
+   * `--allow-empty`, which BORNS HEAD and hides this entirely (measured — that repo has a valid HEAD and
+   * `git show HEAD:<path>` gives the path fatal, not the object-name fatal). No test anywhere used a
+   * commit-less repo before this, so the fixture shape itself is the thing that was missing.
+   */
+  it('draws a file in a commit-less repository as added, instead of leaking git\'s unborn-HEAD fatal', async () => {
+    // A repository with an unborn HEAD: init and identity, deliberately NO commit. Not makeRepo(), which
+    // commits --allow-empty and would give HEAD a value, changing which fatal git prints.
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-git-unborn-'))
+    temporaryRoots.push(root)
+    const host = new LocalExecutionHost()
+    const run = async (args: string[]) => {
+      const result = await host.run('git', ['-C', root, ...args], { timeoutMs: 20_000 })
+      if (result.exitCode !== 0) throw new Error(`git ${args.join(' ')}: ${result.stderr}`)
+      return result
+    }
+    await run(['init', '-q'])
+    await run(['config', 'user.email', 't@example.com'])
+    await run(['config', 'user.name', 'Test'])
+    await writeFile(join(root, 'brand-new.txt'), 'first ever line\n')
+
+    // Self-check: HEAD really is unborn here, and git really prints the object-name fatal (not a path
+    // fatal) — otherwise this case proves nothing about `isHeadUnborn`. If a future git changes either,
+    // this speaks up rather than passing vacuously (记忆 property-unobservable-in-default-env).
+    const verify = await host.run('git', ['-C', root, 'rev-parse', '--verify', '--quiet', 'HEAD'],
+      { timeoutMs: 20_000 })
+    expect(verify.exitCode, 'HEAD is not unborn — this repo has a commit, so it cannot probe the fatal').toBe(1)
+    const shown = await host.run('git', ['-C', root, 'show', '--end-of-options', 'HEAD:./brand-new.txt'],
+      { timeoutMs: 20_000 })
+    expect(shown.exitCode).toBe(128)
+    expect(shown.stderr.trim(), 'git no longer prints the unborn-HEAD fatal this test pins')
+      .toBe("fatal: invalid object name 'HEAD'.")
+
+    const service = new GitService(() => new LocalExecutionHost())
+    const cfg: AppConfig = {
+      ...config,
+      workspaces: [{ id: 'repo', name: 'repo', hostId: 'local', path: root, kind: 'folder' }]
+    }
+
+    const diff = await service.diff('repo', 'brand-new.txt', cfg)
+
+    // The whole diff shape, not the predicate: an unborn HEAD has no old side, so the file is ADDED, and
+    // its new side is the worktree content — never a raw fatal reaching the pane.
+    expect(diff.old).toEqual({ present: false })
+    expect(diff.change).toBe('added')
+    expect(diff.new).toEqual({ present: true, binary: false, text: 'first ever line\n' })
+  })
+
+  /**
+   * Safety (#765, first half): `isHeadUnborn` must NOT swallow a HEAD that resolves to a missing or
+   * unreadable commit. Only a genuinely unborn HEAD prints `invalid object name 'HEAD'` standing alone;
+   * a HEAD whose commit object is gone or unopenable prints the PATH fatal instead — and if that ever
+   * arrives paired with `error:` diagnostics, the extra text means git is telling us something more.
+   *
+   * This pins the sole-line half of the predicate the same way the sibling `isPathAbsentInHead` block
+   * does: git's unborn fatal, with any other diagnostic line beside it, is a real failure that must
+   * surface — not "added". Measured discriminator: for a corrupt-but-resolvable HEAD `rev-parse --verify
+   * --quiet HEAD` exits 0, for an unborn HEAD it exits 1, so the two are genuinely different states and
+   * this is not a hypothetical.
+   */
+  it('refuses to read the unborn-HEAD fatal as absence when other diagnostics accompany it', async () => {
+    const host = gitHost()
+    vi.mocked(host.run).mockImplementation(async (_command, args) => {
+      if (args.includes('--show-prefix')) return gitResult(args, '\n')
+      if (args.includes('rev-parse')) return gitResult(args, '/srv/repo\n')
+      if (args.includes('show')) {
+        return gitResult(
+          args,
+          '',
+          'error: refs/heads/main does not point to a valid object!\n' +
+            "fatal: invalid object name 'HEAD'.\n",
+          128
+        )
+      }
+      return gitResult(args)
+    })
+    const service = new GitService(
+      () => host,
+      async () => ({ present: true, oversized: false, bytes: Buffer.from('x\n') })
+    )
+    const cfg: AppConfig = {
+      ...config,
+      workspaces: [{ id: 'repo', name: 'repo', hostId: 'remote', path: '/srv/repo', kind: 'folder' }]
+    }
+
+    // Loud, carrying git's own words — never flattened into a newly-added file just because the fatal
+    // phrase appears somewhere in the stderr.
+    await expect(service.diff('repo', 'brand-new.txt', cfg)).rejects.toThrow(/does not point to a valid object/)
+  })
+
+  /**
+   * Safety (#765, first half): the ref in the unborn fatal must be the literal `HEAD`, not a wildcard.
+   *
+   * `readHeadBlob` only ever asks git for `HEAD:<path>`, so an `invalid object name '<rev>'` fatal that
+   * names any OTHER rev did not come from the read we made and is not evidence that HEAD is unborn. This
+   * is the ref-literal's own witness: without it, widening the pattern's ref span to a wildcard (`.+`)
+   * leaves the whole suite green — measured, the mutation survives — because the added/corruption cases
+   * above all use `'HEAD'` and none feeds a different rev. `@` is git's shorthand for HEAD and prints
+   * `invalid object name '@'.` when unborn, the closest near-miss there is.
+   *
+   * Fake host, because the point is a string git could emit reaching our predicate, not git's own choice
+   * of rev (git would never print a foreign rev for our `HEAD:` read — that is exactly why a wildcard is
+   * unsafe and a literal is correct).
+   */
+  it('does not read an invalid-object-name fatal about some other rev as an unborn HEAD', async () => {
+    const host = gitHost()
+    vi.mocked(host.run).mockImplementation(async (_command, args) => {
+      if (args.includes('--show-prefix')) return gitResult(args, '\n')
+      if (args.includes('rev-parse')) return gitResult(args, '/srv/repo\n')
+      if (args.includes('show')) return gitResult(args, '', "fatal: invalid object name '@'.\n", 128)
+      return gitResult(args)
+    })
+    const service = new GitService(
+      () => host,
+      async () => ({ present: true, oversized: false, bytes: Buffer.from('x\n') })
+    )
+    const cfg: AppConfig = {
+      ...config,
+      workspaces: [{ id: 'repo', name: 'repo', hostId: 'remote', path: '/srv/repo', kind: 'folder' }]
+    }
+
+    // A fatal about `@` is not about `HEAD`: it must surface as the real failure, never become an added
+    // file. If the ref span were a wildcard this would be swallowed and `diff.old` would be absent.
+    await expect(service.diff('repo', 'brand-new.txt', cfg)).rejects.toThrow(/invalid object name '@'/)
+  })
+
+  /**
+   * Behaviour (#765, second half): AgentMux must never inherit an exported repo-LOCATION variable.
+   *
+   * The leak, measured against real git 2.50.1: `git -C <dir>` positions git's working directory but
+   * does NOT override an exported `GIT_DIR` / `GIT_WORK_TREE` / `GIT_INDEX_FILE` / `GIT_OBJECT_DIRECTORY`
+   * / `GIT_COMMON_DIR`. `runProcess` builds the child env as `{ ...process.env, ...options.env }`, so a
+   * user who exports any of these in their shell (a common dotfile shape; anyone who has scripted a bare
+   * repo) had every AgentMux git operation silently pointed at another repository. The fix is the five
+   * `undefined` entries in `GIT_NONINTERACTIVE_ENV`, which `runProcess` deletes from the child env.
+   *
+   * Why this is behavioural and not a source grep: the coordinator's own warning — a text guard stays
+   * green when the key is present in the source but the runner never receives it, and `'GIT_DIR' in
+   * { GIT_DIR: undefined }` is `true`, so an `in`/`toContain` check cannot tell "unset" from "declared".
+   * This runs the real GitService → LocalExecutionHost → runProcess path with the variable exported in
+   * `process.env`, and asserts the child git did NOT see it. One case per variable, so DELETING any
+   * single `GIT_X: undefined` from the constant reddens exactly that row — the guard is per-key.
+   *
+   * Each row also proves the variable actually BITES (self-check), so no row can pass vacuously: a raw
+   * run that does not unset it must diverge from the clean run — either git reads the decoy (silent:
+   * GIT_DIR flips the branch, GIT_WORK_TREE flips the files) or it fails loud (GIT_INDEX_FILE /
+   * GIT_OBJECT_DIRECTORY / GIT_COMMON_DIR → `bad object` / `unable to read`). If a variable ever stops
+   * biting, the self-check fails rather than letting the row certify nothing.
+   */
+  describe('an exported repo-location git variable is not inherited (#765)', () => {
+    async function committedRepo(branch: string, committedFile: string, message: string): Promise<string> {
+      const root = await mkdtemp(join(tmpdir(), 'agentmux-git-envleak-'))
+      temporaryRoots.push(root)
+      const host = new LocalExecutionHost()
+      const run = async (args: string[]) => {
+        const result = await host.run('git', ['-C', root, ...args], { timeoutMs: 20_000 })
+        if (result.exitCode !== 0) throw new Error(`git ${args.join(' ')}: ${result.stderr}`)
+        return result
+      }
+      await run(['init', '-q', '-b', branch])
+      await run(['config', 'user.email', 't@example.com'])
+      await run(['config', 'user.name', 'Test'])
+      await writeFile(join(root, committedFile), `${message}\n`)
+      await run(['add', '--', committedFile])
+      await run(['commit', '-q', '-m', message])
+      return root
+    }
+
+    // Each variable, paired with the decoy location a real shell would export it to. The five that `-C`
+    // does not override; the three that were measured to have no effect on our verbs
+    // (GIT_NAMESPACE / GIT_CEILING_DIRECTORIES / GIT_ALTERNATE_OBJECT_DIRECTORIES) are deliberately not
+    // unset and therefore not tested — unsetting a variable git ignores would be a vacuous guard arm.
+    it.each(['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_COMMON_DIR'])(
+      'ignores an exported %s and reads the workspace git says it should',
+      async (variable) => {
+        const target = await committedRepo('target-branch', 'keep.txt', 'base')
+        // A file present in the target worktree but not committed: the ONE change a clean status must
+        // report. Any decoy leaking in adds or removes entries, so this list is the discriminator.
+        await writeFile(join(target, 'only-in-target.txt'), 'uncommitted\n')
+        const decoy = await committedRepo('decoy-branch', 'decoy.txt', 'decoy')
+        const decoyGitDir = join(decoy, '.git')
+        const location: Record<string, string> = {
+          GIT_DIR: decoyGitDir,
+          GIT_WORK_TREE: decoy,
+          GIT_INDEX_FILE: join(decoyGitDir, 'index'),
+          GIT_OBJECT_DIRECTORY: join(decoyGitDir, 'objects'),
+          GIT_COMMON_DIR: decoyGitDir
+        }
+        const value = location[variable]!
+
+        const service = new GitService(() => new LocalExecutionHost())
+        const cfg: AppConfig = {
+          ...config,
+          workspaces: [{ id: 'repo', name: 'repo', hostId: 'local', path: target, kind: 'folder' }]
+        }
+
+        const hadOwn = Object.prototype.hasOwnProperty.call(process.env, variable)
+        const previous = process.env[variable]
+        process.env[variable] = value
+        try {
+          // Self-check: with the variable delivered to git (a run that does NOT unset it), the outcome
+          // diverges from clean — silently (wrong branch/changes) or loudly (nonzero exit). If it does
+          // not diverge, the variable is inert here and this row would certify nothing.
+          const leaked = await new LocalExecutionHost().run(
+            'git',
+            ['-C', target, 'status', '--porcelain=v1', '-z', '--branch', '--untracked-files=all'],
+            { timeoutMs: 20_000 }
+          )
+          const leakedClean =
+            leaked.exitCode === 0 &&
+            leaked.stdout.split('\0').filter((t) => t !== '')[0] === '## target-branch' &&
+            leaked.stdout.split('\0').filter((t) => t !== '' && !t.startsWith('## ')).length === 1
+          expect(leakedClean, `${variable} did not bite — the isolation this row checks is unobservable`).toBe(false)
+
+          // Through the real service, which spreads GIT_NONINTERACTIVE_ENV and therefore unsets the
+          // variable: the child git reads the TARGET. Both facts are load-bearing — GIT_DIR flips only
+          // the branch, GIT_WORK_TREE flips only the change list.
+          const result = await service.status('repo', cfg)
+          if (result.kind !== 'git-repository') throw new Error('expected a git repository')
+          expect(result.branch).toBe('target-branch')
+          expect(result.changes.map((change) => change.path)).toEqual(['only-in-target.txt'])
+        } finally {
+          if (hadOwn) process.env[variable] = previous
+          else delete process.env[variable]
+        }
+      }
+    )
+  })
 })
