@@ -238,21 +238,133 @@ describe('每个改动 region 集合的函数都必须过那道闸（#515 接线
     return null
   }
 
-  function callsNamed(scope: ts.Node, callee: string): number {
-    let count = 0
+  /**
+   * 判「断言喂对了值 + 断言真的会跑」的两个正交 AST 判据（#687 补洞）。
+   *
+   * 背景与实测（本 session 亲手跑出来的数字，逐字记录，别凭记忆改）：此前这道闸只问「包住这次
+   * changes-helper 调用的函数体里，有没有出现过一次 assertRegionInvariant 调用」（旧判据是
+   * `callsNamed(owner.body, 'assertRegionInvariant') > 0`）。它既不问断言喂进去的是哪个值，也不问那次断言
+   * 在不在会真正执行的路径上。于是下面两个变异都在 `10 passed (10)` 下**存活**（均施加在 workbench-tabs.ts
+   * 的 addWorkbenchRegion 尾部那句 `assertRegionInvariant(next)`）：
+   *
+   *   M1（可达性）：`assertRegionInvariant(next)` → `if (import.meta.env.DEV) assertRegionInvariant(next)`
+   *                 不变量在生产构建里根本不跑。旧判据只数「出现过」，看不见它被塞进了 dev-only 门。
+   *                 实测：`10 passed (10)`——SURVIVED。
+   *   M2（喂错操作数）：`assertRegionInvariant(next)` → `assertRegionInvariant(tab)`
+   *                 断言的是**入参** tab（进函数时本就合法），而不是本函数刚算出来、准备交出去的 next。
+   *                 旧判据不看操作数，`tab` 同样满足「出现过一次」。实测：`10 passed (10)`——SURVIVED。
+   *
+   * 拆成两个**各自独立红**的 it，不能合进一个：本仓 two-throws-in-one-it-mask-each-other 记过，先抛的那条
+   * 断言会把后一条变成死代码，于是能在从没执行过第二条的情况下声称它守住了。实测（本 session）这两个变异
+   * 命中不同的 it：
+   *   - M1 只让 **接线层-B（真的跑）** 红，接线层-A 仍绿；
+   *   - M2 只让 **接线层-A（喂对值）** 红，接线层-B 仍绿。
+   * 「哪个 it 红」的分离，就是两条判据互不代偿的证据。
+   *
+   * 判据 A（喂对值）：对每个 changes-helper 调用点，求它的**流集**——从「声明的初始化式（可传递地）
+   *   引用了这次 helper 调用**结果**（按 AST 节点标识，不是按名字）」的那个局部起步，再把「初始化式引用了
+   *   已收集局部名」的局部闭包进来。要求函数体里至少有一次 `assertRegionInvariant(X)`、且 X 是个裸标识符、
+   *   落在流集内。入参不在流集里（它不是由 helper 结果派生的局部），所以 M2 的 `tab` 过不了 A。
+   * 判据 B（真的跑）：那次 `assertRegionInvariant(...)` 必须是某个 Block（或函数体）里的**直接**表达式
+   *   语句，且同一个 Block 里在它之后（按语句数组次序）还有一条 return。M1 把 Block 里的那条语句从「裸调用」
+   *   换成了一个 IfStatement，调用退进 if 的 then 分支，不再是 Block 的直接语句 → B 红。control.ts 那种
+   *   `if (mode.kind === 'balance') { const next = …; assertRegionInvariant(next); return next }` 是对的：
+   *   断言与 return 是同一个 Block 里的两条语句，B 绿。
+   *
+   * **自陈盲点（不夸大判据）**：两条判据都把断言绑在**函数**上，不绑在「产出被改值的那段语句序列」上。
+   *   一个函数体里出现多次 assertRegionInvariant 时，A/B 都只要求**其中一次**合格。所以 arrange 那种同一函数
+   *   三个分支各断言一次的形状，若某个 preserves 分支（balance / active-first，本就不被本闸强制断言）的断言
+   *   被喂错了值，本闸不会红——它数的是「这个 changes-helper 函数至少有一次喂对且会跑的断言」，不是
+   *   「每个出口都对」。那一层由上面两族行为断言与 arrange 自身的收敛测试补。另：只有把 helper 结果绑到
+   *   具名局部再断言的写法能过 A；若某新调用点直接断言一个内联表达式而不落地成局部，它过不了 A，会被逼着
+   *   引入一个具名局部——这是有意为之，也在此点名。
+   */
+
+  /** 判据 A 的「流集」：一个函数体里，把 `anchorCall` 的结果（按节点标识）传递派生出去的全部具名局部。 */
+  function flowSetFromCall(ownerBody: ts.Node, anchorCall: ts.CallExpression): Set<string> {
+    const decls: Array<{ name: string; init: ts.Expression }> = []
+    const collect = (node: ts.Node): void => {
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
+        decls.push({ name: node.name.text, init: node.initializer })
+      }
+      node.forEachChild(collect)
+    }
+    collect(ownerBody)
+    const subtreeHas = (root: ts.Node, target: ts.Node): boolean => {
+      let found = false
+      const walk = (node: ts.Node): void => {
+        if (node === target) found = true
+        node.forEachChild(walk)
+      }
+      walk(root)
+      return found
+    }
+    const flow = new Set<string>()
+    for (const decl of decls) if (subtreeHas(decl.init, anchorCall)) flow.add(decl.name)
+    let changed = true
+    while (changed) {
+      changed = false
+      for (const decl of decls) {
+        if (flow.has(decl.name)) continue
+        let refs = false
+        const walk = (node: ts.Node): void => {
+          if (ts.isIdentifier(node) && flow.has(node.text)) refs = true
+          node.forEachChild(walk)
+        }
+        walk(decl.init)
+        if (refs) {
+          flow.add(decl.name)
+          changed = true
+        }
+      }
+    }
+    return flow
+  }
+
+  /**
+   * 一个函数体里每次 assertRegionInvariant(...) 调用的两项事实：
+   *   - `operand`：裸标识符实参（不是裸标识符则 null）——喂给判据 A；
+   *   - `runsBeforeReturn`：这次调用是不是某个 Block 里的直接表达式语句、且其后（按语句次序）跟着 return——
+   *     喂给判据 B。
+   */
+  function assertSitesIn(ownerBody: ts.Node): Array<{ operand: string | null; runsBeforeReturn: boolean }> {
+    const out: Array<{ operand: string | null; runsBeforeReturn: boolean }> = []
     const walk = (node: ts.Node): void => {
-      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === callee) {
-        count += 1
+      if (
+        ts.isCallExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === 'assertRegionInvariant'
+      ) {
+        const arg = node.arguments[0]
+        const operand = arg && ts.isIdentifier(arg) ? arg.text : null
+        let runsBeforeReturn = false
+        const statement = node.parent
+        if (statement && ts.isExpressionStatement(statement) && statement.parent && ts.isBlock(statement.parent)) {
+          const statements = statement.parent.statements
+          const index = statements.indexOf(statement)
+          runsBeforeReturn = index >= 0 && statements.slice(index + 1).some((stmt) => ts.isReturnStatement(stmt))
+        }
+        out.push({ operand, runsBeforeReturn })
       }
       node.forEachChild(walk)
     }
-    walk(scope)
-    return count
+    walk(ownerBody)
+    return out
   }
 
-  /** 每个「会动集合」的布局调用点，连同包着它的函数与该函数体里的断言次数。 */
-  function callSites(): Array<{ file: string; fn: string; helper: string; asserts: number }> {
-    const sites: Array<{ file: string; fn: string; helper: string; asserts: number }> = []
+  type ChangesHelperSite = {
+    file: string
+    fn: string
+    helper: string
+    /** 判据 A：本函数里由该 helper 调用结果传递派生出的具名局部。 */
+    flow: string[]
+    /** 判据 A/B：本函数里每次 assertRegionInvariant 的操作数与「块内直接、其后有 return」标志。 */
+    asserts: Array<{ operand: string | null; runsBeforeReturn: boolean }>
+  }
+
+  /** 每个「会动集合」的布局调用点，连同包着它的函数、该函数的流集与它体内每次断言的两项事实。 */
+  function callSites(): ChangesHelperSite[] {
+    const sites: ChangesHelperSite[] = []
     for (const relative of sourceFiles()) {
       if (relative === DEFINER) continue
       const file = parse(relative)
@@ -267,7 +379,8 @@ describe('每个改动 region 集合的函数都必须过那道闸（#515 接线
             file: relative,
             fn: owner?.name ?? '<top-level>',
             helper: node.expression.text,
-            asserts: owner ? callsNamed(owner.body, 'assertRegionInvariant') : 0
+            flow: owner ? [...flowSetFromCall(owner.body, node)] : [],
+            asserts: owner ? assertSitesIn(owner.body) : []
           })
         }
         node.forEachChild(walk)
@@ -302,25 +415,55 @@ describe('每个改动 region 集合的函数都必须过那道闸（#515 接线
     expect(stale, `LAYOUT_EFFECT 里 ${JSON.stringify(stale)} 已不再是 ${DEFINER} 的导出`).toEqual([])
   })
 
-  it('每个改动 region 集合的调用点，其所在函数都调了 assertRegionInvariant', () => {
-    const sites = callSites()
-    // 在场自检：扫描根写错 / 分类表把 changes 那档清空，都会让 sites 为空而下面恒真。
-    expect(sites.length, '扫不到任何「会动集合」的布局调用点——扫描根或分类表出了问题').toBeGreaterThan(3)
-
+  // 两条判据共用的一套：滤掉被 EXEMPT 豁免后的 changes-helper 调用点。
+  function coveredSites(): ChangesHelperSite[] {
     const exempt = new Set(EXEMPT.map((entry) => `${entry.file}::${entry.fn}`))
+    return callSites().filter((site) => !exempt.has(`${site.file}::${site.fn}`))
+  }
+
+  it('接线层-A（喂对值）：每个 changes 调用点，其函数里至少有一次 assertRegionInvariant 断言的正是该调用结果派生出的值', () => {
+    const all = callSites()
+    // 在场自检 1：扫不到任何「会动集合」的布局调用点（扫描根写错 / 分类表把 changes 那档清空）→ 恒真。
+    expect(all.length, '扫不到任何「会动集合」的布局调用点——扫描根或分类表出了问题').toBeGreaterThan(3)
+    // 在场自检 2：流集是本判据的派生集合。若它对每个受管调用点都算成空，判据 A 会「至少一次落在空集里」
+    // 恒假、进而 unguarded 恒非空——那会变成恒红而非恒绿，但为把「流集算法整体失灵」这个前提暴露成一条
+    // 响亮断言（而不是让它藏在别的失败里），这里单独钉一次：受管调用点里必须至少有一个的流集非空。
+    const sites = coveredSites()
+    expect(
+      sites.some((site) => site.flow.length > 0),
+      '所有受管调用点的流集都算成空了——flowSetFromCall 的派生失灵，判据 A 失去意义'
+    ).toBe(true)
+
     const unguarded = sites
-      .filter((site) => site.asserts === 0)
-      .filter((site) => !exempt.has(`${site.file}::${site.fn}`))
-      .map((site) => `${site.file}::${site.fn}() 调了 ${site.helper}`)
+      .filter((site) => !site.asserts.some((a) => a.operand !== null && site.flow.includes(a.operand)))
+      .map((site) => `${site.file}::${site.fn}() 调了 ${site.helper}；流集={${site.flow.join(', ')}}`)
     expect(
       unguarded,
-      '这些函数改了分屏树的 region 集合，却没在同一个函数体里断言不变量。' +
-        'tab.regions 那张表要么跟着改、要么就漂了——漂了的那一侧是画不出也关不掉的孤儿格。' +
-        `修法是在 return 之前调一次 assertRegionInvariant(next)；确有理由不断言的，往 EXEMPT 加一条并写清可自证的前提。`
+      '这些函数改了分屏树的 region 集合，但没有任何一次 assertRegionInvariant 断言的是「本函数刚算出来、' +
+        '准备交出去的那个值」（即该 changes-helper 调用结果传递派生出的局部）。断言喂了别的东西（比如入参）' +
+        '等于让它对着一个进函数时就已合法的对象空转，真正被交出去的新值没人校验。' +
+        '修法是在 return 之前 assertRegionInvariant(那个新算出来的 tab)。'
     ).toEqual([])
+  })
 
-    // 豁免清单不许留下已经不存在的条目：那会让它悄悄豁免掉一个将来同名的新函数。
-    const live = new Set(sites.map((site) => `${site.file}::${site.fn}`))
+  it('接线层-B（真的跑）：每个 changes 调用点，其函数里至少有一次 assertRegionInvariant 是块内直接语句、其后有 return', () => {
+    const sites = coveredSites()
+    expect(sites.length, '扫不到任何受管的「会动集合」调用点——扫描根或分类表出了问题').toBeGreaterThan(2)
+    const unreachable = sites
+      .filter((site) => !site.asserts.some((a) => a.runsBeforeReturn))
+      .map((site) => `${site.file}::${site.fn}() 调了 ${site.helper}`)
+    expect(
+      unreachable,
+      '这些函数里的 assertRegionInvariant 不是「块内直接语句、其后跟着 return」的形状——它被包进了 if / ' +
+        '短路 / dev-only 门之类的条件里，于是在真正把值交出去的那条路径上根本不会执行。纵深断言一旦可被' +
+        '某个构建或某个分支跳过，就等于没装。修法是让它成为 return 之前的一条无条件语句。'
+    ).toEqual([])
+  })
+
+  it('豁免清单不留死条目：EXEMPT 里的每一条都仍在调用某个「会动集合」的布局函数', () => {
+    const exempt = new Set(EXEMPT.map((entry) => `${entry.file}::${entry.fn}`))
+    // 用「全部」调用点（含被豁免的那些）来核对 exempt 是否仍命中：那会让它悄悄豁免掉一个将来同名的新函数。
+    const live = new Set(callSites().map((site) => `${site.file}::${site.fn}`))
     const dead = [...exempt].filter((key) => !live.has(key))
     expect(dead, `EXEMPT 里 ${JSON.stringify(dead)} 已经不再调用任何「会动集合」的布局函数`).toEqual([])
   })
