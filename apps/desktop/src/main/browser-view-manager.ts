@@ -12,6 +12,7 @@ import {
   type BrowserSnapshot,
   type BrowserViewport
 } from '../shared/contracts.js'
+import { normalizeBrowserBounds } from '../shared/browser-bounds.js'
 import { browserPngFromNativeImage } from './browser-image.js'
 import { sanitizeBrowserElementSelection } from './browser-selection.js'
 import {
@@ -523,16 +524,13 @@ export class BrowserViewManager {
       entry.view.setVisible(false)
       return
     }
-    const values = [bounds.x, bounds.y, bounds.width, bounds.height]
-    if (values.some((value) => !Number.isFinite(value)) || bounds.width < 1 || bounds.height < 1) {
+    // 归一化与 renderer 侧共用一份判定（shared/browser-bounds.ts）。这一侧拿到 null 抛错而不是静默
+    // 隐藏：矩形到了 main 还不可用，意味着上游算错了或有人绕过 renderer 直接发 IPC，隐藏会把 bug 埋掉。
+    const normalized = normalizeBrowserBounds(bounds)
+    if (!normalized) {
       throw new Error('Browser bounds must be finite with a positive size')
     }
-    entry.bounds = {
-      x: Math.max(0, Math.round(bounds.x)),
-      y: Math.max(0, Math.round(bounds.y)),
-      width: Math.max(1, Math.round(bounds.width)),
-      height: Math.max(1, Math.round(bounds.height))
-    }
+    entry.bounds = normalized
     entry.visible = true
     entry.view.setBounds(entry.bounds)
     entry.view.setVisible(true)
