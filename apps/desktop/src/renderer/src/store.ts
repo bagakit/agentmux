@@ -1729,9 +1729,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // subscriptions above intentionally start first so events arriving during this storage read
       // stay in the existing boot buffer instead of being missed.
       const persistWarning = await ensurePersistHydrated()
-      // A successful read can safely accept the normal persistence writes produced by startup. On
-      // a failed read, keep the write fence closed until the complete fallback shell is installed.
-      if (!persistWarning) openPersistWrites()
+      // Keep the write fence closed until the restored Workbench has been projected into the live
+      // store below. Opening it immediately after hydration allows startup observers (and React's
+      // first render) to serialize the pre-runtime empty shell over the durable Tab/Region record.
+      // The fence is opened exactly once after the projection is installed.
       // Config is the boundary that tells us which Workspace a persisted Region belongs to, so a
       // config failure genuinely prevents a safe shell. Session membership and the Provider catalog
       // are narrower runtime observations: either can be temporarily unavailable while the saved
@@ -1910,7 +1911,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // The Runtime and its Agents remain usable; only the optional persisted presentation projection
       // was unavailable. Open the fence after the fallback state is installed so that this warning
       // itself cannot serialize the empty fallback over the user's last good record.
-      openPersistWrites()
+      if (!persistWarning) openPersistWrites()
       // Restored dirty buffers keep their base revision and immediately resume observation.
       // Refresh marks disk conflicts through the existing reducer; it never overwrites a dirty draft.
       for (const key of Object.keys(get().documents)) {

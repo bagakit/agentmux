@@ -379,3 +379,7 @@ styles/
 - 未分组 Agent 使用独立的“未分组”分区，不伪造 Topic 名称；跨 Host 的同名工作线不得合并。分组标题是分类标签，不做成可选中的 Project 行。
 - transient 错误使用靠近窗口边缘但不覆盖内容的 notice surface（优先顶部或侧边的保留槽），最小 32px 高，带关闭按钮与 `aria-label`；关闭按钮命中区不小于 24px。错误文字允许换行但不得把 Terminal/Activity 内容推离视口，重新查看入口放在状态或诊断面。
 - Service Window Notice 继续使用持久、非模态、无关闭按钮的服务窗语汇；transient notice 与 Service Window 不共享生命周期，避免把必须持续可见的降级事实误关掉。
+
+### 重启恢复告示（2026-09-12）
+- 重启期间保留原 Tab/Region 的空间骨架与焦点位置；连接中状态使用 Region 内低干扰短标签，不用空白面或新建 Tab 代替。
+- Runtime 尚未完成 attach 时，告示必须明确“布局已恢复，正在连接既有 Session”，不得显示“在其他应用打开”这类会诱导用户重复 resume 的文案。

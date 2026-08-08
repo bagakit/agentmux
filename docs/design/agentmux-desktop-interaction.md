@@ -578,3 +578,8 @@ Desktop 刷新或重新 Attach 时优先投影这份 Agent 语义；新的 Run `
 - 不同 context 必须能被区分：Topic、Branch、Worktree 名称和必要的 host 元信息不能被一条泛化的“Agent activity”标题取代；没有 context 的 Session 进入明确的“未分组”组，而不是凭空猜 Topic。
 - 全局 transient `reportError` 不得固定在工作区底部遮挡内容。它应停靠在不覆盖主工作面的 notice 区，带清晰的关闭按钮和可访问名称；关闭只隐藏当前展示，不删除 Runtime/Session 事实，并保留从状态或诊断入口重新查看的路径。持久的 Service Window Notice 仍是独立告示，不增加关闭按钮，也不自动消失。
 - Run 的权威 lifecycle 已进入 stopped/exited/done 后，所有 pending composer readiness 必须失效或被清理；Desktop 不得继续把它翻译成“Run is still running / wait”。此时 Composer 给出 resume/restart 等可执行恢复出口；真正仍在运行但尚未观察到 readiness 的 Run 继续 fail-closed，不能为消灭提示而绕过 Core readiness 门。
+
+### 重启后的 Tab/Region 与 Session 恢复（2026-09-12）
+- 重启恢复必须先还原持久化的 Workbench Tab、Region、分屏树、顺序和焦点，再把其中的 Agent/Terminal Region 按其稳定 session identity attach 到仍由 Runtime 持有的 Run；不得因为 Runtime 尚未返回首个 snapshot 就创建第二个 session 或把 Region 清空。
+- “session 仍在运行”与“界面尚未重新 attach”必须是两个独立状态。健康 Runtime 只允许显示连接中/待同步告示，不得把它翻译成“在其他应用打开”并要求用户手动 resume。
+- 只有 Core 明确确认原 Run 已退出且 Provider native handle 可恢复时，才显示 resume/restart 出口；恢复失败必须保留原 Tab/Region 拓扑和可解释的服务窗告示。
