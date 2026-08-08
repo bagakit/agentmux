@@ -56,8 +56,10 @@ A 是**三个触发共用一个数据源**。这一点是 #638 的全部要害�
 **判别器**：`terminal.modes.mouseTrackingMode !== 'none'` 而屏幕上明明有文字。等价地：换成
 ⌥Option+拖拽（mac）或 Shift+拖拽（其他平台）能选中——那是 xterm 的 `shouldForceSelection` 逃生手势。
 
-**规范**：**至少要有一条复制路不依赖选区，且它永不置灰。** B、C 两条走 `buffer.active` 公共数据
-API，与选区服务无关，因此在鼠标上报开着时照常工作。它们是 #638 的真正修法。
+**规范**：**至少要有一条复制路不依赖选区，且它永不置灰。**
+
+**修法**：B、C 两条走 `buffer.active` 公共数据 API（`terminal-buffer-copy.ts:terminalViewportText` /
+`terminalScrollbackText`），与选区服务无关，因此在鼠标上报开着时照常工作——它们是 #638 的真正修法。
 
 **守卫**：`terminal-selection-mode.test.ts`（逐模式的抑制判定 + 提示文案）、
 `terminal-buffer-copy-wiring.test.ts`（AST：菜单项 → 函数 → 缓冲区 → 剪贴板整条接线）。
@@ -71,6 +73,10 @@ API，与选区服务无关，因此在鼠标上报开着时照常工作。它�
 **机制**：坐标意义上的 `hasSelection` 与 trim 之后的选区文本**在空白拖拽时分岔**——拖过一片空白，
 坐标上有选区，文本是空串。若不判空就写剪贴板，用户会丢掉剪贴板里原有的内容。
 
+**修法**：复制前先判文本非空——`terminal-shortcuts.ts:terminalShortcutHandlers` 的 `terminal.copy`
+动作里 `if (!text) return`，空文本既不记也不写。裸 Ctrl+C 与注册表命中两条路共用同一个谓词
+`hasCopyableText`（`terminal-shortcuts.ts:terminalKeyEventHandler` 内），不各写一遍。
+
 **判别器**：在空白处拖一下再按复制，剪贴板变空。
 
 **守卫**：`terminal-shortcuts.test.ts` 的空文本拒绝用例。注意这一条曾经被「三处命中的在场 grep」
@@ -83,19 +89,35 @@ API，与选区服务无关，因此在鼠标上报开着时照常工作。它�
 **修法**：`terminalSelectionForCopy(live, remembered)` 保留一份快照——在 `onPointerDown` 且
 `event.button === 2` 时、以及 `onSelectionChange` 时各记一次。
 
+**判别器**：划词选中后右键弹出菜单，再点 Copy，看剪贴板拿到的是刚才那段选区还是空串。
+
+**守卫**：`terminal-shortcuts.test.ts` 的 `terminalSelectionForCopy` 用例（live 非空取 live、
+live 空取 remembered），以及同文件 `terminal.copy 把当前选区记下来` / `没选区时不去覆盖记住的那份`
+两条真跑断言。
+
 ### 1.5 坑 4：OSC 52 是**反向**通道，且今天不消毒
 
 **机制**：PTY 里的程序发 `ESC]52;c;<base64>` 就能往用户的系统剪贴板写字节。这是唯一一条
 **从 PTY 流向用户**的剪贴板路径，其余三条都是用户主动取。
 
-已有的约束（全部有守卫，见 `terminal-osc-clipboard.test.ts`）：只写不读（读形式 `52;c;?`
-结构上不可达——该模块只产文本，没有 `sendInput` 通路）；base64 必须严格解码；空载荷忽略（防止
-静默清空剪贴板）；整帧 128 KiB 上限；选择目标白名单 `{c, s, ''}`；**replay 期不写**——历史
-scrollback 里的 OSC 52 不许劫持当下的剪贴板（闸是 `isReplaying()`）。
+**判别器**：用户没有任何复制动作，系统剪贴板内容却变了——那就是 PTY 侧的 OSC 52，不是选区/菜单/
+裸 Ctrl+C 那三条用户主动取的路。
 
-**已知缺口（#815）**：解码出来的文本**没有过 ESC 消毒**就进系统剪贴板。消毒器只覆盖「我们送进
-PTY 的字节」，不覆盖「PTY 写出来的字节」。这是投毒面：用户把它粘到别处时才发作。
-这条缺口是**明示的**，不是遗漏——`bracketed-paste.ts` 的文件头写明了它，并指向 #815。
+**修法（围栏，已实现）**：只写不读（读形式 `52;c;?` 结构上不可达——该模块只产文本，没有
+`sendInput` 通路）；base64 必须严格解码；空载荷忽略（防止静默清空剪贴板）；整帧 128 KiB 上限；
+选择目标白名单 `{c, s, ''}`；**replay 期不写**——历史 scrollback 里的 OSC 52 不许劫持当下的剪贴板
+（闸是 `isReplaying()`）。落点是 `terminal-osc-clipboard.ts:terminalOscClipboardWrite`。
+
+**守卫**：`terminal-osc-clipboard.test.ts`——`只接系统剪贴板与默认选区，不接 X11 primary`（白名单）、
+`空载荷不算写` / `纯空白载荷同样不算写`（防静默清空）、`坏 base64 给 null`（严格解码）、
+`体积上限就是 128KiB 整帧` + `恰好落在上限上的整帧要过`（上限边界）、
+`重放留存输出时不写剪贴板`（`isReplaying()` 闸，且有抬闸后同帧会写的对照）、
+`52 永远不回送任何字节给 PTY`（只写不读）。
+
+**仍开着的缺口（#815，修法尚不存在）**：解码出来的文本**没有过 ESC 消毒**就进系统剪贴板。消毒器
+只覆盖「我们送进 PTY 的字节」，不覆盖「PTY 写出来的字节」。这是投毒面：用户把它粘到别处时才发作。
+这条缺口是**明示的**，不是遗漏——`bracketed-paste.ts` 的文件头写明了它，并指向 #815；今天没有守卫，
+因为要守的行为（对写出字节消毒）还没实现。
 
 ---
 
@@ -117,9 +139,12 @@ PTY 的字节」，不覆盖「PTY 写出来的字节」。这是投毒面：用
 **机制**：xterm 的 `bracketTextForPaste` 用 `ESC[200~`/`ESC[201~` 把粘贴内容包起来，但**不转义内容
 本身**。载荷里若带 `ESC[201~` 就能提前闭合括号，后面的字节被 shell 当成真实输入执行。
 
+**修法**：`bracketed-paste.ts:sanitizeBracketedPasteText` 把 ESC 换成可见的 ␛（U+241B），不是删除：
 **判定的是「ESC 这个字节」，不是「`ESC[201~` 这个串」**——收窄到具体串会漏掉伪造起始符、光标
-移动、OSC 等其它构造。消毒是把 ESC 换成可见的 ␛（U+241B），不是删除：用户要看得见有人往里塞了
-控制序列。
+移动、OSC 等其它构造。消毒是替换而非删除，因为用户要看得见有人往里塞了控制序列。这是全仓唯一
+一份判定，prompt 投递路与终端粘贴路共用它。
+
+**判别器**：粘一段自带 `ESC[201~` 或其它控制序列的文本，看它是被当命令执行了，还是原样显示成 ␛。
 
 **守卫**：`packages/core/test/bracketed-paste.test.ts` + `terminal-paste-sanitizer.test.ts`。
 
@@ -129,21 +154,46 @@ PTY 的字节」，不覆盖「PTY 写出来的字节」。这是投毒面：用
 它只调 `stopPropagation()`，**从不检查 `defaultPrevented`**。所以我们的消毒监听器必须是
 **捕获阶段** + `preventDefault()` + `stopImmediatePropagation()`，少一样就会粘两遍或绕过消毒。
 
+**修法**：`terminal-paste.ts:installTerminalPasteSanitizer` 在 `terminal.element` 上装捕获期 paste
+监听，`preventDefault()` + `stopImmediatePropagation()` 一次掐掉那两个冒泡监听，再走
+`pasteIntoTerminal` 消毒后粘贴。
+
 **判别器**：粘贴一次出现两份内容。
+
+**守卫**：`terminal-paste-sanitizer.test.ts` 的 `installTerminalPasteSanitizer：接管原生 paste`
+一组——`装的是**捕获期**监听——xterm 的 handlePasteEvent 从不看 defaultPrevented`（capture 标志），
+与 `同时 preventDefault 与 stopImmediatePropagation`。
 
 ### 2.4 坑 7：把粘贴写进快捷键注册表 = 粘两次
 
-**规范**：**粘贴故意不进 `SHORTCUT_BINDINGS`。** 它的 SSOT 在 Electron 的 `role: 'editMenu'` 里。
-键处理器返回 `false` 时并不 `preventDefault`，原生 Edit→Paste 照常触发；若我们再注册一次，
-两条路都会执行。
+**机制**：粘贴有两条能到 PTY 的路——原生 Edit→Paste role，和我们自己的键处理器。原生路径始终在：
+xterm 的键回调返回 `false` 时并不 `preventDefault`，Electron 的 `role: 'editMenu'` 照常触发。若我们
+再把粘贴注册进 `SHORTCUT_BINDINGS` / 键处理器，同一次 Cmd/Ctrl+V 就走两条路，粘两次。
 
-推论：`main/application-menu.ts:applicationMenuTemplate` 里的 `role: 'editMenu'` 是**承重**的，
-不能因为「我们自己画菜单」就把它摘掉。菜单模板是手搭的（为了甩掉 Cmd+W / Cmd+R 这类会静默丢数据
-的加速键），但 `appMenu` + `editMenu` 必须留着。
+**规范**：**粘贴故意不进 `SHORTCUT_BINDINGS`，也不进终端键处理器的 handler map。** 它的 SSOT 在
+Electron 的 `role: 'editMenu'` 里（本仓已核对：注册表 terminal scope 只有 search / copy / clear /
+newline 四条，没有 paste）。
+
+**判别器**：Cmd/Ctrl+V 粘一次出现两份内容——且与坑 6 区分开：坑 6 是消毒监听器没装在捕获期、被
+xterm 自己的两个冒泡监听重复消费；坑 7 是我们**主动**给粘贴加了第二条 JS 路径（注册表或 handler
+map 里冒出一条 paste 条目）。看「注册表/handler map 里有没有 paste 条目」即可分辨。
+
+**修法**：不注册即修好——让第二条路根本不存在。反过来，`role: 'editMenu'` 是**承重**的，不能因为
+「我们自己画菜单」就把它摘掉。
+
+推论：`main/application-menu.ts:applicationMenuTemplate` 里的 `role: 'editMenu'` 是承重的。菜单模板
+是手搭的（为了甩掉 Cmd+W / Cmd+R 这类会静默丢数据的加速键），但 `appMenu` + `editMenu` 必须留着。
+
+**守卫**：两侧各一道。
+- 「不许出现第二条 JS 路径」：`terminal-shortcuts.test.ts:paste 刻意不在 handler map 里`
+  （`not.toContain('terminal.paste')`）；同文件 `注册表里有 id 但 handler map 里没有的键，交还而不是
+  吞掉` 钉住即便有 id 也不吞（吞掉会让粘贴彻底失效，比粘两次更糟）。
+- 「editMenu 不许摘」：`application-menu.test.ts:保留 Edit 菜单——终端粘贴依赖原生 Paste role`
+  （断言模板里 `item.role === 'editMenu'` 在场）。
 
 右键菜单显示的粘贴键位（`terminal-menu-chords.ts:NATIVE_PASTE_CHORD`）是**全仓唯一一个手写和弦**，
 理由就是它的 SSOT 不在我们这儿。两个平台都**不带 Shift**——写成 `Ctrl+Shift+V` 就是宣传一个死键
-（#367 的第二层）。
+（#367 的第二层）。这一点由 `terminal-menu-chords.test.ts` 守（断言 `NATIVE_PASTE_CHORD.shift` 为假）。
 
 ---
 
@@ -168,9 +218,17 @@ PTY 的字节」，不覆盖「PTY 写出来的字节」。这是投毒面：用
 
 **后果**：新加一个窗口级和弦，如果它和终端里常用的键撞了，终端用户会突然发现那个键被抢走。
 
+**修法**：终端不可被这道闸屏蔽（`isEditableChordTarget` 在 `.xterm` 内恒返回 `false` 是刻意的——
+capture 监听存在就是为了抢在 xterm 前拿到键）。所以纪律不是「屏蔽终端」，而是**未设 gate 的窗口
+和弦不许与任何终端绑定撞键**，否则那条终端绑定直接够不着（窗口动作每次都赢）。
+
 **判别器**：焦点在终端里按那个和弦，看它是走了窗口动作还是进了 PTY。
 
-**守卫**：`shortcut-registry.test.ts` / `shortcut-scope-wiring.test.tsx`。
+**守卫**：`shortcut-registry.test.ts:an un-gated window binding never collides with a terminal or
+editor chord — those surfaces do not shield it`（撞键规则，从注册表自己派生的 scope 列表遍历，非
+手写 `terminal || editor`）；`workbench-shortcuts.test.ts:isEditableChordTarget：非终端可编辑控件
+放行，终端焦点仍接管`（终端子树内一律不放行，即使那是个 textarea）。接线由
+`shortcut-scope-wiring.test.tsx` / `workbench-shortcut-wiring.test.tsx` 按 AST 守。
 
 ### 3.2 坑 9：kitty 渐进增强会吃掉剪贴板和弦
 
@@ -181,10 +239,29 @@ PTY 的字节」，不覆盖「PTY 写出来的字节」。这是投毒面：用
 mac 让出 ⌘C/⌘V；其他平台让出 Ctrl+Shift+C、Ctrl+V、Ctrl+Shift+V、Shift+Insert，而 **Ctrl+C 只在
 有选区时让出**——没选区时它必须是 SIGINT。
 
+**判别器**：在开了 kitty progressive enhancement 的 CLI 里按 ⌘C/⌘V，看原生复制粘贴是否当场失效
+（失效即编码器把和弦 `preventDefault` 了，旁路没生效）。
+
+**守卫**：`xterm-bypass-policy.test.ts`——`mac 剪贴板和弦` 与 `非 mac 剪贴板和弦` 两组逐和弦质询，
+其中 `非 mac：Ctrl+C 且**有选区** → 旁路（复制）` 与 `非 mac：Ctrl+C 且**无选区** → 不旁路（它是
+SIGINT，必须到 shell）` 成对钉住那条选区分支。
+
 ### 3.3 坑 10：裸 Ctrl+C 有两个互斥语义
 
-**规范**：有可复制文本 → 复制；没有 → 交回 PTY 当 SIGINT。判据用的是**文本非空**，不是坐标
-`hasSelection`（见坑 2 的分岔）。这条**刻意排在注册表匹配之前**，且不走 bypass 策略。
+**机制**：裸 Ctrl+C 这一个键要分成两件事——有可复制文本时是「复制」，没有时是终端的 SIGINT。
+注册表里 `terminal.copy` 的两个和弦（mac 的 Cmd+C、非 mac 的 Ctrl+Shift+C）都不匹配裸 Ctrl+C，
+所以它此前在两个平台上都直落「不是我们的键」出口——是**缺失的能力，不是回归**。
+
+**修法**：`terminal-shortcuts.ts:isBareCtrlC` + `terminalKeyEventHandler` 里那条**排在注册表匹配之前**
+的分支：有可复制文本 → 复制；没有 → 交回 PTY 当 SIGINT。
+
+**判别器**：文本非空，不是坐标 `hasSelection`（见坑 2 的分岔）。没选区时按 Ctrl+C 看跑飞的程序能
+不能被中断——被吞成「复制空串」就是判据用错成了坐标。这条刻意不走 bypass 策略（旁路策略的
+interrupt-C 分支读的是坐标 hasSelection，在空白横拖时会分岔）。
+
+**守卫**：`terminal-shortcuts.test.ts` 两组——`裸 Ctrl+C：有选区复制，没选区发 SIGINT（#610）`
+（含 `注册表两条和弦都不匹配裸 Ctrl+C` 这条把前提做成断言），以及 `终端键回调的吞键判定`
+（喂事件问返回值与外界被碰次数，其中 `坐标说有选区但文本是空的，仍要交还` 是那对采样的盲点补齐）。
 
 ### 3.4 键位 SSOT
 
@@ -252,17 +329,32 @@ commit-on-Enter 的输入，例外表的条数被 `EXPECTED_EXCEPTION_COUNT` 钉
 
 **为什么缩放能治**：它真的改变了 CSS 像素/单元格尺寸，既触发 fit 又制造真实的尺寸差。
 
+**判别器**：重启恢复后那一屏花掉，但**放大缩小一下就好了**——「缩放能治而重绘不能」正是这条
+（相对字节落地锚点 `gridWhenReplayLanded` 网格移动过、但 PTY 尺寸没变、没有 SIGWINCH）；alt screen
+的 TUI 缩放也治不好，因为它压根不重排，那是另一回事。
+
 **修法**：若第一次 live fit 确实移动了网格，强制一次 `requestContentRedraw()`。判据是「相对
 **字节落地锚点** `gridWhenReplayLanded` 网格移动了没有」，**不是**「PTY 尺寸变了没有」（渲染层
 不可能知道）也**不是**「这次 fit 移动了没有」（非 live 的 fit 也会移动）。全新终端没有 replay，
 锚点为 `null`，不付这份代价。
 
-**守卫**：`terminal-replay-reflow-recovery.test.ts`、`terminal-viewport-sync.test.ts`。
+**守卫**：`terminal-replay-reflow-recovery.test.ts`（`replay 之后的重排补救：判据锚在「重放那一刻的
+grid」`）、`terminal-viewport-sync.test.ts`。
 
 ### 5.2 坑 13：抖动会把 TUI 画花
 
-**机制**：WebGL/DOM 的单元格度量会在重渲染时抖一列。修法是只有容器 CSS 像素真的变了才 `fit()`
-（`terminal-viewport-sync.ts` 的 `samePixels` 闸）。
+**机制**：WebGL/DOM 的单元格度量会在重渲染时抖一列——`proposeDimensions` 差一列而容器 CSS 像素
+一点没变。若把这当成真 resize 去 `fit()`，xterm reflow 一列再弹回，把刚画好的 TUI 画花。
+
+**修法**：只有容器 CSS 像素真的变了才 `fit()`——`terminal-viewport-sync.ts` 的 `samePixels` 闸。
+注意抖动基线由「这次 fit」建立，且**replay 阶段的 fit 也要留下基线**，否则起活后第一次抖动这道闸
+是空的。
+
+**判别器**：拖拽/重渲染已停（像素固定）却又 fit 了一次——像素没变还 fit 就是 `samePixels` 闸漏了。
+
+**守卫**：`terminal-viewport-sync.test.ts`——`skips a one-column grid wobble when container pixels
+have not changed`，以及 `replay 阶段的 fit 也要留下抖动基线，否则起活后第一次 cell-metric 抖动就会
+把 TUI 画花`。
 
 ### 5.3 replay 与 live 是**不相交**的两条流
 
@@ -273,13 +365,22 @@ commit-on-Enter 的输入，例外表的条数被 `EXPECTED_EXCEPTION_COUNT` 钉
 
 ### 5.4 坑 14：输入有两张面孔
 
-xterm 的输入事件分两路：SGR 鼠标上报（DECSET ?1006）是 ASCII，走 `onData`；**旧式协议**
+**机制**：xterm 的输入事件分两路：SGR 鼠标上报（DECSET ?1006）是 ASCII，走 `onData`；**旧式协议**
 （?1000/?1002/?1003/?9 不带 ?1006）发 ≥128 的坐标字节，语义是 latin1，走 `onBinary`。只订阅
 `onData` 会把旧式鼠标上报整个丢掉，而把 latin1 当 UTF-8 编码会把 0x80 变成 0xC2 0x80。
 
-两条面孔共用**同一个 accepts 闸**与**同一个写出口**（`terminal-reveal.ts:terminalInputSender`）——
-`terminalAcceptsInput` 要求 `canControlRun && acceptsInput && liveReady` 三者同时成立。把判定和写
-包在一个函数里是刻意的：组件里不留可取反的 `if`。
+**修法**：两条面孔经 `terminal-reveal.ts:subscribeTerminalInput` 共用**同一个 accepts 闸**与**同一个
+写出口**（`terminalInputSender`）——`terminalAcceptsInput` 要求 `canControlRun && acceptsInput &&
+liveReady` 三者同时成立；onBinary 的 latin1 字节先经 `encodeTerminalBinaryInput` 还原成 Uint8Array
+再送，不走 UTF-8。把判定和写包在一个函数里是刻意的：组件里不留可取反的 `if`。
+
+**判别器**：一个只开旧式鼠标协议（无 ?1006）的 TUI 里鼠标完全没反应 → onBinary 没订阅；坐标字节
+0x80 变成两字节 → 把 latin1 当 UTF-8 了。
+
+**守卫**：`terminal-reveal.test.ts:两个输入事件源共用一把闸一个出口`（**真跑**，按出口数判：删
+onBinary 订阅、或让它绕过 accepts、或把 latin1 当 UTF-8，各自打红一条），以及
+`encodeTerminalBinaryInput 把 latin1 字符串按字节还原，>=128 也不失真`；接线由同文件
+`onData/onBinary 没经 subscribeTerminalInput 接到 sender` 一条按源码文本钉住。
 
 ---
 
@@ -315,10 +416,18 @@ xterm 的输入事件分两路：SGR 鼠标上报（DECSET ?1006）是 ASCII，�
    （已排除 / 未受影响 / 仍开着并挂在哪个编号下）。声称「修好了」而实际只修了一条，下一次报障
    会被误判成回归。
 4. **每条机制配一道守卫**，而且守卫要能被**变异**杀死：把生产代码改坏一处，它必须变红。
-   一次只改一件事——复合变异证明不了是哪条断言在起作用。
-5. **在场判据不算守卫。** 「某个选择器/字符串/符号名在不在场」这类判据在本仓被绕过过很多次
-   （子串命中、换拼法、同名局部影子、注释里的散文冒充规则）。判据要问**关系**（这条规则选不选得中
-   这个元素、这个取值是不是那次调用的返回值、这个 import 有没有真被调用）。
+   一次只改一件事——复合变异证明不了是哪条断言在起作用。**唯一的例外是行为本身还没实现的缺口**：
+   那时没有可守的行为，必须在对应「坑」的 `**守卫**` 槽里如实写「无」并挂上 tracker 编号，而不是
+   留空或编一个（本文档里就有一处——坑 4 的 ESC 消毒缺口 #815）。「暂时没守卫」和「本该有却没写」
+   必须能一眼分开。
+5. **优先真跑，其次接线，最次在场。** 判据强弱分三档：直接喂输入断言后果（最强，坑 10/14 那种
+   「按出口数计」的真跑）> 按 AST 判取值/import 关系（接线层）> 断言某字符串/符号在不在场（最弱）。
+   **纯源码文本的在场判据单独不算守卫**——「某个选择器/字符串/符号名在不在场」这类判据在本仓被
+   绕过过很多次（子串命中、换拼法、同名局部影子、注释里的散文冒充规则）。它只在旁边另有一条真跑
+   或接线守卫兜底时，才作为补充出现（例如坑 14 里对源码文本断言 `subscribeTerminalInput(terminal,
+   sendInput)` 在场的那条，旁边就有「共用一把闸一个出口」那组真跑断言）。注意「对真跑函数的输出
+   断言某项在场」不属此列——坑 7 的 `item.role === 'editMenu'` 是对 `applicationMenuTemplate` 实际
+   返回的结构判定，那是真跑，不是源码 grep。
 
 ---
 
