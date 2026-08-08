@@ -1,4 +1,8 @@
-import type { AgentCatalogEntry, LaunchOptionSelection, RiskTier } from '@agentmux/core'
+import type { AgentCatalogEntry, LaunchOptionSelection } from '@agentmux/core'
+// RISK_TIERS is the risk-ladder SSOT, imported as a runtime VALUE. It lives on the node-free
+// `@agentmux/core/risk-tier` subpath precisely so the renderer can rank by it without pulling Core's
+// process/filesystem runtime into the render process (the root barrel `@agentmux/core` would).
+import { RISK_TIERS, type RiskTier } from '@agentmux/core/risk-tier'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { attentionSortRank, categoryFor, isUrgentAttention, type AttentionCategory } from './attention-event'
 import { agentUsageDisplay, type AgentUsageDisplay } from './agent-usage'
@@ -145,11 +149,23 @@ export function rosterBadgeCount(rows: readonly RosterRow[]): number {
  *
  * A row shows one mark, so it must be the most permissive thing this Agent was granted — that is the
  * fact worth surfacing when scanning a list.
+ *
+ * "Highest" is defined by the SSOT tuple: {@link RISK_TIERS} is ordered ascending danger, so a tier's
+ * INDEX is its danger rank and the most dangerous scope is the one with the greatest index. Deriving the
+ * rank from the tuple (rather than hand-copying a reversed `['danger','caution','safe']` ladder) means
+ * adding a member to `RISK_TIERS`, or reordering it, moves this ranking with it — there is no second copy
+ * of the order to fall out of step.
  */
 export function rowRiskTier(row: RosterRow): RiskTier | null {
-  const order: RiskTier[] = ['danger', 'caution', 'safe']
-  for (const tier of order) {
-    if (row.scopes.some((scope) => scope.tier === tier)) return tier
+  let highest: RiskTier | null = null
+  let highestRank = -1
+  for (const scope of row.scopes) {
+    if (scope.tier === undefined) continue
+    const rank = RISK_TIERS.indexOf(scope.tier)
+    if (rank > highestRank) {
+      highestRank = rank
+      highest = scope.tier
+    }
   }
-  return null
+  return highest
 }
