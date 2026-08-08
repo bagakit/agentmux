@@ -59,6 +59,10 @@
     "./workbench-layout-preset": {
       "types": "./dist/workbench-layout-preset.d.ts",
       "import": "./dist/workbench-layout-preset.js"
+    },
+    "./bracketed-paste": {
+      "types": "./dist/bracketed-paste.d.ts",
+      "import": "./dist/bracketed-paste.js"
     }
   },
   "bin": {

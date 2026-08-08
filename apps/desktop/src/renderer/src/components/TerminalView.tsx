@@ -22,6 +22,7 @@ import {
   terminalLinkPreviewAnchor
 } from '../lib/terminal-link-gesture'
 import { detectTerminalPathLinks } from '../lib/terminal-path-link'
+import { installTerminalPasteSanitizer, pasteIntoTerminal } from '../lib/terminal-paste'
 import { TERMINAL_HTTP_URL_REGEX } from '../lib/terminal-http-link'
 import { terminalOptions, terminalTheme, activateTerminalUnicodeWidth, UNICODE_WIDTH_VERSION } from '../lib/terminal-theme'
 import {
@@ -639,6 +640,19 @@ export function TerminalView({
         void copyTextToClipboard(text, reportError)
       }
     })
+    // 原生 Cmd+V 是 Electron 的 editMenu role，不经过应用的任何 JS，只能在 DOM 层截。装在
+    // terminal.element（xterm 自己那棵子树的根，terminal.open 之后才存在）而不是 root 上，是**结构性
+    // 作用域**：粘贴目标只可能是它子树里那个 helper textarea，而终端搜索框那个 input 是 root 的另一个
+    // 孩子、不在这棵子树里——往搜索框粘贴天然走不到这里，不需要在运行期比对 event.target。
+    // 理由与 xterm「只包不转义」的证据见 terminal-paste.ts。
+    //
+    // element 在 open() 之后必然在场，但类型上是可选的。缺席时**响亮**说出来：那意味着原生 Cmd+V
+    // 这条路完全没有消毒，而它恰恰是更常用的那条——静默兜底会把一个安全缺口伪装成正常启动。
+    const pasteHost = terminal.element
+    if (!pasteHost) {
+      console.warn('[terminal] xterm element missing after open(); native paste will not be sanitized')
+    }
+    const pasteSanitizer = pasteHost ? installTerminalPasteSanitizer(pasteHost, terminal) : () => {}
     // 终端作用域的键判定统一从注册表匹配（scope 'terminal'），命中之后做什么由
     // terminalShortcutHandlers 提供——那一层是纯的，能被直接调用并断言后果。此前这些分支内联在
     // 这里，运行期够不着：把任一分支的体掏空，整族测试照旧全绿而那个键对用户彻底失效。
@@ -647,8 +661,11 @@ export function TerminalView({
     // 「分支体被掏空」「回调开头插一句早退」这两种变异都能在全绿下存活。壳里没有语句可插，
     // 那两族变异就都落在 terminal-shortcuts.test.ts 的射程里。
     //
-    // Paste 刻意没有条目：本回调返回 false 不会 preventDefault（xterm 的 _keyDown 在 cancel()
-    // 之前就返回），所以原生 Edit→Paste 路径照旧触发；在这里也处理会让同一份文本贴两次。
+    // Paste 刻意没有条目，理由有两层。其一：本回调返回 false 不会 preventDefault（xterm 的 _keyDown
+    // 在 cancel() 之前就返回），所以原生 Edit→Paste 路径照旧触发；在这里也处理会让同一份文本贴两次。
+    // 其二：原生 Cmd+V 走的是浏览器 paste 事件，压根不经过键回调——它由
+    // installTerminalPasteSanitizer 在 terminal.element 上以捕获期接管（见 terminal-paste.ts），
+    // 那才是「粘贴的字节要不要消毒」这件事的落点。
     terminal.attachCustomKeyEventHandler(
       terminalKeyEventHandler({
         matchTerminalShortcut: (event) => matchShortcut(event, isMac, { scope: 'terminal' }),
@@ -801,6 +818,7 @@ export function TerminalView({
       searchCounter.dispose()
       selection.dispose()
       pathLinks.dispose()
+      pasteSanitizer()
       disposeEvents()
       input.dispose()
       resize.disconnect()
@@ -841,7 +859,9 @@ export function TerminalView({
     const terminal = terminalRef.current
     if (!terminal) return
     void api.ui.readClipboardText().then((text) => {
-      if (terminalRef.current === terminal && text) terminal.paste(text)
+      // 走 pasteIntoTerminal 而不是 terminal.paste：ESC 怎么办由 Core 那一个函数说了算，
+      // 与原生 Cmd+V 那条路（installTerminalPasteSanitizer）以及 provider 投递 prompt 同源。
+      if (terminalRef.current === terminal && text) pasteIntoTerminal(terminal, text)
     })
   }
 
