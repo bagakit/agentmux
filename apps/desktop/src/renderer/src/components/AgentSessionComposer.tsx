@@ -149,7 +149,7 @@ export function AgentSessionComposer({
       {...(activeFile ? { activeFile } : {})}
       {...(postureControl ? { postureControl } : {})}
       onChange={(value) => setAgentComposerDraft(sessionId, value)}
-      {...(submitMode.canType ? {
+      {...(submitMode.canSubmit ? {
         onSubmit: () => void submit(),
         onInterrupt: () => void interrupt(sessionId),
         onAttach: () => void attachFiles(),
