@@ -479,13 +479,21 @@ function acceptControlGuard(module: ParsedModule): AcceptControlGuard {
  * 拼法都会从「算注册」的清单里漏掉，而那正是要防的。反过来写，漏的方向变成「多算一个」，那是响亮的假红，
  * 不是静默的洞。
  *
- * 频道匹配同样认两种拼法：绑定到 contracts 那个 `CONTROL_RESPONSE_CHANNEL` 导入的标识符，**以及**逐字相等
- * 的字符串字面量（字面量的期望值取自本文件真的 import 进来的那个常量，不手抄）。只认常量会被「另抄一份
- * 字面量」整个绕过（记忆 counting-a-symbol-misses-other-spellings）。
+ * 方法名与频道名都不按单一拼法认，各自都被绕过过（recognize-list 必漏，记忆 forbidden-list-guard-always-leaks）：
+ * - **方法名**（resolveCalledMethodName）：property-access（`ipcMain.on`）与 element-access（`ipcMain['on']`）
+ *   都认。原判据要求 `ts.isPropertyAccessExpression(node.expression)`，对 `ipcMain['on'](CH, evil)` 完全失明
+ *   ——连方法名都没读到就跳过，那句无门注册静默上线。
+ * - **频道名**（namesControlResponseChannel）：先把实参**折成常量字符串值**再比（constantStringValue，覆盖
+ *   字面量 / 无替换模板 / `'a'+'b'` 常量拼接 / 本地 const 别名链），折不出再按**导入绑定**认
+ *   （bindsToImportedControlChannel）。原判据只认「字面量或 import 标识符」，被 `const CH = 'control:response'`、
+ *   `const CH = CONTROL_RESPONSE_CHANNEL`、`'control:' + 'response'` 三种可发货写法整个绕过。
  *
- * 申报的盲点：判据按 `<任意对象>.<方法>(频道, handler)` 的形状扫，不校验那个对象就是 `ipcMain`。这是刻意
- * 的——`const im = ipcMain` 这类别名下的注册照旧被算上；代价是别的 emitter 若也用这个频道名会打出一次假红，
- * 那种红是要人来看的，比漏掉一次旁路注册便宜。
+ * 申报的盲点：
+ * 1. 判据按 `<任意对象>.<方法>(频道, handler)` 的形状扫，不校验那个对象就是 `ipcMain`。这是刻意的——
+ *    `const im = ipcMain` 这类别名下的注册照旧被算上；代价是别的 emitter 若也用这个频道名会打出一次假红，
+ *    那种红是要人来看的，比漏掉一次旁路注册便宜。
+ * 2. 频道名与方法名都只认**静态可折**的形状。运行期算出来的名字（`[..].join(':')`、`.concat`、带替换的模板、
+ *    `ipcMain[dyn]`、命名空间导入的成员访问）折不出来 → 被**漏算**。这是漏（静默）不是假红，是本层残留的洞。
  */
 type ControlChannelRegistration = {
   readonly method: string
@@ -495,15 +503,95 @@ type ControlChannelRegistration = {
 /** 摘除监听器的方法。这三个之外的一切都算「装了一个监听器」——极性见上方注释。 */
 const LISTENER_REMOVAL_METHODS: ReadonlySet<string> = new Set(['removeListener', 'off', 'removeAllListeners'])
 
-/** arg[0] 指的是不是控制响应频道（认导入的常量，也认逐字相等的字面量）。 */
+/**
+ * 把一个表达式**折叠成常量字符串值**，折不出来给 null。覆盖四种在生产里类型合法、可发货的频道写法：
+ * 字符串字面量、无替换的模板串、`'a' + 'b'` 这类常量拼接、以及初始化器最终落到上述任一形状的本地 `const`
+ * 别名（逐层解 initializer）。这是频道侧的主判据，取代原来「只认字面量或 import 标识符」那条 recognize-list
+ * ——它会被 `const CH = '...'`、`'a' + 'b'` 整个绕过（记忆 forbidden-list-guard-always-leaks）。
+ *
+ * 为什么不直接走 checker：任务建议用 `checker.getTypeAtLocation(arg).isStringLiteral()` 一把梭把 import 常量、
+ * 本地 const、模板、拼接一次搞定。**实测在本文件这套 noLib/noResolve 的单文件 Program 下它折不动生产那条路**：
+ * import 进来的 `CONTROL_RESPONSE_CHANNEL` 类型是 `any`（模块没被解析），`'a' + 'b'` 被 broaden 成 `string`
+ * （两者都不是 string-literal 类型）；只有 `const x = '字面量'` 和模板串才被 checker 折成字面量类型。所以
+ * 这里显式按 AST 折常量值，import 那条改由 bindsToImportedControlChannel 按**绑定**认。
+ *
+ * 申报的盲点：只认上面四种静态形状。`['control','response'].join(':')`、`.concat(...)`、带替换的模板、
+ * 任何运行期算出来的名字都折不出来 → 会被**漏算**（是漏不是假红）。
+ */
+function constantStringValue(
+  module: ParsedModule,
+  expression: ts.Expression | undefined,
+  seen: Set<ts.Node> = new Set()
+): string | null {
+  if (expression === undefined || seen.has(expression)) return null
+  seen.add(expression)
+  if (ts.isParenthesizedExpression(expression)) return constantStringValue(module, expression.expression, seen)
+  if (ts.isStringLiteralLike(expression)) return expression.text
+  if (ts.isBinaryExpression(expression) && expression.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+    const left = constantStringValue(module, expression.left, seen)
+    const right = constantStringValue(module, expression.right, seen)
+    return left !== null && right !== null ? left + right : null
+  }
+  if (ts.isIdentifier(expression)) {
+    const declaration = declarationOf(module, expression)
+    if (declaration !== null && ts.isVariableDeclaration(declaration) && declaration.initializer !== undefined) {
+      return constantStringValue(module, declaration.initializer, seen)
+    }
+  }
+  return null
+}
+
+/**
+ * 一个标识符**按绑定**是不是 contracts 里那个 `CONTROL_RESPONSE_CHANNEL` 导入（也认最终落到该导入的本地
+ * const 别名链，如 `const CH = CONTROL_RESPONSE_CHANNEL`）。这条与 constantStringValue 互补：在本 harness 里
+ * import 的值折不出来（类型是 any），得靠绑定身份认；那条又不认字面量拼接。两条并起来才把「常量拼接 / 本地
+ * const / import / import 的 const 别名」四种一网打尽。
+ *
+ * 申报的盲点：只追 import specifier 身份与 const 别名链；命名空间导入的成员访问（`contracts.CONTROL_...`）
+ * 不认。
+ */
+function bindsToImportedControlChannel(
+  module: ParsedModule,
+  expression: ts.Expression | undefined,
+  seen: Set<ts.Node> = new Set()
+): boolean {
+  if (expression === undefined || !ts.isIdentifier(expression) || seen.has(expression)) return false
+  seen.add(expression)
+  const declaration = declarationOf(module, expression)
+  if (declaration === null) return false
+  if (ts.isImportSpecifier(declaration)) {
+    return (
+      importedModuleOf(declaration) === CONTRACTS_MODULE &&
+      (declaration.propertyName ?? declaration.name).text === 'CONTROL_RESPONSE_CHANNEL'
+    )
+  }
+  if (ts.isVariableDeclaration(declaration) && declaration.initializer !== undefined) {
+    return bindsToImportedControlChannel(module, declaration.initializer, seen)
+  }
+  return false
+}
+
+/** arg[0] 指的是不是控制响应频道：先按常量折叠比值，折不出再按导入绑定认。 */
 function namesControlResponseChannel(module: ParsedModule, argument: ts.Expression | undefined): boolean {
   if (argument === undefined) return false
-  if (ts.isStringLiteralLike(argument)) return argument.text === CONTROL_RESPONSE_CHANNEL
-  if (!ts.isIdentifier(argument)) return false
-  const declaration = declarationOf(module, argument)
-  if (declaration === null || !ts.isImportSpecifier(declaration)) return false
-  if (importedModuleOf(declaration) !== CONTRACTS_MODULE) return false
-  return (declaration.propertyName ?? declaration.name).text === 'CONTROL_RESPONSE_CHANNEL'
+  const folded = constantStringValue(module, argument)
+  if (folded !== null) return folded === CONTROL_RESPONSE_CHANNEL
+  return bindsToImportedControlChannel(module, argument)
+}
+
+/**
+ * 一次调用的**方法名**：property-access（`ipcMain.on`）与 element-access（`ipcMain['on']`）都认，后者把
+ * 方括号里的下标当常量字符串折出来。原判据用 `ts.isPropertyAccessExpression(node.expression)` 把关，对
+ * element-access **完全失明**——`ipcMain['on'](CH, evil)` 连方法名都没读到就被跳过（recognize-list 的
+ * 另一面）。
+ *
+ * 申报的盲点：element-access 的下标必须能折成常量字符串；`ipcMain[dyn]` 这种运行期名字折不出 → 返回 null →
+ * 不算注册（是**漏**不是假红）。
+ */
+function resolveCalledMethodName(module: ParsedModule, callee: ts.Expression): string | null {
+  if (ts.isPropertyAccessExpression(callee)) return callee.name.text
+  if (ts.isElementAccessExpression(callee)) return constantStringValue(module, callee.argumentExpression)
+  return null
 }
 
 function controlResponseRegistrations(module: ParsedModule): ControlChannelRegistration[] {
@@ -511,21 +599,19 @@ function controlResponseRegistrations(module: ParsedModule): ControlChannelRegis
   const auditedDeclaration = auditedArrow === null ? null : auditedArrow.parent
   const out: ControlChannelRegistration[] = []
   const visit = (node: ts.Node): void => {
-    if (
-      ts.isCallExpression(node) &&
-      ts.isPropertyAccessExpression(node.expression) &&
-      !LISTENER_REMOVAL_METHODS.has(node.expression.name.text) &&
-      namesControlResponseChannel(module, node.arguments[0])
-    ) {
-      const handler = node.arguments[1]
-      out.push({
-        method: node.expression.name.text,
-        handlerBindsToAcceptControl:
-          handler !== undefined &&
-          ts.isIdentifier(handler) &&
-          auditedDeclaration !== null &&
-          declarationOf(module, handler) === auditedDeclaration
-      })
+    if (ts.isCallExpression(node) && namesControlResponseChannel(module, node.arguments[0])) {
+      const method = resolveCalledMethodName(module, node.expression)
+      if (method !== null && !LISTENER_REMOVAL_METHODS.has(method)) {
+        const handler = node.arguments[1]
+        out.push({
+          method,
+          handlerBindsToAcceptControl:
+            handler !== undefined &&
+            ts.isIdentifier(handler) &&
+            auditedDeclaration !== null &&
+            declarationOf(module, handler) === auditedDeclaration
+        })
+      }
     }
     ts.forEachChild(node, visit)
   }
@@ -980,5 +1066,91 @@ describe('ipc.ts wiring guard: self-check (the guard reds on planted violations)
     // 反向的同一个洞：诚实的门写好了但一处都没装。断言钉「恰好一处」而不是「至少一处不是旁路」，
     // 正是为了让这一侧也红。
     expect(controlResponseRegistrations(registrationModule(''))).toEqual([])
+  })
+
+  // --- 方法名侧：element-access 拼法（原判据对它完全失明，是四个可发货绕过之一） ---
+
+  it('controlResponseRegistrations catches an ELEMENT-ACCESS install `ipcMain[\'on\'](CH, evil)` (property-access-only was blind)', () => {
+    // 原判据要求 `ts.isPropertyAccessExpression(node.expression)`，于是 `ipcMain['on'](CH, evil)` 连方法名
+    // 都没读到就被跳过——那句无门注册静默上线。现在 resolveCalledMethodName 把方括号下标折成常量方法名。
+    const module = registrationModule(
+      'ipcMain.on(CONTROL_RESPONSE_CHANNEL, acceptControl)\n' +
+        "ipcMain['on'](CONTROL_RESPONSE_CHANNEL, (_e: any, response: any) => accept(response))\n" +
+        'ipcMain.removeListener(CONTROL_RESPONSE_CHANNEL, acceptControl)\n'
+    )
+    expect(controlResponseRegistrations(module)).toEqual([
+      { method: 'on', handlerBindsToAcceptControl: true },
+      { method: 'on', handlerBindsToAcceptControl: false }
+    ])
+  })
+
+  it('resolveCalledMethodName reads the bracket contents, not a constant `on`: element-access REMOVAL still excluded', () => {
+    // 正向探针 + 防退化：诚实注册与摘除都写成 element-access。若 resolveCalledMethodName 退化成恒返回 'on'，
+    // 这里的 `['removeListener']` 会被误算成一次注册（读出两处）——本条会红。它证明方法名是真从方括号里
+    // 折出来的，不是常量。
+    const module = registrationModule(
+      "ipcMain['on'](CONTROL_RESPONSE_CHANNEL, acceptControl)\n" +
+        "ipcMain['removeListener'](CONTROL_RESPONSE_CHANNEL, acceptControl)\n"
+    )
+    expect(controlResponseRegistrations(module)).toEqual([{ method: 'on', handlerBindsToAcceptControl: true }])
+  })
+
+  // --- 频道名侧：三种可发货的非字面量拼法（原判据只认字面量或 import 标识符，被整个绕过） ---
+
+  it('namesControlResponseChannel folds constant concatenation `\'a\' + \'b\'` (was neither literal nor identifier)', () => {
+    // `'control:' + 'response'` 既不是字面量也不是标识符，原判据放它过去。两个操作数从真常量派生（拆两半），
+    // 不手抄第二份频道名；若 constantStringValue 折错值，这个绕过就不会被算上（读出一处）——本条会红。
+    const mid = Math.floor(CONTROL_RESPONSE_CHANNEL.length / 2)
+    const left = CONTROL_RESPONSE_CHANNEL.slice(0, mid)
+    const right = CONTROL_RESPONSE_CHANNEL.slice(mid)
+    const module = registrationModule(
+      'ipcMain.on(CONTROL_RESPONSE_CHANNEL, acceptControl)\n' +
+        `ipcMain.on('${left}' + '${right}', (_e: any, response: any) => accept(response))\n` +
+        'ipcMain.removeListener(CONTROL_RESPONSE_CHANNEL, acceptControl)\n'
+    )
+    expect(controlResponseRegistrations(module)).toEqual([
+      { method: 'on', handlerBindsToAcceptControl: true },
+      { method: 'on', handlerBindsToAcceptControl: false }
+    ])
+  })
+
+  it('namesControlResponseChannel follows a local const alias to the imported constant `const CH = CONTROL_RESPONSE_CHANNEL`', () => {
+    // 本地 const 别名到 import：constantStringValue 在本 harness 折不出（import 值是 any），改由
+    // bindsToImportedControlChannel 追别名链到 import specifier 认出来。
+    const module = registrationModule(
+      'const CH2 = CONTROL_RESPONSE_CHANNEL\n' +
+        'ipcMain.on(CONTROL_RESPONSE_CHANNEL, acceptControl)\n' +
+        'ipcMain.on(CH2, (_e: any, response: any) => accept(response))\n' +
+        'ipcMain.removeListener(CONTROL_RESPONSE_CHANNEL, acceptControl)\n'
+    )
+    expect(controlResponseRegistrations(module)).toEqual([
+      { method: 'on', handlerBindsToAcceptControl: true },
+      { method: 'on', handlerBindsToAcceptControl: false }
+    ])
+  })
+
+  it('namesControlResponseChannel follows a local const alias to a string literal `const CH = \'control:response\'`', () => {
+    // 本地 const 别名到字面量：constantStringValue 追别名链解到字面量。字面量的值取自真常量插值，不手抄。
+    const module = registrationModule(
+      `const CH2 = '${CONTROL_RESPONSE_CHANNEL}'\n` +
+        'ipcMain.on(CONTROL_RESPONSE_CHANNEL, acceptControl)\n' +
+        'ipcMain.on(CH2, (_e: any, response: any) => accept(response))\n' +
+        'ipcMain.removeListener(CONTROL_RESPONSE_CHANNEL, acceptControl)\n'
+    )
+    expect(controlResponseRegistrations(module)).toEqual([
+      { method: 'on', handlerBindsToAcceptControl: true },
+      { method: 'on', handlerBindsToAcceptControl: false }
+    ])
+  })
+
+  it('a const alias to a DIFFERENT value is NOT counted (channel matchers compare the folded value, not constant-true)', () => {
+    // 防退化的另一极：若 constantStringValue/namesControlResponseChannel 退化成恒真，这个指向别的频道的
+    // const 别名会被误算——本条会红。它证明频道名判据真的在比值，不是恒真。
+    const module = registrationModule(
+      "const OTHER = 'some:other-channel'\n" +
+        'ipcMain.on(CONTROL_RESPONSE_CHANNEL, acceptControl)\n' +
+        'ipcMain.on(OTHER, (_e: any, response: any) => accept(response))\n'
+    )
+    expect(controlResponseRegistrations(module)).toEqual([{ method: 'on', handlerBindsToAcceptControl: true }])
   })
 })
