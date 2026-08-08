@@ -213,7 +213,6 @@ function hostPlatformCallsIn(
         calls.push({
           name,
           line: source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1,
-          args: node.arguments.length,
           // 「这里新造出来的」那些实参。空集 = 要么零实参，要么每个都是透传下来的形参。
           minted: node.arguments
             .filter((argument) => !forwardsAnEnclosingParameter(argument))
