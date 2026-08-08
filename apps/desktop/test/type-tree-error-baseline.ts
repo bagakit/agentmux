@@ -63,7 +63,6 @@ export const DESKTOP_TEST_TYPE_ERROR_BASELINE: Readonly<Record<string, number>> 
   "test/launch-option-controls.test.tsx": 4,
   "test/launcher-draft-binding.test.ts": 2,
   "test/lib-export-reachability.test.ts": 2,
-  "test/login-shell-path.test.ts": 3,
   "test/monaco-register-astro.test.ts": 6,
   "test/monaco-register-svelte.test.ts": 5,
   "test/monaco-register-vue.test.ts": 5,

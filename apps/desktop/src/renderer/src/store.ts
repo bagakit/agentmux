@@ -230,6 +230,8 @@ export type HostCheckState = {
 }
 
 type AppState = {
+  runtimeOwnershipWarnings: string[]
+  environmentWarning: string | null
   restoredWorkbench: PersistedWorkbench | null
   config: AppConfig | null
   providerCatalog: AgentCatalogEntry[]
@@ -1313,7 +1315,7 @@ function startSessionMembershipResync(
             membershipGap ||= reduced.sessionMembershipGap === true
             if (reduced.timelineGapSessionId) timelineGaps.add(reduced.timelineGapSessionId)
           }
-          return projected
+          return { ...projected, runtimeOwnershipWarnings: snapshot.runtimeOwnershipWarnings ?? [] }
         })
         for (const sessionId of timelineGaps) void useAppStore.getState().resyncTimeline(sessionId)
         if (!membershipGap) return
@@ -1641,6 +1643,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   workspaceTool: 'files-branches',
   toolDockWidth: TOOL_DOCK_DEFAULT_WIDTH,
   loading: true,
+  runtimeOwnershipWarnings: [],
+  environmentWarning: null,
   error: null,
   async initialize() {
     if (!api.control || typeof api.control.onRequest !== 'function') {
@@ -1719,6 +1723,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       ])
       if (configResult.status === 'rejected') throw configResult.reason
       const config = configResult.value
+      set({ environmentWarning: initialSnapshotResult.status === 'fulfilled'
+        ? initialSnapshotResult.value.environmentWarning ?? null : get().environmentWarning })
       const startupWarnings: string[] = []
       let snapshot = initialSnapshotResult.status === 'fulfilled'
         ? initialSnapshotResult.value
@@ -1870,6 +1876,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         sessions: visibleSessions,
         unclaimedTerminalSessionIds: [...failedCleanupIds],
         timelines: snapshot.timelines,
+        runtimeOwnershipWarnings: snapshot.runtimeOwnershipWarnings ?? [],
         pendingAgentLaunches: {},
         ...restoredUi,
         tabs: workbench.tabs,

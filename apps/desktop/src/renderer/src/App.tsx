@@ -3,6 +3,8 @@ import {
   LoaderCircle
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { RuntimeOwnershipNotice } from './components/RuntimeOwnershipNotice'
+import { ShellEnvironmentNotice } from './components/ShellEnvironmentNotice'
 import { BrandIcon } from './components/BrandIcon'
 import { useAgentAttentionNotifications } from './hooks/useAgentAttentionNotifications'
 import { useAgentStatusDecay } from './lib/agent-status-decay'
@@ -262,6 +264,8 @@ export function App() {
             </section>
           </div>
         )}
+        <ShellEnvironmentNotice />
+        <RuntimeOwnershipNotice />
         {error ? <div className="error-toast"><AlertTriangle size={14} /><span>{error}</span></div> : null}
       </main>
       <AgentStatusBar />
