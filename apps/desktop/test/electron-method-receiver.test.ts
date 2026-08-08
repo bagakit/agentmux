@@ -22,18 +22,34 @@ import { describe, expect, it } from 'vitest'
  * 但那是**一处**的检测器。这条守的是**规则**：`src/main/` 里任何地方再写出同一形状都要红。
  * 常驻规则的交付物是守卫，不是那一次清理（记忆 cleanup-without-a-detector-is-not-cleanup）。
  *
- * 判据经过一次加固（本轮）：第一版只认 `app.exit`（PropertyAccess）一种拼法，于是解构
+ * 判据经过两次加固：第一版只认 `app.exit`（PropertyAccess）一种拼法，于是解构
  * `const { exit } = app` 与下标 `app['exit']` 两种同样摘掉 receiver 的写法都绕过——review agent
- * 各测 `3/3 green`。现在 `detachedMemberReads` 枚举「成员被读出来的每一种方式」：属性访问、
+ * 各测 `3/3 green`。第二版 `detachedMemberReads` 枚举「成员被读出来的每一种方式」：属性访问、
  * 字符串下标、静态可折叠的拼接下标、（重命名）解构；静态解析不出成员名的动态键标成 unclassified
  * 并在宿主是 electron 单例时**响亮失败**，而不是静默放过（记忆 forbidden-list-guard-always-leaks）。
- * 加固后复测：两种旧 bypass（解构 / 下标）均由主扫描 red，原始缺陷（`exit: app.exit`）仍 red。
+ * 复测：两种旧 bypass（解构 / 下标）均由主扫描 red，原始缺陷（`exit: app.exit`）仍 red。
+ *
+ * 第三次加固（本轮）：判据原先三个分支都按 `ts.isIdentifier(node.expression)` 认宿主，于是运行时
+ * 是 no-op 的**透明包裹**——括号 `(app)`、非空断言 `app!`、`as` / `satisfies` 类型转换——把宿主一裹
+ * 就整族静默绕过（`const f = (app as any).exit` 补丁前得 `[]`；`(app as any)['exit']`、
+ * `const { exit } = (app as any)` 同）。这些编译产物就是 `app.exit`，摘下来一样丢 receiver。现在
+ * 三个分支的宿主判定改走 `singletonIdOf`（先剥净透明包裹再取标识符），由自检
+ * `前提自检：穿过运行时透明包裹（…）的摘取也要认出` 钉住：把宿主判定改回 `ts.isIdentifier` 那个变异
+ * 会让 6 个 wrapper 探针退回 `[]`、该条 red。
  *
  * 仍在的盲点（诚实记录，不让注释许诺超过断言）：
  *   - 成员经**中间变量**再摘（`const a = app; const { exit } = a`）——判据只认 initializer 直接是
- *     单例标识符的解构；跨变量要 TypeChecker 做符号解析，本文件是 createSourceFile 词法走查，够不到。
+ *     单例标识符（剥净透明包裹后）的解构；跨变量要 TypeChecker 做符号解析，本文件是 createSourceFile 词法走查，够不到。
  *   - 真正的**动态键**（`app[runtimeName]`）无法静态判成员名，只能标 unclassified 让人回看，判不出
  *     它摘的到底是方法还是属性。这是有意为之的保守出口，不是遗漏。
+ *   - 从**命名空间链**上摘（`electron.app.exit`、`const { app: { exit } } = electron`）——判据只认根对象
+ *     是**裸标识符单例**（`app.exit`）的形状；`electron.app.exit` 的根是 `electron.app`（一个
+ *     PropertyAccess，不是 Identifier），要判它等于 `app` 单例得靠符号解析，词法走查够不到。今天
+ *     `src/main` 全是 `import { app } from 'electron'` 具名导入（grep 可证，无 `import * as electron`），
+ *     所以这条路线一处都不存在——这是**人工观察**，不由机器强制（强制「不许命名空间导入」会对
+ *     `import * as electron` + 只做正常调用 `electron.app.exit(1)` 的合法代码发假红）。这条盲点的
+ *     **当前行为**被 `前提自检：命名空间链上的摘取是当前的已知盲点` 钉住：一旦有人给判据补上符号解析、
+ *     让 `electron.app.exit` 也被认出，那条自检就 red，逼人回来把这段盲点声明一起更新。
  */
 
 const MAIN_DIR = fileURLToPath(new URL('../src/main', import.meta.url))
@@ -120,36 +136,59 @@ function detachedMemberReads(sourceText: string, fileName: string): MemberRead[]
     return null
   }
 
+  // 剥掉运行时的**透明包裹**再认单例标识符。括号 `(app)`、非空断言 `app!`、`as` / `satisfies`
+  // 类型转换在运行时都是 no-op：`(app as any).exit` / `app!.exit` 编译产物就是 `app.exit`，摘下来
+  // 一样丢 receiver，真机上一样抛 Illegal invocation，而 tsc 与普通对象 fixture 一样沉默。只按
+  // `ts.isIdentifier(node.expression)` 认宿主时，这一整族写法全部静默绕过（本轮修补前实测：
+  // `const f = (app as any).exit` 得 `[]`）。返回被包裹的最内层标识符，非标识符返回 null。
+  const singletonIdOf = (node: ts.Expression): ts.Identifier | null => {
+    let inner: ts.Expression = node
+    while (
+      ts.isParenthesizedExpression(inner) ||
+      ts.isNonNullExpression(inner) ||
+      ts.isAsExpression(inner) ||
+      ts.isSatisfiesExpression(inner)
+    ) {
+      inner = inner.expression
+    }
+    return ts.isIdentifier(inner) ? inner : null
+  }
+
   const walk = (node: ts.Node): void => {
-    if (ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.expression) && !isCallee(node)) {
-      // 1) 属性访问 app.exit —— 不在调用位置（`app.exit(1)` 的 receiver 在场，不算摘）。
-      found.push({ line: lineOf(node), object: node.expression.text, kind: 'member', member: node.name.text })
-    } else if (ts.isElementAccessExpression(node) && ts.isIdentifier(node.expression) && !isCallee(node)) {
-      // 2/3) 下标访问 app['exit'] 与拼接下标 app['ex' + 'it'] —— 同样排除调用位置。
-      const key = staticString(node.argumentExpression)
-      if (key !== null) {
-        found.push({ line: lineOf(node), object: node.expression.text, kind: 'member', member: key })
-      } else if (!ts.isNumericLiteral(node.argumentExpression)) {
-        // 静态解析不出成员名的非数字下标：归类不了，留成 unclassified 让主扫描按宿主是否单例来响亮。
-        found.push({ line: lineOf(node), object: node.expression.text, kind: 'unclassified', text: node.getText(source) })
+    if (ts.isPropertyAccessExpression(node) && !isCallee(node)) {
+      // 1) 属性访问 app.exit / (app as any).exit —— 不在调用位置（`app.exit(1)` 的 receiver 在场，不算摘）。
+      const object = singletonIdOf(node.expression)
+      if (object) found.push({ line: lineOf(node), object: object.text, kind: 'member', member: node.name.text })
+    } else if (ts.isElementAccessExpression(node) && !isCallee(node)) {
+      // 2/3) 下标访问 app['exit'] 与拼接下标 app['ex' + 'it']（含穿过包裹的 `(app as any)['exit']`）—— 同样排除调用位置。
+      const object = singletonIdOf(node.expression)
+      if (object) {
+        const key = staticString(node.argumentExpression)
+        if (key !== null) {
+          found.push({ line: lineOf(node), object: object.text, kind: 'member', member: key })
+        } else if (!ts.isNumericLiteral(node.argumentExpression)) {
+          // 静态解析不出成员名的非数字下标：归类不了，留成 unclassified 让主扫描按宿主是否单例来响亮。
+          found.push({ line: lineOf(node), object: object.text, kind: 'unclassified', text: node.getText(source) })
+        }
       }
     } else if (
       ts.isBindingElement(node) &&
       ts.isObjectBindingPattern(node.parent) &&
       ts.isVariableDeclaration(node.parent.parent) &&
-      node.parent.parent.initializer !== undefined &&
-      ts.isIdentifier(node.parent.parent.initializer)
+      node.parent.parent.initializer !== undefined
     ) {
-      // 4) 解构 const { exit } = app —— 解构天生就是摘（拿到的绑定没有 receiver），无「调用位置」豁免。
-      // 键取 propertyName ?? name，故重命名解构 const { exit: e } = app 也算在内。
-      const object = node.parent.parent.initializer.text
-      const key = node.propertyName ?? node.name
-      if (ts.isIdentifier(key) || ts.isStringLiteralLike(key)) {
-        found.push({ line: lineOf(node), object, kind: 'member', member: key.text })
-      } else if (ts.isComputedPropertyName(key)) {
-        const resolved = staticString(key.expression)
-        if (resolved !== null) found.push({ line: lineOf(node), object, kind: 'member', member: resolved })
-        else found.push({ line: lineOf(node), object, kind: 'unclassified', text: node.getText(source) })
+      // 4) 解构 const { exit } = app / const { exit } = (app as any) —— 解构天生就是摘（拿到的绑定
+      // 没有 receiver），无「调用位置」豁免。键取 propertyName ?? name，故重命名解构 const { exit: e } = app 也算在内。
+      const object = singletonIdOf(node.parent.parent.initializer)
+      if (object) {
+        const key = node.propertyName ?? node.name
+        if (ts.isIdentifier(key) || ts.isStringLiteralLike(key)) {
+          found.push({ line: lineOf(node), object: object.text, kind: 'member', member: key.text })
+        } else if (ts.isComputedPropertyName(key)) {
+          const resolved = staticString(key.expression)
+          if (resolved !== null) found.push({ line: lineOf(node), object: object.text, kind: 'member', member: resolved })
+          else found.push({ line: lineOf(node), object: object.text, kind: 'unclassified', text: node.getText(source) })
+        }
       }
     }
     ts.forEachChild(node, walk)
@@ -186,37 +225,119 @@ describe('electron 单例的方法不许脱离宿主对象', () => {
       .not.toContain('name')
   })
 
-  it('前提自检：判据认得出摘下来的方法的四种拼法，也不会把正常调用与注释算进来', () => {
-    // 这条守的是「判据自己失效」：`detachedMemberReads` 恒返回空数组时，下面那条主守卫会
-    // **静默全绿**，而它正是这个仓库最贵的一族假绿。所以判据的每一侧都要在场，且都由这条钉住。
-    const probe = [
-      'const shell = { exit: app.exit }', // 点号摘下来——必须认出
-      "const g = app['exit']", // 下标摘下来（字符串字面量键）——必须认出
-      "const h = app['ex' + 'it']", // 拼接下标——静态折出成员名，必须认出
-      'const { exit } = app', // 解构——必须认出
-      'const { exit: e } = app', // 重命名解构——键取 propertyName，必须认出
-      'app.exit(1)', // 正常调用，receiver 在场——不许算进来
-      '/** 说明：不要写 app.quit，它会丢 receiver */', // 注释——第一版正则在这里吃过八条假红
-      'const message = "app.quit 也不该被算进来"' // 字符串
-    ].join('\n')
-    const reads = detachedMemberReads(probe, 'probe.ts')
-    const names = reads.filter((read) => read.kind === 'member').map((read) => `${read.object}.${read.member}`)
-    // 四种拼法都要把 exit 从 app 上摘出来：点号 1 次 + 两种下标 2 次 + 两种解构 2 次 = 5 次。
-    expect(names.filter((name) => name === 'app.exit'), '摘下来的五种写法没被全部认出——某种拼法漏了')
-      .toHaveLength(5)
-    expect(names, '摘下来的方法没被认出——主守卫此刻什么都不检查').toContain('app.exit')
-    expect(names.filter((name) => name === 'app.exit(1)'), '正常调用 `app.exit(1)` 被算成摘下来了——假红')
-      .toHaveLength(0)
-    expect(names, '注释或字符串里的 `app.quit` 被算进来了——判据没有词法边界').not.toContain('app.quit')
+  // 为什么每种拼法各占一条用例（#742 同族，本轮实测）：这几组断言原先挤在一个 it 里，正向计数排在
+  // 最前，反向自证（正常调用与注释不许被算进来 / 合法调用不许被标 unclassified）排在后面。任何让正向
+  // 计数失败的变异都让反向自证变成**死代码**，于是「判据瞎了」和「判据误伤合法代码」这两类相反的缺陷
+  // 被同一条红压成一件事（记忆 two-throws-in-one-it-mask-each-other）。同时那个 `toHaveLength(5)`
+  // 比缺陷粗：漏掉哪一种拼法都只是「5 变 4」，说不出是哪一种（记忆 mutation-must-change-one-thing）。
+  //
+  // 顺带删掉一条恒被上面覆盖的断言：原先在计数之后还有一句 `expect(names).toContain('app.exit')`，
+  // 它严格弱于「恰好 5 次」，不可能独立报红——是纯噪声。
+  const DETACH_SPELLINGS: ReadonlyArray<{ why: string; code: string }> = [
+    { why: '点号摘取', code: 'const shell = { exit: app.exit }' },
+    { why: '字符串字面量下标', code: "const g = app['exit']" },
+    { why: '静态可折叠的拼接下标', code: "const h = app['ex' + 'it']" },
+    { why: '解构', code: 'const { exit } = app' },
+    { why: '重命名解构', code: 'const { exit: e } = app' }
+  ]
 
+  it.each(DETACH_SPELLINGS)('前提自检：$why 被认成一次摘取', ({ code }) => {
+    // 这条守的是「判据自己失效」：`detachedMemberReads` 恒返回空数组时，下面那条主守卫会
+    // **静默全绿**，而它正是这个仓库最贵的一族假绿。所以判据的每一侧都要在场，且各自可观测。
+    const names = detachedMemberReads(code, 'probe.ts')
+      .filter((read) => read.kind === 'member')
+      .map((read) => `${read.object}.${read.member}`)
+    expect(names, `这种摘取写法没被认出，主守卫对它什么都不检查：${code}`).toEqual(['app.exit'])
+  })
+
+  it.each([
+    { why: '正常调用（receiver 在场）', code: 'app.exit(1)' },
+    // 注释：第一版正则在这里吃过八条假红。
+    { why: '注释里提到成员', code: '/** 说明：不要写 app.quit，它会丢 receiver */' },
+    { why: '字符串里提到成员', code: 'const message = "app.quit 也不该被算进来"' }
+  ])('前提自检：$why 不算一次摘取', ({ code }) => {
+    const reads = detachedMemberReads(code, 'probe.ts')
+    expect(reads.filter((read) => read.kind === 'member'), `合法写法被算成摘取了——假红：${code}`).toEqual([])
+    expect(reads.filter((read) => read.kind === 'unclassified'), `合法写法被误标成可疑：${code}`).toEqual([])
+  })
+
+  it.each([
+    { why: '运行期键的下标', code: "const k = 'exit'; const x = app[k]" },
+    { why: '运行期键的解构', code: "const k = 'exit'; const { [k]: v } = app" }
+  ])('前提自检：$why 被标成 unclassified 而不是静默放过', ({ code }) => {
     // 归类不了的可疑形状必须响亮，不能静默跳过（记忆 forbidden-list-guard-always-leaks）。
-    const dynamic = detachedMemberReads("const k = 'exit'; const x = app[k]; const { [k]: v } = app", 'probe.ts')
     expect(
-      dynamic.filter((read) => read.kind === 'unclassified'),
-      '静态解析不出成员名的下标/解构没有被标成 unclassified——归类不了的形状被静默放过了'
-    ).toHaveLength(2)
-    // 反向自证：合法调用不会被误标成 unclassified。
-    expect(detachedMemberReads('app.exit(1)', 'probe.ts').filter((r) => r.kind === 'unclassified')).toHaveLength(0)
+      detachedMemberReads(code, 'probe.ts').filter((read) => read.kind === 'unclassified'),
+      `静态解析不出成员名的写法被静默放过了：${code}`
+    ).toHaveLength(1)
+  })
+
+  it('前提自检：命名空间链上的摘取是当前的已知盲点', () => {
+    // 把头部残留盲点清单里「命名空间链」那一条做成**可证伪**的断言，而不是一句只写在注释里的话。
+    // 判据只认根对象是**裸标识符单例**（`app.exit` / `const { exit } = app`）的摘取；从命名空间链上摘
+    // （`electron.app.exit`、`const { app: { exit } } = electron`）今天**认不出** exit——`electron.app`
+    // 是 PropertyAccess 而不是 Identifier，要判它就是那个 `app` 单例得靠符号解析，本文件的词法走查够不到。
+    //
+    // 这条盲点今天不构成真缺陷：`src/main` 全是 `import { app } from 'electron'` 具名导入，没有
+    // `import * as electron`，所以命名空间链的摘取一处都不存在（见报告里的 grep）。这里不去强制
+    // 「不许命名空间导入」——那会对 `import * as electron` + 只做合法调用 `electron.app.exit(1)` 发假红。
+    // 这条钉的是**当前行为**：一旦有人给判据补上符号解析、让下面这两个 exit 被认出，断言就 red，
+    // 逼人回来把头部那段盲点声明与这条自检一起更新（记忆 expired-reason-for-not-mapping：
+    // 刻意不覆盖的理由要做成可被质询的断言，别只写进注释里等它过期）。
+    const chainMembers = detachedMemberReads(
+      'const f = electron.app.exit\nconst { app: { exit } } = electron',
+      'probe.ts'
+    )
+      .filter((read) => read.kind === 'member')
+      .map((read) => `${read.object}.${read.member}`)
+    expect(chainMembers, '命名空间链上的 exit 现在被认出来了——盲点被补上了，去更新头部残留盲点清单与本自检')
+      .not.toContain('app.exit')
+    expect(chainMembers, '命名空间链上的 exit 现在被认出来了（解构形）——去更新头部残留盲点清单与本自检')
+      .not.toContain('electron.exit')
+  })
+
+  it('前提自检：穿过运行时透明包裹（括号 / 非空断言 / as / satisfies）的摘取也要认出', () => {
+    // 本轮新补的盲点：判据原先只按 `ts.isIdentifier(node.expression)` 认宿主，于是运行时是 no-op 的
+    // 透明包裹——括号 `(app)`、非空断言 `app!`、`as` / `satisfies` 类型转换——把宿主一裹就整族静默绕过。
+    // 这些写法编译产物就是 `app.exit`，摘下来一样丢 receiver、真机上一样抛 Illegal invocation，而
+    // tsc 与普通对象 fixture 一样沉默（`(app as any).exit` 尤其像样：为压类型报错随手 cast 就顺手摘掉了）。
+    //
+    // 曾经存活、现在被杀的**确切变异**（补丁前实测，counts 见报告）：把三个分支的宿主判定从
+    // `singletonIdOf(node.expression)`（剥包裹后取标识符）改回 `ts.isIdentifier(node.expression)`，
+    // 下面 6 个 wrapper 探针全部退回 `[]`，本条 red（`toHaveLength(6)` 收到 0）；补丁后 6 个全部认出，本条 green。
+    //
+    // 仍**不覆盖**：宿主经中间变量再摘（`const a = app; const { exit } = a`）、真正的动态键
+    // （`app[runtimeName]` 走 unclassified 让人回看）——两者都要 TypeChecker 做符号解析，本文件的
+    // createSourceFile 词法走查够不到；命名空间链（`electron.app.exit`）见上一条自检。
+    const wrapped = [
+      'const a = app!.exit', // 非空断言
+      'const b = (app).exit', // 括号
+      'const c = (app as any).exit', // as 转换（最像样的误用）
+      'const d = (app as unknown as never).exit', // 链式转换
+      "const e = (app as any)['exit']", // 转换 + 下标
+      'const { exit } = (app as any)' // 转换 + 解构
+    ].join('\n')
+    const wrappedExit = detachedMemberReads(wrapped, 'probe.ts')
+      .filter((read) => read.kind === 'member')
+      .map((read) => `${read.object}.${read.member}`)
+      .filter((name) => name === 'app.exit')
+    expect(wrappedExit, '穿过 (app)/app!/(app as T) 的摘取没被全部认出——透明包裹这族又能静默绕过了')
+      .toHaveLength(6)
+
+    // 反向自证：合法形状不能因为这次放宽而误红。
+    // 1) 穿过包裹的**正常调用**，receiver 在场，不算摘（isCallee 在剥包裹后仍成立）。
+    for (const legalCall of ['app.exit(1)', '(app).exit(1)', '(app as any).exit(1)', 'app!.exit(1)']) {
+      expect(
+        detachedMemberReads(legalCall, 'probe.ts').filter((r) => r.kind === 'member'),
+        `合法调用 ${legalCall} 被算成摘下来了——放宽包裹后产生了假红`
+      ).toHaveLength(0)
+    }
+    // 2) 宿主本身不是裸标识符（`foo().exit` / `(app.bar).exit`）不许被当成从单例 `app` 上摘。
+    const notBareId = detachedMemberReads('const f = foo().exit\nconst g = (app.bar).exit', 'probe.ts')
+      .filter((read) => read.kind === 'member')
+      .map((read) => `${read.object}.${read.member}`)
+    expect(notBareId, 'foo().exit 被误当成单例摘取').not.toContain('foo.exit')
+    expect(notBareId, '(app.bar).exit 应记成 app.bar（读了 bar），不该冒出 app.exit').not.toContain('app.exit')
   })
 
   it('src/main 里没有从 electron 单例上摘下来的方法引用', () => {

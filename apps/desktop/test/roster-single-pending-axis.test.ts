@@ -24,20 +24,34 @@ import ts from 'typescript'
  *      而用户看得见的 token 用量静默消失（那个 describe 的注释记着这次实测）。判定层有人守、
  *      接线层无人守，是本仓反复出现的形状。
  *
- *      B 的判据本轮加固过：第一版把「派生」判成「提到」（`referencesAny`），于是
+ *      B 的判据本轮加固过两层：第一版把「派生」判成「提到」（`referencesAny`），于是
  *      `workspacePath: session.id ? '' : ''` 被放行——`session` 在三元条件里出现，两支却是同一个
  *      常量 `''`，值恒为 `''`，这一列没接上真数据（review agent 实测 `2/2 green`、`16/16 combined`）。
  *      「提到 source」不是「值随 source 变」：条件里的 source 只有当两支的值**不同**时才真的左右结果。
- *      现在用 {@link valueDependsOnSource} 判值依赖——三元两支逐字相同即视为源无关常量。
+ *      改用 {@link valueDependsOnSource} 判值依赖——三元两支相同即视为源无关常量。
+ *
+ *      第二层（本轮）：两支的「相同」此前用 `getText().trim()`（原始文本）比，于是
+ *      `session.id ? '' : ""` 又绕过——两支运行期都是空串，只是一个单引号一个双引号，**文本**不同就
+ *      被当成派生。这正是 191f607 给另外四条守卫治过的病在本文件的残留（「匹配一种拼法」而非
+ *      「归一后比较」）。现在两支经 {@link canonicalConstant} 归一后再比：引号风格、`0`/`0x0` 这类
+ *      等价拼法不再算「不同」。
+ *
+ *      第三层（本轮再补）：归一化此前只认**扁平字面量**两支，于是**嵌套常量三元**又绕过——
+ *      `session.busy ? (x ? '' : '') : ''` 两支运行期都是 `''`，可 `(x ? '' : '')` 与 `''` 的文本不同，
+ *      被当成派生（本轮实测这条 bypass 存活，见下方 `nestConst` 的成对自检）。现在 {@link canonicalConstant}
+ *      **递归**归一三元、并穿透括号——它是纯**结构折叠**、不做算术求值，所以照旧不会误伤 `'a' : 'b'`
+ *      这类真派生。注意这不需要 TypeChecker：两支各自折到同一常量身份，是语法层就看得穿的事。
  *
  * 两条都走 TS parser 而不是正则，且各自带在场自检：谓词永远为假、或扫描落空时，是自检先红，
  * 而不是「一个违规都没找到」静默通过（[[false-green-gate-patterns]]）。
  *
- * 仍在的盲点（诚实记录）：值依赖是**语法**层的，不做常量折叠或跨变量数据流——
+ * 仍在的盲点（诚实记录）：值依赖是**语法**层的，不做**算术/字符串求值**、常量折叠或跨变量数据流——
  * `const blank = ''; workspacePath: session.id ? blank : blank2` 若 `blank !== blank2` 逐字不同会被
- * 当成派生（哪怕两个变量运行期相等）；把常量藏进一个提到 session 的 helper 调用
- * （`f(session)` 而内部丢弃入参）也会被算派生。抓这些要 TypeChecker 的常量求值与过程间分析，本文件是
- * createSourceFile 词法/语法走查够不到——这是有意接受的边界，不是遗漏。
+ * 当成派生（哪怕两个变量运行期相等）；`session.id ? 'a' + 'b' : 'ab'`（要把 `'a'+'b'` 化简成 `'ab'` 才知两支
+ * 相等）、`session.a ? (session, 'x') : 'x'`（逗号运算丢弃 session、要求值顺序分析）、以及把常量藏进一个
+ * 提到 session 的 helper 调用（`f(session)` 而内部丢弃入参）都仍被算派生。**嵌套常量三元**曾在此列，
+ * 本轮已由 {@link canonicalConstant} 的结构折叠收掉，不再是盲点。抓剩下这些要 TypeChecker 的常量求值
+ * 与过程间分析，本文件是 createSourceFile 词法/语法走查够不到——这是有意接受的边界，不是遗漏。
  */
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -118,6 +132,40 @@ function referencesAny(node: ts.Node, names: readonly string[]): boolean {
 }
 
 /**
+ * 一个字面量结点的**归一化常量身份**——两个运行期相等的常量，无论怎么拼，都归到同一个字符串。
+ *
+ * 这一层是本轮修的：三元两支的比较此前直接用 `getText().trim()`（原始文本），于是
+ * `session.id ? '' : ""` 被放行——两支运行期都是空串，但一个用单引号一个用双引号，**文本**不同，
+ * 于是 `!==` 成立、被当成派生。这正是 191f607 给另外四条守卫治过的病（「匹配一种拼法」而非
+ * 「归一后比较」）在本文件的残留：换个引号/数字写法就绕过同一档判据（[[counting-a-symbol-misses-other-spellings]]）。
+ * 现在字符串按解析后的字符值比、数字按数值比、true/false/null 各归一，引号风格与 `0`/`0x0` 这类
+ * 等价拼法不再算「不同」。
+ *
+ * 本轮再补一层**结构折叠**：括号原样穿透，三元**递归**归一——两支归一到同一身份，则整个三元就是那个
+ * 常量，条件是什么都不影响。补这层的原因是先前它对非字面量一律 `getText()` 兜底，于是
+ * `session.busy ? (x ? '' : '') : ''` 又绕过：两支运行期都是 `''`，可 `(x ? '' : '')` 与 `''` 的**文本**
+ * 不同，被当成派生（本轮实测这条 bypass 存活，见下方 valueDependsOnSource 的成对自检里 `nestConst`）。
+ * 关键是这层**不做算术/字符串求值**（`'a' + 'b'` 不化简为 `'ab'`），只做结构折叠——两支各自还折不出
+ * 同一身份时仍落回 `getText()` 兜底当「不同」，宁可漏抓也不误伤。
+ */
+function canonicalConstant(node: ts.Node): string {
+  let current: ts.Node = node
+  while (ts.isParenthesizedExpression(current)) current = current.expression
+  if (ts.isConditionalExpression(current)) {
+    const whenTrue = canonicalConstant(current.whenTrue)
+    const whenFalse = canonicalConstant(current.whenFalse)
+    // 两支归一到同一常量身份→整个三元就是那个常量；否则落回原始文本兜底当「不同」。
+    return whenTrue === whenFalse ? whenTrue : `text:${current.getText().trim()}`
+  }
+  if (ts.isStringLiteralLike(current)) return `str:${current.text}`
+  if (ts.isNumericLiteral(current)) return `num:${Number(current.text)}`
+  if (current.kind === ts.SyntaxKind.TrueKeyword) return 'bool:true'
+  if (current.kind === ts.SyntaxKind.FalseKeyword) return 'bool:false'
+  if (current.kind === ts.SyntaxKind.NullKeyword) return 'null'
+  return `text:${current.getText().trim()}`
+}
+
+/**
  * 这个表达式的**值**是否会随 `sources` 改变——即它是不是真的从 session/catalog **派生**，而不只是
  * 顺口**提到**了它们。
  *
@@ -127,17 +175,20 @@ function referencesAny(node: ts.Node, names: readonly string[]): boolean {
  * expected-value-must-not-derive-from-mutation-target 的同族：判据比它自称守的事弱）。
  *
  * 「提到」与「派生」的区别落在**三元条件**上：条件决定走哪一支，只有当两支的值**不同**时，条件里的
- * source 才真的能改变结果；两支逐字相同（`? '' : ''`）时条件无关紧要，值是源无关的常量。别处（属性访问、
- * 调用实参、二元运算元、下标）里出现 source 都是值位，直接算派生。
+ * source 才真的能改变结果；两支归一后相等（`? '' : ''`、`? '' : ""`、`? 0 : 0x0`）时条件无关紧要，值是
+ * 源无关的常量。别处（属性访问、调用实参、二元运算元、下标）里出现 source 都是值位，直接算派生。
+ *
+ * 两支的相等用 {@link canonicalConstant} 归一后比，而非原始文本：见其说明——文本比只认一种拼法，
+ * 换引号或换数字写法就把恒等的两支伪装成「不同」而绕过。
  */
 function valueDependsOnSource(node: ts.Node, sources: readonly string[]): boolean {
   if (ts.isIdentifier(node)) return sources.includes(node.text)
   if (ts.isConditionalExpression(node)) {
     if (valueDependsOnSource(node.whenTrue, sources) || valueDependsOnSource(node.whenFalse, sources)) return true
-    // 分支的值都与 source 无关：只有当条件提到 source **且**两支不逐字相同，条件才真的左右结果。
+    // 分支的值都与 source 无关：只有当条件提到 source **且**两支归一后不相等，条件才真的左右结果。
     return (
       referencesAny(node.condition, sources) &&
-      node.whenTrue.getText().trim() !== node.whenFalse.getText().trim()
+      canonicalConstant(node.whenTrue) !== canonicalConstant(node.whenFalse)
     )
   }
   let dependent = false
@@ -197,11 +248,18 @@ describe('名册只有一条"这一行需要我吗"的轴，且每一列都真�
   const source = parse(LIB)
   const build = functionNamed(source, 'buildAgentRoster')
 
-  it('入参没有可选成员——可选入参就是"这一列可以永久缺席"的许可证', () => {
+  // 为什么每条自检各占一个 it（#742，本轮实测）：这两条门原先各把「谓词自检」与「生产判据」挤在
+  // 同一个 it 里，且生产判据排在最后。于是任何一条自检失败都让生产判据变成**死代码**——变异
+  // 「canonicalConstant 不再递归三元」实测只打红 nested 那条自检，`underivedProperties(literal!)`
+  // 那句从未执行（记忆 two-throws-in-one-it-mask-each-other）。判别器：两个不同变异若报出同一个
+  // 用例名，它们就在互相掩盖。拆开之后每个变异各红各的，计数本身也变成了可读的信号。
+  it('前提自检：扫描确实落在 buildAgentRoster 上', () => {
     expect(build, 'buildAgentRoster 不在 agent-roster.ts 里了——这条门的扫描落空了').toBeDefined()
+  })
 
+  it('前提自检：optionalInputMembers 抓得到可选成员与整个可选入参', () => {
     // 谓词自检：现场合成一份带可选成员的入参，它必须被抓到。少了这一步，`optionalInputMembers`
-    // 恒返回空数组也会让这条断言绿着——那正是它要防的形状。
+    // 恒返回空数组也会让生产判据绿着——那正是它要防的形状。
     const synthetic = functionNamed(
       parseText(
         'export function buildAgentRoster(input: { sessions: readonly S[]; unreadCount?: Record<string, number> }): R[] { return [] }'
@@ -212,14 +270,19 @@ describe('名册只有一条"这一行需要我吗"的轴，且每一列都真�
     // 整个入参可缺席是同一张许可证的更大号版本，也要抓得到。
     const wholeParam = functionNamed(parseText('export function f(input?: { a: number }): void {}'), 'f')
     expect(optionalInputMembers(wholeParam!)).toEqual(['input'])
-    // 反向：全必填的入参不许被误报，否则这条门只是恒红。
+  })
+
+  it('前提自检：全必填的入参不许被误报', () => {
+    // 反向：否则这条门只是恒红，修法把合法写法一起收进来也不会有人发现。
     const clean = functionNamed(parseText('export function f(input: { a: number; b: string }): void {}'), 'f')
     expect(optionalInputMembers(clean!)).toEqual([])
+  })
 
+  it('入参没有可选成员——可选入参就是"这一列可以永久缺席"的许可证', () => {
     expect(optionalInputMembers(build!)).toEqual([])
   })
 
-  it('每一列都由 session/catalog 派生——写死的常量是"没人喂数"的另一种写法', () => {
+  it('前提自检：投影那一行的对象字面量找得到，且确实是一整排列', () => {
     const literal = rowLiteralIn(build!)
     expect(literal, '投影那一行的对象字面量找不到了——判据落在了空处').toBeDefined()
 
@@ -231,7 +294,9 @@ describe('名册只有一条"这一行需要我吗"的轴，且每一列都真�
     expect(names.length).toBeGreaterThan(8)
     expect(names).toContain('awaitingReply')
     expect(names).toContain('usage')
+  })
 
+  it('前提自检：四种"没人喂数"的写法都被抓到（含"提到但不派生"的伪装）', () => {
     // 谓词自检：四种写法都必须被抓到——写死的常量、从入参兜底取值（事故原样，注意它下标里
     // 提到了 `session`，只判「派生自 session」会放行它）、展开、以及**「提到但不派生」的伪装**
     // （`session.id ? '' : ''`：条件里提到 session，两支却是同一个常量，值恒为 ''）——最后这种正是
@@ -250,8 +315,11 @@ describe('名册只有一条"这一行需要我吗"的轴，且每一列都真�
       'unreadCount',
       '...展开'
     ])
-    // 反向：全部真的从 session/catalog 派生的字面量不许被误报，否则这条门只是恒红。这里成对钉住
-    // 「三元条件里用 source 决定两个**不同**的真值」是合法派生——修法不能把这种正常写法一并误伤。
+  })
+
+  it('前提自检：真的从 session/catalog 派生的字面量不许被误报', () => {
+    // 反向：否则这条门只是恒红。这里成对钉住「三元条件里用 source 决定两个**不同**的真值」是合法
+    // 派生——修法不能把这种正常写法一并误伤。
     const clean = rowLiteralIn(
       functionNamed(
         parseText(
@@ -261,7 +329,46 @@ describe('名册只有一条"这一行需要我吗"的轴，且每一列都真�
       )!
     )
     expect(underivedProperties(clean!, ['session', 'catalog'], ['input'])).toEqual([])
+  })
 
+  it('前提自检：三元两支运行期恒等、只是拼法不同也算"没人喂数"', () => {
+    // 归一化自检（本轮加的第二层）：三元两支运行期恒等、只是拼法不同（引号风格 `'' : ""`、
+    // 数字写法 `0 : 0x0`）也必须被抓——否则换个拼法就复活「提到但不派生」的 bypass。这一对成对钉住：
+    // 恒等两支报为不合格，同一列换成**真的不同**的两支（`'a' : 'b'`）仍合法，修法不误伤正常派生。
+    const spellings = rowLiteralIn(
+      functionNamed(
+        parseText(
+          `function f() { return [{ sessionId: session.id, quoteConst: session.id ? '' : "", numConst: session.id ? 0 : 0x0, realDerive: session.busy ? 'a' : 'b' }] }`
+        ),
+        'f'
+      )!
+    )
+    expect(underivedProperties(spellings!, ['session', 'catalog'], ['input'])).toEqual(['quoteConst', 'numConst'])
+  })
+
+  it('前提自检：嵌套常量三元也算"没人喂数"', () => {
+    // 结构折叠自检（本轮加的第三层）：**嵌套常量三元**必须被抓。此前 canonicalConstant 只认扁平字面量
+    // 两支，对非字面量落 getText() 兜底，于是 `session.busy ? (x ? '' : '') : ''` 存活——两支运行期都是
+    // '' 却因 `(x ? '' : '')` 与 '' 文本不同被当成派生。
+    // 死掉的确切变异：把 canonicalConstant 退回「只认扁平字面量、非字面量一律 getText() 兜底」（删掉它
+    // 里面穿透括号 + 递归归一三元那一段），本条 nestConst 立刻从 offenders 消失、**本条**由绿转红。
+    // 这一对成对钉住：嵌套常量三元报为不合格，同一列换成**真的不同**的嵌套两支
+    // （`session.a ? (session.b ? 'z' : 'y') : 'x'`）仍合法，修法不误伤。
+    // 仍不覆盖（诚实记录，见文件头）：算术折叠 `? 'a'+'b' : 'ab'`、逗号运算 `? (session,'x') : 'x'`、
+    // 跨变量 `? blank : blank2`——它们要 TypeChecker 的常量求值/过程间分析，语法层够不到。
+    const nested = rowLiteralIn(
+      functionNamed(
+        parseText(
+          `function f() { return [{ sessionId: session.id, nestConst: session.busy ? (x ? '' : '') : '', realNest: session.a ? (session.b ? 'z' : 'y') : 'x' }] }`
+        ),
+        'f'
+      )!
+    )
+    expect(underivedProperties(nested!, ['session', 'catalog'], ['input'])).toEqual(['nestConst'])
+  })
+
+  it('每一列都由 session/catalog 派生——写死的常量是"没人喂数"的另一种写法', () => {
+    const literal = rowLiteralIn(build!)
     expect(underivedProperties(literal!, ['session', 'catalog'], ['input'])).toEqual([])
   })
 })
