@@ -72,6 +72,67 @@ describe('Control protocol', () => {
     })).toThrow('Region result')
   })
 
+  // resolveAgentMuxRegion has three error branches and NO negative-path test drove any of them: the
+  // success-path assertions above only reach the final `return`. Each of the next three it()s pins one
+  // branch, in its own it() so a mutation reddening one cannot be masked by another throwing first.
+  // Both AMBIGUOUS_REGION_TARGET branches assert their DISTINCT message, because the shared code alone
+  // cannot tell the duplicate-id guard apart from the multi-match guard.
+
+  it('resolveAgentMuxRegion throws AMBIGUOUS_REGION_TARGET when two regions share a regionId', () => {
+    // Kills: the duplicate-id guard condition replaced by `false && …` (guard never fires). With it off,
+    // a target that uniquely matches a THIRD region resolves successfully instead of erroring on the
+    // ambiguous set, so the assertion below (expecting a throw) reds. The message 'Open Region identity
+    // is ambiguous.' distinguishes this guard from the multi-match branch's 'Region target is ambiguous.'
+    const dupA = { ...agentRegion, regionId: 'dup', agentSessionId: 'session-a' }
+    const dupB = { ...browserRegion, regionId: 'dup' }
+    const unique = { ...terminalRegion, regionId: 'unique-region' }
+    const ambiguousSet: AgentMuxRegion[] = [dupA, dupB, unique]
+    expect(() => resolveAgentMuxRegion(ambiguousSet, { kind: 'region', regionId: 'unique-region' }))
+      .toThrowError(expect.objectContaining({
+        code: 'AMBIGUOUS_REGION_TARGET',
+        message: 'Open Region identity is ambiguous.'
+      }))
+    // Self-check: dropping the duplicate makes the SAME target resolve cleanly — proving the throw is
+    // the duplicate set, not the target. This is exactly the path the mutated guard would take (return
+    // `unique`), which is why the assertion above reds when the guard is disabled.
+    expect(resolveAgentMuxRegion([dupA, unique], { kind: 'region', regionId: 'unique-region' }))
+      .toEqual(unique)
+  })
+
+  it('resolveAgentMuxRegion throws REGION_NOT_OPEN when no region matches the target', () => {
+    // Kills: the no-match guard condition replaced by `false && …`. With it off, zero matches fall
+    // through to the multi-match guard and throw AMBIGUOUS_REGION_TARGET instead, so this asserts the
+    // specific code REGION_NOT_OPEN rather than merely "throws".
+    expect(() => resolveAgentMuxRegion(regions, { kind: 'region', regionId: 'does-not-exist' }))
+      .toThrowError(expect.objectContaining({
+        code: 'REGION_NOT_OPEN',
+        message: 'Region target is not currently open.'
+      }))
+    // Self-check: a target that DOES exist in the same set resolves — proving the fixture is well-formed
+    // and the throw is the missing id, not an empty/malformed region list.
+    expect(resolveAgentMuxRegion(regions, { kind: 'region', regionId: 'browser-right' })).toEqual(regions[1])
+  })
+
+  it('resolveAgentMuxRegion throws AMBIGUOUS_REGION_TARGET when an agent-session matches multiple regions', () => {
+    // Kills: the multi-match guard condition `matches.length !== 1` replaced by `false && …`. Two agent
+    // regions with DISTINCT regionIds (so the duplicate-id guard passes) share one agentSessionId, so an
+    // agent-session target matches both. With the guard off the function returns matches[0] instead of
+    // erroring. The message 'Region target is ambiguous.' distinguishes this from the duplicate-id branch.
+    const first = { ...agentRegion, regionId: 'agent-a', agentSessionId: 'shared-session' }
+    const second = { ...agentRegion, regionId: 'agent-b', agentSessionId: 'shared-session' }
+    const multiMatch: AgentMuxRegion[] = [first, second]
+    expect(() => resolveAgentMuxRegion(multiMatch, { kind: 'agent-session', agentSessionId: 'shared-session' }))
+      .toThrowError(expect.objectContaining({
+        code: 'AMBIGUOUS_REGION_TARGET',
+        message: 'Region target is ambiguous.'
+      }))
+    // Self-check: with only one of the two present, the same target resolves to exactly that region —
+    // proving both individually match, so the throw is the multiplicity, not a malformed fixture. This
+    // return of matches[0] is the path the disabled guard takes, which is why the assertion above reds.
+    expect(resolveAgentMuxRegion([first], { kind: 'agent-session', agentSessionId: 'shared-session' }))
+      .toEqual(first)
+  })
+
   it('requires one typed self caller and rejects legacy operations', () => {
     expect(parseAgentMuxControlRequest({
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,

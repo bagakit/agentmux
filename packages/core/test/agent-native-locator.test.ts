@@ -7,6 +7,15 @@ import {
 } from '../src/agent-native-locator.js'
 import { normalizeStoredAgentSession } from '../src/agent-session-store.js'
 
+// Control characters built by code point so the source carries no raw control bytes and no
+// ambiguous backslash escapes: ESC (C0), NEL (C1 low via 0x85), DEL (0x7f), C1 high (0x9f), TAB, LF.
+const ESC = String.fromCharCode(0x1b)
+const NEL = String.fromCharCode(0x85)
+const DEL = String.fromCharCode(0x7f)
+const C1_HIGH = String.fromCharCode(0x9f)
+const TAB = String.fromCharCode(0x09)
+const LF = String.fromCharCode(0x0a)
+
 function session(nativeHandle: unknown) {
   return {
     kind: 'agent' as const,
@@ -31,27 +40,41 @@ describe('native resume locator contract', () => {
     expect(normalizeNativeSessionId(' native-1 ')).toBe('native-1')
     expect(normalizeNativeSessionId('')).toBeUndefined()
     expect(normalizeNativeSessionId(' -resume-me')).toBeUndefined()
-    expect(normalizeNativeSessionId('\n native-1')).toBeUndefined()
-    expect(normalizeNativeSessionId('native\u001bsession')).toBeUndefined()
-    expect(normalizeNativeSessionId('native\u0085session')).toBeUndefined()
+    expect(normalizeNativeSessionId(LF + ' native-1')).toBeUndefined()
+    expect(normalizeNativeSessionId('native' + ESC + 'session')).toBeUndefined()
+    expect(normalizeNativeSessionId('native' + NEL + 'session')).toBeUndefined()
     expect(normalizeNativeSessionId('x'.repeat(MAX_NATIVE_SESSION_ID_BYTES + 1))).toBeUndefined()
+  })
+
+  it('rejects a DEL (0x7f) control byte in a session id and a transcript path', () => {
+    // Kills: hasUnsafeControlCharacters' lower C1 bound `code >= 0x7f` widened to `code >= 0x80`,
+    // which lets a raw DEL byte (0x7f) through to a native resume argv token or a filesystem path.
+    // Existing coverage exercises ESC (0x1b), NEL (0x85) and C1 (0x9f) but never 0x7f -- the exact
+    // edge the mutation moves. String#trim() does not strip DEL, so a survivor returns the raw
+    // string rather than undefined. Blind spot: this pins only 0x7f, not the rest of the C0/C1 range.
+    expect(normalizeNativeSessionId('native' + DEL + 'session')).toBeUndefined()
+    expect(normalizeNativeTranscriptPath('/tmp/session' + DEL + '.jsonl')).toBeUndefined()
+    // Presence self-check: the same locators WITHOUT the DEL byte normalize, so the rejection above
+    // is the control byte itself and not the surrounding shape -- otherwise both halves are vacuous.
+    expect(normalizeNativeSessionId('nativesession')).toBe('nativesession')
+    expect(normalizeNativeTranscriptPath('/tmp/session.jsonl')).toBe('/tmp/session.jsonl')
   })
 
   it('normalizes only absolute, bounded transcript paths', () => {
     expect(normalizeNativeTranscriptPath(' /tmp/session.jsonl ')).toBe('/tmp/session.jsonl')
     expect(normalizeNativeTranscriptPath('relative/session.jsonl')).toBeUndefined()
-    expect(normalizeNativeTranscriptPath('\t/tmp/session.jsonl')).toBeUndefined()
-    expect(normalizeNativeTranscriptPath('/tmp/session\t.jsonl')).toBeUndefined()
-    expect(normalizeNativeTranscriptPath('/tmp/session\u009f.jsonl')).toBeUndefined()
+    expect(normalizeNativeTranscriptPath(TAB + '/tmp/session.jsonl')).toBeUndefined()
+    expect(normalizeNativeTranscriptPath('/tmp/session' + TAB + '.jsonl')).toBeUndefined()
+    expect(normalizeNativeTranscriptPath('/tmp/session' + C1_HIGH + '.jsonl')).toBeUndefined()
     expect(normalizeNativeTranscriptPath('x'.repeat(MAX_NATIVE_TRANSCRIPT_PATH_BYTES + 1))).toBeUndefined()
   })
 
   it('rejects invalid locators when loading durable Session truth', () => {
     for (const nativeHandle of [
       { kind: 'provider', providerId: 'codex', sessionId: '-looks-like-a-flag' },
-      { kind: 'provider', providerId: 'codex', sessionId: 'native\u001bsession' },
+      { kind: 'provider', providerId: 'codex', sessionId: 'native' + ESC + 'session' },
       { kind: 'provider', providerId: 'codex', sessionId: 'native-1', transcriptPath: 'relative/session.jsonl' },
-      { kind: 'provider', providerId: 'codex', sessionId: 'native-1', transcriptPath: '/tmp/session\t.jsonl' },
+      { kind: 'provider', providerId: 'codex', sessionId: 'native-1', transcriptPath: '/tmp/session' + TAB + '.jsonl' },
       { kind: 'acp', adapterId: '-adapter', sessionId: 'acp-1' }
     ]) {
       expect(() => normalizeStoredAgentSession(session(nativeHandle)))
@@ -60,11 +83,11 @@ describe('native resume locator contract', () => {
   })
 
   it('rejects a native provider locator whose providerId is not the Agent provider', () => {
-    // acceptance#3 「providerId/sessionId 不匹配」: a well-formed provider locator that names a
-    // different provider than the Agent must be refused, not silently persisted. Every other
-    // locator case here is codex↔codex, so this cross-field mismatch was never constructed.
-    // The message (not merely the shared code) pins THIS guard: deleting it lets the record
-    // normalize cleanly because no other guard inspects nativeHandle.providerId.
+    // acceptance#3: a well-formed provider locator that names a different provider than the Agent
+    // must be refused, not silently persisted. Every other locator case here is codex-to-codex, so
+    // this cross-field mismatch was never constructed. The message (not merely the shared code) pins
+    // THIS guard: deleting it lets the record normalize cleanly because no other guard inspects
+    // nativeHandle.providerId.
     expect(() => normalizeStoredAgentSession(session({
       kind: 'provider',
       providerId: 'claude',
@@ -76,11 +99,10 @@ describe('native resume locator contract', () => {
   })
 
   it('rejects a hook receipt that does not identify its Agent Session', () => {
-    // acceptance#2 「Hook 后更新是原子且可重复的」+ objective「Provider hook 到达前后安全 round-trip」:
-    // the persisted hook receipt is the hook-after update, so it must name the same provider,
-    // Agent Session and Run as the record it rides on — otherwise a stale or foreign hook would
-    // corrupt the Session on reload. Each variant violates exactly one arm of the guard, and the
-    // message assertion pins this specific guard rather than the code shared across the family.
+    // acceptance#2 + objective: the persisted hook receipt is the hook-after update, so it must name
+    // the same provider, Agent Session and Run as the record it rides on -- otherwise a stale or
+    // foreign hook would corrupt the Session on reload. Each variant violates exactly one arm of the
+    // guard, and the message assertion pins this specific guard rather than the code shared across it.
     const base = {
       id: 'receipt-locator',
       providerId: 'codex',
