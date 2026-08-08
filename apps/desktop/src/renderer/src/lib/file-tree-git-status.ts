@@ -1,5 +1,6 @@
 import type { GitFileChange } from '../../../shared/contracts'
 import { workspaceRelativeGitPath } from './git-path-coordinates'
+import { gitChangeClass, type GitChangeClass } from './git-porcelain-status'
 
 /**
  * What source control says about one file-tree node. A closed union: the whole point of this task is
@@ -81,31 +82,37 @@ export const FILE_TREE_GIT_STATUS_LABEL: Record<FileTreeGitStatus, string> = {
 }
 
 /**
- * Collapse one git change into a single tree status.
+ * The projection from {@link GitChangeClass} onto this surface's vocabulary.
  *
- * The mark read is the same one the Changes panel labels with: the staged (index) column when the
- * file is staged, otherwise the worktree column. Git's status letters are an open set, so the tail
- * falls back to `modified` — any tracked, non-blank change is at least a modification; the fallback is
- * a real union member, never an "unknown" that would break the exhaustive tables above.
+ * The classification itself is not decided here — {@link gitChangeClass} owns it, reading **both**
+ * porcelain columns so a merge conflict is recognised as one before any single-column rule applies.
+ * That mattered: {@link fileTreeGitStatusOfChange} used to make the decision itself, and four of git's
+ * seven unmerged codes (`DD`/`AU`/`DU`/`AA`) came out as green `A` or red `D` with no conflict mark at
+ * all, actively hiding which files conflicted (#746). The other copy of the same hand-written switch —
+ * the Changes panel's label — carried the identical bug, which is the argument for one classifier
+ * rather than two.
+ *
+ * What is decided here is only the projection: the tree has one colour for a conflict and deliberately
+ * draws a copy like a rename, because a collapsed row has one mark to spend and `C` next to `R` buys the
+ * reader nothing. `Record<GitChangeClass, FileTreeGitStatus>`, so a new class cannot ship without a
+ * decision here.
  */
+const TREE_STATUS_OF_CLASS: Record<GitChangeClass, FileTreeGitStatus> = {
+  conflicted: 'conflicted',
+  untracked: 'untracked',
+  added: 'added',
+  deleted: 'deleted',
+  renamed: 'renamed',
+  // Git tells copies and renames apart; this surface does not, on purpose — see above.
+  copied: 'renamed',
+  // A type change (file → symlink, say) is a modification as far as "something changed here" goes.
+  typeChanged: 'modified',
+  modified: 'modified'
+}
+
+/** Collapse one git change into a single tree status, via {@link TREE_STATUS_OF_CLASS}. */
 export function fileTreeGitStatusOfChange(change: GitFileChange): FileTreeGitStatus {
-  if (change.untracked) return 'untracked'
-  const mark = change.staged ? change.index : change.worktree
-  switch (mark) {
-    case 'A':
-      return 'added'
-    case 'D':
-      return 'deleted'
-    case 'R':
-    case 'C':
-      return 'renamed'
-    case 'U':
-      return 'conflicted'
-    case 'M':
-    case 'T':
-    default:
-      return 'modified'
-  }
+  return TREE_STATUS_OF_CLASS[gitChangeClass(change)]
 }
 
 /** The higher-priority of two statuses, per {@link FILE_TREE_GIT_STATUS_PRIORITY}. */
