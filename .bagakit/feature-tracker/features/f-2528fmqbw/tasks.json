@@ -2,8 +2,8 @@
   "version": 2,
   "feat_id": "f-2528fmqbw",
   "plan_status": "reviewed",
-  "plan_revision": 2,
-  "supersedes_revision": 1,
+  "plan_revision": 3,
+  "supersedes_revision": 2,
   "review_ref": "docs/reviews/continuous-progress-2026-09-12.md",
   "source_refs": [
     "docs/reviews/continuous-progress-2026-09-12.md",
@@ -59,6 +59,37 @@
           {
             "from": "T-003",
             "to": "T-007"
+          }
+        ],
+        "removed": []
+      }
+    },
+    {
+      "revision": 3,
+      "supersedes_revision": 2,
+      "review_ref": "docs/reviews/continuous-progress-2026-09-12.md",
+      "source_refs": [
+        "docs/reviews/continuous-progress-2026-09-12.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006",
+        "T-007",
+        "T-008"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {},
+      "dependency_changes": {
+        "added": [
+          {
+            "from": "T-002",
+            "to": "T-008"
           }
         ],
         "removed": []
@@ -279,6 +310,38 @@
       "supersedes": [],
       "estimate_hours": 0.75,
       "introduced_in_revision": 2,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-008",
+      "depends_on": [
+        "T-002"
+      ],
+      "title": "Session 重启后的循环恢复",
+      "objective": "处理 Session/Run 重启替换后的循环配置、tick、readiness 与回执，建立幂等恢复检查和一致状态投影。",
+      "outcome": "重启后只检查一次，不复用旧 Run 证据；busy/error_paused 等状态可解释且可恢复。",
+      "acceptance": [
+        "旧 Run 的 tick/readiness/回执不能作用于新 Run，恢复检查最多执行一次",
+        "执行、循环、恢复状态分开显示；stale/未知/失败保留原因并支持手动恢复"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/continuous-progress-recovery.test.ts test/continuous-progress-recovery.test.tsx",
+          "proves": "Run 替换、幂等恢复和状态投影"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/continuous-progress-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "estimate_hours": 1.5,
+      "heavy": true,
+      "heavy_reason": "跨持久化 loop、Session Run 替换和观察状态投影",
+      "introduced_in_revision": 3,
       "status": "todo",
       "gate_result": null,
       "last_gate_commands": [],

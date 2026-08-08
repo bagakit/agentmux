@@ -35,6 +35,10 @@
     {
       "action": "task_plan_set",
       "detail": "revision=2; supersedes_revision=1"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=3; supersedes_revision=2"
     }
   ]
 }

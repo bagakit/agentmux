@@ -53,3 +53,9 @@ Session 列表部分成功、筛选和真实诊断指引，以及维护角色精
 Context 不是一条普通消息，也不是“剩余百分比”孤立数字。它表示当前 Session 的上下文容量消耗：已使用/容量、剩余比例，以及 Provider 报告的压缩或接近压缩阈值状态。若 Provider 没有暴露压缩阈值，只显示“剩余上下文”并明确未知，不臆测何时压缩；hover/详情显示采样时间与来源，不能把 queued 数量混进 Context。
 
 追加任务：T-006 抽取全局 Message Tools 并接入初始页；T-007 重做 Context 语义与可访问详情。两项依赖 T-003（观察/输入表面）但不改变 loop 的权限和投递边界。
+
+## 追加需求：Session 重启恢复（截图现场，2026-09-12）
+
+截图显示外置监督器在 Claude `working` 时同时记录 `error_paused`，且 Session 重启后状态没有形成可信的恢复链路。该问题属于本 Feature 的同一 Closure，追加 T-008，不创建平行 Feature。
+
+T-008 目标是 Run 替换/Session 重启后的幂等恢复：保留 loop 配置，废弃旧 Run 的 tick/readiness/回执，重新解析精确 Session 与新 Run，只执行一次恢复检查；将执行、循环、恢复三种状态分开投影，避免 busy 与 error_paused 并存却无法解释。验收必须覆盖正常重启、旧回执未知、stale binding、恢复竞态、窗口重载和失败后手动恢复。
