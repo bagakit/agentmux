@@ -11,6 +11,7 @@ import type {
   WorkspaceSelectionResult,
   WorktreeRetention
 } from '../shared/contracts.js'
+import { isWorktreeWorkspace } from '../shared/contracts.js'
 
 type ConfigWriter = {
   save(value: AppConfig): Promise<AppConfig>
@@ -239,7 +240,7 @@ export class WorktreeService {
     config: AppConfig
   ): Promise<{ config: AppConfig; removedPath: string }> {
     const workspace = this.workspace(config, input.workspaceId)
-    if (workspace.kind !== 'worktree' || !workspace.repoPath) {
+    if (!isWorktreeWorkspace(workspace) || !workspace.repoPath) {
       throw new Error(`Workspace is not a worktree: ${workspace.name}`)
     }
     const host = this.hostFor(workspace.hostId)

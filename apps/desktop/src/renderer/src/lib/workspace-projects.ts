@@ -1,4 +1,4 @@
-import { isScratchWorkspaceId, type WorkspaceRecord } from '../../../shared/contracts'
+import { isFolderWorkspace, isScratchWorkspaceId, type WorkspaceRecord } from '../../../shared/contracts'
 
 export type WorkspaceProject = {
   id: string
@@ -33,7 +33,7 @@ export function projectWorkspaces(workspaces: readonly WorkspaceRecord[]): Works
     const existing = projects.get(id)
     if (existing) {
       existing.workspaces.push(workspace)
-      if (workspace.kind === 'folder' && workspace.path === existing.repoPath) {
+      if (isFolderWorkspace(workspace) && workspace.path === existing.repoPath) {
         existing.preferredWorkspaceId = workspace.id
         existing.name = workspace.name
       }
@@ -42,7 +42,7 @@ export function projectWorkspaces(workspaces: readonly WorkspaceRecord[]): Works
     const repoPath = workspace.repoPath ?? workspace.path
     projects.set(id, {
       id,
-      name: workspace.kind === 'folder' ? workspace.name : basename(repoPath),
+      name: isFolderWorkspace(workspace) ? workspace.name : basename(repoPath),
       hostId: workspace.hostId,
       repoPath,
       workspaces: [workspace],
