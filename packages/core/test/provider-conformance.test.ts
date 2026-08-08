@@ -8,6 +8,7 @@ import {
   type AgentProvider
 } from '../src/agent-provider.js'
 import { createCodexProvider } from '../src/providers/index.js'
+import { HOOK_INSTALLATION_BY_PROVIDER } from '../src/providers/shared.js'
 import { AgentMuxError } from '../src/errors.js'
 import { BUILT_IN_AGENT_PROVIDER_IDS } from '../src/types.js'
 import { BUILT_IN_AGENT_LABELS } from '../src/agent-provider-id.js'
@@ -102,6 +103,30 @@ describe('built-in Provider conformance', () => {
         expect(mutation.content).not.toContain('undefined')
       }
     }
+  })
+
+  /**
+   * `HOOK_INSTALLATION_BY_PROVIDER`（providers/shared.ts）是 hook 安装归属的**类型层 SSOT**：
+   * `ProviderRequiringManagedHookResolver` 从它派生，`MANAGED_HOOK_PLAN_RESOLVERS` 拿那个类型当键域，
+   * 于是「声明了 explicit-managed 却漏挂 resolver」变成编译错误。但那张表是各 catalog `hookStrategy` 的
+   * **第二处投影**（类型层拿不回 catalog 里的字面量，只能另抄一份），两处天然会漂。
+   *
+   * 这条把两处投影逐 id 双向钉死：表里的分类必须等于该 provider catalog `hookStrategy` 的实际分类。
+   * 少了它，有人把某家 catalog 从 explicit-managed 改成 unmanaged 却忘了改这张表时——编译期守卫会
+   * 继续**要求**一条本不该有的 resolver（或反过来放行一个缺口），而没有任何东西发红。判据落在这里，
+   * `MANAGED_HOOK_PLAN_RESOLVERS` 的编译期保证才真正锚在 catalog 上，而不是锚在一份可能撒谎的副本上。
+   */
+  it('HOOK_INSTALLATION_BY_PROVIDER 逐 id 等于各 catalog hookStrategy 的实际分类（两处投影不漂）', () => {
+    const fromCatalog = Object.fromEntries(
+      providers.map((provider) => {
+        const strategy = provider.catalog.hookStrategy
+        return [provider.id, strategy.kind === 'none' ? 'none' : strategy.installation]
+      })
+    )
+    // 双向 `toEqual`：表里多一家 / 少一家 / 任一家分类不同都红。
+    expect({ ...HOOK_INSTALLATION_BY_PROVIDER }).toEqual(fromCatalog)
+    // 前提自检：这张表里至少一家是 explicit-managed（否则守卫的键域退化成空集，编译期什么都强制不了）。
+    expect(Object.values(HOOK_INSTALLATION_BY_PROVIDER)).toContain('explicit-managed')
   })
 
   // AgentCapabilities は "each field describes an axis Core actually branches on". Two booleans used to
