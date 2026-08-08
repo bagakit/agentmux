@@ -27,6 +27,7 @@ import type {
   AgentStatus,
   AgentTerminalCapabilityState,
   AgentTerminalPromptDeliveryState,
+  AgentTerminalPromptReadinessSource,
   AgentTimelineCommit,
   AgentTimelineItem,
   AgentTimelineMutation,
@@ -696,14 +697,33 @@ function interactionResponse(
   })
 }
 
+// The sole runtime whitelist for the prompt-readiness source vocabulary, projected off a total
+// `Record<AgentTerminalPromptReadinessSource, true>` table. Hand-copying the members here (as a plain
+// `readonly X[]` literal, or as inline `value !== 'a' && value !== 'b'` checks) only enforces ⊆ — every
+// listed string is a member — and is blind to ⊇: adding a member to the union in types.ts and forgetting
+// to list it here would silently REJECT every legitimate on-disk session carrying the new member with
+// INVALID_AGENT_SESSION_STORE, a fail-closed data drop with NO compile error, and addition is the common
+// direction. The explicit `Record<Union, true>` annotation turns BOTH directions into a compile error at
+// THIS file — a missing key errors (TS2741, the ⊇ drift this guards) and an extra/stale key errors
+// (TS2353). That compiler check is the load-bearing thing, not the runtime `.includes`: a hand-written
+// array is behaviourally identical to this projection, so only the compiler catches the drift. Blind spot:
+// it does not check member order, only the exact set.
+const TERMINAL_PROMPT_READINESS_SOURCE_MEMBERS: Record<AgentTerminalPromptReadinessSource, true> = {
+  'initial-composer': true,
+  'native-stop': true
+}
+const TERMINAL_PROMPT_READINESS_SOURCES = Object.keys(
+  TERMINAL_PROMPT_READINESS_SOURCE_MEMBERS
+) as readonly AgentTerminalPromptReadinessSource[]
+
 function terminalPromptReadinessSource(
   value: unknown,
   name: string
-): 'initial-composer' | 'native-stop' {
-  if (value !== 'initial-composer' && value !== 'native-stop') {
+): AgentTerminalPromptReadinessSource {
+  if (!TERMINAL_PROMPT_READINESS_SOURCES.includes(value as AgentTerminalPromptReadinessSource)) {
     throw new AgentMuxError(`${name} is invalid.`, 'INVALID_AGENT_SESSION_STORE')
   }
-  return value
+  return value as AgentTerminalPromptReadinessSource
 }
 
 function terminalPromptReadiness(
