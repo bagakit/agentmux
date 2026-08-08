@@ -38,7 +38,16 @@ function traceResourceProbe(message: string): void {
   if (RESOURCE_PROBE_DEBUG) process.stderr.write(`[resource-probe] ${message}\n`)
 }
 
-function diagnosticWorkingSet(actualKiB: number, limitKiB: number): {
+/**
+ * Report an observation against a reference limit WITHOUT deciding pass/fail. This is the
+ * diagnostics path: `exceeded` is a reported flag, never a thrown gate. Chromium helpers and the
+ * macOS allocator legitimately retain working-set pages, so an over-limit reading must surface in
+ * the receipt (`diagnostics.exceededWorkingSetDiagnostics`) and let the probe keep running — it
+ * must never abort the run. Exported so a behavior test can execute this exact function and prove
+ * an over-limit input still returns rather than throws (a source grep cannot see that);
+ * resource-probe-behavior.test.ts is the sole consumer of the export.
+ */
+export function diagnosticWorkingSet(actualKiB: number, limitKiB: number): {
   actualKiB: number
   limitKiB: number
   exceeded: boolean
