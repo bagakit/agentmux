@@ -250,7 +250,7 @@ type AdapterShape =
       senderTrustImportedFrom: string | null
       channelArg: ArgumentOrigin
       senderArgIsOwnEventSender: boolean
-      trustedFrameIsWebContents: boolean
+      trustedFrameIsWindowWebContents: boolean
     }
 
 function adapterShape(module: ParsedModule): AdapterShape {
@@ -272,19 +272,32 @@ function adapterShape(module: ParsedModule): AdapterShape {
     ts.isPropertyAccessExpression(senderArg) &&
     senderArg.name.text === 'sender' &&
     argumentOrigin(module, senderArg.expression, arrow) === 'own-parameter'
-  const trustedFrame = inner.arguments[2]
-  const trustedFrameIsWebContents =
-    trustedFrame !== undefined &&
-    ts.isPropertyAccessExpression(trustedFrame) &&
-    trustedFrame.name.text === 'webContents'
   return {
     kind: 'forwards',
     assertImportedFrom: importedModuleOf(declarationOf(module, outer.expression)),
     senderTrustImportedFrom: importedModuleOf(declarationOf(module, inner.expression)),
     channelArg: argumentOrigin(module, inner.arguments[0], arrow),
     senderArgIsOwnEventSender,
-    trustedFrameIsWebContents
+    trustedFrameIsWindowWebContents: trustedFrameIsWindowWebContents(inner.arguments[2])
   }
+}
+
+/**
+ * arg[2] 是「被信任的那一帧」。判据要问的是**它是不是那个窗口的 webContents**，不是「它叫不叫
+ * webContents」。
+ *
+ * 曾经只判属性名（`trustedFrame.name.text === 'webContents'`）。那样 `event.sender.webContents` 也算过
+ * ——一个由**发送者自己**提供的帧，等于把「谁可信」交给被审查方回答。今天 tsc 恰好用 TS2339 挡住了那个
+ * 具体拼法（`WebContents` 上没有 `webContents`），但那是偶然：任何一个类型合法、同名属性的来源都能重新
+ * 打开这个洞，而判据本身对「对象是谁」全程沉默。所以这里改成连对象一起判：必须是 `<x>.window.webContents`。
+ *
+ * 两个站点（adapter 与 acceptControl）共用这一个函数，不各写一份——同一把尺子，避免两处漂移。
+ */
+function trustedFrameIsWindowWebContents(trustedFrame: ts.Expression | undefined): boolean {
+  if (trustedFrame === undefined || !ts.isPropertyAccessExpression(trustedFrame)) return false
+  if (trustedFrame.name.text !== 'webContents') return false
+  const owner = trustedFrame.expression
+  return ts.isPropertyAccessExpression(owner) && owner.name.text === 'window'
 }
 
 /** handleWithEvent('<channel>', <listener>) 的 listener 箭头。 */
@@ -379,7 +392,7 @@ type AcceptControlGuard =
       channelImportedFrom: string | null
       senderArgIsOwnEventSender: boolean
       /** arg[2] 是不是某个东西的 `.webContents`（与 adapterShape 同法）。自比 event.sender 时为 false。 */
-      trustedFrameIsWebContents: boolean
+      trustedFrameIsWindowWebContents: boolean
       /** 不可信时**只**返回：then 分支是裸 return，或块里恰好只有一条 return。 */
       returnsWhenUntrusted: boolean
     }
@@ -425,12 +438,15 @@ function acceptControlGuard(module: ParsedModule): AcceptControlGuard {
   const channelArg = call.arguments[0]
   const senderArg = call.arguments[1]
   const trustedFrame = call.arguments[2]
-  // then 分支必须**只**返回。写成 `statements.some(...)` 时，「先 accept(response) 再 return」照旧通过——
-  // 那正是不可信发送者被接受的形状（实测 26 条全绿）。裸 return 或「块里恰好一条 return」才算。
+  // then 分支必须**只**返回，且那条 return **不带实参**。写成 `statements.some(...)` 时，「先 accept(response)
+  // 再 return」照旧通过（实测 26 条全绿）；而只判 `isReturnStatement` 时，`return void accept(response)` 也
+  // 照旧通过——它是一条合法的 ReturnStatement，`void` 又把 boolean 洗成 void 骗过 tsc，于是不可信发送者的
+  // 响应被全盘接受（实测 29 条全绿 + tsc 干净，会发货）。所以「无实参」这一问是承重的，不是洁癖。
   const then = first.thenStatement
+  const isBareReturn = (node: ts.Statement): boolean =>
+    ts.isReturnStatement(node) && node.expression === undefined
   const returnsWhenUntrusted =
-    ts.isReturnStatement(then) ||
-    (ts.isBlock(then) && then.statements.length === 1 && ts.isReturnStatement(then.statements[0]))
+    isBareReturn(then) || (ts.isBlock(then) && then.statements.length === 1 && isBareReturn(then.statements[0]))
   return {
     kind: 'sender-gate',
     senderTrustImportedFrom: importedModuleOf(declarationOf(module, call.expression)),
@@ -442,13 +458,79 @@ function acceptControlGuard(module: ParsedModule): AcceptControlGuard {
       senderArg.name.text === 'sender' &&
       argumentOrigin(module, senderArg.expression, arrow) === 'own-parameter',
     // arg[2] 是被信任的那一帧。不看它，`event.sender` 与 `{}` 都能塞进来——一个认所有 sender，一个拒
-    // 所有 sender。判法与 adapterShape 的 trustedFrameIsWebContents 一致，两个站点同一把尺子。
-    trustedFrameIsWebContents:
-      trustedFrame !== undefined &&
-      ts.isPropertyAccessExpression(trustedFrame) &&
-      trustedFrame.name.text === 'webContents',
+    // 所有 sender。判法与 adapterShape 共用 `trustedFrameIsWindowWebContents`，两个站点同一把尺子。
+    trustedFrameIsWindowWebContents: trustedFrameIsWindowWebContents(trustedFrame),
     returnsWhenUntrusted
   }
+}
+
+/**
+ * 一处**在控制响应频道上装监听器**的注册点：用的哪个方法、handler 实参是不是绑定到被审计的那个
+ * `acceptControl` 声明。
+ *
+ * 为什么必须有这一层：`acceptControlGuard` 验的是**声明**，不是**跑着的那个 handler**。审计实测出的最坏
+ * 变异正是利用这个缺口——`acceptControl` 原样留着（连 `removeListener` 的引用都还在，看起来完全正常），另
+ * 起一句 `ipcMain.on(CONTROL_RESPONSE_CHANNEL, (_e, response) => controlBridge.accept(response))`。于是被
+ * 验的那道门一句不改、29 条全绿、tsc 干净，而真正处理消息的是那个**无门**的内联 handler：每个不可信发送者
+ * 的控制响应都被接受。「验了一个诚实的声明」与「那个声明就是运行的东西」是两件事。
+ *
+ * 极性刻意反过来：**不是**列出「哪些方法算注册」，而是列出哪两三个是**摘除**，其余一概算注册。禁止清单
+ * 那种极性必漏（记忆 forbidden-list-guard-always-leaks）——`prependListener`、`once` 或任何我没想到的加装
+ * 拼法都会从「算注册」的清单里漏掉，而那正是要防的。反过来写，漏的方向变成「多算一个」，那是响亮的假红，
+ * 不是静默的洞。
+ *
+ * 频道匹配同样认两种拼法：绑定到 contracts 那个 `CONTROL_RESPONSE_CHANNEL` 导入的标识符，**以及**逐字相等
+ * 的字符串字面量（字面量的期望值取自本文件真的 import 进来的那个常量，不手抄）。只认常量会被「另抄一份
+ * 字面量」整个绕过（记忆 counting-a-symbol-misses-other-spellings）。
+ *
+ * 申报的盲点：判据按 `<任意对象>.<方法>(频道, handler)` 的形状扫，不校验那个对象就是 `ipcMain`。这是刻意
+ * 的——`const im = ipcMain` 这类别名下的注册照旧被算上；代价是别的 emitter 若也用这个频道名会打出一次假红，
+ * 那种红是要人来看的，比漏掉一次旁路注册便宜。
+ */
+type ControlChannelRegistration = {
+  readonly method: string
+  readonly handlerBindsToAcceptControl: boolean
+}
+
+/** 摘除监听器的方法。这三个之外的一切都算「装了一个监听器」——极性见上方注释。 */
+const LISTENER_REMOVAL_METHODS: ReadonlySet<string> = new Set(['removeListener', 'off', 'removeAllListeners'])
+
+/** arg[0] 指的是不是控制响应频道（认导入的常量，也认逐字相等的字面量）。 */
+function namesControlResponseChannel(module: ParsedModule, argument: ts.Expression | undefined): boolean {
+  if (argument === undefined) return false
+  if (ts.isStringLiteralLike(argument)) return argument.text === CONTROL_RESPONSE_CHANNEL
+  if (!ts.isIdentifier(argument)) return false
+  const declaration = declarationOf(module, argument)
+  if (declaration === null || !ts.isImportSpecifier(declaration)) return false
+  if (importedModuleOf(declaration) !== CONTRACTS_MODULE) return false
+  return (declaration.propertyName ?? declaration.name).text === 'CONTROL_RESPONSE_CHANNEL'
+}
+
+function controlResponseRegistrations(module: ParsedModule): ControlChannelRegistration[] {
+  const auditedArrow = acceptControlDeclaration(module)
+  const auditedDeclaration = auditedArrow === null ? null : auditedArrow.parent
+  const out: ControlChannelRegistration[] = []
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      !LISTENER_REMOVAL_METHODS.has(node.expression.name.text) &&
+      namesControlResponseChannel(module, node.arguments[0])
+    ) {
+      const handler = node.arguments[1]
+      out.push({
+        method: node.expression.name.text,
+        handlerBindsToAcceptControl:
+          handler !== undefined &&
+          ts.isIdentifier(handler) &&
+          auditedDeclaration !== null &&
+          declarationOf(module, handler) === auditedDeclaration
+      })
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(module.sourceFile)
+  return out
 }
 
 const HONEST_ADAPTER: AdapterShape = {
@@ -457,7 +539,7 @@ const HONEST_ADAPTER: AdapterShape = {
   senderTrustImportedFrom: SENDER_TRUST_MODULE,
   channelArg: 'own-parameter',
   senderArgIsOwnEventSender: true,
-  trustedFrameIsWebContents: true
+  trustedFrameIsWindowWebContents: true
 }
 
 describe('ipc.ts wiring: the shell forwards each privileged sender check to the pure decision (AST, not text)', () => {
@@ -510,9 +592,54 @@ describe('ipc.ts wiring: the shell forwards each privileged sender check to the 
       senderTrustImportedFrom: SENDER_TRUST_MODULE,
       channelImportedFrom: CONTRACTS_MODULE,
       senderArgIsOwnEventSender: true,
-      trustedFrameIsWebContents: true,
+      trustedFrameIsWindowWebContents: true,
       returnsWhenUntrusted: true
     })
+  })
+
+  it('every privileged channel in the SOURCE table is accounted for by exactly one of the two gating routes', () => {
+    // 完备性那一侧。上面几条都是**从本文件的清单出发**去 ipc.ts 查证；缺的是反过来问：
+    // `PRIVILEGED_SENDER_LABELS`（判据模块里那张真表）新增一个键、而 ipc.ts 一处都没给它上门，会不会红？
+    // 审计实测：不会——源头加一个键，29 条照旧全绿，一个新的特权频道就那样裸着上线了。
+    //
+    // 判据把那张表的键**分成恰好两族**，每族各由上面一条断言真的去 ipc.ts 查证过：
+    //   - 会抛的那些：由 THROWING_CHANNELS 驱动「第一句转发给适配器」+ 反向 allow-list；
+    //   - 控制响应频道：由 acceptControl 的 sender-gate 与「注册点恰好一处」两条。
+    // 于是「表里的键 = 两族之并」这条等式一旦被新键打破，就是一处响亮的红，且它指的正是「你加了个特权
+    // 频道但没人给它上门」。两族必须**互斥**（一个键同时进两族时，另一族的旁证会掩盖本族的缺失——
+    // 记忆 cover-key-cannot-be-in-two-families），所以并集用逐元素比对而不是只比大小。
+    //
+    // 刻意不给这条写自检：它的左边是被测模块 import 进来的真表，右边是本文件写死的清单，等式恒真是
+    // 不可能的——源头多/少一个键就红。再写一条自检会是被它自己完全覆盖的死代码（#805 那条审计指出的
+    // 形状）。同理，THROWING_CHANNEL_MESSAGES 保持**手抄**：它是这条等式的外部锚点，一旦改成从
+    // PRIVILEGED_SENDER_LABELS 派生，两边就一起漂移，等式当场变成永不失败的装饰。
+    const sourceKeys = new Set<string>(Object.keys(PRIVILEGED_SENDER_LABELS))
+    const throwing = new Set<string>(THROWING_CHANNELS)
+    expect(
+      [...throwing].filter((channel) => channel === CONTROL_RESPONSE_CHANNEL),
+      '两族必须互斥：控制响应频道走静默返回那条路，不该同时算在会抛的那族里'
+    ).toEqual([])
+    const gated = new Set<string>([...throwing, CONTROL_RESPONSE_CHANNEL])
+    expect(
+      [...sourceKeys].filter((channel) => !gated.has(channel)),
+      '这些特权频道登记在 PRIVILEGED_SENDER_LABELS 里，却没有任何一条接线断言查证它真的上了门'
+    ).toEqual([])
+    expect(
+      [...gated].filter((channel) => !sourceKeys.has(channel)),
+      '这些频道被接线断言当成特权频道查证，却已不在 PRIVILEGED_SENDER_LABELS 里'
+    ).toEqual([])
+  })
+
+  it('the ONLY listener installed on the control-response channel is that audited acceptControl (no bypassing registration)', () => {
+    // 上一条验的是**声明**；这一条验**跑着的东西就是它**。少了这一条，`acceptControl` 原样不动、另起一句
+    // `ipcMain.on(CONTROL_RESPONSE_CHANNEL, (_e, r) => controlBridge.accept(r))` 就能让被验的门完全旁路
+    // ——审计实测 29 条全绿 + tsc 干净，会发货。
+    //
+    // 恰好一处：多一处就是旁路（哪一处是诚实的都不重要，另一处照样在收消息）；零处就是这道门根本没上线。
+    const registrations = controlResponseRegistrations(module)
+    expect(registrations, '控制响应频道上的监听器注册点').toEqual([
+      { method: 'on', handlerBindsToAcceptControl: true }
+    ])
   })
 })
 
@@ -663,7 +790,7 @@ describe('ipc.ts wiring guard: self-check (the guard reds on planted violations)
       senderTrustImportedFrom: SENDER_TRUST_MODULE,
       channelImportedFrom: CONTRACTS_MODULE,
       senderArgIsOwnEventSender: true,
-      trustedFrameIsWebContents: true,
+      trustedFrameIsWindowWebContents: true,
       returnsWhenUntrusted: true
     })
   })
@@ -674,7 +801,7 @@ describe('ipc.ts wiring guard: self-check (the guard reds on planted violations)
     const module = acceptControlModule(
       '  if (!senderTrust(CONTROL_RESPONSE_CHANNEL, event.sender, event.sender).trusted) return\n  accept(response)'
     )
-    expect(acceptControlGuard(module)).toMatchObject({ kind: 'sender-gate', trustedFrameIsWebContents: false })
+    expect(acceptControlGuard(module)).toMatchObject({ kind: 'sender-gate', trustedFrameIsWindowWebContents: false })
   })
 
   it('acceptControlGuard catches a non-frame trusted argument (rejects every sender: control responses silently dropped)', () => {
@@ -682,7 +809,7 @@ describe('ipc.ts wiring guard: self-check (the guard reds on planted violations)
     const module = acceptControlModule(
       '  if (!senderTrust(CONTROL_RESPONSE_CHANNEL, event.sender, {}).trusted) return\n  accept(response)'
     )
-    expect(acceptControlGuard(module)).toMatchObject({ kind: 'sender-gate', trustedFrameIsWebContents: false })
+    expect(acceptControlGuard(module)).toMatchObject({ kind: 'sender-gate', trustedFrameIsWindowWebContents: false })
   })
 
   it('acceptControlGuard catches accepting before the return inside the untrusted branch', () => {
@@ -696,6 +823,45 @@ describe('ipc.ts wiring guard: self-check (the guard reds on planted violations)
         '  accept(response)'
     )
     expect(acceptControlGuard(module)).toMatchObject({ kind: 'sender-gate', returnsWhenUntrusted: false })
+  })
+
+  it('acceptControlGuard catches a RETURN THAT CARRIES A VALUE in the untrusted branch (`return void accept(...)`)', () => {
+    // 审计实测存活的那个变异，也是本文件最坏的一个：`return void accept(response)` 是一条合法的
+    // ReturnStatement，于是只判 `isReturnStatement` 的旧判据放它过去；`void` 又把 `boolean` 洗成 `void`
+    // 骗过 tsc。两者合起来 = 每个不可信发送者的控制响应都被接受，且 29 条全绿 + tsc 干净地发货。
+    // 判据因此必须问「这条 return 带不带实参」，不能只问「是不是 return」。
+    const module = acceptControlModule(
+      '  if (!senderTrust(CONTROL_RESPONSE_CHANNEL, event.sender, args.window.webContents).trusted)\n' +
+        '    return void accept(response)\n' +
+        '  accept(response)'
+    )
+    expect(acceptControlGuard(module)).toMatchObject({ kind: 'sender-gate', returnsWhenUntrusted: false })
+  })
+
+  it('acceptControlGuard catches a value-carrying return inside a BLOCK too (both shapes, one rule)', () => {
+    // 同一件事的块体写法。裸 return 与「块里恰好一条 return」是两条分支，各自都要问「无实参」，
+    // 否则收紧了一条、另一条照旧敞着。
+    const module = acceptControlModule(
+      '  if (!senderTrust(CONTROL_RESPONSE_CHANNEL, event.sender, args.window.webContents).trusted) {\n' +
+        '    return void accept(response)\n' +
+        '  }\n' +
+        '  accept(response)'
+    )
+    expect(acceptControlGuard(module)).toMatchObject({ kind: 'sender-gate', returnsWhenUntrusted: false })
+  })
+
+  it('acceptControlGuard catches a sender-supplied frame that merely SPELLS webContents (`event.sender.webContents`)', () => {
+    // 判据曾只看属性名。那样这个形状也算过——而它把「谁可信」交给**被审查方**回答。今天 tsc 恰好用
+    // TS2339 挡住这个具体拼法，但那是偶然：换一个类型合法的同名属性来源就重新打开。所以判据连对象
+    // 一起判（必须是 `<x>.window.webContents`），不靠 tsc 兜。
+    const module = acceptControlModule(
+      '  if (!senderTrust(CONTROL_RESPONSE_CHANNEL, event.sender, event.sender.webContents).trusted) return\n' +
+        '  accept(response)'
+    )
+    expect(acceptControlGuard(module)).toMatchObject({
+      kind: 'sender-gate',
+      trustedFrameIsWindowWebContents: false
+    })
   })
 
   it('acceptControlGuard catches the sender comparison being dropped (first statement no longer the gate)', () => {
@@ -719,5 +885,100 @@ describe('ipc.ts wiring guard: self-check (the guard reds on planted violations)
         '}\n'
     )
     expect(acceptControlGuard(module)).toMatchObject({ kind: 'sender-gate', senderTrustImportedFrom: null })
+  })
+
+  // --- control-channel registration self-checks (#809 的判据不是恒真) ---
+
+  /** 与生产同构的注册上下文：诚实的 acceptControl 声明 + 一句 `ipcMain.on(频道, acceptControl)`。 */
+  const REGISTRATION_PRELUDE =
+    'declare const ipcMain: any\n' +
+    'declare function accept(r: any): void\n' +
+    'const acceptControl = (event: any, response: any): void => {\n' +
+    '  if (!senderTrust(CONTROL_RESPONSE_CHANNEL, event.sender, args.window.webContents).trusted) return\n' +
+    '  accept(response)\n' +
+    '}\n'
+
+  const registrationModule = (tail: string): ParsedModule => parse(`${IMPORTS}${REGISTRATION_PRELUDE}${tail}`)
+
+  it('controlResponseRegistrations reports the honest single registration bound to acceptControl', () => {
+    const module = registrationModule(
+      'ipcMain.on(CONTROL_RESPONSE_CHANNEL, acceptControl)\n' +
+        'ipcMain.removeListener(CONTROL_RESPONSE_CHANNEL, acceptControl)\n'
+    )
+    // 摘除那句不算注册（否则诚实的生产代码自己就红）。
+    expect(controlResponseRegistrations(module)).toEqual([{ method: 'on', handlerBindsToAcceptControl: true }])
+  })
+
+  it('controlResponseRegistrations catches a BYPASSING inline handler alongside the honest declaration (the audited CRITICAL)', () => {
+    // 审计实测存活的形状：`acceptControl` 一字未改、`removeListener` 仍引用着它（看起来毫无异常），
+    // 但另有一句把一个**无门**的内联 handler 装到同一个频道上。于是每个不可信发送者的控制响应都被接受。
+    // 判据落在「注册点恰好一处」上：这里读出两处，其中一处不绑定到被审计的声明。
+    const module = registrationModule(
+      'ipcMain.on(CONTROL_RESPONSE_CHANNEL, acceptControl)\n' +
+        'ipcMain.on(CONTROL_RESPONSE_CHANNEL, (_e: any, response: any) => accept(response))\n' +
+        'ipcMain.removeListener(CONTROL_RESPONSE_CHANNEL, acceptControl)\n'
+    )
+    expect(controlResponseRegistrations(module)).toEqual([
+      { method: 'on', handlerBindsToAcceptControl: true },
+      { method: 'on', handlerBindsToAcceptControl: false }
+    ])
+  })
+
+  it('controlResponseRegistrations catches the honest handler being SWAPPED for a same-named local shadow', () => {
+    // 注册那句拼写一模一样（`ipcMain.on(CH, acceptControl)`），但装上去的是后声明的那个无门同名者。
+    // 按文本判会放过；按绑定判读出 handlerBindsToAcceptControl=false。
+    // 注：`acceptControlDeclaration` 取扫到的**最后**一个同名声明，所以这里刻意让影子在前、被审计的在后，
+    // 从而「被审计的声明」与「注册用的那个绑定」确实是两个不同的声明。
+    const module = parse(
+      `${IMPORTS}declare const ipcMain: any\ndeclare function accept(r: any): void\n` +
+        'const acceptControl0 = 0\n' +
+        'function scope(): void {\n' +
+        '  const acceptControl = (_e: any, response: any): void => { accept(response) }\n' +
+        '  ipcMain.on(CONTROL_RESPONSE_CHANNEL, acceptControl)\n' +
+        '}\n' +
+        'const acceptControl = (event: any, response: any): void => {\n' +
+        '  if (!senderTrust(CONTROL_RESPONSE_CHANNEL, event.sender, args.window.webContents).trusted) return\n' +
+        '  accept(response)\n' +
+        '}\n'
+    )
+    expect(controlResponseRegistrations(module)).toEqual([{ method: 'on', handlerBindsToAcceptControl: false }])
+  })
+
+  it('controlResponseRegistrations counts an unusual ADDING spelling too (once/prependListener), because the polarity is removal-listed', () => {
+    // 极性验证：清单里只有摘除方法，所以任何别的加装拼法都算注册。若反过来写成「注册方法白名单」，
+    // `once`/`prependListener` 这类就会从清单里漏掉——而那正是要防的旁路。这条钉住极性没被写反。
+    const module = registrationModule(
+      'ipcMain.on(CONTROL_RESPONSE_CHANNEL, acceptControl)\n' +
+        'ipcMain.prependListener(CONTROL_RESPONSE_CHANNEL, (_e: any, r: any) => accept(r))\n' +
+        'ipcMain.once(CONTROL_RESPONSE_CHANNEL, (_e: any, r: any) => accept(r))\n'
+    )
+    expect(controlResponseRegistrations(module).map((r) => r.method)).toEqual(['on', 'prependListener', 'once'])
+  })
+
+  it('controlResponseRegistrations matches the channel by a VERBATIM string literal too, not only the imported constant', () => {
+    // 只认导入常量会被「另抄一份字面量」整个绕过。字面量的期望值取自本文件真的 import 进来的那个常量，
+    // 不手抄第二份。
+    const module = registrationModule(
+      'ipcMain.on(CONTROL_RESPONSE_CHANNEL, acceptControl)\n' +
+        `ipcMain.on('${CONTROL_RESPONSE_CHANNEL}', (_e: any, r: any) => accept(r))\n`
+    )
+    expect(controlResponseRegistrations(module)).toEqual([
+      { method: 'on', handlerBindsToAcceptControl: true },
+      { method: 'on', handlerBindsToAcceptControl: false }
+    ])
+  })
+
+  it('controlResponseRegistrations ignores registrations on OTHER channels (no false red from unrelated listeners)', () => {
+    const module = registrationModule(
+      'ipcMain.on(CONTROL_RESPONSE_CHANNEL, acceptControl)\n' +
+        "ipcMain.on('some:other-channel', (_e: any, r: any) => accept(r))\n"
+    )
+    expect(controlResponseRegistrations(module)).toEqual([{ method: 'on', handlerBindsToAcceptControl: true }])
+  })
+
+  it('controlResponseRegistrations reports EMPTY when nothing is registered (the gate never goes live)', () => {
+    // 反向的同一个洞：诚实的门写好了但一处都没装。断言钉「恰好一处」而不是「至少一处不是旁路」，
+    // 正是为了让这一侧也红。
+    expect(controlResponseRegistrations(registrationModule(''))).toEqual([])
   })
 })
