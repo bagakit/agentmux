@@ -23,6 +23,7 @@ import {
 } from '../lib/terminal-link-gesture'
 import { detectTerminalPathLinks } from '../lib/terminal-path-link'
 import { installTerminalPasteSanitizer, pasteIntoTerminal } from '../lib/terminal-paste'
+import { terminalScrollbackText, terminalViewportText } from '../lib/terminal-buffer-copy'
 import { TERMINAL_HTTP_URL_REGEX } from '../lib/terminal-http-link'
 import { terminalOptions, terminalTheme, activateTerminalUnicodeWidth, UNICODE_WIDTH_VERSION } from '../lib/terminal-theme'
 import {
@@ -889,6 +890,25 @@ export function TerminalView({
     void copyTextToClipboard(text, reportError)
   }
 
+  // #638 的出路：两条**不经过选区**的复制路。取值全在 lib（terminal-buffer-copy），这里只负责把
+  // 真的 buffer 与真的 rows 喂进去——`buffer.active` 是 xterm 的公开数据 API，不问选区服务死活，
+  // 所以 TUI 开着鼠标上报、上面那条 copySelection 恒空时，这两条照常拿得到文本。
+  function copyViewport(): void {
+    const terminal = terminalRef.current
+    if (!terminal) return
+    const text = terminalViewportText(terminal.buffer.active, terminal.rows)
+    if (!text) return
+    void copyTextToClipboard(text, reportError)
+  }
+
+  function copyScrollback(): void {
+    const terminal = terminalRef.current
+    if (!terminal) return
+    const text = terminalScrollbackText(terminal.buffer.active)
+    if (!text) return
+    void copyTextToClipboard(text, reportError)
+  }
+
   function pasteClipboard(): void {
     const terminal = terminalRef.current
     if (!terminal) return
@@ -964,6 +984,8 @@ export function TerminalView({
         hasSelection={hasSelection}
         mouseTrackingMode={mouseTrackingMode}
         onCopy={copySelection}
+        onCopyScrollback={copyScrollback}
+        onCopyViewport={copyViewport}
         onPaste={pasteClipboard}
         onSelectAll={() => terminalRef.current?.selectAll()}
         onSearch={() => setSearchOpen(true)}
