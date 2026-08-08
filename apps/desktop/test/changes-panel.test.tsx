@@ -127,6 +127,7 @@ function render(changes: GitFileChange[]): string {
     kind: 'git-repository',
     hostId: 'local',
     repoPath: _hygiene_fixturePath("repo"),
+    repoRelativePrefix: '',
     branch: 'main',
     changes
   }

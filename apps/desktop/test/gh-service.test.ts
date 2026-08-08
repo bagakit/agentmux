@@ -51,6 +51,7 @@ function gitStub(overrides: Partial<GhServiceGit> = {}): GhServiceGit {
       kind: 'git-repository' as const,
       hostId: 'remote',
       repoPath: _hygiene_fixturePath("srv/repo"),
+      repoRelativePrefix: '',
       branch: 'feature',
       changes: []
     })),
@@ -417,6 +418,7 @@ describe('GhService.prReadiness (contract, fake executor)', () => {
         kind: 'git-repository' as const,
         hostId: 'remote',
         repoPath: _hygiene_fixturePath("srv/repo"),
+        repoRelativePrefix: '',
         branch: null,
         changes: [
           { path: 'a.ts', origPath: null, index: ' ', worktree: 'M', staged: false, unstaged: true, untracked: false }

@@ -395,12 +395,20 @@ export type GitFileChange = {
  * Result of reading source-control status for a workspace. A discriminated union mirroring
  * `WorkspaceBranchesSnapshot`: a plain folder is a first-class, non-error answer, not a thrown
  * exception. `branch` is null on a detached HEAD.
+ *
+ * `repoRelativePrefix` is how deep the workspace sits inside `repoPath`, as reported by git itself
+ * (`''` when they are the same directory). It is carried here rather than recomputed by the renderer
+ * because the two paths are not comparable as strings — `repoPath` is canonicalized by git while a
+ * workspace path is whatever the config stored — and a failed comparison silently degrades to `''`,
+ * which is also the legitimate "same directory" value. It is required, not optional: a consumer that
+ * forgot to pass it would otherwise default to the value that misattributes markers.
  */
 export type GitStatusResult =
   | {
       kind: 'git-repository'
       hostId: string
       repoPath: string
+      repoRelativePrefix: string
       branch: string | null
       changes: GitFileChange[]
     }
