@@ -550,7 +550,16 @@ describe('TerminalViewportSynchronizer', () => {
    * 上一条只动宽度，于是抖动闸的**高度**那一半从来没被执行过：把 `samePixels` 的第二个合取项
    * 删成 `true`，整套测试仍然全绿。而高度是真会单独变的一维——横向分隔条上下拖、状态条出现或
    * 消失，宽度一个像素都不动。那一刻若正好撞上 proposeDimensions 差一行，就会被误判成 cell-metric
-   * 抖动而跳过 fit，xterm 与 PTY 停在旧行数上，直到用户恰好再改一次**宽度**。
+   * 抖动而跳过 fit，xterm 与 PTY 停在旧行数上。
+   *
+   * 更正（本条初版与 5b41eae 的 message 都只说了一半）：从那个坏状态里出来有**两条**路，不是一条。
+   * 抖动闸要同时满足「grid 发散」与「像素等于上次成功 fit 的像素」才 return，于是打断它的办法是
+   *   1. 再动一次**宽度**——合取项被删后只剩这一维还能把像素判成「变了」；这是唯一的几何出路；
+   *   2. 调一次**字号**——`synchronizeCellMetrics()` 把 `lastFittedPixels` 置空，基线不在了，
+   *      `samePixels` 那个合取整体短路，与删没删第二个合取项无关。这条路由
+   *      terminal-font-size-live-refit.test.ts 独立钉住（同场景下 observeViewport 不 resize、
+   *      synchronizeCellMetrics 会 resize）。
+   * 两条都是撞上的，不是修好的：坏状态持续到用户碰巧做了其中一件事为止。
    *
    * 所以这条与上一条是成对的：一条钉宽度那一半，一条钉高度那一半，缺谁谁就能被删成恒真。
    */
