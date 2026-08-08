@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { randomUUID } from 'node:crypto'
 import process from 'node:process'
+import packageManifest from '../package.json' with { type: 'json' }
 import type { AgentMuxAgentSessionLookup } from './agent-session-registry.js'
 import { classifySelfViewFailure, SELF_CONTEXT_TOPIC_HINT, type SelfViewOutcome } from './agent-self-context.js'
 import { AGENTMUX_CLI_HELP, AGENTMUX_CLI_SKILL, AGENTMUX_SELF_CONTEXT_VERB, agentMuxCommandHelp } from './agentmux-cli-help.js'
@@ -18,7 +19,11 @@ import { connectLocalAgentMux } from './runtime-client.js'
 import { OrderedSessionOutputFollow } from './session-output-follow.js'
 import { isWorkbenchLayoutPreset } from './workbench-layout-preset.js'
 
-const VERSION = '0.1.0'
+// 版本号的唯一真相是 package.json 的 `version`——那是 npm 发布、也是用户 `--version` 应当与之一致的
+// 那个字段。这里用 `with { type: 'json' }` 直接引用它，而不是手抄一份常量：tsc 在 NodeNext 下把
+// package.json 拉进程序（`resolveJsonModule`），JSON import 原样出到 dist，运行时由 Node 解析同一份
+// 文件。所以这不是「构建图之外的手抄常量」——改 package.json 的 version，编译产物与 `--version` 一起变。
+const VERSION = packageManifest.version
 const CLI_REQUEST_ID = randomUUID()
 const CLI_ERROR_CODES = [
   ...AGENTMUX_CONTROL_ERROR_CODES,
