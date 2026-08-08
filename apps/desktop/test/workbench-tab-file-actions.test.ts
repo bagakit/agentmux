@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  callbackErasureGates,
   contentSourceText,
   gatesAbove,
   inlineConditions,
@@ -194,14 +195,29 @@ describe('文件 Tab 菜单：路径复制与在文件管理器中显示', () =>
 // ---------------------------------------------------------------------------
 // 渲染层：这一组菜单项在不在场，只能由数据决定。
 //
-// 判据形状换过一次，换的理由记在这里。旧判据是
+// 判据形状换过两次，理由都记在这里。最初是
 //
 //     const content = withoutComments.slice(indexOf('<ContextMenu.Content'), indexOf('</ContextMenu.Content>'))
 //     expect(content).toContain('copyModel.entries.map(')
 //
 // 「那行字面量在场」不等于「那次 map 画得出来」：`{false && copyModel.entries.map((entry) => {`
-// 让整组复制 / 地址 / 「在文件管理器中显示」从 Tab 右键菜单上彻底消失，而这个文件 11 条全绿
+// 让整组复制 / 地址 / 「在文件管理器中显示」从 Tab 右键菜单上彻底消失，而这个文件全绿
 // （实测过，不是推演）。同一族的旧账还有 `indexOf` 猜左右界——截错了与没违规在结果上同形。
+//
+// 第二版把判据落在 `gatesAbove`：「这一次调用与 Content 之间的祖先里，出现三元 / && / || / ?? / if /
+// 函数边界就算门」。一次独立审计证明这个**黑名单**必漏（本仓反复踩到的老坑：禁止清单守卫必漏）。
+// 四种把整组抹掉、却全绿的写法：
+//   - `{void copyModel.entries.map(…)}`        —— 求值成 undefined（实测 14 绿）
+//   - `{(copyModel.entries.map(…), null)}`     —— 逗号表达式取最后一个值 null（实测 14 绿）
+//   - `{!copyModel.entries.map(…)}`            —— 数组取反成 false（实测 14 绿）
+//   - 回调**内部**首行 `if (true) return null`  —— 每一项都成空，而 map 头上一道门都没有（实测 14 绿）
+// 前三种祖先扫描的黑名单里没有；第四种祖先扫描根本够不着——回调是 map 的实参，住在调用节点之下。
+//
+// 所以判据翻了个面（helper 的 docstring 记着为什么）：
+//   - `gatesAbove` 改成**白名单**——调用到 Content 之间只准出现「把表达式塞进 JSX」的那几层无害包装，
+//     别的一律算门。不必再枚举坏拼法，`void` / `!` / 逗号 / 未来某种没见过的写法都一并挡住。
+//   - `callbackErasureGates` 单独判回调体，把「按数据跳过某些项」（`if (entry.kind === …) return null`，
+//     合法）与「无条件 / 按渲染层开关抹掉整组」（`if (true) return null`、`return null`，门）分开。
 //
 // 兄弟文件 workbench-tab-actions.test.ts 守的是另外两个容器，那边的判据是「这段 Content 里
 // **一个内联条件都没有**」。那条不能照搬过来：这个 Content 里有一处**合法**的条件——
@@ -209,9 +225,8 @@ describe('文件 Tab 菜单：路径复制与在文件管理器中显示', () =>
 // 「这张 View 恰好承载唯一一个 Agent」时才给改 Agent 名。照搬会把诚实的代码判红，而一道会打
 // 假红的守卫最终会被删掉，等于没有。
 //
-// 所以判据收窄成**这一次调用**头上没有门：`copyModel.entries.map(…)` 与 Content 之间不许有
-// 任何条件、任何新包的函数壳。想让某一项消失只能改 entries——那份数组跑得到、断言得着，
-// 上面那一族测试就在断言它。
+// 所以判据收窄成**这一次调用**头上没有门、且回调也不会把整组抹掉：想让某一项消失只能改 entries——
+// 那份数组跑得到、断言得着，上面那一族测试就在断言它。
 // ---------------------------------------------------------------------------
 describe('JSX 里没有可以取反的在场判断', () => {
   const CONTENT = { file: 'WorkbenchTabContextMenu.tsx', tag: 'ContextMenu', list: 'copyModel' } as const
@@ -238,6 +253,18 @@ describe('JSX 里没有可以取反的在场判断', () => {
     ).toEqual([])
   })
 
+  it('那次 map 的回调不会把整组抹掉——回调里只许按数据画，不许无条件 / 按渲染层开关吐 null', () => {
+    // gatesAbove 看的是调用头上；这一条看的是调用底下的回调体。审计里最真实的绕法就在这里：
+    // `{copyModel.entries.map((entry) => { if (true) return null; … })}` 头上一道门都没有、字面量
+    // 原样在场、14 条全绿，而每一项都成空。回调恰恰是有人自然会加逐项逻辑的地方。
+    const [call] = memberCallsIn(jsx, `${CONTENT.list}.entries`, 'map')
+    expect(call, '前提自检：调用点都没找到，判据挂在空处').toBeDefined()
+    expect(
+      callbackErasureGates(call!, jsx),
+      '这次 map 的回调会把整组渲染成空——整组复制/地址可以被它抹成永不出现'
+    ).toEqual([])
+  })
+
   it('那处合法的条件仍然合法：判据不禁止 Content 里有条件，只禁止那次 map 头上有', () => {
     // 兄弟文件那条「一个条件都没有」的判据搬过来会把这里判红。钉住这个差异本身：
     // 这个 Content 里**确实**有内联条件（Rename Agent 按可选回调在场与否决定画不画），
@@ -251,46 +278,88 @@ describe('JSX 里没有可以取反的在场判断', () => {
     )
   })
 
-  it('自检：门检测器认得取反用的那几种形状，也不把合法取值误当门', () => {
-    // 没有这条，检测器写坏会让整族静默变恒绿——「没找到门」与「认不出门」在结果上同形。
-    const gatesInProbe = (body: string): string[] => {
-      const probe = jsxContentElementIn(
-        `const X = () => (<ContextMenu.Content>${body}</ContextMenu.Content>)`,
-        'probe.tsx',
-        'ContextMenu'
-      )
-      expect(probe, '探针源码里取不到 Content——自检本身是坏的').not.toBeNull()
-      const [call] = memberCallsIn(probe!, 'm.entries', 'map')
-      expect(call, '探针里找不到那次 map——自检本身是坏的').toBeDefined()
-      return gatesAbove(call!, probe!)
-    }
-    // 该拒：这四种都能在「那行字面量原样在场」的前提下把整组抹掉。
-    // React 把 false/null/undefined 渲染成什么都没有，所以调用落在门的哪一侧都不安全。
-    expect(gatesInProbe('{false && m.entries.map((e) => <I />)}'), '认不出 && 门').not.toEqual([])
-    expect(gatesInProbe('{ok ? m.entries.map((e) => <I />) : null}'), '认不出三元门').not.toEqual([])
-    expect(gatesInProbe('{m.entries.map((e) => <I />) && false}'), '认不出「调用在左、门在右」').not.toEqual([])
-    expect(gatesInProbe('{other ?? m.entries.map((e) => <I />)}'), '认不出 ?? 替换').not.toEqual([])
-    expect(
-      gatesInProbe('{(() => { if (hide) return null; return m.entries.map((e) => <I />) })()}'),
-      '认不出新包的函数壳里那个 if'
-    ).not.toEqual([])
-    // 该放：无条件的那次 map，以及它自己回调里的取值与按数据分支。
-    // 回调是这次调用的实参（在它下面），不是祖先——把回调里的东西当成门会打假红。
-    expect(gatesInProbe('{m.entries.map((e) => <I />)}'), '把无条件的 map 判成有门').toEqual([])
-    expect(
-      gatesInProbe('{m.entries.map((e) => <I>{e.action?.label ?? e.label}</I>)}'),
-      '把回调里的 ?. / ?? 取值误当成门'
-    ).toEqual([])
-    expect(
-      gatesInProbe('{m.entries.map((e) => { if (e.kind === "sep") return null; return <I /> })}'),
-      '把 map 回调里按数据分支的 if 误当成整组的门'
-    ).toEqual([])
-    // 该放：同一段里别处的条件不算这次调用的门（本文件真实形状：Rename Agent 那处）。
-    expect(
-      gatesInProbe('{cb ? <I /> : null}{m.entries.map((e) => <I />)}'),
-      '把兄弟节点上的条件算成了这次调用的门——那会把合法代码判红'
-    ).toEqual([])
-    // receiver 逐字比对：换一份清单不能仍被认成同一次调用。
+  // 自检：门检测器自己也得受质询。没有这些，检测器写坏会让整族静默变恒绿——「没找到门」与
+  // 「认不出门」在结果上同形。逐形状喂它，一行一个判据（挤进一个 it 里，第一条红了后面全成死代码）。
+  const gatesInProbe = (body: string): string[] => {
+    const probe = jsxContentElementIn(
+      `const X = () => (<ContextMenu.Content>${body}</ContextMenu.Content>)`,
+      'probe.tsx',
+      'ContextMenu'
+    )
+    expect(probe, '探针源码里取不到 Content——自检本身是坏的').not.toBeNull()
+    const [call] = memberCallsIn(probe!, 'm.entries', 'map')
+    expect(call, '探针里找不到那次 map——自检本身是坏的').toBeDefined()
+    return gatesAbove(call!, probe!)
+  }
+  const callbackGatesInProbe = (body: string): string[] => {
+    const probe = jsxContentElementIn(
+      `const X = () => (<ContextMenu.Content>${body}</ContextMenu.Content>)`,
+      'probe.tsx',
+      'ContextMenu'
+    )
+    expect(probe, '探针源码里取不到 Content——自检本身是坏的').not.toBeNull()
+    const [call] = memberCallsIn(probe!, 'm.entries', 'map')
+    expect(call, '探针里找不到那次 map——自检本身是坏的').toBeDefined()
+    return callbackErasureGates(call!, probe!)
+  }
+
+  // 该拒（gatesAbove）：这些都能在「那行字面量原样在场」的前提下把整组抹掉。React 把
+  // false/null/undefined 渲染成什么都没有，所以调用落在门的哪一侧、被什么算符裹着都不安全。
+  // 白名单判据的好处：这四种审计新发现的绕法（void / ! / 逗号 / 落在 .filter 上）不必逐一枚举，
+  // 「不是那几层无害的 JSX 包装」这一条把它们与将来没见过的写法一并挡住。
+  it.each([
+    ['&& 门（调用在右）', '{false && m.entries.map((e) => <I />)}'],
+    ['三元门', '{ok ? m.entries.map((e) => <I />) : null}'],
+    ['调用在左、门在右', '{m.entries.map((e) => <I />) && false}'],
+    ['?? 替换', '{other ?? m.entries.map((e) => <I />)}'],
+    ['|| 短路', '{true || m.entries.map((e) => <I />)}'],
+    ['新包的函数壳里那个 if', '{(() => { if (hide) return null; return m.entries.map((e) => <I />) })()}'],
+    ['void 求值成 undefined（审计 B-1）', '{void m.entries.map((e) => <I />)}'],
+    ['逻辑取反成 false（审计 B-4）', '{!m.entries.map((e) => <I />)}'],
+    ['逗号表达式取末值 null（审计 B-2）', '{(m.entries.map((e) => <I />), null)}'],
+    ['渲染层再 .filter 一遍', '{m.entries.map((e) => <I />).filter(Boolean)}']
+  ])('自检·gatesAbove 认得取反用的形状：%s', (_label, body) => {
+    expect(gatesInProbe(body), '这种取反形状没被认成门').not.toEqual([])
+  })
+
+  // 该放（gatesAbove）：无条件的那次 map、它自己回调里的取值、以及兄弟节点上的条件。白名单一收窄
+  // 就会误伤这些诚实写法，而一道打假红的守卫最终会被删掉——所以每一处放宽都配一个 ALLOW 侧探针。
+  it.each([
+    ['无条件的 map', '{m.entries.map((e) => <I />)}'],
+    ['回调里的 ?. / ?? 取值', '{m.entries.map((e) => <I>{e.action?.label ?? e.label}</I>)}'],
+    ['回调里按数据分支的 if', '{m.entries.map((e) => { if (e.kind === "sep") return null; return <I /> })}'],
+    ['裹进一层 Fragment', '<>{m.entries.map((e) => <I />)}</>'],
+    ['纯分组括号', '{(m.entries.map((e) => <I />))}'],
+    ['兄弟节点上的条件（本文件真实形状：Rename Agent）', '{cb ? <I /> : null}{m.entries.map((e) => <I />)}']
+  ])('自检·gatesAbove 不把合法写法误当门：%s', (_label, body) => {
+    expect(gatesInProbe(body), '合法写法被判成了门——这会把诚实代码判红').toEqual([])
+  })
+
+  // 该拒（callbackErasureGates）：回调无条件、或按渲染层开关（不是按当前项）把整组吐成空。
+  it.each([
+    ['首行 if(true) return null（审计 B-3）', '{m.entries.map((e) => { if (true) return null; return <I /> })}'],
+    ['按外部开关 if(hide) return null', '{m.entries.map((e) => { if (hide) return null; return <I /> })}'],
+    ['无条件 return null', '{m.entries.map((e) => { return null })}'],
+    ['简写体直接 null', '{m.entries.map((e) => null)}'],
+    ['简写体按外部开关三元吐 null', '{m.entries.map((e) => hide ? null : <I />)}'],
+    ['外层非数据 if 包着数据 if', '{m.entries.map((e) => { if (hide) { if (e.kind) return null } return <I /> })}']
+  ])('自检·callbackErasureGates 认得回调里抹除整组的形状：%s', (_label, body) => {
+    expect(callbackGatesInProbe(body), '这种回调抹除形状没被认成门').not.toEqual([])
+  })
+
+  // 该放（callbackErasureGates）：按当前项数据跳过某些项、或只是决定某一项长什么样，都合法。
+  it.each([
+    ['按 entry.kind 跳过分隔项', '{m.entries.map((e) => { if (e.kind === "sep") return null; return <I /> })}'],
+    ['按当前项简写三元', '{m.entries.map((e) => e.hidden ? null : <I />)}'],
+    ['两个分支都渲染（不抹除）', '{m.entries.map((e) => cond ? <A /> : <B />)}'],
+    ['按 index 跳过首项', '{m.entries.map((e, i) => { if (i === 0) return null; return <I /> })}'],
+    ['嵌套数据 if 都引用当前项', '{m.entries.map((e) => { if (e.a) { if (e.b) return null } return <I /> })}'],
+    ['某一项的 onSelect 里 return null 不算', '{m.entries.map((e) => <I onSelect={() => { return null }} />)}']
+  ])('自检·callbackErasureGates 不把按数据分支误当门：%s', (_label, body) => {
+    expect(callbackGatesInProbe(body), '按数据分支被判成了门——这会把诚实代码判红').toEqual([])
+  })
+
+  it('自检：receiver 逐字比对——换一份清单不能仍被认成同一次调用', () => {
     expect(
       memberCallsIn(
         jsxContentElementIn(
