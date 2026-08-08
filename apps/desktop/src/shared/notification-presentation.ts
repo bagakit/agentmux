@@ -14,7 +14,7 @@ import type { AgentDisplayState, AgentTimelineItem } from '@agentmux/core'
  * a tier here; the settings control renders exactly these stops in order, and delivery resolves a stop
  * to the `mode` it carries. There is no second table.
  */
-export type NotificationModeId = 'off' | 'brief' | 'standard' | 'patient' | 'until-acknowledged'
+export type NotificationModeId = 'off' | 'brief' | 'standard' | 'patient' | 'until-acknowledged' | 'nagging'
 
 /**
  * What a resolved tier asks delivery to do. `off` never reaches main — the notifier drops it before the

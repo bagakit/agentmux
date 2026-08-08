@@ -1,3 +1,4 @@
+import { clampProjectRailWidth, PROJECT_RAIL_DEFAULT_WIDTH } from './lib/project-rail-width'
 import { create } from 'zustand'
 import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware'
 import {
@@ -314,6 +315,7 @@ type AppState = {
   toolsOpen: boolean
   tabMenuOpen: boolean
   workspaceTool: WorkspaceTool
+  projectRailWidth: number
   toolDockWidth: number
   /**
    * 编辑器换行开关。**全局一个位**，不是按文件——它是一种查看偏好（像主题），不是文档的属性；
@@ -461,6 +463,7 @@ type AppState = {
   setTabMenuOpen(open: boolean): void
   setWorkspaceTool(tool: WorkspaceTool): void
   toggleTools(): void
+  setProjectRailWidth(width: number): void
   setToolDockWidth(width: number): void
   updateFileExplorerState(
     workspaceId: string,
@@ -1438,6 +1441,7 @@ type PersistedAppState = {
   collapsedProjectGroups?: Record<string, true>
   toolsOpen?: boolean
   workspaceTool?: WorkspaceTool
+  projectRailWidth?: number
   toolDockWidth?: number
   editorWordWrap?: boolean
 }
@@ -1450,6 +1454,7 @@ export type RestoredUiState = Pick<
   | 'collapsedProjectGroups'
   | 'toolsOpen'
   | 'workspaceTool'
+  | 'projectRailWidth'
   | 'toolDockWidth'
   | 'editorWordWrap'
 >
@@ -1486,7 +1491,8 @@ export function restorePersistedUiState(
     | 'collapsedProjectGroups'
     | 'toolsOpen'
     | 'workspaceTool'
-    | 'toolDockWidth'
+    | 'projectRailWidth'
+  | 'toolDockWidth'
     | 'editorWordWrap'
   >
 ): RestoredUiState {
@@ -1497,6 +1503,7 @@ export function restorePersistedUiState(
     collapsedProjectGroups: restoredCollapsedGroups(persisted.collapsedProjectGroups),
     toolsOpen: restoredBoolean(persisted.toolsOpen, true),
     workspaceTool: restoredWorkspaceTool(persisted.workspaceTool),
+    projectRailWidth: clampProjectRailWidth(persisted.projectRailWidth ?? PROJECT_RAIL_DEFAULT_WIDTH),
     toolDockWidth: clampToolDockWidth(
       typeof persisted.toolDockWidth === 'number'
         ? persisted.toolDockWidth
@@ -1644,6 +1651,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   toolsOpen: true,
   tabMenuOpen: false,
   workspaceTool: 'files-branches',
+  projectRailWidth: PROJECT_RAIL_DEFAULT_WIDTH,
   toolDockWidth: TOOL_DOCK_DEFAULT_WIDTH,
   loading: true,
   runtimeOwnershipWarnings: [],
@@ -2995,6 +3003,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   toggleTools() {
     set((state) => ({ toolsOpen: !state.toolsOpen }))
+  },
+  setProjectRailWidth(projectRailWidth) {
+    set({ projectRailWidth: clampProjectRailWidth(projectRailWidth) })
   },
   setToolDockWidth(toolDockWidth) {
     set({ toolDockWidth: clampToolDockWidth(toolDockWidth) })
@@ -4524,6 +4535,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     collapsedProjectGroups: state.collapsedProjectGroups,
     toolsOpen: state.toolsOpen,
     workspaceTool: state.workspaceTool,
+    projectRailWidth: state.projectRailWidth,
     toolDockWidth: state.toolDockWidth,
     // 换行开关是一种查看偏好（像主题），重开要还在——与上面这些表面偏好同一档。
     editorWordWrap: state.editorWordWrap

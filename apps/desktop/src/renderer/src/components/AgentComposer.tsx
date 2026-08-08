@@ -10,6 +10,7 @@ export type AgentComposerProps = {
   disabled: boolean
   placeholder: string
   activeFile?: string
+  contextUsage?: ReactNode
   tools?: ReactNode
   commands?: Array<{ text: string; description: string }>
   // Which action the primary button performs. `stop` while a turn is in flight, `send` otherwise. This is
@@ -32,6 +33,7 @@ export function AgentComposer({
   placeholder,
   activeFile,
   tools,
+  contextUsage,
   commands = [],
   primaryAction = 'send',
   postureControl,
@@ -122,6 +124,7 @@ export function AgentComposer({
           ) : null}
         </div>
         <div>
+          {contextUsage}
           {primaryAction === 'stop' ? (
             // ■ interrupts THIS turn (onInterrupt → Core semantic interrupt); it does not end the Run.
             // Terminating the whole session is a separate action that lives in the Tabbar, so the mark and

@@ -491,7 +491,13 @@ function turnUsage(value: unknown): AgentTurnUsage {
     inputTokens: timestamp(source.inputTokens, 'turnUsage.inputTokens'),
     outputTokens: timestamp(source.outputTokens, 'turnUsage.outputTokens'),
     totalTokens: timestamp(source.totalTokens, 'turnUsage.totalTokens'),
-    observedAt: timestamp(source.observedAt, 'turnUsage.observedAt')
+    observedAt: timestamp(source.observedAt, 'turnUsage.observedAt'),
+    ...(source.context === undefined ? {} : {
+      context: {
+        usedTokens: timestamp(record(source.context, 'turnUsage.context').usedTokens, 'turnUsage.context.usedTokens'),
+        capacityTokens: timestamp(record(source.context, 'turnUsage.context').capacityTokens, 'turnUsage.context.capacityTokens')
+      }
+    })
   }
 }
 
