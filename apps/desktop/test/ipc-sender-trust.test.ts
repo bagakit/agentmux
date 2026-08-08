@@ -445,8 +445,9 @@ function acceptControlGuard(module: ParsedModule): AcceptControlGuard {
   const then = first.thenStatement
   const isBareReturn = (node: ts.Statement): boolean =>
     ts.isReturnStatement(node) && node.expression === undefined
+  const onlyThenStatement = ts.isBlock(then) && then.statements.length === 1 ? then.statements[0] : undefined
   const returnsWhenUntrusted =
-    isBareReturn(then) || (ts.isBlock(then) && then.statements.length === 1 && isBareReturn(then.statements[0]))
+    isBareReturn(then) || (onlyThenStatement !== undefined && isBareReturn(onlyThenStatement))
   return {
     kind: 'sender-gate',
     senderTrustImportedFrom: importedModuleOf(declarationOf(module, call.expression)),

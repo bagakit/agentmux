@@ -528,7 +528,13 @@ function originsOfTypeNode(checker: ts.TypeChecker, node: ts.TypeNode, seen: Set
 
 /** 出处集合收成一个词。刻意严格：混了两个包也要说出来，而不是挑一个当答案。 */
 function sideLabel(origins: Set<OriginPackage>): string {
-  if (origins.size === 1) return [...origins][0]
+  if (origins.size === 1) {
+    // size === 1 已经保证这个元素在，这道门只有在那条前提被打破时才会落空
+    // （noUncheckedIndexedAccess 要求写出来）。不用 `!`/`as`：那两种写法会把「其实不在」
+    // 静默强转成「在」，等于把类型系统刚指出的洞又焊回去。
+    const [only] = origins
+    if (only !== undefined) return only
+  }
   if (origins.size === 0) return 'none'
   return `mixed(${[...origins].sort().join(',')})`
 }
