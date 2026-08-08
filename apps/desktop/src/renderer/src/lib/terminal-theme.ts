@@ -1,6 +1,7 @@
 import type { ITheme, ITerminalOptions, Terminal } from '@xterm/xterm'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import type { TerminalThemeId } from '../../../shared/contracts'
+import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
 import { terminalPalette } from '../../../shared/terminal-palettes'
 
 export type TerminalThemeDefinition = {
@@ -41,7 +42,6 @@ const TERMINAL_BASE_OPTIONS = Object.freeze({
   cursorStyle: 'block',
   cursorInactiveStyle: 'outline',
   fontFamily: '"SF Mono", "Menlo", "Monaco", "Cascadia Mono", "Consolas", "DejaVu Sans Mono", "Liberation Mono", "Symbols Nerd Font Mono", "MesloLGS Nerd Font", "JetBrainsMono Nerd Font", "Hack Nerd Font", monospace',
-  fontSize: 12,
   fontWeight: '300',
   fontWeightBold: '500',
   lineHeight: 1,
@@ -54,8 +54,15 @@ const TERMINAL_BASE_OPTIONS = Object.freeze({
   drawBoldTextInBrightColors: true
 }) satisfies Partial<ITerminalOptions>
 
-export function terminalOptions(themeId: TerminalThemeId): Partial<ITerminalOptions> {
-  return { ...TERMINAL_BASE_OPTIONS, theme: terminalTheme(themeId) }
+// `fontSize` is deliberately NOT a member of TERMINAL_BASE_OPTIONS: the size is user-adjustable and its
+// default lives in the contract's `TERMINAL_FONT_SIZE_DEFAULT` (the single source of truth). Deriving it
+// here — never re-declaring a literal — is what keeps the hardcoded `12` from creeping back: change the
+// default and the terminal follows, in one place.
+export function terminalOptions(
+  themeId: TerminalThemeId,
+  fontSize: number = TERMINAL_FONT_SIZE_DEFAULT
+): Partial<ITerminalOptions> {
+  return { ...TERMINAL_BASE_OPTIONS, theme: terminalTheme(themeId), fontSize }
 }
 
 /** xterm 默认宽度表是 Unicode 6：CJK 尚可，但 emoji、较新的符号按 1 列排版。 */

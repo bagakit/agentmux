@@ -217,8 +217,46 @@ const _terminalThemeIdsAreExactlyTheUnion: [
 ] = [true, true]
 void _terminalThemeIdsAreExactlyTheUnion
 
+/**
+ * The terminal font size, in CSS pixels, and the single source of truth for its default and its
+ * allowed range. `terminal-theme.ts` READS `TERMINAL_FONT_SIZE_DEFAULT` (it does not re-declare a
+ * literal), the persistence layer clamps every stored value through {@link clampTerminalFontSize}, and
+ * the Appearance control bounds its input by these constants — one declaration point for a number that
+ * would otherwise be copied into four files and silently drift.
+ *
+ * `DEFAULT` is the value the terminal shipped with before the size was adjustable, so a config that
+ * predates the field, or one that never set it, renders exactly as it did before.
+ */
+export const TERMINAL_FONT_SIZE_MIN = 8
+export const TERMINAL_FONT_SIZE_MAX = 32
+export const TERMINAL_FONT_SIZE_DEFAULT = 12
+
+/**
+ * Force a font size into the allowed range. This is the ONE place a size is clamped — the persistence
+ * schema calls it on every parse, so no unclamped value can reach disk or the renderer. It is
+ * deliberately not called from the renderer or `terminal-theme.ts`: those trust the persisted value.
+ *
+ * Rounds first (a hand-edited `12.6` becomes `13`, not a fractional cell metric), and a non-finite
+ * input (`NaN`, `Infinity`) falls back to the default rather than to a boundary — `NaN` is not "too
+ * small", it is "no value".
+ */
+export function clampTerminalFontSize(value: number): number {
+  if (!Number.isFinite(value)) return TERMINAL_FONT_SIZE_DEFAULT
+  const rounded = Math.round(value)
+  if (rounded < TERMINAL_FONT_SIZE_MIN) return TERMINAL_FONT_SIZE_MIN
+  if (rounded > TERMINAL_FONT_SIZE_MAX) return TERMINAL_FONT_SIZE_MAX
+  return rounded
+}
+
 export type AppearanceConfig = {
   terminalTheme: TerminalThemeId
+  /**
+   * Optional so the field lands without a version bump or a migration (the same path the sibling
+   * `notifications` field took): a config written before it existed still parses, and consumers resolve
+   * an absent value to `TERMINAL_FONT_SIZE_DEFAULT`. Absence therefore means "the default", never
+   * "zero". Persisted values are guaranteed in range because the schema clamps every write.
+   */
+  terminalFontSize?: number
 }
 
 export type BrowserToolbarConfig = {

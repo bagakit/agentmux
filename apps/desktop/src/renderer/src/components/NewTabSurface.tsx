@@ -1,6 +1,7 @@
 import { ArrowUpRight, Check, ChevronRight, Globe2, LoaderCircle, NotebookPen, Play, RadioTower, RefreshCw, Sparkles, SquareTerminal } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { LaunchOptionSelection } from '@agentmux/core'
+import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
 import { DESKTOP_ACTIONS } from '../../../shared/desktop-actions'
 import { executorDetectionKey, useAppStore, warmTerminalKey } from '../store'
 import { configuredExecutors } from '../lib/executors'
@@ -83,6 +84,9 @@ export function NewTabSurface({
   const prewarmTerminal = useAppStore((state) => state.prewarmTerminal)
   const warmTerminal = useAppStore((state) => state.warmTerminal)
   const terminalThemeId = useAppStore((state) => state.config?.appearance.terminalTheme)
+  const terminalFontSize = useAppStore(
+    (state) => state.config?.appearance.terminalFontSize ?? TERMINAL_FONT_SIZE_DEFAULT
+  )
   const createBrowser = useAppStore((state) => state.createBrowser)
   const createNote = useAppStore((state) => state.createNote)
   // 卡片上写「Start in ⟨谁⟩」的那个 Workspace，与五个启动动作真正落进去的那个，必须是**同一次**
@@ -405,6 +409,7 @@ export function NewTabSurface({
                 <TerminalView
                   session={warmSession}
                   themeId={terminalThemeId}
+                  fontSize={terminalFontSize}
                   interactiveResize={false}
                   visible={visible}
                   autoFocus={false}

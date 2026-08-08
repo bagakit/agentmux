@@ -7,6 +7,7 @@ import '@xterm/xterm/css/xterm.css'
 import { ChevronDown, ChevronUp, ExternalLink, FileCode, LoaderCircle, Search, X } from 'lucide-react'
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { RuntimeEvent, SessionSnapshot, TerminalThemeId } from '../../../shared/contracts'
+import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import {
@@ -131,6 +132,7 @@ function outputForSession(event: RuntimeEvent, session: SessionSnapshot) {
 export function TerminalView({
   session,
   themeId,
+  fontSize = TERMINAL_FONT_SIZE_DEFAULT,
   interactiveResize,
   visible = true,
   autoFocus = true,
@@ -138,6 +140,11 @@ export function TerminalView({
 }: {
   session: SessionSnapshot
   themeId: TerminalThemeId
+  // The terminal font size in CSS pixels. Absent falls back to the shipped default (a caller that has
+  // not yet read config renders at the same size the terminal always used). A change reaches an already
+  // open terminal through the live-refit effect below — the attach effect does not depend on it, so a
+  // resize never tears down xterm or replays scrollback.
+  fontSize?: number
   interactiveResize: boolean
   // 这一格看不看得见。隐藏的 Tab 仍留在 DOM 里保住 xterm 实例（切回才不必重放），
   // 但它必须停工：不 fit、不 resize、不渲染。默认 true 供创建页等单格场景。
@@ -163,6 +170,11 @@ export function TerminalView({
   const linkPressRef = useRef<{ x: number; y: number } | null>(null)
   const interactiveResizeRef = useRef(interactiveResize)
   interactiveResizeRef.current = interactiveResize
+  // Font size is a prop the attach effect must NOT depend on (a change must not rebuild xterm and
+  // replay scrollback). The attach effect reads the current value through this ref at construction; a
+  // live change is applied by the dedicated effect below.
+  const fontSizeRef = useRef(fontSize)
+  fontSizeRef.current = fontSize
   const visibleRef = useRef(visible)
   visibleRef.current = visible
   // canControlRun 随 processState 翻转，但 attach effect 不能依赖它——否则同 runId 的
@@ -267,6 +279,24 @@ export function TerminalView({
     viewportRef.current?.setInteractiveResize(interactiveResize)
   }, [interactiveResize])
 
+  // Live font-size application. The attach effect already built xterm at the current size, so this must
+  // not fire on mount — only when the user changes the size on an already-open terminal. Setting
+  // `terminal.options.fontSize` alone is not enough: xterm re-measures the glyph but the grid (cols/rows)
+  // and the retained PTY still disagree until something refits. That refit goes through the ONE existing
+  // owner — `synchronizeCellMetrics` clears the wobble baseline (a deliberate cell-metric change is not
+  // jitter) and re-enters the settled-size path — never a second fit/resize implementation here.
+  const fontSizeMountedRef = useRef(false)
+  useEffect(() => {
+    if (!fontSizeMountedRef.current) {
+      fontSizeMountedRef.current = true
+      return
+    }
+    const terminal = terminalRef.current
+    if (!terminal) return
+    terminal.options.fontSize = fontSize
+    viewportRef.current?.synchronizeCellMetrics()
+  }, [fontSize])
+
   useLayoutEffect(() => {
     const terminal = terminalRef.current
     if (!visible && terminal) {
@@ -313,7 +343,7 @@ export function TerminalView({
     setRedrawing(false)
     rememberedSelectionRef.current = ''
     const terminal = new Terminal({
-      ...terminalOptions(themeId),
+      ...terminalOptions(themeId, fontSizeRef.current),
       scrollback: 5_000
     })
     const fit = new FitAddon()
