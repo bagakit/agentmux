@@ -477,7 +477,7 @@ describe('Agent 头像：身份看图标，点击到人', () => {
   })
 
   it('键盘可达：它是 button，Enter 天然等价于点击，并有 aria-label 与 tooltip', () => {
-    expect(avatar).toContain('type="button"')
+    expect(avatar).toContain("const Element = onOpen ? 'button' : 'span'")
     expect(avatar).toContain('aria-label={`${label} · ${state}`}')
     expect(avatar).toContain('title={`${label} · ${state}`}')
   })
@@ -487,7 +487,7 @@ describe('Agent 头像：身份看图标，点击到人', () => {
     // `transform` 不参与布局，一枚头像 scale 起来不会让邻座移动一个像素（会挤动的是改宽高
     // 或 margin）。用户要的正是 macOS 程序坞那种抬升放大，而当初挡住它的是一条搞错了机制的
     // 注释。现在放大在叠压容器上生效——叠压之后必须有东西能让被压住的那枚完整露出来。
-    const lift = styles.match(/\.selector-presence__slot:hover \.agent-avatar[^{]*\{([^}]*)\}/)?.[1] ?? ''
+    const lift = styles.match(/\.selector-presence__slot:hover button\.agent-avatar[^{]*\{([^}]*)\}/)?.[1] ?? ''
     expect(lift.length).toBeGreaterThan(0)
     expect(lift).toContain('scale(')
     expect(lift).toContain('translateY(')

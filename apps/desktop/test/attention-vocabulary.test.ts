@@ -1,8 +1,9 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 import type { AgentDisplayState } from '@agentmux/core'
 import type { SessionSnapshot } from '../src/shared/contracts.js'
+import { allStyleRules } from './helpers/styles.js'
 import {
   AGENT_DISPLAY_STATES,
   isNeedsYouState
@@ -313,6 +314,98 @@ function codeStringLiterals(source: string, label: string): string[] {
 // concept wearing the same attribute name — they label which class a segment is ABOUT and stay put when
 // its count is zero — so folding them in here would force an exemption list, and an exemption list is
 // where a dead attribute hides.
+// 每个**计算出来的** `data-attention`，连同它所在那个元素的类名。
+//
+// 类名必须从同一个 JSX 元素上取，不能另列一张「组件 → 类名」的表。原来那里是一张手抄的两行 Map，
+// 于是第三个发这个属性的组件（Topic 头像）不在里面——它发了属性、没有任何规则接，而这份文件里
+// 每一条判据对它一概免检，同时"我们提取到了东西"的自检靠另外两行照旧全绿。这正是本文件反复
+// 警告的那个形状：靠省略来豁免。改成派生之后，下一个发这个属性的组件自动入册。
+function attentionEmissions(source: string): Array<{ attention: string; classNames: string[] }> {
+  const file = ts.createSourceFile('x.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const found: Array<{ attention: string; classNames: string[] }> = []
+
+  // 同一个元素上 className 里那些**完整的**字面量类名。
+  //
+  // 半截名字是这里唯一的陷阱：`status--${state}` 的字面量部分是 `status--`，把它当成一个类名放进
+  // 下面那条可达性正则（`\.status--[^,{]*\[data-attention`）就会命中 `.status--working[data-attention]`
+  // ——一个其实无人上色的属性借邻居的规则过了关。
+  //
+  // 所以判据不是"把 `${...}` 抹掉之后剩下什么"，而是每一段字面量的两端**在语法上**接的是什么：
+  // 紧贴插值的那个词是半截的，只有与插值之间隔了空白的词才是完整类名。段的边界由 TS 自己给出，
+  // 这里不引入哨兵字符——一个"类名里不可能出现的字符"是又一个要维护的假设，而本仓
+  // reference-name-containment.test.ts 已经记过它最坏的形态：往源文件里塞 NUL 会让整个文件对
+  // `git grep` 永久失明。
+  const completeWords = (text: string, cutLeft: boolean, cutRight: boolean): string[] => {
+    // split 在字符串两端的空白处留下空串——那正好证明"这一端与插值之间有空白"，即该端的词完整。
+    const words = text.split(/\s+/u)
+    if (cutLeft && words[0] !== '') words.shift()
+    if (cutRight && words[words.length - 1] !== '') words.pop()
+    return words.filter((word) => /^[a-z][a-z0-9_-]*$/iu.test(word))
+  }
+  const classNamesOf = (attributes: ts.JsxAttributes): string[] => {
+    for (const attribute of attributes.properties) {
+      if (!ts.isJsxAttribute(attribute) || attribute.name.getText() !== 'className') continue
+      const initializer = attribute.initializer
+      if (!initializer) return []
+      const expression = ts.isJsxExpression(initializer) ? initializer.expression : initializer
+      if (!expression) return []
+      if (ts.isStringLiteral(expression) || ts.isNoSubstitutionTemplateLiteral(expression)) {
+        return completeWords(expression.text, false, false)
+      }
+      if (ts.isTemplateExpression(expression)) {
+        const last = expression.templateSpans.length - 1
+        return [
+          ...completeWords(expression.head.text, false, true),
+          ...expression.templateSpans.flatMap((span, index) =>
+            completeWords(span.literal.text, true, index < last)
+          )
+        ]
+      }
+      // 不认识的写法（`clsx(...)` 之类）。返回空而不是靠 getText() 猜——空会让"没有字面量类名"
+      // 那条断言响亮报红，而 getText() 会把实参名字混成类名，悄悄放宽判据。
+      return []
+    }
+    return []
+  }
+
+  const visit = (node: ts.Node): void => {
+    // <tag className=... data-attention={expr}>
+    if (
+      ts.isJsxAttribute(node) &&
+      node.name.getText() === 'data-attention' &&
+      node.initializer &&
+      ts.isJsxExpression(node.initializer) &&
+      node.initializer.expression
+    ) {
+      found.push({
+        attention: node.initializer.expression.getText(),
+        classNames: classNamesOf(node.parent)
+      })
+    }
+    // <tag className=... {...(cond ? { 'data-attention': expr } : {})}>
+    if (ts.isPropertyAssignment(node)) {
+      const key = ts.isStringLiteralLike(node.name) ? node.name.text : null
+      if (key === 'data-attention') {
+        // 往上走到这个 spread 所属的属性表——展开写法与直写写法落在同一个元素上，类名也就同源。
+        let attributes: ts.JsxAttributes | null = null
+        for (let parent: ts.Node | undefined = node.parent; parent; parent = parent.parent) {
+          if (ts.isJsxAttributes(parent)) {
+            attributes = parent
+            break
+          }
+        }
+        found.push({
+          attention: node.initializer.getText(),
+          classNames: attributes ? classNamesOf(attributes) : []
+        })
+      }
+    }
+    ts.forEachChild(node, visit)
+  }
+  ts.forEachChild(file, visit)
+  return found
+}
+
 function attentionAttributeExpressions(source: string): string[] {
   const file = ts.createSourceFile('x.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
   const found: string[] = []
@@ -386,34 +479,93 @@ describe('each attention call site is wired to the shared vocabulary', () => {
     // [data-attention]. A guard that only checked "the selector name appears in some file" would pass
     // on a stylesheet that mentions the class for unrelated reasons — that exact blind spot let the
     // fan-out lane's dead attribute live (see the CSS-guard note in the styles tests).
-    const styles = ['chrome.css', 'overlays.css', 'surfaces.css', 'agent.css', 'dock.css', 'selector.css']
-      .map((name) => read(`../src/renderer/src/styles/${name}`))
-      .join('\n')
+    //
+    // Both halves of the input are DERIVED, and both used to be hand-copied lists that exempted by
+    // omission:
+    //
+    //   - the emitters came from a two-row `Map<component, className>`, so the third emitter (the Topic
+    //     avatar, #409) was exempt from every criterion here while the self-check stayed green off the
+    //     other two rows. Now every component file is scanned and the class name is read off the SAME
+    //     JSX element as the attribute, so a new emitter cannot be absent and cannot be paired with the
+    //     wrong class.
+    //   - the stylesheets came from a six-name list while the folder holds fifteen. A rule moved into an
+    //     unlisted file would read as "no rule selects this" and red the wrong thing; a new surface
+    //     styled only in an unlisted file would be invisible to the criterion. `allStyles()` derives the
+    //     set from index.css's own @import order and throws if a stylesheet is not imported at all.
+    // 剥掉注释的那一份：判据是"有没有这么一条规则"，而**这条规则的理由注释里逐字写着那个选择器**。
+    // 实测过：把头像的类名整个改掉（界面上再没有规则接得住），24 条照旧全绿——命中的是散文。
+    const styles = allStyleRules()
+    const componentDir = new URL('../src/renderer/src/components/', import.meta.url)
+    const components = readdirSync(componentDir).filter((name) => name.endsWith('.tsx'))
+    // Self-check: an empty scan root would make every loop below vacuous. This is the shape that turned
+    // a stylesheet guard green by pointing it at the wrong directory once already.
+    expect(components.length).toBeGreaterThan(10)
 
-    // A computed emission is `data-attention={...}`; a hardcoded one is `data-attention="working"`.
-    // Only the computed ones make a claim about the CURRENT state, so only they need ink. The literal
-    // spelling is a different concept wearing the same attribute name (it labels which class a segment
-    // is ABOUT, and stays put when the count is zero) and is tracked separately; counting it here would
-    // force an exemption list, and exemption lists are where the dead attribute hid.
-    const emitters = new Map<string, string>([
-      ['QuickSwitcher.tsx', 'quick-switch__row'],
-      ['WorkspaceSidebar.tsx', 'project-rail-row']
+    const emitters = components
+      .map((component) => ({ component, emissions: attentionEmissions(read(`../src/renderer/src/components/${component}`)) }))
+      .filter(({ emissions }) => emissions.length > 0)
+    // Self-check: the extractor finding nothing anywhere would report success for a codebase that had
+    // quietly stopped emitting the attribute altogether.
+    expect(emitters.map(({ component }) => component).sort()).toEqual([
+      'AgentAvatar.tsx',
+      'QuickSwitcher.tsx',
+      'WorkspaceSidebar.tsx'
     ])
 
-    for (const [component, className] of emitters) {
-      const source = read(`../src/renderer/src/components/${component}`)
-      const computed = attentionAttributeExpressions(source)
-      // Self-check per component: zero extractions would make this iteration prove nothing, and the
-      // outer loop would still report success for a file that had quietly stopped emitting.
-      expect(computed.length, `${component} should still emit a computed data-attention`)
-        .toBeGreaterThan(0)
-      // The rule has to name this component's class AND the attribute in one selector. Matching them
-      // independently would accept a stylesheet that styles the class for layout and reads
-      // [data-attention] on some unrelated element.
-      const reachable = new RegExp(`\\.${className}[^,{]*\\[data-attention`, 'u').test(styles)
-      expect(reachable, `${component} emits data-attention but no rule selects .${className}[data-attention]`)
-        .toBe(true)
+    for (const { component, emissions } of emitters) {
+      for (const { attention, classNames } of emissions) {
+        // An emission on an element with no literal class name cannot be reached by any rule, so it is
+        // a failure in its own right rather than something to skip.
+        expect(classNames.length, `${component} emits data-attention (${attention}) on an element with no literal className`)
+          .toBeGreaterThan(0)
+        // The rule has to name one of THIS element's classes AND the attribute in one selector. Matching
+        // them independently would accept a stylesheet that styles the class for layout and reads
+        // [data-attention] on some unrelated element.
+        // `\\b` 不够：类名以 `-` 收尾时它不是词边界，而更要紧的是 `.status` 会前缀命中
+        // `.status--working[data-attention]`——一个共享的基类就此替这个元素借到了别人的规则（实测：
+        // 头像的独有类名改掉后，同元素上的 `status` 让整条判据照旧通过）。所以要求类名后面紧跟的
+        // 不是类名字符：选择器里合法的下一个字符只能是 `.#[:>+~,{` 或空白。
+        const reachable = classNames.some((className) =>
+          new RegExp(`\\.${className}(?![\\w-])[^,{]*\\[data-attention`, 'u').test(styles)
+        )
+        expect(
+          reachable,
+          `${component} emits data-attention (${attention}) on .${classNames.join('/.')} but no rule selects that pair`
+        ).toBe(true)
+      }
     }
+  })
+
+  it('the emission extractor reads the class off the same element, both spellings', () => {
+    // The derivation above is only as good as this pairing: a extractor that returned the attribute but
+    // lost the class would make every reachability check vacuous (zero classNames → the assertion above
+    // reds, which is the safe direction), and one that picked up a NEIGHBOUR's class would let a dead
+    // attribute pass by borrowing a styled sibling's name. Both spellings and the interpolated-class
+    // shape are pinned on synthetic input.
+    expect(attentionEmissions('const a = <b className="lane" data-attention={f(s)} />')).toEqual([
+      { attention: 'f(s)', classNames: ['lane'] }
+    ])
+    expect(
+      attentionEmissions("const a = <b className=\"row\" {...(x ? { 'data-attention': x.c } : {})} />")
+    ).toEqual([{ attention: 'x.c', classNames: ['row'] }])
+    // Template strings are the majority spelling here, and the half name is the whole reason this
+    // extractor is not a regex. `status--${s}`'s literal part is `status--`; keeping it would make the
+    // reachability regex below match `.status--working[data-attention]`, so an attribute that nothing
+    // paints passes by borrowing a neighbouring state's rule. Only words separated from the
+    // interpolation by whitespace are complete class names — the word touching it is dropped whole.
+    expect(
+      attentionEmissions('const a = <b className={`avatar status status--${s}`} data-attention={g(s)} />')
+    ).toEqual([{ attention: 'g(s)', classNames: ['avatar', 'status'] }])
+    // …and the same on the other side of an interpolation, plus a complete word between two of them.
+    expect(
+      attentionEmissions('const a = <b className={`a${x}b c ${y}d`} data-attention={g(s)} />')
+    ).toEqual([{ attention: 'g(s)', classNames: ['c'] }])
+    // A neighbouring element's class must not leak in.
+    expect(
+      attentionEmissions('const a = <b className="outer"><i className="inner" data-attention={h(s)} /></b>')
+    ).toEqual([{ attention: 'h(s)', classNames: ['inner'] }])
+    // Literals stay out: they are a different concept wearing the same attribute name.
+    expect(attentionEmissions('const a = <b className="lane" data-attention="working" />')).toEqual([])
   })
 
   it('a computed data-attention on a class no rule selects is caught', () => {

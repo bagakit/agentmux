@@ -20,6 +20,7 @@ import { ShortcutsCheatSheet } from './components/ShortcutsCheatSheet'
 import { isEditableChordTarget, windowShortcutHandlers } from './lib/workbench-shortcuts'
 import { routeWindowShortcut } from './lib/shortcut-registry'
 import { SurfaceSwitch, TopRowLeadingChrome } from './components/TopRowChrome'
+import { BoardRowsProvider } from './hooks/useBoardRows'
 import { WorkspaceBoard } from './components/WorkspaceBoard'
 import { WorkspaceSidebar } from './components/WorkspaceSidebar'
 import { SurfaceToolDock } from './components/SurfaceToolDock'
@@ -167,6 +168,7 @@ export function App() {
     <>
       <TerminalParkingProvider parkedRegionIds={parkedTerminalRegionIds}>
       <SurfaceMemoryBudgetProvider state={surfaceMemoryBudget}>
+      <BoardRowsProvider enabled={mainSurface === 'board' && !settingsRoute}>
       <div
         className={`app-shell ${projectRailOpen ? '' : 'app-shell--project-rail-collapsed'}`}
         aria-hidden={settingsRoute ? true : undefined}
@@ -270,6 +272,7 @@ export function App() {
         isMac={isMacPlatform()}
       />
       </div>
+      </BoardRowsProvider>
       </SurfaceMemoryBudgetProvider>
       </TerminalParkingProvider>
       {settingsRoute ? (

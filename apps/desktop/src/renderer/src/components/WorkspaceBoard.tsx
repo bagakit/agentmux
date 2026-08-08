@@ -19,9 +19,6 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { SessionSnapshot } from '../../../shared/contracts'
-import { isScratchWorkspaceId } from '../../../shared/contracts'
-import { useWorkspaceBranches } from '../hooks/useWorkspaceBranches'
-import { useScratchTopics } from '../hooks/useScratchTopics'
 import { useBoardRows } from '../hooks/useBoardRows'
 import { api } from '../lib/api'
 import { presentError } from '../lib/error-presentation'
@@ -35,7 +32,6 @@ import {
 } from '../lib/project-board'
 import { boardRunCardAttributes } from '../lib/board-run-card'
 import { formatRelativeAge } from '../lib/relative-age'
-import { projectWorkspaces } from '../lib/workspace-projects'
 import { useAppStore } from '../store'
 import { BoardDiscussionCanvas } from './BoardDiscussionCanvas'
 import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
@@ -116,9 +112,7 @@ function RunCard({ session, onOpen }: { session: SessionSnapshot; onOpen: () => 
 }
 
 export function WorkspaceBoard() {
-  const config = useAppStore((state) => state.config)
   const sessions = useAppStore((state) => state.sessions)
-  const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
   const selectWorkspace = useAppStore((state) => state.selectWorkspace)
   const selectSession = useAppStore((state) => state.selectSession)
   const openScratchTopic = useAppStore((state) => state.openScratchTopic)
@@ -131,25 +125,7 @@ export function WorkspaceBoard() {
   const [actionError, setActionError] = useState<string | null>(null)
   const [discussionRow, setDiscussionRow] = useState<BoardRow | null>(null)
 
-  const scratch = isScratchWorkspaceId(activeWorkspaceId)
-    ? config?.workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? null
-    : null
-  const projects = useMemo(
-    () => projectWorkspaces((config?.workspaces ?? []).filter((workspace) => !isScratchWorkspaceId(workspace.id))),
-    [config?.workspaces]
-  )
-  const project = projects.find((candidate) =>
-    candidate.workspaces.some((workspace) => workspace.id === activeWorkspaceId)
-  )
-  const anchor = scratch
-    ?? project?.workspaces.find((workspace) => workspace.id === activeWorkspaceId)
-    ?? project?.workspaces.find((workspace) => workspace.id === project.preferredWorkspaceId)
-    ?? null
-  // Scratch 没有 Branch 可读，因此不去读——把 workspaceId 传成 null 使这条请求根本不发生。
-  const { snapshot, loading, error: loadError, refresh } = useWorkspaceBranches(
-    scratch ? null : anchor?.id ?? null
-  )
-  const { topics, error: topicsError } = useScratchTopics(scratch?.id ?? null)
+  const { rows, project, scratch, anchor, snapshot, topics, loadError, topicsError, loading, refresh, kind } = useBoardRows()
 
   useEffect(() => {
     setQuery('')
@@ -159,10 +135,6 @@ export function WorkspaceBoard() {
     setDiscussionRow(null)
   }, [project?.id, scratch?.id])
 
-  // 行来源与排序由 useBoardRows 持有——Board 工具的次级面板显示的是同一张 Board，
-  // 它调用同一个 hook，因此"这个 Board 有哪些行"只有一份答案。
-  const { rows } = useBoardRows()
-  const kind: BoardRow['kind'] = scratch ? 'topic' : 'branch'
   const meta = ROW_KIND_META[kind]
   const filteredRows = useMemo(
     () => filterBoardRows(rows, query, column, binding),

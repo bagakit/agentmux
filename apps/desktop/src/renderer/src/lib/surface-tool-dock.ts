@@ -1,6 +1,6 @@
 import type { SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
 import { sessionBoardColumn } from './project-board'
-import { categoryFor, type AttentionCategory } from './attention-event'
+import { attentionAccentFor, type AttentionCategory } from './attention-event'
 import type { AgentDisplayState } from '@agentmux/core'
 import {
   scratchTopicIdFromWorkspacePath,
@@ -178,7 +178,7 @@ export function getRenderedToolDockWidth(width: number, projectRailOpen: boolean
  * 一个 Topic 里某个 Agent 现在怎么样了。
  *
  * Topic 行要回答的是状态，不是把每个 Agent 的全名平铺出来——名字用户已经知道，
- * 他想知道的是"有没有在等我"。状态语汇复用窗口里那一套（`categoryFor` + `status--<state>`），
+ * 他想知道的是"有没有在等我"。状态语汇复用窗口里那一套（`attentionAccentFor` + `status--<state>`），
  * 使这里的一个点与 Tab 角、名册行、注意力栏含义完全一致，不发明第三套。
  *
  * 没有 live Session 的协作者如实报 `disconnected`——它在磁盘上留了记录，但此刻没在跑，
@@ -197,7 +197,12 @@ export function topicAgentPresentation(agent: TopicAgent): {
 } {
   if (!agent.live) return { state: 'disconnected', attention: null }
   const state = agent.live.status.state
-  return { state, attention: categoryFor(state) }
+  // `attentionAccentFor`（= categoryFor 减掉 done）而不是 categoryFor：这个取值的唯一消费者是头像
+  // 的 `data-attention`，而那是一个**上色**决定。`done` 值得一条通知却不值得抢琥珀/红——理由写在
+  // attention-event.ts 那两个函数的注释里，这里只是别再把它算出来。用 categoryFor 的后果不是画错色，
+  // 是把一个没有任何规则接的值送进 DOM：不响、不报错，只是让"这个属性的取值域"与"样式表画得出的
+  // 取值域"悄悄分岔，而分岔本身就是下一个不可见状态的入口。
+  return { state, attention: attentionAccentFor(state) }
 }
 
 /**

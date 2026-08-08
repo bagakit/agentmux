@@ -109,7 +109,7 @@ describe('Board 工具面板是工作清单', () => {
   it('行与 Board 主视图同源——面板不自己查一遍 topics/branches', () => {
     // 这是本 task 最容易悄悄退化的一条：面板自己 useScratchTopics/useWorkspaceBranches，
     // 两处就会在筛选、排序、加载时序上各自漂移，而漂移时谁都不会响。
-    expect(dockSource).toContain('const { rows, kind, loading } = useBoardRows()')
+    expect(dockSource).toContain('const { rows, kind, loading, error } = useBoardRows()')
     expect(dockSource).not.toContain('useScratchTopics(')
     expect(dockSource).not.toContain('useWorkspaceBranches(')
     expect(dockSource).not.toContain('buildTopicBoardRows(')
