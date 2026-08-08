@@ -265,8 +265,13 @@
   backdrop-filter: blur(2px);
 }
 .terminal-recovery__icon { width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-3); background: var(--surface-3); }
-.terminal-recovery--disconnected .terminal-recovery__icon { color: var(--amber); }
-.terminal-recovery--error .terminal-recovery__icon, .terminal-recovery--exited .terminal-recovery__icon { color: var(--red); }
+/* 恢复横幅那格图标的颜色来自状态语汇，不自己挑色。
+   横幅根上带着 `status--<state>`（只带赋值那一个类，不带 `.status` 本体——`.status` 的
+   inline-flex / capitalize 会掀翻这里的 grid 与正文措辞），于是 `--status-ink` 从那条 SSOT 规则
+   继承下来。此前这两行分别写死 `var(--amber)` 与 `var(--red)`，而 chrome.css 明确把
+   `disconnected` 定为 `--text-3` 并在注释里写明"琥珀只表示等你"——所以那抹琥珀本身就是缺陷：
+   一条掉线的链路被画成了"你是瓶颈"。 */
+.terminal-recovery .terminal-recovery__icon { color: var(--status-ink); }
 .terminal-recovery > div { min-width: 0; display: flex; flex-direction: column; gap:var(--sp-1); }
 .terminal-recovery strong { font-size: var(--fs-micro); }
 .terminal-recovery > div > span { overflow: hidden; color: var(--text-3); font-size: var(--fs-meta); text-overflow: ellipsis; white-space: nowrap; }

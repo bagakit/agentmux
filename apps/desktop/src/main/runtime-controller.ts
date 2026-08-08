@@ -218,6 +218,9 @@ function projectSession(
       ...(subject.agentSession.terminalCapability
         ? { terminalCapability: structuredClone(subject.agentSession.terminalCapability) }
         : {}),
+      ...(subject.agentSession.terminalPromptDelivery
+        ? { terminalPromptDelivery: structuredClone(subject.agentSession.terminalPromptDelivery) }
+        : {}),
       processState: run.state,
       ...runInterruptionFact(run),
       status,
