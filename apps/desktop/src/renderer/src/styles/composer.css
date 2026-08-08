@@ -39,11 +39,13 @@
 
 .composer__toolbar { flex-wrap: wrap; gap: var(--sp-2); }
 .composer__toolbar > div { flex-wrap: wrap; }
-.composer__disclosure { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-4); color: var(--text-3); font-size: var(--fs-micro); cursor: pointer; list-style: none; }
+.composer__disclosure { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); color: var(--text-3); font-size: var(--fs-micro); cursor: pointer; list-style: none; }
 .composer__disclosure::-webkit-details-marker { display: none; }
 .composer__disclosure > svg:last-child { margin-left: auto; }
 .composer:not([open]) .composer__disclosure > svg:last-child { transform: rotate(180deg); }
+.composer[open] .composer__disclosure { position: absolute; margin-top: -2px; }
 .composer[open] .composer__disclosure > span, .composer[open] .composer__disclosure > small { display: none; }
+.composer[open] .composer__toolbar { padding-left: 42px; }
 .composer__disclosure:hover { color: var(--text); background: var(--surface-2); }
 .composer-menu { max-height: min(50vh, 360px); max-width: min(90vw, 360px); overflow-y: auto; }
 .composer-menu__hint { padding: var(--sp-3) var(--sp-4); color: var(--text-3); font-size: var(--fs-micro); }
@@ -53,3 +55,6 @@
 .composer__suggestions button { display: flex; gap: var(--sp-3); border: 0; border-radius: var(--radius-sm); padding: var(--sp-3); background: transparent; color: var(--text); text-align: left; font-size: var(--fs-meta); cursor: pointer; }
 .composer__suggestions button:hover, .composer__suggestions button:focus { background: var(--surface-3); }
 .composer__suggestions small { color: var(--text-3); }
+
+.composer__context { display: inline-flex; align-items: center; color: var(--text-3); font-size: var(--fs-micro); white-space: nowrap; padding: var(--sp-2); }
+.composer__context:focus-visible { outline: var(--focus-line) solid 1px; border-radius: var(--radius-sm); }

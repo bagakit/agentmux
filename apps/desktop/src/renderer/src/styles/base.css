@@ -32,7 +32,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   height: 100%;
   position: relative;
   display: grid;
-  grid-template-columns: 210px minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) auto;
   background: var(--bg);
 }
@@ -135,12 +135,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .icon-button--danger { color: var(--red); }
 
 @media (max-width: 1120px) {
-  .app-shell:not(.app-shell--project-rail-collapsed) { grid-template-columns: 190px minmax(0, 1fr); }
   .topbar-button { font-size: 0; gap:0; }
   .launch-surface { padding: var(--sp-8) var(--sp-6) 44px; }
 }
 @media (max-width: 900px) {
-  .app-shell:not(.app-shell--project-rail-collapsed) { grid-template-columns: 180px minmax(0, 1fr); }
   .settings-page { grid-template-columns: 210px minmax(0, 1fr); }
   .settings-content > header, .settings-content__scroll { padding-right:var(--sp-7); padding-left:var(--sp-7); }
   .host-settings-card > header { grid-template-columns: 32px minmax(0, 1fr) auto auto; }

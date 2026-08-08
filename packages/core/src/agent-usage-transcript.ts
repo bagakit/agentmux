@@ -102,6 +102,7 @@ function extractCodexUsage(tail: readonly string[], observedAt: number): AgentTu
       outputTokens: output,
       // codex 报了单一 total 就用它；没报（老格式）时退回 in+out，绝不为凑字段编数。
       totalTokens: total ?? input + output,
+      ...nativeContext((info as Record<string, unknown>).model_context_window, total),
       observedAt
     }
   }
@@ -139,6 +140,13 @@ export const HOOK_PAYLOAD_USAGE_KEY = 'agentmuxUsage'
  * 它跨了进程边界（hook 命令进程 → hook server → normalizer），所以到达时是 `unknown`：任一字段缺失或不是
  * 有限非负数就返回 `null`，让缺席保持缺席，绝不放行一个半残的对象冒充真实用量。
  */
+function nativeContext(capacity: unknown, used: unknown): Pick<AgentTurnUsage, 'context'> {
+  const capacityTokens = finiteNonNegative(capacity)
+  const usedTokens = finiteNonNegative(used)
+  return capacityTokens !== null && capacityTokens > 0 && usedTokens !== null
+    ? { context: { capacityTokens, usedTokens } } : {}
+}
+
 export function parseTurnUsage(value: unknown): AgentTurnUsage | null {
   if (typeof value !== 'object' || value === null) return null
   const record = value as Record<string, unknown>
@@ -149,7 +157,9 @@ export function parseTurnUsage(value: unknown): AgentTurnUsage | null {
   if (inputTokens === null || outputTokens === null || totalTokens === null || observedAt === null) {
     return null
   }
-  return { inputTokens, outputTokens, totalTokens, observedAt }
+  const context = record.context as Record<string, unknown> | undefined
+  return { inputTokens, outputTokens, totalTokens, observedAt,
+    ...(context && typeof context === 'object' ? nativeContext(context.capacityTokens, context.usedTokens) : {}) }
 }
 
 /** 只读 transcript 尾部这么多字节。用量记录贴着 turn 末尾，读整份 transcript（可达数十 MB）纯属浪费，

@@ -1,3 +1,4 @@
+import { AgentContextUsage } from './AgentContextUsage'
 import { AgentComposerTools } from './AgentComposerTools'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
@@ -133,6 +134,7 @@ export function AgentSessionComposer({
 
   return (
     <AgentComposer
+      contextUsage={<AgentContextUsage usage={session?.kind === 'agent' ? session.turnUsage : undefined} />}
       commands={composerOptions?.commands ?? []}
       tools={<AgentComposerTools disabled={!submitMode.canType} commands={composerOptions?.commands ?? []}
         loadSkills={() => api.ui.listAgentSkills(sessionId)} onChooseSkill={(skill) => insertReference(skill.path)}

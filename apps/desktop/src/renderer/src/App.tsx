@@ -24,7 +24,7 @@ import { routeWindowShortcut } from './lib/shortcut-registry'
 import { SurfaceSwitch, TopRowLeadingChrome } from './components/TopRowChrome'
 import { BoardRowsProvider } from './hooks/useBoardRows'
 import { WorkspaceBoard } from './components/WorkspaceBoard'
-import { WorkspaceSidebar } from './components/WorkspaceSidebar'
+import { ProjectRail } from './components/ProjectRail'
 import { SurfaceToolDock } from './components/SurfaceToolDock'
 import { WorkspaceWorkbench } from './components/WorkspaceWorkbench'
 import { api } from './lib/api'
@@ -128,9 +128,9 @@ export function App() {
   useEffect(() => {
     const isMac = isMacPlatform()
     const onKeyDown = (event: KeyboardEvent): void => {
-      // 在非终端的可编辑控件里打字/改名时，带 `not-in-editable` 门的绑定（Cmd+D 分屏、Cmd+W 关格）先放行；
-      // 全局导航（quick switch）不带门，照常触发。终端焦点仍接管——capture 存在的唯一理由就是抢在聚焦的
-      // xterm 文本代理前拿到键。判定是纯函数，这里只把 DOM 事实（标签名、contentEditable、是否在 .xterm
+      // 在编辑控件或终端/TUI 里输入时，带 `not-in-editable` 门的绑定（Cmd+D 分屏、Cmd+W 关格）先放行；
+      // 全局导航（quick switch）不带门，照常触发。终端焦点不再被工作台快捷键抢走——capture 仍只负责把
+      // 未被作用域门挡住的全局动作路由到正确 owner。判定是纯函数，这里只把 DOM 事实（标签名、contentEditable、是否在 .xterm
       // 子树内）折成一个布尔喂进去。
       const target = event.target
       const editableTarget = target instanceof HTMLElement && isEditableChordTarget({
@@ -181,7 +181,7 @@ export function App() {
         inert={Boolean(settingsRoute)}
       >
       {projectRailOpen ? (
-        <WorkspaceSidebar
+        <ProjectRail
           onOpenSettings={(section) => setSettingsRoute({ section })}
         />
       ) : (
