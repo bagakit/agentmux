@@ -536,9 +536,31 @@ function sideLabel(origins: Set<OriginPackage>): string {
 type ProofProbe = {
   readonly found: boolean
   readonly halves: string[]
+  /**
+   * 每一半的两条臂各是什么。出处判据（`halves`）只问「比的是哪两个包」，**不问这个 conditional 还判不判**：
+   * 把 `? true : never` 改成 `? true : true`，两个操作数照旧跨包，而整道证明当场变成恒真式——实测 tsc
+   * exit 0、31 条全绿，且此时再叠加「渲染层 union 少一个方向」这种真漂移，directional-addressing.ts
+   * 一条错误都不报（诚实树上它在 `_addressDirectionMatchesControlProtocol` 的第 0 槽报 TS2322）。所以
+   * 「两个操作数来自两个包」是承重前提的**必要非充分**部分，判别性是另一半，必须单独有人问。
+   */
+  readonly arms: string[]
   /** 自证用：本文件里两个真实类型引用各自的出处，证明这个判据不是常量。 */
   readonly coreWitness: string
   readonly rendererWitness: string
+}
+
+/**
+ * conditional 的一条臂归成三类之一：`true` / `never` / `other`。
+ *
+ * 只认这三类而不是记下原文，是为了让判据落在「这条臂是不是那个使证明可失败的 `never`」上，而不是落在拼法上。
+ */
+function armLabel(node: ts.TypeNode): string {
+  if (node.kind === ts.SyntaxKind.LiteralType) {
+    const literal = (node as ts.LiteralTypeNode).literal
+    if (literal.kind === ts.SyntaxKind.TrueKeyword) return 'true'
+  }
+  if (node.kind === ts.SyntaxKind.NeverKeyword) return 'never'
+  return 'other'
 }
 
 function crossPackageProofProbe(): ProofProbe {
@@ -547,9 +569,11 @@ function crossPackageProofProbe(): ProofProbe {
   const program = ts.createProgram([ADDRESSING_FILE], parsed.options)
   const checker = program.getTypeChecker()
   const file = program.getSourceFile(ADDRESSING_FILE)
-  if (file === undefined) return { found: false, halves: [], coreWitness: 'none', rendererWitness: 'none' }
+  if (file === undefined)
+    return { found: false, halves: [], arms: [], coreWitness: 'none', rendererWitness: 'none' }
 
   const halves: string[] = []
+  const arms: string[] = []
   let found = false
   const side = (node: ts.TypeNode): string => sideLabel(originsOfTypeNode(checker, node, new Set()))
 
@@ -563,6 +587,7 @@ function crossPackageProofProbe(): ProofProbe {
       for (const element of annotation.elements) {
         if (!ts.isConditionalTypeNode(element)) continue
         halves.push(`${side(element.checkType)}->${side(element.extendsType)}`)
+        arms.push(`${armLabel(element.trueType)}/${armLabel(element.falseType)}`)
       }
     }
   })
@@ -579,7 +604,13 @@ function crossPackageProofProbe(): ProofProbe {
     ts.forEachChild(file, walk)
     return label
   }
-  return { found, halves, coreWitness: witnessOf('AgentMuxRegionNeighbor'), rendererWitness: witnessOf('WorkbenchRegionBounds') }
+  return {
+    found,
+    halves,
+    arms,
+    coreWitness: witnessOf('AgentMuxRegionNeighbor'),
+    rendererWitness: witnessOf('WorkbenchRegionBounds')
+  }
 }
 
 describe('方向的跨包证明必须真的跨包（否则它是恒真的死代码）', () => {
@@ -603,5 +634,18 @@ describe('方向的跨包证明必须真的跨包（否则它是恒真的死代�
     // 这就是 D3 被挡住的地方：把 ControlSplitDirection 的定义改成 `= SplitDirection` 后，追出处得到
     // 的是本包，两半都变成 renderer->renderer，于是这条红——而 tsc 对那次变异是 exit 0 的。
     expect([...probe.halves].sort()).toEqual(['core->renderer', 'renderer->core'])
+  })
+
+  it('两半各自还在判别：真臂是 true、假臂是 never（否则跨包的操作数在恒真式里毫无意义）', () => {
+    // 上面那条只问「比的是哪两个包」。它对 `? true : true` 完全失明：操作数照旧跨包，而 `never` 一没，
+    // `X extends Y` 无论真假都给 true，整道证明再也不可能失败。实测那次变异 tsc exit 0、31 条全绿，
+    // 并且叠加「渲染层 union 少一个方向」这种真漂移后 directional-addressing.ts 一条错都不报（诚实树
+    // 上，那次漂移在 `_addressDirectionMatchesControlProtocol` 的槽位上报 TS2322）。两条判据各守一半，
+    // 必须都在：出处守「比的是不是两个包」，本条守「比出来的结果还能不能让编译失败」。
+    //
+    // 本条**不需要**单独的「判据不是常量」自检：`armLabel` 一旦退化成常量，两条臂就同标签，`'x/x'` 对
+    // 不上 `'true/never'`，这条断言自己就红（三种常量各自试过）。出处判据要额外的见证是因为它两半可以
+    // 同时塌成一个看起来合法的标签；这里塌不了。多写一条会是被兄弟断言完全覆盖的死代码。
+    expect(probe.arms).toEqual(['true/never', 'true/never'])
   })
 })

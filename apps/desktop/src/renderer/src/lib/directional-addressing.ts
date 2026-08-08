@@ -71,6 +71,13 @@ export type AddressDirection = SplitDirection
  * 「方向的跨包证明必须真的跨包」用 checker 顺着别名链追每一半 `extends` 两侧的**定义出处**，要求恰好是
  * 一半 core→renderer、一半 renderer→core；那次变异现在红。判出处不判拼法，所以把 `Extract<…>` 直接内联
  * 进元组这类等价改写照旧通过（也实测过）。
+ *
+ * **出处判据只是承重前提的一半，另一半是判别性**：把下面两处 `? true : never` 改成 `? true : true`，
+ * 操作数照旧跨包（出处判据全绿），而 `X extends Y` 无论真假都给 `true`，整道证明再也不可能失败——实测
+ * `tsc --noEmit` exit 0、31 条全绿，且此时叠加「渲染层 union 少一个方向」这种真漂移，本文件一条错误都
+ * 不报（诚实树上报 `TS2322: Type 'true' is not assignable to type 'never'`）。这个洞在本文件此前的盲点
+ * 清单里没申报，是审计独立找到的。挡它的是同一个 describe 里的「两半各自还在判别」，判每条 conditional
+ * 的真臂是 `true`、假臂是 `never`。两条判据各守一半，缺任一半这道证明都可能是空的。
  */
 type ControlSplitDirection = Extract<AgentMuxOpenDestination, { kind: 'split' }>['direction']
 const _addressDirectionMatchesControlProtocol: [
