@@ -18,6 +18,7 @@
     "report:package": "node scripts/report-desktop-package.mjs",
     "audit:features": "node scripts/audit-feature-history.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
     "measure:desktop": "pnpm build && node scripts/measure-desktop-resources.mjs"
   },
   "dependencies": {
