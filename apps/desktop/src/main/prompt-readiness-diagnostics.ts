@@ -11,6 +11,11 @@ export type PromptReadinessErrorCode =
   | 'AGENT_PROMPT_SUBMISSION_BUSY'
   | 'AGENT_PROMPT_READINESS_CONFLICT'
 
+export type PromptReadinessRunState = 'running' | 'ended'
+// Only these semantic outcomes alter the readiness wording. `working` keeps the original
+// fail-closed guidance, while lifecycle/process states are not semantic evidence at all.
+export type PromptReadinessSemanticState = 'waiting' | 'blocked' | 'done' | 'error'
+
 const PROMPT_READINESS_MESSAGES: Readonly<Record<PromptReadinessErrorCode, string>> = {
   AGENT_PROMPT_NOT_READY:
     'The prompt was not sent because this Run has no consumable composer readiness yet. The Agent Run is still running; wait for the Stop/screen readiness observation to finish, then send again. If it stays not ready, check the Provider readiness marker or Hook ingress.',
@@ -22,10 +27,32 @@ const PROMPT_READINESS_MESSAGES: Readonly<Record<PromptReadinessErrorCode, strin
     'The prompt was not sent because Session readiness changed while the submission was committing. The previous Run status is no longer authoritative; refresh the canonical Session and retry only with its current Run. Do not write directly to the PTY.'
 }
 
-export function humanizePromptDeliveryError(error: unknown): unknown {
+export function humanizePromptDeliveryError(
+  error: unknown,
+  options: {
+    runState?: PromptReadinessRunState
+    semanticState?: PromptReadinessSemanticState
+  } = {}
+): unknown {
   if (!(error instanceof AgentMuxError)) return error
-  const message = PROMPT_READINESS_MESSAGES[error.code as PromptReadinessErrorCode]
+  let message = PROMPT_READINESS_MESSAGES[error.code as PromptReadinessErrorCode]
   if (!message) return error
+  if (options.runState === 'ended') {
+    message = message
+      .replace(/The Agent Run is still running;[^.]*\./, 'The Agent Run has ended; resume or restart it before sending again.')
+      .replace(/The previous Run status is no longer authoritative; refresh the canonical Session and retry only with its current Run\./, 'The Run has ended; resume or restart the Agent, then retry with its new Run.')
+  } else if (options.semanticState) {
+    const semanticMessage = options.semanticState === 'done'
+      ? 'The Agent turn is complete, but composer readiness has not been verified yet; keep the draft and retry when the readiness check finishes.'
+      : options.semanticState === 'waiting'
+        ? 'The Agent is waiting for your reply, but composer readiness has not been verified yet; keep the draft and retry after the readiness check.'
+        : options.semanticState === 'blocked'
+          ? 'The Agent is blocked and its composer readiness has not been verified yet; resolve the blocker or resume it before sending again.'
+          : 'The Agent reported an error; inspect or resume it before sending again.'
+    message = message
+      .replace(/The Agent Run is still running;[^.]*\./, semanticMessage)
+      .replace(/The previous Run status is no longer authoritative; refresh the canonical Session and retry only with its current Run\./, semanticMessage)
+  }
   const diagnostic = error.detail?.trim()
   return new AgentMuxError(
     diagnostic ? `${message} Diagnostic: ${diagnostic}` : message,

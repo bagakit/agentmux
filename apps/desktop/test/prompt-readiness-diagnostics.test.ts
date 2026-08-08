@@ -122,3 +122,24 @@ describe('detail 缺席或空白时不拼 Diagnostic', () => {
     }
   })
 })
+
+describe('semantic turn state keeps readiness wording honest', () => {
+  it('does not call a completed turn a still-running Run', () => {
+    const result = humanizePromptDeliveryError(
+      new AgentMuxError('core message', 'AGENT_PROMPT_NOT_READY', 'runId=run-1 reason=observation-pending'),
+      { semanticState: 'done' }
+    ) as AgentMuxError
+    expect(result.message).toContain('Agent turn is complete')
+    expect(result.message).not.toContain('still running')
+    expect(result.message).toContain('keep the draft')
+  })
+
+  it('keeps a waiting Agent actionable without weakening the readiness gate', () => {
+    const result = humanizePromptDeliveryError(
+      new AgentMuxError('core message', 'AGENT_PROMPT_READINESS_CONSUMED'),
+      { semanticState: 'waiting' }
+    ) as AgentMuxError
+    expect(result.message).toContain('waiting for your reply')
+    expect(result.message).not.toContain('still running')
+  })
+})

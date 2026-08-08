@@ -1,6 +1,12 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
 import { AgentMuxError } from '@agentmux/core'
 import { describeError, presentError } from '../src/renderer/src/lib/error-presentation'
+import { useAppStore } from '../src/renderer/src/store'
+
+const initialStore = useAppStore.getState()
+
+afterEach(() => useAppStore.setState(initialStore, true))
 
 // The presenter's whole reason to exist is #197: a caught error becomes user text in exactly one place,
 // transport framing removed, and the diagnosable original NEVER thrown away. These assertions pin both
@@ -75,5 +81,29 @@ describe('describeError never swallows the diagnosable original', () => {
     const described = describeError(Object.assign(new Error('x'), { code: '', detail: '' }))
     expect(described.code).toBeUndefined()
     expect(described.detail).toBeUndefined()
+  })
+})
+
+describe('transient error lifecycle', () => {
+  it('dismisses only the surface and can reopen the latest message', () => {
+    useAppStore.getState().reportError(new Error('Readiness observation is still pending'))
+    expect(useAppStore.getState()).toMatchObject({
+      error: 'Readiness observation is still pending',
+      lastError: 'Readiness observation is still pending',
+      errorDismissed: false
+    })
+
+    useAppStore.getState().dismissError()
+    expect(useAppStore.getState()).toMatchObject({
+      error: 'Readiness observation is still pending',
+      lastError: 'Readiness observation is still pending',
+      errorDismissed: true
+    })
+
+    useAppStore.getState().reopenError()
+    expect(useAppStore.getState()).toMatchObject({
+      error: 'Readiness observation is still pending',
+      errorDismissed: false
+    })
   })
 })
