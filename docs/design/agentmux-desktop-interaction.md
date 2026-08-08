@@ -608,3 +608,10 @@ Desktop 刷新或重新 Attach 时优先投影这份 Agent 语义；新的 Run `
 - list sessions 应逐项返回：某个 stale binding 带准确 Session/Run/错误码，不导致其他条目不可见；可按 Provider、workspace、状态和活动时间筛选。全局连接失败不得伪装为空列表。
 - 维护者身份应由显式注册的项目角色/capability 解析，不能猜标题、Provider、布局或最近活跃会话。无明确目标返回 MAINTAINER_TARGET_UNRESOLVED，不广播。
 - 维护者过期时保留需求草稿和引用，不自动改发。明确绑定目标后才可 typed send，并保存回执。诊断命令不支持时提供真实可用的帮助或诊断入口，不虚构 doctor 能力。
+
+### Session 重启后的持续推进恢复
+
+- Agent Session 重启或 Run 更换后，循环配置必须保留，但旧 Run 的 tick、readiness、提交回执和活动时间不得冒充新 Run 事实。恢复先重新解析精确 Session 身份与当前 Run，再执行一次检查；不补发旧周期。
+- 恢复期间将“执行状态”“循环状态”“恢复状态”分开显示。旧回执未知、绑定 stale、Provider 尚未就绪或恢复检查失败时，循环暂停并显示具体对象与原因；不能同时显示 busy 与 error_paused 而不给出优先级和下一步。
+- Session 重启完成不等于新一轮已开始。只有 Host 接受、Provider 消费或新一轮活动的真实证据才能推进对应阶段；旧 Run 的 stop/readiness 不能用于新 Run 的去重。
+- 应用重载、监督器重连和窗口重新打开使用同一个恢复检查入口，幂等且只产生一个恢复 tick。恢复失败保留待检查状态与原续行提示，用户可立即检查或恢复循环。
