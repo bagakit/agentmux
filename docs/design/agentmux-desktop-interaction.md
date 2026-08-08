@@ -583,3 +583,8 @@ Desktop 刷新或重新 Attach 时优先投影这份 Agent 语义；新的 Run `
 - 重启恢复必须先还原持久化的 Workbench Tab、Region、分屏树、顺序和焦点，再把其中的 Agent/Terminal Region 按其稳定 session identity attach 到仍由 Runtime 持有的 Run；不得因为 Runtime 尚未返回首个 snapshot 就创建第二个 session 或把 Region 清空。
 - “session 仍在运行”与“界面尚未重新 attach”必须是两个独立状态。健康 Runtime 只允许显示连接中/待同步告示，不得把它翻译成“在其他应用打开”并要求用户手动 resume。
 - 只有 Core 明确确认原 Run 已退出且 Provider native handle 可恢复时，才显示 resume/restart 出口；恢复失败必须保留原 Tab/Region 拓扑和可解释的服务窗告示。
+
+### Composer 消息队列与紧凑状态（2026-09-12）
+- Composer 的 Context、发送和中断控制采用紧凑工具栏布局；Context 以低噪声状态徽标呈现，完整剩余量通过 hover/展开查看，不占用正文行。
+- 用户在 Agent 工作中发送的内容必须先进入该 Session 的有界消息队列；Provider 当前可接收时立即按序投递为 steer，否则保持 queued 状态并在下一次可投递时自动发送。队列条目可见、保序、可删除，失败保留原因，不得静默丢失。
+- pending interaction 不得被普通消息绕过；消息继续排队，交互回答完成后再按序尝试投递。

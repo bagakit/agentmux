@@ -603,6 +603,7 @@ type AppState = {
   appendAgentComposerDraft(sessionId: string, text: string): void
   clearAgentComposerDraftIfUnchanged(sessionId: string, expectedText: string): void
   enqueueAgentSteer(sessionId: string, text: string): void
+  flushAgentSteerQueue(sessionId: string): Promise<void>
   send(sessionId: string, text: string): Promise<void>
   respondInteraction(sessionId: string, response: AgentMuxInteractionResponse): Promise<void>
   setPosture(sessionId: string, modeId: string): Promise<void>
@@ -4274,30 +4275,41 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!text.trim()) return
     set((state) => ({ agentSteerQueues: { ...state.agentSteerQueues, [sessionId]: [...(state.agentSteerQueues[sessionId] ?? []), text] } }))
   },
+  async flushAgentSteerQueue(sessionId) {
+    const session = get().sessions.find((item) => item.id === sessionId)
+    if (!session || session.kind !== 'agent') return
+    const queued = get().agentSteerQueues[sessionId] ?? []
+    if (queued.length === 0 || session.pendingInteraction || session.processState !== 'running') return
+    for (const prompt of queued) {
+      try {
+        await api.sessions.submitPrompt(session.control, prompt)
+        set((state) => {
+          const current = state.agentSteerQueues[sessionId] ?? []
+          const next = current[0] === prompt ? current.slice(1) : current.filter((item) => item !== prompt)
+          const agentSteerQueues = { ...state.agentSteerQueues }
+          if (next.length) agentSteerQueues[sessionId] = next
+          else delete agentSteerQueues[sessionId]
+          return { agentSteerQueues }
+        })
+      } catch (error) {
+        get().reportError(error)
+        return
+      }
+    }
+  },
   async send(sessionId, text) {
     if (!text.trim()) return
     const session = get().sessions.find((item) => item.id === sessionId)
     if (!session || session.kind !== 'agent') return
-    try {
-      await api.sessions.submitPrompt(session.control, text)
-    } catch (error) {
-      get().reportError(error)
-      throw error
-    }
+    get().enqueueAgentSteer(sessionId, text)
+    await get().flushAgentSteerQueue(sessionId)
   },
   async respondInteraction(sessionId, response) {
     const session = get().sessions.find((item) => item.id === sessionId)
     if (!session || session.kind !== 'agent') return
     try {
       await api.sessions.respondInteraction(session.control, response)
-      const queued = get().agentSteerQueues[sessionId] ?? []
-      if (queued.length > 0) {
-        set((state) => { const { [sessionId]: _removed, ...rest } = state.agentSteerQueues; return { agentSteerQueues: rest } })
-        for (const prompt of queued) {
-          try { await api.sessions.submitPrompt(session.control, prompt) }
-          catch (error) { get().reportError(error); set((state) => ({ agentSteerQueues: { ...state.agentSteerQueues, [sessionId]: [prompt, ...(state.agentSteerQueues[sessionId] ?? [])] } })); break }
-        }
-      }
+      await get().flushAgentSteerQueue(sessionId)
     } catch (error) {
       get().reportError(error)
       throw error
@@ -4481,6 +4493,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     })
     if (sessionMembershipGap) startSessionMembershipResync(event)
     if (timelineGapSessionId) void get().resyncTimeline(timelineGapSessionId)
+    // Runtime events can clear an interaction gate or mark a process ready. Retry
+    // queued steers after projection; the flush guard keeps pending/running states safe.
+    for (const sessionId of Object.keys(get().agentSteerQueues)) {
+      void get().flushAgentSteerQueue(sessionId)
+    }
   },
   decayStaleAgentStatuses(now) {
     set((state) => {

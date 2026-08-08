@@ -46,6 +46,7 @@ export function AgentSessionComposer({
   const setAgentComposerDraft = useAppStore((state) => state.setAgentComposerDraft)
   const clearAgentComposerDraftIfUnchanged = useAppStore((state) => state.clearAgentComposerDraftIfUnchanged)
   const enqueueAgentSteer = useAppStore((state) => state.enqueueAgentSteer)
+  const queuedCount = useAppStore((state) => state.agentSteerQueues?.[sessionId]?.length ?? 0)
   const session = useAppStore((state) => state.sessions.find((item) => item.id === sessionId))
   const workspace = useAppStore((state) =>
     state.config?.workspaces.find((item) =>
@@ -137,6 +138,7 @@ export function AgentSessionComposer({
   return (
     <AgentComposer
       contextUsage={<AgentContextUsage usage={session?.kind === 'agent' ? session.turnUsage : undefined} />}
+      queuedCount={queuedCount}
       commands={composerOptions?.commands ?? []}
       tools={<AgentComposerTools disabled={!submitMode.canType} commands={composerOptions?.commands ?? []}
         loadSkills={() => api.ui.listAgentSkills(sessionId)} onChooseSkill={(skill) => insertReference(skill.path)}

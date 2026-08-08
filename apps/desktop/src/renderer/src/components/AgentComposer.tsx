@@ -11,6 +11,7 @@ export type AgentComposerProps = {
   placeholder: string
   activeFile?: string
   contextUsage?: ReactNode
+  queuedCount?: number
   tools?: ReactNode
   commands?: Array<{ text: string; description: string }>
   // Which action the primary button performs. `stop` while a turn is in flight, `send` otherwise. This is
@@ -35,6 +36,7 @@ export function AgentComposer({
   activeFile,
   tools,
   contextUsage,
+  queuedCount = 0,
   commands = [],
   primaryAction = 'send',
   postureControl,
@@ -132,6 +134,9 @@ export function AgentComposer({
         </div>
         <div>
           {contextUsage}
+          {queuedCount > 0 ? <span className="composer__queued" title={`${queuedCount} message${queuedCount === 1 ? '' : 's'} queued for delivery`} aria-label={`${queuedCount} messages queued`}>
+            <MessageSquare size={12} aria-hidden="true" /> {queuedCount}
+          </span> : null}
           {primaryAction === 'stop' ? (
             // ■ interrupts THIS turn (onInterrupt → Core semantic interrupt); it does not end the Run.
             // Terminating the whole session is a separate action that lives in the Tabbar, so the mark and

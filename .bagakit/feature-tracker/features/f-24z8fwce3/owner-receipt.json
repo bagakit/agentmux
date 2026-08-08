@@ -1,0 +1,25 @@
+{
+  "schema": "bagakit.execution-owner-receipt.v2",
+  "owner_kind": "feature_tracker",
+  "owner_id": "f-24z8fwce3",
+  "semantic_revision": "dc10c74129f3277294120c3b8f0f115edc41dba1756dfb57ae29f05ce98097e7",
+  "lifecycle_status": "done",
+  "continuation": "blocked",
+  "active_item_ids": [],
+  "blockers": [
+    {
+      "item_id": null,
+      "class": "closeout_required",
+      "reason": "All current-plan Tasks are done; archive or discard the Feature."
+    }
+  ],
+  "replacement_ref": null,
+  "evidence_refs": [
+    ".bagakit/feature-tracker/features/f-24z8fwce3/state.json",
+    ".bagakit/feature-tracker/features/f-24z8fwce3/tasks.json"
+  ],
+  "evidence_hashes": {
+    ".bagakit/feature-tracker/features/f-24z8fwce3/state.json": "13540294cc2e04be184d29d10a514ab8ec61292313e3dee01532fb89314433b4",
+    ".bagakit/feature-tracker/features/f-24z8fwce3/tasks.json": "4cf1e7cd0d745cc9fc7d8760d04f30db590005a6e0d23d28efecce58fc672d9e"
+  }
+}
