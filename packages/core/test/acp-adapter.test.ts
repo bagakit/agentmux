@@ -354,6 +354,33 @@ describe('AgentMux ACP adapter boundary', () => {
     await bridge.dispose()
   })
 
+  it('auto-reject falls back to a reject-always option when no reject-once exists', async () => {
+    // Kills: rejectDecision dropping `|| candidate.kind === 'reject-always'`. Every other acp test
+    // offers a `reject-once` option, so the first arm of that `find` always matches and the second
+    // arm is never exercised. Here the ONLY denial option is `reject-always`: without the second
+    // arm, rejectDecision finds nothing and returns `{ outcome: 'cancelled' }` — a silent cancel
+    // instead of the explicit denial a provider that offers only reject-always must receive.
+    // The timeout path (no explicit answer) is what routes through rejectDecision's fallback.
+    // Blind spot: this pins the reject-always arm only; the reject-once arm is held by the sibling
+    // test above, and the empty-options `{ outcome: 'cancelled' }` branch is not exercised here.
+    vi.useFakeTimers()
+    const bridge = new AgentMuxAcpBridge(callbacks())
+    const binding = new FakeBinding()
+    await bridge.bind('semantic-acp', binding)
+    binding.emit({
+      type: 'permission',
+      requestId: 'permission-reject-always',
+      title: 'Delete files',
+      options: [{ id: 'deny-forever', label: 'Reject always', kind: 'reject-always' }]
+    })
+    await vi.advanceTimersByTimeAsync(30_000)
+    // Presence self-check: exactly one response was delivered, and it selected the reject-always
+    // option — not `{ outcome: 'cancelled' }`, which is what the surviving mutation produces.
+    expect(binding.responses).toHaveLength(1)
+    expect(binding.responses[0]?.decision).toEqual({ outcome: 'selected', optionId: 'deny-forever' })
+    await bridge.dispose()
+  })
+
   it('drains a pending rejection and semantic settlement before closing the binding', async () => {
     let published!: () => void
     const interactionPublished = new Promise<void>((resolve) => { published = resolve })
