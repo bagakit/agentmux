@@ -139,11 +139,12 @@ describe('剪贴板写入只有一个出口', () => {
 // ─── 判据为什么必须按**位置**而不是按**文件**（#618，Reviewer #1 Finding 1）───
 //
 // 这组断言此前是 `expect(source).toContain('copyTextToClipboard(')`——按**文件**问「有没有」。
-// 那等价于「这个壳转发了」的前提是：该文件里这个形状**只出现一次**。实测前提不成立：
+// 那等价于「这个壳转发了」的前提是：该文件里这个形状**只出现一次**。实测前提不成立（下面两个计数
+// 是 #618 当时的，TerminalView 后来因 #638 又多了两处，见下方表里的注释）：
 //   · TerminalView.tsx        3 处（`writeClipboard` 依赖 ×2、`copySelection` ×1）
 //   · WorkspaceWorkbench.tsx  2 处（`SortableWorkbenchTab`、`WorkbenchRegionLeaf`）
 // 于是在这两个文件里删掉**任意一处**转发、留下别处，旧判据照旧命中、整套全绿。被掩盖的正是
-// 右键 Copy 那条路：`copySelection` 是右键菜单唯一的复制实现（键盘那条走 terminal-shortcuts 的
+// 右键 Copy 那条路：`copySelection` 是右键菜单里走选区的复制实现（键盘那条走 terminal-shortcuts 的
 // action，与它不共用代码），它整段消失时用户的右键复制彻底失效，而没有任何测试会红——本仓
 // 「presence-assertion-blind-when-shape-repeats」那一族，先例 #586。
 //
@@ -180,10 +181,15 @@ describe('每个复制入口与菜单注入点都转发给出口', () => {
     // `jsx:onCopyPath` 这一段是 #619 换成限定路径后才拿到的粒度：它与紧邻的 onRename/onReveal
     // 形状完全一样，只有点名到 handler 才拦得住「复制被搬到另一个菜单项」。
     ['components/SurfaceToolDock.tsx', ['WorkspaceTopicsPanel > jsx:onCopyPath']],
-    // 三处各自承重，缺一不可：前两处是注入给键盘/OSC-52 通路的 `writeClipboard` 端口，
-    // 第三处 `copySelection` 是**右键菜单**唯一的复制实现。三者不共用代码。
+    // 五处各自承重，缺一不可，且不共用代码：
+    //   · 前两处是注入给键盘/OSC-52 通路的 `writeClipboard` 端口；
+    //   · `copySelection` 是**右键菜单**里走选区的那条复制；
+    //   · `copyViewport` / `copyScrollback` 是 #638 的出路——两条**不经过选区**的复制路。
+    //     它们从 `terminal.buffer.active` 取文本，不问选区服务死活，所以 TUI 开着鼠标上报、
+    //     xterm 自禁选区、`copySelection` 恒空时，这两条是用户仅剩的复制手段。删掉任一条，
+    //     那个场景下的复制就彻底没了。
     // 前两条路径逐字相同（同名端口、同一层），故它们之间对调不可观测——见上面「不保证」。
-    ['components/TerminalView.tsx', ['TerminalView > writeClipboard', 'TerminalView > writeClipboard', 'TerminalView > copySelection']],
+    ['components/TerminalView.tsx', ['TerminalView > writeClipboard', 'TerminalView > writeClipboard', 'TerminalView > copySelection', 'TerminalView > copyViewport', 'TerminalView > copyScrollback']],
     ['components/BrowserPane.tsx', ['BrowserPane > copyElementContext']],
     // 两个菜单注入点：地址菜单的复制经这里注入的 writeClipboardText 落到出口。两处的属性名同为
     // `jsx:writeClipboardText`，靠外层组件名区分——这也是判据取整条路径而非最内层名字的另一半理由。
