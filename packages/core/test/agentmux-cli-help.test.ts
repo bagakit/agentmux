@@ -1,10 +1,15 @@
 import { execFile } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
+import { cp, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { describe, expect, it } from 'vitest'
 
 const execFileAsync = promisify(execFile)
 const cli = fileURLToPath(new URL('../bin/agentmux', import.meta.url))
+const packageManifestUrl = new URL('../package.json', import.meta.url)
 async function run(args: readonly string[]): Promise<string> {
   return (await execFileAsync(cli, args, { timeout: 5_000, maxBuffer: 512 * 1024 })).stdout
 }
@@ -122,8 +127,52 @@ describe('agentmux CLI discovery', () => {
     })
   })
 
-  it('reports the installed CLI version', async () => {
-    await expect(run(['--version'])).resolves.toBe('agentmux 0.1.0\n')
+  // 版本号只有一个真相：package.json 的 `version`。CLI 的 `--version` 必须**报告**这个字段，而不是
+  // 另存一份字面量。所以这里不写死 `0.1.0`——那正是被删掉的旧写法（bump 包版本就把测试无辜打红，
+  // 忘了同步源码常量又什么都不红）。
+  //
+  // 断言分成两条，因为它们各挡一种变异，缺一不可：
+  //   1)「关系」条：`--version` 的输出 == `agentmux ${package.json.version}\n`。这挡住"改错字面量/
+  //      改错格式"。但它单独**挡不住**最阴的那种回归——把源码改回硬编码**当前**的 `0.1.0`：那时
+  //      两边恰好相等，关系条恒真。注意 expected 端从磁盘上的 package.json 读出，与被测实现**各读各的**，
+  //      不是"两边同一个表达式算出来"的空转。
+  //   2)「派生」条：把 CLI 连同一个改过 version 的 package.json 一起搬到别处运行，输出必须**跟着**那个
+  //      哨兵值走。这钉死"值是运行时从 package.json 派生的"，而不是编译进二进制的常量——正是第 1 条
+  //      放过的那种变异。sentinel 用 randomUUID，绝不可能等于任何真实发布过的版本。
+  it('reports the version declared in package.json, not a hard-coded copy', async () => {
+    const declaredVersion = JSON.parse(await readFile(packageManifestUrl, 'utf8')).version as string
+    expect(typeof declaredVersion).toBe('string')
+    expect(declaredVersion.length).toBeGreaterThan(0)
+    expect(await run(['--version'])).toBe(`agentmux ${declaredVersion}\n`)
+    // `-V` 是 `--help` 里承诺的等价别名（"--version, -V  Print version and exit."）。它与 `--version`
+    // 共用同一个分支，所以只测长名的话，把 `|| args[0] === '-V'` 删掉会让 `-V` 静默回退到
+    // INVALID_CLI_ARGUMENT 而测试全绿。这条把承诺的等价关系钉住——两个入口必须给出同一个输出。
+    expect(await run(['-V'])).toBe(`agentmux ${declaredVersion}\n`)
+  })
+
+  it('derives --version from package.json at runtime (relocated CLI follows a sentinel version)', async () => {
+    const packageRoot = fileURLToPath(new URL('../', import.meta.url))
+    const stage = await mkdtemp(join(tmpdir(), 'agentmux-version-derivation-'))
+    try {
+      // dist 必须是真实副本：Node 解析 `../package.json` 用的是 dist 文件的**真实**位置，符号链接会被
+      // 解回原包根，于是读到真 version（实测 `--preserve-symlinks` 也一样解回），哨兵就不可观测了。
+      // node_modules 只是补齐 import 图，软链无妨。
+      await cp(join(packageRoot, 'dist'), join(stage, 'dist'), { recursive: true })
+      await symlink(join(packageRoot, 'node_modules'), join(stage, 'node_modules'))
+      const manifest = JSON.parse(await readFile(packageManifestUrl, 'utf8'))
+      const sentinel = `0.0.0-version-ssot-${randomUUID()}`
+      expect(sentinel).not.toBe(manifest.version)
+      manifest.version = sentinel
+      await writeFile(join(stage, 'package.json'), JSON.stringify(manifest))
+      const relocated = await execFileAsync(
+        process.execPath,
+        [join(stage, 'dist', 'agentmux.js'), '--version'],
+        { timeout: 10_000, maxBuffer: 512 * 1024 }
+      )
+      expect(relocated.stdout).toBe(`agentmux ${sentinel}\n`)
+    } finally {
+      await rm(stage, { recursive: true, force: true })
+    }
   })
 
   // T-004 验收 #1：whoami 进入既有的 verb 注册、help 与分发，不另起一套。这些断言区分"真的分发到了
