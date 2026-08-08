@@ -23,3 +23,12 @@ T-003 的命令 gate 检查更新、回切、草稿与终端合同；manual 证�
 现有设计 SSOT 已覆盖上述行为；本次只为其分层更新章节增加交付清单索引。
 Goal 采用 terminal / state，以实际安装验收及 Tracker closeout 为停止条件；
 不得以历史布局需求扩大本 Goal，也不得掩盖它们尚未交付。
+
+## 安装 gate 排障：项目身份
+
+隔离原生探针在 `file editing Workspace project` 等待超时。项目行的 tooltip 已按
+既有需求增加状态说明，但探针仍把整个 title 当成目录身份做等值匹配。
+在 T-002 的原有安装验证范围内修复探针：使用产品已暴露的 `data-workspace-id`，
+从已核实的 fixture Workspace 传入 ID，不删状态说明或放宽原生交互断言。
+复跑同一原生探针及完整安装 gate；将选择器改回旧 title 时须重现红灯，
+`runDesktopFileEditingProbe` 的生产调用仍在 Main 启动路径。

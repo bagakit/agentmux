@@ -271,8 +271,8 @@ function treeRowSource(path: string): string {
   return `document.querySelector('[data-tree-path=${JSON.stringify(path)}]')`
 }
 
-function projectRowSource(path: string): string {
-  return `document.querySelector('.project-rail-row[title=${JSON.stringify(path)}]')`
+function projectRowSource(workspaceId: string): string {
+  return `document.querySelector('.project-rail-row[data-workspace-id=${JSON.stringify(workspaceId)}]')`
 }
 
 function visibleMenuItemSource(label: string): string {
@@ -466,19 +466,21 @@ async function pathExists(path: string): Promise<boolean> {
 async function selectWorkspaceProject(
   window: BrowserWindow,
   description: string,
-  workspacePath: string
+  workspaceId: string
 ): Promise<void> {
-  await nativeClick(window, description, projectRowSource(workspacePath))
+  await nativeClick(window, description, projectRowSource(workspaceId))
   await waitFor(`active ${description}`, async () => (
     await window.webContents.executeJavaScript(
-      `${projectRowSource(workspacePath)}?.classList.contains('project-rail-row--active') === true`
+      `${projectRowSource(workspaceId)}?.classList.contains('project-rail-row--active') === true`
     ) as boolean
   ))
 }
 
 async function runExplorerInteractionProbe(options: {
   window: BrowserWindow
+  workspaceId: string
   workspacePath: string
+  alternateWorkspaceId: string
   alternateWorkspacePath: string
   control: WorkspaceFileEditingProbeControl
 }): Promise<Record<string, unknown>> {
@@ -509,10 +511,10 @@ async function runExplorerInteractionProbe(options: {
   ))
   const revisitEvidenceBefore = await explorerProjectionEvidence(window)
   const beforeRevisit = await explorerProjection(window)
-  await nativeClick(window, 'alternate Workspace project', projectRowSource(options.alternateWorkspacePath))
+  await nativeClick(window, 'alternate Workspace project', projectRowSource(options.alternateWorkspaceId))
   await waitFor('active alternate Workspace project', async () => (
     await window.webContents.executeJavaScript(
-      `${projectRowSource(options.alternateWorkspacePath)}?.classList.contains('project-rail-row--active') === true`
+      `${projectRowSource(options.alternateWorkspaceId)}?.classList.contains('project-rail-row--active') === true`
     ) as boolean
   ))
   await waitFor('alternate Workspace Explorer', async () => (
@@ -520,7 +522,7 @@ async function runExplorerInteractionProbe(options: {
       `Boolean(${treeRowSource('alternate.txt')})`
     ) as boolean
   ))
-  await selectWorkspaceProject(window, 'primary Workspace project', options.workspacePath)
+  await selectWorkspaceProject(window, 'primary Workspace project', options.workspaceId)
   await waitFor('revisited active and neighbor rows and expanded collision target and restored children', async () => (
     await window.webContents.executeJavaScript(
       `${treeRowSource('explorer-source/menu.txt')}?.getAttribute('aria-selected') === 'true' && ` +
@@ -589,10 +591,10 @@ async function runExplorerInteractionProbe(options: {
     await pathExists(join(options.workspacePath, 'targets', 'menu', 'menu.txt')) &&
       !await pathExists(join(options.workspacePath, 'explorer-source', 'menu.txt'))
   ))
-  await nativeClick(window, 'alternate Workspace during committed move', projectRowSource(options.alternateWorkspacePath))
+  await nativeClick(window, 'alternate Workspace during committed move', projectRowSource(options.alternateWorkspaceId))
   await waitFor('active alternate Workspace during committed move', async () => (
     await window.webContents.executeJavaScript(
-      `${projectRowSource(options.alternateWorkspacePath)}?.classList.contains('project-rail-row--active') === true`
+      `${projectRowSource(options.alternateWorkspaceId)}?.classList.contains('project-rail-row--active') === true`
     ) as boolean
   ))
   await waitFor('alternate Workspace tree during committed move', async () => (
@@ -633,10 +635,10 @@ async function runExplorerInteractionProbe(options: {
     `Primary Workspace cache polluted the alternate tree: ${JSON.stringify({ alternateRowsBeforeRelease, alternateRowsAfterRelease })}`
   )
 
-  await nativeClick(window, 'primary Workspace after committed move', projectRowSource(options.workspacePath))
+  await nativeClick(window, 'primary Workspace after committed move', projectRowSource(options.workspaceId))
   await waitFor('active primary Workspace after committed move', async () => (
     await window.webContents.executeJavaScript(
-      `${projectRowSource(options.workspacePath)}?.classList.contains('project-rail-row--active') === true`
+      `${projectRowSource(options.workspaceId)}?.classList.contains('project-rail-row--active') === true`
     ) as boolean
   ))
   const menuMoveObserved = await waitFor('moved Radix menu row', async () => (
@@ -794,7 +796,9 @@ async function runExplorerInteractionProbe(options: {
 
 export async function runDesktopFileEditingProbe(options: {
   window: BrowserWindow
+  workspaceId: string
   workspacePath: string
+  alternateWorkspaceId: string
   alternateWorkspacePath: string
   control: WorkspaceFileEditingProbeControl
 }): Promise<boolean> {
@@ -804,7 +808,7 @@ export async function runDesktopFileEditingProbe(options: {
   const path = join(options.workspacePath, relativePath)
   const phases: Record<string, unknown> = {}
   try {
-    await selectWorkspaceProject(options.window, 'file editing Workspace project', options.workspacePath)
+    await selectWorkspaceProject(options.window, 'file editing Workspace project', options.workspaceId)
     await waitFor('revision probe file row', async () => (
       await options.window.webContents.executeJavaScript(
         `Boolean(document.querySelector('[data-tree-path=${JSON.stringify(relativePath)}]'))`

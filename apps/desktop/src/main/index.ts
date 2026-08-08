@@ -272,7 +272,9 @@ function startPrimaryInstance(): void {
       }
       if (await runDesktopFileEditingProbe({
         window,
+        workspaceId: primaryWorkspace.id,
         workspacePath: primaryWorkspace.path,
+        alternateWorkspaceId: alternateWorkspace.id,
         alternateWorkspacePath: alternateWorkspace.path,
         control: fileEditingProbeControl
       })) {
