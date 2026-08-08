@@ -78,6 +78,8 @@ import {
 } from './OpenDestinationBar'
 import { TerminalContextMenu } from './TerminalContextMenu'
 import { TerminalReplayGapNotice } from './TerminalReplayGapNotice'
+import type { MouseTrackingMode } from '../lib/terminal-selection-mode'
+import { regionCaretFocusTargets } from '../lib/region-focus'
 import { isMacPlatform } from '../lib/host-platform'
 
 function terminalWrite(terminal: Terminal, data: string): Promise<void> {
@@ -175,6 +177,17 @@ export function TerminalView({
   const searchInputRef = useRef<HTMLInputElement>(null)
   const rememberedSelectionRef = useRef('')
   const [hasSelection, setHasSelection] = useState(false)
+  /**
+   * 右键那一刻 xterm 的鼠标上报模式——复制三合一失效的**根因取值**。
+   *
+   * 为什么是 state 而不是每次渲染读 `terminal.modes.mouseTrackingMode`：那是个 getter，PTY 里的 TUI
+   * 随时切换（DECSET ?1000/?1002/?1003），xterm 不为它发 React 能订阅的事件。渲染期读到的值与用户
+   * 右键那一刻的值可以不同，于是提示会说错话。这里在**右键手势本身**里采样——那正是菜单即将打开的
+   * 时刻，也是同一个 handler 已经在抢救选区快照的地方（两件事同因同时，别拆成两处）。
+   *
+   * 初值 'none'（不压制、不提示）：还没右键过就没有可信的模式，不猜。
+   */
+  const [mouseTrackingMode, setMouseTrackingMode] = useState<MouseTrackingMode>('none')
   const [hydrating, setHydrating] = useState(true)
   /**
    * 揭示是被我们自己的步骤逼出来的，而不是走通了（`lib/terminal-reveal.ts`）。
@@ -205,6 +218,9 @@ export function TerminalView({
   const openHttpLink = useAppStore((state) => state.openHttpLink)
   const openFile = useAppStore((state) => state.openFile)
   const reportError = useAppStore((state) => state.reportError)
+  const regionCaretFocus = useAppStore((state) =>
+    regionCaretFocusTargets(state.regionCaretFocus, linkOrigin.regionId) ? state.regionCaretFocus : null)
+  const clearRegionCaretFocus = useAppStore((state) => state.clearRegionCaretFocus)
   // The active workspace's on-disk root — the base main resolves openFile against. Read from the
   // WorkspaceRecord (NOT session.workspacePath) so worktree/scratch terminals still relativize
   // absolute paths against the base main actually uses. A ref keeps it fresh for the attach-effect
@@ -228,6 +244,23 @@ export function TerminalView({
   useEffect(() => {
     if (searchOpen) searchInputRef.current?.focus()
   }, [searchOpen])
+
+  function consumeCaretFocus(): void {
+    const request = useAppStore.getState().regionCaretFocus
+    if (!regionCaretFocusTargets(request, linkOriginRef.current.regionId)) return
+    if (!visibleRef.current) {
+      clearRegionCaretFocus(request.nonce)
+      return
+    }
+    const target = searchInputRef.current ?? terminalRef.current
+    if (!target) return
+    target.focus()
+    clearRegionCaretFocus(request.nonce)
+  }
+
+  useEffect(() => {
+    consumeCaretFocus()
+  }, [regionCaretFocus, visible, searchOpen])
 
   useLayoutEffect(() => {
     viewportRef.current?.setInteractiveResize(interactiveResize)
@@ -373,6 +406,7 @@ export function TerminalView({
     terminal.loadAddon(webLinks)
     terminal.open(root)
     terminalRef.current = terminal
+    consumeCaretFocus()
     searchAddonRef.current = search
     // 「第 3 个 / 共 47 个」。订阅在 addon 加载之后立刻建立，而不是等面板打开：addon 在关闭状态下
     // 也不会发结果事件，等到打开再订阅只是多一处生命周期，且会漏掉打开那一瞬的首次结果。
@@ -928,6 +962,7 @@ export function TerminalView({
     <Fragment>
       <TerminalContextMenu
         hasSelection={hasSelection}
+        mouseTrackingMode={mouseTrackingMode}
         onCopy={copySelection}
         onPaste={pasteClipboard}
         onSelectAll={() => terminalRef.current?.selectAll()}
@@ -951,6 +986,10 @@ export function TerminalView({
                   rememberedSelectionRef.current = text
                   setHasSelection(true)
                 }
+                // 与上面同因同时：菜单即将打开，此刻采样鼠标上报模式。选区为空时**尤其**要采——那正是
+                // 需要解释「为什么 Copy 是灰的」的情形，若只在有选区时采样，提示永远不会出现。
+                const mode = terminalRef.current?.modes.mouseTrackingMode
+                if (mode) setMouseTrackingMode(mode)
               }
               linkPressRef.current = { x: event.clientX, y: event.clientY }
               terminalRef.current?.focus()

@@ -50,6 +50,7 @@ import type { BrowserAnnotation } from './lib/browser-annotations'
 import { EMPTY_LAUNCHER_NAMES, type LauncherNameField, type LauncherNames } from './lib/launcher-name-draft'
 import { resolveLauncherWorkspaceId } from './lib/launcher-workspace'
 import type { OpenDestination, OpenHttpLinkOrigin } from './lib/open-destination'
+import { regionFocusClaimsCaret, type RegionFocusCause } from './lib/region-focus'
 import { createNoteWithAvailableName } from './lib/note-names'
 import { rendererResourceOwnerCounts } from './lib/resource-owner-counts'
 import { terminalResourceOwnerCounts } from './lib/terminal-resource-owners'
@@ -265,6 +266,14 @@ type AppState = {
   // 于是窗口监听只投意图，命中的那一格读到就跑自己既有的确认流，跑完清掉。裸调 closeRegion 会静默弃掉
   // 未存改动——鼠标点 X 不会那样。
   closeRegionRequest: { workspaceId: string; tabId: string; regionId: string; nonce: number } | null
+  // 「把打字光标（DOM caret）搬进这一格」的一次性意图，按 regionId 定位——同 closeRegionRequest 的
+  // consume-and-clear 套路。存在的理由：键盘方向导航搬焦点时只改 activeRegionId（绿环），而看不见的
+  // DOM 焦点仍停在上一格的 xterm/Monaco 上，敲的字全进了上一格。承载被点名那格的表面（TerminalView /
+  // EditorPane）读到就把 .focus() 搬过来、再清掉。只在键盘那一路投递（见 regionFocusClaimsCaret）：
+  // 指针点击那一路原生 mousedown 已经把焦点放对了，再夺一次会打断原生行为。不持久化（是一次导航，
+  // 不是布局事实）。browser 那格没有消费者——原生 WebContentsView 的聚焦是另一条路；一条无人认领的
+  // 意图停在这里是惰性的（下一次投递会覆盖它）。
+  regionCaretFocus: { regionId: string; nonce: number } | null
   workspaceFileRevisions: Record<string, number>
   fileExplorerStates: Record<string, FileExplorerViewState | undefined>
   viewModes: Record<string, ViewMode>
@@ -382,7 +391,12 @@ type AppState = {
     targetPaneId: string,
     direction: SplitDirection
   ): void
-  focusRegion(workspaceId: string, tabId: string, regionId: string): void
+  // `cause` 决定这次落焦除了搬绿环要不要把 DOM caret 也搬进去（键盘导航要，指针点击不要——原生 mousedown
+  // 已把焦点放对）。判定是纯的（regionFocusClaimsCaret），这里只按它的结果投/不投 caret 意图。默认 'pointer'：
+  // 调用方不显式说明时按最保守的一路走，不夺焦。
+  focusRegion(workspaceId: string, tabId: string, regionId: string, cause?: RegionFocusCause): void
+  // 被点名那格的表面消费完 caret 意图后调它清除（只清自己那条 nonce，避免抹掉更晚一次导航投的新意图）。
+  clearRegionCaretFocus(nonce: number): void
   // Explicitly relocate one Session projection (the Region named by regionId) into another
   // workspace's View. This moves DISPLAY identity only — the Agent's cwd is Core's
   // session.workspacePath and is never touched. Navigation reuses focusRegion; a closing source
@@ -863,6 +877,33 @@ async function disposeClosedFileOwners(
   }))
 }
 
+/**
+ * Dispose the file observers of every open file surface whose Workspace no longer exists in `config`.
+ *
+ * Removing a Workspace (deleting a project, or deleting a host and with it every Workspace on it) runs
+ * through `adoptedConfig`, which answers only "which Workspace is active now" — it never touches
+ * `tabs`. So the removed Workspace's file Tabs stay in `state.tabs`, unreachable (the active Workspace
+ * moved away) but still holding a live Main-side observer each. Every observer is a subprocess, and
+ * Main frees it only when `WorkspaceFiles` disposes at app quit — the accumulation reported as a
+ * file-observer subprocess leak. Persistence already drops these surfaces on the next restart
+ * (`persistedSurfaceSurvives` requires the Workspace to still be configured), so the only thing that
+ * outlives the removal within a session is the subprocess; this closes that gap.
+ *
+ * The unobserve is fire-and-forget for the same reason `disposeClosedFileOwners` does not await inside
+ * a `set`: the caller's `set` must stay synchronous, and a failed unobserve has no recovery here.
+ */
+function disposeObserversForRemovedWorkspaces(
+  tabs: Readonly<Record<string, WorkbenchTab>>,
+  config: AppConfig
+): void {
+  const liveWorkspaceIds = new Set(config.workspaces.map((workspace) => workspace.id))
+  for (const [key, surface] of openFileRefs(tabs)) {
+    if (liveWorkspaceIds.has(surface.workspaceId)) continue
+    advanceDocumentLifetime(key)
+    void api.files.unobserve(surface.workspaceId, surface.path).catch(() => undefined)
+  }
+}
+
 async function withWorkspaceFileMutation<T>(
   workspaceId: string,
   path: string,
@@ -1224,6 +1265,7 @@ type SessionMembershipResync = {
   overflowed: boolean
 }
 const MAX_SESSION_MEMBERSHIP_EVENTS = 256
+let regionCaretFocusNonce = 0
 let sessionMembershipResync: SessionMembershipResync | null = null
 let runtimeSubscriptionCount = 0
 
@@ -1589,6 +1631,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   closingWorkbenchViews: {},
   closeTabRequest: null,
   closeRegionRequest: null,
+  regionCaretFocus: null,
   workspaceFileRevisions: {},
   fileExplorerStates: {},
   viewModes: {},
@@ -1909,6 +1952,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         // 「这次写入只加不减」是一条会过期的理由：下一个人在同一处加一句 filter 时不会回头读这行
         // 注释，而漏掉活动位的症状是一屏没有解释的空白欢迎页。统一走同一个出口，代价是一次无操作。
         const next = await api.config.get()
+        // 同活动位：扇出今天只加不减，所以这句是无操作。但「只加不减」是会过期的理由——统一在
+        // 这个出口撤掉被移除 workspace 的观察者，下一个人在此加 filter 时不会漏掉子进程（#559）。
+        disposeObserversForRemovedWorkspaces(get().tabs, next)
         set((state) => adoptedConfig(state.activeWorkspaceId, next))
         // A partial failure is neither swallowed nor promoted to total failure: the lanes that did
         // launch stay launched, and the ones that did not are named through the existing error surface.
@@ -1996,6 +2042,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const next = await api.config.get()
       // 胜者写在候选第二位：活动位指着的还在（比如某条 lane 因为脏树被留下）就不动它，被删掉了才
       // 落到胜者身上。落到胜者而不是通用兜底，是因为「留下这一个」这句话本身就说明了该看哪儿。
+      // 输家的记录连同它们的文件 Tab 一起被撤，那些 Tab 攥着的 Main 侧观察者也要在这里释放（#559）。
+      disposeObserversForRemovedWorkspaces(get().tabs, next)
       set((state) => adoptedConfig(state.activeWorkspaceId, next, input.keepWorkspaceId))
       // A lane refused because it still holds uncommitted work is reported, never silently dropped —
       // losing a bake-off is not a reason to discard someone's work. 分档措辞在 `retentionReport`
@@ -2017,6 +2065,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // `removed` 带回来的 config 就是权威的那一份，不再另外 get() 一次：多一次往返就多一个能与这次
     // 移除结果不一致的窗口。`retained` 什么都没删，所以什么都不写——它是保护生效了，不是一次变更。
     if (outcome.status === 'removed') {
+      // The removed worktree's file Tabs still hold Main-side observers; drop them at the same seam
+      // that reseats the active Workspace (see disposeObserversForRemovedWorkspaces / #559).
+      disposeObserversForRemovedWorkspaces(get().tabs, outcome.config)
       set((state) => adoptedConfig(state.activeWorkspaceId, outcome.config))
     }
     // 抛不抛由调用方决定：单条移除的 `retained` 要在对话框里重问，压成 null 会把 git 的理由吃掉。
@@ -2635,7 +2686,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
     }))
   },
-  focusRegion(workspaceId, tabId, regionId) {
+  focusRegion(workspaceId, tabId, regionId, cause = 'pointer') {
     const tab = get().tabs[tabId]
     const layout = get().layouts[workspaceId]
     const tabGroupId = layout ? tabGroupForTab(layout, tabId) : null
@@ -2645,8 +2696,19 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       layouts: {
         ...state.layouts,
         [workspaceId]: activateLayoutTab(layout!, tabGroupId, tabId)
-      }
+      },
+      // 只有键盘导航这一路才把 DOM caret 也搬过去（regionFocusClaimsCaret）。判据是这次落焦的**因**，不是
+      // 「谁成了焦点」——指针点击那一路原生 mousedown 已把焦点放对，再夺一次会打断选择/原生行为。同一个
+      // regionId 驱动绿环、原生视图让位、与这条 caret 意图，三者读同一次判定（region-focus.ts 顶部的纪律）。
+      // nonce 递增让「连按方向键停在同一格」也能各触发一次，且 selector 不因对象相等忽略它。
+      ...(regionFocusClaimsCaret(cause)
+        ? { regionCaretFocus: { regionId, nonce: ++regionCaretFocusNonce } }
+        : { regionCaretFocus: null })
     }))
+  },
+  clearRegionCaretFocus(nonce) {
+    // 只清掉自己消费的那一条：若清的瞬间已被更晚一次导航覆盖成新 nonce，别把新意图也抹掉。
+    set((state) => (state.regionCaretFocus?.nonce === nonce ? { regionCaretFocus: null } : state))
   },
   moveSessionViewToWorkspace(regionId, targetWorkspaceId) {
     const state = get()
@@ -4367,6 +4429,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // 会被「配置里少了一条 workspace」打坏的引用：删 host 会连带删掉它上面的全部 workspace（见
     // HostSettingsPane 的 filter），删项目会删掉一整组，而两处都经过这里。缺了这一行，每个删除现场
     // 都得自己记得挪活动位，而漏掉的那些就是空白欢迎页。
+    //
+    // 活动位不是唯一指进 config 的东西：被删 workspace 的文件 Tab 还在 `state.tabs` 里，每个都攥着
+    // 一个 Main 侧观察者子进程。撤活动位让它们不可达却不释放那些子进程，于是它们一直活到 app 退出
+    // （#559 的子进程泄漏）。在同一处把它们撤掉——与「谁负责在记录消失时收尾」是同一个决定。
+    disposeObserversForRemovedWorkspaces(get().tabs, config)
     set((state) => ({
       ...adoptedConfig(state.activeWorkspaceId, config),
       executorDetections: {},

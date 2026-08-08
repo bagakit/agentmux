@@ -16,6 +16,7 @@ import {
 import { editorSaveAction } from '../lib/editor-save-shortcut'
 import { detectLanguage } from '../lib/language-detect'
 import { bindingById, monacoKeybindingFor } from '../lib/shortcut-registry'
+import { regionCaretFocusTargets } from '../lib/region-focus'
 import { documentKey, type FileWorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore, type EditorRegionDiffState } from '../store'
 import { EditorReleasedState } from './EditorReleasedState'
@@ -141,11 +142,13 @@ function EditorDiffCanvas({
 export function EditorPane({
   tabId,
   surface,
-  released = false
+  released = false,
+  visible = true
 }: {
   tabId: string
   surface: FileWorkbenchSurface
   released?: boolean
+  visible?: boolean
 }) {
   const key = documentKey(surface.workspaceId, surface.path)
   const document = useAppStore((state) => {
@@ -171,6 +174,9 @@ export function EditorPane({
   )
   const reportError = useAppStore((state) => state.reportError)
   const attachPersistedDocument = useAppStore((state) => state.attachPersistedFileDocument)
+  const regionCaretFocus = useAppStore((state) =>
+    regionCaretFocusTargets(state.regionCaretFocus, surface.regionId) ? state.regionCaretFocus : null)
+  const clearRegionCaretFocus = useAppStore((state) => state.clearRegionCaretFocus)
   // Word wrap is one global viewing preference (like a theme), not a document property: it is read
   // here and mapped to Monaco's enum through the single wordWrapOption seam, so the option is
   // controlled/reactive rather than a mount-time constant.
@@ -185,6 +191,8 @@ export function EditorPane({
   const reloadDiff = useAppStore((state) => state.reloadRegionDiff)
   const conflict = issue?.kind === 'changed' || issue?.kind === 'deleted'
   const editorRef = useRef<MonacoStandaloneEditor | null>(null)
+  const visibleRef = useRef(visible)
+  visibleRef.current = visible
 
   // A file Region restored from persistence arrives with no document behind it: the surface is only
   // {regionId,kind,workspaceId,path}, and every other way a file Region appears loads its document as
@@ -229,6 +237,24 @@ export function EditorPane({
     // consumeRevealTarget reads the latest target from the store; revealTarget only drives when.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [revealTarget, key, released, Boolean(document)])
+
+  // Monaco mounts asynchronously. Keep the intent until a live editor can take it, and read
+  // current store state at consumption so a late mount cannot replay an obsolete request.
+  function consumeCaretFocus(): void {
+    const request = useAppStore.getState().regionCaretFocus
+    if (!regionCaretFocusTargets(request, surface.regionId)) return
+    if (!visibleRef.current) {
+      clearRegionCaretFocus(request.nonce)
+      return
+    }
+    if (!editorRef.current) return
+    editorRef.current.focus()
+    clearRegionCaretFocus(request.nonce)
+  }
+
+  useEffect(() => {
+    consumeCaretFocus()
+  }, [regionCaretFocus, visible, released])
 
   if (released) return <EditorReleasedState />
 
@@ -449,6 +475,7 @@ export function EditorPane({
               registerCommandPaletteShortcut(editor, monaco)
               registerCopyActions(editor, monaco)
               consumeRevealTarget(editor)
+              consumeCaretFocus()
             }}
             theme="vs-dark"
             options={{

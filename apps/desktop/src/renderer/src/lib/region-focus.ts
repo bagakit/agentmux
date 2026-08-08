@@ -95,3 +95,45 @@ export function paneGroupFocusClass(
   const focused = activeGroupId === groupId && focusRingExpressesChoice(groupCount)
   return focused ? PANE_GROUP_FOCUS_CLASS : ''
 }
+
+/**
+ * 一次「让这一格成为焦点」是**因何发生的**——而这个因决定了它除了搬绿环，要不要把**打字光标（DOM
+ * caret）**也搬进那一格的表面。
+ *
+ * 为什么这是一个独立的纯判定，而不是复用 {@link regionFocusExpression} 的「谁是焦点」：焦点环表达的是
+ * 一个**状态**（哪一格现在是活动的），它不携带「这次变化是键盘导航还是指针点击」这个信息。而 caret 该不该
+ * 被夺走恰恰只由后者决定：
+ *   - 键盘方向导航（`Cmd+Alt+方向`）搬焦点时，用户看不见的 DOM 焦点还停在原来那格的 xterm/Monaco 上，
+ *     不主动搬过去，敲的字就全进了上一格——这正是本判定要修的缺陷（绿环移了、键入没移）。
+ *   - `onPointerDown` 落焦时**不能**搬：浏览器/xterm 的原生 mousedown 已经把 DOM 焦点放到了点中的位置，
+ *     这里再 `.focus()` 一次会打断原生行为，还可能在一次文本选择的中途把焦点夺走。
+ * 若让表面去读「我现在是不是焦点格」来决定搬 caret，指针点击那一路也会满足条件，于是每次点都夺焦——所以
+ * 判据必须是**因**（cause），不是**果**（focused 状态）。这与 region-focus.ts 顶部记的 #350 同一条纪律：
+ * 一件事只在一处判定，别在消费侧凭另一个信号重新推一遍。
+ *
+ * 未知的 cause 保守地**不**搬（返回 false）：宁可少搬一次（用户可再点一下），也不要在不该夺焦时夺焦。
+ */
+export const REGION_FOCUS_CAUSES = ['keyboard', 'pointer'] as const
+export type RegionFocusCause = (typeof REGION_FOCUS_CAUSES)[number]
+
+export function regionFocusClaimsCaret(cause: RegionFocusCause): boolean {
+  return cause === 'keyboard'
+}
+
+/**
+ * 一条「搬 caret」意图是否**精确点名了这一格**。
+ *
+ * 搬 caret 的机制是一条按 regionId 定位的一次性意图（`store.regionCaretFocus`，consume-and-clear，同
+ * `closeRegionRequest`）：`focusRegion` 在 {@link regionFocusClaimsCaret} 为真时投递它，承载该格的表面
+ * （TerminalView / EditorPane）读到点名自己那条就把 DOM 焦点搬进来、然后清掉。
+ *
+ * 两个表面**共用这一个匹配器**，而不是各写一句 `request?.regionId === myRegionId`：那样就是「同一个判断有
+ * 两个写入点」，其中一处漏改（比如把 `===` 写成别的、或忘了判 null）只坏一个表面，而另一个照旧全绿。
+ * region id 全局唯一（`newRegionId` / uuid），所以只比 regionId 足矣，不必再带 workspace/tab。
+ */
+export function regionCaretFocusTargets(
+  request: { regionId: string; nonce: number } | null | undefined,
+  regionId: string | null | undefined
+): request is { regionId: string; nonce: number } {
+  return request != null && regionId != null && request.regionId === regionId
+}

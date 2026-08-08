@@ -33,16 +33,15 @@ export function TerminalContextMenu({
   // Copy 变灰、Ctrl/Cmd+C 全部落空（机制见 lib/terminal-selection-mode.ts）。菜单把这个模式喂给那个
   // 纯模块，拿回「要不要提示、提示什么」——决定权整个在 lib，这里只渲染结果。
   //
-  // 目前**刻意可选且暂未接线**：真正把 `mouseTrackingMode={terminalRef.current?.modes.mouseTrackingMode}`
-  // 传进来的那处在 TerminalView.tsx，而那个文件本轮由别的 agent 持有，不能改。缺席时按 'none' 处理
-  // （不知道模式就不提示），所以在接线落地之前用户仍看不到提示——**这个 bug 尚未端到端修好**。
-  // 接线是**单一调用点**：给下面这个组件加一个 prop 取值即可，逻辑无需再动。
+  // **必填，不给默认值**：它曾经是可选的（接线还没落地时的临时形状），而可选在这里买到的只是 tsc
+  // 的沉默——全仓只有 TerminalView.tsx 一个调用点，删掉那行 JSX 属性、或写成 `{undefined && …}`，
+  // 整条能力就静默消失且编译照过（记忆 optional-prop-only-buys-silence）。改成必填之后，删属性是
+  // 编译错误；至于「传进来的是不是那次真读取」，类型系统答不了，由
+  // test/terminal-mouse-tracking-sampling.test.ts 按 AST 判取值身份（把实参换成常量 'none' 会红）。
   //
-  // 为什么可选却不会让能力静默消失：模式 → 提示的映射在 lib 里被逐模式变异测试钉死；组件这侧「把
-  // 这个 prop 喂给 terminalSelectionSuppressionHint 并渲染其结果」由 region/menu 的 AST 判据守
-  // （记忆 optional-prop-only-buys-silence：接线层按 AST 判「值就是那次调用」）。一旦接线传入一个
-  // 压制型模式，提示必然出现；删掉派生或删掉渲染，两族测试各自变红。
-  mouseTrackingMode?: MouseTrackingMode
+  // 分工提醒：模式 → 提示文案的映射在 lib 里被逐模式变异测试钉死；组件这侧只负责「把这个 prop 喂给
+  // terminalSelectionSuppressionHint 并渲染其结果」，由 terminal-context-menu-selection-hint 守。
+  mouseTrackingMode: MouseTrackingMode
   onClear: () => void
   onCopy: () => void
   onPaste: () => void
@@ -54,8 +53,9 @@ export function TerminalContextMenu({
   // 键位不在这里算：三个走注册表、paste 走原生 Edit→Paste 的和弦，理由与来源都在 lib 那一层。
   const chords = terminalMenuChords(isMac)
   // 选区被压制时该说的那句逃生提示（mac: ⌥Option 拖；别处: Shift 拖），否则 null（菜单照常）。
-  // 模式缺席（尚未接线）按 'none' 处理，等价于不提示。整个判定在 lib，这里不重写位掩码或平台判断。
-  const selectionHint = terminalSelectionSuppressionHint(mouseTrackingMode ?? 'none')
+  // **不给 `?? 'none'` 兜底**：prop 必填之后那个兜底是死代码，而它一旦留着，将来若有人把接线改成
+  // 传 undefined，提示会静默消失且这里看起来一切正常。整个判定在 lib，这里不重写位掩码或平台判断。
+  const selectionHint = terminalSelectionSuppressionHint(mouseTrackingMode)
   return (
     <ContextMenu.Root>
       <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
