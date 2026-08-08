@@ -1,6 +1,11 @@
 import { readFileSync } from 'node:fs'
-import ts from 'typescript'
 import { describe, expect, it, vi } from 'vitest'
+import {
+  contentSourceText,
+  inlineConditions,
+  jsxContentElement,
+  jsxContentElementIn
+} from './helpers/jsx-menu-content.js'
 import {
   WORKBENCH_TAB_SPLIT_ACTIONS,
   moveSessionViewTargets,
@@ -239,68 +244,16 @@ describe('分屏菜单的那一段没有可取反的在场判断', () => {
     }
   ] as const
 
-  /** `<X.Content>` 那个 JSX 元素本身。边界由词法器给，不靠猜左右界。 */
-  function contentElementIn(
-    text: string,
-    fileName: string,
-    tag: string
-  ): { node: ts.JsxElement; source: ts.SourceFile } | null {
-    const source = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
-    let found: ts.JsxElement | null = null
-    const walk = (node: ts.Node): void => {
-      if (ts.isJsxElement(node) && node.openingElement.tagName.getText(source) === `${tag}.Content`) {
-        found = node
-      }
-      ts.forEachChild(node, walk)
-    }
-    walk(source)
-    return found ? { node: found, source } : null
-  }
-
-  function contentElement(file: string, tag: string): { node: ts.JsxElement; source: ts.SourceFile } {
-    const text = readFileSync(
-      new URL(`../src/renderer/src/components/${file}`, import.meta.url),
-      'utf8'
-    )
-    const found = contentElementIn(text, file, tag)
-    if (!found) throw new Error(`${file} 里找不到 <${tag}.Content> ——组件换了容器或改了名`)
-    return found
-  }
-
   /**
-   * 这段 JSX 的子节点里所有**内联条件**：三元与 `&&`。
+   * 那段 JSX 的源文本，注释已剥掉（注释里描述规则的文字不是规则本身）。
    *
-   * 为什么必须走词法器：按标点猜是一族盲点。我第一版写的 `/\?(?![.?])/` 把 `a ?? b` 的第二个 `?`
-   * 当成三元门（下面那条自检当场抓到），而字符串、模板字面量、类型标注里的 `?` 也全会误报；
-   * 反过来把正则放松到躲开这些，`{cond ? … : null}` 就漏了。词法器分得清这四种 `?`，正则分不清
-   * （记忆 lexical-boundaries-need-a-real-lexer）。
-   *
-   * map 回调里的 `if (entry.kind === …) return …` 不算：那是按数据分支，每一项都到得了。被挡的是
-   * 「整节要不要出现」这种只有渲染层知道的判断。
+   * 词法器判据住在 test/helpers/jsx-menu-content.ts：兄弟文件
+   * workbench-tab-file-actions.test.ts 守的是第三个容器，两处若各抄一份必漂移
+   * （而漂移的症状是其中一份先失明）。那份 helper 的 docstring 记着为什么必须走词法器，
+   * 以及为什么那边不能照搬本文件这条「一个内联条件都没有」的判据。
    */
-  function inlineConditions(node: ts.JsxElement, source: ts.SourceFile): string[] {
-    const out: string[] = []
-    const walk = (child: ts.Node): void => {
-      if (ts.isConditionalExpression(child)) out.push(child.getText(source))
-      if (
-        ts.isBinaryExpression(child) &&
-        child.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
-      ) {
-        out.push(child.getText(source))
-      }
-      ts.forEachChild(child, walk)
-    }
-    for (const child of node.children) walk(child)
-    return out
-  }
-
-  /** 那段 JSX 的源文本，注释已剥掉（注释里描述规则的文字不是规则本身）。 */
   function contentText(file: string, tag: string): string {
-    const { node, source } = contentElement(file, tag)
-    return node
-      .getText(source)
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .replace(/(^|[^:])\/\/[^\n]*/g, '$1')
+    return contentSourceText(jsxContentElement(file, tag))
   }
 
   it('自检：真的取到了那段 JSX，且它确实在画菜单项', () => {
@@ -335,9 +288,8 @@ describe('分屏菜单的那一段没有可取反的在场判断', () => {
     // `{cond ? … : null}`、`{list.length > 0 && …}` 全被同一条挡住。
     // 真需要条件时把它挪进清单——那里跑得到、断言得着。
     for (const { file, tag } of CONTAINERS) {
-      const { node, source } = contentElement(file, tag)
       expect(
-        inlineConditions(node, source),
+        inlineConditions(jsxContentElement(file, tag)),
         `${file} 的 Content 里有内联条件——整节可以被它取反成永不渲染`
       ).toEqual([])
     }
@@ -370,13 +322,13 @@ describe('分屏菜单的那一段没有可取反的在场判断', () => {
     // 没有这条，检测器写坏会让整族静默变恒绿——「没找到违规」与「认不出违规」在结果上同形。
     // 逐个喂它该拒的与该放的形状：判据自己也得受质询。
     const detect = (body: string): string[] => {
-      const found = contentElementIn(
+      const found = jsxContentElementIn(
         `const X = () => (<DropdownMenu.Content>${body}</DropdownMenu.Content>)`,
         'probe.tsx',
         'DropdownMenu'
       )
       expect(found, '探针源码里取不到 Content——自检本身是坏的').not.toBeNull()
-      return inlineConditions(found!.node, found!.source)
+      return inlineConditions(found!)
     }
     // 该拒：两种把整节取反的门。
     expect(detect('{false && entries.map((entry) => <I key={entry.key} />)}'), '认不出 && 门')
