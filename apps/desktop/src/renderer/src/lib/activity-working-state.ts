@@ -19,11 +19,27 @@
 import type { AgentDisplayState } from '@agentmux/core'
 import type { AgentTimelineItem } from '../../../shared/contracts'
 
-/** Session 显示状态里，代表「这个 turn 正在被处理」的那些。 */
-const WORKING_STATES: ReadonlySet<AgentDisplayState> = new Set<AgentDisplayState>([
-  'starting',
-  'working'
-])
+/**
+ * Session 显示状态里，代表「这个 turn 正在被处理」的那些。
+ *
+ * 写成 `Record<AgentDisplayState, boolean>`（一个覆盖整个联合的判定表），而不是原先的 `Set` of states。
+ * Set 的 `.has()` 对表里没有的状态一律答 `false`，所以 Core 未来加第十个状态时，它会**静默**被归为
+ * 「没在工作」——刚发完 prompt 的窗格该显示「在进行」指示的那个新状态，会被当空状态画。改成 Record
+ * 后，键类型是 `{ [K in AgentDisplayState]: … }`，少填一个成员就编译不过：加状态的人必须在这里为它
+ * 明确回答「算不算在工作」，而不是让它默默落到 false。这不改今天的行为——只有 `starting` / `working`
+ * 为 true，与原 Set 逐一等价。
+ */
+const WORKING_BY_STATE: Record<AgentDisplayState, boolean> = {
+  starting: true,
+  running: false,
+  disconnected: false,
+  working: true,
+  waiting: false,
+  blocked: false,
+  done: false,
+  exited: false,
+  error: false
+}
 
 /**
  * 这个 turn 在工作吗。
@@ -32,7 +48,7 @@ const WORKING_STATES: ReadonlySet<AgentDisplayState> = new Set<AgentDisplayState
  * 结束于一次工具调用时会永远显示"在进行"，而且没有任何证据支持它。
  */
 export function turnWorking(displayState: AgentDisplayState | undefined): boolean {
-  return displayState !== undefined && WORKING_STATES.has(displayState)
+  return displayState !== undefined && WORKING_BY_STATE[displayState]
 }
 
 /**

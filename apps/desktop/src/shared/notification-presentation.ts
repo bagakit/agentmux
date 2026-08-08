@@ -117,6 +117,15 @@ function summarize(text: string | undefined): string | undefined {
   return `${points.slice(0, SUMMARY_MAX_CHARS).join('')}…`
 }
 
+// A notification body's status line reads "*Agent* — *Label*". The label is the user-facing word for
+// each AgentDisplayState.
+//
+// 写成**无 default 的 switch**：九支各自映射，没有兜底。原先那句 `default: return 'Unknown'` 对今天
+// 的九个状态毫无作用（它们都被上面的 case 接住了），但它对 Core 未来新增的第十个状态是沉默的——那个
+// 状态会静默产出一条 body 读作「*Agent* — Unknown」的系统通知（实测：把 default 改成 `'MUTATED_SILENT'`
+// 后 14 条断言全绿、变异存活）。去掉 default 后，返回类型是 `string` 且不含 undefined，少一支就触发
+// TS2366「缺少结尾 return」——于是加状态的人必须在这里给它一个真正的词，而不是让它落进 "Unknown"。
+// tsc 一旦挡住这件事，就不必再补一个「每个状态都有 label」的运行期循环——那会是同一个保证的第二份。
 function statusLabel(state: AgentDisplayState): string {
   switch (state) {
     case 'starting': return 'Starting'
@@ -128,7 +137,6 @@ function statusLabel(state: AgentDisplayState): string {
     case 'done': return 'Finished'
     case 'exited': return 'Exited'
     case 'error': return 'Error'
-    default: return 'Unknown'
   }
 }
 
