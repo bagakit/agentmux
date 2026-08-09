@@ -25,4 +25,14 @@ describe('ContinuousProgressScheduler', () => {
     expect(b.resume(loop.loopId).nextCheckAt).toBe(110)
     expect(b.stop(loop.loopId).status).toBe('stopped')
   })
+  it('recovers one overdue tick without replaying missed periods', () => {
+    let now = 0
+    const s = new ContinuousProgressScheduler({ now: () => now, id: (() => { let n = 0; return () => `id-${++n}` })() })
+    s.create({ agentSessionId: 'a', intervalMs: 10, prompt: 'x' })
+    now = 1000
+    expect(s.recover()).toHaveLength(1)
+    expect(s.recover()).toHaveLength(0)
+    now = 1010
+    expect(s.recover()).toHaveLength(1)
+  })
 })
