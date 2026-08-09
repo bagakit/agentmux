@@ -55,6 +55,18 @@
     {
       "action": "task_plan_set",
       "detail": "revision=6; supersedes_revision=5"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=7; supersedes_revision=6"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=8; supersedes_revision=7"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=9; supersedes_revision=8"
     }
   ],
   "goal_contract": {

@@ -2,8 +2,8 @@
   "version": 2,
   "feat_id": "f-2528fmqbw",
   "plan_status": "reviewed",
-  "plan_revision": 6,
-  "supersedes_revision": 5,
+  "plan_revision": 9,
+  "supersedes_revision": 8,
   "review_ref": "docs/reviews/continuous-progress-2026-09-12.md",
   "source_refs": [
     "docs/reviews/continuous-progress-2026-09-12.md",
@@ -192,6 +192,112 @@
       "supersedes_by_task": {},
       "dependency_changes": {
         "added": [],
+        "removed": []
+      }
+    },
+    {
+      "revision": 7,
+      "supersedes_revision": 6,
+      "review_ref": "docs/reviews/continuous-progress-2026-09-12.md",
+      "source_refs": [
+        "docs/reviews/continuous-progress-2026-09-12.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006",
+        "T-007",
+        "T-008",
+        "T-009",
+        "T-010",
+        "T-011",
+        "T-012",
+        "T-013"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {},
+      "dependency_changes": {
+        "added": [
+          {
+            "from": "T-008",
+            "to": "T-013"
+          }
+        ],
+        "removed": []
+      }
+    },
+    {
+      "revision": 8,
+      "supersedes_revision": 7,
+      "review_ref": "docs/reviews/continuous-progress-2026-09-12.md",
+      "source_refs": [
+        "docs/reviews/continuous-progress-2026-09-12.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006",
+        "T-007",
+        "T-008",
+        "T-009",
+        "T-010",
+        "T-011",
+        "T-012",
+        "T-013",
+        "T-014"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {},
+      "dependency_changes": {
+        "added": [],
+        "removed": []
+      }
+    },
+    {
+      "revision": 9,
+      "supersedes_revision": 8,
+      "review_ref": "docs/reviews/continuous-progress-2026-09-12.md",
+      "source_refs": [
+        "docs/reviews/continuous-progress-2026-09-12.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006",
+        "T-007",
+        "T-008",
+        "T-009",
+        "T-010",
+        "T-011",
+        "T-012",
+        "T-013",
+        "T-014",
+        "T-015"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {},
+      "dependency_changes": {
+        "added": [
+          {
+            "from": "T-012",
+            "to": "T-015"
+          }
+        ],
         "removed": []
       }
     }
@@ -561,6 +667,94 @@
       "supersedes": [],
       "estimate_hours": 0.75,
       "introduced_in_revision": 6,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-013",
+      "depends_on": [
+        "T-008"
+      ],
+      "title": "启动页 Resume 快捷入口",
+      "objective": "在启动页按精确 recovery candidate 提供状态正确的 Resume 入口。",
+      "outcome": "可恢复候选可直接恢复，stale/运行中/权限等待/不可用候选不会被误导为可点击。",
+      "acceptance": [
+        "仅当前 workspace/Host 且身份、Provider 能力可验证的候选显示 Resume，并显示 Run 和原因",
+        "恢复失败保留启动页 prompt、引用和候选信息；不发送 prompt、不启动 loop、不批准权限"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/new-tab-resume.test.tsx test/session-recovery-candidate.test.ts",
+          "proves": "Resume 候选筛选、状态和失败保留"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/continuous-progress-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "estimate_hours": 1,
+      "introduced_in_revision": 7,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-014",
+      "depends_on": [],
+      "title": "通知关闭去重",
+      "objective": "避免 transient error 在用户关闭后被重复事件或轮询重新弹出。",
+      "outcome": "同一错误保持 dismissed，新错误和主动 reopen 仍可见。",
+      "acceptance": [
+        "相同错误内容的重复 report 不清除 dismissed",
+        "不同错误会正常显示，Show last error 仍可主动 reopen"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/transient-error-notice.test.tsx test/store-error-dedup.test.ts",
+          "proves": "通知关闭去重与重新打开行为"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/continuous-progress-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "estimate_hours": 0.5,
+      "introduced_in_revision": 8,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-015",
+      "depends_on": [
+        "T-012"
+      ],
+      "title": "Status Bar 与 Activity 视觉收敛",
+      "objective": "用统一语义图标替代点状 Status Bar 状态，并让 Activity 展开只承载新增诊断信息。",
+      "outcome": "Agents/Needs You/Error 可快速识别，展开面板节省空间且不重复。",
+      "acceptance": [
+        "Status Bar 状态有语义图标、紧凑数字和可访问说明",
+        "单 Agent 无新增诊断不显示展开箭头，多 Agent/有原因时展开明细只显示新增信息"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/agent-status-bar.test.tsx test/project-rail-clarity.test.tsx",
+          "proves": "状态栏图标与 Activity 展开密度"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/continuous-progress-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "estimate_hours": 0.75,
+      "introduced_in_revision": 9,
       "status": "todo",
       "gate_result": null,
       "last_gate_commands": [],

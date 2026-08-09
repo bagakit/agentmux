@@ -8,6 +8,7 @@ import { configuredExecutors } from '../lib/executors'
 import { presentError } from '../lib/error-presentation'
 import { EMPTY_LAUNCHER_NAMES, launcherNameBinding } from '../lib/launcher-name-draft'
 import { launcherPromptBinding } from '../lib/launcher-prompt-draft'
+import { appendFileReferences } from '../lib/composer-file-reference'
 import { launcherCanLaunch, launcherKeydownLaunches } from '../lib/launcher-submit'
 import { resolveLauncherWorkspaceId } from '../lib/launcher-workspace'
 import { warmLauncherId, warmTerminalPreview } from '../lib/warm-terminal-preview'
@@ -16,6 +17,8 @@ import { ComposerTextarea } from './ComposerTextarea'
 import { LaunchRefine } from './LaunchOptionControls'
 import { TerminalView } from './TerminalView'
 import { isMacPlatform } from '../lib/host-platform'
+import { api } from '../lib/api'
+import { AgentComposerTools } from './AgentComposerTools'
 
 export function NewTabSurface({
   tabGroupId,
@@ -207,6 +210,20 @@ export function NewTabSurface({
     ))
   }
 
+  function appendReference(path: string): void {
+    setPrompt(appendFileReferences(prompt, [path], workspace?.path))
+  }
+
+  async function captureComposerScreenshot(): Promise<void> {
+    const path = await api.ui.captureScreenshot()
+    if (path) appendReference(path)
+  }
+
+  async function chooseComposerFiles(): Promise<void> {
+    const paths = await api.ui.chooseFiles(workspace?.path ? { defaultPath: workspace.path } : undefined)
+    for (const path of paths ?? []) appendReference(path)
+  }
+
   return (
     <section className="launch-surface">
       <div className="launch-surface__heading">
@@ -317,6 +334,22 @@ export function NewTabSurface({
         placeholder="Describe the outcome. You can steer the agent after launch."
         rows={4}
       />
+      <div className="composer__toolbar launch-surface__message-tools">
+        <AgentComposerTools
+          disabled={busy !== null || !workspace}
+          commands={providerCatalog.find((entry) => entry.id === selectedProviderId)?.composer?.commands ?? []}
+          loadSkills={() => workspace && selectedProviderId
+            ? api.ui.listWorkspaceSkills(workspace.id, selectedProviderId)
+            : Promise.resolve([])}
+          onChooseSkill={(skill) => appendReference(skill.path)}
+          onCommand={(command) => setPrompt(`${command}${prompt ? ` ${prompt}` : ' '}`)}
+          {...(workspace?.hostId === 'local' ? { onCapture: captureComposerScreenshot } : {})}
+          reportError={(error) => setError(presentError(error))}
+        />
+        <button type="button" className="composer-tool" disabled={busy !== null || !workspace} onClick={() => void chooseComposerFiles()} title="Reference files for the Agent">
+          Files
+        </button>
+      </div>
 
       <div className="launch-names">
         <input

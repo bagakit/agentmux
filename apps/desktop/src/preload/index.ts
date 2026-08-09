@@ -120,6 +120,7 @@ const api: AgentMuxPreloadApi = {
     rendererUpdateReady: (token: string) => ipcRenderer.invoke('ui:rendererUpdateReady', token),
     captureScreenshot: () => ipcRenderer.invoke('ui:captureScreenshot'),
     listAgentSkills: (sessionId: string) => ipcRenderer.invoke('ui:listAgentSkills', sessionId),
+    listWorkspaceSkills: (workspaceId: string, providerId: string) => ipcRenderer.invoke('ui:listWorkspaceSkills', workspaceId, providerId),
     readClipboardText: () => ipcRenderer.invoke('ui:readClipboardText'),
     writeClipboardText: (text: string) => ipcRenderer.invoke('ui:writeClipboardText', text),
     writeClipboardImage: (image: BrowserPng) => ipcRenderer.invoke('ui:writeClipboardImage', image),

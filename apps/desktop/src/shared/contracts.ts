@@ -1131,6 +1131,7 @@ export type AgentMuxDesktopApi = {
     rendererUpdateReady(token: string): Promise<void>
     captureScreenshot(): Promise<string | null>
     listAgentSkills(sessionId: string): Promise<import('@agentmux/core').AgentSkill[]>
+    listWorkspaceSkills(workspaceId: string, providerId: string): Promise<import('@agentmux/core').AgentSkill[]>
     readClipboardText(): Promise<string>
     writeClipboardText(text: string): Promise<void>
     writeClipboardImage(image: BrowserPng): Promise<void>
