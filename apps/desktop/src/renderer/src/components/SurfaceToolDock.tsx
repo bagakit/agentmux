@@ -910,6 +910,8 @@ export function SurfaceToolDock({
   const [savingBrowserToolbar, setSavingBrowserToolbar] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const isBoard = surface === 'board'
+  const fileEditingProbe = typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('agentmux-file-editing-report') === '1'
   // Scratch is a wiki-first workspace: the content slot keeps its `files-branches` role but is
   // re-skinned as `Files + Topics` (see contentSlotPresentation), so the tool set never diverges
   // and the global workspaceTool is never mutated.
@@ -929,7 +931,7 @@ export function SurfaceToolDock({
         }
         return { id, ...meta }
       })
-  const selectedTool = isBoard ? BOARD_TOOL.id : effectiveWorkspaceTool
+  const selectedTool = isBoard ? BOARD_TOOL.id : fileEditingProbe ? 'files-branches' : effectiveWorkspaceTool
   const activePaneId = layout?.activeGroupId
   const project = workspace
     ? projectWorkspaces(config?.workspaces ?? []).find((candidate) =>
@@ -1009,7 +1011,7 @@ export function SurfaceToolDock({
         <span>{tools.find((tool) => tool.id === selectedTool)?.label}</span>
       </header>
       <div className="surface-tool-content">
-        {!isBoard && effectiveWorkspaceTool === 'files-branches' && workspace ? (
+        {!isBoard && selectedTool === 'files-branches' && workspace ? (
           <WorkspaceFilesTool workspace={workspace} isScratch={isScratch} />
         ) : null}
         {!isBoard && effectiveWorkspaceTool === 'agents' && workspace ? (
