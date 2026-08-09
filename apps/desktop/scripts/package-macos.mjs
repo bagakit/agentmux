@@ -597,6 +597,7 @@ async function verifyLaunchServices(appPath, verificationRoot) {
       '--stdout', stdoutPath,
       '--stderr', stderrPath,
       '--env', `AGENTMUX_DESKTOP_USER_DATA=${userData}`,
+      '--env', 'AGENTMUX_DISABLE_CRASH_REPORTER=1',
       '--env', `AGENTMUX_RUNTIME_DIRECTORY=${runtimeRoot}`,
       '--env', `AGENTMUX_DESKTOP_READY_FILE=${readyFile}`,
       '--env', `AGENTMUX_DESKTOP_FILE_EDITING_REPORT=${fileEditingReport}`,
