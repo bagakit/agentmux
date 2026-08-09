@@ -139,12 +139,16 @@ export function SurfaceSwitch() {
     <div className="surface-switch" role="group" aria-label="Main view">
       <button
         className={mainSurface === 'workbench' ? 'selected' : ''}
+        aria-label="Workspace: show terminal and file workbench"
+        title="Workspace — show terminal and file workbench"
         onClick={() => setMainSurface('workbench')}
       >
         <SquareTerminal size={13} /> Workspace
       </button>
       <button
         className={mainSurface === 'board' ? 'selected' : ''}
+        aria-label="Board: show activity and conversation"
+        title="Board — show activity and conversation"
         onClick={() => setMainSurface('board')}
       >
         <LayoutDashboard size={13} /> Board
