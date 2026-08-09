@@ -347,6 +347,40 @@ describe('file explorer reveal, refresh, and stale-response primitives', () => {
     expect(tracker.begin(secondWorkspaceA, 'src')).not.toBeNull()
   })
 
+  it('retires an unmounted scope and preserves a replacement scope', () => {
+    const tracker = createFileExplorerDirLoadTracker()
+    const first = createFileExplorerDirLoadScope('workspace-a')
+    const replacement = createFileExplorerDirLoadScope('workspace-b')
+    tracker.activate(first)
+    const late = tracker.begin(first, 'src')!
+
+    tracker.deactivate(first)
+    expect(tracker.isCurrent(late)).toBe(false)
+    expect(tracker.begin(first, 'src')).toBeNull()
+
+    tracker.activate(replacement)
+    const current = tracker.begin(replacement, 'src')!
+    // A stale cleanup from the first mount must not deactivate the replacement.
+    tracker.deactivate(first)
+    expect(tracker.isCurrent(current)).toBe(true)
+    expect(tracker.runIfActive(replacement, () => undefined)).toBe(true)
+  })
+
+  it('invalidates all outstanding directory loads when the active scope retires', () => {
+    const tracker = createFileExplorerDirLoadTracker()
+    const scope = createFileExplorerDirLoadScope('workspace-a')
+    tracker.activate(scope)
+    const root = tracker.begin(scope, '')!
+    const nested = tracker.begin(scope, 'src')!
+
+    tracker.deactivate(scope)
+    expect(tracker.isCurrent(root)).toBe(false)
+    expect(tracker.isCurrent(nested)).toBe(false)
+    expect(tracker.runIfActive(scope, () => {
+      throw new Error('retired scope was admitted')
+    })).toBe(false)
+  })
+
   it('marks collapsed caches stale and forces their next expansion to reload', () => {
     const cache: Record<string, DirCache> = {
       '': { children: rows, loading: false, error: null },

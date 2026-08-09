@@ -11,6 +11,11 @@ export type FileExplorerDirLoadScope = {
 
 export type FileExplorerDirLoadTracker = {
   activate: (scope: FileExplorerDirLoadScope) => void
+  /**
+   * Retire a mounted scope. Late async completions must fail the same identity
+   * check as a workspace switch, while a newer scope is left untouched.
+   */
+  deactivate: (scope: FileExplorerDirLoadScope) => void
   begin: (scope: FileExplorerDirLoadScope, dirPath: string) => FileExplorerDirLoadToken | null
   isCurrent: (token: FileExplorerDirLoadToken) => boolean
   runIfActive: (scope: FileExplorerDirLoadScope, operation: () => void) => boolean
@@ -31,6 +36,15 @@ export function createFileExplorerDirLoadTracker(): FileExplorerDirLoadTracker {
   return {
     activate: (scope) => {
       activeScope = scope
+      session += 1
+      revisionsByDir.clear()
+    },
+    deactivate: (scope) => {
+      // React may run an old effect cleanup after the replacement effect has
+      // already activated its scope. Never let that stale cleanup retire the
+      // replacement Workspace.
+      if (activeScope !== scope) return
+      activeScope = null
       session += 1
       revisionsByDir.clear()
     },
