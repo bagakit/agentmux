@@ -21,13 +21,16 @@ export function resolvePaneColumnEdgeZone(
   options?: { bodyRect?: PaneRect | null; tabStripHeightPx?: number }
 ): Exclude<TabDropZone, 'center'> | null {
   const localX = point.x - panelRect.left
-  const horizontalEdge = panelRect.width * 0.2
-  if (localX < horizontalEdge) return 'left'
-  if (localX > panelRect.width - horizontalEdge) return 'right'
-
   const tabStripHeight = options?.tabStripHeightPx ?? TAB_GROUP_TAB_STRIP_HEIGHT_PX
   const tabStripBottom = panelRect.top + tabStripHeight
   if (point.y < tabStripBottom) return null
+
+  // A drag over the tab strip is always a reorder gesture, even when the tab happens
+  // to sit near the pane's horizontal edge. Split requires an intentional drop into
+  // the body edge, keeping ordinary tab sorting predictable.
+  const horizontalEdge = panelRect.width * 0.16
+  if (localX < horizontalEdge) return 'left'
+  if (localX > panelRect.width - horizontalEdge) return 'right'
 
   const bodyRect =
     options?.bodyRect ?? {
