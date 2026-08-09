@@ -73,6 +73,7 @@ import {
 } from './file-tree/useWorkspaceFileTree'
 import { FileTreeContextMenu } from './file-tree/FileTreeContextMenu'
 import { isMacPlatform } from '../lib/host-platform'
+import { createDirectoryProjectInput } from '../lib/open-directory-as-project'
 import {
   fileExplorerDropDirectory,
   fileExplorerMoveTargets,
@@ -645,15 +646,21 @@ export function FileExplorer({
   async function openDirectoryAsProject(node: TreeNode): Promise<void> {
     if (!workspace || !node.isDirectory) return
     try {
-      const projectPath = joinWorkspacePath(workspace.path, node.path)
+      const projectInput = createDirectoryProjectInput({
+        workspace,
+        relativePath: node.path,
+        name: node.name,
+        isDirectory: node.isDirectory
+      })
+      if (!projectInput) return
       const current = await api.config.get()
-      const existing = current.workspaces.find((item) => item.hostId === workspace.hostId && item.path === projectPath)
+      const existing = current.workspaces.find((item) => item.hostId === projectInput.hostId && item.path === projectInput.path)
       if (existing) {
         setConfig(current)
         await useAppStore.getState().selectWorkspace(existing.id)
         return
       }
-      const created = await api.workspaces.add({ hostId: workspace.hostId, path: projectPath, name: node.name })
+      const created = await api.workspaces.add(projectInput)
       setConfig(await api.config.get())
       await useAppStore.getState().selectWorkspace(created.id)
     } catch (error) {
