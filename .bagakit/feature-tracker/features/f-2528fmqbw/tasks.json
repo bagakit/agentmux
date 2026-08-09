@@ -864,9 +864,15 @@
       "heavy": true,
       "heavy_reason": "跨 Provider catalog、.agents 发现和两个 Composer 宿主",
       "introduced_in_revision": 4,
-      "status": "todo",
-      "gate_result": null,
-      "last_gate_commands": [],
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop exec vitest run test/message-tools-syntax.test.tsx test/new-tab-message-tools.test.tsx",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
       "notes": []
     },
     {
