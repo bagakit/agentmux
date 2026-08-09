@@ -381,6 +381,24 @@ describe('file explorer reveal, refresh, and stale-response primitives', () => {
     })).toBe(false)
   })
 
+  it('gives rejected loads a unique epoch and operation receipt', () => {
+    const tracker = createFileExplorerDirLoadTracker()
+    const scope = createFileExplorerDirLoadScope('workspace-a')
+    tracker.activate(scope)
+    const admitted = tracker.begin(scope, 'src')!
+    tracker.deactivate(scope)
+    const rejected = tracker.reject(scope, 'src')
+
+    expect(rejected).toMatchObject({
+      workspaceId: 'workspace-a',
+      path: 'src',
+      epoch: admitted.session + 1,
+      kind: 'rejected'
+    })
+    expect(rejected.operationId).toBeGreaterThan(admitted.operationId)
+    expect(rejected.observedAt).toBeGreaterThan(0)
+  })
+
   it('marks collapsed caches stale and forces their next expansion to reload', () => {
     const cache: Record<string, DirCache> = {
       '': { children: rows, loading: false, error: null },

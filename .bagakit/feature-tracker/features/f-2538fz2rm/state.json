@@ -15,19 +15,19 @@
   "counters": {
     "gate_fail_streak": 0,
     "no_progress_rounds": 0,
-    "round_count": 3
+    "round_count": 5
   },
   "gate": {
     "last_result": "pass",
-    "last_task_id": "T-012",
+    "last_task_id": "T-014",
     "last_check_commands": [
       {
-        "command": "pnpm --filter @agentmux/desktop typecheck",
+        "command": "pnpm --filter @agentmux/desktop exec vitest run test/tab-drop-zone.test.ts test/hover-dropdown-menu.test.tsx --maxWorkers=1",
         "exit_code": 0,
         "status": "pass"
       }
     ],
-    "last_log_path": ".bagakit/feature-tracker/features/f-2538fz2rm/artifacts/gate-T-012-r3-0001.log"
+    "last_log_path": ".bagakit/feature-tracker/features/f-2538fz2rm/artifacts/gate-T-014-r5-0001.log"
   },
   "history": [
     {
@@ -85,11 +85,47 @@
     {
       "action": "task_finished",
       "detail": "T-012 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-005"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-005 => fail"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-005 => failed"
+    },
+    {
+      "action": "task_failed",
+      "detail": "T-005 => assumption disproved; replan required"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=6; supersedes_revision=5"
+    },
+    {
+      "action": "feature_goal_set",
+      "detail": "5186e44543399fad756c129554c217e71e5ea7cd023faaca95d8234f9997980c -> bb947558796c0262fd48497b3ab3ee98cbf0448f1bad9e4c91ebf4aad4f21c33"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-014"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-014 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-014 => done"
     }
   ],
   "goal_contract": {
     "schema": "bagakit.feature-goal.v1",
     "ref": ".bagakit/feature-tracker/features/f-2538fz2rm/goal.md",
-    "revision": "5186e44543399fad756c129554c217e71e5ea7cd023faaca95d8234f9997980c"
+    "revision": "bb947558796c0262fd48497b3ab3ee98cbf0448f1bad9e4c91ebf4aad4f21c33"
   }
 }

@@ -1,43 +1,37 @@
-# Feature Goal: 彻底实现内置持续推进闭环
+# Feature Goal: 完成 AgentMux 整合需求并安装验证
 
 Contract: `bagakit.feature-goal.v1`
 Feature: `f-2538fz2rm`
-Convergence: `frontier`
+Convergence: `terminal`
 Closure: `state`
 
 Before acting, verify `owner-receipt.json`, then recover current execution from `state.json` and `tasks.json`. Context may be stale or belong to another Feature; trust this Feature directory before acting.
 
 ## Prime Directive
-交付一个独立于模型会话的 AgentMux 内置持续推进闭环：用户为精确 Agent Session 开启定时检查后，系统能安全判断、保序续行、跨重启恢复并让用户看懂每次决定。输入失败不丢失，健康 Agent 不因 AgentMux 流程错误被阻断。
+彻底实现 f-2538fz2rm 当前 reviewed task plan 中的需求，包括已转正提案，完成行为验收、提交、打包、安装并重启验证。交付以真实产品行为与安装后会话恢复为准，不能以提案转正、编译成功或单轮测试通过替代。
 
 ## Convergence Contract
-- Smallest sufficient closure: T-001 至 T-013 全部完成，形成条件投递、持久 loop、观察面板、Tracker 只读适配、Provider 验收、全局 Message Tools、Context 语义和 Session/Run 重启恢复的一个可验证闭环。
-- Oracle or ratchet: Feature Tracker 当前 reviewed task DAG 的所有任务为 done；每个任务有通过的 executable gate、变异红绿证据和排除定义文件后的生产调用者证据；最终受授权 Provider 测试有分阶段回执。
-- Scope expansion: 其他历史需求只有在现有 reviewed task 明确覆盖时推进；新的独立 Closure 建 child Feature，不扩大本 Goal。维护者角色发现和定向交接继续使用 `f-23d8fwq4z`。
-- Completion or cycle stop: 当全部当前计划任务、closeout review、文档与学习/晋升检查完成并由 Tracker closeout；任何单轮测试通过、模型总结或外置 loop 运行都不算完成。
+- Smallest sufficient closure: 当前 Feature reviewed plan 覆盖的整合版本全部可用并安全安装；相邻 Feature 的未纳入任务仅作背景。
+- Oracle: 当前计划的可执行任务全部 done、对应 gate 有效，关键行为有变异红绿与排除定义文件后的生产调用者证据；最终候选通过打包验证，安装身份与候选一致，重启后 Session/Run 结果有回执，Feature 完成 closeout。
+- Scope expansion: 新需求先更新设计 SSOT 和 reviewed task；当前计划没有覆盖的历史需求不得自动扩大本轮验收。
+- Insufficient: 修改文件、typecheck、纯函数测试、安装命令返回成功或 Task done 未 closeout，均不能单独证明交付。
 
 ## Protected Invariants
-- loopId 绑定精确 Session、Host、Provider、workspace；Run 是可替换实例，旧 Run 的 tick/readiness/回执不能作用于新 Run。
-- 自动检查不批准权限、不绕过用户问题、不隐式 resume、不修改业务任务真值；未知回执不自动重发。
-- 最终投递边界复核 running、交互门、就绪信号、用户输入占用和 tick 去重；人工输入失败或启动失败时草稿与引用保留。
-- ctxmux 继续独占 PTY、Run、ordered bytes、Replay 和 Gap；AgentMux 持有 Session、Provider、调度、权限和语义状态。
-- Non-goal: 自动批准权限、多 Agent DAG、模型切换、部署、成本优化器，以及把所有历史产品需求塞进本 Feature。
-
-## Acceptance And Stop Rules
-- Acceptance: Tracker T-001..T-013 全部 done 且 gates 通过；变异测试能证明关键保护失效时变红；生产调用者审计命中；受授权 Claude 测试验证结束→到期→单次接收→新一轮开始和 Session 重启恢复；UI 显示执行/循环/恢复三态、活动、回执、原因和下次检查。
-- Insufficient: 仅有 Renderer timer、外置 cron、纯 decision 单测、命令返回成功、一个 Provider 的 working 状态、全部 Task done 未 closeout，均不构成闭环完成。
-- Stop and ask before: 改变既有权限策略、向未明确绑定的 Agent 投递、影响其他 workspace/session、自动恢复用户主动停止的 Agent、部署或发布不可逆外部变更。
+- packages/core 与 Electron/React 无关；ctxmux 独占 PTY、Run、ordered bytes、Replay、Gap，AgentMux 持有 Provider、Session、Hook、Permission、readiness 与 semantic resume。
+- 以 SSOT、DRY 和已有公开 API 为优先，不保留过时兼容路径，不创造第二套状态真值。
+- 健康 Agent 不因我们的流程错误受阻；降级与未知如实可见，输入失败保留草稿和引用。
+- 定时与 loop 不自动批准权限，不绕过用户问题，不把未知投递当成功，也不自动恢复用户主动停止的 Agent。
+- 测试进程有明确归属和有界清理，遵守有限内存约束，不误杀正式应用或其他用户 Agent。
 
 ## Authority And Orchestration
-- Follow only this Feature's owner receipt, state, and reviewed tasks.
-- Before substantial work and after every review, re-read this Goal and the current acceptance evidence.
-- 先完成最小用户可见纵切，再扩展 scheduler/UI；保持独立任务可并行，但最终验收使用同一候选版本。
-- 维护者 Agent 通过显式角色/capability 目录解析；目标未知返回未解析并保留草稿，绝不按 Provider、布局或最近活动猜测。
-- 每次变更先更新 reviewed task truth；完成后运行 gate、变异检查、零调用者检查并同步 Tracker。不要在聊天里维护第二份进度真值。
-- 复用现有 typed Control、Core input serialization、readiness 和 Feature Tracker；删除被替代的临时路径，不增加平行 runtime 或兼容层。
+- 用户已授权实现、合理提交、打包、安装与可恢复重启；若安装确实无法保持 Session 且会破坏其他工作现场，先说明具体影响并取得确认。
+- 改变既有权限策略、向未明确绑定的目标投递、影响其他工作区或不可逆外部发布，需要对应授权。
+- 可独立实现的任务并行推进，一个整合 owner 管理 tracker、共享文件、提交与最终候选验证；专家回报有界代码及证据，独立 review 检查正确性、架构与鲁棒性。
+- 每次恢复读取当前任务和代码差异；每轮只推进能改变验收结果的实现或证据，不因单条失败停下所有独立工作。
+- 完成须经 Tracker closeout；保留未通过的证据，不重写已执行任务来伪装成功。
 
 ## Context References
-- `docs/reviews/continuous-progress-2026-09-12.md`: 需求证据、代码现状、范围与验收建议。
-- `docs/design/agentmux-desktop-interaction.md`: 持续推进、输入保留和 Session 重启交互约束。
-- `docs/design/agentmux-surface-density.md`: 观察面板与 Context 视觉约束。
-- `.bagakit/feature-tracker/features/f-23d8fwq4z/`: 维护者发现与定向交接的相邻 Feature。
+- `tasks.json` 与 `state.json`：当前范围、依赖、状态与 gate。
+- `docs/reviews/continuous-progress-followup-2026-09-12.md`：整合与 proposal 转正决定。
+- `docs/design/agentmux-desktop-interaction.md`：行为与生命周期约束。
+- `docs/design/agentmux-surface-density.md`：视觉、密度与控件约束。
