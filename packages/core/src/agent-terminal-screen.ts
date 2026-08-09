@@ -28,7 +28,8 @@ export class AgentTerminalScreen {
   private readonly terminal: HeadlessTerminal
   private nextByte = 0
 
-  constructor(cols: number, rows: number) {
+  constructor(cols: number, rows: number, initialByte = 0) {
+    this.nextByte = initialByte
     this.terminal = new Terminal({
       cols,
       rows,
@@ -149,8 +150,8 @@ export class AgentTerminalScreenEvidence {
   private failure: AgentTerminalScreenFailure | null = null
   private disposed = false
 
-  constructor(cols: number, rows: number, frame: AgentTerminalFrameMarkers | null) {
-    this.screen = new AgentTerminalScreen(cols, rows)
+  constructor(cols: number, rows: number, frame: AgentTerminalFrameMarkers | null, initialByte = 0) {
+    this.screen = new AgentTerminalScreen(cols, rows, initialByte)
     this.startMarker = frame ? Buffer.from(frame.start) : null
     this.endMarker = frame ? Buffer.from(frame.end) : null
   }
