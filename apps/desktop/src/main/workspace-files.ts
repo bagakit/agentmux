@@ -76,7 +76,7 @@ export function workspaceFileObserverCount(): number {
 // pinned cwd. It validates that physical cwd after spawn, then touches only one
 // basename; replacing the original parent path with a symlink cannot redirect
 // the operation after that point.
-const LOCAL_WORKER_SOURCE = String.raw`
+export const LOCAL_WORKER_SOURCE = String.raw`
 import { createHash, randomBytes } from 'node:crypto'
 import { watch } from 'node:fs'
 import { constants, mkdir, open, readdir, readlink, realpath, rename, rm, stat, unlink } from 'node:fs/promises'
@@ -190,6 +190,13 @@ try {
       watcher.close()
     })
     process.once('SIGTERM', () => {
+      watcher.close()
+      process.exit(0)
+    })
+    // The observer is owned by the Electron host. An IPC channel gives the
+    // worker an OS-level lifetime signal when that host disappears, including
+    // a crash where no explicit dispose path can run.
+    process.once('disconnect', () => {
       watcher.close()
       process.exit(0)
     })
@@ -544,10 +551,10 @@ async function spawnLocalObserver(
   ], {
     cwd,
     env: environment,
-    stdio: ['pipe', 'pipe', 'pipe']
+    stdio: ['pipe', 'pipe', 'pipe', 'ipc']
   })
-  child.stdout.setEncoding('utf8')
-  child.stderr.setEncoding('utf8')
+  child.stdout!.setEncoding('utf8')
+  child.stderr!.setEncoding('utf8')
   let stdout = ''
   let stderr = ''
   let inputSent = false
@@ -565,11 +572,11 @@ async function spawnLocalObserver(
       rejectReady(error instanceof Error ? error : new Error(String(error)))
     }
     child.once('error', fail)
-    child.stderr.on('data', (chunk: string) => {
+    child.stderr!.on('data', (chunk: string) => {
       stderr += chunk
       if (!inputSent && stderr.split('\n').includes(LOCAL_WORKER_READY)) {
         inputSent = true
-        child.stdin.end()
+        child.stdin!.end()
       }
       const record = stderr.split('\n').find((line) => line.startsWith(LOCAL_WORKER_ERROR))
       if (record) {
@@ -580,7 +587,7 @@ async function spawnLocalObserver(
         fail(Object.assign(new Error(detail.message), detail.code ? { code: detail.code } : {}))
       }
     })
-    child.stdout.on('data', (chunk: string) => {
+    child.stdout!.on('data', (chunk: string) => {
       stdout += chunk
       const lines = stdout.split('\n')
       stdout = lines.pop() ?? ''
