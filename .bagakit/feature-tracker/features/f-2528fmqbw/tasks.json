@@ -1113,9 +1113,15 @@
       "heavy": true,
       "heavy_reason": "跨 Activity、Projects 工具和 Status Bar 三个展示入口",
       "introduced_in_revision": 10,
-      "status": "todo",
-      "gate_result": null,
-      "last_gate_commands": [],
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop exec vitest run test/project-activity.test.tsx test/agent-status-bar.test.tsx test/agent-roster-surface.test.tsx",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
       "notes": []
     },
     {
