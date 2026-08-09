@@ -83,7 +83,7 @@
       "verification": [
         {
           "kind": "command",
-          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/probe-process.test.ts --maxWorkers=1",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/probe-process-cleanup.test.ts --maxWorkers=1",
           "proves": "真实子进程的资源归属与有界回收行为"
         }
       ],
@@ -114,6 +114,29 @@
       "source_refs": [
         "docs/reviews/probe-process-ownership.md",
         "docs/design/agentmux-desktop-interaction.md"
+      ],
+      "supersedes": []
+    },
+    {
+      "id": "T-005",
+      "title": "Smoke 启动不能覆盖后续 Workspace 切换",
+      "depends_on": [],
+      "objective": "删除 App 对 fixture workspace 的持续强制选择，保留 probe 初始选择这一唯一 owner。",
+      "outcome": "挂载 App 后用户可持续切到另一个 workspace 并切回。",
+      "acceptance": [
+        "真实 App effect 运行后 alternate identity 保持，切回 primary 仍生效。",
+        "恢复旧 effect 时回归测试变红。",
+        "完整 probe 的后续失败按实际结果记录，不以单测替代发布验收。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/app-smoke-workspace-selection.test.tsx --maxWorkers=1",
+          "proves": "App effect 不覆盖后续选择"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/probe-process-ownership.md"
       ],
       "supersedes": []
     }

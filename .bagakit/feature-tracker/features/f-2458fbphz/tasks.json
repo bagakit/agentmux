@@ -2,8 +2,8 @@
   "version": 2,
   "feat_id": "f-2458fbphz",
   "plan_status": "reviewed",
-  "plan_revision": 2,
-  "supersedes_revision": 1,
+  "plan_revision": 3,
+  "supersedes_revision": 2,
   "review_ref": "docs/reviews/probe-process-ownership.md",
   "source_refs": [
     "docs/reviews/agentmux-package-ssot-and-history-audit.md",
@@ -49,6 +49,32 @@
         "T-002",
         "T-003",
         "T-004"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {},
+      "dependency_changes": {
+        "added": [],
+        "removed": []
+      }
+    },
+    {
+      "revision": 3,
+      "supersedes_revision": 2,
+      "review_ref": "docs/reviews/probe-process-ownership.md",
+      "source_refs": [
+        "docs/reviews/agentmux-package-ssot-and-history-audit.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "apps/desktop/scripts/package-macos.mjs",
+        "apps/desktop/scripts/report-desktop-package.mjs",
+        "docs/reviews/probe-process-ownership.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005"
       ],
       "superseded_task_ids": [],
       "supersedes_by_task": {},
@@ -210,6 +236,40 @@
       "last_gate_commands": [
         {
           "command": "pnpm --filter @agentmux/desktop exec vitest run test/workspace-observer-owner.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-005",
+      "depends_on": [],
+      "title": "Smoke 启动不能覆盖后续 Workspace 切换",
+      "objective": "删除 App 对 fixture workspace 的持续强制选择，保留 probe 初始选择这一唯一 owner。",
+      "outcome": "挂载 App 后用户可持续切到另一个 workspace 并切回。",
+      "acceptance": [
+        "真实 App effect 运行后 alternate identity 保持，切回 primary 仍生效。",
+        "恢复旧 effect 时回归测试变红。",
+        "完整 probe 的后续失败按实际结果记录，不以单测替代发布验收。"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/app-smoke-workspace-selection.test.tsx --maxWorkers=1",
+          "proves": "App effect 不覆盖后续选择"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/probe-process-ownership.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 3,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop exec vitest run test/app-smoke-workspace-selection.test.tsx --maxWorkers=1",
           "exit_code": 0,
           "status": "pass"
         }
