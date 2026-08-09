@@ -117,15 +117,6 @@ export function App() {
 
   useEffect(() => api.ui.onWindowResize(({ active }) => setWindowResizeActive(active)), [])
 
-  // The packaged file-editing smoke starts from a fresh user-data directory. Explicitly land it
-  // on the fixture workspace so the probe exercises the real Project Rail/Explorer path instead
-  // of depending on whichever surface the normal startup reseat happens to choose.
-  useEffect(() => {
-    if (loading || !config || new URLSearchParams(window.location.search).get('agentmux-file-editing-report') !== '1') return
-    const target = config.workspaces.find((item) => item.id === 'workspace-file-editing-e2e')
-    if (target && activeWorkspaceId !== target.id) void selectWorkspace(target.id)
-  }, [loading, config, activeWorkspaceId, selectWorkspace])
-
   // Background Agents announce themselves: a completion, a request, or a failure the user is not looking
   // at raises a native notification that routes back to that Session.
   useAgentAttentionNotifications()
