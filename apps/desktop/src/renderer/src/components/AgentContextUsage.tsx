@@ -8,7 +8,9 @@ export function AgentContextUsage({ usage }: { usage?: AgentTurnUsage | undefine
     Number.isFinite(context.usedTokens) && context.usedTokens >= 0
   const remaining = known ? Math.max(0, context.capacityTokens - context.usedTokens) : null
   const percent = known ? Math.floor(remaining! / context.capacityTokens * 100) : null
-  const label = percent === null ? 'Context unknown' : `Context ${percent}% left`
+  // Say what the percentage measures. “Context 75% left” reads like a message count to users and
+  // hides the fact that this is the provider-reported token budget remaining for the current turn.
+  const label = percent === null ? 'Context remaining unknown' : `Context remaining ${percent}%`
   const detail = known && usage
     ? `${remaining!.toLocaleString()} of ${context.capacityTokens.toLocaleString()} tokens remain (${percent}%). Provider may compact when its own threshold is reached; AgentMux does not guess that threshold. Used ${context.usedTokens.toLocaleString()}. Last native observation: ${new Date(usage.observedAt).toLocaleString()}. Unsent draft excluded.`
     : 'Context remaining is unavailable because this Agent has not reported used tokens and capacity. Compression threshold is unknown.'
