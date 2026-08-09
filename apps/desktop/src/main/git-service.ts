@@ -787,7 +787,18 @@ export class GitService {
    * `refs/heads/main`). When neither resolves, there is simply no upstream: ahead/behind are both zero.
    */
   async aheadBehind(workspaceId: string, config: AppConfig): Promise<GitAheadBehind> {
-    const repoPath = await this.requireRepoPath(workspaceId, config)
+    let repoPath: string
+    try {
+      repoPath = await this.requireRepoPath(workspaceId, config)
+    } catch (error) {
+      // A folder Workspace is a supported file-tree surface even when it has no Git metadata.
+      // Treat the sync badge as unavailable (0/0 with no upstream) instead of rejecting an
+      // unrelated Workbench initialization request.
+      if (error instanceof Error && error.message === 'Workspace is not a Git repository') {
+        return { upstream: null, ahead: 0, behind: 0 }
+      }
+      throw error
+    }
     const host = this.host(workspaceId, config)
     const upstream = (await this.resolveRef(host, repoPath, '@{push}')) ?? (await this.resolveRef(host, repoPath, '@{upstream}'))
     if (upstream === null) return { upstream: null, ahead: 0, behind: 0 }
