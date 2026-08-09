@@ -140,6 +140,8 @@ export function AgentSessionComposer({
       contextUsage={<AgentContextUsage usage={session?.kind === 'agent' ? session.turnUsage : undefined} />}
       queuedCount={queuedCount}
       commands={composerOptions?.commands ?? []}
+      references={activeFile ? [{ text: `@${activeFile.split('/').at(-1)}`, description: activeFile }] : []}
+      onSelectSuggestion={(item, kind) => { if (kind === 'reference' && activeFile) addFileReference() }}
       tools={<AgentComposerTools disabled={!submitMode.canType} commands={composerOptions?.commands ?? []}
         loadSkills={() => api.ui.listAgentSkills(sessionId)} onChooseSkill={(skill) => insertReference(skill.path)}
         onCommand={(command) => {
