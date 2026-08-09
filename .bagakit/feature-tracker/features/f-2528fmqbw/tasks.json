@@ -602,7 +602,7 @@
       "heavy": true,
       "heavy_reason": "需协调 Main 生命周期、持久化和 typed control schema",
       "introduced_in_revision": 1,
-      "status": "in_progress",
+      "status": "done",
       "gate_result": "pass",
       "last_gate_commands": [
         {

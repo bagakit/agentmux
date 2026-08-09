@@ -4,7 +4,7 @@
   "title": "AgentMux 持续推进、消息工具与工作面体验",
   "slug": "continuous-progress-loop",
   "goal": "完成持久定时 loop、条件投递、重启恢复、全局 Message Tools、Context 语义，以及清晰紧凑的工作面观测体验。",
-  "status": "in_progress",
+  "status": "ready",
   "workspace_mode": "current_tree",
   "base_ref": "main",
   "branch": "",
@@ -14,7 +14,7 @@
   "runtime_relations": [],
   "counters": {
     "gate_fail_streak": 0,
-    "no_progress_rounds": 1,
+    "no_progress_rounds": 0,
     "round_count": 3
   },
   "gate": {
@@ -105,6 +105,10 @@
     {
       "action": "task_gate",
       "detail": "T-002 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-002 => done"
     }
   ],
   "goal_contract": {
