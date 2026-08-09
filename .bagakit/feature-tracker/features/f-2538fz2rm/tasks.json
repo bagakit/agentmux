@@ -2,13 +2,15 @@
   "version": 2,
   "feat_id": "f-2538fz2rm",
   "plan_status": "reviewed",
-  "plan_revision": 6,
-  "supersedes_revision": 5,
+  "plan_revision": 7,
+  "supersedes_revision": 6,
   "review_ref": "docs/reviews/continuous-progress-followup-2026-09-12.md",
   "source_refs": [
     "docs/reviews/continuous-progress-followup-2026-09-12.md",
     "docs/design/agentmux-desktop-interaction.md",
     "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
     "docs/design/agentmux-desktop-interaction.md",
     "docs/design/agentmux-surface-density.md",
     "docs/design/agentmux-desktop-interaction.md",
@@ -176,6 +178,48 @@
         "added": [],
         "removed": []
       }
+    },
+    {
+      "revision": 7,
+      "supersedes_revision": 6,
+      "review_ref": "docs/reviews/continuous-progress-followup-2026-09-12.md",
+      "source_refs": [
+        "docs/reviews/continuous-progress-followup-2026-09-12.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-006",
+        "T-007",
+        "T-008",
+        "T-009",
+        "T-010",
+        "T-011",
+        "T-012",
+        "T-013",
+        "T-014",
+        "T-015"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {
+        "T-014": [
+          "T-005"
+        ]
+      },
+      "dependency_changes": {
+        "added": [],
+        "removed": []
+      }
     }
   ],
   "tasks": [
@@ -328,8 +372,13 @@
       "verification": [
         {
           "kind": "command",
+          "ref": "pnpm --filter @agentmux/core exec vitest run test/agent-handoff.test.ts test/agent-handoff-cli.test.ts test/agent-session-identity-redaction.test.ts --maxWorkers=1",
+          "proves": "实现原提案能力并接入当前 AgentMux 主流程。"
+        },
+        {
+          "kind": "command",
           "ref": "pnpm --filter @agentmux/desktop typecheck",
-          "proves": "实现可编译并接入 Desktop"
+          "proves": "production integration compiles"
         }
       ],
       "source_refs": [
@@ -357,8 +406,13 @@
       "verification": [
         {
           "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/session-continuation.test.tsx --maxWorkers=1",
+          "proves": "实现原提案能力并接入当前 AgentMux 主流程。"
+        },
+        {
+          "kind": "command",
           "ref": "pnpm --filter @agentmux/desktop typecheck",
-          "proves": "实现可编译并接入 Desktop"
+          "proves": "production integration compiles"
         }
       ],
       "source_refs": [
@@ -386,8 +440,13 @@
       "verification": [
         {
           "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/app-appearance.test.ts test/terminal-theme.test.ts --maxWorkers=1",
+          "proves": "实现原提案能力并接入当前 AgentMux 主流程。"
+        },
+        {
+          "kind": "command",
           "ref": "pnpm --filter @agentmux/desktop typecheck",
-          "proves": "实现可编译并接入 Desktop"
+          "proves": "production integration compiles"
         }
       ],
       "source_refs": [
@@ -415,8 +474,13 @@
       "verification": [
         {
           "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/traffic-light-inset.test.ts test/main-window-setup.test.ts --maxWorkers=1",
+          "proves": "实现原提案能力并接入当前 AgentMux 主流程。"
+        },
+        {
+          "kind": "command",
           "ref": "pnpm --filter @agentmux/desktop typecheck",
-          "proves": "实现可编译并接入 Desktop"
+          "proves": "production integration compiles"
         }
       ],
       "source_refs": [
@@ -444,8 +508,13 @@
       "verification": [
         {
           "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/conversation-attachments.test.tsx test/agent-session-composer.test.tsx --maxWorkers=1",
+          "proves": "实现原提案能力并接入当前 AgentMux 主流程。"
+        },
+        {
+          "kind": "command",
           "ref": "pnpm --filter @agentmux/desktop typecheck",
-          "proves": "实现可编译并接入 Desktop"
+          "proves": "production integration compiles"
         }
       ],
       "source_refs": [
@@ -473,8 +542,13 @@
       "verification": [
         {
           "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/workbench-region-invariant.test.ts test/tab-drop-zone.test.ts --maxWorkers=1",
+          "proves": "实现原提案能力并接入当前 AgentMux 主流程。"
+        },
+        {
+          "kind": "command",
           "ref": "pnpm --filter @agentmux/desktop typecheck",
-          "proves": "实现可编译并接入 Desktop"
+          "proves": "production integration compiles"
         }
       ],
       "source_refs": [
@@ -537,8 +611,13 @@
       "verification": [
         {
           "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/control.test.ts test/promote-region-to-tab.test.ts test/workbench-region-invariant.test.ts --maxWorkers=1",
+          "proves": "实现原提案能力并接入当前 AgentMux 主流程。"
+        },
+        {
+          "kind": "command",
           "ref": "pnpm --filter @agentmux/desktop typecheck",
-          "proves": "实现可编译并接入 Desktop"
+          "proves": "production integration compiles"
         }
       ],
       "source_refs": [
@@ -586,6 +665,40 @@
           "status": "pass"
         }
       ],
+      "notes": []
+    },
+    {
+      "id": "T-015",
+      "depends_on": [],
+      "title": "项目维护者角色目录与精确交接发现",
+      "objective": "通过 .agents 显式角色绑定解析维护者 Session，检查过期并返回可解释的 unresolved 结果，不按标题或布局猜测。",
+      "outcome": "维护者角色可注册、查询并由 Agent 使用稳定身份寻址；过期绑定保留草稿且不广播。",
+      "acceptance": [
+        "角色目录 schema 与 typed resolver 有生产调用者",
+        "有效绑定解析到精确 Session，过期或缺失返回 MAINTAINER_TARGET_UNRESOLVED",
+        "变异破坏精确校验时行为测试变红"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core exec vitest run test/agent-role-directory.test.ts test/agent-handoff-cli.test.ts --maxWorkers=1",
+          "proves": "角色目录解析与交接寻址"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/core typecheck",
+          "proves": "Core typed API 编译"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/reviews/continuous-progress-followup-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 7,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
       "notes": []
     },
     {

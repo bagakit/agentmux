@@ -153,6 +153,10 @@
     {
       "action": "task_finished",
       "detail": "T-003 => done"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=7; supersedes_revision=6"
     }
   ],
   "goal_contract": {
