@@ -601,7 +601,7 @@ async function verifyLaunchServices(appPath, verificationRoot) {
       '--env', `AGENTMUX_DESKTOP_READY_FILE=${readyFile}`,
       '--env', `AGENTMUX_DESKTOP_FILE_EDITING_REPORT=${fileEditingReport}`,
       canonicalAppPath
-    ], { capture: true, timeoutMs: Math.max(1, verificationDeadline - Date.now()) })
+    ], { capture: false, timeoutMs: Math.max(1, verificationDeadline - Date.now()) })
     verificationStage = 'ready-receipt'
     assert(
       await waitForPath(readyFile, verificationDeadline),
@@ -872,7 +872,7 @@ async function quitInstalledApplication(appPath) {
  * 设计前提，重装就该走完这条路，不留"要不要重启"这种由调用方决定的开关。
  */
 async function relaunchInstalledApplication(appPath) {
-  await run('open', ['-a', appPath], { capture: true, timeoutMs: 60_000 })
+  await run('open', ['-a', appPath], { capture: false, timeoutMs: 60_000 })
   const deadline = Date.now() + 60_000
   let pids = []
   while (Date.now() < deadline) {
