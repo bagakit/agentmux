@@ -167,6 +167,7 @@ async function withTimeout<T>(description: string, promise: Promise<T>): Promise
 }
 
 type ExplorerProjectionEvidence = {
+  mountId: string
   total: number
   byWorkspace: Record<string, number>
   rejectedDirectoryLoads: Array<{ workspaceId: string; path: string }>
@@ -188,6 +189,9 @@ function explorerProjectionEvidenceDelta(
   before: ExplorerProjectionEvidence,
   after: ExplorerProjectionEvidence
 ): ExplorerProjectionEvidence {
+  // A Workspace switch remounts Explorer and legitimately starts a fresh DOM
+  // receipt. Compare counters only within the same mounted owner.
+  if (before.mountId !== after.mountId) return { ...after, total: 0, byWorkspace: {}, rejectedDirectoryLoads: [] }
   assertProbe(after.total >= before.total, 'Explorer projection notification receipt moved backwards')
   assertProbe(
     after.rejectedDirectoryLoads.length >= before.rejectedDirectoryLoads.length,
@@ -195,6 +199,7 @@ function explorerProjectionEvidenceDelta(
   )
   const workspaceIds = new Set([...Object.keys(before.byWorkspace), ...Object.keys(after.byWorkspace)])
   return {
+    mountId: after.mountId,
     total: after.total - before.total,
     byWorkspace: Object.fromEntries([...workspaceIds].map((workspaceId) => [
       workspaceId,
