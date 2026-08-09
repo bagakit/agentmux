@@ -2,13 +2,17 @@
   "version": 2,
   "feat_id": "f-2538fz2rm",
   "plan_status": "reviewed",
-  "plan_revision": 3,
-  "supersedes_revision": 2,
+  "plan_revision": 5,
+  "supersedes_revision": 4,
   "review_ref": "docs/reviews/continuous-progress-followup-2026-09-12.md",
   "source_refs": [
     "docs/reviews/continuous-progress-followup-2026-09-12.md",
     "docs/design/agentmux-desktop-interaction.md",
-    "docs/design/agentmux-desktop-interaction.md"
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md",
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/design/agentmux-surface-density.md"
   ],
   "plan_history": [
     {
@@ -64,6 +68,66 @@
         "T-002",
         "T-003",
         "T-004"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {},
+      "dependency_changes": {
+        "added": [],
+        "removed": []
+      }
+    },
+    {
+      "revision": 4,
+      "supersedes_revision": 3,
+      "review_ref": "docs/reviews/continuous-progress-followup-2026-09-12.md",
+      "source_refs": [
+        "docs/reviews/continuous-progress-followup-2026-09-12.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {},
+      "dependency_changes": {
+        "added": [],
+        "removed": []
+      }
+    },
+    {
+      "revision": 5,
+      "supersedes_revision": 4,
+      "review_ref": "docs/reviews/continuous-progress-followup-2026-09-12.md",
+      "source_refs": [
+        "docs/reviews/continuous-progress-followup-2026-09-12.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006",
+        "T-007",
+        "T-008",
+        "T-009",
+        "T-010",
+        "T-011",
+        "T-012",
+        "T-013"
       ],
       "superseded_task_ids": [],
       "supersedes_by_task": {},
@@ -192,6 +256,267 @@
       ],
       "supersedes": [],
       "introduced_in_revision": 3,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-005",
+      "depends_on": [],
+      "title": "Tab 排序与 Split 方位交互",
+      "objective": "区分 Tab 同 Region 排序与拖到边缘创建 Region，并让 Split 默认向右且复用方位组件。",
+      "outcome": "用户可无歧义地排序 Tab 或创建分栏，菜单与布局可行性一致。",
+      "acceptance": [
+        "普通拖动只改变 Tab 顺序",
+        "边缘拖放创建 Region 并可选择方位",
+        "点击 Split 默认向右，hover 菜单复用方位组件"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/*tab*.test.ts* test/*split*.test.ts* --maxWorkers=1",
+          "proves": "Tab/Region/Split interaction"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 4,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-006",
+      "depends_on": [],
+      "title": "Managed Agent handoff and conversation entry",
+      "objective": "让 Agent 能通过稳定角色目录找到维护者并定向交接。",
+      "outcome": "实现原提案能力并接入当前 AgentMux 主流程。",
+      "acceptance": [
+        "有明确的 typed API 与生产调用者",
+        "对应行为测试和变异证据通过",
+        "不破坏现有 Agent 生命周期"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "实现可编译并接入 Desktop"
+        }
+      ],
+      "source_refs": [
+        ".bagakit/feature-tracker/features/f-23d8fwq4z/tasks.json",
+        "docs/reviews/continuous-progress-followup-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 5,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-007",
+      "depends_on": [],
+      "title": "Session fork and continuation",
+      "objective": "支持从一条消息安全创建并延续新会话。",
+      "outcome": "实现原提案能力并接入当前 AgentMux 主流程。",
+      "acceptance": [
+        "有明确的 typed API 与生产调用者",
+        "对应行为测试和变异证据通过",
+        "不破坏现有 Agent 生命周期"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "实现可编译并接入 Desktop"
+        }
+      ],
+      "source_refs": [
+        ".bagakit/feature-tracker/features/f-24a8f93p7/tasks.json",
+        "docs/reviews/continuous-progress-followup-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 5,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-008",
+      "depends_on": [],
+      "title": "Theme switching and appearance follow",
+      "objective": "支持多套完整外观与跟随系统设置。",
+      "outcome": "实现原提案能力并接入当前 AgentMux 主流程。",
+      "acceptance": [
+        "有明确的 typed API 与生产调用者",
+        "对应行为测试和变异证据通过",
+        "不破坏现有 Agent 生命周期"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "实现可编译并接入 Desktop"
+        }
+      ],
+      "source_refs": [
+        ".bagakit/feature-tracker/features/f-24b8f37dv/tasks.json",
+        "docs/reviews/continuous-progress-followup-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 5,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-009",
+      "depends_on": [],
+      "title": "Window chrome and system controls",
+      "objective": "提供自有标题栏与系统按钮的一致交互。",
+      "outcome": "实现原提案能力并接入当前 AgentMux 主流程。",
+      "acceptance": [
+        "有明确的 typed API 与生产调用者",
+        "对应行为测试和变异证据通过",
+        "不破坏现有 Agent 生命周期"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "实现可编译并接入 Desktop"
+        }
+      ],
+      "source_refs": [
+        ".bagakit/feature-tracker/features/f-24c8fqsgc/tasks.json",
+        "docs/reviews/continuous-progress-followup-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 5,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-010",
+      "depends_on": [],
+      "title": "Conversation image attachments",
+      "objective": "对话中的图片以缩略图和可复用附件呈现。",
+      "outcome": "实现原提案能力并接入当前 AgentMux 主流程。",
+      "acceptance": [
+        "有明确的 typed API 与生产调用者",
+        "对应行为测试和变异证据通过",
+        "不破坏现有 Agent 生命周期"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "实现可编译并接入 Desktop"
+        }
+      ],
+      "source_refs": [
+        ".bagakit/feature-tracker/features/f-24d8fcuhy/tasks.json",
+        "docs/reviews/continuous-progress-followup-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 5,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-011",
+      "depends_on": [],
+      "title": "Arbitrary region layout and rearrangement",
+      "objective": "支持 Region 任意元数与可预测重排。",
+      "outcome": "实现原提案能力并接入当前 AgentMux 主流程。",
+      "acceptance": [
+        "有明确的 typed API 与生产调用者",
+        "对应行为测试和变异证据通过",
+        "不破坏现有 Agent 生命周期"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "实现可编译并接入 Desktop"
+        }
+      ],
+      "source_refs": [
+        ".bagakit/feature-tracker/features/f-24e8ffbzq/tasks.json",
+        "docs/reviews/continuous-progress-followup-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 5,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-012",
+      "depends_on": [],
+      "title": "Open directory as project",
+      "objective": "Explorer 目录右键可作为项目打开并正确绑定 Workspace。",
+      "outcome": "实现原提案能力并接入当前 AgentMux 主流程。",
+      "acceptance": [
+        "有明确的 typed API 与生产调用者",
+        "对应行为测试和变异证据通过",
+        "不破坏现有 Agent 生命周期"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "实现可编译并接入 Desktop"
+        }
+      ],
+      "source_refs": [
+        ".bagakit/feature-tracker/features/f-24k8ftgmm/tasks.json",
+        "docs/reviews/continuous-progress-followup-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 5,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-013",
+      "depends_on": [],
+      "title": "Agent self-create and spatial operations",
+      "objective": "Agent 可通过稳定 control intent 创建 Agent 并选择合理空间。",
+      "outcome": "实现原提案能力并接入当前 AgentMux 主流程。",
+      "acceptance": [
+        "有明确的 typed API 与生产调用者",
+        "对应行为测试和变异证据通过",
+        "不破坏现有 Agent 生命周期"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "实现可编译并接入 Desktop"
+        }
+      ],
+      "source_refs": [
+        ".bagakit/feature-tracker/features/f-24m8fphma/tasks.json",
+        "docs/reviews/continuous-progress-followup-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 5,
       "status": "todo",
       "gate_result": null,
       "last_gate_commands": [],

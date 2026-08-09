@@ -5,3 +5,7 @@ This successor feature carries forward the two newly observed release blockers f
 ## Revised decision
 
 The mounted verification protocol uses operation-scoped receipts (`workspaceId`, mount epoch, operation id) rather than aggregate DOM counters. Move commit publishes one authoritative receipt; stale refreshes are rejected by epoch. Stop treats an already vanished Run as an idempotent terminal outcome.
+
+## Proposal promotion scope
+
+At the user's direction, the eight same-product proposals are promoted into this Feature as explicit deferred Tasks, retaining each original Feature id in `source_refs`. They remain todo until their own acceptance and executable gate pass; proposal promotion does not imply implementation. Remote/SSH and other infrastructure closures remain separate because they cross the current desktop Feature boundary.
