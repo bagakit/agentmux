@@ -68,7 +68,10 @@ export class AgentScreenEvidenceStore {
         'AGENT_PROMPT_READINESS_CANCELLED'
       )
     }
-    const evidence = await this.ensure(session)
+    const evidence = await this.ensure(
+      session,
+      requireOutputAfterBoundary ? 0 : Math.max(0, outputBoundaryByte - 64 * 1024)
+    )
     return await evidence.wait({
       boundaryByte: outputBoundaryByte,
       requireOutputAfterBoundary,
@@ -84,7 +87,8 @@ export class AgentScreenEvidenceStore {
   }
 
   private async ensure(
-    session: AgentMuxAgentSession
+    session: AgentMuxAgentSession,
+    startByte: number
   ): Promise<AgentTerminalScreenEvidence> {
     for (;;) {
       const existing = this.evidence.get(session.agentSessionId)
@@ -95,7 +99,7 @@ export class AgentScreenEvidenceStore {
       if (!building) break
       await building.catch(() => {})
     }
-    const build = this.build(session)
+    const build = this.build(session, startByte)
     this.builds.set(session.agentSessionId, build)
     try {
       return await build
@@ -107,7 +111,8 @@ export class AgentScreenEvidenceStore {
   }
 
   private async build(
-    session: AgentMuxAgentSession
+    session: AgentMuxAgentSession,
+    startByte: number
   ): Promise<AgentTerminalScreenEvidence> {
     this.discard(session.agentSessionId)
     const generation = this.generations.get(session.agentSessionId) ?? 0
@@ -118,7 +123,7 @@ export class AgentScreenEvidenceStore {
       if (evidence) evidence.accept(event)
       else pending.push(event)
     }
-    const observation = await this.deps.kernel.observeOutput(session.run.runId, 0, (event) => {
+    const observation = await this.deps.kernel.observeOutput(session.run.runId, startByte, (event) => {
       if (event.type === 'data') {
         forward(event)
       } else if (event.type === 'gap') {
