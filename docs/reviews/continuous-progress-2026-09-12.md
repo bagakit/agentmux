@@ -91,3 +91,7 @@ T-008 目标是 Run 替换/Session 重启后的幂等恢复：保留 loop 配置
 ## 追加需求：CPU/Memory 资源面板（2026-09-12）
 
 用户反馈 Status Bar 的 CPU/Memory 界面不精致，建议复用列表样式并加入 Project/Workspace、Agent/Provider 与 idle 等上下文。追加 T-017，保持资源采样与 Agent 语义状态分离。
+
+## 恢复执行后的证据纠正
+
+2026-09-12：当前 Main manager 仍无生产启动调用者，不能称为已交付。检查代码发现 tick 在 handler 之后落盘、unknown 下一周期会重投、重入可并发调用 handler、Store 吞掉所有读取错误。此前的测试仅覆盖同一时刻连续 check，未覆盖上述故障。修复归入 T-001 的重复投递保护与 T-002 的持久化生命周期；保持完整原有验收，不以辅助模块测试代替正式 Core 边界和产品接线。审查结论 approved：这是已授权不变量的缺陷修复，不改变权限策略或任务范围。

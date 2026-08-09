@@ -8,6 +8,8 @@ export type ContinuousProgressLoop = {
   nextCheckAt: number
   status: 'active' | 'paused' | 'stopped'
   lastTickId?: string
+  lastOutcome?: 'sent' | 'skipped' | 'unknown'
+  lastTickAt?: number
 }
 
 export type ContinuousProgressSchedulerOptions = {
@@ -67,7 +69,7 @@ export class ContinuousProgressScheduler {
     if (loop.status !== 'active' || loop.nextCheckAt > now) return null
     const tickId = this.id()
     const nextCheckAt = now + loop.intervalMs
-    const updated = { ...loop, lastTickId: tickId, nextCheckAt }
+    const updated = { ...loop, lastTickId: tickId, lastTickAt: now, nextCheckAt }
     this.loops.set(loopId, updated)
     return { loop: { ...updated }, tickId }
   }

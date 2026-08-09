@@ -2,8 +2,8 @@
   "version": 2,
   "feat_id": "f-2528fmqbw",
   "plan_status": "reviewed",
-  "plan_revision": 14,
-  "supersedes_revision": 13,
+  "plan_revision": 15,
+  "supersedes_revision": 14,
   "review_ref": "docs/reviews/continuous-progress-2026-09-12.md",
   "source_refs": [
     "docs/reviews/continuous-progress-2026-09-12.md",
@@ -495,6 +495,46 @@
       ],
       "superseded_task_ids": [],
       "supersedes_by_task": {}
+    },
+    {
+      "revision": 15,
+      "supersedes_revision": 14,
+      "review_ref": "docs/reviews/continuous-progress-2026-09-12.md",
+      "source_refs": [
+        "docs/reviews/continuous-progress-2026-09-12.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/reviews/feature-audit-2026-09-12.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006",
+        "T-007",
+        "T-008",
+        "T-009",
+        "T-010",
+        "T-011",
+        "T-012",
+        "T-013",
+        "T-014",
+        "T-015",
+        "T-016",
+        "T-017",
+        "T-018",
+        "T-019",
+        "T-020",
+        "T-021"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {},
+      "dependency_changes": {
+        "added": [],
+        "removed": []
+      }
     }
   ],
   "tasks": [
@@ -524,8 +564,14 @@
       "heavy_reason": "跨 Core/Main typed 边界并需要并发屏障验证",
       "introduced_in_revision": 1,
       "status": "in_progress",
-      "gate_result": null,
-      "last_gate_commands": [],
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/core exec vitest run test/continuous-progress-delivery.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
       "notes": []
     },
     {
@@ -538,13 +584,14 @@
       "outcome": "默认 30 分钟循环持久保存，忙时跳过，暂停/停止语义明确，重启不补发漏周期。",
       "acceptance": [
         "同一目标只能有一个活动 loopId，timer 不依赖 Renderer setInterval",
-        "应用恢复只执行一次检查并显示下一次时间，不集中补发"
+        "应用恢复只执行一次检查并显示下一次时间，不集中补发",
+        "tick 在 handler 前持久化；pending/unknown 跨周期及重启不重投，I/O 故障可见且不会影响人工 Agent 输入"
       ],
       "verification": [
         {
           "kind": "command",
-          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/continuous-progress-scheduler.test.ts",
-          "proves": "调度生命周期、fake clock 与持久化恢复"
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/continuous-progress-loop-manager.test.ts test/continuous-progress-loop-store.test.ts",
+          "proves": "持久认领、unknown 恢复、并发与 I/O 故障保护"
         }
       ],
       "source_refs": [
@@ -558,13 +605,7 @@
       "status": "todo",
       "gate_result": null,
       "last_gate_commands": [],
-      "notes": [
-        "Core ContinuousProgressScheduler added: durable records, due/claimTick, pause/resume/stop; Desktop persistence/integration remains.",
-        "Desktop ContinuousProgressLoopStore persists loop records under Electron userData; typecheck and store test pass.",
-        "Published ./continuous-progress and ./continuous-progress-scheduler package exports; external hosts can consume scheduler without internal paths.",
-        "Main ContinuousProgressLoopManager now combines durable store + scheduler, claims ticks before handler, and never retries unknown delivery results.",
-        "Loop manager exposes async create/pause/resume/stopLoop lifecycle methods with immediate durable save for upcoming Control IPC."
-      ]
+      "notes": []
     },
     {
       "id": "T-003",
@@ -752,9 +793,7 @@
       "status": "todo",
       "gate_result": null,
       "last_gate_commands": [],
-      "notes": [
-        "Core scheduler recover() now claims at most one overdue tick after restart; Main integration remains."
-      ]
+      "notes": []
     },
     {
       "id": "T-009",
@@ -1023,9 +1062,7 @@
       "status": "todo",
       "gate_result": null,
       "last_gate_commands": [],
-      "notes": [
-        "2026-09-12: 资源行已接入 Project/Workspace、Provider、idle 上下文；待 gate/变异/调用者检查。"
-      ]
+      "notes": []
     },
     {
       "id": "T-018",
@@ -1058,9 +1095,7 @@
       "status": "todo",
       "gate_result": null,
       "last_gate_commands": [],
-      "notes": [
-        "已有 Feature f-24e8ffbzq 明确记录 Region 交换/抽出 Closure；本任务只纳入当前 Feature 的接线与验收。"
-      ]
+      "notes": []
     },
     {
       "id": "T-019",
@@ -1087,7 +1122,7 @@
       ],
       "supersedes": [],
       "estimate_hours": 0.75,
-      "introduced_in_revision": 12,
+      "introduced_in_revision": 13,
       "status": "todo",
       "gate_result": null,
       "last_gate_commands": [],
@@ -1118,7 +1153,7 @@
       ],
       "supersedes": [],
       "estimate_hours": 0.75,
-      "introduced_in_revision": 12,
+      "introduced_in_revision": 13,
       "status": "todo",
       "gate_result": null,
       "last_gate_commands": [],
@@ -1150,14 +1185,11 @@
       ],
       "supersedes": [],
       "estimate_hours": 1.0,
-      "introduced_in_revision": 13,
+      "introduced_in_revision": 14,
       "status": "todo",
       "gate_result": null,
       "last_gate_commands": [],
-      "notes": [
-        "斜向方向暂不加入：现有布局协议只有 cardinal split，避免伪造无意义动作。"
-      ]
+      "notes": []
     }
-  ],
-  "title": "AgentMux 持续推进、消息工具与工作面体验"
+  ]
 }

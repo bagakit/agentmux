@@ -14,14 +14,20 @@
   "runtime_relations": [],
   "counters": {
     "gate_fail_streak": 0,
-    "no_progress_rounds": 0,
-    "round_count": 0
+    "no_progress_rounds": 1,
+    "round_count": 1
   },
   "gate": {
-    "last_result": null,
-    "last_task_id": null,
-    "last_check_commands": [],
-    "last_log_path": null
+    "last_result": "pass",
+    "last_task_id": "T-001",
+    "last_check_commands": [
+      {
+        "command": "pnpm --filter @agentmux/core exec vitest run test/continuous-progress-delivery.test.ts",
+        "exit_code": 0,
+        "status": "pass"
+      }
+    ],
+    "last_log_path": ".bagakit/feature-tracker/features/f-2528fmqbw/artifacts/gate-T-001-r1-0001.log"
   },
   "history": [
     {
@@ -75,6 +81,14 @@
     {
       "action": "task_plan_set",
       "detail": "revision=11; supersedes_revision=10"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=15; supersedes_revision=14"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-001 => pass"
     }
   ],
   "goal_contract": {
