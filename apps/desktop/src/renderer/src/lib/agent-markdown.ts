@@ -29,6 +29,7 @@ export type InlineNode =
   // href is carried verbatim. Whether it may be opened is the renderer's call through the existing
   // external-URL seam — a parser deciding that would be a second place where escape rules live.
   | { kind: 'link'; href: string; children: InlineNode[] }
+  | { kind: 'image'; href: string; alt: string }
 
 export type TableAlign = 'left' | 'center' | 'right' | null
 
@@ -76,9 +77,8 @@ function inlineFrom(nodes: readonly PhrasingContent[]): InlineNode[] {
         out.push({ kind: 'text', text: node.value })
         break
       case 'image':
-        // Remote images in untrusted output would be an outbound request we never authorised, so the
-        // alt text and URL are shown as words instead of fetched.
-        out.push({ kind: 'text', text: node.alt ? `${node.alt} (${node.url})` : node.url })
+        // Keep image attachments as data, never fetch them here. The renderer applies the workspace fence.
+        out.push({ kind: 'image', href: node.url, alt: node.alt ?? '' })
         break
       default:
         // Anything else (footnote refs, custom nodes) degrades to its text content rather than
