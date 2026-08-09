@@ -99,6 +99,10 @@ export function ProjectActivity({
         if (!first) return null
         const rosterRows = buildAgentRoster({ sessions: group.sessions, providerCatalog })
         const expanded = expandedGroups[group.key] === true
+        // A single-Agent work line has no additional roster information to reveal;
+        // its summary already opens the exact Session. Do not spend a column on a
+        // dead disclosure affordance.
+        const canExpand = group.sessions.length > 1 || Boolean(first.pendingInteraction || first.status.detail)
         const meta = contextMeta(group)
         return <div key={group.key} className={`project-activity-group${expanded ? ' project-activity-group--expanded' : ''}`}>
           <div className="project-activity-group__header">
@@ -115,7 +119,7 @@ export function ProjectActivity({
               {rosterRows.length > 3 ? <em>+{rosterRows.length - 3}</em> : null}
             </span>
             </DropdownMenu.Item>
-            <DropdownMenu.Item
+            {canExpand ? <DropdownMenu.Item
               className="project-activity-group__disclosure"
               aria-label={`${expanded ? 'Hide' : 'Show'} Agents in ${contextLabel(group)}`}
               aria-expanded={expanded}
@@ -125,7 +129,7 @@ export function ProjectActivity({
               }}
             >
               <ChevronRight size={14} aria-hidden="true" />
-            </DropdownMenu.Item>
+            </DropdownMenu.Item> : null}
           </div>
           {expanded ? <div className="project-activity-group__details">
             {rosterRows.map((row) => {
