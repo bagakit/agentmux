@@ -84,6 +84,11 @@
   --red-wash: color-mix(in srgb, var(--red) 12%, transparent);
   --amber-wash: color-mix(in srgb, var(--amber) 12%, transparent);
 
+  /* Light appearance palette values remain in the single token table; the mode selector only aliases them. */
+  --light-bg: #f4f6f5; --light-surface-0: #ffffff; --light-surface-1: #eef1ef; --light-surface-2: #e3e8e5; --light-surface-3: #d7dfda;
+  --light-line: #c6d0c9; --light-line-soft: #dce3de; --light-text: #17201a; --light-text-2: #46554b; --light-text-3: #6b786f;
+  --light-green: #267a48; --light-green-2: #2f965b; --light-amber: #9a6500; --light-red: #b33b37; --light-blue: #2869a7;
+  --light-neutral-1: #c4cec7; --light-neutral-2: #87958b; --light-neutral-3: #5c6b61; --light-focus-line: #4b8b63;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
   /* 动效刻度：节奏与曲线也是 token，不在各表面手写毫秒数（见 agentmux-surface-density.md《动效》）。
      按"这个动作是什么"选，不按"想显得多快"选——四档跨三个数量级，因为它们是三类不同的事：
@@ -121,25 +126,10 @@
 }
 
 
-:root[data-appearance="light"] {
+ :root[data-appearance="light"] {
   color-scheme: light;
-  --bg: #f4f6f5;
-  --surface-0: #ffffff;
-  --surface-1: #eef1ef;
-  --surface-2: #e3e8e5;
-  --surface-3: #d7dfda;
-  --line: #c6d0c9;
-  --line-soft: #dce3de;
-  --text: #17201a;
-  --text-2: #46554b;
-  --text-3: #6b786f;
-  --green: #267a48;
-  --green-2: #2f965b;
-  --amber: #9a6500;
-  --red: #b33b37;
-  --blue: #2869a7;
-  --neutral-1: #c4cec7;
-  --neutral-2: #87958b;
-  --neutral-3: #5c6b61;
-  --focus-line: #4b8b63;
+  --bg: var(--light-bg); --surface-0: var(--light-surface-0); --surface-1: var(--light-surface-1); --surface-2: var(--light-surface-2); --surface-3: var(--light-surface-3);
+  --line: var(--light-line); --line-soft: var(--light-line-soft); --text: var(--light-text); --text-2: var(--light-text-2); --text-3: var(--light-text-3);
+  --green: var(--light-green); --green-2: var(--light-green-2); --amber: var(--light-amber); --red: var(--light-red); --blue: var(--light-blue);
+  --neutral-1: var(--light-neutral-1); --neutral-2: var(--light-neutral-2); --neutral-3: var(--light-neutral-3); --focus-line: var(--light-focus-line);
 }
