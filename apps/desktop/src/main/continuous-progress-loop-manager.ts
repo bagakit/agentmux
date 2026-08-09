@@ -23,6 +23,10 @@ export class ContinuousProgressLoopManager {
     await this.store.save(this.scheduler.list())
   }
   list(): ContinuousProgressLoop[] { return this.scheduler.list() }
+  async create(input: { agentSessionId: string; intervalMs: number; prompt: string }): Promise<ContinuousProgressLoop> { const loop = this.scheduler.create(input); await this.store.save(this.scheduler.list()); return loop }
+  async pause(loopId: string): Promise<ContinuousProgressLoop> { const loop = this.scheduler.pause(loopId); await this.store.save(this.scheduler.list()); return loop }
+  async resume(loopId: string): Promise<ContinuousProgressLoop> { const loop = this.scheduler.resume(loopId); await this.store.save(this.scheduler.list()); return loop }
+  async stopLoop(loopId: string): Promise<ContinuousProgressLoop> { const loop = this.scheduler.stop(loopId); await this.store.save(this.scheduler.list()); return loop }
   async check(now?: number): Promise<void> {
     if (!this.running) return
     const claims = this.scheduler.recover(now)
