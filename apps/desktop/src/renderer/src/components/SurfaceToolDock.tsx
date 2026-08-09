@@ -308,7 +308,7 @@ function WorkspaceFilesTool({
         key={presentation.showTopics ? 'content-slot-topics' : 'content-slot-branches'}
       >
         <Panel defaultSize={presentation.fileTreeDefaultSize} minSize={presentation.fileTreeMinSize}>
-          <FileExplorer revealRequest={explorerRevealRequest} />
+          <FileExplorer key={workspace.id} revealRequest={explorerRevealRequest} />
         </Panel>
         <PanelResizeHandle className="workspace-tools-resize-handle" />
         <Panel defaultSize={100 - presentation.fileTreeDefaultSize} minSize={20}>
