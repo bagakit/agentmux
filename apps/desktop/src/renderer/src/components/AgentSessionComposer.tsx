@@ -161,7 +161,9 @@ export function AgentSessionComposer({
         ...(postureControl ? { onSetPosture: (modeId: string) => void setPosture(sessionId, modeId) } : {}),
         ...(activeFile ? { onReferenceActiveFile: addFileReference } : {})
       } : {})}
-      {...(session?.kind === 'agent' && session.pendingInteraction && text.trim() ? { onQueue: () => enqueueAgentSteer(sessionId, text) } : {})}
+      {...(session?.kind === 'agent' && session.pendingInteraction && text.trim() ? {
+        onQueue: () => enqueueAgentSteer(sessionId, text)
+      } : {})}
     />
   )
 }

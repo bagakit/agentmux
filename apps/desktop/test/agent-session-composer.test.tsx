@@ -16,6 +16,7 @@ const fixture = vi.hoisted(() => ({
     agentComposerDrafts: {} as Record<string, string>,
     setAgentComposerDraft: vi.fn(),
     clearAgentComposerDraftIfUnchanged: vi.fn(),
+    enqueueAgentSteer: vi.fn(),
     send: vi.fn(async () => {}),
     interrupt: vi.fn(async () => {}),
     setPosture: vi.fn(async () => {}),
@@ -92,6 +93,7 @@ afterEach(() => {
   fixture.state.setPosture.mockClear()
   fixture.state.setAgentComposerDraft.mockClear()
   fixture.state.clearAgentComposerDraftIfUnchanged.mockClear()
+  fixture.state.enqueueAgentSteer.mockClear()
   fixture.state.reportError.mockClear()
   nativeApi.chooseFiles.mockClear()
   nativeApi.savePastedImage.mockClear()
@@ -233,9 +235,9 @@ describe('AgentSessionComposer adapter', () => {
     expect(fixture.state.setAgentComposerDraft).not.toHaveBeenCalled()
   })
 
-  it('does not submit while an interaction is pending: no onSubmit is wired at all', () => {
-    // The card is the only input surface. canType is false, so no submit handler reaches the composer and
-    // Enter cannot fire one — belt to Core's AGENT_INTERACTION_PENDING braces.
+  it('queues a steer while an interaction is pending without pretending it was sent', () => {
+    // The typed response card owns the interaction. Direct submit stays gated, while the explicit queue
+    // action preserves the draft for delivery after the interaction is answered.
     const waiting = agentSession({
       status: { state: 'working', source: 'native-hook', observedAt: 2 },
       pendingInteraction: {
@@ -250,11 +252,14 @@ describe('AgentSessionComposer adapter', () => {
     fixture.state.sessions = [waiting]
     fixture.state.agentComposerDrafts = { 'agent-1': 'This must not go out' }
     const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
-      props: { onSubmit?: () => void; disabled: boolean }
+      props: { onSubmit?: () => void; onQueue?: () => void; disabled: boolean }
     }
 
     expect(composer.props.disabled).toBe(false)
     expect(composer.props.onSubmit).toBeUndefined()
+    expect(composer.props.onQueue).toBeTypeOf('function')
+    composer.props.onQueue?.()
+    expect(fixture.state.enqueueAgentSteer).toHaveBeenCalledWith('agent-1', 'This must not go out')
   })
 
   it('does not guess that a disconnected running process can accept input', () => {
@@ -398,6 +403,6 @@ describe('AgentSessionComposer adapter', () => {
 it('shows the context observation owned by this session in the Composer toolbar', () => {
   fixture.state.sessions = [agentSession({ turnUsage: { inputTokens: 240, outputTokens: 10, totalTokens: 250, observedAt: 1000, context: { usedTokens: 250, capacityTokens: 1000 } } })]
   const html = renderToStaticMarkup(createElement(AgentSessionComposer, { sessionId: 'agent-1' }))
-  expect(html).toContain('Context 75% left')
+  expect(html).toContain('Context remaining 75%')
   expect(html).toContain('Last native observation:')
 })
