@@ -4,7 +4,7 @@
   "title": "Message Tools 触发与菜单收敛",
   "slug": "message-tools-trigger-followup",
   "goal": "让 /、$、@ 触发统一可访问候选菜单，支持方向键且不挤压工具栏。",
-  "status": "ready",
+  "status": "in_progress",
   "workspace_mode": "current_tree",
   "base_ref": "main",
   "branch": "",
@@ -35,6 +35,10 @@
     {
       "action": "workspace_assigned",
       "detail": "proposal_only -> current_tree; root_branch=main"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-001"
     }
   ]
 }
