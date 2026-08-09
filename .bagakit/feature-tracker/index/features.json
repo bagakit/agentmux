@@ -966,7 +966,7 @@
     {
       "feat_id": "f-2538fz2rm",
       "title": "AgentMux 持续推进与运行时收敛后续",
-      "status": "in_progress",
+      "status": "ready",
       "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
