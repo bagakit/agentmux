@@ -2,8 +2,8 @@
   "version": 2,
   "feat_id": "f-2528fmqbw",
   "plan_status": "reviewed",
-  "plan_revision": 11,
-  "supersedes_revision": 10,
+  "plan_revision": 12,
+  "supersedes_revision": 11,
   "review_ref": "docs/reviews/continuous-progress-2026-09-12.md",
   "source_refs": [
     "docs/reviews/continuous-progress-2026-09-12.md",
@@ -380,6 +380,39 @@
         ],
         "removed": []
       }
+    },
+    {
+      "revision": 12,
+      "supersedes_revision": 11,
+      "review_ref": "docs/reviews/continuous-progress-2026-09-12.md",
+      "source_refs": [
+        "docs/reviews/continuous-progress-2026-09-12.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/reviews/feature-audit-2026-09-12.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006",
+        "T-007",
+        "T-008",
+        "T-009",
+        "T-010",
+        "T-011",
+        "T-012",
+        "T-013",
+        "T-014",
+        "T-015",
+        "T-016",
+        "T-017",
+        "T-018"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
     }
   ],
   "tasks": [
@@ -902,6 +935,41 @@
       "last_gate_commands": [],
       "notes": [
         "2026-09-12: 资源行已接入 Project/Workspace、Provider、idle 上下文；待 gate/变异/调用者检查。"
+      ]
+    },
+    {
+      "id": "T-018",
+      "depends_on": [
+        "T-016"
+      ],
+      "title": "Region 右键移位入口",
+      "objective": "复用既有 f-24e8ffbzq Region 布局 Closure，实现右键菜单中的 Region 移位动作并接入统一布局 owner。",
+      "outcome": "用户可从任意 Region 右键选择目标位置完成移位，Session/Region 身份保持稳定。",
+      "acceptance": [
+        "右键菜单提供移位入口并列出合法目标",
+        "执行后布局持久化且不创建重复 Session",
+        "无合法目标时菜单如实禁用或说明原因"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/*region*menu*.test.tsx test/*layout*.test.ts",
+          "proves": "Region 右键移位接线、身份保持与持久化"
+        }
+      ],
+      "source_refs": [
+        ".bagakit/feature-tracker/features/f-24e8ffbzq/goal.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "supersedes": [],
+      "estimate_hours": 1.0,
+      "introduced_in_revision": 12,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": [
+        "已有 Feature f-24e8ffbzq 明确记录 Region 交换/抽出 Closure；本任务只纳入当前 Feature 的接线与验收。"
       ]
     }
   ]

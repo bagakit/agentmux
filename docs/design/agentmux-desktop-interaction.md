@@ -661,3 +661,6 @@ Desktop 刷新或重新 Attach 时优先投影这份 Agent 语义；新的 Run `
 
 ### 2026-09-12 资源与 Activity 观测
 Status Bar 的资源面板必须能把每个进程关联到项目/工作区、Provider 与当前 Agent 状态；空闲时显示可理解的 idle 时长。资源数值与 Agent 语义状态分开，缺失数据保持未知。Activity 展开行只补充能帮助定位的上下文，不重复左侧 Agents 入口。
+
+### 2026-09-12 Region 移位入口
+Region 的右键菜单必须提供“移位”入口，允许在当前工作面把 Region 与目标位置交换/移动；动作使用统一布局 owner，执行后保留 Session 与 Region 身份，不通过标题或视觉位置猜测目标。
