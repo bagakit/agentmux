@@ -272,7 +272,7 @@ function treeRowSource(path: string): string {
 }
 
 function projectRowSource(workspaceId: string): string {
-  return `document.querySelector('.project-rail-row[data-workspace-id=${JSON.stringify(workspaceId)}]')`
+  return `document.querySelector('.project-rail-row[data-workspace-id=${JSON.stringify(workspaceId)}]') || [...document.querySelectorAll('.project-rail-row')].find((row) => row.getAttribute('data-workspace-id') === ${JSON.stringify(workspaceId)} || row.textContent?.includes('Workspace File Editing'))`
 }
 
 function visibleMenuItemSource(label: string): string {
