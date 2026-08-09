@@ -163,7 +163,7 @@ async function main() {
     if (overallTimer) clearTimeout(overallTimer)
     if (child && child.exitCode === null && child.signalCode === null) {
       child.kill('SIGTERM')
-      await new Promise((resolveKill) => {
+      await Promise.race([new Promise((resolveKill) => {
         const forceKill = setTimeout(() => {
           if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
         }, 3_000)
@@ -172,7 +172,7 @@ async function main() {
           clearTimeout(forceKill)
           resolveKill()
         })
-      })
+      }), new Promise((resolve) => setTimeout(resolve, 3_500))])
     }
     // Core spawns ctxmuxd DETACHED (the adopt model), so it outlives the Electron process — the same reason
     // package-macos.mjs reaps the daemon separately. Scope the reap to OUR unique runtime socket path so it
