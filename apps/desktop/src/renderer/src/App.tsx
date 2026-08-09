@@ -62,12 +62,14 @@ export function App() {
   const setToolDockWidth = useAppStore((state) => state.setToolDockWidth)
   const workspace = config?.workspaces.find((item) => item.id === activeWorkspaceId)
   const selectWorkspace = useAppStore((state) => state.selectWorkspace)
+  const fileEditingProbe = typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('agentmux-file-editing-report') === '1'
   // A Workbench is a window-owned surface, not a route component. Keep only Workspaces the user has
   // a persisted surface for (plus the active one during its first layout frame) mounted: switching
   // back then changes visibility instead of destroying SessionPane/xterm/ctxmux attachments, while an
   // untouched configured project does not allocate a hidden launcher/editor/browser tree at startup.
   const mountedWorkspaces = config?.workspaces.filter((candidate) => (
-    candidate.id === activeWorkspaceId || layouts[candidate.id]?.groups.some((group) => group.tabOrder.length > 0)
+    fileEditingProbe || candidate.id === activeWorkspaceId || layouts[candidate.id]?.groups.some((group) => group.tabOrder.length > 0)
   )) ?? []
   const toolsAvailable = mainSurface === 'board' || Boolean(workspace)
   const toolsVisible = toolsAvailable && toolsOpen
