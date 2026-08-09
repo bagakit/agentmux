@@ -272,7 +272,9 @@ function treeRowSource(path: string): string {
 }
 
 function projectRowSource(workspaceId: string): string {
-  return `document.querySelector('.project-rail-row[data-workspace-id=${JSON.stringify(workspaceId)}]') || [...document.querySelectorAll('.project-rail-row')].find((row) => row.getAttribute('data-workspace-id') === ${JSON.stringify(workspaceId)} || row.textContent?.includes('Workspace File Editing'))`
+  // Workspace identity is the only safe selector. A text fallback matched both
+  // fixture projects and made the alternate-workspace probe report a false pass.
+  return `document.querySelector('.project-rail-row[data-workspace-id=${JSON.stringify(workspaceId)}]')`
 }
 
 function visibleMenuItemSource(label: string): string {
