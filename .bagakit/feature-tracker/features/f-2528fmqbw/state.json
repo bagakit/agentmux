@@ -43,6 +43,10 @@
     {
       "action": "feature_goal_set",
       "detail": "none -> 7a0316a64e641483d825592c79e0258d4bfc4d88e4354e8264f92ce3063da08b"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=4; supersedes_revision=3"
     }
   ],
   "goal_contract": {

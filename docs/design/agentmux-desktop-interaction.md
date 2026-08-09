@@ -615,3 +615,10 @@ Desktop 刷新或重新 Attach 时优先投影这份 Agent 语义；新的 Run `
 - 恢复期间将“执行状态”“循环状态”“恢复状态”分开显示。旧回执未知、绑定 stale、Provider 尚未就绪或恢复检查失败时，循环暂停并显示具体对象与原因；不能同时显示 busy 与 error_paused 而不给出优先级和下一步。
 - Session 重启完成不等于新一轮已开始。只有 Host 接受、Provider 消费或新一轮活动的真实证据才能推进对应阶段；旧 Run 的 stop/readiness 不能用于新 Run 的去重。
 - 应用重载、监督器重连和窗口重新打开使用同一个恢复检查入口，幂等且只产生一个恢复 tick。恢复失败保留待检查状态与原续行提示，用户可立即检查或恢复循环。
+
+### Message Tools 的事实来源与快捷语法
+
+- 初始页与 Agent Session Composer 共用同一个 Message Tools 能力面。输入区支持常见的 `@` 文件/目录引用、`/` Provider command/subcommand、`$` skill 选择；工具选择和手写快捷语法最终都生成同一份可恢复 prompt 草稿。
+- `commands` 与 `skills` 的能力范围优先来自当前 Provider 的 catalog/声明；AgentMux 自己提供的配置型能力复用工作区或用户目录下 `.agents` 事实协议，不复制一份 Provider 任务真值。来源、路径和不可用原因要可见。
+- 未连接 Session 的初始页只能使用项目/工作区上下文与可发现的本地 `.agents` 内容；需要 Provider Session 才能解析的能力显示为待启动或 unknown，不能伪造可执行项。启动失败保留输入、引用、skill 和 command 选择。
+- Provider command 与 AgentMux 自己的快捷命令命名冲突时，不静默改写；显示来源并按明确选择生成 prompt。未知 `@`、`/`、`$` 文本保留为普通输入。

@@ -2,8 +2,8 @@
   "version": 2,
   "feat_id": "f-2528fmqbw",
   "plan_status": "reviewed",
-  "plan_revision": 3,
-  "supersedes_revision": 2,
+  "plan_revision": 4,
+  "supersedes_revision": 3,
   "review_ref": "docs/reviews/continuous-progress-2026-09-12.md",
   "source_refs": [
     "docs/reviews/continuous-progress-2026-09-12.md",
@@ -90,6 +90,38 @@
           {
             "from": "T-002",
             "to": "T-008"
+          }
+        ],
+        "removed": []
+      }
+    },
+    {
+      "revision": 4,
+      "supersedes_revision": 3,
+      "review_ref": "docs/reviews/continuous-progress-2026-09-12.md",
+      "source_refs": [
+        "docs/reviews/continuous-progress-2026-09-12.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006",
+        "T-007",
+        "T-008",
+        "T-009"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {},
+      "dependency_changes": {
+        "added": [
+          {
+            "from": "T-006",
+            "to": "T-009"
           }
         ],
         "removed": []
@@ -342,6 +374,38 @@
       "heavy": true,
       "heavy_reason": "跨持久化 loop、Session Run 替换和观察状态投影",
       "introduced_in_revision": 3,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-009",
+      "depends_on": [
+        "T-006"
+      ],
+      "title": "Message Tools 快捷语法与事实协议",
+      "objective": "让共享 Message Tools 支持 @ 文件、/ Provider commands/subcommands、$ skills，并复用 .agents 事实协议。",
+      "outcome": "初始页和 Session Composer 的快捷语法、来源、失败保留和能力边界一致。",
+      "acceptance": [
+        "Provider catalog 提供 commands/skills 范围，AgentMux .agents 内容作为可见的第二事实来源",
+        "未知快捷语法按普通文本保留；启动失败和未连接状态不丢失引用、skill、command 选择"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/message-tools-syntax.test.tsx test/new-tab-message-tools.test.tsx",
+          "proves": "快捷语法解析、来源显示和初始页接线"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/continuous-progress-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "estimate_hours": 1.25,
+      "heavy": true,
+      "heavy_reason": "跨 Provider catalog、.agents 发现和两个 Composer 宿主",
+      "introduced_in_revision": 4,
       "status": "todo",
       "gate_result": null,
       "last_gate_commands": [],

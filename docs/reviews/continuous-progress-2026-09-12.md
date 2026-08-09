@@ -59,3 +59,7 @@ Context 不是一条普通消息，也不是“剩余百分比”孤立数字。
 截图显示外置监督器在 Claude `working` 时同时记录 `error_paused`，且 Session 重启后状态没有形成可信的恢复链路。该问题属于本 Feature 的同一 Closure，追加 T-008，不创建平行 Feature。
 
 T-008 目标是 Run 替换/Session 重启后的幂等恢复：保留 loop 配置，废弃旧 Run 的 tick/readiness/回执，重新解析精确 Session 与新 Run，只执行一次恢复检查；将执行、循环、恢复三种状态分开投影，避免 busy 与 error_paused 并存却无法解释。验收必须覆盖正常重启、旧回执未知、stale binding、恢复竞态、窗口重载和失败后手动恢复。
+
+## 追加需求：Message Tools 快捷语法与事实协议（2026-09-12）
+
+用户补充确认 Message Tools 应支持 `@` 文件引用、`/commands`/subcommands、`$skill`。能力来源分两层：Provider 提供自身支持范围；AgentMux 自有配置优先复用 `.agents` 等事实协议。初始页无 Session 时只使用项目上下文和可发现的本地协议内容，不能伪造 Provider 专属能力。该需求与 T-006 同一 Closure，追加 T-009 验收，不创建新 Feature。
