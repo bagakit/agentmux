@@ -1,0 +1,63 @@
+{
+  "version": 2,
+  "feat_id": "f-2548fr8qc",
+  "plan_status": "reviewed",
+  "plan_revision": 1,
+  "supersedes_revision": null,
+  "review_ref": "docs/reviews/continuous-progress-followup-2026-09-12.md",
+  "source_refs": [
+    "docs/design/agentmux-desktop-interaction.md",
+    "docs/reviews/continuous-progress-followup-2026-09-12.md"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": "docs/reviews/continuous-progress-followup-2026-09-12.md",
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/reviews/continuous-progress-followup-2026-09-12.md"
+      ],
+      "task_ids": [
+        "T-001"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "统一 Message Tools 触发与候选菜单",
+      "objective": "/、$、@ 触发 command、skill、文件候选并复用同一可访问浮层；方向键导航，展开不挤压工具栏。",
+      "outcome": "三类触发、选择写入草稿、菜单键盘操作和紧凑布局均可验证。",
+      "acceptance": [
+        "/、$、@ 均能打开正确候选并选择",
+        "方向键、Enter、Escape 可用",
+        "菜单高度受限且不推动底部工具栏"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/agent-composer-tools.test.tsx test/composer-file-reference.test.ts test/markdown-file-reference.test.tsx --maxWorkers=1",
+          "proves": "Message Tools trigger and menu behavior"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "production integration compiles"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    }
+  ]
+}
