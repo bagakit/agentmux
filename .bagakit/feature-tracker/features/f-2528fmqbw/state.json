@@ -15,19 +15,19 @@
   "counters": {
     "gate_fail_streak": 0,
     "no_progress_rounds": 0,
-    "round_count": 21
+    "round_count": 23
   },
   "gate": {
     "last_result": "pass",
-    "last_task_id": "T-009",
+    "last_task_id": "T-010",
     "last_check_commands": [
       {
-        "command": "pnpm --filter @agentmux/desktop exec vitest run test/message-tools-syntax.test.tsx test/new-tab-message-tools.test.tsx",
+        "command": "pnpm --filter @agentmux/desktop exec vitest run test/message-tools-errors.test.tsx",
         "exit_code": 0,
         "status": "pass"
       }
     ],
-    "last_log_path": ".bagakit/feature-tracker/features/f-2528fmqbw/artifacts/gate-T-009-r21-0001.log"
+    "last_log_path": ".bagakit/feature-tracker/features/f-2528fmqbw/artifacts/gate-T-010-r23-0001.log"
   },
   "history": [
     {
@@ -261,6 +261,22 @@
     {
       "action": "task_finished",
       "detail": "T-009 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-010"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-010 => fail"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-010 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-010 => done"
     }
   ],
   "goal_contract": {
