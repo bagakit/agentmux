@@ -54,6 +54,14 @@ export class ContinuousProgressScheduler {
     return this.list().filter((loop) => loop.status === 'active' && loop.nextCheckAt <= now)
   }
 
+  /** On restart, recover at most one current due tick per loop; missed periods are never replayed. */
+  recover(now = this.now()): Array<{ loop: ContinuousProgressLoop; tickId: string }> {
+    return this.list().flatMap((loop) => {
+      const claim = this.claimTick(loop.loopId, now)
+      return claim ? [claim] : []
+    })
+  }
+
   claimTick(loopId: string, now = this.now()): { loop: ContinuousProgressLoop; tickId: string } | null {
     const loop = this.require(loopId)
     if (loop.status !== 'active' || loop.nextCheckAt > now) return null
