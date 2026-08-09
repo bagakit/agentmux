@@ -79,9 +79,17 @@ export function AgentComposer({
           // the Agent conversation (#609). 判据必须走 SSOT 的四路谓词：此前这里手抄了两路
           // (`nativeEvent?.isComposing || keyCode === 229`)，漏掉顶层 `isComposing` 与
           // `nativeEvent.keyCode`。只标记那两路的输入法照旧会把半转换草稿提交上去。
-          if (event.key === 'ArrowDown' && suggestions.length && !isImeCompositionKeyDown(event)) {
+          if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && suggestions.length && !isImeCompositionKeyDown(event)) {
             event.preventDefault()
-            event.currentTarget.closest('.composer')?.querySelector<HTMLButtonElement>('.composer__suggestions button')?.focus()
+            const buttons = [...(event.currentTarget.closest('.composer')?.querySelectorAll<HTMLButtonElement>('.composer__suggestions button') ?? [])]
+            const current = document.activeElement instanceof HTMLButtonElement ? buttons.indexOf(document.activeElement) : -1
+            const next = event.key === 'ArrowDown' ? (current + 1) % buttons.length : (current - 1 + buttons.length) % buttons.length
+            buttons[next]?.focus()
+            return
+          }
+          if (event.key === 'Escape' && suggestions.length) {
+            event.preventDefault()
+            event.currentTarget.focus()
             return
           }
           if (event.key === 'Enter' && !event.shiftKey && !isImeCompositionKeyDown(event) && primaryAction === 'stop' && onQueue && value.trim()) {
