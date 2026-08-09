@@ -1,9 +1,9 @@
 {
   "version": 1,
   "feat_id": "f-2528fmqbw",
-  "title": "内置任务持续推进与可观察循环",
+  "title": "AgentMux 持续推进、消息工具与工作面体验",
   "slug": "continuous-progress-loop",
-  "goal": "提供独立于模型会话的持久定时续行与 loop 观察能力，按精确 Agent 身份安全检查、投递和恢复，并让维护者 Agent 可被显式角色目录发现。",
+  "goal": "完成持久定时 loop、条件投递、重启恢复、全局 Message Tools、Context 语义，以及清晰紧凑的工作面观测体验。",
   "status": "in_progress",
   "workspace_mode": "current_tree",
   "base_ref": "main",
