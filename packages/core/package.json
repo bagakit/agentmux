@@ -63,6 +63,14 @@
     "./bracketed-paste": {
       "types": "./dist/bracketed-paste.d.ts",
       "import": "./dist/bracketed-paste.js"
+    },
+    "./continuous-progress": {
+      "types": "./dist/continuous-progress.d.ts",
+      "import": "./dist/continuous-progress.js"
+    },
+    "./continuous-progress-scheduler": {
+      "types": "./dist/continuous-progress-scheduler.d.ts",
+      "import": "./dist/continuous-progress-scheduler.js"
     }
   },
   "bin": {
