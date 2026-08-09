@@ -248,7 +248,11 @@ export function clampTerminalFontSize(value: number): number {
   return rounded
 }
 
+export const APP_APPEARANCE_IDS = ['dark', 'light', 'system'] as const
+export type AppAppearanceId = (typeof APP_APPEARANCE_IDS)[number]
+
 export type AppearanceConfig = {
+  appAppearance?: AppAppearanceId
   terminalTheme: TerminalThemeId
   /**
    * Optional so the field lands without a version bump or a migration (the same path the sibling
