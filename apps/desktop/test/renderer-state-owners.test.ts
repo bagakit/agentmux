@@ -11,7 +11,7 @@ import {
   reconcileWorkbenchFileProjection
 } from '../src/renderer/src/lib/file-workbench-state.js'
 import { reduceAgentMembershipSnapshot, reduceRuntimeEvent, reduceTerminalMembershipSnapshot } from '../src/renderer/src/lib/session-state.js'
-import { createWorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.js'
+import { createWorkspaceLayout } from '@agentmux/layout'
 import {
   addWorkbenchRegion,
   createWorkbenchTab,

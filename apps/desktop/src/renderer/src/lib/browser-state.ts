@@ -1,5 +1,5 @@
 import type { BrowserEvent } from '../../../shared/contracts'
-import { removeTab, type WorkspaceLayout } from './workbench-layout'
+import { removeTab, type WorkspaceLayout } from '@agentmux/layout'
 import {
   tabGroupForTab,
   removeWorkbenchRegion,

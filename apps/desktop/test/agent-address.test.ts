@@ -21,7 +21,7 @@ import {
   addWorkbenchRegion,
   createWorkbenchTab
 } from '../src/renderer/src/lib/workbench-tabs.js'
-import { createWorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.js'
+import { createWorkspaceLayout } from '@agentmux/layout'
 
 // 复制出去的是一个寻址方式，不是一个 id。判据只有一条：接收方仅凭这段文本，
 // 能不能不问人、不查文档就完成寻址。因此每条断言都在问"这段文本自足吗"，

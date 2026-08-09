@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 import { describe, expect, it, vi } from 'vitest'
 import { SPLIT_RATIO_EPSILON, SplitRatioCommitter } from '../src/renderer/src/lib/split-ratio-commit'
-import { MIN_SPLIT_RATIO } from '../src/renderer/src/lib/split-tree'
+import { MIN_SPLIT_RATIO } from '@agentmux/layout'
 import { LatestTerminalOutputAcknowledger } from '../src/renderer/src/lib/terminal-output-ack'
 import { terminalStartupPhase } from '../src/renderer/src/lib/terminal-startup'
 

@@ -8,7 +8,7 @@ import {
   removeTab,
   type TabGroup,
   type WorkspaceLayout
-} from '../src/renderer/src/lib/workbench-layout'
+} from '@agentmux/layout'
 
 /**
  * `removeTab` 收掉一个空分组的判据，必须问「它在不在分屏树里」。

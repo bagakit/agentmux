@@ -1,6 +1,6 @@
 import { isScratchWorkspaceId } from '../../../shared/contracts'
 import { activeTopicIdFromLayout, layoutForActiveTopic } from './scratch-topic-layout'
-import type { WorkspaceLayout } from './workbench-layout'
+import type { WorkspaceLayout } from '@agentmux/layout'
 import type { WorkbenchTab } from './workbench-tabs'
 
 type Tabs = Readonly<Record<string, WorkbenchTab>>

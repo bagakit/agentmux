@@ -8,7 +8,7 @@ import {
   removeTab,
   setSplitRatio,
   moveTabToNewGroup
-} from '../src/renderer/src/lib/workbench-layout'
+} from '@agentmux/layout'
 
 describe('workspace tab-group layout', () => {
   it('adds and activates tabs in one group', () => {

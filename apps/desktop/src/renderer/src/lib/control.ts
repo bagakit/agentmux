@@ -17,15 +17,13 @@ import {
   findGroupForTab,
   insertTabAfter,
   removeTab,
-  type WorkspaceLayout
-} from './workbench-layout'
-import {
   applyWorkbenchRegionLayoutPreset,
   balanceWorkbenchRegionLayout,
   placeActiveWorkbenchRegionFirst,
   workbenchRegionBounds,
-  workbenchRegionPresetSize
-} from './workbench-view-layout'
+  workbenchRegionPresetSize,
+  type WorkspaceLayout
+} from '@agentmux/layout'
 import {
   addWorkbenchRegion,
   assertRegionInvariant,

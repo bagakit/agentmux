@@ -7,7 +7,7 @@ vi.hoisted(() => {
 })
 
 import { RegionMosaic } from '../src/renderer/src/components/SurfaceToolDock.js'
-import { workbenchRegionBounds, createWorkbenchViewLayout, splitWorkbenchRegion } from '../src/renderer/src/lib/workbench-view-layout.js'
+import { workbenchRegionBounds, createWorkbenchViewLayout, splitWorkbenchRegion } from '@agentmux/layout'
 import { readFileSync } from 'node:fs'
 
 const dockSource = readFileSync(

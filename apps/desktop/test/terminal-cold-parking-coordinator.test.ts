@@ -8,7 +8,7 @@ import {
   collectTerminalColdParkCandidates,
   useTerminalColdParking
 } from '../src/renderer/src/lib/terminal-cold-parking-coordinator.js'
-import { createWorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.js'
+import { createWorkspaceLayout } from '@agentmux/layout'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
 
 function terminalTab(id: string, phase: 'launching' | 'attached' = 'attached') {

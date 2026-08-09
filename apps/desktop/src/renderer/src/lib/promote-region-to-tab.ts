@@ -1,4 +1,4 @@
-import { insertTabAfter, type WorkspaceLayout } from './workbench-layout'
+import { insertTabAfter, type WorkspaceLayout } from '@agentmux/layout'
 import {
   assertRegionInvariant,
   createWorkbenchTab,

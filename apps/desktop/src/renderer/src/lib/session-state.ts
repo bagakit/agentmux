@@ -12,7 +12,7 @@ import { agentDisplayState } from '@agentmux/core/agent-status'
 // 进程事实的投影走 node-free 子路径，与主进程侧 import 的是同一个模块（包根那条链拖 node:crypto，
 // renderer 引不动）。
 import { projectRunProcessStatus, runExitFacts } from '@agentmux/core/run-status'
-import type { WorkspaceLayout } from './workbench-layout'
+import type { WorkspaceLayout } from '@agentmux/layout'
 import {
   findWorkbenchRegion,
   removeWorkbenchRegion,

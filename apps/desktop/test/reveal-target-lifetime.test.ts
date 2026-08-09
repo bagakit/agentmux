@@ -5,7 +5,7 @@ vi.hoisted(() => {
 })
 
 import type { AppConfig } from '../src/shared/contracts.js'
-import { createWorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.js'
+import { createWorkspaceLayout } from '@agentmux/layout'
 import { documentKey } from '../src/renderer/src/lib/workbench-tabs.js'
 import { api } from '../src/renderer/src/lib/api.js'
 import { useAppStore } from '../src/renderer/src/store.js'

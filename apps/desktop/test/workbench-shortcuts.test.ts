@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { WorkbenchViewLayout } from '../src/renderer/src/lib/workbench-view-layout.js'
-import type { WorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.js'
+import type { WorkbenchViewLayout, WorkspaceLayout } from '@agentmux/layout'
 import type { WorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
 import {
   adjacentRegionId,

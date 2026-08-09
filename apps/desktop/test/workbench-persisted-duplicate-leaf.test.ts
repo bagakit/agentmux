@@ -5,10 +5,10 @@ import {
   assertGroupInvariant,
   createWorkspaceLayout,
   groupIds,
+  EVEN_SPLIT_RATIO,
+  regionIds,
   type WorkspaceLayout
-} from '../src/renderer/src/lib/workbench-layout.js'
-import { EVEN_SPLIT_RATIO } from '../src/renderer/src/lib/split-tree.js'
-import { regionIds } from '../src/renderer/src/lib/workbench-view-layout.js'
+} from '@agentmux/layout'
 import {
   assertRegionInvariant,
   createWorkbenchTab,

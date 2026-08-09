@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { WORKBENCH_LAYOUT_PRESETS } from '@agentmux/core/workbench-layout-preset'
-import { MIN_SPLIT_RATIO } from '../src/renderer/src/lib/split-tree'
 import {
+  MIN_SPLIT_RATIO,
   applyWorkbenchRegionLayoutPreset,
   balanceWorkbenchRegionLayout,
   closeWorkbenchRegion,
@@ -13,7 +13,7 @@ import {
   workbenchRegionBounds,
   workbenchRegionPresetSize,
   type WorkbenchRegionLayoutNode
-} from '../src/renderer/src/lib/workbench-view-layout'
+} from '@agentmux/layout'
 
 /** 树里每个 split 存着的 ratio，按前序。判「存进模型的值」而不是「画出来的宽度」。 */
 function storedRatios(root: WorkbenchRegionLayoutNode): number[] {

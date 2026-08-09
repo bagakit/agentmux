@@ -23,8 +23,7 @@ import {
 } from '../src/renderer/src/components/workbench-split-menu-icons'
 import { createRegionCopyModel } from '../src/renderer/src/components/RegionContextMenu'
 import type { AgentMuxArrangeMode } from '@agentmux/core/control'
-import type { SplitDirection } from '../src/renderer/src/lib/workbench-layout'
-import type { WorkbenchRegionLayoutPreset } from '../src/renderer/src/lib/workbench-view-layout'
+import type { SplitDirection, WorkbenchRegionLayoutPreset } from '@agentmux/layout'
 
 const COMPONENTS = join(__dirname, '../src/renderer/src/components')
 

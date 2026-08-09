@@ -3,12 +3,13 @@ import {
   findGroupForTab,
   groupLeafId,
   moveTab,
-  type WorkspaceLayout
-} from './workbench-layout'
-import { collectLeafIds, removeLeaf } from './split-tree'
+  collectLeafIds,
+  removeLeaf,
+  workbenchRegionBounds,
+  type WorkspaceLayout,
+  type RegionGeometry
+} from '@agentmux/layout'
 import type { WorkbenchTab } from './workbench-tabs'
-import { workbenchRegionBounds } from './workbench-view-layout'
-import type { RegionGeometry } from './split-direction'
 
 /**
  * 当前在看哪个 Topic —— 由活动 Tab 的绑定回答。

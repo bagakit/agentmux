@@ -7,16 +7,14 @@ import {
   regionInDirection,
   orientationOf,
   REGION_GEOMETRY_EPSILON,
-  type RegionGeometry
-} from '../src/renderer/src/lib/split-direction.js'
+  workbenchRegionBounds,
+  type RegionGeometry,
+  type WorkbenchRegionLayoutNode,
+  type WorkbenchViewLayout,
+  type SplitDirection
+} from '@agentmux/layout'
 import { regionNeighbor, type DirectionalNeighborInput } from '../src/renderer/src/lib/directional-addressing.js'
 import { adjacentRegionId } from '../src/renderer/src/lib/workbench-shortcuts.js'
-import {
-  workbenchRegionBounds,
-  type WorkbenchRegionLayoutNode,
-  type WorkbenchViewLayout
-} from '../src/renderer/src/lib/workbench-view-layout.js'
-import type { SplitDirection } from '../src/renderer/src/lib/workbench-layout.js'
 
 // 这个文件守的是一件事：「某方向上是哪一格」在整个渲染层只有**一个**答案。此前有两个——Agent 侧寻址
 // （regionNeighbor → inspect）要求另一轴重叠，键盘焦点移动（adjacentRegionId）不要求、改按中心最近——
@@ -180,19 +178,31 @@ describe('重叠判定分歧：完整平铺下也存在「中心更近却不重�
 })
 
 // ---------------------------------------------------------------------------
-// import 关系 + 「消费者不自算几何」守卫：方向几何只能定义在 split-direction 一个模块里。
-// 判据不是「某几个旧函数名不在场」（换个拼法就绕过、还会误伤），而是两条结构性质：
-//   1) 消费 Region 几何的每个 lib 文件都从 './split-direction' import 方向判定；
+// import 关系 + 「消费者不自算几何」守卫：方向几何只能定义在 split-direction 一个模块里（现居
+// @agentmux/layout）。判据不是「某几个旧函数名不在场」（换个拼法就绕过、还会误伤），而是两条结构性质：
+//   1) 消费 Region 几何的每个 lib 文件都从 '@agentmux/layout' import 方向判定原语；
 //   2) 消费 Region 几何的文件里**只有 split-direction 自己**含 bounds 字段算术
 //      （`.width`/`.height`/`.x +`/`.y +`/EPSILON/1e-）——任何消费者重新自算几何都会被这条抓住，
 //      无论它把函数叫什么名字。
-// 「消费 Region 几何的文件」由目录扫描发现（import 了 workbench-view-layout 或 split-direction），
+// 「消费 Region 几何的文件」由目录扫描发现（import 了 @agentmux/layout 的方向判定或用到 tiler 几何），
 // 不写死清单：明天新增第三个消费者若自算几何，一样落网。每条都带自证，防止扫错目录时守卫恒绿。
 // ---------------------------------------------------------------------------
 const LIB_DIR = new URL('../src/renderer/src/lib/', import.meta.url)
+// 几何产地（方向判定 SSOT split-direction 与 tiler workbench-view-layout）已抽进 @agentmux/layout；
+// 渲染层的旧薄壳已删。消费者（directional-addressing / workbench-shortcuts）仍在渲染层，且直接
+// 写 `from '@agentmux/layout'`。所以：消费者发现走渲染层，产地源码读包里。
+const PKG_DIR = new URL('../../../packages/layout/src/', import.meta.url)
 
 function readLib(relative: string): string {
   return readFileSync(new URL(relative, LIB_DIR), 'utf8')
+}
+
+function readPkg(relative: string): string {
+  return readFileSync(new URL(relative, PKG_DIR), 'utf8')
+}
+
+function pkgSourceFiles(): string[] {
+  return readdirSync(PKG_DIR).filter((name) => name.endsWith('.ts') && !name.endsWith('.d.ts'))
 }
 
 /** lib 目录下所有 .ts 源文件（排除 .d.ts）。 */
@@ -200,10 +210,12 @@ function libSourceFiles(): string[] {
   return readdirSync(LIB_DIR).filter((name) => name.endsWith('.ts') && !name.endsWith('.d.ts'))
 }
 
-/** 该文件是否消费 Region 几何：import 了 workbench-view-layout 的几何或 split-direction 的判定。 */
+/** 该文件是否消费 Region 几何：import 了方向判定原语（现居 @agentmux/layout）或用到 tiler 几何。 */
 function consumesRegionGeometry(source: string): boolean {
   return (
-    /from\s*['"]\.\/split-direction['"]/.test(source) ||
+    /import\s*\{[^}]*\b(regionInDirection|orientationOf|placementOf)\b[^}]*\}\s*from\s*['"]@agentmux\/layout['"]/.test(
+      source
+    ) ||
     /\bworkbenchRegionBounds\b/.test(source) ||
     /\bRegionGeometry\b/.test(source)
   )
@@ -217,7 +229,8 @@ function hasBoundsArithmetic(source: string): boolean {
 describe('几何 SSOT 的 import 关系与消费者不自算几何', () => {
   const addressingSource = readLib('directional-addressing.ts')
   const shortcutsSource = readLib('workbench-shortcuts.ts')
-  const ssotSource = readLib('split-direction.ts')
+  // SSOT 与 tiler 已抽进包，从包源码读。
+  const ssotSource = readPkg('split-direction.ts')
 
   // 合法拥有 Region bounds 算术的两个文件——不是「消费者」而是几何本身的产地：
   //   - workbench-view-layout.ts：把分屏树平铺成 bounds 的 tiler（`workbenchRegionBounds` 的定义处）。
@@ -243,10 +256,11 @@ describe('几何 SSOT 的 import 关系与消费者不自算几何', () => {
     expect(typeof REGION_GEOMETRY_EPSILON).toBe('number')
   })
 
-  it('两个消费者都从 ./split-direction import 几何原语', () => {
-    // import 关系而非名字字面量：只有真的从那个模块取，才算共用同一份真相。
+  it('两个消费者都从 @agentmux/layout import 几何原语', () => {
+    // import 关系而非名字字面量：只有真的从那个模块取，才算共用同一份真相。方向判定 SSOT 已抽进
+    // @agentmux/layout（旧薄壳 ./split-direction 已删），消费者直接从包 import。
     const importsSsot = (source: string): boolean =>
-      /import\s*\{[^}]*\bregionInDirection\b[^}]*\}\s*from\s*['"]\.\/split-direction['"]/.test(source)
+      /import\s*\{[^}]*\bregionInDirection\b[^}]*\}\s*from\s*['"]@agentmux\/layout['"]/.test(source)
     expect(importsSsot(addressingSource)).toBe(true)
     expect(importsSsot(shortcutsSource)).toBe(true)
   })
@@ -271,10 +285,11 @@ describe('几何 SSOT 的 import 关系与消费者不自算几何', () => {
 
   it('自证：每个豁免的几何产地都真实存在且确实含 bounds 算术（豁免不是盲区）', () => {
     // 豁免表若写了不存在的文件、或写了本就没有几何算术的文件，就等于凭空放行——这条把每一项都质询一遍。
-    const libFiles = libSourceFiles()
+    // 两个产地已抽进包，从包源码读。
+    const pkgFiles = pkgSourceFiles()
     for (const owner of GEOMETRY_OWNERS) {
-      expect(libFiles).toContain(owner)
-      expect(hasBoundsArithmetic(readLib(owner))).toBe(true)
+      expect(pkgFiles).toContain(owner)
+      expect(hasBoundsArithmetic(readPkg(owner))).toBe(true)
     }
   })
 
@@ -306,10 +321,14 @@ describe('几何 SSOT 的 import 关系与消费者不自算几何', () => {
 // ---------------------------------------------------------------------------
 const RENDERER_DIR = fileURLToPath(new URL('../src/renderer/src/', import.meta.url))
 const DESKTOP_DIR = fileURLToPath(new URL('../', import.meta.url))
+// 方向两半真相（orientationOf/placementOf/edgeGap 的方向 case）与 SplitDirection 声明都随
+// split-direction.ts / workbench-layout.ts 抽进了 @agentmux/layout。独占性守卫因此要同时扫渲染层与包
+// 两棵树：渲染层的消费者不许自算方向，包里除 split-direction 外也不许。
+const PKG_SRC_DIR = fileURLToPath(new URL('../../../packages/layout/src/', import.meta.url))
 const DIRECTION_MEMBERS = ['left', 'right', 'up', 'down'] as const
 
-/** 方向的两半真相所在——只有这个文件可以把 direction 拆成轴与侧。 */
-const DIRECTION_SSOT = 'lib/split-direction.ts'
+/** 方向的两半真相所在——只有这个文件可以把 direction 拆成轴与侧（现居 @agentmux/layout，标签加 pkg/ 前缀）。 */
+const DIRECTION_SSOT = 'pkg/split-direction.ts'
 
 function rendererSourceFiles(dir: string): string[] {
   const out: string[] = []
@@ -331,14 +350,15 @@ type DirectionComparison = { file: string; line: number; text: string }
  * 这类同形但不同义的 union，也排除了 `string`（宽到什么都能比，不构成对方向的拆解）。
  */
 function findDirectionComparisons(): { hits: DirectionComparison[]; scannedFiles: number; members: string[] } {
-  const roots = rendererSourceFiles(RENDERER_DIR)
+  const roots = [...rendererSourceFiles(RENDERER_DIR), ...rendererSourceFiles(PKG_SRC_DIR)]
   const configFile = ts.readConfigFile(path.join(DESKTOP_DIR, 'tsconfig.json'), ts.sys.readFile)
   const parsed = ts.parseJsonConfigFileContent(configFile.config, ts.sys, DESKTOP_DIR)
   const program = ts.createProgram(roots, parsed.options)
   const checker = program.getTypeChecker()
 
-  // 锚点从 SplitDirection 的声明处取，不在测试里重列那四个词——否则这里就成了第 N 份手抄。
-  const declaration = program.getSourceFile(path.join(RENDERER_DIR, 'lib/workbench-layout.ts'))
+  // 锚点从 SplitDirection 的声明处取，不在测试里重列那四个词——否则这里就成了第 N 份手抄。它已随
+  // workbench-layout.ts 抽进 @agentmux/layout，从包源码取声明。
+  const declaration = program.getSourceFile(path.join(PKG_SRC_DIR, 'workbench-layout.ts'))
   let unionType: ts.Type | undefined
   ts.forEachChild(declaration!, (node) => {
     if (ts.isTypeAliasDeclaration(node) && node.name.text === 'SplitDirection') {
@@ -357,9 +377,18 @@ function findDirectionComparisons(): { hits: DirectionComparison[]; scannedFiles
     return parts.every((part) => part.isStringLiteral() && members.includes(part.value))
   }
 
+  // 两棵树都扫：渲染层文件标签相对 RENDERER_DIR，包文件标签加 `pkg/` 前缀（DIRECTION_SSOT 亦用此拼法）。
+  const labelOf = (fileName: string): string =>
+    fileName.startsWith(PKG_SRC_DIR)
+      ? `pkg/${path.relative(PKG_SRC_DIR, fileName)}`
+      : path.relative(RENDERER_DIR, fileName)
   const scanned = program
     .getSourceFiles()
-    .filter((file) => !file.isDeclarationFile && file.fileName.startsWith(RENDERER_DIR))
+    .filter(
+      (file) =>
+        !file.isDeclarationFile &&
+        (file.fileName.startsWith(RENDERER_DIR) || file.fileName.startsWith(PKG_SRC_DIR))
+    )
   const hits: DirectionComparison[] = []
   const EQUALITY = new Set<ts.SyntaxKind>([
     ts.SyntaxKind.EqualsEqualsEqualsToken,
@@ -371,7 +400,7 @@ function findDirectionComparisons(): { hits: DirectionComparison[]; scannedFiles
     const record = (node: ts.Node): void => {
       const { line } = file.getLineAndCharacterOfPosition(node.getStart())
       hits.push({
-        file: path.relative(RENDERER_DIR, file.fileName),
+        file: labelOf(file.fileName),
         line: line + 1,
         text: node.getText().slice(0, 80)
       })
@@ -463,12 +492,16 @@ describe('方向的两半含义只在 split-direction 里拆一次', () => {
 const ADDRESSING_FILE = path.join(RENDERER_DIR, 'lib/directional-addressing.ts')
 const CROSS_PACKAGE_PROOF = '_addressDirectionMatchesControlProtocol'
 
-type OriginPackage = 'renderer' | 'core' | 'unresolved'
+type OriginPackage = 'renderer' | 'core' | 'layout' | 'unresolved'
 
 /** 这个声明文件属于哪一侧。`lib` 是 TS 自带声明（`Extract` 之类），不参与归包。 */
 function packageOfFile(file: string): OriginPackage | 'lib' {
   if (/[\\/]node_modules[\\/]typescript[\\/]/.test(file)) return 'lib'
   if (/[\\/]packages[\\/]core[\\/]|[\\/]@agentmux[\\/]core[\\/]/.test(file)) return 'core'
+  // 布局代数已抽进 @agentmux/layout：SplitDirection 与 WorkbenchRegionBounds 的定义现居此包。渲染层
+  // 那道跨包证明经薄壳 import 它们，追出处会落到这里——单独归 `layout` 桶，故两半从「core↔renderer」
+  // 变成「core↔layout」，跨包性质不变（仍是两个不同的包）。
+  if (/[\\/]packages[\\/]layout[\\/]|[\\/]@agentmux[\\/]layout[\\/]/.test(file)) return 'layout'
   if (file.startsWith(RENDERER_DIR)) return 'renderer'
   return 'unresolved'
 }
@@ -609,8 +642,8 @@ function crossPackageProofProbe(): ProofProbe {
 //   放宽（加上 'inward'）→ 渲染层多一个成员，`SplitDirection extends ControlSplitDirection` 不再成立 → 第 1 槽红
 // 于是任一半塌成恒真式，都会让**它自己那个方向**的漂移变得静默，而兄弟半仍在报错。少了任一方向，
 // 对应那一半就没人守（实测：只跑收窄时，第 1 半的四种恒真式全部存活）。
-const LAYOUT_UNION_FILE = path.join(RENDERER_DIR, 'lib/workbench-layout.ts')
-/** 逐字取自 workbench-layout.ts。写死是刻意的：若那行改了拼法，下面的在场自检立刻红，而不是静默失配。 */
+const LAYOUT_UNION_FILE = path.join(PKG_SRC_DIR, 'workbench-layout.ts')
+/** 逐字取自 @agentmux/layout 的 workbench-layout.ts。写死是刻意的：若那行改了拼法，下面的在场自检立刻红，而不是静默失配。 */
 const LAYOUT_UNION_DECLARATION = `export type SplitDirection = ${DIRECTION_MEMBERS.map((m) => `'${m}'`).join(' | ')}`
 
 /**
@@ -674,16 +707,16 @@ describe('方向的跨包证明必须真的跨包（否则它是恒真的死代�
   })
 
   it('自证：出处判据在本文件的两个真实类型引用上给出不同的包（判据不是常量）', () => {
-    // `AgentMuxRegionNeighbor` 来自 @agentmux/core/control，`WorkbenchRegionBounds` 来自本包的
-    // workbench-view-layout。若判据坏成恒 'core' 或恒 'renderer'（或恒 unresolved），这里先红。
+    // `AgentMuxRegionNeighbor` 来自 @agentmux/core/control，`WorkbenchRegionBounds` 来自 @agentmux/layout
+    // 的 workbench-view-layout（经渲染层薄壳 import）。若判据坏成恒 'core' 或恒某一侧（或恒 unresolved），这里先红。
     expect(probe.coreWitness).toBe('core')
-    expect(probe.rendererWitness).toBe('renderer')
+    expect(probe.rendererWitness).toBe('layout')
   })
 
-  it('两半各自的 extends 两侧分居 renderer 与 core，方向相反', () => {
+  it('两半各自的 extends 两侧分居 layout 与 core，方向相反', () => {
     // 这就是 D3 被挡住的地方：把 ControlSplitDirection 的定义改成 `= SplitDirection` 后，追出处得到
-    // 的是本包，两半都变成 renderer->renderer，于是这条红——而 tsc 对那次变异是 exit 0 的。
-    expect([...probe.halves].sort()).toEqual(['core->renderer', 'renderer->core'])
+    // 的是 layout 包（SplitDirection 现居此），两半都变成 layout->layout，于是这条红——而 tsc 对那次变异是 exit 0 的。
+    expect([...probe.halves].sort()).toEqual(['core->layout', 'layout->core'])
   })
 
   it('自证：那行 SplitDirection 声明就是反事实要改的那一行（拼法一变先在这里红）', () => {

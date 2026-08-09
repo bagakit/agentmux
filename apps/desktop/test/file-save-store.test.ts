@@ -51,7 +51,7 @@ const fileApi = vi.hoisted(() => {
 vi.mock('../src/renderer/src/lib/api.js', () => ({ api: fileApi.api }))
 
 import type { AppConfig, FileDocument, WorkspaceRecord } from '../src/shared/contracts.js'
-import { createWorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.js'
+import { createWorkspaceLayout } from '@agentmux/layout'
 import {
   createWorkbenchTab,
   documentKey,
