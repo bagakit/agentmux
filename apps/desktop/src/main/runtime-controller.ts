@@ -831,6 +831,23 @@ export class RuntimeController {
     })
   }
 
+  /** Read the authoritative session facts used by the durable progress loop immediately before delivery. */
+  async observeContinuousProgress(loop: { agentSessionId: string }, tickId: string, now: number) {
+    for (const host of this.hosts.values()) {
+      try {
+        const status = await host.client.statusAgent(loop.agentSessionId)
+        return {
+          session: status.session,
+          tickId,
+          now
+        }
+      } catch {
+        // The session may belong to another host; continue searching without guessing by layout.
+      }
+    }
+    throw new AgentMuxError('Continuous progress target session is unavailable.', 'UNKNOWN_AGENT_SESSION')
+  }
+
   async respondInteraction(
     control: Extract<SessionControl, { kind: 'agent' }>,
     response: AgentMuxInteractionResponse
