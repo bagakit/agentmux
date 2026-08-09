@@ -4305,12 +4305,17 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!text.trim()) return
     const session = get().sessions.find((item) => item.id === sessionId)
     if (!session || session.kind !== 'agent') return
+    // Compare occurrence counts rather than `includes(text)`: an identical prompt may already be
+    // queued. A successful send removes one occurrence while the pre-existing duplicate remains; only
+    // an increase proves this invocation was retained for retry.
+    const queuedBefore = get().agentSteerQueues?.[sessionId] ?? []
+    const sameBefore = queuedBefore.filter((prompt) => prompt === text).length
     get().enqueueAgentSteer(sessionId, text)
     await get().flushAgentSteerQueue(sessionId)
-    // `flushAgentSteerQueue` intentionally retains failed entries for retry. Surface
-    // that outcome to the Composer so it must keep the user's draft instead of
-    // treating a retained queue item as a successful send.
-    if ((get().agentSteerQueues?.[sessionId] ?? []).includes(text)) {
+    // `flushAgentSteerQueue` intentionally retains failed entries for retry. Surface that outcome to the
+    // Composer so it must keep the user's draft instead of treating a retained queue item as success.
+    const sameAfter = (get().agentSteerQueues?.[sessionId] ?? []).filter((prompt) => prompt === text).length
+    if (sameAfter > sameBefore) {
       throw new Error('Prompt was retained for retry because the Agent did not accept it yet.')
     }
   },
