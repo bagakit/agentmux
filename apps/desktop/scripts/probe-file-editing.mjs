@@ -108,6 +108,19 @@ async function reapProbeDaemon(runtimeRoot) {
   }
 }
 
+// Electron helpers are not children in the OS process tree on macOS. Reap every process that still
+// points at this run's isolated user-data directory, otherwise a failed probe leaks renderer/GPU
+// processes and can exhaust the host before the next attempt.
+async function reapProbeProcesses(userData) {
+  let stdout = ''
+  try { ({ stdout } = await execFileAsync('ps', ['-axo', 'pid=,command='])) } catch { return }
+  const pids = stdout.split('\n').flatMap((line) => {
+    const match = /^\s*(\d+)\s+(.+)$/.exec(line)
+    return match && match[2].includes(userData) ? [Number(match[1])] : []
+  })
+  for (const pid of pids) { try { process.kill(pid, 'SIGKILL') } catch {} }
+}
+
 async function main() {
   if (!skipBuild) {
     // Rebuild BOTH halves so the probe runs against current source. `@agentmux/core` is externalized by
@@ -165,6 +178,7 @@ async function main() {
     // package-macos.mjs reaps the daemon separately. Scope the reap to OUR unique runtime socket path so it
     // can never touch the user's real daemon. Without this the fast loop leaks a daemon per run.
     await reapProbeDaemon(runtimeRoot)
+    await reapProbeProcesses(userData)
     await rm(temporaryRoot, { recursive: true, force: true })
   }
 
