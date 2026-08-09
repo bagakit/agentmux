@@ -211,11 +211,16 @@ function startPrimaryInstance(): void {
     )
     registerWindowResizeEvents(window)
     registerWindowStatePersistence(window, windowGeometryStore)
+    const reportStartupStage = (stage: string) => {
+      if (process.env.AGENTMUX_DESKTOP_FILE_EDITING_REPORT) process.stderr.write(`file_editing_startup_stage=${stage}\n`)
+    }
     let updateReady: { token: string; resolve: () => void } | null = null
     await disposeIpc?.()
+    reportStartupStage('before-ipc')
     disposeIpc = await registerIpc({ window, configStore, runtime, scratchTopics, workspaceFiles,
       onRendererUpdateReady: (token) => { if (updateReady?.token === token) updateReady.resolve() }, ...(environmentWarning ? { environmentWarning } : {}) })
-    if (process.env.ELECTRON_RENDERER_URL) await window.loadURL(process.env.ELECTRON_RENDERER_URL)
+    reportStartupStage('after-ipc')
+    if (process.env.ELECTRON_RENDERER_URL) { reportStartupStage('before-load-url'); await window.loadURL(process.env.ELECTRON_RENDERER_URL); reportStartupStage('after-load-url') }
     else {
       rendererUpdates?.dispose()
       const probeQuery = process.env.AGENTMUX_DESKTOP_FILE_EDITING_REPORT
@@ -256,6 +261,9 @@ function startPrimaryInstance(): void {
         await rendererUpdates.initialize()
         rendererUpdates.start()
       }
+      reportStartupStage('before-load-file')
+      await window.loadFile(packagedRendererPath, probeQuery ? { query: probeQuery } : undefined)
+      reportStartupStage('after-load-file')
       window.once('closed', () => rendererUpdates?.dispose())
     }
     const rendererLoadedAtMs = Date.now()
