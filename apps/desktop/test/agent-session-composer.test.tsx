@@ -192,11 +192,12 @@ describe('AgentSessionComposer adapter', () => {
     fixture.state.sessions = [agentSession({ status: { state: 'working', source: 'native-hook', observedAt: 1 } })]
     fixture.state.agentComposerDrafts = { 'agent-1': 'Actually, edit the other file' }
     const composer = AgentSessionComposer({ sessionId: 'agent-1' }) as unknown as {
-      props: { onSubmit?: () => void; onInterrupt?: () => void; primaryAction: 'send' | 'stop' }
+      props: { onSubmit?: () => void; onQueue?: () => void; onInterrupt?: () => void; primaryAction: 'send' | 'stop' }
     }
 
     // onSubmit is wired while working (it was undefined before), and the Enter path invokes it.
     expect(composer.props.onSubmit).toBeTypeOf('function')
+    expect(composer.props.onQueue).toBeUndefined()
     composer.props.onSubmit?.()
 
     expect(fixture.state.send).toHaveBeenCalledWith('agent-1', 'Actually, edit the other file')
