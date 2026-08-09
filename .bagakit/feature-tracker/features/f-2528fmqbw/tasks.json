@@ -562,7 +562,8 @@
         "Core ContinuousProgressScheduler added: durable records, due/claimTick, pause/resume/stop; Desktop persistence/integration remains.",
         "Desktop ContinuousProgressLoopStore persists loop records under Electron userData; typecheck and store test pass.",
         "Published ./continuous-progress and ./continuous-progress-scheduler package exports; external hosts can consume scheduler without internal paths.",
-        "Main ContinuousProgressLoopManager now combines durable store + scheduler, claims ticks before handler, and never retries unknown delivery results."
+        "Main ContinuousProgressLoopManager now combines durable store + scheduler, claims ticks before handler, and never retries unknown delivery results.",
+        "Loop manager exposes async create/pause/resume/stopLoop lifecycle methods with immediate durable save for upcoming Control IPC."
       ]
     },
     {
