@@ -63,3 +63,11 @@ T-008 目标是 Run 替换/Session 重启后的幂等恢复：保留 loop 配置
 ## 追加需求：Message Tools 快捷语法与事实协议（2026-09-12）
 
 用户补充确认 Message Tools 应支持 `@` 文件引用、`/commands`/subcommands、`$skill`。能力来源分两层：Provider 提供自身支持范围；AgentMux 自有配置优先复用 `.agents` 等事实协议。初始页无 Session 时只使用项目上下文和可发现的本地协议内容，不能伪造 Provider 专属能力。该需求与 T-006 同一 Closure，追加 T-009 验收，不创建新 Feature。
+
+## 追加需求：Message Tools 原子错误与 Browser Region 选中态（2026-09-12）
+
+用户补充要求：Message Tools 操作失败应在组件内部显示可重试的遮罩/提示，保持输入原子性；浏览器点击后其 Region 应像其他 Region 一样显示选中效果。追加 T-010、T-011，均属于当前编辑器体验 Closure。
+
+## 追加需求：Activity 工作线展开密度（2026-09-12）
+
+用户确认工作线聚合入口已收敛，但箭头展开项信息量不足且占空间。追加 T-012：隐藏无新增信息的展开控件，明细只显示 Provider、最近活动、状态原因、时长和动作，不重复聚合行信息。

@@ -2,8 +2,8 @@
   "version": 2,
   "feat_id": "f-2528fmqbw",
   "plan_status": "reviewed",
-  "plan_revision": 4,
-  "supersedes_revision": 3,
+  "plan_revision": 6,
+  "supersedes_revision": 5,
   "review_ref": "docs/reviews/continuous-progress-2026-09-12.md",
   "source_refs": [
     "docs/reviews/continuous-progress-2026-09-12.md",
@@ -124,6 +124,74 @@
             "to": "T-009"
           }
         ],
+        "removed": []
+      }
+    },
+    {
+      "revision": 5,
+      "supersedes_revision": 4,
+      "review_ref": "docs/reviews/continuous-progress-2026-09-12.md",
+      "source_refs": [
+        "docs/reviews/continuous-progress-2026-09-12.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006",
+        "T-007",
+        "T-008",
+        "T-009",
+        "T-010",
+        "T-011"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {},
+      "dependency_changes": {
+        "added": [
+          {
+            "from": "T-006",
+            "to": "T-010"
+          },
+          {
+            "from": "T-009",
+            "to": "T-010"
+          }
+        ],
+        "removed": []
+      }
+    },
+    {
+      "revision": 6,
+      "supersedes_revision": 5,
+      "review_ref": "docs/reviews/continuous-progress-2026-09-12.md",
+      "source_refs": [
+        "docs/reviews/continuous-progress-2026-09-12.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006",
+        "T-007",
+        "T-008",
+        "T-009",
+        "T-010",
+        "T-011",
+        "T-012"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {},
+      "dependency_changes": {
+        "added": [],
         "removed": []
       }
     }
@@ -406,6 +474,93 @@
       "heavy": true,
       "heavy_reason": "跨 Provider catalog、.agents 发现和两个 Composer 宿主",
       "introduced_in_revision": 4,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-010",
+      "depends_on": [
+        "T-006",
+        "T-009"
+      ],
+      "title": "Message Tools 原子错误反馈",
+      "objective": "让 Message Tools 的失败在组件内显示并可重试，保持 prompt、引用和选择状态。",
+      "outcome": "操作失败不依赖全局通知，也不丢失输入。",
+      "acceptance": [
+        "文件、截图、Skill、command 和发送失败显示组件内短提示与重试入口",
+        "失败状态不会清空草稿、队列或已选引用"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/message-tools-errors.test.tsx",
+          "proves": "组件内错误反馈与输入保留"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/continuous-progress-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "estimate_hours": 1,
+      "introduced_in_revision": 5,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-011",
+      "depends_on": [],
+      "title": "Browser Region 选中态",
+      "objective": "点击 Browser 内容时通过 Workbench 统一 focus 事实标记该 Region 为 active。",
+      "outcome": "Browser Region 具有与其他 Region 一致的持续选中视觉反馈。",
+      "acceptance": [
+        "点击 Browser 内容更新 active Region，边框/标题选中态可见",
+        "切换到其他 Region 后 Browser 选中态正确移除"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/browser-region-focus.test.tsx",
+          "proves": "Browser focus 接线和视觉状态"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/continuous-progress-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "estimate_hours": 0.75,
+      "introduced_in_revision": 5,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-012",
+      "depends_on": [],
+      "title": "Activity 工作线展开密度",
+      "objective": "收敛 Activity by work line 的展开项，只展示聚合行没有表达的新增信息。",
+      "outcome": "无新增信息不显示箭头；展开明细紧凑且可操作。",
+      "acceptance": [
+        "展开项不重复工作线名称、数量和主状态，优先显示 Provider、最近活动、原因、时长和动作",
+        "无新增信息的分组隐藏展开控件并保持选择行打开行为"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/activity-workline-density.test.tsx",
+          "proves": "展开信息层级和密度"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/continuous-progress-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "estimate_hours": 0.75,
+      "introduced_in_revision": 6,
       "status": "todo",
       "gate_result": null,
       "last_gate_commands": [],

@@ -622,3 +622,13 @@ Desktop 刷新或重新 Attach 时优先投影这份 Agent 语义；新的 Run `
 - `commands` 与 `skills` 的能力范围优先来自当前 Provider 的 catalog/声明；AgentMux 自己提供的配置型能力复用工作区或用户目录下 `.agents` 事实协议，不复制一份 Provider 任务真值。来源、路径和不可用原因要可见。
 - 未连接 Session 的初始页只能使用项目/工作区上下文与可发现的本地 `.agents` 内容；需要 Provider Session 才能解析的能力显示为待启动或 unknown，不能伪造可执行项。启动失败保留输入、引用、skill 和 command 选择。
 - Provider command 与 AgentMux 自己的快捷命令命名冲突时，不静默改写；显示来源并按明确选择生成 prompt。未知 `@`、`/`、`$` 文本保留为普通输入。
+
+### Message Tools 失败反馈与 Browser Region 选中态
+
+- Message Tools 的文件、截图、Skill、command 和发送操作失败时，优先在组件自身显示短暂、可重试的原子错误层；全局通知只作为跨组件或无法定位来源的补充。错误层不得清空 prompt 或已选引用。
+- Browser Region 点击内容区必须更新 Workbench 的明确 active Region；选中边界、标题和键盘焦点与 Terminal/File/Agent Region 使用同一事实，不靠浏览器内部 URL 或 hover 猜测。
+
+### Activity 工作线展开信息密度
+
+- `Activity by work line` 折叠态保留工作线摘要和“选择一行打开”；展开箭头只在确实有额外可操作或诊断信息时出现。
+- 展开项不得重复聚合行已经表达的名称、Provider 数量和状态。明细优先显示 Agent 图标、最近活动、状态原因、空闲/停止时长和可直接处理的动作；没有新增信息时保持折叠或隐藏展开控件。
