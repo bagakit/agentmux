@@ -153,7 +153,8 @@ export class AgentScreenEvidenceStore {
     const built = new AgentTerminalScreenEvidence(
       observation.run.cols,
       observation.run.rows,
-      matcher ? { start: matcher.frameStart, end: matcher.frameEnd } : null
+      matcher ? { start: matcher.frameStart, end: matcher.frameEnd } : null,
+      startByte
     )
     for (const event of observation.replay) built.accept(event)
     pending.sort((left, right) => (
