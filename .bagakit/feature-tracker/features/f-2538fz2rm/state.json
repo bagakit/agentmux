@@ -4,7 +4,7 @@
   "title": "AgentMux 持续推进与运行时收敛后续",
   "slug": "continuous-progress-loop-followup",
   "goal": "完成 Explorer 证据稳定性与 Agent stop 收敛，随后安全打包安装重启。",
-  "status": "in_progress",
+  "status": "ready",
   "workspace_mode": "current_tree",
   "base_ref": "main",
   "branch": "",
@@ -121,6 +121,14 @@
     {
       "action": "task_finished",
       "detail": "T-014 => done"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-002 => done"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-001 => done"
     }
   ],
   "goal_contract": {
