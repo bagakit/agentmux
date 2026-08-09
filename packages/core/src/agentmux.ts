@@ -169,8 +169,12 @@ async function listCommand(args: readonly string[]): Promise<number> {
     return 0
   }
   return await withClient(async (client) => {
-    const sessions = await Promise.all(client.agentSessions().map(async (session) => await client.statusAgent(session.agentSessionId)))
-    printSuccess('list.sessions', { sessions }); return 0
+    // One stale Session binding must not hide healthy Sessions. Keep the item-level
+    // error typed and visible while preserving a successful list for the rest.
+    const results = await Promise.allSettled(client.agentSessions().map(async (session) => await client.statusAgent(session.agentSessionId)))
+    const sessions = results.flatMap((result) => result.status === 'fulfilled' ? [result.value] : [])
+    const errors = results.flatMap((result) => result.status === 'rejected' ? [{ error: result.reason instanceof AgentMuxError ? { code: result.reason.code, message: result.reason.message } : { code: 'LIST_SESSION_FAILED', message: String(result.reason) } }] : [])
+    printSuccess('list.sessions', { sessions, ...(errors.length ? { errors } : {}) }); return 0
   })
 }
 
