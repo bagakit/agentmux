@@ -44,7 +44,7 @@ app.setName('AgentMux')
 // 有硬顶。两者都只落盘、无网络出口。尽可能早挂，才能网住 whenReady 之前就发生的崩溃。
 // 致命崩溃（未捕获异常/拒绝）留证后 fail-fast：挂上 process 处理器会抑制 Node 的默认退出，若只记录
 // 不退出，主进程会带着半损坏的运行时静默续命。所以致命崩溃走同步落盘（exit 前必须落地）再 app.exit(1)。
-crashReporter.start(crashReporterOptions())
+if (process.env.AGENTMUX_DISABLE_CRASH_REPORTER !== '1') crashReporter.start(crashReporterOptions())
 const crashLog = new CrashLog()
 registerCrashCapture({
   app,
