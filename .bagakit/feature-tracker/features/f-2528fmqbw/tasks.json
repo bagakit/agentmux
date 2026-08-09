@@ -1075,9 +1075,15 @@
       "supersedes": [],
       "estimate_hours": 0.75,
       "introduced_in_revision": 9,
-      "status": "todo",
-      "gate_result": null,
-      "last_gate_commands": [],
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop exec vitest run test/agent-status-bar.test.tsx test/project-rail-clarity.test.tsx",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
       "notes": []
     },
     {
