@@ -2,7 +2,7 @@
   "schema": "bagakit.execution-owner-receipt.v2",
   "owner_kind": "feature_tracker",
   "owner_id": "f-2528fmqbw",
-  "semantic_revision": "c4e6de70f29620d153f3d644d3f1aeda865915c506c8e26250855732b2954009",
+  "semantic_revision": "857b2b442a8a45fcc96a0a3b12dd26bdc754047135e0dd3b91d8c02021ab12e2",
   "lifecycle_status": "ready",
   "continuation": "continue",
   "active_item_ids": [],
@@ -14,8 +14,8 @@
     ".bagakit/feature-tracker/features/f-2528fmqbw/goal.md"
   ],
   "evidence_hashes": {
-    ".bagakit/feature-tracker/features/f-2528fmqbw/state.json": "03d59fb53fc1dbc10a5585a903a3150ab92b64cab36911947a6d91828b5f86d9",
-    ".bagakit/feature-tracker/features/f-2528fmqbw/tasks.json": "2f10d04d00c17b5112c7755ca829c54536bbaa7a8702d089993bc94d515df5e6",
+    ".bagakit/feature-tracker/features/f-2528fmqbw/state.json": "cf378c5ae148bf597092e3beadf294de1780523315e263c5d0f66bfeabfc3bca",
+    ".bagakit/feature-tracker/features/f-2528fmqbw/tasks.json": "acc96267a3e56a5bddfea58c0ba31874ca51dfb5b7e84ba5d81e801d5106e3a8",
     ".bagakit/feature-tracker/features/f-2528fmqbw/goal.md": "7a0316a64e641483d825592c79e0258d4bfc4d88e4354e8264f92ce3063da08b"
   }
 }
