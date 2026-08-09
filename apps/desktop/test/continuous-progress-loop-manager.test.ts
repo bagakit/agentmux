@@ -16,3 +16,16 @@ describe('ContinuousProgressLoopManager', () => {
     expect(calls).toBe(1); await manager.stop(); await seed.stop(); await rm(dir, { recursive: true, force: true })
   })
 })
+
+  it('persists the claim before a slow handler and pauses unknown outcomes', async () => {
+    const dir = await mkdtemp(join('/tmp', 'agentmux-manager-')); const store = new ContinuousProgressLoopStore(join(dir, 'loops.json'))
+    let now = 0; let release!: () => void; const gate = new Promise<void>((resolve) => { release = resolve })
+    const manager = new ContinuousProgressLoopManager(store, async () => { await gate; return 'unknown' }, () => now)
+    await store.save([{ loopId: 'l', agentSessionId: 'a', intervalMs: 10, prompt: 'x', nextCheckAt: 0, status: 'active' }])
+    await manager.start(); const pending = manager.check(now)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    const persisted = await store.load(); expect(persisted[0]?.lastTickId).toBeTruthy(); expect(persisted[0]?.nextCheckAt).toBe(10)
+    now = 100; const concurrent = manager.check(now); expect(concurrent).toBeInstanceOf(Promise); release(); await pending; await concurrent
+    expect(manager.list()[0]?.status).toBe('paused'); expect(manager.list()[0]?.lastOutcome).toBe('unknown')
+    await manager.stop(); await rm(dir, { recursive: true, force: true })
+  })
