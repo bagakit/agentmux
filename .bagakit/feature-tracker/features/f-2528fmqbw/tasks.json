@@ -2,8 +2,8 @@
   "version": 2,
   "feat_id": "f-2528fmqbw",
   "plan_status": "reviewed",
-  "plan_revision": 13,
-  "supersedes_revision": 12,
+  "plan_revision": 14,
+  "supersedes_revision": 13,
   "review_ref": "docs/reviews/continuous-progress-2026-09-12.md",
   "source_refs": [
     "docs/reviews/continuous-progress-2026-09-12.md",
@@ -456,6 +456,42 @@
         "T-018",
         "T-019",
         "T-020"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    },
+    {
+      "revision": 14,
+      "supersedes_revision": 13,
+      "review_ref": "docs/reviews/continuous-progress-2026-09-12.md",
+      "source_refs": [
+        "docs/reviews/continuous-progress-2026-09-12.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/reviews/feature-audit-2026-09-12.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006",
+        "T-007",
+        "T-008",
+        "T-009",
+        "T-010",
+        "T-011",
+        "T-012",
+        "T-013",
+        "T-014",
+        "T-015",
+        "T-016",
+        "T-017",
+        "T-018",
+        "T-019",
+        "T-020",
+        "T-021"
       ],
       "superseded_task_ids": [],
       "supersedes_by_task": {}
@@ -1079,6 +1115,40 @@
       "gate_result": null,
       "last_gate_commands": [],
       "notes": []
+    },
+    {
+      "id": "T-021",
+      "depends_on": [
+        "T-018"
+      ],
+      "title": "文件点击统一打开目的地选择",
+      "objective": "让 Explorer 文件点击复用 OpenDestinationPopover；目录点击继续导航，目的地按可行性置灰。",
+      "outcome": "文件打开位置可被用户一次选择，不误把目录当文件打开。",
+      "acceptance": [
+        "文件点击出现统一目的地选择器并能打开到选定 Region/Tab",
+        "目录点击只导航 Explorer",
+        "无可行方向时按钮禁用并提供原因"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/open-destination-bar.test.tsx test/file-explorer*.test.tsx",
+          "proves": "文件点击目的地接线与目录语义"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "supersedes": [],
+      "estimate_hours": 1.0,
+      "introduced_in_revision": 13,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": [
+        "斜向方向暂不加入：现有布局协议只有 cardinal split，避免伪造无意义动作。"
+      ]
     }
   ],
   "title": "AgentMux 持续推进、消息工具与工作面体验"
