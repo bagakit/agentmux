@@ -269,6 +269,24 @@ describe('Desktop Control owner', () => {
     expect(openedTerminal.operation).toBe('open.terminal')
   })
 
+  it('rejects ambiguous custom Executor labels before launching or changing layout', async () => {
+    const tab = fixture()
+    useAppStore.setState({ config: {
+      ...config,
+      executors: {
+        first: { ...config.executors.codex!, label: 'Custom' },
+        second: { ...config.executors.codex!, label: 'Custom' }
+      }
+    } })
+    const launchAgent = vi.spyOn(api.sessions, 'launchAgent')
+    await expect(useAppStore.getState().executeControl(request({
+      operation: 'open.agent', content: { kind: 'new-agent', executorId: 'Custom' },
+      destination: { kind: 'split', direction: 'right', region: { kind: 'region', regionId: 'region-caller' } }
+    }))).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
+    expect(launchAgent).not.toHaveBeenCalled()
+    expect(useAppStore.getState().tabs).toEqual({ [tab.id]: tab })
+  })
+
   it('rolls back only its planned Region and cleans a Browser created after cancellation', async () => {
     const tab = fixture()
     let release!: (value: Awaited<ReturnType<typeof api.browser.create>>) => void

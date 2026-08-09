@@ -2394,10 +2394,17 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           await cleanup(controlFailure('LAUNCH_RESULT_MISMATCH', 'Agent launch returned another Workspace.'))
         }
         set((current) => reduceAgentSessionLaunchAttached(current, plan.regionId, committed).state)
+        const committedOwner = findWorkbenchRegion(get().tabs, plan.regionId)
+        if (!committedOwner || committedOwner.surface.kind !== 'agent' || committedOwner.surface.sessionId !== agentSessionId) {
+          // The Agent is healthy; only the Desktop projection moved while launch was in flight.
+          // Keep the Session available and report the layout race without stopping its Run.
+          get().reportError(new Error('Agent launched successfully, but its Region moved before the layout receipt was read.'))
+          throw controlFailure('CONTROL_OWNER_LOST', 'Agent launched successfully but its Region owner moved during launch.')
+        }
         return {
           operation: request.operation,
           region: {
-            tabId: plan.tabId, regionId: plan.regionId, workspaceId: workspace.id, kind: 'agent',
+            tabId: committedOwner.tab.id, regionId: plan.regionId, workspaceId: workspace.id, kind: 'agent',
             agentSessionId, providerId: committed.session.providerId, executorId: committed.session.executorId
           }
         }
