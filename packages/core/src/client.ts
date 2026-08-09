@@ -1156,7 +1156,14 @@ export class AgentMuxClient {
     try {
       await this.kernel.stop(operation)
     } catch (error) {
-      if (error instanceof AgentMuxError && error.code !== 'CTXMUX_run_not_found') throw error
+      if (error instanceof AgentMuxError && error.code === 'CTXMUX_run_not_found') {
+        // The Run is already terminal; continue with the same receipt path.
+      } else {
+        // No lifecycle reservation exists for this low-level API. Do not let
+        // a failed submission poison classification of a later exit.
+        this.stopRequestedRuns.delete(ref.runId)
+        throw error
+      }
     }
     this.runPids.delete(ref.runId)
     this.publisher.publish({
