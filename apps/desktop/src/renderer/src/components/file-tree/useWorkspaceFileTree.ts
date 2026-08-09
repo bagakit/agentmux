@@ -52,7 +52,7 @@ export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<
 
       const token = loadTrackerRef.current.begin(loadScope, path)
       if (!token) {
-        recordRejectedFileExplorerDirectoryLoad(loadScope.workspaceId, path)
+        recordRejectedFileExplorerDirectoryLoad(loadTrackerRef.current.reject(loadScope, path))
         return false
       }
       setDirCache((previous) => ({

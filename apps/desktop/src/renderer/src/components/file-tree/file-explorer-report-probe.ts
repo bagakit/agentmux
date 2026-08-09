@@ -1,6 +1,12 @@
+import type { FileExplorerDirLoadReceipt } from './file-explorer-dir-load-tracker'
+
 export type RejectedFileExplorerDirectoryLoad = {
   workspaceId: string
   path: string
+  epoch: number
+  operationId: number
+  kind: 'rejected'
+  observedAt: number
 }
 
 const rejectedLoadListeners = new Set<(receipt: RejectedFileExplorerDirectoryLoad) => void>()
@@ -15,9 +21,7 @@ export function observeRejectedFileExplorerDirectoryLoads(
 }
 
 export function recordRejectedFileExplorerDirectoryLoad(
-  workspaceId: string,
-  path: string
+  receipt: FileExplorerDirLoadReceipt
 ): void {
-  const receipt = { workspaceId, path }
   for (const listener of rejectedLoadListeners) listener(receipt)
 }

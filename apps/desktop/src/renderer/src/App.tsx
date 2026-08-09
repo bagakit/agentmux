@@ -69,7 +69,14 @@ export function App() {
     if (!fileEditingProbe) return
     let total = 0
     const byWorkspace: Record<string, number> = {}
-    const rejectedDirectoryLoads: Array<{ workspaceId: string; path: string }> = []
+    const rejectedDirectoryLoads: Array<{
+      workspaceId: string
+      path: string
+      epoch: number
+      operationId: number
+      kind: 'rejected'
+      observedAt: number
+    }> = []
     const publish = () => {
       document.documentElement.dataset.fileEditingExplorerEvidence = JSON.stringify({
         mountId: 'app', total, byWorkspace, rejectedDirectoryLoads

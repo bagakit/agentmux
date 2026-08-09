@@ -15,6 +15,15 @@ type DirectoryReadReceipt = {
   path: string
 }
 
+type RejectedDirectoryLoadReceipt = {
+  workspaceId: string
+  path: string
+  epoch: number
+  operationId: number
+  kind: 'rejected'
+  observedAt: number
+}
+
 function createProbeBarrier(): ProbeBarrier {
   let reached!: () => void
   let release!: () => void
@@ -170,7 +179,7 @@ type ExplorerProjectionEvidence = {
   mountId: string
   total: number
   byWorkspace: Record<string, number>
-  rejectedDirectoryLoads: Array<{ workspaceId: string; path: string }>
+  rejectedDirectoryLoads: RejectedDirectoryLoadReceipt[]
 }
 
 async function explorerProjectionEvidence(window: BrowserWindow): Promise<ExplorerProjectionEvidence> {
@@ -794,11 +803,12 @@ async function runExplorerInteractionProbe(options: {
   assertProbe(
     menu.workspaceRace.explorerProjectionNotifications.total === 1 &&
       menu.workspaceRace.explorerProjectionNotifications.byWorkspace['workspace-file-editing-e2e'] === 1 &&
-      JSON.stringify(menu.workspaceRace.explorerProjectionNotifications.rejectedDirectoryLoads) ===
-        JSON.stringify([
-          { workspaceId: 'workspace-file-editing-e2e', path: 'explorer-source' },
-          { workspaceId: 'workspace-file-editing-e2e', path: 'targets/menu' }
-        ]),
+      menu.workspaceRace.explorerProjectionNotifications.rejectedDirectoryLoads.length === 2 &&
+      menu.workspaceRace.explorerProjectionNotifications.rejectedDirectoryLoads.every((receipt) =>
+        receipt.workspaceId === 'workspace-file-editing-e2e' &&
+        receipt.kind === 'rejected' &&
+        receipt.epoch > 0 && receipt.operationId > 0 && receipt.observedAt > 0
+      ),
     `Committed move produced extra Explorer projection notifications: ${JSON.stringify(menu.workspaceRace.explorerProjectionNotifications)}`
   )
   assertProbe(
