@@ -2251,8 +2251,14 @@ export class AgentMuxClient {
         try {
           await this.kernel.stop(stopOperation)
         } catch (error) {
+          // Stop is idempotent at the Session boundary: a Run that vanished
+          // between status and stop has already completed its process exit.
+          if (error instanceof AgentMuxError && error.code === 'CTXMUX_run_not_found') {
+            preserveReservation = true
+          } else {
           preserveReservation = error instanceof AgentMuxError && error.detail === 'unknown'
           throw error
+          }
         }
         preserveReservation = true
       }
