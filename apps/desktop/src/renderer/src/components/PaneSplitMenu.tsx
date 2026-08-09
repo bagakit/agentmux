@@ -31,19 +31,30 @@ export function PaneSplitMenu({
   const entries = workbenchSplitMenuEntries({ regionCount, split: onSplit, arrange: onArrange })
   return (
     <DropdownMenu.Root onOpenChange={onOpenChange}>
-      <DropdownMenu.Trigger asChild>
+      <div className="pane-action-group pane-action-group--split">
         <button
           type="button"
           className="pane-action pane-action--split"
-          title="Split current tab"
-          aria-label="Split current tab"
+          title="Split current tab to the right"
+          aria-label="Split current tab to the right"
           disabled={disabled}
+          onClick={() => onSplit('right')}
         >
           <Columns2 size={13} />
           <span>Split</span>
-          <ChevronDown size={10} />
         </button>
-      </DropdownMenu.Trigger>
+        <DropdownMenu.Trigger asChild>
+          <button
+            type="button"
+            className="pane-action pane-action--split pane-action--split-menu"
+            title="Choose split direction"
+            aria-label="Choose split direction"
+            disabled={disabled}
+          >
+            <ChevronDown size={10} />
+          </button>
+        </DropdownMenu.Trigger>
+      </div>
       <DropdownMenu.Portal>
         <DropdownMenu.Content
           className="tab-context-menu pane-split-menu"

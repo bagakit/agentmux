@@ -200,6 +200,8 @@
 .pane-action:hover { color: var(--text); background: var(--surface-3); }
 .pane-action:disabled { color: var(--text-3); background: transparent; cursor: default; opacity: 0.55; }
 .pane-action--split { width: auto; gap:var(--sp-2); padding:0 var(--sp-3); font-size: var(--fs-micro); }
+.pane-action-group--split { display: inline-flex; align-items: center; gap: 1px; }
+.pane-action--split-menu { width: 22px; padding: 0; }
 .pane-action--split > svg:last-child { margin-left:-1px; opacity: .65; }
 .pane-split-menu { min-width: 148px; max-height: var(--radix-dropdown-menu-content-available-height); }
 .pane-action--stop:hover { color: var(--red); }
