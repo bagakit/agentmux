@@ -2,8 +2,8 @@
   "version": 2,
   "feat_id": "f-2538fz2rm",
   "plan_status": "reviewed",
-  "plan_revision": 7,
-  "supersedes_revision": 6,
+  "plan_revision": 8,
+  "supersedes_revision": 7,
   "review_ref": "docs/reviews/continuous-progress-followup-2026-09-12.md",
   "source_refs": [
     "docs/reviews/continuous-progress-followup-2026-09-12.md",
@@ -220,6 +220,53 @@
         "added": [],
         "removed": []
       }
+    },
+    {
+      "revision": 8,
+      "supersedes_revision": 7,
+      "review_ref": "docs/reviews/continuous-progress-followup-2026-09-12.md",
+      "source_refs": [
+        "docs/reviews/continuous-progress-followup-2026-09-12.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-006",
+        "T-008",
+        "T-009",
+        "T-010",
+        "T-011",
+        "T-012",
+        "T-013",
+        "T-014",
+        "T-015",
+        "T-016"
+      ],
+      "superseded_task_ids": [
+        "T-007"
+      ],
+      "supersedes_by_task": {
+        "T-014": [
+          "T-005"
+        ],
+        "T-016": [
+          "T-007"
+        ]
+      },
+      "dependency_changes": {
+        "added": [],
+        "removed": []
+      }
     }
   ],
   "tasks": [
@@ -387,43 +434,20 @@
       ],
       "supersedes": [],
       "introduced_in_revision": 5,
-      "status": "todo",
-      "gate_result": null,
-      "last_gate_commands": [],
-      "notes": []
-    },
-    {
-      "id": "T-007",
-      "depends_on": [],
-      "title": "Session fork and continuation",
-      "objective": "支持从一条消息安全创建并延续新会话。",
-      "outcome": "实现原提案能力并接入当前 AgentMux 主流程。",
-      "acceptance": [
-        "有明确的 typed API 与生产调用者",
-        "对应行为测试和变异证据通过",
-        "不破坏现有 Agent 生命周期"
-      ],
-      "verification": [
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
         {
-          "kind": "command",
-          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/session-continuation.test.tsx --maxWorkers=1",
-          "proves": "实现原提案能力并接入当前 AgentMux 主流程。"
+          "command": "pnpm --filter @agentmux/core exec vitest run test/agent-handoff.test.ts test/agent-handoff-cli.test.ts test/agent-session-identity-redaction.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
         },
         {
-          "kind": "command",
-          "ref": "pnpm --filter @agentmux/desktop typecheck",
-          "proves": "production integration compiles"
+          "command": "pnpm --filter @agentmux/desktop typecheck",
+          "exit_code": 0,
+          "status": "pass"
         }
       ],
-      "source_refs": [
-        ".bagakit/feature-tracker/features/f-24a8f93p7/tasks.json",
-        "docs/reviews/continuous-progress-followup-2026-09-12.md"
-      ],
-      "supersedes": [],
-      "introduced_in_revision": 5,
-      "status": "todo",
-      "gate_result": null,
-      "last_gate_commands": [],
       "notes": []
     },
     {
@@ -455,9 +479,20 @@
       ],
       "supersedes": [],
       "introduced_in_revision": 5,
-      "status": "todo",
-      "gate_result": null,
-      "last_gate_commands": [],
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop exec vitest run test/app-appearance.test.ts test/terminal-theme.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/desktop typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
       "notes": []
     },
     {
@@ -489,9 +524,20 @@
       ],
       "supersedes": [],
       "introduced_in_revision": 5,
-      "status": "todo",
-      "gate_result": null,
-      "last_gate_commands": [],
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop exec vitest run test/traffic-light-inset.test.ts test/main-window-setup.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/desktop typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
       "notes": []
     },
     {
@@ -523,9 +569,20 @@
       ],
       "supersedes": [],
       "introduced_in_revision": 5,
-      "status": "todo",
-      "gate_result": null,
-      "last_gate_commands": [],
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop exec vitest run test/conversation-attachments.test.tsx test/agent-session-composer.test.tsx --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/desktop typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
       "notes": []
     },
     {
@@ -557,9 +614,20 @@
       ],
       "supersedes": [],
       "introduced_in_revision": 5,
-      "status": "todo",
-      "gate_result": null,
-      "last_gate_commands": [],
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop exec vitest run test/workbench-region-invariant.test.ts test/tab-drop-zone.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/desktop typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
       "notes": []
     },
     {
@@ -626,9 +694,20 @@
       ],
       "supersedes": [],
       "introduced_in_revision": 5,
-      "status": "todo",
-      "gate_result": null,
-      "last_gate_commands": [],
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop exec vitest run test/control.test.ts test/promote-region-to-tab.test.ts test/workbench-region-invariant.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/desktop typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
       "notes": []
     },
     {
@@ -696,9 +775,66 @@
       ],
       "supersedes": [],
       "introduced_in_revision": 7,
-      "status": "todo",
-      "gate_result": null,
-      "last_gate_commands": [],
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/core exec vitest run test/agent-role-directory.test.ts test/agent-handoff-cli.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/core typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-016",
+      "depends_on": [],
+      "title": "有界会话续接行为验证",
+      "objective": "从选中消息生成有界的新会话续接提示并由 ActivityView 生产调用者触发。",
+      "outcome": "续接只包含选中点之前的可见消息，明确创建新 Session，不冒充原生 fork。",
+      "acceptance": [
+        "continuation utility 与 ActivityView 生产调用者接线",
+        "未知 cutoff 拒绝且后续消息不泄漏"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/session-continuation.test.ts --maxWorkers=1",
+          "proves": "bounded continuation behavior"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "production caller compiles"
+        }
+      ],
+      "source_refs": [
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/reviews/continuous-progress-followup-2026-09-12.md"
+      ],
+      "supersedes": [
+        "T-007"
+      ],
+      "introduced_in_revision": 8,
+      "status": "done",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop exec vitest run test/session-continuation.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @agentmux/desktop typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
       "notes": []
     },
     {
@@ -741,6 +877,58 @@
       },
       "superseded_by": [
         "T-014"
+      ]
+    },
+    {
+      "id": "T-007",
+      "depends_on": [],
+      "title": "Session fork and continuation",
+      "objective": "支持从一条消息安全创建并延续新会话。",
+      "outcome": "实现原提案能力并接入当前 AgentMux 主流程。",
+      "acceptance": [
+        "有明确的 typed API 与生产调用者",
+        "对应行为测试和变异证据通过",
+        "不破坏现有 Agent 生命周期"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/session-continuation.test.tsx --maxWorkers=1",
+          "proves": "实现原提案能力并接入当前 AgentMux 主流程。"
+        },
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop typecheck",
+          "proves": "production integration compiles"
+        }
+      ],
+      "source_refs": [
+        ".bagakit/feature-tracker/features/f-24a8f93p7/tasks.json",
+        "docs/reviews/continuous-progress-followup-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 5,
+      "status": "failed",
+      "gate_result": "fail",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop exec vitest run test/session-continuation.test.tsx --maxWorkers=1",
+          "exit_code": 1,
+          "status": "fail"
+        },
+        {
+          "command": "pnpm --filter @agentmux/desktop typecheck",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": [],
+      "failure": {
+        "reason": "The actual focused test is test/session-continuation.test.ts; TSX path does not exist.",
+        "assumption": "The continuation test path used the TSX extension."
+      },
+      "superseded_by": [
+        "T-016"
       ]
     }
   ]

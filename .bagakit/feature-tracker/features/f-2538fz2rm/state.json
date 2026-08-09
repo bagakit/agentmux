@@ -4,7 +4,7 @@
   "title": "AgentMux 持续推进与运行时收敛后续",
   "slug": "continuous-progress-loop-followup",
   "goal": "完成 Explorer 证据稳定性与 Agent stop 收敛，随后安全打包安装重启。",
-  "status": "ready",
+  "status": "done",
   "workspace_mode": "current_tree",
   "base_ref": "main",
   "branch": "",
@@ -15,19 +15,24 @@
   "counters": {
     "gate_fail_streak": 0,
     "no_progress_rounds": 0,
-    "round_count": 7
+    "round_count": 16
   },
   "gate": {
     "last_result": "pass",
-    "last_task_id": "T-003",
+    "last_task_id": "T-016",
     "last_check_commands": [
       {
-        "command": "pnpm --filter @agentmux/desktop package:mac",
+        "command": "pnpm --filter @agentmux/desktop exec vitest run test/session-continuation.test.ts --maxWorkers=1",
+        "exit_code": 0,
+        "status": "pass"
+      },
+      {
+        "command": "pnpm --filter @agentmux/desktop typecheck",
         "exit_code": 0,
         "status": "pass"
       }
     ],
-    "last_log_path": ".bagakit/feature-tracker/features/f-2538fz2rm/artifacts/gate-T-003-r7-0001.log"
+    "last_log_path": ".bagakit/feature-tracker/features/f-2538fz2rm/artifacts/gate-T-016-r16-0001.log"
   },
   "history": [
     {
@@ -157,6 +162,122 @@
     {
       "action": "task_plan_set",
       "detail": "revision=7; supersedes_revision=6"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-006"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-006 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-006 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-008"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-008 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-008 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-009"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-009 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-009 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-010"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-010 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-010 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-011"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-011 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-011 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-013"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-013 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-013 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-015"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-015 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-015 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-007"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-007 => fail"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-007 => failed"
+    },
+    {
+      "action": "task_failed",
+      "detail": "T-007 => assumption disproved; replan required"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=8; supersedes_revision=7"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-016"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-016 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-016 => done"
     }
   ],
   "goal_contract": {
