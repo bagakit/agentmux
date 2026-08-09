@@ -37,3 +37,5 @@ export * from './session-timeline.js'
 export * from './workbench-layout-preset.js'
 export * from './types.js'
 export { discoverAgentSkills, type AgentSkill } from './agent-skills.js'
+
+export * from "./continuous-progress-scheduler.js"
