@@ -18,6 +18,7 @@ import { AgentMuxError } from './errors.js'
 import { connectLocalAgentMux } from './runtime-client.js'
 import { OrderedSessionOutputFollow } from './session-output-follow.js'
 import { isWorkbenchLayoutPreset } from './workbench-layout-preset.js'
+import { registerAgentRole, resolveAgentRole, readAgentRoleBindings } from './agent-role-directory.js'
 
 // 版本号的唯一真相是 package.json 的 `version`——那是 npm 发布、也是用户 `--version` 应当与之一致的
 // 那个字段。这里用 `with { type: 'json' }` 直接引用它，而不是手抄一份常量：tsc 在 NodeNext 下把
@@ -29,7 +30,8 @@ const CLI_ERROR_CODES = [
   ...AGENTMUX_CONTROL_ERROR_CODES,
   'INVALID_CLI_ARGUMENT',
   'MANAGED_AGENT_CONTEXT_REQUIRED',
-  'AGENTMUX_FAILED'
+  'AGENTMUX_FAILED',
+  'MAINTAINER_TARGET_UNRESOLVED'
 ] as const
 type CliErrorCode = typeof CLI_ERROR_CODES[number]
 type FlagKind = 'boolean' | 'value' | 'data'
@@ -158,6 +160,30 @@ async function inspectCommand(args: readonly string[]): Promise<number> {
     printSuccess('inspect.session', { session })
     return 0
   })
+}
+
+async function roleCommand(args: readonly string[]): Promise<number> {
+  const action = args[0]
+  if (action === 'list') {
+    const bindings = await readAgentRoleBindings(process.cwd())
+    printSuccess('roles.list', { bindings }); return 0
+  }
+  if (action === 'register') {
+    const flags = parseFlags(args.slice(1), { '--role': 'value', '--provider': 'value' })
+    const caller = managedCaller()
+    const role = identifier(flags.values.get('--role'), 'Role')
+    const providerId = identifier(flags.values.get('--provider') ?? process.env.AGENTMUX_AGENT_PROVIDER, 'Provider id')
+    const binding = await registerAgentRole({ role, agentSessionId: caller.agentSessionId, workspacePath: process.cwd(), providerId })
+    printSuccess('roles.register', { binding }); return 0
+  }
+  if (action === 'resolve') {
+    const flags = parseFlags(args.slice(1), { '--role': 'value' })
+    const role = identifier(flags.values.get('--role'), 'Role')
+    const binding = await withClient(async (client) => await resolveAgentRole({ workspacePath: process.cwd(), role, sessionExists: async (id) => { try { await client.statusAgent(id); return true } catch { return false } } }))
+    if (!binding) throw new AgentMuxError('Maintainer role is unresolved or stale.', 'MAINTAINER_TARGET_UNRESOLVED')
+    printSuccess('roles.resolve', { binding }); return 0
+  }
+  throw cliError('roles requires list, register, or resolve.')
 }
 
 async function listCommand(args: readonly string[]): Promise<number> {
@@ -493,6 +519,7 @@ async function main(): Promise<number> {
   if (args[0] === 'doctor') return await doctorCommand(args.slice(1))
   if (args[0] === 'inspect') return await inspectCommand(args.slice(1))
   if (args[0] === 'list') return await listCommand(args.slice(1))
+  if (args[0] === 'roles') return await roleCommand(args.slice(1))
   if (args[0] === 'open') return await openCommand(args.slice(1))
   if (args[0] === 'send') return await sendCommand(args.slice(1))
   if (args[0] === 'discuss') return await discussCommand(args.slice(1))
