@@ -563,7 +563,7 @@
       "heavy": true,
       "heavy_reason": "跨 Core/Main typed 边界并需要并发屏障验证",
       "introduced_in_revision": 1,
-      "status": "in_progress",
+      "status": "done",
       "gate_result": "pass",
       "last_gate_commands": [
         {
@@ -602,9 +602,15 @@
       "heavy": true,
       "heavy_reason": "需协调 Main 生命周期、持久化和 typed control schema",
       "introduced_in_revision": 1,
-      "status": "todo",
-      "gate_result": null,
-      "last_gate_commands": [],
+      "status": "in_progress",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop exec vitest run test/continuous-progress-loop-manager.test.ts test/continuous-progress-loop-store.test.ts",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
       "notes": []
     },
     {
