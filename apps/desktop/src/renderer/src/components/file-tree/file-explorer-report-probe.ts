@@ -3,14 +3,14 @@ export type RejectedFileExplorerDirectoryLoad = {
   path: string
 }
 
-let rejectedLoadListener: ((receipt: RejectedFileExplorerDirectoryLoad) => void) | null = null
+const rejectedLoadListeners = new Set<(receipt: RejectedFileExplorerDirectoryLoad) => void>()
 
 export function observeRejectedFileExplorerDirectoryLoads(
   listener: (receipt: RejectedFileExplorerDirectoryLoad) => void
 ): () => void {
-  rejectedLoadListener = listener
+  rejectedLoadListeners.add(listener)
   return () => {
-    if (rejectedLoadListener === listener) rejectedLoadListener = null
+    rejectedLoadListeners.delete(listener)
   }
 }
 
@@ -18,5 +18,6 @@ export function recordRejectedFileExplorerDirectoryLoad(
   workspaceId: string,
   path: string
 ): void {
-  rejectedLoadListener?.({ workspaceId, path })
+  const receipt = { workspaceId, path }
+  for (const listener of rejectedLoadListeners) listener(receipt)
 }

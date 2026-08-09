@@ -177,7 +177,7 @@ async function explorerProjectionEvidence(window: BrowserWindow): Promise<Explor
   let evidence: ExplorerProjectionEvidence | null = null
   await waitFor('mounted Explorer projection evidence receipt', async () => {
     evidence = await window.webContents.executeJavaScript(`(() => {
-      const value = document.querySelector('.file-tree')?.dataset.fileEditingExplorerEvidence
+      const value = document.documentElement.dataset.fileEditingExplorerEvidence
       return value ? JSON.parse(value) : null
     })()`) as ExplorerProjectionEvidence | null
     return evidence !== null
