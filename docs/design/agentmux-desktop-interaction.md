@@ -658,3 +658,6 @@ Desktop 刷新或重新 Attach 时优先投影这份 Agent 语义；新的 Run `
 
 - CPU/Memory 面板复用 Activity/Agents 的列表语言：图标、对象、当前值、次级上下文和处理动作，不使用孤立的大数字卡片。
 - 每个资源对象尽量显示所属 Project/Workspace、Agent/Provider 和最近活动/idle 时长；没有归属时明确显示 unknown。资源采样与 Agent 语义状态分开，不能把低 CPU 误判成 Agent idle。
+
+### 2026-09-12 资源与 Activity 观测
+Status Bar 的资源面板必须能把每个进程关联到项目/工作区、Provider 与当前 Agent 状态；空闲时显示可理解的 idle 时长。资源数值与 Agent 语义状态分开，缺失数据保持未知。Activity 展开行只补充能帮助定位的上下文，不重复左侧 Agents 入口。

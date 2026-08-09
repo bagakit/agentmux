@@ -8,7 +8,8 @@
   "source_refs": [
     "docs/reviews/continuous-progress-2026-09-12.md",
     "docs/design/agentmux-desktop-interaction.md",
-    "docs/design/agentmux-surface-density.md"
+    "docs/design/agentmux-surface-density.md",
+    "docs/reviews/feature-audit-2026-09-12.md"
   ],
   "plan_history": [
     {
@@ -899,7 +900,9 @@
       "status": "todo",
       "gate_result": null,
       "last_gate_commands": [],
-      "notes": []
+      "notes": [
+        "2026-09-12: 资源行已接入 Project/Workspace、Provider、idle 上下文；待 gate/变异/调用者检查。"
+      ]
     }
   ]
 }

@@ -434,3 +434,6 @@ styles/
 
 - 资源面板使用紧凑列表行，优先显示对象与 CPU/Memory，Project/Workspace 和 idle 时长作为次级信息；总览仍保持一行摘要。
 - 沿用 Agents/Activity 的 Provider 图标、圆角、行高和 hover 说明，避免出现第三套列表视觉语言。
+
+### 2026-09-12 资源面板密度
+CPU/Memory 面板复用 Activity 行的紧凑列表语言：一行一个 Agent，首行身份，次行项目与状态，指标靠右；默认折叠，展开后不重复冗余标题。

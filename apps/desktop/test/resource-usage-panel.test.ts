@@ -69,7 +69,7 @@ describe('把采样配上 Agent 的名字', () => {
       snapshot({ runs: [{ runId: 'run-1', processCount: 2, cpuPercent: 5, rssKib: 102_400 }] }),
       [agent('s1', 'run-1', 'Reviewer')]
     )
-    expect(rows).toEqual([{ key: 'run-1', label: 'Reviewer', cpuText: '5.0%', rssText: '100 MiB' }])
+    expect(rows).toEqual([{ key: 'run-1', label: 'Reviewer', cpuText: '5.0%', rssText: '100 MiB', contextText: 'claude · w', stateText: 'working' }])
   })
 
   it('配不上名字的 run 仍然显示', () => {
@@ -92,6 +92,6 @@ describe('把采样配上 Agent 的名字', () => {
       snapshot({ runs: [{ runId: 'run-1', processCount: 0, cpuPercent: null, rssKib: null }] }),
       [agent('s1', 'run-1', 'Gone')]
     )
-    expect(rows[0]).toEqual({ key: 'run-1', label: 'Gone', cpuText: '—', rssText: '—' })
+    expect(rows[0]).toEqual({ key: 'run-1', label: 'Gone', cpuText: '—', rssText: '—', contextText: 'claude · w', stateText: 'working' })
   })
 })
