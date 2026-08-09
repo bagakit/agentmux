@@ -1,0 +1,89 @@
+{
+  "version": 2,
+  "feat_id": "f-2538fz2rm",
+  "plan_status": "reviewed",
+  "plan_revision": 1,
+  "supersedes_revision": null,
+  "review_ref": "docs/reviews/continuous-progress-followup-2026-09-12.md",
+  "source_refs": [
+    "docs/reviews/continuous-progress-followup-2026-09-12.md"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": "docs/reviews/continuous-progress-followup-2026-09-12.md",
+      "source_refs": [
+        "docs/reviews/continuous-progress-followup-2026-09-12.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {}
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "depends_on": [],
+      "title": "Make Explorer projection receipts owner-scoped and monotonic",
+      "objective": "Keep probe evidence in a stable renderer owner/store across Workspace remounts without feedback loops.",
+      "outcome": "Workspace revisit and move assertions observe monotonic receipts and no duplicate projection notifications.",
+      "acceptance": [
+        "Evidence survives Workspace switch/remount",
+        "Repeated reads do not mutate or schedule renders"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/workspace-files.test.ts test/workspace-removal-observer-disposal.test.ts --maxWorkers=1",
+          "proves": "projection behavior"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/continuous-progress-followup-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "in_progress",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "pnpm --filter @agentmux/desktop exec vitest run test/workspace-files.test.ts test/workspace-removal-observer-disposal.test.ts --maxWorkers=1",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "T-002",
+      "depends_on": [],
+      "title": "Convergent and idempotent native Agent stop cleanup",
+      "objective": "Ensure shutdown and probe cleanup stop only owned runs and converge when a run is already exiting or absent.",
+      "outcome": "No native session remains live after graceful and forced stop phases; repeated stop is safe.",
+      "acceptance": [
+        "Already exited or missing run resolves cleanup without stale live process",
+        "Stop path remains bounded and ownership-scoped"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/runtime-controller.test.ts test/resource-probe-behavior.test.ts --maxWorkers=1",
+          "proves": "stop lifecycle behavior"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/continuous-progress-followup-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    }
+  ]
+}

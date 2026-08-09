@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "feat_id": "f-2538fz2rm",
+  "title": "AgentMux 持续推进与运行时收敛后续",
+  "slug": "continuous-progress-loop-followup",
+  "goal": "完成 Explorer 证据稳定性与 Agent stop 收敛，随后安全打包安装重启。",
+  "status": "in_progress",
+  "workspace_mode": "current_tree",
+  "base_ref": "main",
+  "branch": "",
+  "worktree_name": "",
+  "worktree_path": "",
+  "runtime_role": "standalone",
+  "runtime_relations": [],
+  "counters": {
+    "gate_fail_streak": 0,
+    "no_progress_rounds": 1,
+    "round_count": 1
+  },
+  "gate": {
+    "last_result": "pass",
+    "last_task_id": "T-001",
+    "last_check_commands": [
+      {
+        "command": "pnpm --filter @agentmux/desktop exec vitest run test/workspace-files.test.ts test/workspace-removal-observer-disposal.test.ts --maxWorkers=1",
+        "exit_code": 0,
+        "status": "pass"
+      }
+    ],
+    "last_log_path": ".bagakit/feature-tracker/features/f-2538fz2rm/artifacts/gate-T-001-r1-0001.log"
+  },
+  "history": [
+    {
+      "action": "feat_created",
+      "detail": "workspace_mode=current_tree; base_ref=main; root_branch=main"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-001"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-001 => pass"
+    }
+  ]
+}

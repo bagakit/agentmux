@@ -1,0 +1,977 @@
+{
+  "version": 1,
+  "generated_by": "bagakit-feature-tracker",
+  "feature_id_issuance": {
+    "scheme": "feature-tracker-id-v1-c3n2g4",
+    "next_cursor": 95
+  },
+  "features": [
+    {
+      "feat_id": "f-2228fpnqm",
+      "title": "AgentMux tmux Runtime and Desktop Workbench",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "blocked_reason_class": "none",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2238fbdxh",
+      "title": "Orca-informed AgentMux Interaction Redesign",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "blocked_reason_class": "none",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2248f4yx5",
+      "title": "AgentMux Core Maturity",
+      "status": "blocked",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2258fa79w",
+      "title": "Authorized Image Input and Mouse-First Interaction",
+      "status": "discarded",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2268fqs8a",
+      "title": "Reliable Agent-to-Agent Conversations",
+      "status": "discarded",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "blocked_reason_class": "none",
+      "runtime_relations": [],
+      "replacement_feat_id": "f-2248f4yx5"
+    },
+    {
+      "feat_id": "f-2278ffae4",
+      "title": "Semantic Session Continuity and Recovery",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2288fvrq9",
+      "title": "AgentMux Desktop Productization and Terminal",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "blocked_reason_class": "none",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2298fjkx4",
+      "title": "AI-Native Desktop Composition CLI",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "blocked_reason_class": "none",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-22a8fj56c",
+      "title": "Terminal Replay Gap Recovery",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "blocked_reason_class": "none",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-22b8frrax",
+      "title": "Workspace Agents Tool",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "blocked_reason_class": "none",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-22c8fsuma",
+      "title": "Managed Agent Bootstrap Guide",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "blocked_reason_class": "none",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-22d8fjgam",
+      "title": "Ctxmux Disk Full Recovery",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "blocked_reason_class": "none",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-22e8fct3h",
+      "title": "Desktop Composition Cancellation Boundary",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "blocked_reason_class": "none",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-22f8fbbe9",
+      "title": "Spatial Composition and Agent Launch Readiness",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "blocked_reason_class": "none",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-22g8fr92p",
+      "title": "Provider Timeline and Executors",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "blocked_reason_class": "none",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-22h8f7tpm",
+      "title": "Agent Session Composer",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "blocked_reason_class": "none",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-22j8frn9v",
+      "title": "Agent-Native Browser Workspace",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-22k8fnkws",
+      "title": "Conversation and Activity Workspace",
+      "status": "discarded",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "blocked_reason_class": "none",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-22m8fkpar",
+      "title": "Workspace File Operations and Editing",
+      "status": "archived",
+      "workspace_mode": "worktree",
+      "branch": "feat/f-22m8fkpar",
+      "worktree_name": "wt-f-22m8fkpar",
+      "runtime_role": "standalone",
+      "blocked_reason_class": "none",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-22n8fpyst",
+      "title": "Unified AgentMux Control Protocol",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "blocked_reason_class": "none",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-22p8f93c8",
+      "title": "Attention Surfaces and Failure Visibility",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-22q8f25qd",
+      "title": "Parallel Worktree Fan-Out",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-22r8feyju",
+      "title": "Steer a Working Agent",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-22s8fc9kd",
+      "title": "Claude Model and Effort Launch Options",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-22t8fckeu",
+      "title": "Readable Agent Output and Reachable Panes",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-22u8fc2g6",
+      "title": "Composer Surface and Honest Interrupt",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-22v8frrxw",
+      "title": "Full Markdown in the Conversation",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-22w8fsmnv",
+      "title": "Worktree Path Inside the Project",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-22x8fwvng",
+      "title": "Topic Holds Many Agents",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-22y8fh4jr",
+      "title": "Move a Session View to Another Worktree",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-22z8fapnn",
+      "title": "Interactive Activity Timeline",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2328fmmvk",
+      "title": "Reveal an Unopenable File in Finder",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2338fu3ws",
+      "title": "Honest Executor Install State",
+      "status": "discarded",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2348f78d7",
+      "title": "Launch Argument Tokenisation",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2358f2swt",
+      "title": "Git Source Control and Pull Requests",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2368fh2tg",
+      "title": "Honest Prompt Readiness Refusal",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2378fnh3k",
+      "title": "Copy an Address, Not an ID",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2388fkprc",
+      "title": "Switching a Topic Switches Its Tabs",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2398feb76",
+      "title": "Topic Rows Show Agent Status, Not Filler",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-23a8ftmaj",
+      "title": "AgentMux Desktop Workline Surfaces",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-23b8fh58m",
+      "title": "AgentMux Surface Language & Live Region",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-23c8fc6z3",
+      "title": "AgentMux Agent Address, Envelope and Terminal Fidelity",
+      "status": "blocked",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-23d8fwq4z",
+      "title": "Managed Agent Handoff and Conversation Entry",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-23e8f89d8",
+      "title": "CtxMux Remote and SSH Contract",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-23f8f4eb2",
+      "title": "重启后布局还在，session 能直接 resume",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-23g8feb8c",
+      "title": "流程坏了不等于 Agent 坏了：三态分流与服务窗",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-23h8fh9wj",
+      "title": "Topic-owned Tab Creation",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-23j8f43ck",
+      "title": "First-class Agent Session Continuity",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-23k8f8avd",
+      "title": "AgentMux Surface Memory Budget and Cold Parking",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-23m8f4b7g",
+      "title": "终端恢复态：永不无限转圈，且有品牌感",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-23n8fqxe6",
+      "title": "Ctxmux WAL Checkpoint Resilience and Packaged Continuity",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-23p8fsbs8",
+      "title": "对话模式：把工具结果、diff、跟随和在想说清楚",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-23q8faabh",
+      "title": "Core Prompt Path Screen Evidence Optimization",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-23r8fq5nw",
+      "title": "成熟度追赶：运行时保真、工程韧性与交互摩擦",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-23s8f57up",
+      "title": "AgentMux Packaged Artifact Identity and Canonical Install",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-23t8f8a5c",
+      "title": "AgentMux Host、重启恢复与 Topic 头像回归修复",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-23u8fapwh",
+      "title": "AgentMux Terminal Responsiveness and Capability Probes",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-23v8fs9da",
+      "title": "Repair stale managed AgentMux hooks after App replacement",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-23w8ffzet",
+      "title": "Agent Session store lock recovery",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-23x8fnwcr",
+      "title": "Terminal viewport and visual output continuity",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-23y8f5pva",
+      "title": "对话体的说话人身份：头像、双轴 ruler、可复用组件",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-23z8fgsw3",
+      "title": "Orca-informed Provider Parity",
+      "status": "ready",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2428fx658",
+      "title": "Prompt readiness 诊断分类",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2438fjfn8",
+      "title": "Workspace 导航与路径恢复细化",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2448fd7a3",
+      "title": "Terminal restart projection cleanup",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2458fbphz",
+      "title": "AgentMux Packaging SSOT and Change Audit",
+      "status": "blocked",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2468fk4ff",
+      "title": "AgentMux 协作事故案例集",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2478fhyhg",
+      "title": "AgentMux 功能消失案例：旧包与错误启动副本",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2488f2knq",
+      "title": "Terminal HTTP Link Boundary",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2498fjcpd",
+      "title": "配置数据耐久性：版本升级不得销毁用户创作数据",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-24a8f93p7",
+      "title": "会话分叉与延续：从一条消息开出新会话",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-24b8f37dv",
+      "title": "主题切换：多套完整外观与跟随系统",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-24c8fqsgc",
+      "title": "窗口外壳：自有标题栏与系统按钮",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-24d8fcuhy",
+      "title": "对话里的图片：贴图为缩略图而非链接",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-24e8ffbzq",
+      "title": "Region 布局的任意元数与重排",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-24f8fru6a",
+      "title": "New Browser 可见启动与错误反馈",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-24g8fq2ss",
+      "title": "整体 review：发送可靠性、Region 焦点与 Board 一致性",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-24h8f6xgc",
+      "title": "本地 Shell 环境继承",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-24j8fxknj",
+      "title": "Runtime 兼容性与归属边界",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-24k8ftgmm",
+      "title": "文件树目录作为项目打开",
+      "status": "proposal",
+      "workspace_mode": "proposal_only",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-24m8fphma",
+      "title": "Agent 自助创建与空间操作闭环",
+      "status": "ready",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-24n8fj87m",
+      "title": "菜单悬停展开并安装新版本",
+      "status": "archived",
+      "workspace_mode": "worktree",
+      "branch": "delivery/layered-updates-20260910",
+      "worktree_name": "agentmux-release.hmfsNQ",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-24p8fqgte",
+      "title": "Explorer 真实文件与快捷键位置",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-24q8ff2aw",
+      "title": "可收起的 Agent 快捷输入区",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-24r8fa4j9",
+      "title": "Projects 结构与状态可读性",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-24s8f5q7f",
+      "title": "Layered updates and rollback",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-24t8fnuzz",
+      "title": "Terminal redraw feedback",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-24u8fn4jt",
+      "title": "Terminal IME and rendering stability",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-24v8fec2k",
+      "title": "本地文件预览与按格式编辑",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-24w8fu5x5",
+      "title": "Restart layout and session recovery regression",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-24x8fsvu3",
+      "title": "紧凑 Agent Activity 与 Readiness 恢复",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-24y8fdb3h",
+      "title": "Claude 与 Codex 一键 YOLO",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-24z8fwce3",
+      "title": "Composer 消息队列与紧凑状态",
+      "status": "done",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2528fmqbw",
+      "title": "AgentMux 持续推进、消息工具与工作面体验",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-2538fz2rm",
+      "title": "AgentMux 持续推进与运行时收敛后续",
+      "status": "in_progress",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "runtime_relations": []
+    }
+  ]
+}
