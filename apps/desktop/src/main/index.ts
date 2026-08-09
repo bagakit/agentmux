@@ -276,6 +276,13 @@ function startPrimaryInstance(): void {
     }
     const fileEditingConfig = await configStore.get()
     if (process.env.AGENTMUX_DESKTOP_FILE_EDITING_REPORT) {
+      const startupDom = await window.webContents.executeJavaScript(`(() => ({
+        url: location.href,
+        ready: document.readyState,
+        rows: document.querySelectorAll('.project-rail-row').length,
+        body: document.body.innerText.slice(0, 400)
+      }))()`).catch((error) => ({ error: String(error) }))
+      process.stderr.write(`file_editing_startup_dom=${JSON.stringify(startupDom)}\n`)
       const mountedWorkspaces = fileEditingConfig.workspaces.filter((workspace) => !isScratchWorkspaceId(workspace.id))
       const primaryWorkspace = mountedWorkspaces.find((workspace) => workspace.id === 'workspace-file-editing-e2e')
       const alternateWorkspace = mountedWorkspaces.find((workspace) => workspace.id === 'workspace-file-editing-alternate-e2e')
