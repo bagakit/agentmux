@@ -748,7 +748,9 @@
       "status": "todo",
       "gate_result": null,
       "last_gate_commands": [],
-      "notes": []
+      "notes": [
+        "Core scheduler recover() now claims at most one overdue tick after restart; Main integration remains."
+      ]
     },
     {
       "id": "T-009",
