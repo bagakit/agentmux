@@ -249,8 +249,13 @@ function startPrimaryInstance(): void {
           ).catch(() => {})
         }
       })
-      await rendererUpdates.initialize()
-      rendererUpdates.start()
+      // Packaged smoke verification must exercise the bundled renderer deterministically;
+      // a persisted hot-update candidate can otherwise wait for an update-ready token that
+      // the isolated verification page never emits.
+      if (!process.env.AGENTMUX_DESKTOP_READY_FILE) {
+        await rendererUpdates.initialize()
+        rendererUpdates.start()
+      }
       window.once('closed', () => rendererUpdates?.dispose())
     }
     const rendererLoadedAtMs = Date.now()
