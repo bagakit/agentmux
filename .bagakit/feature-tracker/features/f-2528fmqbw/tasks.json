@@ -558,7 +558,9 @@
       "status": "todo",
       "gate_result": null,
       "last_gate_commands": [],
-      "notes": []
+      "notes": [
+        "Core ContinuousProgressScheduler added: durable records, due/claimTick, pause/resume/stop; Desktop persistence/integration remains."
+      ]
     },
     {
       "id": "T-003",
