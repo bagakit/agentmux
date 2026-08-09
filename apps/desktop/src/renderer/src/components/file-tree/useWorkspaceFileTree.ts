@@ -94,6 +94,9 @@ export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<
 
   useLayoutEffect(() => {
     loadTrackerRef.current.activate(loadScope)
+    return () => {
+      loadTrackerRef.current.deactivate(loadScope)
+    }
   }, [loadScope])
 
   useEffect(() => {
