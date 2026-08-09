@@ -143,6 +143,11 @@ function Inline({ nodes, context }: { nodes: InlineNode[]; context: InlineContex
         if (node.kind === 'strong') return <strong key={key}><Inline nodes={node.children} context={context} /></strong>
         if (node.kind === 'emphasis') return <em key={key}><Inline nodes={node.children} context={context} /></em>
         if (node.kind === 'strike') return <del key={key}><Inline nodes={node.children} context={context} /></del>
+        if (node.kind === 'image') {
+          const fileHref = context.openWorkspaceFile ? classifyMarkdownLinkHref(node.href, context.workspaceRoot, context.homeDir) : null
+          if (fileHref && context.openWorkspaceFile) return <button key={key} type="button" className="md-image-attachment" title={fileHref.path} onClick={() => context.openWorkspaceFile?.(fileHref.path, referenceRevealLocation(fileHref))}>🖼️ {node.alt || fileHref.path}</button>
+          return <span key={key} className="md-image-attachment md-image-attachment--unavailable" title="Only workspace images can be previewed">🖼️ {node.alt || node.href}</span>
+        }
         // An explicit `[label](path)` pointing inside the Workspace opens the file. Everything else,
         // http(s) included, keeps leaving through the external seam that Main already adjudicates.
         const fileHref = context.openWorkspaceFile
