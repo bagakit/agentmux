@@ -49,6 +49,10 @@
     {
       "action": "task_gate",
       "detail": "T-002 => pass"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=2; supersedes_revision=1"
     }
   ]
 }

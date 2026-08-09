@@ -2,11 +2,12 @@
   "version": 2,
   "feat_id": "f-2538fz2rm",
   "plan_status": "reviewed",
-  "plan_revision": 1,
-  "supersedes_revision": null,
+  "plan_revision": 2,
+  "supersedes_revision": 1,
   "review_ref": "docs/reviews/continuous-progress-followup-2026-09-12.md",
   "source_refs": [
-    "docs/reviews/continuous-progress-followup-2026-09-12.md"
+    "docs/reviews/continuous-progress-followup-2026-09-12.md",
+    "docs/design/agentmux-desktop-interaction.md"
   ],
   "plan_history": [
     {
@@ -22,6 +23,31 @@
       ],
       "superseded_task_ids": [],
       "supersedes_by_task": {}
+    },
+    {
+      "revision": 2,
+      "supersedes_revision": 1,
+      "review_ref": "docs/reviews/continuous-progress-followup-2026-09-12.md",
+      "source_refs": [
+        "docs/reviews/continuous-progress-followup-2026-09-12.md",
+        "docs/design/agentmux-desktop-interaction.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {},
+      "dependency_changes": {
+        "added": [
+          {
+            "from": "T-001",
+            "to": "T-003"
+          }
+        ],
+        "removed": []
+      }
     }
   ],
   "tasks": [
@@ -89,6 +115,35 @@
           "status": "pass"
         }
       ],
+      "notes": []
+    },
+    {
+      "id": "T-003",
+      "depends_on": [
+        "T-001"
+      ],
+      "title": "验证 operation-scoped Explorer receipt",
+      "objective": "Replace aggregate DOM counter assumptions with operation and epoch scoped mounted verification.",
+      "outcome": "Mounted Move verification survives Workspace remounts without lost or duplicate evidence.",
+      "acceptance": [
+        "Receipt identifies workspace, epoch and operation",
+        "Repeated reads do not mutate state"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop package:mac",
+          "proves": "Mounted packaged verification"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/continuous-progress-followup-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 2,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
       "notes": []
     }
   ]

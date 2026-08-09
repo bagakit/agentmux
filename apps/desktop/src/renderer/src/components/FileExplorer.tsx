@@ -71,7 +71,6 @@ import {
   useWorkspaceFileTree,
   type TreeNode
 } from './file-tree/useWorkspaceFileTree'
-import { observeRejectedFileExplorerDirectoryLoads } from './file-tree/file-explorer-report-probe'
 import { FileTreeContextMenu } from './file-tree/FileTreeContextMenu'
 import { isMacPlatform } from '../lib/host-platform'
 import {
@@ -422,47 +421,6 @@ export function FileExplorer({
     }),
     [refreshGitStatus, tree.refreshTree]
   )
-
-  useEffect(() => {
-    if (new URLSearchParams(window.location.search).get('agentmux-file-editing-report') !== '1') {
-      return
-    }
-    let total = 0
-    let byWorkspace: Record<string, number> = {}
-    let rejectedDirectoryLoads: Array<{ workspaceId: string; path: string }> = []
-    const mountId = crypto.randomUUID()
-    const publish = () => {
-      if (!treeRootRef.current) return
-      treeRootRef.current.dataset.fileEditingExplorerEvidence = JSON.stringify({
-        mountId,
-        total,
-        byWorkspace,
-        rejectedDirectoryLoads
-      })
-    }
-    const unsubscribeStore = useAppStore.subscribe((state, previous) => {
-      if (state.fileExplorerStates === previous.fileExplorerStates) return
-      total += 1
-      for (const id of new Set([
-        ...Object.keys(state.fileExplorerStates),
-        ...Object.keys(previous.fileExplorerStates)
-      ])) {
-        if (state.fileExplorerStates[id] !== previous.fileExplorerStates[id]) {
-          byWorkspace[id] = (byWorkspace[id] ?? 0) + 1
-        }
-      }
-      publish()
-    })
-    const unsubscribeRejectedLoads = observeRejectedFileExplorerDirectoryLoads((receipt) => {
-      rejectedDirectoryLoads = [...rejectedDirectoryLoads, receipt]
-      publish()
-    })
-    publish()
-    return () => {
-      unsubscribeStore()
-      unsubscribeRejectedLoads()
-    }
-  }, [])
 
   function setExpanded(update: SetStateAction<Set<string>>): void {
     if (!workspaceId) return

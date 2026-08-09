@@ -678,3 +678,5 @@ Region 的右键菜单必须提供“移位”入口，允许在当前工作面�
 - 文件 observer 属于创建它的应用进程；宿主异常退出也必须终止观察，不能成为长期存活的孤儿。此约束不改变 ctxmux 对用户 Run 的持有和恢复语义。
 
 - 验证模式的启动落点只决定初始选择，不能持续覆盖用户或 probe 随后的 Workspace 切换；测试模式不得使项目切换失效。
+
+- 文件树跨 Workspace 的验证事件必须按操作和 Workspace epoch 归属；挂载重建不许复用聚合 DOM 计数推断一次 mutation。Move 提交只产生一条权威 receipt，旧 epoch 的刷新明确记为 rejected，Stop 对已消失 Run 归入幂等终态。

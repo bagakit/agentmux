@@ -30,6 +30,7 @@ import { TransientErrorNotice } from './components/TransientErrorNotice'
 import { WorkspaceWorkbench } from './components/WorkspaceWorkbench'
 import { api } from './lib/api'
 import { useAppStore } from './store'
+import { observeRejectedFileExplorerDirectoryLoads } from './components/file-tree/file-explorer-report-probe'
 import { isMacPlatform } from './lib/host-platform'
 import {
   TerminalParkingProvider,
@@ -64,6 +65,31 @@ export function App() {
   const selectWorkspace = useAppStore((state) => state.selectWorkspace)
   const fileEditingProbe = typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).get('agentmux-file-editing-report') === '1'
+  useEffect(() => {
+    if (!fileEditingProbe) return
+    let total = 0
+    const byWorkspace: Record<string, number> = {}
+    const rejectedDirectoryLoads: Array<{ workspaceId: string; path: string }> = []
+    const publish = () => {
+      document.documentElement.dataset.fileEditingExplorerEvidence = JSON.stringify({
+        mountId: 'app', total, byWorkspace, rejectedDirectoryLoads
+      })
+    }
+    const unsubscribeStore = useAppStore.subscribe((state, previous) => {
+      if (state.fileExplorerStates === previous.fileExplorerStates) return
+      total += 1
+      for (const id of new Set([...Object.keys(state.fileExplorerStates), ...Object.keys(previous.fileExplorerStates)])) {
+        if (state.fileExplorerStates[id] !== previous.fileExplorerStates[id]) byWorkspace[id] = (byWorkspace[id] ?? 0) + 1
+      }
+      publish()
+    })
+    const unsubscribeRejectedLoads = observeRejectedFileExplorerDirectoryLoads((receipt) => {
+      rejectedDirectoryLoads.push(receipt)
+      publish()
+    })
+    publish()
+    return () => { unsubscribeStore(); unsubscribeRejectedLoads() }
+  }, [fileEditingProbe])
   // A Workbench is a window-owned surface, not a route component. Keep only Workspaces the user has
   // a persisted surface for (plus the active one during its first layout frame) mounted: switching
   // back then changes visibility instead of destroying SessionPane/xterm/ctxmux attachments, while an
