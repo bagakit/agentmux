@@ -74,13 +74,6 @@ import {
 import { observeRejectedFileExplorerDirectoryLoads } from './file-tree/file-explorer-report-probe'
 import { FileTreeContextMenu } from './file-tree/FileTreeContextMenu'
 import { isMacPlatform } from '../lib/host-platform'
-
-// Probe evidence is renderer-owned so it survives Workspace remounts.
-const explorerProbeEvidence = {
-  total: 0,
-  byWorkspace: {} as Record<string, number>,
-  rejectedDirectoryLoads: [] as Array<{ workspaceId: string; path: string }>
-}
 import {
   fileExplorerDropDirectory,
   fileExplorerMoveTargets,
@@ -434,29 +427,34 @@ export function FileExplorer({
     if (new URLSearchParams(window.location.search).get('agentmux-file-editing-report') !== '1') {
       return
     }
+    let total = 0
+    let byWorkspace: Record<string, number> = {}
+    let rejectedDirectoryLoads: Array<{ workspaceId: string; path: string }> = []
+    const mountId = crypto.randomUUID()
     const publish = () => {
       if (!treeRootRef.current) return
       treeRootRef.current.dataset.fileEditingExplorerEvidence = JSON.stringify({
-        total: explorerProbeEvidence.total,
-        byWorkspace: explorerProbeEvidence.byWorkspace,
-        rejectedDirectoryLoads: explorerProbeEvidence.rejectedDirectoryLoads
+        mountId,
+        total,
+        byWorkspace,
+        rejectedDirectoryLoads
       })
     }
     const unsubscribeStore = useAppStore.subscribe((state, previous) => {
       if (state.fileExplorerStates === previous.fileExplorerStates) return
-      explorerProbeEvidence.total += 1
+      total += 1
       for (const id of new Set([
         ...Object.keys(state.fileExplorerStates),
         ...Object.keys(previous.fileExplorerStates)
       ])) {
         if (state.fileExplorerStates[id] !== previous.fileExplorerStates[id]) {
-          explorerProbeEvidence.byWorkspace[id] = (explorerProbeEvidence.byWorkspace[id] ?? 0) + 1
+          byWorkspace[id] = (byWorkspace[id] ?? 0) + 1
         }
       }
       publish()
     })
     const unsubscribeRejectedLoads = observeRejectedFileExplorerDirectoryLoads((receipt) => {
-      explorerProbeEvidence.rejectedDirectoryLoads.push(receipt)
+      rejectedDirectoryLoads = [...rejectedDirectoryLoads, receipt]
       publish()
     })
     publish()
