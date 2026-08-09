@@ -7,7 +7,7 @@ vi.hoisted(() => {
 
 import { api } from '../src/renderer/src/lib/api.js'
 import { bumpWorkspaceFileRevision } from '../src/renderer/src/lib/file-workbench-state.js'
-import { createWorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.js'
+import { createWorkspaceLayout } from '@agentmux/layout'
 import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics.js'
 import type { AppConfig } from '../src/shared/contracts.js'
 import { useAppStore } from '../src/renderer/src/store.js'

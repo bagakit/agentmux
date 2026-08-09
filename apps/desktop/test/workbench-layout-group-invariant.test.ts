@@ -11,7 +11,7 @@ import {
   type TabGroup,
   type TabGroupLayoutNode,
   type WorkspaceLayout
-} from '../src/renderer/src/lib/workbench-layout'
+} from '@agentmux/layout'
 import {
   projectPersistedWorkbench,
   restorePersistedWorkbench

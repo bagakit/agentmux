@@ -11,7 +11,7 @@ import {
   type AgentWorkbenchSurface,
   type WorkbenchTab
 } from '../src/renderer/src/lib/workbench-tabs.js'
-import { regionIds, workbenchRegionBounds } from '../src/renderer/src/lib/workbench-view-layout.js'
+import { regionIds, workbenchRegionBounds } from '@agentmux/layout'
 
 /**
  * Tab 名的默认策略、手改后不被覆盖、以及"改名不动三级地址"。

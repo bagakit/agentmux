@@ -5,7 +5,7 @@ vi.hoisted(() => {
 })
 
 import type { AppConfig, WorkspaceRecord } from '../src/shared/contracts.js'
-import { createWorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.js'
+import { createWorkspaceLayout } from '@agentmux/layout'
 import {
   createWorkbenchTab,
   documentKey,

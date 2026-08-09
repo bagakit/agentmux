@@ -18,7 +18,7 @@ import {
   moveTabToNewGroup,
   moveTab,
   type WorkspaceLayout
-} from '../src/renderer/src/lib/workbench-layout.js'
+} from '@agentmux/layout'
 import { createWorkbenchTab, type WorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
 
 function tab(id: string, topicId?: string): WorkbenchTab {

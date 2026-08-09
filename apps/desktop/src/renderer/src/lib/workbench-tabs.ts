@@ -9,10 +9,7 @@ import {
   findGroup,
   findGroupForTab,
   removeTab,
-  type WorkspaceLayout
-} from './workbench-layout'
-import { leafIdsMatchRecords } from './split-tree'
-import {
+  leafIdsMatchRecords,
   balanceWorkbenchRegionLayout,
   closeWorkbenchRegion,
   createWorkbenchViewLayout,
@@ -20,9 +17,10 @@ import {
   regionIds,
   splitWorkbenchRegion,
   swapWorkbenchRegions,
-  type WorkbenchViewLayout
-} from './workbench-view-layout'
-import type { SplitDirection } from './workbench-layout'
+  type WorkspaceLayout,
+  type WorkbenchViewLayout,
+  type SplitDirection
+} from '@agentmux/layout'
 import {
   scratchTopicIdFromWorkspacePath,
   workspaceOwnsSessionPath

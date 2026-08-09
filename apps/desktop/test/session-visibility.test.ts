@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { SCRATCH_WORKSPACE_ID } from '../src/shared/contracts.js'
 import type { WorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
-import type { WorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.js'
-import { createWorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.js'
+import { createWorkspaceLayout, type WorkspaceLayout } from '@agentmux/layout'
 import {
   sessionVisibility,
   visibleSessionIds,

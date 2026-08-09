@@ -7,7 +7,7 @@ vi.hoisted(() => {
 import type { AgentLaunchResult, AppConfig, BrowserSnapshot, SessionSnapshot, WorkspaceRecord } from '../src/shared/contracts.js'
 import { api } from '../src/renderer/src/lib/api.js'
 import { revealFileExplorerPath } from '../src/renderer/src/lib/file-explorer-selection.js'
-import { createWorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.js'
+import { createWorkspaceLayout } from '@agentmux/layout'
 import {
   createWorkbenchTab,
   initialWorkbenchRegionId,

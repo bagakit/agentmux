@@ -7,9 +7,14 @@ import {
   groupIds,
   groupLeafId,
   removeTab,
+  clampSplitTreeRatios,
+  dedupeLeafIds,
+  removeLeaf,
+  closeWorkbenchRegion,
+  regionIds,
+  regionLeafId,
   type WorkspaceLayout
-} from './workbench-layout'
-import { clampSplitTreeRatios, dedupeLeafIds, removeLeaf } from './split-tree'
+} from '@agentmux/layout'
 import {
   removeWorkbenchRegion,
   workbenchSurfaces,
@@ -19,7 +24,6 @@ import {
   type WorkbenchSurface,
   type WorkbenchTab
 } from './workbench-tabs'
-import { closeWorkbenchRegion, regionIds, regionLeafId } from './workbench-view-layout'
 import { assertUnreachableSurface, isSessionSurface } from './workbench-surface-kinds'
 import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
 

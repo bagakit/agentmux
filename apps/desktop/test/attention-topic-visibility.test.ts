@@ -7,7 +7,7 @@ import { visibleSessionIdsForState } from '../src/renderer/src/lib/session-visib
 import { activeTopicIdFromLayout } from '../src/renderer/src/lib/scratch-topic-layout.js'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
 import type { WorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
-import type { WorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.js'
+import type { WorkspaceLayout } from '@agentmux/layout'
 
 // The DEFECT this file closes: "is this Session on screen right now" was answered by two independently
 // written predicate families that had diverged. The recyclers went through `surfaceNavigationVisibility`

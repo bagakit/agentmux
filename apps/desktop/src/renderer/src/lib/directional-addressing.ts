@@ -28,9 +28,13 @@
  */
 
 import type { AgentMuxOpenDestination, AgentMuxRegionNeighbor } from '@agentmux/core/control'
-import type { SplitDirection } from './workbench-layout'
-import type { WorkbenchRegionBounds } from './workbench-view-layout'
-import { orientationOf, placementOf, regionInDirection } from './split-direction'
+import {
+  orientationOf,
+  placementOf,
+  regionInDirection,
+  type SplitDirection,
+  type WorkbenchRegionBounds
+} from '@agentmux/layout'
 
 /**
  * 用户说的那四个方向。与 `open` 的 direction 同名同义，不另起一套词。

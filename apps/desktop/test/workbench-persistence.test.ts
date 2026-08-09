@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts.js'
-import { createWorkspaceLayout } from '../src/renderer/src/lib/workbench-layout.js'
-import { regionIds } from '../src/renderer/src/lib/workbench-view-layout.js'
+import { createWorkspaceLayout, regionIds } from '@agentmux/layout'
 import {
   addWorkbenchRegion,
   createWorkbenchTab,

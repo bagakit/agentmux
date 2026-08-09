@@ -10,7 +10,7 @@ import {
   createWorkspaceLayout,
   findGroupForTab,
   type WorkspaceLayout
-} from '../src/renderer/src/lib/workbench-layout.js'
+} from '@agentmux/layout'
 import {
   addWorkbenchRegion,
   createWorkbenchTab,

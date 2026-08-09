@@ -1,6 +1,6 @@
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { surfaceNavigationVisibility } from './surface-navigation-visibility'
-import type { WorkspaceLayout } from './workbench-layout'
+import type { WorkspaceLayout } from '@agentmux/layout'
 import { documentKey, type WorkbenchSurface, type WorkbenchTab } from './workbench-tabs'
 import { assertUnreachableSurface } from './workbench-surface-kinds'
 import type { SurfaceMemoryCandidate } from './surface-memory-budget'

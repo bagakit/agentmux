@@ -150,14 +150,21 @@ export function enclosingFunction(node: ts.Node): { name: string; body: ts.Node 
   return null
 }
 
-/** 一个源文件里，从 `moduleHint` 具名 import 出来的「本地名 → 规范名」别名表（无别名则为恒等）。 */
+/**
+ * 一个源文件里，从 `moduleHint`（渲染层/包内相对路径）或 `@agentmux/layout`（布局代数包）具名 import
+ * 出来的「本地名 → 规范名」别名表（无别名则为恒等）。
+ *
+ * 为什么要认两种来源：布局代数已抽进 `@agentmux/layout`，渲染层的调用点直接从包 import；而包内部的
+ * reducer 仍以相对路径（`./split-tree` 等）互相引用。两棵源码树都在扫描面里，故两种说明符都要认。
+ */
 export function aliasMapFor(file: ts.SourceFile, moduleHint: string): Map<string, string> {
   const map = new Map<string, string>()
   file.forEachChild((node) => {
     if (
       ts.isImportDeclaration(node) &&
       ts.isStringLiteral(node.moduleSpecifier) &&
-      node.moduleSpecifier.text.replace(/^\.\//, '').endsWith(moduleHint) &&
+      (node.moduleSpecifier.text === '@agentmux/layout' ||
+        node.moduleSpecifier.text.replace(/^\.\//, '').endsWith(moduleHint)) &&
       node.importClause?.namedBindings &&
       ts.isNamedImports(node.importClause.namedBindings)
     ) {

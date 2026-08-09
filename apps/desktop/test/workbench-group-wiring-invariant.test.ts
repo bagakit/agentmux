@@ -94,6 +94,22 @@ describe('每个改动 tab-group 集合的地方都必须过 assertGroupInvarian
     siteAccepts: usesGroupAccessor
   }
 
+  // tab-group 的 reducer（removeTab / moveTab / moveTabToNewGroup）与叶子取值器 groupLeafId 已随
+  // workbench-layout.ts 抽进 @agentmux/layout，split-tree 原语也在包里。而两个豁免消费者
+  // （reconcilePersistedLayout / layoutForActiveTopic）仍在渲染层。于是这道接线闸的扫描面现在横跨
+  // 两棵源码树：渲染层 + 包。下面把两棵树各扫一遍再合并——包里的站点文件标签加 `pkg/` 前缀，与渲染层
+  // 站点区分开。包里的 definer 是 `split-tree.ts`（相对包 src），扫描时同样跳过它自己。
+  const PKG = new URL('../../../packages/layout/src/', import.meta.url).pathname
+  const PKG_CONFIG: LeafSetWiringConfig = { ...CONFIG, rendererRoot: PKG, definer: 'split-tree.ts' }
+
+  /** 两棵树合并后的「会动集合」调用点：包里的站点文件标签加 `pkg/` 前缀。 */
+  function allSites() {
+    return [
+      ...callSites(CONFIG),
+      ...callSites(PKG_CONFIG).map((site) => ({ ...site, file: `pkg/${site.file}` }))
+    ]
+  }
+
   /** 两棵树的叶子取值器。它们逃逸的机制逐字相同，故转发禁令一并扫。 */
   const ACCESSORS = new Set([ACCESSOR, 'regionLeafId'])
 
@@ -182,11 +198,12 @@ describe('每个改动 tab-group 集合的地方都必须过 assertGroupInvarian
 
   function coveredSites() {
     const exempt = new Set(EXEMPT.map((entry) => `${entry.file}::${entry.fn}`))
-    return callSites(CONFIG).filter((site) => !exempt.has(`${site.file}::${site.fn}`))
+    return allSites().filter((site) => !exempt.has(`${site.file}::${site.fn}`))
   }
 
   it('split-tree 的每个导出都在分类表里（新增一个必须在这里回答「它动集合吗」）', () => {
-    const file = parse(RENDERER, DEFINER)
+    // split-tree 已抽进 @agentmux/layout，读包源码（渲染层那份是 `export *` 薄壳，扫不到函数声明）。
+    const file = parse(PKG, 'split-tree.ts')
     const exported: string[] = []
     file.forEachChild((node) => {
       if (
@@ -211,7 +228,7 @@ describe('每个改动 tab-group 集合的地方都必须过 assertGroupInvarian
   })
 
   it('接线层-A（喂对值）：每个会动集合的调用点，其函数里至少有一次 assertGroupInvariant 断言的正是该调用结果派生出的值', () => {
-    const all = callSites(CONFIG)
+    const all = allSites()
     // 在场自检 1：扫不到任何 group 侧「会动集合」的调用点（扫描根写错 / 站点判据整体失灵）→ 恒真。
     expect(all.length, '扫不到任何 tab-group 侧「会动集合」的调用点——扫描根或站点判据出了问题').toBeGreaterThan(3)
     const sites = coveredSites()
@@ -255,17 +272,18 @@ describe('每个改动 tab-group 集合的地方都必须过 assertGroupInvarian
    * 掉一个仍可能在地板之上——那正是站点静默泄漏的形状。这里逐名要求每个都在。
    */
   const REQUIRED_COVERED: ReadonlyArray<{ file: string; fn: string; mutator: string }> = [
-    { file: 'lib/workbench-layout.ts', fn: 'removeTab', mutator: 'removeLeaf' },
-    { file: 'lib/workbench-layout.ts', fn: 'moveTab', mutator: 'removeLeaf' },
-    { file: 'lib/workbench-layout.ts', fn: 'moveTabToNewGroup', mutator: 'removeLeaf' },
-    { file: 'lib/workbench-layout.ts', fn: 'moveTabToNewGroup', mutator: 'replaceLeaf' },
+    // reducer 已抽进 @agentmux/layout（`pkg/` 前缀）；两个持久化/投影消费者仍在渲染层。
+    { file: 'pkg/workbench-layout.ts', fn: 'removeTab', mutator: 'removeLeaf' },
+    { file: 'pkg/workbench-layout.ts', fn: 'moveTab', mutator: 'removeLeaf' },
+    { file: 'pkg/workbench-layout.ts', fn: 'moveTabToNewGroup', mutator: 'removeLeaf' },
+    { file: 'pkg/workbench-layout.ts', fn: 'moveTabToNewGroup', mutator: 'replaceLeaf' },
     { file: 'lib/workbench-persistence.ts', fn: 'reconcilePersistedLayout', mutator: 'removeLeaf' },
     { file: 'lib/workbench-persistence.ts', fn: 'reconcilePersistedLayout', mutator: 'dedupeLeafIds' },
     { file: 'lib/scratch-topic-layout.ts', fn: 'layoutForActiveTopic', mutator: 'removeLeaf' }
   ]
 
   it('覆盖面按名字钉住：七个会动 tab-group 集合的调用点必须都在扫描面里（不靠裸计数地板）', () => {
-    const seen = new Set(callSites(CONFIG).map((site) => `${site.file}::${site.fn}::${site.mutator}`))
+    const seen = new Set(allSites().map((site) => `${site.file}::${site.fn}::${site.mutator}`))
     const missing = REQUIRED_COVERED.filter(
       (want) => !seen.has(`${want.file}::${want.fn}::${want.mutator}`)
     ).map((want) => `${want.file}::${want.fn}() 调 ${want.mutator}`)
@@ -294,9 +312,14 @@ describe('每个改动 tab-group 集合的地方都必须过 assertGroupInvarian
    */
   it('转发禁令：会动集合的原语与两棵树的叶子取值器都不得被当值转发（否则站点整体逃出扫描面）', () => {
     const occurrences: Occurrence[] = []
+    // 两棵源码树都扫：原语与取值器现居 @agentmux/layout，reducer 也在包里；渲染层还留着消费者与薄壳。
     for (const relative of sourceFiles(RENDERER)) {
       const file = parse(RENDERER, relative)
       for (const found of classifyReferencesIn(file)) occurrences.push({ file: relative, ...found })
+    }
+    for (const relative of sourceFiles(PKG)) {
+      const file = parse(PKG, relative)
+      for (const found of classifyReferencesIn(file)) occurrences.push({ file: `pkg/${relative}`, ...found })
     }
     const ALLOWED = new Set(['import-specifier', 'direct-call-callee', 'call-argument', 'own-declaration', 'type-query'])
     const escapes = occurrences
@@ -316,7 +339,7 @@ describe('每个改动 tab-group 集合的地方都必须过 assertGroupInvarian
       occurrences.filter((o) => o.role === 'direct-call-callee' && MUTATORS.has(o.name)).map((o) => `${o.file}::${o.name}`)
     )
     expect(primitiveCalls.size, '本条一个「直接调用 mutator」都没扫到——角色分类器或扫描根失灵，本条失去意义').toBeGreaterThan(3)
-    const groupSites = new Set(callSites(CONFIG).map((site) => `${site.file}::${site.mutator}`))
+    const groupSites = new Set(allSites().map((site) => `${site.file}::${site.mutator}`))
     const unseen = [...groupSites].filter((key) => !primitiveCalls.has(key))
     expect(unseen, 'callSites 认得的 group 站点，本条的角色分类器却没认成直接调用——两个扫描器分岔了').toEqual([])
   })
@@ -324,7 +347,7 @@ describe('每个改动 tab-group 集合的地方都必须过 assertGroupInvarian
   it('豁免清单不留死条目：EXEMPT 里的每一条都仍在调用某个「会动集合」的原语', () => {
     const exempt = new Set(EXEMPT.map((entry) => `${entry.file}::${entry.fn}`))
     // 用**全部**站点（含被豁免的）核对，否则它会悄悄豁免掉一个将来同名的新函数。
-    const live = new Set(callSites(CONFIG).map((site) => `${site.file}::${site.fn}`))
+    const live = new Set(allSites().map((site) => `${site.file}::${site.fn}`))
     const dead = [...exempt].filter((key) => !live.has(key))
     expect(dead, `EXEMPT 里 ${JSON.stringify(dead)} 已经不再调用任何「会动集合」的原语`).toEqual([])
   })
@@ -464,7 +487,9 @@ describe('每个改动 tab-group 集合的地方都必须过 assertGroupInvarian
     // 取值器是 split-tree 泛型原语强制调用方传的东西，故一棵新树必然导出一个。按它判、而不是按文件
     // 清单判，是因为取值器是代码为了能编译就必须写对的东西。
     const CLAIMED = new Set([ACCESSOR, 'regionLeafId'])
-    const found = exportedLeafAccessors(RENDERER)
+    // 取值器已随两棵树的定义抽进 @agentmux/layout；渲染层薄壳是 `export *`，不产出 `export const …LeafId`。
+    // 两棵源码树都扫，故将来第三棵树无论落在包里还是渲染层都会被认领检查抓到。
+    const found = [...exportedLeafAccessors(RENDERER), ...exportedLeafAccessors(PKG)].sort()
     expect(found.length, '扫不到任何导出的叶子取值器——扫描器失灵，本条失去意义').toBeGreaterThan(1)
     const unclaimed = found.filter((name) => !CLAIMED.has(name))
     expect(

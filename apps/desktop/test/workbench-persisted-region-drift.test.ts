@@ -3,12 +3,7 @@ import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 import type { AppConfig } from '../src/shared/contracts.js'
 import { CONFIG_VERSION } from '../src/shared/contracts.js'
-import { createWorkspaceLayout, groupIds } from '../src/renderer/src/lib/workbench-layout.js'
-import { MIN_SPLIT_RATIO, EVEN_SPLIT_RATIO, clampSplitRatio } from '../src/renderer/src/lib/split-tree.js'
-import {
-  regionIds,
-  splitWorkbenchRegion
-} from '../src/renderer/src/lib/workbench-view-layout.js'
+import { createWorkspaceLayout, groupIds, MIN_SPLIT_RATIO, EVEN_SPLIT_RATIO, clampSplitRatio, regionIds, splitWorkbenchRegion } from '@agentmux/layout'
 import {
   assertRegionInvariant,
   createWorkbenchTab,

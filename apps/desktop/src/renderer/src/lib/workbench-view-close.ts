@@ -1,6 +1,6 @@
 import type { SessionControl, SessionSnapshot } from '../../../shared/contracts'
 import { activeTopicIdFromLayout, tabEligibilityForActiveTopic } from './scratch-topic-layout'
-import { removeTab, type WorkspaceLayout } from './workbench-layout'
+import { removeTab, type WorkspaceLayout } from '@agentmux/layout'
 import {
   removeWorkbenchRegion,
   tabStillOpen,

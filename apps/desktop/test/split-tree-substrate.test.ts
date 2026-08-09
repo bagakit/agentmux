@@ -12,7 +12,7 @@ import {
   replaceLeaf,
   setSplitRatioAtPath,
   type SplitTreeNode
-} from '../src/renderer/src/lib/split-tree'
+} from '@agentmux/layout'
 
 type Leaf = { id: string }
 type Node = SplitTreeNode<Leaf>
@@ -214,7 +214,10 @@ describe('split-tree substrate（两棵分屏树的 SSOT）', () => {
 // collectLeafIds」（toContain 会被 import 行、注释、死赋值满足），而是「这个函数除了转发到 SSOT 之外
 // 什么都不做」。每条都带自证，扫不到函数时不许恒绿。
 // ---------------------------------------------------------------------------
-const LIB = new URL('../src/renderer/src/lib/', import.meta.url)
+// 这三个源文件（split-tree / workbench-layout / workbench-view-layout）已抽进 @agentmux/layout（SSOT），
+// 渲染层不再留任何转发壳——上面的运行时 import 与下面的 AST 判据读的是**同一份**包源码。
+// 两者必须同源：若 AST 这侧指回渲染层而运行时走包，判据读的就不是被执行的那份字节。
+const LIB = new URL('../../../packages/layout/src/', import.meta.url)
 const SSOT_FN = 'collectLeafIds'
 
 /** 一个转发壳的形状分析结果。字段全部来自 AST，不看源码文本。 */

@@ -15,7 +15,7 @@ import {
   workbenchSurfaces,
   type WorkbenchSurface
 } from '../src/renderer/src/lib/workbench-tabs'
-import { createWorkspaceLayout } from '../src/renderer/src/lib/workbench-layout'
+import { createWorkspaceLayout } from '@agentmux/layout'
 
 // The two REAL failure modes #491 is about, pinned as observable behavior (not source text).
 //
