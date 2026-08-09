@@ -559,7 +559,8 @@
       "gate_result": null,
       "last_gate_commands": [],
       "notes": [
-        "Core ContinuousProgressScheduler added: durable records, due/claimTick, pause/resume/stop; Desktop persistence/integration remains."
+        "Core ContinuousProgressScheduler added: durable records, due/claimTick, pause/resume/stop; Desktop persistence/integration remains.",
+        "Desktop ContinuousProgressLoopStore persists loop records under Electron userData; typecheck and store test pass."
       ]
     },
     {
