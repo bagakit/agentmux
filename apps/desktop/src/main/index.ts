@@ -27,6 +27,8 @@ import { foregroundActionsForSecondInstance, instanceRoleFromLock } from './sing
 import { singleFlight } from './single-flight.js'
 import { topFrameNavigationGuard, topFrameOrigin } from './top-frame-navigation.js'
 import { windowOpenOutcome, windowSecurityWebPreferences } from './window-security.js'
+import { ContinuousProgressLoopManager } from './continuous-progress-loop-manager.js'
+import { ContinuousProgressLoopStore } from './continuous-progress-loop-store.js'
 
 const appIconPath = join(import.meta.dirname, '../../resources/icon.png')
 const packagedUserDataPath = join(app.getPath('appData'), 'dev.agentmux.desktop')
@@ -74,6 +76,17 @@ function startPrimaryInstance(): void {
     new AgentMuxFileAgentSessionStore(desktopAgentSessionStorePath()),
     scratchTopics
   )
+  const progressLoops = new ContinuousProgressLoopManager(
+    ContinuousProgressLoopStore.forUserData(app.getPath('userData')),
+    async (loop) => {
+      const observation = await runtime.observeContinuousProgress(loop, 'delivery', Date.now())
+      await runtime.submitPrompt({ kind: 'agent', agentSessionId: observation.session.agentSessionId, hostId: observation.session.hostId, run: observation.session.run }, loop.prompt)
+      return 'sent'
+    },
+    undefined,
+    (loop, tickId, now) => runtime.observeContinuousProgress(loop, tickId, now)
+  )
+  void progressLoops.start().catch((error) => process.stderr.write(`Continuous progress startup failed: ${String(error)}\n`))
   const configStore = new ConfigStore()
   const windowGeometryStore = new WindowGeometryStore()
   let disposeIpc: (() => Promise<void>) | null = null
@@ -90,6 +103,7 @@ function startPrimaryInstance(): void {
   function disposeOwners(): Promise<void> {
     if (!ownerDisposal) {
       ownerDisposal = (async () => {
+        await progressLoops.stop()
         const disposeRegisteredIpc = disposeIpc
         disposeIpc = null
         rendererUpdates?.dispose()
