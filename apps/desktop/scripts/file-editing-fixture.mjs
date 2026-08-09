@@ -56,7 +56,9 @@ export async function materializeFileEditingFixture({ userData, workspace, alter
     writeFile(join(userData, 'agentmux.config.json'), `${JSON.stringify({
       version: 9,
       hosts: [{ id: 'local', kind: 'local', label: 'Mounted Desktop E2E' }],
-      executors: {},
+      executors: {
+        codex: { label: 'Codex', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: false }
+      },
       workspaces: [{
         id: FILE_EDITING_PRIMARY_WORKSPACE_ID,
         name: 'Workspace File Editing E2E',
