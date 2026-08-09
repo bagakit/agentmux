@@ -83,3 +83,11 @@ T-008 目标是 Run 替换/Session 重启后的幂等恢复：保留 loop 配置
 ## 追加需求：Status Bar 与 Activity 视觉收敛（2026-09-12）
 
 用户反馈底部 Status Bar 的 Agents/Needs You 仍像点状占位，Activity 展开信息量低却占空间。追加 T-015，统一语义图标、数量辅助信息和按新增信息决定展开控件。
+
+## 追加需求：Activity Agent 明细与 Agents 单入口（2026-09-12）
+
+用户要求 Activity 展开后每个 Agent 显示项目和完整统计，并指出左侧已有 Agents、右侧又有重复入口。追加 T-016：补齐 Agent 明细事实并把 Agents roster 收敛到左侧单入口。
+
+## 追加需求：CPU/Memory 资源面板（2026-09-12）
+
+用户反馈 Status Bar 的 CPU/Memory 界面不精致，建议复用列表样式并加入 Project/Workspace、Agent/Provider 与 idle 等上下文。追加 T-017，保持资源采样与 Agent 语义状态分离。

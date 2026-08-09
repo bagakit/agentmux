@@ -98,14 +98,12 @@ describe('agent roster surface', () => {
     expect(renderToStaticMarkup(createElement(AgentRoster, { total: 0 }))).toBe('')
   })
 
-  it('replaces the bar total with the roster trigger, so one fact has one control', () => {
-    // The total segment already owned "how many Agents exist"; the enumerable list belongs to it rather
-    // than to a second control competing for the same number.
+  it('keeps the enumerable Agents roster in the left workspace tool, not the Status Bar', () => {
     fixture.state.sessions = [agent('a')]
     const markup = renderToStaticMarkup(createElement(AgentStatusBar))
 
-    expect(markup).toContain('agent-roster__trigger')
-    // Still one bar, still the shared status vocabulary.
+    expect(markup).not.toContain('agent-roster__trigger')
+    // The Status Bar remains a compact cross-window summary.
     expect(markup).toContain('agent-status-bar')
     expect(markup).toContain('status__dot')
   })

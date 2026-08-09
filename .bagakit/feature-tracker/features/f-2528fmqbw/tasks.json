@@ -2,8 +2,8 @@
   "version": 2,
   "feat_id": "f-2528fmqbw",
   "plan_status": "reviewed",
-  "plan_revision": 9,
-  "supersedes_revision": 8,
+  "plan_revision": 11,
+  "supersedes_revision": 10,
   "review_ref": "docs/reviews/continuous-progress-2026-09-12.md",
   "source_refs": [
     "docs/reviews/continuous-progress-2026-09-12.md",
@@ -296,6 +296,85 @@
           {
             "from": "T-012",
             "to": "T-015"
+          }
+        ],
+        "removed": []
+      }
+    },
+    {
+      "revision": 10,
+      "supersedes_revision": 9,
+      "review_ref": "docs/reviews/continuous-progress-2026-09-12.md",
+      "source_refs": [
+        "docs/reviews/continuous-progress-2026-09-12.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006",
+        "T-007",
+        "T-008",
+        "T-009",
+        "T-010",
+        "T-011",
+        "T-012",
+        "T-013",
+        "T-014",
+        "T-015",
+        "T-016"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {},
+      "dependency_changes": {
+        "added": [
+          {
+            "from": "T-015",
+            "to": "T-016"
+          }
+        ],
+        "removed": []
+      }
+    },
+    {
+      "revision": 11,
+      "supersedes_revision": 10,
+      "review_ref": "docs/reviews/continuous-progress-2026-09-12.md",
+      "source_refs": [
+        "docs/reviews/continuous-progress-2026-09-12.md",
+        "docs/design/agentmux-desktop-interaction.md",
+        "docs/design/agentmux-surface-density.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006",
+        "T-007",
+        "T-008",
+        "T-009",
+        "T-010",
+        "T-011",
+        "T-012",
+        "T-013",
+        "T-014",
+        "T-015",
+        "T-016",
+        "T-017"
+      ],
+      "superseded_task_ids": [],
+      "supersedes_by_task": {},
+      "dependency_changes": {
+        "added": [
+          {
+            "from": "T-016",
+            "to": "T-017"
           }
         ],
         "removed": []
@@ -755,6 +834,68 @@
       "supersedes": [],
       "estimate_hours": 0.75,
       "introduced_in_revision": 9,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-016",
+      "depends_on": [
+        "T-015"
+      ],
+      "title": "Activity Agent 明细与 Agents 单入口",
+      "objective": "补齐 Activity 展开 Agent 的 Project/Workspace、Provider、状态、最近活动、时长和统计，并将重复 Agents roster 收敛到左侧入口。",
+      "outcome": "用户能从一个入口看懂 Agent 分布与处理对象，不重复占用右侧空间。",
+      "acceptance": [
+        "每个 Agent 明细显示 Project/Workspace、Provider 图标、状态、最近活动和等待/停止时长，统计区分 total/running/needs-you/error",
+        "左侧 Agents 入口承载列表和定位能力，右侧不再重复渲染同一 roster，Status Bar 保留跨窗口摘要"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/project-activity.test.tsx test/agent-status-bar.test.tsx test/agent-roster-surface.test.tsx",
+          "proves": "Activity 明细事实与 Agents 单入口"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/continuous-progress-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "estimate_hours": 1.25,
+      "heavy": true,
+      "heavy_reason": "跨 Activity、Projects 工具和 Status Bar 三个展示入口",
+      "introduced_in_revision": 10,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "notes": []
+    },
+    {
+      "id": "T-017",
+      "depends_on": [
+        "T-016"
+      ],
+      "title": "CPU/Memory 资源面板密度",
+      "objective": "复用 Agents/Activity 列表语言展示 CPU/Memory，并加入 Project/Workspace、Provider、最近活动与 idle 上下文。",
+      "outcome": "资源面板精致、紧凑且帮助判断处理对象，不混淆资源和 Agent 语义状态。",
+      "acceptance": [
+        "列表行显示对象、CPU/Memory、Provider 图标和 Project/Workspace/idle 次级信息",
+        "资源采样缺失或无归属显示 unknown，低 CPU 不直接标记 Agent idle"
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "pnpm --filter @agentmux/desktop exec vitest run test/resource-usage-panel.test.tsx test/agent-status-bar.test.tsx",
+          "proves": "资源列表视觉与上下文接线"
+        }
+      ],
+      "source_refs": [
+        "docs/reviews/continuous-progress-2026-09-12.md"
+      ],
+      "supersedes": [],
+      "estimate_hours": 0.75,
+      "introduced_in_revision": 11,
       "status": "todo",
       "gate_result": null,
       "last_gate_commands": [],

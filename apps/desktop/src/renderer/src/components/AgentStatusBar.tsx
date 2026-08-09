@@ -1,7 +1,6 @@
 import { useAppStore } from '../store'
 import { summarizeAgentAttention, summarizeProviderActivity } from '../lib/agent-attention'
 import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
-import { AgentRoster } from './AgentRoster'
 import { ResourceUsagePanel } from './ResourceUsagePanel'
 import { CirclePlay, CircleAlert, CircleHelp } from 'lucide-react'
 
@@ -77,7 +76,6 @@ export function AgentStatusBar() {
     <div className="agent-status-bar" role="group" aria-label="Agent attention across this window">
       {/* The total segment now discloses the roster. It already owned "how many Agents exist", so the
           enumerable list belongs to it rather than to a second control competing for the same fact. */}
-      <AgentRoster total={rollup.total} />
       <span className="agent-status-bar__segment" data-attention="working">
         <StatusCount state={rollup.working > 0 ? 'working' : null} count={rollup.working} label="working" />
       </span>

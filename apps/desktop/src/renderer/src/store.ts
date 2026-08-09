@@ -4532,6 +4532,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   reportError(error) {
     const message = presentError(error)
+    // Replayed runtime events and polling can report the same transient failure
+    // repeatedly. Once the user dismissed that exact message, do not resurrect it
+    // until a different error arrives or they explicitly reopen it.
+    const current = get()
+    if (current.errorDismissed && current.lastError === message) return
     set({ error: message, lastError: message, errorDismissed: false })
   },
   dismissError() {

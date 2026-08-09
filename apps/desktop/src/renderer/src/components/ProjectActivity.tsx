@@ -12,7 +12,7 @@ import {
 } from '../lib/activity-groups'
 import { useAppStore } from '../store'
 import * as DropdownMenu from './HoverDropdownMenu'
-import { AgentProviderIcon } from './AgentProviderIcon'
+import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
 
 function quietDuration(observedAt: number): string {
   const seconds = Math.max(0, Math.floor((Date.now() - observedAt) / 1000))
@@ -80,6 +80,7 @@ export function ProjectActivity({
 }) {
   const selectSession = useAppStore((state) => state.selectSession)
   const providerCatalog = useAppStore((state) => state.providerCatalog)
+  const config = useAppStore((state) => state.config)
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
   const attention = rowAttention(sessions)
   const running = workingAgentCount(sessions)
@@ -134,8 +135,12 @@ export function ProjectActivity({
           {expanded ? <div className="project-activity-group__details">
             {rosterRows.map((row) => {
               const session = group.sessions.find((item) => item.id === row.sessionId)!
+              const workspace = session.kind === 'agent'
+                ? config?.workspaces.find((item) => item.hostId === session.hostId && (session.workspacePath === item.path || session.workspacePath.startsWith(`${item.path}/`)))
+                : undefined
+              const project = workspace?.name ?? (session.kind === 'agent' ? session.workspacePath.split(/[\\/]/).filter(Boolean).at(-1) : 'Terminal')
               return <DropdownMenu.Item key={row.sessionId} className="tab-context-menu__item project-activity-menu__item"
-                onSelect={() => selectSession(row.sessionId)}><AgentProviderIcon providerId={session.providerId} size={13} /><span><strong>{row.label}</strong><small>{projectSessionReason(session)} · {session.status.state === 'working' ? 'active now' : quietDuration(session.status.observedAt)}</small></span></DropdownMenu.Item>
+                onSelect={() => selectSession(row.sessionId)}><AgentProviderIcon providerId={session.providerId} size={13} /><span><strong>{project} · {row.label}</strong><small>{session.kind === 'agent' ? agentProviderLabel(session.providerId) : 'Terminal'} · {projectSessionReason(session)} · {session.status.state === 'working' ? 'active now' : quietDuration(session.status.observedAt)}</small></span></DropdownMenu.Item>
             })}
           </div> : null}
         </div>

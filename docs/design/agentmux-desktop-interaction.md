@@ -648,3 +648,13 @@ Desktop 刷新或重新 Attach 时优先投影这份 Agent 语义；新的 Run `
 
 - Status Bar 的 Agents、Needs You、Error 必须使用语义图标加紧凑数量，不能只用点或无来源的装饰形状；hover/辅助文本说明对象、数量和动作。
 - Activity 展开应是诊断/处理面板，不重复聚合行已有信息；单 Agent 且无额外诊断时不显示展开箭头，多 Agent 或有原因/时长时才展开。
+
+### Agents 入口与 Activity 详情归一
+
+- Activity 工作线展开的每个 Agent 必须显示所属 Project/Workspace、Provider、执行状态、最近活动与等待/停止时长；统计至少区分总数、running、needs you、error，缺失事实显示 unknown。
+- Agents 列表只有一个主入口。左侧 Projects/Agents 工具作为统一入口，右侧重复的 Agents roster 不再单独占位；原有定位、筛选和状态统计能力并入统一入口。
+
+### Status Bar CPU/Memory 资源面板
+
+- CPU/Memory 面板复用 Activity/Agents 的列表语言：图标、对象、当前值、次级上下文和处理动作，不使用孤立的大数字卡片。
+- 每个资源对象尽量显示所属 Project/Workspace、Agent/Provider 和最近活动/idle 时长；没有归属时明确显示 unknown。资源采样与 Agent 语义状态分开，不能把低 CPU 误判成 Agent idle。
